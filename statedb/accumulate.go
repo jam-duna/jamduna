@@ -170,7 +170,7 @@ func (s *StateDB) AccumulatableSequence(W []types.WorkReport) []types.WorkReport
 	result = append(result, Q_q...)
 
 	if len(accumulated_immediately) != len(result) {
-		log.Debug(s.Authoring, "ORDERED ACCUMULATION", "W^! (wphs accumulated immediately)", get_workreport_workpackagehashes(accumulated_immediately),
+		log.Trace(s.Authoring, "ORDERED ACCUMULATION", "W^! (wphs accumulated immediately)", get_workreport_workpackagehashes(accumulated_immediately),
 			"q", get_accumulationqueue_workpackagehashes(q), "Q(q)-priority queue result", get_workreport_workpackagehashes(Q_q), "W^*-wphs of accumulatable work reports)", get_workreport_workpackagehashes(result))
 	}
 	return result
@@ -560,9 +560,9 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 		output_u = g - uint64(max(vm.Gas, 0))
 		xy = &(vm.Y)
 		if r.Err == types.RESULT_OOG {
-			log.Debug(sd.Authoring, "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
+			log.Trace(sd.Authoring, "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
 		} else {
-			log.Debug(sd.Authoring, "BEEFY PANIC @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
+			log.Trace(sd.Authoring, "BEEFY PANIC @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
 		}
 		return
 	}
@@ -576,7 +576,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 		output_b = vm.X.Y
 		res = "yield"
 	}
-	log.Debug(sd.Authoring, fmt.Sprintf("BEEFY OK-HALT with %s @SINGLE ACCUMULATE", res), "s", fmt.Sprintf("%d", s), "B", output_b)
+	log.Debug(debugB, fmt.Sprintf("BEEFY OK-HALT with %s @SINGLE ACCUMULATE", res), "s", fmt.Sprintf("%d", s), "B", output_b)
 	return
 }
 

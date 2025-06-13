@@ -230,7 +230,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 			log.Warn(log.GeneralAuthoring, "BEEFY-C", "commitment", sa.Commitment)
 		} else {
 			leaves = append(leaves, leafBytes)
-			log.Debug(s.Authoring, "BEEFY-C", "s", fmt.Sprintf("%d", sa.Service), "h", sa.Commitment, "encoded", fmt.Sprintf("%x", leafBytes))
+			log.Debug(debugB, "BEEFY-C", "s", fmt.Sprintf("%d", sa.Service), "h", sa.Commitment, "encoded", fmt.Sprintf("%x", leafBytes))
 		}
 	}
 
@@ -243,7 +243,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	tree := trie.NewWellBalancedTree(leaves, types.Keccak)
 	accumulationRoot := common.Hash(tree.Root())
 	if len(leaves) > 0 {
-		log.Debug(s.Authoring, "BEEFY accumulation root", "r", accumulationRoot)
+		log.Debug(debugB, "BEEFY accumulation root", "r", accumulationRoot)
 	}
 	// 4.7 - Recent History [No other state related, but need to do it after rho, AFTER accumulation]
 	s.ApplyStateRecentHistory(blk, &(accumulationRoot))
@@ -361,7 +361,7 @@ func (s *StateDB) ApplyStateTransitionRho(ctx context.Context, assurances []type
 
 	// Guarantees checks
 	for _, g := range guarantees {
-		if err := s.VerifyGuaranteeBasic(g, targetJCE); err != nil {
+		if err := s.VerifyGuaranteeBasic(g); err != nil {
 			return nil, nil, err
 		}
 	}

@@ -22,6 +22,7 @@ type WPQueueItem struct {
 	addTS              int64
 	nextAttemptAfterTS int64
 	numFailures        int
+	slot               uint32 // the slot for which this work package is intended
 }
 
 func (n *Node) runWPQueue() {
@@ -202,6 +203,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 
 	// counting the time for this function execution
 	coreIndex := wpItem.coreIndex
+	slot := wpItem.slot
 
 	// here we are a first guarantor building a bundle (imported segments, justifications, extrinsics)
 	bundle, segmentRootLookup, err := n.buildBundle(wpItem)
@@ -212,8 +214,14 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 
 	curr_statedb := n.statedb.Copy()
 	// reject if the work package is not for this core
+	selfCoreIndex := curr_statedb.GetSelfCoreIndex()
 	if wpItem.coreIndex != curr_statedb.GetSelfCoreIndex() {
-		log.Error(module, "processWPQueueItem -  work package is not for this core", "n", n.String(), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.coreIndex", wpItem.coreIndex, "sdb.GetSelfCoreIndex", curr_statedb.GetSelfCoreIndex(), "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
+		log.Warn(module, "processWPQueueItem -  work package is not for this core", "n", n.String(),
+			"wpItem.slot", wpItem.slot,
+			"wpItem.coreIndex", wpItem.coreIndex,
+			"curr_statedb.timeslot", curr_statedb.GetTimeslot(),
+			"sdb.GetSelfCoreIndex", selfCoreIndex,
+			"wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
 		return false
 	}
 	err = curr_statedb.VerifyPackage(bundle)
@@ -221,7 +229,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		log.Error(module, "processWPQueueItem -  wp not verified", "n", n.String(), "err", err, "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
 		return false
 	}
-	log.Info(module, "processWPQueueItem", "n", n.String(), "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
+	log.Info(module, "processWPQueueItem", "n", n.id, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
 	var wg sync.WaitGroup
 	mutex := &sync.Mutex{}
 	fellow_responses := make(map[types.Ed25519Key]JAMSNPWorkPackageShareResponse)
@@ -256,7 +264,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 			} else {
 				ctx, cancel := context.WithTimeout(context.Background(), MiniTimeout)
 				defer cancel()
-				fellow_response, errfellow := coworker.ShareWorkPackage(ctx, coreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519)
+				fellow_response, errfellow := coworker.ShareWorkPackage(ctx, coreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519, coworker.PeerID)
 				if errfellow != nil {
 					log.Warn(module, "processWPQueueItem", "n", n.String(), "errfellow", errfellow)
 					return
@@ -296,7 +304,8 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 	}
 
 	if len(guarantee.Signatures) >= 2 {
-		guarantee.Slot = curr_statedb.GetTimeslot()
+		guarantee.Slot = slot // this is the slot when ORIGINALLY added to the queue
+		log.Debug(debugG, "processWPQueueItem Guarantee enough signatures", "n", n.id, "guarantee.Slot", guarantee.Slot, "guarantee.Signatures", types.ToJSONHex(guarantee.Signatures), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
 		ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
 		defer cancel()
 		n.broadcast(ctx, guarantee) // send via CE135
@@ -308,7 +317,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 			Guarantee:         guarantee,
 			SpecDerivation:    d,
 		})
-		err := n.processGuarantee(guarantee)
+		err := n.processGuarantee(guarantee, "processWPQueueItem") // should it be curr_statedb.GetTimeslot() here?
 		if err != nil {
 			log.Error(debugG, "processWPQueueItem:processGuarantee:", "n", n.String(), "err", err)
 		}

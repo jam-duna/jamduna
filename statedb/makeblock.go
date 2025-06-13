@@ -93,7 +93,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 		}
 
 		// per-guarantee MakeBlock checks (core index, sigs, assignment, gas, timeouts…)
-		if err := tmpstatedb.VerifyGuaranteeBasic(g, targetJCE); err != nil {
+		if err := tmpstatedb.VerifyGuaranteeBasic(g); err != nil {
 			if AcceptableGuaranteeError(err) {
 				// don't remove from pool if ErrGFutureReportSlot, ErrGCoreEngaged
 			} else {

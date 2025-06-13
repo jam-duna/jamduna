@@ -32,6 +32,7 @@ const (
 	debugG                = log.GuaranteeMonitoring
 	debugP                = "p_mod"
 	debugAudit            = "ad_mode"
+	debugB                = "beefy_mod"
 	saveSealBlockMaterial = false
 	blockAuthoringChaos   = false // turn off for production (or publication of traces)
 )
@@ -781,7 +782,7 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 			if sf0.GetEpochT() == 0 {
 				mode = "fallback"
 			}
-			log.Info(module, "proposeBlock", "mode", mode, "AUTHOR", s.Id, "p", common.Str(proposedBlk.GetParentHeaderHash()), "h", common.Str(proposedBlk.Header.Hash()), "e'", currEpoch, "m'", currPhase, "len(γ_a')",
+			log.Info(module, "Authored Block", "mode", mode, "AUTHOR", s.Id, "p", common.Str(proposedBlk.GetParentHeaderHash()), "h", common.Str(proposedBlk.Header.Hash()), "e'", currEpoch, "m'", currPhase, "len(γ_a')",
 				len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), "blk", proposedBlk.Str())
 			return true, proposedBlk, newStateDB, nil
 		}

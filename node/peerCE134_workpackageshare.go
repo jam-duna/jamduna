@@ -194,21 +194,8 @@ func (p *Peer) ShareWorkPackage(
 	bundle types.WorkPackageBundle,
 	segmentRootLookup types.SegmentRootLookup,
 	pubKey types.Ed25519Key,
+	peerID uint16,
 ) (newReq JAMSNPWorkPackageShareResponse, err error) {
-
-	if p.node.store.SendTrace {
-		tracer := p.node.store.Tp.Tracer("NodeTracer")
-		_, span := tracer.Start(ctx, fmt.Sprintf("[N%d] ShareWorkPackage", p.node.store.NodeID))
-		defer span.End()
-	}
-
-	// Respect cancellation early
-	select {
-	case <-ctx.Done():
-		err = ctx.Err()
-		return
-	default:
-	}
 
 	// Prepare the request
 	segmentroots := make([]JAMSNPSegmentRootMapping, 0, len(segmentRootLookup))
@@ -238,7 +225,8 @@ func (p *Peer) ShareWorkPackage(
 		err = fmt.Errorf("openStream[CE134_WorkPackageShare]: %v", streamErr)
 		return
 	}
-
+	slot := common.GetWallClockJCE(fudgeFactorJCE)
+	log.Debug(debugR, "CE134-ShareWorkPackage OUTGOING", "NODE", p.node.id, "peer", peerID, "coreIndex", coreIndex, "slot", slot)
 	// Send request
 	// --> Core Index ++ Segment Root Mappings
 	if err = sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
@@ -250,6 +238,18 @@ func (p *Peer) ShareWorkPackage(
 		err = fmt.Errorf("sendQuicBytes2[CE134_WorkPackageShare]: %v", err)
 		return
 	}
+	log.Trace(debugG, "onWorkPackageShare OUTGOING QUIC",
+		"CoreIndex ++ SegmentRootMappings", fmt.Sprintf("0x%x", reqBytes),
+		"encodedBundle", fmt.Sprintf("0x%x", encodedBundle),
+	)
+	log.Trace(debugG, "onWorkPackageShare OUTGOING",
+		"workpackage", bundle.WorkPackage.Hash(),
+		"bundle_Len", len(encodedBundle),
+		"coreIndex", coreIndex,
+		"segmentRootsLen", len(segmentroots),
+		"workPackageBundleBytes", fmt.Sprintf("0x%x", bundle.Bytes()),
+		"workPackageBundle", bundle.String(),
+	)
 
 	// --> FIN
 	stream.Close()
@@ -290,7 +290,7 @@ func CompareSegmentRootLookup(a, b types.SegmentRootLookup) (bool, error) {
 	return len(mismatchIdx) == 0, fmt.Errorf("diff at %v", mismatchIdx)
 }
 
-func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg []byte) (err error) {
+func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) (err error) {
 	defer stream.Close()
 
 	// --> Core Index ++ Segment Root Mappings
@@ -300,6 +300,22 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		fmt.Println("Error deserializing:", err)
 		return fmt.Errorf("onWorkPackageShare: decode share message: %w", err)
 	}
+
+	// Verify that we are in the the core based on the WALL CLOCK TIME
+	slot := common.GetWallClockJCE(fudgeFactorJCE)
+	_, assignments := n.statedb.CalculateAssignments(slot)
+	inSet := false
+	for _, assignment := range assignments {
+		if assignment.CoreIndex == newReq.CoreIndex && types.Ed25519Key(assignment.Validator.Ed25519.PublicKey()) == n.GetEd25519Key() {
+			inSet = true
+			break
+		}
+	}
+	log.Debug(debugR, "CE134-ShareWorkPackage INCOMING", "NODE", n.id, "peer", peerID, "coreIndex", newReq.CoreIndex, "slot", slot)
+	if !inSet {
+		return fmt.Errorf("core index %d is not in the current guarantor assignments", newReq.CoreIndex)
+	}
+
 	// --> Work Package Bundle
 	// Read message length (4 bytes)
 	msgLenBytes := make([]byte, 4)
@@ -318,15 +334,43 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		return err
 	}
 
-	bp, _, err := types.DecodeBundle(encodedBundle)
+	bundle, _, err := types.DecodeBundle(encodedBundle)
 	if err != nil {
 		fmt.Println("Error deserializing:", err)
 		return fmt.Errorf("onWorkPackageShare: decode bundle: %w\nencodedBundle data:\n%x", err, encodedBundle)
 	}
 
+	log.Debug(debugG, "onWorkPackageShare INCOMING QUIC",
+		"CoreIndex ++ SegmentRootMappings", fmt.Sprintf("0x%x", msg),
+		"encodedBundle", fmt.Sprintf("0x%x", encodedBundle),
+	)
+
+	recoveredBundleByte := bundle.Bytes()
+
+	if !bytes.Equal(encodedBundle, recoveredBundleByte) {
+		log.Error(debugG, "onWorkPackageShare INCOMING Bundle Ecnode/Decode mismatch",
+			"workpackage", bundle.WorkPackage.Hash(),
+			"bundle_Len", len(encodedBundle),
+			"coreIndex", newReq.CoreIndex,
+			"segmentRootsLen", newReq.Len,
+			"msgLen", msgLen,
+			"ReceivedBundleBytes", fmt.Sprintf("0x%x", encodedBundle),
+			"workPackageBundleBytes", fmt.Sprintf("0x%x", recoveredBundleByte),
+			"workPackageBundle", bundle.String(),
+		)
+		return fmt.Errorf("onWorkPackageShare: encodedBundle length mismatch: %d != %d", len(encodedBundle), len(bundle.Bytes()))
+	}
+
 	wpCoreIndex := newReq.CoreIndex
-	log.Debug(debugG, "onWorkPackageShare", "workpackage", bp.WorkPackage.Hash(), "bundle_Len", len(encodedBundle), "coreIndex", newReq.CoreIndex, "segmentRootsLen", newReq.Len, "msgLen", msgLen,
-		"workPackageBundleBytes", fmt.Sprintf("0x%x", bp.Bytes()), "workPackageBundle", bp.String())
+	log.Trace(debugG, "onWorkPackageShare INCOMING",
+		"workpackage", bundle.WorkPackage.Hash(),
+		"bundle_Len", len(encodedBundle),
+		"coreIndex", newReq.CoreIndex,
+		"segmentRootsLen", newReq.Len,
+		"msgLen", msgLen,
+		"workPackageBundleBytes", fmt.Sprintf("0x%x", encodedBundle),
+		"workPackageBundle", bundle.String(),
+	)
 
 	received_segmentRootLookup := make([]types.SegmentRootLookupItem, 0)
 	for _, sr := range newReq.SegmentRoots {
@@ -344,7 +388,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	default:
 	}
 	// Since the bundle is not trusted, do a VerifyBundle first
-	verified, err := n.VerifyBundle(bp, received_segmentRootLookup)
+	verified, err := n.VerifyBundle(bundle, received_segmentRootLookup)
 	if !verified {
 		log.Warn(module, "VerifyBundle failure", "node", n.id, "verified", verified)
 		// TODO: reconstruct the segments
@@ -360,7 +404,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	default:
 	}
 
-	workReport, _, pvmElapsed, err := n.executeWorkPackageBundle(wpCoreIndex, *bp, received_segmentRootLookup, false)
+	workReport, _, pvmElapsed, err := n.executeWorkPackageBundle(wpCoreIndex, *bundle, received_segmentRootLookup, false)
 	if err != nil {
 		log.Warn(module, "onWorkPackageShare: executeWorkPackageBundle", "node", n.id, "err", err, "pvmElapsed", pvmElapsed)
 		return fmt.Errorf("onWorkPackageShare: executeWorkPackageBundle: %w", err)

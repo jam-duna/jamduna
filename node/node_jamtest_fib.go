@@ -22,7 +22,7 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 
 	isDry := false
 	var prevExportSegmentRoot common.Hash
-	for fibN := 1; fibN < targetN; fibN++ {
+	for fibN := 1; fibN < 100; fibN++ {
 		imported := []types.ImportSegment{}
 		if fibN > 1 {
 			imported = append(imported, types.ImportSegment{

@@ -195,7 +195,7 @@ func (b *WorkPackageBundle) Bytes() []byte {
 		}
 		for _, segment := range wpItemSegments {
 			if len(segment) == 0 {
-				continue
+				//continue
 			}
 			encode = append(encode, segment...)
 		}
@@ -207,7 +207,7 @@ func (b *WorkPackageBundle) Bytes() []byte {
 		}
 		for _, seg_justification := range wpItemJustifications {
 			if len(seg_justification) == 0 {
-				continue
+				//continue
 			}
 			// Encode each justification
 			sj, err := Encode(seg_justification)

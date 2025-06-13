@@ -55,6 +55,10 @@ func ComputeTimeUnit(TimeUnitMode string) uint32 {
 	return unit
 }
 
+func GetWallClockJCE(fudgeFactorJCE uint32) uint32 {
+	return ComputeTimeUnit("JAM") + fudgeFactorJCE
+}
+
 var JceStart = time.Date(2025, time.January, 1, 12, 0, 0, 0, time.UTC) //TODO: make sure this is correct
 
 func AddJamStart(time time.Duration) {

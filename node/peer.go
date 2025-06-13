@@ -328,9 +328,9 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		return n.onWorkPackageSubmission(ctx, stream, msg)
+		return n.onWorkPackageSubmission(ctx, stream, msg, peerID)
 	case CE134_WorkPackageShare:
-		return n.onWorkPackageShare(ctx, stream, msg)
+		return n.onWorkPackageShare(ctx, stream, msg, peerID)
 	case CE135_WorkReportDistribution:
 		return n.onWorkReportDistribution(ctx, stream, msg, peerID)
 	case CE136_WorkReportRequest:

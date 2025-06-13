@@ -717,6 +717,13 @@ func (s *SafroleState) GetPrimaryWinningTicket(slot_index uint32) types.TicketBo
 	return *selected_ticket
 }
 
+func (s *SafroleState) GetEpochType() string {
+	if len(s.TicketsOrKeys.Tickets) > 0 {
+		return "safrole"
+	}
+	return "fallback"
+}
+
 func (s *SafroleState) GetEpochT() int {
 	if len(s.TicketsOrKeys.Tickets) > 0 {
 		return 1
@@ -1503,7 +1510,11 @@ func VerifySafroleSTF(old_sf_origin *SafroleState, new_sf_origin *SafroleState, 
 	block_author_ietf_pub := bandersnatch.BanderSnatchKey(signing_validator.GetBandersnatchKey())
 	vrfOutput, err := bandersnatch.IetfVrfVerify(block_author_ietf_pub, H_s, c, m)
 	if err != nil {
+		log.Error(module, "IetfVrfVerify Failed", "validatorIdx", validatorIdx, "block_author_ietf_pub", block_author_ietf_pub.String(), "H_s(seal)", H_s, "c", c, "m(headerWithoutSig)", m, "err", err)
+		log.Error(module, "IetfVrfVerify Failed (Extra)", "slot", slot_header, "type", new_sf.GetEpochT(), "validatorIdx", validatorIdx, "blockSealEntropy n[3]", blockSealEntropy, "Entropy", new_sf.Entropy)
 		return fmt.Errorf("VerifyBlockHeader Failed: H_s Verification")
+	} else {
+		log.Error(module, "IetfVrfVerify OK (H_s)", "slot", slot_header, "type", new_sf.GetEpochT(), "validatorIdx", validatorIdx, "blockSealEntropy n[3]", blockSealEntropy, "Entropy", new_sf.Entropy)
 	}
 	// H_v Verification (6.17)
 	H_v := header.EntropySource[:]

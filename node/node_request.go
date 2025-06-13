@@ -321,7 +321,11 @@ func (n *Node) runBlocksTickets() {
 	for {
 		select {
 		case ticket := <-n.ticketsCh:
-			n.processTicket(ticket)
+			if n.GetIsSync() {
+				n.processTicket(ticket)
+			} else {
+				log.Info(debugT, "runBlocksTickets: Node is not in sync, ignoring ticket", "n", n.String(), "ticket", ticket.TicketID)
+			}
 		}
 	}
 }
@@ -437,7 +441,7 @@ func (n *Node) runGuarantees() {
 		select {
 		case guarantee := <-n.guaranteesCh:
 			if n.GetIsSync() {
-				err := n.processGuarantee(guarantee)
+				err := n.processGuarantee(guarantee, "runGuarantees-Ch")
 				if err != nil {
 					if statedb.AcceptableGuaranteeError(err) {
 						log.Warn(debugG, "runGuarantees:processGuarantee", "n", n.String(), "problem", err, "TODO", "ignoring...")
@@ -628,8 +632,6 @@ func (n *NodeContent) makeRequests(
 	minSuccess int,
 	singleTimeout, overallTimeout time.Duration,
 ) ([]interface{}, error) {
-	//TODO: need all 5 for
-	minSuccess = 4
 	ctx, cancel := context.WithTimeout(context.Background(), overallTimeout)
 	defer cancel()
 

@@ -484,7 +484,7 @@ func (vm *VM) hostAssign() {
 		qi[i] = common.BytesToHash(c[i*32 : (i+1)*32])
 	}
 	copy(vm.X.U.QueueWorkReport[core][:], qi[:])
-	log.Debug(vm.logging, "ASSIGN OK", "c", core)
+	log.Trace(vm.logging, "ASSIGN OK", "c", core)
 	vm.HostResultCode = OK
 }
 
@@ -1252,7 +1252,7 @@ func (vm *VM) hostWrite() {
 			log.Debug(vm.logging, "WRITE OK", "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "k", k, "v", fmt.Sprintf("%x", v), "vlen", len(v), "oldValue", fmt.Sprintf("%x", oldValue))
 		}
 	}
-	log.Debug(vm.logging, "WRITE storage", "s", fmt.Sprintf("%d", a.ServiceIndex), "a_o", a.StorageSize, "a_i", a.NumStorageItems)
+	log.Trace(vm.logging, "WRITE storage", "s", fmt.Sprintf("%d", a.ServiceIndex), "a_o", a.StorageSize, "a_i", a.NumStorageItems)
 }
 
 // Solicit preimage

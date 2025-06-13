@@ -451,6 +451,7 @@ func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackag
 }
 
 func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPackageRequest) ([]common.Hash, error) {
+	log.Info(module, "NodeClient SubmitAndWaitForWorkPackages", "reqLen", len(reqs))
 	workPackageHashes := make([]common.Hash, len(reqs))
 	workPackageLastStatus := make(map[common.Hash]string)
 

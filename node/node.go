@@ -64,6 +64,7 @@ const (
 	debugT       = "t_mod"                  // Tickets/Safrole
 	debugP       = "p_mod"                  // Preimages
 	debugA       = "a_mod"                  // Assurances
+	debugR       = "r_mod"                  // Rotation
 	debugAudit   = log.AuditMonitoring      // Audit
 	debugGrandpa = "gp_mod"                 // Guaranteeing
 	debugBlock   = log.BlockMonitoring      // Block
@@ -82,14 +83,16 @@ const (
 	writeJAMPNTestVector = false // turn on true when generating JAMNP test vectors only
 
 	// GOAL: centralize use of context timeout parameters here, avoid hard
-	TinyTimeout        = 2000 * time.Millisecond
-	MiniTimeout        = 3 * time.Second
-	SmallTimeout       = 6 * time.Second
-	NormalTimeout      = 9 * time.Second
-	MediumTimeout      = 10 * time.Second
-	LargeTimeout       = 12 * time.Second
-	VeryLargeTimeout   = 600 * time.Second
-	RefineTimeout      = 24 * time.Second
+	TinyTimeout      = 2000 * time.Millisecond
+	MiniTimeout      = 3 * time.Second
+	SmallTimeout     = 6 * time.Second
+	NormalTimeout    = 9 * time.Second
+	MediumTimeout    = 10 * time.Second
+	LargeTimeout     = 12 * time.Second
+	VeryLargeTimeout = 600 * time.Second
+	RefineTimeout    = 24 * time.Second
+
+	fudgeFactorJCE     = 1
 	DefaultChannelSize = 200
 )
 
@@ -990,6 +993,7 @@ func RobustSubmitAndWaitForWorkPackages(ctx context.Context, n JNode, reqs []*Wo
 	return nil, fmt.Errorf("all retries failed after %d attempts: %w", maxRobustTries, lastErr)
 }
 func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPackageRequest) ([]common.Hash, error) {
+	log.Info(module, "Node SubmitAndWaitForWorkPackages", "reqLen", len(reqs))
 	workPackageHashes := make([]common.Hash, len(reqs))
 	accumulated := make(map[common.Hash]bool)
 	identifierToIndex := make(map[string]int)
@@ -1201,37 +1205,67 @@ func (n *NodeContent) GetEd25519Key() types.Ed25519Key {
 }
 
 func (n *NodeContent) SubmitWPSameCore(wp types.WorkPackage, extrinsicsBlobs types.ExtrinsicsBlobs) (err error) {
-	coreIndex, err := n.GetCoreIndexFromEd25519Key(n.GetEd25519Key())
-	if err != nil {
-		return err
-	}
-
-	// get the co-workers of the node
 	workPackageHash := wp.Hash()
-	coWorkers := n.GetCoreCoWorkersPeers(coreIndex)
-	// send the work package to some other co-worker
-	for id, peer := range coWorkers {
-		if uint16(id) != n.id {
-			err = peer.SendWorkPackageSubmission(context.Background(), wp, extrinsicsBlobs, coreIndex)
-			if err != nil {
-				log.Error(module, "SubmitWPSameCore", "err", err, "coreIndex", coreIndex)
-				//return
-			}
-			log.Info(module, "SubmitWPSameCore SUBMISSION", "coreIndex", coreIndex)
-			break
-		} else {
-			n.workPackageQueue.Store(workPackageHash, &WPQueueItem{
-				workPackage:        wp,
-				coreIndex:          coreIndex,
-				extrinsics:         extrinsicsBlobs,
-				addTS:              time.Now().Unix(),
-				nextAttemptAfterTS: time.Now().Unix(),
-			})
-			log.Info(module, "SubmitWPSameCore SUBMISSION", "coreIndex", coreIndex)
-			break
+	var coreIndex uint16
+
+	// map the WALL CLOCK time to the coreIndex of THIS node and calculate all validator assignments
+	// NOTE: we use +1 to avoid the current JCE, we want the next one
+	slot := common.GetWallClockJCE(fudgeFactorJCE)
+	_, assignments := n.statedb.CalculateAssignments(slot)
+	for _, assignment := range assignments {
+		if types.Ed25519Key(assignment.Validator.Ed25519.PublicKey()) == n.GetEd25519Key() {
+			coreIndex = assignment.CoreIndex
 		}
 	}
-	return nil
+	peers := make([]uint16, 0)
+	for _, assignment := range assignments {
+		if assignment.CoreIndex == coreIndex {
+			peer, err := n.GetPeerInfoByEd25519(assignment.Validator.Ed25519)
+			if err != nil {
+
+			} else {
+				peers = append(peers, peer.PeerID)
+			}
+
+		}
+	}
+	log.Debug(debugG, "SubmitWPSameCore SUBMISSION Start", "NODE", n.id, "validators", peers, "coreIndex", coreIndex, "slot", slot)
+
+	// if we want to process it ourselves, this should be true
+	allowSelfSubmission := false
+	if allowSelfSubmission {
+		n.workPackageQueue.Store(workPackageHash, &WPQueueItem{
+			workPackage:        wp,
+			coreIndex:          coreIndex,
+			extrinsics:         extrinsicsBlobs,
+			addTS:              time.Now().Unix(),
+			nextAttemptAfterTS: time.Now().Unix(),
+			slot:               slot, // IMPORTANT: this will be used as guarantee.Slot
+		})
+		log.Debug(debugG, "SubmitWPSameCore SUBMISSION SELF", "coreIndex", coreIndex)
+		return nil
+	}
+	// now we can send to the other 2 nodes
+	for _, assignment := range assignments {
+		if assignment.CoreIndex == coreIndex {
+			if types.Ed25519Key(assignment.Validator.Ed25519.PublicKey()) != n.GetEd25519Key() {
+				pubkey := assignment.Validator.Ed25519
+				peer, err := n.GetPeerInfoByEd25519(pubkey)
+				if err != nil {
+					log.Error(module, "SubmitWPSameCore GetPeerInfoByEd25519", "err", err, "pubkey", pubkey)
+				} else {
+					err = peer.SendWorkPackageSubmission(context.Background(), wp, extrinsicsBlobs, coreIndex)
+					if err != nil {
+						log.Error(module, "SubmitWPSameCore SendWorkPackageSubmission", "err", err, "pubkey", pubkey)
+					} else {
+						// we only want to process ONE
+						return nil
+					}
+				}
+			}
+		}
+	}
+	return fmt.Errorf("SubmitWPSameCore: no peers found for coreIndex %d", coreIndex)
 }
 
 // this function will return the core workers of that core
@@ -1366,7 +1400,8 @@ func (n *NodeContent) addStateDB(_statedb *statedb.StateDB) error {
 	}
 	if _statedb.GetBlock().TimeSlot() > n.statedb.GetBlock().TimeSlot() { // not nessary  && _statedb.GetBlock().GetParentHeaderHash() == n.statedb.GetBlock().Header.Hash()
 		if !(_statedb.GetBlock().GetParentHeaderHash() == n.statedb.GetBlock().Header.Hash()) {
-			log.Warn(debugBlock, "addStateDB Warning:newStateDB's Parent is not current StateDB", "statedb", _statedb.GetHeaderHash().Hex(), "statedb2", n.statedb.GetHeaderHash().Hex())
+			log.Warn(debugBlock, "addStateDB Warning:newStateDB's Parent is not current StateDB", "n", n.String(), "new_statedb", _statedb.GetHeaderHash().Hex(), "new_statedb_slot", _statedb.GetBlock().TimeSlot(), "current_statedb", n.statedb.GetHeaderHash().Hex(), "current_statedb_slot", n.statedb.GetBlock().TimeSlot())
+			panic(fmt.Sprintf("addStateDB: newStateDB's Parent is not current StateDB %s != %s", _statedb.GetBlock().GetParentHeaderHash().Hex(), n.statedb.GetBlock().Header.Hash().Hex()))
 		}
 		n.statedb = _statedb
 		n.statedbMap[_statedb.GetHeaderHash()] = _statedb
@@ -1915,7 +1950,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	if newStateDB.JamState.SafroleState.GetEpochT() == 0 {
 		mode = "fallback"
 	}
-	log.Info(log.BlockMonitoring, "Applied Block", // "n", n.String(),
+	log.Info(log.BlockMonitoring, "Imported Block", // "n", n.String(),
 		"mode", mode,
 		"author", nextBlock.Header.AuthorIndex,
 		"p", nextBlock.Header.ParentHeaderHash.String_short(),
@@ -1924,6 +1959,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 		"len(γ_a')", len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator),
 		"blk", nextBlock.Str(),
 	)
+	// TODO: write finalizd block kv here
 
 	if CE129_test {
 		go n.getCE129(nextBlock.Header.AuthorIndex, nextBlock.Header.Hash())

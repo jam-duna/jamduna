@@ -62,21 +62,21 @@ func (n *Node) processAssurance(assurance types.Assurance) error {
 	return nil // Success
 }
 
-func (n *Node) processGuarantee(g types.Guarantee) error {
+func (n *Node) processGuarantee(g types.Guarantee, caller string) error {
 	// Store the guarantee in the tip's queued guarantees
 	s := n.getState()
-	err := s.VerifyGuaranteeBasic(g, s.Block.TimeSlot())
+
+	err := s.VerifyGuaranteeBasic(g) // wall-clock time or targetJCE
 	if err != nil {
 		if !statedb.AcceptableGuaranteeError(err) {
 			return err
 		}
-		log.Warn(debugG, "processGuarantee:VerifyGuaranteeBasic", "err", err)
+		log.Warn(debugG, "processGuarantee:VerifyGuaranteeBasic", "caller", caller, "err", err)
 		return err
 	}
-
 	err = n.extrinsic_pool.AddGuaranteeToPool(g)
 	if err != nil {
-		log.Error(debugG, "processGuarantee:AddGuaranteeToPool", "err", err)
+		log.Error(debugG, "processGuarantee:AddGuaranteeToPool", "caller", caller, "err", err)
 	}
 	return nil // Success
 }

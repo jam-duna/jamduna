@@ -399,7 +399,7 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 	if !vm.terminated {
 		vm.ResultCode = types.RESULT_OK
 	} else if vm.ResultCode != types.RESULT_OK {
-		log.Warn(vm.logging, "PVM Result Code", "mode", vm.Mode, "service", string(vm.ServiceMetadata), "resultCode", vm.ResultCode)
+		//log.Warn(vm.logging, "PVM Result Code", "mode", vm.Mode, "service", string(vm.ServiceMetadata), "resultCode", vm.ResultCode)
 	}
 	return nil
 }
@@ -675,7 +675,7 @@ func (vm *VM) HandleNoArgs(opcode byte) {
 	switch opcode {
 	case TRAP:
 		vm.ResultCode = types.RESULT_PANIC
-		log.Warn(vm.logging, "TRAP encountered", "service", string(vm.ServiceMetadata), "mode", vm.Mode, "pc", vm.pc)
+		//log.Warn(vm.logging, "TRAP encountered", "service", string(vm.ServiceMetadata), "mode", vm.Mode, "pc", vm.pc)
 
 		vm.terminated = true
 	case FALLTHROUGH:

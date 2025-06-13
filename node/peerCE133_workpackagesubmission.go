@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
@@ -82,7 +83,6 @@ func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPack
 		CoreIndex:   core_idx,
 		WorkPackage: pkg,
 	}
-	// Here need to setup some kind of verification for the work package
 
 	reqBytes, err := req.ToBytes()
 	if err != nil {
@@ -94,6 +94,8 @@ func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPack
 		log.Error(module, "SendWorkPackageSubmission0", "err", err)
 		return err
 	}
+	slot := common.GetWallClockJCE(fudgeFactorJCE)
+	log.Debug(debugR, "CE133-SendWorkPackageSubmission OUTGOING", "NODE", p.node.id, "peerID", p.PeerID, "coreIndex", core_idx, "slot", slot, "wp_hash", pkg.Hash())
 	//--> Core Index ++ Work Package
 	err = sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code)
 	if err != nil {
@@ -118,7 +120,7 @@ func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPack
 	return nil
 }
 
-func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, msg []byte) (err error) {
+func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) (err error) {
 	defer stream.Close()
 	// --> Core Index ++ Work Package
 	var newReq JAMSNPWorkPackage
@@ -128,7 +130,6 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 		log.Error(debugG, "onWorkPackageSubmission:FromBytes", "err", err)
 		return fmt.Errorf("onWorkPackageSubmission: decode failed: %w", err)
 	}
-	log.Info(debugG, "onWorkPackageSubmission", "workpackage", newReq.WorkPackage.Hash(), "workpackageBytes", fmt.Sprintf("%x", newReq.WorkPackage.Bytes()))
 	// --> [Extrinsic] (Message length should equal sum of extrinsic data lengths)
 	// Read message length (4 bytes)
 	msgLenBytes := make([]byte, 4)
@@ -138,6 +139,29 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 		return err
 	}
 	msgLen := binary.LittleEndian.Uint32(msgLenBytes)
+	// Verify that we are in the the core based on the WALL CLOCK TIME
+	slot := common.GetWallClockJCE(fudgeFactorJCE)
+	log.Debug(debugR, "CE133-onWorkPackageSubmission INCOMING", "NODE", n.id, "peer", peerID, "workpackage", newReq.WorkPackage.Hash(), "slot", slot)
+	prevAssignments, assignments := n.statedb.CalculateAssignments(slot)
+	inSet := false
+	for _, assignment := range assignments {
+		if assignment.CoreIndex == newReq.CoreIndex && types.Ed25519Key(assignment.Validator.Ed25519.PublicKey()) == n.GetEd25519Key() {
+			inSet = true
+			break
+		}
+	}
+	allowPrevAssignments := false // if this was true then inSet would always be true in tiny.
+	if allowPrevAssignments {
+		for _, assignment := range prevAssignments {
+			if assignment.CoreIndex == newReq.CoreIndex && types.Ed25519Key(assignment.Validator.Ed25519.PublicKey()) == n.GetEd25519Key() {
+				inSet = true
+				break
+			}
+		}
+	}
+	if !inSet {
+		return fmt.Errorf("core index %d is not in the current guarantor assignments", newReq.CoreIndex)
+	}
 
 	// Read message body, which is the encoded extrinsics
 	extrinsicsBytes := make([]byte, msgLen)
@@ -187,6 +211,7 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 		extrinsics:         extrinsics,
 		addTS:              time.Now().Unix(),
 		nextAttemptAfterTS: time.Now().Unix(),
+		slot:               slot,
 	})
 
 	return nil

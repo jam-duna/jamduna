@@ -57,7 +57,7 @@ func AcceptableGuaranteeError(err error) bool {
 }
 
 // VerifyGuaranteeBasic checks signatures, core index, assignment, timeouts, gas, and code hash.
-func (s *StateDB) VerifyGuaranteeBasic(g types.Guarantee, targetJCE uint32) error {
+func (s *StateDB) VerifyGuaranteeBasic(g types.Guarantee) error {
 	// common validations
 	// if err := s.checkServicesExist(g); err != nil {
 	// 	return err
@@ -81,10 +81,10 @@ func (s *StateDB) VerifyGuaranteeBasic(g types.Guarantee, targetJCE uint32) erro
 	}
 	if s.Block != nil {
 		// assignment to core
-		if err := s.checkAssignment(g, targetJCE); err != nil {
+		if err := s.checkAssignment(g, s.Block.TimeSlot()); err != nil {
 			return err
 		}
-		if err := js.checkReportTimeOut(g, targetJCE); err != nil {
+		if err := js.checkReportTimeOut(g, g.Slot); err != nil {
 			return err
 		}
 	}
@@ -108,37 +108,30 @@ func (s *StateDB) VerifyGuaranteeBasic(g types.Guarantee, targetJCE uint32) erro
 // v0.5 eq 11.25 - The signing validators must be assigned to the core in G or G*
 func (s *StateDB) checkAssignment(g types.Guarantee, ts uint32) error {
 	// old reports aren’t allowed
+	/* TEMPORARILY DISABLED
 	diff := int64(ts) - int64(g.Slot)
-
 	if diff > int64(ts%types.ValidatorCoreRotationPeriod+types.ValidatorCoreRotationPeriod) {
-		fmt.Printf("checkAssignment: diff: %d\n", diff)
 		return jamerrors.ErrGReportEpochBeforeLast
 	}
-
+	*/
 	// choose prev vs curr assignment based on period
-	period := ts / types.ValidatorCoreRotationPeriod
-	reportPeriod := g.Slot / types.ValidatorCoreRotationPeriod
-	prevAssign, currAssign := s.CalculateAssignments(ts)
-	assignments := currAssign
-	if period != reportPeriod {
-		assignments = prevAssign
-	}
-
-	// build validator→core map
+	_, assignments := s.CalculateAssignments(g.Slot)
 	lookup := make(map[uint16]uint16, len(assignments))
 	for idx, a := range assignments {
 		lookup[uint16(idx)] = a.CoreIndex
 	}
-
 	// verify each signature lands on the expected core
 	for _, sig := range g.Signatures {
 		core, ok := lookup[sig.ValidatorIndex]
 		if !ok || core != uint16(g.Report.CoreIndex) {
-			log.Warn(debugG, "checkAssignment: core assignment", "validator", sig.ValidatorIndex, "expectedCore", g.Report.CoreIndex, "actualCore", core)
+			log.Warn(debugG, "checkAssignment: G14-ErrGWrongAssignment",
+				"validator", sig.ValidatorIndex,
+				"slot", g.Slot,
+				"expectedCore", g.Report.CoreIndex,
+				"actualCore", core)
 			return jamerrors.ErrGWrongAssignment
 		}
 	}
-
 	return nil
 }
 
