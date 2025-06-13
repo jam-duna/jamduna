@@ -216,6 +216,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		serviceNames = []string{"delay", "auth_copy"}
 	case "blake2b":
 		serviceNames = []string{"blake2b"}
+	case "rubic":
+		serviceNames = []string{"fib", "auth_copy"}
 	case "fib":
 		serviceNames = []string{"fib", "auth_copy"}
 	case "fib2":
@@ -438,6 +440,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		waitForTermination(tNode, "fallback", FallbackEpochLen, FallbackBufferTime, t)
 	case "fib":
 		fib(bNode, testServices, targetN)
+	case "rubic":
+		rubic(bNode, testServices, targetN)
 	case "fib2":
 		//targetN := 100
 		fib2(bNode, testServices, 10)

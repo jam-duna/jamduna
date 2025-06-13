@@ -238,10 +238,8 @@ func (p *Peer) ShareWorkPackage(
 		err = fmt.Errorf("sendQuicBytes2[CE134_WorkPackageShare]: %v", err)
 		return
 	}
-	log.Trace(log.G, "onWorkPackageShare OUTGOING QUIC",
-		"CoreIndex ++ SegmentRootMappings", fmt.Sprintf("0x%x", reqBytes),
-		"encodedBundle", fmt.Sprintf("0x%x", encodedBundle),
-	)
+	log.Info(log.G, "onWorkPackageShare OUTGOING QUIC", "mapLen", len(reqBytes), "CoreIndex ++ SegmentRootMappings", fmt.Sprintf("0x%x", reqBytes))
+	log.Info(log.G, "onWorkPackageShare OUTGOING QUIC", "bundleLen", len(encodedBundle), "encodedBundle", fmt.Sprintf("0x%x", encodedBundle))
 	log.Trace(log.G, "onWorkPackageShare OUTGOING",
 		"workpackage", bundle.WorkPackage.Hash(),
 		"bundle_Len", len(encodedBundle),
@@ -339,12 +337,8 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		fmt.Println("Error deserializing:", err)
 		return fmt.Errorf("onWorkPackageShare: decode bundle: %w\nencodedBundle data:\n%x", err, encodedBundle)
 	}
-
-	log.Debug(log.G, "onWorkPackageShare INCOMING QUIC",
-		"CoreIndex ++ SegmentRootMappings", fmt.Sprintf("0x%x", msg),
-		"encodedBundle", fmt.Sprintf("0x%x", encodedBundle),
-	)
-
+	log.Info(log.G, "onWorkPackageShare INCOMING QUIC", "mapLen", len(msg), "CoreIndex ++ SegmentRootMappings", fmt.Sprintf("0x%x", msg))
+	log.Info(log.G, "onWorkPackageShare INCOMING QUIC", "bundleLen", len(encodedBundle), "encodedBundle", fmt.Sprintf("0x%x", encodedBundle))
 	recoveredBundleByte := bundle.Bytes()
 
 	if !bytes.Equal(encodedBundle, recoveredBundleByte) {

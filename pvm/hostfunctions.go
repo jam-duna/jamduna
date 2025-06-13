@@ -88,7 +88,7 @@ var errorCases = map[string][]uint64{
 	"Poke":              {OK, OOB, WHO},
 	"Zero":              {OK, OOB, WHO},
 	"Void":              {OK, OOB, WHO},
-	"Invoke":            {OK, OOB, WHO, HOST, FAULT, OOB, PANIC},
+	"Invoke":            {OK, OOB, WHO, OOB},
 	"Expunge":           {OK, OOB, WHO},
 }
 
@@ -1001,7 +1001,7 @@ func (vm *VM) hostInvoke() {
 		pc:       m_n.I,
 		Gas:      int64(g),
 		register: m_n_reg,
-		Ram:      m_n.U,
+		Ram:      nil, // m_n.U,
 	}
 
 	new_machine.logging = vm.logging

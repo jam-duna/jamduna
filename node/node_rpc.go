@@ -897,6 +897,7 @@ func (j *Jam) GetRefineContext(req []string, res *string) error {
 }
 
 func (j *Jam) WorkReport(req []string, res *string) error {
+	fmt.Printf("jam.WorkReport called with req=%v\n", req)
 	if len(req) != 1 {
 		return fmt.Errorf("invalid number of arguments")
 	}

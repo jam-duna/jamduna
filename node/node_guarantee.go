@@ -211,6 +211,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		log.Error(log.Node, "processWPQueueItem", "n", n.String(), "err", err, "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
 		return false
 	}
+	//n.getStateDBByHeaderHash()
 
 	curr_statedb := n.statedb.Copy()
 	err = curr_statedb.VerifyPackage(bundle)
@@ -286,9 +287,9 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 				return status
 			})
 		} else {
-			log.Warn(log.G, "processWPQueueItem Guarantee from fellow did not match", "n", n.String(),
-				"selfWorkReportHash", selfWorkReportHash, "fellowWorkReportHash", fellowWorkReportHash)
+			log.Warn(log.G, "processWPQueueItem Guarantee from fellow did not match", "n", n.String(), "selfWorkReportHash", selfWorkReportHash, "fellowWorkReportHash", fellowWorkReportHash)
 			log.Warn(log.G, "our reports", "n", n.String(), "selfWorkReport", guarantee.Report.String())
+			//return false
 		}
 	}
 

@@ -297,6 +297,7 @@ func (c *NodeClient) GetClient(possibleCores ...uint16) *rpc.Client {
 }
 
 func (c *NodeClient) CallWithRetry(method string, args interface{}, reply interface{}, possibleCores ...uint16) error {
+	fmt.Printf("CallWithRetry: method=%s, args=%v, possibleCores=%v\n", method, args, possibleCores)
 	const maxRetries = 3
 	var err error
 	for attempt := 0; attempt < maxRetries; attempt++ {

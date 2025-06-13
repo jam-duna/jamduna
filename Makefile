@@ -161,7 +161,7 @@ run_parallel_jam:
 		PORT=$$(($(DEFAULT_PORT) + $$i)); \
 		V_IDX=$$i; \
 		echo ">> Starting instance $$V_IDX on port $$PORT..."; \
-		$(OUTPUT_DIR)/$(BINARY) run \
+		$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run \
 			--chain $(CHAINSPEC) \
 			--dev-validator $$V_IDX \
 			--start-time "$(JAM_start-time)" & \
@@ -179,8 +179,8 @@ run_polkajam_all:
 	done; \
 
 run_localclient: kill jam jam_clean run_5 run_1
-run_localclient_jam: jam_clean run_parallel_jam
-run_localclient_jam_dead: jam_clean run_parallel_jam_with_deadnode
+run_localclient_jam: kill jam jam_clean run_parallel_jam
+run_localclient_jam_dead: kill jam jam_clean run_parallel_jam_with_deadnode
 
 run_single_node:jam_clean
 	@echo "Starting single node JAM instance..."

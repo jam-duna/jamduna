@@ -79,6 +79,14 @@ func TestSafrole(t *testing.T) {
 	jamtest(t, "safrole", 0)
 }
 
+func TestRubic(t *testing.T) {
+	targetN := TargetedN_Fib
+	if *targetNum > 0 {
+		targetN = *targetNum
+	}
+	jamtest(t, "rubic", targetN)
+}
+
 func TestFib(t *testing.T) {
 	initPProf(t)
 	targetN := TargetedN_Fib

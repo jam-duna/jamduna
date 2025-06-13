@@ -45,7 +45,7 @@ type VM struct {
 	terminated     bool
 	hostCall       bool // ̵h in GP
 	host_func_id   int  // h in GP
-	Ram            RAMInterface
+	Ram            *RAM
 	register       []uint64
 	Gas            int64
 	hostenv        types.HostEnv
@@ -99,9 +99,6 @@ type VM struct {
 
 	pushFrame       func([]byte)
 	stopFrameServer func()
-
-	//Basic Block
-	BasicBlocks map[uint64]*BasicBlock
 }
 
 type Program struct {
@@ -124,15 +121,6 @@ const (
 	LOW  = (1 << 64) - 8 // 2^32 - 8 8
 	HUH  = (1 << 64) - 9 // 2^32 - 9 7
 	OK   = 0             // 0
-)
-
-// Inner Result Codes
-const (
-	HALT  = 0
-	PANIC = 1
-	FAULT = 2
-	HOST  = 3
-	OOG   = 4
 )
 
 func extractBytes(input []byte) ([]byte, []byte) {
@@ -386,6 +374,7 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 	stepn := 1
 	for !vm.terminated {
 		if err := vm.step(stepn); err != nil {
+			fmt.Println("Error in step:", err)
 			return err
 		}
 		if vm.hostCall && is_child {
@@ -416,7 +405,6 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 // step performs a single step in the PVM
 func (vm *VM) step(stepn int) error {
 	if vm.pc >= uint64(len(vm.code)) {
-		vm.ResultCode = types.RESULT_PANIC
 		return errors.New("program counter out of bounds")
 	}
 	//this_step_pc := vm.pc
@@ -484,26 +472,6 @@ func (vm *VM) step(stepn int) error {
 		return nil
 	}
 
-	if vm.ResultCode == types.RESULT_OOG {
-		vm.terminated = true
-		log.Debug(vm.logging, "terminated: OOG", "service", string(vm.ServiceMetadata), "pc", vm.pc, "opcode", opcode)
-		return errors.New("terminated: OOG")
-	}
-	if vm.ResultCode == types.RESULT_PANIC {
-		vm.terminated = true
-		log.Debug(vm.logging, "terminated: PANIC", "service", string(vm.ServiceMetadata), "pc", vm.pc, "opcode", opcode)
-		return errors.New("terminated: PANIC")
-	}
-	if vm.ResultCode == types.RESULT_HOST {
-		vm.terminated = true
-		log.Debug(vm.logging, "terminated: HOST", "service", string(vm.ServiceMetadata), "pc", vm.pc, "opcode", opcode)
-		return errors.New("terminated: HOST")
-	}
-	if vm.ResultCode == types.RESULT_FAULT {
-		vm.terminated = true
-		log.Debug(vm.logging, "terminated: FAULT", "service", string(vm.ServiceMetadata), "pc", vm.pc, "opcode", opcode)
-		return errors.New("terminated: FAULT")
-	}
 	// avoid this: this is expensive
 	if PvmLogging {
 		registersJSON, _ := json.Marshal(vm.ReadRegisters())
@@ -511,68 +479,6 @@ func (vm *VM) step(stepn int) error {
 		fmt.Printf("%s: %-18s step:%6d pc:%6d g:%6d Registers:%s\n", vm.Mode, opcode_str(opcode), stepn-1, vm.pc, vm.Gas, prettyJSON)
 		//fmt.Printf("instruction=%d pc=%d g=%d Registers=%s\n", opcode, vm.pc, vm.Gas-1, prettyJSON)
 		//fmt.Printf("%s %d %d Registers:%s\n", opcode_str(opcode), stepn-1, vm.pc, prettyJSON)
-	}
-	return nil
-}
-
-// Execute runs the program until it terminates
-func (vm *VM) ExecuteNew(entryPoint int, is_child bool) error {
-	vm.terminated = false
-	// A.2 deblob
-	if vm.code == nil {
-		vm.ResultCode = types.RESULT_PANIC
-		vm.terminated = true
-		return errors.New("no code to execute")
-	}
-
-	if len(vm.code) == 0 {
-		vm.ResultCode = types.RESULT_PANIC
-		vm.terminated = true
-		return errors.New("no code to execute")
-	}
-
-	if len(vm.bitmask) == 0 {
-		vm.ResultCode = types.RESULT_PANIC
-		vm.terminated = true
-		return errors.New("failed to decode bitmask")
-	}
-
-	basicBlocks := vm.compileBasicBlock(vm.pc)
-	vm.pc = uint64(entryPoint)
-
-	done := false
-	for !done {
-		bb, ok := basicBlocks[vm.pc]
-		if !ok {
-			panic("no basic block found for pc: " + fmt.Sprint(vm.pc))
-		}
-
-		vm.terminated = false
-		err := vm.executeBasicBlock(bb, is_child)
-		if err != nil {
-			vm.ResultCode = types.RESULT_PANIC
-			vm.terminated = true
-		}
-		switch bb.JumpType {
-		case TRAP_JUMP:
-			done = true // Exit the loop if we hit a trap jump
-		case DIRECT_JUMP:
-			vm.pc = bb.TruePC
-
-		}
-		if vm.terminated {
-			//fmt.Printf("VM terminated with ResultCode: %d\n", vm.ResultCode)
-			done = true
-		}
-	}
-
-	// vm.Mode = ...
-	// vm.Gas = types.IsAuthorizedGasAllocation
-	// if vm finished without error, set result code to OK
-	if !vm.terminated {
-		vm.ResultCode = types.RESULT_OK
-	} else if vm.ResultCode != types.RESULT_OK {
-		log.Warn(vm.logging, "PVM Result Code", "mode", vm.Mode, "service", string(vm.ServiceMetadata), "resultCode", vm.ResultCode)
 	}
 	return nil
 }
@@ -719,8 +625,8 @@ func (vm *VM) HandleOneImm(opcode byte, operands []byte) {
 		lx := uint32(types.DecodeE_l(operands))
 		vm.hostCall = true
 		vm.host_func_id = int(lx)
-		//vm.ResultCode = types.PVM_HOST
-		//vm.HostResultCode = types.PVM_HOST
+		vm.ResultCode = types.RESULT_HOST
+		vm.HostResultCode = types.RESULT_HOST
 		vm.pc += 1 + uint64(len(operands))
 	}
 }
@@ -768,15 +674,29 @@ func (vm *VM) HandleTwoImms(opcode byte, operands []byte) {
 }
 
 func (vm *VM) HandleOneOffset(opcode byte, operands []byte) {
-	vx := extractOneOffset(operands)
+	originalOperands := make([]byte, len(operands))
+	copy(originalOperands, operands)
+	lx := min(4, len(originalOperands))
+	if lx == 0 {
+		lx = 1
+		originalOperands = append(originalOperands, 0)
+	}
+	vx := z_encode(types.DecodeE_l(originalOperands[0:lx]), uint32(lx))
 	dumpJumpOffset("JUMP", vx, vm.pc)
 	vm.branch(uint64(int64(vm.pc)+vx), true)
 }
 
-// A.5.6. Instructions with Arguments of One Register & One Immediate.
 func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
+	originalOperands := make([]byte, len(operands))
+	copy(originalOperands, operands)
 
-	registerIndexA, vx := extractOneRegOneImm(operands)
+	registerIndexA := min(12, int(originalOperands[0])%16)
+	lx := min(4, max(0, len(originalOperands))-1)
+	if lx == 0 {
+		lx = 1
+		originalOperands = append(originalOperands, 0)
+	}
+	vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
 	valueA, _ := vm.ReadRegister(registerIndexA)
 
 	addr := uint32(vx)
@@ -909,10 +829,23 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 	}
 }
 
-// A.5.7. Instructions with Arguments of One Register & Two Immediates.
 func (vm *VM) HandleOneRegTwoImm(opcode byte, operands []byte) {
-	registerIndexA, vx, vy := extractOneReg2Imm(operands)
+	// handle no operand means 0
+	originalOperands := make([]byte, len(operands))
+	copy(originalOperands, operands)
+
+	registerIndexA := min(12, int(originalOperands[0])%16)
+	lx := min(4, (int(originalOperands[0])/16)%8)
+	ly := min(4, max(0, len(originalOperands)-lx-1))
+	if ly == 0 {
+		ly = 1
+		originalOperands = append(originalOperands, 0)
+	}
+
 	valueA, _ := vm.ReadRegister(registerIndexA)
+
+	vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
+	vy := x_encode(types.DecodeE_l(originalOperands[1+lx:1+lx+ly]), uint32(ly))
 
 	addr := uint32(valueA) + uint32(vx)
 	switch opcode {
@@ -951,12 +884,23 @@ func (vm *VM) HandleOneRegTwoImm(opcode byte, operands []byte) {
 	}
 }
 
-// A.5.8 One Register, One Immediate and One Offset
 func (vm *VM) HandleOneRegOneImmOneOffset(opcode byte, operands []byte) {
-	registerIndexA, vx, vy0 := extractOneRegOneImmOneOffset(operands)
+	// handle no operand means 0
+	originalOperands := make([]byte, len(operands))
+	copy(originalOperands, operands)
+
+	registerIndexA := min(12, int(originalOperands[0])%16)
+	lx := min(4, (int(originalOperands[0]) / 16 % 8))
+	ly := min(4, max(0, len(originalOperands)-lx-1))
+	if ly == 0 {
+		ly = 1
+		originalOperands = append(originalOperands, 0)
+	}
+
+	vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
+	vy := uint64(int64(vm.pc) + z_encode(types.DecodeE_l(originalOperands[1+lx:1+lx+ly]), uint32(ly)))
 
 	valueA, _ := vm.ReadRegister(registerIndexA)
-	vy := uint64(int64(vm.pc) + vy0)
 
 	switch opcode {
 	case LOAD_IMM_JUMP:
@@ -1056,9 +1000,14 @@ func (vm *VM) HandleOneRegOneImmOneOffset(opcode byte, operands []byte) {
 	}
 }
 
-// A.5.9. Instructions with Arguments of Two Registers.
 func (vm *VM) HandleTwoRegs(opcode byte, operands []byte) {
-	registerIndexD, registerIndexA := extractTwoRegisters(operands)
+	// handle no operand means 0
+	originalOperands := make([]byte, len(operands))
+	copy(originalOperands, operands)
+
+	registerIndexD := min(12, int(originalOperands[0])%16)
+	registerIndexA := min(12, int(originalOperands[0])/16)
+
 	valueA, _ := vm.ReadRegister(registerIndexA)
 
 	var result uint64
@@ -1068,12 +1017,12 @@ func (vm *VM) HandleTwoRegs(opcode byte, operands []byte) {
 		dumpMov(registerIndexD, registerIndexA, result)
 	case SBRK:
 		if valueA == 0 {
-			vm.WriteRegister(registerIndexD, uint64(vm.Ram.GetCurrentHeapPointer()))
+			vm.WriteRegister(registerIndexD, uint64(vm.Ram.current_heap_pointer))
 			return
 		}
-		result = uint64(vm.Ram.GetCurrentHeapPointer())
-		next_page_boundary := P_func(vm.Ram.GetCurrentHeapPointer())
-		new_heap_pointer := uint64(vm.Ram.GetCurrentHeapPointer()) + valueA
+		result = uint64(vm.Ram.current_heap_pointer)
+		next_page_boundary := P_func(vm.Ram.current_heap_pointer)
+		new_heap_pointer := uint64(vm.Ram.current_heap_pointer) + valueA
 
 		if new_heap_pointer > uint64(next_page_boundary) {
 			final_boundary := P_func(uint32(new_heap_pointer))
@@ -1083,7 +1032,7 @@ func (vm *VM) HandleTwoRegs(opcode byte, operands []byte) {
 
 			vm.Ram.allocatePages(idx_start, page_count)
 		}
-		vm.Ram.SetCurrentHeapPointer(uint32(new_heap_pointer))
+		vm.Ram.current_heap_pointer = uint32(new_heap_pointer)
 		dumpTwoRegs("SBRK", registerIndexD, registerIndexA, valueA, result)
 	case COUNT_SET_BITS_64:
 		result = uint64(bits.OnesCount64(valueA))
@@ -1121,12 +1070,23 @@ func (vm *VM) HandleTwoRegs(opcode byte, operands []byte) {
 	}
 	vm.WriteRegister(registerIndexD, result)
 }
-
-// A.5.10 Two Registers and One Immediate
 func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
+	// handle no operand means 0
+	originalOperands := make([]byte, len(operands))
+	copy(originalOperands, operands)
+
+	registerIndexA := min(12, int(originalOperands[0])%16)
+	registerIndexB := min(12, int(originalOperands[0])/16)
+	lx := min(4, max(0, len(originalOperands)-1))
+	if lx == 0 {
+		lx = 1
+		originalOperands = append(originalOperands, 0)
+	}
+
 	valueA, _ := vm.ReadRegister(registerIndexA)
 	valueB, _ := vm.ReadRegister(registerIndexB)
+
+	vx := x_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx))
 
 	addr := uint32((uint64(valueB) + vx) % (1 << 32))
 	var result uint64
@@ -1304,10 +1264,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 		result = vx << (valueB & 63)
 		dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
 	case SHLO_R_IMM_ALT_32:
-		result = x_encode(uint64(uint32(vx)>>(valueB&31)), 4)
-		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
-	case SHAR_R_IMM_ALT_32:
-		result = uint64(z_encode(vx%(1<<32), 4) >> (valueB & 31))
+		result = x_encode(vx>>(valueB&63)%(1<<32), 4)
 		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
 	case SHLO_R_IMM_ALT_64:
 		result = vx >> (valueB & 63)
@@ -1343,10 +1300,20 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 	vm.WriteRegister(registerIndexA, result)
 }
 
-// A.5.11 Two Registers and One Offset
 func (vm *VM) HandleTwoRegsOneOffset(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx0 := extractTwoRegsOneOffset(operands)
-	vx := uint64(int64(vm.pc) + int64(vx0))
+	// handle no operand means 0
+	originalOperands := make([]byte, len(operands))
+	copy(originalOperands, operands)
+
+	registerIndexA := min(12, int(originalOperands[0])%16)
+	registerIndexB := min(12, int(originalOperands[0])/16)
+	lx := min(4, max(0, len(originalOperands)-1))
+	if lx == 0 {
+		lx = 1
+		originalOperands = append(originalOperands, 0)
+	}
+	vx := uint64(int64(vm.pc) + z_encode(types.DecodeE_l(originalOperands[1:1+lx]), uint32(lx)))
+
 	valueA, _ := vm.ReadRegister(registerIndexA)
 	valueB, _ := vm.ReadRegister(registerIndexB)
 
@@ -1405,17 +1372,36 @@ func (vm *VM) HandleTwoRegsOneOffset(opcode byte, operands []byte) {
 	}
 }
 
-// A.5.12. Instructions with Arguments of Two Registers and Two Immediates. (LOAD_IMM_JUMP_IND)
 func (vm *VM) HandleTwoRegsTwoImms(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx, vy := extractTwoRegsAndTwoImmediates(operands)
+	// handle no operand means 0
+	originalOperands := make([]byte, len(operands))
+	copy(originalOperands, operands)
+
+	registerIndexA := min(12, int(originalOperands[0])%16)
+	registerIndexB := min(12, int(originalOperands[0])/16)
+	lx := min(4, (int(originalOperands[1]) % 8))
+	ly := min(4, max(0, len(originalOperands)-lx-2))
+	if ly == 0 {
+		ly = 1
+		originalOperands = append(originalOperands, 0)
+	}
+
+	vx := x_encode(types.DecodeE_l(originalOperands[2:2+lx]), uint32(lx))
+	vy := x_encode(types.DecodeE_l(originalOperands[2+lx:2+lx+ly]), uint32(ly))
+
 	valueB, _ := vm.ReadRegister(registerIndexB)
+
 	vm.WriteRegister(registerIndexA, vx)
+
+	//fmt.Printf(" --- LOAD_IMM_JUMP jump %d\n", valueB+vy)
+
 	vm.djump((valueB + vy) % (1 << 32))
 }
-
-// A.5.13. Instructions with Arguments of Three Registers.
 func (vm *VM) HandleThreeRegs(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, registerIndexD := extractThreeRegs(operands)
+	registerIndexA := min(12, int(operands[0]&0x0F))
+	registerIndexB := min(12, int(operands[0]>>4))
+	registerIndexD := min(12, int(operands[1]))
+
 	valueA, _ := vm.ReadRegister(registerIndexA)
 	valueB, _ := vm.ReadRegister(registerIndexB)
 

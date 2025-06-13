@@ -71,7 +71,7 @@ func NewRecompilerVM(vm *VM) (*RecompilerVM, error) {
 		startCode:   nil,
 		exitCode:    nil,
 	}
-	vm.Ram = rvm
+	//vm.Ram = rvm
 	rvm.initStartCode()
 
 	// build exitCode: dump registers into regDumpMem
@@ -300,50 +300,48 @@ func generateLoadImmJumpIndirect(inst Instruction) []byte {
 	return append([]byte{rex, movOp}, immBytes...)
 }
 
-
 // BRANCH_{EQ/NE/...}_IMM: r15 = (r64_reg jcc imm32) ? 1 : 0
 func generateBranchImm(jcc byte) func(inst Instruction) []byte {
-    return func(inst Instruction) []byte {
-        // unpack: register, immediate to compare, and branch offset (ignored here)
-        regIdx, vx, _ := extractOneRegOneImmOneOffset(inst.Args)
-        r   := regInfoList[regIdx]
-        dst := regInfoList[CompareReg] 
+	return func(inst Instruction) []byte {
+		// unpack: register, immediate to compare, and branch offset (ignored here)
+		regIdx, vx, _ := extractOneRegOneImmOneOffset(inst.Args)
+		r := regInfoList[regIdx]
+		dst := regInfoList[CompareReg]
 
-        code := make([]byte, 0, 16)
+		code := make([]byte, 0, 16)
 
-        // 1) XOR R15, R15  → clear all 64 bits of R15
-        rexXor := byte(0x48)           // REX.W
-        if dst.REXBit == 1 {           // high register needs REX.B
-            rexXor |= 0x01
-        }
-        modrmXor := byte(0xC0 | (dst.RegBits<<3) | dst.RegBits)
-        code = append(code, rexXor, 0x31, modrmXor)  // 31 /r = XOR r/m64, r64
+		// 1) XOR R15, R15  → clear all 64 bits of R15
+		rexXor := byte(0x48) // REX.W
+		if dst.REXBit == 1 { // high register needs REX.B
+			rexXor |= 0x01
+		}
+		modrmXor := byte(0xC0 | (dst.RegBits << 3) | dst.RegBits)
+		code = append(code, rexXor, 0x31, modrmXor) // 31 /r = XOR r/m64, r64
 
-        // 2) CMP r64, imm32  → opcode 0x81 /7 id
-        rexCmp := byte(0x48)           // REX.W
-        if r.REXBit == 1 {             // extend rm field if needed
-            rexCmp |= 0x01
-        }
-        modrmCmp := byte(0xC0 | (0x07<<3) | r.RegBits)
-        disp := int32(vx)
-        code = append(code,
-            rexCmp, 0x81, modrmCmp,
-            byte(disp), byte(disp>>8),
-            byte(disp>>16), byte(disp>>24),
-        )
+		// 2) CMP r64, imm32  → opcode 0x81 /7 id
+		rexCmp := byte(0x48) // REX.W
+		if r.REXBit == 1 {   // extend rm field if needed
+			rexCmp |= 0x01
+		}
+		modrmCmp := byte(0xC0 | (0x07 << 3) | r.RegBits)
+		disp := int32(vx)
+		code = append(code,
+			rexCmp, 0x81, modrmCmp,
+			byte(disp), byte(disp>>8),
+			byte(disp>>16), byte(disp>>24),
+		)
 
-        // 3) SETcc R15B  → 0x0F, (jcc+0x10), ModRM
-        rexSet := byte(0x40)           // minimal REX prefix
-        if dst.REXBit == 1 {
-            rexSet |= 0x01             // REX.B to reach R15B
-        }
-        modrmSet := byte(0xC0 | dst.RegBits)
-        code = append(code, rexSet, 0x0F, jcc+0x10, modrmSet)
+		// 3) SETcc R15B  → 0x0F, (jcc+0x10), ModRM
+		rexSet := byte(0x40) // minimal REX prefix
+		if dst.REXBit == 1 {
+			rexSet |= 0x01 // REX.B to reach R15B
+		}
+		modrmSet := byte(0xC0 | dst.RegBits)
+		code = append(code, rexSet, 0x0F, jcc+0x10, modrmSet)
 
-        return code
-    }
+		return code
+	}
 }
-
 
 // BRANCH_{EQ/NE/LT_U/...} (register–register): r15 = (rA <cond> rB) ? 1 : 0
 func generateCompareBranch(op byte) func(inst Instruction) []byte {
@@ -363,7 +361,6 @@ func generateCompareBranch(op byte) func(inst Instruction) []byte {
 		}
 		modrmCmp := byte(0xC0 | (rB.RegBits << 3) | rA.RegBits)
 		code := []byte{rexCmp, 0x39, modrmCmp}
-
 
 		return code
 	}

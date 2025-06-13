@@ -19,6 +19,13 @@ fib :
 	  -tags "network_test,$(TAGS)" $(TARGET_PARAM) \
 	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT)
 
+rubic :
+	@echo "Running TestRubic$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT)..."
+	@echo "go test -timeout $(TIMEOUT) -v -run '^TestFib$$' -tags \"network_test,$(TAGS)\" $(TARGET_PARAM) -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT)"
+	@go test -timeout $(TIMEOUT) -v -run '^TestRubic$$' \
+	  -tags "network_test,$(TAGS)" $(TARGET_PARAM) \
+	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT)
+
 # (Default) Fib2-10
 fib2 :
 	@echo "Running TestFib2$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT)..."
