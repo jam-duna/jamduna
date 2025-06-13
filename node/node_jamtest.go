@@ -169,7 +169,7 @@ func getServices(serviceNames []string, getmetadata bool) (services map[string]*
 			CodeHash:    codeHash,
 			Code:        code,
 		}
-		log.Info(module, serviceName, "codeHash", codeHash, "len", len(code))
+		log.Info(log.Node, serviceName, "codeHash", codeHash, "len", len(code))
 	}
 	return
 }
@@ -190,6 +190,13 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	sendTickets := true //set this to false to run WP without E_T interference
 	jam, isDisputeMode := testWithDispute(jam_raw)
 	//fmt.Printf("jamtest: jam=%s | isDisputeMode=%v | raw=%v\n", jam, isDisputeMode, jam_raw)
+
+	// SETUP DEBUG LOGGING with EnableModules
+	// EnableModules is a comma-separated list of modules to enable for debug logging
+	// For example, to enable DEBUG logging for rotation, guarantees, node, state, quic, preimage:
+	// "rotation,guarantees,node,state,quic,preimage"
+	debug := "rotation,guarantees"
+	log.EnableModules(debug)
 
 	// Specify testServices
 	targetedFinalityDelay := 5 // TODO: write key to levelDB for starting time slot
@@ -213,7 +220,6 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		serviceNames = []string{"fib", "auth_copy"}
 	case "fib2":
 		serviceNames = []string{"corevm", "auth_copy"}
-		//log.EnableModule(log.StateDBMonitoring) //enable here to avoid concurrent map
 	case "game_of_life":
 		if *manifest {
 			serviceNames = []string{"game_of_life_manifest", "auth_copy"}
@@ -269,7 +275,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 
 		nodes, err := SetUpNodes(JCEMode, numNodes, basePort)
 		if err != nil {
-			log.Crit(module, "Error setting up nodes", "err", err)
+			log.Crit(log.Node, "Error setting up nodes", "err", err)
 			return
 		}
 
@@ -288,7 +294,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 			}
 			fmt.Printf("**************************\n")
 		}
-		log.Info(module, "JAMTEST", "jam", jam, "targetN", targetN)
+		log.Info(log.Node, "JAMTEST", "jam", jam, "targetN", targetN)
 
 		// Run the JCE updater (it will run indefinitely).
 		initialJCE := uint32(11)
@@ -320,13 +326,13 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		bNode = nodes[1]
 	}
 
-	//log.EnableModule(log.FirstGuarantorOrAuditor)
+	//log.Enablelog.Node(log.FirstGuarantorOrAuditor)
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule(log.GeneralAuthoring)
 
 	bootstrapCode, err := types.ReadCodeWithMetadata(statedb.BootstrapServiceFile, "bootstrap")
 	if err != nil {
-		log.Error(module, "ReadCodeWithMetadata", "err", err)
+		log.Error(log.Node, "ReadCodeWithMetadata", "err", err)
 		return
 	}
 	bootstrapService := uint32(statedb.BootstrapServiceCode)
@@ -339,7 +345,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		t.Fatalf("GetServices %v", err)
 	}
 
-	log.Info(module, "Waiting for the first block to be ready...")
+	log.Info(log.Node, "Waiting for the first block to be ready...")
 	time.Sleep(defaultDelay) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
 
 	var jceManager *ManualJCEManager
@@ -401,13 +407,13 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 
 		err = bNode.SubmitAndWaitForPreimage(ctx, new_service_idx, service.Code)
 		if err != nil {
-			log.Error(module, "SubmitAndWaitForPreimage", "err", err)
+			log.Error(log.Node, "SubmitAndWaitForPreimage", "err", err)
 		}
-		log.Info(module, "----- NEW SERVICE", "service", serviceName, "service_idx", new_service_idx)
+		log.Info(log.Node, "----- NEW SERVICE", "service", serviceName, "service_idx", new_service_idx)
 
 	}
 	if len(testServices) > 0 {
-		log.Info(module, "testServices Loaded", "jam", jam, "testServices", testServices, "targetN", targetN)
+		log.Info(log.Node, "testServices Loaded", "jam", jam, "testServices", testServices, "targetN", targetN)
 	}
 
 	if isDisputeMode {
@@ -466,7 +472,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 }
 
 func auth_copy(n1 JNode, testServices map[string]*types.TestService, targetN int) {
-	log.Info(module, "FIB START", "targetN", targetN)
+	log.Info(log.Node, "FIB START", "targetN", targetN)
 	service_authcopy := testServices["auth_copy"]
 
 	for fibN := 1; fibN <= targetN; fibN++ {
@@ -502,7 +508,7 @@ func auth_copy(n1 JNode, testServices map[string]*types.TestService, targetN int
 		if err != nil {
 			fmt.Printf("SubmitAndWaitForWorkPackage ERR %v\n", err)
 		} else {
-			log.Info(module, "Authcopy Success", "N", fibN)
+			log.Info(log.Node, "Authcopy Success", "N", fibN)
 		}
 	}
 }

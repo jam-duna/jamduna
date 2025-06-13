@@ -37,7 +37,7 @@ func (p *Peer) GetMultiBlocks(latest_genesis_headerhash common.Hash, ctx context
 		if len(blocksRaw) < maxBlockCount {
 			break
 		}
-		log.Info(debugBlock, "GetMultiBlocks", "blocksRaw", len(blocksRaw), "currentHash", currentHash)
+		log.Info(log.B, "GetMultiBlocks", "blocksRaw", len(blocksRaw), "currentHash", currentHash)
 		currentHash = blocksRaw[len(blocksRaw)-1].Header.Hash()
 	}
 	return blocks, nil

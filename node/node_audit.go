@@ -155,12 +155,12 @@ func (n *Node) cleanWaitingAJ(headerHash common.Hash, workReports []types.WorkRe
 	waitingJudgements := n.waitingJudgements
 	if waitingAnnouncements != nil {
 		for _, a := range waitingAnnouncements[headerHash] {
-			log.Trace(debugAudit, "sending waitingAnnouncements AGAIN", "n", n.String(), "a", a.Hash())
+			log.Trace(log.Audit, "sending waitingAnnouncements AGAIN", "n", n.String(), "a", a.Hash())
 			select {
 			case n.announcementsCh <- a:
-				log.Debug(debugAudit, "cleanWaitingAJ: sent waiting announcement", "n", n.String(), "validator", a.ValidatorIndex)
+				log.Debug(log.Audit, "cleanWaitingAJ: sent waiting announcement", "n", n.String(), "validator", a.ValidatorIndex)
 			default:
-				log.Warn(debugAudit, "cleanWaitingAJ: announcementsCh full, dropping announcement",
+				log.Warn(log.Audit, "cleanWaitingAJ: announcementsCh full, dropping announcement",
 					"n", n.String(), "hash", a.Hash().String_short())
 			}
 		}
@@ -169,12 +169,12 @@ func (n *Node) cleanWaitingAJ(headerHash common.Hash, workReports []types.WorkRe
 	if waitingJudgements != nil {
 		for _, w := range workReports {
 			for _, j := range waitingJudgements[w.Hash()] {
-				log.Trace(debugAudit, "sending waitingJudgements AGAIN", "n", n.String(), "j", j.Hash())
+				log.Trace(log.Audit, "sending waitingJudgements AGAIN", "n", n.String(), "j", j.Hash())
 				select {
 				case n.judgementsCh <- j:
-					log.Debug(debugAudit, "cleanWaitingAJ: sent waiting judgement", "n", n.String(), "validator", j.Validator)
+					log.Debug(log.Audit, "cleanWaitingAJ: sent waiting judgement", "n", n.String(), "validator", j.Validator)
 				default:
-					log.Warn(debugAudit, "cleanWaitingAJ: judgementsCh full, dropping judgement",
+					log.Warn(log.Audit, "cleanWaitingAJ: judgementsCh full, dropping judgement",
 						"n", n.String(), "hash", j.Hash().String_short())
 				}
 			}
@@ -209,50 +209,50 @@ func (n *Node) runAuditAnnouncementJudgement() {
 	for {
 		select {
 		case announcement := <-n.announcementsCh:
-			log.Debug(debugAudit, "runAuditAnnouncementJudgement: announcement", "n", n.String(), "validator", announcement.ValidatorIndex)
+			log.Debug(log.Audit, "runAuditAnnouncementJudgement: announcement", "n", n.String(), "validator", announcement.ValidatorIndex)
 			err := n.processAnnouncement(announcement)
 			if err != nil {
-				log.Warn(debugAudit, "processAnnouncement", "err", err)
+				log.Warn(log.Audit, "processAnnouncement", "err", err)
 			}
 		case judgement := <-n.judgementsCh:
-			log.Debug(debugAudit, "runAuditAnnouncementJudgement: judgement", "n", n.String(), "validator", judgement.Validator)
+			log.Debug(log.Audit, "runAuditAnnouncementJudgement: judgement", "n", n.String(), "validator", judgement.Validator)
 			err := n.processJudgement(judgement)
 			if err != nil {
-				log.Warn(debugAudit, "processJudgement", "err", err)
+				log.Warn(log.Audit, "processJudgement", "err", err)
 			}
 		}
 	}
 }
 
 func (n *Node) runAudit() {
-	// log.EnableModule(debugAudit)
+	// log.EnableModule(log.Audit)
 	for {
 		select {
 		case audit_statedb := <-n.auditingCh:
 			go func(audit_statedb *statedb.StateDB) {
 				headerHash := audit_statedb.GetHeaderHash()
 
-				log.Debug(debugAudit, "runAudit:start auditing block", "n", n.String(), "ts", audit_statedb.Block.TimeSlot(), "audit_statedb.headerHash", audit_statedb.HeaderHash, "headerHash", headerHash)
+				log.Debug(log.Audit, "runAudit:start auditing block", "n", n.String(), "ts", audit_statedb.Block.TimeSlot(), "audit_statedb.headerHash", audit_statedb.HeaderHash, "headerHash", headerHash)
 				err := n.addAuditingStateDB(audit_statedb)
 				if err != nil {
-					log.Error(debugAudit, "addAuditingStateDB", "err", err)
+					log.Error(log.Audit, "addAuditingStateDB", "err", err)
 				}
 				n.initAudit(headerHash)
 				n.cleanWaitingAJ(audit_statedb.HeaderHash, audit_statedb.AvailableWorkReport)
 				n.updateKnownWorkReportMappingFromWorkReports(audit_statedb.AvailableWorkReport, headerHash)
 				err = n.Audit(headerHash)
 				if err != nil {
-					log.Error(debugAudit, "Audit Failed", "err", err)
+					log.Error(log.Audit, "Audit Failed", "err", err)
 				} else {
 					// if the block is audited, we can start grandpa
-					log.Debug(debugBlock, "Audit Done", "n", n.String(), "headerHash", headerHash, "audit_statedb.timeslot", audit_statedb.GetTimeslot())
+					log.Debug(log.B, "Audit Done", "n", n.String(), "headerHash", headerHash, "audit_statedb.timeslot", audit_statedb.GetTimeslot())
 					// sourabh don't disable until it's stable I need this to tell if the audit is running
 					newBlock := audit_statedb.Block.Copy()
 					blockNode, ok := n.block_tree.GetBlockNode(newBlock.Header.HeaderHash())
 					if ok {
 						blockNode.Audited = true // for best block
 					} else {
-						log.Error(debugAudit, "runAudit: blockNode not found", "n", n.String(), "headerHash", headerHash)
+						log.Error(log.Audit, "runAudit: blockNode not found", "n", n.String(), "headerHash", headerHash)
 					}
 					if newBlock.GetParentHeaderHash() == (genesisBlockHash) && Grandpa {
 						n.StartGrandpa(newBlock.Copy())
@@ -284,10 +284,10 @@ func (n *Node) Audit(headerHash common.Hash) error {
 	if tranche == 0 {
 		err := n.ProcessAudit(tranche, headerHash)
 		if err != nil {
-			log.Error(debugAudit, "ProcessAudit failed", "err", err)
+			log.Error(log.Audit, "ProcessAudit failed", "err", err)
 		}
 	} else {
-		log.Debug(debugAudit, "Audit tranche > 0", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche", tranche)
+		log.Debug(log.Audit, "Audit tranche > 0", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche", tranche)
 	}
 	done := false
 	for !done {
@@ -304,7 +304,7 @@ func (n *Node) Audit(headerHash common.Hash) error {
 			start_point := n.jce_timestamp[refreshedJCE]
 			n.jce_timestamp_mutex.Unlock()
 			tranche := auditing_statedb.GetTranche(start_point)
-			// log.Debug(debugAudit, "Audit tranche", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche", tranche)
+			// log.Debug(log.Audit, "Audit tranche", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche", tranche)
 			// use tmp to check if it's a new tranche
 			if tranche != tmp && tranche != 0 {
 
@@ -316,14 +316,14 @@ func (n *Node) Audit(headerHash common.Hash) error {
 				}
 				if isAudited {
 					// wait for everyone to finish auditing
-					log.Trace(debugAudit, "Tranche audited block", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche-1", tranche-1,
+					log.Trace(log.Audit, "Tranche audited block", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche-1", tranche-1,
 						"headerhash", auditing_statedb.Block.Header.Hash().String_short(),
 						"author", auditing_statedb.Block.Header.AuthorIndex,
 					)
 					done = true
 					break
 				} else {
-					log.Debug(debugAudit, "Tranche not audited block", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche", tranche,
+					log.Debug(log.Audit, "Tranche not audited block", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche", tranche,
 						"blockhash", auditing_statedb.Block.Hash())
 				}
 
@@ -359,7 +359,7 @@ func (n *Node) ProcessAudit(tranche uint32, headerHash common.Hash) error {
 	if err != nil {
 		return err
 	}
-	log.Debug(debugAudit, "Tranche, start audit", "n", n.String(), "slot", auditing_statedb.Block.TimeSlot(), "tranche", tranche)
+	log.Debug(log.Audit, "Tranche, start audit", "n", n.String(), "slot", auditing_statedb.Block.TimeSlot(), "tranche", tranche)
 	// normal behavior
 	switch n.AuditNodeType {
 	case "normal":
@@ -433,7 +433,7 @@ func (n *Node) ProcessAudit(tranche uint32, headerHash common.Hash) error {
 		if err != nil {
 			return err
 		}
-		log.Debug(debugAudit, "selected reports", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "len(reports)", len(reports))
+		log.Debug(log.Audit, "selected reports", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "len(reports)", len(reports))
 		judges, err := n.Judge(headerHash, reports)
 		if err != nil {
 			return err
@@ -442,11 +442,11 @@ func (n *Node) ProcessAudit(tranche uint32, headerHash common.Hash) error {
 		}
 	}
 	if len(reports) == 0 {
-		log.Debug(debugAudit, "Tranche, no audit reports", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche", tranche)
+		log.Debug(log.Audit, "Tranche, no audit reports", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche", tranche)
 	} else {
-		log.Debug(debugAudit, "Tranche, audit reports", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche", tranche)
+		log.Debug(log.Audit, "Tranche, audit reports", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "tranche", tranche)
 		for _, w := range reports {
-			log.Debug(debugAudit, "selected work report, from core", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "wph", w.WorkReport.Hash(), "c", w.WorkReport.CoreIndex)
+			log.Debug(log.Audit, "selected work report, from core", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "wph", w.WorkReport.Hash(), "c", w.WorkReport.CoreIndex)
 		}
 	}
 	// audit the work report
@@ -470,7 +470,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 		a0, s0, err := s.Select_a0(banderSnatchSecret)
 
 		for _, w := range a0 {
-			log.Trace(debugAudit, "n", n.String(), "ts", auditing_statedb.GetTimeslot(), "wph", w.WorkReport.Hash())
+			log.Trace(log.Audit, "n", n.String(), "ts", auditing_statedb.GetTimeslot(), "wph", w.WorkReport.Hash())
 		}
 		if len(a0) == 0 {
 			return nil, nil
@@ -485,7 +485,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 			return nil, err
 		} else if hasmade {
 			// fmt.Printf("%s [T:%d] has made announcement %v\n", n.String(), auditing_statedb.GetTimeslot(), announcement.Hash())
-			log.Warn(debugAudit, "n", n.String(), "ts", auditing_statedb.GetTimeslot(), "has made announcement", "hash", announcement.Hash().String_short())
+			log.Warn(log.Audit, "n", n.String(), "ts", auditing_statedb.GetTimeslot(), "has made announcement", "hash", announcement.Hash().String_short())
 			return a0, nil
 		} else if !hasmade {
 			err = nil
@@ -509,7 +509,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 				panic(fmt.Errorf("tranche0 evidence is empty in Announce"))
 			}
 			for _, w := range a0 {
-				log.Trace(debugAudit, "broadcasting announcement", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "wph", w.WorkReport.Hash())
+				log.Trace(log.Audit, "broadcasting announcement", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "wph", w.WorkReport.Hash())
 			}
 			go n.broadcast(context.TODO(), announcementWithProof)
 		}
@@ -533,7 +533,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 	case n.announcementsCh <- announcement:
 		// sent successfully
 	default:
-		log.Warn(debugAudit, "announcementsCh full")
+		log.Warn(log.Audit, "announcementsCh full")
 	}
 
 	if err != nil {
@@ -577,7 +577,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 			}
 		}
 		if len(evidenceSn) == 0 {
-			log.Warn(debugAudit, "tranche evidence is empty in Announce")
+			log.Warn(log.Audit, "tranche evidence is empty in Announce")
 			return nil, nil
 		}
 		announcementWithProof.EvidenceTrancheN = evidenceSn
@@ -696,11 +696,11 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	// IMPORTANT: within reconstructPackageBundleSegments is a call to VerifyBundle
 	workPackageBundle, err := n.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength, workReport.SegmentRootLookup, coreIndex, spec.ExportedSegmentLength)
 	if err != nil {
-		log.Error(debugAudit, "FetchWorkPackageBundle:reconstructPackageBundleSegments", "err", err)
+		log.Error(log.Audit, "FetchWorkPackageBundle:reconstructPackageBundleSegments", "err", err)
 		return
 	}
 	if workPackageBundle.PackageHash() != workPackageHash {
-		log.Error(debugAudit, "auditWorkReport:FetchWorkPackageBundle package mismatch")
+		log.Error(log.Audit, "auditWorkReport:FetchWorkPackageBundle package mismatch")
 		return
 	}
 
@@ -713,26 +713,26 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	case n.workReportsCh <- workReport:
 		// successfully sent
 	default:
-		log.Warn(debugAudit, "auditWorkReport: workReportsCh full, dropping workReport", "workReport", workReport.Hash())
+		log.Warn(log.Audit, "auditWorkReport: workReportsCh full, dropping workReport", "workReport", workReport.Hash())
 	}
 
 	auditPass := false
 	if spec.ErasureRoot == wr.AvailabilitySpec.ErasureRoot {
 		auditPass = true
-		log.Debug(debugAudit, "auditWorkReport:executeWorkPackageBundle PASS", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash(), "pvmElapsed", pvmElapsed)
+		log.Debug(log.Audit, "auditWorkReport:executeWorkPackageBundle PASS", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash(), "pvmElapsed", pvmElapsed)
 	} else {
-		log.Warn(debugAudit, "auditWorkReport:executeWorkPackageBundle FAIL", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash(), "pvmElapsed", pvmElapsed)
+		log.Warn(log.Audit, "auditWorkReport:executeWorkPackageBundle FAIL", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash(), "pvmElapsed", pvmElapsed)
 	}
 
 	judgement, err = n.MakeJudgement(workReport, auditPass)
 	elapse := common.ElapsedStr(start)
-	log.Debug(debugBlock, "auditWorkReport", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash(), "start time", start, "pvmElapsed", pvmElapsed, "total judge elapse", elapse)
+	log.Debug(log.B, "auditWorkReport", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash(), "start time", start, "pvmElapsed", pvmElapsed, "total judge elapse", elapse)
 	return
 }
 
 func (n *Node) DistributeJudgements(judges []types.Judgement, headerHash common.Hash) {
 	for _, j := range judges {
-		log.Trace(debugAudit, "distributing judgement", "n", n.String(), "wph", j.WorkReportHash)
+		log.Trace(log.Audit, "distributing judgement", "n", n.String(), "wph", j.WorkReportHash)
 
 		go n.broadcast(context.TODO(), j)
 
@@ -740,7 +740,7 @@ func (n *Node) DistributeJudgements(judges []types.Judgement, headerHash common.
 		case n.judgementsCh <- j:
 			// success
 		default:
-			log.Warn(debugAudit, "DistributeJudgements: judgementsCh full, dropping judgement",
+			log.Warn(log.Audit, "DistributeJudgements: judgementsCh full, dropping judgement",
 				"n", n.String(),
 				"workReportHash", j.WorkReportHash.String_short(),
 				"validator", j.Validator)
@@ -767,7 +767,7 @@ func (n *Node) CheckBlockAudited(headerHash common.Hash, tranche uint32) (bool, 
 	isBlockAudited := auditing_statedb.IsBlockAudited(announcementBucket, judgment_bucket)
 
 	for _, w := range auditing_statedb.AvailableWorkReport {
-		log.Debug(debugBlock, "CheckBlockAudited", "n", n.String(),
+		log.Debug(log.B, "CheckBlockAudited", "n", n.String(),
 			"ts", auditing_statedb.Block.TimeSlot(),
 			"len announcementBucket", announcementBucket.GetLen(w.Hash()),
 			"len judgment_bucket", judgment_bucket.GetLen(w.Hash()),
@@ -902,13 +902,13 @@ func (n *Node) processAnnouncement(announcement types.Announcement) error {
 			n.waitingAnnouncements = make(map[common.Hash][]types.Announcement)
 		}
 		n.waitingAnnouncements[headerHash] = append(n.waitingAnnouncements[headerHash], announcement)
-		log.Debug(debugAudit, "processAnnouncement waitingAnnouncements", "n", n.String(), "ts", s.Block.TimeSlot(), "validator", index, "headerHash", headerHash.String_short())
+		log.Debug(log.Audit, "processAnnouncement waitingAnnouncements", "n", n.String(), "ts", s.Block.TimeSlot(), "validator", index, "headerHash", headerHash.String_short())
 		return nil
 	}
 
-	log.Debug(debugAudit, "processAnnouncement", "n", n.String(), "ts", s.Block.TimeSlot(), "validator", index, "headerHash", headerHash.String_short())
+	log.Debug(log.Audit, "processAnnouncement", "n", n.String(), "ts", s.Block.TimeSlot(), "validator", index, "headerHash", headerHash.String_short())
 	if err := announcement.Verify(pubkey); err != nil {
-		log.Warn(debugAudit, "processAnnouncement: announcement.Verify failed", "n", n.String(), "ts", s.Block.TimeSlot(), "validator", index, "headerHash", headerHash.String_short())
+		log.Warn(log.Audit, "processAnnouncement: announcement.Verify failed", "n", n.String(), "ts", s.Block.TimeSlot(), "validator", index, "headerHash", headerHash.String_short())
 		return err
 	}
 
@@ -949,11 +949,11 @@ func (n *Node) processJudgement(judgement types.Judgement) error {
 		if n.waitingJudgements == nil {
 			n.waitingJudgements = make(map[common.Hash][]types.Judgement)
 		}
-		log.Debug(debugAudit, "processJudgement waitingJudgements", "n", n.String(), "validator", judgement.Validator, "judgement.WorkReportHash", judgement.WorkReportHash.String_short())
+		log.Debug(log.Audit, "processJudgement waitingJudgements", "n", n.String(), "validator", judgement.Validator, "judgement.WorkReportHash", judgement.WorkReportHash.String_short())
 		n.waitingJudgements[judgement.WorkReportHash] = append(n.waitingJudgements[judgement.WorkReportHash], judgement)
 		return nil
 	}
-	log.Debug(debugAudit, "processJudgement", "n", n.String(), "validator", judgement.Validator, "headerHash", headerHash.String_short())
+	log.Debug(log.Audit, "processJudgement", "n", n.String(), "validator", judgement.Validator, "headerHash", headerHash.String_short())
 	auditing_statedb, err := n.getAuditingStateDB(headerHash)
 	if err != nil {
 		return err

@@ -22,14 +22,14 @@ func (j *JamState) ProcessGuarantees(ctx context.Context, guarantees []types.Gua
 
 		// skip invalid core indices
 		if idx := g.Report.CoreIndex; idx >= types.TotalCores {
-			log.Warn(debugG, "invalid core index", "core", idx)
+			log.Warn(log.G, "invalid core index", "core", idx)
 			continue
 		}
 
 		// assign first report to core
 		if j.AvailabilityAssignments[int(g.Report.CoreIndex)] == nil {
 			j.SetRhoByWorkReport(uint16(g.Report.CoreIndex), g.Report, j.SafroleState.GetTimeSlot())
-			log.Trace(debugG, "assigned core", "core", g.Report.CoreIndex)
+			log.Trace(log.G, "assigned core", "core", g.Report.CoreIndex)
 		}
 
 		// cancellation check
@@ -57,7 +57,7 @@ func AcceptableGuaranteeError(err error) bool {
 }
 
 // VerifyGuaranteeBasic checks signatures, core index, assignment, timeouts, gas, and code hash.
-func (s *StateDB) VerifyGuaranteeBasic(g types.Guarantee) error {
+func (s *StateDB) VerifyGuaranteeBasic(g types.Guarantee, targetJCE uint32) error {
 	// common validations
 	// if err := s.checkServicesExist(g); err != nil {
 	// 	return err
@@ -79,12 +79,12 @@ func (s *StateDB) VerifyGuaranteeBasic(g types.Guarantee) error {
 	if err := js.checkReportPendingOnCore(g); err != nil {
 		return err
 	}
-	if s.Block != nil {
+	if targetJCE > 0 {
 		// assignment to core
-		if err := s.checkAssignment(g, s.Block.TimeSlot()); err != nil {
+		if err := s.checkAssignment(g, targetJCE); err != nil {
 			return err
 		}
-		if err := js.checkReportTimeOut(g, g.Slot); err != nil {
+		if err := js.checkReportTimeOut(g, targetJCE); err != nil {
 			return err
 		}
 	}
@@ -108,12 +108,11 @@ func (s *StateDB) VerifyGuaranteeBasic(g types.Guarantee) error {
 // v0.5 eq 11.25 - The signing validators must be assigned to the core in G or G*
 func (s *StateDB) checkAssignment(g types.Guarantee, ts uint32) error {
 	// old reports aren’t allowed
-	/* TEMPORARILY DISABLED
 	diff := int64(ts) - int64(g.Slot)
 	if diff > int64(ts%types.ValidatorCoreRotationPeriod+types.ValidatorCoreRotationPeriod) {
 		return jamerrors.ErrGReportEpochBeforeLast
 	}
-	*/
+
 	// choose prev vs curr assignment based on period
 	_, assignments := s.CalculateAssignments(g.Slot)
 	lookup := make(map[uint16]uint16, len(assignments))
@@ -124,7 +123,7 @@ func (s *StateDB) checkAssignment(g types.Guarantee, ts uint32) error {
 	for _, sig := range g.Signatures {
 		core, ok := lookup[sig.ValidatorIndex]
 		if !ok || core != uint16(g.Report.CoreIndex) {
-			log.Warn(debugG, "checkAssignment: G14-ErrGWrongAssignment",
+			log.Warn(log.G, "checkAssignment: G14-ErrGWrongAssignment",
 				"validator", sig.ValidatorIndex,
 				"slot", g.Slot,
 				"expectedCore", g.Report.CoreIndex,
@@ -169,6 +168,10 @@ func CheckSortedSignatures(g types.Guarantee) error {
 
 // v0.5 eq 11.28 - check pending report
 func (j *JamState) checkReportTimeOut(g types.Guarantee, ts uint32) error {
+	if ts == 0 {
+		// nothing to check
+		return nil
+	}
 	if g.Slot > ts {
 		return jamerrors.ErrGFutureReportSlot
 	}
@@ -178,9 +181,16 @@ func (j *JamState) checkReportTimeOut(g types.Guarantee, ts uint32) error {
 	timeoutbool := ts >= (j.AvailabilityAssignments[int(g.Report.CoreIndex)].Timeslot)+uint32(types.UnavailableWorkReplacementPeriod)
 	if timeoutbool {
 		return nil
-	} else {
-		return jamerrors.ErrGCoreEngaged
 	}
+
+	log.Warn(log.G, "checkReportTimeOut: G14-ErrGCoreEngaged",
+		"core", g.Report.CoreIndex,
+		"ts", ts,
+		"timeslot", j.AvailabilityAssignments[int(g.Report.CoreIndex)].Timeslot,
+		"currentTimeslot", ts,
+		"unavailablePeriod", types.UnavailableWorkReplacementPeriod)
+	// if the core is engaged, we return an error
+	return jamerrors.ErrGCoreEngaged
 }
 
 // v0.5 eq 11.28
@@ -214,12 +224,12 @@ func (j *JamState) CheckInvalidCoreIndex() {
 	// Core 0 : receiving megatron report; Core 1 : receiving fib+trib report
 	if problem {
 		for i, rho := range j.AvailabilityAssignments {
-			log.Trace(debugG, "CheckInvalidCoreIndex", "i", i, "rho.WorkReportHash", rho.WorkReport.Hash(),
+			log.Trace(log.G, "CheckInvalidCoreIndex", "i", i, "rho.WorkReportHash", rho.WorkReport.Hash(),
 				"CoreIndex", rho.WorkReport.CoreIndex, "WorkReport", rho.WorkReport.String())
 		}
-		log.Crit(debugG, "CheckInvalidCoreIndex: FAILURE")
+		log.Crit(log.G, "CheckInvalidCoreIndex: FAILURE")
 	}
-	log.Trace(debugG, "CheckInvalidCoreIndex: success")
+	log.Trace(log.G, "CheckInvalidCoreIndex: success")
 
 }
 
@@ -231,7 +241,7 @@ func (s *StateDB) checkServicesExist(g types.Guarantee) error {
 			return err
 		}
 		if !ok {
-			log.Warn(debugG, "checkServicesExist: serviceID not found", "serviceID", result.ServiceID, "slot", s.GetTimeslot())
+			log.Warn(log.G, "checkServicesExist: serviceID not found", "serviceID", result.ServiceID, "slot", s.GetTimeslot())
 			return jamerrors.ErrGBadServiceID
 		}
 	}
@@ -244,24 +254,28 @@ func (s *StateDB) checkGas(g types.Guarantee) error {
 	for _, results := range g.Report.Results {
 		sum_rg += results.Gas
 	}
-
+	// check if gas is within limits
+	if sum_rg > types.AccumulationGasAllocation {
+		return jamerrors.ErrGWorkReportGasTooHigh
+	}
 	// current gas allocation is unlimited
-	if sum_rg <= types.AccumulationGasAllocation {
-		for _, results := range g.Report.Results {
-			serviceID := results.ServiceID
-			if service, ok, err := s.GetService(serviceID); ok && err == nil {
-				gas_limitG := service.GasLimitG
-				if results.Gas >= gas_limitG {
-					return nil
-				} else {
-					log.Warn(module, "ErrGServiceItemTooLow", "service", service, "results.Gas", results.Gas, "service.GasLimitG", service.GasLimitG)
-					return jamerrors.ErrGServiceItemTooLow
-				}
-			}
+	for _, results := range g.Report.Results {
+		serviceID := results.ServiceID
+		service, ok, err := s.GetService(serviceID)
+		if err != nil {
+			log.Warn(log.SDB, "checkGas: GetService Error", "serviceID", serviceID, "err", err)
+			continue
+		}
+		if !ok {
+			log.Warn(log.SDB, "checkGas: serviceID not found", "serviceID", serviceID, "slot", s.GetTimeslot())
+			continue
+		}
+		if results.Gas < service.GasLimitG {
+			log.Warn(log.SDB, "ErrGServiceItemTooLow", "service", service, "results.Gas", results.Gas, "service.GasLimitG", service.GasLimitG)
+			return jamerrors.ErrGServiceItemTooLow
 		}
 	}
-
-	return jamerrors.ErrGWorkReportGasTooHigh
+	return nil
 }
 
 // v0.5 eq 11.31
@@ -307,15 +321,15 @@ func (s *StateDB) checkRecentBlock(g types.Guarantee) error {
 	}
 
 	if !anchor {
-		log.Warn(debugG, "checkRecentBlock:anchor not in recent blocks", "refine.Anchor", refine.Anchor)
+		log.Warn(log.G, "checkRecentBlock:anchor not in recent blocks", "refine.Anchor", refine.Anchor)
 		return jamerrors.ErrGAnchorNotRecent
 	}
 	if !stateroot {
-		log.Warn(debugG, "checkRecentBlock:state root not in recent blocks", "refine.StateRoot", refine.StateRoot)
+		log.Warn(log.G, "checkRecentBlock:state root not in recent blocks", "refine.StateRoot", refine.StateRoot)
 		return jamerrors.ErrGBadStateRoot
 	}
 	if !beefyroot {
-		log.Warn(debugG, "checkRecentBlock:beefy root not in recent blocks", "refine.BeefyRoot", refine.BeefyRoot)
+		log.Warn(log.G, "checkRecentBlock:beefy root not in recent blocks", "refine.BeefyRoot", refine.BeefyRoot)
 		return jamerrors.ErrGBadBeefyMMRRoot
 	}
 	return nil
@@ -467,7 +481,7 @@ func (s *StateDB) checkPrereq(g types.Guarantee, EGs []types.Guarantee) error {
 			}
 		}
 		if !exists {
-			log.Error(debugG, "checkPrereq", "missing hash", hash.String())
+			log.Error(log.G, "checkPrereq", "missing hash", hash.String())
 			return jamerrors.ErrGDependencyMissing
 		}
 	}
@@ -553,10 +567,12 @@ func (s *StateDB) checkCodeHash(g types.Guarantee) error {
 			return err
 		}
 		if !ok {
-			return jamerrors.ErrGBadCodeHash
+			log.Warn(log.G, "checkCodeHash: serviceID not found", "serviceID", serviceID, "slot", s.GetTimeslot())
+			return nil // jamerrors.ErrGBadCodeHash
 		}
 		if codeHash != service.CodeHash {
-			return jamerrors.ErrGBadCodeHash
+			log.Warn(log.G, "checkCodeHash: codeHash != service.CodeHash", "serviceID", serviceID, "codeHash", codeHash, "service.CodeHash", service.CodeHash)
+			return nil // jamerrors.ErrGBadCodeHash
 		}
 	}
 	return nil

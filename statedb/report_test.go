@@ -130,7 +130,7 @@ func TestReportParsing(t *testing.T) {
 			}
 			// marshal the struct to JSON
 			expectedJson, err := json.MarshalIndent(tc.expectedType, "", "  ")
-			log.Trace(debugG, "Unmarshaled", "jsonPath", jsonPath, "Expected", "expected", expectedJson)
+			log.Trace(log.G, "Unmarshaled", "jsonPath", jsonPath, "Expected", "expected", expectedJson)
 			// Encode the struct to bytes
 			encodedBytes, err := types.Encode(tc.expectedType)
 			if err != nil {
@@ -148,7 +148,7 @@ func TestReportParsing(t *testing.T) {
 				t.Fatalf("failed to marshal JSON data: %v", err)
 			}
 			fmt.Printf("encodedJSON=%s\n", encodedJSON)
-			log.Trace(debugG, "TestReportParsing", "Encoded JSON", encodedJSON)
+			log.Trace(log.G, "TestReportParsing", "Encoded JSON", encodedJSON)
 
 			// Unmarshal again to compare
 			var decodedStruct2 TestReport

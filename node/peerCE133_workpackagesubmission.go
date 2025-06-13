@@ -91,15 +91,15 @@ func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPack
 	code := uint8(CE133_WorkPackageSubmission)
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
-		log.Error(module, "SendWorkPackageSubmission0", "err", err)
+		log.Error(log.Node, "SendWorkPackageSubmission0", "err", err)
 		return err
 	}
 	slot := common.GetWallClockJCE(fudgeFactorJCE)
-	log.Debug(debugR, "CE133-SendWorkPackageSubmission OUTGOING", "NODE", p.node.id, "peerID", p.PeerID, "coreIndex", core_idx, "slot", slot, "wp_hash", pkg.Hash())
+	log.Debug(log.R, "CE133-SendWorkPackageSubmission OUTGOING", "NODE", p.node.id, "peerID", p.PeerID, "coreIndex", core_idx, "slot", slot, "wp_hash", pkg.Hash())
 	//--> Core Index ++ Work Package
 	err = sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code)
 	if err != nil {
-		log.Error(module, "SendWorkPackageSubmission1", "err", err)
+		log.Error(log.Node, "SendWorkPackageSubmission1", "err", err)
 		stream.Close()
 		return err
 	}
@@ -112,7 +112,7 @@ func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPack
 		extrinsicsBytes = extrinsics.Bytes()
 	}
 	if err = sendQuicBytes(ctx, stream, extrinsicsBytes, p.PeerID, code); err != nil {
-		log.Error(module, "SendWorkPackageSubmission Encode", "err", err)
+		log.Error(log.Node, "SendWorkPackageSubmission Encode", "err", err)
 		stream.Close()
 		return
 	}
@@ -127,21 +127,21 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
 	if err != nil {
-		log.Error(debugG, "onWorkPackageSubmission:FromBytes", "err", err)
+		log.Error(log.G, "onWorkPackageSubmission:FromBytes", "err", err)
 		return fmt.Errorf("onWorkPackageSubmission: decode failed: %w", err)
 	}
 	// --> [Extrinsic] (Message length should equal sum of extrinsic data lengths)
 	// Read message length (4 bytes)
 	msgLenBytes := make([]byte, 4)
 	if _, err := io.ReadFull(stream, msgLenBytes); err != nil {
-		log.Trace(module, "DispatchIncomingQUICStream - length prefix", "err", err)
+		log.Trace(log.Node, "DispatchIncomingQUICStream - length prefix", "err", err)
 		_ = stream.Close()
 		return err
 	}
 	msgLen := binary.LittleEndian.Uint32(msgLenBytes)
 	// Verify that we are in the the core based on the WALL CLOCK TIME
 	slot := common.GetWallClockJCE(fudgeFactorJCE)
-	log.Debug(debugR, "CE133-onWorkPackageSubmission INCOMING", "NODE", n.id, "peer", peerID, "workpackage", newReq.WorkPackage.Hash(), "slot", slot)
+	log.Debug(log.R, "CE133-onWorkPackageSubmission INCOMING", "NODE", n.id, "peer", peerID, "workpackage", newReq.WorkPackage.Hash(), "slot", slot)
 	prevAssignments, assignments := n.statedb.CalculateAssignments(slot)
 	inSet := false
 	for _, assignment := range assignments {
@@ -166,7 +166,7 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 	// Read message body, which is the encoded extrinsics
 	extrinsicsBytes := make([]byte, msgLen)
 	if _, err := io.ReadFull(stream, extrinsicsBytes); err != nil {
-		log.Error(module, "onWorkPackageSubmission4", "err", err)
+		log.Error(log.Node, "onWorkPackageSubmission4", "err", err)
 		stream.CancelRead(ErrCECode)
 		_ = stream.Close()
 		return err
@@ -174,12 +174,12 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 	// map extrinsicsBytes to extrinsics
 	ext, _, err := types.Decode(extrinsicsBytes, reflect.TypeOf(types.ExtrinsicsBlobs{}))
 	if err != nil {
-		log.Error(module, "onWorkPackageSubmission4a", "err", err)
+		log.Error(log.Node, "onWorkPackageSubmission4a", "err", err)
 		return fmt.Errorf("error in decoding data: %w", err)
 	}
 	extrinsics := ext.(types.ExtrinsicsBlobs)
 	if err != nil {
-		log.Error(module, "onWorkPackageSubmission4b", "err", err)
+		log.Error(log.Node, "onWorkPackageSubmission4b", "err", err)
 		return fmt.Errorf("error in decoding data: %w", err)
 	}
 

@@ -54,14 +54,14 @@ func (n *Node) GenerateTickets(jce uint32) {
 	currEpoch, _ := sf.EpochAndPhase(jce)
 	usedEntropy := n.statedb.GetSafrole().Entropy[2]
 	if n.statedb.GetSafrole().IsTicketSubmissionClosed(jce) {
-		log.Trace(debugT, "GenerateTickets: Using Entropy 1 for Node to generate tickets", "n", n.id)
+		log.Trace(log.Node, "GenerateTickets: Using Entropy 1 for Node to generate tickets", "n", n.id)
 		copy(usedEntropy[:], n.statedb.GetSafrole().Entropy[1][:])
 	}
 	n.ticketsMutex.Lock()
 	l := len(n.selfTickets[usedEntropy])
 	n.ticketsMutex.Unlock()
 	if l == types.TicketEntriesPerValidator {
-		log.Trace(debugT, "GenerateTickets:Node has generated tickets", "n", n.id, "l", types.TicketEntriesPerValidator, "currEpoch", currEpoch, "actualEpoch", actualEpoch, "usedEntropy", usedEntropy)
+		log.Trace(log.Node, "GenerateTickets:Node has generated tickets", "n", n.id, "l", types.TicketEntriesPerValidator, "currEpoch", currEpoch, "actualEpoch", actualEpoch, "usedEntropy", usedEntropy)
 		return
 	}
 	if !n.IsTicketGenerated(usedEntropy) {
@@ -112,7 +112,7 @@ func (n *Node) BroadcastTickets(currJCE uint32) {
 				peer := n.peersInfo[proxy]
 				epoch := n.getEpoch()
 				if err := peer.SendTicketDistribution(ctx, epoch, ticket, true); err != nil {
-					log.Warn(debugStream, "SendTicketDistribution", "n", n.String(), "->p", peer.PeerID, "err", err)
+					log.Warn(log.Quic, "SendTicketDistribution", "n", n.String(), "->p", peer.PeerID, "err", err)
 				}
 			}
 			*bucket.IsBroadcasted = true

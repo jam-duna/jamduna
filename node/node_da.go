@@ -38,9 +38,9 @@ func (n *NodeContent) NewAvailabilitySpecifier(package_bundle types.WorkPackageB
 
 	// ExportedSegmentRoot = CDT(segments)
 	exportedSegmentTree := trie.NewCDMerkleTree(export_segments)
-	log.Debug(debugG, "executeWorkPackageBundle", "n", n.String(), "exportedSegmentLength", len(export_segments), "exportedSegmentRoot", exportedSegmentTree.RootHash())
+	log.Debug(log.G, "executeWorkPackageBundle", "n", n.String(), "exportedSegmentLength", len(export_segments), "exportedSegmentRoot", exportedSegmentTree.RootHash())
 	//exportedSegmentTree.PrintTree()
-	log.Debug(debugG, "executeWorkPackageBundle", "n", n.String(), "bClubs", fmt.Sprintf("%v", bClubs), "sClubs", fmt.Sprintf("%v", sClubs))
+	log.Trace(log.G, "executeWorkPackageBundle", "n", n.String(), "bClubs", fmt.Sprintf("%v", bClubs), "sClubs", fmt.Sprintf("%v", sClubs))
 
 	d = AvailabilitySpecifierDerivation{
 		BClubs:        bClubs,
@@ -49,7 +49,7 @@ func (n *NodeContent) NewAvailabilitySpecifier(package_bundle types.WorkPackageB
 		SegmentChunks: sEcChunksArr,
 	}
 
-	log.Debug(debugG, "executeWorkPackageBundle", "derivation", d)
+	log.Trace(log.G, "executeWorkPackageBundle", "derivation", d)
 	availabilitySpecifier := types.AvailabilitySpecifier{
 		WorkPackageHash:       package_bundle.WorkPackage.Hash(),
 		BundleLength:          uint32(len(b)),
@@ -89,11 +89,11 @@ func VerifyWBTJustification(treeLen int, root common.Hash, shardIndex uint16, le
 	encodedPath, _ := common.EncodeJustification(path, types.NumECPiecesPerSegment)
 	reversedEncodedPath, _ := common.EncodeJustification((common.ReversedByteArray(path)), types.NumECPiecesPerSegment)
 	if root != recoveredRoot {
-		log.Warn(module, "VerifyWBTJustification Failure Part.A", "caller", caller, "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
-		log.Warn(module, "VerifyWBTJustification Failure Part.B", "caller", caller, "shardIdx", shardIndex, "Expected", root, "encodedPath", common.Bytes2String(encodedPath), "reversedEncodedPath", common.Bytes2String(reversedEncodedPath))
+		log.Warn(log.Node, "VerifyWBTJustification Failure Part.A", "caller", caller, "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
+		log.Warn(log.Node, "VerifyWBTJustification Failure Part.B", "caller", caller, "shardIdx", shardIndex, "Expected", root, "encodedPath", common.Bytes2String(encodedPath), "reversedEncodedPath", common.Bytes2String(reversedEncodedPath))
 		return false, recoveredRoot
 	}
-	log.Trace(module, "VerifyWBTJustification Success", "caller", caller, "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
+	log.Trace(log.Node, "VerifyWBTJustification Success", "caller", caller, "shardIdx", shardIndex, "Expected", root, "recovered", recoveredRoot, "verified", verified, "treeLen", treeLen, "leafHash", fmt.Sprintf("%x", leafHash), "path", fmt.Sprintf("%x", path))
 	return true, recoveredRoot
 }
 
@@ -121,7 +121,7 @@ func (n *NodeContent) buildBClub(b []byte) ([]common.Hash, []types.DistributeECC
 	// instead of a tower of abstraction, collapse it to the minimal number of lines
 	chunks, err := bls.Encode(paddedB, types.TotalValidators)
 	if err != nil {
-		log.Error(module, "buildBclub", "err", err)
+		log.Error(log.Node, "buildBclub", "err", err)
 	}
 
 	// Hash each element of the encoded data
@@ -157,7 +157,7 @@ func (n *NodeContent) buildSClub(segments [][]byte) (sClub []common.Hash, ecChun
 		// Encode segmentData into leaves
 		erasureCodingSegments, err := bls.Encode(segmentData, types.TotalValidators)
 		if err != nil {
-			log.Error(debugDA, "buildSClub", "segmentIdx", segmentIdx, "err", err)
+			log.Error(log.DA, "buildSClub", "segmentIdx", segmentIdx, "err", err)
 		}
 		for shardIndex, shard := range erasureCodingSegments {
 			ecChunksArr[shardIndex].Data = append(ecChunksArr[shardIndex].Data, shard...)
@@ -169,7 +169,7 @@ func (n *NodeContent) buildSClub(segments [][]byte) (sClub []common.Hash, ecChun
 	//   The guarantor who builds the bundle must pull out a specific pageproof and verify it against the correct exported segment root
 	pageProofs, pageProofGenerationErr := trie.GeneratePageProof(segments)
 	if pageProofGenerationErr != nil {
-		log.Error(debugDA, "GeneratePageProof", "Error", pageProofGenerationErr)
+		log.Error(log.DA, "GeneratePageProof", "Error", pageProofGenerationErr)
 	}
 	for pageIdx, pagedProofByte := range pageProofs {
 		if paranoidVerification {
@@ -177,7 +177,7 @@ func (n *NodeContent) buildSClub(segments [][]byte) (sClub []common.Hash, ecChun
 			global_segmentsRoot := tree.Root()
 			decodedData, _, decodingErr := types.Decode(pagedProofByte, reflect.TypeOf(types.PageProof{}))
 			if decodingErr != nil {
-				log.Error(debugDA, "buildSClub Proof decoding err", "Error", decodingErr)
+				log.Error(log.DA, "buildSClub Proof decoding err", "Error", decodingErr)
 			}
 			recoveredPageProof := decodedData.(types.PageProof)
 			for subTreeIdx := 0; subTreeIdx < len(recoveredPageProof.LeafHashes); subTreeIdx++ {
@@ -186,11 +186,11 @@ func (n *NodeContent) buildSClub(segments [][]byte) (sClub []common.Hash, ecChun
 				index := pageIdx*pageSize + subTreeIdx
 				fullJustification, err := trie.PageProofToFullJustification(pagedProofByte, pageIdx, subTreeIdx)
 				if err != nil {
-					log.Error(debugDA, "buildSClub PageProofToFullJustification ERR", "Error", err)
+					log.Error(log.DA, "buildSClub PageProofToFullJustification ERR", "Error", err)
 				}
 				derived_global_segmentsRoot := trie.VerifyCDTJustificationX(leafHash.Bytes(), index, fullJustification, 0)
 				if !common.CompareBytes(derived_global_segmentsRoot, global_segmentsRoot) {
-					log.Error(debugDA, "buildSClub fullJustification Root hash mismatch", "expected", fmt.Sprintf("%x", global_segmentsRoot), "got", fmt.Sprintf("%x", derived_global_segmentsRoot))
+					log.Error(log.DA, "buildSClub fullJustification Root hash mismatch", "expected", fmt.Sprintf("%x", global_segmentsRoot), "got", fmt.Sprintf("%x", derived_global_segmentsRoot))
 				}
 			}
 		}
@@ -262,10 +262,10 @@ func (n *NodeContent) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup
 			segmentData := importedSegments[segmentIdx]
 			global_segmentsRoot := trie.VerifyCDTJustificationX(trie.ComputeLeaf(segmentData), int(i.Index), b.Justification[itemIndex][segmentIdx], 0)
 			if !common.CompareBytes(exportedSegmentRoot[:], global_segmentsRoot) {
-				log.Warn(module, "trie.VerifyCDTJustificationX NOT VERIFIED", "index", i.Index)
+				log.Warn(log.Node, "trie.VerifyCDTJustificationX NOT VERIFIED", "index", i.Index)
 				return false, fmt.Errorf("justification failure computedRoot %s != exportedSegmentRoot %s", exportedSegmentRoot, exportedSegmentRoot)
 			} else {
-				log.Trace(debugDA, "VerifyBundle: Justification Verified", "index", i.Index, "exportedSegmentRoot", exportedSegmentRoot)
+				log.Trace(log.DA, "VerifyBundle: Justification Verified", "index", i.Index, "exportedSegmentRoot", exportedSegmentRoot)
 			}
 		}
 	}
@@ -311,7 +311,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 			return work_report, d, pvmFailedElapsed, fmt.Errorf("executeWorkPackageBundle(ReadServicePreimageBlob):s_id %v, codehash %v, err %v, ok=%v", service_index, workItem.CodeHash, err0, ok)
 		}
 		if common.Blake2Hash(code) != workItem.CodeHash {
-			log.Crit(module, "executeWorkPackageBundle: Code and CodeHash Mismatch")
+			log.Crit(log.Node, "executeWorkPackageBundle: Code and CodeHash Mismatch")
 		}
 		// fmt.Printf("index %d, code len=%d\n", service_index, len(code))
 		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB)
@@ -322,7 +322,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 
 		expectedSegmentCnt := int(workItem.ExportCount)
 		if expectedSegmentCnt != len(exported_segments) {
-			log.Warn(module, "executeWorkPackageBundle: ExportCount and ExportedSegments Mismatch", "ExportCount", expectedSegmentCnt, "ExportedSegments", len(exported_segments), "ExportedSegments", common.FormatPaddedBytesArray(exported_segments, 20))
+			log.Warn(log.Node, "executeWorkPackageBundle: ExportCount and ExportedSegments Mismatch", "ExportCount", expectedSegmentCnt, "ExportedSegments", len(exported_segments), "ExportedSegments", common.FormatPaddedBytesArray(exported_segments, 20))
 			expectedSegmentCnt = len(exported_segments)
 		}
 		if expectedSegmentCnt != 0 {
@@ -359,7 +359,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 			G: result.Gas, // REVIEW
 			D: result.Result,
 		}
-		log.Debug(debugG, "executeWorkPackageBundle", "wrangledResults", types.DecodedWrangledResults(&o))
+		log.Debug(log.G, "executeWorkPackageBundle", "wrangledResults", types.DecodedWrangledResults(&o))
 	}
 
 	spec, d := n.NewAvailabilitySpecifier(package_bundle, segments)
@@ -374,18 +374,18 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		Results:           results,
 		AuthGasUsed:       uint(authGasUsed),
 	}
-	log.Trace(debugG, "executeWorkPackageBundle OUTGOING SPEC",
+	log.Trace(log.G, "executeWorkPackageBundle OUTGOING SPEC",
 		"n", n.String(),
 		"workReportHash", workReport.Hash(),
 		"spec", workReport.AvailabilitySpec.String(),
 	)
-	log.Debug(debugG, "executeWorkPackageBundle OUTGOING REPORT",
+	log.Debug(log.G, "executeWorkPackageBundle OUTGOING REPORT",
 		"n", n.String(),
 		"workReportHash", workReport.Hash(),
 		"workReport", workReport.String(),
 	)
 
-	log.Trace(debugG, "executeWorkPackageBundle OUTGOING REPORT BYTES",
+	log.Trace(log.G, "executeWorkPackageBundle OUTGOING REPORT BYTES",
 		"n", n.String(),
 		"workPackageHash", workReport.GetWorkPackageHash(),
 		"workReportHash", workReport.Hash(),

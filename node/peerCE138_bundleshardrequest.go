@@ -64,7 +64,7 @@ func (p *Peer) SendBundleShardRequest(
 
 	// --> Erasure Root ++ Shard Index
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
-		log.Trace(debugDA, "SendBundleShardRequest - sending error", "p", p.String(), "erasureRoot", erasureRoot, "shardIndex", shardIndex, "ERR", err)
+		log.Trace(log.DA, "SendBundleShardRequest - sending error", "p", p.String(), "erasureRoot", erasureRoot, "shardIndex", shardIndex, "ERR", err)
 		return nil, common.Hash{}, nil, fmt.Errorf("sendQuicBytes[CE138]: %w", err)
 	}
 	//--> FIN
@@ -72,7 +72,7 @@ func (p *Peer) SendBundleShardRequest(
 
 	parts, err := receiveMultiple(ctx, stream, 2, p.PeerID, code)
 	if err != nil {
-		log.Trace(debugDA, "SendBundleShardRequest - receive error", "p", p.String(), "erasureRoot", erasureRoot, "shardIndex", shardIndex, "ERR", err)
+		log.Trace(log.DA, "SendBundleShardRequest - receive error", "p", p.String(), "erasureRoot", erasureRoot, "shardIndex", shardIndex, "ERR", err)
 		return nil, common.Hash{}, nil, fmt.Errorf("receiveMultiple[CE138]: %w", err)
 	}
 
@@ -81,7 +81,7 @@ func (p *Peer) SendBundleShardRequest(
 
 	sclubJustification, decodeErr := common.DecodeJustification(encodedJustification, types.NumECPiecesPerSegment)
 	if decodeErr != nil || len(sclubJustification) < 1 {
-		log.Error(debugDA, "SendBundleShardRequest - justification decode error",
+		log.Error(log.DA, "SendBundleShardRequest - justification decode error",
 			"p", p.String(), "erasureRoot", erasureRoot, "shardIndex", shardIndex, "ERR", decodeErr)
 		return nil, common.Hash{}, nil, fmt.Errorf("DecodeJustification failed or too short")
 	}
@@ -93,7 +93,7 @@ func (p *Peer) SendBundleShardRequest(
 		return nil, common.Hash{}, nil, fmt.Errorf("EncodeJustification[path] failed: %w", err)
 	}
 
-	log.Trace(debugDA, "SendBundleShardRequest DONE",
+	log.Trace(log.DA, "SendBundleShardRequest DONE",
 		"p", p.String(), "erasureRoot", erasureRoot, "shardIndex", shardIndex,
 		"bundleShardLen", len(bundleShard), "encodedPathLen", len(encodedPath),
 		"sClub", sClub, "encodedPath", fmt.Sprintf("%x", encodedPath))
@@ -109,7 +109,7 @@ func (n *Node) onBundleShardRequest(ctx context.Context, stream quic.Stream, msg
 		return fmt.Errorf("onBundleShardRequest: failed to deserialize: %w", err)
 	}
 
-	log.Trace(debugA, "onBundleShardRequest", "n", n.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex)
+	log.Trace(log.A, "onBundleShardRequest", "n", n.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex)
 
 	code := uint8(CE138_BundleShardRequest)
 	bundleShard, sClub, encodedPath, ok, err := n.GetBundleShard_Assurer(req.ErasureRoot, req.ShardIndex)
@@ -147,6 +147,6 @@ func (n *Node) onBundleShardRequest(ctx context.Context, stream quic.Stream, msg
 		return fmt.Errorf("onBundleShardRequest: send justification failed: %w", err)
 	}
 
-	log.Trace(debugA, "onBundleShardRequest sent", "n", n.String(), "bundleShardLen", len(bundleShard), "justificationLen", len(encodedJustification))
+	log.Trace(log.A, "onBundleShardRequest sent", "n", n.String(), "bundleShardLen", len(bundleShard), "justificationLen", len(encodedJustification))
 	return nil
 }

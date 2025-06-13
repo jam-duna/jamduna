@@ -14,7 +14,7 @@ import (
 var genesisBlockHash common.Hash
 
 func (n *Node) StartGrandpa(b *types.Block) {
-	log.Trace(debugGrandpa, "GRANDPA START")
+	log.Trace(log.Grandpa, "GRANDPA START")
 	if n.block_tree != nil {
 
 		return
@@ -58,10 +58,10 @@ func (n *Node) runGrandpa() {
 		case commit := <-n.grandpa.BroadcastCommitChan:
 			n.broadcast(context.TODO(), commit)
 		case err := <-n.grandpa.ErrorChan:
-			log.Error(debugGrandpa, "GRANDPA ERROR", "err", err)
+			log.Error(log.Grandpa, "GRANDPA ERROR", "err", err)
 
 		case status := <-n.grandpa.GrandpaStatusChan:
-			log.Trace(debugGrandpa, "GRANDPA Status", "status", status)
+			log.Trace(log.Grandpa, "GRANDPA Status", "status", status)
 		}
 
 	}

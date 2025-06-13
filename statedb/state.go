@@ -202,7 +202,7 @@ func (n *JamState) tallyStatistics(validatorIndex uint32, activity string, cnt u
 	case "assurances":
 		n.ValidatorStatistics.Current[validatorIndex].AvailabilityAssurances += cnt
 	default:
-		log.Error(module, "tallyStatistics", "validatorIndex", validatorIndex, "cnt", cnt)
+		log.Error(log.SDB, "tallyStatistics", "validatorIndex", validatorIndex, "cnt", cnt)
 	}
 }
 

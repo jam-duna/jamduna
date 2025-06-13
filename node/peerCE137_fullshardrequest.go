@@ -133,7 +133,7 @@ func (n *Node) onFullShardRequest(ctx context.Context, stream quic.Stream, msg [
 
 	var req JAMSNPShardRequest
 	if err := req.FromBytes(msg); err != nil {
-		log.Error(debugDA, "onFullShardRequest: failed to deserialize", "err", err)
+		log.Error(log.DA, "onFullShardRequest: failed to deserialize", "err", err)
 		return fmt.Errorf("onFullShardRequest: decode failed: %w", err)
 	}
 
@@ -164,7 +164,7 @@ func (n *Node) onFullShardRequest(ctx context.Context, stream quic.Stream, msg [
 		return fmt.Errorf("onFullShardRequest: send justification failed: %w", err)
 	}
 
-	log.Trace(debugDA, "onFullShardRequest completed", "n", n.String(),
+	log.Trace(log.DA, "onFullShardRequest completed", "n", n.String(),
 		"erasureRoot", req.ErasureRoot,
 		"shardIndex", req.ShardIndex,
 		"bundleShardLen", len(bundleShard),

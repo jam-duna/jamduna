@@ -15,5 +15,5 @@ func TestRho(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error decoding: %v", err)
 	}
-	log.Trace(module, "TestRho", decoded)
+	log.Trace(log.SDB, "TestRho", decoded)
 }

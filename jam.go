@@ -51,7 +51,7 @@ func main() {
 		Port           int
 		RPCPort        int
 		validatorIndex int
-		network        string
+		debug          string
 		start_time     string
 
 		logLevel string
@@ -82,7 +82,7 @@ func main() {
 		RPCPortFlag        = "rpc-port"
 		startTimeFlag      = "start-time"
 		validatorIndexFlag = "dev-validator"
-		networkFlag        = "net-spec"
+		debugFlag          = "debug"
 		chainSpecFlag      = "chain"
 
 		//run flags that is not supported yet
@@ -274,7 +274,7 @@ func main() {
 			// use yellow color
 
 			fmt.Printf("Running JAM DUNA node with the following flags:\n")
-			fmt.Printf("\033[33mdataPath: %s, Port: %d, RPCPort: %d, validatorIndex: %d, network: %s, chainSpec: %s, logLevel: %s, start_time: %s\033[0m\n", dataPath, Port, RPCPort, validatorIndex, network, chainSpec, logLevel, start_time)
+			fmt.Printf("\033[33mdataPath: %s, Port: %d, RPCPort: %d, validatorIndex: %d, debug: %s, chainSpec: %s, logLevel: %s, start_time: %s\033[0m\n", dataPath, Port, RPCPort, validatorIndex, debug, chainSpec, logLevel, start_time)
 
 			var err error
 			var validators []types.Validator
@@ -291,8 +291,7 @@ func main() {
 			log.EnableModule(log.OtherGuarantor)
 			log.EnableModule(log.GeneralAuthoring)
 			log.EnableModule(log.GeneralValidating)
-			// log.EnableModule(log.NodeMonitoring)
-			// log.EnableModule(log.BlockMonitoring)
+			log.EnableModules(debug)
 			var peers []string
 			var peerList map[uint16]*node.Peer
 
@@ -401,7 +400,7 @@ func main() {
 	runCmd.Flags().IntVar(&RPCPort, RPCPortFlag, node.GetJAMNetworkWSPort(), "Specifies the RPC listening port.")
 	runCmd.Flags().StringVar(&start_time, startTimeFlag, "", "Start time in format: YYYY-MM-DD HH:MM:SS")
 	runCmd.Flags().IntVar(&validatorIndex, validatorIndexFlag, 0, "Validator Index (only for development)")
-	runCmd.Flags().StringVar(&network, networkFlag, "tiny", "Specifies the genesis state json file.(Only for development)")
+	runCmd.Flags().StringVar(&debug, debugFlag, "r,g", "Specifies debug flags for enhanced logging (block,guarantees,rotation,assurances,audit,da,node,quic,beefy,audit,grandpa,web,state)")
 	runCmd.Flags().StringVar(&chainSpec, chainSpecFlag, "chainspec.json", `Chain to run. "polkadot", "dev", or the path of a chain spec file`)
 
 	desc := flagDescription("The PVM backend to use", map[string]string{

@@ -45,7 +45,7 @@ func (n *Node) runWPQueue() {
 					wpItem.nextAttemptAfterTS = time.Now().Unix() + types.SecondsPerSlot
 					wpItem.numFailures++
 					if wpItem.numFailures > 3 {
-						log.Warn(debugG, "runWPQueue", "n", n.String(), "numFailures", wpItem.numFailures)
+						log.Warn(log.G, "runWPQueue", "n", n.String(), "numFailures", wpItem.numFailures)
 						n.workPackageQueue.Delete(key)
 						return false
 					}
@@ -84,7 +84,7 @@ func (n *Node) buildBundle(wpQueueItem *WPQueueItem) (bundle types.WorkPackageBu
 				si = n.WorkReportSearch(importedSegment.RequestedHash)
 				if si == nil {
 					err = fmt.Errorf("WorkReportSearch(%s) not found", importedSegment.RequestedHash)
-					log.Warn(module, "buildBundle", "err", err)
+					log.Warn(log.Node, "buildBundle", "err", err)
 					return bundle, segmentRootLookup, err
 				}
 				workReportSearchMap[importedSegment.RequestedHash] = si
@@ -110,7 +110,7 @@ func (n *Node) buildBundle(wpQueueItem *WPQueueItem) (bundle types.WorkPackageBu
 	for erasureRoot, specIndex := range erasureRootIndex {
 		receiveSegments, specJustifications, err := n.reconstructSegments(specIndex)
 		if err != nil {
-			log.Warn(module, "reconstructSegments", "err", err)
+			log.Warn(log.Node, "reconstructSegments", "err", err)
 			return bundle, segmentRootLookup, err
 		}
 		if len(receiveSegments) != len(specIndex.Indices) {
@@ -132,7 +132,7 @@ func (n *Node) buildBundle(wpQueueItem *WPQueueItem) (bundle types.WorkPackageBu
 			wpi := workItemErasureRootsMapping[workItemIndex][idx]
 			if wpi == nil {
 				err = fmt.Errorf("missing segments for workItemIndex %d idx %d", workItemIndex, idx)
-				log.Warn(module, "buildBundle", "err", err)
+				log.Warn(log.Node, "buildBundle", "err", err)
 				return bundle, segmentRootLookup, err
 			}
 			erasureRoot := wpi.WorkReport.AvailabilitySpec.ErasureRoot
@@ -140,7 +140,7 @@ func (n *Node) buildBundle(wpQueueItem *WPQueueItem) (bundle types.WorkPackageBu
 			receivedJustifications, existJ := justificationsMapping[erasureRoot]
 			if !exists || !existJ {
 				err = fmt.Errorf("missing segments for erasureRoot %v", erasureRoot)
-				log.Error(module, "buildBundle", "err", err)
+				log.Error(log.Node, "buildBundle", "err", err)
 				return bundle, segmentRootLookup, err
 			}
 			for y, z := range wpi.Indices { // these are the indices of the imported segments with the same erasure root
@@ -208,28 +208,17 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 	// here we are a first guarantor building a bundle (imported segments, justifications, extrinsics)
 	bundle, segmentRootLookup, err := n.buildBundle(wpItem)
 	if err != nil {
-		log.Error(module, "processWPQueueItem", "n", n.String(), "err", err, "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
+		log.Error(log.Node, "processWPQueueItem", "n", n.String(), "err", err, "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
 		return false
 	}
 
 	curr_statedb := n.statedb.Copy()
-	// reject if the work package is not for this core
-	selfCoreIndex := curr_statedb.GetSelfCoreIndex()
-	if wpItem.coreIndex != curr_statedb.GetSelfCoreIndex() {
-		log.Warn(module, "processWPQueueItem -  work package is not for this core", "n", n.String(),
-			"wpItem.slot", wpItem.slot,
-			"wpItem.coreIndex", wpItem.coreIndex,
-			"curr_statedb.timeslot", curr_statedb.GetTimeslot(),
-			"sdb.GetSelfCoreIndex", selfCoreIndex,
-			"wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
-		return false
-	}
 	err = curr_statedb.VerifyPackage(bundle)
 	if err != nil {
-		log.Error(module, "processWPQueueItem -  wp not verified", "n", n.String(), "err", err, "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
+		log.Error(log.Node, "processWPQueueItem -  wp not verified", "n", n.String(), "err", err, "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
 		return false
 	}
-	log.Info(module, "processWPQueueItem", "n", n.id, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
+	log.Info(log.Node, "processWPQueueItem", "n", n.id, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
 	var wg sync.WaitGroup
 	mutex := &sync.Mutex{}
 	fellow_responses := make(map[types.Ed25519Key]JAMSNPWorkPackageShareResponse)
@@ -242,7 +231,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Error(debugG, "panic in coworker goroutine", "err", r)
+					log.Error(log.G, "panic in coworker goroutine", "err", r)
 					fmt.Printf("stack trace: %s\n", string(debug.Stack()))
 				}
 				wg.Done()
@@ -253,7 +242,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 
 				report, d, pvmElapsed, execErr = n.executeWorkPackageBundle(coreIndex, bundle, segmentRootLookup, true)
 				if execErr != nil {
-					log.Warn(module, "processWPQueueItem", "err", execErr)
+					log.Warn(log.Node, "processWPQueueItem", "err", execErr)
 					return
 				}
 				guarantee.Report = report
@@ -266,7 +255,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 				defer cancel()
 				fellow_response, errfellow := coworker.ShareWorkPackage(ctx, coreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519, coworker.PeerID)
 				if errfellow != nil {
-					log.Warn(module, "processWPQueueItem", "n", n.String(), "errfellow", errfellow)
+					log.Warn(log.Node, "processWPQueueItem", "n", n.String(), "errfellow", errfellow)
 					return
 				}
 				mutex.Lock()
@@ -297,15 +286,15 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 				return status
 			})
 		} else {
-			log.Warn(debugG, "processWPQueueItem Guarantee from fellow did not match", "n", n.String(),
+			log.Warn(log.G, "processWPQueueItem Guarantee from fellow did not match", "n", n.String(),
 				"selfWorkReportHash", selfWorkReportHash, "fellowWorkReportHash", fellowWorkReportHash)
-			log.Warn(debugG, "our reports", "n", n.String(), "selfWorkReport", guarantee.Report.String())
+			log.Warn(log.G, "our reports", "n", n.String(), "selfWorkReport", guarantee.Report.String())
 		}
 	}
 
 	if len(guarantee.Signatures) >= 2 {
 		guarantee.Slot = slot // this is the slot when ORIGINALLY added to the queue
-		log.Debug(debugG, "processWPQueueItem Guarantee enough signatures", "n", n.id, "guarantee.Slot", guarantee.Slot, "guarantee.Signatures", types.ToJSONHex(guarantee.Signatures), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
+		log.Debug(log.G, "processWPQueueItem Guarantee enough signatures", "n", n.id, "guarantee.Slot", guarantee.Slot, "guarantee.Signatures", types.ToJSONHex(guarantee.Signatures), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
 		ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
 		defer cancel()
 		n.broadcast(ctx, guarantee) // send via CE135
@@ -319,10 +308,10 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		})
 		err := n.processGuarantee(guarantee, "processWPQueueItem") // should it be curr_statedb.GetTimeslot() here?
 		if err != nil {
-			log.Error(debugG, "processWPQueueItem:processGuarantee:", "n", n.String(), "err", err)
+			log.Error(log.G, "processWPQueueItem:processGuarantee:", "n", n.String(), "err", err)
 		}
 	} else {
-		log.Warn(debugG, "processWPQueueItem Guarantee not enough signatures", "n", n.String(),
+		log.Warn(log.G, "processWPQueueItem Guarantee not enough signatures", "n", n.String(),
 			"guarantee.Signatures", types.ToJSONHex(guarantee.Signatures), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
 		return false
 	}

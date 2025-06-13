@@ -134,9 +134,9 @@ func (n *Node) onAssuranceDistribution(ctx context.Context, stream quic.Stream, 
 	case <-ctx.Done():
 		return fmt.Errorf("onAssuranceDistribution: context cancelled: %w", ctx.Err())
 	case n.assurancesCh <- assurance:
-		log.Trace(debugStream, "onAssuranceDistribution received", "peerID", peerID, "anchor", newReq.Anchor)
+		log.Trace(log.Quic, "onAssuranceDistribution received", "peerID", peerID, "anchor", newReq.Anchor)
 	default:
-		log.Warn(debugStream, "onAssuranceDistribution: assurance channel full, dropping", "peerID", peerID)
+		log.Warn(log.Quic, "onAssuranceDistribution: assurance channel full, dropping", "peerID", peerID)
 	}
 
 	return nil

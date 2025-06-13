@@ -177,7 +177,7 @@ func (s *StateDB) GetAnnouncementWithoutJtrue(A *types.AnnounceBucket, J *types.
 		}
 		// check the last one
 		if a.ValidatorIndex != uint32(tmp.Validator) {
-			log.Trace(debugAudit, "Validator didn't judge in Tranche", "n", s.Id, "ts", s.Block.TimeSlot(), "validatorIndex", a.ValidatorIndex, "tranche", a.Tranche)
+			log.Trace(log.Audit, "Validator didn't judge in Tranche", "n", s.Id, "ts", s.Block.TimeSlot(), "validatorIndex", a.ValidatorIndex, "tranche", a.Tranche)
 			count++
 			announcements = append(announcements, a)
 		}

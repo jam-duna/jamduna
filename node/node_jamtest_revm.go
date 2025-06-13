@@ -12,7 +12,7 @@ import (
 )
 
 func revm(n1 JNode, testServices map[string]*types.TestService) {
-	log.Info(module, "Revm START")
+	log.Info(log.Node, "Revm START")
 	service0 := testServices["revm_test"]
 	service_authcopy := testServices["auth_copy"]
 

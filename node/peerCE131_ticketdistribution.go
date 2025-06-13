@@ -143,10 +143,10 @@ func (n *Node) onTicketDistribution(ctx context.Context, stream quic.Stream, msg
 	if msgType == CE131_TicketDistribution {
 		proxy, err := ticket.ProxyValidator()
 		if err != nil {
-			log.Warn(module, "CE131-invalid ticket", "err", err)
+			log.Warn(log.Node, "CE131-invalid ticket", "err", err)
 			return err
 		} else if proxy != n.id {
-			log.Warn(module, "CE131-not proxy for the ticket", "peerid", peerID)
+			log.Warn(log.Node, "CE131-not proxy for the ticket", "peerid", peerID)
 			return nil
 		}
 		// we should send to everyone via CE132 now that we know the ticket id valid and that our node is the proxy
@@ -162,7 +162,7 @@ func (n *Node) onTicketDistribution(ctx context.Context, stream quic.Stream, msg
 		return fmt.Errorf("onTicketDistribution: context cancelled while sending ticket: %w", ctx.Err())
 	default:
 		// IMPORTANT: avoid blocking if ticketsCh full
-		log.Warn(module, "onTicketDistribution: tickets channel full, dropped ticket")
+		log.Warn(log.Node, "onTicketDistribution: tickets channel full, dropped ticket")
 	}
 	return nil
 }

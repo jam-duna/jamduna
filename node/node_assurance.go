@@ -105,7 +105,7 @@ func (n *NodeContent) FetchAllBundleAndSegmentShards(coreIdx uint16, erasureRoot
 					Justifications: justifications,
 				}
 			} else {
-				log.Warn(debugDA, "assureData: SendSegmentShardRequest failed",
+				log.Warn(log.DA, "assureData: SendSegmentShardRequest failed",
 					"validatorIdx", vIdx,
 					"shardIdx", shardIdx,
 					"err", err)
@@ -130,7 +130,7 @@ func SelectGuarantor(g types.Guarantee, blacklistIdx []uint16) (uint16, error) {
 	}
 	if len(guarantorList) == 0 {
 		err := fmt.Errorf("SelectGuarantor: No valid guarantors found in guarantee signatures for guarantee")
-		log.Error(debugDA, "SelectGuarantor: No valid guarantors found in guarantee signatures", "guarantee", "reportHash", g.Report.Hash(), "error", err)
+		log.Error(log.DA, "SelectGuarantor: No valid guarantors found in guarantee signatures", "guarantee", "reportHash", g.Report.Hash(), "error", err)
 		return 0, err
 	}
 	return guarantorList[rand0.Intn(len(guarantorList))], nil
@@ -160,7 +160,7 @@ func (n *Node) FetchAllFullShards(g types.Guarantee, verify bool) {
 				ExportedShards: exportedShards,
 				EncodedPath:    encodedPath,
 			}
-			log.Trace(debugDA, "FetchAllFullShards: SendFullShardRequest success CE137",
+			log.Trace(log.DA, "FetchAllFullShards: SendFullShardRequest success CE137",
 				"coreIdx", coreIdx,
 				"validatorIdx", vIdx,
 				"shardIdx", shardIdx,
@@ -210,21 +210,21 @@ func (n *Node) assureData(ctx context.Context, g types.Guarantee) error {
 
 		bundleShard, exportedShards, encodedPath, err = n.peersInfo[guarantor].SendFullShardRequest(ctx, spec.ErasureRoot, shardIdx)
 		if err == nil {
-			log.Trace(debugDA, "assureData: SendFullShardRequest success",
+			log.Trace(log.DA, "assureData: SendFullShardRequest success",
 				"coreIdx", coredIdx, "validatorIdx", vIdx, "shardIdx", shardIdx,
 				"erasureRoot", spec.ErasureRoot,
 				"guarantor", guarantor,
 				"bundleShard", fmt.Sprintf("%x", bundleShard))
 			break
 		}
-		log.Warn(debugDA, "assureData: SendFullShardRequest attempt failed",
+		log.Warn(log.DA, "assureData: SendFullShardRequest attempt failed",
 			"coredIdx", coredIdx, "validatorIdx", vIdx, "shardIdx", shardIdx,
 			"attempt", attempt, "n", n.String(), "erasureRoot", spec.ErasureRoot,
 			"guarantor", guarantor, "err", err)
 	}
 
 	if err != nil {
-		log.Error(debugDA, "assureData: SendFullShardRequest failed after retries",
+		log.Error(log.DA, "assureData: SendFullShardRequest failed after retries",
 			"coredIdx", coredIdx, "shardIdx", "validatorIdx", vIdx, "shardIdx", shardIdx,
 			"n", n.String(), "erasureRoot", spec.ErasureRoot,
 			"guarantor", guarantor, "err", err)
@@ -234,11 +234,11 @@ func (n *Node) assureData(ctx context.Context, g types.Guarantee) error {
 	// CRITICAL: verify justification matches the erasure root before storage
 	verified, err := VerifyFullShard(spec.ErasureRoot, shardIdx, bundleShard, exportedShards, encodedPath)
 	if err != nil {
-		log.Error(debugDA, "assureData: VerifyFullShard error", "coredIdx", coredIdx, "validatorIdx", vIdx, "shardIdx", shardIdx, "n", n.String(), "err", err)
+		log.Error(log.DA, "assureData: VerifyFullShard error", "coredIdx", coredIdx, "validatorIdx", vIdx, "shardIdx", shardIdx, "n", n.String(), "err", err)
 		return fmt.Errorf("VerifyFullShard: %w", err)
 	}
 	if !verified {
-		log.Error(debugDA, "assureData: VerifyFullShard failed", "coredIdx", coredIdx, "validatorIdx", vIdx, "shardIdx", shardIdx, "n", n.String(), "verified", false)
+		log.Error(log.DA, "assureData: VerifyFullShard failed", "coredIdx", coredIdx, "validatorIdx", vIdx, "shardIdx", shardIdx, "n", n.String(), "verified", false)
 		return fmt.Errorf("VerifyFullShard: failed verification")
 	}
 
@@ -247,7 +247,7 @@ func (n *Node) assureData(ctx context.Context, g types.Guarantee) error {
 	}
 
 	if err := n.StoreWorkReport(g.Report); err != nil {
-		log.Error(debugDA, "assureData: StoreWorkReport failed", "coredIdx", coredIdx, "shardIdx", "validatorIdx", vIdx, "shardIdx", shardIdx, "n", n.String(), "err", err)
+		log.Error(log.DA, "assureData: StoreWorkReport failed", "coredIdx", coredIdx, "shardIdx", "validatorIdx", vIdx, "shardIdx", shardIdx, "n", n.String(), "err", err)
 		return fmt.Errorf("StoreWorkReport: %w", err)
 	}
 

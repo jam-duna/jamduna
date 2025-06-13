@@ -82,7 +82,7 @@ func TestDisputesJsonParse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to marshal JSON: %v", err)
 	}
-	log.Trace(debugAudit, "TestDisputesJsonParse", "Expected", expectedJson)
+	log.Trace(log.Audit, "TestDisputesJsonParse", "Expected", expectedJson)
 }
 
 func VerifyDisputes(jsonFile string, exceptErr error) error {

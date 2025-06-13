@@ -253,7 +253,7 @@ func NewStateDBFromStateTransitionFile(sdb *storage.StateDBStorage, network stri
 	var statetransition StateTransition
 	err = json.Unmarshal(snapshotRawBytes, &statetransition)
 	if err != nil {
-		log.Crit(module, "Error unmarshalling state snapshot raw file", "error", err)
+		log.Crit(log.SDB, "Error unmarshalling state snapshot raw file", "error", err)
 		return statedb, err
 	}
 	fmt.Printf("StateTransition: %s\n", statetransition.String())
@@ -305,7 +305,7 @@ func NewEpoch0Timestamp(test_name ...string) uint64 {
 		waitTime := int64(second_per_epoch) - now%int64(second_per_epoch) // how far is next epoch (sec)
 		epoch0Timestamp := uint64(now) + uint64(waitTime)
 		epoch0Phase := uint64(now) / uint64(second_per_epoch)
-		log.Trace(module, "NewEpoch0Timestamp", "Raw now", uint64(now), "Raw waitTime", waitTime, "Raw epoch0P", epoch0Phase, "Raw epoch0Timestamp", epoch0Timestamp)
+		log.Trace(log.SDB, "NewEpoch0Timestamp", "Raw now", uint64(now), "Raw waitTime", waitTime, "Raw epoch0P", epoch0Phase, "Raw epoch0Timestamp", epoch0Timestamp)
 
 		if types.TimeSavingMode { //always be five second
 			deDuctedTime := (time.Duration(-waitTime + 5)) * time.Second                             // how much time we have to deduct
@@ -318,7 +318,7 @@ func NewEpoch0Timestamp(test_name ...string) uint64 {
 			waitTime = int64(second_per_epoch) - now%int64(second_per_epoch)
 			epoch0Timestamp = uint64(now) + uint64(waitTime)
 		}
-		log.Trace(module, "NewEpoch0Timestamp", "NewGenesisConfig epoch0Timestamp", epoch0Timestamp, "Wait", uint64(waitTime))
+		log.Trace(log.SDB, "NewEpoch0Timestamp", "NewGenesisConfig epoch0Timestamp", epoch0Timestamp, "Wait", uint64(waitTime))
 		return epoch0Timestamp
 	} else if test_name[0] == "jamtestnet" { // make sure the timestamp is 72
 		if len(test_name) != 2 {
@@ -360,7 +360,7 @@ func NewEpoch0Timestamp(test_name ...string) uint64 {
 		}
 		epoch0Timestamp := uint64(now) + uint64(waitTime)
 		epoch0Phase := uint64(now) / uint64(second_per_epoch)
-		log.Trace(module, "NewEpoch0Timestamp", "Raw now", uint64(now), "Raw waitTime", waitTime, "Raw epoch0P", epoch0Phase, "Raw epoch0Timestamp", epoch0Timestamp)
+		log.Trace(log.SDB, "NewEpoch0Timestamp", "Raw now", uint64(now), "Raw waitTime", waitTime, "Raw epoch0P", epoch0Phase, "Raw epoch0Timestamp", epoch0Timestamp)
 		return uint64(epoch0Timestamp)
 	}
 }

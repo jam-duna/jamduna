@@ -40,7 +40,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 
 	// Make sure this Preimages is ready to be included..
 	queued_preimage := extrinsic_pool.GetPreimageFromPool()
-	log.Trace(debugP, "MakeBlock: Queued Preimages", "len", len(queued_preimage), "slot", targetJCE)
+	log.Trace(log.P, "MakeBlock: Queued Preimages", "len", len(queued_preimage), "slot", targetJCE)
 	for _, preimageLookup := range queued_preimage {
 		_, err := s.ValidateAddPreimage(preimageLookup.Requester, preimageLookup.Blob)
 		if err == nil {
@@ -51,7 +51,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 			extrinsicData.Preimages = append(extrinsicData.Preimages, pl)
 			extrinsic_pool.RemoveOldPreimages([]types.Preimages{*preimageLookup}, targetJCE)
 		} else {
-			log.Warn(debugP, "ValidateLookup", "err", err)
+			log.Warn(log.P, "ValidateLookup", "err", err)
 			//extrinsic_pool.RemoveOldPreimages([]types.Preimages{*preimageLookup}, targetJCE)
 			continue
 		}
@@ -81,7 +81,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 	previousIdx := currRotationIdx - 1
 	acceptedTimeslot := previousIdx * types.ValidatorCoreRotationPeriod
 	queuedGuarantees = extrinsic_pool.GetGuaranteesFromPool(acceptedTimeslot)
-	log.Trace(debugG, "MakeBlock: Queued Guarantees for slot", "len", len(queuedGuarantees), "slot", targetJCE, "acceptedTs", acceptedTimeslot)
+	log.Trace(log.G, "MakeBlock: Queued Guarantees for slot", "len", len(queuedGuarantees), "slot", targetJCE, "acceptedTs", acceptedTimeslot)
 	// collect and pre-validate queued guarantees
 	var valid []types.Guarantee
 	tmpstatedb := s.Copy()
@@ -93,7 +93,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 		}
 
 		// per-guarantee MakeBlock checks (core index, sigs, assignment, gas, timeouts…)
-		if err := tmpstatedb.VerifyGuaranteeBasic(g); err != nil {
+		if err := tmpstatedb.VerifyGuaranteeBasic(g, targetJCE); err != nil {
 			if AcceptableGuaranteeError(err) {
 				// don't remove from pool if ErrGFutureReportSlot, ErrGCoreEngaged
 			} else {

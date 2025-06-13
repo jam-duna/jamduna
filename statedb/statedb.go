@@ -26,12 +26,6 @@ import (
 )
 
 const (
-	module                = log.StateDBMonitoring
-	debugSDB              = log.StateDBMonitoring
-	debugA                = "a_mod"
-	debugG                = log.GuaranteeMonitoring
-	debugP                = "p_mod"
-	debugAudit            = "ad_mode"
 	debugB                = "beefy_mod"
 	saveSealBlockMaterial = false
 	blockAuthoringChaos   = false // turn off for production (or publication of traces)
@@ -113,7 +107,7 @@ func (s *StateDB) CheckIncomingAssurance(a *types.Assurance) (err error) {
 	cred := s.GetSafrole().GetCurrValidator(int(a.ValidatorIndex))
 	err = a.VerifySignature(cred)
 	if err != nil {
-		log.Error(debugSDB, "CheckIncomingAssurance: Invalid Assurance", "err", err)
+		log.Error(log.SDB, "CheckIncomingAssurance: Invalid Assurance", "err", err)
 		return
 	}
 	return nil
@@ -152,10 +146,10 @@ func (s *StateDB) ValidateAddPreimage(serviceID uint32, blob []byte) (common.Has
 	t := s.GetTrie()
 	anchors, ok, err := t.GetPreImageLookup(l.Service_Index(), l.Hash(), l.BlobLength())
 	if err != nil {
-		log.Warn(debugSDB, "[ValidateAddPreimage:GetPreImageLookup] anchor not set", "err", err, "s", l.Service_Index(), "blob hash", l.Hash(), "blob length", l.BlobLength())
+		log.Warn(log.SDB, "[ValidateAddPreimage:GetPreImageLookup] anchor not set", "err", err, "s", l.Service_Index(), "blob hash", l.Hash(), "blob length", l.BlobLength())
 		return common.Hash{}, fmt.Errorf(errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
 	} else if !ok {
-		log.Warn(debugSDB, "[ValidateAddPreimage:GetPreImageLookup] Can't find the anchor", "s", l.Service_Index(), "blob hash", l.Hash(), "blob length", l.BlobLength())
+		log.Warn(log.SDB, "[ValidateAddPreimage:GetPreImageLookup] Can't find the anchor", "s", l.Service_Index(), "blob hash", l.Hash(), "blob length", l.BlobLength())
 		return common.Hash{}, fmt.Errorf(errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
 	}
 	if len(anchors) == 1 { // we have to forget it -- check!
@@ -268,63 +262,63 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 
 	coreAuthPoolEncode, err := t.GetState(C1)
 	if err != nil {
-		log.Crit(debugSDB, "Error reading C1 CoreAuthPool from trie", err)
+		log.Crit(log.SDB, "Error reading C1 CoreAuthPool from trie", err)
 	}
 	authQueueEncode, err := t.GetState(C2)
 	if err != nil {
-		log.Crit(debugSDB, "Error reading C2 AuthQueue from trie: %v\n", err)
+		log.Crit(log.SDB, "Error reading C2 AuthQueue from trie: %v\n", err)
 	}
 	recentBlocksEncode, err := t.GetState(C3)
 	if err != nil {
-		log.Crit(debugSDB, "Error reading C3 RecentBlocks from trie: %v\n", err)
+		log.Crit(log.SDB, "Error reading C3 RecentBlocks from trie: %v\n", err)
 	}
 	safroleStateEncode, err := t.GetState(C4)
 	if err != nil {
-		log.Crit(debugSDB, "Error reading C4 SafroleState from trie: %v\n", err)
+		log.Crit(log.SDB, "Error reading C4 SafroleState from trie: %v\n", err)
 	}
 	disputeStateEncode, err := t.GetState(C5)
 	if err != nil {
-		log.Crit(debugSDB, "Error reading C5 DisputeState from trie: %v\n", err)
+		log.Crit(log.SDB, "Error reading C5 DisputeState from trie: %v\n", err)
 	}
 	entropyEncode, err := t.GetState(C6)
 	if err != nil {
-		log.Crit(debugSDB, "Error reading C6 Entropy from trie: %v\n", err)
+		log.Crit(log.SDB, "Error reading C6 Entropy from trie: %v\n", err)
 	}
 	DesignedEpochValidatorsEncode, err := t.GetState(C7)
 	if err != nil {
-		log.Crit(debugSDB, "Error reading C7 NextEpochValidators from trie: %v\n", err)
+		log.Crit(log.SDB, "Error reading C7 NextEpochValidators from trie: %v\n", err)
 	}
 	currEpochValidatorsEncode, err := t.GetState(C8)
 	if err != nil {
-		log.Crit(debugSDB, "Error reading C8 CurrentEpochValidators from trie: %v\n", err)
+		log.Crit(log.SDB, "Error reading C8 CurrentEpochValidators from trie: %v\n", err)
 	}
 	priorEpochValidatorEncode, err := t.GetState(C9)
 	if err != nil {
-		log.Crit(debugSDB, "Error reading C9 PriorEpochValidators from trie: %v\n", err)
+		log.Crit(log.SDB, "Error reading C9 PriorEpochValidators from trie: %v\n", err)
 	}
 	rhoEncode, err := t.GetState(C10)
 	if err != nil {
-		log.Crit(debugSDB, "Error reading C10 Rho from trie: %v\n", err)
+		log.Crit(log.SDB, "Error reading C10 Rho from trie: %v\n", err)
 	}
 	mostRecentBlockTimeSlotEncode, err := t.GetState(C11)
 	if err != nil {
-		log.Crit(debugSDB, "Error reading C11 MostRecentBlockTimeSlot from trie: %v\n", err)
+		log.Crit(log.SDB, "Error reading C11 MostRecentBlockTimeSlot from trie: %v\n", err)
 	}
 	privilegedServiceIndicesEncode, err := t.GetState(C12)
 	if err != nil {
-		log.Crit(debugSDB, "Error reading C12 PrivilegedServiceIndices from trie: %v\n", err)
+		log.Crit(log.SDB, "Error reading C12 PrivilegedServiceIndices from trie: %v\n", err)
 	}
 	piEncode, err := t.GetState(C13)
 	if err != nil {
-		log.Crit(debugSDB, "Error reading C13 ActiveValidator from trie: %v\n", err)
+		log.Crit(log.SDB, "Error reading C13 ActiveValidator from trie: %v\n", err)
 	}
 	accumulateQueueEncode, err := t.GetState(C14)
 	if err != nil {
-		log.Crit(debugSDB, "Error reading C14 accunulateQueue from trie: %v\n", err)
+		log.Crit(log.SDB, "Error reading C14 accunulateQueue from trie: %v\n", err)
 	}
 	accumulateHistoryEncode, err := t.GetState(C15)
 	if err != nil {
-		log.Crit(debugSDB, "Error reading C15 accunulateHistory from trie: %v\n", err)
+		log.Crit(log.SDB, "Error reading C15 accunulateHistory from trie: %v\n", err)
 	}
 	//Decode(authQueueEncode) -> AuthorizationQueue
 	//set AuthorizationQueue back to JamState
@@ -363,7 +357,7 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	//γs :current epoch’s slot-sealer series, which is either a full complement of E tickets or, in the case of a fallback mode, a series of E Bandersnatch keys (epoch N)
 	sf := s.GetSafrole()
 	if sf == nil {
-		log.Crit(debugSDB, "UpdateTrieState: NO SAFROLE")
+		log.Crit(log.SDB, "UpdateTrieState: NO SAFROLE")
 	}
 	sb := sf.GetSafroleBasicState()
 	safroleStateEncode := sb.GetSafroleStateBytes()
@@ -409,7 +403,7 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 		t2, _ := trie.InitMerkleTreeFromHash(updated_root.Bytes(), s.sdb)
 		checkingResult, err := CheckingAllState(t, t2)
 		if !checkingResult || err != nil {
-			log.Crit(debugSDB, "CheckingAllState", "err", err)
+			log.Crit(log.SDB, "CheckingAllState", "err", err)
 		}
 	}
 
@@ -472,7 +466,7 @@ func (s *StateDB) UpdateAllTrieState(genesis string) common.Hash {
 	//γs :current epoch’s slot-sealer series, which is either a full complement of E tickets or, in the case of a fallback mode, a series of E Bandersnatch keys (epoch N)
 	snapshotBytesRaw, err := os.ReadFile(genesis)
 	if err != nil {
-		log.Crit(module, "UpdateAllTrieState:ReadFile", "genesis", genesis, "err", err)
+		log.Crit(log.SDB, "UpdateAllTrieState:ReadFile", "genesis", genesis, "err", err)
 		return common.Hash{}
 	}
 	snapshotRaw := StateSnapshotRaw{}
@@ -488,14 +482,14 @@ func (s *StateDB) UpdateAllTrieState(genesis string) common.Hash {
 
 	sf := s.GetSafrole()
 	if sf == nil {
-		log.Crit(module, "UpdateAllTrieState:GetSafrole")
+		log.Crit(log.SDB, "UpdateAllTrieState:GetSafrole")
 	}
 
 	if verify {
 		t2, _ := trie.InitMerkleTreeFromHash(updated_root.Bytes(), s.sdb)
 		checkingResult, err := CheckingAllState(t, t2)
 		if !checkingResult || err != nil {
-			log.Crit(module, "UpdateAllTrieState:CheckingAllState", "err", err)
+			log.Crit(log.SDB, "UpdateAllTrieState:CheckingAllState", "err", err)
 		}
 	}
 	return updated_root
@@ -517,91 +511,91 @@ func CheckingAllState(t *trie.MerkleTree, t2 *trie.MerkleTree) (bool, error) {
 	c1a, _ := t.GetState(C1)
 	c1b, _ := t2.GetState(C1)
 	if !common.CompareBytes(c1a, c1b) {
-		log.Error(module, "CheckingAllState: C1 is not the same")
+		log.Error(log.SDB, "CheckingAllState: C1 is not the same")
 		return false, fmt.Errorf("C1 is not the same")
 	}
 	c2a, _ := t.GetState(C2)
 	c2b, _ := t2.GetState(C2)
 	if !common.CompareBytes(c2a, c2b) {
-		log.Error(module, "CheckingAllState: C2 is not the same")
+		log.Error(log.SDB, "CheckingAllState: C2 is not the same")
 		return false, fmt.Errorf("C2 is not the same")
 	}
 	c3a, _ := t.GetState(C3)
 	c3b, _ := t2.GetState(C3)
 	if !common.CompareBytes(c3a, c3b) {
-		log.Error(module, "CheckingAllState: C3 is not the same")
+		log.Error(log.SDB, "CheckingAllState: C3 is not the same")
 		return false, fmt.Errorf("C3 is not the same")
 	}
 	c4a, _ := t.GetState(C4)
 	c4b, _ := t2.GetState(C4)
 	if !common.CompareBytes(c4a, c4b) {
-		log.Error(module, "CheckingAllState: C4 is not the same")
+		log.Error(log.SDB, "CheckingAllState: C4 is not the same")
 		return false, fmt.Errorf("C4 is not the same")
 	}
 	c5a, _ := t.GetState(C5)
 	c5b, _ := t2.GetState(C5)
 	if !common.CompareBytes(c5a, c5b) {
-		log.Error(module, "CheckingAllState: C5 is not the same")
+		log.Error(log.SDB, "CheckingAllState: C5 is not the same")
 		return false, fmt.Errorf("C5 is not the same")
 	}
 	c6a, _ := t.GetState(C6)
 	c6b, _ := t2.GetState(C6)
 	if !common.CompareBytes(c6a, c6b) {
-		log.Error(module, "CheckingAllState: C6 is not the same")
+		log.Error(log.SDB, "CheckingAllState: C6 is not the same")
 		return false, fmt.Errorf("C6 is not the same")
 	}
 	c7a, _ := t.GetState(C7)
 	c7b, _ := t2.GetState(C7)
 	if !common.CompareBytes(c7a, c7b) {
-		log.Error(module, "CheckingAllState: C7 is not the same")
+		log.Error(log.SDB, "CheckingAllState: C7 is not the same")
 		return false, fmt.Errorf("C7 is not the same")
 	}
 	c8a, _ := t.GetState(C8)
 	c8b, _ := t2.GetState(C8)
 	if !common.CompareBytes(c8a, c8b) {
-		log.Error(module, "CheckingAllState: C8 is not the same")
+		log.Error(log.SDB, "CheckingAllState: C8 is not the same")
 		return false, fmt.Errorf("C8 is not the same")
 	}
 	c9a, _ := t.GetState(C9)
 	c9b, _ := t2.GetState(C9)
 	if !common.CompareBytes(c9a, c9b) {
-		log.Error(module, "CheckingAllState: C9 is not the same")
+		log.Error(log.SDB, "CheckingAllState: C9 is not the same")
 		return false, fmt.Errorf("C9 is not the same")
 	}
 	c10a, _ := t.GetState(C10)
 	c10b, _ := t2.GetState(C10)
 	if !common.CompareBytes(c10a, c10b) {
-		log.Error(module, "CheckingAllState: C10 is not the same")
+		log.Error(log.SDB, "CheckingAllState: C10 is not the same")
 		return false, fmt.Errorf("C10 is not the same")
 	}
 	c11a, _ := t.GetState(C11)
 	c11b, _ := t2.GetState(C11)
 	if !common.CompareBytes(c11a, c11b) {
-		log.Error(module, "CheckingAllState: C11 is not the same")
+		log.Error(log.SDB, "CheckingAllState: C11 is not the same")
 		return false, fmt.Errorf("C11 is not the same")
 	}
 	c12a, _ := t.GetState(C12)
 	c12b, _ := t2.GetState(C12)
 	if !common.CompareBytes(c12a, c12b) {
-		log.Error(module, "CheckingAllState: C12 is not the same")
+		log.Error(log.SDB, "CheckingAllState: C12 is not the same")
 		return false, fmt.Errorf("C12 is not the same")
 	}
 	c13a, _ := t.GetState(C13)
 	c13b, _ := t2.GetState(C13)
 	if !common.CompareBytes(c13a, c13b) {
-		log.Error(module, "CheckingAllState: C13 is not the same")
+		log.Error(log.SDB, "CheckingAllState: C13 is not the same")
 		return false, fmt.Errorf("C13 is not the same")
 	}
 	c14a, _ := t.GetState(C14)
 	c14b, _ := t2.GetState(C14)
 	if !common.CompareBytes(c14a, c14b) {
-		log.Error(module, "CheckingAllState: C14 is not the same")
+		log.Error(log.SDB, "CheckingAllState: C14 is not the same")
 		return false, fmt.Errorf("C14 is not the same")
 	}
 	c15a, _ := t.GetState(C15)
 	c15b, _ := t2.GetState(C15)
 	if !common.CompareBytes(c15a, c15b) {
-		log.Error(module, "CheckingAllState: C15 is not the same")
+		log.Error(log.SDB, "CheckingAllState: C15 is not the same")
 		return false, fmt.Errorf("C15 is not the same")
 	}
 	return true, nil
@@ -716,7 +710,7 @@ func GenerateEpochPhaseTraceID(epoch uint32, phase uint32) string {
 func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential types.ValidatorSecret, ticketIDs []common.Hash, extrinsic_pool *types.ExtrinsicPool) (isAuthorizedBlockBuilder bool, blk *types.Block, sdb *StateDB, err error) {
 	genesisReady := s.JamState.SafroleState.CheckFirstPhaseReady(currJCE)
 	if !genesisReady {
-		//log.Warn(module, "ProcessState:GenesisNotReady", "currJCE", currJCE)
+		//log.Warn(log.SDB, "ProcessState:GenesisNotReady", "currJCE", currJCE)
 		return false, nil, nil, nil
 	}
 	targetJCE, timeSlotReady := s.JamState.SafroleState.CheckTimeSlotReady(currJCE)
@@ -740,7 +734,7 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 
 			proposedBlk, err := s.MakeBlock(ctx, credential, targetJCE, ticketID, extrinsic_pool)
 			if err != nil {
-				log.Error(module, "ProcessState:MakeBlock", "author", s.Id, "currJCE", currJCE, "e'", currEpoch, "m'", currPhase, "err", err)
+				log.Error(log.SDB, "ProcessState:MakeBlock", "author", s.Id, "currJCE", currJCE, "e'", currEpoch, "m'", currPhase, "err", err)
 				return true, nil, nil, err
 			}
 
@@ -775,22 +769,22 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 			valid_tickets := extrinsic_pool.GetTicketIDPairFromPool(used_entropy)
 			newStateDB, err := ApplyStateTransitionFromBlock(s, ctx, proposedBlk, valid_tickets) // shawn to check.. valid_tickets was nil here before
 			if err != nil {
-				log.Error(module, "ProcessState:ApplyStateTransitionFromBlock", "s.ID", s.Id, "currJCE", currJCE, "e'", currEpoch, "m'", currPhase, "err", err)
+				log.Error(log.SDB, "ProcessState:ApplyStateTransitionFromBlock", "s.ID", s.Id, "currJCE", currJCE, "e'", currEpoch, "m'", currPhase, "err", err)
 				return true, nil, nil, err
 			}
 			mode := "safrole"
 			if sf0.GetEpochT() == 0 {
 				mode = "fallback"
 			}
-			log.Info(module, "Authored Block", "mode", mode, "AUTHOR", s.Id, "p", common.Str(proposedBlk.GetParentHeaderHash()), "h", common.Str(proposedBlk.Header.Hash()), "e'", currEpoch, "m'", currPhase, "len(γ_a')",
+			log.Info(log.SDB, "Authored Block", "mode", mode, "AUTHOR", s.Id, "p", common.Str(proposedBlk.GetParentHeaderHash()), "h", common.Str(proposedBlk.Header.Hash()), "e'", currEpoch, "m'", currPhase, "len(γ_a')",
 				len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), "blk", proposedBlk.Str())
 			return true, proposedBlk, newStateDB, nil
 		}
-		log.Debug(log.BlockMonitoring, "ProcessState:NotAuthorizedBlockBuilder timeSlotReady", "currJCE", currJCE, "targetJCE", targetJCE, "credential", credential.BandersnatchPub.Hash(), "ticket", len(ticketIDs), "isAuthorizedBlockBuilder", isAuthorizedBlockBuilder)
+		log.Debug(log.B, "ProcessState:NotAuthorizedBlockBuilder timeSlotReady", "currJCE", currJCE, "targetJCE", targetJCE, "credential", credential.BandersnatchPub.Hash(), "ticket", len(ticketIDs), "isAuthorizedBlockBuilder", isAuthorizedBlockBuilder)
 		return false, nil, nil, nil
 	}
 	//waiting for block ... potentially submit ticket here
-	log.Debug(log.BlockMonitoring, "ProcessState:NotAuthorizedBlockBuilder", "currJCE", currJCE, "targetJCE", targetJCE, "credential", credential.BandersnatchPub.Hash(), "ticketLen", len(ticketIDs))
+	log.Debug(log.B, "ProcessState:NotAuthorizedBlockBuilder", "currJCE", currJCE, "targetJCE", targetJCE, "credential", credential.BandersnatchPub.Hash(), "ticketLen", len(ticketIDs))
 	return false, nil, nil, nil
 }
 
@@ -816,7 +810,7 @@ func (s *StateDB) DeleteServicePreimageKey(service uint32, blob_hash common.Hash
 	tree := s.GetTrie()
 	err := tree.DeletePreImageBlob(service, blob_hash)
 	if err != nil {
-		log.Error(module, "DeleteServicePreimageKey:DeletePreImageBlob", "blob_hash", blob_hash, "err", err)
+		log.Error(log.SDB, "DeleteServicePreimageKey:DeletePreImageBlob", "blob_hash", blob_hash, "err", err)
 		return err
 	}
 	return nil
@@ -841,7 +835,7 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 		// validate eq 157
 		_, err := s.ValidateAddPreimage(l.Requester, l.Blob)
 		if err != nil {
-			log.Error(module, "ApplyStateTransitionPreimages:ValidateAddPreimage", "n", s.Id, "err", err)
+			log.Error(log.SDB, "ApplyStateTransitionPreimages:ValidateAddPreimage", "n", s.Id, "err", err)
 			return 0, 0, err
 		}
 	}
@@ -851,7 +845,7 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 		// (eq 158)
 		// δ†[s]p[H(p)] = p
 		// δ†[s]l[H(p),∣p∣] = [τ′]
-		log.Trace(debugP, "WriteServicePreimageBlob", "Service_Index", l.Service_Index(), "Blob", l.Blob)
+		log.Trace(log.P, "WriteServicePreimageBlob", "Service_Index", l.Service_Index(), "Blob", l.Blob)
 		s.WriteServicePreimageBlob(l.Service_Index(), l.Blob)
 		s.WriteServicePreimageLookup(l.Service_Index(), l.Hash(), l.BlobLength(), []uint32{targetJCE})
 		num_preimages++
@@ -896,7 +890,7 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block) (isValid bool, validatorIdx
 	// ValidateTicketTransition
 	sf0, err := s.GetPosteriorSafroleEntropy(targetJCE)
 	if err != nil {
-		log.Error(module, "GetPosteriorSafroleEntropy", "err", err)
+		log.Error(log.SDB, "GetPosteriorSafroleEntropy", "err", err)
 		return false, validatorIdx, bandersnatch.BanderSnatchKey{}, fmt.Errorf("VerifyBlockHeader Failed: GetPosteriorSafroleEntropy")
 	}
 	// author_idx is the K' so we use the sf_tmp
@@ -919,8 +913,8 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block) (isValid bool, validatorIdx
 	m := h.BytesWithoutSig()
 	vrfOutput, err := bandersnatch.IetfVrfVerify(block_author_ietf_pub, H_s, c, m)
 	if err != nil {
-		log.Error(module, "IetfVrfVerify", "err", err)
-		log.Error(module, "IetfVrfVerify",
+		log.Error(log.SDB, "IetfVrfVerify", "err", err)
+		log.Error(log.SDB, "IetfVrfVerify",
 			"H_s", common.BytesToHexStr(H_s),
 			"c", common.BytesToHexStr(c),
 			"m", common.BytesToHexStr(m),
@@ -933,18 +927,18 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block) (isValid bool, validatorIdx
 	c = append([]byte(types.X_E), vrfOutput...)
 	_, err = bandersnatch.IetfVrfVerify(block_author_ietf_pub, H_v, c, []byte{})
 	if err != nil {
-		log.Error(module, "IetfVrfVerify", "err", err)
+		log.Error(log.SDB, "IetfVrfVerify", "err", err)
 		return false, validatorIdx, block_author_ietf_pub, fmt.Errorf("VerifyBlockHeader Failed: H_v Verification")
 	}
 
 	extrinsicHash := bl.Header.ExtrinsicHash
 	if !reflect.DeepEqual(extrinsicHash, bl.Extrinsic.Hash()) {
-		log.Error(module, "VerifyBlockHeader:ExtrinsicHashMismatch",
+		log.Error(log.SDB, "VerifyBlockHeader:ExtrinsicHashMismatch",
 			"extrinsicHash", common.BytesToHexStr(extrinsicHash[:]),
 			"bl.Extrinsic.Hash()", common.BytesToHexStr(bl.Extrinsic.Hash()),
 			"block_author_ietf_pub", common.BytesToHexStr(block_author_ietf_pub[:]),
 			"validatorIdx", validatorIdx)
-		log.Error(module, "VerifyBlockHeader:ExtrinsicHashMismatch",
+		log.Error(log.SDB, "VerifyBlockHeader:ExtrinsicHashMismatch",
 			"guarantees[0]", bl.Extrinsic.Guarantees[0].String())
 		return false, validatorIdx, block_author_ietf_pub, fmt.Errorf("VerifyBlockHeader Failed: ExtrinsicHash Mismatch")
 	}
@@ -960,7 +954,7 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 	// Validate ticket transition
 	sf0, err := s.GetPosteriorSafroleEntropy(targetJCE)
 	if err != nil {
-		log.Error(module, "GetPosteriorSafroleEntropy", "err", err)
+		log.Error(log.SDB, "GetPosteriorSafroleEntropy", "err", err)
 		return nil, fmt.Errorf("SealBlockWithEntropy Failed: GetPosteriorSafroleEntropy")
 	}
 	// Prepare a container to store all intermediate values for debugging / auditing
@@ -982,7 +976,7 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 			return nil, fmt.Errorf("error generating H_v for primary epoch: %w", err)
 		}
 		copy(header.EntropySource[:], H_v[:])
-		log.Trace(module, "IETF SIGN 1 H_v", "k", blockAuthorPriv[:], "c", c, "header.EntropySource", header.EntropySource[:])
+		log.Trace(log.SDB, "IETF SIGN 1 H_v", "k", blockAuthorPriv[:], "c", c, "header.EntropySource", header.EntropySource[:])
 		if saveSealBlockMaterial {
 			// Save for the material
 			material.TicketID = fmt.Sprintf("%s", ticketID)
@@ -1000,7 +994,7 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 			return nil, fmt.Errorf("error generating H_s for primary epoch: %w", err)
 		}
 		copy(header.Seal[:], H_s[:])
-		log.Trace(module, "IETF SIGN H_s", "k", blockAuthorPriv[:], "c", c, header.BytesWithoutSig(), "header.Seal", header.Seal[:])
+		log.Trace(log.SDB, "IETF SIGN H_s", "k", blockAuthorPriv[:], "c", c, header.BytesWithoutSig(), "header.Seal", header.Seal[:])
 
 		// Save for the material
 		if saveSealBlockMaterial {
@@ -1073,7 +1067,7 @@ func (s *StateDB) ValidateVRFSealInput(ticketID common.Hash, targetJCE uint32) (
 	// ValidateTicketTransition
 	sf0, err := s.GetPosteriorSafroleEntropy(targetJCE)
 	if err != nil {
-		log.Error(module, "GetPosteriorSafroleEntropy", "err", err)
+		log.Error(log.SDB, "GetPosteriorSafroleEntropy", "err", err)
 		return false, fmt.Errorf("ValidateVRFSealInput Failed: GetPosteriorSafroleEntropy")
 	}
 	if sf0.GetEpochT() == 0 {

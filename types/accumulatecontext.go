@@ -147,7 +147,6 @@ func (X *XContext) Clone() (Y XContext) {
 	for i, t := range X.T {
 		Y.T[i] = t.Clone()
 	}
-	//log.Info(log.StateDBMonitoring, "CLONE XContext", "X.U", X.U, "Y.U", Y.U)
 	return
 }
 

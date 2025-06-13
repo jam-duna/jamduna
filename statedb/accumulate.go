@@ -338,7 +338,7 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 		// this is parallelizable
 		B, U, XY, exceptional := s.SingleAccumulate(o, w, f, service)
 		if XY == nil {
-			log.Warn(module, "SingleAccumulate returned nil XContext", "service", service)
+			log.Warn(log.SDB, "SingleAccumulate returned nil XContext", "service", service)
 			continue
 		}
 		output_u += U
@@ -529,7 +529,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	if !ok {
 		serviceAccount, ok, err = sd.GetService(s)
 		if err != nil || !ok {
-			log.Error(module, "GetService ERR", "ok", ok, "err", err, "s", s)
+			log.Error(log.SDB, "GetService ERR", "ok", ok, "err", err, "s", s)
 			return
 		}
 	}

@@ -106,7 +106,7 @@ func (p *Peer) SendAuditAnnouncement(ctx context.Context, announcement JAMSNPAud
 		_, span := tracer.Start(ctx, fmt.Sprintf("[N%d] SendAuditAnnouncement", p.node.store.NodeID))
 		defer span.End()
 	}
-	log.Debug(module, "SendAuditAnnouncement", "peerID", p.PeerID, "headerHash", announcement.HeaderHash.String_short(), "tranche", announcement.Tranche)
+	log.Debug(log.Node, "SendAuditAnnouncement", "peerID", p.PeerID, "headerHash", announcement.HeaderHash.String_short(), "tranche", announcement.Tranche)
 	code := uint8(CE144_AuditAnnouncement)
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
@@ -173,7 +173,7 @@ func (n *Node) onAuditAnnouncement(ctx context.Context, stream quic.Stream, msg 
 	code := uint8(CE144_AuditAnnouncement)
 	var newReq JAMSNPAuditAnnouncement
 	if err := newReq.FromBytes(msg); err != nil {
-		log.Warn(module, "onAuditAnnouncement: failed to deserialize announcement", "peerID", peerID, "error", err)
+		log.Warn(log.Node, "onAuditAnnouncement: failed to deserialize announcement", "peerID", peerID, "error", err)
 		return fmt.Errorf("onAuditAnnouncement: failed to deserialize announcement: %w", err)
 	}
 
@@ -295,7 +295,7 @@ func (n *Node) onAuditAnnouncement(ctx context.Context, stream quic.Stream, msg 
 	case n.announcementsCh <- announcement:
 		// Sent successfully
 	default:
-		log.Warn(module, "onAuditAnnouncement: announcementsCh full, dropping announcement",
+		log.Warn(log.Node, "onAuditAnnouncement: announcementsCh full, dropping announcement",
 			"peerID", peerID,
 			"headerHash", newReq.HeaderHash.String_short())
 	}

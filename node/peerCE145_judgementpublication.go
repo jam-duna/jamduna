@@ -165,13 +165,13 @@ func (n *Node) onJudgmentPublication(ctx context.Context, stream quic.Stream, ms
 	case n.judgementsCh <- judgement:
 		// success
 	case <-ctx.Done():
-		log.Warn(module, "onJudgmentPublication: context canceled before sending judgement",
+		log.Warn(log.Node, "onJudgmentPublication: context canceled before sending judgement",
 			"peerID", peerID,
 			"workReportHash", jp.WorkReportHash.String_short(),
 			"validator", jp.ValidatorIndex)
 		return ctx.Err()
 	default:
-		log.Warn(module, "onJudgmentPublication: judgementsCh full, dropping judgement",
+		log.Warn(log.Node, "onJudgmentPublication: judgementsCh full, dropping judgement",
 			"peerID", peerID,
 			"workReportHash", jp.WorkReportHash.String_short(),
 			"validator", jp.ValidatorIndex)

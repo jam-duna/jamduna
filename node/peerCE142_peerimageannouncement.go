@@ -40,10 +40,10 @@ func (n *NodeContent) BroadcastPreimageAnnouncement(serviceID uint32, preimageHa
 
 	err = n.AddPreimageToPool(serviceID, preimage)
 	if err != nil {
-		log.Warn(debugP, "BroadcastPreimageAnnouncement:AddPreimageToPool", "err", err, "serviceID", serviceID, "len", len(preimage), "h", common.Blake2Hash(preimage))
+		log.Warn(log.P, "BroadcastPreimageAnnouncement:AddPreimageToPool", "err", err, "serviceID", serviceID, "len", len(preimage), "h", common.Blake2Hash(preimage))
 		return
 	}
-	log.Trace(module, "BroadcastPreimageAnnouncement:AddPreimageToPool", "n", n.String(), "p", pa.String())
+	log.Trace(log.Node, "BroadcastPreimageAnnouncement:AddPreimageToPool", "n", n.String(), "p", pa.String())
 
 	ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
 	defer cancel()                // ensures context is released
@@ -78,7 +78,7 @@ func (n *Node) onPreimageAnnouncement(ctx context.Context, stream quic.Stream, m
 
 	var preimageAnnouncement types.PreimageAnnouncement
 	if err := preimageAnnouncement.FromBytes(msg); err != nil {
-		log.Error(debugP, "onPreimageAnnouncement: failed to decode", "err", err)
+		log.Error(log.P, "onPreimageAnnouncement: failed to decode", "err", err)
 		return fmt.Errorf("onPreimageAnnouncement: decode failed: %w", err)
 	}
 
@@ -92,16 +92,16 @@ func (n *Node) onPreimageAnnouncement(ctx context.Context, stream quic.Stream, m
 
 	preimage, err := p.SendPreimageRequest(ctx, preimageHash)
 	if err != nil {
-		log.Warn(debugP, "SendPreimageRequest failed", "err", err)
+		log.Warn(log.P, "SendPreimageRequest failed", "err", err)
 		return fmt.Errorf("SendPreimageRequest failed: %w", err)
 	}
 
 	err = n.AddPreimageToPool(serviceIndex, preimage)
 	if err != nil {
-		log.Warn(debugP, "processPreimageAnnouncements:AddPreimageToPool", "err", err, "serviceID", serviceIndex, "len", len(preimage), "h", common.Blake2Hash(preimage))
+		log.Warn(log.P, "processPreimageAnnouncements:AddPreimageToPool", "err", err, "serviceID", serviceIndex, "len", len(preimage), "h", common.Blake2Hash(preimage))
 		return err
 	}
-	log.Trace(module, "BroadcastPreimageAnnouncement:AddPreimageToPool", "n", n.String(), "serviceID", serviceIndex, "len", len(preimage), "h", common.Blake2Hash(preimage))
+	log.Trace(log.Node, "BroadcastPreimageAnnouncement:AddPreimageToPool", "n", n.String(), "serviceID", serviceIndex, "len", len(preimage), "h", common.Blake2Hash(preimage))
 	// received a preimage announcement, mark it as known
 	n.peersInfo[peerID].AddKnownHash(preimageAnnouncement.PreimageHash)
 	// broadcast the preimage announcement to other peers
@@ -163,7 +163,7 @@ func (n *NodeContent) onPreimageRequest(ctx context.Context, stream quic.Stream,
 	preimageHash := common.BytesToHash(msg)
 	preimage, ok := n.extrinsic_pool.GetPreimageByHash(preimageHash)
 	if !ok {
-		log.Warn(debugP, "onPreimageRequest", "n", n.id, "hash", preimageHash, "msg", "preimage not found")
+		log.Warn(log.P, "onPreimageRequest", "n", n.id, "hash", preimageHash, "msg", "preimage not found")
 		return nil
 	}
 
@@ -174,6 +174,6 @@ func (n *NodeContent) onPreimageRequest(ctx context.Context, stream quic.Stream,
 		return fmt.Errorf("onPreimageRequest: sendQuicBytes failed: %w", err)
 	}
 
-	log.Trace(debugP, "onPreimageRequest", "n", n.id, "hash", preimageHash, "size", len(preimage.Blob))
+	log.Trace(log.P, "onPreimageRequest", "n", n.id, "hash", preimageHash, "size", len(preimage.Blob))
 	return nil
 }

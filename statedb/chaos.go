@@ -30,7 +30,7 @@ func SimulateBlockAuthoringInterruption(blk *types.Block) (authoring_supressed b
 	}
 	threshold := uint8(pNot * 256)
 	if r < threshold {
-		log.Warn(module, "Simulated Interruption: Not Broadcasting/Proposing", "n", blk.Header.AuthorIndex, "slot", slot, "e'", epoch, "p'", phase, "case", caseStr, "r", float64(r)/256, "threshold", pNot)
+		log.Warn(log.SDB, "Simulated Interruption: Not Broadcasting/Proposing", "n", blk.Header.AuthorIndex, "slot", slot, "e'", epoch, "p'", phase, "case", caseStr, "r", float64(r)/256, "threshold", pNot)
 		return true
 	}
 	return false

@@ -54,7 +54,7 @@ func NewNodeClient(server, wsUrl string) (*NodeClient, error) {
 	log.InitLogger("debug")
 	baseclient, err := rpc.Dial("tcp", server)
 	if err != nil {
-		log.Error(module, "NewNodeClient", "endpoint", server, "err", err)
+		log.Error(log.Node, "NewNodeClient", "endpoint", server, "err", err)
 		return nil, err
 	}
 
@@ -99,7 +99,7 @@ func (c *NodeClient) listenWebSocket() {
 		}
 		_, msg, err := c.wsConn.ReadMessage()
 		if err != nil {
-			log.Warn(module, "listenWebSocket read error", "err", err)
+			log.Warn(log.Node, "listenWebSocket read error", "err", err)
 			c.reconnectWebSocket()
 			time.Sleep(reconnectDelay)
 			continue
@@ -107,7 +107,7 @@ func (c *NodeClient) listenWebSocket() {
 
 		var envelope envelope
 		if err := json.Unmarshal(msg, &envelope); err != nil {
-			log.Warn(module, "listenWebSocket: Failed to parse WebSocket envelope", "err", err)
+			log.Warn(log.Node, "listenWebSocket: Failed to parse WebSocket envelope", "err", err)
 			continue
 		}
 		c.handleEnvelope(&envelope)
@@ -129,7 +129,7 @@ func (c *NodeClient) reconnectWebSocket() {
 	}
 	conn, _, err := websocket.DefaultDialer.Dial(wsUrl, nil)
 	if err != nil {
-		log.Error(module, "reconnectWebSocket: Failed to reconnect", "err", err)
+		log.Error(log.Node, "reconnectWebSocket: Failed to reconnect", "err", err)
 		return
 	}
 	c.wsConn = conn
@@ -144,7 +144,7 @@ func (c *NodeClient) handleEnvelope(envelope *envelope) error {
 			HeaderHash string `json:"headerHash"`
 		}
 		if err := json.Unmarshal(envelope.Result, &result); err != nil {
-			log.Warn(module, "listenWebSocket: Failed to parse BlockAnnouncement", "err", err)
+			log.Warn(log.Node, "listenWebSocket: Failed to parse BlockAnnouncement", "err", err)
 			return err
 		}
 		// fmt.Printf("Best block: %s\n", result.BlockHash)
@@ -157,7 +157,7 @@ func (c *NodeClient) handleEnvelope(envelope *envelope) error {
 			HeaderHash string `json:"headerHash"`
 		}
 		if err := json.Unmarshal(envelope.Result, &result); err != nil {
-			log.Warn(module, "listenWebSocket: Failed to parse BlockAnnouncement", "err", err)
+			log.Warn(log.Node, "listenWebSocket: Failed to parse BlockAnnouncement", "err", err)
 			return err
 		}
 		// fmt.Printf("Finalized block: %s\n", result.BlockHash)
@@ -168,7 +168,7 @@ func (c *NodeClient) handleEnvelope(envelope *envelope) error {
 			Statistics types.ValidatorStatistics `json:"statistics"`
 		}
 		if err := json.Unmarshal(envelope.Result, &payload); err != nil {
-			log.Warn(module, "listenWebSocket: Failed to parse StatisticsUpdate", "err", err)
+			log.Warn(log.Node, "listenWebSocket: Failed to parse StatisticsUpdate", "err", err)
 			return err
 		}
 		c.Statistics = payload.Statistics
@@ -179,7 +179,7 @@ func (c *NodeClient) handleEnvelope(envelope *envelope) error {
 			Info      types.ServiceAccount `json:"info"`
 		}
 		if err := json.Unmarshal(envelope.Result, &payload); err != nil {
-			log.Warn(module, "listenWebSocket: Failed to parse ServiceInfoUpdate", "err", err)
+			log.Warn(log.Node, "listenWebSocket: Failed to parse ServiceInfoUpdate", "err", err)
 			return err
 		}
 		c.ServiceInfo[payload.ServiceID] = payload.Info
@@ -193,7 +193,7 @@ func (c *NodeClient) handleEnvelope(envelope *envelope) error {
 			Value      string      `json:"value"`
 		}
 		if err := json.Unmarshal(envelope.Result, &payload); err != nil {
-			log.Warn(module, "listenWebSocket: Failed to parse SubServiceValue", "err", err)
+			log.Warn(log.Node, "listenWebSocket: Failed to parse SubServiceValue", "err", err)
 			return err
 		}
 		c.ServiceValue[payload.Hash] = common.Hex2Bytes(payload.Value)
@@ -205,7 +205,7 @@ func (c *NodeClient) handleEnvelope(envelope *envelope) error {
 			Preimage  string      `json:"preimage"`
 		}
 		if err := json.Unmarshal(envelope.Result, &payload); err != nil {
-			log.Warn(module, "listenWebSocket: Failed to parse ServiceInfoUpdate", "err", err)
+			log.Warn(log.Node, "listenWebSocket: Failed to parse ServiceInfoUpdate", "err", err)
 			return err
 		}
 		c.Preimage[payload.Hash] = common.Hex2Bytes(payload.Preimage)
@@ -217,7 +217,7 @@ func (c *NodeClient) handleEnvelope(envelope *envelope) error {
 			Timeslots []uint32    `json:"timeslots"`
 		}
 		if err := json.Unmarshal(envelope.Result, &payload); err != nil {
-			log.Warn(module, "listenWebSocket: Failed to parse SubServiceRequest", "err", err)
+			log.Warn(log.Node, "listenWebSocket: Failed to parse SubServiceRequest", "err", err)
 			return err
 		}
 		c.ServiceRequest[payload.Hash] = payload.Timeslots
@@ -228,13 +228,13 @@ func (c *NodeClient) handleEnvelope(envelope *envelope) error {
 			Status          string      `json:"status"`
 		}
 		if err := json.Unmarshal(envelope.Result, &payload); err != nil {
-			log.Warn(module, "listenWebSocket: Failed to parse SubWorkPackage", "err", err)
+			log.Warn(log.Node, "listenWebSocket: Failed to parse SubWorkPackage", "err", err)
 			return err
 		}
 		c.WorkPackage[payload.WorkPackageHash] = payload.Status
 
 	default:
-		log.Warn(module, "listenWebSocket: Failed to parse method", "method", envelope.Method)
+		log.Warn(log.Node, "listenWebSocket: Failed to parse method", "method", envelope.Method)
 	}
 
 	return nil
@@ -278,7 +278,7 @@ func (c *NodeClient) GetClient(possibleCores ...uint16) *rpc.Client {
 	}
 	idx, err := c.GetCoreCoWorkersPeers(coreIdx)
 	if err != nil {
-		log.Error(module, "GetClient: GetCoreCoWorkersPeers", "err", err)
+		log.Error(log.Node, "GetClient: GetCoreCoWorkersPeers", "err", err)
 		return c.baseClient
 	}
 
@@ -289,7 +289,7 @@ func (c *NodeClient) GetClient(possibleCores ...uint16) *rpc.Client {
 	}
 	client, err := rpc.Dial("tcp", c.server)
 	if err != nil {
-		log.Error(module, "GetClient: Dial", "selected", selected, "c.server", c.server, "err", err)
+		log.Error(log.Node, "GetClient: Dial", "selected", selected, "c.server", c.server, "err", err)
 		return c.baseClient
 	}
 	c.client = client
@@ -312,12 +312,12 @@ func (c *NodeClient) CallWithRetry(method string, args interface{}, reply interf
 			return nil
 		}
 		if strings.Contains(err.Error(), "connection reset") || strings.Contains(err.Error(), "broken pipe") {
-			log.Warn(module, "BaseClient broken, reconnecting")
+			log.Warn(log.Node, "BaseClient broken, reconnecting")
 			c.baseClient.Close()
 			c.baseClient, _ = rpc.Dial("tcp", c.server)
 		}
 
-		log.Warn(module, "CallWithRetry", "method", method, "attempt", attempt+1, "err", err)
+		log.Warn(log.Node, "CallWithRetry", "method", method, "attempt", attempt+1, "err", err)
 		// Reconnect
 		time.Sleep(500 * time.Millisecond)
 	}
@@ -328,7 +328,7 @@ func (c *NodeClient) SendCommand(command []string, nodeID int) {
 	addr := c.server
 	client, err := rpc.Dial("tcp", addr)
 	if err != nil {
-		log.Error(module, "SendCommand: Dial", "addr", addr, "err", err)
+		log.Error(log.Node, "SendCommand: Dial", "addr", addr, "err", err)
 		return
 	}
 	defer client.Close()
@@ -336,7 +336,7 @@ func (c *NodeClient) SendCommand(command []string, nodeID int) {
 	var response string
 	err = client.Call("jam.NodeCommand", command, &response)
 	if err != nil {
-		log.Error(module, "SendCommand: jam.NodeCommand", "addr", addr, "err", err)
+		log.Error(log.Node, "SendCommand: jam.NodeCommand", "addr", addr, "err", err)
 		return
 	}
 	decoded, err := strconv.Unquote(`"` + response + `"`)
@@ -350,7 +350,7 @@ func (c *NodeClient) SendCommand(command []string, nodeID int) {
 func (c *NodeClient) BroadcastCommand(command []string, exceptNode []int) {
 	client, err := rpc.Dial("tcp", c.server)
 	if err != nil {
-		log.Error(module, "BroadcastCommand", "addr", c.server, "err", err)
+		log.Error(log.Node, "BroadcastCommand", "addr", c.server, "err", err)
 		return
 	}
 	defer client.Close()
@@ -358,10 +358,10 @@ func (c *NodeClient) BroadcastCommand(command []string, exceptNode []int) {
 	var response string
 	err = client.Call("jam.NodeCommand", command, &response)
 	if err != nil {
-		log.Error(module, "BroadcastCommand", "addr", c.server, "err", err)
+		log.Error(log.Node, "BroadcastCommand", "addr", c.server, "err", err)
 		return
 	}
-	log.Info(module, "BroadcastCommand: Response", "addr", c.server, "response", response)
+	log.Info(log.Node, "BroadcastCommand: Response", "addr", c.server, "response", response)
 }
 
 func (c *NodeClient) Close() error {
@@ -425,7 +425,7 @@ func (c *NodeClient) SubmitWorkPackage(workPackageReq *WorkPackageRequest) error
 	// Marshal the WorkPackageRequest to JSON
 	reqBytes, err := json.Marshal(workPackageReq)
 	if err != nil {
-		log.Warn(module, "SubmitWorkPackage", "err", err)
+		log.Warn(log.Node, "SubmitWorkPackage", "err", err)
 		return fmt.Errorf("failed to marshal work package request: %w", err)
 	}
 
@@ -436,7 +436,7 @@ func (c *NodeClient) SubmitWorkPackage(workPackageReq *WorkPackageRequest) error
 	// Call the remote RPC method
 	err = c.GetClient().Call("jam.SubmitWorkPackage", req, &res)
 	if err != nil {
-		log.Warn(module, "SubmitWorkPackage: jam.SubmitWorkPackage", "err", err)
+		log.Warn(log.Node, "SubmitWorkPackage: jam.SubmitWorkPackage", "err", err)
 		return err
 	}
 	return nil
@@ -451,7 +451,7 @@ func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackag
 }
 
 func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPackageRequest) ([]common.Hash, error) {
-	log.Info(module, "NodeClient SubmitAndWaitForWorkPackages", "reqLen", len(reqs))
+	log.Info(log.Node, "NodeClient SubmitAndWaitForWorkPackages", "reqLen", len(reqs))
 	workPackageHashes := make([]common.Hash, len(reqs))
 	workPackageLastStatus := make(map[common.Hash]string)
 
@@ -477,7 +477,7 @@ func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*W
 			if idx, ok := identifierToIndex[prereqID]; ok {
 				prereqHashes = append(prereqHashes, reqs[idx].WorkPackage.Hash())
 			} else {
-				log.Warn(module, "Unknown prerequisite identifier", "identifier", prereqID)
+				log.Warn(log.Node, "Unknown prerequisite identifier", "identifier", prereqID)
 			}
 		}
 		req.WorkPackage.RefineContext.Prerequisites = prereqHashes
@@ -493,11 +493,11 @@ func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*W
 			"hash": hash.String(),
 		})
 		if err := c.SubmitWorkPackage(req); err != nil {
-			log.Warn(module, "Failed to submit work package", "identifier", req.Identifier, "err", err)
+			log.Warn(log.Node, "Failed to submit work package", "identifier", req.Identifier, "err", err)
 			return workPackageHashes, err
 		}
 		workPackageLastStatus[hash] = "submitted"
-		log.Info(module, "Subscribe", "id", req.Identifier, "h", hash, "prereqids", req.Prerequisites, "h", req.WorkPackage.RefineContext.Prerequisites)
+		log.Info(log.Node, "Subscribe", "id", req.Identifier, "h", hash, "prereqids", req.Prerequisites, "h", req.WorkPackage.RefineContext.Prerequisites)
 	}
 
 	// Wait for accumulation
@@ -519,14 +519,14 @@ func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*W
 					for _, ah := range state.AccumulationHistory {
 						for _, h := range ah.WorkPackageHash {
 							if workPackageHash == h {
-								log.Info(module, "Work package accumulated", "hash", workPackageHash.Hex())
+								log.Info(log.Node, "Work package accumulated", "hash", workPackageHash.Hex())
 								numacc++
 							}
 						}
 					}
 				}
 				if numacc == len(workPackageHashes) {
-					log.Info(module, "All work packages accumulated")
+					log.Info(log.Node, "All work packages accumulated")
 					return workPackageHashes, nil
 				}
 			}
@@ -535,20 +535,20 @@ func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*W
 			for _, workPackageHash := range workPackageHashes {
 				if status, ok := c.WorkPackage[workPackageHash]; ok {
 					if status == "accumulated" {
-						log.Info(module, "Work package accumulated", "hash", workPackageHash.Hex())
+						log.Info(log.Node, "Work package accumulated", "hash", workPackageHash.Hex())
 						numacc++
 					} else if status == "guaranteed" {
 						if workPackageLastStatus[workPackageHash] == "submitted" {
 							workPackageLastStatus[workPackageHash] = "guaranteed"
-							log.Info(module, "Work package guaranteed", "hash", workPackageHash.Hex())
+							log.Info(log.Node, "Work package guaranteed", "hash", workPackageHash.Hex())
 						}
 					} else {
-						log.Info(module, fmt.Sprintf("Work package status:%s", status), "hash", workPackageHash.Hex())
+						log.Info(log.Node, fmt.Sprintf("Work package status:%s", status), "hash", workPackageHash.Hex())
 					}
 				}
 			}
 			if numacc == len(workPackageHashes) {
-				log.Info(module, "All work packages accumulated")
+				log.Info(log.Node, "All work packages accumulated")
 				return workPackageHashes, nil
 			}
 
@@ -570,7 +570,7 @@ func (c *NodeClient) RobustSubmitWorkPackage(workpackage_req *WorkPackageRequest
 		defer cancel()
 		_, err = c.SubmitAndWaitForWorkPackage(ctx, workpackage_req)
 		if err != nil {
-			log.Error(module, "SendWorkPackageSubmission", "err", err)
+			log.Error(log.Node, "SendWorkPackageSubmission", "err", err)
 			tries = tries + 1
 		} else {
 			return workPackageHash, nil
@@ -781,11 +781,11 @@ func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName s
 	fmt.Printf("**** NewService: serviceCodeHash: %s\n", serviceCodeHash.Hex())
 	bootstrapCode, err := types.ReadCodeWithMetadata(statedb.BootstrapServiceFile, "bootstrap")
 	if err != nil {
-		log.Error(module, "NewService: ReadCodeWithMetadata", "err", err)
+		log.Error(log.Node, "NewService: ReadCodeWithMetadata", "err", err)
 		return
 	}
 	bootstrapCodeHash := common.Blake2Hash(bootstrapCode)
-	log.Info(module, "NewService: ReadCodeWithMetadata")
+	log.Info(log.Node, "NewService: ReadCodeWithMetadata")
 	bootstrapService := uint32(statedb.BootstrapServiceCode)
 	var auth_code_bytes, _ = os.ReadFile(common.GetFilePath(statedb.BootStrapNullAuthFile))
 	var auth_code = statedb.AuthorizeCode{
@@ -817,21 +817,21 @@ func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName s
 	wpr.WorkPackage = codeWP
 	wpr.ExtrinsicsBlobs = types.ExtrinsicsBlobs{}
 	wpHash := codeWP.Hash()
-	log.Info(module, "NewService: Submitting WP", "wph", wpHash)
+	log.Info(log.Node, "NewService: Submitting WP", "wph", wpHash)
 
 	// submits wp
 	ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()
 	_, err = c.SubmitAndWaitForWorkPackage(ctx, &wpr)
 	if err != nil {
-		log.Error(module, "SubmitWorkPackage", "err", err)
+		log.Error(log.Node, "SubmitWorkPackage", "err", err)
 		return
 	}
 
 	storageKey := common.ServiceStorageKey(0, []byte{0, 0, 0, 0})
 	value, _, err := c.GetServiceStorage(0, storageKey)
 	if err != nil {
-		log.Error(module, "GetServiceStorage", "err", err)
+		log.Error(log.Node, "GetServiceStorage", "err", err)
 		return
 	}
 	newServiceIdx = uint32(types.DecodeE_l(value))
@@ -840,11 +840,11 @@ func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName s
 	ctx, cancel = context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()
 	if err = c.SubmitAndWaitForPreimage(ctx, newServiceIdx, serviceCode); err != nil {
-		log.Error(module, "SubmitAndWaitForPreimage", "err", err)
+		log.Error(log.Node, "SubmitAndWaitForPreimage", "err", err)
 		return
 	}
 
-	log.Info(module, "----- NewService", "name", serviceName, "serviceID", newServiceIdx)
+	log.Info(log.Node, "----- NewService", "name", serviceName, "serviceID", newServiceIdx)
 	return
 }
 
@@ -854,19 +854,19 @@ func (c *NodeClient) LoadServices(services []string) (new_service_map map[string
 	for _, service_name := range services {
 		refineContext, err := c.GetRefineContext()
 		if err != nil {
-			log.Error(module, "LoadServices: GetRefineContext", "service_name", service_name, "err", err)
+			log.Error(log.Node, "LoadServices: GetRefineContext", "service_name", service_name, "err", err)
 			return new_service_map, err
 		}
 		service_path := fmt.Sprintf("/services/%s.pvm", service_name)
 		serviceCode, err := types.ReadCodeWithMetadata(service_path, service_name)
 		if err != nil {
-			log.Error(module, "LoadServices: ReadCodeWithMetadata", "service_name", service_name, "err", err)
+			log.Error(log.Node, "LoadServices: ReadCodeWithMetadata", "service_name", service_name, "err", err)
 			return nil, err
 		}
 		codeHash := common.Blake2Hash(serviceCode)
 		new_serviceIdx, err := c.NewService(refineContext, service_name, serviceCode, serviceIDs)
 		if err != nil {
-			log.Error(module, "LoadServices: NewService", "service_name", service_name, "err", err)
+			log.Error(log.Node, "LoadServices: NewService", "service_name", service_name, "err", err)
 			return nil, err
 		}
 		new_service_map[service_name] = types.ServiceInfo{

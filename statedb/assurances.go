@@ -91,7 +91,7 @@ func (s *StateDB) GetValidAssurances(assurances []types.Assurance, anchor common
 			// no error, so add to the list of valid assurances
 			checkedAssurances = append(checkedAssurances, a)
 		} else {
-			log.Warn(module, "GetValidAssurances checkAssurance", "err", err)
+			log.Warn(log.SDB, "GetValidAssurances checkAssurance", "err", err)
 		}
 	}
 	// Sort the assurances by validator index

@@ -15,7 +15,7 @@ import (
 )
 
 func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
-	log.Info(module, "FIB START", "targetN", targetN)
+	log.Info(log.Node, "FIB START", "targetN", targetN)
 
 	service0 := testServices["fib"]
 	serviceAuth := testServices["auth_copy"]
@@ -73,22 +73,22 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 			wr, err := RobustSubmitAndWaitForWorkPackages(ctx, n1, []*WorkPackageRequest{wpr})
 			cancel()
 			if err != nil {
-				log.Error(module, "SubmitAndWaitForWorkPackages ERR", "err", err)
+				log.Error(log.Node, "SubmitAndWaitForWorkPackages ERR", "err", err)
 				return
 			}
 
 			prevExportSegmentRoot = wr.AvailabilitySpec.ExportedSegmentRoot
 			k := common.ServiceStorageKey(statedb.FibServiceCode, []byte{0})
 			data, _, _ := n1.GetServiceStorage(statedb.FibServiceCode, k)
-			log.Info(module, wpr.Identifier, "workPackageHash", wr.AvailabilitySpec.WorkPackageHash, "exportedSegmentRoot", wr.AvailabilitySpec.ExportedSegmentRoot, "result", fmt.Sprintf("%x", data))
+			log.Info(log.Node, wpr.Identifier, "workPackageHash", wr.AvailabilitySpec.WorkPackageHash, "exportedSegmentRoot", wr.AvailabilitySpec.ExportedSegmentRoot, "result", fmt.Sprintf("%x", data))
 		} else {
-			log.Info(module, wpr.Identifier, "workPackageHash", wp.Hash(), "wp", wp.String())
+			log.Info(log.Node, wpr.Identifier, "workPackageHash", wp.Hash(), "wp", wp.String())
 		}
 	}
 }
 
 func fib2(n1 JNode, testServices map[string]*types.TestService, targetN int) error {
-	log.Info(module, "FIB2 START")
+	log.Info(log.Node, "FIB2 START")
 
 	jamKey := []byte("jam")
 	service0 := testServices["corevm"]
@@ -178,7 +178,7 @@ func fib2(n1 JNode, testServices map[string]*types.TestService, targetN int) err
 		wr, err := RobustSubmitAndWaitForWorkPackages(ctx, n1, []*WorkPackageRequest{wpr})
 		cancel()
 		if err != nil {
-			log.Error(module, "RobustSubmitAndWaitForWorkPackages", "err", err)
+			log.Error(log.Node, "RobustSubmitAndWaitForWorkPackages", "err", err)
 			return err
 		}
 		prevWP = wr.AvailabilitySpec.ExportedSegmentRoot
@@ -187,7 +187,7 @@ func fib2(n1 JNode, testServices map[string]*types.TestService, targetN int) err
 		for _, key := range []byte{0, 1, 2, 5, 6, 7, 8, 9} {
 			k := common.ServiceStorageKey(service0.ServiceCode, []byte{key})
 			data, _, _ := n1.GetServiceStorage(service0.ServiceCode, k)
-			log.Info(module,
+			log.Info(log.Node,
 				fmt.Sprintf("Fib2-(%s) result key %d", label, key),
 				"result", fmt.Sprintf("%x", data),
 			)
@@ -202,9 +202,9 @@ func fib2(n1 JNode, testServices map[string]*types.TestService, targetN int) err
 		case -1:
 			ctx2, cancel2 := context.WithTimeout(context.Background(), RefineTimeout)
 			if err := n1.SubmitAndWaitForPreimage(ctx2, service0.ServiceCode, childSvc["corevm_child"].Code); err != nil {
-				log.Error(module, "SubmitAndWaitForPreimage", "err", err)
+				log.Error(log.Node, "SubmitAndWaitForPreimage", "err", err)
 			} else {
-				log.Info(module, "COREVM CHILD LOADED")
+				log.Info(log.Node, "COREVM CHILD LOADED")
 			}
 			cancel2()
 		}

@@ -204,7 +204,7 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 			t.Fatalf("Failed to read service preimage blob: %v, elapsed: %d", err0, pvmFailedElapsed)
 		}
 		if common.Blake2Hash(code) != workItem.CodeHash {
-			log.Crit(module, "executeWorkPackageBundle: Code and CodeHash Mismatch")
+			log.Crit(log.Node, "executeWorkPackageBundle: Code and CodeHash Mismatch")
 		}
 		// fmt.Printf("index %d, code len=%d\n", service_index, len(code))
 		vm := pvm.NewVMFromCode(service_index, code, 0, s)
@@ -215,7 +215,7 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 
 		expectedSegmentCnt := int(workItem.ExportCount)
 		if expectedSegmentCnt != len(exported_segments) {
-			log.Warn(module, "executeWorkPackageBundle: ExportCount and ExportedSegments Mismatch", "ExportCount", expectedSegmentCnt, "ExportedSegments", len(exported_segments), "ExportedSegments", common.FormatPaddedBytesArray(exported_segments, 20))
+			log.Warn(log.Node, "executeWorkPackageBundle: ExportCount and ExportedSegments Mismatch", "ExportCount", expectedSegmentCnt, "ExportedSegments", len(exported_segments), "ExportedSegments", common.FormatPaddedBytesArray(exported_segments, 20))
 			expectedSegmentCnt = len(exported_segments)
 		}
 		if expectedSegmentCnt != 0 {

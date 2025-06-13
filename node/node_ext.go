@@ -244,7 +244,7 @@ func (m *ManualJCEManager) CheckReq() bool {
 			wpHash := segmentRootInfo.WorkPackageHash
 			if _, needed := refine_pending[wpHash]; needed {
 				if _, alreadyFound := refine_found_in_beta[wpHash]; !alreadyFound {
-					log.Trace(module, "CheckReq: Found required WP in Beta state", "wp", wpHash.Hex(), "i", i, "coreIdx", coreIdx)
+					log.Trace(log.Node, "CheckReq: Found required WP in Beta state", "wp", wpHash.Hex(), "i", i, "coreIdx", coreIdx)
 					refine_found_in_beta[wpHash] = struct{}{}
 				}
 			}
@@ -308,7 +308,7 @@ func (m *ManualJCEManager) CheckReq() bool {
 	} else {
 
 		numFound := initialRequiredCount - len(m.WPQueue)
-		log.Trace(module, "CheckReq", "numFound", numFound, "irc", initialRequiredCount, "lenQ", len(m.WPQueue))
+		log.Trace(log.Node, "CheckReq", "numFound", numFound, "irc", initialRequiredCount, "lenQ", len(m.WPQueue))
 
 		if m.JCEBuffer > 0 {
 			m.JCEBuffer--
@@ -369,7 +369,7 @@ func (m *ManualJCEManager) Start(ctx context.Context) {
 					queueLen := len(m.WPQueue)
 					m.stateMu.Unlock()
 
-					log.Trace(module, "Received WP signal", "wp", wp.Hex(), "ql", queueLen)
+					log.Trace(log.Node, "Received WP signal", "wp", wp.Hex(), "ql", queueLen)
 				default:
 					break drainLoop
 				}

@@ -103,19 +103,19 @@ func (p *Peer) SendBlockRequest(ctx context.Context, headerHash common.Hash, dir
 
 	err = sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code)
 	if err != nil {
-		log.Error(module, "CE128 SendBlockRequest:sendQuicBytes", "p", p.String(), "err", err)
+		log.Error(log.Node, "CE128 SendBlockRequest:sendQuicBytes", "p", p.String(), "err", err)
 		return blocks, err
 	}
 	stream.Close()
 	respBytes, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
 	if err != nil {
-		log.Error(module, "CE128 SendBlockRequest:receiveQuicBytes", "peerID", p.String(), "err", err)
+		log.Error(log.Node, "CE128 SendBlockRequest:receiveQuicBytes", "peerID", p.String(), "err", err)
 		return blocks, err
 	}
 
 	decodedBlocks, err := types.DecodeBlocks(respBytes)
 	if err != nil {
-		log.Error(module, "CE128 DecodeBlocks", "peerID", p.String(), "err", err)
+		log.Error(log.Node, "CE128 DecodeBlocks", "peerID", p.String(), "err", err)
 		return blocks, err
 	}
 	return decodedBlocks, nil
@@ -134,12 +134,12 @@ func (n *NodeContent) onBlockRequest(ctx context.Context, stream quic.Stream, ms
 	// read the request and response with a set of blocks
 	blocks, ok, err := n.BlocksLookup(newReq.HeaderHash, newReq.Direction, newReq.MaximumBlocks)
 	if err != nil {
-		log.Error(module, "onBlockRequest", "headerHash", newReq.HeaderHash, "err", err)
+		log.Error(log.Node, "onBlockRequest", "headerHash", newReq.HeaderHash, "err", err)
 		stream.CancelWrite(ErrKeyNotFound)
 		return fmt.Errorf("onBlockRequest: lookup failed: %w", err)
 	}
 	if !ok {
-		log.Error(module, "onBlockRequest NOT OK", "headerHash", newReq.HeaderHash, "direction", newReq.Direction)
+		log.Error(log.Node, "onBlockRequest NOT OK", "headerHash", newReq.HeaderHash, "direction", newReq.Direction)
 		return nil
 	}
 	var blockBytes []byte
@@ -154,14 +154,14 @@ func (n *NodeContent) onBlockRequest(ctx context.Context, stream quic.Stream, ms
 	// check BLOCK if the blockbytes we sent are decodable
 	decodedBlocks, err := types.DecodeBlocks(blockBytes)
 	if len(decodedBlocks) != len(blocks) {
-		log.Warn(module, "***** onBlockRequest DecodeBlocks mismatch", "peerID", peerID, "ok", ok,
+		log.Warn(log.Node, "***** onBlockRequest DecodeBlocks mismatch", "peerID", peerID, "ok", ok,
 			"HeaderHash", newReq.HeaderHash, "Direction", newReq.Direction, "MaximumBlocks", newReq.MaximumBlocks,
 			"len(blocks)", len(blocks), "len(blockBytes)", len(blockBytes), "len(decodedBlocks)", len(decodedBlocks))
 	} else {
 		for i, decodedBlock := range decodedBlocks {
 			origBlock := blocks[i]
 			if origBlock.Header.Hash() != decodedBlock.Header.Hash() {
-				log.Warn(module, "***** onBlockRequest decodedBlock != origBlock header hash", "i", i, "peerID", peerID,
+				log.Warn(log.Node, "***** onBlockRequest decodedBlock != origBlock header hash", "i", i, "peerID", peerID,
 					"ok", ok, "HeaderHash", newReq.HeaderHash, "Direction", newReq.Direction, "MaximumBlocks", newReq.MaximumBlocks,
 					"len(blocks)", len(blocks))
 			}
@@ -170,7 +170,7 @@ func (n *NodeContent) onBlockRequest(ctx context.Context, stream quic.Stream, ms
 
 	err = sendQuicBytes(ctx, stream, blockBytes, n.id, CE128_BlockRequest)
 	if err != nil {
-		log.Warn(module, "onBlockRequest sendQuicBytes", "headerHash", newReq.HeaderHash, "direction", newReq.Direction, "err", err)
+		log.Warn(log.Node, "onBlockRequest sendQuicBytes", "headerHash", newReq.HeaderHash, "direction", newReq.Direction, "err", err)
 		return fmt.Errorf("onBlockRequest: sendQuicBytes failed: %w", err)
 	}
 

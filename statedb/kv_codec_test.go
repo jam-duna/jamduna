@@ -50,5 +50,5 @@ import (
 func TestE(t *testing.T) {
 	a := []byte{0x80, 0x93}
 	decoded, l := types.DecodeE(a)
-	log.Trace(module, "TestE", "Decoded", decoded, "Length", l)
+	log.Trace(log.SDB, "TestE", "Decoded", decoded, "Length", l)
 }

@@ -568,8 +568,8 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (co
 			return common.BytesToHash(ticket_id), nil
 		} else {
 			ticketID, _ := t.TicketID()
-			log.Warn(module, "Failed to verify ticket", "ticket_id", ticketID, "attempt", t.Attempt, "target_epoch_randomness", targetEpochRandomness, "ERR", err)
-			log.Warn(module, "Failed to verify ticket", "ticket_id", ticketID, "ticket_signature", t.String())
+			log.Warn(log.SDB, "Failed to verify ticket", "ticket_id", ticketID, "attempt", t.Attempt, "target_epoch_randomness", targetEpochRandomness, "ERR", err)
+			log.Warn(log.SDB, "Failed to verify ticket", "ticket_id", ticketID, "ticket_signature", t.String())
 		}
 	}
 
@@ -755,13 +755,13 @@ func (s *SafroleState) IsAuthorizedBuilder(slot_index uint32, bandersnatchPub co
 			return true, common.Hash{}, 0, "fallback author"
 		}
 	} else {
-		log.Warn(module, "no way hit here", "slot_index", slot_index, "bandersnatchPub", bandersnatchPub.String(), "currPhase", currPhase, "t_or_k.Tickets", len(t_or_k.Tickets), "t_or_k.Keys", len(t_or_k.Keys))
+		log.Warn(log.SDB, "no way hit here", "slot_index", slot_index, "bandersnatchPub", bandersnatchPub.String(), "currPhase", currPhase, "t_or_k.Tickets", len(t_or_k.Tickets), "t_or_k.Keys", len(t_or_k.Keys))
 		if mode == "tickets" {
 			tickets_json, _ := json.Marshal(t_or_k.Tickets)
-			log.Warn(module, "no way hit here", "tickets_json", string(tickets_json))
+			log.Warn(log.SDB, "no way hit here", "tickets_json", string(tickets_json))
 		} else if mode == "keys" {
 			keys_json, _ := json.Marshal(t_or_k.Keys)
-			log.Warn(module, "no way hit here", "keys_json", string(keys_json))
+			log.Warn(log.SDB, "no way hit here", "keys_json", string(keys_json))
 		}
 		return false, common.Hash{}, 0, "no way hit here"
 	}
@@ -1143,12 +1143,12 @@ func (s2 *SafroleState) AdvanceEntropyAndValidator(s *SafroleState, new_entropy_
 	s2.PrevValidators = s2.CurrValidators
 	s2.CurrValidators = s2.NextValidators
 	if types.GetValidatorsLength(s2.NextValidators) == 0 {
-		log.Crit(module, "no NextValidators")
+		log.Crit(log.SDB, "no NextValidators")
 		return
 	}
 	s2.NextValidators = s2.CleanValidators(s2.DesignedValidators)
 	if types.GetValidatorsLength(s2.DesignedValidators) == 0 {
-		log.Crit(module, "no NextValidators")
+		log.Crit(log.SDB, "no NextValidators")
 		return
 	}
 	//prev_n0 := s2.Entropy[0]
@@ -1510,11 +1510,11 @@ func VerifySafroleSTF(old_sf_origin *SafroleState, new_sf_origin *SafroleState, 
 	block_author_ietf_pub := bandersnatch.BanderSnatchKey(signing_validator.GetBandersnatchKey())
 	vrfOutput, err := bandersnatch.IetfVrfVerify(block_author_ietf_pub, H_s, c, m)
 	if err != nil {
-		log.Error(module, "IetfVrfVerify Failed", "validatorIdx", validatorIdx, "block_author_ietf_pub", block_author_ietf_pub.String(), "H_s(seal)", H_s, "c", c, "m(headerWithoutSig)", m, "err", err)
-		log.Error(module, "IetfVrfVerify Failed (Extra)", "slot", slot_header, "type", new_sf.GetEpochT(), "validatorIdx", validatorIdx, "blockSealEntropy n[3]", blockSealEntropy, "Entropy", new_sf.Entropy)
+		log.Error(log.SDB, "IetfVrfVerify Failed", "validatorIdx", validatorIdx, "block_author_ietf_pub", block_author_ietf_pub.String(), "H_s(seal)", H_s, "c", c, "m(headerWithoutSig)", m, "err", err)
+		log.Error(log.SDB, "IetfVrfVerify Failed (Extra)", "slot", slot_header, "type", new_sf.GetEpochT(), "validatorIdx", validatorIdx, "blockSealEntropy n[3]", blockSealEntropy, "Entropy", new_sf.Entropy)
 		return fmt.Errorf("VerifyBlockHeader Failed: H_s Verification")
 	} else {
-		log.Error(module, "IetfVrfVerify OK (H_s)", "slot", slot_header, "type", new_sf.GetEpochT(), "validatorIdx", validatorIdx, "blockSealEntropy n[3]", blockSealEntropy, "Entropy", new_sf.Entropy)
+		log.Error(log.SDB, "IetfVrfVerify OK (H_s)", "slot", slot_header, "type", new_sf.GetEpochT(), "validatorIdx", validatorIdx, "blockSealEntropy n[3]", blockSealEntropy, "Entropy", new_sf.Entropy)
 	}
 	// H_v Verification (6.17)
 	H_v := header.EntropySource[:]

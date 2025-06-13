@@ -143,7 +143,7 @@ func (p *Peer) SendStateRequest(ctx context.Context, headerHash common.Hash, sta
 	boundaryNode := parts[0]
 	//<-- [Key ++ Value]
 	keyVal := parts[1]
-	log.Info(module, "SendStateRequest: received boundary node and key-value pairs",
+	log.Info(log.Node, "SendStateRequest: received boundary node and key-value pairs",
 		"boundaryNodeLength", len(boundaryNode), "keyValLength", len(keyVal))
 	fmt.Printf("SendStateRequest: %x\n", keyVal)
 	return nil
@@ -167,7 +167,7 @@ func (n *NodeContent) onStateRequest(ctx context.Context, stream quic.Stream, ms
 	}
 	if !ok {
 		// No state found for the given range — optional: log and return nil to skip sending
-		log.Warn(module, "onStateRequest: state not found", "headerHash", newReq.HeaderHash)
+		log.Warn(log.Node, "onStateRequest: state not found", "headerHash", newReq.HeaderHash)
 		return nil
 	}
 

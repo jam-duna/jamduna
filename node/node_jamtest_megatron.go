@@ -104,7 +104,7 @@ func megatron(n1 JNode, testServices map[string]*types.TestService, targetN int)
 		wprs := []*WorkPackageRequest{wprFibTrib, wprMeg}
 		wr, err := RobustSubmitAndWaitForWorkPackages(ctx, n1, wprs)
 		if err != nil {
-			log.Error(module, "RobustSubmitAndWaitForWorkPackages", "err", err)
+			log.Error(log.Node, "RobustSubmitAndWaitForWorkPackages", "err", err)
 			return err
 		}
 		// TODO: fix this

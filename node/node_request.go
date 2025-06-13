@@ -174,7 +174,7 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, np_blockAnnouncemen
 	p, ok := n.peersInfo[validatorIndex]
 	if !ok {
 		err := fmt.Errorf("invalid validator index %d", validatorIndex)
-		log.Error(module, "processBlockAnnouncement", "err", err)
+		log.Error(log.Node, "processBlockAnnouncement", "err", err)
 		return nil, err
 	}
 
@@ -227,13 +227,13 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, np_blockAnnouncemen
 			attemptCtx, cancel := context.WithTimeout(ctx, VeryLargeTimeout)
 			blocksRaw, lastErr = p.GetMultiBlocks(last_finalized_block_header_hash, attemptCtx)
 			cancel()
-			log.Warn(log.BlockMonitoring, "GetAllBlocks", "attempt", attempt, "blockHash", headerHash, "blocksRaw.Len", len(blocksRaw), "isSync", false)
+			log.Warn(log.B, "GetAllBlocks", "attempt", attempt, "blockHash", headerHash, "blocksRaw.Len", len(blocksRaw), "isSync", false)
 			n.SetIsSync(false, "no blocks")
 		case MiddleBlocksMode:
 			attemptCtx, cancel := context.WithTimeout(ctx, VeryLargeTimeout)
 			blocksRaw, lastErr = p.GetMultiBlocks(last_finalized_block_header_hash, attemptCtx)
 			cancel()
-			log.Warn(log.BlockMonitoring, "GetMiddleBlocks", "attempt", attempt, "num", num, "blockHash", headerHash, "blocksRaw.Len", len(blocksRaw), "isSync", false)
+			log.Warn(log.B, "GetMiddleBlocks", "attempt", attempt, "num", num, "blockHash", headerHash, "blocksRaw.Len", len(blocksRaw), "isSync", false)
 			n.SetIsSync(false, "behind others")
 		default:
 			return nil, fmt.Errorf("invalid mode %d", mode)
@@ -242,7 +242,7 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, np_blockAnnouncemen
 		if lastErr == nil && len(blocksRaw) > 0 {
 			if attempt > 1 {
 				// if attempt >1, we can try to find a new peer
-				log.Info(module, "SendBlockRequest succeeded", "attempt", attempt, "blockHash", headerHash)
+				log.Info(log.Node, "SendBlockRequest succeeded", "attempt", attempt, "blockHash", headerHash)
 				origin := validatorIndex
 				// find a new peer
 				for {
@@ -256,7 +256,7 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, np_blockAnnouncemen
 				_, ok = n.peersInfo[validatorIndex]
 				if !ok {
 					err := fmt.Errorf("invalid validator index %d", validatorIndex)
-					log.Error(module, "processBlockAnnouncement", "err", err)
+					log.Error(log.Node, "processBlockAnnouncement", "err", err)
 					return nil, err
 				}
 			}
@@ -264,7 +264,7 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, np_blockAnnouncemen
 		}
 
 		if attempt == maxAttempts {
-			log.Warn(module, "SendBlockRequest failed after 3 attempts", "mode", mode, "blockHash", headerHash, "lastErr", lastErr)
+			log.Warn(log.Node, "SendBlockRequest failed after 3 attempts", "mode", mode, "blockHash", headerHash, "lastErr", lastErr)
 			return nil, fmt.Errorf("SendBlockRequest failed after 3 attempts with mode=%v: %w", mode, lastErr)
 		}
 	}
@@ -272,11 +272,11 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, np_blockAnnouncemen
 		block := &blocksRaw[i]
 		err := n.processBlock(block)
 		if err != nil {
-			log.Error(module, "processBlockAnnouncement", "err", err, "mode", mode, "blockHash", block.Header.Hash())
+			log.Error(log.Node, "processBlockAnnouncement", "err", err, "mode", mode, "blockHash", block.Header.Hash())
 			return nil, err
 		}
 	}
-	log.Debug(debugStream, "Broadcast blockAnnouncement", "n", n.String(), "blockHash", headerHash)
+	log.Debug(log.Quic, "Broadcast blockAnnouncement", "n", n.String(), "blockHash", headerHash)
 
 	n.broadcast(context.Background(), np_blockAnnouncement)
 	return blocksRaw, nil
@@ -324,7 +324,7 @@ func (n *Node) runBlocksTickets() {
 			if n.GetIsSync() {
 				n.processTicket(ticket)
 			} else {
-				log.Info(debugT, "runBlocksTickets: Node is not in sync, ignoring ticket", "n", n.String(), "ticket", ticket.TicketID)
+				log.Info(log.Node, "runBlocksTickets: Node is not in sync, ignoring ticket", "n", n.String(), "ticket", ticket.TicketID)
 			}
 		}
 	}
@@ -362,13 +362,13 @@ func (n *Node) runReceiveBlock() {
 			cancel()
 			processBlockAnnouncementElapsed := common.ElapsedStr(start)
 			if err != nil {
-				log.Warn(debugBlock, "processBlockAnnouncement failed", "n", n.String(), "err", err)
+				log.Warn(log.B, "processBlockAnnouncement failed", "n", n.String(), "err", err)
 				n.SetIsSync(false, "fail to get latest block")
 				continue
 			} else {
 				if len(blocks) == 0 { // check
 					block := blocks[0]
-					log.Trace(debugBlock, "processBlock",
+					log.Trace(log.B, "processBlock",
 						"author", blockAnnouncement.Header.AuthorIndex,
 						"p", common.Str(block.GetParentHeaderHash()),
 						"h", common.Str(block.Header.Hash()),
@@ -376,7 +376,7 @@ func (n *Node) runReceiveBlock() {
 						"goroutines", runtime.NumGoroutine())
 				}
 				for _, block := range blocks {
-					log.Debug(debugBlock, "GetBlock",
+					log.Debug(log.B, "GetBlock",
 						"author", blockAnnouncement.Header.AuthorIndex,
 						"p", common.Str(block.GetParentHeaderHash()),
 						"h", common.Str(block.Header.Hash()),
@@ -388,14 +388,14 @@ func (n *Node) runReceiveBlock() {
 			extendCtx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
 			start = time.Now()
 			if err := n.extendChain(extendCtx); err != nil {
-				log.Warn(debugBlock, "runReceiveBlock: extendChain failed", "n", n.String(), "err", err)
+				log.Warn(log.B, "runReceiveBlock: extendChain failed", "n", n.String(), "err", err)
 			}
 			extendChainElapsed := common.ElapsedStr(start)
 			n.jce_timestamp_mutex.Lock()
 			block_to_apply := time.Since(n.jce_timestamp[blockAnnouncement.Header.Slot])
 			n.jce_timestamp_mutex.Unlock()
 			if extendChainElapsed > time.Second {
-				log.Debug(debugBlock, "runReceiveBlock: extendChain time", "n", n.String(), "takes", extendChainElapsed, "takes to apply", block_to_apply, "processBlockAnnouncement", processBlockAnnouncementElapsed)
+				log.Debug(log.B, "runReceiveBlock: extendChain time", "n", n.String(), "takes", extendChainElapsed, "takes to apply", block_to_apply, "processBlockAnnouncement", processBlockAnnouncementElapsed)
 			}
 			if GrandpaEasy {
 				n.block_tree.EasyFinalization()
@@ -406,7 +406,7 @@ func (n *Node) runReceiveBlock() {
 				if block != nil {
 					err := n.StoreFinalizedBlock(block)
 					if err != nil {
-						log.Warn(debugBlock, "runReceiveBlock: StoreFinalizedBlock failed", "n", n.String(), "err", err)
+						log.Warn(log.B, "runReceiveBlock: StoreFinalizedBlock failed", "n", n.String(), "err", err)
 					}
 				}
 			}()
@@ -414,10 +414,10 @@ func (n *Node) runReceiveBlock() {
 		case <-pulseTicker.C:
 			// MediumTimeout to extend the chain
 		case <-n.stop_receive_blk:
-			log.Trace(debugBlock, "runReceiveBlock: received stop signal", "n", n.String())
+			log.Trace(log.B, "runReceiveBlock: received stop signal", "n", n.String())
 			select {
 			case <-n.restart_receive_blk:
-				log.Trace(debugBlock, "runReceiveBlock: restart signal received", "n", n.String())
+				log.Trace(log.B, "runReceiveBlock: restart signal received", "n", n.String())
 			}
 		}
 	}
@@ -444,9 +444,9 @@ func (n *Node) runGuarantees() {
 				err := n.processGuarantee(guarantee, "runGuarantees-Ch")
 				if err != nil {
 					if statedb.AcceptableGuaranteeError(err) {
-						log.Warn(debugG, "runGuarantees:processGuarantee", "n", n.String(), "problem", err, "TODO", "ignoring...")
+						log.Warn(log.G, "runGuarantees:processGuarantee", "n", n.String(), "problem", err, "TODO", "ignoring...")
 					} else {
-						log.Error(debugG, "runGuarantees:processGuarantee", "n", n.String(), "err", err)
+						log.Error(log.G, "runGuarantees:processGuarantee", "n", n.String(), "err", err)
 					}
 				}
 			}
@@ -537,14 +537,14 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 		erasureRoot := req.ErasureRoot
 		shardIdx_self := ComputeShardIndex(req.CoreIndex, n.id)
 
-		log.Trace(debugDA, "CE138_request: abc", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex, "coreIdx", req.CoreIndex)
+		log.Trace(log.DA, "CE138_request: abc", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex, "coreIdx", req.CoreIndex)
 
 		// handle selfRequesting case
 		if req.ShardIndex == shardIdx_self {
-			log.Trace(debugDA, "CE138_request: selfRequesting", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex)
+			log.Trace(log.DA, "CE138_request: selfRequesting", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex)
 			bundleShard, sClub, encodedPath, _, err := n.GetBundleShard_Assurer(req.ErasureRoot, req.ShardIndex)
 			if err != nil {
-				log.Error(debugDA, "CE138_request: selfRequesting ERROR", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(self)", n.id, "ERR", err)
+				log.Error(log.DA, "CE138_request: selfRequesting ERROR", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(self)", n.id, "ERR", err)
 				return resp, err
 			}
 			self_response := CE138_response{
@@ -553,24 +553,24 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 				SClub:         sClub,
 				Justification: encodedPath,
 			}
-			log.Trace(debugDA, "CE138_request: selfRequesting OK", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "CE138_response", types.ToJSONHex(self_response))
+			log.Trace(log.DA, "CE138_request: selfRequesting OK", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "CE138_response", types.ToJSONHex(self_response))
 			return self_response, nil
 		}
 
 		//peerID = req.ValidatorIndex
 		peer, err := n.getPeerByIndex(peerID) // TODO: what is this peerID??
 		if err != nil {
-			log.Error(debugDA, "CE138_request: SendBundleShardRequest ERROR on getPeerByIndex", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "ERR", err)
+			log.Error(log.DA, "CE138_request: SendBundleShardRequest ERROR on getPeerByIndex", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "ERR", err)
 			return resp, err
 		}
-		log.Trace(debugDA, "CE138_request: SendBundleShardRequest", "n", n.String(), "erasureRoot", erasureRoot, "Req peer shardIndex", peerID, "peer.PeerID", peer.PeerID)
+		log.Trace(log.DA, "CE138_request: SendBundleShardRequest", "n", n.String(), "erasureRoot", erasureRoot, "Req peer shardIndex", peerID, "peer.PeerID", peer.PeerID)
 
 		startTime := time.Now()
 		bundleShard, sClub, encodedPath, err := peer.SendBundleShardRequest(ctx, erasureRoot, req.ShardIndex)
 		rtt := time.Since(startTime)
-		log.Debug(debugDA, "CE138_request: SendBundleShardRequest RTT", "n", n.String(), "peerID", peerID, "rtt", rtt)
+		log.Debug(log.DA, "CE138_request: SendBundleShardRequest RTT", "n", n.String(), "peerID", peerID, "rtt", rtt)
 		if err != nil {
-			log.Trace(debugDA, "CE138_request: SendBundleShardRequest ERROR on resp", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "ERR", err)
+			log.Trace(log.DA, "CE138_request: SendBundleShardRequest ERROR on resp", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "ERR", err)
 			return resp, err
 		}
 		response := CE138_response{
@@ -579,7 +579,7 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 			SClub:         sClub,
 			Justification: encodedPath,
 		}
-		log.Trace(debugDA, "CE138_request: SendBundleShardRequest OK", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "CE138_response", types.ToJSONHex(response))
+		log.Trace(log.DA, "CE138_request: SendBundleShardRequest OK", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "CE138_response", types.ToJSONHex(response))
 		return response, nil
 
 	case "CE139_request":
@@ -587,7 +587,7 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 		erasureRoot := req.ErasureRoot
 		segmentIndices := req.SegmentIndices
 
-		log.Trace(debugDA, "CE139_request", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex, "coreIdx", req.CoreIndex)
+		log.Trace(log.DA, "CE139_request", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex, "coreIdx", req.CoreIndex)
 		peer, err := n.getPeerByIndex(peerID) // check
 		if err != nil {
 			return resp, err
@@ -658,7 +658,7 @@ func (n *NodeContent) makeRequests(
 
 			res, err := n.sendRequest(reqCtx, peerID, obj)
 			if err != nil {
-				log.Trace(debugDA, "sendRequest failed", "peerID", peerID, "err", err)
+				log.Trace(log.DA, "sendRequest failed", "peerID", peerID, "err", err)
 				return
 			}
 
@@ -696,7 +696,7 @@ func (n *NodeContent) makeRequests(
 	sc := successCount
 	mu.Unlock()
 
-	log.Trace(debugDA, "makeRequests: successCount", sc)
+	log.Trace(log.DA, "makeRequests: successCount", sc)
 
 	if sc < minSuccess {
 		return nil, fmt.Errorf("not enough successful requests (successCount:%d < minSuccess:%d)", sc, minSuccess)

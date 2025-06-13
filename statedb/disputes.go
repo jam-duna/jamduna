@@ -256,7 +256,7 @@ func (j *JamState) checkSignature(v types.Verdict) error {
 			return jamerrors.ErrDBadSignatureInVerdict
 		}
 	} else {
-		log.Trace(debugAudit, "Verdict Error: the epoch of the verdict is invalid, current epoch", "e", v.Epoch, "ts/E", j.SafroleState.Timeslot/E)
+		log.Trace(log.Audit, "Verdict Error: the epoch of the verdict is invalid, current epoch", "e", v.Epoch, "ts/E", j.SafroleState.Timeslot/E)
 		return jamerrors.ErrDAgeTooOldInVerdicts
 	}
 	return nil
@@ -378,11 +378,11 @@ func checkWorkReportHash(v []types.Verdict, psi_g [][]byte, psi_b [][]byte, psi_
 			return jamerrors.ErrDAlreadyRecordedVerdict
 		}
 		if checkWorkReportHashInSet(verdict.Target.Bytes(), psi_b) {
-			log.Warn(debugAudit, "Verdict Error: WorkReportHash already in psi_b", "Target", verdict.Target)
+			log.Warn(log.Audit, "Verdict Error: WorkReportHash already in psi_b", "Target", verdict.Target)
 			return jamerrors.ErrDAlreadyRecordedVerdict
 		}
 		if checkWorkReportHashInSet(verdict.Target.Bytes(), psi_w) {
-			log.Warn(debugAudit, "Verdict Error: WorkReportHash already in psi_w", "Target", verdict.Target)
+			log.Warn(log.Audit, "Verdict Error: WorkReportHash already in psi_w", "Target", verdict.Target)
 			return jamerrors.ErrDAlreadyRecordedVerdictWithFaults
 		}
 	}
@@ -410,7 +410,7 @@ func checkVote(v []types.Verdict) error {
 					continue
 				}
 				if vote2.Index == vote.Index {
-					log.Warn(debugAudit, "checkVote", "Vote Error: duplicate index", "vote.Index", vote.Index, "j", j)
+					log.Warn(log.Audit, "checkVote", "Vote Error: duplicate index", "vote.Index", vote.Index, "j", j)
 					return jamerrors.ErrDNotUniqueVotes
 				}
 			}
@@ -419,7 +419,7 @@ func checkVote(v []types.Verdict) error {
 				continue
 			}
 			if vote.Index < verdict.Votes[i-1].Index {
-				log.Warn(debugAudit, "Vote Error: index ordering issue", "v0", vote.Index, "v1", verdict.Votes[i-1].Index)
+				log.Warn(log.Audit, "Vote Error: index ordering issue", "v0", vote.Index, "v1", verdict.Votes[i-1].Index)
 
 				return jamerrors.ErrDNotSortedWorkReports
 			}
@@ -427,7 +427,7 @@ func checkVote(v []types.Verdict) error {
 		if vote_counter == 0 || vote_counter == types.ValidatorsSuperMajority || vote_counter == types.WonkyTrueThreshold {
 			continue
 		} else {
-			log.Warn(debugAudit, "Vote Error: vote count is invalid", "vote_counter", vote_counter)
+			log.Warn(log.Audit, "Vote Error: vote count is invalid", "vote_counter", vote_counter)
 			return jamerrors.ErrDNotHomogenousJudgements
 		}
 	}
@@ -580,7 +580,7 @@ func isFaultEnoughAndValid(state_prime JamState, f []types.Fault) error {
 	found := false
 	for _, f := range f {
 		if f.Voting {
-			log.Trace(debugAudit, "Fault Error: fault should be false, invalid key", "f.Key", f.Key)
+			log.Trace(log.Audit, "Fault Error: fault should be false, invalid key", "f.Key", f.Key)
 
 			return jamerrors.ErrDAuditorMarkedOffender
 		}
@@ -608,7 +608,7 @@ func isCulpritEnoughAndValid(state_prime JamState, c []types.Culprit) error {
 			return jamerrors.ErrDMissingCulpritsBadVerdict
 		}
 		if counter < 2 {
-			log.Error(debugAudit, "Culprit Error: work report hash in psi_b should have at least two culprit", "s", s)
+			log.Error(log.Audit, "Culprit Error: work report hash in psi_b should have at least two culprit", "s", s)
 			return jamerrors.ErrDSingleCulpritBadVerdict
 		}
 	}
@@ -620,7 +620,7 @@ func isCulpritEnoughAndValid(state_prime JamState, c []types.Culprit) error {
 			}
 		}
 		if !found {
-			log.Error(debugAudit, "Culprit Error: work report hash should be in bad set", "Target", c.Target)
+			log.Error(log.Audit, "Culprit Error: work report hash should be in bad set", "Target", c.Target)
 
 			return jamerrors.ErrDOffenderNotPresentVerdict
 		}

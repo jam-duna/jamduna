@@ -66,7 +66,7 @@ func waitForTermination(watchNode *Node, caseType string, targetedEpochLen int, 
 
 	select {
 	case <-done:
-		log.Info(module, "Completed")
+		log.Info(log.Node, "Completed")
 	case err := <-errChan:
 		t.Fatalf("[%v] Failed: %v", caseType, err)
 	}

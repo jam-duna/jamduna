@@ -29,7 +29,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 	if sa.Dirty == false {
 		return nil, nil
 	}
-	log.Trace(module, "writeAccount", "service_idx", sa.ServiceIndex, "dirty", sa.Dirty, "s", sa.String())
+	log.Trace(log.SDB, "writeAccount", "service_idx", sa.ServiceIndex, "dirty", sa.Dirty, "s", sa.String())
 	service_idx := sa.GetServiceIndex()
 	tree := s.GetTrie()
 	start_StorageSize := sa.StorageSize
@@ -42,11 +42,11 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 				err = tree.DeleteServiceStorage(service_idx, storage.RawKey)
 				if err != nil {
 					// DeleteServiceStorageKey: Failed to delete k: 0xffffffffdecedb51effc9737c5fea18873dbf428c55f0d5d3b522672f234a9b1, error: key not found
-					log.Warn(module, "DeleteServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "rawkey", storage.RawKey, "err", err)
+					log.Warn(log.SDB, "DeleteServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "rawkey", storage.RawKey, "err", err)
 					return
 				}
 			} else {
-				log.Trace(module, "writeAccount SET", "service_idx", fmt.Sprintf("%d", service_idx), "k", fmt.Sprintf("%x", storage.Key), "rawkey", storage.RawKey, "value", storage.Value)
+				log.Trace(log.SDB, "writeAccount SET", "service_idx", fmt.Sprintf("%d", service_idx), "k", fmt.Sprintf("%x", storage.Key), "rawkey", storage.RawKey, "value", storage.Value)
 				// Here we are returning ALL storage values written
 				serviceUpdate.ServiceValue[storage.RawKey] = &types.SubServiceValueResult{
 					ServiceID:  service_idx,
@@ -58,7 +58,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 				}
 				err = tree.SetServiceStorage(service_idx, storage.RawKey, storage.Value)
 				if err != nil {
-					log.Warn(module, "SetServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "rawkey", storage.RawKey, "err", err)
+					log.Warn(log.SDB, "SetServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "rawkey", storage.RawKey, "err", err)
 					return
 				}
 			}
@@ -70,7 +70,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 			if v.Deleted {
 				err = tree.DeletePreImageLookup(service_idx, blob_hash, v.Z)
 				if err != nil {
-					log.Warn(module, "tree.DeletePreImageLookup", "blob_hash", blob_hash, "v.Z", v.Z, "err", err)
+					log.Warn(log.SDB, "tree.DeletePreImageLookup", "blob_hash", blob_hash, "v.Z", v.Z, "err", err)
 					return
 				}
 				log.Trace("authoring", "tree.DeletePreImageLookup [FORGET OK]", "blob_hash", blob_hash, "v.Z", v.Z)
@@ -84,7 +84,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 			} else {
 				err = tree.SetPreImageLookup(service_idx, blob_hash, v.Z, v.T)
 				if err != nil {
-					log.Warn(module, "tree.SetPreimageLookup", "blob_hash", blob_hash, "v.Z", v.Z, "v.T", v.T, "err", err)
+					log.Warn(log.SDB, "tree.SetPreimageLookup", "blob_hash", blob_hash, "v.Z", v.Z, "v.T", v.T, "err", err)
 					return
 				}
 				serviceUpdate.ServiceRequest[blob_hash] = &types.SubServiceRequestResult{
@@ -102,14 +102,14 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 			if len(v.Preimage) == 0 || v.Deleted {
 				err = tree.DeletePreImageBlob(service_idx, blobHash)
 				if err != nil {
-					log.Warn(module, "DeletePreImageBlob", "blobHash", blobHash, "err", err)
+					log.Warn(log.SDB, "DeletePreImageBlob", "blobHash", blobHash, "err", err)
 					return
 				}
 				log.Info("authoring", "DeletePreImageBlob [FORGET OK]", "blobHash", blobHash)
 			} else {
 				err = tree.SetPreImageBlob(service_idx, v.Preimage)
 				if err != nil {
-					log.Warn(module, "SetPreImageBlob", "err", err)
+					log.Warn(log.SDB, "SetPreImageBlob", "err", err)
 					return
 				}
 				serviceUpdate.ServicePreimage[blobHash] = &types.SubServicePreimageResult{
@@ -143,11 +143,11 @@ func (s *StateDB) ApplyXContext(U *types.PartialState) (stateUpdate *types.State
 	for _, sa := range U.D {
 		// U.D should only have service accounts with Mutable = true
 		if sa.Mutable == false {
-			log.Crit(module, "Immutable Service account in X.U.D", "s", sa.ServiceIndex)
+			log.Crit(log.SDB, "Immutable Service account in X.U.D", "s", sa.ServiceIndex)
 		} else if sa.Dirty {
 			serviceUpdate, err := s.writeAccount(sa)
 			if err != nil {
-				log.Crit(module, "ApplyXContext", "err", err)
+				log.Crit(log.SDB, "ApplyXContext", "err", err)
 			}
 			stateUpdate.AddServiceUpdate(sa.ServiceIndex, serviceUpdate)
 		}
@@ -211,7 +211,7 @@ func (s *StateDB) ReadServicePreimageBlob(service uint32, blob_hash common.Hash)
 	if err != nil || !ok {
 		return
 	} else {
-		log.Trace(debugP, "ReadServicePreimageBlob", "service", service, "blob_hash", blob_hash, "len(blob)", len(blob))
+		log.Trace(log.P, "ReadServicePreimageBlob", "service", service, "blob_hash", blob_hash, "len(blob)", len(blob))
 		return
 	}
 }
@@ -222,7 +222,7 @@ func (s *StateDB) ReadServicePreimageLookup(service uint32, blob_hash common.Has
 	if err != nil || !ok {
 		return
 	}
-	log.Trace(debugP, "ReadServicePreimageLookup", "service", service, "blob_hash", blob_hash, "blob_length", blob_length, time_slots)
+	log.Trace(log.P, "ReadServicePreimageLookup", "service", service, "blob_hash", blob_hash, "blob_length", blob_length, time_slots)
 	return
 
 }

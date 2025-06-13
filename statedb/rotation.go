@@ -62,7 +62,7 @@ func (s *StateDB) RotateGuarantors() {
 	} else {
 		cores := Permute(s.JamState.SafroleState.Entropy[3], t)
 		if len(s.JamState.SafroleState.PrevValidators) == 0 {
-			log.Crit(module, "PrevValidators is empty")
+			log.Crit(log.SDB, "PrevValidators is empty")
 			return
 		}
 		for i, lambda := range s.JamState.SafroleState.PrevValidators {

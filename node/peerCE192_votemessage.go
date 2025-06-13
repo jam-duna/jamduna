@@ -46,7 +46,7 @@ func (n *Node) onVoteMessage(ctx context.Context, stream quic.Stream, msg []byte
 		case <-ctx.Done():
 			return fmt.Errorf("onVoteMessage: context canceled while sending precommit")
 		default:
-			log.Warn(module, "onVoteMessage: grandpaPreCommitMessageCh full, dropping vote")
+			log.Warn(log.Node, "onVoteMessage: grandpaPreCommitMessageCh full, dropping vote")
 
 		}
 
@@ -57,7 +57,7 @@ func (n *Node) onVoteMessage(ctx context.Context, stream quic.Stream, msg []byte
 		case <-ctx.Done():
 			return fmt.Errorf("onVoteMessage: context canceled while sending prevote")
 		default:
-			log.Warn(module, "onVoteMessage: grandpaPreVoteMessageCh full, dropping vote")
+			log.Warn(log.Node, "onVoteMessage: grandpaPreVoteMessageCh full, dropping vote")
 
 		}
 
@@ -68,7 +68,7 @@ func (n *Node) onVoteMessage(ctx context.Context, stream quic.Stream, msg []byte
 		case <-ctx.Done():
 			return fmt.Errorf("onVoteMessage: context canceled while sending primary propose")
 		default:
-			log.Warn(module, "onVoteMessage: grandpaPrimaryMessageCh full, dropping vote")
+			log.Warn(log.Node, "onVoteMessage: grandpaPrimaryMessageCh full, dropping vote")
 
 		}
 

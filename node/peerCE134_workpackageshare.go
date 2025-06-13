@@ -226,7 +226,7 @@ func (p *Peer) ShareWorkPackage(
 		return
 	}
 	slot := common.GetWallClockJCE(fudgeFactorJCE)
-	log.Debug(debugR, "CE134-ShareWorkPackage OUTGOING", "NODE", p.node.id, "peer", peerID, "coreIndex", coreIndex, "slot", slot)
+	log.Debug(log.R, "CE134-ShareWorkPackage OUTGOING", "NODE", p.node.id, "peer", peerID, "coreIndex", coreIndex, "slot", slot)
 	// Send request
 	// --> Core Index ++ Segment Root Mappings
 	if err = sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
@@ -238,11 +238,11 @@ func (p *Peer) ShareWorkPackage(
 		err = fmt.Errorf("sendQuicBytes2[CE134_WorkPackageShare]: %v", err)
 		return
 	}
-	log.Trace(debugG, "onWorkPackageShare OUTGOING QUIC",
+	log.Trace(log.G, "onWorkPackageShare OUTGOING QUIC",
 		"CoreIndex ++ SegmentRootMappings", fmt.Sprintf("0x%x", reqBytes),
 		"encodedBundle", fmt.Sprintf("0x%x", encodedBundle),
 	)
-	log.Trace(debugG, "onWorkPackageShare OUTGOING",
+	log.Trace(log.G, "onWorkPackageShare OUTGOING",
 		"workpackage", bundle.WorkPackage.Hash(),
 		"bundle_Len", len(encodedBundle),
 		"coreIndex", coreIndex,
@@ -311,7 +311,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 			break
 		}
 	}
-	log.Debug(debugR, "CE134-ShareWorkPackage INCOMING", "NODE", n.id, "peer", peerID, "coreIndex", newReq.CoreIndex, "slot", slot)
+	log.Debug(log.R, "CE134-ShareWorkPackage INCOMING", "NODE", n.id, "peer", peerID, "coreIndex", newReq.CoreIndex, "slot", slot)
 	if !inSet {
 		return fmt.Errorf("core index %d is not in the current guarantor assignments", newReq.CoreIndex)
 	}
@@ -320,7 +320,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	// Read message length (4 bytes)
 	msgLenBytes := make([]byte, 4)
 	if _, err := io.ReadFull(stream, msgLenBytes); err != nil {
-		log.Trace(module, "DispatchIncomingQUICStream - length prefix", "err", err)
+		log.Trace(log.Node, "DispatchIncomingQUICStream - length prefix", "err", err)
 		_ = stream.Close()
 		return err
 	}
@@ -340,7 +340,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		return fmt.Errorf("onWorkPackageShare: decode bundle: %w\nencodedBundle data:\n%x", err, encodedBundle)
 	}
 
-	log.Debug(debugG, "onWorkPackageShare INCOMING QUIC",
+	log.Debug(log.G, "onWorkPackageShare INCOMING QUIC",
 		"CoreIndex ++ SegmentRootMappings", fmt.Sprintf("0x%x", msg),
 		"encodedBundle", fmt.Sprintf("0x%x", encodedBundle),
 	)
@@ -348,7 +348,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	recoveredBundleByte := bundle.Bytes()
 
 	if !bytes.Equal(encodedBundle, recoveredBundleByte) {
-		log.Error(debugG, "onWorkPackageShare INCOMING Bundle Ecnode/Decode mismatch",
+		log.Error(log.G, "onWorkPackageShare INCOMING Bundle Ecnode/Decode mismatch",
 			"workpackage", bundle.WorkPackage.Hash(),
 			"bundle_Len", len(encodedBundle),
 			"coreIndex", newReq.CoreIndex,
@@ -362,7 +362,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	}
 
 	wpCoreIndex := newReq.CoreIndex
-	log.Trace(debugG, "onWorkPackageShare INCOMING",
+	log.Trace(log.G, "onWorkPackageShare INCOMING",
 		"workpackage", bundle.WorkPackage.Hash(),
 		"bundle_Len", len(encodedBundle),
 		"coreIndex", newReq.CoreIndex,
@@ -390,7 +390,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	// Since the bundle is not trusted, do a VerifyBundle first
 	verified, err := n.VerifyBundle(bundle, received_segmentRootLookup)
 	if !verified {
-		log.Warn(module, "VerifyBundle failure", "node", n.id, "verified", verified)
+		log.Warn(log.Node, "VerifyBundle failure", "node", n.id, "verified", verified)
 		// TODO: reconstruct the segments
 	}
 	if err != nil {
@@ -406,7 +406,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 
 	workReport, _, pvmElapsed, err := n.executeWorkPackageBundle(wpCoreIndex, *bundle, received_segmentRootLookup, false)
 	if err != nil {
-		log.Warn(module, "onWorkPackageShare: executeWorkPackageBundle", "node", n.id, "err", err, "pvmElapsed", pvmElapsed)
+		log.Warn(log.Node, "onWorkPackageShare: executeWorkPackageBundle", "node", n.id, "err", err, "pvmElapsed", pvmElapsed)
 		return fmt.Errorf("onWorkPackageShare: executeWorkPackageBundle: %w", err)
 	}
 
@@ -414,7 +414,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	case n.workReportsCh <- workReport:
 		// successfully sent
 	default:
-		log.Warn(debugAudit, "onWorkPackageShare: workReportsCh full, dropping workReport", "workReport", workReport.Hash())
+		log.Warn(log.Audit, "onWorkPackageShare: workReportsCh full, dropping workReport", "workReport", workReport.Hash())
 	}
 
 	// Respect context again before executing
@@ -439,7 +439,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		WorkReportHash: guarantee.Report.Hash(),
 		Signature:      guarantee.Signatures[0].Signature,
 	}
-	log.Debug(debugG, "onWorkPackageShare", "n", n.String(), "wph", req.WorkReportHash, "wp", workReport.String(), "sig", req.Signature.String())
+	log.Debug(log.G, "onWorkPackageShare", "n", n.String(), "wph", req.WorkReportHash, "wp", workReport.String(), "sig", req.Signature.String())
 
 	reqBytes, err := req.ToBytes()
 	if err != nil {

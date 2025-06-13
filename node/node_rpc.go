@@ -91,19 +91,6 @@ func (j *Jam) NodeCommand(req []string, res *string) error {
 		default:
 			*res = fmt.Sprintf("Unknown flag %s", flag)
 		}
-	case "SetLog":
-		module := req[1]
-		value := req[2]
-		BoolVal, err := strconv.ParseBool(value)
-		if err != nil {
-			*res = fmt.Sprintf("Invalid value for flag %s: %s", module, value)
-			return err
-		}
-		if BoolVal {
-			log.EnableModule(module)
-		} else {
-			log.DisableModule(module)
-		}
 	case "StackTrace":
 		debugtrace := make([]byte, 1<<20)
 		runtime.Stack(debugtrace, true)
@@ -378,7 +365,7 @@ func (n *NodeContent) getRefineContext(prereqs ...common.Hash) types.RefineConte
 	}
 	sb, err := n.GetBlockByHeaderHash(anchor)
 	if err != nil {
-		log.Error(module, "getRefineContext", "error", err, "anchor", anchor.String())
+		log.Error(log.Node, "getRefineContext", "error", err, "anchor", anchor.String())
 		return types.RefineContext{}
 	}
 
@@ -700,15 +687,15 @@ func (j *Jam) TraceBlock(req []string, res *string) error {
 	defer cancel()
 	s1, err := statedb.ApplyStateTransitionFromBlock(sdb, ctx, block, nil)
 	if err != nil {
-		log.Error(module, "TraceBlock", "err", err)
+		log.Error(log.Node, "TraceBlock", "err", err)
 		return err
 	}
 	logs, err := log.GetRecordedLogs()
 	if err != nil {
-		log.Error(module, "TraceBlock", "block", block.String(), "len(logs)", len(logs), "err", err)
+		log.Error(log.Node, "TraceBlock", "block", block.String(), "len(logs)", len(logs), "err", err)
 		return err
 	}
-	log.Info(module, "TraceBlock", "block", block.String(), "len(logs)", len(logs), "s1.StateRoot", s1.StateRoot)
+	log.Info(log.Node, "TraceBlock", "block", block.String(), "len(logs)", len(logs), "s1.StateRoot", s1.StateRoot)
 	*res = string(logs)
 	return nil
 }
@@ -741,9 +728,9 @@ func (j *Jam) AuditWorkPackage(req []string, res *string) error {
 
 	// check that workReport == workReport2
 	if workReport.Hash() == workReport2.Hash() {
-		log.Info(module, "AuditWorkPackage", "auditResult", workReport.Hash() == workReport2.Hash(), "workReport", workReport, "elapsed", wr_pvm_elapsed)
+		log.Info(log.Node, "AuditWorkPackage", "auditResult", workReport.Hash() == workReport2.Hash(), "workReport", workReport, "elapsed", wr_pvm_elapsed)
 	} else {
-		log.Error(module, "AuditWorkPackage", "auditResult", workReport.Hash() == workReport2.Hash(), "workReport", workReport, "elapsed", wr_pvm_elapsed)
+		log.Error(log.Node, "AuditWorkPackage", "auditResult", workReport.Hash() == workReport2.Hash(), "workReport", workReport, "elapsed", wr_pvm_elapsed)
 	}
 	logs, err := log.GetRecordedLogs()
 	if err != nil {
@@ -806,7 +793,7 @@ func (j *Jam) SubmitPreimage(req []string, res *string) error {
 	preimage_length := uint32(len(preimage))
 	service_index := uint32(serviceIndex)
 	preimage_hash := common.Blake2Hash(preimage)
-	log.Info(module, "SubmitPreimage", "service", service_index, "preimage", common.Blake2Hash(preimage), "len", preimage_length)
+	log.Info(log.Node, "SubmitPreimage", "service", service_index, "preimage", common.Blake2Hash(preimage), "len", preimage_length)
 
 	// Add it to your own pool
 	j.AddPreimageToPool(service_index, preimage)
@@ -814,7 +801,7 @@ func (j *Jam) SubmitPreimage(req []string, res *string) error {
 	// Announce it everyone else with CE142 (and they will request it with CE143, which will be available in the pool from the above)
 	err = j.BroadcastPreimageAnnouncement(service_index, preimage_hash, preimage_length, preimage)
 	if err != nil {
-		log.Error(module, "SubmitPreimage ERR2", "err", err)
+		log.Error(log.Node, "SubmitPreimage ERR2", "err", err)
 		*res = err.Error()
 		return err
 	}
@@ -882,12 +869,12 @@ func (j *Jam) FetchBlocks(req []string, res *string) error {
 
 func (j *Jam) SubmitWorkPackage(req []string, res *string) error {
 	if len(req) != 1 {
-		log.Info(module, "SubmitWorkPackage error", "err", req)
+		log.Info(log.Node, "SubmitWorkPackage error", "err", req)
 		return fmt.Errorf("invalid number of arguments")
 	}
 	var newReq WorkPackageRequest
 	if err := json.Unmarshal([]byte(req[0]), &newReq); err != nil {
-		log.Error(module, "SubmitWorkPackage", "err", err)
+		log.Error(log.Node, "SubmitWorkPackage", "err", err)
 		return fmt.Errorf("failed to decode WorkPackageRequest: %w", err)
 	}
 	j.NodeContent.SubmitWPSameCore(newReq.WorkPackage, newReq.ExtrinsicsBlobs)

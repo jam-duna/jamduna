@@ -29,7 +29,6 @@ const (
 	SubServicePreimage = "subscribeServicePreimage"
 	SubServiceRequest  = "subscribeServiceRequest"
 	SubWorkPackage     = "subscribeWorkPackage"
-	debugWeb           = log.JamwebMonitoring
 )
 
 // Struct for incoming WebSocket requests
@@ -47,7 +46,7 @@ func (h *Hub) ReceiveLatestBlock(FinalizedBlock *types.Block, BestBlock *types.B
 	var data []byte
 	update := sdb.GetStateUpdates()
 	for client := range h.clients {
-		log.Trace(debugWeb, "ReceiveLatestBlock", "clientsubs", client.String())
+		log.Trace(log.Web, "ReceiveLatestBlock", "clientsubs", client.String())
 		if client.BestBlock != nil {
 			req := client.BestBlock
 			payload := types.WSPayload{
@@ -104,10 +103,10 @@ func (h *Hub) ReceiveLatestBlock(FinalizedBlock *types.Block, BestBlock *types.B
 				if err == nil {
 					client.sendData(data)
 					if res.Status == "accumulated" {
-						log.Info(module, "WORKPACKAGE ACCUMULATED", "wph", wph, "data", string(data))
+						log.Info(log.Node, "WORKPACKAGE ACCUMULATED", "wph", wph, "data", string(data))
 						delete(client.WorkPackages, wph)
 					} else {
-						log.Trace(module, "WORKPACKAGE UPDATED", "wph", wph, "data", string(data))
+						log.Trace(log.Node, "WORKPACKAGE UPDATED", "wph", wph, "data", string(data))
 					}
 				}
 			}
@@ -148,7 +147,7 @@ func (h *Hub) ReceiveLatestBlock(FinalizedBlock *types.Block, BestBlock *types.B
 							data, err = json.Marshal(payload)
 							if err == nil {
 								client.sendData(data)
-								log.Info(module, SubServiceValue, "gen", string(data), "k", k, "v", v)
+								log.Info(log.Node, SubServiceValue, "gen", string(data), "k", k, "v", v)
 							}
 						}
 					} else {
@@ -314,7 +313,7 @@ func (h *Hub) run(wg *sync.WaitGroup) {
 
 // readPump handles WebSocket reads and subscription management
 func (c *Client) sendData(data []byte) {
-	log.Trace(debugWeb, "sendData", "data", string(data))
+	log.Trace(log.Web, "sendData", "data", string(data))
 	select {
 	case c.send <- data:
 	default:
@@ -323,7 +322,7 @@ func (c *Client) sendData(data []byte) {
 
 // readPump handles WebSocket reads and subscription management
 func (c *Client) addSubscription(serviceID uint32, req *SubscriptionRequest) {
-	log.Trace(debugWeb, "addSubscription", "serviceID", serviceID, "method", req.Method, "h", req.hash)
+	log.Trace(log.Web, "addSubscription", "serviceID", serviceID, "method", req.Method, "h", req.hash)
 	if _, ok := c.Services[serviceID]; !ok {
 		c.Services[serviceID] = make([]*SubscriptionRequest, 0)
 	}
@@ -379,7 +378,7 @@ func fetchBoolAttr(req *SubscriptionRequest, key string) (bool, bool) {
 	case string:
 		return v == "true", true
 	default:
-		log.Warn(debugWeb, "unsupported bool attr type", key, fmt.Sprintf("%T", val))
+		log.Warn(log.Web, "unsupported bool attr type", key, fmt.Sprintf("%T", val))
 		return false, false
 	}
 }
@@ -406,15 +405,15 @@ func (c *Client) readPump(ctx context.Context, wg *sync.WaitGroup) {
 			_, message, err := c.conn.ReadMessage()
 			if err != nil {
 				if websocket.IsUnexpectedCloseError(err) {
-					log.Trace(debugWeb, "WebSocket close error", err)
+					log.Trace(log.Web, "WebSocket close error", err)
 				}
 				return
 			}
-			log.Info(module, "Received message from client", "msg", string(message))
+			log.Info(log.Node, "Received message from client", "msg", string(message))
 
 			var req SubscriptionRequest
 			if err := json.Unmarshal(message, &req); err != nil {
-				log.Warn(module, "Invalid subscription message", err)
+				log.Warn(log.Node, "Invalid subscription message", err)
 				continue
 			}
 			req.isFinalized = false
@@ -460,9 +459,9 @@ func (c *Client) readPump(ctx context.Context, wg *sync.WaitGroup) {
 				req.hash = common.HexToHash(req.Params["hash"].(string))
 				c.WorkPackages[req.hash] = &req
 			default:
-				log.Warn(debugWeb, "Unknown subscription method", req.Method)
+				log.Warn(log.Web, "Unknown subscription method", req.Method)
 			}
-			log.Trace(debugWeb, "Subscribed", "method", req.Method, "h", req.hash)
+			log.Trace(log.Web, "Subscribed", "method", req.Method, "h", req.hash)
 		}
 	}
 }
@@ -515,7 +514,7 @@ func (c *Client) writePump(ctx context.Context, wg *sync.WaitGroup) {
 func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request, wg *sync.WaitGroup) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Error(debugWeb, "serveWs Upgrade error", err)
+		log.Error(log.Web, "serveWs Upgrade error", err)
 		return
 	}
 	client := &Client{
@@ -537,7 +536,7 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request, wg *sync.WaitGrou
 func (n *NodeContent) RunApplyBlockAndWeb(ctx context.Context, blockDataDir string, port uint16, storage *storage.StateDBStorage) {
 	files, err := os.ReadDir(blockDataDir)
 	if err != nil {
-		log.Crit(debugWeb, "ReadDir error", err)
+		log.Crit(log.Web, "ReadDir error", err)
 		return
 	}
 
@@ -547,22 +546,22 @@ func (n *NodeContent) RunApplyBlockAndWeb(ctx context.Context, blockDataDir stri
 		}
 		data, err := os.ReadFile(filepath.Join(blockDataDir, file.Name()))
 		if err != nil {
-			log.Crit(debugWeb, "ReadFile error", err)
+			log.Crit(log.Web, "ReadFile error", err)
 			continue
 		}
 		var stf statedb.StateTransition
 		if err := json.Unmarshal(data, &stf); err != nil {
-			log.Crit(debugWeb, "Unmarshal error", err)
+			log.Crit(log.Web, "Unmarshal error", err)
 			continue
 		}
 		newStateDB, err := statedb.NewStateDBFromStateTransition(storage, &stf)
 		if err != nil {
-			log.Crit(debugWeb, "StateDB init error", err)
+			log.Crit(log.Web, "StateDB init error", err)
 			continue
 		}
 		newStateDB.Block = &stf.Block
 		if err := n.StoreBlock(&stf.Block, 9999, false); err != nil {
-			log.Crit(debugWeb, "StoreBlock error", err)
+			log.Crit(log.Web, "StoreBlock error", err)
 			continue
 		}
 		n.addStateDB(newStateDB)
@@ -573,7 +572,7 @@ func (n *NodeContent) RunApplyBlockAndWeb(ctx context.Context, blockDataDir stri
 
 	<-ctx.Done()
 	wg.Wait()
-	log.Info(debugWeb, "Graceful shutdown complete")
+	log.Info(log.Web, "Graceful shutdown complete")
 }
 
 func (n *NodeContent) runJamWeb(ctx context.Context, wg *sync.WaitGroup, basePort uint16, port int) {
@@ -632,14 +631,14 @@ func (n *NodeContent) runJamWeb(ctx context.Context, wg *sync.WaitGroup, basePor
 		w.Write([]byte(result))
 	})
 
-	log.Info(debugWeb, "JAM Web Server started", "addr", addr)
+	log.Info(log.Web, "JAM Web Server started", "addr", addr)
 
 	// Run server in a goroutine
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Crit(debugWeb, "JAMWeb ListenAndServe error", "err", err)
+			log.Crit(log.Web, "JAMWeb ListenAndServe error", "err", err)
 		}
 	}()
 

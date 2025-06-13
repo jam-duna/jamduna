@@ -70,7 +70,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	sf.OffenderState = s.GetJamState().DisputesState.Psi_o
 	s2, err := sf.ApplyStateTransitionTickets(ctx, ticketExts, targetJCE, sf_header, validated_tickets) // Entropy computed!
 	if err != nil {
-		log.Error(module, "ApplyStateTransitionTickets", "err", jamerrors.GetErrorName(err))
+		log.Error(log.SDB, "ApplyStateTransitionTickets", "err", jamerrors.GetErrorName(err))
 		return s, err
 	}
 	//the epochMark validators should be in gamma k'
@@ -252,16 +252,15 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "blocks", 1)
 	s.StateRoot = s.UpdateTrieState()
 	//duration := time.Since(timer)
-	//log.Debug(log.StateDBMonitoring, "ApplyStateTransitionFromBlock", "duration", duration, "block", blk.Header.Hash().String_short(), "stateroot", s.StateRoot.String_short(), "accumulationRoot", accumulationRoot.String_short())
 	return s, nil
 }
 
 func (s *StateDB) computeStateUpdates(blk *types.Block) {
 	// setup workpackage updates (guaranteed, queued, accumulated)
-	log.Trace(module, "computeStateUpdates", "len(e_p)", len(blk.Extrinsic.Preimages), "len(e_g)", len(blk.Extrinsic.Guarantees), "len(ah)", len(s.JamState.AccumulationHistory[types.EpochLength-1].WorkPackageHash))
+	log.Trace(log.SDB, "computeStateUpdates", "len(e_p)", len(blk.Extrinsic.Preimages), "len(e_g)", len(blk.Extrinsic.Guarantees), "len(ah)", len(s.JamState.AccumulationHistory[types.EpochLength-1].WorkPackageHash))
 	for _, g := range blk.Extrinsic.Guarantees {
 		wph := g.Report.AvailabilitySpec.WorkPackageHash
-		log.Trace(module, "computeStateUpdates-GUARANTEE", "hash", wph, g.Report.String())
+		log.Trace(log.SDB, "computeStateUpdates-GUARANTEE", "hash", wph, g.Report.String())
 		s.stateUpdate.WorkPackageUpdates[wph] = &types.SubWorkPackageResult{
 			WorkPackageHash: wph,
 			HeaderHash:      s.HeaderHash,
@@ -348,7 +347,7 @@ func (s *StateDB) ApplyStateTransitionRho(ctx context.Context, assurances []type
 	d := s.GetJamState()
 	assuranceErr := s.ValidateAssurances(ctx, assurances, s.Block.Header.ParentHeaderHash)
 	if assuranceErr != nil {
-		log.Error(module, "ApplyStateTransitionRho", "assuranceErr", assuranceErr)
+		log.Error(log.SDB, "ApplyStateTransitionRho", "assuranceErr", assuranceErr)
 		return nil, nil, err
 	}
 
@@ -361,7 +360,7 @@ func (s *StateDB) ApplyStateTransitionRho(ctx context.Context, assurances []type
 
 	// Guarantees checks
 	for _, g := range guarantees {
-		if err := s.VerifyGuaranteeBasic(g); err != nil {
+		if err := s.VerifyGuaranteeBasic(g, targetJCE); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -389,7 +388,7 @@ func (s *StateDB) ApplyStateTransitionRho(ctx context.Context, assurances []type
 
 	num_reports, err = d.ProcessGuarantees(ctx, guarantees)
 	if err != nil {
-		log.Error(module, "ApplyStateTransitionRho", "GuaranteeErr", err)
+		log.Error(log.SDB, "ApplyStateTransitionRho", "GuaranteeErr", err)
 		return nil, nil, err
 	}
 	return num_reports, num_assurances, nil

@@ -17,20 +17,25 @@ const (
 
 	GeneralAuthoring  = "authoring"  // Generic Authoring  (excluding pvm)
 	GeneralValidating = "validating" // Generic Validating (excluding pvm)
-
-	BlockMonitoring      = "blk_mod"     // Block module log
-	DAMonitoring         = "da_mod"      // Data Availability module log
-	NodeMonitoring       = "n_mod"       // General Node Ops
-	SegmentMonitoring    = "seg_mod"     // Segment module log
-	StateDBMonitoring    = "statedb_mod" // stateDB module log
-	GrandpaMonitoring    = "grandpa_mod" // Grandpa module log
-	AuditMonitoring      = "audit_mod"   // Audit module log
-	JamwebMonitoring     = "jamweb_mod"  // Jamweb module log
-	QuicStreamMonitoring = "q_mod"       // Quicstream module log
-	GuaranteeMonitoring  = "g_mod"       // Guarantee module log
 )
 
 var root atomic.Value
+
+const (
+	Node    = "node"       // Node
+	SDB     = "state"      // StateDB
+	Quic    = "quick"      // Quic
+	B       = "block"      // Block
+	P       = "preimage"   // Preimages
+	G       = "guarantees" // Guarantee
+	R       = "rotation"   // Rotation
+	DA      = "da"         // Data Availability
+	A       = "assurances" // Assurances
+	Beefy   = "beefy"      // Beefy
+	Audit   = "audit"      // Audit
+	Grandpa = "grandpa"    // Grandpa
+	Web     = "web"        // Jamweb
+)
 
 func init() {
 	root.Store(&logger{slog.New(DiscardHandler()), nil, false, make([]slog.Record, 0)})
@@ -93,7 +98,7 @@ func init_module(moduleList []string, moduleEnabled []string) map[string]bool {
 	return moduleMap
 }
 
-var defaultKnownModules = []string{GeneralAuthoring, PvmAuthoring, FirstGuarantorOrAuditor, BlockMonitoring, DAMonitoring, NodeMonitoring, SegmentMonitoring, StateDBMonitoring, GrandpaMonitoring, JamwebMonitoring, "G"} // no idea what is G
+var defaultKnownModules = []string{GeneralAuthoring, PvmAuthoring, FirstGuarantorOrAuditor}
 var defaultModuleEnabled = []string{}
 
 // --- Module management ---
@@ -103,6 +108,13 @@ var moduleEnabled = init_module(defaultKnownModules, defaultModuleEnabled)
 // EnableModule enables logging for the specified module.
 func EnableModule(module string) {
 	moduleEnabled[module] = true
+}
+
+// EnableModules
+func EnableModules(modules string) {
+	for _, module := range strings.Split(modules, ",") {
+		moduleEnabled[module] = true
+	}
 }
 
 // DisableModule disables logging for the specified module.

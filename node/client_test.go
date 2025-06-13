@@ -46,7 +46,7 @@ func TestCommands(t *testing.T) {
 	// client.BroadcastCommand([]string{"SetFlag", "audit", "true"}, []int{5})
 	// client.BroadcastCommand([]string{"SetFlag", "audit", "false"}, []int{5})
 	// client.BroadcastCommand([]string{"SetFlag", "ticket_send", "true"}, []int{})
-	// client.BroadcastCommand([]string{"SetLog", debugBlock, "true"}, []int{1, 2, 3, 4, 5})
+	// client.BroadcastCommand([]string{"SetLog", log.B, "true"}, []int{1, 2, 3, 4, 5})
 	// client.SendCommand([]string{"StackTrace"}, 1)
 	// client.SendCommand([]string{"GetNodeStatus"}, 3)
 	client.SendCommand([]string{"GetConnections"}, 1)

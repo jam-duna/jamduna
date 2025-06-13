@@ -28,7 +28,7 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService, targetN 
 	game_of_life_addr := fmt.Sprintf("localhost:%d", game_of_life_port)
 	ws_push := StartGameOfLifeServer(game_of_life_addr, "./game_of_life.html")
 
-	log.Info(module, "Game of Life START")
+	log.Info(log.Node, "Game of Life START")
 
 	service0 := testServices["game_of_life"]
 	if manifest {
@@ -131,7 +131,7 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService, targetN 
 		}
 		wr, err := RobustSubmitAndWaitForWorkPackages(ctx, n1, []*WorkPackageRequest{wpr})
 		if err != nil {
-			log.Error(module, "RobustSubmitAndWaitForWorkPackages", "err", err)
+			log.Error(log.Node, "RobustSubmitAndWaitForWorkPackages", "err", err)
 			return err
 		}
 		// TODO: fix this
@@ -141,9 +141,9 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService, targetN 
 			defer cancel()
 			err = n1.SubmitAndWaitForPreimage(ctx, service0.ServiceCode, service0_child_code["game_of_life_child"].Code)
 			if err != nil {
-				log.Error(module, "SubmitAndWaitForPreimage", "err", err)
+				log.Error(log.Node, "SubmitAndWaitForPreimage", "err", err)
 			} else {
-				log.Info(module, "GAME OF LIFE CHILD LOADED")
+				log.Info(log.Node, "GAME OF LIFE CHILD LOADED")
 			}
 		} else {
 			exports, Export_segments_count, err := n1.GetSegmentsByRequestedHash(workPackageHash)
