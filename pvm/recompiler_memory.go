@@ -151,6 +151,7 @@ func (rvm *RecompilerVM) allocatePages(startPage uint32, count uint32) {
 		pageIndex := startPage + i
 		rvm.SetPageAccess(int(pageIndex), PageMutable)
 	}
+	return
 }
 
 // GetCurrentHeapPointer

@@ -1,4 +1,4 @@
-package x86_execute
+package pvm
 
 import (
 	"fmt"
@@ -6,12 +6,11 @@ import (
 )
 
 func TestExecuteX86(t *testing.T) {
-	// 程式碼：mov rax, 1; ret
 	code := []byte{
 		0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00, // mov rax, 1
 		0xC3, // ret
 	}
-	status := ExecuteX86(code)
+	status, _ := ExecuteX86(code, make([]byte, 14*8))
 	switch status {
 	case 0:
 		fmt.Println("✅ Executed successfully")

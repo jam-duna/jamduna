@@ -126,6 +126,15 @@ const (
 	OK   = 0             // 0
 )
 
+// Inner Result Codes
+const (
+	HALT  = 0
+	PANIC = 1
+	FAULT = 2
+	HOST  = 3
+	OOG   = 4
+)
+
 func extractBytes(input []byte) ([]byte, []byte) {
 	/*
 		In GP_0.36 (272):
@@ -356,19 +365,19 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 
 	// A.2 deblob
 	if vm.code == nil {
-		vm.ResultCode = types.PVM_PANIC
+		vm.ResultCode = types.RESULT_PANIC
 		vm.terminated = true
 		return errors.New("no code to execute")
 	}
 
 	if len(vm.code) == 0 {
-		vm.ResultCode = types.PVM_PANIC
+		vm.ResultCode = types.RESULT_PANIC
 		vm.terminated = true
 		return errors.New("no code to execute")
 	}
 
 	if len(vm.bitmask) == 0 {
-		vm.ResultCode = types.PVM_PANIC
+		vm.ResultCode = types.RESULT_PANIC
 		vm.terminated = true
 		return errors.New("failed to decode bitmask")
 	}
@@ -407,6 +416,7 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 // step performs a single step in the PVM
 func (vm *VM) step(stepn int) error {
 	if vm.pc >= uint64(len(vm.code)) {
+		vm.ResultCode = types.RESULT_PANIC
 		return errors.New("program counter out of bounds")
 	}
 	//this_step_pc := vm.pc
@@ -468,12 +478,32 @@ func (vm *VM) step(stepn int) error {
 		}
 
 	default:
-		vm.ResultCode = types.PVM_PANIC
+		vm.ResultCode = types.RESULT_PANIC
 		vm.terminated = true
 		log.Warn(vm.logging, "terminated: unknown opcode", "service", string(vm.ServiceMetadata), "opcode", opcode)
 		return nil
 	}
 
+	if vm.ResultCode == types.RESULT_OOG {
+		vm.terminated = true
+		log.Debug(vm.logging, "terminated: OOG", "service", string(vm.ServiceMetadata), "pc", vm.pc, "opcode", opcode)
+		return errors.New("terminated: OOG")
+	}
+	if vm.ResultCode == types.RESULT_PANIC {
+		vm.terminated = true
+		log.Debug(vm.logging, "terminated: PANIC", "service", string(vm.ServiceMetadata), "pc", vm.pc, "opcode", opcode)
+		return errors.New("terminated: PANIC")
+	}
+	if vm.ResultCode == types.RESULT_HOST {
+		vm.terminated = true
+		log.Debug(vm.logging, "terminated: HOST", "service", string(vm.ServiceMetadata), "pc", vm.pc, "opcode", opcode)
+		return errors.New("terminated: HOST")
+	}
+	if vm.ResultCode == types.RESULT_FAULT {
+		vm.terminated = true
+		log.Debug(vm.logging, "terminated: FAULT", "service", string(vm.ServiceMetadata), "pc", vm.pc, "opcode", opcode)
+		return errors.New("terminated: FAULT")
+	}
 	// avoid this: this is expensive
 	if PvmLogging {
 		registersJSON, _ := json.Marshal(vm.ReadRegisters())
@@ -490,19 +520,19 @@ func (vm *VM) ExecuteNew(entryPoint int, is_child bool) error {
 	vm.terminated = false
 	// A.2 deblob
 	if vm.code == nil {
-		vm.ResultCode = types.PVM_PANIC
+		vm.ResultCode = types.RESULT_PANIC
 		vm.terminated = true
 		return errors.New("no code to execute")
 	}
 
 	if len(vm.code) == 0 {
-		vm.ResultCode = types.PVM_PANIC
+		vm.ResultCode = types.RESULT_PANIC
 		vm.terminated = true
 		return errors.New("no code to execute")
 	}
 
 	if len(vm.bitmask) == 0 {
-		vm.ResultCode = types.PVM_PANIC
+		vm.ResultCode = types.RESULT_PANIC
 		vm.terminated = true
 		return errors.New("failed to decode bitmask")
 	}
@@ -520,7 +550,7 @@ func (vm *VM) ExecuteNew(entryPoint int, is_child bool) error {
 		vm.terminated = false
 		err := vm.executeBasicBlock(bb, is_child)
 		if err != nil {
-			vm.ResultCode = types.PVM_PANIC
+			vm.ResultCode = types.RESULT_PANIC
 			vm.terminated = true
 		}
 		switch bb.JumpType {
@@ -577,10 +607,10 @@ func (vm *VM) skip(pc uint64) uint64 {
 func (vm *VM) djump(a uint64) {
 	if a == uint64((1<<32)-(1<<16)) {
 		vm.terminated = true
-		vm.ResultCode = types.PVM_HALT
+		vm.ResultCode = types.RESULT_OK
 	} else if a == 0 || a > uint64(len(vm.J)*Z_A) || a%Z_A != 0 {
 		vm.terminated = true
-		vm.ResultCode = types.PVM_PANIC
+		vm.ResultCode = types.RESULT_PANIC
 	} else {
 		vm.pc = uint64(vm.J[(a/Z_A)-1])
 	}
@@ -609,7 +639,7 @@ func (vm *VM) branch(vx uint64, condition bool) {
 	if condition {
 		vm.pc = vx
 	} else {
-		vm.ResultCode = types.PVM_PANIC
+		vm.ResultCode = types.RESULT_PANIC
 		vm.terminated = true
 	}
 }
@@ -689,8 +719,8 @@ func (vm *VM) HandleOneImm(opcode byte, operands []byte) {
 		lx := uint32(types.DecodeE_l(operands))
 		vm.hostCall = true
 		vm.host_func_id = int(lx)
-		vm.ResultCode = types.PVM_HOST
-		vm.HostResultCode = types.PVM_HOST
+		//vm.ResultCode = types.PVM_HOST
+		//vm.HostResultCode = types.PVM_HOST
 		vm.pc += 1 + uint64(len(operands))
 	}
 }
@@ -763,7 +793,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 			vm.WriteRegister(registerIndexA, uint64(value[0]))
 			dumpLoadGeneric("LOAD_U8", registerIndexA, uint64(addr), uint64(value[0]), 8, false)
 		} else {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -775,7 +805,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 			vm.WriteRegister(registerIndexA, res)
 			dumpLoadGeneric("LOAD_I8", registerIndexA, uint64(addr), res, 8, true)
 		} else {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -787,7 +817,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 			vm.WriteRegister(registerIndexA, res)
 			dumpLoadGeneric("LOAD_U16", registerIndexA, uint64(addr), res, 16, false)
 		} else {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -799,7 +829,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 			vm.WriteRegister(registerIndexA, res)
 			dumpLoadGeneric("LOAD_I16", registerIndexA, uint64(addr), res, 16, true)
 		} else {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -811,7 +841,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 			vm.WriteRegister(registerIndexA, res)
 			dumpLoadGeneric("LOAD_U32", registerIndexA, uint64(addr), res, 32, false)
 		} else {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -823,7 +853,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 			vm.WriteRegister(registerIndexA, res)
 			dumpLoadGeneric("LOAD_I32", registerIndexA, uint64(addr), res, 32, true)
 		} else {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -835,7 +865,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 			vm.WriteRegister(registerIndexA, res)
 			dumpLoadGeneric("LOAD_U64", registerIndexA, uint64(addr), res, 64, false)
 		} else {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -845,7 +875,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 		if errCode == OK {
 			dumpStoreGeneric("STORE_U8", uint64(addr), reg(registerIndexA), valueA, 8)
 		} else {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
@@ -854,7 +884,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 		if errCode == OK {
 			dumpStoreGeneric("STORE_U16", uint64(addr), reg(registerIndexA), valueA%(1<<16), 16)
 		} else {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
@@ -863,7 +893,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 		if errCode == OK {
 			dumpStoreGeneric("STORE_U32", uint64(addr), reg(registerIndexA), valueA%(1<<32), 32)
 		} else {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
@@ -872,7 +902,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 		if errCode == OK {
 			dumpStoreGeneric("STORE_U64", uint64(addr), reg(registerIndexA), valueA, 64)
 		} else {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
@@ -890,7 +920,7 @@ func (vm *VM) HandleOneRegTwoImm(opcode byte, operands []byte) {
 		errCode := vm.Ram.WriteRAMBytes(addr, []byte{byte(uint8(vy))})
 		dumpStoreGeneric("STORE_IMM_IND_U8", uint64(addr), fmt.Sprintf("0x%x", vy), vy&0xff, 8)
 		if errCode != OK {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
@@ -898,7 +928,7 @@ func (vm *VM) HandleOneRegTwoImm(opcode byte, operands []byte) {
 		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(vy%(1<<16), 2))
 		dumpStoreGeneric("STORE_IMM_IND_U16", uint64(addr), fmt.Sprintf("0x%x", vy), vy%(1<<16), 16)
 		if errCode != OK {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
@@ -906,7 +936,7 @@ func (vm *VM) HandleOneRegTwoImm(opcode byte, operands []byte) {
 		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(vy%(1<<32), 4))
 		dumpStoreGeneric("STORE_IMM_IND_U32", uint64(addr), fmt.Sprintf("0x%x", vy), vy%(1<<32), 32)
 		if errCode != OK {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
@@ -914,7 +944,7 @@ func (vm *VM) HandleOneRegTwoImm(opcode byte, operands []byte) {
 		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(uint64(vy), 8))
 		dumpStoreGeneric("STORE_IMM_IND_U64", uint64(addr), fmt.Sprintf("0x%x", vy), vy, 64)
 		if errCode != OK {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
@@ -1086,7 +1116,7 @@ func (vm *VM) HandleTwoRegs(opcode byte, operands []byte) {
 		result = bits.ReverseBytes64(valueA)
 		dumpTwoRegs("REVERSE_BYTES", registerIndexD, registerIndexA, valueA, result)
 	default:
-		vm.ResultCode = types.PVM_PANIC
+		vm.ResultCode = types.RESULT_PANIC
 		vm.terminated = true
 	}
 	vm.WriteRegister(registerIndexD, result)
@@ -1106,7 +1136,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 		errCode := vm.Ram.WriteRAMBytes(addr, []byte{byte(uint8(valueA))})
 		dumpStoreGeneric("STORE_IND_U8", uint64(addr), reg(registerIndexA), valueA&0xff, 8)
 		if errCode != OK {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
@@ -1115,7 +1145,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(valueA%(1<<16), 2))
 		dumpStoreGeneric("STORE_IND_U16", uint64(addr), reg(registerIndexA), valueA&0xffff, 16)
 		if errCode != OK {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
@@ -1124,7 +1154,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(valueA%(1<<32), 4))
 		dumpStoreGeneric("STORE_IND_U32", uint64(addr), reg(registerIndexA), valueA&0xffffffff, 32)
 		if errCode != OK {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
@@ -1133,7 +1163,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(uint64(valueA), 8))
 		dumpStoreGeneric("STORE_IND_U64", uint64(addr), reg(registerIndexA), valueA, 64)
 		if errCode != OK {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 		}
@@ -1141,7 +1171,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 	case LOAD_IND_U8:
 		value, errCode := vm.Ram.ReadRAMBytes(addr, 1)
 		if errCode != OK {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -1153,7 +1183,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 	case LOAD_IND_I8:
 		value, errCode := vm.Ram.ReadRAMBytes(addr, 1)
 		if errCode != OK {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -1163,7 +1193,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 	case LOAD_IND_U16:
 		value, errCode := vm.Ram.ReadRAMBytes(addr, 2)
 		if errCode != OK {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -1173,7 +1203,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 	case LOAD_IND_I16:
 		value, errCode := vm.Ram.ReadRAMBytes(addr, 2)
 		if errCode != OK {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -1183,7 +1213,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 	case LOAD_IND_U32:
 		value, errCode := vm.Ram.ReadRAMBytes(addr, 4)
 		if errCode != OK {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -1193,7 +1223,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 	case LOAD_IND_I32:
 		value, errCode := vm.Ram.ReadRAMBytes(addr, 4)
 		if errCode != OK {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -1203,7 +1233,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 	case LOAD_IND_U64:
 		value, errCode := vm.Ram.ReadRAMBytes(addr, 8)
 		if errCode != OK {
-			vm.ResultCode = types.PVM_FAULT
+			vm.ResultCode = types.RESULT_FAULT
 			vm.terminated = true
 			vm.Fault_address = uint32(errCode)
 			return
@@ -1370,7 +1400,7 @@ func (vm *VM) HandleTwoRegsOneOffset(opcode byte, operands []byte) {
 			vm.pc += uint64(1 + len(operands))
 		}
 	default:
-		vm.ResultCode = types.PVM_PANIC
+		vm.ResultCode = types.RESULT_PANIC
 		vm.terminated = true
 	}
 }

@@ -122,7 +122,6 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 	if address >= ram.rw_data_address && end <= Z_func(ram.current_heap_pointer) {
 		offset := address - ram.rw_data_address
 		if offset+length > uint32(len(ram.rw_data)) {
-			fmt.Printf("ADDRESS %x rw_data_address %x offset %x\n", address, ram.rw_data_address, offset)
 			return nil, OOB
 		}
 		return ram.rw_data[offset : offset+length], OK
@@ -135,12 +134,6 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 		}
 		return ram.ro_data[offset : offset+length], OK
 	}
-
-	log.Trace("pvm", "invalid ReadRAMBytes", "addr", fmt.Sprintf("%x", address), "end", end, "l", length,
-		"output_address", fmt.Sprintf("%x", ram.output_address), "output_end", fmt.Sprintf("%x", ram.output_end),
-		"stack_address", fmt.Sprintf("%x", ram.stack_address), "stack_end", fmt.Sprintf("%x", ram.stack_address_end),
-		"rw_data_address", fmt.Sprintf("%x", ram.rw_data_address), "current_heap_pointer", fmt.Sprintf("%x", Z_func(ram.current_heap_pointer)),
-		"ro_data_address", fmt.Sprintf("%x", ram.ro_data_address), "ro_data_end", fmt.Sprintf("%x", ram.ro_data_address_end))
 
 	return nil, OOB
 }

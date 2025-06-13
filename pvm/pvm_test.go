@@ -96,6 +96,7 @@ func pvm_test(tc TestCase) error {
 	// if len(tc.InitialMemory) == 0 {
 	// 	pvm.Ram.SetPageAccess(32, 1, AccessMode{Readable: false, Writable: false, Inaccessible: true})
 	// }
+	resultCode := uint8(0)
 	if RecompilerFlag {
 		rvm, err := NewRecompilerVM(pvm)
 		if err != nil {
@@ -145,7 +146,7 @@ func pvm_test(tc TestCase) error {
 				rvm.djump(rvm.register[bb.IndirectSourceRegister] + bb.IndirectJumpOffset)
 				fmt.Printf("INDIRECT_JUMP to pc: %d\n", rvm.pc)
 			case CONDITIONAL:
-				reg15Value := rvm.register[len(rvm.register)-1]
+				reg15Value := rvm.register[CompareReg]
 				if reg15Value == 0 {
 					rvm.pc = bb.FalsePC
 					fmt.Printf("CONDITION=0 jump to pc: %d\n", rvm.pc)
@@ -179,19 +180,17 @@ func pvm_test(tc TestCase) error {
 		for i, reg := range rvm.register {
 			if reg != tc.ExpectedRegs[i] {
 				num_mismatch++
+				fmt.Printf("MISMATCH expected %v got %v\n", tc.ExpectedRegs, rvm.register)
 				return fmt.Errorf("register mismatch for test %s at index %d: expected %d, got %d", tc.Name, i, tc.ExpectedRegs[i], reg)
 			}
 		}
-		if types.ResultCodeToString[rvm.ResultCode] != tc.ExpectedStatus {
-			return fmt.Errorf("result code mismatch for test %s: expected %s, got %s", tc.Name, tc.ExpectedStatus, types.ResultCodeToString[rvm.ResultCode])
-		} else {
-			fmt.Printf("Result code match for test %s: %s\n", tc.Name, types.ResultCodeToString[rvm.ResultCode])
-		}
-
+		resultCode = rvm.ResultCode
 		rvm.Close()
 
 	} else {
+		pvm.Gas = int64(100) // Set a high gas limit
 		pvm.Execute(int(tc.InitialPC), false)
+		resultCode = pvm.ResultCode
 	}
 	// Check the registers
 	if equalIntSlices(pvm.register, tc.ExpectedRegs) {
@@ -199,8 +198,20 @@ func pvm_test(tc TestCase) error {
 		return nil
 	}
 
+	resultCodeStr := types.ResultCodeToString[resultCode]
+	if resultCodeStr == "page-fault" {
+		resultCodeStr = "panic"
+	}
+	expectedCodeStr := tc.ExpectedStatus
+	if expectedCodeStr == "page-fault" {
+		expectedCodeStr = "panic"
+	}
+	if resultCodeStr == expectedCodeStr {
+		fmt.Printf("Result code match for test %s: %s\n", tc.Name, resultCodeStr)
+	} else {
+		return fmt.Errorf("result code mismatch for test %s: expected %s, got %s", tc.Name, expectedCodeStr, resultCodeStr)
+	}
 	return fmt.Errorf("register mismatch for test %s: expected %v, got %v", tc.Name, tc.ExpectedRegs, pvm.register)
-
 }
 
 // awaiting 64 bit

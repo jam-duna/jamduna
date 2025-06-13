@@ -346,7 +346,7 @@ func TestSinglePVM(t *testing.T) {
 	PvmTrace = true
 	RecompilerFlag = true
 
-	name := "inst_store_indirect_u16_with_offset_ok"
+	name := "inst_branch_eq_ok"
 	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -411,15 +411,12 @@ func TestHostFuncExpose(t *testing.T) {
 
 	rvm.initStartCode()
 	rvm.x86Code = rvm.startCode
-	panic("WIP")
-	/* ecallicode, err := rvm.EcalliCode(INFO)
+	ecallicode, err := rvm.EcalliCode(INFO)
 	if err != nil {
 		t.Fatalf("Failed to generate Ecalli code: %v", err)
 	}
 	rvm.x86Code = append(rvm.x86Code, ecallicode...)
 	rvm.x86Code = append(rvm.x86Code, 0xC3) // ret
-	*/
-	rvm.x86Code = []byte{}
 	fmt.Printf("Disassembled x86 code:\n%s\n", Disassemble(rvm.x86Code))
 	err = rvm.ExecuteX86Code()
 	if err != nil {

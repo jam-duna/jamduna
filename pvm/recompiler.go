@@ -5,18 +5,19 @@ import (
 	"fmt"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"syscall"
 	"unsafe"
 
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm/x86_execute"
 	"github.com/colorfulnotion/jam/types"
 	"golang.org/x/arch/x86/x86asm"
 )
 
 type RecompilerVM struct {
 	*VM
-	x86Code     []byte // x86 code to execute
+	mu          sync.Mutex // Protects concurrent access
+	x86Code     []byte     // x86 code to execute
 	startCode   []byte
 	exitCode    []byte
 	realMemory  []byte
@@ -70,7 +71,7 @@ func NewRecompilerVM(vm *VM) (*RecompilerVM, error) {
 		startCode:   nil,
 		exitCode:    nil,
 	}
-	// vm.Ram = rvm
+	vm.Ram = rvm
 	rvm.initStartCode()
 
 	// build exitCode: dump registers into regDumpMem
@@ -140,7 +141,7 @@ func (vm *RecompilerVM) Translate(bb *BasicBlock) (err error) {
 		if r := recover(); r != nil {
 			log.Error(vm.logging, "RecompilerVM Translate panic", "error", r)
 			debug.PrintStack()
-			vm.ResultCode = types.PVM_PANIC
+			vm.ResultCode = types.RESULT_PANIC
 			vm.terminated = true
 			err = fmt.Errorf("Translate panic: %v", r)
 		}
@@ -206,7 +207,7 @@ func (vm *RecompilerVM) ExecuteX86Code() (err error) {
 		if r := recover(); r != nil {
 			log.Error(vm.logging, "RecompilerVM ExecuteX86Code panic", "error", r)
 			debug.PrintStack()
-			vm.ResultCode = types.PVM_PANIC
+			vm.ResultCode = types.WORKRESULT_PANIC
 			vm.terminated = true
 			err = fmt.Errorf("ExecuteX86Code panic: %v", r)
 		}
@@ -228,9 +229,9 @@ func (vm *RecompilerVM) ExecuteX86Code() (err error) {
 		return fmt.Errorf("failed to mprotect exec code: %w", err)
 	}
 
-	crashed := x86_execute.ExecuteX86(x86code) //  vm.regDumpMem
-	if crashed == -1 {                         // || err != nil
-		vm.ResultCode = types.PVM_PANIC
+	crashed, err := ExecuteX86(x86code, vm.regDumpMem)
+	if crashed == -1 || err != nil {
+		vm.ResultCode = types.WORKRESULT_PANIC
 		vm.terminated = true
 		fmt.Printf("PANIC in ExecuteX86Code\n")
 	}
@@ -299,45 +300,50 @@ func generateLoadImmJumpIndirect(inst Instruction) []byte {
 	return append([]byte{rex, movOp}, immBytes...)
 }
 
+
 // BRANCH_{EQ/NE/...}_IMM: r15 = (r64_reg jcc imm32) ? 1 : 0
 func generateBranchImm(jcc byte) func(inst Instruction) []byte {
-	return func(inst Instruction) []byte {
-		// unpack: register, immediate to compare, and branch offset (ignored here)
-		regIdx, vx, _ := extractOneRegOneImmOneOffset(inst.Args)
-		r := regInfoList[regIdx]
+    return func(inst Instruction) []byte {
+        // unpack: register, immediate to compare, and branch offset (ignored here)
+        regIdx, vx, _ := extractOneRegOneImmOneOffset(inst.Args)
+        r   := regInfoList[regIdx]
+        dst := regInfoList[CompareReg] 
 
-		// 1) CMP r64, imm32  →  opcode 0x81 /7 id
-		rex := byte(0x48) // REX.W=1
-		if r.REXBit == 1 {
-			rex |= 0x01
-		} // REX.B
-		modrm := byte(0xC0 | (0x07 << 3) | r.RegBits)
-		disp := int32(vx)
-		b0 := byte(disp)
-		b1 := byte(disp >> 8)
-		b2 := byte(disp >> 16)
-		b3 := byte(disp >> 24)
-		code := []byte{rex, 0x81, modrm, b0, b1, b2, b3}
+        code := make([]byte, 0, 16)
 
-		// 2) SETcc r15b  →  0x0F, jcc, ModRM (mod=11, rm=r15.RegBits)
-		dst15 := regInfoList[15]
-		rexSet := byte(0x40)
-		if dst15.REXBit == 1 {
-			rexSet |= 0x01
-		} // REX.B for r15b
-		modrmSet := byte(0xC0 | dst15.RegBits)
-		code = append(code, rexSet, 0x0F, jcc, modrmSet)
+        // 1) XOR R15, R15  → clear all 64 bits of R15
+        rexXor := byte(0x48)           // REX.W
+        if dst.REXBit == 1 {           // high register needs REX.B
+            rexXor |= 0x01
+        }
+        modrmXor := byte(0xC0 | (dst.RegBits<<3) | dst.RegBits)
+        code = append(code, rexXor, 0x31, modrmXor)  // 31 /r = XOR r/m64, r64
 
-		// 3) MOVZX r64_r15, r15b  →  REX.W + 0F B6 /r
-		rexZX := byte(0x48)
-		if dst15.REXBit == 1 {
-			rexZX |= 0x01
-		}
-		modrmZX := byte(0xC0 | (dst15.RegBits << 3) | dst15.RegBits)
-		code = append(code, rexZX, 0x0F, 0xB6, modrmZX)
-		return code
-	}
+        // 2) CMP r64, imm32  → opcode 0x81 /7 id
+        rexCmp := byte(0x48)           // REX.W
+        if r.REXBit == 1 {             // extend rm field if needed
+            rexCmp |= 0x01
+        }
+        modrmCmp := byte(0xC0 | (0x07<<3) | r.RegBits)
+        disp := int32(vx)
+        code = append(code,
+            rexCmp, 0x81, modrmCmp,
+            byte(disp), byte(disp>>8),
+            byte(disp>>16), byte(disp>>24),
+        )
+
+        // 3) SETcc R15B  → 0x0F, (jcc+0x10), ModRM
+        rexSet := byte(0x40)           // minimal REX prefix
+        if dst.REXBit == 1 {
+            rexSet |= 0x01             // REX.B to reach R15B
+        }
+        modrmSet := byte(0xC0 | dst.RegBits)
+        code = append(code, rexSet, 0x0F, jcc+0x10, modrmSet)
+
+        return code
+    }
 }
+
 
 // BRANCH_{EQ/NE/LT_U/...} (register–register): r15 = (rA <cond> rB) ? 1 : 0
 func generateCompareBranch(op byte) func(inst Instruction) []byte {
@@ -358,22 +364,6 @@ func generateCompareBranch(op byte) func(inst Instruction) []byte {
 		modrmCmp := byte(0xC0 | (rB.RegBits << 3) | rA.RegBits)
 		code := []byte{rexCmp, 0x39, modrmCmp}
 
-		// 2) SETcc r15b  →  0x0F, jcc, ModRM (mod=11, rm=r15.RegBits)
-		dst15 := regInfoList[15]
-		rexSet := byte(0x40)
-		if dst15.REXBit == 1 {
-			rexSet |= 0x01
-		} // REX.B for r15b
-		modrmSet := byte(0xC0 | dst15.RegBits)
-		code = append(code, rexSet, 0x0F, op, modrmSet)
-
-		// 3) MOVZX r64_r15, r15b  →  REX.W + 0F B6 /r
-		rexZX := byte(0x48)
-		if dst15.REXBit == 1 {
-			rexZX |= 0x01
-		}
-		modrmZX := byte(0xC0 | (dst15.RegBits << 3) | dst15.RegBits)
-		code = append(code, rexZX, 0x0F, 0xB6, modrmZX)
 
 		return code
 	}

@@ -1392,7 +1392,7 @@ func (n *NodeContent) addStateDB(_statedb *statedb.StateDB) error {
 		}
 		n.statedb = _statedb
 		n.statedbMap[headerHash] = _statedb
-		log.Debug(debugBlock, "addStateDBAA", "statedb", n.statedb.GetHeaderHash().Hex())
+		log.Debug(debugBlock, "addStateDB", "statedb", n.statedb.GetHeaderHash().Hex())
 		return nil
 	}
 	if _statedb.GetBlock() == nil {
@@ -1400,8 +1400,8 @@ func (n *NodeContent) addStateDB(_statedb *statedb.StateDB) error {
 	}
 	if _statedb.GetBlock().TimeSlot() > n.statedb.GetBlock().TimeSlot() { // not nessary  && _statedb.GetBlock().GetParentHeaderHash() == n.statedb.GetBlock().Header.Hash()
 		if !(_statedb.GetBlock().GetParentHeaderHash() == n.statedb.GetBlock().Header.Hash()) {
-			log.Warn(debugBlock, "addStateDB Warning:newStateDB's Parent is not current StateDB", "n", n.String(), "new_statedb", _statedb.GetHeaderHash().Hex(), "new_statedb_slot", _statedb.GetBlock().TimeSlot(), "current_statedb", n.statedb.GetHeaderHash().Hex(), "current_statedb_slot", n.statedb.GetBlock().TimeSlot())
-			panic(fmt.Sprintf("addStateDB: newStateDB's Parent is not current StateDB %s != %s", _statedb.GetBlock().GetParentHeaderHash().Hex(), n.statedb.GetBlock().Header.Hash().Hex()))
+			log.Error(debugBlock, "addStateDB Warning:newStateDB's Parent is not current StateDB", "n", n.String(), "new_statedb", _statedb.GetHeaderHash().Hex(), "new_statedb_slot", _statedb.GetBlock().TimeSlot(), "current_statedb", n.statedb.GetHeaderHash().Hex(), "current_statedb_slot", n.statedb.GetBlock().TimeSlot())
+			return nil
 		}
 		n.statedb = _statedb
 		n.statedbMap[_statedb.GetHeaderHash()] = _statedb

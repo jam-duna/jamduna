@@ -126,7 +126,7 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Resul
 	return r
 }
 func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
-	if vm.ResultCode == types.PVM_OOG {
+	if vm.ResultCode == types.RESULT_OOG {
 		r.Err = types.RESULT_OOG
 		log.Debug(vm.logging, "getArgumentOutputs - OOG", "service", string(vm.ServiceMetadata))
 		return r, 0

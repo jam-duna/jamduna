@@ -17,17 +17,23 @@ var regInfoList = []X86Reg{
 	{"rdx", 2, 0}, // Often paired with rax for mul/div
 	{"rbx", 3, 0},
 	{"rsi", 6, 0}, // Often used as function argument
+
 	{"rdi", 7, 0}, // Often used as function argument
 	{"r8", 0, 1},  // Typically function argument #5
 	{"r9", 1, 1},
 	{"r10", 2, 1},
 	{"r11", 3, 1},
+
 	{"r13", 5, 1},
 	{"r14", 6, 1},
 	{"r15", 7, 1},
 	// the base register for memory dump
 	{"r12", 4, 1},
 }
+
+const (
+	CompareReg = 12
+)
 
 var pvmByteCodeToX86Code = map[byte]func(Instruction) []byte{
 	// A.5.1. Instructions without Arguments

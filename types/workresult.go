@@ -8,26 +8,33 @@ import (
 )
 
 const (
-	RESULT_OK         = 0
-	RESULT_OOG        = 1
-	RESULT_PANIC      = 2
-	RESULT_BAD_EXPORT = 3
-	RESULT_BAD        = 4
-	RESULT_BIG        = 5
+	WORKRESULT_OK         = 0
+	WORKRESULT_OOG        = 1
+	WORKRESULT_PANIC      = 2
+	WORKRESULT_BAD_EXPORT = 3
+	WORKRESULT_BAD        = 4
+	WORKRESULT_BIG        = 5
 )
 
 const (
-	PVM_HALT  = 0 // regular halt ∎
-	PVM_PANIC = 1 // panic ☇
-	PVM_FAULT = 2 // page-fault F
-	PVM_HOST  = 3 // host-call̵ h
-	PVM_OOG   = 4 // out-of-gas ∞
+	RESULT_OK    = 0 // regular halt ∎
+	RESULT_PANIC = 1 // panic ☇
+	RESULT_FAULT = 2 // page-fault F
+	RESULT_HOST  = 3 // host-call̵ h
+	RESULT_OOG   = 4 // out-of-gas ∞
 )
 
 var ResultCodeToString map[uint8]string = map[uint8]string{
-	PVM_HALT:  "halt",
-	PVM_PANIC: "panic",
-	PVM_FAULT: "page-fault",
+	RESULT_OK:    "halt",
+	RESULT_OOG:   "out-of-gas",
+	RESULT_PANIC: "panic",
+	RESULT_HOST:  "host-call",
+	//RESULT_BAD_EXPORT: "bad-exports",
+	//RESULT_BAD:        "bad-code",
+	//RESULT_BIG: "code-oversize",
+	//RESULT_HALT:       "halt",
+	//RESULT_PANIC:      "panic",
+	RESULT_FAULT: "page-fault",
 }
 
 // 11.1.4. Work Result. Equation 11.6. We finally come to define a work result, L, which is the data conduit by which services’ states may be altered through the computation done within a work-package.
@@ -68,15 +75,15 @@ func (R Result) Encode() []byte {
 		return append([]byte{0}, encodedOk...)
 	} else {
 		switch R.Err {
-		case RESULT_OOG:
+		case WORKRESULT_OOG:
 			return []byte{1}
-		case RESULT_PANIC:
+		case WORKRESULT_PANIC:
 			return []byte{2}
-		case RESULT_BAD_EXPORT:
+		case WORKRESULT_BAD_EXPORT:
 			return []byte{3}
-		case RESULT_BAD:
+		case WORKRESULT_BAD:
 			return []byte{4}
-		case RESULT_BIG:
+		case WORKRESULT_BIG:
 			return []byte{5}
 		default:
 			return []byte{R.Err}
@@ -94,32 +101,32 @@ func (target Result) Decode(data []byte) (interface{}, uint32) {
 		}
 		return Result{
 			Ok:  ok_byte.([]byte),
-			Err: RESULT_OK,
+			Err: WORKRESULT_OK,
 		}, length + l
 	case 1:
 		return Result{
 			Ok:  nil,
-			Err: RESULT_OOG,
+			Err: WORKRESULT_OOG,
 		}, length
 	case 2:
 		return Result{
 			Ok:  nil,
-			Err: RESULT_PANIC,
+			Err: WORKRESULT_PANIC,
 		}, length
 	case 3:
 		return Result{
 			Ok:  nil,
-			Err: RESULT_BAD_EXPORT,
+			Err: WORKRESULT_BAD_EXPORT,
 		}, length
 	case 4:
 		return Result{
 			Ok:  nil,
-			Err: RESULT_BAD,
+			Err: WORKRESULT_BAD,
 		}, length
 	case 5:
 		return Result{
 			Ok:  nil,
-			Err: RESULT_BIG,
+			Err: WORKRESULT_BIG,
 		}, length
 	default:
 		return Result{
@@ -165,19 +172,19 @@ func (a *WorkResult) UnmarshalJSON(data []byte) error {
 	if _, ok := s.Result["bad-exports"]; ok {
 		result = Result{
 			Ok:  nil,
-			Err: RESULT_BAD_EXPORT,
+			Err: WORKRESULT_BAD_EXPORT,
 		}
 	}
 	if _, ok := s.Result["bad-code"]; ok {
 		result = Result{
 			Ok:  nil,
-			Err: RESULT_BAD,
+			Err: WORKRESULT_BAD,
 		}
 	}
 	if _, ok := s.Result["code-oversize"]; ok {
 		result = Result{
 			Ok:  nil,
-			Err: RESULT_BIG,
+			Err: WORKRESULT_BIG,
 		}
 	}
 
@@ -202,23 +209,23 @@ func (a WorkResult) MarshalJSON() ([]byte, error) {
 		}
 	} else {
 		switch a.Result.Err {
-		case RESULT_OOG:
+		case WORKRESULT_OOG:
 			result = map[string]interface{}{
 				"out-of-gas": nil,
 			}
-		case RESULT_PANIC:
+		case WORKRESULT_PANIC:
 			result = map[string]interface{}{
 				"panic": nil,
 			}
-		case RESULT_BAD_EXPORT:
+		case WORKRESULT_BAD_EXPORT:
 			result = map[string]interface{}{
 				"bad-exports": nil,
 			}
-		case RESULT_BAD:
+		case WORKRESULT_BAD:
 			result = map[string]interface{}{
 				"bad-code": nil,
 			}
-		case RESULT_BIG:
+		case WORKRESULT_BIG:
 			result = map[string]interface{}{
 				"code-oversize": nil,
 			}
