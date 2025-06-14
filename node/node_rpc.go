@@ -26,26 +26,27 @@ var MethodDescriptionMap = map[string]string{
 	"Functions":   "Functions() -> functions description",
 	"NodeCommand": "NodeCommand(command string) -> will pass the command to the node",
 
-	"Block":            "Block(headerHash hexstring) -> string",
-	"BestBlock":        "BestBlock(headerHash hexstring) -> string",
-	"FinalizedBlock":   "FinalizedBlock(headerHash hexstring) -> string",
-	"Parent":           "Parent(headerHash hexstring) -> string",
-	"StateRoot":        "StateRoot(headerHash hexstring) -> string",
-	"BeefyRoot":        "BeefyRoot(headerHash hexstring) -> string",
-	"State":            "State(headerHash hexstring) -> string",
-	"Statistics":       "Statistics(headerHash hexstring) -> string",
-	"ServiceInfo":      "ServiceInfo(serviceIndex string) -> string",
-	"ServicePreimage":  "ServicePreimage(serviceIndex string, preimage hexstring) -> hexstring",
-	"ServiceRequest":   "ServiceRequest(serviceIndex string, preimage hexstring, length string) -> json string",
-	"SubmitPreimage":   "SubmitPreimage(serviceIndex string, preimage hexstring) -> string",
-	"ServiceValue":     "ServiceValue(serviceIndex string, key hexstring) -> hexstring",
-	"WorkPackage":      "WorkPackage(workPackageHash string) -> json WorkReport",
-	"Code":             "Code(serviceIndex string) -> json string",
-	"ListServices":     "ListServices() -> json string",
-	"AuditWorkPackage": "AuditWorkPackage(workPackageHash string) -> json WorkReport",
-	"Segment":          "Segment(requestedHash string, index int) -> hex string",
-	"Encode":           "Encode(objectType string, input string) -> hexstring",
-	"Decode":           "Decode(objectType string, input string) -> json string",
+	"Block":                "Block(headerHash hexstring) -> string",
+	"BestBlock":            "BestBlock(headerHash hexstring) -> string",
+	"FinalizedBlock":       "FinalizedBlock(headerHash hexstring) -> string",
+	"LatestFinalizedBlock": "LatestFinalizedBlock() -> string",
+	"Parent":               "Parent(headerHash hexstring) -> string",
+	"StateRoot":            "StateRoot(headerHash hexstring) -> string",
+	"BeefyRoot":            "BeefyRoot(headerHash hexstring) -> string",
+	"State":                "State(headerHash hexstring) -> string",
+	"Statistics":           "Statistics(headerHash hexstring) -> string",
+	"ServiceInfo":          "ServiceInfo(serviceIndex string) -> string",
+	"ServicePreimage":      "ServicePreimage(serviceIndex string, preimage hexstring) -> hexstring",
+	"ServiceRequest":       "ServiceRequest(serviceIndex string, preimage hexstring, length string) -> json string",
+	"SubmitPreimage":       "SubmitPreimage(serviceIndex string, preimage hexstring) -> string",
+	"ServiceValue":         "ServiceValue(serviceIndex string, key hexstring) -> hexstring",
+	"WorkPackage":          "WorkPackage(workPackageHash string) -> json WorkReport",
+	"Code":                 "Code(serviceIndex string) -> json string",
+	"ListServices":         "ListServices() -> json string",
+	"AuditWorkPackage":     "AuditWorkPackage(workPackageHash string) -> json WorkReport",
+	"Segment":              "Segment(requestedHash string, index int) -> hex string",
+	"Encode":               "Encode(objectType string, input string) -> hexstring",
+	"Decode":               "Decode(objectType string, input string) -> json string",
 }
 
 type NodeStatusServer struct {
@@ -312,6 +313,7 @@ func (j *Jam) GetCoreCoWorkersPeers(req []string, res *string) (err error) {
 	return nil
 }
 
+// jam.FinalizedBlock returns the header hash of the latest finalized block.
 func (j *Jam) FinalizedBlock(req []string, res *string) error {
 	if len(req) != 1 {
 		return fmt.Errorf("invalid number of arguments: expected 1, got %d", len(req))
@@ -319,7 +321,6 @@ func (j *Jam) FinalizedBlock(req []string, res *string) error {
 
 	var block *types.SBlock // Replace 'Block' with the actual type returned by your methods.
 	var err error
-
 	slot := j.NodeContent.getBestBlockSlot()
 	block, err = j.NodeContent.GetStoredBlockBySlot(slot)
 	if err != nil {
@@ -327,6 +328,20 @@ func (j *Jam) FinalizedBlock(req []string, res *string) error {
 	}
 
 	*res = block.Header.Hash().String()
+	return nil
+}
+
+// jam.LatestFinalizedBlock
+func (j *Jam) LatestFinalizedBlock(req []string, res *string) error {
+
+	var block *types.Block // Replace 'Block' with the actual type returned by your methods.
+	var err error
+
+	block, err = j.NodeContent.GetFinalizedBlock()
+	if err != nil {
+		return fmt.Errorf("failed to get finalized block: %w", err)
+	}
+	*res = block.String()
 	return nil
 }
 

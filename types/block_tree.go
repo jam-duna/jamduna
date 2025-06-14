@@ -623,6 +623,7 @@ func (bt *BlockTree) EasyFinalization() {
 		}
 		if count >= 5 && !node.Finalized && node.Applied {
 			node.Finalized = true
+			//TODO: write finalize k,v here
 		}
 		return count
 	}

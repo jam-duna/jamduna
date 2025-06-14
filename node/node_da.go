@@ -374,7 +374,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		Results:           results,
 		AuthGasUsed:       uint(authGasUsed),
 	}
-	log.Trace(log.G, "executeWorkPackageBundle OUTGOING SPEC",
+	log.Info(log.G, "executeWorkPackageBundle OUTGOING SPEC",
 		"n", n.String(),
 		"workReportHash", workReport.Hash(),
 		"spec", workReport.AvailabilitySpec.String(),

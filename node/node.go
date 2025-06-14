@@ -500,7 +500,7 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 		log.Error(log.Node, "StoreBlock", "err", err)
 		return nil, err
 	}
-	finalizedBlock, FinalizedOk, err := node.GetFinalizedBlock()
+	finalizedBlock, FinalizedOk, err := node.GetFinalizedBlockInternal()
 	if err != nil || !FinalizedOk {
 		FinalizedOk = true
 		log.Info(log.Node, "GetFinalizedBlock", "block_hash", block.Header.HeaderHash().Hex())
@@ -940,6 +940,7 @@ const (
 )
 
 type JNode interface {
+	GetFinalizedBlock() (blk *types.Block, err error)
 	SetJCEManager(jceManager *ManualJCEManager) (err error)
 	GetJCEManager() (jceManager *ManualJCEManager, err error)
 	SubmitAndWaitForWorkPackage(ctx context.Context, wpr *WorkPackageRequest) (common.Hash, error)
@@ -1814,6 +1815,7 @@ func (n *Node) extendChain(ctx context.Context) error {
 		"blocktreeElapsed", blocktreeElapsed,
 		"applyBlockElapsed", applyBlockElapsed,
 	)
+	//TODO
 	return nil
 }
 func (n *Node) getCE129(nodeIndex uint16, headerHash common.Hash) {

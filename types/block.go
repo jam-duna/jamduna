@@ -157,6 +157,7 @@ func (b *Block) Str() string {
 	}
 	if len(b.Extrinsic.Guarantees) > 0 {
 		out += fmt.Sprintf(" |E_G|=%d", len(b.Extrinsic.Guarantees))
+		out += b.Extrinsic.PrintG()
 	}
 	/*if len(b.Extrinsic.Disputes) > 0 {
 		out += fmt.Sprintf(" |E_D|=%d", len(b.Extrinsic.Disputes))
@@ -166,6 +167,7 @@ func (b *Block) Str() string {
 	}
 	if len(b.Extrinsic.Assurances) > 0 {
 		out += fmt.Sprintf(" |E_A|=%d", len(b.Extrinsic.Assurances))
+		out += b.Extrinsic.PrintA()
 	}
 	return out
 }

@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/colorfulnotion/jam/common"
 )
@@ -29,6 +30,37 @@ func (e *ExtrinsicData) Bytes() []byte {
 		return nil
 	}
 	return enc
+}
+
+func (e *ExtrinsicData) PrintA() string {
+	cnt := 0
+	aArr := make([]string, TotalValidators)
+	for i := range TotalValidators {
+		aArr[i] = "." // core without Assurance
+	}
+	for _, a := range e.Assurances {
+		aArr[a.ValidatorIndex] = "*"
+		cnt++
+	}
+	if cnt == TotalValidators {
+		return ""
+	}
+	return fmt.Sprintf("[%s]", strings.Join(aArr, ""))
+}
+
+func (e *ExtrinsicData) PrintG() string {
+	gArr := make([]string, TotalCores)
+	for i := range TotalCores {
+		gArr[i] = "." // core without guarantee
+	}
+	for _, g := range e.Guarantees {
+		if len(g.Signatures) == 2 {
+			gArr[g.Report.CoreIndex] = "_" // core with 2 signatures
+		} else if len(g.Signatures) == 3 {
+			gArr[g.Report.CoreIndex] = "*" // core with 3 signatures
+		}
+	}
+	return fmt.Sprintf(" <%s>", strings.Join(gArr, ""))
 }
 
 func (e *ExtrinsicData) Hash() common.Hash {

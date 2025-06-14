@@ -287,15 +287,17 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 				return status
 			})
 		} else {
-			log.Warn(log.G, "processWPQueueItem Guarantee from fellow did not match", "n", n.String(), "selfWorkReportHash", selfWorkReportHash, "fellowWorkReportHash", fellowWorkReportHash)
-			log.Warn(log.G, "our reports", "n", n.String(), "selfWorkReport", guarantee.Report.String())
-			//return false
+			if (guarantee.Report.GetWorkPackageHash() != common.Hash{}) {
+				log.Warn(log.G, "processWPQueueItem Guarantee from fellow did not match", "n", n.String(), "selfWorkReportHash", selfWorkReportHash, "fellowWorkReportHash", fellowWorkReportHash)
+				log.Warn(log.G, "our reports", "n", n.String(), "selfWorkReport", guarantee.Report.String())
+				//return false
+			}
 		}
 	}
 
 	if len(guarantee.Signatures) >= 2 {
 		guarantee.Slot = slot // this is the slot when ORIGINALLY added to the queue
-		log.Debug(log.G, "processWPQueueItem Guarantee enough signatures", "n", n.id, "guarantee.Slot", guarantee.Slot, "guarantee.Signatures", types.ToJSONHex(guarantee.Signatures), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
+		log.Info(log.G, "processWPQueueItem Guarantee enough signatures", "n", n.id, "guarantee.Slot", guarantee.Slot, "numSig", len(guarantee.Signatures), "guarantee.Signatures", types.ToJSONHex(guarantee.Signatures), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
 		ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
 		defer cancel()
 		n.broadcast(ctx, guarantee) // send via CE135
@@ -312,8 +314,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 			log.Error(log.G, "processWPQueueItem:processGuarantee:", "n", n.String(), "err", err)
 		}
 	} else {
-		log.Warn(log.G, "processWPQueueItem Guarantee not enough signatures", "n", n.String(),
-			"guarantee.Signatures", types.ToJSONHex(guarantee.Signatures), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
+		log.Debug(log.G, "processWPQueueItem Guarantee not enough signatures", "n", n.String(), "guarantee.Signatures", types.ToJSONHex(guarantee.Signatures), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
 		return false
 	}
 	metadata := fmt.Sprintf("role=Guarantor|numSig=%d", len(guarantee.Signatures))

@@ -98,7 +98,7 @@ func init_module(moduleList []string, moduleEnabled []string) map[string]bool {
 	return moduleMap
 }
 
-var defaultKnownModules = []string{GeneralAuthoring, PvmAuthoring, FirstGuarantorOrAuditor}
+var defaultKnownModules = []string{GeneralAuthoring, PvmAuthoring, FirstGuarantorOrAuditor, Node, SDB, Quic, B, P, G, R, DA, A, Beefy, Audit, Grandpa, Web}
 var defaultModuleEnabled = []string{}
 
 // --- Module management ---

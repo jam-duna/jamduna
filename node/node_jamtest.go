@@ -195,11 +195,12 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	// EnableModules is a comma-separated list of modules to enable for debug logging
 	// For example, to enable DEBUG logging for rotation, guarantees, node, state, quic, preimage:
 	// "rotation,guarantees,node,state,quic,preimage"
+	log.InitLogger("debug")
 	debug := "rotation,guarantees"
 	log.EnableModules(debug)
 
 	// Specify testServices
-	targetedFinalityDelay := 5 // TODO: write key to levelDB for starting time slot
+	targetedFinalityDelay := 0 // TODO: write key to levelDB for starting time slot
 	defaultDelay := time.Duration(targetedFinalityDelay*types.SecondsPerSlot) * time.Second
 	var serviceNames []string
 	switch jam {
@@ -348,6 +349,17 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	}
 
 	log.Info(log.Node, "Waiting for the first block to be ready...")
+	isReady := false
+	for !isReady {
+		finalizedBlock, _ := bNode.GetFinalizedBlock()
+		if finalizedBlock != nil && finalizedBlock.Header.Slot > 0 {
+			isReady = true
+			log.Info(log.Node, "JAMTEST READY", "Last Finalized", finalizedBlock.Header.Slot, "HeaderHash", finalizedBlock.Header.Hash())
+			break
+		}
+		time.Sleep(3 * time.Second)
+	}
+
 	time.Sleep(defaultDelay) // this delay is necessary to ensure the first block is ready, nor it will send the wrong anchor slot
 
 	var jceManager *ManualJCEManager

@@ -59,6 +59,7 @@ const block_key_string = "blk_finalized"
 
 func (n *NodeContent) StoreFinalizedBlock(blk *types.Block) error {
 	// from block, derive blockHash & headerHash
+	//fmt.Printf("Storing finalized block: %v HeaderHash: %v\n", blk.Header.Slot, blk.Header.Hash())
 	s, err := n.GetStorage()
 	if err != nil {
 		fmt.Printf("Error getting storage: %v\n", err)
@@ -68,7 +69,30 @@ func (n *NodeContent) StoreFinalizedBlock(blk *types.Block) error {
 	return err
 }
 
-func (n *NodeContent) GetFinalizedBlock() (*types.Block, bool, error) {
+func (n *NodeContent) GetFinalizedBlock() (*types.Block, error) {
+	s, err := n.GetStorage()
+	if err != nil {
+		fmt.Printf("Error getting storage: %v\n", err)
+		return nil, err
+	}
+	encodedblk, ok, err := s.ReadRawKV([]byte(block_key_string))
+	if err != nil {
+		fmt.Printf("Error reading block: %v\n", err)
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	blk, _, err := types.Decode(encodedblk, reflect.TypeOf(types.Block{}))
+	if err != nil {
+		fmt.Printf("Error decoding block: %v\n", err)
+		return nil, err
+	}
+	b := blk.(types.Block)
+	return &b, nil
+}
+
+func (n *NodeContent) GetFinalizedBlockInternal() (*types.Block, bool, error) {
 	s, err := n.GetStorage()
 	if err != nil {
 		fmt.Printf("Error getting storage: %v\n", err)

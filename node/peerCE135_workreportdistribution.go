@@ -178,7 +178,7 @@ func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream,
 		log.Warn(log.G, "onWorkReportDistribution", "msg", "guaranteesCh full, dropping guarantee")
 	}
 
-	log.Trace(log.G, fmt.Sprintf("onWorkReportDistribution INCOMING SPEC"),
+	log.Info(log.G, fmt.Sprintf("onWorkReportDistribution INCOMING SPEC"),
 		"n", n.String(),
 		"peerID", peerID,
 		//"workPackageHash", workReport.GetWorkPackageHash(),

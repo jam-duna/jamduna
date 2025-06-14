@@ -281,6 +281,10 @@ func (c *NodeClient) GetClient(possibleCores ...uint16) *rpc.Client {
 		log.Error(log.Node, "GetClient: GetCoreCoWorkersPeers", "err", err)
 		return c.baseClient
 	}
+	if len(idx) == 0 {
+		log.Warn(log.Node, "GetClient: No co-workers found for core", "coreIdx", coreIdx)
+		return c.baseClient
+	}
 
 	// Select random peer
 	selected := idx[rand.Intn(len(idx))]
@@ -760,6 +764,20 @@ func (c *NodeClient) GetService(serviceID uint32) (sa *types.ServiceAccount, ok 
 	}
 	return &service, true, nil
 
+}
+
+func (c *NodeClient) GetFinalizedBlock() (block *types.Block, err error) {
+	var jsonStr string
+	err = c.CallWithRetry("jam.LatestFinalizedBlock", []string{}, &jsonStr)
+	if err != nil {
+		return nil, err
+	}
+	var blockData types.Block
+	err = json.Unmarshal([]byte(jsonStr), &blockData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal finalized block: %w", err)
+	}
+	return &blockData, nil
 }
 
 func (c *NodeClient) GetWorkReport(requestedHash common.Hash) (wr *types.WorkReport, err error) {
