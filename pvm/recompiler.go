@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"runtime/debug"
 	"strings"
-	"sync"
 	"syscall"
 	"unsafe"
 
@@ -13,17 +12,6 @@ import (
 	"github.com/colorfulnotion/jam/types"
 	"golang.org/x/arch/x86/x86asm"
 )
-
-type RecompilerVM struct {
-	*VM
-	mu          sync.Mutex // Protects concurrent access
-	x86Code     []byte     // x86 code to execute
-	startCode   []byte
-	exitCode    []byte
-	realMemory  []byte
-	regDumpMem  []byte  // memory region to dump registers
-	regDumpAddr uintptr // base address of regDumpMem
-}
 
 const (
 	PageInaccessible = 0
@@ -38,7 +26,7 @@ const (
 )
 
 func NewRecompilerVM(vm *VM) (*RecompilerVM, error) {
-	// allocate real memory
+	// Allocate 4GB virtual memory region (not accessed directly here)
 	const memSize = 4 * 1024 * 1024 * 1024 // 4GB
 	mem, err := syscall.Mmap(
 		-1, 0, memSize,
@@ -48,42 +36,57 @@ func NewRecompilerVM(vm *VM) (*RecompilerVM, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to mmap memory: %v", err)
 	}
-	// put the memory address to BaseReg
-	// mov r12, memAddr
 
-	// allocate memory for register dump: one uint64 per reg
+	// Allocate memory to dump registers into
 	dumpSize := len(regInfoList) * 8
+	if dumpSize < 104 {
+		dumpSize = 104
+	}
 	dumpMem, err := syscall.Mmap(
 		-1, 0, dumpSize,
-		syscall.PROT_READ|syscall.PROT_WRITE|syscall.PROT_EXEC,
+		syscall.PROT_READ|syscall.PROT_WRITE,
 		syscall.MAP_ANON|syscall.MAP_PRIVATE,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to mmap regDump memory: %v", err)
 	}
 	regDumpAddr := uintptr(unsafe.Pointer(&dumpMem[0]))
+	//fmt.Printf("🧠 NewRecompilerVM: regDumpAddr = 0x%x (%d bytes)\n", regDumpAddr, dumpSize)
 
+	// Build exit code in temporary buffer
+	exitCode := encodeMovImm(BaseRegIndex, uint64(regDumpAddr))
+	for i := 0; i < len(regInfoList); i++ {
+		if i == BaseRegIndex {
+			continue // skip R12 into [R12]
+		}
+		offset := byte(i * 8)
+		exitCode = append(exitCode, encodeMovRegToMem(i, BaseRegIndex, offset)...)
+	}
+
+	exitCode = append(exitCode, 0xC3)
+
+	// Allocate executable memory for exitCode
+	execMem, err := syscall.Mmap(
+		-1, 0, len(exitCode),
+		syscall.PROT_READ|syscall.PROT_WRITE|syscall.PROT_EXEC,
+		syscall.MAP_ANON|syscall.MAP_PRIVATE,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to mmap exec memory: %v", err)
+	}
+	copy(execMem, exitCode)
+
+	// Assemble the VM
 	rvm := &RecompilerVM{
 		VM:          vm,
 		realMemory:  mem,
 		regDumpMem:  dumpMem,
 		regDumpAddr: regDumpAddr,
-		startCode:   nil,
-		exitCode:    nil,
+		exitCode:    execMem,
 	}
 	//vm.Ram = rvm
 	rvm.initStartCode()
 
-	// build exitCode: dump registers into regDumpMem
-	// first: mov r12, regDumpAddr (use r12 as base)
-	rvm.exitCode = encodeMovImm(BaseRegIndex, uint64(regDumpAddr))
-
-	// for each register, mov [r12 + i*8], rX
-	for i := 0; i < len(regInfoList); i++ {
-		off := byte(i * 8)
-		dumpInstr := encodeMovRegToMem(i, BaseRegIndex, off)
-		rvm.exitCode = append(rvm.exitCode, dumpInstr...)
-	}
 	return rvm, nil
 }
 
@@ -201,8 +204,7 @@ func Disassemble(code []byte) string {
 	}
 	return sb.String()
 }
-
-func (vm *RecompilerVM) ExecuteX86Code() (err error) {
+func (vm *RecompilerVM) ExecuteX86Code(x86code []byte) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error(vm.logging, "RecompilerVM ExecuteX86Code panic", "error", r)
@@ -213,7 +215,6 @@ func (vm *RecompilerVM) ExecuteX86Code() (err error) {
 		}
 	}()
 
-	x86code := vm.x86Code
 	codeAddr, err := syscall.Mmap(
 		-1, 0, len(x86code),
 		syscall.PROT_READ|syscall.PROT_WRITE,
@@ -223,19 +224,22 @@ func (vm *RecompilerVM) ExecuteX86Code() (err error) {
 		return fmt.Errorf("failed to mmap exec code: %w", err)
 	}
 	copy(codeAddr, x86code)
-	fmt.Printf("bytecode\n%x\n", x86code)
 	err = syscall.Mprotect(codeAddr, syscall.PROT_READ|syscall.PROT_EXEC)
 	if err != nil {
 		return fmt.Errorf("failed to mprotect exec code: %w", err)
 	}
 
-	crashed, err := ExecuteX86(x86code, vm.regDumpMem)
+	// fmt.Printf("Executing at %p\n", &codeAddr[0])
+	// fmt.Printf("DumpMem base: 0x%x\n", vm.regDumpAddr)
+
+	crashed, err := ExecuteX86(codeAddr, vm.regDumpMem)
+
 	if crashed == -1 || err != nil {
 		vm.ResultCode = types.WORKRESULT_PANIC
 		vm.terminated = true
-		fmt.Printf("PANIC in ExecuteX86Code\n")
+		fmt.Printf("PANIC in ExecuteX86Code: %v\n", err)
+		return fmt.Errorf("ExecuteX86 crash detected (return -1)")
 	}
-	fmt.Printf("Execution finished, dumping registers\n")
 
 	for i := 0; i < len(vm.register); i++ {
 		regValue := binary.LittleEndian.Uint64(vm.regDumpMem[i*8:])
@@ -250,8 +254,25 @@ func generateSyscall(inst Instruction) []byte {
 	return []byte{0x0F, 0x05}
 }
 
+func generateTrap(inst Instruction) []byte {
+	rel := 0xDEADBEEF
+	return []byte{
+		0xE9,                      // opcode
+		byte(rel), byte(rel >> 8), // disp[0..1]
+		byte(rel >> 16), byte(rel >> 24),
+	}
+}
+
 func generateFallthrough(inst Instruction) []byte {
 	return []byte{0x90}
+}
+
+func generateJump(inst Instruction) []byte {
+	// For direct jumps, we can just append a jump instruction to a X86 PC
+	x86Code := []byte{0xE9}  // JMP rel32
+	jumpOffset := 0xDEADBEEF // placeholder for the jump offset, which we compute AFTER we know X86PC for each block
+	x86Code = append(x86Code, byte(jumpOffset), byte(jumpOffset>>8), byte(jumpOffset>>16), byte(jumpOffset>>24))
+	return x86Code
 }
 
 // LOAD_IMM_JUMP (only the “LOAD_IMM” portion)
@@ -300,68 +321,74 @@ func generateLoadImmJumpIndirect(inst Instruction) []byte {
 	return append([]byte{rex, movOp}, immBytes...)
 }
 
-// BRANCH_{EQ/NE/...}_IMM: r15 = (r64_reg jcc imm32) ? 1 : 0
+// generateBranchImm emits:
+//
+//	REX.W + CMP r64, imm32         (7 bytes total)
+//	0x0F, jcc                      (2 bytes)
+//	rel32 placeholder (true‐target) (4 bytes)
+//	0xE9                           (1 byte JMP opcode)
+//	rel32 placeholder (false‐target)(4 bytes)
+//
+// Total = 18 bytes
 func generateBranchImm(jcc byte) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		// unpack: register, immediate to compare, and branch offset (ignored here)
-		regIdx, vx, _ := extractOneRegOneImmOneOffset(inst.Args)
+		regIdx, imm, _ := extractOneRegOneImmOneOffset(inst.Args)
 		r := regInfoList[regIdx]
-		dst := regInfoList[CompareReg]
 
-		code := make([]byte, 0, 16)
-
-		// 1) XOR R15, R15  → clear all 64 bits of R15
-		rexXor := byte(0x48) // REX.W
-		if dst.REXBit == 1 { // high register needs REX.B
-			rexXor |= 0x01
+		// REX.W + REX.B if needed
+		rex := byte(0x48)
+		if r.REXBit == 1 {
+			rex |= 0x01
 		}
-		modrmXor := byte(0xC0 | (dst.RegBits << 3) | dst.RegBits)
-		code = append(code, rexXor, 0x31, modrmXor) // 31 /r = XOR r/m64, r64
 
-		// 2) CMP r64, imm32  → opcode 0x81 /7 id
-		rexCmp := byte(0x48) // REX.W
-		if r.REXBit == 1 {   // extend rm field if needed
-			rexCmp |= 0x01
+		// CMP r64, imm32 → opcode 0x81 /7 id
+		modrm := byte(0xC0 | (0x7 << 3) | r.RegBits)
+		disp := int32(imm)
+
+		return []byte{
+			// 7-byte compare
+			rex, 0x81, modrm,
+			byte(disp), byte(disp >> 8), byte(disp >> 16), byte(disp >> 24),
+
+			// 2-byte conditional jump
+			0x0F, jcc,
+
+			// 4-byte placeholder for true target
+			0, 0, 0, 0,
+
+			// 1-byte unconditional JMP opcode
+			0xE9,
+
+			// 4-byte placeholder for false target
+			0, 0, 0, 0,
 		}
-		modrmCmp := byte(0xC0 | (0x07 << 3) | r.RegBits)
-		disp := int32(vx)
-		code = append(code,
-			rexCmp, 0x81, modrmCmp,
-			byte(disp), byte(disp>>8),
-			byte(disp>>16), byte(disp>>24),
-		)
-
-		// 3) SETcc R15B  → 0x0F, (jcc+0x10), ModRM
-		rexSet := byte(0x40) // minimal REX prefix
-		if dst.REXBit == 1 {
-			rexSet |= 0x01 // REX.B to reach R15B
-		}
-		modrmSet := byte(0xC0 | dst.RegBits)
-		code = append(code, rexSet, 0x0F, jcc+0x10, modrmSet)
-
-		return code
 	}
 }
 
-// BRANCH_{EQ/NE/LT_U/...} (register–register): r15 = (rA <cond> rB) ? 1 : 0
-func generateCompareBranch(op byte) func(inst Instruction) []byte {
+func generateCompareBranch(jcc byte) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		// Unpack: two registers (rA, rB) and an ignored offset
-		regA, regB, _ := extractTwoRegsOneOffset(inst.Args)
-		rA := regInfoList[regA]
-		rB := regInfoList[regB]
+		aIdx, bIdx, _ := extractTwoRegsOneOffset(inst.Args)
+		rA := regInfoList[aIdx]
+		rB := regInfoList[bIdx]
 
-		// 1) CMP r64, r64  → opcode 0x39 /r (CMP r/m64, r64)
-		rexCmp := byte(0x48) // REX.W
+		// REX.W + REX.R + REX.B
+		rex := byte(0x48)
 		if rB.REXBit == 1 {
-			rexCmp |= 0x04 // REX.R
+			rex |= 0x04
 		}
 		if rA.REXBit == 1 {
-			rexCmp |= 0x01 // REX.B
+			rex |= 0x01
 		}
-		modrmCmp := byte(0xC0 | (rB.RegBits << 3) | rA.RegBits)
-		code := []byte{rexCmp, 0x39, modrmCmp}
 
-		return code
+		// CMP r/m64, r64 (0x39 /r)
+		modrm := byte(0xC0 | (rB.RegBits << 3) | rA.RegBits)
+
+		return []byte{
+			rex, 0x39, modrm, // 00–02
+			0x0F, jcc, // 03–04
+			0, 0, 0, 0, // 05–08 (relTrue placeholder)
+			0xE9,       // 09 (JMP opcode)
+			0, 0, 0, 0, // 10–13 (relFalse placeholder)
+		}
 	}
 }

@@ -3,22 +3,27 @@ package pvm
 import "fmt"
 
 const (
-	TRAP_JUMP     = 0
-	DIRECT_JUMP   = 1
-	INDIRECT_JUMP = 2
-	CONDITIONAL   = 3
+	TRAP_JUMP        = 0
+	DIRECT_JUMP      = 1
+	INDIRECT_JUMP    = 2
+	CONDITIONAL      = 3
+	FALLTHROUGH_JUMP = 4
+	TERMINATED       = 5
 )
 
 type BasicBlock struct {
 	Instructions []Instruction
-	InitGas      int64
 	GasUsage     int64
+
+	X86PC   uint64
+	X86Code []byte
 
 	JumpType               int
 	IndirectJumpOffset     uint64
 	IndirectSourceRegister int
-	TruePC                 uint64
-	FalsePC                uint64
+
+	TruePC    uint64
+	PVMNextPC uint64 // the next PC in PVM after this block, which is the "FALSE" case
 }
 
 type Instruction struct {
@@ -28,11 +33,11 @@ type Instruction struct {
 	Pc     uint64
 }
 
-func NewBasicBlock(initGas int64) *BasicBlock {
+func NewBasicBlock(x86pc uint64) *BasicBlock {
 	return &BasicBlock{
 		Instructions: make([]Instruction, 0),
-		InitGas:      initGas,
 		GasUsage:     0,
+		X86PC:        x86pc,
 	}
 }
 
@@ -54,7 +59,7 @@ func (bb *BasicBlock) String() string {
 	for _, inst := range bb.Instructions {
 		result += inst.String()
 	}
-	result += fmt.Sprintf("GasCharge: %d, [%d -> %d]\n", bb.GasUsage, bb.InitGas, bb.InitGas-bb.GasUsage)
+	result += fmt.Sprintf("GasCharge: %d", len(bb.Instructions))
 	return result
 }
 

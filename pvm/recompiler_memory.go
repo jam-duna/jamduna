@@ -234,18 +234,31 @@ func generateStoreImmU64(inst Instruction) []byte {
 }
 
 // A.5.6. Instructions with Arguments of One Register & Two Immediates.
-
+// Emits: REX.W + MOV r64, imm64
+// where imm64 is the sign-extended int32(imm) into uint64
 func generateLoadImm32(inst Instruction) []byte {
 	dstReg, imm := extractOneRegOneImm(inst.Args)
 	dst := regInfoList[dstReg]
-	rex := byte(0x40)
+
+	// REX.W = 1, REX.B = dst.REXBit
+	rex := byte(0x48)
 	if dst.REXBit == 1 {
 		rex |= 0x01
 	}
-	opcode := 0xB8 + dst.RegBits
-	code := []byte{rex, opcode}
-	code = append(code, encodeU32(uint32(imm))...)
-	return code
+
+	// opcode = B8 + low 3 bits of register
+	opcode := byte(0xB8 + dst.RegBits)
+
+	// sign-extend the 32-bit imm into a 64-bit value
+	imm64 := uint64(int64(int32(imm)))
+
+	buf := []byte{rex, opcode}
+	// append imm64 LE
+	var immBytes [8]byte
+	binary.LittleEndian.PutUint64(immBytes[:], imm64)
+	buf = append(buf, immBytes[:]...)
+
+	return buf
 }
 
 // Generic generator: load from [BaseReg+disp32] into dst, with zero-extend/sign-extend/direct load

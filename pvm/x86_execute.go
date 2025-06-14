@@ -6,6 +6,7 @@ package pvm
 /*
 #cgo CFLAGS: -Wall
 #include <stdlib.h>
+#include <string.h>
 #include "x86_execute_linux_amd64.h"
 */
 import "C"
@@ -29,24 +30,31 @@ func ExecuteX86(code []byte, regBuf []byte) (ret int, err error) {
 	}()
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+
 	if len(regBuf) < 14*8 {
 		return -1, fmt.Errorf("regBuf too small: need ≥ %d bytes", 14*8)
 	}
 
-	// Copy code to C heap
-	codePtr := C.CBytes(code)
-	defer C.free(codePtr)
+	// Allocate executable memory in C
+	codePtr := C.alloc_executable(C.size_t(len(code)))
+	if codePtr == nil {
+		return -2, fmt.Errorf("C.alloc_executable failed")
+	}
+	//defer C.free(codePtr)
 
-	// Get the underlying memory address of the Go slice
+	// Copy x86 code into the executable buffer
+	C.memcpy(codePtr, unsafe.Pointer(&code[0]), C.size_t(len(code)))
+
+	// Pass pointer to register dump buffer
 	regPtr := unsafe.Pointer(&regBuf[0])
 
-	// Call the C function
+	// Run
 	r := C.execute_x86((*C.uint8_t)(codePtr), C.size_t(len(code)), regPtr)
 	ret = int(r)
 
-	// When ret == -1, regBuf has already been dumped
 	return ret, nil
 }
+
 func GetEcalliAddress() uintptr {
 	return uintptr(C.get_ecalli_address())
 }

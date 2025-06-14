@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdlib.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,6 +21,8 @@ void Ecalli(void* rvmPtr, int32_t opcode);
 
 // Returns the function pointer of the Go-exported Ecalli for JIT stubs
 void* get_ecalli_address(void);
+
+void* alloc_executable(size_t size);
 
 #ifdef __cplusplus
 }

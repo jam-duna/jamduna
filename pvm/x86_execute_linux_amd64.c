@@ -81,37 +81,43 @@ static void sigsegv_handler(int sig, siginfo_t *si, void *arg) {
  *         -2 on mmap failure,
  *         -3 on mprotect failure
  */
-int execute_x86(uint8_t* code, size_t length, void* reg_ptr) {
-    // Save reg_ptr for signal handler
+ int execute_x86(uint8_t* code, size_t length, void* reg_ptr) {
     global_reg_ptr = reg_ptr;
 
-    // Install SIGSEGV handler
-    struct sigaction sa;
+    struct sigaction sa, old_sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_sigaction = sigsegv_handler;
-    sa.sa_flags     = SA_SIGINFO;
+    sa.sa_flags = SA_SIGINFO;
+
+    sigaction(SIGSEGV, NULL, &old_sa);
     sigaction(SIGSEGV, &sa, NULL);
 
-    // Allocate executable memory
-    void* mem = mmap(NULL, length, PROT_READ|PROT_WRITE,
-                     MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+    void* mem = mmap(NULL, length, PROT_READ | PROT_WRITE | PROT_EXEC,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (mem == MAP_FAILED) return -2;
-    memcpy(mem, code, length);
-    if (mprotect(mem, length, PROT_READ|PROT_EXEC) != 0) {
-        munmap(mem, length);
-        return -3;
-    }
 
-    // Setup recovery point
+    memcpy(mem, code, length);
+
     if (sigsetjmp(jump_env, 1) != 0) {
         munmap(mem, length);
+        sigaction(SIGSEGV, &old_sa, NULL);
         return -1;
     }
 
-    // Execute JIT code (including host call stub)
-    ((void(*)())mem)();
+    typedef void (*code_func_t)(void);
+    ((code_func_t)mem)();
 
-    // Clean up
     munmap(mem, length);
+    sigaction(SIGSEGV, &old_sa, NULL);
     return 0;
 }
+
+
+
+void* alloc_executable(size_t size) {
+	void* ptr = mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC,
+	                 MAP_ANON | MAP_PRIVATE, -1, 0);
+	if (ptr == MAP_FAILED) return NULL;
+	return ptr;
+}
+

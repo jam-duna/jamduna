@@ -2,7 +2,6 @@
 package pvm
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -47,42 +46,7 @@ type TestCase struct {
 
 var RecompilerFlag = false // set to false to run the interpreter
 
-func findBasicBlock(pc uint64, basicBlocks map[uint64]*BasicBlock) (*BasicBlock, bool) {
-	if bb, ok := basicBlocks[pc]; ok {
-		return bb, true
-	}
-	for _, bb := range basicBlocks {
-		firstInstruction := bb.Instructions[0]
-		lastInstruction := bb.Instructions[len(bb.Instructions)-1]
-		if firstInstruction.Pc <= pc && pc <= lastInstruction.Pc+uint64(len(lastInstruction.Args)) {
-			// find the first instruction that contains the pc
-			for i, inst := range bb.Instructions {
-				if inst.Pc == pc {
-					// If the instruction is not the first one, we need to create a partial block
-					if i > 0 {
-						partialBlock := &BasicBlock{
-							Instructions:           bb.Instructions[i:],
-							JumpType:               bb.JumpType,
-							TruePC:                 bb.TruePC,
-							FalsePC:                bb.FalsePC,
-							IndirectSourceRegister: bb.IndirectSourceRegister,
-							IndirectJumpOffset:     bb.IndirectJumpOffset,
-						}
-						return partialBlock, true
-					} else {
-						// If it is the first instruction, we can return the whole block
-						return bb, true
-					}
-				}
-			}
-		}
-	}
-	return nil, false
-}
-
 func pvm_test(tc TestCase) error {
-	var num_mismatch int
-
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
 	// metadata, c := types.SplitMetadataAndCode(tc.Code)
@@ -97,101 +61,10 @@ func pvm_test(tc TestCase) error {
 	// 	pvm.Ram.SetPageAccess(32, 1, AccessMode{Readable: false, Writable: false, Inaccessible: true})
 	// }
 	resultCode := uint8(0)
-	if RecompilerFlag {
-		rvm, err := NewRecompilerVM(pvm)
-		if err != nil {
-			return fmt.Errorf("failed to create recompiler VM: %w", err)
-		}
+	pvm.Gas = int64(100) // Set a high gas limit
+	pvm.Execute(int(tc.InitialPC), false)
+	resultCode = pvm.ResultCode
 
-		for _, pm := range tc.InitialPageMap {
-			// Set the page access based on the initial page map
-			if pm.IsWritable {
-				err := rvm.SetMemAssess(pm.Address, pm.Length, PageMutable)
-				if err != nil {
-					return fmt.Errorf("failed to set memory access for address %x: %w", pm.Address, err)
-				}
-			}
-		}
-
-		for _, mem := range tc.InitialMemory {
-			// Write the initial memory contents
-			rvm.WriteMemory(mem.Address, mem.Data)
-		}
-		rvm.pc = 0
-
-		basicBlocks := rvm.compileBasicBlock(rvm.pc)
-		done := false
-		numExecutions := 0
-		for !done {
-			bb, ok := findBasicBlock(rvm.pc, basicBlocks)
-			if !ok {
-				panic("no basic block found for pc: " + fmt.Sprint(rvm.pc))
-			}
-			fmt.Printf("----- Translating Basic Block at pc: %d\n", rvm.pc)
-			if err := rvm.Translate(bb); err != nil {
-				return fmt.Errorf("error translating bytecode: %w", err)
-			}
-			// Now we have rvm.x86Code ready, we can execute it
-			if err := rvm.ExecuteX86Code(); err != nil {
-				return fmt.Errorf("error executing x86 code: %w", err)
-			}
-
-			switch bb.JumpType {
-			case TRAP_JUMP:
-				done = true // Exit the loop if we hit a trap jump
-			case DIRECT_JUMP:
-				rvm.pc = bb.TruePC
-				fmt.Printf("DIRECT_JUMP to pc: %d\n", rvm.pc)
-			case INDIRECT_JUMP:
-				rvm.djump(rvm.register[bb.IndirectSourceRegister] + bb.IndirectJumpOffset)
-				fmt.Printf("INDIRECT_JUMP to pc: %d\n", rvm.pc)
-			case CONDITIONAL:
-				reg15Value := rvm.register[CompareReg]
-				if reg15Value == 0 {
-					rvm.pc = bb.FalsePC
-					fmt.Printf("CONDITION=0 jump to pc: %d\n", rvm.pc)
-				} else {
-					rvm.pc = bb.TruePC
-					fmt.Printf("CONDITION=1 jump to pc: %d\n", rvm.pc)
-				}
-			}
-			if rvm.terminated || rvm.pc >= uint64(len(rvm.code)) {
-				done = true // Exit the loop if we reach the end of the code
-			} else {
-				numExecutions++
-				if numExecutions > 10 {
-					return fmt.Errorf("infinite loop detected, executed %d times", numExecutions)
-				}
-			}
-		}
-		// check the memory
-		for _, mem := range tc.ExpectedMemory {
-			data, err := rvm.ReadMemory(mem.Address, uint32(len(mem.Data)))
-			if err != nil {
-				return fmt.Errorf("failed to read memory at address %x: %w", mem.Address, err)
-			}
-			if !bytes.Equal(data, mem.Data) {
-				num_mismatch++
-				return fmt.Errorf("Memory mismatch for test %s at address %x: expected %x, got %x \n", tc.Name, mem.Address, mem.Data, data)
-			} else {
-				fmt.Printf("Memory match for test %s at address %x \n", tc.Name, mem.Address)
-			}
-		}
-		for i, reg := range rvm.register {
-			if reg != tc.ExpectedRegs[i] {
-				num_mismatch++
-				fmt.Printf("MISMATCH expected %v got %v\n", tc.ExpectedRegs, rvm.register)
-				return fmt.Errorf("register mismatch for test %s at index %d: expected %d, got %d", tc.Name, i, tc.ExpectedRegs[i], reg)
-			}
-		}
-		resultCode = rvm.ResultCode
-		rvm.Close()
-
-	} else {
-		pvm.Gas = int64(100) // Set a high gas limit
-		pvm.Execute(int(tc.InitialPC), false)
-		resultCode = pvm.ResultCode
-	}
 	// Check the registers
 	if equalIntSlices(pvm.register, tc.ExpectedRegs) {
 		// fmt.Printf("Register match for test %s \n", tc.Name)

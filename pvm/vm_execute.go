@@ -1,172 +1,208 @@
 package pvm
 
 import (
-	"encoding/json"
-	"fmt"
-	"strings"
-
-	"github.com/colorfulnotion/jam/log"
+	"encoding/binary"
+	"sync"
 )
 
-func (vm *VM) compileBasicBlock(startStep uint64) (basicBlocks map[uint64]*BasicBlock) {
-	this_step_pc := startStep
-	basicBlocks = make(map[uint64]*BasicBlock)
-	basicBlock := NewBasicBlock(vm.Gas)
+type RecompilerVM struct {
+	*VM
+	mu          sync.Mutex
+	startCode   []byte
+	exitCode    []byte
+	realMemory  []byte
+	regDumpMem  []byte
+	regDumpAddr uintptr
 
-	for this_step_pc < uint64(len(vm.code)) {
-		opcode := vm.code[this_step_pc]
-		len_operands := vm.skip(uint64(this_step_pc))
-		operands := vm.code[this_step_pc+1 : this_step_pc+1+len_operands]
-		basicBlock.AddInstruction(opcode, operands, int(this_step_pc), this_step_pc)
-
-		if IsBasicBlockInstruction(opcode) {
-			if opcode == JUMP {
-				basicBlock.JumpType = DIRECT_JUMP
-				basicBlock.TruePC = uint64(int64(this_step_pc) + extractOneOffset(operands))
-			} else if opcode == LOAD_IMM_JUMP {
-				basicBlock.JumpType = DIRECT_JUMP
-				_, _, vy := extractOneRegOneImmOneOffset(operands)
-				basicBlock.TruePC = uint64(int64(this_step_pc) + vy)
-			} else if opcode == JUMP_IND {
-				registerIndexA, vx := extractOneRegOneImm(operands)
-				basicBlock.JumpType = INDIRECT_JUMP
-				basicBlock.IndirectSourceRegister = registerIndexA
-				basicBlock.IndirectJumpOffset = uint64(vx)
-			} else if opcode == LOAD_IMM_JUMP_IND {
-				_, registerIndexB, _, vy := extractTwoRegsAndTwoImmediates(operands)
-				basicBlock.JumpType = INDIRECT_JUMP
-				basicBlock.IndirectSourceRegister = registerIndexB
-				basicBlock.IndirectJumpOffset = uint64(vy)
-			} else if opcode >= BRANCH_EQ && opcode <= BRANCH_GE_S {
-				_, _, vx0 := extractTwoRegsOneOffset(operands)
-				basicBlock.JumpType = CONDITIONAL
-				basicBlock.TruePC = uint64(int64(this_step_pc) + vx0)
-				basicBlock.FalsePC = this_step_pc + uint64(len_operands) + 1 // default to next instruction
-			} else if opcode >= BRANCH_EQ_IMM && opcode <= BRANCH_GT_S_IMM {
-				_, _, vy0 := extractOneRegOneImmOneOffset(operands)
-				basicBlock.JumpType = CONDITIONAL
-				basicBlock.TruePC = uint64(int64(this_step_pc) + vy0)
-				basicBlock.FalsePC = this_step_pc + uint64(len_operands) + 1 // default to next instruction
-			} else if opcode == TRAP {
-				basicBlock.JumpType = TRAP
-			}
-			basicBlocks[startStep] = basicBlock
-			//fmt.Printf("Basic Block compiled: %d => %s\n", startStep, basicBlock.String())
-			this_step_pc += uint64(len_operands) + 1
-			startStep = this_step_pc
-			basicBlock = NewBasicBlock(vm.Gas)
-		} else {
-			this_step_pc += uint64(len_operands) + 1
-		}
-
-	}
-	basicBlocks[startStep] = basicBlock
-	return basicBlocks
+	basicBlocks map[uint64]*BasicBlock // by PVM PC
+	x86Blocks   map[uint64]*BasicBlock // by x86 PC
+	x86PC       uint64
+	x86Code     []byte
 }
 
-func (vm *VM) executeInstruction(instruction Instruction, is_child bool) error {
-	stepn := instruction.Step
-	opcode := instruction.Opcode
-	operands := instruction.Args
-	len_operands := uint64(len(operands))
+func (vm *RecompilerVM) Compile(startStep uint64) (map[uint64]*BasicBlock, map[uint64]*BasicBlock, []byte) {
+	// init the recompiler
+	vm.basicBlocks = make(map[uint64]*BasicBlock)
+	vm.x86Blocks = make(map[uint64]*BasicBlock)
+	vm.x86PC = 0
+	vm.x86Code = make([]byte, 0)
 
-	switch {
-	case opcode <= 1: // A.5.1 No arguments
-		vm.HandleNoArgs(opcode)
-	case opcode == ECALLI: // A.5.2 One immediate
-		vm.HandleOneImm(opcode, operands)
-	case opcode == LOAD_IMM_64: // A.5.3 One Register and One Extended Width Immediate
-		vm.HandleOneRegOneEWImm(opcode, operands)
-		if !vm.terminated {
-			vm.pc += 1 + len_operands
+	// emit start block
+	block := NewBasicBlock(vm.x86PC)
+	block.X86Code = vm.startCode
+	block.JumpType = FALLTHROUGH_JUMP
+	vm.basicBlocks[0] = block
+	vm.appendBlock(block)
+
+	pc := startStep
+	for pc < uint64(len(vm.code)) {
+		block := vm.translateBasicBlock(pc)
+		if block == nil {
+			break
 		}
-	case 30 <= opcode && opcode <= 33: // A.5.4 Two Immediates
-		vm.HandleTwoImms(opcode, operands)
-		if !vm.terminated {
-			vm.pc += 1 + len_operands
-		}
-	case opcode == JUMP: // A.5.5 One offset
-		vm.HandleOneOffset(opcode, operands)
-	case 50 <= opcode && opcode <= 62: // A.5.6 One Register and One Immediate
-		vm.HandleOneRegOneImm(opcode, operands)
-		if opcode != JUMP_IND {
-			if !vm.terminated {
-				vm.pc += 1 + len_operands
-			}
-		}
-	case 70 <= opcode && opcode <= 73: // A.5.7 One Register and Two Immediate
-		vm.HandleOneRegTwoImm(opcode, operands)
-		if !vm.terminated {
-			vm.pc += 1 + len_operands
-		}
-	case 80 <= opcode && opcode <= 90: // A.5.8 One Register, One Immediate and One Offset
-		vm.HandleOneRegOneImmOneOffset(opcode, operands)
-	case 100 <= opcode && opcode <= 111: // A.5.9 Two Registers
-		vm.HandleTwoRegs(opcode, operands)
-		if !vm.terminated {
-			vm.pc += 1 + len_operands
-		}
-	case 120 <= opcode && opcode <= 161: // A.5.10 Two Registers and One Immediate
-		vm.HandleTwoRegsOneImm(opcode, operands)
-		if !vm.terminated {
-			vm.pc += 1 + len_operands
-		}
-	case 170 <= opcode && opcode <= 175: // A.5.11 Two Registers and One Offset
-		vm.HandleTwoRegsOneOffset(opcode, operands)
-	case opcode == LOAD_IMM_JUMP_IND: // A.5.12 Two Register and Two Immediate
-		vm.HandleTwoRegsTwoImms(opcode, operands)
-	case 190 <= opcode && opcode <= 230: // A.5.13 Three Registers
-		vm.HandleThreeRegs(opcode, operands)
-		if !vm.terminated {
-			vm.pc += 1 + len_operands
-		}
-	default:
-		log.Warn(vm.logging, "terminated: unknown opcode", "service", string(vm.ServiceMetadata), "opcode", opcode)
-		vm.HandleNoArgs(0) //TRAP
+		pc = block.PVMNextPC
 	}
 
-	// avoid this: this is expensive
-	if PvmLogging {
-		registersJSON, _ := json.Marshal(vm.ReadRegisters())
-		prettyJSON := strings.ReplaceAll(string(registersJSON), ",", ", ")
-		//fmt.Printf("%-18s step:%6d pc:%6d g:%6d Registers:%s\n", opcode_str(opcode), stepn-1, this_step_pc, vm.Gas, prettyJSON)
-		fmt.Printf("%s %d %d Registers:%s\n", opcode_str(opcode), stepn, vm.pc, prettyJSON)
+	block = NewBasicBlock(vm.x86PC)
+	block.X86Code = vm.exitCode
+	block.JumpType = TERMINATED
+	vm.basicBlocks[block.X86PC] = block
+	vm.appendBlock(block)
+	vm.finalizeJumpTargets()
+
+	return vm.basicBlocks, vm.x86Blocks, vm.x86Code
+}
+
+func (vm *RecompilerVM) translateBasicBlock(startPC uint64) *BasicBlock {
+	pc := startPC
+	block := NewBasicBlock(vm.x86PC)
+
+	hitBasicBlock := false
+	for pc < uint64(len(vm.code)) {
+		op := vm.code[pc]
+		olen := vm.skip(pc)
+		operands := vm.code[pc+1 : pc+1+olen]
+		block.AddInstruction(op, operands, int(pc), pc)
+		pc0 := pc
+		pc += uint64(olen) + 1
+		if IsBasicBlockInstruction(op) {
+			vm.setJumpMetadata(block, op, operands, pc0, int(olen))
+			hitBasicBlock = true
+			break
+		}
 	}
 
-	if vm.hostCall && is_child {
+	if len(block.Instructions) == 0 {
 		return nil
 	}
-	// host call invocation
-	if vm.hostCall {
-		vm.InvokeHostCall(vm.host_func_id)
-		vm.hostCall = false
-		vm.terminated = false
+
+	// translate the instructions to x86 code
+	var code []byte
+	for _, inst := range block.Instructions {
+		if translateFunc, ok := pvmByteCodeToX86Code[inst.Opcode]; ok {
+			code = append(code, translateFunc(inst)...)
+		}
+	}
+	// add a trap if we didn't hit a basic block instruction at the end
+	if hitBasicBlock == false {
+		code = append(code, generateTrap(Instruction{
+			Opcode: TRAP,
+			Args:   nil,
+		})...)
+		block.JumpType = TRAP_JUMP
 	}
 
-	return nil
+	block.X86Code = code
+	block.PVMNextPC = pc
+	vm.basicBlocks[startPC] = block
+	vm.x86Blocks[block.X86PC] = block
+
+	vm.appendBlock(block)
+	return block
 }
 
-func (vm *VM) executeBasicBlock(bb *BasicBlock, is_child bool) error {
-	if bb == nil {
-		return fmt.Errorf("nil basic block")
+func (vm *RecompilerVM) setJumpMetadata(block *BasicBlock, opcode byte, operands []byte, pc uint64, olen int) {
+	switch {
+	case opcode == JUMP:
+		block.JumpType = DIRECT_JUMP
+		block.TruePC = pc + uint64(extractOneOffset(operands))
+	case opcode == LOAD_IMM_JUMP:
+		_, _, vy := extractOneRegOneImmOneOffset(operands)
+		block.JumpType = DIRECT_JUMP
+		block.TruePC = pc + uint64(vy)
+	case opcode == JUMP_IND:
+		reg, imm := extractOneRegOneImm(operands)
+		block.JumpType = INDIRECT_JUMP
+		block.IndirectSourceRegister = reg
+		block.IndirectJumpOffset = uint64(imm)
+	case opcode == LOAD_IMM_JUMP_IND:
+		_, reg, _, vy := extractTwoRegsAndTwoImmediates(operands)
+		block.JumpType = INDIRECT_JUMP
+		block.IndirectSourceRegister = reg
+		block.IndirectJumpOffset = uint64(vy)
+	case opcode == TRAP:
+		block.JumpType = TRAP_JUMP
+	case 170 <= opcode && opcode <= 175: // BRANCH_EQ
+		_, _, offset := extractTwoRegsOneOffset(operands)
+		block.JumpType = CONDITIONAL
+		block.TruePC = pc + uint64(offset)
+	case 81 <= opcode && opcode <= 90: // BRANCH_EQ_IMM
+		_, _, offset := extractOneRegOneImmOneOffset(operands)
+		block.JumpType = CONDITIONAL
+		block.TruePC = pc + uint64(offset)
+	default:
+		block.JumpType = FALLTHROUGH_JUMP
 	}
-	if PvmLogging {
-		fmt.Printf("Executing Basic Block with %d instructions\n", len(bb.Instructions))
-	}
-	for _, instruction := range bb.Instructions {
-		if err := vm.executeInstruction(instruction, is_child); err != nil {
-			log.Error(vm.logging, "error executing instruction", "error", err)
-			return fmt.Errorf("error executing instruction: %w", err)
-		}
-		bb.GasUsage++
-	}
-	if PvmLogging {
-		fmt.Printf("Basic Block executed successfully: %s\n", bb.String())
-	}
-	vm.Gas -= int64(bb.GasUsage)
-	if vm.Gas < 0 {
-		return fmt.Errorf("gas limit exceeded: %d < %d", vm.Gas, bb.GasUsage)
-	}
+}
 
+func (vm *RecompilerVM) finalizeJumpTargets() {
+	for _, block := range vm.basicBlocks {
+		if block.JumpType == DIRECT_JUMP {
+			dest := vm.basicBlocks[block.TruePC]
+			vm.patchJump(block, dest.X86PC)
+		} else if block.JumpType == CONDITIONAL {
+			destTrue, ok := vm.basicBlocks[block.TruePC]
+			if !ok {
+				return
+			}
+			destFalse, ok := vm.basicBlocks[block.PVMNextPC]
+			if !ok {
+				return
+			}
+			vm.patchJumpConditional(block, destTrue.X86PC, destFalse.X86PC)
+		} else if block.JumpType == TRAP_JUMP {
+			end := vm.findEndBlock()
+			vm.patchJump(block, end.X86PC)
+		} else if block.JumpType == INDIRECT_JUMP {
+			// For INDIRECT_JUMP, we can't path the jump.
+		}
+	}
+}
+func (vm *RecompilerVM) patchJumpConditional(block *BasicBlock, targetTruePC, targetFalsePC uint64) {
+	blockEnd := block.X86PC + uint64(len(block.X86Code))
+
+	// The instruction after Jcc+imm32 lives at blockEnd-5
+	ipAfterJcc := blockEnd - 5
+
+	// relTrue is relative to that IP
+	relTrue := int32(targetTruePC - ipAfterJcc)
+	// relFalse is relative to the IP after the JMP opcode+imm32, i.e. blockEnd
+	relFalse := int32(targetFalsePC - blockEnd)
+
+	// Patch the 4‐byte Jcc immediate at blockEnd-9 .. blockEnd-5
+	startTrue := blockEnd - 9
+	endTrue := blockEnd - 5
+	binary.LittleEndian.PutUint32(
+		vm.x86Code[startTrue:endTrue],
+		uint32(relTrue),
+	)
+
+	// Patch the 4‐byte JMP immediate at blockEnd-4 .. blockEnd
+	startFalse := blockEnd - 4
+	binary.LittleEndian.PutUint32(
+		vm.x86Code[startFalse:blockEnd],
+		uint32(relFalse),
+	)
+}
+
+// patchJump updates the last instruction in the block to jump to the target PC -- works with JUMP and LOAD_IMM_JUMP
+func (vm *RecompilerVM) patchJump(block *BasicBlock, targetPC uint64) {
+	endOfBlock := block.X86PC + uint64(len(block.X86Code))
+	offset := int32(targetPC) - int32(endOfBlock)
+	binary.LittleEndian.PutUint32(vm.x86Code[endOfBlock-4:endOfBlock], uint32(offset))
+}
+
+func (vm *RecompilerVM) appendBlock(block *BasicBlock) {
+	vm.x86Code = append(vm.x86Code, block.X86Code...)
+	block.X86PC = vm.x86PC
+	vm.x86PC += uint64(len(block.X86Code))
+}
+
+func (vm *RecompilerVM) findEndBlock() *BasicBlock {
+	for _, b := range vm.basicBlocks {
+		if b.JumpType == TERMINATED {
+			return b
+		}
+	}
 	return nil
 }

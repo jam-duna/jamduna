@@ -27,30 +27,23 @@ var regInfoList = []X86Reg{
 	{"r13", 5, 1},
 	{"r14", 6, 1},
 	{"r15", 7, 1},
-	// the base register for memory dump
 	{"r12", 4, 1},
 }
 
-const (
-	CompareReg = 12
-)
-
 var pvmByteCodeToX86Code = map[byte]func(Instruction) []byte{
 	// A.5.1. Instructions without Arguments
-	TRAP: func(inst Instruction) []byte {
-		return []byte{}
-	},
+	TRAP:        generateTrap,
 	FALLTHROUGH: generateFallthrough,
 
 	// JumpType = DIRECT_JUMP
-	JUMP:          generateFallthrough, // jump is managed by the VM using the TruePC
+	JUMP:          generateJump,        // jump is managed by the VM using the TruePC
 	LOAD_IMM_JUMP: generateLoadImmJump, // does a LoadImm in x86 side, but the jump is managed by the VM
 
 	// JumpType = INDIRECT_JUMP (all of these have some register visible upon return which is added to some JumpIndirectOffset)
 	JUMP_IND:          generateFallthrough,         // jump is managed by the VM using the JumpSourceRegister
 	LOAD_IMM_JUMP_IND: generateLoadImmJumpIndirect, // does a LoadImm in x86 side, but the jump is managed by the VM
 
-	// JumpType = CONDITIONAL (x86code sets r15 to 1 or 0, VM uses this for branching to TruePC or FalsePC)
+	// JumpType = CONDITIONAL (x86code sets r15 to 1 or 0, VM uses this for branching to TruePC)
 	BRANCH_EQ_IMM:   generateBranchImm(0x84),
 	BRANCH_NE_IMM:   generateBranchImm(0x85),
 	BRANCH_LT_U_IMM: generateBranchImm(0x82),
@@ -217,7 +210,7 @@ var pvmByteCodeToX86Code = map[byte]func(Instruction) []byte{
 
 const BaseRegIndex = 13
 
-var BaseReg = regInfoList[13]
+var BaseReg = regInfoList[BaseRegIndex]
 
 // use store the original memory address for real memory
 // this register is used as base for register dump
@@ -240,11 +233,10 @@ func encodeMovImm(regIdx int, imm uint64) []byte {
 	return append([]byte{prefix, op}, immBytes...)
 }
 
-// encodeMovRegToMem encodes: mov [rBase + offset], rSrc
 func encodeMovRegToMem(srcIdx, baseIdx int, offset byte) []byte {
 	src := regInfoList[srcIdx]
 	base := regInfoList[baseIdx]
-	// Build REX prefix: W=1, R=src.REXBit, B=base.REXBit
+
 	rex := byte(0x48)
 	if src.REXBit == 1 {
 		rex |= 0x04 // REX.R
@@ -252,13 +244,17 @@ func encodeMovRegToMem(srcIdx, baseIdx int, offset byte) []byte {
 	if base.REXBit == 1 {
 		rex |= 0x01 // REX.B
 	}
-	// opcode for mov r->m : 0x89
-	// ModRM: mod=01 (disp8=offset), reg=src.RegBits, rm=100 (SIB)
-	modrm := byte(0x40 | (src.RegBits << 3) | 0x4)
-	// SIB: scale=00, index=100 (no index), base=base.RegBits
-	sib := byte(0x20 | base.RegBits) // (4<<3) | base.RegBits
 
-	return []byte{rex, 0x89, modrm, sib, offset}
+	if base.RegBits == 4 { // R12
+		// Must use SIB encoding when rm=4 (R12)
+		modrm := byte(0x40 | (src.RegBits << 3) | 0x04)
+		sib := byte(0x20 | base.RegBits) // scale=0, index=none(4), base=R12
+		return []byte{rex, 0x89, modrm, sib, offset}
+	} else {
+		// Normal encoding
+		modrm := byte(0x40 | (src.RegBits << 3) | base.RegBits)
+		return []byte{rex, 0x89, modrm, offset}
+	}
 }
 
 // Split a uint64 into its lower 32 bits and higher 32 bits
@@ -311,7 +307,7 @@ func encodeU64(v uint64) []byte {
 
 func (rvm *RecompilerVM) DumpRegisterToMemory(move_back bool) []byte {
 	code := encodeMovImm(BaseRegIndex, uint64(rvm.regDumpAddr))
-	// for each register, mov [r12 + i*8], rX
+	// for each register, mov [BaseRegIndex + i*8], rX
 	for i := 0; i < len(regInfoList); i++ {
 		off := byte(i * 8)
 		dumpInstr := encodeMovRegToMem(i, BaseRegIndex, off)
@@ -319,7 +315,7 @@ func (rvm *RecompilerVM) DumpRegisterToMemory(move_back bool) []byte {
 	}
 
 	if move_back {
-		// restore the base register to r12
+		// restore the base register to BaseRegIndex
 		code = append(code, encodeMovImm(BaseRegIndex, uint64(uintptr(unsafe.Pointer(&rvm.realMemory[0]))))...)
 	}
 	return code
