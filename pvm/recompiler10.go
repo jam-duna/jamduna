@@ -1,5 +1,7 @@
 package pvm
 
+import "encoding/binary"
+
 // A.5.10. Instructions with Arguments of Two Registers & One Immediate.
 
 func generateCmovCmpOp64(cc byte) func(inst Instruction) []byte {
@@ -578,33 +580,113 @@ func generateImmBinaryOp64(opcode byte, subcode byte) func(inst Instruction) []b
 	}
 }
 
+// generateLoadIndSignExtend returns a function that generates machine code
 func generateLoadIndSignExtend(
-	prefix byte,
-	opcode byte,
-	is64bit bool,
+	prefix byte, // Optional extra prefix (e.g. 0x66), or 0 if none
+	opcode byte, // IR opcode (LOAD_IND_I8, LOAD_IND_I16, LOAD_IND_I32)
+	is64bit bool, // true for 64-bit mode
 ) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		dstReg, srcReg, _ := extractTwoRegsOneImm(inst.Args)
-		dst := regInfoList[dstReg]
-		src := regInfoList[srcReg]
+		// Extract dest/regA, src/regB, and immediate vx from inst.Args
+		regAIndex, regBIndex, vx := extractTwoRegsOneImm(inst.Args)
+		regA := regInfoList[regAIndex]
+		regB := regInfoList[regBIndex]
 
-		// REX.W if 64-bit, REX.R for dst, REX.B for src
-		rex := byte(0x40)
+		// Construct REX prefix: 0x40 base, W=1 for 64-bit, R/X/B for high registers
+		var rex byte = 0x40
 		if is64bit {
-			rex |= 0x08
+			rex |= 0x08 // W
 		}
-		if dst.REXBit == 1 {
-			rex |= 0x04
+		if regA.REXBit != 0 {
+			rex |= 0x04 // R
 		}
-		if src.REXBit == 1 {
-			rex |= 0x01
+		if regB.REXBit != 0 {
+			rex |= 0x02 // X (as SIB.index)
+		}
+		if BaseReg.REXBit != 0 {
+			rex |= 0x01 // B (as SIB.base)
 		}
 
-		// ModRM: mod=00 (reg indirect, no disp), reg=dst, rm=src
-		modrm := byte((dst.RegBits << 3) | src.RegBits)
+		// ModRM: mod=10 (disp32), reg=regA, rm=100 (SIB)
+		modRM := byte(0x02<<6) | (regA.RegBits << 3) | 0x04
+		// SIB: scale=0(1), index=regB, base=BaseReg
+		sib := byte(0<<6) | (regB.RegBits << 3) | BaseReg.RegBits
 
-		return []byte{rex, prefix, opcode, modrm}
+		// disp32 as little-endian
+		disp := make([]byte, 4)
+		binary.LittleEndian.PutUint32(disp, uint32(int32(vx)))
+
+		switch opcode {
+		case LOAD_IND_I8:
+			// MOVSX r64, byte ptr [BaseReg + regB*1 + disp32] (0F BE /r)
+			var code []byte
+			if prefix != 0 {
+				code = append(code, prefix)
+			}
+			code = append(code,
+				rex,
+				0x0F, 0xBE,
+				modRM, sib,
+			)
+			code = append(code, disp...)
+			code = append(code, castReg8ToU64(regAIndex)...)
+			return code
+		case LOAD_IND_I16:
+			// 0x66 prefix + MOVSX r64, word ptr [BaseReg + regB*1 + disp32] (0F BF /r)
+			code := append(
+				[]byte{0x66, rex, 0x0F, 0xBF, modRM, sib},
+				disp...,
+			)
+			code = append(code, castReg16ToU64(regAIndex)...)
+			return code
+		case LOAD_IND_I32:
+			// MOVSXD r64, dword ptr [BaseReg + regB*1 + disp32] (63 /r)
+			var code []byte
+			if prefix != 0 {
+				code = append(code, prefix)
+			}
+			code = append(code,
+				rex,
+				0x63,
+				modRM, sib,
+			)
+			code = append(code, disp...)
+			return code
+		default:
+			panic("generateLoadIndSignExtend: invalid opcode")
+		}
 	}
+}
+
+func castReg8ToU64(regIdx int) []byte {
+	r := regInfoList[regIdx]
+	rex := byte(0x48)
+	if r.REXBit != 0 {
+		rex |= 0x05 // R=1, B=1 for ModRM.reg=r, ModRM.rm=r
+	}
+	modRM := byte(0xC0 | (r.RegBits << 3) | r.RegBits)
+	// Opcode 0F BE /r → MOVSX r64, r/m8
+	return []byte{rex, 0x0F, 0xBE, modRM}
+}
+
+func castReg16ToU64(regIdx int) []byte {
+	r := regInfoList[regIdx]
+	rex := byte(0x48)
+	if r.REXBit != 0 {
+		rex |= 0x05 // R=1, B=1 for ModRM.reg=r, ModRM.rm=r
+	}
+	modRM := byte(0xC0 | (r.RegBits << 3) | r.RegBits)
+	return []byte{rex, 0x0F, 0xBF, modRM}
+}
+
+func castReg32ToU64(regIdx int) []byte {
+	r := regInfoList[regIdx]
+	rex := byte(0x48)
+	if r.REXBit != 0 {
+		rex |= 0x05
+	}
+	modRM := byte(0xC0 | (r.RegBits << 3) | r.RegBits)
+	return []byte{rex, 0x63, modRM}
 }
 
 // generateLoadInd emits
@@ -614,28 +696,106 @@ func generateLoadIndSignExtend(
 // for plain MOV or MOVZX/MOVSXD sequences (with no 0x0F prefix).
 // size parameter is unused here but kept for signature symmetry.
 func generateLoadInd(
+	prefix byte, // Optional extra prefix (e.g. 0x66), or 0 if none
 	opcode byte,
 	is64bit bool,
-	_ int,
 ) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		dstReg, srcReg, _ := extractTwoRegsOneImm(inst.Args)
-		dst := regInfoList[dstReg]
-		src := regInfoList[srcReg]
+		// Extract dest/regA, src/regB, and immediate vx from inst.Args
+		regAIndex, regBIndex, vx := extractTwoRegsOneImm(inst.Args)
+		regA := regInfoList[regAIndex]
+		regB := regInfoList[regBIndex]
 
-		rex := byte(0x40)
+		// Construct REX prefix: 0x40 base, W=1 for 64-bit, R/X/B for high registers
+		var rex byte = 0x40
 		if is64bit {
-			rex |= 0x08
+			rex |= 0x08 // W
 		}
-		if dst.REXBit == 1 {
-			rex |= 0x04
+		if regA.REXBit != 0 {
+			rex |= 0x04 // R
 		}
-		if src.REXBit == 1 {
-			rex |= 0x01
+		if regB.REXBit != 0 {
+			rex |= 0x02 // X (as SIB.index)
+		}
+		if BaseReg.REXBit != 0 {
+			rex |= 0x01 // B (as SIB.base)
 		}
 
-		modrm := byte((dst.RegBits << 3) | src.RegBits)
-		return []byte{rex, opcode, modrm}
+		// ModRM: mod=10 (disp32), reg=regA, rm=100 (SIB)
+		modRM := byte(0x02<<6) | (regA.RegBits << 3) | 0x04
+		// SIB: scale=0(1), index=regB, base=BaseReg
+		sib := byte(0<<6) | (regB.RegBits << 3) | BaseReg.RegBits
+
+		// disp32 as little-endian
+		disp := make([]byte, 4)
+		binary.LittleEndian.PutUint32(disp, uint32(int32(vx)))
+
+		switch opcode {
+		case LOAD_IND_U8:
+			// zero-extend byte to 64-bit: MOVZX r64, r/m8 (0F B6 /r)
+			var code []byte
+			if prefix != 0 {
+				code = append(code, prefix)
+			}
+			code = append(code,
+				rex,
+				0x0F, 0xB6,
+				modRM, sib,
+			)
+			code = append(code, disp...)
+			return code
+
+		case LOAD_IND_U16:
+			// zero-extend word to 64-bit: 66 + MOVZX r64, r/m16 (0F B7 /r)
+			return append(
+				append(
+					[]byte{0x66, rex, 0x0F, 0xB7, modRM, sib},
+					disp...,
+				),
+			)
+
+		case LOAD_IND_U32:
+			// zero-extend dword to 64-bit: MOV r32, r/m32 (8B /r) without REX.W
+			// Writing to r32 clears upper 32 bits, so result is zero-extended in r64
+			rex32 := byte(0x40)
+			if regA.REXBit != 0 {
+				rex32 |= 0x04 // R
+			}
+			if regB.REXBit != 0 {
+				rex32 |= 0x02 // X
+			}
+			if BaseReg.REXBit != 0 {
+				rex32 |= 0x01 // B
+			}
+			var code32 []byte
+			if prefix != 0 {
+				code32 = append(code32, prefix)
+			}
+			code32 = append(code32,
+				rex32,
+				0x8B,
+				modRM, sib,
+			)
+			code32 = append(code32, disp...)
+			return code32
+
+		case LOAD_IND_U64:
+			// 64-bit MOV: REX.W + MOV r64, r/m64 (8B /r)
+			var code64 []byte
+			if prefix != 0 {
+				code64 = append(code64, prefix)
+			}
+			code64 = append(code64,
+				rex,
+				0x8B,
+				modRM, sib,
+			)
+			code64 = append(code64, disp...)
+			return code64
+
+		default:
+			panic("generateLoadInd: invalid opcode")
+		}
 	}
 }
 
