@@ -398,7 +398,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	default:
 	}
 
-	workReport, _, pvmElapsed, err := n.executeWorkPackageBundle(wpCoreIndex, *bundle, received_segmentRootLookup, false)
+	workReport, _, pvmElapsed, err := n.executeWorkPackageBundle(wpCoreIndex, *bundle, received_segmentRootLookup, n.statedb.GetTimeslot(), false)
 	if err != nil {
 		log.Warn(log.Node, "onWorkPackageShare: executeWorkPackageBundle", "node", n.id, "err", err, "pvmElapsed", pvmElapsed)
 		return fmt.Errorf("onWorkPackageShare: executeWorkPackageBundle: %w", err)
@@ -433,7 +433,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		WorkReportHash: guarantee.Report.Hash(),
 		Signature:      guarantee.Signatures[0].Signature,
 	}
-	log.Debug(log.G, "onWorkPackageShare", "n", n.String(), "wph", req.WorkReportHash, "wp", workReport.String(), "sig", req.Signature.String())
+	log.Trace(log.G, "onWorkPackageShare", "n", n.String(), "wph", req.WorkReportHash, "wp", workReport.String(), "sig", req.Signature.String())
 
 	reqBytes, err := req.ToBytes()
 	if err != nil {

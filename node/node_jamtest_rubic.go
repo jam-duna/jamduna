@@ -7,36 +7,93 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math/rand"
+	"sync"
+	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
+
+var testExportedRoots []common.Hash
+var once sync.Once
+
+const maxN = 1024
+const importTargetN = 13
+
+func loadExportedRoots() {
+	once.Do(func() {
+		rand.Seed(time.Now().UnixNano())
+		log.Info(log.G, "Parsing master list of exported roots for testing...")
+		roots, err := trie.ParseExportedRoots("../trie/test/exportedRoots.json")
+		if err != nil {
+			panic(fmt.Sprintf("setup failed: could not parse test/exportedRoots.json: %v", err))
+		}
+		testExportedRoots = roots
+	})
+}
+
+type availableRoot struct {
+	Hash     common.Hash
+	TrieSize int
+}
+
+// generateImportsFromPool creates a slice of random import segments by drawing from a pool
+// of previously validated and available roots.
+func generateImportsFromPool(pool []availableRoot, numImports int) []types.ImportSegment {
+	if len(pool) == 0 || numImports <= 0 {
+		return []types.ImportSegment{}
+	}
+
+	importedSegs := make([]types.ImportSegment, numImports)
+	for i := 0; i < numImports; i++ {
+
+		randPoolIndex := rand.Intn(len(pool))
+		//randPoolIndex := len(pool) - 1
+		rootToQuery := pool[randPoolIndex]
+
+		index := rand.Intn(rootToQuery.TrieSize)
+
+		importedSegs[i] = types.ImportSegment{
+			RequestedHash: rootToQuery.Hash,
+			Index:         uint16(index),
+		}
+	}
+	return importedSegs
+}
 
 func rubic(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 	log.Info(log.Node, "RUBIC START", "targetN", targetN)
 
+	loadExportedRoots()
+
 	service0 := testServices["fib"]
 	serviceAuth := testServices["auth_copy"]
-	var prevExportSegmentRoot common.Hash
+
+	availableImportPool := make([]availableRoot, 0)
 
 	isDry := false
 	withImport := true
 	targetN = 50
-	fibStart := 1
-	jmpSize := 2
-	for fibN := fibStart; fibN < fibStart+targetN*jmpSize; fibN += jmpSize {
-		imported := []types.ImportSegment{}
-		if fibN > fibStart && withImport {
-			imported = append(imported, types.ImportSegment{
-				RequestedHash: prevExportSegmentRoot,
-				Index:         0, // TODO: add variety
-			})
+	startN := 50
+	jmpSize := 3
+
+	for packageN := startN; packageN < startN+targetN*jmpSize && packageN < maxN; packageN += jmpSize {
+		var imported0, imported1 []types.ImportSegment
+
+		if withImport && len(availableImportPool) > 0 {
+			// Generate a variable number of imports to increase test diversity.
+			numImports0 := rand.Intn(importTargetN) + 1 // Request 1 to 5 random segments
+			numImports1 := rand.Intn(importTargetN) + 0
+			imported0 = generateImportsFromPool(availableImportPool, numImports0)
+			imported1 = generateImportsFromPool(availableImportPool, numImports1)
 		}
 
 		payload := make([]byte, 4)
-		binary.LittleEndian.PutUint32(payload, uint32(fibN))
+		binary.LittleEndian.PutUint32(payload, uint32(packageN))
 
 		wp := types.WorkPackage{
 			AuthCodeHost:          0,
@@ -50,8 +107,8 @@ func rubic(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 					Payload:            payload,
 					RefineGasLimit:     DefaultRefineGasLimit * 5,
 					AccumulateGasLimit: DefaultAccumulateGasLimit * 5,
-					ImportedSegments:   imported,
-					ExportCount:        uint16(fibN),
+					ImportedSegments:   imported0,
+					ExportCount:        uint16(packageN),
 				},
 				{
 					Service:            statedb.AuthCopyServiceCode,
@@ -59,18 +116,18 @@ func rubic(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 					Payload:            nil,
 					RefineGasLimit:     DefaultRefineGasLimit,
 					AccumulateGasLimit: DefaultAccumulateGasLimit,
-					ImportedSegments:   nil,
+					ImportedSegments:   imported1,
 					ExportCount:        0,
 				},
 			},
 		}
 
 		wpr := &WorkPackageRequest{
-			Identifier: fmt.Sprintf("Rubic(%d)", fibN),
-
+			Identifier:      fmt.Sprintf("Rubic(%d). ImpSegs[%d|%d]", packageN, len(imported0), len(imported1)),
 			WorkPackage:     wp,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 		}
+		fmt.Printf("Rubic(%d). ImpSegs[%d|%d]\n%v\n", packageN, len(imported0), len(imported1), types.ToJSONHexIndent(wp.WorkItems))
 
 		if !isDry {
 			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout*maxRobustTries)
@@ -80,8 +137,17 @@ func rubic(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 				log.Error(log.Node, "SubmitAndWaitForWorkPackages ERR", "err", err)
 				return
 			}
+			if packageN < len(testExportedRoots) {
+				newlyAvailableRoot := availableRoot{
+					Hash:     testExportedRoots[packageN],
+					TrieSize: packageN,
+				}
+				availableImportPool = append(availableImportPool, newlyAvailableRoot)
+				log.Info(log.G, "Root unlocked and added to import pool", "trieSize", packageN, "root", newlyAvailableRoot.Hash)
+			} else {
+				log.Warn(log.G, "Cannot add root to pool: packageN is out of bounds for testExportedRoots", "packageN", packageN)
+			}
 
-			prevExportSegmentRoot = wr.AvailabilitySpec.ExportedSegmentRoot
 			k := common.ServiceStorageKey(statedb.FibServiceCode, []byte{0})
 			data, _, _ := n1.GetServiceStorage(statedb.FibServiceCode, k)
 			log.Info(log.Node, wpr.Identifier, "workPackageHash", wr.AvailabilitySpec.WorkPackageHash, "exportedSegmentRoot", wr.AvailabilitySpec.ExportedSegmentRoot, "result", fmt.Sprintf("%x", data))
@@ -89,129 +155,4 @@ func rubic(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 			log.Info(log.Node, wpr.Identifier, "workPackageHash", wp.Hash(), "wp", wp.String())
 		}
 	}
-}
-
-func rubic2(n1 JNode, testServices map[string]*types.TestService, targetN int) error {
-	log.Info(log.Node, "RUBIC2 START")
-
-	jamKey := []byte("jam")
-	service0 := testServices["corevm"]
-	serviceAuth := testServices["auth_copy"]
-
-	childSvc, _ := getServices([]string{"corevm_child"}, false)
-	childCodeHash := childSvc["corevm_child"].CodeHash
-	childCodeLen := uint32(len(childSvc["corevm_child"].Code))
-	childLenBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(childLenBytes, childCodeLen)
-
-	prevWP := common.Hash{}
-
-	// prepare extrinsics for child loader
-	extrinsics := types.ExtrinsicsBlobs{}
-	ext := append(childCodeHash.Bytes(), childLenBytes...)
-	extrinsics = append(extrinsics, ext)
-	wiExt := []types.WorkItemExtrinsic{{
-		Hash: common.Blake2Hash(ext),
-		Len:  uint32(len(ext)),
-	}}
-
-	for fibN := -1; fibN <= targetN; fibN++ {
-		// build imported segments
-		imported := []types.ImportSegment{}
-		if fibN > 0 {
-			for i := 0; i < fibN; i++ {
-				imported = append(imported, types.ImportSegment{
-					RequestedHash: prevWP,
-					Index:         uint16(i),
-				})
-			}
-		}
-
-		// build payload
-		var payload []byte
-		if fibN >= 0 {
-			for i := 0; i < fibN+2; i++ {
-				tmp := make([]byte, 4)
-				binary.LittleEndian.PutUint32(tmp, uint32(fibN))
-				payload = append(payload, tmp...)
-				binary.LittleEndian.PutUint32(tmp, uint32(1)) // function id
-				payload = append(payload, tmp...)
-			}
-		}
-
-		wp := types.WorkPackage{
-			AuthCodeHost:          0,
-			Authorization:         nil, // null-authorizer
-			AuthorizationCodeHash: bootstrap_auth_codehash,
-			ParameterizationBlob:  nil,
-			WorkItems: []types.WorkItem{
-				{
-					Service:            service0.ServiceCode,
-					CodeHash:           service0.CodeHash,
-					Payload:            payload,
-					RefineGasLimit:     DefaultRefineGasLimit,
-					AccumulateGasLimit: DefaultAccumulateGasLimit,
-					ImportedSegments:   imported,
-					Extrinsics:         wiExt,
-					ExportCount:        uint16(fibN + 1),
-				},
-				{
-					Service:            serviceAuth.ServiceCode,
-					CodeHash:           serviceAuth.CodeHash,
-					Payload:            nil,
-					RefineGasLimit:     DefaultRefineGasLimit,
-					AccumulateGasLimit: DefaultAccumulateGasLimit,
-					ImportedSegments:   nil,
-					ExportCount:        0,
-				},
-			},
-		}
-
-		label := "init"
-		if fibN >= 0 {
-			label = fmt.Sprintf("%d", fibN)
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout*maxRobustTries)
-		wpr := &WorkPackageRequest{
-			Identifier:      fmt.Sprintf("FIB2(%s)", label),
-			WorkPackage:     wp,
-			ExtrinsicsBlobs: extrinsics,
-		}
-
-		wr, err := RobustSubmitAndWaitForWorkPackages(ctx, n1, []*WorkPackageRequest{wpr})
-		cancel()
-		if err != nil {
-			log.Error(log.Node, "RobustSubmitAndWaitForWorkPackages", "err", err)
-			return err
-		}
-		prevWP = wr.AvailabilitySpec.ExportedSegmentRoot
-
-		// inspect storage keys [0,1,2,5,6,7,8,9]
-		for _, key := range []byte{0, 1, 2, 5, 6, 7, 8, 9} {
-			k := common.ServiceStorageKey(service0.ServiceCode, []byte{key})
-			data, _, _ := n1.GetServiceStorage(service0.ServiceCode, k)
-			log.Info(log.Node,
-				fmt.Sprintf("Fib2-(%s) result key %d", label, key),
-				"result", fmt.Sprintf("%x", data),
-			)
-		}
-
-		// occasionally load preimages
-		switch fibN {
-		case 3, 6:
-			ctx2, cancel2 := context.WithTimeout(context.Background(), RefineTimeout)
-			_ = n1.SubmitAndWaitForPreimage(ctx2, service0.ServiceCode, jamKey)
-			cancel2()
-		case -1:
-			ctx2, cancel2 := context.WithTimeout(context.Background(), RefineTimeout)
-			if err := n1.SubmitAndWaitForPreimage(ctx2, service0.ServiceCode, childSvc["corevm_child"].Code); err != nil {
-				log.Error(log.Node, "SubmitAndWaitForPreimage", "err", err)
-			} else {
-				log.Info(log.Node, "COREVM CHILD LOADED")
-			}
-			cancel2()
-		}
-	}
-	return nil
 }

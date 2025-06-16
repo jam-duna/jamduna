@@ -704,7 +704,7 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 		return
 	}
 
-	wr, _, pvmElapsed, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, false)
+	wr, _, pvmElapsed, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, n.statedb.GetTimeslot(), false)
 	if err != nil {
 		return
 	}

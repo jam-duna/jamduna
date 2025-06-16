@@ -6,9 +6,11 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
 
@@ -51,7 +53,7 @@ Guarantor -> Assurer
 type JAMSNPSegmentShardRequest struct {
 	ErasureRoot  common.Hash `json:"erasure_root"`
 	ShardIndex   uint16      `json:"shard_index"`
-	Len          uint8       `json:"len"`
+	Len          uint        `json:"len"`
 	SegmentIndex []uint16    `json:"segment_index"`
 }
 
@@ -69,22 +71,13 @@ func (req *JAMSNPSegmentShardRequest) ToBytes() ([]byte, error) {
 		return nil, err
 	}
 
-	// Serialize Len (1 byte)
-	if err := binary.Write(buf, binary.LittleEndian, req.Len); err != nil {
+	segIndexBytes, err := types.Encode(req.SegmentIndex)
+	if err != nil {
 		return nil, err
 	}
 
-	// Serialize the length of SegmentIndex array (2 bytes for the length)
-	segmentIndexLength := uint16(len(req.SegmentIndex))
-	if err := binary.Write(buf, binary.LittleEndian, segmentIndexLength); err != nil {
+	if _, err := buf.Write(segIndexBytes); err != nil {
 		return nil, err
-	}
-
-	// Serialize each SegmentIndex entry (2 bytes each)
-	for _, segment := range req.SegmentIndex {
-		if err := binary.Write(buf, binary.LittleEndian, segment); err != nil {
-			return nil, err
-		}
 	}
 
 	return buf.Bytes(), nil
@@ -104,24 +97,16 @@ func (req *JAMSNPSegmentShardRequest) FromBytes(data []byte) error {
 		return err
 	}
 
-	// Deserialize Len (1 byte)
-	if err := binary.Read(buf, binary.LittleEndian, &req.Len); err != nil {
-		return err
+	remaining := data[34:] // 32 bytes for ErasureRoot + 2 bytes for ShardIndex
+
+	var segmentIndex []uint16
+	decodedData, _, decodeErr := types.Decode(remaining, reflect.TypeOf(segmentIndex))
+	if decodeErr != nil {
+		return fmt.Errorf("JAMSNPSegmentShardRequest - decode segment index Err: %w", decodeErr)
 	}
 
-	// Deserialize the length of SegmentIndex array (2 bytes)
-	var segmentIndexLength uint16
-	if err := binary.Read(buf, binary.LittleEndian, &segmentIndexLength); err != nil {
-		return err
-	}
-
-	// Deserialize each SegmentIndex entry (2 bytes each)
-	req.SegmentIndex = make([]uint16, segmentIndexLength)
-	for i := 0; i < int(segmentIndexLength); i++ {
-		if err := binary.Read(buf, binary.LittleEndian, &req.SegmentIndex[i]); err != nil {
-			return err
-		}
-	}
+	req.SegmentIndex = decodedData.([]uint16)
+	req.Len = uint(len(req.SegmentIndex))
 
 	return nil
 }
@@ -159,7 +144,7 @@ func (p *Peer) SendSegmentShardRequest(
 	req := &JAMSNPSegmentShardRequest{
 		ErasureRoot:  erasureRoot,
 		ShardIndex:   shardIndex,
-		Len:          uint8(len(segmentIndex)),
+		Len:          uint(len(segmentIndex)),
 		SegmentIndex: segmentIndex,
 	}
 
@@ -206,8 +191,10 @@ func (n *Node) onSegmentShardRequest(ctx context.Context, stream quic.Stream, ms
 	err = req.FromBytes(msg)
 	if err != nil {
 		fmt.Println("Error deserializing:", err)
+		log.Warn(log.DA, "onSegmentShardRequest:FromBytes", "err", err, "CE139/140ReqMsg", fmt.Sprintf("0x%x", msg))
 		return fmt.Errorf("onSegmentShardRequest: FromBytes failed: %w", err)
 	}
+	log.Debug(log.G, "onSegmentShardRequest:FromBytes Received", "CE139/140ReqMsg", fmt.Sprintf("0x%x", msg), "ErasureRoot", req.ErasureRoot, "ShardIndex", req.ShardIndex, "Len", req.Len, "SegmentIndex", req.SegmentIndex)
 
 	selected_segmentshards, selected_segment_justifications, ok, err := n.GetSegmentShard_Assurer(req.ErasureRoot, req.ShardIndex, req.SegmentIndex, withJustification)
 	if err != nil {

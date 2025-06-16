@@ -241,7 +241,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 			if coworker.PeerID == n.id {
 				var execErr error
 
-				report, d, pvmElapsed, execErr = n.executeWorkPackageBundle(coreIndex, bundle, segmentRootLookup, true)
+				report, d, pvmElapsed, execErr = n.executeWorkPackageBundle(coreIndex, bundle, segmentRootLookup, slot, true)
 				if execErr != nil {
 					log.Warn(log.Node, "processWPQueueItem", "err", execErr)
 					return

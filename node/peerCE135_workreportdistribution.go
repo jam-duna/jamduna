@@ -184,7 +184,7 @@ func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream,
 		//"workPackageHash", workReport.GetWorkPackageHash(),
 		"workReportHash", workReport.Hash(),
 		"spec", workReport.AvailabilitySpec.String(),
-		"guarantee.Slot", guarantee.Slot,
+		"slot", guarantee.Slot,
 	)
 
 	log.Trace(log.G, "onWorkReportDistribution INCOMING REPORT",

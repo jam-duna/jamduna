@@ -274,7 +274,7 @@ func (n *NodeContent) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup
 }
 
 // executeWorkPackageBundle can be called by a guarantor OR an auditor -- the caller MUST do  VerifyBundle call prior to execution (verifying the imported segments)
-func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, firstGuarantorOrAuditor bool) (work_report types.WorkReport, d AvailabilitySpecifierDerivation, elapsed uint32, err error) {
+func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, slot uint32, firstGuarantorOrAuditor bool) (work_report types.WorkReport, d AvailabilitySpecifierDerivation, elapsed uint32, err error) {
 	importsegments := make([][][]byte, len(package_bundle.WorkPackage.WorkItems))
 	results := []types.WorkResult{}
 	targetStateDB := n.getPVMStateDB()
@@ -359,7 +359,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 			G: result.Gas, // REVIEW
 			D: result.Result,
 		}
-		log.Debug(log.G, "executeWorkPackageBundle", "wrangledResults", types.DecodedWrangledResults(&o))
+		log.Trace(log.G, "executeWorkPackageBundle", "wrangledResults", types.DecodedWrangledResults(&o))
 	}
 
 	spec, d := n.NewAvailabilitySpecifier(package_bundle, segments)
@@ -378,8 +378,9 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		"n", n.String(),
 		"workReportHash", workReport.Hash(),
 		"spec", workReport.AvailabilitySpec.String(),
+		"slot", slot,
 	)
-	log.Debug(log.G, "executeWorkPackageBundle OUTGOING REPORT",
+	log.Trace(log.G, "executeWorkPackageBundle OUTGOING REPORT",
 		"n", n.String(),
 		"workReportHash", workReport.Hash(),
 		"workReport", workReport.String(),
@@ -398,6 +399,5 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		metadata := fmt.Sprintf("wph=%s|c=%d|len=%d", spec.WorkPackageHash, workReport.CoreIndex, spec.ExportedSegmentLength)
 		n.nodeSelf.Telemetry(log.MsgTypeSegment, segments, "metadata", metadata, "codec_encoded", types.EncodeAsHex(segments))
 	}
-
 	return workReport, d, pvmElapsed, err
 }

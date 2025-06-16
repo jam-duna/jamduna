@@ -64,7 +64,7 @@ spin_0:
 
 run_1:
 	@rm -rf ${HOME}/.jamduna/jam-*
-	@$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator 5 --rpc-port=19805 --chain chainspecs/jamduna-spec.json
+	@$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator 5 --rpc-port=19805 --chain chainspecs/jamduna-spec.json --debug rotation,guarantees
 
 run_5:
 	@for i in 0 1 2 3 4; do \
@@ -164,6 +164,7 @@ run_parallel_jam:
 		$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run \
 			--chain $(CHAINSPEC) \
 			--dev-validator $$V_IDX \
+			--debug rotation,guarantees \
 			--start-time "$(JAM_start-time)" & \
 	done; \
 	wait

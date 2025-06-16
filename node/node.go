@@ -2003,7 +2003,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 					log.Error(log.Audit, "auditWorkReport:FetchWorkPackageBundle package mismatch")
 					continue
 				}
-				wr, _, pvmElapsed, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, false)
+				wr, _, pvmElapsed, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, n.statedb.GetTimeslot(), false)
 				if err != nil {
 					log.Error(log.Audit, "auditWorkReport:executeWorkPackageBundle", "err", err)
 					continue
@@ -2041,7 +2041,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 					log.Error(log.Audit, "auditWorkReport:FetchWorkPackageBundle package mismatch")
 					continue
 				}
-				wr, _, pvmElapsed, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, false)
+				wr, _, pvmElapsed, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, n.statedb.GetTimeslot(), false)
 				if err != nil {
 					log.Error(log.Audit, "auditWorkReport:executeWorkPackageBundle", "err", err)
 					continue
