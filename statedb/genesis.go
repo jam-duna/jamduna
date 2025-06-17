@@ -157,6 +157,7 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 			statedb.WriteServicePreimageLookup(service.ServiceCode, auth_code_hash, auth_code_len, bootStrapAnchor)
 
 			statedb.writeService(service.ServiceCode, &bootstrapServiceAccount)
+			fmt.Printf("Bootstrap Service %s (fn:%s), codeHash %s, codeLen=%d, anchor %v\n", service.ServiceName, service.FileName, codeHash.String(), codeLen, bootStrapAnchor)
 		} else {
 			sa := types.ServiceAccount{
 				CodeHash:        codeHash,
@@ -169,8 +170,9 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 
 			statedb.WriteServicePreimageBlob(service.ServiceCode, code)
 			statedb.WriteServicePreimageLookup(service.ServiceCode, codeHash, codeLen, bootStrapAnchor)
-
 			statedb.writeService(service.ServiceCode, &sa)
+
+			fmt.Printf("Service %s (fn:%s), codeHash %s, codeLen=%d, anchor %v\n", service.ServiceName, service.FileName, codeHash.String(), codeLen, bootStrapAnchor)
 		}
 	}
 	fmt.Printf("Bootstrap AuthorizationHash: %v\n", auth_code_hash_hash) //p_a

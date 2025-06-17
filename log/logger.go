@@ -221,7 +221,10 @@ func (l *logger) Write(level slog.Level, module string, msg string, attrs ...any
 	}
 }
 func (l *logger) Telemetry(str string) {
-	l.writer.Info(str)
+	err := l.writer.Info(str)
+	if err != nil {
+		l.Error("Failed to write telemetry log", "error", err)
+	}
 }
 
 func (l *logger) RecordLogs() {

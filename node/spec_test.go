@@ -159,8 +159,8 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
   },
   "items": [
     {
-      "service": 0,
-      "code_hash": "0x28a0e0c33fcc7cadbb6627bcc902064e89ba1d16c26ea88371a4f614942fb837",
+      "service": 20,
+      "code_hash": "0x5e95b316ba390ee50c595f0e10923a24831647f1d3f800942b5a58f9972baf51",
       "payload": "0x06e90be226abaccc638a0addae983f814190ba97367f8abc5e21642a1e48f23d577241000000000000",
       "refine_gas_limit": 1600000000,
       "accumulate_gas_limit": 10000000,
