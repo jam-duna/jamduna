@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -85,66 +86,92 @@ func (mapping *JAMSNPSegmentRootMapping) FromBytes(data []byte) error {
 
 type JAMSNPWorkPackageShare struct {
 	CoreIndex    uint16                     `json:"core"`
-	Len          uint8                      `json:"len"`
+	Len          uint                       `json:"len"`
 	SegmentRoots []JAMSNPSegmentRootMapping `json:"segment_roots"`
 }
 
-func (share *JAMSNPWorkPackageShare) ToBytes() ([]byte, error) {
+func (share *JAMSNPWorkPackageShare) ToBytes() (encodedBytes []byte, err error) {
+	// encodedBytes, err = types.Encode(share)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("JAMSNPWorkPackageShare.ToBytes: %w", err)
+	// }
+
 	buf := new(bytes.Buffer)
 
 	// Serialize CoreIndex (2 bytes)
 	if err := binary.Write(buf, binary.LittleEndian, share.CoreIndex); err != nil {
 		return nil, err
 	}
-
-	// Serialize Len (1 byte)
-	share.Len = uint8(len(share.SegmentRoots)) // Set the Len field before serialization
-	if err := buf.WriteByte(share.Len); err != nil {
+	segmentRootsBytes, err := types.Encode(share.SegmentRoots)
+	if err != nil {
+		return nil, fmt.Errorf("JAMSNPWorkPackageShare.ToBytes: %w", err)
+	}
+	if _, err := buf.Write(segmentRootsBytes); err != nil {
 		return nil, err
 	}
 
-	// Serialize SegmentRoots (dynamically sized)
-	for _, rootMapping := range share.SegmentRoots {
-		rootMappingBytes, err := rootMapping.ToBytes()
-		if err != nil {
-			return nil, err
-		}
-		if _, err := buf.Write(rootMappingBytes); err != nil {
-			return nil, err
-		}
-	}
+	/*
 
-	return buf.Bytes(), nil
+		// Serialize Len (1 byte)
+		share.Len = uint8(len(share.SegmentRoots)) // Set the Len field before serialization
+		if err := buf.WriteByte(share.Len); err != nil {
+			return nil, err
+		}
+
+		// Serialize SegmentRoots (dynamically sized)
+		for _, rootMapping := range share.SegmentRoots {
+			rootMappingBytes, err := rootMapping.ToBytes()
+			if err != nil {
+				return nil, err
+			}
+			if _, err := buf.Write(rootMappingBytes); err != nil {
+				return nil, err
+			}
+		}
+	*/
+	encodedBytes = buf.Bytes()
+
+	return encodedBytes, nil
 }
 
 func (share *JAMSNPWorkPackageShare) FromBytes(data []byte) error {
+
 	buf := bytes.NewReader(data)
 
 	// Deserialize CoreIndex (2 bytes)
 	if err := binary.Read(buf, binary.LittleEndian, &share.CoreIndex); err != nil {
 		return err
 	}
-
-	// Deserialize Len (1 byte)
-	lenByte, err := buf.ReadByte()
+	decoded, _, err := types.Decode(data[2:], reflect.TypeOf([]JAMSNPSegmentRootMapping{}))
 	if err != nil {
 		return err
 	}
-	share.Len = lenByte
+	jamsnpSegmentRootMappings := decoded.([]JAMSNPSegmentRootMapping)
+	share.SegmentRoots = jamsnpSegmentRootMappings
+	share.Len = uint(len(share.SegmentRoots))
 
-	// Deserialize SegmentRoots based on Len
-	share.SegmentRoots = make([]JAMSNPSegmentRootMapping, share.Len)
-	for i := uint8(0); i < share.Len; i++ {
-		var rootMapping JAMSNPSegmentRootMapping
-		rootMappingBytes := make([]byte, 64)
-		if _, err := buf.Read(rootMappingBytes); err != nil {
+	/*
+		// Deserialize Len (1 byte)
+		lenByte, err := buf.ReadByte()
+		if err != nil {
 			return err
 		}
-		if err := rootMapping.FromBytes(rootMappingBytes); err != nil {
-			return err
+		share.Len = lenByte
+
+		// Deserialize SegmentRoots based on Len
+		share.SegmentRoots = make([]JAMSNPSegmentRootMapping, share.Len)
+		for i := uint8(0); i < share.Len; i++ {
+			var rootMapping JAMSNPSegmentRootMapping
+			rootMappingBytes := make([]byte, 64)
+			if _, err := buf.Read(rootMappingBytes); err != nil {
+				return err
+			}
+			if err := rootMapping.FromBytes(rootMappingBytes); err != nil {
+				return err
+			}
+			share.SegmentRoots[i] = rootMapping
 		}
-		share.SegmentRoots[i] = rootMapping
-	}
+	*/
 
 	return nil
 }
@@ -209,7 +236,7 @@ func (p *Peer) ShareWorkPackage(
 	encodedBundle := bundle.Bytes()
 	req := JAMSNPWorkPackageShare{
 		CoreIndex:    coreIndex,
-		Len:          uint8(len(segmentroots)),
+		Len:          uint(len(segmentroots)),
 		SegmentRoots: segmentroots,
 	}
 
