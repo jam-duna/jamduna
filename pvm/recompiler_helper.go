@@ -40,7 +40,7 @@ var pvmByteCodeToX86Code = map[byte]func(Instruction) []byte{
 	LOAD_IMM_JUMP: generateLoadImmJump, // does a LoadImm in x86 side, but the jump is managed by the VM
 
 	// JumpType = INDIRECT_JUMP (all of these have some register visible upon return which is added to some JumpIndirectOffset)
-	JUMP_IND:          generateFallthrough,         // jump is managed by the VM using the JumpSourceRegister
+	JUMP_IND:          generateJumpIndirect,        // jump is managed by the VM using the JumpSourceRegister
 	LOAD_IMM_JUMP_IND: generateLoadImmJumpIndirect, // does a LoadImm in x86 side, but the jump is managed by the VM
 
 	// JumpType = CONDITIONAL (x86code sets r15 to 1 or 0, VM uses this for branching to TruePC)
@@ -62,7 +62,6 @@ var pvmByteCodeToX86Code = map[byte]func(Instruction) []byte{
 	BRANCH_GE_S:     generateCompareBranch(0x8D),
 
 	// A.5.2. Instructions with Arguments of One Immediate. InstructionI1
-	ECALLI: generateSyscall,
 
 	// A.5.3. Instructions with Arguments of One Register and One Extended Width Immediate.
 	LOAD_IMM_64: generateLoadImm64,
@@ -108,7 +107,6 @@ var pvmByteCodeToX86Code = map[byte]func(Instruction) []byte{
 
 	// A.5.9. Instructions with Arguments of Two Registers.
 	MOVE_REG:              generateMoveReg,
-	SBRK:                  generateSyscall,
 	COUNT_SET_BITS_64:     generateBitCount64,
 	COUNT_SET_BITS_32:     generateBitCount32,
 	LEADING_ZERO_BITS_64:  generateLeadingZeros64,

@@ -101,6 +101,7 @@ func TestPVM(t *testing.T) {
 	num_mismatch := 0
 	total_mismatch := 0
 	for _, file := range files {
+
 		if strings.Contains(file.Name(), "riscv") {
 			continue // skip riscv tests
 		}

@@ -21,6 +21,7 @@ void Ecalli(void* rvmPtr, int32_t opcode);
 
 // Returns the function pointer of the Go-exported Ecalli for JIT stubs
 void* get_ecalli_address(void);
+void* get_sbrk_address(void);
 
 void* alloc_executable(size_t size);
 

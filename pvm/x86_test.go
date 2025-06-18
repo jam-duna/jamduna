@@ -265,22 +265,11 @@ func TestRecompilerSuccess(t *testing.T) {
 	}
 	// 183 tests pass, these 22 tests fail
 	suppress := []string{
-		// SOURABH TODO
-		"inst_branch_eq_imm_nok.json",
-		"inst_jump_indirect_with_offset_ok.json",
-		"inst_jump_indirect_without_offset_ok.json",
-		"inst_load_imm_and_jump.json",
-		"inst_load_imm_and_jump_indirect_same_regs_with_offset_ok.json",
-		"inst_load_imm_and_jump_indirect_same_regs_without_offset_ok.json",
-		//"inst_store_imm_indirect_u16_with_offset_nok.json",
-		//"inst_store_imm_indirect_u32_with_offset_nok.json",
-		//"inst_store_imm_indirect_u64_with_offset_nok.json",
-		//"inst_store_imm_indirect_u8_with_offset_nok.json",
-		//"inst_store_indirect_u16_with_offset_nok.json",
-		//"inst_store_indirect_u32_with_offset_nok.json",
-		//"inst_store_indirect_u64_with_offset_nok.json",
-		//"inst_store_indirect_u8_with_offset_nok.json",
-		//"inst_store_u8_trap_inaccessible.json",
+		// "inst_load_imm_and_jump.json", // LOAD_IMM_JUMP
+		// "inst_load_imm_and_jump_indirect_different_regs_with_offset_ok.json",
+		// "inst_load_imm_and_jump_indirect_different_regs_without_offset_ok.json",
+		// "inst_load_imm_and_jump_indirect_same_regs_with_offset_ok.json",
+		// "inst_load_imm_and_jump_indirect_same_regs_without_offset_ok.json",
 	}
 
 	for _, file := range files {
@@ -373,7 +362,6 @@ func recompiler_test(tc TestCase) error {
 		//pvm.Ram.SetPageAccess(mem.Address/PageSize, 1, AccessMode{Readable: false, Writable: true, Inaccessible: false})
 		pvm.Ram.WriteRAMBytes(mem.Address, mem.Data[:])
 	}
-
 	// if len(tc.InitialMemory) == 0 {
 	// 	pvm.Ram.SetPageAccess(32, 1, AccessMode{Readable: false, Writable: false, Inaccessible: true})
 	// }
@@ -398,15 +386,11 @@ func recompiler_test(tc TestCase) error {
 		rvm.WriteMemory(mem.Address, mem.Data)
 	}
 	rvm.pc = 0
-
-	_, _, x86Code := rvm.Compile(rvm.pc)
-	str := Disassemble(x86Code)
-	fmt.Printf("ALL COMBINED Disassembled x86 code:\n%s\n", str)
-	if err := rvm.ExecuteX86Code(x86Code); err != nil {
+	rvm.Compile(rvm.pc)
+	if err := rvm.ExecuteX86Code(rvm.x86Code); err != nil {
 		// we don't have to return this , just print it
 		fmt.Printf("ExecuteX86 crash detected: %v\n", err)
 	}
-
 	// check the memory
 	for _, mem := range tc.ExpectedMemory {
 		data, err := rvm.ReadMemory(mem.Address, uint32(len(mem.Data)))
@@ -458,7 +442,7 @@ func TestSinglePVM(t *testing.T) {
 	PvmTrace = true
 	RecompilerFlag = true
 
-	name := "inst_branch_eq_ok" // inst_branch_eq_nok
+	name := "inst_load_imm_and_jump"
 	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
 	data, err := os.ReadFile(filePath)
 	if err != nil {

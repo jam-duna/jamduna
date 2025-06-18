@@ -26,6 +26,23 @@ func Ecalli(rvmPtr unsafe.Pointer, opcode int32) {
 	vm.InvokeHostCall(int(opcode))
 }
 
+// Ecalli is the host call invoked by the recompiled x86 code. It updates the VM state.
+//
+//export Sbrk
+func Sbrk(rvmPtr unsafe.Pointer, valueA uint32, registerIndexD int32) {
+	vm := (*RecompilerVM)(rvmPtr)
+	// Acquire lock to ensure thread-safety
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+
+	// Reload registers from memory before executing host call
+	for i := range vm.register {
+		vm.register[i] = binary.LittleEndian.Uint64(vm.regDumpMem[i*8:])
+	}
+	// Invoke the host logic, e.g., gas charging and actual operation
+	vm.InvokeSbrk(valueA, registerIndexD)
+}
+
 // EcalliCode generates the x86_64 machine code snippet that:
 // 1. Dumps registers to memory.
 // 2. Sets up C ABI registers (rdi, esi).
@@ -166,6 +183,26 @@ func (vm *RecompilerVM) chargeGas(host_fn int) {
 
 	vm.Gas = beforeGas - int64(chargedGas)
 	log.Trace(vm.logging, exp, "reg", vm.ReadRegisters(), "gasCharged", chargedGas, "beforeGas", beforeGas, "afterGas", vm.Gas)
+}
+
+func (vm *RecompilerVM) InvokeSbrk(valueA uint32, registerIndexD int32) (result uint32) {
+	if valueA == 0 {
+		vm.WriteRegister(int(registerIndexD), uint64(vm.Ram.current_heap_pointer))
+		return vm.Ram.current_heap_pointer
+	}
+	result = vm.Ram.current_heap_pointer
+	next_page_boundary := P_func(vm.Ram.current_heap_pointer)
+	new_heap_pointer := vm.Ram.current_heap_pointer + valueA
+	if new_heap_pointer > uint32(next_page_boundary) {
+		final_boundary := P_func(uint32(new_heap_pointer))
+		idx_start := next_page_boundary / Z_P
+		idx_end := final_boundary / Z_P
+		page_count := idx_end - idx_start
+
+		vm.Ram.allocatePages(idx_start, page_count)
+	}
+	vm.Ram.current_heap_pointer = uint32(new_heap_pointer)
+	return result
 }
 
 // InvokeHostCall handles host calls

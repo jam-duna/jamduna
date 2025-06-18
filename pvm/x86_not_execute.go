@@ -18,3 +18,8 @@ func GetEcalliAddress() uintptr {
 	log.Error("x86", "GetEcalliAddress is not supported on this platform")
 	return 0
 }
+
+func GetSbrkAddress() uintptr {
+	log.Error("x86", "GetSbrkAddress is not supported on this platform")
+	return 0
+}

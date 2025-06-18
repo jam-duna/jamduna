@@ -15,8 +15,9 @@ type BasicBlock struct {
 	Instructions []Instruction
 	GasUsage     int64
 
-	X86PC   uint64
-	X86Code []byte
+	X86PC             uint64
+	X86Code           []byte
+	pvmPC_TO_x86Index map[uint32]int // maps PVM PC to x86 code offset, where this pc inside this block code
 
 	JumpType               int
 	IndirectJumpOffset     uint64
@@ -24,6 +25,8 @@ type BasicBlock struct {
 
 	TruePC    uint64
 	PVMNextPC uint64 // the next PC in PVM after this block, which is the "FALSE" case
+
+	LastInstructionOffset int
 }
 
 type Instruction struct {
@@ -35,9 +38,10 @@ type Instruction struct {
 
 func NewBasicBlock(x86pc uint64) *BasicBlock {
 	return &BasicBlock{
-		Instructions: make([]Instruction, 0),
-		GasUsage:     0,
-		X86PC:        x86pc,
+		Instructions:      make([]Instruction, 0),
+		GasUsage:          0,
+		X86PC:             x86pc,
+		pvmPC_TO_x86Index: make(map[uint32]int),
 	}
 }
 

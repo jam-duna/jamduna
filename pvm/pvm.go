@@ -374,7 +374,6 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 	stepn := 1
 	for !vm.terminated {
 		if err := vm.step(stepn); err != nil {
-			fmt.Println("Error in step:", err)
 			return err
 		}
 		if vm.hostCall && is_child {

@@ -679,6 +679,7 @@ func castReg16ToU64(regIdx int) []byte {
 	return []byte{rex, 0x0F, 0xBF, modRM}
 }
 
+/*
 func castReg32ToU64(regIdx int) []byte {
 	r := regInfoList[regIdx]
 	rex := byte(0x48)
@@ -688,6 +689,7 @@ func castReg32ToU64(regIdx int) []byte {
 	modRM := byte(0xC0 | (r.RegBits << 3) | r.RegBits)
 	return []byte{rex, 0x63, modRM}
 }
+*/
 
 // generateLoadInd emits
 //
@@ -748,10 +750,8 @@ func generateLoadInd(
 		case LOAD_IND_U16:
 			// zero-extend word to 64-bit: 66 + MOVZX r64, r/m16 (0F B7 /r)
 			return append(
-				append(
-					[]byte{0x66, rex, 0x0F, 0xB7, modRM, sib},
-					disp...,
-				),
+				[]byte{0x66, rex, 0x0F, 0xB7, modRM, sib},
+				disp...,
 			)
 
 		case LOAD_IND_U32:

@@ -10,57 +10,63 @@
 #include <stdint.h>
 #include <stdio.h>
 #include "x86_execute_linux_amd64.h"
+
 // Forward declaration of the Go-exported host call
 extern void Ecalli(void* rvmPtr, int32_t opcode);
-
 void* get_ecalli_address(void) {
     return (void*)Ecalli;
+}
+
+extern void Sbrk(void* rvmPtr);
+void* get_sbrk_address(void) {
+    return (void*)Sbrk;
 }
 
 static sigjmp_buf jump_env;
 static void* global_reg_ptr = NULL;
 
-// SIGSEGV handler: dumps register state then longjmp
-// SIGSEGV handler: dumps CPU state then longjmp
+static void signal_handler(int sig, siginfo_t *si, void *arg) {
+    ucontext_t *ctx     = (ucontext_t*)arg;
+    void*      fault_addr = si->si_addr;
+    uint64_t   rip        = ctx->uc_mcontext.gregs[REG_RIP];
+    uint64_t   rsp        = ctx->uc_mcontext.gregs[REG_RSP];
+    uint64_t   rbp        = ctx->uc_mcontext.gregs[REG_RBP];
 
-// SIGSEGV handler: dumps CPU state then longjmp
-static void sigsegv_handler(int sig, siginfo_t *si, void *arg) {
-    ucontext_t *ctx = (ucontext_t*)arg;
-    uint64_t* regs = (uint64_t*)global_reg_ptr;
-
-    // Fault info
-    void* fault_addr = si->si_addr;
-    uint64_t rip = ctx->uc_mcontext.gregs[REG_RIP];
-    uint64_t rsp = ctx->uc_mcontext.gregs[REG_RSP];
-    uint64_t rbp = ctx->uc_mcontext.gregs[REG_RBP];
-
-    fprintf(stderr, "[x86_execute] Caught SIGSEGV: sig=%d at address=%p\n", sig, fault_addr);
-    fprintf(stderr, "[x86_execute] RIP=0x%016llx RSP=0x%016llx RBP=0x%016llx\n", (unsigned long long)rip, (unsigned long long)rsp, (unsigned long long)rbp);
-
-    // Dump registers to buffer
-    regs[0]  = ctx->uc_mcontext.gregs[REG_RAX];
-    regs[1]  = ctx->uc_mcontext.gregs[REG_RCX];
-    regs[2]  = ctx->uc_mcontext.gregs[REG_RDX];
-    regs[3]  = ctx->uc_mcontext.gregs[REG_RBX];
-    regs[4]  = ctx->uc_mcontext.gregs[REG_RSI];
-    regs[5]  = ctx->uc_mcontext.gregs[REG_RDI];
-    regs[6]  = ctx->uc_mcontext.gregs[REG_R8];
-    regs[7]  = ctx->uc_mcontext.gregs[REG_R9];
-    regs[8]  = ctx->uc_mcontext.gregs[REG_R10];
-    regs[9]  = ctx->uc_mcontext.gregs[REG_R11];
-    regs[10] = ctx->uc_mcontext.gregs[REG_R13];
-    regs[11] = ctx->uc_mcontext.gregs[REG_R14];
-    regs[12] = ctx->uc_mcontext.gregs[REG_R15];
-    regs[13] = ctx->uc_mcontext.gregs[REG_R12];
-
-    // Print register dump
-    const char* names[14] = {"RAX","RCX","RDX","RBX","RSI","RDI","R8","R9","R10","R11","R13","R14","R15","R12"};
-    fprintf(stderr, "[x86_execute] Register dump:\n");
-    for (int i = 0; i < 14; i++) {
-        fprintf(stderr, "  %4s = 0x%016llx\n", names[i], (unsigned long long)regs[i]);
+    // Determine signal name
+    const char* signame = "UNKNOWN";
+    switch (sig) {
+        case SIGSEGV: signame = "SIGSEGV"; break;
+        case SIGILL:  signame = "SIGILL";  break;
+        case SIGFPE:  signame = "SIGFPE";  break;
+        case SIGBUS:  signame = "SIGBUS";  break;
+        case SIGTRAP: signame = "SIGTRAP"; break;
     }
 
-    // Optionally dump bytes around RIP
+    fprintf(stderr, "[x86_execute] Caught %s at address %p\n", signame, fault_addr);
+    fprintf(stderr, "[x86_execute] RIP=0x%016llx RSP=0x%016llx RBP=0x%016llx\n",
+            (unsigned long long)rip,
+            (unsigned long long)rsp,
+            (unsigned long long)rbp);
+
+    // reg_ptr was saved into global_reg_ptr by execute_x86()
+    uint64_t* regPtr = (uint64_t*)global_reg_ptr;
+
+    // Store registers into regPtr in the exact order of the MOV [R12+...] instructions:
+    regPtr[0]  = ctx->uc_mcontext.gregs[REG_RAX];  // [R12+0x00] = RAX
+    regPtr[1]  = ctx->uc_mcontext.gregs[REG_RCX];  // [R12+0x08] = RCX
+    regPtr[2]  = ctx->uc_mcontext.gregs[REG_RDX];  // [R12+0x10] = RDX
+    regPtr[3]  = ctx->uc_mcontext.gregs[REG_RBX];  // [R12+0x18] = RBX
+    regPtr[4]  = ctx->uc_mcontext.gregs[REG_RSI];  // [R12+0x20] = RSI
+    regPtr[5]  = ctx->uc_mcontext.gregs[REG_RDI];  // [R12+0x28] = RDI
+    regPtr[6]  = ctx->uc_mcontext.gregs[REG_R8];   // [R12+0x30] = R8
+    regPtr[7]  = ctx->uc_mcontext.gregs[REG_R9];   // [R12+0x38] = R9
+    regPtr[8]  = ctx->uc_mcontext.gregs[REG_R10];  // [R12+0x40] = R10
+    regPtr[9]  = ctx->uc_mcontext.gregs[REG_R11];  // [R12+0x48] = R11
+    regPtr[10] = ctx->uc_mcontext.gregs[REG_R13];  // [R12+0x50] = R13
+    regPtr[11] = ctx->uc_mcontext.gregs[REG_R14];  // [R12+0x58] = R14
+    regPtr[12] = ctx->uc_mcontext.gregs[REG_R15];  // [R12+0x60] = R15
+
+    // Optionally dump bytes around RIP for debugging
     unsigned char* ip = (unsigned char*)rip;
     fprintf(stderr, "[x86_execute] Bytes @ RIP: ");
     for (int i = -4; i < 12; i++) {
@@ -71,23 +77,26 @@ static void sigsegv_handler(int sig, siginfo_t *si, void *arg) {
     // Jump back to recovery point
     siglongjmp(jump_env, 1);
 }
-/**
- * execute_x86: maps, executes and handles SIGSEGV of JIT code
- * @code: pointer to machine code buffer
- * @length: size of the buffer
- * @reg_ptr: pointer to 14-element uint64_t array to dump registers
- * return: 0 on success,
- *         -1 on segfault (registers dumped),
- *         -2 on mmap failure,
- *         -3 on mprotect failure
- */
- int execute_x86(uint8_t* code, size_t length, void* reg_ptr) {
+static void setup_signal_handlers() {
+    struct sigaction sa = {0};
+    sa.sa_sigaction = signal_handler;
+    sa.sa_flags     = SA_SIGINFO | SA_ONSTACK;
+
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGILL,  &sa, NULL);
+    sigaction(SIGFPE,  &sa, NULL);
+    sigaction(SIGBUS,  &sa, NULL);
+    sigaction(SIGTRAP, &sa, NULL);
+}
+
+int execute_x86(uint8_t* code, size_t length, void* reg_ptr) {
+    setup_signal_handlers();
     global_reg_ptr = reg_ptr;
 
     struct sigaction sa, old_sa;
     memset(&sa, 0, sizeof(sa));
-    sa.sa_sigaction = sigsegv_handler;
-    sa.sa_flags = SA_SIGINFO;
+    sa.sa_sigaction = signal_handler;
+    sa.sa_flags     = SA_SIGINFO;
 
     sigaction(SIGSEGV, NULL, &old_sa);
     sigaction(SIGSEGV, &sa, NULL);
@@ -112,12 +121,9 @@ static void sigsegv_handler(int sig, siginfo_t *si, void *arg) {
     return 0;
 }
 
-
-
 void* alloc_executable(size_t size) {
-	void* ptr = mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC,
-	                 MAP_ANON | MAP_PRIVATE, -1, 0);
-	if (ptr == MAP_FAILED) return NULL;
-	return ptr;
+    void* ptr = mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC,
+                     MAP_ANON | MAP_PRIVATE, -1, 0);
+    if (ptr == MAP_FAILED) return NULL;
+    return ptr;
 }
-

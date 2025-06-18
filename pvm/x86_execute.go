@@ -58,3 +58,7 @@ func ExecuteX86(code []byte, regBuf []byte) (ret int, err error) {
 func GetEcalliAddress() uintptr {
 	return uintptr(C.get_ecalli_address())
 }
+
+func GetSbrkAddress() uintptr {
+	return uintptr(C.get_sbrk_address())
+}
