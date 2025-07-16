@@ -1148,6 +1148,133 @@ func generateImmBinaryOp64(subcode byte) func(inst Instruction) []byte {
 		dstReg, srcReg, imm64, uint64imm := extractTwoRegsOneImm64(inst.Args)
 		dst := regInfoList[dstReg]
 		src := regInfoList[srcReg]
+		var code []byte
+
+		// helper: copy src→dst if needed
+		copySrcToDst := func() {
+			if srcReg != dstReg {
+				rex := byte(0x48) // REX.W
+				if src.REXBit == 1 {
+					rex |= 0x04
+				} // REX.R
+				if dst.REXBit == 1 {
+					rex |= 0x01
+				} // REX.B
+				code = append(code,
+					rex,
+					0x89, // MOV r/m64, r64
+					0xC0|(src.RegBits<<3)|dst.RegBits,
+				)
+			}
+		}
+
+		// 1) Small imm8 path: 83 /subcode ib
+		if imm64 >= -128 && imm64 <= 127 {
+			copySrcToDst()
+			rex := byte(0x48)
+			if dst.REXBit == 1 {
+				rex |= 0x01
+			}
+			code = append(code,
+				rex,
+				0x83,                          // ALU r/m64, imm8
+				0xC0|(subcode<<3)|dst.RegBits, // /subcode
+				byte(int8(imm64)),
+			)
+			return code
+		}
+
+		// 2) Imm32 path: 81 /subcode id
+		if imm64 >= -0x80000000 && imm64 <= 0x7FFFFFFF {
+			copySrcToDst()
+			rex := byte(0x48)
+			if dst.REXBit == 1 {
+				rex |= 0x01
+			}
+			code = append(code,
+				rex,
+				0x81, // ALU r/m64, imm32
+				0xC0|(subcode<<3)|dst.RegBits,
+			)
+			imm32 := uint32(int32(imm64))
+			b := make([]byte, 4)
+			binary.LittleEndian.PutUint32(b, imm32)
+			code = append(code, b...)
+			return code
+		}
+
+		// 3) Full imm64 via scratch + XCHG swap
+		copySrcToDst()
+		scratch := regInfoList[0]
+
+		// swap dst<->scratch: XCHG r64,dst
+		rexXchg := byte(0x48) // REX.W
+		if scratch.REXBit == 1 {
+			rexXchg |= 0x04
+		}
+		if dst.REXBit == 1 {
+			rexXchg |= 0x01
+		}
+		code = append(code,
+			rexXchg,
+			0x87, // XCHG r/m64, r64
+			0xC0|(scratch.RegBits<<3)|dst.RegBits,
+		)
+
+		// MOVABS scratch, imm64 (now scratch contains the old dst value)
+		rexMov := byte(0x48)
+		if scratch.REXBit == 1 {
+			rexMov |= 0x01
+		}
+		code = append(code,
+			rexMov,
+			byte(0xB8|scratch.RegBits), // MOVABS r64, imm64
+		)
+		immBytes := make([]byte, 8)
+		binary.LittleEndian.PutUint64(immBytes, uint64imm)
+		code = append(code, immBytes...)
+
+		// ALU dst, scratch  (dst now has old scratch value, scratch has immediate)
+		var regOp byte
+		switch subcode {
+		case 0:
+			regOp = 0x01 // ADD r/m64, r64
+		case 4:
+			regOp = 0x21 // AND
+		case 6:
+			regOp = 0x31 // XOR
+		default:
+			regOp = 0x01
+		}
+		rexOp := byte(0x48)
+		if scratch.REXBit == 1 {
+			rexOp |= 0x04
+		}
+		if dst.REXBit == 1 {
+			rexOp |= 0x01
+		}
+		code = append(code,
+			rexOp,
+			regOp,
+			0xC0|(scratch.RegBits<<3)|dst.RegBits,
+		)
+
+		// swap back scratch↔dst: XCHG
+		code = append(code,
+			rexXchg,
+			0x87,
+			0xC0|(scratch.RegBits<<3)|dst.RegBits,
+		)
+
+		return code
+	}
+}
+
+func generateImmBinaryOp642(subcode byte) func(inst Instruction) []byte {
+	return func(inst Instruction) []byte {
+		dstReg, srcReg, imm64, uint64imm := extractTwoRegsOneImm64(inst.Args)
+		dst := regInfoList[dstReg]
+		src := regInfoList[srcReg]
 
 		var code []byte
 
@@ -1213,6 +1340,8 @@ func generateImmBinaryOp64(subcode byte) func(inst Instruction) []byte {
 		switch subcode {
 		case 0: // ADD
 			regRegOp = 0x01
+		case 1: // OR
+			regRegOp = 0x09
 		case 4: // AND
 			regRegOp = 0x21
 		case 6: // XOR
