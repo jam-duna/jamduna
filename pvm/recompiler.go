@@ -2,7 +2,6 @@ package pvm
 
 import (
 	"encoding/binary"
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -10,8 +9,6 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"slices"
-	"sort"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -82,9 +79,6 @@ func NewRecompilerVM(vm *VM) (*RecompilerVM, error) {
 		isChargingGas:   true, // default to charging gas
 		isPCCounting:    true, // default to counting PC
 		IsBlockCounting: true, // default to not counting basic blocks
-
-		basicBlockExecutionCounter: make(map[uint64]int),
-		OP_tally:                   make(map[string]*X86InstTally),
 	}
 
 	rvm.current_heap_pointer = rvm.VM.Ram.GetCurrentHeapPointer()
@@ -673,9 +667,6 @@ func (rvm *RecompilerVM) Execute(entry uint32) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			fmt.Printf("failed to create directory %q: %v\n", dir, err)
 		}
-		if useEcalli500 {
-			rvm.CalculateTally()
-		}
 		// dump JSON tally
 		if err := rvm.TallyJSON(jsonFile); err != nil {
 			fmt.Printf("failed to write JSON tally: %v\n", err)
@@ -684,10 +675,7 @@ func (rvm *RecompilerVM) Execute(entry uint32) {
 
 	fmt.Printf("EXECUTEX86 Mode: %s Execution time: %s\n", rvm.Mode, time.Since(tm))
 }
-func (vm *RecompilerVM) CalculateTally() {
-	if vm.basicBlockExecutionCounter == nil {
-		return
-	}
+func (vm *VM) CalculateTally() {
 	fmt.Println("Basic Block Execution Tally:")
 	// Collect and sort PCs
 	var pcs []int
@@ -1144,16 +1132,16 @@ func (vm *RecompilerVM) AddPVMCount(pvm_OP string) {
 	entry.TotalPVM++
 }
 
-func (rvm *RecompilerVM) DisassembleAndTally(pvm_OP_Code byte, code []byte) string {
+func (vm *RecompilerVM) DisassembleAndTally(pvm_OP_Code byte, code []byte) string {
 	pvm_OP := opcode_str(pvm_OP_Code)
 
 	// bump the PVM count once
-	rvm.AddPVMCount(pvm_OP)
+	vm.AddPVMCount(pvm_OP)
 
 	var sb strings.Builder
 	offset := 0
-	if rvm.x86Instructions == nil {
-		rvm.x86Instructions = make(map[int]x86asm.Inst)
+	if vm.x86Instructions == nil {
+		vm.x86Instructions = make(map[int]x86asm.Inst)
 	}
 
 	for offset < len(code) {
@@ -1167,7 +1155,7 @@ func (rvm *RecompilerVM) DisassembleAndTally(pvm_OP_Code byte, code []byte) stri
 
 		// tally the individual x86 instruction
 		mnemonic := inst.Op.String()
-		rvm.AddTally(pvm_OP, mnemonic)
+		vm.AddTally(pvm_OP, mnemonic)
 
 		// …rest of your disassembly printing…
 		offset += length
@@ -1175,7 +1163,7 @@ func (rvm *RecompilerVM) DisassembleAndTally(pvm_OP_Code byte, code []byte) stri
 	return sb.String()
 }
 
-func (vm *RecompilerVM) AverageTally() {
+func (vm *VM) AverageTally() {
 	if vm.OP_tally == nil {
 		return
 	}
@@ -1188,7 +1176,7 @@ func (vm *RecompilerVM) AverageTally() {
 	}
 }
 
-func (vm *RecompilerVM) AddTally(pvm_OP string, x86_OP string) {
+func (vm *VM) AddTally(pvm_OP string, x86_OP string) {
 	if vm.OP_tally == nil {
 		vm.OP_tally = make(map[string]*X86InstTally)
 	}
@@ -1212,8 +1200,9 @@ func (vm *RecompilerVM) AddTally(pvm_OP string, x86_OP string) {
 	entry.TotalX86++
 }
 
-func (rvm *RecompilerVM) TallyJSON(filePath string) error {
+func (vm *VM) TallyJSON(filePath string) error {
 	// 1) Create or truncate the output file
+	vm.CalculateTally()
 	f, err := os.Create(filePath)
 	if err != nil {
 		return fmt.Errorf("create file %q: %w", filePath, err)
@@ -1222,11 +1211,11 @@ func (rvm *RecompilerVM) TallyJSON(filePath string) error {
 
 	// 2) Serialize directly
 	var data []byte
-	if rvm.OP_tally == nil {
+	if vm.OP_tally == nil {
 		data = []byte("{}")
 	} else {
-		rvm.AverageTally() // Calculate averages before marshaling
-		data, err = json.MarshalIndent(rvm.OP_tally, "", "  ")
+		vm.AverageTally() // Calculate averages before marshaling
+		data, err = json.MarshalIndent(vm.OP_tally, "", "  ")
 		//data, err = json.Marshal(rvm.OP_tally)
 		if err != nil {
 			return fmt.Errorf("marshal tally to JSON: %w", err)
@@ -1236,69 +1225,6 @@ func (rvm *RecompilerVM) TallyJSON(filePath string) error {
 	// 3) Write out
 	if _, err := f.Write(data); err != nil {
 		return fmt.Errorf("write to file %q: %w", filePath, err)
-	}
-	return nil
-}
-func (rvm *RecompilerVM) TallyCSV(filePath string) error {
-	if rvm.OP_tally == nil {
-		return fmt.Errorf("no tally data to write")
-	}
-
-	// Create or truncate the CSV file
-	f, err := os.Create(filePath)
-	if err != nil {
-		return fmt.Errorf("create CSV file: %w", err)
-	}
-	defer f.Close()
-
-	w := csv.NewWriter(f)
-	defer w.Flush()
-	rvm.AverageTally() // Calculate averages before writing
-	// Write header
-	if err := w.Write([]string{"pvm_op", "total_pvm", "x86_op", "x86_count"}); err != nil {
-		return fmt.Errorf("write header: %w", err)
-	}
-
-	// Collect rows
-	type row struct {
-		PvmOp    string
-		PvmCount int
-		X86Op    string
-		Count    int
-	}
-
-	rows := make([]row, 0, len(rvm.OP_tally)*4)
-	for _, entry := range rvm.OP_tally {
-		for x86, internal := range entry.X86_Map {
-			rows = append(rows, row{
-				PvmOp:    entry.PVM_OP,
-				PvmCount: entry.TotalPVM,
-				X86Op:    x86,
-				Count:    internal.Count,
-			})
-		}
-	}
-
-	// Sort by descending x86_count
-	sort.Slice(rows, func(i, j int) bool {
-		return rows[i].Count > rows[j].Count
-	})
-
-	// Write rows
-	for _, r := range rows {
-		record := []string{
-			r.PvmOp,
-			strconv.Itoa(r.PvmCount),
-			r.X86Op,
-			strconv.Itoa(r.Count),
-		}
-		if err := w.Write(record); err != nil {
-			return fmt.Errorf("write row %v: %w", record, err)
-		}
-	}
-
-	if err := w.Error(); err != nil {
-		return fmt.Errorf("finalize CSV: %w", err)
 	}
 	return nil
 }

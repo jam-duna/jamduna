@@ -144,7 +144,6 @@ func NewRecompilerSandboxVM(vm *VM) (*RecompilerSandboxVM, error) {
 			JumpTableMap:    make([]uint64, 0),
 			InstMapX86ToPVM: make(map[int]uint32),
 			InstMapPVMToX86: make(map[uint32]int),
-			OP_tally:        make(map[string]*X86InstTally),
 		},
 		sandBox:    mu,
 		pageAccess: make(map[int]int),
@@ -795,6 +794,8 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 			if !ok2 {
 				// fmt.Printf("⚠️ No basic block found for PVM PC %d at 0x%X ...\n", pvm_pc, offset)
 				return
+			} else {
+				vm.basicBlockExecutionCounter[uint64(pvm_pc)]++
 			}
 			if debugRecompiler {
 				fmt.Printf("PVMX PC: %d [%s] reg:%v  BasicBlock: %s ⛽️ Gas remaining: %d, GasUsage %d\n", pvm_pc, opcode_str(vm.code[pvm_pc]),
@@ -875,14 +876,13 @@ func (rvm *RecompilerSandboxVM) ExecuteSandBox(entryPoint uint64) error {
 	if UseTally {
 		// timestamp suffix
 		ts := time.Now().UnixMilli()
-		jsonFile := fmt.Sprintf("test/%s_%s_%d.json", VM_MODE, rvm.ServiceMetadata, ts)
+		jsonFile := fmt.Sprintf("test/%s_%d.json", VM_MODE, ts)
 
 		// ensure the directory exists (mkdir -p)
 		dir := filepath.Dir(jsonFile)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			fmt.Printf("failed to create directory %q: %v\n", dir, err)
 		}
-
 		// dump JSON tally
 		if err := rvm.TallyJSON(jsonFile); err != nil {
 			fmt.Printf("failed to write JSON tally: %v\n", err)

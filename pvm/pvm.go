@@ -107,6 +107,12 @@ type VM struct {
 	Logs        VMLogs
 
 	snapshot *EmulatorSnapShot
+
+	basicBlocks map[uint64]*BasicBlock // by PVM PC
+
+	basicBlockExecutionCounter map[uint64]int // PVM PC to execution count
+
+	OP_tally map[string]*X86InstTally `json:"tally"`
 }
 
 type Program struct {
@@ -343,6 +349,9 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		w_byte:          w_byte,
 		ServiceMetadata: Metadata,
 		CoreIndex:       2048,
+
+		basicBlockExecutionCounter: make(map[uint64]int),
+		OP_tally:                   make(map[string]*X86InstTally),
 	}
 
 	if useRawRam {

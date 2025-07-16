@@ -60,3 +60,4 @@ bin/jamduna
 /bin
 cmd/.DS_Store
 /release
+pvm/test/*

@@ -52,6 +52,7 @@ func Ecalli(rvmPtr unsafe.Pointer, opcode int32) {
 			// get the block counter from the register dump memory
 			vm.vmBasicBlock = int(blockCounter)
 			vm.basicBlockExecutionCounter[vm.pc]++
+
 			if blockCounter%100_000_000 == 0 {
 				if blockCounter >= 1_230_000_000 {
 					vm.LogCurrentState(vm.code[vm.pc], operands, vm.pc, vm.Gas)

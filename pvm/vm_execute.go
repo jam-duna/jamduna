@@ -26,10 +26,9 @@ type RecompilerVM struct {
 	realCode []byte
 	codeAddr uintptr
 
-	basicBlocks map[uint64]*BasicBlock // by PVM PC
-	x86Blocks   map[uint64]*BasicBlock // by x86 PC
-	x86PC       uint64
-	x86Code     []byte
+	x86Blocks map[uint64]*BasicBlock // by x86 PC
+	x86PC     uint64
+	x86Code   []byte
 
 	JumpTableOffset  uint64         // offset for the jump table in x86Code
 	JumpTableOffset2 uint64         // offset for the jump table in x86Code
@@ -49,10 +48,6 @@ type RecompilerVM struct {
 	isChargingGas        bool
 	isPCCounting         bool
 	IsBlockCounting      bool // whether to count basic blocks
-
-	basicBlockExecutionCounter map[uint64]int // PVM PC to execution count
-
-	OP_tally map[string]*X86InstTally `json:"tally"`
 }
 
 func (vm *RecompilerVM) Compile(startStep uint64) {

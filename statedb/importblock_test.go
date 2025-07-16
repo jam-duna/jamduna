@@ -139,8 +139,8 @@ func TestStateTransitionNoSandbox(t *testing.T) {
 }
 
 func TestStateTransitionSandbox(t *testing.T) {
-	pvm.VM_MODE = "recompiler" // set VM mode to recompiler sandbox
-	pvm.VMsCompare = true      // enable VM comparison for this test
+	pvm.VM_MODE = "recompiler_sandbox" // set VM mode to recompiler sandbox
+	pvm.VMsCompare = true              // enable VM comparison for this test
 	pvm.PvmLogging = true
 	pvm.UseTally = true          // enable tally for this test
 	pvm.SetUseEcalli500(true)    // use ecalli500 for log check in x86

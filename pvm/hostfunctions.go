@@ -1401,6 +1401,7 @@ func (vm *VM) hostHistoricalLookup() {
 }
 
 var lastFrameTime time.Time
+var frameCounter uint16
 
 // Export segment host-call
 func (vm *VM) hostExport() {
@@ -1422,11 +1423,15 @@ func (vm *VM) hostExport() {
 		if z != types.SegmentSize {
 			frame := bytes.Join(vm.Exports, nil)
 			now := time.Now()
-
+			frameCounter++
 			if !lastFrameTime.IsZero() {
 				fmt.Printf("Push frame %d bytes (interval: %v)\n", len(frame), now.Sub(lastFrameTime))
 			} else {
 				fmt.Printf("Push frame %d bytes (first)\n", len(frame))
+			}
+			if frameCounter != 0 && useEcalli500 {
+				fn := fmt.Sprintf("test/doom_fram_%d.json", frameCounter)
+				vm.TallyJSON(fn)
 			}
 			lastFrameTime = now
 
