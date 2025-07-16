@@ -39,7 +39,11 @@ ffi/libbandersnatch.a
 
 # state DB test data
 /statedb/testdata/
-
+/statedb/test_case/
+/statedb/recompiler/
+/statedb/recompiler_sandbox/
+/statedb/interpreter/
+/statedb/test/
 # service guarantees JSON
 guarantees/*.json
 

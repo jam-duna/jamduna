@@ -10,6 +10,8 @@ import (
 	"os"
 	"runtime/pprof"
 	"testing"
+
+	"github.com/colorfulnotion/jam/pvm"
 )
 
 const (
@@ -89,6 +91,7 @@ func TestRubic(t *testing.T) {
 
 func TestFib(t *testing.T) {
 	initPProf(t)
+	pvm.VM_MODE = "recompiler_sandbox"
 	targetN := TargetedN_Fib
 	if *targetNum > 0 {
 		targetN = *targetNum

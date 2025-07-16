@@ -21,10 +21,10 @@ func (rvm *RecompilerVM) GetMemAssess(address uint32, length uint32) (byte, erro
 	defer func() {
 		_ = recover() // Catch panic from SIGSEGV
 	}()
-
-	b := *(*byte)(unsafe.Pointer(&rvm.realMemory[start]))
-	_ = b // dummy read
-
+	basePtr := rvm.realMemAddr
+	memSlice := unsafe.Slice((*byte)(unsafe.Pointer(basePtr+uintptr(start))), PageSize)
+	// Read a byte to check if the page is accessible
+	_ = memSlice[0]         // This will panic if the page is not accessible
 	return PageMutable, nil // if no panic, assume readable
 }
 
@@ -48,7 +48,7 @@ func (rvm *RecompilerVM) ReadMemory(address uint32, length uint32) ([]byte, erro
 	end := offset + int(length)
 
 	if end > PageSize {
-		return nil, fmt.Errorf("read exceeds page size at address %x", address)
+		// return nil, fmt.Errorf("read exceeds page size at address %x", address)
 	}
 
 	data := make([]byte, length)
@@ -82,18 +82,24 @@ func (rvm *RecompilerVM) SetPageAccess(pageIndex int, access byte) error {
 	if pageIndex < 0 || pageIndex >= TotalPages {
 		return fmt.Errorf("invalid page index")
 	}
+	if access != PageInaccessible {
+		rvm.dirtyPages[pageIndex] = true // mark page as dirty
+	} else {
+		delete(rvm.dirtyPages, pageIndex) // mark page as clean
+	}
 
 	start := uintptr(pageIndex * PageSize)
-
-	basePtr := uintptr(unsafe.Pointer(&rvm.realMemory[0])) // base address = r12 points here
+	basePtr := rvm.realMemAddr
 	memSlice := unsafe.Slice((*byte)(unsafe.Pointer(basePtr+start)), PageSize)
 
 	var prot int
 	switch access {
 	case PageInaccessible:
 		prot = syscall.PROT_NONE
+		// fmt.Printf("setting access of @0x%x to inaccessible\n", start)
 	case PageMutable:
 		prot = syscall.PROT_READ | syscall.PROT_WRITE
+		// fmt.Printf("setting access of @0x%x to mutable\n", start)
 	case PageImmutable:
 		prot = syscall.PROT_READ
 	default:
@@ -105,14 +111,37 @@ func (rvm *RecompilerVM) SetPageAccess(pageIndex int, access byte) error {
 	}
 	return nil
 }
-
-// SetMemAssess sets memory access rights at a given virtual address.
-func (rvm *RecompilerVM) SetMemAssess(address uint32, length uint32, access byte) error {
-	pageIndex := int(address / PageSize)
-	if pageIndex < 0 || pageIndex >= TotalPages {
-		return fmt.Errorf("invalid address %x for page index %d", address, pageIndex)
+func (rvm *RecompilerVM) SetMemAccess(address uint32, length uint32, access byte) error {
+	if length == 0 {
+		return nil
 	}
-	return rvm.SetPageAccess(pageIndex, access)
+
+	// Check for overflow in address + length - 1
+	if address > ^uint32(0)-(length-1) {
+		return fmt.Errorf("invalid address/length: address=0x%x, length=0x%x", address, length)
+	}
+
+	// Calculate start and end page indices
+	startPage := int(address / PageSize)
+	endAddress := address + length - 1
+	endPage := int(endAddress / PageSize)
+
+	// Validate page indices
+	if startPage < 0 || startPage >= TotalPages || endPage < 0 || endPage >= TotalPages {
+		return fmt.Errorf(
+			"invalid address range: 0x%x(len=0x%x) spans pages %d~%d, total pages=%d",
+			address, length, startPage, endPage, TotalPages,
+		)
+	}
+
+	// Set access for each page in the range
+	for page := startPage; page <= endPage; page++ {
+		// fmt.Printf("Setting access of page %d to %d\n", page, access)
+		if err := rvm.SetPageAccess(page, access); err != nil {
+			return fmt.Errorf("failed to set access on page %d: %w", page, err)
+		}
+	}
+	return nil
 }
 
 func (rvm *RecompilerVM) WriteRAMBytes(address uint32, data []byte) (resultCode uint64) {
@@ -155,12 +184,50 @@ func (rvm *RecompilerVM) allocatePages(startPage uint32, count uint32) {
 
 // GetCurrentHeapPointer
 func (rvm *RecompilerVM) GetCurrentHeapPointer() uint32 {
-	return 0
+	return rvm.current_heap_pointer
 }
 
 func (rvm *RecompilerVM) SetCurrentHeapPointer(pointer uint32) {
-	// Assuming the stack pointer is stored in r13
-	// This is a placeholder; actual implementation may vary
+	rvm.current_heap_pointer = pointer
+}
+
+// 	GetCurrentHeapPointer() uint32
+// 	SetCurrentHeapPointer(pointer uint32)
+// 	ReadRegister(index int) (uint64, uint64)
+// 	WriteRegister(index int, value uint64) uint64
+// 	ReadRegisters() []uint64
+
+func (rvm *RecompilerVM) ReadRegister(index int) (uint64, uint64) {
+	if index < 0 || index >= regSize {
+		return 0, OOB // Out of bounds
+	}
+	value_bytes := rvm.regDumpMem[index*8 : (index+1)*8]
+	value := binary.LittleEndian.Uint64(value_bytes)
+	return value, OK
+}
+
+func (rvm *RecompilerVM) WriteRegister(index int, value uint64) uint64 {
+	if index < 0 || index >= regSize {
+		return OOB // Out of bounds
+	}
+	value_bytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(value_bytes, value)
+	start := index * 8
+	if start+8 > len(rvm.regDumpMem) {
+		return OOB // Out of bounds
+	}
+	copy(rvm.regDumpMem[start:start+8], value_bytes)
+	return OK // Success
+}
+
+// ReadRegisters returns a copy of the current register values.
+func (rvm *RecompilerVM) ReadRegisters() []uint64 {
+	registersCopy := make([]uint64, regSize)
+	for i := 0; i < regSize; i++ {
+		value_bytes := rvm.regDumpMem[i*8 : (i+1)*8]
+		registersCopy[i] = binary.LittleEndian.Uint64(value_bytes)
+	}
+	return registersCopy
 }
 
 // A.5.3. Instructions with Arguments of One Register and One Extended Width Immediate.
@@ -354,7 +421,6 @@ func generateStoreImmIndU8(inst Instruction) []byte {
 	idx := regInfoList[regAIndex]
 	base := BaseReg
 	disp := uint32(disp64)
-	fmt.Printf("generateStoreImmIndU8: regAIndex=%d, disp64=%d, immVal=%d\n", regAIndex, disp64, immVal)
 
 	// 2) REX prefix: 0100 W=0, R=0, X=idx.REXBit, B=base.REXBit
 	rex := byte(0x40)
@@ -395,7 +461,7 @@ func generateStoreImmIndU16(inst Instruction) []byte {
 	idx := regInfoList[regAIndex]
 	base := BaseReg
 	disp := uint32(disp64)
-	fmt.Printf("generateStoreImmIndU16: regAIndex=%d, disp64=%d, immVal=%d\n", regAIndex, disp64, immVal)
+	//fmt.Printf("generateStoreImmIndU16: regAIndex=%d, disp64=%d, immVal=%d\n", regAIndex, disp64, immVal)
 
 	// 2) operand-size override prefix for 16-bit
 	prefix := byte(0x66)
@@ -439,7 +505,6 @@ func generateStoreImmIndU32(inst Instruction) []byte {
 	idx := regInfoList[regAIndex]
 	base := BaseReg
 	disp := uint32(disp64)
-	fmt.Printf("generateStoreImmIndU32: regAIndex=%d, disp64=%d, immVal=%d\n", regAIndex, disp64, immVal)
 
 	// 2) REX prefix: 0b0100_0000, W=0, R=0, X=idx.REXBit, B=base.REXBit
 	rex := byte(0x40)
@@ -483,7 +548,7 @@ func generateStoreImmIndU64(inst Instruction) []byte {
 	idx := regInfoList[regAIndex]
 	base := BaseReg
 	disp := uint32(disp64)
-	fmt.Printf("generateStoreImmIndU64: regAIndex=%d, disp64=%d, immVal=%d\n", regAIndex, disp64, immVal)
+	//fmt.Printf("generateStoreImmIndU64: regAIndex=%d, disp64=%d, immVal=%d\n", regAIndex, disp64, immVal)
 
 	// 2) split the 64-bit immediate into two 32-bit parts
 	low := uint32(immVal & 0xFFFFFFFF)

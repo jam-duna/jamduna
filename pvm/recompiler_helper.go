@@ -2,7 +2,6 @@ package pvm
 
 import (
 	"encoding/binary"
-	"unsafe"
 )
 
 type X86Reg struct {
@@ -131,23 +130,23 @@ var pvmByteCodeToX86Code = map[byte]func(Instruction) []byte{
 	LOAD_IND_I32:      generateLoadIndSignExtend(0x00, LOAD_IND_I32, true),
 	LOAD_IND_U64:      generateLoadInd(0x00, LOAD_IND_U64, true),
 	ADD_IMM_32:        generateBinaryImm32,
-	AND_IMM:           generateImmBinaryOp64(0x81, 4),
-	XOR_IMM:           generateImmBinaryOp64(0x81, 6),
-	OR_IMM:            generateImmBinaryOp64(0x81, 1),
+	AND_IMM:           generateImmBinaryOp64(4),
+	XOR_IMM:           generateImmBinaryOp64(6),
+	OR_IMM:            generateImmBinaryOp64(1),
 	MUL_IMM_32:        generateImmMulOp32,
-	SET_LT_U_IMM:      generateImmSetCondOp32(0x92), // SETB / below unsigned
-	SET_LT_S_IMM:      generateImmSetCondOp32(0x9C), // SETL / below signed
-	SET_GT_U_IMM:      generateImmSetCondOp32(0x97), // SETA / above unsigned
-	SET_GT_S_IMM:      generateImmSetCondOp32(0x9F), // SETG / above signed
-	SHLO_L_IMM_32:     generateImmShiftOp32(0xC1, 4, false),
+	SET_LT_U_IMM:      generateImmSetCondOp32New(0x92), // SETB / below unsigned
+	SET_LT_S_IMM:      generateImmSetCondOp32New(0x9C), // SETL / below signed
+	SET_GT_U_IMM:      generateImmSetCondOp32New(0x97), // SETA / above unsigned
+	SET_GT_S_IMM:      generateImmSetCondOp32New(0x9F), // SETG / above signed
+	SHLO_L_IMM_32:     generateImmShiftOp32SHLO(4),
 	SHLO_R_IMM_32:     generateImmShiftOp32(0xC1, 5, false),
 	SHLO_L_IMM_ALT_32: generateImmShiftOp32Alt(4),
 	SHLO_R_IMM_ALT_32: generateImmShiftOp32(0xC1, 5, true),
 	SHAR_R_IMM_ALT_32: generateImmShiftOp32(0xC1, 7, true),
 	NEG_ADD_IMM_32:    generateNegAddImm32,
-	CMOV_IZ_IMM:       generateCmovIzImm,
-	CMOV_NZ_IMM:       generateCmovIzImm,
-	ADD_IMM_64:        generateImmBinaryOp64(0x81, 0),
+	CMOV_IZ_IMM:       generateCmovImm(true),
+	CMOV_NZ_IMM:       generateCmovImm(false),
+	ADD_IMM_64:        generateImmBinaryOp64(0),
 	MUL_IMM_64:        generateImmMulOp64,
 	SHLO_L_IMM_64:     generateImmShiftOp64(0xC1, 4),
 	SHLO_R_IMM_64:     generateImmShiftOp64(0xC1, 5),
@@ -163,16 +162,17 @@ var pvmByteCodeToX86Code = map[byte]func(Instruction) []byte{
 	ROT_R_32_IMM:      generateRotateRight32Imm,
 
 	// A.5.13. Instructions with Arguments of Three Registers.
-	ADD_32:        generateBinaryOp32(0x01), // add
-	SUB_32:        generateBinaryOp32(0x29), // sub
+	ADD_32: generateBinaryOp32(0x01), // add
+	SUB_32: generateBinaryOp32(0x29), // sub
+
 	MUL_32:        generateMul32,
 	DIV_U_32:      generateDivUOp32,
 	DIV_S_32:      generateDivSOp32,
 	REM_U_32:      generateRemUOp32,
 	REM_S_32:      generateRemSOp32,
-	SHLO_L_32:     generateShiftOp32(0xD3, 4),
-	SHLO_R_32:     generateShiftOp32(0xD3, 5),
-	SHAR_R_32:     generateShiftOp32(0xD3, 7),
+	SHLO_L_32:     generateSHLO_L_32(),
+	SHLO_R_32:     generateSHLO_R_32(),
+	SHAR_R_32:     generateShiftOp32SHAR(0xD3, 7),
 	ADD_64:        generateBinaryOp64(0x01), // add
 	SUB_64:        generateBinaryOp64(0x29), // sub
 	MUL_64:        generateMul64,            // imul
@@ -181,7 +181,7 @@ var pvmByteCodeToX86Code = map[byte]func(Instruction) []byte{
 	REM_U_64:      generateRemUOp64,
 	REM_S_64:      generateRemSOp64,
 	SHLO_L_64:     generateShiftOp64(0xD3, 4),
-	SHLO_R_64:     generateShiftOp64(0xD3, 5),
+	SHLO_R_64:     generateShiftOp64B(0xD3, 5),
 	SHAR_R_64:     generateShiftOp64(0xD3, 7),
 	AND:           generateBinaryOp64(0x21),
 	XOR:           generateBinaryOp64(0x31),
@@ -200,10 +200,10 @@ var pvmByteCodeToX86Code = map[byte]func(Instruction) []byte{
 	AND_INV:       generateAndInvOp64,
 	OR_INV:        generateOrInvOp64,
 	XNOR:          generateXnorOp64,
-	MAX:           generateCmovCmpOp64(0x4F),
-	MAX_U:         generateCmovCmpOp64(0x47),
-	MIN:           generateCmovCmpOp64(0x4C),
-	MIN_U:         generateCmovCmpOp64(0x42),
+	MAX:           generateMax(),
+	MAX_U:         generateMinOrMaxU(true),
+	MIN:           generateMin(),
+	MIN_U:         generateMinU(),
 }
 
 const BaseRegIndex = 13
@@ -253,6 +253,30 @@ func encodeMovRegToMem(srcIdx, baseIdx int, offset byte) []byte {
 		modrm := byte(0x40 | (src.RegBits << 3) | base.RegBits)
 		return []byte{rex, 0x89, modrm, offset}
 	}
+}
+func encodeMovImm64ToMem(memAddr uint64, imm uint64) []byte {
+	var code []byte
+
+	// PUSH RAX and RDX (save scratch registers)
+	code = append(code, 0x50) // PUSH RAX
+	code = append(code, 0x52) // PUSH RDX
+
+	// MOVABS RAX, memAddr
+	code = append(code, 0x48, 0xB8) // MOV RAX, imm64
+	code = append(code, encodeU64(memAddr)...)
+
+	// MOVABS RDX, imm
+	code = append(code, 0x48, 0xBA) // MOV RDX, imm64
+	code = append(code, encodeU64(imm)...)
+
+	// MOV [RAX], RDX
+	code = append(code, 0x48, 0x89, 0x10) // MOV QWORD PTR [RAX], RDX
+
+	// POP RDX and RAX (restore)
+	code = append(code, 0x5A) // POP RDX
+	code = append(code, 0x58) // POP RAX
+
+	return code
 }
 
 // Split a uint64 into its lower 32 bits and higher 32 bits
@@ -314,7 +338,97 @@ func (rvm *RecompilerVM) DumpRegisterToMemory(move_back bool) []byte {
 
 	if move_back {
 		// restore the base register to BaseRegIndex
-		code = append(code, encodeMovImm(BaseRegIndex, uint64(uintptr(unsafe.Pointer(&rvm.realMemory[0]))))...)
+		code = append(code, encodeMovImm(BaseRegIndex, uint64(rvm.realMemAddr))...)
 	}
+	return code
+}
+
+// Load memory[addr:uint64] into dst:r64, using RCX as the default temporary register.
+// If dst is RCX itself, use RAX instead as the temporary register.
+func generateLoadMemToReg(dst X86Reg, addr uint64) []byte {
+	var code []byte
+
+	// Choose temporary register: default is RCX, but if dst==RCX use RAX
+	var tempReg X86Reg
+	var pushOp, popOp byte
+	var movAbsRex, movAbsOpcode byte
+	// fmt.Printf("generateLoadMemToReg: dst=%s, addr=0x%x\n", dst.Name, addr)
+	if dst.Name == "rcx" {
+		// Use RAX as temporary register
+		tempReg = regInfoList[0] // RAX
+		pushOp = 0x50            // PUSH RAX
+		popOp = 0x58             // POP  RAX
+		movAbsRex = 0x48         // REX.W=1, REX.B=0
+		movAbsOpcode = 0xB8      // MOVABS RAX, imm64
+	} else {
+		// Default to RCX
+		tempReg = regInfoList[1] // RCX
+		pushOp = 0x51            // PUSH RCX
+		popOp = 0x59             // POP  RCX
+		movAbsRex = 0x48 | 0x02  // REX.W=1, REX.B=1
+		movAbsOpcode = 0xB9      // MOVABS RCX, imm64
+	}
+
+	// 1) Save temporary register
+	code = append(code, pushOp)
+
+	// 2) MOVABS tempReg, addr
+	code = append(code, movAbsRex, movAbsOpcode)
+	code = append(code, encodeU64(addr)...)
+
+	// 3) MOV dst, [tempReg]
+	//    ModR/M: mod=00 (memory), reg=dst, rm=tempReg
+	rex := byte(0x48) // REX.W = 1
+	if dst.REXBit == 1 {
+		rex |= 0x04 // REX.R for reg field
+	}
+	if tempReg.REXBit == 1 {
+		rex |= 0x01 // REX.B for rm field
+	}
+	modrm := byte((dst.RegBits << 3) | tempReg.RegBits)
+	code = append(code, rex, 0x8B, modrm)
+
+	// 4) Restore temporary register
+	code = append(code, popOp)
+
+	return code
+}
+
+// Increment the 64-bit value at memory[addr:uint64] by 1.
+func generateIncMem(addr uint64) []byte {
+	code := []byte{}
+
+	// 1) Save RCX
+	code = append(code, 0x51) // PUSH RCX
+
+	// 2) Load target address into RCX: MOVABS RCX, imm64
+	code = append(code, 0x48, 0xB9)         // REX.W + opcode for MOVABS RCX, imm64
+	code = append(code, encodeU64(addr)...) // imm64 (little-endian)
+
+	// 3) Increment [RCX] as a 64-bit integer: INC QWORD PTR [RCX]
+	//    FF /0 ⇒ inc r/m64; mod=00 rm=RCX(1) ⇒ modrm = 0x01
+	code = append(code, 0x48, 0xFF, 0x01)
+
+	// 4) Restore RCX
+	code = append(code, 0x59) // POP RCX
+
+	return code
+}
+func (rvm *RecompilerVM) RestoreRegisterInX86() []byte {
+	restoredCode := make([]byte, 0)
+	for i := 0; i < regSize; i++ {
+		reg := regInfoList[i]
+		// MOV rX, [dumpAddr + i*8]
+		movInstr := generateLoadMemToReg(reg, uint64(rvm.regDumpAddr)+uint64(i*8))
+		restoredCode = append(restoredCode, movInstr...)
+	}
+	return restoredCode
+}
+
+func emitPopReg(code []byte, reg X86Reg) []byte {
+	if reg.REXBit == 1 {
+		code = append(code, 0x41) // REX.B prefix
+	}
+	code = append(code, 0x58|reg.RegBits) // POP <reg>
 	return code
 }

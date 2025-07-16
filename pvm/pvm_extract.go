@@ -48,14 +48,17 @@ func extractOneRegOneImm(oargs []byte) (reg1 int, vx uint64) {
 // A.5.7. Instructions with Arguments of One Register and Two Immediates.
 func extractOneReg2Imm(oargs []byte) (reg1 int, vx uint64, vy uint64) {
 	args := slices.Clone(oargs)
+
 	reg1 = min(12, int(args[0])%16)
-	lx_uint := min(4, max(0, uint32(args[0])/16%8))
-	lx := int(lx_uint)
-	ly := min(4, max(0, len(args)+1-lx-1))
-	encodedX := types.DecodeE_l(args[1 : 1+lx])
-	vx = x_encode(encodedX, uint32(lx))
-	encodedY := types.DecodeE_l(args[1+lx : 1+lx+ly])
-	vy = x_encode(encodedY, uint32(ly))
+	lx := min(4, (int(args[0])/16)%8)
+	ly := min(4, max(0, len(args)-lx-1))
+	if ly == 0 {
+		ly = 1
+		args = append(args, 0)
+	}
+
+	vx = x_encode(types.DecodeE_l(args[1:1+lx]), uint32(lx))
+	vy = x_encode(types.DecodeE_l(args[1+lx:1+lx+ly]), uint32(ly))
 	return int(reg1), vx, vy
 }
 
@@ -88,6 +91,16 @@ func extractTwoRegsOneImm(args []byte) (reg1, reg2 int, imm uint64) {
 	reg2 = min(12, int(args[0])/16)
 	lx := min(4, max(0, len(args)-1))
 	imm = x_encode(types.DecodeE_l(args[1:1+lx]), uint32(lx))
+	return
+}
+
+// A.5.10. Instructions with Arguments of Two Registers and One Immediate.
+func extractTwoRegsOneImm64(args []byte) (reg1, reg2 int, imm int64, uint64imm uint64) {
+	reg1 = min(12, int(args[0]&0x0F))
+	reg2 = min(12, int(args[0])/16)
+	lx := min(4, max(0, len(args)-1))
+	imm = int64(x_encode(types.DecodeE_l(args[1:1+lx]), uint32(lx)))
+	uint64imm = x_encode(types.DecodeE_l(args[1:1+lx]), uint32(lx))
 	return
 }
 

@@ -13,6 +13,7 @@ import "C"
 import (
 	"fmt"
 	"runtime"
+	"time"
 	"unsafe"
 )
 
@@ -49,7 +50,10 @@ func ExecuteX86(code []byte, regBuf []byte) (ret int, err error) {
 	regPtr := unsafe.Pointer(&regBuf[0])
 
 	// Run
-	r := C.execute_x86((*C.uint8_t)(codePtr), C.size_t(len(code)), regPtr)
+	start := time.Now()
+	r := C.execute_x86((*C.uint8_t)(unsafe.Pointer(&code[0])), C.size_t(len(code)), regPtr)
+	elapsed := time.Since(start)
+	fmt.Printf("execute_x86 took %v\n", elapsed)
 	ret = int(r)
 
 	return ret, nil

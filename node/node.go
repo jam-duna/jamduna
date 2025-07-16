@@ -2920,6 +2920,7 @@ func (n *Node) runAuthoring() {
 }
 
 func (n *Node) Telemetry(msgType uint8, obj interface{}, tags ...interface{}) {
+	return
 	sender_id := n.GetEd25519Key().String()
 	log.Telemetry(msgType, sender_id, obj, tags...)
 }

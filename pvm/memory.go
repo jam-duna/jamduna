@@ -12,6 +12,10 @@ type RAMInterface interface {
 	allocatePages(startPage uint32, count uint32)
 	GetCurrentHeapPointer() uint32
 	SetCurrentHeapPointer(pointer uint32)
+	ReadRegister(index int) (uint64, uint64)
+	WriteRegister(index int, value uint64) uint64
+	ReadRegisters() []uint64
+	GetDirtyPages() []int
 }
 
 type RAM struct {
@@ -25,10 +29,15 @@ type RAM struct {
 	output_address       uint32
 	output_end           uint32
 
-	stack   []byte
-	rw_data []byte
-	ro_data []byte
-	output  []byte
+	stack    []byte
+	rw_data  []byte
+	ro_data  []byte
+	output   []byte
+	register []uint64
+}
+
+func (ram *RAM) GetDirtyPages() []int {
+	panic("GetDirtyPages not implemented for RAM")
 }
 
 func NewRAM(o_size uint32, w_size uint32, p_s uint32) *RAM {
@@ -40,7 +49,7 @@ func NewRAM(o_size uint32, w_size uint32, p_s uint32) *RAM {
 	rw_data_address := uint32(2 * Z_Z)
 	rw_data_address_end := rw_data_address + Z_func(o_size)
 	current_heap_pointer := rw_data_address_end + 1024*1024
-
+	fmt.Printf("rw_data_address_end: %x, current_heap_pointer: %x\n", rw_data_address_end, current_heap_pointer)
 	// stack
 	stack_address := uint32(0xFFFFFFFF) - 2*Z_Z - Z_I - p_s + 1
 	stack_address_end := stack_address + p_s
@@ -60,6 +69,7 @@ func NewRAM(o_size uint32, w_size uint32, p_s uint32) *RAM {
 		current_heap_pointer: current_heap_pointer,
 		output_address:       output_address,
 		output_end:           output_end,
+		register:             make([]uint64, regSize),
 		stack:                make([]byte, p_s),
 		rw_data:              make([]byte, current_heap_pointer-rw_data_address),
 		ro_data:              make([]byte, ro_data_address_end-ro_data_address),
@@ -149,21 +159,35 @@ func (ram *RAM) allocatePages(startPage uint32, count uint32) {
 }
 
 func (ram *RAM) GetCurrentHeapPointer() uint32 {
-	if ram.current_heap_pointer < ram.rw_data_address_end {
-		return ram.current_heap_pointer
-	}
-	log.Error("pvm", "GetCurrentHeapPointer", "current_heap_pointer out of bounds",
-		"current_heap_pointer", fmt.Sprintf("%x", ram.current_heap_pointer),
-		"rw_data_address_end", fmt.Sprintf("%x", ram.rw_data_address_end))
-	return 0
+	return ram.current_heap_pointer
+
 }
 
 func (ram *RAM) SetCurrentHeapPointer(pointer uint32) {
-	if pointer < ram.rw_data_address_end {
-		ram.current_heap_pointer = pointer
-	} else {
-		log.Error("pvm", "SetCurrentHeapPointer", "pointer out of bounds",
-			"pointer", fmt.Sprintf("%x", pointer),
-			"rw_data_address_end", fmt.Sprintf("%x", ram.rw_data_address_end))
+
+	ram.current_heap_pointer = pointer
+	fmt.Printf("SetCurrentHeapPointer: %x\n", ram.current_heap_pointer)
+
+}
+
+func (ram *RAM) ReadRegister(index int) (uint64, uint64) {
+	if index < 0 || index >= len(ram.register) {
+		return 0, OOB
 	}
+	return ram.register[index], OK
+}
+
+func (ram *RAM) WriteRegister(index int, value uint64) uint64 {
+	if index < 0 || index >= len(ram.register) {
+		return OOB
+	}
+	if debugRecompiler {
+		fmt.Printf("WriteRegister: index %d, value %x\n", index, value)
+	}
+	ram.register[index] = value
+	return OK
+}
+
+func (ram *RAM) ReadRegisters() []uint64 {
+	return ram.register
 }

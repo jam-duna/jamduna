@@ -11,6 +11,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/types"
 
 	"github.com/yudai/gojsondiff"
@@ -120,22 +121,97 @@ func handleDiffs(filename string, diffs map[string]DiffState) {
 	}
 }
 
-func TestStateTransitionSingle(t *testing.T) {
-
-	filename := "../jamtestvectors/traces/reports-l1/00000009.json"
+func TestStateTransitionNoSandbox(t *testing.T) {
+	pvm.PvmLogging = true
+	pvm.PvmTrace = true   // enable PVM trace for this test
+	pvm.VMsCompare = true // enable VM comparison for this test
+	filename := "../jamtestvectors/traces/reports-l1/00000005.json"
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
 	}
+	log.InitLogger("debug")
+	log.EnableModule(log.PvmAuthoring)
+	log.EnableModule("pvm_validator")
 	t.Run(filepath.Base(filename), func(t *testing.T) {
 		runSingleSTFTest(t, filename, string(content))
 	})
 }
+
+func TestStateTransitionSandbox(t *testing.T) {
+	pvm.VM_MODE = "recompiler" // set VM mode to recompiler sandbox
+	pvm.VMsCompare = true      // enable VM comparison for this test
+	pvm.PvmLogging = true
+	pvm.UseTally = true          // enable tally for this test
+	pvm.SetUseEcalli500(true)    // use ecalli500 for log check in x86
+	pvm.SetDebugRecompiler(true) // enable debug mode for recompiler
+	//filename := "../bin/00000019.json"
+	filename := "../jamtestvectors/traces/reports-l1/00000005.json"
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatalf("failed to read file %s: %v", filename, err)
+	}
+	log.InitLogger("debug")
+	log.EnableModule(log.PvmAuthoring)
+	log.EnableModule("pvm_validator")
+	t.Run(filepath.Base(filename), func(t *testing.T) {
+		runSingleSTFTest(t, filename, string(content))
+	})
+}
+
+func TestPVMstepJsonDiff(t *testing.T) {
+	var testdata, testdata_rcp pvm.VMLogs
+
+	// Load JSON 1
+	json1, err := os.ReadFile("test_case/vm_log.json")
+	if err != nil {
+		t.Fatalf("failed to read file test_case/vm_log.json: %v", err)
+	}
+	err = json.Unmarshal(json1, &testdata)
+	if err != nil {
+		t.Fatalf("failed to unmarshal test_case/vm_log.json: %v", err)
+	}
+
+	// Load JSON 2
+	json2, err := os.ReadFile("test_case/vm_log_recompiler.json")
+	if err != nil {
+		t.Fatalf("failed to read file test_case/vm_log_recompiler.json: %v", err)
+	}
+	err = json.Unmarshal(json2, &testdata_rcp)
+	if err != nil {
+		t.Fatalf("failed to unmarshal test_case/vm_log_recompiler.json: %v", err)
+	}
+
+	for i, ans := range testdata {
+		// find the difference in the two JSONs
+		if i >= len(testdata_rcp) {
+			t.Fatalf("len(testdata_rcp)=%d len(testdata)=%d", len(testdata_rcp), len(testdata))
+		}
+		rcp_ans := testdata_rcp[i]
+		if !reflect.DeepEqual(ans, rcp_ans) {
+			fmt.Printf("Difference found in index %d:\n", i)
+			fmt.Printf("Original: %+v\n", ans)
+			fmt.Printf("Recompiler: %+v\n", rcp_ans)
+
+			// Print the differences
+			diff := CompareJSON(ans, rcp_ans)
+			if diff != "" {
+				fmt.Println("Differences:", diff)
+				t.Fatalf("Differences found in index %d: %s", i, diff)
+
+			}
+		}
+	}
+}
+
 func TestTraces(t *testing.T) {
+	//testSTFDir(t, "/root/go/src/github.com/jam-duna/jamtestnet/data/assurances/state_transitions")
 	//testSTFDir(t, "/root/go/src/github.com/jam-duna/jamtestnet/data/assurances/state_transitions")
 	//testSTFDir(t, "../jamtestvectors/traces/fallback")
 	//testSTFDir(t, "../jamtestvectors/traces/safrole")
-	dir := "../jamtestvectors/traces/reports-l1"
+	//dir := "../jamtestvectors/traces/reports-l1"
+	dir := "../cmd/importblocks/rawdata/assurances/state_transitions"
+	pvm.VM_MODE = "recompiler_sandbox" // set VM mode to recompiler sandbox
 	log.InitLogger("info")
 	entries, err := os.ReadDir(dir)
 	if err != nil {

@@ -161,7 +161,7 @@ func TestParseAccumulateVector(t *testing.T) {
 func TestAccumulateSTF(t *testing.T) {
 	accumulate_vector_dir := "../jamtestvectors/accumulate"
 	network_args := *network
-	// test_cases is all the json files in the directory
+	// get all the json files in the directory
 	json_dir := fmt.Sprintf("%s/%s", accumulate_vector_dir, network_args)
 	fmt.Printf("json_dir: %s\n", json_dir)
 	// look for all the json files in the directory

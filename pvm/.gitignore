@@ -1,1 +1,7 @@
 *.pprof
+*.txt
+test_case/*
+interpreter/*
+recompiler_sandbox/*
+recompiler_sandbox_bak/*
+recompiler/*

@@ -73,7 +73,8 @@ static void signal_handler(int sig, siginfo_t *si, void *arg) {
         fprintf(stderr, "%02x ", *(ip + i) & 0xff);
     }
     fprintf(stderr, "\n");
-
+    uint64_t r12 = ctx->uc_mcontext.gregs[REG_R12];
+    fprintf(stderr, "[x86_execute] R12=0x%016llx\n", (unsigned long long)r12);
     // Jump back to recovery point
     siglongjmp(jump_env, 1);
 }
@@ -101,22 +102,14 @@ int execute_x86(uint8_t* code, size_t length, void* reg_ptr) {
     sigaction(SIGSEGV, NULL, &old_sa);
     sigaction(SIGSEGV, &sa, NULL);
 
-    void* mem = mmap(NULL, length, PROT_READ | PROT_WRITE | PROT_EXEC,
-                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (mem == MAP_FAILED) return -2;
-
-    memcpy(mem, code, length);
-
     if (sigsetjmp(jump_env, 1) != 0) {
-        munmap(mem, length);
         sigaction(SIGSEGV, &old_sa, NULL);
         return -1;
     }
 
     typedef void (*code_func_t)(void);
-    ((code_func_t)mem)();
+    ((code_func_t)code)();
 
-    munmap(mem, length);
     sigaction(SIGSEGV, &old_sa, NULL);
     return 0;
 }

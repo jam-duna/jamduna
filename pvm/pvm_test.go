@@ -2,20 +2,24 @@
 package pvm
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/gorilla/websocket"
+	"github.com/nsf/jsondiff"
 )
 
 // memory_for test
@@ -44,8 +48,6 @@ type TestCase struct {
 	ExpectedMemory []TestMemory  `json:"expected-memory"`
 }
 
-var RecompilerFlag = false // set to false to run the interpreter
-
 func pvm_test(tc TestCase) error {
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
@@ -62,11 +64,11 @@ func pvm_test(tc TestCase) error {
 	// }
 	resultCode := uint8(0)
 	pvm.Gas = int64(100) // Set a high gas limit
-	pvm.Execute(int(tc.InitialPC), false)
+	pvm.Execute(int(tc.InitialPC), false, nil)
 	resultCode = pvm.ResultCode
 
 	// Check the registers
-	if equalIntSlices(pvm.register, tc.ExpectedRegs) {
+	if equalIntSlices(pvm.Ram.ReadRegisters(), tc.ExpectedRegs) {
 		// fmt.Printf("Register match for test %s \n", tc.Name)
 		return nil
 	}
@@ -84,7 +86,7 @@ func pvm_test(tc TestCase) error {
 	} else {
 		return fmt.Errorf("result code mismatch for test %s: expected %s, got %s", tc.Name, expectedCodeStr, resultCodeStr)
 	}
-	return fmt.Errorf("register mismatch for test %s: expected %v, got %v", tc.Name, tc.ExpectedRegs, pvm.register)
+	return fmt.Errorf("register mismatch for test %s: expected %v, got %v", tc.Name, tc.ExpectedRegs, pvm.Ram.ReadRegisters())
 }
 
 // awaiting 64 bit
@@ -167,7 +169,7 @@ func TestRevm(t *testing.T) {
 	// pvm.Ram.DebugStatus()
 
 	fmt.Printf("PVM start execution...\n")
-	pvm.Execute(types.EntryPointRefine, false)
+	pvm.Execute(types.EntryPointRefine, false, nil)
 
 	fmt.Printf("pvm.pc: %d, gas: %d, vm.ResultCode: %d, vm.Fault_address: %d\n", pvm.pc, pvm.Gas, pvm.ResultCode, pvm.Fault_address)
 	elapsed := time.Since(start)
@@ -210,67 +212,247 @@ func TestHelloWorld(t *testing.T) {
 	// pvm.Ram.DebugStatus()
 
 	fmt.Printf("PVM start execution...\n")
-	pvm.Execute(types.EntryPointRefine, false)
+	pvm.Execute(types.EntryPointRefine, false, nil)
 
 	fmt.Printf("pvm.pc: %d, gas: %d, vm.ResultCode: %d, vm.Fault_address: %d\n", pvm.pc, pvm.Gas, pvm.ResultCode, pvm.Fault_address)
 	elapsed := time.Since(start)
 	fmt.Printf("Execution took %s\n", elapsed)
 }
 
-func TestDoom(t *testing.T) {
-	// f, err := os.Create("cpu.pprof")
-	// if err != nil {
-	// 	t.Fatal(err)
-	// }
-	// pprof.StartCPUProfile(f)
-	// defer func() {
-	// 	pprof.StopCPUProfile()
-	// 	f.Close()
-	// }()
-
-	log.InitLogger("info")
-	fp := "../services/doom_self_playing.pvm"
-	// fp := "../services/doom_w_input_100_steps_.pvm"
-
-	raw_code, err := os.ReadFile(fp)
+// adjust “LogEntry” to whatever the element type of VMLogs actually is
+func TestCompareLogs(t *testing.T) {
+	f1, err := os.Open("interpreter/vm_log.json")
 	if err != nil {
-		t.Fatalf("Failed to read file %s: %v", fp, err)
+		t.Fatalf("failed to open interpreter/vm_log.json: %v", err)
+	}
+	defer f1.Close()
+
+	f2, err := os.Open("recompiler_sandbox/vm_log.json")
+	if err != nil {
+		t.Fatalf("failed to open recompiler_sandbox/vm_log.json: %v", err)
+	}
+	defer f2.Close()
+
+	s1 := bufio.NewScanner(f1)
+	s2 := bufio.NewScanner(f2)
+
+	var i int
+	for {
+		has1 := s1.Scan()
+		has2 := s2.Scan()
+
+		if err := s1.Err(); err != nil {
+			t.Fatalf("error scanning vm_log.json at line %d: %v", i, err)
+		}
+		if err := s2.Err(); err != nil {
+			t.Fatalf("error scanning vm_log_recompiler.json at line %d: %v", i, err)
+		}
+
+		// both files ended → success
+		if !has1 && !has2 {
+			break
+		}
+		// one ended early → length mismatch
+		if has1 != has2 {
+			t.Fatalf("log length mismatch at index %d: has vm_log=%v, has vm_log_recompiler=%v", i, has1, has2)
+		}
+
+		// unmarshal each line into your entry type
+		var orig, recp VMLog
+		if err := json.Unmarshal(s1.Bytes(), &orig); err != nil {
+			t.Fatalf("failed to unmarshal line %d of vm_log.json: %v", i, err)
+		}
+		if err := json.Unmarshal(s2.Bytes(), &recp); err != nil {
+			t.Fatalf("failed to unmarshal line %d of vm_log_recompiler.json: %v", i, err)
+		}
+
+		// compare
+		if !reflect.DeepEqual(orig, recp) {
+			fmt.Printf("Difference at index %d:\nOriginal: %+v\nRecompiler: %+v\n", i, orig, recp)
+			if diff := CompareJSON(orig, recp); diff != "" {
+				fmt.Println("Differences:", diff)
+				t.Fatalf("differences at index %d: %s", i, diff)
+			}
+		} else if i%100000 == 0 {
+			fmt.Printf("Index %d: no difference %s\n", i, s1.Bytes())
+		}
+		i++
+	}
+}
+
+func TestSnapShots(t *testing.T) {
+	snapshots_dir := "/root/recompiler_sandbox"
+	compares_dir := "./recompiler"
+	files, err := os.ReadDir(snapshots_dir)
+	if err != nil {
+		t.Fatalf("Failed to read directory %s: %v", snapshots_dir, err)
+	}
+	for _, file := range files {
+		// read as a json
+		// and unmarshal it into a EmulatorSnapShot
+		if file.IsDir() || !strings.HasSuffix(file.Name(), ".json") {
+			continue
+		}
+		filePath := filepath.Join(snapshots_dir, file.Name())
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			t.Fatalf("Failed to read file %s: %v", filePath, err)
+		}
+		var snapshot EmulatorSnapShot
+		err = json.Unmarshal(data, &snapshot)
+		if err != nil {
+			t.Fatalf("Failed to unmarshal JSON from file %s: %v", filePath, err)
+		}
+
+		// get the compare file
+		compareFilePath := filepath.Join(compares_dir, file.Name())
+		// check if the compare file exists
+		if _, err := os.Stat(compareFilePath); os.IsNotExist(err) {
+			continue // skip if the compare file does not exist
+		}
+		compareData, err := os.ReadFile(compareFilePath)
+		if err != nil {
+			t.Fatalf("Failed to read compare file %s: %v", compareFilePath, err)
+		}
+		var compareSnapshot EmulatorSnapShot
+		err = json.Unmarshal(compareData, &compareSnapshot)
+		if err != nil {
+			t.Fatalf("Failed to unmarshal JSON from compare file %s: %v", compareFilePath, err)
+		}
+		// compare the two snapshots
+		if !reflect.DeepEqual(snapshot.InitialRegs, compareSnapshot.InitialRegs) {
+			t.Errorf("InitialRegs mismatch in snapshot %s: expected %v, got %v", file.Name(), compareSnapshot.InitialRegs, snapshot.InitialRegs)
+		}
+		if snapshot.InitialPC != compareSnapshot.InitialPC {
+			t.Errorf("InitialPC mismatch in snapshot %s: expected %d, got %d", file.Name(), compareSnapshot.InitialPC, snapshot.InitialPC)
+		}
+		for pageIndex, pageData := range snapshot.InitialMemory {
+			pageHash := common.BytesToHash(pageData)
+			comparePageData := compareSnapshot.InitialMemory[pageIndex]
+			comparePageHash := common.BytesToHash(comparePageData)
+			if pageHash != comparePageHash {
+				t.Errorf("InitialMemory mismatch in snapshot %s at page %d: expected %x, got %x", file.Name(), pageIndex, comparePageHash, pageHash)
+			}
+		}
+		fmt.Printf("Snapshot %s matches with compare file %s\n", file.Name(), compareFilePath)
+	}
+}
+
+/*
+		    {
+	            "Gas": 9999992996392400,
+	            "OpStr": "SHLO_L_IMM_64",
+	            "Opcode": 151,
+	            "Operands": "iAM=",
+	            "PvmPc": 97204,
+	            "Registers": [
+	                1402,
+	                {"changed":[4278055928, 1044447]},
+	                48,
+	                108331,
+	                48,
+	                1,
+	                4278057552,
+	                24655,
+	                6,
+	                4278057752,
+	                44,
+	                44,
+	                0
+	            ]
+	        }
+*/
+func TestLogEntry(t *testing.T) {
+	PvmLogging = true
+	PvmTrace = true
+	VM_MODE = "recompiler_sandbox"
+
+	// a real pvm test case for it to run
+	name := "inst_store_indirect_u16_with_offset_ok"
+	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("Failed to read file %s: %v", filePath, err)
+	}
+
+	var tc TestCase
+	err = json.Unmarshal(data, &tc)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal JSON from file %s: %v", filePath, err)
+	}
+	hostENV := NewMockHostEnv()
+	serviceAcct := uint32(0) // stub
+	// metadata, c := types.SplitMetadataAndCode(tc.Code)
+	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{})
+
+	//jsonStr := `{"Opcode":198,"OpStr":"SHLO_R_32","Operands":"qwo=","PvmPc":97201,"Registers":[1402,4278055928,48,108331,48,1,4278057552,24655,6,4278057752,1,44,0],"Gas":9999992996015693}`
+	jsonStr := `{"Opcode":198,"OpStr":"SHLO_R_32","Operands":"qwo=","PvmPc":97201,"Registers":[1402,4278055928,48,108331,48,1,4278057552,24655,6,4278057752,0,44,0],"Gas":9999992996392400}`
+	var entry VMLog
+	if err := json.Unmarshal([]byte(jsonStr), &entry); err != nil {
+		t.Fatalf("Failed to unmarshal JSON: %v", err)
+	}
+
+	var inst Instruction
+	inst.Opcode = entry.Opcode
+	inst.Args = entry.Operands
+	inst.Pc = entry.PvmPc
+
+	rvm, err := NewRecompilerSandboxVM(pvm)
+	if err != nil {
+		t.Fatalf("Failed to create recompiler sandbox VM: %v", err)
 		return
 	}
-	fmt.Printf("Read %d bytes from %s\n", len(raw_code), fp)
-
-	initial_regs := make([]uint64, 13)
-	initial_pc := uint64(0)
-	hostENV := NewMockHostEnv()
-	metadata := "doom"
-	pvm := NewVM(0, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata))
-
-	if err := pvm.attachFrameServer("127.0.0.1:80", "./index.html"); err != nil {
-		t.Fatalf("frame server error: %v", err)
+	// the register we get it from the log entry
+	for i, reg := range entry.Registers {
+		rvm.Ram.WriteRegister(i, reg)
 	}
-	defer pvm.CloseFrameServer()
+	// Set the initial memory
+	for _, pm := range tc.InitialPageMap {
+		// Set the page access based on the initial page map
+		if pm.IsWritable {
+			err := rvm.SetMemAccessSandBox(pm.Address, pm.Length, PageMutable)
+			if err != nil {
+				t.Fatalf("Failed to set memory access for page %d: %v", pm.Address, err)
+			}
+		}
+	}
+	// Set the initial memory
+	for _, mem := range tc.InitialMemory {
+		// Write the initial memory contents
+		rvm.WriteMemorySandBox(mem.Address, mem.Data)
+	}
 
-	a := make([]byte, 0)
-	pvm.Gas = int64(9999999999999999)
+	for i := 0; i < regSize; i++ {
+		immVal, _ := rvm.Ram.ReadRegister(i)
+		code := encodeMovImm(i, immVal)
+		fmt.Printf("Initialize Register %d (%s) = %d\n", i, regInfoList[i].Name, immVal)
+		rvm.startCode = append(rvm.startCode, code...)
+	}
+	rvm.x86Code = rvm.startCode
+	rvm.x86Code = append(rvm.x86Code, pvmByteCodeToX86Code[inst.Opcode](inst)...)
+	str := rvm.Disassemble(rvm.x86Code)
+	if showDisassembly {
+		fmt.Printf("Disassembled x86 code:\n%s\n", str)
+	}
+	rvm.ExecuteX86Code_SandBox(rvm.x86Code)
+	for i, reg := range rvm.Ram.ReadRegisters() {
+		fmt.Printf("Register %d (%s) value: %d\n", i, regInfoList[i].Name, reg)
+	}
 
-	start := time.Now()
+}
+func CompareJSON(obj1, obj2 interface{}) string {
+	json1, err1 := json.Marshal(obj1)
+	json2, err2 := json.Marshal(obj2)
+	if err1 != nil || err2 != nil {
+		return "Error marshalling JSON"
+	}
+	opts := jsondiff.DefaultJSONOptions()
+	diff, diffStr := jsondiff.Compare(json1, json2, &opts)
 
-	pvm.Standard_Program_Initialization(a)
-
-	// pvm.Ram.DebugStatus()
-
-	fmt.Printf("PVM start execution...\n")
-	pvm.Execute(types.EntryPointRefine, false)
-
-	fmt.Printf("pvm.pc: %d, gas: %d, vm.ResultCode: %d, vm.Fault_address: %d\n", pvm.pc, pvm.Gas, pvm.ResultCode, pvm.Fault_address)
-	elapsed := time.Since(start)
-	fmt.Printf("Execution took %s\n", elapsed)
-
-	// time.Sleep(10 * time.Second)
-	// frame, _ := os.ReadFile("./frame_00010.bin")
-
-	// pvm.SetFrame(frame)
-	// os.WriteFile("./pvm_frame.bin", frame, 0644)
+	if diff == jsondiff.FullMatch {
+		return "JSONs are identical"
+	}
+	return fmt.Sprintf("Diff detected:\n%s", diffStr)
 }
 
 func (vm *VM) attachFrameServer(addr, htmlPath string) error {

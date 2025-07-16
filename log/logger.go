@@ -148,10 +148,10 @@ type logger struct {
 
 // NewLogger returns a logger with the specified handler set
 func NewLogger(h slog.Handler) Logger {
-	writer, _ := syslog.Dial("tcp", "dev.jamduna.org:5000", syslog.LOG_INFO, "jametl")
+	// writer, _ := syslog.Dial("udp", "dev.jamduna.org:5000", syslog.LOG_INFO, "jametl")
 	return &logger{
 		inner:        slog.New(h),
-		writer:       writer,
+		writer:       nil, // writer,
 		recordingLog: false,
 		recordedLogs: make([]slog.Record, 0),
 	}
