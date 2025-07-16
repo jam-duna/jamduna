@@ -192,9 +192,9 @@ func TestDoomX86(t *testing.T) {
 	pvm := NewVM(0, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata))
 	pvm.initLogs()
 	rvm, err := NewRecompilerVM(pvm)
-	rvm.isChargingGas = true
-	rvm.isPCCounting = true
-	rvm.IsBlockCounting = true
+	rvm.isChargingGas = useEcalli500
+	rvm.isPCCounting = useEcalli500
+	rvm.IsBlockCounting = useEcalli500
 	if err != nil {
 		t.Fatalf("Failed to create RecompilerVM: %v", err)
 	}

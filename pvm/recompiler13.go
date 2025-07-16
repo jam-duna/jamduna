@@ -833,10 +833,6 @@ func emitRex(w, r, x, b bool) byte {
 	return rex
 }
 
-// opcode is the 32-bit reg/reg opcode byte:
-//
-//	0x01 = ADD r/m32, r32
-//	0x29 = SUB r/m32, r32
 func generateBinaryOp32(opcode byte) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
 		r1, r2, rd := extractThreeRegs(inst.Args)
@@ -846,67 +842,65 @@ func generateBinaryOp32(opcode byte) func(inst Instruction) []byte {
 
 		var code []byte
 
-		// ───── conflict: dest == src2 ─────
+		// ─── CASE A: conflict dst==src2 ───
 		if r2 == rd {
-			// preserve RAX
-			code = append(code, 0x50) // PUSH RAX
-			tmp := regInfoList[0]     // RAX
-
-			// 1) MOV EAX, src2d
-			code = append(code,
-				emitRex(false, false, false, src2.REXBit == 1),
-				0x8B,
-				0xC0|((tmp.RegBits)<<3)|(src2.RegBits),
-			)
-
-			// 2) MOV dst32, src1d
+			// 1) swap dst<->src1 in 1 instr
 			code = append(code,
 				emitRex(false, src1.REXBit == 1, false, dst.REXBit == 1),
-				0x89,
-				0xC0|((src1.RegBits)<<3)|(dst.RegBits),
+				0x87, // XCHG r/m32, r32
+				0xC0|(src1.RegBits<<3)|dst.RegBits,
 			)
-
-			// 3) <opcode> dst32, EAX      ; either ADD or SUB
+			// 2) dst32 = dst32 <op> src1d
 			code = append(code,
-				emitRex(false, false, false, dst.REXBit == 1),
+				emitRex(false, src1.REXBit == 1, false, dst.REXBit == 1),
 				opcode,
-				0xC0|((tmp.RegBits)<<3)|(dst.RegBits),
+				0xC0|(src1.RegBits<<3)|dst.RegBits,
 			)
-
-			// 4) MOVSXD dst64, dst32
+			// 3) sign‐extend into 64b
 			code = append(code,
 				emitRex(true, dst.REXBit == 1, false, dst.REXBit == 1),
-				0x63,
-				0xC0|((dst.RegBits)<<3)|(dst.RegBits),
+				0x63, // MOVSXD r64,r/m32
+				0xC0|(dst.RegBits<<3)|dst.RegBits,
 			)
-
-			// restore RAX
-			code = append(code, 0x58) // POP RAX
 			return code
 		}
 
-		// ───── no-conflict: dest != src2 ─────
+		// ─── CASE B: dst==src1 ───
+		if r1 == rd {
+			// 1) dst32 = dst32 <op> src2d
+			code = append(code,
+				emitRex(false, src2.REXBit == 1, false, dst.REXBit == 1),
+				opcode,
+				0xC0|(src2.RegBits<<3)|dst.RegBits,
+			)
+			// 2) sign‐extend
+			code = append(code,
+				emitRex(true, dst.REXBit == 1, false, dst.REXBit == 1),
+				0x63,
+				0xC0|(dst.RegBits<<3)|dst.RegBits,
+			)
+			return code
+		}
+
+		// ─── CASE C: no conflict ───
 		// 1) MOV dst32, src1d
 		code = append(code,
 			emitRex(false, src1.REXBit == 1, false, dst.REXBit == 1),
-			0x89,
-			0xC0|((src1.RegBits)<<3)|(dst.RegBits),
+			0x89, // MOV r/m32, r32
+			0xC0|(src1.RegBits<<3)|dst.RegBits,
 		)
-
-		// 2) <opcode> dst32, src2d
+		// 2) dst32 = dst32 <op> src2d
 		code = append(code,
 			emitRex(false, src2.REXBit == 1, false, dst.REXBit == 1),
 			opcode,
-			0xC0|((src2.RegBits)<<3)|(dst.RegBits),
+			0xC0|(src2.RegBits<<3)|dst.RegBits,
 		)
-
 		// 3) MOVSXD dst64, dst32
 		code = append(code,
 			emitRex(true, dst.REXBit == 1, false, dst.REXBit == 1),
 			0x63,
-			0xC0|((dst.RegBits)<<3)|(dst.RegBits),
+			0xC0|(dst.RegBits<<3)|dst.RegBits,
 		)
-
 		return code
 	}
 }

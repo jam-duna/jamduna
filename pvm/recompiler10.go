@@ -436,34 +436,60 @@ func generateRotateRight32Imm(inst Instruction) []byte {
 }
 
 // Implements r64_dst = r64_src << imm8  (or >>, SAR, ROR with different subcodes)
-func generateImmShiftOp64(opcode byte, subcode byte) func(inst Instruction) []byte {
+// FURTHER OPTIMIZATIONS:
+// * if imm == 1 -> use SHL/SAR/SHR/ROR directly
+func generateImmShiftOp64(opcode, subcode byte) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
 		dstIdx, srcIdx, imm := extractTwoRegsOneImm(inst.Args)
 		dst := regInfoList[dstIdx]
 		src := regInfoList[srcIdx]
 
-		var code []byte
-
-		// 1) MOV r64_dst, r64_src
-		rex1 := byte(0x48)
-		if src.REXBit == 1 {
-			rex1 |= 0x04
+		// 1) Zero‐shift → either MOV or nothing
+		if imm == 0 {
+			if srcIdx != dstIdx {
+				// MOV only
+				rex := byte(0x48 | (byte(src.REXBit) << 2) | byte(dst.REXBit))
+				return []byte{rex, 0x89, byte(0xC0 | (src.RegBits << 3) | dst.RegBits)}
+			}
+			return nil
 		}
-		if dst.REXBit == 1 {
-			rex1 |= 0x01
-		}
-		modrm1 := byte(0xC0 | (src.RegBits << 3) | dst.RegBits)
-		code = append(code, rex1, 0x89, modrm1)
 
-		// 2) opcode r/m64(dst), imm8
-		rex2 := byte(0x48)
-		if dst.REXBit == 1 {
-			rex2 |= 0x01
+		// 2) In‐place shift (dst==src)
+		if srcIdx == dstIdx {
+			// try to drop REX if we can do a 64‐bit shift on a low reg without extension
+			useRex := byte(0x48) // we need REX.W=1 for 64-bit
+			if dst.REXBit == 1 {
+				// sometimes you don’t need REX.B if dst<=7, but REX.W forces the prefix
+				useRex |= 0x01
+			}
+			m := byte(0xC0 | (subcode << 3) | dst.RegBits)
+			if imm == 1 {
+				return []byte{useRex, 0xD1, m}
+			}
+			return []byte{useRex, opcode, m, byte(imm)}
 		}
-		modrm2 := byte(0xC0 | (subcode << 3) | dst.RegBits)
-		code = append(code, rex2, opcode, modrm2, byte(imm&0xFF))
 
-		return code
+		// 3) src!=dst, imm>0 → MOV+shift
+		// MOV
+		rexMov := byte(0x48 | (byte(src.REXBit) << 2) | (byte(dst.REXBit) << 0))
+		mMov := byte(0xC0 | (src.RegBits << 3) | dst.RegBits)
+
+		// SHIFT
+		// reuse logic from in‑place case to pick D1 vs C1
+		if imm == 1 {
+			rexSh := byte(0x48 | byte(dst.REXBit))
+			mSh := byte(0xC0 | (subcode << 3) | dst.RegBits)
+			return []byte{
+				rexMov, 0x89, mMov,
+				rexSh, 0xD1, mSh,
+			}
+		}
+		rexSh := byte(0x48 | byte(dst.REXBit))
+		mSh := byte(0xC0 | (subcode << 3) | dst.RegBits)
+		return []byte{
+			rexMov, 0x89, mMov,
+			rexSh, opcode, mSh, byte(imm),
+		}
 	}
 }
 
@@ -1061,24 +1087,42 @@ func generateImmMulOp64(inst Instruction) []byte {
 }
 
 // Implements: dst := sign_extend( i32(src) + imm32 )
+// FURTHER OPTIMIZATIONS:
+// 1. if imm is 8bit (-128 to 127) you can do better
 func generateBinaryImm32(inst Instruction) []byte {
 	dstReg, srcReg, imm := extractTwoRegsOneImm(inst.Args)
 	dst := regInfoList[dstReg]
 	src := regInfoList[srcReg]
 
-	// 1) MOV r32_dst, r32_src
-	rexMov := byte(0x40) // no REX.W
-	if src.REXBit == 1 {
-		rexMov |= 0x04
-	} // REX.R
-	if dst.REXBit == 1 {
-		rexMov |= 0x01
-	} // REX.B
-	// 0x89 /r : MOV r/m32, r32
-	modrmMov := byte(0xC0 | (src.RegBits << 3) | dst.RegBits)
-	code := []byte{rexMov, 0x89, modrmMov}
+	var code []byte
+	// SPECIAL CASE
+	if imm == 0 {
+		//  just sign‑extend src → dst MOVSXD r64_dst, r32_src
+		rex := byte(0x48)
+		if dst.REXBit == 1 {
+			rex |= 0x05
+		}
+		modrm := byte(0xC0 | (dst.RegBits << 3) | src.RegBits)
+		return []byte{rex, 0x63, modrm}
+	}
+
+	// 1) MOV r32_dst, r32_src BUT  Skip the MOV when src and dst are the same!!
+	if srcReg != dstReg {
+		// 1) MOV r32_dst, r32_src
+		rexMov := byte(0x40) // no REX.W
+		if src.REXBit == 1 {
+			rexMov |= 0x04
+		} // REX.R
+		if dst.REXBit == 1 {
+			rexMov |= 0x01
+		} // REX.B
+		modrmMov := byte(0xC0 | (src.RegBits << 3) | dst.RegBits)
+		code = append(code, rexMov, 0x89, modrmMov)
+	}
 
 	// 2) ADD r32_dst, imm32
+	// TODO: if imm is 8-bit, we can use a smaller instruction
+	// use8 := imm >= -128 && imm <= 127
 	rexAdd := byte(0x40)
 	if dst.REXBit == 1 {
 		rexAdd |= 0x01

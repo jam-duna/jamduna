@@ -749,7 +749,7 @@ func TestSingleSandbox(t *testing.T) {
 	VM_MODE = "recompiler_sandbox"
 	debugRecompiler = true
 
-	name := "inst_xor_imm"
+	name := "inst_sub_32"
 	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
 	data, err := os.ReadFile(filePath)
 	if err != nil {
