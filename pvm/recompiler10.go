@@ -1624,93 +1624,56 @@ func generateLoadInd(
 
 func generateStoreIndirect(opcode byte, size int) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		// extract source register, destination register and displacement
 		srcIdx, dstIdx, disp64 := extractTwoRegsOneImm(inst.Args)
 		base := BaseReg
 		disp := uint32(disp64)
 
 		dstInfo := regInfoList[dstIdx]
 		srcInfo := regInfoList[srcIdx]
-		dstBits, srcBits := dstInfo.RegBits, srcInfo.RegBits
+		srcBits := srcInfo.RegBits
 
 		var buf []byte
 
-		// For sizes < 8, preserve original dst register and apply mask
-		if size != 8 {
-			// PUSH dst
-			if srcInfo.REXBit == 1 {
-				buf = append(buf, 0x41) // REX.B
-			}
-			buf = append(buf, 0x50|srcBits)
-
-			// Compute mask for AND
-			var mask uint32
-			switch size {
-			case 1:
-				mask = 0xFF
-			case 2:
-				mask = 0xFFFF
-			case 4:
-				mask = 0xFFFFFFFF
-			}
-
-			// REX prefix for AND r/m64, imm32 (REX.W=1)
-			rexAnd := byte(0x48)
-			if srcInfo.REXBit == 1 {
-				rexAnd |= 0x01
-			}
-			buf = append(buf, rexAnd)
-
-			// AND opcode 0x81 /4 id
-			modrm := byte((3 << 6) | (4 << 3) | (srcBits & 0x07))
-			buf = append(buf, 0x81, modrm)
-			buf = append(buf,
-				byte(mask), byte(mask>>8),
-				byte(mask>>16), byte(mask>>24),
-			)
-
-			// POP dst
-			if srcInfo.REXBit == 1 {
-				buf = append(buf, 0x41)
-			}
-			buf = append(buf, 0x58|srcBits)
-		}
-
-		// MOV [base + index*1 + disp32], dst
-		// Legacy prefix for 16-bit operand size
+		// 1) For 16-bit word, add operand-size override prefix
 		if size == 2 {
 			buf = append(buf, 0x66)
 		}
-		// REX prefix: bit7 fixed=0, bit6 fixed=1
+
+		// 2) Compute REX prefix
 		rex := byte(0x40)
-		// REX.W for 64-bit operand
 		if size == 8 {
-			rex |= 0x08
+			rex |= 0x08 // REX.W
 		}
-		// REX.R, REX.X, REX.B
 		if srcInfo.REXBit == 1 {
-			rex |= 0x04
+			rex |= 0x04 // REX.R
 		}
 		if dstInfo.REXBit == 1 {
-			rex |= 0x02
+			rex |= 0x02 // REX.X
 		}
 		if base.REXBit == 1 {
-			rex |= 0x01
+			rex |= 0x01 // REX.B
 		}
-		// emit REX only if non-default
 		if rex != 0x40 {
 			buf = append(buf, rex)
 		}
-		// MOV opcode and addressing
-		buf = append(buf, opcode)
+
+		// 3) Select opcode: 0x88 for byte, 0x89 for word/dword/qword
+		movOp := byte(0x89)
+		if size == 1 {
+			movOp = 0x88
+		}
+		buf = append(buf, movOp)
+
+		// 4) ModR/M + SIB + disp32
+		//    Mod=10 (disp32)，Reg=srcBits，RM=100 (SIB)
 		modrm := byte((2 << 6) | (srcBits << 3) | 0x04)
-		sib := byte((0 << 6) | (dstBits << 3) | (base.RegBits & 0x07))
+		//    scale=0×1，index=dstBits，base=baseBits
+		sib := byte((0 << 6) | (dstInfo.RegBits << 3) | (base.RegBits & 0x07))
 		buf = append(buf, modrm, sib)
 		buf = append(buf,
 			byte(disp), byte(disp>>8),
 			byte(disp>>16), byte(disp>>24),
 		)
-
 		return buf
 	}
 }
