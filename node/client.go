@@ -34,7 +34,7 @@ type NodeClient struct {
 
 	Preimage       map[common.Hash][]byte
 	WorkPackage    map[common.Hash]string
-	ServiceValue   map[common.Hash][]byte
+	ServiceValue   map[string][]byte
 	ServiceInfo    map[uint32]types.ServiceAccount
 	ServiceRequest map[common.Hash][]uint32
 	HeaderHash     common.Hash
@@ -66,7 +66,7 @@ func NewNodeClient(server, wsUrl string) (*NodeClient, error) {
 		state:          nil,
 		Preimage:       make(map[common.Hash][]byte),
 		WorkPackage:    make(map[common.Hash]string),
-		ServiceValue:   make(map[common.Hash][]byte),
+		ServiceValue:   make(map[string][]byte),
 		ServiceInfo:    make(map[uint32]types.ServiceAccount),
 		ServiceRequest: make(map[common.Hash][]uint32),
 	}
@@ -196,7 +196,7 @@ func (c *NodeClient) handleEnvelope(envelope *envelope) error {
 			log.Warn(log.Node, "listenWebSocket: Failed to parse SubServiceValue", "err", err)
 			return err
 		}
-		c.ServiceValue[payload.Hash] = common.Hex2Bytes(payload.Value)
+		c.ServiceValue[common.Bytes2Hex(payload.Hash[:])] = common.Hex2Bytes(payload.Value)
 
 	case SubServicePreimage:
 		var payload struct {
@@ -301,7 +301,11 @@ func (c *NodeClient) GetClient(possibleCores ...uint16) *rpc.Client {
 }
 
 func (c *NodeClient) CallWithRetry(method string, args interface{}, reply interface{}, possibleCores ...uint16) error {
-	fmt.Printf("CallWithRetry: method=%s, args=%v, possibleCores=%v\n", method, args, possibleCores)
+	if method == "jam.SubmitPreimage" {
+		fmt.Printf("CallWithRetry: method=%s, possibleCores=%v\n", method, possibleCores)
+	} else {
+		fmt.Printf("CallWithRetry: method=%s, args=%v\n", method, args)
+	}
 	const maxRetries = 3
 	var err error
 	for attempt := 0; attempt < maxRetries; attempt++ {
@@ -898,10 +902,10 @@ func (c *NodeClient) LoadServices(services []string) (new_service_map map[string
 }
 
 // SERVICE STORAGE
-func (c *NodeClient) GetServiceStorage(serviceIndex uint32, storageHash common.Hash) ([]byte, bool, error) {
+func (c *NodeClient) GetServiceStorage(serviceIndex uint32, storageKey []byte) ([]byte, bool, error) {
 	req := []string{
 		strconv.FormatUint(uint64(serviceIndex), 10),
-		storageHash.Hex(),
+		common.Bytes2Hex(storageKey),
 	}
 	var res string
 	err := c.CallWithRetry("jam.ServiceValue", req, &res)
@@ -912,10 +916,10 @@ func (c *NodeClient) GetServiceStorage(serviceIndex uint32, storageHash common.H
 	return storageBytes, true, nil
 }
 
-func (c *NodeClient) WaitForServiceValue(serviceIndex uint32, storageKey common.Hash) (service_index uint32, err error) {
+func (c *NodeClient) WaitForServiceValue(serviceIndex uint32, storageKey []byte) (service_index uint32, err error) {
 	ctxWait, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()
-	c.Subscribe(SubServiceValue, map[string]interface{}{"hash": storageKey.String()})
+	c.Subscribe(SubServiceValue, map[string]interface{}{"hash": common.Bytes2Hex(storageKey)})
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -924,7 +928,7 @@ func (c *NodeClient) WaitForServiceValue(serviceIndex uint32, storageKey common.
 		case <-ctxWait.Done():
 			return 0, fmt.Errorf("timed out waiting for service value")
 		case <-ticker.C:
-			if value, ok := c.ServiceValue[storageKey]; ok {
+			if value, ok := c.ServiceValue[common.Bytes2Hex(storageKey)]; ok {
 				service_index = uint32(types.DecodeE_l(value))
 				return service_index, nil
 			}

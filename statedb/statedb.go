@@ -3,18 +3,17 @@ package statedb
 import (
 	"bytes"
 	"context"
+	"errors"
 	"reflect"
 
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 
 	"math"
 	"os"
 	"sort"
-	"sync"
 
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
@@ -43,7 +42,6 @@ type StateDB struct {
 	trie                    *trie.MerkleTree
 	posteriorSafroleEntropy *SafroleState // used to manage entropy, validator, and winning ticket
 	VMs                     map[uint32]*pvm.VM
-	vmMutex                 sync.Mutex
 
 	// used in ApplyStateRecentHistory between statedbs
 	Authoring string
@@ -129,10 +127,10 @@ func IsAuthorizedPVM(workPackage types.WorkPackage) (bool, error) {
 
 // EP Errors
 const (
-	errServiceIndices         = "ServiceIndices duplicated or not ordered"
-	errPreimageLookupNotSet   = "Preimagelookup (h,l) not set"
-	errPreimageLookupNotEmpty = "Preimagelookup not empty"
-	errPreimageBlobSet        = "PreimageBlob already set"
+	errServiceIndices         = "serviceIndices duplicated or not ordered"
+	errPreimageLookupNotSet   = "preimagelookup (h,l) not set"
+	errPreimageLookupNotEmpty = "preimagelookup not empty"
+	errPreimageBlobSet        = "preimageBlob already set"
 )
 
 // ValidateAddPreimage checks that the
@@ -147,13 +145,13 @@ func (s *StateDB) ValidateAddPreimage(serviceID uint32, blob []byte) (common.Has
 	anchors, ok, err := t.GetPreImageLookup(l.Service_Index(), l.Hash(), l.BlobLength())
 	if err != nil {
 		log.Warn(log.SDB, "[ValidateAddPreimage:GetPreImageLookup] anchor not set", "err", err, "s", l.Service_Index(), "blob hash", l.Hash(), "blob length", l.BlobLength())
-		return common.Hash{}, fmt.Errorf(errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
+		return common.Hash{}, fmt.Errorf("%s", errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
 	} else if !ok {
 		log.Warn(log.SDB, "[ValidateAddPreimage:GetPreImageLookup] Can't find the anchor", "s", l.Service_Index(), "blob hash", l.Hash(), "blob length", l.BlobLength())
-		return common.Hash{}, fmt.Errorf(errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
+		return common.Hash{}, fmt.Errorf("%s", errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
 	}
 	if len(anchors) == 1 { // we have to forget it -- check!
-		return common.Hash{}, fmt.Errorf(errPreimageLookupNotEmpty)
+		return common.Hash{}, errors.New(errPreimageLookupNotEmpty)
 	}
 	return preimageHash, nil
 }
@@ -182,6 +180,7 @@ const (
 	C13 = "ActiveValidator"
 	C14 = "AccumulationQueue"
 	C15 = "AccumulationHistory"
+	C16 = "AccumulationOutputs"
 )
 
 var StateKeyMap = map[byte]string{
@@ -200,6 +199,7 @@ var StateKeyMap = map[byte]string{
 	0x0D: "c13",
 	0x0E: "c14",
 	0x0F: "c15",
+	0x10: "c16",
 }
 
 // Initial services
@@ -320,6 +320,11 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	if err != nil {
 		log.Crit(log.SDB, "Error reading C15 accunulateHistory from trie: %v\n", err)
 	}
+	accumulateOutputsEncode, err := t.GetState(C16)
+	if err != nil {
+		log.Crit(log.SDB, "Error reading C16 accunulateOutputs from trie: %v\n", err)
+	}
+
 	//Decode(authQueueEncode) -> AuthorizationQueue
 	//set AuthorizationQueue back to JamState
 
@@ -340,6 +345,7 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	d.SetPi(piEncode)
 	d.SetAccumulateQueue(accumulateQueueEncode)
 	d.SetAccumulateHistory(accumulateHistoryEncode)
+	d.SetAccumulateOutputs(accumulateOutputsEncode)
 	s.SetJamState(d)
 
 	// Because we have safrolestate as internal state, JamState is NOT enough.
@@ -379,6 +385,7 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 
 	accunulateQueueEncode := d.GetAccumulationQueueBytes()
 	accunulateHistoryEncode := d.GetAccumulationHistoryBytes()
+	accumulateOuputsEncode := d.GetAccumulationOutputsBytes()
 
 	t := s.GetTrie()
 	verify := true
@@ -397,6 +404,7 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	t.SetState(C13, piEncode)
 	t.SetState(C14, accunulateQueueEncode)
 	t.SetState(C15, accunulateHistoryEncode)
+	t.SetState(C16, accumulateOuputsEncode)
 	updated_root := t.GetRoot()
 
 	if verify {
@@ -452,7 +460,7 @@ func (s *StateDB) CompareStateRoot(genesis []KeyVal, parentStateRoot common.Hash
 	}
 	new_root := newTrie.GetRoot()
 	if !common.CompareBytes(parent_root[:], new_root[:]) {
-		return false, fmt.Errorf("Roots are not the same")
+		return false, fmt.Errorf("roots are not the same")
 	}
 
 	return true, nil
@@ -639,7 +647,7 @@ func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 	block := types.Block{}
 	b := make([]byte, 32)
 	zeroHash := common.BytesToHash(b)
-	if bytes.Compare(blockHash.Bytes(), zeroHash.Bytes()) == 0 {
+	if bytes.Equal(blockHash.Bytes(), zeroHash.Bytes()) {
 		// genesis block situation
 
 	} else {
@@ -649,7 +657,7 @@ func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 		}
 
 		h := common.Blake2Hash(encodedBlock)
-		if bytes.Compare(h.Bytes(), blockHash.Bytes()) != 0 {
+		if !bytes.Equal(h.Bytes(), blockHash.Bytes()) {
 			return statedb, fmt.Errorf("[statedb:newStateDB] hash of data incorrect [%d bytes]", len(encodedBlock))
 		}
 		if err := json.Unmarshal(encodedBlock, &block); err != nil {
@@ -740,7 +748,7 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 
 			if blockAuthoringChaos {
 				if noAuthoring := SimulateBlockAuthoringInterruption(proposedBlk); noAuthoring {
-					return true, nil, nil, fmt.Errorf("Simulated Interruption: Block @ %v not proposed", currJCE)
+					return true, nil, nil, fmt.Errorf("simulated Interruption: Block @ %v not proposed", currJCE)
 				}
 			}
 
@@ -979,7 +987,7 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 		log.Trace(log.SDB, "IETF SIGN 1 H_v", "k", blockAuthorPriv[:], "c", c, "header.EntropySource", header.EntropySource[:])
 		if saveSealBlockMaterial {
 			// Save for the material
-			material.TicketID = fmt.Sprintf("%s", ticketID)
+			material.TicketID = ticketID.String()
 			material.Attempt = winningTicket.Attempt
 			material.CForHv = fmt.Sprintf("%x", c[:])
 			material.MForHv = ""
@@ -1053,7 +1061,7 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 		}
 		jsonData := types.ToJSON(material)
 		fileName := fmt.Sprintf("../jamtestvectors/seals/%d-%d.json", material.T, validatorIdx)
-		if err := ioutil.WriteFile(fileName, []byte(jsonData), 0o644); err != nil {
+		if err := os.WriteFile(fileName, []byte(jsonData), 0o644); err != nil {
 			return nil, fmt.Errorf("failed to write SealBlockMaterial to file: %w", err)
 		}
 	}

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	uc "github.com/unicorn-engine/unicorn/bindings/go/unicorn"
@@ -56,13 +57,16 @@ type VM struct {
 	VMs map[uint32]*VM
 
 	// Work Package Inputs
-	WorkItemIndex uint32
-	WorkPackage   types.WorkPackage
-	Extrinsics    types.ExtrinsicsBlobs
-	Authorization []byte
-	Imports       [][][]byte
+	WorkItemIndex             uint32
+	WorkPackage               types.WorkPackage
+	Extrinsics                types.ExtrinsicsBlobs
+	Authorization             []byte
+	Imports                   [][][]byte
+	AccumulateOperandElements []types.AccumulateOperandElements
+	Transfers                 []types.DeferredTransfer
+	N                         common.Hash
 
-	// Invocation funtions entry point
+	// Invocation functions entry point
 	EntryPoint uint32
 
 	logging      string
@@ -539,10 +543,8 @@ func (vm *VM) step(stepn int) error {
 		}
 
 	default:
-		vm.ResultCode = types.RESULT_PANIC
-		vm.terminated = true
 		log.Warn(vm.logging, "terminated: unknown opcode", "service", string(vm.ServiceMetadata), "opcode", opcode)
-		return nil
+		vm.HandleNoArgs(0) //TRAP
 	}
 
 	// avoid this: this is expensive

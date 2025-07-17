@@ -76,11 +76,10 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 	tmpState.ComputeAvailabilityAssignments(extrinsicData.Assurances, targetJCE)
 	// E_G - Guarantees: aggregate queuedGuarantees into extrinsicData.Guarantees
 	extrinsicData.Guarantees = make([]types.Guarantee, 0)
-	queuedGuarantees := make([]types.Guarantee, 0)
 	currRotationIdx := s.GetTimeslot() / types.ValidatorCoreRotationPeriod
 	previousIdx := currRotationIdx - 1
 	acceptedTimeslot := previousIdx * types.ValidatorCoreRotationPeriod
-	queuedGuarantees = extrinsic_pool.GetGuaranteesFromPool(acceptedTimeslot)
+	queuedGuarantees := extrinsic_pool.GetGuaranteesFromPool(acceptedTimeslot)
 	log.Trace(log.G, "MakeBlock: Queued Guarantees for slot", "len", len(queuedGuarantees), "slot", targetJCE, "acceptedTs", acceptedTimeslot)
 	// collect and pre-validate queued guarantees
 	var valid []types.Guarantee

@@ -35,7 +35,7 @@ const (
 type SubscriptionRequest struct {
 	Method      string                 `json:"method"` //
 	Params      map[string]interface{} `json:"params"` // "serviceID", "hash" (storage key or preimage hash), "isFinalized" (true/false)
-	hash        common.Hash
+	hash        string
 	isFinalized bool
 }
 
@@ -138,7 +138,7 @@ func (h *Hub) ReceiveLatestBlock(FinalizedBlock *types.Block, BestBlock *types.B
 					if upd.ServiceValue == nil {
 						continue
 					}
-					if req.hash == (common.Hash{}) {
+					if req.hash == "" {
 						for k, v := range upd.ServiceValue {
 							payload := types.WSPayload{
 								Method: SubServiceValue,
@@ -335,13 +335,13 @@ func (c *Client) addSubscription(serviceID uint32, req *SubscriptionRequest) {
 	c.Services[serviceID] = append(c.Services[serviceID], req)
 }
 
-func fetchHashAttr(req *SubscriptionRequest, key string) common.Hash {
+func fetchHashAttr(req *SubscriptionRequest, key string) string {
 	if val, ok := req.Params[key]; ok {
 		if str, ok := val.(string); ok {
-			return common.HexToHash(str)
+			return str
 		}
 	}
-	return common.Hash{}
+	return ""
 }
 
 func fetchUint32Attr(req *SubscriptionRequest, key string) (uint32, bool) {
@@ -456,8 +456,8 @@ func (c *Client) readPump(ctx context.Context, wg *sync.WaitGroup) {
 				c.Statistics = &req
 			case SubWorkPackage:
 				// Handle subscription to work package
-				req.hash = common.HexToHash(req.Params["hash"].(string))
-				c.WorkPackages[req.hash] = &req
+				req.hash = req.Params["hash"].(string)
+				c.WorkPackages[common.HexToHash(req.hash)] = &req
 			default:
 				log.Warn(log.Web, "Unknown subscription method", req.Method)
 			}

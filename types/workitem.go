@@ -1,6 +1,8 @@
 package types
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/json"
 
 	"github.com/colorfulnotion/jam/common"
@@ -27,7 +29,7 @@ type WorkItem struct {
 	AccumulateGasLimit uint64              `json:"accumulate_gas_limit"` // a: an accumulate gas limit
 	ImportedSegments   []ImportSegment     `json:"import_segments"`      // i: a sequence of imported data segments
 	Extrinsics         []WorkItemExtrinsic `json:"extrinsic"`            // x: extrinsic
-	ExportCount        uint16              `json:"export_count"`
+	ExportCount        uint16              `json:"export_count"`         // e: the number of data segments exported by this work item
 }
 
 // 0.6.2 14.5
@@ -56,6 +58,54 @@ type WorkItemExtrinsic struct {
 // Segment represents a segment of data
 type Segment struct {
 	Data []byte
+}
+
+func (w *WorkItem) EncodeS() ([]byte, error) {
+
+	var buf bytes.Buffer
+
+	writeUint64 := func(value uint64) error {
+		return binary.Write(&buf, binary.LittleEndian, value)
+	}
+	writeUint32 := func(value uint32) error {
+		return binary.Write(&buf, binary.LittleEndian, value)
+	}
+	writeUint16 := func(value uint16) error {
+		return binary.Write(&buf, binary.LittleEndian, value)
+	}
+	writeHash := func(value common.Hash) error {
+		return binary.Write(&buf, binary.LittleEndian, value.Bytes())
+	}
+	// E_4: w_s
+	if err := writeUint32(w.Service); err != nil {
+		return nil, err
+	}
+	// E_2: w_h
+	if err := writeHash(w.CodeHash); err != nil {
+		return nil, err
+	}
+	// E_8: w_g, w_a
+	if err := writeUint64(w.RefineGasLimit); err != nil {
+		return nil, err
+	}
+	if err := writeUint64(w.AccumulateGasLimit); err != nil {
+		return nil, err
+	}
+	// E_2: w_e, |w_i|, |w_x|
+	if err := writeUint16(w.ExportCount); err != nil {
+		return nil, err
+	}
+	if err := writeUint16(uint16(len(w.ImportedSegments))); err != nil {
+		return nil, err
+	}
+	if err := writeUint16(uint16(len(w.Extrinsics))); err != nil {
+		return nil, err
+	}
+	// E_4: |w_y|
+	if err := writeUint32(uint32(len(w.Payload))); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func (a *WorkItem) UnmarshalJSON(data []byte) error {

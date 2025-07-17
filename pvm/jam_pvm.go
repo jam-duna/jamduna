@@ -25,15 +25,14 @@ func (vm *VM) SetCore(coreIndex uint16) {
 var VM_MODE = "interpreter"
 
 // input by order([work item index],[workpackage itself], [result from IsAuthorized], [import segments], [export count])
-func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash) (r types.Result, res uint64, exportedSegments [][]byte) {
+func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash, n common.Hash) (r types.Result, res uint64, exportedSegments [][]byte) {
 	vm.Mode = "refine"
 
 	workitem := workPackage.WorkItems[workitemIndex]
 
 	// ADD IN 0.6.6
-	//a := types.E(uint64(workitemIndex)) -- 0.6.6
+	a := types.E(uint64(workitemIndex))
 	//fmt.Printf("ExecuteRefine  workitemIndex %d bytes - %x\n", len(a), a)
-	a := make([]byte, 0)
 	serviceBytes := types.E(uint64(workitem.Service))
 	a = append(a, serviceBytes...)
 	//fmt.Printf("ExecuteRefine  s %d bytes - %x\n", len(serviceBytes), serviceBytes)
@@ -41,23 +40,13 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	a = append(a, encoded_workitem_payload...) // variable number of bytes
 	//fmt.Printf("ExecuteRefine  payload %d bytes - %x\n", len(encoded_workitem_payload), encoded_workitem_payload)
 	a = append(a, workPackage.Hash().Bytes()...) // 32
-	//fmt.Printf("ExecuteRefine  workPackage %d bytes - %x\n", len(workPackage.Hash().Bytes()), workPackage.Hash().Bytes())
 
-	encoded_workPackage_RefineContext, _ := types.Encode(workPackage.RefineContext)
-	a = append(a, encoded_workPackage_RefineContext...)
-	//fmt.Printf("ExecuteRefine  refineContext %d bytes - %x\n", len(encoded_workPackage_RefineContext), encoded_workPackage_RefineContext)
-
-	encoded_p_a, _ := types.Encode(p_a)
-	//fmt.Printf("ExecuteRefine  p_a %d bytes - %x\n", len(encoded_p_a), encoded_p_a)
-	a = append(a, encoded_p_a...)
 	//fmt.Printf("ExecuteRefine TOTAL len(a)=%d %x\n", len(a), a)
 	vm.WorkItemIndex = workitemIndex
 	vm.Gas = int64(workitem.RefineGasLimit)
 	vm.WorkPackage = workPackage
-
-	// Sourabh , William pls validate this
+	vm.N = n
 	vm.Authorization = authorization.Ok
-	//===================================
 	vm.Extrinsics = extrinsics
 	vm.Imports = importsegments
 	switch VM_MODE {
@@ -99,7 +88,7 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	return r, res, exportedSegments
 }
 
-func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.AccumulateOperandElements, X *types.XContext) (r types.Result, res uint64, xs *types.ServiceAccount) {
+func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.AccumulateOperandElements, X *types.XContext, n common.Hash) (r types.Result, res uint64, xs *types.ServiceAccount) {
 
 	vm.Mode = "accumulate"
 	vm.X = X //⎩I(u, s), I(u, s)⎫⎭
@@ -108,11 +97,12 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	input_bytes := make([]byte, 0)
 	t_bytes := types.E(uint64(t))
 	s_bytes := types.E(uint64(s))
-	encoded_elements, _ := types.Encode(elements)
+	o_bytes := types.E(uint64(len(elements)))
 	input_bytes = append(input_bytes, t_bytes...)
 	input_bytes = append(input_bytes, s_bytes...)
-	input_bytes = append(input_bytes, encoded_elements...)
-
+	input_bytes = append(input_bytes, o_bytes...)
+	vm.AccumulateOperandElements = elements
+	vm.N = n
 	vm.Gas = int64(g)
 	// (*ServiceAccount, bool, error)
 	x_s, ok, err := vm.hostenv.GetService(X.S)
@@ -154,6 +144,8 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 		return
 	}
 	r, res = vm.getArgumentOutputs()
+	x_s.UpdateRecentAccumulation(vm.Timeslot) // [Gratis TODO: potentially need to be moved out]
+
 	vm.saveLogs()
 
 	return r, res, x_s
@@ -260,13 +252,7 @@ func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAc
 func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Result) {
 	vm.Mode = "authorization"
 	// 0.6.6 E_2(c) only
-	// a := common.Uint16ToBytes(c)
-	// 0.6.5 E(p_p, p, c)  (non-GP Compliant)
-	p_p, _ := types.Encode(p.ParameterizationBlob)
-	p_bytes, _ := types.Encode(p)
-	c_bytes, _ := types.Encode(uint16(c))
-	a := append(p_p, p_bytes...)
-	a = append(a, c_bytes...)
+	a, _ := types.Encode(uint16(c))
 	vm.Gas = types.IsAuthorizedGasAllocation
 	// fmt.Printf("ExecuteAuthorization - c=%d len(p_bytes)=%d len(c_bytes)=%d len(a)=%d a=%x WP=%s\n", c, len(p_bytes), len(c_bytes), len(a), a, p.String())
 	switch VM_MODE {

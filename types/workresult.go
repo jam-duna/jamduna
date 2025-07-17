@@ -8,12 +8,15 @@ import (
 )
 
 const (
-	WORKRESULT_OK         = 0
+	WORKRESULT_OK = 0
+
+	//{∞, ☇, ⊚, ⊖, BAD, BIG}
 	WORKRESULT_OOG        = 1
 	WORKRESULT_PANIC      = 2
 	WORKRESULT_BAD_EXPORT = 3
-	WORKRESULT_BAD        = 4
-	WORKRESULT_BIG        = 5
+	WORKRESULT_OVERSIZE   = 4
+	WORKRESULT_BAD        = 5
+	WORKRESULT_BIG        = 6
 )
 
 const (
@@ -81,10 +84,12 @@ func (R Result) Encode() []byte {
 			return []byte{2}
 		case WORKRESULT_BAD_EXPORT:
 			return []byte{3}
-		case WORKRESULT_BAD:
+		case WORKRESULT_OVERSIZE:
 			return []byte{4}
-		case WORKRESULT_BIG:
+		case WORKRESULT_BAD:
 			return []byte{5}
+		case WORKRESULT_BIG:
+			return []byte{6}
 		default:
 			return []byte{R.Err}
 		}
@@ -121,9 +126,14 @@ func (target Result) Decode(data []byte) (interface{}, uint32) {
 	case 4:
 		return Result{
 			Ok:  nil,
-			Err: WORKRESULT_BAD,
+			Err: WORKRESULT_OVERSIZE,
 		}, length
 	case 5:
+		return Result{
+			Ok:  nil,
+			Err: WORKRESULT_BAD,
+		}, length
+	case 6:
 		return Result{
 			Ok:  nil,
 			Err: WORKRESULT_BIG,
@@ -175,6 +185,7 @@ func (a *WorkResult) UnmarshalJSON(data []byte) error {
 			Err: WORKRESULT_BAD_EXPORT,
 		}
 	}
+	// came back refactor when test vector is 0.6.7
 	if _, ok := s.Result["bad-code"]; ok {
 		result = Result{
 			Ok:  nil,
@@ -221,6 +232,7 @@ func (a WorkResult) MarshalJSON() ([]byte, error) {
 			result = map[string]interface{}{
 				"bad-exports": nil,
 			}
+		// came back refactor when test vector is 0.6.7
 		case WORKRESULT_BAD:
 			result = map[string]interface{}{
 				"bad-code": nil,

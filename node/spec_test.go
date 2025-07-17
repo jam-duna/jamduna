@@ -211,7 +211,7 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 		vm.Timeslot = s.JamState.SafroleState.Timeslot
 		vm.SetCore(0)
 		vm.SetPVMContext(pvmContext)
-		output, _, exported_segments := vm.ExecuteRefine(uint32(index), workPackage, r, make([][][]byte, 0), workItem.ExportCount, types.ExtrinsicsBlobs{}, p_a)
+		output, _, exported_segments := vm.ExecuteRefine(uint32(index), workPackage, r, make([][][]byte, 0), workItem.ExportCount, types.ExtrinsicsBlobs{}, p_a, common.Hash{})
 
 		expectedSegmentCnt := int(workItem.ExportCount)
 		if expectedSegmentCnt != len(exported_segments) {

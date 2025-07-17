@@ -5,33 +5,32 @@ import (
 	//"fmt"
 )
 
-// (h,l) -> E4(l)++H(h) for a_l
-func Compute_preimageLookup_internal(blob_hash Hash, blob_len uint32) Hash {
-	lBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(lBytes, blob_len)        // E4(l)
-	h_blobHash := ComputeHash(blob_hash.Bytes())           // H(h) -- hash of blobHash
-	al_internal_key := append(lBytes, h_blobHash[2:30]...) // (E4(l) ⌢ H(h) -- this is 36 bytes. but only the first 32 bytes matters
-	return BytesToHash(al_internal_key)
+// k -> E4(2^32-1)++k for a_s
+func Compute_storageKey_internal(rawKey []byte) []byte {
+	prefixBytes := make([]byte, 4)
+	prefix := uint32((1 << 32) - 1)
+	binary.LittleEndian.PutUint32(prefixBytes, prefix)
+	as_internal_key := append(prefixBytes, rawKey[:]...) // not sure if k is 32bytes (or not)
+	return as_internal_key
 }
 
-// h -> E4(2^32-2)++h1...h29 for a_p
-func Compute_preimageBlob_internal(blob_hash Hash) Hash {
+// h -> E4(2^32-2)++h for a_p
+func Compute_preimageBlob_internal(blob_hash Hash) []byte {
 	//2^32 - 2 or fffffffe (BE)
 	prefixBytes := make([]byte, 4)
 	prefix := uint32((1 << 32) - 2)
 	binary.LittleEndian.PutUint32(prefixBytes, prefix)
-
-	ap_internal_key := append(prefixBytes, blob_hash[1:29]...)
-	return BytesToHash(ap_internal_key)
+	ap_internal_key := append(prefixBytes, blob_hash[:]...)
+	return ap_internal_key
 }
 
-// k -> E4(2^32-1)++k0...k28 for a_s
-
-func Compute_storageKey_internal(key_hash Hash) Hash {
-	prefixBytes := make([]byte, 4)
-	prefix := uint32((1 << 32) - 1)
-	binary.LittleEndian.PutUint32(prefixBytes, prefix)
-	return BytesToHash(append(prefixBytes, key_hash[0:28]...))
+// (h,l) -> E4(l)++h for a_l
+func Compute_preimageLookup_internal(blob_hash Hash, blob_len uint32) []byte {
+	lBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(lBytes, blob_len)     // E4(l)
+	h_blobHash := ComputeHash(blob_hash.Bytes())        // H(h) -- hash of blobHash
+	al_internal_key := append(lBytes, h_blobHash[:]...) // (E4(l) ⌢ H(h) -- this is 36 bytes. but only the first 32 bytes matters
+	return al_internal_key
 }
 
 // EQ 290 - state-key constructor functions C
@@ -54,30 +53,40 @@ func ComputeC_is(s uint32) Hash {
 	return BytesToHash(stateKey)
 }
 
-func ComputeC_sh(s uint32, h0 Hash) Hash {
-	// (s,h) ↦ [n0, h0, n1, h1, n2, h2, n3, h3, h4, h5, ... , h26, 0] -- the last 0 is NEW
-	h := h0.Bytes()
-
-	// n0, h0, n1, h1, n2, h2, n3, h3
+func ComputeC_sh(s uint32, h0 []byte) Hash {
+	// (s,h) ↦ [n0, a0, n1, a1, n2, a2, n3, a3, a4, a5, ... , a26,  0 ] -- 0.6.7, last byte left as zero
 	var stateKey [32]byte
+
+	a := Blake2Hash(h0) // a = blake2(h0)0..27
+	h := a.Bytes()
+
+	// n: E4(s)
+	n := []byte{
+		byte(s >> 0),
+		byte(s >> 8),
+		byte(s >> 16),
+		byte(s >> 24),
+	}
+
+	// Interleave stateKey[0:8] as [n0, a0, n1, a1, n2, a2, n3, a3]
 	for i := 0; i < 4; i++ {
-		stateKey[2*i] = byte(s >> (8 * i)) // compute the little-endian byte for s
+		stateKey[2*i] = n[i]
 		stateKey[2*i+1] = h[i]
 	}
 
-	// h4..h7
+	// stateKey[8;31] as [a4..a26]
 	copy(stateKey[8:31], h[4:27])
 	return BytesToHash(stateKey[:])
 }
 
-func ComputeC_sh_Byte(s uint32, k []byte) Hash {
-	var stateKey [32]byte
-	copy(stateKey[:], k)
-	return ComputeC_sh(s, BytesToHash(stateKey[:]))
+func ServiceStorageKeyOLD(s uint32, k []byte) []byte {
+	// sb := make([]byte, 4)
+	// binary.LittleEndian.PutUint32(sb, uint32(s))
+	// return Blake2Hash(append(sb, k...))
+	return k
 }
 
-func ServiceStorageKey(s uint32, k []byte) Hash {
-	sb := make([]byte, 4)
-	binary.LittleEndian.PutUint32(sb, uint32(s))
-	return Blake2Hash(append(sb, k...))
+func ServiceStorageKey(s uint32, k []byte) []byte {
+	// TODO: delete all references to this function
+	return k
 }

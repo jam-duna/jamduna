@@ -603,7 +603,6 @@ func VerifySegmentShard(erasureRoot common.Hash, shardIndex uint16, segmentShard
 	log.Trace(log.DA, "VerifySegmentShard", "bClub", bClub, "bPath", fmt.Sprintf("%x", bPath))
 	//segmentLeafHash := common.ComputeLeafHash_WBT_Blake2B(segmentShard)
 
-	// Michael: please review
 	_, recovered_sClub := VerifyWBTJustification(exportedSegmentLen, erasureRoot, segmentIndex, segmentShard, bPath, "VerifySegmentShard_call1")
 
 	bundle_segment_pair := common.BuildBundleSegment(bClub, recovered_sClub)

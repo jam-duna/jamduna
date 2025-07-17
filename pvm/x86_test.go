@@ -274,9 +274,9 @@ var testcases = map[string]string{
 }
 
 // TestRecompilerSuccess runs all test cases expected to succeed (no division by zero or overflow conditions).
-var errorNames = []string{
-	"by_zero", "overflow", "trap", "nok", "inaccessible", "read_only",
-}
+// var errorNames = []string{
+// 	"by_zero", "overflow", "trap", "nok", "inaccessible", "read_only",
+// }
 
 func TestRecompilerNoSandbox(t *testing.T) {
 	PvmLogging = true

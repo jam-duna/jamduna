@@ -169,7 +169,7 @@ func TestDoomNoSandbox(t *testing.T) {
 }
 func TestDoomX86(t *testing.T) {
 	useRawRam = false   // use raw RAM for this test
-	useEcalli500 = true // use ecalli500 for this test
+	useEcalli500 = false // use ecalli500 for this test
 	log.InitLogger("debug")
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule("pvm_validator")
@@ -192,9 +192,9 @@ func TestDoomX86(t *testing.T) {
 	pvm := NewVM(0, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata))
 	pvm.initLogs()
 	rvm, err := NewRecompilerVM(pvm)
-	rvm.isChargingGas = useEcalli500
-	rvm.isPCCounting = useEcalli500
-	rvm.IsBlockCounting = useEcalli500
+	rvm.isChargingGas = true
+	rvm.isPCCounting = false
+	rvm.IsBlockCounting = false
 	if err != nil {
 		t.Fatalf("Failed to create RecompilerVM: %v", err)
 	}

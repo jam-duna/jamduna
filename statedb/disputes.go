@@ -268,7 +268,7 @@ func (j *JamState) checkIfKeyOffend(key types.Ed25519Key) error {
 	for _, k := range j.DisputesState.Psi_o {
 		if bytes.Equal(k.Bytes(), key.Bytes()) {
 			//drop the key
-			return fmt.Errorf("Already in the Offenders")
+			return fmt.Errorf("already in the Offenders")
 		}
 	}
 	// check if the key is in the validator set
@@ -282,7 +282,7 @@ func (j *JamState) checkIfKeyOffend(key types.Ed25519Key) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("Already in the Offenders")
+	return fmt.Errorf("already in the Offenders")
 }
 
 // eq 103 v: v should index by the work report hash and no duplicates
@@ -590,7 +590,7 @@ func isFaultEnoughAndValid(state_prime JamState, f []types.Fault) error {
 			}
 		}
 		if !found {
-			return fmt.Errorf("Fault Error: work report hash %x should be in good set", f.Target)
+			return fmt.Errorf("fault Error: work report hash %x should be in good set", f.Target)
 		}
 	}
 	return nil

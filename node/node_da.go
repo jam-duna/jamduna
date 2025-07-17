@@ -209,7 +209,7 @@ func (n *NodeContent) buildSClub(segments [][]byte) (sClub []common.Hash, ecChun
 	for shardIndex, ec := range ecChunksArr {
 		chunks := make([][]byte, len(segments)+len(pageProofs))
 		for n := 0; n < len(chunks); n++ {
-			chunks[n] = ec.Data[n*chunkSize : (n+1)*chunkSize] // Michael claims this needs a hash
+			chunks[n] = ec.Data[n*chunkSize : (n+1)*chunkSize]
 		}
 		t := trie.NewWellBalancedTree(chunks, types.Blake2b)
 		sClub[shardIndex] = common.BytesToHash(t.Root())
@@ -318,7 +318,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		vm.Timeslot = n.statedb.JamState.SafroleState.Timeslot
 		vm.SetCore(workPackageCoreIndex)
 		vm.SetPVMContext(pvmContext)
-		output, _, exported_segments := vm.ExecuteRefine(uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData, p_u)
+		output, _, exported_segments := vm.ExecuteRefine(uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData, p_u, common.BytesToHash(trie.H0))
 
 		expectedSegmentCnt := int(workItem.ExportCount)
 		if expectedSegmentCnt != len(exported_segments) {
@@ -347,7 +347,15 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 			NumExtrinsics:       uint(len(package_bundle.ExtrinsicData)),
 			NumBytesExtrinsics:  uint(z),
 		}
-		result.Result = output
+		if len(output.Ok)+z > types.MaxEncodedWorkReportSize {
+			result.Result.Err = types.WORKRESULT_OVERSIZE
+			result.Result.Ok = nil
+		} else if expectedSegmentCnt != len(exported_segments) {
+			result.Result.Err = types.WORKRESULT_BAD_EXPORT
+			result.Result.Ok = nil
+		} else {
+			result.Result = output
+		}
 		results = append(results, result)
 
 		o := types.AccumulateOperandElements{
@@ -374,13 +382,13 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		Results:           results,
 		AuthGasUsed:       uint(authGasUsed),
 	}
-	log.Info(log.G, "executeWorkPackageBundle OUTGOING SPEC",
+	log.Trace(log.G, "executeWorkPackageBundle OUTGOING SPEC",
 		"n", n.String(),
 		"workReportHash", workReport.Hash(),
 		"spec", workReport.AvailabilitySpec.String(),
 		"slot", slot,
 	)
-	log.Trace(log.G, "executeWorkPackageBundle OUTGOING REPORT",
+	log.Debug(log.G, "executeWorkPackageBundle OUTGOING REPORT",
 		"n", n.String(),
 		"workReportHash", workReport.Hash(),
 		"workReport", workReport.String(),

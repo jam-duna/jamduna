@@ -15,10 +15,22 @@ import (
 )
 
 func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
-	log.Info(log.Node, "FIB START", "targetN", targetN)
 
 	service0 := testServices["fib"]
 	serviceAuth := testServices["auth_copy"]
+	fib_serviceIdx := service0.ServiceCode
+	auth_serviceIdx := uint32(statedb.AuthCopyServiceCode)
+
+	isReassign := false
+	if isReassign {
+		auth_serviceIdx = serviceAuth.ServiceCode // statedb.AuthCopyServiceCode
+		if err := reassign(n1, testServices); err != nil {
+			log.Error(log.Node, "Reassign failed", "err", err)
+			return
+		}
+	}
+	log.Info(log.Node, "FIB START", "targetN", targetN)
+	log.Info(log.Node, "FIB START", "fib", fib_serviceIdx, "auth", auth_serviceIdx)
 
 	isDry := false
 	var prevExportSegmentRoot common.Hash
@@ -31,8 +43,10 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 			})
 		}
 
-		payload := make([]byte, 4)
-		binary.LittleEndian.PutUint32(payload, uint32(fibN))
+		fib_payload := make([]byte, 4)
+		binary.LittleEndian.PutUint32(fib_payload, uint32(fibN))
+		auth_payload := make([]byte, 4)
+		binary.LittleEndian.PutUint32(auth_payload, uint32(auth_serviceIdx))
 
 		wp := types.WorkPackage{
 			AuthCodeHost:          0,
@@ -41,22 +55,22 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 			ParameterizationBlob:  nil,
 			WorkItems: []types.WorkItem{
 				{
-					Service:            statedb.FibServiceCode,
-					CodeHash:           service0.CodeHash,
-					Payload:            payload,
-					RefineGasLimit:     DefaultRefineGasLimit * 5,
-					AccumulateGasLimit: DefaultAccumulateGasLimit * 5,
-					ImportedSegments:   imported,
-					ExportCount:        uint16(fibN),
-				},
-				{
-					Service:            statedb.AuthCopyServiceCode,
+					Service:            auth_serviceIdx,
 					CodeHash:           serviceAuth.CodeHash,
-					Payload:            nil,
+					Payload:            auth_payload,
 					RefineGasLimit:     DefaultRefineGasLimit,
 					AccumulateGasLimit: DefaultAccumulateGasLimit,
 					ImportedSegments:   nil,
 					ExportCount:        0,
+				},
+				{
+					Service:            fib_serviceIdx,
+					CodeHash:           service0.CodeHash,
+					Payload:            fib_payload,
+					RefineGasLimit:     DefaultRefineGasLimit * 5,
+					AccumulateGasLimit: DefaultAccumulateGasLimit * 5,
+					ImportedSegments:   imported,
+					ExportCount:        uint16(fibN),
 				},
 			},
 		}
@@ -78,8 +92,8 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 			}
 
 			prevExportSegmentRoot = wr.AvailabilitySpec.ExportedSegmentRoot
-			k := common.ServiceStorageKey(statedb.FibServiceCode, []byte{0})
-			data, _, _ := n1.GetServiceStorage(statedb.FibServiceCode, k)
+			k := common.ServiceStorageKey(fib_serviceIdx, []byte{0})
+			data, _, _ := n1.GetServiceStorage(fib_serviceIdx, k)
 			log.Info(log.Node, wpr.Identifier, "workPackageHash", wr.AvailabilitySpec.WorkPackageHash, "exportedSegmentRoot", wr.AvailabilitySpec.ExportedSegmentRoot, "result", fmt.Sprintf("%x", data))
 		} else {
 			log.Info(log.Node, wpr.Identifier, "workPackageHash", wp.Hash(), "wp", wp.String())

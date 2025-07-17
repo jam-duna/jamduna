@@ -298,3 +298,12 @@ func (n *JamState) GetAccumulationHistoryBytes() []byte {
 	}
 	return encoded
 }
+
+// C16 - AccumulationOutputs
+func (n *JamState) GetAccumulationOutputsBytes() []byte {
+	encoded, err := types.Encode(n.AccumulationOutputs)
+	if err != nil {
+		return []byte{}
+	}
+	return encoded
+}

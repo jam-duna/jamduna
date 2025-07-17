@@ -338,3 +338,15 @@ func (n *JamState) SetAccumulateHistory(accumulateHistoryByte []byte) {
 	}
 	n.AccumulationHistory = validatorStatistics.([types.EpochLength]types.AccumulationHistory)
 }
+
+// C16 AccumulateOutputs
+func (n *JamState) SetAccumulateOutputs(accumulateOutputsByte []byte) {
+	if len(accumulateOutputsByte) == 0 {
+		return
+	}
+	sh, _, err := types.Decode(accumulateOutputsByte, reflect.TypeOf([]types.AccumulationOutput{}))
+	if err != nil {
+		return
+	}
+	n.AccumulationOutputs = sh.([]types.AccumulationOutput)
+}

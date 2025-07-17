@@ -70,12 +70,18 @@ type Data struct {
 }
 
 type ServiceData struct {
-	CodeHash        common.Hash `json:"code_hash"`    //a_c - account code hash c
-	Balance         uint64      `json:"balance"`      //a_b - account balance b, which must be greater than a_t (The threshold needed in terms of its storage footprint)
-	GasLimitG       uint64      `json:"min_item_gas"` //a_g - the minimum gas required in order to execute the Accumulate entry-point of the service's code,
-	GasLimitM       uint64      `json:"min_memo_gas"` //a_m - the minimum required for the On Transfer entry-point.
-	StorageSize     uint64      `json:"bytes"`        //a_l - total number of octets used in storage (9.3)
-	NumStorageItems uint32      `json:"items"`        //a_i - the number of items in storage (9.3)
+	CodeHash     common.Hash `json:"code_hash"`      //a_c - account code hash c
+	Balance      uint64      `json:"balance"`        //a_b - account balance b, which must be greater than a_t (The threshold needed in terms of its storage footprint)
+	GasLimitG    uint64      `json:"min_item_gas"`   //a_g - the minimum gas required in order to execute the Accumulate entry-point of the service's code,
+	GasLimitM    uint64      `json:"min_memo_gas"`   //a_m - the minimum required for the On Transfer entry-point.
+	StorageSize  uint64      `json:"bytes"`          //a_o - total number of octets used in storage (9.3)
+	GratisOffset uint64      `json:"storage_offset"` //a_f - gratis storage offset
+
+	NumStorageItems    uint32 `json:"items"`               //a_i - the number of items in storage (9.3)
+	CreateTime         uint32 `json:"create_time"`         //a_r - the timeslot at creation. used for checkpointing
+	RecentAccumulation uint32 `json:"recent_accumulation"` //a_a - the timeslot at the most recent accumulation, used for checkpointing
+	ParentService      uint32 `json:"parent_service"`      //a_p - the parent service index
+
 }
 
 type CodeImage struct {
@@ -229,14 +235,18 @@ func (j *JamState) GetStateFromAccumulateState(state AccumulateState) (services 
 		key := account.Index
 		data := account.Data
 		services[key] = &types.ServiceAccount{
-			ServiceIndex:    key,
-			CodeHash:        data.Service.CodeHash,
-			Balance:         data.Service.Balance,
-			GasLimitG:       data.Service.GasLimitG,
-			GasLimitM:       data.Service.GasLimitM,
-			StorageSize:     data.Service.StorageSize,
-			NumStorageItems: data.Service.NumStorageItems,
-			Mutable:         true,
+			ServiceIndex:       key,
+			CodeHash:           data.Service.CodeHash,
+			Balance:            data.Service.Balance,
+			GasLimitG:          data.Service.GasLimitG,
+			GasLimitM:          data.Service.GasLimitM,
+			StorageSize:        data.Service.StorageSize,
+			GratisOffset:       data.Service.GratisOffset,
+			NumStorageItems:    data.Service.NumStorageItems,
+			CreateTime:         data.Service.CreateTime,
+			RecentAccumulation: data.Service.RecentAccumulation,
+			ParentService:      data.Service.ParentService,
+			Mutable:            true,
 		}
 		for _, image := range account.Data.Images {
 			if image.PreimageHash == data.Service.CodeHash {

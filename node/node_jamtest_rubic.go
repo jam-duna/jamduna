@@ -74,6 +74,7 @@ func rubic(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 	serviceAuth := testServices["auth_copy"]
 
 	availableImportPool := make([]availableRoot, 0)
+	availableWorkPackages := make([]availableRoot, 0)
 
 	isDry := false
 	withImport := true
@@ -83,17 +84,23 @@ func rubic(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 
 	for packageN := startN; packageN < startN+targetN*jmpSize && packageN < maxN; packageN += jmpSize {
 		var imported0, imported1 []types.ImportSegment
+		var prevWorkPackageHash common.Hash
 
 		if withImport && len(availableImportPool) > 0 {
 			// Generate a variable number of imports to increase test diversity.
 			numImports0 := rand.Intn(importTargetN) + 1 // Request 1 to 5 random segments
-			numImports1 := rand.Intn(importTargetN) + 0
 			imported0 = generateImportsFromPool(availableImportPool, numImports0)
-			imported1 = generateImportsFromPool(availableImportPool, numImports1)
+		}
+		if withImport && len(availableWorkPackages) > 0 {
+			// Generate a variable number of imports to increase test diversity.
+			numImports1 := rand.Intn(importTargetN) // Request 0 to 5 random segments
+			imported1 = generateImportsFromPool(availableWorkPackages, numImports1)
 		}
 
-		payload := make([]byte, 4)
-		binary.LittleEndian.PutUint32(payload, uint32(packageN))
+		rubic_payload := make([]byte, 4)
+		binary.LittleEndian.PutUint32(rubic_payload, uint32(packageN))
+		auth_payload := make([]byte, 4)
+		binary.LittleEndian.PutUint32(auth_payload, uint32(statedb.AuthCopyServiceCode))
 
 		wp := types.WorkPackage{
 			AuthCodeHost:          0,
@@ -102,26 +109,25 @@ func rubic(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 			ParameterizationBlob:  nil,
 			WorkItems: []types.WorkItem{
 				{
-					Service:            statedb.FibServiceCode,
-					CodeHash:           service0.CodeHash,
-					Payload:            payload,
-					RefineGasLimit:     DefaultRefineGasLimit * 5,
-					AccumulateGasLimit: DefaultAccumulateGasLimit * 5,
-					ImportedSegments:   imported0,
-					ExportCount:        uint16(packageN),
-				},
-				{
 					Service:            statedb.AuthCopyServiceCode,
 					CodeHash:           serviceAuth.CodeHash,
-					Payload:            nil,
+					Payload:            auth_payload,
 					RefineGasLimit:     DefaultRefineGasLimit,
 					AccumulateGasLimit: DefaultAccumulateGasLimit,
 					ImportedSegments:   imported1,
 					ExportCount:        0,
 				},
+				{
+					Service:            statedb.FibServiceCode,
+					CodeHash:           service0.CodeHash,
+					Payload:            rubic_payload,
+					RefineGasLimit:     DefaultRefineGasLimit * 5,
+					AccumulateGasLimit: DefaultAccumulateGasLimit * 5,
+					ImportedSegments:   imported0,
+					ExportCount:        uint16(packageN),
+				},
 			},
 		}
-
 		wpr := &WorkPackageRequest{
 			Identifier:      fmt.Sprintf("Rubic(%d). ImpSegs[%d|%d]", packageN, len(imported0), len(imported1)),
 			WorkPackage:     wp,
@@ -151,6 +157,13 @@ func rubic(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 			k := common.ServiceStorageKey(statedb.FibServiceCode, []byte{0})
 			data, _, _ := n1.GetServiceStorage(statedb.FibServiceCode, k)
 			log.Info(log.Node, wpr.Identifier, "workPackageHash", wr.AvailabilitySpec.WorkPackageHash, "exportedSegmentRoot", wr.AvailabilitySpec.ExportedSegmentRoot, "result", fmt.Sprintf("%x", data))
+			prevWorkPackageHash = wr.AvailabilitySpec.WorkPackageHash
+			newlyAvailablePackageHash := availableRoot{
+				Hash:     prevWorkPackageHash,
+				TrieSize: packageN,
+			}
+			availableWorkPackages = append(availableWorkPackages, newlyAvailablePackageHash)
+			log.Info(log.G, "PackageHash unlocked and added to import pool", "trieSize", packageN, "workPackageHash", newlyAvailablePackageHash.Hash)
 		} else {
 			log.Info(log.Node, wpr.Identifier, "workPackageHash", wp.Hash(), "wp", wp.String())
 		}

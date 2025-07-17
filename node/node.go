@@ -67,14 +67,15 @@ const (
 	writeJAMPNTestVector = false // turn on true when generating JAMNP test vectors only
 
 	// GOAL: centralize use of context timeout parameters here, avoid hard
-	TinyTimeout      = 2000 * time.Millisecond
-	MiniTimeout      = 3 * time.Second
-	SmallTimeout     = 6 * time.Second
-	NormalTimeout    = 9 * time.Second
-	MediumTimeout    = 10 * time.Second
-	LargeTimeout     = 12 * time.Second
-	VeryLargeTimeout = 600 * time.Second
-	RefineTimeout    = 24 * time.Second
+	TinyTimeout                = 2000 * time.Millisecond
+	MiniTimeout                = 3 * time.Second
+	SmallTimeout               = 6 * time.Second
+	NormalTimeout              = 9 * time.Second
+	MediumTimeout              = 10 * time.Second
+	LargeTimeout               = 12 * time.Second
+	VeryLargeTimeout           = 600 * time.Second
+	RefineTimeout              = 36 * time.Second
+	RefineAndAccumalateTimeout = 96 * time.Second
 
 	fudgeFactorJCE     = 1
 	DefaultChannelSize = 200
@@ -895,7 +896,7 @@ func (n *Node) GetService(serviceIndex uint32) (sa *types.ServiceAccount, ok boo
 	return n.getState().GetService(serviceIndex)
 }
 
-func (n *Node) GetServiceStorage(serviceIndex uint32, k common.Hash) ([]byte, bool, error) {
+func (n *Node) GetServiceStorage(serviceIndex uint32, k []byte) ([]byte, bool, error) {
 	return n.getState().GetTrie().GetServiceStorage(serviceIndex, k)
 }
 
@@ -938,20 +939,6 @@ func (n *Node) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex uint32
 const (
 	maxRobustTries = 4
 )
-
-type JNode interface {
-	GetFinalizedBlock() (blk *types.Block, err error)
-	SetJCEManager(jceManager *ManualJCEManager) (err error)
-	GetJCEManager() (jceManager *ManualJCEManager, err error)
-	SubmitAndWaitForWorkPackage(ctx context.Context, wpr *WorkPackageRequest) (common.Hash, error)
-	SubmitAndWaitForWorkPackages(ctx context.Context, wpr []*WorkPackageRequest) ([]common.Hash, error)
-	SubmitAndWaitForPreimage(ctx context.Context, serviceID uint32, preimage []byte) error
-	GetWorkReport(requestedHash common.Hash) (*types.WorkReport, error)
-	GetService(service uint32) (sa *types.ServiceAccount, ok bool, err error)
-	GetServiceStorage(serviceID uint32, stroageKey common.Hash) ([]byte, bool, error)
-	GetSegments(importedSegments []types.ImportSegment) (raw_segments [][]byte, err error)
-	GetSegmentsByRequestedHash(requestedHashes common.Hash) (raw_segments [][]byte, ExportedSegmentLength uint16, err error)
-}
 
 // RobustSubmitAndWaitForWorkPackages will retry SubmitAndWaitForWorkPackages up to 4 times
 func RobustSubmitAndWaitForWorkPackages(ctx context.Context, n JNode, reqs []*WorkPackageRequest) (*types.WorkReport, error) {

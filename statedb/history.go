@@ -14,9 +14,14 @@ import (
 // C3
 type RecentBlocks []Beta_state
 
+// TODO: [Sourabh] Recent Blocks: AccOuts in state, store historical roots only
+// Store only MMB root hash in Recent History, as only this is what is needed for verification
+// Separately, store the MMB peak set and the accumulation outputs of the most recent block.
+//
+//	https://github.com/gavofyork/graypaper/commit/c48ad4498ba9df4abbad470aa9aac553ac33b864
 type Beta_state struct {
 	HeaderHash common.Hash                    `json:"header_hash"`
-	B          trie.MMR                       `json:"mmr"`
+	B          trie.MMR                       `json:"b"`
 	StateRoot  common.Hash                    `json:"state_root"`
 	Reported   types.SegmentRootLookupHistory `json:"reported"` // Use the custom type
 }
@@ -32,7 +37,7 @@ func (b *Beta_state) String() string {
 func (b *Beta_state) UnmarshalJSON(data []byte) error {
 	var s struct {
 		HeaderHash common.Hash                    `json:"header_hash"`
-		B          trie.MMR                       `json:"mmr"`
+		B          trie.MMR                       `json:"b"`
 		StateRoot  common.Hash                    `json:"state_root"`
 		Report     types.SegmentRootLookupHistory `json:"reported"`
 	}
@@ -49,7 +54,7 @@ func (b *Beta_state) UnmarshalJSON(data []byte) error {
 func (b Beta_state) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		HeaderHash common.Hash                    `json:"header_hash"`
-		B          trie.MMR                       `json:"mmr"`
+		B          trie.MMR                       `json:"b"`
 		StateRoot  common.Hash                    `json:"state_root"`
 		Report     types.SegmentRootLookupHistory `json:"reported"`
 	}{
@@ -61,7 +66,7 @@ func (b Beta_state) MarshalJSON() ([]byte, error) {
 }
 
 // Recent History : see Section 7
-func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *common.Hash) {
+func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *common.Hash, accumulationOutputs []types.AccumulationOutput) {
 	// Eq 83 n
 	// Eq 83 n.p -- aggregate all the workpackagehashes of the guarantees
 	reported := []types.SegmentRootLookupItemHistory{}
@@ -84,16 +89,14 @@ func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *co
 	if len(preRecentBlocks) > 0 {
 		mmr.Peaks = preRecentBlocks[len(preRecentBlocks)-1].B.Peaks
 	}
-
 	mmr.Append(accumulationRoot)
-	//log.Trace(s.Authoring, "BETA computation", "n", s.Id, "accumulationRoot", accumulationRoot, "mmr", (*mmr).String())
+	s.JamState.AccumulationOutputs = accumulationOutputs
 	n := Beta_state{
 		Reported:   reported,          // p
 		HeaderHash: blk.Header.Hash(), // h
 		B:          *mmr,              // b
 		StateRoot:  common.Hash{},     // this will become the POSTERIOR stateroot in the NEXT update, updated via **** above
 	}
-
 	// Eq 84 β' ≡ β† ++ n (last H=types.RecentHistorySize)
 	postRecentBlocks := append(preRecentBlocks, n)
 	if len(postRecentBlocks) > types.RecentHistorySize {

@@ -149,6 +149,10 @@ func encodeapi(objectType string, inp string) (string, error) {
 		var c15 [types.EpochLength]types.AccumulationHistory
 		err = json.Unmarshal(input, &c15)
 		obj = c15
+	case "C16":
+		var c16 []types.AccumulationOutput
+		err = json.Unmarshal(input, &c16)
+		obj = c16
 	case "JamState":
 		var jamstate statedb.StateSnapshot
 		err = json.Unmarshal(input, &jamstate)

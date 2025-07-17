@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/rand"
+	"os"
 	"testing"
 	"time"
 
@@ -92,7 +93,7 @@ func TestMerkleTree(t *testing.T) {
 	t.Skip("Skip Merkele Tree Until we have 31bytes k,v version")
 	// Read the JSON file
 	filePath := "../jamtestvectors/trie/trie.json"
-	data, err := ioutil.ReadFile(filePath)
+	data, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatalf("Failed to read JSON file: %v", err)
 	}

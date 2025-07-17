@@ -28,7 +28,7 @@ func (s *StateDB) GetAuthorizeCode(wp types.WorkPackage) (auth_code_real []byte,
 		log.Error(log.G, "GetAuthorizeCode: Authorization code decode error", "workPackage", wp.String(), "codeHash", p_u, "error", err)
 		return nil, nil, 0, fmt.Errorf("getAuthorizeCode: Authorization code(%s) decode error, err: %v", p_u.String_short(), err)
 	}
-	if code == nil || len(code) == 0 {
+	if len(code) == 0 {
 		log.Error(log.G, "GetAuthorizeCode: Authorization code not found", "workPackage", wp.String(), "codeHash", p_u)
 		return nil, nil, 0, fmt.Errorf("getAuthorizeCode: Authorization code(%s)not found, err: %v", p_u.String_short(), err)
 	}

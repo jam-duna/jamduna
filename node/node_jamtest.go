@@ -196,7 +196,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	// For example, to enable DEBUG logging for rotation, guarantees, node, state, quic, preimage:
 	// "rotation,guarantees,node,state,quic,preimage"
 	log.InitLogger("debug")
-	debug := "rotation,guarantees"
+	debug := "guarantees"
 	log.EnableModules(debug)
 
 	// Specify testServices
@@ -233,6 +233,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		serviceNames = []string{"auth_copy"}
 	case "revm":
 		serviceNames = []string{"revm_test", "auth_copy"}
+	case "all":
+		serviceNames = []string{"fib", "tribonacci", "megatron", "auth_copy", "game_of_life"}
 	default:
 		serviceNames = []string{"auth_copy", "fib"}
 	}
@@ -341,8 +343,6 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	bootstrapService := uint32(statedb.BootstrapServiceCode)
 	bootstrapCodeHash := common.Blake2Hash(bootstrapCode)
 
-	new_service_idx := uint32(0)
-
 	testServices, err := getServices(serviceNames, true)
 	if err != nil {
 		t.Fatalf("GetServices %v", err)
@@ -365,6 +365,13 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	var jceManager *ManualJCEManager
 	jceManager = nil
 	var previous_service_idx uint32
+	requireNew := jam == "fib"
+	var bootstrap_workItems []types.WorkItem
+	log.Info(log.Node, "JAMTEST", "jam", jam, "targetN", targetN, "requireNew", requireNew)
+
+	serviceList := []string{}
+	serviceCodeList := make([][]byte, 0)
+	serviceCodeHashList := []string{}
 	for serviceName, service := range testServices {
 		if serviceName == "auth_copy" {
 			service.ServiceCode = statedb.AuthCopyServiceCode
@@ -372,60 +379,78 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		}
 		if serviceName == "fib" {
 			service.ServiceCode = statedb.FibServiceCode
-			continue
+			//continue
 		}
+		workItem := types.WorkItem{
+			Service:            bootstrapService,
+			CodeHash:           bootstrapCodeHash,
+			Payload:            append(service.CodeHash.Bytes(), binary.LittleEndian.AppendUint32(nil, uint32(len(service.Code)))...),
+			RefineGasLimit:     DefaultRefineGasLimit,
+			AccumulateGasLimit: DefaultAccumulateGasLimit,
+			ImportedSegments:   make([]types.ImportSegment, 0),
+			ExportCount:        0,
+		}
+		bootstrap_workItems = append(bootstrap_workItems, workItem)
+		serviceList = append(serviceList, serviceName)
+		serviceCodeList = append(serviceCodeList, service.Code)
+		serviceCodeHashList = append(serviceCodeHashList, fmt.Sprintf("%s:%s", serviceName, common.Str(service.CodeHash)))
+	}
+	fmt.Printf("Services to be loaded: %s\n", serviceCodeHashList)
 
+	if requireNew {
 		// set up service using the Bootstrap service
 		codeWorkPackage := types.WorkPackage{
 			Authorization:         []byte(""),
 			AuthCodeHost:          bootstrapService,
 			AuthorizationCodeHash: bootstrap_auth_codehash,
 			ParameterizationBlob:  []byte{},
-			WorkItems: []types.WorkItem{
-				{
-					Service:            bootstrapService,
-					CodeHash:           bootstrapCodeHash,
-					Payload:            append(service.CodeHash.Bytes(), binary.LittleEndian.AppendUint32(nil, uint32(len(service.Code)))...),
-					RefineGasLimit:     DefaultRefineGasLimit,
-					AccumulateGasLimit: DefaultAccumulateGasLimit,
-					ImportedSegments:   make([]types.ImportSegment, 0),
-					ExportCount:        0,
-				},
-			},
+			WorkItems:             bootstrap_workItems,
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), RefineAndAccumalateTimeout)
 		defer cancel()
 		wpr := &WorkPackageRequest{
-			Identifier:      fmt.Sprintf("NewService(%s, %s)", serviceName, common.Str(service.CodeHash)),
+			Identifier:      fmt.Sprintf("NewServices(%s)", serviceList),
 			WorkPackage:     codeWorkPackage,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 		}
 
-		_, err := RobustSubmitAndWaitForWorkPackages(ctx, bNode, []*WorkPackageRequest{wpr})
+		_, err = RobustSubmitAndWaitForWorkPackages(ctx, bNode, []*WorkPackageRequest{wpr})
 		if err != nil {
 			t.Fatalf("SendWorkPackageSubmission ERR %v\n", err)
 		}
-		k := common.ServiceStorageKey(bootstrapService, []byte{0, 0, 0, 0})
-		service_account_byte, ok, err := bNode.GetServiceStorage(0, k)
-		if err != nil {
-			t.Fatalf("SendWorkPackageSubmission ERR %v", err)
-		}
-		if !ok {
 
-		}
-		decoded_new_service_idx := uint32(types.DecodeE_l(service_account_byte))
-		if decoded_new_service_idx != 0 && (decoded_new_service_idx != previous_service_idx) {
-			service.ServiceCode = decoded_new_service_idx
-			new_service_idx = decoded_new_service_idx
+		// batch service submission done, now check if the service was set up correctly
+		serviceIDList := make([]uint32, len(serviceList))
+		for workItemIdx, serverName := range serviceList {
+			workItemKey, _ := types.Encode(uint32(workItemIdx))
+			k := common.ServiceStorageKey(bootstrapService, workItemKey)
+			k_service_account_byte, ok, err := bNode.GetServiceStorage(0, k)
+			if err != nil {
+				t.Fatalf("SendWorkPackageSubmission ERR %v", err)
+			}
+			if !ok {
+				t.Fatalf("SendWorkPackageSubmission NOT OK %v", err)
+			}
+			decoded_new_service_idx := uint32(types.DecodeE_l(k_service_account_byte))
+			if decoded_new_service_idx != 0 && (decoded_new_service_idx != previous_service_idx) {
+				testServices[serverName].ServiceCode = decoded_new_service_idx
+				serviceIDList[workItemIdx] = decoded_new_service_idx
+				fmt.Printf("Service %s created=%d\n", serverName, decoded_new_service_idx)
+			}
 		}
 
-		err = bNode.SubmitAndWaitForPreimage(ctx, new_service_idx, service.Code)
-		if err != nil {
-			log.Error(log.Node, "SubmitAndWaitForPreimage", "err", err)
+		for workItemIdx, serviceID := range serviceIDList {
+			serviceName := serviceList[workItemIdx]
+			preimageBlob := serviceCodeList[workItemIdx]
+			codeHash := common.Blake2Hash(preimageBlob)
+			err = bNode.SubmitAndWaitForPreimage(ctx, serviceID, preimageBlob)
+			if err != nil {
+				log.Error(log.Node, "SubmitAndWaitForPreimage", "err", err)
+			}
+			log.Info(log.Node, "----- NEW SERVICE", "service", serviceName, "service_idx", serviceID, "codeHash", codeHash, "codeLen", len(preimageBlob))
 		}
-		log.Info(log.Node, "----- NEW SERVICE", "service", serviceName, "service_idx", new_service_idx)
-
 	}
+
 	if len(testServices) > 0 {
 		log.Info(log.Node, "testServices Loaded", "jam", jam, "testServices", testServices, "targetN", targetN)
 	}
@@ -463,7 +488,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	case "megatron":
 		megatron(bNode, testServices, 5)
 	case "auth_copy":
-		auth_copy(bNode, testServices, targetN)
+		reassign(bNode, testServices)
 
 	// TODO: modernize those tests?
 	case "transfer":
@@ -484,47 +509,5 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		blake2b(bNode, testServices)
 	case "revm":
 		revm(bNode, testServices)
-	}
-}
-
-func auth_copy(n1 JNode, testServices map[string]*types.TestService, targetN int) {
-	log.Info(log.Node, "FIB START", "targetN", targetN)
-	service_authcopy := testServices["auth_copy"]
-
-	for fibN := 1; fibN <= targetN; fibN++ {
-		payload := make([]byte, 4)
-		binary.LittleEndian.PutUint32(payload, uint32(fibN))
-		workPackage := types.WorkPackage{
-			AuthCodeHost:          0,
-			Authorization:         []byte("0x"), // TODO: set up null-authorizer
-			AuthorizationCodeHash: bootstrap_auth_codehash,
-			ParameterizationBlob:  []byte{},
-			WorkItems: []types.WorkItem{
-				{
-					Service:            service_authcopy.ServiceCode,
-					CodeHash:           service_authcopy.CodeHash,
-					Payload:            []byte{},
-					RefineGasLimit:     DefaultRefineGasLimit,
-					AccumulateGasLimit: DefaultAccumulateGasLimit,
-					ImportedSegments:   make([]types.ImportSegment, 0),
-					ExportCount:        0,
-				},
-			},
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
-		defer cancel()
-		wpr := &WorkPackageRequest{
-			Identifier:      fmt.Sprintf("Auth(%d)", fibN),
-			WorkPackage:     workPackage,
-			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
-		}
-
-		_, err := n1.SubmitAndWaitForWorkPackage(ctx, wpr)
-		if err != nil {
-			fmt.Printf("SubmitAndWaitForWorkPackage ERR %v\n", err)
-		} else {
-			log.Info(log.Node, "Authcopy Success", "N", fibN)
-		}
 	}
 }

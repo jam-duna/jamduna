@@ -10,7 +10,7 @@ func (s *StateDB) Finalize(v types.ValidatorSecret) (blsSignature bls.Signature,
 	finalizedEpoch = false
 	s.Finalized = true
 	if s.Block.Header.EpochMark != nil {
-		lastB := s.JamState.RecentBlocks[len(s.JamState.RecentBlocks)-1].B.Peaks
+		lastB := s.JamState.RecentBlocks[len(s.JamState.RecentBlocks)-1].B
 		bEncoding, err0 := types.Encode(lastB)
 		if err0 != nil {
 			return

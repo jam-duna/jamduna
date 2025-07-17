@@ -417,10 +417,12 @@ func (vm *RecompilerVM) chargeGas(host_fn int) uint64 {
 		exp = "PEEK"
 	case POKE:
 		exp = "POKE"
-	case ZERO:
-		exp = "ZERO"
-	case VOID:
-		exp = "VOID"
+		/*
+			case ZERO:
+				exp = "ZERO"
+			case VOID:
+				exp = "VOID"
+		*/
 	case INVOKE:
 		exp = "INVOKE"
 	case EXPUNGE:
@@ -598,14 +600,6 @@ func (vm *RecompilerVM) InvokeHostCall(host_fn int) (bool, error) {
 		vm.hostPoke()
 		return true, nil
 
-	case ZERO:
-		vm.hostZero()
-		return true, nil
-
-	case VOID:
-		vm.hostVoid()
-		return true, nil
-
 	case INVOKE:
 		vm.hostInvoke()
 		return true, nil
@@ -617,11 +611,19 @@ func (vm *RecompilerVM) InvokeHostCall(host_fn int) (bool, error) {
 	case LOG:
 		vm.hostLog()
 		return true, nil
+		/*
+			case ZERO:
+				vm.hostZero()
+				return true, nil
 
-	case MANIFEST:
-		vm.hostManifest()
-		return true, nil
+			case VOID:
+				vm.hostVoid()
+				return true, nil
 
+			case MANIFEST:
+				vm.hostManifest()
+				return true, nil
+		*/
 	default:
 		vm.Gas = vm.Gas + g
 		return false, fmt.Errorf("unknown host call: %d", host_fn)

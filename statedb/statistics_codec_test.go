@@ -12,10 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const (
-	debugCodec = false
-)
-
 type Input struct {
 	Slot        uint32              `json:"slot"`
 	AuthorIndex uint16              `json:"author_index"`

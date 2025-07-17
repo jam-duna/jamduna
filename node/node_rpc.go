@@ -627,13 +627,14 @@ func (j *Jam) ServiceValue(req []string, res *string) error {
 	if err != nil {
 		return err
 	}
-	storage_hash := common.HexToHash(storage_hashStr)
-	storage, ok, err := j.statedb.ReadServiceStorage(uint32(serviceIndex), storage_hash)
+	//storage_hash := common.HexToHash(storage_hashStr)
+	storage_byte := common.FromHex(storage_hashStr)
+	storage, ok, err := j.statedb.ReadServiceStorage(uint32(serviceIndex), storage_byte)
 	if err != nil {
-		return fmt.Errorf("ReadServiceStorage failed (serviceID=%d, h=%s) %v", serviceIndex, storage_hash, err)
+		return fmt.Errorf("ReadServiceStorage failed (serviceID=%d, h=%s) %v", serviceIndex, storage_hashStr, err)
 	}
 	if !ok {
-		return fmt.Errorf("ReadServiceStorage not found (serviceID=%d, h=%s)", serviceIndex, storage_hash)
+		return fmt.Errorf("ReadServiceStorage not found (serviceID=%d, h=%s)", serviceIndex, storage_hashStr)
 	}
 	*res = common.Bytes2Hex(storage)
 	return nil

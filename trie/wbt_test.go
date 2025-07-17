@@ -210,9 +210,7 @@ func TestGenerateWBTJustification(t *testing.T) {
 
 	numShards := len(leaves)
 	values := make([][]byte, numShards)
-	for i, sb := range leaves {
-		values[i] = sb
-	}
+	copy(values, leaves)
 
 	wbt := NewWellBalancedTree(values, types.Blake2b)
 	if debugWBT {

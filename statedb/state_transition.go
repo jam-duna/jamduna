@@ -25,13 +25,13 @@ func initStorage(testDir string) (*storage.StateDBStorage, error) {
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
 		err = os.MkdirAll(testDir, os.ModePerm)
 		if err != nil {
-			return nil, fmt.Errorf("Failed to create directory /tmp/fuzz: %v", err)
+			return nil, fmt.Errorf("failed to create directory /tmp/fuzz: %v", err)
 		}
 	}
 
 	sdb_storage, err := storage.NewStateDBStorage(testDir)
 	if err != nil {
-		return nil, fmt.Errorf("Error with storage: %v", err)
+		return nil, fmt.Errorf("error with storage: %v", err)
 	}
 	return sdb_storage, nil
 

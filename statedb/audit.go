@@ -58,7 +58,7 @@ var zerobytes = []byte{0} // TODO : How To change this to []byte{}?
 // eq 190
 func (s *StateDB) Get_s0Quantity(V bandersnatch.BanderSnatchSecret) ([]byte, error) {
 	if len(V) != 32 {
-		return nil, errors.New("Invalid length of V")
+		return nil, errors.New("invalid length of V")
 	}
 	alias, err := AliasOutput(s.Block.Header.EntropySource.Bytes())
 	if err != nil {
@@ -75,7 +75,7 @@ func (s *StateDB) Get_s0Quantity(V bandersnatch.BanderSnatchSecret) ([]byte, err
 
 func (s *StateDB) Verify_s0(pubkey bandersnatch.BanderSnatchKey, signature []byte) (bool, error) {
 	if len(pubkey) != 32 {
-		return false, errors.New("Invalid length of pubkey")
+		return false, errors.New("invalid length of pubkey")
 	}
 	alias, err := AliasOutput(s.Block.Header.EntropySource.Bytes())
 	if err != nil {
@@ -149,7 +149,7 @@ func (s *StateDB) Select_a0(V bandersnatch.BanderSnatchSecret) ([]types.WorkRepo
 
 	}
 	if len(s0) != 96 {
-		return nil, bandersnatch.BandersnatchVrfSignature{}, errors.New("Invalid length of s0")
+		return nil, bandersnatch.BandersnatchVrfSignature{}, errors.New("invalid length of s0")
 	}
 	var s0Signature bandersnatch.BandersnatchVrfSignature
 	copy(s0Signature[:], s0)
@@ -241,7 +241,6 @@ func ShuffleWorkReport(slice []types.WorkReportSelection, entropy []uint32) {
 		j := entropy[i] % uint32(i+1)
 		slice[i], slice[j] = slice[j], slice[i]
 	}
-	return
 }
 
 // TODO: tranch is potentially touching JCE logic with now() -- shawn to fix it
@@ -284,11 +283,8 @@ func (s *StateDB) MakeAnnouncement(tranche uint32, workreport []types.WorkReport
 
 func (s *StateDB) ValidateWorkReport(wp types.WorkPackage) bool {
 	// Simulate a 10% chance of returning false
-	if rand.Intn(10) == 0 {
-		return false
-	}
+	return rand.Intn(10) != 0
 	// TODO: Implement the actual validation logic
-	return true
 }
 
 // eq 205
@@ -318,8 +314,8 @@ func (s *StateDB) IsReportAuditedTiny(A *types.AnnounceBucket, J *types.JudgeBuc
 		J.RLock()
 		defer J.RUnlock()
 		for _, j := range J.Judgements[W_hash] {
-			if j.Judge != true {
-				return fmt.Errorf("Validator[%d] said false /n", j.Validator)
+			if !j.Judge {
+				return fmt.Errorf("validator[%d] said false", j.Validator)
 			}
 		}
 		return nil
@@ -327,7 +323,7 @@ func (s *StateDB) IsReportAuditedTiny(A *types.AnnounceBucket, J *types.JudgeBuc
 	if J.GetTrueCount(W_hash) >= types.ValidatorsSuperMajority {
 		return nil
 	}
-	return fmt.Errorf("Audit not yet finished")
+	return fmt.Errorf("audit not yet finished")
 
 }
 
@@ -349,7 +345,7 @@ func (s *StateDB) IsBlockAuditedTiny(A *types.AnnounceBucket, J *types.JudgeBuck
 		if s.IsReportAuditedTiny(A, J, av.GetWorkPackageHash()) == nil {
 			continue
 		} else {
-			return fmt.Errorf("WorkReport:%v didn't finish audit\n", av.GetWorkPackageHash())
+			return fmt.Errorf("workReport:%v didn't finish audit", av.GetWorkPackageHash())
 		}
 	}
 	return nil
@@ -427,12 +423,12 @@ func (s *StateDB) AppendDisputes(J *types.JudgeBucket, W_hash common.Hash, old_g
 	false_count := J.GetFalseCount(W_hash)
 	block := s.Block.Copy()
 	if true_count+false_count < types.ValidatorsSuperMajority {
-		return nil, fmt.Errorf("Not enough votes: true_count=%d, false_count=%d", true_count, false_count)
+		return nil, fmt.Errorf("not enough votes: true_count=%d, false_count=%d", true_count, false_count)
 	}
 
 	if true_count >= types.ValidatorsSuperMajority {
 		if false_count == 0 {
-			return nil, errors.New("Not Required")
+			return nil, errors.New("not Required")
 		}
 		s.appendGoodSetDispute(block, J, W_hash)
 		return block, nil
@@ -444,7 +440,7 @@ func (s *StateDB) AppendDisputes(J *types.JudgeBucket, W_hash common.Hash, old_g
 		return block, nil
 	}
 
-	return nil, fmt.Errorf("No need to dispute")
+	return nil, fmt.Errorf("no need to dispute")
 }
 
 func (s *StateDB) appendGoodSetDispute(block *types.Block, J *types.JudgeBucket, W_hash common.Hash) {
@@ -455,9 +451,7 @@ func (s *StateDB) appendGoodSetDispute(block *types.Block, J *types.JudgeBucket,
 		Epoch:  s.GetSafrole().GetEpoch(),
 	}
 
-	for i, true_vote := range true_votes {
-		goodset_verdict.Votes[i] = true_vote
-	}
+	copy(goodset_verdict.Votes[:], true_votes)
 
 	block.Extrinsic.Disputes.Verdict = append(s.Block.Extrinsic.Disputes.Verdict, goodset_verdict)
 	block.Extrinsic.Disputes.Fault = append(s.Block.Extrinsic.Disputes.Fault, faults...)
@@ -470,9 +464,7 @@ func (s *StateDB) appendBadSetDispute(block *types.Block, J *types.JudgeBucket, 
 		Epoch:  s.GetSafrole().GetEpoch(),
 	}
 
-	for i, false_vote := range false_votes {
-		badset_verdict.Votes[i] = false_vote
-	}
+	copy(badset_verdict.Votes[:], false_votes)
 
 	block.Extrinsic.Disputes.Verdict = append(block.Extrinsic.Disputes.Verdict, badset_verdict)
 	culprits := s.JudgementToCulprit(old_guarantee)

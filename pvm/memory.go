@@ -12,6 +12,7 @@ type RAMInterface interface {
 	allocatePages(startPage uint32, count uint32)
 	GetCurrentHeapPointer() uint32
 	SetCurrentHeapPointer(pointer uint32)
+	//SetPageAccess(pageIndex int, access byte)
 	ReadRegister(index int) (uint64, uint64)
 	WriteRegister(index int, value uint64) uint64
 	ReadRegisters() []uint64
@@ -83,6 +84,9 @@ func NewRAM(o_size uint32, w_size uint32, p_s uint32) *RAM {
 
 	return ram
 }
+func (ram *RAM) SetPageAccess(pageIndex int, access byte) {
+	// TODO: match the model of below ... but how?
+}
 
 func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
 	length := uint32(len(data))
@@ -132,6 +136,8 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 	if address >= ram.rw_data_address && end <= Z_func(ram.current_heap_pointer) {
 		offset := address - ram.rw_data_address
 		if offset+length > uint32(len(ram.rw_data)) {
+			fmt.Printf("ADDRESS %x rw_data_address %x offset %x\n", address, ram.rw_data_address, offset)
+
 			return nil, OOB
 		}
 		return ram.rw_data[offset : offset+length], OK

@@ -126,7 +126,7 @@ func Initial_bpt(db *storage.StateDBStorage) ([]byte, *MerkleTree, error) {
 	for s, hexString := range service_account_info {
 		service_account_info_byte, err := hex.DecodeString(hexString)
 		if err != nil {
-			err = fmt.Errorf("Failed to decode service value %s: %v", hexString, err)
+			err = fmt.Errorf("failed to decode service value %s: %v", hexString, err)
 			return nil, nil, err
 		}
 		tree.SetService(uint32(s), service_account_info_byte)
@@ -139,7 +139,7 @@ func Initial_bpt(db *storage.StateDBStorage) ([]byte, *MerkleTree, error) {
 		// }
 		service_account_storage_value_byte, err := hex.DecodeString(hexString[1])
 		if err != nil {
-			err = fmt.Errorf("Failed to decode service value %s: %v", hexString, err)
+			err = fmt.Errorf("failed to decode service value %s: %v", hexString, err)
 			return nil, nil, err
 		}
 		tree.SetPreImageBlob(uint32(s), service_account_storage_value_byte)
@@ -152,7 +152,7 @@ func Initial_bpt(db *storage.StateDBStorage) ([]byte, *MerkleTree, error) {
 		// }
 		service_account_primage_value_byte, err := hex.DecodeString(hexString[1])
 		if err != nil {
-			err = fmt.Errorf("Failed to decode service value %s: %v", hexString, err)
+			err = fmt.Errorf("failed to decode service value %s: %v", hexString, err)
 			return nil, nil, err
 		}
 		tree.SetPreImageBlob(uint32(s), service_account_primage_value_byte)
@@ -166,7 +166,7 @@ func Initial_bpt(db *storage.StateDBStorage) ([]byte, *MerkleTree, error) {
 		// }
 		service_account_primage_l_value_byte, err := hex.DecodeString(hexString[1])
 		if err != nil {
-			err = fmt.Errorf("Failed to decode service value %s: %v", hexString, err)
+			err = fmt.Errorf("failed to decode service value %s: %v", hexString, err)
 			return nil, nil, err
 		}
 		tree.SetPreImageBlob(uint32(s), service_account_primage_l_value_byte)

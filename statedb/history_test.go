@@ -61,6 +61,7 @@ func HistorySTF(input HInput, s HState) (poststate HState) {
 			SegmentRoot:     g.SegmentRoot,
 		})
 	}
+
 	n := Beta_state{
 		Reported:   reported,         // p
 		HeaderHash: input.HeaderHash, // h
@@ -93,6 +94,9 @@ func TestRecentHistory(t *testing.T) {
 			}
 			var h HistoryData
 			err = json.Unmarshal(jsonData, &h)
+			if err != nil {
+				t.Fatalf("failed to unmarshal JSON data: %v", err)
+			}
 			expectedh := h.PostState
 			posth := HistorySTF(h.Input, h.PreState)
 			if len(expectedh.RecentBlocks) != len(posth.RecentBlocks) {

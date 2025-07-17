@@ -101,8 +101,7 @@ func comnputeExportedRoot(testCases []Full137Resp) ([]common.Hash, error) {
 	fmt.Printf("Redoing %d exported segments and %d paged proofs\n", len(exportedSegments), len(pagedProofs))
 	exportedRoots := make([]common.Hash, 0)
 	for i := 0; i <= len(exportedSegments); i++ {
-		var segs [][]byte
-		segs = common.DeepCopySegments(exportedSegments[:i])
+		segs := common.DeepCopySegments(exportedSegments[:i])
 		exportedSegmentTree := NewCDMerkleTree(segs)
 		exportedRoot := exportedSegmentTree.RootHash()
 		fmt.Printf("ExportedSegment Root with %d segment(s): %v\n", len(segs), exportedRoot)

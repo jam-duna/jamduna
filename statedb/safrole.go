@@ -59,7 +59,7 @@ func SafroleBasicStateFromBytes(data []byte) (SafroleBasicState, error) {
 func (s *SafroleState) GetNextRingCommitment() ([]byte, error) {
 	ringsetBytes, ringSize := s.GetRingSet("Next")
 	if len(ringsetBytes) == 0 {
-		return nil, fmt.Errorf("Not ready yet")
+		return nil, fmt.Errorf("not ready yet")
 	}
 	nextRingCommitment, err := bandersnatch.GetRingCommitment(ringSize, ringsetBytes)
 	if err != nil {
@@ -191,7 +191,7 @@ func (s *SafroleState) GenerateWinningMarker() ([]*types.TicketBody, error) {
 	tickets := s.NextEpochTicketsAccumulator
 	if len(tickets) != types.EpochLength {
 		//accumulator should keep exactly EpochLength ticket
-		return nil, fmt.Errorf("Invalid Ticket size")
+		return nil, fmt.Errorf("invalid Ticket size")
 	}
 	outsidein_tickets := s.computeTicketSlotBinding(tickets)
 	return outsidein_tickets, nil
@@ -207,9 +207,9 @@ type SOutput struct {
 
 // StateDB STF Errors
 const (
-	errEpochFirstSlotNotMet                = "Fail: EpochFirst not met"
-	errExtrinsicWithMoreTicketsThanAllowed = "Fail: Submit an extrinsic with more tickets than allowed."
-	errInvalidWinningMarker                = "Fail: Invalid winning marker"
+	errEpochFirstSlotNotMet                = "fail: EpochFirst not met"
+	errExtrinsicWithMoreTicketsThanAllowed = "fail: Submit an extrinsic with more tickets than allowed"
+	errInvalidWinningMarker                = "fail: Invalid winning marker"
 )
 
 type ClaimData struct {
@@ -269,10 +269,7 @@ func (s *SafroleState) IseWinningMarkerNeeded(currJCE uint32) bool {
 
 func (s *SafroleState) IsTicketSubmissionClosed(currJCE uint32) bool {
 	_, currPhase := s.EpochAndPhase(currJCE)
-	if currPhase >= types.TicketSubmissionEndSlot {
-		return true
-	}
-	return false
+	return currPhase >= types.TicketSubmissionEndSlot
 }
 
 func CalculateEpochAndPhase(currentTimeslot, priorTimeslot uint32) (currentEpoch, priorEpoch, currentPhase, priorPhase uint32) {
@@ -514,7 +511,7 @@ func (s *SafroleState) generateTicket(secret bandersnatch.BanderSnatchSecret, ta
 	auxData := []byte{}
 
 	if len(s.NextValidators) == 0 {
-		return types.Ticket{}, 0, fmt.Errorf("No validators in NextValidators")
+		return types.Ticket{}, 0, fmt.Errorf("no validators in NextValidators")
 	}
 	ringsetBytes, ringSize := s.GetRingSet("Next")
 
@@ -581,7 +578,7 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (co
 // ringVRF
 func (s *SafroleState) ValidateIncomingTicket(t *types.Ticket) (common.Hash, int, error) {
 	if t.Attempt >= types.TicketEntriesPerValidator {
-		return common.Hash{}, -1, fmt.Errorf(errExtrinsicWithMoreTicketsThanAllowed)
+		return common.Hash{}, -1, errors.New(errExtrinsicWithMoreTicketsThanAllowed)
 	}
 	for i := 1; i < 3; i++ {
 		targetEpochRandomness := s.Entropy[i]
@@ -810,13 +807,7 @@ func (s *SafroleState) CheckTimeSlotReady(currJCE uint32) (uint32, bool) {
 }
 
 func (s *SafroleState) CheckFirstPhaseReady(currJCE uint32) (isReady bool) {
-	// timeslot mark
-	phaseEnd := uint32(types.EpochLength)
-	if currJCE < phaseEnd {
-		//fmt.Printf("CheckFirstPhaseReady:FALSE currJCE: %d, phaseEnd: %d\n", currJCE, phaseEnd)
-		return false
-	}
-	return true
+	return currJCE >= uint32(types.EpochLength)
 }
 
 func cloneSafroleState(original SafroleState) SafroleState {

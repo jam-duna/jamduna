@@ -7,7 +7,7 @@ NUM_NODES ?= 6
 DEFAULT_PORT ?= 40000
 SINGLE_NODE_PORT ?= 40005
 BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
-JAM_start-time ?= $(shell \
+JAM_START_TIME ?= $(shell \
 	if date --version >/dev/null 2>&1; then \
 		date -d "5 seconds" "+%Y-%m-%d %H:%M:%S"; \
 	else \
@@ -76,6 +76,14 @@ jam:
 	mkdir -p $(OUTPUT_DIR)
 	go build -tags=  -o $(OUTPUT_DIR)/$(ARCH)/$(BINARY) .
 
+duna_spec: jam
+	@echo "Generating Duna chainspec..."
+	./$(OUTPUT_DIR)/$(ARCH)/$(BINARY) gen-spec chainspecs/dev-config.json chainspecs/jamduna-spec.json
+
+polka_spec: jam
+	@echo "Generating Polka chainspec..."
+	./$(POLKAJAM_BIN) -p tiny gen-spec chainspecs/dev-config.json chainspecs/polkajam-spec.json
+
 # ANSI color codes
 GREEN=\033[0;32m
 YELLOW=\033[1;33m
@@ -85,6 +93,7 @@ define build_with_status
 	@echo "Building $(1)..."
 	@$(2) && echo "$(GREEN)✓ Done: $(1)$(RESET)" || echo "$(YELLOW)⚠ Failed to build: $(1)$(RESET)"
 endef
+
 
 static_jam_linux_amd64:
 	@echo "Building JamDuna binary for Linux (x86_64)..."
@@ -156,7 +165,7 @@ jam_clean:
 
 run_parallel_jam:
 	@mkdir -p logs
-	@echo "Starting $(NUM_NODES) instances of $(OUTPUT_DIR)/$(BINARY) with start_time=$(JAM_start-time)..."
+	@echo "Starting $(NUM_NODES) instances of $(OUTPUT_DIR)/$(BINARY) with start_time=$(JAM_START_TIME)..."
 	@for i in $$(seq 0 $$(($(NUM_NODES) - 1))); do \
 		PORT=$$(($(DEFAULT_PORT) + $$i)); \
 		V_IDX=$$i; \
@@ -165,10 +174,12 @@ run_parallel_jam:
 			--chain $(CHAINSPEC) \
 			--dev-validator $$V_IDX \
 			--debug rotation,guarantees \
-			--start-time "$(JAM_start-time)" & \
-	done; \
-	wait
+			--start-time "$(JAM_START_TIME)" \
+			>logs/jamduna-$$i.log 2>&1 & \
+	done
+	@sleep 1
 	@echo "✅ All instances started and running in parallel."
+	@tail -f logs/jamduna-$(shell echo $$(($(NUM_NODES)-1))).log
 
 run_polkajam_all:
 	@mkdir -p logs
@@ -180,13 +191,13 @@ run_polkajam_all:
 	done; \
 
 run_localclient: kill jam jam_clean run_5 run_1
-run_localclient_jam: kill jam jam_clean run_parallel_jam
+run_localclient_jam: kill duna_spec jam jam_clean run_parallel_jam
 run_localclient_jam_dead: kill jam jam_clean run_parallel_jam_with_deadnode
 
 run_single_node:jam_clean
 	@echo "Starting single node JAM instance..."
-	@echo "Starting $(OUTPUT_DIR)/$(BINARY)... with network $(NETWORK) port $(SINGLE_NODE_PORT) start-time $(JAM_start-time)"
-	@$(OUTPUT_DIR)/$(BINARY) run --chain $(CHAINSPEC) --port $(SINGLE_NODE_PORT) --start-time "$(JAM-start-time)" --dev-validator 5
+	@echo "Starting $(OUTPUT_DIR)/$(BINARY)... with network $(NETWORK) port $(SINGLE_NODE_PORT) start-time $(JAM_START_TIME)"
+	@$(OUTPUT_DIR)/$(BINARY) run --chain $(CHAINSPEC) --port $(SINGLE_NODE_PORT) --start-time "$(JAM_START_TIME)" --dev-validator 5
 	@echo "Instance started."
 run_parallel_jam_with_deadnode:
 	@mkdir -p logs

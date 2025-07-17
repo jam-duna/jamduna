@@ -134,11 +134,11 @@ func (n *NodeContent) GetState(headerHash common.Hash, startKey [31]byte, endKey
 	return boundaryNode, keyvalues, true, nil
 }
 
-func (n *Node) GetServiceIdxStorage(headerHash common.Hash, service_idx uint32, rawKey common.Hash) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {
+func (n *Node) GetServiceIdxStorage(headerHash common.Hash, service_idx uint32, rawKey []byte) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {
 	return n.getServiceIdxStorage(headerHash, service_idx, rawKey)
 }
 
-func (n *NodeContent) getServiceIdxStorage(headerHash common.Hash, service_idx uint32, rawKey common.Hash) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {
+func (n *NodeContent) getServiceIdxStorage(headerHash common.Hash, service_idx uint32, rawKey []byte) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {
 	s := n.getPVMStateDB()
 	// stateRoot := s.GetStateRoot()
 	blocks, ok, err := n.BlocksLookup(headerHash, 1, 1)

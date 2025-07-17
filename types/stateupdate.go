@@ -30,18 +30,18 @@ func (su *StateUpdate) GetServiceUpdates() map[uint32]*ServiceUpdate {
 }
 
 type ServiceUpdate struct {
-	ServiceInfo     *SubServiceInfoResult                     `json:"info"`
-	ServiceValue    map[common.Hash]*SubServiceValueResult    `json:"value"`
-	ServicePreimage map[common.Hash]*SubServicePreimageResult `json:"preimage"`
-	ServiceRequest  map[common.Hash]*SubServiceRequestResult  `json:"request"`
+	ServiceInfo     *SubServiceInfoResult                `json:"info"`
+	ServiceValue    map[string]*SubServiceValueResult    `json:"value"`
+	ServicePreimage map[string]*SubServicePreimageResult `json:"preimage"`
+	ServiceRequest  map[string]*SubServiceRequestResult  `json:"request"`
 }
 
 func NewServiceUpdate(s uint32) *ServiceUpdate {
 	return &ServiceUpdate{
 		ServiceInfo:     nil,
-		ServiceValue:    make(map[common.Hash]*SubServiceValueResult),
-		ServicePreimage: make(map[common.Hash]*SubServicePreimageResult),
-		ServiceRequest:  make(map[common.Hash]*SubServiceRequestResult),
+		ServiceValue:    make(map[string]*SubServiceValueResult),
+		ServicePreimage: make(map[string]*SubServicePreimageResult),
+		ServiceRequest:  make(map[string]*SubServiceRequestResult),
 	}
 }
 
@@ -89,7 +89,8 @@ func (s *StateUpdate) MarshalJSON() ([]byte, error) {
 			ks := make([]string, 0, len(upd.ServiceValue))
 			byKS := make(map[string]*SubServiceValueResult, len(upd.ServiceValue))
 			for h, v := range upd.ServiceValue {
-				k := h.String()
+				//k := h.String()
+				k := h
 				ks = append(ks, k)
 				byKS[k] = v
 			}
@@ -107,7 +108,8 @@ func (s *StateUpdate) MarshalJSON() ([]byte, error) {
 			ks := make([]string, 0, len(upd.ServicePreimage))
 			byKS := make(map[string]*SubServicePreimageResult, len(upd.ServicePreimage))
 			for h, v := range upd.ServicePreimage {
-				k := h.String()
+				//k := h.String()
+				k := h
 				ks = append(ks, k)
 				byKS[k] = v
 			}
@@ -124,7 +126,8 @@ func (s *StateUpdate) MarshalJSON() ([]byte, error) {
 		if len(upd.ServiceRequest) > 0 {
 			ks := make([]string, 0, len(upd.ServiceRequest))
 			for h := range upd.ServiceRequest {
-				ks = append(ks, h.String())
+				ks = append(ks, h)
+				//ks = append(ks, h.String())
 			}
 			sort.Strings(ks)
 

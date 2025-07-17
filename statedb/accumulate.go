@@ -12,10 +12,6 @@ import (
 )
 
 type BeefyPool []Beta_state
-type BeefyCommitment struct {
-	Service    uint32      `json:"service"`
-	Commitment common.Hash `json:"commitment"`
-}
 
 // v0.4.5 eq.165 - W^!
 func AccumulatedImmediately(W []types.WorkReport) []types.WorkReport {
@@ -259,7 +255,7 @@ tant deferred-transfers and accumulation-output pairings:
 */
 // eq 173
 // ∆+
-func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.PartialState, f map[uint32]uint32) (num uint64, output_t []types.DeferredTransfer, output_b []BeefyCommitment, GasUsage []Usage) { // not really sure i here , the max meaning. use uint32 for now
+func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.PartialState, f map[uint32]uint32) (num uint64, output_t []types.DeferredTransfer, output_b []types.AccumulationOutput, GasUsage []Usage) { // not really sure i here , the max meaning. use uint32 for now
 	var gas_tmp uint64
 	i := uint64(0)
 	// calculate how to maximize the work reports to enter the parallelized accumulation
@@ -280,7 +276,7 @@ func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.Parti
 		num = 0
 
 		output_t = make([]types.DeferredTransfer, 0)
-		output_b = make([]BeefyCommitment, 0)
+		output_b = make([]types.AccumulationOutput, 0)
 		GasUsage = make([]Usage, 0)
 		return
 	}
@@ -299,13 +295,13 @@ func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.Parti
 	for _, b := range b_star {
 		duplicate := false
 		for _, existingB := range outputB {
-			if existingB.Service == b.Service && existingB.Commitment == b.Commitment {
+			if existingB.Service == b.Service && existingB.Output == b.Output {
 				duplicate = true
 				break
 			}
 		}
 
-		if b.Commitment != (common.Hash{}) && !duplicate {
+		if b.Output != (common.Hash{}) && !duplicate {
 			output_b = append(output_b, b)
 		}
 	}
@@ -319,7 +315,7 @@ privileged always-accumulate services, into a tuple of the total gas utilized in
 */
 // the parallelized accumulation function ∆*
 // eq 174
-func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkReport, f map[uint32]uint32) (output_u uint64, output_t []types.DeferredTransfer, output_b []BeefyCommitment, GasUsage []Usage) {
+func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkReport, f map[uint32]uint32) (output_u uint64, output_t []types.DeferredTransfer, output_b []types.AccumulationOutput, GasUsage []Usage) {
 	GasUsage = make([]Usage, 0)
 	services := make([]uint32, 0)
 	for _, workReport := range w {
@@ -333,9 +329,13 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 		services = append(services, k)
 	}
 	// remove duplicates
+	//s = {rs S w ∈ w, r ∈ wr} ∪ K(f )
 	services = UniqueUint32Slice(services)
+	accumulated_partial := make(map[uint32]*types.XContext)
+	// TODO: review the o.clone and try to run it in parallel
 	for _, service := range services {
 		// this is parallelizable
+		// o_copy := o.Clone()
 		B, U, XY, exceptional := s.SingleAccumulate(o, w, f, service)
 		if XY == nil {
 			log.Warn(log.SDB, "SingleAccumulate returned nil XContext", "service", service)
@@ -343,18 +343,25 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 		}
 		output_u += U
 		empty := common.Hash{}
+		//u = [(s, ∆1(o, w, f , s)u) S s <− s]
 		GasUsage = append(GasUsage, Usage{
 			Service: service,
 			Gas:     U,
 		})
+		//b = {(s, b) S s ∈ s, b = ∆1(o, w, f , s)b, b ≠ ∅}
 		if B == empty {
 
 		} else {
-			output_b = append(output_b, BeefyCommitment{
-				Service:    service,
-				Commitment: B,
+			output_b = append(output_b, types.AccumulationOutput{
+				Service: service,
+				Output:  B,
 			})
 		}
+
+		//t = [∆1(o, w, f , s)t S s <− s]
+		output_t = append(output_t, XY.T...)
+
+		//d′ = P ((d ∪ n) ∖ m, ⋃s∈s ∆1(o, w, f , s)p)
 		if XY.U != nil {
 			if XY.U.D != nil {
 				for s, sa := range XY.U.D {
@@ -370,48 +377,89 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 				}
 			}
 		}
-		// ASSIGN
-		if s.JamState.PrivilegedServiceIndices.Kai_a == service {
-			o.QueueWorkReport = XY.U.QueueWorkReport
-		}
-		// VALIDATE
-		if s.JamState.PrivilegedServiceIndices.Kai_v == service {
-			o.UpcomingValidators = XY.U.UpcomingValidators
-		}
-		// BLESS
-		if s.JamState.PrivilegedServiceIndices.Kai_m == service {
-			o.PrivilegedState.Kai_a = XY.U.PrivilegedState.Kai_a
-			o.PrivilegedState.Kai_v = XY.U.PrivilegedState.Kai_v
-			o.PrivilegedState.Kai_m = XY.U.PrivilegedState.Kai_m
-			for k, v := range XY.U.PrivilegedState.Kai_g {
-				o.PrivilegedState.Kai_g[k] = v
-			}
-		}
+		accumulated_partial[service] = XY
 
-		output_t = append(output_t, XY.T...)
+		// see what's left
+		//(m′, a∗, v∗, z′) = (∆1(o, w, f , m)o)(m,a,v,z)
+		o.QueueWorkReport = XY.U.QueueWorkReport
+		o.UpcomingValidators = XY.U.UpcomingValidators
+		o.PrivilegedState = XY.U.PrivilegedState
+		for k, v := range XY.U.PrivilegedState.Kai_g {
+			o.PrivilegedState.Kai_g[k] = v
+		}
+	}
+	service_m := o.PrivilegedState.Kai_m
+	serviceMXY, ok := accumulated_partial[service_m]
+	o_copy := o.Clone()
+	if !ok {
+		_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, service_m)
+		serviceMXY = XY
+	}
+	m_prime := serviceMXY.U.PrivilegedState.Kai_m
+	a_star := serviceMXY.U.PrivilegedState.Kai_a
+	v_star := serviceMXY.U.PrivilegedState.Kai_v
+	z_prime := serviceMXY.U.PrivilegedState.Kai_g
 
-		// apply p
-		for _, p := range XY.P {
-			ServiceIndex := p.ServiceIndex
-			P_data := p.P_data
-			if ServiceIndex == service {
-				sa, ok := o.GetService(ServiceIndex)
-				if ok {
-					lookup_ok, X_s_l := sa.ReadLookup(common.Blake2Hash(P_data), uint32(len(P_data)), s)
-					if lookup_ok && len(X_s_l) == 0 {
-						sa.WriteLookup(common.Blake2Hash(P_data), uint32(len(P_data)), []uint32{s.JamState.SafroleState.Timeslot})
-						sa.WritePreimage(common.Blake2Hash(P_data), P_data)
-						sa.Dirty = true
-					}
-				}
+	//∀c ∈ NC ∶ a′c = ((∆1(o, w, f , a∗c )o)a)c
+	var newAssignedCore [types.TotalCores]uint32
+	for i, service_ac := range a_star {
+		service_acXY, ok := accumulated_partial[service_ac]
+		if !ok {
+			o_copy := o.Clone()
+			_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, service_ac)
+			service_acXY = XY
+		}
+		if service_acXY == nil || service_acXY.U == nil {
+			log.Error(log.SDB, "SingleAccumulate returned nil XContext for service_ac", "service_ac", service_ac)
+			continue
+		} else {
+			if service_ac != service_acXY.U.PrivilegedState.Kai_a[i] {
+				log.Info(log.G, "NEW ASSIGNED CORE", "service_ac", service_ac, "accumulated_partial[service_ac]", service_acXY.U.PrivilegedState.Kai_a[i])
 			}
+			newAssignedCore[i] = service_acXY.U.PrivilegedState.Kai_a[i]
 		}
 	}
 
-	// s ∈ K(d) ∖ s
-	/*s.SingleAccumulate(o, w, f, o.PrivilegedState.Kai_m)
-	s.SingleAccumulate(o, w, f, o.PrivilegedState.Kai_a)
-	s.SingleAccumulate(o, w, f, o.PrivilegedState.Kai_v) */
+	//v′ = (∆1(o, w, f , v∗)o)v
+	service_vXY, ok := accumulated_partial[v_star]
+	if !ok {
+		o_copy := o.Clone()
+		_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, v_star)
+		service_vXY = XY
+	}
+	v_prime := service_vXY.U.PrivilegedState.Kai_v
+
+	//i′ = (∆1(o, w, f , v)o)i
+	v := o.PrivilegedState.Kai_v
+	service_iXY, ok := accumulated_partial[v]
+	if !ok {
+		o_copy := o.Clone()
+		_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, v)
+		service_iXY = XY
+	}
+	i_prime := service_iXY.U.UpcomingValidators
+
+	//∀c ∈ NC ∶ q′ c = (∆1(o, w, f , ac)o)q
+	a := o.PrivilegedState.Kai_a
+	var q_prime types.AuthorizationQueue
+	for i, service_ac := range a {
+
+		service_acXY, ok := accumulated_partial[service_ac]
+		if !ok {
+			o_copy := o.Clone()
+			_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, service_ac)
+			service_acXY = XY
+		}
+		q_prime[i] = service_acXY.U.QueueWorkReport[i]
+	}
+
+	// update the partial state
+	o.PrivilegedState.Kai_m = m_prime
+	o.PrivilegedState.Kai_g = z_prime
+	o.PrivilegedState.Kai_a = newAssignedCore
+	o.PrivilegedState.Kai_v = v_prime
+	o.UpcomingValidators = i_prime
+	o.QueueWorkReport = q_prime
 
 	return
 }
@@ -517,7 +565,8 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 					Y: workResult.PayloadHash,
 					D: workResult.Result,
 				}
-				log.Trace(sd.Authoring, "SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "wrangledResults", types.DecodedWrangledResults(&o))
+				log.Info(sd.Authoring, "SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s),
+					"wrangledResults", types.DecodedWrangledResults(&o))
 				p = append(p, o)
 			}
 		}
@@ -551,7 +600,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	vm.SetPVMContext(pvmContext)
 	t := sd.JamState.SafroleState.Timeslot
 	vm.Timeslot = t
-	r, _, serviceAccount := vm.ExecuteAccumulate(t, s, g, p, xContext)
+	r, _, _ := vm.ExecuteAccumulate(t, s, g, p, xContext, sd.JamState.SafroleState.Entropy[0])
 
 	exceptional = false
 	if r.Err == types.RESULT_OOG || r.Err == types.RESULT_PANIC {

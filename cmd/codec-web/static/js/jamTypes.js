@@ -33,5 +33,6 @@ const jamTypes = [
     {value: "C12", label: "C12 - PrivilegedServiceIndices"},
     {value: "C13", label: "C13 - Validator Statistics"},
     {value: "C14", label: "C14 - AccumulateQueue"},
-    {value: "C15", label: "C15 - AccumulateHistory"}
+    {value: "C15", label: "C15 - AccumulateHistory"},
+    {value: "C16", label: "C16 - AccumulateOutputs"}
 ];

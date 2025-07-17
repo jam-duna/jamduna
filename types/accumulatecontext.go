@@ -16,23 +16,28 @@ type AccumulationHistory struct {
 	WorkPackageHash []common.Hash `json:"-"`
 }
 
+type AccumulationOutput struct {
+	Service uint32      `json:"s"`
+	Output  common.Hash `json:"h"`
+}
+
 // Types for Kai
 type Kai_state struct {
-	Kai_m uint32            `json:"chi_m"` // The index of the bless service
-	Kai_a uint32            `json:"chi_a"` // The index of the assign service
-	Kai_v uint32            `json:"chi_v"` // The index of the designate service
-	Kai_g map[uint32]uint64 `json:"chi_g"` // g is a small dictionary containing the indices of services which automatically accumulate in each block together with a basic amount of gas with which each accumulates
+	Kai_m uint32             `json:"chi_m"` // χₘ ∈ ℕₛ: Manager service index – authorized to alter χ and assign deposits.
+	Kai_a [TotalCores]uint32 `json:"chi_a"` // χₐ ∈ ⟦ℕₛ⟧𝒞: List of service indices (one per core) that can modify authorizer queue φ. One per core
+	Kai_v uint32             `json:"chi_v"` // χᵥ ∈ ℕₛ: Service index allowed to set ι. (upcoming validator)
+	Kai_g map[uint32]uint64  `json:"chi_g"` // χ𝗀 ∈ 𝒟(ℕₛ → ℕG): Services that auto-accumulate gas per block. (is this renamed as "z")
 }
 
 // fixed size for the authorization queue
 type AuthorizationQueue [TotalCores][MaxAuthorizationQueueItems]common.Hash
 
-// U: The set of partial state, used during accumulation. See equation 170.
+// U: The set of partial state, used during accumulation. See (12.13).
 type PartialState struct {
-	D                  map[uint32]*ServiceAccount `json:"D"`
-	UpcomingValidators Validators                 `json:"upcoming_validators"`
-	QueueWorkReport    AuthorizationQueue         `json:"authorizations_pool"`
-	PrivilegedState    Kai_state                  `json:"privileged_state"`
+	D                  map[uint32]*ServiceAccount `json:"D"`                   // d: Service accounts δ
+	UpcomingValidators Validators                 `json:"upcoming_validators"` // i: Upcoming validators keys ι
+	QueueWorkReport    AuthorizationQueue         `json:"authorizations_pool"` // q: queue of authorizers φ
+	PrivilegedState    Kai_state                  `json:"privileged_state"`    // x: Privileged state χ
 }
 
 func (u *PartialState) Checkpoint() {
@@ -69,8 +74,7 @@ func (u *PartialState) Clone() *PartialState {
 
 	v.QueueWorkReport = u.QueueWorkReport
 
-	// Copy PrivilegedState fields properly
-	v.PrivilegedState.Kai_g = make(map[uint32]uint64)
+	// Copy Kai_g properly
 	for k, val := range u.PrivilegedState.Kai_g {
 		v.PrivilegedState.Kai_g[k] = val
 	}

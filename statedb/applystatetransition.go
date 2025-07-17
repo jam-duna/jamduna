@@ -28,7 +28,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.HeaderHash = blk.Header.Hash()
 	isValid, _, _, headerErr := s.VerifyBlockHeader(blk)
 	if !isValid || headerErr != nil {
-		return s, fmt.Errorf("Block header is not valid err=%v", headerErr)
+		return s, fmt.Errorf("block header is not valid err=%v", headerErr)
 	}
 	if s.Id == blk.Header.AuthorIndex {
 		s.Authoring = log.GeneralAuthoring
@@ -95,7 +95,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if safrole_debug {
 		err = VerifySafroleSTF(sf, &s2, blk)
 		if err != nil {
-			return s, fmt.Errorf("VerifySafroleSTF %v\n", err)
+			return s, fmt.Errorf("VerifySafroleSTF %v", err)
 		}
 	}
 
@@ -136,7 +136,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		gas = gas_counting
 	}
 	var f map[uint32]uint32
-	var b []BeefyCommitment
+	var b []types.AccumulationOutput
 	accumulate_input_wr := s.AvailableWorkReport
 	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
 
@@ -157,10 +157,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		sa.ALLOW_MUTABLE()
 		sa.Dirty = true
 	}
-	// writeAccount and initializes s.stateUpdate
-	s.stateUpdate = s.ApplyXContext(o)
-	// finalize stateUpdates
-	s.computeStateUpdates(blk) // review targetJCE input
 
 	// accumulate statistics
 	accumulated_workreports := accumulate_input_wr[:n]
@@ -179,6 +175,13 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 			}
 		}
 	}
+
+	// NOTE: we swapped the odring of the (ApplyXContext and computeStateUpdates) vs accumulate statistics in order to support potential idea of GP 0.6.7 (12.31) - updating a_r
+
+	// writeAccount and initializes s.stateUpdate
+	s.stateUpdate = s.ApplyXContext(o)
+	// finalize stateUpdates
+	s.computeStateUpdates(blk) // review targetJCE input
 
 	for _, gasusage := range U {
 		service := gasusage.Service
@@ -223,14 +226,14 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	var leaves [][]byte
 	for _, sa := range b {
 		// put (s,h) of C  into leaves
-		leafBytes := append(common.Uint32ToBytes(sa.Service), sa.Commitment.Bytes()...)
+		leafBytes := append(common.Uint32ToBytes(sa.Service), sa.Output.Bytes()...)
 		empty := common.Hash{}
-		if sa.Commitment == empty {
+		if sa.Output == empty {
 			// should not have gotten here!
-			log.Warn(log.GeneralAuthoring, "BEEFY-C", "commitment", sa.Commitment)
+			log.Warn(log.GeneralAuthoring, "BEEFY-C", "output", sa.Output)
 		} else {
 			leaves = append(leaves, leafBytes)
-			log.Debug(debugB, "BEEFY-C", "s", fmt.Sprintf("%d", sa.Service), "h", sa.Commitment, "encoded", fmt.Sprintf("%x", leafBytes))
+			log.Debug(debugB, "BEEFY-C", "s", fmt.Sprintf("%d", sa.Service), "h", sa.Output, "encoded", fmt.Sprintf("%x", leafBytes))
 		}
 	}
 
@@ -246,7 +249,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		log.Debug(debugB, "BEEFY accumulation root", "r", accumulationRoot)
 	}
 	// 4.7 - Recent History [No other state related, but need to do it after rho, AFTER accumulation]
-	s.ApplyStateRecentHistory(blk, &(accumulationRoot))
+	s.ApplyStateRecentHistory(blk, &(accumulationRoot), b)
 
 	// 4.20 - compute pi
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "blocks", 1)
@@ -288,7 +291,7 @@ func (s *StateDB) computeStateUpdates(blk *types.Block) {
 			s.stateUpdate.ServiceUpdates[serviceID] = sp
 		}
 		log.Trace(s.Authoring, "computeStateUpdates-P", "s", serviceID, "hash", hash, "l", len(p.Blob))
-		sp.ServicePreimage[hash] = &types.SubServicePreimageResult{
+		sp.ServicePreimage[hash.Hex()] = &types.SubServicePreimageResult{
 			HeaderHash: s.HeaderHash,
 			Slot:       s.GetTimeslot(),
 			Hash:       hash,

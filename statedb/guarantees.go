@@ -59,9 +59,9 @@ func AcceptableGuaranteeError(err error) bool {
 // VerifyGuaranteeBasic checks signatures, core index, assignment, timeouts, gas, and code hash.
 func (s *StateDB) VerifyGuaranteeBasic(g types.Guarantee, targetJCE uint32) error {
 	// common validations
-	// if err := s.checkServicesExist(g); err != nil {
-	// 	return err
-	// }
+	if err := s.checkServicesExist(g); err != nil {
+		return err
+	}
 	if g.Report.CoreIndex >= types.TotalCores {
 		return jamerrors.ErrGBadCoreIndex
 	}
@@ -494,10 +494,7 @@ func getPresentBlock(s *StateDB) types.SegmentRootLookup {
 	p := types.SegmentRootLookup{}
 	for _, block := range s.JamState.RecentBlocks {
 		for _, lookupItem := range block.Reported {
-			tmeItem := types.SegmentRootLookupItem{
-				WorkPackageHash: lookupItem.WorkPackageHash,
-				SegmentRoot:     lookupItem.SegmentRoot,
-			}
+			tmeItem := types.SegmentRootLookupItem(lookupItem)
 			p = append(p, tmeItem)
 		}
 	}

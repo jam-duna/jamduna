@@ -32,6 +32,12 @@ jobs:
         uses: actions/checkout@v3
         with: { ref: main }
 
+      - name: Add Go to PATH
+        run: echo "/usr/local/go/bin" >> $GITHUB_PATH
+          
+      - name: Verify Go version
+        run: go version
+
       - name: Set environment variables
         run: |
           echo "/usr/local/go/bin" >> $GITHUB_PATH      
@@ -39,7 +45,6 @@ jobs:
           echo "JAM_PATH=${{ github.workspace }}" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=./bls/target/release: ./bandersnatch/target/release" >> $GITHUB_ENV
           echo "CARGO_MANIFEST_DIR=${{ github.workspace }}" >> $GITHUB_ENV
-
 
       - name: Clear Go module cache
         run: go clean -modcache

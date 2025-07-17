@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"reflect"
 
+	"maps"
+
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
@@ -24,17 +26,9 @@ type JamState struct {
 	ValidatorStatistics      types.ValidatorStatistics                    `json:"pi"`                          // pi The validator statistics. π eq 171
 	AccumulationQueue        [types.EpochLength][]types.AccumulationQueue `json:"ready_queue"`                 // theta - The accumulation queue  θ eq 164
 	AccumulationHistory      [types.EpochLength]types.AccumulationHistory `json:"accumulated"`                 // xi - The accumulation history  ξ eq 162
+	AccumulationOutputs      []types.AccumulationOutput                   `json:"theta"`                       // theta - The accumulation outputs  ω eq 163
 }
 
-/*
-ReadyState                    [types.EpochLength][]Ready
-AccumulatedHistory       [types.EpochLength]map[common.Hash]common.Hash // work-report hash to segment-root dictionary
-
-type Ready struct { //AccumulationQueue
-WorkReport       types.WorkReport
-WorkPackageHashs []common.Hash
-}
-*/
 func (b *Beta_state) MMR_Bytes() []byte {
 	codec_bytes, err := json.Marshal(b.B)
 	if err != nil {
@@ -157,6 +151,7 @@ func (original *JamState) Copy() *JamState {
 		AuthorizationQueue:  original.AuthorizationQueue,
 		AccumulationQueue:   original.AccumulationQueue,
 		AccumulationHistory: original.AccumulationHistory,
+		AccumulationOutputs: original.AccumulationOutputs,
 	}
 
 	for i, rhoState := range original.AvailabilityAssignments {
@@ -207,11 +202,14 @@ func (n *JamState) tallyStatistics(validatorIndex uint32, activity string, cnt u
 }
 
 func (j *JamState) newPartialState() *types.PartialState {
+	p := j.PrivilegedServiceIndices
+	p.Kai_g = make(map[uint32]uint64)
+	maps.Copy(p.Kai_g, j.PrivilegedServiceIndices.Kai_g)
 	return &types.PartialState{
 		D:                  make(map[uint32]*types.ServiceAccount),
 		UpcomingValidators: j.SafroleState.DesignedValidators,
 		QueueWorkReport:    j.AuthorizationQueue,
-		PrivilegedState:    j.PrivilegedServiceIndices,
+		PrivilegedState:    p,
 	}
 }
 

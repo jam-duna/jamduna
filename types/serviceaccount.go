@@ -28,50 +28,59 @@ const (
 
 // ServiceAccount represents a service account.
 type ServiceAccount struct {
-	ServiceIndex    uint32      `json:"service_index"`
-	CodeHash        common.Hash `json:"code_hash"`    //a_c - account code hash c
-	Balance         uint64      `json:"balance"`      //a_b - account balance b, which must be greater than a_t (The threshold needed in terms of its storage footprint)
-	GasLimitG       uint64      `json:"min_item_gas"` //a_g - the minimum gas required in order to execute the Accumulate entry-point of the service's code,
-	GasLimitM       uint64      `json:"min_memo_gas"` //a_m - the minimum required for the On Transfer entry-point.
-	StorageSize     uint64      `json:"code_size"`    //a_l - total number of octets used in storage (9.3)
-	NumStorageItems uint32      `json:"items"`        //a_i - the number of items in storage (9.3)
+	ServiceIndex       uint32      `json:"service_index"`
+	CodeHash           common.Hash `json:"code_hash"`           //a_c - account code hash c
+	Balance            uint64      `json:"balance"`             //a_b - account balance b, which must be greater than a_t (The threshold needed in terms of its storage footprint)
+	GasLimitG          uint64      `json:"min_item_gas"`        //a_g - the minimum gas required in order to execute the Accumulate entry-point of the service's code,
+	GasLimitM          uint64      `json:"min_memo_gas"`        //a_m - the minimum required for the On Transfer entry-point.
+	StorageSize        uint64      `json:"bytes"`               //a_o - total number of octets used in storage (9.3) -- renamed from code_size
+	GratisOffset       uint64      `json:"gratis_offset"`       //a_f - the gratis storage offset
+	NumStorageItems    uint32      `json:"items"`               //a_i - the number of items in storage (9.3)
+	CreateTime         uint32      `json:"create_time"`         //a_r - the timeslot at creation. used for checkpointing
+	RecentAccumulation uint32      `json:"recent_accumulation"` //a_a - the timeslot at the most recent accumulation, used for checkpointing
+	ParentService      uint32      `json:"parent_service"`      //a_p - the parent service index
 
+	// Mutable is used to determine if the account can be modified.
 	// X.D will have Mutable=false, but X.D.U will have Mutable=True
 	Mutable      bool `json:"-"`
 	NewAccount   bool `json:"-"`
 	Checkpointed bool `json:"-"`
 	Dirty        bool `json:"-"`
 
-	Storage  map[common.Hash]*StorageObject  `json:"-"` // arbitrary_k -> v. if v=[]byte. use as delete
-	Lookup   map[common.Hash]*LookupObject   `json:"-"` // (h,l) -> anchor
-	Preimage map[common.Hash]*PreimageObject `json:"-"` // H(p)  -> p
+	Storage  map[string]*StorageObject  `json:"-"` // arbitrary_k -> v. if v=[]byte. use as delete
+	Lookup   map[string]*LookupObject   `json:"-"` // (h,l) -> anchor
+	Preimage map[string]*PreimageObject `json:"-"` // H(p)  -> p
 }
 
 func (s *ServiceAccount) Clone() *ServiceAccount {
 	// Start by cloning primitive fields directly
 	clone := ServiceAccount{
-		ServiceIndex:    s.ServiceIndex,
-		CodeHash:        s.CodeHash,
-		Balance:         s.Balance,
-		GasLimitG:       s.GasLimitG,
-		GasLimitM:       s.GasLimitM,
-		StorageSize:     s.StorageSize,
-		NumStorageItems: s.NumStorageItems,
-		Dirty:           s.Dirty,
-		NewAccount:      s.NewAccount,
-		Checkpointed:    s.Checkpointed,
-		Mutable:         s.Mutable, // should ALLOW_MUTABLE explicitly... check??
+		ServiceIndex:       s.ServiceIndex,
+		CodeHash:           s.CodeHash,
+		Balance:            s.Balance,
+		GasLimitG:          s.GasLimitG,
+		GasLimitM:          s.GasLimitM,
+		StorageSize:        s.StorageSize,
+		GratisOffset:       s.GratisOffset,
+		NumStorageItems:    s.NumStorageItems,
+		CreateTime:         s.CreateTime,
+		RecentAccumulation: s.RecentAccumulation,
+		ParentService:      s.ParentService,
+		Dirty:              s.Dirty,
+		NewAccount:         s.NewAccount,
+		Checkpointed:       s.Checkpointed,
+		Mutable:            s.Mutable, // should ALLOW_MUTABLE explicitly... check??
 	}
 
-	clone.Storage = make(map[common.Hash]*StorageObject, len(s.Storage))
+	clone.Storage = make(map[string]*StorageObject, len(s.Storage))
 	for k, v := range s.Storage {
 		clone.Storage[k] = v.Clone()
 	}
-	clone.Lookup = make(map[common.Hash]*LookupObject, len(s.Lookup))
+	clone.Lookup = make(map[string]*LookupObject, len(s.Lookup))
 	for k, v := range s.Lookup {
 		clone.Lookup[k] = v.Clone()
 	}
-	clone.Preimage = make(map[common.Hash]*PreimageObject, len(s.Preimage))
+	clone.Preimage = make(map[string]*PreimageObject, len(s.Preimage))
 	for k, v := range s.Preimage {
 		clone.Preimage[k] = v.Clone()
 	}
@@ -80,16 +89,17 @@ func (s *ServiceAccount) Clone() *ServiceAccount {
 }
 
 type StorageObject struct {
-	Accessed bool
-	Deleted  bool
-	Dirty    bool
-	Key      []byte      `json:"key"`    // k
-	Value    []byte      `json:"value"`  // v
-	RawKey   common.Hash `json:"rawkey"` // rawKey
+	Accessed    bool
+	Deleted     bool
+	Dirty       bool
+	Key         []byte      `json:"key"`          // k
+	Value       []byte      `json:"value"`        // v
+	InternalKey string      `json:"internal_key"` // as_internal_key
+	StorageKey  common.Hash `json:"storage_key"`  // c(s,h)
 }
 
 func (o *StorageObject) String() string {
-	return fmt.Sprintf("Value: [%x] Deleted: %v Dirty: %v RawKey: %x Key: %x Value: %x", o.Value, o.Deleted, o.Dirty, o.RawKey, o.Key, o.Value)
+	return fmt.Sprintf("Value: [%x] Deleted: %v Dirty: %v InternalKey: %x Key: %x Value: %x", o.Value, o.Deleted, o.Dirty, o.InternalKey, o.Key, o.Value)
 }
 func (o *StorageObject) Clone() *StorageObject {
 	// Deep copy the Key+Value slice
@@ -99,12 +109,13 @@ func (o *StorageObject) Clone() *StorageObject {
 	copy(valueCopy, o.Value)
 
 	return &StorageObject{
-		Accessed: o.Accessed,
-		Deleted:  o.Deleted,
-		Dirty:    o.Dirty,
-		Key:      keyCopy,
-		Value:    valueCopy,
-		RawKey:   o.RawKey,
+		Accessed:    o.Accessed,
+		Deleted:     o.Deleted,
+		Dirty:       o.Dirty,
+		Key:         keyCopy,
+		Value:       valueCopy,
+		InternalKey: o.InternalKey,
+		StorageKey:  o.StorageKey,
 	}
 }
 
@@ -158,17 +169,13 @@ func (o *PreimageObject) Clone() *PreimageObject {
 }
 
 // Convert the ServiceAccount to a byte slice.
-// ac ⌢ E8(ab,ag,am,al) ⌢ E4(ai)
-// 32 + 8*4 + 4 = 68
-// TODO: Need codec E here
+// ac ++ E8(b,g,m,o,f) ++E4(i,r,a,p)
+// 32 + 8*5 + 4*4 = 88
 
 // Bytes encodes the AccountState as a byte slice
 func (s *ServiceAccount) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
 
-	if _, err := buf.Write(s.CodeHash.Bytes()); err != nil {
-		return nil, err
-	}
 	writeUint64 := func(value uint64) error {
 		return binary.Write(&buf, binary.LittleEndian, value)
 	}
@@ -176,7 +183,9 @@ func (s *ServiceAccount) Bytes() ([]byte, error) {
 	writeUint32 := func(value uint32) error {
 		return binary.Write(&buf, binary.LittleEndian, value)
 	}
-
+	if _, err := buf.Write(s.CodeHash.Bytes()); err != nil {
+		return nil, err
+	}
 	if err := writeUint64(s.Balance); err != nil {
 		return nil, err
 	}
@@ -189,17 +198,30 @@ func (s *ServiceAccount) Bytes() ([]byte, error) {
 	if err := writeUint64(s.StorageSize); err != nil {
 		return nil, err
 	}
-	if err := writeUint32(s.NumStorageItems); err != nil {
+	if err := writeUint64(s.GratisOffset); err != nil {
 		return nil, err
 	}
 
+	//[Gratis] E4(i,r,a,p) NumStorageItems, CreateTime, RecentAccumulation, ParentService
+	if err := writeUint32(uint32(s.NumStorageItems)); err != nil {
+		return nil, err
+	}
+	if err := writeUint32(uint32(s.CreateTime)); err != nil {
+		return nil, err
+	}
+	if err := writeUint32(uint32(s.RecentAccumulation)); err != nil {
+		return nil, err
+	}
+	if err := writeUint32(uint32(s.ParentService)); err != nil {
+		return nil, err
+	}
 	return buf.Bytes(), nil
 }
 
 // Recover reconstructs an AccountState from a byte slice
 func (s *ServiceAccount) Recover(data []byte) error {
-	// Ensure the length of the data is correct
-	expectedLen := 32 + 8*4 + 4 // 32 bytes for CodeHash, 4 * 8 bytes for uint64, 4 bytes for uint32
+	// Ensure the length of the data is correct (88 bytes)
+	expectedLen := 32 + 8*5 + 4*4 // 32 bytes for CodeHash, 5 * 8 bytes for uint64, 4 * 4 bytes for uint32
 	if len(data) != expectedLen {
 		return fmt.Errorf("invalid data length: expected %d, got %d", expectedLen, len(data))
 	}
@@ -225,6 +247,8 @@ func (s *ServiceAccount) Recover(data []byte) error {
 		return value, err
 	}
 	var err error
+
+	//[Gratis] E8(b,g,m,o,f) Balance, GasLimitG, GasLimitM, StorageSize, GratisOffset
 	if s.Balance, err = readUint64(); err != nil {
 		return err
 	}
@@ -237,7 +261,21 @@ func (s *ServiceAccount) Recover(data []byte) error {
 	if s.StorageSize, err = readUint64(); err != nil {
 		return err
 	}
+	if s.GratisOffset, err = readUint64(); err != nil {
+		return err
+	}
+
+	//[Gratis] E4(i,r,a,p) NumStorageItems, CreateTime, RecentAccumulation, ParentService
 	if s.NumStorageItems, err = readUint32(); err != nil {
+		return err
+	}
+	if s.CreateTime, err = readUint32(); err != nil {
+		return err
+	}
+	if s.RecentAccumulation, err = readUint32(); err != nil {
+		return err
+	}
+	if s.ParentService, err = readUint32(); err != nil {
 		return err
 	}
 
@@ -271,18 +309,22 @@ func ServiceAccountFromBytes(service_index uint32, state_data []byte) (*ServiceA
 	}
 	// Initialize a new ServiceAccount and copy the relevant fields
 	serviceAccount := &ServiceAccount{
-		ServiceIndex:    service_index,
-		CodeHash:        acctState.CodeHash,
-		Balance:         acctState.Balance,
-		GasLimitG:       acctState.GasLimitG,
-		GasLimitM:       acctState.GasLimitM,
-		StorageSize:     acctState.StorageSize,
-		NumStorageItems: acctState.NumStorageItems,
-		Mutable:         false, // THIS THE DEFAULT
+		ServiceIndex:       service_index,
+		CodeHash:           acctState.CodeHash,           // a_c
+		Balance:            acctState.Balance,            // a_b
+		GasLimitG:          acctState.GasLimitG,          // a_g
+		GasLimitM:          acctState.GasLimitM,          // a_m
+		StorageSize:        acctState.StorageSize,        // a_o
+		GratisOffset:       acctState.GratisOffset,       // a_f
+		NumStorageItems:    acctState.NumStorageItems,    // a_i
+		CreateTime:         acctState.CreateTime,         // a_r
+		RecentAccumulation: acctState.RecentAccumulation, // a_a
+		ParentService:      acctState.ParentService,      // a_p
+		Mutable:            false,                        // THIS THE DEFAULT
 		// Initialize maps to avoid nil reference errors
-		Storage:  make(map[common.Hash]*StorageObject),
-		Lookup:   make(map[common.Hash]*LookupObject),
-		Preimage: make(map[common.Hash]*PreimageObject),
+		Storage:  make(map[string]*StorageObject),
+		Lookup:   make(map[string]*LookupObject),
+		Preimage: make(map[string]*PreimageObject),
 	}
 	return serviceAccount, nil
 }
@@ -290,8 +332,10 @@ func ServiceAccountFromBytes(service_index uint32, state_data []byte) (*ServiceA
 // Convert the ServiceAccount to a human-readable string.
 func (s *ServiceAccount) String() string {
 	// Initial account information
-	str := fmt.Sprintf("ServiceAccount %d CodeHash: %v B=%d (%x), G=%v M=%v L=%v, I=%v [Mutable: %v]\n",
-		s.ServiceIndex, s.CodeHash.Hex(), s.Balance, s.Balance, s.GasLimitG, s.GasLimitM, s.StorageSize, s.NumStorageItems, s.Mutable)
+	str := fmt.Sprintf("ServiceAccount %d CodeHash: %v B=%d (%x) G=%v M=%v O=%v F=%v | I=%v R=%v A=%v P=%v [Mutable: %v]\n",
+		s.ServiceIndex, s.CodeHash.Hex(), s.Balance, s.Balance, s.GasLimitG, s.GasLimitM, s.StorageSize, s.GratisOffset, //E8(ab,ag,am,ao,af)
+		s.NumStorageItems, s.CreateTime, s.RecentAccumulation, s.ParentService, // E4(ai,ar,aa,ap)
+		s.Mutable)
 
 	// Lookup entries
 	str2 := ""
@@ -316,10 +360,11 @@ func (s *ServiceAccount) String() string {
 func (s *ServiceAccount) JsonString() string {
 	return ToJSON(s)
 }
-func (s *ServiceAccount) ReadStorage(mu_k []byte, rawK common.Hash, sdb HostEnv) (ok bool, v []byte) {
+func (s *ServiceAccount) ReadStorage(mu_k []byte, sdb HostEnv) (ok bool, v []byte) {
 	serviceIndex := s.ServiceIndex
-	hk := common.Compute_storageKey_internal(rawK)
-	storageObj, ok := s.Storage[hk]
+	as_internal_key := common.Compute_storageKey_internal(mu_k)
+	as_internal_key_str := common.Bytes2Hex(as_internal_key[:])
+	storageObj, ok := s.Storage[as_internal_key_str]
 	if ok {
 		if storageObj.Deleted {
 			return false, nil
@@ -327,7 +372,7 @@ func (s *ServiceAccount) ReadStorage(mu_k []byte, rawK common.Hash, sdb HostEnv)
 		return true, storageObj.Value
 	}
 	var err error
-	v, ok, err = sdb.ReadServiceStorage(serviceIndex, rawK)
+	v, ok, err = sdb.ReadServiceStorage(serviceIndex, mu_k)
 	if err != nil || !ok {
 		return false, nil
 	}
@@ -336,10 +381,11 @@ func (s *ServiceAccount) ReadStorage(mu_k []byte, rawK common.Hash, sdb HostEnv)
 
 func (s *ServiceAccount) ReadPreimage(blobHash common.Hash, sdb HostEnv) (ok bool, preimage []byte) {
 	if s.Preimage == nil {
-		s.Preimage = make(map[common.Hash]*PreimageObject)
+		s.Preimage = make(map[string]*PreimageObject)
 	}
+	blobHashStr := blobHash.Hex()
 
-	preimageObj, ok := s.Preimage[blobHash]
+	preimageObj, ok := s.Preimage[blobHashStr]
 	if !ok {
 		var err error
 		preimage, ok, err = sdb.ReadServicePreimageBlob(s.GetServiceIndex(), blobHash)
@@ -347,9 +393,9 @@ func (s *ServiceAccount) ReadPreimage(blobHash common.Hash, sdb HostEnv) (ok boo
 			return false, preimage
 		}
 		if s.Preimage == nil {
-			s.Preimage = make(map[common.Hash]*PreimageObject)
+			s.Preimage = make(map[string]*PreimageObject)
 		}
-		s.Preimage[blobHash] = &PreimageObject{
+		s.Preimage[blobHashStr] = &PreimageObject{
 			Accessed: true,
 			Dirty:    false,
 			Preimage: preimage,
@@ -363,7 +409,8 @@ func (s *ServiceAccount) ReadPreimage(blobHash common.Hash, sdb HostEnv) (ok boo
 }
 
 func (s *ServiceAccount) ReadLookup(blobHash common.Hash, z uint32, sdb HostEnv) (ok bool, anchor_timeslot []uint32) {
-	lookupObj, ok := s.Lookup[blobHash]
+	blobHashStr := blobHash.Hex()
+	lookupObj, ok := s.Lookup[blobHashStr]
 	if ok && lookupObj.Deleted {
 		return false, []uint32{}
 	}
@@ -373,7 +420,7 @@ func (s *ServiceAccount) ReadLookup(blobHash common.Hash, z uint32, sdb HostEnv)
 		if err != nil || !ok {
 			return ok, anchor_timeslot
 		}
-		s.Lookup[blobHash] = &LookupObject{
+		s.Lookup[blobHashStr] = &LookupObject{
 			Accessed: true,
 			Dirty:    false,
 			Z:        z,
@@ -446,30 +493,31 @@ func (s *ServiceAccount) SetNumStorageItems(numStorageItems uint32) {
 	s.NumStorageItems = numStorageItems
 }
 
-func (s *ServiceAccount) WriteStorage(serviceIndex uint32, mu_k []byte, rawK common.Hash, val []byte) {
+func (s *ServiceAccount) WriteStorage(serviceIndex uint32, mu_k []byte, val []byte) {
 	if s.Mutable == false {
-		log.Crit(log.PvmAuthoring, "WriteStorage Mutable Err: Called WriteStorage on immutable ServiceAccount", "serviceIndex", serviceIndex, "mu_k", fmt.Sprintf("%x", mu_k), "rawK", rawK.Hex(), "val", fmt.Sprintf("%x", val))
+		log.Crit(log.PvmAuthoring, "WriteStorage Mutable Err: Called WriteStorage on immutable ServiceAccount", "serviceIndex", serviceIndex, "mu_k", fmt.Sprintf("%x", mu_k), "val", fmt.Sprintf("%x", val))
 	}
 
-	hk := common.Compute_storageKey_internal(rawK)
+	as_internal_key := common.Compute_storageKey_internal(mu_k)
+	as_internal_key_str := common.Bytes2Hex(as_internal_key[:])
 	s.Dirty = true
 
-	storeObj, exists := s.Storage[hk]
+	storeObj, exists := s.Storage[as_internal_key_str]
 	if exists {
 		storeObj.Accessed = true
 		storeObj.Dirty = true
 		storeObj.Deleted = (len(val) == 0)
 		storeObj.Key = slices.Clone(mu_k)  // copy
 		storeObj.Value = slices.Clone(val) // copy
-		storeObj.RawKey = rawK
+		storeObj.InternalKey = as_internal_key_str
 	} else {
-		s.Storage[hk] = &StorageObject{
-			Accessed: false,
-			Dirty:    true,
-			Deleted:  len(val) == 0,
-			Key:      slices.Clone(mu_k), // copy of mu_k
-			Value:    slices.Clone(val),  // copy of val
-			RawKey:   rawK,
+		s.Storage[as_internal_key_str] = &StorageObject{
+			Accessed:    false,
+			Dirty:       true,
+			Deleted:     len(val) == 0,
+			Key:         slices.Clone(mu_k), // copy of mu_k
+			Value:       slices.Clone(val),  // copy of val
+			InternalKey: as_internal_key_str,
 		}
 	}
 }
@@ -478,15 +526,16 @@ func (s *ServiceAccount) WritePreimage(blobHash common.Hash, preimage []byte) {
 	if s.Mutable == false {
 		log.Crit(module, "Called WriteStorage on immutable ServiceAccount")
 	}
+	blobHashStr := blobHash.Hex()
 
-	o, exists := s.Preimage[blobHash]
+	o, exists := s.Preimage[blobHashStr]
 	if exists {
 		o.Accessed = true
 		o.Dirty = true
 		o.Deleted = len(preimage) == 0
 		o.Preimage = preimage
 	} else {
-		s.Preimage[blobHash] = &PreimageObject{
+		s.Preimage[blobHashStr] = &PreimageObject{
 			Accessed: false,
 			Dirty:    true,
 			Deleted:  len(preimage) == 0,
@@ -500,8 +549,9 @@ func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots 
 	if s.Mutable == false {
 		log.Crit(module, "Called WriteStorage on immutable ServiceAccount")
 	}
+	blobHashStr := blobHash.Hex()
 	s.Dirty = true
-	o, exists := s.Lookup[blobHash]
+	o, exists := s.Lookup[blobHashStr]
 	if exists {
 		o.Accessed = true
 		o.Dirty = true
@@ -510,7 +560,7 @@ func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots 
 		o.T = time_slots
 		return
 	}
-	s.Lookup[blobHash] = &LookupObject{
+	s.Lookup[blobHashStr] = &LookupObject{
 		Accessed: false,
 		Dirty:    true,
 		Deleted:  time_slots == nil,
@@ -519,9 +569,25 @@ func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots 
 	}
 }
 
-func (s *ServiceAccount) ComputeThreshold() uint64 {
-	return BaseServiceBalance + MinElectiveServiceItemBalance*uint64(s.NumStorageItems) + MinElectiveServiceOctetBalance*s.StorageSize
+func (s *ServiceAccount) UpdateRecentAccumulation(timeslot uint32) {
+	if s.Mutable == false {
+		log.Crit(module, "UpdateRecentAccumulation")
+	}
+	s.Dirty = true
+	s.RecentAccumulation = timeslot
 }
+
+// (9.8) [Gratis] max(0, BS + BI ⋅ ai + BL ⋅ ao − af )
+func (s *ServiceAccount) ComputeThreshold() uint64 {
+	footprint := BaseServiceBalance + MinElectiveServiceItemBalance*uint64(s.NumStorageItems) + MinElectiveServiceOctetBalance*s.StorageSize
+	// af ≥ (BS+BI⋅ai+BL⋅ao)
+	if s.GratisOffset >= footprint {
+		return 0
+	}
+	// BS+BI⋅ai+BL⋅ao - af
+	return footprint - s.GratisOffset
+}
+
 func (s *ServiceAccount) MarshalJSON() ([]byte, error) {
 	type Alias ServiceAccount
 	return json.Marshal(&struct {
@@ -560,18 +626,18 @@ func (s *ServiceAccount) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func convertHashMapToStringMap[T any](input map[common.Hash]*T) map[string]*T {
+func convertHashMapToStringMap[T any](input map[string]*T) map[string]*T {
 	output := make(map[string]*T, len(input))
 	for k, v := range input {
-		output[k.Hex()] = v
+		output[k] = v
 	}
 	return output
 }
 
-func convertStringMapToHashMap[T any](input map[string]*T) map[common.Hash]*T {
-	output := make(map[common.Hash]*T, len(input))
+func convertStringMapToHashMap[T any](input map[string]*T) map[string]*T {
+	output := make(map[string]*T, len(input))
 	for k, v := range input {
-		output[common.HexToHash(k)] = v
+		output[k] = v
 	}
 	return output
 }
@@ -582,6 +648,7 @@ func CombineMetadataAndCode(service_name string, code []byte) []byte {
 	return append(service_name_length_bytes, append(service_name_bytes, code...)...)
 }
 
+// (9.2)E(↕m,c) ?
 func SplitMetadataAndCode(data []byte) (service_name string, code []byte) {
 	metadata_length_byte, remaining := extractBytes(data)
 	metadata_length, _ := DecodeE(metadata_length_byte)

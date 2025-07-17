@@ -201,7 +201,7 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 		fmt.Printf("writing post-state to %s\n", writeFile[0])
 
 		// create the file
-		fileName := fmt.Sprintf("%s", writeFile[0])
+		fileName := writeFile[0]
 		file, err := os.Create(fileName)
 		if err != nil {
 			fmt.Printf("Error creating file: %v\n", err)

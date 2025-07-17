@@ -66,23 +66,6 @@ func NewCDMerkleTree(values [][]byte) *CDMerkleTree {
 }
 
 // padLeaves pads the leaves to the next power of 2
-func padLeaves64(values [][]byte) [][]byte {
-	n := len(values)
-	nextPowerOfTwo := 1
-	for nextPowerOfTwo < n {
-		nextPowerOfTwo <<= 1
-	}
-	for len(values) < nextPowerOfTwo {
-		values = append(values, H0)
-	}
-	for len(values) < 64 {
-		// mathcing on polkajam
-		values = append(values, H0)
-	}
-	return values
-}
-
-// padLeaves pads the leaves to the next power of 2
 func padLeaves(values [][]byte) [][]byte {
 	n := len(values)
 	nextPowerOfTwo := 1
@@ -122,30 +105,6 @@ func padLeafHashes(nonEmptyleafHashes []common.Hash, isFixedPadding bool) []comm
 		nextPowerOfTwo <<= 1
 	}
 	for len(leafHashes) < nextPowerOfTwo {
-		leafHashes = append(leafHashes, H0Hash)
-	}
-	return leafHashes
-}
-
-func padLeafHashes64(nonEmptyleafHashes []common.Hash, isFixedPadding bool) []common.Hash {
-	leafHashes := make([]common.Hash, len(nonEmptyleafHashes))
-	copy(leafHashes, nonEmptyleafHashes)
-	fixedSize := 1 << PageFixedDepth
-	if isFixedPadding {
-		for len(leafHashes) < fixedSize {
-			leafHashes = append(leafHashes, H0Hash)
-		}
-		return leafHashes
-	}
-	n := len(leafHashes)
-	nextPowerOfTwo := 1
-	for nextPowerOfTwo < n {
-		nextPowerOfTwo <<= 1
-	}
-	for len(leafHashes) < nextPowerOfTwo {
-		leafHashes = append(leafHashes, H0Hash)
-	}
-	if len(leafHashes) < 64 {
 		leafHashes = append(leafHashes, H0Hash)
 	}
 	return leafHashes

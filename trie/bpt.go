@@ -61,6 +61,7 @@ const (
 	C13 = "ActiveValidator"
 	C14 = "AccumulationQueue"
 	C15 = "AccumulationHistory"
+	C16 = "AccumulationOutputs"
 )
 
 const (
@@ -708,6 +709,8 @@ func (t *MerkleTree) SetState(_stateIdentifier string, value []byte) {
 		stateKey[0] = 0x0E
 	case C15:
 		stateKey[0] = 0x0F
+	case C16:
+		stateKey[0] = 0x10
 	}
 	t.Insert(stateKey, value)
 }
@@ -746,6 +749,8 @@ func (t *MerkleTree) GetState(_stateIdentifier string) ([]byte, error) {
 		stateKey[0] = 0x0E
 	case C15:
 		stateKey[0] = 0x0F
+	case C16:
+		stateKey[0] = 0x10
 	}
 	value, ok, err := t.Get(stateKey)
 	if !ok || err != nil {
@@ -792,10 +797,11 @@ func (t *MerkleTree) GetService(s uint32) ([]byte, bool, error) {
 	stateKey := service_account.Bytes()
 	value, ok, err := t.Get(stateKey)
 	if err != nil {
-		return nil, false, fmt.Errorf("GetService Error: %v\n", err) //Need to differentiate not found vs leveldb error
+		return nil, false, fmt.Errorf("GetService Error: %v", err) //Need to differentiate not found vs leveldb error
 	} else if !ok {
 		return nil, ok, nil
 	}
+
 	return value, true, nil
 }
 
@@ -886,10 +892,9 @@ func (t *MerkleTree) DeletePreImageLookup(s uint32, blob_hash common.Hash, blob_
 }
 
 // Insert Storage Value into the trie
-func (t *MerkleTree) SetServiceStorage(s uint32, k common.Hash, storageValue []byte) (err error) {
-	storageKey := common.Compute_storageKey_internal(k)
-
-	account_storage_key := common.ComputeC_sh(s, storageKey)
+func (t *MerkleTree) SetServiceStorage(s uint32, k []byte, storageValue []byte) (err error) {
+	as_internal_key := common.Compute_storageKey_internal(k)
+	account_storage_key := common.ComputeC_sh(s, as_internal_key)
 	stateKey := account_storage_key.Bytes()
 
 	metaKey := fmt.Sprintf("meta_%x", stateKey)
@@ -897,7 +902,7 @@ func (t *MerkleTree) SetServiceStorage(s uint32, k common.Hash, storageValue []b
 	if err != nil {
 		fmt.Printf("SetServiceStorage Encode Error: %v\n", err)
 	}
-	metaVal := fmt.Sprintf("account_storage|s=%d|hk=%s k=%s", s, storageKey, k)
+	metaVal := fmt.Sprintf("account_storage|s=%d|hk=%s k=%s", s, account_storage_key, k)
 	metaValBytes, err := types.Encode(metaVal)
 	if err != nil {
 		fmt.Printf("SetServiceStorage metaValBytes Encode Error: %v\n", err)
@@ -907,10 +912,9 @@ func (t *MerkleTree) SetServiceStorage(s uint32, k common.Hash, storageValue []b
 	return nil
 }
 
-func (t *MerkleTree) GetServiceStorage(s uint32, k common.Hash) ([]byte, bool, error) {
-	storageKey := common.Compute_storageKey_internal(k)
-
-	account_storage_key := common.ComputeC_sh(s, storageKey)
+func (t *MerkleTree) GetServiceStorage(s uint32, k []byte) ([]byte, bool, error) {
+	as_internal_key := common.Compute_storageKey_internal(k)
+	account_storage_key := common.ComputeC_sh(s, as_internal_key)
 	stateKey := account_storage_key.Bytes()
 
 	// Get Storage from trie
@@ -922,9 +926,9 @@ func (t *MerkleTree) GetServiceStorage(s uint32, k common.Hash) ([]byte, bool, e
 }
 
 // Delete Storage key(hash)
-func (t *MerkleTree) DeleteServiceStorage(s uint32, k common.Hash) error {
-	storageKey := common.Compute_storageKey_internal(k)
-	account_storage_key := common.ComputeC_sh(s, storageKey)
+func (t *MerkleTree) DeleteServiceStorage(s uint32, k []byte) error {
+	as_internal_key := common.Compute_storageKey_internal(k)
+	account_storage_key := common.ComputeC_sh(s, as_internal_key)
 	stateKey := account_storage_key.Bytes()
 	err := t.Delete(stateKey)
 	return err

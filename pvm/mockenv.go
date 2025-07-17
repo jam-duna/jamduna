@@ -45,7 +45,7 @@ func (mh *MockHostEnv) GetService(c uint32) (*types.ServiceAccount, bool, error)
 	return nil, false, nil
 }
 
-func (mh *MockHostEnv) ReadServiceStorage(s uint32, k common.Hash) (storage []byte, ok bool, err error) {
+func (mh *MockHostEnv) ReadServiceStorage(s uint32, k []byte) (storage []byte, ok bool, err error) {
 	db := mh.GetDB()
 	_, tree, err := trie.Initial_bpt(db)
 	defer tree.Close()
@@ -89,8 +89,8 @@ func (mh *MockHostEnv) ReadServicePreimageLookup(s uint32, blob_hash common.Hash
 }
 
 func (mh *MockHostEnv) HistoricalLookup(a *types.ServiceAccount, t uint32, blob_hash common.Hash) []byte {
-	blob := a.Preimage[common.Blake2Hash(blob_hash.Bytes())].Preimage
-	timeslots := a.Lookup[blob_hash].T
+	blob := a.Preimage[blob_hash.Hex()].Preimage
+	timeslots := a.Lookup[blob_hash.Hex()].T
 	if len(timeslots) == 0 {
 		return nil
 	} else if len(timeslots) == 1 {

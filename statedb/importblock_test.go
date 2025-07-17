@@ -18,8 +18,6 @@ import (
 	"github.com/yudai/gojsondiff/formatter"
 )
 
-var update_from_git = false
-
 //	func printColoredJSONDiff(diffStr string) {
 //		for _, line := range strings.Split(diffStr, "\n") {
 //			switch {
@@ -55,7 +53,7 @@ func runSingleSTFTest(t *testing.T, filename string, content string) {
 		return
 	}
 
-	handleDiffs(filename, diffs)
+	handleDiffs(diffs)
 	t.Errorf("❌ [%s] Test failed: %v", filename, err)
 }
 
@@ -73,7 +71,7 @@ func parseSTFFile(filename, content string) (StateTransition, error) {
 	return stf, err
 }
 
-func handleDiffs(filename string, diffs map[string]DiffState) {
+func handleDiffs(diffs map[string]DiffState) {
 	keys := make([]string, 0, len(diffs))
 	for k := range diffs {
 		keys = append(keys, k)

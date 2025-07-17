@@ -1,6 +1,8 @@
 package types
 
 import (
+	"bytes"
+	"encoding/binary"
 	"time"
 )
 
@@ -79,6 +81,7 @@ const (
 	ECPieceSize                 = 4
 	NumECPiecesPerSegment       = 1026
 	PreimageExpiryPeriod        = 6
+	RotationPeriod              = 4
 )
 
 const (
@@ -108,33 +111,159 @@ var TimeSavingMode bool = true
 
 const CoreLazyMode bool = true
 const (
-	PeriodSecond                   = 4          // A = 8 represents the period, in seconds, between audit tranches.
-	MinElectiveServiceItemBalance  = 10         // B_I represents the additional minimum balance required per item of elective service state.
-	MinElectiveServiceOctetBalance = 1          // B_L represents the additional minimum balance required per octet of elective service state.
-	BaseServiceBalance             = 100        // B_S = 100: The basic minimum balance which all services require.
-	AuditBiasFactor                = 2          // F = 2: The audit bias factor, the expected number of additional validators who will audit a work-report in the following tranche for each no-show in the previous.
-	AccumulationGasAllocation      = 10000000   // G_A: The total gas allocated to a core for Accumulation.
-	IsAuthorizedGasAllocation      = 50000000   // G_I: The gas allocated to invoke a work-package’s Is-Authorized logic.
-	RefineGasAllocation            = 5000000000 // G_R: The total gas allocated for a work-package’s Refine logic.
-	AccumulateGasAllocation_GT     = 3500000000 // G_T: The total gas allocated across all cores for Accumulation. Should be no smaller than GA ⋅ C +∑g∈V(χg )(g).
-	RecentHistorySize              = 8          // H = 8: The size of recent history, in blocks.
-	MaxWorkItemsPerPackage         = 16         // I = 4: The maximum amount of work items in a package.
-	LookupAnchorMaxAge             = 14400      // L = 14,400: The maximum age in timeslots of the lookup anchor.
-	TransferMemoSize               = 128        // M = 128: The size of a transfer memo in octets.
-	SecondsPerSlot                 = 6          // P = 6: The slot period, in seconds.
-
+	PeriodSecond                     = 4              // A = 8 represents the period, in seconds, between audit tranches.
+	MinElectiveServiceItemBalance    = 10             // B_I represents the additional minimum balance required per item of elective service state.
+	MinElectiveServiceOctetBalance   = 1              // B_L represents the additional minimum balance required per octet of elective service state.
+	BaseServiceBalance               = 100            // B_S = 100: The basic minimum balance which all services require.
+	AuditBiasFactor                  = 2              // F = 2: The audit bias factor, the expected number of additional validators who will audit a work-report in the following tranche for each no-show in the previous.
+	AccumulationGasAllocation        = 10000000       // G_A: The total gas allocated to a core for Accumulation.
+	IsAuthorizedGasAllocation        = 50000000       // G_I: The gas allocated to invoke a work-package’s Is-Authorized logic.
+	RefineGasAllocation              = 5000000000     // G_R: The total gas allocated for a work-package’s Refine logic.
+	AccumulateGasAllocation_GT       = 3500000000     // G_T: The total gas allocated across all cores for Accumulation. Should be no smaller than GA ⋅ C +∑g∈V(χg )(g).
+	RecentHistorySize                = 8              // H = 8: The size of recent history, in blocks.
+	MaxWorkItemsPerPackage           = 16             // I = 4: The maximum amount of work items in a package.
+	LookupAnchorMaxAge               = 14400          // L = 14,400: The maximum age in timeslots of the lookup anchor.
+	TransferMemoSize                 = 128            // M = 128: The size of a transfer memo in octets.
+	SecondsPerSlot                   = 6              // P = 6: The slot period, in seconds.
+	ContestDuration                  = 60 * 60 * 24   // Y = 60 * 60 * 24: The duration of a contest, in seconds.
 	UnavailableWorkReplacementPeriod = 5              // U = 5: The period in timeslots after which reported but unavailable work may be replaced.
 	MaxServiceCodeSize               = 4000000        // W_C = 4,000,000: The maximum size of service code in octets.
 	MaxImports                       = 3072           // W_M = 2^11: The maximum number of imports in a work-package. 0.6.5
 	MaxExports                       = 3072           // W_X = 2^11: The maximum number of exports in a work-package. 0.6.5
 	ExtrinsicMaximumPerPackage       = 128            //T = 128: The maximum number of extrinsics in a work-package.
-	MaxEncodedWorkPackageSize        = 12 * (1 << 20) // W_B = 12 * 2^20: The maximum size of an encoded work-package together with its extrinsic data and import implications, in octets.
+	MaxEncodedWorkPackageSize        = 13794305       // W_B = 12 * 2^20: The maximum size of an encoded work-package together with its extrinsic data and import implications, in octets.
 	MaxEncodedWorkReportSize         = 48 * (1 << 10) // W_R = 96 * 2^10: The maximum size of an encoded work-report in octets.
 	PVMDynamicAddressAlignmentFactor = 2              // Z_A = 2: The pvm dynamic address alignment factor. See equation 227.
 	PVMInitInputDataSize             = 1 << 24        // Z_I = 2^24: The standard pvm program initialization input data size. See equation A.7.
 	PVMInitPageSize                  = 1 << 14        // Z_P = 2^14: The standard pvm program initialization page size. See section A.7.
 	PVMInitSegmentSize               = 1 << 16        // Z_Q = 2^16: The standard pvm program initialization segment size. See section A.7.
 )
+
+// Bytes encodes the AccountState as a byte slice
+func ParameterBytes() ([]byte, error) {
+	var buf bytes.Buffer
+
+	writeUint64 := func(value uint64) error {
+		return binary.Write(&buf, binary.LittleEndian, value)
+	}
+	writeUint32 := func(value uint32) error {
+		return binary.Write(&buf, binary.LittleEndian, value)
+	}
+	writeUint16 := func(value uint16) error {
+		return binary.Write(&buf, binary.LittleEndian, value)
+	}
+
+	// E_8: B_I, B_L, B_S
+	if err := writeUint64(MinElectiveServiceItemBalance); err != nil { // B_I
+		return nil, err
+	}
+	if err := writeUint64(MinElectiveServiceOctetBalance); err != nil { // B_L
+		return nil, err
+	}
+	if err := writeUint64(BaseServiceBalance); err != nil { // B_S
+		return nil, err
+	}
+	// E_2: C
+	if err := writeUint16(TotalCores); err != nil { // C
+		return nil, err
+	}
+	// E_4: D, E
+	if err := writeUint32(PreimageExpiryPeriod); err != nil { // D
+		return nil, err
+	}
+	if err := writeUint32(EpochLength); err != nil { // E
+		return nil, err
+	}
+	// E_8: G_A, G_I, G_R, G_T
+	if err := writeUint64(AccumulationGasAllocation); err != nil { // G_A
+		return nil, err
+	}
+	if err := writeUint64(IsAuthorizedGasAllocation); err != nil { // G_I
+		return nil, err
+	}
+	if err := writeUint64(RefineGasAllocation); err != nil { // G_R
+		return nil, err
+	}
+	if err := writeUint64(AccumulateGasAllocation_GT); err != nil { // G_T
+		return nil, err
+	}
+	// E_2: H, I, J
+	if err := writeUint16(RecentHistorySize); err != nil { // H
+		return nil, err
+	}
+	if err := writeUint16(MaxWorkItemsPerPackage); err != nil { // I
+		return nil, err
+	}
+	if err := writeUint16(MaxAuthorizationQueueItems); err != nil { // J
+		return nil, err
+	}
+	// E_4: L
+	if err := writeUint32(LookupAnchorMaxAge); err != nil { // L
+		return nil, err
+	}
+	// E_2: O
+	if err := writeUint16(MaxAuthorizationPoolItems); err != nil { // O
+		return nil, err
+	}
+	// E_2: P, Q, R, S, T, U, V
+	if err := writeUint16(SecondsPerSlot); err != nil { // P
+		return nil, err
+	}
+	if err := writeUint16(ValidatorCoreRotationPeriod); err != nil { // Q
+		return nil, err
+	}
+	if err := writeUint16(RotationPeriod); err != nil { // R
+		return nil, err
+	}
+	if err := writeUint16(TicketSubmissionEndSlot); err != nil { // S
+		return nil, err
+	}
+	if err := writeUint16(TicketEntriesPerValidator); err != nil { // T
+		return nil, err
+	}
+	if err := writeUint16(UnavailableWorkReplacementPeriod); err != nil { // U
+		return nil, err
+	}
+	if err := writeUint16(ValidatorInByte); err != nil { // V
+		return nil, err
+	}
+	// E_4: W_A, W_B, W_C, W_E, W_G, W_M, W_P, W_R, W_T, W_X, Y
+	if err := writeUint32(SegmentSize); err != nil { // W_A
+		return nil, err
+	}
+	if err := writeUint32(MaxEncodedWorkPackageSize); err != nil { // W_B
+		return nil, err
+	}
+	if err := writeUint32(MaxEncodedWorkReportSize); err != nil { // W_C
+		return nil, err
+	}
+	if err := writeUint32(ECPieceSize); err != nil { // W_E
+		return nil, err
+	}
+	if err := writeUint32(GFPointsPerPage); err != nil { // W_G
+		return nil, err
+	}
+	if err := writeUint32(MaxImports); err != nil { // W_M
+		return nil, err
+	}
+	if err := writeUint32(NumECPiecesPerSegment); err != nil { // W_P
+		return nil, err
+	}
+	if err := writeUint32(ExtrinsicMaximumPerPackage); err != nil { // W_R
+		return nil, err
+	}
+	if err := writeUint32(MaxServiceCodeSize); err != nil { // W_T
+		return nil, err
+	}
+	if err := writeUint32(MaxExports); err != nil { // W_X
+		return nil, err
+	}
+	if err := writeUint32(ContestDuration); err != nil { // Y
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
 
 const (
 	QuicIndividualTimeout = 8000 * time.Millisecond

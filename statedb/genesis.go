@@ -79,7 +79,11 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 	j.DisputesState = Psi_state{}
 
 	// Setup Bootstrap Service for all 3 privileges
-	j.PrivilegedServiceIndices.Kai_a = BootstrapServiceCode
+	kai_a := [types.TotalCores]uint32{}
+	for i := 0; i < types.TotalCores; i++ {
+		kai_a[i] = AuthCopyServiceCode
+	}
+	j.PrivilegedServiceIndices.Kai_a = kai_a
 	j.PrivilegedServiceIndices.Kai_v = BootstrapServiceCode
 	j.PrivilegedServiceIndices.Kai_m = BootstrapServiceCode
 	for i := 0; i < types.TotalCores; i++ {
@@ -371,15 +375,15 @@ func InitValidator(bandersnatch_seed, ed25519_seed, bls_seed []byte, metadata []
 	validator := types.Validator{}
 	banderSnatch_pub, _, err := bandersnatch.InitBanderSnatchKey(bandersnatch_seed)
 	if err != nil {
-		return validator, fmt.Errorf("Failed to init BanderSnatch Key")
+		return validator, fmt.Errorf("failed to init BanderSnatch Key")
 	}
 	ed25519_pub, _, err := types.InitEd25519Key(ed25519_seed)
 	if err != nil {
-		return validator, fmt.Errorf("Failed to init Ed25519 Key")
+		return validator, fmt.Errorf("failed to init Ed25519 Key")
 	}
 	bls_pub, _, err := bls.InitBLSKey(bls_seed)
 	if err != nil {
-		return validator, fmt.Errorf("Failed to init BanderSnatch Key")
+		return validator, fmt.Errorf("failed to init BanderSnatch Key")
 	}
 
 	validator.Ed25519 = ed25519_pub
@@ -393,15 +397,15 @@ func InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed []byte, metad
 	validatorSecret := types.ValidatorSecret{}
 	banderSnatch_pub, banderSnatch_priv, err := bandersnatch.InitBanderSnatchKey(bandersnatch_seed)
 	if err != nil {
-		return validatorSecret, fmt.Errorf("Failed to init BanderSnatch Key")
+		return validatorSecret, fmt.Errorf("failed to init BanderSnatch Key")
 	}
 	ed25519_pub, ed25519_priv, err := types.InitEd25519Key(ed25519_seed)
 	if err != nil {
-		return validatorSecret, fmt.Errorf("Failed to init Ed25519 Key")
+		return validatorSecret, fmt.Errorf("failed to init Ed25519 Key")
 	}
 	bls_pub, bls_priv, err := bls.InitBLSKey(bls_seed)
 	if err != nil {
-		return validatorSecret, fmt.Errorf("Failed to init BLS Key")
+		return validatorSecret, fmt.Errorf("failed to init BLS Key")
 	}
 
 	copy(validatorSecret.Ed25519Secret[:], ed25519_priv[:])
@@ -445,14 +449,14 @@ func GenerateValidatorSecretSet(numNodes int) ([]types.Validator, []types.Valida
 
 		validator, err := InitValidator(bandersnatch_seed, ed25519_seed, bls_seed, metadata)
 		if err != nil {
-			return validators, validatorSecrets, fmt.Errorf("Failed to init validator %v", i)
+			return validators, validatorSecrets, fmt.Errorf("failed to init validator %v", i)
 		}
 		validators[i] = validator
 
 		//bandersnatch_seed, ed25519_seed, bls_seed
 		validatorSecret, err := InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed, metadata)
 		if err != nil {
-			return validators, validatorSecrets, fmt.Errorf("Failed to init validator secret=%v", i)
+			return validators, validatorSecrets, fmt.Errorf("failed to init validator secret=%v", i)
 		}
 		validatorSecrets[i] = validatorSecret
 	}
