@@ -312,26 +312,17 @@ func (vm *RecompilerVM) patchJumpConditional(block *BasicBlock, targetTruePC, ta
 	blockEnd := block.X86PC + uint64(len(block.X86Code))
 
 	// The instruction after Jcc+imm32 lives at blockEnd-5
-	ipAfterJcc := blockEnd - 5
+	ipAfterJcc := blockEnd
 
 	// relTrue is relative to that IP
 	relTrue := int32(targetTruePC - ipAfterJcc)
 	// relFalse is relative to the IP after the JMP opcode+imm32, i.e. blockEnd
-	relFalse := int32(targetFalsePC - blockEnd)
-
-	// Patch the 4‐byte Jcc immediate at blockEnd-9 .. blockEnd-5
-	startTrue := blockEnd - 9
-	endTrue := blockEnd - 5
-	binary.LittleEndian.PutUint32(
-		vm.x86Code[startTrue:endTrue],
-		uint32(relTrue),
-	)
 
 	// Patch the 4‐byte JMP immediate at blockEnd-4 .. blockEnd
-	startFalse := blockEnd - 4
+	startTrue := blockEnd - 4
 	binary.LittleEndian.PutUint32(
-		vm.x86Code[startFalse:blockEnd],
-		uint32(relFalse),
+		vm.x86Code[startTrue:blockEnd],
+		uint32(relTrue),
 	)
 }
 

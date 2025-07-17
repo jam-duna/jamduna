@@ -996,10 +996,8 @@ func generateLoadImmJumpIndirect(inst Instruction) []byte {
 //	REX.W + CMP r64, imm32         (7 bytes total)
 //	0x0F, jcc                      (2 bytes)
 //	rel32 placeholder (true‐target) (4 bytes)
-//	0xE9                           (1 byte JMP opcode)
-//	rel32 placeholder (false‐target)(4 bytes)
 //
-// Total = 18 bytes
+// Total = 13 bytes
 func generateBranchImm(jcc byte) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
 		regIdx, imm, _ := extractOneRegOneImmOneOffset(inst.Args)
@@ -1025,16 +1023,13 @@ func generateBranchImm(jcc byte) func(inst Instruction) []byte {
 
 			// 4-byte placeholder for true target
 			0, 0, 0, 0,
-
-			// 1-byte unconditional JMP opcode
-			0xE9,
-
-			// 4-byte placeholder for false target
-			0, 0, 0, 0,
 		}
 	}
 }
 
+// generateCompareBranch creates a function to handle conditional branches between two registers.
+// It uses the classic, robust two-jump sequence which works regardless of block layout.
+// This predictable 14-byte output allows a separate patching pass to safely optimize it.
 func generateCompareBranch(jcc byte) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
 		aIdx, bIdx, _ := extractTwoRegsOneOffset(inst.Args)
@@ -1044,27 +1039,27 @@ func generateCompareBranch(jcc byte) func(inst Instruction) []byte {
 		// REX.W + REX.R + REX.B
 		rex := byte(0x48)
 		if rB.REXBit == 1 {
-			rex |= 0x04
+			rex |= 0x04 // REX.R for rB
 		}
 		if rA.REXBit == 1 {
-			rex |= 0x01
+			rex |= 0x01 // REX.B for rA
 		}
 
 		// CMP r/m64, r64 (0x39 /r)
 		modrm := byte(0xC0 | (rB.RegBits << 3) | rA.RegBits)
 
-		// code := append([]byte{}, generateJumpTrackerCode()...)
-		code := make([]byte, 0)
+		// This robust sequence uses a conditional jump to the true case
+		// and an unconditional jump to the false case. It is 14 bytes long.
+		code := make([]byte, 0, 14)
 		code = append(code,
-			rex, 0x39, modrm, // 00–02
-			0x0F, jcc, // 03–04
-			0, 0, 0, 0, // 05–08 (relTrue placeholder)
-			0xE9,       // 09 (JMP opcode)
-			0, 0, 0, 0, // 10–13 (relFalse placeholder)
+			rex, 0x39, modrm, // 00–02: CMP rA, rB
+			0x0F, jcc, // 03–04: Jcc rel32 (jump to the "true" branch)
+			0, 0, 0, 0, // 05–08: Placeholder for relTrue dd
 		)
 		return code
 	}
 }
+
 func (vm *RecompilerVM) GetMemory() (map[int][]byte, map[int]int) {
 	memory := make(map[int][]byte)
 	pageMap := make(map[int]int)

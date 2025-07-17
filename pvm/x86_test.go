@@ -70,6 +70,42 @@ func TestX86MemAddStore(t *testing.T) {
 	fmt.Printf("Memory[16] = %d (should be 6)\n", sum)
 }
 
+var familyToOpcodes = map[string][]string{
+	"Trap":             {"TRAP"},
+	"Fallthrough":      {"FALLTHROUGH"},
+	"DirectJump":       {"JUMP", "LOAD_IMM_JUMP"},
+	"IndirectJump":     {"JUMP_IND", "LOAD_IMM_JUMP_IND"},
+	"CompareBranch":    {"BRANCH_EQ", "BRANCH_NE", "BRANCH_LT_U", "BRANCH_LT_S", "BRANCH_GE_U", "BRANCH_GE_S"},
+	"BranchImm":        {"BRANCH_EQ_IMM", "BRANCH_NE_IMM", "BRANCH_LT_U_IMM", "BRANCH_LE_U_IMM", "BRANCH_GE_U_IMM", "BRANCH_GT_U_IMM", "BRANCH_LT_S_IMM", "BRANCH_LE_S_IMM", "BRANCH_GE_S_IMM", "BRANCH_GT_S_IMM"},
+	"LoadImm64":        {"LOAD_IMM_64"},
+	"StoreImmGeneric":  {"STORE_IMM_U8", "STORE_IMM_U16", "STORE_IMM_U32"},
+	"StoreImmU64":      {"STORE_IMM_U64"},
+	"LoadImm32":        {"LOAD_IMM"},
+	"LoadWithBase":     {"LOAD_U8", "LOAD_I8", "LOAD_U16", "LOAD_I16", "LOAD_U32", "LOAD_I32", "LOAD_U64"},
+	"StoreWithBase":    {"STORE_U8", "STORE_U16", "STORE_U32", "STORE_U64"},
+	"StoreImmIndirect": {"STORE_IMM_IND_U8", "STORE_IMM_IND_U16", "STORE_IMM_IND_U32", "STORE_IMM_IND_U64"},
+	"MoveAndBitManip":  {"MOVE_REG", "COUNT_SET_BITS_64", "COUNT_SET_BITS_32", "LEADING_ZERO_BITS_64", "LEADING_ZERO_BITS_32", "TRAILING_ZERO_BITS_64", "TRAILING_ZERO_BITS_32", "SIGN_EXTEND_8", "SIGN_EXTEND_16", "ZERO_EXTEND_16", "REVERSE_BYTES"},
+	"StoreIndirect":    {"STORE_IND_U8", "STORE_IND_U16", "STORE_IND_U32", "STORE_IND_U64"},
+	"LoadIndirect":     {"LOAD_IND_U8", "LOAD_IND_I8", "LOAD_IND_U16", "LOAD_IND_I16", "LOAD_IND_U32", "LOAD_IND_I32", "LOAD_IND_U64"},
+	"BinaryImm32":      {"ADD_IMM_32", "NEG_ADD_IMM_32"},
+	"ImmBinaryOp64":    {"AND_IMM", "XOR_IMM", "OR_IMM", "ADD_IMM_64", "NEG_ADD_IMM_64"},
+	"ImmMulOp":         {"MUL_IMM_32", "MUL_IMM_64"},
+	"ImmSetCondOp":     {"SET_LT_U_IMM", "SET_LT_S_IMM", "SET_GT_U_IMM", "SET_GT_S_IMM"},
+	"ImmShiftOp":       {"SHLO_L_IMM_32", "SHLO_R_IMM_32", "SHLO_L_IMM_ALT_32", "SHLO_R_IMM_ALT_32", "SHAR_R_IMM_ALT_32", "SHAR_R_IMM_32", "SHLO_L_IMM_64", "SHLO_R_IMM_64", "SHAR_R_IMM_64", "SHLO_L_IMM_ALT_64", "SHLO_R_IMM_ALT_64", "SHAR_R_IMM_ALT_64", "ROT_R_64_IMM", "ROT_R_64_IMM_ALT", "ROT_R_32_IMM_ALT", "ROT_R_32_IMM"},
+	"CmovImm":          {"CMOV_IZ_IMM", "CMOV_NZ_IMM"},
+	"BinaryOp32":       {"ADD_32", "SUB_32"},
+	"MulDivRem32":      {"MUL_32", "DIV_U_32", "DIV_S_32", "REM_U_32", "REM_S_32"},
+	"ShiftOp32":        {"SHLO_L_32", "SHLO_R_32", "SHAR_R_32", "ROT_L_32", "ROT_R_32"},
+	"BinaryOp64":       {"ADD_64", "SUB_64", "AND", "XOR", "OR"},
+	"MulDivRem64":      {"MUL_64", "DIV_U_64", "DIV_S_64", "REM_U_64", "REM_S_64"},
+	"ShiftOp64":        {"SHLO_L_64", "SHLO_R_64", "SHAR_R_64", "ROT_L_64", "ROT_R_64"},
+	"MulUpperOp64":     {"MUL_UPPER_S_S", "MUL_UPPER_U_U", "MUL_UPPER_S_U"},
+	"SetCondOp64":      {"SET_LT_U", "SET_LT_S"},
+	"CmovOp64":         {"CMOV_IZ", "CMOV_NZ"},
+	"BitwiseLogicOp64": {"AND_INV", "OR_INV", "XNOR"},
+	"MinMaxOp":         {"MAX", "MAX_U", "MIN", "MIN_U"},
+}
+
 var testcases = map[string]string{
 	// A.5.1. Instructions without Arguments
 	"TRAP":        "inst_trap",
@@ -748,6 +784,7 @@ func TestSingleSandbox(t *testing.T) {
 	PvmTrace = true
 	VM_MODE = "recompiler_sandbox"
 	debugRecompiler = true
+	showDisassembly = true
 
 	name := "inst_sub_32"
 	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
@@ -770,6 +807,88 @@ func TestSingleSandbox(t *testing.T) {
 			t.Logf("✅ [%s] Test passed", name)
 		}
 	})
+}
+
+func TestRecompilerFamilies(t *testing.T) {
+	familyNames := []string{"BranchImm", "CompareBranch"}
+	for _, familyName := range familyNames {
+		t.Run(familyName, func(t *testing.T) {
+			testRecompilerFamily(t, familyName)
+		})
+	}
+}
+
+// testRecompilerFamily runs all tests associated with a specific, hard-coded generator family.
+func testRecompilerFamily(t *testing.T, familyName string) {
+	// To test a different group of instructions, change the value of this variable.
+	showDisassembly = true
+	opcodes, ok := familyToOpcodes[familyName]
+	if !ok {
+		t.Fatalf("Unknown family specified in test: %s", familyName)
+	}
+
+	fmt.Printf("--- Running tests for family: %s ---\n", familyName)
+
+	// Collect all test case files for the specified family.
+	var testsToRun [][2]string // Store pairs of [opcodeName, testName]
+	for _, opcodeName := range opcodes {
+		testCaseString, found := testcases[opcodeName]
+		if !found {
+			t.Logf("  Warning: No test cases found for opcode %s", opcodeName)
+			continue
+		}
+		// The testcases map has comma-separated values.
+		for _, testName := range strings.Split(testCaseString, ",") {
+			testsToRun = append(testsToRun, [2]string{opcodeName, testName})
+		}
+	}
+
+	if len(testsToRun) == 0 {
+		t.Fatalf("No test files found for family: %s", familyName)
+	}
+
+	fmt.Printf("\nFound %d total test cases to run for family %s\n", len(testsToRun), familyName)
+
+	// --- Standard Test Execution Logic ---
+	dir := "../jamtestvectors/pvm/programs" // Adjust this path if necessary
+
+	for _, testInfo := range testsToRun {
+		opcodeName := testInfo[0]
+		testName := testInfo[1]
+		fileName := testName + ".json"
+		filePath := dir + "/" + fileName
+
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			t.Logf("Warning: Test file not found, skipping: %s", filePath)
+			continue
+		}
+
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			t.Errorf("Failed to read file %s: %v", filePath, err)
+			continue
+		}
+
+		var tc TestCase
+		err = json.Unmarshal(data, &tc)
+		if err != nil {
+			t.Errorf("Failed to unmarshal JSON from file %s: %v", filePath, err)
+			continue
+		}
+
+		// Run the individual test case as a subtest.
+		// The subtest name now includes the opcode for better logging.
+		t.Run(fmt.Sprintf("%s/%s", opcodeName, testName), func(t *testing.T) {
+			t.Logf("Test: [%s - %s] %s\n", familyName, opcodeName, testName)
+			// Assuming recompiler_sandbox_test exists and is the entry point for a single test case.
+			err := recompiler_sandbox_test(tc)
+			if err != nil {
+				t.Errorf("❌ Test failed: %v", err)
+			} else {
+				t.Logf("✅ Test passed")
+			}
+		})
+	}
 }
 func TestRecompilerSandBox(t *testing.T) {
 	PvmLogging = true
