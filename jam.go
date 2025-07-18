@@ -270,11 +270,10 @@ func main() {
 			if cmd.Flags().Changed(RPCPortFlag) {
 				node.WSPort = RPCPort
 			}
-			// print all the flags values
-			// use yellow color
+			pvm.Set_PVM_Backend(pvmBackend)
 
 			fmt.Printf("Running JAM DUNA node with the following flags:\n")
-			fmt.Printf("\033[33mdataPath: %s, Port: %d, RPCPort: %d, validatorIndex: %d, debug: %s, chainSpec: %s, logLevel: %s, start_time: %s\033[0m\n", dataPath, Port, RPCPort, validatorIndex, debug, chainSpec, logLevel, start_time)
+			fmt.Printf("\033[33mdataPath: %s, Port: %d, RPCPort: %d, validatorIndex: %d, debug: %s, chainSpec: %s, logLevel: %s, start_time: %s. pvm_backend: %s\033[0m\n", dataPath, Port, RPCPort, validatorIndex, debug, chainSpec, logLevel, start_time, pvm.VM_MODE)
 
 			var err error
 			var validators []types.Validator
@@ -283,8 +282,9 @@ func main() {
 			// Run the JAM DUNA node
 			now := time.Now()
 			loc := now.Location()
-			log.InitLogger(logLevel)
 			pvm.PvmLogging = false
+			log.InitLogger(logLevel)
+
 			log.EnableModule(log.PvmAuthoring)
 			log.EnableModule(log.PvmValidating)
 			log.EnableModule(log.FirstGuarantorOrAuditor)
@@ -384,7 +384,7 @@ func main() {
 				os.Exit(1)
 			}
 			defer storage.Close()
-			fmt.Printf("New Node %d started, edkey %v, port%d, time:%s. buildVersion=%v\n", validatorIndex, selfSecret.Ed25519Pub, Port, time.Now().String(), n.GetBuild())
+			fmt.Printf("New Node %d started, edkey %v, port%d, time:%s. buildVersion=%v pvm_backend=%v\n", validatorIndex, selfSecret.Ed25519Pub, Port, time.Now().String(), n.GetBuild(), pvm.VM_MODE)
 			StartRuntimeMonitor(30 * time.Second)
 			ticker := time.NewTicker(30 * time.Second)
 			defer ticker.Stop()
@@ -406,6 +406,7 @@ func main() {
 	desc := flagDescription("The PVM backend to use", map[string]string{
 		"interpreter": "Use a PVM interpreter. Slow, but works everywhere",
 		"compiler":    "Use a PVM recompiler. Fast, but is Linux-only",
+		"sandbox":     "Use a PVM recompiler sandbox for debugging",
 	})
 	runCmd.Flags().StringVar(&pvmBackend, pvmBackendFlag, "interpreter", desc)
 	runCmd.Flags().IntVar(&peerID, peerIDFlag, 0, "Peer ID of this node. If not specified, a new peer ID will be generated. The corresponding secret key will not be persisted.")

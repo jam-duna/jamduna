@@ -746,7 +746,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 		if !ok_x86 {
 			// fmt.Printf("❌ Invalid instruction at offset 0x%X\n", offset)
 		}
-		if pvm_pc, ok := vm.InstMapX86ToPVM[int(offset)]; ok {
+		if pvm_pc, ok := vm.InstMapX86ToPVM[int(offset)]; ok && debugRecompiler {
 			opcode := vm.code[pvm_pc]
 			fmt.Printf("!!! Start PVM PC: %d [%s] reg:%v\n", pvm_pc, opcode_str(opcode), vm.Ram.ReadRegisters())
 		}
@@ -831,7 +831,9 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 		return fmt.Errorf("set RSP: %w", err)
 	}
 	rsp, _ := vm.sandBox.RegRead(uc.X86_REG_RSP)
-	fmt.Printf("RSP = 0x%X\n", rsp)
+	if debugRecompiler {
+		fmt.Printf("RSP = 0x%X\n", rsp)
+	}
 	// --------------------------------------------------------------------
 	// 5. Run the code
 	// --------------------------------------------------------------------
@@ -858,7 +860,9 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 
 	for i := range vm.Ram.ReadRegisters() {
 		val := binary.LittleEndian.Uint64(vm.regDumpMem[i*8:])
-		fmt.Printf("%s = 0x%X\n", regInfoList[i].Name, val)
+		if debugRecompiler {
+			fmt.Printf("%s = 0x%X\n", regInfoList[i].Name, val)
+		}
 		vm.Ram.WriteRegister(i, val)
 	}
 	return nil

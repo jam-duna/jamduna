@@ -92,6 +92,7 @@ func TestRubic(t *testing.T) {
 func TestFib(t *testing.T) {
 	initPProf(t)
 	pvm.VM_MODE = "recompiler_sandbox"
+	//pvm.VM_MODE = "interpreter"
 	targetN := TargetedN_Fib
 	if *targetNum > 0 {
 		targetN = *targetNum

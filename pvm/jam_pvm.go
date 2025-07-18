@@ -152,6 +152,9 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 }
 
 func (vm *VM) initLogs() {
+	if isSaveLog {
+		return
+	}
 	// decide filename
 	fileName := "vm_log"
 	dir := VM_MODE
@@ -172,6 +175,9 @@ func (vm *VM) initLogs() {
 
 // write the vm.Log  (appending only)
 func (vm *VM) saveLogs() {
+	if isSaveLog {
+		return
+	}
 	// decide filename
 	dir := VM_MODE
 	filePath := filepath.Join(dir, "vm_log.json")

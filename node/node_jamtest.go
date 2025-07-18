@@ -16,6 +16,7 @@ import (
 	"github.com/colorfulnotion/jam/chainspecs"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/pvm"
 
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
@@ -36,6 +37,7 @@ var jce_manual = flag.Bool("jce_manual", false, "jce_manual")
 var jam_node = flag.Bool("jam_node", false, "jam_node")
 var jam_local_client = flag.Bool("jam_local_client", false, "jam_local_client")
 var manifest = flag.Bool("manifest", false, "manifest")
+var pvmBackend = flag.String("pvm_backend", "interpreter", "PVM mode to use (interpreter, recompiler, sandbox)")
 
 const (
 	webServicePort = 8079
@@ -264,7 +266,9 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		client := bNode.(*NodeClient)
 		err = client.ConnectWebSocket(wsUrl)
 	} else { // Node
-
+		// onlt "node" can set pvm backend
+		pvm.Set_PVM_Backend(*pvmBackend)
+		fmt.Printf("[%v] Mode\n", pvm.VM_MODE)
 		fmt.Printf("jamtest: %s-node\n", jam)
 		basePort := GenerateRandomBasePort()
 		basePort = 40000

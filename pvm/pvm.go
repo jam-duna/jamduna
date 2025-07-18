@@ -119,6 +119,22 @@ type VM struct {
 	OP_tally map[string]*X86InstTally `json:"tally"`
 }
 
+func Set_PVM_Backend(pvm_mode string) {
+	mode := strings.ToUpper(pvm_mode)
+	switch mode {
+	case "INTERPRETER":
+		VM_MODE = "interpreter"
+	case "COMPILER", "RECOMPILER", "X86":
+		VM_MODE = "recompiler"
+	case "SANDBOX", "RECOMPILER_SANDBOX":
+		VM_MODE = "recompiler_sandbox"
+	default:
+		log.Warn(log.Node, fmt.Sprintf("Unknown PVM mode [%s], defaulting to interpreter", pvm_mode))
+		VM_MODE = "interpreter"
+	}
+	log.Info(log.Node, fmt.Sprintf("PVM Backend: [%s]", mode))
+}
+
 type Program struct {
 	JSize uint64
 	Z     uint8

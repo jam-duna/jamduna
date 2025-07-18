@@ -25,6 +25,14 @@ BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 BINARY := jamduna
 
+# Set default PVM backend based on OS.
+# On Linux, default to the faster 'compiler'. Otherwise, use 'interpreter'.
+ifeq ($(UNAME_S),Linux)
+  PVM_BACKEND ?= compiler # Default to 'compiler' on Linux
+else
+  PVM_BACKEND ?= interpreter # Default to 'interpreter' on non-Linux
+endif
+
 
 POLKAJAM_BIN ?= bin/polkajam
 # Linker flags to strip symbols and embed version info
@@ -54,7 +62,7 @@ spin_localclient: jam kill_jam jam_clean spin_5 spin_0
 spin_5:
 	@rm -rf ${HOME}/.jamduna/jam-*
 	@for i in 1 2 3 4 5; do \
-		$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator $$i  --rpc-port=$$((19800 + $$i)) --chain chainspecs/jamduna-spec.json  >logs/jamduna-$$i.log 2>&1 & \
+		$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator $$i  --rpc-port=$$((19800 + $$i)) --chain chainspecs/jamduna-spec.json --pvm-backend $(PVM_BACKEND)  >logs/jamduna-$$i.log 2>&1 & \
 	done
 
 spin_0:
@@ -64,7 +72,7 @@ spin_0:
 
 run_1:
 	@rm -rf ${HOME}/.jamduna/jam-*
-	@$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator 5 --rpc-port=19805 --chain chainspecs/jamduna-spec.json --debug rotation,guarantees
+	@$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator 5 --rpc-port=19805 --chain chainspecs/jamduna-spec.json --pvm-backend $(PVM_BACKEND) --debug rotation,guarantees
 
 run_5:
 	@for i in 0 1 2 3 4; do \
@@ -174,6 +182,7 @@ run_parallel_jam:
 			--chain $(CHAINSPEC) \
 			--dev-validator $$V_IDX \
 			--debug rotation,guarantees \
+			--pvm-backend $(PVM_BACKEND) \
 			--start-time "$(JAM_START_TIME)" \
 			>logs/jamduna-$$i.log 2>&1 & \
 	done
