@@ -22,8 +22,6 @@ func (vm *VM) SetCore(coreIndex uint16) {
 	vm.CoreIndex = coreIndex
 }
 
-var VM_MODE = "interpreter"
-
 // input by order([work item index],[workpackage itself], [result from IsAuthorized], [import segments], [export count])
 func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash, n common.Hash) (r types.Result, res uint64, exportedSegments [][]byte) {
 	vm.Mode = "refine"
@@ -49,11 +47,11 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	vm.Authorization = authorization.Ok
 	vm.Extrinsics = extrinsics
 	vm.Imports = importsegments
-	switch VM_MODE {
-	case "interpreter":
+	switch vm.Backend {
+	case BackendInterpreter:
 		vm.Standard_Program_Initialization(a) // eq 264/265
 		vm.Execute(types.EntryPointRefine, false, nil)
-	case "recompiler_sandbox":
+	case BackendRecompilerSandbox:
 		rvm, err := NewRecompilerSandboxVM(vm)
 		if err != nil {
 			log.Error(vm.logging, "RecompilerVM creation failed", "error", err)
@@ -64,7 +62,7 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 			return
 		} // eq 264/265
 		rvm.ExecuteSandBox(types.EntryPointRefine)
-	case "recompiler":
+	case BackendRecompiler:
 		rvm, err := NewRecompilerVM(vm)
 		if err != nil {
 			log.Error(vm.logging, "RecompilerVM creation failed", "error", err)
@@ -76,7 +74,8 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 		} // eq 264/265
 		rvm.Execute(types.EntryPointRefine)
 	default:
-		log.Error(vm.logging, "Unknown VM mode", "mode", VM_MODE)
+		log.Crit(vm.logging, "Unknown VM mode", "mode", vm.Backend)
+		panic(0)
 	}
 
 	r, res = vm.getArgumentOutputs()
@@ -113,11 +112,11 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	x_s.Mutable = true
 	vm.X.U.D[s] = x_s
 	vm.ServiceAccount = x_s
-	switch VM_MODE {
-	case "interpreter":
+	switch vm.Backend {
+	case BackendInterpreter:
 		vm.Standard_Program_Initialization(input_bytes)    // eq 264/265
 		vm.Execute(types.EntryPointAccumulate, false, nil) // F ∈ Ω⟨(X, X)⟩
-	case "recompiler_sandbox":
+	case BackendRecompilerSandbox:
 		rvm, err := NewRecompilerSandboxVM(vm)
 		if err != nil {
 			log.Error(vm.logging, "RecompilerVM creation failed", "error", err)
@@ -128,7 +127,7 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 			return
 		}
 		rvm.ExecuteSandBox(types.EntryPointAccumulate)
-	case "recompiler":
+	case BackendRecompiler:
 		rvm, err := NewRecompilerVM(vm)
 		if err != nil {
 			log.Error(vm.logging, "RecompilerVM creation failed", "error", err)
@@ -140,8 +139,8 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 		}
 		rvm.Execute(types.EntryPointAccumulate)
 	default:
-		log.Error(vm.logging, "Unknown VM mode", "mode", VM_MODE)
-		return
+		log.Crit(vm.logging, "Unknown VM mode", "mode", vm.Backend)
+		panic(0)
 	}
 	r, res = vm.getArgumentOutputs()
 	x_s.UpdateRecentAccumulation(vm.Timeslot) // [Gratis TODO: potentially need to be moved out]
@@ -157,7 +156,7 @@ func (vm *VM) initLogs() {
 	}
 	// decide filename
 	fileName := "vm_log"
-	dir := VM_MODE
+	dir := vm.Backend
 	filePath := filepath.Join(dir, fileName+".json")
 	// ensure the directory exists
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -179,7 +178,7 @@ func (vm *VM) saveLogs() {
 		return
 	}
 	// decide filename
-	dir := VM_MODE
+	dir := vm.Backend
 	filePath := filepath.Join(dir, "vm_log.json")
 
 	// ensure the directory exists
@@ -219,11 +218,11 @@ func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAc
 	vm.Mode = "transfer"
 	// a = E(t)   take transfer memos t and encode them
 	vm.ServiceAccount = service_account
-	switch VM_MODE {
-	case "interpreter":
+	switch vm.Backend {
+	case BackendInterpreter:
 		vm.Standard_Program_Initialization(arguments) // eq 264/265
 		vm.Execute(types.EntryPointOnTransfer, false, nil)
-	case "recompiler_sandbox":
+	case BackendRecompilerSandbox:
 		rvm, err := NewRecompilerSandboxVM(vm)
 		if err != nil {
 			log.Error(vm.logging, "RecompilerVM creation failed", "error", err)
@@ -234,7 +233,7 @@ func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAc
 			return
 		} // eq 264/265
 		rvm.ExecuteSandBox(types.EntryPointOnTransfer)
-	case "recompiler":
+	case BackendRecompiler:
 		rvm, err := NewRecompilerVM(vm)
 		if err != nil {
 			log.Error(vm.logging, "RecompilerVM creation failed", "error", err)
@@ -246,8 +245,8 @@ func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAc
 		}
 		rvm.Execute(types.EntryPointOnTransfer)
 	default:
-		log.Error(vm.logging, "Unknown VM mode", "mode", VM_MODE)
-		return
+		log.Crit(vm.logging, "Unknown VM mode", "mode", vm.Backend)
+		panic(12)
 	}
 	// return vm.getArgumentOutputs()
 	r.Err = vm.ResultCode
@@ -261,11 +260,11 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Resul
 	a, _ := types.Encode(uint16(c))
 	vm.Gas = types.IsAuthorizedGasAllocation
 	// fmt.Printf("ExecuteAuthorization - c=%d len(p_bytes)=%d len(c_bytes)=%d len(a)=%d a=%x WP=%s\n", c, len(p_bytes), len(c_bytes), len(a), a, p.String())
-	switch VM_MODE {
-	case "interpreter":
+	switch vm.Backend {
+	case BackendInterpreter:
 		vm.Standard_Program_Initialization(a) // eq 264/265
 		vm.Execute(types.EntryPointAuthorization, false, nil)
-	case "recompiler_sandbox":
+	case BackendRecompilerSandbox:
 		rvm, err := NewRecompilerSandboxVM(vm)
 		if err != nil {
 			log.Error(vm.logging, "RecompilerVM creation failed", "error", err)
@@ -276,7 +275,7 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Resul
 			return
 		} // eq 264/265
 		rvm.ExecuteSandBox(types.EntryPointAuthorization)
-	case "recompiler":
+	case BackendRecompiler:
 		rvm, err := NewRecompilerVM(vm)
 		if err != nil {
 			log.Error(vm.logging, "RecompilerVM creation failed", "error", err)
@@ -288,8 +287,8 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Resul
 		}
 		rvm.Execute(types.EntryPointAuthorization)
 	default:
-		log.Error(vm.logging, "Unknown VM mode", "mode", VM_MODE)
-		return
+		log.Crit(vm.logging, "Unknown VM mode", "mode", vm.Backend)
+		panic(22)
 	}
 	r, _ = vm.getArgumentOutputs()
 	return r

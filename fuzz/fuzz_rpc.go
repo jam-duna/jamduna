@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/jamerrors"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
@@ -58,7 +59,7 @@ type ValidationResult struct {
 	STF   statedb.StateTransition `json:"stf,omitempty"`
 }
 
-func handleSTFValidation(sdb_storage *storage.StateDBStorage) http.HandlerFunc {
+func handleSTFValidation(sdb_storage *storage.StateDBStorage, pvmBackend string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
@@ -81,7 +82,7 @@ func handleSTFValidation(sdb_storage *storage.StateDBStorage) http.HandlerFunc {
 			sendValidateResult(w, http.StatusInternalServerError, ValidationResult{Valid: false, Error: "Failed to type assert to StateTransition"})
 			return
 		}
-		stfErr := statedb.CheckStateTransition(sdb_storage, &stf, nil)
+		stfErr := statedb.CheckStateTransition(sdb_storage, &stf, nil, pvmBackend)
 		if stfErr != nil {
 			errorStr := jamerrors.GetErrorName(stfErr)
 			sendValidateResult(w, http.StatusBadRequest, ValidationResult{Valid: false, Error: errorStr})
@@ -115,7 +116,7 @@ func handleStateTransitionChallenge(sdb_storage *storage.StateDBStorage) http.Ha
 			http.Error(w, "Failed to type assert to StateTransition", http.StatusInternalServerError)
 			return
 		}
-		ok, postStateSnapshotRaw, jamErr, _ := statedb.ComputeStateTransition(sdb_storage, &stc)
+		ok, postStateSnapshotRaw, jamErr, _ := statedb.ComputeStateTransition(sdb_storage, &stc, pvm.BackendInterpreter)
 		if !ok {
 			http.Error(w, "BadChallenge", http.StatusInternalServerError)
 			return
@@ -172,7 +173,7 @@ func handleFuzz(sdb_storage *storage.StateDBStorage) http.HandlerFunc {
 		mutatedStf, expectedErr, possibleErrs := selectImportBlocksError(sdb_storage, modes, &stf)
 		if expectedErr != nil {
 			fmt.Printf("Expected error: %v | %v possibleErrs = %v\n", jamerrors.GetErrorName(expectedErr), len(possibleErrs), jamerrors.GetErrorNames(possibleErrs))
-			errActual := statedb.CheckStateTransition(sdb_storage, mutatedStf, nil)
+			errActual := statedb.CheckStateTransition(sdb_storage, mutatedStf, nil, pvm.BackendInterpreter)
 			if errActual == expectedErr {
 				fuzzed = true
 				log.Printf("[fuzzed!] %v", jamerrors.GetErrorName(errActual))
@@ -195,7 +196,7 @@ func handleFuzz(sdb_storage *storage.StateDBStorage) http.HandlerFunc {
 func runRPCServerInternal(sdbStorage *storage.StateDBStorage) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/fuzz", handleFuzz(sdbStorage))
-	mux.HandleFunc("/validate", handleSTFValidation(sdbStorage))
+	mux.HandleFunc("/validate", handleSTFValidation(sdbStorage, pvm.BackendInterpreter))
 
 	server := &http.Server{
 		Addr:         InternalRPCPort,

@@ -109,6 +109,7 @@ type NodeContent struct {
 
 	server quic.Listener
 
+	pvmBackend      string
 	epoch0Timestamp uint64
 	// Jamweb
 	hub             *Hub
@@ -150,7 +151,8 @@ type NodeContent struct {
 	jceManager      *ManualJCEManager
 }
 
-func NewNodeContent(id uint16, ed25519PublicKey ed25519.PublicKey, store *storage.StateDBStorage) NodeContent {
+func NewNodeContent(id uint16, ed25519PublicKey ed25519.PublicKey, store *storage.StateDBStorage, pvmBackend string) NodeContent {
+	fmt.Printf("[N%v] NewNodeContent pvmBackend: %s\n", id, pvmBackend)
 	return NodeContent{
 		id:                   id,
 		store:                store,
@@ -168,6 +170,7 @@ func NewNodeContent(id uint16, ed25519PublicKey ed25519.PublicKey, store *storag
 		workPackageQueue:     sync.Map{},
 		new_timeslot_chan:    make(chan uint32, 1),
 		extrinsic_pool:       types.NewExtrinsicPool(),
+		pvmBackend:           pvmBackend,
 	}
 }
 
@@ -384,8 +387,8 @@ func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 	}
 }
 
-func createNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int, jceMode string) (*Node, error) {
-	return newNode(id, credential, chainspec, epoch0Timestamp, peers, peerList, dataDir, port, jceMode)
+func createNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int, jceMode string) (*Node, error) {
+	return newNode(id, credential, chainspec, pvmBackend, epoch0Timestamp, peers, peerList, dataDir, port, jceMode)
 }
 
 func PrintSpec(chainspec *chainspecs.ChainSpec) error {
@@ -412,11 +415,11 @@ func PrintSpec(chainspec *chainspecs.ChainSpec) error {
 	fmt.Printf("Spec: %s\n", _statedb.JamState.String())
 	return nil
 }
-func NewNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
-	return createNode(id, credential, chainspec, epoch0Timestamp, peers, peerList, dataDir, port, JCEDefault)
+func NewNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
+	return createNode(id, credential, chainspec, pvmBackend, epoch0Timestamp, peers, peerList, dataDir, port, JCEDefault)
 }
 
-func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, epoch0Timestamp uint64, peers []string, startPeerList map[uint16]*Peer, dataDir string, port int, jceMode string) (*Node, error) {
+func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, epoch0Timestamp uint64, peers []string, startPeerList map[uint16]*Peer, dataDir string, port int, jceMode string) (*Node, error) {
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
 	log.Info(log.Node, fmt.Sprintf("NewNode [N%v]", id), "spec", chainspec.ID, "addr", addr, "dataDir", dataDir)
 	//REQUIRED FOR CAPTURING JOBID. DO NOT DELETE THIS LINE!!
@@ -438,7 +441,7 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 		return nil, fmt.Errorf("error generating self-signed certificate: %v", err)
 	}
 	node := &Node{
-		NodeContent: NewNodeContent(id, ed25519_pub, store),
+		NodeContent: NewNodeContent(id, ed25519_pub, store, pvmBackend),
 		IsSync:      true,
 		peers:       peers,
 		clients:     make(map[string]string),
@@ -1868,7 +1871,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	}
 	start = time.Now()
 	valid_tickets := n.extrinsic_pool.GetTicketIDPairFromPool(used_entropy)
-	newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, ctx, nextBlock, valid_tickets)
+	newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, ctx, nextBlock, valid_tickets, n.pvmBackend)
 	stateTransitionElapsed := common.ElapsedStr(start)
 	if err != nil {
 		fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
@@ -2794,7 +2797,7 @@ func (n *Node) runAuthoring() {
 				ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
 				defer cancel()
 				stProcessState := time.Now()
-				isAuthorized, newBlock, newStateDB, err := n.statedb.ProcessState(ctx, currJCE, n.credential, ticketIDs, n.extrinsic_pool)
+				isAuthorized, newBlock, newStateDB, err := n.statedb.ProcessState(ctx, currJCE, n.credential, ticketIDs, n.extrinsic_pool, n.pvmBackend)
 				if err != nil {
 					log.Error(log.Node, "ProcessState", "err", err)
 					return processResult{}, err
@@ -2870,7 +2873,7 @@ func (n *Node) runAuthoring() {
 					log.Error(log.Node, "runAuthoring:writeDebug", "err", err)
 				}
 				if revalidate {
-					if err := statedb.CheckStateTransition(n.store, st, s.AncestorSet); err != nil {
+					if err := statedb.CheckStateTransition(n.store, st, s.AncestorSet, n.pvmBackend); err != nil {
 						log.Crit(log.Node, "runAuthoring:CheckStateTransition", "err", err)
 					}
 				}
@@ -2907,9 +2910,11 @@ func (n *Node) runAuthoring() {
 }
 
 func (n *Node) Telemetry(msgType uint8, obj interface{}, tags ...interface{}) {
-	return
-	sender_id := n.GetEd25519Key().String()
-	log.Telemetry(msgType, sender_id, obj, tags...)
+	if false {
+		sender_id := n.GetEd25519Key().String()
+		log.Telemetry(msgType, sender_id, obj, tags...)
+
+	}
 }
 
 func (n *Node) authorTelemetry(b *types.Block, newStateDB *statedb.StateDB, elapsed uint32) {

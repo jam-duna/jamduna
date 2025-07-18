@@ -255,7 +255,7 @@ tant deferred-transfers and accumulation-output pairings:
 */
 // eq 173
 // ∆+
-func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.PartialState, f map[uint32]uint32) (num uint64, output_t []types.DeferredTransfer, output_b []types.AccumulationOutput, GasUsage []Usage) { // not really sure i here , the max meaning. use uint32 for now
+func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.PartialState, f map[uint32]uint32, pvmBackend string) (num uint64, output_t []types.DeferredTransfer, output_b []types.AccumulationOutput, GasUsage []Usage) { // not really sure i here , the max meaning. use uint32 for now
 	var gas_tmp uint64
 	i := uint64(0)
 	// calculate how to maximize the work reports to enter the parallelized accumulation
@@ -283,12 +283,12 @@ func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.Parti
 	if i >= uint64(len(w)) { // if i >= len(w), then all work reports are accumulated
 		i = uint64(len(w))
 	}
-	g_star, t_star, b_star, U := s.ParallelizedAccumulate(o, w[0:i], f) // parallelized accumulation the 0 to i work reports // parallelized accumulation the 0 to i work reports
+	g_star, t_star, b_star, U := s.ParallelizedAccumulate(o, w[0:i], f, pvmBackend) // parallelized accumulation the 0 to i work reports
 
 	if i >= uint64(len(w)) { // no more reports
 		return i, t_star, b_star, U
 	}
-	j, outputT, outputB, GasUsage := s.OuterAccumulate(g-g_star, w[i+1:], o, nil) // recursive call to the rest of the work reports
+	j, outputT, outputB, GasUsage := s.OuterAccumulate(g-g_star, w[i+1:], o, nil, pvmBackend) // recursive call to the rest of the work reports
 	num = i + j
 
 	output_t = append(outputT, t_star...)
@@ -315,7 +315,7 @@ privileged always-accumulate services, into a tuple of the total gas utilized in
 */
 // the parallelized accumulation function ∆*
 // eq 174
-func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkReport, f map[uint32]uint32) (output_u uint64, output_t []types.DeferredTransfer, output_b []types.AccumulationOutput, GasUsage []Usage) {
+func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkReport, f map[uint32]uint32, pvmBackend string) (output_u uint64, output_t []types.DeferredTransfer, output_b []types.AccumulationOutput, GasUsage []Usage) {
 	GasUsage = make([]Usage, 0)
 	services := make([]uint32, 0)
 	for _, workReport := range w {
@@ -336,7 +336,7 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 	for _, service := range services {
 		// this is parallelizable
 		// o_copy := o.Clone()
-		B, U, XY, exceptional := s.SingleAccumulate(o, w, f, service)
+		B, U, XY, exceptional := s.SingleAccumulate(o, w, f, service, pvmBackend)
 		if XY == nil {
 			log.Warn(log.SDB, "SingleAccumulate returned nil XContext", "service", service)
 			continue
@@ -392,7 +392,7 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 	serviceMXY, ok := accumulated_partial[service_m]
 	o_copy := o.Clone()
 	if !ok {
-		_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, service_m)
+		_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, service_m, pvmBackend)
 		serviceMXY = XY
 	}
 	m_prime := serviceMXY.U.PrivilegedState.Kai_m
@@ -406,7 +406,7 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 		service_acXY, ok := accumulated_partial[service_ac]
 		if !ok {
 			o_copy := o.Clone()
-			_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, service_ac)
+			_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, service_ac, pvmBackend)
 			service_acXY = XY
 		}
 		if service_acXY == nil || service_acXY.U == nil {
@@ -424,7 +424,7 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 	service_vXY, ok := accumulated_partial[v_star]
 	if !ok {
 		o_copy := o.Clone()
-		_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, v_star)
+		_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, v_star, pvmBackend)
 		service_vXY = XY
 	}
 	v_prime := service_vXY.U.PrivilegedState.Kai_v
@@ -434,7 +434,7 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 	service_iXY, ok := accumulated_partial[v]
 	if !ok {
 		o_copy := o.Clone()
-		_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, v)
+		_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, v, pvmBackend)
 		service_iXY = XY
 	}
 	i_prime := service_iXY.U.UpcomingValidators
@@ -447,7 +447,7 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 		service_acXY, ok := accumulated_partial[service_ac]
 		if !ok {
 			o_copy := o.Clone()
-			_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, service_ac)
+			_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, service_ac, pvmBackend)
 			service_acXY = XY
 		}
 		q_prime[i] = service_acXY.U.QueueWorkReport[i]
@@ -532,7 +532,7 @@ invokes pvm execution
 */
 // ∆1
 // eq 176
-func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport, f map[uint32]uint32, s uint32) (output_b common.Hash, output_u uint64, xy *types.XContext, exceptional bool) {
+func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport, f map[uint32]uint32, s uint32, pvmBackend string) (output_b common.Hash, output_u uint64, xy *types.XContext, exceptional bool) {
 	// gas need to check again
 	// check if s is in f
 	gas := uint32(0)
@@ -592,7 +592,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	}
 
 	//(B.8) start point
-	vm := pvm.NewVMFromCode(s, code, 0, sd)
+	vm := pvm.NewVMFromCode(s, code, 0, sd, pvmBackend)
 	pvmContext := log.PvmValidating
 	if sd.Authoring == log.GeneralAuthoring {
 		pvmContext = log.PvmAuthoring
@@ -641,7 +641,7 @@ func TransferSelect(t []types.DeferredTransfer, d uint32) []types.DeferredTransf
 	return output
 }
 
-func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, self_index uint32, t []types.DeferredTransfer) (gasUsed int64, transferCount uint, err error) { // select transfers eq 12.23
+func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, self_index uint32, t []types.DeferredTransfer, pvmBackend string) (gasUsed int64, transferCount uint, err error) { // select transfers eq 12.23
 	selectedTransfers := TransferSelect(t, self_index)
 	if len(selectedTransfers) == 0 {
 		return 0, 0, nil
@@ -658,7 +658,7 @@ func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, sel
 		return 0, uint(len(selectedTransfers)), nil
 	}
 
-	vm := pvm.NewVMFromCode(self_index, code, 0, s)
+	vm := pvm.NewVMFromCode(self_index, code, 0, s, pvmBackend)
 	pvmContext := log.PvmValidating
 	if s.Authoring == log.GeneralAuthoring {
 		pvmContext = log.PvmAuthoring
@@ -680,10 +680,10 @@ func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, sel
 }
 
 // eq 12.24
-func (s *StateDB) ProcessDeferredTransfers(o *types.PartialState, time_slot uint32, t []types.DeferredTransfer) (transferStats map[uint32]*transferStatistics, err error) {
+func (s *StateDB) ProcessDeferredTransfers(o *types.PartialState, time_slot uint32, t []types.DeferredTransfer, pvmBackend string) (transferStats map[uint32]*transferStatistics, err error) {
 	transferStats = make(map[uint32]*transferStatistics)
 	for service, serviceAccount := range o.D {
-		gasUsed, transferCount, err := s.HostTransfer(serviceAccount, time_slot, uint32(service), t)
+		gasUsed, transferCount, err := s.HostTransfer(serviceAccount, time_slot, uint32(service), t, pvmBackend)
 		if err != nil {
 			return transferStats, err
 		}

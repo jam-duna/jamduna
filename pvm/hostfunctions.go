@@ -893,7 +893,7 @@ func (vm *VM) hostFetch() {
 	case 15: // E(o[w_11])
 		if vm.AccumulateOperandElements != nil && omega_11 < uint64(len(vm.AccumulateOperandElements)) {
 			v_Bytes, _ = types.Encode(vm.AccumulateOperandElements[omega_11])
-			log.Info(vm.logging, "FETCH E(o[w_11])", "w_11", omega_11, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "len", len(v_Bytes))
+			log.Trace(vm.logging, "FETCH E(o[w_11])", "w_11", omega_11, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "len", len(v_Bytes))
 		}
 	case 16: // E(|t) all transfers
 		if vm.Transfers != nil {

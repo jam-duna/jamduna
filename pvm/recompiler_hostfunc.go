@@ -78,7 +78,7 @@ func (vm *RecompilerVM) LogCurrentState(opcode byte, operands []byte, currentPC 
 	// fmt.Printf("IsBasicBlockInstruction: %t vmBasicBlock: %d Gas: %d PC: %d Opcode: %s\n", IsBasicBlockInstruction(opcode), vm.vmBasicBlock, gas, currentPC, opcode_str(opcode))
 	if (vm.vmBasicBlock)%50000 == 0 { // every 50k basic blocks, take a snapshot
 		registers := vm.Ram.ReadRegisters()
-		fmt.Printf("vmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), registers)
+		//fmt.Printf("vmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), registers)
 		snapshot := vm.TakeSnapShot(fmt.Sprintf("BB%d", vm.vmBasicBlock), uint32(currentPC), registers, uint64(vm.Gas), 268435456, vm.r12, uint64(vm.vmBasicBlock))
 		// this snapshot + memory of what was just executed, but we want the NEXT PC, not the currentPC.  The Gas is not clear
 		vm.SaveSnapShot(snapshot)

@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strings"
 	"syscall"
-	"time"
 	"unsafe"
 
 	"github.com/colorfulnotion/jam/log"
@@ -43,9 +42,6 @@ func NewRecompilerVM(vm *VM) (*RecompilerVM, error) {
 		return nil, fmt.Errorf("failed to mmap memory: %v", err)
 	}
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to mmap regDump memory: %v", err)
-	}
 	regDumpAddr := uintptr(unsafe.Pointer(&mem[0]))
 	// mem protect the first 1MB as R/W
 	if err := syscall.Mprotect(mem[:1024*1024], syscall.PROT_READ|syscall.PROT_WRITE); err != nil {
@@ -667,7 +663,6 @@ func (rvm *RecompilerVM) Execute(entry uint32) {
 	rvm.pc = 0
 	rvm.initStartCode()
 	rvm.Compile(rvm.pc)
-	tm := time.Now()
 	if err := rvm.ExecuteX86CodeWithEntry(rvm.x86Code, entry); err != nil {
 		// we don't have to return this , just print it
 		fmt.Printf("ExecuteX86 crash detected: %v\n", err)
@@ -685,9 +680,8 @@ func (rvm *RecompilerVM) Execute(entry uint32) {
 			fmt.Printf("failed to write JSON tally: %v\n", err)
 		}
 	}
-
-	fmt.Printf("EXECUTEX86 Mode: %s Execution time: %s\n", rvm.Mode, time.Since(tm))
 }
+
 func (vm *VM) CalculateTally() {
 	//	fmt.Println("Basic Block Execution Tally:")
 	// Collect and sort PCs

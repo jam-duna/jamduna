@@ -38,7 +38,7 @@ func generateOrInvOp64(inst Instruction) []byte {
 			rex |= 0x04
 		} // REX.R = 1 if srcA ≥ 8
 		// no REX.B because dest is RAX (index 0)
-		modrm := byte(0xC0 | ((srcA.RegBits & 7) << 3) | 0)
+		modrm := byte(0xC0 | ((srcA.RegBits & 7) << 3))
 		code = append(code, rex, 0x89, modrm)
 	}
 

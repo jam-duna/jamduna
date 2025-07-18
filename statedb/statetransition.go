@@ -120,14 +120,14 @@ func makemap(p []KeyVal) map[common.Hash][]byte {
 	return kvMap
 }
 
-func ComputeStateTransition(storage *storage.StateDBStorage, stc *StateTransition) (ok bool, postStateSnapshot *StateSnapshotRaw, jamErr error, miscErr error) {
+func ComputeStateTransition(storage *storage.StateDBStorage, stc *StateTransition, pvmBackend string) (ok bool, postStateSnapshot *StateSnapshotRaw, jamErr error, miscErr error) {
 	preState, miscErr := NewStateDBFromStateTransition(storage, stc)
 	if miscErr != nil {
 		// Invalid pre-state
 		return false, nil, nil, fmt.Errorf("PreState Error")
 	}
 	scBlock := stc.Block
-	postState, jamErr := ApplyStateTransitionFromBlock(preState, context.Background(), &scBlock, nil)
+	postState, jamErr := ApplyStateTransitionFromBlock(preState, context.Background(), &scBlock, nil, pvmBackend)
 	if jamErr != nil {
 		// When validating Fuzzed STC, we shall expect jamError
 		return true, nil, jamErr, nil
@@ -143,7 +143,7 @@ func ComputeStateTransition(storage *storage.StateDBStorage, stc *StateTransitio
 }
 
 // NOTE CheckStateTransition vs CheckStateTransitionWithOutput a good example of "copy-paste" coding increases in complexity
-func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, ancestorSet map[common.Hash]uint32) error {
+func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, ancestorSet map[common.Hash]uint32, pvmBackend string) error {
 	// Apply the state transition
 	s0, err := NewStateDBFromStateTransition(storage, st)
 	if err != nil {
@@ -151,7 +151,7 @@ func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, 
 	}
 	s0.Id = storage.NodeID
 	s0.AncestorSet = ancestorSet
-	s1, err := ApplyStateTransitionFromBlock(s0, context.Background(), &(st.Block), nil)
+	s1, err := ApplyStateTransitionFromBlock(s0, context.Background(), &(st.Block), nil, pvmBackend)
 	if err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, 
 	return fmt.Errorf("mismatch")
 }
 
-func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTransition, ancestorSet map[common.Hash]uint32, writeFile ...string) (diffs map[string]DiffState, err error) {
+func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTransition, ancestorSet map[common.Hash]uint32, pvmBackend string, writeFile ...string) (diffs map[string]DiffState, err error) {
 	// Apply the state transition
 	s0, err := NewStateDBFromStateTransition(storage, st)
 	if err != nil {
@@ -171,7 +171,7 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 	}
 	s0.Id = storage.NodeID
 	s0.AncestorSet = ancestorSet
-	s1, err := ApplyStateTransitionFromBlock(s0, context.Background(), &(st.Block), nil)
+	s1, err := ApplyStateTransitionFromBlock(s0, context.Background(), &(st.Block), nil, pvmBackend)
 	if err != nil {
 		fmt.Printf("!!! ApplyStateTransitionFromBlock error: %v\n", err)
 		return nil, err

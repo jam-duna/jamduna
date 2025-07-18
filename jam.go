@@ -270,10 +270,9 @@ func main() {
 			if cmd.Flags().Changed(RPCPortFlag) {
 				node.WSPort = RPCPort
 			}
-			pvm.Set_PVM_Backend(pvmBackend)
 
 			fmt.Printf("Running JAM DUNA node with the following flags:\n")
-			fmt.Printf("\033[33mdataPath: %s, Port: %d, RPCPort: %d, validatorIndex: %d, debug: %s, chainSpec: %s, logLevel: %s, start_time: %s. pvm_backend: %s\033[0m\n", dataPath, Port, RPCPort, validatorIndex, debug, chainSpec, logLevel, start_time, pvm.VM_MODE)
+			fmt.Printf("\033[33mdataPath: %s, Port: %d, RPCPort: %d, validatorIndex: %d, debug: %s, chainSpec: %s, logLevel: %s, start_time: %s. pvm_backend: %s\033[0m\n", dataPath, Port, RPCPort, validatorIndex, debug, chainSpec, logLevel, start_time, pvmBackend)
 
 			var err error
 			var validators []types.Validator
@@ -371,7 +370,7 @@ func main() {
 			}
 			epoch0Timestamp := statedb.NewEpoch0Timestamp("jam", start_time)
 
-			n, err := node.NewNode(uint16(validatorIndex), selfSecret, chainSpecData, epoch0Timestamp, peers, peerList, dataPath, Port)
+			n, err := node.NewNode(uint16(validatorIndex), selfSecret, chainSpecData, pvmBackend, epoch0Timestamp, peers, peerList, dataPath, Port)
 			if err != nil {
 				fmt.Printf("New Node Err:%s", err.Error())
 				os.Exit(1)
@@ -384,7 +383,7 @@ func main() {
 				os.Exit(1)
 			}
 			defer storage.Close()
-			fmt.Printf("New Node %d started, edkey %v, port%d, time:%s. buildVersion=%v pvm_backend=%v\n", validatorIndex, selfSecret.Ed25519Pub, Port, time.Now().String(), n.GetBuild(), pvm.VM_MODE)
+			fmt.Printf("New Node %d started, edkey %v, port%d, time:%s. buildVersion=%v pvm_backend=%v\n", validatorIndex, selfSecret.Ed25519Pub, Port, time.Now().String(), n.GetBuild(), pvmBackend)
 			StartRuntimeMonitor(30 * time.Second)
 			ticker := time.NewTicker(30 * time.Second)
 			defer ticker.Stop()
@@ -404,11 +403,11 @@ func main() {
 	runCmd.Flags().StringVar(&chainSpec, chainSpecFlag, "chainspec.json", `Chain to run. "polkadot", "dev", or the path of a chain spec file`)
 
 	desc := flagDescription("The PVM backend to use", map[string]string{
-		"interpreter": "Use a PVM interpreter. Slow, but works everywhere",
-		"compiler":    "Use a PVM recompiler. Fast, but is Linux-only",
-		"sandbox":     "Use a PVM recompiler sandbox for debugging",
+		pvm.BackendInterpreter:       "Use a PVM interpreter. Slow, but works everywhere",
+		pvm.BackendRecompiler:        "Use a PVM recompiler. Fast, but is Linux-only",
+		pvm.BackendRecompilerSandbox: "Use a PVM recompiler sandbox for debugging",
 	})
-	runCmd.Flags().StringVar(&pvmBackend, pvmBackendFlag, "interpreter", desc)
+	runCmd.Flags().StringVar(&pvmBackend, pvmBackendFlag, pvm.BackendInterpreter, desc)
 	runCmd.Flags().IntVar(&peerID, peerIDFlag, 0, "Peer ID of this node. If not specified, a new peer ID will be generated. The corresponding secret key will not be persisted.")
 	runCmd.Flags().StringVar(&externalIP, externalIPFlag, "", "External IP of this node, as used by other nodes to connect. If not specified, this will be guessed.")
 	runCmd.Flags().StringVar(&listenIP, listenIPFlag, "", "IP address to listen on. `::` (the default) means all addresses. [default: ::]")

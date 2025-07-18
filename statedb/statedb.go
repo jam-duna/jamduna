@@ -18,7 +18,6 @@ import (
 	"github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
@@ -41,7 +40,6 @@ type StateDB struct {
 	sdb                     *storage.StateDBStorage
 	trie                    *trie.MerkleTree
 	posteriorSafroleEntropy *SafroleState // used to manage entropy, validator, and winning ticket
-	VMs                     map[uint32]*pvm.VM
 
 	// used in ApplyStateRecentHistory between statedbs
 	Authoring string
@@ -715,7 +713,7 @@ func GenerateEpochPhaseTraceID(epoch uint32, phase uint32) string {
 	return hex.EncodeToString(traceIDBytes[:])
 }
 
-func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential types.ValidatorSecret, ticketIDs []common.Hash, extrinsic_pool *types.ExtrinsicPool) (isAuthorizedBlockBuilder bool, blk *types.Block, sdb *StateDB, err error) {
+func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential types.ValidatorSecret, ticketIDs []common.Hash, extrinsic_pool *types.ExtrinsicPool, pvmBackend string) (isAuthorizedBlockBuilder bool, blk *types.Block, sdb *StateDB, err error) {
 	genesisReady := s.JamState.SafroleState.CheckFirstPhaseReady(currJCE)
 	if !genesisReady {
 		//log.Warn(log.SDB, "ProcessState:GenesisNotReady", "currJCE", currJCE)
@@ -775,7 +773,7 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 				used_entropy = s.GetSafrole().Entropy[2]
 			}
 			valid_tickets := extrinsic_pool.GetTicketIDPairFromPool(used_entropy)
-			newStateDB, err := ApplyStateTransitionFromBlock(s, ctx, proposedBlk, valid_tickets) // shawn to check.. valid_tickets was nil here before
+			newStateDB, err := ApplyStateTransitionFromBlock(s, ctx, proposedBlk, valid_tickets, pvmBackend) // shawn to check.. valid_tickets was nil here before
 			if err != nil {
 				log.Error(log.SDB, "ProcessState:ApplyStateTransitionFromBlock", "s.ID", s.Id, "currJCE", currJCE, "e'", currEpoch, "m'", currPhase, "err", err)
 				return true, nil, nil, err

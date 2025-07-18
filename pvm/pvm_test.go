@@ -52,7 +52,7 @@ func pvm_test(tc TestCase) error {
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
 	// metadata, c := types.SplitMetadataAndCode(tc.Code)
-	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{})
+	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendInterpreter)
 	// Set the initial memory
 	for _, mem := range tc.InitialMemory {
 		//pvm.Ram.SetPageAccess(mem.Address/PageSize, 1, AccessMode{Readable: false, Writable: true, Inaccessible: false})
@@ -157,7 +157,7 @@ func TestRevm(t *testing.T) {
 	initial_pc := uint64(0)
 	hostENV := NewMockHostEnv()
 	metadata := "revm_test"
-	pvm := NewVM(0, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata))
+	pvm := NewVM(0, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata), BackendInterpreter)
 
 	a := make([]byte, 0)
 	pvm.Gas = int64(9999999999999999)
@@ -200,7 +200,7 @@ func TestHelloWorld(t *testing.T) {
 	initial_pc := uint64(0)
 	hostENV := NewMockHostEnv()
 	metadata := "hello_world"
-	pvm := NewVM(0, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata))
+	pvm := NewVM(0, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata), BackendInterpreter)
 
 	a := make([]byte, 0)
 	pvm.Gas = int64(9999999999999999)
@@ -221,15 +221,15 @@ func TestHelloWorld(t *testing.T) {
 
 // adjust “LogEntry” to whatever the element type of VMLogs actually is
 func TestCompareLogs(t *testing.T) {
-	f1, err := os.Open("interpreter/vm_log.json")
+	f1, err := os.Open(fmt.Sprintf("%s/vm_log.json", BackendInterpreter))
 	if err != nil {
-		t.Fatalf("failed to open interpreter/vm_log.json: %v", err)
+		t.Fatalf("failed to open %s/vm_log.json: %v", BackendInterpreter, err)
 	}
 	defer f1.Close()
 
-	f2, err := os.Open("recompiler_sandbox/vm_log.json")
+	f2, err := os.Open(fmt.Sprintf("%s/vm_log.json", BackendRecompilerSandbox))
 	if err != nil {
-		t.Fatalf("failed to open recompiler_sandbox/vm_log.json: %v", err)
+		t.Fatalf("failed to open %s/vm_log.json: %v", BackendRecompilerSandbox, err)
 	}
 	defer f2.Close()
 
@@ -365,7 +365,6 @@ func TestSnapShots(t *testing.T) {
 func TestLogEntry(t *testing.T) {
 	PvmLogging = true
 	PvmTrace = true
-	VM_MODE = "recompiler_sandbox"
 
 	// a real pvm test case for it to run
 	name := "inst_store_indirect_u16_with_offset_ok"
@@ -383,7 +382,7 @@ func TestLogEntry(t *testing.T) {
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
 	// metadata, c := types.SplitMetadataAndCode(tc.Code)
-	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{})
+	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendRecompilerSandbox)
 
 	//jsonStr := `{"Opcode":198,"OpStr":"SHLO_R_32","Operands":"qwo=","PvmPc":97201,"Registers":[1402,4278055928,48,108331,48,1,4278057552,24655,6,4278057752,1,44,0],"Gas":9999992996015693}`
 	jsonStr := `{"Opcode":198,"OpStr":"SHLO_R_32","Operands":"qwo=","PvmPc":97201,"Registers":[1402,4278055928,48,108331,48,1,4278057552,24655,6,4278057752,0,44,0],"Gas":9999992996392400}`

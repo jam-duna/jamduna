@@ -28,24 +28,16 @@ func BenchmarkInstRetHalt(b *testing.B) {
 	// 2) Define your three modes:
 	benchmarks := []struct {
 		label string
-		mode  string
 		runFn func(TestCase) error
 	}{
-		{"pvm", "", pvm_test},
-		{"emulator", "recompiler_sandbox", recompiler_sandbox_test},
-		{"recompiler", "recompiler", recompiler_test},
+		{BackendInterpreter, pvm_test},
+		{BackendRecompilerSandbox, recompiler_sandbox_test},
+		{BackendRecompiler, recompiler_test},
 	}
 
 	// 3) Run each sub-benchmark:
 	for _, bm := range benchmarks {
 		b.Run(name+"_"+bm.label, func(b *testing.B) {
-			// switch VM_MODE only if needed:
-			orig := VM_MODE
-			if bm.mode != "" {
-				VM_MODE = bm.mode
-			}
-			defer func() { VM_MODE = orig }()
-
 			b.ReportAllocs()
 			b.ResetTimer()
 

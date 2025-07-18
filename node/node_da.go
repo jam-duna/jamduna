@@ -287,14 +287,16 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		return
 	}
 	pvmContext := log.OtherGuarantor
+	pvmBackend := pvm.BackendInterpreter
 	if firstGuarantorOrAuditor {
+		pvmBackend = pvm.BackendInterpreter
 		pvmContext = log.FirstGuarantorOrAuditor
 		n.nodeSelf.Telemetry(log.MsgTypeWorkPackageBundle, package_bundle, "codec_encoded", types.EncodeAsHex(package_bundle))
 	}
 
 	pvmStart := time.Now()
 
-	vm_auth := pvm.NewVMFromCode(authindex, authcode, 0, targetStateDB)
+	vm_auth := pvm.NewVMFromCode(authindex, authcode, 0, targetStateDB, pvmBackend)
 	vm_auth.SetPVMContext(pvmContext)
 	r := vm_auth.ExecuteAuthorization(workPackage, workPackageCoreIndex)
 	p_u := workPackage.AuthorizationCodeHash
@@ -314,7 +316,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 			log.Crit(log.Node, "executeWorkPackageBundle: Code and CodeHash Mismatch")
 		}
 		// fmt.Printf("index %d, code len=%d\n", service_index, len(code))
-		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB)
+		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB, pvmBackend)
 		vm.Timeslot = n.statedb.JamState.SafroleState.Timeslot
 		vm.SetCore(workPackageCoreIndex)
 		vm.SetPVMContext(pvmContext)

@@ -744,7 +744,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 		offset := addr - codeBase
 		instruction, ok_x86 := vm.x86Instructions[int(offset)] // should get the op_code here
 		if !ok_x86 {
-			// fmt.Printf("❌ Invalid instruction at offset 0x%X\n", offset)
+			panic(fmt.Sprintf("❌ Invalid instruction at offset 0x%X\n", offset))
 		}
 		if pvm_pc, ok := vm.InstMapX86ToPVM[int(offset)]; ok && debugRecompiler {
 			opcode := vm.code[pvm_pc]
@@ -880,7 +880,7 @@ func (rvm *RecompilerSandboxVM) ExecuteSandBox(entryPoint uint64) error {
 	if UseTally {
 		// timestamp suffix
 		ts := time.Now().UnixMilli()
-		jsonFile := fmt.Sprintf("test/%s_%d.json", VM_MODE, ts)
+		jsonFile := fmt.Sprintf("test/%s_%d.json", rvm.Backend, ts)
 
 		// ensure the directory exists (mkdir -p)
 		dir := filepath.Dir(jsonFile)
@@ -1221,7 +1221,7 @@ func (vm *RecompilerSandboxVM) TakeSnapShot(name string, pc uint32, registers []
 }
 
 func (vm *VM) LoadSnapshot(name string) (snapshot *EmulatorSnapShot, err error) {
-	filePath := fmt.Sprintf("interpreter/%s.json", name)
+	filePath := fmt.Sprintf("%s/%s.json", BackendInterpreter, name)
 	fmt.Printf("Loading snapshot from %s\n", filePath)
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -1238,7 +1238,7 @@ func (vm *VM) LoadSnapshot(name string) (snapshot *EmulatorSnapShot, err error) 
 }
 
 func (vm *RecompilerSandboxVM) SaveSnapShot(snapshot *EmulatorSnapShot) error {
-	filePath := fmt.Sprintf("recompiler_sandbox/BB%d.json", snapshot.BasicBlockNumber)
+	filePath := fmt.Sprintf("%s/BB%d.json", BackendRecompilerSandbox, snapshot.BasicBlockNumber)
 	data, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal snapshot: %w", err)

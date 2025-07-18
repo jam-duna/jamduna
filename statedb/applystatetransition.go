@@ -14,7 +14,7 @@ import (
 
 // given previous safrole, applt state transition using block
 // σ'≡Υ(σ,B)
-func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block, validated_tickets map[common.Hash]common.Hash) (s *StateDB, err error) {
+func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block, validated_tickets map[common.Hash]common.Hash, pvmBackend string) (s *StateDB, err error) {
 
 	s = oldState.Copy()
 	if s.StateRoot != blk.Header.ParentStateRoot {
@@ -143,12 +143,12 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	// this will hold the gasUsed + numWorkreports -- ServiceStatistics
 	accumulateStats := make(map[uint32]*accumulateStatistics)
 
-	n, t, b, U := s.OuterAccumulate(gas, accumulate_input_wr, o, f)
+	n, t, b, U := s.OuterAccumulate(gas, accumulate_input_wr, o, f, pvmBackend) // outer accumulate
 
 	// (χ′, δ†, ι′, φ′)
 	// 12.24 transfer δ‡
 	tau := s.GetTimeslot() // τ′
-	transferStats, err := s.ProcessDeferredTransfers(o, tau, t)
+	transferStats, err := s.ProcessDeferredTransfers(o, tau, t, pvmBackend)
 	if err != nil {
 		return s, err
 	}

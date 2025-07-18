@@ -186,7 +186,7 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 
 	pvmStart := time.Now()
 
-	vm_auth := pvm.NewVMFromCode(authindex, authcode, 0, s)
+	vm_auth := pvm.NewVMFromCode(authindex, authcode, 0, s, pvm.BackendInterpreter)
 	vm_auth.SetPVMContext(pvmContext)
 	r := vm_auth.ExecuteAuthorization(workPackage, 0)
 	p_u := workPackage.AuthorizationCodeHash
@@ -207,7 +207,7 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 			log.Crit(log.Node, "executeWorkPackageBundle: Code and CodeHash Mismatch")
 		}
 		// fmt.Printf("index %d, code len=%d\n", service_index, len(code))
-		vm := pvm.NewVMFromCode(service_index, code, 0, s)
+		vm := pvm.NewVMFromCode(service_index, code, 0, s, pvm.BackendInterpreter)
 		vm.Timeslot = s.JamState.SafroleState.Timeslot
 		vm.SetCore(0)
 		vm.SetPVMContext(pvmContext)

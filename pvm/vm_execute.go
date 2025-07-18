@@ -274,11 +274,7 @@ func (vm *RecompilerVM) finalizeJumpTargets(J []uint32) {
 			if !ok {
 				return
 			}
-			destFalse, ok := vm.basicBlocks[block.PVMNextPC]
-			if !ok {
-				return
-			}
-			vm.patchJumpConditional(block, destTrue.X86PC, destFalse.X86PC)
+			vm.patchJumpConditional(block, destTrue.X86PC)
 		} else if block.JumpType == TRAP_JUMP {
 			// vm.patchJump(block, end.X86PC)
 		} else if block.JumpType == TERMINATED {
@@ -308,7 +304,7 @@ func (vm *RecompilerVM) patchJumpIndirect(block *BasicBlock) {
 	fmt.Printf("NOT PATCHED\n")
 }
 
-func (vm *RecompilerVM) patchJumpConditional(block *BasicBlock, targetTruePC, targetFalsePC uint64) {
+func (vm *RecompilerVM) patchJumpConditional(block *BasicBlock, targetTruePC uint64) {
 	blockEnd := block.X86PC + uint64(len(block.X86Code))
 
 	// The instruction after Jcc+imm32 lives at blockEnd-5

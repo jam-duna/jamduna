@@ -19,6 +19,12 @@ import (
 )
 
 const (
+	BackendInterpreter       = "interpreter"
+	BackendRecompiler        = "recompiler"
+	BackendRecompilerSandbox = "recompiler_sandbox"
+)
+
+const (
 	regSize = 13
 
 	W_X = 1024
@@ -39,6 +45,7 @@ var (
 )
 
 type VM struct {
+	Backend        string
 	JSize          uint64
 	Z              uint8
 	J              []uint32
@@ -119,22 +126,6 @@ type VM struct {
 	basicBlockExecutionCounter map[uint64]int // PVM PC to execution count
 
 	OP_tally map[string]*X86InstTally `json:"tally"`
-}
-
-func Set_PVM_Backend(pvm_mode string) {
-	mode := strings.ToUpper(pvm_mode)
-	switch mode {
-	case "INTERPRETER":
-		VM_MODE = "interpreter"
-	case "COMPILER", "RECOMPILER", "X86":
-		VM_MODE = "recompiler"
-	case "SANDBOX", "RECOMPILER_SANDBOX":
-		VM_MODE = "recompiler_sandbox"
-	default:
-		log.Warn(log.Node, fmt.Sprintf("Unknown PVM mode [%s], defaulting to interpreter", pvm_mode))
-		VM_MODE = "interpreter"
-	}
-	log.Info(log.Node, fmt.Sprintf("PVM Backend: [%s]", mode))
 }
 
 type Program struct {
@@ -327,11 +318,14 @@ func (vm *VM) Standard_Program_Initialization(argument_data_a []byte) {
 	vm.Ram.WriteRegister(7, uint64(argAddr))
 	vm.Ram.WriteRegister(8, uint64(uint32(len(argument_data_a))))
 
-	fmt.Printf("Standard Program Initialization: %s=%x %s=%x\n", reg(7), argAddr, reg(8), uint32(len(argument_data_a)))
+	// fmt.Printf("Standard Program Initialization: %s=%x %s=%x\n", reg(7), argAddr, reg(8), uint32(len(argument_data_a)))
 }
 
 // NewVM initializes a new VM with a given program
-func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC uint64, hostENV types.HostEnv, jam_ready_blob bool, Metadata []byte) *VM {
+func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC uint64, hostENV types.HostEnv, jam_ready_blob bool, Metadata []byte, pvmBackend string) *VM {
+	if len(pvmBackend) == 0 {
+		panic("pvmBackend cannot be empty")
+	}
 	if len(code) == 0 {
 		return nil
 	}
@@ -352,25 +346,25 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 	}
 
 	vm := &VM{
-		Gas:             0,
-		JSize:           p.JSize,
-		Z:               p.Z,
-		J:               p.J,
-		code:            p.Code,
-		bitmask:         []byte(p.K),
-		pc:              initialPC,
-		hostenv:         hostENV, //check if we need this
-		Exports:         make([][]byte, 0),
-		Service_index:   service_index,
-		o_size:          o_size,
-		w_size:          w_size,
-		z:               z,
-		s:               s,
-		o_byte:          o_byte,
-		w_byte:          w_byte,
-		ServiceMetadata: Metadata,
-		CoreIndex:       2048,
-
+		Gas:                        0,
+		JSize:                      p.JSize,
+		Z:                          p.Z,
+		J:                          p.J,
+		code:                       p.Code,
+		bitmask:                    []byte(p.K),
+		pc:                         initialPC,
+		hostenv:                    hostENV, //check if we need this
+		Exports:                    make([][]byte, 0),
+		Service_index:              service_index,
+		o_size:                     o_size,
+		w_size:                     w_size,
+		z:                          z,
+		s:                          s,
+		o_byte:                     o_byte,
+		w_byte:                     w_byte,
+		ServiceMetadata:            Metadata,
+		CoreIndex:                  2048,
+		Backend:                    pvmBackend,
 		basicBlockExecutionCounter: make(map[uint64]int),
 		OP_tally:                   make(map[string]*X86InstTally),
 	}
@@ -393,10 +387,10 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 	return vm
 }
 
-func NewVMFromCode(serviceIndex uint32, code []byte, i uint64, hostENV types.HostEnv) *VM {
+func NewVMFromCode(serviceIndex uint32, code []byte, i uint64, hostENV types.HostEnv, pvmBackend string) *VM {
 	// strip metadata
 	metadata, c := types.SplitMetadataAndCode(code)
-	return NewVM(serviceIndex, c, []uint64{}, i, hostENV, true, []byte(metadata))
+	return NewVM(serviceIndex, c, []uint64{}, i, hostENV, true, []byte(metadata), pvmBackend)
 }
 
 // Execute runs the program until it terminates
@@ -483,7 +477,7 @@ func (vm *VM) SetIdentifier(id string) {
 }
 
 func (vm *VM) GetIdentifier() string {
-	return fmt.Sprintf("%d_%s_%s", vm.Service_index, vm.Mode, vm.Identifier)
+	return fmt.Sprintf("%d_%s_%s_%s", vm.Service_index, vm.Mode, vm.Backend, vm.Identifier)
 }
 
 func (vm *VM) getBasicBlockGasCost(pc uint64) uint64 {
@@ -574,7 +568,7 @@ func (vm *VM) step(stepn int) error {
 	}
 
 	// avoid this: this is expensive
-	if PvmLogging || opcode == ECALLI || opcode == SBRK {
+	if PvmLogging { //  || opcode == ECALLI || opcode == SBRK {
 		registersJSON, _ := json.Marshal(vm.Ram.ReadRegisters())
 		prettyJSON := strings.ReplaceAll(string(registersJSON), ",", " ")
 		fmt.Printf("%s: %-18s step:%6d pc:%6d Registers:%s\n", vm.Mode, opcode_str(opcode), stepn-1, vm.pc, prettyJSON)
@@ -1776,7 +1770,7 @@ func (vm *VM) TakeSnapShot(name string, pc uint32, registers []uint64, gas uint6
 }
 
 func (vm *VM) SaveSnapShot(snapshot *EmulatorSnapShot) error {
-	filePath := fmt.Sprintf("%s/BB%d.json", VM_MODE, snapshot.BasicBlockNumber)
+	filePath := fmt.Sprintf("%s/BB%d.json", vm.Backend, snapshot.BasicBlockNumber)
 	data, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal snapshot: %w", err)
@@ -1808,7 +1802,7 @@ func (vm *VM) LogCurrentState(opcode byte, operands []byte, currentPC uint64, ga
 	if IsBasicBlockInstruction(opcode) {
 		if (vm.vmBasicBlock+1)%BBSampleRate == 0 { // every __ basic blocks, take a snapshot
 			registers := vm.Ram.ReadRegisters()
-			fmt.Printf("vmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), registers)
+			//fmt.Printf("vmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), registers)
 			snapshot := vm.TakeSnapShot(fmt.Sprintf("BB%d", vm.vmBasicBlock), uint32(currentPC), registers, uint64(vm.Gas), 268435456, 268435456, uint64(vm.vmBasicBlock))
 			// this snapshot + memory of what was just executed, but we want the NEXT PC, not the currentPC.  The Gas is not clear
 			vm.snapshot = snapshot
@@ -1816,7 +1810,7 @@ func (vm *VM) LogCurrentState(opcode byte, operands []byte, currentPC uint64, ga
 		vm.vmBasicBlock++
 		if vm.vmBasicBlock%RecordLogSampleRate == 0 { // every ___ basic blocks, record a log
 			if vm.vmBasicBlock%100000 == 0 {
-				fmt.Printf("vmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), vm.Ram.ReadRegisters())
+				//fmt.Printf("vmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), vm.Ram.ReadRegisters())
 			}
 			recordLog = true
 		}
@@ -1874,7 +1868,7 @@ func (vm *RecompilerSandboxVM) LogCurrentState(opcode byte, operands []byte, cur
 			r12, _ := vm.sandBox.RegRead(uc.X86_REG_R12)
 			failAddress := uint64(0x1900000E0) // this should be X86PC of the current vm.pc
 
-			fmt.Printf("vmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), post_register)
+			//fmt.Printf("vmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), post_register)
 			snapshot := vm.TakeSnapShot(fmt.Sprintf("BB%d", vm.vmBasicBlock), uint32(currentPC), post_register, uint64(vm.Gas), failAddress, r12, uint64(vm.vmBasicBlock))
 			// this snapshot + memory of what was just executed, but we want the NEXT PC, not the currentPC.  The Gas is not clear
 			vm.snapshot = snapshot
@@ -1882,7 +1876,7 @@ func (vm *RecompilerSandboxVM) LogCurrentState(opcode byte, operands []byte, cur
 		vm.vmBasicBlock++
 		if vm.vmBasicBlock%RecordLogSampleRate == 0 { // every __ basic blocks, record a log
 			if vm.vmBasicBlock%100000 == 0 {
-				fmt.Printf("vmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), vm.Ram.ReadRegisters())
+				//fmt.Printf("vmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), vm.Ram.ReadRegisters())
 			}
 			recordLog = true
 		}

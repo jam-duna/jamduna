@@ -281,7 +281,6 @@ var testcases = map[string]string{
 func TestRecompilerNoSandbox(t *testing.T) {
 	PvmLogging = true
 	PvmTrace = true
-	VM_MODE = "recompiler"
 
 	// Directory containing the JSON files
 	dir := "../jamtestvectors/pvm/programs"
@@ -392,10 +391,11 @@ func TestRecompilerNoSandbox(t *testing.T) {
 
 func recompiler_test(tc TestCase) error {
 	var num_mismatch int
+	pvmBackend := BackendRecompiler
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
 	// metadata, c := types.SplitMetadataAndCode(tc.Code)
-	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{})
+	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, pvmBackend)
 	// Set the initial memory
 	for _, mem := range tc.InitialMemory {
 		//pvm.Ram.SetPageAccess(mem.Address/PageSize, 1, AccessMode{Readable: false, Writable: true, Inaccessible: false})
@@ -480,39 +480,9 @@ func recompiler_test(tc TestCase) error {
 }
 
 func TestSingleNoSandbox(t *testing.T) {
-	debugRecompiler = true
-	PvmLogging = true
-	PvmTrace = true
-	showDisassembly = true
-	VM_MODE = "recompiler"
-	name := "inst_load_i16"
-	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		t.Fatalf("Failed to read file %s: %v", filePath, err)
-	}
-
-	var testCase TestCase
-	err = json.Unmarshal(data, &testCase)
-	if err != nil {
-		t.Fatalf("Failed to unmarshal JSON from file %s: %v", filePath, err)
-	}
-
-	t.Run(name, func(t *testing.T) {
-		err = recompiler_test(testCase)
-		if err != nil {
-			t.Errorf("❌ [%s] Test failed: %v", name, err)
-		} else {
-			t.Logf("✅ [%s] Test passed", name)
-		}
-	})
-}
-
-func TestSinglePVM(t *testing.T) {
 
 	PvmLogging = true
 	PvmTrace = true
-	VM_MODE = "interpreter"
 
 	name := "inst_add_32"
 	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
@@ -540,7 +510,6 @@ func TestSinglePVM(t *testing.T) {
 func TestHostFuncExposeRecompiler(t *testing.T) {
 	PvmLogging = true
 	PvmTrace = true
-	VM_MODE = "recompiler"
 	name := "inst_store_indirect_u16_with_offset_ok"
 	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
 	data, err := os.ReadFile(filePath)
@@ -556,7 +525,7 @@ func TestHostFuncExposeRecompiler(t *testing.T) {
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
 	// metadata, c := types.SplitMetadataAndCode(tc.Code)
-	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{})
+	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendRecompiler)
 	pvm.Gas = 100000000000
 	rvm, err := NewRecompilerVM(pvm)
 	if err != nil {
@@ -599,7 +568,6 @@ func TestHostFuncExposeRecompiler(t *testing.T) {
 func TestSBRK(t *testing.T) {
 	PvmLogging = true
 	PvmTrace = true
-	VM_MODE = "recompiler"
 	name := "inst_store_indirect_u16_with_offset_ok"
 	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
 	data, err := os.ReadFile(filePath)
@@ -615,7 +583,7 @@ func TestSBRK(t *testing.T) {
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
 	// metadata, c := types.SplitMetadataAndCode(tc.Code)
-	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{})
+	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendRecompiler)
 
 	//ramdom set the reg to do the sbrk test
 	pvm.Ram.WriteRegister(5, 8888)
@@ -696,7 +664,7 @@ func recompiler_sandbox_test(tc TestCase) error {
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
 	// metadata, c := types.SplitMetadataAndCode(tc.Code)
-	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{})
+	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendRecompilerSandbox)
 	// Set the initial memory
 	// if len(tc.InitialMemory) == 0 {
 	// 	pvm.Ram.SetPageAccess(32, 1, AccessMode{Readable: false, Writable: false, Inaccessible: true})
@@ -782,7 +750,6 @@ func TestSingleSandbox(t *testing.T) {
 
 	PvmLogging = true
 	PvmTrace = true
-	VM_MODE = "recompiler_sandbox"
 	debugRecompiler = true
 	showDisassembly = true
 
@@ -893,7 +860,6 @@ func testRecompilerFamily(t *testing.T, familyName string) {
 func TestRecompilerSandBox(t *testing.T) {
 	PvmLogging = true
 	PvmTrace = true
-	VM_MODE = "recompiler_sandbox"
 	// Directory containing the JSON files
 	dir := "../jamtestvectors/pvm/programs"
 
@@ -1000,7 +966,6 @@ func TestRecompilerSandBox(t *testing.T) {
 func TestHostFuncExposeSandBox(t *testing.T) {
 	PvmLogging = true
 	PvmTrace = true
-	VM_MODE = "recompiler_sandbox"
 	name := "inst_store_indirect_u16_with_offset_ok"
 	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
 	data, err := os.ReadFile(filePath)
@@ -1016,7 +981,7 @@ func TestHostFuncExposeSandBox(t *testing.T) {
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
 	// metadata, c := types.SplitMetadataAndCode(tc.Code)
-	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{})
+	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendRecompilerSandbox)
 	rvm, err := NewRecompilerSandboxVM(pvm)
 	if err != nil {
 		t.Fatalf("Failed to create RecompilerVM: %v", err)
@@ -1053,7 +1018,6 @@ func TestHostFuncExposeSandBox(t *testing.T) {
 func TestSBRKSandBox(t *testing.T) {
 	PvmLogging = true
 	PvmTrace = true
-	VM_MODE = "recompiler_sandbox"
 	name := "inst_store_indirect_u16_with_offset_ok"
 	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
 	data, err := os.ReadFile(filePath)
@@ -1069,7 +1033,7 @@ func TestSBRKSandBox(t *testing.T) {
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
 	// metadata, c := types.SplitMetadataAndCode(tc.Code)
-	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{})
+	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendRecompilerSandbox)
 
 	//ramdom set the reg to do the sbrk test
 	pvm.Ram.WriteRegister(5, 8888)

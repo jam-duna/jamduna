@@ -9,9 +9,9 @@ import (
 	"github.com/colorfulnotion/jam/log"
 )
 
-func ExecuteX86(code []byte, regBuf []byte) (ret int, err error) {
+func ExecuteX86(code []byte, regBuf []byte) (ret int, usec int, err error) {
 	log.Error("x86", "x86 execution is not supported on this platform")
-	return -1, fmt.Errorf("x86 execution is not supported on this platform")
+	return -1, 0, fmt.Errorf("x86 execution is not supported on this platform")
 }
 
 func GetEcalliAddress() uintptr {

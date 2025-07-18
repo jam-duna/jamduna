@@ -118,10 +118,10 @@ var pvmByteCodeToX86Code = map[byte]func(Instruction) []byte{
 	REVERSE_BYTES:         generateReverseBytes64,
 
 	// A.5.10. Instructions with Arguments of Two Registers & One Immediate.
-	STORE_IND_U8:      generateStoreIndirect(0x88, 1),
-	STORE_IND_U16:     generateStoreIndirect(0x89, 2),
-	STORE_IND_U32:     generateStoreIndirect(0x89, 4),
-	STORE_IND_U64:     generateStoreIndirect(0x89, 8),
+	STORE_IND_U8:      generateStoreIndirect(1),
+	STORE_IND_U16:     generateStoreIndirect(2),
+	STORE_IND_U32:     generateStoreIndirect(4),
+	STORE_IND_U64:     generateStoreIndirect(8),
 	LOAD_IND_U8:       generateLoadInd(0x00, LOAD_IND_U8, false),
 	LOAD_IND_I8:       generateLoadIndSignExtend(0x00, LOAD_IND_I8, false),
 	LOAD_IND_U16:      generateLoadInd(0x66, LOAD_IND_U16, false),

@@ -1270,108 +1270,6 @@ func generateImmBinaryOp64(subcode byte) func(inst Instruction) []byte {
 	}
 }
 
-func generateImmBinaryOp642(subcode byte) func(inst Instruction) []byte {
-	return func(inst Instruction) []byte {
-		dstReg, srcReg, imm64, uint64imm := extractTwoRegsOneImm64(inst.Args)
-		dst := regInfoList[dstReg]
-		src := regInfoList[srcReg]
-
-		var code []byte
-
-		// 1) If src!=dst, copy src into dst
-		if srcReg != dstReg {
-			rex := byte(0x48)
-			if src.REXBit == 1 {
-				rex |= 0x04
-			} // REX.R
-			if dst.REXBit == 1 {
-				rex |= 0x01
-			} // REX.B
-			modrm := byte(0xC0 | (src.RegBits << 3) | dst.RegBits)
-			code = append(code, rex, 0x89, modrm) // MOV r64_dst, r64_src
-		}
-
-		// 2) Can we use a 32-bit immediate?
-		if imm64 >= -0x80000000 && imm64 <= 0x7FFFFFFF {
-			// 81 /subcode id  → op r/m64, imm32
-			rex := byte(0x48)
-			if dst.REXBit == 1 {
-				rex |= 0x01
-			}
-			modrm := byte(0xC0 | (subcode << 3) | dst.RegBits)
-			code = append(code, rex, 0x81, modrm)
-			imm32 := uint32(int32(imm64))
-			b := make([]byte, 4)
-			binary.LittleEndian.PutUint32(b, imm32)
-			code = append(code, b...)
-			return code
-		}
-
-		// 3) Otherwise: full 64-bit immediate via scratch
-		// pick RCX (reg1), or RDX (reg2) if needed, etc.
-		scratchReg := byte(1)
-		if scratchReg == byte(dstReg) || scratchReg == byte(srcReg) {
-			scratchReg = 2
-		}
-		scratch := regInfoList[scratchReg]
-
-		// -- push scratch --
-		pushOp := byte(0x50 + scratch.RegBits)
-		if scratch.REXBit == 1 {
-			code = append(code, 0x41, pushOp)
-		} else {
-			code = append(code, pushOp)
-		}
-
-		// -- MOVABS scratch, imm64 --
-		rexAbs := byte(0x48)
-		if scratch.REXBit == 1 {
-			rexAbs |= 0x01
-		}
-		movabs := byte(0xB8 + scratch.RegBits)
-		code = append(code, rexAbs, movabs)
-		immBytes := make([]byte, 8)
-		binary.LittleEndian.PutUint64(immBytes, uint64imm)
-		code = append(code, immBytes...)
-
-		// -- perform the operation dst = dst <op> scratch --
-		// for ADD: opcode=0x01; AND:0x21; XOR:0x31
-		var regRegOp byte
-		switch subcode {
-		case 0: // ADD
-			regRegOp = 0x01
-		case 1: // OR
-			regRegOp = 0x09
-		case 4: // AND
-			regRegOp = 0x21
-		case 6: // XOR
-			regRegOp = 0x31
-		default:
-			// UNREACHABLE for our use-cases
-			regRegOp = 0x01
-		}
-		rexOp := byte(0x48)
-		if scratch.REXBit == 1 {
-			rexOp |= 0x04
-		} // REX.R = scratch
-		if dst.REXBit == 1 {
-			rexOp |= 0x01
-		} // REX.B = dst
-		modrm := byte(0xC0 | (scratch.RegBits << 3) | dst.RegBits)
-		code = append(code, rexOp, regRegOp, modrm)
-
-		// -- pop scratch --
-		popOp := byte(0x58 + scratch.RegBits)
-		if scratch.REXBit == 1 {
-			code = append(code, 0x41, popOp)
-		} else {
-			code = append(code, popOp)
-		}
-
-		return code
-	}
-}
-
 // generateLoadIndSignExtend returns a function that generates machine code
 func generateLoadIndSignExtend(
 	prefix byte, // Optional extra prefix (e.g. 0x66), or 0 if none
@@ -1622,7 +1520,7 @@ func generateLoadInd(
 	}
 }
 
-func generateStoreIndirect(opcode byte, size int) func(inst Instruction) []byte {
+func generateStoreIndirect(size int) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
 		srcIdx, dstIdx, disp64 := extractTwoRegsOneImm(inst.Args)
 		base := BaseReg

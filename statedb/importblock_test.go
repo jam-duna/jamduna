@@ -30,7 +30,7 @@ import (
 //			}
 //		}
 //	}
-func runSingleSTFTest(t *testing.T, filename string, content string) {
+func runSingleSTFTest(t *testing.T, filename string, content string, pvmBackend string) {
 	t.Helper()
 
 	testDir := "/tmp/test_locala"
@@ -47,7 +47,7 @@ func runSingleSTFTest(t *testing.T, filename string, content string) {
 		return
 	}
 
-	diffs, err := CheckStateTransitionWithOutput(test_storage, &stf, nil)
+	diffs, err := CheckStateTransitionWithOutput(test_storage, &stf, nil, pvmBackend)
 	if err == nil {
 		fmt.Printf("✅ [%s] PostState.StateRoot %s matches\n", filename, stf.PostState.StateRoot)
 		return
@@ -132,13 +132,12 @@ func TestStateTransitionNoSandbox(t *testing.T) {
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule("pvm_validator")
 	t.Run(filepath.Base(filename), func(t *testing.T) {
-		runSingleSTFTest(t, filename, string(content))
+		runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter)
 	})
 }
 
 func TestStateTransitionSandbox(t *testing.T) {
-	pvm.VM_MODE = "recompiler_sandbox" // set VM mode to recompiler sandbox
-	pvm.VMsCompare = true              // enable VM comparison for this test
+	pvm.VMsCompare = true // enable VM comparison for this test
 	pvm.PvmLogging = true
 	pvm.UseTally = true          // enable tally for this test
 	pvm.SetUseEcalli500(true)    // use ecalli500 for log check in x86
@@ -153,7 +152,8 @@ func TestStateTransitionSandbox(t *testing.T) {
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule("pvm_validator")
 	t.Run(filepath.Base(filename), func(t *testing.T) {
-		runSingleSTFTest(t, filename, string(content))
+		runSingleSTFTest(t, filename, string(content), pvm.BackendRecompilerSandbox)
+
 	})
 }
 
@@ -209,7 +209,6 @@ func TestTraces(t *testing.T) {
 	//testSTFDir(t, "../jamtestvectors/traces/safrole")
 	//dir := "../jamtestvectors/traces/reports-l1"
 	dir := "../cmd/importblocks/rawdata/assurances/state_transitions"
-	pvm.VM_MODE = "recompiler_sandbox" // set VM mode to recompiler sandbox
 	log.InitLogger("info")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -229,7 +228,7 @@ func TestTraces(t *testing.T) {
 
 		// ensure inner test failure bubbles up
 		t.Run(e.Name(), func(t *testing.T) {
-			runSingleSTFTest(t, filename, string(content))
+			runSingleSTFTest(t, filename, string(content), pvm.BackendRecompilerSandbox)
 		})
 	}
 }
