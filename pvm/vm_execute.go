@@ -115,7 +115,7 @@ func (vm *RecompilerVM) translateBasicBlock(startPC uint64) *BasicBlock {
 
 		olen := vm.skip(pc)
 		operands := vm.code[pc+1 : pc+1+olen]
-		if pc == 0 && op == JUMP && debugRecompiler {
+		if pc == 0 && op == JUMP && showDisassembly {
 			fmt.Printf("JUMP at PC %d with operands %x\n", pc, operands)
 			fmt.Printf("operands length: %d\n", olen)
 			fmt.Printf("code hash %v", common.Blake2Hash(vm.code))
@@ -225,7 +225,7 @@ func (vm *RecompilerVM) setJumpMetadata(block *BasicBlock, opcode byte, operands
 	case opcode == JUMP:
 		block.JumpType = DIRECT_JUMP
 		block.TruePC = pc + uint64(extractOneOffset(operands))
-		if pc == 0 {
+		if pc == 0 && showDisassembly {
 			fmt.Printf("JUMP at PC %d with operands %x, TruePC %d\n", pc, operands, block.TruePC)
 		}
 	case opcode == LOAD_IMM_JUMP:

@@ -76,8 +76,7 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 		}
 
 		wpr := &WorkPackageRequest{
-			Identifier: fmt.Sprintf("FIB(%d)", fibN),
-
+			Identifier:      fmt.Sprintf("FIB(%d)", fibN),
 			WorkPackage:     wp,
 			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
 		}

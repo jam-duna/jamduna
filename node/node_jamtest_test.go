@@ -91,8 +91,7 @@ func TestRubic(t *testing.T) {
 
 func TestFib(t *testing.T) {
 	initPProf(t)
-	pvm.VM_MODE = "recompiler_sandbox"
-	//pvm.VM_MODE = "interpreter"
+	pvm.UseTally = true
 	targetN := TargetedN_Fib
 	if *targetNum > 0 {
 		targetN = *targetNum
@@ -110,6 +109,7 @@ func TestFib2(t *testing.T) {
 }
 
 func TestAuthCopy(t *testing.T) {
+	pvm.UseTally = true
 	targetN := TargetedN_Fib
 	if *targetNum > 0 {
 		targetN = *targetNum

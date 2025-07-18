@@ -76,9 +76,9 @@ func NewRecompilerVM(vm *VM) (*RecompilerVM, error) {
 		pc_addr:    uint64(regDumpAddr + uintptr((len(regInfoList)+1)*8)),
 		dirtyPages: make(map[int]bool),
 
-		isChargingGas:   true, // default to charging gas
-		isPCCounting:    true, // default to counting PC
-		IsBlockCounting: true, // default to not counting basic blocks
+		isChargingGas:   true,         // default to charging gas
+		isPCCounting:    useEcalli500, // default to counting PC
+		IsBlockCounting: useEcalli500, // default to not counting basic blocks
 	}
 
 	rvm.current_heap_pointer = rvm.VM.Ram.GetCurrentHeapPointer()
@@ -97,11 +97,15 @@ func (vm *RecompilerVM) initStartCode() {
 	for i := 0; i < regSize; i++ {
 		immVal, _ := vm.Ram.ReadRegister(i)
 		code := encodeMovImm(i, immVal)
-		fmt.Printf("Initialize Register %d (%s) = %d\n", i, regInfoList[i].Name, immVal)
+		if showDisassembly {
+			fmt.Printf("Initialize Register %d (%s) = %d\n", i, regInfoList[i].Name, immVal)
+		}
 		vm.startCode = append(vm.startCode, code...)
 	}
 	gasRegMemAddr := uint64(vm.regDumpAddr) + uint64(len(regInfoList)*8)
-	fmt.Printf("Initialize Gas %d = %d\n", gasRegMemAddr, vm.Gas)
+	if showDisassembly {
+		fmt.Printf("Initialize Gas %d = %d\n", gasRegMemAddr, vm.Gas)
+	}
 	vm.startCode = append(vm.startCode, encodeMovImm64ToMem(gasRegMemAddr, uint64(vm.Gas))...)
 
 	// padding with jump to the entry point
@@ -343,7 +347,7 @@ func (vm *RecompilerVM) initDJumpFunc(x86CodeLen int) {
 	firstPending := pendings[0]
 	toAdd := firstPending.jeOff - handlerAddOff + 8
 	// Patch into the Add instruction
-	fmt.Printf("To add to BaseReg: %d\n", toAdd)
+	// fmt.Printf("To add to BaseReg: %d\n", toAdd)
 	uint64ToAdd := uint64(toAdd)
 	binary.LittleEndian.PutUint32(code[handlerAddOff:], uint32(uint64ToAdd))
 	vm.djumpTableFunc = code
@@ -501,12 +505,15 @@ func (vm *RecompilerVM) ExecuteX86Code(x86code []byte) (err error) {
 		fmt.Printf("ALL COMBINED Disassembled x86 code:\n%s\n", str)
 	}
 
-	crashed, err := ExecuteX86(codeAddr, vm.regDumpMem)
+	crashed, msec, err := ExecuteX86(codeAddr, vm.regDumpMem)
 	for i := 0; i < regSize; i++ {
 		regValue := binary.LittleEndian.Uint64(vm.regDumpMem[i*8:])
-		fmt.Printf("%s = %d\n", regInfoList[i].Name, regValue)
+		if showDisassembly {
+			fmt.Printf("%s = %d\n", regInfoList[i].Name, regValue)
+		}
 		vm.Ram.WriteRegister(i, regValue)
 	}
+	vm.SetIdentifier(fmt.Sprintf("%d", msec))
 	if crashed == -1 || err != nil {
 		vm.ResultCode = types.WORKRESULT_PANIC
 		vm.terminated = true
@@ -520,7 +527,9 @@ func (vm *RecompilerVM) ExecuteX86Code(x86code []byte) (err error) {
 
 	for i := 0; i < regSize; i++ {
 		regValue := binary.LittleEndian.Uint64(vm.regDumpMem[i*8:])
-		fmt.Printf("%s = %d\n", regInfoList[i].Name, regValue)
+		if showDisassembly {
+			fmt.Printf("%s = %d\n", regInfoList[i].Name, regValue)
+		}
 		vm.Ram.WriteRegister(i, regValue)
 	}
 	return nil
@@ -584,8 +593,9 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(x86code []byte, entry uint32) (e
 			patchInstIdx = i
 			// replace it with the actual entry patch
 			binary.LittleEndian.PutUint32(x86code[i+1:i+5], uint32(x86PC-i-5))
-			fmt.Printf("Patching entry point at index %d with 0x%X\n",
-				patchInstIdx, entryPatchImm)
+			if showDisassembly {
+				fmt.Printf("Patching entry point at index %d with 0x%X\n", patchInstIdx, entryPatchImm)
+			}
 			break
 		}
 	}
@@ -621,10 +631,13 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(x86code []byte, entry uint32) (e
 		fmt.Printf("ALL COMBINED Disassembled x86 code:\n%s\n", str)
 	}
 
-	crashed, err := ExecuteX86(codeAddr, vm.regDumpMem)
+	crashed, msec, err := ExecuteX86(codeAddr, vm.regDumpMem)
+	vm.SetIdentifier(fmt.Sprintf("%d", msec))
 	for i := 0; i < regSize; i++ {
 		regValue := binary.LittleEndian.Uint64(vm.regDumpMem[i*8:])
-		fmt.Printf("%s = %d\n", regInfoList[i].Name, regValue)
+		if showDisassembly {
+			fmt.Printf("%s = %d\n", regInfoList[i].Name, regValue)
+		}
 		vm.Ram.WriteRegister(i, regValue)
 	}
 	vm.Gas = int64(binary.LittleEndian.Uint64(vm.regDumpMem[(len(regInfoList))*8:]))
@@ -642,7 +655,9 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(x86code []byte, entry uint32) (e
 
 	for i := 0; i < regSize; i++ {
 		regValue := binary.LittleEndian.Uint64(vm.regDumpMem[i*8:])
-		fmt.Printf("%s = %d\n", regInfoList[i].Name, regValue)
+		if showDisassembly {
+			fmt.Printf("%s = %d\n", regInfoList[i].Name, regValue)
+		}
 		vm.Ram.WriteRegister(i, regValue)
 	}
 	return nil
@@ -658,9 +673,7 @@ func (rvm *RecompilerVM) Execute(entry uint32) {
 		fmt.Printf("ExecuteX86 crash detected: %v\n", err)
 	}
 	if UseTally {
-		// timestamp suffix
-		ts := time.Now().UnixMilli()
-		jsonFile := fmt.Sprintf("test/%s_%d.json", VM_MODE, ts)
+		jsonFile := fmt.Sprintf("test/%s.json", rvm.GetIdentifier())
 
 		// ensure the directory exists (mkdir -p)
 		dir := filepath.Dir(jsonFile)
@@ -676,7 +689,7 @@ func (rvm *RecompilerVM) Execute(entry uint32) {
 	fmt.Printf("EXECUTEX86 Mode: %s Execution time: %s\n", rvm.Mode, time.Since(tm))
 }
 func (vm *VM) CalculateTally() {
-	fmt.Println("Basic Block Execution Tally:")
+	//	fmt.Println("Basic Block Execution Tally:")
 	// Collect and sort PCs
 	var pcs []int
 	for pc := range vm.basicBlockExecutionCounter {

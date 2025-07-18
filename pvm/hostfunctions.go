@@ -802,7 +802,7 @@ func (vm *VM) hostFetch() {
 	datatype, _ := vm.Ram.ReadRegister(10)
 	omega_11, _ := vm.Ram.ReadRegister(11)
 	omega_12, _ := vm.Ram.ReadRegister(12)
-	log.Info(vm.logging, "FETCH", "datatype", datatype, "omega_7", o, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12, "vm.Extrinsics", fmt.Sprintf("%x", vm.Extrinsics), "wp", vm.WorkPackage)
+	// log.Info(vm.logging, "FETCH", "datatype", datatype, "omega_7", o, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12, "vm.Extrinsics", fmt.Sprintf("%x", vm.Extrinsics), "wp", vm.WorkPackage)
 	var v_Bytes []byte
 	switch datatype {
 	case 0:
@@ -920,7 +920,7 @@ func (vm *VM) hostFetch() {
 		vm.ResultCode = types.RESULT_FAULT
 		return
 	}
-	log.Info(vm.logging, "FETCH SUCC", "o", o, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "l", l, "f", f, "f+l", f+l, "v_Bytes[f..f+l]", fmt.Sprintf("%x", v_Bytes[f:f+l]))
+	// log.Info(vm.logging, "FETCH SUCC", "o", o, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "l", l, "f", f, "f+l", f+l, "v_Bytes[f..f+l]", fmt.Sprintf("%x", v_Bytes[f:f+l]))
 
 	vm.Ram.WriteRegister(7, uint64(l))
 }

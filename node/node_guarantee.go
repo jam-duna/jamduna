@@ -297,7 +297,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 
 	if len(guarantee.Signatures) >= 2 {
 		guarantee.Slot = slot // this is the slot when ORIGINALLY added to the queue
-		log.Info(log.G, "processWPQueueItem Guarantee enough signatures", "n", n.id, "guarantee.Slot", guarantee.Slot, "numSig", len(guarantee.Signatures), "guarantee.Signatures", types.ToJSONHex(guarantee.Signatures), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
+		// log.Info(log.G, "processWPQueueItem Guarantee enough signatures", "n", n.id, "guarantee.Slot", guarantee.Slot, "numSig", len(guarantee.Signatures), "guarantee.Signatures", types.ToJSONHex(guarantee.Signatures), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
 		ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
 		defer cancel()
 		n.broadcast(ctx, guarantee) // send via CE135

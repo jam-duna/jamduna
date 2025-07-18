@@ -198,7 +198,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	// For example, to enable DEBUG logging for rotation, guarantees, node, state, quic, preimage:
 	// "rotation,guarantees,node,state,quic,preimage"
 	log.InitLogger("debug")
-	debug := "guarantees"
+	debug := "" // guarantees
 	log.EnableModules(debug)
 
 	// Specify testServices

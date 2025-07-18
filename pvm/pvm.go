@@ -35,6 +35,7 @@ const (
 var (
 	PvmLogging = false
 	PvmTrace   = false
+	useRawRam  = false
 )
 
 type VM struct {
@@ -103,6 +104,7 @@ type VM struct {
 	// service metadata
 	ServiceMetadata []byte
 	Mode            string
+	Identifier      string
 
 	pushFrame       func([]byte)
 	stopFrameServer func()
@@ -328,7 +330,6 @@ func (vm *VM) Standard_Program_Initialization(argument_data_a []byte) {
 	fmt.Printf("Standard Program Initialization: %s=%x %s=%x\n", reg(7), argAddr, reg(8), uint32(len(argument_data_a)))
 }
 
-var useRawRam = false // TODO: make global?
 // NewVM initializes a new VM with a given program
 func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC uint64, hostENV types.HostEnv, jam_ready_blob bool, Metadata []byte) *VM {
 	if len(code) == 0 {
@@ -388,6 +389,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 	} else {
 		vm.VMs = nil
 	}
+
 	return vm
 }
 
@@ -474,6 +476,14 @@ func (vm *VM) Execute(entryPoint int, is_child bool, snapshot *EmulatorSnapShot)
 		//log.Warn(vm.logging, "PVM Result Code", "mode", vm.Mode, "service", string(vm.ServiceMetadata), "resultCode", vm.ResultCode)
 	}
 	return nil
+}
+
+func (vm *VM) SetIdentifier(id string) {
+	vm.Identifier = id
+}
+
+func (vm *VM) GetIdentifier() string {
+	return fmt.Sprintf("%d_%s_%s", vm.Service_index, vm.Mode, vm.Identifier)
 }
 
 func (vm *VM) getBasicBlockGasCost(pc uint64) uint64 {

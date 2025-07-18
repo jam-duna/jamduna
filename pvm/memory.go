@@ -50,7 +50,8 @@ func NewRAM(o_size uint32, w_size uint32, p_s uint32) *RAM {
 	rw_data_address := uint32(2 * Z_Z)
 	rw_data_address_end := rw_data_address + Z_func(o_size)
 	current_heap_pointer := rw_data_address_end + 1024*1024
-	fmt.Printf("rw_data_address_end: %x, current_heap_pointer: %x\n", rw_data_address_end, current_heap_pointer)
+	// fmt.Printf("rw_data_address_end: %x, current_heap_pointer: %x\n", rw_data_address_end, current_heap_pointer)
+
 	// stack
 	stack_address := uint32(0xFFFFFFFF) - 2*Z_Z - Z_I - p_s + 1
 	stack_address_end := stack_address + p_s

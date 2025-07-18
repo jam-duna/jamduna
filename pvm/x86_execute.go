@@ -22,26 +22,27 @@ import (
 // -1 = caught SIGSEGV
 // -2 = mmap failed
 // -3 = mprotect failed
-func ExecuteX86(code []byte, regBuf []byte) (ret int, err error) {
+func ExecuteX86(code []byte, regBuf []byte) (ret int, usec int64, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			ret = -1
 			err = fmt.Errorf("panic during execution: %v", r)
 		}
 	}()
+
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
 	if len(regBuf) < 14*8 {
-		return -1, fmt.Errorf("regBuf too small: need ≥ %d bytes", 14*8)
+		return -1, 0, fmt.Errorf("regBuf too small: need ≥ %d bytes", 14*8)
 	}
 
 	// Allocate executable memory in C
 	codePtr := C.alloc_executable(C.size_t(len(code)))
 	if codePtr == nil {
-		return -2, fmt.Errorf("C.alloc_executable failed")
+		return -2, 0, fmt.Errorf("C.alloc_executable failed")
 	}
-	//defer C.free(codePtr)
+	// defer C.free(codePtr)
 
 	// Copy x86 code into the executable buffer
 	C.memcpy(codePtr, unsafe.Pointer(&code[0]), C.size_t(len(code)))
@@ -49,14 +50,11 @@ func ExecuteX86(code []byte, regBuf []byte) (ret int, err error) {
 	// Pass pointer to register dump buffer
 	regPtr := unsafe.Pointer(&regBuf[0])
 
-	// Run
+	// Time the call in microseconds
 	start := time.Now()
-	r := C.execute_x86((*C.uint8_t)(unsafe.Pointer(&code[0])), C.size_t(len(code)), regPtr)
-	elapsed := time.Since(start)
-	fmt.Printf("execute_x86 took %v\n", elapsed)
-	ret = int(r)
-
-	return ret, nil
+	r := C.execute_x86((*C.uint8_t)(codePtr), C.size_t(len(code)), regPtr)
+	usec = time.Since(start).Microseconds()
+	return int(r), usec, err
 }
 
 func GetEcalliAddress() uintptr {
