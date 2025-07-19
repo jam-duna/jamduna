@@ -753,7 +753,7 @@ func TestSingleSandbox(t *testing.T) {
 	debugRecompiler = true
 	showDisassembly = true
 
-	name := "inst_sub_32"
+	name := "inst_branch_not_eq_imm_ok"
 	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
 	data, err := os.ReadFile(filePath)
 	if err != nil {

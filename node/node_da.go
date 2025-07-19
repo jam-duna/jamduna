@@ -289,7 +289,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 	pvmContext := log.OtherGuarantor
 	pvmBackend := pvm.BackendInterpreter
 	if firstGuarantorOrAuditor {
-		pvmBackend = pvm.BackendInterpreter
+		pvmBackend = pvm.BackendRecompiler
 		pvmContext = log.FirstGuarantorOrAuditor
 		n.nodeSelf.Telemetry(log.MsgTypeWorkPackageBundle, package_bundle, "codec_encoded", types.EncodeAsHex(package_bundle))
 	}

@@ -7,7 +7,6 @@ import (
 	"math"
 	"math/bits"
 	"os"
-	"slices"
 	"sort"
 	"strings"
 
@@ -507,10 +506,7 @@ func (vm *VM) step(stepn int) error {
 	len_operands := vm.skip(vm.pc)
 	operands := vm.code[vm.pc+1 : vm.pc+1+len_operands]
 	og_pc := vm.pc
-	if VMsCompare {
-		// preexecution logging
-		vm.LogCurrentState(opcode, operands, og_pc, vm.Gas)
-	}
+
 	switch {
 	case opcode <= 1: // A.5.1 No arguments
 		vm.HandleNoArgs(opcode)
@@ -571,7 +567,8 @@ func (vm *VM) step(stepn int) error {
 	if PvmLogging { //  || opcode == ECALLI || opcode == SBRK {
 		registersJSON, _ := json.Marshal(vm.Ram.ReadRegisters())
 		prettyJSON := strings.ReplaceAll(string(registersJSON), ",", " ")
-		fmt.Printf("%s: %-18s step:%6d pc:%6d Registers:%s\n", vm.Mode, opcode_str(opcode), stepn-1, vm.pc, prettyJSON)
+		fmt.Printf("%s: %-18s step:%6d pc:%6d gas:%d Registers:%s\n", vm.Mode, opcode_str(opcode), stepn-1, vm.pc, vm.Gas, prettyJSON)
+
 		//fmt.Printf("instruction=%d pc=%d g=%d Registers=%s\n", opcode, vm.pc, vm.Gas-1, prettyJSON)
 		//fmt.Printf("%s %d %d Registers:%s\n", opcode_str(opcode), stepn-1, vm.pc, prettyJSON)
 		if stepn == maxPVMSteps {
@@ -579,7 +576,10 @@ func (vm *VM) step(stepn int) error {
 			panic(111)
 		}
 	}
-
+	if VMsCompare {
+		// preexecution logging
+		vm.LogCurrentState(opcode, operands, og_pc, vm.Gas)
+	}
 	return nil
 }
 
@@ -1812,7 +1812,7 @@ func (vm *VM) LogCurrentState(opcode byte, operands []byte, currentPC uint64, ga
 			if vm.vmBasicBlock%100000 == 0 {
 				//fmt.Printf("vmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), vm.Ram.ReadRegisters())
 			}
-			recordLog = true
+
 		}
 	} else {
 		//fmt.Printf("vmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), vm.Ram.ReadRegisters())
@@ -1821,7 +1821,6 @@ func (vm *VM) LogCurrentState(opcode byte, operands []byte, currentPC uint64, ga
 		fmt.Printf("Reached endBasicBlock %d, stopping VM\n", endBasicBlock)
 		os.Exit(0)
 	}
-
 	if recordLog {
 		log := VMLog{
 			Opcode:   opcode,
@@ -1878,7 +1877,7 @@ func (vm *RecompilerSandboxVM) LogCurrentState(opcode byte, operands []byte, cur
 			if vm.vmBasicBlock%100000 == 0 {
 				//fmt.Printf("vmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), vm.Ram.ReadRegisters())
 			}
-			recordLog = true
+
 		}
 	}
 
@@ -1886,15 +1885,18 @@ func (vm *RecompilerSandboxVM) LogCurrentState(opcode byte, operands []byte, cur
 		fmt.Printf("Reached endBasicBlock %d, stopping VM\n", endBasicBlock)
 		os.Exit(0)
 	}
-
 	if recordLog {
+		register := make([]uint64, len(vm.Ram.ReadRegisters()))
+		for i := range vm.Ram.ReadRegisters() {
+			register[i], _ = vm.sandBox.RegRead(sandBoxRegInfoList[i])
+		}
 		log := VMLog{
 			Opcode:    opcode,
 			OpStr:     opcode_str(opcode),
 			Operands:  operands,
 			PvmPc:     currentPC,
 			Gas:       gas,
-			Registers: slices.Clone(vm.post_register),
+			Registers: vm.Ram.ReadRegisters(),
 		}
 
 		if vm.post_register == nil {
@@ -1904,9 +1906,9 @@ func (vm *RecompilerSandboxVM) LogCurrentState(opcode byte, operands []byte, cur
 			vm.post_register[i], _ = vm.sandBox.RegRead(sandBoxRegInfoList[i])
 		}
 		vm.Logs = append(vm.Logs, log)
-		if (len(vm.Logs) > 10 && (gas < hiResGasRangeStart || gas > hiResGasRangeEnd)) || len(vm.Logs) > 1000 {
-			vm.saveLogs()
-		}
+		// if (len(vm.Logs) > 10 && (gas < hiResGasRangeStart || gas > hiResGasRangeEnd)) || len(vm.Logs) > 1000 {
+		vm.saveLogs()
+		// }
 	}
 
 }

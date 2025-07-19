@@ -53,6 +53,7 @@ var sandBoxRegInfoList = []int{
 
 const (
 	pageSize  = uint64(0x1000)                 // 4 KiB
+	dumpSize  = 0x100000                       // 1 MiB dump page size
 	guestBase = uint64(0x10000000)             // guest RAM start
 	guestSize = uint64(4 * 1024 * 1024 * 1024) // 4 GiB
 )
@@ -153,7 +154,6 @@ func NewRecompilerSandboxVM(vm *VM) (*RecompilerSandboxVM, error) {
 	}
 	rvm.current_heap_pointer = rvm.RecompilerVM.VM.Ram.GetCurrentHeapPointer()
 	rvm.RecompilerVM.VM.Ram = rvm
-
 	rvm.sandBox.HookAdd(uc.HOOK_MEM_READ, func(mu uc.Unicorn, access int,
 		addr uint64, size int, value int64) {
 		// compute the page index
@@ -325,7 +325,7 @@ func (vm *RecompilerSandboxVM) Compile(startStep uint64) {
 func generateGasCheck(memAddr uint64, gasCharge uint32) []byte {
 	var code []byte
 	// 4G + 14*8
-	offset := int64(14*8 - 0x100000)
+	offset := int64(14*8 - dumpSize)
 	// fmt.Printf("generateGasCheck: memAddr=0x%X, gasCharge=%d, offset=%d\n", memAddr, gasCharge, offset)
 	code = append(code, generateSubMem64Imm32(BaseReg, offset, gasCharge)...)
 
@@ -686,6 +686,7 @@ func (vm *RecompilerSandboxVM) Patch(x86code []byte, entry uint32) (err error) {
 		return fmt.Errorf("no entry patch placeholder found in x86 code")
 	}
 	vm.x86Code = x86code
+	vm.WriteContextSlot(indirectJumpPointSlot, uint64(vm.djumpAddr), 8)
 	return nil
 }
 func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) (err error) {
@@ -742,10 +743,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 	var lastPc = -1
 	_, err = vm.sandBox.HookAdd(uc.HOOK_CODE, func(mu uc.Unicorn, addr uint64, size uint32) {
 		offset := addr - codeBase
-		instruction, ok_x86 := vm.x86Instructions[int(offset)] // should get the op_code here
-		if !ok_x86 {
-			panic(fmt.Sprintf("❌ Invalid instruction at offset 0x%X\n", offset))
-		}
+		instruction, _ := vm.x86Instructions[int(offset)] // should get the op_code here
 		if pvm_pc, ok := vm.InstMapX86ToPVM[int(offset)]; ok && debugRecompiler {
 			opcode := vm.code[pvm_pc]
 			fmt.Printf("!!! Start PVM PC: %d [%s] reg:%v\n", pvm_pc, opcode_str(opcode), vm.Ram.ReadRegisters())
@@ -755,8 +753,13 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 			fmt.Printf("❌ Failed to read R12: %v\n", err)
 			return
 		}
+		rcxValue, err := mu.RegRead(uc.X86_REG_RCX)
+		if err != nil {
+			fmt.Printf("❌ Failed to read RBP: %v\n", err)
+			return
+		}
 		if debugRecompiler {
-			fmt.Printf("🧭 Executing @ 0x%X >%s< [baseReg 0x%X]\n", addr, instruction.String(), baseRegValue)
+			fmt.Printf("🧭 Executing @ 0x%X >%s< [baseReg 0x%X][RCX 0x%X]\n", addr, instruction.String(), baseRegValue, rcxValue)
 		}
 		if instruction.String() == "RET" {
 			// Handle RET instruction
@@ -771,6 +774,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 		}
 		if pvm_pc, ok := vm.InstMapX86ToPVM[int(offset)]; ok {
 			if VMsCompare {
+
 				if lastPc != -1 {
 					pc := uint64(lastPc)
 					if vm.code[pc] != ECALLI {
@@ -779,6 +783,8 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 					opcode := vm.code[pc] // this is the opCode
 					olen := vm.skip(pc)
 					operands := vm.code[pc+1 : pc+1+olen]
+					gas, _ := vm.ReadContextSlot(gasSlotIndex)
+					vm.Gas = int64(gas)
 					vm.LogCurrentState(opcode, operands, pc, vm.Gas)
 
 					// if vm.stepNumber >= maxPVMSteps {
@@ -893,7 +899,12 @@ func (rvm *RecompilerSandboxVM) ExecuteSandBox(entryPoint uint64) error {
 		}
 
 	}
-
+	gas, err := rvm.ReadContextSlot(gasSlotIndex)
+	if err != nil {
+		fmt.Printf("Failed to read gas from context slot: %v\n", err)
+	} else {
+		rvm.Gas = int64(gas)
+	}
 	fmt.Printf(
 		"**** ExecuteSandBox %s finished, ResultCode: %d Time: %s\n",
 		rvm.Mode,
@@ -1535,4 +1546,42 @@ func (vm *RecompilerSandboxVM) WriteRegisters() {
 			return
 		}
 	}
+}
+
+func (vm *RecompilerSandboxVM) WriteContextSlot(slot_index int, value uint64, size int) error {
+	if vm.regDumpAddr == 0 {
+		return fmt.Errorf("regDumpAddr is not initialized")
+	}
+	addr := vm.regDumpAddr + uintptr(slot_index*8)
+
+	switch size {
+	case 4:
+		var buf [8]byte
+		binary.LittleEndian.PutUint32(buf[:4], uint32(value))
+		return vm.sandBox.MemWrite(uint64(addr), buf[:4])
+	case 8:
+		var buf [8]byte
+		binary.LittleEndian.PutUint64(buf[:], value)
+		return vm.sandBox.MemWrite(uint64(addr), buf[:])
+	default:
+		return fmt.Errorf("unsupported size: %d", size)
+	}
+}
+
+func (vm *RecompilerSandboxVM) ReadContextSlot(slot_index int) (uint64, error) {
+	if vm.regDumpAddr == 0 {
+		return 0, fmt.Errorf("regDumpAddr is not initialized")
+	}
+	addr := vm.regDumpAddr + uintptr(slot_index*8)
+	var value uint64
+	// just read it out
+	data, err := vm.sandBox.MemRead(uint64(addr), 8)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read from regDumpMem at index %d: %w", slot_index, err)
+	}
+	if len(data) < 8 {
+		return 0, fmt.Errorf("not enough data to read from regDumpMem at index %d", slot_index)
+	}
+	value = binary.LittleEndian.Uint64(data)
+	return value, nil
 }

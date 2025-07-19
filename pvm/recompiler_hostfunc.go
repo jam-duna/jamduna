@@ -25,27 +25,34 @@ func Ecalli(rvmPtr unsafe.Pointer, opcode int32) {
 	}
 	// Invoke the host logic, e.g., gas charging and actual operation
 	// fmt.Fprintf(os.Stderr, "Ecalli called with opcode: %d, gas: %d\n", opcode, vm.Gas)
+	if vm.isChargingGas {
+		gas, err := vm.ReadContextSlot(gasSlotIndex)
+		if err != nil {
+			log.Error("x86", "Ecalli: failed to read gas from context slot", "error", err)
+		}
+		vm.Gas = int64(gas)
+	} else {
+		vm.Gas = 100000
+	}
 	if opcode == 500 {
+		var err error
 		if useEcalli500 {
 			if vm.isPCCounting {
 				// read 4 bytes from vm.pc_addr
-				pcBytes := vm.regDumpMem[15*8 : 15*8+4]
-				// get the pc from the register dump memory
-				pc := binary.LittleEndian.Uint32(pcBytes)
-				// fmt.Fprintf(os.Stderr, "Ecalli: pc=%d\n", pc)
-				vm.pc = uint64(pc)
+				vm.pc, err = vm.ReadContextSlot(pcSlotIndex)
+				if err != nil {
+					log.Error("x86", "Ecalli: failed to read pc from context slot", "error", err)
+				}
 			}
-			if vm.isChargingGas {
-				vm.Gas = int64(binary.LittleEndian.Uint64(vm.regDumpMem[14*8 : 15*8]))
-			} else {
-				vm.Gas = 100000
-			}
+
 			// fmt.Printf("Ecalli: pc=%d, operands=%v, gas=%d\n", vm.pc, operands, vm.Gas)
 			// fmt.Fprintf(os.Stderr, "Ecalli: pc=%d, gas=%d\n", vm.pc, vm.Gas)
 			var blockCounter uint64
 			if vm.IsBlockCounting {
-				block_counter_bytes := vm.regDumpMem[16*8 : 16*8+8]
-				blockCounter = binary.LittleEndian.Uint64(block_counter_bytes)
+				blockCounter, err = vm.ReadContextSlot(blockCounterSlotIndex)
+				if err != nil {
+					log.Error("x86", "Ecalli: failed to read blockCounter from context slot", "error", err)
+				}
 			}
 			olen := vm.skip(vm.pc)
 			operands := vm.code[vm.pc+1 : vm.pc+1+olen]
@@ -65,6 +72,11 @@ func Ecalli(rvmPtr unsafe.Pointer, opcode int32) {
 		return
 	}
 	vm.InvokeHostCall(int(opcode))
+	if opcode == 20 {
+		val, _ := vm.Ram.ReadRegister(9) // 20 is the Sbrk opcode
+		vm.Gas = vm.Gas - int64(val)
+		vm.WriteContextSlot(gasSlotIndex, uint64(vm.Gas), 8)
+	}
 
 }
 func (vm *RecompilerVM) LogCurrentState(opcode byte, operands []byte, currentPC uint64, gas int64) {
@@ -217,6 +229,14 @@ func EcalliSandBox(rvmPtr unsafe.Pointer, opcode int32) {
 	}
 	// Invoke the host logic, e.g., gas charging and actual operation
 	vm.InvokeHostCall(int(opcode))
+	gas, _ := vm.ReadContextSlot(gasSlotIndex)
+	vm.Gas = int64(gas)
+	if opcode == 20 {
+		val, _ := vm.Ram.ReadRegister(9)
+		fmt.Printf("value of register 9 in EcalliSandBox: %d\n", val)
+		vm.Gas = vm.Gas - int64(val)
+		vm.WriteContextSlot(gasSlotIndex, uint64(vm.Gas), 8)
+	}
 }
 
 func (rvm *RecompilerSandboxVM) EcalliCodeSandBox(opcode int) ([]byte, error) {

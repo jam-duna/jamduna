@@ -1,6 +1,7 @@
 package statedb
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -123,7 +124,7 @@ func TestStateTransitionNoSandbox(t *testing.T) {
 	pvm.PvmLogging = true
 	pvm.PvmTrace = true   // enable PVM trace for this test
 	pvm.VMsCompare = true // enable VM comparison for this test
-	filename := "../jamtestvectors/traces/reports-l1/00000005.json"
+	filename := "./00000019.json"
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
@@ -140,10 +141,9 @@ func TestStateTransitionSandbox(t *testing.T) {
 	pvm.VMsCompare = true // enable VM comparison for this test
 	pvm.PvmLogging = true
 	pvm.UseTally = true          // enable tally for this test
-	pvm.SetUseEcalli500(true)    // use ecalli500 for log check in x86
+	pvm.SetUseEcalli500(false)   // use ecalli500 for log check in x86
 	pvm.SetDebugRecompiler(true) // enable debug mode for recompiler
-	//filename := "../bin/00000019.json"
-	filename := "../jamtestvectors/traces/reports-l1/00000005.json"
+	filename := "./00000019.json"
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
@@ -161,7 +161,7 @@ func TestPVMstepJsonDiff(t *testing.T) {
 	var testdata, testdata_rcp pvm.VMLogs
 
 	// Load JSON 1
-	json1, err := os.ReadFile("test_case/vm_log.json")
+	json1, err := os.ReadFile("interpreter/vm_log.json")
 	if err != nil {
 		t.Fatalf("failed to read file test_case/vm_log.json: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestPVMstepJsonDiff(t *testing.T) {
 	}
 
 	// Load JSON 2
-	json2, err := os.ReadFile("test_case/vm_log_recompiler.json")
+	json2, err := os.ReadFile("recompiler_sandbox/vm_log.json")
 	if err != nil {
 		t.Fatalf("failed to read file test_case/vm_log_recompiler.json: %v", err)
 	}
@@ -203,12 +203,7 @@ func TestPVMstepJsonDiff(t *testing.T) {
 }
 
 func TestTraces(t *testing.T) {
-	//testSTFDir(t, "/root/go/src/github.com/jam-duna/jamtestnet/data/assurances/state_transitions")
-	//testSTFDir(t, "/root/go/src/github.com/jam-duna/jamtestnet/data/assurances/state_transitions")
-	//testSTFDir(t, "../jamtestvectors/traces/fallback")
-	//testSTFDir(t, "../jamtestvectors/traces/safrole")
-	//dir := "../jamtestvectors/traces/reports-l1"
-	dir := "../cmd/importblocks/rawdata/assurances/state_transitions"
+	dir := "../jamtestvectors/traces/reports-l1"
 	log.InitLogger("info")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -243,4 +238,69 @@ func TestCompareJson(t *testing.T) {
 	}
 	diff := CompareJSON(testdata1, testdata2)
 	fmt.Print(diff)
+}
+
+func TestCompareLogs(t *testing.T) {
+	f1, err := os.Open("interpreter/vm_log.json")
+	if err != nil {
+		t.Fatalf("failed to open interpreter/vm_log.json: %v", err)
+	}
+	defer f1.Close()
+
+	f2, err := os.Open("recompiler_sandbox/vm_log.json")
+	if err != nil {
+		t.Fatalf("failed to open recompiler_sandbox/vm_log.json: %v", err)
+	}
+	defer f2.Close()
+
+	s1 := bufio.NewScanner(f1)
+	s2 := bufio.NewScanner(f2)
+
+	var i int
+	for {
+
+		has1 := s1.Scan()
+		has2 := s2.Scan()
+
+		if err := s1.Err(); err != nil {
+			t.Fatalf("error scanning vm_log.json at line %d: %v", i, err)
+		}
+		if err := s2.Err(); err != nil {
+			t.Fatalf("error scanning vm_log_recompiler.json at line %d: %v", i, err)
+		}
+
+		// both files ended → success
+		if !has1 && !has2 {
+			break
+		}
+		if i == 0 {
+			i++
+			continue
+		}
+		// one ended early → length mismatch
+		if has1 != has2 {
+			t.Fatalf("log length mismatch at index %d: has vm_log=%v, has vm_log_recompiler=%v", i, has1, has2)
+		}
+
+		// unmarshal each line into your entry type
+		var orig, recp pvm.VMLog
+		if err := json.Unmarshal(s1.Bytes(), &orig); err != nil {
+			t.Fatalf("failed to unmarshal line %d of vm_log.json: %v", i, err)
+		}
+		if err := json.Unmarshal(s2.Bytes(), &recp); err != nil {
+			t.Fatalf("failed to unmarshal line %d of vm_log_recompiler.json: %v", i, err)
+		}
+
+		// compare
+		if !reflect.DeepEqual(orig.OpStr, recp.OpStr) || !reflect.DeepEqual(orig.Operands, recp.Operands) || !reflect.DeepEqual(orig.Registers, recp.Registers) || !reflect.DeepEqual(orig.Gas, recp.Gas) {
+			fmt.Printf("Difference at index %d:\nOriginal: %+v\nRecompiler: %+v\n", i, orig, recp)
+			if diff := CompareJSON(orig, recp); diff != "" {
+				fmt.Println("Differences:", diff)
+				t.Fatalf("differences at index %d: %s", i, diff)
+			}
+		} else if i%100000 == 0 {
+			fmt.Printf("Index %d: no difference %s\n", i, s1.Bytes())
+		}
+		i++
+	}
 }

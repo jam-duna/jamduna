@@ -139,7 +139,7 @@ func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) 
 	for i := 0; i < numNodes; i++ {
 		pvmBackend := pvm.BackendInterpreter
 		if i%2 == 1 {
-			pvmBackend = pvm.BackendInterpreter // BackendRecompiler
+			pvmBackend = pvm.BackendRecompiler
 		}
 		node, err := newNode(uint16(i), validatorSecrets[i], chainSpec, pvmBackend, epoch0Timestamp, peers, peerList, nodePaths[i], int(basePort)+i, jceMode)
 		if err != nil {

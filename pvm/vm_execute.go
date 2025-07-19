@@ -279,9 +279,6 @@ func (vm *RecompilerVM) finalizeJumpTargets(J []uint32) {
 			// vm.patchJump(block, end.X86PC)
 		} else if block.JumpType == TERMINATED {
 			vm.patchJumpIndirectTable(J)
-		} else if block.JumpType == INDIRECT_JUMP {
-			// For JUMP_IND [implements vm.pc = uint64(vm.J[((valueA+vx)/2)-1])]
-			vm.patchJumpIndirect(block)
 		}
 	}
 }

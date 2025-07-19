@@ -1516,7 +1516,8 @@ func (vm *VM) hostExport() {
 			now := time.Now()
 			frameCounter++
 			if !lastFrameTime.IsZero() {
-				fmt.Printf("Push frame %d %d bytes (interval: %v)\n", frameCounter, len(frame), now.Sub(lastFrameTime))
+				fps := float64(time.Second) / float64(now.Sub(lastFrameTime))
+				fmt.Printf("Push frame %d %d bytes (FPS: %.2f)\n", frameCounter, len(frame), fps)
 			}
 			if frameCounter >= minFrameCounter && useEcalli500 {
 				fn := fmt.Sprintf("test/doom_frame_%d.json", frameCounter)

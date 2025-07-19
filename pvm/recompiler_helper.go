@@ -255,6 +255,9 @@ func encodeMovRegToMem(srcIdx, baseIdx int, offset byte) []byte {
 	}
 }
 func encodeMovImm64ToMem(memAddr uint64, imm uint64) []byte {
+	// this instruction only do once
+	// move it on top of the start code to save push & pop
+
 	var code []byte
 
 	// PUSH RAX and RDX (save scratch registers)
@@ -347,7 +350,7 @@ func (rvm *RecompilerVM) DumpRegisterToMemory(move_back bool) []byte {
 // If dst is RCX itself, use RAX instead as the temporary register.
 func generateLoadMemToReg(dst X86Reg, addr uint64) []byte {
 	var code []byte
-
+	// replace like mov rax, qword ptr [r12 - 0x36]
 	// Choose temporary register: default is RCX, but if dst==RCX use RAX
 	var tempReg X86Reg
 	var pushOp, popOp byte
@@ -430,5 +433,41 @@ func emitPopReg(code []byte, reg X86Reg) []byte {
 		code = append(code, 0x41) // REX.B prefix
 	}
 	code = append(code, 0x58|reg.RegBits) // POP <reg>
+	return code
+}
+
+func generateJumpRegMem(srcReg X86Reg, rel int32) []byte {
+	var code []byte
+
+	// Step 1: REX prefix
+	rex := byte(0x48) // REX.W (64-bit)
+	if srcReg.REXBit == 1 {
+		rex |= 0x01 // REX.B for rm
+	}
+	code = append(code, rex)
+
+	// Step 2: Opcode for JMP r/m64
+	code = append(code, 0xFF)
+
+	mod := byte(0b10 << 6)  // mod = 10 (disp32)
+	reg := byte(0b100 << 3) // /4 = JMP
+
+	if srcReg.RegBits == 4 { // r12 or rsp → needs SIB
+		modrm := mod | reg | 0b100 // rm = 100 means SIB follows
+		code = append(code, modrm)
+
+		// SIB: scale=0, index=100 (none), base=100 (r12/rsp)
+		sib := byte(0b00_100_100)
+		code = append(code, sib)
+	} else {
+		modrm := mod | reg | srcReg.RegBits
+		code = append(code, modrm)
+	}
+
+	// disp32
+	disp := make([]byte, 4)
+	binary.LittleEndian.PutUint32(disp, uint32(rel))
+	code = append(code, disp...)
+
 	return code
 }

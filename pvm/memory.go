@@ -17,6 +17,9 @@ type RAMInterface interface {
 	WriteRegister(index int, value uint64) uint64
 	ReadRegisters() []uint64
 	GetDirtyPages() []int
+
+	// WriteContextSlot(slot_index int, value uint64) error
+	// ReadContextSlot(slot_index int) (uint64, error)
 }
 
 type RAM struct {

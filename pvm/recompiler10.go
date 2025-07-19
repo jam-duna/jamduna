@@ -592,35 +592,82 @@ func generateImmShiftOp64Alt(subcode byte) func(inst Instruction) []byte {
 
 // Implements dst64 = imm64 - src64
 func generateNegAddImm64(inst Instruction) []byte {
-	dstIdx, srcIdx, imm := extractTwoRegsOneImm(inst.Args)
+	dstIdx, srcIdx, imm64 := extractTwoRegsOneImm(inst.Args)
 	dst := regInfoList[dstIdx]
-	src := regInfoList[srcIdx]
 
 	var code []byte
 
-	// 1) MOVABS r64_dst, imm64
-	//    REX.W + B8+rd, then 8‐byte little‐endian immediate
-	rexMov := byte(0x48)
-	if dst.REXBit == 1 {
-		rexMov |= 0x01 // REX.B for high registers
-	}
-	movOp := byte(0xB8 | dst.RegBits)
-	code = append(code, rexMov, movOp)
-	for i := 0; i < 8; i++ {
-		code = append(code, byte(imm>>(8*i)))
+	// ─── Special‐case when dst==src ───
+	if dstIdx == srcIdx {
+		// 1) NEG r64_dst   (opcode F7 /3 with ModRM = 11|3|dst)
+		rexNeg := byte(0x48) // REX.W
+		if dst.REXBit == 1 {
+			rexNeg |= 0x01
+		}
+		modrmNeg := byte(0xD8 | dst.RegBits) // 11b, /3, R/M=dst
+		code = append(code, rexNeg, 0xF7, modrmNeg)
+
+		// 2) ADD r64_dst, imm8  if possible  (83 /0 ib)
+		if imm64 <= 127 {
+			rexAdd := byte(0x48)
+			if dst.REXBit == 1 {
+				rexAdd |= 0x01
+			}
+			modrmAdd := byte(0xC0 | dst.RegBits) // reg=0 (/0), rm=dst
+			code = append(code,
+				rexAdd,
+				0x83, // ADD r/m64, imm8
+				modrmAdd,
+				byte(int8(imm64)),
+			)
+			return code
+		}
+
+		// 3) ADD r64_dst, imm32  if it fits 32 bits  (81 /0 id)
+		if imm64 <= 0x7FFFFFFF {
+			rexAdd := byte(0x48)
+			if dst.REXBit == 1 {
+				rexAdd |= 0x01
+			}
+			modrmAdd := byte(0xC0 | dst.RegBits)
+			code = append(code,
+				rexAdd,
+				0x81, // ADD r/m64, imm32
+				modrmAdd,
+			)
+			imm32 := uint32(int32(imm64))
+			b := make([]byte, 4)
+			binary.LittleEndian.PutUint32(b, imm32)
+			code = append(code, b...)
+			return code
+		}
+
+		// 4) Otherwise fall back to MOVABS+SUB
+		// (rare: imm outside signed‐32 range)
 	}
 
-	// 2) SUB r64_dst, r64_src
-	//    REX.W + 29 /r
-	rexSub := byte(0x48)
+	// ─── Fallback for dst!=src or large imm ───
+	// MOVABS r64_dst, imm64
+	movRex := byte(0x48)
+	if dst.REXBit == 1 {
+		movRex |= 0x01
+	}
+	code = append(code, movRex, 0xB8|dst.RegBits)
+	immBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(immBytes, uint64(imm64))
+	code = append(code, immBytes...)
+
+	// SUB r64_dst, r64_src
+	src := regInfoList[srcIdx]
+	subRex := byte(0x48)
 	if src.REXBit == 1 {
-		rexSub |= 0x04 // REX.R for reg field = src
+		subRex |= 0x04
 	}
 	if dst.REXBit == 1 {
-		rexSub |= 0x01 // REX.B for rm field = dst
+		subRex |= 0x01
 	}
 	modrmSub := byte(0xC0 | (src.RegBits << 3) | dst.RegBits)
-	code = append(code, rexSub, 0x29, modrmSub)
+	code = append(code, subRex, 0x29, modrmSub)
 
 	return code
 }
@@ -704,7 +751,6 @@ func generateNegAddImm32(inst Instruction) []byte {
 	dstIdx, srcIdx, imm := extractTwoRegsOneImm(inst.Args)
 	dst := regInfoList[dstIdx]
 	src := regInfoList[srcIdx]
-
 	var code []byte
 
 	// 1) MOV r64_dst, r64_src
