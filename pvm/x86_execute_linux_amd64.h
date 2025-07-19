@@ -24,6 +24,7 @@ void* get_ecalli_address(void);
 void* get_sbrk_address(void);
 
 void* alloc_executable(size_t size);
+void free_executable(void* ptr, size_t size);
 
 #ifdef __cplusplus
 }

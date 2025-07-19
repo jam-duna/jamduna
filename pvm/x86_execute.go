@@ -30,9 +30,6 @@ func ExecuteX86(code []byte, regBuf []byte) (ret int, usec int64, err error) {
 		}
 	}()
 
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-
 	if len(regBuf) < 14*8 {
 		return -1, 0, fmt.Errorf("regBuf too small: need ≥ %d bytes", 14*8)
 	}
@@ -42,7 +39,8 @@ func ExecuteX86(code []byte, regBuf []byte) (ret int, usec int64, err error) {
 	if codePtr == nil {
 		return -2, 0, fmt.Errorf("C.alloc_executable failed")
 	}
-	// defer C.free(codePtr)
+	size := C.size_t(len(code))
+	defer C.free_executable(codePtr, C.size_t(size))
 
 	// Copy x86 code into the executable buffer
 	C.memcpy(codePtr, unsafe.Pointer(&code[0]), C.size_t(len(code)))
@@ -52,7 +50,9 @@ func ExecuteX86(code []byte, regBuf []byte) (ret int, usec int64, err error) {
 
 	// Time the call in microseconds
 	start := time.Now()
+	runtime.LockOSThread()
 	r := C.execute_x86((*C.uint8_t)(codePtr), C.size_t(len(code)), regPtr)
+	runtime.UnlockOSThread()
 	usec = time.Since(start).Microseconds()
 	return int(r), usec, err
 }

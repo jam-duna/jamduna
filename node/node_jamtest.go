@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	DefaultRefineGasLimit     = uint64(8000000)
+	DefaultRefineGasLimit     = uint64(4000000000)
 	DefaultAccumulateGasLimit = uint64(1000000)
 )
 

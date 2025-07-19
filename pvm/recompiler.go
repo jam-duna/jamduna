@@ -846,7 +846,7 @@ func generateTrap(inst Instruction) []byte {
 		// 0xE9,                      // opcode
 		// byte(rel), byte(rel >> 8), // disp[0..1]
 		// byte(rel >> 16), byte(rel >> 24),
-		0xCC, // int3 (breakpoint instruction)
+		0x0F, 0x0B, // int3 (breakpoint instruction)
 	}
 }
 

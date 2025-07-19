@@ -332,8 +332,7 @@ func generateGasCheck(memAddr uint64, gasCharge uint32) []byte {
 	// JNS skip_trap
 	jumpPos := len(code)
 	code = append(code, 0x79, 0x00) // JNS rel8
-	// INT3 (trap)
-	code = append(code, 0xCC)
+	code = append(code, 0x0F, 0x0B)
 
 	// Patch rel8
 	code[jumpPos+1] = byte(len(code) - (jumpPos + 2)) // calculate relative jump distance
