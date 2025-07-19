@@ -273,6 +273,18 @@ func IsGenesisSTF(statetransition *StateTransition) bool {
 	return false
 }
 
+func NewStateDBFromStateTransitionPost(sdb *storage.StateDBStorage, statetransition *StateTransition) (statedb *StateDB, err error) {
+	statedb, err = newStateDB(sdb, common.Hash{})
+	if err != nil {
+		return statedb, err
+	}
+	statedb.Block = &(statetransition.Block)
+	statedb.StateRoot = statedb.UpdateAllTrieStateRaw(statetransition.PostState) // NOTE: MK -- USE POSTSTATE
+	statedb.JamState = NewJamState()
+	statedb.RecoverJamState(statedb.StateRoot)
+	return statedb, nil
+}
+
 func NewStateDBFromStateTransition(sdb *storage.StateDBStorage, statetransition *StateTransition) (statedb *StateDB, err error) {
 	statedb, err = newStateDB(sdb, common.Hash{})
 	if err != nil {

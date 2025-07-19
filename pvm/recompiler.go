@@ -503,7 +503,6 @@ func (vm *RecompilerVM) ExecuteX86Code(x86code []byte) (err error) {
 	if showDisassembly {
 		fmt.Printf("ALL COMBINED Disassembled x86 code:\n%s\n", str)
 	}
-
 	crashed, msec, err := ExecuteX86(codeAddr, vm.regDumpMem)
 	for i := 0; i < regSize; i++ {
 		regValue := binary.LittleEndian.Uint64(vm.regDumpMem[i*8:])
@@ -631,7 +630,6 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(x86code []byte, entry uint32) (e
 	if showDisassembly {
 		fmt.Printf("ALL COMBINED Disassembled x86 code:\n%s\n", str)
 	}
-
 	crashed, msec, err := ExecuteX86(codeAddr, vm.regDumpMem)
 	vm.SetIdentifier(fmt.Sprintf("%d", msec))
 	for i := 0; i < regSize; i++ {

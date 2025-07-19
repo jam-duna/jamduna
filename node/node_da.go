@@ -274,7 +274,7 @@ func (n *NodeContent) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup
 }
 
 // executeWorkPackageBundle can be called by a guarantor OR an auditor -- the caller MUST do  VerifyBundle call prior to execution (verifying the imported segments)
-func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, slot uint32, firstGuarantorOrAuditor bool) (work_report types.WorkReport, d AvailabilitySpecifierDerivation, elapsed uint32, err error) {
+func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, slot uint32, firstGuarantorOrAuditor bool) (work_report types.WorkReport, d AvailabilitySpecifierDerivation, elapsed uint32, bundleSnapshot *types.WorkPackageBundleSnapshot, err error) {
 	importsegments := make([][][]byte, len(package_bundle.WorkPackage.WorkItems))
 	results := []types.WorkResult{}
 	targetStateDB := n.getPVMStateDB()
@@ -287,7 +287,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		return
 	}
 	pvmContext := log.OtherGuarantor
-	pvmBackend := pvm.BackendInterpreter
+	pvmBackend := n.pvmBackend
 	if firstGuarantorOrAuditor {
 		pvmBackend = pvm.BackendRecompiler
 		pvmContext = log.FirstGuarantorOrAuditor
@@ -310,7 +310,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		code, ok, err0 := targetStateDB.ReadServicePreimageBlob(service_index, workItem.CodeHash)
 		if err0 != nil || !ok || len(code) == 0 {
 			pvmFailedElapsed := common.Elapsed(pvmStart)
-			return work_report, d, pvmFailedElapsed, fmt.Errorf("executeWorkPackageBundle(ReadServicePreimageBlob):s_id %v, codehash %v, err %v, ok=%v", service_index, workItem.CodeHash, err0, ok)
+			return work_report, d, pvmFailedElapsed, bundleSnapshot, fmt.Errorf("executeWorkPackageBundle(ReadServicePreimageBlob):s_id %v, codehash %v, err %v, ok=%v", service_index, workItem.CodeHash, err0, ok)
 		}
 		if common.Blake2Hash(code) != workItem.CodeHash {
 			log.Crit(log.Node, "executeWorkPackageBundle: Code and CodeHash Mismatch")
@@ -409,5 +409,12 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		metadata := fmt.Sprintf("wph=%s|c=%d|len=%d", spec.WorkPackageHash, workReport.CoreIndex, spec.ExportedSegmentLength)
 		n.nodeSelf.Telemetry(log.MsgTypeSegment, segments, "metadata", metadata, "codec_encoded", types.EncodeAsHex(segments))
 	}
-	return workReport, d, pvmElapsed, err
+	bundleSnapshot = &types.WorkPackageBundleSnapshot{
+		PackageHash:       workReport.GetWorkPackageHash(),
+		CoreIndex:         workPackageCoreIndex,
+		Bundle:            package_bundle,
+		SegmentRootLookup: segmentRootLookup,
+		Slot:              slot,
+	}
+	return workReport, d, pvmElapsed, bundleSnapshot, err
 }

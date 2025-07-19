@@ -240,11 +240,16 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 			// if it's itself, execute the workpackage
 			if coworker.PeerID == n.id {
 				var execErr error
-
-				report, d, pvmElapsed, execErr = n.executeWorkPackageBundle(coreIndex, bundle, segmentRootLookup, slot, true)
+				var bundleSnapshot *types.WorkPackageBundleSnapshot
+				report, d, pvmElapsed, bundleSnapshot, execErr = n.executeWorkPackageBundle(coreIndex, bundle, segmentRootLookup, slot, true)
 				if execErr != nil {
 					log.Warn(log.Node, "processWPQueueItem", "err", execErr)
 					return
+				}
+				if bundleSnapshot != nil {
+					// packageHash_coreIndex_slot_audit
+					desc := fmt.Sprintf("%s_%d_%d_%s", bundleSnapshot.Bundle.WorkPackage.Hash(), bundleSnapshot.CoreIndex, n.id, "guarantor")
+					n.writeLogWithDescription(bundleSnapshot, bundleSnapshot.Slot, desc)
 				}
 				guarantee.Report = report
 				signerSecret := n.GetEd25519Secret()

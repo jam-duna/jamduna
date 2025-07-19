@@ -31,9 +31,10 @@ const (
 // go mod tidy
 
 type LogMessage struct {
-	Payload  interface{}
-	Timeslot uint32
-	Self     bool
+	Payload     interface{}
+	Description string
+	Timeslot    uint32
+	Self        bool
 }
 
 // StateDBStorage struct to hold the LevelDB instance

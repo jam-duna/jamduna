@@ -425,10 +425,15 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	default:
 	}
 
-	workReport, _, pvmElapsed, err := n.executeWorkPackageBundle(wpCoreIndex, *bundle, received_segmentRootLookup, n.statedb.GetTimeslot(), false)
+	workReport, _, pvmElapsed, bundleSnapshot, err := n.executeWorkPackageBundle(wpCoreIndex, *bundle, received_segmentRootLookup, n.statedb.GetTimeslot(), false)
 	if err != nil {
 		log.Warn(log.Node, "onWorkPackageShare: executeWorkPackageBundle", "node", n.id, "err", err, "pvmElapsed", pvmElapsed)
 		return fmt.Errorf("onWorkPackageShare: executeWorkPackageBundle: %w", err)
+	}
+	if bundleSnapshot != nil {
+		// packageHash_coreIndex_slot_guarantor_follower
+		//desc := fmt.Sprintf("%s_%d_%s_%s", bundleSnapshot.Bundle.WorkPackage.Hash(), bundleSnapshot.CoreIndex, bundleSnapshot.Slot, "guarantor_follower")
+		//n.writeLogWithDescription(bundleSnapshot, bundleSnapshot.Slot, desc)
 	}
 
 	select {

@@ -151,7 +151,8 @@ type NodeContent struct {
 	jceManager      *ManualJCEManager
 }
 
-func NewNodeContent(id uint16, ed25519PublicKey ed25519.PublicKey, store *storage.StateDBStorage, pvmBackend string) NodeContent {
+func NewNodeContent(id uint16, store *storage.StateDBStorage, pvmBackend string) NodeContent {
+	// removed pub since its not used
 	fmt.Printf("[N%v] NewNodeContent pvmBackend: %s\n", id, pvmBackend)
 	return NodeContent{
 		id:                   id,
@@ -441,7 +442,7 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 		return nil, fmt.Errorf("error generating self-signed certificate: %v", err)
 	}
 	node := &Node{
-		NodeContent: NewNodeContent(id, ed25519_pub, store, pvmBackend),
+		NodeContent: NewNodeContent(id, store, pvmBackend),
 		IsSync:      true,
 		peers:       peers,
 		clients:     make(map[string]string),
@@ -1354,6 +1355,10 @@ func (n *NodeContent) updateServiceMap(statedb *statedb.StateDB, b *types.Block)
 	return nil
 }
 
+func (n *NodeContent) AddStateDB(_statedb *statedb.StateDB) error {
+	return n.addStateDB(_statedb)
+}
+
 func (n *NodeContent) addStateDB(_statedb *statedb.StateDB) error {
 	n.statedbMutex.Lock()
 	n.statedbMapMutex.Lock()
@@ -1993,7 +1998,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 					log.Error(log.Audit, "auditWorkReport:FetchWorkPackageBundle package mismatch")
 					continue
 				}
-				wr, _, pvmElapsed, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, n.statedb.GetTimeslot(), false)
+				wr, _, pvmElapsed, _, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, n.statedb.GetTimeslot(), false)
 				if err != nil {
 					log.Error(log.Audit, "auditWorkReport:executeWorkPackageBundle", "err", err)
 					continue
@@ -2031,7 +2036,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 					log.Error(log.Audit, "auditWorkReport:FetchWorkPackageBundle package mismatch")
 					continue
 				}
-				wr, _, pvmElapsed, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, n.statedb.GetTimeslot(), false)
+				wr, _, pvmElapsed, _, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, n.statedb.GetTimeslot(), false)
 				if err != nil {
 					log.Error(log.Audit, "auditWorkReport:executeWorkPackageBundle", "err", err)
 					continue
@@ -2455,6 +2460,10 @@ func getMessageType(obj interface{}) string {
 		return "StateDB"
 	case statedb.StateDB:
 		return "StateDB"
+	case *types.WorkPackageBundleSnapshot:
+		return "bundle_snapshot"
+	case types.WorkPackageBundleSnapshot:
+		return "bundle_snapshot"
 	case *statedb.JamState:
 		return "JamState"
 	case statedb.JamState:
@@ -2500,6 +2509,18 @@ func (n *Node) SetSendTickets(sendTickets bool) {
 	n.sendTickets = sendTickets
 }
 
+func (n *Node) writeLogWithDescription(obj interface{}, timeslot uint32, description string) error {
+	if !n.WriteDebugFlag {
+		return nil
+	}
+	l := storage.LogMessage{
+		Payload:     obj,
+		Timeslot:    timeslot,
+		Description: description,
+	}
+	return n.WriteLog(l)
+}
+
 func (n *Node) writeDebug(obj interface{}, timeslot uint32) error {
 	if !n.WriteDebugFlag {
 		return nil
@@ -2515,9 +2536,11 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 	//msgType := getStructType(obj)
 	obj := logMsg.Payload
 	timeSlot := logMsg.Timeslot
+	description := logMsg.Description
 	msgType := getMessageType(obj)
 	if msgType != "unknown" {
 	}
+
 	dataDir := fmt.Sprintf("%s/data", n.dataDir)
 	structDir := fmt.Sprintf("%s/%vs", dataDir, msgType)
 
@@ -2535,6 +2558,9 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 		path := fmt.Sprintf("%s/%08d", structDir, timeSlot)
 		if epoch == 0 && phase == 0 {
 			path = fmt.Sprintf("%s/genesis", structDir)
+		}
+		if description != "" {
+			path = fmt.Sprintf("%s/%08d_%s", structDir, timeSlot, description)
 		}
 		types.SaveObject(path, obj)
 	}
