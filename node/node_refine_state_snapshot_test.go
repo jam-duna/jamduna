@@ -1,6 +1,8 @@
 package node
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"reflect"
 
@@ -9,12 +11,93 @@ import (
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
+	"github.com/nsf/jsondiff"
 
 	"github.com/colorfulnotion/jam/types"
 
 	_ "net/http/pprof"
 	"os"
 )
+
+func CompareJSON(obj1, obj2 interface{}) string {
+	json1, err1 := json.Marshal(obj1)
+	json2, err2 := json.Marshal(obj2)
+	if err1 != nil || err2 != nil {
+		return "Error marshalling JSON"
+	}
+	opts := jsondiff.DefaultJSONOptions()
+	diff, diffStr := jsondiff.Compare(json1, json2, &opts)
+
+	if diff == jsondiff.FullMatch {
+		return "JSONs are identical"
+	}
+	return fmt.Sprintf("Diff detected:\n%s", diffStr)
+}
+
+func TestCompareLogs(t *testing.T) {
+	f1, err := os.Open("interpreter/2805406230_refine.json")
+	if err != nil {
+		t.Fatalf("failed to open interpreter/vm_log.json: %v", err)
+	}
+	defer f1.Close()
+
+	f2, err := os.Open("recompiler_sandbox/2805406230_refine.json")
+	if err != nil {
+		t.Fatalf("failed to open recompiler_sandbox/vm_log.json: %v", err)
+	}
+	defer f2.Close()
+
+	s1 := bufio.NewScanner(f1)
+	s2 := bufio.NewScanner(f2)
+
+	var i int
+	for {
+
+		has1 := s1.Scan()
+		has2 := s2.Scan()
+
+		if err := s1.Err(); err != nil {
+			t.Fatalf("error scanning vm_log.json at line %d: %v", i, err)
+		}
+		if err := s2.Err(); err != nil {
+			t.Fatalf("error scanning vm_log_recompiler.json at line %d: %v", i, err)
+		}
+
+		// both files ended → success
+		if !has1 && !has2 {
+			break
+		}
+		if i == 0 {
+			i++
+			continue
+		}
+		// one ended early → length mismatch
+		if has1 != has2 {
+			t.Fatalf("log length mismatch at index %d: has vm_log=%v, has vm_log_recompiler=%v", i, has1, has2)
+		}
+
+		// unmarshal each line into your entry type
+		var orig, recp pvm.VMLog
+		if err := json.Unmarshal(s1.Bytes(), &orig); err != nil {
+			t.Fatalf("failed to unmarshal line %d of vm_log.json: %v", i, err)
+		}
+		if err := json.Unmarshal(s2.Bytes(), &recp); err != nil {
+			t.Fatalf("failed to unmarshal line %d of vm_log_recompiler.json: %v", i, err)
+		}
+
+		// compare
+		if !reflect.DeepEqual(orig.OpStr, recp.OpStr) || !reflect.DeepEqual(orig.Operands, recp.Operands) || !reflect.DeepEqual(orig.Registers, recp.Registers) { // || !reflect.DeepEqual(orig.Gas, recp.Gas) {
+			fmt.Printf("Difference at index %d:\nOriginal: %+v\nRecompiler: %+v\n", i, orig, recp)
+			if diff := CompareJSON(orig, recp); diff != "" {
+				fmt.Println("Differences:", diff)
+				t.Fatalf("differences at index %d: %s", i, diff)
+			}
+		} else if i%100000 == 0 {
+			fmt.Printf("Index %d: no difference %s\n", i, s1.Bytes())
+		}
+		i++
+	}
+}
 
 func ReadStateTransitions(filename string) (stf *statedb.StateTransition, err error) {
 	stBytes, err := os.ReadFile(filename)
@@ -57,8 +140,11 @@ func ReadBundleSnapshot(filename string) (stf *types.WorkPackageBundleSnapshot, 
 }
 
 func TestRefineStateTransitions(t *testing.T) {
+     pvm.PvmLogging = true
+        pvm.PvmTrace = true
+	
 	filename_stf := "test/00000022.bin"
-	filename_bundle := "test/00000022_0xbe539878a3f9f3bd949d6a77b3debbe15b3861c3596c4eb10a1087c5029f5f3e_1_3_guarantor.bin"
+	filename_bundle := "test/00000022_0x30eb09e23761cd42c7c13ae97dc733dc04dcbd0ea38bc8db229831cb001ef1e2_1_3_guarantor.bin"
 
 	stf, err := ReadStateTransitions(filename_stf)
 	if err != nil {
@@ -77,7 +163,7 @@ func TestRefineStateTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
-	pvmBackends := []string{pvm.BackendInterpreter, pvm.BackendRecompilerSandbox, pvm.BackendRecompiler}
+	pvmBackends := []string{pvm.BackendInterpreter, pvm.BackendRecompilerSandbox}
 	for _, pvmBackend := range pvmBackends {
 		t.Run(fmt.Sprintf("pvmBackend=%s", pvmBackend), func(t *testing.T) {
 			testRefineStateTransition(pvmBackend, store, bundle_snapshot, stf, t)

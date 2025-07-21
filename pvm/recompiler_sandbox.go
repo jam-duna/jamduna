@@ -785,12 +785,6 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 					gas, _ := vm.ReadContextSlot(gasSlotIndex)
 					vm.Gas = int64(gas)
 					vm.LogCurrentState(opcode, operands, pc, vm.Gas)
-
-					// if vm.stepNumber >= maxPVMSteps {
-					// 	fmt.Printf("Reached max PVM steps (%d), stopping execution.\n", maxPVMSteps)
-					// 	vm.saveLogs()
-					// 	os.Exit(0)
-					// }
 					vm.stepNumber++
 				}
 				lastPc = int(pvm_pc)
@@ -1462,11 +1456,6 @@ func (vm *RecompilerSandboxVM) ExecuteX86CodeFromBreakPoint(x86code []byte, brea
 					olen := vm.skip(pc)
 					operands := vm.code[pc+1 : pc+1+olen]
 					vm.LogCurrentState(opcode, operands, pc, vm.Gas)
-					// if vm.stepNumber >= maxPVMSteps {
-					// 	fmt.Printf("Reached max PVM steps (%d), stopping execution.\n", maxPVMSteps)
-					// 	vm.saveLogs()
-					// 	os.Exit(0)
-					// }
 					vm.stepNumber++
 				}
 				lastPc = int(pvm_pc)

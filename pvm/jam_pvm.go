@@ -2,6 +2,7 @@ package pvm
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -150,20 +151,22 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	return r, res, x_s
 }
 
+func (vm *VM) serviceIDlog() string {
+	return fmt.Sprintf("%d_%s.json", vm.Service_index, vm.Mode)
+}
+
 func (vm *VM) initLogs() {
 	if isSaveLog {
 		return
 	}
-	// decide filename
-	fileName := "vm_log"
-	dir := vm.Backend
-	filePath := filepath.Join(dir, fileName+".json")
+
 	// ensure the directory exists
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(vm.Backend, 0755); err != nil {
 		log.Error(vm.logging, "Error ensuring directory exists", "error", err)
 		return
 	}
 	// check if file exists, if not create it with 0 length
+	filePath := filepath.Join(vm.Backend, vm.serviceIDlog())
 	f, err := os.Create(filePath)
 	if err != nil {
 		log.Error(vm.logging, "Error creating log file", "file", filePath, "error", err)
@@ -178,14 +181,7 @@ func (vm *VM) saveLogs() {
 		return
 	}
 	// decide filename
-	dir := vm.Backend
-	filePath := filepath.Join(dir, "vm_log.json")
-
-	// ensure the directory exists
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		log.Error(vm.logging, "Error ensuring directory exists", "error", err)
-		return
-	}
+	filePath := filepath.Join(vm.Backend, vm.serviceIDlog())
 
 	// open for append (create if missing), do NOT truncate
 	f, err := os.OpenFile(filePath,

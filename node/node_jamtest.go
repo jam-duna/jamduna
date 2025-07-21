@@ -29,8 +29,8 @@ import (
 )
 
 const (
-	DefaultRefineGasLimit     = uint64(4000000000)
-	DefaultAccumulateGasLimit = uint64(1000000)
+	DefaultRefineGasLimit     = uint64(400_000_000)
+	DefaultAccumulateGasLimit = uint64(4_000_000)
 )
 
 var jce_manual = flag.Bool("jce_manual", false, "jce_manual")
@@ -138,7 +138,7 @@ func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
 		pvmBackend := pvm.BackendInterpreter
-		if i%2 == 1 {
+		if i%2 == 1 && useRecompiler {
 			pvmBackend = pvm.BackendRecompiler
 		}
 		node, err := newNode(uint16(i), validatorSecrets[i], chainSpec, pvmBackend, epoch0Timestamp, peers, peerList, nodePaths[i], int(basePort)+i, jceMode)

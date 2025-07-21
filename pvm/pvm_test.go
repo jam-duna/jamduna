@@ -339,28 +339,28 @@ func TestSnapShots(t *testing.T) {
 }
 
 /*
-	{
-	    "Gas": 998998,
-	    "OpStr": "NEG_ADD_IMM_64",
-	    "Opcode": 154,
-	    "Operands": "u4EA",
-	    "PvmPc": 155,
-	    "Registers": [
-	        200,
-	        4278058000,
-	        87,
-	        1,
-	        6,
-	        4278058280,
-	        1,
-	        126,
-	        4278058376,
-	        4278058125,
-	        51,
-	        {"changed":[2, 0]},
-	        128
-	    ]
-	    }
+{
+            "Gas": {"changed":[2499969925, 2499969957]},
+            "OpStr": "LOAD_IND_U64",
+            "Opcode": 130,
+            "Operands": "GFA=",
+            "PvmPc": 189060,
+            "Registers": [
+                3012,
+                4278057904,
+                1114112,
+                77404,
+                8,
+                4278058864,
+                271020,
+                {"changed":[2499969915, 2499969947]},
+                2499970604,
+                0,
+                20,
+                0,
+                20
+            ]
+        }
 */
 func TestLogEntry(t *testing.T) {
 	PvmLogging = true
@@ -384,8 +384,10 @@ func TestLogEntry(t *testing.T) {
 	// metadata, c := types.SplitMetadataAndCode(tc.Code)
 	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendRecompilerSandbox)
 
-	jsonStr := `{"Opcode":154,"OpStr":"NEG_ADD_IMM_64","Operands":"u4EA","PvmPc":155,"Registers":[200,4278058000,87,1,6,4278058280,1,126,4278058376,4278058125,51,127,128],"Gas":998998}`
-
+/*
+{"Opcode":40,"OpStr":"JUMP","Operands":"kvE=","PvmPc":192753,"Registers":[3012,4278057904,1114112,77404,8,4278058864,271020,271040,20,0,20,0,20],"Gas":2499969957}
+{"Opcode":130,"OpStr":"LOAD_IND_U64","Operands":"GFA=","PvmPc":189060,"Registers":[3012,4278057904,1114112,77404,8,4278058864,271020,2499969915,2499970604,0,20,0,20],"Gas":2499969925}
+*/
 	var entry VMLog
 	if err := json.Unmarshal([]byte(jsonStr), &entry); err != nil {
 		t.Fatalf("Failed to unmarshal JSON: %v", err)

@@ -571,10 +571,6 @@ func (vm *VM) step(stepn int) error {
 
 		//fmt.Printf("instruction=%d pc=%d g=%d Registers=%s\n", opcode, vm.pc, vm.Gas-1, prettyJSON)
 		//fmt.Printf("%s %d %d Registers:%s\n", opcode_str(opcode), stepn-1, vm.pc, prettyJSON)
-		if stepn == maxPVMSteps {
-			vm.saveLogs()
-			panic(111)
-		}
 	}
 	if VMsCompare {
 		// preexecution logging
@@ -734,6 +730,7 @@ func (vm *VM) HandleOneImm(opcode byte, operands []byte) {
 		lx := uint32(types.DecodeE_l(operands))
 		vm.hostCall = true
 		vm.host_func_id = int(lx)
+		fmt.Printf(" ECALLI HOSTFUNCID = %d\n", vm.host_func_id)
 		vm.ResultCode = types.RESULT_HOST
 		vm.HostResultCode = types.RESULT_HOST
 		vm.pc += 1 + uint64(len(operands))
@@ -1685,10 +1682,9 @@ type VMLog struct {
 }
 
 var VMsCompare = true
-var maxPVMSteps = 8_500_000_000 // 1 export/Push frame at 8.49B in TestDoomNoSandbox
 
-var hiResGasRangeStart = int64(9999992000000000)
-var hiResGasRangeEnd = int64(9999992996609668)
+var hiResGasRangeStart = int64(1)
+var hiResGasRangeEnd = int64(99999999999999999)
 var BBSampleRate = 20_000_000
 var RecordLogSampleRate = 1
 var endBasicBlock = 2_000_000_000
@@ -1815,11 +1811,6 @@ func (vm *VM) LogCurrentState(opcode byte, operands []byte, currentPC uint64, ga
 
 		}
 	} else {
-		//fmt.Printf("vmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), vm.Ram.ReadRegisters())
-	}
-	if vm.vmBasicBlock > endBasicBlock {
-		fmt.Printf("Reached endBasicBlock %d, stopping VM\n", endBasicBlock)
-		os.Exit(0)
 	}
 	if recordLog {
 		log := VMLog{
@@ -1829,7 +1820,9 @@ func (vm *VM) LogCurrentState(opcode byte, operands []byte, currentPC uint64, ga
 			PvmPc:    currentPC,
 			Gas:      gas,
 		}
-
+		if vm.vmBasicBlock%10000 == 0 {
+			fmt.Printf("ivmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), vm.Ram.ReadRegisters())
+		}
 		log.Registers = make([]uint64, len(vm.Ram.ReadRegisters()))
 		for i := 0; i < regSize; i++ {
 			log.Registers[i], _ = vm.Ram.ReadRegister(i)
@@ -1867,7 +1860,6 @@ func (vm *RecompilerSandboxVM) LogCurrentState(opcode byte, operands []byte, cur
 			r12, _ := vm.sandBox.RegRead(uc.X86_REG_R12)
 			failAddress := uint64(0x1900000E0) // this should be X86PC of the current vm.pc
 
-			//fmt.Printf("vmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), post_register)
 			snapshot := vm.TakeSnapShot(fmt.Sprintf("BB%d", vm.vmBasicBlock), uint32(currentPC), post_register, uint64(vm.Gas), failAddress, r12, uint64(vm.vmBasicBlock))
 			// this snapshot + memory of what was just executed, but we want the NEXT PC, not the currentPC.  The Gas is not clear
 			vm.snapshot = snapshot
@@ -1881,10 +1873,6 @@ func (vm *RecompilerSandboxVM) LogCurrentState(opcode byte, operands []byte, cur
 		}
 	}
 
-	if vm.vmBasicBlock > endBasicBlock {
-		fmt.Printf("Reached endBasicBlock %d, stopping VM\n", endBasicBlock)
-		os.Exit(0)
-	}
 	if recordLog {
 		register := make([]uint64, len(vm.Ram.ReadRegisters()))
 		for i := range vm.Ram.ReadRegisters() {
@@ -1905,10 +1893,13 @@ func (vm *RecompilerSandboxVM) LogCurrentState(opcode byte, operands []byte, cur
 		for i := range vm.post_register {
 			vm.post_register[i], _ = vm.sandBox.RegRead(sandBoxRegInfoList[i])
 		}
+		if vm.vmBasicBlock%10000 == 0 {
+			fmt.Printf("rvmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), vm.Ram.ReadRegisters())
+		}
 		vm.Logs = append(vm.Logs, log)
-		// if (len(vm.Logs) > 10 && (gas < hiResGasRangeStart || gas > hiResGasRangeEnd)) || len(vm.Logs) > 1000 {
-		vm.saveLogs()
-		// }
+		if (len(vm.Logs) > 10 && (gas < hiResGasRangeStart || gas > hiResGasRangeEnd)) || len(vm.Logs) > 1000 {
+			vm.saveLogs()
+		}
 	}
 
 }

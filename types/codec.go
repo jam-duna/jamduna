@@ -526,25 +526,21 @@ func DecodeWithRemainder(data []byte, t reflect.Type) (value interface{}, remain
 }
 
 func SaveObject(path string, obj interface{}) error {
-	jsonPath := fmt.Sprintf("%s.json", path)
 	codecPath := fmt.Sprintf("%s.bin", path)
 
 	switch v := obj.(type) {
 	default:
-		jsonEncode, _ := json.MarshalIndent(v, "", "    ")
 		codecEncode, err := Encode(v)
 		if err != nil {
 			return fmt.Errorf("Error encoding object: %v\n", err)
 		}
-		err = os.WriteFile(jsonPath, jsonEncode, 0644)
-		if err != nil {
-			return fmt.Errorf("Error writing json file: %v\n", err)
-		}
+
 		err = os.WriteFile(codecPath, codecEncode, 0644)
 		if err != nil {
 			return fmt.Errorf("Error writing codec file: %v\n", err)
 		}
 	}
+
 	return nil
 }
 

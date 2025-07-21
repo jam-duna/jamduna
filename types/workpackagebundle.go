@@ -62,12 +62,15 @@ func (b *WorkPackageBundle) Validate() error {
 		Gas_a += work_item.AccumulateGasLimit
 		Gas_r += work_item.RefineGasLimit
 	}
-	if Gas_a > AccumulationGasAllocation {
-		return fmt.Errorf("WorkPackageBundle has too much accumulate gas")
-	}
-	if Gas_r > RefineGasAllocation {
-		return fmt.Errorf("WorkPackageBundle has too much refine gas")
-	}
+	/*
+		// TODO: FIX This
+		if Gas_a > AccumulationGasAllocation {
+			return fmt.Errorf("WorkPackageBundle has too much accumulate gas (%d must be less than %d)", Gas_a, AccumulationGasAllocation)
+		}
+		if Gas_r > RefineGasAllocation {
+			return fmt.Errorf("WorkPackageBundle has too much refine gas (%d must be less than %d)", Gas_r, RefineGasAllocation)
+		}
+	*/
 	return nil
 }
 

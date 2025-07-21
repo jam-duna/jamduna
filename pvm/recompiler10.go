@@ -405,7 +405,9 @@ func generateCmovImm(isZero bool) func(inst Instruction) []byte {
 	}
 }
 
-// Implements r32_dst = r32_src rotate_right imm8
+//	result = x_encode(uint64(bits.RotateLeft32(uint32(valueB), -int(imm&31))), 4)
+//
+// Implements: result = sign‑extend32( bits.RotateRight32(uint32(src), imm&31) )
 func generateRotateRight32Imm(inst Instruction) []byte {
 	dstIdx, srcIdx, imm := extractTwoRegsOneImm(inst.Args)
 	dst := regInfoList[dstIdx]
@@ -413,24 +415,55 @@ func generateRotateRight32Imm(inst Instruction) []byte {
 
 	var code []byte
 
-	// 1) MOV r32_dst, r32_src
-	rex1 := byte(0x40)
-	if src.REXBit == 1 {
-		rex1 |= 0x04
-	} // REX.R
-	if dst.REXBit == 1 {
-		rex1 |= 0x01
-	} // REX.B
-	modrm1 := byte(0xC0 | (src.RegBits << 3) | dst.RegBits)
-	code = append(code, rex1, 0x89, modrm1)
+	// ─── Conflict (src==dst) ───
+	if srcIdx == dstIdx {
+		// 1) MOV r32_dst, r32_dst   ; zero‑extend low 32→64
+		code = append(code,
+			// REX.R=dst.REXBit, REX.B=dst.REXBit
+			emitRex(false, dst.REXBit == 1, false, dst.REXBit == 1),
+			0x89, // MOV r/m32, r32
+			byte(0xC0|(dst.RegBits<<3)|dst.RegBits),
+		)
 
-	// 2) ROR r/m32(dst), imm8
-	rex2 := byte(0x40)
-	if dst.REXBit == 1 {
-		rex2 |= 0x01
+		// 2) ROR r/m32(dst), imm8
+		code = append(code,
+			emitRex(false, false, false, dst.REXBit == 1),
+			0xC1,                          // ROR r/m32, imm8
+			byte(0xC0|(1<<3)|dst.RegBits), // /1 = ROR
+			byte(imm&31),
+		)
+
+		// 3) MOVSXD r64_dst, r32_dst  ; sign‑extend low 32→64
+		code = append(code,
+			// REX.W=1, REX.R=dst.REXBit, REX.B=dst.REXBit
+			emitRex(true, dst.REXBit == 1, false, dst.REXBit == 1),
+			0x63, // MOVSXD r64, r/m32
+			byte(0xC0|(dst.RegBits<<3)|dst.RegBits),
+		)
+
+		return code
 	}
-	modrm2 := byte(0xC0 | (1 << 3) | dst.RegBits) // /1 for ROR
-	code = append(code, rex2, 0xC1, modrm2, byte(imm&0xFF))
+
+	// ─── Non‑conflict (src!=dst) ───
+	// 1) MOV r32_dst, r32_src
+	code = append(code,
+		emitRex(false, src.REXBit == 1, false, dst.REXBit == 1),
+		0x89,
+		byte(0xC0|(src.RegBits<<3)|dst.RegBits),
+	)
+	// 2) ROR r/m32(dst), imm8
+	code = append(code,
+		emitRex(false, false, false, dst.REXBit == 1),
+		0xC1,
+		byte(0xC0|(1<<3)|dst.RegBits),
+		byte(imm&31),
+	)
+	// 3) MOVSXD r64_dst, r32_dst
+	code = append(code,
+		emitRex(true, dst.REXBit == 1, false, dst.REXBit == 1),
+		0x63,
+		byte(0xC0|(dst.RegBits<<3)|dst.RegBits),
+	)
 
 	return code
 }

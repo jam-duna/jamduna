@@ -10,6 +10,8 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+const DoomServiceID = uint32(60) // Doom service ID
+
 func TestSnapShot(t *testing.T) {
 
 	PvmLogging = true
@@ -30,7 +32,7 @@ func TestSnapShot(t *testing.T) {
 	}
 
 	hostENV := NewMockHostEnv()
-	serviceAcct := uint32(0) // stub
+	serviceAcct := uint32(DoomServiceID) // stub
 	tc := testCase
 	// metadata, c := types.SplitMetadataAndCode(tc.Code)
 	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendRecompilerSandbox)
@@ -105,7 +107,7 @@ func TestDoomInterpreterFromSnapshot(t *testing.T) {
 	initial_pc := uint64(0)
 	hostENV := NewMockHostEnv()
 	metadata := "doom"
-	pvm := NewVM(0, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata), BackendInterpreter)
+	pvm := NewVM(DoomServiceID, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata), BackendInterpreter)
 	pvm.initLogs()
 
 	if err := pvm.attachFrameServer("0.0.0.0:8080", "./index.html"); err != nil {
@@ -148,7 +150,7 @@ func TestDoomNoSandbox(t *testing.T) {
 	initial_pc := uint64(0)
 	hostENV := NewMockHostEnv()
 	metadata := "doom"
-	pvm := NewVM(0, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata), BackendInterpreter)
+	pvm := NewVM(DoomServiceID, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata), BackendInterpreter)
 	pvm.initLogs()
 
 	if err := pvm.attachFrameServer("0.0.0.0:8080", "./index.html"); err != nil {
@@ -186,7 +188,7 @@ func TestDoomX86(t *testing.T) {
 	initial_pc := uint64(0)
 	hostENV := NewMockHostEnv()
 	metadata := "doom"
-	pvm := NewVM(0, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata), BackendRecompiler)
+	pvm := NewVM(DoomServiceID, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata), BackendRecompiler)
 	pvm.initLogs()
 	rvm, err := NewRecompilerVM(pvm)
 	if err != nil {
@@ -228,7 +230,7 @@ func TestDoomSandBox(t *testing.T) {
 	initial_regs := make([]uint64, 13)
 	initial_pc := uint64(0)
 	metadata := "doom"
-	pvm := NewVM(0, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata), BackendRecompilerSandbox)
+	pvm := NewVM(DoomServiceID, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata), BackendRecompilerSandbox)
 	rvm, err := NewRecompilerSandboxVM(pvm)
 	if err != nil {
 		t.Fatalf("Failed to create RecompilerSandboxVM: %v", err)
@@ -260,7 +262,7 @@ func TestDoomSnapShot(t *testing.T) {
 	initial_regs := make([]uint64, 13)
 	initial_pc := uint64(0)
 	metadata := "doom"
-	pvm := NewVM(0, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata), BackendRecompilerSandbox)
+	pvm := NewVM(DoomServiceID, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata), BackendRecompilerSandbox)
 	rvm, err := NewRecompilerSandboxVM(pvm)
 	a := make([]byte, 0)
 	rvm.Standard_Program_Initialization_SandBox(a)

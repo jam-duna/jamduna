@@ -267,7 +267,7 @@ func EmitCallToEcalliStubSandBox(rvmPtr uintptr, opcode int, addr uint64) []byte
 	// mov esi, opcode
 	stub = append(stub, encodeMovEsiImm32(uint32(opcode))...)
 	// movabs rax, <address of Ecalli>
-	fmt.Printf("EmitCallToEcalliStubSandBox: addr=0x%x\n", addr)
+	//fmt.Printf("EmitCallToEcalliStubSandBox: addr=0x%x\n", addr)
 	stub = append(stub, encodeMovabsRaxImm64(addr)...)
 	// call rax
 	stub = append(stub, encodeCallRax()...)

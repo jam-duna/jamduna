@@ -77,6 +77,7 @@ const (
 	RefineTimeout              = 36 * time.Second
 	RefineAndAccumalateTimeout = 96 * time.Second
 
+	useRecompiler      = false
 	fudgeFactorJCE     = 1
 	DefaultChannelSize = 200
 )
@@ -2538,8 +2539,6 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 	timeSlot := logMsg.Timeslot
 	description := logMsg.Description
 	msgType := getMessageType(obj)
-	if msgType != "unknown" {
-	}
 
 	dataDir := fmt.Sprintf("%s/data", n.dataDir)
 	structDir := fmt.Sprintf("%s/%vs", dataDir, msgType)
@@ -2553,8 +2552,9 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 	}
 
 	if msgType != "unknown" {
+
 		epoch, phase := statedb.ComputeEpochAndPhase(timeSlot, n.epoch0Timestamp)
-		//path := fmt.Sprintf("%s/%v_%03d", structDir, epoch, phase)
+
 		path := fmt.Sprintf("%s/%08d", structDir, timeSlot)
 		if epoch == 0 && phase == 0 {
 			path = fmt.Sprintf("%s/genesis", structDir)
@@ -2562,7 +2562,11 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 		if description != "" {
 			path = fmt.Sprintf("%s/%08d_%s", structDir, timeSlot, description)
 		}
-		types.SaveObject(path, obj)
+
+		err := types.SaveObject(path, obj)
+		if err != nil {
+			panic(err)
+		}
 	}
 	return nil
 }
