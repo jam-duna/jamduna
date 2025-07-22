@@ -64,3 +64,4 @@ pvm/test/*
 node/test/*
 node/interpreter/*
 node/recompiler/*
+node/recompiler_sandbox/*

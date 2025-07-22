@@ -73,8 +73,6 @@ func Ecalli(rvmPtr unsafe.Pointer, opcode int32) {
 	}
 	vm.InvokeHostCall(int(opcode))
 	if opcode == 20 {
-		val, _ := vm.Ram.ReadRegister(9) // 20 is the Sbrk opcode
-		vm.Gas = vm.Gas - int64(val)
 		vm.WriteContextSlot(gasSlotIndex, uint64(vm.Gas), 8)
 	}
 
@@ -227,16 +225,17 @@ func EcalliSandBox(rvmPtr unsafe.Pointer, opcode int32) {
 		val := binary.LittleEndian.Uint64(regMem[i*8 : (i+1)*8])
 		vm.Ram.WriteRegister(i, val)
 	}
+
+	gas, err := vm.ReadContextSlot(gasSlotIndex)
+	if err != nil {
+		log.Error("x86", "EcalliSandBox: failed to read gas from context slot", "error", err)
+		return
+	}
+	vm.Gas = int64(gas)
 	// Invoke the host logic, e.g., gas charging and actual operation
 	vm.InvokeHostCall(int(opcode))
-	gas, _ := vm.ReadContextSlot(gasSlotIndex)
-	vm.Gas = int64(gas)
-	if opcode == 20 {
-		val, _ := vm.Ram.ReadRegister(9)
-		fmt.Printf("value of register 9 in EcalliSandBox: %d\n", val)
-		vm.Gas = vm.Gas - int64(val)
-		vm.WriteContextSlot(gasSlotIndex, uint64(vm.Gas), 8)
-	}
+
+	vm.WriteContextSlot(gasSlotIndex, uint64(vm.Gas), 8)
 }
 
 func (rvm *RecompilerSandboxVM) EcalliCodeSandBox(opcode int) ([]byte, error) {
@@ -385,8 +384,6 @@ func (vm *RecompilerVM) chargeGas(host_fn int) uint64 {
 
 	switch host_fn {
 	case TRANSFER:
-		omega_9, _ := vm.Ram.ReadRegister(9)
-		chargedGas = omega_9 + 10
 		exp = "TRANSFER"
 	case READ:
 		exp = "READ"
@@ -564,6 +561,9 @@ func (vm *RecompilerVM) InvokeHostCall(host_fn int) (bool, error) {
 		return true, nil
 
 	case TRANSFER:
+		gas, _ := vm.Ram.ReadRegister(9)
+		vm.Gas = vm.Gas - int64(gas)
+		fmt.Printf("InvokeHostCall: TRANSFER gas=%d, vm.Gas=%d\n", gas, vm.Gas)
 		vm.hostTransfer()
 		return true, nil
 

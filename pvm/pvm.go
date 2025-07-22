@@ -439,22 +439,16 @@ func (vm *VM) Execute(entryPoint int, is_child bool, snapshot *EmulatorSnapShot)
 	stepn := 1
 	for !vm.terminated {
 		// charge gas for all the next steps until hitting a basic block instruction
-		gasBasicBlock := vm.getBasicBlockGasCost(vm.pc)
+		gasBasicBlock, step := vm.getBasicBlockGasCost(vm.pc)
 		vm.Gas -= int64(gasBasicBlock)
 		// now, run the block
-		for i := uint64(0); i < gasBasicBlock && !vm.terminated; i++ {
+		for i := 0; i < step && !vm.terminated; i++ {
 			if err := vm.step(stepn); err != nil {
 				return err
 			}
 
 			if vm.hostCall && is_child {
 				return nil
-			}
-			// host call invocation
-			if vm.hostCall {
-				vm.InvokeHostCall(vm.host_func_id)
-				vm.hostCall = false
-				vm.terminated = false
 			}
 			stepn++
 		}
@@ -479,20 +473,29 @@ func (vm *VM) GetIdentifier() string {
 	return fmt.Sprintf("%d_%s_%s_%s", vm.Service_index, vm.Mode, vm.Backend, vm.Identifier)
 }
 
-func (vm *VM) getBasicBlockGasCost(pc uint64) uint64 {
+func (vm *VM) getBasicBlockGasCost(pc uint64) (uint64, int) {
 	gasCost := uint64(0)
 	i := pc
 	// charge gas for all the next steps until hitting a basic block instruction
+	step := 0
 	for i < uint64(len(vm.code)) {
 		opcode := vm.code[pc]
 		len_operands := vm.skip(pc)
+		if opcode == ECALLI {
+			operands := vm.code[pc+1 : pc+1+len_operands]
+			lx := uint32(types.DecodeE_l(operands))
+			host_fn := int(lx)
+			gasCost += uint64(vm.chargeGas(host_fn))
+		}
 		pc += 1 + len_operands
+		step++
 		gasCost += 1
 		if IsBasicBlockInstruction(opcode) {
-			return gasCost
+			// step is the number of instructions executed in this basic block
+			return gasCost, step
 		}
 	}
-	return gasCost
+	return gasCost, step
 }
 
 // step performs a single step in the PVM
@@ -512,6 +515,12 @@ func (vm *VM) step(stepn int) error {
 		vm.HandleNoArgs(opcode)
 	case opcode == ECALLI: // A.5.2 One immediate
 		vm.HandleOneImm(opcode, operands)
+		// host call invocation
+		if vm.hostCall {
+			vm.InvokeHostCall(vm.host_func_id)
+			vm.hostCall = false
+			vm.terminated = false
+		}
 	case opcode == LOAD_IMM_64: // A.5.3 One Register and One Extended Width Immediate
 		vm.HandleOneRegOneEWImm(opcode, operands)
 		if !vm.terminated {

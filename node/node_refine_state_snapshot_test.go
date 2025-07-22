@@ -86,7 +86,7 @@ func TestCompareLogs(t *testing.T) {
 		}
 
 		// compare
-		if !reflect.DeepEqual(orig.OpStr, recp.OpStr) || !reflect.DeepEqual(orig.Operands, recp.Operands) || !reflect.DeepEqual(orig.Registers, recp.Registers) { // || !reflect.DeepEqual(orig.Gas, recp.Gas) {
+		if !reflect.DeepEqual(orig.OpStr, recp.OpStr) || !reflect.DeepEqual(orig.Operands, recp.Operands) || !reflect.DeepEqual(orig.Registers, recp.Registers) || !reflect.DeepEqual(orig.Gas, recp.Gas) {
 			fmt.Printf("Difference at index %d:\nOriginal: %+v\nRecompiler: %+v\n", i, orig, recp)
 			if diff := CompareJSON(orig, recp); diff != "" {
 				fmt.Println("Differences:", diff)
@@ -140,9 +140,9 @@ func ReadBundleSnapshot(filename string) (stf *types.WorkPackageBundleSnapshot, 
 }
 
 func TestRefineStateTransitions(t *testing.T) {
-     pvm.PvmLogging = true
-        pvm.PvmTrace = true
-	
+	pvm.PvmLogging = true
+	pvm.PvmTrace = true
+
 	filename_stf := "test/00000022.bin"
 	filename_bundle := "test/00000022_0x30eb09e23761cd42c7c13ae97dc733dc04dcbd0ea38bc8db229831cb001ef1e2_1_3_guarantor.bin"
 

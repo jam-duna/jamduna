@@ -168,15 +168,13 @@ type Refine_parameters struct {
 	C_t   uint32
 }
 
-func (vm *VM) chargeGas(host_fn int) {
+func (vm *VM) chargeGas(host_fn int) int64 {
 	beforeGas := vm.Gas
 	chargedGas := uint64(10)
 	exp := fmt.Sprintf("HOSTFUNC %d", host_fn)
 
 	switch host_fn {
 	case TRANSFER:
-		omega_9, _ := vm.Ram.ReadRegister(9)
-		chargedGas = omega_9 + 10
 		exp = "TRANSFER"
 	case READ:
 		exp = "READ"
@@ -235,8 +233,8 @@ func (vm *VM) chargeGas(host_fn int) {
 		chargedGas = 0
 	}
 
-	vm.Gas = beforeGas - int64(chargedGas)
 	log.Trace(vm.logging, exp, "reg", vm.Ram.ReadRegisters(), "gasCharged", chargedGas, "beforeGas", beforeGas, "afterGas", vm.Gas)
+	return int64(chargedGas)
 }
 
 // InvokeHostCall handles host calls
@@ -247,7 +245,6 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 		vm.ResultCode = types.RESULT_OOG
 		return true, fmt.Errorf("out of gas")
 	}
-	vm.chargeGas(host_fn)
 
 	switch host_fn {
 	case GAS:
@@ -295,6 +292,8 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 		return true, nil
 
 	case TRANSFER:
+		gas, _ := vm.Ram.ReadRegister(9)
+		vm.Gas = vm.Gas - int64(gas)
 		vm.hostTransfer()
 		return true, nil
 

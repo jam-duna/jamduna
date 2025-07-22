@@ -422,28 +422,26 @@ func (vm *RecompilerSandboxVM) translateBasicBlock(startPC uint64) *BasicBlock {
 	var code []byte
 	for i, inst := range block.Instructions {
 		pvm_opcode := inst.Opcode
+		codeLen := len(code)
+		if i == 0 {
+			gasMemAddr := uint64(vm.regDumpAddr + uintptr(len(regInfoList)*8))
+			code = append(code, generateGasCheck(gasMemAddr, uint32(block.GasUsage))...)
+		}
 		if pvm_opcode == ECALLI {
 			// 1. Dump registers to memory.
 			// 2. Set up C ABI registers (rdi, esi).
 			opcode := uint32(types.DecodeE_l(inst.Args))
 			Ecallcode := append(vm.DumpRegisterToMemory(true), EmitCallToEcalliStubSandBox(uintptr(unsafe.Pointer(vm)), int(opcode), uint64(vm.ecallAddr))...)
 			Ecallcode = append(Ecallcode, vm.RestoreRegisterInX86()...)
-			codeLen := len(code)
 			code = append(code, Ecallcode...)
 			block.pvmPC_TO_x86Index[uint32(inst.Pc)] = codeLen
 		} else if pvm_opcode == SBRK {
 			dstIdx, srcIdx := extractTwoRegisters(inst.Args)
 			Sbrkcode := append(vm.DumpRegisterToMemory(true), EmitCallToSbrkStubSandBox(uintptr(unsafe.Pointer(vm)), uint32(srcIdx), uint32(dstIdx), uint64(vm.ecallAddr+vm.sbrkOffset))...)
 			// Sbrkcode = append(Sbrkcode, vm.RestoreRegisterInX86()...)
-			codeLen := len(code)
 			code = append(code, Sbrkcode...)
 			block.pvmPC_TO_x86Index[uint32(inst.Pc)] = codeLen
 		} else if translateFunc, ok := pvmByteCodeToX86Code[pvm_opcode]; ok {
-			codeLen := len(code)
-			if i == 0 {
-				gasMemAddr := uint64(vm.regDumpAddr + uintptr(len(regInfoList)*8))
-				code = append(code, generateGasCheck(gasMemAddr, uint32(block.GasUsage))...)
-			}
 			if i == len(block.Instructions)-1 {
 				block.LastInstructionOffset = len(code)
 			}
