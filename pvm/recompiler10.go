@@ -10,41 +10,157 @@ func generateMax() func(inst Instruction) []byte {
 		a := regInfoList[aIdx]
 		b := regInfoList[bIdx]
 		dst := regInfoList[dstIdx]
+		// RAX is regInfoList[0]
+		rax := regInfoList[0]
+
+		// If dst==a (and a!=b) then we'll clobber `a` when we MOV b→dst,
+		// so we need to stash it in RAX first.
+		useTmp := dstIdx == aIdx && aIdx != bIdx
 
 		var code []byte
 
-		// 1) MOV dst, B
-		rex := byte(0x48)
-		if b.REXBit == 1 {
-			rex |= 0x04
-		} // REX.R = B
-		if dst.REXBit == 1 {
-			rex |= 0x01
-		} // REX.B = dst
-		modrm := byte(0xC0 | (b.RegBits << 3) | dst.RegBits)
-		code = append(code, rex, 0x89, modrm)
+		// 1) CMP a, b  — signed compare original a vs b
+		{
+			rex := byte(0x48)
+			if b.REXBit == 1 {
+				rex |= 0x04
+			} // REX.R = b
+			if a.REXBit == 1 {
+				rex |= 0x01
+			} // REX.B = a
+			modrm := byte(0xC0 | (b.RegBits << 3) | a.RegBits)
+			code = append(code, rex, 0x39, modrm) // 39 /r = CMP r/m64, r64
+		}
 
-		// 2) CMP A, B  → CMP r/m=A, r=B  (signed flags from A-B)
-		rex = byte(0x48)
-		if b.REXBit == 1 {
-			rex |= 0x04
-		} // REX.R = B
-		if a.REXBit == 1 {
-			rex |= 0x01
-		} // REX.B = A
-		modrm = byte(0xC0 | (b.RegBits << 3) | a.RegBits)
-		code = append(code, rex, 0x39, modrm)
+		// 2) If needed, save original a → RAX
+		if useTmp {
+			code = append(code, 0x50) // PUSH RAX
+			// MOV RAX, a
+			rex := byte(0x48)
+			if a.REXBit == 1 {
+				rex |= 0x01
+			} // REX.B = a
+			// REX.R remains 0 because dest=RAX has REXBit=0
+			modrm := byte(0xC0 | (rax.RegBits << 3) | a.RegBits)
+			code = append(code, rex, 0x8B, modrm) // 8B /r = MOV r64, r/m64
+		}
 
-		// 3) CMOVGE dst, A  (0F 4D /r) — if A >= B signed, move A
-		rex = byte(0x48)
-		if a.REXBit == 1 {
-			rex |= 0x04
-		} // REX.R = A
-		if dst.REXBit == 1 {
-			rex |= 0x01
-		} // REX.B = dst
-		modrm = byte(0xC0 | (a.RegBits << 3) | dst.RegBits)
-		code = append(code, rex, 0x0F, 0x4D, modrm)
+		// 3) MOV dst, b  — skip if dst == b
+		if dstIdx != bIdx {
+			rex := byte(0x48)
+			if b.REXBit == 1 {
+				rex |= 0x04
+			} // REX.R = b
+			if dst.REXBit == 1 {
+				rex |= 0x01
+			} // REX.B = dst
+			modrm := byte(0xC0 | (b.RegBits << 3) | dst.RegBits)
+			code = append(code, rex, 0x89, modrm) // 89 /r = MOV r/m64, r64
+		}
+
+		// 4) CMOVGE dst, src
+		{
+			src := a
+			if useTmp {
+				src = rax
+			}
+			rex := byte(0x48)
+			if dst.REXBit == 1 {
+				rex |= 0x04
+			} // REX.R = dst
+			if src.REXBit == 1 {
+				rex |= 0x01
+			} // REX.B = src
+			modrm := byte(0xC0 | (dst.RegBits << 3) | src.RegBits)
+			code = append(code, rex, 0x0F, 0x4D, modrm) // 0F 4D /r = CMOVGE r64, r/m64
+		}
+
+		// 5) Restore RAX if we pushed it
+		if useTmp {
+			code = append(code, 0x58) // POP RAX
+		}
+
+		return code
+	}
+}
+
+func generateMax2() func(inst Instruction) []byte {
+	return func(inst Instruction) []byte {
+		aIdx, bIdx, dstIdx := extractThreeRegs(inst.Args)
+		a := regInfoList[aIdx]
+		b := regInfoList[bIdx]
+		dst := regInfoList[dstIdx]
+		// RAX is regInfoList[0]
+		rax := regInfoList[0]
+
+		var code []byte
+
+		// If dst==a (and a!=b) we'll overwrite 'a' when MOV b→dst, so save 'a' in RAX.
+		useTmp := dstIdx == aIdx && aIdx != bIdx
+
+		// 0) if needed, PUSH RAX and MOV RAX←a
+		if useTmp {
+			// push rax
+			code = append(code, 0x50)
+			// mov rax, a
+			//    opcode: 0x8B /r   ; MOV r64, r/m64
+			rex := byte(0x48)
+			if a.REXBit == 1 {
+				// source is 'a' in rm field → REX.B
+				rex |= 0x01
+			}
+			// dest=RAX (reg field) → REX.R = rax.REXBit (always 0)
+			modrm := byte(0xC0 | (rax.RegBits << 3) | a.RegBits)
+			code = append(code, rex, 0x8B, modrm)
+		}
+
+		// 1) MOV dst, b   (skip when dst==b)
+		if dstIdx != bIdx {
+			rex := byte(0x48)
+			if b.REXBit == 1 {
+				rex |= 0x04 // REX.R = b
+			}
+			if dst.REXBit == 1 {
+				rex |= 0x01 // REX.B = dst
+			}
+			modrm := byte(0xC0 | (b.RegBits << 3) | dst.RegBits)
+			code = append(code, rex, 0x89, modrm)
+		}
+
+		// 2) CMP a, b   ; signed compare A vs B
+		{
+			rex := byte(0x48)
+			if b.REXBit == 1 {
+				rex |= 0x04 // REX.R = b (reg field)
+			}
+			if a.REXBit == 1 {
+				rex |= 0x01 // REX.B = a (rm field)
+			}
+			modrm := byte(0xC0 | (b.RegBits << 3) | a.RegBits)
+			code = append(code, rex, 0x39, modrm)
+		}
+
+		// 3) CMOVGE dst, src   (if A>=B signed, move A—or saved-A in RAX—into dst)
+		{
+			src := a
+			if useTmp {
+				src = rax
+			}
+			rex := byte(0x48)
+			if dst.REXBit == 1 {
+				rex |= 0x04 // REX.R = dst
+			}
+			if src.REXBit == 1 {
+				rex |= 0x01 // REX.B = src
+			}
+			modrm := byte(0xC0 | (dst.RegBits << 3) | src.RegBits)
+			code = append(code, rex, 0x0F, 0x4D, modrm)
+		}
+
+		// 4) if we pushed RAX, restore it
+		if useTmp {
+			code = append(code, 0x58) // pop rax
+		}
 
 		return code
 	}
@@ -56,41 +172,75 @@ func generateMin() func(inst Instruction) []byte {
 		a := regInfoList[aIdx]
 		b := regInfoList[bIdx]
 		dst := regInfoList[dstIdx]
+		// RAX is regInfoList[0]
+		rax := regInfoList[0]
+
+		// If dst==a (and a!=b) then MOV dst←b would clobber a,
+		// so we need to stash a in RAX.
+		useTmp := dstIdx == aIdx && aIdx != bIdx
 
 		var code []byte
 
-		// 1) MOV dst, B
-		rex := byte(0x48)
-		if b.REXBit == 1 {
-			rex |= 0x04
-		} // REX.R = B
-		if dst.REXBit == 1 {
-			rex |= 0x01
-		} // REX.B = dst
-		modrm := byte(0xC0 | (b.RegBits << 3) | dst.RegBits)
-		code = append(code, rex, 0x89, modrm)
+		// 1) CMP a, b  — signed compare original a vs b
+		{
+			rex := byte(0x48)
+			if b.REXBit == 1 {
+				rex |= 0x04
+			} // REX.R = b
+			if a.REXBit == 1 {
+				rex |= 0x01
+			} // REX.B = a
+			modrm := byte(0xC0 | (b.RegBits << 3) | a.RegBits)
+			code = append(code, rex, 0x39, modrm) // 39 /r = CMP r/m64, r64
+		}
 
-		// 2) CMP A, B  → CMP r/m=A, r=B  (signed flags from A-B)
-		rex = byte(0x48)
-		if b.REXBit == 1 {
-			rex |= 0x04
-		} // REX.R = B
-		if a.REXBit == 1 {
-			rex |= 0x01
-		} // REX.B = A
-		modrm = byte(0xC0 | (b.RegBits << 3) | a.RegBits)
-		code = append(code, rex, 0x39, modrm)
+		// 2) If needed, save original a → RAX
+		if useTmp {
+			code = append(code, 0x50) // PUSH RAX
+			// MOV RAX, a
+			rex := byte(0x48)
+			if a.REXBit == 1 {
+				rex |= 0x01
+			} // REX.B = a
+			// REX.R = 0 (RAX)
+			modrm := byte(0xC0 | (rax.RegBits << 3) | a.RegBits)
+			code = append(code, rex, 0x8B, modrm) // 8B /r = MOV r64, r/m64
+		}
 
-		// 3) CMOVL dst, A  (0F 4C /r) — if A < B signed, move A into dst
-		rex = byte(0x48)
-		if a.REXBit == 1 {
-			rex |= 0x04
-		} // REX.R = A
-		if dst.REXBit == 1 {
-			rex |= 0x01
-		} // REX.B = dst
-		modrm = byte(0xC0 | (a.RegBits << 3) | dst.RegBits)
-		code = append(code, rex, 0x0F, 0x4C, modrm)
+		// 3) MOV dst, b  — skip if dst == b
+		if dstIdx != bIdx {
+			rex := byte(0x48)
+			if b.REXBit == 1 {
+				rex |= 0x04
+			} // REX.R = b
+			if dst.REXBit == 1 {
+				rex |= 0x01
+			} // REX.B = dst
+			modrm := byte(0xC0 | (b.RegBits << 3) | dst.RegBits)
+			code = append(code, rex, 0x89, modrm) // 89 /r = MOV r/m64, r64
+		}
+
+		// 4) CMOVLE dst, src  — if A ≤ B signed, move A (or saved-A in RAX) into dst
+		{
+			src := a
+			if useTmp {
+				src = rax
+			}
+			rex := byte(0x48)
+			if dst.REXBit == 1 {
+				rex |= 0x04
+			} // REX.R = dst
+			if src.REXBit == 1 {
+				rex |= 0x01
+			} // REX.B = src
+			modrm := byte(0xC0 | (dst.RegBits << 3) | src.RegBits)
+			code = append(code, rex, 0x0F, 0x4E, modrm) // 0F 4E /r = CMOVLE r64, r/m64
+		}
+
+		// 5) Restore RAX if we pushed it
+		if useTmp {
+			code = append(code, 0x58) // POP RAX
+		}
 
 		return code
 	}
@@ -1000,7 +1150,6 @@ func generateImmShiftOp32(opcode byte, subcode byte, alt bool) func(inst Instruc
 	}
 }
 
-// Implements dst32 = (src32 <cond> imm32) ? 1 : 0
 func generateImmSetCondOp32New(setcc byte) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
 		dstIdx, srcIdx, imm := extractTwoRegsOneImm(inst.Args)
@@ -1010,86 +1159,79 @@ func generateImmSetCondOp32New(setcc byte) func(inst Instruction) []byte {
 
 		var code []byte
 
+		// --- alias case: dst and src are the same register ---
 		if dstIdx == srcIdx {
-			// Alias: dst and src are the same register → use RCX scratch
+			// 1) save RCX
+			code = append(code, 0x51) // PUSH RCX
 
-			// 1) PUSH RCX
-			code = append(code, 0x51)
-
-			// 2) MOV ECX, r32_dst  (save original valueB into ECX)
-			//    opcode: 0x8B /r, REX.W=0
+			// 2) sign‑extend the 32‑bit dst into RCX
 			{
-				rex := byte(0x40)
+				rex := byte(0x48) // REX.W
 				if dstInfo.REXBit == 1 {
-					rex |= 0x01 // REX.B for rm field if dst is r8–r15
+					rex |= 0x01 // REX.B for r8–r15
 				}
-				// reg = 1 (ECX), rm = dst.RegBits
-				modrm := byte(0xC0 | (1 << 3) | dstInfo.RegBits)
+				// opcode 0x8B /r = MOV r64, r/m64
+				modrm := byte(0xC0 | (1 << 3) | dstInfo.RegBits) // reg=1(RCX), rm=dst
 				code = append(code, rex, 0x8B, modrm)
 			}
 
-			// 3) XOR r32_dst, r32_dst  → clear dst
+			// 3) clear the low 32 bits of dst
 			{
 				rex := byte(0x40)
 				if dstInfo.REXBit == 1 {
-					// we need REX.R and REX.B so that both fields can address dst
-					rex |= 0x04 | 0x01
+					rex |= 0x04 | 0x01 // REX.R + REX.B so both fields can address dst
 				}
 				modrm := byte(0xC0 | (dstInfo.RegBits << 3) | dstInfo.RegBits)
-				code = append(code, rex, 0x31, modrm)
+				code = append(code, rex, 0x31, modrm) // XOR r32_dst, r32_dst
 			}
 
-			// 4) CMP ECX, imm32
+			// 4) signed compare RCX vs imm32
 			{
-				rex := byte(0x40)
-				// reg = 7 for CMP, rm = scratch.RegBits (ECX)
-				modrm := byte(0xC0 | (7 << 3) | scratch.RegBits)
+				rex := byte(0x48)                                // REX.W for 64‑bit CMP
+				modrm := byte(0xC0 | (7 << 3) | scratch.RegBits) // reg=7 (CMP), rm=RCX
 				code = append(code, rex, 0x81, modrm)
 				code = append(code, encodeU32(uint32(imm))...)
 			}
 
-			// 5) SETcc r/m8_dst
+			// 5) SETcc into low byte of dst
 			{
 				rex := byte(0x40)
 				if dstInfo.REXBit == 1 {
 					rex |= 0x01
 				}
-				// For SETcc the encoding is: REX, 0F, setcc, ModRM
-				modrm := byte(0xC0 | dstInfo.RegBits)
+				modrm := byte(0xC0 | dstInfo.RegBits) // r/m8 = dst low byte
 				code = append(code, rex, 0x0F, setcc, modrm)
 			}
 
-			// 6) POP RCX
-			code = append(code, 0x59)
-
+			// 6) restore RCX
+			code = append(code, 0x59) // POP RCX
 			return code
 		}
 
-		// Non-alias case: dst != src
+		// --- non‑alias case: dst != src ---
 
-		// 1) XOR r32_dst, r32_dst  → clear dst
+		// 1) clear dst
 		{
 			rex := byte(0x40)
 			if dstInfo.REXBit == 1 {
 				rex |= 0x04 | 0x01
 			}
 			modrm := byte(0xC0 | (dstInfo.RegBits << 3) | dstInfo.RegBits)
-			code = append(code, rex, 0x31, modrm)
+			code = append(code, rex, 0x31, modrm) // XOR r32_dst, r32_dst
 		}
 
-		// 2) CMP r32_src, imm32
+		// 2) signed compare src vs imm
 		{
-			rex := byte(0x40)
+			rex := byte(0x48) // REX.W
 			if srcInfo.REXBit == 1 {
 				rex |= 0x01
 			}
-			// reg = 7 (CMP), rm = srcInfo.RegBits
-			modrm := byte(0xC0 | (7 << 3) | srcInfo.RegBits)
+			modrm := byte(0xC0 | (7 << 3) | srcInfo.RegBits) // reg=7 (CMP), rm=src
 			code = append(code, rex, 0x81, modrm)
 			code = append(code, encodeU32(uint32(imm))...)
 		}
 
-		// 3) SETcc r/m8_dst
+		// 3) SETcc into low byte of dst
 		{
 			rex := byte(0x40)
 			if dstInfo.REXBit == 1 {
@@ -1104,33 +1246,48 @@ func generateImmSetCondOp32New(setcc byte) func(inst Instruction) []byte {
 }
 
 // Implements dst := src * imm (32-bit immediate)
+// 8 * 18446744073709542685 => 3389986608 but should be 18446744072804570928
+//
+//	 generateImmMulOp32: dst=r9 7, src=r10 8, imm=18446744073709542685
+//		fmt.Printf("generateImmMulOp32: dst=%s %d, src=%s %d, imm=%d\n", dst.Name, dstReg, src.Name, srcReg, imm)
+//
+// Implements dst := sign‑extended((src * imm) & 0xFFFFFFFF)
 func generateImmMulOp32(inst Instruction) []byte {
 	dstReg, srcReg, imm := extractTwoRegsOneImm(inst.Args)
 	src := regInfoList[srcReg]
 	dst := regInfoList[dstReg]
 
-	// 1) MOV r32_dst, r32_src
-	rexMov := byte(0x40) // no W, only extension bits
+	// 1) copy src → dst (32‑bit)
+	rexMov := byte(0x40)
 	if src.REXBit == 1 {
-		rexMov |= 0x04 // REX.R for src in ModRM.reg
-	}
+		rexMov |= 0x04
+	} // REX.R
 	if dst.REXBit == 1 {
-		rexMov |= 0x01 // REX.B for dst in ModRM.rm
-	}
+		rexMov |= 0x01
+	} // REX.B
 	modrmMov := byte(0xC0 | (src.RegBits << 3) | dst.RegBits)
-	code := []byte{rexMov, 0x89, modrmMov} // MOV r/m32(dst), r32(src)
+	code := []byte{rexMov, 0x89, modrmMov}
 
-	// 2) IMUL r32_dst, r32_src, imm32
+	// 2) IMUL dst, src, imm32  (yields 32‑bit truncated product in dst)
 	rexMul := byte(0x40)
 	if dst.REXBit == 1 {
-		rexMul |= 0x04 // REX.R for dst in ModRM.reg
-	}
+		rexMul |= 0x04
+	} // REX.R
 	if src.REXBit == 1 {
-		rexMul |= 0x01 // REX.B for src in ModRM.rm
-	}
+		rexMul |= 0x01
+	} // REX.B
 	modrmMul := byte(0xC0 | (dst.RegBits << 3) | src.RegBits)
 	code = append(code, rexMul, 0x69, modrmMul)
-	code = append(code, encodeU32(uint32(imm))...) // imm32 little-endian
+	code = append(code, encodeU32(uint32(imm))...)
+
+	// 3) MOVSXD r64_dst, r32_dst  (sign‑extend low 32 bits back to 64 bits)
+	rexSxd := byte(0x48) // REX.W
+	if dst.REXBit == 1 {
+		rexSxd |= 0x05 // REX.R and REX.B
+	}
+	modrmSxd := byte(0xC0 | (dst.RegBits << 3) | dst.RegBits)
+	code = append(code, rexSxd, 0x63, modrmSxd)
+
 	return code
 }
 
@@ -1172,16 +1329,25 @@ func generateBinaryImm32(inst Instruction) []byte {
 	dstReg, srcReg, imm := extractTwoRegsOneImm(inst.Args)
 	dst := regInfoList[dstReg]
 	src := regInfoList[srcReg]
-
+	//fmt.Printf("generateBinaryImm32: dst=%s %d, src=%s %d, imm=%d\n", dst.Name, dstReg, src.Name, srcReg, imm)
 	var code []byte
-	// SPECIAL CASE
+	// SPECIAL CASE: imm == 0 → dst = sign_extend(src32)
 	if imm == 0 {
-		//  just sign‑extend src → dst MOVSXD r64_dst, r32_src
-		rex := byte(0x48)
+		// 0x63 /r : MOVSXD r64, r/m32
+		// REX.W=1, REX.R = dst.REXBit, REX.B = src.REXBit
+		rex := byte(0x48) // base: 0100 1000
 		if dst.REXBit == 1 {
-			rex |= 0x05
-		}
-		modrm := byte(0xC0 | (dst.RegBits << 3) | src.RegBits)
+			rex |= 0x04
+		} // set REX.R (bit 2) if dst is r8–r15
+		if src.REXBit == 1 {
+			rex |= 0x01
+		} // set REX.B (bit 0) if src is r8–r15
+
+		modrm := byte(0xC0 |
+			(dst.RegBits << 3) | // reg = dst low‑3
+			(src.RegBits), // rm  = src low‑3
+		)
+
 		return []byte{rex, 0x63, modrm}
 	}
 

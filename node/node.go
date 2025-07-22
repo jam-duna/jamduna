@@ -68,7 +68,7 @@ const (
 
 	// GOAL: centralize use of context timeout parameters here, avoid hard
 	TinyTimeout                = 2000 * time.Millisecond
-	MiniTimeout                = 3 * time.Second
+	MiniTimeout                = 300 * time.Second // TEMPORARY == revert back to 3s
 	SmallTimeout               = 6 * time.Second
 	NormalTimeout              = 9 * time.Second
 	MediumTimeout              = 10 * time.Second
@@ -77,7 +77,7 @@ const (
 	RefineTimeout              = 36 * time.Second
 	RefineAndAccumalateTimeout = 96 * time.Second
 
-	useRecompiler      = false
+	useRecompiler      = true
 	fudgeFactorJCE     = 1
 	DefaultChannelSize = 200
 )

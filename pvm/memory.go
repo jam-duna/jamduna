@@ -192,7 +192,7 @@ func (ram *RAM) WriteRegister(index int, value uint64) uint64 {
 		return OOB
 	}
 	if debugRecompiler {
-		fmt.Printf("WriteRegister: index %d, value %x\n", index, value)
+		//fmt.Printf("WriteRegister: index %d, value %x\n", index, value)
 	}
 	ram.register[index] = value
 	return OK

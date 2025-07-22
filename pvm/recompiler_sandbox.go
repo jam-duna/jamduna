@@ -66,7 +66,7 @@ func SetUseEcalli500(enabled bool) {
 	useEcalli500 = enabled
 }
 
-var isSaveLog = false
+var skipSaveLog = false
 
 func SetDebugRecompiler(enabled bool) {
 	debugRecompiler = enabled
@@ -740,7 +740,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 	var lastPc = -1
 	_, err = vm.sandBox.HookAdd(uc.HOOK_CODE, func(mu uc.Unicorn, addr uint64, size uint32) {
 		offset := addr - codeBase
-		instruction, _ := vm.x86Instructions[int(offset)] // should get the op_code here
+		instruction := vm.x86Instructions[int(offset)] // should get the op_code here
 		if pvm_pc, ok := vm.InstMapX86ToPVM[int(offset)]; ok && debugRecompiler {
 			opcode := vm.code[pvm_pc]
 			fmt.Printf("!!! Start PVM PC: %d [%s] reg:%v\n", pvm_pc, opcode_str(opcode), vm.Ram.ReadRegisters())
@@ -1161,7 +1161,7 @@ func (rvm *RecompilerSandboxVM) WriteRegister(index int, value uint64) uint64 {
 		return OOB // Out of bounds
 	}
 	if debugRecompiler {
-		fmt.Printf("WriteRegister index: %d, value: 0x%X\n", index, value)
+		//fmt.Printf("WriteRegister index: %d, value: 0x%X\n", index, value)
 	}
 	value_bytes := make([]byte, 8)
 	binary.LittleEndian.PutUint64(value_bytes, value)

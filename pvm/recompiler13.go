@@ -2,6 +2,7 @@ package pvm
 
 import (
 	"encoding/binary"
+	"fmt"
 )
 
 func generateXnorOp64(inst Instruction) []byte {
@@ -160,228 +161,294 @@ func generateAndInvOp64(inst Instruction) []byte {
 	return code
 }
 
-// Implements REM signed 64-bit: r64_dst = sign_extend(r64_src % r64_src2)
+// rem unsigned 64-bit with B==0 ⇒ result=A
 
-// rem signed 64-bit with overflow case ⇒ result=0
+// generateRemUOp64 emits code for dst = src1 % src2 (unsigned)
+// Uses Method B: conditional spill/restore of RAX/RDX and optimized MOV/XCHG
+func generateRemUOp64(inst Instruction) []byte {
+	srcIdx, src2Idx, dstIdx := extractThreeRegs(inst.Args)
+	src1 := regInfoList[srcIdx]
+	src2 := regInfoList[src2Idx]
+	dst := regInfoList[dstIdx]
+	buf := []byte{}
+
+	// Determine if dst conflicts with RAX/RDX
+	isDstRAX := dstIdx == 0
+	isDstRDX := dstIdx == 2
+
+	// 0) Conditional spill: only push if we need to restore later
+	if !isDstRAX {
+		buf = append(buf, 0x50) // PUSH RAX
+	}
+	if !isDstRDX {
+		buf = append(buf, 0x52) // PUSH RDX
+	}
+
+	// 1) MOV dividend into RAX (if src1 != RAX)
+	if srcIdx != 0 {
+		rex := byte(0x48) // REX.W
+		if src1.REXBit == 1 {
+			rex |= 0x01 // REX.B
+		}
+		buf = append(buf,
+			rex, 0x8B,
+			byte(0xC0|(0<<3)|src1.RegBits),
+		)
+	}
+
+	// 2) TEST divisor != 0
+	rex := byte(0x48)
+	// REX.R� for src2 in reg field, REX.B for rm
+	if src2.REXBit == 1 {
+		rex |= 0x04 | 0x01
+	}
+	buf = append(buf,
+		rex, 0x85,
+		byte(0xC0|(src2.RegBits<<3)|src2.RegBits),
+	)
+
+	// JE zeroDiv placeholder
+	jeOff := len(buf)
+	buf = append(buf, 0x0F, 0x84, 0, 0, 0, 0)
+
+	// 3) Normal path: clear RDX, DIV, move remainder
+	// XOR RDX, RDX
+	rex = 0x48
+	if regInfoList[2].REXBit == 1 {
+		rex |= 0x04 | 0x01 // REX.R+REX.B for RDX
+	}
+	buf = append(buf, rex, 0x31, byte(0xC0|(2<<3)|2))
+	isSrc2RAX := src2Idx == 0
+	isSrc2RDX := src2Idx == 2
+
+	if isSrc2RAX {
+		// If divisor is RAX, use the spilled original RAX from [RSP+8]
+		buf = append(buf,
+			0x48,             // REX.W
+			0xF7, 0xB4, 0x24, // F7 /6 rm=4 (SIB follows)
+			0x08, 0x00, 0x00, 0x00, // disp32 = 8
+		)
+	} else if isSrc2RDX {
+		// If divisor is RDX, use the spilled original RDX from [RSP]
+		buf = append(buf,
+			0x48,       // REX.W
+			0xF7, 0x34, // F7 /6 rm=4 (SIB follows)
+			0x24, // SIB: scale=0,index=RSP,base=RSP
+		)
+	} else {
+		rex = 0x48
+		if src2.REXBit == 1 {
+			rex |= 0x01
+		}
+		buf = append(buf,
+			rex, 0xF7,
+			byte(0xC0|(6<<3)|src2.RegBits),
+		)
+	}
+
+	// Move remainder into dst
+	if isDstRAX {
+		// XCHG RAX, RDX => remainder ends up in RAX
+		buf = append(buf, 0x48, 0x87, 0xD0)
+	} else if !isDstRDX {
+		// MOV dst, RDX
+		rex = 0x48
+		if regInfoList[2].REXBit == 1 {
+			rex |= 0x04 // REX.R
+		}
+		if dst.REXBit == 1 {
+			rex |= 0x01 // REX.B
+		}
+		buf = append(buf,
+			rex, 0x89,
+			byte(0xC0|(2<<3)|dst.RegBits),
+		)
+	}
+
+	// 4) JMP end placeholder
+	jmpOff := len(buf)
+	buf = append(buf, 0xE9, 0, 0, 0, 0)
+
+	// zeroDiv: divisor was zero => dst = dividend (in RAX)
+	zeroOff := len(buf)
+	if !isDstRAX {
+		rex = 0x48
+		if dst.REXBit == 1 {
+			rex |= 0x01
+		}
+		buf = append(buf,
+			rex, 0x89,
+			byte(0xC0|(0<<3)|dst.RegBits),
+		)
+	}
+
+	// end: restore if spilled
+	endOff := len(buf)
+	if !isDstRDX {
+		buf = append(buf, 0x5A) // POP RDX
+	}
+	if !isDstRAX {
+		buf = append(buf, 0x58) // POP RAX
+	}
+
+	// Patch JE and JMP offsets
+	binary.LittleEndian.PutUint32(buf[jeOff+2:], uint32(zeroOff-(jeOff+6)))
+	binary.LittleEndian.PutUint32(buf[jmpOff+1:], uint32(endOff-(jmpOff+5)))
+
+	return buf
+}
+
+// Handles src2==RDX with spill/restore and memory operand special case
 func generateRemSOp64(inst Instruction) []byte {
 	srcIdx, src2Idx, dstIdx := extractThreeRegs(inst.Args)
 	srcInfo := regInfoList[srcIdx]
 	src2Info := regInfoList[src2Idx]
 	dstInfo := regInfoList[dstIdx]
 
-	code := []byte{}
+	isDstRAX := dstIdx == 0
+	isDstRDX := dstIdx == 2
+	isSrc2RDX := src2Idx == 2
 
-	// 0) save RAX, RDX
-	code = append(code, 0x50, 0x52) // push rax; push rdx
+	buf := []byte{}
 
-	// 1) MOV RAX, r64_src
-	rex := byte(0x48) // REX.W
+	// Conditional spill
+	if !isDstRAX {
+		buf = append(buf, 0x50) // PUSH RAX
+	}
+	if !isDstRDX {
+		buf = append(buf, 0x52) // PUSH RDX
+	}
+
+	// MOV RAX, src1
+	rex := byte(0x48)
 	if srcInfo.REXBit == 1 {
 		rex |= 0x01
-	} // REX.B for rm=src
-	modrm := byte(0xC0 | (0 << 3) | srcInfo.RegBits) // reg=0 (RAX), rm=src
-	code = append(code, rex, 0x8B, modrm)
+	}
+	buf = append(buf, rex, 0x8B, byte(0xC0|(0<<3)|srcInfo.RegBits))
 
-	// 2) TEST r64_src2, r64_src2  (to detect divisor=0)
+	// TEST src2, src2 (b==0?)
 	rex = 0x48
 	if src2Info.REXBit == 1 {
 		rex |= 0x04 | 0x01
-	} // REX.R & REX.B, since reg=src2, rm=src2
-	modrm = byte(0xC0 | (src2Info.RegBits << 3) | src2Info.RegBits)
-	code = append(code, rex, 0x85, modrm) // 85 /r = TEST r/m64, r64
+	}
+	buf = append(buf, rex, 0x85, byte(0xC0|(src2Info.RegBits<<3)|src2Info.RegBits))
 
-	// 3) JE zeroDiv
-	jeZeroOff := len(code)
-	code = append(code, 0x0F, 0x84, 0, 0, 0, 0) // placeholder for JE to zeroDiv
+	// JE zeroDiv
+	jeZeroOff := len(buf)
+	buf = append(buf, 0x0F, 0x84, 0, 0, 0, 0)
 
-	// 4) Check overflow: if RAX == MinInt64
-	//    MOV RDX, 0x8000000000000000
-	code = append(code,
-		0x48, 0xBA, // REX.W + MOV RDX, imm64
-		0x00, 0x00, 0x00, 0x00, // low dword = 0
-		0x00, 0x00, 0x00, 0x80, // high dword = 0x80000000
+	// Overflow check a==INT64_MIN
+	// MOV RDX, 0x8000000000000000
+	buf = append(buf,
+		0x48, 0xBA,
+		0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x80,
+		// CMP RAX, RDX
+		0x48, 0x39, byte(0xC0|(2<<3)|0),
 	)
-	//    CMP RAX, RDX
-	code = append(code,
-		0x48, 0x39, // REX.W + CMP r/m64, r64
-		byte(0xC0|(2<<3)), // mod=11, reg=2=RDX, rm=0=RAX
-	)
-	//    JNE checkNegOne
-	jneNeg1Off := len(code)
-	code = append(code, 0x0F, 0x85, 0, 0, 0, 0)
+	// JNE doRem
+	jneOff := len(buf)
+	buf = append(buf, 0x0F, 0x85, 0, 0, 0, 0)
 
-	// 5) Check divisor == -1  (signed overflow pair)
-	//    CMP r64_src2, imm32(-1)
-	rex = 0x48
-	if src2Info.REXBit == 1 {
-		rex |= 0x01
-	} // REX.B for rm=src2
-	modrm = byte(0xC0 | (7 << 3) | src2Info.RegBits) // /7= CMP
-	code = append(code, rex, 0x81, modrm)
-	code = append(code, 0xFF, 0xFF, 0xFF, 0xFF) // imm32 = -1
+	// Overflow check b==-1
+	if isSrc2RDX {
+		// CMP [RSP], imm32(-1)
+		buf = append(buf,
+			0x48,       // REX.W
+			0x81, 0x3C, // 81 /7 r/m64, imm32; mod=00, reg=7, rm=4 => 0x3C
+			0x24,                   // SIB: scale=0,index=RSP,base=RSP
+			0xFF, 0xFF, 0xFF, 0xFF, // imm32 = -1
+		)
+	} else {
+		// CMP RDX, imm32(-1)
+		rex = 0x48
+		if src2Info.REXBit == 1 {
+			rex |= 0x01
+		}
+		modrm := byte(0xC0 | (7 << 3) | src2Info.RegBits)
+		buf = append(buf, rex, 0x81, modrm, 0xFF, 0xFF, 0xFF, 0xFF)
+	}
+	// JE overflowCase
+	jeOvfOff := len(buf)
+	buf = append(buf, 0x0F, 0x84, 0, 0, 0, 0)
 
-	//    JE overflowCase
-	jeOvfOff := len(code)
-	code = append(code, 0x0F, 0x84, 0, 0, 0, 0)
+	// doRem: CQO + IDIV
+	doRemOff := len(buf)
+	buf = append(buf, 0x48, 0x99) // CQO
 
-	// --- normal rem path: do CQO/IDIV ---
+	if isSrc2RDX {
+		// IDIV qword ptr [RSP]
+		buf = append(buf,
+			0x48,       // REX.W
+			0xF7, 0x3C, // F7 /7 rm=4 (SIB)
+			0x24, // SIB: scale=0,index=RSP,base=RSP
+		)
+	} else {
+		rex = 0x48
+		if src2Info.REXBit == 1 {
+			rex |= 0x01
+		}
+		modrm := byte(0xC0 | (7 << 3) | src2Info.RegBits)
+		buf = append(buf, rex, 0xF7, modrm)
+	}
 
-	// label doRem:
-	doRemOff := len(code)
-
-	// a) CQO
-	code = append(code, 0x48, 0x99)
-
-	// b) IDIV r/m64 (src2)
-	rex = 0x48
-	if src2Info.REXBit == 1 {
-		rex |= 0x01
-	} // REX.B
-	modrm = byte(0xC0 | (7 << 3) | src2Info.RegBits) // /7 = IDIV
-	code = append(code, rex, 0xF7, modrm)
-
-	// c) MOVSXD dst, RDX
-	rex = 0x48
-	if dstInfo.REXBit == 1 {
-		rex |= 0x04
-	} // REX.R for reg=dst
-	modrm = byte(0xC0 | (dstInfo.RegBits << 3) | 0x2) // rm=2=RDX
-	code = append(code, rex, 0x63, modrm)
-
-	// 6) JMP end
-	jmpEndOff := len(code)
-	code = append(code, 0xE9, 0, 0, 0, 0)
-
-	// --- zeroDiv label ---
-	zeroDivOff := len(code)
-
-	// MOV dst, RAX  -> copy full 64-bit valueA into dst
-	rex = 0x48
-	if dstInfo.REXBit == 1 {
-		rex |= 0x01
-	} // REX.B for rm=dst
-	modrm = byte(0xC0 | (0 << 3) | dstInfo.RegBits) // reg=0 (RAX), rm=dst
-	code = append(code, rex, 0x89, modrm)
+	// Move remainder to dst
+	if isDstRAX {
+		buf = append(buf, 0x48, 0x87, 0xD0) // XCHG RAX,RDX
+	} else if !isDstRDX {
+		// MOV dst, RDX
+		rex = 0x48
+		if dstInfo.REXBit == 1 {
+			rex |= 0x01
+		}
+		buf = append(buf, rex, 0x89, byte(0xC0|(2<<3)|dstInfo.RegBits))
+	}
 
 	// JMP end
-	code = append(code, 0xE9, 0, 0, 0, 0)
-	jmpZeroEndOff := len(code) - 4
+	jmpEndOff := len(buf)
+	buf = append(buf, 0xE9, 0, 0, 0, 0)
 
-	// --- overflowCase label ---
-	ovfOff := len(code)
-	// XOR dst, dst  -> result = 0
+	// zeroDiv: b==0 ⇒ result=a (in RAX)
+	zeroOff := len(buf)
+	if !isDstRAX {
+		rex = 0x48
+		if dstInfo.REXBit == 1 {
+			rex |= 0x01
+		}
+		buf = append(buf, rex, 0x89, byte(0xC0|(0<<3)|dstInfo.RegBits))
+	}
+	buf = append(buf, 0xE9, 0, 0, 0, 0)
+	jmpZeroEnd := len(buf) - 4
+
+	// overflowCase: result = 0
+	ovfOff := len(buf)
 	rex = 0x48
 	if dstInfo.REXBit == 1 {
-		// need REX.R (for reg) _and_ REX.B (for rm) to target the same high register
-		rex |= 0x05 // 0x04 | 0x01
+		rex |= 0x05
 	}
-	modrm = byte(0xC0 | (dstInfo.RegBits << 3) | dstInfo.RegBits)
-	code = append(code, rex, 0x31, modrm)
+	buf = append(buf, rex, 0x31, byte(0xC0|(dstInfo.RegBits<<3)|dstInfo.RegBits))
+	buf = append(buf, 0xE9, 0, 0, 0, 0)
+	jmpOvfEnd := len(buf) - 4
 
-	// JMP end
-	code = append(code, 0xE9, 0, 0, 0, 0)
-	jmpOvfEndOff := len(code) - 4
+	// end: restore
+	endOff := len(buf)
+	if !isDstRDX {
+		buf = append(buf, 0x5A) // POP RDX
+	}
+	if !isDstRAX {
+		buf = append(buf, 0x58) // POP RAX
+	}
 
-	// --- end label ---
-	endOff := len(code)
-	// restore RDX, RAX
-	code = append(code, 0x5A, 0x58)
+	// patch branch offsets
+	binary.LittleEndian.PutUint32(buf[jeZeroOff+2:], uint32(zeroOff-(jeZeroOff+6)))
+	binary.LittleEndian.PutUint32(buf[jneOff+2:], uint32(doRemOff-(jneOff+6)))
+	binary.LittleEndian.PutUint32(buf[jeOvfOff+2:], uint32(ovfOff-(jeOvfOff+6)))
+	binary.LittleEndian.PutUint32(buf[jmpEndOff+1:], uint32(endOff-(jmpEndOff+5)))
+	binary.LittleEndian.PutUint32(buf[jmpZeroEnd:], uint32(endOff-(jmpZeroEnd+4)))
+	binary.LittleEndian.PutUint32(buf[jmpOvfEnd:], uint32(endOff-(jmpOvfEnd+4)))
 
-	// Patch JE zeroDiv
-	binary.LittleEndian.PutUint32(code[jeZeroOff+2:], uint32(zeroDivOff-(jeZeroOff+6)))
-	// Patch JNE to checkNegOne
-	binary.LittleEndian.PutUint32(code[jneNeg1Off+2:], uint32(doRemOff-(jneNeg1Off+6)))
-	// Patch JE overflowCase
-	binary.LittleEndian.PutUint32(code[jeOvfOff+2:], uint32(ovfOff-(jeOvfOff+6)))
-	// Patch JMP end (normal path)
-	binary.LittleEndian.PutUint32(code[jmpEndOff+1:], uint32(endOff-(jmpEndOff+5)))
-	// Patch JMP zeroDiv→end
-	binary.LittleEndian.PutUint32(code[jmpZeroEndOff:], uint32(endOff-(jmpZeroEndOff+4)))
-	// Patch JMP ovf→end
-	binary.LittleEndian.PutUint32(code[jmpOvfEndOff:], uint32(endOff-(jmpOvfEndOff+4)))
-
-	return code
+	return buf
 }
-
-// rem unsigned 64-bit with B==0 ⇒ result=A
-func generateRemUOp64(inst Instruction) []byte {
-	srcIdx, src2Idx, dstIdx := extractThreeRegs(inst.Args)
-	srcInfo := regInfoList[srcIdx]
-	src2Info := regInfoList[src2Idx]
-	dstInfo := regInfoList[dstIdx]
-
-	code := []byte{}
-
-	// Save RAX, RDX
-	code = append(code, 0x50, 0x52) // push rax; push rdx
-
-	// 1) MOV RAX, r64_src
-	rex := byte(0x48) // REX.W
-	if srcInfo.REXBit == 1 {
-		rex |= 0x01 // REX.B for rm = src
-	}
-	modrm := byte(0xC0 | (0 << 3) | srcInfo.RegBits) // reg=0 (RAX), rm=src
-	code = append(code, rex, 0x8B, modrm)
-
-	// 2) TEST r64_src2, r64_src2  (check divisor==0?)
-	rex = 0x48 // REX.W
-	if src2Info.REXBit == 1 {
-		rex |= 0x05 // REX.R (0x04) + REX.B (0x01)
-	}
-	modrm = byte(0xC0 | (src2Info.RegBits << 3) | src2Info.RegBits)
-	code = append(code, rex, 0x85, modrm) // 85 /r = TEST r/m64, r64
-
-	// 3) JNE doDiv
-	jneOff := len(code)
-	code = append(code, 0x0F, 0x85, 0, 0, 0, 0) // placeholder
-
-	// 4) divisor==0 path: MOV dst, RAX
-	rex = 0x48
-	if dstInfo.REXBit == 1 {
-		rex |= 0x01
-	}
-	modrm = byte(0xC0 | (0 << 3) | dstInfo.RegBits)
-	code = append(code, rex, 0x89, modrm) // 89 /r = MOV r/m64, r64
-
-	// 5) JMP end
-	jmpOff := len(code)
-	code = append(code, 0xE9, 0, 0, 0, 0)
-
-	// label doDiv:
-	doDiv := len(code)
-
-	// a) XOR RDX, RDX (zero-extend dividend)
-	code = append(code, 0x48, 0x31, byte(0xC0|(2<<3)|2)) // 31 /r = XOR r/m64, r64
-
-	// b) DIV r/m64
-	rex = 0x48
-	if src2Info.REXBit == 1 {
-		rex |= 0x01
-	}
-	modrm = byte(0xC0 | (6 << 3) | src2Info.RegBits) // /6 = DIV
-	code = append(code, rex, 0xF7, modrm)
-
-	// c) MOV dst, RDX
-	rex = 0x48
-	if dstInfo.REXBit == 1 {
-		rex |= 0x01
-	}
-	modrm = byte(0xC0 | (2 << 3) | dstInfo.RegBits) // reg=2 RDX
-	code = append(code, rex, 0x89, modrm)
-
-	// label end:
-	end := len(code)
-	// patch JNE→doDiv
-	binary.LittleEndian.PutUint32(code[jneOff+2:], uint32(doDiv-(jneOff+6)))
-	// patch JMP→end
-	binary.LittleEndian.PutUint32(code[jmpOff+1:], uint32(end-(jmpOff+5)))
-
-	// Restore RDX, RAX
-	code = append(code, 0x5A, 0x58) // pop rdx; pop rax
-
-	return code
-}
-
 func generateRemUOp32(inst Instruction) []byte {
 	srcIdx, src2Idx, dstIdx := extractThreeRegs(inst.Args)
 	srcInfo := regInfoList[srcIdx]
@@ -841,43 +908,61 @@ func generateBinaryOp32(opcode byte) func(inst Instruction) []byte {
 		dst := regInfoList[rd]
 
 		var code []byte
+		// fmt.Printf("generateBinaryOp32 (ADD_32/SUB_32): %s (Reg %d) %s (Reg %d) => %s (Reg %d)\n",
+		// 	src1.Name, r1, src2.Name, r2, dst.Name, rd)
 
 		// ─── CASE A: conflict dst==src2 ───
 		if r2 == rd {
-			// 1) swap dst<->src1 in 1 instr
+			// 1) push rax
+			code = append(code, 0x50)
+
+			// 2) mov eax, src2d
+			//    REX.B if src2 is r8–r15
+			code = append(code,
+				emitRex(false, false, false, src2.REXBit == 1),
+				0x8B, // MOV r32, r/m32
+				byte(0xC0|(0<<3)|src2.RegBits),
+			)
+
+			// 3) mov dst32, src1d
 			code = append(code,
 				emitRex(false, src1.REXBit == 1, false, dst.REXBit == 1),
-				0x87, // XCHG r/m32, r32
-				0xC0|(src1.RegBits<<3)|dst.RegBits,
+				0x89, // MOV r/m32, r32
+				byte(0xC0|(src1.RegBits<<3)|dst.RegBits),
 			)
-			// 2) dst32 = dst32 <op> src1d
+
+			// 4) dst32 = dst32 <op> eax
 			code = append(code,
-				emitRex(false, src1.REXBit == 1, false, dst.REXBit == 1),
-				opcode,
-				0xC0|(src1.RegBits<<3)|dst.RegBits,
+				emitRex(false, false, false, dst.REXBit == 1),
+				opcode, // e.g. 0x01=ADD, 0x29=SUB
+				byte(0xC0|(0<<3)|dst.RegBits),
 			)
-			// 3) sign‐extend into 64b
+
+			// 5) sign‑extend into 64 bits
 			code = append(code,
 				emitRex(true, dst.REXBit == 1, false, dst.REXBit == 1),
-				0x63, // MOVSXD r64,r/m32
-				0xC0|(dst.RegBits<<3)|dst.RegBits,
+				0x63, // MOVSXD r64, r/m32
+				byte(0xC0|(dst.RegBits<<3)|dst.RegBits),
 			)
+
+			// 6) pop rax
+			code = append(code, 0x58)
 			return code
 		}
 
 		// ─── CASE B: dst==src1 ───
 		if r1 == rd {
-			// 1) dst32 = dst32 <op> src2d
+			// just do dst32 = dst32 <op> src2d
 			code = append(code,
 				emitRex(false, src2.REXBit == 1, false, dst.REXBit == 1),
 				opcode,
-				0xC0|(src2.RegBits<<3)|dst.RegBits,
+				byte(0xC0|(src2.RegBits<<3)|dst.RegBits),
 			)
-			// 2) sign‐extend
+			// sign‑extend
 			code = append(code,
 				emitRex(true, dst.REXBit == 1, false, dst.REXBit == 1),
 				0x63,
-				0xC0|(dst.RegBits<<3)|dst.RegBits,
+				byte(0xC0|(dst.RegBits<<3)|dst.RegBits),
 			)
 			return code
 		}
@@ -886,20 +971,20 @@ func generateBinaryOp32(opcode byte) func(inst Instruction) []byte {
 		// 1) MOV dst32, src1d
 		code = append(code,
 			emitRex(false, src1.REXBit == 1, false, dst.REXBit == 1),
-			0x89, // MOV r/m32, r32
-			0xC0|(src1.RegBits<<3)|dst.RegBits,
+			0x89,
+			byte(0xC0|(src1.RegBits<<3)|dst.RegBits),
 		)
 		// 2) dst32 = dst32 <op> src2d
 		code = append(code,
 			emitRex(false, src2.REXBit == 1, false, dst.REXBit == 1),
 			opcode,
-			0xC0|(src2.RegBits<<3)|dst.RegBits,
+			byte(0xC0|(src2.RegBits<<3)|dst.RegBits),
 		)
-		// 3) MOVSXD dst64, dst32
+		// 3) sign‐extend
 		code = append(code,
 			emitRex(true, dst.REXBit == 1, false, dst.REXBit == 1),
 			0x63,
-			0xC0|(dst.RegBits<<3)|dst.RegBits,
+			byte(0xC0|(dst.RegBits<<3)|dst.RegBits),
 		)
 		return code
 	}
@@ -961,9 +1046,62 @@ func generateShiftOp64B(opcode byte, regField byte) func(inst Instruction) []byt
 		return code
 	}
 }
+func generateROTL64() func(inst Instruction) []byte {
+	return func(inst Instruction) []byte {
+		// pull out our three regs
+		src1Idx, src2Idx, dstIdx := extractThreeRegs(inst.Args)
+		a := regInfoList[src1Idx] // valueA (to be rotated)
+		b := regInfoList[src2Idx] // valueB (rotate count)
+		dst := regInfoList[dstIdx]
 
-// Implements: r64_dst = int64(r64_src1) >> (r64_src2 & 63),
-// without leaving RCX or src2 trashed.
+		var code []byte
+		// fmt.Printf("generateROTL64:  a: %s (Reg %d), b: %s (Reg %d), dst: %s (Reg %d)\n",
+		// 	a.Name, src1Idx,
+		// 	b.Name, src2Idx,
+		// 	dst.Name, dstIdx)
+		// ─── 1) LOAD COUNT INTO CL ───
+		// If count isn't already in CL (reg 1) and we won't overwrite CL as the dst:
+		if src2Idx != 1 && dstIdx != 1 {
+			// push rcx
+			code = append(code, 0x51)
+
+			// mov rcx, r64_b
+			//   REX.W=1, REX.B=b.REXBit
+			code = append(code,
+				emitRex(true, false, false, b.REXBit == 1),
+				0x8B,                        // MOV r64_reg, r64_rm
+				byte(0xC0|(1<<3)|b.RegBits), // reg=1 (RCX), rm=b (FIXED)
+			)
+		}
+
+		// ─── 2) COPY valueA → dst ───
+		if src1Idx != dstIdx {
+			// MOV r/m64: 0x89 /r
+			code = append(code,
+				emitRex(true, a.REXBit == 1, false, dst.REXBit == 1),
+				0x89,
+				byte(0xC0|(a.RegBits<<3)|dst.RegBits),
+			)
+		}
+
+		// ─── 3) ROL dst, CL ───
+		// Opcode: D3 /0 = ROL r/m64, CL
+		code = append(code,
+			emitRex(true, false, false, dst.REXBit == 1),
+			0xD3,
+			byte(0xC0|(0<<3)|dst.RegBits), // /0 = ROL, rm=dst
+		)
+
+		// ─── 4) RESTORE RCX ───
+		if src2Idx != 1 && dstIdx != 1 {
+			code = append(code, 0x59) // pop rcx
+		}
+
+		return code
+	}
+}
+
+// Implements: r64_dst = int64(r64_src1) >> (r64_src2 & 63)
 func generateShiftOp64(opcode byte, regField byte) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
 		src1Idx, src2Idx, dstIdx := extractThreeRegs(inst.Args)
@@ -972,7 +1110,10 @@ func generateShiftOp64(opcode byte, regField byte) func(inst Instruction) []byte
 		dst := regInfoList[dstIdx]
 
 		var code []byte
-
+		fmt.Printf("generateShiftOp64: src1: Register %d (%s), src2: Register %d (%s), dst: Register %d (%s)\n",
+			src1Idx, src1.Name,
+			src2Idx, src2.Name,
+			dstIdx, dst.Name)
 		// 1) MOV r64_dst, r64_src1
 		rex1 := byte(0x48) // REX.W
 		if src1.REXBit == 1 {
@@ -1003,6 +1144,144 @@ func generateShiftOp64(opcode byte, regField byte) func(inst Instruction) []byte
 
 		// 4) XCHG RCX, r64_src2  (restore original RCX)
 		code = append(code, rexX, 0x87, modrmX)
+
+		return code
+	}
+}
+
+func generateSHLO_L_64() func(inst Instruction) []byte {
+	return func(inst Instruction) []byte {
+		const (
+			opcode   = byte(0xD3) // D3 /4 = SHL r/m64, CL
+			regField = byte(4)    // /4 = SHL
+		)
+
+		src1Idx, src2Idx, dstIdx := extractThreeRegs(inst.Args)
+		src1 := regInfoList[src1Idx]
+		src2 := regInfoList[src2Idx]
+		dst := regInfoList[dstIdx]
+
+		var code []byte
+
+		emitMOV := func(srcReg, dstReg X86Reg) {
+			rex := byte(0x48) // REX.W
+			if srcReg.REXBit == 1 {
+				rex |= 0x04 // REX.R
+			}
+			if dstReg.REXBit == 1 {
+				rex |= 0x01 // REX.B
+			}
+			modrm := byte(0xC0 | (srcReg.RegBits << 3) | dstReg.RegBits)
+			code = append(code, rex, 0x89, modrm)
+		}
+
+		emitSHL := func(target X86Reg) {
+			rex := byte(0x48) // REX.W
+			if target.REXBit == 1 {
+				rex |= 0x01 // REX.B
+			}
+			modrm := byte(0xC0 | (regField << 3) | target.RegBits)
+			code = append(code, rex, opcode, modrm)
+		}
+
+		emitXCHG := func(a, b X86Reg) {
+			rex := byte(0x48) // REX.W
+			if a.REXBit == 1 {
+				rex |= 0x04 // REX.R
+			}
+			if b.REXBit == 1 {
+				rex |= 0x01 // REX.B
+			}
+			modrm := byte(0xC0 | (a.RegBits << 3) | b.RegBits)
+			code = append(code, rex, 0x87, modrm)
+		}
+
+		emitPUSH := func(r X86Reg) {
+			if r.REXBit == 1 {
+				code = append(code, 0x41) // REX for extended reg
+			}
+			code = append(code, 0x50+byte(r.RegBits))
+		}
+
+		emitPOP := func(r X86Reg) {
+			if r.REXBit == 1 {
+				code = append(code, 0x41)
+			}
+			code = append(code, 0x58+byte(r.RegBits))
+		}
+
+		emitMOVByteToCL := func(src X86Reg) {
+			rex := byte(0x40) // minimal REX for byte op
+			if src.REXBit == 1 {
+				rex |= 0x01 // REX.B extends rm field
+			}
+			// 8A /r = MOV r8, r/m8 ; reg=CL(1), rm=src.RegBits
+			modrm := byte(0xC0 | (1 << 3) | src.RegBits)
+			code = append(code, rex, 0x8A, modrm)
+		}
+
+		// Constants for RCX/RAX indices
+		const (
+			raxIdx = 0
+			rcxIdx = 1
+		)
+		rcx := regInfoList[rcxIdx]
+		rax := regInfoList[raxIdx]
+
+		// Case 1: shift==dst
+		if src2Idx == dstIdx {
+			if dstIdx == rcxIdx {
+				// shift==dst==RCX
+				emitPUSH(rax)        // save RAX
+				emitMOV(src2, rax)   // RAX := old shift
+				emitMOV(src1, dst)   // RCX := src
+				emitMOVByteToCL(rax) // CL := low byte of old shift
+				emitSHL(dst)         // SHL RCX, CL
+				emitPOP(rax)         // restore RAX
+			} else {
+				// shift==dst!=RCX
+				emitPUSH(rcx)      // save RCX
+				emitMOV(src2, rcx) // RCX := old shift
+				emitMOV(src1, dst) // dst := src
+				emitSHL(dst)       // SHL dst, CL
+				emitPOP(rcx)       // restore RCX
+			}
+
+			// Case 2: dst==RCX!=shift
+		} else if dstIdx == rcxIdx {
+			if src2Idx == raxIdx {
+				// shift in RAX
+				emitPUSH(rax)
+				emitMOV(src1, rcx)
+				emitMOV(src2, rax)
+				emitXCHG(rax, rcx)
+				emitSHL(rax)
+				emitMOV(rax, rcx)
+				emitPOP(rax)
+			} else {
+				// shift elsewhere
+				emitPUSH(rax)
+				emitMOV(src1, rax)
+				emitMOV(src2, rcx)
+				emitSHL(rax)
+				emitMOV(rax, rcx)
+				emitPOP(rax)
+			}
+
+			// Case 3: dst!=RCX && shift!=dst
+		} else {
+			emitMOV(src1, dst)
+			if src2Idx == rcxIdx {
+				emitSHL(dst)
+			} else if src1Idx == rcxIdx {
+				emitMOV(src2, rcx)
+				emitSHL(dst)
+			} else {
+				emitXCHG(rcx, src2)
+				emitSHL(dst)
+				emitXCHG(rcx, src2)
+			}
+		}
 
 		return code
 	}
@@ -1065,53 +1344,48 @@ func generateMulUpperOp64(mode string) func(inst Instruction) []byte {
 
 		var code []byte
 
-		// Save RAX and RDX
-		code = append(code, 0x50) // push rax
-		code = append(code, 0x52) // push rdx
+		// Save RAX and conditionally RDX
+		code = append(code, 0x50) // PUSH RAX
+		saveRDX := dstIdx != 2
+		if saveRDX {
+			code = append(code, 0x52) // PUSH RDX
+		}
 
 		// Move src1 into RAX
 		rexMov1 := byte(0x48) // REX.W
 		if src1.REXBit == 1 {
-			rexMov1 |= 0x01 // REX.B for src1
+			rexMov1 |= 0x01 // REX.B for src1>7
 		}
 		modrmMov1 := byte(0xC0 | (0 << 3) | src1.RegBits)
-		code = append(code, rexMov1, 0x8B, modrmMov1)
+		code = append(code, rexMov1, 0x8B, modrmMov1) // MOV RAX, src1
 
-		// Clear RDX
-		rexXor := byte(0x48)
-		// no rexR, only rm=RDX bit0
-		if regInfoList[2].REXBit == 1 {
-			rexXor |= 0x01
-		}
-		modrmXor := byte(0xC0 | (2 << 3) | 2)
-		code = append(code, rexXor, 0x31, modrmXor)
-
-		// Multiply RAX by src2
-		extension := byte(0x4)
+		// Multiply RAX by src2 (unsigned MUL / signed IMUL)
+		ext := byte(0x4) // /4 = MUL
 		if mode == "signed" {
-			extension = 0x5
+			ext = 0x5 // /5 = IMUL
 		}
-		rexMul := byte(0x48) // REX.W
+		rexMul := byte(0x48)
 		if src2.REXBit == 1 {
-			rexMul |= 0x01 // REX.B for src2
+			rexMul |= 0x01 // REX.B for src2>7
 		}
-		modrmMul := byte(0xC0 | (extension << 3) | src2.RegBits)
-		code = append(code, rexMul, 0xF7, modrmMul)
+		modrmMul := byte(0xC0 | (ext << 3) | src2.RegBits)
+		code = append(code, rexMul, 0xF7, modrmMul) // MUL/IMUL src2
 
-		// Move upper 64 bits from RDX to dst
-		rexMov2 := byte(0x48) // REX.W
-		if regInfoList[2].REXBit == 1 {
-			rexMov2 |= 0x04 // REX.R for RDX
+		// If dst isn't RDX, move the high 64 bits (in RDX) into dst
+		if dstIdx != 2 {
+			rexMov2 := byte(0x48) // REX.W
+			if dst.REXBit == 1 {
+				rexMov2 |= 0x01 // REX.B for dst>7
+			}
+			modrmMov2 := byte(0xC0 | (2 << 3) | dst.RegBits)
+			code = append(code, rexMov2, 0x89, modrmMov2) // MOV dst, RDX
 		}
-		if dst.REXBit == 1 {
-			rexMov2 |= 0x01 // REX.B for dst
-		}
-		modrmMov2 := byte(0xC0 | (2 << 3) | dst.RegBits)
-		code = append(code, rexMov2, 0x89, modrmMov2)
 
-		// Restore RDX and RAX
-		code = append(code, 0x5A) // pop rdx
-		code = append(code, 0x58) // pop rax
+		// Restore RDX (if we saved it) and RAX
+		if saveRDX {
+			code = append(code, 0x5A) // POP RDX
+		}
+		code = append(code, 0x58) // POP RAX
 
 		return code
 	}
@@ -1465,6 +1739,97 @@ func generateSHLO_R_32() func(inst Instruction) []byte {
 	}
 }
 
+func generateROT_R_32() func(inst Instruction) []byte {
+	return func(inst Instruction) []byte {
+		opcode := byte(0xD3)
+		regField := byte(1)
+		// regA = value, regB = shift, dst = destination
+		regAIdx, regBIdx, dstIdx := extractThreeRegs(inst.Args)
+		srcA := regInfoList[regAIdx]
+		srcB := regInfoList[regBIdx]
+		dst := regInfoList[dstIdx]
+
+		// Formal indices for RAX/RCX in regInfoList
+		const (
+			raxIdx = 0
+			rcxIdx = 1
+		)
+
+		var code []byte
+
+		// ── Special case: shift register == dst ────────────────────
+		if regBIdx == dstIdx {
+			// 1) save RCX
+			code = append(code, 0x51) // PUSH RCX
+
+			// 2) MOV ECX, dst  ; CL = old shift count
+			rex := byte(0x40)
+			if dst.REXBit == 1 {
+				rex |= 0x01
+			} // REX.B
+			mod := byte(0xC0 | (dst.RegBits << 3) | byte(rcxIdx))
+			code = append(code, rex, 0x8B, mod) // 8B /r = MOV r32, r/m32
+
+			// 3) MOV dst, srcA
+			rex = byte(0x40)
+			if srcA.REXBit == 1 {
+				rex |= 0x04
+			} // REX.R
+			if dst.REXBit == 1 {
+				rex |= 0x01
+			} // REX.B
+			mod = byte(0xC0 | (srcA.RegBits << 3) | dst.RegBits)
+			code = append(code, rex, 0x89, mod) // 89 /r = MOV r/m32, r32
+
+			// 4) ROR dst, CL
+			rex = byte(0x40)
+			if dst.REXBit == 1 {
+				rex |= 0x01
+			}
+			mod = byte(0xC0 | (regField << 3) | dst.RegBits)
+			code = append(code, rex, opcode, mod)
+
+			// 5) restore RCX
+			code = append(code, 0x59) // POP RCX
+
+			return code
+		}
+
+		// ── Normal case: dst != shift ─────────────────────────────
+		// 1) MOV dst, srcA
+		rex1 := byte(0x40)
+		if srcA.REXBit == 1 {
+			rex1 |= 0x04
+		}
+		if dst.REXBit == 1 {
+			rex1 |= 0x01
+		}
+		m1 := byte(0xC0 | (srcA.RegBits << 3) | dst.RegBits)
+		code = append(code, rex1, 0x89, m1)
+
+		// 2) XCHG ECX, srcB      ; put shift into CL
+		rexX := byte(0x40)
+		if srcB.REXBit == 1 {
+			rexX |= 0x04
+		}
+		mX := byte(0xC0 | (srcB.RegBits << 3) | byte(rcxIdx))
+		code = append(code, rexX, 0x87, mX)
+
+		// 3) ROR dst, CL
+		rex2 := byte(0x40)
+		if dst.REXBit == 1 {
+			rex2 |= 0x01
+		}
+		m2 := byte(0xC0 | (regField << 3) | dst.RegBits)
+		code = append(code, rex2, opcode, m2)
+
+		// 4) XCHG ECX, srcB      ; restore original CL/source
+		code = append(code, rexX, 0x87, mX)
+
+		return code
+	}
+}
+
 // Implements dst = regA op (regB & 31) without clobbering regB or RCX,
 // and for SAR (regField=7) sign‐extends the 32‐bit result into 64 bits.
 func generateShiftOp32(opcode byte, regField byte) func(inst Instruction) []byte {
@@ -1659,9 +2024,6 @@ func generateDivSOp64(inst Instruction) []byte {
 
 	return code
 }
-
-// DIV_U_64: dst = src1 / src2 (unsigned), but if src2==0 then dst=maxUint64.
-// Preserves RAX/RDX in r12/r13.
 func generateDivUOp64(inst Instruction) []byte {
 	srcIdx1, srcIdx2, dstIdx := extractThreeRegs(inst.Args)
 	src1 := regInfoList[srcIdx1]
@@ -1670,39 +2032,38 @@ func generateDivUOp64(inst Instruction) []byte {
 
 	code := []byte{}
 
-	// -- save RAX → r12, RDX → r13 --
+	// ── spill RAX/RDX on the stack ──
 	code = append(code,
-		0x49, 0x89, 0xC4, // mov r12, rax
-		0x49, 0x89, 0xD5, // mov r13, rdx
+		0x50, // push rax
+		0x52, // push rdx
 	)
 
 	// 1) MOV RAX, src1
 	rex := byte(0x48)
 	if src1.REXBit == 1 {
 		rex |= 0x01
-	} // REX.B for rm=src1
+	} // REX.B for src1
 	code = append(code, rex, 0x8B, byte(0xC0|src1.RegBits))
 
 	// 2) TEST src2, src2
-	rex = 0x48 // REX.W
+	rex = 0x48
 	if src2.REXBit == 1 {
 		rex |= 0x05
 	} // REX.R + REX.B
-	// mod=11, reg=src2, rm=src2
 	code = append(code, rex, 0x85, byte(0xC0|(src2.RegBits<<3)|src2.RegBits))
 
-	// 3) JNE doDiv
-	jneOff := len(code)
-	code = append(code, 0x0F, 0x85, 0, 0, 0, 0) // placeholder
+	// 3) JNE to doDiv
+	jnePos := len(code)
+	code = append(code, 0x0F, 0x85, 0, 0, 0, 0)
 
-	// -- src2 == 0 path → dst = maxUint64 via XOR/NOT --
-	// XOR r64_dst, r64_dst
+	// ── src2 == 0: dst = maxUint64 ──
+	// XOR dst,dst
 	rex = 0x48
 	if dst.REXBit == 1 {
 		rex |= 0x05
-	} // REX.W + REX.R+B
+	} // REX.R + REX.B
 	code = append(code, rex, 0x31, byte(0xC0|(dst.RegBits<<3)|dst.RegBits))
-	// NOT r/m64 dst
+	// NOT dst
 	rex = 0x48
 	if dst.REXBit == 1 {
 		rex |= 0x01
@@ -1710,14 +2071,14 @@ func generateDivUOp64(inst Instruction) []byte {
 	code = append(code, rex, 0xF7, byte(0xC0|(2<<3)|dst.RegBits))
 
 	// JMP end
-	jmpOff := len(code)
+	jmpPos := len(code)
 	code = append(code, 0xE9, 0, 0, 0, 0)
 
-	// -- doDiv: normal unsigned divide --
+	// ── doDiv: normal unsigned divide ──
 	doDivPos := len(code)
-	binary.LittleEndian.PutUint32(code[jneOff+2:], uint32(doDivPos-(jneOff+6)))
+	binary.LittleEndian.PutUint32(code[jnePos+2:], uint32(doDivPos-(jnePos+6)))
 
-	// XOR RDX, RDX
+	// zero‑extend dividend: XOR RDX,RDX
 	code = append(code, 0x48, 0x31, 0xD2)
 
 	// DIV r/m64 = src2  (F7 /6)
@@ -1734,14 +2095,14 @@ func generateDivUOp64(inst Instruction) []byte {
 	}
 	code = append(code, rex, 0x89, byte(0xC0|(0<<3)|dst.RegBits))
 
-	// -- patch JMP end --
+	// patch JMP end
 	endPos := len(code)
-	binary.LittleEndian.PutUint32(code[jmpOff+1:], uint32(endPos-(jmpOff+5)))
+	binary.LittleEndian.PutUint32(code[jmpPos+1:], uint32(endPos-(jmpPos+5)))
 
-	// -- restore RAX/RDX from r12/r13 --
+	// ── restore RDX/RAX from stack ──
 	code = append(code,
-		0x49, 0x8B, 0xC4, // mov rax, r12
-		0x49, 0x8B, 0xD5, // mov rdx, r13
+		0x5A, // pop rdx
+		0x58, // pop rax
 	)
 
 	return code

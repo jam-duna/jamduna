@@ -742,6 +742,7 @@ func (vm *VM) hostTransfer() {
 // Gas Service
 func (vm *VM) hostGas() {
 	vm.Ram.WriteRegister(7, uint64(vm.Gas-10)) // its gas remaining AFTER the host call
+	//vm.Ram.WriteRegister(7, uint64(1234567)) // TEMPORARY
 	vm.HostResultCode = OK
 }
 
@@ -1721,6 +1722,7 @@ func (vm *VM) hostLog() {
 		log.Warn(vm.logging, string(messageBytes))
 	case 2: // 2: User agent displays as important information
 		log.Info(vm.logging, string(messageBytes))
+		fmt.Printf("INFO: %s\n", string(messageBytes)) // For CLI output
 	case 3: // 3: User agent displays as helpful information
 		log.Debug(vm.logging, string(messageBytes))
 	case 4: // 4: User agent displays as pedantic information

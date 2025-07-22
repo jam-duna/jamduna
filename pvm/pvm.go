@@ -739,7 +739,6 @@ func (vm *VM) HandleOneImm(opcode byte, operands []byte) {
 		lx := uint32(types.DecodeE_l(operands))
 		vm.hostCall = true
 		vm.host_func_id = int(lx)
-		fmt.Printf(" ECALLI HOSTFUNCID = %d\n", vm.host_func_id)
 		vm.ResultCode = types.RESULT_HOST
 		vm.HostResultCode = types.RESULT_HOST
 		vm.pc += 1 + uint64(len(operands))
@@ -1696,7 +1695,6 @@ var hiResGasRangeStart = int64(1)
 var hiResGasRangeEnd = int64(99999999999999999)
 var BBSampleRate = 20_000_000
 var RecordLogSampleRate = 1
-var endBasicBlock = 2_000_000_000
 
 type VMLogs []VMLog
 
@@ -1830,7 +1828,7 @@ func (vm *VM) LogCurrentState(opcode byte, operands []byte, currentPC uint64, ga
 			Gas:      gas,
 		}
 		if vm.vmBasicBlock%10000 == 0 {
-			fmt.Printf("ivmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), vm.Ram.ReadRegisters())
+			//			fmt.Printf("ivmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), vm.Ram.ReadRegisters())
 		}
 		log.Registers = make([]uint64, len(vm.Ram.ReadRegisters()))
 		for i := 0; i < regSize; i++ {
@@ -1903,7 +1901,7 @@ func (vm *RecompilerSandboxVM) LogCurrentState(opcode byte, operands []byte, cur
 			vm.post_register[i], _ = vm.sandBox.RegRead(sandBoxRegInfoList[i])
 		}
 		if vm.vmBasicBlock%10000 == 0 {
-			fmt.Printf("rvmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), vm.Ram.ReadRegisters())
+			//		fmt.Printf("rvmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), vm.Ram.ReadRegisters())
 		}
 		vm.Logs = append(vm.Logs, log)
 		if (len(vm.Logs) > 10 && (gas < hiResGasRangeStart || gas > hiResGasRangeEnd)) || len(vm.Logs) > 1000 {

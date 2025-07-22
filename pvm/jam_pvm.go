@@ -156,7 +156,7 @@ func (vm *VM) serviceIDlog() string {
 }
 
 func (vm *VM) initLogs() {
-	if isSaveLog {
+	if skipSaveLog {
 		return
 	}
 
@@ -177,7 +177,7 @@ func (vm *VM) initLogs() {
 
 // write the vm.Log  (appending only)
 func (vm *VM) saveLogs() {
-	if isSaveLog {
+	if skipSaveLog {
 		return
 	}
 	// decide filename

@@ -339,33 +339,46 @@ func TestSnapShots(t *testing.T) {
 }
 
 /*
+in node:
+go test -run=TestCompareLogs
+in pvm:
+
+
+go test -run=TestLogEntry
+
+Differences: Diff detected:
 {
-            "Gas": {"changed":[2499969925, 2499969957]},
-            "OpStr": "LOAD_IND_U64",
-            "Opcode": 130,
-            "Operands": "GFA=",
-            "PvmPc": 189060,
-            "Registers": [
-                3012,
-                4278057904,
-                1114112,
-                77404,
-                8,
-                4278058864,
-                271020,
-                {"changed":[2499969915, 2499969947]},
-                2499970604,
-                0,
-                20,
-                0,
-                20
-            ]
-        }
+    "Gas": 2499072842,
+    "OpStr": "ROT_R_32",
+    "Opcode": 223,
+    "Operands": "eAc=",
+    "PvmPc": 177485,
+    "Registers": [
+        2634,
+        {"changed":[4278057904, 4024417039]},
+        18,
+        4278057670,
+        16,
+        4278058864,
+        215666,
+        {"changed":[5221614, 10443228]},
+        4305410524,
+        4305394171,
+        55374,
+        32,
+        52
+    ]
+}
+
+
+
 */
+
 func TestLogEntry(t *testing.T) {
 	PvmLogging = true
 	PvmTrace = true
-
+	debugRecompiler = true
+	showDisassembly = true
 	// a real pvm test case for it to run
 	name := "inst_store_indirect_u16_with_offset_ok"
 	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
@@ -381,13 +394,19 @@ func TestLogEntry(t *testing.T) {
 	}
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
-	// metadata, c := types.SplitMetadataAndCode(tc.Code)
-	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendRecompilerSandbox)
 
-/*
-{"Opcode":40,"OpStr":"JUMP","Operands":"kvE=","PvmPc":192753,"Registers":[3012,4278057904,1114112,77404,8,4278058864,271020,271040,20,0,20,0,20],"Gas":2499969957}
-{"Opcode":130,"OpStr":"LOAD_IND_U64","Operands":"GFA=","PvmPc":189060,"Registers":[3012,4278057904,1114112,77404,8,4278058864,271020,2499969915,2499970604,0,20,0,20],"Gas":2499969925}
-*/
+	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendRecompilerSandbox)
+	// jsonStr := `{"Opcode":214,"OpStr":"MUL_UPPER_U_U","Operands":"KAc=","PvmPc":76691,"Registers":[1610,4278057832,18084696918600843327,205504,4278058384,13512,257504,205504,115,0,271040,13512,13536],"Gas":2499712216}`
+	// jsonStr := `{"Opcode":135,"OpStr":"MUL_IMM_32","Operands":"hx3d","PvmPc":127250,"Registers":[1184,4278057904,1114112,257336,56,4278058864,48,1616,13433591450591902960,15199007462949731568,13750,0,44],"Gas":2499706249}`
+	// jsonStr := `{"Opcode":137,"OpStr":"SET_LT_S_IMM","Operands":"zA==","PvmPc":84545,"Registers":[251168,4278057832,8,251160,0,9223372036854775808,0,1,0,4611686018427387903,1,251112,4611686018427387903],"Gas":2499614836}`
+	// jsonStr := `{"Opcode":137,"OpStr":"SET_LT_S_IMM","Operands":"dw==","PvmPc":68275,"Registers":[48,4278057792,28,2,1,18446744073709551589,0,18446744073709550659,1,10,261936,150,18446744073709551610],"Gas":2499858122}`
+	// jsonStr := `{"Opcode":214,"OpStr":"MUL_UPPER_U_U","Operands":"mQI=","PvmPc":100900,"Registers":[4999,4278057792,35,5,1,0,5,25,10,5,0,1,10],"Gas":2499358629}`
+	// jsonStr := `{"Opcode":207,"OpStr":"SHLO_L_64","Operands":"ZQY=","PvmPc":198420,"Registers":[4278057744,4278057632,1,9007199254740829,11,2306,18446744073709551604,9007199254740991,18446744073709218722,1153,18446744073709551039,0,11],"Gas":2499357512}`
+	// jsonStr := `{"Opcode":207,"OpStr":"SHLO_L_64","Operands":"hgk=","PvmPc":199236,"Registers":[32,4278058608,14,77404,8,1836412448,8389754676398355295,271004,32,18,271016,271008,77408],"Gas":2499999674}`
+	// jsonStr := `{"Opcode":206,"OpStr":"REM_S_64","Operands":"Jwc=","PvmPc":101815,"Registers":[1180,4278057824,101,0,352,352,5,18446744073709551575,9223372036854775808,18446744073709551583,0,0,5],"Gas":2499304716}`
+	// jsonStr := `{"Opcode":206,"OpStr":"REM_S_64","Operands":"hwI=","PvmPc":40192,"Registers":[2100,4278057904,1114112,221376,221296,4278058864,101,335,543,542,1,271,44],"Gas":2499300876}`
+	jsonStr := `{"Opcode":223,"OpStr":"ROT_R_32","Operands":"eAc=","PvmPc":177485,"Registers":[2634,4278057904,18,4278057670,16,4278058864,215666,1,4305410524,4305394171,55374,32,52],"Gas":2499072842}`
+
 	var entry VMLog
 	if err := json.Unmarshal([]byte(jsonStr), &entry); err != nil {
 		t.Fatalf("Failed to unmarshal JSON: %v", err)

@@ -139,12 +139,14 @@ func ReadBundleSnapshot(filename string) (stf *types.WorkPackageBundleSnapshot, 
 	return stf, nil
 }
 
+// rm recompiler_sandbox/2805406230_refine.json
+// go test -run=TestRefineStateTransitions
 func TestRefineStateTransitions(t *testing.T) {
-	pvm.PvmLogging = true
-	pvm.PvmTrace = true
+	pvm.PvmLogging = false
+	pvm.PvmTrace = false
 
-	filename_stf := "test/00000022.bin"
-	filename_bundle := "test/00000022_0x30eb09e23761cd42c7c13ae97dc733dc04dcbd0ea38bc8db229831cb001ef1e2_1_3_guarantor.bin"
+	filename_stf := "test/00000020.bin"
+	filename_bundle := "test/00000020_0x7179353c50e937bf4a4ec4b566dda07253bc67f66c9e6a5bce8772171f6c0472_1_3_guarantor.bin"
 
 	stf, err := ReadStateTransitions(filename_stf)
 	if err != nil {
@@ -163,7 +165,8 @@ func TestRefineStateTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
-	pvmBackends := []string{pvm.BackendInterpreter, pvm.BackendRecompilerSandbox}
+	pvmBackends := []string{pvm.BackendRecompiler}
+	//pvmBackends := []string{pvm.BackendInterpreter}
 	for _, pvmBackend := range pvmBackends {
 		t.Run(fmt.Sprintf("pvmBackend=%s", pvmBackend), func(t *testing.T) {
 			testRefineStateTransition(pvmBackend, store, bundle_snapshot, stf, t)

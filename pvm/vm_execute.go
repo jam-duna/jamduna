@@ -1,7 +1,6 @@
 package pvm
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"sync"
@@ -281,24 +280,6 @@ func (vm *RecompilerVM) finalizeJumpTargets(J []uint32) {
 			vm.patchJumpIndirectTable(J)
 		}
 	}
-}
-
-func (vm *RecompilerVM) patchJumpIndirect(block *BasicBlock) {
-	codeAddress := make([]byte, 8)
-	binary.LittleEndian.PutUint64(codeAddress, uint64(vm.djumpAddr))
-	//	fmt.Printf("Patching indirect jump with code address 0x%x\n", vm.djumpAddr)
-	patchData := []byte{0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE}
-	for c := block.X86PC; c < block.X86PC+uint64(len(block.X86Code)); c++ {
-
-		if c+8 <= uint64(len(vm.x86Code)) && bytes.Equal(vm.x86Code[c:c+8], patchData) {
-			// base_address is at c+2 .. c+10
-			copy(vm.x86Code[c:c+8], codeAddress[:])
-			// fmt.Printf("PATCHED\n")
-			return
-		}
-
-	}
-	fmt.Printf("NOT PATCHED\n")
 }
 
 func (vm *RecompilerVM) patchJumpConditional(block *BasicBlock, targetTruePC uint64) {
