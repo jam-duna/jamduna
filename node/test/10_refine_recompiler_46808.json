@@ -1,0 +1,2282 @@
+{
+  "ADD_32": {
+    "pvm_op": "ADD_32",
+    "x86_map": {
+      "ADD": {
+        "x86_op": "ADD",
+        "count": 58
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 7
+      },
+      "MOVSXD": {
+        "x86_op": "MOVSXD",
+        "count": 58
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 1
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 1
+      }
+    },
+    "total_x86_insts": 125,
+    "total_pvm_insts": 58,
+    "execution_count": 232,
+    "average_x86_insts": 2.1551724137931036,
+    "weighted_x86_insts": 500.00000000000006
+  },
+  "ADD_64": {
+    "pvm_op": "ADD_64",
+    "x86_map": {
+      "ADD": {
+        "x86_op": "ADD",
+        "count": 2984
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 786
+      }
+    },
+    "total_x86_insts": 3770,
+    "total_pvm_insts": 2984,
+    "execution_count": 81814,
+    "average_x86_insts": 1.2634048257372654,
+    "weighted_x86_insts": 103364.20241286863
+  },
+  "ADD_IMM_32": {
+    "pvm_op": "ADD_IMM_32",
+    "x86_map": {
+      "ADD": {
+        "x86_op": "ADD",
+        "count": 54
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 15
+      },
+      "MOVSXD": {
+        "x86_op": "MOVSXD",
+        "count": 76
+      }
+    },
+    "total_x86_insts": 145,
+    "total_pvm_insts": 76,
+    "execution_count": 8676,
+    "average_x86_insts": 1.9078947368421053,
+    "weighted_x86_insts": 16552.894736842107
+  },
+  "ADD_IMM_64": {
+    "pvm_op": "ADD_IMM_64",
+    "x86_map": {
+      "ADD": {
+        "x86_op": "ADD",
+        "count": 5128
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 2684
+      }
+    },
+    "total_x86_insts": 7812,
+    "total_pvm_insts": 5128,
+    "execution_count": 197043,
+    "average_x86_insts": 1.5234009360374414,
+    "weighted_x86_insts": 300175.4906396256
+  },
+  "AND": {
+    "pvm_op": "AND",
+    "x86_map": {
+      "AND": {
+        "x86_op": "AND",
+        "count": 193
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 27
+      }
+    },
+    "total_x86_insts": 220,
+    "total_pvm_insts": 193,
+    "execution_count": 2042,
+    "average_x86_insts": 1.1398963730569949,
+    "weighted_x86_insts": 2327.6683937823836
+  },
+  "AND_IMM": {
+    "pvm_op": "AND_IMM",
+    "x86_map": {
+      "AND": {
+        "x86_op": "AND",
+        "count": 651
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 331
+      }
+    },
+    "total_x86_insts": 982,
+    "total_pvm_insts": 651,
+    "execution_count": 20544,
+    "average_x86_insts": 1.5084485407066053,
+    "weighted_x86_insts": 30989.566820276497
+  },
+  "AND_INV": {
+    "pvm_op": "AND_INV",
+    "x86_map": {
+      "AND": {
+        "x86_op": "AND",
+        "count": 27
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 54
+      },
+      "NOT": {
+        "x86_op": "NOT",
+        "count": 27
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 27
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 27
+      }
+    },
+    "total_x86_insts": 162,
+    "total_pvm_insts": 27,
+    "execution_count": 870,
+    "average_x86_insts": 6,
+    "weighted_x86_insts": 5220
+  },
+  "BRANCH_EQ": {
+    "pvm_op": "BRANCH_EQ",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 493
+      },
+      "JE": {
+        "x86_op": "JE",
+        "count": 493
+      }
+    },
+    "total_x86_insts": 986,
+    "total_pvm_insts": 493,
+    "execution_count": 17000,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 34000
+  },
+  "BRANCH_EQ_IMM": {
+    "pvm_op": "BRANCH_EQ_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 1170
+      },
+      "JE": {
+        "x86_op": "JE",
+        "count": 1170
+      }
+    },
+    "total_x86_insts": 2340,
+    "total_pvm_insts": 1170,
+    "execution_count": 84996,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 169992
+  },
+  "BRANCH_GE_S": {
+    "pvm_op": "BRANCH_GE_S",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 32
+      },
+      "JGE": {
+        "x86_op": "JGE",
+        "count": 32
+      }
+    },
+    "total_x86_insts": 64,
+    "total_pvm_insts": 32,
+    "execution_count": 330,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 660
+  },
+  "BRANCH_GE_S_IMM": {
+    "pvm_op": "BRANCH_GE_S_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 15
+      },
+      "JGE": {
+        "x86_op": "JGE",
+        "count": 15
+      }
+    },
+    "total_x86_insts": 30,
+    "total_pvm_insts": 15,
+    "execution_count": 70,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 140
+  },
+  "BRANCH_GE_U": {
+    "pvm_op": "BRANCH_GE_U",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 721
+      },
+      "JAE": {
+        "x86_op": "JAE",
+        "count": 721
+      }
+    },
+    "total_x86_insts": 1442,
+    "total_pvm_insts": 721,
+    "execution_count": 37466,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 74932
+  },
+  "BRANCH_GE_U_IMM": {
+    "pvm_op": "BRANCH_GE_U_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 526
+      },
+      "JAE": {
+        "x86_op": "JAE",
+        "count": 526
+      }
+    },
+    "total_x86_insts": 1052,
+    "total_pvm_insts": 526,
+    "execution_count": 1942,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 3884
+  },
+  "BRANCH_GT_S_IMM": {
+    "pvm_op": "BRANCH_GT_S_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 3
+      },
+      "JG": {
+        "x86_op": "JG",
+        "count": 3
+      }
+    },
+    "total_x86_insts": 6,
+    "total_pvm_insts": 3,
+    "execution_count": 240,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 480
+  },
+  "BRANCH_GT_U_IMM": {
+    "pvm_op": "BRANCH_GT_U_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 114
+      },
+      "JA": {
+        "x86_op": "JA",
+        "count": 114
+      }
+    },
+    "total_x86_insts": 228,
+    "total_pvm_insts": 114,
+    "execution_count": 228,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 456
+  },
+  "BRANCH_LE_S_IMM": {
+    "pvm_op": "BRANCH_LE_S_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 8
+      },
+      "JLE": {
+        "x86_op": "JLE",
+        "count": 8
+      }
+    },
+    "total_x86_insts": 16,
+    "total_pvm_insts": 8,
+    "execution_count": 847,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 1694
+  },
+  "BRANCH_LE_U_IMM": {
+    "pvm_op": "BRANCH_LE_U_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 80
+      },
+      "JBE": {
+        "x86_op": "JBE",
+        "count": 80
+      }
+    },
+    "total_x86_insts": 160,
+    "total_pvm_insts": 80,
+    "execution_count": 1697,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 3394
+  },
+  "BRANCH_LT_S": {
+    "pvm_op": "BRANCH_LT_S",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 15
+      },
+      "JL": {
+        "x86_op": "JL",
+        "count": 15
+      }
+    },
+    "total_x86_insts": 30,
+    "total_pvm_insts": 15,
+    "execution_count": 38,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 76
+  },
+  "BRANCH_LT_S_IMM": {
+    "pvm_op": "BRANCH_LT_S_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 17
+      },
+      "JL": {
+        "x86_op": "JL",
+        "count": 17
+      }
+    },
+    "total_x86_insts": 34,
+    "total_pvm_insts": 17,
+    "execution_count": 376,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 752
+  },
+  "BRANCH_LT_U": {
+    "pvm_op": "BRANCH_LT_U",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 669
+      },
+      "JB": {
+        "x86_op": "JB",
+        "count": 669
+      }
+    },
+    "total_x86_insts": 1338,
+    "total_pvm_insts": 669,
+    "execution_count": 42011,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 84022
+  },
+  "BRANCH_LT_U_IMM": {
+    "pvm_op": "BRANCH_LT_U_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 165
+      },
+      "JB": {
+        "x86_op": "JB",
+        "count": 165
+      }
+    },
+    "total_x86_insts": 330,
+    "total_pvm_insts": 165,
+    "execution_count": 5741,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 11482
+  },
+  "BRANCH_NE": {
+    "pvm_op": "BRANCH_NE",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 1495
+      },
+      "JNE": {
+        "x86_op": "JNE",
+        "count": 1495
+      }
+    },
+    "total_x86_insts": 2990,
+    "total_pvm_insts": 1495,
+    "execution_count": 9131,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 18262
+  },
+  "BRANCH_NE_IMM": {
+    "pvm_op": "BRANCH_NE_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 988
+      },
+      "JNE": {
+        "x86_op": "JNE",
+        "count": 988
+      }
+    },
+    "total_x86_insts": 1976,
+    "total_pvm_insts": 988,
+    "execution_count": 52755,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 105510
+  },
+  "CMOV_IZ": {
+    "pvm_op": "CMOV_IZ",
+    "x86_map": {
+      "CMOVE": {
+        "x86_op": "CMOVE",
+        "count": 95
+      },
+      "TEST": {
+        "x86_op": "TEST",
+        "count": 95
+      }
+    },
+    "total_x86_insts": 190,
+    "total_pvm_insts": 95,
+    "execution_count": 3204,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 6408
+  },
+  "CMOV_IZ_IMM": {
+    "pvm_op": "CMOV_IZ_IMM",
+    "x86_map": {
+      "CMOVE": {
+        "x86_op": "CMOVE",
+        "count": 35
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 35
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 35
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 35
+      },
+      "TEST": {
+        "x86_op": "TEST",
+        "count": 35
+      }
+    },
+    "total_x86_insts": 175,
+    "total_pvm_insts": 35,
+    "execution_count": 435,
+    "average_x86_insts": 5,
+    "weighted_x86_insts": 2175
+  },
+  "CMOV_NZ": {
+    "pvm_op": "CMOV_NZ",
+    "x86_map": {
+      "CMOVNE": {
+        "x86_op": "CMOVNE",
+        "count": 132
+      },
+      "TEST": {
+        "x86_op": "TEST",
+        "count": 132
+      }
+    },
+    "total_x86_insts": 264,
+    "total_pvm_insts": 132,
+    "execution_count": 4816,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 9632
+  },
+  "CMOV_NZ_IMM": {
+    "pvm_op": "CMOV_NZ_IMM",
+    "x86_map": {
+      "CMOVNE": {
+        "x86_op": "CMOVNE",
+        "count": 38
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 38
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 38
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 38
+      },
+      "TEST": {
+        "x86_op": "TEST",
+        "count": 38
+      }
+    },
+    "total_x86_insts": 190,
+    "total_pvm_insts": 38,
+    "execution_count": 502,
+    "average_x86_insts": 5,
+    "weighted_x86_insts": 2510
+  },
+  "COUNT_SET_BITS_64": {
+    "pvm_op": "COUNT_SET_BITS_64",
+    "x86_map": {
+      "POPCNT": {
+        "x86_op": "POPCNT",
+        "count": 7
+      }
+    },
+    "total_x86_insts": 7,
+    "total_pvm_insts": 7,
+    "execution_count": 395,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 395
+  },
+  "DIV_S_64": {
+    "pvm_op": "DIV_S_64",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 34
+      },
+      "CQO": {
+        "x86_op": "CQO",
+        "count": 17
+      },
+      "IDIV": {
+        "x86_op": "IDIV",
+        "count": 17
+      },
+      "JMP": {
+        "x86_op": "JMP",
+        "count": 34
+      },
+      "JNE": {
+        "x86_op": "JNE",
+        "count": 51
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 68
+      },
+      "NOT": {
+        "x86_op": "NOT",
+        "count": 17
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 34
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 34
+      },
+      "TEST": {
+        "x86_op": "TEST",
+        "count": 17
+      },
+      "XOR": {
+        "x86_op": "XOR",
+        "count": 17
+      }
+    },
+    "total_x86_insts": 340,
+    "total_pvm_insts": 17,
+    "execution_count": 121,
+    "average_x86_insts": 20,
+    "weighted_x86_insts": 2420
+  },
+  "DIV_U_32": {
+    "pvm_op": "DIV_U_32",
+    "x86_map": {
+      "DIV": {
+        "x86_op": "DIV",
+        "count": 2
+      },
+      "JMP": {
+        "x86_op": "JMP",
+        "count": 2
+      },
+      "JNE": {
+        "x86_op": "JNE",
+        "count": 2
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 4
+      },
+      "NOT": {
+        "x86_op": "NOT",
+        "count": 2
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 4
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 4
+      },
+      "TEST": {
+        "x86_op": "TEST",
+        "count": 2
+      },
+      "XOR": {
+        "x86_op": "XOR",
+        "count": 4
+      }
+    },
+    "total_x86_insts": 26,
+    "total_pvm_insts": 2,
+    "execution_count": 20,
+    "average_x86_insts": 13,
+    "weighted_x86_insts": 260
+  },
+  "DIV_U_64": {
+    "pvm_op": "DIV_U_64",
+    "x86_map": {
+      "DIV": {
+        "x86_op": "DIV",
+        "count": 64
+      },
+      "JMP": {
+        "x86_op": "JMP",
+        "count": 64
+      },
+      "JNE": {
+        "x86_op": "JNE",
+        "count": 64
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 128
+      },
+      "NOT": {
+        "x86_op": "NOT",
+        "count": 64
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 128
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 128
+      },
+      "TEST": {
+        "x86_op": "TEST",
+        "count": 64
+      },
+      "XOR": {
+        "x86_op": "XOR",
+        "count": 128
+      }
+    },
+    "total_x86_insts": 832,
+    "total_pvm_insts": 64,
+    "execution_count": 231,
+    "average_x86_insts": 13,
+    "weighted_x86_insts": 3003
+  },
+  "FALLTHROUGH": {
+    "pvm_op": "FALLTHROUGH",
+    "x86_map": {
+      "NOP": {
+        "x86_op": "NOP",
+        "count": 2866
+      }
+    },
+    "total_x86_insts": 2866,
+    "total_pvm_insts": 2866,
+    "execution_count": 22573,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 22573
+  },
+  "JUMP": {
+    "pvm_op": "JUMP",
+    "x86_map": {
+      "JMP": {
+        "x86_op": "JMP",
+        "count": 2480
+      }
+    },
+    "total_x86_insts": 2480,
+    "total_pvm_insts": 2480,
+    "execution_count": 13245,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 13245
+  },
+  "JUMP_IND": {
+    "pvm_op": "JUMP_IND",
+    "x86_map": {
+      "ADD": {
+        "x86_op": "ADD",
+        "count": 352
+      },
+      "JMP": {
+        "x86_op": "JMP",
+        "count": 352
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 352
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 352
+      }
+    },
+    "total_x86_insts": 1408,
+    "total_pvm_insts": 352,
+    "execution_count": 14762,
+    "average_x86_insts": 4,
+    "weighted_x86_insts": 59048
+  },
+  "LEADING_ZERO_BITS_64": {
+    "pvm_op": "LEADING_ZERO_BITS_64",
+    "x86_map": {
+      "LZCNT": {
+        "x86_op": "LZCNT",
+        "count": 16
+      }
+    },
+    "total_x86_insts": 16,
+    "total_pvm_insts": 16,
+    "execution_count": 68,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 68
+  },
+  "LOAD_IMM": {
+    "pvm_op": "LOAD_IMM",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 5344
+      }
+    },
+    "total_x86_insts": 5344,
+    "total_pvm_insts": 5344,
+    "execution_count": 43017,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 43017
+  },
+  "LOAD_IMM_64": {
+    "pvm_op": "LOAD_IMM_64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 200
+      }
+    },
+    "total_x86_insts": 200,
+    "total_pvm_insts": 200,
+    "execution_count": 359,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 359
+  },
+  "LOAD_IMM_JUMP": {
+    "pvm_op": "LOAD_IMM_JUMP",
+    "x86_map": {
+      "JMP": {
+        "x86_op": "JMP",
+        "count": 988
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 988
+      }
+    },
+    "total_x86_insts": 1976,
+    "total_pvm_insts": 988,
+    "execution_count": 9376,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 18752
+  },
+  "LOAD_IMM_JUMP_IND": {
+    "pvm_op": "LOAD_IMM_JUMP_IND",
+    "x86_map": {
+      "ADD": {
+        "x86_op": "ADD",
+        "count": 111
+      },
+      "AND": {
+        "x86_op": "AND",
+        "count": 111
+      },
+      "JMP": {
+        "x86_op": "JMP",
+        "count": 111
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 222
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 111
+      }
+    },
+    "total_x86_insts": 666,
+    "total_pvm_insts": 111,
+    "execution_count": 3476,
+    "average_x86_insts": 6,
+    "weighted_x86_insts": 20856
+  },
+  "LOAD_IND_I32": {
+    "pvm_op": "LOAD_IND_I32",
+    "x86_map": {
+      "MOVSXD": {
+        "x86_op": "MOVSXD",
+        "count": 37
+      }
+    },
+    "total_x86_insts": 37,
+    "total_pvm_insts": 37,
+    "execution_count": 430,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 430
+  },
+  "LOAD_IND_I8": {
+    "pvm_op": "LOAD_IND_I8",
+    "x86_map": {
+      "MOVSX": {
+        "x86_op": "MOVSX",
+        "count": 50
+      }
+    },
+    "total_x86_insts": 50,
+    "total_pvm_insts": 25,
+    "execution_count": 34,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 68
+  },
+  "LOAD_IND_U32": {
+    "pvm_op": "LOAD_IND_U32",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 13
+      }
+    },
+    "total_x86_insts": 13,
+    "total_pvm_insts": 13,
+    "execution_count": 2684,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 2684
+  },
+  "LOAD_IND_U64": {
+    "pvm_op": "LOAD_IND_U64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 10540
+      }
+    },
+    "total_x86_insts": 10540,
+    "total_pvm_insts": 10540,
+    "execution_count": 173061,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 173061
+  },
+  "LOAD_IND_U8": {
+    "pvm_op": "LOAD_IND_U8",
+    "x86_map": {
+      "MOVZX": {
+        "x86_op": "MOVZX",
+        "count": 417
+      }
+    },
+    "total_x86_insts": 417,
+    "total_pvm_insts": 417,
+    "execution_count": 37459,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 37459
+  },
+  "LOAD_U64": {
+    "pvm_op": "LOAD_U64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 964
+      }
+    },
+    "total_x86_insts": 964,
+    "total_pvm_insts": 964,
+    "execution_count": 2083,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 2083
+  },
+  "MAX": {
+    "pvm_op": "MAX",
+    "x86_map": {
+      "CMOVGE": {
+        "x86_op": "CMOVGE",
+        "count": 63
+      },
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 63
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 53
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 14
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 14
+      }
+    },
+    "total_x86_insts": 207,
+    "total_pvm_insts": 63,
+    "execution_count": 589,
+    "average_x86_insts": 3.2857142857142856,
+    "weighted_x86_insts": 1935.2857142857142
+  },
+  "MAX_U": {
+    "pvm_op": "MAX_U",
+    "x86_map": {
+      "CMOVB": {
+        "x86_op": "CMOVB",
+        "count": 64
+      },
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 64
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 79
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 15
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 15
+      }
+    },
+    "total_x86_insts": 237,
+    "total_pvm_insts": 64,
+    "execution_count": 1548,
+    "average_x86_insts": 3.703125,
+    "weighted_x86_insts": 5732.4375
+  },
+  "MIN": {
+    "pvm_op": "MIN",
+    "x86_map": {
+      "CMOVLE": {
+        "x86_op": "CMOVLE",
+        "count": 26
+      },
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 26
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 22
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 4
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 4
+      }
+    },
+    "total_x86_insts": 82,
+    "total_pvm_insts": 26,
+    "execution_count": 245,
+    "average_x86_insts": 3.1538461538461537,
+    "weighted_x86_insts": 772.6923076923076
+  },
+  "MIN_U": {
+    "pvm_op": "MIN_U",
+    "x86_map": {
+      "CMOVA": {
+        "x86_op": "CMOVA",
+        "count": 59
+      },
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 59
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 73
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 14
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 14
+      }
+    },
+    "total_x86_insts": 219,
+    "total_pvm_insts": 59,
+    "execution_count": 399,
+    "average_x86_insts": 3.711864406779661,
+    "weighted_x86_insts": 1481.0338983050847
+  },
+  "MOVE_REG": {
+    "pvm_op": "MOVE_REG",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 2315
+      }
+    },
+    "total_x86_insts": 2315,
+    "total_pvm_insts": 2315,
+    "execution_count": 47522,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 47522
+  },
+  "MUL_32": {
+    "pvm_op": "MUL_32",
+    "x86_map": {
+      "IMUL": {
+        "x86_op": "IMUL",
+        "count": 3
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 4
+      },
+      "MOVSXD": {
+        "x86_op": "MOVSXD",
+        "count": 3
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 1
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 1
+      }
+    },
+    "total_x86_insts": 12,
+    "total_pvm_insts": 3,
+    "execution_count": 306,
+    "average_x86_insts": 4,
+    "weighted_x86_insts": 1224
+  },
+  "MUL_64": {
+    "pvm_op": "MUL_64",
+    "x86_map": {
+      "IMUL": {
+        "x86_op": "IMUL",
+        "count": 1181
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 1400
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 219
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 219
+      }
+    },
+    "total_x86_insts": 3019,
+    "total_pvm_insts": 1181,
+    "execution_count": 43402,
+    "average_x86_insts": 2.5563082133784927,
+    "weighted_x86_insts": 110948.88907705333
+  },
+  "MUL_IMM_32": {
+    "pvm_op": "MUL_IMM_32",
+    "x86_map": {
+      "IMUL": {
+        "x86_op": "IMUL",
+        "count": 9
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 9
+      },
+      "MOVSXD": {
+        "x86_op": "MOVSXD",
+        "count": 9
+      }
+    },
+    "total_x86_insts": 27,
+    "total_pvm_insts": 9,
+    "execution_count": 7,
+    "average_x86_insts": 3,
+    "weighted_x86_insts": 21
+  },
+  "MUL_IMM_64": {
+    "pvm_op": "MUL_IMM_64",
+    "x86_map": {
+      "IMUL": {
+        "x86_op": "IMUL",
+        "count": 375
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 375
+      }
+    },
+    "total_x86_insts": 750,
+    "total_pvm_insts": 375,
+    "execution_count": 2786,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 5572
+  },
+  "MUL_UPPER_S_S": {
+    "pvm_op": "MUL_UPPER_S_S",
+    "x86_map": {
+      "IMUL": {
+        "x86_op": "IMUL",
+        "count": 15
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 30
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 30
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 30
+      }
+    },
+    "total_x86_insts": 105,
+    "total_pvm_insts": 15,
+    "execution_count": 15,
+    "average_x86_insts": 7,
+    "weighted_x86_insts": 105
+  },
+  "MUL_UPPER_U_U": {
+    "pvm_op": "MUL_UPPER_U_U",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 989
+      },
+      "MUL": {
+        "x86_op": "MUL",
+        "count": 495
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 989
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 989
+      }
+    },
+    "total_x86_insts": 3462,
+    "total_pvm_insts": 495,
+    "execution_count": 8999,
+    "average_x86_insts": 6.993939393939394,
+    "weighted_x86_insts": 62938.46060606061
+  },
+  "NEG_ADD_IMM_32": {
+    "pvm_op": "NEG_ADD_IMM_32",
+    "x86_map": {
+      "ADD": {
+        "x86_op": "ADD",
+        "count": 22
+      },
+      "IMUL": {
+        "x86_op": "IMUL",
+        "count": 11
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 44
+      },
+      "NEG": {
+        "x86_op": "NEG",
+        "count": 11
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 22
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 22
+      },
+      "SHR": {
+        "x86_op": "SHR",
+        "count": 11
+      }
+    },
+    "total_x86_insts": 143,
+    "total_pvm_insts": 11,
+    "execution_count": 1134,
+    "average_x86_insts": 13,
+    "weighted_x86_insts": 14742
+  },
+  "NEG_ADD_IMM_64": {
+    "pvm_op": "NEG_ADD_IMM_64",
+    "x86_map": {
+      "ADD": {
+        "x86_op": "ADD",
+        "count": 18
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 141
+      },
+      "NEG": {
+        "x86_op": "NEG",
+        "count": 18
+      },
+      "SUB": {
+        "x86_op": "SUB",
+        "count": 141
+      }
+    },
+    "total_x86_insts": 318,
+    "total_pvm_insts": 159,
+    "execution_count": 1899,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 3798
+  },
+  "OR": {
+    "pvm_op": "OR",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 40
+      },
+      "OR": {
+        "x86_op": "OR",
+        "count": 428
+      }
+    },
+    "total_x86_insts": 468,
+    "total_pvm_insts": 428,
+    "execution_count": 8595,
+    "average_x86_insts": 1.0934579439252337,
+    "weighted_x86_insts": 9398.271028037383
+  },
+  "OR_IMM": {
+    "pvm_op": "OR_IMM",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 13
+      },
+      "OR": {
+        "x86_op": "OR",
+        "count": 41
+      }
+    },
+    "total_x86_insts": 54,
+    "total_pvm_insts": 41,
+    "execution_count": 92,
+    "average_x86_insts": 1.3170731707317074,
+    "weighted_x86_insts": 121.17073170731707
+  },
+  "OR_INV": {
+    "pvm_op": "OR_INV",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 71
+      },
+      "NOT": {
+        "x86_op": "NOT",
+        "count": 36
+      },
+      "OR": {
+        "x86_op": "OR",
+        "count": 36
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 35
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 35
+      }
+    },
+    "total_x86_insts": 213,
+    "total_pvm_insts": 36,
+    "execution_count": 123,
+    "average_x86_insts": 5.916666666666667,
+    "weighted_x86_insts": 727.75
+  },
+  "REM_S_64": {
+    "pvm_op": "REM_S_64",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 76
+      },
+      "CQO": {
+        "x86_op": "CQO",
+        "count": 38
+      },
+      "IDIV": {
+        "x86_op": "IDIV",
+        "count": 38
+      },
+      "JE": {
+        "x86_op": "JE",
+        "count": 76
+      },
+      "JMP": {
+        "x86_op": "JMP",
+        "count": 114
+      },
+      "JNE": {
+        "x86_op": "JNE",
+        "count": 38
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 151
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 75
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 75
+      },
+      "TEST": {
+        "x86_op": "TEST",
+        "count": 38
+      },
+      "XOR": {
+        "x86_op": "XOR",
+        "count": 38
+      }
+    },
+    "total_x86_insts": 757,
+    "total_pvm_insts": 38,
+    "execution_count": 57,
+    "average_x86_insts": 19.92105263157895,
+    "weighted_x86_insts": 1135.5
+  },
+  "REM_U_32": {
+    "pvm_op": "REM_U_32",
+    "x86_map": {
+      "DIV": {
+        "x86_op": "DIV",
+        "count": 1
+      },
+      "JMP": {
+        "x86_op": "JMP",
+        "count": 1
+      },
+      "JNE": {
+        "x86_op": "JNE",
+        "count": 1
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 2
+      },
+      "MOVSXD": {
+        "x86_op": "MOVSXD",
+        "count": 1
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 2
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 2
+      },
+      "TEST": {
+        "x86_op": "TEST",
+        "count": 1
+      },
+      "XOR": {
+        "x86_op": "XOR",
+        "count": 1
+      }
+    },
+    "total_x86_insts": 12,
+    "total_pvm_insts": 1,
+    "execution_count": 1,
+    "average_x86_insts": 12,
+    "weighted_x86_insts": 12
+  },
+  "REM_U_64": {
+    "pvm_op": "REM_U_64",
+    "x86_map": {
+      "DIV": {
+        "x86_op": "DIV",
+        "count": 233
+      },
+      "JE": {
+        "x86_op": "JE",
+        "count": 233
+      },
+      "JMP": {
+        "x86_op": "JMP",
+        "count": 233
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 695
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 463
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 463
+      },
+      "TEST": {
+        "x86_op": "TEST",
+        "count": 233
+      },
+      "XCHG": {
+        "x86_op": "XCHG",
+        "count": 1
+      },
+      "XOR": {
+        "x86_op": "XOR",
+        "count": 233
+      }
+    },
+    "total_x86_insts": 2787,
+    "total_pvm_insts": 233,
+    "execution_count": 31653,
+    "average_x86_insts": 11.96137339055794,
+    "weighted_x86_insts": 378613.35193133046
+  },
+  "REVERSE_BYTES": {
+    "pvm_op": "REVERSE_BYTES",
+    "x86_map": {
+      "BSWAP": {
+        "x86_op": "BSWAP",
+        "count": 1
+      }
+    },
+    "total_x86_insts": 1,
+    "total_pvm_insts": 1,
+    "execution_count": 1,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 1
+  },
+  "ROT_L_64": {
+    "pvm_op": "ROT_L_64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 11
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 7
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 7
+      },
+      "ROL": {
+        "x86_op": "ROL",
+        "count": 7
+      }
+    },
+    "total_x86_insts": 32,
+    "total_pvm_insts": 7,
+    "execution_count": 6,
+    "average_x86_insts": 4.571428571428571,
+    "weighted_x86_insts": 27.428571428571427
+  },
+  "ROT_R_32": {
+    "pvm_op": "ROT_R_32",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 2
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 1
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 1
+      },
+      "ROR": {
+        "x86_op": "ROR",
+        "count": 1
+      }
+    },
+    "total_x86_insts": 5,
+    "total_pvm_insts": 1,
+    "execution_count": 1,
+    "average_x86_insts": 5,
+    "weighted_x86_insts": 5
+  },
+  "ROT_R_64_IMM": {
+    "pvm_op": "ROT_R_64_IMM",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 1
+      },
+      "ROR": {
+        "x86_op": "ROR",
+        "count": 16
+      }
+    },
+    "total_x86_insts": 17,
+    "total_pvm_insts": 16,
+    "execution_count": 14,
+    "average_x86_insts": 1.0625,
+    "weighted_x86_insts": 14.875
+  },
+  "SET_GT_S_IMM": {
+    "pvm_op": "SET_GT_S_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 12
+      },
+      "SETG": {
+        "x86_op": "SETG",
+        "count": 12
+      },
+      "XOR": {
+        "x86_op": "XOR",
+        "count": 12
+      }
+    },
+    "total_x86_insts": 36,
+    "total_pvm_insts": 12,
+    "execution_count": 59,
+    "average_x86_insts": 3,
+    "weighted_x86_insts": 177
+  },
+  "SET_GT_U_IMM": {
+    "pvm_op": "SET_GT_U_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 86
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 46
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 46
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 46
+      },
+      "SETA": {
+        "x86_op": "SETA",
+        "count": 86
+      },
+      "XOR": {
+        "x86_op": "XOR",
+        "count": 86
+      }
+    },
+    "total_x86_insts": 396,
+    "total_pvm_insts": 86,
+    "execution_count": 1768,
+    "average_x86_insts": 4.604651162790698,
+    "weighted_x86_insts": 8141.023255813954
+  },
+  "SET_LT_S": {
+    "pvm_op": "SET_LT_S",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 140
+      },
+      "MOVZX": {
+        "x86_op": "MOVZX",
+        "count": 140
+      },
+      "SETL": {
+        "x86_op": "SETL",
+        "count": 140
+      }
+    },
+    "total_x86_insts": 420,
+    "total_pvm_insts": 140,
+    "execution_count": 1071,
+    "average_x86_insts": 3,
+    "weighted_x86_insts": 3213
+  },
+  "SET_LT_S_IMM": {
+    "pvm_op": "SET_LT_S_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 50
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 13
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 13
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 13
+      },
+      "SETL": {
+        "x86_op": "SETL",
+        "count": 50
+      },
+      "XOR": {
+        "x86_op": "XOR",
+        "count": 50
+      }
+    },
+    "total_x86_insts": 189,
+    "total_pvm_insts": 50,
+    "execution_count": 971,
+    "average_x86_insts": 3.78,
+    "weighted_x86_insts": 3670.3799999999997
+  },
+  "SET_LT_U": {
+    "pvm_op": "SET_LT_U",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 675
+      },
+      "MOVZX": {
+        "x86_op": "MOVZX",
+        "count": 675
+      },
+      "SETB": {
+        "x86_op": "SETB",
+        "count": 675
+      }
+    },
+    "total_x86_insts": 2025,
+    "total_pvm_insts": 675,
+    "execution_count": 19477,
+    "average_x86_insts": 3,
+    "weighted_x86_insts": 58431
+  },
+  "SET_LT_U_IMM": {
+    "pvm_op": "SET_LT_U_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 237
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 77
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 77
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 77
+      },
+      "SETB": {
+        "x86_op": "SETB",
+        "count": 237
+      },
+      "XOR": {
+        "x86_op": "XOR",
+        "count": 237
+      }
+    },
+    "total_x86_insts": 942,
+    "total_pvm_insts": 237,
+    "execution_count": 2522,
+    "average_x86_insts": 3.9746835443037973,
+    "weighted_x86_insts": 10024.151898734177
+  },
+  "SHAR_R_IMM_32": {
+    "pvm_op": "SHAR_R_IMM_32",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 24
+      },
+      "MOVSXD": {
+        "x86_op": "MOVSXD",
+        "count": 24
+      },
+      "SAR": {
+        "x86_op": "SAR",
+        "count": 24
+      }
+    },
+    "total_x86_insts": 72,
+    "total_pvm_insts": 24,
+    "execution_count": 24,
+    "average_x86_insts": 3,
+    "weighted_x86_insts": 72
+  },
+  "SHAR_R_IMM_64": {
+    "pvm_op": "SHAR_R_IMM_64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 26
+      },
+      "SAR": {
+        "x86_op": "SAR",
+        "count": 54
+      }
+    },
+    "total_x86_insts": 80,
+    "total_pvm_insts": 54,
+    "execution_count": 406,
+    "average_x86_insts": 1.4814814814814814,
+    "weighted_x86_insts": 601.4814814814814
+  },
+  "SHLO_L_64": {
+    "pvm_op": "SHLO_L_64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 26
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 6
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 6
+      },
+      "SHL": {
+        "x86_op": "SHL",
+        "count": 20
+      },
+      "XCHG": {
+        "x86_op": "XCHG",
+        "count": 28
+      }
+    },
+    "total_x86_insts": 86,
+    "total_pvm_insts": 20,
+    "execution_count": 515,
+    "average_x86_insts": 4.3,
+    "weighted_x86_insts": 2214.5
+  },
+  "SHLO_L_IMM_32": {
+    "pvm_op": "SHLO_L_IMM_32",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 8
+      },
+      "MOVSXD": {
+        "x86_op": "MOVSXD",
+        "count": 8
+      },
+      "SHL": {
+        "x86_op": "SHL",
+        "count": 8
+      }
+    },
+    "total_x86_insts": 24,
+    "total_pvm_insts": 8,
+    "execution_count": 4,
+    "average_x86_insts": 3,
+    "weighted_x86_insts": 12
+  },
+  "SHLO_L_IMM_64": {
+    "pvm_op": "SHLO_L_IMM_64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 1970
+      },
+      "SHL": {
+        "x86_op": "SHL",
+        "count": 2554
+      }
+    },
+    "total_x86_insts": 4524,
+    "total_pvm_insts": 2554,
+    "execution_count": 18671,
+    "average_x86_insts": 1.7713390759592795,
+    "weighted_x86_insts": 33072.67188723571
+  },
+  "SHLO_L_IMM_ALT_32": {
+    "pvm_op": "SHLO_L_IMM_ALT_32",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 1
+      },
+      "SHL": {
+        "x86_op": "SHL",
+        "count": 1
+      },
+      "XCHG": {
+        "x86_op": "XCHG",
+        "count": 2
+      }
+    },
+    "total_x86_insts": 4,
+    "total_pvm_insts": 1,
+    "execution_count": 0,
+    "average_x86_insts": 4,
+    "weighted_x86_insts": 0
+  },
+  "SHLO_L_IMM_ALT_64": {
+    "pvm_op": "SHLO_L_IMM_ALT_64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 13
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 11
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 11
+      },
+      "SHL": {
+        "x86_op": "SHL",
+        "count": 9
+      },
+      "XCHG": {
+        "x86_op": "XCHG",
+        "count": 18
+      }
+    },
+    "total_x86_insts": 62,
+    "total_pvm_insts": 9,
+    "execution_count": 86,
+    "average_x86_insts": 6.888888888888889,
+    "weighted_x86_insts": 592.4444444444445
+  },
+  "SHLO_R_32": {
+    "pvm_op": "SHLO_R_32",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 4
+      },
+      "MOVSXD": {
+        "x86_op": "MOVSXD",
+        "count": 2
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 2
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 2
+      },
+      "SHR": {
+        "x86_op": "SHR",
+        "count": 2
+      }
+    },
+    "total_x86_insts": 12,
+    "total_pvm_insts": 2,
+    "execution_count": 0,
+    "average_x86_insts": 6,
+    "weighted_x86_insts": 0
+  },
+  "SHLO_R_64": {
+    "pvm_op": "SHLO_R_64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 52
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 26
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 26
+      },
+      "SHR": {
+        "x86_op": "SHR",
+        "count": 26
+      }
+    },
+    "total_x86_insts": 130,
+    "total_pvm_insts": 26,
+    "execution_count": 1337,
+    "average_x86_insts": 5,
+    "weighted_x86_insts": 6685
+  },
+  "SHLO_R_IMM_32": {
+    "pvm_op": "SHLO_R_IMM_32",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 34
+      },
+      "SHR": {
+        "x86_op": "SHR",
+        "count": 34
+      }
+    },
+    "total_x86_insts": 68,
+    "total_pvm_insts": 34,
+    "execution_count": 391,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 782
+  },
+  "SHLO_R_IMM_64": {
+    "pvm_op": "SHLO_R_IMM_64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 1033
+      },
+      "SHR": {
+        "x86_op": "SHR",
+        "count": 1626
+      }
+    },
+    "total_x86_insts": 2659,
+    "total_pvm_insts": 1626,
+    "execution_count": 12758,
+    "average_x86_insts": 1.63530135301353,
+    "weighted_x86_insts": 20863.174661746616
+  },
+  "SHLO_R_IMM_ALT_64": {
+    "pvm_op": "SHLO_R_IMM_ALT_64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 5
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 5
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 5
+      },
+      "SHR": {
+        "x86_op": "SHR",
+        "count": 5
+      },
+      "XCHG": {
+        "x86_op": "XCHG",
+        "count": 10
+      }
+    },
+    "total_x86_insts": 30,
+    "total_pvm_insts": 5,
+    "execution_count": 1,
+    "average_x86_insts": 6,
+    "weighted_x86_insts": 6
+  },
+  "SIGN_EXTEND_8": {
+    "pvm_op": "SIGN_EXTEND_8",
+    "x86_map": {
+      "MOVSX": {
+        "x86_op": "MOVSX",
+        "count": 2
+      }
+    },
+    "total_x86_insts": 2,
+    "total_pvm_insts": 2,
+    "execution_count": 32,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 32
+  },
+  "STORE_IMM_IND_U32": {
+    "pvm_op": "STORE_IMM_IND_U32",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 12
+      }
+    },
+    "total_x86_insts": 12,
+    "total_pvm_insts": 12,
+    "execution_count": 206,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 206
+  },
+  "STORE_IMM_IND_U64": {
+    "pvm_op": "STORE_IMM_IND_U64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 2448
+      }
+    },
+    "total_x86_insts": 2448,
+    "total_pvm_insts": 1224,
+    "execution_count": 5131,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 10262
+  },
+  "STORE_IMM_IND_U8": {
+    "pvm_op": "STORE_IMM_IND_U8",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 126
+      }
+    },
+    "total_x86_insts": 126,
+    "total_pvm_insts": 126,
+    "execution_count": 969,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 969
+  },
+  "STORE_IND_U32": {
+    "pvm_op": "STORE_IND_U32",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 55
+      }
+    },
+    "total_x86_insts": 55,
+    "total_pvm_insts": 55,
+    "execution_count": 245,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 245
+  },
+  "STORE_IND_U64": {
+    "pvm_op": "STORE_IND_U64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 6942
+      }
+    },
+    "total_x86_insts": 6942,
+    "total_pvm_insts": 6942,
+    "execution_count": 114302,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 114302
+  },
+  "STORE_IND_U8": {
+    "pvm_op": "STORE_IND_U8",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 340
+      }
+    },
+    "total_x86_insts": 340,
+    "total_pvm_insts": 340,
+    "execution_count": 35890,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 35890
+  },
+  "STORE_U32": {
+    "pvm_op": "STORE_U32",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 2
+      }
+    },
+    "total_x86_insts": 2,
+    "total_pvm_insts": 2,
+    "execution_count": 2,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 2
+  },
+  "STORE_U64": {
+    "pvm_op": "STORE_U64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 625
+      }
+    },
+    "total_x86_insts": 625,
+    "total_pvm_insts": 625,
+    "execution_count": 1538,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 1538
+  },
+  "SUB_32": {
+    "pvm_op": "SUB_32",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 9
+      },
+      "MOVSXD": {
+        "x86_op": "MOVSXD",
+        "count": 25
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 3
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 3
+      },
+      "SUB": {
+        "x86_op": "SUB",
+        "count": 25
+      }
+    },
+    "total_x86_insts": 65,
+    "total_pvm_insts": 25,
+    "execution_count": 81,
+    "average_x86_insts": 2.6,
+    "weighted_x86_insts": 210.6
+  },
+  "SUB_64": {
+    "pvm_op": "SUB_64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 1629
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 118
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 118
+      },
+      "SUB": {
+        "x86_op": "SUB",
+        "count": 2096
+      }
+    },
+    "total_x86_insts": 3961,
+    "total_pvm_insts": 2096,
+    "execution_count": 14742,
+    "average_x86_insts": 1.889790076335878,
+    "weighted_x86_insts": 27859.285305343514
+  },
+  "TRAILING_ZERO_BITS_64": {
+    "pvm_op": "TRAILING_ZERO_BITS_64",
+    "x86_map": {
+      "TZCNT": {
+        "x86_op": "TZCNT",
+        "count": 15
+      }
+    },
+    "total_x86_insts": 15,
+    "total_pvm_insts": 15,
+    "execution_count": 48,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 48
+  },
+  "TRAP": {
+    "pvm_op": "TRAP",
+    "x86_map": {
+      "UD2": {
+        "x86_op": "UD2",
+        "count": 784
+      }
+    },
+    "total_x86_insts": 784,
+    "total_pvm_insts": 784,
+    "execution_count": 0,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 0
+  },
+  "XOR": {
+    "pvm_op": "XOR",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 99
+      },
+      "XOR": {
+        "x86_op": "XOR",
+        "count": 2074
+      }
+    },
+    "total_x86_insts": 2173,
+    "total_pvm_insts": 2074,
+    "execution_count": 6235,
+    "average_x86_insts": 1.0477338476374156,
+    "weighted_x86_insts": 6532.620540019287
+  },
+  "XOR_IMM": {
+    "pvm_op": "XOR_IMM",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 76
+      },
+      "XOR": {
+        "x86_op": "XOR",
+        "count": 187
+      }
+    },
+    "total_x86_insts": 263,
+    "total_pvm_insts": 187,
+    "execution_count": 8077,
+    "average_x86_insts": 1.4064171122994653,
+    "weighted_x86_insts": 11359.631016042782
+  },
+  "ZERO_EXTEND_16": {
+    "pvm_op": "ZERO_EXTEND_16",
+    "x86_map": {
+      "MOVZX": {
+        "x86_op": "MOVZX",
+        "count": 3
+      }
+    },
+    "total_x86_insts": 3,
+    "total_pvm_insts": 3,
+    "execution_count": 4,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 4
+  }
+}

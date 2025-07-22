@@ -1,0 +1,1400 @@
+{
+  "ADD_32": {
+    "pvm_op": "ADD_32",
+    "x86_map": {
+      "ADD": {
+        "x86_op": "ADD",
+        "count": 2
+      },
+      "MOVSXD": {
+        "x86_op": "MOVSXD",
+        "count": 2
+      }
+    },
+    "total_x86_insts": 4,
+    "total_pvm_insts": 2,
+    "execution_count": 129,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 258
+  },
+  "ADD_64": {
+    "pvm_op": "ADD_64",
+    "x86_map": {
+      "ADD": {
+        "x86_op": "ADD",
+        "count": 241
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 41
+      }
+    },
+    "total_x86_insts": 282,
+    "total_pvm_insts": 241,
+    "execution_count": 1402,
+    "average_x86_insts": 1.170124481327801,
+    "weighted_x86_insts": 1640.5145228215767
+  },
+  "ADD_IMM_32": {
+    "pvm_op": "ADD_IMM_32",
+    "x86_map": {
+      "ADD": {
+        "x86_op": "ADD",
+        "count": 1
+      },
+      "MOVSXD": {
+        "x86_op": "MOVSXD",
+        "count": 4
+      }
+    },
+    "total_x86_insts": 5,
+    "total_pvm_insts": 4,
+    "execution_count": 68,
+    "average_x86_insts": 1.25,
+    "weighted_x86_insts": 85
+  },
+  "ADD_IMM_64": {
+    "pvm_op": "ADD_IMM_64",
+    "x86_map": {
+      "ADD": {
+        "x86_op": "ADD",
+        "count": 291
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 179
+      }
+    },
+    "total_x86_insts": 470,
+    "total_pvm_insts": 291,
+    "execution_count": 2624,
+    "average_x86_insts": 1.6151202749140894,
+    "weighted_x86_insts": 4238.07560137457
+  },
+  "AND": {
+    "pvm_op": "AND",
+    "x86_map": {
+      "AND": {
+        "x86_op": "AND",
+        "count": 1
+      }
+    },
+    "total_x86_insts": 1,
+    "total_pvm_insts": 1,
+    "execution_count": 0,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 0
+  },
+  "AND_IMM": {
+    "pvm_op": "AND_IMM",
+    "x86_map": {
+      "AND": {
+        "x86_op": "AND",
+        "count": 31
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 24
+      }
+    },
+    "total_x86_insts": 55,
+    "total_pvm_insts": 31,
+    "execution_count": 451,
+    "average_x86_insts": 1.7741935483870968,
+    "weighted_x86_insts": 800.1612903225806
+  },
+  "AND_INV": {
+    "pvm_op": "AND_INV",
+    "x86_map": {
+      "AND": {
+        "x86_op": "AND",
+        "count": 3
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 6
+      },
+      "NOT": {
+        "x86_op": "NOT",
+        "count": 3
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 3
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 3
+      }
+    },
+    "total_x86_insts": 18,
+    "total_pvm_insts": 3,
+    "execution_count": 2,
+    "average_x86_insts": 6,
+    "weighted_x86_insts": 12
+  },
+  "BRANCH_EQ": {
+    "pvm_op": "BRANCH_EQ",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 13
+      },
+      "JE": {
+        "x86_op": "JE",
+        "count": 13
+      }
+    },
+    "total_x86_insts": 26,
+    "total_pvm_insts": 13,
+    "execution_count": 69,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 138
+  },
+  "BRANCH_EQ_IMM": {
+    "pvm_op": "BRANCH_EQ_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 45
+      },
+      "JE": {
+        "x86_op": "JE",
+        "count": 45
+      }
+    },
+    "total_x86_insts": 90,
+    "total_pvm_insts": 45,
+    "execution_count": 280,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 560
+  },
+  "BRANCH_GE_S_IMM": {
+    "pvm_op": "BRANCH_GE_S_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 6
+      },
+      "JGE": {
+        "x86_op": "JGE",
+        "count": 6
+      }
+    },
+    "total_x86_insts": 12,
+    "total_pvm_insts": 6,
+    "execution_count": 3,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 6
+  },
+  "BRANCH_GE_U": {
+    "pvm_op": "BRANCH_GE_U",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 15
+      },
+      "JAE": {
+        "x86_op": "JAE",
+        "count": 15
+      }
+    },
+    "total_x86_insts": 30,
+    "total_pvm_insts": 15,
+    "execution_count": 16,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 32
+  },
+  "BRANCH_GE_U_IMM": {
+    "pvm_op": "BRANCH_GE_U_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 37
+      },
+      "JAE": {
+        "x86_op": "JAE",
+        "count": 37
+      }
+    },
+    "total_x86_insts": 74,
+    "total_pvm_insts": 37,
+    "execution_count": 168,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 336
+  },
+  "BRANCH_GT_S_IMM": {
+    "pvm_op": "BRANCH_GT_S_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 1
+      },
+      "JG": {
+        "x86_op": "JG",
+        "count": 1
+      }
+    },
+    "total_x86_insts": 2,
+    "total_pvm_insts": 1,
+    "execution_count": 0,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 0
+  },
+  "BRANCH_GT_U_IMM": {
+    "pvm_op": "BRANCH_GT_U_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 38
+      },
+      "JA": {
+        "x86_op": "JA",
+        "count": 38
+      }
+    },
+    "total_x86_insts": 76,
+    "total_pvm_insts": 38,
+    "execution_count": 81,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 162
+  },
+  "BRANCH_LE_S_IMM": {
+    "pvm_op": "BRANCH_LE_S_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 3
+      },
+      "JLE": {
+        "x86_op": "JLE",
+        "count": 3
+      }
+    },
+    "total_x86_insts": 6,
+    "total_pvm_insts": 3,
+    "execution_count": 11,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 22
+  },
+  "BRANCH_LE_U_IMM": {
+    "pvm_op": "BRANCH_LE_U_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 4
+      },
+      "JBE": {
+        "x86_op": "JBE",
+        "count": 4
+      }
+    },
+    "total_x86_insts": 8,
+    "total_pvm_insts": 4,
+    "execution_count": 5,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 10
+  },
+  "BRANCH_LT_S_IMM": {
+    "pvm_op": "BRANCH_LT_S_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 2
+      },
+      "JL": {
+        "x86_op": "JL",
+        "count": 2
+      }
+    },
+    "total_x86_insts": 4,
+    "total_pvm_insts": 2,
+    "execution_count": 4,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 8
+  },
+  "BRANCH_LT_U": {
+    "pvm_op": "BRANCH_LT_U",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 34
+      },
+      "JB": {
+        "x86_op": "JB",
+        "count": 34
+      }
+    },
+    "total_x86_insts": 68,
+    "total_pvm_insts": 34,
+    "execution_count": 558,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 1116
+  },
+  "BRANCH_LT_U_IMM": {
+    "pvm_op": "BRANCH_LT_U_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 31
+      },
+      "JB": {
+        "x86_op": "JB",
+        "count": 31
+      }
+    },
+    "total_x86_insts": 62,
+    "total_pvm_insts": 31,
+    "execution_count": 148,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 296
+  },
+  "BRANCH_NE": {
+    "pvm_op": "BRANCH_NE",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 28
+      },
+      "JNE": {
+        "x86_op": "JNE",
+        "count": 28
+      }
+    },
+    "total_x86_insts": 56,
+    "total_pvm_insts": 28,
+    "execution_count": 16,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 32
+  },
+  "BRANCH_NE_IMM": {
+    "pvm_op": "BRANCH_NE_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 54
+      },
+      "JNE": {
+        "x86_op": "JNE",
+        "count": 54
+      }
+    },
+    "total_x86_insts": 108,
+    "total_pvm_insts": 54,
+    "execution_count": 744,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 1488
+  },
+  "CMOV_IZ": {
+    "pvm_op": "CMOV_IZ",
+    "x86_map": {
+      "CMOVE": {
+        "x86_op": "CMOVE",
+        "count": 2
+      },
+      "TEST": {
+        "x86_op": "TEST",
+        "count": 2
+      }
+    },
+    "total_x86_insts": 4,
+    "total_pvm_insts": 2,
+    "execution_count": 129,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 258
+  },
+  "CMOV_IZ_IMM": {
+    "pvm_op": "CMOV_IZ_IMM",
+    "x86_map": {
+      "CMOVE": {
+        "x86_op": "CMOVE",
+        "count": 1
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 1
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 1
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 1
+      },
+      "TEST": {
+        "x86_op": "TEST",
+        "count": 1
+      }
+    },
+    "total_x86_insts": 5,
+    "total_pvm_insts": 1,
+    "execution_count": 0,
+    "average_x86_insts": 5,
+    "weighted_x86_insts": 0
+  },
+  "CMOV_NZ": {
+    "pvm_op": "CMOV_NZ",
+    "x86_map": {
+      "CMOVNE": {
+        "x86_op": "CMOVNE",
+        "count": 1
+      },
+      "TEST": {
+        "x86_op": "TEST",
+        "count": 1
+      }
+    },
+    "total_x86_insts": 2,
+    "total_pvm_insts": 1,
+    "execution_count": 0,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 0
+  },
+  "CMOV_NZ_IMM": {
+    "pvm_op": "CMOV_NZ_IMM",
+    "x86_map": {
+      "CMOVNE": {
+        "x86_op": "CMOVNE",
+        "count": 1
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 1
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 1
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 1
+      },
+      "TEST": {
+        "x86_op": "TEST",
+        "count": 1
+      }
+    },
+    "total_x86_insts": 5,
+    "total_pvm_insts": 1,
+    "execution_count": 68,
+    "average_x86_insts": 5,
+    "weighted_x86_insts": 340
+  },
+  "FALLTHROUGH": {
+    "pvm_op": "FALLTHROUGH",
+    "x86_map": {
+      "NOP": {
+        "x86_op": "NOP",
+        "count": 95
+      }
+    },
+    "total_x86_insts": 95,
+    "total_pvm_insts": 95,
+    "execution_count": 333,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 333
+  },
+  "JUMP": {
+    "pvm_op": "JUMP",
+    "x86_map": {
+      "JMP": {
+        "x86_op": "JMP",
+        "count": 76
+      }
+    },
+    "total_x86_insts": 76,
+    "total_pvm_insts": 76,
+    "execution_count": 231,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 231
+  },
+  "JUMP_IND": {
+    "pvm_op": "JUMP_IND",
+    "x86_map": {
+      "ADD": {
+        "x86_op": "ADD",
+        "count": 29
+      },
+      "JMP": {
+        "x86_op": "JMP",
+        "count": 29
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 29
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 29
+      }
+    },
+    "total_x86_insts": 116,
+    "total_pvm_insts": 29,
+    "execution_count": 579,
+    "average_x86_insts": 4,
+    "weighted_x86_insts": 2316
+  },
+  "LOAD_IMM": {
+    "pvm_op": "LOAD_IMM",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 324
+      }
+    },
+    "total_x86_insts": 324,
+    "total_pvm_insts": 324,
+    "execution_count": 1491,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 1491
+  },
+  "LOAD_IMM_64": {
+    "pvm_op": "LOAD_IMM_64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 6
+      }
+    },
+    "total_x86_insts": 6,
+    "total_pvm_insts": 6,
+    "execution_count": 3,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 3
+  },
+  "LOAD_IMM_JUMP": {
+    "pvm_op": "LOAD_IMM_JUMP",
+    "x86_map": {
+      "JMP": {
+        "x86_op": "JMP",
+        "count": 69
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 69
+      }
+    },
+    "total_x86_insts": 138,
+    "total_pvm_insts": 69,
+    "execution_count": 368,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 736
+  },
+  "LOAD_IMM_JUMP_IND": {
+    "pvm_op": "LOAD_IMM_JUMP_IND",
+    "x86_map": {
+      "ADD": {
+        "x86_op": "ADD",
+        "count": 23
+      },
+      "AND": {
+        "x86_op": "AND",
+        "count": 23
+      },
+      "JMP": {
+        "x86_op": "JMP",
+        "count": 23
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 46
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 23
+      }
+    },
+    "total_x86_insts": 138,
+    "total_pvm_insts": 23,
+    "execution_count": 142,
+    "average_x86_insts": 6,
+    "weighted_x86_insts": 852
+  },
+  "LOAD_IND_I32": {
+    "pvm_op": "LOAD_IND_I32",
+    "x86_map": {
+      "MOVSXD": {
+        "x86_op": "MOVSXD",
+        "count": 7
+      }
+    },
+    "total_x86_insts": 7,
+    "total_pvm_insts": 7,
+    "execution_count": 5,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 5
+  },
+  "LOAD_IND_I8": {
+    "pvm_op": "LOAD_IND_I8",
+    "x86_map": {
+      "MOVSX": {
+        "x86_op": "MOVSX",
+        "count": 14
+      }
+    },
+    "total_x86_insts": 14,
+    "total_pvm_insts": 7,
+    "execution_count": 3,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 6
+  },
+  "LOAD_IND_U32": {
+    "pvm_op": "LOAD_IND_U32",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 5
+      }
+    },
+    "total_x86_insts": 5,
+    "total_pvm_insts": 5,
+    "execution_count": 204,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 204
+  },
+  "LOAD_IND_U64": {
+    "pvm_op": "LOAD_IND_U64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 561
+      }
+    },
+    "total_x86_insts": 561,
+    "total_pvm_insts": 561,
+    "execution_count": 4411,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 4411
+  },
+  "LOAD_IND_U8": {
+    "pvm_op": "LOAD_IND_U8",
+    "x86_map": {
+      "MOVZX": {
+        "x86_op": "MOVZX",
+        "count": 132
+      }
+    },
+    "total_x86_insts": 132,
+    "total_pvm_insts": 132,
+    "execution_count": 733,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 733
+  },
+  "LOAD_U64": {
+    "pvm_op": "LOAD_U64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 22
+      }
+    },
+    "total_x86_insts": 22,
+    "total_pvm_insts": 22,
+    "execution_count": 15,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 15
+  },
+  "MAX_U": {
+    "pvm_op": "MAX_U",
+    "x86_map": {
+      "CMOVB": {
+        "x86_op": "CMOVB",
+        "count": 6
+      },
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 6
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 6
+      }
+    },
+    "total_x86_insts": 18,
+    "total_pvm_insts": 6,
+    "execution_count": 10,
+    "average_x86_insts": 3,
+    "weighted_x86_insts": 30
+  },
+  "MIN_U": {
+    "pvm_op": "MIN_U",
+    "x86_map": {
+      "CMOVA": {
+        "x86_op": "CMOVA",
+        "count": 2
+      },
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 2
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 2
+      }
+    },
+    "total_x86_insts": 6,
+    "total_pvm_insts": 2,
+    "execution_count": 1,
+    "average_x86_insts": 3,
+    "weighted_x86_insts": 3
+  },
+  "MOVE_REG": {
+    "pvm_op": "MOVE_REG",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 205
+      }
+    },
+    "total_x86_insts": 205,
+    "total_pvm_insts": 205,
+    "execution_count": 2104,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 2104
+  },
+  "MUL_32": {
+    "pvm_op": "MUL_32",
+    "x86_map": {
+      "IMUL": {
+        "x86_op": "IMUL",
+        "count": 1
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 1
+      },
+      "MOVSXD": {
+        "x86_op": "MOVSXD",
+        "count": 1
+      }
+    },
+    "total_x86_insts": 3,
+    "total_pvm_insts": 1,
+    "execution_count": 0,
+    "average_x86_insts": 3,
+    "weighted_x86_insts": 0
+  },
+  "MUL_64": {
+    "pvm_op": "MUL_64",
+    "x86_map": {
+      "IMUL": {
+        "x86_op": "IMUL",
+        "count": 2
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 2
+      }
+    },
+    "total_x86_insts": 4,
+    "total_pvm_insts": 2,
+    "execution_count": 2,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 4
+  },
+  "MUL_IMM_64": {
+    "pvm_op": "MUL_IMM_64",
+    "x86_map": {
+      "IMUL": {
+        "x86_op": "IMUL",
+        "count": 4
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 4
+      }
+    },
+    "total_x86_insts": 8,
+    "total_pvm_insts": 4,
+    "execution_count": 2,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 4
+  },
+  "MUL_UPPER_U_U": {
+    "pvm_op": "MUL_UPPER_U_U",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 2
+      },
+      "MUL": {
+        "x86_op": "MUL",
+        "count": 1
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 2
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 2
+      }
+    },
+    "total_x86_insts": 7,
+    "total_pvm_insts": 1,
+    "execution_count": 0,
+    "average_x86_insts": 7,
+    "weighted_x86_insts": 0
+  },
+  "NEG_ADD_IMM_32": {
+    "pvm_op": "NEG_ADD_IMM_32",
+    "x86_map": {
+      "ADD": {
+        "x86_op": "ADD",
+        "count": 6
+      },
+      "IMUL": {
+        "x86_op": "IMUL",
+        "count": 3
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 12
+      },
+      "NEG": {
+        "x86_op": "NEG",
+        "count": 3
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 6
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 6
+      },
+      "SHR": {
+        "x86_op": "SHR",
+        "count": 3
+      }
+    },
+    "total_x86_insts": 39,
+    "total_pvm_insts": 3,
+    "execution_count": 13,
+    "average_x86_insts": 13,
+    "weighted_x86_insts": 169
+  },
+  "NEG_ADD_IMM_64": {
+    "pvm_op": "NEG_ADD_IMM_64",
+    "x86_map": {
+      "ADD": {
+        "x86_op": "ADD",
+        "count": 2
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 7
+      },
+      "NEG": {
+        "x86_op": "NEG",
+        "count": 2
+      },
+      "SUB": {
+        "x86_op": "SUB",
+        "count": 7
+      }
+    },
+    "total_x86_insts": 18,
+    "total_pvm_insts": 9,
+    "execution_count": 69,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 138
+  },
+  "OR": {
+    "pvm_op": "OR",
+    "x86_map": {
+      "OR": {
+        "x86_op": "OR",
+        "count": 9
+      }
+    },
+    "total_x86_insts": 9,
+    "total_pvm_insts": 9,
+    "execution_count": 14,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 14
+  },
+  "OR_IMM": {
+    "pvm_op": "OR_IMM",
+    "x86_map": {
+      "OR": {
+        "x86_op": "OR",
+        "count": 5
+      }
+    },
+    "total_x86_insts": 5,
+    "total_pvm_insts": 5,
+    "execution_count": 0,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 0
+  },
+  "ROT_R_64_IMM": {
+    "pvm_op": "ROT_R_64_IMM",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 36
+      },
+      "ROR": {
+        "x86_op": "ROR",
+        "count": 64
+      }
+    },
+    "total_x86_insts": 100,
+    "total_pvm_insts": 64,
+    "execution_count": 384,
+    "average_x86_insts": 1.5625,
+    "weighted_x86_insts": 600
+  },
+  "SET_GT_U_IMM": {
+    "pvm_op": "SET_GT_U_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 1
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 1
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 1
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 1
+      },
+      "SETA": {
+        "x86_op": "SETA",
+        "count": 1
+      },
+      "XOR": {
+        "x86_op": "XOR",
+        "count": 1
+      }
+    },
+    "total_x86_insts": 6,
+    "total_pvm_insts": 1,
+    "execution_count": 2,
+    "average_x86_insts": 6,
+    "weighted_x86_insts": 12
+  },
+  "SET_LT_S_IMM": {
+    "pvm_op": "SET_LT_S_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 2
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 1
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 1
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 1
+      },
+      "SETL": {
+        "x86_op": "SETL",
+        "count": 2
+      },
+      "XOR": {
+        "x86_op": "XOR",
+        "count": 2
+      }
+    },
+    "total_x86_insts": 9,
+    "total_pvm_insts": 2,
+    "execution_count": 2,
+    "average_x86_insts": 4.5,
+    "weighted_x86_insts": 9
+  },
+  "SET_LT_U": {
+    "pvm_op": "SET_LT_U",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 6
+      },
+      "MOVZX": {
+        "x86_op": "MOVZX",
+        "count": 6
+      },
+      "SETB": {
+        "x86_op": "SETB",
+        "count": 6
+      }
+    },
+    "total_x86_insts": 18,
+    "total_pvm_insts": 6,
+    "execution_count": 6,
+    "average_x86_insts": 3,
+    "weighted_x86_insts": 18
+  },
+  "SET_LT_U_IMM": {
+    "pvm_op": "SET_LT_U_IMM",
+    "x86_map": {
+      "CMP": {
+        "x86_op": "CMP",
+        "count": 18
+      },
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 4
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 4
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 4
+      },
+      "SETB": {
+        "x86_op": "SETB",
+        "count": 18
+      },
+      "XOR": {
+        "x86_op": "XOR",
+        "count": 18
+      }
+    },
+    "total_x86_insts": 66,
+    "total_pvm_insts": 18,
+    "execution_count": 137,
+    "average_x86_insts": 3.6666666666666665,
+    "weighted_x86_insts": 502.3333333333333
+  },
+  "SHLO_L_64": {
+    "pvm_op": "SHLO_L_64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 2
+      },
+      "SHL": {
+        "x86_op": "SHL",
+        "count": 2
+      },
+      "XCHG": {
+        "x86_op": "XCHG",
+        "count": 4
+      }
+    },
+    "total_x86_insts": 8,
+    "total_pvm_insts": 2,
+    "execution_count": 8,
+    "average_x86_insts": 4,
+    "weighted_x86_insts": 32
+  },
+  "SHLO_L_IMM_32": {
+    "pvm_op": "SHLO_L_IMM_32",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 1
+      },
+      "MOVSXD": {
+        "x86_op": "MOVSXD",
+        "count": 1
+      },
+      "SHL": {
+        "x86_op": "SHL",
+        "count": 1
+      }
+    },
+    "total_x86_insts": 3,
+    "total_pvm_insts": 1,
+    "execution_count": 2,
+    "average_x86_insts": 3,
+    "weighted_x86_insts": 6
+  },
+  "SHLO_L_IMM_64": {
+    "pvm_op": "SHLO_L_IMM_64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 13
+      },
+      "SHL": {
+        "x86_op": "SHL",
+        "count": 55
+      }
+    },
+    "total_x86_insts": 68,
+    "total_pvm_insts": 55,
+    "execution_count": 333,
+    "average_x86_insts": 1.2363636363636363,
+    "weighted_x86_insts": 411.7090909090909
+  },
+  "SHLO_R_64": {
+    "pvm_op": "SHLO_R_64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 2
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 1
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 1
+      },
+      "SHR": {
+        "x86_op": "SHR",
+        "count": 1
+      }
+    },
+    "total_x86_insts": 5,
+    "total_pvm_insts": 1,
+    "execution_count": 6,
+    "average_x86_insts": 5,
+    "weighted_x86_insts": 30
+  },
+  "SHLO_R_IMM_32": {
+    "pvm_op": "SHLO_R_IMM_32",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 2
+      },
+      "SHR": {
+        "x86_op": "SHR",
+        "count": 2
+      }
+    },
+    "total_x86_insts": 4,
+    "total_pvm_insts": 2,
+    "execution_count": 0,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 0
+  },
+  "SHLO_R_IMM_64": {
+    "pvm_op": "SHLO_R_IMM_64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 41
+      },
+      "SHR": {
+        "x86_op": "SHR",
+        "count": 59
+      }
+    },
+    "total_x86_insts": 100,
+    "total_pvm_insts": 59,
+    "execution_count": 135,
+    "average_x86_insts": 1.694915254237288,
+    "weighted_x86_insts": 228.81355932203388
+  },
+  "SIGN_EXTEND_8": {
+    "pvm_op": "SIGN_EXTEND_8",
+    "x86_map": {
+      "MOVSX": {
+        "x86_op": "MOVSX",
+        "count": 1
+      }
+    },
+    "total_x86_insts": 1,
+    "total_pvm_insts": 1,
+    "execution_count": 2,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 2
+  },
+  "STORE_IMM_IND_U32": {
+    "pvm_op": "STORE_IMM_IND_U32",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 3
+      }
+    },
+    "total_x86_insts": 3,
+    "total_pvm_insts": 3,
+    "execution_count": 1,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 1
+  },
+  "STORE_IMM_IND_U64": {
+    "pvm_op": "STORE_IMM_IND_U64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 118
+      }
+    },
+    "total_x86_insts": 118,
+    "total_pvm_insts": 59,
+    "execution_count": 98,
+    "average_x86_insts": 2,
+    "weighted_x86_insts": 196
+  },
+  "STORE_IMM_IND_U8": {
+    "pvm_op": "STORE_IMM_IND_U8",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 7
+      }
+    },
+    "total_x86_insts": 7,
+    "total_pvm_insts": 7,
+    "execution_count": 73,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 73
+  },
+  "STORE_IND_U32": {
+    "pvm_op": "STORE_IND_U32",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 6
+      }
+    },
+    "total_x86_insts": 6,
+    "total_pvm_insts": 6,
+    "execution_count": 4,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 4
+  },
+  "STORE_IND_U64": {
+    "pvm_op": "STORE_IND_U64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 426
+      }
+    },
+    "total_x86_insts": 426,
+    "total_pvm_insts": 426,
+    "execution_count": 3143,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 3143
+  },
+  "STORE_IND_U8": {
+    "pvm_op": "STORE_IND_U8",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 36
+      }
+    },
+    "total_x86_insts": 36,
+    "total_pvm_insts": 36,
+    "execution_count": 500,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 500
+  },
+  "STORE_U32": {
+    "pvm_op": "STORE_U32",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 1
+      }
+    },
+    "total_x86_insts": 1,
+    "total_pvm_insts": 1,
+    "execution_count": 1,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 1
+  },
+  "STORE_U8": {
+    "pvm_op": "STORE_U8",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 67
+      }
+    },
+    "total_x86_insts": 67,
+    "total_pvm_insts": 67,
+    "execution_count": 32,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 32
+  },
+  "SUB_64": {
+    "pvm_op": "SUB_64",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 33
+      },
+      "POP": {
+        "x86_op": "POP",
+        "count": 7
+      },
+      "PUSH": {
+        "x86_op": "PUSH",
+        "count": 7
+      },
+      "SUB": {
+        "x86_op": "SUB",
+        "count": 35
+      }
+    },
+    "total_x86_insts": 82,
+    "total_pvm_insts": 35,
+    "execution_count": 170,
+    "average_x86_insts": 2.342857142857143,
+    "weighted_x86_insts": 398.2857142857143
+  },
+  "TRAP": {
+    "pvm_op": "TRAP",
+    "x86_map": {
+      "UD2": {
+        "x86_op": "UD2",
+        "count": 30
+      }
+    },
+    "total_x86_insts": 30,
+    "total_pvm_insts": 30,
+    "execution_count": 0,
+    "average_x86_insts": 1,
+    "weighted_x86_insts": 0
+  },
+  "XOR": {
+    "pvm_op": "XOR",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 23
+      },
+      "XOR": {
+        "x86_op": "XOR",
+        "count": 95
+      }
+    },
+    "total_x86_insts": 118,
+    "total_pvm_insts": 95,
+    "execution_count": 394,
+    "average_x86_insts": 1.2421052631578948,
+    "weighted_x86_insts": 489.38947368421054
+  },
+  "XOR_IMM": {
+    "pvm_op": "XOR_IMM",
+    "x86_map": {
+      "MOV": {
+        "x86_op": "MOV",
+        "count": 3
+      },
+      "XOR": {
+        "x86_op": "XOR",
+        "count": 5
+      }
+    },
+    "total_x86_insts": 8,
+    "total_pvm_insts": 5,
+    "execution_count": 6,
+    "average_x86_insts": 1.6,
+    "weighted_x86_insts": 9.600000000000001
+  }
+}

@@ -4,8 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
+	"sync"
+
+	"github.com/colorfulnotion/jam/log"
 )
 
 type CustomEncoder interface {
@@ -524,23 +528,134 @@ func DecodeWithRemainder(data []byte, t reflect.Type) (value interface{}, remain
 	}
 	return val, data[used:], nil
 }
+func SaveObject(path string, obj interface{}, withJSON bool) error {
+	//saveObjectSerialized(path, obj, withJSON)
+	return saveObjectConcurrent(path, obj, false)
+}
 
-func SaveObject(path string, obj interface{}) error {
+func saveObjectConcurrent(path string, obj interface{}, withJSON bool) error {
 	codecPath := fmt.Sprintf("%s.bin", path)
+	jsonPath := fmt.Sprintf("%s.json", path)
+	hexPath := fmt.Sprintf("%s.hex", path)
+
+	jsonEnabled := withJSON
+	codecEnabled := true
+	hexEnabled := true
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", dir, err)
+	}
+
+	var wg sync.WaitGroup
+	errChan := make(chan error, 3)
 
 	switch v := obj.(type) {
 	default:
-		codecEncode, err := Encode(v)
-		if err != nil {
-			return fmt.Errorf("Error encoding object: %v\n", err)
+		var codecEncode []byte
+		var err error
+		if codecEnabled || hexEnabled {
+			codecEncode, err = Encode(v)
+			if err != nil {
+				return fmt.Errorf("error encoding object for binary/hex: %w", err)
+			}
 		}
 
-		err = os.WriteFile(codecPath, codecEncode, 0644)
-		if err != nil {
-			return fmt.Errorf("Error writing codec file: %v\n", err)
+		if codecEnabled {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := os.WriteFile(codecPath, codecEncode, 0644); err != nil {
+					errChan <- fmt.Errorf("error writing codec file: %w", err)
+				}
+			}()
+		}
+
+		if hexEnabled {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				hexString := fmt.Sprintf("0x%x\n", codecEncode)
+				if err := os.WriteFile(hexPath, []byte(hexString), 0644); err != nil {
+					errChan <- fmt.Errorf("error writing hex file: %w", err)
+				}
+			}()
+		}
+
+		if jsonEnabled {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				//jsonEncode, err := json.MarshalIndent(v, "", "    ")
+				jsonEncode, err := json.Marshal(v)
+				if err != nil {
+					log.Info(log.G, "Error encoding object to JSON", "err", err, "object", PrintObject(v))
+					errChan <- fmt.Errorf("error encoding object to JSON: %w", err)
+					return
+				}
+				if err := os.WriteFile(jsonPath, jsonEncode, 0644); err != nil {
+					errChan <- fmt.Errorf("error writing JSON file: %w", err)
+				}
+			}()
 		}
 	}
 
+	wg.Wait()
+	close(errChan)
+
+	for err := range errChan {
+		if err != nil {
+			// Return the first error we encounter.
+			return err
+		}
+	}
+
+	return nil
+}
+
+func saveObjectSerialized(path string, obj interface{}, withJSON bool) error {
+	codecPath := fmt.Sprintf("%s.bin", path)
+	jsonPath := fmt.Sprintf("%s.json", path)
+	hexPath := fmt.Sprintf("%s.hex", path)
+
+	jsonEnabled := withJSON
+	codeEnabled := true
+	hexEnabled := true
+
+	// Ensure directory exists
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %v", dir, err)
+	}
+
+	switch v := obj.(type) {
+	default:
+		if codeEnabled {
+			codecEncode, err := Encode(v)
+			if err != nil {
+				return fmt.Errorf("error encoding object: %v", err)
+			}
+			if err := os.WriteFile(codecPath, codecEncode, 0644); err != nil {
+				return fmt.Errorf("error writing codec file: %v", err)
+			}
+			if hexEnabled {
+				hexString := fmt.Sprintf("0x%x\n", codecEncode)
+				if err := os.WriteFile(hexPath, []byte(hexString), 0644); err != nil {
+					return fmt.Errorf("error writing hex file: %v", err)
+				}
+			}
+		}
+		if jsonEnabled {
+			jsonEncode, err := json.MarshalIndent(v, "", "    ")
+			if err != nil {
+				log.Info(log.G, "Error encoding object to JSON", "err", err, "object", PrintObject(v))
+				return fmt.Errorf("error encoding object to JSON: %v", err)
+			}
+			if err := os.WriteFile(jsonPath, jsonEncode, 0644); err != nil {
+				return fmt.Errorf("error writing JSON file: %v", err)
+			}
+		}
+	}
 	return nil
 }
 

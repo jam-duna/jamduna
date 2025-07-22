@@ -145,8 +145,8 @@ func TestRefineStateTransitions(t *testing.T) {
 	pvm.PvmLogging = false
 	pvm.PvmTrace = false
 
-	filename_stf := "test/00000020.bin"
-	filename_bundle := "test/00000020_0x7179353c50e937bf4a4ec4b566dda07253bc67f66c9e6a5bce8772171f6c0472_1_3_guarantor.bin"
+	filename_stf := "test/00000026.bin"
+	filename_bundle := "test/00000031_0xaf424b6f3b8444a383480ad0232d90798e04aa599fd77a46d301c579fb26ca31_0_0_guarantor.bin"
 
 	stf, err := ReadStateTransitions(filename_stf)
 	if err != nil {
@@ -165,7 +165,7 @@ func TestRefineStateTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
-	pvmBackends := []string{pvm.BackendRecompiler}
+	pvmBackends := []string{pvm.BackendRecompiler, pvm.BackendInterpreter, pvm.BackendRecompilerSandbox}
 	//pvmBackends := []string{pvm.BackendInterpreter}
 	for _, pvmBackend := range pvmBackends {
 		t.Run(fmt.Sprintf("pvmBackend=%s", pvmBackend), func(t *testing.T) {

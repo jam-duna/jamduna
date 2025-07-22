@@ -432,8 +432,8 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	}
 	if bundleSnapshot != nil {
 		// packageHash_coreIndex_slot_guarantor_follower
-		//desc := fmt.Sprintf("%s_%d_%s_%s", bundleSnapshot.Bundle.WorkPackage.Hash(), bundleSnapshot.CoreIndex, bundleSnapshot.Slot, "guarantor_follower")
-		//n.writeLogWithDescription(bundleSnapshot, bundleSnapshot.Slot, desc)
+		desc := fmt.Sprintf("%s_%d_%d_%s", bundleSnapshot.Bundle.WorkPackage.Hash(), bundleSnapshot.CoreIndex, bundleSnapshot.Slot, "guarantor_follower")
+		n.writeLogWithDescription(bundleSnapshot, bundleSnapshot.Slot, desc, false)
 	}
 
 	select {

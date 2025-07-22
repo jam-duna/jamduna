@@ -180,21 +180,22 @@ func (vm *VM) saveLogs() {
 	if skipSaveLog {
 		return
 	}
-	// decide filename
+
 	filePath := filepath.Join(vm.Backend, vm.serviceIDlog())
 
-	// open for append (create if missing), do NOT truncate
-	f, err := os.OpenFile(filePath,
-		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
-		0644,
-	)
+	dir := filepath.Dir(filePath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		log.Error(vm.logging, "Failed to create log directory", "dir", dir, "error", err)
+		return
+	}
+
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		log.Error(vm.logging, "Error opening log file for append", "file", filePath, "error", err)
 		return
 	}
 	defer f.Close()
 
-	// append each log entry as one JSON object per line
 	for _, entry := range vm.Logs {
 		data, err := json.Marshal(entry)
 		if err != nil {
@@ -205,7 +206,6 @@ func (vm *VM) saveLogs() {
 			log.Error(vm.logging, "Error writing JSON to file", "file", filePath, "error", err)
 			return
 		}
-		//fmt.Println(string(data))
 	}
 	vm.Logs = make([]VMLog, 0)
 }

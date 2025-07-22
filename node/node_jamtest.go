@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"runtime"
 	"strings"
 
 	"testing"
@@ -40,7 +41,8 @@ var manifest = flag.Bool("manifest", false, "manifest")
 var pvmBackend = flag.String("pvm_backend", pvm.BackendInterpreter, "PVM mode to use (interpreter, recompiler, sandbox)")
 
 const (
-	webServicePort = 8079
+	webServicePort    = 8079
+	runSamePvmbackend = true
 )
 
 func SetLevelDBPaths(numNodes int) []string {
@@ -138,9 +140,6 @@ func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
 		pvmBackend := pvm.BackendInterpreter
-		if i%2 == 1 && useRecompiler {
-			pvmBackend = pvm.BackendRecompiler
-		}
 		node, err := newNode(uint16(i), validatorSecrets[i], chainSpec, pvmBackend, epoch0Timestamp, peers, peerList, nodePaths[i], int(basePort)+i, jceMode)
 		if err != nil {
 			return nil, err
@@ -227,6 +226,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		serviceNames = []string{"fib", "auth_copy"}
 	case "fib":
 		serviceNames = []string{"fib", "auth_copy"}
+	case "algo":
+		serviceNames = []string{"algo", "auth_copy"}
 	case "fib2":
 		serviceNames = []string{"corevm", "auth_copy"}
 	case "game_of_life":
@@ -288,6 +289,19 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		if err != nil {
 			log.Crit(log.Node, "Error setting up nodes", "err", err)
 			return
+		}
+
+		for i := 0; i < numNodes; i++ {
+			if runSamePvmbackend {
+				nodes[i].SetPVMBackend(*pvmBackend)
+			} else {
+				if i%2 == 1 {
+					if useRecompiler && runtime.GOOS == "linux" {
+						recompilerBackend := pvm.BackendRecompiler
+						pvmBackend = &recompilerBackend
+					}
+				}
+			}
 		}
 
 		// Handling Safrole
@@ -387,6 +401,10 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 			service.ServiceCode = statedb.FibServiceCode
 			//continue
 		}
+		if serviceName == "algo" {
+			service.ServiceCode = statedb.AlgoServiceCode
+			//continue
+		}
 		workItem := types.WorkItem{
 			Service:            bootstrapService,
 			CodeHash:           bootstrapCodeHash,
@@ -483,6 +501,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		waitForTermination(tNode, "fallback", FallbackEpochLen, FallbackBufferTime, t)
 	case "fib":
 		fib(bNode, testServices, targetN)
+	case "algo":
+		algo(bNode, testServices, targetN)
 	case "rubic":
 		rubic(bNode, testServices, targetN)
 	case "fib2":

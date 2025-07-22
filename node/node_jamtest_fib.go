@@ -30,7 +30,7 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 		}
 	}
 	log.Info(log.Node, "FIB START", "targetN", targetN)
-	log.Info(log.Node, "FIB START", "fib", fib_serviceIdx, "auth", auth_serviceIdx)
+	log.Info(log.Node, "FIB START", "fib", fib_serviceIdx, "auth", auth_serviceIdx, "codeHash", service0.CodeHash)
 
 	isDry := false
 	var prevExportSegmentRoot common.Hash

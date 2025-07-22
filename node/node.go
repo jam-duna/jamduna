@@ -35,6 +35,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/grandpa"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
@@ -70,12 +71,12 @@ const (
 	TinyTimeout                = 2000 * time.Millisecond
 	MiniTimeout                = 300 * time.Second // TEMPORARY == revert back to 3s
 	SmallTimeout               = 6 * time.Second
-	NormalTimeout              = 9 * time.Second
+	NormalTimeout              = 900 * time.Second
 	MediumTimeout              = 10 * time.Second
 	LargeTimeout               = 12 * time.Second
 	VeryLargeTimeout           = 600 * time.Second
-	RefineTimeout              = 36 * time.Second
-	RefineAndAccumalateTimeout = 96 * time.Second
+	RefineTimeout              = 96 * time.Second        // 36
+	RefineAndAccumalateTimeout = (96 + 96) * time.Second // 96
 
 	useRecompiler      = true
 	fudgeFactorJCE     = 1
@@ -153,8 +154,7 @@ type NodeContent struct {
 }
 
 func NewNodeContent(id uint16, store *storage.StateDBStorage, pvmBackend string) NodeContent {
-	// removed pub since its not used
-	fmt.Printf("[N%v] NewNodeContent pvmBackend: %s\n", id, pvmBackend)
+	//fmt.Printf("[N%v] NewNodeContent pvmBackend: %s\n", id, pvmBackend)
 	return NodeContent{
 		id:                   id,
 		store:                store,
@@ -419,6 +419,28 @@ func PrintSpec(chainspec *chainspecs.ChainSpec) error {
 }
 func NewNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
 	return createNode(id, credential, chainspec, pvmBackend, epoch0Timestamp, peers, peerList, dataDir, port, JCEDefault)
+}
+
+func (n *Node) SetPVMBackend(pvm_mode string) {
+	mode := strings.ToUpper(pvm_mode)
+	var pvmBackend string
+	switch mode {
+	case "INTERPRETER":
+		pvmBackend = pvm.BackendInterpreter
+	case "COMPILER", "RECOMPILER", "X86":
+		if runtime.GOOS == "linux" {
+			pvmBackend = pvm.BackendRecompiler
+		} else {
+			log.Warn(log.Node, fmt.Sprintf("COMPILER Not Supported. Defaulting to interpreter"))
+		}
+	case "SANDBOX", "RECOMPILER_SANDBOX":
+		pvmBackend = pvm.BackendRecompilerSandbox
+	default:
+		log.Warn(log.Node, fmt.Sprintf("Unknown PVM mode [%s], defaulting to interpreter", pvm_mode))
+		pvmBackend = pvm.BackendInterpreter
+	}
+	n.pvmBackend = pvmBackend
+	log.Info(log.Node, fmt.Sprintf("PVM Backend: [%s]", mode))
 }
 
 func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, epoch0Timestamp uint64, peers []string, startPeerList map[uint16]*Peer, dataDir string, port int, jceMode string) (*Node, error) {
@@ -1904,10 +1926,10 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 		default:
 		}
 
-		if err := n.writeDebug(st, nextBlock.TimeSlot()); err != nil {
+		if err := n.writeDebug(st, nextBlock.TimeSlot(), true); err != nil {
 			log.Error(log.Node, "writeDebug: StateTransition", "err", err)
 		}
-		if err := n.writeDebug(newStateDB.JamState.Snapshot(&st.PostState, newStateDB.GetStateUpdates()), nextBlock.TimeSlot()); err != nil {
+		if err := n.writeDebug(newStateDB.JamState.Snapshot(&st.PostState, newStateDB.GetStateUpdates()), nextBlock.TimeSlot(), false); err != nil {
 			log.Error(log.Node, "writeDebug: Snapshot", "err", err)
 		}
 	}()
@@ -2510,7 +2532,7 @@ func (n *Node) SetSendTickets(sendTickets bool) {
 	n.sendTickets = sendTickets
 }
 
-func (n *Node) writeLogWithDescription(obj interface{}, timeslot uint32, description string) error {
+func (n *Node) writeLogWithDescription(obj interface{}, timeslot uint32, description string, withJSON bool) error {
 	if !n.WriteDebugFlag {
 		return nil
 	}
@@ -2519,10 +2541,10 @@ func (n *Node) writeLogWithDescription(obj interface{}, timeslot uint32, descrip
 		Timeslot:    timeslot,
 		Description: description,
 	}
-	return n.WriteLog(l)
+	return n.WriteLog(l, withJSON)
 }
 
-func (n *Node) writeDebug(obj interface{}, timeslot uint32) error {
+func (n *Node) writeDebug(obj interface{}, timeslot uint32, withJSON bool) error {
 	if !n.WriteDebugFlag {
 		return nil
 	}
@@ -2530,10 +2552,10 @@ func (n *Node) writeDebug(obj interface{}, timeslot uint32) error {
 		Payload:  obj,
 		Timeslot: timeslot,
 	}
-	return n.WriteLog(l)
+	return n.WriteLog(l, withJSON)
 }
 
-func (n *Node) WriteLog(logMsg storage.LogMessage) error {
+func (n *Node) WriteLog(logMsg storage.LogMessage, withJSON bool) error {
 	//msgType := getStructType(obj)
 	obj := logMsg.Payload
 	timeSlot := logMsg.Timeslot
@@ -2563,7 +2585,7 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 			path = fmt.Sprintf("%s/%08d_%s", structDir, timeSlot, description)
 		}
 
-		err := types.SaveObject(path, obj)
+		err := types.SaveObject(path, obj, withJSON)
 		if err != nil {
 			panic(err)
 		}
@@ -2571,7 +2593,7 @@ func (n *Node) WriteLog(logMsg storage.LogMessage) error {
 	return nil
 }
 
-func WriteSTFLog(stf *statedb.StateTransition, timeslot uint32, dataDir string) error {
+func WriteSTFLog(stf *statedb.StateTransition, timeslot uint32, dataDir string, withJSON bool) error {
 
 	structDir := fmt.Sprintf("%s/%vs", dataDir, "state_transition")
 
@@ -2588,7 +2610,7 @@ func WriteSTFLog(stf *statedb.StateTransition, timeslot uint32, dataDir string) 
 	if epoch == 0 && phase == 0 {
 		path = fmt.Sprintf("%s/genesis", structDir)
 	}
-	types.SaveObject(path, stf)
+	types.SaveObject(path, stf, withJSON)
 	return nil
 }
 
@@ -2899,7 +2921,7 @@ func (n *Node) runAuthoring() {
 					log.Crit(log.Node, "CompareStateRoot", "err", err)
 				}
 				st := buildStateTransitionStruct(oldstate, newBlock, newStateDB)
-				if err := n.writeDebug(st, timeslot); err != nil {
+				if err := n.writeDebug(st, timeslot, true); err != nil {
 					log.Error(log.Node, "runAuthoring:writeDebug", "err", err)
 				}
 				if revalidate {
@@ -2907,7 +2929,7 @@ func (n *Node) runAuthoring() {
 						log.Crit(log.Node, "runAuthoring:CheckStateTransition", "err", err)
 					}
 				}
-				if err := n.writeDebug(newStateDB.JamState.Snapshot(&(st.PostState), newStateDB.GetStateUpdates()), timeslot); err != nil {
+				if err := n.writeDebug(newStateDB.JamState.Snapshot(&(st.PostState), newStateDB.GetStateUpdates()), timeslot, true); err != nil {
 					log.Error(log.Node, "runAuthoring:writeDebug", "err", err)
 				}
 			}()
@@ -2934,7 +2956,7 @@ func (n *Node) runAuthoring() {
 			IsClosed := n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetTimeslot())
 			n.extrinsic_pool.RemoveUsedExtrinsicFromPool(newBlock, newStateDB.GetSafrole().Entropy[2], IsClosed)
 		case log := <-logChan:
-			go n.WriteLog(log)
+			go n.WriteLog(log, true)
 		}
 	}
 }

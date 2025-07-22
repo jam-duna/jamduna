@@ -249,7 +249,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 				if bundleSnapshot != nil {
 					// packageHash_coreIndex_slot_audit
 					desc := fmt.Sprintf("%s_%d_%d_%s", bundleSnapshot.Bundle.WorkPackage.Hash(), bundleSnapshot.CoreIndex, n.id, "guarantor")
-					n.writeLogWithDescription(bundleSnapshot, bundleSnapshot.Slot, desc)
+					n.writeLogWithDescription(bundleSnapshot, bundleSnapshot.Slot, desc, false)
 				}
 				guarantee.Report = report
 				signerSecret := n.GetEd25519Secret()

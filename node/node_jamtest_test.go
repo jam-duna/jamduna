@@ -99,6 +99,16 @@ func TestFib(t *testing.T) {
 	jamtest(t, "fib", targetN)
 }
 
+func TestAlgo(t *testing.T) {
+	initPProf(t)
+	pvm.UseTally = true
+	targetN := TargetedN_Fib
+	if *targetNum > 0 {
+		targetN = *targetNum
+	}
+	jamtest(t, "algo", targetN)
+}
+
 func TestFib2(t *testing.T) {
 	initPProf(t)
 	targetN := TargetedN_Fib

@@ -1692,7 +1692,7 @@ type VMLog struct {
 var VMsCompare = true
 
 var hiResGasRangeStart = int64(1)
-var hiResGasRangeEnd = int64(99999999999999999)
+var hiResGasRangeEnd = int64(2) // tmp
 var BBSampleRate = 20_000_000
 var RecordLogSampleRate = 1
 

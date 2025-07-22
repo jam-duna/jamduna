@@ -206,8 +206,11 @@ const (
 	BootstrapServiceFile  = "/services/bootstrap.pvm"
 	BootStrapNullAuthFile = "/services/null_authorizer.pvm"
 
-	FibServiceCode = 10
+	FibServiceCode = 15
 	FibServiceFile = "/services/fib.pvm"
+
+	AlgoServiceCode = 10
+	AlgoServiceFile = "/services/algo.pvm"
 
 	AuthCopyServiceCode = 20
 	AuthCopyServiceFile = "/services/auth_copy.pvm"

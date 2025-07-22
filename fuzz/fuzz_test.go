@@ -142,7 +142,7 @@ func WriteLog(baseDir string, fuzz_mode string, jamErrorIdentifier string, epoch
 	timeSlot := epoch*types.EpochLength + phase
 	path := fmt.Sprintf("%s/%08d_%v", structDir, timeSlot, jamErrorIdentifier)
 	if obj != nil {
-		types.SaveObject(path, obj)
+		types.SaveObject(path, obj, true)
 		fmt.Printf("Saved %v to %v\n", fuzz_mode, path)
 	}
 	return nil

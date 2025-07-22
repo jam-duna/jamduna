@@ -1077,7 +1077,7 @@ func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32,
 			}
 			// see if ticket exists in valid_tickets
 			ticket_hash := t.Hash()
-			ticket_id, ticketWasValid := valid_tickets[ticket_hash]
+			ticket_id, ticketWasValid := valid_tickets[ticket_hash] // TODO: potential concurrent map read and map write issue
 			var err error
 			if !ticketWasValid {
 				ticket_id, err = s2.ValidateProposedTicket(&t, isShifted)
