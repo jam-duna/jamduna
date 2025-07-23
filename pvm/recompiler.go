@@ -11,8 +11,10 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"golang.org/x/arch/x86/x86asm"
@@ -499,8 +501,8 @@ func (vm *RecompilerVM) ExecuteX86Code(x86code []byte) (err error) {
 		}
 		// write the djumpTableFunc to the file
 	}
-	str := vm.Disassemble(vm.realCode)
 	if showDisassembly {
+		str := vm.Disassemble(vm.realCode)
 		fmt.Printf("ALL COMBINED Disassembled x86 code:\n%s\n", str)
 	}
 	crashed, msec, err := ExecuteX86(codeAddr, vm.regDumpMem)
@@ -543,6 +545,7 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(x86code []byte, entry uint32) (e
 			err = fmt.Errorf("ExecuteX86Code panic: %v", r)
 		}
 	}()
+	startTime := time.Now()
 	vm.initDJumpFunc(len(x86code))
 	codeAddr, err := syscall.Mmap(
 		-1, 0, len(x86code)+len(vm.djumpTableFunc),
@@ -626,10 +629,13 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(x86code []byte, entry uint32) (e
 		}
 		// write the djumpTableFunc to the file
 	}
-	str := vm.Disassemble(vm.realCode)
+
 	if showDisassembly {
+		str := vm.Disassemble(vm.realCode)
 		fmt.Printf("ALL COMBINED Disassembled x86 code:\n%s\n", str)
 	}
+	vm.compileTime += common.Elapsed(startTime)
+	startTime = time.Now()
 	crashed, msec, err := ExecuteX86(codeAddr, vm.regDumpMem)
 	vm.SetIdentifier(fmt.Sprintf("%d", msec))
 	for i := 0; i < regSize; i++ {
@@ -663,13 +669,17 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(x86code []byte, entry uint32) (e
 		}
 		vm.Ram.WriteRegister(i, regValue)
 	}
+	vm.executionTime = common.Elapsed(startTime)
 	return nil
 }
 
 func (rvm *RecompilerVM) Execute(entry uint32) {
+	startTime := time.Now()
 	rvm.pc = 0
+
 	rvm.initStartCode()
 	rvm.Compile(rvm.pc)
+	rvm.compileTime = common.Elapsed(startTime)
 	if err := rvm.ExecuteX86CodeWithEntry(rvm.x86Code, entry); err != nil {
 		// we don't have to return this , just print it
 		fmt.Printf("ExecuteX86 crash detected: %v\n", err)

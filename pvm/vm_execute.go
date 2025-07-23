@@ -147,44 +147,42 @@ func (vm *RecompilerVM) translateBasicBlock(startPC uint64) *BasicBlock {
 	// translate the instructions to x86 code
 	var code []byte
 	for i, inst := range block.Instructions {
+		codeLen := len(code)
+		if i == 0 {
+			pvm_pc := uint32(inst.Pc)
+			pc_addr := vm.pc_addr
+			if vm.isPCCounting {
+				code = append(code, GenerateMovMemImm(uint64(pc_addr), pvm_pc)...)
+			}
+			if useEcalli500 {
+				Ecallcode := append(vm.DumpRegisterToMemory(true), EmitCallToEcalliStub(uintptr(unsafe.Pointer(vm)), int(500))...)
+				Ecallcode = append(Ecallcode, vm.RestoreRegisterInX86()...)
+				code = append(code, Ecallcode...)
+			}
+			if vm.isChargingGas {
+				gasMemAddr := uint64(vm.regDumpAddr + uintptr(len(regInfoList)*8))
+				code = append(code, generateGasCheck(gasMemAddr, uint32(block.GasUsage))...)
+			}
+			if vm.IsBlockCounting {
+				basicBlockCounterAddr := pc_addr + 8
+				code = append(code, generateIncMem(basicBlockCounterAddr)...)
+			}
+		}
 		if inst.Opcode == ECALLI {
 			// 1. Dump registers to memory.
 			// 2. Set up C ABI registers (rdi, esi).
 			opcode := uint32(types.DecodeE_l(inst.Args))
 			Ecallcode := append(vm.DumpRegisterToMemory(true), EmitCallToEcalliStub(uintptr(unsafe.Pointer(vm)), int(opcode))...)
 			Ecallcode = append(Ecallcode, vm.RestoreRegisterInX86()...)
-			codeLen := len(code)
 			code = append(code, Ecallcode...)
 			block.pvmPC_TO_x86Index[uint32(inst.Pc)] = codeLen
 		} else if inst.Opcode == SBRK {
 			dstIdx, srcIdx := extractTwoRegisters(inst.Args)
 			Sbrkcode := append(vm.DumpRegisterToMemory(true), EmitCallToSbrkStub(uintptr(unsafe.Pointer(vm)), uint32(srcIdx), uint32(dstIdx))...)
 			Sbrkcode = append(Sbrkcode, vm.RestoreRegisterInX86()...)
-			codeLen := len(code)
 			code = append(code, Sbrkcode...)
 			block.pvmPC_TO_x86Index[uint32(inst.Pc)] = codeLen
 		} else if translateFunc, ok := pvmByteCodeToX86Code[inst.Opcode]; ok {
-			codeLen := len(code)
-			if i == 0 {
-				pvm_pc := uint32(inst.Pc)
-				pc_addr := vm.pc_addr
-				if vm.isPCCounting {
-					code = append(code, GenerateMovMemImm(uint64(pc_addr), pvm_pc)...)
-				}
-				if useEcalli500 {
-					Ecallcode := append(vm.DumpRegisterToMemory(true), EmitCallToEcalliStub(uintptr(unsafe.Pointer(vm)), int(500))...)
-					Ecallcode = append(Ecallcode, vm.RestoreRegisterInX86()...)
-					code = append(code, Ecallcode...)
-				}
-				if vm.isChargingGas {
-					gasMemAddr := uint64(vm.regDumpAddr + uintptr(len(regInfoList)*8))
-					code = append(code, generateGasCheck(gasMemAddr, uint32(block.GasUsage))...)
-				}
-				if vm.IsBlockCounting {
-					basicBlockCounterAddr := pc_addr + 8
-					code = append(code, generateIncMem(basicBlockCounterAddr)...)
-				}
-			}
 			if i == len(block.Instructions)-1 {
 				block.LastInstructionOffset = len(code)
 			}
@@ -212,8 +210,9 @@ func (vm *RecompilerVM) translateBasicBlock(startPC uint64) *BasicBlock {
 	vm.x86Blocks[block.X86PC] = block
 
 	vm.appendBlock(block)
-	str := vm.Disassemble(block.X86Code)
+
 	if showDisassembly {
+		str := vm.Disassemble(block.X86Code)
 		fmt.Printf("Translated block at PVM PC %d to x86 PC %x with %d instructions: %s\n%s", startPC, block.X86PC, len(block.Instructions), block.String(), str)
 	}
 	return block

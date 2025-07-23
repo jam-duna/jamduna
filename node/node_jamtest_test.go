@@ -7,8 +7,6 @@ import (
 	"flag"
 	"fmt"
 	_ "net/http/pprof"
-	"os"
-	"runtime/pprof"
 	"testing"
 
 	"github.com/colorfulnotion/jam/pvm"
@@ -40,35 +38,6 @@ const (
 
 var targetNum = flag.Int("targetN", -1, "targetN")
 
-func initPProf(t *testing.T) {
-	// CPU profile
-	cpuF, err := os.Create("cpu.pprof")
-	if err != nil {
-		t.Fatalf("could not create cpu profile: %v", err)
-	}
-	if err := pprof.StartCPUProfile(cpuF); err != nil {
-		t.Fatalf("could not start cpu profile: %v", err)
-	}
-	// ensure we stop CPU profiling and close file
-	t.Cleanup(func() {
-		pprof.StopCPUProfile()
-		cpuF.Close()
-	})
-
-	// heap profile
-	memF, err := os.Create("mem.pprof")
-	if err != nil {
-		t.Fatalf("could not create mem profile: %v", err)
-	}
-	// write heap at end
-	t.Cleanup(func() {
-		if err := pprof.WriteHeapProfile(memF); err != nil {
-			t.Fatalf("could not write heap profile: %v", err)
-		}
-		memF.Close()
-	})
-}
-
 // IMPORTANT:
 // THIS FILE IS THE DEPLOYER FOR JAM TEST
 // DONT PUT ANY INTERNAL TEST LOGIC HERE. KEEP IT SIMPLE!
@@ -91,7 +60,7 @@ func TestRubic(t *testing.T) {
 
 func TestFib(t *testing.T) {
 	initPProf(t)
-	pvm.UseTally = true
+	pvm.UseTally = false
 	targetN := TargetedN_Fib
 	if *targetNum > 0 {
 		targetN = *targetNum
@@ -101,7 +70,7 @@ func TestFib(t *testing.T) {
 
 func TestAlgo(t *testing.T) {
 	initPProf(t)
-	pvm.UseTally = true
+	pvm.UseTally = false
 	targetN := TargetedN_Fib
 	if *targetNum > 0 {
 		targetN = *targetNum

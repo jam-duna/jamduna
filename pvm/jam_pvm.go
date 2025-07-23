@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -48,20 +49,29 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	vm.Authorization = authorization.Ok
 	vm.Extrinsics = extrinsics
 	vm.Imports = importsegments
+	startTime := time.Now()
+	initTime := startTime
 	switch vm.Backend {
 	case BackendInterpreter:
 		vm.Standard_Program_Initialization(a) // eq 264/265
+		vm.standardInitTime = common.Elapsed(startTime)
+		startTime = time.Now()
 		vm.Execute(types.EntryPointRefine, false, nil)
+		vm.executionTime = common.Elapsed(startTime)
 	case BackendRecompilerSandbox:
+
 		rvm, err := NewRecompilerSandboxVM(vm)
 		if err != nil {
 			log.Error(vm.logging, "RecompilerVM creation failed", "error", err)
 			return
 		}
+		vm.initializationTime = common.Elapsed(startTime)
+		startTime = time.Now()
 		if err = rvm.Standard_Program_Initialization_SandBox(a); err != nil {
 			log.Error(vm.logging, "RecompilerVM Standard_Program_Initialization failed", "error", err)
 			return
 		} // eq 264/265
+		vm.standardInitTime = common.Elapsed(startTime)
 		rvm.ExecuteSandBox(types.EntryPointRefine)
 	case BackendRecompiler:
 		rvm, err := NewRecompilerVM(vm)
@@ -69,10 +79,13 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 			log.Error(vm.logging, "RecompilerVM creation failed", "error", err)
 			return
 		}
+		vm.initializationTime = common.Elapsed(startTime)
+		startTime = time.Now()
 		if err = rvm.Standard_Program_Initialization(a); err != nil {
 			log.Error(vm.logging, "RecompilerVM Standard_Program_Initialization failed", "error", err)
 			return
 		} // eq 264/265
+		vm.standardInitTime = common.Elapsed(startTime)
 		rvm.Execute(types.EntryPointRefine)
 	default:
 		log.Crit(vm.logging, "Unknown VM mode", "mode", vm.Backend)
@@ -85,8 +98,42 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	log.Trace(vm.logging, string(vm.ServiceMetadata), "Result", r.String(), "pc", vm.pc, "fault_address", vm.Fault_address, "resultCode", vm.ResultCode)
 
 	exportedSegments = vm.Exports
+
+	AllExecutionTimes := common.Elapsed(initTime)
+	if RecordTime {
+		fmt.Printf("=== VM %s Execution Summary (service %s, %d bytes)===\n", vm.Backend, string(vm.ServiceMetadata), len(vm.code))
+		fmt.Printf("%-15s  %-12s  %8s\n", "Phase", "Duration", "Percent")
+
+		phases := []struct {
+			name string
+			time uint32
+		}{
+			{"Initialization", vm.initializationTime},
+			{"StandardInit", vm.standardInitTime},
+			{"Compile", vm.compileTime},
+			{"Execution", vm.executionTime},
+		}
+
+		for _, p := range phases {
+			pct := float64(p.time) / float64(AllExecutionTimes) * 100
+			fmt.Printf("%-15s  %-12s  %7.2f%%\n",
+				p.name,
+				common.FormatElapsed(p.time),
+				pct,
+			)
+		}
+
+		// total doesn’t need a percent
+		fmt.Printf("%-15s  %-12s\n",
+			"Total",
+			common.FormatElapsed(AllExecutionTimes),
+		)
+	}
+
 	return r, res, exportedSegments
 }
+
+var RecordTime = false
 
 func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.AccumulateOperandElements, X *types.XContext, n common.Hash) (r types.Result, res uint64, xs *types.ServiceAccount) {
 

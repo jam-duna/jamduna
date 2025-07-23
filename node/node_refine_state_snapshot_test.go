@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"runtime/pprof"
 
 	"testing"
 
@@ -138,15 +139,44 @@ func ReadBundleSnapshot(filename string) (stf *types.WorkPackageBundleSnapshot, 
 	stf = &st // Assign the address of the resulting value to the pointer 'stf'.
 	return stf, nil
 }
+func initPProf(t *testing.T) {
+	// CPU profile
+	cpuF, err := os.Create("cpu.pprof")
+	if err != nil {
+		t.Fatalf("could not create cpu profile: %v", err)
+	}
+	if err := pprof.StartCPUProfile(cpuF); err != nil {
+		t.Fatalf("could not start cpu profile: %v", err)
+	}
+	// ensure we stop CPU profiling and close file
+	t.Cleanup(func() {
+		pprof.StopCPUProfile()
+		cpuF.Close()
+	})
+
+	// heap profile
+	memF, err := os.Create("mem.pprof")
+	if err != nil {
+		t.Fatalf("could not create mem profile: %v", err)
+	}
+	// write heap at end
+	t.Cleanup(func() {
+		if err := pprof.WriteHeapProfile(memF); err != nil {
+			t.Fatalf("could not write heap profile: %v", err)
+		}
+		memF.Close()
+	})
+}
 
 // rm recompiler_sandbox/2805406230_refine.json
 // go test -run=TestRefineStateTransitions
 func TestRefineStateTransitions(t *testing.T) {
 	pvm.PvmLogging = false
 	pvm.PvmTrace = false
-
-	filename_stf := "test/00000026.bin"
-	filename_bundle := "test/00000031_0xaf424b6f3b8444a383480ad0232d90798e04aa599fd77a46d301c579fb26ca31_0_0_guarantor.bin"
+	pvm.RecordTime = true
+	initPProf(t)
+	filename_stf := "test/00000030.bin"
+	filename_bundle := "test/00000031_0x7f8d1854158c7acaba1c3a74accf501a9be01d282c38c3eb141a9c6132faeaf5_0_0_guarantor.bin"
 
 	stf, err := ReadStateTransitions(filename_stf)
 	if err != nil {
@@ -165,7 +195,7 @@ func TestRefineStateTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
-	pvmBackends := []string{pvm.BackendRecompiler, pvm.BackendInterpreter, pvm.BackendRecompilerSandbox}
+	pvmBackends := []string{pvm.BackendRecompiler} //, pvm.BackendInterpreter, pvm.BackendRecompilerSandbox}
 	//pvmBackends := []string{pvm.BackendInterpreter}
 	for _, pvmBackend := range pvmBackends {
 		t.Run(fmt.Sprintf("pvmBackend=%s", pvmBackend), func(t *testing.T) {

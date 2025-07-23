@@ -125,6 +125,11 @@ type VM struct {
 	basicBlockExecutionCounter map[uint64]int // PVM PC to execution count
 
 	OP_tally map[string]*X86InstTally `json:"tally"`
+
+	initializationTime uint32 // time taken to initialize the VM
+	standardInitTime   uint32
+	compileTime        uint32
+	executionTime      uint32
 }
 
 type Program struct {

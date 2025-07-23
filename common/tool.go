@@ -396,7 +396,20 @@ func BytesToHexStr(v interface{}) interface{} {
 func Elapsed(startTime time.Time) uint32 {
 	return uint32(time.Since(startTime).Microseconds())
 }
-
+func FormatElapsed(micros uint32) string {
+	duration := time.Duration(micros) * time.Microsecond
+	return formatDuration(duration)
+}
+func formatDuration(d time.Duration) string {
+	if d < time.Microsecond {
+		return fmt.Sprintf("%dns", d.Nanoseconds())
+	} else if d < time.Millisecond {
+		return fmt.Sprintf("%.0fµs", d.Seconds()*1e6)
+	} else if d < time.Second {
+		return fmt.Sprintf("%.3fms", d.Seconds()*1e3)
+	}
+	return d.String()
+}
 func ElapsedStr(startTime time.Time) time.Duration {
 	return time.Since(startTime)
 }

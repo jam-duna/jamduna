@@ -866,14 +866,19 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 }
 
 func (rvm *RecompilerSandboxVM) ExecuteSandBox(entryPoint uint64) error {
+	startTime := time.Now()
 	rvm.initStartCode()
 	rvm.Compile(rvm.pc)
 
 	start := time.Now()
 	rvm.Patch(rvm.x86Code, uint32(entryPoint))
+	rvm.compileTime = common.Elapsed(startTime)
+
+	startTime = time.Now()
 	if execErr := rvm.ExecuteX86Code_SandBox_WithEntry(rvm.x86Code); execErr != nil {
 		fmt.Printf("ExecuteX86 crash detected: %v\n", execErr)
 	}
+
 	if UseTally {
 		// timestamp suffix
 		ts := time.Now().UnixMilli()
@@ -902,6 +907,7 @@ func (rvm *RecompilerSandboxVM) ExecuteSandBox(entryPoint uint64) error {
 		rvm.ResultCode,
 		time.Since(start),
 	)
+	rvm.executionTime = common.Elapsed(startTime)
 	return nil
 }
 

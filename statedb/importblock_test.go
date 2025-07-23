@@ -140,7 +140,7 @@ func TestStateTransitionNoSandbox(t *testing.T) {
 func TestStateTransitionSandbox(t *testing.T) {
 	pvm.VMsCompare = true // enable VM comparison for this test
 	pvm.PvmLogging = true
-	pvm.UseTally = true          // enable tally for this test
+	pvm.UseTally = false         // enable tally for this test
 	pvm.SetUseEcalli500(false)   // use ecalli500 for log check in x86
 	pvm.SetDebugRecompiler(true) // enable debug mode for recompiler
 	filename := "./00000019.json"

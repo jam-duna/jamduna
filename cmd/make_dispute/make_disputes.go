@@ -271,7 +271,7 @@ func main() {
 			fmt.Printf("\033[1;31mError making disputes: %v\033[0m\n", err)
 		}
 		if dispute_stf != nil && disputable {
-			err = node.WriteSTFLog(dispute_stf, dispute_stf.Block.TimeSlot(), "../importblocks/rawdata/disputes")
+			err = node.WriteSTFLog(dispute_stf, dispute_stf.Block.TimeSlot(), "../importblocks/rawdata/disputes", false)
 			if err != nil {
 				fmt.Printf("\033[1;31mError writing dispute state transition: %v\033[0m\n", err)
 			} else {
