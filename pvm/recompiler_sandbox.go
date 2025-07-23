@@ -675,7 +675,8 @@ func (vm *RecompilerSandboxVM) Patch(x86code []byte, entry uint32) (err error) {
 			// replace it with the actual entry patch
 			binary.LittleEndian.PutUint32(x86code[i+1:i+5], uint32(x86PC-i-5))
 			if showDisassembly {
-				fmt.Printf("Patching entry point at index %d with 0x%X\n", patchInstIdx, entryPatchImm)
+				fmt.Printf("Patching entry point at index %d with 0x%X\n",
+					patchInstIdx, entryPatchImm)
 			}
 			break
 		}
@@ -903,8 +904,7 @@ func (rvm *RecompilerSandboxVM) ExecuteSandBox(entryPoint uint64) error {
 		rvm.Gas = int64(gas)
 	}
 	fmt.Printf(
-		"**** ExecuteSandBox SERVICE %d %s finished, ResultCode: %d Time: %s\n",
-		rvm.Service_index,
+		"**** ExecuteSandBox %s finished, ResultCode: %d Time: %s\n",
 		rvm.Mode,
 		rvm.ResultCode,
 		time.Since(start),

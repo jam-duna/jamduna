@@ -138,10 +138,25 @@ func (sn *StateSnapshot) Raw() *StateSnapshotRaw {
 	return &snapshotRaw
 }
 
-func (kv KeyVal) MarshalJSON() ([]byte, error) {
+func (kv KeyVal) MarshalJSON_OLD() ([]byte, error) {
 	aux := kvAlias{
 		Key:   common.HexString(kv.Key[0:31]), // 31 byte keys
 		Value: common.HexString(kv.Value),
+	}
+	return json.Marshal(aux)
+}
+
+func BytesToHex(b []byte) string {
+	// hex.EncodeToString is highly optimized.
+	// The "0x" is prepended in a single, efficient string allocation.
+	return "0x" + hex.EncodeToString(b)
+}
+
+func (kv KeyVal) MarshalJSON() ([]byte, error) {
+	aux := kvAlias{
+		// Call the new, fast, and type-safe function.
+		Key:   BytesToHex(kv.Key[0:31]),
+		Value: BytesToHex(kv.Value),
 	}
 	return json.Marshal(aux)
 }

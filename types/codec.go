@@ -530,7 +530,7 @@ func DecodeWithRemainder(data []byte, t reflect.Type) (value interface{}, remain
 }
 func SaveObject(path string, obj interface{}, withJSON bool) error {
 	//saveObjectSerialized(path, obj, withJSON)
-	return saveObjectConcurrent(path, obj, false)
+	return saveObjectConcurrent(path, obj, true)
 }
 
 func saveObjectConcurrent(path string, obj interface{}, withJSON bool) error {
