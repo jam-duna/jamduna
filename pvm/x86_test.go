@@ -463,7 +463,7 @@ func recompiler_test(tc TestCase) error {
 	}
 	rvm.Close()
 
-	resultCodeStr := types.ResultCodeToString[resultCode]
+	resultCodeStr := types.HostResultCodeToString[resultCode]
 	if resultCodeStr == "page-fault" {
 		resultCodeStr = "panic"
 	}
@@ -730,7 +730,7 @@ func recompiler_sandbox_test(tc TestCase) error {
 		return nil
 	}
 	rvm.Close()
-	resultCodeStr := types.ResultCodeToString[resultCode]
+	resultCodeStr := types.HostResultCodeToString[resultCode]
 	if resultCodeStr == "page-fault" {
 		resultCodeStr = "panic"
 	}

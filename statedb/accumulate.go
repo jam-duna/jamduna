@@ -603,12 +603,12 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	r, _, _ := vm.ExecuteAccumulate(t, s, g, p, xContext, sd.JamState.SafroleState.Entropy[0])
 
 	exceptional = false
-	if r.Err == types.RESULT_OOG || r.Err == types.RESULT_PANIC {
+	if r.Err == types.WORKRESULT_OOG || r.Err == types.WORKRESULT_PANIC {
 		exceptional = true
 		output_b = vm.Y.Y
 		output_u = g - uint64(max(vm.Gas, 0))
 		xy = &(vm.Y)
-		if r.Err == types.RESULT_OOG {
+		if r.Err == types.WORKRESULT_OOG {
 			log.Trace(sd.Authoring, "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
 		} else {
 			log.Trace(sd.Authoring, "BEEFY PANIC @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)

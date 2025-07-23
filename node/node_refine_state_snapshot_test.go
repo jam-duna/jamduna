@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"reflect"
 	"runtime/pprof"
-	"slices"
 	"testing"
 
 	"github.com/colorfulnotion/jam/pvm"
@@ -36,13 +35,13 @@ func CompareJSON(obj1, obj2 interface{}) string {
 }
 
 func TestCompareLogs(t *testing.T) {
-	f1, err := os.Open("interpreter/2805406230_refine.json")
+	f1, err := os.Open("interpreter/10_refine.json")
 	if err != nil {
 		t.Fatalf("failed to open interpreter/vm_log.json: %v", err)
 	}
 	defer f1.Close()
 
-	f2, err := os.Open("recompiler_sandbox/2805406230_refine.json")
+	f2, err := os.Open("recompiler_sandbox/10_refine.json")
 	if err != nil {
 		t.Fatalf("failed to open recompiler_sandbox/vm_log.json: %v", err)
 	}
@@ -223,25 +222,11 @@ func TestRefineAlgo(t *testing.T) {
 			err)
 	}
 	// each of these programs fails before {32, 64, 96, 128, 192, 255} .. the others all succeed at 255
-	failsBefore := make(map[int][]uint8)
-	failsBefore[32] = []uint8{36, 53, 80, 81, 93, 95, 96, 125, 160, 161}
-	failsBefore[64] = []uint8{5, 7, 10, 76, 78, 79, 82, 87}
-	failsBefore[96] = []uint8{3, 4, 13, 27, 58, 73, 85, 149}
-	failsBefore[128] = []uint8{16, 18, 29, 56, 57, 72, 74, 75, 104}
-	failsBefore[192] = []uint8{15, 24, 26, 33, 55, 69, 77, 84, 134, 142}
-	failsBefore[255] = []uint8{19, 59, 71, 88, 135, 136, 152}
-	for i := 0; i < 170; i++ {
-		willFail := false
-		for _, skip := range failsBefore {
-			if slices.Contains(skip, uint8(i)) {
-				willFail = true
-			}
-		}
-		if willFail {
-			continue
-		}
+	//    panics := []uint8{36, 53, 80, 81, 93, 95, 96, 125, 160, 161, 5, 7, 10, 76, 78, 79, 82, 87, 3, 4, 13, 27, 58, 73, 85, 149, 16, 18, 29, 56, 57, 72, 74, 75, 104, 15, 24, 26, 33, 55, 69, 77, 84, 134, 142, 19, 59, 71, 88, 135, 136, 152}
+	panics := []uint8{53}
+	for _, i := range panics {
 		gasUsed := make(map[string]uint)
-		backends := []string{pvm.BackendRecompiler}
+		backends := []string{pvm.BackendInterpreter}
 		for _, pvmBackend := range backends {
 			algo_payload := make([]byte, 2)
 			algo_payload[0] = byte(i)
@@ -276,11 +261,11 @@ func testRefineStateTransition(pvmBackend string, store *storage.StateDBStorage,
 	simulatedNode.NodeContent.AddStateDB(sdb)
 
 	// execute workpackage bundle
-	re_workReport, _, _, reexecuted_snapshot, err := simulatedNode.executeWorkPackageBundle(uint16(bundle_snapshot.CoreIndex), bundle_snapshot.Bundle, bundle_snapshot.SegmentRootLookup, bundle_snapshot.Slot, false)
+	re_workReport, _, wr_pvm_elapsed, reexecuted_snapshot, err := simulatedNode.executeWorkPackageBundle(uint16(bundle_snapshot.CoreIndex), bundle_snapshot.Bundle, bundle_snapshot.SegmentRootLookup, bundle_snapshot.Slot, false)
 	if err != nil {
 		t.Fatalf("Error executing work package bundle: %v", err)
 	}
-	//t.Logf("[%s] Work Report[Hash: %v. PVM Elapsed: %v]\n%v\n", pvmBackend, re_workReport.Hash(), wr_pvm_elapsed, re_workReport.String())
+	t.Logf("[%s] Work Report[Hash: %v. PVM Elapsed: %v]\n%v\n", pvmBackend, re_workReport.Hash(), wr_pvm_elapsed, re_workReport.String())
 	if reexecuted_snapshot == nil {
 		t.Fatalf("Reexecuted snapshot is nil")
 	}

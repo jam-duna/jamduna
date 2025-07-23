@@ -96,7 +96,6 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	vm.saveLogs()
 
 	log.Trace(vm.logging, string(vm.ServiceMetadata), "Result", r.String(), "pc", vm.pc, "fault_address", vm.Fault_address, "resultCode", vm.ResultCode)
-
 	exportedSegments = vm.Exports
 
 	AllExecutionTimes := common.Elapsed(initTime)
@@ -337,8 +336,8 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Resul
 	return r
 }
 func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
-	if vm.ResultCode == types.RESULT_OOG {
-		r.Err = types.RESULT_OOG
+	if vm.ResultCode == types.WORKRESULT_OOG {
+		r.Err = types.WORKRESULT_OOG
 		log.Debug(vm.logging, "getArgumentOutputs - OOG", "service", string(vm.ServiceMetadata))
 		return r, 0
 	}
@@ -346,15 +345,15 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 	o, _ := vm.Ram.ReadRegister(7)
 	l, _ := vm.Ram.ReadRegister(8)
 	output, res := vm.Ram.ReadRAMBytes(uint32(o), uint32(l))
-	if vm.ResultCode == types.RESULT_OK && res == 0 {
+	if vm.ResultCode == types.WORKRESULT_OK && res == 0 {
 		r.Ok = output
 		return r, res
 	}
-	if vm.ResultCode == types.RESULT_OK && res != 0 {
+	if vm.ResultCode == types.WORKRESULT_OK && res != 0 {
 		r.Ok = []byte{}
 		return r, res
 	}
-	r.Err = types.RESULT_PANIC
+	r.Err = types.WORKRESULT_PANIC
 	log.Debug(vm.logging, "getArgumentOutputs - PANIC", "result", vm.ResultCode, "mode", vm.Mode, "service", string(vm.ServiceMetadata))
 	return r, 0
 }

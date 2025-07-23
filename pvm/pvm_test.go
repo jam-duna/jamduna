@@ -73,7 +73,7 @@ func pvm_test(tc TestCase) error {
 		return nil
 	}
 
-	resultCodeStr := types.ResultCodeToString[resultCode]
+	resultCodeStr := types.HostResultCodeToString[resultCode]
 	if resultCodeStr == "page-fault" {
 		resultCodeStr = "panic"
 	}

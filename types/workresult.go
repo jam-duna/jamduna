@@ -19,25 +19,10 @@ const (
 	WORKRESULT_BIG        = 6
 )
 
-const (
-	RESULT_OK    = 0 // regular halt ∎
-	RESULT_PANIC = 1 // panic ☇
-	RESULT_FAULT = 2 // page-fault F
-	RESULT_HOST  = 3 // host-call̵ h
-	RESULT_OOG   = 4 // out-of-gas ∞
-)
-
-var ResultCodeToString map[uint8]string = map[uint8]string{
-	RESULT_OK:    "halt",
-	RESULT_OOG:   "out-of-gas",
-	RESULT_PANIC: "panic",
-	RESULT_HOST:  "host-call",
-	//RESULT_BAD_EXPORT: "bad-exports",
-	//RESULT_BAD:        "bad-code",
-	//RESULT_BIG: "code-oversize",
-	//RESULT_HALT:       "halt",
-	//RESULT_PANIC:      "panic",
-	RESULT_FAULT: "page-fault",
+var HostResultCodeToString map[uint8]string = map[uint8]string{
+	WORKRESULT_OK:    "halt",
+	WORKRESULT_OOG:   "out-of-gas",
+	WORKRESULT_PANIC: "panic",
 }
 
 // 11.1.4. Work Result. Equation 11.6. We finally come to define a work result, L, which is the data conduit by which services’ states may be altered through the computation done within a work-package.
@@ -69,7 +54,7 @@ type Result struct {
 }
 
 func (R Result) Encode() []byte {
-	if R.Err == RESULT_OK {
+	if R.Err == WORKRESULT_OK {
 		ok_byte := R.Ok
 		encodedOk, err := Encode(ok_byte)
 		if err != nil {
@@ -164,19 +149,19 @@ func (a *WorkResult) UnmarshalJSON(data []byte) error {
 	if _, ok := s.Result["ok"]; ok {
 		result = Result{
 			Ok:  common.FromHex(s.Result["ok"].(string)),
-			Err: RESULT_OK,
+			Err: WORKRESULT_OK,
 		}
 	}
 	if _, ok := s.Result["out-of-gas"]; ok {
 		result = Result{
 			Ok:  nil,
-			Err: RESULT_OOG,
+			Err: WORKRESULT_OOG,
 		}
 	}
 	if _, ok := s.Result["panic"]; ok {
 		result = Result{
 			Ok:  nil,
-			Err: RESULT_PANIC,
+			Err: WORKRESULT_PANIC,
 		}
 	}
 	if _, ok := s.Result["bad-exports"]; ok {
@@ -214,7 +199,7 @@ func (a *WorkResult) UnmarshalJSON(data []byte) error {
 
 func (a WorkResult) MarshalJSON() ([]byte, error) {
 	var result map[string]interface{}
-	if a.Result.Err == RESULT_OK {
+	if a.Result.Err == WORKRESULT_OK {
 		result = map[string]interface{}{
 			"ok": common.HexString(a.Result.Ok),
 		}

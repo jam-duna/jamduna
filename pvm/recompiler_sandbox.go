@@ -485,6 +485,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox(x86code []byte) (err error
 			log.Error(vm.logging, "RecompilerVM ExecuteX86Code panic", "error", r)
 			debug.PrintStack()
 			vm.ResultCode = types.WORKRESULT_PANIC
+			vm.MachineState = PANIC
 			vm.terminated = true
 			vm.saveRegistersOnceSandBox()
 			vm.saveMemoryOnceSandBox()
@@ -572,7 +573,8 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox(x86code []byte) (err error
 			if vm.Gas < 0 {
 				fmt.Printf("⛔️ Gas limit exceeded at 0x%X\n",
 					addr)
-				vm.ResultCode = types.RESULT_OOG
+				vm.ResultCode = types.WORKRESULT_OOG
+				vm.MachineState = OOG
 				vm.terminated = true
 				vm.saveRegistersOnceSandBox()
 				vm.saveMemoryOnceSandBox()
@@ -611,6 +613,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox(x86code []byte) (err error
 	// --------------------------------------------------------------------
 	if err := vm.sandBox.Start(codeBase, codeBase+uint64(codeLen)); err != nil {
 		vm.ResultCode = types.WORKRESULT_PANIC
+		vm.MachineState = PANIC
 		vm.terminated = true
 		vm.saveRegistersOnceSandBox()
 		vm.saveMemoryOnceSandBox()
@@ -694,6 +697,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 			log.Error(vm.logging, "RecompilerVM ExecuteX86Code panic", "error", r)
 			debug.PrintStack()
 			vm.ResultCode = types.WORKRESULT_PANIC
+			vm.MachineState = PANIC
 			vm.terminated = true
 			vm.saveRegistersOnceSandBox()
 			vm.saveMemoryOnceSandBox()
@@ -804,7 +808,8 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 			if vm.Gas < 0 {
 				fmt.Printf("⛔️ Gas limit exceeded at 0x%X\n",
 					addr)
-				vm.ResultCode = types.RESULT_OOG
+				vm.ResultCode = types.WORKRESULT_OOG
+				vm.MachineState = OOG
 				vm.terminated = true
 				vm.saveRegistersOnceSandBox()
 				vm.saveMemoryOnceSandBox()
@@ -838,6 +843,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 	// --------------------------------------------------------------------
 	if err := vm.sandBox.Start(codeBase, codeBase+uint64(codeLen)); err != nil {
 		vm.ResultCode = types.WORKRESULT_PANIC
+		vm.MachineState = PANIC
 		vm.terminated = true
 		vm.saveRegistersOnceSandBox()
 		vm.saveMemoryOnceSandBox()
@@ -1389,6 +1395,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86CodeFromBreakPoint(x86code []byte, brea
 			log.Error(vm.logging, "RecompilerVM ExecuteX86Code panic", "error", r)
 			debug.PrintStack()
 			vm.ResultCode = types.WORKRESULT_PANIC
+			vm.MachineState = PANIC
 			vm.terminated = true
 			vm.saveRegistersOnceSandBox()
 			vm.saveMemoryOnceSandBox()
@@ -1479,7 +1486,8 @@ func (vm *RecompilerSandboxVM) ExecuteX86CodeFromBreakPoint(x86code []byte, brea
 			if vm.Gas < 0 {
 				fmt.Printf("⛔️ Gas limit exceeded at 0x%X\n",
 					addr)
-				vm.ResultCode = types.RESULT_OOG
+				vm.ResultCode = types.WORKRESULT_OOG
+				vm.MachineState = OOG
 				vm.terminated = true
 				vm.saveRegistersOnceSandBox()
 				vm.saveMemoryOnceSandBox()
@@ -1508,6 +1516,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86CodeFromBreakPoint(x86code []byte, brea
 	fmt.Printf("running from breakpoint 0x%X\n", breakpoint)
 	if err := vm.sandBox.Start(breakpoint, codeBase+uint64(codeLen)); err != nil {
 		vm.ResultCode = types.WORKRESULT_PANIC
+		vm.MachineState = PANIC
 		vm.terminated = true
 		vm.saveRegistersOnceSandBox()
 		vm.saveMemoryOnceSandBox()
