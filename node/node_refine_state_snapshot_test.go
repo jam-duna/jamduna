@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"runtime/pprof"
-
+	"slices"
 	"testing"
 
 	"github.com/colorfulnotion/jam/pvm"
@@ -168,7 +168,6 @@ func initPProf(t *testing.T) {
 	})
 }
 
-// rm recompiler_sandbox/2805406230_refine.json
 // go test -run=TestRefineStateTransitions
 func TestRefineStateTransitions(t *testing.T) {
 	pvm.PvmLogging = false
@@ -204,7 +203,67 @@ func TestRefineStateTransitions(t *testing.T) {
 	}
 }
 
-func testRefineStateTransition(pvmBackend string, store *storage.StateDBStorage, bundle_snapshot *types.WorkPackageBundleSnapshot, stf *statedb.StateTransition, t *testing.T) {
+func TestRefineAlgo(t *testing.T) {
+	pvm.PvmLogging = false
+	pvm.PvmTrace = false
+	pvm.RecordTime = false
+	initPProf(t)
+	filename_stf := "test/00000030.bin"
+	filename_bundle := "test/00000031_0x0a698c35d2c4ce8282c7384d1a937ab7dbf5f20af537309299873fedb7cb7c2d_0_0_guarantor.bin"
+
+	stf, err := ReadStateTransitions(filename_stf)
+	if err != nil {
+		t.Fatalf("failed to read state transition from file %s: %v", filename_stf,
+			err)
+	}
+	//fmt.Printf("Read state transition from file %s: %v\n", filename_stf, stf)
+	bundle_snapshot, err := ReadBundleSnapshot(filename_bundle)
+	if err != nil {
+		t.Fatalf("failed to read state transition from file %s: %v", filename_bundle,
+			err)
+	}
+	// each of these programs fails before {32, 64, 96, 128, 192, 255} .. the others all succeed at 255
+	failsBefore := make(map[int][]uint8)
+	failsBefore[32] = []uint8{36, 53, 80, 81, 93, 95, 96, 125, 160, 161}
+	failsBefore[64] = []uint8{5, 7, 10, 76, 78, 79, 82, 87}
+	failsBefore[96] = []uint8{3, 4, 13, 27, 58, 73, 85, 149}
+	failsBefore[128] = []uint8{16, 18, 29, 56, 57, 72, 74, 75, 104}
+	failsBefore[192] = []uint8{15, 24, 26, 33, 55, 69, 77, 84, 134, 142}
+	failsBefore[255] = []uint8{19, 59, 71, 88, 135, 136, 152}
+	for i := 0; i < 170; i++ {
+		willFail := false
+		for _, skip := range failsBefore {
+			if slices.Contains(skip, uint8(i)) {
+				willFail = true
+			}
+		}
+		if willFail {
+			continue
+		}
+		gasUsed := make(map[string]uint)
+		backends := []string{pvm.BackendRecompiler}
+		for _, pvmBackend := range backends {
+			algo_payload := make([]byte, 2)
+			algo_payload[0] = byte(i)
+			algo_payload[1] = byte(255)
+			modified_wp := bundle_snapshot.Bundle.WorkPackage
+			modified_wp.WorkItems[1].Payload = algo_payload
+			wp_hash := modified_wp.Hash()
+			bundle_snapshot.PackageHash = wp_hash
+			bundle_snapshot.Bundle.WorkPackage = modified_wp
+			fmt.Printf("PROGRAM %d %s\n", algo_payload[0], pvmBackend)
+			levelDBPath := fmt.Sprintf("/tmp/testdb%d-%s", i, pvmBackend)
+			store, err := storage.NewStateDBStorage(levelDBPath)
+			if err != nil {
+				t.Fatalf("Failed to create storage: %v", err)
+			}
+			gasUsed[pvmBackend] = testRefineStateTransition(pvmBackend, store, bundle_snapshot, stf, t)
+		}
+		fmt.Printf("Gas used for program %d: %v\n", i, gasUsed)
+	}
+}
+
+func testRefineStateTransition(pvmBackend string, store *storage.StateDBStorage, bundle_snapshot *types.WorkPackageBundleSnapshot, stf *statedb.StateTransition, t *testing.T) uint {
 	t.Logf("Testing refine state transition with pvmBackend: %s", pvmBackend)
 	sdb, err := statedb.NewStateDBFromStateTransitionPost(store, stf)
 	if err != nil {
@@ -216,13 +275,15 @@ func testRefineStateTransition(pvmBackend string, store *storage.StateDBStorage,
 	simulatedNode.NodeContent = NewNodeContent(id, store, pvmBackend)
 	simulatedNode.NodeContent.AddStateDB(sdb)
 
-	// // execute workpackage bundle
-	re_workReport, _, wr_pvm_elapsed, reexecuted_snapshot, err := simulatedNode.executeWorkPackageBundle(uint16(bundle_snapshot.CoreIndex), bundle_snapshot.Bundle, bundle_snapshot.SegmentRootLookup, bundle_snapshot.Slot, false)
+	// execute workpackage bundle
+	re_workReport, _, _, reexecuted_snapshot, err := simulatedNode.executeWorkPackageBundle(uint16(bundle_snapshot.CoreIndex), bundle_snapshot.Bundle, bundle_snapshot.SegmentRootLookup, bundle_snapshot.Slot, false)
 	if err != nil {
 		t.Fatalf("Error executing work package bundle: %v", err)
 	}
-	t.Logf("[%s] Work Report[Hash: %v. PVM Elapsed: %v]\n%v\n", pvmBackend, re_workReport.Hash(), wr_pvm_elapsed, re_workReport.String())
+	//t.Logf("[%s] Work Report[Hash: %v. PVM Elapsed: %v]\n%v\n", pvmBackend, re_workReport.Hash(), wr_pvm_elapsed, re_workReport.String())
 	if reexecuted_snapshot == nil {
 		t.Fatalf("Reexecuted snapshot is nil")
 	}
+	gasused := re_workReport.Results[1].GasUsed
+	return gasused
 }
