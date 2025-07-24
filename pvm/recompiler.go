@@ -724,6 +724,12 @@ func (vm *VM) CalculateTally() {
 	// fmt.Println("End of Basic Block Execution Tally")
 }
 
+func (vm *VM) ResetTally() {
+	for _, v := range vm.OP_tally {
+		v.ExeCount = 0
+	}
+}
+
 // Standard_Program_Initialization initializes the program memory and registers
 func (vm *RecompilerVM) Standard_Program_Initialization(argument_data_a []byte) (err error) {
 
@@ -1227,5 +1233,6 @@ func (vm *VM) TallyJSON(filePath string) error {
 	if _, err := f.Write(data); err != nil {
 		return fmt.Errorf("write to file %q: %w", filePath, err)
 	}
+	vm.ResetTally() // Reset tally after writing
 	return nil
 }
