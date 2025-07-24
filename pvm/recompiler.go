@@ -538,16 +538,6 @@ func (vm *RecompilerVM) ExecuteX86Code(x86code []byte) (err error) {
 }
 
 func (vm *RecompilerVM) ExecuteX86CodeWithEntry(x86code []byte, entry uint32) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Error(vm.logging, "RecompilerVM ExecuteX86Code panic", "error", r)
-			debug.PrintStack()
-			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
-			vm.terminated = true
-			err = fmt.Errorf("ExecuteX86Code panic: %v", r)
-		}
-	}()
 	startTime := time.Now()
 	vm.initDJumpFunc(len(x86code))
 	codeAddr, err := syscall.Mmap(

@@ -342,6 +342,11 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 		return r, 0
 	}
 	//o := 0xFFFFFFFF - Z_Z - Z_I + 1
+	if vm.ResultCode != types.WORKRESULT_OK {
+		r.Err = vm.ResultCode
+		log.Debug(vm.logging, "getArgumentOutputs - Error", "result", vm.ResultCode, "mode", vm.Mode, "service", string(vm.ServiceMetadata))
+		return r, 0
+	}
 	o, _ := vm.Ram.ReadRegister(7)
 	l, _ := vm.Ram.ReadRegister(8)
 	output, res := vm.Ram.ReadRAMBytes(uint32(o), uint32(l))

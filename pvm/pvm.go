@@ -1858,7 +1858,7 @@ func (vm *VM) LogCurrentState(opcode byte, operands []byte, currentPC uint64, ga
 	}
 
 	if IsBasicBlockInstruction(opcode) {
-		if (vm.vmBasicBlock+1)%BBSampleRate == 0 { // every __ basic blocks, take a snapshot
+		if (vm.vmBasicBlock+1)%BBSampleRate == 0 && false { // shawn to check // every __ basic blocks, take a snapshot
 			registers := vm.Ram.ReadRegisters()
 			//fmt.Printf("vmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), registers)
 			snapshot := vm.TakeSnapShot(fmt.Sprintf("BB%d", vm.vmBasicBlock), uint32(currentPC), registers, uint64(vm.Gas), 268435456, 268435456, uint64(vm.vmBasicBlock))

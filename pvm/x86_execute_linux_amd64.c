@@ -13,50 +13,57 @@
 
 // Forward declaration of the Go-exported host calls
 extern void Ecalli(void* rvmPtr, int32_t opcode);
-void* get_ecalli_address(void) {
-    return (void*)Ecalli;
-}
+void* get_ecalli_address(void) { return (void*)Ecalli; }
 
 extern void Sbrk(void* rvmPtr);
-void* get_sbrk_address(void) {
-    return (void*)Sbrk;
-}
+void* get_sbrk_address(void) { return (void*)Sbrk; }
 
 // Thread-local jump buffer and register pointer
 static __thread sigjmp_buf tls_jump_env;
 static __thread void*      tls_global_reg_ptr;
-static __thread int        tls_signal_installed = 0;
-static __thread int        tls_signal_jmp_times = 0;
-// Signal handler for trapping faults in JIT code
+
+// Thread-local flag to indicate we are inside JIT execution
+static __thread int        in_jit = 0;
+
+// Global installation flag for our signal handler
+static int handlers_installed = 0;
+
+// List of signals to intercept during JIT
+static int signums[] = { SIGSEGV, SIGILL, SIGFPE, SIGBUS, SIGTRAP };
+static const int n_signums = sizeof(signums) / sizeof(signums[0]);
+
+// Our unified signal handler: if not in JIT, restore default and re-raise
 static void signal_handler(int sig, siginfo_t *si, void *arg) {
-    ucontext_t *ctx        = (ucontext_t*)arg;
-    void*      fault_addr  = si->si_addr;
-    uint64_t   rip         = ctx->uc_mcontext.gregs[REG_RIP];
-    uint64_t   rsp         = ctx->uc_mcontext.gregs[REG_RSP];
-    uint64_t   rbp         = ctx->uc_mcontext.gregs[REG_RBP];
+    if (!in_jit) {
+        // Not in JIT phase: uninstall our handler and forward to default
+        struct sigaction act = { .sa_handler = SIG_DFL };
+        sigaction(sig, &act, NULL);
+        raise(sig);
+        return;
+    }
+
+    // We are in JIT: handle the fault, save registers, and longjmp back
+    ucontext_t *ctx       = (ucontext_t*)arg;
+    void*      fault_addr = si->si_addr;
+    uint64_t   rip        = ctx->uc_mcontext.gregs[REG_RIP];
+    uint64_t   rsp        = ctx->uc_mcontext.gregs[REG_RSP];
+    uint64_t   rbp        = ctx->uc_mcontext.gregs[REG_RBP];
 
     // Determine signal name
     const char* signame = "UNKNOWN";
     switch (sig) {
-        case SIGSEGV: signame = "SIGSEGV"; break;
-        case SIGILL:  signame = "SIGILL";  break;
-        case SIGFPE:  signame = "SIGFPE";  break;
-        case SIGBUS:  signame = "SIGBUS";  break;
-        case SIGTRAP: signame = "SIGTRAP"; break;
-    }
-    tls_signal_jmp_times++;
-    if (tls_signal_jmp_times > 5) {
-        fprintf(stderr, "[x86_execute] Signal %s occurred multiple times, exiting.\n", signame);
-        exit(1);
+      case SIGSEGV: signame = "SIGSEGV"; break;
+      case SIGILL:  signame = "SIGILL";  break;
+      case SIGFPE:  signame = "SIGFPE";  break;
+      case SIGBUS:  signame = "SIGBUS";  break;
+      case SIGTRAP: signame = "SIGTRAP"; break;
     }
 
-    fprintf(stderr, "[x86_execute] Caught %s at address %p\n", signame, fault_addr);
-    fprintf(stderr, "[x86_execute] RIP=0x%016llx RSP=0x%016llx RBP=0x%016llx\n",
-            (unsigned long long)rip,
-            (unsigned long long)rsp,
-            (unsigned long long)rbp);
+    fprintf(stderr, "[x86_execute] Caught %s at address %p (RIP=0x%llx RSP=0x%llx RBP=0x%llx)\n",
+            signame, fault_addr, (unsigned long long)rip,
+            (unsigned long long)rsp, (unsigned long long)rbp);
 
-    // Save registers into the provided buffer in R12+offset order
+    // Save callee-saved registers into the provided buffer
     uint64_t* regPtr = (uint64_t*)tls_global_reg_ptr;
     regPtr[0]  = ctx->uc_mcontext.gregs[REG_RAX];
     regPtr[1]  = ctx->uc_mcontext.gregs[REG_RCX];
@@ -71,50 +78,54 @@ static void signal_handler(int sig, siginfo_t *si, void *arg) {
     regPtr[10] = ctx->uc_mcontext.gregs[REG_R13];
     regPtr[11] = ctx->uc_mcontext.gregs[REG_R14];
     regPtr[12] = ctx->uc_mcontext.gregs[REG_R15];
-    
-    // Jump back to the recovery point
+
+    // Jump back to the recovery point in execute_x86
     siglongjmp(tls_jump_env, 1);
 }
 
-// Install the signal handler once per thread
+// Install our signal handler once for the process
 static void ensure_signal_handlers() {
-    if (tls_signal_installed) return;
+    if (handlers_installed) return;
     struct sigaction sa = {0};
     sa.sa_sigaction = signal_handler;
     sa.sa_flags     = SA_SIGINFO | SA_ONSTACK;
 
-    sigaction(SIGSEGV, &sa, NULL);
-    sigaction(SIGILL,  &sa, NULL);
-    sigaction(SIGFPE,  &sa, NULL);
-    sigaction(SIGBUS,  &sa, NULL);
-    sigaction(SIGTRAP, &sa, NULL);
-
-    tls_signal_installed = 1;
+    for (int i = 0; i < n_signums; i++) {
+        sigaction(signums[i], &sa, NULL);
+    }
+    handlers_installed = 1;
 }
 
-// Thread-local execute function with fault recovery
+// Execute JIT code with fault recovery using in_jit flag
 int execute_x86(uint8_t* code, size_t length, void* reg_ptr) {
+    tls_global_reg_ptr   = reg_ptr;
+
     ensure_signal_handlers();
-    tls_global_reg_ptr = reg_ptr;
+
+    in_jit = 1;  // Enter JIT execution phase
 
     if (sigsetjmp(tls_jump_env, 1) != 0) {
-        // Fault occurred, recovered here
+        // A fault occurred during JIT; we recovered here.
+        in_jit = 0;  
         return -1;
     }
 
-    // Execute JIT code
+    // Run the JIT-compiled code pointer
     ((void(*)(void))code)();
+
+    in_jit = 0;  // Exit JIT execution phase
     return 0;
 }
 
 // Allocate RWX memory for code
 void* alloc_executable(size_t size) {
-    void* ptr = mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC,
+    void* ptr = mmap(NULL, size,
+                     PROT_READ | PROT_WRITE | PROT_EXEC,
                      MAP_ANON | MAP_PRIVATE, -1, 0);
     return (ptr == MAP_FAILED) ? NULL : ptr;
 }
 
-// Expose C.allocate_executable to Go
+// Free the executable memory
 void free_executable(void* ptr, size_t size) {
     munmap(ptr, size);
 }

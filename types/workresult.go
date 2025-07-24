@@ -26,8 +26,21 @@ var HostResultCodeToString map[uint8]string = map[uint8]string{
 	WORKRESULT_PANIC: "panic",
 }
 
+var ResultCodeToString map[uint8]string = map[uint8]string{
+	WORKRESULT_OK:    "halt",
+	WORKRESULT_OOG:   "out-of-gas",
+	WORKRESULT_PANIC: "panic",
+	// RESULT_HOST:  "host-call",
+	//RESULT_BAD_EXPORT: "bad-exports",
+	//RESULT_BAD:        "bad-code",
+	//RESULT_BIG: "code-oversize",
+	//RESULT_HALT:       "halt",
+	//RESULT_PANIC:      "panic",
+	// RESULT_FAULT: "page-fault",
+}
+
 func ResultCode(code uint8) string {
-	str, ok := HostResultCodeToString[code]
+	str, ok := ResultCodeToString[code]
 	if ok {
 		return str
 	}

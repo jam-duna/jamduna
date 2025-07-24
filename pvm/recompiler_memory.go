@@ -29,7 +29,16 @@ func (rvm *RecompilerVM) GetMemAssess(address uint32, length uint32) (byte, erro
 }
 
 // ReadMemory reads data from a specific address in the memory if it's readable.
-func (rvm *RecompilerVM) ReadMemory(address uint32, length uint32) ([]byte, error) {
+func (rvm *RecompilerVM) ReadMemory(address uint32, length uint32) (data []byte, err error) {
+	// recover panic from SIGSEGV
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("ReadMemory panic: %v\n", r)
+			data = nil
+			err = fmt.Errorf("memory access violation at address %x: %v", address, r)
+			return
+		}
+	}()
 	pageIndex := int(address / PageSize)
 	if pageIndex < 0 || pageIndex >= TotalPages {
 		return nil, fmt.Errorf("invalid address %x for page index %d", address, pageIndex)
@@ -51,7 +60,7 @@ func (rvm *RecompilerVM) ReadMemory(address uint32, length uint32) ([]byte, erro
 		// return nil, fmt.Errorf("read exceeds page size at address %x", address)
 	}
 
-	data := make([]byte, length)
+	data = make([]byte, length)
 	copy(data, rvm.realMemory[start+offset:start+end])
 	return data, nil
 }
