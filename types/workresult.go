@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
@@ -23,6 +24,14 @@ var HostResultCodeToString map[uint8]string = map[uint8]string{
 	WORKRESULT_OK:    "halt",
 	WORKRESULT_OOG:   "out-of-gas",
 	WORKRESULT_PANIC: "panic",
+}
+
+func ResultCode(code uint8) string {
+	str, ok := HostResultCodeToString[code]
+	if ok {
+		return str
+	}
+	return fmt.Sprintf("unknown(%d)", code)
 }
 
 // 11.1.4. Work Result. Equation 11.6. We finally come to define a work result, L, which is the data conduit by which services’ states may be altered through the computation done within a work-package.

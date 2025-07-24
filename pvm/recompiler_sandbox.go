@@ -60,8 +60,8 @@ const (
 
 var debugRecompiler = false
 var showDisassembly = false
-var UseTally = false    // use tally for x86 instructions
-var useEcalli500 = true // use ecalli500 for log check in x86
+var UseTally = false     // use tally for x86 instructions
+var useEcalli500 = false // use ecalli500 for log check in x86
 func SetUseEcalli500(enabled bool) {
 	useEcalli500 = enabled
 }

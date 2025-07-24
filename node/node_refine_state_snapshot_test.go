@@ -4,19 +4,27 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"reflect"
 	"runtime/pprof"
+	"slices"
 	"testing"
+	"text/tabwriter"
+	"time"
 
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
-	"github.com/nsf/jsondiff"
-
 	"github.com/colorfulnotion/jam/types"
+	"github.com/nsf/jsondiff"
 
 	_ "net/http/pprof"
 	"os"
+)
+
+const (
+	algo_stf    = "test/00000017.bin"
+	algo_bundle = "test/00000017_0xe84c7b9fa2a3e87a8b290ea58ccbe2077ef7b45b6041e9870007cc45fa9b1f12_0_3_guarantor.bin"
 )
 
 func CompareJSON(obj1, obj2 interface{}) string {
@@ -173,8 +181,8 @@ func TestRefineStateTransitions(t *testing.T) {
 	pvm.PvmTrace = false
 	pvm.RecordTime = true
 	initPProf(t)
-	filename_stf := "test/00000030.bin"
-	filename_bundle := "test/00000031_0x7f8d1854158c7acaba1c3a74accf501a9be01d282c38c3eb141a9c6132faeaf5_0_0_guarantor.bin"
+	filename_stf := algo_stf
+	filename_bundle := algo_bundle
 
 	stf, err := ReadStateTransitions(filename_stf)
 	if err != nil {
@@ -202,13 +210,122 @@ func TestRefineStateTransitions(t *testing.T) {
 	}
 }
 
+func DebugBundleSnapshot(b *types.WorkPackageBundleSnapshot) {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0) // pad with 3 spaces
+	fmt.Fprintln(w, "TYPE\tID\tITER\tWORK ITEM\tSERVICE\tPAYLOAD\tREFINE GAS\tACCUMULATE GAS")
+	fmt.Fprintln(w, "----\t--\t----\t---------\t-------\t-------\t----------\t--------------")
+
+	for workItemIdx, wi := range b.Bundle.WorkPackage.WorkItems {
+		if workItemIdx == 0 {
+			fmt.Fprintf(w, "AUTH\t-\t1\tWorkItem[%d]\t%d\t%x\t%d\t%d\n",
+				workItemIdx, wi.Service, wi.Payload, wi.RefineGasLimit, wi.AccumulateGasLimit)
+		} else {
+			algoPayload := wi.Payload
+			algoID := uint(algoPayload[0])
+			iter := uint(algoPayload[1])
+			algoIter := iter * iter * iter
+
+			fmt.Fprintf(w, "ALGO\t%d\t%d\tWorkItem[%d]\t%d\t%x\t%d\t%d\n",
+				algoID, algoIter, workItemIdx, wi.Service, wi.Payload, wi.RefineGasLimit, wi.AccumulateGasLimit)
+		}
+	}
+	w.Flush()
+}
+
+func TestRefineAlgo3(t *testing.T) {
+	pvm.PvmLogging = false
+	pvm.PvmTrace = false
+	pvm.RecordTime = true
+	initPProf(t)
+	filename_stf := algo_stf
+	filename_bundle := algo_bundle
+
+	stf, err := ReadStateTransitions(filename_stf)
+	if err != nil {
+		t.Fatalf("failed to read state transition from file %s: %v", filename_stf,
+			err)
+	}
+	//fmt.Printf("Read state transition from file %s: %v\n", filename_stf, stf)
+	bundle_snapshot, err := ReadBundleSnapshot(filename_bundle)
+	if err != nil {
+		t.Fatalf("failed to read state transition from file %s: %v", filename_bundle,
+			err)
+	}
+	// each of these programs fails before {32, 64, 96, 128, 192, 255}
+	failsBefore := make(map[int][]uint8)
+	failsBefore[32] = []uint8{36, 53, 80, 81, 93, 95, 96, 125, 160, 161}
+	failsBefore[64] = []uint8{5, 7, 10, 76, 78, 79, 82, 87}
+	failsBefore[96] = []uint8{3, 4, 13, 27, 58, 73, 85, 149}
+	failsBefore[128] = []uint8{16, 18, 29, 56, 57, 72, 74, 75, 104}
+	failsBefore[192] = []uint8{15, 24, 26, 33, 55, 69, 77, 84, 134, 142}
+	failsBefore[255] = []uint8{19, 59, 71, 88, 135, 136, 152}
+	// Attempting 64K we fail on these before 3s
+	// SIGILL
+	failsBefore[26999] = []uint8{20, 21, 23, 25, 28, 30, 31, 32, 34, 35, 38, 39, 40, 44, 50, 51, 52, 61, 62, 63, 68, 70, 83, 91, 92, 94, 98, 111, 112, 115, 118, 119, 123, 124, 126, 127, 128, 129, 131, 134, 137, 138, 139, 144, 145, 148, 150, 151, 153, 154, 157, 166}
+	// SIGSEGV
+	failsBefore[27000] = []uint8{0, 2, 6, 11, 12}
+	// smashing
+	failsBefore[27001] = []uint8{12, 14, 17, 22, 45, 47, 113, 130, 140, 141, 143}
+	// this worked at 40^3 but not at 70^3
+	failsBefore[64000] = []uint8{43, 54, 67, 86, 105, 122, 156, 169}
+	// this worked at 70^3 but not at 100^3
+	failsBefore[421875] = []uint8{65, 66, 89, 99, 117, 132, 133, 147, 158}
+	// this worked at 100^3 but not at 128^3
+	failsBefore[2097152] = []uint8{42, 97, 103, 109, 110, 114, 146}
+	pickRandom := true
+	rand.Seed(time.Now().UnixNano())
+	for i := 0; i < 170; i++ {
+		willFail := false
+		for _, skip := range failsBefore {
+			if slices.Contains(skip, uint8(i)) {
+				willFail = true
+			}
+		}
+		if willFail {
+			continue
+		}
+		gasUsed := make(map[string]uint)
+		backends := []string{pvm.BackendRecompiler}
+		for _, pvmBackend := range backends {
+			modified_wp := bundle_snapshot.Bundle.WorkPackage
+			modified_wp.WorkItems[1].RefineGasLimit = 4_000_000_000
+			if pickRandom {
+				algo_payload := GenerateAlgoPayload(40)
+				modified_wp.WorkItems[1].Payload = algo_payload
+				fmt.Printf("PAYLOAD %v %s\n", algo_payload, pvmBackend)
+			} else {
+				algo_payload := make([]byte, 2)
+				algo_payload[0] = byte(i)
+				algo_payload[1] = byte(128)
+
+				modified_wp.WorkItems[1].Payload = algo_payload
+				fmt.Printf("PROGRAM %d %s\n", algo_payload[0], pvmBackend)
+			}
+			wp_hash := modified_wp.Hash()
+			bundle_snapshot.PackageHash = wp_hash
+			bundle_snapshot.Bundle.WorkPackage = modified_wp
+			levelDBPath := fmt.Sprintf("/tmp/testdb%d-%s", i, pvmBackend)
+			store, err := storage.NewStateDBStorage(levelDBPath)
+			if err != nil {
+				t.Fatalf("Failed to create storage: %v", err)
+			}
+			algo_gasused, _, algo_res_err := testRefineStateTransition(pvmBackend, store, bundle_snapshot, stf, t)
+			if algo_res_err != nil {
+				fmt.Printf("ERR %s\n", err)
+			}
+			gasUsed[pvmBackend] = algo_gasused
+		}
+		fmt.Printf("Gas used for program %d: %v\n", i, gasUsed)
+	}
+}
+
 func TestRefineAlgo(t *testing.T) {
 	pvm.PvmLogging = false
 	pvm.PvmTrace = false
-	pvm.RecordTime = false
+	pvm.RecordTime = true
 	initPProf(t)
-	filename_stf := "test/00000030.bin"
-	filename_bundle := "test/00000031_0x0a698c35d2c4ce8282c7384d1a937ab7dbf5f20af537309299873fedb7cb7c2d_0_0_guarantor.bin"
+	filename_stf := algo_stf
+	filename_bundle := algo_bundle
 
 	stf, err := ReadStateTransitions(filename_stf)
 	if err != nil {
@@ -228,27 +345,42 @@ func TestRefineAlgo(t *testing.T) {
 		gasUsed := make(map[string]uint)
 		backends := []string{pvm.BackendInterpreter}
 		for _, pvmBackend := range backends {
-			algo_payload := make([]byte, 2)
-			algo_payload[0] = byte(i)
-			algo_payload[1] = byte(255)
-			modified_wp := bundle_snapshot.Bundle.WorkPackage
-			modified_wp.WorkItems[1].Payload = algo_payload
-			wp_hash := modified_wp.Hash()
-			bundle_snapshot.PackageHash = wp_hash
-			bundle_snapshot.Bundle.WorkPackage = modified_wp
-			fmt.Printf("PROGRAM %d %s\n", algo_payload[0], pvmBackend)
+
+			algo_iter_start := 40
+			algo_iter_end := 40
+			fmt.Printf("PROGRAM %d %s\n", i, pvmBackend)
 			levelDBPath := fmt.Sprintf("/tmp/testdb%d-%s", i, pvmBackend)
 			store, err := storage.NewStateDBStorage(levelDBPath)
 			if err != nil {
 				t.Fatalf("Failed to create storage: %v", err)
 			}
-			gasUsed[pvmBackend] = testRefineStateTransition(pvmBackend, store, bundle_snapshot, stf, t)
+			for algo_iter := algo_iter_start; algo_iter <= algo_iter_end; algo_iter++ {
+				algo_payload := make([]byte, 2)
+				algo_payload[0] = byte(i)
+				algo_payload[1] = byte(algo_iter)
+				modified_wp := bundle_snapshot.Bundle.WorkPackage
+				modified_wp.WorkItems[1].Payload = algo_payload
+				modified_wp.WorkItems[0].RefineGasLimit = types.RefineGasAllocation / 5
+				modified_wp.WorkItems[1].RefineGasLimit = types.RefineGasAllocation/2 + 4*(types.RefineGasAllocation/5)
+				wp_hash := modified_wp.Hash()
+				bundle_snapshot.PackageHash = wp_hash
+				bundle_snapshot.Bundle.WorkPackage = modified_wp
+				algo_gasused, algo_res_status, algo_res_err := testRefineStateTransition(pvmBackend, store, bundle_snapshot, stf, t)
+				gasUsed[pvmBackend] = algo_gasused
+				if algo_res_err != nil {
+					DebugBundleSnapshot(bundle_snapshot)
+					t.Fatalf("Error executing work package bundle: %v", algo_res_err)
+				} else {
+					fmt.Printf("Result status: %s\n", algo_res_status)
+				}
+			}
+			fmt.Printf("Gas used for program %d: %v\n", i, gasUsed)
 		}
-		fmt.Printf("Gas used for program %d: %v\n", i, gasUsed)
+
 	}
 }
 
-func testRefineStateTransition(pvmBackend string, store *storage.StateDBStorage, bundle_snapshot *types.WorkPackageBundleSnapshot, stf *statedb.StateTransition, t *testing.T) uint {
+func testRefineStateTransition(pvmBackend string, store *storage.StateDBStorage, bundle_snapshot *types.WorkPackageBundleSnapshot, stf *statedb.StateTransition, t *testing.T) (algo_gasused uint, algo_res_status string, algo_res_err error) {
 	t.Logf("Testing refine state transition with pvmBackend: %s", pvmBackend)
 	sdb, err := statedb.NewStateDBFromStateTransitionPost(store, stf)
 	if err != nil {
@@ -269,6 +401,10 @@ func testRefineStateTransition(pvmBackend string, store *storage.StateDBStorage,
 	if reexecuted_snapshot == nil {
 		t.Fatalf("Reexecuted snapshot is nil")
 	}
-	gasused := re_workReport.Results[1].GasUsed
-	return gasused
+	algo_res := re_workReport.Results[1]
+	algo_res_errCode := algo_res.Result.Err
+	algo_res_status = types.ResultCode(algo_res_errCode)
+
+	algo_gasused = algo_res.GasUsed
+	return algo_gasused, algo_res_status, algo_res_err
 }

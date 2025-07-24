@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/rand"
 	"os"
 	"runtime/debug"
 	"sort"
@@ -325,4 +326,25 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 	metadata := fmt.Sprintf("role=Guarantor|numSig=%d", len(guarantee.Signatures))
 	n.Telemetry(log.MsgTypeWorkReport, guarantee.Report, "msg_type", getMessageType(guarantee.Report), "metadata", metadata, "elapsed", pvmElapsed, "codec_encoded", types.EncodeAsHex(guarantee.Report))
 	return true
+}
+
+func GenerateAlgoPayload(sz int) []byte {
+	if sz == 0 {
+		algo_payload := make([]byte, 170*2)
+		for i := 0; i < 170; i++ {
+			algo_payload[i*2] = byte(i)
+			algo_payload[i*2+1] = byte(1)
+		}
+	}
+	algo_payload := make([]byte, sz*2)
+	success := []uint8{1, 8, 9, 37, 41, 46, 48, 49, 60, 64, 90, 100, 101, 102, 106, 107, 108, 116, 120, 121, 155, 159, 162, 163, 164, 165, 167, 168}
+	for j := 0; j < sz; j++ {
+		// pick a random element from success
+		p := success[rand.Intn(len(success))]
+		// pick a random number from 0 and 20
+		c := rand.Intn(8)
+		algo_payload[j*2] = byte(p)
+		algo_payload[j*2+1] = byte(35 + c)
+	}
+	return algo_payload
 }

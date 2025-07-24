@@ -61,7 +61,6 @@ bin/jamduna
 cmd/.DS_Store
 /release
 pvm/test/*
-node/test/*
 node/interpreter/*
 node/recompiler/*
 node/recompiler_sandbox/*

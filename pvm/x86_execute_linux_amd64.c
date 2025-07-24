@@ -26,7 +26,7 @@ void* get_sbrk_address(void) {
 static __thread sigjmp_buf tls_jump_env;
 static __thread void*      tls_global_reg_ptr;
 static __thread int        tls_signal_installed = 0;
-
+static __thread int        tls_signal_jmp_times = 0;
 // Signal handler for trapping faults in JIT code
 static void signal_handler(int sig, siginfo_t *si, void *arg) {
     ucontext_t *ctx        = (ucontext_t*)arg;
@@ -43,6 +43,11 @@ static void signal_handler(int sig, siginfo_t *si, void *arg) {
         case SIGFPE:  signame = "SIGFPE";  break;
         case SIGBUS:  signame = "SIGBUS";  break;
         case SIGTRAP: signame = "SIGTRAP"; break;
+    }
+    tls_signal_jmp_times++;
+    if (tls_signal_jmp_times > 5) {
+        fprintf(stderr, "[x86_execute] Signal %s occurred multiple times, exiting.\n", signame);
+        exit(1);
     }
 
     fprintf(stderr, "[x86_execute] Caught %s at address %p\n", signame, fault_addr);

@@ -1,6 +1,8 @@
 package types
 
-import "github.com/colorfulnotion/jam/common"
+import (
+	"github.com/colorfulnotion/jam/common"
+)
 
 type WorkPackageBundleSnapshot struct {
 	PackageHash       common.Hash       `json:"package_hash"`

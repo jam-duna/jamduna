@@ -33,11 +33,9 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 
 	for algoN := 0; algoN < targetN; algoN++ {
 		imported := []types.ImportSegment{}
-		algo_payload := make([]byte, 20)
-		for i := 0; i < 10; i++ {
-			algo_payload[i*2] = byte(algoN*10 + i)
-			algo_payload[i*2+1] = byte(1)
-		}
+		algo_payload := GenerateAlgoPayload(40) // ONLY can do on recompiler cannot do logging
+		// algo_payload := GenerateAlgoPayload(0) // to generate a clean "do all 170" interpreter
+
 		auth_payload := make([]byte, 4)
 		binary.LittleEndian.PutUint32(auth_payload, uint32(auth_serviceIdx))
 
