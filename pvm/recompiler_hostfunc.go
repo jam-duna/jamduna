@@ -137,19 +137,19 @@ func Sbrk(rvmPtr unsafe.Pointer, registerIndexA uint32, registerIndexD uint32) {
 }
 func EmitCallToSbrkStub(rvmPtr uintptr, registerIndexA uint32, registerIndexD uint32) []byte {
 	var stub []byte
-	stub = append(stub, 0x50)                                 // push rax
-	stub = append(stub, 0x57)                                 // push rdi
-	stub = append(stub, encodeMovRdiImm64(uint64(rvmPtr))...) // mov rdi, rvmPtr
-	stub = append(stub, encodeMovEsiImm32(registerIndexA)...) // mov esi, valueA
-	stub = append(stub, encodeMovEdxImm32(registerIndexD)...) // mov edx, registerIndexD
+	stub = append(stub, emitPushReg(regInfoList[0])...)         // push rax
+	stub = append(stub, emitPushReg(regInfoList[5])...)         // push rdi
+	stub = append(stub, encodeMovRdiImm64(uint64(rvmPtr))...)   // mov rdi, rvmPtr
+	stub = append(stub, encodeMovEsiImm32(registerIndexA)...)   // mov esi, valueA
+	stub = append(stub, encodeMovEdxImm32(registerIndexD)...)   // mov edx, registerIndexD
 
 	// movabs rax, &Sbrk
 	addr := GetSbrkAddress()
 	stub = append(stub, encodeMovabsRaxImm64(uint64(addr))...)
 
-	stub = append(stub, encodeCallRax()...) // call rax
-	stub = append(stub, 0x5F)               // pop rdi
-	stub = append(stub, 0x58)               // pop rax
+	stub = append(stub, encodeCallRax()...)                     // call rax
+	stub = append(stub, emitPopReg(regInfoList[5])...)          // pop rdi
+	stub = append(stub, emitPopReg(regInfoList[0])...)          // pop rax
 	return stub
 }
 
@@ -196,8 +196,8 @@ func EmitCallToEcalliStub(rvmPtr uintptr, opcode int) []byte {
 // and calls the Ecalli function using an absolute indirect call via RAX.
 func EmitCallToEcalliStubPushPop(rvmPtr uintptr, opcode int) []byte {
 	var stub []byte
-	stub = append(stub, 0x50) // push rax
-	stub = append(stub, 0x57) // push rdi
+	stub = append(stub, emitPushReg(regInfoList[0])...)       // push rax
+	stub = append(stub, emitPushReg(regInfoList[5])...)       // push rdi
 	// mov rdi, rvmPtr
 	stub = append(stub, encodeMovRdiImm64(uint64(rvmPtr))...)
 	// mov esi, opcode
@@ -209,8 +209,8 @@ func EmitCallToEcalliStubPushPop(rvmPtr uintptr, opcode int) []byte {
 	stub = append(stub, encodeMovabsRaxImm64(uint64(addr))...)
 	// call rax
 	stub = append(stub, encodeCallRax()...)
-	stub = append(stub, 0x5F) // pop rdi
-	stub = append(stub, 0x58) // pop rax
+	stub = append(stub, emitPopReg(regInfoList[5])...)        // pop rdi
+	stub = append(stub, emitPopReg(regInfoList[0])...)        // pop rax
 	return stub
 }
 
@@ -319,62 +319,47 @@ func (vm *RecompilerSandboxVM) writeBackRegisters() {
 
 func EmitCallToSbrkStubSandBox(rvmPtr uintptr, registerIndexA uint32, registerIndexD uint32, addr uint64) []byte {
 	var stub []byte
-	stub = append(stub, 0x50)                                 // push rax
-	stub = append(stub, 0x57)                                 // push rdi
-	stub = append(stub, 0x56)                                 // push rsi
-	stub = append(stub, 0x52)                                 // push rdx
-	stub = append(stub, encodeMovRdiImm64(uint64(rvmPtr))...) // mov rdi, rvmPtr
-	stub = append(stub, encodeMovEsiImm32(registerIndexA)...) // mov esi, registerIndexA
-	stub = append(stub, encodeMovEdxImm32(registerIndexD)...) // mov edx, registerIndexD
+	stub = append(stub, emitPushReg(regInfoList[0])...)         // push rax
+	stub = append(stub, emitPushReg(regInfoList[5])...)         // push rdi
+	stub = append(stub, emitPushReg(regInfoList[4])...)         // push rsi
+	stub = append(stub, emitPushReg(regInfoList[2])...)         // push rdx
+	stub = append(stub, encodeMovRdiImm64(uint64(rvmPtr))...)   // mov rdi, rvmPtr
+	stub = append(stub, encodeMovEsiImm32(registerIndexA)...)   // mov esi, registerIndexA
+	stub = append(stub, encodeMovEdxImm32(registerIndexD)...)   // mov edx, registerIndexD
 
 	// movabs rax, &Sbrk
 	stub = append(stub, encodeMovabsRaxImm64(addr)...)
 
-	stub = append(stub, encodeCallRax()...) // call rax
+	stub = append(stub, encodeCallRax()...)                     // call rax
 	// Clean up the stack
-	stub = append(stub, 0x5A) // pop rdx
-	stub = append(stub, 0x5E) // pop rsi
-	stub = append(stub, 0x5F) // pop rdi
-	stub = append(stub, 0x58) // pop rax
+	stub = append(stub, emitPopReg(regInfoList[2])...)          // pop rdx
+	stub = append(stub, emitPopReg(regInfoList[4])...)          // pop rsi
+	stub = append(stub, emitPopReg(regInfoList[5])...)          // pop rdi
+	stub = append(stub, emitPopReg(regInfoList[0])...)          // pop rax
 	return stub
 }
 
 // encodeMovRdiImm64 encodes 'mov rdi, imm64'.
 func encodeMovRdiImm64(imm uint64) []byte {
-	buf := []byte{0x48, 0xBF}
-	for i := 0; i < 8; i++ {
-		buf = append(buf, byte(imm>>uint(8*i)))
-	}
-	return buf
+	return emitMovImmToReg64(regInfoList[5], imm) // RDI is at index 5
 }
 func encodeMovEdxImm32(val uint32) []byte {
-	buf := make([]byte, 5)
-	buf[0] = 0xBA // opcode
-	binary.LittleEndian.PutUint32(buf[1:], val)
-	return buf
+	return emitMovImm32ToReg32(regInfoList[2], val) // RDX is at index 2
 }
 
 // encodeMovEsiImm32 encodes 'mov esi, imm32'.
 func encodeMovEsiImm32(imm uint32) []byte {
-	buf := []byte{0xBE}
-	for i := 0; i < 4; i++ {
-		buf = append(buf, byte(imm>>uint(8*i)))
-	}
-	return buf
+	return emitMovImm32ToReg32(regInfoList[4], imm) // RSI is at index 4
 }
 
 // encodeMovabsRaxImm64 encodes 'movabs rax, imm64'.
 func encodeMovabsRaxImm64(imm uint64) []byte {
-	buf := []byte{0x48, 0xB8}
-	for i := 0; i < 8; i++ {
-		buf = append(buf, byte(imm>>uint(8*i)))
-	}
-	return buf
+	return emitMovImmToReg64(regInfoList[0], imm) // RAX is at index 0
 }
 
 // encodeCallRax encodes 'call rax'.
 func encodeCallRax() []byte {
-	return []byte{0xFF, 0xD0}
+	return emitCallReg(regInfoList[0]) // RAX is at index 0
 }
 
 func (vm *RecompilerVM) chargeGas(host_fn int) uint64 {

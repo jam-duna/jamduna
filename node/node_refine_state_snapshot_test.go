@@ -29,7 +29,7 @@ import (
 
 const (
 	algo_stf    = "test/00000017.bin"
-	algo_bundle = "test/00000017_0xe84c7b9fa2a3e87a8b290ea58ccbe2077ef7b45b6041e9870007cc45fa9b1f12_0_3_guarantor.bin"
+	algo_bundle = "test/00000017_0x0ca8503921ff22a02a7f216b76126e98ce1c2186b0312c279cb106eba8c9018f_0_3_guarantor.bin"
 )
 
 func CompareJSON(obj1, obj2 interface{}) string {

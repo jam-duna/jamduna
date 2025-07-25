@@ -321,7 +321,7 @@ func (vm *RecompilerVM) initDJumpFunc(x86CodeLen int) {
 	relRet := int32(int64(retStubAddr) - int64(vm.codeAddr) - int64(offJEret) - 6)
 	binary.LittleEndian.PutUint32(code[offJEret+2:offJEret+6], uint32(relRet))
 	// finish ret stub
-	code = emitPopReg(code, jumpIndTempReg) // POP jumpIndTempReg
+	code = append(code, emitPopReg(jumpIndTempReg)...) // POP jumpIndTempReg
 	code = append(code, vm.exitCode...)
 
 	// Patch handler jumps
@@ -852,39 +852,31 @@ func (vm *RecompilerVM) ReadContextSlot(slot_index int) (uint64, error) {
 
 func generateTrap(inst Instruction) []byte {
 	// rel := 0xDEADBEEF
-	return []byte{
-		// 0xE9,                      // opcode
-		// byte(rel), byte(rel >> 8), // disp[0..1]
-		// byte(rel >> 16), byte(rel >> 24),
-		0x0F, 0x0B, // int3 (breakpoint instruction)
-	}
+	return emitTrap()
 }
 
 func generateFallthrough(inst Instruction) []byte {
-	return []byte{0x90}
+	return emitNop()
 }
 
 func generateJump(inst Instruction) []byte {
 	// For direct jumps, we can just append a jump instruction to a X86 PC
-	code := make([]byte, 0)
-	return append(code, 0xE9, 0xFE, 0xFE, 0xFE, 0xFE)
+	// The displacement 0xFEFEFEFE will be patched by the VM
+	return emitJmpWithPlaceholder()
 }
 
 // LOAD_IMM_JUMP (only the “LOAD_IMM” portion)
 func generateLoadImmJump(inst Instruction) []byte {
 	dstIdx, vx, _ := extractOneRegOneImmOneOffset(inst.Args)
 	r := regInfoList[dstIdx]
-	// start with REX.W only (0x48), and then OR in B *only if* r.REXBit==1
-	rex := byte(0x48)
-	if r.REXBit == 1 {
-		rex |= 0x01 // set only the B bit for r8–r15
-	}
-	movOp := byte(0xB8 + r.RegBits)
-	immBytes := make([]byte, 8)
-	binary.LittleEndian.PutUint64(immBytes, vx)
-	code := append([]byte{rex, movOp}, immBytes...)
-	// code = append(code, generateJumpTrackerCode()...)
-	return append(code, 0xE9, 0xFE, 0xFE, 0xFE, 0xFE) // this will be patched
+
+	var code []byte
+	// Generate MOV instruction using matching helper
+	code = append(code, emitMovImmToReg64WithManualREX(r, vx)...)
+
+	// Generate JMP instruction using matching helper
+	code = append(code, emitJmpWithPlaceholder()...)
+	return code
 }
 
 var jumpIndTempReg = regInfoList[1] //rcx
@@ -1015,27 +1007,15 @@ func generateBranchImm(jcc byte) func(inst Instruction) []byte {
 		regIdx, imm, _ := extractOneRegOneImmOneOffset(inst.Args)
 		r := regInfoList[regIdx]
 
-		// REX.W + REX.B if needed
-		rex := byte(0x48)
-		if r.REXBit == 1 {
-			rex |= 0x01
-		}
+		var buf []byte
 
-		// CMP r64, imm32 → opcode 0x81 /7 id
-		modrm := byte(0xC0 | (0x7 << 3) | r.RegBits)
-		disp := int32(imm)
+		// Generate CMP r64, imm32 using exact matching helper
+		buf = append(buf, emitCmpRegImm32WithManualConstruction(r, int32(imm))...)
 
-		return []byte{
-			// 7-byte compare
-			rex, 0x81, modrm,
-			byte(disp), byte(disp >> 8), byte(disp >> 16), byte(disp >> 24),
+		// Generate conditional jump using exact matching helper
+		buf = append(buf, emitJccWithPlaceholder(jcc)...)
 
-			// 2-byte conditional jump
-			0x0F, jcc,
-
-			// 4-byte placeholder for true target
-			0, 0, 0, 0,
-		}
+		return buf
 	}
 }
 
@@ -1048,25 +1028,16 @@ func generateCompareBranch(jcc byte) func(inst Instruction) []byte {
 		rA := regInfoList[aIdx]
 		rB := regInfoList[bIdx]
 
-		// REX.W + REX.R + REX.B
-		rex := byte(0x48)
-		if rB.REXBit == 1 {
-			rex |= 0x04 // REX.R for rB
-		}
-		if rA.REXBit == 1 {
-			rex |= 0x01 // REX.B for rA
-		}
-
-		// CMP r/m64, r64 (0x39 /r)
-		modrm := byte(0xC0 | (rB.RegBits << 3) | rA.RegBits)
+		// Use helper function for CMP rA, rB (order: CMP b, a due to parameter convention)
+		cmpBytes := emitCmpReg64(rB, rA)
 
 		// This robust sequence uses a conditional jump to the true case
 		// and an unconditional jump to the false case. It is 14 bytes long.
 		code := make([]byte, 0, 14)
+		code = append(code, cmpBytes...) // CMP rA, rB
 		code = append(code,
-			rex, 0x39, modrm, // 00–02: CMP rA, rB
-			0x0F, jcc, // 03–04: Jcc rel32 (jump to the "true" branch)
-			0, 0, 0, 0, // 05–08: Placeholder for relTrue dd
+			0x0F, jcc, // Jcc rel32 (jump to the "true" branch)
+			0, 0, 0, 0, // Placeholder for relTrue dd
 		)
 		return code
 	}

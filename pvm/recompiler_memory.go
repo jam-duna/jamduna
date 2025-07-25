@@ -243,14 +243,9 @@ func (rvm *RecompilerVM) ReadRegisters() []uint64 {
 func generateLoadImm64(inst Instruction) []byte {
 	dst := min(12, int(inst.Args[0]))
 	imm := binary.LittleEndian.Uint64(inst.Args[1:9])
-	opcode := 0xB8 + regInfoList[dst].RegBits
-	rex := byte(0x48)
-	if regInfoList[dst].REXBit == 1 {
-		rex |= 0x01
-	}
-	code := []byte{rex, opcode}
-	code = append(code, encodeU64(imm)...) // encodeU64: returns imm64 little endian
-	return code
+
+	// Use helper function instead of manual construction
+	return emitMovImmToReg64(regInfoList[dst], imm)
 }
 
 func generateStoreImmGeneric(
@@ -261,30 +256,9 @@ func generateStoreImmGeneric(
 	return func(inst Instruction) []byte {
 		disp, immVal := extractTwoImm(inst.Args)
 
-		// REX prefix (64-bit mode), only used to extend r8–r15; BaseReg REXBit=0
-		rex := byte(0x40)
-		if BaseReg.REXBit != 0 {
-			rex |= 0x01
-		}
-
-		// ModRM: mod=10 (disp32), reg=000 (MOV sub-opcode), r/m=100 (SIB follows)
-		modrm := byte(0x84)
-		// SIB: scale=0 (×1), index=100 (none), base=BaseReg.RegBits
-		sib := byte(0x24 | (BaseReg.RegBits & 0x07))
-
-		buf := make([]byte, 0, 16)
-		if prefix != 0 {
-			buf = append(buf, prefix)
-		}
-		buf = append(buf,
-			rex,    // REX
-			opcode, // MOV r/m?, imm?
-			modrm,  // ModRM
-			sib,    // SIB
-		)
-		buf = append(buf, encodeU32(uint32(disp))...) // disp32
-		buf = append(buf, immBuilder(immVal)...)      // immediate
-		return buf
+		// Use helper function for store immediate with base SIB addressing
+		immBytes := immBuilder(immVal)
+		return emitStoreImmWithBaseSIB(BaseReg, uint32(disp), immBytes, opcode, prefix)
 	}
 }
 
@@ -315,25 +289,8 @@ func generateLoadImm32(inst Instruction) []byte {
 	dstReg, imm := extractOneRegOneImm(inst.Args)
 	dst := regInfoList[dstReg]
 
-	// REX.W = 1, REX.B = dst.REXBit
-	rex := byte(0x48)
-	if dst.REXBit == 1 {
-		rex |= 0x01
-	}
-
-	// opcode = B8 + low 3 bits of register
-	opcode := byte(0xB8 + dst.RegBits)
-
-	// sign-extend the 32-bit imm into a 64-bit value
-	imm64 := uint64(int64(int32(imm)))
-
-	buf := []byte{rex, opcode}
-	// append imm64 LE
-	var immBytes [8]byte
-	binary.LittleEndian.PutUint64(immBytes[:], imm64)
-	buf = append(buf, immBytes[:]...)
-
-	return buf
+	// Use helper function for sign-extended 32-bit immediate to 64-bit register
+	return emitMovSignExtImm32ToReg64(dst, uint32(imm))
 }
 
 // Generic generator: load from [BaseReg+disp32] into dst, with zero-extend/sign-extend/direct load
@@ -350,37 +307,8 @@ func generateLoadWithBase(opcodes []byte, rexW bool) func(inst Instruction) []by
 		dst := regInfoList[dstReg]
 		base := BaseReg
 
-		// Construct REX prefix: 0100WRXB
-		rex := byte(0x40)
-		if rexW {
-			rex |= 0x08 // REX.W
-		}
-		if dst.REXBit == 1 {
-			rex |= 0x04 // REX.R extends ModRM.reg
-		}
-		if base.REXBit == 1 {
-			rex |= 0x01 // REX.B extends ModRM.r/m (base)
-		}
-
-		// ModRM: mod=10 (disp32), reg=dst.RegBits, r/m=100 (SIB follows)
-		modrm := byte(0x80 | (dst.RegBits << 3) | 0x04)
-		// SIB: scale=0 (×1), index=100(none), base=base.RegBits
-		sib := byte(0x24 | (base.RegBits & 0x07))
-
-		// disp32
-		d := uint32(disp)
-		dispBytes := []byte{
-			byte(d), byte(d >> 8),
-			byte(d >> 16), byte(d >> 24),
-		}
-
-		// Concatenate
-		buf := make([]byte, 0, 1+len(opcodes)+2+1+4)
-		buf = append(buf, rex)
-		buf = append(buf, opcodes...)
-		buf = append(buf, modrm, sib)
-		buf = append(buf, dispBytes...)
-		return buf
+		// Use helper function for SIB-based load
+		return emitLoadWithBaseSIB(dst, base, uint32(disp), opcodes, rexW)
 	}
 }
 
@@ -390,37 +318,8 @@ func generateStoreWithBase(opcode byte, prefix byte, rexW bool) func(inst Instru
 		src := regInfoList[srcIdx]
 		base := BaseReg
 
-		// REX prefix: 0100WRXB
-		rex := byte(0x40)
-		if rexW {
-			rex |= 0x08 // REX.W
-		}
-		if src.REXBit == 1 {
-			rex |= 0x04 // REX.R extends ModRM.reg
-		}
-		if base.REXBit == 1 {
-			rex |= 0x01 // REX.B extends ModRM.r/m (base)
-		}
-
-		// ModRM: mod=10 (disp32), reg=src.RegBits, r/m=100 (SIB follows)
-		modrm := byte(0x80 | (src.RegBits << 3) | 0x04)
-		// SIB: scale=0 (×1), index=100(none), base=base.RegBits
-		sib := byte(0x24 | (base.RegBits & 0x07))
-
-		// disp32, little-endian
-		d := uint32(disp)
-		dispBytes := []byte{
-			byte(d), byte(d >> 8),
-			byte(d >> 16), byte(d >> 24),
-		}
-
-		buf := make([]byte, 0, 1+1+2+1+4)
-		if prefix != 0 {
-			buf = append(buf, prefix)
-		}
-		buf = append(buf, rex, opcode, modrm, sib)
-		buf = append(buf, dispBytes...)
-		return buf
+		// Use helper function for SIB-based store
+		return emitStoreWithBaseSIB(src, base, uint32(disp), opcode, prefix, rexW)
 	}
 }
 
@@ -431,36 +330,9 @@ func generateStoreImmIndU8(inst Instruction) []byte {
 	base := BaseReg
 	disp := uint32(disp64)
 
-	// 2) REX prefix: 0100 W=0, R=0, X=idx.REXBit, B=base.REXBit
-	rex := byte(0x40)
-	if idx.REXBit == 1 {
-		rex |= 0x02 // REX.X for SIB.index
-	}
-	if base.REXBit == 1 {
-		rex |= 0x01 // REX.B for SIB.base
-	}
-
-	// 3) opcode = C6 /0 (MOV r/m8, imm8)
-	buf := []byte{rex, 0xC6}
-
-	// 4) ModRM: mod=10 (disp32), reg=000 (/0), r/m=100 (SIB follows)
-	buf = append(buf, 0x84)
-
-	// 5) SIB: scale=0(×1)=00, index=idx.RegBits, base=base.RegBits
-	sib := byte((0 << 6) | (idx.RegBits << 3) | (base.RegBits & 0x07))
-	buf = append(buf, sib)
-
-	// 6) disp32, little-endian
-	buf = append(buf,
-		byte(disp), byte(disp>>8),
-		byte(disp>>16), byte(disp>>24),
-	)
-
-	// 7) imm8
+	// 2) Use helper function for SIB-based store with 8-bit immediate
 	immValU8 := uint8(immVal & 0xFF)
-	buf = append(buf, immValU8)
-
-	return buf
+	return emitStoreImmIndWithSIB(idx, base, disp, []byte{immValU8}, 0xC6, 0)
 }
 
 // generateStoreImmIndU16 generates machine code for MOV word ptr [Base+index*1+disp], imm16
@@ -472,39 +344,10 @@ func generateStoreImmIndU16(inst Instruction) []byte {
 	disp := uint32(disp64)
 	//fmt.Printf("generateStoreImmIndU16: regAIndex=%d, disp64=%d, immVal=%d\n", regAIndex, disp64, immVal)
 
-	// 2) operand-size override prefix for 16-bit
-	prefix := byte(0x66)
-
-	// 3) REX prefix: 0b0100_0000, W=0, R=0, X=idx.REXBit, B=base.REXBit
-	rex := byte(0x40)
-	if idx.REXBit == 1 {
-		rex |= 0x02 // REX.X for SIB.index
-	}
-	if base.REXBit == 1 {
-		rex |= 0x01 // REX.B for SIB.base
-	}
-
-	// 4) opcode = 0xC7 (/0) for MOV r/m16, imm16
-	buf := []byte{prefix, rex, 0xC7}
-
-	// 5) ModRM: mod=10 (disp32), reg=000, r/m=100 (SIB follows)
-	buf = append(buf, 0x84)
-
-	// 6) SIB: scale=1 (00), index=idx.RegBits, base=base.RegBits
-	sib := byte((0 << 6) | (idx.RegBits << 3) | (base.RegBits & 0x07))
-	buf = append(buf, sib)
-
-	// 7) 32-bit displacement, little-endian
-	buf = append(buf,
-		byte(disp), byte(disp>>8),
-		byte(disp>>16), byte(disp>>24),
-	)
-
-	// 8) 16-bit immediate, little-endian
+	// 2) Use helper function for SIB-based store with 16-bit immediate and 0x66 prefix
 	imm16 := uint16(immVal & 0xFFFF)
-	buf = append(buf, byte(imm16), byte(imm16>>8))
-
-	return buf
+	immBytes := []byte{byte(imm16), byte(imm16 >> 8)}
+	return emitStoreImmIndWithSIB(idx, base, disp, immBytes, 0xC7, 0x66)
 }
 
 // generateStoreImmIndU32 generates machine code for MOV dword ptr [Base+index*1+disp], imm32
@@ -515,39 +358,13 @@ func generateStoreImmIndU32(inst Instruction) []byte {
 	base := BaseReg
 	disp := uint32(disp64)
 
-	// 2) REX prefix: 0b0100_0000, W=0, R=0, X=idx.REXBit, B=base.REXBit
-	rex := byte(0x40)
-	if idx.REXBit == 1 {
-		rex |= 0x02 // REX.X for SIB.index
-	}
-	if base.REXBit == 1 {
-		rex |= 0x01 // REX.B for SIB.base
-	}
-
-	// 3) opcode = 0xC7 (/0) for MOV r/m32, imm32
-	buf := []byte{rex, 0xC7}
-
-	// 4) ModRM: mod=10 (disp32), reg=000, r/m=100 (SIB)
-	buf = append(buf, 0x84)
-
-	// 5) SIB: scale=1 (00), index, base
-	sib := byte((0 << 6) | (idx.RegBits << 3) | (base.RegBits & 0x07))
-	buf = append(buf, sib)
-
-	// 6) 32-bit displacement
-	buf = append(buf,
-		byte(disp), byte(disp>>8),
-		byte(disp>>16), byte(disp>>24),
-	)
-
-	// 7) 32-bit immediate, little-endian
+	// 2) Use helper function for SIB-based store with 32-bit immediate
 	imm32 := uint32(immVal)
-	buf = append(buf,
-		byte(imm32), byte(imm32>>8),
-		byte(imm32>>16), byte(imm32>>24),
-	)
-
-	return buf
+	immBytes := []byte{
+		byte(imm32), byte(imm32 >> 8),
+		byte(imm32 >> 16), byte(imm32 >> 24),
+	}
+	return emitStoreImmIndWithSIB(idx, base, disp, immBytes, 0xC7, 0)
 }
 
 // generateStoreImmIndU64 generates machine code for MOV qword ptr [Base+index*1+disp], imm64
@@ -563,43 +380,10 @@ func generateStoreImmIndU64(inst Instruction) []byte {
 	low := uint32(immVal & 0xFFFFFFFF)
 	high := uint32(immVal >> 32)
 
-	// 3) encode low dword at offset disp
+	// 3) Use helper functions for both parts
 	buf := bytes.NewBuffer(nil)
-	buf.Write(generateStoreImmIndU32WithRegs(idx, base, disp, low))
-
-	// 4) encode high dword at offset disp+4
-	buf.Write(generateStoreImmIndU32WithRegs(idx, base, disp+4, high))
+	buf.Write(emitStoreImmIndU32WithRegs(idx, base, disp, low))
+	buf.Write(emitStoreImmIndU32WithRegs(idx, base, disp+4, high))
 
 	return buf.Bytes()
-}
-
-// helper to generate store of a 32-bit immediate with custom regs and displacement
-func generateStoreImmIndU32WithRegs(idx X86Reg, base X86Reg, disp uint32, imm32 uint32) []byte {
-	// REX prefix
-	rex := byte(0x40)
-	if idx.REXBit == 1 {
-		rex |= 0x02
-	}
-	if base.REXBit == 1 {
-		rex |= 0x01
-	}
-	buf := []byte{rex, 0xC7, 0x84}
-
-	// SIB
-	sib := byte((0 << 6) | (idx.RegBits << 3) | (base.RegBits & 0x07))
-	buf = append(buf, sib)
-
-	// disp32
-	buf = append(buf,
-		byte(disp), byte(disp>>8),
-		byte(disp>>16), byte(disp>>24),
-	)
-
-	// imm32
-	buf = append(buf,
-		byte(imm32), byte(imm32>>8),
-		byte(imm32>>16), byte(imm32>>24),
-	)
-
-	return buf
 }

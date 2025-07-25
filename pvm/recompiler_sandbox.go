@@ -83,7 +83,13 @@ type RecompilerSandboxVM struct {
 	sbrkOffset     uint64
 	stepNumber     int
 	snapshot       *EmulatorSnapShot
-	post_register  []uint64 // registers after execution
+	post_register  []uint64     // registers after execution
+	PcByteCodes    []PcByteCode // bytecode for each PC
+}
+
+type PcByteCode struct {
+	Op    byte   `json:"op"`
+	Bytes []byte `json:"b"`
 }
 
 // NewRecompilerVM_SandBox creates a Unicorn sandbox with 4 GiB guest RAM
@@ -447,6 +453,10 @@ func (vm *RecompilerSandboxVM) translateBasicBlock(startPC uint64) *BasicBlock {
 			}
 			additionalCode := translateFunc(inst)
 			//disassemble the additionalCode and build the tally map
+			vm.PcByteCodes = append(vm.PcByteCodes, PcByteCode{
+				Op:    pvm_opcode,
+				Bytes: additionalCode,
+			})
 			if UseTally {
 				vm.DisassembleAndTally(pvm_opcode, additionalCode)
 			}
