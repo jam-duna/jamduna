@@ -112,7 +112,7 @@ func TestCompareLogs(t *testing.T) {
 	}
 }
 
-func ReadStateTransitions(filename string) (stf *statedb.StateTransition, err error) {
+func ReadStateTransition(filename string) (stf *statedb.StateTransition, err error) {
 	stBytes, err := os.ReadFile(filename)
 	if err != nil {
 		fmt.Printf("Error reading file %s: %v\n", filename, err)
@@ -189,7 +189,7 @@ func TestRefineStateTransitions(t *testing.T) {
 	filename_stf := algo_stf
 	filename_bundle := algo_bundle
 
-	stf, err := ReadStateTransitions(filename_stf)
+	stf, err := ReadStateTransition(filename_stf)
 	if err != nil {
 		t.Fatalf("failed to read state transition from file %s: %v", filename_stf,
 			err)
@@ -249,7 +249,7 @@ func TestRefineAlgo3(t *testing.T) {
 	filename_stf := algo_stf
 	filename_bundle := algo_bundle
 
-	stf, err := ReadStateTransitions(filename_stf)
+	stf, err := ReadStateTransition(filename_stf)
 	if err != nil {
 		t.Fatalf("failed to read state transition from file %s: %v", filename_stf,
 			err)
@@ -446,7 +446,7 @@ func TestRefineAutoAlgo(t *testing.T) {
 	pvm.RecordTime = true
 	initPProf(t)
 
-	stf, err := ReadStateTransitions(algo_stf)
+	stf, err := ReadStateTransition(algo_stf)
 	if err != nil {
 		t.Fatalf("failed to read state transition from file %s: %v", algo_stf, err)
 	}

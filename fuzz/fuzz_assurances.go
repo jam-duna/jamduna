@@ -8,25 +8,17 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-/*
-// Assurance represents an assurance value.
-type Assurance struct {
-	// H_p - see Eq 124
-	Anchor common.Hash `json:"anchor"`
-	// f - 1 means "available"
-	Bitfield       [Avail_bitfield_bytes]byte `json:"bitfield"`
-	ValidatorIndex uint16                     `json:"validator_index"`
-	Signature      Ed25519Signature           `json:"signature"`
-}
-*/
-
-func randomAssurance(block *types.Block) *types.Assurance {
-	return &(block.Extrinsic.Assurances[rand.Intn(len(block.Extrinsic.Assurances))])
+func randomAssurance(r *rand.Rand, block *types.Block) *types.Assurance {
+	if len(block.Extrinsic.Assurances) == 0 {
+		return nil
+	}
+	return &(block.Extrinsic.Assurances[r.Intn(len(block.Extrinsic.Assurances))])
 }
 
 // One assurance has a bad signature.
-func fuzzBlockABadSignature(block *types.Block) error {
-	a := randomAssurance(block)
+func fuzzBlockABadSignature(seed []byte, block *types.Block) error {
+	r := NewSeededRand(seed)
+	a := randomAssurance(r, block)
 	if a == nil {
 		return nil
 	}
@@ -35,8 +27,9 @@ func fuzzBlockABadSignature(block *types.Block) error {
 }
 
 // One assurance has a bad validator index.
-func fuzzBlockABadValidatorIndex(block *types.Block) error {
-	a := randomAssurance(block)
+func fuzzBlockABadValidatorIndex(seed []byte, block *types.Block) error {
+	r := NewSeededRand(seed)
+	a := randomAssurance(r, block)
 	if a == nil {
 		return nil
 	}
@@ -45,11 +38,12 @@ func fuzzBlockABadValidatorIndex(block *types.Block) error {
 }
 
 // One assurance targets a core without any assigned work report.
-func fuzzBlockABadCore(block *types.Block, s *statedb.StateDB, secrets []types.ValidatorSecret) error {
+func fuzzBlockABadCore(seed []byte, block *types.Block, s *statedb.StateDB, secrets []types.ValidatorSecret) error {
+	r := NewSeededRand(seed)
 	jamstate := s.GetJamState()
 	for coreIdx, rhoState := range jamstate.AvailabilityAssignments {
 		if rhoState == nil {
-			a := randomAssurance(block)
+			a := randomAssurance(r, block)
 			if a == nil {
 				return nil
 			}
@@ -62,8 +56,9 @@ func fuzzBlockABadCore(block *types.Block, s *statedb.StateDB, secrets []types.V
 }
 
 // One assurance has a bad attestation parent hash.
-func fuzzBlockABadParentHash(block *types.Block, secrets []types.ValidatorSecret) error {
-	a := randomAssurance(block)
+func fuzzBlockABadParentHash(seed []byte, block *types.Block, secrets []types.ValidatorSecret) error {
+	r := NewSeededRand(seed)
+	a := randomAssurance(r, block)
 	if a == nil {
 		return nil
 	}
@@ -72,8 +67,8 @@ func fuzzBlockABadParentHash(block *types.Block, secrets []types.ValidatorSecret
 	return jamerrors.ErrABadParentHash
 }
 
-func fuzzBlockAStaleReport(block *types.Block, s *statedb.StateDB) error {
-	// Look into AvailabilityAssignments. Filter on Stale. And manually set the bitfield to true.
+func fuzzBlockAStaleReport(seed []byte, block *types.Block, s *statedb.StateDB) error {
+	r := NewSeededRand(seed)
 	jamState := s.GetJamState()
 	blkTimeSlot := block.Header.Slot
 	stalePendingCores := map[uint16]uint32{}
@@ -85,30 +80,22 @@ func fuzzBlockAStaleReport(block *types.Block, s *statedb.StateDB) error {
 		if rhoState != nil {
 			anyAvailability = true
 			if (rhoState.Timeslot + types.UnavailableWorkReplacementPeriod) <= blkTimeSlot {
-				// can be fuzzed to stale
 				anyStaleAvailability = true
 				stalePendingCores[uint16(coreIdx)] = rhoState.Timeslot
 			}
 		}
 	}
 
-	if !anyAvailability {
-		// No available work reports to assure about
+	if !anyAvailability || !anyStaleAvailability {
 		return nil
 	}
 
-	if !anyStaleAvailability {
-		// No available work reports that's already stale
-		return nil
-	}
-
-	a := randomAssurance(block)
+	a := randomAssurance(r, block)
 	if a == nil {
 		return nil
 	}
 
-	for staleCoreIdx, _ := range stalePendingCores {
-		// mark the assurance to target the stale core to fuzz the error
+	for staleCoreIdx := range stalePendingCores {
 		a.SetBitFieldBit(uint16(staleCoreIdx), true)
 	}
 	// TODO: probably need to re-sign EA with new signature

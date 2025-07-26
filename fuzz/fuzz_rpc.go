@@ -142,7 +142,7 @@ func sendValidateResult(w http.ResponseWriter, code int, res ValidationResult) {
 	_ = json.NewEncoder(w).Encode(res)
 }
 
-func handleFuzz(sdb_storage *storage.StateDBStorage) http.HandlerFunc {
+func handleFuzz(seed []byte, sdb_storage *storage.StateDBStorage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
@@ -170,7 +170,7 @@ func handleFuzz(sdb_storage *storage.StateDBStorage) http.HandlerFunc {
 		}
 		fuzzed := false
 		modes := []string{"assurances"}
-		mutatedStf, expectedErr, possibleErrs := selectImportBlocksError(sdb_storage, modes, &stf)
+		mutatedStf, expectedErr, possibleErrs := selectImportBlocksError(seed, sdb_storage, modes, &stf)
 		if expectedErr != nil {
 			fmt.Printf("Expected error: %v | %v possibleErrs = %v\n", jamerrors.GetErrorName(expectedErr), len(possibleErrs), jamerrors.GetErrorNames(possibleErrs))
 			errActual := statedb.CheckStateTransition(sdb_storage, mutatedStf, nil, pvm.BackendInterpreter)
@@ -193,9 +193,9 @@ func handleFuzz(sdb_storage *storage.StateDBStorage) http.HandlerFunc {
 	}
 }
 
-func runRPCServerInternal(sdbStorage *storage.StateDBStorage) {
+func runRPCServerInternal(seed []byte, sdbStorage *storage.StateDBStorage) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/fuzz", handleFuzz(sdbStorage))
+	mux.HandleFunc("/fuzz", handleFuzz(seed, sdbStorage))
 	mux.HandleFunc("/validate", handleSTFValidation(sdbStorage, pvm.BackendInterpreter))
 
 	server := &http.Server{

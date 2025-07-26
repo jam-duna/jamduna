@@ -8,8 +8,11 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-func randomTicket(block *types.Block) (*types.Ticket, int) {
-	idx := rand.Intn(len(block.Extrinsic.Tickets))
+func randomTicket(r *rand.Rand, block *types.Block) (*types.Ticket, int) {
+	if len(block.Extrinsic.Tickets) == 0 {
+		return nil, -1
+	}
+	idx := r.Intn(len(block.Extrinsic.Tickets))
 	return &(block.Extrinsic.Tickets[idx]), idx
 }
 
@@ -22,21 +25,23 @@ func outsideBoundary(s *statedb.StateDB, slot uint32) bool {
 }
 
 // Submit an extrinsic with a bad ticket attempt number.
-func fuzzBlockTBadTicketAttemptNumber(block *types.Block) error {
-	t, _ := randomTicket(block)
+func fuzzBlockTBadTicketAttemptNumber(seed []byte, block *types.Block) error {
+	r := NewSeededRand(seed)
+	t, _ := randomTicket(r, block)
 	if t == nil {
 		return nil
 	}
-	t.Attempt = types.TicketEntriesPerValidator + uint8(rand.Intn(100))
+	t.Attempt = types.TicketEntriesPerValidator + uint8(r.Intn(100))
 	return jamerrors.ErrTBadTicketAttemptNumber
 }
 
 // Submit one ticket already recorded in the state.
-func fuzzBlockTTicketAlreadyInState(block *types.Block, s *statedb.StateDB, validatorSecrets []types.ValidatorSecret) error {
+func fuzzBlockTTicketAlreadyInState(seed []byte, block *types.Block, s *statedb.StateDB, validatorSecrets []types.ValidatorSecret) error {
 	if outsideBoundary(s, block.Header.Slot) {
 		return nil
 	}
-	t, t_idx := randomTicket(block)
+	r := NewSeededRand(seed)
+	t, t_idx := randomTicket(r, block)
 	simpleFuzz := false
 	if t == nil {
 		// Can be fuzzed with anything...
@@ -47,7 +52,7 @@ func fuzzBlockTTicketAlreadyInState(block *types.Block, s *statedb.StateDB, vali
 		return nil
 	}
 	// take a random ticket t2 in the accumulator with a specific index idx2
-	existingTicketBodyID := rand.Intn(len(sf.NextEpochTicketsAccumulator))
+	existingTicketBodyID := r.Intn(len(sf.NextEpochTicketsAccumulator))
 	if existingTicketBodyID == t_idx && !simpleFuzz {
 		return nil
 	}
@@ -80,36 +85,39 @@ func fuzzBlockTTicketAlreadyInState(block *types.Block, s *statedb.StateDB, vali
 }
 
 // Submit tickets in bad order.
-func fuzzBlockTTicketsBadOrder(block *types.Block) error {
+func fuzzBlockTTicketsBadOrder(seed []byte, block *types.Block) error {
 	if len(block.Extrinsic.Tickets) < 2 {
 		return nil
 	}
+	r := NewSeededRand(seed)
 	// Reverse the order of tickets
-	i := rand.Intn(len(block.Extrinsic.Tickets))
+	i := r.Intn(len(block.Extrinsic.Tickets))
 	j := (i + 1) % len(block.Extrinsic.Tickets)
 	block.Extrinsic.Tickets[i], block.Extrinsic.Tickets[j] = block.Extrinsic.Tickets[j], block.Extrinsic.Tickets[i]
 	return jamerrors.ErrTTicketsBadOrder
 }
 
 // Submit tickets with bad ring proof.
-func fuzzBlockTBadRingProof(block *types.Block) error {
-	t, _ := randomTicket(block)
+func fuzzBlockTBadRingProof(seed []byte, block *types.Block) error {
+	r := NewSeededRand(seed)
+	t, _ := randomTicket(r, block)
 	if t == nil {
 		return nil
 	}
-	b := rand.Intn(len(t.Signature))
+	b := r.Intn(len(t.Signature))
 	t.Signature[b] = t.Signature[b] ^ 0xFF
 	return jamerrors.ErrTBadRingProof
 }
 
 // Submit tickets when epoch's lottery is over.
-func fuzzBlockTEpochLotteryOver(block *types.Block, s *statedb.StateDB) error {
-	t, _ := randomTicket(block)
+func fuzzBlockTEpochLotteryOver(seed []byte, block *types.Block, s *statedb.StateDB) error {
+	r := NewSeededRand(seed)
+	t, _ := randomTicket(r, block)
 	if t == nil {
 		return nil
 	}
 	_, currPhase := s.JamState.SafroleState.EpochAndPhase(block.Header.Slot)
-	altPhase := uint32(rand.Intn(int(types.EpochLength-types.TicketSubmissionEndSlot))) + uint32(types.TicketSubmissionEndSlot)
+	altPhase := uint32(r.Intn(int(types.EpochLength-types.TicketSubmissionEndSlot))) + uint32(types.TicketSubmissionEndSlot)
 	currSlot := block.Header.Slot
 	altSlot := currSlot - currPhase + altPhase
 
@@ -119,12 +127,13 @@ func fuzzBlockTEpochLotteryOver(block *types.Block, s *statedb.StateDB) error {
 }
 
 // Progress from slot X to slot X. Timeslot must be strictly monotonic.
-func fuzzBlockTTimeslotNotMonotonic(block *types.Block, s *statedb.StateDB) error {
+func fuzzBlockTTimeslotNotMonotonic(seed []byte, block *types.Block, s *statedb.StateDB) error {
+	r := NewSeededRand(seed)
 	_, currPhase := s.JamState.SafroleState.EpochAndPhase(block.Header.Slot)
 	if currPhase == 0 {
 		return nil
 	}
-	altPhase := uint32(rand.Intn(int(currPhase)))
+	altPhase := uint32(r.Intn(int(currPhase)))
 	currSlot := block.Header.Slot
 	altSlot := currSlot - currPhase + altPhase
 	block.Header.Slot = altSlot

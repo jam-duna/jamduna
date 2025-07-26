@@ -33,7 +33,7 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 
 	for algoN := 0; algoN < targetN; algoN++ {
 		imported := []types.ImportSegment{}
-		algo_payload := GenerateAlgoPayload(40) // ONLY can do on recompiler cannot do logging
+		algo_payload := GenerateAlgoPayload(20) // ONLY can do on recompiler cannot do logging
 		// algo_payload := GenerateAlgoPayload(0) // to generate a clean "do all 170" interpreter
 
 		auth_payload := make([]byte, 4)

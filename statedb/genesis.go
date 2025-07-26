@@ -290,6 +290,17 @@ func NewStateDBFromStateTransitionPost(sdb *storage.StateDBStorage, statetransit
 	return statedb, nil
 }
 
+func NewStateDBFromStateKeyVals(sdb *storage.StateDBStorage, stateKeyVals *StateKeyVals) (statedb *StateDB, err error) {
+	statedb, err = newStateDB(sdb, common.Hash{})
+	if err != nil {
+		return statedb, err
+	}
+	statedb.StateRoot = statedb.UpdateAllTrieKeyVals(*stateKeyVals)
+	statedb.JamState = NewJamState()
+	statedb.RecoverJamState(statedb.StateRoot)
+	return statedb, nil
+}
+
 func NewStateDBFromStateTransition(sdb *storage.StateDBStorage, statetransition *StateTransition) (statedb *StateDB, err error) {
 	statedb, err = newStateDB(sdb, common.Hash{})
 	if err != nil {

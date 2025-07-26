@@ -1,5 +1,5 @@
 TIMEOUT          := 10m
-BINARY_NAME      := importblocks
+BINARY_NAME      := duna_fuzzer
 BINARY_NAME_FUZZ := fuzzer
 JAMDIR           ?= /tmp/ntust/jam
 MODE             ?= generic
@@ -17,7 +17,7 @@ all: build
 build:
 	go build -tags=$(NETWORK) -o $(BINARY_NAME) .
 
-importblocks: build
+fuzzer: build
 	./$(BINARY_NAME)
 
 run:

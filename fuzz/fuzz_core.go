@@ -1,9 +1,11 @@
 package fuzz
 
 import (
+	"encoding/binary"
 	"fmt"
 	"log"
 	"math/rand"
+	"reflect"
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
@@ -30,26 +32,26 @@ var ErrorMap = map[string][]error{
 		jamerrors.ErrGBadCoreIndex,
 		jamerrors.ErrGBadSignature,
 		jamerrors.ErrGCoreEngaged,
-		jamerrors.ErrGDependencyMissing, // Michael
+		jamerrors.ErrGDependencyMissing,
 		jamerrors.ErrGDuplicatePackageTwoReports,
 		jamerrors.ErrGFutureReportSlot,
 		jamerrors.ErrGInsufficientGuarantees,
 		jamerrors.ErrGDuplicateGuarantors,
 		jamerrors.ErrGOutOfOrderGuarantee,
-		jamerrors.ErrGWorkReportGasTooHigh, // Michael
-		jamerrors.ErrGServiceItemTooLow,    // Michael
+		jamerrors.ErrGWorkReportGasTooHigh,
+		jamerrors.ErrGServiceItemTooLow,
 		jamerrors.ErrGBadValidatorIndex,
 		jamerrors.ErrGBadValidatorIndex,
 		jamerrors.ErrGWrongAssignment,
-		jamerrors.ErrGAnchorNotRecent, // Michael
-		jamerrors.ErrGBadBeefyMMRRoot, // Michael
+		jamerrors.ErrGAnchorNotRecent,
+		jamerrors.ErrGBadBeefyMMRRoot,
 		jamerrors.ErrGBadServiceID,
-		jamerrors.ErrGBadStateRoot,                            // Michael
-		jamerrors.ErrGReportEpochBeforeLast,                   // Michael
-		jamerrors.ErrGSegmentRootLookupInvalidNotRecentBlocks, // Michael
-		jamerrors.ErrGSegmentRootLookupInvalidUnexpectedValue, // Michael
-		jamerrors.ErrGCoreWithoutAuthorizer,                   // Michael
-		jamerrors.ErrGCoreUnexpectedAuthorizer,                // Michael
+		jamerrors.ErrGBadStateRoot,
+		jamerrors.ErrGReportEpochBeforeLast,
+		jamerrors.ErrGSegmentRootLookupInvalidNotRecentBlocks,
+		jamerrors.ErrGSegmentRootLookupInvalidUnexpectedValue,
+		jamerrors.ErrGCoreWithoutAuthorizer,
+		jamerrors.ErrGCoreUnexpectedAuthorizer,
 	},
 	"assurances": {jamerrors.ErrABadSignature,
 		jamerrors.ErrABadValidatorIndex,
@@ -78,30 +80,54 @@ var ErrorMap = map[string][]error{
 		jamerrors.ErrDAgeTooOldInVerdicts},
 }
 
-func Shuffle[T any](data []T) {
-	rand.Seed(time.Now().UnixNano())
-	rand.Shuffle(len(data), func(i, j int) {
-		data[i], data[j] = data[j], data[i]
+func (f *Fuzzer) Shuffle(slice interface{}) {
+	if len(f.seed) == 0 {
+		return
+	}
+
+	var seedInt64 int64
+	if len(f.seed) >= 8 {
+		seedInt64 = int64(binary.BigEndian.Uint64(f.seed[:8]))
+	} else {
+		paddedSeed := make([]byte, 8)
+		copy(paddedSeed, f.seed)
+		seedInt64 = int64(binary.BigEndian.Uint64(paddedSeed))
+	}
+
+	source := rand.NewSource(seedInt64)
+	r := rand.New(source)
+
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		log.Printf("Shuffle error: provided data of type %T is not a slice", slice)
+		return
+	}
+
+	length := rv.Len()
+	swap := reflect.Swapper(slice)
+
+	r.Shuffle(length, func(i, j int) {
+		swap(i, j)
 	})
 }
 
 func (f *Fuzzer) FuzzWithTargetedInvalidRate(modes []string, stfs []*statedb.StateTransition, invalidRate float64, numBlocks int) (finalSTFs []StateTransitionQA, err error) {
-
-	sdbStorage := f.sdbStorage
+	seed := f.GetSeed()
+	store := f.store
 	numInvalidBlocks := int(float64(numBlocks) * invalidRate)
 	numValidBlocks := numBlocks - numInvalidBlocks
-	fmt.Printf("InvalidRate=%.2f -> invalidBlocks=%d | validBlocks=%d | total=%d\n",
-		invalidRate, numInvalidBlocks, numValidBlocks, numBlocks,
+	fmt.Printf("Seed=%x InvalidRate=%.2f -> invalidBlocks=%d | validBlocks=%d | total=%d\n",
+		seed, invalidRate, numInvalidBlocks, numValidBlocks, numBlocks,
 	)
 
-	Shuffle(stfs)
+	f.Shuffle(stfs)
 
 	var fuzzedSTFs []StateTransitionQA
 	var notFuzzedSTFs []StateTransitionQA
 
 	fuzzableCandidates := make([]*statedb.StateTransition, 0, len(stfs))
 	for _, stf := range stfs {
-		_, expectedErr, possibleErrs := selectImportBlocksError(sdbStorage, modes, stf)
+		_, expectedErr, possibleErrs := selectImportBlocksError(seed, store, modes, stf)
 		if expectedErr != nil || len(possibleErrs) > 0 {
 			fuzzableCandidates = append(fuzzableCandidates, stf)
 		} else {
@@ -124,7 +150,7 @@ func (f *Fuzzer) FuzzWithTargetedInvalidRate(modes []string, stfs []*statedb.Sta
 			if count >= numInvalidBlocks {
 				break
 			}
-			mutated, expectedErr, _ := selectImportBlocksError(sdbStorage, modes, stf)
+			mutated, expectedErr, _ := selectImportBlocksError(seed, store, modes, stf)
 			fuzzedSTFs = append(fuzzedSTFs, StateTransitionQA{
 				Mutated: true,
 				Error:   expectedErr,
@@ -137,7 +163,7 @@ func (f *Fuzzer) FuzzWithTargetedInvalidRate(modes []string, stfs []*statedb.Sta
 			idx := 0
 			for len(fuzzedSTFs) < numInvalidBlocks {
 				stf := fuzzableCandidates[idx%len(fuzzableCandidates)]
-				mutated, expectedErr, _ := selectImportBlocksError(sdbStorage, modes, stf)
+				mutated, expectedErr, _ := selectImportBlocksError(seed, store, modes, stf)
 				fuzzedSTFs = append(fuzzedSTFs, StateTransitionQA{
 					Mutated: true,
 					Error:   expectedErr,
@@ -160,136 +186,150 @@ func (f *Fuzzer) FuzzWithTargetedInvalidRate(modes []string, stfs []*statedb.Sta
 	}
 
 	finalSTFs = append(fuzzedSTFs, notFuzzedSTFs...)
-	Shuffle(finalSTFs)
+	f.Shuffle(finalSTFs)
 
 	log.Printf("Fuzz completed: %d invalid blocks, %d valid blocks", len(fuzzedSTFs), len(notFuzzedSTFs))
 	return finalSTFs, nil
 }
 
-func possibleError(selectedError error, block *types.Block, s *statedb.StateDB, validatorSecrets []types.ValidatorSecret) error {
+// NewSeededRand creates a new deterministic random number generator based on a byte slice seed.
+func NewSeededRand(seed []byte) *rand.Rand {
+	var seedInt64 int64
+	if len(seed) >= 8 {
+		seedInt64 = int64(binary.BigEndian.Uint64(seed[:8]))
+	} else {
+		paddedSeed := make([]byte, 8)
+		copy(paddedSeed, seed)
+		seedInt64 = int64(binary.BigEndian.Uint64(paddedSeed))
+	}
+	source := rand.NewSource(seedInt64)
+	return rand.New(source)
+}
+
+func possibleError(seed []byte, selectedError error, block *types.Block, s *statedb.StateDB, validatorSecrets []types.ValidatorSecret) error {
 	// Dispatch to the appropriate fuzzBlock function based on the selected error
 	switch selectedError {
 
 	// safrole errors
 	case jamerrors.ErrTBadTicketAttemptNumber:
-		return fuzzBlockTBadTicketAttemptNumber(block)
+		return fuzzBlockTBadTicketAttemptNumber(seed, block)
 	case jamerrors.ErrTTicketAlreadyInState:
-		return fuzzBlockTTicketAlreadyInState(block, s, validatorSecrets)
+		return fuzzBlockTTicketAlreadyInState(seed, block, s, validatorSecrets)
 	case jamerrors.ErrTTicketsBadOrder:
-		return fuzzBlockTTicketsBadOrder(block)
+		return fuzzBlockTTicketsBadOrder(seed, block)
 	case jamerrors.ErrTBadRingProof:
-		return fuzzBlockTBadRingProof(block)
+		return fuzzBlockTBadRingProof(seed, block)
 	case jamerrors.ErrTEpochLotteryOver:
-		return fuzzBlockTEpochLotteryOver(block, s)
+		return fuzzBlockTEpochLotteryOver(seed, block, s)
 	case jamerrors.ErrTTimeslotNotMonotonic:
-		return fuzzBlockTTimeslotNotMonotonic(block, s)
+		return fuzzBlockTTimeslotNotMonotonic(seed, block, s)
 
 	// reports errors
 	case jamerrors.ErrGBadCodeHash:
-		return fuzzBlockGBadCodeHash(block)
+		return fuzzBlockGBadCodeHash(seed, block)
 	case jamerrors.ErrGBadCoreIndex:
-		return fuzzBlockGBadCoreIndex(block)
+		return fuzzBlockGBadCoreIndex(seed, block)
 	case jamerrors.ErrGBadSignature:
-		return fuzzBlockGBadSignature(block)
+		return fuzzBlockGBadSignature(seed, block)
 	case jamerrors.ErrGCoreEngaged:
-		return fuzzBlockGCoreEngaged(block, s)
+		return fuzzBlockGCoreEngaged(seed, block, s)
 	case jamerrors.ErrGDependencyMissing:
-		return fuzzBlockGDependencyMissing(block, s)
+		return fuzzBlockGDependencyMissing(seed, block, s)
 	case jamerrors.ErrGDuplicatePackageTwoReports:
-		return fuzzBlockGDuplicatePackageTwoReports(block, s)
+		return fuzzBlockGDuplicatePackageTwoReports(seed, block, s)
 	case jamerrors.ErrGFutureReportSlot:
-		return fuzzBlockGFutureReportSlot(block)
+		return fuzzBlockGFutureReportSlot(seed, block)
 	case jamerrors.ErrGInsufficientGuarantees:
-		return fuzzBlockGInsufficientGuarantees(block)
+		return fuzzBlockGInsufficientGuarantees(seed, block)
 	case jamerrors.ErrGDuplicateGuarantors:
-		return fuzzBlockGDuplicateGuarantors(block)
+		return fuzzBlockGDuplicateGuarantors(seed, block)
 	case jamerrors.ErrGOutOfOrderGuarantee:
-		return fuzzBlockGOutOfOrderGuarantee(block)
+		return fuzzBlockGOutOfOrderGuarantee(seed, block)
 	case jamerrors.ErrGWorkReportGasTooHigh:
-		return fuzzBlockGWorkReportGasTooHigh(block)
+		return fuzzBlockGWorkReportGasTooHigh(seed, block)
 	case jamerrors.ErrGServiceItemTooLow:
-		return fuzzBlockGServiceItemTooLow(block, s)
+		return fuzzBlockGServiceItemTooLow(seed, block, s)
 	case jamerrors.ErrGBadValidatorIndex:
-		return fuzzBlockGBadValidatorIndex(block)
+		return fuzzBlockGBadValidatorIndex(seed, block)
 	case jamerrors.ErrGWrongAssignment:
-		return fuzzBlockGWrongAssignment(block, s)
+		return fuzzBlockGWrongAssignment(seed, block, s)
 	case jamerrors.ErrGAnchorNotRecent:
-		return fuzzBlockGAnchorNotRecent(block, s)
+		return fuzzBlockGAnchorNotRecent(seed, block, s)
 	case jamerrors.ErrGBadBeefyMMRRoot:
-		return fuzzBlockGBadBeefyMMRRoot(block, s)
+		return fuzzBlockGBadBeefyMMRRoot(seed, block, s)
 	case jamerrors.ErrGBadServiceID:
-		return fuzzBlockGBadServiceID(block, s)
+		return fuzzBlockGBadServiceID(seed, block, s)
 	case jamerrors.ErrGBadStateRoot:
-		return fuzzBlockGBadStateRoot(block, s)
+		return fuzzBlockGBadStateRoot(seed, block, s)
 	case jamerrors.ErrGReportEpochBeforeLast:
-		return fuzzBlockGReportEpochBeforeLast(block, s)
+		return fuzzBlockGReportEpochBeforeLast(seed, block, s)
 	case jamerrors.ErrGDuplicatePackageRecentHistory:
-		return fuzzBlockGDuplicatePackageRecentHistory(block, s)
+		return fuzzBlockGDuplicatePackageRecentHistory(seed, block, s)
 	case jamerrors.ErrGSegmentRootLookupInvalidNotRecentBlocks:
-		return fuzzBlockGSegmentRootLookupInvalidNotRecentBlocks(block)
+		return fuzzBlockGSegmentRootLookupInvalidNotRecentBlocks(seed, block)
 	case jamerrors.ErrGSegmentRootLookupInvalidUnexpectedValue:
-		return fuzzBlockGSegmentRootLookupInvalidUnexpectedValue(block)
+		return fuzzBlockGSegmentRootLookupInvalidUnexpectedValue(seed, block)
 	case jamerrors.ErrGCoreWithoutAuthorizer:
-		return fuzzBlockGCoreWithoutAuthorizer(block, s)
+		return fuzzBlockGCoreWithoutAuthorizer(seed, block, s)
 	case jamerrors.ErrGCoreUnexpectedAuthorizer:
-		return fuzzBlockGCoreUnexpectedAuthorizer(block, s)
+		return fuzzBlockGCoreUnexpectedAuthorizer(seed, block, s)
 
 	// assurances errors
 	case jamerrors.ErrABadSignature:
-		return fuzzBlockABadSignature(block)
+		return fuzzBlockABadSignature(seed, block)
 	case jamerrors.ErrABadValidatorIndex:
-		return fuzzBlockABadValidatorIndex(block)
+		return fuzzBlockABadValidatorIndex(seed, block)
 	case jamerrors.ErrABadCore:
-		return fuzzBlockABadCore(block, s, validatorSecrets)
+		return fuzzBlockABadCore(seed, block, s, validatorSecrets)
 	case jamerrors.ErrABadParentHash:
-		return fuzzBlockABadParentHash(block, validatorSecrets)
+		return fuzzBlockABadParentHash(seed, block, validatorSecrets)
 	case jamerrors.ErrAStaleReport:
-		return fuzzBlockAStaleReport(block, s)
+		return fuzzBlockAStaleReport(seed, block, s)
 
 	// disputes errors
 	case jamerrors.ErrDNotSortedWorkReports:
-		return fuzzBlockDNotSortedWorkReports(block)
+		return fuzzBlockDNotSortedWorkReports(seed, block)
 	case jamerrors.ErrDNotUniqueVotes:
-		return fuzzBlockDNotUniqueVotes(block)
+		return fuzzBlockDNotUniqueVotes(seed, block)
 	case jamerrors.ErrDNotSortedValidVerdicts:
-		return fuzzBlockDNotSortedValidVerdicts(block)
+		return fuzzBlockDNotSortedValidVerdicts(seed, block)
 	case jamerrors.ErrDNotHomogenousJudgements:
-		return fuzzBlockDNotHomogenousJudgements(block)
+		return fuzzBlockDNotHomogenousJudgements(seed, block)
 	case jamerrors.ErrDMissingCulpritsBadVerdict:
-		return fuzzBlockDMissingCulpritsBadVerdict(block)
+		return fuzzBlockDMissingCulpritsBadVerdict(seed, block)
 	case jamerrors.ErrDSingleCulpritBadVerdict:
-		return fuzzBlockDSingleCulpritBadVerdict(block)
+		return fuzzBlockDSingleCulpritBadVerdict(seed, block)
 	case jamerrors.ErrDTwoCulpritsBadVerdictNotSorted:
-		return fuzzBlockDTwoCulpritsBadVerdictNotSorted(block)
+		return fuzzBlockDTwoCulpritsBadVerdictNotSorted(seed, block)
 	case jamerrors.ErrDAlreadyRecordedVerdict:
-		return fuzzBlockDAlreadyRecordedVerdict(block)
+		return fuzzBlockDAlreadyRecordedVerdict(seed, block)
 	case jamerrors.ErrDCulpritAlreadyInOffenders:
-		return fuzzBlockDCulpritAlreadyInOffenders(block)
+		return fuzzBlockDCulpritAlreadyInOffenders(seed, block)
 	case jamerrors.ErrDOffenderNotPresentVerdict:
-		return fuzzBlockDOffenderNotPresentVerdict(block)
+		return fuzzBlockDOffenderNotPresentVerdict(seed, block)
 	case jamerrors.ErrDMissingFaultsGoodVerdict:
-		return fuzzBlockDMissingFaultsGoodVerdict(block)
+		return fuzzBlockDMissingFaultsGoodVerdict(seed, block)
 	case jamerrors.ErrDTwoFaultOffendersGoodVerdict:
-		return fuzzBlockDTwoFaultOffendersGoodVerdict(block)
+		return fuzzBlockDTwoFaultOffendersGoodVerdict(seed, block)
 	case jamerrors.ErrDAlreadyRecordedVerdictWithFaults:
-		return fuzzBlockDAlreadyRecordedVerdictWithFaults(block)
+		return fuzzBlockDAlreadyRecordedVerdictWithFaults(seed, block)
 	case jamerrors.ErrDFaultOffenderInOffendersList:
-		return fuzzBlockDFaultOffenderInOffendersList(block)
+		return fuzzBlockDFaultOffenderInOffendersList(seed, block)
 	case jamerrors.ErrDAuditorMarkedOffender:
-		return fuzzBlockDAuditorMarkedOffender(block)
+		return fuzzBlockDAuditorMarkedOffender(seed, block)
 	case jamerrors.ErrDBadSignatureInVerdict:
-		return fuzzBlockDBadSignatureInVerdict(block)
+		return fuzzBlockDBadSignatureInVerdict(seed, block)
 	case jamerrors.ErrDBadSignatureInCulprits:
-		return fuzzBlockDBadSignatureInCulprits(block)
+		return fuzzBlockDBadSignatureInCulprits(seed, block)
 	case jamerrors.ErrDAgeTooOldInVerdicts:
-		return fuzzBlockDAgeTooOldInVerdicts(block)
+		return fuzzBlockDAgeTooOldInVerdicts(seed, block)
 
 	default:
 		return nil
 	}
 }
 
-func selectAllImportBlocksErrors(store *storage.StateDBStorage, modes []string, stf *statedb.StateTransition) (oSlot uint32, oEpoch int32, oPhase uint32, mutated_STFs []statedb.StateTransition, fuzzable_errors []error) {
+func selectAllImportBlocksErrors(seed []byte, store *storage.StateDBStorage, modes []string, stf *statedb.StateTransition) (oSlot uint32, oEpoch int32, oPhase uint32, mutated_STFs []statedb.StateTransition, fuzzable_errors []error) {
 	var aggregatedErrors []error
 	var mutatedSTFs []statedb.StateTransition
 	block := stf.Block
@@ -349,7 +389,7 @@ func selectAllImportBlocksErrors(store *storage.StateDBStorage, modes []string, 
 	for _, selectedError := range aggregatedErrors {
 		blockCopy := block.Copy()
 		statedbCopy := sdb.Copy()
-		stfErrExpected := possibleError(selectedError, blockCopy, statedbCopy, validatorSecrets)
+		stfErrExpected := possibleError(seed, selectedError, blockCopy, statedbCopy, validatorSecrets)
 		var sealerUnknown bool
 		switch selectedError {
 		case jamerrors.ErrTEpochLotteryOver, jamerrors.ErrTTimeslotNotMonotonic:
@@ -456,8 +496,8 @@ func selectAllImportBlocksErrors(store *storage.StateDBStorage, modes []string, 
 
 }
 
-func selectImportBlocksError(store *storage.StateDBStorage, modes []string, stf *statedb.StateTransition) (*statedb.StateTransition, error, []error) {
-	oSlot, oEpoch, oPhase, mutatedSTFs, errorList := selectAllImportBlocksErrors(store, modes, stf)
+func selectImportBlocksError(seed []byte, store *storage.StateDBStorage, modes []string, stf *statedb.StateTransition) (*statedb.StateTransition, error, []error) {
+	oSlot, oEpoch, oPhase, mutatedSTFs, errorList := selectAllImportBlocksErrors(seed, store, modes, stf)
 	// pick a random error based on our success
 	if len(errorList) > 0 {
 		rand.Seed(time.Now().UnixNano())
@@ -472,7 +512,7 @@ func selectImportBlocksError(store *storage.StateDBStorage, modes []string, stf 
 }
 
 func (f *Fuzzer) ValidateStateTransitionChallengeResponse(stfQA *StateTransitionQA, stfResp *StateTransitionResponse) (isMatch bool, validationErr error) {
-	return validateStateTransitionChallengeResponse(f.sdbStorage, stfQA, stfResp)
+	return validateStateTransitionChallengeResponse(f.store, stfQA, stfResp)
 }
 
 func validateStateTransitionChallengeResponse(db *storage.StateDBStorage, stfQA *StateTransitionQA, stfResp *StateTransitionResponse) (isMatch bool, validationErr error) {

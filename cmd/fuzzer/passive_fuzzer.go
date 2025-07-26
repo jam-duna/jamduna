@@ -15,6 +15,7 @@ import (
 func main() {
 
 	dir := "/tmp/fuzzer"
+	socket := "/tmp/jam_target.sock"
 	enableRPC := false
 
 	jConfig := types.ConfigJamBlocks{
@@ -39,11 +40,19 @@ func main() {
 	fReg.RegisterFlag("statistics", nil, jConfig.Statistics, "Print statistics interval", &jConfig.Statistics)
 	fReg.RegisterFlag("dir", nil, dir, "Storage directory", &dir)
 	fReg.RegisterFlag("rpc", nil, enableRPC, "Start RPC server", &enableRPC)
+	fReg.RegisterFlag("socket", nil, socket, "Path for the Unix domain socket to connect to", &socket)
+
+	fuzzerInfo := fuzz.PeerInfo{
+		Name:       "jam-duna-fuzzer-v0.1",
+		AppVersion: fuzz.Version{Major: 0, Minor: 6, Patch: 7},
+		JamVersion: fuzz.Version{Major: 0, Minor: 6, Patch: 7},
+	}
+
 	fReg.ProcessRegistry()
 
 	fmt.Printf("jConfig: %v\n", jConfig)
 
-	fuzzer, err := fuzz.NewFuzzer(dir)
+	fuzzer, err := fuzz.NewFuzzer(dir, socket, fuzzerInfo)
 	if err != nil {
 		log.Fatalf("Failed to initialize fuzzer: %v", err)
 	}

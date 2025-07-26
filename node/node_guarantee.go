@@ -344,7 +344,7 @@ func GenerateAlgoPayload(sz int) []byte {
 		// pick a random number from 0 and 20
 		c := rand.Intn(8)
 		algo_payload[j*2] = byte(p)
-		algo_payload[j*2+1] = byte(35 + c)
+		algo_payload[j*2+1] = byte(10 + c)
 	}
 	return algo_payload
 }

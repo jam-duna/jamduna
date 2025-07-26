@@ -61,6 +61,10 @@ type StateSnapshotRaw struct {
 	KeyVals   []KeyVal    `json:"keyvals"`
 }
 
+type StateKeyVals struct {
+	KeyVals []KeyVal `json:"keyvals"`
+}
+
 // kvAlias type for davxy traces
 type kvAlias struct {
 	Key        string `json:"key"`
@@ -322,4 +326,8 @@ func (s *StateSnapshot) String() string {
 
 func (snr *StateSnapshotRaw) String() string {
 	return types.ToJSON(snr)
+}
+
+func (skv *StateKeyVals) String() string {
+	return types.ToJSON(skv)
 }

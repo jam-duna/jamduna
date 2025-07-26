@@ -98,6 +98,7 @@ run_single_test() {
 
 test_pairs=(
  # "megatron orderedaccumulation"
+  "algo safrole"
   "fib2 assurances"
  # "game_of_life generic"
 )

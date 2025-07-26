@@ -3,6 +3,7 @@ package fuzz
 import (
 	//"errors"
 
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -15,16 +16,12 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-type Fuzzer struct {
-	sdbStorage *storage.StateDBStorage
-}
-
-func NewFuzzer(storageDir string) (*Fuzzer, error) {
-	sdbStorage, err := storage.NewStateDBStorage(storageDir)
+func (er *ExecutionReport) String() string {
+	jsonBytes, err := json.MarshalIndent(er, "", "  ")
 	if err != nil {
-		return nil, err
+		return fmt.Sprintf("Error marshaling ExecutionReport: %v", err)
 	}
-	return &Fuzzer{sdbStorage: sdbStorage}, nil
+	return string(jsonBytes)
 }
 
 var fuzzModeList = map[string]bool{
@@ -70,14 +67,6 @@ func CheckModes(mode string) (bool, error) {
 		return false, fmt.Errorf(errMsg)
 	}
 	return true, nil
-}
-
-func (fs *Fuzzer) RunImplementationRPCServer() {
-	runRPCServer(fs.sdbStorage)
-}
-
-func (fs *Fuzzer) RunInternalRPCServer() {
-	runRPCServerInternal(fs.sdbStorage)
 }
 
 func InitFuzzStorage(testDir string) (*storage.StateDBStorage, error) {
@@ -132,4 +121,36 @@ func ReadStateTransitions(baseDir, dir string) (stfs []*statedb.StateTransition,
 	}
 	fmt.Printf("Loaded %v state transitions\n", len(stfs))
 	return stfs, nil
+}
+
+type ExecutionReport struct {
+	Seed            []byte               `json:"seed"`
+	Block           types.Block          `json:"block"`
+	PreState        statedb.StateKeyVals `json:"pre_state"`
+	PostState       statedb.StateKeyVals `json:"post_state"`
+	TargetPostState statedb.StateKeyVals `json:"target_result"`
+	Error           string               `json:"error,omitempty"`
+}
+
+// MarshalJSON implements the json.Marshaler interface for ExecutionReport.
+func (r *ExecutionReport) MarshalJSON() ([]byte, error) {
+	type jsonExecutionReport struct {
+		Seed            string               `json:"seed"`
+		Block           types.Block          `json:"block"`
+		PreState        statedb.StateKeyVals `json:"pre_state"`
+		PostState       statedb.StateKeyVals `json:"post_state"`
+		TargetPostState statedb.StateKeyVals `json:"target_result"`
+		Error           string               `json:"error,omitempty"`
+	}
+
+	report := jsonExecutionReport{
+		Seed:            fmt.Sprintf("0x%x", r.Seed),
+		Block:           r.Block,
+		PreState:        r.PreState,
+		PostState:       r.PostState,
+		TargetPostState: r.TargetPostState,
+		Error:           r.Error,
+	}
+
+	return json.Marshal(report)
 }

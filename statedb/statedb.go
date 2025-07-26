@@ -504,6 +504,13 @@ func (s *StateDB) UpdateAllTrieState(genesis string) common.Hash {
 	return updated_root
 }
 
+func (s *StateDB) UpdateAllTrieKeyVals(skv StateKeyVals) common.Hash {
+	for _, kv := range skv.KeyVals {
+		s.trie.SetRawKeyVal(kv.Key, kv.Value)
+	}
+	return s.trie.GetRoot()
+}
+
 func (s *StateDB) UpdateAllTrieStateRaw(snapshotRaw StateSnapshotRaw) common.Hash {
 	for _, kv := range snapshotRaw.KeyVals {
 		s.trie.SetRawKeyVal(kv.Key, kv.Value)
