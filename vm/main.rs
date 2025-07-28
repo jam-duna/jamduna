@@ -1,200 +1,83 @@
+#![no_std]
+#![no_main]
+#![feature(asm_const)]
 #![allow(non_snake_case)]
 
-use rand::{thread_rng, Rng};
-use std::panic;
-use std::collections::{BinaryHeap, HashMap, VecDeque};
+extern crate alloc;
+use alloc::collections::BinaryHeap;
+use alloc::collections::VecDeque;
+use alloc::format;
+use alloc::string::String;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::mem;
+//use core::mem::transmute;
+use core::primitive::u64;
+use hashbrown::HashMap;
 
+const SIZE0: usize = 0x10000;
+// allocate memory for stack
+use polkavm_derive::min_stack_size;
+min_stack_size!(SIZE0);
+
+const SIZE1: usize = 0x100000;
+// allocate memory for heap
+use simplealloc::SimpleAlloc;
+#[global_allocator]
+static ALLOCATOR: SimpleAlloc<SIZE1> = SimpleAlloc::new();
+
+use core::slice;
+use core::sync::atomic::{AtomicU64, Ordering};
+use utils::constants::FIRST_READABLE_ADDRESS;
+use utils::functions::{call_log, parse_accumulate_args, parse_refine_args, parse_transfer_args, write_result};
+use utils::host_functions::{fetch, gas, write};
+
+/// A simple xorshift64* PRNG
+#[derive(Clone, Copy)]
+pub struct XorShift64Star {
+    state: u64,
+}
+
+impl XorShift64Star {
+    pub const fn new(seed: u64) -> Self {
+        // seed must be nonzero
+        XorShift64Star { state: seed }
+    }
+
+    #[inline]
+    pub fn next_u64(&mut self) -> u64 {
+        let mut x = self.state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.state = x;
+        x.wrapping_mul(0x2545F4914F6CDD1D)
+    }
+}
+
+// we’ll put the RNG state in an AtomicU64 to avoid `unsafe` in get_random_number
+static RNG_STATE: AtomicU64 = AtomicU64::new(0x_1234_5678_9ABC_DEF1);
+
+/// Initialize the global PRNG (call once at startup, with any nonzero seed)
+pub fn seed_rng(seed: u64) {
+    assert!(seed != 0);
+    RNG_STATE.store(seed, Ordering::SeqCst);
+}
+
+/// Returns the next random `u64`
 pub fn get_random_number() -> u64 {
-    rand::thread_rng().gen()
+    // load-and-update atomically
+    let mut state = RNG_STATE.load(Ordering::SeqCst);
+    // xorshift64* step
+    state ^= state << 13;
+    state ^= state >> 7;
+    state ^= state << 17;
+    let out = state.wrapping_mul(0x2545F4914F6CDD1D);
+    RNG_STATE.store(state, Ordering::SeqCst);
+    out
 }
 
 #[allow(dead_code)]
-#[repr(u8)]
-#[derive(Debug, Copy, Clone)]
-enum Programs {
-    ProgramLucas = 0, // Start at 0
-    ProgramTribonacci,
-    ProgramPell,
-    ProgramStirling1,
-    ProgramStirling2,
-    ProgramBell,
-    ProgramDerangement,
-    ProgramNarayana,
-    ProgramMotzkin,
-    ProgramAdjacencyMatrixPowers,
-    ProgramPerfectMatchings,
-    ProgramChromaticPolynomial,
-    ProgramTopologicalSort,
-    ProgramTarjanSCC,
-    ProgramBipartiteMatching,
-    ProgramStoerWagnerMinCut,
-    ProgramLinearMu,
-    ProgramGraphIsomorphism,
-    ProgramPicksTheorem,
-    ProgramManhattanDistance,
-    ProgramChebyshevDistance,
-    ProgramPointInPolygon,
-    ProgramLineSegmentIntersection,
-    ProgramFloodFill,
-    ProgramScanLinePolygonFill,
-    ProgramCohenSutherlandClip,
-    ProgramMidpointCircle,
-    ProgramMergeSort,
-    ProgramQuickSort,
-    ProgramHeapSort,
-    ProgramCountingSort,
-    ProgramRadixSort,
-    ProgramSegmentTree,
-    ProgramQuadraticResidue,
-    ProgramCarmichaelFunction,
-    ProgramMultiplicativeOrder,
-    ProgramPrimitiveRoot,
-    ProgramWilsonsTheorem,
-    ProgramSolovayStrassen,
-    ProgramFermatFactorization,
-    ProgramWheelTrialDivision,
-    ProgramPocklington,
-    ProgramDiffieHellman,
-    ProgramShamirSecretSharing,
-    ProgramLFSRSequence,
-    ProgramBlumBlumShub,
-    ProgramOneTimePad,
-    ProgramCaesarCipher,
-    ProgramTSPHeldKarp,
-    ProgramBinPackingFFD,
-    ProgramGraphColoringGreedy,
-    ProgramMaximumIndependentSet,
-    ProgramVertexCoverApprox,
-    ProgramSteinerTreeApprox,
-    ProgramJobScheduling,
-    ProgramInclusionExclusion,
-    ProgramBurnsideNecklace,
-    ProgramRookPolynomial,
-    ProgramPermanentRyser,
-    ProgramVandermondeDet,
-    ProgramYoungTableaux,
-    ProgramFibonacciMatrix,
-    ProgramFrobeniusCoin,
-    ProgramPartitionModM,
-    ProgramQAnalog,
-    ProgramMobiusInversion,
-    ProgramRamseyBounds,
-    ProgramBellmanFord,
-    ProgramFloydWarshall,
-    ProgramGraphDiameter,
-    ProgramArticulationPoints,
-    ProgramBridges,
-    ProgramBronKerboschCliques,
-    ProgramGreedyDominatingSet,
-    ProgramEulerianPathCircuit,
-    ProgramGrahamScan,
-    ProgramRotatingCalipers,
-    ProgramConvexPolygonTriangulation,
-    ProgramMinkowskiSum,
-    ProgramVisibilityGraph,
-    ProgramStrassen2x2,
-    ProgramGershgorinBounds,
-    ProgramConditionNumber2x2,
-    ProgramSparseMatrixVectorMultiply,
-    ProgramSingularValueBounds,
-    ProgramPollardRhoBrent,
-    ProgramRabinCryptosystem,
-    ProgramMerkleHellman,
-    ProgramRecurrenceSolver,
-    ProgramLinearDiophantine,
-    ProgramkShortestPaths,
-    ProgramRSAKeyGen,
-    ProgramElGamalKeyGen,
-    ProgramDSA,
-    ProgramGFCoeffs,
-    ProgramOneDRangeTreeQuery,
-    ProgramLegendreSymbol,
-    ProgramPollardsPMinusOne,
-    ProgramLucasSequence,
-    ProgramBailliePSW,
-    ProgramNewtonSqrt,
-    ProgramSmithNormalForm2x2,
-    ProgramHermiteNormalForm2x2,
-    ProgramLLLReduction2D,
-    ProgramLongDivisionU64,
-    ProgramBarrettDivision,
-    ProgramSlidingWindowModExp,
-    ProgramMontgomeryLadderModExp,
-    ProgramToomCook3Way64BitMul,
-    ProgramSteinBinaryGCD,
-    ProgramSubtractionOnlyGCD,
-    ProgramBinarySearchDivision,
-    ProgramIntegerLogViaMultiplication,
-    ProgramIntegerLogViaDivision,
-    ProgramPerfectSquareTest,
-    ProgramPerfectPowerTest,
-    ProgramContinuedFractionConvergents,
-    ProgramFareySequence,
-    ProgramClosestPairOfPoints,
-    ProgramFWHT,
-    ProgramNextPermutation,
-    ProgramNextCombination,
-    ProgramPermutationRankUnrank,
-    ProgramCombinationRankUnrank,
-    ProgramPartitionCount,
-    ProgramCoinChangeCount,
-    ProgramCoinChangeMin,
-    ProgramLCS,
-    ProgramLIS,
-    ProgramLevenshtein,
-    ProgramDamerauLevenshtein,
-    ProgramMatrixChain,
-    ProgramOptimalBST,
-    ProgramDTW,
-    ProgramNeedlemanWunsch,
-    ProgramSmithWaterman,
-    ProgramGCDLCM,
-    ProgramModularExpInv,
-    ProgramCRT2,
-    ProgramBitTricksGrayCode,
-    ProgramSieveOfEratosthenes,
-    ProgramTrialDivisionPollardsRho,
-    ProgramFastFibonacci,
-    ProgramFibonacci,
-    ProgramKaratsuba,
-    ProgramNumberTheoreticTransform,
-    ProgramCORDIC,
-    ProgramFixedPoint,
-    ProgramPseudoRandomGenerators,
-    ProgramCRC32Adler32FNV1aMurmurJenkins,
-    ProgramEulerTotient,
-    ProgramLinearSieve,
-    ProgramSumOfDivisors,
-    ProgramDivisorCount,
-    ProgramMobius,
-    ProgramDirichletConvolution,
-    ProgramPrimeCountTrialDivision,
-    ProgramKnapsack,
-    ProgramUnboundedKnapsack,
-    ProgramEulerian,
-    ProgramLucasLehmerTest,
-    ProgramBareiss3x3Determinant,
-    ProgramEnumeratePartitions,
-    ProgramMontgomeryBarrettReduction,
-    ProgramFenwickTree,
-    ProgramSpanningTreeCount,
-    ProgramMatrixRank,
-    ProgramCipolla,
-    ProgramJacobiSymbol,
-
-    // FAILS/HANGS SOMETIMES
-    ProgramSternBrocotPath,
-    ProgramStrongLucasPRP,
-    ProgramConvexHull,
-    ProgramSetCoverGreedy,
-    ProgramTonelliShanks,
-
-    // MATH ISSUES
-    ProgramQuadraticCongruence,
-    ProgramCyclotomicPhiN,
-    ProgramCFFactorization,
-}
-
 fn lcm(a: u64, b: u64) -> u64 {
     a / gcd(a, b) * b
 }
@@ -310,7 +193,7 @@ fn jacobi(mut a: u64, mut n: u64) -> i64 {
                 t = -t;
             }
         }
-        std::mem::swap(&mut a, &mut n);
+        mem::swap(&mut a, &mut n);
         if a & n & 2 != 0 {
             t = -t;
         }
@@ -323,6 +206,7 @@ fn jacobi(mut a: u64, mut n: u64) -> i64 {
     }
 }
 
+#[allow(dead_code)]
 fn dist2(a: (i64, i64), b: (i64, i64)) -> u64 {
     let dx = a.0 - b.0;
     let dy = a.1 - b.1;
@@ -447,15 +331,21 @@ fn garner(a: &[i64], n: &[i64]) -> i64 {
 //fn floor_log2(n: u64) -> u32 { 63 - n.leading_zeros() }
 
 // 8. CLZ, CTZ, Popcount, Parity
+#[allow(dead_code)]
 fn clz(n: u64) -> u32 {
     n.leading_zeros()
 }
+
+#[allow(dead_code)]
 fn ctz(n: u64) -> u32 {
     n.trailing_zeros()
 }
+
+#[allow(dead_code)]
 fn popcount(n: u64) -> u32 {
     n.count_ones()
 }
+#[allow(dead_code)]
 fn parity(n: u64) -> u32 {
     (n.count_ones() & 1) as u32
 }
@@ -491,22 +381,6 @@ fn sieve(n: usize) -> Vec<usize> {
     p
 }
 
-// Trial division & Pollard's Rho
-fn trial_division(mut n: u64) -> Vec<u64> {
-    let mut f = Vec::new();
-    let mut d = 2;
-    while d <= integer_sqrt(n) {
-        while n % d == 0 {
-            f.push(d);
-            n /= d;
-        }
-        d += 1;
-    }
-    if n > 1 {
-        f.push(n)
-    }
-    f
-}
 fn is_prime_small(n: u64) -> bool {
     if n < 2 {
         return false;
@@ -523,6 +397,7 @@ fn is_prime_small(n: u64) -> bool {
     }
     true
 }
+/*
 fn pollards_rho(n: u64) -> u64 {
     if n % 2 == 0 {
         return 2;
@@ -563,8 +438,7 @@ fn factor(n: u64) -> Vec<u64> {
     l.sort_unstable();
     l
 }
-
-// ─── 21–30 ─────────────────────────────────────────────────────────────────
+*/
 
 // 12. Fast Fibonacci (fast doubling)
 fn fib(n: u64) -> (u64, u64) {
@@ -582,9 +456,7 @@ fn fib(n: u64) -> (u64, u64) {
 }
 // 13–14. Factorial & binomial & Catalan
 fn catalan(n: u64) -> u64 {
-    (1..=n).fold(1u64, |c, i| {
-        c.wrapping_mul(4 * i as u64 - 2) / (i as u64 + 1)
-    })
+    (1..=n).fold(1u64, |c, i| c.wrapping_mul(4 * i as u64 - 2) / (i as u64 + 1))
 }
 // 15. Karatsuba 64×64→128
 fn karatsuba(x: u64, y: u64) -> u128 {
@@ -644,7 +516,7 @@ fn mont_mul32(a: u32, b: u32, m: u32, m_prime: u32) -> u32 {
     let t = a as u64 * b as u64;
     let m0 = (t as u32).wrapping_mul(m_prime);
     let tmp = t.wrapping_add((m0 as u64).wrapping_mul(m as u64));
-    let u   = (tmp >> 32) as u32;
+    let u = (tmp >> 32) as u32;
     if u >= m {
         u - m
     } else {
@@ -693,9 +565,7 @@ fn ntt(a: &[u64; NTT_N]) -> [u64; NTT_N] {
 }
 // 21. CORDIC Q16
 fn cordic(angle: i32) -> (i32, i32) {
-    const ANG: [i32; 16] = [
-        51471, 30385, 16054, 8153, 4097, 2049, 1025, 512, 256, 128, 64, 32, 16, 8, 4, 2,
-    ];
+    const ANG: [i32; 16] = [51471, 30385, 16054, 8153, 4097, 2049, 1025, 512, 256, 128, 64, 32, 16, 8, 4, 2];
     const K: i32 = 39797;
     let mut x = K;
     let mut y = 0;
@@ -720,7 +590,7 @@ fn fix_mul(a: i32, b: i32) -> i32 {
     ((a as i64 * b as i64) >> 16) as i32
 }
 fn fix_div(a: i32, b: i32) -> i32 {
-        // avoid divide-by-zero
+    // avoid divide-by-zero
     if b == 0 {
         return 0;
     }
@@ -753,9 +623,7 @@ struct Pcg {
 impl Pcg {
     fn next(&mut self) -> u32 {
         let old = self.state;
-        self.state = old
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(self.inc | 1);
+        self.state = old.wrapping_mul(6364136223846793005).wrapping_add(self.inc | 1);
         let x = ((old >> 18) ^ old) >> 27;
         let r = (old >> 59) as u32;
         (x as u32).rotate_right(r)
@@ -780,11 +648,7 @@ fn crc32(data: &[u8]) -> u32 {
     for &b in data {
         crc ^= b as u32;
         for _ in 0..8 {
-            crc = if crc & 1 != 0 {
-                (crc >> 1) ^ 0xEDB8_8320
-            } else {
-                crc >> 1
-            };
+            crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
         }
     }
     !crc
@@ -1187,8 +1051,7 @@ fn cipolla(n: u64, p: u64) -> Option<u64> {
     }
     impl Complex {
         fn mul(self, other: Complex) -> Complex {
-            let x =
-                (self.x * other.x % self.p + self.y * other.y % self.p * self.w % self.p) % self.p;
+            let x = (self.x * other.x % self.p + self.y * other.y % self.p * self.w % self.p) % self.p;
             let y = (self.x * other.y % self.p + self.y * other.x % self.p) % self.p;
             Complex {
                 x,
@@ -1228,13 +1091,10 @@ fn lucas_lehmer(p: u64) -> bool {
     let mut s = 4u64;
     for _ in 0..(p - 2) {
         // use wrapping_mul so debug builds won't panic
-        s = s.wrapping_mul(s)
-             .wrapping_sub(2)
-             % m;
+        s = s.wrapping_mul(s).wrapping_sub(2) % m;
     }
     s == 0
 }
-
 
 // Lucas sequence U_n, V_n mod m (naïve O(n))
 fn lucas_sequence(n: u64, P: i64, Q: i64, m: i64) -> (i64, i64) {
@@ -1288,8 +1148,7 @@ fn is_strong_lucas_prp(n: u64) -> bool {
     for _ in 1..s {
         // U, V update for doubling
         let U2 = (U * V).rem_euclid(n as i64);
-        let V2 =
-            (V * V - 2 * mod_exp(Q.rem_euclid(n as i64) as u64, 1, n) as i64).rem_euclid(n as i64);
+        let V2 = (V * V - 2 * mod_exp(Q.rem_euclid(n as i64) as u64, 1, n) as i64).rem_euclid(n as i64);
         U = U2;
         V = V2;
         if U == 0 {
@@ -1353,7 +1212,7 @@ fn newton_sqrt(n: u64) -> u64 {
 
 // Bareiss Algorithm for 3×3 Determinant
 /// Standard direct formula for a 3×3 determinant.
-fn det3_direct(mat: [[i64;3];3]) -> i64 {
+fn det3_direct(mat: [[i64; 3]; 3]) -> i64 {
     let a = mat[0][0];
     let b = mat[0][1];
     let c = mat[0][2];
@@ -1363,11 +1222,11 @@ fn det3_direct(mat: [[i64;3];3]) -> i64 {
     let g = mat[2][0];
     let h = mat[2][1];
     let i = mat[2][2];
-    a*(e*i - f*h) - b*(d*i - f*g) + c*(d*h - e*g)
+    a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
 }
 
 /// Bareiss algorithm with zero‑pivot guard
-fn det_bareiss_3x3(mat: [[i64;3];3]) -> i64 {
+fn det_bareiss_3x3(mat: [[i64; 3]; 3]) -> i64 {
     // Copy into a mutable 2D array
     let mut m2 = mat;
     let mut denom = 1i64;
@@ -1390,7 +1249,6 @@ fn det_bareiss_3x3(mat: [[i64;3];3]) -> i64 {
     // After two elimination steps, m2[2][2] is the determinant
     m2[2][2]
 }
-
 
 // Smith Normal Form for 2×2
 fn smith_normal_form_2x2(mat: [[i64; 2]; 2]) -> (i64, i64) {
@@ -1760,7 +1618,6 @@ fn enum_partitions(n: u64) -> Vec<Vec<u64>> {
     out
 }
 
-
 // Coin change: count ways (coins 1,5,10,25)
 fn coin_change_count(n: usize) -> u64 {
     let coins = [1, 5, 10, 25];
@@ -1862,9 +1719,7 @@ fn levenshtein(a: &[u8], b: &[u8]) -> usize {
     for i in 1..=m {
         for j in 1..=n {
             let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
-            dp[i][j] = (dp[i - 1][j] + 1)
-                .min(dp[i][j - 1] + 1)
-                .min(dp[i - 1][j - 1] + cost);
+            dp[i][j] = (dp[i - 1][j] + 1).min(dp[i][j - 1] + 1).min(dp[i - 1][j - 1] + cost);
         }
     }
     dp[m][n]
@@ -1883,9 +1738,7 @@ fn damerau_levenshtein(a: &[u8], b: &[u8]) -> usize {
     for i in 1..=m {
         for j in 1..=n {
             let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
-            dp[i][j] = (dp[i - 1][j] + 1)
-                .min(dp[i][j - 1] + 1)
-                .min(dp[i - 1][j - 1] + cost);
+            dp[i][j] = (dp[i - 1][j] + 1).min(dp[i][j - 1] + 1).min(dp[i - 1][j - 1] + cost);
             if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
                 dp[i][j] = dp[i][j].min(dp[i - 2][j - 2] + 1);
             }
@@ -1925,9 +1778,7 @@ fn optimal_bst(freq: &[u64]) -> u64 {
             dp[i][j] = u64::MAX;
             let w = sum[j + 1] - sum[i];
             for r in i..=j {
-                let c = w
-                    + (if r > i { dp[i][r - 1] } else { 0 })
-                    + (if r < j { dp[r + 1][j] } else { 0 });
+                let c = w + (if r > i { dp[i][r - 1] } else { 0 }) + (if r < j { dp[r + 1][j] } else { 0 });
                 dp[i][j] = dp[i][j].min(c);
             }
         }
@@ -1992,10 +1843,7 @@ fn smith_waterman(a: &[u8], b: &[u8]) -> i64 {
     for i in 1..=m {
         for j in 1..=n {
             let score = if a[i - 1] == b[j - 1] { 2 } else { -1 };
-            dp[i][j] = (dp[i - 1][j - 1] + score)
-                .max(dp[i - 1][j] + gap)
-                .max(dp[i][j - 1] + gap)
-                .max(0);
+            dp[i][j] = (dp[i - 1][j - 1] + score).max(dp[i - 1][j] + gap).max(dp[i][j - 1] + gap).max(0);
             best = best.max(dp[i][j]);
         }
     }
@@ -2015,7 +1863,7 @@ fn stein_gcd(mut a: u64, mut b: u64) -> u64 {
     loop {
         b >>= b.trailing_zeros();
         if a > b {
-            std::mem::swap(&mut a, &mut b);
+            mem::swap(&mut a, &mut b);
         }
         b -= a;
         if b == 0 {
@@ -2046,7 +1894,7 @@ fn sub_gcd(mut a: u64, mut b: u64) -> u64 {
 // Binary‑Search Integer Division: ⌊a/b⌋
 fn binary_div(a: u64, b: u64) -> u64 {
     if b == 0 {
-        panic!("division by zero");
+        return 0;
     }
 
     let mut low: u64 = 0;
@@ -2325,16 +2173,8 @@ fn eulerian(n: usize, k: usize) -> u64 {
     dp[0][0] = 1;
     for i in 1..=n {
         for j in 0..i {
-            let a = if j > 0 {
-                (i - j) as u64 * dp[i - 1][j - 1]
-            } else {
-                0
-            };
-            let b = if j < i - 1 {
-                (j + 1) as u64 * dp[i - 1][j]
-            } else {
-                0
-            };
+            let a = if j > 0 { (i - j) as u64 * dp[i - 1][j - 1] } else { 0 };
+            let b = if j < i - 1 { (j + 1) as u64 * dp[i - 1][j] } else { 0 };
             dp[i][j] = a + b;
         }
     }
@@ -2394,6 +2234,8 @@ fn mat_mul(a: &Vec<Vec<u64>>, b: &Vec<Vec<u64>>) -> Vec<Vec<u64>> {
     }
     c
 }
+
+#[allow(dead_code)]
 fn mat_pow(adj: &Vec<Vec<u64>>, k: u32) -> Vec<Vec<u64>> {
     let n = adj.len();
     let mut res = vec![vec![0u64; n]; n];
@@ -2589,16 +2431,7 @@ fn tarjan_scc(adj: &Vec<Vec<bool>>) -> Vec<Vec<usize>> {
     }
     for u in 0..n {
         if index[u].is_none() {
-            dfs(
-                u,
-                adj,
-                &mut index,
-                &mut low,
-                &mut stack,
-                &mut onstack,
-                &mut idx,
-                &mut comps,
-            );
+            dfs(u, adj, &mut index, &mut low, &mut stack, &mut onstack, &mut idx, &mut comps);
         }
     }
     comps
@@ -2609,12 +2442,7 @@ fn bipartite_match(adj: &Vec<Vec<bool>>) -> usize {
     let n = adj.len();
     let m = adj[0].len();
     let mut match_r = vec![None; m];
-    fn dfs(
-        u: usize,
-        adj: &Vec<Vec<bool>>,
-        seen: &mut Vec<bool>,
-        match_r: &mut Vec<Option<usize>>,
-    ) -> bool {
+    fn dfs(u: usize, adj: &Vec<Vec<bool>>, seen: &mut Vec<bool>, match_r: &mut Vec<Option<usize>>) -> bool {
         for v in 0..adj[0].len() {
             if adj[u][v] && !seen[v] {
                 seen[v] = true;
@@ -2803,9 +2631,7 @@ fn convex_hull(points: &[(i64, i64)]) -> Vec<(i64, i64)> {
     // find leftmost lowest
     let mut left = 0;
     for i in 1..n {
-        if points[i].0 < points[left].0
-            || (points[i].0 == points[left].0 && points[i].1 < points[left].1)
-        {
+        if points[i].0 < points[left].0 || (points[i].0 == points[left].0 && points[i].1 < points[left].1) {
             left = i;
         }
     }
@@ -3196,7 +3022,6 @@ impl Fenwick {
     }
 }
 
-
 // Segment Tree (range sum)
 struct SegTree {
     n: usize,
@@ -3253,11 +3078,7 @@ fn carmichael(n: u64) -> u64 {
     }
     let mut res = 1;
     for (&p, &k) in &counts {
-        let lam = if p == 2 && k >= 3 {
-            1 << (k - 2)
-        } else {
-            p.pow(k - 1) * (p - 1)
-        };
+        let lam = if p == 2 && k >= 3 { 1 << (k - 2) } else { p.pow(k - 1) * (p - 1) };
         res = lcm(res, lam);
     }
     res
@@ -3583,10 +3404,7 @@ fn steiner_approx(adj: &Vec<Vec<u64>>, terminals: &[usize]) -> u64 {
     let mut total = 0;
     for _ in 0..k {
         // pick minimum‐key vertex
-        let u = (0..k)
-            .filter(|&i| !in_mst[i])
-            .min_by_key(|&i| key[i])
-            .unwrap();
+        let u = (0..k).filter(|&i| !in_mst[i]).min_by_key(|&i| key[i]).unwrap();
         in_mst[u] = true;
         total += key[u];
         // update neighbors
@@ -3664,9 +3482,7 @@ fn binom(n: usize, k: usize) -> u64 {
 
 // Rook polynomial coefficients for n×n board
 fn rook_poly(n: usize) -> Vec<u64> {
-    (0..=n)
-        .map(|r| binom(n, r).pow(2) * fact(r as u64))
-        .collect()
+    (0..=n).map(|r| binom(n, r).pow(2) * fact(r as u64)).collect()
 }
 
 // Permanent of a 0‑1 matrix via Ryser’s formula
@@ -3676,9 +3492,7 @@ fn permanent(a: &Vec<Vec<u64>>) -> u64 {
     let mut res = 0i64;
 
     // build a usize‐typed range
-    let max_mask = 1usize
-        .checked_shl(n as u32)
-        .expect("n too large for bitmask");
+    let max_mask = 1usize.checked_shl(n as u32).expect("n too large for bitmask");
 
     for mask in 1usize..max_mask {
         // now mask: usize, so count_ones() is defined
@@ -3736,14 +3550,8 @@ fn young_tableaux(rc: (usize, usize)) -> u64 {
 fn fib_matrix(n: u64) -> u64 {
     fn mul(a: [[u64; 2]; 2], b: [[u64; 2]; 2]) -> [[u64; 2]; 2] {
         [
-            [
-                a[0][0] * b[0][0] + a[0][1] * b[1][0],
-                a[0][0] * b[0][1] + a[0][1] * b[1][1],
-            ],
-            [
-                a[1][0] * b[0][0] + a[1][1] * b[1][0],
-                a[1][0] * b[0][1] + a[1][1] * b[1][1],
-            ],
+            [a[0][0] * b[0][0] + a[0][1] * b[1][0], a[0][0] * b[0][1] + a[0][1] * b[1][1]],
+            [a[1][0] * b[0][0] + a[1][1] * b[1][0], a[1][0] * b[0][1] + a[1][1] * b[1][1]],
         ]
     }
     let mut res = [[1, 0], [0, 1]];
@@ -3818,16 +3626,15 @@ fn cyclotomic(n: u64, x: u64) -> u64 {
             } else {
                 // Promote to 128 bits so pow and sub never overflow
                 let xp: u128 = (x as u128).wrapping_pow(d as u32);
-                let numerator = xp.saturating_sub(1);   // always >= 0 in u128
-                let denominator = (x - 1) as u128;      // nonzero
-                (numerator / denominator) as u64        // fits back in u64
+                let numerator = xp.saturating_sub(1); // always >= 0 in u128
+                let denominator = (x - 1) as u128; // nonzero
+                (numerator / denominator) as u64 // fits back in u64
             };
             result = result.saturating_mul(term);
         }
     }
     result
 }
-
 
 // Möbius Inversion: given g up to N, recover f
 fn mobius_inversion(g: &[u64]) -> Vec<i64> {
@@ -3967,11 +3774,7 @@ fn articulation_points(adj: &Vec<Vec<usize>>) -> Vec<usize> {
             dfs(u, &mut time, &mut disc, &mut low, &mut parent, &mut ap, adj);
         }
     }
-    ap.iter()
-        .enumerate()
-        .filter(|&(_, &is_ap)| is_ap)
-        .map(|(i, _)| i)
-        .collect()
+    ap.iter().enumerate().filter(|&(_, &is_ap)| is_ap).map(|(i, _)| i).collect()
 }
 
 // 73. Bridge Finding (Tarjan)
@@ -4011,28 +3814,14 @@ fn find_bridges(adj: &Vec<Vec<usize>>) -> Vec<(usize, usize)> {
 
     for u in 0..n {
         if disc[u] == 0 {
-            dfs(
-                u,
-                &mut time,
-                &mut disc,
-                &mut low,
-                &mut parent,
-                adj,
-                &mut bridges,
-            );
+            dfs(u, &mut time, &mut disc, &mut low, &mut parent, adj, &mut bridges);
         }
     }
     bridges
 }
 
 // 76. Bron–Kerbosch Maximal Cliques
-fn bron_kerbosch(
-    r: Vec<usize>,
-    mut p: Vec<usize>,
-    mut x: Vec<usize>,
-    adj: &Vec<Vec<bool>>,
-    cliques: &mut Vec<Vec<usize>>,
-) {
+fn bron_kerbosch(r: Vec<usize>, mut p: Vec<usize>, mut x: Vec<usize>, adj: &Vec<Vec<bool>>, cliques: &mut Vec<Vec<usize>>) {
     // If no more candidates and no excluded, r is a maximal clique
     if p.is_empty() && x.is_empty() {
         cliques.push(r);
@@ -4067,12 +3856,7 @@ fn greedy_dominating_set(adj: &Vec<Vec<bool>>) -> Vec<usize> {
         let mut best = 0;
         let mut best_u = 0;
         for u in 0..n {
-            let cover = adj[u]
-                .iter()
-                .enumerate()
-                .filter(|&(v, &e)| e && !dominated[v])
-                .count()
-                + if !dominated[u] { 1 } else { 0 };
+            let cover = adj[u].iter().enumerate().filter(|&(v, &e)| e && !dominated[v]).count() + if !dominated[u] { 1 } else { 0 };
             if cover > best {
                 best = cover;
                 best_u = u;
@@ -4109,25 +3893,21 @@ fn closest_pair(points: &[(i64, i64)]) -> ((i64, i64), (i64, i64), u64) {
 }
 
 // ─── 83. Graham Scan Convex Hull ────────────────────────────────────────────
-
+#[allow(dead_code)]
 fn graham_hull(pts: &Vec<(i64, i64)>) -> Vec<(i64, i64)> {
     let mut p = pts.clone();
     p.sort_unstable();
     //let n = p.len();
     let mut lower = Vec::new();
     for &pt in &p {
-        while lower.len() >= 2
-            && orientation(lower[lower.len() - 2], lower[lower.len() - 1], pt) <= 0
-        {
+        while lower.len() >= 2 && orientation(lower[lower.len() - 2], lower[lower.len() - 1], pt) <= 0 {
             lower.pop();
         }
         lower.push(pt);
     }
     let mut upper = Vec::new();
     for &pt in p.iter().rev() {
-        while upper.len() >= 2
-            && orientation(upper[upper.len() - 2], upper[upper.len() - 1], pt) <= 0
-        {
+        while upper.len() >= 2 && orientation(upper[upper.len() - 2], upper[upper.len() - 1], pt) <= 0 {
             upper.pop();
         }
         upper.push(pt);
@@ -4150,9 +3930,7 @@ fn diameter(pts: &Vec<(i64, i64)>) -> u64 {
     let mut best = 0;
     for i in 0..m {
         let ni = (i + 1) % m;
-        while orientation(ch[i], ch[ni], ch[(j + 1) % m]).abs()
-            > orientation(ch[i], ch[ni], ch[j]).abs()
-        {
+        while orientation(ch[i], ch[ni], ch[(j + 1) % m]).abs() > orientation(ch[i], ch[ni], ch[j]).abs() {
             j = (j + 1) % m;
         }
         best = best.max(dist2(ch[i], ch[j]));
@@ -4162,7 +3940,7 @@ fn diameter(pts: &Vec<(i64, i64)>) -> u64 {
 }
 
 // ─── 86. Convex Polygon Triangulation (fan) ─────────────────────────────────
-
+#[allow(dead_code)]
 fn triangulate_convex(poly: &Vec<(i64, i64)>) -> Vec<(usize, usize, usize)> {
     let n = poly.len();
     let mut tris = Vec::new();
@@ -4185,7 +3963,7 @@ fn minkowski_sum(a: &Vec<(i64, i64)>, b: &Vec<(i64, i64)>) -> Vec<(i64, i64)> {
 }
 
 // ─── 88. Visibility Graph (naïve) ───────────────────────────────────────────
-
+#[allow(dead_code)]
 fn visibility_graph(poly: &Vec<(i64, i64)>) -> Vec<Vec<bool>> {
     let n = poly.len();
     let mut g = vec![vec![false; n]; n];
@@ -4209,6 +3987,7 @@ fn visibility_graph(poly: &Vec<(i64, i64)>) -> Vec<Vec<bool>> {
 }
 
 // 93. Integer Matrix Multiplication (Strassen) for 2×2
+#[allow(dead_code)]
 fn strassen_2x2(a: [[i64; 2]; 2], b: [[i64; 2]; 2]) -> [[i64; 2]; 2] {
     let m1 = (a[0][0] + a[1][1]) * (b[0][0] + b[1][1]);
     let m2 = (a[1][0] + a[1][1]) * b[0][0];
@@ -4221,6 +4000,7 @@ fn strassen_2x2(a: [[i64; 2]; 2], b: [[i64; 2]; 2]) -> [[i64; 2]; 2] {
 }
 
 // 96. Eigenvalue Bounds (Gershgorin)
+#[allow(dead_code)]
 fn gershgorin_bounds(mat: &Vec<Vec<i64>>) -> Vec<(i64, i64)> {
     let n = mat.len();
     let mut bounds = Vec::with_capacity(n);
@@ -4276,8 +4056,6 @@ fn matrix_rank(mut a: Vec<Vec<i64>>) -> usize {
     rank
 }
 
-
-
 // 98. Condition Number Estimation for 2×2 matrix (∞-norm)
 fn condition_number_2x2(a: [[i64; 2]; 2]) -> u64 {
     let norm_a = ((a[0][0].abs() + a[0][1].abs()).max(a[1][0].abs() + a[1][1].abs())) as u64;
@@ -4290,6 +4068,7 @@ fn condition_number_2x2(a: [[i64; 2]; 2]) -> u64 {
 }
 
 // 99. Sparse Matrix-Vector Multiplication
+#[allow(dead_code)]
 fn spmv(rows: &Vec<Vec<(usize, i64)>>, x: &Vec<i64>) -> Vec<i64> {
     let m = rows.len();
     let mut y = vec![0i64; m];
@@ -4427,9 +4206,7 @@ fn rabin_decrypt(c: u64, p: u64, q: u64) -> Vec<u64> {
     let mut res = Vec::new();
     for &s_p in &[r_p, (p - r_p) % p] {
         for &s_q in &[r_q, (q - r_q) % q] {
-            let x = (s_p.wrapping_mul(q).wrapping_mul(inv_q)
-                + s_q.wrapping_mul(p).wrapping_mul(inv_p))
-                % n;
+            let x = (s_p.wrapping_mul(q).wrapping_mul(inv_q) + s_q.wrapping_mul(p).wrapping_mul(inv_p)) % n;
             res.push(x);
         }
     }
@@ -4437,6 +4214,7 @@ fn rabin_decrypt(c: u64, p: u64, q: u64) -> Vec<u64> {
 }
 
 // 4. Merkle-Hellman Knapsack
+#[allow(dead_code)]
 fn mh_keygen(n: usize) -> (Vec<u64>, u64, u64) {
     let mut w = Vec::with_capacity(n);
     let mut sum = 0;
@@ -4456,6 +4234,8 @@ fn mh_keygen(n: usize) -> (Vec<u64>, u64, u64) {
 fn mh_encrypt(pubkey: &Vec<u64>, msg: &[u8]) -> u64 {
     msg.iter().zip(pubkey).map(|(&b, &k)| (b as u64) * k).sum()
 }
+
+#[allow(dead_code)]
 fn mh_decrypt(w: &Vec<u64>, q: u64, r: u64, c: u64) -> Vec<u8> {
     let inv_r = mod_inv(r as i64, q as i64).unwrap() as u64;
     let mut s = c.wrapping_mul(inv_r) % q;
@@ -4473,6 +4253,7 @@ fn mh_decrypt(w: &Vec<u64>, q: u64, r: u64, c: u64) -> Vec<u8> {
 }
 
 // 5. Recurrence Relation Solver (companion matrix)
+#[allow(dead_code)]
 fn rec_nth(coefs: &[i64], init: &[i64], n: u64) -> i64 {
     let k = coefs.len();
     if n < k as u64 {
@@ -4493,6 +4274,8 @@ fn rec_nth(coefs: &[i64], init: &[i64], n: u64) -> i64 {
     }
     res as i64
 }
+
+#[allow(dead_code)]
 fn mat_mul_i64(a: Vec<Vec<i64>>, b: Vec<Vec<i64>>) -> Vec<Vec<i64>> {
     let n = a.len();
     let mut c = vec![vec![0; n]; n];
@@ -4554,12 +4337,12 @@ fn solve_linear3(a: i64, b: i64, c: i64, d: i64) -> Option<(i64, i64, i64)> {
     Some((x00, y00, z00))
 }
 
-
-// 7. k‑Shortest Paths (Yen’s, simple BFS–Dijkstra)
+// 7. kShortest Paths (Yen’s, simple BFS–Dijkstra)
+#[allow(dead_code)]
 fn k_shortest(src: usize, dst: usize, adj: &Vec<Vec<(usize, u64)>>, k: usize) -> Vec<u64> {
     let mut res = Vec::new();
     let mut pq = BinaryHeap::new();
-    pq.push((std::u64::MAX, vec![src])); // max-heap: store (-cost, path)
+    pq.push((0xFFFFFFFFFFFFFFFF, vec![src])); // max-heap: store (-cost, path)
     while let Some((nc, path)) = pq.pop() {
         let cost = !nc;
         let u = *path.last().unwrap();
@@ -4581,10 +4364,15 @@ fn k_shortest(src: usize, dst: usize, adj: &Vec<Vec<(usize, u64)>>, k: usize) ->
 }
 
 // Continued Fraction Factorization (basic)
+#[allow(dead_code)]
 fn cf_factor(n: u64) -> Option<u64> {
-    if n % 2 == 0 { return Some(2); }
+    if n % 2 == 0 {
+        return Some(2);
+    }
     let a0 = integer_sqrt(n);
-    if a0 * a0 == n { return Some(a0); }
+    if a0 * a0 == n {
+        return Some(a0);
+    }
 
     let mut p_prev = 0u64;
     let mut p = a0;
@@ -4601,11 +4389,24 @@ fn cf_factor(n: u64) -> Option<u64> {
         let k = a.wrapping_mul(k1).wrapping_add(k2);
 
         // 2) f = h² − n·k², skip on overflow
-        let hh = match h.checked_mul(h) { Some(v) => v, None => continue };
-        let kk = match k.checked_mul(k) { Some(v) => v, None => continue };
-        let nk = match (n as u128).checked_mul(kk as u128) { Some(v) => v, None => continue };
+        let hh = match h.checked_mul(h) {
+            Some(v) => v,
+            None => continue,
+        };
+        let kk = match k.checked_mul(k) {
+            Some(v) => v,
+            None => continue,
+        };
+        let nk = match (n as u128).checked_mul(kk as u128) {
+            Some(v) => v,
+            None => continue,
+        };
 
-        let af = if (hh as u128) >= nk { (hh as u128 - nk) as u64 } else { (nk - hh as u128) as u64 };
+        let af = if (hh as u128) >= nk {
+            (hh as u128 - nk) as u64
+        } else {
+            (nk - hh as u128) as u64
+        };
 
         // 3) perfect square?
         let s = integer_sqrt(af);
@@ -4625,7 +4426,10 @@ fn cf_factor(n: u64) -> Option<u64> {
             p_prev = p;
             p = p_next;
             // keep q and a unchanged so we don’t break the CF stream
-            h2 = h1;  h1 = h;  k2 = k1;  k1 = k;
+            h2 = h1;
+            h1 = h;
+            k2 = k1;
+            k1 = k;
             continue;
         }
         // guard division by zero
@@ -4636,14 +4440,17 @@ fn cf_factor(n: u64) -> Option<u64> {
         let a_next = (a0 + p_next) / q_next;
 
         // rotate state
-        p_prev = p;  p = p_next;
-        q = q_next;  a = a_next;
-        h2 = h1;     h1 = h;
-        k2 = k1;     k1 = k;
+        p_prev = p;
+        p = p_next;
+        q = q_next;
+        a = a_next;
+        h2 = h1;
+        h1 = h;
+        k2 = k1;
+        k1 = k;
     }
     None
 }
-
 
 // RSA Key Generation
 fn rsa_keygen() -> (u64, u64, u64) {
@@ -4663,7 +4470,7 @@ fn rsa_keygen() -> (u64, u64, u64) {
 }
 
 // ─── 17. ElGamal Key Generation ────────────────────────────────────────────
-
+#[allow(dead_code)]
 fn elgamal_keygen() -> (u64, u64, u64, u64) {
     let p = next_prime(get_random_number() % 1000 + 100);
     let g = primitive_root(p);
@@ -4731,475 +4538,60 @@ impl RangeTree1D {
     }
 }
 
-fn run_program(choice: Programs) {
-    match choice {
-        Programs::ProgramLucas => {
-            let n = (get_random_number() % 50) as u32;
-            println!("lucas({}) = {}", n, lucas(n));
-        }
-        Programs::ProgramTribonacci => {
-            // Tribonacci Numbers
+fn run_program(idx: u8) -> u64 {
+    let gas_start = unsafe { gas() };
+
+    match idx {
+        0 => {
             let n = (get_random_number() % 30) as u32;
-            println!("tribonacci({}) = {}", n, tribonacci(n));
+            call_log(2, None, &format!("tribonacci({}) = {}", n, tribonacci(n)));
         }
-        Programs::ProgramPell => {
-            // Pell Numbers
-            let n = (get_random_number() % 40) as u32;
-            println!("pell({}) = {}", n, pell(n));
-        }
-        Programs::ProgramStirling1 => {
-            //  Stirling Numbers of the First Kind
-            let n = (get_random_number() % 20) as usize;
-            let k = (get_random_number() % (n as u64 + 1)) as usize;
-            println!("stirling1({}, {}) = {}", n, k, stirling1(n, k));
-        }
-        Programs::ProgramStirling2 => {
-            // Stirling Numbers of the Second Kind
-            let n = (get_random_number() % 20) as usize;
-            let k = (get_random_number() % (n as u64 + 1)) as usize;
-            println!("stirling2({}, {}) = {}", n, k, stirling2(n, k));
-        }
-        Programs::ProgramBell => {
-            // Bell Numbers
-            let n = (get_random_number() % 20) as usize;
-            println!("Bell({}) = {}", n, bell(n));
-        }
-        Programs::ProgramDerangement => {
-            // Derangement Count
-            let n = (get_random_number() % 20) as u32;
-            println!("derangement{} = {}", n, derangement(n));
-        }
-        Programs::ProgramEulerian => {
-            // Eulerian Numbers
-            let n = ((get_random_number() % 20) + 1) as usize;
-            let k = (get_random_number() % n as u64) as usize;
-            println!("eulerian({}, {}) = {}", n, k, eulerian(n, k));
-        }
-        Programs::ProgramNarayana => {
+
+        1 => {
             // Narayana Numbers
             let n = (get_random_number() % 20) + 1;
             let k = (get_random_number() % n) + 1;
-            println!("narayana({}, {}) = {}", n, k, narayana(n, k));
+            call_log(2, None, &format!("narayana({}, {}) = {}", n, k, narayana(n, k)));
         }
-        Programs::ProgramMotzkin => {
+        2 => {
             // Motzkin Numbers
             let n = (get_random_number() % 20) as usize;
-            println!("motzkin({}) = {}", n, motzkin(n));
+            call_log(2, None, &format!("motzkin({}) = {}", n, motzkin(n)));
         }
-        Programs::ProgramAdjacencyMatrixPowers => {
-            // Adjacency Matrix Powers
-            let n = 4;
-            let mut adj = vec![vec![0u64; n]; n];
-            for i in 0..n {
-                for j in 0..n {
-                    adj[i][j] = (get_random_number() % 2) as u64;
-                }
-            }
-            let k = (get_random_number() % 5) as u32 + 1;
-            let paths = mat_pow(&adj, k);
-            println!("mat_pow({}): {:?}", k, paths);
-        }
-        Programs::ProgramPerfectMatchings => {
-            // Perfect Matching Count
-            let n = 6;
-            let mut adj = vec![vec![false; n]; n];
-            for i in 0..n {
-                for j in i + 1..n {
-                    let e = get_random_number() % 2 == 1;
-                    adj[i][j] = e;
-                    adj[j][i] = e;
-                }
-            }
-            println!("perfect_matchings = {}", perfect_matchings(&adj));
-        }
-        Programs::ProgramChromaticPolynomial => {
-            //  Chromatic Polynomial Evaluation
 
-            let n = 5;
-            let mut adj = vec![vec![false; n]; n];
-            for i in 0..n {
-                for j in i + 1..n {
-                    let e = get_random_number() % 2 == 1;
-                    adj[i][j] = e;
-                    adj[j][i] = e;
-                }
-            }
-            let k = (get_random_number() % 4) as u32 + 1;
-            println!("chromatic_count(k={}) = {}", k, chromatic_count(&adj, k));
-        }
-        Programs::ProgramSpanningTreeCount => {
-            // Spanning-Tree Count
-            let n = 5;
-            let mut adj = vec![vec![0u64; n]; n];
-            for i in 0..n {
-                for j in i + 1..n {
-                    let e = if get_random_number() % 2 == 1 { 1 } else { 0 };
-                    adj[i][j] = e;
-                    adj[j][i] = e;
-                }
-            }
-            println!("spanning_tree_count = {}", spanning_tree_count(&adj));
-        }
-        Programs::ProgramEulerianPathCircuit => {
-            // Eulerian Path/Circuit Check
-            let n = 6;
-            let mut adj = vec![vec![false; n]; n];
-            for i in 0..n {
-                for j in i + 1..n {
-                    let e = get_random_number() % 2 == 1;
-                    adj[i][j] = e;
-                    adj[j][i] = e;
-                }
-            }
-            let (circuit, path) = eulerian_path_circuit(&adj);
-            println!("circuit={}, path={}", circuit, path);
-        }
-        Programs::ProgramTopologicalSort => {
-            // Topological Sort (Kahn)
-            let n = 5;
-            let mut adj = vec![vec![false; n]; n];
-            for i in 0..n {
-                for j in i + 1..n {
-                    if get_random_number() % 2 == 1 {
-                        adj[i][j] = true;
-                    }
-                }
-            }
-            let order = topo_sort(&adj).unwrap_or_else(|| vec![]);
-            println!("topo_sort = {:?}", order);
-        }
-        Programs::ProgramTarjanSCC => {
-            // Strongly Connected Components (Tarjan)
-            let n = 5;
-            let mut adj = vec![vec![false; n]; n];
-            for i in 0..n {
-                for j in 0..n {
-                    if i != j && get_random_number() % 2 == 1 {
-                        adj[i][j] = true;
-                    }
-                }
-            }
-            let comps = tarjan_scc(&adj);
-            println!("SCCs = {:?}", comps);
-        }
-        Programs::ProgramBipartiteMatching => {
-            // Bipartite Matching (Ford–Fulkerson)
-            let l = 4;
-            let r = 4;
-            let mut adj = vec![vec![false; r]; l];
-            for i in 0..l {
-                for j in 0..r {
-                    adj[i][j] = get_random_number() % 2 == 1;
-                }
-            }
-            println!("bipartite_match = {}", bipartite_match(&adj));
-        }
-        Programs::ProgramStoerWagnerMinCut => {
-            // Global Min‑Cut (Stoer–Wagner)
-            let n = 6;
-            let mut w = vec![vec![0u64; n]; n];
-            for i in 0..n {
-                for j in i + 1..n {
-                    let wt = get_random_number() % 10;
-                    w[i][j] = wt;
-                    w[j][i] = wt;
-                }
-            }
-            println!("stoer_wagner = {}", stoer_wagner(w));
-        }
-        Programs::ProgramGraphIsomorphism => {
-            // Graph Isomorphism (small graphs)
-            let n = 5;
-            let mut a = vec![vec![false; n]; n];
-            let mut b = vec![vec![false; n]; n];
-            for i in 0..n {
-                for j in i + 1..n {
-                    let e1 = get_random_number() % 2 == 1;
-                    let e2 = get_random_number() % 2 == 1;
-                    a[i][j] = e1;
-                    a[j][i] = e1;
-                    b[i][j] = e2;
-                    b[j][i] = e2;
-                }
-            }
-            println!("is_isomorphic = {}", is_isomorphic(&a, &b));
-        }
-        Programs::ProgramPicksTheorem => {
-            // Pick’s Theorem Application
-            // simple axis-aligned rectangle
-            let x = (get_random_number() % 10) as i64;
-            let y = (get_random_number() % 10) as i64;
-            let dx = (get_random_number() % 5 + 1) as i64;
-            let dy = (get_random_number() % 5 + 1) as i64;
-            let poly = vec![(x, y), (x + dx, y), (x + dx, y + dy), (x, y + dy)];
-            let (area2, b, i) = pick_theorem(&poly);
-            println!(
-                "pick_theorem {:?} → 2area={}, B={}, I={}",
-                poly, area2, b, i
-            );
-        }
-        Programs::ProgramManhattanDistance => {
-            // Manhattan Distance
-            let p = (
-                (get_random_number() % 50) as i64,
-                (get_random_number() % 50) as i64,
-            );
-            let q = (
-                (get_random_number() % 50) as i64,
-                (get_random_number() % 50) as i64,
-            );
-            println!("manhattan({:?},{:?})={}", p, q, manhattan(p, q));
-        }
-        Programs::ProgramChebyshevDistance => {
-            // Chebyshev Distance
-            let p = (
-                (get_random_number() % 50) as i64,
-                (get_random_number() % 50) as i64,
-            );
-            let q = (
-                (get_random_number() % 50) as i64,
-                (get_random_number() % 50) as i64,
-            );
-            println!("chebyshev({:?},{:?})={}", p, q, chebyshev(p, q));
-        }
-        Programs::ProgramPointInPolygon => {
-            // Point‑in‑Polygon Test
-            // generate random convex polygon via rectangle again
-            let x = (get_random_number() % 10) as i64;
-            let y = (get_random_number() % 10) as i64;
-            let dx = (get_random_number() % 5 + 1) as i64;
-            let dy = (get_random_number() % 5 + 1) as i64;
-            let poly = vec![(x, y), (x + dx, y), (x + dx, y + dy), (x, y + dy)];
-            let pt = (
-                (get_random_number() % 20) as i64,
-                (get_random_number() % 20) as i64,
-            );
-            println!("{:?} in {:?}? {}", pt, poly, point_in_polygon(pt, &poly));
-        }
-        Programs::ProgramConvexHull => {
-            // Convex Hull (Gift‑Wrapping)
-            let m = (get_random_number() % 8 + 3) as usize;
-            let mut pts = Vec::with_capacity(m);
-            for _ in 0..m {
-                pts.push((
-                    (get_random_number() % 50) as i64,
-                    (get_random_number() % 50) as i64,
-                ));
-            }
-            let hull = convex_hull(&pts);
-            println!("convex_hull={:?} → hull={:?}", pts, hull);
-        }
-        Programs::ProgramLineSegmentIntersection => {
-            // Line‑Segment Intersection
-            let p1 = (
-                (get_random_number() % 50) as i64,
-                (get_random_number() % 50) as i64,
-            );
-            let p2 = (
-                (get_random_number() % 50) as i64,
-                (get_random_number() % 50) as i64,
-            );
-            let p3 = (
-                (get_random_number() % 50) as i64,
-                (get_random_number() % 50) as i64,
-            );
-            let p4 = (
-                (get_random_number() % 50) as i64,
-                (get_random_number() % 50) as i64,
-            );
-            println!(
-                "segments_intersect {:?}-{:?} ∩ {:?}-{:?}? {}",
-                p1,
-                p2,
-                p3,
-                p4,
-                segments_intersect(p1, p2, p3, p4)
-            );
-        }
-        Programs::ProgramFloodFill => {
-            // Flood‑Fill Algorithm
-
-            let h = 10;
-            let w = 10;
-            let mut grid = vec![vec![0u8; w]; h];
-            for y in 0..h {
-                for x in 0..w {
-                    grid[y][x] = (get_random_number() % 3) as u8;
-                }
-            }
-            let sx = (get_random_number() % w as u64) as usize;
-            let sy = (get_random_number() % h as u64) as usize;
-            let new_color = ((get_random_number() % 3) + 3) as u8;
-            flood_fill(&mut grid, sx, sy, new_color);
-            // count how many were painted
-            let count: usize = grid
-                .iter()
-                .flat_map(|row| row.iter())
-                .filter(|&&c| c == new_color)
-                .count();
-            println!("filled {} cells from ({},{})", count, sx, sy);
-        }
-        Programs::ProgramScanLinePolygonFill => {
-            // Scan‑Line Polygon Fill
-            let x = (get_random_number() % 10) as i64;
-            let y = (get_random_number() % 10) as i64;
-            let dx = (get_random_number() % 5 + 1) as i64;
-            let dy = (get_random_number() % 5 + 1) as i64;
-            let poly = vec![(x, y), (x + dx, y), (x + dx, y + dy), (x, y + dy)];
-            let grid = scanline_fill(&poly, 20, 20);
-            let count: usize = grid.iter().flat_map(|r| r.iter()).filter(|&&b| b).count();
-            println!("scanline_fill of {:?} → {} pixels", poly, count);
-        }
-        Programs::ProgramCohenSutherlandClip => {
-            // Cohen–Sutherland Line Clipping
-            let x0 = (get_random_number() % 20) as i64;
-            let y0 = (get_random_number() % 20) as i64;
-            let x1 = (get_random_number() % 20) as i64;
-            let y1 = (get_random_number() % 20) as i64;
-            let clip = (0, 0, 15, 15);
-            let res = cohen_sutherland_clip(x0, y0, x1, y1, clip.0, clip.1, clip.2, clip.3);
-            println!(
-                "cohen_sutherland_clip {:?}-{:?} clipped to {:?}? {:?}",
-                (x0, y0),
-                (x1, y1),
-                clip,
-                res
-            );
-        }
-        Programs::ProgramMidpointCircle => {
-            // Midpoint Circle Algorithm
-            let cx = (get_random_number() % 20) as i64;
-            let cy = (get_random_number() % 20) as i64;
-            let r = (get_random_number() % 10) as i64 + 1;
-            let pts = midpoint_circle(cx, cy, r);
-            println!(
-                "midpoint_circle @({},{}) r={} → {} pts",
-                cx,
-                cy,
-                r,
-                pts.len()
-            );
-        }
-        Programs::ProgramMergeSort => {
-            // Merge Sort
-            let len = (get_random_number() % 20) as usize + 1;
-            let mut v: Vec<u64> = (0..len).map(|_| get_random_number() % 1000).collect();
-            merge_sort(&mut v);
-            println!("merge_sort {:?}", v);
-        }
-        Programs::ProgramQuickSort => {
-            // Quick Sort
-            let len = (get_random_number() % 20) as usize + 1;
-            let mut v: Vec<u64> = (0..len).map(|_| get_random_number() % 1000).collect();
-            quick_sort(&mut v);
-            println!("quick_sort {:?}", v);
-        }
-        Programs::ProgramHeapSort => {
-            // Heap Sort
-            let len = (get_random_number() % 20) as usize + 1;
-            let mut v: Vec<u64> = (0..len).map(|_| get_random_number() % 1000).collect();
-            heap_sort(&mut v);
-            println!("heap_sort {:?}", v);
-        }
-        Programs::ProgramCountingSort => {
-            // Counting Sort
-            let len = (get_random_number() % 20) as usize + 1;
-            let v: Vec<u64> = (0..len).map(|_| get_random_number() % 20).collect();
-            let sorted = counting_sort(&v);
-            println!("counting_sort {:?} → {:?}", v, sorted);
-        }
-        Programs::ProgramRadixSort => {
-            // Radix Sort
-            let len = (get_random_number() % 20) as usize + 1;
-            let mut v: Vec<u64> = (0..len).map(|_| get_random_number() % 10000).collect();
-            radix_sort(&mut v);
-            println!("radix_sort {:?}", v);
-        }
-        Programs::ProgramFenwickTree => {
-            // Fenwick Tree
-            let len = (get_random_number() % 20) as usize + 1;
-            let v: Vec<u64> = (0..len).map(|_| get_random_number() % 100).collect();
-            let bit = Fenwick::from_vec(&v);
-            let idx = (get_random_number() as usize % len) as usize;
-            println!("{:?}, sum(0..={}) = {}", v, idx, bit.sum(idx));
-        } 
-        Programs::ProgramSegmentTree => {
-            // Segment Tree
-            let len = (get_random_number() % 20) as usize + 1;
-            let v: Vec<u64> = (0..len).map(|_| get_random_number() % 100).collect();
-            let st = SegTree::from_vec(&v);
-            let l = (get_random_number() as usize % len) as usize;
-            let r = (get_random_number() as usize % len) as usize;
-            let (l, r) = if l <= r { (l, r) } else { (r, l) };
-            println!("{:?}, sum({}..={}) = {}", v, l, r, st.query(l, r));
-        }
-        Programs::ProgramQuadraticResidue => {
+        3 => {
             // Quadratic Residue Test
             let p = ((get_random_number() % 50) | 1) + 2;
             let a = get_random_number() % p;
-            println!(
-                "is_quadratic_residue({}, {}) = {}",
-                a,
-                p,
-                is_quadratic_residue(a, p)
+            call_log(
+                2,
+                None,
+                &format!("is_quadratic_residue({}, {}) = {}", a, p, is_quadratic_residue(a, p)),
             );
         }
-        Programs::ProgramCarmichaelFunction => {
-            // Carmichael Function
-            let n = (get_random_number() % 1000) + 2;
-            println!("carmichael({}) = {}", n, carmichael(n));
-        }
-        Programs::ProgramMultiplicativeOrder => {
-            // Multiplicative Order
-            let n = (get_random_number() % 1000) + 2;
-            let a = get_random_number() % (n - 1) + 1;
-            println!("ord_{}({}) = {:?}", a, n, multiplicative_order(a, n));
-        }
-        Programs::ProgramPrimitiveRoot => {
-            // Primitive Root Test
-            let p = ((get_random_number() % 50) | 1) + 2;
-            println!("primitive_root({}) = {:?}", p, primitive_root(p));
-        }
-        Programs::ProgramWilsonsTheorem => {
+
+        4 => {
             // Wilson's Theorem
             let p = ((get_random_number() % 50) | 1) + 2;
-            println!("is_wilson_prime({}) = {}", p, is_wilson_prime(p));
+            call_log(2, None, &format!("is_wilson_prime({}) = {}", p, is_wilson_prime(p)));
         }
-        Programs::ProgramSolovayStrassen => {
-            // Solovay‑Strassen Test
+        5 => {
+            // Solovay Strassen Test
             let n = (get_random_number() % 1000) + 3 | 1;
-            println!("solovay_strassen({}) = {}", n, solovay_strassen(n, 5));
+            call_log(2, None, &format!("solovay_strassen({}) = {}", n, solovay_strassen(n, 5)));
         }
-        Programs::ProgramFermatFactorization => {
+        6 => {
             // Fermat Factorization ;
             let n = ((get_random_number() % 500) + 4) * 2 + 1;
-            println!("fermat_factor({}) = {:?}", n, fermat_factor(n));
+            call_log(2, None, &format!("fermat_factor({}) = {:?}", n, fermat_factor(n)));
         }
-        Programs::ProgramWheelTrialDivision => {
-            // Wheel Trial Division
-            let n = (get_random_number() % 1000) + 2;
-            println!(
-                "trial_division_wheel({}) = {:?}",
-                n,
-                trial_division_wheel(n)
-            );
-        }
-        Programs::ProgramPocklington => {
-            // Pocklington Primality Test
-            let n = ((get_random_number() % 1000) + 3) | 1;
-            println!("pocklington({}) = {}", n, pocklington(n));
-        }
-        Programs::ProgramDiffieHellman => {
+
+        7 => {
             // Diffie-Hellman Shared Secret
-            println!("{}", diffie_hellman());
+            call_log(2, None, &format!("diffie hellman {}", diffie_hellman()));
         }
-        Programs::ProgramShamirSecretSharing => {
-            // Shamir's Secret Sharing (t=3,n=5)
-            let secret = get_random_number() % 1000;
-            let shares = shamir_share(secret, 3, 5, 2089);
-            println!("secret={} shares={:?}", secret, shares);
-        }
-        Programs::ProgramLFSRSequence => {
+
+        8 => {
             // LFSR Sequence (16-bit)
             let mut state = (get_random_number() & 0xFFFF) as u16;
             // generate 8 bits
@@ -5208,9 +4600,9 @@ fn run_program(choice: Programs) {
                 let bit = (lfsr_next(&mut state) & 1) as u8;
                 byte |= bit << i;
             }
-            println!("{:02X}", byte);
+            call_log(2, None, &format!("lfsr {:02X}", byte));
         }
-        Programs::ProgramBlumBlumShub => {
+        9 => {
             // Blum Blum Shub Output
             let p = 1009u64;
             let q = 1013u64;
@@ -5220,619 +4612,85 @@ fn run_program(choice: Programs) {
                 x = get_random_number() % n;
             }
             x = bbs_next(x, n);
-            println!("bbs_next {}", x);
+            call_log(2, None, &format!("bbs_next {}", x));
         }
-        Programs::ProgramOneTimePad => {
-            // One-Time Pad (XOR)
-            let m = get_random_number();
-            let k = get_random_number();
-            let c = otp_encrypt(m, k);
-            let d = otp_encrypt(c, k);
-            println!("otp_encrypt m={} c={} d={}", m, c, d);
-        }
-        Programs::ProgramCaesarCipher => {
-            // Caesar Cipher
-            let letters: Vec<char> = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars().collect();
-            let ch = letters[(get_random_number() % 26) as usize];
-            let shift = (get_random_number() % 26) as u8;
-            let enc = caesar(ch, shift);
-            let dec = caesar(enc, (26 - shift) as u8);
-            println!("{}+{}→{}→{}", ch, shift, enc, dec);
-        }
-        Programs::ProgramTSPHeldKarp => {
-            // TSP Held-Karp
-            let n = 5;
-            let mut dist = vec![vec![0u64; n]; n];
-            for i in 0..n {
-                for j in 0..n {
-                    dist[i][j] = if i == j {
-                        0
-                    } else {
-                        get_random_number() % 50 + 1
-                    };
-                }
-            }
-            println!("tsp_held_karp tour cost = {}", tsp_held_karp(&dist));
-        }
-        Programs::ProgramSetCoverGreedy => {
-            // Set Cover Greedy
-            let uni = 20;
-            let m = 10;
-            let mut sets = Vec::new();
-            for _ in 0..m {
-                let k = (get_random_number() % 5 + 1) as usize;
-                let mut s = Vec::new();
-                for _ in 0..k {
-                    s.push((get_random_number() % uni as u64) as usize);
-                }
-                sets.push(s);
-            }
-            let cover = set_cover_greedy(uni, &sets);
-            println!("set_cover_greedy = {:?}", cover);
-        }
-        Programs::ProgramBinPackingFFD => {
-            // Bin Packing FFD
-            let mut items = (0..10)
-                .map(|_| get_random_number() % 50 + 1)
-                .collect::<Vec<_>>();
-            let bins = bin_packing_ffd(&mut items, 100);
-            println!("bin_packing_ffd = {}", bins);
-        }
-        Programs::ProgramGraphColoringGreedy => {
-            // Graph Coloring Greedy
-            let n = 10;
-            let mut adj = vec![vec![false; n]; n];
-            for i in 0..n {
-                for j in i + 1..n {
-                    let e = get_random_number() % 2 == 1;
-                    adj[i][j] = e;
-                    adj[j][i] = e;
-                }
-            }
-            println!("greedy_coloring = {}", greedy_coloring(&adj));
-        }
-        Programs::ProgramMaximumIndependentSet => {
-            // Maximum Independent Set
-            let n = 8;
-            let mut adj = vec![vec![false; n]; n];
-            for i in 0..n {
-                for j in i + 1..n {
-                    let e = get_random_number() % 2 == 1;
-                    adj[i][j] = e;
-                    adj[j][i] = e;
-                }
-            }
-            println!("mis_bruteforce = {}", mis_bruteforce(&adj));
-        }
-        Programs::ProgramVertexCoverApprox => {
-            // Vertex Cover 2-Approx
-            let n = 8;
-            let mut adj = vec![vec![false; n]; n];
-            for i in 0..n {
-                for j in i + 1..n {
-                    let e = get_random_number() % 2 == 1;
-                    adj[i][j] = e;
-                    adj[j][i] = e;
-                }
-            }
-            println!("cover edges = {:?}", vertex_cover_approx(&adj));
-        }
-        Programs::ProgramSteinerTreeApprox => {
-            // Steiner Tree Approximation
-            let n = 6;
-            // random complete graph
-            let mut adj = vec![vec![0; n]; n];
-            for i in 0..n {
-                for j in i + 1..n {
-                    let w = get_random_number() % 20 + 1;
-                    adj[i][j] = w;
-                    adj[j][i] = w;
-                }
-            }
-            // pick 3 random terminals
-            let terminals: Vec<usize> = (0..n).collect();
-            let mut chosen = Vec::new();
-            let mut pool = terminals.clone();
-            for _ in 0..3 {
-                let idx = (get_random_number() as usize) % pool.len();
-                chosen.push(pool.remove(idx));
-            }
-            let cost = steiner_approx(&adj, &chosen);
-            println!("steiner_approx {:?} → approx cost={}", chosen, cost);
-        }
-        Programs::ProgramJobScheduling => {
-            // Job Scheduling (SPT)
 
-            // generate 10 jobs with random processing times
-            let mut jobs = Vec::new();
-            for i in 0..10usize {
-                jobs.push((i, get_random_number() % 50 + 1));
-            }
-            let order = schedule_spt(&jobs);
-            println!("jobs {:?} → order {:?}", jobs, order);
+        10 => {
+            // Bin Packing FFD
+            let mut items = (0..10).map(|_| get_random_number() % 50 + 1).collect::<Vec<_>>();
+            let bins = bin_packing_ffd(&mut items, 100);
+            call_log(2, None, &format!("bin_packing_ffd = {}", bins));
         }
-        Programs::ProgramInclusionExclusion => {
-            // Inclusion–Exclusion
-            let universe = 10;
-            let mut sets = Vec::new();
-            for _ in 0..3 {
-                let mut s = Vec::new();
-                for x in 0..universe {
-                    if get_random_number() % 2 == 0 {
-                        s.push(x);
-                    }
-                }
-                sets.push(s);
-            }
-            println!("union size = {}", inc_ex_count(&sets, universe));
-        }
-        Programs::ProgramBurnsideNecklace => {
+	11 => {
             // Burnside’s Necklace
             let n = (get_random_number() % 10 + 1) as usize;
             let k = get_random_number() % 5 + 2;
-            println!(
-                "burnside_necklace distinct colorings = {}",
-                burnside_necklace(n, k)
+            call_log(
+                2,
+                None,
+                &format!("burnside_necklace distinct colorings = {}", burnside_necklace(n, k)),
             );
         }
-        Programs::ProgramRookPolynomial => {
-            // Rook Polynomial
-            let n = (get_random_number() % 6 + 1) as usize;
-            println!("rook_poly n={} → {:?}", n, rook_poly(n));
-        }
-        Programs::ProgramPermanentRyser => {
-            // Permanent (Ryser)
-            let n = 4;
-            let mut mat = vec![vec![0u64; n]; n];
-            for i in 0..n {
-                for j in 0..n {
-                    mat[i][j] = get_random_number() % 2;
-                }
-            }
-            println!("permanent = {}", permanent(&mat));
-        }
-        Programs::ProgramVandermondeDet => {
-            // Vandermonde Det
 
-            let n = 5;
-            let mut x = Vec::new();
-            for _ in 0..n {
-                x.push(get_random_number() as i64 % 20);
-            }
-            println!("det = {}", vandermonde(&x));
-        }
-        Programs::ProgramYoungTableaux => {
+        12 => {
             // Young Tableaux
             let r = (get_random_number() % 4 + 1) as usize;
             let c = (get_random_number() % 4 + 1) as usize;
-            println!("young_tableaux {}×{} → {}", r, c, young_tableaux((r, c)));
+            call_log(2, None, &format!("young_tableaux {}×{} → {}", r, c, young_tableaux((r, c))));
         }
-        Programs::ProgramFibonacciMatrix => {
-            // Fibonacci Matrix
-            let n = get_random_number() % 50;
-            println!("fib({}) = {}", n, fib_matrix(n));
-        }
-        Programs::ProgramFrobeniusCoin => {
+        13 => {
             // Frobenius Coin
             let a = (get_random_number() % 20) + 2;
             let b = (get_random_number() % 20) + 2;
-            println!("frobenius({}, {}) = {}", a, b, frobenius(a, b));
+            call_log(2, None, &format!("frobenius({}, {}) = {}", a, b, frobenius(a, b)));
         }
-        Programs::ProgramPartitionModM => {
+        14 => {
             // Partition mod m
             let n = (get_random_number() % 50) as usize;
             let m = (get_random_number() % 100) + 1;
-            println!("p({}) mod {} = {}", n, m, partition_mod(n, m));
+            call_log(2, None, &format!("p({}) mod {} = {}", n, m, partition_mod(n, m)));
         }
-        Programs::ProgramQAnalog => {
+        15 => {
             // q-Analog
             let n = get_random_number() % 20;
             let q = (get_random_number() % 5) + 1;
-            println!("q_analog[{}]_{} = {}", n, q, q_analog(n, q));
-        }
-        Programs::ProgramCyclotomicPhiN => {
-            // Cyclotomic Φ_n(x)
-            let n = (get_random_number() % 10) + 1;
-            let x = (get_random_number() % 5) as i64;
-            println!("Φ_{}({}) = {}", n, x, cyclotomic(n, x.try_into().unwrap()));
-        }  
-        Programs::ProgramMobiusInversion => {
-            // Möbius Inversion
-            let n = (get_random_number() % 20) + 1;
-            let g: Vec<u64> = (0..=n).map(|i| i * i).collect();
-            println!("f = {:?}", mobius_inversion(&g));
-        }
-        Programs::ProgramRamseyBounds => {
-            // Ramsey Bounds
-            let a = (get_random_number() % 5) + 3;
-            let b = (get_random_number() % 5) + 3;
-
-            // explicitly convert into usize
-            let ai: usize = a.try_into().unwrap();
-            let bi: usize = b.try_into().unwrap();
-
-            println!("R({}, {}) in {:?}", ai, bi, ramsey_bounds(ai, bi));
+            call_log(2, None, &format!("q_analog[{}]_{} = {}", n, q, q_analog(n, q)));
         }
 
-        Programs::ProgramBellmanFord => {
-            // Bellman–Ford
-            let n = 6;
-            let m = 12;
-            let mut edges = Vec::new();
-            for _ in 0..m {
-                let u = (get_random_number() as usize) % n;
-                let v = (get_random_number() as usize) % n;
-                let w = (get_random_number() % 20) as i64 - 10;
-                edges.push((u, v, w));
-            }
-            let src = 0;
-            match bellman_ford(n, &edges, src) {
-                Some(d) => println!("bellman_ford dist from {} = {:?}", src, d),
-                None => println!("negative cycle detected"),
-            }
-        }
-        Programs::ProgramFloydWarshall => {
-            // Floyd–Warshall
-            let n = 5;
-            let mut dist = vec![vec![i64::MAX / 2; n]; n];
-            for i in 0..n {
-                dist[i][i] = 0;
-            }
-            for _ in 0..n * 2 {
-                let u = (get_random_number() as usize) % n;
-                let v = (get_random_number() as usize) % n;
-                let w = (get_random_number() % 20) as i64;
-                dist[u][v] = w.min(dist[u][v]);
-            }
-            floyd_warshall(&mut dist);
-            println!("floyd_warshall{:?}", dist);
-        }
-
-        Programs::ProgramGraphDiameter => {
-            // Graph Diameter
-            let n = 10;
-            // random undirected graph
-            let mut adj = vec![Vec::new(); n];
-            for u in 0..n {
-                for v in u + 1..n {
-                    if get_random_number() % 3 == 0 {
-                        adj[u].push(v);
-                        adj[v].push(u);
-                    }
-                }
-            }
-            println!("graph_diameter = {}", graph_diameter(&adj));
-        }
-        Programs::ProgramArticulationPoints => {
-            // Articulation Points
-            let n = 8;
-            let mut adj = vec![Vec::new(); n];
-            for u in 0..n {
-                for v in u + 1..n {
-                    if get_random_number() % 2 == 0 {
-                        adj[u].push(v);
-                        adj[v].push(u);
-                    }
-                }
-            }
-            println!("articulation_points = {:?}", articulation_points(&adj));
-        }
-        Programs::ProgramBridges => {
-            // Bridges
-            let n = 8;
-            let mut adj = vec![Vec::new(); n];
-            for u in 0..n {
-                for v in u + 1..n {
-                    if get_random_number() % 2 == 0 {
-                        adj[u].push(v);
-                        adj[v].push(u);
-                    }
-                }
-            }
-            println!("bridges = {:?}", find_bridges(&adj));
-        }
-        Programs::ProgramBronKerboschCliques => {
-            // Bron–Kerbosch Maximal Cliques
-            let n = 6;
-            let mut adj = vec![vec![false; n]; n];
-            for i in 0..n {
-                for j in i + 1..n {
-                    if get_random_number() % 2 == 0 {
-                        adj[i][j] = true;
-                        adj[j][i] = true;
-                    }
-                }
-            }
-            let mut cliques = Vec::new();
-            bron_kerbosch(
-                Vec::new(),       // r = empty clique
-                (0..n).collect(), // p = all vertices
-                Vec::new(),       // x = no excluded vertices
-                &adj,             // adj matrix borrowed
-                &mut cliques,     // cliques collected
-            );
-            println!("bron_kerbosch {} maximal cliques", cliques.len());
-        }
-
-        Programs::ProgramGreedyDominatingSet => {
-            // Greedy Dominating Set
-            let n = 10;
-            let mut adj = vec![vec![false; n]; n];
-            for i in 0..n {
-                for j in i + 1..n {
-                    if get_random_number() % 3 == 0 {
-                        adj[i][j] = true;
-                        adj[j][i] = true;
-                    }
-                }
-            }
-            let ds = greedy_dominating_set(&adj);
-            println!("greedy_dominating_set = {}", ds.len());
-        }
-        Programs::ProgramGrahamScan => {
-            // Graham Scan Convex Hull
-            let mut pts = Vec::new();
-            for _ in 0..20 {
-                pts.push((
-                    (get_random_number() % 100) as i64,
-                    (get_random_number() % 100) as i64,
-                ));
-            }
-            let hull = graham_hull(&pts);
-            println!("graham_hull = {:?}", hull);
-        }
-        Programs::ProgramRotatingCalipers => {
-            // Rotating Calipers (Diameter)
-            let mut pts = Vec::new();
-            for _ in 0..20 {
-                pts.push((
-                    (get_random_number() % 100) as i64,
-                    (get_random_number() % 100) as i64,
-                ));
-            }
-            let d2 = diameter(&pts);
-            println!("diameter = {}", d2);
-        }
-        Programs::ProgramConvexPolygonTriangulation => {
-            // Convex Polygon Triangulation
-            let mut pts = Vec::new();
-            for _ in 0..10 {
-                pts.push((
-                    (get_random_number() % 100) as i64,
-                    (get_random_number() % 100) as i64,
-                ));
-            }
-            let poly = graham_hull(&pts);
-            let tris = triangulate_convex(&poly);
-            println!("triangulate_convex = {:?}", tris);
-        }
-        Programs::ProgramMinkowskiSum => {
-            // Minkowski Sum
-            let mut a = Vec::new();
-            let mut b = Vec::new();
-            for _ in 0..5 {
-                a.push((
-                    (get_random_number() % 50) as i64,
-                    (get_random_number() % 50) as i64,
-                ));
-                b.push((
-                    (get_random_number() % 50) as i64,
-                    (get_random_number() % 50) as i64,
-                ));
-            }
-            let ha = graham_hull(&a);
-            let hb = graham_hull(&b);
-            let ms = minkowski_sum(&ha, &hb);
-            println!("minkowski_sum hull = {:?}", ms);
-        }
-        Programs::ProgramVisibilityGraph => {
-            // Visibility Graph
-            let mut pts = Vec::new();
-            for _ in 0..10 {
-                pts.push((
-                    (get_random_number() % 100) as i64,
-                    (get_random_number() % 100) as i64,
-                ));
-            }
-            let poly = graham_hull(&pts);
-            let g = visibility_graph(&poly);
-            let edges: usize = g.iter().map(|row| row.iter().filter(|&&b| b).count()).sum();
-            println!("VisibilityGraph edges = {}", edges / 2);
-        }
-        Programs::ProgramStrassen2x2 => {
-            // Strassen 2×2 Multiplication
-
+        16 => {
+            // Condition Number (2x2)
             let a = [
-                [
-                    get_random_number() as i64 % 10,
-                    get_random_number() as i64 % 10,
-                ],
-                [
-                    get_random_number() as i64 % 10,
-                    get_random_number() as i64 % 10,
-                ],
-            ];
-            let b = [
-                [
-                    get_random_number() as i64 % 10,
-                    get_random_number() as i64 % 10,
-                ],
-                [
-                    get_random_number() as i64 % 10,
-                    get_random_number() as i64 % 10,
-                ],
-            ];
-            let c = strassen_2x2(a, b);
-            println!("strassen_2x2 A={:?}, B={:?}, A·B={:?}", a, b, c);
-        }
-        Programs::ProgramGershgorinBounds => {
-            // Gershgorin Eigenvalue Bounds
-            let n = 4;
-            let mut mat = vec![vec![0i64; n]; n];
-            for i in 0..n {
-                for j in 0..n {
-                    mat[i][j] = (get_random_number() % 20) as i64 - 10;
-                }
-            }
-            let b = gershgorin_bounds(&mat);
-            println!("gershgorin_bounds mat={:?}, bounds={:?}", mat, b);
-        }
-        Programs::ProgramMatrixRank => {
-            // Matrix Rank via Row Reduction
-            let m = 5;
-            let n = 6;
-            let mut mat = vec![vec![0i64; n]; m];
-            for i in 0..m {
-                for j in 0..n {
-                    mat[i][j] = (get_random_number() % 10) as i64;
-                }
-            }
-            let r = matrix_rank(mat.clone());
-            println!("matrix_rank mat={:?}, rank={}", mat, r);
-        }
-        Programs::ProgramConditionNumber2x2 => {
-            // Condition Number (2×2)
-            let a = [
-                [
-                    (get_random_number() % 101) as i64 - 50,
-                    (get_random_number() % 101) as i64 - 50,
-                ],
-                [
-                    (get_random_number() % 101) as i64 - 50,
-                    (get_random_number() % 101) as i64 - 50,
-                ],
+                [(get_random_number() % 101) as i64 - 50, (get_random_number() % 101) as i64 - 50],
+                [(get_random_number() % 101) as i64 - 50, (get_random_number() % 101) as i64 - 50],
             ];
             let cond = condition_number_2x2(a);
-            println!("condition_number_2x2 A={:?} ={}", a, cond);
+            call_log(2, None, &format!("condition_number_2x2 A={:?} ={}", a, cond));
         }
-        Programs::ProgramSparseMatrixVectorMultiply => {
-            // Sparse Matrix-Vector Multiply
-            let n = 10;
-            // build random sparse matrix: ~3 entries per row
-            let mut rows = vec![Vec::new(); n];
-            for i in 0..n {
-                for _ in 0..3 {
-                    let j = (get_random_number() as usize) % n;
-                    let v = (get_random_number() % 21) as i64 - 10;
-                    rows[i].push((j, v));
-                }
-            }
-            let x: Vec<i64> = (0..n)
-                .map(|_| (get_random_number() % 21) as i64 - 10)
-                .collect();
-            let y = spmv(&rows, &x);
-            println!("spmv x={:?} → y={:?}", x, y);
-        }
-        Programs::ProgramSingularValueBounds => {
-            // Singular Value Bounds
-            let n = 4;
-            let mut a = vec![vec![0i64; n]; n];
-            for i in 0..n {
-                for j in 0..n {
-                    a[i][j] = (get_random_number() % 21) as i64 - 10;
-                }
-            }
-            let (low, high) = singular_value_bounds(&a);
-            println!("singular_value_bounds A={:?} σ∈[{},{}]", a, low, high);
-        }
-        Programs::ProgramPollardRhoBrent => {
+
+        17 => {
             // Pollard-Rho Brent
             let n = (get_random_number() % 1000) | 1;
-            println!("pollard_rho_brent {:?}", pollard_rho_brent(n));
+            call_log(2, None, &format!("pollard_rho_brent {:?}", pollard_rho_brent(n)));
         }
-Programs::ProgramQuadraticCongruence => {
-    // Quadratic Congruence
-    let p = ((get_random_number() % 50) | 1) + 2;    // odd ≥ 3
-    // pick a ∈ [1..p‑1], so 2*a mod p ≠ 0
-    let a = ((get_random_number() % (p - 1)) + 1) as u64;
-    let b = (get_random_number() % p) as u64;
-    let c = (get_random_number() % p) as u64;
-    println!(
-        "solve_quadratic_mod(a={}, b={}, c={}, p={}) = {:?}",
-        a,
-        b,
-        c,
-        p,
-        solve_quadratic_mod(a, b, c, p)
-    );
-}
-        Programs::ProgramRabinCryptosystem => {
-            // Rabin Cryptosystem
-            let p = 1009;
-            let q = 1013;
-            let n = p * q;
-            let m = get_random_number() % n;
-            let c = rabin_encrypt(m, n);
-            let ds = rabin_decrypt(c, p, q);
-            println!("rabin_decrypt m={}→c={}→{:?}", m, c, ds);
-        }
-        Programs::ProgramMerkleHellman => {
-            // Merkle-Hellman
-            let (pubk, q, r) = mh_keygen(8);
-            let msg = (0..8)
-                .map(|_| (get_random_number() % 2) as u8)
-                .collect::<Vec<_>>();
-            let c = mh_encrypt(&pubk, &msg);
-            let plain = mh_decrypt(&pubk, q, r, c);
-            println!("mh_decrypt {:?}→{}→{:?}", msg, c, plain);
-        }
-        Programs::ProgramRecurrenceSolver => {
-            // Recurrence Solver
-            let coefs = vec![1, 1, 1];
-            let init = vec![0, 1, 1];
-            let n = get_random_number() % 30;
-            println!("rec_nth T({})={}", n, rec_nth(&coefs, &init, n));
-        }
-        Programs::ProgramLinearDiophantine => {
-            // Linear Diophantine ax+by+cz=d
-            let a = (get_random_number() % 10) as u64;
-            let b = (get_random_number() % 10) as u64;
-            let c = (get_random_number() % 10) as u64;
-            let d = (get_random_number() % 20) as u64;
+        18 => {
+            // 1D Range Tree Query
 
-            // cast each to i64:
-            let ai = a as i64;
-            let bi = b as i64;
-            let ci = c as i64;
-            let di = d as i64;
-
-            println!("solve_linear3 {:?}", solve_linear3(ai, bi, ci, di));
+            let xs: Vec<i64> = (0..20).map(|_| (get_random_number() % 100) as i64).collect();
+            let tree = RangeTree1D::new(xs);
+            let a = (get_random_number() % 100) as i64;
+            let b = (get_random_number() % 100) as i64;
+            let (l, r) = if a <= b { (a, b) } else { (b, a) };
+            let cnt = tree.query(l, r);
+            call_log(2, None, &format!("OneDRangeTreeQuery [{},{}] → {}", l, r, cnt));
         }
 
-        Programs::ProgramkShortestPaths => {
-            // k-Shortest Paths (Yen's)
-            let n = 6;
-            let mut adj = vec![Vec::new(); n];
-            for u in 0..n {
-                for v in 0..n {
-                    if u != v {
-                        adj[u].push((v, (get_random_number() % 10) + 1));
-                    }
-                }
-            }
-            let ks = k_shortest(0, n - 1, &adj, 3);
-            println!("k_shortest {:?}", ks);
-        }
-        Programs::ProgramCFFactorization => {
-            // CF Factorization
-            let n = ((get_random_number() % 500) + 2) | 1;
-            print!("n={} → ", n);
-            match cf_factor(n) {
-                Some(f) => println!("cf_factor factor: {}", f),
-                None => println!("no factor"),
-            }
-        }
-        Programs::ProgramRSAKeyGen => {
+        19 => {
             // RSA KeyGen
             let (n, e, d) = rsa_keygen();
-            println!("rsa_keygen n={}, e={}, d={}", n, e, d);
+            call_log(2, None, &format!("rsa_keygen n={}, e={}, d={}", n, e, d));
         }
-        Programs::ProgramElGamalKeyGen => {
-            // ElGamal KeyGen
-            let (p, g, h, x) = elgamal_keygen();
-            println!("elgamal_keygen p={}, g={}, h={}, x={}", p, g, h, x);
-        }
-        Programs::ProgramDSA => {
+
+        20 => {
             // DSA Sign/Verify
             // fixed params
             let p = next_prime(500);
@@ -5844,99 +4702,52 @@ Programs::ProgramQuadraticCongruence => {
             let m = get_random_number() % q;
             let (r, s) = dsa_sign(m, p, q, g, x);
             let ok = dsa_verify(m, r, s, p, q, g, y);
-            println!("m={}, r={}, s={}, ok={}", m, r, s, ok);
+            call_log(2, None, &format!("m={}, r={}, s={}, ok={}", m, r, s, ok));
         }
-        Programs::ProgramGFCoeffs => {
+        21 => {
             //  GF Coeffs of 1/(1-x-x^2)
             let P = vec![1];
             let Q = vec![1, -1, -1];
             let n = (get_random_number() % 20) as usize;
             let coeffs = gf_coeff(&P, &Q, n);
-            println!("gf_coeff[{}] = {}", n, coeffs[n]);
+            call_log(2, None, &format!("gf_coeff[{}] = {}", n, coeffs[n]));
         }
-        Programs::ProgramOneDRangeTreeQuery => {
-            // 1D Range Tree Query
-
-            let xs: Vec<i64> = (0..20)
-                .map(|_| (get_random_number() % 100) as i64)
-                .collect();
-            let tree = RangeTree1D::new(xs);
-            let a = (get_random_number() % 100) as i64;
-            let b = (get_random_number() % 100) as i64;
-            let (l, r) = if a <= b { (a, b) } else { (b, a) };
-            let cnt = tree.query(l, r);
-            println!("OneDRangeTreeQuery [{},{}] → {}", l, r, cnt);
-        }
-        Programs::ProgramLegendreSymbol => {
+        22 => {
             // Legendre Symbol
             let p = ((get_random_number() % 1000) | 1) + 2;
             let a = (get_random_number() % p) as i64;
-            println!(
-                "legendre_symbol ( {}/{}) = {}",
-                a,
-                p,
-                legendre_symbol(a, p as i64)
+            call_log(
+                2,
+                None,
+                &format!("legendre_symbol ( {}/{}) = {}", a, p, legendre_symbol(a, p as i64)),
             );
         }
-        Programs::ProgramTonelliShanks => {
-            // Tonelli–Shanks
-            let p = ((get_random_number() % 1000) | 1) + 2;
-            let n = get_random_number() % p;
-            print!("tonelli_shanks sqrt({} mod {}) = ", n, p);
-            match tonelli_shanks(n, p) {
-                Some(r) => println!("{}", r),
-                None => println!("none"),
-            }
-        }
-        Programs::ProgramCipolla => {
-            // Cipolla’s Algorithm
-            let p = ((get_random_number() % 1000) | 1) + 2;
-            let n = get_random_number() % p;
-            print!("cipolla sqrt({} mod {}) = ", n, p);
-            match cipolla(n, p) {
-                Some(r) => println!("{}", r),
-                None => println!("none"),
-            }
-        }
-        Programs::ProgramPollardsPMinusOne => {
-            // Pollard’s p–1 Factorization
-
-            let n = (get_random_number() % 10_000) + 2;
-            match pollards_p_minus_one(n, 1000) {
-                Some(d) => println!("n={} → factor {}", n, d),
-                None => println!("n={} → fail", n),
-            }
-        }
-        Programs::ProgramLucasLehmerTest => {
+        23 => {
             // Lucas–Lehmer Test
             let p = (get_random_number() % 50) + 2;
-            println!("lucas_lehmer M_{} is prime? {}", p, lucas_lehmer(p));
+            call_log(2, None, &format!("lucas_lehmer M_{} is prime? {}", p, lucas_lehmer(p)));
         }
-        Programs::ProgramLucasSequence => {
+        24 => {
             // Lucas Sequence
             let n = get_random_number() % 20;
             let P = 1;
             let Q = 1;
             let m = (get_random_number() % 100) as i64 + 1;
             let (U, V) = lucas_sequence(n, P, Q, m);
-            println!("lucas_sequence U_{},V_{} mod {} = ({},{})", n, n, m, U, V);
+            call_log(2, None, &format!("lucas_sequence U_{},V_{} mod {} = ({},{})", n, n, m, U, V));
         }
-        Programs::ProgramStrongLucasPRP => {
-            // Strong Lucas PRP
-            let n = ((get_random_number() % 1000) | 1) + 2;
-            println!("is_strong_lucas_prp {}? {}", n, is_strong_lucas_prp(n));
-        }
-        Programs::ProgramBailliePSW => {
+
+        25 => {
             // Baillie–PSW Primality Test
             let n = ((get_random_number() % 10_000) | 1) + 2;
-            println!("baillie_psw {} is prime? {}", n, baillie_psw(n));
+            call_log(2, None, &format!("baillie_psw {} is prime? {}", n, baillie_psw(n)));
         }
-        Programs::ProgramNewtonSqrt => {
+        26 => {
             // Newton Integer √
             let n = get_random_number() % 1_000_000;
-            println!("newton_sqrt {} = {}", n, newton_sqrt(n));
+            call_log(2, None, &format!("newton_sqrt {} = {}", n, newton_sqrt(n)));
         }
-        Programs::ProgramBareiss3x3Determinant => {
+        27 => {
             // Bareiss 3×3 Determinant
             let mut mat = [[0i64; 3]; 3];
             for i in 0..3 {
@@ -5944,405 +4755,110 @@ Programs::ProgramQuadraticCongruence => {
                     mat[i][j] = (get_random_number() % 101) as i64 - 50;
                 }
             }
-            println!("det_bareiss_3x3 det = {}", det_bareiss_3x3(mat));
+            call_log(2, None, &format!("det_bareiss_3x3 det = {}", det_bareiss_3x3(mat)));
         }
-        Programs::ProgramSmithNormalForm2x2 => {
+        28 => {
             // Smith Normal Form 2×2
             let mat = [
-                [
-                    (get_random_number() % 101) as i64 - 50,
-                    (get_random_number() % 101) as i64 - 50,
-                ],
-                [
-                    (get_random_number() % 101) as i64 - 50,
-                    (get_random_number() % 101) as i64 - 50,
-                ],
+                [(get_random_number() % 101) as i64 - 50, (get_random_number() % 101) as i64 - 50],
+                [(get_random_number() % 101) as i64 - 50, (get_random_number() % 101) as i64 - 50],
             ];
             let (d1, d2) = smith_normal_form_2x2(mat);
-            println!("smith_normal_form_2x2 diag({}, {})", d1, d2);
+            call_log(2, None, &format!("smith_normal_form_2x2 diag({}, {})", d1, d2));
         }
-        Programs::ProgramHermiteNormalForm2x2 => {
+        29 => {
             // Hermite Normal Form 2×2
 
             let mat = [
-                [
-                    (get_random_number() % 101) as i64 - 50,
-                    (get_random_number() % 101) as i64 - 50,
-                ],
-                [
-                    (get_random_number() % 101) as i64 - 50,
-                    (get_random_number() % 101) as i64 - 50,
-                ],
+                [(get_random_number() % 101) as i64 - 50, (get_random_number() % 101) as i64 - 50],
+                [(get_random_number() % 101) as i64 - 50, (get_random_number() % 101) as i64 - 50],
             ];
             let h = hermite_normal_form_2x2(mat);
-            println!(
-                "hermite_normal_form_2x2 H = [[{},{}],[{},{}]]",
-                h[0][0], h[0][1], h[1][0], h[1][1]
+            call_log(
+                2,
+                None,
+                &format!("hermite_normal_form_2x2 H = [[{},{}],[{},{}]]", h[0][0], h[0][1], h[1][0], h[1][1]),
             );
         }
-        Programs::ProgramLLLReduction2D => {
+        30 => {
             // LLL Reduction in 2D
-            let b1 = (
-                (get_random_number() % 101) as i64 - 50,
-                (get_random_number() % 101) as i64 - 50,
-            );
-            let b2 = (
-                (get_random_number() % 101) as i64 - 50,
-                (get_random_number() % 101) as i64 - 50,
-            );
+            let b1 = ((get_random_number() % 101) as i64 - 50, (get_random_number() % 101) as i64 - 50);
+            let b2 = ((get_random_number() % 101) as i64 - 50, (get_random_number() % 101) as i64 - 50);
             let (r1, r2) = lll_reduce_2d(b1, b2);
-            println!("lll_reduce_2d b1={:?}, b2={:?}", r1, r2);
+            call_log(2, None, &format!("lll_reduce_2d b1={:?}, b2={:?}", r1, r2));
         }
-        Programs::ProgramLongDivisionU64 => {
-            // Long Division (u64)
-            let a = get_random_number();
-            let b = (get_random_number() % 1_000_000) + 1;
-            let (q, r) = long_div(a, b);
-            println!("long_div {} ÷ {} = {}, rem {}", a, b, q, r);
-        }
-        Programs::ProgramBarrettDivision => {
-            // Barrett Division
-            let d = (get_random_number() % 1_000_000) + 1;
-            let n = get_random_number();
-            println!("barrett_div({}, {}) = {}", n, d, barrett_div(n, d));
-        }
-        Programs::ProgramSlidingWindowModExp => {
-            // Sliding‑Window ModExp
-            let base = get_random_number() % 1_000;
-            let exp = get_random_number() % 1_000;
-            let m = (get_random_number() % 1_000) + 1;
-            println!(
-                "mod_exp_sliding({}, {}, {}) = {}",
-                base,
-                exp,
-                m,
-                mod_exp_sliding(base, exp, m)
-            );
-        }
-        Programs::ProgramMontgomeryLadderModExp => {
+
+        31 => {
             // Montgomery Ladder ModExp
             let base = get_random_number() % 1_000;
             let exp = get_random_number() % 1_000;
             let m = (get_random_number() % 1_000) + 1;
-            println!(
-                "mod_exp_ladder({}, {}, {}) = {}",
-                base,
-                exp,
-                m,
-                mod_exp_ladder(base, exp, m)
+            call_log(
+                2,
+                None,
+                &format!("mod_exp_ladder({}, {}, {}) = {}", base, exp, m, mod_exp_ladder(base, exp, m)),
             );
         }
-        Programs::ProgramToomCook3Way64BitMul => {
-            // Toom‑Cook 3‑Way 64‑bit Mul
-            let x = get_random_number();
-            let y = get_random_number();
-            println!("toom3_64({}, {}) = {}", x, y, toom3_64(x, y));
-        }
-        Programs::ProgramSteinBinaryGCD => {
+
+        32 => {
             // Stein’s Binary GCD
             let a = get_random_number() % 1_000_000;
             let b = get_random_number() % 1_000_000;
-            println!("stein_gcd({}, {}) = {}", a, b, stein_gcd(a, b));
+            call_log(2, None, &format!("stein_gcd({}, {}) = {}", a, b, stein_gcd(a, b)));
         }
-        Programs::ProgramSubtractionOnlyGCD => {
+        33 => {
             // Subtraction‑Only GCD
             let a = get_random_number() % 1_000_000;
             let b = get_random_number() % 1_000_000;
-            println!("sub_gcd({}, {}) = {}", a, b, sub_gcd(a, b));
+            call_log(2, None, &format!("sub_gcd({}, {}) = {}", a, b, sub_gcd(a, b)));
         }
-        Programs::ProgramBinarySearchDivision => {
-            // Binary-Search Division
-            let a = get_random_number() % 1_000_000;
-            let b = (get_random_number() % 999_999) + 1;
-            println!("{} ÷ {} = {}", a, b, binary_div(a, b));
-        }
-        Programs::ProgramIntegerLogViaMultiplication => {
+
+        34 => {
             // Integer Log via Multiplication
             let n = (get_random_number() % 1_000_000) + 1;
             let b = (get_random_number() % 9) + 2;
-            println!("integer_log_mul({}, {}) = {}", n, b, integer_log_mul(n, b));
+            call_log(2, None, &format!("integer_log_mul({}, {}) = {}", n, b, integer_log_mul(n, b)));
         }
-        Programs::ProgramIntegerLogViaDivision => {
+        35 => {
             // Integer Log via Division
             let n = (get_random_number() % 1_000_000) + 1;
             let b = (get_random_number() % 9) + 2;
-            println!("integer_log_div({}, {}) = {}", n, b, integer_log_div(n, b));
+            call_log(2, None, &format!("integer_log_div({}, {}) = {}", n, b, integer_log_div(n, b)));
         }
-        Programs::ProgramPerfectSquareTest => {
+        36 => {
             // Perfect Square Test
             let n = get_random_number() % 1_000_000;
-            println!("is_perfect_square({}) = {}", n, is_perfect_square(n));
-        }
-        Programs::ProgramPerfectPowerTest => {
-            // Perfect Power Test
-            let n = (get_random_number() % 1_000_000) + 1;
-            println!("perfect_power({}) = {:?}", n, perfect_power(n));
-        }
-        Programs::ProgramSternBrocotPath => {
-            // Stern–Brocot Path
-            let num = (get_random_number() % 50) + 1;
-            let den = (get_random_number() % 50) + 1;
-            println!(
-                "stern_brocot_path({}/{}) = {}",
-                num,
-                den,
-                stern_brocot_path(num, den)
-            );
-        }
-        Programs::ProgramContinuedFractionConvergents => {
-            // Continued Fraction Convergents
-            let num = (get_random_number() % 100) + 1;
-            let den = (get_random_number() % 100) + 1;
-            println!(
-                "continued_fraction_convergents({}/{}) = {:?}",
-                num,
-                den,
-                continued_fraction_convergents(num, den)
-            );
-        }
-        Programs::ProgramFareySequence => {
-            // Farey Sequence
-            let n = (get_random_number() % 50) + 1;
-            println!("farey_sequence({}) length = {}", n, farey_sequence(n).len());
-        }
-        Programs::ProgramClosestPairOfPoints => {
-            // Closest Pair of Points
-            // generate random points
-            let n = 20;
-            let mut pts = Vec::with_capacity(n);
-            for _ in 0..n {
-                let x = (get_random_number() % 100) as i64;
-                let y = (get_random_number() % 100) as i64;
-                pts.push((x, y));
-            }
-            let (p, q, d2) = closest_pair(&pts);
-            println!(
-                "closest_pair {:?}, closest={:?}-{:?}, dist²={}",
-                pts, p, q, d2
-            );
-        }
-        Programs::ProgramFWHT => {
-            // FWHT
-            let mut a = [0u64; 8];
-            for i in 0..8 {
-                a[i] = get_random_number();
-            }
-            fwht(&mut a);
-            println!("fwht {:?}", a);
-        }
-        Programs::ProgramNextPermutation => {
-            // Next Permutation
-            let mut v: Vec<u64> = (0..8).map(|_| get_random_number() % 8).collect();
-            let ok = next_lexicographic_permutation(&mut v);
-            println!("ok={} perm={:?}", ok, v);
-        }
-        Programs::ProgramNextCombination => {
-            // Next Combination
-            let n = 10;
-            let k = 4;
-            let mut cmb: Vec<usize> = (0..k).collect();
-            let ok = next_combination(&mut cmb, n);
-            println!("ok={} comb={:?}", ok, cmb);
-        }
-        Programs::ProgramPermutationRankUnrank => {
-            // Permutation Rank/Unrank
-            let n = 5;
-            let mut perm: Vec<u64> = (0..n as u64).collect();
-            // shuffle
-            for i in (1..n as usize).rev() {
-                let j = (get_random_number() % ((i + 1) as u64)) as usize;
-                perm.swap(i, j);
-            }
-            let r = perm_rank(&perm);
-            let u = perm_unrank(r, n as usize);
-            println!("perm={:?} rank={} unrank={:?}", perm, r, u);
-        }
-        Programs::ProgramCombinationRankUnrank => {
-            // Combination Rank/Unrank
-            let n = 15;
-            let k = 5;
-            let cmb: Vec<usize> = (0..k).collect();
-            let r = comb_rank(&cmb, n);
-            let u = comb_unrank(r, n, k);
-            println!("comb={:?} rank={} unrank={:?}", cmb, r, u);
-        }
-        Programs::ProgramPartitionCount => {
-            // Partition Count
-            let n = (get_random_number() % 30) as usize;
-            println!("p({})={}", n, partition_count(n));
-        }
-        Programs::ProgramEnumeratePartitions => {
-            // Enumerate Partitions
-            let n = get_random_number() % 6;
-            let parts = enum_partitions(n);
-            println!("n={} → {} parts: {:?}", n, parts.len(), parts);
-        }
-        Programs::ProgramCoinChangeCount => {
-            // Coin Change Count
-            let n = (get_random_number() % 100) as usize;
-            println!("coin_change_count({})={}", n, coin_change_count(n));
-        }
-        Programs::ProgramCoinChangeMin => {
-            // Coin Change Min
-            let n = (get_random_number() % 100) as usize;
-            println!("coin_change_min({})={}", n, coin_change_min(n));
-        }
-        Programs::ProgramKnapsack => {
-            // Knapsack
-            let items = 5;
-let cap = ((get_random_number() % 100) + 1) as usize; 
-            let mut ws = Vec::new();
-            let mut vs = Vec::new();
-            for _ in 0..items {
-                ws.push(((get_random_number() % cap as u64) + 1) as usize);
-                vs.push(get_random_number() % 1000);
-            }
-            println!(
-                "knapsack cap={}, ws={:?}, vs={:?} → max={}",
-                cap,
-                ws,
-                vs,
-                knapsack(&ws, &vs, cap)
-            );
-        } 
-        Programs::ProgramUnboundedKnapsack => {
-            // Unbounded Knapsack
-            let items = 5;
-let cap = ((get_random_number() % 100) + 1) as usize; 
-            let mut ws = Vec::new();
-            let mut vs = Vec::new();
-            for _ in 0..items {
-                ws.push(((get_random_number() % cap as u64) + 1) as usize);
-                vs.push(get_random_number() % 1000);
-            }
-            println!(
-                "unbounded_knapsack cap={}, ws={:?}, vs={:?} → {}",
-                cap,
-                ws,
-                vs,
-                unbounded_knapsack(&ws, &vs, cap)
-            );
-        }
-        Programs::ProgramLCS => {
-            // LCS
-            let len1 = (get_random_number() % 10) as usize;
-            let len2 = (get_random_number() % 10) as usize;
-            let a: Vec<u8> = (0..len1).map(|_| (get_random_number() % 4) as u8).collect();
-            let b: Vec<u8> = (0..len2).map(|_| (get_random_number() % 4) as u8).collect();
-            println!("lcs({:?}, {:?}) = {}", a, b, lcs(&a, &b));
-        }
-        Programs::ProgramLIS => {
-            // LIS
-            let len = (get_random_number() % 20) as usize;
-            let seq: Vec<u64> = (0..len).map(|_| get_random_number() % 100).collect();
-            println!("levenshtein({:?}) = {}", seq, lis_length(&seq));
-        }
-        Programs::ProgramLevenshtein => {
-            // Levenshtein
-            let len1 = (get_random_number() % 8) as usize;
-            let len2 = (get_random_number() % 8) as usize;
-            let a: Vec<u8> = (0..len1).map(|_| (get_random_number() % 4) as u8).collect();
-            let b: Vec<u8> = (0..len2).map(|_| (get_random_number() % 4) as u8).collect();
-            println!(
-                "levenshtein({}, {}) = {}",
-                String::from_utf8_lossy(&a),
-                String::from_utf8_lossy(&b),
-                levenshtein(&a, &b)
-            );
-        }
-        Programs::ProgramDamerauLevenshtein => {
-            // Damerau-Levenshtein
-            let len1 = (get_random_number() % 8) as usize;
-            let len2 = (get_random_number() % 8) as usize;
-            let a: Vec<u8> = (0..len1).map(|_| (get_random_number() % 4) as u8).collect();
-            let b: Vec<u8> = (0..len2).map(|_| (get_random_number() % 4) as u8).collect();
-            println!(
-                "damerau_levenshtein({}, {}) = {}",
-                String::from_utf8_lossy(&a),
-                String::from_utf8_lossy(&b),
-                damerau_levenshtein(&a, &b)
-            );
-        }
-        Programs::ProgramMatrixChain => {
-            // Matrix Chain
-            let n = (get_random_number() % 5 + 2) as usize;
-            let dims: Vec<usize> = (0..=n)
-                .map(|_| (get_random_number() % 20 + 1) as usize)
-                .collect();
-            println!("matrix_chain({:?}) → {}", dims, matrix_chain(&dims));
-        }
-        Programs::ProgramOptimalBST => {
-            // Optimal BST
-            let n = (get_random_number() % 5 + 1) as usize;
-            let freq: Vec<u64> = (0..n).map(|_| get_random_number() % 100).collect();
-            println!("optimal_bst freq={:?} → {}", freq, optimal_bst(&freq));
-        }
-        Programs::ProgramDTW => {
-            // DTW
-            let len1 = (get_random_number() % 10) as usize;
-            let len2 = (get_random_number() % 10) as usize;
-            let a: Vec<u64> = (0..len1).map(|_| get_random_number() % 100).collect();
-            let b: Vec<u64> = (0..len2).map(|_| get_random_number() % 100).collect();
-            println!("dtw({:?}, {:?}) = {}", a, b, dtw(&a, &b));
+            call_log(2, None, &format!("is_perfect_square({}) = {}", n, is_perfect_square(n)));
         }
 
-        Programs::ProgramNeedlemanWunsch => {
-            // Needleman–Wunsch
-            let len1 = (get_random_number() % 8) as usize;
-            let len2 = (get_random_number() % 8) as usize;
-            let a: Vec<u8> = (0..len1)
-                .map(|_| b"ACGT"[(get_random_number() % 4) as usize])
-                .collect();
-            let b: Vec<u8> = (0..len2)
-                .map(|_| b"ACGT"[(get_random_number() % 4) as usize])
-                .collect();
-            println!(
-                "needleman_wunsch({}, {}) = {}",
-                String::from_utf8_lossy(&a),
-                String::from_utf8_lossy(&b),
-                needleman_wunsch(&a, &b)
-            );
+        37 => {
+            // Coin Change Count
+            let n = (get_random_number() % 100) as usize;
+            call_log(2, None, &format!("coin_change_count({})={}", n, coin_change_count(n)));
         }
-        Programs::ProgramSmithWaterman => {
-            // Smith–Waterman
-            let len1 = (get_random_number() % 8) as usize;
-            let len2 = (get_random_number() % 8) as usize;
-            let a: Vec<u8> = (0..len1)
-                .map(|_| b"ACGT"[(get_random_number() % 4) as usize])
-                .collect();
-            let b: Vec<u8> = (0..len2)
-                .map(|_| b"ACGT"[(get_random_number() % 4) as usize])
-                .collect();
-            println!(
-                "smith_waterman({}, {}) = {}",
-                String::from_utf8_lossy(&a),
-                String::from_utf8_lossy(&b),
-                smith_waterman(&a, &b)
-            );
+        38 => {
+            // Coin Change Min
+            let n = (get_random_number() % 100) as usize;
+            call_log(2, None, &format!("coin_change_min({})={}", n, coin_change_min(n)));
         }
-        Programs::ProgramGCDLCM => {
-            // GCD & LCM
-            let a = get_random_number() % 1_000_000;
-            let b = get_random_number() % 1_000_000;
-            println!("gcd({},{})={}, lcm={}", a, b, gcd(a, b), lcm(a, b));
-        }
-        Programs::ProgramModularExpInv => {
+
+        39 => {
             // Modular Exponentiation & Inverse
             let base = (get_random_number() % 1000) + 1;
             let exp = get_random_number() % 1000;
             let m = (get_random_number() % 999) + 1;
             let me = mod_exp(base, exp, m);
             let inv = mod_inv(base as i64, m as i64);
-            println!("mod_exp({},{},{})={}, mod_inv={:?}", base, exp, m, me, inv);
+            call_log(2, None, &format!("mod_exp({},{},{})={}, mod_inv={:?}", base, exp, m, me, inv));
         }
-        Programs::ProgramCRT2 => {
+        40 => {
             // CRT2, Garner & Nth‑Root
             let a1 = (get_random_number() % 100) as i64;
             let n1 = ((get_random_number() % 98) + 2) as i64;
             let a2 = (get_random_number() % 100) as i64;
             let n2 = ((get_random_number() % 98) + 2) as i64;
             if gcd(n1 as u64, n2 as u64) == 1 {
-                println!("crt2 = {}", crt2(a1, n1, a2, n2));
+                call_log(2, None, &format!("crt2 = {}", crt2(a1, n1, a2, n2)));
             }
             // Garner
             let mods = [2, 3, 5];
@@ -6351,274 +4867,251 @@ let cap = ((get_random_number() % 100) + 1) as usize;
                 (get_random_number() % 3) as i64,
                 (get_random_number() % 5) as i64,
             ];
-            println!("garner = {}", garner(&rems, &mods));
+            call_log(2, None, &format!("garner = {}", garner(&rems, &mods)));
             // Nth‑root
             let n = get_random_number() % 1_000_000;
             let k = (get_random_number() % 4) + 2;
-            println!(
-                "nth_root({},{}) = {}",
-                n,
-                k,
-                integer_nth_root(n, k.try_into().unwrap())
+            call_log(
+                2,
+                None,
+                &format!("nth_root({},{}) = {}", n, k, integer_nth_root(n, k.try_into().unwrap())),
             );
-        }
-        Programs::ProgramBitTricksGrayCode => {
-            // Bit Tricks & Gray Code
-            let x = get_random_number() as u64;
-            println!(
-                "clz={}, ctz={}, popcount={}, parity={}",
-                clz(x),
-                ctz(x),
-                popcount(x),
-                parity(x)
-            );
-            let x = get_random_number() as u32;
-            let g = gray_encode(x as u64);
-            println!(
-                "rev_bits={:#034b}, gray_enc={}, gray_dec={}",
-                reverse_bits32(x),
-                g,
-                gray_decode(g)
-            );
-        }
-        Programs::ProgramSieveOfEratosthenes => {
-            // Sieve of Eratosthenes
-            println!("primes up to 100: {:?}", sieve(100));
         }
 
-        Programs::ProgramTrialDivisionPollardsRho => {
-            // Trial Division & Pollard’s Rho
-            let n = (get_random_number() % 9999) + 1;
-            println!("trial_div({}) = {:?}", n, trial_division(n));
-            if n > 1 && !is_prime_small(n) {
-                println!("rho({}) = {:?}", n, factor(n));
-            }
-        }
-        Programs::ProgramFastFibonacci => {
-            // Fast Fibonacci
-            let n = get_random_number() % 1000;
-            println!("fib({}) = {}", n, fib(n).0);
-        }
-        Programs::ProgramFibonacci => {
-            // Factorials & Combinatorics
-            let n = get_random_number() % 20;
-            let k = get_random_number() % (n + 1);
-            println!(
-                "fact({})={}, binomial({},{})={}, catalan({})={}",
-                n,
-                factorial(n),
-                n,
-                k,
-                binomial(n, k),
-                n,
-                catalan(n)
-            );
-        }
-        Programs::ProgramKaratsuba => {
-            // Karatsuba & Multi‑Precision Add/Sub/Mul
-            let x = get_random_number() as u64;
-            let y = get_random_number() as u64;
-            println!("karatsuba({}, {}) = {}", x, y, karatsuba(x, y));
-            let a = [get_random_number() as u64, get_random_number() as u64];
-            let b = [get_random_number() as u64, get_random_number() as u64];
-            println!(
-                "mp_add={:?}, mp_sub={:?}, mp_mul_naive={:?}",
-                mp_add(a, b),
-                mp_sub(a, b),
-                mp_mul_naive(a, b)
-            );
-        }
-        Programs::ProgramMontgomeryBarrettReduction => {
-            // Montgomery & Barrett Reduction
-            let m = ((get_random_number() as u32) | 1).max(3);
-            let r = 1u64 << 32;
-            let (_, inv, _) = extended_gcd(m as i64, r as i64);
-            let m_prime = (inv.rem_euclid(r as i64) as u32).wrapping_neg();
-            let a = (get_random_number() as u32) % m;
-
-            println!(
-                "mont_mul32({}, {}) = {}",
-                a,
-                a,
-                mont_mul32(a, a, m, m_prime)
-            );
-
-            let t = (a as u64) << 32;
-
-            // compute μ = floor(2^64 / m) in u128, then cast back to u64
-            let mu = ((1u128 << 64) / (m as u128)) as u64;
-
-            println!(
-                "mont_reduce32 = {}, barrett = {}",
-                mont_reduce32(t, m, m_prime),
-                barrett_reduce(get_random_number() as u64, m, mu)
-            );
-        }
-        Programs::ProgramNumberTheoreticTransform => {
+        41 => {
             // Number Theoretic Transform
             let mut poly = [0u64; NTT_N];
             for i in 0..NTT_N {
                 poly[i] = get_random_number() % MOD_NTT;
             }
-            println!("ntt({:?}) = {:?}", poly, ntt(&poly));
+            call_log(2, None, &format!("ntt({:?}) = {:?}", poly, ntt(&poly)));
         }
-        Programs::ProgramCORDIC => {
+        42 => {
             // CORDIC Rotation
             let angle = (get_random_number() % 200_001) as i32 - 100_000;
             let (c, s) = cordic(angle);
-            println!("angle={} → cos≈{}, sin≈{}", angle, c, s);
+            call_log(2, None, &format!("angle={} → cos≈{}, sin≈{}", angle, c, s));
         }
-        Programs::ProgramFixedPoint => {
-            // Fixed‑Point Multiply/Divide
-            let a = (((get_random_number() % 2000) as i32) - 1000) << 16;
-            let b = (((get_random_number() % 2000) as i32) - 1000) << 16;
-            println!("fix_mul={}, fix_div={}", fix_mul(a, b), fix_div(a, b));
-        }
-        Programs::ProgramPseudoRandomGenerators => {
+
+        43 => {
             // Pseudo-Random Generators
             let mut lcg = Lcg {
                 state: get_random_number() as u32,
                 a: 1664525,
                 c: 1013904223,
             };
-            println!("lcg.next() = {}", lcg.next());
-            println!("xorshift64 = {}", xorshift64(get_random_number() as u64));
+            call_log(2, None, &format!("lcg.next() = {}", lcg.next()));
+            call_log(2, None, &format!("xorshift64 = {}", xorshift64(get_random_number() as u64)));
             let mut pcg = Pcg {
                 state: get_random_number() as u64,
                 inc: get_random_number() as u64,
             };
-            println!("pcg.next() = {}", pcg.next());
+            call_log(2, None, &format!("pcg.next() = {}", pcg.next()));
             let mut mwc = Mwc {
                 state: get_random_number() as u64,
                 carry: get_random_number() as u64 & 0xFFFF_FFFF,
             };
-            println!("mwc.next() = {}", mwc.next());
+            call_log(2, None, &format!("mwc.next() = {}", mwc.next()));
         }
-        Programs::ProgramCRC32Adler32FNV1aMurmurJenkins => {
+        44 => {
             // CRC32, Adler-32, FNV-1a, Murmur, Jenkins
             let len = (get_random_number() % 32) as usize;
             let mut data = Vec::with_capacity(len);
             for _ in 0..len {
                 data.push(get_random_number() as u8);
             }
-            println!(
-                "crc32={:08x}, adler32={:08x}, fnv1a={:08x}, murmur3={:08x}, jenkins={:08x}",
-                crc32(&data),
-                adler32(&data),
-                fnv1a(&data),
-                murmur3_finalizer(get_random_number() as u32),
-                jenkins(&data)
+            call_log(
+                2,
+                None,
+                &format!(
+                    "crc32={:08x}, adler32={:08x}, fnv1a={:08x}, murmur3={:08x}, jenkins={:08x}",
+                    crc32(&data),
+                    adler32(&data),
+                    fnv1a(&data),
+                    murmur3_finalizer(get_random_number() as u32),
+                    jenkins(&data)
+                ),
             );
         }
-        Programs::ProgramEulerTotient => {
+        45 => {
             // Euler’s Totient φ(n)
             let n = (get_random_number() % 100_000) + 1;
-            println!("eulerTotient phi({}) = {}", n, phi(n));
-        }
-        Programs::ProgramLinearSieve => {
-            // Linear Sieve (primes, φ, μ)
-            let n = (get_random_number() % 1_000) as usize + 1;
-            let (_pr, phi_v, mu_v) = linear_sieve(n);
-            println!(
-                "linear_sieve n={} → #primes={}, φ[n]={}, μ[n]={}",
-                n,
-                _pr.len(),
-                phi_v[n],
-                mu_v[n]
-            );
+            call_log(2, None, &format!("eulerTotient phi({}) = {}", n, phi(n)));
         }
 
-        Programs::ProgramLinearMu => {
-            // Linear Sieve μ(n) only
+        46 => {
+            // Linear SieveMu
             let n = (get_random_number() % 1_000) as usize + 1;
             let mu = linear_mu(n);
-            println!("linear_mu n={}, μ[n]={}", n, mu[n]);
+            call_log(2, None, &format!("linear_mu n={}, [n]={}", n, mu[n]));
         }
-        Programs::ProgramSumOfDivisors => {
-            // Sum‑of‑Divisors σ(n)
+        47 => {
+            // Sum of Divisors
             let n = (get_random_number() % 100_000) + 1;
-            println!("SumOfDivisors sigma({}) = {}", n, sigma(n));
+            call_log(2, None, &format!("SumOfDivisors sigma({}) = {}", n, sigma(n)));
         }
-        Programs::ProgramDivisorCount => {
+        48 => {
             // Divisor Count d(n)
             let n = (get_random_number() % 100_000) + 1;
-            println!("divisor_count({}) = {}", n, divisor_count(n));
+            call_log(2, None, &format!("divisor_count({}) = {}", n, divisor_count(n)));
         }
-        Programs::ProgramMobius => {
-            // Möbius μ(n)
+        49 => {
+            // Mobius
             let n = (get_random_number() % 100_000) + 1;
-            println!("mobius({}) = {}", n, mobius(n));
+            call_log(2, None, &format!("mobius({}) = {}", n, mobius(n)));
         }
-        Programs::ProgramDirichletConvolution => {
+        50 => {
             // Dirichlet Convolution (1 * id)
             let n = (get_random_number() % 1_000) + 1;
-            // f(d)=1     → |_| 1
-            // g(d)=d     → |d| d
-            println!(
-                "dirichlet_convolution (1 * id)({}) = {}",
-                n,
-                dirichlet_convolution(n, |_| 1, |d| d)
+            call_log(
+                2,
+                None,
+                &format!("dirichlet_convolution (1 * id)({}) = {}", n, dirichlet_convolution(n, |_| 1, |d| d)),
             );
         }
-
-        Programs::ProgramPrimeCountTrialDivision => {
-            // Prime Count π(n) via Trial Division
-            let n = (get_random_number() % 10_000) + 1;
-            println!("pi_trial({}) = {}", n, pi_trial(n));
-        }
-        Programs::ProgramJacobiSymbol => {
+        51 => {
             // Jacobi Symbol (a/n)
             let n = ((get_random_number() % 999) | 1) + 2; // odd ≥3
             let a = (get_random_number() % (n as u64)) as i64;
-            println!(
-                "jacobi( {}/{}) = {}",
-                a,
-                n,
-                jacobi(a.try_into().unwrap(), (n as i64).try_into().unwrap())
+            call_log(
+                2,
+                None,
+                &format!(
+                    "jacobi( {}/{}) = {}",
+                    a,
+                    n,
+                    jacobi(a.try_into().unwrap(), (n as i64).try_into().unwrap())
+                ),
             );
         }
-        _ => unreachable!(),
-    }
-}
-
-impl Programs {
-    /// Number of variants in `Programs`.
-    pub const COUNT: u8 = (Programs::ProgramJacobiSymbol as u8) + 1;
-
-    // Pick a random variant.
-    /*
-    pub fn random_program() -> Self {
-        let idx = rand::thread_rng().gen_range(0..Self::COUNT);
-        // SAFETY: `idx` is guaranteed < COUNT, so the discriminant exists.
-        unsafe { std::mem::transmute(idx) }
-    }
-     */ 
-}
-
-use std::backtrace::Backtrace;
-fn main() {
-        std::panic::set_hook(Box::new(|info| {
-        eprintln!("panic occurred: {}", info);
-        eprintln!("backtrace:\n{:?}", Backtrace::capture());
-    }));
-    for idx in 0..Programs::COUNT as u8 {
-        let program = unsafe { std::mem::transmute::<u8, Programs>(idx) };
-        println!("=== Running {:?} ===", program);
-        for run in 1..=25000 {
-
-            let result = panic::catch_unwind(|| run_program(program));
-
-            match result {
-                Ok(_) => {
-                    // println!("ok")
-                }
-                Err(_) => {
-                    println!("failed!");
-                    eprintln!("    ❌  {:?} panicked on run {}/10 — skipping further runs of this one.", program, run);
-                    break;
-                }
+        52 => {
+            // Cipolla’s Algorithm
+            let p = ((get_random_number() % 1000) | 1) + 2;
+            let n = get_random_number() % p;
+            match cipolla(n, p) {
+                Some(r) => call_log(2, None, &format!("{}", r)),
+                None => call_log(2, None, &format!("none")),
             }
+        }
+        53..=u8::MAX => {
+            call_log(2, None, &format!("not implemented {}", idx));
         }
     }
 
+    let gas_end = unsafe { gas() };
+    return gas_start - gas_end;
+}
+
+#[polkavm_derive::polkavm_export]
+extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
+    let args = if let Some(a) = parse_refine_args(start_address, length) {
+        a
+    } else {
+        return (FIRST_READABLE_ADDRESS as u64, 0);
+    };
+
+    let out_ptr = unsafe { output_bytes_32.as_ptr() as u64 };
+    let mut bytes_written = 0u64;
+    let payload_ptr = args.wi_payload_start_address as *const u8;
+    let payload_len = args.wi_payload_length as usize;
+    let payload = unsafe { slice::from_raw_parts(payload_ptr, payload_len) };
+
+    // run each (program_id, count) pair
+    let pairs = payload_len / 2;
+    call_log(2, None, &format!("PAYLOAD {} {}", payload_len, pairs));
+    for i in 0..pairs {
+        let program_id = payload[i * 2];
+        let p_id = program_id % 170;
+        let count = payload[i * 2 + 1] as u64;
+        let iterations = count * count * count as u64;
+        call_log(2, None, &format!("PROGRAM_ID {} ITERATIONS {}", program_id, iterations));
+        let mut gas_used = 0 as u64;
+        for _ in 0..iterations {
+            gas_used += run_program(p_id);
+        }
+        // after the last run, grab your sum_bytes
+        // only store up to 32 slots
+        if i < 32 {
+            unsafe {
+                output_bytes_32[i] = program_id;
+            }
+            bytes_written += 1;
+        }
+        call_log(
+            2,
+            None,
+            &format!("run_program {} ITERATIONS {} gas_used {}", program_id, iterations, gas_used),
+        )
+    }
+
+    return (out_ptr, bytes_written);
+}
+
+#[no_mangle]
+static mut output_bytes_32: [u8; 32] = [0; 32];
+
+#[polkavm_derive::polkavm_export]
+extern "C" fn accumulate(start_address: u64, length: u64) -> (u64, u64) {
+    // parse accumulate args
+    let (_timeslot, _service_index, number_of_operands) = if let Some(args) = parse_accumulate_args(start_address, length) {
+        (args.t, args.s, args.number_of_operands)
+    } else {
+        return (FIRST_READABLE_ADDRESS as u64, 0);
+    };
+
+    let ptr = unsafe { output_bytes_32.as_ptr() as u64 };
+    for i in 0..number_of_operands {
+        let result0 = unsafe { fetch(ptr, 0, 32, 15, i.into(), 0) };
+
+        unsafe {
+            call_log(2, None, &format!("fib {:?} result={}", output_bytes_32, result0));
+        }
+        let key = [0u8; 1];
+        unsafe {
+            write(key.as_ptr() as u64, key.len() as u64, ptr, 8);
+        }
+    }
+
+    return (ptr, 32);
+}
+
+#[polkavm_derive::polkavm_export]
+extern "C" fn on_transfer(start_address: u64, length: u64) -> (u64, u64) {
+    // Note: This part executes only if there are deferred transfers AND this service is the receiver.
+    let mut i: u64 = 0;
+
+    loop {
+        let (timeslot, service_index, sender, receiver, amount, memo, gas_limit) =
+            if let Some(args) = parse_transfer_args(start_address, length, i) {
+                (args.t, args.s, args.ts, args.td, args.ta, args.tm, args.tg)
+            } else {
+                break;
+            };
+
+        call_log(
+            2,
+            None,
+            &format!(
+                "FIB on_transfer: timeslot={:?} service_index={:?} sender={:?} receiver={:?} amount={:?} memo={:?} gas_limit={:?}",
+                timeslot, service_index, sender, receiver, amount, memo, gas_limit
+            ),
+        );
+
+        let service_index_bytes = service_index.to_le_bytes();
+        let service_index_ptr: u64 = service_index_bytes.as_ptr() as u64;
+        let service_index_length: u64 = service_index_bytes.len() as u64;
+
+        let memo_ptr: u64 = memo.as_ptr() as u64;
+        let memo_length: u64 = memo.len() as u64;
+
+        unsafe { write(service_index_ptr, service_index_length, memo_ptr, memo_length) };
+
+        let gas_result = unsafe { gas() };
+        write_result(gas_result, 4);
+        call_log(2, None, &format!("FIB on_transfer gas: got {:?} (recorded at key 4)", gas_result));
+
+        i += 1;
+    }
+
+    return (FIRST_READABLE_ADDRESS as u64, 0);
 }

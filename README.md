@@ -62,8 +62,13 @@ pkill -f jamduna
 
 ## Disclosures
 
+No one on our team viewed any other team's JAM implementations code, but we wish to summarize our interactions with other teams for completeness.
+
 Our interactions with fellow teams concerning implementation are:
-* Public [JAM Telegram room](https://t.me/jamtestnet) wherein many JAM Implementers are sharing published blocks/state transitions and Discord room;  A few conversations with Jason @ JavaJAM to review how to participate in a [tiny testnet](https://github.com/jam-duna/jamtestnet/issues/69) 
-* Public [JAM DUNA JAM Testnet repo](https://github.com/jam-duna/jamtestnet/releases) on resolving discrepancies on published blocks/state_transitions/state_snapshot
+* Public [JAM Telegram room](https://t.me/jamtestnet) wherein many JAM Implementers are sharing published blocks/state transitions and Discord room;  A few conversations with Jason @ JavaJAM to review how to participate in a [tiny testnet](https://github.com/jam-duna/jamtestnet/issues/69); The #implementers room in the JAM DAO discord.  
+* Public [JAM DUNA JAM Testnet repo](https://github.com/jam-duna/jamtestnet/releases) on resolving discrepancies on published blocks/state_transitions/state_snapshot in the GP 0.5.x to 0.6.x series.  This was enormously valuable to fix interpretation issues.
 * [JAM0 event at Devcon 7, sponsored by Colorful Notion](https://forum.polkadot.network/t/jam0-jam-implementers-meetup-sub0-devcon-7-bangkok-nov-11-nov-16-2024/10866)
-* Public conversations with @koute concerning using polkatool over github to build our first services (see [here](https://forum.polkadot.network/t/building-jam-services-in-rust/10161))
+* We built many services using a fork of koute/polkavm [here](https://github.com/colorfulnotion/)
+* Public conversations with @koute concerning using polkatool over github to build our first services (see [here](https://forum.polkadot.network/t/building-jam-services-in-rust/10161)) and a few private DMs concerning toolchain usage and in-person discussion in May concerning CoreEVM service development
+* Many critically helpful public conversations with Polkajam team leads (Dave Emett, davxy, koute) in Let's JAM.
+* Generative AI usage restricted to: learning how to FFI into Rust (bandersnatch + bls + erasure coding package), in-line documentation + PR summary and basic debugging (eg fmt.Printf auto generation), learning about QUIC+X86 opcodes, building fuzzer tests.
