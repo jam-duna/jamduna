@@ -1,0 +1,5 @@
+r7 = 0xa
+r8 = 0xfffffffffffffff6
+jump 10 if r7 >=u r8
+trap
+r7 = 0xdeadbeef

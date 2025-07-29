@@ -1,0 +1,1 @@
+r9 = 0xffffffffffff0001 >> r8

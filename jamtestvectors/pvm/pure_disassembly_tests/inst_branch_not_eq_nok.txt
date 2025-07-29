@@ -1,0 +1,5 @@
+r7 = 0x4d2
+r8 = 0x4d2
+jump 12 if r7 != r8
+trap
+r7 = 0xdeadbeef

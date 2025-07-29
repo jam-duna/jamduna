@@ -1,0 +1,4 @@
+r7 = 0x4d2
+jump 10 if r7 != 1234
+trap
+r7 = 0xdeadbeef

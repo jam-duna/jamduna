@@ -1,0 +1,4 @@
+r7 = 0xfffffffffffffff6
+jump 8 if r7 <=s 10
+trap
+r7 = 0xdeadbeef

@@ -676,6 +676,10 @@ func recompiler_sandbox_test(tc TestCase) error {
 		return fmt.Errorf("failed to create recompiler VM: %w", err)
 	}
 	rvm.Gas = 1000000 // set a high gas limit for the sandbox
+	codeLines := rvm.DisassemblePVM()
+	for _, line := range codeLines {
+		fmt.Printf("%s\n", line)
+	}
 
 	for _, pm := range tc.InitialPageMap {
 		// Set the page access based on the initial page map
@@ -749,10 +753,10 @@ func recompiler_sandbox_test(tc TestCase) error {
 
 func TestSingleSandbox(t *testing.T) {
 
-	PvmLogging = true
-	PvmTrace = true
-	debugRecompiler = true
-	showDisassembly = true
+	PvmLogging = false
+	PvmTrace = false
+	debugRecompiler = false
+	showDisassembly = false
 
 	name := "inst_branch_not_eq_imm_ok"
 	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
@@ -1103,38 +1107,38 @@ func TestCodeIsSame(t *testing.T) {
 	rvm.initStartCode()
 	rvm.Compile(0)
 	rvm.Patch(rvm.x86Code, 0)
-	
+
 	// Get the three hashes we want to test
 	x86CodeHash := common.Blake2Hash(rvm.x86Code)
 	djumpTableHash := common.Blake2Hash(rvm.djumpTableFunc)
-	
+
 	// Combined code hash (for backward compatibility)
 	combinedCode := append(rvm.x86Code, rvm.djumpTableFunc...)
 	combinedHash := common.Blake2Hash(combinedCode)
-	
+
 	fmt.Printf("x86Code hash: %s\n", x86CodeHash.Hex())
 	fmt.Printf("djumpTableFunc hash: %s\n", djumpTableHash.Hex())
 	fmt.Printf("Combined code hash: %s\n", combinedHash.Hex())
-	
+
 	// Expected hashes - you can update these with the correct values after running the original version
 	expectedX86CodeHash := "0xfd336cfcedecd4287b92cba002d316602252177509555ae18e5fc8336bec45cd"
 	expectedDjumpTableHash := "0xbd1fb1995fe867ba196d2222388c4b541a3afca76d39cecf4796d8c2ed25e684"
 	expectedCombinedHash := "0xc961f299f8eb65e2ad302c22e9f0339261f00e827a6895817e3c7e9406a20f92"
-	
+
 	// Test x86Code hash
 	if x86CodeHash.Hex() != expectedX86CodeHash {
 		t.Errorf("x86Code hash mismatch: expected %s, got %s", expectedX86CodeHash, x86CodeHash.Hex())
 	} else {
 		fmt.Printf("✅ x86Code hash matches expected value\n")
 	}
-	
+
 	// Test djumpTableFunc hash
 	if djumpTableHash.Hex() != expectedDjumpTableHash {
 		t.Errorf("djumpTableFunc hash mismatch: expected %s, got %s", expectedDjumpTableHash, djumpTableHash.Hex())
 	} else {
 		fmt.Printf("✅ djumpTableFunc hash matches expected value\n")
 	}
-	
+
 	// Test combined hash
 	if combinedHash.Hex() != expectedCombinedHash {
 		t.Errorf("Combined code hash mismatch: expected %s, got %s", expectedCombinedHash, combinedHash.Hex())

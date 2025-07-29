@@ -1,0 +1,4 @@
+r7 = 0x2
+jump [r7 + 0x1]
+trap
+r8 = 0xdeadbeef
