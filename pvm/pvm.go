@@ -489,7 +489,7 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 	if !vm.terminated {
 		vm.ResultCode = types.WORKRESULT_OK
 	} else if vm.ResultCode != types.WORKRESULT_OK {
-		fmt.Printf("VM terminated with error code %d at PC %d\n", vm.ResultCode, vm.pc)
+		fmt.Printf("VM terminated with error code %d at PC %d (%v, %s, %s) Gas:%v\n", vm.ResultCode, vm.pc, vm.Service_index, vm.Mode, string(vm.ServiceMetadata), vm.Gas)
 		//log.Warn(vm.logging, "PVM Result Code", "mode", vm.Mode, "service", string(vm.ServiceMetadata), "resultCode", vm.ResultCode)
 	}
 	return nil

@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/nsf/jsondiff"
+	"github.com/yudai/gojsondiff"
+	"github.com/yudai/gojsondiff/formatter"
 )
 
 type StateTransitionChallenge struct {
@@ -48,7 +51,7 @@ func compareKeyVals(p0 []KeyVal, p1 []KeyVal) {
 	for k0, v0 := range kv0 {
 		v1 := kv1[k0]
 		if !common.CompareBytes(v0, v1) {
-			fmt.Printf("K %v\nC: %x\nP: %x\n", k0, v0, v1)
+			fmt.Printf("K %v\nC(Actual): %x\nP(Exp): %x\n", k0, v0, v1)
 		}
 	}
 }
@@ -165,6 +168,7 @@ func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, 
 
 func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTransition, ancestorSet map[common.Hash]uint32, pvmBackend string, writeFile ...string) (diffs map[string]DiffState, err error) {
 	// Apply the state transition
+	//fmt.Printf("CheckStateTransitionWithOutput: %v\n", pvmBackend)
 	s0, err := NewStateDBFromStateTransition(storage, st)
 	if err != nil {
 		return nil, err
@@ -239,4 +243,52 @@ func CompareJSON(obj1, obj2 interface{}) string {
 		return "JSONs are identical"
 	}
 	return fmt.Sprintf("Diff detected:\n%s", diffStr)
+}
+
+func HandleDiffs(diffs map[string]DiffState) {
+	keys := make([]string, 0, len(diffs))
+	for k := range diffs {
+		keys = append(keys, k)
+	}
+	SortDiffKeys(keys)
+
+	fmt.Printf("Diff on %d keys: %v\n", len(keys), keys)
+	for _, key := range keys {
+		val := diffs[key]
+
+		stateType := "unknown"
+		if m := strings.TrimSuffix(val.ActualMeta, "|"); m != "" {
+			stateType = m
+		} else {
+			keyFirstByte := common.FromHex(key)[0]
+			if tmp, ok := StateKeyMap[keyFirstByte]; ok {
+				stateType = tmp
+			}
+		}
+
+		fmt.Println(strings.Repeat("=", 40))
+		fmt.Printf("\033[34mState Key: %s (%s)\033[0m\n", stateType, key)
+		fmt.Printf("%-10s | PreState : 0x%x\n", stateType, val.Prestate)
+		printHexDiff(stateType, val.ExpectedPostState, val.ActualPostState)
+
+		if stateType != "unknown" {
+			expJSON, _ := StateDecodeToJson(val.ExpectedPostState, stateType)
+			actJSON, _ := StateDecodeToJson(val.ActualPostState, stateType)
+
+			differ := gojsondiff.New()
+			delta, err := differ.Compare([]byte(expJSON), []byte(actJSON))
+			if err == nil && delta.Modified() {
+				var leftObj, rightObj interface{}
+				_ = json.Unmarshal([]byte(expJSON), &leftObj)
+				_ = json.Unmarshal([]byte(actJSON), &rightObj)
+
+				cfg := formatter.AsciiFormatterConfig{ShowArrayIndex: true, Coloring: true}
+				asciiFmt := formatter.NewAsciiFormatter(leftObj, cfg)
+				asciiDiff, _ := asciiFmt.Format(delta)
+				fmt.Println(asciiDiff)
+			}
+			fmt.Printf("------ %s JSON DONE ------\n", stateType)
+		}
+		fmt.Println(strings.Repeat("=", 40))
+	}
 }

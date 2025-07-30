@@ -102,14 +102,30 @@ define build_with_status
 	@$(2) && echo "$(GREEN)✓ Done: $(1)$(RESET)" || echo "$(YELLOW)⚠ Failed to build: $(1)$(RESET)"
 endef
 
+native_static_jam_linux_amd64:
+	@echo "Building JamDuna static binary natively for Linux (x86_64)..."
+	@echo "--> Creating temporary symlink for libunicorn..."
+	@ln -s ${PWD}/ffi/libunicorn.linux_amd64.a ffi/libunicorn.a
+	-@$(call build_with_status,native_static_jam_linux_amd64,\
+		GOOS=linux GOARCH=amd64 CC=musl-gcc CGO_ENABLED=1 \
+		go build -tags "cgo" \
+		-ldflags "$(GO_LDFLAGS) -extldflags '-static'" \
+		-o $(OUTPUT_DIR)/linux-amd64/$(BINARY) . && strip $(OUTPUT_DIR)/linux-amd64/jamduna 2>/dev/null)
+	@rm ffi/libunicorn.a
 
 static_jam_linux_amd64:
 	@echo "Building JamDuna binary for Linux (x86_64)..."
-	$(call build_with_status,static_jam_linux_amd64,\
+	@echo "--> Creating temporary symlink for libunicorn..."
+	@ln -s $(CURDIR)/ffi/libunicorn.linux_amd64.a ffi/libunicorn.a
+	@# The '-' at the beginning of the next line tells 'make' to continue
+	@# to the cleanup step even if the build command fails.
+	-@$(call build_with_status,static_jam_linux_amd64,\
 	GOOS=linux GOARCH=amd64 CC=x86_64-linux-musl-gcc CGO_ENABLED=1 \
 	go build -tags "cgo" \
 	-ldflags "$(GO_LDFLAGS) -extldflags '-static'" \
 	-o $(OUTPUT_DIR)/linux-amd64/$(BINARY) . && strip $(OUTPUT_DIR)/linux-amd64/jamduna 2>/dev/null)
+	@echo "--> Cleaning up temporary symlink..."
+	@rm ffi/libunicorn.a
 
 static_jam_linux_arm64:
 	@echo "Building JamDuna binary for Linux (aarch64)..."
@@ -121,19 +137,27 @@ static_jam_linux_arm64:
 
 static_jam_darwin_amd64:
 	@echo "Building JamDuna binary for macOS (x86_64)..."
-	$(call build_with_status,static_jam_darwin_amd64,\
+	@echo "--> Creating temporary symlink for libunicorn..."
+	@ln -s $(CURDIR)/ffi/libunicorn.mac.a ffi/libunicorn.a
+	-@$(call build_with_status,static_jam_darwin_amd64,\
 	GOOS=darwin GOARCH=amd64 CC=clang CGO_ENABLED=1 \
 	go build -tags "cgo" \
 	-ldflags "$(GO_LDFLAGS)" \
 	-o $(OUTPUT_DIR)/mac-amd64/$(BINARY) . && strip -x $(OUTPUT_DIR)/mac-amd64/jamduna)
+	@echo "--> Cleaning up temporary symlink..."
+	@rm ffi/libunicorn.a
 
 static_jam_darwin_arm64:
 	@echo "Building JamDuna binary for macOS (aarch64)..."
-	$(call build_with_status,static_jam_darwin_arm64,\
+	@echo "--> Creating temporary symlink for libunicorn..."
+	@ln -s $(CURDIR)/ffi/libunicorn.mac.a ffi/libunicorn.a
+	-@$(call build_with_status,static_jam_darwin_arm64,\
 	CGO_ENABLED=1 CC=clang \
 	go build -tags "cgo" \
 	-ldflags "$(GO_LDFLAGS)" \
 	-o $(OUTPUT_DIR)/mac-arm64/$(BINARY) . && strip -x $(OUTPUT_DIR)/mac-arm64/jamduna)
+	@echo "--> Cleaning up temporary symlink..."
+	@rm ffi/libunicorn.a
 
 static_jam_all:
 	@echo "Building static JAM for available platforms..."
@@ -142,11 +166,11 @@ static_jam_all:
 	@$(MAKE) static_jam_linux_amd64
 
 	# Build Linux ARM64 only if compiler exists or on ARM host
-	@if command -v aarch64-linux-musl-gcc >/dev/null 2>&1; then \
-	  $(MAKE) static_jam_linux_arm64; \
-	else \
-	  echo "⚠ Skipping Linux ARM64 (no aarch64-linux-musl-gcc)"; \
-	fi
+	#@if command -v aarch64-linux-musl-gcc >/dev/null 2>&1; then \
+	#  $(MAKE) static_jam_linux_arm64; \
+	#else \
+	#  echo "⚠ Skipping Linux ARM64 (no aarch64-linux-musl-gcc)"; \
+	#fi
 
 	# Build macOS binaries only on macOS
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \

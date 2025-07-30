@@ -85,7 +85,92 @@ func InitFuzzStorage(testDir string) (*storage.StateDBStorage, error) {
 
 }
 
+func ReadStateTransitionBIN(filename string) (stf *statedb.StateTransition, err error) {
+	stBytes, err := os.ReadFile(filename)
+	if err != nil {
+		fmt.Printf("Error reading file %s: %v\n", filename, err)
+		return nil, fmt.Errorf("Error reading file %s: %v", filename, err)
+	}
+	// Decode st from stBytes
+	b, _, err := types.Decode(stBytes, reflect.TypeOf(statedb.StateTransition{}))
+	if err != nil {
+		fmt.Printf("Error decoding block %s: %v\n", filename, err)
+		return nil, fmt.Errorf("Error decoding block %s: %v", filename, err)
+	}
+	st, ok := b.(statedb.StateTransition)
+	if !ok {
+		return nil, fmt.Errorf("failed to type assert decoded data to StateTransition; got type %T", b)
+	}
+	stf = &st // Assign the address of the resulting value to the pointer 'stf'.
+	return stf, nil
+}
+
+func ReadStateTransitionJSON(path string) (*statedb.StateTransition, error) {
+	file, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("could not read file %s: %w", path, err)
+	}
+
+	var st statedb.StateTransition
+	if err := json.Unmarshal(file, &st); err != nil {
+		return nil, fmt.Errorf("could not unmarshal json from %s: %w", path, err)
+	}
+	return &st, nil
+}
+
+func ReadStateTransition(filename string) (stf *statedb.StateTransition, err error) {
+	if filename == "" {
+		return nil, fmt.Errorf("filename cannot be empty")
+	}
+	if len(filename) > 0 && filename[len(filename)-4:] == ".bin" {
+		return ReadStateTransitionBIN(filename)
+	}
+	return ReadStateTransitionJSON(filename)
+}
+
 func ReadStateTransitions(baseDir, dir string) (stfs []*statedb.StateTransition, err error) {
+	stfs = make([]*statedb.StateTransition, 0)
+	state_transitions_dir := filepath.Join(baseDir, dir, "state_transitions")
+	stFiles, err := os.ReadDir(state_transitions_dir)
+	if err != nil {
+		return stfs, fmt.Errorf("failed to read directory: %v", err)
+	}
+	fmt.Printf("Selected Dir: %v\n", dir)
+	file_idx := 0
+	useJSON := true
+	useBIN := false
+	for _, file := range stFiles {
+		if strings.HasSuffix(file.Name(), ".bin") || strings.HasSuffix(file.Name(), ".json") {
+			stPath := filepath.Join(state_transitions_dir, file.Name())
+			isJSON := strings.HasSuffix(file.Name(), ".json")
+			isBin := strings.HasSuffix(file.Name(), ".bin")
+			if useJSON && isJSON {
+				fmt.Printf("Reading JSON file: %s\n", stPath)
+				stf, err := ReadStateTransition(stPath)
+				if err != nil {
+					log.Printf("Error reading state transition file %s: %v\n", file.Name(), err)
+					continue
+				}
+				stfs = append(stfs, stf)
+				file_idx++
+			}
+			if useBIN && isBin {
+				fmt.Printf("Reading BIN file: %s\n", stPath)
+				stf, err := ReadStateTransition(stPath)
+				if err != nil {
+					log.Printf("Error reading state transition file %s: %v\n", file.Name(), err)
+					continue
+				}
+				stfs = append(stfs, stf)
+				file_idx++
+			}
+		}
+	}
+	fmt.Printf("Loaded %v state transitions\n", len(stfs))
+	return stfs, nil
+}
+
+func ReadStateTransitionsOLD(baseDir, dir string) (stfs []*statedb.StateTransition, err error) {
 	stfs = make([]*statedb.StateTransition, 0)
 	state_transitions_dir := filepath.Join(baseDir, dir, "state_transitions")
 	stFiles, err := os.ReadDir(state_transitions_dir)
@@ -117,6 +202,22 @@ func ReadStateTransitions(baseDir, dir string) (stfs []*statedb.StateTransition,
 			// Store the state transition in the stateTransitions map
 			stf := b.(statedb.StateTransition)
 			stfs = append(stfs, &stf)
+		} else if strings.HasSuffix(file.Name(), ".json") {
+			file_idx++
+			// Read the st file
+			stPath := filepath.Join(state_transitions_dir, file.Name())
+			stBytes, err := os.ReadFile(stPath)
+			if err != nil {
+				log.Printf("Error reading block file %s: %v\n", file.Name(), err)
+				continue
+			}
+			var st statedb.StateTransition
+			err = json.Unmarshal(stBytes, &st)
+			if err != nil {
+				log.Printf("Error decoding block %s: %v\n", file.Name(), err)
+				continue
+			}
+			stfs = append(stfs, &st)
 		}
 	}
 	fmt.Printf("Loaded %v state transitions\n", len(stfs))

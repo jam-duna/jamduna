@@ -113,7 +113,11 @@ func (f *Fuzzer) Shuffle(slice interface{}) {
 
 func (f *Fuzzer) FuzzWithTargetedInvalidRate(modes []string, stfs []*statedb.StateTransition, invalidRate float64, numBlocks int) (finalSTFs []StateTransitionQA, err error) {
 	seed := f.GetSeed()
-	store := f.store
+	store, err := statedb.InitStorage("/tmp/test_locala")
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize storage: %v", err)
+	}
+	//store := f.store
 	numInvalidBlocks := int(float64(numBlocks) * invalidRate)
 	numValidBlocks := numBlocks - numInvalidBlocks
 	fmt.Printf("Seed=%x InvalidRate=%.2f -> invalidBlocks=%d | validBlocks=%d | total=%d\n",
@@ -124,9 +128,18 @@ func (f *Fuzzer) FuzzWithTargetedInvalidRate(modes []string, stfs []*statedb.Sta
 
 	var fuzzedSTFs []StateTransitionQA
 	var notFuzzedSTFs []StateTransitionQA
-
+	//pvmBackend := pvm.BackendRecompiler
+	pvmBackend := f.pvmBackend
 	fuzzableCandidates := make([]*statedb.StateTransition, 0, len(stfs))
 	for _, stf := range stfs {
+		//stfErr := statedb.CheckStateTransition(store, stf, nil, pvmBackend)
+		diffs, stfErr := statedb.CheckStateTransitionWithOutput(store, stf, nil, pvmBackend)
+		if stfErr != nil {
+			statedb.HandleDiffs(diffs)
+			fmt.Printf("Invalid STF. stfErr=%v, stf=%v\n", stfErr, stf.ToJSON())
+			panic(fmt.Sprintf("Invalid STF: %v | %v", stfErr, stf.ToJSON()))
+		}
+
 		_, expectedErr, possibleErrs := selectImportBlocksError(seed, store, modes, stf)
 		if expectedErr != nil || len(possibleErrs) > 0 {
 			fuzzableCandidates = append(fuzzableCandidates, stf)
@@ -337,6 +350,8 @@ func selectAllImportBlocksErrors(seed []byte, store *storage.StateDBStorage, mod
 	if err != nil {
 		return 0, 0, 0, nil, nil
 	}
+	//jsonOutput, _ := json.MarshalIndent(stf, "", "  ")
+	//fmt.Printf("stf!! %v\n", stf.ToJSON())
 
 	for _, mode := range modes {
 		if mode == "safrole" && len(block.Extrinsic.Tickets) == 0 {

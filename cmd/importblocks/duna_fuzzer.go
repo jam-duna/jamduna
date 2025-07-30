@@ -56,7 +56,7 @@ func runUnixSocketChallenge(fuzzer *fuzz.Fuzzer, stfQA *fuzz.StateTransitionQA, 
 			log.Printf("B#%.3d Fuzzed block returned expected zero post-state root.", stfQA.STF.Block.Header.Slot)
 			matched = true
 		} else {
-			log.Printf("FATAL: Fuzzed block returned non-zero post-state root: %s", targetPostStateRoot.Hex())
+			log.Printf("FATAL: Fuzzed block returned non-zero post-state root: %s | Pre-State Root:%s", targetPostStateRoot.Hex(), expectedPreStateRoot.Hex())
 			matched = false // Fuzzed Undetected
 		}
 	} else {
@@ -113,6 +113,7 @@ func main() {
 	enableRPC := false
 	useUnixSocket := true
 	seedHex := "0x44554E41"
+	pvmBackend := "interpreter" // Default PVM backend
 
 	jConfig := types.ConfigJamBlocks{
 		Mode:        "safrole",
@@ -138,6 +139,7 @@ func main() {
 	fReg.RegisterFlag("dir", nil, dir, "Storage directory", &dir)
 	fReg.RegisterFlag("socket", nil, socket, "Path for the Unix domain socket to connect to", &socket)
 	fReg.RegisterFlag("use-unix-socket", nil, useUnixSocket, "Enable to use Unix domain socket for communication", &useUnixSocket)
+	fReg.RegisterFlag("pvm-backend", nil, pvmBackend, "PVM backend to use (Recompiler or Interpreter)", &pvmBackend)
 	fReg.ProcessRegistry()
 	fmt.Printf("%v\n", jConfig)
 
@@ -156,7 +158,7 @@ func main() {
 		AppVersion: fuzz.Version{Major: 0, Minor: 6, Patch: 7},
 		JamVersion: fuzz.Version{Major: 0, Minor: 6, Patch: 7},
 	}
-	fuzzer, err := fuzz.NewFuzzer(dir, socket, fuzzerInfo)
+	fuzzer, err := fuzz.NewFuzzer(dir, socket, fuzzerInfo, pvmBackend)
 	if err != nil {
 		log.Fatalf("Failed to initialize fuzzer: %v", err)
 	}

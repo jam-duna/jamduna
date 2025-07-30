@@ -10,6 +10,7 @@ import (
 	"reflect"
 
 	"github.com/colorfulnotion/jam/fuzz"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -37,7 +38,7 @@ func main() {
 	}
 
 	// Create the fuzzer engine.
-	dummy_fuzzer, err := fuzz.NewFuzzer(storageDir, *socketPath, fuzzerInfo)
+	dummy_fuzzer, err := fuzz.NewFuzzer(storageDir, *socketPath, fuzzerInfo, pvm.BackendInterpreter)
 	if err != nil {
 		log.Fatalf("Failed to create fuzzer: %v", err)
 	}

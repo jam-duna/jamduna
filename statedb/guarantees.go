@@ -125,6 +125,7 @@ func (s *StateDB) checkAssignment(g types.Guarantee, ts uint32) error {
 		if !ok || core != uint16(g.Report.CoreIndex) {
 			log.Warn(log.G, "checkAssignment: G14-ErrGWrongAssignment",
 				"validator", sig.ValidatorIndex,
+				"ok", ok,
 				"slot", g.Slot,
 				"expectedCore", g.Report.CoreIndex,
 				"actualCore", core)

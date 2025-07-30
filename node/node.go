@@ -62,7 +62,7 @@ const (
 	Audit       = false
 	CE138_test  = false
 	CE129_test  = false // turn on for testing CE129
-	revalidate  = false // turn off for production (or publication of traces)
+	revalidate  = true  // turn off for production (or publication of traces)
 
 	paranoidVerification = false // turn off for production
 	writeJAMPNTestVector = false // turn on true when generating JAMNP test vectors only
@@ -75,8 +75,8 @@ const (
 	MediumTimeout              = 10 * time.Second
 	LargeTimeout               = 12 * time.Second
 	VeryLargeTimeout           = 600 * time.Second
-	RefineTimeout              = 96 * time.Second        // 36
-	RefineAndAccumalateTimeout = (96 + 96) * time.Second // 96
+	RefineTimeout              = 36 * time.Second        // 36
+	RefineAndAccumalateTimeout = (36 + 60) * time.Second // 96
 
 	useRecompiler      = true
 	fudgeFactorJCE     = 1
@@ -1228,7 +1228,7 @@ func (n *NodeContent) SubmitWPSameCore(wp types.WorkPackage, extrinsicsBlobs typ
 
 		}
 	}
-	log.Debug(log.G, "SubmitWPSameCore SUBMISSION Start", "NODE", n.id, "validators", peers, "coreIndex", coreIndex, "slot", slot)
+	log.Info(log.G, "SubmitWPSameCore SUBMISSION Start", "NODE", n.id, "validators", peers, "coreIndex", coreIndex, "slot", slot)
 
 	// if we want to process it ourselves, this should be true
 	allowSelfSubmission := false
@@ -1241,7 +1241,7 @@ func (n *NodeContent) SubmitWPSameCore(wp types.WorkPackage, extrinsicsBlobs typ
 			nextAttemptAfterTS: time.Now().Unix(),
 			slot:               slot, // IMPORTANT: this will be used as guarantee.Slot
 		})
-		log.Debug(log.G, "SubmitWPSameCore SUBMISSION SELF", "coreIndex", coreIndex)
+		log.Info(log.G, "SubmitWPSameCore SUBMISSION SELF", "coreIndex", coreIndex)
 		return nil
 	}
 	// now we can send to the other 2 nodes
@@ -2927,6 +2927,9 @@ func (n *Node) runAuthoring() {
 				if revalidate {
 					if err := statedb.CheckStateTransition(n.store, st, s.AncestorSet, n.pvmBackend); err != nil {
 						log.Crit(log.Node, "runAuthoring:CheckStateTransition", "err", err)
+						panic(fmt.Sprintf("CheckStateTransition failed: %v", err))
+					} else {
+						log.Info(log.Node, "runAuthoring:CheckStateTransition", "revalidate", revalidate, "status", "ok")
 					}
 				}
 				if err := n.writeDebug(newStateDB.JamState.Snapshot(&(st.PostState), newStateDB.GetStateUpdates()), timeslot, true); err != nil {

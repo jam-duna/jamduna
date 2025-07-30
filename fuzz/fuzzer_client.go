@@ -6,8 +6,11 @@ import (
 	"io"
 	"log"
 	"net"
+	"runtime"
+	"strings"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
@@ -22,13 +25,21 @@ type Fuzzer struct {
 	seed           []byte
 	store          *storage.StateDBStorage
 	internalSTFMap map[common.Hash]*statedb.StateTransition
+	pvmBackend     string
 }
 
 // NewFuzzer creates a new fuzzer instance.
-func NewFuzzer(storageDir string, socketPath string, fuzzerInfo PeerInfo) (*Fuzzer, error) {
+func NewFuzzer(storageDir string, socketPath string, fuzzerInfo PeerInfo, pvmBackend string) (*Fuzzer, error) {
 	sdbStorage, err := storage.NewStateDBStorage(storageDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize fuzzer's local storage: %w", err)
+	}
+	if strings.ToLower(pvmBackend) != pvm.BackendInterpreter && strings.ToLower(pvmBackend) != pvm.BackendRecompiler {
+		pvmBackend = pvm.BackendInterpreter
+		fmt.Printf("Invalid PVM backend specified. Defaulting to Interpreter\n")
+	} else if runtime.GOOS != "linux" && strings.ToLower(pvmBackend) != pvm.BackendInterpreter {
+		pvmBackend = pvm.BackendInterpreter
+		fmt.Printf("Defaulting to Interpreter\n")
 	}
 
 	return &Fuzzer{
@@ -36,6 +47,7 @@ func NewFuzzer(storageDir string, socketPath string, fuzzerInfo PeerInfo) (*Fuzz
 		fuzzerInfo:     fuzzerInfo,
 		store:          sdbStorage,
 		internalSTFMap: make(map[common.Hash]*statedb.StateTransition),
+		pvmBackend:     pvmBackend,
 	}, nil
 }
 

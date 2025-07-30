@@ -43,6 +43,7 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 
 	//fmt.Printf("ExecuteRefine TOTAL len(a)=%d %x\n", len(a), a)
 	vm.WorkItemIndex = workitemIndex
+	initialRefineGasLimit := int64(workitem.RefineGasLimit)
 	vm.Gas = int64(workitem.RefineGasLimit)
 	vm.WorkPackage = workPackage
 	vm.N = n
@@ -99,33 +100,35 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 
 	AllExecutionTimes := common.Elapsed(initTime)
 	if RecordTime {
-		fmt.Printf("=== VM %s Execution Summary (service %s, %d bytes)===\n", vm.Backend, string(vm.ServiceMetadata), len(vm.code))
-		fmt.Printf("%-15s  %-12s  %8s\n", "Phase", "Duration", "Percent")
+		serviceMeta := string(vm.ServiceMetadata)
+		if serviceMeta != "auth_copy" {
+			fmt.Printf("=== VM %s Execution Summary (service %s, %d bytes, refineGasUsed %d)===\n", vm.Backend, serviceMeta, len(vm.code), initialRefineGasLimit-vm.Gas)
+			fmt.Printf("%-15s  %-12s  %8s\n", "Phase", "Duration", "Percent")
+			phases := []struct {
+				name string
+				time uint32
+			}{
+				{"Initialization", vm.initializationTime},
+				{"StandardInit", vm.standardInitTime},
+				{"Compile", vm.compileTime},
+				{"Execution", vm.executionTime},
+			}
 
-		phases := []struct {
-			name string
-			time uint32
-		}{
-			{"Initialization", vm.initializationTime},
-			{"StandardInit", vm.standardInitTime},
-			{"Compile", vm.compileTime},
-			{"Execution", vm.executionTime},
-		}
+			for _, p := range phases {
+				pct := float64(p.time) / float64(AllExecutionTimes) * 100
+				fmt.Printf("%-15s  %-12s  %7.2f%%\n",
+					p.name,
+					common.FormatElapsed(p.time),
+					pct,
+				)
+			}
 
-		for _, p := range phases {
-			pct := float64(p.time) / float64(AllExecutionTimes) * 100
-			fmt.Printf("%-15s  %-12s  %7.2f%%\n",
-				p.name,
-				common.FormatElapsed(p.time),
-				pct,
+			// total doesn’t need a percent
+			fmt.Printf("%-15s  %-12s\n",
+				"Total",
+				common.FormatElapsed(AllExecutionTimes),
 			)
 		}
-
-		// total doesn’t need a percent
-		fmt.Printf("%-15s  %-12s\n",
-			"Total",
-			common.FormatElapsed(AllExecutionTimes),
-		)
 	}
 
 	return r, res, exportedSegments

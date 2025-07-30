@@ -394,7 +394,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		"spec", workReport.AvailabilitySpec.String(),
 		"slot", slot,
 	)
-	log.Debug(log.G, "executeWorkPackageBundle OUTGOING REPORT",
+	log.Info(log.G, "executeWorkPackageBundle OUTGOING REPORT",
 		"n", n.String(),
 		"workReportHash", workReport.Hash(),
 		"workReport", workReport.String(),

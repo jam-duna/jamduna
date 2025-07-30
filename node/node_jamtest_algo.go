@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
@@ -33,7 +34,7 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 
 	for algoN := 0; algoN < targetN; algoN++ {
 		imported := []types.ImportSegment{}
-		algo_payload := GenerateAlgoPayload(20) // ONLY can do on recompiler cannot do logging
+		algo_payload := GenerateAlgoPayload(40) //compiler only
 		// algo_payload := GenerateAlgoPayload(0) // to generate a clean "do all 170" interpreter
 
 		auth_payload := make([]byte, 4)
@@ -79,6 +80,9 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 			log.Error(log.Node, "SubmitAndWaitForWorkPackages ERR", "err", err)
 			return
 		}
-		log.Info(log.Node, wpr.Identifier, "workPackageHash", wp.Hash(), "wr", wr.String())
+		k := common.ServiceStorageKey(algo_serviceIdx, []byte{0})
+		data, _, _ := n1.GetServiceStorage(algo_serviceIdx, k)
+		log.Info(log.Node, wpr.Identifier, "workPackageHash", wr.AvailabilitySpec.WorkPackageHash, "exportedSegmentRoot", wr.AvailabilitySpec.ExportedSegmentRoot, "result", fmt.Sprintf("%x", data))
+		//log.Info(log.Node, wpr.Identifier, "workPackageHash", wp.Hash(), "wr", wr.String())
 	}
 }

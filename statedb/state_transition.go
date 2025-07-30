@@ -21,6 +21,10 @@ const (
 	colorGreen = "\033[32m"
 )
 
+func InitStorage(testDir string) (*storage.StateDBStorage, error) {
+	return initStorage(testDir)
+}
+
 func initStorage(testDir string) (*storage.StateDBStorage, error) {
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
 		err = os.MkdirAll(testDir, os.ModePerm)

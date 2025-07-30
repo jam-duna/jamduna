@@ -8,9 +8,12 @@ import (
 	"log"
 	"net"
 	"os"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
@@ -24,21 +27,31 @@ type Target struct {
 	store      *storage.StateDBStorage     // Storage backend for the state database.
 	stateDB    *statedb.StateDB            // This can be used to manage state transitions.
 	stateDBMap map[common.Hash]common.Hash // [headererHash]posteriorStateRoot
+	pvmBackend string                      // Backend to use for state transitions, e.g., "Interpreter" or "Recompiler".
 }
 
 // NewTarget creates a new target instance, armed with a specific test case.
-func NewTarget(socketPath string, targetInfo PeerInfo) *Target {
+func NewTarget(socketPath string, targetInfo PeerInfo, pvmBackend string) *Target {
 	levelDBPath := fmt.Sprintf("/tmp/target_%d", time.Now().Unix())
 	store, err := storage.NewStateDBStorage(levelDBPath)
 	if err != nil {
 		log.Fatalf("Failed to create state DB storage: %v", err)
 	}
+	if strings.ToLower(pvmBackend) != pvm.BackendInterpreter && strings.ToLower(pvmBackend) != pvm.BackendRecompiler {
+		pvmBackend = pvm.BackendInterpreter
+		fmt.Printf("Invalid PVM backend specified. Defaulting to Interpreter\n")
+	} else if runtime.GOOS != "linux" && strings.ToLower(pvmBackend) != pvm.BackendInterpreter {
+		pvmBackend = pvm.BackendInterpreter
+		fmt.Printf("Defaulting to Interpreter\n")
+	}
+
 	return &Target{
 		socketPath: socketPath,
 		targetInfo: targetInfo,
 		store:      store,
 		stateDB:    nil,
 		stateDBMap: make(map[common.Hash]common.Hash),
+		pvmBackend: pvmBackend,
 	}
 }
 
@@ -156,7 +169,7 @@ func (t *Target) onImportBlock(req *types.Block) *Message {
 		return &Message{StateRoot: &common.Hash{}}
 	}
 	headerHash := req.Header.Hash()
-	pvmBackend := "interpreter" // or any other backend you want to use
+	pvmBackend := t.pvmBackend
 	preState := t.stateDB
 	postState, jamErr := statedb.ApplyStateTransitionFromBlock(preState, context.Background(), req, nil, pvmBackend)
 	if jamErr != nil {

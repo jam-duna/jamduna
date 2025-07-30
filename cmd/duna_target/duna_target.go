@@ -12,6 +12,7 @@ import (
 
 func main() {
 	socketPath := flag.String("socket", "/tmp/jam_target.sock", "Path for the Unix domain socket")
+	pvmBackend := flag.String("pvm-backend", "interpreter", "PVM backend to use (Recompiler or Interpreter)")
 	flag.Parse()
 
 	// Define the target's identity.
@@ -21,7 +22,7 @@ func main() {
 		JamVersion: fuzz.Version{Major: 0, Minor: 6, Patch: 7},
 	}
 
-	target := fuzz.NewTarget(*socketPath, targetInfo)
+	target := fuzz.NewTarget(*socketPath, targetInfo, *pvmBackend)
 
 	// Graceful shutdown setup
 	sigs := make(chan os.Signal, 1)

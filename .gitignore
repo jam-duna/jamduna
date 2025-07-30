@@ -64,3 +64,4 @@ pvm/test/*
 node/interpreter/*
 node/recompiler/*
 node/recompiler_sandbox/*
+node/test/*_recompiler_*.json

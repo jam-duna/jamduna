@@ -10,13 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/types"
-
-	"github.com/yudai/gojsondiff"
-	"github.com/yudai/gojsondiff/formatter"
 )
 
 //	func printColoredJSONDiff(diffStr string) {
@@ -54,7 +50,7 @@ func runSingleSTFTest(t *testing.T, filename string, content string, pvmBackend 
 		return
 	}
 
-	handleDiffs(diffs)
+	HandleDiffs(diffs)
 	t.Errorf("❌ [%s] Test failed: %v", filename, err)
 }
 
@@ -70,54 +66,6 @@ func parseSTFFile(filename, content string) (StateTransition, error) {
 		err = json.Unmarshal([]byte(content), &stf)
 	}
 	return stf, err
-}
-
-func handleDiffs(diffs map[string]DiffState) {
-	keys := make([]string, 0, len(diffs))
-	for k := range diffs {
-		keys = append(keys, k)
-	}
-	SortDiffKeys(keys)
-
-	fmt.Printf("Diff on %d keys: %v\n", len(keys), keys)
-	for _, key := range keys {
-		val := diffs[key]
-
-		stateType := "unknown"
-		if m := strings.TrimSuffix(val.ActualMeta, "|"); m != "" {
-			stateType = m
-		} else {
-			keyFirstByte := common.FromHex(key)[0]
-			if tmp, ok := StateKeyMap[keyFirstByte]; ok {
-				stateType = tmp
-			}
-		}
-
-		fmt.Println(strings.Repeat("=", 40))
-		fmt.Printf("\033[34mState Key: %s (%s)\033[0m\n", stateType, key)
-		fmt.Printf("%-10s | PreState : 0x%x\n", stateType, val.Prestate)
-		printHexDiff(stateType, val.ExpectedPostState, val.ActualPostState)
-
-		if stateType != "unknown" {
-			expJSON, _ := StateDecodeToJson(val.ExpectedPostState, stateType)
-			actJSON, _ := StateDecodeToJson(val.ActualPostState, stateType)
-
-			differ := gojsondiff.New()
-			delta, err := differ.Compare([]byte(expJSON), []byte(actJSON))
-			if err == nil && delta.Modified() {
-				var leftObj, rightObj interface{}
-				_ = json.Unmarshal([]byte(expJSON), &leftObj)
-				_ = json.Unmarshal([]byte(actJSON), &rightObj)
-
-				cfg := formatter.AsciiFormatterConfig{ShowArrayIndex: true, Coloring: true}
-				asciiFmt := formatter.NewAsciiFormatter(leftObj, cfg)
-				asciiDiff, _ := asciiFmt.Format(delta)
-				fmt.Println(asciiDiff)
-			}
-			fmt.Printf("------ %s JSON DONE ------\n", stateType)
-		}
-		fmt.Println(strings.Repeat("=", 40))
-	}
 }
 
 func TestStateTransitionNoSandbox(t *testing.T) {
@@ -203,7 +151,8 @@ func TestPVMstepJsonDiff(t *testing.T) {
 }
 
 func TestTraces(t *testing.T) {
-	dir := "../jamtestvectors/traces/reports-l1"
+	//dir := "../jamtestvectors/traces/reports-l1"
+	dir := "../cmd/importblocks/rawdata/safrole/state_transitions/"
 	log.InitLogger("info")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -223,7 +172,7 @@ func TestTraces(t *testing.T) {
 
 		// ensure inner test failure bubbles up
 		t.Run(e.Name(), func(t *testing.T) {
-			runSingleSTFTest(t, filename, string(content), pvm.BackendRecompilerSandbox)
+			runSingleSTFTest(t, filename, string(content), pvm.BackendRecompiler)
 		})
 	}
 }
