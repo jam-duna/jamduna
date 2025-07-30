@@ -7,7 +7,7 @@ build: static_target_linux static_target_mac
 dynamic_build:
 	@echo "Building dynamic duna_fuzzer for current platform..."
 	@GOOS=$(shell go env GOOS) GOARCH=$(shell go env GOARCH) \
-	go build -tags="cgo,$(NETWORK)" -o $(BINARY_NAME) .
+	go build -tags="cgo,$(NETWORK)" -o $(BINARY_NAME)_dynamic .
 
 static_target_linux:
 	@echo "Building static $(BINARY_NAME) for Linux (amd64)..."

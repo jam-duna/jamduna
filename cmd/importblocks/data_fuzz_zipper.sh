@@ -43,8 +43,8 @@ if [ -d "${FUZZED_DATA_DIR}" ]; then
             fuzzName=$(basename "$f")
             if [ -d "${DATA_TEMP}/${fuzzName}" ]; then
                 echo "Merging fuzzed data from $fuzzName into ${DATA_TEMP}/${fuzzName}/state_transitions_fuzzed..."
-                mkdir -p "${DATA_TEMP}/${fuzzName}/state_transitions_fuzzed"
-                cp -r "$f"/* "${DATA_TEMP}/${fuzzName}/state_transitions_fuzzed/"
+                #mkdir -p "${DATA_TEMP}/${fuzzName}/state_transitions_fuzzed"
+                #cp -r "$f"/* "${DATA_TEMP}/${fuzzName}/state_transitions_fuzzed/"
             else
                 echo "No matching directory for fuzzed data: $fuzzName in ${DATA_TEMP}. Skipping."
             fi

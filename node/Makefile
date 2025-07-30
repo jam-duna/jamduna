@@ -3,6 +3,7 @@ TAGS               ?= tiny
 MEG_L              ?= 911
 MEG_S              ?= 911
 TargetN            ?= 10
+TargetAlgoShort    ?= 39
 JCE_MANUAL         ?= true
 JAM_NODE           ?= true
 JAM_LOCAL_CLIENT   ?= false
@@ -35,6 +36,13 @@ algo :
 	@echo "go test -timeout $(TIMEOUT) -v -run '^TestAlgo$$' -tags \"network_test,$(TAGS)\" $(TARGET_PARAM) -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)"
 	@go test -timeout $(TIMEOUT) -v -run '^TestAlgo$$' \
 	  -tags "network_test,$(TAGS)" $(TARGET_PARAM) \
+	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)
+
+algo_short :
+	@echo "Running TestAlgo$(if $(filter -1,$(TargetAlgoShort)),, with targetAlgoShort=$(TargetAlgoShort)) and timeout $(TIMEOUT) in $(PVM_BACKEND) mode..."
+	@echo "go test -timeout $(TIMEOUT) -v -run '^TestAlgo$$' -tags \"network_test,$(TAGS)\" -targetN=$(TargetAlgoShort) -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)"
+	@go test -timeout $(TIMEOUT) -v -run '^TestAlgo$$' \
+	  -tags "network_test,$(TAGS)" -targetN=$(TargetAlgoShort) \
 	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)
 
 doom :

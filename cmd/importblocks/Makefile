@@ -17,7 +17,7 @@ all: build
 dynamic_build:
 	@echo "Building dynamic duna_fuzzer for current platform..."
 	@GOOS=$(shell go env GOOS) GOARCH=$(shell go env GOARCH) \
-	go build -tags="cgo,$(NETWORK)" -o $(BINARY_NAME) .
+	go build -tags="cgo,$(NETWORK)" -o $(BINARY_NAME)_dynamic .
 
 build: static_fuzzer_linux static_fuzzer_mac
 

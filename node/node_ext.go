@@ -76,7 +76,7 @@ func NewManualJCEManager(nodes []*Node, initialValue uint32) *ManualJCEManager {
 		CompleteIndices:          []int{},
 		refineUpdatesChan:        make(chan []byte, 1),
 		accumulationUpdatesChan:  make(chan []byte, 1),
-		currentRefineState:       nil,
+		currentRefineState:       statedb.RecentBlocks{},
 		currentAccumulationState: [types.EpochLength]types.AccumulationHistory{},
 	}
 }
@@ -203,7 +203,7 @@ func (m *ManualJCEManager) CheckReq() bool {
 		}
 	}
 
-	if len(m.currentRefineState) == 0 {
+	if len(m.currentRefineState.B_H) == 0 {
 
 		//fmt.Println("CheckReq Error: WPQueue non-empty, but currentRefineState is nil/empty. Cannot check requirements.")
 
@@ -238,8 +238,8 @@ func (m *ManualJCEManager) CheckReq() bool {
 	//fmt.Printf("CheckReq: Need to find %d unique WP(s) from WPQueue: %v\n", initialRequiredCount, m.WPQueue)
 
 	refine_found_in_beta := make(map[common.Hash]struct{})
-	for i := len(m.currentRefineState) - 1; i >= 0; i-- {
-		beta := m.currentRefineState[i]
+	for i := len(m.currentRefineState.B_H) - 1; i >= 0; i-- {
+		beta := m.currentRefineState.B_H[i]
 		for coreIdx, segmentRootInfo := range beta.Reported {
 			wpHash := segmentRootInfo.WorkPackageHash
 			if _, needed := refine_pending[wpHash]; needed {

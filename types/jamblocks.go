@@ -7,6 +7,7 @@ import (
 type ConfigJamBlocks struct {
 	Mode        string
 	HTTP        string
+	Socket      string
 	QUIC        string
 	Verbose     bool
 	NumBlocks   int
@@ -14,6 +15,8 @@ type ConfigJamBlocks struct {
 	Statistics  int
 	Endpoint    string
 	Network     string
+	PVMBackend  string
+	Seed        string
 }
 
 func (c ConfigJamBlocks) MarshalJSON() ([]byte, error) {

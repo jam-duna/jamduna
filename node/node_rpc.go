@@ -234,7 +234,7 @@ func (j *Jam) BeefyRoot(req []string, res *string) error {
 		return fmt.Errorf("state not found for header hash %s", headerHash.String())
 	}
 
-	recentBlocks := sdb.JamState.Snapshot(&statedb.StateSnapshotRaw{}, nil).RecentBlocks
+	recentBlocks := sdb.JamState.Snapshot(&statedb.StateSnapshotRaw{}, nil).RecentBlocks.B_H
 	if len(recentBlocks) > 0 {
 		*res = recentBlocks[len(recentBlocks)-1].String()
 		return nil
@@ -372,12 +372,12 @@ func (n *NodeContent) getRefineContext(prereqs ...common.Hash) types.RefineConte
 	stateRoot := common.Hash{}
 	beefyRoot := common.Hash{}
 	s := n.statedb
-	if len(s.JamState.RecentBlocks) > finalityApproxConst {
-		idx := len(s.JamState.RecentBlocks) - finalityApproxConst
-		anchorBlock := s.JamState.RecentBlocks[idx]
-		anchor = anchorBlock.HeaderHash          // header hash a must be in s.JamState.RecentBlocks
-		stateRoot = anchorBlock.StateRoot        // state root s must be in s.JamState.RecentBlocks
-		beefyRoot = *(anchorBlock.B.SuperPeak()) // beefy root b must be in s.JamState.RecentBlocks
+	if len(s.JamState.RecentBlocks.B_H) > finalityApproxConst {
+		idx := len(s.JamState.RecentBlocks.B_H) - finalityApproxConst
+		anchorBlock := s.JamState.RecentBlocks.B_H[idx]
+		anchor = anchorBlock.HeaderHash   // header hash a must be in s.JamState.RecentBlocks
+		stateRoot = anchorBlock.StateRoot // state root s must be in s.JamState.RecentBlocks
+		beefyRoot = anchorBlock.B         // beefy root b must be in s.JamState.RecentBlocks
 	}
 	sb, err := n.GetBlockByHeaderHash(anchor)
 	if err != nil {

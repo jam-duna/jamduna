@@ -72,7 +72,8 @@ func TestStateTransitionNoSandbox(t *testing.T) {
 	pvm.PvmLogging = true
 	pvm.PvmTrace = true   // enable PVM trace for this test
 	pvm.VMsCompare = true // enable VM comparison for this test
-	filename := "./00000019.json"
+	filename := "../jamtestvectors/traces/javajam/3017116.json"
+	//filename := "../jamtestvectors/traces/javajam/3017117.json"
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
@@ -151,8 +152,8 @@ func TestPVMstepJsonDiff(t *testing.T) {
 }
 
 func TestTraces(t *testing.T) {
-	//dir := "../jamtestvectors/traces/reports-l1"
-	dir := "../cmd/importblocks/rawdata/safrole/state_transitions/"
+	dir := "../jamtestvectors/traces/javajam"
+	//dir := "../cmd/importblocks/rawdata/safrole/state_transitions/"
 	log.InitLogger("info")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -170,9 +171,10 @@ func TestTraces(t *testing.T) {
 			continue
 		}
 
+		fmt.Printf("Running test for file: %s\n", filename)
 		// ensure inner test failure bubbles up
 		t.Run(e.Name(), func(t *testing.T) {
-			runSingleSTFTest(t, filename, string(content), pvm.BackendRecompiler)
+			runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter)
 		})
 	}
 }

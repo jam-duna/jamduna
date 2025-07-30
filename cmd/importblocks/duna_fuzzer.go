@@ -12,6 +12,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/fuzz"
 	"github.com/colorfulnotion/jam/jamerrors"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -109,25 +110,27 @@ func main() {
 	fmt.Println("importblocks - JAM Duna Import Blocks generator")
 
 	dir := "/tmp/importBlock"
-	socket := "/tmp/jam_target.sock"
+	//socket := "/tmp/jam_target.sock"
 	enableRPC := false
 	useUnixSocket := true
-	seedHex := "0x44554E41"
-	pvmBackend := "interpreter" // Default PVM backend
+	test_dir := "./rawdata"
 
 	jConfig := types.ConfigJamBlocks{
 		Mode:        "safrole",
 		HTTP:        "http://localhost:8088/",
+		Socket:      "/tmp/jam_target.sock",
 		QUIC:        "",
 		Verbose:     false,
 		NumBlocks:   50,
-		InvalidRate: 0.14285,
+		InvalidRate: 0,
 		Statistics:  20,
 		Network:     "tiny",
+		PVMBackend:  pvm.BackendInterpreter,
+		Seed:        "0x44554E41",
 	}
 
 	fReg := fuzz.NewFlagRegistry("importblocks")
-	fReg.RegisterFlag("seed", nil, seedHex, "Seed for random number generation (as hex)", &seedHex)
+	fReg.RegisterFlag("seed", nil, jConfig.Seed, "Seed for random number generation (as hex)", &jConfig.Seed)
 	fReg.RegisterFlag("mode", "m", jConfig.Mode, "Block generation mode", &jConfig.Mode)
 	fReg.RegisterFlag("http", "h", jConfig.HTTP, "HTTP endpoint to send blocks", &jConfig.HTTP)
 	fReg.RegisterFlag("quic", "q", jConfig.QUIC, "QUIC endpoint to send blocks", &jConfig.QUIC)
@@ -137,9 +140,10 @@ func main() {
 	fReg.RegisterFlag("invalidrate", nil, jConfig.InvalidRate, "Percentage of invalid blocks", &jConfig.InvalidRate)
 	fReg.RegisterFlag("statistics", nil, jConfig.Statistics, "Print statistics interval", &jConfig.Statistics)
 	fReg.RegisterFlag("dir", nil, dir, "Storage directory", &dir)
-	fReg.RegisterFlag("socket", nil, socket, "Path for the Unix domain socket to connect to", &socket)
+	fReg.RegisterFlag("test-dir", nil, test_dir, "Storage directory", &test_dir)
+	fReg.RegisterFlag("socket", nil, jConfig.Socket, "Path for the Unix domain socket to connect to", &jConfig.Socket)
 	fReg.RegisterFlag("use-unix-socket", nil, useUnixSocket, "Enable to use Unix domain socket for communication", &useUnixSocket)
-	fReg.RegisterFlag("pvm-backend", nil, pvmBackend, "PVM backend to use (Recompiler or Interpreter)", &pvmBackend)
+	fReg.RegisterFlag("pvm-backend", nil, jConfig.PVMBackend, "PVM backend to use (Recompiler or Interpreter)", &jConfig.PVMBackend)
 	fReg.ProcessRegistry()
 	fmt.Printf("%v\n", jConfig)
 
@@ -154,15 +158,15 @@ func main() {
 
 	validateImportBlockConfig(jConfig, useUnixSocket)
 	fuzzerInfo := fuzz.PeerInfo{
-		Name:       "jam-duna-fuzzer-v0.1",
+		Name:       "jam-duna-fuzzer-v0.2",
 		AppVersion: fuzz.Version{Major: 0, Minor: 6, Patch: 7},
 		JamVersion: fuzz.Version{Major: 0, Minor: 6, Patch: 7},
 	}
-	fuzzer, err := fuzz.NewFuzzer(dir, socket, fuzzerInfo, pvmBackend)
+	fuzzer, err := fuzz.NewFuzzer(dir, jConfig.Socket, fuzzerInfo, jConfig.PVMBackend)
 	if err != nil {
 		log.Fatalf("Failed to initialize fuzzer: %v", err)
 	}
-	seed := common.FromHex(seedHex)
+	seed := common.FromHex(jConfig.Seed)
 	fuzzer.SetSeed(seed)
 
 	if enableRPC {
@@ -178,14 +182,15 @@ func main() {
 	mode := jConfig.Mode
 
 	log.Printf("[INFO] Starting block generation: mode=%s, numBlocks=%d, dir=%s\n", mode, numBlocks, dir)
-
-	baseDir := os.Getenv("TEST_DATA_DIR")
-	if baseDir == "" {
-		baseDir = "./rawdata"
-	}
-	stfs, err := fuzz.ReadStateTransitions(baseDir, mode)
+	/*
+		baseDir := os.Getenv("TEST_DATA_DIR")
+		if baseDir == "" {
+			baseDir = "./rawdata"
+		}
+	*/
+	stfs, err := fuzz.ReadStateTransitions(test_dir, mode)
 	if err != nil || len(stfs) == 0 {
-		log.Printf("No %v mode data available on BaseDir=%v. Exit!", mode, baseDir)
+		log.Printf("No %v mode data available on BaseDir=%v. Exit!", mode, test_dir)
 		return
 	}
 

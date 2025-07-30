@@ -194,7 +194,7 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 	}
 
 	// Avoid duplicating work package submissions already in RecentBlocks
-	for _, block := range s.JamState.RecentBlocks {
+	for _, block := range s.JamState.RecentBlocks.B_H {
 		if len(block.Reported) != 0 {
 			for _, segmentRootLookup := range block.Reported {
 				if segmentRootLookup.WorkPackageHash == workPackageHash {

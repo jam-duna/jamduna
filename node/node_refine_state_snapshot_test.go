@@ -348,7 +348,7 @@ func TestRefineAlgo3(t *testing.T) {
 			modified_wp := bundle_snapshot.Bundle.WorkPackage
 			modified_wp.WorkItems[1].RefineGasLimit = 4_000_000_000
 			if pickRandom {
-				algo_payload := GenerateAlgoPayload(40)
+				algo_payload := GenerateAlgoPayload(40, false)
 				modified_wp.WorkItems[1].Payload = algo_payload
 				fmt.Printf("PAYLOAD %v %s\n", algo_payload, pvmBackend)
 			} else {

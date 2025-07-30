@@ -39,7 +39,7 @@ func NewFuzzer(storageDir string, socketPath string, fuzzerInfo PeerInfo, pvmBac
 		fmt.Printf("Invalid PVM backend specified. Defaulting to Interpreter\n")
 	} else if runtime.GOOS != "linux" && strings.ToLower(pvmBackend) != pvm.BackendInterpreter {
 		pvmBackend = pvm.BackendInterpreter
-		fmt.Printf("Defaulting to Interpreter\n")
+		fmt.Printf("%v Not supported on %v Defaulting to Interpreter\n", pvmBackend, runtime.GOOS)
 	}
 
 	return &Fuzzer{

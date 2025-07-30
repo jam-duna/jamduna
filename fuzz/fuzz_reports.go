@@ -329,7 +329,7 @@ func fuzzBlockGBadStateRoot(seed []byte, block *types.Block, s *statedb.StateDB)
 
 // Package was already available in recent history.
 func fuzzBlockGDuplicatePackageRecentHistory(seed []byte, block *types.Block, s *statedb.StateDB) error {
-	RecentBlocks := s.JamState.RecentBlocks
+	RecentBlocks := s.JamState.RecentBlocks.B_H
 	if len(RecentBlocks) < 2 {
 		return nil
 	}

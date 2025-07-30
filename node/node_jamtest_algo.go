@@ -16,6 +16,7 @@ import (
 
 func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 
+	isSimple := targetN == 39
 	service0 := testServices["algo"]
 	serviceAuth := testServices["auth_copy"]
 	algo_serviceIdx := service0.ServiceCode
@@ -34,8 +35,7 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 
 	for algoN := 0; algoN < targetN; algoN++ {
 		imported := []types.ImportSegment{}
-		algo_payload := GenerateAlgoPayload(40) //compiler only
-		// algo_payload := GenerateAlgoPayload(0) // to generate a clean "do all 170" interpreter
+		algo_payload := GenerateAlgoPayload(algoN, isSimple)
 
 		auth_payload := make([]byte, 4)
 		binary.LittleEndian.PutUint32(auth_payload, uint32(auth_serviceIdx))

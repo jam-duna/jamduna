@@ -23,7 +23,7 @@ func (n *NodeContent) LoadService(service_name string) ([]byte, error) {
 }
 
 func IsWorkPackageInHistory(latestdb *statedb.StateDB, workPackageHash common.Hash) bool {
-	for _, block := range latestdb.JamState.RecentBlocks {
+	for _, block := range latestdb.JamState.RecentBlocks.B_H {
 		if len(block.Reported) != 0 {
 			for _, segmentRootLookup := range block.Reported {
 				if segmentRootLookup.WorkPackageHash == workPackageHash {

@@ -42,7 +42,7 @@ type HOutput struct{}
 func HistorySTF(input HInput, s HState) (poststate HState) {
 	// Eq 83 n
 	// Eq 83 n.p -- aggregate all the workpackagehashes of the guarantees
-	preRecentBlocks := s.RecentBlocks
+	preRecentBlocks := s.RecentBlocks.B_H
 	if len(preRecentBlocks) > 0 {
 		preRecentBlocks[len(preRecentBlocks)-1].StateRoot = input.ParentStateRoot
 	}
@@ -50,7 +50,7 @@ func HistorySTF(input HInput, s HState) (poststate HState) {
 	// Eq 83 n.b
 	mmr := trie.NewMMR()
 	if len(preRecentBlocks) > 0 {
-		mmr.Peaks = preRecentBlocks[len(preRecentBlocks)-1].B.Peaks
+		mmr.Peaks = s.RecentBlocks.B_B.Peaks
 	}
 	mmr.Append(&(input.AccumulateRoot))
 
@@ -65,7 +65,7 @@ func HistorySTF(input HInput, s HState) (poststate HState) {
 	n := Beta_state{
 		Reported:   reported,         // p
 		HeaderHash: input.HeaderHash, // h
-		B:          *mmr,             // b
+		B:          *mmr.SuperPeak(), // b
 		StateRoot:  common.Hash{},    // this is the POSTERIOR stateroot
 	}
 
@@ -74,7 +74,9 @@ func HistorySTF(input HInput, s HState) (poststate HState) {
 	if len(postRecentBlocks) > types.RecentHistorySize {
 		postRecentBlocks = postRecentBlocks[1 : types.RecentHistorySize+1]
 	}
-	poststate.RecentBlocks = postRecentBlocks
+
+	poststate.RecentBlocks.B_H = postRecentBlocks
+	poststate.RecentBlocks.B_B = *mmr
 	return
 }
 
@@ -99,18 +101,18 @@ func TestRecentHistory(t *testing.T) {
 			}
 			expectedh := h.PostState
 			posth := HistorySTF(h.Input, h.PreState)
-			if len(expectedh.RecentBlocks) != len(posth.RecentBlocks) {
+			if len(expectedh.RecentBlocks.B_H) != len(posth.RecentBlocks.B_H) {
 				fmt.Printf("Test %s FAIL\n", jsonFile)
 			}
-			for i := 0; i < len(posth.RecentBlocks); i++ {
-				e := expectedh.RecentBlocks[i].String()
-				p := posth.RecentBlocks[i].String()
+			for i := 0; i < len(posth.RecentBlocks.B_H); i++ {
+				e := expectedh.RecentBlocks.B_H[i].String()
+				p := posth.RecentBlocks.B_H[i].String()
 				if e == p {
 					fmt.Printf("Test %d %s PASS\n", i, jsonFile)
 				} else {
-					fmt.Printf("Test %d: element %d/%d expected %s got: %s\n", testnum, i, len(posth.RecentBlocks), e, p)
+					fmt.Printf("Test %d: element %d/%d expected %s got: %s\n", testnum, i, len(posth.RecentBlocks.B_H), e, p)
 				}
-
+				// todo MMR peaks comparison
 			}
 
 		})

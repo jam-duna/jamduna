@@ -35,6 +35,7 @@ func (n *JamState) GetRecentBlocksBytes() []byte {
 	if err != nil {
 		return []byte{}
 	}
+	//fmt.Printf("GetRecentBlocksBytes called with %v, encoding is: %x\n",n.RecentBlocks, codec_bytes)
 	return codec_bytes
 }
 

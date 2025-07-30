@@ -877,7 +877,7 @@ func (s *SafroleState) ApplyStateTransitionTickets(ctx context.Context, tickets 
 
 	ticketBodies, err := s.ValidateSaforle(tickets, targetJCE, header, validated_tickets)
 	if err != nil {
-		fmt.Printf("ApplyStateTransitionTickets ValidateSafrole len(E_T)=%d | len(validated_tickets)=%d. Err=%v", len(tickets), len(validated_tickets), err)
+		//fmt.Printf("ApplyStateTransitionTickets ValidateSafrole len(E_T)=%d | len(validated_tickets)=%d. Err=%v", len(tickets), len(validated_tickets), err)
 		return *s, err
 	}
 

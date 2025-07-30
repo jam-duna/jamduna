@@ -145,7 +145,7 @@ func ReadStateTransitions(baseDir, dir string) (stfs []*statedb.StateTransition,
 			isJSON := strings.HasSuffix(file.Name(), ".json")
 			isBin := strings.HasSuffix(file.Name(), ".bin")
 			if useJSON && isJSON {
-				fmt.Printf("Reading JSON file: %s\n", stPath)
+				//fmt.Printf("Reading JSON file: %s\n", stPath)
 				stf, err := ReadStateTransition(stPath)
 				if err != nil {
 					log.Printf("Error reading state transition file %s: %v\n", file.Name(), err)

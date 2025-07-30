@@ -300,8 +300,8 @@ func (s *StateDB) checkRecentBlock(g types.Guarantee) error {
 	stateroot := false
 	beefyroot := false
 	// goes backwards, short-circuits each of above 3 conditions
-	for i := len(s.JamState.RecentBlocks) - 1; i >= 0; i-- {
-		block := s.JamState.RecentBlocks[i]
+	for i := len(s.JamState.RecentBlocks.B_H) - 1; i >= 0; i-- {
+		block := s.JamState.RecentBlocks.B_H[i]
 
 		if !anchor && block.HeaderHash == refine.Anchor {
 			anchor = true
@@ -310,8 +310,8 @@ func (s *StateDB) checkRecentBlock(g types.Guarantee) error {
 			stateroot = true
 		}
 		if !beefyroot {
-			superPeak := block.B.SuperPeak()
-			if *superPeak == refine.BeefyRoot {
+			superPeak := block.B
+			if superPeak == refine.BeefyRoot {
 				beefyroot = true
 			}
 		}
@@ -396,7 +396,7 @@ func (s *StateDB) checkAnyPrereq(g types.Guarantee) error {
 	// 	fmt.Printf("invalid prerequisite work package(from queue), core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
 	// 	return jamerrors.ErrGDuplicatePackageRecentHistory
 	// }
-	for _, block := range s.JamState.RecentBlocks {
+	for _, block := range s.JamState.RecentBlocks.B_H {
 		if len(block.Reported) != 0 {
 			for _, segmentRootLookup := range block.Reported {
 				if segmentRootLookup.WorkPackageHash == workPackageHash {
@@ -458,7 +458,7 @@ func (s *StateDB) checkPrereq(g types.Guarantee, EGs []types.Guarantee) error {
 	}
 
 	// check if we only get her after accumulate..
-	for _, block := range s.JamState.RecentBlocks {
+	for _, block := range s.JamState.RecentBlocks.B_H {
 		for _, segmentRootLookup := range block.Reported {
 			prereqSet[segmentRootLookup.WorkPackageHash] = true
 		}
@@ -493,7 +493,7 @@ func (s *StateDB) checkPrereq(g types.Guarantee, EGs []types.Guarantee) error {
 // v0.5 eq 11.39
 func getPresentBlock(s *StateDB) types.SegmentRootLookup {
 	p := types.SegmentRootLookup{}
-	for _, block := range s.JamState.RecentBlocks {
+	for _, block := range s.JamState.RecentBlocks.B_H {
 		for _, lookupItem := range block.Reported {
 			tmeItem := types.SegmentRootLookupItem(lookupItem)
 			p = append(p, tmeItem)
@@ -510,7 +510,7 @@ func (s *StateDB) checkRecentWorkPackage(g types.Guarantee, egs []types.Guarante
 		return nil
 	}
 
-	if len(s.JamState.RecentBlocks) == 0 {
+	if len(s.JamState.RecentBlocks.B_H) == 0 {
 		return nil
 	}
 	// Combine the present block and the recent blocks

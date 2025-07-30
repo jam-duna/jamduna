@@ -1086,7 +1086,7 @@ func (n *Node) SubmitAndWaitForWorkPackage(ctx context.Context, wp *WorkPackageR
 		case <-ctx.Done():
 			return workPackageHash, ctx.Err()
 		case <-ticker.C:
-			recentBlocks := n.statedb.JamState.RecentBlocks
+			recentBlocks := n.statedb.JamState.RecentBlocks.B_H
 			accumulationHistory := n.statedb.JamState.AccumulationHistory
 
 			if jceManager != nil {
