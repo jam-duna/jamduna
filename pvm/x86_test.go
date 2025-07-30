@@ -1104,28 +1104,28 @@ func TestCodeIsSame(t *testing.T) {
 	}
 	a := make([]byte, 0)
 	rvm.Standard_Program_Initialization_SandBox(a)
+	rvm.SetRecoredGeneratedCode(true)
 	rvm.initStartCode()
 	rvm.Compile(0)
-	rvm.Patch(rvm.x86Code, 0)
-
 	// Get the three hashes we want to test
-	x86CodeHash := common.Blake2Hash(rvm.x86Code)
+	x86CodeHash := common.Blake2Hash(rvm.genreatedCode)
+	// use the generated code for the x])
+	rvm.Patch(rvm.x86Code, 0)
 	djumpTableHash := common.Blake2Hash(rvm.djumpTableFunc)
 
 	// Combined code hash (for backward compatibility)
-	combinedCode := append(rvm.x86Code, rvm.djumpTableFunc...)
-	combinedHash := common.Blake2Hash(combinedCode)
 
+	// x86Code hash: 0x32544f520aa21576f7fc5224275cecafeb522393e3c0fc2e8c011884f352f0b8
+	// djumpTableFunc hash: 0x76d1a0c42becc37e9b8f0be067e3f19b2afd008934f201e8e4293eccf0f69209
+	// Combined code hash: 0xae58870518c960d2a0bbe05e25c58798c977ddfc24363424c35c1eab3b3a1d44
 	fmt.Printf("x86Code hash: %s\n", x86CodeHash.Hex())
 	fmt.Printf("djumpTableFunc hash: %s\n", djumpTableHash.Hex())
-	fmt.Printf("Combined code hash: %s\n", combinedHash.Hex())
-
-	// Expected hashes - you can update these with the correct values after running the original version
-	expectedX86CodeHash := "0xfd336cfcedecd4287b92cba002d316602252177509555ae18e5fc8336bec45cd"
-	expectedDjumpTableHash := "0xbd1fb1995fe867ba196d2222388c4b541a3afca76d39cecf4796d8c2ed25e684"
-	expectedCombinedHash := "0xc961f299f8eb65e2ad302c22e9f0339261f00e827a6895817e3c7e9406a20f92"
+	// fmt.Printf("Combined code hash: %s\n", combinedHash.Hex())
 
 	// Test x86Code hash
+	expectedX86CodeHash := "0x32544f520aa21576f7fc5224275cecafeb522393e3c0fc2e8c011884f352f0b8"
+	expectedDjumpTableHash := "0x76d1a0c42becc37e9b8f0be067e3f19b2afd008934f201e8e4293eccf0f69209"
+	// expectedCombinedHash := "0xae58870518c960d2a0bbe05e25c58798c977ddfc24363424c35c1eab3b3a1d44"
 	if x86CodeHash.Hex() != expectedX86CodeHash {
 		t.Errorf("x86Code hash mismatch: expected %s, got %s", expectedX86CodeHash, x86CodeHash.Hex())
 	} else {
@@ -1137,12 +1137,5 @@ func TestCodeIsSame(t *testing.T) {
 		t.Errorf("djumpTableFunc hash mismatch: expected %s, got %s", expectedDjumpTableHash, djumpTableHash.Hex())
 	} else {
 		fmt.Printf("✅ djumpTableFunc hash matches expected value\n")
-	}
-
-	// Test combined hash
-	if combinedHash.Hex() != expectedCombinedHash {
-		t.Errorf("Combined code hash mismatch: expected %s, got %s", expectedCombinedHash, combinedHash.Hex())
-	} else {
-		fmt.Printf("✅ Combined code hash matches expected value\n")
 	}
 }

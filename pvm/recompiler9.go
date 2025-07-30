@@ -4,76 +4,55 @@ package pvm
 
 func generateMoveReg(inst Instruction) []byte {
 	dstIdx, srcIdx := extractTwoRegisters(inst.Args)
-	dst := regInfoList[dstIdx]
-	src := regInfoList[srcIdx]
-	return emitMovRegToReg64(dst, src)
+	return emitMovRegToReg64(regInfoList[dstIdx], regInfoList[srcIdx])
 }
 
 func generateBitCount64(inst Instruction) []byte {
-	dstReg, srcReg := extractTwoRegisters(inst.Args)
-	dst := regInfoList[dstReg]
-	src := regInfoList[srcReg]
-	return emitPopCnt64(dst, src)
+	dstIdx, srcIdx := extractTwoRegisters(inst.Args)
+	return emitPopCnt64(regInfoList[dstIdx], regInfoList[srcIdx])
 }
 
 func generateBitCount32(inst Instruction) []byte {
-	dstReg, srcReg := extractTwoRegisters(inst.Args)
-	dst := regInfoList[dstReg]
-	src := regInfoList[srcReg]
-	return emitPopCnt32(dst, src)
+	dstIdx, srcIdx := extractTwoRegisters(inst.Args)
+	return emitPopCnt32(regInfoList[dstIdx], regInfoList[srcIdx])
 }
 
 func generateLeadingZeros64(inst Instruction) []byte {
 	dstIdx, srcIdx := extractTwoRegisters(inst.Args)
-	dst := regInfoList[dstIdx]
-	src := regInfoList[srcIdx]
-	return emitLzcnt64(dst, src)
+	return emitLzcnt64(regInfoList[dstIdx], regInfoList[srcIdx])
 }
 
 func generateLeadingZeros32(inst Instruction) []byte {
 	dstIdx, srcIdx := extractTwoRegisters(inst.Args)
-	dst := regInfoList[dstIdx]
-	src := regInfoList[srcIdx]
-	return emitLzcnt32(dst, src)
+	return emitLzcnt32(regInfoList[dstIdx], regInfoList[srcIdx])
 }
 
 func generateTrailingZeros32(inst Instruction) []byte {
 	dstIdx, srcIdx := extractTwoRegisters(inst.Args)
-	dst := regInfoList[dstIdx]
-	src := regInfoList[srcIdx]
-	return emitTzcnt32(dst, src)
+	return emitTzcnt32(regInfoList[dstIdx], regInfoList[srcIdx])
 }
 
 func generateTrailingZeros64(inst Instruction) []byte {
-	dstReg, srcReg := extractTwoRegisters(inst.Args)
-	dst := regInfoList[dstReg]
-	src := regInfoList[srcReg]
-	return emitTzcnt64(dst, src)
+	dstIdx, srcIdx := extractTwoRegisters(inst.Args)
+	return emitTzcnt64(regInfoList[dstIdx], regInfoList[srcIdx])
 }
 
 func generateSignExtend8(inst Instruction) []byte {
-	dstReg, srcReg := extractTwoRegisters(inst.Args)
-	dst := regInfoList[dstReg]
-	src := regInfoList[srcReg]
-	return emitMovsx64From8(dst, src)
+	dstIdx, srcIdx := extractTwoRegisters(inst.Args)
+	return emitMovsx64From8(regInfoList[dstIdx], regInfoList[srcIdx])
 }
 
 func generateSignExtend16(inst Instruction) []byte {
-	dstReg, srcReg := extractTwoRegisters(inst.Args)
-	dst := regInfoList[dstReg]
-	src := regInfoList[srcReg]
-	return emitMovsx64From16(dst, src)
+	dstIdx, srcIdx := extractTwoRegisters(inst.Args)
+	return emitMovsx64From16(regInfoList[dstIdx], regInfoList[srcIdx])
 }
 
 func generateZeroExtend16(inst Instruction) []byte {
-	dstReg, srcReg := extractTwoRegisters(inst.Args)
-	dst := regInfoList[dstReg]
-	src := regInfoList[srcReg]
-	return emitMovzx64From16(dst, src)
+	dstIdx, srcIdx := extractTwoRegisters(inst.Args)
+	return emitMovzx64From16(regInfoList[dstIdx], regInfoList[srcIdx])
 }
 
 func generateReverseBytes64(inst Instruction) []byte {
-	dstReg, _ := extractTwoRegisters(inst.Args)
-	dst := regInfoList[dstReg]
-	return emitBswap64(dst)
+	dstIdx, _ := extractTwoRegisters(inst.Args)
+	return emitBswap64(regInfoList[dstIdx])
 }

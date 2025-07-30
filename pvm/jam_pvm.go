@@ -56,10 +56,9 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 		vm.Standard_Program_Initialization(a) // eq 264/265
 		vm.standardInitTime = common.Elapsed(startTime)
 		startTime = time.Now()
-		vm.Execute(types.EntryPointRefine, false, nil)
+		vm.Execute(types.EntryPointRefine, false)
 		vm.executionTime = common.Elapsed(startTime)
 	case BackendRecompilerSandbox:
-
 		rvm, err := NewRecompilerSandboxVM(vm)
 		if err != nil {
 			log.Error(vm.logging, "RecompilerVM creation failed", "error", err)
@@ -161,8 +160,8 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	vm.ServiceAccount = x_s
 	switch vm.Backend {
 	case BackendInterpreter:
-		vm.Standard_Program_Initialization(input_bytes)    // eq 264/265
-		vm.Execute(types.EntryPointAccumulate, false, nil) // F ∈ Ω⟨(X, X)⟩
+		vm.Standard_Program_Initialization(input_bytes) // eq 264/265
+		vm.Execute(types.EntryPointAccumulate, false)   // F ∈ Ω⟨(X, X)⟩
 	case BackendRecompilerSandbox:
 		rvm, err := NewRecompilerSandboxVM(vm)
 		if err != nil {
@@ -202,7 +201,7 @@ func (vm *VM) serviceIDlog() string {
 }
 
 func (vm *VM) initLogs() {
-	if skipSaveLog {
+	if true {
 		return
 	}
 
@@ -223,7 +222,7 @@ func (vm *VM) initLogs() {
 
 // write the vm.Log  (appending only)
 func (vm *VM) saveLogs() {
-	if skipSaveLog {
+	if true {
 		return
 	}
 
@@ -263,7 +262,7 @@ func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAc
 	switch vm.Backend {
 	case BackendInterpreter:
 		vm.Standard_Program_Initialization(arguments) // eq 264/265
-		vm.Execute(types.EntryPointOnTransfer, false, nil)
+		vm.Execute(types.EntryPointOnTransfer, false)
 	case BackendRecompilerSandbox:
 		rvm, err := NewRecompilerSandboxVM(vm)
 		if err != nil {
@@ -305,7 +304,7 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Resul
 	switch vm.Backend {
 	case BackendInterpreter:
 		vm.Standard_Program_Initialization(a) // eq 264/265
-		vm.Execute(types.EntryPointAuthorization, false, nil)
+		vm.Execute(types.EntryPointAuthorization, false)
 	case BackendRecompilerSandbox:
 		rvm, err := NewRecompilerSandboxVM(vm)
 		if err != nil {

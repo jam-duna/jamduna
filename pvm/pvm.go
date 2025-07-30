@@ -6,14 +6,15 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
-	"os"
+
 	"sort"
 	"strings"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
-	uc "github.com/unicorn-engine/unicorn/bindings/go/unicorn"
+
+	//	uc "github.com/unicorn-engine/unicorn/bindings/go/unicorn"
 	"golang.org/x/example/hello/reverse" // go get golang.org/x/example/hello/reverse
 )
 
@@ -41,6 +42,11 @@ var (
 	PvmLogging = false
 	PvmTrace   = false
 	useRawRam  = false
+
+	showDisassembly = false
+	useEcalli500    = false
+	debugRecompiler = false
+	UseTally        = false
 )
 
 type VM struct {
@@ -119,7 +125,7 @@ type VM struct {
 	BasicBlocks map[uint64]BasicBlock
 	Logs        VMLogs
 
-	snapshot *EmulatorSnapShot
+	//	snapshot *EmulatorSnapShot
 
 	basicBlocks map[uint64]*BasicBlock // by PVM PC
 
@@ -413,7 +419,7 @@ func NewVMFromCode(serviceIndex uint32, code []byte, i uint64, hostENV types.Hos
 }
 
 // Execute runs the program until it terminates
-func (vm *VM) Execute(entryPoint int, is_child bool, snapshot *EmulatorSnapShot) error {
+func (vm *VM) Execute(entryPoint int, is_child bool) error {
 	vm.terminated = false
 
 	// A.2 deblob
@@ -438,7 +444,7 @@ func (vm *VM) Execute(entryPoint int, is_child bool, snapshot *EmulatorSnapShot)
 		return errors.New("failed to decode bitmask")
 	}
 	vm.pc = uint64(entryPoint)
-	if snapshot != nil {
+	/*	if snapshot != nil {
 		// Load snapshot InitialRegs + InitialMemory
 		for i, v := range snapshot.InitialRegs {
 			vm.Ram.WriteRegister(i, v)
@@ -457,7 +463,7 @@ func (vm *VM) Execute(entryPoint int, is_child bool, snapshot *EmulatorSnapShot)
 		// a := make([]byte, 0)
 		// vm.Standard_Program_Initialization(a)
 
-	}
+	} */
 
 	stepn := 1
 	for !vm.terminated {
@@ -1810,38 +1816,39 @@ func (vm *VM) GetMemory() (map[int][]byte, map[int]int) {
 	return memory, pageMap
 }
 
-func (vm *VM) TakeSnapShot(name string, pc uint32, registers []uint64, gas uint64, failAddress uint64, BaseRegValue uint64, basicBlockNumber uint64) *EmulatorSnapShot {
-	memory, pagemap := vm.GetMemory()
-	snapshot := &EmulatorSnapShot{
-		Name:             name,
-		InitialRegs:      registers,
-		InitialPC:        pc,
-		FailAddress:      failAddress,
-		InitialPageMap:   pagemap,
-		InitialMemory:    memory,
-		InitialGas:       gas,
-		Code:             make([]byte, 0), // regenerated anyway
-		BaseRegValue:     BaseRegValue,
-		BasicBlockNumber: basicBlockNumber,
-	}
-	return snapshot
-}
-
-func (vm *VM) SaveSnapShot(snapshot *EmulatorSnapShot) error {
-	filePath := fmt.Sprintf("%s/BB%d.json", vm.Backend, snapshot.BasicBlockNumber)
-	data, err := json.MarshalIndent(snapshot, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal snapshot: %w", err)
+/*
+	func (vm *VM) TakeSnapShot(name string, pc uint32, registers []uint64, gas uint64, failAddress uint64, BaseRegValue uint64, basicBlockNumber uint64) *EmulatorSnapShot {
+		memory, pagemap := vm.GetMemory()
+		snapshot := &EmulatorSnapShot{
+			Name:             name,
+			InitialRegs:      registers,
+			InitialPC:        pc,
+			FailAddress:      failAddress,
+			InitialPageMap:   pagemap,
+			InitialMemory:    memory,
+			InitialGas:       gas,
+			Code:             make([]byte, 0), // regenerated anyway
+			BaseRegValue:     BaseRegValue,
+			BasicBlockNumber: basicBlockNumber,
+		}
+		return snapshot
 	}
 
-	err = os.WriteFile(filePath, data, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to write snapshot to file %s: %w", filePath, err)
-	}
-	fmt.Printf("Snapshot %s saved [PC: %d, BasicBlock: %d, Gas: %d Registers: %v]\n", filePath, snapshot.InitialPC, snapshot.BasicBlockNumber, snapshot.InitialGas, snapshot.InitialRegs)
-	return nil
-}
+	func (vm *VM) SaveSnapShot(snapshot *EmulatorSnapShot) error {
+		filePath := fmt.Sprintf("%s/BB%d.json", vm.Backend, snapshot.BasicBlockNumber)
+		data, err := json.MarshalIndent(snapshot, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal snapshot: %w", err)
+		}
 
+		err = os.WriteFile(filePath, data, 0644)
+		if err != nil {
+			return fmt.Errorf("failed to write snapshot to file %s: %w", filePath, err)
+		}
+		fmt.Printf("Snapshot %s saved [PC: %d, BasicBlock: %d, Gas: %d Registers: %v]\n", filePath, snapshot.InitialPC, snapshot.BasicBlockNumber, snapshot.InitialGas, snapshot.InitialRegs)
+		return nil
+	}
+*/
 func (vm *VM) LogCurrentState(opcode byte, operands []byte, currentPC uint64, gas int64) {
 	if opcode == ECALLI {
 		return
@@ -1850,21 +1857,14 @@ func (vm *VM) LogCurrentState(opcode byte, operands []byte, currentPC uint64, ga
 	if gas >= hiResGasRangeStart && gas <= hiResGasRangeEnd {
 		recordLog = true
 	}
-	if vm.snapshot != nil {
+	/*	if vm.snapshot != nil {
 		vm.snapshot.InitialPC = uint32(currentPC)
 		vm.snapshot.BasicBlockNumber = uint64(vm.vmBasicBlock)
 		vm.SaveSnapShot(vm.snapshot)
 		vm.snapshot = nil
-	}
+	} */
 
 	if IsBasicBlockInstruction(opcode) {
-		if (vm.vmBasicBlock+1)%BBSampleRate == 0 && false { // shawn to check // every __ basic blocks, take a snapshot
-			registers := vm.Ram.ReadRegisters()
-			//fmt.Printf("vmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), registers)
-			snapshot := vm.TakeSnapShot(fmt.Sprintf("BB%d", vm.vmBasicBlock), uint32(currentPC), registers, uint64(vm.Gas), 268435456, 268435456, uint64(vm.vmBasicBlock))
-			// this snapshot + memory of what was just executed, but we want the NEXT PC, not the currentPC.  The Gas is not clear
-			vm.snapshot = snapshot
-		}
 		vm.vmBasicBlock++
 		if vm.vmBasicBlock%RecordLogSampleRate == 0 { // every ___ basic blocks, record a log
 			if vm.vmBasicBlock%100000 == 0 {
@@ -1894,74 +1894,4 @@ func (vm *VM) LogCurrentState(opcode byte, operands []byte, currentPC uint64, ga
 			vm.saveLogs()
 		}
 	}
-}
-
-// same as above for now but with some snapshot extras
-func (vm *RecompilerSandboxVM) LogCurrentState(opcode byte, operands []byte, currentPC uint64, gas int64) {
-	if opcode == ECALLI {
-		return
-	}
-	recordLog := false
-	if gas >= hiResGasRangeStart && gas <= hiResGasRangeEnd {
-		recordLog = true
-	}
-
-	if vm.snapshot != nil {
-		vm.snapshot.InitialPC = uint32(currentPC)
-		vm.snapshot.BasicBlockNumber = uint64(vm.vmBasicBlock)
-		vm.SaveSnapShot(vm.snapshot)
-		vm.snapshot = nil
-	}
-
-	if IsBasicBlockInstruction(opcode) {
-		if (vm.vmBasicBlock+1)%BBSampleRate == 0 { // every __ basic blocks, take a snapshot
-			post_register := make([]uint64, len(vm.Ram.ReadRegisters()))
-			for i := range post_register {
-				post_register[i], _ = vm.sandBox.RegRead(sandBoxRegInfoList[i])
-			}
-			r12, _ := vm.sandBox.RegRead(uc.X86_REG_R12)
-			failAddress := uint64(0x1900000E0) // this should be X86PC of the current vm.pc
-
-			snapshot := vm.TakeSnapShot(fmt.Sprintf("BB%d", vm.vmBasicBlock), uint32(currentPC), post_register, uint64(vm.Gas), failAddress, r12, uint64(vm.vmBasicBlock))
-			// this snapshot + memory of what was just executed, but we want the NEXT PC, not the currentPC.  The Gas is not clear
-			vm.snapshot = snapshot
-		}
-		vm.vmBasicBlock++
-		if vm.vmBasicBlock%RecordLogSampleRate == 0 { // every __ basic blocks, record a log
-			if vm.vmBasicBlock%100000 == 0 {
-				//fmt.Printf("vmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), vm.Ram.ReadRegisters())
-			}
-
-		}
-	}
-
-	if recordLog {
-		register := make([]uint64, len(vm.Ram.ReadRegisters()))
-		for i := range vm.Ram.ReadRegisters() {
-			register[i], _ = vm.sandBox.RegRead(sandBoxRegInfoList[i])
-		}
-		log := VMLog{
-			Opcode:    opcode,
-			OpStr:     opcode_str(opcode),
-			Operands:  operands,
-			PvmPc:     currentPC,
-			Gas:       gas,
-			Registers: vm.Ram.ReadRegisters(),
-		}
-
-		if vm.post_register == nil {
-			vm.post_register = make([]uint64, regSize)
-		}
-		for i := range vm.post_register {
-			vm.post_register[i], _ = vm.sandBox.RegRead(sandBoxRegInfoList[i])
-		}
-		if vm.vmBasicBlock%10000 == 0 {
-			//		fmt.Printf("rvmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), vm.Ram.ReadRegisters())
-		}
-		vm.Logs = append(vm.Logs, log)
-		if (len(vm.Logs) > 10 && (gas < hiResGasRangeStart || gas > hiResGasRangeEnd)) || len(vm.Logs) > 1000 {
-			vm.saveLogs()
-		}
-	}
-
 }

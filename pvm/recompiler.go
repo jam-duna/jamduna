@@ -27,6 +27,7 @@ const (
 )
 
 const (
+	dumpSize   = 0x100000
 	PageSize   = 4096                   // 4 KiB
 	TotalMem   = 4 * 1024 * 1024 * 1024 // 4 GiB
 	TotalPages = TotalMem / PageSize    // 1,048,576 pages
@@ -133,7 +134,7 @@ func (vm *RecompilerVM) initStartCode() {
 	vm.startCode = append(vm.startCode, encodeMovImm64ToMem(gasRegMemAddr, uint64(vm.Gas))...)
 
 	// padding with jump to the entry point
-	vm.startCode = append(vm.startCode, 0xE9) // JMP rel32
+	vm.startCode = append(vm.startCode, X86_OP_JMP_REL32) // JMP rel32
 	// use entryPatch as a placeholder 0x99999999
 	patch := make([]byte, 4)
 	binary.LittleEndian.PutUint32(patch, entryPatch)
@@ -148,7 +149,7 @@ func (vm *RecompilerVM) initStartCode() {
 		offset := byte(i * 8)
 		exitCode = append(exitCode, encodeMovRegToMem(i, BaseRegIndex, offset)...)
 	}
-	vm.exitCode = append(exitCode, 0xC3)
+	vm.exitCode = append(exitCode, X86_OP_RET)
 }
 func (vm *RecompilerVM) GetDirtyPages() []int {
 	dirtyPages := make([]int, 0)
@@ -160,6 +161,17 @@ func (vm *RecompilerVM) GetDirtyPages() []int {
 	return dirtyPages
 }
 
+// initDJumpFunc initializes the dynamic jump table function for indirect jumps.
+// It generates x86 code that performs a series of checks and dispatches to the correct handler
+// based on the value in jumpIndTempReg (typically RCX). The generated code handles the following cases:
+//
+//  1. If jumpIndTempReg == 0xFFFF0000, return (ret_stub).
+//  2. If jumpIndTempReg == 0, trigger a panic (panic_stub).
+//  3. If jumpIndTempReg > threshold, trigger a panic (panic_stub).
+//  4. If jumpIndTempReg is odd (jumpIndTempReg % 2 != 0), trigger a panic (panic_stub).
+//
+// If all checks pass, it computes the handler address and jumps to the appropriate handler.
+// The function also patches the generated code with the correct relative offsets for jumps and handlers.
 func (vm *RecompilerVM) initDJumpFunc(x86CodeLen int) {
 	type pending struct {
 		jeOff   int
@@ -168,178 +180,169 @@ func (vm *RecompilerVM) initDJumpFunc(x86CodeLen int) {
 
 	code := make([]byte, 0)
 	var pendings []pending
+
 	// ==== Pre-checks: CMP/JE placeholders ====
 
-	// (a) jumpIndTempReg == 0xFFFF0000 → ret_stub
-	// REX prefix: 0x40 | B
-	rex := byte(0x40)
+	// (a) If jumpIndTempReg == 0xFFFF0000, jump to ret_stub
+	rex := byte(X86_REX_BASE)
 	if jumpIndTempReg.REXBit == 1 {
-		rex |= 0x01 // REX.B
+		rex |= X86_REX_B // REX.B
 	}
-	modrm := byte(0xC0 | (7 << 3) | jumpIndTempReg.RegBits)
+	modrm := byte(X86_MOD_REGISTER<<6 | (7 << 3) | jumpIndTempReg.RegBits)
 	code = append(code,
 		rex,
-		0x81, // CMP r/m32, imm32
+		X86_OP_GROUP1_RM_IMM32, // CMP r/m32, imm32
 		modrm,
 		0x00, 0x00, 0xFF, 0xFF, // 0xFFFF0000
 	)
 	offJEret := len(code)
-	code = append(code, 0x0F, 0x84, 0, 0, 0, 0)
+	code = append(code, emitJeInitDJump()...)
 
-	// (b) jumpIndTempReg == 0 → panic_stub
-	rex = 0x48
+	// (b) If jumpIndTempReg == 0, jump to panic_stub
+	rex = X86_REX_W_PREFIX
 	if jumpIndTempReg.REXBit == 1 {
-		rex |= 0x01
+		rex |= X86_REX_B
 	}
 	modrm = byte(0xF8 | jumpIndTempReg.RegBits)
-	code = append(code, rex, 0x83, modrm, 0x00)
+	code = append(code, rex, X86_OP_GROUP1_RM_IMM8, modrm, X86_IMM_0)
 	offJE0 := len(code)
-	code = append(code, 0x0F, 0x84, 0, 0, 0, 0)
+	code = append(code, emitJeInitDJump()...)
 
-	// (c) jumpIndTempReg > threshold → panic_stub
+	// (c) If jumpIndTempReg > threshold, jump to panic_stub
 	threshold := uint32(len(vm.JumpTableMap)) * uint32(Z_A)
 	var thr [4]byte
 	binary.LittleEndian.PutUint32(thr[:], threshold)
-	rex = 0x48
+	rex = X86_REX_W_PREFIX
 	if jumpIndTempReg.REXBit == 1 {
-		rex |= 0x01
+		rex |= X86_REX_B
 	}
 	modrm = byte(0xF8 | jumpIndTempReg.RegBits)
-	code = append(code, rex, 0x81, modrm)
+	code = append(code, rex, X86_OP_GROUP1_RM_IMM32, modrm)
 	code = append(code, thr[:]...)
 	offJA := len(code)
-	code = append(code, 0x0F, 0x87, 0, 0, 0, 0)
+	code = append(code, emitJaInitDJump()...)
 
-	// (d) jumpIndTempReg % 2 != 0 → panic_stub
-	rex = 0x48
+	// (d) If jumpIndTempReg is odd (jumpIndTempReg % 2 != 0), jump to panic_stub
+	rex = X86_REX_W_PREFIX
 	if jumpIndTempReg.REXBit == 1 {
-		rex |= 0x01
+		rex |= X86_REX_B
 	}
-	modrm = byte(0xC0 | jumpIndTempReg.RegBits)
-	code = append(code, rex, 0xF7, modrm, 0x01, 0, 0, 0)
+	modrm = byte(X86_MOD_REGISTER<<6 | jumpIndTempReg.RegBits)
+	code = append(code, rex, X86_OP_GROUP3_RM, modrm, X86_IMM_1, 0, 0, 0)
 	offJNZ := len(code)
-	code = append(code, 0x0F, 0x85, 0, 0, 0, 0)
+	code = append(code, emitJneInitDJump()...)
 
-	// Collect panic placeholders
+	// Collect panic jump offsets for later patching
 	panicOffs := []int{offJE0 + 2, offJA + 2, offJNZ + 2}
 
 	// ==== Continue execution after checks ====
-	// ==== Continue execution after checks ====
-	// 计算 (jumpIndTempReg / 2 - 1) * 7，然后把当前 PC 加载到 RAX
+	// Compute (jumpIndTempReg / 2 - 1) * 7, then load current PC into RAX
 
-	//  1. SAR jumpIndTempReg, 1    ; 带符号右移 1 位，相当于 signed_div R12,2
-	//     opcode: REX.W + C1 /7 ib
-	rex = byte(0x48) // REX.W
+	// 1. SAR jumpIndTempReg, 1    ; Arithmetic right shift by 1 (signed division by 2)
+	rex = byte(X86_REX_W_PREFIX)
 	if jumpIndTempReg.REXBit == 1 {
-		rex |= 0x01 // REX.B 扩展到 R12..R15
+		rex |= X86_REX_B
 	}
-	// /7 → reg=7，mod=11（0xC0），rm=jumpIndTempReg.RegBits
-	modrm = byte(0xC0 | (7 << 3) | jumpIndTempReg.RegBits)
+	modrm = byte(X86_MOD_REGISTER<<6 | (7 << 3) | jumpIndTempReg.RegBits)
 	code = append(code,
-		rex,   // REX 前缀
-		0xC1,  // opcode: shift r/m64 by imm8
-		modrm, // ModR/M (reg=7→SAR)
-		0x01,  // imm8 = 1
+		rex,
+		X86_OP_GROUP2_RM_IMM8,
+		modrm,
+		X86_IMM_1,
 	)
 
-	// 假設 jumpIndTempReg 是 r12 .RegBits=5, jumpIndTempReg.REXBit=0
-
-	// 2. SUB RCX, 1
-	rex = byte(0x48)                // REX.W
-	if jumpIndTempReg.REXBit == 1 { // REX.B 扩展到 R12..R15
-		rex |= 0x01
+	// 2. SUB jumpIndTempReg, 1
+	rex = byte(X86_REX_W_PREFIX)
+	if jumpIndTempReg.REXBit == 1 {
+		rex |= X86_REX_B
 	}
-	modr := byte(0xC0 | (5 << 3) | jumpIndTempReg.RegBits) // 0xC0 | 0x28 | 0x04 == 0xEC
+	modr := byte(X86_MOD_REGISTER<<6 | (5 << 3) | jumpIndTempReg.RegBits)
 	code = append(code,
-		rex,  // 0x49
-		0x83, // opcode: ADD/SUB r/m64, imm8
-		modr, // 0xEC
-		0x01, // imm8 = 1
+		rex,
+		X86_OP_GROUP1_RM_IMM8,
+		modr,
+		X86_IMM_1,
 	)
 
-	// REX.W + REX.R + REX.B 都要設
-	rex = byte(0x48) // W=1
+	// 3. IMUL jumpIndTempReg, jumpIndTempReg, 7
+	rex = byte(X86_REX_W_PREFIX)
 	if jumpIndTempReg.REXBit == 1 {
-		rex |= 0x05 // REX.R=1, REX.B=1
+		rex |= (X86_REX_R | X86_REX_B)
 	}
-	// mod=11, reg=jumpIndTempReg.RegBits, rm=jumpIndTempReg.RegBits
-	modrm = byte(0xC0 | (jumpIndTempReg.RegBits << 3) | jumpIndTempReg.RegBits)
-	// imm32 = 7
+	modrm = byte(X86_MOD_REGISTER<<6 | (jumpIndTempReg.RegBits << 3) | jumpIndTempReg.RegBits)
 	imm := []byte{0x07, 0x00, 0x00, 0x00}
-	code = append(code, rex, 0x69, modrm)
+	code = append(code, rex, X86_OP_IMUL_R_RM, modrm)
 	code = append(code, imm...)
 
-	// // PUSH R12
-	// code = append(code,
-	// 	0x41,                 // REX.B
-	// 	0x50|jumpIndTempReg.RegBits, // 0x50|4 = 0x54
-	// )
+	// 4. PUSH RAX
+	code = append(code, emitPushReg(RAX)...)
 
-	// push rax
-	code = append(code, 0x50) // PUSH RAX
-	//  4. LEA RAX, [RIP+0]     ; 获取当前指令地址到 RAX
-	//     opcode: 48 8D 05 00 00 00 00
-	code = append(code, 0x48, 0x8D, 0x05, 0x00, 0x00, 0x00, 0x00)
+	// 5. LEA RAX, [RIP+0] ; Load current instruction address into RAX
+	code = append(code, emitLeaRaxRipInitDJump()...)
 
-	rex = byte(0x48)
+	// 6. ADD jumpIndTempReg, RAX
+	rex = byte(X86_REX_W_PREFIX)
 	if jumpIndTempReg.REXBit == 1 {
-		rex |= 0x01 // REX.B
+		rex |= X86_REX_B
 	}
-	modrm = byte(0xC0 | (0 << 3) | jumpIndTempReg.RegBits)
-	code = append(code, rex, 0x01, modrm)
+	modrm = byte(X86_MOD_REGISTER<<6 | (0 << 3) | jumpIndTempReg.RegBits)
+	code = append(code, rex, X86_OP_ADD_RM_R, modrm)
 
-	code = append(code, 0x58) // POP RAX
+	// 7. POP RAX
+	code = append(code, emitPopReg(RAX)...)
 
+	// 8. ADD jumpIndTempReg, imm32 (handler address offset, to be patched later)
 	handlerAddOff := len(code) + 3
-	code = append(code, rex, 0x81, modrm, 0xEF, 0xBE, 0xAD, 0xDE) // add jumpIndTempReg, imm32
+	code = append(code, rex, X86_OP_GROUP1_RM_IMM32, modrm, 0xEF, 0xBE, 0xAD, 0xDE)
 
-	// jmp jumpIndTempReg
-	rex = 0x48
+	// 9. JMP jumpIndTempReg
+	rex = X86_REX_W_PREFIX
 	if jumpIndTempReg.REXBit == 1 {
-		rex |= 0x01
+		rex |= X86_REX_B
 	}
 	modrm = 0xE0 | jumpIndTempReg.RegBits
 	code = append(code, rex, 0xFF, modrm)
+
+	// Collect handler jump locations for patching
 	for _, idx := range vm.JumpTableMap {
 		pendings = append(pendings, pending{
 			handler: uintptr(idx),
 		})
 	}
-	// jumpOff := len(code)
 
-	// Patch panic jumps
+	// Patch panic jumps to point to the panic stub
 	panicStubAddr := vm.codeAddr + uintptr(len(code))
 	for _, off := range panicOffs {
 		rel := int32(int64(panicStubAddr) - int64(vm.codeAddr) - int64(off) - 4)
 		binary.LittleEndian.PutUint32(code[off:], uint32(rel))
 	}
-	// panic stub
-	code = append(code, rex, byte(0x58|jumpIndTempReg.RegBits), 0x0F, 0x0B) // POP jumpIndTempReg; UD2
 
-	// Patch ret stub JE
+	// Panic stub: POP jumpIndTempReg, then UD2 (undefined instruction)
+	code = append(code, rex, byte(0x58|jumpIndTempReg.RegBits))
+	code = append(code, emitUd2InitDJump()...)
+
+	// Patch JE ret stub to point to the return stub
 	retStubAddr := vm.codeAddr + uintptr(len(code))
 	relRet := int32(int64(retStubAddr) - int64(vm.codeAddr) - int64(offJEret) - 6)
 	binary.LittleEndian.PutUint32(code[offJEret+2:offJEret+6], uint32(relRet))
-	// finish ret stub
-	code = append(code, emitPopReg(jumpIndTempReg)...) // POP jumpIndTempReg
+
+	// Return stub: POP jumpIndTempReg, then exit code
+	code = append(code, emitPopReg(jumpIndTempReg)...)
 	code = append(code, vm.exitCode...)
 
-	// Patch handler jumps
+	// Patch handler jumps for each pending handler
 	for i, p := range pendings {
 		// POP jumpIndTempReg then JMP handler
 		pendings[i].jeOff = len(code)
 		code = append(code, rex, byte(0x58|jumpIndTempReg.RegBits))
-		// 2bytes
 		toMinus := x86CodeLen + len(code) - int(p.handler)
 		num := int32(-toMinus - 5)
 		buf := make([]byte, 4)
 		binary.LittleEndian.PutUint32(buf, uint32(num))
-		code = append(code, 0xE9)
-		// 1 byte
+		code = append(code, emitJmpE9InitDJump()...)
 		code = append(code, buf...)
-		// 4 bytes
-		// total 7 bytes
 	}
+
 	if len(pendings) == 0 {
 		fmt.Println("No pending handlers found, skipping handler patching.")
 		vm.djumpTableFunc = code
@@ -347,8 +350,7 @@ func (vm *RecompilerVM) initDJumpFunc(x86CodeLen int) {
 	}
 	firstPending := pendings[0]
 	toAdd := firstPending.jeOff - handlerAddOff + 7
-	// Patch into the Add instruction
-	// fmt.Printf("To add to BaseReg: %d\n", toAdd)
+	// Patch the handler address offset into the ADD instruction
 	uint64ToAdd := uint64(toAdd)
 	binary.LittleEndian.PutUint32(code[handlerAddOff:], uint32(uint64ToAdd))
 	vm.djumpTableFunc = code
@@ -872,14 +874,15 @@ func generateLoadImmJump(inst Instruction) []byte {
 
 	var code []byte
 	// Generate MOV instruction using matching helper
-	code = append(code, emitMovImmToReg64WithManualREX(r, vx)...)
+	code = append(code, emitMovImmToReg64(r, vx)...)
 
 	// Generate JMP instruction using matching helper
 	code = append(code, emitJmpWithPlaceholder()...)
 	return code
 }
 
-var jumpIndTempReg = regInfoList[1] //rcx
+var jumpIndTempReg = RCX
+
 func generateJumpIndirect(inst Instruction) []byte {
 	// 1) Extract baseIdx and vx
 	operands := slices.Clone(inst.Args)
@@ -893,33 +896,17 @@ func generateJumpIndirect(inst Instruction) []byte {
 	base := regInfoList[baseIdx]
 
 	buf := make([]byte, 0, 32)
-	// 1) 如果是 r8–r15，就先推 REX.B
-	if jumpIndTempReg.REXBit == 1 {
-		buf = append(buf, 0x41)
-	}
-	// 2) 再推 opcode 0x50 + regBits
-	buf = append(buf, 0x50|jumpIndTempReg.RegBits)
-	// mov baseReg, [base]
-	rex := byte(0x48) // REX.W
-	if jumpIndTempReg.REXBit == 1 {
-		rex |= 0x04
-	} // REX.R
-	if base.REXBit == 1 {
-		rex |= 0x01
-	} // REX.B
-	buf = append(buf, rex, 0x8B, byte(0xC0|(jumpIndTempReg.RegBits<<3)|base.RegBits))
 
-	// add r11, vx
-	rex = 0x48
-	if jumpIndTempReg.REXBit == 1 {
-		rex |= 0x01
-	} // REX.B
-	buf = append(buf, rex, 0x81, byte(0xC0|(0<<3)|jumpIndTempReg.RegBits))
-	imm32 := make([]byte, 4)
-	binary.LittleEndian.PutUint32(imm32, uint32(vx))
-	buf = append(buf, imm32...)
+	// 1) PUSH jumpIndTempReg with exact manual construction
+	buf = append(buf, emitPushRegJumpIndirect(jumpIndTempReg)...)
 
-	// jmp [BaseReg + indirectJumpPointSlot*8 - dumpSize]
+	// 2) MOV jumpIndTempReg, [base] with exact manual construction
+	buf = append(buf, emitMovRegFromMemJumpIndirect(jumpIndTempReg, base)...)
+
+	// 3) ADD jumpIndTempReg, vx with exact manual construction
+	buf = append(buf, emitAddRegImm32_100(jumpIndTempReg, uint32(vx))...)
+
+	// 4) JMP [BaseReg + offset] (already uses emit helper)
 	buf = append(buf, generateJumpRegMem(BaseReg, indirectJumpPointSlot*8-dumpSize)...)
 
 	return buf
@@ -932,63 +919,22 @@ func generateLoadImmJumpIndirect(inst Instruction) []byte {
 	r := regInfoList[dstIdx]
 	indexReg := regInfoList[indexRegIdx]
 
-	// 1) PUSH jumpIndTempReg
-	rex := byte(0x48)
-	if jumpIndTempReg.REXBit == 1 {
-		rex |= 0x01
-	}
-	pushOp := byte(0x50 | jumpIndTempReg.RegBits)
-	buf := []byte{rex, pushOp}
-	// 2) MOV jumpIndTempReg, indexReg
-	rex = byte(0x48) // REX.W
-	if jumpIndTempReg.REXBit == 1 {
-		rex |= 0x04 // REX.R: extend the reg field for jumpIndTempReg
-	}
-	if indexReg.REXBit == 1 {
-		rex |= 0x01 // REX.B: extend the rm field for indexReg
-	}
-	// mod=11 (register-direct), reg=jumpIndTempReg, rm=indexReg
-	modrm := byte(0xC0 | (jumpIndTempReg.RegBits << 3) | indexReg.RegBits)
+	var buf []byte
 
-	buf = append(buf,
-		rex,   // now 0x4D for W=1, R=1, B=1 (r12→r12)
-		0x8B,  // MOV r64, r/m64
-		modrm, // encodes dest=jumpIndTempReg, src=indexReg
-	)
+	// 1) PUSH jumpIndTempReg
+	buf = append(buf, emitPushRegLoadImmJumpIndirect(jumpIndTempReg)...)
+
+	// 2) MOV jumpIndTempReg, indexReg
+	buf = append(buf, emitMovRegToRegLoadImmJumpIndirect(jumpIndTempReg, indexReg)...)
 
 	// 3) MOV r64 (dst) <- imm64 (vx)
-	rex = 0x48 // REX.W
-	// set REX.B if dst in r8–r15
-	if r.REXBit == 1 {
-		rex |= 0x01
-	}
-	movOp := byte(0xB8 + r.RegBits)
-	imm64 := make([]byte, 8)
-	binary.LittleEndian.PutUint64(imm64, vx)
-	buf = append(buf, rex, movOp)
-	buf = append(buf, imm64...)
+	buf = append(buf, emitMovImmToRegLoadImmJumpIndirect(r, vx)...)
 
 	// 4) ADD jumpIndTempReg, vy
-	rex = 0x48
-	if jumpIndTempReg.REXBit == 1 {
-		rex |= 0x01
-	}
-	// ADD r/m64, imm32 (reg=0)
-	modrm = byte(0xC0 | (0 << 3) | jumpIndTempReg.RegBits)
-	imm32 := make([]byte, 4)
-	binary.LittleEndian.PutUint32(imm32, uint32(vy))
-	buf = append(buf, rex, 0x81, modrm)
-	buf = append(buf, imm32...)
+	buf = append(buf, emitAddRegImm32LoadImmJumpIndirect(jumpIndTempReg, uint32(vy))...)
 
 	// 5) AND jumpIndTempReg, 0xFFFFFFFF (zero-extend)
-	rex = 0x48
-	if jumpIndTempReg.REXBit == 1 {
-		rex |= 0x01
-	}
-	// AND r/m64, imm32 (reg=4)
-	modrm = byte(0xC0 | (4 << 3) | jumpIndTempReg.RegBits)
-	buf = append(buf, rex, 0x81, modrm)
-	buf = append(buf, []byte{0xFF, 0xFF, 0xFF, 0xFF}...)
+	buf = append(buf, emitAndRegImm32LoadImmJumpIndirect(jumpIndTempReg)...)
 
 	// 6) JMP [TempReg + indirectJumpPointSlot*8 - dumpSize]
 	buf = append(buf, generateJumpRegMem(BaseReg, indirectJumpPointSlot*8-dumpSize)...)
@@ -1010,7 +956,7 @@ func generateBranchImm(jcc byte) func(inst Instruction) []byte {
 		var buf []byte
 
 		// Generate CMP r64, imm32 using exact matching helper
-		buf = append(buf, emitCmpRegImm32WithManualConstruction(r, int32(imm))...)
+		buf = append(buf, emitCmpRegImm32Force81(r, int32(imm))...)
 
 		// Generate conditional jump using exact matching helper
 		buf = append(buf, emitJccWithPlaceholder(jcc)...)
@@ -1062,22 +1008,6 @@ func (vm *RecompilerVM) GetMemory() (map[int][]byte, map[int]int) {
 		}
 	}
 	return memory, pageMap
-}
-func (vm *RecompilerVM) TakeSnapShot(name string, pc uint32, registers []uint64, gas uint64, failAddress uint64, BaseRegValue uint64, basicBlockNumber uint64) *EmulatorSnapShot {
-	memory, pagemap := vm.GetMemory()
-	snapshot := &EmulatorSnapShot{
-		Name:             name,
-		InitialRegs:      registers,
-		InitialPC:        pc,
-		FailAddress:      failAddress,
-		InitialPageMap:   pagemap,
-		InitialMemory:    memory,
-		InitialGas:       gas,
-		Code:             make([]byte, 0), // regenerated anyway
-		BaseRegValue:     BaseRegValue,
-		BasicBlockNumber: basicBlockNumber,
-	}
-	return snapshot
 }
 
 type X86InstTally struct {

@@ -52,16 +52,12 @@ var sandBoxRegInfoList = []int{
 }
 
 const (
-	pageSize  = uint64(0x1000)                 // 4 KiB
-	dumpSize  = 0x100000                       // 1 MiB dump page size
+	pageSize = uint64(0x1000) // 4 KiB
+
 	guestBase = uint64(0x10000000)             // guest RAM start
 	guestSize = uint64(4 * 1024 * 1024 * 1024) // 4 GiB
 )
 
-var debugRecompiler = false
-var showDisassembly = false
-var UseTally = false     // use tally for x86 instructions
-var useEcalli500 = false // use ecalli500 for log check in x86
 func SetUseEcalli500(enabled bool) {
 	useEcalli500 = enabled
 }
@@ -83,13 +79,10 @@ type RecompilerSandboxVM struct {
 	sbrkOffset     uint64
 	stepNumber     int
 	snapshot       *EmulatorSnapShot
-	post_register  []uint64     // registers after execution
-	PcByteCodes    []PcByteCode // bytecode for each PC
-}
+	post_register  []uint64 // registers after execution
 
-type PcByteCode struct {
-	Op    byte   `json:"op"`
-	Bytes []byte `json:"b"`
+	recordGeneratedCode bool   // record generated code for debugging
+	genreatedCode       []byte // generated x86 code
 }
 
 // NewRecompilerVM_SandBox creates a Unicorn sandbox with 4 GiB guest RAM
@@ -290,6 +283,13 @@ func NewRecompilerSandboxVM(vm *VM) (*RecompilerSandboxVM, error) {
 	return rvm, nil
 }
 
+func (rvm *RecompilerSandboxVM) SetRecoredGeneratedCode(enabled bool) {
+	rvm.recordGeneratedCode = enabled
+	if rvm.recordGeneratedCode {
+		rvm.genreatedCode = make([]byte, 0)
+	}
+}
+
 func (vm *RecompilerSandboxVM) Close() {
 	vm.RecompilerVM.Close()
 	if vm.sandBox != nil {
@@ -328,62 +328,6 @@ func (vm *RecompilerSandboxVM) Compile(startStep uint64) {
 	vm.basicBlocks[block.X86PC] = block
 	vm.appendBlock(block)
 }
-func generateGasCheck(memAddr uint64, gasCharge uint32) []byte {
-	var code []byte
-	// 4G + 14*8
-	offset := int64(14*8 - dumpSize)
-	// fmt.Printf("generateGasCheck: memAddr=0x%X, gasCharge=%d, offset=%d\n", memAddr, gasCharge, offset)
-	code = append(code, generateSubMem64Imm32(BaseReg, offset, gasCharge)...)
-
-	// JNS skip_trap
-	jumpPos := len(code)
-	code = append(code, 0x79, 0x00) // JNS rel8
-	code = append(code, 0x0F, 0x0B)
-
-	// Patch rel8
-	code[jumpPos+1] = byte(len(code) - (jumpPos + 2)) // calculate relative jump distance
-
-	// fmt.Printf("disassembled gas check code: %s\n", Disassemble(code))
-	return code
-}
-func generateSubMem64Imm32(reg X86Reg, offset int64, gasCost uint32) []byte {
-	var code []byte
-
-	// --- REX Prefix ---
-	rex := byte(0x48) // REX.W = 1
-	if reg.REXBit == 1 {
-		rex |= 0x01 // REX.B = 1
-	}
-	code = append(code, rex)
-
-	// --- Opcode: 81 /5 (SUB r/m64, imm32) ---
-	code = append(code, 0x81)
-
-	// --- ModRM ---
-	// mod = 10 (disp32), reg = 5 (SUB), rm = reg.RegBits
-	modrm := byte(0x80 | (5 << 3) | (reg.RegBits & 0x07))
-	code = append(code, modrm)
-
-	// --- SIB (required for r12/r13/r14/r15) ---
-	if reg.RegBits&0x07 == 4 {
-		// SIB: scale=0, index=none(100), base=100 (RSP/r12)
-		sib := byte(0x24)
-		code = append(code, sib)
-	}
-
-	// --- disp32 ---
-	disp := make([]byte, 4)
-	binary.LittleEndian.PutUint32(disp, uint32(offset))
-	code = append(code, disp...)
-
-	// --- imm32 ---
-	imm := make([]byte, 4)
-	binary.LittleEndian.PutUint32(imm, uint32(gasCost))
-	code = append(code, imm...)
-
-	return code
-}
-
 func (vm *RecompilerSandboxVM) translateBasicBlock(startPC uint64) *BasicBlock {
 	pc := startPC
 	block := NewBasicBlock(vm.x86PC)
@@ -430,8 +374,8 @@ func (vm *RecompilerSandboxVM) translateBasicBlock(startPC uint64) *BasicBlock {
 		pvm_opcode := inst.Opcode
 		codeLen := len(code)
 		if i == 0 {
-			gasMemAddr := uint64(vm.regDumpAddr + uintptr(len(regInfoList)*8))
-			code = append(code, generateGasCheck(gasMemAddr, uint32(block.GasUsage))...)
+
+			code = append(code, generateGasCheck(uint32(block.GasUsage))...)
 		}
 		if pvm_opcode == ECALLI {
 			// 1. Dump registers to memory.
@@ -453,12 +397,11 @@ func (vm *RecompilerSandboxVM) translateBasicBlock(startPC uint64) *BasicBlock {
 			}
 			additionalCode := translateFunc(inst)
 			//disassemble the additionalCode and build the tally map
-			vm.PcByteCodes = append(vm.PcByteCodes, PcByteCode{
-				Op:    pvm_opcode,
-				Bytes: additionalCode,
-			})
 			if UseTally {
 				vm.DisassembleAndTally(pvm_opcode, additionalCode)
+			}
+			if vm.recordGeneratedCode {
+				vm.genreatedCode = append(vm.genreatedCode, additionalCode...)
 			}
 			code = append(code, additionalCode...)
 			block.pvmPC_TO_x86Index[uint32(inst.Pc)] = codeLen
@@ -678,7 +621,7 @@ func (vm *RecompilerSandboxVM) Patch(x86code []byte, entry uint32) (err error) {
 	patch := make([]byte, 4)
 	binary.LittleEndian.PutUint32(patch, entryPatch)
 	for i := 0; i < len(x86code)-5; i++ {
-		if x86code[i] == 0xE9 && // JMP rel32
+		if x86code[i] == X86_OP_JMP_REL32 && // JMP rel32
 			x86code[i+1] == 0x99 &&
 			x86code[i+2] == 0x99 &&
 			x86code[i+3] == 0x99 &&
@@ -1597,4 +1540,154 @@ func (vm *RecompilerSandboxVM) ReadContextSlot(slot_index int) (uint64, error) {
 	}
 	value = binary.LittleEndian.Uint64(data)
 	return value, nil
+}
+
+func EcalliSandBox(rvmPtr unsafe.Pointer, opcode int32) {
+	vm := (*RecompilerSandboxVM)(rvmPtr)
+	regMem, err := vm.sandBox.MemRead(uint64(vm.regDumpAddr), uint64(len(vm.Ram.ReadRegisters())*8))
+	if err != nil {
+		log.Error("x86", "EcalliSandBox: failed to read register memory", "error", err)
+		return
+	}
+	for i := range vm.Ram.ReadRegisters() {
+		val := binary.LittleEndian.Uint64(regMem[i*8 : (i+1)*8])
+		vm.Ram.WriteRegister(i, val)
+	}
+
+	gas, err := vm.ReadContextSlot(gasSlotIndex)
+	if err != nil {
+		log.Error("x86", "EcalliSandBox: failed to read gas from context slot", "error", err)
+		return
+	}
+	vm.Gas = int64(gas)
+	// Invoke the host logic, e.g., gas charging and actual operation
+	vm.InvokeHostCall(int(opcode))
+
+	vm.WriteContextSlot(gasSlotIndex, uint64(vm.Gas), 8)
+}
+
+func SbrkSandBox(rvmPtr unsafe.Pointer, registerIndexA uint32, registerIndexD uint32) {
+	vm := (*RecompilerSandboxVM)(rvmPtr)
+	// Acquire lock to ensure thread-safety
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+
+	// Reload registers from memory before executing host call
+	for i := range vm.Ram.ReadRegisters() {
+		regAddr := vm.regDumpAddr
+		regMem, errr := vm.sandBox.MemRead(uint64(regAddr+uintptr(i*8)), 8)
+		if errr != nil {
+			log.Error("x86", "SbrkSandBox: failed to read register memory", "index", i, "error", errr)
+			return
+		}
+		v := binary.LittleEndian.Uint64(regMem)
+		vm.Ram.WriteRegister(i, v)
+		//fmt.Printf("SbrkSandBox: register[%d] = %d\n", i, v)
+	}
+	// Invoke the host logic, e.g., gas charging and actual operation
+	result := vm.InvokeSbrkSandBox(registerIndexA, registerIndexD)
+	// Write the result back to the specified register
+	vm.Ram.WriteRegister(int(registerIndexD), uint64(result))
+	// todo : use memory to separate registers and memory
+	vm.writeBackRegisters()
+}
+
+// EmitCallToEcalliStub creates the machine code stub that sets up the arguments
+// and calls the Ecalli function using an absolute indirect call via RAX.
+func EmitCallToEcalliStubSandBox(rvmPtr uintptr, opcode int, addr uint64) []byte {
+	var stub []byte
+	// stub = append(stub, 0x50) // push rax
+	// stub = append(stub, 0x57) // push rdi
+	// stub = append(stub, 0x56) // push rsi
+	// mov rdi, rvmPtr
+	stub = append(stub, encodeMovRdiImm64(uint64(rvmPtr))...)
+	// mov esi, opcode
+	stub = append(stub, encodeMovEsiImm32(uint32(opcode))...)
+	// movabs rax, <address of Ecalli>
+	//fmt.Printf("EmitCallToEcalliStubSandBox: addr=0x%x\n", addr)
+	stub = append(stub, encodeMovabsRaxImm64(addr)...)
+	// call rax
+	stub = append(stub, encodeCallRax()...)
+	// Clean up the stack
+	//pop rsi, pop rdi, pop rax
+	// stub = append(stub, 0x5E) // pop rsi
+	// stub = append(stub, 0x5F) // pop rdi
+	// stub = append(stub, 0x58) // pop rax
+
+	return stub
+}
+
+func (vm *RecompilerSandboxVM) writeBackRegisters() {
+	for i := range vm.Ram.ReadRegisters() {
+		v, _ := vm.Ram.ReadRegister(i)
+		if err := vm.sandBox.RegWrite(sandBoxRegInfoList[i], v); err != nil {
+			log.Error("x86", "writeBackRegisters: failed to write back register", "index", i, "error", err)
+			return
+		}
+		// fmt.Printf("writeBackRegisters: register[%d] = %d\n", i, v)
+		// log.Debug("x86", "writeBackRegisters", "index", i, "value", v, "name", sandBoxRegInfoList[i].Name)
+	}
+}
+
+func EmitCallToSbrkStubSandBox(rvmPtr uintptr, registerIndexA uint32, registerIndexD uint32, addr uint64) []byte {
+	var stub []byte
+	stub = append(stub, emitPushReg(regInfoList[0])...)       // push rax
+	stub = append(stub, emitPushReg(regInfoList[5])...)       // push rdi
+	stub = append(stub, emitPushReg(regInfoList[4])...)       // push rsi
+	stub = append(stub, emitPushReg(regInfoList[2])...)       // push rdx
+	stub = append(stub, encodeMovRdiImm64(uint64(rvmPtr))...) // mov rdi, rvmPtr
+	stub = append(stub, encodeMovEsiImm32(registerIndexA)...) // mov esi, registerIndexA
+	stub = append(stub, encodeMovEdxImm32(registerIndexD)...) // mov edx, registerIndexD
+
+	// movabs rax, &Sbrk
+	stub = append(stub, encodeMovabsRaxImm64(addr)...)
+
+	stub = append(stub, encodeCallRax()...) // call rax
+	// Clean up the stack
+	stub = append(stub, emitPopReg(regInfoList[2])...) // pop rdx
+	stub = append(stub, emitPopReg(regInfoList[4])...) // pop rsi
+	stub = append(stub, emitPopReg(regInfoList[5])...) // pop rdi
+	stub = append(stub, emitPopReg(regInfoList[0])...) // pop rax
+	return stub
+}
+
+func (vm *RecompilerSandboxVM) InvokeSbrkSandBox(registerA uint32, registerIndexD uint32) (result uint32) {
+	valueA, _ := vm.Ram.ReadRegister(int(registerA))
+	currentHeapPointer := vm.GetCurrentHeapPointer()
+	if valueA == 0 {
+		vm.Ram.WriteRegister(int(registerIndexD), uint64(currentHeapPointer))
+		return currentHeapPointer
+	}
+	result = currentHeapPointer
+	//fmt.Fprintf(os.Stderr, "RecompilerVM: Sbrk: current_heap_pointer=%d, valueA=%d, registerIndexD=%d\n", currentHeapPointer, valueA, registerIndexD)
+	next_page_boundary := P_func(currentHeapPointer)
+	new_heap_pointer := currentHeapPointer + uint32(valueA)
+	if new_heap_pointer > uint32(next_page_boundary) {
+
+		final_boundary := P_func(uint32(new_heap_pointer))
+		//fmt.Fprintf(os.Stderr, "RecompilerVM: Sbrk: new_heap_pointer=%d, final_boundary=%d\n", new_heap_pointer, final_boundary)
+		idx_start := next_page_boundary / Z_P
+		idx_end := final_boundary / Z_P
+		page_count := idx_end - idx_start
+
+		vm.allocatePages(idx_start, page_count)
+		//fmt.Fprintf(os.Stderr, "RecompilerVM: Sbrk: Allocated %d pages from %d to %d\n", page_count, idx_start, idx_end)
+	}
+	vm.SetCurrentHeapPointer(new_heap_pointer)
+	return result
+}
+func (rvm *RecompilerSandboxVM) EcalliCodeSandBox(opcode int) ([]byte, error) {
+	// 1. Dump registers to memory
+	code := rvm.DumpRegisterToMemory(true)
+
+	// 2. Generate call stub to Ecalli
+	fmt.Printf("EcalliCodeSandBox: opcode=%d\n", opcode)
+	stub := EmitCallToEcalliStubSandBox(uintptr(unsafe.Pointer(rvm)), opcode, rvm.ecallAddr)
+
+	// 3. Append stub to code
+	code = append(code, stub...)
+	for i, reg := range regInfoList {
+		code = append(code, generateLoadMemToReg(reg, uint64(rvm.regDumpAddr)+uint64(i*8))...)
+	}
+	return code, nil
 }

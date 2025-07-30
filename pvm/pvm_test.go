@@ -64,7 +64,7 @@ func pvm_test(tc TestCase) error {
 	// }
 	resultCode := uint8(0)
 	pvm.Gas = int64(100) // Set a high gas limit
-	pvm.Execute(int(tc.InitialPC), false, nil)
+	pvm.Execute(int(tc.InitialPC), false)
 	resultCode = pvm.ResultCode
 
 	// Check the registers
@@ -169,7 +169,7 @@ func TestRevm(t *testing.T) {
 	// pvm.Ram.DebugStatus()
 
 	fmt.Printf("PVM start execution...\n")
-	pvm.Execute(types.EntryPointRefine, false, nil)
+	pvm.Execute(types.EntryPointRefine, false)
 
 	fmt.Printf("pvm.pc: %d, gas: %d, vm.ResultCode: %d, vm.Fault_address: %d\n", pvm.pc, pvm.Gas, pvm.ResultCode, pvm.Fault_address)
 	elapsed := time.Since(start)
@@ -212,7 +212,7 @@ func TestHelloWorld(t *testing.T) {
 	// pvm.Ram.DebugStatus()
 
 	fmt.Printf("PVM start execution...\n")
-	pvm.Execute(types.EntryPointRefine, false, nil)
+	pvm.Execute(types.EntryPointRefine, false)
 
 	fmt.Printf("pvm.pc: %d, gas: %d, vm.ResultCode: %d, vm.Fault_address: %d\n", pvm.pc, pvm.Gas, pvm.ResultCode, pvm.Fault_address)
 	elapsed := time.Since(start)

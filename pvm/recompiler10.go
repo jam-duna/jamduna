@@ -6,8 +6,6 @@ func generateMax() func(inst Instruction) []byte {
 		a := regInfoList[aIdx]
 		b := regInfoList[bIdx]
 		dst := regInfoList[dstIdx]
-		// RAX is regInfoList[0]
-		rax := regInfoList[0]
 
 		// If dst==a (and a!=b) then we'll clobber `a` when we MOV b→dst,
 		// so we need to stash it in RAX first.
@@ -16,112 +14,32 @@ func generateMax() func(inst Instruction) []byte {
 		var code []byte
 
 		// 1) CMP a, b  — signed compare original a vs b
-		{
-			rex := byte(0x48)
-			if b.REXBit == 1 {
-				rex |= 0x04
-			} // REX.R = b
-			if a.REXBit == 1 {
-				rex |= 0x01
-			} // REX.B = a
-			modrm := byte(0xC0 | (b.RegBits << 3) | a.RegBits)
-			code = append(code, rex, 0x39, modrm) // 39 /r = CMP r/m64, r64
-		}
+		code = append(code, emitCmpReg64Max(a, b)...)
 
 		// 2) If needed, save original a → RAX
 		if useTmp {
-			code = append(code, 0x50) // PUSH RAX
+			code = append(code, emitPushReg(RAX)...)
 			// MOV RAX, a
-			rex := byte(0x48)
-			if a.REXBit == 1 {
-				rex |= 0x01
-			} // REX.B = a
-			// REX.R remains 0 because dest=RAX has REXBit=0
-			modrm := byte(0xC0 | (rax.RegBits << 3) | a.RegBits)
-			code = append(code, rex, 0x8B, modrm) // 8B /r = MOV r64, r/m64
+			code = append(code, emitMovRegToRegMax(RAX, a)...)
 		}
 
 		// 3) MOV dst, b  — skip if dst == b
 		if dstIdx != bIdx {
-			rex := byte(0x48)
-			if b.REXBit == 1 {
-				rex |= 0x04
-			} // REX.R = b
-			if dst.REXBit == 1 {
-				rex |= 0x01
-			} // REX.B = dst
-			modrm := byte(0xC0 | (b.RegBits << 3) | dst.RegBits)
-			code = append(code, rex, 0x89, modrm) // 89 /r = MOV r/m64, r64
+			code = append(code, emitMovRegFromRegMax(dst, b)...)
 		}
 
 		// 4) CMOVGE dst, src
 		{
 			src := a
 			if useTmp {
-				src = rax
+				src = RAX
 			}
-			rex := byte(0x48)
-			if dst.REXBit == 1 {
-				rex |= 0x04
-			} // REX.R = dst
-			if src.REXBit == 1 {
-				rex |= 0x01
-			} // REX.B = src
-			modrm := byte(0xC0 | (dst.RegBits << 3) | src.RegBits)
-			code = append(code, rex, 0x0F, 0x4D, modrm) // 0F 4D /r = CMOVGE r64, r/m64
+			code = append(code, emitCmovgeMax(dst, src)...)
 		}
 
 		// 5) Restore RAX if we pushed it
 		if useTmp {
-			code = append(code, 0x58) // POP RAX
-		}
-
-		return code
-	}
-}
-
-func generateMax2() func(inst Instruction) []byte {
-	return func(inst Instruction) []byte {
-		aIdx, bIdx, dstIdx := extractThreeRegs(inst.Args)
-		a := regInfoList[aIdx]
-		b := regInfoList[bIdx]
-		dst := regInfoList[dstIdx]
-		// RAX is regInfoList[0]
-		rax := regInfoList[0]
-
-		var code []byte
-
-		// If dst==a (and a!=b) we'll overwrite 'a' when MOV b→dst, so save 'a' in RAX.
-		useTmp := dstIdx == aIdx && aIdx != bIdx
-
-		// 0) if needed, PUSH RAX and MOV RAX←a
-		if useTmp {
-			// push rax
-			code = append(code, emitPushRax()...)
-			// mov rax, a
-			code = append(code, emitMovRegToReg64(rax, a)...)
-		}
-
-		// 1) MOV dst, b   (skip when dst==b)
-		if dstIdx != bIdx {
-			code = append(code, emitMovRegToReg64(dst, b)...)
-		}
-
-		// 2) CMP a, b   ; signed compare A vs B
-		code = append(code, emitCmpReg64(b, a)...)
-
-		// 3) CMOVGE dst, src   (if A>=B signed, move A—or saved-A in RAX—into dst)
-		{
-			src := a
-			if useTmp {
-				src = rax
-			}
-			code = append(code, emitCmovcc(0x4D, dst, src)...)
-		}
-
-		// 4) if we pushed RAX, restore it
-		if useTmp {
-			code = append(code, emitPopRax()...)
+			code = append(code, emitPopReg(RAX)...)
 		}
 
 		return code
@@ -134,8 +52,6 @@ func generateMin() func(inst Instruction) []byte {
 		a := regInfoList[aIdx]
 		b := regInfoList[bIdx]
 		dst := regInfoList[dstIdx]
-		// RAX is regInfoList[0]
-		rax := regInfoList[0]
 
 		// If dst==a (and a!=b) then MOV dst←b would clobber a,
 		// so we need to stash a in RAX.
@@ -148,9 +64,9 @@ func generateMin() func(inst Instruction) []byte {
 
 		// 2) If needed, save original a → RAX
 		if useTmp {
-			code = append(code, emitPushRax()...) // PUSH RAX
+			code = append(code, emitPushReg(RAX)...) // PUSH RAX
 			// MOV RAX, a
-			code = append(code, emitMovRegToRegWithManualConstruction(rax, a)...)
+			code = append(code, emitMovRegToRegWithManualConstruction(RAX, a)...)
 		}
 
 		// 3) MOV dst, b  — skip if dst == b
@@ -162,37 +78,32 @@ func generateMin() func(inst Instruction) []byte {
 		{
 			src := a
 			if useTmp {
-				src = rax
+				src = RAX
 			}
-			code = append(code, emitCmovcc(0x4E, dst, src)...)
+			code = append(code, emitCmovcc(X86_OP2_CMOVLE, dst, src)...)
 		}
 
 		// 5) Restore RAX if we pushed it
 		if useTmp {
-			code = append(code, emitPopRax()...) // POP RAX
+			code = append(code, emitPopReg(RAX)...) // POP RAX
 		}
 
 		return code
 	}
 }
 
-// generateMinOrMaxU returns a code‐gen function for unsigned MIN or MAX.
-// If isMax==false, it implements MIN_U (dst = min(A,B)); if isMax==true, MAX_U.
-func generateMinOrMaxU(isMax bool) func(inst Instruction) []byte {
+// generateMaxU returns a code‐gen function for unsigned MAX.
+func generateMaxU() func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
 		aIdx, bIdx, dstIdx := extractThreeRegs(inst.Args)
 		a := regInfoList[aIdx]
 		b := regInfoList[bIdx]
 		dst := regInfoList[dstIdx]
-		tmp := regInfoList[1] // RCX as scratch
 
 		var code []byte
 
-		// choose the CMOV opcode: for MAX_U use CMOVB (0x42), for MIN_U use CMOVA (0x47)
-		cmov := byte(0x47) // MIN_U: CMOVA (A>B → move B)
-		if isMax {
-			cmov = 0x42 // MAX_U: CMOVB (A<B → move B)
-		}
+		// choose the CMOV opcode: for MAX_U use CMOVB (X86_OP2_CMOVB), for MIN_U use CMOVA (X86_OP2_CMOVA)
+		cmov := byte(X86_OP2_CMOVB) // MAX_U: CMOVB (A<B → move B)
 
 		if dstIdx == bIdx {
 			// alias: dst and B collide. Save B in RCX, then:
@@ -202,10 +113,10 @@ func generateMinOrMaxU(isMax bool) func(inst Instruction) []byte {
 			//   POP RCX
 
 			// 1) PUSH RCX
-			code = append(code, emitPushRcx()...)
+			code = append(code, emitPushReg(RCX)...)
 
 			// 2) MOV RCX, B
-			code = append(code, emitMovRegToRegWithManualConstruction(tmp, b)...)
+			code = append(code, emitMovRegToRegWithManualConstruction(RCX, b)...) // REVIEW
 
 			// 3) CMP A, B
 			code = append(code, emitCmpReg64(b, a)...)
@@ -216,10 +127,10 @@ func generateMinOrMaxU(isMax bool) func(inst Instruction) []byte {
 			}
 
 			// 5) CMOV{B|A} dst, RCX
-			code = append(code, emitCmovcc(cmov, dst, tmp)...)
+			code = append(code, emitCmovcc(cmov, dst, RCX)...)
 
 			// 6) POP RCX
-			code = append(code, emitPopRcx()...)
+			code = append(code, emitPopReg(RCX)...)
 
 		} else {
 			// no alias: dst != B
@@ -247,67 +158,29 @@ func generateMinU() func(inst Instruction) []byte {
 		a := regInfoList[aIdx]
 		b := regInfoList[bIdx]
 		dst := regInfoList[dstIdx]
-		tmp := regInfoList[1] // use RCX as scratch
+		// use RCX as scratch
 
 		var code []byte
-
 		if dstIdx == bIdx {
 			// dst aliases B → save B in tmp first
 
 			// 1) PUSH RCX
-			code = append(code, 0x51)
+			code = append(code, emitPushReg(RCX)...)
 
 			// 2) MOV RCX, B   ; tmp = original B
-			{
-				rex := byte(0x48)
-				if b.REXBit == 1 {
-					rex |= 0x01
-				} // REX.B for rm=B
-				modrm := byte(0xC0 | (1 << 3) | b.RegBits) // reg=1(RCX), rm=B
-				code = append(code, rex, 0x8B, modrm)      // MOV RCX, [B]
-			}
+			code = append(code, emitMovRcxRegMinU(b)...) // REVIEW
 
 			// 3) CMP A, B    ; compare A vs original B
-			{
-				rex := byte(0x48)
-				if a.REXBit == 1 {
-					rex |= 0x01
-				} // REX.B for A→rm
-				if b.REXBit == 1 {
-					rex |= 0x04
-				} // REX.R for B→reg
-				modrm := byte(0xC0 | (b.RegBits << 3) | a.RegBits)
-				code = append(code, rex, 0x39, modrm) // CMP r/m64, r64
-			}
+			code = append(code, emitCmpReg64(b, a)...) // REVIEW
 
 			// 4) MOV dst, A   ; dst←A
-			{
-				rex := byte(0x48)
-				if a.REXBit == 1 {
-					rex |= 0x04
-				} // REX.R for A
-				if dst.REXBit == 1 {
-					rex |= 0x01
-				} // REX.B for dst
-				modrm := byte(0xC0 | (a.RegBits << 3) | dst.RegBits)
-				code = append(code, rex, 0x89, modrm) // MOV r/m64, r64
-			}
+			code = append(code, emitMovRegToRegMinU(dst, a)...) // REVIEW
 
 			// 5) CMOVA dst, RCX ; if A>B unsigned then dst←original B
-			{
-				rex := byte(0x48)
-				if dst.REXBit == 1 {
-					rex |= 0x04
-				} // REX.R for dst
-				if tmp.REXBit == 1 {
-					rex |= 0x01
-				} // REX.B for RCX
-				modrm := byte(0xC0 | (dst.RegBits << 3) | tmp.RegBits)
-				code = append(code, rex, 0x0F, 0x47, modrm) // CMOVA r64, r/m64
-			}
+			code = append(code, emitCmovaMinU(dst, RCX)...) // REVIEW
 
 			// 6) POP RCX
-			code = append(code, 0x59)
+			code = append(code, emitPopReg(RCX)...)
 
 			return code
 		}
@@ -315,43 +188,13 @@ func generateMinU() func(inst Instruction) []byte {
 		// Non-alias case: dst != B
 
 		// 1) MOV dst, A
-		{
-			rex := byte(0x48)
-			if a.REXBit == 1 {
-				rex |= 0x04
-			}
-			if dst.REXBit == 1 {
-				rex |= 0x01
-			}
-			modrm := byte(0xC0 | (a.RegBits << 3) | dst.RegBits)
-			code = append(code, rex, 0x89, modrm)
-		}
+		code = append(code, emitMovRegToRegMinU(dst, a)...) // REVIEW
 
 		// 2) CMP dst, B
-		{
-			rex := byte(0x48)
-			if dst.REXBit == 1 {
-				rex |= 0x01
-			}
-			if b.REXBit == 1 {
-				rex |= 0x04
-			}
-			modrm := byte(0xC0 | (b.RegBits << 3) | dst.RegBits)
-			code = append(code, rex, 0x39, modrm)
-		}
+		code = append(code, emitCmpReg64(b, dst)...) // REVIEW
 
 		// 3) CMOVA dst, B
-		{
-			rex := byte(0x48)
-			if dst.REXBit == 1 {
-				rex |= 0x04
-			}
-			if b.REXBit == 1 {
-				rex |= 0x01
-			}
-			modrm := byte(0xC0 | (dst.RegBits << 3) | b.RegBits)
-			code = append(code, rex, 0x0F, 0x47, modrm)
-		}
+		code = append(code, emitCmovaMinU(dst, b)...) // REVIEW
 
 		return code
 	}
@@ -362,29 +205,28 @@ func generateCmovImm(isZero bool) func(inst Instruction) []byte {
 		dstIdx, condIdx, imm := extractTwoRegsOneImm(inst.Args)
 		dst := regInfoList[dstIdx]
 		cond := regInfoList[condIdx]
-		scratch := regInfoList[1] // RCX
 
 		var code []byte
 
 		// 1) PUSH RCX
-		code = append(code, emitPushRcx()...)
+		code = append(code, emitPushReg(RCX)...)
 
 		// 2) MOVABS RCX, imm64
-		code = append(code, emitMovImmToReg64(scratch, uint64(imm))...)
+		code = append(code, emitMovImmToReg64(RCX, uint64(imm))...)
 
 		// 3) TEST cond, cond   → sets ZF=1 iff cond==0
 		code = append(code, emitTestReg64(cond, cond)...)
 
 		// 4) CMOVcc dst, RCX
-		//    CMOVE (0x44) if isZero==true, otherwise CMOVNE (0x45)
-		cmovOp := byte(0x44)
+		//    CMOVE (X86_OP2_CMOVE) if isZero==true, otherwise CMOVNE (X86_OP2_CMOVNE)
+		cmovOp := byte(X86_OP2_CMOVE)
 		if !isZero {
-			cmovOp = 0x45
+			cmovOp = X86_OP2_CMOVNE
 		}
-		code = append(code, emitCmovcc(cmovOp, dst, scratch)...)
+		code = append(code, emitCmovcc(cmovOp, dst, RCX)...)
 
 		// 5) POP RCX
-		code = append(code, emitPopRcx()...)
+		code = append(code, emitPopReg(RCX)...)
 
 		return code
 	}
@@ -403,13 +245,13 @@ func generateRotateRight32Imm(inst Instruction) []byte {
 	// ─── Conflict (src==dst) ───
 	if srcIdx == dstIdx {
 		// 1) MOV r32_dst, r32_dst   ; zero‑extend low 32→64
-		code = append(code, emitMovRegToReg32(dst, dst)...)
+		code = append(code, emitMovRegToReg32(dst, dst)...) // REVIEW: this is the same as below??
 
 		// 2) ROR r/m32(dst), imm8 - use shift helper with subcode 1 for ROR
-		code = append(code, emitShiftRegImm(dst, 0xC1, 1, byte(imm&31))...)
+		code = append(code, emitShiftRegImm(dst, X86_OP_GROUP2_RM_IMM8, X86_REG_ROR, byte(imm&X86_SHIFT_MASK_32))...)
 
 		// 3) MOVSXD r64_dst, r32_dst  ; sign‑extend low 32→64
-		code = append(code, emitMovsxdReg64(dst, dst)...)
+		code = append(code, emitMovsxd64(dst, dst)...)
 
 		return code
 	}
@@ -418,16 +260,14 @@ func generateRotateRight32Imm(inst Instruction) []byte {
 	// 1) MOV r32_dst, r32_src
 	code = append(code, emitMovRegToReg32(dst, src)...)
 	// 2) ROR r/m32(dst), imm8 - use shift helper with subcode 1 for ROR
-	code = append(code, emitShiftRegImm(dst, 0xC1, 1, byte(imm&31))...)
+	code = append(code, emitShiftRegImm(dst, X86_OP_GROUP2_RM_IMM8, X86_REG_ROR, byte(imm&X86_SHIFT_MASK_32))...)
 	// 3) MOVSXD r64_dst, r32_dst
-	code = append(code, emitMovsxdReg64(dst, dst)...)
+	code = append(code, emitMovsxd64(dst, dst)...)
 
 	return code
 }
 
 // Implements r64_dst = r64_src << imm8  (or >>, SAR, ROR with different subcodes)
-// FURTHER OPTIMIZATIONS:
-// * if imm == 1 -> use SHL/SAR/SHR/ROR directly
 func generateImmShiftOp64(opcode, subcode byte) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
 		dstIdx, srcIdx, imm := extractTwoRegsOneImm(inst.Args)
@@ -474,86 +314,42 @@ func generateImmShiftOp64Alt(subcode byte) func(inst Instruction) []byte {
 		sameReg := dstIdx == srcIdx
 
 		if sameReg {
-			if BaseReg.REXBit == 1 {
-				code = append(code, 0x41)
-			}
-			code = append(code, 0x50|BaseReg.RegBits)
+			code = append(code, emitPushReg(BaseReg)...)
 
 			dstIdx = BaseRegIndex
 			dst = regInfoList[dstIdx]
 
-			rexMov := byte(0x48)
-			if src.REXBit == 1 {
-				rexMov |= 0x04
-			}
-			if dst.REXBit == 1 {
-				rexMov |= 0x01
-			}
-			modrm := byte(0xC0 | (src.RegBits << 3) | dst.RegBits)
-			code = append(code, rexMov, 0x89, modrm)
+			code = append(code, emitMovRegToRegImmShiftOp64Alt(src, dst)...)
 		}
 
 		needSaveRCX := dst.Name != "RCX"
 		needXchg := src.Name != "RCX"
 
 		if needSaveRCX {
-			code = append(code, 0x51)
+			code = append(code, emitPushReg(RCX)...)
 		}
 
-		rexMov := byte(0x48)
-		if dst.REXBit == 1 {
-			rexMov |= 0x01
-		}
-		code = append(code, rexMov, 0xB8|dst.RegBits)
-		for i := 0; i < 8; i++ {
-			code = append(code, byte(imm>>(8*i)))
-		}
+		code = append(code, emitMovImmToReg64(dst, imm)...)
 
 		if needXchg {
-			rexX := byte(0x48)
-			if src.REXBit == 1 {
-				rexX |= 0x04
-			}
-			modrmX := byte(0xC0 | (src.RegBits << 3) | 0x01)
-			code = append(code, rexX, 0x87, modrmX)
+			code = append(code, emitXchgRegRcxImmShiftOp64Alt(src)...)
 		}
 
-		rexSh := byte(0x48)
-		if dst.REXBit == 1 {
-			rexSh |= 0x01
-		}
-		modrmSh := byte(0xC0 | (subcode << 3) | dst.RegBits)
-		code = append(code, rexSh, 0xD3, modrmSh)
+		code = append(code, emitShiftRegClImmShiftOp64Alt(dst, subcode)...)
 
 		if needXchg {
-			rexX := byte(0x48)
-			if src.REXBit == 1 {
-				rexX |= 0x04
-			}
-			modrmX := byte(0xC0 | (src.RegBits << 3) | 0x01)
-			code = append(code, rexX, 0x87, modrmX)
+			code = append(code, emitXchgRegRcxImmShiftOp64Alt(src)...)
 		}
 
 		if needSaveRCX {
-			code = append(code, 0x59)
+			code = append(code, emitPopReg(RCX)...)
 		}
 
 		if sameReg {
 			// move result back to src
-			rexMov2 := byte(0x48)
-			if BaseReg.REXBit == 1 {
-				rexMov2 |= 0x04
-			}
-			if src.REXBit == 1 {
-				rexMov2 |= 0x01
-			}
-			modrm2 := byte(0xC0 | (BaseReg.RegBits << 3) | src.RegBits)
-			code = append(code, rexMov2, 0x89, modrm2)
+			code = append(code, emitMovBaseRegToSrcImmShiftOp64Alt(BaseReg, src)...)
 
-			if BaseReg.REXBit == 1 {
-				code = append(code, 0x41)
-			}
-			code = append(code, 0x58|BaseReg.RegBits)
+			code = append(code, emitPopReg(BaseReg)...)
 		}
 
 		return code
@@ -579,7 +375,7 @@ func generateNegAddImm64(inst Instruction) []byte {
 		}
 
 		// 3) ADD r64_dst, imm32  if it fits 32 bits  (81 /0 id)
-		if imm64 <= 0x7FFFFFFF {
+		if imm64 <= X86_MAX_INT32 {
 			code = append(code, emitAddRegImm32(dst, int32(imm64))...)
 			return code
 		}
@@ -604,69 +400,45 @@ func generateXEncode(dst X86Reg, n uint32) []byte {
 	var code []byte
 
 	// 0) Save temporary registers
-	code = append(code,
-		0x52, // push rdx
-		0x51, // push rcx
-	)
+	code = append(code, emitPushReg(RDX)...)
+	code = append(code, emitPushReg(RCX)...)
 
 	// 1) If n is invalid → directly zero out
 	if n == 0 || n > 8 {
-		rex := byte(0x48) // REX.W=1
-		if dst.REXBit == 1 {
-			rex |= 0x01
-		}
-		modrm := byte(0xC0 | dst.RegBits)
-		code = append(code, rex, 0xC7, modrm) // MOV r64_dst, imm32
-		code = append(code, encodeU32(0)...)
-		return append(code,
-			0x59, // pop rcx
-			0x5A, // pop rdx
-		)
+		code = append(code, emitMovImmToDstXEncode(dst)...)
+		code = append(code, emitPushReg(RDX)...)
+		return append(code, emitPushReg(RCX)...)
 	}
 
 	// 2) If n==8 → already 64-bit, no operation needed
 	if n == 8 {
-		return append(code,
-			0x59, // pop rcx
-			0x5A, // pop rdx
-		)
+		code = append(code, emitPopReg(RCX)...)
+		code = append(code, emitPopReg(RDX)...)
 	}
 
 	// Below: 1 <= n <= 7
 
 	// 3) MOV r64_rcx, r64_dst   ; copy x → rcx
-	rex1 := byte(0x48)
-	if dst.REXBit == 1 {
-		rex1 |= 0x04 // REX.R
-	}
-	code = append(code, rex1, 0x89, byte(0xC0|dst.RegBits<<3|1)) // ModR/M: reg=dst, rm=rcx
+	code = append(code, emitMovDstToRcxXEncode(dst)...)
 
 	// 4) SHR rcx, imm8          ; q = x >> (8*n-1)
 	shift := byte(8*n - 1)
-	code = append(code, 0x48, 0xC1, 0xE9, shift) // 0xC1 /5=SHR, modrm E9=(reg=5, rm=1)
+	code = append(code, emitShrRcxImmXEncode(shift)...)
 
 	// 5) MOVABS rdx, factor     ; factor = ^((1<<(8*n))-1)
 	mask := uint64((1 << (8 * n)) - 1)
 	factor := ^mask
-	rex2 := byte(0x48) | 0x02               // REX.W + REX.X for rdx
-	code = append(code, rex2, byte(0xB8|2)) // MOVABS rdx, imm64
-	code = append(code, encodeU64(factor)...)
+	code = append(code, emitMovAbsRdxXEncode(factor)...)
 
 	// 6) IMUL rdx, rcx          ; rdx = q * factor
-	code = append(code, 0x48, 0x0F, 0xAF, byte(0xC0|2<<3|1))
+	code = append(code, emitImulRdxRcxXEncode()...)
 
 	// 7) ADD r64_dst, r64_rdx   ; x + q*factor
-	rex3 := byte(0x48)
-	if dst.REXBit == 1 {
-		rex3 |= 0x01
-	}
-	code = append(code, rex3, 0x01, byte(0xC0|2<<3|dst.RegBits))
+	code = append(code, emitAddDstRdxXEncode(dst)...)
 
 	// 8) restore rcx and rdx
-	code = append(code,
-		0x59, // pop rcx
-		0x5A, // pop rdx
-	)
+	code = append(code, emitPopReg(RCX)...)
+	code = append(code, emitPopReg(RDX)...)
 
 	return code
 }
@@ -681,42 +453,18 @@ func generateNegAddImm32(inst Instruction) []byte {
 	var code []byte
 
 	// 1) MOV r64_dst, r64_src
-	rex1 := byte(0x48) // REX.W=1
-	if src.REXBit == 1 {
-		rex1 |= 0x04
-	} // REX.R for src
-	if dst.REXBit == 1 {
-		rex1 |= 0x01
-	} // REX.B for dst
-	modrm1 := byte(0xC0 | (src.RegBits << 3) | dst.RegBits)
-	code = append(code, rex1, 0x89, modrm1)
+	code = append(code, emitMovRegToReg64NegAddImm32(dst, src)...)
 
 	// 2) NEG r64_dst
-	rex2 := byte(0x48)
-	if dst.REXBit == 1 {
-		rex2 |= 0x01
-	}
-	modrm2 := byte(0xC0 | (0x03 << 3) | dst.RegBits) // /3 = NEG
-	code = append(code, rex2, 0xF7, modrm2)
+	code = append(code, emitNegReg64NegAddImm32(dst)...)
 
 	// 3) ADD r64_dst, imm32
-	rex3 := byte(0x48)
-	if dst.REXBit == 1 {
-		rex3 |= 0x01
-	}
-	modrm3 := byte(0xC0 | (0x00 << 3) | dst.RegBits) // /0 = ADD
-	code = append(code, rex3, 0x81, modrm3)
-	code = append(code, encodeU32(uint32(imm))...)
+	code = append(code, emitAddRegImm32_100(dst, uint32(imm))...)
 
 	// 4) Truncate to 32-bit: MOV r/m32(dst), r32(dst)
-	//    any write to the 32-bit sub-register zeroes the upper 32 bits
-	rex4 := byte(0x40) // REX (W=0 means 32-bit operand size)
-	// extend reg and rm if dst ∈ r8–r15
-	if dst.REXBit == 1 {
-		rex4 |= 0x05 // REX.R=1 and REX.B=1 (same reg in both fields)
-	}
-	modrm4 := byte(0xC0 | (dst.RegBits << 3) | dst.RegBits)
-	code = append(code, rex4, 0x89, modrm4)
+	code = append(code, emitMovReg32ToReg32NegAddImm32(dst)...)
+
+	// 5) Sign extend to 64-bit
 	code = append(code, generateXEncode(dst, 4)...)
 
 	return code
@@ -765,11 +513,11 @@ func generateImmShiftOp32SHLO(subcode byte) func(inst Instruction) []byte {
 		code = append(code, emitMovRegToReg32(dst, src)...)
 
 		// 2) SHL r/m32(dst), imm8  (C1 /4 ib) - 32-bit shift
-		shiftAmt := byte(imm & 0x1F)
-		code = append(code, emitShiftRegImm32(dst, 0xC1, subcode, shiftAmt)...)
+		shiftAmt := byte(imm & X86_SHIFT_MASK_32)
+		code = append(code, emitShiftRegImm32(dst, X86_OP_GROUP2_RM_IMM8, subcode, shiftAmt)...)
 
 		// 3) MOVSXD r64_dst, r/m32(dst)  → sign-extend to 64-bit
-		code = append(code, emitMovsxdReg64(dst, dst)...)
+		code = append(code, emitMovsxd64(dst, dst)...)
 
 		return code
 	}
@@ -792,17 +540,17 @@ func generateImmShiftOp32(opcode byte, subcode byte, alt bool) func(inst Instruc
 			code = append(code, emitMovImmToReg32(dst, uint32(imm))...)
 
 			// 2) XCHG ECX, r32_src  ; load count into CL
-			code = append(code, emitXchgReg32Reg32(regInfoList[1], src)...) // RCX = regInfoList[1]
+			code = append(code, emitXchgReg32Reg32(RCX, src)...) // RCX
 
 			// 3) D3 /subcode r/m32(dst), CL - use shift helper
 			code = append(code, emitShiftReg32ByCl(dst, subcode)...)
 
 			// 4) XCHG ECX, r32_src  ; restore ECX and src
-			code = append(code, emitXchgReg32Reg32(regInfoList[1], src)...)
+			code = append(code, emitXchgReg32Reg32(RCX, src)...)
 
 			// 5) if SAR (subcode==7), sign-extend 32->64: MOVSXD r64_dst, r/m32(dst)
 			if subcode == 7 {
-				code = append(code, emitMovsxdReg64(dst, dst)...)
+				code = append(code, emitMovsxd64(dst, dst)...)
 			}
 		} else {
 			// NORMAL: register value on left, immediate count
@@ -810,11 +558,11 @@ func generateImmShiftOp32(opcode byte, subcode byte, alt bool) func(inst Instruc
 			code = append(code, emitMovRegToReg32(dst, src)...)
 
 			// 2) C1 /subcode r/m32(dst), imm8 - 32-bit shift
-			code = append(code, emitShiftRegImm32(dst, opcode, subcode, byte(imm&0xFF))...)
+			code = append(code, emitShiftRegImm32(dst, opcode, subcode, byte(imm&X86_MASK_8BIT))...)
 
 			// 3) if SAR (subcode==7), sign-extend 32->64: MOVSXD r64_dst, r/m32(dst)
 			if subcode == 7 {
-				code = append(code, emitMovsxdReg64(dst, dst)...)
+				code = append(code, emitMovsxd64(dst, dst)...)
 			}
 		}
 
@@ -827,17 +575,17 @@ func generateImmSetCondOp32New(setcc byte) func(inst Instruction) []byte {
 		dstIdx, srcIdx, imm := extractTwoRegsOneImm(inst.Args)
 		dstInfo := regInfoList[dstIdx]
 		srcInfo := regInfoList[srcIdx]
-		scratch := regInfoList[1] // RCX
+		scratch := RCX // RCX
 
 		var code []byte
 
 		// --- alias case: dst and src are the same register ---
 		if dstIdx == srcIdx {
 			// 1) save RCX
-			code = append(code, emitPushRcx()...) // PUSH RCX
+			code = append(code, emitPushReg(RCX)...) // PUSH RCX
 
 			// 2) sign‑extend the 32‑bit dst into RCX
-			// opcode 0x8B /r = MOV r64, r/m64 (this is MOV RCX, dst)
+			// opcode X86_OP_MOV_R_RM /r = MOV r64, r/m64 (this is MOV RCX, dst)
 			code = append(code, emitMovRegToRegWithManualConstruction(scratch, dstInfo)...)
 
 			// 3) clear the low 32 bits of dst
@@ -850,7 +598,7 @@ func generateImmSetCondOp32New(setcc byte) func(inst Instruction) []byte {
 			code = append(code, emitSetccReg8(setcc, dstInfo)...)
 
 			// 6) restore RCX
-			code = append(code, emitPopRcx()...) // POP RCX
+			code = append(code, emitPopReg(RCX)...) // POP RCX
 			return code
 		}
 
@@ -875,7 +623,7 @@ func generateImmSetCondOp32New(setcc byte) func(inst Instruction) []byte {
 //	 generateImmMulOp32: dst=r9 7, src=r10 8, imm=18446744073709542685
 //		fmt.Printf("generateImmMulOp32: dst=%s %d, src=%s %d, imm=%d\n", dst.Name, dstReg, src.Name, srcReg, imm)
 //
-// Implements dst := sign‑extended((src * imm) & 0xFFFFFFFF)
+// Implements dst := sign‑extended((src * imm) & X86_MASK_32BIT)
 func generateImmMulOp32(inst Instruction) []byte {
 	dstReg, srcReg, imm := extractTwoRegsOneImm(inst.Args)
 	src := regInfoList[srcReg]
@@ -888,7 +636,7 @@ func generateImmMulOp32(inst Instruction) []byte {
 	code = append(code, emitImulRegImm32(dst, src, uint32(imm))...)
 
 	// 3) MOVSXD r64_dst, r32_dst  (sign‑extend low 32 bits back to 64 bits)
-	code = append(code, emitMovsxdReg64(dst, dst)...)
+	code = append(code, emitMovsxd64(dst, dst)...)
 
 	return code
 }
@@ -918,7 +666,7 @@ func generateBinaryImm32(inst Instruction) []byte {
 	var code []byte
 	// SPECIAL CASE: imm == 0 → dst = sign_extend(src32)
 	if imm == 0 {
-		return emitMovsxdReg64(dst, src)
+		return emitMovsxd64(dst, src)
 	}
 
 	// 1) MOV r32_dst, r32_src BUT  Skip the MOV when src and dst are the same!!
@@ -931,7 +679,7 @@ func generateBinaryImm32(inst Instruction) []byte {
 	code = append(code, emitAddRegImm32WithManualConstruction(dst, imm)...)
 
 	// 3) MOVSXD r64_dst, r/m32   ; sign-extend low 32→64
-	code = append(code, emitMovsxdReg64(dst, dst)...)
+	code = append(code, emitMovsxd64(dst, dst)...)
 	return code
 }
 
@@ -957,7 +705,7 @@ func generateImmBinaryOp64(subcode byte) func(inst Instruction) []byte {
 		}
 
 		// 2) Imm32 path: 81 /subcode id
-		if imm64 >= -0x80000000 && imm64 <= 0x7FFFFFFF {
+		if imm64 >= -X86_MIN_INT32 && imm64 <= X86_MAX_INT32 {
 			copySrcToDst()
 			code = append(code, emitAluRegImm32(dst, subcode, int32(imm64))...)
 			return code
@@ -965,13 +713,13 @@ func generateImmBinaryOp64(subcode byte) func(inst Instruction) []byte {
 
 		// 3) Full imm64 via scratch + XCHG swap
 		copySrcToDst()
-		scratch := regInfoList[0]
+		scratch := RAX
 
 		// swap dst<->scratch: XCHG r64,dst
 		code = append(code, emitXchgReg64(scratch, dst)...)
 
 		// MOVABS scratch, imm64 (now scratch contains the old dst value)
-		code = append(code, emitMovAbsToReg(scratch, uint64imm)...)
+		code = append(code, emitMovImmToReg64(scratch, uint64imm)...)
 
 		// ALU dst, scratch  (dst now has old scratch value, scratch has immediate)
 		code = append(code, emitAluRegReg(dst, scratch, subcode)...)
@@ -985,7 +733,7 @@ func generateImmBinaryOp64(subcode byte) func(inst Instruction) []byte {
 
 // generateLoadIndSignExtend returns a function that generates machine code
 func generateLoadIndSignExtend(
-	prefix byte, // Optional extra prefix (e.g. 0x66), or 0 if none
+	prefix byte, // Optional extra prefix (e.g. X86_PREFIX_66), or X86_NO_PREFIX if none
 	opcode byte, // IR opcode (LOAD_IND_I8, LOAD_IND_I16, LOAD_IND_I32)
 	is64bit bool, // true for 64-bit mode
 ) func(inst Instruction) []byte {
@@ -998,17 +746,17 @@ func generateLoadIndSignExtend(
 		switch opcode {
 		case LOAD_IND_I8:
 			// MOVSX r64, byte ptr [BaseReg + regB*1 + disp32] (0F BE /r)
-			code := emitLoadWithSIB(regA, BaseReg, regB, int32(vx), []byte{0x0F, 0xBE}, is64bit, prefix)
+			code := emitLoadWithSIB(regA, BaseReg, regB, int32(vx), []byte{X86_PREFIX_0F, X86_OP2_MOVSX_R_RM8}, is64bit, prefix)
 			code = append(code, castReg8ToU64(regAIndex)...)
 			return code
 		case LOAD_IND_I16:
-			// 0x66 prefix + MOVSX r64, word ptr [BaseReg + regB*1 + disp32] (0F BF /r)
-			code := emitLoadWithSIB(regA, BaseReg, regB, int32(vx), []byte{0x0F, 0xBF}, is64bit, 0x66)
+			// X86_PREFIX_66 prefix + MOVSX r64, word ptr [BaseReg + regB*1 + disp32] (0F BF /r)
+			code := emitLoadWithSIB(regA, BaseReg, regB, int32(vx), []byte{X86_PREFIX_0F, X86_OP2_MOVSX_R_RM16}, is64bit, X86_PREFIX_66)
 			code = append(code, castReg16ToU64(regAIndex)...)
 			return code
 		case LOAD_IND_I32:
 			// MOVSXD r64, dword ptr [BaseReg + regB*1 + disp32] (63 /r)
-			return emitLoadWithSIB(regA, BaseReg, regB, int32(vx), []byte{0x63}, is64bit, prefix)
+			return emitLoadWithSIB(regA, BaseReg, regB, int32(vx), []byte{X86_OP_MOVSXD}, is64bit, prefix)
 		default:
 			panic("generateLoadIndSignExtend: invalid opcode")
 		}
@@ -1028,7 +776,7 @@ func castReg16ToU64(regIdx int) []byte {
 }
 
 func generateLoadInd(
-	prefix byte, // Optional extra prefix (e.g. 0x66), or 0 if none
+	prefix byte, // Optional extra prefix (e.g. X86_PREFIX_66), or X86_NO_PREFIX if none
 	opcode byte,
 	is64bit bool,
 ) func(inst Instruction) []byte {
@@ -1041,7 +789,7 @@ func generateLoadInd(
 		switch opcode {
 		case LOAD_IND_U8:
 			// zero-extend byte into the full 64-bit reg: MOVZX r64, r/m8 (0F B6 /r)
-			return emitLoadWithSIB(regA, BaseReg, regB, int32(vx), []byte{0x0F, 0xB6}, is64bit, prefix)
+			return emitLoadWithSIB(regA, BaseReg, regB, int32(vx), []byte{X86_PREFIX_0F, X86_OP2_MOVZX_R_RM8}, is64bit, prefix)
 
 		case LOAD_IND_U16:
 			// MOVZX r64, r/m16 (0F B7 /r) with special handling for BaseReg==R12
@@ -1054,18 +802,18 @@ func generateLoadInd(
 				index = regB
 			}
 
-			code := emitLoadWithSIB(regA, base, index, int32(vx), []byte{0x0F, 0xB7}, false, 0x66)
-			// AND with 0x0000FFFF to ensure proper zero-extension
-			code = append(code, emitAluRegImm32(regA, 4, 0x0000FFFF)...)
+			code := emitLoadWithSIB(regA, base, index, int32(vx), []byte{X86_PREFIX_0F, X86_OP2_MOVZX_R_RM16}, false, X86_PREFIX_66)
+			// AND with X86_MASK_16BIT to ensure proper zero-extension
+			code = append(code, emitAluRegImm32(regA, 4, X86_MASK_16BIT)...)
 			return code
 
 		case LOAD_IND_U32:
 			// zero-extend via 32-bit MOV → clears upper 32 bits in 64-bit reg
-			return emitLoadWithSIB(regA, BaseReg, regB, int32(vx), []byte{0x8B}, false, prefix)
+			return emitLoadWithSIB(regA, BaseReg, regB, int32(vx), []byte{X86_OP_MOV_R_RM}, false, prefix)
 
 		case LOAD_IND_U64:
 			// full 64-bit MOV r64, r/m64
-			return emitLoadWithSIB(regA, BaseReg, regB, int32(vx), []byte{0x8B}, true, prefix)
+			return emitLoadWithSIB(regA, BaseReg, regB, int32(vx), []byte{X86_OP_MOV_R_RM}, true, prefix)
 
 		default:
 			panic("generateLoadInd: invalid opcode")

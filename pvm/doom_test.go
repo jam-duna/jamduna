@@ -88,49 +88,7 @@ func TestSnapShot(t *testing.T) {
 	fmt.Printf("registers after snapshot: %v\n", rvm.Ram.ReadRegisters())
 
 }
-func TestDoomInterpreterFromSnapshot(t *testing.T) {
-	useRawRam = true // use raw RAM for this test
-	log.InitLogger("debug")
-	log.EnableModule(log.PvmAuthoring)
-	log.EnableModule("pvm_validator")
-	PvmLogging = false
-	fp := "../services/doom_self_playing.pvm"
 
-	raw_code, err := os.ReadFile(fp)
-	if err != nil {
-		t.Fatalf("Failed to read file %s: %v", fp, err)
-		return
-	}
-	fmt.Printf("Read %d bytes from %s\n", len(raw_code), fp)
-
-	initial_regs := make([]uint64, 13)
-	initial_pc := uint64(0)
-	hostENV := NewMockHostEnv()
-	metadata := "doom"
-	pvm := NewVM(DoomServiceID, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata), BackendInterpreter)
-	pvm.initLogs()
-
-	if err := pvm.attachFrameServer("0.0.0.0:8080", "./index.html"); err != nil {
-		t.Fatalf("frame server error: %v", err)
-	}
-	defer pvm.CloseFrameServer()
-
-	snapshotName := "BB966150000"
-	snapshot, err := pvm.LoadSnapshot(snapshotName)
-	if err != nil {
-		fmt.Printf("Failed to load snapshot: %v\n", err)
-		return
-	}
-
-	a := make([]byte, 0)
-	pvm.Gas = int64(9999999999999999)
-	pvm.Standard_Program_Initialization(a)
-
-	fmt.Printf("PVM start execution...\n")
-	pvm.Execute(types.EntryPointRefine, false, snapshot)
-
-	pvm.saveLogs()
-}
 func TestDoomNoSandbox(t *testing.T) {
 	useRawRam = true // use raw RAM for this test
 	log.InitLogger("debug")
@@ -163,7 +121,7 @@ func TestDoomNoSandbox(t *testing.T) {
 	pvm.Standard_Program_Initialization(a)
 
 	fmt.Printf("PVM start execution...\n")
-	pvm.Execute(types.EntryPointRefine, false, nil)
+	pvm.Execute(types.EntryPointRefine, false)
 
 	pvm.saveLogs()
 }

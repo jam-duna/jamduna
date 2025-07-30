@@ -86,14 +86,6 @@ func (vm *RecompilerVM) LogCurrentState(opcode byte, operands []byte, currentPC 
 		recordLog = true
 	}
 	// fmt.Printf("IsBasicBlockInstruction: %t vmBasicBlock: %d Gas: %d PC: %d Opcode: %s\n", IsBasicBlockInstruction(opcode), vm.vmBasicBlock, gas, currentPC, opcode_str(opcode))
-	if (vm.vmBasicBlock)%50000 == 0 { // every 50k basic blocks, take a snapshot
-		registers := vm.Ram.ReadRegisters()
-		//fmt.Printf("vmBasicBlock: %d Gas: %d PC: %d Opcode: %s Registers: %v\n", vm.vmBasicBlock, gas, currentPC, opcode_str(opcode), registers)
-		snapshot := vm.TakeSnapShot(fmt.Sprintf("BB%d", vm.vmBasicBlock), uint32(currentPC), registers, uint64(vm.Gas), 268435456, vm.r12, uint64(vm.vmBasicBlock))
-		// this snapshot + memory of what was just executed, but we want the NEXT PC, not the currentPC.  The Gas is not clear
-		vm.SaveSnapShot(snapshot)
-		// vm.snapshot = snapshot
-	}
 	if vm.vmBasicBlock%10000 == 0 { // every 10000 basic blocks, take a snapshot
 		recordLog = true
 	}
@@ -137,19 +129,19 @@ func Sbrk(rvmPtr unsafe.Pointer, registerIndexA uint32, registerIndexD uint32) {
 }
 func EmitCallToSbrkStub(rvmPtr uintptr, registerIndexA uint32, registerIndexD uint32) []byte {
 	var stub []byte
-	stub = append(stub, emitPushReg(regInfoList[0])...)         // push rax
-	stub = append(stub, emitPushReg(regInfoList[5])...)         // push rdi
-	stub = append(stub, encodeMovRdiImm64(uint64(rvmPtr))...)   // mov rdi, rvmPtr
-	stub = append(stub, encodeMovEsiImm32(registerIndexA)...)   // mov esi, valueA
-	stub = append(stub, encodeMovEdxImm32(registerIndexD)...)   // mov edx, registerIndexD
+	stub = append(stub, emitPushReg(RAX)...)                  // push rax
+	stub = append(stub, emitPushReg(RDI)...)                  // push rdi
+	stub = append(stub, encodeMovRdiImm64(uint64(rvmPtr))...) // mov rdi, rvmPtr
+	stub = append(stub, encodeMovEsiImm32(registerIndexA)...) // mov esi, valueA
+	stub = append(stub, encodeMovEdxImm32(registerIndexD)...) // mov edx, registerIndexD
 
 	// movabs rax, &Sbrk
 	addr := GetSbrkAddress()
 	stub = append(stub, encodeMovabsRaxImm64(uint64(addr))...)
 
-	stub = append(stub, encodeCallRax()...)                     // call rax
-	stub = append(stub, emitPopReg(regInfoList[5])...)          // pop rdi
-	stub = append(stub, emitPopReg(regInfoList[0])...)          // pop rax
+	stub = append(stub, encodeCallRax()...) // call rax
+	stub = append(stub, emitPopReg(RDI)...) // pop rdi
+	stub = append(stub, emitPopReg(RAX)...) // pop rax
 	return stub
 }
 
@@ -196,8 +188,8 @@ func EmitCallToEcalliStub(rvmPtr uintptr, opcode int) []byte {
 // and calls the Ecalli function using an absolute indirect call via RAX.
 func EmitCallToEcalliStubPushPop(rvmPtr uintptr, opcode int) []byte {
 	var stub []byte
-	stub = append(stub, emitPushReg(regInfoList[0])...)       // push rax
-	stub = append(stub, emitPushReg(regInfoList[5])...)       // push rdi
+	stub = append(stub, emitPushReg(RAX)...) // push rax
+	stub = append(stub, emitPushReg(RDI)...) // push rdi
 	// mov rdi, rvmPtr
 	stub = append(stub, encodeMovRdiImm64(uint64(rvmPtr))...)
 	// mov esi, opcode
@@ -209,157 +201,33 @@ func EmitCallToEcalliStubPushPop(rvmPtr uintptr, opcode int) []byte {
 	stub = append(stub, encodeMovabsRaxImm64(uint64(addr))...)
 	// call rax
 	stub = append(stub, encodeCallRax()...)
-	stub = append(stub, emitPopReg(regInfoList[5])...)        // pop rdi
-	stub = append(stub, emitPopReg(regInfoList[0])...)        // pop rax
-	return stub
-}
+	stub = append(stub, emitPopReg(RDI)...) // pop rdi
+	stub = append(stub, emitPopReg(RAX)...) // pop rax
 
-func EcalliSandBox(rvmPtr unsafe.Pointer, opcode int32) {
-	vm := (*RecompilerSandboxVM)(rvmPtr)
-	regMem, err := vm.sandBox.MemRead(uint64(vm.regDumpAddr), uint64(len(vm.Ram.ReadRegisters())*8))
-	if err != nil {
-		log.Error("x86", "EcalliSandBox: failed to read register memory", "error", err)
-		return
-	}
-	for i := range vm.Ram.ReadRegisters() {
-		val := binary.LittleEndian.Uint64(regMem[i*8 : (i+1)*8])
-		vm.Ram.WriteRegister(i, val)
-	}
-
-	gas, err := vm.ReadContextSlot(gasSlotIndex)
-	if err != nil {
-		log.Error("x86", "EcalliSandBox: failed to read gas from context slot", "error", err)
-		return
-	}
-	vm.Gas = int64(gas)
-	// Invoke the host logic, e.g., gas charging and actual operation
-	vm.InvokeHostCall(int(opcode))
-
-	vm.WriteContextSlot(gasSlotIndex, uint64(vm.Gas), 8)
-}
-
-func (rvm *RecompilerSandboxVM) EcalliCodeSandBox(opcode int) ([]byte, error) {
-	// 1. Dump registers to memory
-	code := rvm.DumpRegisterToMemory(true)
-
-	// 2. Generate call stub to Ecalli
-	fmt.Printf("EcalliCodeSandBox: opcode=%d\n", opcode)
-	stub := EmitCallToEcalliStubSandBox(uintptr(unsafe.Pointer(rvm)), opcode, rvm.ecallAddr)
-
-	// 3. Append stub to code
-	code = append(code, stub...)
-	for i, reg := range regInfoList {
-		code = append(code, generateLoadMemToReg(reg, uint64(rvm.regDumpAddr)+uint64(i*8))...)
-	}
-	return code, nil
-}
-
-// EmitCallToEcalliStub creates the machine code stub that sets up the arguments
-// and calls the Ecalli function using an absolute indirect call via RAX.
-func EmitCallToEcalliStubSandBox(rvmPtr uintptr, opcode int, addr uint64) []byte {
-	var stub []byte
-	// stub = append(stub, 0x50) // push rax
-	// stub = append(stub, 0x57) // push rdi
-	// stub = append(stub, 0x56) // push rsi
-	// mov rdi, rvmPtr
-	stub = append(stub, encodeMovRdiImm64(uint64(rvmPtr))...)
-	// mov esi, opcode
-	stub = append(stub, encodeMovEsiImm32(uint32(opcode))...)
-	// movabs rax, <address of Ecalli>
-	//fmt.Printf("EmitCallToEcalliStubSandBox: addr=0x%x\n", addr)
-	stub = append(stub, encodeMovabsRaxImm64(addr)...)
-	// call rax
-	stub = append(stub, encodeCallRax()...)
-	// Clean up the stack
-	//pop rsi, pop rdi, pop rax
-	// stub = append(stub, 0x5E) // pop rsi
-	// stub = append(stub, 0x5F) // pop rdi
-	// stub = append(stub, 0x58) // pop rax
-
-	return stub
-}
-
-func SbrkSandBox(rvmPtr unsafe.Pointer, registerIndexA uint32, registerIndexD uint32) {
-	vm := (*RecompilerSandboxVM)(rvmPtr)
-	// Acquire lock to ensure thread-safety
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
-
-	// Reload registers from memory before executing host call
-	for i := range vm.Ram.ReadRegisters() {
-		regAddr := vm.regDumpAddr
-		regMem, errr := vm.sandBox.MemRead(uint64(regAddr+uintptr(i*8)), 8)
-		if errr != nil {
-			log.Error("x86", "SbrkSandBox: failed to read register memory", "index", i, "error", errr)
-			return
-		}
-		v := binary.LittleEndian.Uint64(regMem)
-		vm.Ram.WriteRegister(i, v)
-		//fmt.Printf("SbrkSandBox: register[%d] = %d\n", i, v)
-	}
-	// Invoke the host logic, e.g., gas charging and actual operation
-	result := vm.InvokeSbrkSandBox(registerIndexA, registerIndexD)
-	// Write the result back to the specified register
-	vm.Ram.WriteRegister(int(registerIndexD), uint64(result))
-	// todo : use memory to separate registers and memory
-	vm.writeBackRegisters()
-}
-
-func (vm *RecompilerSandboxVM) writeBackRegisters() {
-	for i := range vm.Ram.ReadRegisters() {
-		v, _ := vm.Ram.ReadRegister(i)
-		if err := vm.sandBox.RegWrite(sandBoxRegInfoList[i], v); err != nil {
-			log.Error("x86", "writeBackRegisters: failed to write back register", "index", i, "error", err)
-			return
-		}
-		// fmt.Printf("writeBackRegisters: register[%d] = %d\n", i, v)
-		// log.Debug("x86", "writeBackRegisters", "index", i, "value", v, "name", sandBoxRegInfoList[i].Name)
-	}
-}
-
-func EmitCallToSbrkStubSandBox(rvmPtr uintptr, registerIndexA uint32, registerIndexD uint32, addr uint64) []byte {
-	var stub []byte
-	stub = append(stub, emitPushReg(regInfoList[0])...)         // push rax
-	stub = append(stub, emitPushReg(regInfoList[5])...)         // push rdi
-	stub = append(stub, emitPushReg(regInfoList[4])...)         // push rsi
-	stub = append(stub, emitPushReg(regInfoList[2])...)         // push rdx
-	stub = append(stub, encodeMovRdiImm64(uint64(rvmPtr))...)   // mov rdi, rvmPtr
-	stub = append(stub, encodeMovEsiImm32(registerIndexA)...)   // mov esi, registerIndexA
-	stub = append(stub, encodeMovEdxImm32(registerIndexD)...)   // mov edx, registerIndexD
-
-	// movabs rax, &Sbrk
-	stub = append(stub, encodeMovabsRaxImm64(addr)...)
-
-	stub = append(stub, encodeCallRax()...)                     // call rax
-	// Clean up the stack
-	stub = append(stub, emitPopReg(regInfoList[2])...)          // pop rdx
-	stub = append(stub, emitPopReg(regInfoList[4])...)          // pop rsi
-	stub = append(stub, emitPopReg(regInfoList[5])...)          // pop rdi
-	stub = append(stub, emitPopReg(regInfoList[0])...)          // pop rax
 	return stub
 }
 
 // encodeMovRdiImm64 encodes 'mov rdi, imm64'.
 func encodeMovRdiImm64(imm uint64) []byte {
-	return emitMovImmToReg64(regInfoList[5], imm) // RDI is at index 5
+	return emitMovImmToReg64(RDI, imm) // RDI is at index 5
 }
 func encodeMovEdxImm32(val uint32) []byte {
-	return emitMovImm32ToReg32(regInfoList[2], val) // RDX is at index 2
+	return emitMovImm32ToReg32(RDX, val) // RDX is at index 2
 }
 
 // encodeMovEsiImm32 encodes 'mov esi, imm32'.
 func encodeMovEsiImm32(imm uint32) []byte {
-	return emitMovImm32ToReg32(regInfoList[4], imm) // RSI is at index 4
+	return emitMovImm32ToReg32(RSI, imm) // RSI is at index 4
 }
 
 // encodeMovabsRaxImm64 encodes 'movabs rax, imm64'.
 func encodeMovabsRaxImm64(imm uint64) []byte {
-	return emitMovImmToReg64(regInfoList[0], imm) // RAX is at index 0
+	return emitMovImmToReg64(RAX, imm) // RAX is at index 0
 }
 
 // encodeCallRax encodes 'call rax'.
 func encodeCallRax() []byte {
-	return emitCallReg(regInfoList[0]) // RAX is at index 0
+	return emitCallReg(RAX) // RAX is at index 0
 }
 
 func (vm *RecompilerVM) chargeGas(host_fn int) uint64 {
@@ -461,32 +329,6 @@ func (vm *RecompilerVM) InvokeSbrk(registerA uint32, registerIndexD uint32) (res
 
 		vm.allocatePages(idx_start, page_count)
 		// fmt.Fprintf(os.Stderr, "RecompilerVM: Sbrk: Allocated %d pages from %d to %d\n", page_count, idx_start, idx_end)
-	}
-	vm.SetCurrentHeapPointer(new_heap_pointer)
-	return result
-}
-
-func (vm *RecompilerSandboxVM) InvokeSbrkSandBox(registerA uint32, registerIndexD uint32) (result uint32) {
-	valueA, _ := vm.Ram.ReadRegister(int(registerA))
-	currentHeapPointer := vm.GetCurrentHeapPointer()
-	if valueA == 0 {
-		vm.Ram.WriteRegister(int(registerIndexD), uint64(currentHeapPointer))
-		return currentHeapPointer
-	}
-	result = currentHeapPointer
-	//fmt.Fprintf(os.Stderr, "RecompilerVM: Sbrk: current_heap_pointer=%d, valueA=%d, registerIndexD=%d\n", currentHeapPointer, valueA, registerIndexD)
-	next_page_boundary := P_func(currentHeapPointer)
-	new_heap_pointer := currentHeapPointer + uint32(valueA)
-	if new_heap_pointer > uint32(next_page_boundary) {
-
-		final_boundary := P_func(uint32(new_heap_pointer))
-		//fmt.Fprintf(os.Stderr, "RecompilerVM: Sbrk: new_heap_pointer=%d, final_boundary=%d\n", new_heap_pointer, final_boundary)
-		idx_start := next_page_boundary / Z_P
-		idx_end := final_boundary / Z_P
-		page_count := idx_end - idx_start
-
-		vm.allocatePages(idx_start, page_count)
-		//fmt.Fprintf(os.Stderr, "RecompilerVM: Sbrk: Allocated %d pages from %d to %d\n", page_count, idx_start, idx_end)
 	}
 	vm.SetCurrentHeapPointer(new_heap_pointer)
 	return result

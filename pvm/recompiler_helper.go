@@ -4,30 +4,9 @@ import (
 	"encoding/binary"
 )
 
-type X86Reg struct {
-	Name    string
-	RegBits byte // 3-bit code for ModRM/SIB
-	REXBit  byte // 1 if register index >= 8
-}
-
-var regInfoList = []X86Reg{
-	{"rax", 0, 0}, // Commonly used as return value register
-	{"rcx", 1, 0}, // Used for loop counters or intermediates
-	{"rdx", 2, 0}, // Often paired with rax for mul/div
-	{"rbx", 3, 0},
-	{"rsi", 6, 0}, // Often used as function argument
-
-	{"rdi", 7, 0}, // Often used as function argument
-	{"r8", 0, 1},  // Typically function argument #5
-	{"r9", 1, 1},
-	{"r10", 2, 1},
-	{"r11", 3, 1},
-
-	{"r13", 5, 1},
-	{"r14", 6, 1},
-	{"r15", 7, 1},
-	{"r12", 4, 1},
-}
+// ================================================================================================
+// Data-Driven PVM Bytecode to x86 Mapping
+// ================================================================================================
 
 var pvmByteCodeToX86Code = map[byte]func(Instruction) []byte{
 	// A.5.1. Instructions without Arguments
@@ -43,22 +22,22 @@ var pvmByteCodeToX86Code = map[byte]func(Instruction) []byte{
 	LOAD_IMM_JUMP_IND: generateLoadImmJumpIndirect, // does a LoadImm in x86 side, but the jump is managed by the VM
 
 	// JumpType = CONDITIONAL (x86code sets r15 to 1 or 0, VM uses this for branching to TruePC)
-	BRANCH_EQ_IMM:   generateBranchImm(0x84),
-	BRANCH_NE_IMM:   generateBranchImm(0x85),
-	BRANCH_LT_U_IMM: generateBranchImm(0x82),
-	BRANCH_LE_U_IMM: generateBranchImm(0x86),
-	BRANCH_GE_U_IMM: generateBranchImm(0x83),
-	BRANCH_GT_U_IMM: generateBranchImm(0x87),
-	BRANCH_LT_S_IMM: generateBranchImm(0x8C),
-	BRANCH_LE_S_IMM: generateBranchImm(0x8E),
-	BRANCH_GE_S_IMM: generateBranchImm(0x8D),
-	BRANCH_GT_S_IMM: generateBranchImm(0x8F),
-	BRANCH_EQ:       generateCompareBranch(0x84),
-	BRANCH_NE:       generateCompareBranch(0x85),
-	BRANCH_LT_U:     generateCompareBranch(0x82),
-	BRANCH_LT_S:     generateCompareBranch(0x8C),
-	BRANCH_GE_U:     generateCompareBranch(0x83),
-	BRANCH_GE_S:     generateCompareBranch(0x8D),
+	BRANCH_EQ_IMM:   generateBranchImm(X86_OP2_JE),
+	BRANCH_NE_IMM:   generateBranchImm(X86_OP2_JNE),
+	BRANCH_LT_U_IMM: generateBranchImm(X86_OP2_JB),
+	BRANCH_LE_U_IMM: generateBranchImm(X86_OP2_JBE),
+	BRANCH_GE_U_IMM: generateBranchImm(X86_OP2_JAE),
+	BRANCH_GT_U_IMM: generateBranchImm(X86_OP2_JA),
+	BRANCH_LT_S_IMM: generateBranchImm(X86_OP2_JL),
+	BRANCH_LE_S_IMM: generateBranchImm(X86_OP2_JLE),
+	BRANCH_GE_S_IMM: generateBranchImm(X86_OP2_JGE),
+	BRANCH_GT_S_IMM: generateBranchImm(X86_OP2_JG),
+	BRANCH_EQ:       generateCompareBranch(X86_OP2_JE),
+	BRANCH_NE:       generateCompareBranch(X86_OP2_JNE),
+	BRANCH_LT_U:     generateCompareBranch(X86_OP2_JB),
+	BRANCH_LT_S:     generateCompareBranch(X86_OP2_JL),
+	BRANCH_GE_U:     generateCompareBranch(X86_OP2_JAE),
+	BRANCH_GE_S:     generateCompareBranch(X86_OP2_JGE),
 
 	// A.5.2. Instructions with Arguments of One Immediate. InstructionI1
 
@@ -67,36 +46,36 @@ var pvmByteCodeToX86Code = map[byte]func(Instruction) []byte{
 
 	// A.5.4. Instructions with Arguments of Two Immediates.
 	STORE_IMM_U8: generateStoreImmGeneric(
-		0xC6, // MOV r/m8, imm8
-		0x00, // no prefix
+		X86_OP_MOV_RM_IMM8, // MOV r/m8, imm8
+		X86_NO_PREFIX,      // no prefix
 		func(v uint64) []byte { return []byte{byte(v)} },
 	),
 	STORE_IMM_U16: generateStoreImmGeneric(
-		0xC7, // MOV r/m16, imm16 (with 0x66 prefix)
-		0x66,
+		X86_OP_MOV_RM_IMM, // MOV r/m16, imm16 (with 0x66 prefix)
+		X86_PREFIX_66,
 		func(v uint64) []byte { return encodeU16(uint16(v)) },
 	),
 	STORE_IMM_U32: generateStoreImmGeneric(
-		0xC7, // MOV r/m32, imm32
-		0x00,
+		X86_OP_MOV_RM_IMM, // MOV r/m32, imm32
+		X86_NO_PREFIX,
 		func(v uint64) []byte { return encodeU32(uint32(v)) },
 	),
 	STORE_IMM_U64: generateStoreImmU64,
 
 	// A.5.6. Instructions with Arguments of One Register & Two Immediates.
 	LOAD_IMM: generateLoadImm32,
-	LOAD_U8:  generateLoadWithBase([]byte{0x0F, 0xB6}, false), // MOVZX r32, byte ptr [Base+disp32]
-	LOAD_I8:  generateLoadWithBase([]byte{0x0F, 0xBE}, true),  // MOVSX r32, byte ptr [Base+disp32]
-	LOAD_U16: generateLoadWithBase([]byte{0x0F, 0xB7}, false), // MOVZX r32, word ptr [Base+disp32]
+	LOAD_U8:  generateLoadWithBase([]byte{X86_PREFIX_0F, X86_OP2_MOVZX_R_RM8}, false),  // MOVZX r32, byte ptr [Base+disp32]
+	LOAD_I8:  generateLoadWithBase([]byte{X86_PREFIX_0F, X86_OP2_MOVSX_R_RM8}, true),   // MOVSX r32, byte ptr [Base+disp32]
+	LOAD_U16: generateLoadWithBase([]byte{X86_PREFIX_0F, X86_OP2_MOVZX_R_RM16}, false), // MOVZX r32, word ptr [Base+disp32]
 
-	LOAD_I16:  generateLoadWithBase([]byte{0x0F, 0xBF}, true), // MOVSX r32, word ptr [Base+disp32]
-	LOAD_U32:  generateLoadWithBase([]byte{0x8B}, false),      // MOV r32, dword ptr [Base+disp32]
-	LOAD_I32:  generateLoadWithBase([]byte{0x63}, true),       // MOVSXD r64, dword ptr [Base+disp32]
-	LOAD_U64:  generateLoadWithBase([]byte{0x8B}, true),       // MOV r64, qword ptr [Base+disp32],
-	STORE_U8:  generateStoreWithBase(0x88, 0x00, false),       // MOV byte ptr [Base+disp32], r8
-	STORE_U16: generateStoreWithBase(0x89, 0x66, false),       // MOV word ptr [Base+disp32], r16
-	STORE_U32: generateStoreWithBase(0x89, 0x00, false),       // MOV dword ptr [Base+disp32], r32
-	STORE_U64: generateStoreWithBase(0x89, 0x00, true),        // MOV qword ptr [Base+disp32], r64  (REX.W=1)
+	LOAD_I16:  generateLoadWithBase([]byte{X86_PREFIX_0F, X86_OP2_MOVSX_R_RM16}, true), // MOVSX r32, word ptr [Base+disp32]
+	LOAD_U32:  generateLoadWithBase([]byte{X86_OP_MOV_R_RM}, false),                    // MOV r32, dword ptr [Base+disp32]
+	LOAD_I32:  generateLoadWithBase([]byte{X86_OP_MOVSXD}, true),                       // MOVSXD r64, dword ptr [Base+disp32]
+	LOAD_U64:  generateLoadWithBase([]byte{X86_OP_MOV_R_RM}, true),                     // MOV r64, qword ptr [Base+disp32],
+	STORE_U8:  generateStoreWithBase(X86_OP_MOV_RM8_R8, X86_NO_PREFIX, false),          // MOV byte ptr [Base+disp32], r8
+	STORE_U16: generateStoreWithBase(X86_OP_MOV_RM_R, X86_PREFIX_66, false),            // MOV word ptr [Base+disp32], r16
+	STORE_U32: generateStoreWithBase(X86_OP_MOV_RM_R, X86_NO_PREFIX, false),            // MOV dword ptr [Base+disp32], r32
+	STORE_U64: generateStoreWithBase(X86_OP_MOV_RM_R, X86_NO_PREFIX, true),             // MOV qword ptr [Base+disp32], r64  (REX.W=1)
 
 	// A.5.7. Instructions with Arguments of One Register & Two Immediates.
 	STORE_IMM_IND_U8:  generateStoreImmIndU8,
@@ -122,48 +101,48 @@ var pvmByteCodeToX86Code = map[byte]func(Instruction) []byte{
 	STORE_IND_U16:     generateStoreIndirect(2),
 	STORE_IND_U32:     generateStoreIndirect(4),
 	STORE_IND_U64:     generateStoreIndirect(8),
-	LOAD_IND_U8:       generateLoadInd(0x00, LOAD_IND_U8, false),
-	LOAD_IND_I8:       generateLoadIndSignExtend(0x00, LOAD_IND_I8, false),
-	LOAD_IND_U16:      generateLoadInd(0x66, LOAD_IND_U16, false),
-	LOAD_IND_I16:      generateLoadIndSignExtend(0x66, LOAD_IND_I16, false),
-	LOAD_IND_U32:      generateLoadInd(0x00, LOAD_IND_U32, false),
-	LOAD_IND_I32:      generateLoadIndSignExtend(0x00, LOAD_IND_I32, true),
-	LOAD_IND_U64:      generateLoadInd(0x00, LOAD_IND_U64, true),
+	LOAD_IND_U8:       generateLoadInd(X86_NO_PREFIX, LOAD_IND_U8, false),
+	LOAD_IND_I8:       generateLoadIndSignExtend(X86_NO_PREFIX, LOAD_IND_I8, false),
+	LOAD_IND_U16:      generateLoadInd(X86_PREFIX_66, LOAD_IND_U16, false),
+	LOAD_IND_I16:      generateLoadIndSignExtend(X86_PREFIX_66, LOAD_IND_I16, false),
+	LOAD_IND_U32:      generateLoadInd(X86_NO_PREFIX, LOAD_IND_U32, false),
+	LOAD_IND_I32:      generateLoadIndSignExtend(X86_NO_PREFIX, LOAD_IND_I32, true),
+	LOAD_IND_U64:      generateLoadInd(X86_NO_PREFIX, LOAD_IND_U64, true),
 	ADD_IMM_32:        generateBinaryImm32,
-	AND_IMM:           generateImmBinaryOp64(4),
-	XOR_IMM:           generateImmBinaryOp64(6),
-	OR_IMM:            generateImmBinaryOp64(1),
+	AND_IMM:           generateImmBinaryOp64(X86_REG_AND),
+	XOR_IMM:           generateImmBinaryOp64(X86_REG_XOR),
+	OR_IMM:            generateImmBinaryOp64(X86_REG_OR),
 	MUL_IMM_32:        generateImmMulOp32,
-	SET_LT_U_IMM:      generateImmSetCondOp32New(0x92), // SETB / below unsigned
-	SET_LT_S_IMM:      generateImmSetCondOp32New(0x9C), // SETL / below signed
-	SET_GT_U_IMM:      generateImmSetCondOp32New(0x97), // SETA / above unsigned
-	SET_GT_S_IMM:      generateImmSetCondOp32New(0x9F), // SETG / above signed
-	SHLO_L_IMM_32:     generateImmShiftOp32SHLO(4),
-	SHLO_R_IMM_32:     generateImmShiftOp32(0xC1, 5, false),
-	SHLO_L_IMM_ALT_32: generateImmShiftOp32Alt(4),
-	SHLO_R_IMM_ALT_32: generateImmShiftOp32(0xC1, 5, true),
-	SHAR_R_IMM_ALT_32: generateImmShiftOp32(0xC1, 7, true),
+	SET_LT_U_IMM:      generateImmSetCondOp32New(X86_OP2_SETB), // SETB / below unsigned
+	SET_LT_S_IMM:      generateImmSetCondOp32New(X86_OP2_SETL), // SETL / below signed
+	SET_GT_U_IMM:      generateImmSetCondOp32New(X86_OP2_SETA), // SETA / above unsigned
+	SET_GT_S_IMM:      generateImmSetCondOp32New(X86_OP2_SETG), // SETG / above signed
+	SHLO_L_IMM_32:     generateImmShiftOp32SHLO(X86_REG_SHL),
+	SHLO_R_IMM_32:     generateImmShiftOp32(X86_OP_GROUP2_RM_IMM8, X86_REG_SHR, false),
+	SHLO_L_IMM_ALT_32: generateImmShiftOp32Alt(X86_REG_SHL),
+	SHLO_R_IMM_ALT_32: generateImmShiftOp32(X86_OP_GROUP2_RM_IMM8, X86_REG_SHR, true),
+	SHAR_R_IMM_ALT_32: generateImmShiftOp32(X86_OP_GROUP2_RM_IMM8, X86_REG_SAR, true),
 	NEG_ADD_IMM_32:    generateNegAddImm32,
 	CMOV_IZ_IMM:       generateCmovImm(true),
 	CMOV_NZ_IMM:       generateCmovImm(false),
-	ADD_IMM_64:        generateImmBinaryOp64(0),
+	ADD_IMM_64:        generateImmBinaryOp64(X86_REG_ADD),
 	MUL_IMM_64:        generateImmMulOp64,
-	SHLO_L_IMM_64:     generateImmShiftOp64(0xC1, 4),
-	SHLO_R_IMM_64:     generateImmShiftOp64(0xC1, 5),
-	SHAR_R_IMM_32:     generateImmShiftOp32(0xC1, 7, false),
-	SHAR_R_IMM_64:     generateImmShiftOp64(0xC1, 7),
+	SHLO_L_IMM_64:     generateImmShiftOp64(X86_OP_GROUP2_RM_IMM8, X86_REG_SHL),
+	SHLO_R_IMM_64:     generateImmShiftOp64(X86_OP_GROUP2_RM_IMM8, X86_REG_SHR),
+	SHAR_R_IMM_32:     generateImmShiftOp32(X86_OP_GROUP2_RM_IMM8, X86_REG_SAR, false),
+	SHAR_R_IMM_64:     generateImmShiftOp64(X86_OP_GROUP2_RM_IMM8, X86_REG_SAR),
 	NEG_ADD_IMM_64:    generateNegAddImm64,
-	SHLO_L_IMM_ALT_64: generateImmShiftOp64Alt(4),
-	SHLO_R_IMM_ALT_64: generateImmShiftOp64Alt(5),
-	SHAR_R_IMM_ALT_64: generateImmShiftOp64Alt(7),
-	ROT_R_64_IMM:      generateImmShiftOp64(0xC1, 1),
-	ROT_R_64_IMM_ALT:  generateImmShiftOp64(0xC1, 1),
-	ROT_R_32_IMM_ALT:  generateImmShiftOp32(0xC1, 1, true),
+	SHLO_L_IMM_ALT_64: generateImmShiftOp64Alt(X86_REG_SHL),
+	SHLO_R_IMM_ALT_64: generateImmShiftOp64Alt(X86_REG_SHR),
+	SHAR_R_IMM_ALT_64: generateImmShiftOp64Alt(X86_REG_SAR),
+	ROT_R_64_IMM:      generateImmShiftOp64(X86_OP_GROUP2_RM_IMM8, X86_REG_ROR),
+	ROT_R_64_IMM_ALT:  generateImmShiftOp64(X86_OP_GROUP2_RM_IMM8, X86_REG_ROR),
+	ROT_R_32_IMM_ALT:  generateImmShiftOp32(X86_OP_GROUP2_RM_IMM8, X86_REG_ROR, true),
 	ROT_R_32_IMM:      generateRotateRight32Imm,
 
 	// A.5.13. Instructions with Arguments of Three Registers.
-	ADD_32: generateBinaryOp32(0x01), // add
-	SUB_32: generateBinaryOp32(0x29), // sub
+	ADD_32: generateBinaryOp32(X86_OP_ADD_RM_R), // add
+	SUB_32: generateBinaryOp32(X86_OP_SUB_RM_R), // sub
 
 	MUL_32:        generateMul32,
 	DIV_U_32:      generateDivUOp32,
@@ -172,43 +151,39 @@ var pvmByteCodeToX86Code = map[byte]func(Instruction) []byte{
 	REM_S_32:      generateRemSOp32,
 	SHLO_L_32:     generateSHLO_L_32(),
 	SHLO_R_32:     generateSHLO_R_32(),
-	SHAR_R_32:     generateShiftOp32SHAR(0xD3, 7),
-	ADD_64:        generateBinaryOp64(0x01), // add
-	SUB_64:        generateBinaryOp64(0x29), // sub
-	MUL_64:        generateMul64,            // imul
+	SHAR_R_32:     generateShiftOp32SHAR(),
+	ADD_64:        generateBinaryOp64(X86_OP_ADD_RM_R), // add
+	SUB_64:        generateBinaryOp64(X86_OP_SUB_RM_R), // sub
+	MUL_64:        generateMul64,                       // imul
 	DIV_U_64:      generateDivUOp64,
 	DIV_S_64:      generateDivSOp64,
 	REM_U_64:      generateRemUOp64,
 	REM_S_64:      generateRemSOp64,
 	SHLO_L_64:     generateSHLO_L_64(),
-	SHLO_R_64:     generateShiftOp64B(0xD3, 5),
-	SHAR_R_64:     generateShiftOp64(0xD3, 7),
-	AND:           generateBinaryOp64(0x21),
-	XOR:           generateBinaryOp64(0x31),
-	OR:            generateBinaryOp64(0x09),
+	SHLO_R_64:     generateShiftOp64B(X86_OP_GROUP2_RM_CL, X86_REG_SHR),
+	SHAR_R_64:     generateShiftOp64(X86_OP_GROUP2_RM_CL, X86_REG_SAR),
+	AND:           generateBinaryOp64(X86_OP_AND_RM_R),
+	XOR:           generateBinaryOp64(X86_OP_XOR_RM_R),
+	OR:            generateBinaryOp64(X86_OP_OR_RM_R),
 	MUL_UPPER_S_S: generateMulUpperOp64("signed"),
 	MUL_UPPER_U_U: generateMulUpperOp64("unsigned"),
 	MUL_UPPER_S_U: generateMulUpperOp64("mixed"),
-	SET_LT_U:      generateSetCondOp64(0x92),
-	SET_LT_S:      generateSetCondOp64(0x9C),
-	CMOV_IZ:       generateCmovOp64(0x44),
-	CMOV_NZ:       generateCmovOp64(0x45),
+	SET_LT_U:      generateSetCondOp64(X86_OP2_SETB),
+	SET_LT_S:      generateSetCondOp64(X86_OP2_SETL),
+	CMOV_IZ:       generateCmovOp64(X86_OP2_CMOVE),
+	CMOV_NZ:       generateCmovOp64(X86_OP2_CMOVNE),
 	ROT_L_64:      generateROTL64(),
-	ROT_L_32:      generateShiftOp32(0xD3, 0),
-	ROT_R_64:      generateShiftOp64(0xD3, 1),
+	ROT_L_32:      generateShiftOp32(X86_REG_ROL),
+	ROT_R_64:      generateShiftOp64(X86_OP_GROUP2_RM_CL, X86_REG_ROR),
 	ROT_R_32:      generateROT_R_32(),
 	AND_INV:       generateAndInvOp64,
 	OR_INV:        generateOrInvOp64,
 	XNOR:          generateXnorOp64,
 	MAX:           generateMax(),
-	MAX_U:         generateMinOrMaxU(true),
+	MAX_U:         generateMaxU(),
 	MIN:           generateMin(),
 	MIN_U:         generateMinU(),
 }
-
-const BaseRegIndex = 13
-
-var BaseReg = regInfoList[BaseRegIndex]
 
 // use store the original memory address for real memory
 // this register is used as base for register dump
@@ -216,42 +191,30 @@ var BaseReg = regInfoList[BaseRegIndex]
 // encodeMovImm encodes: mov rX, imm64
 func encodeMovImm(regIdx int, imm uint64) []byte {
 	reg := regInfoList[regIdx]
-	var prefix byte = 0x48
-	if reg.REXBit == 1 {
-		// For r8..r15, set RE XB
-		// since opcode B8+r low bits, high bit handled by REX.B
-		// but we need to distinguish r8..r15
-		prefix |= 0x01 // REX.B = 1
-	}
+	rex := buildREX(true, false, false, reg.REXBit == 1)
 	// opcode = B8 + low 3 bits
-	op := byte(0xB8 + reg.RegBits)
+	op := byte(X86_OP_MOV_R_IMM + reg.RegBits)
 
 	immBytes := make([]byte, 8)
 	binary.LittleEndian.PutUint64(immBytes, imm)
-	return append([]byte{prefix, op}, immBytes...)
+	return append([]byte{rex, op}, immBytes...)
 }
 
 func encodeMovRegToMem(srcIdx, baseIdx int, offset byte) []byte {
 	src := regInfoList[srcIdx]
 	base := regInfoList[baseIdx]
 
-	rex := byte(0x48)
-	if src.REXBit == 1 {
-		rex |= 0x04 // REX.R
-	}
-	if base.REXBit == 1 {
-		rex |= 0x01 // REX.B
-	}
+	rex := buildREX(true, src.REXBit == 1, false, base.REXBit == 1)
 
 	if base.RegBits == 4 { // R12
 		// Must use SIB encoding when rm=4 (R12)
-		modrm := byte(0x40 | (src.RegBits << 3) | 0x04)
-		sib := byte(0x20 | base.RegBits) // scale=0, index=none(4), base=R12
-		return []byte{rex, 0x89, modrm, sib, offset}
+		modrm := buildModRM(1, src.RegBits, 4) // mod=01 (disp8), reg=src, rm=100 (SIB)
+		sib := buildSIB(0, 4, base.RegBits)    // scale=0, index=none(4), base=R12
+		return []byte{rex, X86_OP_MOV_RM_R, modrm, sib, offset}
 	} else {
 		// Normal encoding
-		modrm := byte(0x40 | (src.RegBits << 3) | base.RegBits)
-		return []byte{rex, 0x89, modrm, offset}
+		modrm := buildModRM(1, src.RegBits, base.RegBits) // mod=01 (disp8), reg=src, rm=base
+		return []byte{rex, X86_OP_MOV_RM_R, modrm, offset}
 	}
 }
 func encodeMovImm64ToMem(memAddr uint64, imm uint64) []byte {
@@ -261,23 +224,23 @@ func encodeMovImm64ToMem(memAddr uint64, imm uint64) []byte {
 	var code []byte
 
 	// PUSH RAX and RDX (save scratch registers)
-	code = append(code, 0x50) // PUSH RAX
-	code = append(code, 0x52) // PUSH RDX
+	code = append(code, X86_OP_PUSH_R)   // PUSH RAX
+	code = append(code, X86_OP_PUSH_R+2) // PUSH RDX
 
 	// MOVABS RAX, memAddr
-	code = append(code, 0x48, 0xB8) // MOV RAX, imm64
+	code = append(code, X86_REX_W_PREFIX, X86_OP_MOV_RAX_IMM64) // MOV RAX, imm64
 	code = append(code, encodeU64(memAddr)...)
 
 	// MOVABS RDX, imm
-	code = append(code, 0x48, 0xBA) // MOV RDX, imm64
+	code = append(code, X86_REX_W_PREFIX, X86_OP_MOV_RDX_IMM64) // MOV RDX, imm64
 	code = append(code, encodeU64(imm)...)
 
 	// MOV [RAX], RDX
-	code = append(code, 0x48, 0x89, 0x10) // MOV QWORD PTR [RAX], RDX
+	code = append(code, X86_REX_W_PREFIX, X86_OP_MOV_RM_R, X86_MODRM_RAX_RDX) // MOV QWORD PTR [RAX], RDX
 
 	// POP RDX and RAX (restore)
-	code = append(code, 0x5A) // POP RDX
-	code = append(code, 0x58) // POP RAX
+	code = append(code, X86_OP_POP_R+2) // POP RDX
+	code = append(code, X86_OP_POP_R)   // POP RAX
 
 	return code
 }
@@ -294,19 +257,16 @@ func emitStoreImm32(buf []byte, disp uint32, imm uint32) []byte {
 	base := BaseReg
 
 	// REX prefix: W=0, R=0, X=0, B=base.REXBit
-	rex := byte(0x40)
-	if base.REXBit != 0 {
-		rex |= 0x01
-	}
+	rex := buildREX(false, false, false, base.REXBit != 0)
 	// MOV [Base+disp], imm32 → opcode 0xC7 /0 + ModRM/SIB
-	modrm := byte(0x84) // mod=10, reg=000, r/m=100→SIB
-	sib := byte(0x24 | (base.RegBits & 0x07))
+	modrm := buildModRM(2, 0, 4)        // mod=10 (disp32), reg=000, r/m=100→SIB
+	sib := buildSIB(0, 4, base.RegBits) // scale=0, index=none, base=base register
 
 	// disp32 LE
 	dispBytes := encodeU32(disp)
 	immBytes := encodeU32(imm)
 
-	buf = append(buf, rex, 0xC7, modrm, sib)
+	buf = append(buf, rex, X86_OP_MOV_RM_IMM, modrm, sib)
 	buf = append(buf, dispBytes...)
 	buf = append(buf, immBytes...)
 	return buf
@@ -350,70 +310,46 @@ func (rvm *RecompilerVM) DumpRegisterToMemory(move_back bool) []byte {
 // If dst is RCX itself, use RAX instead as the temporary register.
 func generateLoadMemToReg(dst X86Reg, addr uint64) []byte {
 	var code []byte
-	// replace like mov rax, qword ptr [r12 - 0x36]
+
 	// Choose temporary register: default is RCX, but if dst==RCX use RAX
 	var tempReg X86Reg
-	var pushOp, popOp byte
-	var movAbsRex, movAbsOpcode byte
-	// fmt.Printf("generateLoadMemToReg: dst=%s, addr=0x%x\n", dst.Name, addr)
 	if dst.Name == "rcx" {
-		// Use RAX as temporary register
-		tempReg = regInfoList[0] // RAX
-		pushOp = 0x50            // PUSH RAX
-		popOp = 0x58             // POP  RAX
-		movAbsRex = 0x48         // REX.W=1, REX.B=0
-		movAbsOpcode = 0xB8      // MOVABS RAX, imm64
+		tempReg = RAX
 	} else {
-		// Default to RCX
-		tempReg = regInfoList[1] // RCX
-		pushOp = 0x51            // PUSH RCX
-		popOp = 0x59             // POP  RCX
-		movAbsRex = 0x48 | 0x02  // REX.W=1, REX.B=1
-		movAbsOpcode = 0xB9      // MOVABS RCX, imm64
+		tempReg = RCX
 	}
 
 	// 1) Save temporary register
-	code = append(code, pushOp)
+	code = append(code, emitPushReg(tempReg)...)
 
 	// 2) MOVABS tempReg, addr
-	code = append(code, movAbsRex, movAbsOpcode)
-	code = append(code, encodeU64(addr)...)
+	code = append(code, emitMovImmToReg64(tempReg, addr)...)
 
 	// 3) MOV dst, [tempReg]
-	//    ModR/M: mod=00 (memory), reg=dst, rm=tempReg
-	rex := byte(0x48) // REX.W = 1
-	if dst.REXBit == 1 {
-		rex |= 0x04 // REX.R for reg field
-	}
-	if tempReg.REXBit == 1 {
-		rex |= 0x01 // REX.B for rm field
-	}
-	modrm := byte((dst.RegBits << 3) | tempReg.RegBits)
-	code = append(code, rex, 0x8B, modrm)
+	code = append(code, emitMovMemToReg64(dst, tempReg)...)
 
 	// 4) Restore temporary register
-	code = append(code, popOp)
+	code = append(code, emitPopReg(tempReg)...)
 
 	return code
 }
 
 // Increment the 64-bit value at memory[addr:uint64] by 1.
 func generateIncMem(addr uint64) []byte {
-	code := []byte{}
+	var code []byte
+	rcx := RCX
 
 	// 1) Save RCX
-	code = append(code, 0x51) // PUSH RCX
+	code = append(code, emitPushReg(rcx)...)
 
 	// 2) Load target address into RCX: MOVABS RCX, imm64
-	code = append(code, 0x48, 0xB9)         // REX.W + opcode for MOVABS RCX, imm64
-	code = append(code, encodeU64(addr)...) // imm64 (little-endian)
+	code = append(code, emitMovImmToReg64(rcx, addr)...)
 
 	// 3) Increment [RCX] as a 64-bit integer: INC QWORD PTR [RCX]
-	//    FF /0 ⇒ inc r/m64; mod=00 rm=RCX(1) ⇒ modrm = 0x01
-	code = append(code, 0x48, 0xFF, 0x01)
+	code = append(code, emitIncMemIndirect(rcx)...)
 
 	// 4) Restore RCX
-	code = append(code, 0x59) // POP RCX
+	code = append(code, emitPopReg(rcx)...)
 
 	return code
 }
@@ -429,39 +365,8 @@ func (rvm *RecompilerVM) RestoreRegisterInX86() []byte {
 }
 
 func generateJumpRegMem(srcReg X86Reg, rel int32) []byte {
-	var code []byte
-
-	// Step 1: REX prefix
-	rex := byte(0x48) // REX.W (64-bit)
-	if srcReg.REXBit == 1 {
-		rex |= 0x01 // REX.B for rm
-	}
-	code = append(code, rex)
-
-	// Step 2: Opcode for JMP r/m64
-	code = append(code, 0xFF)
-
-	mod := byte(0b10 << 6)  // mod = 10 (disp32)
-	reg := byte(0b100 << 3) // /4 = JMP
-
-	if srcReg.RegBits == 4 { // r12 or rsp → needs SIB
-		modrm := mod | reg | 0b100 // rm = 100 means SIB follows
-		code = append(code, modrm)
-
-		// SIB: scale=0, index=100 (none), base=100 (r12/rsp)
-		sib := byte(0b00_100_100)
-		code = append(code, sib)
-	} else {
-		modrm := mod | reg | srcReg.RegBits
-		code = append(code, modrm)
-	}
-
-	// disp32
-	disp := make([]byte, 4)
-	binary.LittleEndian.PutUint32(disp, uint32(rel))
-	code = append(code, disp...)
-
-	return code
+	// Use the new emit helper function
+	return emitJmpRegMemDisp(srcReg, rel)
 }
 
 // ================================================================================================
@@ -474,18 +379,18 @@ func generateJumpRegMem(srcReg X86Reg, rel int32) []byte {
 // x: REX.X (extension of SIB index field)
 // b: REX.B (extension of ModR/M rm field, SIB base field, or opcode reg field)
 func buildREX(w, r, x, b bool) byte {
-	rex := byte(0x40) // REX prefix base
+	rex := byte(X86_REX_BASE) // REX prefix base
 	if w {
-		rex |= 0x08 // W bit
+		rex |= X86_REX_W // W bit
 	}
 	if r {
-		rex |= 0x04 // R bit
+		rex |= X86_REX_R // R bit
 	}
 	if x {
-		rex |= 0x02 // X bit
+		rex |= X86_REX_X // X bit
 	}
 	if b {
-		rex |= 0x01 // B bit
+		rex |= X86_REX_B // B bit
 	}
 	return rex
 }
@@ -495,14 +400,15 @@ func buildREX(w, r, x, b bool) byte {
 // reg: register/opcode field (3 bits)
 // rm: register/memory field (3 bits)
 func buildModRM(mod, reg, rm byte) byte {
-	return (mod << 6) | ((reg & 0x07) << 3) | (rm & 0x07)
+	return (mod << 6) | ((reg & X86_MOD_REG_MASK) << 3) | (rm & X86_MOD_REG_MASK)
 }
 
-// emitREXModRM emits REX prefix and ModR/M byte for reg-reg operations
-func emitREXModRM(w bool, dst, src X86Reg, regField byte) []byte {
-	rex := buildREX(w, dst.REXBit == 1, false, src.REXBit == 1)
-	modrm := buildModRM(0x03, regField, src.RegBits) // mod=11 for register
-	return []byte{rex, modrm}
+// buildSIB constructs a SIB (Scale-Index-Base) byte
+// scale: scale factor (0=1x, 1=2x, 2=4x, 3=8x)
+// index: index register (0-7, 4=none)
+// base: base register (0-7)
+func buildSIB(scale, index, base byte) byte {
+	return (scale << 6) | ((index & X86_MOD_REG_MASK) << 3) | (base & X86_MOD_REG_MASK)
 }
 
 // ================================================================================================
@@ -512,21 +418,21 @@ func emitREXModRM(w bool, dst, src X86Reg, regField byte) []byte {
 // emitMovRegToReg64 emits: MOV dst, src (64-bit)
 func emitMovRegToReg64(dst, src X86Reg) []byte {
 	rex := buildREX(true, src.REXBit == 1, false, dst.REXBit == 1)
-	modrm := buildModRM(0x03, src.RegBits, dst.RegBits)
-	return []byte{rex, 0x89, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, src.RegBits, dst.RegBits)
+	return []byte{rex, X86_OP_MOV_RM_R, modrm}
 }
 
 // emitMovRegToReg32 emits: MOV dst, src (32-bit)
 func emitMovRegToReg32(dst, src X86Reg) []byte {
 	rex := buildREX(false, src.REXBit == 1, false, dst.REXBit == 1)
-	modrm := buildModRM(0x03, src.RegBits, dst.RegBits)
-	return []byte{rex, 0x89, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, src.RegBits, dst.RegBits)
+	return []byte{rex, X86_OP_MOV_RM_R, modrm}
 }
 
 // emitMovImmToReg64 emits: MOV dst, imm64
 func emitMovImmToReg64(dst X86Reg, val uint64) []byte {
 	rex := buildREX(true, false, false, dst.REXBit == 1)
-	opcode := byte(0xB8 + dst.RegBits)
+	opcode := byte(X86_OP_MOV_R_IMM + dst.RegBits)
 	result := []byte{rex, opcode}
 	result = append(result, encodeU64(val)...)
 	return result
@@ -546,7 +452,7 @@ func emitMovImmToReg32(dst X86Reg, val uint32) []byte {
 		rex := buildREX(false, false, false, true)
 		result = append(result, rex)
 	}
-	opcode := byte(0xB8 + dst.RegBits)
+	opcode := byte(X86_OP_MOV_R_IMM + dst.RegBits)
 	result = append(result, opcode)
 	result = append(result, encodeU32(val)...)
 	return result
@@ -559,29 +465,15 @@ func emitMovImmToReg32(dst X86Reg, val uint32) []byte {
 // emitAddReg64 emits: ADD dst, src (64-bit)
 func emitAddReg64(dst, src X86Reg) []byte {
 	rex := buildREX(true, src.REXBit == 1, false, dst.REXBit == 1)
-	modrm := buildModRM(0x03, src.RegBits, dst.RegBits)
-	return []byte{rex, 0x01, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, src.RegBits, dst.RegBits)
+	return []byte{rex, X86_OP_ADD_RM_R, modrm}
 }
 
 // emitSubReg64 emits: SUB dst, src (64-bit)
 func emitSubReg64(dst, src X86Reg) []byte {
 	rex := buildREX(true, src.REXBit == 1, false, dst.REXBit == 1)
-	modrm := buildModRM(0x03, src.RegBits, dst.RegBits)
-	return []byte{rex, 0x29, modrm}
-}
-
-// emitAddReg32 emits: ADD dst, src (32-bit)
-func emitAddReg32(dst, src X86Reg) []byte {
-	rex := buildREX(false, src.REXBit == 1, false, dst.REXBit == 1)
-	modrm := buildModRM(0x03, src.RegBits, dst.RegBits)
-	return []byte{rex, 0x01, modrm}
-}
-
-// emitSubReg32 emits: SUB dst, src (32-bit)
-func emitSubReg32(dst, src X86Reg) []byte {
-	rex := buildREX(false, src.REXBit == 1, false, dst.REXBit == 1)
-	modrm := buildModRM(0x03, src.RegBits, dst.RegBits)
-	return []byte{rex, 0x29, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, src.RegBits, dst.RegBits)
+	return []byte{rex, X86_OP_SUB_RM_R, modrm}
 }
 
 // ================================================================================================
@@ -591,43 +483,29 @@ func emitSubReg32(dst, src X86Reg) []byte {
 // emitAndReg64 emits: AND dst, src (64-bit)
 func emitAndReg64(dst, src X86Reg) []byte {
 	rex := buildREX(true, src.REXBit == 1, false, dst.REXBit == 1)
-	modrm := buildModRM(0x03, src.RegBits, dst.RegBits)
-	return []byte{rex, 0x21, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, src.RegBits, dst.RegBits)
+	return []byte{rex, X86_OP_AND_RM_R, modrm}
 }
 
 // emitOrReg64 emits: OR dst, src (64-bit)
 func emitOrReg64(dst, src X86Reg) []byte {
 	rex := buildREX(true, src.REXBit == 1, false, dst.REXBit == 1)
-	modrm := buildModRM(0x03, src.RegBits, dst.RegBits)
-	return []byte{rex, 0x09, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, src.RegBits, dst.RegBits)
+	return []byte{rex, X86_OP_OR_RM_R, modrm}
 }
 
 // emitXorReg64 emits: XOR dst, src (64-bit)
 func emitXorReg64(dst, src X86Reg) []byte {
 	rex := buildREX(true, src.REXBit == 1, false, dst.REXBit == 1)
-	modrm := buildModRM(0x03, src.RegBits, dst.RegBits)
-	return []byte{rex, 0x31, modrm}
-}
-
-// emitAndReg32 emits: AND dst, src (32-bit)
-func emitAndReg32(dst, src X86Reg) []byte {
-	rex := buildREX(false, src.REXBit == 1, false, dst.REXBit == 1)
-	modrm := buildModRM(0x03, src.RegBits, dst.RegBits)
-	return []byte{rex, 0x21, modrm}
-}
-
-// emitOrReg32 emits: OR dst, src (32-bit)
-func emitOrReg32(dst, src X86Reg) []byte {
-	rex := buildREX(false, src.REXBit == 1, false, dst.REXBit == 1)
-	modrm := buildModRM(0x03, src.RegBits, dst.RegBits)
-	return []byte{rex, 0x09, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, src.RegBits, dst.RegBits)
+	return []byte{rex, X86_OP_XOR_RM_R, modrm}
 }
 
 // emitXorReg32 emits: XOR dst, src (32-bit)
 func emitXorReg32(dst, src X86Reg) []byte {
 	rex := buildREX(false, src.REXBit == 1, false, dst.REXBit == 1)
-	modrm := buildModRM(0x03, src.RegBits, dst.RegBits)
-	return []byte{rex, 0x31, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, src.RegBits, dst.RegBits)
+	return []byte{rex, X86_OP_XOR_RM_R, modrm}
 }
 
 // ================================================================================================
@@ -637,33 +515,72 @@ func emitXorReg32(dst, src X86Reg) []byte {
 // emitNotReg64 emits: NOT reg (64-bit)
 func emitNotReg64(reg X86Reg) []byte {
 	rex := buildREX(true, false, false, reg.REXBit == 1)
-	modrm := buildModRM(0x03, 2, reg.RegBits) // /2 for NOT
-	return []byte{rex, 0xF7, modrm}
-}
-
-// emitNotReg32 emits: NOT reg (32-bit)
-func emitNotReg32(reg X86Reg) []byte {
-	rex := buildREX(false, false, false, reg.REXBit == 1)
-	modrm := buildModRM(0x03, 2, reg.RegBits) // /2 for NOT
-	return []byte{rex, 0xF7, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, X86_REG_NOT, reg.RegBits) // /2 for NOT
+	return []byte{rex, X86_OP_UNARY_RM, modrm}
 }
 
 // ================================================================================================
-// Comparison Instructions
+// Comparison Instructions (X86_OP_CMP_RM_R = 0x39)
 // ================================================================================================
 
 // emitCmpReg64 emits: CMP a, b (64-bit)
 func emitCmpReg64(a, b X86Reg) []byte {
 	rex := buildREX(true, a.REXBit == 1, false, b.REXBit == 1)
-	modrm := buildModRM(0x03, a.RegBits, b.RegBits)
-	return []byte{rex, 0x39, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, a.RegBits, b.RegBits)
+	return []byte{rex, X86_OP_CMP_RM_R, modrm}
 }
 
-// emitCmpReg32 emits: CMP a, b (32-bit)
-func emitCmpReg32(a, b X86Reg) []byte {
-	rex := buildREX(false, a.REXBit == 1, false, b.REXBit == 1)
-	modrm := buildModRM(0x03, a.RegBits, b.RegBits)
-	return []byte{rex, 0x39, modrm}
+// emitCmpRaxRdxDivSOp64 emits: CMP RAX, RDX (specific construction for DivSOp64)
+func emitCmpRaxRdxDivSOp64(src X86Reg) []byte {
+	rex := buildREX(true, false, false, src.REXBit == 1)
+	modrm := buildModRM(X86_MOD_REGISTER, 2, src.RegBits) // mod=11, reg=2(RDX), rm=src.RegBits
+	return []byte{rex, X86_OP_CMP_RM_R, modrm}
+}
+
+// emitCmpRaxRdxRemSOp64 emits: CMP RAX, RDX (specific construction for RemSOp64)
+func emitCmpRaxRdxRemSOp64() []byte {
+	rex := buildREX(true, false, false, false) // W=1, R=0, X=0, B=0
+	modrm := buildModRM(0x03, 2, 0)            // mod=11, reg=2 (RDX), rm=0 (RAX)
+	return []byte{rex, X86_OP_CMP_RM_R, modrm}
+}
+
+// emitCmpRegRegMinU emits: CMP dst, b with exact manual construction for MIN_U non-alias case
+func emitCmpRegRegMinU(dst, b X86Reg) []byte {
+	return emitCmpReg64(b, dst)
+}
+
+// emitCmpReg64Reg64 emits: CMP src1_64, src2_64 (64-bit register compare)
+func emitCmpReg64Reg64(src1 X86Reg, src2 X86Reg) []byte {
+	rex := buildREX(true, src2.REXBit == 1, false, src1.REXBit == 1) // 64-bit, R=src2, B=src1
+	modrm := buildModRM(0x03, src2.RegBits, src1.RegBits)
+	return []byte{rex, X86_OP_CMP_RM_R, modrm} // 39 /r = CMP r/m64, r64
+}
+
+// emitCmpReg64Max emits: CMP a, b with exact manual construction for MAX function
+func emitCmpReg64Max(a, b X86Reg) []byte {
+	var result []byte
+
+	rex := buildREX(true, b.REXBit == 1, false, a.REXBit == 1)
+	modrm := buildModRM(0x03, b.RegBits, a.RegBits)
+	result = append(result, rex, X86_OP_CMP_RM_R, modrm) // 39 /r = CMP r/m64, r64
+
+	return result
+}
+
+// emitCmpRegImm32MinInt emits: CMP reg, 0x80000000 (for MinInt32 comparison)
+func emitCmpRegImm32MinInt(reg X86Reg) []byte {
+	rex := buildREX(false, false, false, reg.REXBit == 1)   // 32-bit operation
+	modrm := buildModRM(0x03, 7, reg.RegBits)               // /7 for CMP
+	return []byte{rex, 0x81, modrm, 0x00, 0x00, 0x00, 0x80} // 0x80000000 in little-endian
+}
+
+// emitCmpRegImm32Force81 emits: CMP reg, imm32 using 0x81 opcode (forces 32-bit immediate form)
+func emitCmpRegImm32Force81(reg X86Reg, imm int32) []byte {
+	rex := buildREX(true, false, false, reg.REXBit == 1)
+	modrm := buildModRM(X86_MOD_REGISTER, X86_REG_CMP, reg.RegBits)
+	result := []byte{rex, 0x81, modrm}
+	result = append(result, encodeU32(uint32(imm))...)
+	return result
 }
 
 // ================================================================================================
@@ -673,17 +590,17 @@ func emitCmpReg32(a, b X86Reg) []byte {
 // emitPushReg emits: PUSH reg
 func emitPushReg(reg X86Reg) []byte {
 	if reg.REXBit == 1 {
-		return []byte{0x41, byte(0x50 + reg.RegBits)}
+		return []byte{X86_REX_BASE | X86_REX_B, X86_OP_PUSH_R + reg.RegBits}
 	}
-	return []byte{byte(0x50 + reg.RegBits)}
+	return []byte{X86_OP_PUSH_R + reg.RegBits}
 }
 
 // emitPopReg emits: POP reg
 func emitPopReg(reg X86Reg) []byte {
 	if reg.REXBit == 1 {
-		return []byte{0x41, byte(0x58 + reg.RegBits)}
+		return []byte{X86_REX_BASE | X86_REX_B, X86_OP_POP_R + reg.RegBits}
 	}
-	return []byte{byte(0x58 + reg.RegBits)}
+	return []byte{X86_OP_POP_R + reg.RegBits}
 }
 
 // ================================================================================================
@@ -693,143 +610,76 @@ func emitPopReg(reg X86Reg) []byte {
 // emitPopCnt64 emits: POPCNT dst, src (64-bit)
 func emitPopCnt64(dst, src X86Reg) []byte {
 	rex := buildREX(true, dst.REXBit == 1, false, src.REXBit == 1)
-	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)
-	return []byte{0xF3, rex, 0x0F, 0xB8, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, dst.RegBits, src.RegBits)
+	return []byte{X86_PREFIX_REP, rex, X86_PREFIX_0F, X86_OP2_POPCNT, modrm}
 }
 
 // emitPopCnt32 emits: POPCNT dst, src (32-bit)
 func emitPopCnt32(dst, src X86Reg) []byte {
 	rex := buildREX(false, dst.REXBit == 1, false, src.REXBit == 1)
-	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)
-	return []byte{0xF3, rex, 0x0F, 0xB8, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, dst.RegBits, src.RegBits)
+	return []byte{X86_PREFIX_REP, rex, X86_PREFIX_0F, X86_OP2_POPCNT, modrm}
 }
 
 // emitLzcnt64 emits: LZCNT dst, src (64-bit)
 func emitLzcnt64(dst, src X86Reg) []byte {
 	rex := buildREX(true, dst.REXBit == 1, false, src.REXBit == 1)
-	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)
-	return []byte{0xF3, rex, 0x0F, 0xBD, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, dst.RegBits, src.RegBits)
+	return []byte{X86_PREFIX_REP, rex, X86_PREFIX_0F, X86_OP2_BSR, modrm}
 }
 
 // emitLzcnt32 emits: LZCNT dst, src (32-bit)
 func emitLzcnt32(dst, src X86Reg) []byte {
 	rex := buildREX(false, dst.REXBit == 1, false, src.REXBit == 1)
-	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)
-	return []byte{0xF3, rex, 0x0F, 0xBD, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, dst.RegBits, src.RegBits)
+	return []byte{X86_PREFIX_REP, rex, X86_PREFIX_0F, X86_OP2_BSR, modrm}
 }
 
 // emitTzcnt64 emits: TZCNT dst, src (64-bit)
 func emitTzcnt64(dst, src X86Reg) []byte {
 	rex := buildREX(true, dst.REXBit == 1, false, src.REXBit == 1)
-	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)
-	return []byte{0xF3, rex, 0x0F, 0xBC, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, dst.RegBits, src.RegBits)
+	return []byte{X86_PREFIX_REP, rex, X86_PREFIX_0F, X86_OP2_BSF, modrm}
 }
 
 // emitTzcnt32 emits: TZCNT dst, src (32-bit)
 func emitTzcnt32(dst, src X86Reg) []byte {
 	rex := buildREX(false, dst.REXBit == 1, false, src.REXBit == 1)
-	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)
-	return []byte{0xF3, rex, 0x0F, 0xBC, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, dst.RegBits, src.RegBits)
+	return []byte{X86_PREFIX_REP, rex, X86_PREFIX_0F, X86_OP2_BSF, modrm}
 }
 
 // emitMovsx64From8 emits: MOVSX dst, src (8-bit to 64-bit sign extend)
 func emitMovsx64From8(dst, src X86Reg) []byte {
 	rex := buildREX(true, dst.REXBit == 1, false, src.REXBit == 1)
-	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)
-	return []byte{rex, 0x0F, 0xBE, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, dst.RegBits, src.RegBits)
+	return []byte{rex, X86_PREFIX_0F, X86_OP2_MOVSX_R_RM8, modrm}
 }
 
 // emitMovsx64From16 emits: MOVSX dst, src (16-bit to 64-bit sign extend)
 func emitMovsx64From16(dst, src X86Reg) []byte {
 	rex := buildREX(true, dst.REXBit == 1, false, src.REXBit == 1)
-	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)
-	return []byte{rex, 0x0F, 0xBF, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, dst.RegBits, src.RegBits)
+	return []byte{rex, X86_PREFIX_0F, X86_OP2_MOVSX_R_RM16, modrm}
 }
 
 // emitMovzx64From16 emits: MOVZX dst, src (16-bit to 64-bit zero extend)
 func emitMovzx64From16(dst, src X86Reg) []byte {
 	rex := buildREX(true, dst.REXBit == 1, false, src.REXBit == 1)
-	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)
-	return []byte{rex, 0x0F, 0xB7, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, dst.RegBits, src.RegBits)
+	return []byte{rex, X86_PREFIX_0F, X86_OP2_MOVZX_R_RM16, modrm}
 }
 
 // emitBswap64 emits: BSWAP dst (64-bit byte swap)
 func emitBswap64(dst X86Reg) []byte {
 	rex := buildREX(true, false, false, dst.REXBit == 1)
-	opcode := byte(0xC8 + dst.RegBits)
-	return []byte{rex, 0x0F, opcode}
-}
-
-// ================================================================================================
-// Memory Operations
-// ================================================================================================
-
-// emitMovRegFromMem emits: MOV dst, [base + disp] (64-bit)
-func emitMovRegFromMem(dst X86Reg, base X86Reg, disp int32) []byte {
-	rex := buildREX(true, dst.REXBit == 1, false, base.REXBit == 1)
-	code := []byte{rex, 0x8B}
-
-	// ModR/M and displacement
-	if disp == 0 && base.RegBits != 5 { // RBP needs displacement
-		modrm := buildModRM(0x00, dst.RegBits, base.RegBits)
-		code = append(code, modrm)
-	} else if disp >= -128 && disp <= 127 {
-		modrm := buildModRM(0x01, dst.RegBits, base.RegBits)
-		code = append(code, modrm, byte(disp))
-	} else {
-		modrm := buildModRM(0x02, dst.RegBits, base.RegBits)
-		code = append(code, modrm)
-		dispBytes := make([]byte, 4)
-		binary.LittleEndian.PutUint32(dispBytes, uint32(disp))
-		code = append(code, dispBytes...)
-	}
-	return code
-}
-
-// emitMovMemFromReg emits: MOV [base + disp], src (64-bit)
-func emitMovMemFromReg(base X86Reg, disp int32, src X86Reg) []byte {
-	rex := buildREX(true, src.REXBit == 1, false, base.REXBit == 1)
-	code := []byte{rex, 0x89}
-
-	// ModR/M and displacement
-	if disp == 0 && base.RegBits != 5 { // RBP needs displacement
-		modrm := buildModRM(0x00, src.RegBits, base.RegBits)
-		code = append(code, modrm)
-	} else if disp >= -128 && disp <= 127 {
-		modrm := buildModRM(0x01, src.RegBits, base.RegBits)
-		code = append(code, modrm, byte(disp))
-	} else {
-		modrm := buildModRM(0x02, src.RegBits, base.RegBits)
-		code = append(code, modrm)
-		dispBytes := make([]byte, 4)
-		binary.LittleEndian.PutUint32(dispBytes, uint32(disp))
-		code = append(code, dispBytes...)
-	}
-	return code
+	opcode := byte(X86_OP2_BSWAP + dst.RegBits)
+	return []byte{rex, X86_PREFIX_0F, opcode}
 }
 
 // ================================================================================================
 // Immediate Operations
 // ================================================================================================
-
-// emitCmpRegImm32 emits: CMP reg, imm32 (signed 32-bit immediate)
-func emitCmpRegImm32(reg X86Reg, imm int32) []byte {
-	rex := buildREX(true, false, false, reg.REXBit == 1)
-
-	if imm >= -128 && imm <= 127 {
-		// Use 8-bit immediate form: CMP r/m64, imm8
-		modrm := buildModRM(0x03, 7, reg.RegBits) // /7 for CMP
-		return []byte{rex, 0x83, modrm, byte(imm)}
-	} else {
-		// Use 32-bit immediate form: CMP r/m64, imm32
-		modrm := buildModRM(0x03, 7, reg.RegBits) // /7 for CMP
-		immBytes := make([]byte, 4)
-		binary.LittleEndian.PutUint32(immBytes, uint32(imm))
-		result := []byte{rex, 0x81, modrm}
-		result = append(result, immBytes...)
-		return result
-	}
-}
 
 // emitAddRegImm32 emits: ADD reg, imm32 (signed 32-bit immediate)
 func emitAddRegImm32(reg X86Reg, imm int32) []byte {
@@ -837,14 +687,14 @@ func emitAddRegImm32(reg X86Reg, imm int32) []byte {
 
 	if imm >= -128 && imm <= 127 {
 		// Use 8-bit immediate form: ADD r/m64, imm8
-		modrm := buildModRM(0x03, 0, reg.RegBits) // /0 for ADD
-		return []byte{rex, 0x83, modrm, byte(imm)}
+		modrm := buildModRM(X86_MOD_REGISTER, X86_REG_ADD, reg.RegBits) // /0 for ADD
+		return []byte{rex, X86_OP_GROUP1_RM_IMM8, modrm, byte(imm)}
 	} else {
 		// Use 32-bit immediate form: ADD r/m64, imm32
-		modrm := buildModRM(0x03, 0, reg.RegBits) // /0 for ADD
+		modrm := buildModRM(X86_MOD_REGISTER, X86_REG_ADD, reg.RegBits) // /0 for ADD
 		immBytes := make([]byte, 4)
 		binary.LittleEndian.PutUint32(immBytes, uint32(imm))
-		result := []byte{rex, 0x81, modrm}
+		result := []byte{rex, X86_OP_GROUP1_RM_IMM32, modrm}
 		result = append(result, immBytes...)
 		return result
 	}
@@ -857,223 +707,82 @@ func emitAddRegImm32(reg X86Reg, imm int32) []byte {
 // emitNegReg64 emits: NEG reg64 (negate register)
 func emitNegReg64(reg X86Reg) []byte {
 	rex := buildREX(true, false, false, reg.REXBit == 1)
-	modrm := byte(0xD8 | reg.RegBits) // ModR/M: mod=11, reg=3 (/3), rm=reg
-	return []byte{rex, 0xF7, modrm}   // F7 /3 = NEG r/m64
+	modrm := buildModRM(3, X86_REG_NEG, reg.RegBits) // ModR/M: mod=11, reg=3 (/3), rm=reg
+	return []byte{rex, X86_OP_UNARY_RM, modrm}       // F7 /3 = NEG r/m64
 }
 
 // emitAddRegImm8 emits: ADD reg64, imm8
 func emitAddRegImm8(reg X86Reg, imm int8) []byte {
 	rex := buildREX(true, false, false, reg.REXBit == 1)
-	modrm := buildModRM(3, 0, reg.RegBits)     // reg=0 (/0)
-	return []byte{rex, 0x83, modrm, byte(imm)} // 83 /0 ib = ADD r/m64, imm8
+	modrm := buildModRM(3, X86_REG_ADD, reg.RegBits)            // reg=0 (/0)
+	return []byte{rex, X86_OP_GROUP1_RM_IMM8, modrm, byte(imm)} // 83 /0 ib = ADD r/m64, imm8
 }
 
 // emitShiftRegImm1 emits: shift reg, 1 (D1 /subcode)
 func emitShiftRegImm1(reg X86Reg, subcode byte) []byte {
 	rex := buildREX(true, false, false, reg.REXBit == 1)
-	modrm := buildModRM(3, subcode, reg.RegBits)
-	return []byte{rex, 0xD1, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, subcode, reg.RegBits)
+	return []byte{rex, X86_OP_GROUP2_RM_1, modrm}
 }
 
 // emitShiftRegImm emits: shift reg, imm8 (opcode /subcode ib)
 func emitShiftRegImm(reg X86Reg, opcode, subcode byte, imm byte) []byte {
 	rex := buildREX(true, false, false, reg.REXBit == 1)
-	modrm := buildModRM(3, subcode, reg.RegBits)
+	modrm := buildModRM(X86_MOD_REGISTER, subcode, reg.RegBits)
 	return []byte{rex, opcode, modrm, imm}
-}
-
-// emitTestReg64 emits: TEST dst, src (test and set flags)
-func emitTestReg64(dst, src X86Reg) []byte {
-	rex := buildREX(true, src.REXBit == 1, false, dst.REXBit == 1)
-	modrm := buildModRM(3, src.RegBits, dst.RegBits)
-	return []byte{rex, 0x85, modrm} // 85 /r = TEST r/m64, r64
 }
 
 // emitCmovcc emits: CMOVcc dst, src (conditional move)
 func emitCmovcc(cc byte, dst, src X86Reg) []byte {
 	rex := buildREX(true, dst.REXBit == 1, false, src.REXBit == 1)
-	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)
-	return []byte{rex, 0x0F, cc, modrm}
-}
-
-// emitSetcc emits: SETcc reg (set byte on condition)
-func emitSetcc(cc byte, reg X86Reg) []byte {
-	rex := buildREX(false, false, false, reg.REXBit == 1)
-	modrm := buildModRM(0x03, 0, reg.RegBits)
-	return []byte{rex, 0x0F, cc, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, dst.RegBits, src.RegBits)
+	return []byte{rex, X86_PREFIX_0F, cc, modrm}
 }
 
 // ================================================================================================
-// Jump Instructions
+// X86_OP_TEST_RM_R helpers
 // ================================================================================================
 
-// emitJcc emits: Jcc rel32 (conditional jump)
-func emitJcc(cc byte, rel32 int32) []byte {
-	result := []byte{0x0F, cc}
-	relBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(relBytes, uint32(rel32))
-	result = append(result, relBytes...)
-	return result
-}
-
-// emitJmp emits: JMP rel32 (unconditional jump)
-func emitJmp(rel32 int32) []byte {
-	result := []byte{0xE9}
-	relBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(relBytes, uint32(rel32))
-	result = append(result, relBytes...)
-	return result
-}
-
-// ================================================================================================
-// Additional Specialized Instructions
-// ================================================================================================
-
-// emitMovzx64From8 emits: MOVZX dst, src (8-bit to 64-bit zero extend)
-func emitMovzx64From8(dst X86Reg) []byte {
-	rex := buildREX(true, dst.REXBit == 1, false, dst.REXBit == 1)
-	modrm := buildModRM(0x03, dst.RegBits, dst.RegBits)
-	return []byte{rex, 0x0F, 0xB6, modrm}
-}
-
-// emitMovsxd emits: MOVSXD dst, src (32-bit to 64-bit sign extend)
-func emitMovsxd(dst, src X86Reg) []byte {
-	rex := buildREX(true, dst.REXBit == 1, false, src.REXBit == 1)
-	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)
-	return []byte{rex, 0x63, modrm}
-}
-
-// emitMovByteToCL emits: MOV CL, src_low8
-func emitMovByteToCL(src X86Reg) []byte {
-	rex := buildREX(false, false, false, src.REXBit == 1)
-	modrm := buildModRM(0x03, 1, src.RegBits) // CL is RCX low byte (reg=1)
-	return []byte{rex, 0x88, modrm}
-}
-
-// emitMovAbsToReg emits: MOVABS dst, imm64
-func emitMovAbsToReg(dst X86Reg, val uint64) []byte {
-	return emitMovImmToReg64(dst, val) // Same as MOV reg, imm64
-}
-
-// emitMovFromStack emits: MOV dst, [RSP + offset]
-func emitMovFromStack(dst X86Reg, offset int) []byte {
-	// For now, use a simple approach - this may need adjustment based on actual register layout
-	return emitMovRegFromMem(dst, BaseReg, int32(offset))
-}
-
-// emitTest64 emits: TEST reg, reg (64-bit)
-func emitTest64(reg X86Reg) []byte {
-	rex := buildREX(true, reg.REXBit == 1, false, reg.REXBit == 1)
-	modrm := buildModRM(0x03, reg.RegBits, reg.RegBits)
-	return []byte{rex, 0x85, modrm}
-}
-
-// emitTest32 emits: TEST reg, reg (32-bit)
-func emitTest32(reg X86Reg) []byte {
-	rex := buildREX(false, reg.REXBit == 1, false, reg.REXBit == 1)
-	modrm := buildModRM(0x03, reg.RegBits, reg.RegBits)
-	return []byte{rex, 0x85, modrm}
-}
-
-// emitImul64 emits: IMUL dst, src (64-bit)
-func emitImul64(dst, src X86Reg) []byte {
-	rex := buildREX(true, dst.REXBit == 1, false, src.REXBit == 1)
-	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)
-	return []byte{rex, 0x0F, 0xAF, modrm}
-}
-
-// emitImul32 emits: IMUL dst, src (32-bit)
-func emitImul32(dst, src X86Reg) []byte {
-	rex := buildREX(false, dst.REXBit == 1, false, src.REXBit == 1)
-	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)
-	return []byte{rex, 0x0F, 0xAF, modrm}
-}
-
-// emitDivReg64 emits: DIV r64 (unsigned divide RDX:RAX by r64)
-func emitDivReg64(src X86Reg) []byte {
-	rex := buildREX(true, false, false, src.REXBit == 1)
-	modrm := buildModRM(0x03, 0x06, src.RegBits) // opcode extension /6 for DIV
-	return []byte{rex, 0xF7, modrm}
-}
-
-// emitDivMem64 emits: DIV m64 with SIB addressing [RSP+disp32]
-func emitDivMem64(disp32 uint32) []byte {
-	buf := []byte{0x48, 0xF7, 0xB4, 0x24} // REX.W F7 /6 with SIB
-	dispBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(dispBytes, disp32)
-	buf = append(buf, dispBytes...)
-	return buf
-}
-
-// emitDivMemRSP64 emits: DIV qword ptr [RSP] (divisor at stack top)
-func emitDivMemRSP64() []byte {
-	return []byte{0x48, 0xF7, 0x34, 0x24} // REX.W F7 /6 with SIB for [RSP]
-}
-
-// emitXchgReg64 emits: XCHG r64, r64
-func emitXchgReg64(reg1, reg2 X86Reg) []byte {
-	rex := buildREX(true, reg1.REXBit == 1, false, reg2.REXBit == 1)
-	modrm := buildModRM(0x03, reg1.RegBits, reg2.RegBits)
-	return []byte{rex, 0x87, modrm}
-}
-
-// emitIdivReg64 emits: IDIV r64 (signed divide RDX:RAX by r64)
-func emitIdivReg64(src X86Reg) []byte {
-	rex := buildREX(true, false, false, src.REXBit == 1)
-	modrm := buildModRM(0x03, 0x07, src.RegBits) // opcode extension /7 for IDIV
-	return []byte{rex, 0xF7, modrm}
-}
-
-// emitIdivMemRSP64 emits: IDIV qword ptr [RSP] (signed divide by value at stack top)
-func emitIdivMemRSP64() []byte {
-	return []byte{0x48, 0xF7, 0x3C, 0x24} // REX.W F7 /7 with SIB for [RSP]
-}
-
-// emitCqo emits: CQO (convert quad word to oct word, sign-extend RAX to RDX:RAX)
-func emitCqo() []byte {
-	return []byte{0x48, 0x99} // REX.W + 99
+// emitTestReg64 emits: TEST dst, src (test and set flags)
+func emitTestReg64(dst, src X86Reg) []byte {
+	rex := buildREX(true, src.REXBit == 1, false, dst.REXBit == 1)
+	modrm := buildModRM(X86_MOD_REGISTER, src.RegBits, dst.RegBits)
+	return []byte{rex, X86_OP_TEST_RM_R, modrm} // 85 /r = TEST r/m64, r64
 }
 
 // emitTestReg32 emits: TEST r32, r32
 func emitTestReg32(dst, src X86Reg) []byte {
 	rex := buildREX(false, src.REXBit == 1, false, dst.REXBit == 1)
 	modrm := buildModRM(3, src.RegBits, dst.RegBits)
-	return []byte{rex, 0x85, modrm} // 85 /r = TEST r/m32, r32
+	return []byte{rex, X86_OP_TEST_RM_R, modrm} // 85 /r = TEST r/m32, r32
 }
 
-// emitDivReg32 emits: DIV r32 (unsigned divide EDX:EAX by r32)
-func emitDivReg32(src X86Reg) []byte {
+// emitJne32 emits: JNE rel32 + 4-byte displacement
+func emitJne32() []byte {
+	return []byte{X86_PREFIX_0F, X86_OP_TEST_RM_R, 0, 0, 0, 0} // 4-byte displacement filled in later
+}
+
+// ================================================================================================
+// Additional Specialized Instructions
+// ================================================================================================
+
+// emitMovByteToCL emits: MOV CL, src_low8
+func emitMovByteToCL(src X86Reg) []byte {
 	rex := buildREX(false, false, false, src.REXBit == 1)
-	modrm := buildModRM(0x03, 0x06, src.RegBits) // opcode extension /6 for DIV
-	return []byte{rex, 0xF7, modrm}
+	modrm := buildModRM(X86_MOD_REGISTER, 1, src.RegBits) // CL is RCX low byte (reg=1)
+	return []byte{rex, X86_OP_MOV_RM8_R8, modrm}
 }
 
-// emitMovsxdReg emits: MOVSXD r64, r32 (sign-extend 32-bit to 64-bit)
-func emitMovsxdReg(dst, src X86Reg) []byte {
+// emitImul64 emits: IMUL dst, src (64-bit)
+func emitImul64(dst, src X86Reg) []byte {
 	rex := buildREX(true, dst.REXBit == 1, false, src.REXBit == 1)
 	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)
-	return []byte{rex, 0x63, modrm} // 63 /r = MOVSXD r64, r/m32
-}
-
-// emitCmpMemRSPImm32 emits: CMP qword ptr [RSP], imm32
-func emitCmpMemRSPImm32(imm32 int32) []byte {
-	buf := []byte{0x48, 0x81, 0x3C, 0x24} // REX.W, 81 /7, ModRM, SIB
-	immBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(immBytes, uint32(imm32))
-	buf = append(buf, immBytes...)
-	return buf
-}
-
-// emitNot64Reg emits: NOT r64 (bitwise NOT)
-func emitNot64Reg(reg X86Reg) []byte {
-	rex := buildREX(true, false, false, reg.REXBit == 1)
-	modrm := buildModRM(0x03, 0x02, reg.RegBits) // opcode extension /2 for NOT
-	return []byte{rex, 0xF7, modrm}
+	return []byte{rex, X86_PREFIX_0F, 0xAF, modrm}
 }
 
 // emitCdq emits: CDQ (convert double word to quad word, sign-extend EAX to EDX:EAX)
 func emitCdq() []byte {
-	return []byte{0x99} // 99 = CDQ
+	return []byte{X86_OP_CDQ} // 99 = CDQ
 }
 
 // emitIdiv32 emits: IDIV r32 (signed divide EDX:EAX by r32)
@@ -1083,20 +792,6 @@ func emitIdiv32(src X86Reg) []byte {
 	return []byte{rex, 0xF7, modrm}
 }
 
-// emitCmpRegImm32MinInt emits: CMP reg, 0x80000000 (for MinInt32 comparison)
-func emitCmpRegImm32MinInt(reg X86Reg) []byte {
-	rex := buildREX(false, false, false, reg.REXBit == 1)   // 32-bit operation
-	modrm := buildModRM(0x03, 7, reg.RegBits)               // /7 for CMP
-	return []byte{rex, 0x81, modrm, 0x00, 0x00, 0x00, 0x80} // 0x80000000 in little-endian
-}
-
-// emitMovEaxFromReg32 emits: MOV EAX, reg32 (reads from reg into EAX)
-func emitMovEaxFromReg32(src X86Reg) []byte {
-	rex := buildREX(false, false, false, src.REXBit == 1) // rm field uses REX.B
-	modrm := buildModRM(0x03, 0, src.RegBits)             // reg=0 (EAX), rm=src
-	return []byte{rex, 0x8B, modrm}                       // 8B /r = MOV r32, r/m32
-}
-
 // emitCmpRegImmByte emits: CMP reg, imm8 (32-bit register compare with 8-bit immediate)
 func emitCmpRegImmByte(reg X86Reg, imm byte) []byte {
 	rex := buildREX(false, false, false, reg.REXBit == 1) // 32-bit operation
@@ -1104,46 +799,11 @@ func emitCmpRegImmByte(reg X86Reg, imm byte) []byte {
 	return []byte{rex, 0x83, modrm, imm}
 }
 
-// emitMovsxd64 emits: MOVSXD dst64, src32 (sign-extend 32-bit to 64-bit)
-func emitMovsxd64(dst X86Reg, src X86Reg) []byte {
-	rex := buildREX(true, dst.REXBit == 1, false, src.REXBit == 1) // 64-bit operation, REX.W=1
-	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)
-	return []byte{rex, 0x63, modrm} // 63 /r = MOVSXD r64, r/m32
-}
-
-// emitPushReg64 emits: PUSH reg64
-func emitPushReg64(reg X86Reg) []byte {
-	if reg.REXBit == 1 {
-		return []byte{0x40 | 0x01, 0x50 + reg.RegBits} // REX.B + PUSH
-	}
-	return []byte{0x50 + reg.RegBits} // PUSH r64
-}
-
-// emitPopReg64 emits: POP reg64
-func emitPopReg64(reg X86Reg) []byte {
-	if reg.REXBit == 1 {
-		return []byte{0x40 | 0x01, 0x58 + reg.RegBits} // REX.B + POP
-	}
-	return []byte{0x58 + reg.RegBits} // POP r64
-}
-
-// emitTestRegReg32 emits: TEST reg32, reg32
-func emitTestRegReg32(reg X86Reg) []byte {
-	rex := buildREX(false, reg.REXBit == 1, false, reg.REXBit == 1) // 32-bit, R=reg, B=reg
-	modrm := buildModRM(0x03, reg.RegBits, reg.RegBits)             // mod=11, reg=reg, rm=reg
-	return []byte{rex, 0x85, modrm}
-}
-
 // emitXorReg64Reg64 emits: XOR reg64, reg64
 func emitXorReg64Reg64(reg X86Reg) []byte {
 	rex := buildREX(true, reg.REXBit == 1, false, reg.REXBit == 1) // 64-bit, R=reg, B=reg
 	modrm := buildModRM(0x03, reg.RegBits, reg.RegBits)            // mod=11, reg=reg, rm=reg
 	return []byte{rex, 0x31, modrm}
-}
-
-// emitJne32 emits: JNE rel32 (0x0F 0x85 + 4-byte displacement)
-func emitJne32() []byte {
-	return []byte{0x0F, 0x85, 0, 0, 0, 0} // 4-byte displacement filled in later
 }
 
 // emitJmp32 emits: JMP rel32 (0xE9 + 4-byte displacement)
@@ -1154,30 +814,6 @@ func emitJmp32() []byte {
 // emitPopRdxRax emits: POP RDX; POP RAX
 func emitPopRdxRax() []byte {
 	return []byte{0x5A, 0x58} // POP RDX, POP RAX
-}
-
-// emitPushRax emits: PUSH RAX
-func emitPushRax() []byte {
-	return []byte{0x50}
-}
-
-// emitPopRax emits: POP RAX
-func emitPopRax() []byte {
-	return []byte{0x58}
-}
-
-// emitMovEaxFromReg32 emits: MOV EAX, reg32 (different from emitMovRegReg32)
-func emitMovRegFromEax32(dst X86Reg) []byte {
-	rex := buildREX(false, false, false, dst.REXBit == 1) // 32-bit, B=dst
-	modrm := buildModRM(0x03, 0, dst.RegBits)             // mod=11, reg=0 (EAX), rm=dst
-	return []byte{rex, 0x8B, modrm}                       // MOV dst32, EAX
-}
-
-// emitMovRegReg32 emits: MOV dst32, src32
-func emitMovRegReg32(dst, src X86Reg) []byte {
-	rex := buildREX(false, src.REXBit == 1, false, dst.REXBit == 1) // 32-bit, R=src, B=dst
-	modrm := buildModRM(0x03, src.RegBits, dst.RegBits)             // mod=11, reg=src, rm=dst
-	return []byte{rex, 0x89, modrm}                                 // MOV dst32, src32
 }
 
 // emitBinaryOpRegEax32 emits: dst32 = dst32 <op> EAX
@@ -1194,52 +830,11 @@ func emitBinaryOpRegReg32(opcode byte, dst, src X86Reg) []byte {
 	return []byte{rex, opcode, modrm}
 }
 
-// emitPushRcx emits: PUSH RCX
-func emitPushRcx() []byte {
-	return []byte{0x51}
-}
-
-// emitPopRcx emits: POP RCX
-func emitPopRcx() []byte {
-	return []byte{0x59}
-}
-
 // emitShiftOp64 emits: shift operation on reg64 by CL
 func emitShiftOp64(opcode byte, regField byte, reg X86Reg) []byte {
 	rex := buildREX(true, false, false, reg.REXBit == 1) // 64-bit, B=reg
 	modrm := buildModRM(0x03, regField, reg.RegBits)     // mod=11, reg=regField, rm=reg
 	return []byte{rex, opcode, modrm}
-}
-
-// emitRol64ByCl emits: ROL reg64, CL
-func emitRol64ByCl(reg X86Reg) []byte {
-	rex := buildREX(true, false, false, reg.REXBit == 1) // 64-bit, B=reg
-	modrm := buildModRM(0x03, 0, reg.RegBits)            // mod=11, reg=0 (/0 for ROL), rm=reg
-	return []byte{rex, 0xD3, modrm}
-}
-
-// emitXchgRcxReg64 emits: XCHG RCX, reg64
-func emitXchgRcxReg64(reg X86Reg) []byte {
-	rex := buildREX(true, reg.REXBit == 1, false, false) // 64-bit, R=reg, rm=RCX(1)
-	modrm := buildModRM(0x03, reg.RegBits, 1)            // mod=11, reg=reg, rm=1 (RCX)
-	return []byte{rex, 0x87, modrm}
-}
-
-// emitXchgRegReg64 emits: XCHG reg1, reg2
-func emitXchgRegReg64(reg1, reg2 X86Reg) []byte {
-	rex := buildREX(true, reg1.REXBit == 1, false, reg2.REXBit == 1) // 64-bit, R=reg1, B=reg2
-	modrm := buildModRM(0x03, reg1.RegBits, reg2.RegBits)            // mod=11, reg=reg1, rm=reg2
-	return []byte{rex, 0x87, modrm}
-}
-
-// emitPushRdx emits: PUSH RDX
-func emitPushRdx() []byte {
-	return []byte{0x52}
-}
-
-// emitPopRdx emits: POP RDX
-func emitPopRdx() []byte {
-	return []byte{0x5A}
 }
 
 // emitMulReg64 emits: MUL reg64 (unsigned)
@@ -1256,13 +851,6 @@ func emitImulReg64(reg X86Reg) []byte {
 	return []byte{rex, 0xF7, modrm}
 }
 
-// emitMovEcxFromReg32 emits: MOV ECX, reg32
-func emitMovEcxFromReg32(src X86Reg) []byte {
-	rex := buildREX(false, false, false, src.REXBit == 1) // 32-bit, B=src
-	modrm := buildModRM(0x03, 1, src.RegBits)             // mod=11, reg=1 (ECX), rm=src
-	return []byte{rex, 0x8B, modrm}
-}
-
 // emitShl32ByCl emits: SHL reg32, CL
 func emitShl32ByCl(reg X86Reg) []byte {
 	rex := buildREX(false, false, false, reg.REXBit == 1) // 32-bit, B=reg
@@ -1270,46 +858,25 @@ func emitShl32ByCl(reg X86Reg) []byte {
 	return []byte{rex, 0xD3, modrm}
 }
 
-// emitMovReg32 emits: MOV dst32, src32 (32-bit register to register move)
-func emitMovReg32(dst X86Reg, src X86Reg) []byte {
-	rex := buildREX(false, dst.REXBit == 1, false, src.REXBit == 1) // 32-bit operation
-	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)
-	return []byte{rex, 0x8B, modrm} // 8B /r = MOV r32, r/m32
-}
-
 // emitImulReg32 emits: IMUL dst32, src32 (32-bit signed multiply)
 func emitImulReg32(dst X86Reg, src X86Reg) []byte {
 	rex := buildREX(false, dst.REXBit == 1, false, src.REXBit == 1) // 32-bit operation
 	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)
-	return []byte{rex, 0x0F, 0xAF, modrm} // 0F AF /r = IMUL r32, r/m32
-}
-
-// emitCmpReg64Reg64 emits: CMP src1_64, src2_64 (64-bit register compare)
-func emitCmpReg64Reg64(src1 X86Reg, src2 X86Reg) []byte {
-	rex := buildREX(true, src2.REXBit == 1, false, src1.REXBit == 1) // 64-bit, R=src2, B=src1
-	modrm := buildModRM(0x03, src2.RegBits, src1.RegBits)
-	return []byte{rex, 0x39, modrm} // 39 /r = CMP r/m64, r64
+	return []byte{rex, X86_PREFIX_0F, 0xAF, modrm} // 0F AF /r = IMUL r32, r/m32
 }
 
 // emitSetccReg8 emits: SETcc r/m8 (set byte on condition)
 func emitSetccReg8(cc byte, dst X86Reg) []byte {
 	rex := buildREX(false, false, false, dst.REXBit == 1) // 8-bit operation, B=dst
 	modrm := buildModRM(0x03, 0, dst.RegBits)
-	return []byte{rex, 0x0F, cc, modrm} // 0F 90+cc /r = SETcc r/m8
+	return []byte{rex, X86_PREFIX_0F, cc, modrm} // 0F 90+cc /r = SETcc r/m8
 }
 
 // emitMovzxReg64Reg8 emits: MOVZX dst64, src8 (zero-extend 8-bit to 64-bit)
 func emitMovzxReg64Reg8(dst X86Reg, src X86Reg) []byte {
 	rex := buildREX(true, dst.REXBit == 1, false, src.REXBit == 1) // 64-bit dest, R=dst, B=src
 	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)
-	return []byte{rex, 0x0F, 0xB6, modrm} // 0F B6 /r = MOVZX r64, r/m8
-}
-
-// emitMovsxdReg64Reg32 emits: MOVSXD dst64, src32 (sign-extend 32-bit to 64-bit)
-func emitMovsxdReg64Reg32(dst X86Reg, src X86Reg) []byte {
-	rex := buildREX(true, dst.REXBit == 1, false, src.REXBit == 1) // 64-bit operation, R=dst, B=src
-	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)
-	return []byte{rex, 0x63, modrm} // 63 /r = MOVSXD r64, r/m32
+	return []byte{rex, X86_PREFIX_0F, 0xB6, modrm} // 0F B6 /r = MOVZX r64, r/m8
 }
 
 // emitAndRegImm8 emits: AND reg32, imm8
@@ -1327,32 +894,48 @@ func emitSarReg32ByCl(dst X86Reg) []byte {
 	return []byte{rex, 0xD3, modrm}                       // D3 /7 = SAR r/m32, CL
 }
 
-// emitShrReg32ByCl emits: SHR reg32, CL
-func emitShrReg32ByCl(dst X86Reg) []byte {
-	rex := buildREX(false, false, false, dst.REXBit == 1) // 32-bit operation, B=dst
-	modrm := buildModRM(0x03, 5, dst.RegBits)             // reg=5 for SHR
-	return []byte{rex, 0xD3, modrm}                       // D3 /5 = SHR r/m32, CL
+// ================================================================================================
+//
+//	X86_OP_XCHG_RM_R
+//
+// ================================================================================================
+// emitXchgReg64 emits: XCHG r64, r64
+func emitXchgReg64(reg1, reg2 X86Reg) []byte {
+	rex := buildREX(true, reg1.REXBit == 1, false, reg2.REXBit == 1)
+	modrm := buildModRM(0x03, reg1.RegBits, reg2.RegBits)
+	return []byte{rex, X86_OP_XCHG_RM_R, modrm}
+}
+
+// emitXchgRegReg64 emits: XCHG reg1, reg2
+func emitXchgRegReg64(reg1, reg2 X86Reg) []byte {
+	rex := buildREX(true, reg1.REXBit == 1, false, reg2.REXBit == 1) // 64-bit, R=reg1, B=reg2
+	modrm := buildModRM(0x03, reg1.RegBits, reg2.RegBits)            // mod=11, reg=reg1, rm=reg2
+	return []byte{rex, X86_OP_XCHG_RM_R, modrm}
 }
 
 // emitXchgReg32Reg32 emits: XCHG reg1_32, reg2_32
 func emitXchgReg32Reg32(reg1 X86Reg, reg2 X86Reg) []byte {
 	rex := buildREX(false, reg1.REXBit == 1, false, reg2.REXBit == 1) // 32-bit operation, R=reg1, B=reg2
 	modrm := buildModRM(0x03, reg1.RegBits, reg2.RegBits)
-	return []byte{rex, 0x87, modrm} // 87 /r = XCHG r/m32, r32
+	return []byte{rex, X86_OP_XCHG_RM_R, modrm} // 87 /r = XCHG r/m32, r32
 }
 
-// emitRorReg32ByCl emits: ROR reg32, CL
-func emitRorReg32ByCl(dst X86Reg) []byte {
-	rex := buildREX(false, false, false, dst.REXBit == 1) // 32-bit operation, B=dst
-	modrm := buildModRM(0x03, 1, dst.RegBits)             // reg=1 for ROR
-	return []byte{rex, 0xD3, modrm}                       // D3 /1 = ROR r/m32, CL
+// emitXchgRaxRdxRemUOp64 emits: XCHG RAX, RDX (specific construction for RemUOp64)
+func emitXchgRaxRdxRemUOp64() []byte {
+	return []byte{0x48, X86_OP_XCHG_RM_R, 0xD0}
 }
 
-// emitShlReg32ByCl emits: SHL reg32, CL
-func emitShlReg32ByCl(dst X86Reg) []byte {
-	rex := buildREX(false, false, false, dst.REXBit == 1) // 32-bit operation, B=dst
-	modrm := buildModRM(0x03, 4, dst.RegBits)             // reg=4 for SHL
-	return []byte{rex, 0xD3, modrm}                       // D3 /4 = SHL r/m32, CL
+func emitXchgRegRcxImmShiftOp64Alt(src X86Reg) []byte {
+	rex := buildREX(true, src.REXBit == 1, false, false)
+	modrm := buildModRM(0x3, src.RegBits, 0x01)
+	return []byte{rex, X86_OP_XCHG_RM_R, modrm}
+}
+
+// emitXchgRcxReg64 emits: XCHG RCX, reg64
+func emitXchgRcxReg64(reg X86Reg) []byte {
+	rex := buildREX(true, reg.REXBit == 1, false, false) // 64-bit, R=reg, rm=RCX(1)
+	modrm := buildModRM(0x03, reg.RegBits, 1)            // mod=11, reg=reg, rm=1 (RCX)
+	return []byte{rex, X86_OP_XCHG_RM_R, modrm}
 }
 
 // emitShiftReg32ByCl emits: SHIFT reg32, CL with specified regField
@@ -1363,32 +946,135 @@ func emitShiftReg32ByCl(dst X86Reg, regField byte) []byte {
 	return []byte{rex, 0xD3, modrm} // D3 /n = SHIFT r/m32, CL
 }
 
-// emitXorRdxRdx emits: XOR RDX, RDX (zero RDX for unsigned division)
-func emitXorRdxRdx() []byte {
-	return []byte{0x48, 0x31, 0xD2} // 48 31 D2 = XOR RDX, RDX
-}
-
 // emitJeRel32 emits: JE rel32 (conditional jump equal)
 func emitJeRel32() []byte {
-	return []byte{0x0F, 0x84, 0, 0, 0, 0} // 0F 84 = JE rel32 (placeholder offset)
+	return []byte{X86_PREFIX_0F, 0x84, 0, 0, 0, 0} // 0F 84 = JE rel32 (placeholder offset)
 }
 
-// emitPushRaxRdx emits PUSH RAX; PUSH RDX
-func emitPushRaxRdx() []byte {
-	return []byte{0x50, 0x52}
-}
-
+// ================================================================================================
+// X86_OP_MOV_R_RM = 0x8B
+// ================================================================================================
 // emitMovReg32ToReg32 emits MOV dst32, src32
 func emitMovReg32ToReg32(dst, src X86Reg) []byte {
-	rex := byte(0x40) // REX for 32-bit operation
-	if dst.REXBit == 1 {
-		rex |= 0x04 // REX.R
-	}
+	rex := buildREX(false, dst.REXBit == 1, false, src.REXBit == 1)
+	modrm := buildModRM(X86_MOD_REGISTER, dst.RegBits, src.RegBits)
+	return []byte{rex, X86_OP_MOV_R_RM, modrm}
+}
+
+// emitMovReg32 emits: MOV dst32, src32 (32-bit register to register move)
+func emitMovReg32(dst X86Reg, src X86Reg) []byte {
+	rex := buildREX(false, dst.REXBit == 1, false, src.REXBit == 1) // 32-bit operation
+	modrm := buildModRM(X86_MOD_REGISTER, dst.RegBits, src.RegBits)
+	return []byte{rex, X86_OP_MOV_R_RM, modrm} // 8B /r = MOV r32, r/m32
+}
+
+// emitMovEcxFromReg32 emits: MOV ECX, reg32
+func emitMovEcxFromReg32(src X86Reg) []byte {
+	rex := buildREX(false, false, false, src.REXBit == 1) // 32-bit, B=src
+	modrm := buildModRM(X86_MOD_REGISTER, 1, src.RegBits) // mod=11, reg=1 (ECX), rm=src
+	return []byte{rex, X86_OP_MOV_R_RM, modrm}
+}
+
+// emitMovEaxFromReg32 emits: MOV EAX, reg32 (reads from reg into EAX)
+func emitMovEaxFromReg32(src X86Reg) []byte {
+	rex := buildREX(false, false, false, src.REXBit == 1) // rm field uses REX.B
+	modrm := buildModRM(X86_MOD_REGISTER, 0, src.RegBits) // reg=0 (EAX), rm=src
+	return []byte{rex, X86_OP_MOV_R_RM, modrm}            // 8B /r = MOV r32, r/m32
+}
+
+func emitMovEaxFromRegDivUOp32(src X86Reg) []byte {
+	rex := byte(0x40)
 	if src.REXBit == 1 {
-		rex |= 0x01 // REX.B
+		rex |= 0x01
 	}
-	modrm := byte(0xC0 | (dst.RegBits << 3) | src.RegBits)
-	return []byte{rex, 0x8B, modrm}
+	return []byte{rex, X86_OP_MOV_R_RM, byte(0xC0 | (0 << 3) | src.RegBits)}
+}
+
+// emitMovEaxFromRegRemUOp32 emits: MOV EAX, reg32 with exact manual construction for RemUOp32
+func emitMovEaxFromRegRemUOp32(src X86Reg) []byte {
+	rex := buildREX(false, false, false, src.REXBit == 1)
+	modrm := buildModRM(0x3, 0, src.RegBits)
+	return []byte{rex, X86_OP_MOV_R_RM, modrm}
+}
+
+// emitMovRegToRegLoadImmJumpIndirect emits: MOV dst, src with exact manual construction for LoadImmJumpIndirect
+func emitMovRegToRegLoadImmJumpIndirect(dst, src X86Reg) []byte {
+	// Manual construction for MOV jumpIndTempReg, indexReg
+	rex := buildREX(true, dst.REXBit == 1, false, src.REXBit == 1)
+	modrm := buildModRM(0x3, dst.RegBits, src.RegBits)
+	return []byte{rex, X86_OP_MOV_R_RM, modrm}
+}
+
+// emitMovRaxFromRegDivSOp64 emits: MOV RAX, src (specific construction for DivSOp64)
+func emitMovRaxFromRegDivSOp64(src X86Reg) []byte {
+	rex := byte(0x48)
+	if src.REXBit == 1 {
+		rex |= 0x01 // REX.B for rm=src
+	}
+	return []byte{rex, X86_OP_MOV_R_RM, byte(0xC0 | (0 << 3) | src.RegBits)}
+}
+
+// emitMovRaxFromRegDivUOp64 emits: MOV RAX, src (specific construction for DivUOp64)
+func emitMovRaxFromRegDivUOp64(src X86Reg) []byte {
+	rex := buildREX(true, false, false, src.REXBit == 1)
+	modrm := buildModRM(0x03, 0, src.RegBits) // mod=11, reg=0 (RAX), rm=src
+	return []byte{rex, X86_OP_MOV_R_RM, modrm}
+}
+
+// emitMovRcxFromRegShiftOp64B emits: MOV RCX, reg (specific construction for ShiftOp64B)
+func emitMovRcxFromRegShiftOp64B(src X86Reg) []byte {
+	rex := buildREX(true, false, false, src.REXBit == 1)
+	modrm := buildModRM(0x03, 1, src.RegBits) // mod=11, reg=1 (RCX), rm=src
+	return []byte{rex, X86_OP_MOV_R_RM, modrm}
+}
+
+// emitMovRaxFromRegRemSOp64 emits: MOV RAX, src (specific construction for RemSOp64)
+func emitMovRaxFromRegRemSOp64(src X86Reg) []byte {
+	rex := buildREX(true, false, false, src.REXBit == 1)
+	modrm := buildModRM(0x03, 0, src.RegBits) // mod=11, reg=0 (RAX), rm=src
+	return []byte{rex, X86_OP_MOV_R_RM, modrm}
+}
+
+// emitMovRaxFromRegRemUOp64 emits: MOV RAX, reg (specific construction for RemUOp64)
+func emitMovRaxFromRegRemUOp64(src X86Reg) []byte {
+	rex := buildREX(true, false, false, src.REXBit == 1)
+	modrm := buildModRM(0x03, 0, src.RegBits) // mod=11, reg=0 (RAX), rm=src
+	return []byte{rex, X86_OP_MOV_R_RM, modrm}
+}
+
+// emitMovRcxRegMinU emits: MOV RCX, reg specifically for MIN_U step 2
+func emitMovRcxRegMinU(reg X86Reg) []byte {
+	rex := buildREX(true, false, false, reg.REXBit == 1)
+	modrm := buildModRM(0x03, 1, reg.RegBits)  // mod=11, reg=1(RCX), rm=reg
+	return []byte{rex, X86_OP_MOV_R_RM, modrm} // MOV RCX, reg
+}
+
+// emitMovRegToRegMax emits: MOV dst, src with exact manual construction for MAX function
+func emitMovRegToRegMax(dst, src X86Reg) []byte {
+	var result []byte
+
+	rex := buildREX(true, false, false, src.REXBit == 1)
+	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)  // mod=11, reg=dst, rm=src
+	result = append(result, rex, X86_OP_MOV_R_RM, modrm) // 8B /r = MOV r64, r/m64
+
+	return result
+}
+
+// emitMovRegFromMemJumpIndirect emits: MOV dst, [src] with exact manual construction for JUMP_IND
+func emitMovRegFromMemJumpIndirect(dst, src X86Reg) []byte {
+	var result []byte
+	rex := buildREX(true, dst.REXBit == 1, false, src.REXBit == 1)
+	modrm := buildModRM(X86_MOD_REGISTER, dst.RegBits, src.RegBits) // mod=11, reg=dst, rm=src
+	result = append(result, rex, X86_OP_MOV_R_RM, modrm)
+	return result
+}
+
+// emitMovRegToRegWithManualConstruction emits: MOV dst, src using exact manual construction (0x8B opcode)
+func emitMovRegToRegWithManualConstruction(dst, src X86Reg) []byte {
+	// Use centralized REX construction (opcode 0x8B = MOV r64, r/m64)
+	rex := buildREX(true, dst.REXBit == 1, false, src.REXBit == 1)
+	modrm := buildModRM(X86_MOD_REGISTER, dst.RegBits, src.RegBits)
+	return []byte{rex, X86_OP_MOV_R_RM, modrm}
 }
 
 // emitXorEaxEax emits XOR EAX, EAX
@@ -1396,62 +1082,31 @@ func emitXorEaxEax() []byte {
 	return []byte{0x31, 0xC0}
 }
 
-// emitMovsxdReg64 emits MOVSXD dst64, src32
-func emitMovsxdReg64(dst, src X86Reg) []byte {
-	rex := byte(0x48) // REX.W for 64-bit operation
-	if dst.REXBit == 1 {
-		rex |= 0x04 // REX.R
-	}
-	if src.REXBit == 1 {
-		rex |= 0x01 // REX.B
-	}
-	modrm := byte(0xC0 | (dst.RegBits << 3) | src.RegBits)
-	return []byte{rex, 0x63, modrm}
-}
-
 // emitCmov64 emits: CMOVcc r64_dst, r64_src (conditional move)
 func emitCmov64(cc byte, dst, src X86Reg) []byte {
-	rex := byte(0x48) // REX.W for 64-bit operation
-	if dst.REXBit == 1 {
-		rex |= 0x04 // REX.R
-	}
-	if src.REXBit == 1 {
-		rex |= 0x01 // REX.B
-	}
-	modrm := byte(0xC0 | (dst.RegBits << 3) | src.RegBits)
-	return []byte{rex, 0x0F, cc, modrm}
+	rex := buildREX(true, dst.REXBit == 1, false, src.REXBit == 1)
+	modrm := buildModRM(X86_MOD_REGISTER, dst.RegBits, src.RegBits)
+	return []byte{rex, X86_PREFIX_0F, cc, modrm}
 }
 
 // emitShiftRegCl emits: D3 /subcode r/m64, CL
 func emitShiftRegCl(dst X86Reg, subcode byte) []byte {
-	rex := byte(0x48)
-	if dst.REXBit == 1 {
-		rex |= 0x01
-	}
-	modrm := buildModRM(0x03, subcode, dst.RegBits)
+	rex := buildREX(true, false, false, dst.REXBit == 1)
+	modrm := buildModRM(X86_MOD_REGISTER, subcode, dst.RegBits)
 	return []byte{rex, 0xD3, modrm}
 }
 
 // emitShiftRegImm32 emits: C1 /subcode r/m32, imm8 (32-bit shift with immediate)
 func emitShiftRegImm32(dst X86Reg, opcode, subcode byte, imm byte) []byte {
-	rex := byte(0x40)
-	if dst.REXBit == 1 {
-		rex |= 0x01 // REX.B
-	}
-	modrm := byte(0xC0 | (subcode << 3) | dst.RegBits)
+	rex := buildREX(false, false, false, dst.REXBit == 1)
+	modrm := buildModRM(X86_MOD_REGISTER, subcode, dst.RegBits)
 	return []byte{rex, opcode, modrm, imm}
 }
 
 // emitImulRegImm32 emits: IMUL dst, src, imm32 (32-bit multiply with immediate)
 func emitImulRegImm32(dst, src X86Reg, imm uint32) []byte {
-	rex := byte(0x40)
-	if dst.REXBit == 1 {
-		rex |= 0x04 // REX.R
-	}
-	if src.REXBit == 1 {
-		rex |= 0x01 // REX.B
-	}
-	modrm := byte(0xC0 | (dst.RegBits << 3) | src.RegBits)
+	rex := buildREX(false, dst.REXBit == 1, false, src.REXBit == 1)
+	modrm := buildModRM(X86_MOD_REGISTER, dst.RegBits, src.RegBits)
 	result := []byte{rex, 0x69, modrm}
 	result = append(result, encodeU32(imm)...)
 	return result
@@ -1459,48 +1114,17 @@ func emitImulRegImm32(dst, src X86Reg, imm uint32) []byte {
 
 // emitImulRegImm64 emits: IMUL dst, src, imm32 (64-bit multiply with 32-bit immediate)
 func emitImulRegImm64(dst, src X86Reg, imm uint32) []byte {
-	rex := byte(0x48) // REX.W for 64-bit operation
-	if dst.REXBit == 1 {
-		rex |= 0x04 // REX.R
-	}
-	if src.REXBit == 1 {
-		rex |= 0x01 // REX.B
-	}
-	modrm := byte(0xC0 | (dst.RegBits << 3) | src.RegBits)
+	rex := buildREX(true, dst.REXBit == 1, false, src.REXBit == 1)
+	modrm := buildModRM(X86_MOD_REGISTER, dst.RegBits, src.RegBits)
 	result := []byte{rex, 0x69, modrm}
 	result = append(result, encodeU32(imm)...)
 	return result
 }
 
-// emitCmpRegImm32Force81 emits: CMP reg, imm32 using 0x81 opcode (forces 32-bit immediate form)
-func emitCmpRegImm32Force81(reg X86Reg, imm int32) []byte {
-	rex := byte(0x48) // REX.W for 64-bit operation
-	if reg.REXBit == 1 {
-		rex |= 0x01 // REX.B
-	}
-	modrm := byte(0xC0 | (7 << 3) | reg.RegBits) // reg=7 (CMP), rm=reg
-	result := []byte{rex, 0x81, modrm}
-	result = append(result, encodeU32(uint32(imm))...)
-	return result
-}
-
-// emitAluRegImm8 emits: ALU reg64, imm8 (0x83 opcode with subcode)
-func emitAluRegImm8(reg X86Reg, subcode byte, imm int8) []byte {
-	rex := byte(0x48) // REX.W for 64-bit operation
-	if reg.REXBit == 1 {
-		rex |= 0x01 // REX.B
-	}
-	modrm := byte(0xC0 | (subcode << 3) | reg.RegBits)
-	return []byte{rex, 0x83, modrm, byte(imm)}
-}
-
 // emitAluRegImm32 emits: ALU reg64, imm32 (0x81 opcode with subcode)
 func emitAluRegImm32(reg X86Reg, subcode byte, imm int32) []byte {
-	rex := byte(0x48) // REX.W for 64-bit operation
-	if reg.REXBit == 1 {
-		rex |= 0x01 // REX.B
-	}
-	modrm := byte(0xC0 | (subcode << 3) | reg.RegBits)
+	rex := buildREX(true, false, false, reg.REXBit == 1)
+	modrm := buildModRM(X86_MOD_REGISTER, subcode, reg.RegBits)
 	result := []byte{rex, 0x81, modrm}
 	result = append(result, encodeU32(uint32(imm))...)
 	return result
@@ -1520,43 +1144,24 @@ func emitAluRegReg(reg1, reg2 X86Reg, subcode byte) []byte {
 		opcode = 0x01 // Default to ADD
 	}
 
-	rex := byte(0x48) // REX.W for 64-bit operation
-	if reg2.REXBit == 1 {
-		rex |= 0x04 // REX.R (source register)
-	}
-	if reg1.REXBit == 1 {
-		rex |= 0x01 // REX.B (destination register)
-	}
-	modrm := byte(0xC0 | (reg2.RegBits << 3) | reg1.RegBits)
+	rex := buildREX(true, reg2.REXBit == 1, false, reg1.REXBit == 1)
+	modrm := buildModRM(X86_MOD_REGISTER, reg2.RegBits, reg1.RegBits)
 	return []byte{rex, opcode, modrm}
 }
 
 // emitLoadWithSIB emits: Load instruction with SIB addressing [base + index*1 + disp32]
 // Used for patterns like MOVSX reg, [base + index + disp32]
 func emitLoadWithSIB(dst, base, index X86Reg, disp32 int32, opcodeBytes []byte, is64bit bool, prefix byte) []byte {
-	// Construct REX prefix: 0x40 base, W=1 for 64-bit, R/X/B for high registers
-	var rex byte = 0x40
-	if is64bit {
-		rex |= 0x08 // W
-	}
-	if dst.REXBit != 0 {
-		rex |= 0x04 // R
-	}
-	if index.REXBit != 0 {
-		rex |= 0x02 // X (as SIB.index)
-	}
-	if base.REXBit != 0 {
-		rex |= 0x01 // B (as SIB.base)
-	}
+	// Construct REX prefix: W=1 for 64-bit, R/X/B for high registers
+	rex := buildREX(is64bit, dst.REXBit != 0, index.REXBit != 0, base.REXBit != 0)
 
 	// ModRM: mod=10 (disp32), reg=dst, rm=100 (SIB)
-	modRM := byte(0x02<<6) | (dst.RegBits << 3) | 0x04
+	modRM := buildModRM(2, dst.RegBits, 4) // mod=10 (disp32), reg=dst, rm=100 (SIB)
 	// SIB: scale=0(1), index=index, base=base
-	sib := byte(0<<6) | (index.RegBits << 3) | base.RegBits
+	sib := buildSIB(0, index.RegBits, base.RegBits)
 
 	// disp32 as little-endian
-	dispBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(dispBytes, uint32(disp32))
+	dispBytes := encodeU32(uint32(disp32))
 
 	var code []byte
 	if prefix != 0 {
@@ -1581,25 +1186,13 @@ func emitStoreWithSIB(src, base, index X86Reg, disp32 int32, size int) []byte {
 	}
 
 	// 2) Compute REX prefix
-	rex := byte(0x40)
-	if size == 8 {
-		rex |= 0x08 // REX.W
-	}
-	if src.REXBit == 1 {
-		rex |= 0x04 // REX.R
-	}
-	if index.REXBit == 1 {
-		rex |= 0x02 // REX.X
-	}
-	if base.REXBit == 1 {
-		rex |= 0x01 // REX.B
-	}
+	rex := buildREX(size == 8, src.REXBit == 1, index.REXBit == 1, base.REXBit == 1)
 	if rex != 0x40 {
 		buf = append(buf, rex)
 	}
 
 	// 3) Select opcode: 0x88 for byte, 0x89 for word/dword/qword
-	movOp := byte(0x89)
+	movOp := byte(X86_OP_MOV_RM_R)
 	if size == 1 {
 		movOp = 0x88
 	}
@@ -1607,166 +1200,34 @@ func emitStoreWithSIB(src, base, index X86Reg, disp32 int32, size int) []byte {
 
 	// 4) ModR/M + SIB + disp32
 	//    Mod=10 (disp32), Reg=src, RM=100 (SIB)
-	modrm := byte((2 << 6) | (src.RegBits << 3) | 0x04)
+	modrm := buildModRM(2, src.RegBits, 4) // mod=10 (disp32), reg=src, rm=100 (SIB)
 	//    scale=0×1, index=index, base=base
-	sib := byte((0 << 6) | (index.RegBits << 3) | (base.RegBits & 0x07))
+	sib := buildSIB(0, index.RegBits, base.RegBits)
 	buf = append(buf, modrm, sib)
 
 	// disp32 as little-endian
-	buf = append(buf,
-		byte(disp32), byte(disp32>>8),
-		byte(disp32>>16), byte(disp32>>24),
-	)
+	buf = append(buf, encodeU32(uint32(disp32))...)
 	return buf
 }
 
-// emitCmpRegImm8 emits: CMP reg64, imm8
-func emitCmpRegImm8(reg X86Reg, imm int8) []byte {
-	rex := byte(0x48) // REX.W
-	if reg.REXBit == 1 {
-		rex |= 0x01 // REX.B
-	}
-	modrm := byte(0xF8 | reg.RegBits) // Mod=11, Reg=7 (CMP), RM=reg
-	return []byte{rex, 0x83, modrm, byte(imm)}
-}
-
-// emitTestRegImm32 emits: TEST reg64, imm32
-func emitTestRegImm32(reg X86Reg, imm uint32) []byte {
-	rex := byte(0x48) // REX.W
-	if reg.REXBit == 1 {
-		rex |= 0x01 // REX.B
-	}
-	modrm := byte(0xC0 | reg.RegBits) // Mod=11, Reg=0 (TEST), RM=reg
-	buf := []byte{rex, 0xF7, modrm}
-	buf = append(buf, byte(imm), byte(imm>>8), byte(imm>>16), byte(imm>>24))
-	return buf
-}
-
-// emitTrap emits: INT3 (0x0F 0x0B - breakpoint instruction)
+// emitTrap emits: INT3
 func emitTrap() []byte {
-	return []byte{0x0F, 0x0B}
+	return []byte{X86_PREFIX_0F, X86_2OP_UD2}
 }
 
 // emitNop emits: NOP (0x90 - no operation)
 func emitNop() []byte {
-	return []byte{0x90}
+	return []byte{X86_OP_NOP}
 }
 
 // emitJmpWithPlaceholder emits: JMP rel32 with placeholder bytes 0xFEFEFEFE
 func emitJmpWithPlaceholder() []byte {
-	return []byte{0xE9, 0xFE, 0xFE, 0xFE, 0xFE}
-}
-
-// emitMovImmToReg64WithManualREX emits: MOV reg64, imm64 using exact manual REX construction
-func emitMovImmToReg64WithManualREX(r X86Reg, imm uint64) []byte {
-	// Manual REX construction matching original code
-	rex := byte(0x48)
-	if r.REXBit == 1 {
-		rex |= 0x01 // set only the B bit for r8–r15
-	}
-	movOp := byte(0xB8 + r.RegBits)
-	immBytes := make([]byte, 8)
-	binary.LittleEndian.PutUint64(immBytes, imm)
-	code := append([]byte{rex, movOp}, immBytes...)
-	return code
-}
-
-// emitCmpRegImm32WithManualConstruction emits: CMP reg64, imm32 using exact manual construction
-func emitCmpRegImm32WithManualConstruction(r X86Reg, imm int32) []byte {
-	// Manual REX construction matching original code
-	rex := byte(0x48)
-	if r.REXBit == 1 {
-		rex |= 0x01
-	}
-
-	// CMP r64, imm32 → opcode 0x81 /7 id
-	modrm := byte(0xC0 | (0x7 << 3) | r.RegBits)
-
-	return []byte{
-		rex, 0x81, modrm,
-		byte(imm), byte(imm >> 8), byte(imm >> 16), byte(imm >> 24),
-	}
+	return []byte{X86_OP_JMP_REL32, 0xFE, 0xFE, 0xFE, 0xFE}
 }
 
 // emitJccWithPlaceholder emits: Jcc rel32 with 4-byte placeholder
 func emitJccWithPlaceholder(jcc byte) []byte {
-	return []byte{0x0F, jcc, 0, 0, 0, 0}
-}
-
-// emitPushRegWithManualConstruction emits: PUSH reg using exact manual construction
-func emitPushRegWithManualConstruction(reg X86Reg) []byte {
-	var buf []byte
-	// Manual construction matching original code
-	if reg.REXBit == 1 {
-		buf = append(buf, 0x41)
-	}
-	buf = append(buf, 0x50|reg.RegBits)
-	return buf
-}
-
-// emitMovRegToRegWithManualConstruction emits: MOV dst, src using exact manual construction (0x8B opcode)
-func emitMovRegToRegWithManualConstruction(dst, src X86Reg) []byte {
-	// Manual construction matching original code (opcode 0x8B = MOV r64, r/m64)
-	rex := byte(0x48) // REX.W
-	if dst.REXBit == 1 {
-		rex |= 0x04 // REX.R
-	}
-	if src.REXBit == 1 {
-		rex |= 0x01 // REX.B
-	}
-	modrm := byte(0xC0 | (dst.RegBits << 3) | src.RegBits)
-	return []byte{rex, 0x8B, modrm}
-}
-
-// emitMovRegToRegWithReversedOpcode emits: MOV dst, src using 0x89 opcode (reversed operand encoding)
-func emitMovRegToRegWithReversedOpcode(dst, src X86Reg) []byte {
-	// Manual construction with 0x89 opcode (MOV r/m64, r64) - src and dst roles swapped in ModR/M
-	rex := byte(0x48) // REX.W
-	if src.REXBit == 1 {
-		rex |= 0x04 // REX.R (source reg is in reg field for 0x89)
-	}
-	if dst.REXBit == 1 {
-		rex |= 0x01 // REX.B (dest reg is in r/m field for 0x89)
-	}
-	modrm := byte(0xC0 | (src.RegBits << 3) | dst.RegBits) // swapped: src in reg field, dst in r/m
-	return []byte{rex, 0x89, modrm}
-}
-
-// emitMovRegToRegForMinU emits: MOV dst, src specifically for MIN_U with consistent 0x89 opcode
-func emitMovRegToRegForMinU(dst, src X86Reg) []byte {
-	// MIN_U consistently uses 0x89 opcode (MOV r/m64, r64)
-	rex := byte(0x48) // REX.W
-	if src.REXBit == 1 {
-		rex |= 0x04 // REX.R
-	}
-	if dst.REXBit == 1 {
-		rex |= 0x01 // REX.B
-	}
-	modrm := byte(0xC0 | (src.RegBits << 3) | dst.RegBits) // src in reg field, dst in r/m
-	return []byte{rex, 0x89, modrm}
-}
-
-// emitMovRegToRegSameRegForMinU emits: MOV reg, reg for same register (special case for MIN_U)
-func emitMovRegToRegSameRegForMinU(reg X86Reg) []byte {
-	// Special case for MIN_U when moving register to itself - use 0x89 opcode with same reg in both fields
-	rex := byte(0x48) // REX.W
-	if reg.REXBit == 1 {
-		rex |= 0x04 // REX.R
-		rex |= 0x01 // REX.B
-	}
-	modrm := byte(0xC0 | (reg.RegBits << 3) | reg.RegBits) // same reg in both fields
-	return []byte{rex, 0x89, modrm}
-}
-
-// emitMovRegToRegSameReg emits: MOV reg, reg (same register) - special case for optimizations
-func emitMovRegToRegSameReg(reg X86Reg) []byte {
-	// Special case: MOV reg, reg using 0x89 opcode
-	rex := byte(0x48) // REX.W
-	if reg.REXBit == 1 {
-		rex |= 0x05 // REX.R + REX.B (both set for same register)
-	}
-	modrm := byte(0xC0 | (reg.RegBits << 3) | reg.RegBits) // same reg in both fields
-	return []byte{rex, 0x89, modrm}
+	return []byte{X86_PREFIX_0F, jcc, 0, 0, 0, 0}
 }
 
 // emitAddRegImm32WithManualConstruction emits: ADD reg, imm32 using exact manual construction
@@ -1784,251 +1245,7 @@ func emitAddRegImm32WithManualConstruction(reg X86Reg, imm uint64) []byte {
 	return result
 }
 
-// emitAddRegImm32ForJumpIndirect emits: ADD reg, imm32 with 64-bit REX for JUMP_IND context
-func emitAddRegImm32ForJumpIndirect(reg X86Reg, imm uint64) []byte {
-	// Manual construction matching original JUMP_IND code pattern (64-bit REX)
-	rex := byte(0x48) // REX.W = 1 for 64-bit operation size
-	if reg.REXBit == 1 {
-		rex |= 0x01 // REX.B
-	}
-	modrm := byte(0xC0 | (0 << 3) | reg.RegBits) // /0 for ADD
-	imm32 := make([]byte, 4)
-	binary.LittleEndian.PutUint32(imm32, uint32(imm))
-
-	result := []byte{rex, 0x81, modrm}
-	result = append(result, imm32...)
-	return result
-}
-
-// emitPushRegFor64Bit emits: PUSH reg using manual 64-bit prefix construction
-func emitPushRegFor64Bit(reg X86Reg) []byte {
-	// Manual construction for 64-bit PUSH - different from the jumpIndTempReg version
-	rex := byte(0x48)
-	if reg.REXBit == 1 {
-		rex |= 0x01
-	}
-	pushOp := byte(0x50 | reg.RegBits)
-	return []byte{rex, pushOp}
-}
-
-// emitMovRegToRegForLoadImmJumpIndirect emits: MOV dst, src with specific REX construction for LoadImmJumpIndirect
-func emitMovRegToRegForLoadImmJumpIndirect(dst, src X86Reg) []byte {
-	// Manual construction matching original code for LoadImmJumpIndirect
-	rex := byte(0x48) // REX.W
-	if dst.REXBit == 1 {
-		rex |= 0x04 // REX.R: extend the reg field for dst
-	}
-	if src.REXBit == 1 {
-		rex |= 0x01 // REX.B: extend the rm field for src
-	}
-	// mod=11 (register-direct), reg=dst, rm=src
-	modrm := byte(0xC0 | (dst.RegBits << 3) | src.RegBits)
-
-	return []byte{rex, 0x8B, modrm}
-}
-
-// emitAddRegImm32ForLoadImmJumpIndirect emits: ADD reg, imm32 with specific construction for LoadImmJumpIndirect
-func emitAddRegImm32ForLoadImmJumpIndirect(reg X86Reg, imm uint64) []byte {
-	// Manual construction matching original code for LoadImmJumpIndirect
-	rex := byte(0x48)
-	if reg.REXBit == 1 {
-		rex |= 0x01
-	}
-	// ADD r/m64, imm32 (reg=0)
-	modrm := byte(0xC0 | (0 << 3) | reg.RegBits)
-	imm32 := make([]byte, 4)
-	binary.LittleEndian.PutUint32(imm32, uint32(imm))
-
-	result := []byte{rex, 0x81, modrm}
-	result = append(result, imm32...)
-	return result
-}
-
-// emitAndRegImm32WithFFs emits: AND reg, 0xFFFFFFFF using exact manual construction
-func emitAndRegImm32WithFFs(reg X86Reg) []byte {
-	// Manual construction matching original code for zero-extend
-	rex := byte(0x48)
-	if reg.REXBit == 1 {
-		rex |= 0x01
-	}
-	// AND r/m64, imm32 (reg=4)
-	modrm := byte(0xC0 | (4 << 3) | reg.RegBits)
-
-	result := []byte{rex, 0x81, modrm}
-	result = append(result, []byte{0xFF, 0xFF, 0xFF, 0xFF}...)
-	return result
-}
-
 // Helper functions for initDJumpFunc - these match the exact manual constructions
-
-// emitCmpReg32WithImm32ForDJump emits: CMP r/m32, imm32 using 0x40 REX prefix
-func emitCmpReg32WithImm32ForDJump(reg X86Reg, imm uint32) []byte {
-	// Manual construction: REX prefix 0x40 + B bit
-	rex := byte(0x40)
-	if reg.REXBit == 1 {
-		rex |= 0x01 // REX.B
-	}
-	modrm := byte(0xC0 | (7 << 3) | reg.RegBits)
-
-	result := []byte{rex, 0x81, modrm}
-	immBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(immBytes, imm)
-	result = append(result, immBytes...)
-	return result
-}
-
-// emitCmpRegImm8ForDJump emits: CMP r/m64, imm8 using 0x83 opcode
-func emitCmpRegImm8ForDJump(reg X86Reg, imm byte) []byte {
-	// Manual construction: REX.W + REX.B
-	rex := byte(0x48)
-	if reg.REXBit == 1 {
-		rex |= 0x01
-	}
-	modrm := byte(0xF8 | reg.RegBits)
-	return []byte{rex, 0x83, modrm, imm}
-}
-
-// emitCmpRegImm32ForDJump emits: CMP r/m64, imm32 using 0x81 opcode
-func emitCmpRegImm32ForDJump(reg X86Reg, imm uint32) []byte {
-	// Manual construction: REX.W + REX.B
-	rex := byte(0x48)
-	if reg.REXBit == 1 {
-		rex |= 0x01
-	}
-	modrm := byte(0xF8 | reg.RegBits)
-
-	result := []byte{rex, 0x81, modrm}
-	immBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(immBytes, imm)
-	result = append(result, immBytes...)
-	return result
-}
-
-// emitTestRegImm32ForDJump emits: TEST r/m64, imm32 using 0xF7 opcode
-func emitTestRegImm32ForDJump(reg X86Reg, imm uint32) []byte {
-	// Manual construction: REX.W + REX.B
-	rex := byte(0x48)
-	if reg.REXBit == 1 {
-		rex |= 0x01
-	}
-	modrm := byte(0xC0 | reg.RegBits)
-
-	result := []byte{rex, 0xF7, modrm}
-	immBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(immBytes, imm)
-	result = append(result, immBytes...)
-	return result
-}
-
-// emitSarRegImm8ForDJump emits: SAR r/m64, imm8 using 0xC1 /7 opcode
-func emitSarRegImm8ForDJump(reg X86Reg, imm byte) []byte {
-	// Manual construction: REX.W + REX.B
-	rex := byte(0x48)
-	if reg.REXBit == 1 {
-		rex |= 0x01
-	}
-	// /7 → reg=7，mod=11（0xC0），rm=reg.RegBits
-	modrm := byte(0xC0 | (7 << 3) | reg.RegBits)
-	return []byte{rex, 0xC1, modrm, imm}
-}
-
-// emitSubRegImm8ForDJump emits: SUB r/m64, imm8 using 0x83 /5 opcode
-func emitSubRegImm8ForDJump(reg X86Reg, imm byte) []byte {
-	// Manual construction: REX.W + REX.B
-	rex := byte(0x48)
-	if reg.REXBit == 1 {
-		rex |= 0x01
-	}
-	modrm := byte(0xC0 | (5 << 3) | reg.RegBits)
-	return []byte{rex, 0x83, modrm, imm}
-}
-
-// emitImulRegRegImm32ForDJump emits: IMUL r64, r/m64, imm32 using 0x69 opcode
-func emitImulRegRegImm32ForDJump(reg X86Reg, imm uint32) []byte {
-	// Manual construction: REX.W + REX.R + REX.B
-	rex := byte(0x48) // W=1
-	if reg.REXBit == 1 {
-		rex |= 0x05 // REX.R=1, REX.B=1
-	}
-	// mod=11, reg=reg.RegBits, rm=reg.RegBits
-	modrm := byte(0xC0 | (reg.RegBits << 3) | reg.RegBits)
-
-	result := []byte{rex, 0x69, modrm}
-	immBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(immBytes, imm)
-	result = append(result, immBytes...)
-	return result
-}
-
-// emitPushRAX emits: PUSH RAX
-func emitPushRAX() []byte {
-	return []byte{0x50}
-}
-
-// emitLeaRAXRip emits: LEA RAX, [RIP+0]
-func emitLeaRAXRip() []byte {
-	return []byte{0x48, 0x8D, 0x05, 0x00, 0x00, 0x00, 0x00}
-}
-
-// emitAddRegRegForDJump emits: ADD r/m64, r/m64 using 0x01 opcode
-func emitAddRegRegForDJump(dst X86Reg) []byte {
-	// Manual construction: REX.W + REX.B (adding RAX to dst)
-	rex := byte(0x48)
-	if dst.REXBit == 1 {
-		rex |= 0x01 // REX.B
-	}
-	modrm := byte(0xC0 | (0 << 3) | dst.RegBits) // RAX is reg=0
-	return []byte{rex, 0x01, modrm}
-}
-
-// emitPopRAX emits: POP RAX
-func emitPopRAX() []byte {
-	return []byte{0x58}
-}
-
-// emitAddRegImm32WithPlaceholderForDJump emits: ADD r/m64, imm32 with DEADBEEF placeholder
-func emitAddRegImm32WithPlaceholderForDJump(reg X86Reg) []byte {
-	// Manual construction: REX.W + REX.B
-	rex := byte(0x48)
-	if reg.REXBit == 1 {
-		rex |= 0x01 // REX.B
-	}
-	modrm := byte(0xC0 | (0 << 3) | reg.RegBits)
-	return []byte{rex, 0x81, modrm, 0xEF, 0xBE, 0xAD, 0xDE}
-}
-
-// emitJmpRegForDJump emits: JMP r/m64 using 0xFF /4 opcode
-func emitJmpRegForDJump(reg X86Reg) []byte {
-	// Manual construction: REX.W + REX.B
-	rex := byte(0x48)
-	if reg.REXBit == 1 {
-		rex |= 0x01
-	}
-	modrm := byte(0xE0 | reg.RegBits) // /4 = 0b100 shifted to reg field = 0xE0
-	return []byte{rex, 0xFF, modrm}
-}
-
-// emitPopRegUd2ForDJump emits: POP reg; UD2 (panic stub)
-func emitPopRegUd2ForDJump(reg X86Reg) []byte {
-	// Manual construction: REX + POP + UD2
-	rex := byte(0x48)
-	if reg.REXBit == 1 {
-		rex |= 0x01
-	}
-	popOp := byte(0x58 | reg.RegBits)
-	return []byte{rex, popOp, 0x0F, 0x0B}
-}
-
-// emitPopRegForDJump emits: POP reg for handler jumps
-func emitPopRegForDJump(reg X86Reg) []byte {
-	// Manual construction: REX + POP
-	rex := byte(0x48)
-	if reg.REXBit == 1 {
-		rex |= 0x01
-	}
-	popOp := byte(0x58 | reg.RegBits)
-	return []byte{rex, popOp}
-}
 
 // emitStoreImmIndWithSIB emits: MOV [base + index*1 + disp32], imm (with SIB addressing)
 func emitStoreImmIndWithSIB(idx X86Reg, base X86Reg, disp uint32, imm []byte, opcode byte, prefix byte) []byte {
@@ -2039,14 +1256,7 @@ func emitStoreImmIndWithSIB(idx X86Reg, base X86Reg, disp uint32, imm []byte, op
 		buf = append(buf, prefix)
 	}
 
-	// REX prefix: W=0, R=0, X=idx.REXBit, B=base.REXBit
-	rex := byte(0x40)
-	if idx.REXBit == 1 {
-		rex |= 0x02 // REX.X for SIB.index
-	}
-	if base.REXBit == 1 {
-		rex |= 0x01 // REX.B for SIB.base
-	}
+	rex := buildREX(false, false, idx.REXBit == 1, base.REXBit == 1)
 
 	buf = append(buf, rex, opcode)
 
@@ -2054,7 +1264,7 @@ func emitStoreImmIndWithSIB(idx X86Reg, base X86Reg, disp uint32, imm []byte, op
 	buf = append(buf, 0x84)
 
 	// SIB: scale=0(×1)=00, index=idx.RegBits, base=base.RegBits
-	sib := byte((0 << 6) | (idx.RegBits << 3) | (base.RegBits & 0x07))
+	sib := buildSIB(0, idx.RegBits, base.RegBits)
 	buf = append(buf, sib)
 
 	// disp32, little-endian
@@ -2087,11 +1297,7 @@ func emitStoreImmWithBaseSIB(base X86Reg, disp uint32, imm []byte, opcode byte, 
 		buf = append(buf, prefix)
 	}
 
-	// REX prefix (64-bit mode), only used to extend r8–r15
-	rex := byte(0x40)
-	if base.REXBit != 0 {
-		rex |= 0x01
-	}
+	rex := buildREX(false, false, false, base.REXBit == 1)
 
 	buf = append(buf, rex, opcode)
 
@@ -2099,7 +1305,7 @@ func emitStoreImmWithBaseSIB(base X86Reg, disp uint32, imm []byte, opcode byte, 
 	buf = append(buf, 0x84)
 
 	// SIB: scale=0 (×1), index=100 (none), base=base.RegBits
-	sib := byte(0x24 | (base.RegBits & 0x07))
+	sib := buildSIB(0, 4, base.RegBits)
 	buf = append(buf, sib)
 
 	// disp32, little-endian
@@ -2113,22 +1319,12 @@ func emitStoreImmWithBaseSIB(base X86Reg, disp uint32, imm []byte, opcode byte, 
 
 // emitLoadWithBaseSIB emits: MOV dst, [base + disp32] with SIB addressing
 func emitLoadWithBaseSIB(dst X86Reg, base X86Reg, disp uint32, opcodes []byte, rexW bool) []byte {
-	// Construct REX prefix: 0100WRXB
-	rex := byte(0x40)
-	if rexW {
-		rex |= 0x08 // REX.W
-	}
-	if dst.REXBit == 1 {
-		rex |= 0x04 // REX.R extends ModRM.reg
-	}
-	if base.REXBit == 1 {
-		rex |= 0x01 // REX.B extends ModRM.r/m (base)
-	}
+	rex := buildREX(rexW, dst.REXBit == 1, false, base.REXBit == 1)
 
 	// ModRM: mod=10 (disp32), reg=dst.RegBits, r/m=100 (SIB follows)
-	modrm := byte(0x80 | (dst.RegBits << 3) | 0x04)
+	modrm := buildModRM(0x02, dst.RegBits, 0x04)
 	// SIB: scale=0 (×1), index=100(none), base=base.RegBits
-	sib := byte(0x24 | (base.RegBits & 0x07))
+	sib := buildSIB(0, 4, base.RegBits)
 
 	// disp32
 	dispBytes := encodeU32(disp)
@@ -2144,22 +1340,12 @@ func emitLoadWithBaseSIB(dst X86Reg, base X86Reg, disp uint32, opcodes []byte, r
 
 // emitStoreWithBaseSIB emits: MOV [base + disp32], src with SIB addressing and optional prefix
 func emitStoreWithBaseSIB(src X86Reg, base X86Reg, disp uint32, opcode byte, prefix byte, rexW bool) []byte {
-	// REX prefix: 0100WRXB
-	rex := byte(0x40)
-	if rexW {
-		rex |= 0x08 // REX.W
-	}
-	if src.REXBit == 1 {
-		rex |= 0x04 // REX.R extends ModRM.reg
-	}
-	if base.REXBit == 1 {
-		rex |= 0x01 // REX.B extends ModRM.r/m (base)
-	}
+	rex := buildREX(rexW, src.REXBit == 1, false, base.REXBit == 1)
 
 	// ModRM: mod=10 (disp32), reg=src.RegBits, r/m=100 (SIB follows)
-	modrm := byte(0x80 | (src.RegBits << 3) | 0x04)
+	modrm := buildModRM(0x02, src.RegBits, 0x04)
 	// SIB: scale=0 (×1), index=100(none), base=base.RegBits
-	sib := byte(0x24 | (base.RegBits & 0x07))
+	sib := buildSIB(0, 4, base.RegBits)
 
 	// disp32, little-endian
 	dispBytes := encodeU32(disp)
@@ -2196,4 +1382,600 @@ func emitMovImm32ToReg32(dst X86Reg, val uint32) []byte {
 	result = append(result, opcode)
 	result = append(result, encodeU32(val)...)
 	return result
+}
+
+// emitSubMemImm32 emits: SUB [reg+disp32], imm32 (81 /5)
+func emitSubMemImm32(reg X86Reg, disp int32, imm uint32) []byte {
+	var result []byte
+
+	// REX.W = 1 for 64-bit operation
+	rex := buildREX(true, false, false, reg.REXBit == 1)
+	result = append(result, rex)
+
+	// Opcode: 81 /5 (SUB r/m64, imm32)
+	result = append(result, 0x81)
+
+	// ModRM: mod = 10 (disp32), reg = 5 (SUB), rm = reg.RegBits
+	modrm := buildModRM(0x02, 0x05, reg.RegBits)
+	result = append(result, modrm)
+
+	// SIB if needed (for r12/r13/r14/r15 when RegBits == 4)
+	if reg.RegBits&0x07 == 4 {
+		sib := byte(0x24) // scale=0, index=none(100), base=100 (RSP/r12)
+		result = append(result, sib)
+	}
+
+	// disp32
+	result = append(result, encodeU32(uint32(disp))...)
+
+	// imm32
+	result = append(result, encodeU32(imm)...)
+
+	return result
+}
+
+// emitJns8 emits: JNS rel8 (short jump if not sign)
+func emitJns8(rel8 int8) []byte {
+	return []byte{0x79, byte(rel8)}
+}
+
+// emitJmpRegMemDisp emits: JMP [reg+disp32] (indirect jump through memory)
+func emitJmpRegMemDisp(reg X86Reg, disp int32) []byte {
+	var result []byte
+
+	// REX.W = 1 for 64-bit operation
+	rex := buildREX(true, false, false, reg.REXBit == 1)
+	result = append(result, rex)
+
+	// Opcode: FF /4 (JMP r/m64)
+	result = append(result, 0xFF)
+
+	// ModRM: mod = 10 (disp32), reg = 4 (JMP), rm = reg.RegBits
+	modrm := buildModRM(0x02, 0x04, reg.RegBits)
+	result = append(result, modrm)
+
+	// SIB if needed (for r12/r13/r14/r15 when RegBits == 4)
+	if reg.RegBits&0x07 == 4 {
+		sib := byte(0x24) // scale=0, index=none(100), base=100 (RSP/r12)
+		result = append(result, sib)
+	}
+
+	// disp32
+	result = append(result, encodeU32(uint32(disp))...)
+
+	return result
+}
+
+// emitIncMemIndirect emits: INC QWORD PTR [reg] (increment 64-bit value at [reg])
+func emitIncMemIndirect(reg X86Reg) []byte {
+	var result []byte
+
+	// REX.W = 1 for 64-bit operation
+	rex := buildREX(true, false, false, reg.REXBit == 1)
+	result = append(result, rex)
+
+	// Opcode: FF /0 (INC r/m64)
+	result = append(result, 0xFF)
+
+	// ModRM: mod = 00 (indirect), reg = 0 (INC), rm = reg.RegBits
+	modrm := buildModRM(0x00, 0x00, reg.RegBits)
+	result = append(result, modrm)
+
+	// SIB if needed (for certain registers)
+	if reg.RegBits&0x07 == 4 {
+		sib := byte(0x24) // scale=0, index=none(100), base=100 (RSP/r12)
+		result = append(result, sib)
+	}
+
+	return result
+}
+
+// emitMovMemToReg64 emits: MOV dst, [src] (load 64-bit value from [src] to dst)
+func emitMovMemToReg64(dst, src X86Reg) []byte {
+	var result []byte
+
+	// REX.W = 1 for 64-bit operation
+	rex := buildREX(true, dst.REXBit == 1, false, src.REXBit == 1)
+	result = append(result, rex)
+
+	// Opcode: 8B (MOV reg, r/m64)
+	result = append(result, 0x8B)
+
+	// ModRM: mod = 00 (indirect), reg = dst.RegBits, rm = src.RegBits
+	modrm := buildModRM(0x00, dst.RegBits, src.RegBits)
+	result = append(result, modrm)
+
+	// SIB if needed (for certain registers)
+	if src.RegBits&0x07 == 4 {
+		sib := byte(0x24) // scale=0, index=none(100), base=100 (RSP/r12)
+		result = append(result, sib)
+	}
+
+	return result
+}
+
+// Custom helpers for generateJumpIndirect - exact manual construction matching
+
+// emitPushRegJumpIndirect emits: PUSH reg with exact manual construction for JUMP_IND
+func emitPushRegJumpIndirect(reg X86Reg) []byte {
+	var result []byte
+
+	// Manual construction matching generateJumpIndirect exactly
+	if reg.REXBit == 1 {
+		result = append(result, 0x41) // REX.B
+	}
+	result = append(result, 0x50|reg.RegBits) // PUSH + regBits
+
+	return result
+}
+
+// emitAddRegImm32JumpIndirect emits: ADD reg, imm32 with exact manual construction for JUMP_IND
+func emitAddRegImm32_100(reg X86Reg, imm uint32) []byte {
+	var result []byte
+
+	rex := buildREX(true, false, false, reg.REXBit == 1)
+	modrm := buildModRM(0x03, 0, reg.RegBits) // mod=11, reg=0 (ADD), rm=reg
+	result = append(result, rex, 0x81, modrm)
+
+	// Add 32-bit immediate (little-endian)
+	imm32 := make([]byte, 4)
+	binary.LittleEndian.PutUint32(imm32, imm)
+	result = append(result, imm32...)
+
+	return result
+}
+
+// ================================================================================================
+// Custom helpers for  exact manual construction match
+// ================================================================================================
+
+// emitCmovgeMax emits: CMOVGE dst, src with exact manual construction for MAX function
+func emitCmovgeMax(dst, src X86Reg) []byte {
+	var result []byte
+
+	rex := buildREX(true, dst.REXBit == 1, false, src.REXBit == 1)
+	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)
+	result = append(result, rex, X86_PREFIX_0F, 0x4D, modrm) // 0F 4D /r = CMOVGE r64, r/m64
+
+	return result
+}
+
+// emitCmovaMinU emits: CMOVA dst, src with exact manual construction for MIN_U
+func emitCmovaMinU(dst, src X86Reg) []byte {
+	rex := byte(0x48)
+	if dst.REXBit == 1 {
+		rex |= 0x04 // REX.R for dst
+	}
+	if src.REXBit == 1 {
+		rex |= 0x01 // REX.B for src
+	}
+	modrm := byte(0xC0 | (dst.RegBits << 3) | src.RegBits)
+	return []byte{rex, X86_PREFIX_0F, 0x47, modrm} // CMOVA r64, r/m64
+}
+
+// emitNegReg64NegAddImm32 emits: NEG r64_dst for NegAddImm32 with exact manual construction
+func emitNegReg64NegAddImm32(dst X86Reg) []byte {
+	rex := buildREX(true, false, false, dst.REXBit == 1)
+	modrm := buildModRM(0x03, 0x03, dst.RegBits) // /3 = NEG
+	return []byte{rex, 0xF7, modrm}
+}
+
+// ================================================================================================
+// Custom helpers for generateXEncode - exact manual construction match
+// ================================================================================================
+
+// emitMovImmToDstXEncode emits: MOV r64_dst, imm32 (zero) for XEncode with exact manual construction
+func emitMovImmToDstXEncode(dst X86Reg) []byte {
+	rex := buildREX(true, false, false, dst.REXBit == 1)
+	modrm := buildModRM(0x03, 0, dst.RegBits) // mod=11, reg=0, rm=dst
+	result := []byte{rex, 0xC7, modrm}        // MOV r64_dst, imm32
+	result = append(result, encodeU32(0)...)
+	return result
+}
+
+// emitShrRcxImmXEncode emits: SHR rcx, imm8 for XEncode with exact manual construction
+func emitShrRcxImmXEncode(shift byte) []byte {
+	return []byte{0x48, 0xC1, 0xE9, shift} // 0xC1 /5=SHR, modrm E9=(reg=5, rm=1)
+}
+
+// emitMovAbsRdxXEncode emits: MOVABS rdx, imm64 for XEncode with exact manual construction
+func emitMovAbsRdxXEncode(factor uint64) []byte {
+	rex := buildREX(true, false, true, false) // REX.W + REX.X for rdx
+	result := []byte{rex, byte(0xB8 | 2)}     // MOVABS rdx, imm64
+	result = append(result, encodeU64(factor)...)
+	return result
+}
+
+// emitImulRdxRcxXEncode emits: IMUL rdx, rcx for XEncode with exact manual construction
+func emitImulRdxRcxXEncode() []byte {
+	rex := buildREX(true, false, false, false) // W=1, R=0, X=0, B=0
+	modrm := buildModRM(0x03, 2, 1)            // mod=11, reg=2 (RDX), rm=1 (RCX)
+	return []byte{rex, X86_PREFIX_0F, 0xAF, modrm}
+}
+
+// emitAddDstRdxXEncode emits: ADD r64_dst, r64_rdx for XEncode with exact manual construction
+func emitAddDstRdxXEncode(dst X86Reg) []byte {
+	rex := buildREX(true, false, false, dst.REXBit == 1)
+	modrm := buildModRM(0x03, 2, dst.RegBits) // mod=11, reg=2 (RDX), rm=dst
+	return []byte{rex, 0x01, modrm}
+}
+
+// emitXorRdxRdxRemUOp64 emits: XOR RDX, RDX (specific construction for RemUOp64)
+// emitDivMemStackRemUOp64RAX emits: DIV qword ptr [RSP+8] (for src2==RAX case)
+func emitDivMemStackRemUOp64RAX() []byte {
+	return []byte{
+		0x48,             // REX.W
+		0xF7, 0xB4, 0x24, // F7 /6 rm=4 (SIB follows)
+		0x08, 0x00, 0x00, 0x00, // disp32 = 8
+	}
+}
+
+// emitDivMemStackRemUOp64RDX emits: DIV qword ptr [RSP] (for src2==RDX case)
+func emitDivMemStackRemUOp64RDX() []byte {
+	return []byte{
+		0x48,       // REX.W
+		0xF7, 0x34, // F7 /6 rm=4 (SIB follows)
+		0x24, // SIB: scale=0,index=RSP,base=RSP
+	}
+}
+
+// emitDivRegRemUOp64 emits: DIV reg (specific construction for RemUOp64)
+func emitDivRegRemUOp64(src X86Reg) []byte {
+	rex := byte(0x48)
+	if src.REXBit == 1 {
+		rex |= 0x01
+	}
+	return []byte{rex, 0xF7, byte(0xC0 | (6 << 3) | src.RegBits)}
+}
+
+// emitMovRdxIntMinRemSOp64 emits: MOV RDX, 0x8000000000000000 (specific construction for RemSOp64)
+func emitMovRdxIntMinRemSOp64() []byte {
+	return []byte{
+		0x48, 0xBA,
+		0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x80,
+	}
+}
+
+// emitCmpMemStackNeg1RemSOp64 emits: CMP qword ptr [RSP], -1 (specific construction for RemSOp64)
+func emitCmpMemStackNeg1RemSOp64() []byte {
+	return []byte{
+		0x48,       // REX.W
+		0x81, 0x3C, // 81 /7 r/m64, imm32; mod=00, reg=7, rm=4 => 0x3C
+		0x24,                   // SIB: scale=0,index=RSP,base=RSP
+		0xFF, 0xFF, 0xFF, 0xFF, // imm32 = -1
+	}
+}
+
+// emitCmpRegNeg1RemSOp64 emits: CMP reg, -1 (specific construction for RemSOp64)
+func emitCmpRegNeg1RemSOp64(reg X86Reg) []byte {
+	rex := buildREX(true, false, false, reg.REXBit == 1)
+	modrm := buildModRM(0x03, 7, reg.RegBits) // mod=11, reg=7 (CMP), rm=reg
+	return []byte{rex, 0x81, modrm, 0xFF, 0xFF, 0xFF, 0xFF}
+}
+
+// emitCqoRemSOp64 emits: CQO (specific construction for RemSOp64)
+func emitCqoRemSOp64() []byte {
+	return []byte{0x48, 0x99}
+}
+
+// emitIdivMemStackRemSOp64 emits: IDIV qword ptr [RSP] (specific construction for RemSOp64)
+func emitIdivMemStackRemSOp64() []byte {
+	return []byte{
+		0x48,       // REX.W
+		0xF7, 0x3C, // F7 /7 rm=4 (SIB)
+		0x24, // SIB: scale=0,index=RSP,base=RSP
+	}
+}
+
+// emitIdivRegRemSOp64 emits: IDIV reg (specific construction for RemSOp64)
+func emitIdivRegRemSOp64(reg X86Reg) []byte {
+	rex := buildREX(true, false, false, reg.REXBit == 1)
+	modrm := buildModRM(0x03, 7, reg.RegBits) // mod=11, reg=7 (IDIV), rm=reg
+	return []byte{rex, 0xF7, modrm}
+}
+
+// emitXorRegRegRemSOp64 emits: XOR reg, reg (specific construction for RemSOp64)
+func emitXorRegRegRemSOp64(reg X86Reg) []byte {
+	rex := buildREX(true, reg.REXBit == 1, false, reg.REXBit == 1)
+	modrm := buildModRM(0x03, reg.RegBits, reg.RegBits) // mod=11, reg=reg, rm=reg
+	return []byte{rex, 0x31, modrm}
+}
+
+// ====== Custom helpers for generateShiftOp64B ======
+
+// emitShiftDstByClShiftOp64B emits: SHIFT dst, CL (specific construction for ShiftOp64B)
+func emitShiftDstByClShiftOp64B(opcode byte, regField byte, dst X86Reg) []byte {
+	rex := buildREX(true, false, false, dst.REXBit == 1)
+	modrm := buildModRM(0x03, regField, dst.RegBits) // mod=11, reg=regField, rm=dst
+	return []byte{rex, opcode, modrm}
+}
+
+// emitXorRegRegDivUOp64 emits: XOR dst, dst (specific construction for DivUOp64)
+func emitXorRegRegDivUOp64(dst X86Reg) []byte {
+	rex := buildREX(true, dst.REXBit == 1, false, dst.REXBit == 1)
+	modrm := buildModRM(0x03, dst.RegBits, dst.RegBits) // mod=11, reg=dst, rm=dst
+	return []byte{rex, 0x31, modrm}
+}
+
+// emitNotRegDivUOp64 emits: NOT dst (specific construction for DivUOp64)
+func emitNotRegDivUOp64(dst X86Reg) []byte {
+	rex := byte(0x48)
+	if dst.REXBit == 1 {
+		rex |= 0x01 // REX.B
+	}
+	return []byte{rex, 0xF7, byte(0xC0 | (2 << 3) | dst.RegBits)}
+}
+
+// emitXorRdxRdxDivUOp64 emits: XOR RDX, RDX (specific construction for DivUOp64)
+// emitDivRegDivUOp64 emits: DIV src (specific construction for DivUOp64)
+func emitDivRegDivUOp64(src X86Reg) []byte {
+	rex := byte(0x48)
+	if src.REXBit == 1 {
+		rex |= 0x01
+	}
+	return []byte{rex, 0xF7, byte(0xC0 | (6 << 3) | src.RegBits)}
+}
+
+// emitMovDstFromRaxDivUOp64 emits: MOV dst, RAX (specific construction for DivUOp64)
+func emitMovDstFromRaxDivUOp64(dst X86Reg) []byte {
+	rex := byte(0x48)
+	if dst.REXBit == 1 {
+		rex |= 0x01
+	}
+	return []byte{rex, X86_OP_MOV_RM_R, byte(0xC0 | (0 << 3) | dst.RegBits)}
+}
+
+// emitMovDstFromSrcShiftOp64B emits: MOV dst, src (specific construction for ShiftOp64B)
+func emitMovDstFromSrcShiftOp64B(dst, src X86Reg) []byte {
+	rex := buildREX(true, src.REXBit == 1, false, dst.REXBit == 1)
+	modrm := buildModRM(0x03, src.RegBits, dst.RegBits) // mod=11, reg=src, rm=dst
+	return []byte{rex, X86_OP_MOV_RM_R, modrm}
+}
+
+// emitMovDstFromRdxRemUOp64 emits: MOV dst, RDX (specific construction for RemUOp64)
+func emitMovDstFromRdxRemUOp64(dst X86Reg) []byte {
+	rex := buildREX(true, RDX.REXBit == 1, false, dst.REXBit == 1)
+	modrm := buildModRM(0x03, 2, dst.RegBits) // mod=11, reg=2 (RDX), rm=dst
+	return []byte{rex, X86_OP_MOV_RM_R, modrm}
+}
+
+// emitMovDstFromRaxRemUOp64 emits: MOV dst, RAX (specific construction for RemUOp64)
+func emitMovDstFromRaxRemUOp64(dst X86Reg) []byte {
+	rex := buildREX(true, false, false, dst.REXBit == 1)
+	modrm := buildModRM(0x03, 0, dst.RegBits) // mod=11, reg=0 (RAX), rm=dst
+	return []byte{rex, X86_OP_MOV_RM_R, modrm}
+}
+
+// emitMovDstToRcxXEncode emits: MOV r64_rcx, r64_dst for XEncode with exact manual construction
+func emitMovDstToRcxXEncode(dst X86Reg) []byte {
+	rex := buildREX(true, dst.REXBit == 1, false, false)
+	modrm := buildModRM(0x03, dst.RegBits, 1) // mod=11, reg=dst, rm=rcx(1)
+	return []byte{rex, X86_OP_MOV_RM_R, modrm}
+}
+
+// emitMovReg32ToReg32NegAddImm32 emits: MOV r/m32(dst), r32(dst) for NegAddImm32 truncation with exact manual construction
+func emitMovReg32ToReg32NegAddImm32(dst X86Reg) []byte {
+	rex := buildREX(false, dst.REXBit == 1, false, dst.REXBit == 1) // W=0 for 32-bit
+	modrm := buildModRM(0x03, dst.RegBits, dst.RegBits)
+	return []byte{rex, X86_OP_MOV_RM_R, modrm}
+}
+
+// emitMovRegToReg64NegAddImm32 emits: MOV r64_dst, r64_src for NegAddImm32 with exact manual construction
+func emitMovRegToReg64NegAddImm32(dst, src X86Reg) []byte {
+	rex := buildREX(true, src.REXBit == 1, false, dst.REXBit == 1)
+	modrm := byte(0xC0 | (src.RegBits << 3) | dst.RegBits)
+	return []byte{rex, X86_OP_MOV_RM_R, modrm}
+}
+
+// emitMovRegToRegMinU emits: MOV dst, src with exact manual construction for MIN_U
+func emitMovRegToRegMinU(dst, src X86Reg) []byte {
+	rex := buildREX(true, src.REXBit == 1, false, dst.REXBit == 1)
+	modrm := buildModRM(0x03, src.RegBits, dst.RegBits)
+	return []byte{rex, X86_OP_MOV_RM_R, modrm} // MOV r/m64, r64
+}
+
+// emitMovRegFromRegMax emits: MOV dst, src (opposite direction) with exact manual construction for MAX function
+func emitMovRegFromRegMax(dst, src X86Reg) []byte {
+	var result []byte
+
+	rex := buildREX(true, src.REXBit == 1, false, dst.REXBit == 1)
+	modrm := buildModRM(0x03, src.RegBits, dst.RegBits)  // mod=11, reg=src, rm=dst
+	result = append(result, rex, X86_OP_MOV_RM_R, modrm) // 89 /r = MOV r/m64, r64
+
+	return result
+}
+
+// emitMovRegReg32 emits: MOV dst32, src32
+func emitMovRegReg32(dst, src X86Reg) []byte {
+	rex := buildREX(false, src.REXBit == 1, false, dst.REXBit == 1) // 32-bit, R=src, B=dst
+	modrm := buildModRM(0x03, src.RegBits, dst.RegBits)             // mod=11, reg=src, rm=dst
+	return []byte{rex, X86_OP_MOV_RM_R, modrm}                      // MOV dst32, src32
+}
+
+func emitMovBaseRegToSrcImmShiftOp64Alt(baseReg, src X86Reg) []byte {
+	rex := buildREX(true, baseReg.REXBit == 1, false, src.REXBit == 1)
+	modrm := buildModRM(0x3, baseReg.RegBits, src.RegBits)
+	return []byte{rex, X86_OP_MOV_RM_R, modrm}
+}
+func emitMovRegToRegImmShiftOp64Alt(src, dst X86Reg) []byte {
+	rex := buildREX(true, src.REXBit == 1, false, dst.REXBit == 1)
+	modrm := buildModRM(0x3, src.RegBits, dst.RegBits)
+	return []byte{rex, X86_OP_MOV_RM_R, modrm}
+}
+
+func emitMovDstEaxDivUOp32(dst X86Reg) []byte {
+	rex := buildREX(true, false, false, dst.REXBit == 1)
+	modrm := buildModRM(0x3, 0, dst.RegBits)
+	return []byte{rex, X86_OP_MOV_RM_R, modrm}
+}
+
+// emitMovDstEdxRemUOp32 emits: MOV dst, EDX with exact manual construction for RemUOp32
+func emitMovDstEdxRemUOp32(dst X86Reg) []byte {
+	rex := buildREX(false, false, false, dst.REXBit == 1)
+	modrm := buildModRM(0x3, 2, dst.RegBits)
+	return []byte{rex, X86_OP_MOV_RM_R, modrm}
+}
+
+// emitXorRegRegDivSOp64 emits: XOR dst, dst (specific construction for DivSOp64)
+func emitXorRegRegDivSOp64(dst X86Reg) []byte {
+	rex := buildREX(true, dst.REXBit == 1, false, dst.REXBit == 1)
+	modrm := buildModRM(0x3, dst.RegBits, dst.RegBits)
+	return []byte{rex, 0x31, modrm}
+}
+
+// emitNotRegDivSOp64 emits: NOT dst (specific construction for DivSOp64)
+func emitNotRegDivSOp64(dst X86Reg) []byte {
+	rex := buildREX(true, false, false, dst.REXBit == 1)
+	modrm := buildModRM(0x3, 2, dst.RegBits)
+	return []byte{rex, 0xF7, modrm}
+}
+
+// emitMovRdxMinInt64DivSOp64 emits: MOVABS RDX, MinInt64 (specific construction for DivSOp64)
+func emitMovRdxMinInt64DivSOp64() []byte {
+	return []byte{
+		0x48,                   // REX.W
+		0xBA,                   // B8+2 for RDX
+		0x00, 0x00, 0x00, 0x00, // low 32 bits
+		0x00, 0x00, 0x00, 0x80, // high 32 bits = 0x80
+	}
+}
+
+// emitCmpRegNeg1DivSOp64 emits: CMP src2, -1 (specific construction for DivSOp64)
+func emitCmpRegNeg1DivSOp64(src X86Reg) []byte {
+	rex := buildREX(true, false, false, src.REXBit == 1)
+	modrm := buildModRM(0x3, 7, src.RegBits)
+	return []byte{rex, 0x83, modrm, 0xFF}
+}
+
+// emitAluRegImm8 emits: ALU reg64, imm8 (0x83 opcode with subcode)
+func emitAluRegImm8(reg X86Reg, subcode byte, imm int8) []byte {
+	rex := buildREX(true, false, false, reg.REXBit == 1)
+	modrm := buildModRM(X86_MOD_REGISTER, subcode, reg.RegBits)
+	return []byte{rex, 0x83, modrm, byte(imm)}
+}
+
+// emitCqoDivSOp64 emits: CQO (specific construction for DivSOp64)
+func emitCqoDivSOp64() []byte {
+	return []byte{0x48, 0x99}
+}
+
+// emitIdivRegDivSOp64 emits: IDIV src2 (specific construction for DivSOp64)
+func emitIdivRegDivSOp64(src X86Reg) []byte {
+	rex := buildREX(true, false, false, src.REXBit == 1)
+	modrm := buildModRM(0x3, 7, src.RegBits)
+	return []byte{rex, 0xF7, modrm}
+}
+
+// ====== Custom helpers for generateLoadImmJumpIndirect ======
+
+// emitPushRegLoadImmJumpIndirect emits: PUSH reg with exact manual construction for LoadImmJumpIndirect
+func emitPushRegLoadImmJumpIndirect(reg X86Reg) []byte {
+	// Manual construction: PUSH jumpIndTempReg
+	rex := buildREX(true, false, false, reg.REXBit == 1)
+	pushOp := byte(0x50 | reg.RegBits)
+	return []byte{rex, pushOp}
+}
+
+// emitMovImmToRegLoadImmJumpIndirect emits: MOV reg, imm64 with exact manual construction for LoadImmJumpIndirect
+func emitMovImmToRegLoadImmJumpIndirect(reg X86Reg, imm uint64) []byte {
+	// Manual construction for MOV r64, imm64
+	rex := buildREX(true, false, false, reg.REXBit == 1)
+	movOp := byte(0xB8 + reg.RegBits)
+	imm64 := make([]byte, 8)
+	binary.LittleEndian.PutUint64(imm64, imm)
+
+	buf := []byte{rex, movOp}
+	buf = append(buf, imm64...)
+	return buf
+}
+
+// emitAddRegImm32LoadImmJumpIndirect emits: ADD reg, imm32 with exact manual construction for LoadImmJumpIndirect
+func emitAddRegImm32LoadImmJumpIndirect(reg X86Reg, imm uint32) []byte {
+	// Manual construction for ADD jumpIndTempReg, vy
+	rex := buildREX(true, false, false, reg.REXBit == 1)
+	modrm := buildModRM(0x3, 0, reg.RegBits)
+	imm32 := make([]byte, 4)
+	binary.LittleEndian.PutUint32(imm32, imm)
+
+	buf := []byte{rex, 0x81, modrm}
+	buf = append(buf, imm32...)
+	return buf
+}
+
+// emitAndRegImm32LoadImmJumpIndirect emits: AND reg, 0xFFFFFFFF with exact manual construction for LoadImmJumpIndirect
+func emitAndRegImm32LoadImmJumpIndirect(reg X86Reg) []byte {
+	// Manual construction for AND jumpIndTempReg, 0xFFFFFFFF (zero-extend)
+	rex := buildREX(true, false, false, reg.REXBit == 1)
+	modrm := buildModRM(0x3, 4, reg.RegBits)
+	return []byte{rex, 0x81, modrm, 0xFF, 0xFF, 0xFF, 0xFF}
+}
+
+// ====== Custom helpers for X86_OP_MOVSXD ======
+
+// emitMovsxdDstEaxRemUOp32 emits: MOVSXD dst, EAX with exact emitDiv32 construction for RemUOp32
+func emitMovsxdDstEaxRemUOp32(dst X86Reg) []byte {
+	rex := buildREX(true, dst.REXBit == 1, false, false)
+	modrm := buildModRM(0x3, dst.RegBits, 0) // rm=0 => EAX
+	return []byte{rex, X86_OP_MOVSXD, modrm}
+}
+
+// emitMovsxd64 emits: MOVSXD dst64, src32 (sign-extend 32-bit to 64-bit)
+func emitMovsxd64(dst X86Reg, src X86Reg) []byte {
+	rex := buildREX(true, dst.REXBit == 1, false, src.REXBit == 1) // 64-bit operation, REX.W=1
+	modrm := buildModRM(0x03, dst.RegBits, src.RegBits)
+	return []byte{rex, X86_OP_MOVSXD, modrm} // 63 /r = MOVSXD r64, r/m32
+}
+
+// emitDiv32 emits: DIV r/m32 with exact manual construction for RemUOp32
+func emitDiv32(src X86Reg) []byte {
+	rex := buildREX(false, false, false, src.REXBit == 1)
+	modrm := buildModRM(0x3, 6, src.RegBits)
+	return []byte{rex, 0xF7, modrm}
+}
+
+// emitPopRdxRaxRemUOp32 emits: POP RDX; POP RAX with exact manual construction for RemUOp32
+func emitPopRdxRaxRemUOp32() []byte {
+	return []byte{0x5A, 0x58}
+}
+
+// Custom helpers for generateDivUOp32
+func emitNotReg64DivUOp32(dst X86Reg) []byte {
+	rex := buildREX(true, false, false, dst.REXBit == 1)
+	modrm := buildModRM(0x3, 2, dst.RegBits)
+	return []byte{rex, 0xF7, modrm}
+}
+
+func emitPopRdxRaxDivUOp32() []byte {
+	return []byte{0x5A, 0x58}
+}
+
+func emitShiftRegClImmShiftOp64Alt(dst X86Reg, subcode byte) []byte {
+	rex := buildREX(true, false, false, dst.REXBit == 1)
+	modrm := buildModRM(0x3, subcode, dst.RegBits)
+	return []byte{rex, 0xD3, modrm}
+}
+
+func emitLeaRaxRipInitDJump() []byte {
+	return []byte{0x48, 0x8D, 0x05, 0x00, 0x00, 0x00, 0x00}
+}
+
+func emitJmpE9InitDJump() []byte {
+	return []byte{X86_OP_JMP_REL32}
+}
+
+func emitUd2InitDJump() []byte {
+	return []byte{X86_PREFIX_0F, X86_2OP_UD2}
+}
+
+func emitJeInitDJump() []byte {
+	return []byte{X86_PREFIX_0F, X86_2OP_JE, 0, 0, 0, 0}
+}
+
+func emitJaInitDJump() []byte {
+	return []byte{X86_PREFIX_0F, X86_2OP_JA, 0, 0, 0, 0}
+}
+
+func emitJneInitDJump() []byte {
+	return []byte{X86_PREFIX_0F, X86_2OP_JNE, 0, 0, 0, 0}
 }

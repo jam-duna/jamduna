@@ -1109,7 +1109,7 @@ func (vm *VM) hostInvoke() {
 	}
 	//TODO: review here
 	new_machine.logging = vm.logging
-	new_machine.Execute(int(new_machine.pc), true, nil)
+	new_machine.Execute(int(new_machine.pc), true)
 
 	m_n.I = new_machine.pc
 	m_n.U = new_machine.Ram
@@ -1558,7 +1558,7 @@ func (vm *VM) hostExport() {
 				fps := float64(time.Second) / float64(now.Sub(lastFrameTime))
 				fmt.Printf("Push frame %d %d bytes (FPS: %.2f)\n", frameCounter, len(frame), fps)
 			}
-			if frameCounter >= minFrameCounter && useEcalli500 {
+			if frameCounter >= minFrameCounter && false { // WAS: useEcalli500
 				fn := fmt.Sprintf("test/doom_frame_%d.json", frameCounter)
 				vm.TallyJSON(fn)
 				fmt.Printf(" -- wrote %s\n", fn)

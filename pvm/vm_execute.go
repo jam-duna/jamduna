@@ -160,8 +160,7 @@ func (vm *RecompilerVM) translateBasicBlock(startPC uint64) *BasicBlock {
 				code = append(code, Ecallcode...)
 			}
 			if vm.isChargingGas {
-				gasMemAddr := uint64(vm.regDumpAddr + uintptr(len(regInfoList)*8))
-				code = append(code, generateGasCheck(gasMemAddr, uint32(block.GasUsage))...)
+				code = append(code, generateGasCheck(uint32(block.GasUsage))...)
 			}
 			if vm.IsBlockCounting {
 				basicBlockCounterAddr := pc_addr + 8
@@ -342,4 +341,61 @@ func (vm *RecompilerVM) appendBlock(block *BasicBlock) {
 			fmt.Printf("Mapped PVM PC %d to x86 PC %x\n", pvm_pc, x86_realpc)
 		}
 	}
+}
+
+func generateGasCheck(gasCharge uint32) []byte {
+	var code []byte
+	// 4G + 14*8
+	offset := int64(14*8 - dumpSize)
+	// fmt.Printf("generateGasCheck: memAddr=0x%X, gasCharge=%d, offset=%d\n", memAddr, gasCharge, offset)
+	code = append(code, generateSubMem64Imm32(BaseReg, offset, gasCharge)...)
+
+	// JNS skip_trap
+	jumpPos := len(code)
+	code = append(code, 0x79, 0x00) // JNS rel8
+	code = append(code, 0x0F, 0x0B)
+
+	// Patch rel8
+	code[jumpPos+1] = byte(len(code) - (jumpPos + 2)) // calculate relative jump distance
+
+	// fmt.Printf("disassembled gas check code: %s\n", Disassemble(code))
+	return code
+}
+
+func generateSubMem64Imm32(reg X86Reg, offset int64, gasCost uint32) []byte {
+	var code []byte
+
+	// --- REX Prefix ---
+	rex := byte(0x48) // REX.W = 1
+	if reg.REXBit == 1 {
+		rex |= 0x01 // REX.B = 1
+	}
+	code = append(code, rex)
+
+	// --- Opcode: 81 /5 (SUB r/m64, imm32) ---
+	code = append(code, 0x81)
+
+	// --- ModRM ---
+	// mod = 10 (disp32), reg = 5 (SUB), rm = reg.RegBits
+	modrm := byte(0x80 | (5 << 3) | (reg.RegBits & 0x07))
+	code = append(code, modrm)
+
+	// --- SIB (required for r12/r13/r14/r15) ---
+	if reg.RegBits&0x07 == 4 {
+		// SIB: scale=0, index=none(100), base=100 (RSP/r12)
+		sib := byte(0x24)
+		code = append(code, sib)
+	}
+
+	// --- disp32 ---
+	disp := make([]byte, 4)
+	binary.LittleEndian.PutUint32(disp, uint32(offset))
+	code = append(code, disp...)
+
+	// --- imm32 ---
+	imm := make([]byte, 4)
+	binary.LittleEndian.PutUint32(imm, uint32(gasCost))
+	code = append(code, imm...)
+
+	return code
 }

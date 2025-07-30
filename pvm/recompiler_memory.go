@@ -331,8 +331,8 @@ func generateStoreImmIndU8(inst Instruction) []byte {
 	disp := uint32(disp64)
 
 	// 2) Use helper function for SIB-based store with 8-bit immediate
-	immValU8 := uint8(immVal & 0xFF)
-	return emitStoreImmIndWithSIB(idx, base, disp, []byte{immValU8}, 0xC6, 0)
+	immValU8 := uint8(immVal & X86_MASK_8BIT)
+	return emitStoreImmIndWithSIB(idx, base, disp, []byte{immValU8}, X86_OP_MOV_RM_IMM8, X86_NO_PREFIX)
 }
 
 // generateStoreImmIndU16 generates machine code for MOV word ptr [Base+index*1+disp], imm16
@@ -345,9 +345,9 @@ func generateStoreImmIndU16(inst Instruction) []byte {
 	//fmt.Printf("generateStoreImmIndU16: regAIndex=%d, disp64=%d, immVal=%d\n", regAIndex, disp64, immVal)
 
 	// 2) Use helper function for SIB-based store with 16-bit immediate and 0x66 prefix
-	imm16 := uint16(immVal & 0xFFFF)
+	imm16 := uint16(immVal & X86_MASK_16BIT)
 	immBytes := []byte{byte(imm16), byte(imm16 >> 8)}
-	return emitStoreImmIndWithSIB(idx, base, disp, immBytes, 0xC7, 0x66)
+	return emitStoreImmIndWithSIB(idx, base, disp, immBytes, X86_OP_MOV_RM_IMM, X86_PREFIX_66)
 }
 
 // generateStoreImmIndU32 generates machine code for MOV dword ptr [Base+index*1+disp], imm32
@@ -364,7 +364,7 @@ func generateStoreImmIndU32(inst Instruction) []byte {
 		byte(imm32), byte(imm32 >> 8),
 		byte(imm32 >> 16), byte(imm32 >> 24),
 	}
-	return emitStoreImmIndWithSIB(idx, base, disp, immBytes, 0xC7, 0)
+	return emitStoreImmIndWithSIB(idx, base, disp, immBytes, X86_OP_MOV_RM_IMM, X86_NO_PREFIX)
 }
 
 // generateStoreImmIndU64 generates machine code for MOV qword ptr [Base+index*1+disp], imm64
@@ -377,7 +377,7 @@ func generateStoreImmIndU64(inst Instruction) []byte {
 	//fmt.Printf("generateStoreImmIndU64: regAIndex=%d, disp64=%d, immVal=%d\n", regAIndex, disp64, immVal)
 
 	// 2) split the 64-bit immediate into two 32-bit parts
-	low := uint32(immVal & 0xFFFFFFFF)
+	low := uint32(immVal & X86_MASK_32BIT)
 	high := uint32(immVal >> 32)
 
 	// 3) Use helper functions for both parts
