@@ -22,15 +22,6 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 	algo_serviceIdx := service0.ServiceCode
 	auth_serviceIdx := uint32(statedb.AuthCopyServiceCode)
 
-	isReassign := false
-	if isReassign {
-		auth_serviceIdx = serviceAuth.ServiceCode // statedb.AuthCopyServiceCode
-		if err := reassign(n1, testServices); err != nil {
-			log.Error(log.Node, "Reassign failed", "err", err)
-			return
-		}
-	}
-
 	log.Info(log.Node, "ALGO START", "algo", algo_serviceIdx, "auth", auth_serviceIdx)
 
 	for algoN := 0; algoN < targetN; algoN++ {
@@ -39,7 +30,6 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 
 		auth_payload := make([]byte, 4)
 		binary.LittleEndian.PutUint32(auth_payload, uint32(auth_serviceIdx))
-
 		wp := types.WorkPackage{
 			AuthCodeHost:          0,
 			Authorization:         nil, // null-authorizer

@@ -144,7 +144,7 @@ func (original *JamState) Copy() *JamState {
 		RecentBlocks:             original.RecentBlocks,
 		SafroleStateGamma:        original.SafroleStateGamma,
 		DisputesState:            original.DisputesState,
-		PrivilegedServiceIndices: original.PrivilegedServiceIndices,
+		PrivilegedServiceIndices: original.PrivilegedServiceIndices.Copy(),
 		ValidatorStatistics:      *original.ValidatorStatistics.Copy(),
 		SafroleState:             original.SafroleState.Copy(),
 		//AvailabilityAssignments:  make([types.TotalCores]*Rho_state),

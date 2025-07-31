@@ -346,7 +346,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 			ServiceID:           workItem.Service,
 			CodeHash:            workItem.CodeHash,
 			PayloadHash:         common.Blake2Hash(workItem.Payload),
-			Gas:                 workItem.AccumulateGasLimit, // put a
+			Gas:                 workItem.AccumulateGasLimit,
 			GasUsed:             uint(workItem.RefineGasLimit - uint64(vm.Gas)),
 			NumImportedSegments: uint(len(workItem.ImportedSegments)),
 			NumExportedSegments: uint(expectedSegmentCnt),
@@ -365,15 +365,15 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		results = append(results, result)
 
 		o := types.AccumulateOperandElements{
-			H: common.Hash{},
-			E: common.Hash{},
+			H: common.Hash{}, // REVIEW
+			E: common.Hash{}, // REVIEW
 			A: p_a,
 			O: r.Ok,
 			Y: result.PayloadHash,
-			G: result.Gas, // REVIEW
+			G: uint(result.Gas),
 			D: result.Result,
 		}
-		log.Trace(log.G, "executeWorkPackageBundle", "wrangledResults", types.DecodedWrangledResults(&o))
+		log.Debug(log.G, "executeWorkPackageBundle", "wrangledResults", types.DecodedWrangledResults(&o))
 	}
 
 	spec, d := n.NewAvailabilitySpecifier(package_bundle, segments)

@@ -249,7 +249,7 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 			A: p_a,
 			O: r.Ok,
 			Y: result.PayloadHash,
-			G: result.Gas, // REVIEW
+			G: uint(result.Gas),
 			D: result.Result,
 		}
 		fmt.Printf("o: %x res: %s\n", o, result.String())

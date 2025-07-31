@@ -464,7 +464,6 @@ func (vm *VM) hostBless() {
 		bold_z[s] = g
 	}
 
-	//TODO: Shawn to check
 	bold_a := [types.TotalCores]uint32{}
 	for i := 0; i < types.TotalCores; i++ {
 		data, err := vm.Ram.ReadRAMBytes(uint32(a)+uint32(i)*4, 4)
@@ -500,7 +499,6 @@ func (vm *VM) hostBless() {
 
 // Assign Core x_c[i]
 func (vm *VM) hostAssign() {
-
 	c, _ := vm.Ram.ReadRegister(7)
 	o, _ := vm.Ram.ReadRegister(8)
 	a, _ := vm.Ram.ReadRegister(9)
@@ -531,9 +529,10 @@ func (vm *VM) hostAssign() {
 		log.Debug(vm.logging, "ASSIGN HUH", "c", c, "kai_a[c]", privilegedService_a, "xs", xs.ServiceIndex)
 		return
 	}
+
 	copy(vm.X.U.QueueWorkReport[c][:], bold_q[:])
 	vm.X.U.PrivilegedState.Kai_a[c] = uint32(a)
-	log.Debug(vm.logging, "ASSIGN OK", "c", c, "kai_a[c]", privilegedService_a, "xs", xs.ServiceIndex)
+	log.Debug(vm.logging, "ASSIGN OK", "c", c, "kai_a[c]", a, "xs", xs.ServiceIndex)
 	vm.Ram.WriteRegister(7, OK)
 	vm.HostResultCode = OK
 }
@@ -815,7 +814,7 @@ func (vm *VM) hostFetch() {
 	datatype, _ := vm.Ram.ReadRegister(10)
 	omega_11, _ := vm.Ram.ReadRegister(11)
 	omega_12, _ := vm.Ram.ReadRegister(12)
-	// log.Info(vm.logging, "FETCH", "datatype", datatype, "omega_7", o, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12, "vm.Extrinsics", fmt.Sprintf("%x", vm.Extrinsics), "wp", vm.WorkPackage)
+	//log.Info(vm.logging, "FETCH", "datatype", datatype, "omega_7", o, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12, "vm.Extrinsics", fmt.Sprintf("%x", vm.Extrinsics), "wp", vm.WorkPackage)
 	var v_Bytes []byte
 	switch datatype {
 	case 0:
@@ -1763,8 +1762,7 @@ func (vm *VM) hostLog() {
 	case 1: // 1: User agent displays as warning
 		log.Warn(vm.logging, string(messageBytes))
 	case 2: // 2: User agent displays as important information
-	// DISABLED LOG ... need to be enabled in the future
-	// log.Info(vm.logging, string(messageBytes))
+		log.Info(vm.logging, string(messageBytes))
 	//		fmt.Printf("INFO: %s\n", string(messageBytes)) // For CLI output
 	case 3: // 3: User agent displays as helpful information
 		log.Debug(vm.logging, string(messageBytes))

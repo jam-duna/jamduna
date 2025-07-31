@@ -402,6 +402,9 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 
 	//∀c ∈ NC ∶ a′c = ((∆1(o, w, f , a∗c )o)a)c
 	var newAssignedCore [types.TotalCores]uint32
+	for i := 0; i < types.TotalCores; i++ {
+		newAssignedCore[i] = serviceMXY.U.PrivilegedState.Kai_a[i]
+	}
 	for i, service_ac := range a_star {
 		service_acXY, ok := accumulated_partial[service_ac]
 		if !ok {
@@ -559,7 +562,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 				o := types.AccumulateOperandElements{
 					H: workReport.AvailabilitySpec.WorkPackageHash,
 					E: workReport.AvailabilitySpec.ExportedSegmentRoot,
-					G: workResult.Gas,
+					G: uint(workResult.Gas),
 					A: workReport.AuthorizerHash,
 					O: workReport.AuthOutput,
 					Y: workResult.PayloadHash,
@@ -601,7 +604,6 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	t := sd.JamState.SafroleState.Timeslot
 	vm.Timeslot = t
 	r, _, _ := vm.ExecuteAccumulate(t, s, g, p, xContext, sd.JamState.SafroleState.Entropy[0])
-
 	exceptional = false
 	if r.Err == types.WORKRESULT_OOG || r.Err == types.WORKRESULT_PANIC {
 		exceptional = true

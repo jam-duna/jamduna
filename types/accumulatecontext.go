@@ -29,6 +29,19 @@ type Kai_state struct {
 	Kai_g map[uint32]uint64  `json:"chi_g"` // χ𝗀 ∈ 𝒟(ℕₛ → ℕG): Services that auto-accumulate gas per block. (is this renamed as "z")
 }
 
+func (k Kai_state) Copy() Kai_state {
+	copy := Kai_state{
+		Kai_m: k.Kai_m,
+		Kai_v: k.Kai_v,
+		Kai_g: make(map[uint32]uint64),
+	}
+	copy.Kai_a = k.Kai_a
+	for k, v := range k.Kai_g {
+		copy.Kai_g[k] = v
+	}
+	return copy
+}
+
 // fixed size for the authorization queue
 type AuthorizationQueue [TotalCores][MaxAuthorizationQueueItems]common.Hash
 
@@ -182,10 +195,10 @@ type AccumulateOperandElements struct {
 	H common.Hash `json:"H"` // h
 	E common.Hash `json:"E"` // e
 	A common.Hash `json:"A"` // a
-	O []byte      `json:"O"` // o
 	Y common.Hash `json:"Y"` // y
-	G uint64      `json:"G"` // g 0.6.5 -- see (C.29)
+	G uint        `json:"G"` // g 0.6.5 -- see (C.29) -- check
 	D Result      `json:"D"` // d
+	O []byte      `json:"O"` // o
 }
 
 func (a AccumulateOperandElements) Encode() []byte {
@@ -201,18 +214,19 @@ func (a AccumulateOperandElements) Encode() []byte {
 	if err != nil {
 		return nil
 	}
-	oBytes, err := Encode(a.O)
-	if err != nil {
-		return nil
-	}
+
 	yBytes, err := Encode(a.Y)
 	if err != nil {
 		return nil
 	}
-	// for GP 0.6.5
-	gBytes := E(a.G)
+
+	gBytes := E(uint64(a.G))
 
 	dBytes, err := Encode(a.D)
+	if err != nil {
+		return nil
+	}
+	oBytes, err := Encode(a.O)
 	if err != nil {
 		return nil
 	}
@@ -221,10 +235,10 @@ func (a AccumulateOperandElements) Encode() []byte {
 	out = append(out, hBytes...)
 	out = append(out, eBytes...)
 	out = append(out, aBytes...)
-	out = append(out, oBytes...)
 	out = append(out, yBytes...)
 	out = append(out, gBytes...)
 	out = append(out, dBytes...)
+	out = append(out, oBytes...)
 
 	return out
 }
@@ -246,22 +260,21 @@ func DecodedWrangledResults(o *AccumulateOperandElements) string {
 		H common.Hash `json:"H"`
 		E common.Hash `json:"E"`
 		A common.Hash `json:"A"`
-		O []byte      `json:"O"`
 		Y common.Hash `json:"Y"`
-		G uint64      `json:"G"` // g 0.6.5 -- see (C.29)
+		G uint        `json:"G"`
 		D string      `json:"D"`
+		O string      `json:"O"`
 	}{
 		H: o.H,
 		E: o.E,
 		A: o.A,
-		O: o.O,
 		Y: o.Y,
-		G: o.G, // REVIEW
+		G: o.G,
+		O: fmt.Sprintf("0x%x", o.O),
 	}
 
 	ResultBytes, _ := Encode(o.D)
 	aux.D = fmt.Sprintf("0x%x", ResultBytes)
-
 	enc, err := json.Marshal(aux)
 	if err != nil {
 		return fmt.Sprintf("Error marshaling JSON: %v", err)

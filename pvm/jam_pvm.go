@@ -93,7 +93,7 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	}
 
 	r, res = vm.getArgumentOutputs()
-	vm.saveLogs()
+	//vm.saveLogs()
 
 	log.Trace(vm.logging, string(vm.ServiceMetadata), "Result", r.String(), "pc", vm.pc, "fault_address", vm.Fault_address, "resultCode", vm.ResultCode)
 	exportedSegments = vm.Exports
@@ -161,6 +161,7 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	x_s.Mutable = true
 	vm.X.U.D[s] = x_s
 	vm.ServiceAccount = x_s
+
 	switch vm.Backend {
 	case BackendInterpreter:
 		vm.Standard_Program_Initialization(input_bytes) // eq 264/265
@@ -352,6 +353,7 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 	o, _ := vm.Ram.ReadRegister(7)
 	l, _ := vm.Ram.ReadRegister(8)
 	output, res := vm.Ram.ReadRAMBytes(uint32(o), uint32(l))
+	log.Trace(vm.logging, "getArgumentOutputs - OK", "output", fmt.Sprintf("%x", output), "l", l)
 	if vm.ResultCode == types.WORKRESULT_OK && res == 0 {
 		r.Ok = output
 		return r, res
@@ -361,6 +363,6 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 		return r, res
 	}
 	r.Err = types.WORKRESULT_PANIC
-	log.Debug(vm.logging, "getArgumentOutputs - PANIC", "result", vm.ResultCode, "mode", vm.Mode, "service", string(vm.ServiceMetadata))
+	log.Info(vm.logging, "getArgumentOutputs - PANIC", "result", vm.ResultCode, "mode", vm.Mode, "service", string(vm.ServiceMetadata))
 	return r, 0
 }

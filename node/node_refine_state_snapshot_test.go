@@ -350,7 +350,6 @@ func TestRefineAlgo3(t *testing.T) {
 			if pickRandom {
 				algo_payload := GenerateAlgoPayload(40, false)
 				modified_wp.WorkItems[1].Payload = algo_payload
-				fmt.Printf("PAYLOAD %v %s\n", algo_payload, pvmBackend)
 			} else {
 				algo_payload := make([]byte, 2)
 				algo_payload[0] = byte(i)
