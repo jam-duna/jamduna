@@ -139,7 +139,7 @@ const (
 	PVMInitSegmentSize               = 1 << 16        // Z_Q = 2^16: The standard pvm program initialization segment size. See section A.7.
 )
 
-// Bytes encodes the AccountState as a byte slice
+// 0.7.0 Bytes encodes the AccountState as a byte slice
 func ParameterBytes() ([]byte, error) {
 	var buf bytes.Buffer
 
@@ -187,7 +187,7 @@ func ParameterBytes() ([]byte, error) {
 	if err := writeUint64(AccumulateGasAllocation_GT); err != nil { // G_T
 		return nil, err
 	}
-	// E_2: H, I, J
+	// E_2: H, I, J, K
 	if err := writeUint16(RecentHistorySize); err != nil { // H
 		return nil, err
 	}
@@ -197,15 +197,23 @@ func ParameterBytes() ([]byte, error) {
 	if err := writeUint16(MaxAuthorizationQueueItems); err != nil { // J
 		return nil, err
 	}
+	if err := writeUint16(MaxTicketsPerExtrinsic); err != nil { // K (NEW in 0.7.0 [polkajam uses in 0.6.7])
+		return nil, err
+	}
+
 	// E_4: L
 	if err := writeUint32(LookupAnchorMaxAge); err != nil { // L
 		return nil, err
 	}
-	// E_2: O
+	// E_2: N, O
+	if err := writeUint16(TicketEntriesPerValidator); err != nil { // N (NEW in 0.7.0 [polkajam uses in 0.6.7])
+		return nil, err
+	}
 	if err := writeUint16(MaxAuthorizationPoolItems); err != nil { // O
 		return nil, err
 	}
-	// E_2: P, Q, R, S, T, U, V
+
+	// E_2: P, Q, R, T, U, V
 	if err := writeUint16(SecondsPerSlot); err != nil { // P
 		return nil, err
 	}
@@ -215,9 +223,10 @@ func ParameterBytes() ([]byte, error) {
 	if err := writeUint16(RotationPeriod); err != nil { // R
 		return nil, err
 	}
-	if err := writeUint16(TicketSubmissionEndSlot); err != nil { // S
-		return nil, err
-	}
+	// removed in 0.7.0
+	// if err := writeUint16(TicketSubmissionEndSlot); err != nil { // S
+	// 	return nil, err
+	// }
 	if err := writeUint16(TicketEntriesPerValidator); err != nil { // T
 		return nil, err
 	}
@@ -240,9 +249,10 @@ func ParameterBytes() ([]byte, error) {
 	if err := writeUint32(ECPieceSize); err != nil { // W_E
 		return nil, err
 	}
-	if err := writeUint32(GFPointsPerPage); err != nil { // W_G
-		return nil, err
-	}
+	// removed in 0.7.0
+	// if err := writeUint32(GFPointsPerPage); err != nil { // W_G
+	// 	return nil, err
+	// }
 	if err := writeUint32(MaxImports); err != nil { // W_M
 		return nil, err
 	}

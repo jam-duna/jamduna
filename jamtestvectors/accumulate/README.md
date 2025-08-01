@@ -1,7 +1,10 @@
 # Accumulate STF Test Vectors
 
-Both JSON and SCALE formats conform to the JAM ASN.1 [schema](../jam-types-asn/jam-types.asn)
-and this subsystem STF specific [schema](./accumulate.asn).
+## Schema
+
+Both the binary and json formats adhere to the overarching JAM protocol ASN.1
+[schema](../jam-types-asn/jam-types.asn), as well as the specific vectors
+[schema](./accumulate.asn) defined for these test cases.
 
 ## Test Service Code
 
@@ -23,6 +26,16 @@ to process these test vectors.
 
 In particular the `accumulate-count` (a.0), `accumulate-gas-used` (a.1),
 `on-transfers-count` (t.0) and `on-transfers-gas-used` (t.1).
+
+## Gas Costs
+
+The gas cost for a single instruction is set to **$1$**, unlike in GP where
+it is set to $0$. This distinction is primarily intended to verify correct
+tracking of gas consumption.
+
+All host calls have a gas cost of **$10$**, with the following exceptions:
+- **`transfer`**: Gas cost is set to **$10 + \omega_9$**, as specified in the GP.
+- **`log`**: Gas cost is set to **0**, as defined in [JIP-1](https://hackmd.io/@polkadot/jip1).
 
 ## Tiny Vectors
  

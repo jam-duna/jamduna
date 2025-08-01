@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/nsf/jsondiff"
@@ -315,14 +316,14 @@ func testAccumulateSTF(testname string, TestCase AccumulateTestCase, t *testing.
 	s.AvailableWorkReport = TestCase.Input.Reports
 	accumulate_input_wr := TestCase.Input.Reports
 	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
-	n, T, _, _ := s.OuterAccumulate(g, accumulate_input_wr, o, f)
+	n, T, _, _ := s.OuterAccumulate(g, accumulate_input_wr, o, f, pvm.BackendInterpreter)
 	if err != nil {
 		t.Errorf("OuterAccumulate failed: %v", err)
 	}
 	// Not sure whether transfer happens here
 	tau := s.GetTimeslot() // Not sure whether τ ′ is set up like this
 	if len(T) > 0 {
-		s.ProcessDeferredTransfers(o, tau, T)
+		s.ProcessDeferredTransfers(o, tau, T, pvm.BackendInterpreter)
 	}
 	// make sure all service accounts can be written
 	for _, sa := range o.D {
@@ -433,12 +434,12 @@ func AccumulateSTF(testname string, TestCase AccumulateTestCase) error {
 	s.AvailableWorkReport = TestCase.Input.Reports
 	accumulate_input_wr := TestCase.Input.Reports
 	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
-	n, T, _, _ := s.OuterAccumulate(g, accumulate_input_wr, o, f)
+	n, T, _, _ := s.OuterAccumulate(g, accumulate_input_wr, o, f, pvm.BackendInterpreter)
 
 	// Not sure whether transfer happens here
 	tau := s.GetTimeslot() // Not sure whether τ ′ is set up like this
 	if len(T) > 0 {
-		s.ProcessDeferredTransfers(o, tau, T)
+		s.ProcessDeferredTransfers(o, tau, T, pvm.BackendInterpreter)
 	}
 	// make sure all service accounts can be written
 	for _, sa := range o.D {
@@ -466,7 +467,7 @@ func AccumulateSTF(testname string, TestCase AccumulateTestCase) error {
 			key_bytes := make([]byte, 32)
 			copy(key_bytes, key)
 			key_hash := common.BytesToHash(key_bytes)
-			storage, ok, err := s.ReadServiceStorage(service_idx, key_hash)
+			storage, ok, err := s.ReadServiceStorage(service_idx, key_hash.Bytes())
 			if !ok || err != nil {
 				return fmt.Errorf("STF FAIL: ReadServiceStorage failed")
 			}
