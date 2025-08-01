@@ -333,7 +333,7 @@ func GenerateAlgoPayload(sz int, isSimple bool) []byte {
 		algo_payload := make([]byte, 2)
 		for i := 0; i < 1; i++ {
 			algo_payload[i*2] = byte(sz)
-			algo_payload[i*2+1] = byte(1)
+			algo_payload[i*2+1] = byte(5)
 		}
 		return algo_payload
 	}

@@ -17,7 +17,8 @@ import (
 )
 
 func (er *ExecutionReport) String() string {
-	jsonBytes, err := json.MarshalIndent(er, "", "  ")
+	//jsonBytes, err := json.MarshalIndent(er, "", "  ")
+	jsonBytes, err := json.Marshal(er)
 	if err != nil {
 		return fmt.Sprintf("Error marshaling ExecutionReport: %v", err)
 	}

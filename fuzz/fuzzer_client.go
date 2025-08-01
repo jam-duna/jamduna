@@ -16,8 +16,21 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-// Fuzzer is the main engine that drives conformance testing.
-// It manages local state computation, test data, and communication with the target.
+// ANSI color codes for logging to make output more readable.
+const (
+	colorReset       = "\033[0m"
+	colorRed         = "\033[31m"
+	colorGreen       = "\033[32m"
+	colorBlue        = "\033[34m"
+	colorYellow      = "\033[33m"
+	colorMagenta     = "\033[35m"
+	colorCyan        = "\033[36m"
+	colorGray        = "\033[90m"
+	colorBrightRed   = "\033[91m"
+	colorBrightGreen = "\033[92m"
+	colorBrightWhite = "\033[97m"
+)
+
 type Fuzzer struct {
 	conn           net.Conn
 	socketPath     string
@@ -53,12 +66,12 @@ func NewFuzzer(storageDir string, socketPath string, fuzzerInfo PeerInfo, pvmBac
 
 // RunImplementationRPCServer starts the RPC server for the implementation.
 func (fs *Fuzzer) RunImplementationRPCServer() {
-	runRPCServer(fs.store)
+	// runRPCServer(fs.store)
 }
 
 // RunInternalRPCServer starts the RPC server for the internal fuzzer logic.
 func (fs *Fuzzer) RunInternalRPCServer() {
-	runRPCServerInternal(fs.seed, fs.store)
+	// runRPCServerInternal(fs.seed, fs.store)
 }
 
 func (fs *Fuzzer) GenerateExecutionReport(stateTransitionQA *StateTransitionQA, targetStateKeyVals statedb.StateKeyVals) *ExecutionReport {
@@ -87,7 +100,7 @@ func (fs *Fuzzer) GenerateExecutionReport(stateTransitionQA *StateTransitionQA, 
 func (f *Fuzzer) Connect() error {
 	conn, err := net.Dial("unix", f.socketPath)
 	if err != nil {
-		return fmt.Errorf("failed to connect to target socket %s: %w", f.socketPath, err)
+		return fmt.Errorf("%sfailed to connect to target socket %s: %w%s", colorRed, f.socketPath, err, colorReset)
 	}
 	f.conn = conn
 	return nil
@@ -126,7 +139,7 @@ func (f *Fuzzer) GenSeed() []byte {
 // --- Protocol Methods ---
 
 func (f *Fuzzer) Handshake() (*PeerInfo, error) {
-	log.Printf("[OUTGOING REQUEST ] PeerInfo - Fuzzer Info: %s", f.fuzzerInfo.Name)
+	log.Printf("%s[OUTGOING REQUEST ]%s PeerInfo - Fuzzer Info: %s", colorGreen, colorReset, f.fuzzerInfo.Name)
 	msgToSend := &Message{PeerInfo: &f.fuzzerInfo}
 	if err := f.sendMessage(msgToSend); err != nil {
 		return nil, err
@@ -138,12 +151,12 @@ func (f *Fuzzer) Handshake() (*PeerInfo, error) {
 	if receivedMsg.PeerInfo == nil {
 		return nil, fmt.Errorf("expected PeerInfo from target, but got a different message type")
 	}
-	log.Printf("[INCOMING RESPONSE] PeerInfo - Target Info: %s", receivedMsg.PeerInfo.Name)
+	log.Printf("%s[INCOMING RESPONSE]%s PeerInfo - Target Info: %s", colorBlue, colorReset, receivedMsg.PeerInfo.Name)
 	return receivedMsg.PeerInfo, nil
 }
 
 func (f *Fuzzer) SetState(state *HeaderWithState) (*common.Hash, error) {
-	log.Printf("[OUTGOING REQUEST ] SetState - Header Hash: %s", state.Header.Hash().Hex())
+	log.Printf("%s[OUTGOING REQUEST ]%s SetState - Header Hash: %s", colorGreen, colorReset, state.Header.Hash().Hex())
 	msgToSend := &Message{SetState: state}
 	if err := f.sendMessage(msgToSend); err != nil {
 		return nil, err
@@ -155,12 +168,12 @@ func (f *Fuzzer) SetState(state *HeaderWithState) (*common.Hash, error) {
 	if receivedMsg.StateRoot == nil {
 		return nil, fmt.Errorf("expected StateRoot, got different type")
 	}
-	log.Printf("[INCOMING RESPONSE] StateRoot - Hash: %s", receivedMsg.StateRoot.Hex())
+	log.Printf("%s[INCOMING RESPONSE]%s StateRoot - Hash: %s", colorBlue, colorReset, receivedMsg.StateRoot.Hex())
 	return receivedMsg.StateRoot, nil
 }
 
 func (f *Fuzzer) ImportBlock(block *types.Block) (*common.Hash, error) {
-	log.Printf("[OUTGOING REQUEST ] ImportBlock - Hash: %s", block.Header.HeaderHash().Hex())
+	log.Printf("%s[OUTGOING REQUEST ]%s ImportBlock - Hash: %s", colorGreen, colorReset, block.Header.HeaderHash().Hex())
 	msgToSend := &Message{ImportBlock: block}
 	if err := f.sendMessage(msgToSend); err != nil {
 		return nil, err
@@ -172,12 +185,12 @@ func (f *Fuzzer) ImportBlock(block *types.Block) (*common.Hash, error) {
 	if receivedMsg.StateRoot == nil {
 		return nil, fmt.Errorf("expected StateRoot, got different type")
 	}
-	log.Printf("[INCOMING RESPONSE] StateRoot - Hash: %s", receivedMsg.StateRoot.Hex())
+	log.Printf("%s[INCOMING RESPONSE]%s StateRoot - Hash: %s", colorBlue, colorReset, receivedMsg.StateRoot.Hex())
 	return receivedMsg.StateRoot, nil
 }
 
 func (f *Fuzzer) GetState(hash *common.Hash) (*statedb.StateKeyVals, error) {
-	log.Printf("[OUTGOING REQUEST ] GetState - HeaderHash: %s", hash.Hex())
+	log.Printf("%s[OUTGOING REQUEST ]%s GetState - HeaderHash: %s", colorGreen, colorReset, hash.Hex())
 	msgToSend := &Message{GetState: hash}
 	if err := f.sendMessage(msgToSend); err != nil {
 		return nil, err
@@ -189,7 +202,7 @@ func (f *Fuzzer) GetState(hash *common.Hash) (*statedb.StateKeyVals, error) {
 	if receivedMsg.State == nil {
 		return nil, fmt.Errorf("expected State, got different type")
 	}
-	log.Printf("[INCOMING RESPONSE] State - %d key-value pairs", len(receivedMsg.State.KeyVals))
+	log.Printf("%s[INCOMING RESPONSE]%s State - %d key-value pairs", colorBlue, colorReset, len(receivedMsg.State.KeyVals))
 	return receivedMsg.State, nil
 }
 
@@ -198,14 +211,14 @@ func (f *Fuzzer) GetState(hash *common.Hash) (*statedb.StateKeyVals, error) {
 func (f *Fuzzer) sendMessage(msg *Message) error {
 	encodedBody, err := encode(msg)
 	if err != nil {
-		return fmt.Errorf("failed to encode message: %w", err)
+		return fmt.Errorf("%sfailed to encode message: %w%s", colorRed, err, colorReset)
 	}
 	msgLength := uint32(len(encodedBody))
 	if err := binary.Write(f.conn, binary.LittleEndian, msgLength); err != nil {
-		return fmt.Errorf("failed to write message length: %w", err)
+		return fmt.Errorf("%sfailed to write message length: %w%s", colorRed, err, colorReset)
 	}
 	if _, err := f.conn.Write(encodedBody); err != nil {
-		return fmt.Errorf("failed to write message body: %w", err)
+		return fmt.Errorf("%sfailed to write message body: %w%s", colorRed, err, colorReset)
 	}
 	return nil
 }
@@ -214,13 +227,13 @@ func (f *Fuzzer) readMessage() (*Message, error) {
 	var msgLength uint32
 	if err := binary.Read(f.conn, binary.LittleEndian, &msgLength); err != nil {
 		if err == io.EOF {
-			return nil, fmt.Errorf("connection closed by target")
+			return nil, fmt.Errorf("%sconnection closed by target%s", colorRed, colorReset)
 		}
-		return nil, fmt.Errorf("failed to read message length: %w", err)
+		return nil, fmt.Errorf("%sfailed to read message length: %w%s", colorRed, err, colorReset)
 	}
 	body := make([]byte, msgLength)
 	if _, err := io.ReadFull(f.conn, body); err != nil {
-		return nil, fmt.Errorf("failed to read message body: %w", err)
+		return nil, fmt.Errorf("%sfailed to read message body: %w%s", colorRed, err, colorReset)
 	}
 	return decode(body)
 }

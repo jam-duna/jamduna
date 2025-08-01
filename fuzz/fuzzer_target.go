@@ -58,12 +58,12 @@ func NewTarget(socketPath string, targetInfo PeerInfo, pvmBackend string) *Targe
 // Start begins listening on the Unix socket for incoming fuzzer connections.
 func (t *Target) Start() error {
 	if err := os.RemoveAll(t.socketPath); err != nil {
-		return fmt.Errorf("failed to remove old socket file: %w", err)
+		return fmt.Errorf("%sfailed to remove old socket file: %w%s", colorRed, err, colorReset)
 	}
 
 	listener, err := net.Listen("unix", t.socketPath)
 	if err != nil {
-		return fmt.Errorf("failed to listen on socket %s: %w", t.socketPath, err)
+		return fmt.Errorf("%sfailed to listen on socket %s: %w%s", colorRed, t.socketPath, err, colorReset)
 	}
 	t.listener = listener
 	log.Printf("Target listening on %s\n", t.socketPath)
@@ -96,7 +96,7 @@ func (t *Target) handleConnection(conn net.Conn) {
 		msg, err := readMessage(conn)
 		if err != nil {
 			if err != io.EOF {
-				log.Printf("Error reading message: %v\n", err)
+				log.Printf("%sError reading message: %v%s\n", colorRed, err, colorReset)
 			}
 			return
 		}
@@ -112,12 +112,12 @@ func (t *Target) handleConnection(conn net.Conn) {
 		case msg.GetState != nil:
 			response = t.onGetState(msg.GetState)
 		default:
-			log.Println("Received unknown or unexpected message type")
+			log.Printf("%sReceived unknown or unexpected message type%s", colorRed, colorReset)
 			return // Terminate on unexpected messages.
 		}
 
 		if err := sendMessage(conn, response); err != nil {
-			log.Printf("Error sending response: %v\n", err)
+			log.Printf("%sError sending response: %v%s\n", colorRed, err, colorReset)
 			return
 		}
 	}
@@ -126,15 +126,15 @@ func (t *Target) handleConnection(conn net.Conn) {
 // --- Message Handlers ---
 
 func (t *Target) onPeerInfo(fuzzerInfo *PeerInfo) *Message {
-	log.Printf("[INCOMING REQUEST] PeerInfo")
+	log.Printf("%s[INCOMING REQUEST]%s PeerInfo", colorBlue, colorReset)
 	log.Printf("Received handshake from fuzzer: %s", fuzzerInfo.Name)
-	log.Printf("[OUTGOING RESPONSE] PeerInfo")
+	log.Printf("%s[OUTGOING RESPONSE]%s PeerInfo", colorGreen, colorReset)
 	return &Message{PeerInfo: &t.targetInfo}
 }
 
 // onSetState validates the received state against the test vector's PreState.
 func (t *Target) onSetState(req *HeaderWithState) *Message {
-	log.Printf("[INCOMING REQUEST] SetState")
+	log.Printf("%s[INCOMING REQUEST]%s SetState", colorBlue, colorReset)
 	log.Printf("Received SetState request with %d key-value pairs.", len(req.State.KeyVals))
 	sky := statedb.StateKeyVals{
 		KeyVals: req.State.KeyVals,
@@ -143,53 +143,54 @@ func (t *Target) onSetState(req *HeaderWithState) *Message {
 	headerHash := header.Hash()
 	log.Printf("Setting state with header: %s", headerHash.Hex())
 	if t.stateDB != nil {
-		log.Println("Warning: Target already has a state initialized. Overwriting with new state.")
+		//log.Printf("%sWarning: Target already has a state initialized. Overwriting with new state.%s", colorYellow, colorReset)
 	}
 	recovered_statedb, err := statedb.NewStateDBFromStateKeyVals(t.store, &sky)
 	recovered_statedb_stateRoot := recovered_statedb.StateRoot
 	if err != nil {
 		//TODO: how to handle this error?
-		return &Message{StateRoot: &common.Hash{}}
+		return &Message{StateRoot: &recovered_statedb_stateRoot}
 	}
 	t.stateDB = recovered_statedb
 	log.Printf("StateDB initialized with %d key-value pairs. stateRoot: %v | HeaderHash: %v", len(sky.KeyVals), recovered_statedb_stateRoot.Hex(), headerHash.Hex())
 	t.stateDBMap[headerHash] = recovered_statedb_stateRoot
-	log.Printf("[OUTGOING RESPONSE] StateRoot")
+	log.Printf("%s[OUTGOING RESPONSE]%s StateRoot", colorGreen, colorReset)
 	return &Message{StateRoot: &recovered_statedb_stateRoot}
 }
 
 // onImportBlock validates the received block against the test vector's block.
 func (t *Target) onImportBlock(req *types.Block) *Message {
-	log.Printf("[INCOMING REQUEST] ImportBlock")
+	log.Printf("%s[INCOMING REQUEST]%s ImportBlock", colorBlue, colorReset)
 	log.Printf("Received ImportBlock request for block hash: %s", req.Hash().Hex())
 
 	// apply state transition using block and the current stateDB
 	if t.stateDB == nil {
-		log.Println("Error: Target has no state initialized. Please set the state first.")
+		log.Printf("%sError: Target has no state initialized. Please set the state first.%s", colorRed, colorReset)
 		return &Message{StateRoot: &common.Hash{}}
 	}
 	headerHash := req.Header.Hash()
 	pvmBackend := t.pvmBackend
 	preState := t.stateDB
+	preStateRoot := preState.StateRoot
 	postState, jamErr := statedb.ApplyStateTransitionFromBlock(preState, context.Background(), req, nil, pvmBackend)
 	if jamErr != nil {
-		log.Printf("Error applying state transition from block: %v", jamErr)
-		return &Message{StateRoot: &common.Hash{}}
+		log.Printf("%sError applying state transition from block: %v%s", colorRed, jamErr, colorReset)
+		return &Message{StateRoot: &preStateRoot}
 	}
 	log.Printf("State transition applied. New stateRoot: %v | HeaderHash: %v", postState.StateRoot.Hex(), headerHash.Hex())
 	postStateRoot := postState.StateRoot
 	t.stateDBMap[headerHash] = postStateRoot
-	log.Printf("[OUTGOING RESPONSE] StateRoot")
+	log.Printf("%s[OUTGOING RESPONSE]%s StateRoot", colorGreen, colorReset)
 	return &Message{StateRoot: &postStateRoot}
 }
 
 // onGetState returns the full state based on the test vector.
 func (t *Target) onGetState(req *common.Hash) *Message {
 	headerHash := *req
-	log.Printf("[INCOMING REQUEST] GetState")
+	log.Printf("%s[INCOMING REQUEST]%s GetState", colorBlue, colorReset)
 	log.Printf("Received GetState request headerHash: %s", headerHash.Hex())
 	if t.stateDBMap[headerHash] == (common.Hash{}) {
-		log.Printf("Error: No state found for headerHash: %s", headerHash.Hex())
+		log.Printf("%sError: No state found for headerHash: %s%s", colorRed, headerHash.Hex(), colorReset)
 		return &Message{State: &statedb.StateKeyVals{}}
 	}
 
@@ -202,25 +203,23 @@ func (t *Target) onGetState(req *common.Hash) *Message {
 	stateKeyVals := statedb.StateKeyVals{
 		KeyVals: recoveredStateDB.GetAllKeyValues(),
 	}
-	log.Printf("[OUTGOING RESPONSE] State")
+	log.Printf("%s[OUTGOING RESPONSE]%s State", colorGreen, colorReset)
 	return &Message{State: &stateKeyVals}
 }
-
-// --- Generic Network Functions (can be shared) ---
 
 func sendMessage(conn net.Conn, msg *Message) error {
 	encodedBody, err := encode(msg)
 	if err != nil {
-		return fmt.Errorf("failed to encode message: %w", err)
+		return fmt.Errorf("%sfailed to encode message: %w%s", colorRed, err, colorReset)
 	}
 
 	msgLength := uint32(len(encodedBody))
 	if err := binary.Write(conn, binary.LittleEndian, msgLength); err != nil {
-		return fmt.Errorf("failed to write message length: %w", err)
+		return fmt.Errorf("%sfailed to write message length: %w%s", colorRed, err, colorReset)
 	}
 
 	if _, err := conn.Write(encodedBody); err != nil {
-		return fmt.Errorf("failed to write message body: %w", err)
+		return fmt.Errorf("%sfailed to write message body: %w%s", colorRed, err, colorReset)
 	}
 	return nil
 }
@@ -231,12 +230,12 @@ func readMessage(conn net.Conn) (*Message, error) {
 		if err == io.EOF {
 			return nil, io.EOF
 		}
-		return nil, fmt.Errorf("failed to read message length: %w", err)
+		return nil, fmt.Errorf("%sfailed to read message length: %w%s", colorRed, err, colorReset)
 	}
 
 	body := make([]byte, msgLength)
 	if _, err := io.ReadFull(conn, body); err != nil {
-		return nil, fmt.Errorf("failed to read message body: %w", err)
+		return nil, fmt.Errorf("%sfailed to read message body: %w%s", colorRed, err, colorReset)
 	}
 
 	return decode(body)

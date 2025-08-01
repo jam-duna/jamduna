@@ -62,7 +62,7 @@ const (
 	Audit       = false
 	CE138_test  = false
 	CE129_test  = false // turn on for testing CE129
-	revalidate  = true  // turn off for production (or publication of traces)
+	revalidate  = false // turn off for production (or publication of traces)
 
 	paranoidVerification = false // turn off for production
 	writeJAMPNTestVector = false // turn on true when generating JAMNP test vectors only

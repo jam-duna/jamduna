@@ -40,21 +40,21 @@ func (fs *FuzzStats) Metrics() map[string]interface{} {
 	}
 
 	fuzz := map[string]interface{}{
-		"TruePositiveRate":      Ratio(fs.FuzzTruePositives, fs.FuzzedBlocks),
-		"FalseNegativeRate":     Ratio(fs.FuzzFalseNegatives, fs.FuzzedBlocks),
-		"ResponseErrorRate":     Ratio(fs.FuzzResponseErrors, fs.FuzzedBlocks),
-		"MisclassificationRate": Ratio(fs.FuzzMisclassifications, fs.FuzzedBlocks),
+		"Fuzzed_Blocks_Correctly_Detected": Ratio(fs.FuzzTruePositives, fs.FuzzedBlocks),
+		"Fuzzed_Blocks_Undetected":         Ratio(fs.FuzzFalseNegatives, fs.FuzzedBlocks),
+		"Fuzzed_Blocks_Response_Error":     Ratio(fs.FuzzResponseErrors, fs.FuzzedBlocks),
+		"Fuzzed_Blocks_Misclassified":      Ratio(fs.FuzzMisclassifications, fs.FuzzedBlocks),
 	}
 
 	original := map[string]interface{}{
-		"FalsePositiveRate":     Ratio(fs.OrigFalsePositives, fs.OriginalBlocks),
-		"TrueNegativeRate":      Ratio(fs.OrigTrueNegatives, fs.OriginalBlocks),
-		"ResponseErrorRate":     Ratio(fs.OrigResponseErrors, fs.OriginalBlocks),
-		"MisclassificationRate": Ratio(fs.OrigMisclassifications, fs.OriginalBlocks),
+		"Original_Blocks_Falsely_Flagged":     Ratio(fs.OrigFalsePositives, fs.OriginalBlocks),
+		"Original_Blocks_Correctly_Validated": Ratio(fs.OrigTrueNegatives, fs.OriginalBlocks),
+		"Original_ResponseError":              Ratio(fs.OrigResponseErrors, fs.OriginalBlocks),
+		"Original_Misclassified":              Ratio(fs.OrigMisclassifications, fs.OriginalBlocks),
 	}
 
 	overall := map[string]interface{}{
-		"FlaggedRate":           Ratio(fs.FuzzTruePositives+fs.OrigFalsePositives, fs.TotalBlocks),
+		//"FlaggedRate":           Ratio(fs.FuzzTruePositives+fs.OrigFalsePositives, fs.TotalBlocks),
 		"CorrectRate":           Ratio(fs.FuzzTruePositives+fs.OrigTrueNegatives, fs.TotalBlocks),
 		"ResponseErrorRate":     Ratio(fs.FuzzResponseErrors+fs.OrigResponseErrors, fs.TotalBlocks),
 		"MisclassificationRate": Ratio(fs.FuzzMisclassifications+fs.OrigMisclassifications, fs.TotalBlocks),

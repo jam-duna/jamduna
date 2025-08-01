@@ -112,39 +112,69 @@ func (f *Fuzzer) Shuffle(slice interface{}) {
 }
 
 func (f *Fuzzer) FuzzWithTargetedInvalidRate(modes []string, stfs []*statedb.StateTransition, invalidRate float64, numBlocks int) (finalSTFs []StateTransitionQA, err error) {
+	allowFuzzing := true
 	seed := f.GetSeed()
 	store, err := statedb.InitStorage("/tmp/test_locala")
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize storage: %v", err)
 	}
-	//store := f.store
+
 	numInvalidBlocks := int(float64(numBlocks) * invalidRate)
 	numValidBlocks := numBlocks - numInvalidBlocks
+	if numInvalidBlocks == 0 {
+		allowFuzzing = false
+	}
 	fmt.Printf("Seed=%x InvalidRate=%.2f -> invalidBlocks=%d | validBlocks=%d | total=%d\n",
 		seed, invalidRate, numInvalidBlocks, numValidBlocks, numBlocks,
 	)
 
 	f.Shuffle(stfs)
 
-	var fuzzedSTFs []StateTransitionQA
-	var notFuzzedSTFs []StateTransitionQA
-	//pvmBackend := pvm.BackendRecompiler
-	pvmBackend := f.pvmBackend
-	fuzzableCandidates := make([]*statedb.StateTransition, 0, len(stfs))
+	var allPossibleMutations []STFError
+	var validBlockPool []*statedb.StateTransition
+
 	for _, stf := range stfs {
-		//stfErr := statedb.CheckStateTransition(store, stf, nil, pvmBackend)
-		diffs, stfErr := statedb.CheckStateTransitionWithOutput(store, stf, nil, pvmBackend)
+		diffs, stfErr := statedb.CheckStateTransitionWithOutput(store, stf, nil, f.pvmBackend)
 		if stfErr != nil {
 			statedb.HandleDiffs(diffs)
-			fmt.Printf("Invalid STF. stfErr=%v, stf=%v\n", stfErr, stf.ToJSON())
-			panic(fmt.Sprintf("Invalid STF: %v | %v", stfErr, stf.ToJSON()))
+			return nil, fmt.Errorf("invalid base STF provided: %v | %v", stfErr, stf.ToJSON())
 		}
 
-		_, expectedErr, possibleErrs := selectImportBlocksError(seed, store, modes, stf)
-		if expectedErr != nil || len(possibleErrs) > 0 {
-			fuzzableCandidates = append(fuzzableCandidates, stf)
-		} else {
-			notFuzzedSTFs = append(notFuzzedSTFs, StateTransitionQA{
+		validBlockPool = append(validBlockPool, stf)
+
+		mutations := selectImportBlocksErrorArr(seed, store, modes, stf, allowFuzzing)
+		if len(mutations) > 0 {
+			allPossibleMutations = append(allPossibleMutations, mutations...)
+		}
+	}
+
+	if numInvalidBlocks > 0 && len(allPossibleMutations) == 0 {
+		log.Println("No STFs are fuzzable to generate the required invalid blocks.")
+		return nil, fmt.Errorf("no STFs are fuzzable")
+	}
+
+	var fuzzedSTFs []StateTransitionQA
+	if numInvalidBlocks > 0 {
+		f.Shuffle(allPossibleMutations)
+		for i := 0; i < numInvalidBlocks; i++ {
+			mutation := allPossibleMutations[i%len(allPossibleMutations)]
+			fuzzedSTFs = append(fuzzedSTFs, StateTransitionQA{
+				Mutated: true,
+				Error:   mutation.Error, // The specific error for this mutation
+				STF:     mutation.StateTransition,
+			})
+		}
+	}
+
+	var finalValidSTFs []StateTransitionQA
+	if numValidBlocks > 0 {
+		if len(validBlockPool) == 0 {
+			return nil, fmt.Errorf("cannot generate valid blocks: no source STFs available")
+		}
+		f.Shuffle(validBlockPool)
+		for i := 0; i < numValidBlocks; i++ {
+			stf := validBlockPool[i%len(validBlockPool)]
+			finalValidSTFs = append(finalValidSTFs, StateTransitionQA{
 				Mutated: false,
 				Error:   nil,
 				STF:     stf,
@@ -152,56 +182,10 @@ func (f *Fuzzer) FuzzWithTargetedInvalidRate(modes []string, stfs []*statedb.Sta
 		}
 	}
 
-	if numInvalidBlocks > 0 && len(fuzzableCandidates) == 0 {
-		log.Println("No STFs are fuzzable.")
-		return nil, fmt.Errorf("no STFs are fuzzable")
-	}
-
-	if numInvalidBlocks > 0 {
-		count := 0
-		for _, stf := range fuzzableCandidates {
-			if count >= numInvalidBlocks {
-				break
-			}
-			mutated, expectedErr, _ := selectImportBlocksError(seed, store, modes, stf)
-			fuzzedSTFs = append(fuzzedSTFs, StateTransitionQA{
-				Mutated: true,
-				Error:   expectedErr,
-				STF:     mutated,
-			})
-			count++
-		}
-
-		if len(fuzzableCandidates) > 0 && len(fuzzedSTFs) < numInvalidBlocks {
-			idx := 0
-			for len(fuzzedSTFs) < numInvalidBlocks {
-				stf := fuzzableCandidates[idx%len(fuzzableCandidates)]
-				mutated, expectedErr, _ := selectImportBlocksError(seed, store, modes, stf)
-				fuzzedSTFs = append(fuzzedSTFs, StateTransitionQA{
-					Mutated: true,
-					Error:   expectedErr,
-					STF:     mutated,
-				})
-				idx++
-			}
-		}
-	}
-
-	if len(notFuzzedSTFs) < numValidBlocks {
-		needed := numValidBlocks - len(notFuzzedSTFs)
-		idx := 0
-		for i := 0; i < needed; i++ {
-			notFuzzedSTFs = append(notFuzzedSTFs, notFuzzedSTFs[idx%len(notFuzzedSTFs)])
-			idx++
-		}
-	} else if len(notFuzzedSTFs) > numValidBlocks {
-		notFuzzedSTFs = notFuzzedSTFs[:numValidBlocks]
-	}
-
-	finalSTFs = append(fuzzedSTFs, notFuzzedSTFs...)
+	finalSTFs = append(fuzzedSTFs, finalValidSTFs...)
 	f.Shuffle(finalSTFs)
 
-	log.Printf("Fuzz completed: %d invalid blocks, %d valid blocks", len(fuzzedSTFs), len(notFuzzedSTFs))
+	log.Printf("Fuzz completed: %d invalid blocks, %d valid blocks", len(fuzzedSTFs), len(finalValidSTFs))
 	return finalSTFs, nil
 }
 
@@ -342,7 +326,7 @@ func possibleError(seed []byte, selectedError error, block *types.Block, s *stat
 	}
 }
 
-func selectAllImportBlocksErrors(seed []byte, store *storage.StateDBStorage, modes []string, stf *statedb.StateTransition) (oSlot uint32, oEpoch int32, oPhase uint32, mutated_STFs []statedb.StateTransition, fuzzable_errors []error) {
+func selectAllImportBlocksErrors(seed []byte, store *storage.StateDBStorage, modes []string, stf *statedb.StateTransition, allowFuzzing bool) (oSlot uint32, oEpoch int32, oPhase uint32, mutated_STFs []statedb.StateTransition, fuzzable_errors []error) {
 	var aggregatedErrors []error
 	var mutatedSTFs []statedb.StateTransition
 	block := stf.Block
@@ -394,12 +378,17 @@ func selectAllImportBlocksErrors(seed []byte, store *storage.StateDBStorage, mod
 		panic(fmt.Sprintf("Original block failed seal test: %v | %v | %v\n", oValid, err, oBlockCopy.Header.AuthorIndex))
 	}
 
-	if len(aggregatedErrors) == 0 {
-		fmt.Printf("[#%v e=%v,m=%03d] \033[31mNotFuzzable\033[0m  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, oValidatorPub, oValidatorIdx)
+	if !allowFuzzing {
+		fmt.Printf("[#%v e=%v,m=%03d] %sSkip Fuzzing%s  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, colorGray, colorReset, oValidatorPub, oValidatorIdx)
 		return oSlot, oEpoch, oPhase, nil, nil
 	}
 
-	fmt.Printf("[#%v e=%v,m=%03d] \033[0mFuzzable!!!\033[0m  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, oValidatorPub, oValidatorIdx)
+	if len(aggregatedErrors) == 0 {
+		fmt.Printf("[#%v e=%v,m=%03d] %sNotFuzzable%s  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, colorGray, colorReset, oValidatorPub, oValidatorIdx)
+		return oSlot, oEpoch, oPhase, nil, nil
+	}
+
+	fmt.Printf("[#%v e=%v,m=%03d] %sFuzzable   %s  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, colorMagenta, colorReset, oValidatorPub, oValidatorIdx)
 
 	for _, selectedError := range aggregatedErrors {
 		blockCopy := block.Copy()
@@ -504,15 +493,41 @@ func selectAllImportBlocksErrors(seed []byte, store *storage.StateDBStorage, mod
 	// pick a random error based on our success
 	if len(errorList) > 0 {
 		possibleErrs := errorList
-		fmt.Printf("[#%v e=%v,m=%03d] Fuzzed. %v possible errors = \033[32m%v\033[0m\n", oSlot, oEpoch, oPhase, len(possibleErrs), jamerrors.GetErrorNames(possibleErrs))
+		fmt.Printf("[#%v e=%v,m=%03d] %v possible errors = %s%v%s\n", oSlot, oEpoch, oPhase, len(possibleErrs), colorMagenta, jamerrors.GetErrorNames(possibleErrs), colorReset)
 		return oSlot, oEpoch, oPhase, mutatedSTFs, possibleErrs
 	}
 	return oSlot, oEpoch, oPhase, nil, nil
 
 }
 
-func selectImportBlocksError(seed []byte, store *storage.StateDBStorage, modes []string, stf *statedb.StateTransition) (*statedb.StateTransition, error, []error) {
-	oSlot, oEpoch, oPhase, mutatedSTFs, errorList := selectAllImportBlocksErrors(seed, store, modes, stf)
+type STFError struct {
+	StateTransition *statedb.StateTransition
+	Error           error
+	Errors          []error
+}
+
+func selectImportBlocksErrorArr(seed []byte, store *storage.StateDBStorage, modes []string, stf *statedb.StateTransition, allowFuzzing bool) (stfErrors []STFError) {
+	oSlot, oEpoch, oPhase, mutatedSTFs, errorList := selectAllImportBlocksErrors(seed, store, modes, stf, allowFuzzing)
+	if len(mutatedSTFs) == 0 {
+		return nil
+	}
+	stfErrors = make([]STFError, 0, len(mutatedSTFs))
+	for i := 0; i < len(mutatedSTFs); i++ {
+		stfErrors = append(stfErrors, STFError{
+			StateTransition: &mutatedSTFs[i],
+			Error:           errorList[i],
+			Errors:          errorList,
+		})
+	}
+	debug := false
+	if debug {
+		fmt.Printf("[#%v e=%v,m=%03d] Found %v possible mutations = %v\n", oSlot, oEpoch, oPhase, len(errorList), jamerrors.GetErrorNames(errorList))
+	}
+	return stfErrors
+}
+
+func selectImportBlocksError(seed []byte, store *storage.StateDBStorage, modes []string, stf *statedb.StateTransition, allowFuzzing bool) (*statedb.StateTransition, error, []error) {
+	oSlot, oEpoch, oPhase, mutatedSTFs, errorList := selectAllImportBlocksErrors(seed, store, modes, stf, allowFuzzing)
 	// pick a random error based on our success
 	if len(errorList) > 0 {
 		rand.Seed(time.Now().UnixNano())

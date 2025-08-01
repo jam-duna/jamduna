@@ -145,7 +145,7 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	input_bytes := make([]byte, 0)
 	t_bytes := types.E(uint64(t))
 	s_bytes := types.E(uint64(s))
-	o_bytes := types.E(uint64(len(elements)))
+	o_bytes := types.E(uint64(len(elements))) // TODO: check
 	input_bytes = append(input_bytes, t_bytes...)
 	input_bytes = append(input_bytes, s_bytes...)
 	input_bytes = append(input_bytes, o_bytes...)

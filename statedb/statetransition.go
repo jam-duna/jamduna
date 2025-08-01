@@ -72,6 +72,10 @@ func (d *StateTransition) String() string {
 	return types.ToJSON(d)
 }
 
+func CompareKeyValsWithOutput(prestate, actual, expected []KeyVal) map[string]DiffState {
+	return compareKeyValsWithOutput(prestate, actual, expected)
+}
+
 func compareKeyValsWithOutput(prestate, actual, expected []KeyVal) map[string]DiffState {
 	// build maps: key → bytes and key → metadata
 	kv_pre := makemap(prestate)
@@ -185,13 +189,16 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 	}
 	// s1 is the ACTUAL stf output
 	// st.PostState.KeyVals is the EXPECTED stf output
-
+	post_actual_root := s1.UpdateTrieState()
 	post_actual := s1.GetAllKeyValues()
 	post_expected := st.PostState.KeyVals
 	if len(post_actual) != len(post_expected) {
 		fmt.Printf("len post_actual %d != len post_expected %d\n", len(post_actual), len(post_expected))
 		//fmt.Printf("post_actual\n%v\n", KeyVals(post_actual).String())
 		//fmt.Printf("post_expected\n%v\n", KeyVals(post_expected).String())
+	}
+	if post_actual_root != st.PostState.StateRoot {
+		fmt.Printf("!!! post_actual_root %s != post_expected %s\n", post_actual_root.Hex(), st.PostState.StateRoot.Hex())
 	}
 	if len(writeFile) > 0 && writeFile[0] != "" {
 		// write the output to a file

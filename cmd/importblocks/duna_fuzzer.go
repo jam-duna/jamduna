@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"log"
 	"os"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/fuzz"
-	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
@@ -21,77 +19,6 @@ const (
 	numBlocksMax = 650
 	magicConst   = 1107
 )
-
-// runUnixSocketChallenge executes a state transition test over an existing connection.
-func runUnixSocketChallenge(fuzzer *fuzz.Fuzzer, stfQA *fuzz.StateTransitionQA, verbose bool) (matched bool, err error) {
-	initialStatePayload := &fuzz.HeaderWithState{
-		Header: stfQA.STF.Block.Header,
-		State:  statedb.StateKeyVals{KeyVals: stfQA.STF.PreState.KeyVals},
-	}
-	expectedPreStateRoot := stfQA.STF.PreState.StateRoot
-
-	targetPreStateRoot, err := fuzzer.SetState(initialStatePayload)
-	if err != nil {
-		return false, fmt.Errorf("SetState failed: %w", err)
-	}
-
-	// Verification for pre-state.
-	if !bytes.Equal(targetPreStateRoot.Bytes(), expectedPreStateRoot.Bytes()) {
-		log.Printf("FATAL: Pre-state root MISMATCH!\n  Got:  %s\n  Want: %s", targetPreStateRoot.Hex(), expectedPreStateRoot.Hex())
-		return false, nil // Mismatch is a valid test outcome, not an error.
-	}
-
-	blockToProcess := &stfQA.STF.Block
-	headerHash := blockToProcess.Header.HeaderHash()
-	expectedPostStateRoot := stfQA.STF.PostState.StateRoot
-
-	targetPostStateRoot, err := fuzzer.ImportBlock(blockToProcess)
-	if err != nil {
-		return false, fmt.Errorf("ImportBlock failed: %w", err)
-	}
-
-	if stfQA.Mutated {
-		log.Printf("B#%.3d Fuzzed: %v\n", stfQA.STF.Block.Header.Slot, jamerrors.GetErrorName(stfQA.Error))
-		// fuzzed blocks should return as 0x0000....0000
-		if *targetPostStateRoot == (common.Hash{}) {
-			log.Printf("B#%.3d Fuzzed block returned expected zero post-state root.", stfQA.STF.Block.Header.Slot)
-			matched = true
-		} else {
-			log.Printf("FATAL: Fuzzed block returned non-zero post-state root: %s | Pre-State Root:%s", targetPostStateRoot.Hex(), expectedPreStateRoot.Hex())
-			matched = false // Fuzzed Undetected
-		}
-	} else {
-		log.Printf("B#%.3d Original: %v\n", stfQA.STF.Block.Header.Slot, jamerrors.GetErrorName(stfQA.Error))
-		// Unfuzzed. Do verification for post-state.
-		if bytes.Equal(targetPostStateRoot.Bytes(), expectedPostStateRoot.Bytes()) {
-			matched = true
-			log.Printf("B#%.3d Original block returned expected post-state root: %s", blockToProcess.Header.Slot, targetPostStateRoot.Hex())
-		} else {
-			log.Printf("FATAL: Post-state root MISMATCH!\n  Got:  %s\n  Want: %s", targetPostStateRoot.Hex(), expectedPostStateRoot.Hex())
-			matched = false // Post-state root MISMATCH
-		}
-	}
-
-	if !matched || verbose {
-		// Log the mismatch for further analysis.
-		if !matched {
-			log.Printf("B#%.3d MISMATCH: HeaderHash: %s | PostStateRoot: %s", blockToProcess.Header.Slot, headerHash.Hex(), targetPostStateRoot.Hex())
-		} else {
-			log.Printf("B#%.3d MATCH: HeaderHash: %s | PostStateRoot: %s", blockToProcess.Header.Slot, headerHash.Hex(), targetPostStateRoot.Hex())
-		}
-		targetStateKeyVals, err := fuzzer.GetState(&headerHash) // Fetch the state for debugging.
-		if err != nil {
-			log.Printf("Error fetching state for headerHash %s: %v", headerHash.Hex(), err)
-		} else if targetStateKeyVals == nil {
-			log.Printf("No state found for headerHash %s", headerHash.Hex())
-		} else {
-			executionReport := fuzzer.GenerateExecutionReport(stfQA, *targetStateKeyVals)
-			log.Printf("Execution Report for B#%.3d:\n%s", blockToProcess.Header.Slot, executionReport.String())
-		}
-	}
-
-	return matched, nil
-}
 
 func validateImportBlockConfig(jConfig types.ConfigJamBlocks, useSocket bool) {
 	if !useSocket && jConfig.HTTP == "" && jConfig.QUIC == "" {
@@ -188,13 +115,23 @@ func main() {
 			baseDir = "./rawdata"
 		}
 	*/
-	stfs, err := fuzz.ReadStateTransitions(test_dir, mode)
-	if err != nil || len(stfs) == 0 {
+	raw_stfs, err := fuzz.ReadStateTransitions(test_dir, mode)
+
+	usable_stfs := make([]*statedb.StateTransition, 0)
+	for _, stf := range raw_stfs {
+		if fuzz.HasParentStfs(raw_stfs, stf) {
+			usable_stfs = append(usable_stfs, stf)
+		} else {
+			log.Printf("Skipping STF with no parent: %s", stf.Block.Header.HeaderHash().Hex())
+		}
+	}
+
+	if err != nil || len(usable_stfs) == 0 {
 		log.Printf("No %v mode data available on BaseDir=%v. Exit!", mode, test_dir)
 		return
 	}
 
-	stfTestBank, fuzzErr := fuzzer.FuzzWithTargetedInvalidRate([]string{mode}, stfs, jConfig.InvalidRate, numBlocks)
+	stfTestBank, fuzzErr := fuzzer.FuzzWithTargetedInvalidRate([]string{mode}, usable_stfs, jConfig.InvalidRate, numBlocks)
 	if fuzzErr != nil {
 		log.Fatal(fuzzErr)
 	}
@@ -227,12 +164,8 @@ func main() {
 			fStat.OriginalBlocks++
 		}
 
-		if challengerFuzzed {
-			log.Printf("B#%.3d Fuzzed: %v\n", i, jamerrors.GetErrorName(stfQA.Error))
-		}
-
 		if useUnixSocket {
-			isMatch, err := runUnixSocketChallenge(fuzzer, &stfQA, jConfig.Verbose)
+			isMatch, solverFuzzed, err := fuzz.RunUnixSocketChallenge(fuzzer, &stfQA, jConfig.Verbose, raw_stfs)
 			if err != nil {
 				log.Printf("B#%.3d Unix Socket communication error: %v", i, err)
 				if challengerFuzzed {
@@ -243,13 +176,20 @@ func main() {
 				continue
 			}
 
-			if challengerFuzzed && isMatch {
-				fStat.FuzzFalseNegatives++
-			} else if challengerFuzzed && !isMatch {
+			//log.Printf("B#%.3d isMatch: %v, solverFuzzed: %v, challengerFuzzed: %v", i, isMatch, solverFuzzed, challengerFuzzed)
+
+			switch {
+			case challengerFuzzed && solverFuzzed && isMatch:
 				fStat.FuzzTruePositives++
-			} else if !challengerFuzzed && isMatch {
+			case challengerFuzzed && solverFuzzed && !isMatch:
+				fStat.FuzzMisclassifications++
+			case challengerFuzzed && !solverFuzzed:
+				fStat.FuzzFalseNegatives++
+			case !challengerFuzzed && !solverFuzzed && isMatch:
 				fStat.OrigTrueNegatives++
-			} else if !challengerFuzzed && !isMatch {
+			case !challengerFuzzed && !solverFuzzed && !isMatch:
+				fStat.OrigMisclassifications++
+			case !challengerFuzzed && solverFuzzed:
 				fStat.OrigFalsePositives++
 			}
 

@@ -170,7 +170,7 @@ func handleFuzz(seed []byte, sdb_storage *storage.StateDBStorage) http.HandlerFu
 		}
 		fuzzed := false
 		modes := []string{"assurances"}
-		mutatedStf, expectedErr, possibleErrs := selectImportBlocksError(seed, sdb_storage, modes, &stf)
+		mutatedStf, expectedErr, possibleErrs := selectImportBlocksError(seed, sdb_storage, modes, &stf, true)
 		if expectedErr != nil {
 			fmt.Printf("Expected error: %v | %v possibleErrs = %v\n", jamerrors.GetErrorName(expectedErr), len(possibleErrs), jamerrors.GetErrorNames(possibleErrs))
 			errActual := statedb.CheckStateTransition(sdb_storage, mutatedStf, nil, pvm.BackendInterpreter)

@@ -3,6 +3,8 @@ package fuzz
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -16,6 +18,9 @@ func testFullMessageEncoding(t *testing.T, msg *Message, expectedFullMessage []b
 	if err != nil {
 		t.Fatalf("encode() failed: %v", err)
 	}
+	byteStr, _ := json.Marshal(msg) // For debugging purposes, to see the JSON representation
+	fmt.Printf("Expected message string: %v\n", string(byteStr))
+	fmt.Printf("Expected full message: %x\n", expectedFullMessage)
 
 	buf := new(bytes.Buffer)
 	if err := binary.Write(buf, binary.LittleEndian, uint32(len(encodedBody))); err != nil {

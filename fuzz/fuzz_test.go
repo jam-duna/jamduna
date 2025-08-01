@@ -51,7 +51,7 @@ func testFuzz(t *testing.T, Base_Dir string, modes []string, stfs []*statedb.Sta
 	Cleanup(Base_Dir, dumpMode)
 	seed := []byte("duna")
 	for _, stf := range stfs {
-		oSlot, oEpoch, oPhase, mutatedSTFs, possibleErrs := selectAllImportBlocksErrors(seed, sdb_storage, modes, stf)
+		oSlot, oEpoch, oPhase, mutatedSTFs, possibleErrs := selectAllImportBlocksErrors(seed, sdb_storage, modes, stf, true)
 		if len(possibleErrs) > 0 {
 			for errIdx, expectedErr := range possibleErrs {
 				mutatedStf := mutatedSTFs[errIdx]
