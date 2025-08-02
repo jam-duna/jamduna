@@ -385,7 +385,11 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	var jceManager *ManualJCEManager
 	jceManager = nil
 	var previous_service_idx uint32
-	requireNew := jam == "fib"
+	requireNew := false
+	if strings.Compare(jam, "fib") == 0 || strings.Compare(jam, "algo") == 0 {
+		requireNew = true
+	}
+
 	var bootstrap_workItems []types.WorkItem
 	log.Info(log.Node, "JAMTEST", "jam", jam, "targetN", targetN, "requireNew", requireNew)
 

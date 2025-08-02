@@ -776,6 +776,7 @@ func (t *MerkleTree) SetService(s uint32, v []byte) (err error) {
 	service_account := common.ComputeC_is(s)
 	stateKey := service_account.Bytes()
 
+	// fmt.Printf("**** SetService stateKey=%x, s=%d\n", stateKey, s)
 	metaKey := fmt.Sprintf("meta_%x", stateKey)
 	metaKeyBytes, err := types.Encode(metaKey)
 	if err != nil {
@@ -811,7 +812,7 @@ func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 	al_internal_key := common.Compute_preimageLookup_internal(blob_hash, blob_len)
 	account_lookuphash := common.ComputeC_sh(s, al_internal_key) // C(s, (h,l))
 	stateKey := account_lookuphash.Bytes()
-
+	//fmt.Printf("**** SetPreImageLookup C(s=%d, h=%x)=%x\n", s, al_internal_key, stateKey)
 	vBytes, err := types.Encode(time_slots)
 	if err != nil {
 		fmt.Printf("SetPreImageLookup Encode Error: %v\n", err)
@@ -897,7 +898,6 @@ func (t *MerkleTree) SetServiceStorage(s uint32, k []byte, storageValue []byte) 
 	account_storage_key := common.ComputeC_sh(s, as_internal_key)
 	stateKey := account_storage_key.Bytes()
 
-	log.Info("whatever", "SetServiceStorage", "stateKey", fmt.Sprintf("%x", stateKey), "s", s, "k", k, "storageValue", fmt.Sprintf("%x", storageValue))
 	metaKey := fmt.Sprintf("meta_%x", stateKey)
 	metaKeyBytes, err := types.Encode(metaKey)
 	if err != nil {
@@ -972,7 +972,7 @@ func (t *MerkleTree) GetPreImageBlob(s uint32, blobHash common.Hash) (value []by
 	ap_internal_key := common.Compute_preimageBlob_internal(blobHash)
 	account_preimage_hash := common.ComputeC_sh(s, ap_internal_key)
 	stateKey := account_preimage_hash.Bytes()
-
+	// fmt.Printf("**** GetPreImageBlob C(s=%d, h=%x)=%x\n", s, ap_internal_key, stateKey)
 	value, ok, err = t.Get(stateKey)
 	if !ok || err != nil {
 		return nil, ok, err

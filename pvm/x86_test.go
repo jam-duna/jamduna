@@ -680,6 +680,10 @@ func recompiler_sandbox_test(tc TestCase) error {
 	for _, line := range codeLines {
 		fmt.Printf("%s\n", line)
 	}
+	_, codeLines = rvm.DisassemblePVMOfficial()
+	for _, line := range codeLines {
+		fmt.Printf("%s\n", line)
+	}
 
 	for _, pm := range tc.InitialPageMap {
 		// Set the page access based on the initial page map

@@ -69,12 +69,12 @@ func parseSTFFile(filename, content string) (StateTransition, error) {
 }
 
 func TestStateTransitionNoSandbox(t *testing.T) {
-	pvm.PvmLogging = false
-	pvm.PvmTrace = false          // enable PVM trace for this test
-	pvm.VMsCompare = true         // enable VM comparison for this test
-	filename := "./00000019.json" // javajam 0.6.7 -- see https://github.com/jam-duna/jamtestnet/issues/231#issuecomment-3144487797
-	//filename = "../jamtestvectors/traces/reports-l1/00000002.json"
-	//filename = "../jamtestvectors/traces/reports-l0/00000002.json"
+	pvm.PvmLogging = true
+	pvm.PvmTrace = true                // enable PVM trace for this test
+	pvm.VMsCompare = true              // enable VM comparison for this test
+	filename := "traces/00000019.json" // javajam 0.6.7 -- see https://github.com/jam-duna/jamtestnet/issues/231#issuecomment-3144487797
+	filename = "../jamtestvectors/traces/storage_light/00000003.json"
+
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
@@ -94,6 +94,7 @@ func TestStateTransitionSandbox(t *testing.T) {
 	pvm.SetUseEcalli500(false)   // use ecalli500 for log check in x86
 	pvm.SetDebugRecompiler(true) // enable debug mode for recompiler
 	filename := "./00000019.json"
+
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
@@ -153,12 +154,16 @@ func TestPVMstepJsonDiff(t *testing.T) {
 }
 
 func TestTraces(t *testing.T) {
-	//dir := "../cmd/importblocks/rawdata/safrole/state_transitions/"
-	dir := "./traces/" // PASSES
-	//dir = "../jamtestvectors/traces/reports-l0" // FAILS at ../jamtestvectors/traces/reports-l0/00000002.json
-	//dir = "../jamtestvectors/traces/reports-l1" // FAILS at ../jamtestvectors/traces/reports-l1/00000002.json
+	log.InitLogger("debug")
+	pvm.VMsCompare = true // enable VM comparison for this test
+	//	pvm.PvmLogging = true
 
-	log.InitLogger("info")
+	//dir := "../cmd/importblocks/rawdata/safrole/state_transitions/"
+	dir := "../jamtestvectors/traces/fallback" // PASSES
+	//dir = "../jamtestvectors/traces/safrole"    // PASSES
+	//dir = "./traces"  // PASSES
+	dir = "../jamtestvectors/traces/storage_light"
+	//dir = "../jamtestvectors/traces/preimages_light"
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("failed to read dir %s: %v", dir, err)

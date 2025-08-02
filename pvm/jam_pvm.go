@@ -194,7 +194,7 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	}
 	r, res = vm.getArgumentOutputs()
 	x_s.UpdateRecentAccumulation(vm.Timeslot) // [Gratis TODO: potentially need to be moved out]
-	fmt.Printf("ExecuteAccumulate - r=%x res=%v\n", r.Ok, res)
+	//fmt.Printf("ExecuteAccumulate - r=%x res=%v\n", r.Ok, res)
 	//vm.saveLogs()
 
 	return r, res, x_s
@@ -341,19 +341,19 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Resul
 func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 	if vm.ResultCode == types.WORKRESULT_OOG {
 		r.Err = types.WORKRESULT_OOG
-		log.Debug(vm.logging, "getArgumentOutputs - OOG", "service", string(vm.ServiceMetadata))
+		log.Error(vm.logging, "getArgumentOutputs - OOG", "service", string(vm.ServiceMetadata))
 		return r, 0
 	}
 	//o := 0xFFFFFFFF - Z_Z - Z_I + 1
 	if vm.ResultCode != types.WORKRESULT_OK {
 		r.Err = vm.ResultCode
-		log.Debug(vm.logging, "getArgumentOutputs - Error", "result", vm.ResultCode, "mode", vm.Mode, "service", string(vm.ServiceMetadata))
+		log.Error(vm.logging, "getArgumentOutputs - Error", "result", vm.ResultCode, "mode", vm.Mode, "service", string(vm.ServiceMetadata))
 		return r, 0
 	}
 	o, _ := vm.Ram.ReadRegister(7)
 	l, _ := vm.Ram.ReadRegister(8)
 	output, res := vm.Ram.ReadRAMBytes(uint32(o), uint32(l))
-	log.Trace(vm.logging, "getArgumentOutputs - OK", "output", fmt.Sprintf("%x", output), "l", l)
+	log.Info(vm.logging, "getArgumentOutputs - OK", "output", fmt.Sprintf("%x", output), "l", l)
 	if vm.ResultCode == types.WORKRESULT_OK && res == 0 {
 		r.Ok = output
 		return r, res
@@ -363,6 +363,6 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 		return r, res
 	}
 	r.Err = types.WORKRESULT_PANIC
-	log.Info(vm.logging, "getArgumentOutputs - PANIC", "result", vm.ResultCode, "mode", vm.Mode, "service", string(vm.ServiceMetadata))
+	log.Error(vm.logging, "getArgumentOutputs - PANIC", "result", vm.ResultCode, "mode", vm.Mode, "service", string(vm.ServiceMetadata))
 	return r, 0
 }

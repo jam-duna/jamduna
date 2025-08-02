@@ -76,7 +76,7 @@ run_1:
 
 run_5:
 	@for i in 0 1 2 3 4; do \
-		RUST_LOG=jam_node=trace $(POLKAJAM_BIN) --chain chainspecs/jamduna-spec.json --parameters tiny run --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
+		RUST_LOG=jam_node=trace $(POLKAJAM_BIN)  --chain chainspecs/jamduna-spec.json run --pvm-backend compiler --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
 	done
 
 jam:

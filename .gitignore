@@ -67,3 +67,7 @@ node/recompiler_sandbox/*
 node/test/*_recompiler_*.json
 /node/test
 /cmd/importblocks/fuzzed
+conf/*
+java*.jar
+libjava*.dylib
+assets/zcash-srs-2-11-uncompressed.bin

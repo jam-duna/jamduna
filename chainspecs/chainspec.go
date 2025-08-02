@@ -1,6 +1,7 @@
 package chainspecs
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/types"
 
 	"embed"
 )
@@ -51,20 +53,24 @@ type ChainSpec struct {
 	ID            string           `json:"id"`
 	GenesisHeader []byte           `json:"genesis_header"`
 	GenesisState  []statedb.KeyVal `json:"genesis_state"`
+
+	ProtocolParameters string `json:"protocol_parameters"` // Optional field for additional parameters
 }
 
 func (cs ChainSpec) MarshalJSON() ([]byte, error) {
 	type tmpChainSpec struct {
-		Bootnodes     []string          `json:"bootnodes"`
-		ID            string            `json:"id"`
-		GenesisHeader string            `json:"genesis_header"`
-		GenesisState  map[string]string `json:"genesis_state"`
+		Bootnodes          []string          `json:"bootnodes"`
+		ID                 string            `json:"id"`
+		GenesisHeader      string            `json:"genesis_header"`
+		GenesisState       map[string]string `json:"genesis_state"`
+		ProtocolParameters string            `json:"protocol_parameters"`
 	}
 	tmp := tmpChainSpec{
-		Bootnodes:     cs.Bootnodes,
-		ID:            cs.ID,
-		GenesisHeader: common.Bytes2String(cs.GenesisHeader),
-		GenesisState:  make(map[string]string),
+		Bootnodes:          cs.Bootnodes,
+		ID:                 cs.ID,
+		GenesisHeader:      common.Bytes2String(cs.GenesisHeader),
+		GenesisState:       make(map[string]string),
+		ProtocolParameters: cs.ProtocolParameters,
 	}
 	for _, kv := range cs.GenesisState {
 		key_string := common.Bytes2String(kv.Key[:])
@@ -76,10 +82,11 @@ func (cs ChainSpec) MarshalJSON() ([]byte, error) {
 
 func (cs *ChainSpec) UnmarshalJSON(data []byte) error {
 	type tmpChainSpec struct {
-		Bootnodes     []string          `json:"bootnodes"`
-		ID            string            `json:"id"`
-		GenesisHeader string            `json:"genesis_header"`
-		GenesisState  map[string]string `json:"genesis_state"`
+		Bootnodes          []string          `json:"bootnodes"`
+		ID                 string            `json:"id"`
+		GenesisHeader      string            `json:"genesis_header"`
+		GenesisState       map[string]string `json:"genesis_state"`
+		ProtocolParameters string            `json:"protocol_parameters"`
 	}
 	tmp := tmpChainSpec{}
 	if err := json.Unmarshal(data, &tmp); err != nil {
@@ -89,6 +96,7 @@ func (cs *ChainSpec) UnmarshalJSON(data []byte) error {
 	cs.ID = tmp.ID
 	cs.GenesisHeader = common.FromHex(tmp.GenesisHeader)
 	cs.GenesisState = make([]statedb.KeyVal, 0, len(tmp.GenesisState))
+	cs.ProtocolParameters = tmp.ProtocolParameters
 	for k, v := range tmp.GenesisState {
 		keyBytes := common.FromHex(k)
 		value := common.FromHex(v)
@@ -138,5 +146,8 @@ func GenSpec(dev DevConfig) (chainSpec *ChainSpec, err error) {
 	}
 	chainSpec.GenesisState = trace.PostState.KeyVals
 	chainSpec.GenesisHeader, _ = trace.Block.Header.Bytes()
+	params, _ := types.ParameterBytes()
+	fmt.Printf("Protocol parameters (%d bytes): %s\n", len(params), hex.EncodeToString(params))
+	chainSpec.ProtocolParameters = hex.EncodeToString(params)
 	return chainSpec, nil
 }

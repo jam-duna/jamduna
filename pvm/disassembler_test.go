@@ -46,7 +46,6 @@ func TestDisassemble(t *testing.T) {
 		t.Run(file.Name(), func(t *testing.T) {
 			testSingleCase(t, testCase)
 		})
-		t.Logf("Disassembled %s successfully", file.Name())
 	}
 }
 

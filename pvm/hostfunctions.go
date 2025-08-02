@@ -814,11 +814,13 @@ func (vm *VM) hostFetch() {
 	datatype, _ := vm.Ram.ReadRegister(10)
 	omega_11, _ := vm.Ram.ReadRegister(11)
 	omega_12, _ := vm.Ram.ReadRegister(12)
-	//log.Info(vm.logging, "FETCH", "datatype", datatype, "omega_7", o, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12, "vm.Extrinsics", fmt.Sprintf("%x", vm.Extrinsics), "wp", vm.WorkPackage)
+	log.Info(vm.logging, "FETCH", "datatype", datatype, "omega_7", o, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12, "vm.Extrinsics", fmt.Sprintf("%x", vm.Extrinsics), "wp", vm.WorkPackage)
 	var v_Bytes []byte
 	switch datatype {
 	case 0:
 		v_Bytes, _ = types.ParameterBytes()
+		//0a00000000000000010000000000000064000000000000000200200000000c000000809698000000000080f0fa020000000000ca9a3b00000000002d3101000000000800100008000300403800000300080006005000040080000500060000fa0000017cd20000093d0004000000000c00000204000000c0000080000000000c00000a000000
+		//[8: B_I]        [8: B_L].       [8: B_S].       [C.][4:D   ][4:E   ][8:G_A.        ][8:G_I.        ][8:G_R         ][8:G_T*        ][H ][I ][J ][K ][4:L   ][N ][O ][P ][Q ][R ][T ][U ][V ][4:W_A ][4:W_B ][4:W_C ][4:W_E ][4:W_M ][4:W_P ][4:W_R*][4:W_T ][4:W_X ][4:Y.  ]
 	case 1:
 		v_Bytes = vm.N.Bytes()
 	case 2:
@@ -925,7 +927,7 @@ func (vm *VM) hostFetch() {
 	f := min(uint64(len(v_Bytes)), omega_8)   // offset
 	l := min(uint64(len(v_Bytes))-f, omega_9) // max length
 
-	errCode := vm.Ram.WriteRAMBytes(uint32(o), v_Bytes[f:f+l])
+	errCode := vm.Ram.WriteRAMBytes(uint32(o), v_Bytes[f:])
 	if errCode != OK {
 		log.Info(vm.logging, "FETCH FAIL", "o", o, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "l", l, "f", f, "f+l", f+l, "v_Bytes[f..f+l]", fmt.Sprintf("%x", v_Bytes[f:f+l]))
 		vm.terminated = true
@@ -933,9 +935,10 @@ func (vm *VM) hostFetch() {
 		vm.MachineState = PANIC
 		return
 	}
-	// log.Info(vm.logging, "FETCH SUCC", "o", o, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "l", l, "f", f, "f+l", f+l, "v_Bytes[f..f+l]", fmt.Sprintf("%x", v_Bytes[f:f+l]))
+	l = uint64(len(v_Bytes))
+	log.Info(vm.logging, "FETCH SUCC", "o", o, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "l", l, "f", f, "f+l", f+l, "v_Bytes[f..f+l]", fmt.Sprintf("%x", v_Bytes[f:]))
 
-	vm.Ram.WriteRegister(7, uint64(l))
+	vm.Ram.WriteRegister(7, uint64(len(v_Bytes)))
 }
 
 func (vm *VM) hostYield() {
@@ -1764,7 +1767,7 @@ func (vm *VM) hostLog() {
 	case 2: // 2: User agent displays as important information
 		log.Info(vm.logging, string(messageBytes))
 	case 3: // 3: User agent displays as helpful information
-		// log.Debug(vm.logging, string(messageBytes))
+		log.Debug(vm.logging, string(messageBytes))
 	case 4: // 4: User agent displays as pedantic information
 		log.Trace(vm.logging, string(messageBytes))
 	}

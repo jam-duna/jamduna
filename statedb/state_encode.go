@@ -1,8 +1,6 @@
 package statedb
 
 import (
-	"fmt"
-
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -308,6 +306,6 @@ func (n *JamState) GetAccumulationOutputsBytes() []byte {
 	if err != nil {
 		return []byte{}
 	}
-	fmt.Printf("GetAccumulationOutputsBytes called with %v, encoding is: %x\n", n.AccumulationOutputs, encoded)
+	//fmt.Printf("C16 encoding: %x\n", encoded)
 	return encoded
 }

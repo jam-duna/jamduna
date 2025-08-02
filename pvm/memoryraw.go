@@ -36,10 +36,15 @@ type RawRAM struct {
 }
 
 func NewRawRAM() *RawRAM {
-	return &RawRAM{
-		Pages:    make([]*Page, TotalPages),
-		register: make([]uint64, regSize),
+	ram := &RawRAM{
+		Pages:                make([]*Page, TotalPages),
+		register:             make([]uint64, regSize),
+		current_heap_pointer: 51 * 4096,
 	}
+	for i := uint32(0); i < 51; i++ {
+		ram.getOrAllocatePage(i)
+	}
+	return ram
 }
 
 func (ram *RawRAM) GetDirtyPages() []int {

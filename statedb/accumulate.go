@@ -411,6 +411,7 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 			o_copy := o.Clone()
 			_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, service_ac, pvmBackend)
 			service_acXY = XY
+			accumulated_partial[service_ac] = service_acXY
 		}
 		if service_acXY == nil || service_acXY.U == nil {
 			log.Error(log.SDB, "SingleAccumulate returned nil XContext for service_ac", "service_ac", service_ac)
@@ -429,6 +430,7 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 		o_copy := o.Clone()
 		_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, v_star, pvmBackend)
 		service_vXY = XY
+		accumulated_partial[v_star] = service_vXY
 	}
 	v_prime := service_vXY.U.PrivilegedState.Kai_v
 
@@ -439,6 +441,7 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 		o_copy := o.Clone()
 		_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, v, pvmBackend)
 		service_iXY = XY
+		accumulated_partial[v] = service_iXY
 	}
 	i_prime := service_iXY.U.UpcomingValidators
 
@@ -452,6 +455,7 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 			o_copy := o.Clone()
 			_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, service_ac, pvmBackend)
 			service_acXY = XY
+			accumulated_partial[service_ac] = service_acXY
 		}
 		q_prime[i] = service_acXY.U.QueueWorkReport[i]
 	}
@@ -568,7 +572,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 					Y: workResult.PayloadHash,
 					D: workResult.Result,
 				}
-				log.Info(sd.Authoring, "SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s),
+				log.Trace(sd.Authoring, "SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s),
 					"wrangledResults", types.DecodedWrangledResults(&o))
 				p = append(p, o)
 			}
@@ -588,9 +592,12 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	xContext := sd.NewXContext(o, s, serviceAccount)
 
 	xy = xContext // if code does not exist, fallback to this
+	if codeHash == (common.Hash{}) {
+		return
+	}
 	ok, code := serviceAccount.ReadPreimage(codeHash, sd)
 	if !ok {
-		// CHECK
+		log.Error(log.SDB, "GetPreimage ERR", "ok", ok, "s", s, "codeHash", codeHash)
 		return
 	}
 

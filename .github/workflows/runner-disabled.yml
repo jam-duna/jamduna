@@ -23,7 +23,7 @@ on:
 
 jobs:
   test:
-    runs-on: polkavm-runner
+    runs-on: polkavm
     timeout-minutes: 50
     strategy:
       max-parallel: 2

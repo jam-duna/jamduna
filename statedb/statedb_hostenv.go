@@ -35,7 +35,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 					return
 				}
 			} else {
-				log.Info(log.SDB, "writeAccount SET", "service_idx", fmt.Sprintf("%d", service_idx), "k", fmt.Sprintf("%x", storage.Key), "rawkey", as_internal_key, "value", storage.Value)
+				log.Trace(log.SDB, "writeAccount SET", "service_idx", fmt.Sprintf("%d", service_idx), "k", fmt.Sprintf("%x", storage.Key), "rawkey", as_internal_key, "value", storage.Value)
 				// Here we are returning ALL storage values written
 				serviceUpdate.ServiceValue[as_internal_key] = &types.SubServiceValueResult{
 					ServiceID:  service_idx,

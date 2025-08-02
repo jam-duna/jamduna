@@ -94,7 +94,6 @@ func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *co
 	}
 	mmr.Append(accumulationRoot)
 	s.JamState.AccumulationOutputs = accumulationOutputs
-	fmt.Printf("AccumulationOutputs: %v\n", s.JamState.AccumulationOutputs)
 	n := Beta_state{
 		Reported:   reported,          // p
 		HeaderHash: blk.Header.Hash(), // h

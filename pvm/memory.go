@@ -33,6 +33,7 @@ type RAM struct {
 	output_address       uint32
 	output_end           uint32
 
+	first64k [65536]byte // first 64K of memory, used for special purposes
 	stack    []byte
 	rw_data  []byte
 	ro_data  []byte
@@ -52,7 +53,7 @@ func NewRAM(o_size uint32, w_size uint32, p_s uint32) *RAM {
 	// read-write
 	rw_data_address := uint32(2 * Z_Z)
 	rw_data_address_end := rw_data_address + Z_func(o_size)
-	current_heap_pointer := rw_data_address_end + 1024*1024
+	current_heap_pointer := rw_data_address_end + Z_P
 	// fmt.Printf("rw_data_address_end: %x, current_heap_pointer: %x\n", rw_data_address_end, current_heap_pointer)
 
 	// stack
@@ -97,6 +98,9 @@ func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
 	end := address + length
 
 	switch {
+	case address < 65536:
+		copy(ram.first64k[address:], data)
+		return OK
 	case address >= ram.output_address && end <= ram.output_end:
 		offset := address - ram.output_address
 		copy(ram.output[offset:], data)
@@ -114,6 +118,7 @@ func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
 		copy(ram.ro_data[offset:], data)
 		return OK
 	default:
+
 		return OOB
 	}
 }
@@ -121,6 +126,20 @@ func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
 func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 	end := address + length
 
+	if address >= ram.output_address && end <= ram.output_end {
+		offset := address - ram.output_address
+		if offset+length > uint32(len(ram.output)) {
+			return nil, OOB
+		}
+		return ram.output[offset : offset+length], OK
+	}
+	if address < 65536 {
+		if address+length > 65536 {
+			return nil, OOB
+		}
+		panic(111)
+		return ram.first64k[address : address+length], OK
+	}
 	if address >= ram.output_address && end <= ram.output_end {
 		offset := address - ram.output_address
 		if offset+length > uint32(len(ram.output)) {
