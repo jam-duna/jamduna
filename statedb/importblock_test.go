@@ -69,12 +69,12 @@ func parseSTFFile(filename, content string) (StateTransition, error) {
 }
 
 func TestStateTransitionNoSandbox(t *testing.T) {
-	pvm.PvmLogging = true
-	pvm.PvmTrace = true           // enable PVM trace for this test
+	pvm.PvmLogging = false
+	pvm.PvmTrace = false          // enable PVM trace for this test
 	pvm.VMsCompare = true         // enable VM comparison for this test
 	filename := "./00000019.json" // javajam 0.6.7 -- see https://github.com/jam-duna/jamtestnet/issues/231#issuecomment-3144487797
-	filename = "../jamtestvectors/traces/reports-l1/00000002.json"
-	filename = "../jamtestvectors/traces/reports-l0/00000002.json"
+	//filename = "../jamtestvectors/traces/reports-l1/00000002.json"
+	//filename = "../jamtestvectors/traces/reports-l0/00000002.json"
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
@@ -154,10 +154,9 @@ func TestPVMstepJsonDiff(t *testing.T) {
 
 func TestTraces(t *testing.T) {
 	//dir := "../cmd/importblocks/rawdata/safrole/state_transitions/"
-	dir := "../jamtestvectors/traces/fallback"  // PASSES
-	dir = "../jamtestvectors/traces/safrole"    // PASSES
-	dir = "../jamtestvectors/traces/reports-l0" // FAILS at ../jamtestvectors/traces/reports-l0/00000002.json
-	dir = "../jamtestvectors/traces/reports-l1" // FAILS at ../jamtestvectors/traces/reports-l1/00000002.json
+	dir := "./traces/" // PASSES
+	//dir = "../jamtestvectors/traces/reports-l0" // FAILS at ../jamtestvectors/traces/reports-l0/00000002.json
+	//dir = "../jamtestvectors/traces/reports-l1" // FAILS at ../jamtestvectors/traces/reports-l1/00000002.json
 
 	log.InitLogger("info")
 	entries, err := os.ReadDir(dir)

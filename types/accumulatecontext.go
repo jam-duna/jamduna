@@ -21,19 +21,49 @@ type AccumulationOutput struct {
 	Output  common.Hash `json:"h"`
 }
 
+type AlwaysAccumulateEntry struct {
+	ServiceID uint32 `json:"id"`
+	Gas       uint64 `json:"gas"`
+}
+
+type AlwaysAccMap map[uint32]uint64
+
+func (aam AlwaysAccMap) MarshalJSON() ([]byte, error) {
+	entries := make([]AlwaysAccumulateEntry, 0, len(aam))
+	for id, gas := range aam {
+		entries = append(entries, AlwaysAccumulateEntry{
+			ServiceID: id,
+			Gas:       gas,
+		})
+	}
+	return json.Marshal(entries)
+}
+
+func (aam *AlwaysAccMap) UnmarshalJSON(data []byte) error {
+	var entries []AlwaysAccumulateEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return err
+	}
+	*aam = make(AlwaysAccMap, len(entries))
+	for _, entry := range entries {
+		(*aam)[entry.ServiceID] = entry.Gas
+	}
+	return nil
+}
+
 // Types for Kai
 type Kai_state struct {
-	Kai_m uint32             `json:"chi_m"` // χₘ ∈ ℕₛ: Manager service index – authorized to alter χ and assign deposits.
-	Kai_a [TotalCores]uint32 `json:"chi_a"` // χₐ ∈ ⟦ℕₛ⟧𝒞: List of service indices (one per core) that can modify authorizer queue φ. One per core
-	Kai_v uint32             `json:"chi_v"` // χᵥ ∈ ℕₛ: Service index allowed to set ι. (upcoming validator)
-	Kai_g map[uint32]uint64  `json:"chi_g"` // χ𝗀 ∈ 𝒟(ℕₛ → ℕG): Services that auto-accumulate gas per block. (is this renamed as "z")
+	Kai_m uint32             `json:"bless"`      // χₘ ∈ ℕₛ: Manager service index – authorized to alter χ and assign deposits.
+	Kai_a [TotalCores]uint32 `json:"designate"`  // χₐ ∈ ⟦ℕₛ⟧𝒞: List of service indices (one per core) that can modify authorizer queue φ. One per core
+	Kai_v uint32             `json:"assign"`     // χᵥ ∈ ℕₛ: Service index allowed to set ι. (upcoming validator)
+	Kai_g AlwaysAccMap       `json:"always_acc"` // χ𝗀 ∈ 𝒟(ℕₛ → ℕG): Services that auto-accumulate gas per block. (is this renamed as "z")
 }
 
 func (k Kai_state) Copy() Kai_state {
 	copy := Kai_state{
 		Kai_m: k.Kai_m,
 		Kai_v: k.Kai_v,
-		Kai_g: make(map[uint32]uint64),
+		Kai_g: make(AlwaysAccMap),
 	}
 	copy.Kai_a = k.Kai_a
 	for k, v := range k.Kai_g {

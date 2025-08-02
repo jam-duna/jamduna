@@ -85,6 +85,7 @@ func ServiceToSeviceAccount(s []ServiceItem) map[uint32]*types.ServiceAccount {
 func (j *JamState) GetStateFromReportState(r StateReport) map[uint32]*types.ServiceAccount {
 	j.AvailabilityAssignments = r.AvailabilityAssignments
 	j.SafroleState.CurrValidators = r.CurrValidators
+	j.SafroleState.NextValidators = r.CurrValidators
 	j.SafroleState.PrevValidators = r.PrevValidators
 	j.SafroleState.Entropy = r.Entropy
 	j.RecentBlocks = r.RecentBlocks

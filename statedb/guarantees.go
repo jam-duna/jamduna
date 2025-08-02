@@ -114,10 +114,16 @@ func (s *StateDB) checkAssignment(g types.Guarantee, ts uint32) error {
 	}
 
 	// choose prev vs curr assignment based on period
-	_, assignments := s.CalculateAssignments(g.Slot)
+	prev_assignments, assignments := s.CalculateAssignments(ts)
 	lookup := make(map[uint16]uint16, len(assignments))
-	for idx, a := range assignments {
-		lookup[uint16(idx)] = a.CoreIndex
+	if ts/types.ValidatorCoreRotationPeriod == (g.Slot / types.ValidatorCoreRotationPeriod) {
+		for idx, a := range assignments {
+			lookup[uint16(idx)] = a.CoreIndex
+		}
+	} else {
+		for idx, a := range prev_assignments {
+			lookup[uint16(idx)] = a.CoreIndex
+		}
 	}
 	// verify each signature lands on the expected core
 	for _, sig := range g.Signatures {
@@ -566,11 +572,11 @@ func (s *StateDB) checkCodeHash(g types.Guarantee) error {
 		}
 		if !ok {
 			log.Warn(log.G, "checkCodeHash: serviceID not found", "serviceID", serviceID, "slot", s.GetTimeslot())
-			return nil // jamerrors.ErrGBadCodeHash
+			return jamerrors.ErrGBadCodeHash
 		}
 		if codeHash != service.CodeHash {
 			log.Warn(log.G, "checkCodeHash: codeHash != service.CodeHash", "serviceID", serviceID, "codeHash", codeHash, "service.CodeHash", service.CodeHash)
-			return nil // jamerrors.ErrGBadCodeHash
+			return jamerrors.ErrGBadCodeHash
 		}
 	}
 	return nil

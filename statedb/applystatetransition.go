@@ -233,7 +233,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 			log.Warn(log.GeneralAuthoring, "BEEFY-C", "output", sa.Output)
 		} else {
 			leaves = append(leaves, leafBytes)
-			log.Debug(debugB, "BEEFY-C", "s", fmt.Sprintf("%d", sa.Service), "h", sa.Output, "encoded", fmt.Sprintf("%x", leafBytes))
+			log.Info(debugB, "BEEFY-C", "s", fmt.Sprintf("%d", sa.Service), "h", sa.Output, "encoded", fmt.Sprintf("%x", leafBytes))
 		}
 	}
 

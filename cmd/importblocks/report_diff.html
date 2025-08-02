@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-900">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Execution Report Diff Tool</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .key-value-grid {
+            display: grid;
+            grid-template-columns: minmax(100px, 1fr) 3fr;
+            gap: 0.5rem 1rem;
+            align-items: start;
+        }
+        .key, .value {
+            overflow-wrap: break-word;
+            word-wrap: break-word;
+            word-break: break-all;
+            min-width: 0;
+        }
+        .key {
+            font-weight: 600;
+            color: #9ca3af; /* gray-400 */
+        }
+        .value {
+            font-family: 'Courier New', Courier, monospace;
+        }
+        .diff-char {
+            background-color: rgba(239, 68, 68, 0.2); /* bg-red-500/20 */
+            color: #f87171; /* text-red-400 */
+            font-weight: bold;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body class="text-gray-200 h-full overflow-hidden">
+    <div class="h-full flex flex-col p-4 sm:p-6 lg:p-8">
+        <!-- Header & Input Section (Fixed top part) -->
+        <div>
+            <div class="text-center mb-4">
+                <h1 class="text-3xl sm:text-4xl font-bold text-white mb-2">Execution Report Diff Tool</h1>
+                <p class="text-gray-400">Paste JSON report below to compare `PostState` and `TargetPostState`.</p>
+            </div>
+
+            <div class="mb-2">
+                <textarea id="jsonInput" class="w-full h-48 p-4 bg-gray-800 border border-gray-700 rounded-lg text-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-200" placeholder="Paste ExecutionReport JSON here..."></textarea>
+                <div class="mt-4 flex flex-col sm:flex-row items-center justify-center gap-4">
+                    <button id="compareBtn" class="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                          <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 7a1 1 0 00-1.414 1.414l2.293 2.293a1 1 0 001.414 0l4-4A1 1 0 1012.586 5.5L8 10.086l-1.293-1.293A1 1 0 007 7z" clip-rule="evenodd" />
+                        </svg>
+                        Compare States
+                    </button>
+                    <div class="flex items-center">
+                        <input type="checkbox" id="hideMatchingToggle" class="h-4 w-4 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500" checked>
+                        <label for="hideMatchingToggle" class="ml-2 text-gray-400">Hide matching key-values</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Message/Error Display -->
+        <div id="messageBox" class="hidden my-4 p-4 rounded-lg text-center flex-shrink-0"></div>
+
+        <!-- Scrollable Content Wrapper -->
+        <div class="flex-grow min-h-0 overflow-y-auto mt-4">
+            <!-- Comparison Output Section -->
+            <div id="output" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- PostState Column -->
+                <div id="postStateContainer" class="bg-gray-800 p-6 rounded-lg border border-gray-700 hidden">
+                    <h2 class="text-2xl font-semibold text-white mb-4 border-b border-gray-600 pb-2">Expected `PostState`</h2>
+                    <div id="postStateOutput" class="key-value-grid"></div>
+                </div>
+                <!-- TargetPostState Column -->
+                <div id="targetStateContainer" class="bg-gray-800 p-6 rounded-lg border border-gray-700 hidden">
+                    <h2 class="text-2xl font-semibold text-white mb-4 border-b border-gray-600 pb-2">Actual `TargetPostState`</h2>
+                    <div id="targetStateOutput" class="key-value-grid"></div>
+                </div>
+            </div>
+
+            <!-- Summary Section -->
+            <div id="summaryContainer" class="mt-6 bg-gray-800 p-6 rounded-lg border border-gray-700 hidden">
+                <h2 class="text-2xl font-semibold text-white mb-4 border-b border-gray-600 pb-2">Comparison Summary</h2>
+                <div id="summaryOutput"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Function to perform character-by-character diff and generate HTML
+        function generateDiffHtml(str1, str2) {
+            let html1 = '';
+            let html2 = '';
+            const len1 = str1.length;
+            const len2 = str2.length;
+            const maxLen = Math.max(len1, len2);
+
+            for (let i = 0; i < maxLen; i++) {
+                const char1 = str1[i];
+                const char2 = str2[i];
+
+                if (char1 !== undefined && char1 === char2) {
+                    html1 += char1;
+                    html2 += char2;
+                } else {
+                    if (char1 !== undefined) {
+                        html1 += `<span class="diff-char">${char1}</span>`;
+                    }
+                    if (char2 !== undefined) {
+                        html2 += `<span class="diff-char">${char2}</span>`;
+                    }
+                }
+            }
+            return [html1, html2];
+        }
+
+        const compareStates = () => {
+            // Clear previous results
+            const postStateOutput = document.getElementById('postStateOutput');
+            const targetStateOutput = document.getElementById('targetStateOutput');
+            const summaryOutput = document.getElementById('summaryOutput');
+            const messageBox = document.getElementById('messageBox');
+            
+            postStateOutput.innerHTML = '';
+            targetStateOutput.innerHTML = '';
+            summaryOutput.innerHTML = '';
+            messageBox.className = 'hidden my-4 p-4 rounded-lg text-center flex-shrink-0';
+            messageBox.textContent = '';
+            
+            document.getElementById('postStateContainer').classList.add('hidden');
+            document.getElementById('targetStateContainer').classList.add('hidden');
+            document.getElementById('summaryContainer').classList.add('hidden');
+
+            const jsonInput = document.getElementById('jsonInput').value;
+            if (!jsonInput.trim()) {
+                showMessage('Please paste JSON data into the text area.', 'yellow');
+                return;
+            }
+
+            let report;
+            try {
+                report = JSON.parse(jsonInput);
+            } catch (e) {
+                showMessage(`Invalid JSON: ${e.message}`, 'red');
+                return;
+            }
+
+            // Validate the structure of the pasted JSON
+            if (!report.post_state || !report.target_result || !report.post_state.keyvals || !report.target_result.keyvals) {
+                showMessage('JSON structure is invalid. It must contain `post_state` and `target_result` objects, each with a `keyvals` array.', 'red');
+                return;
+            }
+
+            // Show containers
+            document.getElementById('postStateContainer').classList.remove('hidden');
+            document.getElementById('targetStateContainer').classList.remove('hidden');
+            document.getElementById('summaryContainer').classList.remove('hidden');
+
+            const hideMatching = document.getElementById('hideMatchingToggle').checked;
+
+            // Convert key-value arrays to maps for efficient lookup
+            const postStateMap = new Map(report.post_state.keyvals.map(item => [item.key, item.value]));
+            const targetStateMap = new Map(report.target_result.keyvals.map(item => [item.key, item.value]));
+
+            // Get all unique keys from both states
+            const allKeys = new Set([...postStateMap.keys(), ...targetStateMap.keys()]);
+            
+            let diffCount = 0;
+            let summaryHtml = '<ul class="space-y-2">';
+
+            // Sort keys for consistent display order
+            const sortedKeys = Array.from(allKeys).sort();
+
+            for (const key of sortedKeys) {
+                const postValue = postStateMap.get(key);
+                const targetValue = targetStateMap.get(key);
+
+                let postHtml = '';
+                let targetHtml = '';
+
+                if (postStateMap.has(key) && targetStateMap.has(key)) {
+                    // Key exists in both states
+                    if (postValue === targetValue) {
+                        if (hideMatching) continue; // Skip rendering if we are hiding matches
+                        // Values match
+                        postHtml = `<div class="key text-green-400">${key}</div><div class="value text-green-400">${postValue}</div>`;
+                        targetHtml = `<div class="key text-green-400">${key}</div><div class="value text-green-400">${targetValue}</div>`;
+                    } else {
+                        // Values differ
+                        diffCount++;
+                        const [diffHtml1, diffHtml2] = generateDiffHtml(postValue, targetValue);
+                        postHtml = `<div class="key text-yellow-400">${key}</div><div class="value text-gray-200">${diffHtml1}</div>`;
+                        targetHtml = `<div class="key text-yellow-400">${key}</div><div class="value text-gray-200">${diffHtml2}</div>`;
+                        summaryHtml += `<li class="text-yellow-400"><strong>Mismatch on key:</strong> <code class="bg-gray-700 p-1 rounded">${key}</code></li>`;
+                    }
+                } else if (postStateMap.has(key)) {
+                    // Key only in PostState
+                    diffCount++;
+                    postHtml = `<div class="key text-red-400">${key}</div><div class="value text-red-400">${postValue}</div>`;
+                    targetHtml = `<div class="key text-gray-600">${key}</div><div class="value text-gray-600">(missing)</div>`;
+                    summaryHtml += `<li class="text-red-400"><strong>Missing from TargetState:</strong> <code class="bg-gray-700 p-1 rounded">${key}</code></li>`;
+                } else {
+                    // Key only in TargetPostState
+                    diffCount++;
+                    postHtml = `<div class="key text-gray-600">${key}</div><div class="value text-gray-600">(missing)</div>`;
+                    targetHtml = `<div class="key text-blue-400">${key}</div><div class="value text-blue-400">${targetValue}</div>`;
+                    summaryHtml += `<li class="text-blue-400"><strong>Extra in TargetState:</strong> <code class="bg-gray-700 p-1 rounded">${key}</code></li>`;
+                }
+
+                postStateOutput.innerHTML += postHtml;
+                targetStateOutput.innerHTML += targetHtml;
+            }
+
+            summaryHtml += '</ul>';
+
+            if (diffCount === 0) {
+                summaryOutput.innerHTML = '<p class="text-green-400 font-semibold">✅ All key-value pairs match perfectly.</p>';
+                showMessage('States are identical!', 'green');
+            } else {
+                summaryOutput.innerHTML = summaryHtml;
+                showMessage(`Found ${diffCount} difference(s).`, 'yellow');
+            }
+        };
+
+        document.getElementById('compareBtn').addEventListener('click', compareStates);
+        document.getElementById('hideMatchingToggle').addEventListener('change', compareStates);
+
+
+        function showMessage(text, color) {
+            const messageBox = document.getElementById('messageBox');
+            const colorClasses = {
+                red: 'bg-red-900 text-red-300 border border-red-700',
+                yellow: 'bg-yellow-900 text-yellow-300 border border-yellow-700',
+                green: 'bg-green-900 text-green-300 border border-green-700'
+            };
+            messageBox.className = `my-4 p-4 rounded-lg text-center flex-shrink-0 ${colorClasses[color] || colorClasses.yellow}`;
+            messageBox.textContent = text;
+        }
+    </script>
+</body>
+</html>

@@ -897,6 +897,7 @@ func (t *MerkleTree) SetServiceStorage(s uint32, k []byte, storageValue []byte) 
 	account_storage_key := common.ComputeC_sh(s, as_internal_key)
 	stateKey := account_storage_key.Bytes()
 
+	log.Info("whatever", "SetServiceStorage", "stateKey", fmt.Sprintf("%x", stateKey), "s", s, "k", k, "storageValue", fmt.Sprintf("%x", storageValue))
 	metaKey := fmt.Sprintf("meta_%x", stateKey)
 	metaKeyBytes, err := types.Encode(metaKey)
 	if err != nil {

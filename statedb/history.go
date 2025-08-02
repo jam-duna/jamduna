@@ -13,8 +13,8 @@ import (
 
 // C3
 type RecentBlocks struct {
-	B_H []Beta_state
-	B_B trie.MMR
+	B_H []Beta_state `json:"history"` // History of Beta states, each with header hash, B, state root, and reported segment roots
+	B_B trie.MMR     `json:"mmr"`     // MMR of the B values from Beta states
 }
 
 // TODO: [Sourabh] Recent Blocks: AccOuts in state, store historical roots only
@@ -24,7 +24,7 @@ type RecentBlocks struct {
 //	https://github.com/gavofyork/graypaper/commit/c48ad4498ba9df4abbad470aa9aac553ac33b864
 type Beta_state struct {
 	HeaderHash common.Hash                    `json:"header_hash"`
-	B          common.Hash                    `json:"b"`
+	B          common.Hash                    `json:"beefy_root"`
 	StateRoot  common.Hash                    `json:"state_root"`
 	Reported   types.SegmentRootLookupHistory `json:"reported"` // Use the custom type
 }
@@ -40,7 +40,7 @@ func (b *Beta_state) String() string {
 func (b *Beta_state) UnmarshalJSON(data []byte) error {
 	var s struct {
 		HeaderHash common.Hash                    `json:"header_hash"`
-		B          common.Hash                    `json:"b"`
+		B          common.Hash                    `json:"beefy_root"`
 		StateRoot  common.Hash                    `json:"state_root"`
 		Report     types.SegmentRootLookupHistory `json:"reported"`
 	}
@@ -57,7 +57,7 @@ func (b *Beta_state) UnmarshalJSON(data []byte) error {
 func (b Beta_state) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		HeaderHash common.Hash                    `json:"header_hash"`
-		B          common.Hash                    `json:"b"`
+		B          common.Hash                    `json:"beefy_root"`
 		StateRoot  common.Hash                    `json:"state_root"`
 		Report     types.SegmentRootLookupHistory `json:"reported"`
 	}{
@@ -94,6 +94,7 @@ func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *co
 	}
 	mmr.Append(accumulationRoot)
 	s.JamState.AccumulationOutputs = accumulationOutputs
+	fmt.Printf("AccumulationOutputs: %v\n", s.JamState.AccumulationOutputs)
 	n := Beta_state{
 		Reported:   reported,          // p
 		HeaderHash: blk.Header.Hash(), // h

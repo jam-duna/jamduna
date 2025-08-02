@@ -41,22 +41,16 @@ type AccumulateState struct {
 	Accounts            []TmpAccount                                 `json:"accounts"`    // a - The accounts
 }
 
-//	type Kai_state struct {
-//		Kai_m uint32            `json:"chi_m"` // The index of the bless service
-//		Kai_a uint32            `json:"chi_a"` // The index of the designate service
-//		Kai_v uint32            `json:"chi_v"` // The index of the assign service
-//		Kai_g map[uint32]uint32 `json:"chi_g"` // g is a small dictionary containing the indices of services which automatically accumulate in each block together with a basic amount of gas with which each accumulates
-//	}
 type tmpKaiState struct {
-	Kai_m uint32 `json:"bless"`     // The index of the bless service
-	Kai_a uint32 `json:"designate"` // The index of the designate service
-	Kai_v uint32 `json:"assign"`    // The index of the assign service
-	// Kai_g always_acc `json:"always_acc"` // g is a small dictionary containing the indices of services which automatically accumulate in each block together with a basic amount of gas with which each accumulates
+	Kai_m uint32             `json:"bless"`      // The index of the bless service
+	Kai_v []uint32           `json:"assign"`     // The index of the assign service
+	Kai_a uint32             `json:"designate"`  // The index of the designate service
+	Kai_g types.AlwaysAccMap `json:"always_acc"` // g is a small dictionary containing the indices of services which automatically accumulate in each block together with a basic amount of gas with which each accumulates
 }
 
 type always_acc struct {
-	key uint32
-	val uint32
+	ServiceId uint32 `json:"id"`  // The index of the service that always accumulates
+	Gas       uint32 `json:"gas"` // The amount of gas that the service accumulates
 }
 
 type TmpAccount struct {

@@ -89,7 +89,7 @@ func TestRecentHistory(t *testing.T) {
 	}
 	for testnum, jsonFile := range testCases {
 		t.Run(jsonFile, func(t *testing.T) {
-			jsonPath := filepath.Join("../jamtestvectors/history/data", jsonFile)
+			jsonPath := filepath.Join("../jamtestvectors/history/tiny", jsonFile)
 			jsonData, err := os.ReadFile(jsonPath)
 			if err != nil {
 				t.Fatalf("failed to read JSON file: %v", err)
