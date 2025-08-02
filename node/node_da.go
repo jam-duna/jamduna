@@ -419,6 +419,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		Bundle:            package_bundle,
 		SegmentRootLookup: segmentRootLookup,
 		Slot:              slot,
+		Report:            workReport,
 	}
 	return workReport, d, pvmElapsed, bundleSnapshot, err
 }

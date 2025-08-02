@@ -10,6 +10,7 @@ type WorkPackageBundleSnapshot struct {
 	Bundle            WorkPackageBundle `json:"bundle"`
 	SegmentRootLookup SegmentRootLookup `json:"segment_root_lookup"`
 	Slot              uint32            `json:"slot"`
+	Report            WorkReport        `json:"report"`
 }
 
 /*
