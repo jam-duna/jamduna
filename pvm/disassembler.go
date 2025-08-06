@@ -212,14 +212,8 @@ func createExtractFunctionForOpcode(opcode byte, args []Argument) func([]byte) [
 
 		case opcode == 10: // ECALLI - one immediate
 			if len(oargs) > 0 {
-				lx := min(4, int(oargs[0])%8)
-				if lx == 0 {
-					lx = 4
-				}
-				if len(oargs) >= 1+lx {
-					vx := types.DecodeE_l(oargs[1 : 1+lx])
-					params[0] = x_encode(vx, uint32(lx))
-				}
+				vx := types.DecodeE_l(oargs)
+				params[0] = uint32(vx)
 			}
 
 		case opcode == 20: // LOAD_IMM_64 - one reg, one u64

@@ -3,8 +3,13 @@ package pvm
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -98,4 +103,93 @@ func ParseInstructionLines(filePath string) ([]string, error) {
 	}
 
 	return instructions, nil
+}
+
+func ParseInstructions(r io.Reader) (map[int]string, error) {
+	re := regexp.MustCompile(`\[\d+\]:\s+(\d+):\s+(.+)`)
+	instMap := make(map[int]string)
+	scanner := bufio.NewScanner(r)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		m := re.FindStringSubmatch(line)
+		if len(m) != 3 {
+			continue
+		}
+		pcStr, inst := m[1], m[2]
+		if inst == "charge_gas" {
+			continue
+		}
+
+		pc, err := strconv.Atoi(pcStr)
+		if err != nil {
+			continue
+		}
+		instMap[pc] = inst
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return instMap, nil
+}
+func TestParseInstructions(t *testing.T) {
+	sampleLog := `
+2025-08-04 11:55:51 [D] ... [81]: 77309: charge_gas
+2025-08-04 11:55:51 [D] ... [82]: 77309: a0 = 0
+2025-08-04 11:55:51 [D] ... [83]: 77311: ret
+2025-08-04 11:55:51 [D] ... [84]: 77313: charge_gas
+2025-08-04 11:55:51 [D] ... [85]: 77313: sp = sp + 0xffffffffffffffd8
+2025-08-04 11:55:51 [D] ... [86]: 77316: u64 [sp + 0x20] = ra
+2025-08-04 11:55:51 [D] ... [87]: 77319: u64 [sp + 0x18] = s0
+2025-08-04 11:55:51 [D] ... [88]: 77322: u64 [sp + 0x10] = s1
+2025-08-04 11:55:51 [D] ... [89]: 77325: s1 = a1 + 0x1f
+2025-08-04 11:55:51 [D] ... [90]: 77328: s0 = 0x30008
+2025-08-04 11:55:51 [D] ... [91]: 77333: a2 = s0 + 0x2748
+2025-08-04 11:55:51 [D] ... [92]: 77337: a2 = a2 & 0xfffffffffffffffc
+2025-08-04 11:55:51 [D] ... [93]: 77340: fallthrough
+2025-08-04 11:55:51 [D] ... [94]: 77343: foo = bar
+`
+
+	expected := map[int]string{
+		77309: "a0 = 0",
+		77311: "ret",
+		77313: "sp = sp + 0xffffffffffffffd8",
+		77316: "u64 [sp + 0x20] = ra",
+		77319: "u64 [sp + 0x18] = s0",
+		77322: "u64 [sp + 0x10] = s1",
+		77325: "s1 = a1 + 0x1f",
+		77328: "s0 = 0x30008",
+		77333: "a2 = s0 + 0x2748",
+		77337: "a2 = a2 & 0xfffffffffffffffc",
+		77340: "fallthrough",
+		77343: "foo = bar",
+	}
+
+	got, err := ParseInstructions(strings.NewReader(sampleLog))
+	if err != nil {
+		t.Fatalf("ParseInstructions returned error: %v", err)
+	}
+	if len(got) != len(expected) {
+		t.Fatalf("expected %d entries, got %d", len(expected), len(got))
+	}
+	for pc, inst := range expected {
+		if got[pc] != inst {
+			t.Errorf("pc %d: expected %q, got %q", pc, inst, got[pc])
+		}
+	}
+}
+
+func TestParseParityTrace(t *testing.T) {
+	f, err := os.Open("../statedb/storage_light_000000003/pvm-trace.log")
+	if err != nil {
+		log.Fatalf("failed to open log file: %v", err)
+	}
+	defer f.Close()
+	instMap, err := ParseInstructions(f)
+	if err != nil {
+		log.Fatalf("failed to parse instructions: %v", err)
+	}
+	for pc, inst := range instMap {
+		fmt.Printf("[%d] = %q\n", pc, inst)
+	}
 }

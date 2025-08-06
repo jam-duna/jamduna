@@ -41,6 +41,7 @@ const (
 var (
 	PvmLogging = false
 	PvmTrace   = false
+	PvmTrace2  = false
 	useRawRam  = true
 
 	showDisassembly = false
@@ -539,8 +540,8 @@ func (vm *VM) step(stepn int) error {
 	len_operands := vm.skip(vm.pc)
 	operands := vm.code[vm.pc+1 : vm.pc+1+len_operands]
 	og_pc := vm.pc
-	if PvmTrace {
-		fmt.Printf("%s %s", prefixTrace, DisassembleSingleInstruction(opcode, operands))
+	if PvmTrace2 {
+		fmt.Printf("%s %s\n", prefixTrace, DisassembleSingleInstruction(opcode, operands))
 	}
 	switch {
 	case opcode <= 1: // A.5.1 No arguments
@@ -788,6 +789,7 @@ func (vm *VM) HandleOneRegOneEWImm(opcode byte, operands []byte) {
 	registerIndexA := min(12, int(originalOperands[0])%16)
 	lx := 8
 	vx := types.DecodeE_l(originalOperands[1 : 1+lx])
+	dumpLoadImm("LOAD_IMM_64", registerIndexA, uint64(vx), vx, 64, false)
 	vm.Ram.WriteRegister(registerIndexA, uint64(vx))
 }
 
@@ -808,17 +810,22 @@ func (vm *VM) HandleTwoImms(opcode byte, operands []byte) {
 	switch opcode {
 	case STORE_IMM_U8:
 		vm.Fault_address = uint32(vm.Ram.WriteRAMBytes(addr, []byte{uint8(vx)}))
+		dumpStoreGeneric("STORE_IMM_U8", uint64(addr), "imm", vx, 8)
 	case STORE_IMM_U16:
 		vm.Fault_address = uint32(vm.Ram.WriteRAMBytes(addr, types.E_l(vy%(1<<16), 2)))
+		dumpStoreGeneric("STORE_IMM_U16", uint64(addr), "imm", vy%(1<<16), 16)
 	case STORE_IMM_U32:
 		vm.Fault_address = uint32(vm.Ram.WriteRAMBytes(addr, types.E_l(vy%(1<<32), 4)))
+		dumpStoreGeneric("STORE_IMM_U32", uint64(addr), "imm", vy%(1<<32), 32)
 	case STORE_IMM_U64:
 		vm.Fault_address = uint32(vm.Ram.WriteRAMBytes(addr, types.E_l(vy, 8)))
+		dumpStoreGeneric("STORE_IMM_U64", uint64(addr), "imm", vy, 64)
 	}
 }
 
 func (vm *VM) HandleOneOffset(opcode byte, operands []byte) {
 	vx := extractOneOffset(operands)
+	dumpJumpOffset("JUMP", vx, vm.pc)
 	vm.branch(uint64(int64(vm.pc)+vx), true)
 }
 
@@ -830,13 +837,16 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 	addr := uint32(vx)
 	switch opcode {
 	case JUMP_IND:
+		dumpBranchImm("JUMP_IND", registerIndexA, valueA, vx, valueA+vx, false, true)
 		vm.djump((valueA + vx) % (1 << 32))
 	case LOAD_IMM:
 		vm.Ram.WriteRegister(registerIndexA, vx)
+		dumpLoadImm("LOAD_IMM", registerIndexA, uint64(addr), vx, 64, false)
 	case LOAD_U8:
 		value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 1)
 		if errCode == OK {
 			vm.Ram.WriteRegister(registerIndexA, uint64(value[0]))
+			dumpLoadGeneric("LOAD_U8", registerIndexA, uint64(addr), uint64(value[0]), 8, false)
 		} else {
 			vm.ResultCode = types.WORKRESULT_PANIC
 			vm.MachineState = PANIC
@@ -849,6 +859,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 		if errCode == OK {
 			res := x_encode(uint64(value[0]), 1)
 			vm.Ram.WriteRegister(registerIndexA, res)
+			dumpLoadGeneric("LOAD_I8", registerIndexA, uint64(addr), res, 8, true)
 		} else {
 			vm.ResultCode = types.WORKRESULT_PANIC
 			vm.MachineState = PANIC
@@ -861,6 +872,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 		if errCode == OK {
 			res := types.DecodeE_l(value)
 			vm.Ram.WriteRegister(registerIndexA, res)
+			dumpLoadGeneric("LOAD_U16", registerIndexA, uint64(addr), res, 16, false)
 		} else {
 			vm.ResultCode = types.WORKRESULT_PANIC
 			vm.MachineState = PANIC
@@ -873,6 +885,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 		if errCode == OK {
 			res := x_encode(types.DecodeE_l(value), 2)
 			vm.Ram.WriteRegister(registerIndexA, res)
+			dumpLoadGeneric("LOAD_I16", registerIndexA, uint64(addr), res, 16, true)
 		} else {
 			vm.ResultCode = types.WORKRESULT_PANIC
 			vm.MachineState = PANIC
@@ -885,6 +898,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 		if errCode == OK {
 			res := types.DecodeE_l(value)
 			vm.Ram.WriteRegister(registerIndexA, res)
+			dumpLoadGeneric("LOAD_U32", registerIndexA, uint64(addr), res, 32, false)
 		} else {
 			vm.ResultCode = types.WORKRESULT_PANIC
 			vm.MachineState = PANIC
@@ -897,6 +911,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 		if errCode == OK {
 			res := x_encode(types.DecodeE_l(value), 4)
 			vm.Ram.WriteRegister(registerIndexA, res)
+			dumpLoadGeneric("LOAD_I32", registerIndexA, uint64(addr), res, 32, true)
 		} else {
 			vm.ResultCode = types.WORKRESULT_PANIC
 			vm.MachineState = PANIC
@@ -909,6 +924,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 		if errCode == OK {
 			res := types.DecodeE_l(value)
 			vm.Ram.WriteRegister(registerIndexA, res)
+			dumpLoadGeneric("LOAD_U64", registerIndexA, uint64(addr), res, 64, false)
 		} else {
 			vm.ResultCode = types.WORKRESULT_PANIC
 			vm.MachineState = PANIC
@@ -919,6 +935,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 	case STORE_U8:
 		errCode := vm.Ram.WriteRAMBytes(addr, []byte{uint8(valueA)})
 		if errCode == OK {
+			dumpStoreGeneric("STORE_U8", uint64(addr), reg(registerIndexA), valueA, 8)
 		} else {
 			vm.ResultCode = types.WORKRESULT_PANIC
 			vm.MachineState = PANIC
@@ -928,6 +945,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 	case STORE_U16:
 		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(valueA%(1<<16), 2))
 		if errCode == OK {
+			dumpStoreGeneric("STORE_U16", uint64(addr), reg(registerIndexA), valueA%(1<<16), 16)
 		} else {
 			vm.ResultCode = types.WORKRESULT_PANIC
 			vm.MachineState = PANIC
@@ -937,6 +955,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 	case STORE_U32:
 		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(valueA%(1<<32), 4))
 		if errCode == OK {
+			dumpStoreGeneric("STORE_U32", uint64(addr), reg(registerIndexA), valueA%(1<<32), 32)
 		} else {
 			vm.ResultCode = types.WORKRESULT_PANIC
 			vm.MachineState = PANIC
@@ -946,6 +965,7 @@ func (vm *VM) HandleOneRegOneImm(opcode byte, operands []byte) {
 	case STORE_U64:
 		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(uint64(valueA), 8))
 		if errCode == OK {
+			dumpStoreGeneric("STORE_U64", uint64(addr), reg(registerIndexA), valueA, 64)
 		} else {
 			vm.ResultCode = types.WORKRESULT_PANIC
 			vm.MachineState = PANIC
@@ -963,6 +983,7 @@ func (vm *VM) HandleOneRegTwoImm(opcode byte, operands []byte) {
 	switch opcode {
 	case STORE_IMM_IND_U8:
 		errCode := vm.Ram.WriteRAMBytes(addr, []byte{byte(uint8(vy))})
+		dumpStoreGeneric("STORE_IMM_IND_U8", uint64(addr), fmt.Sprintf("0x%x", vy), vy&0xff, 8)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
 			vm.MachineState = PANIC
@@ -971,6 +992,7 @@ func (vm *VM) HandleOneRegTwoImm(opcode byte, operands []byte) {
 		}
 	case STORE_IMM_IND_U16:
 		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(vy%(1<<16), 2))
+		dumpStoreGeneric("STORE_IMM_IND_U16", uint64(addr), fmt.Sprintf("0x%x", vy), vy%(1<<16), 16)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
 			vm.MachineState = PANIC
@@ -979,6 +1001,7 @@ func (vm *VM) HandleOneRegTwoImm(opcode byte, operands []byte) {
 		}
 	case STORE_IMM_IND_U32:
 		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(vy%(1<<32), 4))
+		dumpStoreGeneric("STORE_IMM_IND_U32", uint64(addr), fmt.Sprintf("0x%x", vy), vy%(1<<32), 32)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
 			vm.MachineState = PANIC
@@ -987,6 +1010,7 @@ func (vm *VM) HandleOneRegTwoImm(opcode byte, operands []byte) {
 		}
 	case STORE_IMM_IND_U64:
 		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(uint64(vy), 8))
+		dumpStoreGeneric("STORE_IMM_IND_U64", uint64(addr), fmt.Sprintf("0x%x", vy), vy, 64)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
 			vm.MachineState = PANIC
@@ -1004,9 +1028,11 @@ func (vm *VM) HandleOneRegOneImmOneOffset(opcode byte, operands []byte) {
 	switch opcode {
 	case LOAD_IMM_JUMP:
 		vm.Ram.WriteRegister(registerIndexA, vx)
+		dumpLoadImmJump("LOAD_IMM_JUMP", registerIndexA, vx)
 		vm.branch(vy, true)
 	case BRANCH_EQ_IMM:
 		taken := valueA == vx
+		dumpBranchImm("BRANCH_EQ_IMM", registerIndexA, valueA, vx, vy, false, taken)
 		if taken {
 			vm.branch(vy, true)
 		} else {
@@ -1015,6 +1041,7 @@ func (vm *VM) HandleOneRegOneImmOneOffset(opcode byte, operands []byte) {
 
 	case BRANCH_NE_IMM:
 		taken := valueA != vx
+		dumpBranchImm("BRANCH_NE_IMM", registerIndexA, valueA, vx, vy, false, taken)
 		if taken {
 			vm.branch(vy, true)
 		} else {
@@ -1023,6 +1050,7 @@ func (vm *VM) HandleOneRegOneImmOneOffset(opcode byte, operands []byte) {
 
 	case BRANCH_LT_U_IMM:
 		taken := valueA < vx
+		dumpBranchImm("BRANCH_LT_U_IMM", registerIndexA, valueA, vx, vy, false, taken)
 		if taken {
 			vm.branch(vy, true)
 		} else {
@@ -1031,6 +1059,7 @@ func (vm *VM) HandleOneRegOneImmOneOffset(opcode byte, operands []byte) {
 
 	case BRANCH_LE_U_IMM:
 		taken := valueA <= vx
+		dumpBranchImm("BRANCH_LE_U_IMM", registerIndexA, valueA, vx, vy, false, taken)
 		if taken {
 			vm.branch(vy, true)
 		} else {
@@ -1039,6 +1068,7 @@ func (vm *VM) HandleOneRegOneImmOneOffset(opcode byte, operands []byte) {
 
 	case BRANCH_GE_U_IMM:
 		taken := valueA >= vx
+		dumpBranchImm("BRANCH_GE_U_IMM", registerIndexA, valueA, vx, vy, false, taken)
 		if taken {
 			vm.branch(vy, true)
 		} else {
@@ -1047,6 +1077,7 @@ func (vm *VM) HandleOneRegOneImmOneOffset(opcode byte, operands []byte) {
 
 	case BRANCH_GT_U_IMM:
 		taken := valueA > vx
+		dumpBranchImm("BRANCH_GT_U_IMM", registerIndexA, valueA, vx, vy, false, taken)
 		if taken {
 			vm.branch(vy, true)
 		} else {
@@ -1055,6 +1086,7 @@ func (vm *VM) HandleOneRegOneImmOneOffset(opcode byte, operands []byte) {
 
 	case BRANCH_LT_S_IMM:
 		taken := int64(valueA) < int64(vx)
+		dumpBranchImm("BRANCH_LT_S_IMM", registerIndexA, valueA, vx, vy, true, taken)
 		if taken {
 			vm.branch(vy, true)
 		} else {
@@ -1063,6 +1095,7 @@ func (vm *VM) HandleOneRegOneImmOneOffset(opcode byte, operands []byte) {
 
 	case BRANCH_LE_S_IMM:
 		taken := int64(valueA) <= int64(vx)
+		dumpBranchImm("BRANCH_LE_S_IMM", registerIndexA, valueA, vx, vy, true, taken)
 		if taken {
 			vm.branch(vy, true)
 		} else {
@@ -1071,6 +1104,7 @@ func (vm *VM) HandleOneRegOneImmOneOffset(opcode byte, operands []byte) {
 
 	case BRANCH_GE_S_IMM:
 		taken := int64(valueA) >= int64(vx)
+		dumpBranchImm("BRANCH_GE_S_IMM", registerIndexA, valueA, vx, vy, true, taken)
 		if taken {
 			vm.branch(vy, true)
 		} else {
@@ -1079,6 +1113,7 @@ func (vm *VM) HandleOneRegOneImmOneOffset(opcode byte, operands []byte) {
 
 	case BRANCH_GT_S_IMM:
 		taken := int64(valueA) > int64(vx)
+		dumpBranchImm("BRANCH_GT_S_IMM", registerIndexA, valueA, vx, vy, true, taken)
 		if taken {
 			vm.branch(vy, true)
 		} else {
@@ -1096,6 +1131,7 @@ func (vm *VM) HandleTwoRegs(opcode byte, operands []byte) {
 	switch opcode {
 	case MOVE_REG:
 		result = valueA
+		dumpMov(registerIndexD, registerIndexA, result)
 	case SBRK:
 		if valueA == 0 {
 			vm.Ram.WriteRegister(registerIndexD, uint64(vm.Ram.GetCurrentHeapPointer()))
@@ -1114,26 +1150,37 @@ func (vm *VM) HandleTwoRegs(opcode byte, operands []byte) {
 			vm.Ram.allocatePages(idx_start, page_count)
 		}
 		vm.Ram.SetCurrentHeapPointer(uint32(new_heap_pointer))
+		dumpTwoRegs("SBRK", registerIndexD, registerIndexA, valueA, result)
 	case COUNT_SET_BITS_64:
 		result = uint64(bits.OnesCount64(valueA))
+		dumpTwoRegs("COUNT_SET_BITS_64", registerIndexD, registerIndexA, valueA, result)
 	case COUNT_SET_BITS_32:
 		result = uint64(bits.OnesCount32(uint32(valueA)))
+		dumpTwoRegs("COUNT_SET_BITS_32", registerIndexD, registerIndexA, valueA, result)
 	case LEADING_ZERO_BITS_64:
 		result = uint64(bits.LeadingZeros64(valueA))
+		dumpTwoRegs("LEADING_ZERO_BITS_64", registerIndexD, registerIndexA, valueA, result)
 	case LEADING_ZERO_BITS_32:
 		result = uint64(bits.LeadingZeros32(uint32(valueA)))
+		dumpTwoRegs("LEADING_ZERO_BITS_32", registerIndexD, registerIndexA, valueA, result)
 	case TRAILING_ZERO_BITS_64:
 		result = uint64(bits.TrailingZeros64(valueA))
+		dumpTwoRegs("TRAILING_ZERO_BITS_64", registerIndexD, registerIndexA, valueA, result)
 	case TRAILING_ZERO_BITS_32:
 		result = uint64(bits.TrailingZeros32(uint32(valueA)))
+		dumpTwoRegs("TRAILING_ZERO_BITS_32", registerIndexD, registerIndexA, valueA, result)
 	case SIGN_EXTEND_8:
 		result = uint64(int8(valueA & 0xFF))
+		dumpTwoRegs("SIGN_EXTEND_8", registerIndexD, registerIndexA, valueA, result)
 	case SIGN_EXTEND_16:
 		result = uint64(int16(valueA & 0xFFFF))
+		dumpTwoRegs("SIGN_EXTEND_16", registerIndexD, registerIndexA, valueA, result)
 	case ZERO_EXTEND_16:
 		result = valueA & 0xFFFF
+		dumpTwoRegs("ZERO_EXTEND_16", registerIndexD, registerIndexA, valueA, result)
 	case REVERSE_BYTES:
 		result = bits.ReverseBytes64(valueA)
+		dumpTwoRegs("REVERSE_BYTES", registerIndexD, registerIndexA, valueA, result)
 	default:
 		vm.ResultCode = types.WORKRESULT_PANIC
 		vm.MachineState = PANIC
@@ -1153,6 +1200,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 	switch opcode {
 	case STORE_IND_U8:
 		errCode := vm.Ram.WriteRAMBytes(addr, []byte{byte(uint8(valueA))})
+		dumpStoreGeneric("STORE_IND_U8", uint64(addr), reg(registerIndexA), valueA&0xff, 8)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
 			vm.MachineState = PANIC
@@ -1162,6 +1210,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 		return
 	case STORE_IND_U16:
 		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(valueA%(1<<16), 2))
+		dumpStoreGeneric("STORE_IND_U16", uint64(addr), reg(registerIndexA), valueA&0xffff, 16)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
 			vm.MachineState = PANIC
@@ -1171,6 +1220,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 		return
 	case STORE_IND_U32:
 		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(valueA%(1<<32), 4))
+		dumpStoreGeneric("STORE_IND_U32", uint64(addr), reg(registerIndexA), valueA&0xffffffff, 32)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
 			vm.MachineState = PANIC
@@ -1180,6 +1230,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 		return
 	case STORE_IND_U64:
 		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(uint64(valueA), 8))
+		dumpStoreGeneric("STORE_IND_U64", uint64(addr), reg(registerIndexA), valueA, 64)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
 			vm.MachineState = PANIC
@@ -1198,6 +1249,8 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 		}
 		result = uint64(uint8(value[0]))
 
+		dumpLoadGeneric("LOAD_IND_U8", registerIndexA, uint64(addr), result, 8, false)
+
 	case LOAD_IND_I8:
 		value, errCode := vm.Ram.ReadRAMBytes(addr, 1)
 		if errCode != OK {
@@ -1208,6 +1261,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 			return
 		}
 		result = uint64(int8(value[0]))
+		dumpLoadGeneric("LOAD_IND_I8", registerIndexA, uint64(addr), result, 8, true)
 	case LOAD_IND_U16:
 		value, errCode := vm.Ram.ReadRAMBytes(addr, 2)
 		if errCode != OK {
@@ -1218,6 +1272,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 			return
 		}
 		result = types.DecodeE_l(value)
+		dumpLoadGeneric("LOAD_IND_U16", registerIndexA, uint64(addr), result, 16, false)
 	case LOAD_IND_I16:
 		value, errCode := vm.Ram.ReadRAMBytes(addr, 2)
 		if errCode != OK {
@@ -1228,6 +1283,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 			return
 		}
 		result = uint64(int16(types.DecodeE_l(value)))
+		dumpLoadGeneric("LOAD_IND_I16", registerIndexA, uint64(addr), result, 16, true)
 	case LOAD_IND_U32:
 		value, errCode := vm.Ram.ReadRAMBytes(addr, 4)
 		if errCode != OK {
@@ -1238,6 +1294,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 			return
 		}
 		result = types.DecodeE_l(value)
+		dumpLoadGeneric("LOAD_IND_U32", registerIndexA, uint64(addr), result, 32, false)
 	case LOAD_IND_I32:
 		value, errCode := vm.Ram.ReadRAMBytes(addr, 4)
 		if errCode != OK {
@@ -1248,6 +1305,7 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 			return
 		}
 		result = uint64(int32(types.DecodeE_l(value)))
+		dumpLoadGeneric("LOAD_IND_I32", registerIndexA, uint64(addr), result, 32, true)
 	case LOAD_IND_U64:
 		value, errCode := vm.Ram.ReadRAMBytes(addr, 8)
 		if errCode != OK {
@@ -1258,73 +1316,104 @@ func (vm *VM) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 			return
 		}
 		result = types.DecodeE_l(value)
+		dumpLoadGeneric("LOAD_IND_U64", registerIndexA, uint64(addr), result, 64, false)
 	case ADD_IMM_32:
 		result = x_encode((valueB+vx)%(1<<32), 4)
+		dumpBinOp("+", registerIndexA, registerIndexB, vx, result)
 	case ADD_IMM_64:
 		result = valueB + vx
+		dumpBinOp("+", registerIndexA, registerIndexB, vx, result)
 	case AND_IMM:
 		result = valueB & vx
+		dumpBinOp("&", registerIndexA, registerIndexB, vx, result)
 	case XOR_IMM:
 		result = valueB ^ vx
+		dumpBinOp("^", registerIndexA, registerIndexB, vx, result)
 	case OR_IMM:
 		result = valueB | vx
+		dumpBinOp("|", registerIndexA, registerIndexB, vx, result)
 	case MUL_IMM_32:
 		result = x_encode((valueB*vx)%(1<<32), 4)
+		dumpBinOp("*", registerIndexA, registerIndexB, vx, result)
 	case MUL_IMM_64:
 		result = valueB * vx
+		dumpBinOp("*", registerIndexA, registerIndexB, vx, result)
 	case SET_LT_U_IMM:
 		result = boolToUint(valueB < vx)
+		dumpCmpOp("<u", registerIndexA, registerIndexB, vx, result)
 	case SET_LT_S_IMM:
 		result = boolToUint(int64(valueB) < int64(vx))
+		dumpCmpOp("<s", registerIndexA, registerIndexB, vx, result)
 	case SET_GT_U_IMM:
 		result = boolToUint(valueB > vx)
+		dumpCmpOp("u>", registerIndexA, registerIndexB, vx, result)
 	case SET_GT_S_IMM:
 		result = boolToUint(int64(valueB) > int64(vx))
+		dumpCmpOp("s>", registerIndexA, registerIndexB, vx, result)
 	case NEG_ADD_IMM_32:
 		result = x_encode((vx-valueB)%(1<<32), 4)
+		dumpBinOp("-+", registerIndexA, registerIndexB, vx, result)
 	case NEG_ADD_IMM_64:
 		result = vx - valueB
+		dumpBinOp("-+", registerIndexA, registerIndexB, vx, result)
 	case SHLO_L_IMM_32:
 		result = x_encode(valueB<<(vx&63)%(1<<32), 4)
+		dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
 	case SHLO_L_IMM_64:
 		result = valueB << (vx & 63)
+		dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
 	case SHLO_R_IMM_32:
 		result = x_encode(uint64(uint32(valueB)>>(vx&31)), 4)
+		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
 	case SHLO_R_IMM_64:
 		result = valueB >> (vx & 63)
+		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
 	case SHAR_R_IMM_32:
 		result = uint64(int64(int32(valueB) >> (vx & 31)))
+		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
 	case SHAR_R_IMM_64:
 		result = uint64(int64(valueB) >> (vx & 63))
+		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
 	case SHLO_L_IMM_ALT_32:
 		result = x_encode(vx<<(valueB&63)%(1<<32), 4)
+		dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
 	case SHLO_L_IMM_ALT_64:
 		result = vx << (valueB & 63)
+		dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
 	case SHLO_R_IMM_ALT_32:
 		result = x_encode(vx>>(valueB&63)%(1<<32), 4)
+		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
 	case SHLO_R_IMM_ALT_64:
 		result = vx >> (valueB & 63)
+		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
 	case SHAR_R_IMM_ALT_64:
 		result = uint64(int64(vx) >> (valueB & 63))
+		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
 	case ROT_R_64_IMM:
 		result = bits.RotateLeft64(valueB, -int(vx&63))
+		dumpRotOp("ROT_R_64_IMM", reg(registerIndexA), reg(registerIndexB), vx, result)
 	case ROT_R_64_IMM_ALT:
 		result = bits.RotateLeft64(vx, -int(valueB&63))
+		dumpRotOp("ROT_R_64_IMM_ALT", reg(registerIndexA), reg(registerIndexB), vx, result)
 	case ROT_R_32_IMM:
 		result = x_encode(uint64(bits.RotateLeft32(uint32(valueB), -int(vx&31))), 4)
+		dumpRotOp("ROT_R_32_IMM", reg(registerIndexA), reg(registerIndexB), vx, result)
 	case ROT_R_32_IMM_ALT:
 		result = x_encode(uint64(bits.RotateLeft32(uint32(vx), -int(valueB&31))), 4)
+		dumpRotOp("ROT_R_32_IMM_ALT", reg(registerIndexA), reg(registerIndexB), vx, result)
 	case CMOV_IZ_IMM:
 		result = vx
 		if valueB != 0 {
 			result = valueA
 		}
+		dumpCmovOp("== 0", registerIndexA, registerIndexB, vx, valueA, result, true)
 	case CMOV_NZ_IMM:
 		if valueB != 0 {
 			result = vx
 		} else {
 			result = valueA
 		}
+		dumpCmovOp("!= 0", registerIndexA, registerIndexB, vx, valueA, result, false)
 	}
 	vm.Ram.WriteRegister(registerIndexA, result)
 }
@@ -1339,6 +1428,7 @@ func (vm *VM) HandleTwoRegsOneOffset(opcode byte, operands []byte) {
 	switch opcode {
 	case BRANCH_EQ:
 		taken := valueA == valueB
+		dumpBranch("BRANCH_EQ", registerIndexA, registerIndexB, valueA, valueB, vx, taken)
 		if taken {
 			vm.branch(vx, true)
 		} else {
@@ -1346,6 +1436,7 @@ func (vm *VM) HandleTwoRegsOneOffset(opcode byte, operands []byte) {
 		}
 	case BRANCH_NE:
 		taken := valueA != valueB
+		dumpBranch("BRANCH_NE", registerIndexA, registerIndexB, valueA, valueB, vx, taken)
 		if taken {
 			vm.branch(vx, true)
 		} else {
@@ -1353,6 +1444,7 @@ func (vm *VM) HandleTwoRegsOneOffset(opcode byte, operands []byte) {
 		}
 	case BRANCH_LT_U:
 		taken := valueA < valueB
+		dumpBranch("BRANCH_LT_U", registerIndexA, registerIndexB, valueA, valueB, vx, taken)
 		if taken {
 			vm.branch(vx, true)
 		} else {
@@ -1360,6 +1452,7 @@ func (vm *VM) HandleTwoRegsOneOffset(opcode byte, operands []byte) {
 		}
 	case BRANCH_LT_S:
 		taken := int64(valueA) < int64(valueB)
+		dumpBranch("BRANCH_LT_S", registerIndexA, registerIndexB, valueA, valueB, vx, taken)
 		if taken {
 			vm.branch(vx, true)
 		} else {
@@ -1367,6 +1460,7 @@ func (vm *VM) HandleTwoRegsOneOffset(opcode byte, operands []byte) {
 		}
 	case BRANCH_GE_U:
 		taken := valueA >= valueB
+		dumpBranch("BRANCH_GE_U", registerIndexA, registerIndexB, valueA, valueB, vx, taken)
 		if taken {
 			vm.branch(vx, true)
 		} else {
@@ -1374,6 +1468,7 @@ func (vm *VM) HandleTwoRegsOneOffset(opcode byte, operands []byte) {
 		}
 	case BRANCH_GE_S:
 		taken := int64(valueA) >= int64(valueB)
+		dumpBranch("BRANCH_GE_S", registerIndexA, registerIndexB, valueA, valueB, vx, taken)
 		if taken {
 			vm.branch(vx, true)
 		} else {
@@ -1407,16 +1502,20 @@ func (vm *VM) HandleThreeRegs(opcode byte, operands []byte) {
 	switch opcode {
 	case ADD_32:
 		result = x_encode(uint64(uint32(valueA)+uint32(valueB)), 4)
+		dumpThreeRegOp("ADD_32", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case SUB_32:
 		result = x_encode(uint64(uint32(valueA)-uint32(valueB)), 4)
+		dumpThreeRegOp("SUB_32", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case MUL_32:
 		result = x_encode(uint64(uint32(valueA)*uint32(valueB)), 4)
+		dumpThreeRegOp("MUL_32", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case DIV_U_32:
 		if valueB&0xFFFF_FFFF == 0 {
 			result = maxUint64
 		} else {
 			result = x_encode(uint64(uint32(valueA)/uint32(valueB)), 4)
 		}
+		dumpThreeRegOp("DIV_U_32", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case DIV_S_32:
 		a, b := int32(valueA), int32(valueB)
 		switch {
@@ -1427,6 +1526,7 @@ func (vm *VM) HandleThreeRegs(opcode byte, operands []byte) {
 		default:
 			result = uint64(int64(a / b))
 		}
+		dumpThreeRegOp("DIV_S_32", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case REM_U_32:
 		if valueB&0xFFFF_FFFF == 0 {
 			result = x_encode(uint64(uint32(valueA)), 4)
@@ -1434,6 +1534,7 @@ func (vm *VM) HandleThreeRegs(opcode byte, operands []byte) {
 			r := uint32(valueA) % uint32(valueB)
 			result = x_encode(uint64(r), 4)
 		}
+		dumpThreeRegOp("REM_U_32", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case REM_S_32:
 		a, b := int32(valueA), int32(valueB)
 		switch {
@@ -1444,24 +1545,32 @@ func (vm *VM) HandleThreeRegs(opcode byte, operands []byte) {
 		default:
 			result = uint64(int64(a % b))
 		}
+		dumpThreeRegOp("REM_S_32", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case SHLO_L_32:
 		result = x_encode(uint64(uint32(valueA)<<(valueB&31)), 4)
+		dumpShiftOp("<<", registerIndexD, registerIndexA, valueB&31, result)
 	case SHLO_R_32:
 		result = x_encode(uint64(uint32(valueA)>>(valueB&31)), 4)
+		dumpShiftOp(">>", registerIndexD, registerIndexA, valueB&31, result)
 	case SHAR_R_32:
 		result = uint64(int32(valueA) >> (valueB & 31))
+		dumpShiftOp(">>", registerIndexD, registerIndexA, valueB&31, result)
 	case ADD_64:
 		result = valueA + valueB
+		dumpThreeRegOp("+", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case SUB_64:
 		result = valueA - valueB
+		dumpThreeRegOp("-", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case MUL_64:
 		result = valueA * valueB
+		dumpThreeRegOp("*", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case DIV_U_64:
 		if valueB == 0 {
 			result = maxUint64
 		} else {
 			result = valueA / valueB
 		}
+		dumpThreeRegOp("/", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case DIV_S_64:
 		if valueB == 0 {
 			result = maxUint64
@@ -1470,30 +1579,39 @@ func (vm *VM) HandleThreeRegs(opcode byte, operands []byte) {
 		} else {
 			result = uint64(int64(valueA) / int64(valueB))
 		}
+		dumpThreeRegOp("/", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case REM_U_64:
 		if valueB == 0 {
 			result = valueA
 		} else {
 			result = valueA % valueB
 		}
+		dumpThreeRegOp("%", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case REM_S_64:
 		if int64(valueA) == -(1<<63) && int64(valueB) == -1 {
 			result = 0
 		} else {
 			result = uint64(smod(int64(valueA), int64(valueB)))
 		}
+		dumpThreeRegOp("%", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case SHLO_L_64:
 		result = valueA << (valueB & 63)
+		dumpShiftOp("<<", registerIndexD, registerIndexA, valueB&63, result)
 	case SHLO_R_64:
 		result = valueA >> (valueB & 63)
+		dumpShiftOp(">>", registerIndexD, registerIndexA, valueB&63, result)
 	case SHAR_R_64:
 		result = uint64(int64(valueA) >> (valueB & 63))
+		dumpShiftOp("SHAR_R_64", registerIndexD, registerIndexA, valueB&63, result)
 	case AND:
 		result = valueA & valueB
+		dumpThreeRegOp("&", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case XOR:
 		result = valueA ^ valueB
+		dumpThreeRegOp("^", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case OR:
 		result = valueA | valueB
+		dumpThreeRegOp("|", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case MUL_UPPER_S_S:
 		hi, _ := bits.Mul64(valueA, valueB)
 		if valueA>>63 == 1 {
@@ -1503,60 +1621,78 @@ func (vm *VM) HandleThreeRegs(opcode byte, operands []byte) {
 			hi -= valueA
 		}
 		result = hi
+		dumpThreeRegOp("*s", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case MUL_UPPER_U_U:
 		result, _ = bits.Mul64(valueA, valueB)
+		dumpThreeRegOp("*u", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case MUL_UPPER_S_U:
 		hi, _ := bits.Mul64(valueA, valueB)
 		if valueA>>63 == 1 {
 			hi -= valueB
 		}
 		result = hi
+		dumpThreeRegOp("*s", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case SET_LT_U:
 		if valueA < valueB {
 			result = 1
 		} else {
 			result = 0
 		}
+		dumpCmpOp("<u", registerIndexD, registerIndexA, valueB, result)
 	case SET_LT_S:
 		if int64(valueA) < int64(valueB) {
 			result = 1
 		} else {
 			result = 0
 		}
+		dumpCmpOp("<s", registerIndexD, registerIndexA, valueB, result)
 	case CMOV_IZ:
 		if valueB == 0 {
 			result = valueA
+			dumpCmovOp("CMOV_IZ", registerIndexD, registerIndexB, valueA, valueA, result, true)
 		} else {
 			return
 		}
 	case CMOV_NZ:
 		if valueB != 0 {
 			result = valueA
+			dumpCmovOp("CMOV_NZ", registerIndexD, registerIndexB, valueA, valueA, result, false)
 		} else {
 			return
 		}
 	case ROT_L_64:
 		result = bits.RotateLeft64(valueA, int(valueB&63))
+		dumpRotOp("<<", reg(registerIndexD), reg(registerIndexA), valueB&63, result)
 	case ROT_L_32:
 		result = x_encode(uint64(bits.RotateLeft32(uint32(valueA), int(valueB&31))), 4)
+		dumpRotOp("<<", reg(registerIndexD), reg(registerIndexA), valueB&31, result)
 	case ROT_R_64:
 		result = bits.RotateLeft64(valueA, -int(valueB&63))
+		dumpRotOp(">>", reg(registerIndexD), reg(registerIndexA), valueB&63, result)
 	case ROT_R_32:
 		result = x_encode(uint64(bits.RotateLeft32(uint32(valueA), -int(valueB&31))), 4)
+		dumpRotOp(">>", reg(registerIndexD), reg(registerIndexA), valueB&31, result)
 	case AND_INV:
 		result = valueA & (^valueB)
+		dumpThreeRegOp("&!", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case OR_INV:
 		result = valueA | (^valueB)
+		dumpThreeRegOp("|!", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case XNOR:
 		result = ^(valueA ^ valueB)
+		dumpThreeRegOp("^!", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case MAX:
 		result = uint64(max(int64(valueA), int64(valueB)))
+		dumpThreeRegOp("max", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case MAX_U:
 		result = max(valueA, valueB)
+		dumpThreeRegOp("max", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case MIN:
 		result = uint64(min(int64(valueA), int64(valueB)))
+		dumpThreeRegOp("min", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	case MIN_U:
 		result = min(valueA, valueB)
+		dumpThreeRegOp("minu", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	}
 
 	vm.Ram.WriteRegister(registerIndexD, result)

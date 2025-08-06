@@ -11,13 +11,30 @@ import (
 )
 
 // ProcessGuarantees applies guarantees to JamState, tracking signature counts.
-func (j *JamState) ProcessGuarantees(ctx context.Context, guarantees []types.Guarantee) (map[uint16]uint16, error) {
-	reports := make(map[uint16]uint16)
+func (j *JamState) ProcessGuarantees(ctx context.Context, guarantees []types.Guarantee, prev_assignment types.GuarantorAssignments) (map[types.Ed25519Key]uint16, error) {
+	reports := make(map[types.Ed25519Key]uint16)
 
 	for _, g := range guarantees {
 		// tally signature counts
-		for _, sig := range g.Signatures {
-			reports[sig.ValidatorIndex]++
+		if g.Slot/types.RotationPeriod == j.SafroleState.Timeslot/types.RotationPeriod {
+			for _, sig := range g.Signatures {
+				index := sig.ValidatorIndex
+				if uint32(index) < uint32(len(j.SafroleState.CurrValidators)) {
+					ed25519key := j.SafroleState.CurrValidators[int(index)].Ed25519
+					reports[ed25519key]++
+					// fmt.Printf("Validator %d: %s (CurrValidators)\n", index, ed25519key)
+				}
+			}
+		} else {
+			for _, sig := range g.Signatures {
+				index := sig.ValidatorIndex
+				// get the key from the previous validator set
+				if uint32(index) < uint32(len(j.SafroleState.PrevValidators)) {
+					ed25519key := prev_assignment[index].Validator.Ed25519
+					// fmt.Printf("Validator %d: %s (PrevValidators)\n", index, ed25519key)
+					reports[ed25519key]++
+				}
+			}
 		}
 
 		// skip invalid core indices
@@ -31,7 +48,6 @@ func (j *JamState) ProcessGuarantees(ctx context.Context, guarantees []types.Gua
 			j.SetRhoByWorkReport(uint16(g.Report.CoreIndex), g.Report, j.SafroleState.GetTimeSlot())
 			log.Trace(log.G, "assigned core", "core", g.Report.CoreIndex)
 		}
-
 		// cancellation check
 		select {
 		case <-ctx.Done():
@@ -97,7 +113,7 @@ func (s *StateDB) VerifyGuaranteeBasic(g types.Guarantee, targetJCE uint32) erro
 	}
 
 	// signature verification against current or previous validator set
-	validators := s.chooseValidatorSet(g.Slot)
+	validators := s.JamState.chooseValidatorSet(g.Slot)
 	if err := g.Verify(validators); err != nil {
 		return err
 	}
@@ -115,6 +131,8 @@ func (s *StateDB) checkAssignment(g types.Guarantee, ts uint32) error {
 
 	// choose prev vs curr assignment based on period
 	prev_assignments, assignments := s.CalculateAssignments(ts)
+	s.GuarantorAssignments = assignments
+	s.PreviousGuarantorAssignments = prev_assignments
 	lookup := make(map[uint16]uint16, len(assignments))
 	if ts/types.ValidatorCoreRotationPeriod == (g.Slot / types.ValidatorCoreRotationPeriod) {
 		for idx, a := range assignments {
@@ -137,16 +155,17 @@ func (s *StateDB) checkAssignment(g types.Guarantee, ts uint32) error {
 				"actualCore", core)
 			return jamerrors.ErrGWrongAssignment
 		}
+		// fmt.Printf("Validator %d: %s (Assigned to Core %d), g slot %d\n", sig.ValidatorIndex, assignments[sig.ValidatorIndex].Validator.Ed25519, core, g.Slot)
 	}
 	return nil
 }
 
 // Helper: chooseValidatorSet returns Prev or Curr based on slot.
-func (s *StateDB) chooseValidatorSet(slot uint32) types.Validators {
-	if s.IsPreviousValidators(slot) {
-		return s.JamState.SafroleState.PrevValidators
+func (j *JamState) chooseValidatorSet(slot uint32) types.Validators {
+	if j.IsPreviousValidators(slot) {
+		return j.SafroleState.PrevValidators
 	}
-	return s.JamState.SafroleState.CurrValidators
+	return j.SafroleState.CurrValidators
 }
 
 // CheckSortedGuarantees ensures guarantees are sorted by core index.
@@ -582,8 +601,8 @@ func (s *StateDB) checkCodeHash(g types.Guarantee) error {
 	return nil
 }
 
-func (s *StateDB) IsPreviousValidators(eg_timeslot uint32) bool {
-	curr_timeslot := s.GetTimeslot()
+func (j *JamState) IsPreviousValidators(eg_timeslot uint32) bool {
+	curr_timeslot := j.SafroleState.GetTimeSlot()
 	assignment_idx := curr_timeslot / types.ValidatorCoreRotationPeriod
 	previous_assignment_idx := assignment_idx - 1
 	eg_assignment_idx := eg_timeslot / types.ValidatorCoreRotationPeriod

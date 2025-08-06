@@ -73,8 +73,8 @@ func TestStateTransitionNoSandbox(t *testing.T) {
 	pvm.PvmTrace = true                // enable PVM trace for this test
 	pvm.VMsCompare = true              // enable VM comparison for this test
 	filename := "traces/00000019.json" // javajam 0.6.7 -- see https://github.com/jam-duna/jamtestnet/issues/231#issuecomment-3144487797
-	filename = "../jamtestvectors/traces/storage_light/00000003.json"
-
+	//filename = "../jamtestvectors/traces/storage_light/00000016.json"
+	filename = "../jamtestvectors/traces/preimages/00000057.json"
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
@@ -156,34 +156,52 @@ func TestPVMstepJsonDiff(t *testing.T) {
 func TestTraces(t *testing.T) {
 	log.InitLogger("debug")
 	pvm.VMsCompare = true // enable VM comparison for this test
-	//	pvm.PvmLogging = true
+	// pvm.PvmLogging = true
 
-	//dir := "../cmd/importblocks/rawdata/safrole/state_transitions/"
-	dir := "../jamtestvectors/traces/fallback" // PASSES
-	//dir = "../jamtestvectors/traces/safrole"    // PASSES
-	//dir = "./traces"  // PASSES
-	dir = "../jamtestvectors/traces/storage_light"
-	//dir = "../jamtestvectors/traces/preimages_light"
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("failed to read dir %s: %v", dir, err)
+	// Define all the directories you want to test in a single slice.
+	testDirs := []string{
+		//"../cmd/importblocks/rawdata/safrole/state_transitions/",
+		"../jamtestvectors/traces/fallback",
+		"../jamtestvectors/traces/safrole",
+		"../jamtestvectors/traces/preimages_light",
+		"../jamtestvectors/traces/preimages",
+		"../jamtestvectors/traces/storage_light",
+		"../jamtestvectors/traces/storage",
 	}
 
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || e.Name() == "00000000.json" {
-			continue
-		}
-		filename := filepath.Join(dir, e.Name())
-		content, err := os.ReadFile(filename)
-		if err != nil {
-			t.Errorf("failed to read file %s: %v", filename, err)
-			continue
-		}
+	// Iterate over each directory.
+	for _, dir := range testDirs {
+		// Create a local copy of dir for the sub-test to capture correctly.
+		// This avoids issues where the sub-tests might all run with the last value of 'dir'.
+		currentDir := dir
 
-		fmt.Printf("Running test for file: %s\n", filename)
-		// ensure inner test failure bubbles up
-		t.Run(e.Name(), func(t *testing.T) {
-			runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter)
+		t.Run(fmt.Sprintf("Directory_%s", filepath.Base(currentDir)), func(t *testing.T) {
+			entries, err := os.ReadDir(currentDir)
+			if err != nil {
+				// Use t.Fatalf to stop the test for this directory if we can't read it.
+				t.Fatalf("failed to read directory %s: %v", currentDir, err)
+			}
+
+			for _, e := range entries {
+				if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || e.Name() == "00000000.json" {
+					continue
+				}
+
+				filename := filepath.Join(currentDir, e.Name())
+				content, err := os.ReadFile(filename)
+				if err != nil {
+					// Use t.Errorf to report the error but continue with other files.
+					t.Errorf("failed to read file %s: %v", filename, err)
+					continue
+				}
+
+				fmt.Printf("Running test for file: %s\n", filename)
+
+				// Run the actual test logic for each file as a distinct sub-test.
+				t.Run(e.Name(), func(t *testing.T) {
+					runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter)
+				})
+			}
 		})
 	}
 }

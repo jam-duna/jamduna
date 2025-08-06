@@ -194,7 +194,7 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	}
 	r, res = vm.getArgumentOutputs()
 	x_s.UpdateRecentAccumulation(vm.Timeslot) // [Gratis TODO: potentially need to be moved out]
-	//fmt.Printf("ExecuteAccumulate - r=%x res=%v\n", r.Ok, res)
+	//fmt.Printf("!!!ExecuteAccumulate - r=%x res=%v timeslot=%d. x_s=%v\n", r.Ok, res, vm.Timeslot, x_s)
 	//vm.saveLogs()
 
 	return r, res, x_s

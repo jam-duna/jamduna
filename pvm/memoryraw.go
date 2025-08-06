@@ -63,7 +63,7 @@ func (ram *RawRAM) GetCurrentHeapPointer() uint32 {
 
 func (ram *RawRAM) SetCurrentHeapPointer(pointer uint32) {
 	ram.current_heap_pointer = pointer
-	fmt.Printf("SetCurrentHeapPointer: %x\n", ram.current_heap_pointer)
+	//fmt.Printf("SetCurrentHeapPointer: %x\n", ram.current_heap_pointer)
 
 }
 

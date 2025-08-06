@@ -70,12 +70,12 @@ type ServiceData struct {
 	GasLimitG    uint64      `json:"min_item_gas"`   //a_g - the minimum gas required in order to execute the Accumulate entry-point of the service's code,
 	GasLimitM    uint64      `json:"min_memo_gas"`   //a_m - the minimum required for the On Transfer entry-point.
 	StorageSize  uint64      `json:"bytes"`          //a_o - total number of octets used in storage (9.3)
-	GratisOffset uint64      `json:"storage_offset"` //a_f - gratis storage offset
+	GratisOffset uint64      `json:"deposit-offset"` //a_f - gratis storage offset
 
-	NumStorageItems    uint32 `json:"items"`               //a_i - the number of items in storage (9.3)
-	CreateTime         uint32 `json:"create_time"`         //a_r - the timeslot at creation. used for checkpointing
-	RecentAccumulation uint32 `json:"recent_accumulation"` //a_a - the timeslot at the most recent accumulation, used for checkpointing
-	ParentService      uint32 `json:"parent_service"`      //a_p - the parent service index
+	NumStorageItems    uint32 `json:"items"`                  //a_i - the number of items in storage (9.3)
+	CreateTime         uint32 `json:"creation-slot"`          //a_r - the timeslot at creation. used for checkpointing
+	RecentAccumulation uint32 `json:"last-accumulation-slot"` //a_a - the timeslot at the most recent accumulation, used for checkpointing
+	ParentService      uint32 `json:"parent-service"`         //a_p - the parent service index
 
 }
 

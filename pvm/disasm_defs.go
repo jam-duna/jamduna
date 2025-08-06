@@ -141,7 +141,10 @@ func FormatInstruction(opcode byte, values []interface{}) string {
 				formatted = "r?"
 			}
 		case ArgTypeU32:
-			if val, ok := values[i].(uint32); ok {
+			if opcode == ECALLI {
+				val := values[i].(uint32)
+				formatted = fmt.Sprintf("%d", val)
+			} else if val, ok := values[i].(uint32); ok {
 				if val == 0 {
 					formatted = "0"
 				} else {
@@ -215,7 +218,7 @@ func init() {
 
 	RegisterInstr(FALLTHROUGH, opcode_str_lower(FALLTHROUGH)).
 		Args().
-		Format("llthrough")
+		Format("fallthrough")
 
 	// A.5.2. Instructions with Arguments of One Immediate
 	RegisterInstr(ECALLI, opcode_str_lower(ECALLI)).

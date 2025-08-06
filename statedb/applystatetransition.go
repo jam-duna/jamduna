@@ -117,8 +117,10 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	for validatorIndex, nassurances := range num_assurances {
 		s.JamState.tallyStatistics(uint32(validatorIndex), "assurances", uint32(nassurances))
 	}
-	for validatorIndex, nreports := range num_reports {
-		s.JamState.tallyStatistics(uint32(validatorIndex), "reports", uint32(nreports))
+	for ed25519Key, _ := range num_reports {
+		validatorIndex := s.JamState.SafroleState.GetCurrValidatorIndex(ed25519Key)
+		s.JamState.tallyStatistics(uint32(validatorIndex), "reports", 1)
+		// fmt.Printf("Validator %d: %d reports\n", validatorIndex, nreports)
 	}
 	// 4.17 Accmuulation [need available work report, ϑ, ξ, δ, χ, ι, φ]
 	// 12.20 gas counting
@@ -211,6 +213,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if err != nil {
 		return s, err
 	}
+
 	s.JamState.tallyServiceStatistics(guarantees, preimages, accumulateStats, transferStats)
 
 	// Update Authorization Pool alpha
@@ -346,7 +349,7 @@ func (s *StateDB) ApplyStateTransitionDispute(disputes types.Dispute) (err error
 }
 
 // Process Rho - Eq 25/26/27 using disputes, assurances, guarantees in that order
-func (s *StateDB) ApplyStateTransitionRho(ctx context.Context, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32) (num_reports map[uint16]uint16, num_assurances map[uint16]uint16, err error) {
+func (s *StateDB) ApplyStateTransitionRho(ctx context.Context, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32) (num_reports map[types.Ed25519Key]uint16, num_assurances map[uint16]uint16, err error) {
 	d := s.GetJamState()
 	assuranceErr := s.ValidateAssurances(ctx, assurances, s.Block.Header.ParentHeaderHash)
 	if assuranceErr != nil {
@@ -389,7 +392,7 @@ func (s *StateDB) ApplyStateTransitionRho(ctx context.Context, assurances []type
 		}
 	}
 
-	num_reports, err = d.ProcessGuarantees(ctx, guarantees)
+	num_reports, err = d.ProcessGuarantees(ctx, guarantees, s.PreviousGuarantorAssignments)
 	if err != nil {
 		log.Error(log.SDB, "ApplyStateTransitionRho", "GuaranteeErr", err)
 		return nil, nil, err

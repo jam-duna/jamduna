@@ -26,14 +26,19 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 	for _, storage := range sa.Storage {
 		as_internal_key := storage.InternalKey
 		if storage.Dirty {
-			if len(storage.Value) == 0 || storage.Deleted {
-				log.Trace(s.Authoring, "writeAccount DELETE", "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", as_internal_key, "storage.Accessed", storage.Accessed, "storage.Deleted", storage.Deleted)
-				err = tree.DeleteServiceStorage(service_idx, storage.Key)
-				if err != nil {
-					// DeleteServiceStorageKey: Failed to delete k: 0xffffffffdecedb51effc9737c5fea18873dbf428c55f0d5d3b522672f234a9b1, error: key not found
-					log.Warn(log.SDB, "DeleteServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", as_internal_key, "err", err)
-					return
+			if storage.Deleted {
+				log.Trace(s.Authoring, "writeAccount DELETE", "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", as_internal_key, "storage.Accessed", storage.Accessed, "storage.Deleted", storage.Deleted, "storage.source", storage.Source)
+				if storage.Source == "trie" {
+					err = tree.DeleteServiceStorage(service_idx, storage.Key)
+					if err != nil {
+						// DeleteServiceStorageKey: Failed to delete k: 0xffffffffdecedb51effc9737c5fea18873dbf428c55f0d5d3b522672f234a9b1, error: key not found
+						log.Warn(log.SDB, "DeleteServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", as_internal_key, "err", err)
+						continue
+					}
+				} else {
+					//log.Trace(log.SDB, "DeleteServiceStorage from memory", "n", s.Id, "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", as_internal_key, "err", err)
 				}
+
 			} else {
 				log.Trace(log.SDB, "writeAccount SET", "service_idx", fmt.Sprintf("%d", service_idx), "k", fmt.Sprintf("%x", storage.Key), "rawkey", as_internal_key, "value", storage.Value)
 				// Here we are returning ALL storage values written
@@ -58,18 +63,20 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 		blob_hash := common.HexToHash(blob_hash_str)
 		if v.Dirty {
 			if v.Deleted {
-				err = tree.DeletePreImageLookup(service_idx, blob_hash, v.Z)
-				if err != nil {
-					log.Warn(log.SDB, "tree.DeletePreImageLookup", "blob_hash", blob_hash, "v.Z", v.Z, "err", err)
-					return
-				}
-				log.Trace("authoring", "tree.DeletePreImageLookup [FORGET OK]", "blob_hash", blob_hash, "v.Z", v.Z)
-				serviceUpdate.ServiceRequest[blob_hash_str] = &types.SubServiceRequestResult{
-					HeaderHash: s.HeaderHash,
-					Slot:       s.GetTimeslot(),
-					Hash:       blob_hash, //TODO: SOURABH CHECK
-					ServiceID:  service_idx,
-					Timeslots:  nil,
+				if v.Source == "trie" {
+					err = tree.DeletePreImageLookup(service_idx, blob_hash, v.Z)
+					if err != nil {
+						log.Warn(log.SDB, "tree.DeletePreImageLookup", "blob_hash", blob_hash, "v.Z", v.Z, "err", err)
+						continue
+					}
+					log.Debug("authoring", "tree.DeletePreImageLookup [FORGET OK]", "blob_hash", blob_hash, "v.Z", v.Z)
+					serviceUpdate.ServiceRequest[blob_hash_str] = &types.SubServiceRequestResult{
+						HeaderHash: s.HeaderHash,
+						Slot:       s.GetTimeslot(),
+						Hash:       blob_hash, //TODO: SOURABH CHECK
+						ServiceID:  service_idx,
+						Timeslots:  nil,
+					}
 				}
 			} else {
 				err = tree.SetPreImageLookup(service_idx, blob_hash, v.Z, v.T)
@@ -90,13 +97,15 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 	for blobHash_str, v := range sa.Preimage {
 		blobHash := common.HexToHash(blobHash_str)
 		if v.Dirty {
-			if len(v.Preimage) == 0 || v.Deleted {
-				err = tree.DeletePreImageBlob(service_idx, blobHash)
-				if err != nil {
-					log.Warn(log.SDB, "DeletePreImageBlob", "blobHash", blobHash, "err", err)
-					return
+			if v.Deleted {
+				if v.Source == "trie" {
+					err = tree.DeletePreImageBlob(service_idx, blobHash)
+					if err != nil {
+						log.Warn(log.SDB, "DeletePreImageBlob Forget A", "blobHash", blobHash, "err", err, "v.Deleted", v.Deleted, "len(v.Preimage)", len(v.Preimage), "source", v.Source)
+						continue
+					}
+					log.Trace("authoring", "DeletePreImageBlob [FORGET OK] A", "blobHash", blobHash, "v.Deleted", v.Deleted, "len(v.Preimage)", len(v.Preimage), "source", v.Source)
 				}
-				log.Info("authoring", "DeletePreImageBlob [FORGET OK]", "blobHash", blobHash)
 			} else {
 				err = tree.SetPreImageBlob(service_idx, v.Preimage)
 				if err != nil {
@@ -126,17 +135,21 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 		ServiceID:  service_idx,
 		Info:       *sa,
 	}
-	return
+	return serviceUpdate, err
 }
 
 func (s *StateDB) ApplyXContext(U *types.PartialState) (stateUpdate *types.StateUpdate) {
 	stateUpdate = types.NewStateUpdate()
+	debugXU := false
 	for _, sa := range U.D {
 		// U.D should only have service accounts with Mutable = true
 		if !sa.Mutable {
 			log.Crit(log.SDB, "Immutable Service account in X.U.D", "s", sa.ServiceIndex)
 		} else if sa.Dirty {
 			serviceUpdate, err := s.writeAccount(sa)
+			if debugXU {
+				log.Trace(log.SDB, "ApplyXContext: writeAccount for "+fmt.Sprintf("%d", sa.ServiceIndex), "serviceUpdate", types.ToJSON(serviceUpdate), "err", err)
+			}
 			if err != nil {
 				log.Crit(log.SDB, "ApplyXContext", "err", err)
 			}
@@ -197,9 +210,11 @@ func (s *StateDB) ReadServiceStorage(service uint32, k []byte) (storage []byte, 
 	tree := s.GetTrie()
 	storage, ok, err = tree.GetServiceStorage(service, k)
 	if err != nil || !ok {
-		return
+		fmt.Printf("TRIE NOT FOUND ReadServiceStorage: service %d, key %x, value %x\n", service, k, storage)
+		return storage, ok, err
 	}
-	return
+	fmt.Printf("TRIE ReadServiceStorage: service %d, key %x, value %x\n", service, k, storage)
+	return storage, ok, err
 }
 
 func (s *StateDB) ReadServicePreimageBlob(service uint32, blob_hash common.Hash) (blob []byte, ok bool, err error) {
@@ -226,15 +241,17 @@ func (s *StateDB) ReadServicePreimageLookup(service uint32, blob_hash common.Has
 
 // HistoricalLookup, GetImportItem, ExportSegment
 func (s *StateDB) HistoricalLookup(a *types.ServiceAccount, t uint32, blob_hash common.Hash) []byte {
-	ok, blob := a.ReadPreimage(blob_hash, s)
+	ok, blob, preimage_source := a.ReadPreimage(blob_hash, s)
 	if !ok {
+		log.Error(log.SDB, "HistoricalLookup ERR", "ok", ok, "s", a.ServiceIndex, "blob_hash", blob_hash, "preimage_source", preimage_source)
 		return nil
 	}
 
 	z := uint32(len(blob))
 
-	ok, timeslots := a.ReadLookup(blob_hash, z, s)
+	ok, timeslots, lookup_source := a.ReadLookup(blob_hash, z, s)
 	if !ok {
+		log.Error(log.SDB, "HistoricalLookup ReadLookup ERR", "ok", ok, "s", a.ServiceIndex, "blob_hash", blob_hash, "z", z, "lookup_source", lookup_source)
 		return nil
 	}
 

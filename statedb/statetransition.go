@@ -162,6 +162,7 @@ func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, 
 	if err != nil {
 		return err
 	}
+
 	if st.PostState.StateRoot == s1.StateRoot {
 		return nil
 	}
@@ -172,11 +173,23 @@ func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, 
 
 func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTransition, ancestorSet map[common.Hash]uint32, pvmBackend string, writeFile ...string) (diffs map[string]DiffState, err error) {
 	// Apply the state transition
-	//fmt.Printf("CheckStateTransitionWithOutput: %v\n", pvmBackend)
-	s0, err := NewStateDBFromStateTransition(storage, st)
+	preState, err := NewStateDBFromStateTransition(storage, st)
 	if err != nil {
 		return nil, err
 	}
+	if !bytes.Equal(preState.StateRoot.Bytes(), st.PreState.StateRoot.Bytes()) {
+		return diffs, fmt.Errorf("PreState.StateRoot mismatch: expected %s, got %s", st.PreState.StateRoot.Hex(), preState.StateRoot.Hex())
+	}
+
+	post_state, err := NewStateDBFromStateTransitionPost(storage, st)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(post_state.StateRoot.Bytes(), st.PostState.StateRoot.Bytes()) {
+		return diffs, fmt.Errorf("PostState.StateRoot mismatch: expected %s, got %s", st.PostState.StateRoot.Hex(), post_state.StateRoot.Hex())
+	}
+
+	s0 := preState
 	s0.Id = storage.NodeID
 	s0.AncestorSet = ancestorSet
 	s1, err := ApplyStateTransitionFromBlock(s0, context.Background(), &(st.Block), nil, pvmBackend)
@@ -184,9 +197,11 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 		fmt.Printf("!!! ApplyStateTransitionFromBlock error: %v\n", err)
 		return nil, err
 	}
-	if st.PostState.StateRoot == s1.StateRoot {
+
+	if bytes.Compare(st.PostState.StateRoot.Bytes(), s1.StateRoot.Bytes()) == 0 {
 		return nil, nil
 	}
+
 	// s1 is the ACTUAL stf output
 	// st.PostState.KeyVals is the EXPECTED stf output
 	post_actual_root := s1.UpdateTrieState()

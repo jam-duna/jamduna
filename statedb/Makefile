@@ -1,5 +1,6 @@
 	# Default timeout for tests (can be overridden: `make TIMEOUT=2m test-network NETWORK=...`)
 TIMEOUT      ?= 5m
+LongTimeout ?= 30m
 
 # The list of networks you want to test by default
 NETWORKS     ?= tiny # use tiny for now
@@ -77,6 +78,9 @@ test-network:
 			go test -timeout $(TIMEOUT) -v -run TestTestVectors  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
 	@echo "Finished all tests for network='$(NETWORK)'"
 
+trace:
+	@echo "Running 'TestTraces' with timeout $(LongTimeout) for network='$(NETWORK)' ..."
+	@cd $(STATEDB_DIR) && go test -v -timeout $(LongTimeout) -run TestTraces  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
 
 tiny:
 	$(MAKE) test-network NETWORK=tiny;

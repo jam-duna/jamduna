@@ -384,12 +384,12 @@ func (vm *VM) hostInfo() {
 	if errCode != OK {
 		vm.Ram.WriteRegister(7, NONE)
 		vm.HostResultCode = NONE
-		log.Info(vm.logging, "INFO NONE", "s", omega_7)
+		log.Debug(vm.logging, "INFO NONE", "s", omega_7)
 		return
 	}
 	bo, _ := vm.Ram.ReadRegister(8)
-	f, _ := vm.Ram.ReadRegister(11)
-	l, _ := vm.Ram.ReadRegister(12)
+	f, _ := vm.Ram.ReadRegister(9)
+	l, _ := vm.Ram.ReadRegister(10)
 
 	// [Gratis] Different encoding than serviceAccount; E(a_c, E8(a_b,a_t,a_g,a_m,a_o), E4(a_i), E8(a_f), E4(a_r,a_a,a_p))
 	var buf bytes.Buffer
@@ -411,7 +411,7 @@ func (vm *VM) hostInfo() {
 		if err != nil {
 			vm.Ram.WriteRegister(7, NONE)
 			vm.HostResultCode = NONE
-			log.Info(vm.logging, "INFO NONE", "s", omega_7)
+			log.Debug(vm.logging, "INFO NONE", "s", omega_7)
 			return
 		}
 		//fmt.Printf("INFO %d %x\n", i, encoded)
@@ -431,7 +431,7 @@ func (vm *VM) hostInfo() {
 		return
 	}
 	log.Debug(vm.logging, "INFO OK", "s", fmt.Sprintf("%d", omega_7), "info", fmt.Sprintf("%v", elements))
-	vm.Ram.WriteRegister(7, OK)
+	vm.Ram.WriteRegister(7, lenval)
 	vm.HostResultCode = OK
 }
 
@@ -583,13 +583,21 @@ func (vm *VM) hostCheckpoint() {
 // implements https://graypaper.fluffylabs.dev/#/5f542d7/313103313103
 func new_check(i uint32, u_d map[uint32]*types.ServiceAccount) uint32 {
 	bump := uint32(1)
+	minServiceIndex := uint32(256)
+	maxServiceIndex := uint32(4294966784) // 2^32 - 2^9
+	serviceIndexRangeSize := maxServiceIndex - minServiceIndex + 1
+
+	if i < minServiceIndex {
+		i = minServiceIndex
+	}
+
 	for {
 		if _, ok := u_d[i]; !ok {
 			return i
 		}
-		// aligns the final result with the desired range: [2^8, 2^32 - 2^9] = [256, 4294966784]
-		i = uint32(256) + uint32(i-256+bump)%(uint32(4294966784))
-		// ump = 1 // initially 42 coming in from hostNew
+		offset := i - minServiceIndex
+		nextOffset := (offset + bump) % serviceIndexRangeSize
+		i = minServiceIndex + nextOffset
 	}
 }
 
@@ -617,7 +625,7 @@ func (vm *VM) hostNew() {
 	if xs.Balance < x_s_t {
 		vm.Ram.WriteRegister(7, CASH)
 		vm.HostResultCode = CASH //balance insufficient
-		log.Info(vm.logging, "hostNew: NEW CASH xs.Balance < x_s_t", "xs.Balance", xs.Balance, "x_s_t", x_s_t, "x_s_index", xs.ServiceIndex)
+		log.Debug(vm.logging, "hostNew: NEW CASH xs.Balance < x_s_t", "xs.Balance", xs.Balance, "x_s_t", x_s_t, "x_s_index", xs.ServiceIndex)
 		return
 	}
 
@@ -659,8 +667,23 @@ func (vm *VM) hostNew() {
 	a.ALLOW_MUTABLE()
 	a.Balance = a.ComputeThreshold()
 	xs.DecBalance(a.Balance) // (x's)b <- (xs)b - at
-	xContext.I = new_check(uint32(256)+uint32(xi-256+42)%(uint32(4294966784)), xContext.U.D)
-	a.WriteLookup(common.BytesToHash(c), uint32(l), []uint32{})
+	xContext.I = new_check(xi, xContext.U.D)
+
+	const bump = uint32(42)
+	const minServiceIndex = uint32(256)
+	const maxServiceIndex = uint32(4294966784)
+	const serviceIndexRangeSize = maxServiceIndex - minServiceIndex + 1
+
+	if xi < minServiceIndex {
+		xi = minServiceIndex
+	}
+	offset := xi - minServiceIndex
+	nextOffset := (offset + bump) % serviceIndexRangeSize
+	proposed_i := minServiceIndex + nextOffset
+	xContext.I = new_check(proposed_i, xContext.U.D)
+
+	//xContext.I = new_check(uint32(256)+uint32(xi-256+42)%(uint32(4294966784)), xContext.U.D)
+	a.WriteLookup(common.BytesToHash(c), uint32(l), []uint32{}, "memory")
 
 	xContext.U.D[xi] = a // this new account is included but only is written if (a) non-exceptional (b) exceptional and checkpointed
 	vm.Ram.WriteRegister(7, uint64(xi))
@@ -769,12 +792,12 @@ func (vm *VM) hostQuery() {
 	}
 	a, _ := vm.X.GetX_s()
 	account_lookuphash := common.BytesToHash(h)
-	ok, anchor_timeslot := a.ReadLookup(account_lookuphash, uint32(z), vm.hostenv)
+	ok, anchor_timeslot, lookup_source := a.ReadLookup(account_lookuphash, uint32(z), vm.hostenv)
 	if !ok {
 		vm.Ram.WriteRegister(7, NONE)
 		vm.Ram.WriteRegister(8, 0)
 		vm.HostResultCode = NONE
-		log.Debug(vm.logging, "QUERY NONE", "h", account_lookuphash, "z", z)
+		log.Debug(vm.logging, "QUERY NONE", "h", account_lookuphash, "z", z, "lookup_source", lookup_source)
 		return
 	}
 	switch len(anchor_timeslot) {
@@ -814,7 +837,7 @@ func (vm *VM) hostFetch() {
 	datatype, _ := vm.Ram.ReadRegister(10)
 	omega_11, _ := vm.Ram.ReadRegister(11)
 	omega_12, _ := vm.Ram.ReadRegister(12)
-	log.Info(vm.logging, "FETCH", "datatype", datatype, "omega_7", o, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12, "vm.Extrinsics", fmt.Sprintf("%x", vm.Extrinsics), "wp", vm.WorkPackage)
+	log.Trace(vm.logging, "FETCH", "datatype", datatype, "omega_7", o, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12, "vm.Extrinsics", fmt.Sprintf("%x", vm.Extrinsics), "wp", vm.WorkPackage)
 	var v_Bytes []byte
 	switch datatype {
 	case 0:
@@ -929,14 +952,14 @@ func (vm *VM) hostFetch() {
 
 	errCode := vm.Ram.WriteRAMBytes(uint32(o), v_Bytes[f:])
 	if errCode != OK {
-		log.Info(vm.logging, "FETCH FAIL", "o", o, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "l", l, "f", f, "f+l", f+l, "v_Bytes[f..f+l]", fmt.Sprintf("%x", v_Bytes[f:f+l]))
+		log.Warn(vm.logging, "FETCH FAIL", "o", o, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "l", l, "f", f, "f+l", f+l, "v_Bytes[f..f+l]", fmt.Sprintf("%x", v_Bytes[f:f+l]))
 		vm.terminated = true
 		vm.ResultCode = types.WORKRESULT_PANIC
 		vm.MachineState = PANIC
 		return
 	}
 	l = uint64(len(v_Bytes))
-	log.Info(vm.logging, "FETCH SUCC", "o", o, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "l", l, "f", f, "f+l", f+l, "v_Bytes[f..f+l]", fmt.Sprintf("%x", v_Bytes[f:]))
+	log.Trace(vm.logging, "FETCH SUCC", "o", o, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "l", l, "f", f, "f+l", f+l, "v_Bytes[f..f+l]", fmt.Sprintf("%x", v_Bytes[f:]))
 
 	vm.Ram.WriteRegister(7, uint64(len(v_Bytes)))
 }
@@ -984,11 +1007,11 @@ func (vm *VM) hostProvide() {
 	}
 
 	h := common.Blake2Hash(i)
-	ok, X_s_l := a.ReadLookup(h, uint32(z), vm.hostenv)
+	ok, X_s_l, lookup_source := a.ReadLookup(h, uint32(z), vm.hostenv)
 	if !ok && len(X_s_l) > 0 {
 		vm.Ram.WriteRegister(7, HUH)
 		vm.HostResultCode = HUH
-		log.Debug(vm.logging, "PROVIDE HUH", "omega_7", omega_7, "h", h, "z", z)
+		log.Debug(vm.logging, "PROVIDE HUH", "omega_7", omega_7, "h", h, "z", z, "lookup_source", lookup_source)
 		return
 	}
 
@@ -1037,11 +1060,11 @@ func (vm *VM) hostEject() {
 	}
 	l := max(AccountLookupConst, bold_d.StorageSize) - AccountLookupConst
 
-	ok, D_lookup := bold_d.ReadLookup(common.BytesToHash(h), uint32(l), vm.hostenv)
+	ok, D_lookup, lookup_source := bold_d.ReadLookup(common.BytesToHash(h), uint32(l), vm.hostenv)
 	if !ok || bold_d.NumStorageItems != 2 {
 		vm.Ram.WriteRegister(7, HUH)
 		vm.HostResultCode = HUH
-		log.Debug(vm.logging, "EJECT HUH", "d", fmt.Sprintf("%d", d), "h", h, "l", l)
+		log.Debug(vm.logging, "EJECT HUH", "d", fmt.Sprintf("%d", d), "h", h, "l", l, "lookup_source", lookup_source)
 		return
 	}
 
@@ -1049,7 +1072,7 @@ func (vm *VM) hostEject() {
 	s = s.Clone()
 	s.Balance += bold_d.Balance
 
-	if len(D_lookup) == 2 && D_lookup[1] < vm.Timeslot-uint32(types.PreimageExpiryPeriod) {
+	if len(D_lookup) == 2 && D_lookup[1]+uint32(types.PreimageExpiryPeriod) < vm.Timeslot {
 		vm.Ram.WriteRegister(7, OK)
 		vm.HostResultCode = OK
 		delete(vm.X.U.D, uint32(d))
@@ -1200,12 +1223,13 @@ func (vm *VM) hostLookup() {
 
 	var v []byte
 	var ok bool
+	var preimage_source string
 
 	account_blobhash = common.Hash(k_bytes)
-	ok, v = a.ReadPreimage(account_blobhash, vm.hostenv)
+	ok, v, preimage_source = a.ReadPreimage(account_blobhash, vm.hostenv)
 	if !ok {
 		vm.Ram.WriteRegister(7, NONE)
-		log.Debug(vm.logging, "LOOKUP NONE", "s", fmt.Sprintf("%d", a.ServiceIndex), "h", account_blobhash)
+		log.Debug(vm.logging, "LOOKUP NONE", "s", fmt.Sprintf("%d", a.ServiceIndex), "h", account_blobhash, "preimage_source", preimage_source)
 		vm.HostResultCode = NONE
 		return
 	}
@@ -1221,9 +1245,13 @@ func (vm *VM) hostLookup() {
 	}
 
 	if len(v) != 0 {
-		vm.Ram.WriteRegister(7, l)
+		vm.Ram.WriteRegister(7, uint64(len(v)))
 	}
-	log.Debug(vm.logging, "LOOKUP OK", "s", fmt.Sprintf("%d", a.ServiceIndex), "h", h, "len(v)", len(v))
+	logStr := fmt.Sprintf("len = %d", len(v))
+	if len(v) < 200 {
+		logStr = fmt.Sprintf("len = %d, v = %s", len(v), fmt.Sprintf("%x", v))
+	}
+	log.Trace(vm.logging, "LOOKUP OK", "s", fmt.Sprintf("%d", a.ServiceIndex), "h", h, "v", logStr)
 	vm.HostResultCode = OK
 }
 
@@ -1281,20 +1309,26 @@ func (vm *VM) hostRead() {
 	}
 	// [0.6.7] No more hashing of mu_k
 	//k := common.ServiceStorageKey(a.ServiceIndex, mu_k) // this does E_4(s) ... mu_4
-	ok, val := a.ReadStorage(mu_k, vm.hostenv)
+	ok, val, storage_source := a.ReadStorage(mu_k, vm.hostenv)
 
 	if !ok { // || true
 		vm.Ram.WriteRegister(7, NONE)
 		vm.HostResultCode = NONE
-		log.Info(vm.logging, "READ NONE", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "ok", ok, "val", fmt.Sprintf("%x", val), "len(val)", len(val))
+		log.Debug(vm.logging, "READ NONE", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "ok", ok, "val", fmt.Sprintf("%x", val), "len(val)", len(val), "source", storage_source)
 		return
 	}
-	log.Info(vm.logging, "READ OK", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "ok", ok, "val", fmt.Sprintf("%x", val), "len(val)", len(val))
+	log.Trace(vm.logging, "READ OK", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "ok", ok, "val", fmt.Sprintf("%x", val), "len(val)", len(val), "source", storage_source)
 	lenval := uint64(len(val))
 	f = min(f, lenval)
 	l = min(l, lenval-f)
 	// TODO: check for OOB case again using o, f + l
-	vm.Ram.WriteRAMBytes(uint32(bo), val[f:f+l])
+	if errCode := vm.Ram.WriteRAMBytes(uint32(bo), val[f:f+l]); errCode != OK {
+		vm.terminated = true
+		vm.ResultCode = types.WORKRESULT_PANIC
+		vm.MachineState = PANIC
+		log.Error(vm.logging, "READ RAM WRITE ERROR", "err", errCode)
+		return
+	}
 	vm.Ram.WriteRegister(7, lenval)
 }
 
@@ -1328,7 +1362,7 @@ func (vm *VM) hostWrite() {
 	}
 
 	l := uint64(NONE)
-	exists, oldValue := a.ReadStorage(mu_k, vm.hostenv)
+	exists, oldValue, storage_source := a.ReadStorage(mu_k, vm.hostenv)
 	v := []byte{}
 	err := uint64(0)
 	if vz > 0 {
@@ -1341,17 +1375,20 @@ func (vm *VM) hostWrite() {
 		}
 		//l = uint64(len(v))
 	}
-	a.WriteStorage(a.ServiceIndex, mu_k, v)
+	a.WriteStorage(a.ServiceIndex, mu_k, v, vz == 0, storage_source)
 	vm.ResultCode = OK
 	vm.HostResultCode = OK
+
 	key_len := uint64(len(mu_k)) // x in a_s(x,y) |y|
 	val_len := uint64(len(v))    // y in a_s(x,y) |x|
+
 	if !exists {
 		if val_len > 0 {
 			a.NumStorageItems++
 			a.StorageSize += (AccountStorageConst + val_len + key_len) // [Gratis] Add ∑ 34 + |y| + |x|
-			log.Debug(vm.logging, "WRITE NONE", "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "v", fmt.Sprintf("%x", v), "kLen", key_len, "vlen", len(v))
 		}
+		log.Trace(vm.logging, "WRITE NONE", "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "v", fmt.Sprintf("%x", v), "kLen", key_len, "vlen", len(v), "storage_source", storage_source)
+
 		vm.Ram.WriteRegister(7, NONE)
 	} else {
 		prev_l := uint64(len(oldValue))
@@ -1391,28 +1428,28 @@ func (vm *VM) hostSolicit() {
 	}
 	account_lookuphash := common.BytesToHash(hBytes)
 
-	ok, X_s_l := xs.ReadLookup(account_lookuphash, uint32(z), vm.hostenv)
+	ok, X_s_l, lookup_source := xs.ReadLookup(account_lookuphash, uint32(z), vm.hostenv)
 	if !ok {
 		// when preimagehash is not found, put it into solicit request - so we can ask other DAs
-		xs.WriteLookup(account_lookuphash, uint32(z), []uint32{})
+		xs.WriteLookup(account_lookuphash, uint32(z), []uint32{}, lookup_source)
 		xs.NumStorageItems += 2
 		xs.StorageSize += AccountLookupConst + uint64(z)
-		log.Debug(vm.logging, "SOLICIT OK", "h", account_lookuphash, "z", z, "newvalue", []uint32{})
+		log.Debug(vm.logging, "SOLICIT OK", "h", account_lookuphash, "z", z, "newvalue", []uint32{}, "lookup_source", lookup_source)
 		vm.Ram.WriteRegister(7, OK)
 		vm.HostResultCode = OK
 		return
 	}
 
 	if xs.Balance < xs.ComputeThreshold() {
-		xs.WriteLookup(account_lookuphash, uint32(z), X_s_l)
+		xs.WriteLookup(account_lookuphash, uint32(z), X_s_l, lookup_source)
 		vm.Ram.WriteRegister(7, FULL)
 		vm.HostResultCode = FULL
 		log.Debug(vm.logging, "SOLICIT FULL", "h", account_lookuphash, "z", z)
 		return
 	}
 	if len(X_s_l) == 2 { // [x, y] => [x, y, t]
-		xs.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...))
-		log.Debug(vm.logging, "SOLICIT OK BBB", "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
+		xs.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...), lookup_source)
+		log.Debug(vm.logging, "SOLICIT OK 2", "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
 		vm.Ram.WriteRegister(7, OK)
 		vm.HostResultCode = OK
 		return
@@ -1440,39 +1477,51 @@ func (vm *VM) hostForget() {
 	account_lookuphash := common.Hash(hBytes)
 	account_blobhash := common.Hash(hBytes)
 
-	ok, X_s_l := x_s.ReadLookup(account_lookuphash, uint32(z), vm.hostenv)
-	if !ok {
+	lookup_ok, X_s_l, lookup_source := x_s.ReadLookup(account_lookuphash, uint32(z), vm.hostenv)
+	_, _, preimage_source := x_s.ReadPreimage(account_blobhash, vm.hostenv)
+
+	if !lookup_ok {
 		vm.Ram.WriteRegister(7, HUH)
 		vm.HostResultCode = HUH
-		log.Debug(vm.logging, "FORGET HUH", "h", account_lookuphash, "o", o)
+		log.Debug(vm.logging, "FORGET HUH", "h", account_lookuphash, "o", o, "lookup_source", lookup_source)
 		return
 	}
-	// 0 [] case is when we solicited but never got a preimage, so we can forget it
-	// 2 [x,y] case is when we have a forgotten a preimage and have PASSED the preimage expiry period, so we can forget it
-	if len(X_s_l) == 0 || (len(X_s_l) == 2) && X_s_l[1] < (vm.Timeslot-types.PreimageExpiryPeriod) { // D = types.PreimageExpiryPeriod
-		x_s.WriteLookup(account_lookuphash, uint32(z), nil) // nil means delete the lookup
-		x_s.WritePreimage(account_blobhash, []byte{})       // []byte{} means delete the preimage
+	if len(X_s_l) == 0 {
+		// 0 [] case is when we solicited but never got a preimage, so we can forget it
+		x_s.WriteLookup(account_lookuphash, uint32(z), nil, lookup_source) // nil means delete the lookup
+		x_s.WritePreimage(account_blobhash, []byte{}, preimage_source)     // []byte{} means delete the preimage. TODO: should be preimage_source
 		// storage accounting
 		x_s.NumStorageItems -= 2
 		x_s.StorageSize -= AccountLookupConst + uint64(z)
-		log.Debug(vm.logging, "FORGET OK1", "h", account_lookuphash, "z", z)
+		log.Debug(vm.logging, "FORGET OK A", "h", account_lookuphash, "z", z, "vm.Timeslot", vm.Timeslot, "X_s_l[1]", X_s_l[1], "expiry", (vm.Timeslot - types.PreimageExpiryPeriod), "types.PreimageExpiryPeriod", types.PreimageExpiryPeriod)
+		vm.Ram.WriteRegister(7, OK)
+		vm.HostResultCode = OK
+		return
+	} else if len(X_s_l) == 2 && X_s_l[1]+types.PreimageExpiryPeriod < vm.Timeslot {
+		// 2 [x,y] case is when we have a forgotten a preimage and have PASSED the preimage expiry period, so we can forget it
+		x_s.WriteLookup(account_lookuphash, uint32(z), nil, lookup_source) // nil means delete the lookup
+		x_s.WritePreimage(account_blobhash, []byte{}, preimage_source)     // []byte{} means delete the preimage
+		// storage accounting
+		x_s.NumStorageItems -= 2
+		x_s.StorageSize -= AccountLookupConst + uint64(z)
+		log.Debug(vm.logging, "FORGET OK B", "h", account_lookuphash, "z", z, "vm.Timeslot", vm.Timeslot, "X_s_l[1]", X_s_l[1], "expiry", (vm.Timeslot - types.PreimageExpiryPeriod), "types.PreimageExpiryPeriod", types.PreimageExpiryPeriod)
 		vm.Ram.WriteRegister(7, OK)
 		vm.HostResultCode = OK
 		return
 	} else if len(X_s_l) == 1 {
 		// preimage exists [x] => [x, y] where y is the current time, the time we are forgetting
-		x_s.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...)) // [x, t]
+		x_s.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...), lookup_source) // [x, t]
 		vm.Ram.WriteRegister(7, OK)
 		vm.HostResultCode = OK
-		log.Debug(vm.logging, "FORGET OK2", "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
+		log.Debug(vm.logging, "FORGET OK C", "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
 		return
-	} else if len(X_s_l) == 3 && X_s_l[1] < (vm.Timeslot-types.PreimageExpiryPeriod) {
+	} else if len(X_s_l) == 3 && X_s_l[1]+types.PreimageExpiryPeriod < vm.Timeslot {
 		// [x,y,w] => [w, t] where y is the current time, the time we are forgetting
-		X_s_l = []uint32{X_s_l[2], vm.Timeslot}               // w = X_s_l[2], t = vm.Timeslot
-		x_s.WriteLookup(account_lookuphash, uint32(z), X_s_l) // [w, t]
+		X_s_l = []uint32{X_s_l[2], vm.Timeslot}                              // w = X_s_l[2], t = vm.Timeslot
+		x_s.WriteLookup(account_lookuphash, uint32(z), X_s_l, lookup_source) // [w, t]
 		vm.Ram.WriteRegister(7, OK)
 		vm.HostResultCode = OK
-		log.Debug(vm.logging, "FORGET OK3", "h", account_lookuphash, "z", z, "newvalue", X_s_l)
+		log.Debug(vm.logging, "FORGET OK D", "h", account_lookuphash, "z", z, "newvalue", X_s_l)
 		return
 	}
 	vm.Ram.WriteRegister(7, HUH)
@@ -1720,6 +1769,13 @@ func (vm *VM) hostPages() {
 		vm.HostResultCode = WHO
 		return
 	}
+
+	if p > maxUint64-c {
+		vm.Ram.WriteRegister(7, HUH)
+		vm.HostResultCode = HUH
+		return
+	}
+
 	if p < 16 || p+c >= (1<<32)/Z_P || r > 4 {
 		vm.Ram.WriteRegister(7, HUH)
 		vm.HostResultCode = HUH

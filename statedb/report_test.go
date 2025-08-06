@@ -77,7 +77,7 @@ func ServiceToSeviceAccount(s []ServiceItem) map[uint32]*types.ServiceAccount {
 			Lookup:          make(map[string]*types.LookupObject),
 			Preimage:        make(map[string]*types.PreimageObject),
 		}
-		result[value.ServiceID].WriteLookup(value.Service.CodeHash, value.Service.Items, []uint32{})
+		result[value.ServiceID].WriteLookup(value.Service.CodeHash, value.Service.Items, []uint32{}, "trie")
 	}
 	return result
 }
@@ -261,7 +261,7 @@ func ReportVerify(jsonFile string, exceptErr error) error {
 	}
 	post_state := NewJamState()
 	post_state.GetStateFromReportState(report.PostState)
-	db.JamState.ProcessGuarantees(context.TODO(), db.Block.Guarantees())
+	db.JamState.ProcessGuarantees(context.TODO(), db.Block.Guarantees(), db.PreviousGuarantorAssignments)
 	db.JamState.tallyCoreStatistics(db.Block.Guarantees(), nil, nil)
 	db.JamState.tallyServiceStatistics(db.Block.Guarantees(), nil, nil, nil)
 	if exceptErr == nil {

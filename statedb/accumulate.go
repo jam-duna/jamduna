@@ -418,7 +418,7 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 			continue
 		} else {
 			if service_ac != service_acXY.U.PrivilegedState.Kai_a[i] {
-				log.Info(log.G, "NEW ASSIGNED CORE", "service_ac", service_ac, "accumulated_partial[service_ac]", service_acXY.U.PrivilegedState.Kai_a[i])
+				log.Debug(log.G, "NEW ASSIGNED CORE", "service_ac", service_ac, "accumulated_partial[service_ac]", service_acXY.U.PrivilegedState.Kai_a[i])
 			}
 			newAssignedCore[i] = service_acXY.U.PrivilegedState.Kai_a[i]
 		}
@@ -449,8 +449,8 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 	a := o.PrivilegedState.Kai_a
 	var q_prime types.AuthorizationQueue
 	for i, service_ac := range a {
-
 		service_acXY, ok := accumulated_partial[service_ac]
+		//fmt.Printf("!!!AAAA ACCUMULATE i=%d SA=%v, service_acXY=%v,ok=%v\n", i, service_ac, service_acXY.U.D[service_ac].RecentAccumulation, ok)
 		if !ok {
 			o_copy := o.Clone()
 			_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, service_ac, pvmBackend)
@@ -458,6 +458,10 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 			accumulated_partial[service_ac] = service_acXY
 		}
 		q_prime[i] = service_acXY.U.QueueWorkReport[i]
+	}
+	// TODO:review on why accumulated_partial is not used?
+	for service, service_accumulated_partial := range accumulated_partial {
+		o.D[service] = service_accumulated_partial.U.D[service]
 	}
 
 	// update the partial state
@@ -572,8 +576,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 					Y: workResult.PayloadHash,
 					D: workResult.Result,
 				}
-				log.Trace(sd.Authoring, "SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s),
-					"wrangledResults", types.DecodedWrangledResults(&o))
+				log.Debug(sd.Authoring, "SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "wrangledResults", types.DecodedWrangledResults(&o))
 				p = append(p, o)
 			}
 		}
@@ -595,9 +598,9 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	if codeHash == (common.Hash{}) {
 		return
 	}
-	ok, code := serviceAccount.ReadPreimage(codeHash, sd)
+	ok, code, preimage_source := serviceAccount.ReadPreimage(codeHash, sd)
 	if !ok {
-		log.Error(log.SDB, "GetPreimage ERR", "ok", ok, "s", s, "codeHash", codeHash)
+		log.Error(log.SDB, "GetPreimage ERR", "ok", ok, "s", s, "codeHash", codeHash, "preimage_source", preimage_source)
 		return
 	}
 
@@ -610,17 +613,19 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	vm.SetPVMContext(pvmContext)
 	t := sd.JamState.SafroleState.Timeslot
 	vm.Timeslot = t
-	r, _, _ := vm.ExecuteAccumulate(t, s, g, p, xContext, sd.JamState.SafroleState.Entropy[0])
+	r, _, x_s := vm.ExecuteAccumulate(t, s, g, p, xContext, sd.JamState.SafroleState.Entropy[0])
 	exceptional = false
 	if r.Err == types.WORKRESULT_OOG || r.Err == types.WORKRESULT_PANIC {
 		exceptional = true
 		output_b = vm.Y.Y
 		output_u = g - uint64(max(vm.Gas, 0))
 		xy = &(vm.Y)
+		xy.U.D[s].UpdateRecentAccumulation(vm.Timeslot)
+		//xy.U.D[s] = x_s
 		if r.Err == types.WORKRESULT_OOG {
-			log.Trace(sd.Authoring, "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
+			log.Warn(sd.Authoring, "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b, "x_s", x_s)
 		} else {
-			log.Trace(sd.Authoring, "BEEFY PANIC @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b)
+			log.Warn(sd.Authoring, "BEEFY PANIC @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b, "x_s", x_s)
 		}
 		return
 	}
@@ -634,7 +639,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 		output_b = vm.X.Y
 		res = "yield"
 	}
-	log.Debug(debugB, fmt.Sprintf("BEEFY OK-HALT with %s @SINGLE ACCUMULATE", res), "s", fmt.Sprintf("%d", s), "B", output_b)
+	log.Trace(debugB, fmt.Sprintf("BEEFY OK-HALT with %s @SINGLE ACCUMULATE", res), "s", fmt.Sprintf("%d", s), "B", output_b)
 	return
 }
 
@@ -662,8 +667,9 @@ func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, sel
 	}
 
 	// this create PreimageObject in ServiceAccount with Accessed = true
-	ok, code := self.ReadPreimage(self.CodeHash, s)
+	ok, code, preimage_source := self.ReadPreimage(self.CodeHash, s)
 	if !ok {
+		log.Error(log.SDB, "GetPreimage ERR in HostTransfer", "ok", ok, "s", self_index, "codeHash", self.CodeHash, "preimage_source", preimage_source)
 		return 0, uint(len(selectedTransfers)), nil
 	}
 

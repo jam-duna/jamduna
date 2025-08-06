@@ -415,7 +415,6 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 			log.Crit(log.SDB, "CheckingAllState", "err", err)
 		}
 	}
-
 	return updated_root
 }
 
@@ -438,7 +437,7 @@ func (s *StateDB) GetAllKeyValues() []KeyVal {
 			Key:   realKey,
 			Value: realValue,
 		}
-		//fmt.Printf("~~~key: %x, structType: %s, metadata: %s\n", keyVal.Key, keyVal.StructType, keyVal.Metadata)
+		//fmt.Printf("~~~key: %x, v: %x,\n", keyVal.Key, keyVal.Value)
 		tmpKeyVals = append(tmpKeyVals, keyVal)
 	}
 
@@ -515,7 +514,6 @@ func (s *StateDB) UpdateAllTrieStateRaw(snapshotRaw StateSnapshotRaw) common.Has
 	for _, kv := range snapshotRaw.KeyVals {
 		s.trie.SetRawKeyVal(kv.Key, kv.Value)
 	}
-
 	return s.trie.GetRoot()
 }
 
