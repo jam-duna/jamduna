@@ -78,9 +78,17 @@ test-network:
 			go test -timeout $(TIMEOUT) -v -run TestTestVectors  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
 	@echo "Finished all tests for network='$(NETWORK)'"
 
-trace:
+trace_interpreter:
 	@echo "Running 'TestTraces' with timeout $(LongTimeout) for network='$(NETWORK)' ..."
 	@cd $(STATEDB_DIR) && go test -v -timeout $(LongTimeout) -run TestTraces  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
+
+trace_recompiler:
+	@echo "Running 'TestTraceRecompiler' with timeout $(LongTimeout) for network='$(NETWORK)' ..."
+	@cd $(STATEDB_DIR) && go test -v -timeout $(LongTimeout) -run TestTracesRecompiler  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)	
+
+trace_sandbox:
+	@echo "Running 'TestTraceSandbox' with timeout $(LongTimeout) for network='$(NETWORK)' ..."
+	@cd $(STATEDB_DIR) && go test -v -timeout $(LongTimeout) -run TestTracesSandbox  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
 
 tiny:
 	$(MAKE) test-network NETWORK=tiny;

@@ -15,7 +15,6 @@ import (
 // given previous safrole, applt state transition using block
 // σ'≡Υ(σ,B)
 func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block, validated_tickets map[common.Hash]common.Hash, pvmBackend string) (s *StateDB, err error) {
-
 	s = oldState.Copy()
 	if s.StateRoot != blk.Header.ParentStateRoot {
 		//fmt.Printf("Apply Block %v\n", blk.Header.Hash())
@@ -179,12 +178,10 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	}
 
 	// NOTE: we swapped the odring of the (ApplyXContext and computeStateUpdates) vs accumulate statistics in order to support potential idea of GP 0.6.7 (12.31) - updating a_r
-
 	// writeAccount and initializes s.stateUpdate
 	s.stateUpdate = s.ApplyXContext(o)
 	// finalize stateUpdates
 	s.computeStateUpdates(blk) // review targetJCE input
-
 	for _, gasusage := range U {
 		service := gasusage.Service
 		stats, ok := accumulateStats[service]
@@ -194,7 +191,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		stats.gasUsed += uint(gasusage.Gas)
 		accumulateStats[service] = stats
 	}
-
 	//after accumulation, we need to update the accumulate state
 	s.ApplyStateTransitionAccumulation(accumulate_input_wr, n, old_timeslot)
 	// 0.6.2 4.18 - Preimages [ δ‡, τ′]
@@ -245,7 +241,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		return s, fmt.Errorf("ApplyStateRecentHistoryDagga canceled")
 	default:
 	}
-
 	tree := trie.NewWellBalancedTree(leaves, types.Keccak)
 	accumulationRoot := common.Hash(tree.Root())
 	if len(leaves) > 0 {
@@ -253,7 +248,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	}
 	// 4.7 - Recent History [No other state related, but need to do it after rho, AFTER accumulation]
 	s.ApplyStateRecentHistory(blk, &(accumulationRoot), b)
-
 	// 4.20 - compute pi
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "blocks", 1)
 	s.StateRoot = s.UpdateTrieState()

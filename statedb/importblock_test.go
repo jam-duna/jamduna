@@ -75,6 +75,8 @@ func TestStateTransitionNoSandbox(t *testing.T) {
 	filename := "traces/00000019.json" // javajam 0.6.7 -- see https://github.com/jam-duna/jamtestnet/issues/231#issuecomment-3144487797
 	//filename = "../jamtestvectors/traces/storage_light/00000016.json"
 	filename = "../jamtestvectors/traces/preimages/00000057.json"
+	filename = "../jamtestvectors/traces/storage/00000060.json"
+
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
@@ -94,6 +96,8 @@ func TestStateTransitionSandbox(t *testing.T) {
 	pvm.SetUseEcalli500(false)   // use ecalli500 for log check in x86
 	pvm.SetDebugRecompiler(true) // enable debug mode for recompiler
 	filename := "./00000019.json"
+	filename = "../jamtestvectors/traces/storage/00000060.json"
+	// filename = "../jamtestvectors/traces/storage_light/00000016.json"
 
 	content, err := os.ReadFile(filename)
 	if err != nil {
@@ -104,6 +108,28 @@ func TestStateTransitionSandbox(t *testing.T) {
 	log.EnableModule("pvm_validator")
 	t.Run(filepath.Base(filename), func(t *testing.T) {
 		runSingleSTFTest(t, filename, string(content), pvm.BackendRecompilerSandbox)
+
+	})
+}
+
+func TestStateTransitionRecompiler(t *testing.T) {
+	pvm.VMsCompare = true // enable VM comparison for this test
+	pvm.PvmLogging = true
+	pvm.UseTally = false         // enable tally for this test
+	pvm.SetUseEcalli500(false)   // use ecalli500 for log check in x86
+	pvm.SetDebugRecompiler(true) // enable debug mode for recompiler
+	filename := "./00000019.json"
+	filename = "../jamtestvectors/traces/storage_light/00000016.json"
+
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatalf("failed to read file %s: %v", filename, err)
+	}
+	log.InitLogger("debug")
+	log.EnableModule(log.PvmAuthoring)
+	log.EnableModule("pvm_validator")
+	t.Run(filepath.Base(filename), func(t *testing.T) {
+		runSingleSTFTest(t, filename, string(content), pvm.BackendRecompiler)
 
 	})
 }
@@ -205,6 +231,111 @@ func TestTraces(t *testing.T) {
 		})
 	}
 }
+
+func TestTracesRecompiler(t *testing.T) {
+	log.InitLogger("debug")
+	pvm.VMsCompare = true // enable VM comparison for this test
+	// pvm.PvmLogging = true
+
+	// Define all the directories you want to test in a single slice.
+	testDirs := []string{
+		//"../cmd/importblocks/rawdata/safrole/state_transitions/",
+		// "../jamtestvectors/traces/fallback",
+		// "../jamtestvectors/traces/safrole",
+		"../jamtestvectors/traces/preimages_light",
+		"../jamtestvectors/traces/preimages",
+		"../jamtestvectors/traces/storage_light",
+		"../jamtestvectors/traces/storage",
+	}
+
+	// Iterate over each directory.
+	for _, dir := range testDirs {
+		// Create a local copy of dir for the sub-test to capture correctly.
+		// This avoids issues where the sub-tests might all run with the last value of 'dir'.
+		currentDir := dir
+
+		t.Run(fmt.Sprintf("Directory_%s", filepath.Base(currentDir)), func(t *testing.T) {
+			entries, err := os.ReadDir(currentDir)
+			if err != nil {
+				// Use t.Fatalf to stop the test for this directory if we can't read it.
+				t.Fatalf("failed to read directory %s: %v", currentDir, err)
+			}
+
+			for _, e := range entries {
+				if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || e.Name() == "00000000.json" {
+					continue
+				}
+
+				filename := filepath.Join(currentDir, e.Name())
+				content, err := os.ReadFile(filename)
+				if err != nil {
+					// Use t.Errorf to report the error but continue with other files.
+					t.Errorf("failed to read file %s: %v", filename, err)
+					continue
+				}
+
+				fmt.Printf("Running test for file: %s\n", filename)
+
+				// Run the actual test logic for each file as a distinct sub-test.
+				t.Run(e.Name(), func(t *testing.T) {
+					runSingleSTFTest(t, filename, string(content), pvm.BackendRecompiler)
+				})
+			}
+		})
+	}
+}
+func TestTracesSandbox(t *testing.T) {
+	log.InitLogger("debug")
+	pvm.VMsCompare = true // enable VM comparison for this test
+	// pvm.PvmLogging = true
+
+	// Define all the directories you want to test in a single slice.
+	testDirs := []string{
+		//"../cmd/importblocks/rawdata/safrole/state_transitions/",
+		// "../jamtestvectors/traces/fallback",
+		// "../jamtestvectors/traces/safrole",
+		"../jamtestvectors/traces/preimages_light",
+		"../jamtestvectors/traces/preimages",
+		"../jamtestvectors/traces/storage_light",
+		"../jamtestvectors/traces/storage",
+	}
+
+	// Iterate over each directory.
+	for _, dir := range testDirs {
+		// Create a local copy of dir for the sub-test to capture correctly.
+		// This avoids issues where the sub-tests might all run with the last value of 'dir'.
+		currentDir := dir
+
+		t.Run(fmt.Sprintf("Directory_%s", filepath.Base(currentDir)), func(t *testing.T) {
+			entries, err := os.ReadDir(currentDir)
+			if err != nil {
+				// Use t.Fatalf to stop the test for this directory if we can't read it.
+				t.Fatalf("failed to read directory %s: %v", currentDir, err)
+			}
+
+			for _, e := range entries {
+				if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || e.Name() == "00000000.json" {
+					continue
+				}
+
+				filename := filepath.Join(currentDir, e.Name())
+				content, err := os.ReadFile(filename)
+				if err != nil {
+					// Use t.Errorf to report the error but continue with other files.
+					t.Errorf("failed to read file %s: %v", filename, err)
+					continue
+				}
+
+				fmt.Printf("Running test for file: %s\n", filename)
+
+				// Run the actual test logic for each file as a distinct sub-test.
+				t.Run(e.Name(), func(t *testing.T) {
+					runSingleSTFTest(t, filename, string(content), pvm.BackendRecompilerSandbox)
+				})
+			}
+		})
+	}
+}
 func TestCompareJson(t *testing.T) {
 	var testdata1 types.Validator
 	var testdata2 types.Validator
@@ -219,13 +350,13 @@ func TestCompareJson(t *testing.T) {
 }
 
 func TestCompareLogs(t *testing.T) {
-	f1, err := os.Open("interpreter/vm_log.json")
+	f1, err := os.Open("interpreter/0_accumulate.json")
 	if err != nil {
 		t.Fatalf("failed to open interpreter/vm_log.json: %v", err)
 	}
 	defer f1.Close()
 
-	f2, err := os.Open("recompiler_sandbox/vm_log.json")
+	f2, err := os.Open("recompiler_sandbox/0_accumulate.json")
 	if err != nil {
 		t.Fatalf("failed to open recompiler_sandbox/vm_log.json: %v", err)
 	}
@@ -274,6 +405,7 @@ func TestCompareLogs(t *testing.T) {
 			fmt.Printf("Difference at index %d:\nOriginal: %+v\nRecompiler: %+v\n", i, orig, recp)
 			if diff := CompareJSON(orig, recp); diff != "" {
 				fmt.Println("Differences:", diff)
+				fmt.Printf("Operation: %s\n", pvm.DisassembleSingleInstruction(orig.Opcode, orig.Operands))
 				t.Fatalf("differences at index %d: %s", i, diff)
 			}
 		} else if i%100000 == 0 {

@@ -1090,6 +1090,9 @@ func (vm *RecompilerSandboxVM) Standard_Program_Initialization_SandBox(argument_
 
 func (vm *RecompilerSandboxVM) WriteRAMBytes(address uint32, data []byte) uint64 {
 	if len(data) == 0 {
+		return OK
+	}
+	if len(data) == 0 {
 		return OOB
 	}
 	if err := vm.WriteMemorySandBox(address, data); err != nil {
@@ -1101,6 +1104,9 @@ func (vm *RecompilerSandboxVM) WriteRAMBytes(address uint32, data []byte) uint64
 func (vm *RecompilerSandboxVM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 	if length == 0 {
 		return nil, OOB
+	}
+	if length == 0 {
+		return []byte{}, OK
 	}
 	data, err := vm.ReadMemorySandBox(address, length)
 	if err != nil {

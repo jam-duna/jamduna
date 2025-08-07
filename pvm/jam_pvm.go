@@ -194,8 +194,8 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	}
 	r, res = vm.getArgumentOutputs()
 	x_s.UpdateRecentAccumulation(vm.Timeslot) // [Gratis TODO: potentially need to be moved out]
-	//fmt.Printf("!!!ExecuteAccumulate - r=%x res=%v timeslot=%d. x_s=%v\n", r.Ok, res, vm.Timeslot, x_s)
-	//vm.saveLogs()
+	// fmt.Printf("!!!ExecuteAccumulate - r=%x res=%v timeslot=%d. x_s=%v\n", r.Ok, res, vm.Timeslot, x_s)
+	vm.saveLogs()
 
 	return r, res, x_s
 }
@@ -226,10 +226,9 @@ func (vm *VM) initLogs() {
 
 // write the vm.Log  (appending only)
 func (vm *VM) saveLogs() {
-	if true {
+	if !VMsCompare {
 		return
 	}
-
 	filePath := filepath.Join(vm.Backend, vm.serviceIDlog())
 
 	dir := filepath.Dir(filePath)
@@ -244,7 +243,6 @@ func (vm *VM) saveLogs() {
 		return
 	}
 	defer f.Close()
-
 	for _, entry := range vm.Logs {
 		data, err := json.Marshal(entry)
 		if err != nil {

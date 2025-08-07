@@ -161,6 +161,9 @@ func (rvm *RecompilerVM) WriteRAMBytes(address uint32, data []byte) (resultCode 
 			return
 		}
 	}()
+	if len(data) == 0 {
+		return OK
+	}
 	err := rvm.WriteMemory(address, data)
 	if err != nil {
 		fmt.Printf("WriteRamBytes error: %v\n", err)
@@ -176,6 +179,9 @@ func (rvm *RecompilerVM) ReadRAMBytes(address uint32, length uint32) (data []byt
 			resultCode = OOB // Out of bounds
 		}
 	}()
+	if length == 0 {
+		return []byte{}, OK
+	}
 	data, err := rvm.ReadMemory(address, length)
 	if err != nil {
 		fmt.Printf("ReadRamBytes error: %v\n", err)

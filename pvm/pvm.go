@@ -1753,10 +1753,10 @@ type VMLog struct {
 	Gas       int64
 }
 
-var VMsCompare = true
+var VMsCompare = false
 
-var hiResGasRangeStart = int64(1)
-var hiResGasRangeEnd = int64(2) // tmp
+var hiResGasRangeStart = int64(0)
+var hiResGasRangeEnd = int64(math.MaxInt64)
 var BBSampleRate = 20_000_000
 var RecordLogSampleRate = 1
 
@@ -1893,8 +1893,8 @@ func (vm *VM) LogCurrentState(opcode byte, operands []byte, currentPC uint64, ga
 			log.Registers[i], _ = vm.Ram.ReadRegister(i)
 		}
 		vm.Logs = append(vm.Logs, log)
-		if (len(vm.Logs) > 10 && (gas < hiResGasRangeStart || gas > hiResGasRangeEnd)) || len(vm.Logs) > 1000 {
-			vm.saveLogs()
-		}
+		// if (len(vm.Logs) > 10 && (gas < hiResGasRangeStart || gas > hiResGasRangeEnd)) || len(vm.Logs) > 1000 {
+		// 	vm.saveLogs()
+		// }
 	}
 }

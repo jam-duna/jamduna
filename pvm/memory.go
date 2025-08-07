@@ -94,6 +94,9 @@ func (ram *RAM) SetPageAccess(pageIndex int, access byte) {
 }
 
 func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
+	if len(data) == 0 {
+		return OK
+	}
 	length := uint32(len(data))
 	end := address + length
 
@@ -125,7 +128,9 @@ func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
 
 func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 	end := address + length
-
+	if length == 0 {
+		return []byte{}, OK
+	}
 	if address >= ram.output_address && end <= ram.output_end {
 		offset := address - ram.output_address
 		if offset+length > uint32(len(ram.output)) {

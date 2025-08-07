@@ -489,14 +489,27 @@ func generateImmShiftOp32Alt(subcode byte) func(inst Instruction) []byte {
 		var code []byte
 
 		// ALT: immediate on left, register count
-		// 1) MOVABS dst64, imm64
+		// 1) Save RCX if needed
+		needSaveRCX := src.Name != "RCX"
+		if needSaveRCX {
+			code = append(code, emitPushReg(RCX)...)
+		}
+
+		// 2) MOVABS dst64, imm64
 		code = append(code, emitMovImmToReg64(dst, imm)...)
-		// 2) XCHG RCX, src64
-		code = append(code, emitXchgRcxReg64(src)...)
-		// 3) Shift full 64-bit: D3 /subcode dst, CL
+
+		// 3) MOV RCX, src64 (put shift count in CL)
+		if src.Name != "RCX" {
+			code = append(code, emitMovRegToReg64(RCX, src)...)
+		}
+
+		// 4) Shift full 64-bit: D3 /subcode dst, CL
 		code = append(code, emitShiftRegCl(dst, subcode)...)
-		// 4) restore RCX
-		code = append(code, emitXchgRcxReg64(src)...)
+
+		// 5) Restore RCX if we saved it
+		if needSaveRCX {
+			code = append(code, emitPopReg(RCX)...)
+		}
 
 		return code
 	}
