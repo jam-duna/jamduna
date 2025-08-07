@@ -395,6 +395,11 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 		_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, service_m, pvmBackend)
 		serviceMXY = XY
 	}
+	// Sourabh to review this
+	if serviceMXY == nil || serviceMXY.U == nil {
+		log.Error(log.SDB, "serviceMXY is nil after SingleAccumulate", "service_m", service_m)
+		return
+	}
 	m_prime := serviceMXY.U.PrivilegedState.Kai_m
 	a_star := serviceMXY.U.PrivilegedState.Kai_a
 	v_star := serviceMXY.U.PrivilegedState.Kai_v

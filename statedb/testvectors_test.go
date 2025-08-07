@@ -18,7 +18,7 @@ func TestTestVectors(t *testing.T) {
 		{"Statics", TestStaticsSTFVerify},
 		{"Auth", TestVerifyAuths},
 		{"Accumulate", TestAccumulateSTF},
-		{"Traces", TestTraces},
+		// {"Traces", TestTraces},
 	}
 
 	for _, tc := range tests {

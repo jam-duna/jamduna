@@ -78,7 +78,7 @@ func (j *JamState) IsValidateDispute(input *types.Dispute) ([]VerdictResult, err
 	// gp 0.5.0 (10.5)
 	for _, c := range input.Culprit {
 		err := j.checkIfKeyOffend(c.Key)
-		if err != nil && err.Error() == "Already in the Offenders" {
+		if err != nil && err.Error() == "already in the offenders" {
 			return []VerdictResult{}, jamerrors.ErrDCulpritAlreadyInOffenders
 		} else if err != nil {
 			return []VerdictResult{}, err
@@ -87,7 +87,7 @@ func (j *JamState) IsValidateDispute(input *types.Dispute) ([]VerdictResult, err
 	// gp 0.5.0 (10.6)
 	for _, f := range input.Fault {
 		err := j.checkIfKeyOffend(f.Key)
-		if err != nil && err.Error() == "Already in the Offenders" {
+		if err != nil && err.Error() == "already in the offenders" {
 			return []VerdictResult{}, jamerrors.ErrDFaultOffenderInOffendersList
 		} else if err != nil {
 			return []VerdictResult{}, err
@@ -268,7 +268,7 @@ func (j *JamState) checkIfKeyOffend(key types.Ed25519Key) error {
 	for _, k := range j.DisputesState.Psi_o {
 		if bytes.Equal(k.Bytes(), key.Bytes()) {
 			//drop the key
-			return fmt.Errorf("already in the Offenders")
+			return fmt.Errorf("already in the offenders")
 		}
 	}
 	// check if the key is in the validator set
