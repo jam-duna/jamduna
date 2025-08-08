@@ -674,7 +674,7 @@ func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, sel
 	// this create PreimageObject in ServiceAccount with Accessed = true
 	ok, code, preimage_source := self.ReadPreimage(self.CodeHash, s)
 	if !ok {
-		log.Error(log.SDB, "GetPreimage ERR in HostTransfer", "ok", ok, "s", self_index, "codeHash", self.CodeHash, "preimage_source", preimage_source)
+		log.Trace(log.SDB, "GetPreimage ERR in HostTransfer", "ok", ok, "s", self_index, "codeHash", self.CodeHash, "preimage_source", preimage_source)
 		return 0, uint(len(selectedTransfers)), nil
 	}
 

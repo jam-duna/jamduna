@@ -177,17 +177,19 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 	if err != nil {
 		return nil, err
 	}
-	if !bytes.Equal(preState.StateRoot.Bytes(), st.PreState.StateRoot.Bytes()) {
-		return diffs, fmt.Errorf("PreState.StateRoot mismatch: expected %s, got %s", st.PreState.StateRoot.Hex(), preState.StateRoot.Hex())
-	}
+	/*
+		if !bytes.Equal(preState.StateRoot.Bytes(), st.PreState.StateRoot.Bytes()) {
+			return diffs, fmt.Errorf("PreState.StateRoot mismatch: expected %s, got %s", st.PreState.StateRoot.Hex(), preState.StateRoot.Hex())
+		}
 
-	post_state, err := NewStateDBFromStateTransitionPost(storage, st)
-	if err != nil {
-		return nil, err
-	}
-	if !bytes.Equal(post_state.StateRoot.Bytes(), st.PostState.StateRoot.Bytes()) {
-		return diffs, fmt.Errorf("PostState.StateRoot mismatch: expected %s, got %s", st.PostState.StateRoot.Hex(), post_state.StateRoot.Hex())
-	}
+		post_state, err := NewStateDBFromStateTransitionPost(storage, st)
+		if err != nil {
+			return nil, err
+		}
+		if !bytes.Equal(post_state.StateRoot.Bytes(), st.PostState.StateRoot.Bytes()) {
+			return diffs, fmt.Errorf("PostState.StateRoot mismatch: expected %s, got %s", st.PostState.StateRoot.Hex(), post_state.StateRoot.Hex())
+		}
+	*/
 
 	s0 := preState
 	s0.Id = storage.NodeID

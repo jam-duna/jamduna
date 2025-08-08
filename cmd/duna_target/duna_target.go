@@ -17,7 +17,7 @@ func main() {
 
 	// Define the target's identity.
 	targetInfo := fuzz.PeerInfo{
-		Name:       "jam-duna-target-v0.4",
+		Name:       "jam-duna-target-v0.6",
 		AppVersion: fuzz.Version{Major: 0, Minor: 6, Patch: 7},
 		JamVersion: fuzz.Version{Major: 0, Minor: 6, Patch: 7},
 	}
