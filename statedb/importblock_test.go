@@ -414,3 +414,21 @@ func TestCompareLogs(t *testing.T) {
 		i++
 	}
 }
+
+func TestTracesFuzz(t *testing.T) {
+	pvm.PvmLogging = true
+	pvm.PvmTrace = true   // enable PVM trace for this test
+	pvm.VMsCompare = true // enable VM comparison for this test
+	filename := "../jamtestvectors/fuzz-reports/jamduna/jam-duna-target-v0.5-0.6.7_gp-0.6.7/00000001.json"
+	//filename = "../jamtestvectors/fuzz-reports/javajam/javajam-0.6.7_gp-0.6.7/1754582958/00000004.bin"
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatalf("failed to read file %s: %v", filename, err)
+	}
+	log.InitLogger("debug")
+	log.EnableModule(log.PvmAuthoring)
+	log.EnableModule("pvm_validator")
+	t.Run(filepath.Base(filename), func(t *testing.T) {
+		runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter)
+	})
+}

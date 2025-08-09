@@ -139,8 +139,9 @@ func ReadStateTransitions(baseDir, dir string) (stfs []*statedb.StateTransition,
 	fmt.Printf("Selected Dir: %v\n", dir)
 	file_idx := 0
 	useJSON := true
-	useBIN := false
+	useBIN := true
 	for _, file := range stFiles {
+		//fmt.Printf("Processing file: %s\n", file.Name())
 		if strings.HasSuffix(file.Name(), ".bin") || strings.HasSuffix(file.Name(), ".json") {
 			stPath := filepath.Join(state_transitions_dir, file.Name())
 			isJSON := strings.HasSuffix(file.Name(), ".json")

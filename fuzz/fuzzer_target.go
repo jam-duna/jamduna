@@ -87,6 +87,10 @@ func (t *Target) Stop() {
 	log.Println("Target stopped.")
 }
 
+func (t *Target) SetStateDB(target_state *statedb.StateDB) {
+	t.stateDB = target_state
+}
+
 // handleConnection manages a single fuzzer session.
 func (t *Target) handleConnection(conn net.Conn) {
 	defer conn.Close()
@@ -151,7 +155,7 @@ func (t *Target) onSetState(req *HeaderWithState) *Message {
 		//TODO: how to handle this error?
 		return &Message{StateRoot: &recovered_statedb_stateRoot}
 	}
-	t.stateDB = recovered_statedb
+	t.SetStateDB(recovered_statedb)
 	log.Printf("StateDB initialized with %d key-value pairs. stateRoot: %v | HeaderHash: %v", len(sky.KeyVals), recovered_statedb_stateRoot.Hex(), headerHash.Hex())
 	t.stateDBMap[headerHash] = recovered_statedb_stateRoot
 	log.Printf("%s[OUTGOING RESPONSE]%s StateRoot", colorGreen, colorReset)
@@ -179,6 +183,7 @@ func (t *Target) onImportBlock(req *types.Block) *Message {
 	}
 	log.Printf("State transition applied. New stateRoot: %v | HeaderHash: %v", postState.StateRoot.Hex(), headerHash.Hex())
 	postStateRoot := postState.StateRoot
+	t.SetStateDB(postState)
 	t.stateDBMap[headerHash] = postStateRoot
 	log.Printf("%s[OUTGOING RESPONSE]%s StateRoot", colorGreen, colorReset)
 	return &Message{StateRoot: &postStateRoot}

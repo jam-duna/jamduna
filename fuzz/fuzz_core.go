@@ -132,16 +132,17 @@ func (f *Fuzzer) FuzzWithTargetedInvalidRate(modes []string, stfs []*statedb.Sta
 
 	var allPossibleMutations []STFError
 	var validBlockPool []*statedb.StateTransition
-
+	validateInput := false
 	for _, stf := range stfs {
-		diffs, stfErr := statedb.CheckStateTransitionWithOutput(store, stf, nil, f.pvmBackend)
-		if stfErr != nil {
-			statedb.HandleDiffs(diffs)
-			return nil, fmt.Errorf("invalid base STF provided: %v | %v", stfErr, stf.ToJSON())
+		if validateInput {
+			diffs, stfErr := statedb.CheckStateTransitionWithOutput(store, stf, nil, f.pvmBackend)
+			if stfErr != nil {
+				statedb.HandleDiffs(diffs)
+				return nil, fmt.Errorf("invalid base STF provided: %v | %v", stfErr, stf.ToJSON())
+			}
 		}
 
 		validBlockPool = append(validBlockPool, stf)
-
 		mutations := selectImportBlocksErrorArr(seed, store, modes, stf, allowFuzzing)
 		if len(mutations) > 0 {
 			allPossibleMutations = append(allPossibleMutations, mutations...)
