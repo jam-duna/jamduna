@@ -168,42 +168,32 @@ func (a *WorkResult) UnmarshalJSON(data []byte) error {
 	}
 
 	var result Result
-	if _, ok := s.Result["ok"]; ok {
-		result = Result{
-			Ok:  common.FromHex(s.Result["ok"].(string)),
-			Err: WORKRESULT_OK,
+
+	for key, value := range s.Result {
+		switch key {
+		case "ok":
+			valStr, ok := value.(string)
+			if !ok {
+				return fmt.Errorf("expected string for 'ok' result, got %T", value)
+			}
+			result = Result{
+				Ok:  common.FromHex(valStr),
+				Err: WORKRESULT_OK,
+			}
+		case "out-of-gas", "out_of_gas":
+			result = Result{Ok: nil, Err: WORKRESULT_OOG}
+		case "panic":
+			result = Result{Ok: nil, Err: WORKRESULT_PANIC}
+		case "bad-exports", "bad_exports":
+			result = Result{Ok: nil, Err: WORKRESULT_BAD_EXPORT}
+		case "bad-code", "bad_code":
+			result = Result{Ok: nil, Err: WORKRESULT_BAD}
+		case "code-oversize", "code_oversize":
+			result = Result{Ok: nil, Err: WORKRESULT_BIG}
+		default:
+			return fmt.Errorf("unknown result key found: %s", key)
 		}
-	}
-	if _, ok := s.Result["out-of-gas"]; ok {
-		result = Result{
-			Ok:  nil,
-			Err: WORKRESULT_OOG,
-		}
-	}
-	if _, ok := s.Result["panic"]; ok {
-		result = Result{
-			Ok:  nil,
-			Err: WORKRESULT_PANIC,
-		}
-	}
-	if _, ok := s.Result["bad-exports"]; ok {
-		result = Result{
-			Ok:  nil,
-			Err: WORKRESULT_BAD_EXPORT,
-		}
-	}
-	// came back refactor when test vector is 0.6.7
-	if _, ok := s.Result["bad-code"]; ok {
-		result = Result{
-			Ok:  nil,
-			Err: WORKRESULT_BAD,
-		}
-	}
-	if _, ok := s.Result["code-oversize"]; ok {
-		result = Result{
-			Ok:  nil,
-			Err: WORKRESULT_BIG,
-		}
+		break
 	}
 
 	a.ServiceID = s.ServiceID

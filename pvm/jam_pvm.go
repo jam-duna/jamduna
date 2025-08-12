@@ -137,7 +137,6 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 var RecordTime = false
 
 func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.AccumulateOperandElements, X *types.XContext, n common.Hash) (r types.Result, res uint64, xs *types.ServiceAccount) {
-
 	vm.Mode = "accumulate"
 	vm.X = X //⎩I(u, s), I(u, s)⎫⎭
 	vm.Y = X.Clone()
@@ -153,9 +152,10 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	vm.N = n
 	vm.Gas = int64(g)
 	// (*ServiceAccount, bool, error)
-	x_s, ok, err := vm.hostenv.GetService(X.S)
-	if !ok || err != nil {
-		// fmt.Printf("service %v ok %v err %v\n", X.S, ok, err)
+
+	x_s, found := X.U.D[s]
+	if !found {
+		log.Error(vm.logging, "ExecuteAccumulate - ServiceAccount not found in X.U.D", "s", s, "X.U.D", X.U.D)
 		return
 	}
 	x_s.Mutable = true
@@ -193,8 +193,7 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 		panic(0)
 	}
 	r, res = vm.getArgumentOutputs()
-	x_s.UpdateRecentAccumulation(vm.Timeslot) // [Gratis TODO: potentially need to be moved out]
-	// fmt.Printf("!!!ExecuteAccumulate - r=%x res=%v timeslot=%d. x_s=%v\n", r.Ok, res, vm.Timeslot, x_s)
+	//fmt.Printf("!!!ExecuteAccumulate - r=%x res=%v timeslot=%d. x_s=%v\n", r.Ok, res, vm.Timeslot, x_s)
 	vm.saveLogs()
 
 	return r, res, x_s

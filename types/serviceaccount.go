@@ -435,8 +435,7 @@ func (s *ServiceAccount) ReadLookup(blobHash common.Hash, z uint32, sdb HostEnv)
 		return false, []uint32{}, "trie"
 	}
 	if !found {
-		log.Info(module, "ReadLookup: Not found", "serviceID", s.GetServiceIndex(), "blobHash", blobHashStr, "z", z)
-		fmt.Printf("ReadLookup: NOT FOUND %v\n", found)
+		log.Trace(module, "ReadLookup: Not found", "serviceID", s.GetServiceIndex(), "blobHash", blobHashStr, "z", z)
 		return false, []uint32{}, "trie"
 	}
 	/* TODO: */

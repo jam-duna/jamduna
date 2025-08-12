@@ -420,7 +420,7 @@ func TestTracesFuzz(t *testing.T) {
 	pvm.PvmTrace = true   // enable PVM trace for this test
 	pvm.VMsCompare = true // enable VM comparison for this test
 	filename := "../jamtestvectors/fuzz-reports/jamduna/jam-duna-target-v0.5-0.6.7_gp-0.6.7/00000001.json"
-	//filename = "../jamtestvectors/fuzz-reports/javajam/javajam-0.6.7_gp-0.6.7/1754582958/00000004.bin"
+	filename = "../jamtestvectors/fuzz-reports/jamduna/jam-duna-target-v0.7-0.6.7_gp-0.6.7/1754724115/00000004_mod.json"
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)

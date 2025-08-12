@@ -537,6 +537,30 @@ func (sdb *StateDB) NewXContext(u *types.PartialState, s uint32, serviceAccount 
 	return x
 }
 
+func (sd *StateDB) InitXContextService(s uint32, o *types.PartialState, xy *types.XContext) error {
+	// Initialize the service account for the given service ID and XContext
+	if xy.U == nil {
+		xy.U = o.Clone() // make a copy of the partial state
+		xy.U.D = make(map[uint32]*types.ServiceAccount)
+	}
+
+	if xy.U != nil && xy.U.D == nil {
+		xy.U.D = make(map[uint32]*types.ServiceAccount)
+
+	}
+
+	if xy.U.D[s] == nil {
+		x_s, ok, err := sd.GetService(s) // misplaced
+		if !ok || err != nil {
+			fmt.Printf("service %v ok %v err %v\n", s, ok, err)
+			return fmt.Errorf("service %v Err: %v", s, err)
+		}
+		xy.U.D[s] = x_s
+	}
+	xy.U.D[s].UpdateRecentAccumulation(sd.JamState.SafroleState.Timeslot)
+	return nil
+}
+
 /*
 The single-service accumulation function, ∆1, trans-
 forms an initial state-context, sequence of work-reports
@@ -549,6 +573,7 @@ invokes pvm execution
 // ∆1
 // eq 176
 func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport, f map[uint32]uint32, s uint32, pvmBackend string) (output_b common.Hash, output_u uint64, xy *types.XContext, exceptional bool) {
+	//fmt.Printf("!!!SingleAccumulate - o=%v w=%v f=%v s=%d pvmBackend=%s\n", o, w, f, s, pvmBackend)
 	// gas need to check again
 	// check if s is in f
 	gas := uint32(0)
@@ -603,9 +628,15 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	if codeHash == (common.Hash{}) {
 		return
 	}
+
+	err = sd.InitXContextService(s, o, xy)
+	if err != nil {
+		log.Error(log.SDB, "InitXContextService ERR", "s", s, "error", err)
+		return
+	}
 	ok, code, preimage_source := serviceAccount.ReadPreimage(codeHash, sd)
 	if !ok {
-		log.Error(log.SDB, "GetPreimage ERR", "ok", ok, "s", s, "codeHash", codeHash, "preimage_source", preimage_source)
+		log.Warn(log.SDB, "GetPreimage ERR", "ok", ok, "s", s, "codeHash", codeHash, "preimage_source", preimage_source)
 		return
 	}
 
@@ -625,12 +656,10 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 		output_b = vm.Y.Y
 		output_u = g - uint64(max(vm.Gas, 0))
 		xy = &(vm.Y)
-		xy.U.D[s].UpdateRecentAccumulation(vm.Timeslot)
-		//xy.U.D[s] = x_s
 		if r.Err == types.WORKRESULT_OOG {
-			log.Warn(sd.Authoring, "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b, "x_s", x_s)
+			log.Trace(sd.Authoring, "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b, "x_s", x_s)
 		} else {
-			log.Warn(sd.Authoring, "BEEFY PANIC @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b, "x_s", x_s)
+			log.Trace(sd.Authoring, "BEEFY PANIC @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b, "x_s", x_s)
 		}
 		return
 	}

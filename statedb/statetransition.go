@@ -177,7 +177,9 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 	if err != nil {
 		return nil, err
 	}
-	/*
+
+	runPrevalidation := false
+	if runPrevalidation {
 		if !bytes.Equal(preState.StateRoot.Bytes(), st.PreState.StateRoot.Bytes()) {
 			return diffs, fmt.Errorf("PreState.StateRoot mismatch: expected %s, got %s", st.PreState.StateRoot.Hex(), preState.StateRoot.Hex())
 		}
@@ -189,7 +191,8 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 		if !bytes.Equal(post_state.StateRoot.Bytes(), st.PostState.StateRoot.Bytes()) {
 			return diffs, fmt.Errorf("PostState.StateRoot mismatch: expected %s, got %s", st.PostState.StateRoot.Hex(), post_state.StateRoot.Hex())
 		}
-	*/
+		fmt.Printf("STF StateRoot - Pre: %s | Post: %s\n", preState.StateRoot.Hex(), post_state.StateRoot.Hex())
+	}
 
 	s0 := preState
 	s0.Id = storage.NodeID
@@ -214,20 +217,24 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 		//fmt.Printf("post_actual\n%v\n", KeyVals(post_actual).String())
 		//fmt.Printf("post_expected\n%v\n", KeyVals(post_expected).String())
 	}
+
 	if post_actual_root != st.PostState.StateRoot {
 		fmt.Printf("!!! post_actual_root %s != post_expected %s\n", post_actual_root.Hex(), st.PostState.StateRoot.Hex())
 	}
-	if len(writeFile) > 0 && writeFile[0] != "" {
-		// write the output to a file
-		var stateTransition StateTransition
-		stateTransition.PreState = st.PreState
-		stateTransition.Block = st.Block
-		stateTransition.PostState = StateSnapshotRaw{
-			StateRoot: s1.StateRoot,
-			KeyVals:   post_actual,
-		}
-		fmt.Printf("writing post-state to %s\n", writeFile[0])
 
+	// write the output to a file
+	var stateTransition StateTransition
+	stateTransition.PreState = st.PreState
+	stateTransition.Block = st.Block
+	stateTransition.PostState = StateSnapshotRaw{
+		StateRoot: s1.StateRoot,
+		KeyVals:   post_actual,
+	}
+
+	showPostState := false
+
+	if len(writeFile) > 0 && writeFile[0] != "" {
+		fmt.Printf("writing post-state to %s\n", writeFile[0])
 		// create the file
 		fileName := writeFile[0]
 		file, err := os.Create(fileName)
@@ -248,6 +255,10 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 			return nil, err
 		}
 		fmt.Printf("Output written to %s\n", fileName)
+
+	} else if showPostState {
+		jsonStr, _ := json.Marshal(stateTransition)
+		fmt.Printf("!!StateTransition: %s\n", string(jsonStr))
 
 	}
 	diffs = compareKeyValsWithOutput(st.PreState.KeyVals, post_actual, post_expected)

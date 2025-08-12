@@ -359,9 +359,9 @@ func (s *StateDB) ApplyStateTransitionRho(ctx context.Context, assurances []type
 	// core's data is now available
 	//ρ††
 	availableWorkReport, num_assurances := d.ComputeAvailabilityAssignments(assurances, targetJCE)
-	_ = availableWorkReport                     // availableWorkReport is the work report that is available for the core, will be used in the audit section
+	//_ = availableWorkReport                     // availableWorkReport is the work report that is available for the core, will be used in the audit section
 	s.AvailableWorkReport = availableWorkReport // every block has new available work report
-
+	//fmt.Printf("!!!Available Work Report: %v\n", types.ToJSONHex(availableWorkReport))
 	// Guarantees checks
 	for _, g := range guarantees {
 		if err := s.VerifyGuaranteeBasic(g, targetJCE); err != nil {
