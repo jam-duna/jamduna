@@ -135,7 +135,7 @@ func (f *Fuzzer) FuzzWithTargetedInvalidRate(modes []string, stfs []*statedb.Sta
 	validateInput := false
 	for _, stf := range stfs {
 		if validateInput {
-			diffs, stfErr := statedb.CheckStateTransitionWithOutput(store, stf, nil, f.pvmBackend)
+			diffs, stfErr := statedb.CheckStateTransitionWithOutput(store, stf, nil, f.pvmBackend, false)
 			if stfErr != nil {
 				statedb.HandleDiffs(diffs)
 				return nil, fmt.Errorf("invalid base STF provided: %v | %v", stfErr, stf.ToJSON())

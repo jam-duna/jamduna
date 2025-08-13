@@ -418,7 +418,7 @@ func main() {
 		}
 
 		// Perform the state transition check.
-		diffs, err := statedb.CheckStateTransitionWithOutput(test_storage, &stf, nil, pvm.BackendInterpreter)
+		diffs, err := statedb.CheckStateTransitionWithOutput(test_storage, &stf, nil, pvm.BackendInterpreter, false)
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
 			// Build an errors array from the diffs map using PoststateCompared

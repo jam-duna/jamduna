@@ -16,11 +16,7 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-const (
-	JamConformancePath = "/Users/michael/Desktop/jam-conformance"
-)
-
-func runSingleSTFTest(t *testing.T, filename string, content string, pvmBackend string) {
+func runSingleSTFTest(t *testing.T, filename string, content string, pvmBackend string, runPrevalidation bool) {
 	t.Helper()
 
 	testDir := "/tmp/test_locala"
@@ -37,10 +33,13 @@ func runSingleSTFTest(t *testing.T, filename string, content string, pvmBackend 
 		return
 	}
 
-	diffs, err := CheckStateTransitionWithOutput(test_storage, &stf, nil, pvmBackend)
+	diffs, err := CheckStateTransitionWithOutput(test_storage, &stf, nil, pvmBackend, runPrevalidation)
 	if err == nil {
 		fmt.Printf("✅ [%s] PostState.StateRoot %s matches\n", filename, stf.PostState.StateRoot)
 		return
+	}
+	if err.Error() == "OMIT" {
+		t.Skipf("⚠️ OMIT: Test case for [%s] is marked to be omitted.", filename)
 	}
 
 	HandleDiffs(diffs)
@@ -75,7 +74,7 @@ func TestStateTransitionNoSandbox(t *testing.T) {
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule("pvm_validator")
 	t.Run(filepath.Base(filename), func(t *testing.T) {
-		runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter)
+		runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter, false)
 	})
 }
 
@@ -97,7 +96,7 @@ func TestStateTransitionSandbox(t *testing.T) {
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule("pvm_validator")
 	t.Run(filepath.Base(filename), func(t *testing.T) {
-		runSingleSTFTest(t, filename, string(content), pvm.BackendRecompilerSandbox)
+		runSingleSTFTest(t, filename, string(content), pvm.BackendRecompilerSandbox, false)
 
 	})
 }
@@ -119,7 +118,7 @@ func TestStateTransitionRecompiler(t *testing.T) {
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule("pvm_validator")
 	t.Run(filepath.Base(filename), func(t *testing.T) {
-		runSingleSTFTest(t, filename, string(content), pvm.BackendRecompiler)
+		runSingleSTFTest(t, filename, string(content), pvm.BackendRecompiler, false)
 
 	})
 }
@@ -215,7 +214,7 @@ func TestTracesInterpreter(t *testing.T) {
 
 				// Run the actual test logic for each file as a distinct sub-test.
 				t.Run(e.Name(), func(t *testing.T) {
-					runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter)
+					runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter, false)
 				})
 			}
 		})
@@ -268,7 +267,7 @@ func TestTracesRecompiler(t *testing.T) {
 
 				// Run the actual test logic for each file as a distinct sub-test.
 				t.Run(e.Name(), func(t *testing.T) {
-					runSingleSTFTest(t, filename, string(content), pvm.BackendRecompiler)
+					runSingleSTFTest(t, filename, string(content), pvm.BackendRecompiler, false)
 				})
 			}
 		})
@@ -320,7 +319,7 @@ func TestTracesSandbox(t *testing.T) {
 
 				// Run the actual test logic for each file as a distinct sub-test.
 				t.Run(e.Name(), func(t *testing.T) {
-					runSingleSTFTest(t, filename, string(content), pvm.BackendRecompilerSandbox)
+					runSingleSTFTest(t, filename, string(content), pvm.BackendRecompilerSandbox, false)
 				})
 			}
 		})
@@ -405,16 +404,25 @@ func TestCompareLogs(t *testing.T) {
 	}
 }
 
+func GetFuzzReportsPath() (string, error) {
+	JamConformancePath := os.Getenv("JAM_CONFORMANCE_PATH")
+	if JamConformancePath == "" {
+		return "", fmt.Errorf("JAM_CONFORMANCE_PATH environment variable is not set")
+	}
+	return JamConformancePath, nil
+}
+
 func TestSingleFuzzTrace(t *testing.T) {
 	pvm.PvmLogging = false
 	pvm.PvmTrace = false  // enable PVM trace for this test
 	pvm.VMsCompare = true // enable VM comparison for this test
 	fileMap := make(map[string]string)
 
-	basePath := "/Users/michael/Desktop/jam-conformance/fuzz-reports"
-	//basePath = "/Users/michael/Github/jam-conformance/fuzz-reports"
+	jamConformancePath, err := GetFuzzReportsPath()
+	if err != nil {
+		t.Fatalf("failed to get fuzz reports path: %v", err)
+	}
 
-	//basePath := "../jamtestvectors/fuzz-reports"
 	fileMap["spacejam"] = "spacejam/1755083543/00000002.bin"
 
 	fileMap["jamduna"] = "jamduna/jam-duna-target-v0.8-0.6.7_gp-0.6.7/fixed/1754982630/00000009.json"  // WORKS
@@ -434,7 +442,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 	if !exists {
 		t.Fatalf("team %s not found in fileMap", team)
 	}
-	filename = filepath.Join(basePath, filename)
+	filename = filepath.Join(jamConformancePath, filename)
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
@@ -444,7 +452,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule("pvm_validator")
 	t.Run(filepath.Base(filename), func(t *testing.T) {
-		runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter)
+		runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter, true)
 	})
 }
 
@@ -458,9 +466,13 @@ func TestFuzzTrace(t *testing.T) {
 	log.EnableModule("pvm_validator")
 
 	targetVersion := "gp-0.6.7" // Define the target version string
+	jamConformancePath, err := GetFuzzReportsPath()
+	if err != nil {
+		t.Fatalf("failed to get fuzz reports path: %v", err)
+	}
 
 	var testFiles []string
-	err := filepath.WalkDir(JamConformancePath, func(path string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(jamConformancePath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -476,16 +488,16 @@ func TestFuzzTrace(t *testing.T) {
 	})
 
 	if err != nil {
-		t.Fatalf("Error walking directory %s: %v", JamConformancePath, err)
+		t.Fatalf("Error walking directory %s: %v", jamConformancePath, err)
 	}
 
 	if len(testFiles) == 0 {
-		t.Fatalf("No valid .bin files (excluding report.bin) found in paths containing '%s' under %s", targetVersion, JamConformancePath)
+		t.Fatalf("No valid .bin files (excluding report.bin) found in paths containing '%s' under %s", targetVersion, jamConformancePath)
 	}
 
 	for _, filename := range testFiles {
 		currentFile := filename
-		relPath, err := filepath.Rel(JamConformancePath, currentFile)
+		relPath, err := filepath.Rel(jamConformancePath, currentFile)
 		if err != nil {
 			relPath = filepath.Base(currentFile)
 		}
@@ -496,7 +508,7 @@ func TestFuzzTrace(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to read file %s: %v", currentFile, err)
 			}
-			runSingleSTFTest(t, currentFile, string(content), pvm.BackendInterpreter)
+			runSingleSTFTest(t, currentFile, string(content), pvm.BackendInterpreter, true)
 		})
 	}
 }
