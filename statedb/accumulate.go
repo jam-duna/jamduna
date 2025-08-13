@@ -323,6 +323,7 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 			services = append(services, workResult.ServiceID)
 		}
 	}
+	ts := s.JamState.SafroleState.Timeslot
 	output_u = 0
 	// get services from f key
 	for k := range f {
@@ -373,13 +374,15 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 					} else {
 						sa.Dirty = true
 						o.D[s] = sa
+						sa.UpdateRecentAccumulation(ts)
+
 					}
 				}
 			}
 		}
 		accumulated_partial[service] = XY
 
-		// see what's left
+		// update the partial state
 		//(m′, a∗, v∗, z′) = (∆1(o, w, f , m)o)(m,a,v,z)
 		o.QueueWorkReport = XY.U.QueueWorkReport
 		o.UpcomingValidators = XY.U.UpcomingValidators
@@ -388,94 +391,6 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 			o.PrivilegedState.Kai_g[k] = v
 		}
 	}
-	service_m := o.PrivilegedState.Kai_m
-	serviceMXY, ok := accumulated_partial[service_m]
-	o_copy := o.Clone()
-	if !ok {
-		_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, service_m, pvmBackend)
-		serviceMXY = XY
-	}
-	// Sourabh to review this
-	if serviceMXY == nil || serviceMXY.U == nil {
-		log.Error(log.SDB, "serviceMXY is nil after SingleAccumulate", "service_m", service_m)
-		return
-	}
-	m_prime := serviceMXY.U.PrivilegedState.Kai_m
-	a_star := serviceMXY.U.PrivilegedState.Kai_a
-	v_star := serviceMXY.U.PrivilegedState.Kai_v
-	z_prime := serviceMXY.U.PrivilegedState.Kai_g
-
-	//∀c ∈ NC ∶ a′c = ((∆1(o, w, f , a∗c )o)a)c
-	var newAssignedCore [types.TotalCores]uint32
-	for i := 0; i < types.TotalCores; i++ {
-		newAssignedCore[i] = serviceMXY.U.PrivilegedState.Kai_a[i]
-	}
-	for i, service_ac := range a_star {
-		service_acXY, ok := accumulated_partial[service_ac]
-		if !ok {
-			o_copy := o.Clone()
-			_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, service_ac, pvmBackend)
-			service_acXY = XY
-			accumulated_partial[service_ac] = service_acXY
-		}
-		if service_acXY == nil || service_acXY.U == nil {
-			log.Error(log.SDB, "SingleAccumulate returned nil XContext for service_ac", "service_ac", service_ac)
-			continue
-		} else {
-			if service_ac != service_acXY.U.PrivilegedState.Kai_a[i] {
-				log.Debug(log.G, "NEW ASSIGNED CORE", "service_ac", service_ac, "accumulated_partial[service_ac]", service_acXY.U.PrivilegedState.Kai_a[i])
-			}
-			newAssignedCore[i] = service_acXY.U.PrivilegedState.Kai_a[i]
-		}
-	}
-
-	//v′ = (∆1(o, w, f , v∗)o)v
-	service_vXY, ok := accumulated_partial[v_star]
-	if !ok {
-		o_copy := o.Clone()
-		_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, v_star, pvmBackend)
-		service_vXY = XY
-		accumulated_partial[v_star] = service_vXY
-	}
-	v_prime := service_vXY.U.PrivilegedState.Kai_v
-
-	//i′ = (∆1(o, w, f , v)o)i
-	v := o.PrivilegedState.Kai_v
-	service_iXY, ok := accumulated_partial[v]
-	if !ok {
-		o_copy := o.Clone()
-		_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, v, pvmBackend)
-		service_iXY = XY
-		accumulated_partial[v] = service_iXY
-	}
-	i_prime := service_iXY.U.UpcomingValidators
-
-	//∀c ∈ NC ∶ q′ c = (∆1(o, w, f , ac)o)q
-	a := o.PrivilegedState.Kai_a
-	var q_prime types.AuthorizationQueue
-	for i, service_ac := range a {
-		service_acXY, ok := accumulated_partial[service_ac]
-		//fmt.Printf("!!!AAAA ACCUMULATE i=%d SA=%v, service_acXY=%v,ok=%v\n", i, service_ac, service_acXY.U.D[service_ac].RecentAccumulation, ok)
-		if !ok {
-			o_copy := o.Clone()
-			_, _, XY, _ := s.SingleAccumulate(o_copy, w, f, service_ac, pvmBackend)
-			service_acXY = XY
-			accumulated_partial[service_ac] = service_acXY
-		}
-		q_prime[i] = service_acXY.U.QueueWorkReport[i]
-	}
-	// TODO:review on why accumulated_partial is not used?
-	for service, service_accumulated_partial := range accumulated_partial {
-		o.D[service] = service_accumulated_partial.U.D[service]
-	}
-
-	// update the partial state
-	o.PrivilegedState.Kai_m = m_prime
-	o.PrivilegedState.Kai_g = z_prime
-	o.PrivilegedState.Kai_a = newAssignedCore
-	o.PrivilegedState.Kai_v = v_prime
-	o.UpcomingValidators = i_prime
-	o.QueueWorkReport = q_prime
 
 	return
 }
@@ -589,13 +504,11 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 		}
 	}
 
-	var codeHash common.Hash
 	p := make([]types.AccumulateOperandElements, 0)
 	g := uint64(0)
 	for _, workReport := range w {
 		for _, workResult := range workReport.Results {
 			if workResult.ServiceID == s {
-				codeHash = workResult.CodeHash
 				g += workResult.Gas
 				o := types.AccumulateOperandElements{
 					H: workReport.AvailabilitySpec.WorkPackageHash,
@@ -622,21 +535,19 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 			return
 		}
 	}
+
+	serviceAccount.UpdateRecentAccumulation(sd.JamState.SafroleState.Timeslot)
 	xContext := sd.NewXContext(o, s, serviceAccount)
 
 	xy = xContext // if code does not exist, fallback to this
-	if codeHash == (common.Hash{}) {
-		return
-	}
-
 	err = sd.InitXContextService(s, o, xy)
 	if err != nil {
 		log.Error(log.SDB, "InitXContextService ERR", "s", s, "error", err)
 		return
 	}
-	ok, code, preimage_source := serviceAccount.ReadPreimage(codeHash, sd)
+	ok, code, preimage_source := serviceAccount.ReadPreimage(serviceAccount.CodeHash, sd)
 	if !ok {
-		log.Warn(log.SDB, "GetPreimage ERR", "ok", ok, "s", s, "codeHash", codeHash, "preimage_source", preimage_source)
+		log.Warn(log.SDB, "GetPreimage ERR", "ok", ok, "s", s, "codeHash", serviceAccount.CodeHash, "preimage_source", preimage_source)
 		return
 	}
 

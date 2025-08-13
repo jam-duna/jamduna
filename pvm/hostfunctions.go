@@ -540,7 +540,7 @@ func (vm *VM) hostAssign() {
 // Designate validators
 func (vm *VM) hostDesignate() {
 	o, _ := vm.Ram.ReadRegister(7)
-	v, errCode := vm.Ram.ReadRAMBytes(uint32(o), 176*V)
+	v, errCode := vm.Ram.ReadRAMBytes(uint32(o), 336*types.TotalValidators)
 	if errCode != OK {
 		vm.terminated = true
 		vm.ResultCode = types.WORKRESULT_PANIC
@@ -556,17 +556,18 @@ func (vm *VM) hostDesignate() {
 		log.Debug(vm.logging, "DESIGNATE HUH", "kai_v", privilegedService_v, "xs", xs.ServiceIndex)
 		return
 	}
-	v_bold := make([]types.Validator, V)
+	v_bold := make([]types.Validator, types.TotalValidators)
 	for i := 0; i < types.TotalValidators; i++ {
+		keys := v[i*336 : (i+1)*336]
 		newv := types.Validator{}
-		copy(newv.Bandersnatch[:], v[0:32])
-		copy(newv.Ed25519[:], v[64:92])
-		copy(newv.Bls[:], v[92:128])
-		copy(newv.Metadata[:], v[128:])
+		copy(newv.Bandersnatch[:], keys[0:32])
+		copy(newv.Ed25519[:], keys[32:32+32])
+		copy(newv.Bls[:], keys[64:64+144])
+		copy(newv.Metadata[:], keys[64+144:])
 		v_bold[i] = newv
 	}
 	vm.X.U.UpcomingValidators = v_bold
-	log.Debug(vm.logging, "DESIGNATE OK")
+	log.Debug(vm.logging, "DESIGNATE OK", "validatorsLen", len(v_bold), "TotalValidators", types.TotalValidators, "kai_v", privilegedService_v, "xs", xs.ServiceIndex)
 	vm.Ram.WriteRegister(7, OK)
 	vm.HostResultCode = OK
 }

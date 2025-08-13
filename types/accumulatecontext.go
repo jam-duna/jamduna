@@ -72,6 +72,25 @@ func (k Kai_state) Copy() Kai_state {
 	return copy
 }
 
+func (k *Kai_state) GetAllServices() []uint32 {
+	services := make(map[uint32]bool)
+	services[k.Kai_m] = true // Manager service index
+	services[k.Kai_v] = true // Upcoming validator service index
+	for _, serviceIndex := range k.Kai_a {
+		services[serviceIndex] = true // Designated service indices
+	}
+	// Add all services from the AlwaysAccMap
+	for serviceID := range k.Kai_g {
+		services[serviceID] = true
+	}
+	list := []uint32{}
+	for s, _ := range services {
+		list = append(list, s) // Convert map keys to slice
+	}
+	// Remove duplicates
+	return list
+}
+
 // fixed size for the authorization queue
 type AuthorizationQueue [TotalCores][MaxAuthorizationQueueItems]common.Hash
 
@@ -102,6 +121,7 @@ func (u *PartialState) GetService(s uint32) (*ServiceAccount, bool) {
 
 // IMPORTANT: have to get X vs Y correctly clone with checkpoint!
 func (u *PartialState) Clone() *PartialState {
+	//fmt.Printf("Cloning PartialState called from %s\n", caller)
 	v := &PartialState{
 		D: make(map[uint32]*ServiceAccount),
 		// must have copy of the slice

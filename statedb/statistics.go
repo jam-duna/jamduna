@@ -81,18 +81,21 @@ func (n *JamState) tallyServiceStatistics(guarantees []types.Guarantee, preimage
 		cs.NumBytesPreimages += uint(len(p.Blob)) //p
 	}
 	for s, a := range accumulateStats {
+		//fmt.Printf("!!!! Accumulate stats for service %d: numWorkReports %d, gasUsed %d\n", s, a.numWorkReports, a.gasUsed)
 		cs, ok := stats[s]
 		if !ok {
 			cs = &types.ServiceStatistics{}
 			stats[s] = cs
 		}
 		cs.AccumulateNumWorkReports += a.numWorkReports
+		//fmt.Printf("!!!! AAAA Accumulate stats for service %d: numWorkReports %d, gasUsed %d\n", s, cs.AccumulateNumWorkReports, cs.AccumulateGasUsed)
 
 		if math.MaxUint64-cs.AccumulateGasUsed < a.gasUsed {
-			fmt.Printf("service %d, og data %d, new data %d\n", s, cs.AccumulateGasUsed, a.gasUsed) // overflow check
+			fmt.Printf("service %d, old data %d, new data %d\n", s, cs.AccumulateGasUsed, a.gasUsed) // overflow check
 		} else {
 			cs.AccumulateGasUsed += a.gasUsed
 		}
+
 	}
 	for s, t := range transferStats { // X
 		cs, ok := stats[s]
@@ -105,16 +108,17 @@ func (n *JamState) tallyServiceStatistics(guarantees []types.Guarantee, preimage
 	}
 	// incorporate stats into ValidatorStatistics
 	n.ValidatorStatistics.ServiceStatistics = make(map[uint32]types.ServiceStatistics)
-	for k, v := range stats {
+	for s, v := range stats {
 		emptyStats := &types.ServiceStatistics{}
 		emptyStatsByte, _ := types.Encode(emptyStats) // to ensure no padding bytes
 		statsByte, _ := types.Encode(v)
 		if v != nil {
 			if bytes.Equal(emptyStatsByte, statsByte) {
-				log.Debug(log.SDB, "tallyServiceStatistics: ignoring empty stats for service", "service", k)
+				log.Debug(log.SDB, "tallyServiceStatistics: ignoring empty stats for service", "service", s)
 				continue
 			}
-			n.ValidatorStatistics.ServiceStatistics[k] = *v
+			//fmt.Printf("tallyServiceStatistics: service %d, stats %v\n", s, v)
+			n.ValidatorStatistics.ServiceStatistics[s] = *v
 		}
 	}
 }

@@ -607,7 +607,7 @@ func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots 
 
 func (s *ServiceAccount) UpdateRecentAccumulation(timeslot uint32) {
 	if s.Mutable == false {
-		log.Crit(module, "UpdateRecentAccumulation")
+		//log.Crit(module, "UpdateRecentAccumulation")
 	}
 	s.Dirty = true
 	s.RecentAccumulation = timeslot

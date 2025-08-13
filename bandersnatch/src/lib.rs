@@ -125,7 +125,7 @@ impl Verifier {
         use ark_vrf::ring::Verifier as _;
 
         // Gracefully handle invalid signature
-        let signature = match RingVrfSignature::deserialize_compressed(signature) {
+        let signature = match RingVrfSignature::deserialize_compressed_unchecked(signature) {
             Ok(sig) => sig,
             Err(_e) => {
                 //println!("Failed to deserialize signature: {:?}", e);
@@ -175,7 +175,7 @@ impl Verifier {
     ) -> Result<[u8; 32], ()> {
         use ark_vrf::ietf::Verifier as _;
 
-        let signature = match IetfVrfSignature::deserialize_compressed(signature) {
+        let signature = match IetfVrfSignature::deserialize_compressed_unchecked(signature) {
             Ok(sig) => sig,
             Err(_) => {
                 eprintln!("Failed to deserialize compressed signature");
@@ -243,7 +243,7 @@ pub extern "C" fn get_public_key(
 
 /*
     // Deserialize the private key from bytes
-    let secret = match Secret::deserialize_compressed(&seed_slice[..]) {
+    let secret = match Secret::deserialize_compressed_unchecked(&seed_slice[..]) {
         Ok(secret) => secret,
         Err(e) => {
             eprintln!("Failed to deserialize private key: {}", e);
@@ -301,7 +301,7 @@ pub extern "C" fn get_private_key(
 
 /*
     // Deserialize the private key from bytes
-    let secret = match Secret::deserialize_compressed(&seed_slice[..]) {
+    let secret = match Secret::deserialize_compressed_unchecked(&seed_slice[..]) {
         Ok(secret) => secret,
         Err(e) => {
             eprintln!("Failed to deserialize private key: {}", e);
@@ -354,7 +354,7 @@ pub extern "C" fn ietf_vrf_sign(
     let private_key_slice = unsafe { slice::from_raw_parts(private_key_bytes, private_key_len) };
 
     // Deserialize the private key from bytes
-    let private_key = match Secret::deserialize_compressed(&private_key_slice[..]) {
+    let private_key = match Secret::deserialize_compressed_unchecked(&private_key_slice[..]) {
         Ok(secret) => secret,
         Err(e) => {
             eprintln!("Failed to deserialize private key: {}", e);
@@ -435,7 +435,7 @@ pub extern "C" fn get_ietf_vrf_output(
     let signature_slice = unsafe { slice::from_raw_parts(sig, sig_len) };
 
     // Deserialize the signature
-    let signature = match IetfVrfSignature::deserialize_compressed(signature_slice) {
+    let signature = match IetfVrfSignature::deserialize_compressed_unchecked(signature_slice) {
         Ok(sig) => sig,
         Err(_) => return 0, // Return 0 on deserialization failure
     };
@@ -484,7 +484,7 @@ pub extern "C" fn ring_vrf_sign(
     let private_key_slice = unsafe { slice::from_raw_parts(private_key_bytes, private_key_len) };
 
     // Deserialize the private key from bytes
-    let private_key = match Secret::deserialize_compressed(&private_key_slice[..]) {
+    let private_key = match Secret::deserialize_compressed_unchecked(&private_key_slice[..]) {
         Ok(secret) => secret,
         Err(e) => {
             eprintln!("Failed to deserialize private key: {}", e);
@@ -506,7 +506,7 @@ pub extern "C" fn ring_vrf_sign(
         let public_key = if pubkey_bytes.iter().all(|&b| b == 0) {
             padding_point.clone()
         } else {
-            match Public::deserialize_compressed(pubkey_bytes) {
+            match Public::deserialize_compressed_unchecked(pubkey_bytes) {
             Ok(public_key) => public_key,
             Err(e) => {
                 eprintln!("Failed to deserialize public key: {}", e);
@@ -611,7 +611,7 @@ pub extern "C" fn ietf_vrf_verify(
     // Check the length of the public key slice
     //println!("Prover public slice length: {}", prover_public_slice.len());
 
-    let prover_public = match Public::deserialize_compressed(prover_public_slice) {
+    let prover_public = match Public::deserialize_compressed_unchecked(prover_public_slice) {
         Ok(public_key) => public_key,
         Err(e) => {
             println!("Failed to deserialize prover public key: {:?}", e);
@@ -649,7 +649,7 @@ fn ietf_vrf_verify_iml(
 ) -> Result<[u8; 32], ()> {
     use ark_vrf::ietf::Verifier as _;
 
-    let signature = match IetfVrfSignature::deserialize_compressed(signature) {
+    let signature = match IetfVrfSignature::deserialize_compressed_unchecked(signature) {
         Ok(signature) => signature,
         Err(e) => {
             eprintln!("Failed to deserialize IETF VRF signature: {}", e);
@@ -701,10 +701,11 @@ pub extern "C" fn get_ring_commitment(
     let  padding_point = Public::from(RingProofParams::padding_point());
     for i in 0..ring_size {
         let pubkey_bytes = &ring_set_slice[i * 32..(i + 1) * 32];
+        // eprintln!("pubkey_bytes: {:?}", hex::encode(pubkey_bytes));
         let public_key = if pubkey_bytes.iter().all(|&b| b == 0) {
             padding_point.clone()
         } else {
-            match Public::deserialize_compressed(pubkey_bytes) {
+            match Public::deserialize_compressed_unchecked(pubkey_bytes) {
             Ok(public_key) => public_key,
             Err(e) => {
                 eprintln!("Failed to deserialize public key: {}", e);
@@ -789,7 +790,7 @@ pub extern "C" fn ring_vrf_verify(
         let public_key = if pubkey_bytes.iter().all(|&b| b == 0) {
             padding_point.clone()
         } else {
-            match Public::deserialize_compressed(pubkey_bytes) {
+            match Public::deserialize_compressed_unchecked(pubkey_bytes) {
             Ok(public_key) => public_key,
             Err(e) => {
                 eprintln!("Failed to deserialize public key: {}", e);
@@ -839,7 +840,7 @@ pub extern "C" fn get_ring_vrf_output(
     let signature_slice = unsafe { slice::from_raw_parts(sig, sig_len) };
 
     // Deserialize the signature
-    let signature = match RingVrfSignature::deserialize_compressed(signature_slice) {
+    let signature = match RingVrfSignature::deserialize_compressed_unchecked(signature_slice) {
         Ok(sig) => sig,
         Err(_) => return 0, // Return 0 on deserialization failure
     };
@@ -1013,7 +1014,7 @@ mod tests {
             );
 
             // Deserialize public key
-            let public_key = match Public::deserialize_compressed(&pub_key_bytes[..]) {
+            let public_key = match Public::deserialize_compressed_unchecked(&pub_key_bytes[..]) {
                 Ok(pk) => pk,
                 Err(e) => {
                     eprintln!("Failed to deserialize public key: {}", e);
@@ -1126,7 +1127,7 @@ mod tests {
 
         // Check if the private key can regenerate the same public key
         let secret_slice = unsafe { slice::from_raw_parts(secret_bytes.as_ptr(), secret_bytes.len()) };
-        let secret = match Secret::deserialize_compressed(&secret_slice[..]) {
+        let secret = match Secret::deserialize_compressed_unchecked(&secret_slice[..]) {
             Ok(secret) => secret,
             Err(e) => {
                 eprintln!("Failed to deserialize secret: {}", e);
@@ -1183,7 +1184,7 @@ mod tests {
             );
 
             // Deserialize public key
-            let public_key = match Public::deserialize_compressed(&pub_key_bytes[..]) {
+            let public_key = match Public::deserialize_compressed_unchecked(&pub_key_bytes[..]) {
                 Ok(pk) => pk,
                 Err(e) => {
                     eprintln!("Failed to deserialize public key: {}", e);

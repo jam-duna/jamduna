@@ -85,7 +85,7 @@ func main() {
 
 	validateImportBlockConfig(jConfig, useUnixSocket)
 	fuzzerInfo := fuzz.PeerInfo{
-		Name:       "jam-duna-fuzzer-v0.8",
+		Name:       "jam-duna-fuzzer-v0.12",
 		AppVersion: fuzz.Version{Major: 0, Minor: 6, Patch: 7},
 		JamVersion: fuzz.Version{Major: 0, Minor: 6, Patch: 7},
 	}

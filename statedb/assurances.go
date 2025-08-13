@@ -38,7 +38,7 @@ func (j *JamState) ComputeAvailabilityAssignments(validatedAssurances []types.As
 			continue
 		}
 		timeout := timeslot >= j.AvailabilityAssignments[c].Timeslot+uint32(types.UnavailableWorkReplacementPeriod)
-		if available >= 2*types.TotalValidators/3 || timeout {
+		if available > 2*types.TotalValidators/3 || timeout {
 			if !timeout {
 				wr = append(wr, j.AvailabilityAssignments[c].WorkReport)
 			}

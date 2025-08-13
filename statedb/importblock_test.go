@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -179,7 +180,7 @@ func TestPVMstepJsonDiff(t *testing.T) {
 	}
 }
 
-func TestTraces(t *testing.T) {
+func TestTracesInterpreter(t *testing.T) {
 	log.InitLogger("debug")
 	pvm.VMsCompare = true // enable VM comparison for this test
 	// pvm.PvmLogging = true
@@ -187,8 +188,8 @@ func TestTraces(t *testing.T) {
 	// Define all the directories you want to test in a single slice.
 	testDirs := []string{
 		//"../cmd/importblocks/rawdata/safrole/state_transitions/",
-		"../jamtestvectors/traces/fallback",
-		"../jamtestvectors/traces/safrole",
+		//"../jamtestvectors/traces/fallback",
+		//"../jamtestvectors/traces/safrole",
 		"../jamtestvectors/traces/preimages_light",
 		"../jamtestvectors/traces/preimages",
 		"../jamtestvectors/traces/storage_light",
@@ -415,20 +416,98 @@ func TestCompareLogs(t *testing.T) {
 	}
 }
 
-func TestTracesFuzz(t *testing.T) {
-	pvm.PvmLogging = true
-	pvm.PvmTrace = true   // enable PVM trace for this test
+func TestSingleFuzzTrace(t *testing.T) {
+	pvm.PvmLogging = false
+	pvm.PvmTrace = false  // enable PVM trace for this test
 	pvm.VMsCompare = true // enable VM comparison for this test
-	filename := "../jamtestvectors/fuzz-reports/jamduna/jam-duna-target-v0.5-0.6.7_gp-0.6.7/00000001.json"
-	filename = "../jamtestvectors/fuzz-reports/jamduna/jam-duna-target-v0.7-0.6.7_gp-0.6.7/1754724115/00000004_mod.json"
+	fileMap := make(map[string]string)
+
+	basePath := "/Users/michael/Desktop/jam-conformance/fuzz-reports"
+	basePath = "/Users/michael/Github/jam-conformance/fuzz-reports"
+
+	//basePath := "../jamtestvectors/fuzz-reports"
+	fileMap["spacejam"] = "spacejam/1755083543/00000002.bin"
+
+	fileMap["jamduna"] = "jamduna/jam-duna-target-v0.8-0.6.7_gp-0.6.7/fixed/1754982630/00000009.json" // WORKS
+	fileMap["jamduna2"] = "jamduna/jam-duna-target-v0.8-0.6.7_gp-0.6.7/1755105426/00000003.json"      // WORKS
+	fileMap["jamixir"] = "jamixir/1754983524/traces/00000012.bin"                                     // WORKS
+	fileMap["javajam0"] = "javajam/javajam-0.6.7_gp-0.6.7/1754725568/00000004.bin"                    // FAILS
+	fileMap["javajam"] = "javajam/javajam-0.6.7_gp-0.6.7/1754990132/00000012.bin"                     // WORKS
+	fileMap["jamzig2"] = "jamzig/jamzig-target-0.1.0_gp-0.6.7/fixed/1754988078/00000010.bin"          // WORKS
+	fileMap["jamzig"] = "jamzig/jamzig-target-0.1.0_gp-0.6.7/1755081941/00000024.bin"                 // WORKS
+	fileMap["jamzilla"] = "jamzilla/jam-node-0.1.0_gp-0.6.7/fixed/1754984893/00000010.bin"            // WORKS
+	fileMap["jamzilla2"] = "jamzilla/jam-node-0.1.0_gp-0.6.7/1755082451/00000012.bin"                 // WORKS
+
+	team := "jamzilla2"
+	filename, exists := fileMap[team]
+	if !exists {
+		t.Fatalf("team %s not found in fileMap", team)
+	}
+	filename = filepath.Join(basePath, filename)
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
 	}
+
 	log.InitLogger("debug")
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule("pvm_validator")
 	t.Run(filepath.Base(filename), func(t *testing.T) {
 		runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter)
 	})
+}
+
+func TestFuzzTrace(t *testing.T) {
+	pvm.PvmLogging = false
+	pvm.PvmTrace = false   // enable PVM trace for this test
+	pvm.VMsCompare = false // enable VM comparison for this test
+
+	log.InitLogger("debug")
+	log.EnableModule(log.PvmAuthoring)
+	log.EnableModule("pvm_validator")
+
+	//rootPath := "/Users/michael/Desktop/jam-conformance"
+	rootPath := "/Users/michael/Github/jam-conformance/fuzz-reports"
+	targetVersion := "gp-0.6.7" // Define the target version string
+
+	var testFiles []string
+	err := filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Condition: Is a file, path contains target version, name ends with .bin, AND is NOT report.bin
+		if !d.IsDir() &&
+			strings.Contains(path, targetVersion) &&
+			strings.HasSuffix(d.Name(), ".bin") &&
+			d.Name() != "report.bin" && d.Name() != "genesis.bin" {
+			testFiles = append(testFiles, path)
+		}
+		return nil
+	})
+
+	if err != nil {
+		t.Fatalf("Error walking directory %s: %v", rootPath, err)
+	}
+
+	if len(testFiles) == 0 {
+		t.Fatalf("No valid .bin files (excluding report.bin) found in paths containing '%s' under %s", targetVersion, rootPath)
+	}
+
+	for _, filename := range testFiles {
+		currentFile := filename
+		relPath, err := filepath.Rel(rootPath, currentFile)
+		if err != nil {
+			relPath = filepath.Base(currentFile)
+		}
+		testName := filepath.ToSlash(relPath)
+
+		t.Run(testName, func(t *testing.T) {
+			content, err := os.ReadFile(currentFile)
+			if err != nil {
+				t.Fatalf("failed to read file %s: %v", currentFile, err)
+			}
+			runSingleSTFTest(t, currentFile, string(content), pvm.BackendInterpreter)
+		})
+	}
 }
