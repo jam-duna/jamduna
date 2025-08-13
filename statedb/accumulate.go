@@ -284,8 +284,7 @@ func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.Parti
 		i = uint64(len(w))
 	}
 	g_star, t_star, b_star, U := s.ParallelizedAccumulate(o, w[0:i], f, pvmBackend) // parallelized accumulation the 0 to i work reports
-
-	if i >= uint64(len(w)) { // no more reports
+	if i >= uint64(len(w)) {
 		return i, t_star, b_star, U
 	}
 	j, outputT, outputB, GasUsage := s.OuterAccumulate(g-g_star, w[i+1:], o, nil, pvmBackend) // recursive call to the rest of the work reports
@@ -323,7 +322,6 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 			services = append(services, workResult.ServiceID)
 		}
 	}
-	ts := s.JamState.SafroleState.Timeslot
 	output_u = 0
 	// get services from f key
 	for k := range f {
@@ -371,11 +369,10 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 							sa.Dirty = true
 							o.D[s] = sa
 						}
+
 					} else {
 						sa.Dirty = true
 						o.D[s] = sa
-						sa.UpdateRecentAccumulation(ts)
-
 					}
 				}
 			}
@@ -392,6 +389,11 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 		}
 	}
 
+	for service, service_accumulated_partial := range accumulated_partial {
+		if service_accumulated_partial.U != nil {
+			o.D[service] = service_accumulated_partial.U.D[service]
+		}
+	}
 	return
 }
 
@@ -472,7 +474,6 @@ func (sd *StateDB) InitXContextService(s uint32, o *types.PartialState, xy *type
 		}
 		xy.U.D[s] = x_s
 	}
-	xy.U.D[s].UpdateRecentAccumulation(sd.JamState.SafroleState.Timeslot)
 	return nil
 }
 
@@ -567,6 +568,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 		output_b = vm.Y.Y
 		output_u = g - uint64(max(vm.Gas, 0))
 		xy = &(vm.Y)
+
 		if r.Err == types.WORKRESULT_OOG {
 			log.Trace(sd.Authoring, "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b, "x_s", x_s)
 		} else {

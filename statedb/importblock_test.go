@@ -16,18 +16,10 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-//	func printColoredJSONDiff(diffStr string) {
-//		for _, line := range strings.Split(diffStr, "\n") {
-//			switch {
-//			case strings.HasPrefix(line, "-"):
-//				fmt.Println(colorRed + line + colorReset)
-//			case strings.HasPrefix(line, "+"):
-//				fmt.Println(colorGreen + line + colorReset)
-//			default:
-//				fmt.Println(line)
-//			}
-//		}
-//	}
+const (
+	JamConformancePath = "/Users/michael/Desktop/jam-conformance"
+)
+
 func runSingleSTFTest(t *testing.T, filename string, content string, pvmBackend string) {
 	t.Helper()
 
@@ -70,13 +62,10 @@ func parseSTFFile(filename, content string) (StateTransition, error) {
 }
 
 func TestStateTransitionNoSandbox(t *testing.T) {
-	pvm.PvmLogging = true
-	pvm.PvmTrace = true                // enable PVM trace for this test
-	pvm.VMsCompare = true              // enable VM comparison for this test
-	filename := "traces/00000019.json" // javajam 0.6.7 -- see https://github.com/jam-duna/jamtestnet/issues/231#issuecomment-3144487797
-	//filename = "../jamtestvectors/traces/storage_light/00000016.json"
-	filename = "../jamtestvectors/traces/preimages/00000057.json"
-	filename = "../jamtestvectors/traces/storage/00000060.json"
+	pvm.PvmLogging = false
+	pvm.PvmTrace = false   // enable PVM trace for this test
+	pvm.VMsCompare = false // enable VM comparison for this test
+	filename := "../jamtestvectors/traces/preimages_light/00000012.json"
 
 	content, err := os.ReadFile(filename)
 	if err != nil {
@@ -423,22 +412,26 @@ func TestSingleFuzzTrace(t *testing.T) {
 	fileMap := make(map[string]string)
 
 	basePath := "/Users/michael/Desktop/jam-conformance/fuzz-reports"
-	basePath = "/Users/michael/Github/jam-conformance/fuzz-reports"
+	//basePath = "/Users/michael/Github/jam-conformance/fuzz-reports"
 
 	//basePath := "../jamtestvectors/fuzz-reports"
 	fileMap["spacejam"] = "spacejam/1755083543/00000002.bin"
 
-	fileMap["jamduna"] = "jamduna/jam-duna-target-v0.8-0.6.7_gp-0.6.7/fixed/1754982630/00000009.json" // WORKS
-	fileMap["jamduna2"] = "jamduna/jam-duna-target-v0.8-0.6.7_gp-0.6.7/1755105426/00000003.json"      // WORKS
-	fileMap["jamixir"] = "jamixir/1754983524/traces/00000012.bin"                                     // WORKS
-	fileMap["javajam0"] = "javajam/javajam-0.6.7_gp-0.6.7/1754725568/00000004.bin"                    // FAILS
-	fileMap["javajam"] = "javajam/javajam-0.6.7_gp-0.6.7/1754990132/00000012.bin"                     // WORKS
-	fileMap["jamzig2"] = "jamzig/jamzig-target-0.1.0_gp-0.6.7/fixed/1754988078/00000010.bin"          // WORKS
-	fileMap["jamzig"] = "jamzig/jamzig-target-0.1.0_gp-0.6.7/1755081941/00000024.bin"                 // WORKS
-	fileMap["jamzilla"] = "jamzilla/jam-node-0.1.0_gp-0.6.7/fixed/1754984893/00000010.bin"            // WORKS
-	fileMap["jamzilla2"] = "jamzilla/jam-node-0.1.0_gp-0.6.7/1755082451/00000012.bin"                 // WORKS
+	fileMap["jamduna"] = "jamduna/jam-duna-target-v0.8-0.6.7_gp-0.6.7/fixed/1754982630/00000009.json"  // WORKS
+	fileMap["jamduna1"] = "jamduna/jam-duna-target-v0.8-0.6.7_gp-0.6.7/fixed/1754982630/00000008.json" // WORKS
+	fileMap["jamduna2"] = "jamduna/jam-duna-target-v0.8-0.6.7_gp-0.6.7/1755105426/00000003.json"       // WORKS
+	fileMap["jamixir"] = "jamixir/1754983524/traces/00000012.bin"                                      // WORKS
+	fileMap["javajam"] = "javajam/javajam-0.6.7_gp-0.6.7/1754990132/00000012.bin"                      // WORKS
+	fileMap["jamzig2"] = "jamzig/jamzig-target-0.1.0_gp-0.6.7/fixed/1754988078/00000010.bin"           // WORKS
+	fileMap["jamzig"] = "jamzig/jamzig-target-0.1.0_gp-0.6.7/1755081941/00000024.bin"                  // WORKS
+	fileMap["jamzilla"] = "jamzilla/jam-node-0.1.0_gp-0.6.7/fixed/1754984893/00000010.bin"             // WORKS
+	fileMap["jamzilla2"] = "jamzilla/jam-node-0.1.0_gp-0.6.7/1755082451/00000012.bin"                  // WORKS
+	fileMap["javajam-ignore"] = "javajam/javajam-0.6.7_gp-0.6.7/1754725568/00000004.bin"               // IGNORE (buggy)
 
-	team := "jamzilla2"
+	// TODO: A5|StaleReport: One assurance targets a core with a stale report
+	fileMap["jamzilla1"] = "jamzilla/jam-node-0.1.0_gp-0.6.7/1755082451/00000011.json" // FAILS
+
+	team := "jamzilla1"
 	filename, exists := fileMap[team]
 	if !exists {
 		t.Fatalf("team %s not found in fileMap", team)
@@ -466,12 +459,10 @@ func TestFuzzTrace(t *testing.T) {
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule("pvm_validator")
 
-	//rootPath := "/Users/michael/Desktop/jam-conformance"
-	rootPath := "/Users/michael/Github/jam-conformance/fuzz-reports"
 	targetVersion := "gp-0.6.7" // Define the target version string
 
 	var testFiles []string
-	err := filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(JamConformancePath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -487,16 +478,16 @@ func TestFuzzTrace(t *testing.T) {
 	})
 
 	if err != nil {
-		t.Fatalf("Error walking directory %s: %v", rootPath, err)
+		t.Fatalf("Error walking directory %s: %v", JamConformancePath, err)
 	}
 
 	if len(testFiles) == 0 {
-		t.Fatalf("No valid .bin files (excluding report.bin) found in paths containing '%s' under %s", targetVersion, rootPath)
+		t.Fatalf("No valid .bin files (excluding report.bin) found in paths containing '%s' under %s", targetVersion, JamConformancePath)
 	}
 
 	for _, filename := range testFiles {
 		currentFile := filename
-		relPath, err := filepath.Rel(rootPath, currentFile)
+		relPath, err := filepath.Rel(JamConformancePath, currentFile)
 		if err != nil {
 			relPath = filepath.Base(currentFile)
 		}

@@ -80,7 +80,7 @@ test-network:
 
 trace_interpreter:
 	@echo "Running 'TestTraces' with timeout $(LongTimeout) for network='$(NETWORK)' ..."
-	@cd $(STATEDB_DIR) && go test -v -timeout $(LongTimeout) -run TestTraces  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
+	@cd $(STATEDB_DIR) && go test -v -timeout $(LongTimeout) -run TestTracesInterpreter  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
 
 trace_recompiler:
 	@echo "Running 'TestTraceRecompiler' with timeout $(LongTimeout) for network='$(NETWORK)' ..."
