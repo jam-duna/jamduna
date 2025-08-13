@@ -427,9 +427,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 	fileMap["jamzilla"] = "jamzilla/jam-node-0.1.0_gp-0.6.7/fixed/1754984893/00000010.bin"             // WORKS
 	fileMap["jamzilla2"] = "jamzilla/jam-node-0.1.0_gp-0.6.7/1755082451/00000012.bin"                  // WORKS
 	fileMap["javajam-ignore"] = "javajam/javajam-0.6.7_gp-0.6.7/1754725568/00000004.bin"               // IGNORE (buggy)
-
-	// TODO: A5|StaleReport: One assurance targets a core with a stale report
-	fileMap["jamzilla1"] = "jamzilla/jam-node-0.1.0_gp-0.6.7/1755082451/00000011.json" // FAILS
+	fileMap["jamzilla1"] = "jamzilla/jam-node-0.1.0_gp-0.6.7/1755082451/00000011.json"                 // WORKS
 
 	team := "jamzilla1"
 	filename, exists := fileMap[team]

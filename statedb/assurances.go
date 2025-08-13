@@ -37,9 +37,12 @@ func (j *JamState) ComputeAvailabilityAssignments(validatedAssurances []types.As
 		if j.AvailabilityAssignments[c] == nil {
 			continue
 		}
-		timeout := timeslot >= j.AvailabilityAssignments[c].Timeslot+uint32(types.UnavailableWorkReplacementPeriod)
+		diff := timeslot - (j.AvailabilityAssignments[c].Timeslot + uint32(types.UnavailableWorkReplacementPeriod))
+		timeout := diff > 0
 		if available > 2*types.TotalValidators/3 || timeout {
-			if !timeout {
+			if timeout {
+				//fmt.Printf("Core %d: Timeout detected, removing work report -- %d - %d = %d\n", c, timeslot, j.AvailabilityAssignments[c].Timeslot+uint32(types.UnavailableWorkReplacementPeriod), diff)
+			} else {
 				wr = append(wr, j.AvailabilityAssignments[c].WorkReport)
 			}
 			j.AvailabilityAssignments[c] = nil
@@ -55,7 +58,7 @@ func (s *StateDB) getWRStatus() (hasRecentWR, hasStaleWR []bool) {
 	for core, rho := range s.JamState.AvailabilityAssignments {
 		if rho != nil {
 			hasRecentWR[core] = true
-			if ts >= rho.Timeslot+uint32(types.UnavailableWorkReplacementPeriod) {
+			if ts > rho.Timeslot+uint32(types.UnavailableWorkReplacementPeriod) {
 				hasStaleWR[core] = true
 			}
 		}
