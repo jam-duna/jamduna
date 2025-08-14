@@ -60,12 +60,10 @@ func CheckModes(mode string) (bool, error) {
 	enabledModes, _ := getModeStatus()
 	modeEnabled, found := fuzzModeList[mode]
 	if !found {
-		errMsg := fmt.Sprintf("Mode Unknown. Must be one of %v", enabledModes)
-		return false, fmt.Errorf(errMsg)
+		return false, fmt.Errorf("mode Unknown. Must be one of %v", enabledModes)
 	}
 	if found && !modeEnabled {
-		errMsg := fmt.Sprintf("Mode Suppressed. Must be one of %v", enabledModes)
-		return false, fmt.Errorf(errMsg)
+		return false, fmt.Errorf("mode Suppressed. Must be one of %v", enabledModes)
 	}
 	return true, nil
 }
@@ -74,13 +72,13 @@ func InitFuzzStorage(testDir string) (*storage.StateDBStorage, error) {
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
 		err = os.MkdirAll(testDir, os.ModePerm)
 		if err != nil {
-			return nil, fmt.Errorf("Failed to create directory /tmp/fuzz: %v", err)
+			return nil, fmt.Errorf("failed to create directory /tmp/fuzz: %v", err)
 		}
 	}
 
 	sdb_storage, err := storage.NewStateDBStorage(testDir)
 	if err != nil {
-		return nil, fmt.Errorf("Error with storage: %v", err)
+		return nil, fmt.Errorf("error with storage: %v", err)
 	}
 	return sdb_storage, nil
 
@@ -90,13 +88,13 @@ func ReadStateTransitionBIN(filename string) (stf *statedb.StateTransition, err 
 	stBytes, err := os.ReadFile(filename)
 	if err != nil {
 		fmt.Printf("Error reading file %s: %v\n", filename, err)
-		return nil, fmt.Errorf("Error reading file %s: %v", filename, err)
+		return nil, fmt.Errorf("error reading file %s: %v", filename, err)
 	}
 	// Decode st from stBytes
 	b, _, err := types.Decode(stBytes, reflect.TypeOf(statedb.StateTransition{}))
 	if err != nil {
 		fmt.Printf("Error decoding block %s: %v\n", filename, err)
-		return nil, fmt.Errorf("Error decoding block %s: %v", filename, err)
+		return nil, fmt.Errorf("error decoding block %s: %v", filename, err)
 	}
 	st, ok := b.(statedb.StateTransition)
 	if !ok {
@@ -129,21 +127,20 @@ func ReadStateTransition(filename string) (stf *statedb.StateTransition, err err
 	return ReadStateTransitionJSON(filename)
 }
 
-func ReadStateTransitions(baseDir, dir string) (stfs []*statedb.StateTransition, err error) {
+func ReadStateTransitions(baseDir string) (stfs []*statedb.StateTransition, err error) {
 	stfs = make([]*statedb.StateTransition, 0)
-	state_transitions_dir := filepath.Join(baseDir, dir, "state_transitions")
-	stFiles, err := os.ReadDir(state_transitions_dir)
+	stFiles, err := os.ReadDir(baseDir)
 	if err != nil {
 		return stfs, fmt.Errorf("failed to read directory: %v", err)
 	}
-	fmt.Printf("Selected Dir: %v\n", dir)
+	fmt.Printf("Selected Dir: %v\n", baseDir)
 	file_idx := 0
 	useJSON := true
 	useBIN := true
 	for _, file := range stFiles {
 		//fmt.Printf("Processing file: %s\n", file.Name())
 		if strings.HasSuffix(file.Name(), ".bin") || strings.HasSuffix(file.Name(), ".json") {
-			stPath := filepath.Join(state_transitions_dir, file.Name())
+			stPath := filepath.Join(baseDir, file.Name())
 			isJSON := strings.HasSuffix(file.Name(), ".json")
 			isBin := strings.HasSuffix(file.Name(), ".bin")
 			if useJSON && isJSON {

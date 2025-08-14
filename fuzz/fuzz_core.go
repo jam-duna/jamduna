@@ -6,7 +6,6 @@ import (
 	"log"
 	"math/rand"
 	"reflect"
-	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/jamerrors"
@@ -526,22 +525,6 @@ func selectImportBlocksErrorArr(seed []byte, store *storage.StateDBStorage, mode
 	}
 	return stfErrors
 }
-
-func selectImportBlocksError(seed []byte, store *storage.StateDBStorage, modes []string, stf *statedb.StateTransition, allowFuzzing bool) (*statedb.StateTransition, error, []error) {
-	oSlot, oEpoch, oPhase, mutatedSTFs, errorList := selectAllImportBlocksErrors(seed, store, modes, stf, allowFuzzing)
-	// pick a random error based on our success
-	if len(errorList) > 0 {
-		rand.Seed(time.Now().UnixNano())
-		errSelectionIdx := rand.Intn(len(errorList))
-		mutatedSTF := &mutatedSTFs[errSelectionIdx]
-		expectedErr := errorList[errSelectionIdx]
-		possibleErrs := errorList
-		fmt.Printf("[#%v e=%v,m=%03d] Fuzzed with \033[32m%v\033[0m ouf of %v possible errors = %v\n", oSlot, oEpoch, oPhase, jamerrors.GetErrorName(expectedErr), len(possibleErrs), jamerrors.GetErrorNames(possibleErrs))
-		return mutatedSTF, expectedErr, possibleErrs
-	}
-	return nil, nil, nil
-}
-
 func (f *Fuzzer) ValidateStateTransitionChallengeResponse(stfQA *StateTransitionQA, stfResp *StateTransitionResponse) (isMatch bool, validationErr error) {
 	return validateStateTransitionChallengeResponse(f.store, stfQA, stfResp)
 }
@@ -603,7 +586,7 @@ func lowlevelTrieInit(db *storage.StateDBStorage, snapshotRaw *statedb.StateSnap
 	}
 	actualRoot := tree.GetRoot()
 	if (expectedRoot != common.Hash{}) && expectedRoot != actualRoot {
-		return nil, fmt.Errorf("Root mismatch: expected=%v actual=%v", expectedRoot, actualRoot)
+		return nil, fmt.Errorf("root mismatch: expected=%v actual=%v", expectedRoot, actualRoot)
 	}
 	return tree, nil
 }

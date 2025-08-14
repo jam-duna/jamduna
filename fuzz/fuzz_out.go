@@ -57,19 +57,19 @@ func (f *Fuzzer) SendStateTransitionChallenge(endpoint string, challenge statedb
 
 	jsonData, err := json.Marshal(challenge)
 	if err != nil {
-		return nil, respNotOK, fmt.Errorf("Failed to marshal STF data: %v", err)
+		return nil, respNotOK, fmt.Errorf("failed to marshal STF data: %v", err)
 	}
 
 	req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return nil, respNotOK, fmt.Errorf("Failed to open HTTP request: %v", err)
+		return nil, respNotOK, fmt.Errorf("failed to open HTTP request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: ChallengeTimeOut}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, respNotOK, fmt.Errorf("Failed to send HTTP request: %v", err)
+		return nil, respNotOK, fmt.Errorf("failed to send HTTP request: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -78,7 +78,7 @@ func (f *Fuzzer) SendStateTransitionChallenge(endpoint string, challenge statedb
 		// [200 OK] Solver: stc -> valid
 		var snapshot statedb.StateSnapshotRaw
 		if err := json.NewDecoder(resp.Body).Decode(&snapshot); err != nil {
-			return nil, respNotOK, fmt.Errorf("Failed to decode challenge response: %v", err)
+			return nil, respNotOK, fmt.Errorf("failed to decode challenge response: %v", err)
 		}
 		postOriginalStateSnapshotResp := StateTransitionResponse{
 			PostState: &snapshot,
@@ -90,7 +90,7 @@ func (f *Fuzzer) SendStateTransitionChallenge(endpoint string, challenge statedb
 		// [406 Not Acceptable] Solver: stc -> jamError
 		var jamError JamError
 		if decodeErr := json.NewDecoder(resp.Body).Decode(&jamError); decodeErr != nil {
-			return nil, respNotOK, fmt.Errorf("Failed to decode JamError: %v", decodeErr)
+			return nil, respNotOK, fmt.Errorf("failed to decode JamError: %v", decodeErr)
 		}
 		postFuzzedStateSnapshotResp := StateTransitionResponse{
 			Mutated:  true,
@@ -99,6 +99,6 @@ func (f *Fuzzer) SendStateTransitionChallenge(endpoint string, challenge statedb
 		return &postFuzzedStateSnapshotResp, respOK, nil
 
 	default:
-		return nil, respNotOK, fmt.Errorf("Unexpected ResponseCode %d", resp.StatusCode)
+		return nil, respNotOK, fmt.Errorf("unexpected response code %d", resp.StatusCode)
 	}
 }

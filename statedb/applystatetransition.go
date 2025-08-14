@@ -21,7 +21,8 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		return s, fmt.Errorf("ParentStateRoot does not match")
 	}
 	recentBlocks := s.JamState.RecentBlocks.B_H
-	if blk.Header.ParentHeaderHash != recentBlocks[len(recentBlocks)-1].HeaderHash {
+	if len(recentBlocks) > 0 && blk.Header.ParentHeaderHash != recentBlocks[len(recentBlocks)-1].HeaderHash {
+		log.Error(log.SDB, "ApplyStateTransitionFromBlock", "ParentHeaderHash", blk.Header.ParentHeaderHash, "recentBlocks", recentBlocks[len(recentBlocks)-1].HeaderHash)
 		return s, fmt.Errorf("ParentHeaderHash does not match recent block")
 	}
 	old_timeslot := s.GetSafrole().Timeslot

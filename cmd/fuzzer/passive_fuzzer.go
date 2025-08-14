@@ -20,9 +20,7 @@ func main() {
 	enableRPC := false
 
 	jConfig := types.ConfigJamBlocks{
-		Mode:        "assurances",
 		HTTP:        "http://localhost:8088/",
-		QUIC:        "",
 		Verbose:     false,
 		NumBlocks:   500,
 		InvalidRate: 0.25,
@@ -33,7 +31,6 @@ func main() {
 	fReg := fuzz.NewFlagRegistry("fuzzer")
 	// fReg.RegisterFlag("mode", "m", jConfig.Mode, "Block generation mode", &jConfig.Mode)
 	fReg.RegisterFlag("http", "h", jConfig.HTTP, "HTTP endpoint to send blocks", &jConfig.HTTP)
-	fReg.RegisterFlag("quic", "q", jConfig.QUIC, "QUIC endpoint to send blocks", &jConfig.QUIC)
 	// fReg.RegisterFlag("network", "n", jConfig.Network, "JAM network size", &jConfig.Network)
 	fReg.RegisterFlag("verbose", "v", jConfig.Verbose, "Enable detailed logging", &jConfig.Verbose)
 	// fReg.RegisterFlag("numblocks", nil, jConfig.NumBlocks, "Number of blocks to generate", &jConfig.NumBlocks)

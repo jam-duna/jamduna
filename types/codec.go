@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/colorfulnotion/jam/log"
@@ -534,13 +535,16 @@ func SaveObject(path string, obj interface{}, withJSON bool) error {
 }
 
 func saveObjectConcurrent(path string, obj interface{}, withJSON bool) error {
-	codecPath := fmt.Sprintf("%s.bin", path)
-	jsonPath := fmt.Sprintf("%s.json", path)
-	hexPath := fmt.Sprintf("%s.hex", path)
+	// TODO: strip any bin/json/hex extensions from path
+	basePath := strings.TrimSuffix(path, filepath.Ext(path))
+
+	codecPath := fmt.Sprintf("%s.bin", basePath)
+	jsonPath := fmt.Sprintf("%s.json", basePath)
+	hexPath := fmt.Sprintf("%s.hex", basePath)
 
 	jsonEnabled := withJSON
 	codecEnabled := true
-	hexEnabled := true
+	hexEnabled := false
 
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -610,52 +614,6 @@ func saveObjectConcurrent(path string, obj interface{}, withJSON bool) error {
 		}
 	}
 
-	return nil
-}
-
-func saveObjectSerialized(path string, obj interface{}, withJSON bool) error {
-	codecPath := fmt.Sprintf("%s.bin", path)
-	jsonPath := fmt.Sprintf("%s.json", path)
-	hexPath := fmt.Sprintf("%s.hex", path)
-
-	jsonEnabled := withJSON
-	codeEnabled := true
-	hexEnabled := true
-
-	// Ensure directory exists
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory %s: %v", dir, err)
-	}
-
-	switch v := obj.(type) {
-	default:
-		if codeEnabled {
-			codecEncode, err := Encode(v)
-			if err != nil {
-				return fmt.Errorf("error encoding object: %v", err)
-			}
-			if err := os.WriteFile(codecPath, codecEncode, 0644); err != nil {
-				return fmt.Errorf("error writing codec file: %v", err)
-			}
-			if hexEnabled {
-				hexString := fmt.Sprintf("0x%x\n", codecEncode)
-				if err := os.WriteFile(hexPath, []byte(hexString), 0644); err != nil {
-					return fmt.Errorf("error writing hex file: %v", err)
-				}
-			}
-		}
-		if jsonEnabled {
-			jsonEncode, err := json.MarshalIndent(v, "", "    ")
-			if err != nil {
-				log.Info(log.G, "Error encoding object to JSON", "err", err, "object", PrintObject(v))
-				return fmt.Errorf("error encoding object to JSON: %v", err)
-			}
-			if err := os.WriteFile(jsonPath, jsonEncode, 0644); err != nil {
-				return fmt.Errorf("error writing JSON file: %v", err)
-			}
-		}
-	}
 	return nil
 }
 

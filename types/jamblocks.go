@@ -5,10 +5,8 @@ import (
 )
 
 type ConfigJamBlocks struct {
-	Mode        string
 	HTTP        string
 	Socket      string
-	QUIC        string
 	Verbose     bool
 	NumBlocks   int
 	InvalidRate float64

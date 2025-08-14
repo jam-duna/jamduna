@@ -20,21 +20,14 @@ const (
 	magicConst   = 1107
 )
 
-func validateImportBlockConfig(jConfig types.ConfigJamBlocks, useSocket bool) {
-	if !useSocket && jConfig.HTTP == "" && jConfig.QUIC == "" {
-		log.Fatalf("You must specify either an HTTP URL (--http), a QUIC address (--quic), or enable socket communication (--use-unix-socket).")
-	}
-	if jConfig.Network != "tiny" && jConfig.Network != "full" {
-		log.Fatalf("Invalid --network value: %s. Must be 'tiny' or 'full'.", jConfig.Network)
-	}
-	_, modeErr := fuzz.CheckModes(jConfig.Mode)
-	if modeErr != nil {
-		log.Fatalf(modeErr.Error())
+func validateImportBlockConfig(jConfig types.ConfigJamBlocks) {
+	if jConfig.Network != "tiny" {
+		log.Fatalf("Invalid --network value: %s. Must be 'tiny'.", jConfig.Network)
 	}
 }
 
 func main() {
-	fmt.Println("importblocks - JAM Duna Import Blocks generator")
+	fmt.Println("fuzzer - JAM Duna 0.6.7 fuzzer")
 
 	dir := "/tmp/importBlock"
 	//socket := "/tmp/jam_target.sock"
@@ -43,10 +36,8 @@ func main() {
 	test_dir := "./rawdata"
 
 	jConfig := types.ConfigJamBlocks{
-		Mode:        "safrole",
 		HTTP:        "http://localhost:8088/",
 		Socket:      "/tmp/jam_target.sock",
-		QUIC:        "",
 		Verbose:     false,
 		NumBlocks:   50,
 		InvalidRate: 0,
@@ -58,9 +49,6 @@ func main() {
 
 	fReg := fuzz.NewFlagRegistry("importblocks")
 	fReg.RegisterFlag("seed", nil, jConfig.Seed, "Seed for random number generation (as hex)", &jConfig.Seed)
-	fReg.RegisterFlag("mode", "m", jConfig.Mode, "Block generation mode", &jConfig.Mode)
-	fReg.RegisterFlag("http", "h", jConfig.HTTP, "HTTP endpoint to send blocks", &jConfig.HTTP)
-	fReg.RegisterFlag("quic", "q", jConfig.QUIC, "QUIC endpoint to send blocks", &jConfig.QUIC)
 	fReg.RegisterFlag("network", "n", jConfig.Network, "JAM network size", &jConfig.Network)
 	fReg.RegisterFlag("verbose", "v", jConfig.Verbose, "Enable detailed logging", &jConfig.Verbose)
 	fReg.RegisterFlag("numblocks", nil, jConfig.NumBlocks, "Number of blocks to generate", &jConfig.NumBlocks)
@@ -83,9 +71,9 @@ func main() {
 		os.Exit(0)
 	}()
 
-	validateImportBlockConfig(jConfig, useUnixSocket)
+	validateImportBlockConfig(jConfig)
 	fuzzerInfo := fuzz.PeerInfo{
-		Name:       "jam-duna-fuzzer-v0.12",
+		Name:       "jam-duna-fuzzer-v0.13",
 		AppVersion: fuzz.Version{Major: 0, Minor: 6, Patch: 7},
 		JamVersion: fuzz.Version{Major: 0, Minor: 6, Patch: 7},
 	}
@@ -106,16 +94,15 @@ func main() {
 	startTime := time.Now()
 	numBlocks := jConfig.NumBlocks
 	nonStopFlagSet := jConfig.NumBlocks == magicConst
-	mode := jConfig.Mode
 
-	log.Printf("[INFO] Starting block generation: mode=%s, numBlocks=%d, dir=%s\n", mode, numBlocks, dir)
+	log.Printf("[INFO] Starting block generation: numBlocks=%d, dir=%s\n", numBlocks, dir)
 	/*
 		baseDir := os.Getenv("TEST_DATA_DIR")
 		if baseDir == "" {
 			baseDir = "./rawdata"
 		}
 	*/
-	raw_stfs, err := fuzz.ReadStateTransitions(test_dir, mode)
+	raw_stfs, err := fuzz.ReadStateTransitions(test_dir)
 
 	usable_stfs := make([]*statedb.StateTransition, 0)
 	for _, stf := range raw_stfs {
@@ -127,11 +114,11 @@ func main() {
 	}
 
 	if err != nil || len(usable_stfs) == 0 {
-		log.Printf("No %v mode data available on BaseDir=%v. Exit!", mode, test_dir)
+		log.Printf("No test data available on BaseDir=%v. Exit!", test_dir)
 		return
 	}
 
-	stfTestBank, fuzzErr := fuzzer.FuzzWithTargetedInvalidRate([]string{mode}, usable_stfs, jConfig.InvalidRate, numBlocks)
+	stfTestBank, fuzzErr := fuzzer.FuzzWithTargetedInvalidRate([]string{"safrole", "reports", "assurances"}, usable_stfs, jConfig.InvalidRate, numBlocks)
 	if fuzzErr != nil {
 		log.Fatal(fuzzErr)
 	}
@@ -223,10 +210,10 @@ func main() {
 		}
 
 		if fStat.TotalBlocks%jConfig.Statistics == 0 {
-			log.Printf("[%s Mode]\nStats:\n%s\n", mode, fStat.DumpMetrics())
+			log.Printf("Stats:\n%s\n", fStat.DumpMetrics())
 		}
 	}
 
 	elapsed := time.Since(startTime).Seconds()
-	log.Printf("[%s Mode] Done in %.2fs\n%s\n", mode, elapsed, fStat.DumpMetrics())
+	log.Printf("Done in %.2fs\n%s\n", elapsed, fStat.DumpMetrics())
 }

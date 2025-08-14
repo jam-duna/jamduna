@@ -25,12 +25,12 @@ const (
 )
 
 func readSTF(baseDir, targeted_mode string, t *testing.T) ([]*statedb.StateTransition, error) {
-	stfs, err := ReadStateTransitions(baseDir, targeted_mode)
+	stfs, err := ReadStateTransitions(baseDir)
 	if err == nil {
 		return stfs, nil
 	}
 	fmt.Printf("%v-mode specific data unavailable.. using STF Generic data instead", targeted_mode)
-	stfs_generic, err := ReadStateTransitions(baseDir, STF_Generic)
+	stfs_generic, err := ReadStateTransitions(baseDir)
 	if err != nil {
 		t.Fatalf("Unable to test %v fuzzing: %v", targeted_mode, err)
 		return nil, fmt.Errorf("Error reading state transitions for STF Generic: %v", err)
@@ -114,12 +114,12 @@ func testFuzzAll(t *testing.T) {
 }
 
 func TestFuzz(t *testing.T) {
-	//testFuzzAll(t)
+	testFuzzAll(t)
 	testFuzzAssurances(t)
 	testFuzzGeneric(t)
-	//testFuzzSafrole(t)
-	//testFuzzReports(t)
-	//testFuzzDisputes(t)
+	testFuzzSafrole(t)
+	testFuzzReports(t)
+	testFuzzDisputes(t)
 }
 
 func writeDebug(baseDir string, fuzz_mode string, jamErrorIdentifier string, epoch uint32, phase uint32, obj interface{}) error {
