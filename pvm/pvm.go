@@ -101,6 +101,7 @@ type VM struct {
 	ExportSegmentIndex uint32
 
 	// Accumulate argument
+	PriorX   types.XContext
 	X        *types.XContext
 	Y        types.XContext
 	Timeslot uint32

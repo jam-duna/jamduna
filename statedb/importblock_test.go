@@ -30,9 +30,8 @@ func SaveReportTrace(path string, obj interface{}) {
 
 func runSingleSTFTestAndSave(t *testing.T, filename string, content string, pvmBackend string, runPrevalidation bool, sourceBasePath string, destinationPath string) {
 	t.Helper()
+	testDir := t.TempDir()
 
-	// --- Setup and Parsing (Assumed Functions) ---
-	testDir := t.TempDir() // Use t.TempDir() for cleaner, temporary test directories.
 	test_storage, err := initStorage(testDir)
 	if err != nil {
 		t.Errorf("❌ [%s] Error initializing storage: %v", filename, err)
@@ -46,18 +45,13 @@ func runSingleSTFTestAndSave(t *testing.T, filename string, content string, pvmB
 		return
 	}
 
-	// --- Core Test Logic ---
 	diffs, err := CheckStateTransitionWithOutput(test_storage, &stf, nil, pvmBackend, runPrevalidation)
 
-	// --- Result Handling ---
-	// Handle OMIT case first and exit immediately.
 	if err != nil && err.Error() == "OMIT" {
 		t.Skipf("⚠️ OMIT: Test case for [%s] is marked to be omitted.", filename)
 		return
 	}
 
-	// For all other outcomes (PASS or FAIL), save the report.
-	// 1. Create the filename based on its path relative to the SOURCE directory.
 	relativePath, relErr := filepath.Rel(sourceBasePath, filename)
 	if relErr != nil {
 		t.Fatalf("Could not get relative path for %s from source base %s: %v", filename, sourceBasePath, relErr)
@@ -65,13 +59,11 @@ func runSingleSTFTestAndSave(t *testing.T, filename string, content string, pvmB
 	newFilename := strings.TrimSuffix(relativePath, filepath.Ext(relativePath)) + ".json"
 	finalFilename := strings.ReplaceAll(newFilename, string(filepath.Separator), "_")
 
-	// 2. Create the final output path using the DESTINATION directory.
 	outputPath := filepath.Join(destinationPath, "generated_reports", finalFilename)
 
 	SaveReportTrace(outputPath, &stf)
 	fmt.Printf("📄 Saved report to %s\n", outputPath)
 
-	// Finally, report the Pass or Fail status.
 	if err == nil {
 		fmt.Printf("✅ [%s] PostState.StateRoot %s matches\n", filename, stf.PostState.StateRoot)
 	} else {
@@ -82,8 +74,8 @@ func runSingleSTFTestAndSave(t *testing.T, filename string, content string, pvmB
 
 func runSingleSTFTest(t *testing.T, filename string, content string, pvmBackend string, runPrevalidation bool) {
 	t.Helper()
+	testDir := t.TempDir()
 
-	testDir := "/tmp/test_locala"
 	test_storage, err := initStorage(testDir)
 	if err != nil {
 		t.Errorf("❌ [%s] Error initializing storage: %v", filename, err)
@@ -303,14 +295,11 @@ func TestTracesRecompiler(t *testing.T) {
 
 	// Iterate over each directory.
 	for _, dir := range testDirs {
-		// Create a local copy of dir for the sub-test to capture correctly.
-		// This avoids issues where the sub-tests might all run with the last value of 'dir'.
 		currentDir := dir
 
 		t.Run(fmt.Sprintf("Directory_%s", filepath.Base(currentDir)), func(t *testing.T) {
 			entries, err := os.ReadDir(currentDir)
 			if err != nil {
-				// Use t.Fatalf to stop the test for this directory if we can't read it.
 				t.Fatalf("failed to read directory %s: %v", currentDir, err)
 			}
 
@@ -322,14 +311,12 @@ func TestTracesRecompiler(t *testing.T) {
 				filename := filepath.Join(currentDir, e.Name())
 				content, err := os.ReadFile(filename)
 				if err != nil {
-					// Use t.Errorf to report the error but continue with other files.
 					t.Errorf("failed to read file %s: %v", filename, err)
 					continue
 				}
 
 				fmt.Printf("Running test for file: %s\n", filename)
 
-				// Run the actual test logic for each file as a distinct sub-test.
 				t.Run(e.Name(), func(t *testing.T) {
 					runSingleSTFTest(t, filename, string(content), pvm.BackendRecompiler, false)
 				})
@@ -476,7 +463,6 @@ func GetFuzzReportsPath() (string, error) {
 	return filepath.Abs(fuzzPath)
 }
 
-// GetDunaReportsPath gets the destination directory for reports from the environment.
 // export DUNA_CONFORMANCE_PATH=~/Desktop/reports
 func GetDunaReportsPath() (string, error) {
 	dunaPath := os.Getenv("DUNA_CONFORMANCE_PATH")
@@ -484,6 +470,39 @@ func GetDunaReportsPath() (string, error) {
 		return "", fmt.Errorf("DUNA_CONFORMANCE_PATH environment variable is not set")
 	}
 	return filepath.Abs(dunaPath)
+}
+
+func findFuzzTestFiles(sourcePath, targetVersion string, excludedTeams []string) ([]string, error) {
+	fmt.Printf("Load GP v(%v) Trace files in %s | Excluding: %v\n", targetVersion, sourcePath, excludedTeams)
+	var testFiles []string
+
+	err := filepath.WalkDir(sourcePath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		for _, team := range excludedTeams {
+			if team != "" && strings.Contains(path, team) {
+				return nil
+			}
+		}
+
+		isTestFile := !d.IsDir() &&
+			//strings.Contains(path, targetVersion) &&
+			strings.HasSuffix(d.Name(), ".bin") &&
+			d.Name() != "report.bin" && d.Name() != "genesis.bin"
+
+		if isTestFile {
+			testFiles = append(testFiles, path)
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("error walking directory %s: %w", sourcePath, err)
+	}
+
+	return testFiles, nil
 }
 
 func TestSingleFuzzTrace(t *testing.T) {
@@ -496,22 +515,12 @@ func TestSingleFuzzTrace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get fuzz reports path: %v", err)
 	}
+	fileMap["jamduna27"] = "jamduna/jam-duna-target-v0.13-0.6.7_gp-0.6.7/1755150174/00000027.bin" // MC [SN] - FAILS - c10 (AvailabilityAssignments/Pending Reports)
+	fileMap["jamduna13"] = "jamduna/jam-duna-target-v0.13-0.6.7_gp-0.6.7/1755150526/00000013.bin" // SC [MC] FAILS - c7 (validators) + c13 mismatch [bless ok, designate huh]
+	fileMap["javajam26"] = "javajam/1755155383/00000016.bin"
+	fileMap["jamzig93"] = "jamzig/1755185281/00000093.bin"
 
-	fileMap["spacejam"] = "spacejam/1755083543/00000002.bin"
-
-	fileMap["jamduna"] = "jamduna/jam-duna-target-v0.8-0.6.7_gp-0.6.7/fixed/1754982630/00000009.json"  // WORKS
-	fileMap["jamduna1"] = "jamduna/jam-duna-target-v0.8-0.6.7_gp-0.6.7/fixed/1754982630/00000008.json" // WORKS
-	fileMap["jamduna2"] = "jamduna/jam-duna-target-v0.8-0.6.7_gp-0.6.7/1755105426/00000003.json"       // WORKS
-	fileMap["jamixir"] = "jamixir/1754983524/traces/00000012.bin"                                      // WORKS
-	fileMap["javajam"] = "javajam/javajam-0.6.7_gp-0.6.7/1754990132/00000012.bin"                      // WORKS
-	fileMap["jamzig2"] = "jamzig/jamzig-target-0.1.0_gp-0.6.7/fixed/1754988078/00000010.bin"           // WORKS
-	fileMap["jamzig"] = "jamzig/jamzig-target-0.1.0_gp-0.6.7/1755081941/00000024.bin"                  // WORKS
-	fileMap["jamzilla"] = "jamzilla/jam-node-0.1.0_gp-0.6.7/fixed/1754984893/00000010.bin"             // WORKS
-	fileMap["jamzilla2"] = "jamzilla/jam-node-0.1.0_gp-0.6.7/1755082451/00000012.bin"                  // WORKS
-	fileMap["javajam-ignore"] = "javajam/javajam-0.6.7_gp-0.6.7/1754725568/00000004.bin"               // IGNORE (buggy)
-	fileMap["jamzilla1"] = "jamzilla/jam-node-0.1.0_gp-0.6.7/1755082451/00000011.json"                 // WORKS
-
-	team := "jamzilla1"
+	team := "jamzig93"
 	filename, exists := fileMap[team]
 	if !exists {
 		t.Fatalf("team %s not found in fileMap", team)
@@ -530,7 +539,9 @@ func TestSingleFuzzTrace(t *testing.T) {
 	})
 }
 
-func TestPublishFuzzTrace(t *testing.T) {
+func testFuzzTraceInternal(t *testing.T, saveOutput bool) {
+	t.Helper()
+
 	pvm.PvmLogging = false
 	pvm.PvmTrace = false
 	pvm.VMsCompare = false
@@ -539,40 +550,28 @@ func TestPublishFuzzTrace(t *testing.T) {
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule("pvm_validator")
 
-	targetVersion := "gp-0.6.7"
+	targetVersion := "0.6.7"
+	excludedTeams := []string{"vinwolf"}
 
-	// 1. Get the SOURCE path where test files are located.
 	sourcePath, err := GetFuzzReportsPath()
 	if err != nil {
 		t.Fatalf("failed to get source fuzz reports path: %v", err)
 	}
 
-	// 2. Get the DESTINATION path where reports will be saved.
-	destinationPath, err := GetDunaReportsPath()
-	if err != nil {
-		t.Fatalf("failed to get destination reports path: %v", err)
+	var destinationPath string
+	if saveOutput {
+		destinationPath, err = GetDunaReportsPath()
+		if err != nil {
+			t.Fatalf("failed to get destination reports path: %v", err)
+		}
 	}
 
-	var testFiles []string
-	// 3. Walk the SOURCE path to find test files.
-	err = filepath.WalkDir(sourcePath, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() &&
-			strings.Contains(path, targetVersion) &&
-			strings.HasSuffix(d.Name(), ".bin") &&
-			d.Name() != "report.bin" && d.Name() != "genesis.bin" {
-			testFiles = append(testFiles, path)
-		}
-		return nil
-	})
-
+	testFiles, err := findFuzzTestFiles(sourcePath, targetVersion, excludedTeams)
 	if err != nil {
-		t.Fatalf("Error walking directory %s: %v", sourcePath, err)
+		t.Fatal(err)
 	}
 	if len(testFiles) == 0 {
-		t.Fatalf("No valid .bin files found in paths containing '%s' under %s", targetVersion, sourcePath)
+		t.Fatalf("No valid .bin files found for version '%s' under %s (after exclusions)", targetVersion, sourcePath)
 	}
 
 	for _, filename := range testFiles {
@@ -581,71 +580,25 @@ func TestPublishFuzzTrace(t *testing.T) {
 		testName := filepath.ToSlash(relPath)
 
 		t.Run(testName, func(t *testing.T) {
-			t.Parallel() // Optional: run tests in parallel for speed.
 			content, err := os.ReadFile(currentFile)
 			if err != nil {
 				t.Fatalf("failed to read file %s: %v", currentFile, err)
 			}
 
-			// 4. Pass BOTH paths to the helper function.
-			runSingleSTFTestAndSave(t, currentFile, string(content), pvm.BackendInterpreter, true, sourcePath, destinationPath)
+			if saveOutput {
+				t.Parallel()
+				runSingleSTFTestAndSave(t, currentFile, string(content), pvm.BackendInterpreter, true, sourcePath, destinationPath)
+			} else {
+				runSingleSTFTest(t, currentFile, string(content), pvm.BackendInterpreter, true)
+			}
 		})
 	}
 }
 
 func TestFuzzTrace(t *testing.T) {
-	pvm.PvmLogging = false
-	pvm.PvmTrace = false   // enable PVM trace for this test
-	pvm.VMsCompare = false // enable VM comparison for this test
+	testFuzzTraceInternal(t, false)
+}
 
-	log.InitLogger("debug")
-	log.EnableModule(log.PvmAuthoring)
-	log.EnableModule("pvm_validator")
-
-	targetVersion := "gp-0.6.7" // Define the target version string
-	jamConformancePath, err := GetFuzzReportsPath()
-	if err != nil {
-		t.Fatalf("failed to get fuzz reports path: %v", err)
-	}
-
-	var testFiles []string
-	err = filepath.WalkDir(jamConformancePath, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Condition: Is a file, path contains target version, name ends with .bin, AND is NOT report.bin
-		if !d.IsDir() &&
-			strings.Contains(path, targetVersion) &&
-			strings.HasSuffix(d.Name(), ".bin") &&
-			d.Name() != "report.bin" && d.Name() != "genesis.bin" {
-			testFiles = append(testFiles, path)
-		}
-		return nil
-	})
-
-	if err != nil {
-		t.Fatalf("Error walking directory %s: %v", jamConformancePath, err)
-	}
-
-	if len(testFiles) == 0 {
-		t.Fatalf("No valid .bin files (excluding report.bin) found in paths containing '%s' under %s", targetVersion, jamConformancePath)
-	}
-
-	for _, filename := range testFiles {
-		currentFile := filename
-		relPath, err := filepath.Rel(jamConformancePath, currentFile)
-		if err != nil {
-			relPath = filepath.Base(currentFile)
-		}
-		testName := filepath.ToSlash(relPath)
-
-		t.Run(testName, func(t *testing.T) {
-			content, err := os.ReadFile(currentFile)
-			if err != nil {
-				t.Fatalf("failed to read file %s: %v", currentFile, err)
-			}
-			runSingleSTFTest(t, currentFile, string(content), pvm.BackendInterpreter, true)
-		})
-	}
+func TestPublishFuzzTrace(t *testing.T) {
+	testFuzzTraceInternal(t, true)
 }

@@ -12,6 +12,67 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+func ApplyStateTransitionTickets(oldState *StateDB, ctx context.Context, blk *types.Block, validated_tickets map[common.Hash]common.Hash) (safroleState *SafroleState, err error) {
+	s := oldState.Copy()
+	if s.StateRoot != blk.Header.ParentStateRoot {
+		//fmt.Printf("Apply Block %v\n", blk.Header.Hash())
+		return safroleState, fmt.Errorf("ParentStateRoot does not match")
+	}
+	recentBlocks := s.JamState.RecentBlocks.B_H
+	if len(recentBlocks) > 0 && blk.Header.ParentHeaderHash != recentBlocks[len(recentBlocks)-1].HeaderHash {
+		log.Error(log.SDB, "ApplyStateTransitionFromBlock", "ParentHeaderHash", blk.Header.ParentHeaderHash, "recentBlocks", recentBlocks[len(recentBlocks)-1].HeaderHash)
+		return safroleState, fmt.Errorf("ParentHeaderHash does not match recent block")
+	}
+	s.JamState = oldState.JamState.Copy()
+	s.Block = blk
+	s.ParentHeaderHash = blk.Header.ParentHeaderHash
+	s.HeaderHash = blk.Header.Hash()
+	if s.Id == blk.Header.AuthorIndex {
+		s.Authoring = log.GeneralAuthoring
+	} else {
+		s.Authoring = log.GeneralValidating
+	}
+	log.Trace(s.Authoring, "ApplyStateTransitionFromBlock", "n", s.Id, "p", s.ParentHeaderHash, "headerhash", s.HeaderHash, "stateroot", s.StateRoot)
+	targetJCE := blk.TimeSlot()
+	// 17+18 -- takes the PREVIOUS accumulationRoot which summarizes C a set of (service, result) pairs and
+	// 19-22 - Safrole last
+	ticketExts := blk.Tickets()
+	sf_header := blk.GetHeader()
+	epochMark := blk.EpochMark()
+
+	if epochMark != nil {
+		// s.queuedTickets = make(map[common.Hash]types.Ticket)
+		s.GetJamState().ResetTallyStatistics()
+	}
+	// 0.6.2 4.7 - Recent History Dagga (β†) [No other state related]
+	s.ApplyStateRecentHistoryDagga(blk.Header.ParentStateRoot)
+	select {
+	case <-ctx.Done():
+		return safroleState, fmt.Errorf("ApplyStateRecentHistoryDagga canceled")
+	default:
+	}
+
+	// dispute should go here
+	disputes := blk.Disputes()
+	if len(disputes.Verdict) != 0 {
+		err = s.ApplyStateTransitionDispute(disputes)
+		if err != nil {
+			return safroleState, err
+		}
+	}
+	// TODO - 4.12 - Dispute
+	// 0.6.2 Safrole 4.5,4.8,4.9,4.10,4.11 [post dispute state , pre designed validators iota]
+	sf := s.GetSafrole()
+	// Shawn to check: should it be sf0 here?
+	sf.OffenderState = s.GetJamState().DisputesState.Psi_o
+	ss, err := sf.ApplyStateTransitionTickets(ctx, ticketExts, targetJCE, sf_header, validated_tickets) // Entropy computed!
+	if err != nil {
+		log.Error(log.SDB, "ApplyStateTransitionTickets", "err", jamerrors.GetErrorName(err))
+		return safroleState, err
+	}
+	return &ss, nil
+}
+
 // given previous safrole, applt state transition using block
 // σ'≡Υ(σ,B)
 func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block, validated_tickets map[common.Hash]common.Hash, pvmBackend string) (s *StateDB, err error) {
@@ -30,10 +91,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.Block = blk
 	s.ParentHeaderHash = blk.Header.ParentHeaderHash
 	s.HeaderHash = blk.Header.Hash()
-	isValid, _, _, headerErr := s.VerifyBlockHeader(blk)
-	if !isValid || headerErr != nil {
-		return s, fmt.Errorf("block header is not valid err=%v", headerErr)
-	}
 	if s.Id == blk.Header.AuthorIndex {
 		s.Authoring = log.GeneralAuthoring
 	} else {
@@ -77,6 +134,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		log.Error(log.SDB, "ApplyStateTransitionTickets", "err", jamerrors.GetErrorName(err))
 		return s, err
 	}
+	//fmt.Printf("Safrole state transition done: %v | validated_tickets: %v\n", s2, validated_tickets)
 	//the epochMark validators should be in gamma k'
 	if epochMark != nil {
 		// (6.27)Bandersnatch validator keys (kb) beginning in the next epoch.
@@ -95,6 +153,10 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 			}
 		}
 	}
+	isValid, _, _, headerErr := s.VerifyBlockHeader(blk, &s2)
+	if !isValid || headerErr != nil {
+		return s, fmt.Errorf("block header is not valid err=%v", headerErr)
+	}
 	safrole_debug := false
 	if safrole_debug {
 		err = VerifySafroleSTF(sf, &s2, blk)
@@ -112,6 +174,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 
 	assurances := blk.Assurances()
 	guarantees := blk.Guarantees()
+	log.Trace(log.A, "ApplyStateTransitionFromBlock", "len(assurances)", len(assurances))
 	// 4.13,4.14,4.15 - Rho [disputes, assurances, guarantees] [kappa',lamda',tau', beta dagga, prestate service, prestate accumulate related state]
 	// 4.16 available work report also updated
 	num_reports, num_assurances, err := s.ApplyStateTransitionRho(ctx, assurances, guarantees, targetJCE)
@@ -350,7 +413,7 @@ func (s *StateDB) ApplyStateTransitionDispute(disputes types.Dispute) (err error
 // Process Rho - Eq 25/26/27 using disputes, assurances, guarantees in that order
 func (s *StateDB) ApplyStateTransitionRho(ctx context.Context, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32) (num_reports map[types.Ed25519Key]uint16, num_assurances map[uint16]uint16, err error) {
 	d := s.GetJamState()
-	assuranceErr := s.ValidateAssurances(ctx, assurances, s.Block.Header.ParentHeaderHash)
+	assuranceErr := s.ValidateAssurances(ctx, assurances, s.Block.Header.ParentHeaderHash, false)
 	if assuranceErr != nil {
 		log.Error(log.SDB, "ApplyStateTransitionRho", "assuranceErr", assuranceErr)
 		return nil, nil, err
@@ -362,7 +425,8 @@ func (s *StateDB) ApplyStateTransitionRho(ctx context.Context, assurances []type
 	availableWorkReport, num_assurances := d.ComputeAvailabilityAssignments(assurances, targetJCE)
 	//_ = availableWorkReport                     // availableWorkReport is the work report that is available for the core, will be used in the audit section
 	s.AvailableWorkReport = availableWorkReport // every block has new available work report
-	//fmt.Printf("!!!Available Work Report: %v\n", types.ToJSONHex(availableWorkReport))
+	log.Trace(log.A, "ApplyStateTransitionRho", "len(s.AvailableWorkReport)", len(s.AvailableWorkReport))
+
 	// Guarantees checks
 	for _, g := range guarantees {
 		if err := s.VerifyGuaranteeBasic(g, targetJCE); err != nil {

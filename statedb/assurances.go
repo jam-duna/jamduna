@@ -13,6 +13,7 @@ import (
 
 // State transition function
 func (j *JamState) CountAvailableWR(validatedAssurances []types.Assurance) ([]uint32, map[uint16]uint16) {
+	log.Trace(log.A, "CountAvailableWR", "num_validated_assurances", len(validatedAssurances))
 	// Count the number of available assurances for each validator
 	num_assurances := make(map[uint16]uint16)
 	for _, a := range validatedAssurances {
@@ -25,28 +26,49 @@ func (j *JamState) CountAvailableWR(validatedAssurances []types.Assurance) ([]ui
 				tally[c]++
 			}
 		}
+		log.Trace(log.A, "CountAvailableWR", "core", c, "available", tally[c])
 	}
 	return tally, num_assurances
 }
 
+func (j *JamState) GetReportTimeouts(timeslot uint32) []bool {
+	timeouts := make([]bool, types.TotalCores)
+	for i, assignment := range j.AvailabilityAssignments {
+		if assignment == nil {
+			timeouts[i] = false // no report, no timeout
+			continue
+		}
+		timeouts[i] = timeslot >= assignment.Timeslot+uint32(types.UnavailableWorkReplacementPeriod) // (11.17)
+	}
+	return timeouts
+}
+
 func (j *JamState) ComputeAvailabilityAssignments(validatedAssurances []types.Assurance, timeslot uint32) (wr []types.WorkReport, num_assurances map[uint16]uint16) {
-	// Count the number of available assurances for each validator on each core
 	tally, num_assurances := j.CountAvailableWR(validatedAssurances)
 	wr = make([]types.WorkReport, 0)
-	for c, available := range tally {
+
+	reportTimeouts := j.GetReportTimeouts(timeslot)
+
+	for c, availableCnt := range tally {
 		if j.AvailabilityAssignments[c] == nil {
 			continue
 		}
-		timeout := timeslot > j.AvailabilityAssignments[c].Timeslot+uint32(types.UnavailableWorkReplacementPeriod)
-		if available > 2*types.TotalValidators/3 || timeout {
-			if timeout {
-				//fmt.Printf("Core %d: Timeout detected, removing work report -- %d - %d = %d\n", c, timeslot, j.AvailabilityAssignments[c].Timeslot+uint32(types.UnavailableWorkReplacementPeriod), diff)
-			} else {
-				wr = append(wr, j.AvailabilityAssignments[c].WorkReport)
-			}
+		assuranceThreshold := uint32(2 * types.TotalValidators / 3)
+		isTimedOut := reportTimeouts[c]
+		isThresholdReached := availableCnt > assuranceThreshold
+		if isThresholdReached {
+			log.Trace(log.A, "ComputeAvailabilityAssignments - Reached availability threshold", "Core", c, "availableCnt", availableCnt, "threshold", assuranceThreshold, "timeslot", timeslot)
+			wr = append(wr, j.AvailabilityAssignments[c].WorkReport)
+		}
+		if isTimedOut {
+			log.Info(log.A, "ComputeAvailabilityAssignments - Timeout detected", "Core", c, "availableCnt", availableCnt, "threshold", assuranceThreshold, "timeslot", timeslot)
+		}
+		if isThresholdReached || isTimedOut {
 			j.AvailabilityAssignments[c] = nil
+			log.Trace(log.A, "ComputeAvailabilityAssignments - Clearing core assignment", "Core", c, "availableCnt", availableCnt, "threshold", assuranceThreshold, "timeslot", timeslot)
 		}
 	}
+
 	return wr, num_assurances
 }
 
@@ -57,7 +79,8 @@ func (s *StateDB) getWRStatus() (hasRecentWR, hasStaleWR []bool) {
 	for core, rho := range s.JamState.AvailabilityAssignments {
 		if rho != nil {
 			hasRecentWR[core] = true
-			if ts > rho.Timeslot+uint32(types.UnavailableWorkReplacementPeriod) {
+			// (11.17) A work-report is considered stale if its timeslot `rho_t` is greater than or equal timeslot `t` by at least `UWRP` period
+			if ts >= rho.Timeslot+uint32(types.UnavailableWorkReplacementPeriod) {
 				hasStaleWR[core] = true
 			}
 		}
@@ -66,20 +89,25 @@ func (s *StateDB) getWRStatus() (hasRecentWR, hasStaleWR []bool) {
 }
 
 func (s *StateDB) checkAssurance(a types.Assurance, anchor common.Hash, validators types.Validators, hasRecentWR, hasStaleWR []bool) error {
+
+	// (11.11) assurance's anchor `a_a` to be the parent block hash `H_p`.
 	if a.Anchor != anchor {
 		return jamerrors.ErrABadParentHash
 	}
+
+	// (11.13)
 	if int(a.ValidatorIndex) >= len(validators) {
 		return jamerrors.ErrABadValidatorIndex
 	}
+
+	// (11.13)
 	if err := a.VerifySignature(validators[a.ValidatorIndex]); err != nil {
 		return jamerrors.ErrABadSignature
 	}
+
+	// (11.15) if a bit `a_f[c]` is set for a core, there must be a pending work-report on that core
 	if !a.ValidBitfield(hasRecentWR) {
 		return jamerrors.ErrABadCore
-	}
-	if !a.CheckTimeout(hasStaleWR) {
-		return jamerrors.ErrAStaleReport
 	}
 	return nil
 }
@@ -104,7 +132,9 @@ func (s *StateDB) GetValidAssurances(assurances []types.Assurance, anchor common
 	return
 }
 
-func (s *StateDB) ValidateAssurances(ctx context.Context, assurances []types.Assurance, anchor common.Hash) error {
+// ValidateAssurances checks the validity of assurances against the current state.
+// Note that checkTimeout should only be true for the Assurances STF as timeouts are treated within JAM logic
+func (s *StateDB) ValidateAssurances(ctx context.Context, assurances []types.Assurance, anchor common.Hash, checkTimeout bool) error {
 	validators := s.GetSafrole().CurrValidators
 	hasRecentWR, hasStaleWR := s.getWRStatus()
 	// check sorting by validatorIndex
@@ -112,6 +142,11 @@ func (s *StateDB) ValidateAssurances(ctx context.Context, assurances []types.Ass
 	for i, a := range assurances {
 		if err := s.checkAssurance(a, anchor, validators, hasRecentWR, hasStaleWR); err != nil {
 			return err
+		}
+		if checkTimeout {
+			if !a.CheckTimeout(hasStaleWR) {
+				return jamerrors.ErrAStaleReport
+			}
 		}
 		if i > 0 {
 			if a.ValidatorIndex == prevIndex {

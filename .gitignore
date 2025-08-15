@@ -71,3 +71,5 @@ conf/*
 java*.jar
 libjava*.dylib
 assets/zcash-srs-2-11-uncompressed.bin
+cmd/.DS_Store
+/cmd/duna_fuzzer/rawdata

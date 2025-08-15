@@ -82,7 +82,7 @@ func VerifyAssurances(jsonFile string, exceptErr error) error {
 	db.Block.Header.ParentHeaderHash = testCase.Input.ParentHash
 	db.Block.Header.Slot = uint32(testCase.Input.Slot)
 	db.ParentHeaderHash = testCase.Input.ParentHash
-	err = db.ValidateAssurances(context.Background(), db.Block.Extrinsic.Assurances, db.ParentHeaderHash)
+	err = db.ValidateAssurances(context.Background(), db.Block.Extrinsic.Assurances, db.ParentHeaderHash, true)
 	if err != exceptErr {
 		return fmt.Errorf("expected error %v, got %v", exceptErr, err)
 	}

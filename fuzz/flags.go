@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+const (
+	FUZZ_VERSION = "0.6.7.14"
+)
+
 type FlagRegistry struct {
 	program     string
 	flags       []registeredFlag

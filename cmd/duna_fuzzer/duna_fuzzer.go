@@ -27,10 +27,9 @@ func validateImportBlockConfig(jConfig types.ConfigJamBlocks) {
 }
 
 func main() {
-	fmt.Println("fuzzer - JAM Duna 0.6.7 fuzzer")
+	fmt.Printf("fuzzer - JAM Duna %s fuzzer", fuzz.FUZZ_VERSION)
 
 	dir := "/tmp/importBlock"
-	//socket := "/tmp/jam_target.sock"
 	enableRPC := false
 	useUnixSocket := true
 	test_dir := "./rawdata"
@@ -73,7 +72,7 @@ func main() {
 
 	validateImportBlockConfig(jConfig)
 	fuzzerInfo := fuzz.PeerInfo{
-		Name:       "jam-duna-fuzzer-v0.13",
+		Name:       fmt.Sprintf("jam-duna-fuzzer-%s", fuzz.FUZZ_VERSION),
 		AppVersion: fuzz.Version{Major: 0, Minor: 6, Patch: 7},
 		JamVersion: fuzz.Version{Major: 0, Minor: 6, Patch: 7},
 	}

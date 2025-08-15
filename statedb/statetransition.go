@@ -167,7 +167,7 @@ func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, 
 		return nil
 	}
 
-	compareKeyVals(s1.GetAllKeyValues(), st.PostState.KeyVals)
+	//compareKeyVals(s1.GetAllKeyValues(), st.PostState.KeyVals)
 	return fmt.Errorf("mismatch")
 }
 

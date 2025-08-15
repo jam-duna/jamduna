@@ -949,8 +949,10 @@ func (s *SafroleState) SimulatePostiorEntropy(targetJCE uint32) (s2 *SafroleStat
 	// here we set the sealer authority
 	if epochAdvanced {
 		// New Epoch change! Shift entropy
+		log.Info(log.SDB, "SimulatePostiorEntropy New Epoch")
 		// [fresh, η0, η1, η2] - > [η0', η1', η2', η3']. η0' doesn't matter as it would be updated after STF
 		s2.AdvanceEntropyAndValidator(s, common.Hash{})
+
 	} else {
 		// Epoch in progress ... no change. entropy0 is unimportant
 	}
@@ -1500,6 +1502,13 @@ func VerifySafroleSTF(old_sf_origin *SafroleState, new_sf_origin *SafroleState, 
 	signing_validator := new_sf.GetCurrValidator(int(validatorIdx))
 	block_author_ietf_pub := bandersnatch.BanderSnatchKey(signing_validator.GetBandersnatchKey())
 	vrfOutput, err := bandersnatch.IetfVrfVerify(block_author_ietf_pub, H_s, c, m)
+	fmt.Printf("VerifyBlockHeader: H_s Verification: block_author_ietf_pub: %s, H_s: %s, c: %s, m: %s, vrfOutput: %s\n",
+		common.BytesToHexStr(block_author_ietf_pub[:]),
+		common.BytesToHexStr(H_s),
+		common.BytesToHexStr(c),
+		common.BytesToHexStr(m),
+		common.BytesToHexStr(vrfOutput),
+	)
 	if err != nil {
 		log.Error(log.SDB, "IetfVrfVerify Failed", "validatorIdx", validatorIdx, "block_author_ietf_pub", block_author_ietf_pub.String(), "H_s(seal)", H_s, "c", c, "m(headerWithoutSig)", m, "err", err)
 		log.Error(log.SDB, "IetfVrfVerify Failed (Extra)", "slot", slot_header, "type", new_sf.GetEpochT(), "validatorIdx", validatorIdx, "blockSealEntropy n[3]", blockSealEntropy, "Entropy", new_sf.Entropy)

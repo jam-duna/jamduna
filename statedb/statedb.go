@@ -896,17 +896,30 @@ type SealBlockMaterial struct {
 	HeaderBytes string `json:"header_bytes"`
 }
 
-func (s *StateDB) VerifyBlockHeader(bl *types.Block) (isValid bool, validatorIdx uint16, ietf_pub bandersnatch.BanderSnatchKey, verificationErr error) {
+func (s *StateDB) VerifyBlockHeader(bl *types.Block, sf0 *SafroleState) (isValid bool, validatorIdx uint16, ietf_pub bandersnatch.BanderSnatchKey, verificationErr error) {
 	targetJCE := bl.TimeSlot()
 	h := bl.GetHeader()
 	validatorIdx = h.AuthorIndex
+	var err error
 
-	// ValidateTicketTransition
-	sf0, err := s.GetPosteriorSafroleEntropy(targetJCE)
-	if err != nil {
-		log.Error(log.SDB, "GetPosteriorSafroleEntropy", "err", err)
-		return false, validatorIdx, bandersnatch.BanderSnatchKey{}, fmt.Errorf("VerifyBlockHeader Failed: GetPosteriorSafroleEntropy")
+	if sf0 == nil {
+		// ValidateTicketTransition
+
+		sf0, err = s.GetPosteriorSafroleEntropy(targetJCE)
+		if err != nil {
+			log.Error(log.SDB, "GetPosteriorSafroleEntropy", "err", err)
+			return false, validatorIdx, bandersnatch.BanderSnatchKey{}, fmt.Errorf("VerifyBlockHeader Failed: GetPosteriorSafroleEntropy")
+		}
+
+		/*
+			sf0, err = ApplyStateTransitionTickets(s, context.TODO(), bl, nil)
+			if err != nil {
+				log.Error(log.SDB, "ApplyStateTransitionTickets", "err", err)
+				return false, validatorIdx, bandersnatch.BanderSnatchKey{}, fmt.Errorf("VerifyBlockHeader Failed: ApplyStateTransitionTickets")
+			}
+		*/
 	}
+
 	// author_idx is the K' so we use the sf_tmp
 	signing_validator := sf0.GetCurrValidator(int(validatorIdx))
 	block_author_ietf_pub := bandersnatch.BanderSnatchKey(signing_validator.GetBandersnatchKey())
