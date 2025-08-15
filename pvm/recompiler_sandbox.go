@@ -70,9 +70,8 @@ func SetDebugRecompiler(enabled bool) {
 
 type RecompilerSandboxVM struct {
 	RecompilerVM
-	sandBox        uc.Unicorn
-	pageAccess     map[int]int
-	dirtyPages     map[int]bool // pages that were modified
+	sandBox *Emulator
+
 	savedRegisters bool
 	savedMemory    bool
 	ecallAddr      uint64
@@ -85,10 +84,18 @@ type RecompilerSandboxVM struct {
 	genreatedCode       []byte // generated x86 code
 }
 
-// NewRecompilerVM_SandBox creates a Unicorn sandbox with 4 GiB guest RAM
-// and an extra dump page at the very end of that RAM region.
-func NewRecompilerSandboxVM(vm *VM) (*RecompilerSandboxVM, error) {
+type Emulator struct {
+	uc.Unicorn
+	pageAccess           map[int]int
+	dirtyPages           map[int]bool // pages that were modified
+	current_heap_pointer uint32
+	regDumpMem           []byte  // buffer to copy registers
+	regDumpAddr          uintptr // address to dump registers
+	realMemory           []byte  // actual memory for the guest
+	realMemAddr          uintptr // address of the real memory
+}
 
+func NewEmulator() (*Emulator, error) {
 	mu, err := uc.NewUnicorn(uc.ARCH_X86, uc.MODE_64)
 	if err != nil {
 		return nil, fmt.Errorf("create unicorn: %w", err)
@@ -120,8 +127,40 @@ func NewRecompilerSandboxVM(vm *VM) (*RecompilerSandboxVM, error) {
 		mu.Close()
 		return nil, fmt.Errorf("protect dump page: %w", err)
 	}
+	access := make(map[int]int)
+	for i := 0; i < TotalPages; i++ {
+		access[i] = PageInaccessible // initialize all pages as inaccessible
+	}
+	return &Emulator{
+		Unicorn:     mu,
+		pageAccess:  make(map[int]int),
+		dirtyPages:  make(map[int]bool),
+		regDumpMem:  make([]byte, dumpSize), // buffer to copy registers
+		regDumpAddr: uintptr(dumpAddr),
+		realMemory:  nil, // defer heavy allocation
+		realMemAddr: uintptr(guestBase),
+	}, nil
+}
+func (emu *Emulator) Close() error {
+	if emu.Unicorn != nil {
+		return emu.Unicorn.Close()
+	}
+	return nil
+}
 
-	ecallAddr := guestBase + guestMainSize
+// NewRecompilerVM_SandBox creates a Unicorn sandbox with 4 GiB guest RAM
+// and an extra dump page at the very end of that RAM region.
+func NewRecompilerSandboxVM(vm *VM) (*RecompilerSandboxVM, error) {
+	mu, err := NewEmulator()
+	if err != nil {
+		return nil, fmt.Errorf("create emulator: %w", err)
+	}
+	return NewRecompilerSandboxVMFromEmulator(vm, mu)
+}
+
+func NewRecompilerSandboxVMFromEmulator(vm *VM, mu *Emulator) (*RecompilerSandboxVM, error) {
+
+	ecallAddr := guestBase + guestSize
 	if err := mu.MemMap(ecallAddr, 0x1000); err != nil {
 		mu.Close()
 		return nil, fmt.Errorf("map ecall page: %w", err)
@@ -130,38 +169,43 @@ func NewRecompilerSandboxVM(vm *VM) (*RecompilerSandboxVM, error) {
 		mu.Close()
 		return nil, fmt.Errorf("protect ecall page: %w", err)
 	}
-
+	dumpSize := uint64(0x100000) // 1 MiB dump page size
+	if dumpSize < 104 {
+		dumpSize = 10
+	}
+	dumpSize = (dumpSize + pageSize - 1) & ^(pageSize - 1) // round-up
+	dumpAddr := guestBase - dumpSize                       // dump page start
 	rvm := &RecompilerSandboxVM{
 		RecompilerVM: RecompilerVM{
-			VM: vm,
-
-			regDumpMem:      make([]byte, dumpSize), // buffer to copy registers
-			regDumpAddr:     uintptr(dumpAddr),
-			realMemory:      nil, // defer heavy allocation
-			realMemAddr:     uintptr(guestBase),
+			VM:              vm,
 			startCode:       make([]byte, 0),
 			exitCode:        make([]byte, 0),
 			JumpTableMap:    make([]uint64, 0),
 			InstMapX86ToPVM: make(map[int]uint32),
 			InstMapPVMToX86: make(map[uint32]int),
+			RecompilerRam: &RecompilerRam{
+				regDumpMem:  make([]byte, dumpSize), // buffer to copy registers
+				regDumpAddr: uintptr(dumpAddr),
+				realMemory:  nil, // defer heavy allocation
+				realMemAddr: uintptr(guestBase),
+			},
 		},
-		sandBox:    mu,
-		pageAccess: make(map[int]int),
-		dirtyPages: make(map[int]bool),
+		sandBox: mu,
+
 		ecallAddr:  ecallAddr,
 		sbrkOffset: 0x1,
 	}
-	rvm.current_heap_pointer = rvm.RecompilerVM.VM.Ram.GetCurrentHeapPointer()
-	rvm.RecompilerVM.VM.Ram = rvm
+	rvm.sandBox.current_heap_pointer = rvm.RecompilerVM.VM.Ram.GetCurrentHeapPointer()
+	rvm.RecompilerVM.VM.Ram = mu
 	rvm.sandBox.HookAdd(uc.HOOK_MEM_READ, func(mu uc.Unicorn, access int,
 		addr uint64, size int, value int64) {
 		// compute the page index
-		if addr < guestBase || addr >= guestBase+guestMainSize {
+		if addr < guestBase || addr >= guestBase+guestSize {
 			return // ignore accesses outside guest RAM
 		}
 		offset := addr - guestBase
 		pageIndex := int(offset / pageSize)
-		if access, ok := rvm.pageAccess[pageIndex]; !ok || access == PageInaccessible {
+		if access, ok := rvm.sandBox.pageAccess[pageIndex]; !ok || access == PageInaccessible {
 			fmt.Printf("❌ Access denied for page %d at address 0x%X\n", pageIndex, offset)
 			rvm.ResultCode = types.WORKRESULT_PANIC
 			rvm.terminated = true
@@ -195,7 +239,7 @@ func NewRecompilerSandboxVM(vm *VM) (*RecompilerSandboxVM, error) {
 			return
 		}
 
-		if addr < guestBase || addr >= guestBase+guestMainSize {
+		if addr < guestBase || addr >= guestBase+guestSize {
 			return
 		} else {
 			if baseRegValue != guestBase {
@@ -205,7 +249,7 @@ func NewRecompilerSandboxVM(vm *VM) (*RecompilerSandboxVM, error) {
 		// compute the page index
 		offset := addr - guestBase
 		pageIndex := int(offset / pageSize)
-		if access, ok := rvm.pageAccess[pageIndex]; !ok || access == PageInaccessible || access == PageImmutable {
+		if access, ok := rvm.sandBox.pageAccess[pageIndex]; !ok || access == PageInaccessible || access == PageImmutable {
 			if !ok {
 				fmt.Printf("🔒 Page %d at address 0x%X is not initialized\n", pageIndex, offset)
 			} else if access == PageInaccessible {
@@ -220,7 +264,7 @@ func NewRecompilerSandboxVM(vm *VM) (*RecompilerSandboxVM, error) {
 			rvm.saveRegistersOnceSandBox()
 			rvm.saveMemoryOnceSandBox()
 		} else {
-			rvm.dirtyPages[pageIndex] = true // mark page as dirty
+			rvm.sandBox.dirtyPages[pageIndex] = true // mark page as dirty
 		}
 	}, 1, 0, 0)
 	rvm.sandBox.HookAdd(unicorn.HOOK_MEM_INVALID, func(uc unicorn.Unicorn, access int, address uint64, size int, value int64) bool {
@@ -381,6 +425,11 @@ func (vm *RecompilerSandboxVM) translateBasicBlock(startPC uint64) *BasicBlock {
 			// 1. Dump registers to memory.
 			// 2. Set up C ABI registers (rdi, esi).
 			opcode := uint32(types.DecodeE_l(inst.Args))
+			if opcode != LOG && vm.IsChild {
+				// panic
+				code = append(code, emitTrap()...)
+				continue
+			}
 			Ecallcode := append(vm.DumpRegisterToMemory(true), EmitCallToEcalliStubSandBox(uintptr(unsafe.Pointer(vm)), int(opcode), uint64(vm.ecallAddr))...)
 			Ecallcode = append(Ecallcode, vm.RestoreRegisterInX86()...)
 			code = append(code, Ecallcode...)
@@ -872,7 +921,7 @@ func (rvm *RecompilerSandboxVM) ExecuteSandBox(entryPoint uint64) error {
 	return nil
 }
 
-func (rvm *RecompilerSandboxVM) SetMemAccessSandBox(address uint32, length uint32, access int) error {
+func (mu *Emulator) SetMemAccessSandBox(address uint32, length uint32, access int) error {
 	if length == 0 {
 		return nil
 	}
@@ -899,17 +948,17 @@ func (rvm *RecompilerSandboxVM) SetMemAccessSandBox(address uint32, length uint3
 	for page := startPage; page <= endPage; page++ {
 		// fmt.Printf("Setting access for page %d: %d\n", page, access)
 		// fmt.Printf("Address: 0x%x, Length: 0x%x, Page: %d\n", address, length, page)
-		if err := rvm.SetPageAccessSandBox(page, access); err != nil {
+		if err := mu.SetPageAccessSandBox(page, access); err != nil {
 			return fmt.Errorf("failed to set access on page %d: %w", page, err)
 		}
 	}
 	return nil
 }
 
-func (rvm *RecompilerSandboxVM) allocatePages(startPage uint32, count uint32) {
+func (mu *Emulator) allocatePages(startPage uint32, count uint32) {
 	for i := uint32(0); i < count; i++ {
 		pageIndex := startPage + i
-		rvm.SetPageAccessSandBox(int(pageIndex), PageMutable)
+		mu.SetPageAccessSandBox(int(pageIndex), PageMutable)
 	}
 }
 
@@ -959,47 +1008,47 @@ func (rvm *RecompilerSandboxVM) saveMemoryOnceSandBox() {
 }
 
 // SetPageAccess sets the memory protection of a single page using BaseReg as memory base.
-func (rvm *RecompilerSandboxVM) SetPageAccessSandBox(pageIndex int, access int) error {
+func (mu *Emulator) SetPageAccessSandBox(pageIndex int, access int) error {
 	if pageIndex < 0 || pageIndex >= TotalPages {
 		return fmt.Errorf("invalid page index")
 	}
-	rvm.pageAccess[pageIndex] = access
+	mu.pageAccess[pageIndex] = access
 	return nil
 }
 
 // ReadMemory reads data from a specific address in the memory if it's readable.
-func (rvm *RecompilerSandboxVM) ReadMemorySandBox(address uint32, length uint32) ([]byte, error) {
+func (mu *Emulator) ReadMemorySandBox(address uint32, length uint32) ([]byte, error) {
 	pageIndex := int(address / PageSize)
 	if pageIndex < 0 || pageIndex >= TotalPages {
 		return nil, fmt.Errorf("invalid address %x for page index %d", address, pageIndex)
 	}
 	godMode := false
 	godMap := make(map[int]int)
-	tmpMap := rvm.pageAccess
+	tmpMap := mu.pageAccess
 	if godMode {
 		for i := 0; i < TotalPages; i++ {
 			godMap[i] = PageMutable // allow all pages to be readable
 		}
-		rvm.pageAccess = godMap
-		data, err := rvm.sandBox.MemRead(uint64(rvm.realMemAddr+uintptr(address)), uint64(length))
-		rvm.pageAccess = tmpMap // restore original page access
+		mu.pageAccess = godMap
+		data, err := mu.MemRead(uint64(mu.realMemAddr+uintptr(address)), uint64(length))
+		mu.pageAccess = tmpMap // restore original page access
 		if err != nil {
 			return nil, fmt.Errorf("read memory at address %x: %w", address, err)
 		}
 		return data, nil
 	}
-	return rvm.sandBox.MemRead(uint64(rvm.realMemAddr+uintptr(address)), uint64(length))
+	return mu.MemRead(uint64(mu.realMemAddr+uintptr(address)), uint64(length))
 
 }
 
 // WriteMemory writes data to a specific address in the memory if it's writable.
-func (rvm *RecompilerSandboxVM) WriteMemorySandBox(address uint32, data []byte) error {
+func (mu *Emulator) WriteMemorySandBox(address uint32, data []byte) error {
 	pageIndex := int(address / PageSize)
 	if pageIndex < 0 || pageIndex >= TotalPages {
 		return fmt.Errorf("invalid address %x for page index %d", address, pageIndex)
 	}
 
-	return rvm.sandBox.MemWrite(uint64(rvm.realMemAddr+uintptr(address)), data)
+	return mu.MemWrite(uint64(mu.realMemAddr+uintptr(address)), data)
 }
 
 // Standard_Program_Initialization initializes the program memory and registers
@@ -1011,19 +1060,19 @@ func (vm *RecompilerSandboxVM) Standard_Program_Initialization_SandBox(argument_
 	//1)
 	// o_byte
 	o_len := len(vm.o_byte)
-	if err = vm.SetMemAccessSandBox(Z_Z, uint32(o_len), PageMutable); err != nil {
+	if err = vm.sandBox.SetMemAccessSandBox(Z_Z, uint32(o_len), PageMutable); err != nil {
 		return fmt.Errorf("SetMemAccess failed (o_byte): %w", err)
 	}
-	if err = vm.WriteMemorySandBox(Z_Z, vm.o_byte); err != nil {
+	if err = vm.sandBox.WriteMemorySandBox(Z_Z, vm.o_byte); err != nil {
 		return fmt.Errorf("WriteMemory failed (o_byte): %w", err)
 	}
-	if err = vm.SetMemAccessSandBox(Z_Z, uint32(o_len), PageImmutable); err != nil {
+	if err = vm.sandBox.SetMemAccessSandBox(Z_Z, uint32(o_len), PageImmutable); err != nil {
 		return fmt.Errorf("SetMemAccess failed (o_byte): %w", err)
 	}
 	//2)
 	//p|o|
 	p_o_len := P_func(uint32(o_len))
-	if err = vm.SetMemAccessSandBox(Z_Z+uint32(o_len), p_o_len, PageImmutable); err != nil {
+	if err = vm.sandBox.SetMemAccessSandBox(Z_Z+uint32(o_len), p_o_len, PageImmutable); err != nil {
 		return fmt.Errorf("SetMemAccess failed (p_o_byte): %w", err)
 	}
 
@@ -1039,41 +1088,41 @@ func (vm *RecompilerSandboxVM) Standard_Program_Initialization_SandBox(argument_
 	// w_byte
 	w_addr := 2*Z_Z + z_o
 	w_len := uint32(len(vm.w_byte))
-	if err = vm.SetMemAccessSandBox(w_addr, w_len, PageMutable); err != nil {
+	if err = vm.sandBox.SetMemAccessSandBox(w_addr, w_len, PageMutable); err != nil {
 		return fmt.Errorf("SetMemAccess failed (w_byte): %w", err)
 	}
-	if err = vm.WriteMemorySandBox(w_addr, vm.w_byte); err != nil {
+	if err = vm.sandBox.WriteMemorySandBox(w_addr, vm.w_byte); err != nil {
 		return fmt.Errorf("WriteMemory failed (w_byte): %w", err)
 	}
 	// 4)
 	addr4 := 2*Z_Z + z_o + w_len
 	little_z := vm.z
 	len4 := P_func(w_len) + little_z*Z_P - w_len
-	if err = vm.SetMemAccessSandBox(addr4, len4, PageMutable); err != nil {
+	if err = vm.sandBox.SetMemAccessSandBox(addr4, len4, PageMutable); err != nil {
 		return fmt.Errorf("SetMemAccess failed (addr4): %w", err)
 	}
 	// 5)
 	addr5 := 0xFFFFFFFF + 1 - 2*Z_Z - Z_I - P_func(vm.s)
 	len5 := P_func(vm.s)
-	if err = vm.SetMemAccessSandBox(addr5, len5, PageMutable); err != nil {
+	if err = vm.sandBox.SetMemAccessSandBox(addr5, len5, PageMutable); err != nil {
 		return fmt.Errorf("SetMemAccess failed (addr5): %w", err)
 	}
 	// 6)
 	argAddr := uint32(0xFFFFFFFF) - Z_Z - Z_I + 1
-	if err = vm.SetMemAccessSandBox(argAddr, uint32(len(argument_data_a)), PageMutable); err != nil {
+	if err = vm.sandBox.SetMemAccessSandBox(argAddr, uint32(len(argument_data_a)), PageMutable); err != nil {
 		return fmt.Errorf("SetMemAccess failed (argAddr): %w", err)
 	}
-	if err = vm.WriteMemorySandBox(argAddr, argument_data_a); err != nil {
+	if err = vm.sandBox.WriteMemorySandBox(argAddr, argument_data_a); err != nil {
 		return fmt.Errorf("WriteMemory failed (argAddr): %w", err)
 	}
 	// set it back to immutable
-	if err = vm.SetMemAccessSandBox(argAddr+uint32(len(argument_data_a)), Z_I, PageImmutable); err != nil {
+	if err = vm.sandBox.SetMemAccessSandBox(argAddr+uint32(len(argument_data_a)), Z_I, PageImmutable); err != nil {
 		return fmt.Errorf("SetMemAccess failed (argAddr+len): %w", err)
 	}
 	// 7)
 	addr7 := argAddr + uint32(len(argument_data_a))
 	len7 := argAddr + P_func(uint32(len(argument_data_a))) - addr7
-	if err = vm.SetMemAccessSandBox(addr7, len7, PageImmutable); err != nil {
+	if err = vm.sandBox.SetMemAccessSandBox(addr7, len7, PageImmutable); err != nil {
 		return fmt.Errorf("SetMemAccess failed (addr7): %w", err)
 	}
 
@@ -1088,27 +1137,27 @@ func (vm *RecompilerSandboxVM) Standard_Program_Initialization_SandBox(argument_
 // ReadRAMBytes(address uint32, length uint32) ([]byte, uint64)
 // allocatePages(startPage uint32, count uint32)
 
-func (vm *RecompilerSandboxVM) WriteRAMBytes(address uint32, data []byte) uint64 {
+func (mu *Emulator) WriteRAMBytes(address uint32, data []byte) uint64 {
 	if len(data) == 0 {
 		return OK
 	}
 	if len(data) == 0 {
 		return OOB
 	}
-	if err := vm.WriteMemorySandBox(address, data); err != nil {
+	if err := mu.WriteMemorySandBox(address, data); err != nil {
 		return OOB
 	}
 	return OK
 }
 
-func (vm *RecompilerSandboxVM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
+func (mu *Emulator) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 	if length == 0 {
 		return nil, OOB
 	}
 	if length == 0 {
 		return []byte{}, OK
 	}
-	data, err := vm.ReadMemorySandBox(address, length)
+	data, err := mu.ReadMemorySandBox(address, length)
 	if err != nil {
 		fmt.Printf("ReadRAMBytes error: %v\n", err)
 		return nil, OOB
@@ -1116,11 +1165,11 @@ func (vm *RecompilerSandboxVM) ReadRAMBytes(address uint32, length uint32) ([]by
 	return data, OK
 }
 
-func (rvm *RecompilerSandboxVM) ReadRegister(index int) (uint64, uint64) {
+func (mu *Emulator) ReadRegister(index int) (uint64, uint64) {
 	if index < 0 || index >= regSize {
 		return 0, OOB // Out of bounds
 	}
-	value_bytes, err := rvm.sandBox.MemRead(uint64(rvm.regDumpAddr+uintptr(index*8)), 8)
+	value_bytes, err := mu.MemRead(uint64(mu.regDumpAddr+uintptr(index*8)), 8)
 	if err != nil {
 		fmt.Printf("ReadRegister error: %v\n", err)
 		return 0, OOB // Out of bounds
@@ -1129,7 +1178,7 @@ func (rvm *RecompilerSandboxVM) ReadRegister(index int) (uint64, uint64) {
 	return value, OK
 }
 
-func (rvm *RecompilerSandboxVM) WriteRegister(index int, value uint64) uint64 {
+func (mu *Emulator) WriteRegister(index int, value uint64) uint64 {
 	if index < 0 || index >= regSize {
 		return OOB // Out of bounds
 	}
@@ -1139,11 +1188,11 @@ func (rvm *RecompilerSandboxVM) WriteRegister(index int, value uint64) uint64 {
 	value_bytes := make([]byte, 8)
 	binary.LittleEndian.PutUint64(value_bytes, value)
 	start := index * 8
-	if start+8 > len(rvm.regDumpMem) {
+	if start+8 > len(mu.regDumpMem) {
 		return OOB // Out of bounds
 	}
 
-	if err := rvm.sandBox.MemWrite(uint64(rvm.regDumpAddr+uintptr(start)), value_bytes); err != nil {
+	if err := mu.MemWrite(uint64(mu.regDumpAddr+uintptr(start)), value_bytes); err != nil {
 		fmt.Printf("WriteRegister error: %v\n", err)
 		return OOB // Out of bounds
 	}
@@ -1152,10 +1201,10 @@ func (rvm *RecompilerSandboxVM) WriteRegister(index int, value uint64) uint64 {
 }
 
 // ReadRegisters returns a copy of the current register values.
-func (rvm *RecompilerSandboxVM) ReadRegisters() []uint64 {
+func (mu *Emulator) ReadRegisters() []uint64 {
 	registersCopy := make([]uint64, regSize)
 	for i := 0; i < regSize; i++ {
-		value, ok := rvm.ReadRegister(i)
+		value, ok := mu.ReadRegister(i)
 		if ok != OK {
 			fmt.Printf("ReadRegisters error: %v\n", ok)
 			return nil // Error occurred, return nil
@@ -1163,6 +1212,24 @@ func (rvm *RecompilerSandboxVM) ReadRegisters() []uint64 {
 		registersCopy[i] = value
 	}
 	return registersCopy
+}
+
+func (mu *Emulator) GetDirtyPages() []int {
+	var dirtyPages []int
+	for i := 0; i < TotalPages; i++ {
+		if mu.dirtyPages[i] {
+			dirtyPages = append(dirtyPages, i)
+		}
+	}
+	return dirtyPages
+}
+
+func (mu *Emulator) GetCurrentHeapPointer() uint32 {
+	return mu.current_heap_pointer
+}
+
+func (mu *Emulator) SetCurrentHeapPointer(pointer uint32) {
+	mu.current_heap_pointer = pointer
 }
 
 type EmulatorSnapShot struct {
@@ -1185,7 +1252,7 @@ func (vm *RecompilerSandboxVM) TakeSnapShot(name string, pc uint32, registers []
 		InitialRegs:      registers,
 		InitialPC:        pc,
 		FailAddress:      failAddress,
-		InitialPageMap:   vm.pageAccess,
+		InitialPageMap:   vm.sandBox.pageAccess,
 		InitialMemory:    vm.GetMemory(),
 		InitialGas:       gas,
 		Code:             vm.x86Code,
@@ -1232,7 +1299,7 @@ func (vm *RecompilerSandboxVM) GetMemory() map[int][]byte {
 
 	// 1) collect all the dirty, accessible pages
 	var pages []int
-	for idx, access := range vm.pageAccess {
+	for idx, access := range vm.sandBox.pageAccess {
 		if access != PageInaccessible && vm.dirtyPages[idx] {
 			pages = append(pages, idx)
 		}
@@ -1298,7 +1365,7 @@ func (vm *RecompilerSandboxVM) ExecuteFromSnapshot(snapshot *EmulatorSnapShot) e
 	vm.vmBasicBlock = int(snapshot.BasicBlockNumber)
 	GasAddress := uint64(vm.regDumpAddr) + uint64(len(regInfoList)*8)
 	vm.sandBox.MemWrite(uint64(GasAddress), encodeU64(snapshot.InitialGas)) // Set the gas address
-	vm.pageAccess = snapshot.InitialPageMap
+	vm.sandBox.pageAccess = snapshot.InitialPageMap
 
 	// Set the initial registers
 	fmt.Println("Setting initial registers...")
@@ -1317,13 +1384,13 @@ func (vm *RecompilerSandboxVM) ExecuteFromSnapshot(snapshot *EmulatorSnapShot) e
 	for pageIndex, mem := range snapshot.InitialMemory {
 		address := uint32((pageIndex) * PageSize)
 		// Write the initial memory contents
-		vm.WriteMemorySandBox(address, mem)
+		vm.sandBox.WriteMemorySandBox(address, mem)
 		//fmt.Printf("Writing initial memory at page %d (address 0x%X) %s\n", pageIndex, address, common.Blake2Hash(mem))
 		for i := 0; i < len(mem)/PageSize; i++ {
 			p := pageIndex + i
 			address := uint32(p * PageSize)
 			vm.dirtyPages[p] = true // mark page as dirty
-			err := vm.SetMemAccessSandBox(address, PageSize, PageMutable)
+			err := vm.sandBox.SetMemAccessSandBox(address, PageSize, PageMutable)
 			if err != nil {
 				return err
 			}
@@ -1331,8 +1398,8 @@ func (vm *RecompilerSandboxVM) ExecuteFromSnapshot(snapshot *EmulatorSnapShot) e
 	}
 
 	for pageIndex, access := range snapshot.InitialPageMap {
-		vm.pageAccess[pageIndex] = access
-		//	fmt.Printf("p=%d %d len(vm.pageAccess) = %d\n", pageIndex, access, len(vm.pageAccess))
+		vm.sandBox.pageAccess[pageIndex] = access
+		//	fmt.Printf("p=%d %d len(rvm.sandBox.pageAccess) = %d\n", pageIndex, access, len(rvm.sandBox.pageAccess))
 	}
 	// print the disabled code (required for now -- do not disable yet)
 	str := vm.Disassemble(vm.x86Code)
@@ -1566,6 +1633,9 @@ func EcalliSandBox(rvmPtr unsafe.Pointer, opcode int32) {
 		return
 	}
 	vm.Gas = int64(gas)
+	if vm.IsChild && opcode != LOG {
+		return
+	}
 	// Invoke the host logic, e.g., gas charging and actual operation
 	vm.InvokeHostCall(int(opcode))
 
@@ -1659,7 +1729,7 @@ func EmitCallToSbrkStubSandBox(rvmPtr uintptr, registerIndexA uint32, registerIn
 
 func (vm *RecompilerSandboxVM) InvokeSbrkSandBox(registerA uint32, registerIndexD uint32) (result uint32) {
 	valueA, _ := vm.Ram.ReadRegister(int(registerA))
-	currentHeapPointer := vm.GetCurrentHeapPointer()
+	currentHeapPointer := vm.RecompilerVM.VM.Ram.GetCurrentHeapPointer()
 	if valueA == 0 {
 		vm.Ram.WriteRegister(int(registerIndexD), uint64(currentHeapPointer))
 		return currentHeapPointer
@@ -1676,10 +1746,10 @@ func (vm *RecompilerSandboxVM) InvokeSbrkSandBox(registerA uint32, registerIndex
 		idx_end := final_boundary / Z_P
 		page_count := idx_end - idx_start
 
-		vm.allocatePages(idx_start, page_count)
+		vm.RecompilerVM.VM.Ram.allocatePages(idx_start, page_count)
 		//fmt.Fprintf(os.Stderr, "RecompilerVM: Sbrk: Allocated %d pages from %d to %d\n", page_count, idx_start, idx_end)
 	}
-	vm.SetCurrentHeapPointer(new_heap_pointer)
+	vm.RecompilerVM.VM.Ram.SetCurrentHeapPointer(new_heap_pointer)
 	return result
 }
 func (rvm *RecompilerSandboxVM) EcalliCodeSandBox(opcode int) ([]byte, error) {

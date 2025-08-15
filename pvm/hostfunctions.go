@@ -244,10 +244,14 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 	if vm.Gas-g < 0 {
 		vm.ResultCode = types.WORKRESULT_OOG
 		vm.MachineState = OOG
-
+		log.Warn(vm.logging, "OOG", "host_fn", host_fn, "gas", vm.Gas, "g", g)
 		return true, fmt.Errorf("out of gas")
 	}
 
+	return vm.hostFunction(host_fn)
+}
+
+func (vm *VM) hostFunction(host_fn int) (bool, error) {
 	switch host_fn {
 	case GAS:
 		vm.hostGas()
@@ -367,6 +371,10 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 
 	default:
 		vm.Gas = vm.Gas + g
+		vm.terminated = true
+		vm.ResultCode = types.WORKRESULT_PANIC
+		vm.MachineState = PANIC
+		log.Error(vm.logging, "UNKNOWN HOST CALL", "host_fn", host_fn)
 		return false, fmt.Errorf("unknown host call: %d", host_fn)
 	}
 }
@@ -1100,8 +1108,8 @@ func (vm *VM) hostInvoke() {
 	}
 
 	g := types.DecodeE_l(gasBytes)
-
-	m_n_reg := make([]uint64, 13)
+	log.Trace(vm.logging, "INVOKE", "n", n, "o", o, "g", g)
+	m_n, ok := vm.RefineM_map[uint32(n)]
 	for i := 1; i < 14; i++ {
 		reg_bytes, errCodeReg := vm.Ram.ReadRAMBytes(uint32(o)+8*uint32(i), 8)
 		if errCodeReg != OK {
@@ -1110,9 +1118,9 @@ func (vm *VM) hostInvoke() {
 			vm.MachineState = PANIC
 			return
 		}
-		m_n_reg[i-1] = types.DecodeE_l(reg_bytes)
+		m_n.U.WriteRegister(i-1, types.DecodeE_l(reg_bytes))
 	}
-	m_n, ok := vm.RefineM_map[uint32(n)]
+
 	if !ok {
 		vm.Ram.WriteRegister(7, WHO)
 		log.Debug(vm.logging, "INVOKE WHO", "n", n)
@@ -1131,17 +1139,68 @@ func (vm *VM) hostInvoke() {
 		pc:  m_n.I,
 		Gas: int64(g),
 		// TODO: ***** register: m_n_reg,
-		Ram: nil, // m_n.U,
+		Ram: m_n.U, // m_n.U,
+
+		Backend:                    vm.Backend,
+		basicBlockExecutionCounter: make(map[uint64]int),
+		OP_tally:                   make(map[string]*X86InstTally),
 	}
+	initGas := vm.Gas
 	//TODO: review here
 	new_machine.logging = vm.logging
-	new_machine.Execute(int(new_machine.pc), true)
+	new_machine.IsChild = true
+	switch vm.Backend {
+	case BackendInterpreter:
+		new_machine.Execute(int(new_machine.pc), true)
+	case BackendRecompiler:
+		if recRam, ok := m_n.U.(*RecompilerRam); ok {
+			log.Info(vm.logging, "INVOKE: Recompiler", "n", n, "o", o, "g", int64(g))
+			new_rvm, err := NewRecompilerVMFromRam(new_machine, recRam)
+			if err != nil {
+				log.Error(vm.logging, "INVOKE: NewRecompilerVMFromRam failed", "n", n, "o", o, "g", int64(g), "err", err)
+				vm.terminated = true
+				vm.ResultCode = types.WORKRESULT_PANIC
+				vm.MachineState = PANIC
+				return
+			}
+			new_rvm.Execute(uint32(new_rvm.pc))
+			new_rvm.Close()
+		} else {
+			log.Error(vm.logging, "INVOKE: m_n.U is not *RecompilerRam")
+			vm.terminated = true
+			vm.ResultCode = types.WORKRESULT_PANIC
+			vm.MachineState = PANIC
+			return
+		}
+	case BackendRecompilerSandbox:
+		if emu, ok := m_n.U.(*Emulator); ok {
+			log.Info(vm.logging, "INVOKE: RecompilerSandbox", "n", n, "o", o, "g", int64(g))
+			new_sandbox, err := NewRecompilerSandboxVMFromEmulator(new_machine, emu)
+			if err != nil {
+				log.Error(vm.logging, "INVOKE: NewRecompilerSandboxVMFromEmulator failed", "n", n, "o", o, "g", int64(g), "err", err)
+				vm.terminated = true
+				vm.ResultCode = types.WORKRESULT_PANIC
+				vm.MachineState = PANIC
+				return
+			}
+			new_sandbox.ExecuteSandBox(uint64(new_sandbox.pc))
+		} else {
+			log.Error(vm.logging, "INVOKE: m_n.U is not *Emulator")
+			vm.terminated = true
+			vm.ResultCode = types.WORKRESULT_PANIC
+			vm.MachineState = PANIC
+			return
+		}
+	}
 
 	m_n.I = new_machine.pc
 	m_n.U = new_machine.Ram
 	vm.RefineM_map[uint32(n)] = m_n
-
+	log.Trace(vm.logging, "INVOKE DONE", "n", n, "o", o, "g", int64(g), "new_machine.Gas", new_machine.Gas, "new_machine.pc", new_machine.pc, "new_machine.MachineState", new_machine.MachineState)
 	// Result after execution
+	postGas := new_machine.Gas
+	gasUsed := initGas - postGas
+	log.Info(vm.logging, "INVOKE: gas used", "n", n, "o", o, "g", int64(g), "gasUsed", gasUsed, "new_machine.pc", new_machine.pc, "new_machine.MachineState", new_machine.MachineState)
 	gasBytes = types.E_l(uint64(new_machine.Gas), 8)
 	errCodeGas = vm.Ram.WriteRAMBytes(uint32(o), gasBytes)
 	if errCodeGas != OK {
@@ -1150,19 +1209,18 @@ func (vm *VM) hostInvoke() {
 		vm.MachineState = PANIC
 		return
 	}
-	// TODO: use register ram model
-	/*
-				for i := 1; i < 14; i++ {
-					reg_bytes := types.E_l(new_machine.register[i-1], 8)
-					errCode := vm.Ram.WriteRAMBytes(uint32(o)+8*uint32(i), reg_bytes)
-					if errCode != OK {
-						vm.terminated = true
-						vm.ResultCode = types.WORKRESULT_PANIC
-		vm.MachineState = PANIC
-						return
-					}
-				}
-	*/
+
+	for i := 1; i < 14; i++ {
+		regVal, _ := new_machine.Ram.ReadRegister(i - 1)
+		reg_bytes := types.E_l(regVal, 8)
+		errCode := vm.Ram.WriteRAMBytes(uint32(o)+8*uint32(i), reg_bytes)
+		if errCode != OK {
+			vm.terminated = true
+			vm.ResultCode = types.WORKRESULT_PANIC
+			vm.MachineState = PANIC
+			return
+		}
+	}
 
 	//TODO: who
 
@@ -1419,9 +1477,11 @@ func (vm *VM) hostSolicit() {
 	xs, _ := vm.X.GetX_s()
 	// Got l of X_s by setting s = 1, z = z(from RAM)
 	o, _ := vm.Ram.ReadRegister(7)
-	z, _ := vm.Ram.ReadRegister(8)                      // z: blob_len
+	z, _ := vm.Ram.ReadRegister(8) // z: blob_len
+	log.Info(vm.logging, "SOLICIT", "o", o, "z", z)
 	hBytes, err_h := vm.Ram.ReadRAMBytes(uint32(o), 32) // h: blobHash
 	if err_h != OK {
+		log.Error(vm.logging, "SOLICIT RAM READ ERROR", "err", err_h, "o", o, "z", z)
 		vm.terminated = true
 		vm.ResultCode = types.WORKRESULT_PANIC
 		vm.MachineState = PANIC
@@ -1435,7 +1495,7 @@ func (vm *VM) hostSolicit() {
 		xs.WriteLookup(account_lookuphash, uint32(z), []uint32{}, lookup_source)
 		xs.NumStorageItems += 2
 		xs.StorageSize += AccountLookupConst + uint64(z)
-		log.Debug(vm.logging, "SOLICIT OK", "h", account_lookuphash, "z", z, "newvalue", []uint32{}, "lookup_source", lookup_source)
+		log.Info(vm.logging, "SOLICIT OK", "h", account_lookuphash, "z", z, "newvalue", []uint32{}, "lookup_source", lookup_source)
 		vm.Ram.WriteRegister(7, OK)
 		vm.HostResultCode = OK
 		return
@@ -1445,19 +1505,19 @@ func (vm *VM) hostSolicit() {
 		xs.WriteLookup(account_lookuphash, uint32(z), X_s_l, lookup_source)
 		vm.Ram.WriteRegister(7, FULL)
 		vm.HostResultCode = FULL
-		log.Debug(vm.logging, "SOLICIT FULL", "h", account_lookuphash, "z", z)
+		log.Info(vm.logging, "SOLICIT FULL", "h", account_lookuphash, "z", z)
 		return
 	}
 	if len(X_s_l) == 2 { // [x, y] => [x, y, t]
 		xs.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...), lookup_source)
-		log.Debug(vm.logging, "SOLICIT OK 2", "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
+		log.Info(vm.logging, "SOLICIT OK 2", "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
 		vm.Ram.WriteRegister(7, OK)
 		vm.HostResultCode = OK
 		return
 	} else {
 		vm.Ram.WriteRegister(7, HUH)
 		vm.HostResultCode = HUH
-		log.Debug(vm.logging, "SOLICIT HUH", "h", account_lookuphash, "z", z, "len(X_s_l)", len(X_s_l))
+		log.Info(vm.logging, "SOLICIT HUH", "h", account_lookuphash, "z", z, "len(X_s_l)", len(X_s_l))
 		return
 	}
 }
@@ -1625,7 +1685,6 @@ func (vm *VM) hostExport() {
 		vm.HostResultCode = OK
 		return
 	}
-
 	x = common.PadToMultipleOfN(x, types.SegmentSize)
 	x = slices.Clone(x)
 
@@ -1672,10 +1731,18 @@ func (vm *VM) hostMachine() {
 	}
 	// todo: check if deblob sucess
 	// TODO: u := NewRAM()
-
+	var ram RAMInterface
+	switch vm.Ram.(type) {
+	case *RAM, *RawRAM:
+		ram = NewRawRAM()
+	case *RecompilerRam:
+		ram, _ = NewRecompilerRam()
+	case *Emulator:
+		ram, _ = NewEmulator()
+	}
 	vm.RefineM_map[min_n] = &RefineM{
 		P: p,
-		//	U: u,
+		U: ram,
 		I: i,
 	}
 
@@ -1763,40 +1830,42 @@ func (vm *VM) hostPages() {
 	p, _ := vm.Ram.ReadRegister(8)  // p: page number
 	c, _ := vm.Ram.ReadRegister(9)  // c: number of pages to change
 	r, _ := vm.Ram.ReadRegister(10) // r: access characteristics
-
-	_, ok := vm.RefineM_map[uint32(n)]
+	m, ok := vm.RefineM_map[uint32(n)]
 	if !ok {
 		vm.Ram.WriteRegister(7, WHO)
 		vm.HostResultCode = WHO
+		log.Warn(vm.logging, "hostPages WHO", "n", n, "p", p, "c", c, "r", r)
 		return
 	}
 
 	if p > maxUint64-c {
 		vm.Ram.WriteRegister(7, HUH)
 		vm.HostResultCode = HUH
+		log.Warn(vm.logging, "hostPages HUH", "n", n, "p", p, "c", c, "r", r)
 		return
 	}
 
 	if p < 16 || p+c >= (1<<32)/Z_P || r > 4 {
 		vm.Ram.WriteRegister(7, HUH)
 		vm.HostResultCode = HUH
+		log.Warn(vm.logging, "hostPages HUH", "n", n, "p", p, "c", c, "r", r)
 		return
 	}
 	if p+c >= (1<<32)/Z_P && r > 2 {
 		vm.Ram.WriteRegister(7, HUH)
 		vm.HostResultCode = HUH
+		log.Warn(vm.logging, "hostPages HUH", "n", n, "p", p, "c", c, "r", r)
 		return
 	}
 	// TODO : use vm.RAM
-	for i := int(0); i < int(c); i++ {
-		switch {
-		case r == 0: // To deallocate a page (previously void)
-		//	m.U.SetPageAccess(int(p)+i, PageInaccessible)
-		case r == 1 || r == 3: // read-only
-		//	m.U.SetPageAccess(int(p)+i, PageImmutable)
-		case r == 2 || r == 4: // read-write
-			//	m.U.SetPageAccess(int(p)+i, PageMutable)
-		}
+	page := uint32(p)
+	switch {
+	case r == 0: // To deallocate a page (previously void)
+		m.U.allocatePages(page, uint32(c))
+	case r == 1 || r == 3: // read-only
+		m.U.allocatePages(page, uint32(c))
+	case r == 2 || r == 4: // read-write
+		m.U.allocatePages(page, uint32(c))
 	}
 
 	vm.Ram.WriteRegister(7, OK)
@@ -1816,17 +1885,25 @@ func (vm *VM) hostLog() {
 	}
 	//levelName := getLogLevelName(level, vm.CoreIndex, string(vm.ServiceMetadata))
 	vm.HostResultCode = OK
+	serviceMetadata := string(vm.ServiceMetadata)
+	if serviceMetadata == "" {
+		serviceMetadata = "unknown"
+	}
+
+	if vm.IsChild {
+		serviceMetadata = fmt.Sprintf("%s-child", serviceMetadata)
+	}
 	switch level {
 	case 0: // 0: User agent displays as fatal error
-		log.Crit(vm.logging, string(messageBytes))
+		log.Crit(vm.logging, fmt.Sprintf("HOSTLOG-%s", serviceMetadata), "msg", string(messageBytes))
 	case 1: // 1: User agent displays as warning
-		log.Warn(vm.logging, string(messageBytes))
+		log.Warn(vm.logging, fmt.Sprintf("HOSTLOG-%s", serviceMetadata), "msg", string(messageBytes))
 	case 2: // 2: User agent displays as important information
-		log.Info(vm.logging, string(messageBytes))
+		log.Info(vm.logging, fmt.Sprintf("HOSTLOG-%s", serviceMetadata), "msg", string(messageBytes))
 	case 3: // 3: User agent displays as helpful information
-		log.Debug(vm.logging, string(messageBytes))
+		log.Debug(vm.logging, fmt.Sprintf("HOSTLOG-%s", serviceMetadata), "msg", string(messageBytes))
 	case 4: // 4: User agent displays as pedantic information
-		log.Trace(vm.logging, string(messageBytes))
+		log.Trace(vm.logging, fmt.Sprintf("HOSTLOG-%s", serviceMetadata), "msg", string(messageBytes))
 	}
 }
 

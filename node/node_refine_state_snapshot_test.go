@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"runtime/pprof"
@@ -33,6 +34,9 @@ import (
 const (
 	algo_stf    = "test/00000017.bin"
 	algo_bundle = "test/00000017_0xaa03ac39deda658dc4ec97c9c38995a3e99b111fafb1dfe24a14feb6f47db038_0_3_guarantor.bin"
+
+	game_of_stf    = "test/03233539.bin"
+	game_of_bundle = "test/03233538_0x8d63f7ce582bdf289283594871633c9018384b65f2699890d8321c5441b95c53_1_3233538_guarantor_follower.bin"
 )
 
 func CompareJSON(obj1, obj2 interface{}) string {
@@ -189,8 +193,8 @@ func TestRefineStateTransitions(t *testing.T) {
 	pvm.PvmTrace = false
 	pvm.RecordTime = true
 	initPProf(t)
-	filename_stf := algo_stf
-	filename_bundle := algo_bundle
+	filename_stf := game_of_stf
+	filename_bundle := game_of_bundle
 
 	stf, err := ReadStateTransition(filename_stf)
 	if err != nil {
@@ -665,4 +669,227 @@ func captureOutput(f func()) string {
 	var buf bytes.Buffer
 	io.Copy(&buf, r)
 	return buf.String()
+}
+
+func testRefineStateTransitionInvoke(pvmBackend string, store *storage.StateDBStorage, bundle_snapshot *types.WorkPackageBundleSnapshot, stf *statedb.StateTransition, t *testing.T) {
+	//t.Logf("Testing refine state transition with pvmBackend: %s", pvmBackend)
+	// log.InitLogger("debug")
+	// log.EnableModule(log.PvmAuthoring)
+	// log.EnableModule("pvm_validator")
+	sdb, err := statedb.NewStateDBFromStateTransitionPost(store, stf)
+	if err != nil {
+		t.Fatalf("Failed to create state DB from state transition: %v", err)
+	}
+	total_simulated_nodes := uint16(1)
+	nodes := make([]*Node, total_simulated_nodes)
+	for id := uint16(0); id < total_simulated_nodes; id++ {
+		nodes[id] = &Node{}
+		nodes[id].NodeContent = NewNodeContent(id, store, pvmBackend)
+		nodes[id].NodeContent.AddStateDB(sdb)
+	}
+
+	var wg sync.WaitGroup
+	type result struct {
+		workReport         *types.WorkReport
+		pvmElapsed         time.Duration
+		reexecutedSnapshot interface{}
+		err                error
+	}
+	results := make([]result, total_simulated_nodes)
+	startTimes := make([]time.Time, total_simulated_nodes)
+	endTimes := make([]time.Time, total_simulated_nodes)
+
+	for id := uint16(0); id < total_simulated_nodes; id++ {
+		wg.Add(1)
+		go func(idx uint16) {
+			defer wg.Done()
+			startTimes[idx] = time.Now()
+			re_workReport, _, wr_pvm_elapsed, reexecuted_snapshot, err := nodes[idx].executeWorkPackageBundle(
+				uint16(bundle_snapshot.CoreIndex),
+				bundle_snapshot.Bundle,
+				bundle_snapshot.SegmentRootLookup,
+				bundle_snapshot.Slot,
+				false,
+			)
+			endTimes[idx] = time.Now()
+			results[idx] = result{
+				workReport:         &re_workReport,
+				pvmElapsed:         time.Duration(wr_pvm_elapsed),
+				reexecutedSnapshot: reexecuted_snapshot,
+				err:                err,
+			}
+		}(id)
+	}
+	wg.Wait()
+
+	// Check for errors and compare results
+	var refReport *types.WorkReport
+	for i, res := range results {
+		if res.err != nil {
+			t.Fatalf("Node %d: Error executing work package bundle: %v", i, res.err)
+		}
+		if res.reexecutedSnapshot == nil {
+			t.Fatalf("Node %d: Reexecuted snapshot is nil", i)
+		}
+		if i == 0 {
+			refReport = res.workReport
+		} else {
+			if !reflect.DeepEqual(refReport, res.workReport) {
+				t.Fatalf("Node %d: WorkReport mismatch with Node 0", i)
+			}
+		}
+	}
+
+	// Print execution times
+	for i := 0; i < int(total_simulated_nodes); i++ {
+		fmt.Printf("Node %d execution time: %v\n", i, endTimes[i].Sub(startTimes[i]))
+	}
+	t.Logf("All nodes produced identical results.")
+}
+func TestRefineInvokeLimit(t *testing.T) {
+	pvm.PvmLogging = true
+	pvm.PvmTrace = true
+	pvm.RecordTime = true
+	initPProf(t)
+	filename_stf := game_of_stf
+	filename_bundle := game_of_bundle
+
+	stf, err := ReadStateTransition(filename_stf)
+	if err != nil {
+		t.Fatalf("failed to read state transition from file %s: %v", filename_stf,
+			err)
+	}
+	//fmt.Printf("Read state transition from file %s: %v\n", filename_stf, stf)
+	bundle_snapshot, err := ReadBundleSnapshot(filename_bundle)
+	if err != nil {
+		t.Fatalf("failed to read state transition from file %s: %v", filename_bundle,
+			err)
+	}
+
+	levelDBPath := "/tmp/testdb"
+	store, err := storage.NewStateDBStorage(levelDBPath)
+	if err != nil {
+		t.Fatalf("Failed to create storage: %v", err)
+	}
+	//pvmBackends := []string{pvm.BackendInterpreter}
+	pvmBackend := pvm.BackendInterpreter
+	t.Run(fmt.Sprintf("pvmBackend=%s", pvmBackend), func(t *testing.T) {
+		testRefineStateTransitionInvoke(pvmBackend, store, bundle_snapshot, stf, t)
+	})
+
+}
+
+func testRefine(pvmBackend string, store *storage.StateDBStorage, bundle_snapshot *types.WorkPackageBundleSnapshot, stf *statedb.StateTransition, t *testing.T) (report types.WorkReport) {
+	//t.Logf("Testing refine state transition with pvmBackend: %s", pvmBackend)
+	sdb, err := statedb.NewStateDBFromStateTransitionPost(store, stf)
+	if err != nil {
+		t.Fatalf("Failed to create state DB from state transition: %v", err)
+	}
+
+	id := uint16(3) // Simulated node ID
+	simulatedNode := &Node{}
+	simulatedNode.NodeContent = NewNodeContent(id, store, pvmBackend)
+	simulatedNode.NodeContent.AddStateDB(sdb)
+
+	// execute workpackage bundle
+	re_workReport, _, wr_pvm_elapsed, reexecuted_snapshot, err := simulatedNode.executeWorkPackageBundle(uint16(bundle_snapshot.CoreIndex), bundle_snapshot.Bundle, bundle_snapshot.SegmentRootLookup, bundle_snapshot.Slot, false)
+	if err != nil {
+		t.Fatalf("Error executing work package bundle: %v", err)
+	}
+	//t.Logf("[%s] Work Report[Hash: %v. PVM Elapsed: %v]\n%v\n", pvmBackend, re_workReport.Hash(), wr_pvm_elapsed, re_workReport.String())
+	t.Logf("[%s] Work Report[Hash: %v. PVM Elapsed: %v]\n", pvmBackend, re_workReport.Hash(), wr_pvm_elapsed)
+	if reexecuted_snapshot == nil {
+		t.Fatalf("Reexecuted snapshot is nil")
+	}
+	return re_workReport
+}
+
+func TestGenerateTestCase(t *testing.T) {
+	type TestCase struct {
+		Name           string
+		BundleSnapShot *types.WorkPackageBundleSnapshot
+	}
+
+	stf_file := "test/game_of_life/state_transitions/state.bin"
+
+	stf, err := ReadStateTransition(stf_file)
+	if err != nil {
+		t.Fatalf("failed to read state transition from file %s: %v", stf_file, err)
+	}
+
+	testCases := make([]TestCase, 0)
+	bundlesDir := "test/game_of_life/bundle_snapshots"
+	reportsDir := "test/game_of_life/reports"
+	// check if the reports directory exists, if not create it
+	if _, err := os.Stat(reportsDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(reportsDir, 0755); err != nil {
+			t.Fatalf("failed to create reports directory %s: %v", reportsDir, err)
+		}
+		fmt.Printf("Created reports directory: %s\n", reportsDir)
+	} else {
+		fmt.Printf("Reports directory already exists: %s\n", reportsDir)
+	}
+	// for loop the files
+	files, err := os.ReadDir(bundlesDir)
+	if err != nil {
+		t.Fatalf("failed to read directory %s: %v", bundlesDir, err)
+	}
+
+	for _, file := range files {
+		if !file.IsDir() && strings.HasSuffix(file.Name(), ".bin") {
+			filePath := filepath.Join(bundlesDir, file.Name())
+			bundle_snapshot, err := ReadBundleSnapshot(filePath)
+			if err != nil {
+				t.Fatalf("failed to read bundle snapshot from file %s: %v", filePath, err)
+			}
+			testCases = append(testCases, TestCase{
+				Name:           strings.TrimSuffix(file.Name(), ".bin"),
+				BundleSnapShot: bundle_snapshot,
+			})
+		}
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.Name, func(t *testing.T) {
+			pvm.PvmLogging = false
+			pvm.PvmTrace = false
+			pvm.RecordTime = false
+			initPProf(t)
+
+			levelDBPath := fmt.Sprintf("/tmp/testdb-%s", testCase.Name)
+			store, err := storage.NewStateDBStorage(levelDBPath)
+			if err != nil {
+				t.Fatalf("Failed to create storage: %v", err)
+			}
+
+			report := testRefine(pvm.BackendInterpreter, store, testCase.BundleSnapShot, stf, t)
+			fmt.Printf("Test case %s executed successfully with report: %v\n", testCase.Name, report.Hash().String())
+
+			// write the report to the dir
+			jsonFileName := fmt.Sprintf("%s/%s.json", reportsDir, testCase.Name)
+			reportJSON, err := json.MarshalIndent(report, "", "  ")
+			if err != nil {
+				t.Fatalf("failed to marshal report to JSON: %v", err)
+			}
+			if err := os.WriteFile(jsonFileName, reportJSON, 0644); err != nil {
+				t.Fatalf("failed to write report to file %s: %v", jsonFileName, err)
+			}
+			binFileName := fmt.Sprintf("%s/%s.bin", reportsDir, testCase.Name)
+			reportBin, err := types.Encode(&report)
+			if err != nil {
+				t.Fatalf("failed to encode report to binary: %v", err)
+			}
+			if err := os.WriteFile(binFileName, reportBin, 0644); err != nil {
+				t.Fatalf("failed to write report to file %s: %v", binFileName, err)
+			}
+			fmt.Printf("Report for test case %s written to %s and %s\n", testCase.Name, jsonFileName, binFileName)
+			// Clean up the storage
+			if err := store.Close(); err != nil {
+				t.Fatalf("failed to close storage: %v", err)
+			}
+			if err := os.RemoveAll(levelDBPath); err != nil {
+				t.Fatalf("failed to remove storage directory %s: %v", levelDBPath, err)
+			}
+			fmt.Printf("Cleaned up storage for test case %s\n", testCase.Name)
+		})
+	}
 }

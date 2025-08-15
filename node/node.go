@@ -885,13 +885,9 @@ func (n *Node) GetSegments(importedSegments []types.ImportSegment) (raw_segments
 	return raw_segments, nil
 }
 
-func (n *Node) GetSegmentsByRequestedHash(RequestedHash common.Hash) ([][]byte, uint16, error) {
+func (n *Node) GetSegmentsByRequestedHash(RequestedHash common.Hash, count int) (raw_segments [][]byte, err error) {
 
-	si := n.WorkReportSearch(RequestedHash)
-	if si == nil {
-		return nil, 0, fmt.Errorf("WorkReportSearch(%s) not found", RequestedHash)
-	}
-	ExportedSegmentLength := si.WorkReport.AvailabilitySpec.ExportedSegmentLength
+	ExportedSegmentLength := count
 
 	importedSegments := make([]types.ImportSegment, 0)
 	for i := 0; i < int(ExportedSegmentLength); i++ {
@@ -902,11 +898,11 @@ func (n *Node) GetSegmentsByRequestedHash(RequestedHash common.Hash) ([][]byte, 
 		importedSegments = append(importedSegments, importedSegment)
 	}
 
-	raw_segments, err := n.GetSegments(importedSegments)
+	raw_segments, err = n.GetSegments(importedSegments)
 	if err != nil {
-		return nil, 0, fmt.Errorf("GetSegments failed: %v", err)
+		return nil, fmt.Errorf("GetSegments failed: %v", err)
 	}
-	return raw_segments, ExportedSegmentLength, nil
+	return raw_segments, nil
 }
 
 func (n *Node) GetWorkReport(requestedHash common.Hash) (wr *types.WorkReport, err error) {

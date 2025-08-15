@@ -162,6 +162,7 @@ func TestBlake2b(t *testing.T) {
 }
 
 func TestGameOfLife(t *testing.T) {
+	// initPProf(t)
 	targetN := 10
 	fmt.Printf("game_of_life targetNum: %v\n", targetN)
 	jamtest(t, "game_of_life", targetN)

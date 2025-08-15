@@ -231,6 +231,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	case "fib2":
 		serviceNames = []string{"corevm", "auth_copy"}
 	case "game_of_life":
+		sendTickets = true // game_of_life does not use tickets
 		if *manifest {
 			serviceNames = []string{"game_of_life_manifest", "auth_copy"}
 		} else {
@@ -352,7 +353,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	}
 
 	//log.Enablelog.Node(log.FirstGuarantorOrAuditor)
-	log.EnableModule(log.PvmAuthoring)
+	// log.EnableModule(log.PvmAuthoring)
 	log.EnableModule(log.GeneralAuthoring)
 
 	bootstrapCode, err := types.ReadCodeWithMetadata(statedb.BootstrapServiceFile, "bootstrap")
@@ -385,9 +386,9 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	var jceManager *ManualJCEManager
 	jceManager = nil
 	var previous_service_idx uint32
-	requireNew := false
-	if strings.Compare(jam, "fib") == 0 || strings.Compare(jam, "algo") == 0 {
-		requireNew = true
+	requireNew := true
+	if strings.Compare(jam, "fib") == 0 || strings.Compare(jam, "algo") == 0 || strings.Compare(jam, "game_of_life") == 0 {
+		requireNew = false
 	}
 
 	var bootstrap_workItems []types.WorkItem
@@ -403,11 +404,9 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		}
 		if serviceName == "fib" {
 			service.ServiceCode = statedb.FibServiceCode
-			//continue
 		}
 		if serviceName == "algo" {
 			service.ServiceCode = statedb.AlgoServiceCode
-			//continue
 		}
 		workItem := types.WorkItem{
 			Service:            bootstrapService,

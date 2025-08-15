@@ -3,51 +3,11 @@ package pvm
 import (
 	"encoding/binary"
 	"fmt"
-	"sync"
 	"unsafe"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
-	"golang.org/x/arch/x86/x86asm"
 )
-
-type RecompilerVM struct {
-	*VM
-	mu          sync.Mutex
-	startCode   []byte
-	exitCode    []byte
-	realMemory  []byte
-	realMemAddr uintptr
-
-	regDumpMem  []byte
-	regDumpAddr uintptr
-
-	realCode []byte
-	codeAddr uintptr
-
-	x86Blocks map[uint64]*BasicBlock // by x86 PC
-	x86PC     uint64
-	x86Code   []byte
-
-	JumpTableOffset  uint64         // offset for the jump table in x86Code
-	JumpTableOffset2 uint64         // offset for the jump table in x86Code
-	JumpTableMap     []uint64       // maps PVM PC to the index of the x86code (djump only)
-	InstMapPVMToX86  map[uint32]int // maps PVM PC to the x86 PC index
-	InstMapX86ToPVM  map[int]uint32 // maps x86 PC to the PVM PC
-
-	djumpTableFunc []byte
-	djumpAddr      uintptr // address of the jump table in x86Code
-
-	//debug tool
-	x86Instructions      map[int]x86asm.Inst
-	dirtyPages           map[int]bool
-	pc_addr              uint64
-	r12                  uint64
-	current_heap_pointer uint32
-	isChargingGas        bool
-	isPCCounting         bool
-	IsBlockCounting      bool // whether to count basic blocks
-}
 
 func (vm *RecompilerVM) Compile(startStep uint64) {
 	// init the recompiler
@@ -171,6 +131,11 @@ func (vm *RecompilerVM) translateBasicBlock(startPC uint64) *BasicBlock {
 			// 1. Dump registers to memory.
 			// 2. Set up C ABI registers (rdi, esi).
 			opcode := uint32(types.DecodeE_l(inst.Args))
+			if opcode != LOG && vm.IsChild {
+				// panic
+				code = append(code, emitTrap()...)
+				continue
+			}
 			Ecallcode := append(vm.DumpRegisterToMemory(true), EmitCallToEcalliStub(uintptr(unsafe.Pointer(vm)), int(opcode))...)
 			Ecallcode = append(Ecallcode, vm.RestoreRegisterInX86()...)
 			code = append(code, Ecallcode...)

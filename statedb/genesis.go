@@ -121,6 +121,11 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 			FileName:    AuthCopyServiceFile,
 			ServiceName: "auth_copy",
 		},
+		{
+			ServiceCode: GameOfLifeCode,
+			FileName:    GameOfLifeFile,
+			ServiceName: "game_of_life",
+		},
 	}
 	auth_pvm := common.GetFilePath(BootStrapNullAuthFile)
 	auth_code_bytes, err0 := os.ReadFile(auth_pvm)
@@ -182,6 +187,21 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 			statedb.writeService(service.ServiceCode, &sa)
 
 			fmt.Printf("Service %s (fn:%s), codeHash %s, codeLen=%d, anchor %v\n", service.ServiceName, service.FileName, codeHash.String(), codeLen, bootStrapAnchor)
+			if service.ServiceCode == GameOfLifeCode {
+				// write the child code with preimage and lookup
+				files := []string{GameOfLifeChildFile, GameOfLifeChildLogFile}
+				for _, game_file := range files {
+					child_code, err := os.ReadFile(game_file)
+					if err != nil {
+						return nil, err
+					}
+					child_code_hash := common.Blake2Hash(child_code)
+					child_code_len := uint32(len(child_code))
+					statedb.WriteServicePreimageBlob(GameOfLifeCode, child_code)
+					statedb.WriteServicePreimageLookup(GameOfLifeCode, child_code_hash, child_code_len, bootStrapAnchor)
+					fmt.Printf("Game_of_life_child codeHash %s, codeLen=%d, anchor %v\n", child_code_hash.String(), child_code_len, bootStrapAnchor)
+				}
+			}
 		}
 	}
 	fmt.Printf("Bootstrap AuthorizationHash: %v\n", auth_code_hash_hash) //p_a

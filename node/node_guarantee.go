@@ -319,6 +319,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		if err != nil {
 			log.Error(log.G, "processWPQueueItem:processGuarantee:", "n", n.String(), "err", err)
 		}
+		log.Info(log.G, "processWPQueueItem Guarantee processed", "n", n.String(), "guarantee.Slot", guarantee.Slot, "numSig", len(guarantee.Signatures), "guarantee.Signatures", types.ToJSONHex(guarantee.Signatures), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
 	} else {
 		log.Debug(log.G, "processWPQueueItem Guarantee not enough signatures", "n", n.String(), "guarantee.Signatures", types.ToJSONHex(guarantee.Signatures), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
 		return false

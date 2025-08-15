@@ -134,7 +134,7 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	return r, res, exportedSegments
 }
 
-var RecordTime = false
+var RecordTime = true
 
 func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.AccumulateOperandElements, X *types.XContext, n common.Hash) (r types.Result, res uint64, xs *types.ServiceAccount) {
 	vm.Mode = "accumulate"

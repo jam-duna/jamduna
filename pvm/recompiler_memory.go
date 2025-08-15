@@ -8,9 +8,76 @@ import (
 	"unsafe"
 )
 
+type RecompilerRam struct {
+	realMemory           []byte
+	realMemAddr          uintptr
+	regDumpMem           []byte
+	regDumpAddr          uintptr
+	dirtyPages           map[int]bool
+	current_heap_pointer uint32
+}
+
+func NewRecompilerRam() (*RecompilerRam, error) {
+	// Allocate 4GB virtual memory region (not accessed directly here)
+	const memSize = 4*1024*1024*1024 + 1024*1024 // 4GB + 1MB
+	mem, err := syscall.Mmap(
+		-1, 0, memSize,
+		syscall.PROT_NONE,
+		syscall.MAP_ANON|syscall.MAP_PRIVATE,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to mmap memory: %v", err)
+	}
+
+	regDumpAddr := uintptr(unsafe.Pointer(&mem[0]))
+	// mem protect the first 1MB as R/W
+	if err := syscall.Mprotect(mem[:1024*1024], syscall.PROT_READ|syscall.PROT_WRITE); err != nil {
+		return nil, fmt.Errorf("failed to mprotect memory: %v", err)
+	}
+
+	if debugRecompiler {
+		// print with size
+		fmt.Printf("Register dump memory address: 0x%X (size: %d bytes)\n", regDumpAddr, len(mem[:1024*1024]))
+
+		realMemAddruint := uint64(uintptr(unsafe.Pointer(&mem[1024*1024])))
+		fmt.Printf("Real memory address: 0x%X (size: %d bytes)\n", realMemAddruint, len(mem))
+		fmt.Printf("RecompilerVM initialized with memory size: %d bytes\n", len(mem))
+	}
+	realMem := mem[1024*1024:]
+	regMem := mem[:1024*1024]
+	return &RecompilerRam{
+		realMemory:  realMem,
+		realMemAddr: uintptr(unsafe.Pointer(&realMem[0])),
+		regDumpMem:  regMem,
+		regDumpAddr: uintptr(unsafe.Pointer(&regMem[0])),
+		dirtyPages:  make(map[int]bool),
+	}, nil
+}
+func (rvm *RecompilerRam) Close() error {
+	// The underlying mmap'd memory is the union of regDumpMem and realMemory.
+	// regDumpMem is the first 1MB, realMemory is the rest.
+	// Both slices share the same backing array, so unmap once using the full region.
+	if rvm.regDumpMem == nil && rvm.realMemory == nil {
+		return nil
+	}
+	// Find the full mmap'd region by combining regDumpMem and realMemory
+	var fullRegion []byte
+	if cap(rvm.regDumpMem) > cap(rvm.realMemory) {
+		fullRegion = rvm.regDumpMem[:cap(rvm.regDumpMem)]
+	} else {
+		fullRegion = rvm.realMemory[:cap(rvm.realMemory)]
+	}
+	err := syscall.Munmap(fullRegion)
+	// Clear references
+	rvm.realMemory = nil
+	rvm.regDumpMem = nil
+	rvm.dirtyPages = nil
+	return err
+}
+
 // GetMemAssess checks access rights for a memory range using mprotect probe.
 // DANGER: This function uses unsafe operations and can cause SIGSEGV if the address is invalid or inaccessible.
-func (rvm *RecompilerVM) GetMemAssess(address uint32, length uint32) (byte, error) {
+func (rvm *RecompilerRam) GetMemAssess(address uint32, length uint32) (byte, error) {
 	pageIndex := int(address / PageSize)
 	if pageIndex < 0 || pageIndex >= TotalPages {
 		return PageInaccessible, fmt.Errorf("invalid address")
@@ -29,7 +96,7 @@ func (rvm *RecompilerVM) GetMemAssess(address uint32, length uint32) (byte, erro
 }
 
 // ReadMemory reads data from a specific address in the memory if it's readable.
-func (rvm *RecompilerVM) ReadMemory(address uint32, length uint32) (data []byte, err error) {
+func (rvm *RecompilerRam) ReadMemory(address uint32, length uint32) (data []byte, err error) {
 	// recover panic from SIGSEGV
 	defer func() {
 		if r := recover(); r != nil {
@@ -66,7 +133,7 @@ func (rvm *RecompilerVM) ReadMemory(address uint32, length uint32) (data []byte,
 }
 
 // WriteMemory writes data to a specific address in the memory if it's writable.
-func (rvm *RecompilerVM) WriteMemory(address uint32, data []byte) error {
+func (rvm *RecompilerRam) WriteMemory(address uint32, data []byte) error {
 	pageIndex := int(address / PageSize)
 	if pageIndex < 0 || pageIndex >= TotalPages {
 		return fmt.Errorf("invalid address %x for page index %d", address, pageIndex)
@@ -87,7 +154,7 @@ func (rvm *RecompilerVM) WriteMemory(address uint32, data []byte) error {
 }
 
 // SetPageAccess sets the memory protection of a single page using BaseReg as memory base.
-func (rvm *RecompilerVM) SetPageAccess(pageIndex int, access byte) error {
+func (rvm *RecompilerRam) SetPageAccess(pageIndex int, access byte) error {
 	if pageIndex < 0 || pageIndex >= TotalPages {
 		return fmt.Errorf("invalid page index")
 	}
@@ -120,7 +187,7 @@ func (rvm *RecompilerVM) SetPageAccess(pageIndex int, access byte) error {
 	}
 	return nil
 }
-func (rvm *RecompilerVM) SetMemAccess(address uint32, length uint32, access byte) error {
+func (rvm *RecompilerRam) SetMemAccess(address uint32, length uint32, access byte) error {
 	if length == 0 {
 		return nil
 	}
@@ -153,7 +220,7 @@ func (rvm *RecompilerVM) SetMemAccess(address uint32, length uint32, access byte
 	return nil
 }
 
-func (rvm *RecompilerVM) WriteRAMBytes(address uint32, data []byte) (resultCode uint64) {
+func (rvm *RecompilerRam) WriteRAMBytes(address uint32, data []byte) (resultCode uint64) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Printf("WriteRamBytes panic: %v\n", r)
@@ -171,7 +238,7 @@ func (rvm *RecompilerVM) WriteRAMBytes(address uint32, data []byte) (resultCode 
 	}
 	return OK
 }
-func (rvm *RecompilerVM) ReadRAMBytes(address uint32, length uint32) (data []byte, resultCode uint64) {
+func (rvm *RecompilerRam) ReadRAMBytes(address uint32, length uint32) (data []byte, resultCode uint64) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Printf("ReadRamBytes panic: %v\n", r)
@@ -190,7 +257,7 @@ func (rvm *RecompilerVM) ReadRAMBytes(address uint32, length uint32) (data []byt
 	return data, OK
 }
 
-func (rvm *RecompilerVM) allocatePages(startPage uint32, count uint32) {
+func (rvm *RecompilerRam) allocatePages(startPage uint32, count uint32) {
 	for i := uint32(0); i < count; i++ {
 		pageIndex := startPage + i
 		rvm.SetPageAccess(int(pageIndex), PageMutable)
@@ -198,11 +265,11 @@ func (rvm *RecompilerVM) allocatePages(startPage uint32, count uint32) {
 }
 
 // GetCurrentHeapPointer
-func (rvm *RecompilerVM) GetCurrentHeapPointer() uint32 {
+func (rvm *RecompilerRam) GetCurrentHeapPointer() uint32 {
 	return rvm.current_heap_pointer
 }
 
-func (rvm *RecompilerVM) SetCurrentHeapPointer(pointer uint32) {
+func (rvm *RecompilerRam) SetCurrentHeapPointer(pointer uint32) {
 	rvm.current_heap_pointer = pointer
 }
 
@@ -212,7 +279,7 @@ func (rvm *RecompilerVM) SetCurrentHeapPointer(pointer uint32) {
 // 	WriteRegister(index int, value uint64) uint64
 // 	ReadRegisters() []uint64
 
-func (rvm *RecompilerVM) ReadRegister(index int) (uint64, uint64) {
+func (rvm *RecompilerRam) ReadRegister(index int) (uint64, uint64) {
 	if index < 0 || index >= regSize {
 		return 0, OOB // Out of bounds
 	}
@@ -221,7 +288,7 @@ func (rvm *RecompilerVM) ReadRegister(index int) (uint64, uint64) {
 	return value, OK
 }
 
-func (rvm *RecompilerVM) WriteRegister(index int, value uint64) uint64 {
+func (rvm *RecompilerRam) WriteRegister(index int, value uint64) uint64 {
 	if index < 0 || index >= regSize {
 		return OOB // Out of bounds
 	}
@@ -236,7 +303,7 @@ func (rvm *RecompilerVM) WriteRegister(index int, value uint64) uint64 {
 }
 
 // ReadRegisters returns a copy of the current register values.
-func (rvm *RecompilerVM) ReadRegisters() []uint64 {
+func (rvm *RecompilerRam) ReadRegisters() []uint64 {
 	registersCopy := make([]uint64, regSize)
 	for i := 0; i < regSize; i++ {
 		value_bytes := rvm.regDumpMem[i*8 : (i+1)*8]

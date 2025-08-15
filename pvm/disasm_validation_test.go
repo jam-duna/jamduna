@@ -1,8 +1,11 @@
 package pvm
 
 import (
+	"bufio"
 	"fmt"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -498,5 +501,179 @@ func TestOpcodeSequentialCoverage(t *testing.T) {
 			}
 		}
 		t.Logf("Range %s (0x%02x-0x%02x): %d opcodes defined", er.name, er.start, er.end, count)
+	}
+}
+
+type ChargeGasEntry struct {
+	Index     int
+	Amount    int
+	GasBefore int
+	GasAfter  int
+	LineNum   int
+}
+
+func parseJamdunaChargeGas(line string) (*ChargeGasEntry, error) {
+	// Parse: "charged gas 1, 399999999 -> 399999990"
+	re := regexp.MustCompile(`charged gas (\d+), (\d+) -> (\d+)`)
+	matches := re.FindStringSubmatch(line)
+	if len(matches) != 4 {
+		return nil, fmt.Errorf("no match")
+	}
+
+	amount, _ := strconv.Atoi(matches[1])
+	gasBefore, _ := strconv.Atoi(matches[2])
+	gasAfter, _ := strconv.Atoi(matches[3])
+
+	return &ChargeGasEntry{
+		Amount:    amount,
+		GasBefore: gasBefore,
+		GasAfter:  gasAfter,
+	}, nil
+}
+
+func parsePolkajamChargeGas(line string) (*ChargeGasEntry, error) {
+	// Parse: "2025-08-14 01:13:50 tokio-runtime-worker TRACE polkavm::interpreter::raw_handlers  [2]: charge_gas: 1 (400000000 -> 399999999)"
+	re := regexp.MustCompile(`\[(\d+)\]: charge_gas: (\d+) \((\d+) -> (\d+)\)`)
+	matches := re.FindStringSubmatch(line)
+	if len(matches) != 5 {
+		return nil, fmt.Errorf("no match")
+	}
+
+	index, _ := strconv.Atoi(matches[1])
+	amount, _ := strconv.Atoi(matches[2])
+	gasBefore, _ := strconv.Atoi(matches[3])
+	gasAfter, _ := strconv.Atoi(matches[4])
+
+	return &ChargeGasEntry{
+		Index:     index,
+		Amount:    amount,
+		GasBefore: gasBefore,
+		GasAfter:  gasAfter,
+	}, nil
+}
+
+func TestDiff(t *testing.T) {
+	jamdunaFile := "../logs/jamduna.log"
+	polkajamFile := "../logs/polkajam.log"
+
+	// Read Jamduna charge_gas entries
+	jamdunaEntries := []ChargeGasEntry{}
+	f1, err := os.Open(jamdunaFile)
+	if err != nil {
+		t.Fatalf("Failed to open %s: %v", jamdunaFile, err)
+	}
+	defer f1.Close()
+
+	scanner1 := bufio.NewScanner(f1)
+	lineNum1 := 0
+	for scanner1.Scan() {
+		lineNum1++
+		line := scanner1.Text()
+		if entry, err := parseJamdunaChargeGas(line); err == nil {
+			entry.LineNum = lineNum1
+			jamdunaEntries = append(jamdunaEntries, *entry)
+		}
+	}
+
+	// Read Polkajam charge_gas entries
+	polkajamEntries := []ChargeGasEntry{}
+	f2, err := os.Open(polkajamFile)
+	if err != nil {
+		t.Fatalf("Failed to open %s: %v", polkajamFile, err)
+	}
+	defer f2.Close()
+
+	scanner2 := bufio.NewScanner(f2)
+	lineNum2 := 0
+	for scanner2.Scan() {
+		lineNum2++
+		line := scanner2.Text()
+		if entry, err := parsePolkajamChargeGas(line); err == nil {
+			entry.LineNum = lineNum2
+			polkajamEntries = append(polkajamEntries, *entry)
+		}
+	}
+
+	t.Logf("Found %d charge_gas entries in jamduna.log", len(jamdunaEntries))
+	t.Logf("Found %d charge_gas entries in polkajam.log", len(polkajamEntries))
+
+	// Print first few entries to understand the pattern
+	t.Logf("First 3 Jamduna entries:")
+	for i := 0; i < 3 && i < len(jamdunaEntries); i++ {
+		e := jamdunaEntries[i]
+		t.Logf("  [%d] charged gas %d, %d -> %d (line %d)", i, e.Amount, e.GasBefore, e.GasAfter, e.LineNum)
+	}
+
+	t.Logf("First 4 Polkajam entries:")
+	for i := 0; i < 4 && i < len(polkajamEntries); i++ {
+		e := polkajamEntries[i]
+		t.Logf("  [%d] [%d]: charge_gas: %d (%d -> %d) (line %d)", i, e.Index, e.Amount, e.GasBefore, e.GasAfter, e.LineNum)
+	}
+
+	// It seems Polkajam has an extra initial charge_gas, so we start comparing from polkajam[1] vs jamduna[0]
+	polkajamOffset := 1
+	if len(polkajamEntries) > polkajamOffset && len(jamdunaEntries) > 0 {
+		if polkajamEntries[polkajamOffset].Amount == jamdunaEntries[0].Amount &&
+			polkajamEntries[polkajamOffset].GasBefore == jamdunaEntries[0].GasBefore &&
+			polkajamEntries[polkajamOffset].GasAfter == jamdunaEntries[0].GasAfter {
+			t.Logf("Confirmed: Polkajam has an extra initial charge_gas, using offset of %d", polkajamOffset)
+		} else {
+			polkajamOffset = 0 // fallback to no offset
+			t.Logf("No clear offset pattern found, comparing from start")
+		}
+	}
+
+	// Compare entries with offset
+	maxCompare := len(jamdunaEntries)
+	if len(polkajamEntries)-polkajamOffset < maxCompare {
+		maxCompare = len(polkajamEntries) - polkajamOffset
+	}
+
+	jamdunaIdx := 0
+	polkajamIdx := polkajamOffset
+	
+	for jamdunaIdx < len(jamdunaEntries) && polkajamIdx < len(polkajamEntries) {
+		jamduna := jamdunaEntries[jamdunaIdx]
+		polkajam := polkajamEntries[polkajamIdx]
+		
+		// Check if we should skip either entry (for misaligned sequences)
+		if jamduna.GasBefore != polkajam.GasBefore {
+			// Try to find matching gas state by advancing the one that's behind
+			if jamduna.GasBefore > polkajam.GasBefore {
+				// Polkajam is behind, advance it
+				t.Logf("Skipping polkajam[%d] - gas mismatch: jamduna.GasBefore=%d > polkajam.GasBefore=%d", 
+					polkajamIdx, jamduna.GasBefore, polkajam.GasBefore)
+				polkajamIdx++
+				continue
+			} else {
+				// Jamduna is behind, advance it
+				t.Logf("Skipping jamduna[%d] - gas mismatch: jamduna.GasBefore=%d < polkajam.GasBefore=%d", 
+					jamdunaIdx, jamduna.GasBefore, polkajam.GasBefore)
+				jamdunaIdx++
+				continue
+			}
+		}
+		
+		// Compare the charge gas details when gas states align
+		if jamduna.Amount != polkajam.Amount ||
+			jamduna.GasBefore != polkajam.GasBefore ||
+			jamduna.GasAfter != polkajam.GasAfter {
+
+			t.Fatalf("First difference found at jamduna[%d] vs polkajam[%d]:\nJamduna (line %d): charged gas %d, %d -> %d\nPolkajam (line %d): [%d]: charge_gas: %d (%d -> %d)",
+				jamdunaIdx, polkajamIdx,
+				jamduna.LineNum, jamduna.Amount, jamduna.GasBefore, jamduna.GasAfter,
+				polkajam.LineNum, polkajam.Index, polkajam.Amount, polkajam.GasBefore, polkajam.GasAfter)
+		}
+		
+		// Both entries match, advance both
+		jamdunaIdx++
+		polkajamIdx++
+	}
+
+	if len(jamdunaEntries) != len(polkajamEntries)-polkajamOffset {
+		t.Logf("Different number of comparable charge_gas entries: jamduna=%d, polkajam=%d (offset=%d)",
+			len(jamdunaEntries), len(polkajamEntries)-polkajamOffset, polkajamOffset)
+	} else {
+		t.Logf("All %d charge_gas entries match (with offset %d)!", len(jamdunaEntries), polkajamOffset)
 	}
 }

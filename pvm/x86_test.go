@@ -688,7 +688,7 @@ func recompiler_sandbox_test(tc TestCase) error {
 	for _, pm := range tc.InitialPageMap {
 		// Set the page access based on the initial page map
 		if pm.IsWritable {
-			err := rvm.SetMemAccessSandBox(pm.Address, pm.Length, PageMutable)
+			err := rvm.sandBox.SetMemAccessSandBox(pm.Address, pm.Length, PageMutable)
 			if err != nil {
 				return fmt.Errorf("failed to set memory access for address %x: %w", pm.Address, err)
 			}
@@ -702,7 +702,7 @@ func recompiler_sandbox_test(tc TestCase) error {
 
 	for _, mem := range tc.InitialMemory {
 		// Write the initial memory contents
-		rvm.WriteMemorySandBox(mem.Address, mem.Data)
+		rvm.sandBox.WriteMemorySandBox(mem.Address, mem.Data)
 	}
 	rvm.pc = 0
 	err = rvm.ExecuteSandBox(0)
@@ -713,7 +713,7 @@ func recompiler_sandbox_test(tc TestCase) error {
 	}
 	// check the memory
 	for _, mem := range tc.ExpectedMemory {
-		data, err := rvm.ReadMemorySandBox(mem.Address, uint32(len(mem.Data)))
+		data, err := rvm.sandBox.ReadMemorySandBox(mem.Address, uint32(len(mem.Data)))
 		if err != nil {
 			return fmt.Errorf("failed to read memory at address %x: %w", mem.Address, err)
 		}
@@ -762,7 +762,7 @@ func TestSingleSandbox(t *testing.T) {
 	debugRecompiler = false
 	showDisassembly = false
 
-	name := "inst_branch_not_eq_imm_ok"
+	name := "inst_store_imm_indirect_u16_with_offset_ok"
 	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -999,7 +999,7 @@ func TestHostFuncExposeSandBox(t *testing.T) {
 	for _, pm := range tc.InitialPageMap {
 		// Set the page access based on the initial page map
 		if pm.IsWritable {
-			err := rvm.SetMemAccessSandBox(pm.Address, pm.Length, PageMutable)
+			err := rvm.sandBox.SetMemAccessSandBox(pm.Address, pm.Length, PageMutable)
 			if err != nil {
 				t.Fatalf("Failed to set memory access for page %d: %v", pm.Address, err)
 			}
@@ -1008,7 +1008,7 @@ func TestHostFuncExposeSandBox(t *testing.T) {
 
 	for _, mem := range tc.InitialMemory {
 		// Write the initial memory contents
-		rvm.WriteMemorySandBox(mem.Address, mem.Data)
+		rvm.sandBox.WriteMemorySandBox(mem.Address, mem.Data)
 	}
 
 	rvm.initStartCode()
@@ -1056,7 +1056,7 @@ func TestSBRKSandBox(t *testing.T) {
 	for _, pm := range tc.InitialPageMap {
 		// Set the page access based on the initial page map
 		if pm.IsWritable {
-			err := rvm.SetMemAccessSandBox(pm.Address, pm.Length, PageMutable)
+			err := rvm.sandBox.SetMemAccessSandBox(pm.Address, pm.Length, PageMutable)
 			if err != nil {
 				t.Fatalf("Failed to set memory access for page %d: %v", pm.Address, err)
 			}
@@ -1065,7 +1065,7 @@ func TestSBRKSandBox(t *testing.T) {
 
 	for _, mem := range tc.InitialMemory {
 		// Write the initial memory contents
-		rvm.WriteMemorySandBox(mem.Address, mem.Data)
+		rvm.sandBox.WriteMemorySandBox(mem.Address, mem.Data)
 	}
 
 	rvm.x86Code = rvm.startCode

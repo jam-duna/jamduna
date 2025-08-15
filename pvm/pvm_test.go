@@ -430,7 +430,7 @@ func TestLogEntry(t *testing.T) {
 	for _, pm := range tc.InitialPageMap {
 		// Set the page access based on the initial page map
 		if pm.IsWritable {
-			err := rvm.SetMemAccessSandBox(pm.Address, pm.Length, PageMutable)
+			err := rvm.sandBox.SetMemAccessSandBox(pm.Address, pm.Length, PageMutable)
 			if err != nil {
 				t.Fatalf("Failed to set memory access for page %d: %v", pm.Address, err)
 			}
@@ -439,7 +439,7 @@ func TestLogEntry(t *testing.T) {
 	// Set the initial memory
 	for _, mem := range tc.InitialMemory {
 		// Write the initial memory contents
-		rvm.WriteMemorySandBox(mem.Address, mem.Data)
+		rvm.sandBox.WriteMemorySandBox(mem.Address, mem.Data)
 	}
 
 	for i := 0; i < regSize; i++ {

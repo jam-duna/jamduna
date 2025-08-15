@@ -717,8 +717,19 @@ func (c *NodeClient) GetSegments(importedSegments []types.ImportSegment) (raw_se
 	return raw_segments, nil
 }
 
-func (c *NodeClient) GetSegmentsByRequestedHash(requestedHash common.Hash) (raw_segments [][]byte, ExportedSegmentLength uint16, err error) {
-	return nil, 0, nil
+func (c *NodeClient) GetSegmentsByRequestedHash(requestedHashes common.Hash, count int) (raw_segments [][]byte, err error) {
+	for i := 0; i < count; i++ {
+		segmentIndex := uint16(i)
+		segmentBytes, err := c.Segment(requestedHashes, segmentIndex)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get segment %d for hash %s: %w", segmentIndex, requestedHashes.Hex(), err)
+		}
+		raw_segments = append(raw_segments, segmentBytes)
+	}
+	if len(raw_segments) != count {
+		return nil, fmt.Errorf("expected %d segments, got %d", count, len(raw_segments))
+	}
+	return raw_segments, nil
 }
 
 func (c *NodeClient) Segment(wphash common.Hash, segmentIndex uint16) ([]byte, error) {

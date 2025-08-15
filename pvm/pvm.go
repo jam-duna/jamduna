@@ -52,6 +52,7 @@ var (
 
 type VM struct {
 	Backend        string
+	IsChild        bool
 	JSize          uint64
 	Z              uint8
 	J              []uint32
@@ -422,7 +423,7 @@ func NewVMFromCode(serviceIndex uint32, code []byte, i uint64, hostENV types.Hos
 // Execute runs the program until it terminates
 func (vm *VM) Execute(entryPoint int, is_child bool) error {
 	vm.terminated = false
-
+	vm.IsChild = is_child
 	// A.2 deblob
 	if vm.code == nil {
 		vm.ResultCode = types.WORKRESULT_PANIC
@@ -469,18 +470,29 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 	stepn := 1
 	for !vm.terminated {
 		// charge gas for all the next steps until hitting a basic block instruction
-		gasBasicBlock, step := vm.getBasicBlockGasCost(vm.pc)
+		gasBasicBlock, hostGasCost, step := vm.getBasicBlockGasCost(vm.pc)
+		// og_gas := vm.Gas
 		vm.Gas -= int64(gasBasicBlock)
+
+		// fmt.Printf("charged gas %d, %d -> %d\n", gasBasicBlock, og_gas, vm.Gas)
+
+		vm.Gas -= int64(hostGasCost)
 		// now, run the block
 		for i := 0; i < step && !vm.terminated; i++ {
 			if err := vm.step(stepn); err != nil {
+				if err == childHostCall {
+					return nil
+				}
 				return err
 			}
-
-			if vm.hostCall && is_child {
-				return nil
-			}
 			stepn++
+			if vm.Gas < 0 {
+				vm.ResultCode = types.WORKRESULT_OOG
+				vm.MachineState = OOG
+				vm.terminated = true
+				log.Warn(vm.logging, "Out of Gas", "service", string(vm.ServiceMetadata), "mode", vm.Mode, "pc", vm.pc, "gas", vm.Gas)
+				return errors.New("out of gas")
+			}
 		}
 	}
 
@@ -504,11 +516,12 @@ func (vm *VM) GetIdentifier() string {
 	return fmt.Sprintf("%d_%s_%s_%s", vm.Service_index, vm.Mode, vm.Backend, vm.Identifier)
 }
 
-func (vm *VM) getBasicBlockGasCost(pc uint64) (uint64, int) {
+func (vm *VM) getBasicBlockGasCost(pc uint64) (uint64, uint64, int) {
 	gasCost := uint64(0)
 	i := pc
 	// charge gas for all the next steps until hitting a basic block instruction
 	step := 0
+	hostGasCost := uint64(0)
 	for i < uint64(len(vm.code)) {
 		opcode := vm.code[pc]
 		len_operands := vm.skip(pc)
@@ -516,18 +529,20 @@ func (vm *VM) getBasicBlockGasCost(pc uint64) (uint64, int) {
 			operands := vm.code[pc+1 : pc+1+len_operands]
 			lx := uint32(types.DecodeE_l(operands))
 			host_fn := int(lx)
-			gasCost += uint64(vm.chargeGas(host_fn))
+			hostGasCost += uint64(vm.chargeGas(host_fn))
 		}
 		pc += 1 + len_operands
 		step++
 		gasCost += 1
 		if IsBasicBlockInstruction(opcode) {
 			// step is the number of instructions executed in this basic block
-			return gasCost, step
+			return gasCost, hostGasCost, step
 		}
 	}
-	return gasCost, step
+	return gasCost, hostGasCost, step
 }
+
+var childHostCall = errors.New("host call not allowed in child VM")
 
 // step performs a single step in the PVM
 func (vm *VM) step(stepn int) error {
@@ -549,6 +564,9 @@ func (vm *VM) step(stepn int) error {
 	case opcode == ECALLI: // A.5.2 One immediate
 		vm.HandleOneImm(opcode, operands)
 		// host call invocation
+		if vm.hostCall && vm.IsChild {
+			return childHostCall
+		}
 		if vm.hostCall {
 			vm.InvokeHostCall(vm.host_func_id)
 			vm.hostCall = false

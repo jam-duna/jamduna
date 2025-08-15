@@ -28,7 +28,7 @@ BINARY := jamduna
 # Set default PVM backend based on OS.
 # On Linux, default to the faster 'compiler'. Otherwise, use 'interpreter'.
 ifeq ($(UNAME_S),Linux)
-  PVM_BACKEND ?= compiler # Default to 'compiler' on Linux
+  PVM_BACKEND ?= recompiler # Default to 'compiler' on Linux
 else
   PVM_BACKEND ?= interpreter # Default to 'interpreter' on non-Linux
 endif
@@ -76,7 +76,7 @@ run_1:
 
 run_5:
 	@for i in 0 1 2 3 4; do \
-		RUST_LOG=jam_node=trace $(POLKAJAM_BIN)  --chain chainspecs/jamduna-spec.json run --pvm-backend compiler --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
+		RUST_LOG=chain-core=debug,jam_node=trace $(POLKAJAM_BIN)  --chain chainspecs/jamduna-spec.json run --pvm-backend compiler --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
 	done
 
 jam:

@@ -18,5 +18,5 @@ type JNode interface {
 	GetService(service uint32) (sa *types.ServiceAccount, ok bool, err error)
 	GetServiceStorage(serviceID uint32, storageKey []byte) ([]byte, bool, error)
 	GetSegments(importedSegments []types.ImportSegment) (raw_segments [][]byte, err error)
-	GetSegmentsByRequestedHash(requestedHashes common.Hash) (raw_segments [][]byte, ExportedSegmentLength uint16, err error)
+	GetSegmentsByRequestedHash(requestedHashes common.Hash, count int) (raw_segments [][]byte, err error)
 }

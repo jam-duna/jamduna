@@ -10,6 +10,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -59,56 +60,83 @@ const (
 	indirectJumpPointSlot = 20 // Indirect jump point is at index 20
 )
 
+type RecompilerVM struct {
+	*VM
+	*RecompilerRam
+	mu        sync.Mutex
+	startCode []byte
+	exitCode  []byte
+
+	realCode []byte
+	codeAddr uintptr
+
+	x86Blocks map[uint64]*BasicBlock // by x86 PC
+	x86PC     uint64
+	x86Code   []byte
+
+	JumpTableOffset  uint64         // offset for the jump table in x86Code
+	JumpTableOffset2 uint64         // offset for the jump table in x86Code
+	JumpTableMap     []uint64       // maps PVM PC to the index of the x86code (djump only)
+	InstMapPVMToX86  map[uint32]int // maps PVM PC to the x86 PC index
+	InstMapX86ToPVM  map[int]uint32 // maps x86 PC to the PVM PC
+
+	djumpTableFunc []byte
+	djumpAddr      uintptr // address of the jump table in x86Code
+
+	//debug tool
+	x86Instructions map[int]x86asm.Inst
+	pc_addr         uint64
+	r12             uint64
+	isChargingGas   bool
+	isPCCounting    bool
+	IsBlockCounting bool // whether to count basic blocks
+}
+
 func NewRecompilerVM(vm *VM) (*RecompilerVM, error) {
-	// Allocate 4GB virtual memory region (not accessed directly here)
-	const memSize = 4*1024*1024*1024 + 1024*1024 // 4GB + 1MB
-	mem, err := syscall.Mmap(
-		-1, 0, memSize,
-		syscall.PROT_NONE,
-		syscall.MAP_ANON|syscall.MAP_PRIVATE,
-	)
+	currentHeapPointer := vm.Ram.GetCurrentHeapPointer()
+	ram, err := NewRecompilerRam() // 1MB for register dump
 	if err != nil {
-		return nil, fmt.Errorf("failed to mmap memory: %v", err)
+		return nil, fmt.Errorf("failed to create RecompilerRam: %w", err)
 	}
-
-	regDumpAddr := uintptr(unsafe.Pointer(&mem[0]))
-	// mem protect the first 1MB as R/W
-	if err := syscall.Mprotect(mem[:1024*1024], syscall.PROT_READ|syscall.PROT_WRITE); err != nil {
-		return nil, fmt.Errorf("failed to mprotect memory: %v", err)
-	}
-
-	if debugRecompiler {
-		// print with size
-		fmt.Printf("Register dump memory address: 0x%X (size: %d bytes)\n", regDumpAddr, len(mem[:1024*1024]))
-
-		realMemAddruint := uint64(uintptr(unsafe.Pointer(&mem[1024*1024])))
-		fmt.Printf("Real memory address: 0x%X (size: %d bytes)\n", realMemAddruint, len(mem))
-		fmt.Printf("RecompilerVM initialized with memory size: %d bytes\n", len(mem))
-	}
-
 	// Assemble the VM
 	rvm := &RecompilerVM{
-		VM:          vm,
-		realMemory:  mem[1024*1024:], // 1MB reserved for register dump
-		realMemAddr: uintptr(unsafe.Pointer(&mem[1024*1024])),
-		regDumpMem:  mem[:1024*1024],
-		regDumpAddr: regDumpAddr,
+		VM: vm,
 
 		JumpTableMap:    make([]uint64, 0),
 		InstMapX86ToPVM: make(map[int]uint32),
 		InstMapPVMToX86: make(map[uint32]int),
 
-		pc_addr:    uint64(regDumpAddr + uintptr((len(regInfoList)+1)*8)),
-		dirtyPages: make(map[int]bool),
+		pc_addr: uint64(ram.regDumpAddr + uintptr((len(regInfoList)+1)*8)),
 
 		isChargingGas:   true,         // default to charging gas
 		isPCCounting:    useEcalli500, // default to counting PC
 		IsBlockCounting: useEcalli500, // default to not counting basic blocks
 	}
 
-	rvm.current_heap_pointer = rvm.VM.Ram.GetCurrentHeapPointer()
-	rvm.VM.Ram = rvm
+	rvm.VM.Ram = ram
+	rvm.VM.Ram.SetCurrentHeapPointer(currentHeapPointer)
+	rvm.RecompilerRam = ram
+	return rvm, nil
+}
 
+func NewRecompilerVMFromRam(vm *VM, ram *RecompilerRam) (*RecompilerVM, error) {
+	// Assemble the VM
+	rvm := &RecompilerVM{
+		VM: vm,
+
+		JumpTableMap:    make([]uint64, 0),
+		InstMapX86ToPVM: make(map[int]uint32),
+		InstMapPVMToX86: make(map[uint32]int),
+
+		pc_addr: uint64(ram.regDumpAddr + uintptr((len(regInfoList)+1)*8)),
+
+		isChargingGas:   true,         // default to charging gas
+		isPCCounting:    useEcalli500, // default to counting PC
+		IsBlockCounting: useEcalli500, // default to not counting basic blocks
+	}
+
+	rvm.VM.Ram = ram
+	rvm.RecompilerRam = ram
 	return rvm, nil
 }
 
@@ -117,7 +145,7 @@ const entryPatch = 0x99999999
 
 func (vm *RecompilerVM) initStartCode() {
 
-	vm.startCode = append(vm.startCode, encodeMovImm(BaseRegIndex, uint64(vm.realMemAddr))...)
+	vm.startCode = append(vm.startCode, encodeMovImm(BaseRegIndex, uint64(vm.RecompilerRam.realMemAddr))...)
 	// initialize registers: mov rX, imm from vm.register
 	for i := 0; i < regSize; i++ {
 		immVal, _ := vm.Ram.ReadRegister(i)
@@ -127,7 +155,7 @@ func (vm *RecompilerVM) initStartCode() {
 		}
 		vm.startCode = append(vm.startCode, code...)
 	}
-	gasRegMemAddr := uint64(vm.regDumpAddr) + uint64(len(regInfoList)*8)
+	gasRegMemAddr := uint64(vm.RecompilerRam.regDumpAddr) + uint64(len(regInfoList)*8)
 	if showDisassembly {
 		fmt.Printf("Initialize Gas %d = %d\n", gasRegMemAddr, vm.Gas)
 	}
@@ -141,7 +169,7 @@ func (vm *RecompilerVM) initStartCode() {
 	vm.startCode = append(vm.startCode, patch...)
 
 	// Build exit code in temporary buffer
-	exitCode := encodeMovImm(BaseRegIndex, uint64(vm.regDumpAddr))
+	exitCode := encodeMovImm(BaseRegIndex, uint64(vm.RecompilerRam.regDumpAddr))
 	for i := 0; i < len(regInfoList); i++ {
 		if i == BaseRegIndex {
 			continue // skip R12 into [R12]
@@ -151,7 +179,7 @@ func (vm *RecompilerVM) initStartCode() {
 	}
 	vm.exitCode = append(exitCode, X86_OP_RET)
 }
-func (vm *RecompilerVM) GetDirtyPages() []int {
+func (vm *RecompilerRam) GetDirtyPages() []int {
 	dirtyPages := make([]int, 0)
 	for pageIndex, _ := range vm.dirtyPages {
 		if vm.dirtyPages[pageIndex] {
@@ -358,20 +386,6 @@ func (vm *RecompilerVM) initDJumpFunc(x86CodeLen int) {
 
 func (vm *RecompilerVM) Close() error {
 	var errs []error
-
-	if vm.realMemory != nil {
-		if err := syscall.Munmap(vm.realMemory); err != nil {
-			errs = append(errs, fmt.Errorf("realMemory: %w", err))
-		}
-		vm.realMemory = nil
-	}
-
-	if vm.regDumpMem != nil {
-		if err := syscall.Munmap(vm.regDumpMem); err != nil {
-			errs = append(errs, fmt.Errorf("regDumpMem: %w", err))
-		}
-		vm.regDumpMem = nil
-	}
 
 	if vm.x86Code != nil {
 		if err := syscall.Munmap(vm.x86Code); err != nil {

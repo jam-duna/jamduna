@@ -214,6 +214,11 @@ const (
 
 	AuthCopyServiceCode = 20
 	AuthCopyServiceFile = "/services/auth_copy.pvm"
+
+	GameOfLifeCode         = 30
+	GameOfLifeFile         = "/services/game_of_life.pvm"
+	GameOfLifeChildFile    = "services/game_of_life_child.pvm"
+	GameOfLifeChildLogFile = "services/game_of_life_child_with_log.pvm"
 )
 
 func (s *StateDB) GetHeaderHash() common.Hash {
