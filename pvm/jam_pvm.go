@@ -140,7 +140,6 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	vm.Mode = "accumulate"
 	vm.X = X //⎩I(u, s), I(u, s)⎫⎭
 	vm.Y = X.Clone()
-	vm.PriorX = X.Clone()
 	input_bytes := make([]byte, 0)
 	t_bytes := types.E(uint64(t))
 	s_bytes := types.E(uint64(s))

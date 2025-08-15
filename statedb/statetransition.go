@@ -180,7 +180,7 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 
 	if runPrevalidation {
 		if bytes.Equal(preState.StateRoot.Bytes(), st.PostState.StateRoot.Bytes()) {
-			return nil, fmt.Errorf("OMIT")
+			//			return nil, fmt.Errorf("OMIT")
 		}
 
 		if !bytes.Equal(preState.StateRoot.Bytes(), st.PreState.StateRoot.Bytes()) {

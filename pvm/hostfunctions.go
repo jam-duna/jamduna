@@ -442,7 +442,7 @@ func (vm *VM) hostBless() {
 	v, _ := vm.Ram.ReadRegister(9)
 	o, _ := vm.Ram.ReadRegister(10)
 	n, _ := vm.Ram.ReadRegister(11)
-	readX := vm.PriorX
+
 	if m > (1<<32)-1 || v > (1<<32)-1 {
 		vm.Ram.WriteRegister(7, WHO)
 		vm.HostResultCode = WHO
@@ -475,8 +475,9 @@ func (vm *VM) hostBless() {
 		}
 		bold_a[i] = binary.LittleEndian.Uint32(data)
 	}
-	xs, _ := readX.GetX_s() //vm.X.S.ServiceIndex
-	privilegedService_m := readX.U.PrivilegedState.Kai_m
+	xContext := vm.X
+	xs, _ := xContext.GetX_s() //vm.X.S.ServiceIndex
+	privilegedService_m := vm.X.U.PrivilegedState.Kai_m
 	if privilegedService_m != xs.ServiceIndex {
 		vm.Ram.WriteRegister(7, HUH)
 		vm.HostResultCode = HUH
@@ -484,12 +485,12 @@ func (vm *VM) hostBless() {
 		return
 	}
 	//TODO: check who!!
-	writeX := vm.X
+
 	// Set (x'p)_m, (x'p)_a, (x'p)_v
-	writeX.U.PrivilegedState.Kai_m = uint32(m)
-	writeX.U.PrivilegedState.Kai_a = bold_a
-	writeX.U.PrivilegedState.Kai_v = uint32(v)
-	writeX.U.PrivilegedState.Kai_g = bold_z
+	vm.X.U.PrivilegedState.Kai_m = uint32(m)
+	vm.X.U.PrivilegedState.Kai_a = bold_a
+	vm.X.U.PrivilegedState.Kai_v = uint32(v)
+	vm.X.U.PrivilegedState.Kai_g = bold_z
 
 	vm.Ram.WriteRegister(7, OK)
 	log.Debug(vm.logging, "BLESS OK", "m", fmt.Sprintf("%d", m), "a", fmt.Sprintf("%d", a), "v", fmt.Sprintf("%d", v))
@@ -519,18 +520,18 @@ func (vm *VM) hostAssign() {
 	for i := 0; i < types.MaxAuthorizationQueueItems; i++ {
 		bold_q[i] = common.BytesToHash(q[i*32 : (i+1)*32])
 	}
-	readX := vm.PriorX
-	xs, _ := readX.GetX_s()
-	privilegedService_a := readX.U.PrivilegedState.Kai_a[c]
+	xContext := vm.X
+	xs, _ := xContext.GetX_s()
+	privilegedService_a := vm.X.U.PrivilegedState.Kai_a[c]
 	if privilegedService_a != xs.ServiceIndex {
 		vm.Ram.WriteRegister(7, HUH)
 		vm.HostResultCode = HUH
 		log.Debug(vm.logging, "ASSIGN HUH", "c", c, "kai_a[c]", privilegedService_a, "xs", xs.ServiceIndex)
 		return
 	}
-	writeX := vm.X
-	copy(writeX.U.QueueWorkReport[c][:], bold_q[:])
-	writeX.U.PrivilegedState.Kai_a[c] = uint32(a)
+
+	copy(vm.X.U.QueueWorkReport[c][:], bold_q[:])
+	vm.X.U.PrivilegedState.Kai_a[c] = uint32(a)
 	log.Debug(vm.logging, "ASSIGN OK", "c", c, "kai_a[c]", a, "xs", xs.ServiceIndex)
 	vm.Ram.WriteRegister(7, OK)
 	vm.HostResultCode = OK
@@ -546,13 +547,13 @@ func (vm *VM) hostDesignate() {
 		vm.MachineState = PANIC
 		return
 	}
-	readX := vm.PriorX
-	_, xs := readX.GetX_s()
-	privilegedService_v := readX.U.PrivilegedState.Kai_v
-	if privilegedService_v != xs {
+	xContext := vm.X
+	xs, _ := xContext.GetX_s()
+	privilegedService_v := vm.X.U.PrivilegedState.Kai_v
+	if privilegedService_v != xs.ServiceIndex {
 		vm.Ram.WriteRegister(7, HUH)
 		vm.HostResultCode = HUH
-		log.Debug(vm.logging, "DESIGNATE HUH", "kai_v", privilegedService_v, "xs", xs)
+		log.Debug(vm.logging, "DESIGNATE HUH", "kai_v", privilegedService_v, "xs", xs.ServiceIndex)
 		return
 	}
 	v_bold := make([]types.Validator, types.TotalValidators)
@@ -565,9 +566,8 @@ func (vm *VM) hostDesignate() {
 		copy(newv.Metadata[:], keys[64+144:])
 		v_bold[i] = newv
 	}
-	writeX := vm.X
-	writeX.U.UpcomingValidators = v_bold
-	log.Debug(vm.logging, "DESIGNATE OK", "validatorsLen", len(v_bold), "TotalValidators", types.TotalValidators, "kai_v", privilegedService_v, "xs", xs)
+	vm.X.U.UpcomingValidators = v_bold
+	log.Debug(vm.logging, "DESIGNATE OK", "validatorsLen", len(v_bold), "TotalValidators", types.TotalValidators, "kai_v", privilegedService_v, "xs", xs.ServiceIndex)
 	vm.Ram.WriteRegister(7, OK)
 	vm.HostResultCode = OK
 }

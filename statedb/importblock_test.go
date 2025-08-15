@@ -48,8 +48,8 @@ func runSingleSTFTestAndSave(t *testing.T, filename string, content string, pvmB
 	diffs, err := CheckStateTransitionWithOutput(test_storage, &stf, nil, pvmBackend, runPrevalidation)
 
 	if err != nil && err.Error() == "OMIT" {
-		t.Skipf("⚠️ OMIT: Test case for [%s] is marked to be omitted.", filename)
-		return
+		//	t.Skipf("⚠️ OMIT: Test case for [%s] is marked to be omitted.", filename)
+		//	return
 	}
 
 	relativePath, relErr := filepath.Rel(sourceBasePath, filename)
@@ -95,7 +95,7 @@ func runSingleSTFTest(t *testing.T, filename string, content string, pvmBackend 
 		return
 	}
 	if err.Error() == "OMIT" {
-		t.Skipf("⚠️ OMIT: Test case for [%s] is marked to be omitted.", filename)
+		//	t.Skipf("⚠️ OMIT: Test case for [%s] is marked to be omitted.", filename)
 	}
 
 	HandleDiffs(diffs)
@@ -515,12 +515,19 @@ func TestSingleFuzzTrace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get fuzz reports path: %v", err)
 	}
-	fileMap["jamduna27"] = "jamduna/jam-duna-target-v0.13-0.6.7_gp-0.6.7/1755150174/00000027.bin" // MC [SN] - FAILS - c10 (AvailabilityAssignments/Pending Reports)
-	fileMap["jamduna13"] = "jamduna/jam-duna-target-v0.13-0.6.7_gp-0.6.7/1755150526/00000013.bin" // SC [MC] FAILS - c7 (validators) + c13 mismatch [bless ok, designate huh]
-	fileMap["javajam26"] = "javajam/1755155383/00000016.bin"
-	fileMap["jamzig93"] = "jamzig/1755185281/00000093.bin"
+	fileMap["jamduna74"] = "jamduna/0.6.7/1755150174/00000027.bin"   // PASS
+	fileMap["jamduna69"] = "jamduna/0.6.7/1755248769/00000014.bin"   // PASS
+	fileMap["jamduna82"] = "jamduna/0.6.7/1755248982/00000004.bin"   // PASS
+	fileMap["jamduna27"] = "jamduna/0.6.7/1755252727/00000011.bin"   // FAIL
+	fileMap["boka87"] = "boka/0.6.7/1755250287/00000012.bin"         // PASS
+	fileMap["jamixir80"] = "jamixir/0.6.7/1755151480/00000006.bin"   // PASS
+	fileMap["jamzig93"] = "jamzig/0.6.7/1755185281/00000093.bin"     // PASS
+	fileMap["jamzilla19"] = "jamzilla/0.6.7/1755251719/00000029.bin" // PASS
+	fileMap["javajam67"] = "javajam/0.6.7/1755186567/00000130.bin"   // PASS
+	fileMap["javajam71"] = "javajam/0.6.7/1755186771/00000030.bin"   // PASS
+	fileMap["spacejam15"] = "spacejam/0.6.7/1755183715/00000011.bin" // PASS
 
-	team := "jamzig93"
+	team := "jamduna27"
 	filename, exists := fileMap[team]
 	if !exists {
 		t.Fatalf("team %s not found in fileMap", team)

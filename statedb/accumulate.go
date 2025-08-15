@@ -431,9 +431,9 @@ func (sdb *StateDB) k_exist(i uint32) bool {
 func (sdb *StateDB) NewXContext(u *types.PartialState, s uint32, serviceAccount *types.ServiceAccount) *types.XContext {
 
 	// Calculate x.I 0.6.2 (B.9) https://graypaper.fluffylabs.dev/#/5f542d7/2efd002efd00
-	encoded_service, _ := types.Encode(s)
+	encoded_service, _ := types.Encode(uint(s))
 	encoded_entropy := sdb.JamState.SafroleState.Entropy[0].Bytes()
-	encoded_timeslot, _ := types.Encode(sdb.JamState.SafroleState.Timeslot)
+	encoded_timeslot, _ := types.Encode(uint(sdb.JamState.SafroleState.Timeslot))
 	encoded := append(encoded_service, append(encoded_entropy, encoded_timeslot...)...)
 	hash := common.Blake2Hash(encoded).Bytes()
 	decoded := uint32(types.DecodeE_l(hash[:4]))

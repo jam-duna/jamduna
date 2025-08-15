@@ -908,6 +908,17 @@ func (s *SafroleState) ApplyStateTransitionTickets(ctx context.Context, tickets 
 		}
 	}
 
+	if header.TicketsMark != nil {
+		winning_ticket_mark := header.TicketsMark
+		if len(winning_ticket_mark) != types.EpochLength {
+			return *s, fmt.Errorf("TicketsMark length mismatch")
+		}
+		for _, t := range winning_ticket_mark {
+			if t.Attempt >= types.TicketEntriesPerValidator {
+				return *s, fmt.Errorf("TicketsMark attempt exceeds maximum allowed: %d", types.TicketEntriesPerValidator)
+			}
+		}
+	}
 	// Sort and trim tickets
 	s2.SortAndTrimTickets()
 
