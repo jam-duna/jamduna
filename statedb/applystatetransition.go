@@ -173,6 +173,10 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	// preparing for the rho transition
 
 	assurances := blk.Assurances()
+	assurances, err = s.GetValidAssurances(assurances, blk.Header.ParentHeaderHash)
+	if err != nil {
+		return s, err
+	}
 	guarantees := blk.Guarantees()
 	log.Trace(log.A, "ApplyStateTransitionFromBlock", "len(assurances)", len(assurances))
 	// 4.13,4.14,4.15 - Rho [disputes, assurances, guarantees] [kappa',lamda',tau', beta dagga, prestate service, prestate accumulate related state]

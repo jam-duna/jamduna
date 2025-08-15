@@ -90,6 +90,18 @@ trace_sandbox:
 	@echo "Running 'TestTraceSandbox' with timeout $(LongTimeout) for network='$(NETWORK)' ..."
 	@cd $(STATEDB_DIR) && go test -v -timeout $(LongTimeout) -run TestTracesSandbox  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
 
+single_fuzz:
+	@echo "Running 'TestSingleFuzzTrace' with timeout $(TIMEOUT) for network='$(NETWORK)' ..."
+	@cd $(STATEDB_DIR) && go test -timeout $(TIMEOUT) -v -run TestSingleFuzzTrace  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
+
+publish_fuzz:
+	@echo "Running 'TestPublishFuzzTrace' with timeout $(TIMEOUT) for network='$(NETWORK)' ..."
+	@cd $(STATEDB_DIR) && go test -timeout $(TIMEOUT) -v -run TestPublishFuzzTrace  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
+
+all_fuzz:
+	@echo "Running 'TestFuzzTrace' with timeout $(TIMEOUT) for network='$(NETWORK)' ..."
+	@cd $(STATEDB_DIR) && go test -timeout $(TIMEOUT) -v -run TestFuzzTrace  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
+
 tiny:
 	$(MAKE) test-network NETWORK=tiny;
 

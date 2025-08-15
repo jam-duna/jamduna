@@ -112,7 +112,7 @@ func (s *StateDB) checkAssurance(a types.Assurance, anchor common.Hash, validato
 	return nil
 }
 
-func (s *StateDB) GetValidAssurances(assurances []types.Assurance, anchor common.Hash) (checkedAssurances []types.Assurance) {
+func (s *StateDB) GetValidAssurances(assurances []types.Assurance, anchor common.Hash) (checkedAssurances []types.Assurance, err error) {
 	validators := s.GetSafrole().CurrValidators
 	hasRecentWR, hasStaleWR := s.getWRStatus()
 
@@ -121,7 +121,8 @@ func (s *StateDB) GetValidAssurances(assurances []types.Assurance, anchor common
 			// no error, so add to the list of valid assurances
 			checkedAssurances = append(checkedAssurances, a)
 		} else {
-			log.Warn(log.SDB, "GetValidAssurances checkAssurance", "err", err)
+			log.Error(log.SDB, "GetValidAssurances checkAssurance", "err", err)
+			return nil, err
 		}
 	}
 	// Sort the assurances by validator index

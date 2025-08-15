@@ -70,7 +70,10 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 	//   HOWEVER, the bitfield needs to be validated with respect to rho (nil vs timeslot)
 	unvalidatedAssurances := extrinsic_pool.GetAssurancesFromPool(h.ParentHeaderHash)
 	// HERE we use rho validate all assurances and sort them
-	extrinsicData.Assurances = s.GetValidAssurances(unvalidatedAssurances, h.ParentHeaderHash)
+	extrinsicData.Assurances, err = s.GetValidAssurances(unvalidatedAssurances, h.ParentHeaderHash)
+	if err != nil {
+		return nil, err
+	}
 
 	tmpState := s.JamState.Copy()
 	tmpState.ComputeAvailabilityAssignments(extrinsicData.Assurances, targetJCE)

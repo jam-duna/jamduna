@@ -488,7 +488,7 @@ func findFuzzTestFiles(sourcePath, targetVersion string, excludedTeams []string)
 		}
 
 		isTestFile := !d.IsDir() &&
-			//strings.Contains(path, targetVersion) &&
+			strings.Contains(path, targetVersion) &&
 			strings.HasSuffix(d.Name(), ".bin") &&
 			d.Name() != "report.bin" && d.Name() != "genesis.bin"
 
@@ -515,19 +515,9 @@ func TestSingleFuzzTrace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get fuzz reports path: %v", err)
 	}
-	fileMap["jamduna74"] = "jamduna/0.6.7/1755150174/00000027.bin"   // PASS
-	fileMap["jamduna69"] = "jamduna/0.6.7/1755248769/00000014.bin"   // PASS
-	fileMap["jamduna82"] = "jamduna/0.6.7/1755248982/00000004.bin"   // PASS
-	fileMap["jamduna27"] = "jamduna/0.6.7/1755252727/00000011.bin"   // FAIL
-	fileMap["boka87"] = "boka/0.6.7/1755250287/00000012.bin"         // PASS
-	fileMap["jamixir80"] = "jamixir/0.6.7/1755151480/00000006.bin"   // PASS
-	fileMap["jamzig93"] = "jamzig/0.6.7/1755185281/00000093.bin"     // PASS
-	fileMap["jamzilla19"] = "jamzilla/0.6.7/1755251719/00000029.bin" // PASS
-	fileMap["javajam67"] = "javajam/0.6.7/1755186567/00000130.bin"   // PASS
-	fileMap["javajam71"] = "javajam/0.6.7/1755186771/00000030.bin"   // PASS
-	fileMap["spacejam15"] = "spacejam/0.6.7/1755183715/00000011.bin" // PASS
-
-	team := "jamduna27"
+	// fileMap["jamduna87"] = "archive/0.6.7/1754982087/00000005.bin" // FAIL -- looks to be a serviceID change
+	fileMap["jamduna69"] = "jamduna/0.6.7/1755248769/00000015.bin" // FAIL
+	team := "jamduna69"
 	filename, exists := fileMap[team]
 	if !exists {
 		t.Fatalf("team %s not found in fileMap", team)
