@@ -130,22 +130,22 @@ func (t *Target) handleConnection(conn net.Conn) {
 // --- Message Handlers ---
 
 func (t *Target) onPeerInfo(fuzzerInfo *PeerInfo) *Message {
-	log.Printf("%s[INCOMING REQUEST]%s PeerInfo", colorBlue, colorReset)
-	log.Printf("Received handshake from fuzzer: %s", fuzzerInfo.Name)
-	log.Printf("%s[OUTGOING RESPONSE]%s PeerInfo", colorGreen, colorReset)
+	log.Printf("%s[INCOMING REQ]%s PeerInfo", colorBlue, colorReset)
+	log.Printf("%sReceived handshake from fuzzer: %s%s", colorGray, fuzzerInfo.Name, colorReset)
+	log.Printf("%s[OUTGOING RSP]%s PeerInfo", colorGreen, colorReset)
 	return &Message{PeerInfo: &t.targetInfo}
 }
 
 // onSetState validates the received state against the test vector's PreState.
 func (t *Target) onSetState(req *HeaderWithState) *Message {
-	log.Printf("%s[INCOMING REQUEST]%s SetState", colorBlue, colorReset)
-	log.Printf("Received SetState request with %d key-value pairs.", len(req.State.KeyVals))
+	log.Printf("%s[INCOMING REQ]%s SetState", colorBlue, colorReset)
+	//log.Printf("Received SetState request with %d key-value pairs.", len(req.State.KeyVals))
 	sky := statedb.StateKeyVals{
 		KeyVals: req.State.KeyVals,
 	}
 	header := req.Header
 	headerHash := header.Hash()
-	log.Printf("Setting state with header: %s", headerHash.Hex())
+	log.Printf("%sSetting state with header: %s (%d KVs)%s", colorGray, headerHash.Hex(), len(sky.KeyVals), colorReset)
 	if t.stateDB != nil {
 		//log.Printf("%sWarning: Target already has a state initialized. Overwriting with new state.%s", colorYellow, colorReset)
 	}
@@ -156,43 +156,48 @@ func (t *Target) onSetState(req *HeaderWithState) *Message {
 		return &Message{StateRoot: &recovered_statedb_stateRoot}
 	}
 	t.SetStateDB(recovered_statedb)
-	log.Printf("StateDB initialized with %d key-value pairs. stateRoot: %v | HeaderHash: %v", len(sky.KeyVals), recovered_statedb_stateRoot.Hex(), headerHash.Hex())
+	//log.Printf("%sStateDB initialized with %d key-value pairs%s", colorGray, len(sky.KeyVals), colorReset)
+	log.Printf("%sState_Root: %v%s", colorGray, recovered_statedb_stateRoot.Hex(), colorReset)
+	log.Printf("%sHeaderHash: %v%s", colorGray, headerHash.Hex(), colorReset)
+
 	t.stateDBMap[headerHash] = recovered_statedb_stateRoot
-	log.Printf("%s[OUTGOING RESPONSE]%s StateRoot", colorGreen, colorReset)
+	log.Printf("%s[OUTGOING RSP]%s StateRoot", colorGreen, colorReset)
 	return &Message{StateRoot: &recovered_statedb_stateRoot}
 }
 
 // onImportBlock validates the received block against the test vector's block.
 func (t *Target) onImportBlock(req *types.Block) *Message {
-	log.Printf("%s[INCOMING REQUEST]%s ImportBlock", colorBlue, colorReset)
-	log.Printf("Received ImportBlock request for block hash: %s", req.Hash().Hex())
+	log.Printf("%s[INCOMING REQ]%s ImportBlock", colorBlue, colorReset)
+	headerHash := req.Header.Hash()
+	log.Printf("%sReceived ImportBlock request for HeaderHash: %s%s", colorGray, headerHash.Hex(), colorReset)
 
 	// apply state transition using block and the current stateDB
 	if t.stateDB == nil {
 		log.Printf("%sError: Target has no state initialized. Please set the state first.%s", colorRed, colorReset)
 		return &Message{StateRoot: &common.Hash{}}
 	}
-	headerHash := req.Header.Hash()
 	pvmBackend := t.pvmBackend
 	preState := t.stateDB
 	preStateRoot := preState.StateRoot
 	postState, jamErr := statedb.ApplyStateTransitionFromBlock(preState, context.Background(), req, nil, pvmBackend)
 	if jamErr != nil {
-		log.Printf("%sError applying state transition from block: %v%s", colorRed, jamErr, colorReset)
+		log.Printf("%s[IMPORTBK ERR] %v%s", colorRed, jamErr, colorReset)
 		return &Message{StateRoot: &preStateRoot}
 	}
-	log.Printf("State transition applied. New stateRoot: %v | HeaderHash: %v", postState.StateRoot.Hex(), headerHash.Hex())
+	log.Printf("%sState transition applied%s", colorGray, colorReset)
+	log.Printf("%sPost State_Root: %v%s", colorGray, postState.StateRoot.Hex(), colorReset)
+	log.Printf("%sPost HeaderHash: %v%s", colorGray, headerHash.Hex(), colorReset)
 	postStateRoot := postState.StateRoot
 	t.SetStateDB(postState)
 	t.stateDBMap[headerHash] = postStateRoot
-	log.Printf("%s[OUTGOING RESPONSE]%s StateRoot", colorGreen, colorReset)
+	log.Printf("%s[OUTGOING RSP]%s StateRoot", colorGreen, colorReset)
 	return &Message{StateRoot: &postStateRoot}
 }
 
 // onGetState returns the full state based on the test vector.
 func (t *Target) onGetState(req *common.Hash) *Message {
 	headerHash := *req
-	log.Printf("%s[INCOMING REQUEST]%s GetState", colorBlue, colorReset)
+	log.Printf("%s[INCOMING REQ]%s GetState", colorBlue, colorReset)
 	log.Printf("Received GetState request headerHash: %s", headerHash.Hex())
 	if t.stateDBMap[headerHash] == (common.Hash{}) {
 		log.Printf("%sError: No state found for headerHash: %s%s", colorRed, headerHash.Hex(), colorReset)
@@ -208,7 +213,7 @@ func (t *Target) onGetState(req *common.Hash) *Message {
 	stateKeyVals := statedb.StateKeyVals{
 		KeyVals: recoveredStateDB.GetAllKeyValues(),
 	}
-	log.Printf("%s[OUTGOING RESPONSE]%s State", colorGreen, colorReset)
+	log.Printf("%s[OUTGOING RSP]%s State", colorGreen, colorReset)
 	return &Message{State: &stateKeyVals}
 }
 

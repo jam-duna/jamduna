@@ -7,10 +7,16 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/colorfulnotion/jam/fuzz"
 	"github.com/colorfulnotion/jam/pvm"
 )
+
+func Terminate(stopCh chan os.Signal) {
+	stopCh <- syscall.SIGTERM
+	time.Sleep(100 * time.Millisecond)
+}
 
 func main() {
 	// ./duna_target_mac -pvm-logging debug
@@ -37,11 +43,11 @@ func main() {
 	target := fuzz.NewTarget(*socketPath, targetInfo, "interpreter")
 
 	// Graceful shutdown setup
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	stopCh := make(chan os.Signal, 1)
+	signal.Notify(stopCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		<-sigs
-		log.Println("Shutdown signal received, stopping target...")
+		<-stopCh
+		log.Println("TERMINATING TARGET")
 		target.Stop()
 		os.Exit(0)
 	}()

@@ -112,7 +112,7 @@ func (s *StateDB) checkAssurance(a types.Assurance, anchor common.Hash, validato
 	return nil
 }
 
-func (s *StateDB) GetValidAssurances(assurances []types.Assurance, anchor common.Hash) (checkedAssurances []types.Assurance, err error) {
+func (s *StateDB) GetValidAssurances(assurances []types.Assurance, anchor common.Hash, sortRequired bool) (checkedAssurances []types.Assurance, err error) {
 	validators := s.GetSafrole().CurrValidators
 	hasRecentWR, hasStaleWR := s.getWRStatus()
 
@@ -126,9 +126,11 @@ func (s *StateDB) GetValidAssurances(assurances []types.Assurance, anchor common
 		}
 	}
 	// Sort the assurances by validator index
-	sort.Slice(checkedAssurances, func(i, j int) bool {
-		return checkedAssurances[i].ValidatorIndex < checkedAssurances[j].ValidatorIndex
-	})
+	if sortRequired {
+		sort.Slice(checkedAssurances, func(i, j int) bool {
+			return checkedAssurances[i].ValidatorIndex < checkedAssurances[j].ValidatorIndex
+		})
+	}
 
 	return
 }
@@ -139,9 +141,11 @@ func (s *StateDB) ValidateAssurances(ctx context.Context, assurances []types.Ass
 	validators := s.GetSafrole().CurrValidators
 	hasRecentWR, hasStaleWR := s.getWRStatus()
 	// check sorting by validatorIndex
-	var prevIndex uint16
-	for i, a := range assurances {
+	//var prevIndex int
+	prevIndex := -1
+	for _, a := range assurances {
 		if err := s.checkAssurance(a, anchor, validators, hasRecentWR, hasStaleWR); err != nil {
+			//log.Error(log.SDB, "ValidateAssurances checkAssurance", "err", err, "assurance", a)
 			return err
 		}
 		if checkTimeout {
@@ -149,15 +153,13 @@ func (s *StateDB) ValidateAssurances(ctx context.Context, assurances []types.Ass
 				return jamerrors.ErrAStaleReport
 			}
 		}
-		if i > 0 {
-			if a.ValidatorIndex == prevIndex {
-				return jamerrors.ErrADuplicateAssurer
-			}
-			if a.ValidatorIndex < prevIndex {
-				return jamerrors.ErrANotSortedAssurers
-			}
+		if int(a.ValidatorIndex) == prevIndex {
+			return jamerrors.ErrADuplicateAssurer
 		}
-		prevIndex = a.ValidatorIndex
+		if int(a.ValidatorIndex) < prevIndex {
+			return jamerrors.ErrANotSortedAssurers
+		}
+		prevIndex = int(a.ValidatorIndex)
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("ValidateAssurances canceled")

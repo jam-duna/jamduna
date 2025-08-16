@@ -7,17 +7,18 @@ import (
 )
 
 type FuzzStats struct {
-	TotalBlocks            int `json:"generated"`
-	FuzzedBlocks           int `json:"fuzzed"`
-	OriginalBlocks         int `json:"original"`
-	FuzzTruePositives      int `json:"fuzz_true_positives"`     // Fuzzed blocks correctly detected.
-	FuzzFalseNegatives     int `json:"fuzz_false_negatives"`    // Fuzzed blocks that were missed.
-	FuzzResponseErrors     int `json:"fuzz_response_errors"`    // Response errors in fuzzed blocks.
-	FuzzMisclassifications int `json:"fuzz_misclassifications"` // Fuzzed blocks misclassified.
-	OrigFalsePositives     int `json:"orig_false_positives"`    // Original blocks wrongly flagged.
-	OrigTrueNegatives      int `json:"orig_true_negatives"`     // Original blocks correctly validated.
-	OrigResponseErrors     int `json:"orig_response_errors"`    // Response errors in original blocks.
-	OrigMisclassifications int `json:"orig_misclassifications"` // Original blocks misclassified.
+	FuzzRateTarget         float64 `json:"fuzz_rate_target"` // Target rate of fuzzed blocks.
+	TotalBlocks            int     `json:"generated"`
+	FuzzedBlocks           int     `json:"fuzzed"`
+	OriginalBlocks         int     `json:"original"`
+	FuzzTruePositives      int     `json:"fuzz_true_positives"`     // Fuzzed blocks correctly detected.
+	FuzzFalseNegatives     int     `json:"fuzz_false_negatives"`    // Fuzzed blocks that were missed.
+	FuzzResponseErrors     int     `json:"fuzz_response_errors"`    // Response errors in fuzzed blocks.
+	FuzzMisclassifications int     `json:"fuzz_misclassifications"` // Fuzzed blocks misclassified.
+	OrigFalsePositives     int     `json:"orig_false_positives"`    // Original blocks wrongly flagged.
+	OrigTrueNegatives      int     `json:"orig_true_negatives"`     // Original blocks correctly validated.
+	OrigResponseErrors     int     `json:"orig_response_errors"`    // Response errors in original blocks.
+	OrigMisclassifications int     `json:"orig_misclassifications"` // Original blocks misclassified.
 }
 
 func Ratio(numerator, denominator int) float64 {
@@ -33,10 +34,11 @@ func (fs *FuzzStats) Metrics() map[string]interface{} {
 		return nil
 	}
 	basic := map[string]interface{}{
-		"TotalBlocks":    fs.TotalBlocks,
-		"FuzzedBlocks":   fs.FuzzedBlocks,
-		"OriginalBlocks": fs.OriginalBlocks,
-		"FuzzedRate":     Ratio(fs.FuzzedBlocks, fs.TotalBlocks),
+		"Blocks_Total":       fs.TotalBlocks,
+		"Blocks_Fuzzed":      fs.FuzzedBlocks,
+		"Blocks_Original":    fs.OriginalBlocks,
+		"Fuzzed_Rate_Actual": Ratio(fs.FuzzedBlocks, fs.TotalBlocks),
+		"Fuzzed_Rate_Target": fs.FuzzRateTarget,
 	}
 
 	fuzz := map[string]interface{}{
@@ -55,9 +57,9 @@ func (fs *FuzzStats) Metrics() map[string]interface{} {
 
 	overall := map[string]interface{}{
 		//"FlaggedRate":           Ratio(fs.FuzzTruePositives+fs.OrigFalsePositives, fs.TotalBlocks),
-		"CorrectRate":           Ratio(fs.FuzzTruePositives+fs.OrigTrueNegatives, fs.TotalBlocks),
-		"ResponseErrorRate":     Ratio(fs.FuzzResponseErrors+fs.OrigResponseErrors, fs.TotalBlocks),
-		"MisclassificationRate": Ratio(fs.FuzzMisclassifications+fs.OrigMisclassifications, fs.TotalBlocks),
+		"Correct_Rate":           Ratio(fs.FuzzTruePositives+fs.OrigTrueNegatives, fs.TotalBlocks),
+		"Response_Error_Rate":    Ratio(fs.FuzzResponseErrors+fs.OrigResponseErrors, fs.TotalBlocks),
+		"Misclassification_Rate": Ratio(fs.FuzzMisclassifications+fs.OrigMisclassifications, fs.TotalBlocks),
 	}
 
 	return map[string]interface{}{

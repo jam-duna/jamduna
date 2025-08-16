@@ -173,7 +173,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	// preparing for the rho transition
 
 	assurances := blk.Assurances()
-	assurances, err = s.GetValidAssurances(assurances, blk.Header.ParentHeaderHash)
+	assurances, err = s.GetValidAssurances(assurances, blk.Header.ParentHeaderHash, false)
 	if err != nil {
 		return s, err
 	}
@@ -420,7 +420,7 @@ func (s *StateDB) ApplyStateTransitionRho(ctx context.Context, assurances []type
 	assuranceErr := s.ValidateAssurances(ctx, assurances, s.Block.Header.ParentHeaderHash, false)
 	if assuranceErr != nil {
 		log.Error(log.SDB, "ApplyStateTransitionRho", "assuranceErr", assuranceErr)
-		return nil, nil, err
+		return nil, nil, assuranceErr
 	}
 
 	// Assurances: get the bitstring from the availability

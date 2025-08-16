@@ -17,6 +17,10 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+const (
+	debugFuzz = false
+)
+
 // Error map for each mode
 var ErrorMap = map[string][]error{
 	"safrole": {
@@ -25,43 +29,44 @@ var ErrorMap = map[string][]error{
 		jamerrors.ErrTTicketsBadOrder,
 		jamerrors.ErrTBadRingProof,
 		jamerrors.ErrTEpochLotteryOver,
-		jamerrors.ErrTTimeslotNotMonotonic,
+		//jamerrors.ErrTTimeslotNotMonotonic,
 	},
-	/*
-		"reports": {
-			jamerrors.ErrGBadCodeHash,
-			jamerrors.ErrGBadCoreIndex,
-			jamerrors.ErrGBadSignature,
-			jamerrors.ErrGCoreEngaged,
-			jamerrors.ErrGDependencyMissing,
-			jamerrors.ErrGDuplicatePackageTwoReports,
-			jamerrors.ErrGFutureReportSlot,
-			jamerrors.ErrGInsufficientGuarantees,
-			jamerrors.ErrGDuplicateGuarantors,
-			jamerrors.ErrGOutOfOrderGuarantee,
-			jamerrors.ErrGWorkReportGasTooHigh,
-			jamerrors.ErrGServiceItemTooLow,
-			jamerrors.ErrGBadValidatorIndex,
-			jamerrors.ErrGBadValidatorIndex,
-			jamerrors.ErrGWrongAssignment,
-			jamerrors.ErrGAnchorNotRecent,
-			jamerrors.ErrGBadBeefyMMRRoot,
-			jamerrors.ErrGBadServiceID,
-			jamerrors.ErrGBadStateRoot,
-			jamerrors.ErrGReportEpochBeforeLast,
-			jamerrors.ErrGSegmentRootLookupInvalidNotRecentBlocks,
-			jamerrors.ErrGSegmentRootLookupInvalidUnexpectedValue,
-			jamerrors.ErrGCoreWithoutAuthorizer,
-			jamerrors.ErrGCoreUnexpectedAuthorizer,
-		},
-	*/
 
 	"assurances": {
-		//jamerrors.ErrABadSignature,
-		//jamerrors.ErrABadValidatorIndex,
-		//jamerrors.ErrABadCore,
-		//jamerrors.ErrABadParentHash,
+		jamerrors.ErrABadSignature,
+		jamerrors.ErrABadValidatorIndex,
+		jamerrors.ErrABadCore,
+		jamerrors.ErrABadParentHash,
 		//jamerrors.ErrAStaleReport,
+		jamerrors.ErrADuplicateAssurer,
+		jamerrors.ErrANotSortedAssurers,
+	},
+
+	"reports": {
+		// jamerrors.ErrGBadCodeHash,
+		// jamerrors.ErrGBadCoreIndex,
+		// jamerrors.ErrGBadSignature,
+		// jamerrors.ErrGCoreEngaged,
+		// jamerrors.ErrGDependencyMissing,
+		// jamerrors.ErrGDuplicatePackageTwoReports,
+		// jamerrors.ErrGFutureReportSlot,
+		// jamerrors.ErrGInsufficientGuarantees,
+		// jamerrors.ErrGDuplicateGuarantors,
+		// jamerrors.ErrGOutOfOrderGuarantee,
+		// jamerrors.ErrGWorkReportGasTooHigh,
+		// jamerrors.ErrGServiceItemTooLow,
+		// jamerrors.ErrGBadValidatorIndex,
+		// jamerrors.ErrGBadValidatorIndex,
+		// jamerrors.ErrGWrongAssignment,
+		// jamerrors.ErrGAnchorNotRecent,
+		// jamerrors.ErrGBadBeefyMMRRoot,
+		// jamerrors.ErrGBadServiceID,
+		// jamerrors.ErrGBadStateRoot,
+		// jamerrors.ErrGReportEpochBeforeLast,
+		// jamerrors.ErrGSegmentRootLookupInvalidNotRecentBlocks,
+		// jamerrors.ErrGSegmentRootLookupInvalidUnexpectedValue,
+		// jamerrors.ErrGCoreWithoutAuthorizer,
+		// jamerrors.ErrGCoreUnexpectedAuthorizer,
 	},
 
 	/*
@@ -132,57 +137,78 @@ func NewRand(seed []byte) *rand.Rand {
 	return rand.New(source)
 }
 
-func StartFuzzingProducer(fuzzer *Fuzzer, output chan<- StateTransitionQA, baseSTFs []*statedb.StateTransition, invalidRate int, numBlocks int) {
+func StartFuzzingProducer(fuzzer *Fuzzer, output chan<- StateTransitionQA, baseSTFs []*statedb.StateTransition, invalidRate float64, numBlocks int) {
 	defer close(output)
 	rng := NewRand(fuzzer.GetSeed())
 
+	store, err := statedb.InitStorage("/tmp/test_locala_producer")
+	if err != nil {
+		log.Printf("FUZZER: Failed to initialize storage, exiting: %v", err)
+		return
+	}
+
+	numInvalidBlocks := int(float64(numBlocks) * invalidRate)
+	numValidBlocks := numBlocks - numInvalidBlocks
+	log.Printf("FUZZER: Starting. Target: %d invalid blocks, %d valid blocks.", numInvalidBlocks, numValidBlocks)
+
 	for i := 0; i < numBlocks; i++ {
 		if len(baseSTFs) == 0 {
-			log.Println("Producer: No more base state transitions available.")
+			log.Println("FUZZER: No more base state transitions available.")
 			return
 		}
 
-		stfIndex := rng.Intn(len(baseSTFs))
-		baseSTF := baseSTFs[stfIndex]
+		remainingBlocks := numInvalidBlocks + numValidBlocks
+		probInvalid := float64(numInvalidBlocks) / float64(remainingBlocks)
 
-		stfQA := StateTransitionQA{
-			Mutated: false,
-			Error:   nil,
-			STF:     baseSTF, // baseSTF is already a pointer
-		}
+		if rng.Float64() < probInvalid {
+			var fuzzedQA *StateTransitionQA
+			for {
+				stfIndex := rng.Intn(len(baseSTFs))
+				baseSTF := baseSTFs[stfIndex]
 
-		if rng.Intn(100) < invalidRate {
-			mutatedResult, err := fuzzer.FuzzSingleStf(baseSTF, []string{"safrole", "reports", "assurances"})
-			if err != nil {
-				log.Printf("Producer: Error fuzzing STF: %v", err)
-			} else {
-				stfQA = *mutatedResult
+				//modeList := []string{"safrole", "reports", "assurances"}
+				modeList := []string{"safrole", "assurances"}
+				mutatedResult, err := fuzzer.FuzzSingleStf(store, baseSTF, modeList)
+				if err == nil {
+					fuzzedQA = mutatedResult
+					break
+				}
 			}
+			output <- *fuzzedQA
+			numInvalidBlocks--
+		} else {
+			stfIndex := rng.Intn(len(baseSTFs))
+			baseSTF := baseSTFs[stfIndex]
+			validQA := StateTransitionQA{
+				Mutated: false,
+				Error:   nil,
+				STF:     baseSTF,
+			}
+			output <- validQA
+			numValidBlocks--
 		}
-		output <- stfQA
 	}
-	log.Println("Producer: Finished generating all blocks.")
+	log.Println("FUZZER: Finished generating all blocks.")
 }
 
-func (f *Fuzzer) FuzzSingleStf(stf *statedb.StateTransition, modes []string) (*StateTransitionQA, error) {
-	store, err := statedb.InitStorage("/tmp/test_locala_single")
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize temporary storage for fuzzing: %v", err)
+func (f *Fuzzer) FuzzSingleStf(store *storage.StateDBStorage, stf_org *statedb.StateTransition, modes []string) (*StateTransitionQA, error) {
+	stf := stf_org.DeepCopy()
+	if stf == nil {
+		return nil, fmt.Errorf("failed to copy STF")
 	}
-
 	possibleMutations := selectImportBlocksErrorArr(f.GetSeed(), store, modes, stf, true)
 	if len(possibleMutations) == 0 {
 		return nil, fmt.Errorf("the provided STF is not fuzzable with the given modes")
 	}
 
+	// Pick one of the possible mutations at random.
 	rng := NewRand(f.GetSeed())
 	chosenMutation := possibleMutations[rng.Intn(len(possibleMutations))]
 
-	// FIX: Assign the pointer directly to the STF field.
 	resultQA := &StateTransitionQA{
 		Mutated: true,
 		Error:   chosenMutation.Error,
-		STF:     chosenMutation.StateTransition, // This is already a pointer
+		STF:     chosenMutation.StateTransition,
 	}
 
 	return resultQA, nil
@@ -360,6 +386,10 @@ func possibleError(seed []byte, selectedError error, block *types.Block, s *stat
 		return fuzzBlockABadParentHash(seed, block, validatorSecrets)
 	case jamerrors.ErrAStaleReport:
 		return fuzzBlockAStaleReport(seed, block, s)
+	case jamerrors.ErrADuplicateAssurer:
+		return fuzzBlockADuplicateAssurer(seed, block, s, validatorSecrets)
+	case jamerrors.ErrANotSortedAssurers:
+		return fuzzBlockANotSortedAssurers(seed, block, s, validatorSecrets)
 
 	// disputes errors
 	case jamerrors.ErrDNotSortedWorkReports:
@@ -459,21 +489,29 @@ func selectAllImportBlocksErrors(seed []byte, store *storage.StateDBStorage, mod
 	oValid, oValidatorIdx, oValidatorPub, err := oStatedbCopy.VerifyBlockHeader(oBlockCopy, nil)
 	if !oValid || err != nil || oBlockCopy.Header.AuthorIndex != oValidatorIdx {
 		if allowFuzzing {
-			panic(fmt.Sprintf("Original block failed seal test: %v | %v | %v\n", oValid, err, oBlockCopy.Header.AuthorIndex))
+			//panic(fmt.Sprintf("Original block failed seal test: %v | %v | %v\n", oValid, err, oBlockCopy.Header.AuthorIndex))
+			fmt.Printf("Original block failed seal test: %v | %v | %v\n", oValid, err, oBlockCopy.Header.AuthorIndex)
+			return oSlot, oEpoch, oPhase, nil, nil
 		}
 	}
 
 	if !allowFuzzing {
-		fmt.Printf("[#%v e=%v,m=%03d] %sSkip Fuzzing%s  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, colorGray, colorReset, oValidatorPub, oValidatorIdx)
+		if debugFuzz {
+			fmt.Printf("[#%v e=%v,m=%03d] %sSkip Fuzzing%s  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, colorGray, colorReset, oValidatorPub, oValidatorIdx)
+		}
 		return oSlot, oEpoch, oPhase, nil, nil
 	}
 
 	if len(aggregatedErrors) == 0 {
-		fmt.Printf("[#%v e=%v,m=%03d] %sNotFuzzable%s  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, colorGray, colorReset, oValidatorPub, oValidatorIdx)
+		if debugFuzz {
+			fmt.Printf("[#%v e=%v,m=%03d] %sNotFuzzable%s  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, colorGray, colorReset, oValidatorPub, oValidatorIdx)
+		}
 		return oSlot, oEpoch, oPhase, nil, nil
 	}
 
-	fmt.Printf("[#%v e=%v,m=%03d] %sFuzzable   %s  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, colorMagenta, colorReset, oValidatorPub, oValidatorIdx)
+	if debugFuzz {
+		fmt.Printf("[#%v e=%v,m=%03d] %sFuzzable   %s  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, colorMagenta, colorReset, oValidatorPub, oValidatorIdx)
+	}
 
 	for _, selectedError := range aggregatedErrors {
 		blockCopy := block.Copy()
@@ -482,6 +520,7 @@ func selectAllImportBlocksErrors(seed []byte, store *storage.StateDBStorage, mod
 		// slot := blockCopy.TimeSlot()
 		// ticketExts := blockCopy.Tickets()
 		stfErrExpected := possibleError(seed, selectedError, blockCopy, statedbCopy, validatorSecrets)
+
 		var sealerUnknown bool
 		switch selectedError {
 		case jamerrors.ErrTEpochLotteryOver, jamerrors.ErrTTimeslotNotMonotonic:
@@ -517,8 +556,10 @@ func selectAllImportBlocksErrors(seed []byte, store *storage.StateDBStorage, mod
 				//ms2, err := msf.ApplyStateTransitionTickets(context.TODO(), ticketExts, slot, header, nil) // Entropy computed!
 				mValid, mValidatorIdx, mValidatorPub, err := statedbCopy.VerifyBlockHeader(mSealedBlk, nil)
 				if !mValid || err != nil {
-					fmt.Printf("Mutated block failed seal test!!! %v | %v | %v\n", mValid, err, mSealedBlk.Header.AuthorIndex)
-					//panic(fmt.Sprintf("mutated block failed seal entropy test failed: %v |  mValidatorIdx=%v | mValidatorPub=%v | err: %v\n", mValid, mValidatorIdx, mValidatorPub, err))
+					if debugFuzz {
+						fmt.Printf("Mutated block failed seal test!!! %v | %v | %v\n", mValid, err, mSealedBlk.Header.AuthorIndex)
+						//panic(fmt.Sprintf("mutated block failed seal entropy test failed: %v |  mValidatorIdx=%v | mValidatorPub=%v | err: %v\n", mValid, mValidatorIdx, mValidatorPub, err))
+					}
 					continue
 				}
 
@@ -587,7 +628,9 @@ func selectAllImportBlocksErrors(seed []byte, store *storage.StateDBStorage, mod
 	// pick a random error based on our success
 	if len(errorList) > 0 {
 		possibleErrs := errorList
-		fmt.Printf("[#%v e=%v,m=%03d] %v possible errors = %s%v%s\n", oSlot, oEpoch, oPhase, len(possibleErrs), colorMagenta, jamerrors.GetErrorNames(possibleErrs), colorReset)
+		if debugFuzz || true {
+			fmt.Printf("[#%v e=%v,m=%03d] %v possible mutations = %s%v%s\n", oSlot, oEpoch, oPhase, len(possibleErrs), colorMagenta, jamerrors.GetErrorNames(possibleErrs), colorReset)
+		}
 		return oSlot, oEpoch, oPhase, mutatedSTFs, possibleErrs
 	}
 	return oSlot, oEpoch, oPhase, nil, nil

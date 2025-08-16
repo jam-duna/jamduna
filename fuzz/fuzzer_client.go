@@ -35,14 +35,16 @@ type Fuzzer struct {
 	conn           net.Conn
 	socketPath     string
 	fuzzerInfo     PeerInfo
+	targetInfo     PeerInfo
 	seed           []byte
 	store          *storage.StateDBStorage
 	internalSTFMap map[common.Hash]*statedb.StateTransition
 	pvmBackend     string
+	reportDir      string
 }
 
 // NewFuzzer creates a new fuzzer instance.
-func NewFuzzer(storageDir string, socketPath string, fuzzerInfo PeerInfo, pvmBackend string) (*Fuzzer, error) {
+func NewFuzzer(storageDir string, reportDir string, socketPath string, fuzzerInfo PeerInfo, pvmBackend string) (*Fuzzer, error) {
 	sdbStorage, err := storage.NewStateDBStorage(storageDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize fuzzer's local storage: %w", err)
@@ -59,6 +61,7 @@ func NewFuzzer(storageDir string, socketPath string, fuzzerInfo PeerInfo, pvmBac
 		socketPath:     socketPath,
 		fuzzerInfo:     fuzzerInfo,
 		store:          sdbStorage,
+		reportDir:      reportDir,
 		internalSTFMap: make(map[common.Hash]*statedb.StateTransition),
 		pvmBackend:     pvmBackend,
 	}, nil
@@ -74,7 +77,7 @@ func (fs *Fuzzer) RunInternalRPCServer() {
 	// runRPCServerInternal(fs.seed, fs.store)
 }
 
-func (fs *Fuzzer) GenerateExecutionReport(stateTransitionQA *StateTransitionQA, targetStateKeyVals statedb.StateKeyVals) *ExecutionReport {
+func (fs *Fuzzer) GenerateExecutionReport(stateTransitionQA *StateTransitionQA, targetStateKeyVals statedb.StateKeyVals, postStateRoot common.Hash, targetPostStateRoot common.Hash) *ExecutionReport {
 	stf := stateTransitionQA.STF
 	preState := statedb.StateKeyVals{
 		KeyVals: stf.PreState.KeyVals,
@@ -84,12 +87,15 @@ func (fs *Fuzzer) GenerateExecutionReport(stateTransitionQA *StateTransitionQA, 
 	}
 
 	execReport := ExecutionReport{
-		Block:           stf.Block,
-		PreState:        preState,
-		PostState:       postState,
-		Seed:            fs.seed,
-		TargetPostState: targetStateKeyVals,
+		Block:               stf.Block,
+		PostStateRoot:       postStateRoot,
+		TargetPostStateRoot: targetPostStateRoot,
+		PreState:            preState,
+		PostState:           postState,
+		Seed:                fs.seed,
+		TargetPostState:     targetStateKeyVals,
 	}
+
 	if stateTransitionQA.Error != nil {
 		execReport.Error = stateTransitionQA.Error.Error()
 	}
@@ -136,10 +142,23 @@ func (f *Fuzzer) GenSeed() []byte {
 	return f.seed
 }
 
+func (f *Fuzzer) SetTargetPeerInfo(targetPeerInfo PeerInfo) error {
+	f.targetInfo = targetPeerInfo
+	return nil
+}
+
+func (f *Fuzzer) GetTargetInfo() PeerInfo {
+	return f.targetInfo
+}
+
+func (f *Fuzzer) GetFuzzerInfo() PeerInfo {
+	return f.fuzzerInfo
+}
+
 // --- Protocol Methods ---
 
 func (f *Fuzzer) Handshake() (*PeerInfo, error) {
-	log.Printf("%s[OUTGOING REQUEST ]%s PeerInfo - Fuzzer Info: %s", colorGreen, colorReset, f.fuzzerInfo.Name)
+	log.Printf("%s[OUTGOING REQ]%s PeerInfo - Fuzzer Info: %s", colorGreen, colorReset, f.fuzzerInfo.Name)
 	msgToSend := &Message{PeerInfo: &f.fuzzerInfo}
 	if err := f.sendMessage(msgToSend); err != nil {
 		return nil, err
@@ -151,12 +170,12 @@ func (f *Fuzzer) Handshake() (*PeerInfo, error) {
 	if receivedMsg.PeerInfo == nil {
 		return nil, fmt.Errorf("expected PeerInfo from target, but got a different message type")
 	}
-	log.Printf("%s[INCOMING RESPONSE]%s PeerInfo - Target Info: %s", colorBlue, colorReset, receivedMsg.PeerInfo.Name)
+	log.Printf("%s[INCOMING RSP]%s PeerInfo - Target Info: %s", colorBlue, colorReset, receivedMsg.PeerInfo.Name)
 	return receivedMsg.PeerInfo, nil
 }
 
 func (f *Fuzzer) SetState(state *HeaderWithState) (*common.Hash, error) {
-	log.Printf("%s[OUTGOING REQUEST ]%s SetState - Header Hash: %s", colorGreen, colorReset, state.Header.Hash().Hex())
+	log.Printf("%s[OUTGOING REQ]%s SetState - Header Hash: %s", colorGreen, colorReset, state.Header.Hash().Hex())
 	msgToSend := &Message{SetState: state}
 	if err := f.sendMessage(msgToSend); err != nil {
 		return nil, err
@@ -168,12 +187,12 @@ func (f *Fuzzer) SetState(state *HeaderWithState) (*common.Hash, error) {
 	if receivedMsg.StateRoot == nil {
 		return nil, fmt.Errorf("expected StateRoot, got different type")
 	}
-	log.Printf("%s[INCOMING RESPONSE]%s StateRoot - Hash: %s", colorBlue, colorReset, receivedMsg.StateRoot.Hex())
+	log.Printf("%s[INCOMING RSP]%s StateRoot - Hash: %s", colorBlue, colorReset, receivedMsg.StateRoot.Hex())
 	return receivedMsg.StateRoot, nil
 }
 
 func (f *Fuzzer) ImportBlock(block *types.Block) (*common.Hash, error) {
-	log.Printf("%s[OUTGOING REQUEST ]%s ImportBlock - Hash: %s", colorGreen, colorReset, block.Header.HeaderHash().Hex())
+	log.Printf("%s[OUTGOING REQ]%s ImportBlock - Hash: %s", colorGreen, colorReset, block.Header.HeaderHash().Hex())
 	msgToSend := &Message{ImportBlock: block}
 	if err := f.sendMessage(msgToSend); err != nil {
 		return nil, err
@@ -185,12 +204,12 @@ func (f *Fuzzer) ImportBlock(block *types.Block) (*common.Hash, error) {
 	if receivedMsg.StateRoot == nil {
 		return nil, fmt.Errorf("expected StateRoot, got different type")
 	}
-	log.Printf("%s[INCOMING RESPONSE]%s StateRoot - Hash: %s", colorBlue, colorReset, receivedMsg.StateRoot.Hex())
+	log.Printf("%s[INCOMING RSP]%s StateRoot - Hash: %s", colorBlue, colorReset, receivedMsg.StateRoot.Hex())
 	return receivedMsg.StateRoot, nil
 }
 
 func (f *Fuzzer) GetState(hash *common.Hash) (*statedb.StateKeyVals, error) {
-	log.Printf("%s[OUTGOING REQUEST ]%s GetState - HeaderHash: %s", colorGreen, colorReset, hash.Hex())
+	log.Printf("%s[OUTGOING REQ]%s GetState - HeaderHash: %s", colorGreen, colorReset, hash.Hex())
 	msgToSend := &Message{GetState: hash}
 	if err := f.sendMessage(msgToSend); err != nil {
 		return nil, err
@@ -202,7 +221,7 @@ func (f *Fuzzer) GetState(hash *common.Hash) (*statedb.StateKeyVals, error) {
 	if receivedMsg.State == nil {
 		return nil, fmt.Errorf("expected State, got different type")
 	}
-	log.Printf("%s[INCOMING RESPONSE]%s State - %d key-value pairs", colorBlue, colorReset, len(receivedMsg.State.KeyVals))
+	log.Printf("%s[INCOMING RSP]%s State - %d key-value pairs", colorBlue, colorReset, len(receivedMsg.State.KeyVals))
 	return receivedMsg.State, nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
@@ -42,7 +43,7 @@ func RunUnixSocketChallenge(fuzzer *Fuzzer, stfQA *StateTransitionQA, verbose bo
 		//log.Printf("Challenge B#%.3d Using parent HeaderHash: %s", stfQA.STF.Block.Header.Slot, parentBlock.Header.HeaderHash().Hex())
 		initialStatePayload.Header = parentBlock.Header
 	} else {
-		log.Printf("FATAL: Challenge B#%.3d Parent block not found for STF: %s", stfQA.STF.Block.Header.Slot, stfQA.STF.Block.Header.HeaderHash().Hex())
+		//log.Printf("FATAL: Challenge B#%.3d Parent block not found for STF: %s", stfQA.STF.Block.Header.Slot, stfQA.STF.Block.Header.HeaderHash().Hex())
 		return false, false, fmt.Errorf("parent block not found for STF: %s", stfQA.STF.Block.Header.HeaderHash().Hex())
 	}
 	expectedPreStateRoot := stfQA.STF.PreState.StateRoot
@@ -100,7 +101,7 @@ func RunUnixSocketChallenge(fuzzer *Fuzzer, stfQA *StateTransitionQA, verbose bo
 		}
 	}
 
-	if !matched || verbose {
+	if !matched {
 		// Log the mismatch for further analysis.
 		if !matched {
 			log.Printf("B#%.3d MISMATCH: HeaderHash: %s | PostStateRoot: %s", blockToProcess.Header.Slot, headerHash.Hex(), targetPostStateRoot.Hex())
@@ -113,11 +114,26 @@ func RunUnixSocketChallenge(fuzzer *Fuzzer, stfQA *StateTransitionQA, verbose bo
 		} else if targetStateKeyVals == nil {
 			log.Printf("No state found for headerHash %s", headerHash.Hex())
 		} else {
-			executionReport := fuzzer.GenerateExecutionReport(stfQA, *targetStateKeyVals)
-			log.Printf("Execution Report for B#%.3d:\n%s", blockToProcess.Header.Slot, executionReport.String())
-			diffs := statedb.CompareKeyValsWithOutput(executionReport.PreState.KeyVals, executionReport.TargetPostState.KeyVals, executionReport.PostState.KeyVals)
-			//fmt.Printf("B#%.3d Diffs:\v%s", blockToProcess.Header.Slot, diffs)
-			statedb.HandleDiffs(diffs)
+			internalExecutionReport := fuzzer.GenerateExecutionReport(stfQA, *targetStateKeyVals, *targetPostStateRoot, expectedPostStateRoot)
+			externalResport := fuzzer.GenerateJsonDiffReport(internalExecutionReport)
+			// Store report in the specified directory
+			if fuzzer.reportDir != "" {
+				currTs := common.ComputeCurrentTS()
+				if err := externalResport.SaveToFile(fuzzer.reportDir, currTs, blockToProcess.Header.Slot, stfQA); err != nil {
+					log.Printf("Failed to save execution report: %v", err)
+				} else {
+					log.Printf("Execution report saved for B#%.3d in %s", blockToProcess.Header.Slot, fuzzer.reportDir)
+				}
+			} else {
+				log.Printf("Report directory not set. Skipping saving report for B#%.3d", blockToProcess.Header.Slot)
+			}
+			log.Printf("Execution Report for B#%.3d:\n%s", blockToProcess.Header.Slot, externalResport.String())
+			if verbose {
+				diffs := statedb.CompareKeyValsWithOutput(internalExecutionReport.PreState.KeyVals, internalExecutionReport.TargetPostState.KeyVals, internalExecutionReport.PostState.KeyVals)
+				fmt.Printf("B#%.3d Diffs:\v%s", blockToProcess.Header.Slot, diffs)
+				statedb.HandleDiffs(diffs)
+			}
+
 		}
 		if !matched {
 			os.Exit(1)

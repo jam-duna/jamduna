@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 
 	"github.com/colorfulnotion/jam/common"
@@ -34,6 +35,20 @@ type StateTransition struct {
 
 func (s *StateTransition) ToJSON() string {
 	return types.ToJSON(s)
+}
+
+func (s *StateTransition) DeepCopy() *StateTransition {
+
+	stfCopyByte, err := types.Encode(s)
+	if err != nil {
+		return nil
+	}
+	stfInterface, _, _ := types.Decode(stfCopyByte, reflect.TypeOf(StateTransition{}))
+	stf, ok := stfInterface.(StateTransition)
+	if !ok {
+		return nil
+	}
+	return &stf
 }
 
 type StateTransitionCheck struct {

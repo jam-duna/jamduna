@@ -16,6 +16,7 @@ import (
 func main() {
 
 	dir := "/tmp/fuzzer"
+	report_dir := "./reports"
 	socket := "/tmp/jam_target.sock"
 	enableRPC := false
 
@@ -37,6 +38,7 @@ func main() {
 	fReg.RegisterFlag("invalidrate", nil, jConfig.InvalidRate, "Percentage of invalid blocks", &jConfig.InvalidRate)
 	fReg.RegisterFlag("statistics", nil, jConfig.Statistics, "Print statistics interval", &jConfig.Statistics)
 	fReg.RegisterFlag("dir", nil, dir, "Storage directory", &dir)
+	fReg.RegisterFlag("report-dir", nil, report_dir, "Report directory", &report_dir)
 	fReg.RegisterFlag("rpc", nil, enableRPC, "Start RPC server", &enableRPC)
 	fReg.RegisterFlag("socket", nil, socket, "Path for the Unix domain socket to connect to", &socket)
 
@@ -50,7 +52,7 @@ func main() {
 
 	fmt.Printf("jConfig: %v\n", jConfig)
 
-	fuzzer, err := fuzz.NewFuzzer(dir, socket, fuzzerInfo, pvm.BackendInterpreter)
+	fuzzer, err := fuzz.NewFuzzer(dir, report_dir, socket, fuzzerInfo, pvm.BackendInterpreter)
 	if err != nil {
 		log.Fatalf("Failed to initialize fuzzer: %v", err)
 	}

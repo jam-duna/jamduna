@@ -101,3 +101,42 @@ func fuzzBlockAStaleReport(seed []byte, block *types.Block, s *statedb.StateDB) 
 	// TODO: probably need to re-sign EA with new signature
 	return jamerrors.ErrAStaleReport
 }
+
+func fuzzBlockADuplicateAssurer(seed []byte, block *types.Block, s *statedb.StateDB, secrets []types.ValidatorSecret) error {
+	r := NewSeededRand(seed)
+	a := randomAssurance(r, block)
+	if a == nil {
+		return nil
+	}
+	if len(block.Extrinsic.Assurances) < 2 {
+		return nil
+	}
+
+	a0 := block.Extrinsic.Assurances[0]
+	a1 := block.Extrinsic.Assurances[1]
+
+	// Duplicate the assurer
+	a0.ValidatorIndex = a1.ValidatorIndex
+	a0.Sign(secrets[a0.ValidatorIndex].Ed25519Secret[:])
+	block.Extrinsic.Assurances[0] = a0
+	return jamerrors.ErrADuplicateAssurer
+}
+
+func fuzzBlockANotSortedAssurers(seed []byte, block *types.Block, s *statedb.StateDB, secrets []types.ValidatorSecret) error {
+	r := NewSeededRand(seed)
+	a := randomAssurance(r, block)
+	if a == nil {
+		return nil
+	}
+
+	if len(block.Extrinsic.Assurances) < 2 {
+		return nil // Not enough assurances to sort
+	}
+	// destroy the sorted order
+	for i := 0; i < len(block.Extrinsic.Assurances)-1; i++ {
+		if r.Intn(2) == 0 {
+			block.Extrinsic.Assurances[i], block.Extrinsic.Assurances[i+1] = block.Extrinsic.Assurances[i+1], block.Extrinsic.Assurances[i]
+		}
+	}
+	return jamerrors.ErrANotSortedAssurers
+}

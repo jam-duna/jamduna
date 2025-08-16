@@ -909,20 +909,20 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block, sf0 *SafroleState) (isValid
 
 	if sf0 == nil {
 		// ValidateTicketTransition
-
-		sf0, err = s.GetPosteriorSafroleEntropy(targetJCE)
-		if err != nil {
-			log.Error(log.SDB, "GetPosteriorSafroleEntropy", "err", err)
-			return false, validatorIdx, bandersnatch.BanderSnatchKey{}, fmt.Errorf("VerifyBlockHeader Failed: GetPosteriorSafroleEntropy")
-		}
-
 		/*
-			sf0, err = ApplyStateTransitionTickets(s, context.TODO(), bl, nil)
+			sf0, err = s.GetPosteriorSafroleEntropy(targetJCE)
 			if err != nil {
-				log.Error(log.SDB, "ApplyStateTransitionTickets", "err", err)
-				return false, validatorIdx, bandersnatch.BanderSnatchKey{}, fmt.Errorf("VerifyBlockHeader Failed: ApplyStateTransitionTickets")
+				log.Error(log.SDB, "GetPosteriorSafroleEntropy", "err", err)
+				return false, validatorIdx, bandersnatch.BanderSnatchKey{}, fmt.Errorf("VerifyBlockHeader Failed: GetPosteriorSafroleEntropy")
 			}
 		*/
+
+		sf0, err = ApplyStateTransitionTickets(s, context.TODO(), bl, nil)
+		if err != nil {
+			log.Error(log.SDB, "ApplyStateTransitionTickets", "err", err)
+			return false, validatorIdx, bandersnatch.BanderSnatchKey{}, fmt.Errorf("VerifyBlockHeader Failed: ApplyStateTransitionTickets")
+		}
+
 	}
 
 	// author_idx is the K' so we use the sf_tmp
@@ -982,6 +982,7 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 	newBlock := originalBlock.Copy()
 	header := newBlock.GetHeader()
 	header.ExtrinsicHash = newBlock.Extrinsic.Hash()
+	//fmt.Printf("!!SealBlockWithEntropy: targetJCE %d, authorIdx %d, authorPub %x | extrinsicHash %x\n", targetJCE, validatorIdx, blockAuthorPub[:], header.ExtrinsicHash[:])
 
 	// Validate ticket transition
 	sf0, err := s.GetPosteriorSafroleEntropy(targetJCE)
