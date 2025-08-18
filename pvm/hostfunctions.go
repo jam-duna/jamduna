@@ -961,15 +961,13 @@ func (vm *VM) hostFetch() {
 
 	errCode := vm.Ram.WriteRAMBytes(uint32(o), v_Bytes[f:f+l])
 	if errCode != OK {
-		log.Warn(vm.logging, "FETCH FAIL", "o", o, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "l", l, "f", f, "f+l", f+l, "v_Bytes[f..f+l]", fmt.Sprintf("%x", v_Bytes[f:f+l]))
 		vm.terminated = true
 		vm.ResultCode = types.WORKRESULT_PANIC
 		vm.MachineState = PANIC
+		log.Warn(vm.logging, "FETCH FAIL", "o", o, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "l", l, "f", f, "f+l", f+l, "v_Bytes[f..f+l]", fmt.Sprintf("%x", v_Bytes[f:f+l]))
 		return
 	}
-	l = uint64(len(v_Bytes))
-	log.Trace(vm.logging, "FETCH SUCC", "o", o, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "l", l, "f", f, "f+l", f+l, "v_Bytes[f..f+l]", fmt.Sprintf("%x", v_Bytes[f:]))
-
+	log.Trace(vm.logging, "FETCH SUCC", "useRawRAM", useRawRam, "o", fmt.Sprintf("%x", o), "v_Bytes", fmt.Sprintf("%x", v_Bytes), "l", l, "f", f, "f+l", f+l, "v_Bytes[f..f+l]", fmt.Sprintf("%x", v_Bytes[f:]))
 	vm.Ram.WriteRegister(7, uint64(len(v_Bytes)))
 }
 

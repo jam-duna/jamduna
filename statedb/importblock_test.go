@@ -525,7 +525,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 	*/
 
 	// Michael - Transfer of 71225 with 10000 gas resulted in Ok(()) => something else
-	fileMap["jamduna0896"] = "0.6.7/traces/1755530896/00000008.bin" // FAIL - Transfer should fail
+	fileMap["jamduna0896"] = "0.6.7/traces/1755530896/00000008.bin" // they 122667, we 8702
 	/*
 		DEBUG[08-18|10:55:15.629] LOOKUP NONE                              s=0                    h=0x7bcf5a5b5ea3cb0c46ecdd53d8d5ddb181014962464d95a02a961e8fc37e8dc5 preimage_source=trie
 		INFO [08-18|10:55:15.631] "HOSTLOG-\x00\x15jam-bootstrap-service\x060.1.24\nApache-2.0\x01%Parity Technologies <admin@parity.io>" msg="Attemting transfer, gas=9981814"
@@ -541,19 +541,20 @@ func TestSingleFuzzTrace(t *testing.T) {
 	fileMap["jamduna1419"] = "0.6.7/traces/1755531419/00000008.bin" // FAIL Transfer of 71225 with 10000 gas resulted in Ok(())
 	fileMap["jamduna1480"] = "0.6.7/traces/1755531480/00000008.bin" // FAIL Transfer of 71225 with 10000 gas resulted in Ok(())
 
-	// Sourabh low memory
-	fileMap["jamduna0728"] = "0.6.7/traces/1755530728/00000008.bin" // FAIL - Sourabh
-	/*
-			INFO [08-18|10:53:01.735] "HOSTLOG-\x00\x11jam-fuzzy-service\x060.1.24\nApache-2.0\x01%Parity Technologies <admin@parity.io>" msg="Selected instruction: LowMemCheck"
-		INFO [08-18|10:53:01.740] "HOSTLOG-\x00\x11jam-fuzzy-service\x060.1.24\nApache-2.0\x01%Parity Technologies <admin@parity.io>" msg="Accessing LOW-MEM 0x24b8 (0x000024b8)"
-	*/
+	// Sourabh 64K low memory
+	fileMap["jamduna0728"] = "0.6.7/traces/1755530728/00000008.bin" // SOLVED
 
 	/* Sourabh fetch
-	INFO [08-18|11:00:16.912] "HOSTLOG-\x00\x11jam-fuzzy-service\x060.1.24\nApache-2.0\x01%Parity Technologies <admin@parity.io>" msg="Selected instruction: HostCallFetch"
-	INFO [08-18|11:00:16.921] "HOSTLOG-\x00\x11jam-fuzzy-service\x060.1.24\nApache-2.0\x01%Parity Technologies <admin@parity.io>" msg="hostcall: fetch (kind=1, buf_ptr=0xc5b28d6b*, buf_len=256, off=0, a=0, b=0)"
+		INFO [08-18|11:00:16.912] "HOSTLOG-\x00\x11jam-fuzzy-service\x060.1.24\nApache-2.0\x01%Parity Technologies <admin@parity.io>" msg="Selected instruction: HostCallFetch"
+		INFO [08-18|11:00:16.921] "HOSTLOG-\x00\x11jam-fuzzy-service\x060.1.24\nApache-2.0\x01%Parity Technologies <admin@parity.io>" msg="hostcall: fetch (kind=1, buf_ptr=0xc5b28d6b*, buf_len=256, off=0, a=0, b=0)"
+		For case 1755531229 - there is an invalid fetch trying to write to 0xc5b28d6b resulting in a PANIC, and the only difference is what the accumulate_gas_user should be in this PANIC situation.
+		  polkajam: 0, jamduna: 19087
+		By this, we believe it should be non-zero
+	   	    https://graypaper.fluffylabs.dev/#/7e6ff6a/2d44032d4403?v=0.6.7
+		Our statistics match that of boka.
 	*/
 	fileMap["jamduna1229"] = "0.6.7/traces/1755531229/00000035.bin" // FAIL
-	team := "jamduna1229"
+	team := "jamduna0728"
 	filename, exists := fileMap[team]
 	if !exists {
 		t.Fatalf("team %s not found in fileMap", team)

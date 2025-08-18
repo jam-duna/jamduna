@@ -45,9 +45,7 @@ func (j *JamState) ProcessGuarantees(ctx context.Context, guarantees []types.Gua
 		// assign first report to core
 		if j.AvailabilityAssignments[int(g.Report.CoreIndex)] == nil {
 			j.SetRhoByWorkReport(uint16(g.Report.CoreIndex), g.Report, j.SafroleState.GetTimeSlot())
-			log.Info(log.G, "assigned core", "core", g.Report.CoreIndex)
 		} else {
-			log.Warn(log.G, "core already assigned", "core", g.Report.CoreIndex, "report", g.Report.String())
 			continue
 		}
 		// cancellation check

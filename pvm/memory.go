@@ -45,33 +45,47 @@ func (ram *RAM) GetDirtyPages() []int {
 	panic("GetDirtyPages not implemented for RAM")
 }
 
-func NewRAM(o_size uint32, w_size uint32, p_s uint32) *RAM {
-	// read-only
+//		vm.Ram = NewRAM(o_size, w_size, z, s, o_byte, w_byte)
+
+func NewRAM(o_size uint32, w_size uint32, z uint32, o_byte []byte, w_byte []byte, s uint32) *RAM {
+	// o - read-only
 	ro_data_address := uint32(Z_Z)
-	ro_data_address_end := ro_data_address + o_size
+	ro_data_address_end := ro_data_address + P_func(o_size)
+	fmt.Printf("o_size: %d copied to %d up to %d\n", o_size, ro_data_address, ro_data_address_end)
 
-	// read-write
-	rw_data_address := uint32(2 * Z_Z)
-	rw_data_address_end := rw_data_address + Z_func(o_size)
-	current_heap_pointer := rw_data_address_end + Z_P
-	// fmt.Printf("rw_data_address_end: %x, current_heap_pointer: %x\n", rw_data_address_end, current_heap_pointer)
+	// w - read-write
+	rw_data_address := uint32(2*Z_Z) + Z_func(o_size)
+	rw_data_address_end := rw_data_address + P_func(w_size)
+	current_heap_pointer := rw_data_address_end
+	fmt.Printf("w_size: %d copied to %d up to %d\n", w_size, rw_data_address, rw_data_address_end)
 
-	// stack
-	stack_address := uint32(0xFFFFFFFF) - 2*Z_Z - Z_I - p_s + 1
-	stack_address_end := stack_address + p_s
+	fmt.Printf("current_heap_pointer: %d (dec) %x (hex)\n", current_heap_pointer, current_heap_pointer)
 
-	// output
+	// s - stack
+	p_s := P_func(s)
+	stack_address := uint32(uint64(1<<32) - uint64(2*Z_Z) - uint64(Z_I) - uint64(p_s))
+	stack_address_end := uint32(uint64(1<<32) - uint64(2*Z_Z) - uint64(Z_I))
+	fmt.Printf("s_size: %d [hex %x] stack at %d [hex %x] up to %d [hex %x]\n",
+		s, s,
+		stack_address, stack_address,
+		stack_address_end, stack_address_end)
+	// a - argument outputs
 	a_size := uint32(Z_Z + Z_I - 1)
 	output_address := uint32(0xFFFFFFFF) - Z_Z - Z_I + 1
 	output_end := uint32(0xFFFFFFFF)
 
 	ram := &RAM{
-		stack_address:        stack_address,
-		stack_address_end:    stack_address_end,
-		rw_data_address:      rw_data_address,
-		rw_data_address_end:  rw_data_address_end,
-		ro_data_address:      ro_data_address,
-		ro_data_address_end:  ro_data_address_end,
+		// o_bytes are be copied here Z_Z
+		ro_data_address:     ro_data_address,
+		ro_data_address_end: ro_data_address_end,
+
+		// w_bytes should be copied into here
+		rw_data_address:     rw_data_address,
+		rw_data_address_end: rw_data_address_end,
+
+		stack_address:     stack_address,
+		stack_address_end: stack_address_end,
+
 		current_heap_pointer: current_heap_pointer,
 		output_address:       output_address,
 		output_end:           output_end,
@@ -81,6 +95,9 @@ func NewRAM(o_size uint32, w_size uint32, p_s uint32) *RAM {
 		ro_data:              make([]byte, ro_data_address_end-ro_data_address),
 		output:               make([]byte, a_size),
 	}
+	copy(ram.ro_data[:], o_byte[:])
+	copy(ram.rw_data[:], w_byte[:])
+
 	log.Trace("pvm", "NewRAM",
 		"output_address", fmt.Sprintf("%x", ram.output_address), "output_end", fmt.Sprintf("%x", ram.output_end),
 		"stack_address", fmt.Sprintf("%x", ram.stack_address), "stack_end", fmt.Sprintf("%x", ram.stack_address_end),
@@ -121,7 +138,7 @@ func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
 		copy(ram.ro_data[offset:], data)
 		return OK
 	default:
-
+		log.Error(log.GeneralAuthoring, "WriteRAMBytes Invalid RAM", "address", fmt.Sprintf("%x", address), "end", fmt.Sprintf("%x", end))
 		return OOB
 	}
 }
@@ -142,8 +159,7 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 		if address+length > 65536 {
 			return nil, OOB
 		}
-		panic(111)
-		return ram.first64k[address : address+length], OK
+		return ram.first64k[address : address+length], OOB
 	}
 	if address >= ram.output_address && end <= ram.output_end {
 		offset := address - ram.output_address
@@ -162,10 +178,11 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 	}
 
 	if address >= ram.rw_data_address && end <= Z_func(ram.current_heap_pointer) {
+		//fmt.Printf("ReadRAMBytes: address %x, length %d, current_heap_pointer %x\n", address, length, ram.current_heap_pointer)
 		offset := address - ram.rw_data_address
 		if offset+length > uint32(len(ram.rw_data)) {
 			fmt.Printf("ADDRESS %x rw_data_address %x offset %x\n", address, ram.rw_data_address, offset)
-
+			// panic(555)
 			return nil, OOB
 		}
 		return ram.rw_data[offset : offset+length], OK

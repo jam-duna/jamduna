@@ -42,7 +42,7 @@ var (
 	PvmLogging = false
 	PvmTrace   = false
 	PvmTrace2  = false
-	useRawRam  = true
+	useRawRam  = false
 
 	showDisassembly = false
 	useEcalli500    = false
@@ -248,7 +248,7 @@ func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, 
 	if offset+4 <= uint64(len(pure)) {
 		offset += 4 // skip standard_c_size_byte
 	}
-	//fmt.Printf("DecodeProgram o_size: %d, w_size: %d, z_val: %d, s_val: %d\n", o_size, w_size, z_val, s_val)
+	// fmt.Printf("DecodeProgram o_size: %d, w_size: %d, z_val: %d, s_val: %d len(w_byte)=%d\n", o_size, w_size, z_val, s_val, len(w_byte))
 	return decodeCorePart(pure[offset:]), uint32(o_size), uint32(w_size), uint32(z_val), uint32(s_val), o_byte, w_byte
 }
 
@@ -393,7 +393,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 	if useRawRam {
 		vm.Ram = NewRawRAM() // for DOOM
 	} else {
-		vm.Ram = NewRAM(o_size, w_size, s) // for davxy 0.6.6 traces
+		vm.Ram = NewRAM(o_size, w_size, z, o_byte, w_byte, s)
 	}
 
 	for i := 0; i < len(initialRegs); i++ {
@@ -570,7 +570,6 @@ func (vm *VM) step(stepn int) error {
 		if vm.hostCall {
 			vm.InvokeHostCall(vm.host_func_id)
 			vm.hostCall = false
-			vm.terminated = false
 		}
 	case opcode == LOAD_IMM_64: // A.5.3 One Register and One Extended Width Immediate
 		vm.HandleOneRegOneEWImm(opcode, operands)
