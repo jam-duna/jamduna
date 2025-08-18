@@ -124,6 +124,19 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 			return s, err
 		}
 	}
+
+	// assurances := blk.Assurances()
+	assurances := blk.Assurances()
+	assurances, err = s.GetValidAssurances(assurances, blk.Header.ParentHeaderHash, false)
+	if err != nil {
+		return s, err
+	}
+	num_assurances, err := s.ApplyStateTransitionRhoDagga(ctx, assurances, targetJCE)
+	if err != nil {
+		log.Error(log.SDB, "ApplyStateTransitionRhoDagga", "err", err)
+		return s, err
+	}
+
 	// TODO - 4.12 - Dispute
 	// 0.6.2 Safrole 4.5,4.8,4.9,4.10,4.11 [post dispute state , pre designed validators iota]
 	sf := s.GetSafrole()
@@ -172,16 +185,12 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 
 	// preparing for the rho transition
 
-	assurances := blk.Assurances()
-	assurances, err = s.GetValidAssurances(assurances, blk.Header.ParentHeaderHash, false)
-	if err != nil {
-		return s, err
-	}
 	guarantees := blk.Guarantees()
 	log.Trace(log.A, "ApplyStateTransitionFromBlock", "len(assurances)", len(assurances))
 	// 4.13,4.14,4.15 - Rho [disputes, assurances, guarantees] [kappa',lamda',tau', beta dagga, prestate service, prestate accumulate related state]
 	// 4.16 available work report also updated
-	num_reports, num_assurances, err := s.ApplyStateTransitionRho(ctx, assurances, guarantees, targetJCE)
+
+	num_reports, err := s.ApplyStateTransitionRho(ctx, guarantees, targetJCE)
 	if err != nil {
 		return s, err
 	}
@@ -414,13 +423,12 @@ func (s *StateDB) ApplyStateTransitionDispute(disputes types.Dispute) (err error
 	return nil
 }
 
-// Process Rho - Eq 25/26/27 using disputes, assurances, guarantees in that order
-func (s *StateDB) ApplyStateTransitionRho(ctx context.Context, assurances []types.Assurance, guarantees []types.Guarantee, targetJCE uint32) (num_reports map[types.Ed25519Key]uint16, num_assurances map[uint16]uint16, err error) {
+func (s *StateDB) ApplyStateTransitionRhoDagga(ctx context.Context, assurances []types.Assurance, targetJCE uint32) (num_assurances map[uint16]uint16, err error) {
 	d := s.GetJamState()
 	assuranceErr := s.ValidateAssurances(ctx, assurances, s.Block.Header.ParentHeaderHash, false)
 	if assuranceErr != nil {
 		log.Error(log.SDB, "ApplyStateTransitionRho", "assuranceErr", assuranceErr)
-		return nil, nil, assuranceErr
+		return nil, assuranceErr
 	}
 
 	// Assurances: get the bitstring from the availability
@@ -431,38 +439,44 @@ func (s *StateDB) ApplyStateTransitionRho(ctx context.Context, assurances []type
 	s.AvailableWorkReport = availableWorkReport // every block has new available work report
 	log.Trace(log.A, "ApplyStateTransitionRho", "len(s.AvailableWorkReport)", len(s.AvailableWorkReport))
 
+	return num_assurances, nil
+}
+
+// Process Rho - Eq 25/26/27 using disputes, assurances, guarantees in that order
+func (s *StateDB) ApplyStateTransitionRho(ctx context.Context, guarantees []types.Guarantee, targetJCE uint32) (num_reports map[types.Ed25519Key]uint16, err error) {
+	d := s.GetJamState()
+
 	// Guarantees checks
 	for _, g := range guarantees {
 		if err := s.VerifyGuaranteeBasic(g, targetJCE); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 
 	// ensure global sort order  (sorted in makeblock)
 	if err := CheckSortedGuarantees(guarantees); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// length constraint (makeblock ensure unique wps -- CHECK)
 	if err := s.checkLength(); err != nil {
-		return nil, nil, err
-
+		return nil, err
 	}
 
 	// inter-dependency checks among guarantees
 	for _, g := range guarantees {
 		if err := s.checkRecentWorkPackage(g, guarantees); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		if err := s.checkPrereq(g, guarantees); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 
 	num_reports, err = d.ProcessGuarantees(ctx, guarantees, s.PreviousGuarantorAssignments)
 	if err != nil {
 		log.Error(log.SDB, "ApplyStateTransitionRho", "GuaranteeErr", err)
-		return nil, nil, err
+		return nil, err
 	}
-	return num_reports, num_assurances, nil
+	return num_reports, nil
 }

@@ -102,6 +102,7 @@ func (s *StateDB) checkAssurance(a types.Assurance, anchor common.Hash, validato
 
 	// (11.13)
 	if err := a.VerifySignature(validators[a.ValidatorIndex]); err != nil {
+		log.Error(log.SDB, "Assurance signature verification failed", "err", err, "validator_index", a.ValidatorIndex)
 		return jamerrors.ErrABadSignature
 	}
 
