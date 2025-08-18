@@ -71,7 +71,7 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService, targetN 
 		gld := uint32(10)
 		binary.LittleEndian.PutUint32(tmp, gld) // num_of_gliders
 		payload = append(payload, tmp...)
-		step := uint32(10 + 20*(game_of_life_n))
+		step := uint32(10 + 750*(game_of_life_n))
 		binary.LittleEndian.PutUint32(tmp, step) // total_execution_steps
 		payload = append(payload, tmp...)
 
@@ -124,6 +124,12 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService, targetN 
 		// TODO: fix this
 		segRootHash := wr.AvailabilitySpec.ExportedSegmentRoot
 		if game_of_life_n > 0 {
+			result := wr.Results[0]
+			var gas uint64
+			if result.Result.Err == types.WORKRESULT_OK {
+				gas = binary.LittleEndian.Uint64(result.Result.Ok)
+				log.Info(log.Node, "Game of Life", "N", game_of_life_n, "child gas", gas, "step", step, "ExportedSegmentRoot", segRootHash.String())
+			}
 			Export_segments_count := wr.AvailabilitySpec.ExportedSegmentLength
 			next_import_cnt = int(Export_segments_count)
 			exports, err := n1.GetSegmentsByRequestedHash(segRootHash, next_import_cnt)
