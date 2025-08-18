@@ -3,6 +3,7 @@ package pvm
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -188,7 +189,7 @@ func TestHelloWorld(t *testing.T) {
 	// }()
 
 	log.InitLogger("info")
-	fp := "../services/hello_world.pvm"
+	fp := "../services/blake2b_parent.pvm"
 	raw_code, err := os.ReadFile(fp)
 	if err != nil {
 		t.Fatalf("Failed to read file %s: %v", fp, err)
@@ -212,11 +213,34 @@ func TestHelloWorld(t *testing.T) {
 	// pvm.Ram.DebugStatus()
 
 	fmt.Printf("PVM start execution...\n")
-	pvm.Execute(types.EntryPointRefine, false)
 
+	pvm.Execute(types.EntryPointRefine, false)
 	fmt.Printf("pvm.pc: %d, gas: %d, vm.ResultCode: %d, vm.Fault_address: %d\n", pvm.pc, pvm.Gas, pvm.ResultCode, pvm.Fault_address)
 	elapsed := time.Since(start)
 	fmt.Printf("Execution took %s\n", elapsed)
+	r, _ := pvm.getArgumentOutputs()
+	fmt.Printf("result as string: %s\n", r.String())
+
+	var hashExpectedResult common.Hash
+	data := []byte{0xDE, 0xAD, 0xBE, 0xEF}
+	//hash 100 times 0xdeadbeef
+	for i := 0; i < 100; i++ {
+		if i == 0 {
+			hashExpectedResult = common.Blake2Hash(data)
+		} else {
+			hashExpectedResult = common.Blake2Hash(hashExpectedResult.Bytes())
+		}
+
+	}
+	fmt.Printf("Expected hash: %s\n", hashExpectedResult.Hex())
+	result := r.Ok
+	// compare the result with the expected hash
+	// use bytes.Equal to compare the two hashes
+	if !bytes.Equal(result, hashExpectedResult.Bytes()) {
+		t.Errorf("Expected hash %s, got %s", hashExpectedResult.Hex(), common.BytesToHash(result).Hex())
+	} else {
+		fmt.Printf("Hash matches: %s\n", common.BytesToHash(result).Hex())
+	}
 }
 
 // adjust “LogEntry” to whatever the element type of VMLogs actually is
