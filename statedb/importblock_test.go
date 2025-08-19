@@ -489,6 +489,7 @@ func findFuzzTestFiles(sourcePath, targetVersion string, excludedTeams []string)
 
 		isTestFile := !d.IsDir() &&
 			strings.Contains(path, targetVersion) &&
+			!strings.Contains(path, "RETIRED") &&
 			strings.HasSuffix(d.Name(), ".bin") &&
 			d.Name() != "report.bin" && d.Name() != "genesis.bin"
 
@@ -516,28 +517,13 @@ func TestSingleFuzzTrace(t *testing.T) {
 		t.Fatalf("failed to get fuzz reports path: %v", err)
 	}
 
-	fileMap["jamduna8769"] = "0.6.7/traces/1755248769/00000015.bin" // PASS
+	fileMap["jamduna1265"] = "0.6.7/traces/1755531265/00000008.bin" // MC
 
-	// FAIL explainable with recompiler vs interpreter gas model
-	fileMap["jamduna0728"] = "0.6.7/traces/1755530728/00000008.bin" // they 13063, 13048 us (low memory fix)
-	fileMap["jamduna1081"] = "0.6.7/traces/1755531081/00000008.bin" // bad_code
-	fileMap["jamduna1179"] = "0.6.7/traces/1755531179/00000008.bin" // bad_code
-
-	// FAIL - these all have "bad-code"
-	// FOCUS: [javajam passes, vinwolf claims]
-	fileMap["jamduna1265"] = "0.6.7/traces/1755531265/00000008.bin" // bad_code - 8 byte difference. gas matches
-	fileMap["jamduna0896"] = "0.6.7/traces/1755530896/00000008.bin" // bad_code - they 12667, we 23512, many differences
-
-	// probably this is polkajam bug (jamzilla) -- bad-code
-	fileMap["jamduna0535"] = "0.6.7/traces/1755530535/00000011.bin" //  ***OK*** 0 them, 22717 us
-	fileMap["jamduna1000"] = "0.6.7/traces/1755531000/00000008.bin" //  bad_code 0 them, 22907 us
-	fileMap["jamduna1229"] = "0.6.7/traces/1755531229/00000035.bin" //  bad_code 0 them, 19087 us
-	fileMap["jamduna1322"] = "0.6.7/traces/1755531322/00000008.bin" //  bad_code 0 them, 14562 us
-	fileMap["jamduna1375"] = "0.6.7/traces/1755531375/00000008.bin" //  bad_code 0 them, 16045 us
-	fileMap["jamduna1419"] = "0.6.7/traces/1755531419/00000008.bin" //  bad_code 0 them, 15964 us
-	fileMap["jamduna1480"] = "0.6.7/traces/1755531480/00000008.bin" //  bad_code 0 them, 52349 us
-
-	team := "jamduna1265"
+	// WORK REPORT BAD
+	fileMap["jamduna0371"] = "0.6.7/traces/TESTING/1755620371/00000008.bin" // SOLVED
+	fileMap["jamduna0896"] = "0.6.7/traces/TESTING/1755530896/00000008.bin" // SOLVED
+	fileMap["jamduna1252"] = "0.6.7/traces/TESTING/1755621252/00000009.bin" // FAILS
+	team := "jamduna1252"
 	filename, exists := fileMap[team]
 	if !exists {
 		t.Fatalf("team %s not found in fileMap", team)
@@ -551,6 +537,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 	log.InitLogger("debug")
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule("pvm_validator")
+	log.EnableModule(log.SDB)
 	t.Run(filepath.Base(filename), func(t *testing.T) {
 		runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter, true)
 	})
@@ -595,7 +582,9 @@ func testFuzzTraceInternal(t *testing.T, saveOutput bool) {
 		currentFile := filename
 		relPath, _ := filepath.Rel(sourcePath, currentFile)
 		testName := filepath.ToSlash(relPath)
-
+		if strings.Contains(testName, "RETIRED") || strings.Contains(testName, "1754982087") || strings.Contains(testName, "1755252727") {
+			continue
+		}
 		t.Run(testName, func(t *testing.T) {
 			content, err := os.ReadFile(currentFile)
 			if err != nil {

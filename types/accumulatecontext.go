@@ -251,6 +251,10 @@ type AccumulateOperandElements struct {
 	O []byte      `json:"O"` // o
 }
 
+func (a *AccumulateOperandElements) String() string {
+	return ToJSONHex(a)
+}
+
 func (a AccumulateOperandElements) Encode() []byte {
 	hBytes, err := Encode(a.H)
 	if err != nil {

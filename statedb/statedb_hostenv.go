@@ -17,7 +17,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 	if !sa.Dirty {
 		return nil, nil
 	}
-	log.Trace(log.SDB, "writeAccount", "service_idx", sa.ServiceIndex, "dirty", sa.Dirty, "s", sa.JsonString())
+	log.Debug(log.SDB, "writeAccount", "service_idx", sa.ServiceIndex, "dirty", sa.Dirty, "s", sa.JsonString())
 
 	service_idx := sa.GetServiceIndex()
 	tree := s.GetTrie()
@@ -25,16 +25,16 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 	start_NumStorageItems := sa.NumStorageItems
 	serviceUpdate = types.NewServiceUpdate(service_idx)
 	for _, storage := range sa.Storage {
-		log.Trace(log.SDB, "writeAccount Storage", "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", storage.InternalKey, "storage.Accessed", storage.Accessed, "storage.Deleted", storage.Deleted, "storage.source", storage.Source)
+		log.Debug(log.SDB, "writeAccount Storage", "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", storage.InternalKey, "storage.Accessed", storage.Accessed, "storage.Deleted", storage.Deleted, "storage.source", storage.Source)
 		as_internal_key := storage.InternalKey
 		if storage.Dirty {
 			if storage.Deleted {
-				log.Trace(s.Authoring, "writeAccount DELETE", "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", as_internal_key, "storage.Accessed", storage.Accessed, "storage.Deleted", storage.Deleted, "storage.source", storage.Source)
+				log.Debug(s.Authoring, "writeAccount DELETE", "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", as_internal_key, "storage.Accessed", storage.Accessed, "storage.Deleted", storage.Deleted, "storage.source", storage.Source)
 				if storage.Source == "trie" {
 					err = tree.DeleteServiceStorage(service_idx, storage.Key)
 					if err != nil {
 						// DeleteServiceStorageKey: Failed to delete k: 0xffffffffdecedb51effc9737c5fea18873dbf428c55f0d5d3b522672f234a9b1, error: key not found
-						log.Trace(log.SDB, "DeleteServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", as_internal_key, "err", err)
+						log.Debug(log.SDB, "DeleteServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", as_internal_key, "err", err)
 						continue
 					}
 				} else {
@@ -61,7 +61,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 	}
 
 	for blob_hash_str, v := range sa.Lookup {
-		log.Trace(log.SDB, "writeAccount Lookup", "service_idx", service_idx, "blob_hash_str", blob_hash_str, "v.Dirty", v.Dirty, "v.Deleted", v.Deleted, "v.Z", v.Z, "v.T", v.T, "source", v.Source)
+		log.Debug(log.SDB, "writeAccount Lookup", "service_idx", service_idx, "blob_hash_str", blob_hash_str, "v.Dirty", v.Dirty, "v.Deleted", v.Deleted, "v.Z", v.Z, "v.T", v.T, "source", v.Source)
 		blob_hash := common.HexToHash(blob_hash_str)
 		if v.Dirty {
 			if v.Deleted {
@@ -81,7 +81,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 					}
 				}
 			} else {
-				log.Trace(log.SDB, "writeAccount SET Lookup", "service_idx", service_idx, "blob_hash", blob_hash_str, "v.Z", v.Z, "v.T", v.T)
+				log.Debug(log.SDB, "writeAccount SET Lookup", "service_idx", service_idx, "blob_hash", blob_hash_str, "v.Z", v.Z, "v.T", v.T)
 				err = tree.SetPreImageLookup(service_idx, blob_hash, v.Z, v.T)
 				if err != nil {
 					log.Warn(log.SDB, "tree.SetPreimageLookup", "blob_hash", blob_hash, "v.Z", v.Z, "v.T", v.T, "err", err)
@@ -98,7 +98,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 		}
 	}
 	for blobHash_str, v := range sa.Preimage {
-		log.Trace(log.SDB, "writeAccount Preimage", "service_idx", service_idx, "blobHash_str", blobHash_str, "v.Dirty", v.Dirty, "v.Deleted", v.Deleted, "len(v.Preimage)", len(v.Preimage), "source", v.Source)
+		log.Debug(log.SDB, "writeAccount Preimage", "service_idx", service_idx, "blobHash_str", blobHash_str, "v.Dirty", v.Dirty, "v.Deleted", v.Deleted, "len(v.Preimage)", len(v.Preimage), "source", v.Source)
 		blobHash := common.HexToHash(blobHash_str)
 		if v.Dirty {
 			if v.Deleted {
@@ -126,7 +126,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 			}
 		}
 	}
-	log.Trace(log.SDB, "writeAccount ServiceInfo", "service_idx", service_idx, "sa.NumStorageItems", sa.NumStorageItems, "sa.StorageSize", sa.StorageSize)
+	log.Debug(log.SDB, "writeAccount ServiceInfo", "service_idx", service_idx, "sa.NumStorageItems", sa.NumStorageItems, "sa.StorageSize", sa.StorageSize)
 	err = s.writeService(service_idx, sa)
 	if sa.NumStorageItems != start_NumStorageItems {
 		fmt.Printf(" a_i [s=%d] changed from %d to %d\n", sa.ServiceIndex, start_NumStorageItems, sa.NumStorageItems)

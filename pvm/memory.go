@@ -117,7 +117,7 @@ func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
 	switch {
 	case address < 65536:
 		copy(ram.first64k[address:], data)
-		return OK
+		return OOB
 	case address >= ram.output_address && end <= ram.output_end:
 		offset := address - ram.output_address
 		copy(ram.output[offset:], data)
@@ -133,7 +133,7 @@ func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
 	case address >= ram.ro_data_address && end <= ram.ro_data_address_end:
 		offset := address - ram.ro_data_address
 		copy(ram.ro_data[offset:], data)
-		return OK
+		return OOB
 	default:
 		log.Error(log.GeneralAuthoring, "WriteRAMBytes Invalid RAM", "address", fmt.Sprintf("%x", address), "end", fmt.Sprintf("%x", end))
 		return OOB

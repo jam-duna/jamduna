@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	FUZZ_VERSION = "0.6.7.17"
+	FUZZ_VERSION = "0.6.7.18"
 )
 
 type FlagRegistry struct {

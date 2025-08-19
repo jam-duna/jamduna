@@ -890,110 +890,167 @@ func (vm *VM) hostFetch() {
 	datatype, _ := vm.Ram.ReadRegister(10)
 	omega_11, _ := vm.Ram.ReadRegister(11)
 	omega_12, _ := vm.Ram.ReadRegister(12)
-	log.Trace(vm.logging, "FETCH", "datatype", datatype, "omega_7", o, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12, "vm.Extrinsics", fmt.Sprintf("%x", vm.Extrinsics), "wp", vm.WorkPackage)
 	var v_Bytes []byte
-	switch datatype {
-	case 0:
-		v_Bytes, _ = types.ParameterBytes()
-		//0a00000000000000010000000000000064000000000000000200200000000c000000809698000000000080f0fa020000000000ca9a3b00000000002d3101000000000800100008000300403800000300080006005000040080000500060000fa0000017cd20000093d0004000000000c00000204000000c0000080000000000c00000a000000
-		//[8: B_I]        [8: B_L].       [8: B_S].       [C.][4:D   ][4:E   ][8:G_A.        ][8:G_I.        ][8:G_R         ][8:G_T*        ][H ][I ][J ][K ][4:L   ][N ][O ][P ][Q ][R ][T ][U ][V ][4:W_A ][4:W_B ][4:W_C ][4:W_E ][4:W_M ][4:W_P ][4:W_R*][4:W_T ][4:W_X ][4:Y.  ]
-	case 1:
-		v_Bytes = vm.N.Bytes()
-	case 2:
-		v_Bytes = vm.Authorization
-	case 3:
-		if omega_11 < uint64(len(vm.WorkPackage.WorkItems)) && omega_12 < uint64(len(vm.WorkPackage.WorkItems[omega_11].Extrinsics)) {
-			// get extrinsic by omega 11 and omega 12
-			extrinsicHash := common.Blake2Hash(vm.Extrinsics[omega_11][:])
-			extrinsicLength := len(vm.Extrinsics[omega_11])
-			workitemExtrinisc := types.WorkItemExtrinsic{
-				Hash: extrinsicHash,
-				Len:  uint32(extrinsicLength),
-			}
-			if vm.WorkPackage.WorkItems[omega_11].Extrinsics[omega_12] == workitemExtrinisc {
-				v_Bytes = append([]byte{}, vm.Extrinsics[omega_11][:]...)
-			}
-		}
-	case 4:
-		if omega_11 < uint64(len(vm.WorkPackage.WorkItems[vm.WorkItemIndex].Extrinsics)) {
-			// get extrinsic by index within the sequence specified by this work-item
-			extrinsicHash := common.Blake2Hash(vm.Extrinsics[vm.WorkItemIndex][:])
-			extrinsicLength := len(vm.Extrinsics[vm.WorkItemIndex])
-			workitemExtrinisc := types.WorkItemExtrinsic{
-				Hash: extrinsicHash,
-				Len:  uint32(extrinsicLength),
-			}
-			if vm.WorkPackage.WorkItems[vm.WorkItemIndex].Extrinsics[omega_11] == workitemExtrinisc {
-				v_Bytes = append([]byte{}, vm.Extrinsics[vm.WorkItemIndex][:]...)
-			}
-		}
-	case 5:
-		// get imported segment by omega 11 and omega 12
-		if omega_11 < uint64(len(vm.Imports)) && omega_12 < uint64(len(vm.Imports[omega_11])) {
-			v_Bytes = append([]byte{}, vm.Imports[omega_11][omega_12][:]...)
-			log.Trace(log.DA, fmt.Sprintf("%s Fetch segment hash:", vm.ServiceMetadata), "I", fmt.Sprintf("%v", common.Blake2Hash(v_Bytes)))
-			log.Trace(log.DA, fmt.Sprintf("%s Fetch segment byte:", vm.ServiceMetadata), "I", fmt.Sprintf("%x", v_Bytes))
-			log.Trace(log.DA, fmt.Sprintf("%s Fetch segment  len:", vm.ServiceMetadata), "I", fmt.Sprintf("%d", len(v_Bytes)))
-			log.Trace(log.DA, fmt.Sprintf("%s Fetch segment  idx:", vm.ServiceMetadata), "I", fmt.Sprintf("%d", omega_12))
-		}
+	mode := vm.Mode
+	allowed := false
 
-	case 6:
-		// get imported segment by work item index
-		if omega_11 < uint64(len(vm.Imports[vm.WorkItemIndex])) {
-			v_Bytes = append([]byte{}, vm.Imports[vm.WorkItemIndex][omega_11][:]...)
-			log.Trace(vm.logging, fmt.Sprintf("[N%d] %s Fetch imported segment", vm.hostenv.GetID(), vm.ServiceMetadata),
-				"h", fmt.Sprintf("%v", common.Blake2Hash(v_Bytes)),
-				"bytes", v_Bytes[0:20],
-				"l", len(v_Bytes),
-				"workItemIndex", vm.WorkItemIndex,
-				"w11", omega_11)
-		} else {
-			// fmt.Printf("FETCH 6 FAIL omega_11 %d vs len(vm.Imports[vm.WorkItemIndex=%d])=%d\n", omega_11, vm.WorkItemIndex, len(vm.Imports[vm.WorkItemIndex]))
+	switch mode {
+	case ModeIsAuthorized:
+		switch datatype {
+		case 0, 7, 8, 9, 10, 11, 12, 13:
+			allowed = true
+		default:
+			allowed = false
 		}
-	case 7: // encode work package
-		v_Bytes, _ = types.Encode(vm.WorkPackage)
-	case 8: // p_u + | p_p
-		v_Bytes = append(vm.WorkPackage.AuthorizationCodeHash.Bytes(), vm.WorkPackage.ParameterizationBlob...)
-		log.Trace(vm.logging, "FETCH p_u + | p_p", "p_u", vm.WorkPackage.AuthorizationCodeHash, "p_p", vm.WorkPackage.ParameterizationBlob)
-	case 9: // p_j
-		v_Bytes = vm.WorkPackage.Authorization
-	case 10: // p_X (refine context)
-		v_Bytes, _ = types.Encode(vm.WorkPackage.RefineContext)
-	case 11: // all work items
-		v_Bytes = make([]byte, 0)
-		for _, w := range vm.WorkPackage.WorkItems {
-			s_bytes, _ := w.EncodeS()
-			v_Bytes = append(v_Bytes, s_bytes...) // TODO: add discriminator in front
+	case ModeRefine:
+		switch datatype {
+		case 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13:
+			allowed = true
+		default:
+			allowed = false
 		}
-	case 12: // S(w) for specific work item w_11
-		if omega_11 < uint64(len(vm.WorkPackage.WorkItems)) {
-			w := vm.WorkPackage.WorkItems[omega_11]
-			v_Bytes, _ = w.EncodeS()
+	case ModeAccumulate:
+		switch datatype {
+		case 0, 1, 14, 15:
+			allowed = true
+		default:
+			allowed = false
 		}
-	case 13: // p_w[w_11]_y
-		if omega_11 < uint64(len(vm.WorkPackage.WorkItems)) {
-			w := vm.WorkPackage.WorkItems[omega_11]
-			v_Bytes = w.Payload
-			log.Trace(vm.logging, "FETCH p_w[w_11]_y", "w_11", omega_11, "payload", fmt.Sprintf("%x", v_Bytes), "len", len(v_Bytes))
-		}
-	case 14: // E(|o) all accumulation operands
-		if vm.AccumulateOperandElements != nil {
-			v_Bytes, _ = types.Encode(vm.AccumulateOperandElements)
-		}
-	case 15: // E(o[w_11])
-		if vm.AccumulateOperandElements != nil && omega_11 < uint64(len(vm.AccumulateOperandElements)) {
-			v_Bytes, _ = types.Encode(vm.AccumulateOperandElements[omega_11])
-			log.Trace(vm.logging, "FETCH E(o[w_11])", "w_11", omega_11, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "len", len(v_Bytes))
-		}
-	case 16: // E(|t) all transfers
-		if vm.Transfers != nil {
-			v_Bytes, _ = types.Encode(vm.Transfers)
-		}
-	case 17: // E(t[w_11])
-		if vm.Transfers != nil && omega_11 < uint64(len(vm.Transfers)) {
-			v_Bytes, _ = types.Encode(vm.Transfers[omega_11])
+	case ModeOnTransfer:
+		switch datatype {
+		case 0, 1, 16, 17:
+			allowed = true
+		default:
+			allowed = false
 		}
 	}
+	log.Trace(vm.logging, "FETCH", "mode", mode, "allowed", allowed, "datatype", datatype, "omega_7", o, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12, "vm.Extrinsics", fmt.Sprintf("%x", vm.Extrinsics), "wp", vm.WorkPackage)
+
+	if allowed {
+		switch datatype {
+
+		case 0:
+			v_Bytes, _ = types.ParameterBytes()
+		//0a00000000000000010000000000000064000000000000000200200000000c000000809698000000000080f0fa020000000000ca9a3b00000000002d3101000000000800100008000300403800000300080006005000040080000500060000fa0000017cd20000093d0004000000000c00000204000000c0000080000000000c00000a000000
+		//[8: B_I]        [8: B_L].       [8: B_S].       [C.][4:D   ][4:E   ][8:G_A.        ][8:G_I.        ][8:G_R         ][8:G_T*        ][H ][I ][J ][K ][4:L   ][N ][O ][P ][Q ][R ][T ][U ][V ][4:W_A ][4:W_B ][4:W_C ][4:W_E ][4:W_M ][4:W_P ][4:W_R*][4:W_T ][4:W_X ][4:Y.  ]
+
+		case 1: // n
+			v_Bytes = vm.N.Bytes()
+
+		case 2:
+			v_Bytes = vm.Authorization
+
+		case 3:
+			if omega_11 < uint64(len(vm.WorkPackage.WorkItems)) && omega_12 < uint64(len(vm.WorkPackage.WorkItems[omega_11].Extrinsics)) {
+				// get extrinsic by omega 11 and omega 12
+				extrinsicHash := common.Blake2Hash(vm.Extrinsics[omega_11][:])
+				extrinsicLength := len(vm.Extrinsics[omega_11])
+				workitemExtrinisc := types.WorkItemExtrinsic{
+					Hash: extrinsicHash,
+					Len:  uint32(extrinsicLength),
+				}
+				if vm.WorkPackage.WorkItems[omega_11].Extrinsics[omega_12] == workitemExtrinisc {
+					v_Bytes = append([]byte{}, vm.Extrinsics[omega_11][:]...)
+				}
+			}
+
+		case 4:
+			if omega_11 < uint64(len(vm.WorkPackage.WorkItems[vm.WorkItemIndex].Extrinsics)) {
+				// get extrinsic by index within the sequence specified by this work-item
+				extrinsicHash := common.Blake2Hash(vm.Extrinsics[vm.WorkItemIndex][:])
+				extrinsicLength := len(vm.Extrinsics[vm.WorkItemIndex])
+				workitemExtrinisc := types.WorkItemExtrinsic{
+					Hash: extrinsicHash,
+					Len:  uint32(extrinsicLength),
+				}
+				if vm.WorkPackage.WorkItems[vm.WorkItemIndex].Extrinsics[omega_11] == workitemExtrinisc {
+					v_Bytes = append([]byte{}, vm.Extrinsics[vm.WorkItemIndex][:]...)
+				}
+			}
+
+		case 5:
+			// get imported segment by omega 11 and omega 12
+			if omega_11 < uint64(len(vm.Imports)) && omega_12 < uint64(len(vm.Imports[omega_11])) {
+				v_Bytes = append([]byte{}, vm.Imports[omega_11][omega_12][:]...)
+				log.Trace(log.DA, fmt.Sprintf("%s Fetch segment hash:", vm.ServiceMetadata), "I", fmt.Sprintf("%v", common.Blake2Hash(v_Bytes)))
+				log.Trace(log.DA, fmt.Sprintf("%s Fetch segment byte:", vm.ServiceMetadata), "I", fmt.Sprintf("%x", v_Bytes))
+				log.Trace(log.DA, fmt.Sprintf("%s Fetch segment  len:", vm.ServiceMetadata), "I", fmt.Sprintf("%d", len(v_Bytes)))
+				log.Trace(log.DA, fmt.Sprintf("%s Fetch segment  idx:", vm.ServiceMetadata), "I", fmt.Sprintf("%d", omega_12))
+			}
+
+		case 6:
+			// get imported segment by work item index
+			if omega_11 < uint64(len(vm.Imports[vm.WorkItemIndex])) {
+				v_Bytes = append([]byte{}, vm.Imports[vm.WorkItemIndex][omega_11][:]...)
+				log.Trace(vm.logging, fmt.Sprintf("[N%d] %s Fetch imported segment", vm.hostenv.GetID(), vm.ServiceMetadata),
+					"h", fmt.Sprintf("%v", common.Blake2Hash(v_Bytes)),
+					"bytes", v_Bytes[0:20],
+					"l", len(v_Bytes),
+					"workItemIndex", vm.WorkItemIndex,
+					"w11", omega_11)
+			} else {
+				// fmt.Printf("FETCH 6 FAIL omega_11 %d vs len(vm.Imports[vm.WorkItemIndex=%d])=%d\n", omega_11, vm.WorkItemIndex, len(vm.Imports[vm.WorkItemIndex]))
+			}
+
+		case 7: // encode work package
+			v_Bytes, _ = types.Encode(vm.WorkPackage)
+
+		case 8: // p_u + | p_p
+			v_Bytes = append(vm.WorkPackage.AuthorizationCodeHash.Bytes(), vm.WorkPackage.ParameterizationBlob...)
+			log.Trace(vm.logging, "FETCH p_u + | p_p", "p_u", vm.WorkPackage.AuthorizationCodeHash, "p_p", vm.WorkPackage.ParameterizationBlob)
+
+		case 9: // p_j
+			v_Bytes = vm.WorkPackage.Authorization
+
+		case 10: // p_X (refine context)
+			v_Bytes, _ = types.Encode(vm.WorkPackage.RefineContext)
+
+		case 11: // all work items
+			v_Bytes = make([]byte, 0)
+			for i, w := range vm.WorkPackage.WorkItems {
+				fmt.Printf("WorkItem %d: %v\n", i, types.ToJSONHex(w))
+				s_bytes, _ := w.EncodeS()
+				v_Bytes = append(v_Bytes, s_bytes...) // TODO: add discriminator in front
+			}
+
+		case 12: // S(w) for specific work item w_11
+			if omega_11 < uint64(len(vm.WorkPackage.WorkItems)) {
+				w := vm.WorkPackage.WorkItems[omega_11]
+				v_Bytes, _ = w.EncodeS()
+			}
+
+		case 13: // p_w[w_11]_y
+			if omega_11 < uint64(len(vm.WorkPackage.WorkItems)) {
+				w := vm.WorkPackage.WorkItems[omega_11]
+				v_Bytes = w.Payload
+				log.Trace(vm.logging, "FETCH p_w[w_11]_y", "w_11", omega_11, "payload", fmt.Sprintf("%x", v_Bytes), "len", len(v_Bytes))
+			}
+
+		case 14: // E(|o) all accumulation operands
+			if vm.AccumulateOperandElements != nil {
+				v_Bytes, _ = types.Encode(vm.AccumulateOperandElements)
+			}
+
+		case 15: // E(o[w_11])
+			if vm.AccumulateOperandElements != nil && omega_11 < uint64(len(vm.AccumulateOperandElements)) {
+				v_Bytes, _ = types.Encode(vm.AccumulateOperandElements[omega_11])
+				log.Trace(vm.logging, "FETCH E(o[w_11])", "w_11", omega_11, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "len", len(v_Bytes))
+			}
+
+		case 16: // E(|t) all transfers
+			if vm.Transfers != nil {
+				v_Bytes, _ = types.Encode(vm.Transfers)
+			}
+
+		case 17: // E(t[w_11])
+			if vm.Transfers != nil && omega_11 < uint64(len(vm.Transfers)) {
+				v_Bytes, _ = types.Encode(vm.Transfers[omega_11])
+			}
+		}
+	} else {
+		log.Warn(vm.logging, "FETCH FAIL NOT ALLOWED", "mode", mode, "allowed", allowed, "datatype", datatype, "omega_7", o, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12)
+	}
+
 	if v_Bytes == nil {
 		vm.Ram.WriteRegister(7, NONE)
 		vm.HostResultCode = NONE
@@ -1011,7 +1068,7 @@ func (vm *VM) hostFetch() {
 		log.Warn(vm.logging, "FETCH FAIL", "o", o, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "l", l, "f", f, "f+l", f+l, "v_Bytes[f..f+l]", fmt.Sprintf("%x", v_Bytes[f:f+l]))
 		return
 	}
-	log.Trace(vm.logging, "FETCH SUCC", "useRawRAM", useRawRam, "o", fmt.Sprintf("%x", o), "v_Bytes", fmt.Sprintf("%x", v_Bytes), "l", l, "f", f, "f+l", f+l, "v_Bytes[f..f+l]", fmt.Sprintf("%x", v_Bytes[f:]))
+	log.Trace(vm.logging, "FETCH SUCC", "datatype", datatype, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "useRawRAM", useRawRam, "o", fmt.Sprintf("%x", o), "v_Bytes", fmt.Sprintf("%x", v_Bytes), "l", l, "f", f, "f+l", f+l, "v_Bytes[f..f+l]", fmt.Sprintf("%x", v_Bytes[f:]))
 	vm.Ram.WriteRegister(7, uint64(len(v_Bytes)))
 }
 

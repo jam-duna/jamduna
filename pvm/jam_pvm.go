@@ -26,7 +26,7 @@ func (vm *VM) SetCore(coreIndex uint16) {
 
 // input by order([work item index],[workpackage itself], [result from IsAuthorized], [import segments], [export count])
 func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash, n common.Hash) (r types.Result, res uint64, exportedSegments [][]byte) {
-	vm.Mode = "refine"
+	vm.Mode = ModeRefine
 
 	workitem := workPackage.WorkItems[workitemIndex]
 
@@ -137,7 +137,7 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 var RecordTime = true
 
 func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.AccumulateOperandElements, X *types.XContext, n common.Hash) (r types.Result, res uint64, xs *types.ServiceAccount) {
-	vm.Mode = "accumulate"
+	vm.Mode = ModeAccumulate
 	vm.X = X //⎩I(u, s), I(u, s)⎫⎭
 	vm.Y = X.Clone()
 	input_bytes := make([]byte, 0)
@@ -256,7 +256,7 @@ func (vm *VM) saveLogs() {
 }
 
 func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAccount) (r types.Result, res uint64) {
-	vm.Mode = "transfer"
+	vm.Mode = ModeOnTransfer
 	// a = E(t)   take transfer memos t and encode them
 	vm.ServiceAccount = service_account
 	switch vm.Backend {
@@ -296,7 +296,7 @@ func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAc
 }
 
 func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Result) {
-	vm.Mode = "authorization"
+	vm.Mode = ModeIsAuthorized
 	// 0.6.6 E_2(c) only
 	a, _ := types.Encode(uint16(c))
 	vm.Gas = types.IsAuthorizedGasAllocation

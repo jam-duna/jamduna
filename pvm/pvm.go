@@ -38,6 +38,13 @@ const (
 	Z_Z = (1 << 16)
 )
 
+const (
+	ModeAccumulate   = "accumulate"
+	ModeIsAuthorized = "is_authorized"
+	ModeRefine       = "refine"
+	ModeOnTransfer   = "on_transfer"
+)
+
 var (
 	PvmLogging = false
 	PvmTrace   = false
@@ -633,7 +640,7 @@ func (vm *VM) step(stepn int) error {
 	if PvmLogging { //  || opcode == ECALLI || opcode == SBRK {
 		registersJSON, _ := json.Marshal(vm.Ram.ReadRegisters())
 		prettyJSON := strings.ReplaceAll(string(registersJSON), ",", " ")
-		fmt.Printf("%s: %-18s step:%6d pc:%6d gas:%d Registers:%s\n", vm.Mode, opcode_str(opcode), stepn-1, vm.pc, vm.Gas, prettyJSON)
+		fmt.Printf("%s %d: %-18s step:%6d pc:%6d gas:%d Registers:%s\n", vm.Mode, vm.Service_index, opcode_str(opcode), stepn-1, vm.pc, vm.Gas, prettyJSON)
 
 		//fmt.Printf("instruction=%d pc=%d g=%d Registers=%s\n", opcode, vm.pc, vm.Gas-1, prettyJSON)
 		//fmt.Printf("%s %d %d Registers:%s\n", opcode_str(opcode), stepn-1, vm.pc, prettyJSON)
