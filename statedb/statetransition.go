@@ -320,7 +320,7 @@ func HandleDiffs(diffs map[string]DiffState) {
 		}
 
 		fmt.Println(strings.Repeat("=", 40))
-		fmt.Printf("\033[34mState Key: %s (%s)\033[0m\n", stateType, key)
+		fmt.Printf("\033[34mState Key: %s (%s)\033[0m\n", stateType, key[:64])
 		fmt.Printf("%-10s | PreState : 0x%x\n", stateType, val.Prestate)
 		printHexDiff(stateType, val.ExpectedPostState, val.ActualPostState)
 

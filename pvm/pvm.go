@@ -245,10 +245,12 @@ func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, 
 	}
 	offset += w_size
 
-	if offset+4 <= uint64(len(pure)) {
-		offset += 4 // skip standard_c_size_byte
+	c_size := types.DecodeE_l(pure[offset : offset+4])
+	offset += 4
+	if len(pure[offset:]) != int(c_size) {
+		// fmt.Printf("DecodeProgram o_size: %d, w_size: %d, z_val: %d, s_val: %d len(w_byte)=%d\n", o_size, w_size, z_val, s_val, len(w_byte))
+		return nil, 0, 0, 0, 0, nil, nil
 	}
-	// fmt.Printf("DecodeProgram o_size: %d, w_size: %d, z_val: %d, s_val: %d len(w_byte)=%d\n", o_size, w_size, z_val, s_val, len(w_byte))
 	return decodeCorePart(pure[offset:]), uint32(o_size), uint32(w_size), uint32(z_val), uint32(s_val), o_byte, w_byte
 }
 
@@ -394,6 +396,11 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		vm.Ram = NewRawRAM() // for DOOM
 	} else {
 		vm.Ram = NewRAM(o_size, w_size, z, o_byte, w_byte, s)
+		requiredMemory := 5*Z_Z + Z_func(o_size) + Z_func(w_size+z*Z_P) + Z_func(s) + Z_I
+		if requiredMemory > math.MaxUint32 {
+			log.Error(vm.logging, "Standard Program Initialization Error")
+			panic(12344321)
+		}
 	}
 
 	for i := 0; i < len(initialRegs); i++ {
@@ -470,13 +477,11 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 	stepn := 1
 	for !vm.terminated {
 		// charge gas for all the next steps until hitting a basic block instruction
-		gasBasicBlock, hostGasCost, step := vm.getBasicBlockGasCost(vm.pc)
+		_, _, step := vm.getBasicBlockGasCost(vm.pc)
 		// og_gas := vm.Gas
-		vm.Gas -= int64(gasBasicBlock)
 
 		// fmt.Printf("charged gas %d, %d -> %d\n", gasBasicBlock, og_gas, vm.Gas)
 
-		vm.Gas -= int64(hostGasCost)
 		// now, run the block
 		for i := 0; i < step && !vm.terminated; i++ {
 			if err := vm.step(stepn); err != nil {
@@ -554,6 +559,7 @@ func (vm *VM) step(stepn int) error {
 
 	len_operands := vm.skip(vm.pc)
 	operands := vm.code[vm.pc+1 : vm.pc+1+len_operands]
+	vm.Gas -= 1
 	og_pc := vm.pc
 	if PvmTrace2 {
 		fmt.Printf("%s %s\n", prefixTrace, DisassembleSingleInstruction(opcode, operands))
@@ -568,6 +574,7 @@ func (vm *VM) step(stepn int) error {
 			return childHostCall
 		}
 		if vm.hostCall {
+			vm.Gas -= int64(vm.chargeGas(vm.host_func_id))
 			vm.InvokeHostCall(vm.host_func_id)
 			vm.hostCall = false
 		}

@@ -51,24 +51,21 @@ func NewRAM(o_size uint32, w_size uint32, z uint32, o_byte []byte, w_byte []byte
 	// o - read-only
 	ro_data_address := uint32(Z_Z)
 	ro_data_address_end := ro_data_address + P_func(o_size)
-	fmt.Printf("o_size: %d copied to %d up to %d\n", o_size, ro_data_address, ro_data_address_end)
+	//fmt.Printf("o_size: %d copied to %d up to %d\n", o_size, ro_data_address, ro_data_address_end)
 
 	// w - read-write
 	rw_data_address := uint32(2*Z_Z) + Z_func(o_size)
 	rw_data_address_end := rw_data_address + P_func(w_size)
 	current_heap_pointer := rw_data_address_end
-	fmt.Printf("w_size: %d copied to %d up to %d\n", w_size, rw_data_address, rw_data_address_end)
+	//fmt.Printf("w_size: %d copied to %d up to %d\n", w_size, rw_data_address, rw_data_address_end)
 
-	fmt.Printf("current_heap_pointer: %d (dec) %x (hex)\n", current_heap_pointer, current_heap_pointer)
+	//fmt.Printf("current_heap_pointer: %d (dec) %x (hex)\n", current_heap_pointer, current_heap_pointer)
 
 	// s - stack
 	p_s := P_func(s)
 	stack_address := uint32(uint64(1<<32) - uint64(2*Z_Z) - uint64(Z_I) - uint64(p_s))
 	stack_address_end := uint32(uint64(1<<32) - uint64(2*Z_Z) - uint64(Z_I))
-	fmt.Printf("s_size: %d [hex %x] stack at %d [hex %x] up to %d [hex %x]\n",
-		s, s,
-		stack_address, stack_address,
-		stack_address_end, stack_address_end)
+	// fmt.Printf("s_size: %d [hex %x] stack at %d [hex %x] up to %d [hex %x]\n", s, s, stack_address, stack_address, stack_address_end, stack_address_end)
 	// a - argument outputs
 	a_size := uint32(Z_Z + Z_I - 1)
 	output_address := uint32(0xFFFFFFFF) - Z_Z - Z_I + 1

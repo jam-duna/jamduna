@@ -302,7 +302,7 @@ func (a *DeferredTransfer) Bytes() []byte {
 }
 
 func (a *DeferredTransfer) String() string {
-	return ToJSON(a)
+	return ToJSONHex(a)
 }
 
 func DecodedWrangledResults(o *AccumulateOperandElements) string {

@@ -24,7 +24,7 @@ func Ecalli(rvmPtr unsafe.Pointer, opcode int32) {
 		vm.Ram.WriteRegister(i, binary.LittleEndian.Uint64(vm.regDumpMem[i*8:]))
 	}
 	// Invoke the host logic, e.g., gas charging and actual operation
-	// fmt.Fprintf(os.Stderr, "Ecalli called with opcode: %d, gas: %d\n", opcode, vm.Gas)
+	//fmt.Fprintf(os.Stderr, "Ecalli called with opcode: %d, gas: %d\n", opcode, vm.Gas)
 	if vm.isChargingGas {
 		gas, err := vm.ReadContextSlot(gasSlotIndex)
 		if err != nil {

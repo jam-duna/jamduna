@@ -515,46 +515,29 @@ func TestSingleFuzzTrace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get fuzz reports path: %v", err)
 	}
-	fileMap["jamduna8769"] = "0.6.7/traces/1755248769/00000015.bin" // PASS - Shawn fixed it in this commit
 
-	fileMap["jamduna0535"] = "0.6.7/traces/1755530535/00000011.bin" // FAIL - Shawn
-	/*
-			INFO [08-18|10:52:13.150] "HOSTLOG-\x00\x11jam-fuzzy-service\x060.1.24\nApache-2.0\x01%Parity Technologies <admin@parity.io>" msg="Selected instruction: RandomJump"
-		INFO [08-18|10:52:13.153] "HOSTLOG-\x00\x11jam-fuzzy-service\x060.1.24\nApache-2.0\x01%Parity Technologies <admin@parity.io>" msg="Random jump to @ a0ea78ab"
-		VM terminated with error code 2 at PC 6367 (2494454674, accumulate, jam-fuzzy-service0.1.24
-	*/
+	fileMap["jamduna8769"] = "0.6.7/traces/1755248769/00000015.bin" // PASS
 
-	// Michael - Transfer of 71225 with 10000 gas resulted in Ok(()) => something else
-	fileMap["jamduna0896"] = "0.6.7/traces/1755530896/00000008.bin" // they 122667, we 8702
-	/*
-		DEBUG[08-18|10:55:15.629] LOOKUP NONE                              s=0                    h=0x7bcf5a5b5ea3cb0c46ecdd53d8d5ddb181014962464d95a02a961e8fc37e8dc5 preimage_source=trie
-		INFO [08-18|10:55:15.631] "HOSTLOG-\x00\x15jam-bootstrap-service\x060.1.24\nApache-2.0\x01%Parity Technologies <admin@parity.io>" msg="Attemting transfer, gas=9981814"
-		DEBUG[08-18|10:55:15.632] TRANSFER OK                              sender=0 receiver=2387142948 amount=71225 gaslimit=10000
-		INFO [08-18|10:55:15.637] "HOSTLOG-\x00\x15jam-bootstrap-service\x060.1.24\nApache-2.0\x01%Parity Technologies <admin@parity.io>" msg="Transfer of 71225 with 10000 gas resulted in Ok(())"
-	*/
-	fileMap["jamduna1000"] = "0.6.7/traces/1755531000/00000008.bin" // FAIL Transfer of 71225 with 10000 gas resulted in Ok(())
-	fileMap["jamduna1081"] = "0.6.7/traces/1755531081/00000008.bin" // FAIL Transfer of 71225 with 10000 gas resulted in Ok(())
-	fileMap["jamduna1179"] = "0.6.7/traces/1755531179/00000008.bin" // FAIL Transfer of 71225 with 10000 gas resulted in Ok(())
-	fileMap["jamduna1265"] = "0.6.7/traces/1755531265/00000008.bin" // FAIL Transfer of 71225 with 10000 gas resulted in Ok(())
-	fileMap["jamduna1322"] = "0.6.7/traces/1755531322/00000008.bin" // FAIL Transfer of 71225 with 10000 gas resulted in Ok(())
-	fileMap["jamduna1375"] = "0.6.7/traces/1755531375/00000008.bin" // FAIL Transfer of 71225 with 10000 gas resulted in Ok(())
-	fileMap["jamduna1419"] = "0.6.7/traces/1755531419/00000008.bin" // FAIL Transfer of 71225 with 10000 gas resulted in Ok(())
-	fileMap["jamduna1480"] = "0.6.7/traces/1755531480/00000008.bin" // FAIL Transfer of 71225 with 10000 gas resulted in Ok(())
+	// FAIL explainable with recompiler vs interpreter gas model
+	fileMap["jamduna0728"] = "0.6.7/traces/1755530728/00000008.bin" // they 13063, 13048 us (low memory fix)
+	fileMap["jamduna1081"] = "0.6.7/traces/1755531081/00000008.bin" // bad_code
+	fileMap["jamduna1179"] = "0.6.7/traces/1755531179/00000008.bin" // bad_code
 
-	// Sourabh 64K low memory
-	fileMap["jamduna0728"] = "0.6.7/traces/1755530728/00000008.bin" // SOLVED
+	// FAIL - these all have "bad-code"
+	// FOCUS: [javajam passes, vinwolf claims]
+	fileMap["jamduna1265"] = "0.6.7/traces/1755531265/00000008.bin" // bad_code - 8 byte difference. gas matches
+	fileMap["jamduna0896"] = "0.6.7/traces/1755530896/00000008.bin" // bad_code - they 12667, we 23512, many differences
 
-	/* Sourabh fetch
-		INFO [08-18|11:00:16.912] "HOSTLOG-\x00\x11jam-fuzzy-service\x060.1.24\nApache-2.0\x01%Parity Technologies <admin@parity.io>" msg="Selected instruction: HostCallFetch"
-		INFO [08-18|11:00:16.921] "HOSTLOG-\x00\x11jam-fuzzy-service\x060.1.24\nApache-2.0\x01%Parity Technologies <admin@parity.io>" msg="hostcall: fetch (kind=1, buf_ptr=0xc5b28d6b*, buf_len=256, off=0, a=0, b=0)"
-		For case 1755531229 - there is an invalid fetch trying to write to 0xc5b28d6b resulting in a PANIC, and the only difference is what the accumulate_gas_user should be in this PANIC situation.
-		  polkajam: 0, jamduna: 19087
-		By this, we believe it should be non-zero
-	   	    https://graypaper.fluffylabs.dev/#/7e6ff6a/2d44032d4403?v=0.6.7
-		Our statistics match that of boka.
-	*/
-	fileMap["jamduna1229"] = "0.6.7/traces/1755531229/00000035.bin" // FAIL
-	team := "jamduna0728"
+	// probably this is polkajam bug (jamzilla) -- bad-code
+	fileMap["jamduna0535"] = "0.6.7/traces/1755530535/00000011.bin" //  ***OK*** 0 them, 22717 us
+	fileMap["jamduna1000"] = "0.6.7/traces/1755531000/00000008.bin" //  bad_code 0 them, 22907 us
+	fileMap["jamduna1229"] = "0.6.7/traces/1755531229/00000035.bin" //  bad_code 0 them, 19087 us
+	fileMap["jamduna1322"] = "0.6.7/traces/1755531322/00000008.bin" //  bad_code 0 them, 14562 us
+	fileMap["jamduna1375"] = "0.6.7/traces/1755531375/00000008.bin" //  bad_code 0 them, 16045 us
+	fileMap["jamduna1419"] = "0.6.7/traces/1755531419/00000008.bin" //  bad_code 0 them, 15964 us
+	fileMap["jamduna1480"] = "0.6.7/traces/1755531480/00000008.bin" //  bad_code 0 them, 52349 us
+
+	team := "jamduna1265"
 	filename, exists := fileMap[team]
 	if !exists {
 		t.Fatalf("team %s not found in fileMap", team)

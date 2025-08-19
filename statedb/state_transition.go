@@ -179,7 +179,7 @@ func ValidateStateTransitionFile(filename string, storageDir string, outputDir s
 		}
 
 		fmt.Println(strings.Repeat("=", 40))
-		fmt.Printf("\033[34mState Key: %s (%s)\033[0m\n", stateType, key)
+		fmt.Printf("\033[34mState Key: %s (%s)\033[0m\n", stateType, key[:64])
 
 		// raw‐byte diff
 		fmt.Printf("%-10s | PreState : 0x%x\n", stateType, val.Prestate)

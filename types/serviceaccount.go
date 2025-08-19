@@ -92,15 +92,15 @@ type StorageObject struct {
 	Accessed    bool
 	Deleted     bool
 	Dirty       bool
-	Key         []byte      `json:"key"`          // k
-	Value       []byte      `json:"value"`        // v
-	InternalKey string      `json:"internal_key"` // as_internal_key
-	StorageKey  common.Hash `json:"storage_key"`  // c(s,h)
-	Source      string      `json:"-"`            // "trie" or "memory"
+	Key         []byte `json:"key"`          // k
+	Value       []byte `json:"value"`        // v
+	InternalKey string `json:"internal_key"` // as_internal_key
+	StorageKey  string `json:"storage_key"`  // c(s,h)
+	Source      string `json:"-"`            // "trie" or "memory"
 }
 
 func (o *StorageObject) String() string {
-	return fmt.Sprintf("Value: [%x] Deleted: %v Dirty: %v InternalKey: %x Key: %x Value: %x, Source: %s", o.Value, o.Deleted, o.Dirty, o.InternalKey, o.Key, o.Value, o.Source)
+	return fmt.Sprintf("Value: [%x] Deleted: %v Dirty: %v InternalKey: %v Key: %x Value: %x, Source: %s", o.Value, o.Deleted, o.Dirty, o.InternalKey, o.Key, o.Value, o.Source)
 }
 func (o *StorageObject) Clone() *StorageObject {
 	// Deep copy the Key+Value slice
@@ -364,7 +364,7 @@ func (s *ServiceAccount) String() string {
 }
 
 func (s *ServiceAccount) JsonString() string {
-	return ToJSON(s)
+	return ToJSONHexIndent(s)
 }
 func (s *ServiceAccount) ReadStorage(mu_k []byte, sdb HostEnv) (ok bool, v []byte, source string) {
 	serviceIndex := s.ServiceIndex
@@ -524,6 +524,7 @@ func (s *ServiceAccount) WriteStorage(serviceIndex uint32, mu_k []byte, val []by
 
 	as_internal_key := common.Compute_storageKey_internal(mu_k)
 	as_internal_key_str := common.Bytes2Hex(as_internal_key[:])
+	account_storage_key := fmt.Sprintf("0x%x", common.ComputeC_sh(serviceIndex, as_internal_key).Bytes()[:31])
 	s.Dirty = true
 
 	storeObj, exists := s.Storage[as_internal_key_str]
@@ -533,6 +534,7 @@ func (s *ServiceAccount) WriteStorage(serviceIndex uint32, mu_k []byte, val []by
 		storeObj.Deleted = Isdeleted
 		storeObj.Key = slices.Clone(mu_k)  // copy
 		storeObj.Value = slices.Clone(val) // copy
+		storeObj.StorageKey = account_storage_key
 		storeObj.InternalKey = as_internal_key_str
 	} else {
 		s.Storage[as_internal_key_str] = &StorageObject{
@@ -541,6 +543,7 @@ func (s *ServiceAccount) WriteStorage(serviceIndex uint32, mu_k []byte, val []by
 			Deleted:     Isdeleted,
 			Key:         slices.Clone(mu_k), // copy of mu_k
 			Value:       slices.Clone(val),  // copy of val
+			StorageKey:  account_storage_key,
 			InternalKey: as_internal_key_str,
 			Source:      source,
 		}

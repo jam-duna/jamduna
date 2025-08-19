@@ -48,6 +48,45 @@ const (
 	LOG = 100
 )
 
+var hostFnNames = map[int]string{
+	GAS:               "GAS",
+	FETCH:             "FETCH",
+	LOOKUP:            "LOOKUP",
+	READ:              "READ",
+	WRITE:             "WRITE",
+	INFO:              "INFO",
+	HISTORICAL_LOOKUP: "HISTORICAL_LOOKUP",
+	EXPORT:            "EXPORT",
+	MACHINE:           "MACHINE",
+	PEEK:              "PEEK",
+	POKE:              "POKE",
+	PAGES:             "PAGES",
+	INVOKE:            "INVOKE",
+	EXPUNGE:           "EXPUNGE",
+	BLESS:             "BLESS",
+	ASSIGN:            "ASSIGN",
+	DESIGNATE:         "DESIGNATE",
+	CHECKPOINT:        "CHECKPOINT",
+	NEW:               "NEW",
+	UPGRADE:           "UPGRADE",
+	TRANSFER:          "TRANSFER",
+	EJECT:             "EJECT",
+	QUERY:             "QUERY",
+	SOLICIT:           "SOLICIT",
+	FORGET:            "FORGET",
+	YIELD:             "YIELD",
+	PROVIDE:           "PROVIDE",
+	MANIFEST:          "MANIFEST",
+	LOG:               "LOG",
+}
+
+func HostFnToName(hostFn int) string {
+	if name, ok := hostFnNames[hostFn]; ok {
+		return name
+	}
+	return "UNKNOWN"
+}
+
 const maxUint64 = ^uint64(0)
 
 const (
@@ -246,6 +285,9 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 		vm.MachineState = OOG
 		log.Warn(vm.logging, "OOG", "host_fn", host_fn, "gas", vm.Gas, "g", g)
 		return true, fmt.Errorf("out of gas")
+	}
+	if PvmLogging {
+		fmt.Printf("Calling HOST %s \tECALLI_%d\n", HostFnToName(host_fn), host_fn)
 	}
 
 	return vm.hostFunction(host_fn)
@@ -759,6 +801,7 @@ func (vm *VM) hostTransfer() {
 		return
 	}
 	t := types.DeferredTransfer{Amount: a, GasLimit: g, SenderIndex: vm.X.S, ReceiverIndex: uint32(d)} // CHECK
+	log.Info(vm.logging, "TRANSFER START", "sender", fmt.Sprintf("%d", t.SenderIndex), "receiver", fmt.Sprintf("%d", d), "amount", fmt.Sprintf("%d", a), "gaslimit", g, "x_s_bal", xs.Balance, "DeferredTransfer", t.String())
 
 	if g < receiver.GasLimitM {
 		vm.Ram.WriteRegister(7, LOW)
@@ -777,14 +820,15 @@ func (vm *VM) hostTransfer() {
 	xs.DecBalance(a)
 	copy(t.Memo[:], m[:])
 	vm.X.T = append(vm.X.T, t)
-	log.Debug(vm.logging, "TRANSFER OK", "sender", fmt.Sprintf("%d", t.SenderIndex), "receiver", fmt.Sprintf("%d", d), "amount", fmt.Sprintf("%d", a), "gaslimit", g)
+	log.Debug(vm.logging, "TRANSFER OK", "sender", fmt.Sprintf("%d", t.SenderIndex), "receiver", fmt.Sprintf("%d", d), "amount", fmt.Sprintf("%d", a), "gaslimit", g, "x_s_bal", xs.Balance, "DeferredTransfer", t.String())
 	vm.Ram.WriteRegister(7, OK)
 	vm.HostResultCode = OK
 }
 
 // Gas Service
 func (vm *VM) hostGas() {
-	vm.Ram.WriteRegister(7, uint64(vm.Gas-10)) // its gas remaining AFTER the host call
+	gasCost := int64(0)                             // Define gas cost.TODO: check 0 vs 10 here
+	vm.Ram.WriteRegister(7, uint64(vm.Gas-gasCost)) // its gas remaining AFTER the host call
 	//vm.Ram.WriteRegister(7, uint64(1234567)) // TEMPORARY
 	vm.HostResultCode = OK
 }

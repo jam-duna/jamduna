@@ -509,6 +509,10 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 	g := uint64(0)
 	for _, workReport := range w {
 		for _, workResult := range workReport.Results {
+			if uint32(workResult.Result.Err) == types.WORKRESULT_BAD {
+				log.Warn(sd.Authoring, "SingleAccumulate - WORKRESULT_BAD", "s", fmt.Sprintf("%d", s), "workReport", workReport, "workResult", workResult)
+				//continue
+			}
 			if workResult.ServiceID == s {
 				g += workResult.Gas
 				o := types.AccumulateOperandElements{
