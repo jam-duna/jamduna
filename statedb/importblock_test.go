@@ -517,13 +517,14 @@ func TestSingleFuzzTrace(t *testing.T) {
 		t.Fatalf("failed to get fuzz reports path: %v", err)
 	}
 
-	fileMap["jamduna1265"] = "0.6.7/traces/1755531265/00000008.bin" // MC
+	// FAILS due to recent accumulation being updated too early
+	fileMap["6995"] = "0.6.7/traces/TESTING/1755796995/00000011.bin"
+	fileMap["0509"] = "0.6.7/traces/TESTING/1755530509/00000004.bin"
+	fileMap["0728"] = "0.6.7/traces/1755530728/00000008.bin"
+	fileMap["1265"] = "0.6.7/traces/1755531265/00000008.bin"
+	fileMap["6851"] = "0.6.7/traces/TESTING/1755796851/00000016.bin"
 
-	// WORK REPORT BAD
-	fileMap["jamduna0371"] = "0.6.7/traces/TESTING/1755620371/00000008.bin" // SOLVED
-	fileMap["jamduna0896"] = "0.6.7/traces/TESTING/1755530896/00000008.bin" // SOLVED
-	fileMap["jamduna1252"] = "0.6.7/traces/TESTING/1755621252/00000009.bin" // FAILS
-	team := "jamduna1252"
+	team := "6995" //6995
 	filename, exists := fileMap[team]
 	if !exists {
 		t.Fatalf("team %s not found in fileMap", team)

@@ -317,6 +317,7 @@ privileged always-accumulate services, into a tuple of the total gas utilized in
 func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkReport, f map[uint32]uint32, pvmBackend string) (output_u uint64, output_t []types.DeferredTransfer, output_b []types.AccumulationOutput, GasUsage []Usage) {
 	GasUsage = make([]Usage, 0)
 	services := make([]uint32, 0)
+	ts := s.JamState.SafroleState.Timeslot
 	for _, workReport := range w {
 		for _, workResult := range workReport.Results {
 			services = append(services, workResult.ServiceID)
@@ -390,6 +391,9 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 	}
 
 	for service, service_accumulated_partial := range accumulated_partial {
+		sa := service_accumulated_partial.U.D[service]
+		sa.UpdateRecentAccumulation(ts)
+		o.D[service] = sa
 		if service_accumulated_partial.U != nil {
 			o.D[service] = service_accumulated_partial.U.D[service]
 		}
@@ -537,7 +541,6 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport,
 		}
 	}
 
-	serviceAccount.UpdateRecentAccumulation(sd.JamState.SafroleState.Timeslot)
 	xContext := sd.NewXContext(o, s, serviceAccount)
 
 	xy = xContext // if code does not exist, fallback to this
