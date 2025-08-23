@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/colorfulnotion/jam/bandersnatch"
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/stretchr/testify/require"
@@ -29,7 +31,7 @@ type TestCase struct {
 // Example test function that scans the `seals` directory, reads each .json file,
 // and attempts to verify H_s and H_v the same way VerifyBlockHeader does.
 func TestSealBlockMaterial(t *testing.T) {
-	files, err := filepath.Glob("../jamtestvectors/seals/*.json")
+	files, err := filepath.Glob(path.Join(common.GetJAMTestVectorPath("stf"), "seals/*.json"))
 	require.NoError(t, err)
 
 	for _, file := range files {
@@ -106,8 +108,7 @@ func TestSafrole(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.jsonFile, func(t *testing.T) {
-			jsonPath := filepath.Join("../jamtestvectors/safrole/tiny", tc.jsonFile)
-			// binPath := filepath.Join("../jamtestvectors/safrole/tiny", tc.binFile)
+			jsonPath := filepath.Join(path.Join(common.GetJAMTestVectorPath("stf"), "safrole/tiny", tc.jsonFile))
 
 			targetedStructType := reflect.TypeOf(tc.expectedType)
 			// Read and unmarshal JSON file
@@ -165,7 +166,7 @@ func TestSafrole(t *testing.T) {
 }
 
 func safrole_test(jsonFile string, exceptErr error) error {
-	jsonPath := filepath.Join("../jamtestvectors/safrole/", jsonFile)
+	jsonPath := path.Join(common.GetJAMTestVectorPath("stf"), "safrole/", jsonFile)
 	jsonData, err := os.ReadFile(jsonPath)
 	if err != nil {
 		return fmt.Errorf("failed to read JSON file: %v", err)
@@ -197,27 +198,27 @@ func safrole_test(jsonFile string, exceptErr error) error {
 }
 
 func (j *JamState) get_state_from_testcase(tc TestCase) {
-	// Tau           uint32             `json:"tau"`
-	// Eta           Entropy            `json:"eta"`
-	// Lambda        types.Validators   `json:"lambda"`
-	// Kappa         types.Validators   `json:"kappa"`
-	// GammaK        types.Validators   `json:"gamma_k"`
-	// Iota          types.Validators   `json:"iota"`
-	// GammaA        []types.TicketBody `json:"gamma_a"`
-	// GammaS        TicketsOrKeys      `json:"gamma_s"`
-	// GammaZ        [144]byte          `json:"gamma_z"`
+	// Timeslot           uint32             `json:"tau"`
+	// Entropy           Entropy            `json:"eta"`
+	// PrevValidators        types.Validators   `json:"lambda"`
+	// CurrValidators         types.Validators   `json:"kappa"`
+	// NextValidators        types.Validators   `json:"gamma_k"`
+	// DesignatedValidators          types.Validators   `json:"iota"`
+	// TicketAccumulator        []types.TicketBody `json:"gamma_a"`
+	// SlotSealerSeries        TicketsOrKeys      `json:"gamma_s"`
+	// RingCommitment        [144]byte          `json:"gamma_z"`
 	// PostOffenders []types.Ed25519Key `json:"post_offenders"`
 	sf := j.SafroleState
-	sf.Timeslot = tc.PreState.Tau
-	sf.Entropy = tc.PreState.Eta
-	sf.PrevValidators = tc.PreState.Lambda
-	sf.CurrValidators = tc.PreState.Kappa
-	sf.NextValidators = tc.PreState.GammaK
-	sf.DesignedValidators = tc.PreState.Iota
-	sf.NextEpochTicketsAccumulator = tc.PreState.GammaA
-	sf.TicketsOrKeys = tc.PreState.GammaS
-	sf.TicketsVerifierKey = tc.PreState.GammaZ[:]
-	j.DisputesState.Psi_o = tc.PreState.PostOffenders
+	sf.Timeslot = tc.PreState.Timeslot
+	sf.Entropy = tc.PreState.Entropy
+	sf.PrevValidators = tc.PreState.PrevValidators
+	sf.CurrValidators = tc.PreState.CurrValidators
+	sf.NextValidators = tc.PreState.NextValidators
+	sf.DesignatedValidators = tc.PreState.DesignatedValidators
+	sf.NextEpochTicketsAccumulator = tc.PreState.TicketAccumulator
+	sf.TicketsOrKeys = tc.PreState.SlotSealerSeries
+	sf.TicketsVerifierKey = tc.PreState.RingCommitment[:]
+	j.DisputesState.Offenders = tc.PreState.PostOffenders
 }
 
 func TestSafroleVerify(t *testing.T) {

@@ -98,28 +98,6 @@ func convertRelativeOffsetsToAbsolute(opcode byte, params []interface{}, current
 	return result
 }
 
-// formatValue formats a parameter value according to its type
-func formatValue(value interface{}) string {
-	switch v := value.(type) {
-	case uint32:
-		if v == 0 {
-			return "0"
-		}
-		return fmt.Sprintf("0x%x", v)
-	case uint64:
-		if v == 0 {
-			return "0"
-		}
-		return fmt.Sprintf("0x%x", v)
-	case int32:
-		return fmt.Sprintf("%d", v)
-	case int64:
-		return fmt.Sprintf("%d", v)
-	default:
-		return fmt.Sprintf("%v", v)
-	}
-}
-
 // formatImmediate formats an immediate value as decimal (unsigned interpretation)
 func formatImmediate(value interface{}) string {
 	switch v := value.(type) {
@@ -449,52 +427,6 @@ func (vm *VM) DisassemblePVM() []string {
 	return result
 }
 
-// getOperandLength returns the operand length for a given opcode
-func getOperandLength(opcode byte) int {
-	switch {
-	case opcode == 0 || opcode == 1: // TRAP, FALLTHROUGH
-		return 0
-	case opcode == 10: // ECALLI
-		return 5 // 1 byte length + 4 bytes immediate
-	case opcode == 20: // LOAD_IMM_64
-		return 9 // 1 byte reg + 8 bytes immediate
-	case 30 <= opcode && opcode <= 33: // STORE_IMM_*
-		return 9 // 1 byte length + 4 bytes offset + 1 byte length + 4 bytes value (variable)
-	case opcode == 40: // JUMP
-		return 5 // 1 byte length + 4 bytes offset
-	case opcode == 50: // JUMP_IND
-		return 6 // 1 byte reg + 1 byte length + 4 bytes offset
-	case opcode == 51: // LOAD_IMM
-		return 6 // 1 byte reg + 1 byte length + 4 bytes immediate
-	case 52 <= opcode && opcode <= 58: // LOAD_*
-		return 6 // 1 byte reg + 1 byte length + 4 bytes offset
-	case 59 <= opcode && opcode <= 62: // STORE_*
-		return 6 // 1 byte reg + 1 byte length + 4 bytes offset
-	case 70 <= opcode && opcode <= 73: // STORE_IMM_IND_*
-		return 10 // 1 byte reg + variable length offset + variable length value
-	case opcode == 80: // LOAD_IMM_JUMP
-		return 10 // 1 byte reg + variable length imm + variable length offset
-	case 81 <= opcode && opcode <= 90: // BRANCH_*_IMM
-		return 10 // 1 byte reg + variable length imm + variable length offset
-	case opcode == 100: // MOVE_REG
-		return 1 // 1 byte with two packed registers
-	case 101 <= opcode && opcode <= 111: // Two register ops
-		return 1 // 1 byte with two packed registers
-	case 120 <= opcode && opcode <= 130: // STORE_IND_*, LOAD_IND_*
-		return 6 // 1 byte packed regs + 1 byte length + 4 bytes offset
-	case 131 <= opcode && opcode <= 161: // Two reg one imm ops
-		return 6 // 1 byte packed regs + 1 byte length + 4 bytes immediate
-	case 170 <= opcode && opcode <= 175: // BRANCH_* (two regs, one offset)
-		return 6 // 1 byte packed regs + 1 byte length + 4 bytes offset
-	case opcode == 180: // LOAD_IMM_JUMP_IND
-		return 10 // 1 byte packed regs + variable length imm + variable length offset
-	case 190 <= opcode && opcode <= 230: // Three register ops
-		return 2 // 1 byte packed + 1 byte dst
-	default:
-		return 1 // Default case
-	}
-}
-
 // DisassemblePVMOfficial converts bytecode to JAM-spec official format
 func (vm *VM) DisassemblePVMOfficial() ([]byte, []string) {
 	var result []string
@@ -546,22 +478,6 @@ func (vm *VM) DisassemblePVMOfficial() ([]byte, []string) {
 	}
 
 	return opcodes, result
-}
-
-// formatInstructionHumanReadable creates a human-readable instruction string
-func formatInstructionHumanReadable(opcode byte, params []interface{}, pc uint64) string {
-	if def, exists := instrTable[opcode]; exists {
-		formatted := def.Format(params)
-		opcodeStr := opcode_str_lower(opcode)
-
-		if formatted != "" {
-			return fmt.Sprintf("0x%04x: %s %s", pc, opcodeStr, formatted)
-		} else {
-			return fmt.Sprintf("0x%04x: %s", pc, opcodeStr)
-		}
-	}
-
-	return fmt.Sprintf("0x%04x: unknown_0x%02x", pc, opcode)
 }
 
 // DisassemblePVMCode provides backwards compatibility for code that doesn't have a VM instance

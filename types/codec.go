@@ -643,7 +643,7 @@ func extractBytes(input []byte) ([]byte, []byte) {
 
 	// Determine the number of bytes to extract based on the value of the 0th byte.
 	switch {
-	case firstByte >= 0 && firstByte < 128:
+	case firstByte < 128:
 		numBytes = 1
 	case firstByte >= 128 && firstByte < 192:
 		numBytes = 2

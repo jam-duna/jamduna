@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
+	"path"
 	"testing"
 
 	"github.com/colorfulnotion/jam/common"
@@ -62,7 +62,7 @@ func HistorySTF(input HInput, s HState) (poststate HState) {
 		})
 	}
 
-	n := Beta_state{
+	n := HistoryState{
 		Reported:   reported,         // p
 		HeaderHash: input.HeaderHash, // h
 		B:          *mmr.SuperPeak(), // b
@@ -89,7 +89,7 @@ func TestRecentHistory(t *testing.T) {
 	}
 	for testnum, jsonFile := range testCases {
 		t.Run(jsonFile, func(t *testing.T) {
-			jsonPath := filepath.Join("../jamtestvectors/history/tiny", jsonFile)
+			jsonPath := path.Join(common.GetJAMTestVectorPath("stf"), "history/tiny", jsonFile)
 			jsonData, err := os.ReadFile(jsonPath)
 			if err != nil {
 				t.Fatalf("failed to read JSON file: %v", err)

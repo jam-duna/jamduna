@@ -7,6 +7,22 @@ import (
 	git "github.com/go-git/go-git/v5"
 )
 
+func GetJAMTestVectorPath(subDir ...string) string {
+	p := os.Getenv("JAM_TESTVECTORS_PATH")
+	if p == "" {
+		p = "/Users/michael/Desktop/jam-test-vectors"
+	}
+	absPath, err := filepath.Abs(p)
+	if err != nil {
+		panic(err)
+	}
+	targetDir := "stf" // Default sub dir
+	if len(subDir) > 0 {
+		targetDir = subDir[0]
+	}
+	return filepath.Join(absPath, targetDir)
+}
+
 func GetCommitHash() string {
 	if cwd, err := os.Getwd(); err == nil {
 		if hash := computeHashFromPath(cwd); hash != "" {

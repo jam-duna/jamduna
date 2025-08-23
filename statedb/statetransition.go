@@ -57,20 +57,6 @@ type StateTransitionCheck struct {
 	PostStateMismatch  []common.Hash `json:"post_state_mismatch"`
 }
 
-func compareKeyVals(p0 []KeyVal, p1 []KeyVal) {
-	if len(p0) != len(p1) {
-		fmt.Printf("len pre %d != len post %d\n", len(p0), len(p1))
-	}
-	kv0 := makemap(p0)
-	kv1 := makemap(p1)
-	for k0, v0 := range kv0 {
-		v1 := kv1[k0]
-		if !common.CompareBytes(v0, v1) {
-			fmt.Printf("K %v\nC(Actual): %x\nP(Exp): %x\n", k0, v0, v1)
-		}
-	}
-}
-
 type DiffState struct {
 	Prestate          []byte
 	ActualPostState   []byte

@@ -684,7 +684,7 @@ func (c *NodeClient) GetServicePreimage(serviceIndex uint32, codeHash common.Has
 	return rawBytes, metadata, length, nil
 }
 
-func (c *NodeClient) GetAvailabilityAssignments(coreIdx uint32) (*statedb.Rho_state, error) {
+func (c *NodeClient) GetAvailabilityAssignments(coreIdx uint32) (*statedb.CoreState, error) {
 	// Convert coreIdx to a string
 	coreIdxStr := strconv.FormatUint(uint64(coreIdx), 10)
 	req := []string{coreIdxStr}
@@ -697,12 +697,12 @@ func (c *NodeClient) GetAvailabilityAssignments(coreIdx uint32) (*statedb.Rho_st
 	}
 
 	// Unmarshal the JSON response into an AvailabilityAssignment
-	var rho_state statedb.Rho_state
-	err = json.Unmarshal([]byte(res), &rho_state)
+	var CoreState statedb.CoreState
+	err = json.Unmarshal([]byte(res), &CoreState)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal availability assignment: %w", err)
 	}
-	return &rho_state, nil
+	return &CoreState, nil
 }
 
 func (c *NodeClient) GetSegments(importedSegments []types.ImportSegment) (raw_segments [][]byte, err error) {
@@ -831,10 +831,10 @@ func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName s
 	bootstrap_auth_codehash := common.Blake2Hash(auth_code_encoded_bytes) //pu
 
 	codeWP := types.WorkPackage{
-		Authorization:         []byte(""),
+		AuthorizationToken:    []byte(""),
 		AuthCodeHost:          bootstrapService,
 		AuthorizationCodeHash: bootstrap_auth_codehash,
-		ParameterizationBlob:  []byte{},
+		ConfigurationBlob:     []byte{},
 		RefineContext:         refineContext,
 		WorkItems: []types.WorkItem{{
 			Service:            bootstrapService,

@@ -12,24 +12,24 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-type AvailabilityAssignments [types.TotalCores]*Rho_state
+type AvailabilityAssignments [types.TotalCores]*CoreState
 
 type JamState struct {
 	AuthorizationsPool       [types.TotalCores][]common.Hash              `json:"authorizations_pool"`         // alpha The core αuthorizations pool. α eq 85
 	AuthorizationQueue       types.AuthorizationQueue                     `json:"authorization_queue"`         // phi - The authorization queue  φ eq 85
 	RecentBlocks             RecentBlocks                                 `json:"beefy_pool"`                  // beta - The core βeefy pool. β eq 81
-	SafroleStateGamma        SafroleBasicState                            `json:"safrole_state_gamma"`         // gamma - SafroleBasicState γ eq 48
+	SafroleBasicState        SafroleBasicState                            `json:"safrole_state_gamma"`         // gamma - SafroleBasicState γ eq 48
 	SafroleState             *SafroleState                                `json:"safrole"`                     // safrole - SafroleState
-	AvailabilityAssignments  AvailabilityAssignments                      `json:"availability_assignments"`    // rho - AvailabilityAssignments ρ eq 118
-	DisputesState            Psi_state                                    `json:"disputes_state"`              // psi - Disputes ψ eq 97
-	PrivilegedServiceIndices types.Kai_state                              `json:"privileged_services_indices"` // kai - The privileged service indices. χ eq 96
+	AvailabilityAssignments  AvailabilityAssignments                      `json:"availability_assignments"`    // availability_assignment - AvailabilityAssignments ρ eq 118
+	DisputesState            DisputeState                                 `json:"disputes_state"`              // psi - Disputes ψ eq 97
+	PrivilegedServiceIndices types.PrivilegedServiceState                 `json:"privileged_services_indices"` // kai - The privileged service indices. χ eq 96
 	ValidatorStatistics      types.ValidatorStatistics                    `json:"pi"`                          // pi The validator statistics. π eq 171
 	AccumulationQueue        [types.EpochLength][]types.AccumulationQueue `json:"ready_queue"`                 // theta - The accumulation queue  θ eq 164
 	AccumulationHistory      [types.EpochLength]types.AccumulationHistory `json:"accumulated"`                 // xi - The accumulation history  ξ eq 162
 	AccumulationOutputs      []types.AccumulationOutput                   `json:"theta"`                       // theta - The accumulation outputs  ω eq 163
 }
 
-func (b *Beta_state) MMR_Bytes() []byte {
+func (b *HistoryState) MMR_Bytes() []byte {
 	codec_bytes, err := json.Marshal(b.B)
 	if err != nil {
 		fmt.Println("Error serializing MMR", err)
@@ -37,21 +37,21 @@ func (b *Beta_state) MMR_Bytes() []byte {
 	return codec_bytes
 }
 
-// Types for Psi
-type Psi_state struct {
-	Psi_g [][]byte           `json:"good"`      // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
-	Psi_b [][]byte           `json:"bad"`       // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
-	Psi_w [][]byte           `json:"wonky"`     // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
-	Psi_o []types.Ed25519Key `json:"offenders"` // SEQUENCE OF Ed25519Key (ByteArray32 in disputes.asn)
+// Types for DisputesState
+type DisputeState struct {
+	GoodSet   [][]byte           `json:"good"`      // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
+	BadSet    [][]byte           `json:"bad"`       // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
+	WonkySet  [][]byte           `json:"wonky"`     // SEQUENCE OF WorkReportHash (ByteArray32 in disputes.asn)
+	Offenders []types.Ed25519Key `json:"offenders"` // SEQUENCE OF Ed25519Key (ByteArray32 in disputes.asn)
 }
 
-// Types for Rho
-type Rho_state struct {
+// Types for AvailabilityAssignments
+type CoreState struct {
 	WorkReport types.WorkReport `json:"report"`
 	Timeslot   uint32           `json:"timeout"`
 }
 
-func (r *Rho_state) ShortString() string {
+func (r *CoreState) ShortString() string {
 	if r == nil {
 		return "null"
 	}
@@ -65,7 +65,7 @@ func (r *Rho_state) ShortString() string {
 	return types.ToJSON(tmp)
 }
 
-func (r *Rho_state) String() string {
+func (r *CoreState) String() string {
 	return types.ToJSON(r)
 }
 
@@ -87,44 +87,44 @@ func (t TicketsOrKeys) TicketLen() int {
 	return 0
 }
 
-type GammaK []types.Validator
-type GammaZ []byte
+type NextValidators []types.Validator
+type RingCommitment []byte
 
 type SafroleBasicState struct {
-	GammaK GammaK             `json:"gamma_k"` // γk: Bandersnatch key of each of the next epoch’s validators (epoch N+1)
-	GammaZ GammaZ             `json:"gamma_z"` // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
-	GammaS TicketsOrKeys      `json:"gamma_s"` // γs: Current epoch’s slot-sealer series (epoch N)
-	GammaA []types.TicketBody `json:"gamma_a"` // γa: Ticket accumulator for the next epoch (epoch N+1)
+	NextValidators    NextValidators     `json:"gamma_k"` // γk: Bandersnatch key of each of the next epoch’s validators (epoch N+1)
+	RingCommitment    RingCommitment     `json:"gamma_z"` // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
+	SlotSealerSeries  TicketsOrKeys      `json:"gamma_s"` // γs: Current epoch’s slot-sealer series (epoch N)
+	TicketAccumulator []types.TicketBody `json:"gamma_a"` // γa: Ticket accumulator for the next epoch (epoch N+1)
 }
 
 func (sbs SafroleBasicState) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
-		GammaK GammaK             `json:"gamma_k"`
-		GammaZ string             `json:"gamma_z"`
-		GammaS TicketsOrKeys      `json:"gamma_s"`
-		GammaA []types.TicketBody `json:"gamma_a"`
+		NextValidators    NextValidators     `json:"gamma_k"`
+		RingCommitment    string             `json:"gamma_z"`
+		SlotSealerSeries  TicketsOrKeys      `json:"gamma_s"`
+		TicketAccumulator []types.TicketBody `json:"gamma_a"`
 	}{
-		GammaK: sbs.GammaK,
-		GammaZ: common.HexString(sbs.GammaZ),
-		GammaS: sbs.GammaS,
-		GammaA: sbs.GammaA,
+		NextValidators:    sbs.NextValidators,
+		RingCommitment:    common.HexString(sbs.RingCommitment),
+		SlotSealerSeries:  sbs.SlotSealerSeries,
+		TicketAccumulator: sbs.TicketAccumulator,
 	})
 }
 
 func (sbs *SafroleBasicState) UnmarshalJSON(data []byte) error {
 	var s struct {
-		GammaK GammaK             `json:"gamma_k"`
-		GammaZ string             `json:"gamma_z"`
-		GammaS TicketsOrKeys      `json:"gamma_s"`
-		GammaA []types.TicketBody `json:"gamma_a"`
+		NextValidators    NextValidators     `json:"gamma_k"`
+		RingCommitment    string             `json:"gamma_z"`
+		SlotSealerSeries  TicketsOrKeys      `json:"gamma_s"`
+		TicketAccumulator []types.TicketBody `json:"gamma_a"`
 	}
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
 	}
-	sbs.GammaK = s.GammaK
-	sbs.GammaZ = common.FromHex(s.GammaZ)
-	sbs.GammaS = s.GammaS
-	sbs.GammaA = s.GammaA
+	sbs.NextValidators = s.NextValidators
+	sbs.RingCommitment = common.FromHex(s.RingCommitment)
+	sbs.SlotSealerSeries = s.SlotSealerSeries
+	sbs.TicketAccumulator = s.TicketAccumulator
 	return nil
 }
 
@@ -132,7 +132,7 @@ func (sbs *SafroleBasicState) UnmarshalJSON(data []byte) error {
 
 func NewJamState() *JamState {
 	return &JamState{
-		//AvailabilityAssignments:  make([types.TotalCores]*Rho_state),
+		//AvailabilityAssignments:  make([types.TotalCores]*CoreState),
 		SafroleState: NewSafroleState(),
 	}
 }
@@ -142,23 +142,23 @@ func (original *JamState) Copy() *JamState {
 	copyState := &JamState{
 		AuthorizationsPool:       original.AuthorizationsPool,
 		RecentBlocks:             original.RecentBlocks,
-		SafroleStateGamma:        original.SafroleStateGamma,
+		SafroleBasicState:        original.SafroleBasicState,
 		DisputesState:            original.DisputesState,
 		PrivilegedServiceIndices: original.PrivilegedServiceIndices.Copy(),
 		ValidatorStatistics:      *original.ValidatorStatistics.Copy(),
 		SafroleState:             original.SafroleState.Copy(),
-		//AvailabilityAssignments:  make([types.TotalCores]*Rho_state),
+		//AvailabilityAssignments:  make([types.TotalCores]*CoreState),
 		AuthorizationQueue:  original.AuthorizationQueue,
 		AccumulationQueue:   original.AccumulationQueue,
 		AccumulationHistory: original.AccumulationHistory,
 		AccumulationOutputs: original.AccumulationOutputs,
 	}
 
-	for i, rhoState := range original.AvailabilityAssignments {
-		if rhoState != nil {
-			copyState.AvailabilityAssignments[i] = &Rho_state{
-				WorkReport: rhoState.WorkReport,
-				Timeslot:   rhoState.Timeslot,
+	for i, availability_assignment := range original.AvailabilityAssignments {
+		if availability_assignment != nil {
+			copyState.AvailabilityAssignments[i] = &CoreState{
+				WorkReport: availability_assignment.WorkReport,
+				Timeslot:   availability_assignment.Timeslot,
 			}
 		}
 	}
@@ -166,7 +166,7 @@ func (original *JamState) Copy() *JamState {
 	return copyState
 }
 
-// clearRhoByCore clears the Rho state for a specific core
+// clearAvailabilityAssignmentsByCore clears the AvailabilityAssignments state for a specific core
 func (state *JamState) String() string {
 	return types.ToJSON(state)
 }
@@ -203,11 +203,11 @@ func (n *JamState) tallyStatistics(validatorIndex uint32, activity string, cnt u
 
 func (j *JamState) newPartialState() *types.PartialState {
 	p := j.PrivilegedServiceIndices
-	p.Kai_g = make(map[uint32]uint64)
-	maps.Copy(p.Kai_g, j.PrivilegedServiceIndices.Kai_g)
+	p.AlwaysAccServiceID = make(map[uint32]uint64)
+	maps.Copy(p.AlwaysAccServiceID, j.PrivilegedServiceIndices.AlwaysAccServiceID)
 	return &types.PartialState{
-		D:                  make(map[uint32]*types.ServiceAccount),
-		UpcomingValidators: j.SafroleState.DesignedValidators,
+		ServiceAccounts:    make(map[uint32]*types.ServiceAccount),
+		UpcomingValidators: j.SafroleState.DesignatedValidators,
 		QueueWorkReport:    j.AuthorizationQueue,
 		PrivilegedState:    p,
 	}
@@ -248,59 +248,59 @@ func (j *JamState) GetValidatorStats() string {
 
 }
 
-func (a *Psi_state) UnmarshalJSON(data []byte) error {
+func (a *DisputeState) UnmarshalJSON(data []byte) error {
 	var s struct {
-		Psi_g []string `json:"good"`
-		Psi_b []string `json:"bad"`
-		Psi_w []string `json:"wonky"`
-		Psi_o []string `json:"offenders"`
+		GoodSet   []string `json:"good"`
+		BadSet    []string `json:"bad"`
+		WonkySet  []string `json:"wonky"`
+		Offenders []string `json:"offenders"`
 	}
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
 	}
-	for _, v := range s.Psi_g {
-		a.Psi_g = append(a.Psi_g, common.FromHex(v))
+	for _, v := range s.GoodSet {
+		a.GoodSet = append(a.GoodSet, common.FromHex(v))
 	}
-	for _, v := range s.Psi_b {
-		a.Psi_b = append(a.Psi_b, common.FromHex(v))
+	for _, v := range s.BadSet {
+		a.BadSet = append(a.BadSet, common.FromHex(v))
 	}
-	for _, v := range s.Psi_w {
-		a.Psi_w = append(a.Psi_w, common.FromHex(v))
+	for _, v := range s.WonkySet {
+		a.WonkySet = append(a.WonkySet, common.FromHex(v))
 	}
-	for _, v := range s.Psi_o {
-		a.Psi_o = append(a.Psi_o, types.Ed25519Key(common.FromHex(v)))
+	for _, v := range s.Offenders {
+		a.Offenders = append(a.Offenders, types.Ed25519Key(common.FromHex(v)))
 	}
 
 	return nil
 }
 
-func (a Psi_state) MarshalJSON() ([]byte, error) {
-	psi_g := []string{}
-	for _, v := range a.Psi_g {
-		psi_g = append(psi_g, common.HexString(v))
+func (a DisputeState) MarshalJSON() ([]byte, error) {
+	goodSet := []string{}
+	for _, v := range a.GoodSet {
+		goodSet = append(goodSet, common.HexString(v))
 	}
-	psi_b := []string{}
-	for _, v := range a.Psi_b {
-		psi_b = append(psi_b, common.HexString(v))
+	badSet := []string{}
+	for _, v := range a.BadSet {
+		badSet = append(badSet, common.HexString(v))
 	}
-	psi_w := []string{}
-	for _, v := range a.Psi_w {
-		psi_w = append(psi_w, common.HexString(v))
+	wonkySet := []string{}
+	for _, v := range a.WonkySet {
+		wonkySet = append(wonkySet, common.HexString(v))
 	}
-	psi_o := []string{}
-	for _, v := range a.Psi_o {
-		psi_o = append(psi_o, common.HexString(v[:]))
+	offenders := []string{}
+	for _, v := range a.Offenders {
+		offenders = append(offenders, common.HexString(v[:]))
 	}
 	return json.Marshal(&struct {
-		Psi_g []string `json:"good"`
-		Psi_b []string `json:"bad"`
-		Psi_w []string `json:"wonky"`
-		Psi_o []string `json:"offenders"`
+		GoodSet   []string `json:"good"`
+		BadSet    []string `json:"bad"`
+		WonkySet  []string `json:"wonky"`
+		Offenders []string `json:"offenders"`
 	}{
-		Psi_g: psi_g,
-		Psi_b: psi_b,
-		Psi_w: psi_w,
-		Psi_o: psi_o,
+		GoodSet:   goodSet,
+		BadSet:    badSet,
+		WonkySet:  wonkySet,
+		Offenders: offenders,
 	})
 }
 
@@ -319,13 +319,13 @@ func StateDecodeToJson(encodedBytes []byte, state string) (string, error) {
 	case "c3":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(RecentBlocks{}))
 	case "c3-beta":
-		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(Beta_state{}))
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(HistoryState{}))
 	case "c4":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(SafroleBasicState{}))
 	case "c4-gamma_s":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(TicketsOrKeys{}))
 	case "c5":
-		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(Psi_state{}))
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(DisputeState{}))
 	case "c6":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(Entropy{}))
 	case "c7":
@@ -339,7 +339,7 @@ func StateDecodeToJson(encodedBytes []byte, state string) (string, error) {
 	case "c11":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(uint32(0)))
 	case "c12":
-		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Kai_state{}))
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.PrivilegedServiceState{}))
 	case "c13":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.ValidatorStatistics{}))
 	case "c14":

@@ -60,11 +60,10 @@ func ApplyStateTransitionTickets(oldState *StateDB, ctx context.Context, blk *ty
 			return safroleState, err
 		}
 	}
-	// TODO - 4.12 - Dispute
+	// 4.12 - Dispute
 	// 0.6.2 Safrole 4.5,4.8,4.9,4.10,4.11 [post dispute state , pre designed validators iota]
 	sf := s.GetSafrole()
-	// Shawn to check: should it be sf0 here?
-	sf.OffenderState = s.GetJamState().DisputesState.Psi_o
+	sf.OffenderState = s.GetJamState().DisputesState.Offenders
 	ss, err := sf.ApplyStateTransitionTickets(ctx, ticketExts, targetJCE, sf_header, validated_tickets) // Entropy computed!
 	if err != nil {
 		log.Error(log.SDB, "ApplyStateTransitionTickets", "err", jamerrors.GetErrorName(err))
@@ -131,9 +130,9 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if err != nil {
 		return s, err
 	}
-	num_assurances, err := s.ApplyStateTransitionRhoDagga(ctx, assurances, targetJCE)
+	num_assurances, err := s.ApplyStateTransitionAvailabilityAssignmentsDagga(ctx, assurances, targetJCE)
 	if err != nil {
-		log.Error(log.SDB, "ApplyStateTransitionRhoDagga", "err", err)
+		log.Error(log.SDB, "ApplyStateTransitionAvailabilityAssignmentsDagga", "err", err)
 		return s, err
 	}
 
@@ -141,7 +140,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	// 0.6.2 Safrole 4.5,4.8,4.9,4.10,4.11 [post dispute state , pre designed validators iota]
 	sf := s.GetSafrole()
 	// Shawn to check: should it be sf0 here?
-	sf.OffenderState = s.GetJamState().DisputesState.Psi_o
+	sf.OffenderState = s.GetJamState().DisputesState.Offenders
 	s2, err := sf.ApplyStateTransitionTickets(ctx, ticketExts, targetJCE, sf_header, validated_tickets) // Entropy computed!
 	if err != nil {
 		log.Error(log.SDB, "ApplyStateTransitionTickets", "err", jamerrors.GetErrorName(err))
@@ -183,14 +182,14 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	// use post entropy state rotate the guarantors
 	s.RotateGuarantors()
 
-	// preparing for the rho transition
+	// preparing for the availability_assignment transition
 
 	guarantees := blk.Guarantees()
 	log.Trace(log.A, "ApplyStateTransitionFromBlock", "len(assurances)", len(assurances))
-	// 4.13,4.14,4.15 - Rho [disputes, assurances, guarantees] [kappa',lamda',tau', beta dagga, prestate service, prestate accumulate related state]
+	// 4.13,4.14,4.15 - AvailabilityAssignments [disputes, assurances, guarantees]
 	// 4.16 available work report also updated
 
-	num_reports, err := s.ApplyStateTransitionRho(ctx, guarantees, targetJCE)
+	num_reports, err := s.ApplyStateTransitionAvailabilityAssignments(ctx, guarantees, targetJCE)
 	if err != nil {
 		return s, err
 	}
@@ -210,38 +209,37 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	gas_counting = types.AccumulationGasAllocation * types.TotalCores
 	// get the partial state
 	o := s.JamState.newPartialState()
-	kai_g := o.PrivilegedState.Kai_g
-	for _, g := range kai_g {
+	alwaysAccServiceID := o.PrivilegedState.AlwaysAccServiceID
+	for _, g := range alwaysAccServiceID {
 		gas_counting += uint64(g)
 	}
 	if gas < gas_counting {
 		gas = gas_counting
 	}
 	var f map[uint32]uint32
-	var b []types.AccumulationOutput
 	accumulate_input_wr := s.AvailableWorkReport
 	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
 
 	// this will hold the gasUsed + numWorkreports -- ServiceStatistics
 	accumulateStats := make(map[uint32]*accumulateStatistics)
 
-	n, t, b, U := s.OuterAccumulate(gas, accumulate_input_wr, o, f, pvmBackend) // outer accumulate
+	num_accumulations, deferred_transfers, accumulation_output, gasUsage := s.OuterAccumulate(gas, accumulate_input_wr, o, f, pvmBackend) // outer accumulate
 
 	// (χ′, δ†, ι′, φ′)
 	// 12.24 transfer δ‡
-	tau := s.GetTimeslot() // τ′
-	transferStats, err := s.ProcessDeferredTransfers(o, tau, t, pvmBackend)
+	timeslot := s.GetTimeslot() // τ′
+	transferStats, err := s.ProcessDeferredTransfers(o, timeslot, deferred_transfers, pvmBackend)
 	if err != nil {
 		return s, err
 	}
 	// make sure all service accounts can be written
-	for _, sa := range o.D {
+	for _, sa := range o.ServiceAccounts {
 		sa.ALLOW_MUTABLE()
 		sa.Dirty = true
 	}
 
 	// accumulate statistics
-	accumulated_workreports := accumulate_input_wr[:n]
+	accumulated_workreports := accumulate_input_wr[:num_accumulations]
 	for _, report := range accumulated_workreports {
 		for _, result := range report.Results {
 			service := result.ServiceID
@@ -263,17 +261,17 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	s.stateUpdate = s.ApplyXContext(o)
 	// finalize stateUpdates
 	s.computeStateUpdates(blk) // review targetJCE input
-	for _, gasusage := range U {
-		service := gasusage.Service
+	for _, gas_usage := range gasUsage {
+		service := gas_usage.Service
 		stats, ok := accumulateStats[service]
 		if !ok {
 			stats = &accumulateStatistics{}
 		}
-		stats.gasUsed += uint(gasusage.Gas)
+		stats.gasUsed += uint(gas_usage.Gas)
 		accumulateStats[service] = stats
 	}
 	//after accumulation, we need to update the accumulate state
-	s.ApplyStateTransitionAccumulation(accumulate_input_wr, n, old_timeslot)
+	s.ApplyStateTransitionAccumulation(accumulate_input_wr, num_accumulations, old_timeslot)
 	// 0.6.2 4.18 - Preimages [ δ‡, τ′]
 	preimages := blk.PreimageLookups()
 	num_preimage, num_octets, err := s.ApplyStateTransitionPreimages(preimages, targetJCE)
@@ -300,11 +298,11 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		return s, err
 	}
 	// n.r = M_B( [ s \ E_4(s) ++ E(h) | (s,h) in C] , H_K)
-	sort.Slice(b, func(i, j int) bool {
-		return b[i].Service < b[j].Service
+	sort.Slice(accumulation_output, func(i, j int) bool {
+		return accumulation_output[i].Service < accumulation_output[j].Service
 	})
 	var leaves [][]byte
-	for _, sa := range b {
+	for _, sa := range accumulation_output {
 		// put (s,h) of C  into leaves
 		leafBytes := append(common.Uint32ToBytes(sa.Service), sa.Output.Bytes()...)
 		empty := common.Hash{}
@@ -327,8 +325,8 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if len(leaves) > 0 {
 		log.Debug(debugB, "BEEFY accumulation root", "r", accumulationRoot)
 	}
-	// 4.7 - Recent History [No other state related, but need to do it after rho, AFTER accumulation]
-	s.ApplyStateRecentHistory(blk, &(accumulationRoot), b)
+	// 4.7 - Recent History [No other state related, but need to do it after availability_assignment]
+	s.ApplyStateRecentHistory(blk, &(accumulationRoot), accumulation_output)
 	// 4.20 - compute pi
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "blocks", 1)
 	s.StateRoot = s.UpdateTrieState()
@@ -423,11 +421,11 @@ func (s *StateDB) ApplyStateTransitionDispute(disputes types.Dispute) (err error
 	return nil
 }
 
-func (s *StateDB) ApplyStateTransitionRhoDagga(ctx context.Context, assurances []types.Assurance, targetJCE uint32) (num_assurances map[uint16]uint16, err error) {
+func (s *StateDB) ApplyStateTransitionAvailabilityAssignmentsDagga(ctx context.Context, assurances []types.Assurance, targetJCE uint32) (num_assurances map[uint16]uint16, err error) {
 	d := s.GetJamState()
 	assuranceErr := s.ValidateAssurances(ctx, assurances, s.Block.Header.ParentHeaderHash, false)
 	if assuranceErr != nil {
-		log.Error(log.SDB, "ApplyStateTransitionRho", "assuranceErr", assuranceErr)
+		log.Error(log.SDB, "ApplyStateTransitionAvailabilityAssignments", "assuranceErr", assuranceErr)
 		return nil, assuranceErr
 	}
 
@@ -437,13 +435,13 @@ func (s *StateDB) ApplyStateTransitionRhoDagga(ctx context.Context, assurances [
 	availableWorkReport, num_assurances := d.ComputeAvailabilityAssignments(assurances, targetJCE)
 	//_ = availableWorkReport                     // availableWorkReport is the work report that is available for the core, will be used in the audit section
 	s.AvailableWorkReport = availableWorkReport // every block has new available work report
-	log.Trace(log.A, "ApplyStateTransitionRho", "len(s.AvailableWorkReport)", len(s.AvailableWorkReport))
+	log.Trace(log.A, "ApplyStateTransitionAvailabilityAssignments", "len(s.AvailableWorkReport)", len(s.AvailableWorkReport))
 
 	return num_assurances, nil
 }
 
-// Process Rho - Eq 25/26/27 using disputes, assurances, guarantees in that order
-func (s *StateDB) ApplyStateTransitionRho(ctx context.Context, guarantees []types.Guarantee, targetJCE uint32) (num_reports map[types.Ed25519Key]uint16, err error) {
+// Process AvailabilityAssignments - Eq 25/26/27 using disputes, assurances, guarantees in that order
+func (s *StateDB) ApplyStateTransitionAvailabilityAssignments(ctx context.Context, guarantees []types.Guarantee, targetJCE uint32) (num_reports map[types.Ed25519Key]uint16, err error) {
 	d := s.GetJamState()
 
 	// Guarantees checks
@@ -475,7 +473,7 @@ func (s *StateDB) ApplyStateTransitionRho(ctx context.Context, guarantees []type
 
 	num_reports, err = d.ProcessGuarantees(ctx, guarantees, s.PreviousGuarantorAssignments)
 	if err != nil {
-		log.Error(log.SDB, "ApplyStateTransitionRho", "GuaranteeErr", err)
+		log.Error(log.SDB, "ApplyStateTransitionAvailabilityAssignments", "GuaranteeErr", err)
 		return nil, err
 	}
 	return num_reports, nil

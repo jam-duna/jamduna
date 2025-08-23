@@ -13,23 +13,21 @@ import (
 
 // C3
 type RecentBlocks struct {
-	B_H []Beta_state `json:"history"` // History of Beta states, each with header hash, B, state root, and reported segment roots
-	B_B trie.MMR     `json:"mmr"`     // MMR of the B values from Beta states
+	B_H []HistoryState `json:"history"` // History of Beta states, each with header hash, B, state root, and reported segment roots
+	B_B trie.MMR       `json:"mmr"`     // MMR of the B values from Beta states
 }
 
-// TODO: [Sourabh] Recent Blocks: AccOuts in state, store historical roots only
+// Recent Blocks: AccOuts in state, store historical roots only
 // Store only MMB root hash in Recent History, as only this is what is needed for verification
 // Separately, store the MMB peak set and the accumulation outputs of the most recent block.
-//
-//	https://github.com/gavofyork/graypaper/commit/c48ad4498ba9df4abbad470aa9aac553ac33b864
-type Beta_state struct {
+type HistoryState struct {
 	HeaderHash common.Hash                    `json:"header_hash"`
 	B          common.Hash                    `json:"beefy_root"`
 	StateRoot  common.Hash                    `json:"state_root"`
 	Reported   types.SegmentRootLookupHistory `json:"reported"` // Use the custom type
 }
 
-func (b *Beta_state) String() string {
+func (b *HistoryState) String() string {
 	enc, err := json.Marshal(b)
 	if err != nil {
 		return fmt.Sprintf("Error marshaling JSON: %v", err)
@@ -37,7 +35,7 @@ func (b *Beta_state) String() string {
 	return string(enc)
 }
 
-func (b *Beta_state) UnmarshalJSON(data []byte) error {
+func (b *HistoryState) UnmarshalJSON(data []byte) error {
 	var s struct {
 		HeaderHash common.Hash                    `json:"header_hash"`
 		B          common.Hash                    `json:"beefy_root"`
@@ -54,7 +52,7 @@ func (b *Beta_state) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (b Beta_state) MarshalJSON() ([]byte, error) {
+func (b HistoryState) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		HeaderHash common.Hash                    `json:"header_hash"`
 		B          common.Hash                    `json:"beefy_root"`
@@ -94,7 +92,7 @@ func (s *StateDB) ApplyStateRecentHistory(blk *types.Block, accumulationRoot *co
 	}
 	mmr.Append(accumulationRoot)
 	s.JamState.AccumulationOutputs = accumulationOutputs
-	n := Beta_state{
+	n := HistoryState{
 		Reported:   reported,          // p
 		HeaderHash: blk.Header.Hash(), // h
 		B:          *mmr.SuperPeak(),  // b

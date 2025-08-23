@@ -64,7 +64,7 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 	j.SafroleState.PrevValidators = validators
 	j.SafroleState.CurrValidators = validators
 	j.SafroleState.NextValidators = validators
-	j.SafroleState.DesignedValidators = validators
+	j.SafroleState.DesignatedValidators = validators
 
 	/*
 		The on-chain randomness is initialized after the genesis block construction.
@@ -76,16 +76,16 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 	j.SafroleState.Entropy[2] = common.BytesToHash(common.ComputeHash(j.SafroleState.Entropy[1].Bytes())) //BLAKE2B of EpochN1
 	j.SafroleState.Entropy[3] = common.BytesToHash(common.ComputeHash(j.SafroleState.Entropy[2].Bytes())) //BLAKE2B of EpochN2
 	j.SafroleState.TicketsOrKeys.Keys, _ = j.SafroleState.ChooseFallBackValidator()
-	j.DisputesState = Psi_state{}
+	j.DisputesState = DisputeState{}
 
 	// Setup Bootstrap Service for all 3 privileges
-	kai_a := [types.TotalCores]uint32{}
+	authQueueServiceID := [types.TotalCores]uint32{}
 	for i := 0; i < types.TotalCores; i++ {
-		kai_a[i] = AuthCopyServiceCode
+		authQueueServiceID[i] = AuthCopyServiceCode
 	}
-	j.PrivilegedServiceIndices.Kai_a = kai_a
-	j.PrivilegedServiceIndices.Kai_v = BootstrapServiceCode
-	j.PrivilegedServiceIndices.Kai_m = BootstrapServiceCode
+	j.PrivilegedServiceIndices.AuthQueueServiceID = authQueueServiceID
+	j.PrivilegedServiceIndices.UpcomingValidatorsServiceID = BootstrapServiceCode
+	j.PrivilegedServiceIndices.ManagerServiceID = BootstrapServiceCode
 	for i := 0; i < types.TotalCores; i++ {
 		j.AuthorizationsPool[i] = make([]common.Hash, types.MaxAuthorizationPoolItems)
 		var temp [types.MaxAuthorizationQueueItems]common.Hash

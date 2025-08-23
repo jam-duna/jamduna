@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -114,8 +115,7 @@ func TestReportParsing(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.jsonFile, func(t *testing.T) {
-			jsonPath := filepath.Join("../jamtestvectors/reports/tiny", tc.jsonFile)
-			// binPath := filepath.Join("../jamtestvectors/safrole/tiny", tc.binFile)
+			jsonPath := filepath.Join(path.Join(common.GetJAMTestVectorPath("stf"), "reports/tiny", tc.jsonFile))
 
 			targetedStructType := reflect.TypeOf(tc.expectedType)
 
@@ -167,7 +167,7 @@ func TestReportParsing(t *testing.T) {
 }
 
 func ReportVerify(jsonFile string, exceptErr error) error {
-	jsonPath := filepath.Join("../jamtestvectors/reports/", jsonFile)
+	jsonPath := path.Join(common.GetJAMTestVectorPath("stf"), "reports", jsonFile)
 
 	// Read and unmarshal JSON file
 	jsonData, err := os.ReadFile(jsonPath)
@@ -265,8 +265,8 @@ func ReportVerify(jsonFile string, exceptErr error) error {
 	db.JamState.tallyCoreStatistics(db.Block.Guarantees(), nil, nil)
 	db.JamState.tallyServiceStatistics(db.Block.Guarantees(), nil, nil, nil)
 	if exceptErr == nil {
-		for i, rho := range db.JamState.AvailabilityAssignments {
-			if !reflect.DeepEqual(rho, post_state.AvailabilityAssignments[i]) {
+		for i, availability_assignment := range db.JamState.AvailabilityAssignments {
+			if !reflect.DeepEqual(availability_assignment, post_state.AvailabilityAssignments[i]) {
 				return fmt.Errorf("Reports FAIL: AvailabilityAssignments not match")
 			}
 		}
@@ -285,7 +285,7 @@ func ReportVerify(jsonFile string, exceptErr error) error {
 
 func TestReportVerify(t *testing.T) {
 	network_args := *network
-	fmt.Printf("Report Test Case (Guraantee Verification), Network=%s\n", network_args)
+	t.Logf("Report Test Case (Guraantee Verification), Network=%s\n", network_args)
 	// run throgh all the json files in the tiny folder
 	testCases := []struct {
 		jsonFile string
@@ -332,7 +332,7 @@ func TestReportVerify(t *testing.T) {
 // These cases should NOT return any errorduring STF check
 func TestReportValidReportCase(t *testing.T) {
 	network_args := *network
-	fmt.Printf("Report Test Case (Valid Report), Network=%s\n", network_args)
+	t.Logf("Report Test Case (Valid Report), Network=%s\n", network_args)
 	testCases := []struct {
 		jsonFile string
 		except   error

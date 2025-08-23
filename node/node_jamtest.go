@@ -427,10 +427,10 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	if requireNew {
 		// set up service using the Bootstrap service
 		codeWorkPackage := types.WorkPackage{
-			Authorization:         []byte(""),
+			AuthorizationToken:    []byte(""),
 			AuthCodeHost:          bootstrapService,
 			AuthorizationCodeHash: bootstrap_auth_codehash,
-			ParameterizationBlob:  []byte{},
+			ConfigurationBlob:     []byte{},
 			WorkItems:             bootstrap_workItems,
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), RefineAndAccumalateTimeout)

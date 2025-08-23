@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
+	"path"
 	"reflect"
 	"testing"
 
@@ -12,11 +12,16 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const (
-	debugCodec = false
-)
+func TestCodecTiny(t *testing.T) {
+	testCodec(t, "tiny")
+}
 
-func TestCodec(t *testing.T) {
+func TestCodecFull(t *testing.T) {
+	//TODO: need to support switching config again
+	testCodec(t, "full")
+}
+
+func testCodec(t *testing.T, neworkType string) {
 	testCases := []struct {
 		jsonFile     string
 		binFile      string
@@ -35,14 +40,14 @@ func TestCodec(t *testing.T) {
 		{"work_item.json", "work_item.bin", WorkItem{}},
 		{"work_package.json", "work_package.bin", WorkPackage{}},
 		{"work_report.json", "work_report.bin", WorkReport{}},
-		{"work_result_0.json", "work_result_0.bin", WorkResult{}},
-		{"work_result_1.json", "work_result_1.bin", WorkResult{}},
+		{"work_result_0.json", "work_result_0.bin", WorkDigest{}},
+		{"work_result_1.json", "work_result_1.bin", WorkDigest{}},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.jsonFile, func(t *testing.T) {
-			jsonPath := filepath.Join("../jamtestvectors/codec/data", tc.jsonFile)
-			binPath := filepath.Join("../jamtestvectors/codec/data", tc.binFile)
+			jsonPath := path.Join(common.GetJAMTestVectorPath("codec"), neworkType, tc.jsonFile)
+			binPath := path.Join(common.GetJAMTestVectorPath("codec"), neworkType, tc.binFile)
 			testcase_name := tc.jsonFile
 			// Read Codec
 			expectedCodec, err := os.ReadFile(binPath)

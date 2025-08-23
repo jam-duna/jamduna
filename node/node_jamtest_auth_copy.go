@@ -24,9 +24,9 @@ func reassign(n1 JNode, testServices map[string]*types.TestService) error {
 
 	wp := types.WorkPackage{
 		AuthCodeHost:          0,
-		Authorization:         nil, // null-authorizer
+		AuthorizationToken:    nil, // null-authorizer
 		AuthorizationCodeHash: bootstrap_auth_codehash,
-		ParameterizationBlob:  nil,
+		ConfigurationBlob:     nil,
 		WorkItems: []types.WorkItem{
 			{
 				Service:            auth_serviceIdx_orig,

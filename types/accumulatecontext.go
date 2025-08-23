@@ -51,36 +51,35 @@ func (aam *AlwaysAccMap) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Types for Kai
-type Kai_state struct {
-	Kai_m uint32             `json:"bless"`      // χₘ ∈ ℕₛ: Manager service index – authorized to alter χ and assign deposits.
-	Kai_a [TotalCores]uint32 `json:"designate"`  // χₐ ∈ ⟦ℕₛ⟧𝒞: List of service indices (one per core) that can modify authorizer queue φ. One per core
-	Kai_v uint32             `json:"assign"`     // χᵥ ∈ ℕₛ: Service index allowed to set ι. (upcoming validator)
-	Kai_g AlwaysAccMap       `json:"always_acc"` // χ𝗀 ∈ 𝒟(ℕₛ → ℕG): Services that auto-accumulate gas per block. (is this renamed as "z")
+type PrivilegedServiceState struct {
+	ManagerServiceID            uint32             `json:"bless"`      // χₘ ∈ ℕₛ: Manager service index – authorized to alter χ and assign deposits.
+	AuthQueueServiceID          [TotalCores]uint32 `json:"designate"`  // χₐ ∈ ⟦ℕₛ⟧𝒞: List of service indices (one per core) that can modify authorizer queue φ. One per core
+	UpcomingValidatorsServiceID uint32             `json:"assign"`     // χᵥ ∈ ℕₛ: Service index allowed to set ι. (upcoming validator)
+	AlwaysAccServiceID          AlwaysAccMap       `json:"always_acc"` // χ𝗀 ∈ 𝒟(ℕₛ → ℕG): Services that auto-accumulate gas per block. (is this renamed as "z")
 }
 
-func (k Kai_state) Copy() Kai_state {
-	copy := Kai_state{
-		Kai_m: k.Kai_m,
-		Kai_v: k.Kai_v,
-		Kai_g: make(AlwaysAccMap),
+func (k PrivilegedServiceState) Copy() PrivilegedServiceState {
+	copy := PrivilegedServiceState{
+		ManagerServiceID:            k.ManagerServiceID,
+		UpcomingValidatorsServiceID: k.UpcomingValidatorsServiceID,
+		AlwaysAccServiceID:          make(AlwaysAccMap),
 	}
-	copy.Kai_a = k.Kai_a
-	for k, v := range k.Kai_g {
-		copy.Kai_g[k] = v
+	copy.AuthQueueServiceID = k.AuthQueueServiceID
+	for k, v := range k.AlwaysAccServiceID {
+		copy.AlwaysAccServiceID[k] = v
 	}
 	return copy
 }
 
-func (k *Kai_state) GetAllServices() []uint32 {
+func (k *PrivilegedServiceState) GetAllServices() []uint32 {
 	services := make(map[uint32]bool)
-	services[k.Kai_m] = true // Manager service index
-	services[k.Kai_v] = true // Upcoming validator service index
-	for _, serviceIndex := range k.Kai_a {
+	services[k.ManagerServiceID] = true            // Manager service index
+	services[k.UpcomingValidatorsServiceID] = true // Upcoming validator service index
+	for _, serviceIndex := range k.AuthQueueServiceID {
 		services[serviceIndex] = true // Designated service indices
 	}
 	// Add all services from the AlwaysAccMap
-	for serviceID := range k.Kai_g {
+	for serviceID := range k.AlwaysAccServiceID {
 		services[serviceID] = true
 	}
 	list := []uint32{}
@@ -96,24 +95,23 @@ type AuthorizationQueue [TotalCores][MaxAuthorizationQueueItems]common.Hash
 
 // U: The set of partial state, used during accumulation. See (12.13).
 type PartialState struct {
-	D                  map[uint32]*ServiceAccount `json:"D"`                   // d: Service accounts δ
+	ServiceAccounts    map[uint32]*ServiceAccount `json:"D"`                   // d: Service accounts δ
 	UpcomingValidators Validators                 `json:"upcoming_validators"` // i: Upcoming validators keys ι
 	QueueWorkReport    AuthorizationQueue         `json:"authorizations_pool"` // q: queue of authorizers φ
-	PrivilegedState    Kai_state                  `json:"privileged_state"`    // x: Privileged state χ
+	PrivilegedState    PrivilegedServiceState     `json:"privileged_state"`    // x: Privileged state χ
 }
 
 func (u *PartialState) Checkpoint() {
-	for _, sa := range u.D {
+	for _, sa := range u.ServiceAccounts {
 		if sa.NewAccount || sa.Dirty {
 			sa.Dirty = true
 			sa.Checkpointed = true
 		}
 	}
-	return
 }
 
 func (u *PartialState) GetService(s uint32) (*ServiceAccount, bool) {
-	if sa, ok := u.D[s]; ok {
+	if sa, ok := u.ServiceAccounts[s]; ok {
 		return sa, true
 	}
 	return nil, false
@@ -123,12 +121,12 @@ func (u *PartialState) GetService(s uint32) (*ServiceAccount, bool) {
 func (u *PartialState) Clone() *PartialState {
 	//fmt.Printf("Cloning PartialState called from %s\n", caller)
 	v := &PartialState{
-		D: make(map[uint32]*ServiceAccount),
+		ServiceAccounts: make(map[uint32]*ServiceAccount),
 		// must have copy of the slice
 		UpcomingValidators: make([]Validator, len(u.UpcomingValidators)),
 		// Copying by value works here
 		QueueWorkReport: u.QueueWorkReport,
-		// Shallow copy; Kai_g handled below
+		// Shallow copy; AlwaysAccServiceID handled below
 		PrivilegedState: u.PrivilegedState,
 	}
 
@@ -137,14 +135,14 @@ func (u *PartialState) Clone() *PartialState {
 
 	v.QueueWorkReport = u.QueueWorkReport
 
-	// Copy Kai_g properly
-	for k, val := range u.PrivilegedState.Kai_g {
-		v.PrivilegedState.Kai_g[k] = val
+	// Copy AlwaysAccServiceID properly
+	for k, val := range u.PrivilegedState.AlwaysAccServiceID {
+		v.PrivilegedState.AlwaysAccServiceID[k] = val
 	}
 
-	// Deep copy D (ServiceAccount map) -- we do need cloning here because of X vs Y
-	for s, sa := range u.D {
-		v.D[s] = sa.Clone() // Assuming ServiceAccount has a Clone() method
+	// Deep copy ServiceAccounts (ServiceAccount map) -- we do need cloning here because of X vs Y
+	for s, sa := range u.ServiceAccounts {
+		v.ServiceAccounts[s] = sa.Clone() // Assuming ServiceAccount has a Clone() method
 	}
 
 	return v
@@ -178,21 +176,21 @@ func (ah *AccumulationHistory) UnmarshalJSON(data []byte) error {
 
 func (U PartialState) Dump(prefix string, id uint16) {
 	fmt.Printf("[N%d] Partial State Dump -- %s\n", id, prefix)
-	for serviceIndex, serviceAccount := range U.D {
+	for serviceIndex, serviceAccount := range U.ServiceAccounts {
 		fmt.Printf("[N%d] Service %d => Dirty %v %s\n", id, serviceIndex, serviceAccount.Dirty, serviceAccount.String())
 	}
 	fmt.Printf("[N%d]\n\n", id)
 }
 
 type XContext struct {
-	I uint32             `json:"I"`
-	S uint32             `json:"S"`
-	U *PartialState      `json:"U"`
-	T []DeferredTransfer `json:"T"`
-	Y common.Hash        `json:"Y"` // Question: should this be a pointer or just common.Hash
-	P []P                `json:"P"`
+	NewServiceIndex uint32             `json:"new_service_index"`
+	ServiceIndex    uint32             `json:"service_index"`
+	U               *PartialState      `json:"U"`
+	Transfers       []DeferredTransfer `json:"transfers"`
+	Yield           common.Hash        `json:"Y"` // Question: should this be a pointer or just common.Hash
+	Provided        []Provided         `json:"provided"`
 }
-type P struct {
+type Provided struct {
 	ServiceIndex uint32 `json:"ServiceIndex"`
 	P_data       []byte `json:"P_data"`
 }
@@ -200,30 +198,30 @@ type P struct {
 // returns back X.U.D[s] where s is the current service index
 func (X *XContext) GetX_s() (xs *ServiceAccount, s uint32) {
 	// This is Mutable
-	return X.U.D[X.S], X.S
+	return X.U.ServiceAccounts[X.ServiceIndex], X.ServiceIndex
 }
 
 func (X *XContext) Clone() (Y XContext) {
 	Y = XContext{
-		I: X.I,
-		S: X.S,
-		U: X.U.Clone(),
-		T: make([]DeferredTransfer, len(X.T)),
-		Y: X.Y,
+		NewServiceIndex: X.NewServiceIndex,
+		ServiceIndex:    X.ServiceIndex,
+		U:               X.U.Clone(),
+		Transfers:       make([]DeferredTransfer, len(X.Transfers)),
+		Yield:           X.Yield,
 	}
-	for i, t := range X.T {
-		Y.T[i] = t.Clone()
+	for i, t := range X.Transfers {
+		Y.Transfers[i] = t.Clone()
 	}
 	return
 }
 
-// T: The set of deferred transfers.
+// T: The set of deferred transfers. 12.14
 type DeferredTransfer struct {
-	SenderIndex   uint32    `json:"sender_index"`
-	ReceiverIndex uint32    `json:"receiver_index"`
-	Amount        uint64    `json:"amount"`
-	Memo          [128]byte `json:"memo"`
-	GasLimit      uint64    `json:"gas_limit"`
+	SenderIndex   uint32    `json:"sender_index"`   // s ∈ ⟦ℕₛ⟧: Sender service index
+	ReceiverIndex uint32    `json:"receiver_index"` // d ∈ ⟦ℕₛ⟧: Receiver service index
+	Amount        uint64    `json:"amount"`         // a ∈ ℕ: Amount to transfer
+	Memo          [128]byte `json:"memo"`           // m ∈ {0,1}^128: Memo Component
+	GasLimit      uint64    `json:"gas_limit"`      // g ∈ ℕ: Gas limit for transfer
 }
 
 func (d DeferredTransfer) Clone() DeferredTransfer {
@@ -236,51 +234,58 @@ func (d DeferredTransfer) Clone() DeferredTransfer {
 	}
 }
 
-// 0.6.4
-// see 12.3 Wrangling - Eq 159
-// WrangledWorkResult
-// wrangled operand tuples
-// O: The accumulation operand element, corresponding to a single work result.
+// 0.7.0 Eq 12.19 C.32  The accumulation operand element, corresponding to a single work item information
 type AccumulateOperandElements struct {
-	H common.Hash `json:"H"` // h
-	E common.Hash `json:"E"` // e
-	A common.Hash `json:"A"` // a
-	Y common.Hash `json:"Y"` // y
-	G uint        `json:"G"` // g 0.6.5 -- see (C.29) -- check
-	D Result      `json:"D"` // d
-	O []byte      `json:"O"` // o
+	WorkPackageHash     common.Hash `json:"H"` // p = (w_s)_p WorkPackageHash
+	ExportedSegmentRoot common.Hash `json:"E"` // e = (w_s)_e ExportedSegmentRoot
+	AuthorizerHash      common.Hash `json:"A"` // a = w_a AuthorizerHash
+	PayloadHash         common.Hash `json:"Y"` // y = r_y PayloadHash
+	Gas                 uint        `json:"G"` // g = r_g Gas
+	Result              Result      `json:"D"` // l = r_l Result
+	Trace               []byte      `json:"O"` // t = w_t Trace
 }
 
+/*
+	o := types.AccumulateOperandElements{
+			H: common.Hash{}, // REVIEW
+			E: common.Hash{}, // REVIEW
+			A: p_a,
+			O: r.Ok,
+			Y: result.PayloadHash,
+			G: uint(result.Gas),
+			D: result.Result,
+		}
+*/
 func (a *AccumulateOperandElements) String() string {
 	return ToJSONHex(a)
 }
 
 func (a AccumulateOperandElements) Encode() []byte {
-	hBytes, err := Encode(a.H)
+	hBytes, err := Encode(a.WorkPackageHash)
 	if err != nil {
 		return nil
 	}
-	eBytes, err := Encode(a.E)
+	eBytes, err := Encode(a.ExportedSegmentRoot)
 	if err != nil {
 		return nil
 	}
-	aBytes, err := Encode(a.A)
-	if err != nil {
-		return nil
-	}
-
-	yBytes, err := Encode(a.Y)
+	aBytes, err := Encode(a.AuthorizerHash)
 	if err != nil {
 		return nil
 	}
 
-	gBytes := E(uint64(a.G))
-
-	dBytes, err := Encode(a.D)
+	yBytes, err := Encode(a.PayloadHash)
 	if err != nil {
 		return nil
 	}
-	oBytes, err := Encode(a.O)
+
+	gBytes := E(uint64(a.Gas))
+
+	dBytes, err := Encode(a.Result)
+	if err != nil {
+		return nil
+	}
+	oBytes, err := Encode(a.Trace)
 	if err != nil {
 		return nil
 	}
@@ -311,23 +316,23 @@ func (a *DeferredTransfer) String() string {
 
 func DecodedWrangledResults(o *AccumulateOperandElements) string {
 	aux := struct {
-		H common.Hash `json:"H"`
-		E common.Hash `json:"E"`
-		A common.Hash `json:"A"`
-		Y common.Hash `json:"Y"`
-		G uint        `json:"G"`
-		D string      `json:"D"`
-		O string      `json:"O"`
+		WorkPackageHash     common.Hash `json:"H"`
+		ExportedSegmentRoot common.Hash `json:"E"`
+		AuthorizerHash      common.Hash `json:"A"`
+		PayloadHash         common.Hash `json:"Y"`
+		Gas                 uint        `json:"G"`
+		D                   string      `json:"D"`
+		Trace               string      `json:"O"`
 	}{
-		H: o.H,
-		E: o.E,
-		A: o.A,
-		Y: o.Y,
-		G: o.G,
-		O: fmt.Sprintf("0x%x", o.O),
+		WorkPackageHash:     o.WorkPackageHash,
+		ExportedSegmentRoot: o.ExportedSegmentRoot,
+		AuthorizerHash:      o.AuthorizerHash,
+		PayloadHash:         o.PayloadHash,
+		Gas:                 o.Gas,
+		Trace:               fmt.Sprintf("0x%x", o.Trace),
 	}
 
-	ResultBytes, _ := Encode(o.D)
+	ResultBytes, _ := Encode(o.Result)
 	aux.D = fmt.Sprintf("0x%x", ResultBytes)
 	enc, err := json.Marshal(aux)
 	if err != nil {

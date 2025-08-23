@@ -16,18 +16,19 @@ import (
 * ${\bf i}$ - a sequence of work items
 */
 
-// WorkPackage represents a work package.
+// C.28 - 14.2 WorkPackage represents a work package.
 type WorkPackage struct {
-	// $j$ - a simple blob acting as an authorization token
-	Authorization []byte `json:"authorization"`
+	// h, u, c, |j, |f, |w
 	// $h$ - the index of the service which hosts the authorization code
 	AuthCodeHost uint32 `json:"auth_code_host"`
 	// $u$ - an authorization code hash
-	AuthorizationCodeHash common.Hash `json:"authorization_code_hash"`
-	// $p$ - a parameterization blob
-	ParameterizationBlob []byte `json:"parameterization_blob"`
-	// $x$ - context
+	AuthorizationCodeHash common.Hash `json:"auth_code_hash"`
+	// $c$ - context
 	RefineContext RefineContext `json:"context"`
+	// $j$ - a simple blob acting as an authorization token
+	AuthorizationToken []byte `json:"authorization"`
+	// $f$ - configuration blob
+	ConfigurationBlob []byte `json:"authorizer_config"` //configuration_blob
 	// $w$ - a sequence of work items
 	WorkItems []WorkItem `json:"items"`
 }
@@ -56,45 +57,41 @@ func (a *WorkPackage) Hash() common.Hash {
 
 func (a *WorkPackage) UnmarshalJSON(data []byte) error {
 	var s struct {
-		Authorization string        `json:"authorization"`
-		AuthCodeHost  uint32        `json:"auth_code_host"`
-		Authorizer    Authorizer    `json:"authorizer"`
-		RefineContext RefineContext `json:"context"`
-		WorkItems     []WorkItem    `json:"items"`
+		AuthCodeHost          uint32        `json:"auth_code_host"`
+		AuthorizationCodeHash common.Hash   `json:"auth_code_hash"`
+		RefineContext         RefineContext `json:"context"`
+		AuthorizationToken    string        `json:"authorization"`
+		ConfigurationBlob     string        `json:"authorizer_config"`
+		WorkItems             []WorkItem    `json:"items"`
 	}
 	err := json.Unmarshal(data, &s)
 	if err != nil {
 		return err
 	}
-
-	a.Authorization = common.FromHex(s.Authorization)
 	a.AuthCodeHost = s.AuthCodeHost
-	a.AuthorizationCodeHash = s.Authorizer.CodeHash
-	a.ParameterizationBlob = s.Authorizer.Params
+	a.AuthorizationCodeHash = s.AuthorizationCodeHash
 	a.RefineContext = s.RefineContext
+	a.AuthorizationToken = common.FromHex(s.AuthorizationToken)
+	a.ConfigurationBlob = common.FromHex(s.ConfigurationBlob)
 	a.WorkItems = s.WorkItems
 
 	return nil
 }
 
 func (a WorkPackage) MarshalJSON() ([]byte, error) {
-	// Convert Authorization from []byte to hex string
-	authorization := common.HexString(a.Authorization)
-
 	return json.Marshal(&struct {
-		Authorization string        `json:"authorization"`
-		AuthCodeHost  uint32        `json:"auth_code_host"`
-		Authorizer    Authorizer    `json:"authorizer"`
-		RefineContext RefineContext `json:"context"`
-		WorkItems     []WorkItem    `json:"items"`
+		AuthCodeHost          uint32        `json:"auth_code_host"`
+		AuthorizationCodeHash common.Hash   `json:"auth_code_hash"`
+		RefineContext         RefineContext `json:"context"`
+		Authorization         string        `json:"authorization"`
+		ConfigurationBlob     string        `json:"authorizer_config"`
+		WorkItems             []WorkItem    `json:"items"`
 	}{
-		Authorization: authorization,
-		AuthCodeHost:  a.AuthCodeHost,
-		Authorizer: Authorizer{
-			CodeHash: a.AuthorizationCodeHash,
-			Params:   a.ParameterizationBlob,
-		},
-		RefineContext: a.RefineContext,
-		WorkItems:     a.WorkItems,
+		AuthCodeHost:          a.AuthCodeHost,
+		AuthorizationCodeHash: a.AuthorizationCodeHash,
+		RefineContext:         a.RefineContext,
+		Authorization:         common.HexString(a.AuthorizationToken),
+		ConfigurationBlob:     common.HexString(a.ConfigurationBlob),
+		WorkItems:             a.WorkItems,
 	})
 }

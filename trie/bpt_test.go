@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
+	"path"
 	"testing"
 	"time"
 
@@ -92,7 +93,7 @@ func TestTrace(t *testing.T) {
 func TestMerkleTree(t *testing.T) {
 	t.Skip("Skip Merkele Tree Until we have 31bytes k,v version")
 	// Read the JSON file
-	filePath := "../jamtestvectors/trie/trie.json"
+	filePath := path.Join(common.GetJAMTestVectorPath("stf"), "trie/trie.json")
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatalf("Failed to read JSON file: %v", err)
@@ -399,7 +400,7 @@ func TestModifyGenesis(t *testing.T) {
 
 func TestModify(t *testing.T) {
 	return
-	filePath := "../jamtestvectors/trie/trie.json"
+	filePath := path.Join(common.GetJAMTestVectorPath("stf"), "trie/trie.json")
 	data, err := ioutil.ReadFile(filePath)
 	if err != nil {
 		t.Fatalf("Failed to read JSON file: %v", err)
@@ -481,7 +482,7 @@ func truncateValue(value []byte) string {
 
 // TestDelete tests the deletion of key-value pairs from the Merkle tree
 func TestDelete(t *testing.T) {
-	filePath := "../jamtestvectors/trie/trie.json"
+	filePath := path.Join(common.GetJAMTestVectorPath("stf"), "trie/trie.json")
 	testData, err := ioutil.ReadFile(filePath)
 	if err != nil {
 		t.Fatalf("Failed to read JSON file: %v", err)

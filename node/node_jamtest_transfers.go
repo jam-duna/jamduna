@@ -55,10 +55,10 @@ func transfer(n1 JNode, testServices map[string]*types.TestService, transferNum 
 			payload = append(reciver, amount...)
 
 			workPackage = types.WorkPackage{
-				Authorization:         []byte("0x"),
+				AuthorizationToken:    []byte("0x"),
 				AuthCodeHost:          0,
 				AuthorizationCodeHash: bootstrap_auth_codehash,
-				ParameterizationBlob:  []byte{},
+				ConfigurationBlob:     []byte{},
 				WorkItems: []types.WorkItem{
 					{
 						Service:            service0.ServiceCode,
@@ -81,10 +81,10 @@ func transfer(n1 JNode, testServices map[string]*types.TestService, transferNum 
 			payload = append(reciver, amount...)
 
 			workPackage = types.WorkPackage{
-				Authorization:         []byte("0x"),
+				AuthorizationToken:    []byte("0x"),
 				AuthCodeHost:          0,
 				AuthorizationCodeHash: bootstrap_auth_codehash,
-				ParameterizationBlob:  []byte{},
+				ConfigurationBlob:     []byte{},
 				WorkItems: []types.WorkItem{
 					{
 						Service:            service1.ServiceCode,
@@ -209,10 +209,10 @@ func scaled_transfer(n1 JNode, testServices map[string]*types.TestService, trans
 				Transfer_WorkItems = append(Transfer_WorkItems, auth_copy_item)
 			}
 			workPackage = types.WorkPackage{
-				Authorization:         []byte("0x"),
+				AuthorizationToken:    []byte("0x"),
 				AuthCodeHost:          0,
 				AuthorizationCodeHash: bootstrap_auth_codehash,
-				ParameterizationBlob:  []byte{},
+				ConfigurationBlob:     []byte{},
 				WorkItems:             Transfer_WorkItems,
 			}
 		} else {
@@ -236,16 +236,16 @@ func scaled_transfer(n1 JNode, testServices map[string]*types.TestService, trans
 				Transfer_WorkItems = append(Transfer_WorkItems, auth_copy_item)
 			}
 			workPackage = types.WorkPackage{
-				Authorization:         []byte("0x"),
+				AuthorizationToken:    []byte("0x"),
 				AuthCodeHost:          0,
 				AuthorizationCodeHash: bootstrap_auth_codehash,
-				ParameterizationBlob:  []byte{},
+				ConfigurationBlob:     []byte{},
 				WorkItems:             Transfer_WorkItems,
 			}
 		}
 		Transfer_WorkPackages = append(Transfer_WorkPackages, workPackage)
 		fmt.Printf("** \033[36mTRANSFER WorkPackage #%d\033[0m: %v **\n", n, workPackage.Hash())
-		totalWPSizeInMB := calaulateTotalWPSize(workPackage, types.ExtrinsicsBlobs{})
+		totalWPSizeInMB := calculateTotalWPSize(workPackage, types.ExtrinsicsBlobs{})
 		fmt.Printf("Total Work Package Size: %v MB\n", totalWPSizeInMB)
 	}
 
@@ -560,10 +560,10 @@ func balances(n1 JNode, testServices map[string]*types.TestService) {
 	binary.LittleEndian.PutUint64(payload_bytes, 0) // extrinsic index
 
 	create_asset_workPackage = types.WorkPackage{
-		Authorization:         []byte("0x"),
+		AuthorizationToken:    []byte("0x"),
 		AuthCodeHost:          0,
 		AuthorizationCodeHash: bootstrap_auth_codehash,
-		ParameterizationBlob:  []byte{},
+		ConfigurationBlob:     []byte{},
 		WorkItems: []types.WorkItem{
 			{
 				Service:            balancesServiceIndex,
@@ -627,10 +627,10 @@ func balances(n1 JNode, testServices map[string]*types.TestService) {
 		binary.LittleEndian.PutUint64(payload_bytes, 0) // extrinsic index
 
 		mint_workPackage := types.WorkPackage{
-			Authorization:         []byte("0x"),
+			AuthorizationToken:    []byte("0x"),
 			AuthCodeHost:          0,
 			AuthorizationCodeHash: bootstrap_auth_codehash,
-			ParameterizationBlob:  []byte{},
+			ConfigurationBlob:     []byte{},
 			WorkItems: []types.WorkItem{
 				{
 					Service:            balancesServiceIndex,
@@ -692,10 +692,10 @@ func balances(n1 JNode, testServices map[string]*types.TestService) {
 	binary.LittleEndian.PutUint64(payload_bytes, 0) // extrinsic index
 
 	mint_workPackage := types.WorkPackage{
-		Authorization:         []byte("0x"),
+		AuthorizationToken:    []byte("0x"),
 		AuthCodeHost:          0,
 		AuthorizationCodeHash: bootstrap_auth_codehash,
-		ParameterizationBlob:  []byte{},
+		ConfigurationBlob:     []byte{},
 		WorkItems: []types.WorkItem{
 			{
 				Service:            balancesServiceIndex,
@@ -753,10 +753,10 @@ func balances(n1 JNode, testServices map[string]*types.TestService) {
 	binary.LittleEndian.PutUint64(payload_bytes, 0) // extrinsic index
 
 	bond_workPackage := types.WorkPackage{
-		Authorization:         []byte("0x"),
+		AuthorizationToken:    []byte("0x"),
 		AuthCodeHost:          balancesServiceIndex,
 		AuthorizationCodeHash: bootstrap_auth_codehash,
-		ParameterizationBlob:  []byte{},
+		ConfigurationBlob:     []byte{},
 		WorkItems: []types.WorkItem{
 			{
 				Service:            balancesServiceIndex,
@@ -809,10 +809,10 @@ func balances(n1 JNode, testServices map[string]*types.TestService) {
 	binary.LittleEndian.PutUint64(payload_bytes, 0) // extrinsic index
 
 	unbond_workPackage := types.WorkPackage{
-		Authorization:         []byte("0x"),
+		AuthorizationToken:    []byte("0x"),
 		AuthCodeHost:          0,
 		AuthorizationCodeHash: bootstrap_auth_codehash,
-		ParameterizationBlob:  []byte{},
+		ConfigurationBlob:     []byte{},
 		WorkItems: []types.WorkItem{
 			{
 				Service:            balancesServiceIndex,
@@ -870,10 +870,10 @@ func balances(n1 JNode, testServices map[string]*types.TestService) {
 	binary.LittleEndian.PutUint64(payload_bytes, 0) // extrinsic index
 
 	transfer_workPackage := types.WorkPackage{
-		Authorization:         []byte("0x"),
+		AuthorizationToken:    []byte("0x"),
 		AuthCodeHost:          0,
 		AuthorizationCodeHash: bootstrap_auth_codehash,
-		ParameterizationBlob:  []byte{},
+		ConfigurationBlob:     []byte{},
 		WorkItems: []types.WorkItem{
 			{
 				Service:            balancesServiceIndex,
@@ -968,10 +968,10 @@ func scaled_balances(n1 JNode, testServices map[string]*types.TestService, targe
 	binary.LittleEndian.PutUint64(payload_bytes, 0) // extrinsic index
 
 	create_asset_workPackage = types.WorkPackage{
-		Authorization:         []byte("0x"),
+		AuthorizationToken:    []byte("0x"),
 		AuthCodeHost:          0,
 		AuthorizationCodeHash: bootstrap_auth_codehash,
-		ParameterizationBlob:  []byte{},
+		ConfigurationBlob:     []byte{},
 		WorkItems: []types.WorkItem{
 			{
 				Service:            balancesServiceIndex,
@@ -987,7 +987,7 @@ func scaled_balances(n1 JNode, testServices map[string]*types.TestService, targe
 		},
 	}
 
-	totalWPSizeInMB = calaulateTotalWPSize(create_asset_workPackage, extrinsicsBytes)
+	totalWPSizeInMB = calculateTotalWPSize(create_asset_workPackage, extrinsicsBytes)
 	fmt.Printf("\nTotal Work Package Size: %v MB\n\n", totalWPSizeInMB)
 
 	ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
@@ -1047,14 +1047,14 @@ func scaled_balances(n1 JNode, testServices map[string]*types.TestService, targe
 	}
 
 	mint_workPackage = types.WorkPackage{
-		Authorization:         []byte("0x"),
+		AuthorizationToken:    []byte("0x"),
 		AuthCodeHost:          0,
 		AuthorizationCodeHash: bootstrap_auth_codehash,
-		ParameterizationBlob:  []byte{},
+		ConfigurationBlob:     []byte{},
 		WorkItems:             mint_workItems,
 	}
 
-	totalWPSizeInMB = calaulateTotalWPSize(mint_workPackage, extrinsicsBytes)
+	totalWPSizeInMB = calculateTotalWPSize(mint_workPackage, extrinsicsBytes)
 	fmt.Printf("\nTotal Work Package Size: %v MB\n\n", totalWPSizeInMB)
 
 	ctx, cancel = context.WithTimeout(context.Background(), RefineTimeout)
@@ -1126,14 +1126,14 @@ func scaled_balances(n1 JNode, testServices map[string]*types.TestService, targe
 	}
 
 	transfer_workPackage = types.WorkPackage{
-		Authorization:         []byte("0x"),
+		AuthorizationToken:    []byte("0x"),
 		AuthCodeHost:          0,
 		AuthorizationCodeHash: bootstrap_auth_codehash,
-		ParameterizationBlob:  []byte{},
+		ConfigurationBlob:     []byte{},
 		WorkItems:             transfer_workItems,
 	}
 
-	totalWPSizeInMB = calaulateTotalWPSize(transfer_workPackage, extrinsicsBytes)
+	totalWPSizeInMB = calculateTotalWPSize(transfer_workPackage, extrinsicsBytes)
 	fmt.Printf("\nTotal Work Package Size: %v MB\n\n", totalWPSizeInMB)
 
 	ctx, cancel = context.WithTimeout(context.Background(), RefineTimeout)
@@ -1170,7 +1170,7 @@ func generateVBytes(n uint64) [32]byte {
 	return arr
 }
 
-func calaulateTotalWPSize(create_asset_workPackage types.WorkPackage, extrinsicsBytes types.ExtrinsicsBlobs) float64 {
+func calculateTotalWPSize(create_asset_workPackage types.WorkPackage, extrinsicsBytes types.ExtrinsicsBlobs) float64 {
 	WPsizeInBytes := len(create_asset_workPackage.Bytes())
 	WPsizeInMB := float64(WPsizeInBytes) / 1024 / 1024
 
@@ -1241,7 +1241,7 @@ func blake2b(n1 JNode, testServices map[string]*types.TestService) {
 	payload = append(payload, input...)
 
 	workPackage := types.WorkPackage{
-		Authorization:         []byte("0x"), // TODO: set up null-authorizer
+		AuthorizationToken:    []byte("0x"), // TODO: set up null-authorizer
 		AuthCodeHost:          0,
 		AuthorizationCodeHash: bootstrap_auth_codehash,
 

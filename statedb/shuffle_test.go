@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
+	"path"
 	"testing"
+
+	"github.com/colorfulnotion/jam/common"
 )
 
 type ShuffleTestCase struct {
@@ -19,7 +21,7 @@ type ShuffleTestCase struct {
 // shuffle_test reads a JSON file of test cases and performs the tests.
 func TestShuffle(t *testing.T) {
 	// Read the input file
-	fn := filepath.Join("../jamtestvectors/shuffle/shuffle_tests.json")
+	fn := path.Join(common.GetJAMTestVectorPath("stf"), "shuffle/shuffle_tests.json")
 	file, err := os.Open(fn)
 	if err != nil {
 		t.Fatalf("Failed to open testcases file: %v", err)

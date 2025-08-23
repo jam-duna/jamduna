@@ -576,7 +576,7 @@ func testRefineStateTransition(pvmBackend string, store *storage.StateDBStorage,
 	algo_res := re_workReport.Results[1]
 	algo_res_errCode := algo_res.Result.Err
 	algo_res_status = types.ResultCode(algo_res_errCode)
-	if algo_res_errCode != types.WORKRESULT_OK {
+	if algo_res_errCode != types.WORKDIGEST_OK {
 		algo_res_err = fmt.Errorf(types.ResultCode(algo_res_errCode))
 	} else {
 		algo_res_status = "OK"

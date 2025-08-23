@@ -1,5 +1,0 @@
-r7 = 0x2
-r7 = r7 + 0x1
-jump [r7 + 0]
-trap
-r8 = 0xdeadbeef

@@ -90,7 +90,7 @@ func (mh *MockHostEnv) ReadServicePreimageLookup(s uint32, blob_hash common.Hash
 
 func (mh *MockHostEnv) HistoricalLookup(a *types.ServiceAccount, t uint32, blob_hash common.Hash) []byte {
 	blob := a.Preimage[blob_hash.Hex()].Preimage
-	timeslots := a.Lookup[blob_hash.Hex()].T
+	timeslots := a.Lookup[blob_hash.Hex()].Timeslots
 	if len(timeslots) == 0 {
 		return nil
 	} else if len(timeslots) == 1 {

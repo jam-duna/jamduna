@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"slices"
 	"strings"
 	"syscall"
@@ -279,12 +280,12 @@ var testcases = map[string]string{
 // 	"by_zero", "overflow", "trap", "nok", "inaccessible", "read_only",
 // }
 
-func TestRecompilerNoSandbox(t *testing.T) {
+func TestRecompilerFull(t *testing.T) {
 	PvmLogging = true
 	PvmTrace = true
 
 	// Directory containing the JSON files
-	dir := "../jamtestvectors/pvm/programs"
+	dir := path.Join(common.GetJAMTestVectorPath("stf"), "pvm/programs")
 
 	// Read all files in the directory
 	files, err := os.ReadDir(dir)
@@ -480,13 +481,13 @@ func recompiler_test(tc TestCase) error {
 	return fmt.Errorf("register mismatch for test %s: expected %v, got %v", tc.Name, tc.ExpectedRegs, pvm.Ram.ReadRegisters())
 }
 
-func TestSingleNoSandbox(t *testing.T) {
+func TestSingleInterpreter(t *testing.T) {
 
 	PvmLogging = true
 	PvmTrace = true
 
 	name := "inst_add_32"
-	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
+	filePath := path.Join(common.GetJAMTestVectorPath("stf"), fmt.Sprintf("pvm/programs/%s.json", name))
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatalf("Failed to read file %s: %v", filePath, err)
@@ -512,7 +513,7 @@ func TestHostFuncExposeRecompiler(t *testing.T) {
 	PvmLogging = true
 	PvmTrace = true
 	name := "inst_store_indirect_u16_with_offset_ok"
-	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
+	filePath := path.Join(common.GetJAMTestVectorPath("stf"), "pvm/programs", name+".json")
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatalf("Failed to read file %s: %v", filePath, err)
@@ -570,7 +571,7 @@ func TestSBRK(t *testing.T) {
 	PvmLogging = true
 	PvmTrace = true
 	name := "inst_store_indirect_u16_with_offset_ok"
-	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
+	filePath := path.Join(common.GetJAMTestVectorPath("stf"), "pvm/programs", name+".json")
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatalf("Failed to read file %s: %v", filePath, err)
@@ -763,7 +764,7 @@ func TestSingleSandbox(t *testing.T) {
 	showDisassembly = false
 
 	name := "inst_store_imm_indirect_u16_with_offset_ok"
-	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
+	filePath := path.Join(common.GetJAMTestVectorPath("stf"), "pvm/programs", name+".json")
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatalf("Failed to read file %s: %v", filePath, err)
@@ -826,7 +827,7 @@ func testRecompilerFamily(t *testing.T, familyName string) {
 	fmt.Printf("\nFound %d total test cases to run for family %s\n", len(testsToRun), familyName)
 
 	// --- Standard Test Execution Logic ---
-	dir := "../jamtestvectors/pvm/programs" // Adjust this path if necessary
+	dir := path.Join(common.GetJAMTestVectorPath("stf"), "pvm/programs") // Adjust this path if necessary
 
 	for _, testInfo := range testsToRun {
 		opcodeName := testInfo[0]
@@ -870,7 +871,7 @@ func TestRecompilerSandBox(t *testing.T) {
 	PvmLogging = true
 	PvmTrace = true
 	// Directory containing the JSON files
-	dir := "../jamtestvectors/pvm/programs"
+	dir := path.Join(common.GetJAMTestVectorPath("stf"), "pvm/programs")
 
 	// Read all files in the directory
 	files, err := os.ReadDir(dir)
@@ -976,7 +977,7 @@ func TestHostFuncExposeSandBox(t *testing.T) {
 	PvmLogging = true
 	PvmTrace = true
 	name := "inst_store_indirect_u16_with_offset_ok"
-	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
+	filePath := path.Join(common.GetJAMTestVectorPath("stf"), "pvm/programs", name+".json")
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatalf("Failed to read file %s: %v", filePath, err)
@@ -1028,7 +1029,7 @@ func TestSBRKSandBox(t *testing.T) {
 	PvmLogging = true
 	PvmTrace = true
 	name := "inst_store_indirect_u16_with_offset_ok"
-	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
+	filePath := path.Join(common.GetJAMTestVectorPath("stf"), "pvm/programs", name+".json")
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatalf("Failed to read file %s: %v", filePath, err)

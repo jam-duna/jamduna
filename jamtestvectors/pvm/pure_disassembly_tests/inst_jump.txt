@@ -1,4 +1,0 @@
-r7 = 0x4d2
-jump 7
-trap
-r7 = 0xdeadbeef

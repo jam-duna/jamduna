@@ -76,11 +76,11 @@ func (s *StateDB) getWRStatus() (hasRecentWR, hasStaleWR []bool) {
 	ts := s.JamState.SafroleState.Timeslot
 	hasRecentWR = make([]bool, types.TotalCores)
 	hasStaleWR = make([]bool, types.TotalCores)
-	for core, rho := range s.JamState.AvailabilityAssignments {
-		if rho != nil {
+	for core, availability_assignment := range s.JamState.AvailabilityAssignments {
+		if availability_assignment != nil {
 			hasRecentWR[core] = true
-			// (11.17) A work-report is considered stale if its timeslot `rho_t` is greater than or equal timeslot `t` by at least `UWRP` period
-			if ts >= rho.Timeslot+uint32(types.UnavailableWorkReplacementPeriod) {
+			// (11.17) A work-report is considered stale if its timeslot `availability_assignment_t` is greater than or equal timeslot `t` by at least `UWRP` period
+			if ts >= availability_assignment.Timeslot+uint32(types.UnavailableWorkReplacementPeriod) {
 				hasStaleWR[core] = true
 			}
 		}
@@ -171,11 +171,11 @@ func (s *StateDB) ValidateAssurances(ctx context.Context, assurances []types.Ass
 }
 
 // For generateAssurance, get the INCOMING work package hashes ... that have **not timed out**
-func (j *JamState) GetRecentWorkPackagesFromRho(timeslot uint32) (wph map[uint16]common.Hash) {
+func (j *JamState) GetRecentWorkPackagesFromAvailabilityAssignments(timeslot uint32) (wph map[uint16]common.Hash) {
 	wph = make(map[uint16]common.Hash)
-	for core, rho := range j.AvailabilityAssignments {
-		if rho != nil && (timeslot-rho.Timeslot < uint32(types.UnavailableWorkReplacementPeriod)) {
-			wph[uint16(core)] = rho.WorkReport.AvailabilitySpec.WorkPackageHash
+	for core, availability_assignment := range j.AvailabilityAssignments {
+		if availability_assignment != nil && (timeslot-availability_assignment.Timeslot < uint32(types.UnavailableWorkReplacementPeriod)) {
+			wph[uint16(core)] = availability_assignment.WorkReport.AvailabilitySpec.WorkPackageHash
 		}
 	}
 	return wph

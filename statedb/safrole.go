@@ -71,10 +71,10 @@ func (s *SafroleState) GetNextRingCommitment() ([]byte, error) {
 func (s *SafroleState) GetSafroleBasicState() SafroleBasicState {
 	nextRingCommitment, _ := s.GetNextRingCommitment()
 	return SafroleBasicState{
-		GammaK: []types.Validator(s.NextValidators),
-		GammaA: s.NextEpochTicketsAccumulator,
-		GammaS: s.TicketsOrKeys,
-		GammaZ: nextRingCommitment,
+		NextValidators:    []types.Validator(s.NextValidators),
+		TicketAccumulator: s.NextEpochTicketsAccumulator,
+		SlotSealerSeries:  s.TicketsOrKeys,
+		RingCommitment:    nextRingCommitment,
 	}
 }
 
@@ -117,10 +117,10 @@ type SafroleState struct {
 	Entropy Entropy `json:"entropy"`
 
 	// 4 authorities[pre, curr, next, designed]
-	PrevValidators     types.Validators `json:"prev_validators"`
-	CurrValidators     types.Validators `json:"curr_validators"`
-	NextValidators     types.Validators `json:"next_validators"`
-	DesignedValidators types.Validators `json:"designed_validators"`
+	PrevValidators       types.Validators `json:"prev_validators"`
+	CurrValidators       types.Validators `json:"curr_validators"`
+	NextValidators       types.Validators `json:"next_validators"`
+	DesignatedValidators types.Validators `json:"designed_validators"`
 
 	// Accumulator of tickets, modified with Extrinsics to hold ORDERED array of Tickets
 	NextEpochTicketsAccumulator []types.TicketBody `json:"next_tickets_accumulator"` //gamma_a
@@ -132,15 +132,15 @@ type SafroleState struct {
 
 func NewSafroleState() *SafroleState {
 	return &SafroleState{
-		Id:                 9999,
-		Timeslot:           0, // MK check! was common.ComputeTimeUnit(types.TimeUnitMode)
-		Entropy:            Entropy{},
-		PrevValidators:     []types.Validator{},
-		CurrValidators:     []types.Validator{},
-		NextValidators:     []types.Validator{},
-		DesignedValidators: []types.Validator{},
-		TicketsOrKeys:      TicketsOrKeys{},
-		TicketsVerifierKey: []byte{},
+		Id:                   9999,
+		Timeslot:             0, // MK check! was common.ComputeTimeUnit(types.TimeUnitMode)
+		Entropy:              Entropy{},
+		PrevValidators:       []types.Validator{},
+		CurrValidators:       []types.Validator{},
+		NextValidators:       []types.Validator{},
+		DesignatedValidators: []types.Validator{},
+		TicketsOrKeys:        TicketsOrKeys{},
+		TicketsVerifierKey:   []byte{},
 	}
 }
 
@@ -361,7 +361,7 @@ func (s *SafroleState) GetEpochValidatorAndRandomness(phase string) ([]types.Val
 	case "Next": //N+1
 		validatorSet = s.NextValidators
 	case "Designed": //N+2
-		validatorSet = s.DesignedValidators
+		validatorSet = s.DesignatedValidators
 	}
 	return validatorSet, target_randomness
 }
@@ -377,7 +377,7 @@ func (s *SafroleState) GetValidatorData(phase string) (validatorsData []byte) {
 	case "Next": //N+1
 		validatorSet = s.NextValidators
 	case "Designed": //N+2
-		validatorSet = s.DesignedValidators
+		validatorSet = s.DesignatedValidators
 	}
 	for _, v := range validatorSet {
 		validatorsData = append(validatorsData, v.Bytes()...)
@@ -435,7 +435,7 @@ func (s *SafroleState) SetValidatorData(validatorsData []byte, phase string) err
 	case "Next": // N+1
 		s.NextValidators = validatorSet
 	case "Designed": // N+2
-		s.DesignedValidators = validatorSet
+		s.DesignatedValidators = validatorSet
 	default:
 		return fmt.Errorf("unknown phase: %s", phase)
 	}
@@ -453,7 +453,7 @@ func (s *SafroleState) GetRingSet(phase string) (ringsetBytes []byte, ringSize i
 	case "Next": //N+1
 		validatorSet = s.NextValidators
 	case "Designed": //N+2
-		validatorSet = s.DesignedValidators
+		validatorSet = s.DesignatedValidators
 	}
 	ringSize = len(validatorSet)
 	pubkeys := []bandersnatch.BanderSnatchKey{}
@@ -650,9 +650,9 @@ func (s *SafroleState) GetAuthorIndex(authorkey common.Hash, phase string) (uint
 		}
 		validatorSet = s.NextValidators
 	case "Designed": // N+2
-		validatorSet = s.DesignedValidators
+		validatorSet = s.DesignatedValidators
 		if len(validatorSet) == 0 {
-			return 0, errors.New("DesignedValidators is empty")
+			return 0, errors.New("DesignatedValidators is empty")
 		}
 	default:
 		return 0, errors.New("invalid phase")
@@ -820,7 +820,7 @@ func cloneSafroleState(original SafroleState) SafroleState {
 		PrevValidators:              make([]types.Validator, len(original.PrevValidators)),
 		CurrValidators:              make([]types.Validator, len(original.CurrValidators)),
 		NextValidators:              make([]types.Validator, len(original.NextValidators)),
-		DesignedValidators:          make([]types.Validator, len(original.DesignedValidators)),
+		DesignatedValidators:        make([]types.Validator, len(original.DesignatedValidators)),
 		NextEpochTicketsAccumulator: make([]types.TicketBody, len(original.NextEpochTicketsAccumulator)),
 		TicketsOrKeys:               original.TicketsOrKeys,
 		TicketsVerifierKey:          make([]byte, len(original.TicketsVerifierKey)),
@@ -831,7 +831,7 @@ func cloneSafroleState(original SafroleState) SafroleState {
 	copy(copied.PrevValidators, original.PrevValidators)
 	copy(copied.CurrValidators, original.CurrValidators)
 	copy(copied.NextValidators, original.NextValidators)
-	copy(copied.DesignedValidators, original.DesignedValidators)
+	copy(copied.DesignatedValidators, original.DesignatedValidators)
 	copy(copied.NextEpochTicketsAccumulator, original.NextEpochTicketsAccumulator)
 	copy(copied.TicketsVerifierKey, original.TicketsVerifierKey)
 
@@ -849,7 +849,7 @@ func (original *SafroleState) Copy() *SafroleState {
 		PrevValidators:              make([]types.Validator, len(original.PrevValidators)),
 		CurrValidators:              make([]types.Validator, len(original.CurrValidators)),
 		NextValidators:              make([]types.Validator, len(original.NextValidators)),
-		DesignedValidators:          make([]types.Validator, len(original.DesignedValidators)),
+		DesignatedValidators:        make([]types.Validator, len(original.DesignatedValidators)),
 		NextEpochTicketsAccumulator: make([]types.TicketBody, len(original.NextEpochTicketsAccumulator)),
 		TicketsOrKeys:               original.TicketsOrKeys, // Assuming this has value semantics
 		TicketsVerifierKey:          make([]byte, len(original.TicketsVerifierKey)),
@@ -859,7 +859,7 @@ func (original *SafroleState) Copy() *SafroleState {
 	copy(copyState.PrevValidators, original.PrevValidators)
 	copy(copyState.CurrValidators, original.CurrValidators)
 	copy(copyState.NextValidators, original.NextValidators)
-	copy(copyState.DesignedValidators, original.DesignedValidators)
+	copy(copyState.DesignatedValidators, original.DesignatedValidators)
 	copy(copyState.NextEpochTicketsAccumulator, original.NextEpochTicketsAccumulator)
 	// Copy the TicketsVerifierKey slice
 	copy(copyState.TicketsVerifierKey, original.TicketsVerifierKey)
@@ -1150,8 +1150,8 @@ func (s2 *SafroleState) AdvanceEntropyAndValidator(s *SafroleState, new_entropy_
 		log.Crit(log.SDB, "no NextValidators")
 		return
 	}
-	s2.NextValidators = s2.CleanValidators(s2.DesignedValidators)
-	if types.GetValidatorsLength(s2.DesignedValidators) == 0 {
+	s2.NextValidators = s2.CleanValidators(s2.DesignatedValidators)
+	if types.GetValidatorsLength(s2.DesignatedValidators) == 0 {
 		log.Crit(log.SDB, "no NextValidators")
 		return
 	}
@@ -1277,82 +1277,82 @@ func (E Extrinsic) MarshalJSON() ([]byte, error) {
 }
 
 type SafroleStateCodec struct {
-	Tau           uint32             `json:"tau"`
-	Eta           Entropy            `json:"eta"`
-	Lambda        types.Validators   `json:"lambda"`
-	Kappa         types.Validators   `json:"kappa"`
-	GammaK        types.Validators   `json:"gamma_k"`
-	Iota          types.Validators   `json:"iota"`
-	GammaA        []types.TicketBody `json:"gamma_a"`
-	GammaS        TicketsOrKeys      `json:"gamma_s"`
-	GammaZ        [144]byte          `json:"gamma_z"`
-	PostOffenders []types.Ed25519Key `json:"post_offenders"`
+	Timeslot             uint32             `json:"tau"`
+	Entropy              Entropy            `json:"eta"`
+	PrevValidators       types.Validators   `json:"lambda"`
+	CurrValidators       types.Validators   `json:"kappa"`
+	NextValidators       types.Validators   `json:"gamma_k"`
+	DesignatedValidators types.Validators   `json:"iota"`
+	TicketAccumulator    []types.TicketBody `json:"gamma_a"`
+	SlotSealerSeries     TicketsOrKeys      `json:"gamma_s"`
+	RingCommitment       [144]byte          `json:"gamma_z"`
+	PostOffenders        []types.Ed25519Key `json:"post_offenders"`
 }
 
 func (s *SafroleState) SafroleStateCodec() SafroleStateCodec {
 
 	return SafroleStateCodec{
-		Tau:    s.Timeslot,
-		Eta:    s.Entropy,
-		Lambda: s.PrevValidators,
-		Kappa:  s.CurrValidators,
-		GammaK: s.NextValidators,
-		Iota:   s.DesignedValidators,
-		GammaA: s.NextEpochTicketsAccumulator,
-		GammaS: s.TicketsOrKeys,
-		GammaZ: [144]byte(s.TicketsVerifierKey),
+		Timeslot:             s.Timeslot,
+		Entropy:              s.Entropy,
+		PrevValidators:       s.PrevValidators,
+		CurrValidators:       s.CurrValidators,
+		NextValidators:       s.NextValidators,
+		DesignatedValidators: s.DesignatedValidators,
+		TicketAccumulator:    s.NextEpochTicketsAccumulator,
+		SlotSealerSeries:     s.TicketsOrKeys,
+		RingCommitment:       [144]byte(s.TicketsVerifierKey),
 	}
 }
 
 func (a *SafroleStateCodec) UnmarshalJSON(data []byte) error {
 	var s struct {
-		Tau    uint32             `json:"tau"`
-		Eta    Entropy            `json:"eta"`
-		Lambda types.Validators   `json:"lambda"`
-		Kappa  types.Validators   `json:"kappa"`
-		GammaK types.Validators   `json:"gamma_k"`
-		Iota   types.Validators   `json:"iota"`
-		GammaA []types.TicketBody `json:"gamma_a"`
-		GammaS TicketsOrKeys      `json:"gamma_s"`
-		GammaZ string             `json:"gamma_z"`
+		Timeslot             uint32             `json:"tau"`
+		Entropy              Entropy            `json:"eta"`
+		PrevValidators       types.Validators   `json:"lambda"`
+		CurrValidators       types.Validators   `json:"kappa"`
+		NextValidators       types.Validators   `json:"gamma_k"`
+		DesignatedValidators types.Validators   `json:"iota"`
+		TicketAccumulator    []types.TicketBody `json:"gamma_a"`
+		SlotSealerSeries     TicketsOrKeys      `json:"gamma_s"`
+		RingCommitment       string             `json:"gamma_z"`
 	}
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
 	}
-	a.Tau = s.Tau
-	a.Eta = s.Eta
-	a.Lambda = s.Lambda
-	a.Kappa = s.Kappa
-	a.GammaK = s.GammaK
-	a.Iota = s.Iota
-	a.GammaA = s.GammaA
-	a.GammaS = s.GammaS
-	copy(a.GammaZ[:], common.FromHex(s.GammaZ))
+	a.Timeslot = s.Timeslot
+	a.Entropy = s.Entropy
+	a.PrevValidators = s.PrevValidators
+	a.CurrValidators = s.CurrValidators
+	a.NextValidators = s.NextValidators
+	a.DesignatedValidators = s.DesignatedValidators
+	a.TicketAccumulator = s.TicketAccumulator
+	a.SlotSealerSeries = s.SlotSealerSeries
+	copy(a.RingCommitment[:], common.FromHex(s.RingCommitment))
 
 	return nil
 }
 
 func (a *SafroleStateCodec) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
-		Tau    uint32             `json:"tau"`
-		Eta    Entropy            `json:"eta"`
-		Lambda types.Validators   `json:"lambda"`
-		Kappa  types.Validators   `json:"kappa"`
-		GammaK types.Validators   `json:"gamma_k"`
-		Iota   types.Validators   `json:"iota"`
-		GammaA []types.TicketBody `json:"gamma_a"`
-		GammaS TicketsOrKeys      `json:"gamma_s"`
-		GammaZ string             `json:"gamma_z"`
+		Timeslot             uint32             `json:"tau"`
+		Entropy              Entropy            `json:"eta"`
+		PrevValidators       types.Validators   `json:"lambda"`
+		CurrValidators       types.Validators   `json:"kappa"`
+		NextValidators       types.Validators   `json:"gamma_k"`
+		DesignatedValidators types.Validators   `json:"iota"`
+		TicketAccumulator    []types.TicketBody `json:"gamma_a"`
+		SlotSealerSeries     TicketsOrKeys      `json:"gamma_s"`
+		RingCommitment       string             `json:"gamma_z"`
 	}{
-		Tau:    a.Tau,
-		Eta:    a.Eta,
-		Lambda: a.Lambda,
-		Kappa:  a.Kappa,
-		GammaK: a.GammaK,
-		Iota:   a.Iota,
-		GammaA: a.GammaA,
-		GammaS: a.GammaS,
-		GammaZ: common.HexString(a.GammaZ[:]),
+		Timeslot:             a.Timeslot,
+		Entropy:              a.Entropy,
+		PrevValidators:       a.PrevValidators,
+		CurrValidators:       a.CurrValidators,
+		NextValidators:       a.NextValidators,
+		DesignatedValidators: a.DesignatedValidators,
+		TicketAccumulator:    a.TicketAccumulator,
+		SlotSealerSeries:     a.SlotSealerSeries,
+		RingCommitment:       common.HexString(a.RingCommitment[:]),
 	})
 }
 func SortTicketsById(tickets []types.Ticket) {
@@ -1400,8 +1400,8 @@ func VerifySafroleSTF(old_sf_origin *SafroleState, new_sf_origin *SafroleState, 
 			return fmt.Errorf("CurrValidators mismatch")
 		case !reflect.DeepEqual(new_sf.PrevValidators, old_sf.PrevValidators):
 			return fmt.Errorf("PrevValidators mismatch")
-		case !reflect.DeepEqual(new_sf.DesignedValidators, old_sf.DesignedValidators):
-			return fmt.Errorf("DesignedValidators mismatch")
+		case !reflect.DeepEqual(new_sf.DesignatedValidators, old_sf.DesignatedValidators):
+			return fmt.Errorf("DesignatedValidators mismatch")
 		case !reflect.DeepEqual(new_sf.NextValidators, old_sf.NextValidators):
 			return fmt.Errorf("NextValidators mismatch")
 		}
@@ -1428,7 +1428,7 @@ func VerifySafroleSTF(old_sf_origin *SafroleState, new_sf_origin *SafroleState, 
 			return fmt.Errorf("PrevValidators mismatch")
 		case !reflect.DeepEqual(new_sf.CurrValidators, old_sf.NextValidators):
 			return fmt.Errorf("CurrValidators mismatch")
-		case !reflect.DeepEqual(new_sf.NextValidators, old_sf.DesignedValidators):
+		case !reflect.DeepEqual(new_sf.NextValidators, old_sf.DesignatedValidators):
 			return fmt.Errorf("NextValidators mismatch")
 		}
 		// entropy

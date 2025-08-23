@@ -8,29 +8,30 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
+	"path"
 	"reflect"
 	"testing"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
 type DJamState struct {
-	Psi    Psi_state               `json:"psi"`
-	Rho    AvailabilityAssignments `json:"rho"`
-	Tau    uint32                  `json:"tau"`
-	Kappa  types.Validators        `json:"kappa"`
-	Lambda types.Validators        `json:"lambda"`
+	DisputesState           DisputeState            `json:"psi"`
+	AvailabilityAssignments AvailabilityAssignments `json:"availability_assignment"`
+	Timeslot                uint32                  `json:"tau"`
+	CurrValidators          types.Validators        `json:"kappa"`
+	PrevValidators          types.Validators        `json:"lambda"`
 }
 
 func (j *JamState) GetStateFromDJamState(dJamState DJamState) {
-	j.DisputesState = dJamState.Psi
-	j.AvailabilityAssignments = dJamState.Rho
-	j.SafroleState.Timeslot = dJamState.Tau
-	j.SafroleState.CurrValidators = dJamState.Kappa
-	j.SafroleState.PrevValidators = dJamState.Lambda
+	j.DisputesState = dJamState.DisputesState
+	j.AvailabilityAssignments = dJamState.AvailabilityAssignments
+	j.SafroleState.Timeslot = dJamState.Timeslot
+	j.SafroleState.CurrValidators = dJamState.CurrValidators
+	j.SafroleState.PrevValidators = dJamState.PrevValidators
 }
 
 type DInput struct {
@@ -66,7 +67,7 @@ progress_with_verdict_signatures_from_previous_set-2 🔴	disputes	ErrDAgeTooOld
 */
 
 func TestDisputesJsonParse(t *testing.T) {
-	json_file := "../jamtestvectors/disputes/tiny/progress_with_culprits-6.json"
+	json_file := path.Join(common.GetJAMTestVectorPath("stf"), "disputes/tiny/progress_with_culprits-6.json")
 	jsonData, err := os.ReadFile(json_file)
 	if err != nil {
 		t.Fatalf("failed to read JSON file: %v", err)
@@ -86,7 +87,7 @@ func TestDisputesJsonParse(t *testing.T) {
 }
 
 func VerifyDisputes(jsonFile string, exceptErr error) error {
-	jsonPath := filepath.Join("../jamtestvectors/disputes/", jsonFile)
+	jsonPath := path.Join(common.GetJAMTestVectorPath("stf"), "disputes", jsonFile)
 	jsonData, err := os.ReadFile(jsonPath)
 	if err != nil {
 		return fmt.Errorf("failed to read JSON file: %v", err)
@@ -196,7 +197,7 @@ var network = flag.String("network", "", "using for change the network-spec")
 
 func TestVerifyDisputes(t *testing.T) {
 	network_args := *network
-	fmt.Printf("Test Case For Disputes, Network: %s\n", network_args)
+	t.Logf("Test Case For Disputes, Network: %s\n", network_args)
 	testCases := []struct {
 		jsonFile    string
 		expectedErr error
@@ -234,7 +235,7 @@ func TestVerifyDisputes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed in File %s\nexcept error %v\nfailed to verify disputes: %v", tc.jsonFile, tc.expectedErr, err)
 			} else {
-				fmt.Printf("\033[32mDisputs Passed: %s\033[0m\n", tc.jsonFile)
+				fmt.Printf("\033[32mDisputes Passed: %s\033[0m\n", tc.jsonFile)
 			}
 		})
 	}
@@ -273,8 +274,7 @@ func TestDisputeState(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.jsonFile, func(t *testing.T) {
-			jsonPath := filepath.Join("../jamtestvectors/disputes/tiny", tc.jsonFile)
-			// binPath := filepath.Join("../jamtestvectors/history/data", tc.binFile)
+			jsonPath := path.Join(common.GetJAMTestVectorPath("stf"), "disputes/tiny", tc.jsonFile)
 
 			targetedStructType := reflect.TypeOf(tc.expectedType)
 

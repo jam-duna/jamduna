@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"testing"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -19,7 +21,7 @@ func TestSnapShot(t *testing.T) {
 	debugRecompiler = true
 	VMsCompare = true
 	name := "inst_add_32"
-	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
+	filePath := path.Join(common.GetJAMTestVectorPath("stf"), "pvm/programs/"+name+".json")
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatalf("Failed to read file %s: %v", filePath, err)
@@ -89,7 +91,7 @@ func TestSnapShot(t *testing.T) {
 
 }
 
-func TestDoomNoSandbox(t *testing.T) {
+func TestDoomInterpreter(t *testing.T) {
 	useRawRam = true // use raw RAM for this test
 	log.InitLogger("debug")
 	log.EnableModule(log.PvmAuthoring)

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -37,15 +38,15 @@ type AccumulateState struct {
 	Entropy             common.Hash                                  `json:"entropy"`
 	AccumulationQueue   [types.EpochLength][]types.AccumulationQueue `json:"ready_queue"` // theta - The accumulation queue  θ eq 164
 	AccumulationHistory [types.EpochLength][]common.Hash             `json:"accumulated"` // xi - The accumulation history  ξ eq 162
-	Privileges          tmpKaiState                                  `json:"privileges"`  // kai - The privileges
+	Privileges          tmpPrivilegedServiceState                    `json:"privileges"`  // kai - The privileges
 	Accounts            []TmpAccount                                 `json:"accounts"`    // a - The accounts
 }
 
-type tmpKaiState struct {
-	Kai_m uint32             `json:"bless"`      // The index of the bless service
-	Kai_v []uint32           `json:"assign"`     // The index of the assign service
-	Kai_a uint32             `json:"designate"`  // The index of the designate service
-	Kai_g types.AlwaysAccMap `json:"always_acc"` // g is a small dictionary containing the indices of services which automatically accumulate in each block together with a basic amount of gas with which each accumulates
+type tmpPrivilegedServiceState struct {
+	ManagerServiceID            uint32             `json:"bless"`      // The index of the bless service
+	UpcomingValidatorsServiceID []uint32           `json:"assign"`     // The index of the assign service
+	AuthQueueServiceID          uint32             `json:"designate"`  // The index of the designate service
+	AlwaysAccServiceID          types.AlwaysAccMap `json:"always_acc"` // g is a small dictionary containing the indices of services which automatically accumulate in each block together with a basic amount of gas with which each accumulates
 }
 
 type always_acc struct {
@@ -133,12 +134,10 @@ func (c *Blob) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// testing .....
-
 func TestParseAccumulateVector(t *testing.T) {
 	// read the json file
 	// parse the json file
-	json_file := "../jamtestvectors/accumulate/tiny/enqueue_and_unlock_chain-1.json"
+	json_file := path.Join(common.GetJAMTestVectorPath("stf"), "accumulate/tiny/enqueue_and_unlock_chain-1.json")
 	jsonData, err := os.ReadFile(json_file)
 	if err != nil {
 		t.Fatalf("failed to read JSON file: %v", err)
@@ -160,11 +159,11 @@ func TestParseAccumulateVector(t *testing.T) {
 }
 
 func TestAccumulateSTF(t *testing.T) {
-	accumulate_vector_dir := "../jamtestvectors/accumulate"
+	accumulate_vector_dir := filepath.Join(common.GetJAMTestVectorPath("stf"), "accumulate")
 	network_args := *network
 	// get all the json files in the directory
 	json_dir := fmt.Sprintf("%s/%s", accumulate_vector_dir, network_args)
-	fmt.Printf("json_dir: %s\n", json_dir)
+
 	// look for all the json files in the directory
 	json_files, err := os.ReadDir(json_dir)
 	if err != nil {
@@ -198,7 +197,7 @@ func TestAccumulateSTF(t *testing.T) {
 }
 
 func TestSingleAccumulateSTF(t *testing.T) {
-	filepath := "../jamtestvectors/accumulate/tiny/ready_queue_editing-1.json"
+	filepath := path.Join(common.GetJAMTestVectorPath("stf"), "accumulate/tiny/ready_queue_editing-1.json")
 	jsonData, err := os.ReadFile(filepath)
 	if err != nil {
 		t.Fatalf("failed to read JSON file: %v", err)
@@ -315,12 +314,12 @@ func testAccumulateSTF(testname string, TestCase AccumulateTestCase, t *testing.
 		t.Errorf("OuterAccumulate failed: %v", err)
 	}
 	// Not sure whether transfer happens here
-	tau := s.GetTimeslot() // Not sure whether τ ′ is set up like this
+	timeslot := s.GetTimeslot() // Not sure whether τ ′ is set up like this
 	if len(T) > 0 {
-		s.ProcessDeferredTransfers(o, tau, T, pvm.BackendInterpreter)
+		s.ProcessDeferredTransfers(o, timeslot, T, pvm.BackendInterpreter)
 	}
 	// make sure all service accounts can be written
-	for _, sa := range o.D {
+	for _, sa := range o.ServiceAccounts {
 		sa.Mutable = true
 		sa.Dirty = true
 	}
@@ -410,7 +409,7 @@ func AccumulateSTF(testname string, TestCase AccumulateTestCase) error {
 	services, codes, _ := db.JamState.GetStateFromAccumulateState(TestCase.PreState)
 	for key, service := range services {
 		// write the service to the db
-		o.D[key] = service
+		o.ServiceAccounts[key] = service
 		_, err := db.writeAccount(service)
 		if err != nil {
 			return fmt.Errorf("Reports FAIL: failed to write account: %v", err)
@@ -431,12 +430,12 @@ func AccumulateSTF(testname string, TestCase AccumulateTestCase) error {
 	n, T, _, _ := s.OuterAccumulate(g, accumulate_input_wr, o, f, pvm.BackendInterpreter)
 
 	// Not sure whether transfer happens here
-	tau := s.GetTimeslot() // Not sure whether τ ′ is set up like this
+	timeslot := s.GetTimeslot() // Not sure whether τ ′ is set up like this
 	if len(T) > 0 {
-		s.ProcessDeferredTransfers(o, tau, T, pvm.BackendInterpreter)
+		s.ProcessDeferredTransfers(o, timeslot, T, pvm.BackendInterpreter)
 	}
 	// make sure all service accounts can be written
-	for _, sa := range o.D {
+	for _, sa := range o.ServiceAccounts {
 		sa.Mutable = true
 		sa.Dirty = true
 	}
@@ -455,7 +454,7 @@ func AccumulateSTF(testname string, TestCase AccumulateTestCase) error {
 	}
 	checkStorage := false
 	if checkStorage {
-		for _, service := range o.D {
+		for _, service := range o.ServiceAccounts {
 			service_idx := service.ServiceIndex
 			key := p_stroage[service_idx].KeyBytes
 			key_bytes := make([]byte, 32)

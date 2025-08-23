@@ -450,7 +450,6 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	default:
 	}
 
-	//TODO: Shawn this is potentially problematic. How can we have deterministic ValidatorIndex here???
 	signerSecret := n.GetEd25519Secret()
 	gc := workReport.Sign(signerSecret, uint16(n.GetCurrValidatorIndex()))
 	guarantee := types.Guarantee{

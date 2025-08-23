@@ -47,8 +47,8 @@ func (b *WorkPackageBundle) Validate() error {
 	}
 	// 0.6.2 14.5
 	data_lens := 0
-	data_lens += len(work_package.Authorization)
-	data_lens += len(work_package.ParameterizationBlob)
+	data_lens += len(work_package.AuthorizationToken)
+	data_lens += len(work_package.ConfigurationBlob)
 	for _, work_item := range work_package.WorkItems {
 		data_lens += work_item.GetTotalDataLength()
 	}
@@ -93,7 +93,18 @@ func (b *WorkPackageBundle) Package() WorkPackage {
 }
 
 func (b WorkPackageBundle) Encode() []byte {
-	return b.Bytes()
+	encodedBundle := b.Bytes()
+	/*
+		fmt.Printf("Encoding WorkPackageBundle: %v\nEncode:%0xx \n", b.StringL(), encodedBundle)
+
+		wb, codecLen, err := DecodeBundle(encodedBundle)
+		if err != nil {
+			fmt.Printf("Failed to decode WorkPackageBundle: %v\n", err)
+			return encodedBundle
+		}
+		fmt.Printf("Successfully decoded WorkPackageBundle(len=%d): %v\n", codecLen, wb.StringL())
+	*/
+	return encodedBundle
 }
 
 func (b WorkPackageBundle) Decode(data []byte) (interface{}, uint32) {

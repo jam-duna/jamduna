@@ -190,7 +190,7 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 	vm_auth.SetPVMContext(pvmContext)
 	r := vm_auth.ExecuteAuthorization(workPackage, 0)
 	p_u := workPackage.AuthorizationCodeHash
-	p_p := workPackage.ParameterizationBlob
+	p_p := workPackage.ConfigurationBlob
 	p_a := common.Blake2Hash(append(p_u.Bytes(), p_p...))
 
 	var segments [][]byte
@@ -228,7 +228,7 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 		for _, extrinsic := range workItem.Extrinsics {
 			z += int(extrinsic.Len)
 		}
-		result := types.WorkResult{
+		result := types.WorkDigest{
 			ServiceID:           workItem.Service,
 			CodeHash:            workItem.CodeHash,
 			PayloadHash:         common.Blake2Hash(workItem.Payload),
@@ -244,13 +244,13 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 		fmt.Printf("result: %x\n", result.Result)
 
 		o := types.AccumulateOperandElements{
-			H: common.Hash{},
-			E: common.Hash{},
-			A: p_a,
-			O: r.Ok,
-			Y: result.PayloadHash,
-			G: uint(result.Gas),
-			D: result.Result,
+			WorkPackageHash:     common.Hash{},
+			ExportedSegmentRoot: common.Hash{},
+			AuthorizerHash:      p_a,
+			Trace:               r.Ok,
+			PayloadHash:         result.PayloadHash,
+			Gas:                 uint(result.Gas),
+			Result:              result.Result,
 		}
 		fmt.Printf("o: %x res: %s\n", o, result.String())
 	}

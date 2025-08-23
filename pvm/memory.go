@@ -57,6 +57,7 @@ func NewRAM(o_size uint32, w_size uint32, z uint32, o_byte []byte, w_byte []byte
 	rw_data_address := uint32(2*Z_Z) + Z_func(o_size)
 	rw_data_address_end := rw_data_address + P_func(w_size)
 	current_heap_pointer := rw_data_address_end
+	heap_end := rw_data_address + Z_func(current_heap_pointer)
 	//fmt.Printf("w_size: %d copied to %d up to %d\n", w_size, rw_data_address, rw_data_address_end)
 
 	//fmt.Printf("current_heap_pointer: %d (dec) %x (hex)\n", current_heap_pointer, current_heap_pointer)
@@ -88,7 +89,7 @@ func NewRAM(o_size uint32, w_size uint32, z uint32, o_byte []byte, w_byte []byte
 		output_end:           output_end,
 		register:             make([]uint64, regSize),
 		stack:                make([]byte, p_s),
-		rw_data:              make([]byte, current_heap_pointer-rw_data_address),
+		rw_data:              make([]byte, heap_end-rw_data_address),
 		ro_data:              make([]byte, ro_data_address_end-ro_data_address),
 		output:               make([]byte, a_size),
 	}

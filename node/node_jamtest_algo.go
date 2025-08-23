@@ -32,9 +32,9 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 		binary.LittleEndian.PutUint32(auth_payload, uint32(auth_serviceIdx))
 		wp := types.WorkPackage{
 			AuthCodeHost:          0,
-			Authorization:         nil, // null-authorizer
+			AuthorizationToken:    nil, // null-authorizer
 			AuthorizationCodeHash: bootstrap_auth_codehash,
-			ParameterizationBlob:  nil,
+			ConfigurationBlob:     nil,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            auth_serviceIdx,

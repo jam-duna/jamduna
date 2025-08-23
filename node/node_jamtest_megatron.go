@@ -21,7 +21,7 @@ func makeWorkPackageRequest(coreIndex uint16, identifier string, prerequisites [
 		Prerequisites:   prerequisites,
 		ExtrinsicsBlobs: extrinsics,
 		WorkPackage: types.WorkPackage{
-			Authorization:         []byte("0x"), // TODO: set up null-authorizer
+			AuthorizationToken:    []byte("0x"), // TODO: set up null-authorizer
 			AuthCodeHost:          0,
 			AuthorizationCodeHash: bootstrap_auth_codehash,
 			WorkItems:             workItems,

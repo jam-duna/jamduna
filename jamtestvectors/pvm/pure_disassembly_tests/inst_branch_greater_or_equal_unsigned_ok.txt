@@ -1,5 +1,0 @@
-r7 = 0xfffffffffffffff6
-r8 = 0xa
-jump 10 if r7 >=u r8
-trap
-r7 = 0xdeadbeef

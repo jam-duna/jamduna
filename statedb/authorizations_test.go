@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"testing"
 
 	"github.com/colorfulnotion/jam/common"
@@ -83,7 +84,7 @@ func (j *JamState) JamStateToAuthState() AuthState {
 func TestAuthParsing(t *testing.T) {
 	// read the json file
 	// parse the json file
-	json_file := "../jamtestvectors/authorizations/tiny/progress_authorizations-1.json"
+	json_file := path.Join(common.GetJAMTestVectorPath("stf"), "authorizations/tiny/progress_authorizations-1.json")
 	jsonData, err := os.ReadFile(json_file)
 	if err != nil {
 		t.Fatalf("failed to read JSON file: %v", err)
@@ -102,7 +103,7 @@ func TestAuthParsing(t *testing.T) {
 	fmt.Printf("Expected: %s\n", expectedJson)
 }
 func VerifyAuths(jsonFile string, exceptErr error) error {
-	jsonPath := fmt.Sprintf("../jamtestvectors/authorizations/%s", jsonFile)
+	jsonPath := path.Join(common.GetJAMTestVectorPath("stf"), "authorizations", jsonFile)
 	jsonData, err := os.ReadFile(jsonPath)
 	if err != nil {
 		return fmt.Errorf("failed to read JSON file: %v", err)
@@ -133,15 +134,15 @@ func VerifyAuths(jsonFile string, exceptErr error) error {
 
 func TestVerifyAuths(t *testing.T) {
 	network_args := *network
-	fmt.Printf("Test case for Authorizations, Network=%s\n", network_args)
+	t.Logf("Test case for Authorizations, Network=%s\n", network_args)
 
-	tesecase := []string{
+	testcase := []string{
 		fmt.Sprintf("%s/progress_authorizations-1.json", network_args),
 		fmt.Sprintf("%s/progress_authorizations-2.json", network_args),
 		fmt.Sprintf("%s/progress_authorizations-3.json", network_args),
 	}
 
-	for _, tc := range tesecase {
+	for _, tc := range testcase {
 		tc := tc // capture range variable
 		t.Run(tc, func(t *testing.T) {
 			err := VerifyAuths(tc, nil)

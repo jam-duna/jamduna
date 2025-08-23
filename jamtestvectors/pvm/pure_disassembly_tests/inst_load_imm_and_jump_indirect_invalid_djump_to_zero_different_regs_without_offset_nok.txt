@@ -1,3 +1,0 @@
-r8 = 1234, jump [r7 + 0]
-trap
-r9 = 0xdeadbeef

@@ -27,41 +27,25 @@ type DOutput struct {
 	Err *string `json:"err,omitempty" ` // ErrorCode
 }
 
-/*
-ErrDNotSortedWorkReports	No - Shawn to review	Not sorted work reports within a verdict
-ErrDNotUniqueVotes	No - Shawn to review	Not unique votes within a verdict
-ErrDNotSortedValidVerdicts	Yes	Not sorted, valid verdicts
-ErrDNotHomogenousJudgements	No - Shawn to review	Not homogeneous judgements, but positive votes count is not correct
-ErrDMissingCulpritsBadVerdict	No - Shawn to review	Missing culprits for bad verdict
-ErrDSingleCulpritBadVerdict	No - Shawn to review	Single culprit for bad verdict
-ErrDTwoCulpritsBadVerdictNotSorted	Yes	Two culprits for bad verdict, not sorted
-ErrDAlreadyRecordedVerdict	No - Shawn to review	Report an already recorded verdict, with culprits
-ErrDCulpritAlreadyInOffenders	No - Shawn to review	Culprit offender already in the offenders list
-ErrDOffenderNotPresentVerdict	No - Shawn to review	Offender relative to a not present verdict
-ErrDMissingFaultsGoodVerdict	No - Shawn to review	Missing faults for good verdict
-ErrDTwoFaultOffendersGoodVerdict	No - Shawn to review	Two fault offenders for a good verdict, not sorted
-ErrDAlreadyRecordedVerdictWithFaults	No - Shawn to review	Report an already recorded verdict, with faults
-ErrDFaultOffenderInOffendersList	No - Shawn to review	Fault offender already in the offenders list
-ErrDAuditorMarkedOffender	No - Shawn to review	Auditor marked as offender, but vote matches the verdict.
-ErrDBadSignatureInVerdict	Yes	Bad signature within the verdict judgements
-ErrDBadSignatureInCulprits	Yes	Bad signature within the culprits sequence
-ErrDAgeTooOldInVerdicts	No - Shawn to review	Age too old for verdicts judgements
-*/
 type VerdictResult struct {
 	WorkReportHash common.Hash
 	PositveCount   int
 }
 
 func (j *JamState) IsValidateDispute(input *types.Dispute) ([]VerdictResult, error) {
+	err := checkNotPresentVerdict(input.Verdict, input.Culprit, input.Fault)
+	if err != nil {
+		return []VerdictResult{}, err
+	}
 	// gp 0.5.0 (10.3)
 	for _, v := range input.Verdict {
-		err := j.checkSignature(v)
+		err = j.checkSignature(v)
 		if err != nil {
 			return []VerdictResult{}, err
 		}
 	}
 	//gp 0.5.0 (10.7) v: v should index by the work report hash and no duplicates
-	err := checkVerdicts(input.Verdict)
+	err = checkVerdicts(input.Verdict)
 	if err != nil {
 		return []VerdictResult{}, err
 	}
@@ -93,8 +77,8 @@ func (j *JamState) IsValidateDispute(input *types.Dispute) ([]VerdictResult, err
 			return []VerdictResult{}, err
 		}
 	}
-	//gp 0.5.0 (10.9) v: work report hash should not be in the psi_g, psi_b, psi_w set
-	err = checkWorkReportHash(input.Verdict, j.DisputesState.Psi_g, j.DisputesState.Psi_b, j.DisputesState.Psi_w)
+	//gp 0.5.0 (10.9) v: work report hash should not be in the Good/Bad/Wonky set
+	err = checkWorkReportHash(input.Verdict, j.DisputesState.GoodSet, j.DisputesState.BadSet, j.DisputesState.WonkySet)
 	if err != nil {
 		return []VerdictResult{}, err
 	}
@@ -132,8 +116,8 @@ func (j *JamState) NeedsOffendersMarker(d *types.Dispute) bool {
 	return true
 }
 
-// func (j *JamState) GetPsiBytes() ([]byte, error) {
-// 	// use scale to encode the Psi_state
+// func (j *JamState) GetDisputesStateBytes() ([]byte, error) {
+// 	// use scale to encode the DisputeState
 // 	//use json marshal to get the bytes
 // 	scale_bytes, err := json.Marshal(j.DisputesState)
 // 	if err != nil {
@@ -179,8 +163,8 @@ func (j *JamState) GetOffenderMark(input types.Dispute) (types.OffenderMarker, e
 	if err != nil {
 		return types.OffenderMarker{}, err
 	}
-	//eq 105 v: work report hash should not be in the psi_g, psi_b, psi_w set
-	err = checkWorkReportHash(input.Verdict, j.DisputesState.Psi_g, j.DisputesState.Psi_b, j.DisputesState.Psi_w)
+	//eq 105 v: work report hash should not be in the Good/Bad/Wonky set
+	err = checkWorkReportHash(input.Verdict, j.DisputesState.GoodSet, j.DisputesState.BadSet, j.DisputesState.WonkySet)
 	if err != nil {
 		return types.OffenderMarker{}, err
 	}
@@ -215,9 +199,9 @@ func (j *JamState) GetOffenderMark(input types.Dispute) (types.OffenderMarker, e
 
 func (j *JamState) ProcessDispute(result []VerdictResult, c []types.Culprit, f []types.Fault) {
 	j.sortSet(result)
-	//eq 10.15 start: clear old report in rho ,report and timeout
+	//eq 10.15 start: clear old report in availability_assignment ,report and timeout
 	j.updateOffender(c, f)
-	j.clearReportRho(result)
+	j.clearReportAvailabilityAssignments(result)
 }
 
 func (j *JamState) Disputes(input *types.Dispute) (types.OffenderMarker, error) {
@@ -265,7 +249,7 @@ func (j *JamState) checkSignature(v types.Verdict) error {
 // eq 101
 // gp 0.5.0 (10.6)
 func (j *JamState) checkIfKeyOffend(key types.Ed25519Key) error {
-	for _, k := range j.DisputesState.Psi_o {
+	for _, k := range j.DisputesState.Offenders {
 		if bytes.Equal(k.Bytes(), key.Bytes()) {
 			//drop the key
 			return fmt.Errorf("already in the offenders")
@@ -370,19 +354,19 @@ func checkFault(f []types.Fault) error {
 	return nil
 }
 
-// eq 105 v: work report hash should not be in the psi_g, psi_b, psi_w set
+// eq 105 v: work report hash should not be in the goodSet, badSet, wonkySet
 // gp 0.5.0 (10.9)
-func checkWorkReportHash(v []types.Verdict, psi_g [][]byte, psi_b [][]byte, psi_w [][]byte) error {
+func checkWorkReportHash(v []types.Verdict, goodSet [][]byte, badSet [][]byte, wonkySet [][]byte) error {
 	for _, verdict := range v {
-		if checkWorkReportHashInSet(verdict.Target.Bytes(), psi_g) {
+		if checkWorkReportHashInSet(verdict.Target.Bytes(), goodSet) {
 			return jamerrors.ErrDAlreadyRecordedVerdict
 		}
-		if checkWorkReportHashInSet(verdict.Target.Bytes(), psi_b) {
-			log.Warn(log.Audit, "Verdict Error: WorkReportHash already in psi_b", "Target", verdict.Target)
+		if checkWorkReportHashInSet(verdict.Target.Bytes(), badSet) {
+			log.Warn(log.Audit, "Verdict Error: WorkReportHash already in BadSet", "Target", verdict.Target)
 			return jamerrors.ErrDAlreadyRecordedVerdict
 		}
-		if checkWorkReportHashInSet(verdict.Target.Bytes(), psi_w) {
-			log.Warn(log.Audit, "Verdict Error: WorkReportHash already in psi_w", "Target", verdict.Target)
+		if checkWorkReportHashInSet(verdict.Target.Bytes(), wonkySet) {
+			log.Warn(log.Audit, "Verdict Error: WorkReportHash already in WonkySet", "Target", verdict.Target)
 			return jamerrors.ErrDAlreadyRecordedVerdictWithFaults
 		}
 	}
@@ -465,19 +449,19 @@ func (j *JamState) sortSet(VerdictResult []VerdictResult) {
 	for _, v := range VerdictResult {
 		if v.PositveCount == 0 {
 			//bad
-			j.DisputesState.Psi_b = append(j.DisputesState.Psi_b, v.WorkReportHash.Bytes())
+			j.DisputesState.BadSet = append(j.DisputesState.BadSet, v.WorkReportHash.Bytes())
 
 		} else if v.PositveCount == ValidatorNum/3 {
 			//wonky
-			j.DisputesState.Psi_w = append(j.DisputesState.Psi_w, v.WorkReportHash.Bytes())
+			j.DisputesState.WonkySet = append(j.DisputesState.WonkySet, v.WorkReportHash.Bytes())
 		} else if v.PositveCount == ValidatorNum*2/3+1 {
 			//good
-			j.DisputesState.Psi_g = append(j.DisputesState.Psi_g, v.WorkReportHash.Bytes())
+			j.DisputesState.GoodSet = append(j.DisputesState.GoodSet, v.WorkReportHash.Bytes())
 		}
 	}
-	j.DisputesState.Psi_b = sortByHash(j.DisputesState.Psi_b)
-	j.DisputesState.Psi_w = sortByHash(j.DisputesState.Psi_w)
-	j.DisputesState.Psi_g = sortByHash(j.DisputesState.Psi_g)
+	j.DisputesState.BadSet = sortByHash(j.DisputesState.BadSet)
+	j.DisputesState.WonkySet = sortByHash(j.DisputesState.WonkySet)
+	j.DisputesState.GoodSet = sortByHash(j.DisputesState.GoodSet)
 
 }
 func (j *JamState) sortSet_Prime(VerdictResult []VerdictResult) JamState {
@@ -485,31 +469,31 @@ func (j *JamState) sortSet_Prime(VerdictResult []VerdictResult) JamState {
 	for _, v := range VerdictResult {
 		if v.PositveCount == 0 {
 			//bad
-			state_prime.DisputesState.Psi_b = append(state_prime.DisputesState.Psi_b, v.WorkReportHash.Bytes())
+			state_prime.DisputesState.BadSet = append(state_prime.DisputesState.BadSet, v.WorkReportHash.Bytes())
 
 		} else if v.PositveCount == ValidatorNum/3 {
 			//wonky
-			state_prime.DisputesState.Psi_w = append(state_prime.DisputesState.Psi_w, v.WorkReportHash.Bytes())
+			state_prime.DisputesState.WonkySet = append(state_prime.DisputesState.WonkySet, v.WorkReportHash.Bytes())
 		} else if v.PositveCount == ValidatorNum*2/3+1 {
 			//good
-			state_prime.DisputesState.Psi_g = append(state_prime.DisputesState.Psi_g, v.WorkReportHash.Bytes())
+			state_prime.DisputesState.GoodSet = append(state_prime.DisputesState.GoodSet, v.WorkReportHash.Bytes())
 		}
 	}
-	state_prime.DisputesState.Psi_b = sortByHash(state_prime.DisputesState.Psi_b)
-	state_prime.DisputesState.Psi_w = sortByHash(state_prime.DisputesState.Psi_w)
-	state_prime.DisputesState.Psi_g = sortByHash(state_prime.DisputesState.Psi_g)
+	state_prime.DisputesState.BadSet = sortByHash(state_prime.DisputesState.BadSet)
+	state_prime.DisputesState.WonkySet = sortByHash(state_prime.DisputesState.WonkySet)
+	state_prime.DisputesState.GoodSet = sortByHash(state_prime.DisputesState.GoodSet)
 	return state_prime
 }
-func (j *JamState) clearReportRho(V []VerdictResult) {
+func (j *JamState) clearReportAvailabilityAssignments(V []VerdictResult) {
 
 	for i := range j.AvailabilityAssignments {
-		rhoo := j.AvailabilityAssignments[i]
-		if rhoo == nil {
+		availability_assignmento := j.AvailabilityAssignments[i]
+		if availability_assignmento == nil {
 			continue
 		}
 		for _, h := range V {
 
-			wrHash := common.ComputeHash(rhoo.WorkReport.Bytes())
+			wrHash := common.ComputeHash(availability_assignmento.WorkReport.Bytes())
 			if bytes.Equal(wrHash, h.WorkReportHash.Bytes()) && h.PositveCount < ValidatorNum*2/3 {
 				// clear the old report
 				j.AvailabilityAssignments[i] = nil
@@ -522,14 +506,14 @@ func (j *JamState) clearReportRho(V []VerdictResult) {
 
 func (j *JamState) updateOffender(c []types.Culprit, f []types.Fault) {
 	for _, c := range c {
-		j.DisputesState.Psi_o = append(j.DisputesState.Psi_o, c.Key)
+		j.DisputesState.Offenders = append(j.DisputesState.Offenders, c.Key)
 	}
 	for _, f := range f {
-		j.DisputesState.Psi_o = append(j.DisputesState.Psi_o, f.Key)
+		j.DisputesState.Offenders = append(j.DisputesState.Offenders, f.Key)
 
 	}
 	//sort the key
-	j.DisputesState.Psi_o = sortByKey(j.DisputesState.Psi_o)
+	j.DisputesState.Offenders = sortByKey(j.DisputesState.Offenders)
 }
 func processTypesOutput(c []types.Culprit, f []types.Fault) types.OffenderMarker {
 	var output2 types.OffenderMarker
@@ -565,9 +549,31 @@ func sortByKey(set []types.Ed25519Key) []types.Ed25519Key {
 	}
 	return set
 }
+
+func checkNotPresentVerdict(v []types.Verdict, c []types.Culprit, f []types.Fault) error {
+	// make a map to all the target hash
+	targetMap := make(map[common.Hash]struct{})
+	for _, verdict := range v {
+		targetMap[verdict.Target] = struct{}{}
+	}
+	for _, culprit := range c {
+		if _, ok := targetMap[culprit.Target]; !ok {
+			log.Error(log.Audit, "Culprit Error: work report hash should be in bad set", "Target", culprit.Target)
+			return jamerrors.ErrDOffenderNotPresentVerdict
+		}
+	}
+	for _, fault := range f {
+		if _, ok := targetMap[fault.Target]; !ok {
+			log.Error(log.Audit, "Fault Error: work report hash should be in good set", "Target", fault.Target)
+			return jamerrors.ErrDOffenderNotPresentVerdict
+		}
+	}
+	return nil
+}
+
 func isFaultEnoughAndValid(state_prime JamState, f []types.Fault) error {
 	counter := 0
-	for _, s := range state_prime.DisputesState.Psi_g {
+	for _, s := range state_prime.DisputesState.GoodSet {
 		for _, f := range f {
 			if bytes.Equal(s, f.Target.Bytes()) {
 				counter++
@@ -581,10 +587,9 @@ func isFaultEnoughAndValid(state_prime JamState, f []types.Fault) error {
 	for _, f := range f {
 		if f.Voting {
 			log.Trace(log.Audit, "Fault Error: fault should be false, invalid key", "f.Key", f.Key)
-
 			return jamerrors.ErrDAuditorMarkedOffender
 		}
-		for _, s := range state_prime.DisputesState.Psi_g {
+		for _, s := range state_prime.DisputesState.GoodSet {
 			if bytes.Equal(s, f.Target.Bytes()) {
 				found = true
 			}
@@ -598,7 +603,7 @@ func isFaultEnoughAndValid(state_prime JamState, f []types.Fault) error {
 
 func isCulpritEnoughAndValid(state_prime JamState, c []types.Culprit) error {
 	counter := 0
-	for _, s := range state_prime.DisputesState.Psi_b {
+	for _, s := range state_prime.DisputesState.BadSet {
 		for _, c := range c {
 			if bytes.Equal(s, c.Target.Bytes()) {
 				counter++
@@ -608,13 +613,13 @@ func isCulpritEnoughAndValid(state_prime JamState, c []types.Culprit) error {
 			return jamerrors.ErrDMissingCulpritsBadVerdict
 		}
 		if counter < 2 {
-			log.Error(log.Audit, "Culprit Error: work report hash in psi_b should have at least two culprit", "s", s)
+			log.Error(log.Audit, "Culprit Error: work report hash in BadSet should have at least two culprit", "s", s)
 			return jamerrors.ErrDSingleCulpritBadVerdict
 		}
 	}
 	found := false
 	for _, c := range c {
-		for _, s := range state_prime.DisputesState.Psi_b {
+		for _, s := range state_prime.DisputesState.BadSet {
 			if bytes.Equal(s, c.Target.Bytes()) {
 				found = true
 			}

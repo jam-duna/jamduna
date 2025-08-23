@@ -42,15 +42,15 @@ type SegmentRootLookupItemHistory struct {
 // SegmentRootLookup represents a list of SegmentRootLookupItem
 type SegmentRootLookupHistory []SegmentRootLookupItemHistory
 
-type WorkReport struct {
-	AvailabilitySpec  AvailabilitySpecifier `json:"package_spec"`
-	RefineContext     RefineContext         `json:"context"`
-	CoreIndex         uint                  `json:"core_index"` // MK check coreIndex
-	AuthorizerHash    common.Hash           `json:"authorizer_hash"`
-	AuthOutput        []byte                `json:"auth_output"`
-	SegmentRootLookup SegmentRootLookup     `json:"segment_root_lookup"`
-	Results           []WorkResult          `json:"results"`
-	AuthGasUsed       uint                  `json:"auth_gas_used"`
+type WorkReport struct { // 0.7.0 C.27 11.2
+	AvailabilitySpec  AvailabilitySpecifier `json:"package_spec"`        // s
+	RefineContext     RefineContext         `json:"context"`             // bold-c
+	CoreIndex         uint                  `json:"core_index"`          // c
+	AuthorizerHash    common.Hash           `json:"authorizer_hash"`     // a
+	AuthGasUsed       uint                  `json:"auth_gas_used"`       // g
+	Trace             []byte                `json:"auth_output"`         // t -- now called Trace
+	SegmentRootLookup SegmentRootLookup     `json:"segment_root_lookup"` // l
+	Results           []WorkDigest          `json:"results"`             // d
 }
 
 // eq 190
@@ -114,11 +114,11 @@ func (a *WorkReport) UnmarshalJSON(data []byte) error {
 	var s struct {
 		AvailabilitySpec  AvailabilitySpecifier `json:"package_spec"`
 		RefineContext     RefineContext         `json:"context"`
-		CoreIndex         uint                  `json:"core_index"` // MK check coreIndex
+		CoreIndex         uint                  `json:"core_index"`
 		AuthorizerHash    common.Hash           `json:"authorizer_hash"`
-		AuthOutput        string                `json:"auth_output"`
+		Trace             string                `json:"auth_output"`
 		SegmentRootLookup SegmentRootLookup     `json:"segment_root_lookup"`
-		Results           []WorkResult          `json:"results"`
+		Results           []WorkDigest          `json:"results"`
 		AuthGasUsed       uint                  `json:"auth_gas_used"`
 	}
 	if err := json.Unmarshal(data, &s); err != nil {
@@ -128,7 +128,7 @@ func (a *WorkReport) UnmarshalJSON(data []byte) error {
 	a.RefineContext = s.RefineContext
 	a.CoreIndex = s.CoreIndex
 	a.AuthorizerHash = s.AuthorizerHash
-	a.AuthOutput = common.FromHex(s.AuthOutput)
+	a.Trace = common.FromHex(s.Trace)
 	a.SegmentRootLookup = s.SegmentRootLookup
 	a.Results = s.Results
 	a.AuthGasUsed = s.AuthGasUsed
@@ -139,18 +139,18 @@ func (a WorkReport) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
 		AvailabilitySpec  AvailabilitySpecifier `json:"package_spec"`
 		RefineContext     RefineContext         `json:"context"`
-		CoreIndex         uint                  `json:"core_index"` // MK check coreIndex
+		CoreIndex         uint                  `json:"core_index"`
 		AuthorizerHash    common.Hash           `json:"authorizer_hash"`
-		AuthOutput        string                `json:"auth_output"`
+		Trace             string                `json:"auth_output"` // "trace"
 		SegmentRootLookup SegmentRootLookup     `json:"segment_root_lookup"`
-		Results           []WorkResult          `json:"results"`
+		Results           []WorkDigest          `json:"results"`
 		AuthGasUsed       uint                  `json:"auth_gas_used"`
 	}{
 		AvailabilitySpec:  a.AvailabilitySpec,
 		RefineContext:     a.RefineContext,
 		CoreIndex:         a.CoreIndex,
 		AuthorizerHash:    a.AuthorizerHash,
-		AuthOutput:        common.HexString(a.AuthOutput),
+		Trace:             common.HexString(a.Trace),
 		SegmentRootLookup: a.SegmentRootLookup,
 		Results:           a.Results,
 		AuthGasUsed:       a.AuthGasUsed,

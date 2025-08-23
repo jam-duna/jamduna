@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
+	"path"
 	"testing"
 
 	"github.com/colorfulnotion/jam/common"
@@ -41,7 +41,7 @@ func (j *JamState) GetStateFromAssuranceState(assuranceState AssuranceState) {
 func TestAssuranceParsing(t *testing.T) {
 	// read the json file
 	// parse the json file
-	json_file := "../jamtestvectors/assurances/tiny/assurance_for_not_engaged_core-1.json"
+	json_file := path.Join(common.GetJAMTestVectorPath("stf"), "assurances/tiny/assurance_for_not_engaged_core-1.json")
 	jsonData, err := os.ReadFile(json_file)
 	if err != nil {
 		t.Fatalf("failed to read JSON file: %v", err)
@@ -61,7 +61,7 @@ func TestAssuranceParsing(t *testing.T) {
 }
 
 func VerifyAssurances(jsonFile string, exceptErr error) error {
-	jsonPath := filepath.Join("../jamtestvectors/assurances/", jsonFile)
+	jsonPath := path.Join(common.GetJAMTestVectorPath("stf"), "assurances", jsonFile)
 	jsonData, err := os.ReadFile(jsonPath)
 	if err != nil {
 
@@ -116,7 +116,7 @@ Duplicate assurer.
 
 func TestVerifyAssurance(t *testing.T) {
 	network_args := *network
-	fmt.Printf("Test Cases For Assurances, Network=%s\n", network_args)
+	t.Logf("Test Cases For Assurances, Network=%s\n", network_args)
 	testCase := []struct {
 		jsonFile  string
 		exceptErr error

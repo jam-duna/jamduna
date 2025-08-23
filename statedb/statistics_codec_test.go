@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/stretchr/testify/assert"
 )
@@ -19,12 +20,12 @@ type Input struct {
 }
 
 type state struct {
-	Current        [types.TotalValidators]types.ValidatorStatisticState `json:"vals_curr_stats"`
-	Last           [types.TotalValidators]types.ValidatorStatisticState `json:"vals_last_stats"`
-	CoreStatistics [types.TotalCores]types.CoreStatistics               `json:"cores"`
-	ServiceStatics types.ServiceStatisticsKeyPairs                      `json:"services,omitempty"`
-	Tau            uint32                                               `json:"slot"`
-	Kappa_prime    types.Validators                                     `json:"curr_validators"`
+	Current              [types.TotalValidators]types.ValidatorStatisticState `json:"vals_curr_stats"`
+	Last                 [types.TotalValidators]types.ValidatorStatisticState `json:"vals_last_stats"`
+	CoreStatistics       [types.TotalCores]types.CoreStatistics               `json:"cores"`
+	ServiceStatics       types.ServiceStatisticsKeyPairs                      `json:"services,omitempty"`
+	Timeslot             uint32                                               `json:"slot"`
+	CurrValidators_prime types.Validators                                     `json:"curr_validators"`
 }
 
 func (s *state) String() string {
@@ -52,8 +53,8 @@ func TestCodecStatistics(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.jsonFile, func(t *testing.T) {
-			jsonPath := filepath.Join("../jamtestvectors/statistics/tiny", tc.jsonFile)
-			binPath := filepath.Join("../jamtestvectors/statistics/tiny", tc.binFile)
+			jsonPath := filepath.Join(common.GetJAMTestVectorPath("stf"), "statistics/tiny", tc.jsonFile)
+			binPath := filepath.Join(common.GetJAMTestVectorPath("stf"), "statistics/tiny", tc.binFile)
 			testcase_name := tc.jsonFile
 			// Read Codec
 			expectedCodec, err := os.ReadFile(binPath)

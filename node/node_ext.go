@@ -115,7 +115,7 @@ func (m *ManualJCEManager) UpdateAccumulationState(c15Bytes []byte) {
 	case m.accumulationUpdatesChan <- c15Bytes:
 
 	default:
-		fmt.Printf("Warning: Rho Accumulation updates channel full. Dropping accu update.\n")
+		fmt.Printf("Warning: AvailabilityAssignments Accumulation updates channel full. Dropping accu update.\n")
 	}
 }
 
@@ -237,30 +237,30 @@ func (m *ManualJCEManager) CheckReq() bool {
 	initialRequiredCount := len(refine_pending)
 	//fmt.Printf("CheckReq: Need to find %d unique WP(s) from WPQueue: %v\n", initialRequiredCount, m.WPQueue)
 
-	refine_found_in_beta := make(map[common.Hash]struct{})
+	refine_found_in_recenthistory := make(map[common.Hash]struct{})
 	for i := len(m.currentRefineState.B_H) - 1; i >= 0; i-- {
-		beta := m.currentRefineState.B_H[i]
-		for coreIdx, segmentRootInfo := range beta.Reported {
+		recenthistory := m.currentRefineState.B_H[i]
+		for coreIdx, segmentRootInfo := range recenthistory.Reported {
 			wpHash := segmentRootInfo.WorkPackageHash
 			if _, needed := refine_pending[wpHash]; needed {
-				if _, alreadyFound := refine_found_in_beta[wpHash]; !alreadyFound {
+				if _, alreadyFound := refine_found_in_recenthistory[wpHash]; !alreadyFound {
 					log.Trace(log.Node, "CheckReq: Found required WP in Beta state", "wp", wpHash.Hex(), "i", i, "coreIdx", coreIdx)
-					refine_found_in_beta[wpHash] = struct{}{}
+					refine_found_in_recenthistory[wpHash] = struct{}{}
 				}
 			}
 		}
 	}
 
-	if len(refine_found_in_beta) > 0 {
-		refinedCompleteWP := make([]common.Hash, 0, len(refine_found_in_beta))
-		for wp := range refine_found_in_beta {
+	if len(refine_found_in_recenthistory) > 0 {
+		refinedCompleteWP := make([]common.Hash, 0, len(refine_found_in_recenthistory))
+		for wp := range refine_found_in_recenthistory {
 			refinedCompleteWP = append(refinedCompleteWP, wp)
 		}
-		//fmt.Printf("CheckReq: Moving %d found WPs from WPQueue to RefinedWP: %v\n", len(refine_found_in_beta), refinedCompleteWP)
+		//fmt.Printf("CheckReq: Moving %d found WPs from WPQueue to RefinedWP: %v\n", len(refine_found_in_recenthistory), refinedCompleteWP)
 
 		m.RefinedWP = append(m.RefinedWP, refinedCompleteWP...)
 
-		removeWPsFromSlice(&m.WPQueue, refine_found_in_beta)
+		removeWPsFromSlice(&m.WPQueue, refine_found_in_recenthistory)
 		//fmt.Printf("CheckReq: WPQueue size after moving found WPs: %d\n", len(m.WPQueue))
 	}
 

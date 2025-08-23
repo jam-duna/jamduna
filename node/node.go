@@ -1026,6 +1026,7 @@ func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPac
 
 	// Submit each work package to a random peer on the assigned core
 	for _, req := range reqs {
+		fmt.Printf("Submitting work package: %s\n", req.WorkPackage.String())
 		n.SubmitWPSameCore(req.WorkPackage, req.ExtrinsicsBlobs)
 		log.Info(log.Node, "Work package submitted", "identifier", req.Identifier, "hash", workPackageHashes[identifierToIndex[req.Identifier]].Hex())
 	}

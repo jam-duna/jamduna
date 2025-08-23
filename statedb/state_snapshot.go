@@ -34,15 +34,15 @@ type StateSnapshot struct {
 	AuthorizationsPool       [types.TotalCores][]common.Hash              `json:"alpha"`             // c1
 	AuthorizationQueue       types.AuthorizationQueue                     `json:"varphi"`            // c2
 	RecentBlocks             RecentBlocks                                 `json:"beta"`              // c3
-	Gamma                    SafroleBasicState                            `json:"gamma"`             // c4
-	Disputes                 Psi_state                                    `json:"psi"`               // c5
+	SafroleBasicState        SafroleBasicState                            `json:"gamma"`             // c4
+	Disputes                 DisputeState                                 `json:"psi"`               // c5
 	Entropy                  Entropy                                      `json:"eta"`               // c6
 	NextValidators           types.Validators                             `json:"iota"`              // c7
 	CurrValidators           types.Validators                             `json:"kappa"`             // c8
 	PrevValidators           types.Validators                             `json:"lambda"`            // c9
 	AvailabilityAssignments  AvailabilityAssignments                      `json:"rho"`               // c10
 	Timeslot                 uint32                                       `json:"tau"`               // c11
-	PrivilegedServiceIndices types.Kai_state                              `json:"chi"`               // c12
+	PrivilegedServiceIndices types.PrivilegedServiceState                 `json:"chi"`               // c12
 	ValidatorStatistics      types.ValidatorStatistics                    `json:"pi"`                // c13
 	AccumulationQueue        [types.EpochLength][]types.AccumulationQueue `json:"theta"`             // c14 Accumulation Queue
 	AccumulationHistory      [types.EpochLength]types.AccumulationHistory `json:"xi"`                // c15 Accumulation History
@@ -93,7 +93,7 @@ func (sn *StateSnapshot) Raw() *StateSnapshotRaw {
 			stateVal, _ = types.Encode(sn.RecentBlocks)
 		case C4:
 			stateKey[0] = 0x04
-			stateVal, _ = types.Encode(sn.Gamma)
+			stateVal, _ = types.Encode(sn.SafroleBasicState)
 		case C5:
 			stateKey[0] = 0x05
 			stateVal, _ = types.Encode(sn.Disputes)
@@ -215,10 +215,10 @@ func (snr *StateSnapshotRaw) FromStateSnapshotRaw() *StateSnapshot {
 			sn.RecentBlocks = recentBlocks.(RecentBlocks)
 		case C4:
 			gamma, _, _ := types.Decode(kv.Value, reflect.TypeOf(SafroleBasicState{}))
-			sn.Gamma = gamma.(SafroleBasicState)
+			sn.SafroleBasicState = gamma.(SafroleBasicState)
 		case C5:
-			disputes, _, _ := types.Decode(kv.Value, reflect.TypeOf(Psi_state{}))
-			sn.Disputes = disputes.(Psi_state)
+			disputes, _, _ := types.Decode(kv.Value, reflect.TypeOf(DisputeState{}))
+			sn.Disputes = disputes.(DisputeState)
 		case C6:
 			entropy, _, _ := types.Decode(kv.Value, reflect.TypeOf(Entropy{}))
 			sn.Entropy = entropy.(Entropy)
@@ -238,8 +238,8 @@ func (snr *StateSnapshotRaw) FromStateSnapshotRaw() *StateSnapshot {
 			timeslot, _, _ := types.Decode(kv.Value, reflect.TypeOf(uint32(0)))
 			sn.Timeslot = timeslot.(uint32)
 		case C12:
-			privilegedServiceIndices, _, _ := types.Decode(kv.Value, reflect.TypeOf(types.Kai_state{}))
-			sn.PrivilegedServiceIndices = privilegedServiceIndices.(types.Kai_state)
+			privilegedServiceIndices, _, _ := types.Decode(kv.Value, reflect.TypeOf(types.PrivilegedServiceState{}))
+			sn.PrivilegedServiceIndices = privilegedServiceIndices.(types.PrivilegedServiceState)
 		case C13:
 			validatorStatistics, _, _ := types.Decode(kv.Value, reflect.TypeOf(types.ValidatorStatistics{}))
 			sn.ValidatorStatistics = validatorStatistics.(types.ValidatorStatistics)
@@ -263,7 +263,7 @@ func (n *JamState) Snapshot(state *StateSnapshotRaw, stateUpdates *types.StateUp
 		AuthorizationsPool:       n.AuthorizationsPool,                                  // C1
 		AuthorizationQueue:       n.AuthorizationQueue,                                  // C2
 		RecentBlocks:             n.RecentBlocks,                                        // C3
-		Gamma:                    n.SafroleState.GetSafroleBasicState().Copy(),          // C4
+		SafroleBasicState:        n.SafroleState.GetSafroleBasicState().Copy(),          // C4
 		Disputes:                 n.DisputesState,                                       // C5
 		Entropy:                  n.SafroleState.Entropy,                                // C6
 		NextValidators:           make([]types.Validator, len(original.NextValidators)), // C7
@@ -309,14 +309,14 @@ func (original TicketsOrKeys) Copy() TicketsOrKeys {
 
 func (original SafroleBasicState) Copy() SafroleBasicState {
 	copied := SafroleBasicState{
-		GammaK: make([]types.Validator, len(original.GammaK)),
-		GammaA: make([]types.TicketBody, len(original.GammaA)),
-		GammaS: original.GammaS.Copy(),
-		GammaZ: make([]byte, len(original.GammaZ)),
+		NextValidators:    make([]types.Validator, len(original.NextValidators)),
+		TicketAccumulator: make([]types.TicketBody, len(original.TicketAccumulator)),
+		SlotSealerSeries:  original.SlotSealerSeries.Copy(),
+		RingCommitment:    make([]byte, len(original.RingCommitment)),
 	}
-	copy(copied.GammaK[:], original.GammaK[:])
-	copy(copied.GammaA[:], original.GammaA[:])
-	copy(copied.GammaZ[:], original.GammaZ[:])
+	copy(copied.NextValidators[:], original.NextValidators[:])
+	copy(copied.TicketAccumulator[:], original.TicketAccumulator[:])
+	copy(copied.RingCommitment[:], original.RingCommitment[:])
 	return copied
 }
 

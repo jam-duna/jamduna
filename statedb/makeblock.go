@@ -67,9 +67,9 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 	}
 
 	// E_A - Assurances -- these have already been signature checked and the response is ordered by validator index
-	//   HOWEVER, the bitfield needs to be validated with respect to rho (nil vs timeslot)
+	//   HOWEVER, the bitfield needs to be validated with respect to availability_assignment (nil vs timeslot)
 	unvalidatedAssurances := extrinsic_pool.GetAssurancesFromPool(h.ParentHeaderHash)
-	// HERE we use rho validate all assurances and sort them
+	// HERE we use availability_assignment validate all assurances and sort them
 	extrinsicData.Assurances, err = s.GetValidAssurances(unvalidatedAssurances, h.ParentHeaderHash, true)
 	if err != nil {
 		return nil, err
@@ -87,7 +87,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 	// collect and pre-validate queued guarantees
 	var valid []types.Guarantee
 	tmpstatedb := s.Copy()
-	tmpstatedb.JamState = tmpState // use the tmp state (updated rho) to validate guarantees, which can avoid the core engaged error but still validated state transition
+	tmpstatedb.JamState = tmpState // use the tmp state (updated availability_assignment) to validate guarantees, which can avoid the core engaged error but still validated state transition
 	for _, q := range queuedGuarantees {
 		g, err := q.DeepCopy()
 		if err != nil {
@@ -178,7 +178,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 
 		} else {
 			// get the ticket from the pool by using the next_n2 entropy
-			next_n2 := s.JamState.SafroleState.GetNextN2(targetJCE) // !!!! Shawn to check: this is n1 when phase = 11
+			next_n2 := s.JamState.SafroleState.GetNextN2(targetJCE)
 			tmp_accumulator := make([]types.TicketBody, len(s.JamState.SafroleState.NextEpochTicketsAccumulator))
 			copy(tmp_accumulator, s.JamState.SafroleState.NextEpochTicketsAccumulator)
 			// remove the tickets that already in state from the pool
@@ -186,8 +186,8 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 				extrinsic_pool.RemoveTicketFromPool(ticket.Id, next_n2)
 			}
 			// get the clean tickets out from the pool
-			tickets := extrinsic_pool.GetTicketsFromPool(next_n2) // Shawn to check the the next_n2 here correct?
-			SortTicketsById(tickets)                              // first include the better id
+			tickets := extrinsic_pool.GetTicketsFromPool(next_n2)
+			SortTicketsById(tickets) // first include the better id
 			if len(tickets) > types.MaxTicketsPerExtrinsic {
 				tickets = tickets[:types.MaxTicketsPerExtrinsic]
 			}
@@ -293,7 +293,7 @@ func (s *StateDB) ReSignDisputeBlock(credential types.ValidatorSecret, new_assur
 		without_offenders_validators := [types.TotalValidators]types.ValidatorKeyTuple{}
 		for i, key := range b.Header.EpochMark.Validators {
 			//gamma k'
-			validator_set := s.GetSafrole().DesignedValidators
+			validator_set := s.GetSafrole().DesignatedValidators
 			var ed25519Key types.Ed25519Key
 			for _, validator := range validator_set {
 				if validator.Bandersnatch.Hash() == key.BandersnatchKey {

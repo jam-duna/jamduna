@@ -9,27 +9,27 @@ import (
 )
 
 const (
-	WORKRESULT_OK = 0
+	WORKDIGEST_OK = 0
 
 	//{∞, ☇, ⊚, ⊖, BAD, BIG}
-	WORKRESULT_OOG        = 1
-	WORKRESULT_PANIC      = 2
-	WORKRESULT_BAD_EXPORT = 3
-	WORKRESULT_OVERSIZE   = 4
-	WORKRESULT_BAD        = 5
-	WORKRESULT_BIG        = 6
+	WORKDIGEST_OOG        = 1
+	WORKDIGEST_PANIC      = 2
+	WORKDIGEST_BAD_EXPORT = 3
+	WORKDIGEST_OVERSIZE   = 4
+	WORKDIGEST_BAD        = 5
+	WORKDIGEST_BIG        = 6
 )
 
 var HostResultCodeToString map[uint8]string = map[uint8]string{
-	WORKRESULT_OK:    "halt",
-	WORKRESULT_OOG:   "out-of-gas",
-	WORKRESULT_PANIC: "panic",
+	WORKDIGEST_OK:    "halt",
+	WORKDIGEST_OOG:   "out-of-gas",
+	WORKDIGEST_PANIC: "panic",
 }
 
 var ResultCodeToString map[uint8]string = map[uint8]string{
-	WORKRESULT_OK:    "halt",
-	WORKRESULT_OOG:   "out-of-gas",
-	WORKRESULT_PANIC: "panic",
+	WORKDIGEST_OK:    "halt",
+	WORKDIGEST_OOG:   "out-of-gas",
+	WORKDIGEST_PANIC: "panic",
 	// RESULT_HOST:  "host-call",
 	//RESULT_BAD_EXPORT: "bad-exports",
 	//RESULT_BAD:        "bad-code",
@@ -47,19 +47,18 @@ func ResultCode(code uint8) string {
 	return fmt.Sprintf("unknown(%d)", code)
 }
 
-// 11.1.4. Work Result. Equation 11.6. We finally come to define a work result, L, which is the data conduit by which services’ states may be altered through the computation done within a work-package.
-type WorkResult struct {
-	ServiceID   uint32      `json:"service_id"`
-	CodeHash    common.Hash `json:"code_hash"`
-	PayloadHash common.Hash `json:"payload_hash"`
-	Gas         uint64      `json:"accumulate_gas"`
-	Result      Result      `json:"result"`
-	// NEW in 0.6.4 -- see C.23 which specifies ordering of { u, i, x, z, e }
-	GasUsed             uint `json:"gas_used"`        // u
-	NumImportedSegments uint `json:"imports"`         // i
-	NumExtrinsics       uint `json:"extrinsic_count"` // x
-	NumBytesExtrinsics  uint `json:"extrinsic_size"`  // z
-	NumExportedSegments uint `json:"exports"`         // e
+// 11.1.4. Work Digest 11.6 C.26
+type WorkDigest struct {
+	ServiceID           uint32      `json:"service_id"`      // s the index of the service whose state is to be altered and thus whose refine code was already executed
+	CodeHash            common.Hash `json:"code_hash"`       // c the hash of the code of the service at the time of being reported
+	PayloadHash         common.Hash `json:"payload_hash"`    // y the hash of the payload (y) within the work item which was executed in the refine stage to give this result.
+	Gas                 uint64      `json:"accumulate_gas"`  // g the accumulate gas limit for executing this item’s accumulate
+	Result              Result      `json:"result"`          // r output blob or error code
+	GasUsed             uint        `json:"gas_used"`        // u the actual amount of gas used during refinement; i and e the number of segments
+	NumImportedSegments uint        `json:"imports"`         // i
+	NumExtrinsics       uint        `json:"extrinsic_count"` // x
+	NumBytesExtrinsics  uint        `json:"extrinsic_size"`  // z
+	NumExportedSegments uint        `json:"exports"`         // e
 }
 
 type RefineLoad struct {
@@ -76,7 +75,7 @@ type Result struct {
 }
 
 func (R Result) Encode() []byte {
-	if R.Err == WORKRESULT_OK {
+	if R.Err == WORKDIGEST_OK {
 		ok_byte := R.Ok
 		encodedOk, err := Encode(ok_byte)
 		if err != nil {
@@ -85,17 +84,17 @@ func (R Result) Encode() []byte {
 		return append([]byte{0}, encodedOk...)
 	} else {
 		switch R.Err {
-		case WORKRESULT_OOG:
+		case WORKDIGEST_OOG:
 			return []byte{1}
-		case WORKRESULT_PANIC:
+		case WORKDIGEST_PANIC:
 			return []byte{2}
-		case WORKRESULT_BAD_EXPORT:
+		case WORKDIGEST_BAD_EXPORT:
 			return []byte{3}
-		case WORKRESULT_OVERSIZE:
+		case WORKDIGEST_OVERSIZE:
 			return []byte{4}
-		case WORKRESULT_BAD:
+		case WORKDIGEST_BAD:
 			return []byte{5}
-		case WORKRESULT_BIG:
+		case WORKDIGEST_BIG:
 			return []byte{6}
 		default:
 			return []byte{R.Err}
@@ -113,37 +112,37 @@ func (target Result) Decode(data []byte) (interface{}, uint32) {
 		}
 		return Result{
 			Ok:  ok_byte.([]byte),
-			Err: WORKRESULT_OK,
+			Err: WORKDIGEST_OK,
 		}, length + l
 	case 1:
 		return Result{
 			Ok:  nil,
-			Err: WORKRESULT_OOG,
+			Err: WORKDIGEST_OOG,
 		}, length
 	case 2:
 		return Result{
 			Ok:  nil,
-			Err: WORKRESULT_PANIC,
+			Err: WORKDIGEST_PANIC,
 		}, length
 	case 3:
 		return Result{
 			Ok:  nil,
-			Err: WORKRESULT_BAD_EXPORT,
+			Err: WORKDIGEST_BAD_EXPORT,
 		}, length
 	case 4:
 		return Result{
 			Ok:  nil,
-			Err: WORKRESULT_OVERSIZE,
+			Err: WORKDIGEST_OVERSIZE,
 		}, length
 	case 5:
 		return Result{
 			Ok:  nil,
-			Err: WORKRESULT_BAD,
+			Err: WORKDIGEST_BAD,
 		}, length
 	case 6:
 		return Result{
 			Ok:  nil,
-			Err: WORKRESULT_BIG,
+			Err: WORKDIGEST_BIG,
 		}, length
 	default:
 		return Result{
@@ -153,7 +152,7 @@ func (target Result) Decode(data []byte) (interface{}, uint32) {
 	}
 }
 
-func (a *WorkResult) UnmarshalJSON(data []byte) error {
+func (a *WorkDigest) UnmarshalJSON(data []byte) error {
 	var s struct {
 		ServiceID   uint32                 `json:"service_id"`
 		CodeHash    common.Hash            `json:"code_hash"`
@@ -178,18 +177,18 @@ func (a *WorkResult) UnmarshalJSON(data []byte) error {
 			}
 			result = Result{
 				Ok:  common.FromHex(valStr),
-				Err: WORKRESULT_OK,
+				Err: WORKDIGEST_OK,
 			}
 		case "out-of-gas", "out_of_gas":
-			result = Result{Ok: nil, Err: WORKRESULT_OOG}
+			result = Result{Ok: nil, Err: WORKDIGEST_OOG}
 		case "panic":
-			result = Result{Ok: nil, Err: WORKRESULT_PANIC}
+			result = Result{Ok: nil, Err: WORKDIGEST_PANIC}
 		case "bad-exports", "bad_exports":
-			result = Result{Ok: nil, Err: WORKRESULT_BAD_EXPORT}
+			result = Result{Ok: nil, Err: WORKDIGEST_BAD_EXPORT}
 		case "bad-code", "bad_code":
-			result = Result{Ok: nil, Err: WORKRESULT_BAD}
+			result = Result{Ok: nil, Err: WORKDIGEST_BAD}
 		case "code-oversize", "code_oversize":
-			result = Result{Ok: nil, Err: WORKRESULT_BIG}
+			result = Result{Ok: nil, Err: WORKDIGEST_BIG}
 		default:
 			return fmt.Errorf("unknown result key found: %s", key)
 		}
@@ -209,32 +208,32 @@ func (a *WorkResult) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (a WorkResult) MarshalJSON() ([]byte, error) {
+func (a WorkDigest) MarshalJSON() ([]byte, error) {
 	var result map[string]interface{}
-	if a.Result.Err == WORKRESULT_OK {
+	if a.Result.Err == WORKDIGEST_OK {
 		result = map[string]interface{}{
 			"ok": common.HexString(a.Result.Ok),
 		}
 	} else {
 		switch a.Result.Err {
-		case WORKRESULT_OOG:
+		case WORKDIGEST_OOG:
 			result = map[string]interface{}{
 				"out-of-gas": nil,
 			}
-		case WORKRESULT_PANIC:
+		case WORKDIGEST_PANIC:
 			result = map[string]interface{}{
 				"panic": nil,
 			}
-		case WORKRESULT_BAD_EXPORT:
+		case WORKDIGEST_BAD_EXPORT:
 			result = map[string]interface{}{
 				"bad-exports": nil,
 			}
 		// came back refactor when test vector is 0.6.7
-		case WORKRESULT_BAD:
+		case WORKDIGEST_BAD:
 			result = map[string]interface{}{
 				"bad-code": nil,
 			}
-		case WORKRESULT_BIG:
+		case WORKDIGEST_BIG:
 			result = map[string]interface{}{
 				"code-oversize": nil,
 			}
@@ -265,7 +264,7 @@ func (a WorkResult) MarshalJSON() ([]byte, error) {
 }
 
 // helper function to print the WorkReport
-func (a *WorkResult) String() string {
+func (a *WorkDigest) String() string {
 	return ToJSON(a)
 }
 func (a *Result) String() string {

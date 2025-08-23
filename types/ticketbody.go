@@ -7,9 +7,10 @@ import (
 )
 
 // TicketBody represents the structure of a ticket
+// 6.6 C.30
 type TicketBody struct {
-	Id      common.Hash `json:"id"`
-	Attempt uint8       `json:"attempt"`
+	Id      common.Hash `json:"id"`      // y
+	Attempt uint8       `json:"attempt"` // e
 }
 
 type TicketsMark [EpochLength]TicketBody

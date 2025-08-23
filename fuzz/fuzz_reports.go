@@ -24,14 +24,14 @@ func lastGuarantee(block *types.Block) *types.Guarantee {
 	return &(block.Extrinsic.Guarantees[len(block.Extrinsic.Guarantees)-1])
 }
 
-func randomGuaranteeResult(r *rand.Rand, g *types.Guarantee) *types.WorkResult {
+func randomGuaranteeResult(r *rand.Rand, g *types.Guarantee) *types.WorkDigest {
 	if len(g.Report.Results) == 0 {
 		return nil
 	}
 	return &(g.Report.Results[r.Intn(len(g.Report.Results))])
 }
 
-func lastGuaranteeResult(g *types.Guarantee) *types.WorkResult {
+func lastGuaranteeResult(g *types.Guarantee) *types.WorkDigest {
 	if len(g.Report.Results) == 0 {
 		return nil
 	}
@@ -110,7 +110,7 @@ func fuzzBlockGCoreEngaged(seed []byte, block *types.Block, s *statedb.StateDB) 
 	if j.AvailabilityAssignments[int(g.Report.CoreIndex)] == nil {
 		return nil
 	}
-	j.AvailabilityAssignments[int(g.Report.CoreIndex)] = &statedb.Rho_state{
+	j.AvailabilityAssignments[int(g.Report.CoreIndex)] = &statedb.CoreState{
 		WorkReport: g.Report,
 		Timeslot:   block.Header.Slot,
 	}
@@ -335,7 +335,7 @@ func fuzzBlockGDuplicatePackageRecentHistory(seed []byte, block *types.Block, s 
 	}
 
 	anyReported := false
-	var lastNonEmptyRecentBlock *statedb.Beta_state
+	var lastNonEmptyRecentBlock *statedb.HistoryState
 	for i := len(RecentBlocks) - 1; i >= 0; i-- {
 		recentBlock := RecentBlocks[i]
 		if len(recentBlock.Reported) > 0 {

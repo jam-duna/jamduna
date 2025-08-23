@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/types"
@@ -116,11 +118,11 @@ func parseSTFFile(filename, content string) (StateTransition, error) {
 	return stf, err
 }
 
-func TestStateTransitionNoSandbox(t *testing.T) {
+func TestStateTransitionInterpreter(t *testing.T) {
 	pvm.PvmLogging = false
 	pvm.PvmTrace = false   // enable PVM trace for this test
 	pvm.VMsCompare = false // enable VM comparison for this test
-	filename := "../jamtestvectors/traces/preimages_light/00000012.json"
+	filename := path.Join(common.GetJAMTestVectorPath("traces"), "preimages/00000089.json")
 
 	content, err := os.ReadFile(filename)
 	if err != nil {
@@ -141,8 +143,8 @@ func TestStateTransitionSandbox(t *testing.T) {
 	pvm.SetUseEcalli500(false)   // use ecalli500 for log check in x86
 	pvm.SetDebugRecompiler(true) // enable debug mode for recompiler
 	filename := "./00000019.json"
-	filename = "../jamtestvectors/traces/storage/00000060.json"
-	// filename = "../jamtestvectors/traces/storage_light/00000016.json"
+	filename = path.Join(common.GetJAMTestVectorPath("stf"), "traces/storage/00000060.json")
+	// filename = path.Join(GetJAMTestVectorPath(), "traces/storage_light/00000016.json"
 
 	content, err := os.ReadFile(filename)
 	if err != nil {
@@ -164,7 +166,7 @@ func TestStateTransitionRecompiler(t *testing.T) {
 	pvm.SetUseEcalli500(false)   // use ecalli500 for log check in x86
 	pvm.SetDebugRecompiler(true) // enable debug mode for recompiler
 	filename := "./00000019.json"
-	filename = "../jamtestvectors/traces/storage_light/00000016.json"
+	filename = path.Join(common.GetJAMTestVectorPath("stf"), "traces/storage_light/00000016.json")
 
 	content, err := os.ReadFile(filename)
 	if err != nil {
@@ -232,12 +234,12 @@ func TestTracesInterpreter(t *testing.T) {
 	// Define all the directories you want to test in a single slice.
 	testDirs := []string{
 		//"../cmd/importblocks/rawdata/safrole/state_transitions/",
-		//"../jamtestvectors/traces/fallback",
-		//"../jamtestvectors/traces/safrole",
-		"../jamtestvectors/traces/preimages_light",
-		"../jamtestvectors/traces/preimages",
-		"../jamtestvectors/traces/storage_light",
-		"../jamtestvectors/traces/storage",
+		//path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
+		//path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
+		//path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
+		//path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
+		//path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
 	}
 
 	// Iterate over each directory.
@@ -285,12 +287,12 @@ func TestTracesRecompiler(t *testing.T) {
 	// Define all the directories you want to test in a single slice.
 	testDirs := []string{
 		//"../cmd/importblocks/rawdata/safrole/state_transitions/",
-		// "../jamtestvectors/traces/fallback",
-		// "../jamtestvectors/traces/safrole",
-		"../jamtestvectors/traces/preimages_light",
-		"../jamtestvectors/traces/preimages",
-		"../jamtestvectors/traces/storage_light",
-		"../jamtestvectors/traces/storage",
+		//path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
+		//path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
 	}
 
 	// Iterate over each directory.
@@ -332,12 +334,12 @@ func TestTracesSandbox(t *testing.T) {
 	// Define all the directories you want to test in a single slice.
 	testDirs := []string{
 		//"../cmd/importblocks/rawdata/safrole/state_transitions/",
-		// "../jamtestvectors/traces/fallback",
-		// "../jamtestvectors/traces/safrole",
-		"../jamtestvectors/traces/preimages_light",
-		"../jamtestvectors/traces/preimages",
-		"../jamtestvectors/traces/storage_light",
-		"../jamtestvectors/traces/storage",
+		//path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
+		//path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
 	}
 
 	// Iterate over each directory.

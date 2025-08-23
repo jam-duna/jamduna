@@ -204,10 +204,10 @@ func MakeDisputes(store *storage.StateDBStorage, stf *statedb.StateTransition, v
 	new_assurances := make([]types.Assurance, len(dispute_prestate.Block.Extrinsic.Assurances))
 	//copy
 	copy(new_assurances, dispute_prestate.Block.Extrinsic.Assurances)
-	for i, rho := range dispute_prestate.JamState.AvailabilityAssignments {
+	for i, availability_assignment := range dispute_prestate.JamState.AvailabilityAssignments {
 		// see if the report hash in the disputed report map
-		if rho != nil {
-			if _, ok := disputed_report_map[rho.WorkReport.Hash()]; ok {
+		if availability_assignment != nil {
+			if _, ok := disputed_report_map[availability_assignment.WorkReport.Hash()]; ok {
 				// resign the assurance
 				for index, assurance := range new_assurances {
 					assurance.SetBitFieldBit(uint16(i), false)

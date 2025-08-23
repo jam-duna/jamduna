@@ -45,7 +45,7 @@ func (n *JamState) SetRecentBlocks(recentBlocksByte []byte) {
 
 // C4 safroleState
 
-// GammaS
+// SlotSealerSeries
 func (C CTicketsOrKeys) CT2T() TicketsOrKeys {
 	var T TicketsOrKeys
 
@@ -115,12 +115,12 @@ func (T TicketsOrKeys) Decode(data []byte) (interface{}, uint32) {
 	return ticketsOrKeys, length
 }
 
-func (Z GammaZ) Decode(data []byte) (interface{}, uint32) {
+func (Z RingCommitment) Decode(data []byte) (interface{}, uint32) {
 	decoded, length, err := types.Decode(data, reflect.TypeOf([144]byte{}))
 	if err != nil {
-		return GammaZ{}, 0
+		return RingCommitment{}, 0
 	}
-	gammaZ := make(GammaZ, 144)
+	gammaZ := make(RingCommitment, 144)
 	decodedArray := decoded.([144]byte)
 	for i := 0; i < 144; i++ {
 		gammaZ[i] = decodedArray[i]
@@ -128,12 +128,12 @@ func (Z GammaZ) Decode(data []byte) (interface{}, uint32) {
 	return gammaZ, length
 }
 
-func (K GammaK) Decode(data []byte) (interface{}, uint32) {
+func (K NextValidators) Decode(data []byte) (interface{}, uint32) {
 	decoded, length, err := types.Decode(data, reflect.TypeOf([types.TotalValidators]types.Validator{}))
 	if err != nil {
-		return GammaK{}, 0
+		return NextValidators{}, 0
 	}
-	gammaK := make(GammaK, types.TotalValidators)
+	gammaK := make(NextValidators, types.TotalValidators)
 	decodedArray := decoded.([types.TotalValidators]types.Validator)
 	for i := 0; i < types.TotalValidators; i++ {
 		gammaK[i] = decodedArray[i]
@@ -149,52 +149,52 @@ func (n *JamState) SetSafroleState(safroleStateByte []byte) {
 	if err != nil {
 		return
 	}
-	n.SafroleStateGamma = safroleState.(SafroleBasicState)
+	n.SafroleBasicState = safroleState.(SafroleBasicState)
 }
 
 // C5 PastJudgements
-func (P Psi_state) Decode(data []byte) (interface{}, uint32) {
+func (P DisputeState) Decode(data []byte) (interface{}, uint32) {
 	var s struct {
-		Psi_g []common.Hash      `json:"good"`
-		Psi_b []common.Hash      `json:"bad"`
-		Psi_w []common.Hash      `json:"wonky"`
-		Psi_o []types.Ed25519Key `json:"offenders"`
+		GoodSet   []common.Hash      `json:"good"`
+		BadSet    []common.Hash      `json:"bad"`
+		WonkySet  []common.Hash      `json:"wonky"`
+		Offenders []types.Ed25519Key `json:"offenders"`
 	}
 	decoded, l, err := types.Decode(data, reflect.TypeOf(s))
 	if err != nil {
-		return Psi_state{}, 0
+		return DisputeState{}, 0
 	}
 	sDecoded := decoded.(struct {
-		Psi_g []common.Hash      `json:"good"`
-		Psi_b []common.Hash      `json:"bad"`
-		Psi_w []common.Hash      `json:"wonky"`
-		Psi_o []types.Ed25519Key `json:"offenders"`
+		GoodSet   []common.Hash      `json:"good"`
+		BadSet    []common.Hash      `json:"bad"`
+		WonkySet  []common.Hash      `json:"wonky"`
+		Offenders []types.Ed25519Key `json:"offenders"`
 	})
-	P.Psi_g = make([][]byte, len(sDecoded.Psi_g))
-	for i, hash := range sDecoded.Psi_g {
-		P.Psi_g[i] = hash[:]
+	P.GoodSet = make([][]byte, len(sDecoded.GoodSet))
+	for i, hash := range sDecoded.GoodSet {
+		P.GoodSet[i] = hash[:]
 	}
-	P.Psi_b = make([][]byte, len(sDecoded.Psi_b))
-	for i, hash := range sDecoded.Psi_b {
-		P.Psi_b[i] = hash[:]
+	P.BadSet = make([][]byte, len(sDecoded.BadSet))
+	for i, hash := range sDecoded.BadSet {
+		P.BadSet[i] = hash[:]
 	}
-	P.Psi_w = make([][]byte, len(sDecoded.Psi_w))
-	for i, hash := range sDecoded.Psi_w {
-		P.Psi_w[i] = hash[:]
+	P.WonkySet = make([][]byte, len(sDecoded.WonkySet))
+	for i, hash := range sDecoded.WonkySet {
+		P.WonkySet[i] = hash[:]
 	}
-	P.Psi_o = sDecoded.Psi_o
+	P.Offenders = sDecoded.Offenders
 	return P, l
 }
 
-func (j *JamState) SetPsi(psiByte []byte) {
-	if len(psiByte) == 0 {
+func (j *JamState) SetDisputesState(disputesStateBytes []byte) {
+	if len(disputesStateBytes) == 0 {
 		return
 	}
-	disputesState, _, err := types.Decode(psiByte, reflect.TypeOf(Psi_state{}))
+	disputesState, _, err := types.Decode(disputesStateBytes, reflect.TypeOf(DisputeState{}))
 	if err != nil {
 		return
 	}
-	j.DisputesState = disputesState.(Psi_state)
+	j.DisputesState = disputesState.(DisputeState)
 }
 
 // C6 Entropy
@@ -210,7 +210,7 @@ func (n *JamState) SetEntropy(entropyByte []byte) {
 }
 
 // C7 NextEpochValidatorKeys
-func (n *JamState) SetDesignedValidators(DesignedEpochValidatorsByte []byte) {
+func (n *JamState) SetDesignatedValidators(DesignedEpochValidatorsByte []byte) {
 	if len(DesignedEpochValidatorsByte) == 0 {
 		return
 	}
@@ -218,7 +218,7 @@ func (n *JamState) SetDesignedValidators(DesignedEpochValidatorsByte []byte) {
 	if err != nil {
 		return
 	}
-	n.SafroleState.DesignedValidators = DesignedEpochValidators.(types.Validators)
+	n.SafroleState.DesignatedValidators = DesignedEpochValidators.(types.Validators)
 }
 
 // C8 CurrentValidatorKeys
@@ -254,23 +254,23 @@ func (T AvailabilityAssignments) Decode(data []byte) (interface{}, uint32) {
 			length++
 		} else if data[length] == 1 {
 			length++
-			rho_state, l, err := types.Decode(data[length:], reflect.TypeOf(Rho_state{}))
+			coreState, l, err := types.Decode(data[length:], reflect.TypeOf(CoreState{}))
 			if err != nil {
 				return AvailabilityAssignments{}, 0
 			}
-			rho := rho_state.(Rho_state)
-			T[i] = &rho
+			availability_assignment := coreState.(CoreState)
+			T[i] = &availability_assignment
 			length += l
 		}
 	}
 	return T, length
 }
 
-func (n *JamState) SetRho(rhoByte []byte) {
-	if len(rhoByte) == 0 {
+func (n *JamState) SetAvailabilityAssignments(availability_assignmentByte []byte) {
+	if len(availability_assignmentByte) == 0 {
 		return
 	}
-	availabilityAssignments, _, err := types.Decode(rhoByte, reflect.TypeOf(AvailabilityAssignments{}))
+	availabilityAssignments, _, err := types.Decode(availability_assignmentByte, reflect.TypeOf(AvailabilityAssignments{}))
 	if err != nil {
 		return
 	}
@@ -294,11 +294,11 @@ func (n *JamState) SetPrivilegedServicesIndices(privilegedServicesIndicesByte []
 	if len(privilegedServicesIndicesByte) == 0 {
 		return
 	}
-	privilegedServicesIndices, _, err := types.Decode(privilegedServicesIndicesByte, reflect.TypeOf(types.Kai_state{}))
+	privilegedServicesIndices, _, err := types.Decode(privilegedServicesIndicesByte, reflect.TypeOf(types.PrivilegedServiceState{}))
 	if err != nil {
 		return
 	}
-	n.PrivilegedServiceIndices = privilegedServicesIndices.(types.Kai_state)
+	n.PrivilegedServiceIndices = privilegedServicesIndices.(types.PrivilegedServiceState)
 }
 
 // C13 ValidatorStatistics

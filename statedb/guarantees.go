@@ -44,7 +44,7 @@ func (j *JamState) ProcessGuarantees(ctx context.Context, guarantees []types.Gua
 
 		// assign first report to core
 		if j.AvailabilityAssignments[int(g.Report.CoreIndex)] == nil {
-			j.SetRhoByWorkReport(uint16(g.Report.CoreIndex), g.Report, j.SafroleState.GetTimeSlot())
+			j.SetAvailabilityAssignmentsByWorkReport(uint16(g.Report.CoreIndex), g.Report, j.SafroleState.GetTimeSlot())
 		} else {
 			continue
 		}
@@ -59,9 +59,9 @@ func (j *JamState) ProcessGuarantees(ctx context.Context, guarantees []types.Gua
 	return reports, nil
 }
 
-// SetRhoByWorkReport updates the Rho state for a given core.
-func (s *JamState) SetRhoByWorkReport(core uint16, report types.WorkReport, slot uint32) {
-	s.AvailabilityAssignments[int(core)] = &Rho_state{WorkReport: report, Timeslot: slot}
+// SetAvailabilityAssignmentsByWorkReport updates the AvailabilityAssignments state for a given core.
+func (s *JamState) SetAvailabilityAssignmentsByWorkReport(core uint16, report types.WorkReport, slot uint32) {
+	s.AvailabilityAssignments[int(core)] = &CoreState{WorkReport: report, Timeslot: slot}
 }
 
 // acceptableGuaranteeError categorizes errors into "acceptable" vs "not" -- if something is acceptable, it could be in the pool *temporarily*  being invalid and later be valid and error free
@@ -234,7 +234,6 @@ func (j *JamState) checkReportPendingOnCore(g types.Guarantee) error {
 		}
 	}
 	if !find {
-		fmt.Printf("checkReportPendingOnCore: %v\n", g.String())
 		return jamerrors.ErrGCoreUnexpectedAuthorizer
 	}
 	return nil
@@ -242,16 +241,16 @@ func (j *JamState) checkReportPendingOnCore(g types.Guarantee) error {
 
 func (j *JamState) CheckInvalidCoreIndex() {
 	problem := false
-	for i, rho := range j.AvailabilityAssignments {
-		if rho != nil && rho.WorkReport.CoreIndex != uint(i) {
+	for i, availability_assignment := range j.AvailabilityAssignments {
+		if availability_assignment != nil && availability_assignment.WorkReport.CoreIndex != uint(i) {
 			problem = true
 		}
 	}
 	// Core 0 : receiving megatron report; Core 1 : receiving fib+trib report
 	if problem {
-		for i, rho := range j.AvailabilityAssignments {
-			log.Trace(log.G, "CheckInvalidCoreIndex", "i", i, "rho.WorkReportHash", rho.WorkReport.Hash(),
-				"CoreIndex", rho.WorkReport.CoreIndex, "WorkReport", rho.WorkReport.String())
+		for i, availability_assignment := range j.AvailabilityAssignments {
+			log.Trace(log.G, "CheckInvalidCoreIndex", "i", i, "availability_assignment.WorkReportHash", availability_assignment.WorkReport.Hash(),
+				"CoreIndex", availability_assignment.WorkReport.CoreIndex, "WorkReport", availability_assignment.WorkReport.String())
 		}
 		log.Crit(log.G, "CheckInvalidCoreIndex: FAILURE")
 	}
@@ -393,11 +392,11 @@ func (s *StateDB) getPrereqFromAccumulationQueue() []common.Hash {
 }
 */
 // TODO: v0.5 eq 11.36
-func (s *StateDB) getPrereqFromRho() []common.Hash {
+func (s *StateDB) getPrereqFromAvailabilityAssignments() []common.Hash {
 	result := []common.Hash{}
-	for _, rho := range s.JamState.AvailabilityAssignments {
-		if rho != nil && len(rho.WorkReport.RefineContext.Prerequisites) != 0 {
-			result = append(result, rho.WorkReport.RefineContext.Prerequisites...)
+	for _, availability_assignment := range s.JamState.AvailabilityAssignments {
+		if availability_assignment != nil && len(availability_assignment.WorkReport.RefineContext.Prerequisites) != 0 {
+			result = append(result, availability_assignment.WorkReport.RefineContext.Prerequisites...)
 		}
 	}
 	return result
@@ -457,14 +456,14 @@ func (s *StateDB) checkAnyPrereq(g types.Guarantee) error {
 	}
 
 	// 𝒂:This is a collection of "assigned" work packages.
-	prereqSetFromRho := make(map[common.Hash]struct{})
-	for _, hash := range s.getPrereqFromRho() {
-		prereqSetFromRho[hash] = struct{}{}
+	prereqSetFromAvailabilityAssignments := make(map[common.Hash]struct{})
+	for _, hash := range s.getPrereqFromAvailabilityAssignments() {
+		prereqSetFromAvailabilityAssignments[hash] = struct{}{}
 	}
-	_, exists = prereqSetFromRho[workPackageHash]
+	_, exists = prereqSetFromAvailabilityAssignments[workPackageHash]
 	if exists {
 		// TODO: REVIEW non-standard error
-		return fmt.Errorf("invalid prerequisite work package(from rho), core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
+		return fmt.Errorf("invalid prerequisite work package(from availability_assignment), core %v, package %v", g.Report.CoreIndex, g.Report.GetWorkPackageHash())
 	}
 	return nil
 }

@@ -463,7 +463,7 @@ func (vm *RecompilerVM) ExecuteX86Code(x86code []byte) (err error) {
 		if r := recover(); r != nil {
 			log.Error(vm.logging, "RecompilerVM ExecuteX86Code panic", "error", r)
 			debug.PrintStack()
-			vm.ResultCode = types.WORKRESULT_PANIC
+			vm.ResultCode = types.WORKDIGEST_PANIC
 			vm.MachineState = PANIC
 			vm.terminated = true
 			err = fmt.Errorf("ExecuteX86Code panic: %v", r)
@@ -532,7 +532,7 @@ func (vm *RecompilerVM) ExecuteX86Code(x86code []byte) (err error) {
 	}
 	vm.SetIdentifier(fmt.Sprintf("%d", msec))
 	if crashed == -1 || err != nil {
-		vm.ResultCode = types.WORKRESULT_PANIC
+		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
 		vm.terminated = true
 		fmt.Printf("PANIC in ExecuteX86Code: %v\n", err)
@@ -660,7 +660,7 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(x86code []byte, entry uint32) (e
 	}
 	vm.Gas = int64(gas)
 	if crashed == -1 || err != nil {
-		vm.ResultCode = types.WORKRESULT_PANIC
+		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
 		vm.terminated = true
 		fmt.Printf("PANIC in ExecuteX86Code: %v\n", err)

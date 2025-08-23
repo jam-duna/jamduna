@@ -122,29 +122,29 @@ func (o *StorageObject) Clone() *StorageObject {
 }
 
 type LookupObject struct {
-	Accessed bool
-	Deleted  bool
-	Dirty    bool
-	Z        uint32   `json:"z"` // z
-	T        []uint32 `json:"t"` // t
-	Source   string   `json:"-"` // "trie" or "memory"
+	Accessed  bool
+	Deleted   bool
+	Dirty     bool
+	Z         uint32   `json:"z"` // z
+	Timeslots []uint32 `json:"t"` // t
+	Source    string   `json:"-"` // "trie" or "memory"
 }
 
 func (o *LookupObject) String() string {
-	return fmt.Sprintf("Z: [%v] T: %v Deleted: %v Dirty: %v", o.Z, o.T, o.Deleted, o.Dirty)
+	return fmt.Sprintf("Z: [%v] Timeslots: %v Deleted: %v Dirty: %v", o.Z, o.Timeslots, o.Deleted, o.Dirty)
 }
 
 func (o *LookupObject) Clone() *LookupObject {
-	// Deep copy the T slice
-	tCopy := make([]uint32, len(o.T))
-	copy(tCopy, o.T)
+	// Deep copy the Timeslots slice
+	tCopy := make([]uint32, len(o.Timeslots))
+	copy(tCopy, o.Timeslots)
 
 	return &LookupObject{
-		Deleted: o.Deleted,
-		Dirty:   o.Dirty,
-		Z:       o.Z,
-		T:       tCopy,
-		Source:  o.Source,
+		Deleted:   o.Deleted,
+		Dirty:     o.Dirty,
+		Z:         o.Z,
+		Timeslots: tCopy,
+		Source:    o.Source,
 	}
 }
 
@@ -425,7 +425,7 @@ func (s *ServiceAccount) ReadLookup(blobHash common.Hash, z uint32, sdb HostEnv)
 		if lookupObj.Deleted {
 			return false, []uint32{}, lookupObj.Source
 		}
-		return true, lookupObj.T, lookupObj.Source
+		return true, lookupObj.Timeslots, lookupObj.Source
 	}
 
 	var err error
@@ -443,11 +443,11 @@ func (s *ServiceAccount) ReadLookup(blobHash common.Hash, z uint32, sdb HostEnv)
 		s.Lookup = make(map[string]*LookupObject)
 	}
 	lookupObj = &LookupObject{
-		Accessed: true,
-		Dirty:    false,
-		Z:        z,
-		T:        anchor_timeslot,
-		Source:   "trie",
+		Accessed:  true,
+		Dirty:     false,
+		Z:         z,
+		Timeslots: anchor_timeslot,
+		Source:    "trie",
 	}
 	s.Lookup[blobHashStr] = lookupObj
 
@@ -594,17 +594,17 @@ func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots 
 		o.Dirty = true
 		o.Deleted = time_slots == nil
 		o.Z = z
-		o.T = time_slots
+		o.Timeslots = time_slots
 		o.Source = source
 		return
 	}
 	s.Lookup[blobHashStr] = &LookupObject{
-		Accessed: false,
-		Dirty:    true,
-		Deleted:  time_slots == nil,
-		Z:        z,
-		T:        time_slots,
-		Source:   source,
+		Accessed:  false,
+		Dirty:     true,
+		Deleted:   time_slots == nil,
+		Z:         z,
+		Timeslots: time_slots,
+		Source:    source,
 	}
 }
 

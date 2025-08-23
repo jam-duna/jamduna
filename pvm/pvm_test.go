@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -93,7 +94,7 @@ func pvm_test(tc TestCase) error {
 // awaiting 64 bit
 func TestPVM(t *testing.T) {
 	// Directory containing the JSON files
-	dir := "../jamtestvectors/pvm/programs"
+	dir := path.Join(common.GetJAMTestVectorPath("stf"), "pvm/programs")
 
 	// Read all files in the directory
 	files, err := os.ReadDir(dir)
@@ -405,7 +406,7 @@ func TestLogEntry(t *testing.T) {
 	showDisassembly = true
 	// a real pvm test case for it to run
 	name := "inst_store_indirect_u16_with_offset_ok"
-	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
+	filePath := path.Join(common.GetJAMTestVectorPath("stf"), "pvm/programs/", name+".json")
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatalf("Failed to read file %s: %v", filePath, err)

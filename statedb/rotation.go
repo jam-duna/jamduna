@@ -40,10 +40,10 @@ func (s *StateDB) RotateGuarantors() {
 	entropy := s.JamState.SafroleState.Entropy[2]
 	t := s.JamState.SafroleState.Timeslot
 	cores := Permute(entropy, t)
-	for i, kappa := range s.JamState.SafroleState.CurrValidators {
+	for i, v := range s.JamState.SafroleState.CurrValidators {
 		assignments = append(assignments, types.GuarantorAssignment{
 			CoreIndex: uint16(cores[i]),
-			Validator: kappa,
+			Validator: v,
 		})
 	}
 	s.GuarantorAssignments = make([]types.GuarantorAssignment, len(assignments))
@@ -53,10 +53,10 @@ func (s *StateDB) RotateGuarantors() {
 	t = s.JamState.SafroleState.Timeslot - types.ValidatorCoreRotationPeriod
 	if (s.JamState.SafroleState.Timeslot-types.ValidatorCoreRotationPeriod)/types.EpochLength == s.JamState.SafroleState.Timeslot/types.EpochLength {
 		cores := Permute(s.JamState.SafroleState.Entropy[2], t)
-		for i, kappa := range s.JamState.SafroleState.CurrValidators {
+		for i, validator := range s.JamState.SafroleState.CurrValidators {
 			assignments = append(assignments, types.GuarantorAssignment{
 				CoreIndex: uint16(cores[i]),
-				Validator: kappa,
+				Validator: validator,
 			})
 		}
 	} else {
@@ -65,10 +65,10 @@ func (s *StateDB) RotateGuarantors() {
 			log.Crit(log.SDB, "PrevValidators is empty")
 			return
 		}
-		for i, lambda := range s.JamState.SafroleState.PrevValidators {
+		for i, validator := range s.JamState.SafroleState.PrevValidators {
 			assignments = append(assignments, types.GuarantorAssignment{
 				CoreIndex: uint16(cores[i]),
-				Validator: lambda,
+				Validator: validator,
 			})
 		}
 	}
@@ -84,10 +84,10 @@ func (s *StateDB) CalculateAssignments(slot uint32) (PreviousGuarantorAssignment
 	entropy := sf_tmp.Entropy[2]
 	t := slot
 	cores := Permute(entropy, t)
-	for i, kappa := range sf_tmp.CurrValidators {
+	for i, validator := range sf_tmp.CurrValidators {
 		assignments = append(assignments, types.GuarantorAssignment{
 			CoreIndex: uint16(cores[i]),
-			Validator: kappa,
+			Validator: validator,
 		})
 	}
 
@@ -96,18 +96,18 @@ func (s *StateDB) CalculateAssignments(slot uint32) (PreviousGuarantorAssignment
 	prev_using_entropy := 2
 	if (slot-types.ValidatorCoreRotationPeriod)/types.EpochLength == slot/types.EpochLength {
 		cores := Permute(sf_tmp.Entropy[prev_using_entropy], t)
-		for i, kappa := range sf_tmp.CurrValidators {
+		for i, validator := range sf_tmp.CurrValidators {
 			prev_assignments = append(prev_assignments, types.GuarantorAssignment{
 				CoreIndex: uint16(cores[i]),
-				Validator: kappa,
+				Validator: validator,
 			})
 		}
 	} else {
 		cores := Permute(sf_tmp.Entropy[prev_using_entropy+1], t)
-		for i, lambda := range sf_tmp.PrevValidators {
+		for i, validator := range sf_tmp.PrevValidators {
 			prev_assignments = append(prev_assignments, types.GuarantorAssignment{
 				CoreIndex: uint16(cores[i]),
-				Validator: lambda,
+				Validator: validator,
 			})
 		}
 	}

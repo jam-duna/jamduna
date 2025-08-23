@@ -15,13 +15,13 @@ ErasureRoot(u)		: MB([x∣x∈T[b♣,s♣]]) - root of a binary Merkle tree whic
 SegmentRoot(e)		: M(s) - root of a constant-depth, left-biased and zero-hash-padded binary Merkle tree (CDT) committing to the hashes of each of the exported segments of each work-item.
 */
 
-// EQ(186):Availability Specifier
+// EQ(186):Availability Specifier C.25 11.5
 type AvailabilitySpecifier struct {
-	WorkPackageHash       common.Hash `json:"hash"`
-	BundleLength          uint32      `json:"length"`
-	ErasureRoot           common.Hash `json:"erasure_root"`
-	ExportedSegmentRoot   common.Hash `json:"exports_root"`
-	ExportedSegmentLength uint16      `json:"exports_count"`
+	WorkPackageHash       common.Hash `json:"hash"`          // p
+	BundleLength          uint32      `json:"length"`        // l
+	ErasureRoot           common.Hash `json:"erasure_root"`  // u
+	ExportedSegmentRoot   common.Hash `json:"exports_root"`  // e
+	ExportedSegmentLength uint16      `json:"exports_count"` // n
 }
 
 func (as *AvailabilitySpecifier) String() string {

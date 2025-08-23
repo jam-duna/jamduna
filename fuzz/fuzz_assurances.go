@@ -41,8 +41,8 @@ func fuzzBlockABadValidatorIndex(seed []byte, block *types.Block) error {
 func fuzzBlockABadCore(seed []byte, block *types.Block, s *statedb.StateDB, secrets []types.ValidatorSecret) error {
 	r := NewSeededRand(seed)
 	jamstate := s.GetJamState()
-	for coreIdx, rhoState := range jamstate.AvailabilityAssignments {
-		if rhoState == nil {
+	for coreIdx, availability_assignment := range jamstate.AvailabilityAssignments {
+		if availability_assignment == nil {
 			a := randomAssurance(r, block)
 			if a == nil {
 				return nil
@@ -76,12 +76,12 @@ func fuzzBlockAStaleReport(seed []byte, block *types.Block, s *statedb.StateDB) 
 	anyAvailability := false
 	anyStaleAvailability := false
 
-	for coreIdx, rhoState := range jamState.AvailabilityAssignments {
-		if rhoState != nil {
+	for coreIdx, availability_assignment := range jamState.AvailabilityAssignments {
+		if availability_assignment != nil {
 			anyAvailability = true
-			if (rhoState.Timeslot + types.UnavailableWorkReplacementPeriod) <= blkTimeSlot {
+			if (availability_assignment.Timeslot + types.UnavailableWorkReplacementPeriod) <= blkTimeSlot {
 				anyStaleAvailability = true
-				stalePendingCores[uint16(coreIdx)] = rhoState.Timeslot
+				stalePendingCores[uint16(coreIdx)] = availability_assignment.Timeslot
 			}
 		}
 	}

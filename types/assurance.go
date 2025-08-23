@@ -51,17 +51,17 @@ func (A *Assurance) BitFieldToBytes() []byte {
 	return A.Bitfield[:]
 }
 
-func (A *Assurance) ValidBitfield(HadRho []bool) bool {
-	for i, rho := range HadRho {
-		if A.GetBitFieldBit(uint16(i)) && !rho {
+func (A *Assurance) ValidBitfield(HadAvailabilityAssignments []bool) bool {
+	for i, availability_assignment := range HadAvailabilityAssignments {
+		if A.GetBitFieldBit(uint16(i)) && !availability_assignment {
 			return false
 		}
 	}
 	return true
 }
 
-func (A *Assurance) CheckTimeout(IsRhoTimeOut []bool) bool {
-	for i, timeout := range IsRhoTimeOut {
+func (A *Assurance) CheckTimeout(IsAvailabilityAssignmentsTimeOut []bool) bool {
+	for i, timeout := range IsAvailabilityAssignmentsTimeOut {
 		if A.GetBitFieldBit(uint16(i)) && timeout {
 			return false
 		}

@@ -9,41 +9,39 @@ import (
 )
 
 type BlockHeader struct {
-	// H_p
+	// H_P
 	ParentHeaderHash common.Hash `json:"parent"`
-	// H_r
+	// H_R
 	ParentStateRoot common.Hash `json:"parent_state_root"`
-	// H_x
+	// H_X
 	ExtrinsicHash common.Hash `json:"extrinsic_hash"`
-	// H_t
+	// H_T
 	Slot uint32 `json:"slot"`
-	// H_e
+	// H_E
 	EpochMark *EpochMark `json:"epoch_mark,omitempty"`
-	// H_w
+	// H_W
 	TicketsMark []*TicketBody `json:"tickets_mark,omitempty"`
-	// H_o
+	// H_O
 	OffendersMark []Ed25519Key `json:"offenders_mark"`
-	// H_i
+	// H_I
 	AuthorIndex uint16 `json:"author_index"`
-	// H_v
+	// H_V
 	EntropySource BandersnatchVrfSignature `json:"entropy_source"`
-	// H_s
+	// H_S
 	Seal BandersnatchVrfSignature `json:"seal"`
-	// H_j
-	// VerdictsMarkers *VerdictMarker `json:"verdict_markers"` // renamed from judgement
 }
 
 // BlockHeaderWithoutSig represents the BlockHeader without signature fields.
 type BlockHeaderWithoutSig struct {
-	ParentHeaderHash common.Hash              `json:"parent_hash"`
-	PriorStateRoot   common.Hash              `json:"prior_state_root"`
-	ExtrinsicHash    common.Hash              `json:"extrinsic_hash"`
-	TimeSlot         uint32                   `json:"timeslot"`
-	EpochMark        *EpochMark               `json:"epoch_mark"`
-	TicketsMark      *TicketsMark             `json:"tickets_mark"`
-	OffendersMark    []Ed25519Key             `json:"offenders_mark"`
-	AuthorIndex      uint16                   `json:"block_author_key"`
-	EntropySource    BandersnatchVrfSignature `json:"entropy_source"`
+	ParentHeaderHash common.Hash              `json:"parent"`            // H_P
+	PriorStateRoot   common.Hash              `json:"parent_state_root"` // H_R
+	ExtrinsicHash    common.Hash              `json:"extrinsic_hash"`    // H_X
+	TimeSlot         uint32                   `json:"slot"`              // H_T
+	EpochMark        *EpochMark               `json:"epoch_mark"`        // H_E
+	TicketsMark      *TicketsMark             `json:"tickets_mark"`      // H_W
+	AuthorIndex      uint16                   `json:"author_index"`      // H_I
+	EntropySource    BandersnatchVrfSignature `json:"entropy_source"`    // H_V
+	OffendersMark    []Ed25519Key             `json:"offenders_mark"`    // H_O ???
 }
 
 func (b *BlockHeaderWithoutSig) String() string {
@@ -53,16 +51,16 @@ func (b *BlockHeaderWithoutSig) String() string {
 
 // for codec
 type CBlockHeader struct {
-	ParentHeaderHash common.Hash              `json:"parent"`
-	ParentStateRoot  common.Hash              `json:"parent_state_root"`
-	ExtrinsicHash    common.Hash              `json:"extrinsic_hash"`
-	Slot             uint32                   `json:"slot"`
-	EpochMark        *EpochMark               `json:"epoch_mark,omitempty"`
-	TicketsMark      *TicketsMark             `json:"tickets_mark"`
-	OffendersMark    []Ed25519Key             `json:"offenders_mark"`
-	AuthorIndex      uint16                   `json:"author_index"`
-	EntropySource    BandersnatchVrfSignature `json:"entropy_source"`
-	Seal             BandersnatchVrfSignature `json:"seal"`
+	ParentHeaderHash common.Hash              `json:"parent"`               // H_P
+	ParentStateRoot  common.Hash              `json:"parent_state_root"`    // H_R
+	ExtrinsicHash    common.Hash              `json:"extrinsic_hash"`       // H_X
+	Slot             uint32                   `json:"slot"`                 // H_T
+	EpochMark        *EpochMark               `json:"epoch_mark,omitempty"` // H_E
+	TicketsMark      *TicketsMark             `json:"tickets_mark"`         // H_W
+	AuthorIndex      uint16                   `json:"author_index"`         // H_I
+	EntropySource    BandersnatchVrfSignature `json:"entropy_source"`       // H_V
+	OffendersMark    []Ed25519Key             `json:"offenders_mark"`       // H_O
+	Seal             BandersnatchVrfSignature `json:"seal"`                 // H_S
 }
 
 // NewBlockHeader returns a fresh block header from scratch.
@@ -184,21 +182,22 @@ func (b *BlockHeader) ConvertTicketsMark() (*TicketsMark, bool, error) {
 // type casting BlockHeader -> CBlockHeader
 func (b *BlockHeader) toCBlockHeader() (*CBlockHeader, error) {
 	cbh := &CBlockHeader{
-		ParentHeaderHash: b.ParentHeaderHash,
-		ParentStateRoot:  b.ParentStateRoot,
-		ExtrinsicHash:    b.ExtrinsicHash,
-		Slot:             b.Slot,
-		EpochMark:        b.EpochMark,
-		//TicketsMark:     nil,
-		OffendersMark: b.OffendersMark,
-		AuthorIndex:   b.AuthorIndex,
-		EntropySource: b.EntropySource,
-		Seal:          b.Seal,
+		ParentHeaderHash: b.ParentHeaderHash, // H_P
+		ParentStateRoot:  b.ParentStateRoot,  // H_R
+		ExtrinsicHash:    b.ExtrinsicHash,    // H_X
+		Slot:             b.Slot,             // H_T
+		EpochMark:        b.EpochMark,        // H_E
+		TicketsMark:      nil,                // H_W
+		AuthorIndex:      b.AuthorIndex,      // H_I
+		EntropySource:    b.EntropySource,    // H_V
+		OffendersMark:    b.OffendersMark,    // H_O
+		Seal:             b.Seal,             // H_S
 	}
 
+	// updating non-nil H_W
 	ticketMark, ok, _ := b.ConvertTicketsMark()
 	if ok && ticketMark != nil {
-		cbh.TicketsMark = ticketMark
+		cbh.TicketsMark = ticketMark //H_W
 	}
 	return cbh, nil
 }

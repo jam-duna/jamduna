@@ -82,36 +82,6 @@ func (b *InstructionBuilder) Format(format string) *InstructionBuilder {
 	return b
 }
 
-// formatRegister formats a register index as a register name
-func formatRegister(regIndex interface{}) string {
-	switch v := regIndex.(type) {
-	case int:
-		// Special register aliases
-		switch v {
-		case 0:
-			return "a0"
-		case 1:
-			return "a1"
-		case 2:
-			return "a2"
-		case 3:
-			return "a3"
-		case 4:
-			return "a4"
-		case 5:
-			return "a5"
-		default:
-			return fmt.Sprintf("r%d", v)
-		}
-	case uint32:
-		return formatRegister(int(v))
-	case uint64:
-		return formatRegister(int(v))
-	default:
-		return fmt.Sprintf("r%v", regIndex)
-	}
-}
-
 // FormatInstruction formats an instruction using its specification and provided values
 func FormatInstruction(opcode byte, values []interface{}) string {
 	spec, exists := InstrSpecs[opcode]

@@ -104,9 +104,9 @@ func rubic(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 
 		wp := types.WorkPackage{
 			AuthCodeHost:          0,
-			Authorization:         nil, // null-authorizer
+			AuthorizationToken:    nil, // null-authorizer
 			AuthorizationCodeHash: bootstrap_auth_codehash,
-			ParameterizationBlob:  nil,
+			ConfigurationBlob:     nil,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            statedb.AuthCopyServiceCode,

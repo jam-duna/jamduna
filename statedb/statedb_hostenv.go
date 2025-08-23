@@ -61,7 +61,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 	}
 
 	for blob_hash_str, v := range sa.Lookup {
-		log.Debug(log.SDB, "writeAccount Lookup", "service_idx", service_idx, "blob_hash_str", blob_hash_str, "v.Dirty", v.Dirty, "v.Deleted", v.Deleted, "v.Z", v.Z, "v.T", v.T, "source", v.Source)
+		log.Debug(log.SDB, "writeAccount Lookup", "service_idx", service_idx, "blob_hash_str", blob_hash_str, "v.Dirty", v.Dirty, "v.Deleted", v.Deleted, "v.Z", v.Z, "v.Timeslots", v.Timeslots, "source", v.Source)
 		blob_hash := common.HexToHash(blob_hash_str)
 		if v.Dirty {
 			if v.Deleted {
@@ -81,10 +81,10 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 					}
 				}
 			} else {
-				log.Debug(log.SDB, "writeAccount SET Lookup", "service_idx", service_idx, "blob_hash", blob_hash_str, "v.Z", v.Z, "v.T", v.T)
-				err = tree.SetPreImageLookup(service_idx, blob_hash, v.Z, v.T)
+				log.Debug(log.SDB, "writeAccount SET Lookup", "service_idx", service_idx, "blob_hash", blob_hash_str, "v.Z", v.Z, "v.Timeslots", v.Timeslots)
+				err = tree.SetPreImageLookup(service_idx, blob_hash, v.Z, v.Timeslots)
 				if err != nil {
-					log.Warn(log.SDB, "tree.SetPreimageLookup", "blob_hash", blob_hash, "v.Z", v.Z, "v.T", v.T, "err", err)
+					log.Warn(log.SDB, "tree.SetPreimageLookup", "blob_hash", blob_hash, "v.Z", v.Z, "v.Timeslots", v.Timeslots, "err", err)
 					return
 				}
 				serviceUpdate.ServiceRequest[blob_hash_str] = &types.SubServiceRequestResult{
@@ -92,7 +92,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 					Slot:       s.GetTimeslot(),
 					Hash:       blob_hash, //TODO: SOURABH CHECK
 					ServiceID:  service_idx,
-					Timeslots:  v.T,
+					Timeslots:  v.Timeslots,
 				}
 			}
 		}
@@ -146,7 +146,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 func (s *StateDB) ApplyXContext(U *types.PartialState) (stateUpdate *types.StateUpdate) {
 	stateUpdate = types.NewStateUpdate()
 	debugXU := false
-	for _, sa := range U.D {
+	for _, sa := range U.ServiceAccounts {
 		// U.D should only have service accounts with Mutable = true
 		if !sa.Mutable {
 			log.Crit(log.SDB, "Immutable Service account in X.U.D", "s", sa.ServiceIndex)
@@ -161,13 +161,13 @@ func (s *StateDB) ApplyXContext(U *types.PartialState) (stateUpdate *types.State
 			stateUpdate.AddServiceUpdate(sa.ServiceIndex, serviceUpdate)
 		}
 	}
-	// p - Bless => Kai_state 12.4.1 (164)
-	s.JamState.PrivilegedServiceIndices.Kai_a = U.PrivilegedState.Kai_a
-	s.JamState.PrivilegedServiceIndices.Kai_m = U.PrivilegedState.Kai_m
-	s.JamState.PrivilegedServiceIndices.Kai_v = U.PrivilegedState.Kai_v
-	s.JamState.PrivilegedServiceIndices.Kai_g = make(map[uint32]uint64)
-	for k, v := range U.PrivilegedState.Kai_g {
-		s.JamState.PrivilegedServiceIndices.Kai_g[k] = v
+	// p - Bless => PrivilegedServiceState 12.4.1 (164)
+	s.JamState.PrivilegedServiceIndices.AuthQueueServiceID = U.PrivilegedState.AuthQueueServiceID
+	s.JamState.PrivilegedServiceIndices.ManagerServiceID = U.PrivilegedState.ManagerServiceID
+	s.JamState.PrivilegedServiceIndices.UpcomingValidatorsServiceID = U.PrivilegedState.UpcomingValidatorsServiceID
+	s.JamState.PrivilegedServiceIndices.AlwaysAccServiceID = make(map[uint32]uint64)
+	for k, v := range U.PrivilegedState.AlwaysAccServiceID {
+		s.JamState.PrivilegedServiceIndices.AlwaysAccServiceID[k] = v
 	}
 
 	// c - Designate => AuthorizationQueue
@@ -176,7 +176,7 @@ func (s *StateDB) ApplyXContext(U *types.PartialState) (stateUpdate *types.State
 	}
 
 	// v - Assign => DesignatedValidators
-	s.JamState.SafroleState.DesignedValidators = U.UpcomingValidators
+	s.JamState.SafroleState.DesignatedValidators = U.UpcomingValidators
 	return
 }
 

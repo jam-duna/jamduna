@@ -276,7 +276,7 @@ func (n *NodeContent) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup
 // executeWorkPackageBundle can be called by a guarantor OR an auditor -- the caller MUST do  VerifyBundle call prior to execution (verifying the imported segments)
 func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, slot uint32, firstGuarantorOrAuditor bool) (work_report types.WorkReport, d AvailabilitySpecifierDerivation, elapsed uint32, bundleSnapshot *types.WorkPackageBundleSnapshot, err error) {
 	importsegments := make([][][]byte, len(package_bundle.WorkPackage.WorkItems))
-	results := []types.WorkResult{}
+	results := []types.WorkDigest{}
 	targetStateDB := n.getPVMStateDB()
 	workPackage := package_bundle.WorkPackage
 
@@ -304,7 +304,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 	vm_auth.SetPVMContext(pvmContext)
 	r := vm_auth.ExecuteAuthorization(workPackage, workPackageCoreIndex)
 	p_u := workPackage.AuthorizationCodeHash
-	p_p := workPackage.ParameterizationBlob
+	p_p := workPackage.ConfigurationBlob
 	p_a := common.Blake2Hash(append(p_u.Bytes(), p_p...))
 	authGasUsed := int64(types.IsAuthorizedGasAllocation) - vm_auth.Gas
 	var segments [][]byte
@@ -342,7 +342,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		for _, extrinsic := range workItem.Extrinsics {
 			z += int(extrinsic.Len)
 		}
-		result := types.WorkResult{
+		result := types.WorkDigest{
 			ServiceID:           workItem.Service,
 			CodeHash:            workItem.CodeHash,
 			PayloadHash:         common.Blake2Hash(workItem.Payload),
@@ -354,26 +354,16 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 			NumBytesExtrinsics:  uint(z),
 		}
 		if len(output.Ok)+z > types.MaxEncodedWorkReportSize {
-			result.Result.Err = types.WORKRESULT_OVERSIZE
+			result.Result.Err = types.WORKDIGEST_OVERSIZE
 			result.Result.Ok = nil
 		} else if expectedSegmentCnt != len(exported_segments) {
-			result.Result.Err = types.WORKRESULT_BAD_EXPORT
+			result.Result.Err = types.WORKDIGEST_BAD_EXPORT
 			result.Result.Ok = nil
 		} else {
 			result.Result = output
 		}
 		results = append(results, result)
 
-		o := types.AccumulateOperandElements{
-			H: common.Hash{}, // REVIEW
-			E: common.Hash{}, // REVIEW
-			A: p_a,
-			O: r.Ok,
-			Y: result.PayloadHash,
-			G: uint(result.Gas),
-			D: result.Result,
-		}
-		log.Debug(log.G, "executeWorkPackageBundle", "wrangledResults", types.DecodedWrangledResults(&o))
 	}
 
 	spec, d := n.NewAvailabilitySpecifier(package_bundle, segments)
@@ -383,7 +373,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		RefineContext:     workPackage.RefineContext,
 		CoreIndex:         uint(workPackageCoreIndex),
 		AuthorizerHash:    p_a,
-		AuthOutput:        r.Ok,
+		Trace:             r.Ok,
 		SegmentRootLookup: segmentRootLookup,
 		Results:           results,
 		AuthGasUsed:       uint(authGasUsed),

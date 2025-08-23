@@ -1,4 +1,0 @@
-r7 = 0xa
-jump 8 if r7 >s 4294967286
-trap
-r7 = 0xdeadbeef

@@ -28,7 +28,7 @@ func (n *Node) isAssuring(workPackageHash common.Hash) bool {
 // For generating assurance extrinsic
 func (n *Node) generateAssurance(headerHash common.Hash, timeslot uint32) (a types.Assurance, numCores uint16) {
 	// this will generate an assurance based on RECENT work packages (based on some block timeslot)
-	wph := n.statedb.GetJamState().GetRecentWorkPackagesFromRho(timeslot)
+	wph := n.statedb.GetJamState().GetRecentWorkPackagesFromAvailabilityAssignments(timeslot)
 	numCores = 0
 	for core, wph := range wph {
 		if n.isAssuring(wph) {

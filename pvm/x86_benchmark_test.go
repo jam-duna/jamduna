@@ -2,8 +2,12 @@ package pvm
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"path"
 	"testing"
+
+	"github.com/colorfulnotion/jam/common"
 )
 
 func BenchmarkInstRetHalt(b *testing.B) {
@@ -14,7 +18,7 @@ func BenchmarkInstRetHalt(b *testing.B) {
 
 	// 1) Load & parse test case exactly once:
 	const name = "inst_ret_halt"
-	filePath := "../jamtestvectors/pvm/programs/" + name + ".json"
+	filePath := path.Join(common.GetJAMTestVectorPath("stf"), "pvm/programs", fmt.Sprintf("%s.json", name))
 
 	data, err := os.ReadFile(filePath)
 	if err != nil {

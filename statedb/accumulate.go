@@ -11,12 +11,12 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-type BeefyPool []Beta_state
+type BeefyPool []HistoryState
 
 // v0.4.5 eq.165 - W^!
-func AccumulatedImmediately(W []types.WorkReport) []types.WorkReport {
+func AccumulatedImmediately(workReports []types.WorkReport) []types.WorkReport {
 	outputWorkReports := []types.WorkReport{}
-	for _, workReport := range W {
+	for _, workReport := range workReports {
 		if len(workReport.RefineContext.Prerequisites) == 0 && len(workReport.SegmentRootLookup) == 0 {
 			outputWorkReports = append(outputWorkReports, workReport)
 		}
@@ -25,9 +25,9 @@ func AccumulatedImmediately(W []types.WorkReport) []types.WorkReport {
 }
 
 // v0.4.5 eq.166 - W^Q
-func (j *JamState) QueuedExecution(W []types.WorkReport) []types.AccumulationQueue {
+func (j *JamState) QueuedExecution(workReports []types.WorkReport) []types.AccumulationQueue {
 	outputWorkReports := []types.WorkReport{}
-	for _, workReport := range W {
+	for _, workReport := range workReports {
 		if len(workReport.RefineContext.Prerequisites) != 0 || len(workReport.SegmentRootLookup) != 0 {
 			outputWorkReports = append(outputWorkReports, workReport)
 		}
@@ -54,16 +54,7 @@ func Depandancy(w types.WorkReport) types.AccumulationQueue {
 	for _, p := range w.RefineContext.Prerequisites {
 		hashSet[p] = struct{}{}
 	}
-	/*
-		for _, key := range w.SegmentRootLookup {
-			hashSet[key] = struct{}{}
-		}
-		depandancy := []common.Hash{}
-		for key := range hashSet {
-			depandancy = append(depandancy, key)
-		}
-	*/
-	// Shawn please check
+
 	for _, segmentRootLookupItem := range w.SegmentRootLookup {
 		hashSet[segmentRootLookupItem.WorkPackageHash] = struct{}{}
 	}
@@ -253,18 +244,17 @@ free accumulation, into a tuple of the number of work-
 results accumulated, a posterior state-context, the resul-
 tant deferred-transfers and accumulation-output pairings:
 */
-// eq 173
 // ∆+
-func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.PartialState, f map[uint32]uint32, pvmBackend string) (num uint64, output_t []types.DeferredTransfer, output_b []types.AccumulationOutput, GasUsage []Usage) { // not really sure i here , the max meaning. use uint32 for now
+func (s *StateDB) OuterAccumulate(g uint64, workReports []types.WorkReport, o *types.PartialState, freeAccumulation map[uint32]uint32, pvmBackend string) (num_accumulations uint64, transfers []types.DeferredTransfer, accumulation_output []types.AccumulationOutput, GasUsage []Usage) {
 	var gas_tmp uint64
 	i := uint64(0)
 	// calculate how to maximize the work reports to enter the parallelized accumulation
-	for _, workReport := range w {
-		for _, workResult := range workReport.Results {
-			gas_tmp += workResult.Gas
+	for _, workReport := range workReports {
+		for _, workDigest := range workReport.Results {
+			gas_tmp += workDigest.Gas
 			if gas_tmp <= g {
 				i++
-				if i >= uint64(len(w))+1 {
+				if i >= uint64(len(workReports))+1 {
 					break
 				}
 			}
@@ -273,38 +263,38 @@ func (s *StateDB) OuterAccumulate(g uint64, w []types.WorkReport, o *types.Parti
 	}
 
 	if i == 0 { // if i = 0, then nothing to do
-		num = 0
+		num_accumulations = 0
 
-		output_t = make([]types.DeferredTransfer, 0)
-		output_b = make([]types.AccumulationOutput, 0)
+		transfers = make([]types.DeferredTransfer, 0)
+		accumulation_output = make([]types.AccumulationOutput, 0)
 		GasUsage = make([]Usage, 0)
 		return
 	}
-	if i >= uint64(len(w)) { // if i >= len(w), then all work reports are accumulated
-		i = uint64(len(w))
+	if i >= uint64(len(workReports)) { // if i >= len(w), then all work reports are accumulated
+		i = uint64(len(workReports))
 	}
-	g_star, t_star, b_star, U := s.ParallelizedAccumulate(o, w[0:i], f, pvmBackend) // parallelized accumulation the 0 to i work reports
-	if i >= uint64(len(w)) {
-		return i, t_star, b_star, U
+	p_gasUsed, p_transfers, p_outputs, p_gasUsage := s.ParallelizedAccumulate(o, workReports[0:i], freeAccumulation, pvmBackend) // parallelized accumulation the 0 to i work reports
+	if i >= uint64(len(workReports)) {
+		return i, p_transfers, p_outputs, p_gasUsage
 	}
-	j, outputT, outputB, GasUsage := s.OuterAccumulate(g-g_star, w[i+1:], o, nil, pvmBackend) // recursive call to the rest of the work reports
-	num = i + j
+	incNum, incTransfers, incAccumulationOutput, incGasUsage := s.OuterAccumulate(g-p_gasUsed, workReports[i+1:], o, nil, pvmBackend) // recursive call to the rest of the work reports
+	num_accumulations = i + incNum
 
-	output_t = append(outputT, t_star...)
-	for _, b := range b_star {
+	transfers = append(incTransfers, p_transfers...)
+	for _, p_output := range p_outputs {
 		duplicate := false
-		for _, existingB := range outputB {
-			if existingB.Service == b.Service && existingB.Output == b.Output {
+		for _, acc_output := range incAccumulationOutput {
+			if acc_output.Service == p_output.Service && acc_output.Output == p_output.Output {
 				duplicate = true
 				break
 			}
 		}
 
-		if b.Output != (common.Hash{}) && !duplicate {
-			output_b = append(output_b, b)
+		if p_output.Output != (common.Hash{}) && !duplicate {
+			accumulation_output = append(accumulation_output, p_output)
 		}
 	}
-	GasUsage = append(U, GasUsage...)
+	GasUsage = append(p_gasUsage, incGasUsage...)
 	return
 }
 
@@ -314,66 +304,64 @@ privileged always-accumulate services, into a tuple of the total gas utilized in
 */
 // the parallelized accumulation function ∆*
 // eq 174
-func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkReport, f map[uint32]uint32, pvmBackend string) (output_u uint64, output_t []types.DeferredTransfer, output_b []types.AccumulationOutput, GasUsage []Usage) {
+func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, workReports []types.WorkReport, freeAccumulation map[uint32]uint32, pvmBackend string) (totalGasUsed uint64, transfers []types.DeferredTransfer, accumulation_output []types.AccumulationOutput, GasUsage []Usage) {
 	GasUsage = make([]Usage, 0)
 	services := make([]uint32, 0)
 	ts := s.JamState.SafroleState.Timeslot
-	for _, workReport := range w {
-		for _, workResult := range workReport.Results {
-			services = append(services, workResult.ServiceID)
+	for _, workReport := range workReports {
+		for _, workDigest := range workReport.Results {
+			services = append(services, workDigest.ServiceID)
 		}
 	}
-	output_u = 0
-	// get services from f key
-	for k := range f {
+	totalGasUsed = 0
+	// get services from freeAccumulation key
+	for k := range freeAccumulation {
 		services = append(services, k)
 	}
 	// remove duplicates
 	//s = {rs S w ∈ w, r ∈ wr} ∪ K(f )
 	services = UniqueUint32Slice(services)
 	accumulated_partial := make(map[uint32]*types.XContext)
-	// TODO: review the o.clone and try to run it in parallel
+	// TODO: parallelize this
 	for _, service := range services {
-		// this is parallelizable
-		// o_copy := o.Clone()
-		B, U, XY, exceptional := s.SingleAccumulate(o, w, f, service, pvmBackend)
+		output, gasUsed, XY, exceptional := s.SingleAccumulate(o, workReports, freeAccumulation, service, pvmBackend)
 		if XY == nil {
 			log.Warn(log.SDB, "SingleAccumulate returned nil XContext", "service", service)
 			continue
 		}
-		output_u += U
+		totalGasUsed += gasUsed
 		empty := common.Hash{}
 		//u = [(s, ∆1(o, w, f , s)u) S s <− s]
 		GasUsage = append(GasUsage, Usage{
 			Service: service,
-			Gas:     U,
+			Gas:     gasUsed,
 		})
 		//b = {(s, b) S s ∈ s, b = ∆1(o, w, f , s)b, b ≠ ∅}
-		if B == empty {
+		if output == empty {
 
 		} else {
-			output_b = append(output_b, types.AccumulationOutput{
+			accumulation_output = append(accumulation_output, types.AccumulationOutput{
 				Service: service,
-				Output:  B,
+				Output:  output,
 			})
 		}
 
 		//t = [∆1(o, w, f , s)t S s <− s]
-		output_t = append(output_t, XY.T...)
+		transfers = append(transfers, XY.Transfers...)
 
 		//d′ = P ((d ∪ n) ∖ m, ⋃s∈s ∆1(o, w, f , s)p)
 		if XY.U != nil {
-			if XY.U.D != nil {
-				for s, sa := range XY.U.D {
+			if XY.U.ServiceAccounts != nil {
+				for s, sa := range XY.U.ServiceAccounts {
 					if exceptional {
 						if sa.Checkpointed {
 							sa.Dirty = true
-							o.D[s] = sa
+							o.ServiceAccounts[s] = sa
 						}
 
 					} else {
 						sa.Dirty = true
-						o.D[s] = sa
+						o.ServiceAccounts[s] = sa
 					}
 				}
 			}
@@ -385,17 +373,17 @@ func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, w []types.WorkRe
 		o.QueueWorkReport = XY.U.QueueWorkReport
 		o.UpcomingValidators = XY.U.UpcomingValidators
 		o.PrivilegedState = XY.U.PrivilegedState
-		for k, v := range XY.U.PrivilegedState.Kai_g {
-			o.PrivilegedState.Kai_g[k] = v
+		for k, v := range XY.U.PrivilegedState.AlwaysAccServiceID {
+			o.PrivilegedState.AlwaysAccServiceID[k] = v
 		}
 	}
 
 	for service, service_accumulated_partial := range accumulated_partial {
-		sa := service_accumulated_partial.U.D[service]
+		sa := service_accumulated_partial.U.ServiceAccounts[service]
 		sa.UpdateRecentAccumulation(ts)
-		o.D[service] = sa
+		o.ServiceAccounts[service] = sa
 		if service_accumulated_partial.U != nil {
-			o.D[service] = service_accumulated_partial.U.D[service]
+			o.ServiceAccounts[service] = service_accumulated_partial.U.ServiceAccounts[service]
 		}
 	}
 	return
@@ -443,18 +431,15 @@ func (sdb *StateDB) NewXContext(u *types.PartialState, s uint32, serviceAccount 
 	decoded := uint32(types.DecodeE_l(hash[:4]))
 
 	x := &types.XContext{
-		U: u.Clone(), // IMPORTANT: writes in one service (Fib, Trib) are readable by another (Meg) in ordered accumulation
-		S: s,
-		I: sdb.NewXContext_Check(decoded%((1<<32)-(1<<9)) + (1 << 8)),
+		U:               u.Clone(), // IMPORTANT: writes in one service (Fib, Trib) are readable by another (Meg) in ordered accumulation
+		ServiceIndex:    s,
+		NewServiceIndex: sdb.NewXContext_Check(decoded%((1<<32)-(1<<9)) + (1 << 8)),
 	}
-	//log.Trace(module, "s", s, "eta_0'", sdb.JamState.SafroleState.Entropy[0].Bytes(), "timeslot", sdb.JamState.SafroleState.Timeslot)
-	//log.Trace(module, "encode(s, eta_0', timeslot)", encoded, "hash(encoded)", hash, "hashed[:4]", hash[:4], "decode(hashed[:4])", decoded)
-	//log.Trace(module, "decoded mod 4294966784 + 256= %d  ====> this will be the new service id\n\n", x.I)
 
 	// IMPORTABLE NOW WE MAKE A COPY of serviceAccount AND MAKE IT MUTABLE
 	mutableServiceAccount := serviceAccount.Clone()
 	mutableServiceAccount.ALLOW_MUTABLE()
-	x.U.D[s] = mutableServiceAccount // NOTE: this is a distinct COPY of serviceAccount and CAN have Set{...}
+	x.U.ServiceAccounts[s] = mutableServiceAccount // NOTE: this is a distinct COPY of serviceAccount and CAN have Set{...}
 	return x
 }
 
@@ -462,21 +447,21 @@ func (sd *StateDB) InitXContextService(s uint32, o *types.PartialState, xy *type
 	// Initialize the service account for the given service ID and XContext
 	if xy.U == nil {
 		xy.U = o.Clone() // make a copy of the partial state
-		xy.U.D = make(map[uint32]*types.ServiceAccount)
+		xy.U.ServiceAccounts = make(map[uint32]*types.ServiceAccount)
 	}
 
-	if xy.U != nil && xy.U.D == nil {
-		xy.U.D = make(map[uint32]*types.ServiceAccount)
+	if xy.U != nil && xy.U.ServiceAccounts == nil {
+		xy.U.ServiceAccounts = make(map[uint32]*types.ServiceAccount)
 
 	}
 
-	if xy.U.D[s] == nil {
+	if xy.U.ServiceAccounts[s] == nil {
 		x_s, ok, err := sd.GetService(s) // misplaced
 		if !ok || err != nil {
 			fmt.Printf("service %v ok %v err %v\n", s, ok, err)
 			return fmt.Errorf("service %v Err: %v", s, err)
 		}
-		xy.U.D[s] = x_s
+		xy.U.ServiceAccounts[s] = x_s
 	}
 	return nil
 }
@@ -492,104 +477,104 @@ invokes pvm execution
 */
 // ∆1
 // eq 176
-func (sd *StateDB) SingleAccumulate(o *types.PartialState, w []types.WorkReport, f map[uint32]uint32, s uint32, pvmBackend string) (output_b common.Hash, output_u uint64, xy *types.XContext, exceptional bool) {
+func (sd *StateDB) SingleAccumulate(o *types.PartialState, workReports []types.WorkReport, freeAccumulation map[uint32]uint32, serviceID uint32, pvmBackend string) (accumulation_output common.Hash, gasUsed uint64, xy *types.XContext, exceptional bool) {
 	//fmt.Printf("!!!SingleAccumulate - o=%v w=%v f=%v s=%d pvmBackend=%s\n", o, w, f, s, pvmBackend)
 	// gas need to check again
-	// check if s is in f
+	// check if serviceID is in f
 	gas := uint32(0)
-	if _, ok := f[s]; ok {
-		gas = f[s]
+	if _, ok := freeAccumulation[serviceID]; ok {
+		gas = freeAccumulation[serviceID]
 	}
 	// add all gas from work reports
-	for _, workReport := range w {
-		for _, workResult := range workReport.Results {
-			if workResult.ServiceID == s {
-				gas += uint32(workResult.Gas)
+	for _, workReport := range workReports {
+		for _, workDigest := range workReport.Results {
+			if workDigest.ServiceID == serviceID {
+				gas += uint32(workDigest.Gas)
 			}
 		}
 	}
 
-	p := make([]types.AccumulateOperandElements, 0)
+	operandElements := make([]types.AccumulateOperandElements, 0)
 	g := uint64(0)
-	for _, workReport := range w {
-		for _, workResult := range workReport.Results {
-			if workResult.ServiceID == s {
-				g += workResult.Gas
-				o := types.AccumulateOperandElements{
-					H: workReport.AvailabilitySpec.WorkPackageHash,
-					E: workReport.AvailabilitySpec.ExportedSegmentRoot,
-					G: uint(workResult.Gas),
-					A: workReport.AuthorizerHash,
-					O: workReport.AuthOutput,
-					Y: workResult.PayloadHash,
-					D: workResult.Result,
+	for _, workReport := range workReports {
+		for _, workDigest := range workReport.Results {
+			if workDigest.ServiceID == serviceID {
+				g += workDigest.Gas
+				operandElement := types.AccumulateOperandElements{
+					WorkPackageHash:     workReport.AvailabilitySpec.WorkPackageHash,
+					ExportedSegmentRoot: workReport.AvailabilitySpec.ExportedSegmentRoot,
+					Gas:                 uint(workDigest.Gas),
+					AuthorizerHash:      workReport.AuthorizerHash,
+					Trace:               workReport.Trace,
+					PayloadHash:         workDigest.PayloadHash,
+					Result:              workDigest.Result,
 				}
-				log.Debug(sd.Authoring, "SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "wrangledResults", types.DecodedWrangledResults(&o))
-				p = append(p, o)
+				log.Debug(sd.Authoring, "SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", serviceID), "wrangledResults", types.DecodedWrangledResults(&operandElement))
+				operandElements = append(operandElements, operandElement)
 			}
 		}
 	}
 
 	//  get serviceAccount from U.D[s] FIRST
 	var err error
-	serviceAccount, ok := o.GetService(s)
+	serviceAccount, ok := o.GetService(serviceID)
 	if !ok {
-		serviceAccount, ok, err = sd.GetService(s)
+		serviceAccount, ok, err = sd.GetService(serviceID)
 		if err != nil || !ok {
-			log.Error(log.SDB, "GetService ERR", "ok", ok, "err", err, "s", s)
+			log.Error(log.SDB, "GetService ERR", "ok", ok, "err", err, "s", serviceID)
 			return
 		}
 	}
 
-	xContext := sd.NewXContext(o, s, serviceAccount)
+	xContext := sd.NewXContext(o, serviceID, serviceAccount)
 
 	xy = xContext // if code does not exist, fallback to this
-	err = sd.InitXContextService(s, o, xy)
+	err = sd.InitXContextService(serviceID, o, xy)
 	if err != nil {
-		log.Error(log.SDB, "InitXContextService ERR", "s", s, "error", err)
+		log.Error(log.SDB, "InitXContextService ERR", "s", serviceID, "error", err)
 		return
 	}
 	ok, code, preimage_source := serviceAccount.ReadPreimage(serviceAccount.CodeHash, sd)
 	if !ok {
-		log.Warn(log.SDB, "GetPreimage ERR", "ok", ok, "s", s, "codeHash", serviceAccount.CodeHash, "preimage_source", preimage_source)
+		log.Warn(log.SDB, "GetPreimage ERR", "ok", ok, "s", serviceID, "codeHash", serviceAccount.CodeHash, "preimage_source", preimage_source)
 		return
 	}
 
 	//(B.8) start point
-	vm := pvm.NewVMFromCode(s, code, 0, sd, pvmBackend)
+	vm := pvm.NewVMFromCode(serviceID, code, 0, sd, pvmBackend)
 	pvmContext := log.PvmValidating
 	if sd.Authoring == log.GeneralAuthoring {
 		pvmContext = log.PvmAuthoring
 	}
 	vm.SetPVMContext(pvmContext)
-	t := sd.JamState.SafroleState.Timeslot
-	vm.Timeslot = t
-	r, _, x_s := vm.ExecuteAccumulate(t, s, g, p, xContext, sd.JamState.SafroleState.Entropy[0])
+	timeslot := sd.JamState.SafroleState.Timeslot
+	vm.Timeslot = timeslot
+	r, _, x_s := vm.ExecuteAccumulate(timeslot, serviceID, g, operandElements, xContext, sd.JamState.SafroleState.Entropy[0])
 	exceptional = false
-	if r.Err == types.WORKRESULT_OOG || r.Err == types.WORKRESULT_PANIC {
+	if r.Err == types.WORKDIGEST_OOG || r.Err == types.WORKDIGEST_PANIC {
 		exceptional = true
-		output_b = vm.Y.Y
-		output_u = g - uint64(max(vm.Gas, 0))
+		accumulation_output = vm.Y.Yield
+		gasUsed = g - uint64(max(vm.Gas, 0))
 		xy = &(vm.Y)
 
-		if r.Err == types.WORKRESULT_OOG {
-			log.Trace(sd.Authoring, "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b, "x_s", x_s)
+		if r.Err == types.WORKDIGEST_OOG {
+			log.Trace(sd.Authoring, "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", serviceID), "accumulation_output", accumulation_output, "x_s", x_s)
 		} else {
-			log.Trace(sd.Authoring, "BEEFY PANIC @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", s), "B", output_b, "x_s", x_s)
+			log.Trace(sd.Authoring, "BEEFY PANIC @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", serviceID), "accumulation_output", accumulation_output, "x_s", x_s)
 		}
 		return
 	}
 	xy = vm.X
-	output_u = g - uint64(max(vm.Gas, 0))
+	gasUsed = g - uint64(max(vm.Gas, 0))
 	res := ""
 	if len(r.Ok) == 32 {
-		output_b = common.BytesToHash(r.Ok)
+		accumulation_output = common.BytesToHash(r.Ok)
 		res = "32byte"
 	} else {
-		output_b = vm.X.Y
+		accumulation_output = vm.X.Yield
 		res = "yield"
 	}
-	log.Trace(debugB, fmt.Sprintf("BEEFY OK-HALT with %s @SINGLE ACCUMULATE", res), "s", fmt.Sprintf("%d", s), "B", output_b)
+	log.Trace(debugB, fmt.Sprintf("BEEFY OK-HALT with %s @SINGLE ACCUMULATE", res), "s", fmt.Sprintf("%d", serviceID), "accumulation_output", accumulation_output)
 	return
 }
 
@@ -647,7 +632,7 @@ func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, sel
 // eq 12.24
 func (s *StateDB) ProcessDeferredTransfers(o *types.PartialState, time_slot uint32, t []types.DeferredTransfer, pvmBackend string) (transferStats map[uint32]*transferStatistics, err error) {
 	transferStats = make(map[uint32]*transferStatistics)
-	for service, serviceAccount := range o.D {
+	for service, serviceAccount := range o.ServiceAccounts {
 		gasUsed, transferCount, err := s.HostTransfer(serviceAccount, time_slot, uint32(service), t, pvmBackend)
 		if err != nil {
 			return transferStats, err
@@ -683,9 +668,6 @@ func (j *JamState) UpdateLatestHistory(w_star []types.WorkReport, num int) {
 
 	SortByHash(j.AccumulationHistory[types.EpochLength-1].WorkPackageHash)
 
-	// if len(j.AccumulationHistory[types.EpochLength-1].WorkPackageHash) > 0 {
-	// 	fmt.Printf("UpdateLatestHistory WorkPackageHash=%v\n", j.AccumulationHistory[types.EpochLength-1].WorkPackageHash)
-	// }
 }
 
 func SortByHash(hashes []common.Hash) {

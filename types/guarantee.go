@@ -2,7 +2,6 @@ package types
 
 import (
 	"encoding/json"
-	"fmt"
 	"reflect"
 
 	"bytes"
@@ -48,7 +47,7 @@ The core index of each guarantee must be unique and guarantees must be in ascend
 */
 // Credential represents a series of tuples of a signature and a validator index.
 type GuaranteeCredential struct {
-	ValidatorIndex uint16           `json:"validator_index"`
+	ValidatorIndex uint16           `json:"validator_index"` // fixed length E_2(v): https://graypaper.fluffylabs.dev/#/38c4e62/3adb013adb01?v=0.7.0
 	Signature      Ed25519Signature `json:"signature"`
 }
 
@@ -61,7 +60,7 @@ func (cred *GuaranteeCredential) ToBytes() ([]byte, error) {
 		return nil, err
 	}
 
-	// Serialize Signature (64 bytes for Ed25519Signature)
+	// Serialize Signature (64 bytes for Ed25519Signature) https://graypaper.fluffylabs.dev/#/38c4e62/3adb013adb01?v=0.7.0
 	if _, err := buf.Write(cred.Signature[:]); err != nil {
 		return nil, err
 	}
@@ -73,7 +72,7 @@ func (cred *GuaranteeCredential) ToBytes() ([]byte, error) {
 func (cred *GuaranteeCredential) FromBytes(data []byte) error {
 	buf := bytes.NewReader(data)
 
-	// Deserialize ValidatorIndex (2 bytes)
+	// Deserialize ValidatorIndex (2 bytes) https://graypaper.fluffylabs.dev/#/38c4e62/3adb013adb01?v=0.7.0
 	if err := binary.Read(buf, binary.LittleEndian, &cred.ValidatorIndex); err != nil {
 		return err
 	}
@@ -157,10 +156,10 @@ func (g *Guarantee) Verify(CurrV []Validator) error {
 		validatorKey := CurrV[i.ValidatorIndex].GetEd25519Key()
 		if !Ed25519Verify(validatorKey, signtext, i.Signature) {
 			numErrors++
-			fmt.Printf("[guarantee:Verify] reportHash: %v; ERR %d invalid signature in guarantee by validator %v [PubKey: %s]\n", g.Report.Hash().String(), numErrors, i.ValidatorIndex, common.Bytes2Hex(validatorKey[:]))
-			fmt.Printf("work report hash : %s\n", g.Report.Hash().String())
-			fmt.Printf("sign salt : %s\n", common.Bytes2Hex(signtext))
-			fmt.Printf("signature : %s\n", common.Bytes2Hex(i.Signature[:]))
+			// fmt.Printf("[guarantee:Verify] reportHash: %v; ERR %d invalid signature in guarantee by validator %v [PubKey: %s]\n", g.Report.Hash().String(), numErrors, i.ValidatorIndex, common.Bytes2Hex(validatorKey[:]))
+			// fmt.Printf("work report hash : %s\n", g.Report.Hash().String())
+			// fmt.Printf("sign salt : %s\n", common.Bytes2Hex(signtext))
+			// fmt.Printf("signature : %s\n", common.Bytes2Hex(i.Signature[:]))
 		} else {
 			//fmt.Printf("[guarantee:Verify] reportHash: %v; OK signature in guarantee by validator %v [PubKey: %s]\n", g.Report.Hash().String(), i.ValidatorIndex, common.Bytes2Hex(validatorKey[:]))
 		}

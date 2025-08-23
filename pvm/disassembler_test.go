@@ -7,16 +7,19 @@ import (
 	"io"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/colorfulnotion/jam/common"
 )
 
 func TestDisassemble(t *testing.T) {
 	// Directory containing the JSON files
-	dir := "../jamtestvectors/pvm/programs"
+	dir := path.Join(common.GetJAMTestVectorPath("stf"), "pvm/programs")
 
 	// Read all files in the directory
 	files, err := os.ReadDir(dir)
@@ -61,7 +64,7 @@ func testSingleCase(t *testing.T, testCase TestCase) {
 
 	opcodes, codeLines := pvm.DisassemblePVMOfficial()
 	name := testCase.Name
-	instrFilePath := "../jamtestvectors/pvm/pure_disassembly_tests/" + name + ".txt"
+	instrFilePath := path.Join(common.GetJAMTestVectorPath("stf"), "pvm/pure_disassembly_tests/", name+".txt")
 	instructions, err := ParseInstructionLines(instrFilePath)
 	if err != nil {
 		t.Fatalf("Failed to parse instruction lines from file %s: %v", instrFilePath, err)

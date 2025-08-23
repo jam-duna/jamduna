@@ -20,16 +20,17 @@ A work item includes: (See Equation 175)
   - $e$, the number of data segments exported by this work item
 */
 
-// WorkItem represents a work item.
+// WorkItem represents a work item in W (Eq 14.3)
+// C.29 - s, c, g, a, e, |y, |i, |x
 type WorkItem struct {
 	Service            uint32              `json:"service"`              // s: the identifier of the service to which it relates
 	CodeHash           common.Hash         `json:"code_hash"`            // c: the code hash of the service at the time of reporting
-	Payload            []byte              `json:"payload"`              // y: a payload blob
 	RefineGasLimit     uint64              `json:"refine_gas_limit"`     // g: a refine gas limit
 	AccumulateGasLimit uint64              `json:"accumulate_gas_limit"` // a: an accumulate gas limit
+	ExportCount        uint16              `json:"export_count"`         // e: the number of data segments exported by this work item
+	Payload            []byte              `json:"payload"`              // y: a payload blob
 	ImportedSegments   []ImportSegment     `json:"import_segments"`      // i: a sequence of imported data segments
 	Extrinsics         []WorkItemExtrinsic `json:"extrinsic"`            // x: extrinsic
-	ExportCount        uint16              `json:"export_count"`         // e: the number of data segments exported by this work item
 }
 
 // 0.6.2 14.5
@@ -60,6 +61,7 @@ type Segment struct {
 	Data []byte
 }
 
+// HostFetch 11, 12 CustomeEncode
 func (w *WorkItem) EncodeS() ([]byte, error) {
 
 	var buf bytes.Buffer
@@ -80,7 +82,7 @@ func (w *WorkItem) EncodeS() ([]byte, error) {
 	if err := writeUint32(w.Service); err != nil {
 		return nil, err
 	}
-	// E_2: w_h
+	// E: w_c
 	if err := writeHash(w.CodeHash); err != nil {
 		return nil, err
 	}

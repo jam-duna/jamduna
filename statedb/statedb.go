@@ -24,9 +24,9 @@ import (
 )
 
 const (
-	debugB                = "beefy_mod"
-	saveSealBlockMaterial = false
-	blockAuthoringChaos   = false // turn off for production (or publication of traces)
+	debugB = "beefy_mod"
+
+	blockAuthoringChaos = false // turn off for production (or publication of traces)
 )
 
 type StateDB struct {
@@ -302,9 +302,9 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	if err != nil {
 		log.Crit(log.SDB, "Error reading C9 PriorEpochValidators from trie: %v\n", err)
 	}
-	rhoEncode, err := t.GetState(C10)
+	availability_assignmentEncode, err := t.GetState(C10)
 	if err != nil {
-		log.Crit(log.SDB, "Error reading C10 Rho from trie: %v\n", err)
+		log.Crit(log.SDB, "Error reading C10 AvailabilityAssignments from trie: %v\n", err)
 	}
 	mostRecentBlockTimeSlotEncode, err := t.GetState(C11)
 	if err != nil {
@@ -339,13 +339,13 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	d.SetAuthQueue(authQueueEncode)
 	d.SetRecentBlocks(recentBlocksEncode)
 	d.SetSafroleState(safroleStateEncode)
-	d.SetPsi(disputeStateEncode)
+	d.SetDisputesState(disputeStateEncode)
 	d.SetEntropy(entropyEncode)
-	d.SetDesignedValidators(DesignedEpochValidatorsEncode)
+	d.SetDesignatedValidators(DesignedEpochValidatorsEncode)
 	d.SetCurrEpochValidators(currEpochValidatorsEncode)
 	d.SetPriorEpochValidators(priorEpochValidatorEncode)
 	d.SetMostRecentBlockTimeSlot(mostRecentBlockTimeSlotEncode)
-	d.SetRho(rhoEncode)
+	d.SetAvailabilityAssignments(availability_assignmentEncode)
 
 	d.SetPrivilegedServicesIndices(privilegedServiceIndicesEncode)
 	d.SetPi(piEncode)
@@ -355,10 +355,10 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	s.SetJamState(d)
 
 	// Because we have safrolestate as internal state, JamState is NOT enough.
-	d.SafroleState.NextEpochTicketsAccumulator = d.SafroleStateGamma.GammaA      // γa: Ticket accumulator for the next epoch (epoch N+1) DONE
-	d.SafroleState.TicketsVerifierKey = d.SafroleStateGamma.GammaZ               // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
-	d.SafroleState.TicketsOrKeys = d.SafroleStateGamma.GammaS                    // γs: Current epoch’s slot-sealer series (epoch N)
-	d.SafroleState.NextValidators = types.Validators(d.SafroleStateGamma.GammaK) // γk: Next epoch’s validators (epoch N+1)
+	d.SafroleState.NextEpochTicketsAccumulator = d.SafroleBasicState.TicketAccumulator   // γa: Ticket accumulator for the next epoch (epoch N+1) DONE
+	d.SafroleState.TicketsVerifierKey = d.SafroleBasicState.RingCommitment               // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
+	d.SafroleState.TicketsOrKeys = d.SafroleBasicState.SlotSealerSeries                  // γs: Current epoch’s slot-sealer series (epoch N)
+	d.SafroleState.NextValidators = types.Validators(d.SafroleBasicState.NextValidators) // γk: Next epoch’s validators (epoch N+1)
 }
 
 func (s *StateDB) UpdateTrieState() common.Hash {
@@ -380,8 +380,8 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	mostRecentBlockTimeSlotEncode := sf.GetMostRecentBlockTimeSlotBytes()
 
 	d := s.GetJamState()
-	disputeState := d.GetPsiBytes()
-	rhoEncode := d.GetRhoBytes()
+	disputeState := d.GetDisputesStateBytes()
+	availability_assignmentEncode := d.GetAvailabilityAssignmentsBytes()
 	piEncode := d.GetPiBytes()
 	coreAuthPoolEncode := d.GetAuthPoolBytes()
 	authQueueEncode := d.GetAuthQueueBytes()
@@ -404,7 +404,7 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	t.SetState(C7, nextnextEpochValidatorsEncode)
 	t.SetState(C8, currEpochValidatorsEncode)
 	t.SetState(C9, priorEpochValidatorEncode)
-	t.SetState(C10, rhoEncode)
+	t.SetState(C10, availability_assignmentEncode)
 	t.SetState(C11, mostRecentBlockTimeSlotEncode)
 	t.SetState(C12, privilegedServiceIndicesEncode)
 	t.SetState(C13, piEncode)
@@ -635,10 +635,10 @@ func NewStateDBFromBlock(sdb *storage.StateDBStorage, block *types.Block) (state
 	statedb.RecoverJamState(statedb.StateRoot)
 	// Because we have safrolestate as internal state, JamState is NOT enough.
 	s := statedb.JamState
-	s.SafroleState.NextEpochTicketsAccumulator = s.SafroleStateGamma.GammaA      // γa: Ticket accumulator for the next epoch (epoch N+1) DONE
-	s.SafroleState.TicketsVerifierKey = s.SafroleStateGamma.GammaZ               // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
-	s.SafroleState.TicketsOrKeys = s.SafroleStateGamma.GammaS                    // γs: Current epoch’s slot-sealer series (epoch N)
-	s.SafroleState.NextValidators = types.Validators(s.SafroleStateGamma.GammaK) // γk: Next epoch’s validators (epoch N+1)
+	s.SafroleState.NextEpochTicketsAccumulator = s.SafroleBasicState.TicketAccumulator   // γa: Ticket accumulator for the next epoch (epoch N+1) DONE
+	s.SafroleState.TicketsVerifierKey = s.SafroleBasicState.RingCommitment               // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
+	s.SafroleState.TicketsOrKeys = s.SafroleBasicState.SlotSealerSeries                  // γs: Current epoch’s slot-sealer series (epoch N)
+	s.SafroleState.NextValidators = types.Validators(s.SafroleBasicState.NextValidators) // γk: Next epoch’s validators (epoch N+1)
 	return statedb, nil
 }
 
@@ -991,10 +991,6 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 		return nil, fmt.Errorf("SealBlockWithEntropy Failed: GetPosteriorSafroleEntropy")
 	}
 	// Prepare a container to store all intermediate values for debugging / auditing
-	material := &SealBlockMaterial{
-		BlockAuthorPub:  fmt.Sprintf("%x", blockAuthorPub[:]),
-		BlockAuthorPriv: fmt.Sprintf("%x", blockAuthorPriv[:]), // do NOT store real priv keys in production
-	}
 
 	blockSealEntropy := sf0.Entropy[3]
 	if sf0.GetEpochT() == 1 {
@@ -1010,14 +1006,6 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 		}
 		copy(header.EntropySource[:], H_v[:])
 		log.Trace(log.SDB, "IETF SIGN 1 H_v", "k", blockAuthorPriv[:], "c", c, "header.EntropySource", header.EntropySource[:])
-		if saveSealBlockMaterial {
-			// Save for the material
-			material.TicketID = ticketID.String()
-			material.Attempt = winningTicket.Attempt
-			material.CForHv = fmt.Sprintf("%x", c[:])
-			material.MForHv = ""
-			material.Hv = fmt.Sprintf("%x", H_v[:])
-		}
 
 		// H_s generation (primary) 6.15
 		c = append(append([]byte(types.X_T), blockSealEntropy.Bytes()...), byte(uint8(winningTicket.Attempt)&0xF))
@@ -1029,14 +1017,6 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 		copy(header.Seal[:], H_s[:])
 		log.Trace(log.SDB, "IETF SIGN H_s", "k", blockAuthorPriv[:], "c", c, header.BytesWithoutSig(), "header.Seal", header.Seal[:])
 
-		// Save for the material
-		if saveSealBlockMaterial {
-			material.T = 1
-			material.Entropy3 = fmt.Sprintf("%x", blockSealEntropy[:])
-			material.CForHs = fmt.Sprintf("%x", c[:])
-			material.MForHs = fmt.Sprintf("%x", m[:])
-			material.Hs = fmt.Sprintf("%x", H_s[:])
-		}
 	} else {
 		// Y(H_s) generation with an *INCOMPLETE* header because it is missing H_v
 		c := append([]byte(types.X_F), blockSealEntropy.Bytes()...)
@@ -1061,36 +1041,9 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 		}
 		copy(header.Seal[:], H_s[:])
 
-		// Save for the material
-		if saveSealBlockMaterial {
-			material.T = 0
-			material.Entropy3 = fmt.Sprintf("%x", blockSealEntropy[:])
-			material.CForHv = fmt.Sprintf("%x", cHv[:])
-			material.MForHv = "" // empty
-			material.Hv = fmt.Sprintf("%x", H_v[:])
-
-			material.CForHs = fmt.Sprintf("%x", c[:])
-			material.MForHs = fmt.Sprintf("%x", m[:])
-			material.Hs = fmt.Sprintf("%x", H_s[:])
-		}
 	}
 
 	newBlock.Header = header
-	headerbytes, _ := header.Bytes()
-
-	if saveSealBlockMaterial {
-		material.HeaderBytes = fmt.Sprintf("%x", headerbytes)
-		// Write material as JSON into a file: seals/validatorIdx-targetJCE.json
-		if err := os.MkdirAll("../jamtestvectors/seals", 0o755); err != nil {
-			return nil, fmt.Errorf("failed to mkdir seals: %w", err)
-		}
-		jsonData := types.ToJSON(material)
-		fileName := fmt.Sprintf("../jamtestvectors/seals/%d-%d.json", material.T, validatorIdx)
-		if err := os.WriteFile(fileName, []byte(jsonData), 0o644); err != nil {
-			return nil, fmt.Errorf("failed to write SealBlockMaterial to file: %w", err)
-		}
-	}
-
 	return newBlock, nil
 }
 

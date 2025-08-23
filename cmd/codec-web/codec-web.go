@@ -78,10 +78,10 @@ func encodeapi(objectType string, inp string) (string, error) {
 		var pageProof types.PageProof
 		err = json.Unmarshal(input, &pageProof)
 		obj = pageProof
-	case "WorkResult":
-		var workResult types.WorkResult
-		err = json.Unmarshal(input, &workResult)
-		obj = workResult
+	case "WorkDigest":
+		var workDigest types.WorkDigest
+		err = json.Unmarshal(input, &workDigest)
+		obj = workDigest
 	case "Announcement":
 		var announcement types.Announcement
 		err = json.Unmarshal(input, &announcement)
@@ -103,9 +103,9 @@ func encodeapi(objectType string, inp string) (string, error) {
 		err = json.Unmarshal(input, &c3)
 		obj = c3
 	case "C3-Beta":
-		var beta_state statedb.Beta_state
-		err = json.Unmarshal(input, &beta_state)
-		obj = beta_state
+		var history_state statedb.HistoryState
+		err = json.Unmarshal(input, &history_state)
+		obj = history_state
 	case "C4":
 		var c4 statedb.SafroleBasicState
 		err = json.Unmarshal(input, &c4)
@@ -115,7 +115,7 @@ func encodeapi(objectType string, inp string) (string, error) {
 		err = json.Unmarshal(input, &c4gammas)
 		obj = c4gammas
 	case "C5":
-		var c5 statedb.Psi_state
+		var c5 statedb.DisputeState
 		err = json.Unmarshal(input, &c5)
 		obj = c5
 	case "C6":
@@ -135,9 +135,9 @@ func encodeapi(objectType string, inp string) (string, error) {
 		err = json.Unmarshal(input, &c11)
 		obj = c11
 	case "C12":
-		var kaiState types.Kai_state
-		err = json.Unmarshal(input, &kaiState)
-		obj = kaiState
+		var c12 types.PrivilegedServiceState
+		err = json.Unmarshal(input, &c12)
+		obj = c12
 	case "C13":
 		var c13 types.ValidatorStatistics
 		err = json.Unmarshal(input, &c13)
@@ -231,8 +231,8 @@ func decodeapi(objectType, input string) (string, error) {
 	case "WorkPackageBundle":
 		//decodedStruct, _, err = types.DecodeBundle(encodedBytes)
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.WorkPackageBundle{}))
-	case "WorkResult":
-		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.WorkResult{}))
+	case "WorkDigest":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.WorkDigest{}))
 	case "WorkReport":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.WorkReport{}))
 	case "PageProof":
@@ -246,13 +246,13 @@ func decodeapi(objectType, input string) (string, error) {
 	case "C3":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.RecentBlocks{}))
 	case "C3-Beta":
-		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.Beta_state{}))
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.HistoryState{}))
 	case "C4":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.SafroleBasicState{}))
 	case "C4-Gamma_s":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.TicketsOrKeys{}))
 	case "C5":
-		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.Psi_state{}))
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.DisputeState{}))
 	case "C6":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(statedb.Entropy{}))
 	case "C7":
@@ -266,7 +266,7 @@ func decodeapi(objectType, input string) (string, error) {
 	case "C11":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(uint32(0)))
 	case "C12":
-		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Kai_state{}))
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.PrivilegedServiceState{}))
 	case "C13":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.ValidatorStatistics{}))
 	case "C14":

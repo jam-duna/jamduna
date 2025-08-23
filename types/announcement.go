@@ -203,7 +203,6 @@ func (W *AnnounceBucket) PutAnnouncement(a Announcement) {
 		W.Announcements[w.WorkReportHash] = append(W.Announcements[w.WorkReportHash], a)
 	}
 	W.KnownAnnouncements[a.Hash()] = true
-	return
 }
 
 func (W *AnnounceBucket) HaveMadeAnnouncement(a Announcement) bool {

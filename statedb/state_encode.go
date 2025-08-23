@@ -39,7 +39,7 @@ func (n *JamState) GetRecentBlocksBytes() []byte {
 	return codec_bytes
 }
 
-// C4 safroleState Gamma
+// C4 safroleState
 func (T TicketsOrKeys) T2CT() CTicketsOrKeys {
 	var Tickets types.TicketsMark
 	var Keys [types.EpochLength]common.Hash
@@ -109,7 +109,7 @@ func (T TicketsOrKeys) Encode() []byte {
 	return encoded
 }
 
-func (Z GammaZ) Encode() []byte {
+func (Z RingCommitment) Encode() []byte {
 	var gammaZ [144]byte
 	copy(gammaZ[:], Z[:])
 	encoded, err := types.Encode(gammaZ)
@@ -119,7 +119,7 @@ func (Z GammaZ) Encode() []byte {
 	return encoded
 }
 
-func (K GammaK) Encode() []byte {
+func (K NextValidators) Encode() []byte {
 	var gammak [types.TotalValidators]types.Validator
 	copy(gammak[:], K[:])
 	encoded, err := types.Encode(gammak)
@@ -138,30 +138,30 @@ func (s SafroleBasicState) GetSafroleStateBytes() []byte {
 }
 
 // C5 - PastJudgements
-func (P Psi_state) Encode() []byte {
-	var psi_g []common.Hash
-	for _, v := range P.Psi_g {
-		psi_g = append(psi_g, common.BytesToHash(v))
+func (P DisputeState) Encode() []byte {
+	var goodSet []common.Hash
+	for _, v := range P.GoodSet {
+		goodSet = append(goodSet, common.BytesToHash(v))
 	}
-	var psi_b []common.Hash
-	for _, v := range P.Psi_b {
-		psi_b = append(psi_b, common.BytesToHash(v))
+	var badSet []common.Hash
+	for _, v := range P.BadSet {
+		badSet = append(badSet, common.BytesToHash(v))
 	}
-	var psi_w []common.Hash
-	for _, v := range P.Psi_w {
-		psi_w = append(psi_w, common.BytesToHash(v))
+	var wonkySet []common.Hash
+	for _, v := range P.WonkySet {
+		wonkySet = append(wonkySet, common.BytesToHash(v))
 	}
 
 	s := struct {
-		Psi_g []common.Hash      `json:"good"`
-		Psi_b []common.Hash      `json:"bad"`
-		Psi_w []common.Hash      `json:"wonky"`
-		Psi_o []types.Ed25519Key `json:"offenders"`
+		GoodSet   []common.Hash      `json:"good"`
+		BadSet    []common.Hash      `json:"bad"`
+		WonkySet  []common.Hash      `json:"wonky"`
+		Offenders []types.Ed25519Key `json:"offenders"`
 	}{
-		Psi_g: psi_g,
-		Psi_b: psi_b,
-		Psi_w: psi_w,
-		Psi_o: P.Psi_o,
+		GoodSet:   goodSet,
+		BadSet:    badSet,
+		WonkySet:  wonkySet,
+		Offenders: P.Offenders,
 	}
 	encoded, err := types.Encode(s)
 	if err != nil {
@@ -170,7 +170,7 @@ func (P Psi_state) Encode() []byte {
 	return encoded
 }
 
-func (j *JamState) GetPsiBytes() []byte {
+func (j *JamState) GetDisputesStateBytes() []byte {
 	codec_bytes, err := types.Encode(j.DisputesState)
 	if err != nil {
 		return []byte{}
@@ -195,7 +195,7 @@ func (s *SafroleState) GetNextNextEpochValidatorsBytes() []byte {
 	if s == nil {
 		return []byte{}
 	}
-	codec_bytes, err := types.Encode(s.DesignedValidators)
+	codec_bytes, err := types.Encode(s.DesignatedValidators)
 	if err != nil {
 		return []byte{}
 	}
@@ -244,7 +244,7 @@ func (T AvailabilityAssignments) Encode() []byte {
 	return encoded
 }
 
-func (n *JamState) GetRhoBytes() []byte {
+func (n *JamState) GetAvailabilityAssignmentsBytes() []byte {
 	codec_bytes, err := types.Encode(n.AvailabilityAssignments)
 	if err != nil {
 		return []byte{}

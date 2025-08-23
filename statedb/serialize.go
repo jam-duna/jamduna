@@ -47,7 +47,7 @@ type SState struct {
 	PrevValidators     []SValidator          `json:"lambda"`
 	CurrValidators     []SValidator          `json:"kappa"`
 	NextValidators     []SValidator          `json:"gamma_k"`
-	DesignedValidators []SValidator          `json:"iota"`
+	DesignatedValidators []SValidator          `json:"iota"`
 	TicketsAccumulator []SSafroleAccumulator `json:"gamma_a"`
 	TicketsOrKeys      STicketsOrKeys        `json:"gamma_s"`
 	TicketsVerifierKey string                `json:"gamma_z"`
@@ -215,8 +215,8 @@ func (s *SafroleState) serialize() SState {
 		nextValidators[idx] = validator.serialize()
 	}
 
-	designedValidators := make([]SValidator, len(s.DesignedValidators))
-	for idx, validator := range s.DesignedValidators {
+	designedValidators := make([]SValidator, len(s.DesignatedValidators))
+	for idx, validator := range s.DesignatedValidators {
 		designedValidators[idx] = validator.serialize()
 	}
 
@@ -244,7 +244,7 @@ func (s *SafroleState) serialize() SState {
 		PrevValidators:     prevValidators,
 		CurrValidators:     currValidators,
 		NextValidators:     nextValidators,
-		DesignedValidators: designedValidators,
+		DesignatedValidators: designedValidators,
 		TicketsAccumulator: ticketsAccumulator,
 		TicketsOrKeys: STicketsOrKeys{
 			Tickets: tickets,
@@ -295,8 +295,8 @@ func (s *SafroleState) serialize() SState {
 // 		nextValidators[idx] = validator
 // 	}
 //
-// 	designedValidators := make([]Validator, len(ss.DesignedValidators))
-// 	for idx, sValidator := range ss.DesignedValidators {
+// 	designedValidators := make([]Validator, len(ss.DesignatedValidators))
+// 	for idx, sValidator := range ss.DesignatedValidators {
 // 		validator, err := sValidator.deserialize()
 // 		if err != nil {
 // 			return SafroleState{}, err
@@ -332,7 +332,7 @@ func (s *SafroleState) serialize() SState {
 // 		PrevValidators:     prevValidators,
 // 		CurrValidators:     currValidators,
 // 		NextValidators:     nextValidators,
-// 		DesignedValidators: designedValidators,
+// 		DesignatedValidators: designedValidators,
 // 		TicketsAccumulator: ticketsAccumulator,
 // 		TicketsOrKeys: struct {
 // 			Keys []common.Hash `json:"keys"`
@@ -382,8 +382,8 @@ func (ss *SState) deserialize() (SafroleState, error) {
 		nextValidators[idx] = validator
 	}
 
-	designedValidators := make([]types.Validator, len(ss.DesignedValidators))
-	for idx, sValidator := range ss.DesignedValidators {
+	designedValidators := make([]types.Validator, len(ss.DesignatedValidators))
+	for idx, sValidator := range ss.DesignatedValidators {
 		validator, err := sValidator.deserialize()
 		if err != nil {
 			return SafroleState{}, err
@@ -432,7 +432,7 @@ func (ss *SState) deserialize() (SafroleState, error) {
 		PrevValidators:     prevValidators,
 		CurrValidators:     currValidators,
 		NextValidators:     nextValidators,
-		DesignedValidators: designedValidators,
+		DesignatedValidators: designedValidators,
 		TicketsAccumulator: ticketsAccumulator,
 		TicketsOrKeys: TicketsOrKeys{
 			Tickets: tickets,

@@ -207,7 +207,7 @@ func NewRecompilerSandboxVMFromEmulator(vm *VM, mu *Emulator) (*RecompilerSandbo
 		pageIndex := int(offset / pageSize)
 		if access, ok := rvm.sandBox.pageAccess[pageIndex]; !ok || access == PageInaccessible {
 			fmt.Printf("❌ Access denied for page %d at address 0x%X\n", pageIndex, offset)
-			rvm.ResultCode = types.WORKRESULT_PANIC
+			rvm.ResultCode = types.WORKDIGEST_PANIC
 			rvm.terminated = true
 			for i := range vm.Ram.ReadRegisters() {
 				val, _ := rvm.sandBox.RegRead(sandBoxRegInfoList[i])
@@ -258,7 +258,7 @@ func NewRecompilerSandboxVMFromEmulator(vm *VM, mu *Emulator) (*RecompilerSandbo
 				fmt.Printf("🔒 Page %d at address 0x%X is immutable\n", pageIndex, offset)
 			}
 			fmt.Printf("❌ Access denied for page %d at address 0x%X\n", pageIndex, offset)
-			rvm.ResultCode = types.WORKRESULT_PANIC
+			rvm.ResultCode = types.WORKDIGEST_PANIC
 			rvm.terminated = true
 			rvm.saveLogs()
 			rvm.saveRegistersOnceSandBox()
@@ -486,7 +486,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox(x86code []byte) (err error
 		if r := recover(); r != nil {
 			log.Error(vm.logging, "RecompilerVM ExecuteX86Code panic", "error", r)
 			debug.PrintStack()
-			vm.ResultCode = types.WORKRESULT_PANIC
+			vm.ResultCode = types.WORKDIGEST_PANIC
 			vm.MachineState = PANIC
 			vm.terminated = true
 			vm.saveRegistersOnceSandBox()
@@ -575,7 +575,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox(x86code []byte) (err error
 			if vm.Gas < 0 {
 				fmt.Printf("⛔️ Gas limit exceeded at 0x%X\n",
 					addr)
-				vm.ResultCode = types.WORKRESULT_OOG
+				vm.ResultCode = types.WORKDIGEST_OOG
 				vm.MachineState = OOG
 				vm.terminated = true
 				vm.saveRegistersOnceSandBox()
@@ -614,7 +614,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox(x86code []byte) (err error
 	// 5. Run the code
 	// --------------------------------------------------------------------
 	if err := vm.sandBox.Start(codeBase, codeBase+uint64(codeLen)); err != nil {
-		vm.ResultCode = types.WORKRESULT_PANIC
+		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
 		vm.terminated = true
 		vm.saveRegistersOnceSandBox()
@@ -698,7 +698,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 		if r := recover(); r != nil {
 			log.Error(vm.logging, "RecompilerVM ExecuteX86Code panic", "error", r)
 			debug.PrintStack()
-			vm.ResultCode = types.WORKRESULT_PANIC
+			vm.ResultCode = types.WORKDIGEST_PANIC
 			vm.MachineState = PANIC
 			vm.terminated = true
 			vm.saveRegistersOnceSandBox()
@@ -810,7 +810,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 			if vm.Gas < 0 {
 				fmt.Printf("⛔️ Gas limit exceeded at 0x%X\n",
 					addr)
-				vm.ResultCode = types.WORKRESULT_OOG
+				vm.ResultCode = types.WORKDIGEST_OOG
 				vm.MachineState = OOG
 				vm.terminated = true
 				vm.saveRegistersOnceSandBox()
@@ -844,7 +844,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 	// 5. Run the code
 	// --------------------------------------------------------------------
 	if err := vm.sandBox.Start(codeBase, codeBase+uint64(codeLen)); err != nil {
-		vm.ResultCode = types.WORKRESULT_PANIC
+		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
 		vm.terminated = true
 		vm.saveRegistersOnceSandBox()
@@ -1420,7 +1420,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86CodeFromBreakPoint(x86code []byte, brea
 		if r := recover(); r != nil {
 			log.Error(vm.logging, "RecompilerVM ExecuteX86Code panic", "error", r)
 			debug.PrintStack()
-			vm.ResultCode = types.WORKRESULT_PANIC
+			vm.ResultCode = types.WORKDIGEST_PANIC
 			vm.MachineState = PANIC
 			vm.terminated = true
 			vm.saveRegistersOnceSandBox()
@@ -1512,7 +1512,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86CodeFromBreakPoint(x86code []byte, brea
 			if vm.Gas < 0 {
 				fmt.Printf("⛔️ Gas limit exceeded at 0x%X\n",
 					addr)
-				vm.ResultCode = types.WORKRESULT_OOG
+				vm.ResultCode = types.WORKDIGEST_OOG
 				vm.MachineState = OOG
 				vm.terminated = true
 				vm.saveRegistersOnceSandBox()
@@ -1541,7 +1541,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86CodeFromBreakPoint(x86code []byte, brea
 	// init from the breakpoint
 	fmt.Printf("running from breakpoint 0x%X\n", breakpoint)
 	if err := vm.sandBox.Start(breakpoint, codeBase+uint64(codeLen)); err != nil {
-		vm.ResultCode = types.WORKRESULT_PANIC
+		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
 		vm.terminated = true
 		vm.saveRegistersOnceSandBox()

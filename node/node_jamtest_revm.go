@@ -20,9 +20,9 @@ func revm(n1 JNode, testServices map[string]*types.TestService) {
 		payload := make([]byte, 0)
 		workPackage := types.WorkPackage{
 			AuthCodeHost:          0,
-			Authorization:         []byte("0x"), // TODO: set up null-authorizer
+			AuthorizationToken:    []byte("0x"), // TODO: set up null-authorizer
 			AuthorizationCodeHash: bootstrap_auth_codehash,
-			ParameterizationBlob:  []byte{},
+			ConfigurationBlob:     []byte{},
 			WorkItems: []types.WorkItem{
 				{
 					Service:            service0.ServiceCode,

@@ -8,7 +8,7 @@ import (
 )
 
 // EpochMark (see 6.4 Epoch change Signal) represents the descriptor for parameters to be used in the next epoch
-type EpochMark struct {
+type EpochMark struct { // H_E
 	// Randomness accumulator snapshot
 	Entropy        common.Hash `json:"entropy"`
 	TicketsEntropy common.Hash `json:"tickets_entropy"`

@@ -152,13 +152,13 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	vm.Gas = int64(g)
 	// (*ServiceAccount, bool, error)
 
-	x_s, found := X.U.D[s]
+	x_s, found := X.U.ServiceAccounts[s]
 	if !found {
-		log.Error(vm.logging, "ExecuteAccumulate - ServiceAccount not found in X.U.D", "s", s, "X.U.D", X.U.D)
+		log.Error(vm.logging, "ExecuteAccumulate - ServiceAccount not found in X.U.ServiceAccounts", "s", s, "X.U.ServiceAccounts", X.U.ServiceAccounts)
 		return
 	}
 	x_s.Mutable = true
-	vm.X.U.D[s] = x_s
+	vm.X.U.ServiceAccounts[s] = x_s
 	vm.ServiceAccount = x_s
 
 	switch vm.Backend {
@@ -335,13 +335,13 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Resul
 	return r
 }
 func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
-	if vm.ResultCode == types.WORKRESULT_OOG {
-		r.Err = types.WORKRESULT_OOG
+	if vm.ResultCode == types.WORKDIGEST_OOG {
+		r.Err = types.WORKDIGEST_OOG
 		log.Error(vm.logging, "getArgumentOutputs - OOG", "service", string(vm.ServiceMetadata))
 		return r, 0
 	}
 	//o := 0xFFFFFFFF - Z_Z - Z_I + 1
-	if vm.ResultCode != types.WORKRESULT_OK {
+	if vm.ResultCode != types.WORKDIGEST_OK {
 		r.Err = vm.ResultCode
 		log.Error(vm.logging, "getArgumentOutputs - Error", "result", vm.ResultCode, "mode", vm.Mode, "service", string(vm.ServiceMetadata))
 		return r, 0
@@ -350,15 +350,15 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 	l, _ := vm.Ram.ReadRegister(8)
 	output, res := vm.Ram.ReadRAMBytes(uint32(o), uint32(l))
 	log.Info(vm.logging, "getArgumentOutputs - OK", "output", fmt.Sprintf("%x", output), "l", l)
-	if vm.ResultCode == types.WORKRESULT_OK && res == 0 {
+	if vm.ResultCode == types.WORKDIGEST_OK && res == 0 {
 		r.Ok = output
 		return r, res
 	}
-	if vm.ResultCode == types.WORKRESULT_OK && res != 0 {
+	if vm.ResultCode == types.WORKDIGEST_OK && res != 0 {
 		r.Ok = []byte{}
 		return r, res
 	}
-	r.Err = types.WORKRESULT_PANIC
+	r.Err = types.WORKDIGEST_PANIC
 	log.Error(vm.logging, "getArgumentOutputs - PANIC", "result", vm.ResultCode, "mode", vm.Mode, "service", string(vm.ServiceMetadata))
 	return r, 0
 }

@@ -79,9 +79,9 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService, targetN 
 
 		workPackage := types.WorkPackage{
 			AuthCodeHost:          0,
-			Authorization:         []byte("0xs"), // TODO: set up null-authorizer
+			AuthorizationToken:    []byte("0xs"), // TODO: set up null-authorizer
 			AuthorizationCodeHash: bootstrap_auth_codehash,
-			ParameterizationBlob:  []byte{},
+			ConfigurationBlob:     []byte{},
 			WorkItems: []types.WorkItem{
 				// {
 				// 	Service:            statedb.AuthCopyServiceCode,
@@ -116,7 +116,7 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService, targetN 
 			return err
 		}
 		for _, result := range wr.Results {
-			if result.Result.Err != types.WORKRESULT_OK {
+			if result.Result.Err != types.WORKDIGEST_OK {
 				game_of_life_n--
 				continue
 			}
@@ -126,7 +126,7 @@ func game_of_life(n1 JNode, testServices map[string]*types.TestService, targetN 
 		if game_of_life_n > 0 {
 			result := wr.Results[0]
 			var gas uint64
-			if result.Result.Err == types.WORKRESULT_OK {
+			if result.Result.Err == types.WORKDIGEST_OK {
 				gas = binary.LittleEndian.Uint64(result.Result.Ok)
 				log.Info(log.Node, "Game of Life", "N", game_of_life_n, "child gas", gas, "step", step, "ExportedSegmentRoot", segRootHash.String())
 			}

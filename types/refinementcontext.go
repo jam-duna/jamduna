@@ -9,19 +9,19 @@ import (
 * two historical blocks, the anchor  header hash $a$
 * its associated posterior state-root $s$
 * posterior Beefy root $b$
-* the lookupanchor $l$
-* header hash $l$
+* the lookupanchor header hash $l$
 * timeslot $t$
 * the hash of an optional prerequisite work-package p.
 */
 
+// Work Context 11.4 C.24
 type RefineContext struct {
 	Anchor           common.Hash   `json:"anchor"`             // a
 	StateRoot        common.Hash   `json:"state_root"`         // s
 	BeefyRoot        common.Hash   `json:"beefy_root"`         // b
 	LookupAnchor     common.Hash   `json:"lookup_anchor"`      // l
 	LookupAnchorSlot uint32        `json:"lookup_anchor_slot"` // t
-	Prerequisites    []common.Hash `json:"prerequisites"`      //p
+	Prerequisites    []common.Hash `json:"prerequisites"`      // p
 }
 
 func (rc *RefineContext) Clone() *RefineContext {
