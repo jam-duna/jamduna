@@ -122,7 +122,7 @@ func TestStateTransitionInterpreter(t *testing.T) {
 	pvm.PvmLogging = false
 	pvm.PvmTrace = false   // enable PVM trace for this test
 	pvm.VMsCompare = false // enable VM comparison for this test
-	filename := path.Join(common.GetJAMTestVectorPath("traces"), "preimages/00000089.json")
+	filename := path.Join(common.GetJAMTestVectorPath("traces"), "preimages/00000008.json")
 
 	content, err := os.ReadFile(filename)
 	if err != nil {
@@ -236,10 +236,10 @@ func TestTracesInterpreter(t *testing.T) {
 		//"../cmd/importblocks/rawdata/safrole/state_transitions/",
 		//path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
 		//path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
-		//path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
-		//path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
-		//path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
 	}
 
 	// Iterate over each directory.

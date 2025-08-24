@@ -244,25 +244,52 @@ free accumulation, into a tuple of the number of work-
 results accumulated, a posterior state-context, the resul-
 tant deferred-transfers and accumulation-output pairings:
 */
-// ∆+
+/*
+Example from  https://github.com/davxy/jam-test-vectors/pull/90#issuecomment-3217905803
+we end up with three reports to accumulate:
+
+w1 = 0x30106542a08638f4b03aa444a502e84c5d8c0af2f4e7d78dec6fcf20839ba96c w1 has 4 work items with 2_500_000 gas each
+w2 = 0x9e93aef22e437721ab38c1e6cde35faee26a67d04d00e3cd68d1b6e6509d12c8 w2 has 4 work items with 2_500_000 gas each
+w3 = 0x59763c52ed98c413c82bdba8f8483dde3d1249bb8330f46cbf5b87b7297a45dc w3 has 2 work items with 5_000_000 gas each
+How many times service 0 calls into accumulate?  You call into OuterAccumulate just once with all the reports in one shot.
+
+However, this approach does not account for the fact that each call to accumulate must be limited by the maximum allowed gas per block (as per 12.21 and 12.16).
+
+In our case we have:
+ G_A = 10000000 (max_accumulate_gas_per_core), C = 2 (cores)
+ G_T = 20000000 (total gas for all accumulations)
+Thus, given 12.21 we have that the max gas that can be used is 20_000_000.
+
+All the three reports have a gas for accumulate set to 10_000_000.
+
+Given that w1_gas + w2_gas hits the max accumulate gas we first call accumulate for w1 and w2 (i.e. Δ∗) as prescribed by Δ+ (12.16).
+When Δ∗ returns, we compute the effective gas consumed, we subtract it from g and we call into Δ+ again for w3.
+The effective gas consumed by w1+w2 is 91_982. So, since the gas required by w3 + 91_982 <= 20_000_000 we accumulate w3 as well.
+
+In the end the service 0 calls into accumulate twice and not once: One time for w1+w2 and one for w3
+*/
 func (s *StateDB) OuterAccumulate(g uint64, workReports []types.WorkReport, o *types.PartialState, freeAccumulation map[uint32]uint32, pvmBackend string) (num_accumulations uint64, transfers []types.DeferredTransfer, accumulation_output []types.AccumulationOutput, GasUsage []Usage) {
 	var gas_tmp uint64
 	i := uint64(0)
 	// calculate how to maximize the work reports to enter the parallelized accumulation
+	done := false
 	for _, workReport := range workReports {
 		for _, workDigest := range workReport.Results {
-			gas_tmp += workDigest.Gas
-			if gas_tmp <= g {
-				i++
-				if i >= uint64(len(workReports))+1 {
-					break
-				}
+			if gas_tmp <= types.AccumulateGasAllocation_GT {
+				gas_tmp += workDigest.Gas
+			} else {
+				done = true
+				break
 			}
-
+		}
+		if i >= uint64(len(workReports))+1 || done {
+			break
+		} else {
+			i++
 		}
 	}
 
-	if i == 0 { // if i = 0, then nothing to do
+	if len(workReports) == 0 { // if i = 0, then nothing to do
 		num_accumulations = 0
 
 		transfers = make([]types.DeferredTransfer, 0)
@@ -270,14 +297,11 @@ func (s *StateDB) OuterAccumulate(g uint64, workReports []types.WorkReport, o *t
 		GasUsage = make([]Usage, 0)
 		return
 	}
-	if i >= uint64(len(workReports)) { // if i >= len(w), then all work reports are accumulated
-		i = uint64(len(workReports))
-	}
 	p_gasUsed, p_transfers, p_outputs, p_gasUsage := s.ParallelizedAccumulate(o, workReports[0:i], freeAccumulation, pvmBackend) // parallelized accumulation the 0 to i work reports
 	if i >= uint64(len(workReports)) {
 		return i, p_transfers, p_outputs, p_gasUsage
 	}
-	incNum, incTransfers, incAccumulationOutput, incGasUsage := s.OuterAccumulate(g-p_gasUsed, workReports[i+1:], o, nil, pvmBackend) // recursive call to the rest of the work reports
+	incNum, incTransfers, incAccumulationOutput, incGasUsage := s.OuterAccumulate(g-p_gasUsed, workReports[i:], o, nil, pvmBackend) // recursive call to the rest of the work reports
 	num_accumulations = i + incNum
 
 	transfers = append(incTransfers, p_transfers...)
