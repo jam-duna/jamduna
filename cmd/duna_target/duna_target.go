@@ -28,8 +28,8 @@ func main() {
 	// Define the target's identity.
 	targetInfo := fuzz.PeerInfo{
 		Name:       fmt.Sprintf("jam-duna-target-%s", fuzz.FUZZ_VERSION),
-		AppVersion: fuzz.Version{Major: 0, Minor: 6, Patch: 7},
-		JamVersion: fuzz.Version{Major: 0, Minor: 6, Patch: 7},
+		AppVersion: fuzz.Version{Major: 0, Minor: 7, Patch: 0},
+		JamVersion: fuzz.Version{Major: 0, Minor: 7, Patch: 0},
 	}
 	if pvmLogging != nil {
 		if *pvmLogging == "trace" {

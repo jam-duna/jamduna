@@ -80,8 +80,8 @@ func main() {
 	validateImportBlockConfig(jConfig)
 	fuzzerInfo := fuzz.PeerInfo{
 		Name:       fmt.Sprintf("jam-duna-fuzzer-%s", fuzz.FUZZ_VERSION),
-		AppVersion: fuzz.Version{Major: 0, Minor: 6, Patch: 7},
-		JamVersion: fuzz.Version{Major: 0, Minor: 6, Patch: 7},
+		AppVersion: fuzz.Version{Major: 0, Minor: 7, Patch: 0},
+		JamVersion: fuzz.Version{Major: 0, Minor: 7, Patch: 0},
 	}
 	fuzzer, err := fuzz.NewFuzzer(dir, report_dir, jConfig.Socket, fuzzerInfo, jConfig.PVMBackend)
 	if err != nil {
