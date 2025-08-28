@@ -18,7 +18,7 @@ func TestSnapShot(t *testing.T) {
 
 	PvmLogging = true
 	PvmTrace = true
-	debugRecompiler = true
+	debugCompiler = true
 	VMsCompare = true
 	name := "inst_add_32"
 	filePath := path.Join(common.GetJAMTestVectorPath("stf"), "pvm/programs/"+name+".json")
@@ -37,15 +37,15 @@ func TestSnapShot(t *testing.T) {
 	serviceAcct := uint32(DoomServiceID) // stub
 	tc := testCase
 	// metadata, c := types.SplitMetadataAndCode(tc.Code)
-	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendRecompilerSandbox)
+	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendSandbox)
 	// Set the initial memory
 	// if len(tc.InitialMemory) == 0 {
 	// 	pvm.Ram.SetPageAccess(32, 1, AccessMode{Readable: false, Writable: false, Inaccessible: true})
 	// }
-	rvm, err := NewRecompilerSandboxVM(pvm)
+	rvm, err := NewCompilerSandboxVM(pvm)
 	rvm.Gas = 1000000 // set a high gas limit for the sandbox
 	if err != nil {
-		t.Fatalf("Failed to create RecompilerSandboxVM: %v", err)
+		t.Fatalf("Failed to create CompilerSandboxVM: %v", err)
 	}
 	for _, pm := range tc.InitialPageMap {
 		// Set the page access based on the initial page map
@@ -78,10 +78,10 @@ func TestSnapShot(t *testing.T) {
 	post_register[8] = 0x33
 	snapshot := rvm.TakeSnapShot(name, uint32(rvm.pc), post_register, uint64(rvm.Gas), 0x1900000E0, guestBase, 0)
 	rvm.Close()
-	pvm = NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendRecompilerSandbox)
-	rvm, err = NewRecompilerSandboxVM(pvm)
+	pvm = NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendSandbox)
+	rvm, err = NewCompilerSandboxVM(pvm)
 	if err != nil {
-		t.Fatalf("Failed to create RecompilerSandboxVM: %v", err)
+		t.Fatalf("Failed to create CompilerSandboxVM: %v", err)
 	}
 	err = rvm.ExecuteFromSnapshot(snapshot)
 	if err != nil {
@@ -148,11 +148,11 @@ func TestDoomX86(t *testing.T) {
 	initial_pc := uint64(0)
 	hostENV := NewMockHostEnv()
 	metadata := "doom"
-	pvm := NewVM(DoomServiceID, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata), BackendRecompiler)
+	pvm := NewVM(DoomServiceID, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata), BackendCompiler)
 	pvm.initLogs()
-	rvm, err := NewRecompilerVM(pvm)
+	rvm, err := NewCompilerVM(pvm)
 	if err != nil {
-		t.Fatalf("Failed to create RecompilerVM: %v", err)
+		t.Fatalf("Failed to create CompilerVM: %v", err)
 	}
 	if err := pvm.attachFrameServer("0.0.0.0:8080", "./index.html"); err != nil {
 		t.Fatalf("frame server error: %v", err)
@@ -173,7 +173,7 @@ func TestDoomSandBox(t *testing.T) {
 	PvmTrace = false
 
 	useRawRam = true // use raw RAM for this test
-	debugRecompiler = true
+	debugCompiler = true
 	VMsCompare = true
 
 	// set up the code for the Doom self-playing test case
@@ -190,10 +190,10 @@ func TestDoomSandBox(t *testing.T) {
 	initial_regs := make([]uint64, 13)
 	initial_pc := uint64(0)
 	metadata := "doom"
-	pvm := NewVM(DoomServiceID, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata), BackendRecompilerSandbox)
-	rvm, err := NewRecompilerSandboxVM(pvm)
+	pvm := NewVM(DoomServiceID, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata), BackendSandbox)
+	rvm, err := NewCompilerSandboxVM(pvm)
 	if err != nil {
-		t.Fatalf("Failed to create RecompilerSandboxVM: %v", err)
+		t.Fatalf("Failed to create CompilerSandboxVM: %v", err)
 	}
 	a := make([]byte, 0)
 	rvm.Standard_Program_Initialization_SandBox(a)
@@ -205,7 +205,7 @@ func TestDoomSnapShot(t *testing.T) {
 	PvmLogging = false
 	PvmTrace = false
 	useRawRam = true // use raw RAM for this test
-	debugRecompiler = true
+	debugCompiler = true
 	VMsCompare = true
 
 	// set up the code for the Doom self-playing test case
@@ -222,15 +222,15 @@ func TestDoomSnapShot(t *testing.T) {
 	initial_regs := make([]uint64, 13)
 	initial_pc := uint64(0)
 	metadata := "doom"
-	pvm := NewVM(DoomServiceID, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata), BackendRecompilerSandbox)
-	rvm, err := NewRecompilerSandboxVM(pvm)
+	pvm := NewVM(DoomServiceID, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata), BackendSandbox)
+	rvm, err := NewCompilerSandboxVM(pvm)
 	a := make([]byte, 0)
 	rvm.Standard_Program_Initialization_SandBox(a)
 	rvm.initLogs()
 
 	rvm.Gas = int64(9999999999999999)
 	if err != nil {
-		t.Fatalf("Failed to create RecompilerSandboxVM: %v", err)
+		t.Fatalf("Failed to create CompilerSandboxVM: %v", err)
 	}
 
 	snapshotName := "BB966150000" // from the interpreter
@@ -239,7 +239,7 @@ func TestDoomSnapShot(t *testing.T) {
 		fmt.Printf("Failed to load snapshot: %v\n", err)
 		return
 	}
-	debugRecompiler = false // disable debug mode for the snapshot execution
+	debugCompiler = false // disable debug mode for the snapshot execution
 	err = rvm.ExecuteFromSnapshot(snapshot)
 	if err != nil {
 		fmt.Printf("ExecuteFromSnapshot crash detected: %v\n", err)

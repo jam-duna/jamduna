@@ -275,12 +275,12 @@ var testcases = map[string]string{
 	//"MIN_U":                 "",
 }
 
-// TestRecompilerSuccess runs all test cases expected to succeed (no division by zero or overflow conditions).
+// TestCompilerSuccess runs all test cases expected to succeed (no division by zero or overflow conditions).
 // var errorNames = []string{
 // 	"by_zero", "overflow", "trap", "nok", "inaccessible", "read_only",
 // }
 
-func TestRecompilerFull(t *testing.T) {
+func TestCompilerFull(t *testing.T) {
 	PvmLogging = true
 	PvmTrace = true
 
@@ -335,7 +335,7 @@ func TestRecompilerFull(t *testing.T) {
 
 		t.Run(name, func(t *testing.T) {
 			fmt.Printf("Running test: %s\n", name)
-			err = recompiler_test(tc)
+			err = compiler_test(tc)
 			if err != nil {
 				//Memory mismatch
 				//result code mismatch
@@ -359,7 +359,7 @@ func TestRecompilerFull(t *testing.T) {
 			count++
 		})
 	}
-	fmt.Printf("Recompiler Test Summary:===========================================\n")
+	fmt.Printf("Compiler Test Summary:===========================================\n")
 	fmt.Printf("Total tests run: %d\n", count)
 	fmt.Printf("Memory mismatch: %d (%.2f%%)\n", len(mismatchs[memory_mismatch]), float64(len(mismatchs[memory_mismatch]))/float64(count)*100)
 	fmt.Printf("Register mismatch: %d (%.2f%%)\n", len(mismatchs[register_mismatch]), float64(len(mismatchs[register_mismatch]))/float64(count)*100)
@@ -391,9 +391,9 @@ func TestRecompilerFull(t *testing.T) {
 	fmt.Printf("===================================================================\n")
 }
 
-func recompiler_test(tc TestCase) error {
+func compiler_test(tc TestCase) error {
 	var num_mismatch int
-	pvmBackend := BackendRecompiler
+	pvmBackend := BackendCompiler
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
 	// metadata, c := types.SplitMetadataAndCode(tc.Code)
@@ -408,9 +408,9 @@ func recompiler_test(tc TestCase) error {
 	// }
 	resultCode := uint8(0)
 	pvm.Gas = 100000000000
-	rvm, err := NewRecompilerVM(pvm)
+	rvm, err := NewCompilerVM(pvm)
 	if err != nil {
-		return fmt.Errorf("failed to create recompiler VM: %w", err)
+		return fmt.Errorf("failed to create compiler VM: %w", err)
 	}
 
 	for _, pm := range tc.InitialPageMap {
@@ -509,7 +509,7 @@ func TestSingleInterpreter(t *testing.T) {
 	})
 }
 
-func TestHostFuncExposeRecompiler(t *testing.T) {
+func TestHostFuncExposeCompiler(t *testing.T) {
 	PvmLogging = true
 	PvmTrace = true
 	name := "inst_store_indirect_u16_with_offset_ok"
@@ -527,11 +527,11 @@ func TestHostFuncExposeRecompiler(t *testing.T) {
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
 	// metadata, c := types.SplitMetadataAndCode(tc.Code)
-	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendRecompiler)
+	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendCompiler)
 	pvm.Gas = 100000000000
-	rvm, err := NewRecompilerVM(pvm)
+	rvm, err := NewCompilerVM(pvm)
 	if err != nil {
-		t.Fatalf("Failed to create RecompilerVM: %v", err)
+		t.Fatalf("Failed to create CompilerVM: %v", err)
 	}
 
 	for _, pm := range tc.InitialPageMap {
@@ -585,15 +585,15 @@ func TestSBRK(t *testing.T) {
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
 	// metadata, c := types.SplitMetadataAndCode(tc.Code)
-	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendRecompiler)
+	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendCompiler)
 
 	//ramdom set the reg to do the sbrk test
 	pvm.Ram.WriteRegister(5, 8888)
 	pvm.Ram.WriteRegister(6, 6)
 
-	rvm, err := NewRecompilerVM(pvm)
+	rvm, err := NewCompilerVM(pvm)
 	if err != nil {
-		t.Fatalf("Failed to create RecompilerVM: %v", err)
+		t.Fatalf("Failed to create CompilerVM: %v", err)
 	}
 
 	for _, pm := range tc.InitialPageMap {
@@ -660,21 +660,21 @@ func TestUnicornBasicEmulation(t *testing.T) {
 	}
 }
 
-func recompiler_sandbox_test(tc TestCase) error {
+func compiler_sandbox_test(tc TestCase) error {
 	var num_mismatch int
 
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
 	// metadata, c := types.SplitMetadataAndCode(tc.Code)
-	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendRecompilerSandbox)
+	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendSandbox)
 	// Set the initial memory
 	// if len(tc.InitialMemory) == 0 {
 	// 	pvm.Ram.SetPageAccess(32, 1, AccessMode{Readable: false, Writable: false, Inaccessible: true})
 	// }
 	resultCode := uint8(0)
-	rvm, err := NewRecompilerSandboxVM(pvm)
+	rvm, err := NewCompilerSandboxVM(pvm)
 	if err != nil {
-		return fmt.Errorf("failed to create recompiler VM: %w", err)
+		return fmt.Errorf("failed to create compiler VM: %w", err)
 	}
 	rvm.Gas = 1000000 // set a high gas limit for the sandbox
 	codeLines := rvm.DisassemblePVM()
@@ -760,7 +760,7 @@ func TestSingleSandbox(t *testing.T) {
 
 	PvmLogging = false
 	PvmTrace = false
-	debugRecompiler = false
+	debugCompiler = false
 	showDisassembly = false
 
 	name := "inst_store_imm_indirect_u16_with_offset_ok"
@@ -777,7 +777,7 @@ func TestSingleSandbox(t *testing.T) {
 	}
 
 	t.Run(name, func(t *testing.T) {
-		err = recompiler_sandbox_test(testCase)
+		err = compiler_sandbox_test(testCase)
 		if err != nil {
 			t.Errorf("❌ [%s] Test failed: %v", name, err)
 		} else {
@@ -786,17 +786,17 @@ func TestSingleSandbox(t *testing.T) {
 	})
 }
 
-func TestRecompilerFamilies(t *testing.T) {
+func TestCompilerFamilies(t *testing.T) {
 	familyNames := []string{"BranchImm", "CompareBranch"}
 	for _, familyName := range familyNames {
 		t.Run(familyName, func(t *testing.T) {
-			testRecompilerFamily(t, familyName)
+			testCompilerFamily(t, familyName)
 		})
 	}
 }
 
-// testRecompilerFamily runs all tests associated with a specific, hard-coded generator family.
-func testRecompilerFamily(t *testing.T, familyName string) {
+// testCompilerFamily runs all tests associated with a specific, hard-coded generator family.
+func testCompilerFamily(t *testing.T, familyName string) {
 	// To test a different group of instructions, change the value of this variable.
 	showDisassembly = true
 	opcodes, ok := familyToOpcodes[familyName]
@@ -857,8 +857,8 @@ func testRecompilerFamily(t *testing.T, familyName string) {
 		// The subtest name now includes the opcode for better logging.
 		t.Run(fmt.Sprintf("%s/%s", opcodeName, testName), func(t *testing.T) {
 			t.Logf("Test: [%s - %s] %s\n", familyName, opcodeName, testName)
-			// Assuming recompiler_sandbox_test exists and is the entry point for a single test case.
-			err := recompiler_sandbox_test(tc)
+			// Assuming compiler_sandbox_test exists and is the entry point for a single test case.
+			err := compiler_sandbox_test(tc)
 			if err != nil {
 				t.Errorf("❌ Test failed: %v", err)
 			} else {
@@ -867,7 +867,7 @@ func testRecompilerFamily(t *testing.T, familyName string) {
 		})
 	}
 }
-func TestRecompilerSandBox(t *testing.T) {
+func TestCompilerSandBox(t *testing.T) {
 	PvmLogging = true
 	PvmTrace = true
 	// Directory containing the JSON files
@@ -918,7 +918,7 @@ func TestRecompilerSandBox(t *testing.T) {
 		}
 
 		t.Run(name, func(t *testing.T) {
-			err = recompiler_sandbox_test(tc)
+			err = compiler_sandbox_test(tc)
 			if err != nil {
 				//Memory mismatch
 				//result code mismatch
@@ -942,7 +942,7 @@ func TestRecompilerSandBox(t *testing.T) {
 			count++
 		})
 	}
-	fmt.Printf("Recompiler Test Summary:===========================================\n")
+	fmt.Printf("Compiler Test Summary:===========================================\n")
 	fmt.Printf("Total tests run: %d\n", count)
 	fmt.Printf("Memory mismatch: %d (%.2f%%)\n", len(mismatchs[memory_mismatch]), float64(len(mismatchs[memory_mismatch]))/float64(count)*100)
 	fmt.Printf("Register mismatch: %d (%.2f%%)\n", len(mismatchs[register_mismatch]), float64(len(mismatchs[register_mismatch]))/float64(count)*100)
@@ -991,10 +991,10 @@ func TestHostFuncExposeSandBox(t *testing.T) {
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
 	// metadata, c := types.SplitMetadataAndCode(tc.Code)
-	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendRecompilerSandbox)
-	rvm, err := NewRecompilerSandboxVM(pvm)
+	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendSandbox)
+	rvm, err := NewCompilerSandboxVM(pvm)
 	if err != nil {
-		t.Fatalf("Failed to create RecompilerVM: %v", err)
+		t.Fatalf("Failed to create CompilerVM: %v", err)
 	}
 
 	for _, pm := range tc.InitialPageMap {
@@ -1043,15 +1043,15 @@ func TestSBRKSandBox(t *testing.T) {
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
 	// metadata, c := types.SplitMetadataAndCode(tc.Code)
-	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendRecompilerSandbox)
+	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendSandbox)
 
 	//ramdom set the reg to do the sbrk test
 	pvm.Ram.WriteRegister(5, 8888)
 	pvm.Ram.WriteRegister(6, 6)
 
-	rvm, err := NewRecompilerSandboxVM(pvm)
+	rvm, err := NewCompilerSandboxVM(pvm)
 	if err != nil {
-		t.Fatalf("Failed to create RecompilerVM: %v", err)
+		t.Fatalf("Failed to create CompilerVM: %v", err)
 	}
 
 	for _, pm := range tc.InitialPageMap {
@@ -1085,7 +1085,7 @@ func TestCodeIsSame(t *testing.T) {
 	PvmTrace = false
 
 	useRawRam = true // use raw RAM for this test
-	debugRecompiler = true
+	debugCompiler = true
 	VMsCompare = true
 
 	// set up the code for the Doom self-playing test case
@@ -1102,10 +1102,10 @@ func TestCodeIsSame(t *testing.T) {
 	initial_regs := make([]uint64, 13)
 	initial_pc := uint64(0)
 	metadata := "algo"
-	pvm := NewVM(DoomServiceID, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata), BackendRecompilerSandbox)
-	rvm, err := NewRecompilerSandboxVM(pvm)
+	pvm := NewVM(DoomServiceID, raw_code, initial_regs, initial_pc, hostENV, true, []byte(metadata), BackendSandbox)
+	rvm, err := NewCompilerSandboxVM(pvm)
 	if err != nil {
-		t.Fatalf("Failed to create RecompilerSandboxVM: %v", err)
+		t.Fatalf("Failed to create CompilerSandboxVM: %v", err)
 	}
 	a := make([]byte, 0)
 	rvm.Standard_Program_Initialization_SandBox(a)

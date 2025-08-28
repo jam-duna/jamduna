@@ -139,9 +139,9 @@ func TestStateTransitionInterpreter(t *testing.T) {
 func TestStateTransitionSandbox(t *testing.T) {
 	pvm.VMsCompare = true // enable VM comparison for this test
 	pvm.PvmLogging = true
-	pvm.UseTally = false         // enable tally for this test
-	pvm.SetUseEcalli500(false)   // use ecalli500 for log check in x86
-	pvm.SetDebugRecompiler(true) // enable debug mode for recompiler
+	pvm.UseTally = false       // enable tally for this test
+	pvm.SetUseEcalli500(false) // use ecalli500 for log check in x86
+	pvm.SetDebugCompiler(true) // enable debug mode for compiler
 	filename := "./00000019.json"
 	filename = path.Join(common.GetJAMTestVectorPath("stf"), "traces/storage/00000060.json")
 	// filename = path.Join(GetJAMTestVectorPath(), "traces/storage_light/00000016.json"
@@ -154,17 +154,17 @@ func TestStateTransitionSandbox(t *testing.T) {
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule("pvm_validator")
 	t.Run(filepath.Base(filename), func(t *testing.T) {
-		runSingleSTFTest(t, filename, string(content), pvm.BackendRecompilerSandbox, false)
+		runSingleSTFTest(t, filename, string(content), pvm.BackendSandbox, false)
 
 	})
 }
 
-func TestStateTransitionRecompiler(t *testing.T) {
+func TestStateTransitionCompiler(t *testing.T) {
 	pvm.VMsCompare = true // enable VM comparison for this test
 	pvm.PvmLogging = true
-	pvm.UseTally = false         // enable tally for this test
-	pvm.SetUseEcalli500(false)   // use ecalli500 for log check in x86
-	pvm.SetDebugRecompiler(true) // enable debug mode for recompiler
+	pvm.UseTally = false       // enable tally for this test
+	pvm.SetUseEcalli500(false) // use ecalli500 for log check in x86
+	pvm.SetDebugCompiler(true) // enable debug mode for compiler
 	filename := "./00000019.json"
 	filename = path.Join(common.GetJAMTestVectorPath("stf"), "traces/storage_light/00000016.json")
 
@@ -176,7 +176,7 @@ func TestStateTransitionRecompiler(t *testing.T) {
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule("pvm_validator")
 	t.Run(filepath.Base(filename), func(t *testing.T) {
-		runSingleSTFTest(t, filename, string(content), pvm.BackendRecompiler, false)
+		runSingleSTFTest(t, filename, string(content), pvm.BackendCompiler, false)
 
 	})
 }
@@ -195,13 +195,13 @@ func TestPVMstepJsonDiff(t *testing.T) {
 	}
 
 	// Load JSON 2
-	json2, err := os.ReadFile("recompiler_sandbox/vm_log.json")
+	json2, err := os.ReadFile("sandbox/vm_log.json")
 	if err != nil {
-		t.Fatalf("failed to read file test_case/vm_log_recompiler.json: %v", err)
+		t.Fatalf("failed to read file test_case/vm_log_compiler.json: %v", err)
 	}
 	err = json.Unmarshal(json2, &testdata_rcp)
 	if err != nil {
-		t.Fatalf("failed to unmarshal test_case/vm_log_recompiler.json: %v", err)
+		t.Fatalf("failed to unmarshal test_case/vm_log_compiler.json: %v", err)
 	}
 
 	for i, ans := range testdata {
@@ -213,7 +213,7 @@ func TestPVMstepJsonDiff(t *testing.T) {
 		if !reflect.DeepEqual(ans, rcp_ans) {
 			fmt.Printf("Difference found in index %d:\n", i)
 			fmt.Printf("Original: %+v\n", ans)
-			fmt.Printf("Recompiler: %+v\n", rcp_ans)
+			fmt.Printf("Compiler: %+v\n", rcp_ans)
 
 			// Print the differences
 			diff := CompareJSON(ans, rcp_ans)
@@ -256,7 +256,7 @@ func TestTracesInterpreter(t *testing.T) {
 			}
 
 			for _, e := range entries {
-				if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || e.Name() == "00000000.json" {
+				if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || (e.Name() == "00000000.json" || e.Name() == "genesis.json") {
 					continue
 				}
 
@@ -279,7 +279,7 @@ func TestTracesInterpreter(t *testing.T) {
 	}
 }
 
-func TestTracesRecompiler(t *testing.T) {
+func TestTracesCompiler(t *testing.T) {
 	log.InitLogger("debug")
 	pvm.VMsCompare = true // enable VM comparison for this test
 	// pvm.PvmLogging = true
@@ -320,7 +320,7 @@ func TestTracesRecompiler(t *testing.T) {
 				fmt.Printf("Running test for file: %s\n", filename)
 
 				t.Run(e.Name(), func(t *testing.T) {
-					runSingleSTFTest(t, filename, string(content), pvm.BackendRecompiler, false)
+					runSingleSTFTest(t, filename, string(content), pvm.BackendCompiler, false)
 				})
 			}
 		})
@@ -372,7 +372,7 @@ func TestTracesSandbox(t *testing.T) {
 
 				// Run the actual test logic for each file as a distinct sub-test.
 				t.Run(e.Name(), func(t *testing.T) {
-					runSingleSTFTest(t, filename, string(content), pvm.BackendRecompilerSandbox, false)
+					runSingleSTFTest(t, filename, string(content), pvm.BackendSandbox, false)
 				})
 			}
 		})
@@ -398,9 +398,9 @@ func TestCompareLogs(t *testing.T) {
 	}
 	defer f1.Close()
 
-	f2, err := os.Open("recompiler_sandbox/0_accumulate.json")
+	f2, err := os.Open("sandbox/0_accumulate.json")
 	if err != nil {
-		t.Fatalf("failed to open recompiler_sandbox/vm_log.json: %v", err)
+		t.Fatalf("failed to open sandbox/vm_log.json: %v", err)
 	}
 	defer f2.Close()
 
@@ -417,7 +417,7 @@ func TestCompareLogs(t *testing.T) {
 			t.Fatalf("error scanning vm_log.json at line %d: %v", i, err)
 		}
 		if err := s2.Err(); err != nil {
-			t.Fatalf("error scanning vm_log_recompiler.json at line %d: %v", i, err)
+			t.Fatalf("error scanning vm_log_compiler.json at line %d: %v", i, err)
 		}
 
 		// both files ended → success
@@ -430,7 +430,7 @@ func TestCompareLogs(t *testing.T) {
 		}
 		// one ended early → length mismatch
 		if has1 != has2 {
-			t.Fatalf("log length mismatch at index %d: has vm_log=%v, has vm_log_recompiler=%v", i, has1, has2)
+			t.Fatalf("log length mismatch at index %d: has vm_log=%v, has vm_log_compiler=%v", i, has1, has2)
 		}
 
 		// unmarshal each line into your entry type
@@ -439,12 +439,12 @@ func TestCompareLogs(t *testing.T) {
 			t.Fatalf("failed to unmarshal line %d of vm_log.json: %v", i, err)
 		}
 		if err := json.Unmarshal(s2.Bytes(), &recp); err != nil {
-			t.Fatalf("failed to unmarshal line %d of vm_log_recompiler.json: %v", i, err)
+			t.Fatalf("failed to unmarshal line %d of vm_log_compiler.json: %v", i, err)
 		}
 
 		// compare
 		if !reflect.DeepEqual(orig.OpStr, recp.OpStr) || !reflect.DeepEqual(orig.Operands, recp.Operands) || !reflect.DeepEqual(orig.Registers, recp.Registers) || !reflect.DeepEqual(orig.Gas, recp.Gas) {
-			fmt.Printf("Difference at index %d:\nOriginal: %+v\nRecompiler: %+v\n", i, orig, recp)
+			fmt.Printf("Difference at index %d:\nOriginal: %+v\nCompiler: %+v\n", i, orig, recp)
 			if diff := CompareJSON(orig, recp); diff != "" {
 				fmt.Println("Differences:", diff)
 				fmt.Printf("Operation: %s\n", pvm.DisassembleSingleInstruction(orig.Opcode, orig.Operands))

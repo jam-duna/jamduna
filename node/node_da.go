@@ -290,8 +290,8 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 	pvmBackend := n.pvmBackend
 	if firstGuarantorOrAuditor {
 		/*
-			if useRecompiler {
-				pvmBackend = pvm.BackendRecompiler // MK: DO NOT MUTATE/HARDCODE pvmBackend
+			if useCompiler {
+				pvmBackend = pvm.BackendCompiler // MK: DO NOT MUTATE/HARDCODE pvmBackend
 			}
 		*/
 		pvmContext = log.FirstGuarantorOrAuditor

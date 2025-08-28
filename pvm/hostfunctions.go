@@ -1251,12 +1251,12 @@ func (vm *VM) hostInvoke() {
 	switch vm.Backend {
 	case BackendInterpreter:
 		new_machine.Execute(int(new_machine.pc), true)
-	case BackendRecompiler:
-		if recRam, ok := m_n.U.(*RecompilerRam); ok {
-			log.Info(vm.logging, "INVOKE: Recompiler", "n", n, "o", o, "g", int64(g))
-			new_rvm, err := NewRecompilerVMFromRam(new_machine, recRam)
+	case BackendCompiler:
+		if recRam, ok := m_n.U.(*CompilerRam); ok {
+			log.Info(vm.logging, "INVOKE: Compiler", "n", n, "o", o, "g", int64(g))
+			new_rvm, err := NewCompilerVMFromRam(new_machine, recRam)
 			if err != nil {
-				log.Error(vm.logging, "INVOKE: NewRecompilerVMFromRam failed", "n", n, "o", o, "g", int64(g), "err", err)
+				log.Error(vm.logging, "INVOKE: NewCompilerVMFromRam failed", "n", n, "o", o, "g", int64(g), "err", err)
 				vm.terminated = true
 				vm.ResultCode = types.WORKDIGEST_PANIC
 				vm.MachineState = PANIC
@@ -1265,18 +1265,18 @@ func (vm *VM) hostInvoke() {
 			new_rvm.Execute(uint32(new_rvm.pc))
 			new_rvm.Close()
 		} else {
-			log.Error(vm.logging, "INVOKE: m_n.U is not *RecompilerRam")
+			log.Error(vm.logging, "INVOKE: m_n.U is not *CompilerRam")
 			vm.terminated = true
 			vm.ResultCode = types.WORKDIGEST_PANIC
 			vm.MachineState = PANIC
 			return
 		}
-	case BackendRecompilerSandbox:
+	case BackendSandbox:
 		if emu, ok := m_n.U.(*Emulator); ok {
-			log.Info(vm.logging, "INVOKE: RecompilerSandbox", "n", n, "o", o, "g", int64(g))
-			new_sandbox, err := NewRecompilerSandboxVMFromEmulator(new_machine, emu)
+			log.Info(vm.logging, "INVOKE: CompilerSandbox", "n", n, "o", o, "g", int64(g))
+			new_sandbox, err := NewCompilerSandboxVMFromEmulator(new_machine, emu)
 			if err != nil {
-				log.Error(vm.logging, "INVOKE: NewRecompilerSandboxVMFromEmulator failed", "n", n, "o", o, "g", int64(g), "err", err)
+				log.Error(vm.logging, "INVOKE: NewCompilerSandboxVMFromEmulator failed", "n", n, "o", o, "g", int64(g), "err", err)
 				vm.terminated = true
 				vm.ResultCode = types.WORKDIGEST_PANIC
 				vm.MachineState = PANIC
@@ -1834,8 +1834,8 @@ func (vm *VM) hostMachine() {
 	switch vm.Ram.(type) {
 	case *RAM, *RawRAM:
 		ram = NewRawRAM()
-	case *RecompilerRam:
-		ram, _ = NewRecompilerRam()
+	case *CompilerRam:
+		ram, _ = NewCompilerRam()
 	case *Emulator:
 		ram, _ = NewEmulator()
 	}

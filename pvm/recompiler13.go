@@ -579,7 +579,7 @@ func generateMul64(inst Instruction) []byte {
 	return code
 }
 
-// Note: emitRex is replaced by buildREX from recompiler_helper.go for consistency
+// Note: emitRex is replaced by buildREX from compiler_helper.go for consistency
 
 func generateBinaryOp32(opcode byte) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {

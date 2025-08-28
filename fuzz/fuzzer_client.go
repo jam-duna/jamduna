@@ -49,7 +49,7 @@ func NewFuzzer(storageDir string, reportDir string, socketPath string, fuzzerInf
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize fuzzer's local storage: %w", err)
 	}
-	if strings.ToLower(pvmBackend) != pvm.BackendInterpreter && strings.ToLower(pvmBackend) != pvm.BackendRecompiler {
+	if strings.ToLower(pvmBackend) != pvm.BackendInterpreter && strings.ToLower(pvmBackend) != pvm.BackendCompiler {
 		pvmBackend = pvm.BackendInterpreter
 		fmt.Printf("Invalid PVM backend specified. Defaulting to Interpreter\n")
 	} else if runtime.GOOS != "linux" && strings.ToLower(pvmBackend) != pvm.BackendInterpreter {

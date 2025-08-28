@@ -14,7 +14,7 @@ func BenchmarkInstRetHalt(b *testing.B) {
 	// Enable any global tracing/logging you want *outside* measured loops:
 	PvmLogging = true
 	PvmTrace = true
-	debugRecompiler = true
+	debugCompiler = true
 
 	// 1) Load & parse test case exactly once:
 	const name = "inst_ret_halt"
@@ -35,8 +35,8 @@ func BenchmarkInstRetHalt(b *testing.B) {
 		runFn func(TestCase) error
 	}{
 		{BackendInterpreter, pvm_test},
-		{BackendRecompilerSandbox, recompiler_sandbox_test},
-		{BackendRecompiler, recompiler_test},
+		{BackendSandbox, sandbox_test},
+		{BackendCompiler, compiler_test},
 	}
 
 	// 3) Run each sub-benchmark:

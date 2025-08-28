@@ -27,7 +27,7 @@ type Target struct {
 	store      *storage.StateDBStorage     // Storage backend for the state database.
 	stateDB    *statedb.StateDB            // This can be used to manage state transitions.
 	stateDBMap map[common.Hash]common.Hash // [headererHash]posteriorStateRoot
-	pvmBackend string                      // Backend to use for state transitions, e.g., "Interpreter" or "Recompiler".
+	pvmBackend string                      // Backend to use for state transitions, e.g., "Interpreter" or "Compiler".
 }
 
 // NewTarget creates a new target instance, armed with a specific test case.
@@ -37,7 +37,7 @@ func NewTarget(socketPath string, targetInfo PeerInfo, pvmBackend string) *Targe
 	if err != nil {
 		log.Fatalf("Failed to create state DB storage: %v", err)
 	}
-	if strings.ToLower(pvmBackend) != pvm.BackendInterpreter && strings.ToLower(pvmBackend) != pvm.BackendRecompiler {
+	if strings.ToLower(pvmBackend) != pvm.BackendInterpreter && strings.ToLower(pvmBackend) != pvm.BackendCompiler {
 		pvmBackend = pvm.BackendInterpreter
 		fmt.Printf("Invalid PVM backend specified. Defaulting to Interpreter\n")
 	} else if runtime.GOOS != "linux" && strings.ToLower(pvmBackend) != pvm.BackendInterpreter {

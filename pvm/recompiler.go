@@ -60,9 +60,9 @@ const (
 	indirectJumpPointSlot = 20 // Indirect jump point is at index 20
 )
 
-type RecompilerVM struct {
+type CompilerVM struct {
 	*VM
-	*RecompilerRam
+	*CompilerRam
 	mu        sync.Mutex
 	startCode []byte
 	exitCode  []byte
@@ -92,14 +92,14 @@ type RecompilerVM struct {
 	IsBlockCounting bool // whether to count basic blocks
 }
 
-func NewRecompilerVM(vm *VM) (*RecompilerVM, error) {
+func NewCompilerVM(vm *VM) (*CompilerVM, error) {
 	currentHeapPointer := vm.Ram.GetCurrentHeapPointer()
-	ram, err := NewRecompilerRam() // 1MB for register dump
+	ram, err := NewCompilerRam() // 1MB for register dump
 	if err != nil {
-		return nil, fmt.Errorf("failed to create RecompilerRam: %w", err)
+		return nil, fmt.Errorf("failed to create CompilerRam: %w", err)
 	}
 	// Assemble the VM
-	rvm := &RecompilerVM{
+	rvm := &CompilerVM{
 		VM: vm,
 
 		JumpTableMap:    make([]uint64, 0),
@@ -115,13 +115,13 @@ func NewRecompilerVM(vm *VM) (*RecompilerVM, error) {
 
 	rvm.VM.Ram = ram
 	rvm.VM.Ram.SetCurrentHeapPointer(currentHeapPointer)
-	rvm.RecompilerRam = ram
+	rvm.CompilerRam = ram
 	return rvm, nil
 }
 
-func NewRecompilerVMFromRam(vm *VM, ram *RecompilerRam) (*RecompilerVM, error) {
+func NewCompilerVMFromRam(vm *VM, ram *CompilerRam) (*CompilerVM, error) {
 	// Assemble the VM
-	rvm := &RecompilerVM{
+	rvm := &CompilerVM{
 		VM: vm,
 
 		JumpTableMap:    make([]uint64, 0),
@@ -136,16 +136,16 @@ func NewRecompilerVMFromRam(vm *VM, ram *RecompilerRam) (*RecompilerVM, error) {
 	}
 
 	rvm.VM.Ram = ram
-	rvm.RecompilerRam = ram
+	rvm.CompilerRam = ram
 	return rvm, nil
 }
 
 // add jump indirects
 const entryPatch = 0x99999999
 
-func (vm *RecompilerVM) initStartCode() {
+func (vm *CompilerVM) initStartCode() {
 
-	vm.startCode = append(vm.startCode, encodeMovImm(BaseRegIndex, uint64(vm.RecompilerRam.realMemAddr))...)
+	vm.startCode = append(vm.startCode, encodeMovImm(BaseRegIndex, uint64(vm.CompilerRam.realMemAddr))...)
 	// initialize registers: mov rX, imm from vm.register
 	for i := 0; i < regSize; i++ {
 		immVal, _ := vm.Ram.ReadRegister(i)
@@ -155,7 +155,7 @@ func (vm *RecompilerVM) initStartCode() {
 		}
 		vm.startCode = append(vm.startCode, code...)
 	}
-	gasRegMemAddr := uint64(vm.RecompilerRam.regDumpAddr) + uint64(len(regInfoList)*8)
+	gasRegMemAddr := uint64(vm.CompilerRam.regDumpAddr) + uint64(len(regInfoList)*8)
 	if showDisassembly {
 		fmt.Printf("Initialize Gas %d = %d\n", gasRegMemAddr, vm.Gas)
 	}
@@ -169,7 +169,7 @@ func (vm *RecompilerVM) initStartCode() {
 	vm.startCode = append(vm.startCode, patch...)
 
 	// Build exit code in temporary buffer
-	exitCode := encodeMovImm(BaseRegIndex, uint64(vm.RecompilerRam.regDumpAddr))
+	exitCode := encodeMovImm(BaseRegIndex, uint64(vm.CompilerRam.regDumpAddr))
 	for i := 0; i < len(regInfoList); i++ {
 		if i == BaseRegIndex {
 			continue // skip R12 into [R12]
@@ -179,7 +179,7 @@ func (vm *RecompilerVM) initStartCode() {
 	}
 	vm.exitCode = append(exitCode, X86_OP_RET)
 }
-func (vm *RecompilerRam) GetDirtyPages() []int {
+func (vm *CompilerRam) GetDirtyPages() []int {
 	dirtyPages := make([]int, 0)
 	for pageIndex, _ := range vm.dirtyPages {
 		if vm.dirtyPages[pageIndex] {
@@ -200,7 +200,7 @@ func (vm *RecompilerRam) GetDirtyPages() []int {
 //
 // If all checks pass, it computes the handler address and jumps to the appropriate handler.
 // The function also patches the generated code with the correct relative offsets for jumps and handlers.
-func (vm *RecompilerVM) initDJumpFunc(x86CodeLen int) {
+func (vm *CompilerVM) initDJumpFunc(x86CodeLen int) {
 	type pending struct {
 		jeOff   int
 		handler uintptr
@@ -384,7 +384,7 @@ func (vm *RecompilerVM) initDJumpFunc(x86CodeLen int) {
 	vm.djumpTableFunc = code
 }
 
-func (vm *RecompilerVM) Close() error {
+func (vm *CompilerVM) Close() error {
 	var errs []error
 
 	if vm.x86Code != nil {
@@ -401,7 +401,7 @@ func (vm *RecompilerVM) Close() error {
 	return nil
 }
 
-func (rvm *RecompilerVM) Disassemble(code []byte) string {
+func (rvm *CompilerVM) Disassemble(code []byte) string {
 	var sb strings.Builder
 	offset := 0
 	if rvm.x86Instructions == nil {
@@ -458,10 +458,10 @@ func Disassemble(code []byte) string {
 	return sb.String()
 }
 
-func (vm *RecompilerVM) ExecuteX86Code(x86code []byte) (err error) {
+func (vm *CompilerVM) ExecuteX86Code(x86code []byte) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Error(vm.logging, "RecompilerVM ExecuteX86Code panic", "error", r)
+			log.Error(vm.logging, "CompilerVM ExecuteX86Code panic", "error", r)
 			debug.PrintStack()
 			vm.ResultCode = types.WORKDIGEST_PANIC
 			vm.MachineState = PANIC
@@ -553,7 +553,7 @@ func (vm *RecompilerVM) ExecuteX86Code(x86code []byte) (err error) {
 	return nil
 }
 
-func (vm *RecompilerVM) ExecuteX86CodeWithEntry(x86code []byte, entry uint32) (err error) {
+func (vm *CompilerVM) ExecuteX86CodeWithEntry(x86code []byte, entry uint32) (err error) {
 	startTime := time.Now()
 	vm.initDJumpFunc(len(x86code))
 	codeAddr, err := syscall.Mmap(
@@ -588,7 +588,7 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(x86code []byte, entry uint32) (e
 	if !ok && entry != 0 {
 		return fmt.Errorf("entry %d not found in InstMapPVMToX86", entry)
 	}
-	if debugRecompiler {
+	if debugCompiler {
 		fmt.Printf("Executing code at x86 PC: %d (PVM PC: %d)\n", x86PC, entry)
 	}
 	patch := make([]byte, 4)
@@ -683,7 +683,7 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(x86code []byte, entry uint32) (e
 	return nil
 }
 
-func (rvm *RecompilerVM) Execute(entry uint32) {
+func (rvm *CompilerVM) Execute(entry uint32) {
 	startTime := time.Now()
 	rvm.pc = 0
 
@@ -747,7 +747,7 @@ func (vm *VM) ResetTally() {
 }
 
 // Standard_Program_Initialization initializes the program memory and registers
-func (vm *RecompilerVM) Standard_Program_Initialization(argument_data_a []byte) (err error) {
+func (vm *CompilerVM) Standard_Program_Initialization(argument_data_a []byte) (err error) {
 
 	if len(argument_data_a) == 0 {
 		argument_data_a = []byte{0}
@@ -828,7 +828,7 @@ func (vm *RecompilerVM) Standard_Program_Initialization(argument_data_a []byte) 
 	return nil
 }
 
-func (vm *RecompilerVM) WriteContextSlot(slot_index int, value uint64, size int) error {
+func (vm *CompilerVM) WriteContextSlot(slot_index int, value uint64, size int) error {
 	if vm.regDumpAddr == 0 {
 		return fmt.Errorf("regDumpAddr is not initialized")
 	}
@@ -849,7 +849,7 @@ func (vm *RecompilerVM) WriteContextSlot(slot_index int, value uint64, size int)
 	return nil
 }
 
-func (vm *RecompilerVM) ReadContextSlot(slot_index int) (uint64, error) {
+func (vm *CompilerVM) ReadContextSlot(slot_index int) (uint64, error) {
 	if vm.regDumpAddr == 0 {
 		return 0, fmt.Errorf("regDumpAddr is not initialized")
 	}
@@ -1003,7 +1003,7 @@ func generateCompareBranch(jcc byte) func(inst Instruction) []byte {
 	}
 }
 
-func (vm *RecompilerVM) GetMemory() (map[int][]byte, map[int]int) {
+func (vm *CompilerVM) GetMemory() (map[int][]byte, map[int]int) {
 	memory := make(map[int][]byte)
 	pageMap := make(map[int]int)
 	for index, _ := range vm.dirtyPages {
@@ -1039,7 +1039,7 @@ type X86InternalTally struct {
 	Count  int    `json:"count"`
 }
 
-func (vm *RecompilerVM) AddPVMCount(pvm_OP string) {
+func (vm *CompilerVM) AddPVMCount(pvm_OP string) {
 	if vm.OP_tally == nil {
 		vm.OP_tally = make(map[string]*X86InstTally)
 	}
@@ -1054,7 +1054,7 @@ func (vm *RecompilerVM) AddPVMCount(pvm_OP string) {
 	entry.TotalPVM++
 }
 
-func (vm *RecompilerVM) DisassembleAndTally(pvm_OP_Code byte, code []byte) string {
+func (vm *CompilerVM) DisassembleAndTally(pvm_OP_Code byte, code []byte) string {
 	pvm_OP := opcode_str(pvm_OP_Code)
 
 	// bump the PVM count once

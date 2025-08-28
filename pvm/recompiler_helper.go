@@ -290,7 +290,7 @@ func encodeU64(v uint64) []byte {
 	return buf
 }
 
-func (rvm *RecompilerVM) DumpRegisterToMemory(move_back bool) []byte {
+func (rvm *CompilerVM) DumpRegisterToMemory(move_back bool) []byte {
 	code := encodeMovImm(BaseRegIndex, uint64(rvm.regDumpAddr))
 	// for each register, mov [BaseRegIndex + i*8], rX
 	for i := 0; i < len(regInfoList); i++ {
@@ -353,7 +353,7 @@ func generateIncMem(addr uint64) []byte {
 
 	return code
 }
-func (rvm *RecompilerVM) RestoreRegisterInX86() []byte {
+func (rvm *CompilerVM) RestoreRegisterInX86() []byte {
 	restoredCode := make([]byte, 0)
 	for i := 0; i < regSize; i++ {
 		reg := regInfoList[i]

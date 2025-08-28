@@ -40,8 +40,8 @@ ffi/libbandersnatch.a
 # state DB test data
 /statedb/testdata/
 /statedb/test_case/
-/statedb/recompiler/
-/statedb/recompiler_sandbox/
+/statedb/compiler/
+/statedb/sandbox/
 /statedb/interpreter/
 /statedb/test/
 # service guarantees JSON
@@ -62,9 +62,9 @@ cmd/.DS_Store
 /release
 pvm/test/*
 node/interpreter/*
-node/recompiler/*
-node/recompiler_sandbox/*
-node/test/*_recompiler_*.json
+node/compiler/*
+node/sandbox/*
+node/test/*_compiler_*.json
 /node/test
 /cmd/importblocks/fuzzed
 conf/*

@@ -14,7 +14,7 @@ import (
 //
 //export Ecalli
 func Ecalli(rvmPtr unsafe.Pointer, opcode int32) {
-	vm := (*RecompilerVM)(rvmPtr)
+	vm := (*CompilerVM)(rvmPtr)
 	// Acquire lock to ensure thread-safety
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
@@ -77,7 +77,7 @@ func Ecalli(rvmPtr unsafe.Pointer, opcode int32) {
 	}
 
 }
-func (vm *RecompilerVM) LogCurrentState(opcode byte, operands []byte, currentPC uint64, gas int64) {
+func (vm *CompilerVM) LogCurrentState(opcode byte, operands []byte, currentPC uint64, gas int64) {
 	if opcode == ECALLI {
 		return
 	}
@@ -114,7 +114,7 @@ func (vm *RecompilerVM) LogCurrentState(opcode byte, operands []byte, currentPC 
 //
 //export Sbrk
 func Sbrk(rvmPtr unsafe.Pointer, registerIndexA uint32, registerIndexD uint32) {
-	vm := (*RecompilerVM)(rvmPtr)
+	vm := (*CompilerVM)(rvmPtr)
 	// Acquire lock to ensure thread-safety
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
@@ -150,7 +150,7 @@ func EmitCallToSbrkStub(rvmPtr uintptr, registerIndexA uint32, registerIndexD ui
 // 2. Sets up C ABI registers (rdi, esi).
 // 3. Calls the Ecalli function.
 // It returns the combined machine code bytes.
-func (rvm *RecompilerVM) EcalliCode(opcode int) ([]byte, error) {
+func (rvm *CompilerVM) EcalliCode(opcode int) ([]byte, error) {
 	// 1. Dump registers to memory
 	code := rvm.DumpRegisterToMemory(true)
 
@@ -230,7 +230,7 @@ func encodeCallRax() []byte {
 	return emitCallReg(RAX) // RAX is at index 0
 }
 
-func (vm *RecompilerVM) chargeGas(host_fn int) uint64 {
+func (vm *CompilerVM) chargeGas(host_fn int) uint64 {
 	beforeGas := vm.Gas
 	chargedGas := uint64(10) // We deduct 10 here
 	exp := fmt.Sprintf("HOSTFUNC %d", host_fn)
@@ -299,7 +299,7 @@ func (vm *RecompilerVM) chargeGas(host_fn int) uint64 {
 		chargedGas = 0
 	}
 	if false {
-		fmt.Fprintf(os.Stderr, "RecompilerVM: chargeGas: host_fn=%d, beforeGas=%d, chargedGas=%d, exp=%s\n",
+		fmt.Fprintf(os.Stderr, "CompilerVM: chargeGas: host_fn=%d, beforeGas=%d, chargedGas=%d, exp=%s\n",
 			host_fn,
 			beforeGas,
 			chargedGas,
@@ -308,7 +308,7 @@ func (vm *RecompilerVM) chargeGas(host_fn int) uint64 {
 	return chargedGas
 }
 
-func (vm *RecompilerVM) InvokeSbrk(registerA uint32, registerIndexD uint32) (result uint32) {
+func (vm *CompilerVM) InvokeSbrk(registerA uint32, registerIndexD uint32) (result uint32) {
 	valueA, _ := vm.Ram.ReadRegister(int(registerA))
 	currentHeapPointer := vm.GetCurrentHeapPointer()
 	if valueA == 0 {
@@ -316,19 +316,19 @@ func (vm *RecompilerVM) InvokeSbrk(registerA uint32, registerIndexD uint32) (res
 		return currentHeapPointer
 	}
 	result = currentHeapPointer
-	//fmt.Fprintf(os.Stderr, "RecompilerVM: Sbrk: current_heap_pointer=%d, valueA=%d, registerIndexD=%d\n", currentHeapPointer, valueA, registerIndexD)
+	//fmt.Fprintf(os.Stderr, "CompilerVM: Sbrk: current_heap_pointer=%d, valueA=%d, registerIndexD=%d\n", currentHeapPointer, valueA, registerIndexD)
 	next_page_boundary := P_func(currentHeapPointer)
 	new_heap_pointer := currentHeapPointer + uint32(valueA)
 	if new_heap_pointer > uint32(next_page_boundary) {
 
 		final_boundary := P_func(uint32(new_heap_pointer))
-		// fmt.Fprintf(os.Stderr, "RecompilerVM: Sbrk: new_heap_pointer=%d, final_boundary=%d\n", new_heap_pointer, final_boundary)
+		// fmt.Fprintf(os.Stderr, "CompilerVM: Sbrk: new_heap_pointer=%d, final_boundary=%d\n", new_heap_pointer, final_boundary)
 		idx_start := next_page_boundary / Z_P
 		idx_end := final_boundary / Z_P
 		page_count := idx_end - idx_start
 
 		vm.allocatePages(idx_start, page_count)
-		// fmt.Fprintf(os.Stderr, "RecompilerVM: Sbrk: Allocated %d pages from %d to %d\n", page_count, idx_start, idx_end)
+		// fmt.Fprintf(os.Stderr, "CompilerVM: Sbrk: Allocated %d pages from %d to %d\n", page_count, idx_start, idx_end)
 	}
 	vm.SetCurrentHeapPointer(new_heap_pointer)
 	return result
@@ -336,6 +336,6 @@ func (vm *RecompilerVM) InvokeSbrk(registerA uint32, registerIndexD uint32) (res
 
 // InvokeHostCall handles host calls
 // Returns true if the call results in a halt condition, otherwise false
-func (vm *RecompilerVM) InvokeHostCall(host_fn int) (bool, error) {
+func (vm *CompilerVM) InvokeHostCall(host_fn int) (bool, error) {
 	return vm.hostFunction(host_fn)
 }

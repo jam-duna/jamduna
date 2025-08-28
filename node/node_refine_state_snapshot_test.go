@@ -61,9 +61,9 @@ func TestCompareLogs(t *testing.T) {
 	}
 	defer f1.Close()
 
-	f2, err := os.Open("recompiler_sandbox/10_refine.json")
+	f2, err := os.Open("sandbox/10_refine.json")
 	if err != nil {
-		t.Fatalf("failed to open recompiler_sandbox/vm_log.json: %v", err)
+		t.Fatalf("failed to open sandbox/vm_log.json: %v", err)
 	}
 	defer f2.Close()
 
@@ -80,7 +80,7 @@ func TestCompareLogs(t *testing.T) {
 			t.Fatalf("error scanning vm_log.json at line %d: %v", i, err)
 		}
 		if err := s2.Err(); err != nil {
-			t.Fatalf("error scanning vm_log_recompiler.json at line %d: %v", i, err)
+			t.Fatalf("error scanning vm_log_compiler.json at line %d: %v", i, err)
 		}
 
 		// both files ended → success
@@ -93,7 +93,7 @@ func TestCompareLogs(t *testing.T) {
 		}
 		// one ended early → length mismatch
 		if has1 != has2 {
-			t.Fatalf("log length mismatch at index %d: has vm_log=%v, has vm_log_recompiler=%v", i, has1, has2)
+			t.Fatalf("log length mismatch at index %d: has vm_log=%v, has vm_log_compiler=%v", i, has1, has2)
 		}
 
 		// unmarshal each line into your entry type
@@ -102,12 +102,12 @@ func TestCompareLogs(t *testing.T) {
 			t.Fatalf("failed to unmarshal line %d of vm_log.json: %v", i, err)
 		}
 		if err := json.Unmarshal(s2.Bytes(), &recp); err != nil {
-			t.Fatalf("failed to unmarshal line %d of vm_log_recompiler.json: %v", i, err)
+			t.Fatalf("failed to unmarshal line %d of vm_log_compiler.json: %v", i, err)
 		}
 
 		// compare
 		if !reflect.DeepEqual(orig.OpStr, recp.OpStr) || !reflect.DeepEqual(orig.Operands, recp.Operands) || !reflect.DeepEqual(orig.Registers, recp.Registers) || !reflect.DeepEqual(orig.Gas, recp.Gas) {
-			fmt.Printf("Difference at index %d:\nOriginal: %+v\nRecompiler: %+v\n", i, orig, recp)
+			fmt.Printf("Difference at index %d:\nOriginal: %+v\nCompiler: %+v\n", i, orig, recp)
 			if diff := CompareJSON(orig, recp); diff != "" {
 				fmt.Println("Differences:", diff)
 				t.Fatalf("differences at index %d: %s", i, diff)
@@ -213,7 +213,7 @@ func TestRefineStateTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
-	pvmBackends := []string{pvm.BackendRecompiler} //, pvm.BackendInterpreter, pvm.BackendRecompilerSandbox}
+	pvmBackends := []string{pvm.BackendCompiler} //, pvm.BackendInterpreter, pvm.BackendSandbox}
 	//pvmBackends := []string{pvm.BackendInterpreter}
 	for _, pvmBackend := range pvmBackends {
 		t.Run(fmt.Sprintf("pvmBackend=%s", pvmBackend), func(t *testing.T) {
@@ -347,7 +347,7 @@ func TestRefineAlgo3(t *testing.T) {
 			continue
 		}
 		gasUsed := make(map[string]uint)
-		backends := []string{pvm.BackendRecompiler}
+		backends := []string{pvm.BackendCompiler}
 		for _, pvmBackend := range backends {
 			modified_wp := bundle_snapshot.Bundle.WorkPackage
 			modified_wp.WorkItems[1].RefineGasLimit = 4_000_000_000
@@ -507,7 +507,7 @@ func TestRefineAutoAlgo(t *testing.T) {
 	for algoID := algoID_start; algoID <= algoID_end; algoID++ {
 		t.Run(fmt.Sprintf("Algo_%d", algoID), func(t *testing.T) {
 			fmt.Printf("--- Searching for last success for Algorithm ID: %d ---\n", algoID)
-			pvmBackend := pvm.BackendRecompiler
+			pvmBackend := pvm.BackendCompiler
 			if runtime.GOOS != "linux" {
 				pvmBackend = pvm.BackendInterpreter
 				log.Warn(log.Node, fmt.Sprintf("COMPILER Not Supported. Defaulting to interpreter"))
@@ -634,7 +634,7 @@ func TestAlgoExecMax(t *testing.T) {
 			algo_gas_used := uint(0)
 
 			output := captureOutput(func() {
-				pvmBackend := pvm.BackendRecompiler
+				pvmBackend := pvm.BackendCompiler
 				if runtime.GOOS != "linux" {
 					pvmBackend = pvm.BackendInterpreter
 				}

@@ -2,7 +2,7 @@ OUTPUT_DIR := bin
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
 SRC := jam.go
-CHAINSPEC ?= chainspecs/jamduna-spec.json
+
 NUM_NODES ?= 6
 DEFAULT_PORT ?= 40000
 SINGLE_NODE_PORT ?= 40005
@@ -28,10 +28,13 @@ BINARY := jamduna
 # Set default PVM backend based on OS.
 # On Linux, default to the faster 'compiler'. Otherwise, use 'interpreter'.
 ifeq ($(UNAME_S),Linux)
-  PVM_BACKEND ?= recompiler # Default to 'compiler' on Linux
+  PVM_BACKEND ?= compiler # Default to 'compiler' on Linux
 else
   PVM_BACKEND ?= interpreter # Default to 'interpreter' on non-Linux
 endif
+
+#CHAINSPEC ?= chainspecs/jamduna-spec.json
+CHAINSPEC ?= chainspecs/$(ARCH)/polkajam-spec.json
 
 
 POLKAJAM_BIN ?= bin/polkajam
@@ -62,21 +65,26 @@ spin_localclient: jam kill_jam jam_clean spin_5 spin_0
 spin_5:
 	@rm -rf ${HOME}/.jamduna/jam-*
 	@for i in 1 2 3 4 5; do \
-		$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator $$i  --rpc-port=$$((19800 + $$i)) --chain chainspecs/jamduna-spec.json --pvm-backend $(PVM_BACKEND)  >logs/jamduna-$$i.log 2>&1 & \
+		$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator $$i  --rpc-port=$$((19800 + $$i)) --chain ${CHAINSPEC} --pvm-backend $(PVM_BACKEND)  >logs/jamduna-$$i.log 2>&1 & \
 	done
 
 spin_0:
 	@for i in 0; do \
-		RUST_LOG=polkavm=trace,jam_node=trace $(POLKAJAM_BIN) --chain chainspecs/jamduna-spec.json --parameters tiny run --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
+		RUST_LOG=polkavm=trace,jam_node=trace $(POLKAJAM_BIN) --chain ${CHAINSPEC} run --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
 	done
 
 run_1:
 	@rm -rf ${HOME}/.jamduna/jam-*
-	@$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator 5 --rpc-port=19805 --chain chainspecs/jamduna-spec.json --pvm-backend $(PVM_BACKEND) --debug rotation,guarantees
+	@$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator 5 --rpc-port=19805 --chain ${CHAINSPEC} --pvm-backend $(PVM_BACKEND) --debug rotation,guarantees
 
 run_5:
 	@for i in 0 1 2 3 4; do \
-		RUST_LOG=chain-core=debug,jam_node=trace $(POLKAJAM_BIN)  --chain chainspecs/jamduna-spec.json run --pvm-backend compiler --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
+		RUST_LOG=chain-core=debug,jam_node=trace $(POLKAJAM_BIN)  --chain ${CHAINSPEC} run --pvm-backend $(PVM_BACKEND) --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
+	done
+
+run_6:
+	@for i in 0 1 2 3 4 5; do \
+		RUST_LOG=chain-core=debug,jam_node=trace $(POLKAJAM_BIN)  --chain ${CHAINSPEC} run --pvm-backend $(PVM_BACKEND) --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
 	done
 
 jam:
@@ -90,7 +98,8 @@ duna_spec: jam
 
 polka_spec: jam
 	@echo "Generating Polka chainspec..."
-	./$(POLKAJAM_BIN) -p tiny gen-spec chainspecs/dev-config.json chainspecs/polkajam-spec.json
+	@mkdir -p chainspecs/$(ARCH)
+	./$(POLKAJAM_BIN) gen-spec chainspecs/dev-config.json chainspecs/$(ARCH)/polkajam-spec.json
 
 # ANSI color codes
 GREEN=\033[0;32m
@@ -220,7 +229,7 @@ run_polkajam_all:
 		PORT=$$(($(DEFAULT_PORT) + $$i)); \
 		V_IDX=$$i; \
 		echo ">> Starting instance $$V_IDX on port $$PORT..."; \
-		$(POLKAJAM_BIN) --chain $(CHAINSPEC) --parameters tiny run  --temp  --dev-validator $$V_IDX --rpc-port=$$((19800 + $$i)) & \
+		$(POLKAJAM_BIN) --chain $(CHAINSPEC) --pvm-backend $(PVM_BACKEND) run  --temp  --dev-validator $$V_IDX --rpc-port=$$((19800 + $$i)) & \
 	done; \
 
 run_localclient: kill jam jam_clean run_5 run_1

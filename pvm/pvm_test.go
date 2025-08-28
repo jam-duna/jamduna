@@ -252,9 +252,9 @@ func TestCompareLogs(t *testing.T) {
 	}
 	defer f1.Close()
 
-	f2, err := os.Open(fmt.Sprintf("%s/vm_log.json", BackendRecompilerSandbox))
+	f2, err := os.Open(fmt.Sprintf("%s/vm_log.json", BackendSandbox))
 	if err != nil {
-		t.Fatalf("failed to open %s/vm_log.json: %v", BackendRecompilerSandbox, err)
+		t.Fatalf("failed to open %s/vm_log.json: %v", BackendSandbox, err)
 	}
 	defer f2.Close()
 
@@ -270,7 +270,7 @@ func TestCompareLogs(t *testing.T) {
 			t.Fatalf("error scanning vm_log.json at line %d: %v", i, err)
 		}
 		if err := s2.Err(); err != nil {
-			t.Fatalf("error scanning vm_log_recompiler.json at line %d: %v", i, err)
+			t.Fatalf("error scanning vm_log_compiler.json at line %d: %v", i, err)
 		}
 
 		// both files ended → success
@@ -279,7 +279,7 @@ func TestCompareLogs(t *testing.T) {
 		}
 		// one ended early → length mismatch
 		if has1 != has2 {
-			t.Fatalf("log length mismatch at index %d: has vm_log=%v, has vm_log_recompiler=%v", i, has1, has2)
+			t.Fatalf("log length mismatch at index %d: has vm_log=%v, has vm_log_compiler=%v", i, has1, has2)
 		}
 
 		// unmarshal each line into your entry type
@@ -288,12 +288,12 @@ func TestCompareLogs(t *testing.T) {
 			t.Fatalf("failed to unmarshal line %d of vm_log.json: %v", i, err)
 		}
 		if err := json.Unmarshal(s2.Bytes(), &recp); err != nil {
-			t.Fatalf("failed to unmarshal line %d of vm_log_recompiler.json: %v", i, err)
+			t.Fatalf("failed to unmarshal line %d of vm_log_compiler.json: %v", i, err)
 		}
 
 		// compare
 		if !reflect.DeepEqual(orig, recp) {
-			fmt.Printf("Difference at index %d:\nOriginal: %+v\nRecompiler: %+v\n", i, orig, recp)
+			fmt.Printf("Difference at index %d:\nOriginal: %+v\nCompiler: %+v\n", i, orig, recp)
 			if diff := CompareJSON(orig, recp); diff != "" {
 				fmt.Println("Differences:", diff)
 				t.Fatalf("differences at index %d: %s", i, diff)
@@ -306,8 +306,8 @@ func TestCompareLogs(t *testing.T) {
 }
 
 func TestSnapShots(t *testing.T) {
-	snapshots_dir := "/root/recompiler_sandbox"
-	compares_dir := "./recompiler"
+	snapshots_dir := "/root/sandbox"
+	compares_dir := "./compiler"
 	files, err := os.ReadDir(snapshots_dir)
 	if err != nil {
 		t.Fatalf("Failed to read directory %s: %v", snapshots_dir, err)
@@ -402,7 +402,7 @@ Differences: Diff detected:
 func TestLogEntry(t *testing.T) {
 	PvmLogging = true
 	PvmTrace = true
-	debugRecompiler = true
+	debugCompiler = true
 	showDisassembly = true
 	// a real pvm test case for it to run
 	name := "inst_store_indirect_u16_with_offset_ok"
@@ -420,7 +420,7 @@ func TestLogEntry(t *testing.T) {
 	hostENV := NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
 
-	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendRecompilerSandbox)
+	pvm := NewVM(serviceAcct, tc.Code, tc.InitialRegs, uint64(tc.InitialPC), hostENV, false, []byte{}, BackendSandbox)
 	// jsonStr := `{"Opcode":214,"OpStr":"MUL_UPPER_U_U","Operands":"KAc=","PvmPc":76691,"Registers":[1610,4278057832,18084696918600843327,205504,4278058384,13512,257504,205504,115,0,271040,13512,13536],"Gas":2499712216}`
 	// jsonStr := `{"Opcode":135,"OpStr":"MUL_IMM_32","Operands":"hx3d","PvmPc":127250,"Registers":[1184,4278057904,1114112,257336,56,4278058864,48,1616,13433591450591902960,15199007462949731568,13750,0,44],"Gas":2499706249}`
 	// jsonStr := `{"Opcode":137,"OpStr":"SET_LT_S_IMM","Operands":"zA==","PvmPc":84545,"Registers":[251168,4278057832,8,251160,0,9223372036854775808,0,1,0,4611686018427387903,1,251112,4611686018427387903],"Gas":2499614836}`
@@ -442,9 +442,9 @@ func TestLogEntry(t *testing.T) {
 	inst.Args = entry.Operands
 	inst.Pc = entry.PvmPc
 
-	rvm, err := NewRecompilerSandboxVM(pvm)
+	rvm, err := NewCompilerSandboxVM(pvm)
 	if err != nil {
-		t.Fatalf("Failed to create recompiler sandbox VM: %v", err)
+		t.Fatalf("Failed to create compiler sandbox VM: %v", err)
 		return
 	}
 	// the register we get it from the log entry

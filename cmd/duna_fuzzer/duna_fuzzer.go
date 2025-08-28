@@ -65,7 +65,7 @@ func main() {
 	fReg.RegisterFlag("report-dir", nil, report_dir, "Report directory", &report_dir)
 	fReg.RegisterFlag("socket", nil, jConfig.Socket, "Path for the Unix domain socket to connect to", &jConfig.Socket)
 	fReg.RegisterFlag("use-unix-socket", nil, useUnixSocket, "Enable to use Unix domain socket for communication", &useUnixSocket)
-	fReg.RegisterFlag("pvm-backend", nil, jConfig.PVMBackend, "PVM backend to use (Recompiler or Interpreter)", &jConfig.PVMBackend)
+	fReg.RegisterFlag("pvm-backend", nil, jConfig.PVMBackend, "PVM backend to use (Compiler or Interpreter)", &jConfig.PVMBackend)
 	fReg.ProcessRegistry()
 	fmt.Printf("%v\n", jConfig)
 

@@ -960,7 +960,7 @@ func (s *SafroleState) SimulatePostiorEntropy(targetJCE uint32) (s2 *SafroleStat
 	// here we set the sealer authority
 	if epochAdvanced {
 		// New Epoch change! Shift entropy
-		log.Info(log.SDB, "SimulatePostiorEntropy New Epoch")
+		//log.Info(log.SDB, "SimulatePostiorEntropy New Epoch")
 		// [fresh, η0, η1, η2] - > [η0', η1', η2', η3']. η0' doesn't matter as it would be updated after STF
 		s2.AdvanceEntropyAndValidator(s, common.Hash{})
 

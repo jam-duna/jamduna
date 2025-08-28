@@ -78,7 +78,7 @@ const (
 	RefineTimeout              = 36 * time.Second        // 36
 	RefineAndAccumalateTimeout = (36 + 60) * time.Second // 96
 
-	useRecompiler      = true
+	useCompiler        = true
 	fudgeFactorJCE     = 1
 	DefaultChannelSize = 200
 )
@@ -421,7 +421,7 @@ func NewNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 	return createNode(id, credential, chainspec, pvmBackend, epoch0Timestamp, peers, peerList, dataDir, port, JCEDefault)
 }
 
-func (n *Node) SetPVMBackend(pvm_mode string) {
+func StandardizePVMBackend(pvm_mode string) string {
 	mode := strings.ToUpper(pvm_mode)
 	var pvmBackend string
 	switch mode {
@@ -429,18 +429,23 @@ func (n *Node) SetPVMBackend(pvm_mode string) {
 		pvmBackend = pvm.BackendInterpreter
 	case "COMPILER", "RECOMPILER", "X86":
 		if runtime.GOOS == "linux" {
-			pvmBackend = pvm.BackendRecompiler
+			pvmBackend = pvm.BackendCompiler
 		} else {
 			log.Warn(log.Node, fmt.Sprintf("COMPILER Not Supported. Defaulting to interpreter"))
 		}
-	case "SANDBOX", "RECOMPILER_SANDBOX":
-		pvmBackend = pvm.BackendRecompilerSandbox
+	case "SANDBOX", "RECOMPILER_SANDBOX", "COMPILER_SANDBOX":
+		pvmBackend = pvm.BackendSandbox
 	default:
 		log.Warn(log.Node, fmt.Sprintf("Unknown PVM mode [%s], defaulting to interpreter", pvm_mode))
 		pvmBackend = pvm.BackendInterpreter
 	}
+	return pvmBackend
+}
+
+func (n *Node) SetPVMBackend(pvm_mode string) {
+	pvmBackend := StandardizePVMBackend(pvm_mode)
 	n.pvmBackend = pvmBackend
-	log.Info(log.Node, fmt.Sprintf("PVM Backend: [%s]", mode))
+	log.Info(log.Node, fmt.Sprintf("PVM Backend: [%s]", pvmBackend))
 }
 
 func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, epoch0Timestamp uint64, peers []string, startPeerList map[uint16]*Peer, dataDir string, port int, jceMode string) (*Node, error) {
@@ -465,7 +470,7 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 		return nil, fmt.Errorf("error generating self-signed certificate: %v", err)
 	}
 	node := &Node{
-		NodeContent: NewNodeContent(id, store, pvmBackend),
+		NodeContent: NewNodeContent(id, store, StandardizePVMBackend(pvmBackend)), // mkcheck
 		IsSync:      true,
 		peers:       peers,
 		clients:     make(map[string]string),

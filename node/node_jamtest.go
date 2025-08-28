@@ -38,7 +38,7 @@ var jce_manual = flag.Bool("jce_manual", false, "jce_manual")
 var jam_node = flag.Bool("jam_node", false, "jam_node")
 var jam_local_client = flag.Bool("jam_local_client", false, "jam_local_client")
 var manifest = flag.Bool("manifest", false, "manifest")
-var pvmBackend = flag.String("pvm_backend", pvm.BackendInterpreter, "PVM mode to use (interpreter, recompiler, sandbox)")
+var pvmBackend = flag.String("pvm_backend", pvm.BackendInterpreter, "PVM mode to use (interpreter, compiler, sandbox)")
 
 const (
 	webServicePort    = 8079
@@ -297,9 +297,9 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 				nodes[i].SetPVMBackend(*pvmBackend)
 			} else {
 				if i%2 == 1 {
-					if useRecompiler && runtime.GOOS == "linux" {
-						recompilerBackend := pvm.BackendRecompiler
-						pvmBackend = &recompilerBackend
+					if useCompiler && runtime.GOOS == "linux" {
+						compilerBackend := pvm.BackendCompiler
+						pvmBackend = &compilerBackend
 					}
 				}
 			}

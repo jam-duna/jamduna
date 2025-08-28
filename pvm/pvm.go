@@ -19,9 +19,9 @@ import (
 )
 
 const (
-	BackendInterpreter       = "interpreter"
-	BackendRecompiler        = "recompiler"
-	BackendRecompilerSandbox = "recompiler_sandbox"
+	BackendInterpreter = "interpreter"
+	BackendCompiler    = "compiler"
+	BackendSandbox     = "sandbox"
 )
 
 const (
@@ -53,7 +53,7 @@ var (
 
 	showDisassembly = false
 	useEcalli500    = false
-	debugRecompiler = false
+	debugCompiler   = false
 	UseTally        = false
 )
 

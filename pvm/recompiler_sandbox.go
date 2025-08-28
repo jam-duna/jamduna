@@ -64,12 +64,12 @@ func SetUseEcalli500(enabled bool) {
 
 var skipSaveLog = false
 
-func SetDebugRecompiler(enabled bool) {
-	debugRecompiler = enabled
+func SetDebugCompiler(enabled bool) {
+	debugCompiler = enabled
 }
 
-type RecompilerSandboxVM struct {
-	RecompilerVM
+type CompilerSandboxVM struct {
+	CompilerVM
 	sandBox *Emulator
 
 	savedRegisters bool
@@ -148,17 +148,17 @@ func (emu *Emulator) Close() error {
 	return nil
 }
 
-// NewRecompilerVM_SandBox creates a Unicorn sandbox with 4 GiB guest RAM
+// NewCompilerVM_SandBox creates a Unicorn sandbox with 4 GiB guest RAM
 // and an extra dump page at the very end of that RAM region.
-func NewRecompilerSandboxVM(vm *VM) (*RecompilerSandboxVM, error) {
+func NewCompilerSandboxVM(vm *VM) (*CompilerSandboxVM, error) {
 	mu, err := NewEmulator()
 	if err != nil {
 		return nil, fmt.Errorf("create emulator: %w", err)
 	}
-	return NewRecompilerSandboxVMFromEmulator(vm, mu)
+	return NewCompilerSandboxVMFromEmulator(vm, mu)
 }
 
-func NewRecompilerSandboxVMFromEmulator(vm *VM, mu *Emulator) (*RecompilerSandboxVM, error) {
+func NewCompilerSandboxVMFromEmulator(vm *VM, mu *Emulator) (*CompilerSandboxVM, error) {
 
 	ecallAddr := guestBase + guestSize
 	if err := mu.MemMap(ecallAddr, 0x1000); err != nil {
@@ -175,15 +175,15 @@ func NewRecompilerSandboxVMFromEmulator(vm *VM, mu *Emulator) (*RecompilerSandbo
 	}
 	dumpSize = (dumpSize + pageSize - 1) & ^(pageSize - 1) // round-up
 	dumpAddr := guestBase - dumpSize                       // dump page start
-	rvm := &RecompilerSandboxVM{
-		RecompilerVM: RecompilerVM{
+	rvm := &CompilerSandboxVM{
+		CompilerVM: CompilerVM{
 			VM:              vm,
 			startCode:       make([]byte, 0),
 			exitCode:        make([]byte, 0),
 			JumpTableMap:    make([]uint64, 0),
 			InstMapX86ToPVM: make(map[int]uint32),
 			InstMapPVMToX86: make(map[uint32]int),
-			RecompilerRam: &RecompilerRam{
+			CompilerRam: &CompilerRam{
 				regDumpMem:  make([]byte, dumpSize), // buffer to copy registers
 				regDumpAddr: uintptr(dumpAddr),
 				realMemory:  nil, // defer heavy allocation
@@ -195,8 +195,8 @@ func NewRecompilerSandboxVMFromEmulator(vm *VM, mu *Emulator) (*RecompilerSandbo
 		ecallAddr:  ecallAddr,
 		sbrkOffset: 0x1,
 	}
-	rvm.sandBox.current_heap_pointer = rvm.RecompilerVM.VM.Ram.GetCurrentHeapPointer()
-	rvm.RecompilerVM.VM.Ram = mu
+	rvm.sandBox.current_heap_pointer = rvm.CompilerVM.VM.Ram.GetCurrentHeapPointer()
+	rvm.CompilerVM.VM.Ram = mu
 	rvm.sandBox.HookAdd(uc.HOOK_MEM_READ, func(mu uc.Unicorn, access int,
 		addr uint64, size int, value int64) {
 		// compute the page index
@@ -221,7 +221,7 @@ func NewRecompilerSandboxVMFromEmulator(vm *VM, mu *Emulator) (*RecompilerSandbo
 			data, err := rvm.sandBox.MemRead(addr, uint64(size))
 			if err != nil {
 				fmt.Printf("    (failed to read: %v)\n", err)
-			} else if debugRecompiler {
+			} else if debugCompiler {
 				fmt.Printf("🔍 READ  @ 0x%X (%d bytes):0x%X\n", addr, size, data)
 			}
 		}
@@ -229,7 +229,7 @@ func NewRecompilerSandboxVMFromEmulator(vm *VM, mu *Emulator) (*RecompilerSandbo
 
 	rvm.sandBox.HookAdd(uc.HOOK_MEM_WRITE, func(mu uc.Unicorn, access int,
 		addr uint64, size int, value int64) {
-		if debugRecompiler {
+		if debugCompiler {
 			fmt.Printf("✍️ WRITE @ 0x%X (%d bytes) = 0x%X\n", addr, size, value)
 		}
 		// ignore writes outside guest RAM
@@ -327,15 +327,15 @@ func NewRecompilerSandboxVMFromEmulator(vm *VM, mu *Emulator) (*RecompilerSandbo
 	return rvm, nil
 }
 
-func (rvm *RecompilerSandboxVM) SetRecoredGeneratedCode(enabled bool) {
+func (rvm *CompilerSandboxVM) SetRecoredGeneratedCode(enabled bool) {
 	rvm.recordGeneratedCode = enabled
 	if rvm.recordGeneratedCode {
 		rvm.genreatedCode = make([]byte, 0)
 	}
 }
 
-func (vm *RecompilerSandboxVM) Close() {
-	vm.RecompilerVM.Close()
+func (vm *CompilerSandboxVM) Close() {
+	vm.CompilerVM.Close()
 	if vm.sandBox != nil {
 		if err := vm.sandBox.Close(); err != nil {
 			log.Error(vm.logging, "Failed to close Unicorn sandbox", "error", err)
@@ -343,8 +343,8 @@ func (vm *RecompilerSandboxVM) Close() {
 		vm.sandBox = nil
 	}
 }
-func (vm *RecompilerSandboxVM) Compile(startStep uint64) {
-	// init the recompiler
+func (vm *CompilerSandboxVM) Compile(startStep uint64) {
+	// init the compiler
 	vm.basicBlocks = make(map[uint64]*BasicBlock)
 	vm.x86Blocks = make(map[uint64]*BasicBlock)
 	vm.x86PC = 0
@@ -372,7 +372,7 @@ func (vm *RecompilerSandboxVM) Compile(startStep uint64) {
 	vm.basicBlocks[block.X86PC] = block
 	vm.appendBlock(block)
 }
-func (vm *RecompilerSandboxVM) translateBasicBlock(startPC uint64) *BasicBlock {
+func (vm *CompilerSandboxVM) translateBasicBlock(startPC uint64) *BasicBlock {
 	pc := startPC
 	block := NewBasicBlock(vm.x86PC)
 
@@ -382,7 +382,7 @@ func (vm *RecompilerSandboxVM) translateBasicBlock(startPC uint64) *BasicBlock {
 
 		olen := vm.skip(pc)
 		operands := vm.code[pc+1 : pc+1+olen]
-		if pc == 0 && op == JUMP && debugRecompiler {
+		if pc == 0 && op == JUMP && debugCompiler {
 			fmt.Printf("JUMP at PC %d with operands %x\n", pc, operands)
 			fmt.Printf("operands length: %d\n", olen)
 			fmt.Printf("code hash %v", common.Blake2Hash(vm.code))
@@ -391,7 +391,7 @@ func (vm *RecompilerSandboxVM) translateBasicBlock(startPC uint64) *BasicBlock {
 			lx := uint32(types.DecodeE_l(operands))
 			host_func_id := int(lx)
 			block.GasUsage += int64(vm.chargeGas(host_func_id))
-			if debugRecompiler && false {
+			if debugCompiler && false {
 				fmt.Printf("ECALLI at PC %d with operands %x\n", pc, operands)
 			}
 		}
@@ -481,10 +481,10 @@ func (vm *RecompilerSandboxVM) translateBasicBlock(startPC uint64) *BasicBlock {
 const stackSize = uint64(0x400000) //4mb
 const stackTop = uint64(0x1A0000000)
 
-func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox(x86code []byte) (err error) {
+func (vm *CompilerSandboxVM) ExecuteX86Code_SandBox(x86code []byte) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Error(vm.logging, "RecompilerVM ExecuteX86Code panic", "error", r)
+			log.Error(vm.logging, "CompilerVM ExecuteX86Code panic", "error", r)
 			debug.PrintStack()
 			vm.ResultCode = types.WORKDIGEST_PANIC
 			vm.MachineState = PANIC
@@ -560,7 +560,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox(x86code []byte) (err error
 	_, err = vm.sandBox.HookAdd(uc.HOOK_CODE, func(mu uc.Unicorn, addr uint64, size uint32) {
 		offset := addr - codeBase
 		instruction := vm.x86Instructions[int(offset)]
-		if debugRecompiler {
+		if debugCompiler {
 			fmt.Printf("🧭 Executing @ 0x%X %s\n", addr, instruction.String())
 		}
 		if pvm_pc, ok := vm.InstMapX86ToPVM[int(offset)]; ok {
@@ -647,7 +647,7 @@ const (
 	codeBase = uint64(0x190000000) // separate memory area outside 4GiB RAM
 )
 
-func (vm *RecompilerSandboxVM) Patch(x86code []byte, entry uint32) (err error) {
+func (vm *CompilerSandboxVM) Patch(x86code []byte, entry uint32) (err error) {
 	// --------------------------------------------------------------------
 	// 1. Prepare jump-table and compute aligned memory region
 	// --------------------------------------------------------------------
@@ -664,7 +664,7 @@ func (vm *RecompilerSandboxVM) Patch(x86code []byte, entry uint32) (err error) {
 	if !ok {
 		return fmt.Errorf("entry %d not found in InstMapPVMToX86", entry)
 	}
-	if debugRecompiler {
+	if debugCompiler {
 		fmt.Printf("Executing code at x86 PC: %d (PVM PC: %d)\n", x86PC, entry)
 	}
 	patch := make([]byte, 4)
@@ -693,10 +693,10 @@ func (vm *RecompilerSandboxVM) Patch(x86code []byte, entry uint32) (err error) {
 	vm.WriteContextSlot(indirectJumpPointSlot, uint64(vm.djumpAddr), 8)
 	return nil
 }
-func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) (err error) {
+func (vm *CompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Error(vm.logging, "RecompilerVM ExecuteX86Code panic", "error", r)
+			log.Error(vm.logging, "CompilerVM ExecuteX86Code panic", "error", r)
 			debug.PrintStack()
 			vm.ResultCode = types.WORKDIGEST_PANIC
 			vm.MachineState = PANIC
@@ -749,7 +749,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 	_, err = vm.sandBox.HookAdd(uc.HOOK_CODE, func(mu uc.Unicorn, addr uint64, size uint32) {
 		offset := addr - codeBase
 		instruction := vm.x86Instructions[int(offset)] // should get the op_code here
-		if pvm_pc, ok := vm.InstMapX86ToPVM[int(offset)]; ok && debugRecompiler {
+		if pvm_pc, ok := vm.InstMapX86ToPVM[int(offset)]; ok && debugCompiler {
 			opcode := vm.code[pvm_pc]
 			fmt.Printf("!!! Start PVM PC: %d [%s] reg:%v\n", pvm_pc, opcode_str(opcode), vm.Ram.ReadRegisters())
 		}
@@ -763,7 +763,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 			fmt.Printf("❌ Failed to read RBP: %v\n", err)
 			return
 		}
-		if debugRecompiler {
+		if debugCompiler {
 			fmt.Printf("🧭 Executing @ 0x%X >%s< [baseReg 0x%X][RCX 0x%X]\n", addr, instruction.String(), baseRegValue, rcxValue)
 		}
 		if instruction.String() == "RET" {
@@ -802,7 +802,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 			} else {
 				vm.basicBlockExecutionCounter[uint64(pvm_pc)]++
 			}
-			if debugRecompiler {
+			if debugCompiler {
 				fmt.Printf("PVMX PC: %d [%s] reg:%v  BasicBlock: %s ⛽️ Gas remaining: %d, GasUsage %d\n", pvm_pc, opcode_str(vm.code[pvm_pc]),
 					vm.Ram.ReadRegisters(), basicBlock.String(), vm.Gas, basicBlock.GasUsage)
 			}
@@ -837,7 +837,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 		return fmt.Errorf("set RSP: %w", err)
 	}
 	rsp, _ := vm.sandBox.RegRead(uc.X86_REG_RSP)
-	if debugRecompiler {
+	if debugCompiler {
 		fmt.Printf("RSP = 0x%X\n", rsp)
 	}
 	// --------------------------------------------------------------------
@@ -867,7 +867,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 
 	for i := range vm.Ram.ReadRegisters() {
 		val := binary.LittleEndian.Uint64(vm.regDumpMem[i*8:])
-		if debugRecompiler {
+		if debugCompiler {
 			fmt.Printf("%s = 0x%X\n", regInfoList[i].Name, val)
 		}
 		vm.Ram.WriteRegister(i, val)
@@ -875,7 +875,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 	return nil
 }
 
-func (rvm *RecompilerSandboxVM) ExecuteSandBox(entryPoint uint64) error {
+func (rvm *CompilerSandboxVM) ExecuteSandBox(entryPoint uint64) error {
 	startTime := time.Now()
 	rvm.initStartCode()
 	rvm.Compile(rvm.pc)
@@ -963,7 +963,7 @@ func (mu *Emulator) allocatePages(startPage uint32, count uint32) {
 }
 
 // saveRegistersOnceSandBox saves the current state of the registers to the VM's RAM, including the gasUsed.
-func (vm *RecompilerSandboxVM) saveRegistersOnceSandBox() {
+func (vm *CompilerSandboxVM) saveRegistersOnceSandBox() {
 	if vm.savedRegisters {
 		return
 	}
@@ -979,7 +979,7 @@ func (vm *RecompilerSandboxVM) saveRegistersOnceSandBox() {
 }
 
 // saveRegisters saves the current state of the registers to the VM's RAM, including the gasUsed.
-func (vm *RecompilerSandboxVM) saveRegisters() {
+func (vm *CompilerSandboxVM) saveRegisters() {
 	for i := range vm.Ram.ReadRegisters() {
 		val, err := vm.sandBox.RegRead(sandBoxRegInfoList[i])
 		// fmt.Printf("Saving register %d: 0x%X\n", i, val)
@@ -991,7 +991,7 @@ func (vm *RecompilerSandboxVM) saveRegisters() {
 	vm.saveGasFromMemory()
 }
 
-func (rvm *RecompilerSandboxVM) saveGasFromMemory() {
+func (rvm *CompilerSandboxVM) saveGasFromMemory() {
 	gasRegMemAddr := uint64(rvm.regDumpAddr) + uint64(len(regInfoList)*8)
 	rawGasByte, _ := rvm.sandBox.MemRead(gasRegMemAddr, 8)
 	rawGasUsed := int64(binary.LittleEndian.Uint64(rawGasByte))
@@ -999,7 +999,7 @@ func (rvm *RecompilerSandboxVM) saveGasFromMemory() {
 	rvm.Gas = rawGasUsed
 }
 
-func (rvm *RecompilerSandboxVM) saveMemoryOnceSandBox() {
+func (rvm *CompilerSandboxVM) saveMemoryOnceSandBox() {
 	if rvm.savedMemory {
 		return
 	}
@@ -1052,7 +1052,7 @@ func (mu *Emulator) WriteMemorySandBox(address uint32, data []byte) error {
 }
 
 // Standard_Program_Initialization initializes the program memory and registers
-func (vm *RecompilerSandboxVM) Standard_Program_Initialization_SandBox(argument_data_a []byte) (err error) {
+func (vm *CompilerSandboxVM) Standard_Program_Initialization_SandBox(argument_data_a []byte) (err error) {
 
 	if len(argument_data_a) == 0 {
 		argument_data_a = []byte{0}
@@ -1182,7 +1182,7 @@ func (mu *Emulator) WriteRegister(index int, value uint64) uint64 {
 	if index < 0 || index >= regSize {
 		return OOB // Out of bounds
 	}
-	if debugRecompiler {
+	if debugCompiler {
 		//fmt.Printf("WriteRegister index: %d, value: 0x%X\n", index, value)
 	}
 	value_bytes := make([]byte, 8)
@@ -1246,7 +1246,7 @@ type EmulatorSnapShot struct {
 	BasicBlockNumber uint64 `json:"basic-block-number,omitempty"`
 }
 
-func (vm *RecompilerSandboxVM) TakeSnapShot(name string, pc uint32, registers []uint64, gas uint64, failAddress uint64, BaseRegValue uint64, basicBlockNumber uint64) *EmulatorSnapShot {
+func (vm *CompilerSandboxVM) TakeSnapShot(name string, pc uint32, registers []uint64, gas uint64, failAddress uint64, BaseRegValue uint64, basicBlockNumber uint64) *EmulatorSnapShot {
 	snapshot := &EmulatorSnapShot{
 		Name:             name,
 		InitialRegs:      registers,
@@ -1279,8 +1279,8 @@ func (vm *VM) LoadSnapshot(name string) (snapshot *EmulatorSnapShot, err error) 
 	return snapshot, nil
 }
 
-func (vm *RecompilerSandboxVM) SaveSnapShot(snapshot *EmulatorSnapShot) error {
-	filePath := fmt.Sprintf("%s/BB%d.json", BackendRecompilerSandbox, snapshot.BasicBlockNumber)
+func (vm *CompilerSandboxVM) SaveSnapShot(snapshot *EmulatorSnapShot) error {
+	filePath := fmt.Sprintf("%s/BB%d.json", BackendSandbox, snapshot.BasicBlockNumber)
 	data, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal snapshot: %w", err)
@@ -1294,7 +1294,7 @@ func (vm *RecompilerSandboxVM) SaveSnapShot(snapshot *EmulatorSnapShot) error {
 	return nil
 }
 
-func (vm *RecompilerSandboxVM) GetMemory() map[int][]byte {
+func (vm *CompilerSandboxVM) GetMemory() map[int][]byte {
 	memory := make(map[int][]byte)
 
 	// 1) collect all the dirty, accessible pages
@@ -1351,7 +1351,7 @@ func (vm *RecompilerSandboxVM) GetMemory() map[int][]byte {
 	return memory
 }
 
-func (vm *RecompilerSandboxVM) ExecuteFromSnapshot(snapshot *EmulatorSnapShot) error {
+func (vm *CompilerSandboxVM) ExecuteFromSnapshot(snapshot *EmulatorSnapShot) error {
 	fmt.Println("ExecuteFromSnapshot RECOMPILING")
 	vm.initStartCode()
 	tm := time.Now()
@@ -1415,10 +1415,10 @@ func (vm *RecompilerSandboxVM) ExecuteFromSnapshot(snapshot *EmulatorSnapShot) e
 	return vm.ExecuteX86CodeFromBreakPoint(vm.x86Code, breakpoint)
 }
 
-func (vm *RecompilerSandboxVM) ExecuteX86CodeFromBreakPoint(x86code []byte, breakpoint uint64) (err error) {
+func (vm *CompilerSandboxVM) ExecuteX86CodeFromBreakPoint(x86code []byte, breakpoint uint64) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Error(vm.logging, "RecompilerVM ExecuteX86Code panic", "error", r)
+			log.Error(vm.logging, "CompilerVM ExecuteX86Code panic", "error", r)
 			debug.PrintStack()
 			vm.ResultCode = types.WORKDIGEST_PANIC
 			vm.MachineState = PANIC
@@ -1470,7 +1470,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86CodeFromBreakPoint(x86code []byte, brea
 			fmt.Printf("❌ Failed to read R12: %v\n", err)
 			return
 		}
-		if debugRecompiler {
+		if debugCompiler {
 			fmt.Printf("🧭 Executing @ 0x%X %s [baseReg 0x%X]\n", addr, instruction.String(), baseRegValue)
 		}
 		if instruction.String() == "RET" {
@@ -1504,7 +1504,7 @@ func (vm *RecompilerSandboxVM) ExecuteX86CodeFromBreakPoint(x86code []byte, brea
 				// fmt.Printf("⚠️ No basic block found for PVM PC %d at 0x%X ...\n", pvm_pc, offset)
 				return
 			}
-			if debugRecompiler {
+			if debugCompiler {
 				fmt.Printf("PVMX PC: %d [%s] reg:%v  BasicBlock: %s ⛽️ Gas remaining: %d, GasUsage %d\n", pvm_pc, opcode_str(vm.code[pvm_pc]),
 					vm.Ram.ReadRegisters(), basicBlock.String(), vm.Gas, basicBlock.GasUsage)
 			}
@@ -1565,9 +1565,9 @@ func (vm *RecompilerSandboxVM) ExecuteX86CodeFromBreakPoint(x86code []byte, brea
 	}
 	return nil
 }
-func (vm *RecompilerSandboxVM) WriteRegisters() {
+func (vm *CompilerSandboxVM) WriteRegisters() {
 	for i, reg := range vm.Ram.ReadRegisters() {
-		if debugRecompiler {
+		if debugCompiler {
 			fmt.Printf("WriteRegistersSandbox index: %d, value: 0x%X\n", i, reg)
 		}
 		if err := vm.sandBox.RegWrite(sandBoxRegInfoList[i], reg); err != nil {
@@ -1577,7 +1577,7 @@ func (vm *RecompilerSandboxVM) WriteRegisters() {
 	}
 }
 
-func (vm *RecompilerSandboxVM) WriteContextSlot(slot_index int, value uint64, size int) error {
+func (vm *CompilerSandboxVM) WriteContextSlot(slot_index int, value uint64, size int) error {
 	if vm.regDumpAddr == 0 {
 		return fmt.Errorf("regDumpAddr is not initialized")
 	}
@@ -1597,7 +1597,7 @@ func (vm *RecompilerSandboxVM) WriteContextSlot(slot_index int, value uint64, si
 	}
 }
 
-func (vm *RecompilerSandboxVM) ReadContextSlot(slot_index int) (uint64, error) {
+func (vm *CompilerSandboxVM) ReadContextSlot(slot_index int) (uint64, error) {
 	if vm.regDumpAddr == 0 {
 		return 0, fmt.Errorf("regDumpAddr is not initialized")
 	}
@@ -1616,7 +1616,7 @@ func (vm *RecompilerSandboxVM) ReadContextSlot(slot_index int) (uint64, error) {
 }
 
 func EcalliSandBox(rvmPtr unsafe.Pointer, opcode int32) {
-	vm := (*RecompilerSandboxVM)(rvmPtr)
+	vm := (*CompilerSandboxVM)(rvmPtr)
 	regMem, err := vm.sandBox.MemRead(uint64(vm.regDumpAddr), uint64(len(vm.Ram.ReadRegisters())*8))
 	if err != nil {
 		log.Error("x86", "EcalliSandBox: failed to read register memory", "error", err)
@@ -1643,7 +1643,7 @@ func EcalliSandBox(rvmPtr unsafe.Pointer, opcode int32) {
 }
 
 func SbrkSandBox(rvmPtr unsafe.Pointer, registerIndexA uint32, registerIndexD uint32) {
-	vm := (*RecompilerSandboxVM)(rvmPtr)
+	vm := (*CompilerSandboxVM)(rvmPtr)
 	// Acquire lock to ensure thread-safety
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
@@ -1693,7 +1693,7 @@ func EmitCallToEcalliStubSandBox(rvmPtr uintptr, opcode int, addr uint64) []byte
 	return stub
 }
 
-func (vm *RecompilerSandboxVM) writeBackRegisters() {
+func (vm *CompilerSandboxVM) writeBackRegisters() {
 	for i := range vm.Ram.ReadRegisters() {
 		v, _ := vm.Ram.ReadRegister(i)
 		if err := vm.sandBox.RegWrite(sandBoxRegInfoList[i], v); err != nil {
@@ -1727,32 +1727,32 @@ func EmitCallToSbrkStubSandBox(rvmPtr uintptr, registerIndexA uint32, registerIn
 	return stub
 }
 
-func (vm *RecompilerSandboxVM) InvokeSbrkSandBox(registerA uint32, registerIndexD uint32) (result uint32) {
+func (vm *CompilerSandboxVM) InvokeSbrkSandBox(registerA uint32, registerIndexD uint32) (result uint32) {
 	valueA, _ := vm.Ram.ReadRegister(int(registerA))
-	currentHeapPointer := vm.RecompilerVM.VM.Ram.GetCurrentHeapPointer()
+	currentHeapPointer := vm.CompilerVM.VM.Ram.GetCurrentHeapPointer()
 	if valueA == 0 {
 		vm.Ram.WriteRegister(int(registerIndexD), uint64(currentHeapPointer))
 		return currentHeapPointer
 	}
 	result = currentHeapPointer
-	//fmt.Fprintf(os.Stderr, "RecompilerVM: Sbrk: current_heap_pointer=%d, valueA=%d, registerIndexD=%d\n", currentHeapPointer, valueA, registerIndexD)
+	//fmt.Fprintf(os.Stderr, "CompilerVM: Sbrk: current_heap_pointer=%d, valueA=%d, registerIndexD=%d\n", currentHeapPointer, valueA, registerIndexD)
 	next_page_boundary := P_func(currentHeapPointer)
 	new_heap_pointer := currentHeapPointer + uint32(valueA)
 	if new_heap_pointer > uint32(next_page_boundary) {
 
 		final_boundary := P_func(uint32(new_heap_pointer))
-		//fmt.Fprintf(os.Stderr, "RecompilerVM: Sbrk: new_heap_pointer=%d, final_boundary=%d\n", new_heap_pointer, final_boundary)
+		//fmt.Fprintf(os.Stderr, "CompilerVM: Sbrk: new_heap_pointer=%d, final_boundary=%d\n", new_heap_pointer, final_boundary)
 		idx_start := next_page_boundary / Z_P
 		idx_end := final_boundary / Z_P
 		page_count := idx_end - idx_start
 
-		vm.RecompilerVM.VM.Ram.allocatePages(idx_start, page_count)
-		//fmt.Fprintf(os.Stderr, "RecompilerVM: Sbrk: Allocated %d pages from %d to %d\n", page_count, idx_start, idx_end)
+		vm.CompilerVM.VM.Ram.allocatePages(idx_start, page_count)
+		//fmt.Fprintf(os.Stderr, "CompilerVM: Sbrk: Allocated %d pages from %d to %d\n", page_count, idx_start, idx_end)
 	}
-	vm.RecompilerVM.VM.Ram.SetCurrentHeapPointer(new_heap_pointer)
+	vm.CompilerVM.VM.Ram.SetCurrentHeapPointer(new_heap_pointer)
 	return result
 }
-func (rvm *RecompilerSandboxVM) EcalliCodeSandBox(opcode int) ([]byte, error) {
+func (rvm *CompilerSandboxVM) EcalliCodeSandBox(opcode int) ([]byte, error) {
 	// 1. Dump registers to memory
 	code := rvm.DumpRegisterToMemory(true)
 

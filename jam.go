@@ -403,9 +403,9 @@ func main() {
 	runCmd.Flags().StringVar(&chainSpec, chainSpecFlag, "chainspec.json", `Chain to run. "polkadot", "dev", or the path of a chain spec file`)
 
 	desc := flagDescription("The PVM backend to use", map[string]string{
-		pvm.BackendInterpreter:       "Use a PVM interpreter. Slow, but works everywhere",
-		pvm.BackendRecompiler:        "Use a PVM recompiler. Fast, but is Linux-only",
-		pvm.BackendRecompilerSandbox: "Use a PVM recompiler sandbox for debugging",
+		pvm.BackendInterpreter: "Use a PVM interpreter. Slow, but works everywhere",
+		pvm.BackendCompiler:    "Use a PVM compiler. Fast, but is Linux-only",
+		pvm.BackendSandbox:     "Use a PVM compiler sandbox for debugging",
 	})
 	runCmd.Flags().StringVar(&pvmBackend, pvmBackendFlag, pvm.BackendInterpreter, desc)
 	runCmd.Flags().IntVar(&peerID, peerIDFlag, 0, "Peer ID of this node. If not specified, a new peer ID will be generated. The corresponding secret key will not be persisted.")

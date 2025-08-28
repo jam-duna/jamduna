@@ -9,8 +9,8 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-func (vm *RecompilerVM) Compile(startStep uint64) {
-	// init the recompiler
+func (vm *CompilerVM) Compile(startStep uint64) {
+	// init the compiler
 	vm.basicBlocks = make(map[uint64]*BasicBlock)
 	vm.x86Blocks = make(map[uint64]*BasicBlock)
 	vm.x86PC = 0
@@ -64,7 +64,7 @@ func GenerateMovMemImm(addr uint64, imm uint32) []byte {
 
 	return code
 }
-func (vm *RecompilerVM) translateBasicBlock(startPC uint64) *BasicBlock {
+func (vm *CompilerVM) translateBasicBlock(startPC uint64) *BasicBlock {
 	pc := startPC
 	block := NewBasicBlock(vm.x86PC)
 
@@ -83,7 +83,7 @@ func (vm *RecompilerVM) translateBasicBlock(startPC uint64) *BasicBlock {
 			lx := uint32(types.DecodeE_l(operands))
 			host_func_id := int(lx)
 			block.GasUsage += int64(vm.chargeGas(host_func_id))
-			if debugRecompiler && false {
+			if debugCompiler && false {
 				fmt.Printf("ECALLI at PC %d with operands %x\n", pc, operands)
 			}
 		}
@@ -182,7 +182,7 @@ func (vm *RecompilerVM) translateBasicBlock(startPC uint64) *BasicBlock {
 	return block
 }
 
-func (vm *RecompilerVM) setJumpMetadata(block *BasicBlock, opcode byte, operands []byte, pc uint64) {
+func (vm *CompilerVM) setJumpMetadata(block *BasicBlock, opcode byte, operands []byte, pc uint64) {
 	switch {
 	case opcode == JUMP:
 		block.JumpType = DIRECT_JUMP
@@ -222,7 +222,7 @@ func (vm *RecompilerVM) setJumpMetadata(block *BasicBlock, opcode byte, operands
 	}
 }
 
-func (vm *RecompilerVM) finalizeJumpTargets(J []uint32) {
+func (vm *CompilerVM) finalizeJumpTargets(J []uint32) {
 	// end := vm.findEndBlock(TERMINATED)
 	for _, block := range vm.basicBlocks {
 		if block.JumpType == DIRECT_JUMP {
@@ -245,7 +245,7 @@ func (vm *RecompilerVM) finalizeJumpTargets(J []uint32) {
 	}
 }
 
-func (vm *RecompilerVM) patchJumpConditional(block *BasicBlock, targetTruePC uint64) {
+func (vm *CompilerVM) patchJumpConditional(block *BasicBlock, targetTruePC uint64) {
 	blockEnd := block.X86PC + uint64(len(block.X86Code))
 
 	// The instruction after Jcc+imm32 lives at blockEnd-5
@@ -264,14 +264,14 @@ func (vm *RecompilerVM) patchJumpConditional(block *BasicBlock, targetTruePC uin
 }
 
 // patchJump updates the last instruction in the block to jump to the target PC -- works with JUMP and LOAD_IMM_JUMP
-func (vm *RecompilerVM) patchJump(block *BasicBlock, targetPC uint64) {
+func (vm *CompilerVM) patchJump(block *BasicBlock, targetPC uint64) {
 	endOfBlock := block.X86PC + uint64(len(block.X86Code))
 	offset := int32(targetPC) - int32(endOfBlock)
 	binary.LittleEndian.PutUint32(vm.x86Code[endOfBlock-4:endOfBlock], uint32(offset))
 }
 
 // patchJumpTable updates each instruction in the block to jump to the target PC -- works with JUMP and LOAD_IMM_JUMP
-func (vm *RecompilerVM) patchJumpIndirectTable(J []uint32) {
+func (vm *CompilerVM) patchJumpIndirectTable(J []uint32) {
 	for i := 0; i < len(J); i++ {
 		targetPC := vm.basicBlocks[uint64(J[i])].X86PC
 		startOfInst := uint64(6*(i)) + vm.JumpTableOffset
@@ -285,7 +285,7 @@ func (vm *RecompilerVM) patchJumpIndirectTable(J []uint32) {
 	}
 }
 
-func (vm *RecompilerVM) appendBlock(block *BasicBlock) {
+func (vm *CompilerVM) appendBlock(block *BasicBlock) {
 	startLen := len(vm.x86Code)
 	vm.x86Code = append(vm.x86Code, block.X86Code...)
 	block.X86PC = vm.x86PC
@@ -302,7 +302,7 @@ func (vm *RecompilerVM) appendBlock(block *BasicBlock) {
 		x86_realpc := startLen + idx
 		vm.InstMapX86ToPVM[x86_realpc] = pvm_pc
 		vm.InstMapPVMToX86[pvm_pc] = x86_realpc
-		if debugRecompiler && false {
+		if debugCompiler && false {
 			fmt.Printf("Mapped PVM PC %d to x86 PC %x\n", pvm_pc, x86_realpc)
 		}
 	}

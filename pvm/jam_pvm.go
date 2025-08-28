@@ -59,30 +59,30 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 		startTime = time.Now()
 		vm.Execute(types.EntryPointRefine, false)
 		vm.executionTime = common.Elapsed(startTime)
-	case BackendRecompilerSandbox:
-		rvm, err := NewRecompilerSandboxVM(vm)
+	case BackendSandbox:
+		rvm, err := NewCompilerSandboxVM(vm)
 		if err != nil {
-			log.Error(vm.logging, "RecompilerVM creation failed", "error", err)
+			log.Error(vm.logging, "CompilerVM creation failed", "error", err)
 			return
 		}
 		vm.initializationTime = common.Elapsed(startTime)
 		startTime = time.Now()
 		if err = rvm.Standard_Program_Initialization_SandBox(a); err != nil {
-			log.Error(vm.logging, "RecompilerVM Standard_Program_Initialization failed", "error", err)
+			log.Error(vm.logging, "CompilerVM Standard_Program_Initialization failed", "error", err)
 			return
 		} // eq 264/265
 		vm.standardInitTime = common.Elapsed(startTime)
 		rvm.ExecuteSandBox(types.EntryPointRefine)
-	case BackendRecompiler:
-		rvm, err := NewRecompilerVM(vm)
+	case BackendCompiler:
+		rvm, err := NewCompilerVM(vm)
 		if err != nil {
-			log.Error(vm.logging, "RecompilerVM creation failed", "error", err)
+			log.Error(vm.logging, "CompilerVM creation failed", "error", err)
 			return
 		}
 		vm.initializationTime = common.Elapsed(startTime)
 		startTime = time.Now()
 		if err = rvm.Standard_Program_Initialization(a); err != nil {
-			log.Error(vm.logging, "RecompilerVM Standard_Program_Initialization failed", "error", err)
+			log.Error(vm.logging, "CompilerVM Standard_Program_Initialization failed", "error", err)
 			return
 		} // eq 264/265
 		vm.standardInitTime = common.Elapsed(startTime)
@@ -165,25 +165,25 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	case BackendInterpreter:
 		vm.Standard_Program_Initialization(input_bytes) // eq 264/265
 		vm.Execute(types.EntryPointAccumulate, false)   // F ∈ Ω⟨(X, X)⟩
-	case BackendRecompilerSandbox:
-		rvm, err := NewRecompilerSandboxVM(vm)
+	case BackendSandbox:
+		rvm, err := NewCompilerSandboxVM(vm)
 		if err != nil {
-			log.Error(vm.logging, "RecompilerVM creation failed", "error", err)
+			log.Error(vm.logging, "CompilerVM creation failed", "error", err)
 			return
 		}
 		if err = rvm.Standard_Program_Initialization_SandBox(input_bytes); err != nil {
-			log.Error(vm.logging, "RecompilerVM Standard_Program_Initialization failed", "error", err)
+			log.Error(vm.logging, "CompilerVM Standard_Program_Initialization failed", "error", err)
 			return
 		}
 		rvm.ExecuteSandBox(types.EntryPointAccumulate)
-	case BackendRecompiler:
-		rvm, err := NewRecompilerVM(vm)
+	case BackendCompiler:
+		rvm, err := NewCompilerVM(vm)
 		if err != nil {
-			log.Error(vm.logging, "RecompilerVM creation failed", "error", err)
+			log.Error(vm.logging, "CompilerVM creation failed", "error", err)
 			return
 		}
 		if err = rvm.Standard_Program_Initialization(input_bytes); err != nil {
-			log.Error(vm.logging, "RecompilerVM Standard_Program_Initialization failed", "error", err)
+			log.Error(vm.logging, "CompilerVM Standard_Program_Initialization failed", "error", err)
 			return
 		}
 		rvm.Execute(types.EntryPointAccumulate)
@@ -263,25 +263,25 @@ func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAc
 	case BackendInterpreter:
 		vm.Standard_Program_Initialization(arguments) // eq 264/265
 		vm.Execute(types.EntryPointOnTransfer, false)
-	case BackendRecompilerSandbox:
-		rvm, err := NewRecompilerSandboxVM(vm)
+	case BackendSandbox:
+		rvm, err := NewCompilerSandboxVM(vm)
 		if err != nil {
-			log.Error(vm.logging, "RecompilerVM creation failed", "error", err)
+			log.Error(vm.logging, "CompilerVM creation failed", "error", err)
 			return
 		}
 		if err = rvm.Standard_Program_Initialization_SandBox(arguments); err != nil {
-			log.Error(vm.logging, "RecompilerVM Standard_Program_Initialization failed", "error", err)
+			log.Error(vm.logging, "CompilerVM Standard_Program_Initialization failed", "error", err)
 			return
 		} // eq 264/265
 		rvm.ExecuteSandBox(types.EntryPointOnTransfer)
-	case BackendRecompiler:
-		rvm, err := NewRecompilerVM(vm)
+	case BackendCompiler:
+		rvm, err := NewCompilerVM(vm)
 		if err != nil {
-			log.Error(vm.logging, "RecompilerVM creation failed", "error", err)
+			log.Error(vm.logging, "CompilerVM creation failed", "error", err)
 			return
 		}
 		if err = rvm.Standard_Program_Initialization(arguments); err != nil {
-			log.Error(vm.logging, "RecompilerVM Standard_Program_Initialization failed", "error", err)
+			log.Error(vm.logging, "CompilerVM Standard_Program_Initialization failed", "error", err)
 			return
 		}
 		rvm.Execute(types.EntryPointOnTransfer)
@@ -305,25 +305,25 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Resul
 	case BackendInterpreter:
 		vm.Standard_Program_Initialization(a) // eq 264/265
 		vm.Execute(types.EntryPointAuthorization, false)
-	case BackendRecompilerSandbox:
-		rvm, err := NewRecompilerSandboxVM(vm)
+	case BackendSandbox:
+		rvm, err := NewCompilerSandboxVM(vm)
 		if err != nil {
-			log.Error(vm.logging, "RecompilerVM creation failed", "error", err)
+			log.Error(vm.logging, "CompilerVM creation failed", "error", err)
 			return
 		}
 		if err = rvm.Standard_Program_Initialization_SandBox(a); err != nil {
-			log.Error(vm.logging, "RecompilerVM Standard_Program_Initialization failed", "error", err)
+			log.Error(vm.logging, "CompilerVM Standard_Program_Initialization failed", "error", err)
 			return
 		} // eq 264/265
 		rvm.ExecuteSandBox(types.EntryPointAuthorization)
-	case BackendRecompiler:
-		rvm, err := NewRecompilerVM(vm)
+	case BackendCompiler:
+		rvm, err := NewCompilerVM(vm)
 		if err != nil {
-			log.Error(vm.logging, "RecompilerVM creation failed", "error", err)
+			log.Error(vm.logging, "CompilerVM creation failed", "error", err)
 			return
 		}
 		if err = rvm.Standard_Program_Initialization(a); err != nil {
-			log.Error(vm.logging, "RecompilerVM Standard_Program_Initialization failed", "error", err)
+			log.Error(vm.logging, "CompilerVM Standard_Program_Initialization failed", "error", err)
 			return
 		}
 		rvm.Execute(types.EntryPointAuthorization)
