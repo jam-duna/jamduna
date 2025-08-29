@@ -247,7 +247,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 					log.Warn(log.Node, "processWPQueueItem", "err", execErr)
 					return
 				}
-				if bundleSnapshot != nil {
+				if bundleSnapshot != nil && isWriteBundleGuarantor {
 					// packageHash_coreIndex_slot_audit
 					desc := fmt.Sprintf("%s_%d_%d_%s", bundleSnapshot.Bundle.WorkPackage.Hash(), bundleSnapshot.CoreIndex, n.id, "guarantor")
 					n.writeLogWithDescription(bundleSnapshot, bundleSnapshot.Slot, desc, false)

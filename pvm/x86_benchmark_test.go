@@ -35,7 +35,7 @@ func BenchmarkInstRetHalt(b *testing.B) {
 		runFn func(TestCase) error
 	}{
 		{BackendInterpreter, pvm_test},
-		{BackendSandbox, sandbox_test},
+		//{BackendSandbox, sandbox_test},
 		{BackendCompiler, compiler_test},
 	}
 

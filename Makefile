@@ -79,7 +79,7 @@ run_1:
 
 run_5:
 	@for i in 0 1 2 3 4; do \
-		RUST_LOG=chain-core=debug,jam_node=trace $(POLKAJAM_BIN)  --chain ${CHAINSPEC} run --pvm-backend $(PVM_BACKEND) --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
+		RUST_LOG=polkavm=trace,chain-core=debug,jam_node=trace $(POLKAJAM_BIN)  --chain ${CHAINSPEC} run --pvm-backend $(PVM_BACKEND) --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
 	done
 
 run_6:
@@ -255,6 +255,8 @@ kill_parallel_jam:
 kill:
 	@echo "Kill Jam Binaries(if any)..."
 	@pkill jam || true
+	sleep 1
+	@echo "Process cleanup complete."
 
 
 # env setup for remote nodes

@@ -993,11 +993,20 @@ func (vm *VM) hostFetch() {
 
 		case 7: // encode work package
 			v_Bytes, _ = types.Encode(vm.WorkPackage)
+			//log.Info(vm.logging, "FETCH wp", "len(v_Bytes)", len(v_Bytes))
 
 		case 8: // p_u + | p_p
-			v_Bytes = append(vm.WorkPackage.AuthorizationCodeHash.Bytes(), vm.WorkPackage.ConfigurationBlob...)
-			log.Trace(vm.logging, "FETCH p_u + | p_p", "p_u", vm.WorkPackage.AuthorizationCodeHash, "p_p", vm.WorkPackage.ConfigurationBlob)
+			type pp struct {
+				PHash common.Hash `json:"hash"`
+				PBlob []byte      `json:"blob"`
+			}
 
+			p := pp{
+				PHash: vm.WorkPackage.AuthorizationCodeHash,
+				PBlob: vm.WorkPackage.ConfigurationBlob,
+			}
+			v_Bytes, _ = types.Encode(p)
+			//log.Info(vm.logging, "FETCH p_u + | p_p", "p_u", vm.WorkPackage.AuthorizationCodeHash, "p_p", vm.WorkPackage.ConfigurationBlob, "len", len(v_Bytes))
 		case 9: // p_j
 			v_Bytes = vm.WorkPackage.AuthorizationToken
 

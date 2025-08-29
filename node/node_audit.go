@@ -708,10 +708,10 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	if err != nil {
 		return
 	}
-	if bundleSnapshot != nil {
+	if bundleSnapshot != nil && isWriteBundleAuditor {
 		// packageHash_coreIndex_slot_audit
-		//desc := fmt.Sprintf("%s_%d_%d_%s", bundleSnapshot.Bundle.WorkPackage.Hash(), bundleSnapshot.CoreIndex, n.id, "audit")
-		//n.writeLogWithDescription(bundleSnapshot, bundleSnapshot.Slot, desc, false)
+		desc := fmt.Sprintf("%s_%d_%d_%s", bundleSnapshot.Bundle.WorkPackage.Hash(), bundleSnapshot.CoreIndex, n.id, "audit")
+		n.writeLogWithDescription(bundleSnapshot, bundleSnapshot.Slot, desc, false)
 	}
 
 	select {

@@ -297,8 +297,8 @@ func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAc
 
 func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Result) {
 	vm.Mode = ModeIsAuthorized
-	// 0.6.6 E_2(c) only
-	a, _ := types.Encode(uint16(c))
+	// NOT 0.7.0 COMPLIANT
+	a, _ := types.Encode(uint8(c))
 	vm.Gas = types.IsAuthorizedGasAllocation
 	// fmt.Printf("ExecuteAuthorization - c=%d len(p_bytes)=%d len(c_bytes)=%d len(a)=%d a=%x WP=%s\n", c, len(p_bytes), len(c_bytes), len(a), a, p.String())
 	switch vm.Backend {

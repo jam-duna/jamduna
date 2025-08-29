@@ -430,7 +430,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		log.Warn(log.Node, "onWorkPackageShare: executeWorkPackageBundle", "node", n.id, "err", err, "pvmElapsed", pvmElapsed)
 		return fmt.Errorf("onWorkPackageShare: executeWorkPackageBundle: %w", err)
 	}
-	if bundleSnapshot != nil {
+	if bundleSnapshot != nil && isWriteBundleFollower {
 		// packageHash_coreIndex_slot_guarantor_follower
 		desc := fmt.Sprintf("%s_%d_%d_%s", bundleSnapshot.Bundle.WorkPackage.Hash(), bundleSnapshot.CoreIndex, bundleSnapshot.Slot, "guarantor_follower")
 		n.writeLogWithDescription(bundleSnapshot, bundleSnapshot.Slot, desc, false)

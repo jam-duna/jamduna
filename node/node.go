@@ -54,6 +54,14 @@ const (
 )
 
 const (
+	isWriteSnapshot        = false
+	isWriteTransition      = true
+	isWriteBundleFollower  = true
+	isWriteBundleGuarantor = true
+	isWriteBundleAuditor   = true
+)
+
+const (
 	enableInit  = false
 	numNodes    = types.TotalValidators
 	quicAddr    = "127.0.0.1:%d"
@@ -1916,23 +1924,19 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	// 2. Update services for new state
 	n.updateServiceMap(newStateDB, nextBlock)
 	updateServiceElapsed := common.ElapsedStr(start)
-	// 3. Async write of debug state — optionally cancelable
+	// 3. Async write of debug state
 	go func() {
 		st := buildStateTransitionStruct(recoveredStateDB, nextBlock, newStateDB)
-
-		// Optional: Respect ctx cancel
-		select {
-		case <-ctx.Done():
-			// log.Warn(log.Node, "ApplyBlock: context canceled, skipping debug write")
-			return
-		default:
+		//log.Debug(log.B, "Storing ImportBlock", "n", n.String(), "h", nextBlock.Header.Hash().String_short(), "blk", nextBlock.Str())
+		if isWriteTransition {
+			if err := n.writeDebug(st, nextBlock.TimeSlot(), true); err != nil {
+				log.Error(log.Node, "writeDebug: StateTransition", "err", err)
+			}
 		}
-
-		if err := n.writeDebug(st, nextBlock.TimeSlot(), true); err != nil {
-			log.Error(log.Node, "writeDebug: StateTransition", "err", err)
-		}
-		if err := n.writeDebug(newStateDB.JamState.Snapshot(&st.PostState, newStateDB.GetStateUpdates()), nextBlock.TimeSlot(), false); err != nil {
-			log.Error(log.Node, "writeDebug: Snapshot", "err", err)
+		if isWriteSnapshot {
+			if err := n.writeDebug(newStateDB.JamState.Snapshot(&st.PostState, newStateDB.GetStateUpdates()), nextBlock.TimeSlot(), false); err != nil {
+				log.Error(log.Node, "writeDebug: Snapshot", "err", err)
+			}
 		}
 	}()
 	start = time.Now()
@@ -2923,8 +2927,10 @@ func (n *Node) runAuthoring() {
 					log.Crit(log.Node, "CompareStateRoot", "err", err)
 				}
 				st := buildStateTransitionStruct(oldstate, newBlock, newStateDB)
-				if err := n.writeDebug(st, timeslot, true); err != nil {
-					log.Error(log.Node, "runAuthoring:writeDebug", "err", err)
+				if isWriteTransition {
+					if err := n.writeDebug(st, timeslot, true); err != nil {
+						log.Error(log.Node, "runAuthoring:writeDebug", "err", err)
+					}
 				}
 				if revalidate {
 					if err := statedb.CheckStateTransition(n.store, st, s.AncestorSet, n.pvmBackend); err != nil {
@@ -2934,8 +2940,10 @@ func (n *Node) runAuthoring() {
 						log.Info(log.Node, "runAuthoring:CheckStateTransition", "revalidate", revalidate, "status", "ok")
 					}
 				}
-				if err := n.writeDebug(newStateDB.JamState.Snapshot(&(st.PostState), newStateDB.GetStateUpdates()), timeslot, true); err != nil {
-					log.Error(log.Node, "runAuthoring:writeDebug", "err", err)
+				if isWriteSnapshot {
+					if err := n.writeDebug(newStateDB.JamState.Snapshot(&(st.PostState), newStateDB.GetStateUpdates()), timeslot, true); err != nil {
+						log.Error(log.Node, "runAuthoring:writeDebug", "err", err)
+					}
 				}
 			}()
 			n.author_status = "authoring:broadcasted"

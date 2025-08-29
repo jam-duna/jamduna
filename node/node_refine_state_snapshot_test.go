@@ -37,6 +37,9 @@ const (
 
 	game_of_stf    = "test/03233539.bin"
 	game_of_bundle = "test/03233538_0x8d63f7ce582bdf289283594871633c9018384b65f2699890d8321c5441b95c53_1_3233538_guarantor_follower.bin"
+
+	corevm_stf    = "test/03448350.bin"
+	corevm_bundle = "test/03448350_0x7d72894b366ec40836e90cb0c80bde3235190ffa15b188b9eb2a678c886e9a9b_0_3448350_guarantor_follower.bin"
 )
 
 func CompareJSON(obj1, obj2 interface{}) string {
@@ -189,12 +192,12 @@ func initPProf(t *testing.T) {
 
 // go test -run=TestRefineStateTransitions
 func TestRefineStateTransitions(t *testing.T) {
-	pvm.PvmLogging = false
-	pvm.PvmTrace = false
+	pvm.PvmLogging = true
+	pvm.PvmTrace = true
 	pvm.RecordTime = true
 	initPProf(t)
-	filename_stf := game_of_stf
-	filename_bundle := game_of_bundle
+	filename_stf := corevm_stf
+	filename_bundle := corevm_bundle
 
 	stf, err := ReadStateTransition(filename_stf)
 	if err != nil {
@@ -208,14 +211,20 @@ func TestRefineStateTransitions(t *testing.T) {
 			err)
 	}
 
+	fmt.Printf("Read bundle snapshot from file %s: %v\n", filename_bundle, bundle_snapshot)
+
 	levelDBPath := "/tmp/testdb"
 	store, err := storage.NewStateDBStorage(levelDBPath)
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
-	pvmBackends := []string{pvm.BackendCompiler} //, pvm.BackendInterpreter, pvm.BackendSandbox}
+	pvmBackends := []string{pvm.BackendInterpreter} //, pvm.BackendInterpreter, pvm.BackendSandbox}
 	//pvmBackends := []string{pvm.BackendInterpreter}
 	for _, pvmBackend := range pvmBackends {
+		if runtime.GOOS != "linux" && pvmBackend == pvm.BackendCompiler {
+			t.Logf("pvmBackend=%s on non-linux platform NOT supported", pvmBackend)
+			pvmBackend = pvm.BackendInterpreter
+		}
 		t.Run(fmt.Sprintf("pvmBackend=%s", pvmBackend), func(t *testing.T) {
 			testRefineStateTransition(pvmBackend, store, bundle_snapshot, stf, t)
 		})
@@ -573,7 +582,11 @@ func testRefineStateTransition(pvmBackend string, store *storage.StateDBStorage,
 	if reexecuted_snapshot == nil {
 		t.Fatalf("Reexecuted snapshot is nil")
 	}
-	algo_res := re_workReport.Results[1]
+	i := 0
+	if len(re_workReport.Results) > 1 {
+		i = 1
+	}
+	algo_res := re_workReport.Results[i]
 	algo_res_errCode := algo_res.Result.Err
 	algo_res_status = types.ResultCode(algo_res_errCode)
 	if algo_res_errCode != types.WORKDIGEST_OK {

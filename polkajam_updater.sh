@@ -1,17 +1,9 @@
 #!/bin/bash
 
-# Exit immediately if a command exits with a non-zero status.
-set -e
-# Treat unset variables as an error when substituting.
-set -u
-# Pipestatus: the return value of a pipeline is the status of the last command to exit with a non-zero status,
-# or zero if no command exited with a non-zero status.
-set -o pipefail
+set -euo pipefail
 
-# --- Configuration ---
 GITHUB_API_URL="https://api.github.com/repos/paritytech/polkajam-releases/releases"
 
-# User-configurable: Base path for Jam installation (MUST be set as environment variable)
 if [ -z "${JAM_PATH:-}" ]; then
     echo "Error: Environment variable JAM_PATH is not set." >&2
     echo "Please set it to your Jam installation directory, e.g.:" >&2
@@ -20,11 +12,8 @@ if [ -z "${JAM_PATH:-}" ]; then
 fi
 echo "Using JAM_PATH: $JAM_PATH"
 
-# User-configurable: Target directory for the final binaries
-# Defaults to $JAM_PATH/bin, can be overridden by JAM_TARGET_BIN_DIR
 TARGET_DIR="${JAM_TARGET_BIN_DIR:-${JAM_PATH}/bin}"
 
-# User-configurable: Persistent directory to store all downloaded releases (MUST be set as environment variable)
 if [ -z "${POLKAJAM_RELEASES_PATH:-}" ]; then
     echo "Error: Environment variable POLKAJAM_RELEASES_PATH is not set." >&2
     echo "Please set it to your desired archive directory for Polkadot JAM releases, e.g.:" >&2
@@ -35,29 +24,35 @@ JAM_RELEASES_ARCHIVE_DIR="${POLKAJAM_RELEASES_PATH}"
 echo "Using POLKAJAM_RELEASES_PATH for archive: $JAM_RELEASES_ARCHIVE_DIR"
 
 
-# User-configurable: Base directory for temporary downloads (during a fetch operation)
 DOWNLOAD_BASE_DIR="${JAM_DOWNLOAD_DIR:-/tmp}"
-# User-configurable: Base directory for temporary extractions (during a fetch operation)
 EXTRACTION_BASE_DIR="${JAM_EXTRACTION_DIR:-/tmp}"
-
-# Platform: Dynamically determined or overridden by JAM_PLATFORM
-PLATFORM="" # Will be set by determine_platform_or_use_env
-
-# Generated: Unique directory for this script run's temporary downloads
-RUN_SPECIFIC_DOWNLOAD_DIR="" # Will be set in fetch_and_store_release
-# Generated: Unique directory for this script run's temporary extractions
-RUN_SPECIFIC_EXTRACTION_DIR="" # Will be set in fetch_and_store_release
-
-
-# Indexed arrays for mapping source binary names to target binary names
-# These will be populated by initialize_platform_config
+PLATFORM=""
+RUN_SPECIFIC_DOWNLOAD_DIR=""
+RUN_SPECIFIC_EXTRACTION_DIR=""
 SOURCE_BINARY_NAMES_IN_ARCHIVE=()
 TARGET_BINARY_NAMES_IN_DEPLOY_DIR=()
+SIMPLIFIED_PLATFORM_ASSET_SUFFIX=""
 
-# Will be populated after platform is determined
-SIMPLIFIED_PLATFORM_ASSET_SUFFIX="" # For asset name construction
-
-# --- Helper Functions ---
+format_iso_date() {
+    local timestamp="$1"
+    local formatted_date
+    
+    if command -v gdate >/dev/null 2>&1; then
+        formatted_date=$(gdate -d "$timestamp" "+%Y-%m-%d %H:%M" 2>/dev/null)
+    elif date --version 2>/dev/null | grep -q GNU; then
+        formatted_date=$(date -d "$timestamp" "+%Y-%m-%d %H:%M" 2>/dev/null)
+    else
+        local clean_timestamp="${timestamp%Z}"
+        formatted_date=$(date -j -f "%Y-%m-%dT%H:%M:%S" "$clean_timestamp" "+%Y-%m-%d %H:%M" 2>/dev/null)
+    fi
+    if [ -z "$formatted_date" ]; then
+        formatted_date="${timestamp%T*} ${timestamp#*T}"
+        formatted_date="${formatted_date%Z}"
+        formatted_date="${formatted_date%:*}"
+    fi
+    
+    echo "$formatted_date"
+}
 
 check_dependencies() {
     local missing_deps=0
@@ -112,7 +107,6 @@ determine_platform_or_use_env() {
 }
 
 
-# Function to clean up run-specific temporary directories
 cleanup_temp_dirs() {
     if [ -n "$RUN_SPECIFIC_DOWNLOAD_DIR" ] && [ -d "$RUN_SPECIFIC_DOWNLOAD_DIR" ]; then
         echo "Cleaning up run-specific download directory: $RUN_SPECIFIC_DOWNLOAD_DIR"
@@ -124,11 +118,8 @@ cleanup_temp_dirs() {
     fi
 }
 
-# Register the cleanup function to be called on script exit
 trap cleanup_temp_dirs EXIT
 
-# Sets SIMPLIFIED_PLATFORM_ASSET_SUFFIX
-# and populates SOURCE_BINARY_NAMES_IN_ARCHIVE & TARGET_BINARY_NAMES_IN_DEPLOY_DIR arrays
 initialize_platform_config() {
     if [ -z "$PLATFORM" ]; then
         echo "Error: PLATFORM variable not set. Call determine_platform_or_use_env first." >&2
@@ -154,8 +145,6 @@ initialize_platform_config() {
             ;;
     esac
 
-    # Define the mapping for deployment phase
-    # Source names as they are expected to be in the archive
     SOURCE_BINARY_NAMES_IN_ARCHIVE=(
         "polkajam"
         "jamt"
@@ -163,8 +152,6 @@ initialize_platform_config() {
         "polkajam-repl"
         "polkajam-testnet"
     )
-    # Corresponding target names in the final $TARGET_DIR
-    # polkajam from archive is deployed as polkajam
     TARGET_BINARY_NAMES_IN_DEPLOY_DIR=(
         "polkajam"
         "jamt"
@@ -175,15 +162,10 @@ initialize_platform_config() {
 }
 
 
-# --- Core Functions ---
 
-# Fetches and stores a release.
-# Returns 0 if release is successfully fetched and stored OR if it already exists in archive.
-# Returns 1 on failure.
-# Sets global variable PROCESSED_RELEASE_TAG with the tag name of the release.
 PROCESSED_RELEASE_TAG=""
 fetch_and_store_release() {
-    local release_tag_to_fetch="$1" # If empty, fetches latest nightly
+    local release_tag_to_fetch="$1"
     local release_json
     local asset_name_filter
     local asset_url
@@ -192,15 +174,13 @@ fetch_and_store_release() {
     local extracted_binaries_path
     local archive_storage_path_for_release
 
-    PROCESSED_RELEASE_TAG="" # Reset global var
-
-    # Setup temporary directories for this fetch operation
+    PROCESSED_RELEASE_TAG=""
     RUN_SPECIFIC_DOWNLOAD_DIR="${DOWNLOAD_BASE_DIR}/polkajam_dl_$(date +%s)_$$"
     RUN_SPECIFIC_EXTRACTION_DIR="${EXTRACTION_BASE_DIR}/polkajam_extract_$(date +%s)_$$"
     mkdir -p "$RUN_SPECIFIC_DOWNLOAD_DIR"
     mkdir -p "$RUN_SPECIFIC_EXTRACTION_DIR"
 
-    echo "Fetching release information from GitHub ($GITHUB_API_URL)..."
+    echo "Fetching release information..."
     ALL_RELEASES_JSON=$(curl -s "$GITHUB_API_URL")
 
     if [ -n "$release_tag_to_fetch" ]; then
@@ -213,15 +193,16 @@ fetch_and_store_release() {
         echo "Found specified release: $PROCESSED_RELEASE_TAG"
     else
         release_json=$(echo "$ALL_RELEASES_JSON" | \
-            jq -r '[.[] | select((.tag_name | ascii_downcase | contains("nightly")))] | sort_by(.published_at) | .[-1]')
+            jq -r '[.[] | select((.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+")) or (.tag_name | ascii_downcase | contains("nightly")))] | sort_by(.published_at) | .[-1]')
+        
         if [ -z "$release_json" ] || [ "$release_json" == "null" ]; then
-            echo "Error: Could not find the latest nightly release (tag_name contains 'nightly')." >&2
+            echo "Error: Could not find any suitable release (stable or nightly)." >&2
             echo "Current releases found (tag_name, prerelease, published_at):" >&2
             echo "$ALL_RELEASES_JSON" | jq -r '.[] | "\(.tag_name) | Prerelease: \(.prerelease) | Published: \(.published_at)"' >&2
             return 1
         fi
         PROCESSED_RELEASE_TAG=$(echo "$release_json" | jq -r '.tag_name')
-        echo "Found latest nightly release: $PROCESSED_RELEASE_TAG"
+        echo "Found latest release: $PROCESSED_RELEASE_TAG"
     fi
 
     archive_storage_path_for_release="${JAM_RELEASES_ARCHIVE_DIR}/${PROCESSED_RELEASE_TAG}"
@@ -231,7 +212,6 @@ fetch_and_store_release() {
     fi
 
     asset_name_filter="polkajam-${PROCESSED_RELEASE_TAG}-${SIMPLIFIED_PLATFORM_ASSET_SUFFIX}.tgz"
-    echo "Constructed Asset Name Filter: $asset_name_filter"
 
     asset_url=$(echo "$release_json" | jq -r --arg FILTER "$asset_name_filter" '.assets[] | select(.name == $FILTER) | .browser_download_url')
     asset_filename=$(echo "$release_json" | jq -r --arg FILTER "$asset_name_filter" '.assets[] | select(.name == $FILTER) | .name')
@@ -243,64 +223,63 @@ fetch_and_store_release() {
         PROCESSED_RELEASE_TAG="" 
         return 1
     fi
-    echo "Asset to download: $asset_filename (URL: $asset_url)"
 
     download_path="$RUN_SPECIFIC_DOWNLOAD_DIR/$asset_filename"
-    echo "Downloading $asset_filename to $download_path..."
+    echo "Downloading $asset_filename..."
     curl -L --progress-bar "$asset_url" -o "$download_path" || { echo "Error: Download failed." >&2; PROCESSED_RELEASE_TAG=""; return 1; }
     echo "Download complete."
 
-    echo "Extracting $asset_filename to $RUN_SPECIFIC_EXTRACTION_DIR..."
+    echo "Extracting $asset_filename..."
     tar -xzf "$download_path" -C "$RUN_SPECIFIC_EXTRACTION_DIR" || { echo "Error: Extraction failed." >&2; PROCESSED_RELEASE_TAG=""; return 1; }
     echo "Extraction complete."
-
+    
     local extracted_subfolder_name
-    extracted_subfolder_name=$(basename "$asset_filename" .tgz) 
+    extracted_subfolder_name=$(basename "$asset_filename" .tgz)
     extracted_binaries_path="$RUN_SPECIFIC_EXTRACTION_DIR/$extracted_subfolder_name"
 
     if [ ! -d "$extracted_binaries_path" ]; then
-        echo "Info: Did not find expected subfolder '$extracted_binaries_path'." >&2
-        echo "Assuming binaries were extracted directly into '$RUN_SPECIFIC_EXTRACTION_DIR'." >&2
-        extracted_binaries_path="$RUN_SPECIFIC_EXTRACTION_DIR"
-        local first_binary_source_name="${SOURCE_BINARY_NAMES_IN_ARCHIVE[0]}"
-        if [ -n "$first_binary_source_name" ] && [ ! -f "$extracted_binaries_path/$first_binary_source_name" ]; then
-             echo "Warning: Could not find binaries in assumed paths." >&2
-             ls -lA "$RUN_SPECIFIC_EXTRACTION_DIR" >&2
-             local possible_subfolders=("$RUN_SPECIFIC_EXTRACTION_DIR"/*/)
-             if [ ${#possible_subfolders[@]} -eq 1 ] && [ -d "${possible_subfolders[0]}" ]; then
-                 extracted_binaries_path=$(realpath "${possible_subfolders[0]}")
-                 echo "Update: Found a single subdirectory, using: $extracted_binaries_path"
-             else
-                 echo "Could not reliably determine the extracted binaries path. Storing may fail." >&2
-             fi
+        if find "$RUN_SPECIFIC_EXTRACTION_DIR" -maxdepth 1 -type f -name "*polkajam*" | grep -q .; then
+            extracted_binaries_path="$RUN_SPECIFIC_EXTRACTION_DIR"
+        else
+            local possible_dirs=()
+            while IFS= read -r -d '' dir; do
+                possible_dirs+=("$dir")
+            done < <(find "$RUN_SPECIFIC_EXTRACTION_DIR" -type d -mindepth 1 -maxdepth 2 -print0)
+            
+            for dir in "${possible_dirs[@]}"; do
+                if find "$dir" -maxdepth 1 -type f -name "*polkajam*" | grep -q .; then
+                    extracted_binaries_path="$dir"
+                    break
+                fi
+            done
         fi
     fi
-    echo "Binaries sourced from: $extracted_binaries_path"
 
-    echo "Storing binaries for release '$PROCESSED_RELEASE_TAG' in '$archive_storage_path_for_release'..."
+    echo "Storing release files..."
     mkdir -p "$archive_storage_path_for_release"
 
-    # Store binaries with their original names from the archive
-    for source_name_in_archive in "${SOURCE_BINARY_NAMES_IN_ARCHIVE[@]}"; do
-        local source_file_path="$extracted_binaries_path/$source_name_in_archive"
-        local storage_file_path="$archive_storage_path_for_release/$source_name_in_archive" 
-
-        if [ -f "$source_file_path" ]; then
-            echo "  Storing '$source_name_in_archive' to '$storage_file_path'..."
-            cp "$source_file_path" "$storage_file_path"
-            chmod +x "$storage_file_path" 
-        else
-            if [ "$source_name_in_archive" == "polkajam" ]; then
-                 echo "  ERROR: Main source binary '$source_name_in_archive' not found in '$extracted_binaries_path'. Cannot store release." >&2
-                 PROCESSED_RELEASE_TAG=""
-                 return 1 
-            else
-                echo "  Warning: Auxiliary binary '$source_name_in_archive' not found in '$extracted_binaries_path'. Skipping storage for this file." >&2
-            fi
+    local files_stored=0
+    local polkajam_found=false
+    
+    while IFS= read -r -d '' file; do
+        local filename
+        filename=$(basename "$file")
+        local storage_file_path="$archive_storage_path_for_release/$filename"
+        
+        cp -p "$file" "$storage_file_path"
+        chmod --reference="$file" "$storage_file_path" 2>/dev/null || chmod $(stat -f %Mp%Lp "$file" 2>/dev/null || echo 755) "$storage_file_path"
+        if [[ "$filename" == *"polkajam"* ]] || [[ "$filename" == *"jam"* ]]; then
+            polkajam_found=true
         fi
-    done
-    echo "Release '$PROCESSED_RELEASE_TAG' successfully fetched and stored in archive."
-    return 0 # Indicate success
+        files_stored=$((files_stored + 1))
+    done < <(find "$extracted_binaries_path" -type f -print0)
+    if [ "$polkajam_found" = false ] && [ $files_stored -eq 0 ]; then
+        echo "  ERROR: No polkajam binary found and no files stored. Cannot store release." >&2
+        PROCESSED_RELEASE_TAG=""
+        return 1
+    fi
+    echo "Stored $files_stored files."
+    return 0
 }
 
 list_stored_releases_and_deploy() {
@@ -311,16 +290,14 @@ list_stored_releases_and_deploy() {
     fi
     
     local release_options=()
-    local OLD_COLUMNS=${COLUMNS:-80} # Default to 80 if COLUMNS is unset
-    COLUMNS=1 # Force single column for select
+    local OLD_COLUMNS=${COLUMNS:-80}
+    COLUMNS=1
     while IFS= read -r line; do
         if [ -n "$line" ]; then 
             release_options+=("$line")
         fi
     done < <(find "$JAM_RELEASES_ARCHIVE_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort -Vr)
     
-
-
     if [ ${#release_options[@]} -eq 0 ]; then
         echo "  No releases found in archive."
         COLUMNS=$OLD_COLUMNS
@@ -329,7 +306,7 @@ list_stored_releases_and_deploy() {
 
     PS3="Select a release number to deploy (or q to quit): "
     select selected_tag in "${release_options[@]}" "Quit"; do
-        COLUMNS=$OLD_COLUMNS # Restore COLUMNS as soon as select is done or broken from
+        COLUMNS=$OLD_COLUMNS
         if [[ "$REPLY" == "q" || "$REPLY" == "Q" || "$selected_tag" == "Quit" ]]; then
              echo "Deployment cancelled."
              return 1
@@ -338,17 +315,13 @@ list_stored_releases_and_deploy() {
             return $? 
         else
             echo "Invalid selection. Please try again."
-            # To re-display the menu correctly if select continues
             COLUMNS=1 
         fi
     done
-    COLUMNS=$OLD_COLUMNS # Fallback restoration
+    COLUMNS=$OLD_COLUMNS
     return 1 
 }
 
-# Fetches/stores a specific release and then deploys it.
-# Returns 0 if both fetch/store AND deploy are successful.
-# Returns 1 otherwise.
 process_and_deploy_specific_tag() {
     local tag_to_process="$1"
     if [ -z "$tag_to_process" ]; then
@@ -380,33 +353,61 @@ process_and_deploy_specific_tag() {
 }
 
 
-list_remote_nightly_releases_and_select_for_processing() {
-    echo "Fetching available nightly releases from GitHub..."
+list_remote_releases_and_select_for_processing() {
+    echo "Fetching available releases from GitHub..."
     ALL_RELEASES_JSON=$(curl -s "$GITHUB_API_URL")
     
-    local nightly_tags=()
-    local OLD_COLUMNS=${COLUMNS:-80} # Default to 80 if COLUMNS is unset
-    COLUMNS=1 # Force single column for select
-    while IFS= read -r line; do
-        if [ -n "$line" ]; then
-            nightly_tags+=("$line")
+    local stable_releases=()
+    while IFS='|' read -r tag timestamp; do
+        if [ -n "$tag" ]; then
+            stable_releases+=("$tag|$timestamp")
         fi
-    done < <(echo "$ALL_RELEASES_JSON" | jq -r '[.[] | select((.tag_name | ascii_downcase | contains("nightly")))] | sort_by(.published_at) | reverse | .[].tag_name')
+    done < <(echo "$ALL_RELEASES_JSON" | jq -r '[.[] | select((.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+")) and (.prerelease == false))] | sort_by(.published_at) | reverse | .[] | "\(.tag_name)|\(.published_at)"')
     
+    local nightly_releases=()
+    while IFS='|' read -r tag timestamp; do
+        if [ -n "$tag" ]; then
+            nightly_releases+=("$tag|$timestamp")
+        fi
+    done < <(echo "$ALL_RELEASES_JSON" | jq -r '[.[] | select((.tag_name | ascii_downcase | contains("nightly")))] | sort_by(.published_at) | reverse | .[] | "\(.tag_name)|\(.published_at)"')
+    
+    local all_release_tags=()
+    local release_tag_map=()
+    
+    for release in "${stable_releases[@]}"; do
+        IFS='|' read -r tag timestamp <<< "$release"
+        local formatted_date
+        formatted_date=$(format_iso_date "$timestamp")
+        local display_string="$tag ($formatted_date)"
+        all_release_tags+=("$display_string")
+        release_tag_map+=("$tag")
+    done
+    
+    for release in "${nightly_releases[@]}"; do
+        IFS='|' read -r tag timestamp <<< "$release"
+        local formatted_date
+        formatted_date=$(format_iso_date "$timestamp")
+        local display_string="$tag ($formatted_date)"
+        all_release_tags+=("$display_string")
+        release_tag_map+=("$tag")
+    done
 
-
-    if [ ${#nightly_tags[@]} -eq 0 ]; then
-        echo "  No nightly releases found on GitHub."
-        COLUMNS=$OLD_COLUMNS
+    if [ ${#all_release_tags[@]} -eq 0 ]; then
+        echo "  No releases found on GitHub."
         return 1 
     fi
 
-    echo "Available nightly releases on GitHub (newest first):"
+    echo "Available releases on GitHub (newest first):"
+    echo "  Stable releases: ${#stable_releases[@]}"
+    echo "  Nightly releases: ${#nightly_releases[@]}"
+    
+    local OLD_COLUMNS=${COLUMNS:-80}
+    COLUMNS=1
     PS3="Select a release to fetch, store, and deploy (or 'm' to enter manually, 'q' to quit): "
-    select selected_tag_option in "${nightly_tags[@]}" "Enter tag manually" "Quit"; do
-        COLUMNS=$OLD_COLUMNS # Restore COLUMNS as soon as select is done or broken from
+    select selected_tag_option in "${all_release_tags[@]}" "Enter tag manually" "Quit"; do
+        COLUMNS=$OLD_COLUMNS
         if [[ "$REPLY" == "q" || "$REPLY" == "Q" || "$selected_tag_option" == "Quit" ]]; then 
-            echo "Operation cancelled."
+            echo "Quit."
             return 1
         elif [[ "$selected_tag_option" == "Enter tag manually" ]]; then
             read -r -p "Enter the exact release tag: " manual_tag
@@ -418,15 +419,21 @@ list_remote_nightly_releases_and_select_for_processing() {
                 return 1 
             fi
         elif [ -n "$selected_tag_option" ]; then
-            process_and_deploy_specific_tag "$selected_tag_option"
-            return $? 
+            local selected_index=$((REPLY - 1))
+            if [ $selected_index -ge 0 ] && [ $selected_index -lt ${#release_tag_map[@]} ]; then
+                local actual_tag="${release_tag_map[$selected_index]}"
+                process_and_deploy_specific_tag "$actual_tag"
+                return $?
+            else
+                echo "Invalid selection index."
+                COLUMNS=1
+            fi
         else
             echo "Invalid selection. Please try again."
-            # To re-display the menu correctly if select continues
             COLUMNS=1 
         fi
     done
-    COLUMNS=$OLD_COLUMNS # Fallback restoration
+    COLUMNS=$OLD_COLUMNS
     return 1 
 }
 
@@ -440,70 +447,111 @@ deploy_release() {
         return 1
     fi
 
-    echo "Deploying release '$selected_tag_name' to '$TARGET_DIR'..."
+    echo "Deploying $selected_tag_name..."
     mkdir -p "$TARGET_DIR"
 
-    echo "  Removing previous release indicator files from $TARGET_DIR..."
-    # Remove old style indicators first
-    find "$TARGET_DIR" -maxdepth 1 -type f -name 'ACTIVE_RELEASE_IS_*.txt' -delete 2>/dev/null || true
-    # Remove new style indicators (files named exactly like other archived tags)
-    if [ -d "$JAM_RELEASES_ARCHIVE_DIR" ]; then
-        for item_in_archive in "$JAM_RELEASES_ARCHIVE_DIR"/*; do
-            if [ -d "$item_in_archive" ]; then
-                local archived_tag_name
-                archived_tag_name=$(basename "$item_in_archive")
-                if [ "$archived_tag_name" != "$selected_tag_name" ] && [ -f "${TARGET_DIR}/${archived_tag_name}" ]; then
-                    echo "    Removing previous indicator file: ${TARGET_DIR}/${archived_tag_name}"
-                    rm -f "${TARGET_DIR}/${archived_tag_name}"
-                fi
-            fi
-        done
+    echo "Cleaning target directory..."
+    local files_to_remove=()
+    while IFS= read -r -d '' file; do
+        files_to_remove+=("$file")
+    done < <(find "$TARGET_DIR" -maxdepth 1 -type f -not -name ".DS_Store" -not -name ".*" -print0)
+    
+    if [ ${#files_to_remove[@]} -gt 0 ]; then
+        echo "Removing ${#files_to_remove[@]} existing files..."
+        rm -f "${files_to_remove[@]}"
+    else
+        echo "No existing files to remove."
     fi
 
 
-    for i in "${!SOURCE_BINARY_NAMES_IN_ARCHIVE[@]}"; do
-        local source_name_in_archive="${SOURCE_BINARY_NAMES_IN_ARCHIVE[i]}"
-        local target_name="${TARGET_BINARY_NAMES_IN_DEPLOY_DIR[i]}"
-        local source_file_path="$stored_release_path/$source_name_in_archive"
-        local target_file_path="$TARGET_DIR/$target_name"
-
-        if [ -f "$source_file_path" ]; then
-            echo "  Copying '$source_name_in_archive' (from archive) to '$target_file_path'..."
-            cp "$source_file_path" "$target_file_path"
+    local files_deployed=0
+    while IFS= read -r -d '' file; do
+        local filename
+        filename=$(basename "$file")
+        local target_file_path="$TARGET_DIR/$filename"
+        
+        cp -p "$file" "$target_file_path"
+        
+        if [ -x "$file" ]; then
             chmod +x "$target_file_path"
-        else
-            echo "  Warning: Source binary '$source_name_in_archive' not found in stored release '$selected_tag_name'. Skipping deployment for this file." >&2
         fi
-    done
-
-    echo "  Creating new release indicator file: ${TARGET_DIR}/${selected_tag_name}"
-    touch "${TARGET_DIR}/${selected_tag_name}" # New indicator filename
+        
+        files_deployed=$((files_deployed + 1))
+    done < <(find "$stored_release_path" -maxdepth 1 -type f -print0)
+    
+    echo "Deployed $files_deployed files."
+    touch "${TARGET_DIR}/${selected_tag_name}"
 
     echo "Deployment of '$selected_tag_name' complete."
-    echo "Binaries in target directory ($TARGET_DIR):"
-    ls -lt "$TARGET_DIR"
-    return 0 # Indicate success
+    echo "Files in target directory ($TARGET_DIR):"
+    while IFS= read -r -d '' file; do
+        local filename
+        filename=$(basename "$file")
+        local file_hash file_size file_date
+        
+        if command -v shasum >/dev/null 2>&1; then
+            file_hash=$(shasum -a 256 "$file" | cut -d' ' -f1 | cut -c1-16)
+        elif command -v sha256sum >/dev/null 2>&1; then
+            file_hash=$(sha256sum "$file" | cut -d' ' -f1 | cut -c1-16)
+        else
+            file_hash="(unavailable)"
+        fi
+        
+        if command -v gstat >/dev/null 2>&1; then
+            file_size=$(gstat -c%s "$file")
+            file_date=$(gstat -c%y "$file" | cut -d' ' -f1,2 | cut -d'.' -f1)
+        elif stat --version 2>/dev/null | grep -q GNU; then
+            file_size=$(stat -c%s "$file")
+            file_date=$(stat -c%y "$file" | cut -d' ' -f1,2 | cut -d'.' -f1)
+        else
+            file_size=$(stat -f%z "$file")
+            file_date=$(stat -f%Sm -t "%Y-%m-%d %H:%M:%S" "$file")
+        fi
+        
+        printf "%-25s %10s  %19s  %s\n" "$filename" "$file_size" "$file_date" "$file_hash"
+    done < <(find "$TARGET_DIR" -maxdepth 1 -type f -not -name "${selected_tag_name}" -not -name ".DS_Store" -print0 | sort -z)
+    return 0
+}
+
+clear_stored_releases() {
+    echo "Clearing stored releases..."
+    if [ ! -d "$JAM_RELEASES_ARCHIVE_DIR" ]; then
+        echo "No release archive directory found at '$JAM_RELEASES_ARCHIVE_DIR'."
+        return 0
+    fi
+    
+    local release_count
+    release_count=$(find "$JAM_RELEASES_ARCHIVE_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l)
+    
+    if [ "$release_count" -eq 0 ]; then
+        echo "No stored releases found to clear."
+        return 0
+    fi
+    
+    echo "Found $release_count stored releases, clearing all..."
+    find "$JAM_RELEASES_ARCHIVE_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort
+    rm -rf "${JAM_RELEASES_ARCHIVE_DIR:?}"/*
+    echo "All stored releases cleared."
+    return 0
 }
 
 show_menu() {
     echo ""
-    echo "Polkadot JAM Nightly Release Manager"
-    echo "------------------------------------"
+    echo "Polkadot JAM Release Manager"
+    echo "----------------------------"
     echo "Platform            : $PLATFORM" 
     echo "JAM Base Path       : $JAM_PATH"
     echo "Active Target Dir   : $TARGET_DIR"
     echo "Release Archive Dir : $JAM_RELEASES_ARCHIVE_DIR"
-    echo "------------------------------------"
-    echo "1. Fetch, store, and deploy latest nightly release"
-    echo "2. Fetch, store, and deploy specific nightly release (select from list or enter tag)"
-    echo "3. List stored releases and deploy one"
-    # echo "4. Deploy specific stored release (by tag)" # Option 4 disabled as per user request
+    echo "----------------------------"
+    echo "1. Select Latest Release"
+    echo "2. Select Specific Release"
+    echo "3. Clear Stored Releases"
     echo "Q. Quit"
     echo ""
     read -r -p "Enter your choice: " MENU_CHOICE
 }
 
-# --- Main Execution ---
 
 check_dependencies
 determine_platform_or_use_env 
@@ -517,50 +565,43 @@ while true; do
     show_menu
     case "$MENU_CHOICE" in
         1)
-            echo "Determining latest nightly release tag..."
-            ALL_RELEASES_JSON_FOR_LATEST=$(curl -s "$GITHUB_API_URL")
-            LATEST_NIGHTLY_TAG=$(echo "$ALL_RELEASES_JSON_FOR_LATEST" | \
-                jq -r '[.[] | select((.tag_name | ascii_downcase | contains("nightly")))] | sort_by(.published_at) | .[-1].tag_name')
-
-            if [ -z "$LATEST_NIGHTLY_TAG" ] || [ "$LATEST_NIGHTLY_TAG" == "null" ]; then
-                echo "Error: Could not determine the latest nightly release tag."
-                read -r -n 1 -s -p "Press any key to return to menu..." && echo
-            else
-                echo "Latest nightly tag is: $LATEST_NIGHTLY_TAG"
-                if process_and_deploy_specific_tag "$LATEST_NIGHTLY_TAG"; then
-                    echo "Latest nightly release ($LATEST_NIGHTLY_TAG) processed and deployed. Exiting."
-                    exit 0
+            if fetch_and_store_release ""; then
+                if [ -n "$PROCESSED_RELEASE_TAG" ]; then
+                    echo "Latest release tag is: $PROCESSED_RELEASE_TAG"
+                    if deploy_release "$PROCESSED_RELEASE_TAG"; then
+                        echo "Latest release ($PROCESSED_RELEASE_TAG) processed and deployed. Exiting."
+                        exit 0
+                    else
+                        echo "Deployment of latest release ($PROCESSED_RELEASE_TAG) did not complete successfully. Returning to menu."
+                        read -r -n 1 -s -p "Press any key to return to menu..." && echo
+                    fi
                 else
-                    echo "Operation for latest nightly ($LATEST_NIGHTLY_TAG) did not complete successfully. Returning to menu."
+                    echo "Could not determine latest release tag."
                     read -r -n 1 -s -p "Press any key to return to menu..." && echo
                 fi
+            else
+                echo "Could not fetch latest release."
+                read -r -n 1 -s -p "Press any key to return to menu..." && echo
             fi
             ;;
         2)
-            if list_remote_nightly_releases_and_select_for_processing; then 
-                echo "Selected nightly release processed and deployed. Exiting."
+            if list_remote_releases_and_select_for_processing; then 
+                echo "Selected release processed and deployed. Exiting."
                 exit 0
             else
-                echo "Operation for specific nightly did not complete successfully or was cancelled. Returning to menu."
-                read -r -n 1 -s -p "Press any key to return to menu..." && echo
+                exit 1
             fi
             ;;
         3)
-            list_stored_releases_and_deploy 
-            read -r -n 1 -s -p "Press any key to return to menu..." && echo
+            if clear_stored_releases; then
+                echo "Exiting."
+                exit 0
+            else
+                read -r -n 1 -s -p "Press any key to return to menu..." && echo
+            fi
             ;;
-        # Option 4 is disabled
-        # 4)
-        #     read -r -p "Enter the exact tag of the stored release to deploy: " specific_tag_deploy
-        #      if [ -n "$specific_tag_deploy" ]; then
-        #         deploy_release "$specific_tag_deploy"
-        #     else
-        #         echo "No tag entered."
-        #     fi
-        #     read -r -n 1 -s -p "Press any key to return to menu..." && echo
-        #     ;;
         [qQ])
-            echo "Exiting."
+            echo "Quit."
             break
             ;;
         *)
