@@ -120,8 +120,8 @@ func parseSTFFile(filename, content string) (StateTransition, error) {
 
 func TestStateTransitionInterpreter(t *testing.T) {
 	pvm.PvmLogging = false
-	pvm.PvmTrace = false   // enable PVM trace for this test
-	pvm.VMsCompare = false // enable VM comparison for this test
+	pvm.PvmTrace = false // enable PVM trace for this test
+
 	filename := path.Join(common.GetJAMTestVectorPath("traces"), "preimages/00000008.json")
 
 	content, err := os.ReadFile(filename)
@@ -137,7 +137,6 @@ func TestStateTransitionInterpreter(t *testing.T) {
 }
 
 func TestStateTransitionSandbox(t *testing.T) {
-	pvm.VMsCompare = true // enable VM comparison for this test
 	pvm.PvmLogging = true
 	pvm.UseTally = false       // enable tally for this test
 	pvm.SetUseEcalli500(false) // use ecalli500 for log check in x86
@@ -160,7 +159,6 @@ func TestStateTransitionSandbox(t *testing.T) {
 }
 
 func TestStateTransitionCompiler(t *testing.T) {
-	pvm.VMsCompare = true // enable VM comparison for this test
 	pvm.PvmLogging = true
 	pvm.UseTally = false       // enable tally for this test
 	pvm.SetUseEcalli500(false) // use ecalli500 for log check in x86
@@ -228,7 +226,6 @@ func TestPVMstepJsonDiff(t *testing.T) {
 
 func TestTracesInterpreter(t *testing.T) {
 	log.InitLogger("debug")
-	pvm.VMsCompare = true // enable VM comparison for this test
 	// pvm.PvmLogging = true
 
 	// Define all the directories you want to test in a single slice.
@@ -277,11 +274,25 @@ func TestTracesInterpreter(t *testing.T) {
 			}
 		})
 	}
+
+	rows := BenchRows() // expose recorder snapshot via a small helper (see below)
+	if len(rows) == 0 {
+		t.Fatalf("no timing rows recorded; did you run with -tags benchprofile ?")
+	}
+
+	fmt.Println("\n=== Top 40 by TOTAL time ===")
+	for i, r := range rows {
+		if i == 40 {
+			break
+		}
+		fmt.Printf("%-45s  total=%-12s count=%-4d mean=%-10s p95=%-10s max=%-10s\n",
+			r.Name, r.Total, r.Count, r.Mean, r.P95, r.Max)
+	}
+
 }
 
 func TestTracesCompiler(t *testing.T) {
 	log.InitLogger("debug")
-	pvm.VMsCompare = true // enable VM comparison for this test
 	// pvm.PvmLogging = true
 
 	// Define all the directories you want to test in a single slice.
@@ -328,7 +339,6 @@ func TestTracesCompiler(t *testing.T) {
 }
 func TestTracesSandbox(t *testing.T) {
 	log.InitLogger("debug")
-	pvm.VMsCompare = true // enable VM comparison for this test
 	// pvm.PvmLogging = true
 
 	// Define all the directories you want to test in a single slice.
@@ -510,8 +520,7 @@ func findFuzzTestFiles(sourcePath, targetVersion string, excludedTeams []string)
 
 func TestSingleFuzzTrace(t *testing.T) {
 	pvm.PvmLogging = false
-	pvm.PvmTrace = false  // enable PVM trace for this test
-	pvm.VMsCompare = true // enable VM comparison for this test
+	pvm.PvmTrace = false // enable PVM trace for this test
 	fileMap := make(map[string]string)
 
 	jamConformancePath, err := GetFuzzReportsPath()
@@ -551,7 +560,6 @@ func testFuzzTraceInternal(t *testing.T, saveOutput bool) {
 
 	pvm.PvmLogging = false
 	pvm.PvmTrace = false
-	pvm.VMsCompare = false
 
 	log.InitLogger("debug")
 	log.EnableModule(log.PvmAuthoring)

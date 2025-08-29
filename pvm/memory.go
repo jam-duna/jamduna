@@ -108,58 +108,78 @@ func (ram *RAM) SetPageAccess(pageIndex int, access byte) {
 	// TODO: match the model of below ... but how?
 }
 
+// inRange reports whether the half-open interval [address, address+length) lies fully within [start, end).  It is crafted to avoid uint32 overflow.
+
+func inRange(address, length, start, end uint32) bool {
+	if length == 0 {
+		return true
+	}
+	// Must start inside region.
+	if address < start || address >= end {
+		return false
+	}
+	// address + length <= end  ⇔  address <= end - length
+	// (works even when length is large; avoids overflow)
+	return address <= end-length
+}
+
 func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
 	if len(data) == 0 {
 		return OK
 	}
 	length := uint32(len(data))
-	end := address + length
+	heapEnd := Z_func(ram.current_heap_pointer)
 
-	switch {
-	case address < 65536:
+	// First 64K (special, write is OOB)
+	if inRange(address, length, 0, 65536) {
+		// Preserve existing semantics: writes to first64k return OOB.
 		copy(ram.first64k[address:], data)
 		return OOB
-	case address >= ram.output_address && end <= ram.output_end:
+	}
+
+	// Output region (writable)
+	if inRange(address, length, ram.output_address, ram.output_end) {
 		offset := address - ram.output_address
-		copy(ram.output[offset:], data)
+		copy(ram.output[offset:offset+length], data)
 		return OK
-	case address >= ram.stack_address && end <= ram.stack_address_end:
+	}
+
+	// Stack region (writable)
+	if inRange(address, length, ram.stack_address, ram.stack_address_end) {
 		offset := address - ram.stack_address
-		copy(ram.stack[offset:], data)
+		copy(ram.stack[offset:offset+length], data)
 		return OK
-	case address >= ram.rw_data_address && end <= Z_func(ram.current_heap_pointer):
+	}
+
+	// RW data / heap region (writable up to heapEnd)
+	if inRange(address, length, ram.rw_data_address, heapEnd) {
 		offset := address - ram.rw_data_address
-		copy(ram.rw_data[offset:], data)
+		// Safety guard for dynamic growth; usually elided by compiler
+		if offEnd := offset + length; offEnd > uint32(len(ram.rw_data)) {
+			return OOB
+		}
+		copy(ram.rw_data[offset:offset+length], data)
 		return OK
-	case address >= ram.ro_data_address && end <= ram.ro_data_address_end:
+	}
+
+	// RO data region (writes are OOB but we mimic prior behavior of copying then OOB)
+	if inRange(address, length, ram.ro_data_address, ram.ro_data_address_end) {
 		offset := address - ram.ro_data_address
-		copy(ram.ro_data[offset:], data)
-		return OOB
-	default:
-		log.Error(log.GeneralAuthoring, "WriteRAMBytes Invalid RAM", "address", fmt.Sprintf("%x", address), "end", fmt.Sprintf("%x", end))
+		copy(ram.ro_data[offset:offset+length], data)
 		return OOB
 	}
+
+	return OOB
 }
 
 func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
-	end := address + length
 	if length == 0 {
 		return []byte{}, OK
 	}
-	if address >= ram.output_address && end <= ram.output_end {
-		offset := address - ram.output_address
-		if offset+length > uint32(len(ram.output)) {
-			return nil, OOB
-		}
-		return ram.output[offset : offset+length], OK
-	}
-	if address < 65536 {
-		if address+length > 65536 {
-			return nil, OOB
-		}
-		return ram.first64k[address : address+length], OOB
-	}
-	if address >= ram.output_address && end <= ram.output_end {
+	heapEnd := Z_func(ram.current_heap_pointer)
+
+	// Output region
+	if inRange(address, length, ram.output_address, ram.output_end) {
 		offset := address - ram.output_address
 		if offset+length > uint32(len(ram.output)) {
 			return nil, OOB
@@ -167,7 +187,13 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 		return ram.output[offset : offset+length], OK
 	}
 
-	if address >= ram.stack_address && end <= ram.stack_address_end {
+	// First 64K (special; read returns OOB per existing semantics)
+	if inRange(address, length, 0, 65536) {
+		return ram.first64k[address : address+length], OOB
+	}
+
+	// Stack
+	if inRange(address, length, ram.stack_address, ram.stack_address_end) {
 		offset := address - ram.stack_address
 		if offset+length > uint32(len(ram.stack)) {
 			return nil, OOB
@@ -175,18 +201,17 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 		return ram.stack[offset : offset+length], OK
 	}
 
-	if address >= ram.rw_data_address && end <= Z_func(ram.current_heap_pointer) {
-		//fmt.Printf("ReadRAMBytes: address %x, length %d, current_heap_pointer %x\n", address, length, ram.current_heap_pointer)
+	// RW data / heap
+	if inRange(address, length, ram.rw_data_address, heapEnd) {
 		offset := address - ram.rw_data_address
 		if offset+length > uint32(len(ram.rw_data)) {
-			fmt.Printf("ADDRESS %x rw_data_address %x offset %x\n", address, ram.rw_data_address, offset)
-			// panic(555)
 			return nil, OOB
 		}
 		return ram.rw_data[offset : offset+length], OK
 	}
 
-	if address >= ram.ro_data_address && end <= ram.ro_data_address_end {
+	// RO data
+	if inRange(address, length, ram.ro_data_address, ram.ro_data_address_end) {
 		offset := address - ram.ro_data_address
 		if offset+length > uint32(len(ram.ro_data)) {
 			return nil, OOB
@@ -220,16 +245,16 @@ func (ram *RAM) SetCurrentHeapPointer(pointer uint32) {
 }
 
 func (ram *RAM) ReadRegister(index int) (uint64, uint64) {
-	if index < 0 || index >= len(ram.register) {
-		return 0, OOB
-	}
+	// if index < 0 || index >= len(ram.register) {
+	// 	return 0, OOB
+	// }
 	return ram.register[index], OK
 }
 
 func (ram *RAM) WriteRegister(index int, value uint64) uint64 {
-	if index < 0 || index >= len(ram.register) {
-		return OOB
-	}
+	// if index < 0 || index >= len(ram.register) {
+	// 	return OOB
+	// }
 	ram.register[index] = value
 	return OK
 }

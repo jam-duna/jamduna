@@ -419,11 +419,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		hiResGasRangeEnd = int64(999999999999999)
 	}
 
-	if VMsCompare {
-		vm.Logs = make(VMLogs, 0)
-	} else {
-		vm.VMs = nil
-	}
+	vm.VMs = nil
 
 	return vm
 }
@@ -514,7 +510,7 @@ func (vm *VM) Execute(entryPoint int, is_child bool) error {
 	if !vm.terminated {
 		vm.ResultCode = types.WORKDIGEST_OK
 	} else if vm.ResultCode != types.WORKDIGEST_OK {
-		fmt.Printf("VM terminated with error code %d at PC %d (%v, %s, %s) Gas:%v\n", vm.ResultCode, vm.pc, vm.Service_index, vm.Mode, string(vm.ServiceMetadata), vm.Gas)
+		//fmt.Printf("VM terminated with error code %d at PC %d (%v, %s, %s) Gas:%v\n", vm.ResultCode, vm.pc, vm.Service_index, vm.Mode, string(vm.ServiceMetadata), vm.Gas)
 		//log.Warn(vm.logging, "PVM Result Code", "mode", vm.Mode, "service", string(vm.ServiceMetadata), "resultCode", vm.ResultCode)
 	}
 	return nil
@@ -567,7 +563,7 @@ func (vm *VM) step(stepn int) error {
 	len_operands := vm.skip(vm.pc)
 	operands := vm.code[vm.pc+1 : vm.pc+1+len_operands]
 	vm.Gas -= 1
-	og_pc := vm.pc
+
 	if PvmTrace2 {
 		fmt.Printf("%s %s\n", prefixTrace, DisassembleSingleInstruction(opcode, operands))
 	}
@@ -644,10 +640,6 @@ func (vm *VM) step(stepn int) error {
 
 		//fmt.Printf("instruction=%d pc=%d g=%d Registers=%s\n", opcode, vm.pc, vm.Gas-1, prettyJSON)
 		//fmt.Printf("%s %d %d Registers:%s\n", opcode_str(opcode), stepn-1, vm.pc, prettyJSON)
-	}
-	if VMsCompare {
-		// preexecution logging
-		vm.LogCurrentState(opcode, operands, og_pc, vm.Gas)
 	}
 	return nil
 }
@@ -738,31 +730,12 @@ func z_encode(a uint64, n uint32) int64 {
 	return int64(a<<shift) >> shift
 }
 
-// func z_decode(a int64, n uint32) uint64 {
-// 	if n == 0 || n > 8 {
-// 		return 0
-// 	}
-// 	var mask uint64
-// 	if n == 8 {
-// 		mask = ^uint64(0)
-// 	} else {
-// 		mask = (uint64(1) << (8 * n)) - 1
-// 	}
-// 	return uint64(a) & mask
-// }
-
 func x_encode(x uint64, n uint32) uint64 {
 	if n == 0 || n > 8 {
 		return 0
 	}
-	shift := 8*n - 1
-	q := x >> shift
-	if n == 8 {
-		return x
-	}
-	mask := (uint64(1) << (8 * n)) - 1
-	factor := ^mask
-	return x + q*factor
+	shift := uint(64 - 8*n)
+	return uint64(int64(x<<shift) >> shift)
 }
 
 func smod(a, b int64) int64 {
@@ -793,7 +766,7 @@ func (vm *VM) HandleNoArgs(opcode byte) {
 		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
 		//log.Warn(vm.logging, "TRAP encountered", "service", string(vm.ServiceMetadata), "mode", vm.Mode, "pc", vm.pc)
-		fmt.Printf("TRAP encountered at pc %d in mode %s\n", vm.pc, vm.Mode)
+		//fmt.Printf("TRAP encountered at pc %d in mode %s\n", vm.pc, vm.Mode)
 		vm.terminated = true
 	case FALLTHROUGH:
 		vm.pc += 1
@@ -1784,8 +1757,6 @@ type VMLog struct {
 	Gas       int64
 }
 
-var VMsCompare = false
-
 var hiResGasRangeStart = int64(0)
 var hiResGasRangeEnd = int64(math.MaxInt64)
 var BBSampleRate = 20_000_000
@@ -1794,6 +1765,7 @@ var RecordLogSampleRate = 1
 type VMLogs []VMLog
 
 func (vm *VM) GetMemory() (map[int][]byte, map[int]int) {
+	panic(2)
 	memory := make(map[int][]byte)
 	pageMap := make(map[int]int)
 	for i := 0; i < TotalPages; i++ {
@@ -1850,39 +1822,6 @@ func (vm *VM) GetMemory() (map[int][]byte, map[int]int) {
 	return memory, pageMap
 }
 
-/*
-	func (vm *VM) TakeSnapShot(name string, pc uint32, registers []uint64, gas uint64, failAddress uint64, BaseRegValue uint64, basicBlockNumber uint64) *EmulatorSnapShot {
-		memory, pagemap := vm.GetMemory()
-		snapshot := &EmulatorSnapShot{
-			Name:             name,
-			InitialRegs:      registers,
-			InitialPC:        pc,
-			FailAddress:      failAddress,
-			InitialPageMap:   pagemap,
-			InitialMemory:    memory,
-			InitialGas:       gas,
-			Code:             make([]byte, 0), // regenerated anyway
-			BaseRegValue:     BaseRegValue,
-			BasicBlockNumber: basicBlockNumber,
-		}
-		return snapshot
-	}
-
-	func (vm *VM) SaveSnapShot(snapshot *EmulatorSnapShot) error {
-		filePath := fmt.Sprintf("%s/BB%d.json", vm.Backend, snapshot.BasicBlockNumber)
-		data, err := json.MarshalIndent(snapshot, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal snapshot: %w", err)
-		}
-
-		err = os.WriteFile(filePath, data, 0644)
-		if err != nil {
-			return fmt.Errorf("failed to write snapshot to file %s: %w", filePath, err)
-		}
-		fmt.Printf("Snapshot %s saved [PC: %d, BasicBlock: %d, Gas: %d Registers: %v]\n", filePath, snapshot.InitialPC, snapshot.BasicBlockNumber, snapshot.InitialGas, snapshot.InitialRegs)
-		return nil
-	}
-*/
 func (vm *VM) LogCurrentState(opcode byte, operands []byte, currentPC uint64, gas int64) {
 	if opcode == ECALLI {
 		return

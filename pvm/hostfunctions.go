@@ -208,71 +208,11 @@ type Refine_parameters struct {
 }
 
 func (vm *VM) chargeGas(host_fn int) int64 {
-	beforeGas := vm.Gas
 	chargedGas := uint64(10)
-	exp := fmt.Sprintf("HOSTFUNC %d", host_fn)
-
 	switch host_fn {
-	case TRANSFER:
-		exp = "TRANSFER"
-	case READ:
-		exp = "READ"
-	case WRITE:
-		exp = "WRITE"
-	case NEW:
-		exp = "NEW"
-	case FETCH:
-		exp = "FETCH"
-	case EXPORT:
-		exp = "EXPORT"
-	case GAS:
-		exp = "GAS"
-	case LOOKUP:
-		exp = "LOOKUP"
-	case INFO:
-		exp = "INFO"
-	case BLESS:
-		exp = "BLESS"
-	case ASSIGN:
-		exp = "ASSIGN"
-	case DESIGNATE:
-		exp = "DESIGNATE"
-	case CHECKPOINT:
-		exp = "CHECKPOINT"
-	case UPGRADE:
-		exp = "UPGRADE"
-	case EJECT:
-		exp = "EJECT"
-	case QUERY:
-		exp = "QUERY"
-	case SOLICIT:
-		exp = "SOLICIT"
-	case FORGET:
-		exp = "FORGET"
-	case YIELD:
-		exp = "YIELD"
-	case PROVIDE:
-		exp = "PROVIDE"
-	case HISTORICAL_LOOKUP:
-		exp = "HISTORICAL_LOOKUP"
-	case MACHINE:
-		exp = "MACHINE"
-	case PEEK:
-		exp = "PEEK"
-	case POKE:
-		exp = "POKE"
-	case PAGES:
-		exp = "PAGES"
-	case INVOKE:
-		exp = "INVOKE"
-	case EXPUNGE:
-		exp = "EXPUNGE"
 	case LOG:
-		exp = "LOG"
 		chargedGas = 0
 	}
-
-	log.Trace(vm.logging, exp, "reg", vm.Ram.ReadRegisters(), "gasCharged", chargedGas, "beforeGas", beforeGas, "afterGas", vm.Gas)
 	return int64(chargedGas)
 }
 
@@ -923,7 +863,7 @@ func (vm *VM) hostFetch() {
 			allowed = false
 		}
 	}
-	log.Trace(vm.logging, "FETCH", "mode", mode, "allowed", allowed, "datatype", datatype, "omega_7", o, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12, "vm.Extrinsics", fmt.Sprintf("%x", vm.Extrinsics), "wp", vm.WorkPackage)
+	//log.Trace(vm.logging, "FETCH", "mode", mode, "allowed", allowed, "datatype", datatype, "omega_7", o, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12, "vm.Extrinsics", fmt.Sprintf("%x", vm.Extrinsics), "wp", vm.WorkPackage)
 
 	if allowed {
 		switch datatype {
@@ -971,10 +911,10 @@ func (vm *VM) hostFetch() {
 			// get imported segment by omega 11 and omega 12
 			if omega_11 < uint64(len(vm.Imports)) && omega_12 < uint64(len(vm.Imports[omega_11])) {
 				v_Bytes = append([]byte{}, vm.Imports[omega_11][omega_12][:]...)
-				log.Trace(log.DA, fmt.Sprintf("%s Fetch segment hash:", vm.ServiceMetadata), "I", fmt.Sprintf("%v", common.Blake2Hash(v_Bytes)))
-				log.Trace(log.DA, fmt.Sprintf("%s Fetch segment byte:", vm.ServiceMetadata), "I", fmt.Sprintf("%x", v_Bytes))
-				log.Trace(log.DA, fmt.Sprintf("%s Fetch segment  len:", vm.ServiceMetadata), "I", fmt.Sprintf("%d", len(v_Bytes)))
-				log.Trace(log.DA, fmt.Sprintf("%s Fetch segment  idx:", vm.ServiceMetadata), "I", fmt.Sprintf("%d", omega_12))
+				//log.Trace(log.DA, fmt.Sprintf("%s Fetch segment hash:", vm.ServiceMetadata), "I", fmt.Sprintf("%v", common.Blake2Hash(v_Bytes)))
+				//log.Trace(log.DA, fmt.Sprintf("%s Fetch segment byte:", vm.ServiceMetadata), "I", fmt.Sprintf("%x", v_Bytes))
+				//log.Trace(log.DA, fmt.Sprintf("%s Fetch segment  len:", vm.ServiceMetadata), "I", fmt.Sprintf("%d", len(v_Bytes)))
+				//log.Trace(log.DA, fmt.Sprintf("%s Fetch segment  idx:", vm.ServiceMetadata), "I", fmt.Sprintf("%d", omega_12))
 			}
 
 		case 6:
@@ -1585,8 +1525,7 @@ func (vm *VM) hostSolicit() {
 	xs, _ := vm.X.GetX_s()
 	// Got l of X_s by setting s = 1, z = z(from RAM)
 	o, _ := vm.Ram.ReadRegister(7)
-	z, _ := vm.Ram.ReadRegister(8) // z: blob_len
-	log.Info(vm.logging, "SOLICIT", "o", o, "z", z)
+	z, _ := vm.Ram.ReadRegister(8)                      // z: blob_len
 	hBytes, err_h := vm.Ram.ReadRAMBytes(uint32(o), 32) // h: blobHash
 	if err_h != OK {
 		log.Error(vm.logging, "SOLICIT RAM READ ERROR", "err", err_h, "o", o, "z", z)
@@ -1603,7 +1542,7 @@ func (vm *VM) hostSolicit() {
 		xs.WriteLookup(account_lookuphash, uint32(z), []uint32{}, lookup_source)
 		xs.NumStorageItems += 2
 		xs.StorageSize += AccountLookupConst + uint64(z)
-		log.Info(vm.logging, "SOLICIT OK", "h", account_lookuphash, "z", z, "newvalue", []uint32{}, "lookup_source", lookup_source)
+		//log.Trace(vm.logging, "SOLICIT OK", "h", account_lookuphash, "z", z, "newvalue", []uint32{}, "lookup_source", lookup_source)
 		vm.Ram.WriteRegister(7, OK)
 		vm.HostResultCode = OK
 		return
@@ -1613,19 +1552,19 @@ func (vm *VM) hostSolicit() {
 		xs.WriteLookup(account_lookuphash, uint32(z), X_s_l, lookup_source)
 		vm.Ram.WriteRegister(7, FULL)
 		vm.HostResultCode = FULL
-		log.Info(vm.logging, "SOLICIT FULL", "h", account_lookuphash, "z", z)
+		//log.Trace(vm.logging, "SOLICIT FULL", "h", account_lookuphash, "z", z)
 		return
 	}
 	if len(X_s_l) == 2 { // [x, y] => [x, y, t]
 		xs.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...), lookup_source)
-		log.Info(vm.logging, "SOLICIT OK 2", "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
+		//log.Trace(vm.logging, "SOLICIT OK 2", "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
 		vm.Ram.WriteRegister(7, OK)
 		vm.HostResultCode = OK
 		return
 	} else {
 		vm.Ram.WriteRegister(7, HUH)
 		vm.HostResultCode = HUH
-		log.Info(vm.logging, "SOLICIT HUH", "h", account_lookuphash, "z", z, "len(X_s_l)", len(X_s_l))
+		//log.Trace(vm.logging, "SOLICIT HUH", "h", account_lookuphash, "z", z, "len(X_s_l)", len(X_s_l))
 		return
 	}
 }
@@ -2000,6 +1939,10 @@ func (vm *VM) hostLog() {
 
 	if vm.IsChild {
 		serviceMetadata = fmt.Sprintf("%s-child", serviceMetadata)
+	}
+	loggingVerbose := false
+	if !loggingVerbose {
+		return
 	}
 	switch level {
 	case 0: // 0: User agent displays as fatal error

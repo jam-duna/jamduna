@@ -2,6 +2,7 @@ package statedb
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -17,24 +18,25 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 	if !sa.Dirty {
 		return nil, nil
 	}
-	log.Debug(log.SDB, "writeAccount", "service_idx", sa.ServiceIndex, "dirty", sa.Dirty, "s", sa.JsonString())
+	//log.Debug(log.SDB, "writeAccount", "service_idx", sa.ServiceIndex, "dirty", sa.Dirty, "s", sa.JsonString())
 
 	service_idx := sa.GetServiceIndex()
 	tree := s.GetTrie()
 	start_StorageSize := sa.StorageSize
 	start_NumStorageItems := sa.NumStorageItems
 	serviceUpdate = types.NewServiceUpdate(service_idx)
+	t0 := time.Now()
 	for _, storage := range sa.Storage {
-		log.Debug(log.SDB, "writeAccount Storage", "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", storage.InternalKey, "storage.Accessed", storage.Accessed, "storage.Deleted", storage.Deleted, "storage.source", storage.Source)
+		//log.Debug(log.SDB, "writeAccount Storage", "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", storage.InternalKey, "storage.Accessed", storage.Accessed, "storage.Deleted", storage.Deleted, "storage.source", storage.Source)
 		as_internal_key := storage.InternalKey
 		if storage.Dirty {
 			if storage.Deleted {
-				log.Debug(s.Authoring, "writeAccount DELETE", "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", as_internal_key, "storage.Accessed", storage.Accessed, "storage.Deleted", storage.Deleted, "storage.source", storage.Source)
+				//log.Debug(s.Authoring, "writeAccount DELETE", "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", as_internal_key, "storage.Accessed", storage.Accessed, "storage.Deleted", storage.Deleted, "storage.source", storage.Source)
 				if storage.Source == "trie" {
 					err = tree.DeleteServiceStorage(service_idx, storage.Key)
 					if err != nil {
 						// DeleteServiceStorageKey: Failed to delete k: 0xffffffffdecedb51effc9737c5fea18873dbf428c55f0d5d3b522672f234a9b1, error: key not found
-						log.Debug(log.SDB, "DeleteServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", as_internal_key, "err", err)
+						//log.Debug(log.SDB, "DeleteServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", as_internal_key, "err", err)
 						continue
 					}
 				} else {
@@ -59,9 +61,11 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 			}
 		}
 	}
+	benchRec.Add("*** ApplyXContext: writeAccount:Storage", time.Since(t0))
 
+	t0 = time.Now()
 	for blob_hash_str, v := range sa.Lookup {
-		log.Debug(log.SDB, "writeAccount Lookup", "service_idx", service_idx, "blob_hash_str", blob_hash_str, "v.Dirty", v.Dirty, "v.Deleted", v.Deleted, "v.Z", v.Z, "v.Timeslots", v.Timeslots, "source", v.Source)
+		//log.Debug(log.SDB, "writeAccount Lookup", "service_idx", service_idx, "blob_hash_str", blob_hash_str, "v.Dirty", v.Dirty, "v.Deleted", v.Deleted, "v.Z", v.Z, "v.Timeslots", v.Timeslots, "source", v.Source)
 		blob_hash := common.HexToHash(blob_hash_str)
 		if v.Dirty {
 			if v.Deleted {
@@ -71,7 +75,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 						log.Warn(log.SDB, "tree.DeletePreImageLookup", "blob_hash", blob_hash, "v.Z", v.Z, "err", err)
 						continue
 					}
-					log.Debug("authoring", "tree.DeletePreImageLookup [FORGET OK]", "blob_hash", blob_hash, "v.Z", v.Z)
+					//log.Debug("authoring", "tree.DeletePreImageLookup [FORGET OK]", "blob_hash", blob_hash, "v.Z", v.Z)
 					serviceUpdate.ServiceRequest[blob_hash_str] = &types.SubServiceRequestResult{
 						HeaderHash: s.HeaderHash,
 						Slot:       s.GetTimeslot(),
@@ -81,7 +85,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 					}
 				}
 			} else {
-				log.Debug(log.SDB, "writeAccount SET Lookup", "service_idx", service_idx, "blob_hash", blob_hash_str, "v.Z", v.Z, "v.Timeslots", v.Timeslots)
+				//log.Debug(log.SDB, "writeAccount SET Lookup", "service_idx", service_idx, "blob_hash", blob_hash_str, "v.Z", v.Z, "v.Timeslots", v.Timeslots)
 				err = tree.SetPreImageLookup(service_idx, blob_hash, v.Z, v.Timeslots)
 				if err != nil {
 					log.Warn(log.SDB, "tree.SetPreimageLookup", "blob_hash", blob_hash, "v.Z", v.Z, "v.Timeslots", v.Timeslots, "err", err)
@@ -97,8 +101,11 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 			}
 		}
 	}
+	benchRec.Add("*** ApplyXContext: writeAccount:Lookup", time.Since(t0))
+
+	t0 = time.Now()
 	for blobHash_str, v := range sa.Preimage {
-		log.Debug(log.SDB, "writeAccount Preimage", "service_idx", service_idx, "blobHash_str", blobHash_str, "v.Dirty", v.Dirty, "v.Deleted", v.Deleted, "len(v.Preimage)", len(v.Preimage), "source", v.Source)
+		//log.Debug(log.SDB, "writeAccount Preimage", "service_idx", service_idx, "blobHash_str", blobHash_str, "v.Dirty", v.Dirty, "v.Deleted", v.Deleted, "len(v.Preimage)", len(v.Preimage), "source", v.Source)
 		blobHash := common.HexToHash(blobHash_str)
 		if v.Dirty {
 			if v.Deleted {
@@ -126,8 +133,11 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 			}
 		}
 	}
-	log.Debug(log.SDB, "writeAccount ServiceInfo", "service_idx", service_idx, "sa.NumStorageItems", sa.NumStorageItems, "sa.StorageSize", sa.StorageSize)
+	benchRec.Add("*** ApplyXContext: writeAccount:Preimage", time.Since(t0))
+
+	t0 = time.Now()
 	err = s.writeService(service_idx, sa)
+	benchRec.Add("*** ApplyXContext: writeAccount:writeService", time.Since(t0))
 	if sa.NumStorageItems != start_NumStorageItems {
 		fmt.Printf(" a_i [s=%d] changed from %d to %d\n", sa.ServiceIndex, start_NumStorageItems, sa.NumStorageItems)
 	}
@@ -145,38 +155,60 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 
 func (s *StateDB) ApplyXContext(U *types.PartialState) (stateUpdate *types.StateUpdate) {
 	stateUpdate = types.NewStateUpdate()
-	debugXU := false
 	for _, sa := range U.ServiceAccounts {
 		// U.D should only have service accounts with Mutable = true
 		if !sa.Mutable {
 			log.Crit(log.SDB, "Immutable Service account in X.U.D", "s", sa.ServiceIndex)
 		} else if sa.Dirty {
+			t0 := time.Now()
 			serviceUpdate, err := s.writeAccount(sa)
-			if debugXU {
-				log.Trace(log.SDB, "ApplyXContext: writeAccount for "+fmt.Sprintf("%d", sa.ServiceIndex), "serviceUpdate", types.ToJSON(serviceUpdate), "err", err)
-			}
 			if err != nil {
 				log.Crit(log.SDB, "ApplyXContext", "err", err)
 			}
-			stateUpdate.AddServiceUpdate(sa.ServiceIndex, serviceUpdate)
+			if false {
+				stateUpdate.AddServiceUpdate(sa.ServiceIndex, serviceUpdate)
+			}
+			benchRec.Add("-- ApplyXContext: writeAccount", time.Since(t0))
 		}
 	}
+	t0 := time.Now()
 	// p - Bless => PrivilegedServiceState 12.4.1 (164)
-	s.JamState.PrivilegedServiceIndices.AuthQueueServiceID = U.PrivilegedState.AuthQueueServiceID
-	s.JamState.PrivilegedServiceIndices.ManagerServiceID = U.PrivilegedState.ManagerServiceID
-	s.JamState.PrivilegedServiceIndices.UpcomingValidatorsServiceID = U.PrivilegedState.UpcomingValidatorsServiceID
-	s.JamState.PrivilegedServiceIndices.AlwaysAccServiceID = make(map[uint32]uint64)
-	for k, v := range U.PrivilegedState.AlwaysAccServiceID {
-		s.JamState.PrivilegedServiceIndices.AlwaysAccServiceID[k] = v
+	// Direct assignment to reduce field access overhead
+	privilegedIndices := &s.JamState.PrivilegedServiceIndices
+	privilegedState := &U.PrivilegedState
+
+	privilegedIndices.AuthQueueServiceID = privilegedState.AuthQueueServiceID
+	privilegedIndices.ManagerServiceID = privilegedState.ManagerServiceID
+	privilegedIndices.UpcomingValidatorsServiceID = privilegedState.UpcomingValidatorsServiceID
+
+	// Optimize map copying - check if we need to allocate new map
+	if privilegedIndices.AlwaysAccServiceID == nil || len(privilegedState.AlwaysAccServiceID) > len(privilegedIndices.AlwaysAccServiceID) {
+		privilegedIndices.AlwaysAccServiceID = make(map[uint32]uint64, len(privilegedState.AlwaysAccServiceID))
+	} else {
+		// Clear existing map
+		for k := range privilegedIndices.AlwaysAccServiceID {
+			delete(privilegedIndices.AlwaysAccServiceID, k)
+		}
+	}
+
+	// Copy map entries
+	for k, v := range privilegedState.AlwaysAccServiceID {
+		privilegedIndices.AlwaysAccServiceID[k] = v
 	}
 
 	// c - Designate => AuthorizationQueue
-	for i := 0; i < types.TotalCores; i++ {
-		copy(s.JamState.AuthorizationQueue[i][:], U.QueueWorkReport[i][:])
+	// Use range loop to avoid bounds checking overhead
+	authQueue := s.JamState.AuthorizationQueue
+	queueWorkReport := U.QueueWorkReport
+	for i := range authQueue {
+		copy(authQueue[i][:], queueWorkReport[i][:])
 	}
 
 	// v - Assign => DesignatedValidators
+	// Direct assignment - no optimization needed here
 	s.JamState.SafroleState.DesignatedValidators = U.UpcomingValidators
+	benchRec.Add("-- ApplyXContext: other", time.Since(t0))
+
 	return
 }
 

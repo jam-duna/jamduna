@@ -149,13 +149,18 @@ func (t *Target) onSetState(req *HeaderWithState) *Message {
 	if t.stateDB != nil {
 		//log.Printf("%sWarning: Target already has a state initialized. Overwriting with new state.%s", colorYellow, colorReset)
 	}
+
+	startTime := time.Now()
 	recovered_statedb, err := statedb.NewStateDBFromStateKeyVals(t.store, &sky)
 	recovered_statedb_stateRoot := recovered_statedb.StateRoot
 	if err != nil {
-		//TODO: how to handle this error?
+		stateRecoveryDuration := time.Since(startTime)
+		log.Printf("%sState recovery failed (took %.3fms): %v%s", colorRed, float64(stateRecoveryDuration.Nanoseconds())/1e6, err, colorReset)
 		return &Message{StateRoot: &recovered_statedb_stateRoot}
 	}
 	t.SetStateDB(recovered_statedb)
+	stateRecoveryDuration := time.Since(startTime)
+	log.Printf("%sState recovery completed (took %.3fms)%s", colorGray, float64(stateRecoveryDuration.Nanoseconds())/1e6, colorReset)
 	//log.Printf("%sStateDB initialized with %d key-value pairs%s", colorGray, len(sky.KeyVals), colorReset)
 	log.Printf("%sState_Root: %v%s", colorGray, recovered_statedb_stateRoot.Hex(), colorReset)
 	log.Printf("%sHeaderHash: %v%s", colorGray, headerHash.Hex(), colorReset)
@@ -179,12 +184,16 @@ func (t *Target) onImportBlock(req *types.Block) *Message {
 	pvmBackend := t.pvmBackend
 	preState := t.stateDB
 	preStateRoot := preState.StateRoot
+
+	startTime := time.Now()
 	postState, jamErr := statedb.ApplyStateTransitionFromBlock(preState, context.Background(), req, nil, pvmBackend)
+	transitionDuration := time.Since(startTime)
+
 	if jamErr != nil {
-		log.Printf("%s[IMPORTBK ERR] %v%s", colorRed, jamErr, colorReset)
+		log.Printf("%s[IMPORTBK ERR] %v (took %.3fms)%s", colorRed, jamErr, float64(transitionDuration.Nanoseconds())/1e6, colorReset)
 		return &Message{StateRoot: &preStateRoot}
 	}
-	log.Printf("%sState transition applied%s", colorGray, colorReset)
+	log.Printf("%sState transition applied (took %.3fms)%s", colorGray, float64(transitionDuration.Nanoseconds())/1e6, colorReset)
 	log.Printf("%sPost State_Root: %v%s", colorGray, postState.StateRoot.Hex(), colorReset)
 	log.Printf("%sPost HeaderHash: %v%s", colorGray, headerHash.Hex(), colorReset)
 	postStateRoot := postState.StateRoot

@@ -483,9 +483,6 @@ func selectAllImportBlocksErrors(seed []byte, store *storage.StateDBStorage, mod
 	oEpoch, oPhase = oStatedbCopy.GetSafrole().EpochAndPhase(oSlot)
 
 	// Make sure original block passes seal test: which requires author guessing, entropy, attempt for passing
-
-	//osf := oStatedbCopy.GetSafrole()
-	//os2, err := osf.ApplyStateTransitionTickets(context.TODO(), oTicketExts, oSlot, oHeader, nil) // Entropy computed!
 	oValid, oValidatorIdx, oValidatorPub, err := oStatedbCopy.VerifyBlockHeader(oBlockCopy, nil)
 	if !oValid || err != nil || oBlockCopy.Header.AuthorIndex != oValidatorIdx {
 		if allowFuzzing {

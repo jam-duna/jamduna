@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"time"
 
 	"encoding/binary"
 	"encoding/hex"
@@ -367,18 +368,24 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	//γz :epoch’s root, a Bandersnatch ring root composed with the one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
 	//γa :the ticket accumulator, a series of highest-scoring ticket identifiers to be used for the next epoch (epoch N+1)
 	//γs :current epoch’s slot-sealer series, which is either a full complement of E tickets or, in the case of a fallback mode, a series of E Bandersnatch keys (epoch N)
+	t0 := time.Now()
 	sf := s.GetSafrole()
 	if sf == nil {
 		log.Crit(log.SDB, "UpdateTrieState: NO SAFROLE")
 	}
+	benchRec.Add("- UpdateTrieState:GetSafrole", time.Since(t0))
+
+	t0 = time.Now()
 	sb := sf.GetSafroleBasicState()
+	benchRec.Add("- UpdateTrieState:GetSafroleBasicState", time.Since(t0))
+
+	t0 = time.Now()
 	safroleStateEncode := sb.GetSafroleStateBytes()
 	entropyEncode := sf.GetEntropyBytes()
 	nextnextEpochValidatorsEncode := sf.GetNextNextEpochValidatorsBytes()
 	currEpochValidatorsEncode := sf.GetCurrEpochValidatorsBytes()
 	priorEpochValidatorEncode := sf.GetPriorEpochValidatorsBytes()
 	mostRecentBlockTimeSlotEncode := sf.GetMostRecentBlockTimeSlotBytes()
-
 	d := s.GetJamState()
 	disputeState := d.GetDisputesStateBytes()
 	availability_assignmentEncode := d.GetAvailabilityAssignmentsBytes()
@@ -386,15 +393,17 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	coreAuthPoolEncode := d.GetAuthPoolBytes()
 	authQueueEncode := d.GetAuthQueueBytes()
 	privilegedServiceIndicesEncode := d.GetPrivilegedServicesIndicesBytes()
-
 	recentBlocksEncode := d.GetRecentBlocksBytes()
+	accumulateQueueEncode := d.GetAccumulationQueueBytes()
+	accumulateHistoryEncode := d.GetAccumulationHistoryBytes()
+	accumulateOutputsEncode := d.GetAccumulationOutputsBytes()
+	benchRec.Add("- UpdateTrieState:Codec", time.Since(t0))
 
-	accunulateQueueEncode := d.GetAccumulationQueueBytes()
-	accunulateHistoryEncode := d.GetAccumulationHistoryBytes()
-	accumulateOuputsEncode := d.GetAccumulationOutputsBytes()
-
+	t0 = time.Now()
 	t := s.GetTrie()
-	verify := true
+	benchRec.Add("- UpdateTrieState:GetTrie", time.Since(t0))
+
+	t0 = time.Now()
 	t.SetState(C1, coreAuthPoolEncode)
 	t.SetState(C2, authQueueEncode)
 	t.SetState(C3, recentBlocksEncode)
@@ -408,17 +417,24 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	t.SetState(C11, mostRecentBlockTimeSlotEncode)
 	t.SetState(C12, privilegedServiceIndicesEncode)
 	t.SetState(C13, piEncode)
-	t.SetState(C14, accunulateQueueEncode)
-	t.SetState(C15, accunulateHistoryEncode)
-	t.SetState(C16, accumulateOuputsEncode)
-	updated_root := t.GetRoot()
+	t.SetState(C14, accumulateQueueEncode)
+	t.SetState(C15, accumulateHistoryEncode)
+	t.SetState(C16, accumulateOutputsEncode)
+	benchRec.Add("- UpdateTrieState:SetState", time.Since(t0))
 
+	t0 = time.Now()
+	updated_root := t.GetRoot()
+	benchRec.Add("- UpdateTrieState:GetRoot", time.Since(t0))
+
+	t0 = time.Now()
+	verify := false
 	if verify {
 		t2, _ := trie.InitMerkleTreeFromHash(updated_root.Bytes(), s.sdb)
 		checkingResult, err := CheckingAllState(t, t2)
 		if !checkingResult || err != nil {
 			log.Crit(log.SDB, "CheckingAllState", "err", err)
 		}
+		benchRec.Add("- UpdateTrieState:Verify", time.Since(t0))
 	}
 	return updated_root
 }
@@ -909,20 +925,11 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block, sf0 *SafroleState) (isValid
 
 	if sf0 == nil {
 		// ValidateTicketTransition
-		/*
-			sf0, err = s.GetPosteriorSafroleEntropy(targetJCE)
-			if err != nil {
-				log.Error(log.SDB, "GetPosteriorSafroleEntropy", "err", err)
-				return false, validatorIdx, bandersnatch.BanderSnatchKey{}, fmt.Errorf("VerifyBlockHeader Failed: GetPosteriorSafroleEntropy")
-			}
-		*/
-
 		sf0, err = ApplyStateTransitionTickets(s, context.TODO(), bl, nil)
 		if err != nil {
 			log.Error(log.SDB, "ApplyStateTransitionTickets", "err", err)
 			return false, validatorIdx, bandersnatch.BanderSnatchKey{}, fmt.Errorf("VerifyBlockHeader Failed: ApplyStateTransitionTickets")
 		}
-
 	}
 
 	// author_idx is the K' so we use the sf_tmp

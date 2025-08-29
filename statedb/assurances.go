@@ -61,7 +61,7 @@ func (j *JamState) ComputeAvailabilityAssignments(validatedAssurances []types.As
 			wr = append(wr, j.AvailabilityAssignments[c].WorkReport)
 		}
 		if isTimedOut {
-			log.Info(log.A, "ComputeAvailabilityAssignments - Timeout detected", "Core", c, "availableCnt", availableCnt, "threshold", assuranceThreshold, "timeslot", timeslot)
+			log.Trace(log.A, "ComputeAvailabilityAssignments - Timeout detected", "Core", c, "availableCnt", availableCnt, "threshold", assuranceThreshold, "timeslot", timeslot)
 		}
 		if isThresholdReached || isTimedOut {
 			j.AvailabilityAssignments[c] = nil

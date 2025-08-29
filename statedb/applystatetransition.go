@@ -4,13 +4,20 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/sdbtiming"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
+
+var benchRec = sdbtiming.New()
+
+// used in ApplyStateTransitionFromBlock
+func BenchRows() []sdbtiming.Row { return benchRec.Snapshot() }
 
 func ApplyStateTransitionTickets(oldState *StateDB, ctx context.Context, blk *types.Block, validated_tickets map[common.Hash]common.Hash) (safroleState *SafroleState, err error) {
 	s := oldState.Copy()
@@ -75,6 +82,7 @@ func ApplyStateTransitionTickets(oldState *StateDB, ctx context.Context, blk *ty
 // given previous safrole, applt state transition using block
 // σ'≡Υ(σ,B)
 func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block, validated_tickets map[common.Hash]common.Hash, pvmBackend string) (s *StateDB, err error) {
+
 	s = oldState.Copy()
 	if s.StateRoot != blk.Header.ParentStateRoot {
 		//fmt.Printf("Apply Block %v\n", blk.Header.Hash())
@@ -95,7 +103,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	} else {
 		s.Authoring = log.GeneralValidating
 	}
-	log.Trace(s.Authoring, "ApplyStateTransitionFromBlock", "n", s.Id, "p", s.ParentHeaderHash, "headerhash", s.HeaderHash, "stateroot", s.StateRoot)
+
 	targetJCE := blk.TimeSlot()
 	// 17+18 -- takes the PREVIOUS accumulationRoot which summarizes C a set of (service, result) pairs and
 	// 19-22 - Safrole last
@@ -108,7 +116,10 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		s.GetJamState().ResetTallyStatistics()
 	}
 	// 0.6.2 4.7 - Recent History Dagga (β†) [No other state related]
+	t0 := time.Now()
 	s.ApplyStateRecentHistoryDagga(blk.Header.ParentStateRoot)
+	benchRec.Add("ApplyStateRecentHistoryDagga", time.Since(t0))
+
 	select {
 	case <-ctx.Done():
 		return s, fmt.Errorf("ApplyStateRecentHistoryDagga canceled")
@@ -124,7 +135,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		}
 	}
 
-	// assurances := blk.Assurances()
+	t0 = time.Now()
 	assurances := blk.Assurances()
 	assurances, err = s.GetValidAssurances(assurances, blk.Header.ParentHeaderHash, false)
 	if err != nil {
@@ -135,9 +146,12 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		log.Error(log.SDB, "ApplyStateTransitionAvailabilityAssignmentsDagga", "err", err)
 		return s, err
 	}
+	benchRec.Add("GetValidAssurances", time.Since(t0))
 
 	// TODO - 4.12 - Dispute
 	// 0.6.2 Safrole 4.5,4.8,4.9,4.10,4.11 [post dispute state , pre designed validators iota]
+	t0 = time.Now()
+
 	sf := s.GetSafrole()
 	// Shawn to check: should it be sf0 here?
 	sf.OffenderState = s.GetJamState().DisputesState.Offenders
@@ -146,7 +160,10 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		log.Error(log.SDB, "ApplyStateTransitionTickets", "err", jamerrors.GetErrorName(err))
 		return s, err
 	}
-	//fmt.Printf("Safrole state transition done: %v | validated_tickets: %v\n", s2, validated_tickets)
+	benchRec.Add("ApplyStateTransitionTickets", time.Since(t0))
+
+	t0 = time.Now()
+
 	//the epochMark validators should be in gamma k'
 	if epochMark != nil {
 		// (6.27)Bandersnatch validator keys (kb) beginning in the next epoch.
@@ -165,10 +182,16 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 			}
 		}
 	}
+	// ------ VerifyBlockHeader ------
 	isValid, _, _, headerErr := s.VerifyBlockHeader(blk, &s2)
 	if !isValid || headerErr != nil {
 		return s, fmt.Errorf("block header is not valid err=%v", headerErr)
 	}
+	benchRec.Add("VerifyBlockHeader", time.Since(t0))
+	t0 = time.Now()
+
+	// ------ VerifySafroleSTF ------
+	t0 = time.Now()
 	safrole_debug := false
 	if safrole_debug {
 		err = VerifySafroleSTF(sf, &s2, blk)
@@ -176,11 +199,15 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 			return s, fmt.Errorf("VerifySafroleSTF %v", err)
 		}
 	}
+	benchRec.Add("VerifySafroleSTF", time.Since(t0))
+	// ------ tallyStatistics ------
+	t0 = time.Now()
 
 	s.JamState.SafroleState = &s2
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "tickets", uint32(len(ticketExts)))
 	// use post entropy state rotate the guarantors
 	s.RotateGuarantors()
+	benchRec.Add("tallyStatistics", time.Since(t0))
 
 	// preparing for the availability_assignment transition
 
@@ -193,6 +220,10 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if err != nil {
 		return s, err
 	}
+	benchRec.Add("ApplyStateTransitionAvailabilityAssignments", time.Since(t0))
+
+	// ------ tallyStatistics ------
+	t0 = time.Now()
 	for validatorIndex, nassurances := range num_assurances {
 		s.JamState.tallyStatistics(uint32(validatorIndex), "assurances", uint32(nassurances))
 	}
@@ -222,9 +253,15 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 
 	// this will hold the gasUsed + numWorkreports -- ServiceStatistics
 	accumulateStats := make(map[uint32]*accumulateStatistics)
+	benchRec.Add("tallyStatistics", time.Since(t0))
 
+	// ------ OuterAccumulate ------
+	t0 = time.Now()
 	num_accumulations, deferred_transfers, accumulation_output, gasUsage := s.OuterAccumulate(gas, accumulate_input_wr, o, f, pvmBackend) // outer accumulate
+	benchRec.Add("OuterAccumulate", time.Since(t0))
 
+	// ------ ProcessDeferredTransfers ------
+	t0 = time.Now()
 	// (χ′, δ†, ι′, φ′)
 	// 12.24 transfer δ‡
 	timeslot := s.GetTimeslot() // τ′
@@ -232,13 +269,10 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if err != nil {
 		return s, err
 	}
-	// make sure all service accounts can be written
 	for _, sa := range o.ServiceAccounts {
-		sa.ALLOW_MUTABLE()
+		sa.ALLOW_MUTABLE() // make sure all service accounts can be written
 		sa.Dirty = true
 	}
-
-	// accumulate statistics
 	accumulated_workreports := accumulate_input_wr[:num_accumulations]
 	for _, report := range accumulated_workreports {
 		for _, result := range report.Results {
@@ -255,10 +289,14 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 			}
 		}
 	}
+	benchRec.Add("ProcessDeferredTransfers", time.Since(t0))
 
-	// NOTE: we swapped the odring of the (ApplyXContext and computeStateUpdates) vs accumulate statistics in order to support potential idea of GP 0.6.7 (12.31) - updating a_r
-	// writeAccount and initializes s.stateUpdate
+	// ---------  ApplyXContext/computeStateUpdates ------
+	t0 = time.Now()
 	s.stateUpdate = s.ApplyXContext(o)
+	benchRec.Add("ApplyXContext", time.Since(t0))
+
+	t0 = time.Now()
 	// finalize stateUpdates
 	s.computeStateUpdates(blk) // review targetJCE input
 	for _, gas_usage := range gasUsage {
@@ -270,15 +308,22 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		stats.gasUsed += uint(gas_usage.Gas)
 		accumulateStats[service] = stats
 	}
-	//after accumulation, we need to update the accumulate state
+	benchRec.Add("computeStateUpdates", time.Since(t0))
+
+	// ---------  ApplyStateTransitionAccumulation ------
+	t0 = time.Now()
 	s.ApplyStateTransitionAccumulation(accumulate_input_wr, num_accumulations, old_timeslot)
+
 	// 0.6.2 4.18 - Preimages [ δ‡, τ′]
 	preimages := blk.PreimageLookups()
 	num_preimage, num_octets, err := s.ApplyStateTransitionPreimages(preimages, targetJCE)
 	if err != nil {
 		return s, err
 	}
+	benchRec.Add("ApplyStateTransitionPreimages", time.Since(t0))
 
+	// ---------  tallyServiceStatistics ------
+	t0 = time.Now()
 	// tally validator statistics
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "preimages", num_preimage)
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "octets", num_octets)
@@ -290,13 +335,19 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	}
 
 	s.JamState.tallyServiceStatistics(guarantees, preimages, accumulateStats, transferStats)
+	benchRec.Add("tallyStatistics", time.Since(t0))
 
-	// Update Authorization Pool alpha
+	// ---------  ApplyStateTransitionAuthorizations ------
 	// 4.19 α'[need φ', so after accumulation]
+	t0 = time.Now()
 	err = s.ApplyStateTransitionAuthorizations()
 	if err != nil {
 		return s, err
 	}
+	benchRec.Add("ApplyStateTransitionAuthorizations", time.Since(t0))
+
+	// ---------  NewWellBalancedTree ------
+	t0 = time.Now()
 	// n.r = M_B( [ s \ E_4(s) ++ E(h) | (s,h) in C] , H_K)
 	sort.Slice(accumulation_output, func(i, j int) bool {
 		return accumulation_output[i].Service < accumulation_output[j].Service
@@ -315,28 +366,32 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		}
 	}
 
-	select {
-	case <-ctx.Done():
-		return s, fmt.Errorf("ApplyStateRecentHistoryDagga canceled")
-	default:
-	}
 	tree := trie.NewWellBalancedTree(leaves, types.Keccak)
 	accumulationRoot := common.Hash(tree.Root())
 	if len(leaves) > 0 {
 		log.Debug(debugB, "BEEFY accumulation root", "r", accumulationRoot)
 	}
+	benchRec.Add("NewWellBalancedTree", time.Since(t0))
+
+	// ---------  ApplyStateRecentHistory ------
 	// 4.7 - Recent History [No other state related, but need to do it after availability_assignment]
+	t0 = time.Now()
 	s.ApplyStateRecentHistory(blk, &(accumulationRoot), accumulation_output)
+	benchRec.Add("ApplyStateRecentHistory", time.Since(t0))
+
 	// 4.20 - compute pi
+	t0 = time.Now()
 	s.JamState.tallyStatistics(uint32(blk.Header.AuthorIndex), "blocks", 1)
+	benchRec.Add("tallyStatistics", time.Since(t0))
+
+	// ---------  UpdateTrieState ------
 	s.StateRoot = s.UpdateTrieState()
-	//duration := time.Since(timer)
+	benchRec.Add("UpdateTrieState", time.Since(t0))
 	return s, nil
 }
 
 func (s *StateDB) computeStateUpdates(blk *types.Block) {
 	// setup workpackage updates (guaranteed, queued, accumulated)
-	log.Trace(log.SDB, "computeStateUpdates", "len(e_p)", len(blk.Extrinsic.Preimages), "len(e_g)", len(blk.Extrinsic.Guarantees), "len(ah)", len(s.JamState.AccumulationHistory[types.EpochLength-1].WorkPackageHash))
 	for _, g := range blk.Extrinsic.Guarantees {
 		wph := g.Report.AvailabilitySpec.WorkPackageHash
 		log.Trace(log.SDB, "computeStateUpdates-GUARANTEE", "hash", wph, g.Report.String())
@@ -350,7 +405,6 @@ func (s *StateDB) computeStateUpdates(blk *types.Block) {
 
 	h := s.JamState.AccumulationHistory[types.EpochLength-1]
 	for _, wph := range h.WorkPackageHash {
-		log.Trace(s.Authoring, "computeStateUpdates-A", "hash", wph)
 		s.stateUpdate.WorkPackageUpdates[wph] = &types.SubWorkPackageResult{
 			WorkPackageHash: wph,
 			HeaderHash:      s.HeaderHash,
@@ -366,7 +420,6 @@ func (s *StateDB) computeStateUpdates(blk *types.Block) {
 			sp = types.NewServiceUpdate(serviceID)
 			s.stateUpdate.ServiceUpdates[serviceID] = sp
 		}
-		log.Trace(s.Authoring, "computeStateUpdates-P", "s", serviceID, "hash", hash, "l", len(p.Blob))
 		sp.ServicePreimage[hash.Hex()] = &types.SubServicePreimageResult{
 			HeaderHash: s.HeaderHash,
 			Slot:       s.GetTimeslot(),

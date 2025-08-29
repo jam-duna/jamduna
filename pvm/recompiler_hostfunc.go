@@ -90,7 +90,7 @@ func (vm *CompilerVM) LogCurrentState(opcode byte, operands []byte, currentPC ui
 		recordLog = true
 	}
 
-	if recordLog {
+	if recordLog && false {
 		log := VMLog{
 			Opcode:   opcode,
 			OpStr:    opcode_str(opcode),
@@ -104,9 +104,6 @@ func (vm *CompilerVM) LogCurrentState(opcode byte, operands []byte, currentPC ui
 			log.Registers[i], _ = vm.Ram.ReadRegister(i)
 		}
 		vm.Logs = append(vm.Logs, log)
-		if (len(vm.Logs) > 10 && (gas < hiResGasRangeStart || gas > hiResGasRangeEnd)) || len(vm.Logs) > 1000 {
-			vm.saveLogs()
-		}
 	}
 }
 

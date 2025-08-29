@@ -117,7 +117,6 @@ func (n *JamState) tallyServiceStatistics(guarantees []types.Guarantee, preimage
 				log.Debug(log.SDB, "tallyServiceStatistics: ignoring empty stats for service", "service", s)
 				continue
 			}
-			//fmt.Printf("tallyServiceStatistics: service %d, stats %v\n", s, v)
 			n.ValidatorStatistics.ServiceStatistics[s] = *v
 		}
 	}

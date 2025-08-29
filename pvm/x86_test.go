@@ -1086,7 +1086,6 @@ func TestCodeIsSame(t *testing.T) {
 
 	useRawRam = true // use raw RAM for this test
 	debugCompiler = true
-	VMsCompare = true
 
 	// set up the code for the Doom self-playing test case
 	fp := "../services/algo.pvm"

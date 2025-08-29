@@ -19,7 +19,7 @@ func TestSnapShot(t *testing.T) {
 	PvmLogging = true
 	PvmTrace = true
 	debugCompiler = true
-	VMsCompare = true
+
 	name := "inst_add_32"
 	filePath := path.Join(common.GetJAMTestVectorPath("stf"), "pvm/programs/"+name+".json")
 	data, err := os.ReadFile(filePath)
@@ -125,7 +125,6 @@ func TestDoomInterpreter(t *testing.T) {
 	fmt.Printf("PVM start execution...\n")
 	pvm.Execute(types.EntryPointRefine, false)
 
-	pvm.saveLogs()
 }
 func TestDoomX86(t *testing.T) {
 	useRawRam = false    // use raw RAM for this test
@@ -165,7 +164,7 @@ func TestDoomX86(t *testing.T) {
 
 	fmt.Printf("PVM start execution...\n")
 	rvm.Execute(types.EntryPointRefine)
-	pvm.saveLogs()
+
 }
 
 func TestDoomSandBox(t *testing.T) {
@@ -174,7 +173,6 @@ func TestDoomSandBox(t *testing.T) {
 
 	useRawRam = true // use raw RAM for this test
 	debugCompiler = true
-	VMsCompare = true
 
 	// set up the code for the Doom self-playing test case
 	fp := "../services/doom_self_playing.pvm"
@@ -206,7 +204,6 @@ func TestDoomSnapShot(t *testing.T) {
 	PvmTrace = false
 	useRawRam = true // use raw RAM for this test
 	debugCompiler = true
-	VMsCompare = true
 
 	// set up the code for the Doom self-playing test case
 	fp := "../services/doom_self_playing.pvm"

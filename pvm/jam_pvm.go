@@ -1,7 +1,6 @@
 package pvm
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -192,8 +191,6 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 		panic(0)
 	}
 	r, res = vm.getArgumentOutputs()
-	//fmt.Printf("!!!ExecuteAccumulate - r=%x res=%v timeslot=%d. x_s=%v\n", r.Ok, res, vm.Timeslot, x_s)
-	vm.saveLogs()
 
 	return r, res, x_s
 }
@@ -220,39 +217,6 @@ func (vm *VM) initLogs() {
 		return
 	}
 	defer f.Close()
-}
-
-// write the vm.Log  (appending only)
-func (vm *VM) saveLogs() {
-	if !VMsCompare {
-		return
-	}
-	filePath := filepath.Join(vm.Backend, vm.serviceIDlog())
-
-	dir := filepath.Dir(filePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		log.Error(vm.logging, "Failed to create log directory", "dir", dir, "error", err)
-		return
-	}
-
-	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		log.Error(vm.logging, "Error opening log file for append", "file", filePath, "error", err)
-		return
-	}
-	defer f.Close()
-	for _, entry := range vm.Logs {
-		data, err := json.Marshal(entry)
-		if err != nil {
-			log.Error(vm.logging, "Error marshalling vm.Log to JSON", "error", err)
-			return
-		}
-		if _, err := f.Write(append(data, '\n')); err != nil {
-			log.Error(vm.logging, "Error writing JSON to file", "file", filePath, "error", err)
-			return
-		}
-	}
-	vm.Logs = make([]VMLog, 0)
 }
 
 func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAccount) (r types.Result, res uint64) {
@@ -343,13 +307,13 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 	//o := 0xFFFFFFFF - Z_Z - Z_I + 1
 	if vm.ResultCode != types.WORKDIGEST_OK {
 		r.Err = vm.ResultCode
-		log.Error(vm.logging, "getArgumentOutputs - Error", "result", vm.ResultCode, "mode", vm.Mode, "service", string(vm.ServiceMetadata))
+		log.Trace(vm.logging, "getArgumentOutputs - Error", "result", vm.ResultCode, "mode", vm.Mode, "service", string(vm.ServiceMetadata))
 		return r, 0
 	}
 	o, _ := vm.Ram.ReadRegister(7)
 	l, _ := vm.Ram.ReadRegister(8)
 	output, res := vm.Ram.ReadRAMBytes(uint32(o), uint32(l))
-	log.Info(vm.logging, "getArgumentOutputs - OK", "output", fmt.Sprintf("%x", output), "l", l)
+	//log.Info(vm.logging, "getArgumentOutputs - OK", "output", fmt.Sprintf("%x", output), "l", l)
 	if vm.ResultCode == types.WORKDIGEST_OK && res == 0 {
 		r.Ok = output
 		return r, res
@@ -359,6 +323,6 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 		return r, res
 	}
 	r.Err = types.WORKDIGEST_PANIC
-	log.Error(vm.logging, "getArgumentOutputs - PANIC", "result", vm.ResultCode, "mode", vm.Mode, "service", string(vm.ServiceMetadata))
+	//log.Error(vm.logging, "getArgumentOutputs - PANIC", "result", vm.ResultCode, "mode", vm.Mode, "service", string(vm.ServiceMetadata))
 	return r, 0
 }

@@ -213,7 +213,6 @@ func NewCompilerSandboxVMFromEmulator(vm *VM, mu *Emulator) (*CompilerSandboxVM,
 				val, _ := rvm.sandBox.RegRead(sandBoxRegInfoList[i])
 				vm.Ram.WriteRegister(i, val)
 			}
-			rvm.saveLogs()
 			rvm.saveRegistersOnceSandBox()
 			rvm.sandBox.Stop()
 		} else {
@@ -260,7 +259,6 @@ func NewCompilerSandboxVMFromEmulator(vm *VM, mu *Emulator) (*CompilerSandboxVM,
 			fmt.Printf("❌ Access denied for page %d at address 0x%X\n", pageIndex, offset)
 			rvm.ResultCode = types.WORKDIGEST_PANIC
 			rvm.terminated = true
-			rvm.saveLogs()
 			rvm.saveRegistersOnceSandBox()
 			rvm.saveMemoryOnceSandBox()
 		} else {
@@ -745,7 +743,7 @@ func (vm *CompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) (e
 		},
 		1, 0, 0,
 	)
-	var lastPc = -1
+
 	_, err = vm.sandBox.HookAdd(uc.HOOK_CODE, func(mu uc.Unicorn, addr uint64, size uint32) {
 		offset := addr - codeBase
 		instruction := vm.x86Instructions[int(offset)] // should get the op_code here
@@ -778,23 +776,6 @@ func (vm *CompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) (e
 			return
 		}
 		if pvm_pc, ok := vm.InstMapX86ToPVM[int(offset)]; ok {
-			if VMsCompare {
-
-				if lastPc != -1 {
-					pc := uint64(lastPc)
-					if vm.code[pc] != ECALLI {
-						vm.saveRegisters()
-					}
-					opcode := vm.code[pc] // this is the opCode
-					olen := vm.skip(pc)
-					operands := vm.code[pc+1 : pc+1+olen]
-					gas, _ := vm.ReadContextSlot(gasSlotIndex)
-					vm.Gas = int64(gas)
-					vm.LogCurrentState(opcode, operands, pc, vm.Gas)
-					vm.stepNumber++
-				}
-				lastPc = int(pvm_pc)
-			}
 			basicBlock, ok2 := vm.basicBlocks[uint64(pvm_pc)]
 			if !ok2 {
 				// fmt.Printf("⚠️ No basic block found for PVM PC %d at 0x%X ...\n", pvm_pc, offset)
@@ -1461,7 +1442,6 @@ func (vm *CompilerSandboxVM) ExecuteX86CodeFromBreakPoint(x86code []byte, breakp
 		},
 		1, 0, 0,
 	)
-	var lastPc = -1
 	_, err = vm.sandBox.HookAdd(uc.HOOK_CODE, func(mu uc.Unicorn, addr uint64, size uint32) {
 		offset := addr - codeBase
 		instruction := vm.x86Instructions[int(offset)]
@@ -1485,20 +1465,7 @@ func (vm *CompilerSandboxVM) ExecuteX86CodeFromBreakPoint(x86code []byte, breakp
 			return
 		}
 		if pvm_pc, ok := vm.InstMapX86ToPVM[int(offset)]; ok {
-			if VMsCompare {
-				if lastPc != -1 {
-					pc := uint64(lastPc)
-					if vm.code[pc] != ECALLI {
-						vm.saveRegisters()
-					}
-					opcode := vm.code[pc]
-					olen := vm.skip(pc)
-					operands := vm.code[pc+1 : pc+1+olen]
-					vm.LogCurrentState(opcode, operands, pc, vm.Gas)
-					vm.stepNumber++
-				}
-				lastPc = int(pvm_pc)
-			}
+
 			basicBlock, ok2 := vm.basicBlocks[uint64(pvm_pc)]
 			if !ok2 {
 				// fmt.Printf("⚠️ No basic block found for PVM PC %d at 0x%X ...\n", pvm_pc, offset)

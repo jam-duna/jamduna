@@ -175,7 +175,7 @@ func (f *Fuzzer) Handshake() (*PeerInfo, error) {
 }
 
 func (f *Fuzzer) SetState(state *HeaderWithState) (*common.Hash, error) {
-	log.Printf("%s[OUTGOING REQ]%s SetState - Header Hash: %s", colorGreen, colorReset, state.Header.Hash().Hex())
+	log.Printf("%s[OUTGOING REQ]%s SetState    - Header Hash: %s", colorGreen, colorReset, state.Header.Hash().Hex())
 	msgToSend := &Message{SetState: state}
 	if err := f.sendMessage(msgToSend); err != nil {
 		return nil, err
@@ -187,7 +187,7 @@ func (f *Fuzzer) SetState(state *HeaderWithState) (*common.Hash, error) {
 	if receivedMsg.StateRoot == nil {
 		return nil, fmt.Errorf("expected StateRoot, got different type")
 	}
-	log.Printf("%s[INCOMING RSP]%s StateRoot - Hash: %s", colorBlue, colorReset, receivedMsg.StateRoot.Hex())
+	log.Printf("%s[INCOMING RSP]%s StateRoot   - Hash: %s", colorBlue, colorReset, receivedMsg.StateRoot.Hex())
 	return receivedMsg.StateRoot, nil
 }
 
@@ -204,12 +204,12 @@ func (f *Fuzzer) ImportBlock(block *types.Block) (*common.Hash, error) {
 	if receivedMsg.StateRoot == nil {
 		return nil, fmt.Errorf("expected StateRoot, got different type")
 	}
-	log.Printf("%s[INCOMING RSP]%s StateRoot - Hash: %s", colorBlue, colorReset, receivedMsg.StateRoot.Hex())
+	log.Printf("%s[INCOMING RSP]%s StateRoot   - Hash: %s", colorBlue, colorReset, receivedMsg.StateRoot.Hex())
 	return receivedMsg.StateRoot, nil
 }
 
 func (f *Fuzzer) GetState(hash *common.Hash) (*statedb.StateKeyVals, error) {
-	log.Printf("%s[OUTGOING REQ]%s GetState - HeaderHash: %s", colorGreen, colorReset, hash.Hex())
+	log.Printf("%s[OUTGOING REQ]%s GetState    - HeaderHash: %s", colorGreen, colorReset, hash.Hex())
 	msgToSend := &Message{GetState: hash}
 	if err := f.sendMessage(msgToSend); err != nil {
 		return nil, err

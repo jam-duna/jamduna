@@ -18,6 +18,8 @@ import "C"
 
 import (
 	"bytes"
+	"sync"
+
 	//"crypto/ed25519"
 	"encoding/hex"
 	"errors"
@@ -70,6 +72,16 @@ G.3: Ring for Ticket Generation
 const (
 	X_BANDERSNATCH_SEED = "jam_val_key_bandersnatch"
 )
+
+// Ring commitment cache
+type ringCommitmentCache struct {
+	mu    sync.RWMutex
+	cache map[string][]byte // key is hex-encoded hash, value is commitment bytes
+}
+
+var commitmentCache = &ringCommitmentCache{
+	cache: make(map[string][]byte),
+}
 
 type BanderSnatchSecret [SecretLen]byte
 type BanderSnatchKey [PubkeyLen]byte
@@ -337,10 +349,30 @@ func VRFSignedOutput(signature []byte) ([]byte, error) {
 	return vrfOutput, nil
 }
 
+// GetRingCommitment computes ring commitment with caching based on ringsetBytes hash
 func GetRingCommitment(ringSize int, ringsetBytes []byte) ([]byte, error) {
 	if len(ringsetBytes) == 0 {
-		return []byte{}, fmt.Errorf("No ringset")
+		return []byte{}, fmt.Errorf("no ringset")
 	}
+
+	// Compute hash of ringsetBytes for cache key
+	ringsetHash := common.Blake2Hash(ringsetBytes)
+	cacheKey := hex.EncodeToString(ringsetHash.Bytes())
+
+	// Check cache first (read lock)
+	commitmentCache.mu.RLock()
+	if cachedCommitment, exists := commitmentCache.cache[cacheKey]; exists {
+		commitmentCache.mu.RUnlock()
+		// Return a copy to prevent external modification of cached data
+		result := make([]byte, len(cachedCommitment))
+		copy(result, cachedCommitment)
+		return result, nil
+	}
+	commitmentCache.mu.RUnlock()
+
+	// Not in cache, compute the commitment
+	fmt.Printf("GetRingCommitment (computing): len(ringsetBytes)=%d, ringSize=%d c=%s\n", len(ringsetBytes), ringSize, common.Blake2Hash(ringsetBytes))
+
 	emptyBytes := make([]byte, BlsLen)
 	commitmentBytes := make([]byte, BlsLen)
 	C.get_ring_commitment(
@@ -350,8 +382,18 @@ func GetRingCommitment(ringSize int, ringsetBytes []byte) ([]byte, error) {
 		(*C.uchar)(unsafe.Pointer(&commitmentBytes[0])),
 		C.size_t(len(commitmentBytes)),
 	)
+
 	if bytes.Equal(emptyBytes, commitmentBytes) {
 		return nil, fmt.Errorf("failed to compute ring commitment")
 	}
+
+	// Store in cache (write lock)
+	commitmentCache.mu.Lock()
+	// Make a copy before storing to prevent external modification
+	cachedValue := make([]byte, len(commitmentBytes))
+	copy(cachedValue, commitmentBytes)
+	commitmentCache.cache[cacheKey] = cachedValue
+	commitmentCache.mu.Unlock()
+
 	return commitmentBytes, nil
 }

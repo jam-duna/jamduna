@@ -3,7 +3,9 @@ package statedb
 import (
 	"bytes"
 	"fmt"
+	"runtime"
 	"sort"
+	"sync"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -325,91 +327,156 @@ func (s *StateDB) OuterAccumulate(g uint64, workReports []types.WorkReport, o *t
 /*
 the parallelized accumulation function ∆∗ which, with the help of the single-service accumulation function ∆1, transforms an initial state-context, together with a sequence of work-reports and a dictionary of
 privileged always-accumulate services, into a tuple of the total gas utilized in pvm execution u, a posterior statecontext (x′,d′,i′,q′) and the resultant accumulationoutput pairings b and deferred-transfers Ì
+
+now with accRess go func!
 */
-// the parallelized accumulation function ∆*
-// eq 174
-func (s *StateDB) ParallelizedAccumulate(o *types.PartialState, workReports []types.WorkReport, freeAccumulation map[uint32]uint32, pvmBackend string) (totalGasUsed uint64, transfers []types.DeferredTransfer, accumulation_output []types.AccumulationOutput, GasUsage []Usage) {
-	GasUsage = make([]Usage, 0)
-	services := make([]uint32, 0)
-	ts := s.JamState.SafroleState.Timeslot
-	for _, workReport := range workReports {
-		for _, workDigest := range workReport.Results {
-			services = append(services, workDigest.ServiceID)
+func (s *StateDB) ParallelizedAccumulate(
+	o *types.PartialState,
+	workReports []types.WorkReport,
+	freeAccumulation map[uint32]uint32,
+	pvmBackend string,
+) (totalGasUsed uint64, transfers []types.DeferredTransfer, accumulation_output []types.AccumulationOutput, GasUsage []Usage) {
+
+	GasUsage = make([]Usage, 0, 64)
+
+	// Build the service set: s = {rs S w ∈ w, r ∈ wr} ∪ K(f )
+	services := make([]uint32, 0, 64)
+	for _, wr := range workReports {
+		for _, digest := range wr.Results {
+			services = append(services, digest.ServiceID)
 		}
 	}
-	totalGasUsed = 0
-	// get services from freeAccumulation key
 	for k := range freeAccumulation {
 		services = append(services, k)
 	}
-	// remove duplicates
-	//s = {rs S w ∈ w, r ∈ wr} ∪ K(f )
 	services = UniqueUint32Slice(services)
-	accumulated_partial := make(map[uint32]*types.XContext)
-	// TODO: parallelize this
-	for _, service := range services {
-		output, gasUsed, XY, exceptional := s.SingleAccumulate(o, workReports, freeAccumulation, service, pvmBackend)
-		if XY == nil {
-			log.Warn(log.SDB, "SingleAccumulate returned nil XContext", "service", service)
+	if len(services) == 0 {
+		return 0, nil, nil, nil
+	}
+
+	ts := s.JamState.SafroleState.Timeslot
+
+	// --- Parallel section: call SingleAccumulate per service in a worker pool ---
+	type accRes struct {
+		service     uint32
+		output      common.Hash
+		gasUsed     uint64
+		XY          *types.XContext
+		exceptional bool
+	}
+
+	par := runtime.GOMAXPROCS(0) // tune if desired
+	if par < 1 {
+		par = 1
+	}
+
+	jobCh := make(chan uint32, len(services))
+	resCh := make(chan accRes, len(services))
+	var wg sync.WaitGroup
+
+	// SingleAccumulate!
+	worker := func() {
+		defer wg.Done()
+		for service := range jobCh {
+			out, gas, XY, exceptional := s.SingleAccumulate(o, workReports, freeAccumulation, service, pvmBackend)
+			resCh <- accRes{
+				service:     service,
+				output:      out,
+				gasUsed:     gas,
+				XY:          XY,
+				exceptional: exceptional,
+			}
+		}
+	}
+
+	wg.Add(par)
+	for i := 0; i < par; i++ {
+		go worker()
+	}
+	for _, svc := range services {
+		jobCh <- svc
+	}
+	close(jobCh)
+	wg.Wait()
+	close(resCh)
+
+	// Collect results into a slice and sort for deterministic merge order
+	results := make([]accRes, 0, len(services))
+	for r := range resCh {
+		if r.XY == nil {
+			log.Warn(log.SDB, "SingleAccumulate returned nil XContext", "service", r.service)
 			continue
 		}
-		totalGasUsed += gasUsed
-		empty := common.Hash{}
-		//u = [(s, ∆1(o, w, f , s)u) S s <− s]
-		GasUsage = append(GasUsage, Usage{
-			Service: service,
-			Gas:     gasUsed,
-		})
-		//b = {(s, b) S s ∈ s, b = ∆1(o, w, f , s)b, b ≠ ∅}
-		if output == empty {
+		results = append(results, r)
+	}
+	sort.Slice(results, func(i, j int) bool { return results[i].service < results[j].service })
 
-		} else {
+	// put all the results back together in o
+	accumulated_partial := make(map[uint32]*types.XContext, len(results))
+	empty := common.Hash{}
+
+	for _, r := range results {
+		totalGasUsed += r.gasUsed
+		GasUsage = append(GasUsage, Usage{Service: r.service, Gas: r.gasUsed})
+
+		// b = {(s,b) | b = ∆1(...)_b, b ≠ ∅}
+		if r.output != empty {
 			accumulation_output = append(accumulation_output, types.AccumulationOutput{
-				Service: service,
-				Output:  output,
+				Service: r.service,
+				Output:  r.output,
 			})
 		}
 
-		//t = [∆1(o, w, f , s)t S s <− s]
-		transfers = append(transfers, XY.Transfers...)
+		// t = [∆1(... )_t]  (deferred transfers)
+		if r.XY != nil && len(r.XY.Transfers) > 0 {
+			transfers = append(transfers, r.XY.Transfers...)
+		}
 
-		//d′ = P ((d ∪ n) ∖ m, ⋃s∈s ∆1(o, w, f , s)p)
-		if XY.U != nil {
-			if XY.U.ServiceAccounts != nil {
-				for s, sa := range XY.U.ServiceAccounts {
-					if exceptional {
+		// Service accounts
+		if r.XY != nil && r.XY.U != nil {
+			if r.XY.U.ServiceAccounts != nil {
+				for sid, sa := range r.XY.U.ServiceAccounts {
+					if r.exceptional {
 						if sa.Checkpointed {
 							sa.Dirty = true
-							o.ServiceAccounts[s] = sa
+							o.ServiceAccounts[sid] = sa
 						}
-
 					} else {
 						sa.Dirty = true
-						o.ServiceAccounts[s] = sa
+						o.ServiceAccounts[sid] = sa
 					}
 				}
 			}
-		}
-		accumulated_partial[service] = XY
+			// QueueWorkReport / UpcomingValidators
+			o.QueueWorkReport = r.XY.U.QueueWorkReport
+			o.UpcomingValidators = r.XY.U.UpcomingValidators
 
-		// update the partial state
-		//(m′, a∗, v∗, z′) = (∆1(o, w, f , m)o)(m,a,v,z)
-		o.QueueWorkReport = XY.U.QueueWorkReport
-		o.UpcomingValidators = XY.U.UpcomingValidators
-		o.PrivilegedState = XY.U.PrivilegedState
-		for k, v := range XY.U.PrivilegedState.AlwaysAccServiceID {
-			o.PrivilegedState.AlwaysAccServiceID[k] = v
+			for k, v := range r.XY.U.PrivilegedState.AlwaysAccServiceID {
+				o.PrivilegedState.AlwaysAccServiceID[k] = v
+			}
+		}
+
+		accumulated_partial[r.service] = r.XY
+	}
+
+	// UpdateRecentAccumulation
+	for svc, part := range accumulated_partial {
+		if part == nil || part.U == nil || part.U.ServiceAccounts == nil {
+			continue
+		}
+		if sa, ok := part.U.ServiceAccounts[svc]; ok && sa != nil {
+			sa.UpdateRecentAccumulation(ts)
+			o.ServiceAccounts[svc] = sa
 		}
 	}
 
-	for service, service_accumulated_partial := range accumulated_partial {
-		sa := service_accumulated_partial.U.ServiceAccounts[service]
-		sa.UpdateRecentAccumulation(ts)
-		o.ServiceAccounts[service] = sa
-		if service_accumulated_partial.U != nil {
-			o.ServiceAccounts[service] = service_accumulated_partial.U.ServiceAccounts[service]
-		}
+	// sort by Service id
+	if len(accumulation_output) > 1 {
+		sort.Slice(accumulation_output, func(i, j int) bool {
+			return accumulation_output[i].Service < accumulation_output[j].Service
+		})
 	}
+
 	return
 }
 
