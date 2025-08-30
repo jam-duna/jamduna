@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -378,7 +379,10 @@ func (s *StateDB) ParallelizedAccumulate(
 	worker := func() {
 		defer wg.Done()
 		for service := range jobCh {
+			t0 := time.Now()
 			out, gas, XY, exceptional := s.SingleAccumulate(o, workReports, freeAccumulation, service, pvmBackend)
+			benchRec.Add("-SingleAccumulate", time.Since(t0))
+
 			resCh <- accRes{
 				service:     service,
 				output:      out,
@@ -569,7 +573,7 @@ invokes pvm execution
 // ∆1
 // eq 176
 func (sd *StateDB) SingleAccumulate(o *types.PartialState, workReports []types.WorkReport, freeAccumulation map[uint32]uint32, serviceID uint32, pvmBackend string) (accumulation_output common.Hash, gasUsed uint64, xy *types.XContext, exceptional bool) {
-	//fmt.Printf("!!!SingleAccumulate - o=%v w=%v f=%v s=%d pvmBackend=%s\n", o, w, f, s, pvmBackend)
+	t0 := time.Now()
 	// gas need to check again
 	// check if serviceID is in f
 	gas := uint32(0)
@@ -607,6 +611,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, workReports []types.W
 	}
 
 	//  get serviceAccount from U.D[s] FIRST
+	t0 = time.Now()
 	var err error
 	serviceAccount, ok := o.GetService(serviceID)
 	if !ok {
@@ -616,23 +621,33 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, workReports []types.W
 			return
 		}
 	}
+	benchRec.Add("-SingleAccumulate:GetService", time.Since(t0))
 
+	t0 = time.Now()
 	xContext := sd.NewXContext(o, serviceID, serviceAccount)
+	benchRec.Add("-SingleAccumulate:NewXContext", time.Since(t0))
 
+	t0 = time.Now()
 	xy = xContext // if code does not exist, fallback to this
 	err = sd.InitXContextService(serviceID, o, xy)
 	if err != nil {
 		log.Error(log.SDB, "InitXContextService ERR", "s", serviceID, "error", err)
 		return
 	}
+	benchRec.Add("-SingleAccumulate:InitXContextService", time.Since(t0))
+
+	t0 = time.Now()
 	ok, code, preimage_source := serviceAccount.ReadPreimage(serviceAccount.CodeHash, sd)
 	if !ok {
 		log.Warn(log.SDB, "GetPreimage ERR", "ok", ok, "s", serviceID, "codeHash", serviceAccount.CodeHash, "preimage_source", preimage_source)
 		return
 	}
+	benchRec.Add("-SingleAccumulate:ReadPreimage", time.Since(t0))
 
 	//(B.8) start point
+	t0 = time.Now()
 	vm := pvm.NewVMFromCode(serviceID, code, 0, sd, pvmBackend)
+	benchRec.Add("-SingleAccumulate:NewVMFromCode", time.Since(t0))
 	pvmContext := log.PvmValidating
 	if sd.Authoring == log.GeneralAuthoring {
 		pvmContext = log.PvmAuthoring
@@ -640,7 +655,9 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, workReports []types.W
 	vm.SetPVMContext(pvmContext)
 	timeslot := sd.JamState.SafroleState.Timeslot
 	vm.Timeslot = timeslot
+	t0 = time.Now()
 	r, _, x_s := vm.ExecuteAccumulate(timeslot, serviceID, g, operandElements, xContext, sd.JamState.SafroleState.Entropy[0])
+	benchRec.Add("-SingleAccumulate:ExecuteAccumulate", time.Since(t0))
 	exceptional = false
 	if r.Err == types.WORKDIGEST_OOG || r.Err == types.WORKDIGEST_PANIC {
 		exceptional = true

@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -40,13 +41,19 @@ func E_l(x uint64, l uint32) []byte {
 	}
 }
 
-// GP v0.3.6 eq(271)  E_l - Integer Decoding
 func DecodeE_l(encoded []byte) uint64 {
-	var x uint64 = 0
-	for i := len(encoded) - 1; i >= 0; i-- {
-		x = x*256 + uint64(encoded[i])
+	if len(encoded) == 0 {
+		return 0
 	}
-	return x
+
+	// Pad to 8 bytes if needed
+	if len(encoded) < 8 {
+		padded := make([]byte, 8)
+		copy(padded, encoded)
+		return binary.LittleEndian.Uint64(padded)
+	}
+
+	return binary.LittleEndian.Uint64(encoded[:8])
 }
 
 // GP v0.3.6 eq(272)  E - Integer Encoding: general natural number serialization up to 2^64

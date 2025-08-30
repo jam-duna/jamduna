@@ -1,9 +1,8 @@
 package pvm
 
 import (
-	"fmt"
-
-	"github.com/colorfulnotion/jam/log"
+	"slices"
+	"time"
 )
 
 type RAMInterface interface {
@@ -12,16 +11,11 @@ type RAMInterface interface {
 	allocatePages(startPage uint32, count uint32)
 	GetCurrentHeapPointer() uint32
 	SetCurrentHeapPointer(pointer uint32)
-	//SetPageAccess(pageIndex int, access byte)
-	ReadRegister(index int) (uint64, uint64)
-	WriteRegister(index int, value uint64) uint64
-	ReadRegisters() []uint64
 	GetDirtyPages() []int
 
 	// WriteContextSlot(slot_index int, value uint64) error
 	// ReadContextSlot(slot_index int) (uint64, error)
 }
-
 type RAM struct {
 	stack_address        uint32
 	stack_address_end    uint32
@@ -38,69 +32,100 @@ type RAM struct {
 	rw_data  []byte
 	ro_data  []byte
 	output   []byte
-	register []uint64
 }
 
 func (ram *RAM) GetDirtyPages() []int {
 	panic("GetDirtyPages not implemented for RAM")
 }
-
-//		vm.Ram = NewRAM(o_size, w_size, z, s, o_byte, w_byte)
-
 func NewRAM(o_size uint32, w_size uint32, z uint32, o_byte []byte, w_byte []byte, s uint32) *RAM {
+	// Z_Z, Z_I
+	z_z := uint32(Z_Z)
+	z_i := uint32(Z_I)
+
 	// o - read-only
-	ro_data_address := uint32(Z_Z)
-	ro_data_address_end := ro_data_address + P_func(o_size)
-	//fmt.Printf("o_size: %d copied to %d up to %d\n", o_size, ro_data_address, ro_data_address_end)
+	ro_data_address := z_z
+	p_o_size := P_func(o_size)
+	ro_data_address_end := ro_data_address + p_o_size
 
 	// w - read-write
-	rw_data_address := uint32(2*Z_Z) + Z_func(o_size)
-	rw_data_address_end := rw_data_address + P_func(w_size)
+	z_o_size := Z_func(o_size)
+	rw_data_address := 2*z_z + z_o_size
+	p_w_size := P_func(w_size)
+	rw_data_address_end := rw_data_address + p_w_size
 	current_heap_pointer := rw_data_address_end
 	heap_end := rw_data_address + Z_func(current_heap_pointer)
-	//fmt.Printf("w_size: %d copied to %d up to %d\n", w_size, rw_data_address, rw_data_address_end)
-
-	//fmt.Printf("current_heap_pointer: %d (dec) %x (hex)\n", current_heap_pointer, current_heap_pointer)
 
 	// s - stack
 	p_s := P_func(s)
-	stack_address := uint32(uint64(1<<32) - uint64(2*Z_Z) - uint64(Z_I) - uint64(p_s))
-	stack_address_end := uint32(uint64(1<<32) - uint64(2*Z_Z) - uint64(Z_I))
-	// fmt.Printf("s_size: %d [hex %x] stack at %d [hex %x] up to %d [hex %x]\n", s, s, stack_address, stack_address, stack_address_end, stack_address_end)
+	max_uint32 := uint32(0xFFFFFFFF)
+	stack_offset := 2*z_z + z_i + p_s
+	stack_address := max_uint32 + 1 - stack_offset
+	stack_address_end := max_uint32 + 1 - 2*z_z - z_i
+
 	// a - argument outputs
-	a_size := uint32(Z_Z + Z_I - 1)
-	output_address := uint32(0xFFFFFFFF) - Z_Z - Z_I + 1
-	output_end := uint32(0xFFFFFFFF)
+	a_size := z_z + z_i - 1
+	output_address := max_uint32 - z_z - z_i + 1
+
+	// ro + rw slice lengths
+	ro_len := ro_data_address_end - ro_data_address
+	rw_len := heap_end - rw_data_address
+
+	// Ensure input slices don't exceed calculated lengths
+	o_copy_len := min(len(o_byte), int(ro_len))
+	w_copy_len := min(len(w_byte), int(rw_len))
 
 	ram := &RAM{
-		// o_bytes are be copied here Z_Z
-		ro_data_address:     ro_data_address,
-		ro_data_address_end: ro_data_address_end,
-
-		// w_bytes should be copied into here
-		rw_data_address:     rw_data_address,
-		rw_data_address_end: rw_data_address_end,
-
-		stack_address:     stack_address,
-		stack_address_end: stack_address_end,
-
+		ro_data_address:      ro_data_address,
+		ro_data_address_end:  ro_data_address_end,
+		rw_data_address:      rw_data_address,
+		rw_data_address_end:  rw_data_address_end,
+		stack_address:        stack_address,
+		stack_address_end:    stack_address_end,
 		current_heap_pointer: current_heap_pointer,
 		output_address:       output_address,
-		output_end:           output_end,
-		register:             make([]uint64, regSize),
-		stack:                make([]byte, p_s),
-		rw_data:              make([]byte, heap_end-rw_data_address),
-		ro_data:              make([]byte, ro_data_address_end-ro_data_address),
-		output:               make([]byte, a_size),
+		output_end:           max_uint32,
+		stack:                nil,
+		rw_data:              nil,
+		ro_data:              nil,
+		output:               nil,
 	}
-	copy(ram.ro_data[:], o_byte[:])
-	copy(ram.rw_data[:], w_byte[:])
 
-	log.Trace("pvm", "NewRAM",
-		"output_address", fmt.Sprintf("%x", ram.output_address), "output_end", fmt.Sprintf("%x", ram.output_end),
-		"stack_address", fmt.Sprintf("%x", ram.stack_address), "stack_end", fmt.Sprintf("%x", ram.stack_address_end),
-		"rw_data_address", fmt.Sprintf("%x", ram.rw_data_address), "current_heap_pointer", fmt.Sprintf("%x", Z_func(ram.current_heap_pointer)),
-		"ro_data_address", fmt.Sprintf("%x", ram.ro_data_address), "ro_data_end", fmt.Sprintf("%x", ram.ro_data_address_end))
+	t0 := time.Now()
+	ro_data := make([]byte, ro_len)
+	// Use slices.Clone to avoid copy when possible, otherwise copy the subset
+	if len(o_byte) <= int(ro_len) {
+		ro_data = slices.Clone(o_byte)
+		// Resize if needed
+		if len(ro_data) < int(ro_len) {
+			ro_data = slices.Grow(ro_data, int(ro_len)-len(ro_data))[:ro_len]
+		}
+	} else {
+		copy(ro_data, o_byte[:o_copy_len])
+	}
+	ram.ro_data = ro_data
+	benchRec.Add("- NewRAM:ro_data", time.Since(t0))
+
+	t0 = time.Now()
+	rw_data := make([]byte, rw_len)
+	if len(w_byte) <= int(rw_len) {
+		rw_data = slices.Clone(w_byte)
+		// Resize if needed
+		if len(rw_data) < int(rw_len) {
+			rw_data = slices.Grow(rw_data, int(rw_len)-len(rw_data))[:rw_len]
+		}
+	} else {
+		copy(rw_data, w_byte[:w_copy_len])
+	}
+	ram.rw_data = rw_data
+	benchRec.Add("- NewRAM:rw_data", time.Since(t0))
+
+	t0 = time.Now()
+	ram.stack = make([]byte, p_s)
+	benchRec.Add("- NewRAM:stack", time.Since(t0))
+
+	t0 = time.Now()
+	ram.output = make([]byte, a_size)
+	benchRec.Add("- NewRAM:output", time.Since(t0))
 
 	return ram
 }
@@ -242,23 +267,4 @@ func (ram *RAM) SetCurrentHeapPointer(pointer uint32) {
 	ram.current_heap_pointer = pointer
 	//fmt.Printf("SetCurrentHeapPointer: %x\n", ram.current_heap_pointer)
 
-}
-
-func (ram *RAM) ReadRegister(index int) (uint64, uint64) {
-	// if index < 0 || index >= len(ram.register) {
-	// 	return 0, OOB
-	// }
-	return ram.register[index], OK
-}
-
-func (ram *RAM) WriteRegister(index int, value uint64) uint64 {
-	// if index < 0 || index >= len(ram.register) {
-	// 	return OOB
-	// }
-	ram.register[index] = value
-	return OK
-}
-
-func (ram *RAM) ReadRegisters() []uint64 {
-	return ram.register
 }

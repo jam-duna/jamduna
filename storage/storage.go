@@ -4,21 +4,17 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"net/http"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/storage"
 
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
 const (
 	CheckStateTransition = false
+	useMemory            = true
 )
 
 type LogMessage struct {
@@ -30,8 +26,9 @@ type LogMessage struct {
 
 // StateDBStorage struct to hold the LevelDB instance
 type StateDBStorage struct {
-	db      *leveldb.DB
-	logChan chan LogMessage
+	db       *leveldb.DB
+	logChan  chan LogMessage
+	memBased bool // Track whether this instance is memory-based
 
 	// OpenTelemetry stuff
 	Tp                       *sdktrace.TracerProvider
@@ -51,16 +48,48 @@ const (
 )
 
 // NewStateDBStorage initializes a new LevelDB store
+// Uses memory-based storage if useMemory is true, otherwise uses file-based storage
 func NewStateDBStorage(path string) (*StateDBStorage, error) {
+	if useMemory {
+		return newMemoryStateDBStorage()
+	}
+	return newFileStateDBStorage(path)
+}
+
+// newMemoryStateDBStorage creates a memory-only storage (internal helper)
+func newMemoryStateDBStorage() (*StateDBStorage, error) {
+	memStorage := storage.NewMemStorage()
+	db, err := leveldb.Open(memStorage, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	s := StateDBStorage{
+		db:       db,
+		logChan:  make(chan LogMessage, 100),
+		memBased: true,
+	}
+	return &s, nil
+}
+
+// newFileStateDBStorage creates a file-based storage (internal helper)
+func newFileStateDBStorage(path string) (*StateDBStorage, error) {
 	db, err := leveldb.OpenFile(path, nil)
 	if err != nil {
 		return nil, err
 	}
+
 	s := StateDBStorage{
-		db:      db,
-		logChan: make(chan LogMessage, 100),
+		db:       db,
+		logChan:  make(chan LogMessage, 100),
+		memBased: false,
 	}
 	return &s, nil
+}
+
+// IsMemoryBased returns whether this storage instance is using memory-based storage
+func (store *StateDBStorage) IsMemoryBased() bool {
+	return store.memBased
 }
 
 // ReadKV reads a value for a given key from the LevelDB store
@@ -77,7 +106,7 @@ func (store *StateDBStorage) WriteKV(key common.Hash, value []byte) error {
 	return store.db.Put(key.Bytes(), value, nil)
 }
 
-// Close closes the LevelDB store
+// DeleteK deletes a key from the LevelDB store
 func (store *StateDBStorage) DeleteK(key common.Hash) error {
 	return store.db.Delete(key.Bytes(), nil)
 }
@@ -138,41 +167,10 @@ func (store *StateDBStorage) GetChan() chan LogMessage {
 }
 
 func TestTrace(host string) bool {
-	resp, err := http.Post(fmt.Sprintf("http://%s/v1/traces", host), "application/json", bytes.NewBuffer([]byte(`{}`)))
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode >= 200 && resp.StatusCode < 300
+	return true
 }
 
 func (store *StateDBStorage) InitTracer(serviceName string) error {
-	// run jaeger web locally:
-	// docker run --rm --name jaeger -p 16686:16686 -p 4317:4317 -p 4318:4318 -p 5778:5778 -p 9411:9411 jaegertracing/jaeger:2.3.0
-	// http://localhost:16686/search
-
-	host := "jaeger.jamduna.com:4318" // localhost:4318 // jaeger.jamduna.com:4318
-	store.SendTrace = TestTrace(host)
-
-	exporter, err := otlptracehttp.New(
-		context.Background(),
-		otlptracehttp.WithEndpoint(host),
-		otlptracehttp.WithInsecure())
-	if err != nil {
-		return err
-	}
-
-	tp := sdktrace.NewTracerProvider(
-		// sdktrace.WithSampler(sdktrace.AlwaysSample()),
-		sdktrace.WithBatcher(exporter),
-		sdktrace.WithResource(resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceNameKey.String(serviceName))),
-	)
-
-	store.Tp = tp
-
-	otel.SetTextMapPropagator(propagation.TraceContext{})
 	return nil
 }
 

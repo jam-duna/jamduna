@@ -94,16 +94,6 @@ func extractTwoRegsOneImm(args []byte) (reg1, reg2 int, imm uint64) {
 	return
 }
 
-// A.5.10. Instructions with Arguments of Two Registers and One Immediate.
-func extractTwoRegsOneImm64(args []byte) (reg1, reg2 int, imm int64, uint64imm uint64) {
-	reg1 = min(12, int(args[0]&0x0F))
-	reg2 = min(12, int(args[0])/16)
-	lx := min(4, max(0, len(args)-1))
-	imm = int64(x_encode(types.DecodeE_l(args[1:1+lx]), uint32(lx)))
-	uint64imm = x_encode(types.DecodeE_l(args[1:1+lx]), uint32(lx))
-	return
-}
-
 // A.5.11. Instructions with Arguments of Two Registers and One Offset. (BRANCH_{EQ/NE/...})
 func extractTwoRegsOneOffset(oargs []byte) (registerIndexA, registerIndexB int, vx int64) {
 	args := slices.Clone(oargs)

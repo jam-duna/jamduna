@@ -138,9 +138,9 @@ func TestStateTransitionInterpreter(t *testing.T) {
 
 func TestStateTransitionSandbox(t *testing.T) {
 	pvm.PvmLogging = true
-	pvm.UseTally = false       // enable tally for this test
-	pvm.SetUseEcalli500(false) // use ecalli500 for log check in x86
-	pvm.SetDebugCompiler(true) // enable debug mode for compiler
+	pvm.UseTally = false // enable tally for this test
+	//pvm.SetUseEcalli500(false) // use ecalli500 for log check in x86
+	//pvm.SetDebugCompiler(true) // enable debug mode for compiler
 	filename := "./00000019.json"
 	filename = path.Join(common.GetJAMTestVectorPath("stf"), "traces/storage/00000060.json")
 	// filename = path.Join(GetJAMTestVectorPath(), "traces/storage_light/00000016.json"
@@ -160,9 +160,9 @@ func TestStateTransitionSandbox(t *testing.T) {
 
 func TestStateTransitionCompiler(t *testing.T) {
 	pvm.PvmLogging = true
-	pvm.UseTally = false       // enable tally for this test
-	pvm.SetUseEcalli500(false) // use ecalli500 for log check in x86
-	pvm.SetDebugCompiler(true) // enable debug mode for compiler
+	pvm.UseTally = false // enable tally for this test
+	//pvm.SetUseEcalli500(false) // use ecalli500 for log check in x86
+	//pvm.SetDebugCompiler(true) // enable debug mode for compiler
 	filename := "./00000019.json"
 	filename = path.Join(common.GetJAMTestVectorPath("stf"), "traces/storage_light/00000016.json")
 
@@ -280,9 +280,18 @@ func TestTracesInterpreter(t *testing.T) {
 		t.Fatalf("no timing rows recorded; did you run with -tags benchprofile ?")
 	}
 
-	fmt.Println("\n=== Top 40 by TOTAL time ===")
+	fmt.Println("\n=== statedb Top 40 by TOTAL time ===")
 	for i, r := range rows {
 		if i == 40 {
+			break
+		}
+		fmt.Printf("%-45s  total=%-12s count=%-4d mean=%-10s p95=%-10s max=%-10s\n",
+			r.Name, r.Total, r.Count, r.Mean, r.P95, r.Max)
+	}
+	fmt.Println("\n=== pvm Top 25 by TOTAL time ===")
+	rows = pvm.BenchRows()
+	for i, r := range rows {
+		if i == 25 {
 			break
 		}
 		fmt.Printf("%-45s  total=%-12s count=%-4d mean=%-10s p95=%-10s max=%-10s\n",
@@ -457,7 +466,7 @@ func TestCompareLogs(t *testing.T) {
 			fmt.Printf("Difference at index %d:\nOriginal: %+v\nCompiler: %+v\n", i, orig, recp)
 			if diff := CompareJSON(orig, recp); diff != "" {
 				fmt.Println("Differences:", diff)
-				fmt.Printf("Operation: %s\n", pvm.DisassembleSingleInstruction(orig.Opcode, orig.Operands))
+				//				fmt.Printf("Operation: %s\n", pvm.DisassembleSingleInstruction(orig.Opcode, orig.Operands))
 				t.Fatalf("differences at index %d: %s", i, diff)
 			}
 		} else if i%100000 == 0 {
