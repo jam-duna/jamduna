@@ -267,8 +267,7 @@ jam_set:
 build_remote_nodes:
 	@echo "Building JAM on all remote nodes..."
 	@/usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "bash -i -c 'cdj && git fetch origin && git reset --hard origin/$(BRANCH) && git clean -fd'"
-	@/usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "bash -i -c 'cdj && make bandersnatchlib'"
-	@/usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "bash -i -c 'cdj && make blslib'"
+	@/usr/bin/parallel-ssh -h $(HOSTS_FILE) -l root -i "bash -i -c 'cdj && make cryptolib'"
 	@echo "All remote nodes built."
 # clean the process and delete the storage
 clean_remote_nodes:
@@ -305,26 +304,9 @@ testnet:
 
 # Target to build BLS FFI library with musl
 # TODO : everyone should run $rustup target add x86_64-unknown-linux-musl
-blslib:
-	@echo "Building BLS (static) for all platforms..."
-	@rustup target add x86_64-unknown-linux-musl
-	@cd bls && \
-	for TARGET in x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-gnu; do \
-		echo "  Building for $$TARGET..."; \
-		RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target=$$TARGET; \
-	done
-	@echo "Copying libbls.a artifacts to bls/target/release for Go linker..."
-	@cp bls/target/x86_64-unknown-linux-musl/release/libbls.a bls/target/release/libbls.linux_amd64.a || true
-	@cp bls/target/aarch64-unknown-linux-musl/release/libbls.a bls/target/release/libbls.linux_arm64.a || true
-	@cp bls/target/x86_64-apple-darwin/release/libbls.a bls/target/release/libbls.mac_amd64.a || true
-	@cp bls/target/aarch64-apple-darwin/release/libbls.a bls/target/release/libbls.mac_arm64.a || true
-	@cp bls/target/x86_64-pc-windows-gnu/release/libbls.a bls/target/release/libbls.windows_amd64.a || true
-	@mkdir -p ffi
-	@cp bls/target/release/libbls.*.a ffi/
-	@echo "All libbls.a versions prepared."
 
-bandersnatchlib:
-	@echo "Building Bandersnatch for   statically for all platforms..."
+cryptolib:
+	@echo "Building crypto library statically for all platforms..."
 	@rustup target add x86_64-unknown-linux-musl
 	@cd bandersnatch && \
 	for TARGET in x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-gnu; do \
@@ -332,27 +314,23 @@ bandersnatchlib:
 		RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target=$$TARGET --features " "; \
 	done
 	@mkdir -p bandersnatch/target/release
-	@cp bandersnatch/target/x86_64-unknown-linux-musl/release/libbandersnatch.a bandersnatch/target/release/libbandersnatch.linux_amd64.a || true
-	@cp bandersnatch/target/aarch64-unknown-linux-musl/release/libbandersnatch.a bandersnatch/target/release/libbandersnatch.linux_arm64.a || true
-	@cp bandersnatch/target/x86_64-apple-darwin/release/libbandersnatch.a bandersnatch/target/release/libbandersnatch.mac_amd64.a || true
-	@cp bandersnatch/target/aarch64-apple-darwin/release/libbandersnatch.a bandersnatch/target/release/libbandersnatch.mac_arm64.a || true
-	@cp bandersnatch/target/x86_64-pc-windows-gnu/release/libbandersnatch.a bandersnatch/target/release/libbandersnatch.windows_amd64.a || true
+	@cp bandersnatch/target/x86_64-unknown-linux-musl/release/libbandersnatch.a bandersnatch/target/release/libcrypto.linux_amd64.a || true
+	@cp bandersnatch/target/aarch64-unknown-linux-musl/release/libbandersnatch.a bandersnatch/target/release/libcrypto.linux_arm64.a || true
+	@cp bandersnatch/target/x86_64-apple-darwin/release/libbandersnatch.a bandersnatch/target/release/libcrypto.mac_amd64.a || true
+	@cp bandersnatch/target/aarch64-apple-darwin/release/libbandersnatch.a bandersnatch/target/release/libcrypto.mac_arm64.a || true
+	@cp bandersnatch/target/x86_64-pc-windows-gnu/release/libbandersnatch.a bandersnatch/target/release/libcrypto.windows_amd64.a || true
 	@mkdir -p ffi
-	@cp bandersnatch/target/release/libbandersnatch.*.a ffi/
-	@echo "All libbandersnatch.a versions prepared."
+	@cp bandersnatch/target/release/libcrypto.*.a ffi/
+	@echo "libcrypto.a files ready."
 
 cargo_clean:
-	@echo "Clean Up FFI libraries (BLS + Bandersnatch)!"
+	@echo "Cleaning FFI libraries!"
 	@cd bandersnatch && cargo clean
-	@cd ..
-	@cd bls && cargo clean
 	@cd ..
 
 ffi_force: cargo_clean ffi
 
-# Target to build both BLS and Bandersnatch FFI libraries
-ffi: bandersnatchlib blslib
-	@echo "Built all FFI libraries (BLS + Bandersnatch)!"
+ffi: cryptolib
 
 beauty:
 	@echo "Running go fmt on all Go files..."

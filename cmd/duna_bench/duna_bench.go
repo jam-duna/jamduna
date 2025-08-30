@@ -19,10 +19,6 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-const (
-	BENCH_VERSION = "0.1.0"
-)
-
 // colors for terminal output - trying to match the fuzzer's style
 var (
 	colorReset     = "\033[0m"
@@ -574,7 +570,7 @@ func main() {
 	log.SetFlags(0)
 	log.SetOutput(&customLogWriter{})
 
-	fmt.Printf("duna_bench - JAM Duna %s Sequential Benchmarker\n", BENCH_VERSION)
+	fmt.Printf("duna_bench - JAM Duna %s Sequential Benchmarker\n", fuzz.FUZZ_VERSION)
 
 	dir := "/tmp/importBlock"
 	enableRPC := false
@@ -622,7 +618,7 @@ func main() {
 	}
 
 	benchInfo := fuzz.PeerInfo{
-		Name:       fmt.Sprintf("jam-duna-bench-%s", BENCH_VERSION),
+		Name:       fmt.Sprintf("jam-duna-bench-%s", fuzz.FUZZ_VERSION),
 		AppVersion: fuzz.Version{Major: 0, Minor: 7, Patch: 0},
 		JamVersion: fuzz.Version{Major: 0, Minor: 7, Patch: 0},
 	}

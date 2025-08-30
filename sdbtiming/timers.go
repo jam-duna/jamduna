@@ -74,13 +74,17 @@ func (r *Recorder) Snapshot() []Row {
 		for _, d := range s {
 			total += d
 		}
+		p95Index := int(float64(len(s))*0.95) - 1
+		if p95Index < 0 {
+			p95Index = 0
+		}
 		row := Row{
 			Name:  name,
 			Count: len(s),
 			Total: total,
 			Mean:  time.Duration(int64(total) / int64(len(s))),
 			P50:   s[len(s)/2],
-			P95:   s[int(float64(len(s))*0.95)-1],
+			P95:   s[p95Index],
 			Max:   s[len(s)-1],
 		}
 		out = append(out, row)

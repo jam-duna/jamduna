@@ -4,11 +4,11 @@
 package bandersnatch
 
 /*
-#cgo linux,amd64 LDFLAGS: -L${SRCDIR}/../ffi -lbandersnatch.linux_amd64 -ldl
-#cgo linux,arm64 LDFLAGS: -L${SRCDIR}/../ffi -lbandersnatch.linux_arm64 -ldl
-#cgo darwin,amd64 LDFLAGS: -L${SRCDIR}/../ffi -lbandersnatch.mac_amd64 -ldl
-#cgo darwin,arm64 LDFLAGS: -L${SRCDIR}/../ffi -lbandersnatch.mac_arm64 -ldl
-#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/../ffi -lbandersnatch.windows_amd64 -lws2_32
+#cgo linux,amd64 LDFLAGS: -L${SRCDIR}/../ffi -lcrypto.linux_amd64 -ldl
+#cgo linux,arm64 LDFLAGS: -L${SRCDIR}/../ffi -lcrypto.linux_arm64 -ldl
+#cgo darwin,amd64 LDFLAGS: -L${SRCDIR}/../ffi -lcrypto.mac_amd64 -ldl
+#cgo darwin,arm64 LDFLAGS: -L${SRCDIR}/../ffi -lcrypto.mac_arm64 -ldl
+#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/../ffi -lcrypto.windows_amd64 -lws2_32
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -71,17 +71,74 @@ G.3: Ring for Ticket Generation
 
 const (
 	X_BANDERSNATCH_SEED = "jam_val_key_bandersnatch"
+	MAX_CACHE_SIZE      = 64
 )
 
-// Ring commitment cache
-type ringCommitmentCache struct {
-	mu    sync.RWMutex
-	cache map[string][]byte // key is hex-encoded hash, value is commitment bytes
+type lruCache[T any] struct {
+	mu      sync.RWMutex
+	cache   map[string]T
+	keys    []string
+	maxSize int
+	cleanup func(T)
 }
 
-var commitmentCache = &ringCommitmentCache{
-	cache: make(map[string][]byte),
+func newLRUCache[T any](maxSize int, cleanup func(T)) *lruCache[T] {
+	return &lruCache[T]{
+		cache:   make(map[string]T),
+		keys:    make([]string, 0),
+		maxSize: maxSize,
+		cleanup: cleanup,
+	}
 }
+
+func (c *lruCache[T]) get(key string) (T, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	val, ok := c.cache[key]
+	return val, ok
+}
+
+func (c *lruCache[T]) put(key string, value T) {
+	isDebug := false
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, exists := c.cache[key]; !exists {
+		if isDebug {
+			fmt.Printf("DEBUG: Cache size before put: %d (max: %d)\n", len(c.cache), c.maxSize)
+		}
+		if len(c.cache) >= c.maxSize {
+			if isDebug {
+				fmt.Printf("DEBUG: Triggering eviction...\n")
+			}
+			c.evictOldest()
+		}
+		c.cache[key] = value
+		c.keys = append(c.keys, key)
+		if isDebug {
+			fmt.Printf("DEBUG: Added to cache, size now: %d\n", len(c.cache))
+		}
+	}
+}
+
+func (c *lruCache[T]) evictOldest() {
+	if len(c.keys) == 0 {
+		return
+	}
+	oldest := c.keys[0]
+	if value, ok := c.cache[oldest]; ok {
+		if c.cleanup != nil {
+			c.cleanup(value)
+		}
+		delete(c.cache, oldest)
+	}
+	c.keys = c.keys[1:]
+}
+
+var commitmentCache = newLRUCache[[]byte](MAX_CACHE_SIZE, nil)
+var verifierCache_global = newLRUCache[uintptr](MAX_CACHE_SIZE, func(ptr uintptr) {
+	fmt.Printf("DEBUG: free_verifier called for ptr=%x\n", ptr)
+	C.free_verifier(unsafe.Pointer(ptr))
+})
 
 type BanderSnatchSecret [SecretLen]byte
 type BanderSnatchKey [PubkeyLen]byte
@@ -219,7 +276,55 @@ func RingVrfSign(ringSize int, privateKey BanderSnatchSecret, ringsetBytes, vrfI
 	return sig, vrfOutput, nil
 }
 
-// RingVRFVerify is Used for tickets verification, and returns vrfOutput on success
+func RingVrfVerifyWithCache(ringSize int, ringsetBytes []byte, signature, vrfInputData, auxData []byte) ([]byte, error) {
+	if len(ringsetBytes) == 0 {
+		return []byte{}, fmt.Errorf("No ringsetBytes")
+	}
+
+	hash := common.Blake2Hash(ringsetBytes)
+	key := hex.EncodeToString(hash.Bytes())
+
+	ptr, ok := verifierCache_global.get(key)
+
+	if !ok {
+		v := C.create_verifier(
+			(*C.uchar)(unsafe.Pointer(&ringsetBytes[0])),
+			C.size_t(len(ringsetBytes)),
+			C.size_t(ringSize),
+		)
+		if v == nil {
+			return nil, fmt.Errorf("create verifier failed")
+		}
+		ptr = uintptr(v)
+		verifierCache_global.put(key, ptr)
+	}
+
+	out := make([]byte, VRFOutputLen)
+	auxL := C.size_t(len(auxData))
+	aux := auxData
+	if len(auxData) == 0 {
+		aux = []byte{1}
+		auxL = C.size_t(0)
+	}
+
+	res := C.ring_vrf_verify_with_verifier(
+		unsafe.Pointer(ptr),
+		(*C.uchar)(unsafe.Pointer(&signature[0])),
+		C.size_t(len(signature)),
+		(*C.uchar)(unsafe.Pointer(&vrfInputData[0])),
+		C.size_t(len(vrfInputData)),
+		(*C.uchar)(unsafe.Pointer(&aux[0])),
+		auxL,
+		(*C.uchar)(unsafe.Pointer(&out[0])),
+		C.size_t(len(out)),
+	)
+
+	if res != 1 {
+		return nil, fmt.Errorf("verification failed")
+	}
+	return out, nil
+}
+
 func RingVrfVerify(ringSize int, ringsetBytes []byte, signature, vrfInputData, auxData []byte) ([]byte, error) {
 	vrfOutput := make([]byte, VRFOutputLen)
 	auxDataL := C.size_t(len(auxData))
@@ -359,16 +464,13 @@ func GetRingCommitment(ringSize int, ringsetBytes []byte) ([]byte, error) {
 	ringsetHash := common.Blake2Hash(ringsetBytes)
 	cacheKey := hex.EncodeToString(ringsetHash.Bytes())
 
-	// Check cache first (read lock)
-	commitmentCache.mu.RLock()
-	if cachedCommitment, exists := commitmentCache.cache[cacheKey]; exists {
-		commitmentCache.mu.RUnlock()
+	// Check cache first
+	if cachedCommitment, exists := commitmentCache.get(cacheKey); exists {
 		// Return a copy to prevent external modification of cached data
 		result := make([]byte, len(cachedCommitment))
 		copy(result, cachedCommitment)
 		return result, nil
 	}
-	commitmentCache.mu.RUnlock()
 
 	// Not in cache, compute the commitment
 	fmt.Printf("GetRingCommitment (computing): len(ringsetBytes)=%d, ringSize=%d c=%s\n", len(ringsetBytes), ringSize, common.Blake2Hash(ringsetBytes))
@@ -387,13 +489,11 @@ func GetRingCommitment(ringSize int, ringsetBytes []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to compute ring commitment")
 	}
 
-	// Store in cache (write lock)
-	commitmentCache.mu.Lock()
+	// Store in cache
 	// Make a copy before storing to prevent external modification
 	cachedValue := make([]byte, len(commitmentBytes))
 	copy(cachedValue, commitmentBytes)
-	commitmentCache.cache[cacheKey] = cachedValue
-	commitmentCache.mu.Unlock()
+	commitmentCache.put(cacheKey, cachedValue)
 
 	return commitmentBytes, nil
 }

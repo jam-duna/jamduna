@@ -8,8 +8,37 @@ ark-vrf ={ version = "0.1.0", features = ["bandersnatch", "ring"] }
 hex = "0.4.3"
 rand = "0.8"
 
+w3f-bls = "0.1.4" 
+arrayref = { version = "0.3", default-features = false }
+rand_core = { version = "0.6", default-features = false }
+rand_chacha = { version = "0.3", default-features = false }
+sha3 = { version = "0.10", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+digest = { version = "0.10", default-features = false }
+ark-ff = { version = "0.4.0", default-features = false }
+ark-ec = { version = "0.4.0", default-features = false }
+ark-serialize = { version = "0.4.0", default-features = false, features = [ "derive" ] }
+ark-serialize-derive = { version = "0.4.0", default-features = false }
+ark-bls12-381 = { version = "0.4.0", default-features = false, features = [ "curve" ] }
+ark-bls12-377 = { version = "0.4.0", default-features = false, features = [ "curve" ] }
+zeroize = { version = "1.0", default-features = false, features = [ "zeroize_derive" ] }
+serde = { version = "1.0", default-features = false, optional = true }
+thiserror = { version = "1.0", default-features = false }
+constcat = "0.3.0"
+reed-solomon-simd = "3"
+blake2 = "0.10"
+
 [lib]
 crate-type = ["staticlib"]
+
+[profile.release]
+lto = true
+panic = "abort" 
+strip = true
+codegen-units = 1
+
+[target.'cfg(target_os = "macos")']
+rustflags = ["-C", "link-args=-Wl,-undefined,dynamic_lookup"]
 
 [features]
 default = []       

@@ -33,9 +33,9 @@ cmd/importblocks/data.zip
 cmd/importblocks/fuzzed.zip
 cmd/importblocks/core.zip
 
-# FFI static libs
-ffi/libbls.a
-ffi/libbandersnatch.a
+# FFI static libs  
+ffi/libcrypto.*.a
+ffi/libunicorn.*.a
 
 # state DB test data
 /statedb/testdata/
@@ -53,12 +53,13 @@ guarantees/*.json
 
 # macOS metadata
 **/.DS_Store
+.DS_Store
+
 bin/jam
 bin/*
 !bin/jam*
 bin/jamduna
 /bin
-cmd/.DS_Store
 /release
 pvm/test/*
 node/interpreter/*
@@ -71,7 +72,6 @@ conf/*
 java*.jar
 libjava*.dylib
 assets/zcash-srs-2-11-uncompressed.bin
-cmd/.DS_Store
 /cmd/duna_fuzzer/rawdata
 /cmd/duna_bench/duna_bench_*
 /cmd/duna_bench/reports
