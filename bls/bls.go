@@ -4,15 +4,15 @@
 package bls
 
 /*
-#cgo linux,amd64 LDFLAGS: -L${SRCDIR}/../ffi -lbls.linux_amd64 -ldl
-#cgo linux,arm64 LDFLAGS: -L${SRCDIR}/../ffi -lbls.linux_arm64 -ldl
-#cgo darwin,amd64 LDFLAGS: -L${SRCDIR}/../ffi -lbls.mac_amd64 -ldl
-#cgo darwin,arm64 LDFLAGS: -L${SRCDIR}/../ffi -lbls.mac_arm64 -ldl
-#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/../ffi -lbls.windows_amd64 -lws2_32
+#cgo linux,amd64 LDFLAGS: -L${SRCDIR}/../ffi -lcrypto.linux_amd64 -ldl
+#cgo linux,arm64 LDFLAGS: -L${SRCDIR}/../ffi -lcrypto.linux_arm64 -ldl
+#cgo darwin,amd64 LDFLAGS: -L${SRCDIR}/../ffi -lcrypto.mac_amd64 -ldl
+#cgo darwin,arm64 LDFLAGS: -L${SRCDIR}/../ffi -lcrypto.mac_arm64 -ldl
+#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/../ffi -lcrypto.windows_amd64 -lws2_32
 
 #include <stdint.h>
 #include <stdlib.h>
-#include <bls.h>
+#include "../bandersnatch/bandersnatch.h"
 */
 import "C"
 

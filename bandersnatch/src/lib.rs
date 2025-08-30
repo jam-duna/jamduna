@@ -7,6 +7,27 @@ use bandersnatch::{
     RingProofParams, Secret,
 };
 
+// Additional cryptographic dependencies for unified functionality
+use sha2::Sha256;
+use ark_bls12_381::Bls12_381;
+use ark_ff::Zero;
+
+// BLS signature functionality
+use w3f_bls::{
+    serialize::SerializableToBytes,
+    double::{DoublePublicKeyScheme, DoublePublicKey},
+    single_pop_aggregator::SignatureAggregatorAssumingPoP,
+    EngineBLS, Message, TinyBLS, TinyBLS381,
+    PublicKey as BlsPublicKey, PublicKeyInSignatureGroup,
+    Signature as BlsSignature, SecretKey as BlsSecretKey,
+    Signed,
+};
+
+// Reed-Solomon erasure coding
+use reed_solomon_simd::{ReedSolomonDecoder, ReedSolomonEncoder};
+
+// FFI types
+use std::os::raw::{c_int, c_uchar, c_uint};
 
 //const RING_SIZE: usize = 6;
 //const RING_SIZE: usize = 1023;
@@ -219,7 +240,6 @@ impl Verifier {
 }
 
 //use hex;
-use std::os::raw::{c_int, c_uchar};
 use std::slice;
 
 #[no_mangle]
@@ -864,6 +884,351 @@ pub extern "C" fn get_ring_vrf_output(
     1 // Return 1 on success
 }
 
+
+#[no_mangle]
+pub extern "C" fn get_secret_key(
+    seed_bytes: *const c_uchar,
+    seed_len: usize,
+    secret_key: *mut c_uchar,
+    secret_key_len: usize,
+) {
+    let seed_slice = unsafe { std::slice::from_raw_parts(seed_bytes, seed_len) };
+    let secret = BlsSecretKey::<TinyBLS<Bls12_381, ark_bls12_381::Config>>::from_seed(&seed_slice);
+    let mut secret_key_bytes = secret.to_bytes();
+    
+    if secret_key_bytes.len() != secret_key_len {
+        eprintln!("Buffer size mismatch for secret key: expected {}, got {}", 
+                  secret_key_bytes.len(), secret_key_len);
+        return;
+    }
+    
+    unsafe {
+        std::ptr::copy(secret_key_bytes.as_mut_ptr(), secret_key, secret_key_len);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn get_double_pubkey(
+    seed_bytes: *const c_uchar,
+    seed_len: usize,
+    pub_key: *mut c_uchar,
+    pub_key_len: usize,
+) {
+    let seed_slice = unsafe { std::slice::from_raw_parts(seed_bytes, seed_len) };
+    let secret = BlsSecretKey::<TinyBLS<Bls12_381, ark_bls12_381::Config>>::from_seed(&seed_slice);
+    let secret_vt = secret.into_vartime();
+    let double_public_key = secret_vt.into_double_public_key();
+    let mut pub_key_bytes = double_public_key.to_bytes();
+    
+    if pub_key_bytes.len() != pub_key_len {
+        eprintln!("Buffer size mismatch for public key: expected {}, got {}",
+                  pub_key_bytes.len(), pub_key_len);
+        return;
+    }
+    
+    unsafe {
+        std::ptr::copy(pub_key_bytes.as_mut_ptr(), pub_key, pub_key_len);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn get_pubkey_g2(
+    seed_bytes: *const c_uchar,
+    seed_len: usize,
+    pub_key: *mut c_uchar,
+    pub_key_len: usize,
+){
+    let seed_slice = unsafe { std::slice::from_raw_parts(seed_bytes, seed_len) };
+    let secret = BlsSecretKey::<TinyBLS<Bls12_381, ark_bls12_381::Config>>::from_seed(&seed_slice);
+    let public_key = secret.into_public();
+    let mut pub_key_bytes = public_key.to_bytes();
+    if pub_key_bytes.len() != pub_key_len {
+        eprintln!("Provided buffer is too small for the public key");
+        return;
+    }
+    unsafe {
+        std::ptr::copy(pub_key_bytes.as_mut_ptr(), pub_key, pub_key_len);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn sign(
+    secret_key_bytes: *const c_uchar,
+    secret_key_len: usize,
+    message_bytes: *const c_uchar,
+    message_len: usize,
+    signature: *mut c_uchar,
+    signature_len: usize,
+){
+    let secret_key_slice = unsafe { std::slice::from_raw_parts(secret_key_bytes, secret_key_len) };
+    let mut secret = BlsSecretKey::<TinyBLS381>::from_bytes(&secret_key_slice).unwrap();
+    let message_slice = unsafe { std::slice::from_raw_parts(message_bytes, message_len) };
+    let message = Message::from(message_slice);
+
+    let signature_bytes = secret.sign_once(&message).to_bytes();
+    
+    if signature_bytes.len() != signature_len {
+        eprintln!("Provided buffer is too small for the signature");
+        return;
+    }
+    unsafe {
+        std::ptr::copy(signature_bytes.as_ptr(), signature, signature_len);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn verify(
+    pub_key_bytes: *const c_uchar,
+    pub_key_len: usize,
+    message_bytes: *const c_uchar,
+    message_len: usize,
+    signature_bytes: *const c_uchar,
+    signature_len: usize,
+) -> c_int {
+    let pub_key_slice = unsafe { std::slice::from_raw_parts(pub_key_bytes, pub_key_len) };
+    let public_key = BlsPublicKey::<TinyBLS381>::from_bytes(&pub_key_slice).unwrap();
+    let message_slice = unsafe { std::slice::from_raw_parts(message_bytes, message_len) };
+    let message = Message::from(message_slice);
+    let signature_slice = unsafe { std::slice::from_raw_parts(signature_bytes, signature_len) };
+    let signature = BlsSignature::<TinyBLS381>::from_bytes(&signature_slice).unwrap();
+    
+    if signature.verify(&message, &public_key) {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn aggregate_sign (
+    signatures_bytes: *const c_uchar,
+    signatures_len: usize,
+    message_bytes: *const c_uchar,
+    message_len: usize,
+    aggregated_signature: *mut c_uchar,
+    aggregated_signature_len: usize,
+){
+    let signatures_slice = unsafe { std::slice::from_raw_parts(signatures_bytes, signatures_len) };
+    let message_slice = unsafe { std::slice::from_raw_parts(message_bytes, message_len) };
+    let message = Message::from(message_slice);
+    let mut prover_aggregator = SignatureAggregatorAssumingPoP::<TinyBLS381>::new(message.clone());
+    for i in 0..signatures_slice.len()/48 {
+        let signature = BlsSignature::<TinyBLS381>::from_bytes(&signatures_slice[i*48..(i+1)*48]).unwrap();
+        prover_aggregator.add_signature(&signature);
+    }
+    let sig = (&prover_aggregator).signature();
+    let sig_bytes = sig.to_bytes();
+    if sig_bytes.len() != aggregated_signature_len {
+        eprintln!("Provided buffer is too small for the aggregated signature");
+        return;
+    }
+    unsafe {
+        std::ptr::copy(sig_bytes.as_ptr(), aggregated_signature, aggregated_signature_len);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn aggregate_verify_by_signature (
+    pub_keys_bytes: *const c_uchar,
+    pub_keys_len: usize,
+    message_bytes: *const c_uchar,
+    message_len: usize,
+    signature_bytes: *const c_uchar,
+    signature_len: usize,
+) -> c_int {
+    let pub_keys_slice = unsafe { std::slice::from_raw_parts(pub_keys_bytes, pub_keys_len) };
+    let message_slice = unsafe { std::slice::from_raw_parts(message_bytes, message_len) };
+    let message = Message::from(message_slice);
+    let mut verifier_aggregator = SignatureAggregatorAssumingPoP::<TinyBLS381>::new(message.clone());
+    let mut aggregated_public_key = <TinyBLS381 as EngineBLS>::PublicKeyGroup::zero();
+    for i in 0..pub_keys_slice.len()/144 {
+        let pub_key = DoublePublicKey::<TinyBLS381>::from_bytes(&pub_keys_slice[i*144..(i+1)*144]).unwrap();
+        verifier_aggregator.add_auxiliary_public_key(&PublicKeyInSignatureGroup(pub_key.0));
+        let pub_key_g2_bytes = &pub_key.to_bytes()[48..144];
+        let pub_key_g2 = BlsPublicKey::<TinyBLS381>::from_bytes(pub_key_g2_bytes).unwrap();
+        aggregated_public_key += pub_key_g2.0;
+    }
+    let signature_slice = unsafe { std::slice::from_raw_parts(signature_bytes, signature_len) };
+    let signature = BlsSignature::<TinyBLS381>::from_bytes(&signature_slice).unwrap();
+    verifier_aggregator.add_signature(&signature);
+    verifier_aggregator.add_publickey(&BlsPublicKey(aggregated_public_key));
+
+    if verifier_aggregator.verify_using_aggregated_auxiliary_public_keys::<Sha256>() {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn encode(
+    input_ptr: *const c_uchar,
+    input_len: usize,
+    V: usize,
+    output_ptr: *mut c_uchar,
+    _shard_size: usize,
+) {
+    let C = V / 3;
+    let W_E = C * 2;
+    let data = unsafe { std::slice::from_raw_parts(input_ptr, input_len) };
+
+    let mut padded = data.to_vec();
+    if padded.len() % W_E != 0 {
+        let pad_len = W_E - (padded.len() % W_E);
+        padded.extend(std::iter::repeat(0).take(pad_len));
+    }
+    let shard_size = padded.len() / C;
+    let k = padded.len() / W_E;
+    let mut original_shards: Vec<Vec<u8>> = vec![Vec::with_capacity(2 * k); C];
+    let mut recovery_shards: Vec<Vec<u8>> = vec![Vec::with_capacity(2 * k); C*2];
+    for i in 0..k {
+        let mut encoder = ReedSolomonEncoder::new(C, C*2, 2).unwrap();
+        for c in 0..C {
+            let shard = [
+                padded[i * 2 + c * shard_size],
+                padded[i * 2 + c * shard_size + 1],
+            ];
+            let _ = encoder.add_original_shard(&shard);
+            original_shards[c].extend_from_slice(&shard);
+        }
+
+        let encoded = encoder.encode().unwrap();
+        for (j, shard) in encoded.recovery_iter().enumerate() {
+            recovery_shards[j].extend_from_slice(shard);
+        }
+    }
+
+    let mut offset = 0;
+    for shard in original_shards.iter().chain(recovery_shards.iter()) {
+        unsafe {
+            std::ptr::copy_nonoverlapping(shard.as_ptr(), output_ptr.add(offset), shard.len());
+        }
+        offset += shard.len();
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn decode(
+    shards_ptr: *const c_uchar,
+    indexes_ptr: *const c_uint,
+    V: usize,
+    shard_size: usize,
+    output_ptr: *mut c_uchar,
+    _output_size: usize,  // For compatibility with BLS interface
+) {
+    let C = V / 3;
+    let R = V - C;
+    let k = shard_size / 2;
+    let shards = unsafe { std::slice::from_raw_parts(shards_ptr, (C + R) * shard_size) };
+    let indexes = unsafe { std::slice::from_raw_parts(indexes_ptr, C) };
+
+    for i in 0..k {
+        let mut decoder = ReedSolomonDecoder::new(C, R, 2).unwrap();
+        for (j, &index) in indexes.iter().enumerate() {
+            let shard_offset = j * shard_size + i * 2;
+            let shard = &shards[shard_offset..shard_offset + 2];
+            if (index as usize) < C {
+                decoder.add_original_shard(index as usize, shard).unwrap();
+                let offset = i * 2 + index as usize * shard_size;
+                unsafe {
+                    std::ptr::copy_nonoverlapping(shard.as_ptr(), output_ptr.add(offset), 2);
+                }
+            } else {
+                decoder.add_recovery_shard(index as usize - C, shard).unwrap();
+            }
+        }
+
+        {
+            let result = decoder.decode();
+            match result {
+                Ok(decoded) => {
+                    for (index, segment) in decoded.restored_original_iter() {
+                        let offset = i * 2 + index * shard_size;
+                        unsafe {
+                            std::ptr::copy_nonoverlapping(segment.as_ptr(), output_ptr.add(offset), 2);
+                        }
+                    }
+                }
+                Err(_) => {
+                    println!("⚠️ decode failed at row {}", i);
+                }
+            }
+        }
+    }
+}
+
+// FFI functions for verifier caching
+#[no_mangle]
+pub extern "C" fn create_verifier(
+    ring_set_bytes: *const c_uchar,
+    ring_set_len: usize,
+    ring_size: usize,
+) -> *mut Verifier {
+    let ring_set_slice = unsafe { slice::from_raw_parts(ring_set_bytes, ring_set_len) };
+    let mut ring_set: Vec<Public> = Vec::new();
+    let _params = ring_proof_params(ring_size);
+    let padding_point = Public::from(RingProofParams::padding_point());
+    
+    for i in 0..ring_size {
+        let pubkey_bytes = &ring_set_slice[i * 32..(i + 1) * 32];
+        let public_key = if pubkey_bytes.iter().all(|&b| b == 0) {
+            padding_point.clone()
+        } else {
+            match Public::deserialize_compressed_unchecked(pubkey_bytes) {
+                Ok(public_key) => public_key,
+                Err(_) => return std::ptr::null_mut(),
+            }
+        };
+        ring_set.push(public_key);
+    }
+
+    let verifier = Box::new(Verifier::new(ring_set));
+    Box::into_raw(verifier)
+}
+
+#[no_mangle]
+pub extern "C" fn ring_vrf_verify_with_verifier(
+    verifier: *mut Verifier,
+    signature_bytes: *const c_uchar,
+    signature_len: usize,
+    vrf_input_data_bytes: *const c_uchar,
+    vrf_input_data_len: usize,
+    aux_data_bytes: *const c_uchar,
+    aux_data_len: usize,
+    vrf_output: *mut c_uchar,
+    _vrf_output_len: usize
+) -> c_int {
+    let verifier = unsafe { &*verifier };
+    
+    let signature_slice = unsafe { slice::from_raw_parts(signature_bytes, signature_len) };
+    let vrf_input_data_slice = unsafe { slice::from_raw_parts(vrf_input_data_bytes, vrf_input_data_len) };
+    let aux_data_slice = if aux_data_len == 0 {
+        &[]
+    } else {
+        unsafe { slice::from_raw_parts(aux_data_bytes, aux_data_len) }
+    };
+
+    let res = verifier.ring_vrf_verify(vrf_input_data_slice, aux_data_slice, signature_slice);
+
+    match res {
+        Ok(vrf_output_hash) => {
+            unsafe {
+                std::ptr::copy_nonoverlapping(vrf_output_hash.as_ptr(), vrf_output, 32);
+            }
+            1
+        }
+        Err(_) => 0
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn free_verifier(verifier: *mut Verifier) {
+    if !verifier.is_null() {
+        unsafe {
+            let _ = Box::from_raw(verifier);
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
