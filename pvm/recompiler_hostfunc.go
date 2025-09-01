@@ -78,33 +78,7 @@ func Ecalli(rvmPtr unsafe.Pointer, opcode int32) {
 
 }
 func (vm *CompilerVM) LogCurrentState(opcode byte, operands []byte, currentPC uint64, gas int64) {
-	if opcode == ECALLI {
-		return
-	}
-	recordLog := false
-	if gas >= hiResGasRangeStart && gas <= hiResGasRangeEnd {
-		recordLog = true
-	}
-	// fmt.Printf("IsBasicBlockInstruction: %t vmBasicBlock: %d Gas: %d PC: %d Opcode: %s\n", IsBasicBlockInstruction(opcode), vm.vmBasicBlock, gas, currentPC, opcode_str(opcode))
-	if vm.vmBasicBlock%10000 == 0 { // every 10000 basic blocks, take a snapshot
-		recordLog = true
-	}
 
-	if recordLog && false {
-		log := VMLog{
-			Opcode:   opcode,
-			OpStr:    opcode_str(opcode),
-			Operands: operands,
-			PvmPc:    currentPC,
-			Gas:      gas,
-		}
-
-		log.Registers = make([]uint64, len(vm.Ram.ReadRegisters()))
-		for i := 0; i < regSize; i++ {
-			log.Registers[i], _ = vm.Ram.ReadRegister(i)
-		}
-		vm.Logs = append(vm.Logs, log)
-	}
 }
 
 // Ecalli is the host call invoked by the recompiled x86 code. It updates the VM state.

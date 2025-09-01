@@ -1108,15 +1108,20 @@ func (vm *VM) hostEject() {
 		return
 	}
 
-	bold_d, ok := vm.X.U.ServiceAccounts[uint32(d)]
-	if d == uint64(vm.X.ServiceIndex) || !ok || bold_d.CodeHash != common.Hash(types.E_l(uint64(vm.X.ServiceIndex), 32)) {
+	xContext := vm.X
+	if d == uint64(xContext.ServiceIndex) {
 		vm.Ram.WriteRegister(7, WHO)
 		vm.HostResultCode = WHO
-		log.Debug(vm.logging, "EJECT WHO", "d", fmt.Sprintf("%d", d))
+		log.Warn("XXX", "EJECT WHO -- cannot eject self", "d", fmt.Sprintf("%d", d), "vm.X.ServiceIndex", fmt.Sprintf("%d", vm.X.ServiceIndex))
+		return
+	}
+	bold_d, errCode := vm.getXUDS(d)
+	if errCode != OK {
+		vm.Ram.WriteRegister(7, WHO)
+		vm.HostResultCode = WHO
 		return
 	}
 	l := max(AccountLookupConst, bold_d.StorageSize) - AccountLookupConst
-
 	ok, D_lookup, lookup_source := bold_d.ReadLookup(common.BytesToHash(h), uint32(l), vm.hostenv)
 	if !ok || bold_d.NumStorageItems != 2 {
 		vm.Ram.WriteRegister(7, HUH)
@@ -1124,16 +1129,14 @@ func (vm *VM) hostEject() {
 		log.Debug(vm.logging, "EJECT HUH", "d", fmt.Sprintf("%d", d), "h", h, "l", l, "lookup_source", lookup_source)
 		return
 	}
-
-	s, _ := vm.getXUDS(uint64(vm.X.ServiceIndex))
-	s = s.Clone()
-	s.Balance += bold_d.Balance
+	xs, _ := xContext.GetX_s()
+	xs.IncBalance(bold_d.Balance)
 
 	if len(D_lookup) == 2 && D_lookup[1]+uint32(types.PreimageExpiryPeriod) < vm.Timeslot {
 		vm.Ram.WriteRegister(7, OK)
 		vm.HostResultCode = OK
-		delete(vm.X.U.ServiceAccounts, uint32(d))
-		vm.X.U.ServiceAccounts[vm.X.ServiceIndex] = s
+		xContext.U.ServiceAccounts[uint32(d)] = bold_d
+		bold_d.DeletedAccount = true
 		log.Debug(vm.logging, "EJECT OK", "d", fmt.Sprintf("%d", d))
 		return
 	}

@@ -347,7 +347,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	benchRec.Add("ApplyStateTransitionAuthorizations", time.Since(t0))
 
 	// ---------  NewWellBalancedTree ------
-	t0 = time.Now()
 	// n.r = M_B( [ s \ E_4(s) ++ E(h) | (s,h) in C] , H_K)
 	sort.Slice(accumulation_output, func(i, j int) bool {
 		return accumulation_output[i].Service < accumulation_output[j].Service
@@ -371,7 +370,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if len(leaves) > 0 {
 		log.Debug(debugB, "BEEFY accumulation root", "r", accumulationRoot)
 	}
-	benchRec.Add("NewWellBalancedTree", time.Since(t0))
 
 	// ---------  ApplyStateRecentHistory ------
 	// 4.7 - Recent History [No other state related, but need to do it after availability_assignment]

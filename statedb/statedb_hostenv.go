@@ -135,6 +135,14 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 	}
 	benchRec.Add("*** ApplyXContext: writeAccount:Preimage", time.Since(t0))
 
+	if sa.DeletedAccount {
+		err = tree.DeleteService(service_idx)
+		if err != nil {
+			log.Warn(log.SDB, "tree.DeleteService", "service_idx", service_idx, "err", err)
+			return
+		}
+		log.Info(log.SDB, "tree.DeleteService SUCCESS", "service_idx", service_idx)
+	}
 	t0 = time.Now()
 	err = s.writeService(service_idx, sa)
 	benchRec.Add("*** ApplyXContext: writeAccount:writeService", time.Since(t0))
@@ -171,7 +179,6 @@ func (s *StateDB) ApplyXContext(U *types.PartialState) (stateUpdate *types.State
 			benchRec.Add("-- ApplyXContext: writeAccount", time.Since(t0))
 		}
 	}
-	t0 := time.Now()
 	// p - Bless => PrivilegedServiceState 12.4.1 (164)
 	// Direct assignment to reduce field access overhead
 	privilegedIndices := &s.JamState.PrivilegedServiceIndices
@@ -207,7 +214,6 @@ func (s *StateDB) ApplyXContext(U *types.PartialState) (stateUpdate *types.State
 	// v - Assign => DesignatedValidators
 	// Direct assignment - no optimization needed here
 	s.JamState.SafroleState.DesignatedValidators = U.UpcomingValidators
-	benchRec.Add("-- ApplyXContext: other", time.Since(t0))
 
 	return
 }

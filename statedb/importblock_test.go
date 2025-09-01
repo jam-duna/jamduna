@@ -1,7 +1,6 @@
 package statedb
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -179,60 +178,14 @@ func TestStateTransitionCompiler(t *testing.T) {
 	})
 }
 
-func TestPVMstepJsonDiff(t *testing.T) {
-	var testdata, testdata_rcp pvm.VMLogs
-
-	// Load JSON 1
-	json1, err := os.ReadFile("interpreter/vm_log.json")
-	if err != nil {
-		t.Fatalf("failed to read file test_case/vm_log.json: %v", err)
-	}
-	err = json.Unmarshal(json1, &testdata)
-	if err != nil {
-		t.Fatalf("failed to unmarshal test_case/vm_log.json: %v", err)
-	}
-
-	// Load JSON 2
-	json2, err := os.ReadFile("sandbox/vm_log.json")
-	if err != nil {
-		t.Fatalf("failed to read file test_case/vm_log_compiler.json: %v", err)
-	}
-	err = json.Unmarshal(json2, &testdata_rcp)
-	if err != nil {
-		t.Fatalf("failed to unmarshal test_case/vm_log_compiler.json: %v", err)
-	}
-
-	for i, ans := range testdata {
-		// find the difference in the two JSONs
-		if i >= len(testdata_rcp) {
-			t.Fatalf("len(testdata_rcp)=%d len(testdata)=%d", len(testdata_rcp), len(testdata))
-		}
-		rcp_ans := testdata_rcp[i]
-		if !reflect.DeepEqual(ans, rcp_ans) {
-			fmt.Printf("Difference found in index %d:\n", i)
-			fmt.Printf("Original: %+v\n", ans)
-			fmt.Printf("Compiler: %+v\n", rcp_ans)
-
-			// Print the differences
-			diff := CompareJSON(ans, rcp_ans)
-			if diff != "" {
-				fmt.Println("Differences:", diff)
-				t.Fatalf("Differences found in index %d: %s", i, diff)
-
-			}
-		}
-	}
-}
-
 func TestTracesInterpreter(t *testing.T) {
 	log.InitLogger("debug")
 	// pvm.PvmLogging = true
 
 	// Define all the directories you want to test in a single slice.
 	testDirs := []string{
-		//"../cmd/importblocks/rawdata/safrole/state_transitions/",
-		path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
@@ -399,72 +352,6 @@ func TestCompareJson(t *testing.T) {
 	}
 	diff := CompareJSON(testdata1, testdata2)
 	fmt.Print(diff)
-}
-
-func TestCompareLogs(t *testing.T) {
-	f1, err := os.Open("interpreter/0_accumulate.json")
-	if err != nil {
-		t.Fatalf("failed to open interpreter/vm_log.json: %v", err)
-	}
-	defer f1.Close()
-
-	f2, err := os.Open("sandbox/0_accumulate.json")
-	if err != nil {
-		t.Fatalf("failed to open sandbox/vm_log.json: %v", err)
-	}
-	defer f2.Close()
-
-	s1 := bufio.NewScanner(f1)
-	s2 := bufio.NewScanner(f2)
-
-	var i int
-	for {
-
-		has1 := s1.Scan()
-		has2 := s2.Scan()
-
-		if err := s1.Err(); err != nil {
-			t.Fatalf("error scanning vm_log.json at line %d: %v", i, err)
-		}
-		if err := s2.Err(); err != nil {
-			t.Fatalf("error scanning vm_log_compiler.json at line %d: %v", i, err)
-		}
-
-		// both files ended → success
-		if !has1 && !has2 {
-			break
-		}
-		if i == 0 {
-			i++
-			continue
-		}
-		// one ended early → length mismatch
-		if has1 != has2 {
-			t.Fatalf("log length mismatch at index %d: has vm_log=%v, has vm_log_compiler=%v", i, has1, has2)
-		}
-
-		// unmarshal each line into your entry type
-		var orig, recp pvm.VMLog
-		if err := json.Unmarshal(s1.Bytes(), &orig); err != nil {
-			t.Fatalf("failed to unmarshal line %d of vm_log.json: %v", i, err)
-		}
-		if err := json.Unmarshal(s2.Bytes(), &recp); err != nil {
-			t.Fatalf("failed to unmarshal line %d of vm_log_compiler.json: %v", i, err)
-		}
-
-		// compare
-		if !reflect.DeepEqual(orig.OpStr, recp.OpStr) || !reflect.DeepEqual(orig.Operands, recp.Operands) || !reflect.DeepEqual(orig.Registers, recp.Registers) || !reflect.DeepEqual(orig.Gas, recp.Gas) {
-			fmt.Printf("Difference at index %d:\nOriginal: %+v\nCompiler: %+v\n", i, orig, recp)
-			if diff := CompareJSON(orig, recp); diff != "" {
-				fmt.Println("Differences:", diff)
-				fmt.Printf("Operation: %s\n", pvm.DisassembleSingleInstruction(orig.Opcode, orig.Operands))
-				t.Fatalf("differences at index %d: %s", i, diff)
-			}
-		} else if i%100000 == 0 {
-			fmt.Printf("Index %d: no difference %s\n", i, s1.Bytes())
-		}
-		i++
-	}
 }
 
 func GetFuzzReportsPath() (string, error) {

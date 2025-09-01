@@ -399,9 +399,7 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	accumulateOutputsEncode := d.GetAccumulationOutputsBytes()
 	benchRec.Add("- UpdateTrieState:Codec", time.Since(t0))
 
-	t0 = time.Now()
 	t := s.GetTrie()
-	benchRec.Add("- UpdateTrieState:GetTrie", time.Since(t0))
 
 	t0 = time.Now()
 	t.SetState(C1, coreAuthPoolEncode)
@@ -422,9 +420,7 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	t.SetState(C16, accumulateOutputsEncode)
 	benchRec.Add("- UpdateTrieState:SetState", time.Since(t0))
 
-	t0 = time.Now()
 	updated_root := t.GetRoot()
-	benchRec.Add("- UpdateTrieState:GetRoot", time.Since(t0))
 
 	t0 = time.Now()
 	verify := false

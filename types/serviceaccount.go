@@ -47,6 +47,8 @@ type ServiceAccount struct {
 	Checkpointed bool `json:"-"`
 	Dirty        bool `json:"-"`
 
+	DeletedAccount bool `json:"-"` // if true, this account is deleted
+
 	Storage  map[string]*StorageObject  `json:"-"` // arbitrary_k -> v. if v=[]byte. use as delete
 	Lookup   map[string]*LookupObject   `json:"-"` // (h,l) -> anchor
 	Preimage map[string]*PreimageObject `json:"-"` // H(p)  -> p
@@ -68,6 +70,7 @@ func (s *ServiceAccount) Clone() *ServiceAccount {
 		ParentService:      s.ParentService,
 		Dirty:              s.Dirty,
 		NewAccount:         s.NewAccount,
+		DeletedAccount:     s.DeletedAccount,
 		Checkpointed:       s.Checkpointed,
 		Mutable:            s.Mutable, // should ALLOW_MUTABLE explicitly... check??
 	}

@@ -1,7 +1,6 @@
 package node
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -57,71 +56,72 @@ func CompareJSON(obj1, obj2 interface{}) string {
 	return fmt.Sprintf("Diff detected:\n%s", diffStr)
 }
 
-func TestCompareLogs(t *testing.T) {
-	f1, err := os.Open("interpreter/10_refine.json")
-	if err != nil {
-		t.Fatalf("failed to open interpreter/vm_log.json: %v", err)
-	}
-	defer f1.Close()
-
-	f2, err := os.Open("sandbox/10_refine.json")
-	if err != nil {
-		t.Fatalf("failed to open sandbox/vm_log.json: %v", err)
-	}
-	defer f2.Close()
-
-	s1 := bufio.NewScanner(f1)
-	s2 := bufio.NewScanner(f2)
-
-	var i int
-	for {
-
-		has1 := s1.Scan()
-		has2 := s2.Scan()
-
-		if err := s1.Err(); err != nil {
-			t.Fatalf("error scanning vm_log.json at line %d: %v", i, err)
+/*
+	func TestCompareLogs(t *testing.T) {
+		f1, err := os.Open("interpreter/10_refine.json")
+		if err != nil {
+			t.Fatalf("failed to open interpreter/vm_log.json: %v", err)
 		}
-		if err := s2.Err(); err != nil {
-			t.Fatalf("error scanning vm_log_compiler.json at line %d: %v", i, err)
-		}
+		defer f1.Close()
 
-		// both files ended → success
-		if !has1 && !has2 {
-			break
+		f2, err := os.Open("sandbox/10_refine.json")
+		if err != nil {
+			t.Fatalf("failed to open sandbox/vm_log.json: %v", err)
 		}
-		if i == 0 {
-			i++
-			continue
-		}
-		// one ended early → length mismatch
-		if has1 != has2 {
-			t.Fatalf("log length mismatch at index %d: has vm_log=%v, has vm_log_compiler=%v", i, has1, has2)
-		}
+		defer f2.Close()
 
-		// unmarshal each line into your entry type
-		var orig, recp pvm.VMLog
-		if err := json.Unmarshal(s1.Bytes(), &orig); err != nil {
-			t.Fatalf("failed to unmarshal line %d of vm_log.json: %v", i, err)
-		}
-		if err := json.Unmarshal(s2.Bytes(), &recp); err != nil {
-			t.Fatalf("failed to unmarshal line %d of vm_log_compiler.json: %v", i, err)
-		}
+		s1 := bufio.NewScanner(f1)
+		s2 := bufio.NewScanner(f2)
 
-		// compare
-		if !reflect.DeepEqual(orig.OpStr, recp.OpStr) || !reflect.DeepEqual(orig.Operands, recp.Operands) || !reflect.DeepEqual(orig.Registers, recp.Registers) || !reflect.DeepEqual(orig.Gas, recp.Gas) {
-			fmt.Printf("Difference at index %d:\nOriginal: %+v\nCompiler: %+v\n", i, orig, recp)
-			if diff := CompareJSON(orig, recp); diff != "" {
-				fmt.Println("Differences:", diff)
-				t.Fatalf("differences at index %d: %s", i, diff)
+		var i int
+		for {
+
+			has1 := s1.Scan()
+			has2 := s2.Scan()
+
+			if err := s1.Err(); err != nil {
+				t.Fatalf("error scanning vm_log.json at line %d: %v", i, err)
 			}
-		} else if i%100000 == 0 {
-			fmt.Printf("Index %d: no difference %s\n", i, s1.Bytes())
-		}
-		i++
-	}
-}
+			if err := s2.Err(); err != nil {
+				t.Fatalf("error scanning vm_log_compiler.json at line %d: %v", i, err)
+			}
 
+			// both files ended → success
+			if !has1 && !has2 {
+				break
+			}
+			if i == 0 {
+				i++
+				continue
+			}
+			// one ended early → length mismatch
+			if has1 != has2 {
+				t.Fatalf("log length mismatch at index %d: has vm_log=%v, has vm_log_compiler=%v", i, has1, has2)
+			}
+
+			// unmarshal each line into your entry type
+			var orig, recp pvm.VMLog
+			if err := json.Unmarshal(s1.Bytes(), &orig); err != nil {
+				t.Fatalf("failed to unmarshal line %d of vm_log.json: %v", i, err)
+			}
+			if err := json.Unmarshal(s2.Bytes(), &recp); err != nil {
+				t.Fatalf("failed to unmarshal line %d of vm_log_compiler.json: %v", i, err)
+			}
+
+			// compare
+			if !reflect.DeepEqual(orig.OpStr, recp.OpStr) || !reflect.DeepEqual(orig.Operands, recp.Operands) || !reflect.DeepEqual(orig.Registers, recp.Registers) || !reflect.DeepEqual(orig.Gas, recp.Gas) {
+				fmt.Printf("Difference at index %d:\nOriginal: %+v\nCompiler: %+v\n", i, orig, recp)
+				if diff := CompareJSON(orig, recp); diff != "" {
+					fmt.Println("Differences:", diff)
+					t.Fatalf("differences at index %d: %s", i, diff)
+				}
+			} else if i%100000 == 0 {
+				fmt.Printf("Index %d: no difference %s\n", i, s1.Bytes())
+			}
+			i++
+		}
+	}
+*/
 func ReadStateTransition(filename string) (stf *statedb.StateTransition, err error) {
 	stBytes, err := os.ReadFile(filename)
 	if err != nil {

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path/filepath"
 	"runtime/debug"
 	"slices"
 	"strings"
@@ -522,7 +521,7 @@ func (vm *CompilerVM) ExecuteX86Code(x86code []byte) (err error) {
 		str := vm.Disassemble(vm.realCode)
 		fmt.Printf("ALL COMBINED Disassembled x86 code:\n%s\n", str)
 	}
-	crashed, msec, err := ExecuteX86(codeAddr, vm.regDumpMem)
+	crashed, _, err := ExecuteX86(codeAddr, vm.regDumpMem)
 	for i := 0; i < regSize; i++ {
 		regValue := binary.LittleEndian.Uint64(vm.regDumpMem[i*8:])
 		if showDisassembly {
@@ -530,7 +529,7 @@ func (vm *CompilerVM) ExecuteX86Code(x86code []byte) (err error) {
 		}
 		vm.Ram.WriteRegister(i, regValue)
 	}
-	vm.SetIdentifier(fmt.Sprintf("%d", msec))
+	//vm.SetIdentifier(fmt.Sprintf("%d", msec))
 	if crashed == -1 || err != nil {
 		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
@@ -645,8 +644,8 @@ func (vm *CompilerVM) ExecuteX86CodeWithEntry(x86code []byte, entry uint32) (err
 	}
 	vm.compileTime += common.Elapsed(startTime)
 	startTime = time.Now()
-	crashed, msec, err := ExecuteX86(codeAddr, vm.regDumpMem)
-	vm.SetIdentifier(fmt.Sprintf("%d", msec))
+	crashed, _, err := ExecuteX86(codeAddr, vm.regDumpMem)
+	//vm.SetIdentifier(fmt.Sprintf("%d", msec))
 	for i := 0; i < regSize; i++ {
 		regValue := binary.LittleEndian.Uint64(vm.regDumpMem[i*8:])
 		if showDisassembly {
@@ -694,20 +693,7 @@ func (rvm *CompilerVM) Execute(entry uint32) {
 		// we don't have to return this , just print it
 		fmt.Printf("ExecuteX86 crash detected: %v\n", err)
 	}
-	if UseTally {
-		jsonFile := fmt.Sprintf("test/%s.json", rvm.GetIdentifier())
 
-		// ensure the directory exists (mkdir -p)
-		dir := filepath.Dir(jsonFile)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			fmt.Printf("failed to create directory %q: %v\n", dir, err)
-		}
-		// dump JSON tally
-		if err := rvm.TallyJSON(jsonFile); err != nil {
-			fmt.Printf("failed to write JSON tally: %v\n", err)
-		}
-
-	}
 }
 
 func (vm *VM) CalculateTally() {

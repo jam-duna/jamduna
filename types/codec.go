@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -29,24 +30,34 @@ func powerOfTwo(exp uint32) uint64 {
 	return result
 }
 
-// GP v0.3.6 eq(271)  E_l - Integer Encoding
 func E_l(x uint64, l uint32) []byte {
-	if l == 0 {
-		return []byte{}
-	} else {
-		encoded := []byte{byte(x % 256)}
-		encoded = append(encoded, E_l(x/256, l-1)...)
-		return encoded
+	n := int(l)
+	if n <= 0 {
+		return nil
 	}
+	b := make([]byte, n)
+
+	if n >= 8 {
+		binary.LittleEndian.PutUint64(b[:8], x)
+		// b[8:] already zeroed
+		return b
+	}
+
+	// n < 8
+	for i := 0; i < n; i++ {
+		b[i] = byte(x)
+		x >>= 8
+	}
+	return b
 }
 
-// GP v0.3.6 eq(271)  E_l - Integer Decoding
-func DecodeE_l(encoded []byte) uint64 {
-	var x uint64 = 0
-	for i := len(encoded) - 1; i >= 0; i-- {
-		x = x*256 + uint64(encoded[i])
+func DecodeE_l(b []byte) uint64 {
+	if len(b) >= 8 {
+		return binary.LittleEndian.Uint64(b[:8])
 	}
-	return x
+	var buf [8]byte // stack-allocated, no heap escape
+	copy(buf[:], b)
+	return binary.LittleEndian.Uint64(buf[:])
 }
 
 // GP v0.3.6 eq(272)  E - Integer Encoding: general natural number serialization up to 2^64

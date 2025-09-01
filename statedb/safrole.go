@@ -606,7 +606,6 @@ func (s *SafroleState) validateTicketWithRing(t *types.Ticket, shifted bool, rin
 	return common.Hash{}, jamerrors.ErrTBadRingProof
 }
 
-
 // ringVRF
 func (s *SafroleState) ValidateIncomingTicket(t *types.Ticket) (common.Hash, int, error) {
 	if t.Attempt >= types.TicketEntriesPerValidator {
@@ -912,12 +911,10 @@ func (s *SafroleState) ApplyStateTransitionTickets(ctx context.Context, tickets 
 	benchRec.Add("- ApplyStateTransitionTickets:ValidateSafrole", time.Since(t0))
 
 	// tally existing ticketIDs
-	t0 = time.Now()
 	ticketIDs := make(map[common.Hash]uint8)
 	for _, a := range s.NextEpochTicketsAccumulator {
 		ticketIDs[a.Id] = a.Attempt
 	}
-	benchRec.Add("- ApplyStateTransitionTickets:TallyTicketIDs", time.Since(t0))
 
 	// Process Extrinsic Tickets
 	t0 = time.Now()
@@ -928,15 +925,12 @@ func (s *SafroleState) ApplyStateTransitionTickets(ctx context.Context, tickets 
 	}
 	benchRec.Add("- ApplyStateTransitionTickets:GetFreshRandomness", time.Since(t0))
 
-	t0 = time.Now()
 	s2, _, err := s.ValidateTicketTransition(targetJCE, fresh_randomness)
 	if err != nil {
 		return *s, fmt.Errorf("error applying state transition safrole in MakeBlock: %v", err)
 	}
-	benchRec.Add("- ApplyStateTransitionTickets:ValidateTicketTransition", time.Since(t0))
 
 	// If the ticket is valid, add it to the accumulator
-	t0 = time.Now()
 	for _, ticket := range ticketBodies {
 		s2.PutTicketInAccumulator(ticket)
 		select {
@@ -945,9 +939,7 @@ func (s *SafroleState) ApplyStateTransitionTickets(ctx context.Context, tickets 
 		default:
 		}
 	}
-	benchRec.Add("- ApplyStateTransitionTickets:PutTicketsInAccumulator", time.Since(t0))
 
-	t0 = time.Now()
 	if header.TicketsMark != nil {
 		winning_ticket_mark := header.TicketsMark
 		if len(winning_ticket_mark) != types.EpochLength {
@@ -959,12 +951,9 @@ func (s *SafroleState) ApplyStateTransitionTickets(ctx context.Context, tickets 
 			}
 		}
 	}
-	benchRec.Add("- ApplyStateTransitionTickets:ValidateTicketsMark", time.Since(t0))
 
 	// Sort and trim tickets
-	t0 = time.Now()
 	s2.SortAndTrimTickets()
-	benchRec.Add("- ApplyStateTransitionTickets:SortAndTrimTickets", time.Since(t0))
 
 	s2.Timeslot = targetJCE
 
@@ -1098,7 +1087,6 @@ func (s *SafroleState) ValidateTicketTransition(targetJCE uint32, fresh_randomne
 // this function is for validate the block input is correct or not
 // should use the s3
 func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32, header types.BlockHeader, valid_tickets map[common.Hash]common.Hash) ([]types.TicketBody, error) {
-	t0 := time.Now()
 	if valid_tickets == nil {
 		valid_tickets = make(map[common.Hash]common.Hash)
 	}
@@ -1120,20 +1108,15 @@ func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32,
 		// Epoch in progress
 		s2.StableEntropy(s, new_entropy_0)
 	}
-	benchRec.Add("-- ValidateSafrole:Setup", time.Since(t0))
 
-	t0 = time.Now()
 	ringBytes, ringSize := s2.GetRingSet("Next")
-	benchRec.Add("-- ValidateSafrole:GetRingSet", time.Since(t0))
 
-	t0 = time.Now()
 	accMap := make(map[common.Hash]bool)
 	for _, a := range s2.NextEpochTicketsAccumulator {
 		accMap[a.Id] = true
 	}
-	benchRec.Add("-- ValidateSafrole:BuildAccumulatorMap", time.Since(t0))
 
-	t0 = time.Now()
+	t0 := time.Now()
 	ticketBodies := make([]types.TicketBody, 0) // n
 	var wg sync.WaitGroup
 	errors := make(chan error, len(tickets))
@@ -1171,7 +1154,6 @@ func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32,
 	wg.Wait()
 	benchRec.Add("-- ValidateSafrole:ParallelValidation", time.Since(t0))
 
-	t0 = time.Now()
 	select {
 	case err := <-errors:
 		if err != nil {
@@ -1180,9 +1162,7 @@ func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32,
 	default:
 		// No error
 	}
-	benchRec.Add("-- ValidateSafrole:ErrorCheck", time.Since(t0))
 
-	t0 = time.Now()
 	for _, t := range tickets {
 		ticketId, ok := valid_tickets[t.Hash()]
 		if !ok {
@@ -1194,9 +1174,7 @@ func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32,
 		}
 		ticketBodies = append(ticketBodies, ticketBody)
 	}
-	benchRec.Add("-- ValidateSafrole:CreateTicketBodies", time.Since(t0))
 
-	t0 = time.Now()
 	// check ticketBodies sorted by Id
 	// use bytes to compare
 	for i, a := range ticketBodies {
@@ -1204,7 +1182,6 @@ func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32,
 			return nil, jamerrors.ErrTTicketsBadOrder
 		}
 	}
-	benchRec.Add("-- ValidateSafrole:SortCheck", time.Since(t0))
 	return ticketBodies, nil
 }
 
