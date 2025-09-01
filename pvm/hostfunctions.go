@@ -77,7 +77,7 @@ var hostFnNames = map[int]string{
 	YIELD:             "YIELD",
 	PROVIDE:           "PROVIDE",
 	MANIFEST:          "MANIFEST",
-	LOG:               "LOG",
+	LOG:               "DEBUG",
 }
 
 func HostFnToName(hostFn int) string {
@@ -227,7 +227,7 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 		return true, fmt.Errorf("out of gas")
 	}
 	if PvmLogging {
-		fmt.Printf("Calling HOST %s \tECALLI_%d\n", HostFnToName(host_fn), host_fn)
+		fmt.Printf("%d %s: Calling host function: %s %d\n", vm.Service_index, vm.Mode, HostFnToName(host_fn), host_fn)
 	}
 
 	return vm.hostFunction(host_fn)
@@ -420,7 +420,7 @@ func (vm *VM) hostInfo() {
 		vm.MachineState = PANIC
 		return
 	}
-	log.Debug(vm.logging, "INFO OK", "s", fmt.Sprintf("%d", omega_7), "info", fmt.Sprintf("%v", elements))
+	log.Trace(vm.logging, "INFO OK", "s", fmt.Sprintf("%d", omega_7), "info", fmt.Sprintf("%v", elements))
 	vm.Ram.WriteRegister(7, lenval)
 	vm.HostResultCode = OK
 }
@@ -432,13 +432,6 @@ func (vm *VM) hostBless() {
 	v, _ := vm.Ram.ReadRegister(9)
 	o, _ := vm.Ram.ReadRegister(10)
 	n, _ := vm.Ram.ReadRegister(11)
-
-	if m > (1<<32)-1 || v > (1<<32)-1 {
-		vm.Ram.WriteRegister(7, WHO)
-		vm.HostResultCode = WHO
-		log.Debug(vm.logging, "BLESS WHO", "m", fmt.Sprintf("%d", m), "a", fmt.Sprintf("%d", a), "v", fmt.Sprintf("%d", v))
-		return
-	}
 
 	bold_z := make(map[uint32]uint64)
 	for i := 0; i < int(n); i++ {
@@ -465,6 +458,7 @@ func (vm *VM) hostBless() {
 		}
 		bold_a[i] = binary.LittleEndian.Uint32(data)
 	}
+
 	xContext := vm.X
 	xs, _ := xContext.GetX_s() //vm.X.S.ServiceIndex
 	privilegedService_m := vm.X.U.PrivilegedState.ManagerServiceID
@@ -475,6 +469,12 @@ func (vm *VM) hostBless() {
 		return
 	}
 	//TODO: check who!!
+	if m > (1<<32)-1 || v > (1<<32)-1 {
+		vm.Ram.WriteRegister(7, WHO)
+		vm.HostResultCode = WHO
+		log.Debug(vm.logging, "BLESS WHO", "m", fmt.Sprintf("%d", m), "a", fmt.Sprintf("%d", a), "v", fmt.Sprintf("%d", v))
+		return
+	}
 
 	// Set (x'p)_m, (x'p)_a, (x'p)_v
 	vm.X.U.PrivilegedState.ManagerServiceID = uint32(m)
@@ -493,17 +493,17 @@ func (vm *VM) hostAssign() {
 	o, _ := vm.Ram.ReadRegister(8)
 	a, _ := vm.Ram.ReadRegister(9)
 
-	if c >= types.TotalCores {
-		vm.Ram.WriteRegister(7, CORE)
-		vm.HostResultCode = CORE
-		log.Debug(vm.logging, "ASSIGN CORE", "c", c)
-		return
-	}
 	q, errcode := vm.Ram.ReadRAMBytes(uint32(o), 32*types.MaxAuthorizationQueueItems)
 	if errcode != OK {
 		vm.Ram.WriteRegister(7, OOB)
 		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
+		vm.terminated = true
+		return
+	}
+	if c >= types.TotalCores {
+		vm.Ram.WriteRegister(7, CORE)
+		vm.HostResultCode = CORE
 		return
 	}
 	bold_q := make([]common.Hash, types.MaxAuthorizationQueueItems)
@@ -1421,7 +1421,7 @@ func (vm *VM) hostRead() {
 	if !ok { // || true
 		vm.Ram.WriteRegister(7, NONE)
 		vm.HostResultCode = NONE
-		log.Debug(vm.logging, "READ NONE", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "ok", ok, "val", fmt.Sprintf("%x", val), "len(val)", len(val), "source", storage_source)
+		log.Trace(vm.logging, "READ NONE", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "ok", ok, "val", fmt.Sprintf("%x", val), "len(val)", len(val), "source", storage_source)
 		return
 	}
 	log.Trace(vm.logging, "READ OK", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "ok", ok, "val", fmt.Sprintf("%x", val), "len(val)", len(val), "source", storage_source)
@@ -1754,6 +1754,13 @@ func (vm *VM) hostExport() {
 }
 
 func (vm *VM) hostMachine() {
+	if vm.Mode != ModeRefine {
+		// TODO:
+		vm.Ram.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+
+	}
 	po, _ := vm.Ram.ReadRegister(7)
 	pz, _ := vm.Ram.ReadRegister(8)
 	i, _ := vm.Ram.ReadRegister(9)

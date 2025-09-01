@@ -371,7 +371,7 @@ func GetRingCommitment(ringSize int, ringsetBytes []byte) ([]byte, error) {
 	commitmentCache.mu.RUnlock()
 
 	// Not in cache, compute the commitment
-	fmt.Printf("GetRingCommitment (computing): len(ringsetBytes)=%d, ringSize=%d c=%s\n", len(ringsetBytes), ringSize, common.Blake2Hash(ringsetBytes))
+	//fmt.Printf("GetRingCommitment (computing): len(ringsetBytes)=%d, ringSize=%d c=%s\n", len(ringsetBytes), ringSize, common.Blake2Hash(ringsetBytes))
 
 	emptyBytes := make([]byte, BlsLen)
 	commitmentBytes := make([]byte, BlsLen)

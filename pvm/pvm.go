@@ -635,12 +635,11 @@ func (vm *VM) step(stepn int) error {
 	// avoid this: this is expensive
 	if PvmLogging { //  || opcode == ECALLI || opcode == SBRK {
 		registersJSON, _ := json.Marshal(vm.Ram.ReadRegisters())
-		prettyJSON := strings.ReplaceAll(string(registersJSON), ",", " ")
-		fmt.Printf("%s %d: %-18s step:%6d pc:%6d gas:%d Registers:%s\n", vm.Mode, vm.Service_index, opcode_str(opcode), stepn-1, vm.pc, vm.Gas, prettyJSON)
-
-		//fmt.Printf("instruction=%d pc=%d g=%d Registers=%s\n", opcode, vm.pc, vm.Gas-1, prettyJSON)
-		//fmt.Printf("%s %d %d Registers:%s\n", opcode_str(opcode), stepn-1, vm.pc, prettyJSON)
+		prettyJSON := strings.ReplaceAll(string(registersJSON), ",", ", ")
+		//fmt.Printf("%s %d: %-18s step:%6d pc:%6d Registers:%s\n", vm.Mode, vm.Service_index, opcode_str(opcode), stepn-1, vm.pc, vm.Gas, prettyJSON)
+		fmt.Printf("%d-%s: %s %d %d Gas: %d Registers:%s\n", vm.Service_index, vm.Mode, opcode_str(opcode), stepn-1, vm.pc, vm.Gas, prettyJSON)
 	}
+
 	return nil
 }
 

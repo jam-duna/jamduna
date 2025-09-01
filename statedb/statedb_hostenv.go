@@ -248,7 +248,7 @@ func (s *StateDB) ReadServiceStorage(service uint32, k []byte) (storage []byte, 
 	tree := s.GetTrie()
 	storage, ok, err = tree.GetServiceStorage(service, k)
 	if err != nil || !ok {
-		log.Debug(log.SDB, "ReadServiceStorage: Not found", "service", service, "key", fmt.Sprintf("%x", k), "err", err)
+		log.Trace(log.SDB, "ReadServiceStorage: Not found", "service", service, "key", fmt.Sprintf("%x", k), "err", err)
 		return storage, ok, err
 	}
 	log.Trace(log.SDB, "ReadServiceStorage", "service", service, "key", fmt.Sprintf("%x", k), "value", fmt.Sprintf("%x", storage))

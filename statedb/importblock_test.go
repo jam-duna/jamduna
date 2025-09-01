@@ -528,14 +528,22 @@ func TestSingleFuzzTrace(t *testing.T) {
 		t.Fatalf("failed to get fuzz reports path: %v", err)
 	}
 
-	// FAILS due to recent accumulation being updated too early
-	fileMap["6995"] = "0.6.7/traces/TESTING/1755796995/00000011.bin"
-	fileMap["0509"] = "0.6.7/traces/TESTING/1755530509/00000004.bin"
-	fileMap["0728"] = "0.6.7/traces/1755530728/00000008.bin"
-	fileMap["1265"] = "0.6.7/traces/1755531265/00000008.bin"
-	fileMap["6851"] = "0.6.7/traces/TESTING/1755796851/00000016.bin"
+	// solved with the ASSIGN reordering
+	fileMap["8741"] = "fuzz-reports/0.7.0/traces/1756548741/00000059.bin"
+	fileMap["8916"] = "fuzz-reports/0.7.0/traces/1756548916/00000082.bin"
 
-	team := "6995" //6995
+	// solved by reordering BLESS host function
+	fileMap["8459"] = "fuzz-reports/0.7.0/traces/1756548459/00000042.bin"
+
+	// solved with WHAT fix on MACHINE host function
+	fileMap["8583"] = "fuzz-reports/0.7.0/traces/1756548583/00000009.bin"
+
+	// [MC] upon EJECT, do we delete the preimage we newed and it appears our DeleteService doesn't work?
+	//  EJECT WHO 0xff2400e90048008e0000000000000000000000000000000000000000000000
+	fileMap["8706"] = "fuzz-reports/0.7.0/traces/1756548706/00000094.bin"
+
+	// test one of them out
+	team := "8459"
 	filename, exists := fileMap[team]
 	if !exists {
 		t.Fatalf("team %s not found in fileMap", team)

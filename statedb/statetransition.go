@@ -195,7 +195,7 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 		if !bytes.Equal(post_state.StateRoot.Bytes(), st.PostState.StateRoot.Bytes()) {
 			return diffs, fmt.Errorf("PostState.StateRoot mismatch: expected %s, got %s", st.PostState.StateRoot.Hex(), post_state.StateRoot.Hex())
 		}
-		fmt.Printf("STF StateRoot - Pre: %s | Post: %s\n", preState.StateRoot.Hex(), post_state.StateRoot.Hex())
+		//fmt.Printf("STF StateRoot - Pre: %s | Post: %s\n", preState.StateRoot.Hex(), post_state.StateRoot.Hex())
 	}
 
 	s0 := preState
