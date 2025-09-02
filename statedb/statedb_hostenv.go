@@ -141,11 +141,13 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 			log.Warn(log.SDB, "tree.DeleteService", "service_idx", service_idx, "err", err)
 			return
 		}
-		log.Info(log.SDB, "tree.DeleteService SUCCESS", "service_idx", service_idx)
+		//log.Info(log.SDB, "tree.DeleteService SUCCESS", "service_idx", service_idx)
+	} else {
+		t0 = time.Now()
+		err = s.writeService(service_idx, sa)
+		benchRec.Add("*** ApplyXContext: writeAccount:writeService", time.Since(t0))
+
 	}
-	t0 = time.Now()
-	err = s.writeService(service_idx, sa)
-	benchRec.Add("*** ApplyXContext: writeAccount:writeService", time.Since(t0))
 	if sa.NumStorageItems != start_NumStorageItems {
 		fmt.Printf(" a_i [s=%d] changed from %d to %d\n", sa.ServiceIndex, start_NumStorageItems, sa.NumStorageItems)
 	}

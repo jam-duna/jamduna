@@ -1,6 +1,7 @@
 package pvm
 
 import (
+	"encoding/binary"
 	"math/bits"
 
 	"github.com/colorfulnotion/jam/types"
@@ -64,8 +65,10 @@ func (vm *VM) handleSTORE_IND_U64(opcode byte, operands []byte) {
 	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
 	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
 	addr := uint32((uint64(valueB) + vx) % (1 << 32))
-	errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(uint64(valueA), 8))
-	dumpStoreGeneric("STORE_IND_U64", uint64(addr), reg(registerIndexA), valueA, 64)
+	errCode := vm.Ram.WriteRAMBytes64(addr, valueA)
+	if PvmTrace {
+		dumpStoreGeneric("STORE_IND_U64", uint64(addr), reg(registerIndexA), valueA, 64)
+	}
 	if errCode != OK {
 		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
@@ -187,10 +190,13 @@ func (vm *VM) handleLOAD_IND_I32(opcode byte, operands []byte) {
 }
 
 func (vm *VM) handleLOAD_IND_U64(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
+
+	registerIndexA := min(12, int(operands[0]&0x0F))
+	registerIndexB := min(12, int(operands[0]>>4))
+	lx := min(4, max(0, len(operands)-1))
+	vx := x_encode(types.DecodeE_l(operands[1:1+lx]), uint32(lx))
 	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	addr := uint32((uint64(valueB) + vx) % (1 << 32))
-	value, errCode := vm.Ram.ReadRAMBytes(addr, 8)
+	value, errCode := vm.Ram.ReadRAMBytes(uint32((uint64(valueB) + vx)), 8)
 	if errCode != OK {
 		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
@@ -198,9 +204,10 @@ func (vm *VM) handleLOAD_IND_U64(opcode byte, operands []byte) {
 		vm.Fault_address = uint32(errCode)
 		return
 	}
-	result := types.DecodeE_l(value)
-	dumpLoadGeneric("LOAD_IND_U64", registerIndexA, uint64(addr), result, 64, false)
-	vm.Ram.WriteRegister(registerIndexA, result)
+	if PvmTrace {
+		dumpLoadGeneric("LOAD_IND_U64", registerIndexA, uint64((uint64(valueB) + vx)), binary.LittleEndian.Uint64(value), 64, false)
+	}
+	vm.Ram.WriteRegister(registerIndexA, binary.LittleEndian.Uint64(value))
 	vm.pc += 1 + uint64(len(operands))
 }
 
@@ -216,10 +223,15 @@ func (vm *VM) handleADD_IMM_32(opcode byte, operands []byte) {
 }
 
 func (vm *VM) handleADD_IMM_64(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
+	registerIndexA := min(12, int(operands[0]&0x0F))
+	registerIndexB := min(12, int(operands[0]>>4))
+	lx := min(4, max(0, len(operands)-1))
+	vx := x_encode(types.DecodeE_l(operands[1:1+lx]), uint32(lx))
 	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
 	result := valueB + vx
-	dumpBinOp("+", registerIndexA, registerIndexB, vx, result)
+	if PvmTrace {
+		dumpBinOp("+", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.Ram.WriteRegister(registerIndexA, result)
 	vm.pc += 1 + uint64(len(operands))
 }

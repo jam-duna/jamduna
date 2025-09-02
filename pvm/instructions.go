@@ -94,14 +94,14 @@ const (
 	STORE_IND_U8      = 120
 	STORE_IND_U16     = 121
 	STORE_IND_U32     = 122
-	STORE_IND_U64     = 123
+	STORE_IND_U64     = 123 // hotspot
 	LOAD_IND_U8       = 124
 	LOAD_IND_I8       = 125
 	LOAD_IND_U16      = 126
 	LOAD_IND_I16      = 127
 	LOAD_IND_U32      = 128
 	LOAD_IND_I32      = 129
-	LOAD_IND_U64      = 130
+	LOAD_IND_U64      = 130 // hotspot
 	ADD_IMM_32        = 131
 	AND_IMM           = 132
 	XOR_IMM           = 133
@@ -120,7 +120,7 @@ const (
 	SHAR_R_IMM_ALT_32 = 146
 	CMOV_IZ_IMM       = 147
 	CMOV_NZ_IMM       = 148
-	ADD_IMM_64        = 149
+	ADD_IMM_64        = 149 // hotspot
 	MUL_IMM_64        = 150
 	SHLO_L_IMM_64     = 151
 	SHLO_R_IMM_64     = 152

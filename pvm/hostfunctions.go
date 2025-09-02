@@ -1112,7 +1112,7 @@ func (vm *VM) hostEject() {
 	if d == uint64(xContext.ServiceIndex) {
 		vm.Ram.WriteRegister(7, WHO)
 		vm.HostResultCode = WHO
-		log.Warn("XXX", "EJECT WHO -- cannot eject self", "d", fmt.Sprintf("%d", d), "vm.X.ServiceIndex", fmt.Sprintf("%d", vm.X.ServiceIndex))
+		log.Warn(vm.logging, "EJECT WHO -- cannot eject self", "d", fmt.Sprintf("%d", d), "vm.X.ServiceIndex", fmt.Sprintf("%d", vm.X.ServiceIndex))
 		return
 	}
 	bold_d, errCode := vm.getXUDS(d)
@@ -1121,9 +1121,11 @@ func (vm *VM) hostEject() {
 		vm.HostResultCode = WHO
 		return
 	}
+	tst := common.Hash(types.E_l(uint64(vm.X.ServiceIndex), 32))
+	//fmt.Printf("EJECT: x_s.ServiceIndex=%d bold_d.ServiceIndex=%d e32(s)=%s d.CodeHash=%s\n", vm.X.ServiceIndex, bold_d.ServiceIndex, tst, bold_d.CodeHash)
 	l := max(AccountLookupConst, bold_d.StorageSize) - AccountLookupConst
 	ok, D_lookup, lookup_source := bold_d.ReadLookup(common.BytesToHash(h), uint32(l), vm.hostenv)
-	if !ok || bold_d.NumStorageItems != 2 {
+	if !ok || bold_d.NumStorageItems != 2 || !bytes.Equal(tst.Bytes(), bold_d.CodeHash.Bytes()) {
 		vm.Ram.WriteRegister(7, HUH)
 		vm.HostResultCode = HUH
 		log.Debug(vm.logging, "EJECT HUH", "d", fmt.Sprintf("%d", d), "h", h, "l", l, "lookup_source", lookup_source)
@@ -1137,7 +1139,11 @@ func (vm *VM) hostEject() {
 		vm.HostResultCode = OK
 		xContext.U.ServiceAccounts[uint32(d)] = bold_d
 		bold_d.DeletedAccount = true
+		bold_d.Mutable = true
 		log.Debug(vm.logging, "EJECT OK", "d", fmt.Sprintf("%d", d))
+		blobHash := common.BytesToHash(h)
+		bold_d.WriteLookup(blobHash, uint32(l), nil, "trie") // nil means delete the lookup
+		bold_d.WritePreimage(blobHash, []byte{}, "trie")     // []byte{} means delete the preimage. TODO: should be preimage_source
 		return
 	}
 

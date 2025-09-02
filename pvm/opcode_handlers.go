@@ -39,7 +39,22 @@ func (vm *VM) handleSTORE_IMM_IND_U16(opcode byte, operands []byte) {
 	}
 	vm.pc += 1 + uint64(len(operands))
 }
+func (vm *CompilerRam) WriteRAMBytes64(address uint32, data uint64) uint64 {
+	// TODO
+	return OK
+}
 
+func (vm *Emulator) WriteRAMBytes64(address uint32, data uint64) uint64 {
+	// TODO
+
+	return OK
+}
+
+func (vm *RawRAM) WriteRAMBytes64(address uint32, data uint64) uint64 {
+	return OK
+	// TODO
+
+}
 func (vm *VM) handleSTORE_IMM_IND_U32(opcode byte, operands []byte) {
 	registerIndexA, vx, vy := extractOneReg2Imm(operands)
 	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
@@ -60,7 +75,7 @@ func (vm *VM) handleSTORE_IMM_IND_U64(opcode byte, operands []byte) {
 	registerIndexA, vx, vy := extractOneReg2Imm(operands)
 	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
 	addr := uint32(valueA) + uint32(vx)
-	errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(uint64(vy), 8))
+	errCode := vm.Ram.WriteRAMBytes64(addr, vy)
 	dumpStoreGeneric("STORE_IMM_IND_U64", uint64(addr), "imm", vy, 64)
 	if errCode != OK {
 		vm.ResultCode = types.WORKDIGEST_PANIC

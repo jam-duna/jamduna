@@ -739,9 +739,7 @@ func (t *MerkleTree) GetState(_stateIdentifier string) ([]byte, error) {
 func (t *MerkleTree) DeleteService(s uint32) error {
 	service_account := common.ComputeC_is(s)
 	stateKey := service_account.Bytes()
-	fmt.Printf("**** DeleteService C(s=%d)=%x\n", s, stateKey)
 	err := t.Delete(stateKey)
-	fmt.Printf("**** DeleteService C(s=%d)=%x err=%v\n", s, stateKey, err)
 	return err
 }
 

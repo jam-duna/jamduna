@@ -241,6 +241,15 @@ func TestTracesInterpreter(t *testing.T) {
 		fmt.Printf("%-45s  total=%-12s count=%-4d mean=%-10s p95=%-10s max=%-10s\n",
 			r.Name, r.Total, r.Count, r.Mean, r.P95, r.Max)
 	}
+	rows = pvm.BenchRows()
+	fmt.Println("\n=== Top 40 by TOTAL time ===")
+	for i, r := range rows {
+		if i == 40 {
+			break
+		}
+		fmt.Printf("%-45s  total=%-12s count=%-4d mean=%-10s p95=%-10s max=%-10s\n",
+			r.Name, r.Total, r.Count, r.Mean, r.P95, r.Max)
+	}
 
 }
 
@@ -430,7 +439,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 	fileMap["8706"] = "fuzz-reports/0.7.0/traces/1756548706/00000094.bin"
 
 	// test one of them out
-	team := "8459"
+	team := "8706"
 	filename, exists := fileMap[team]
 	if !exists {
 		t.Fatalf("team %s not found in fileMap", team)

@@ -6,7 +6,6 @@ import (
 	"math"
 
 	"github.com/colorfulnotion/jam/jamerrors"
-	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -114,7 +113,7 @@ func (n *JamState) tallyServiceStatistics(guarantees []types.Guarantee, preimage
 		statsByte, _ := types.Encode(v)
 		if v != nil {
 			if bytes.Equal(emptyStatsByte, statsByte) {
-				log.Debug(log.SDB, "tallyServiceStatistics: ignoring empty stats for service", "service", s)
+				//log.Debug(log.SDB, "tallyServiceStatistics: ignoring empty stats for service", "service", s)
 				continue
 			}
 			n.ValidatorStatistics.ServiceStatistics[s] = *v

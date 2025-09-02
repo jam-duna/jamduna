@@ -1,6 +1,7 @@
 package pvm
 
 import (
+	"encoding/binary"
 	"fmt"
 
 	"github.com/colorfulnotion/jam/log"
@@ -8,6 +9,7 @@ import (
 
 type RAMInterface interface {
 	WriteRAMBytes(address uint32, data []byte) uint64
+	WriteRAMBytes64(address uint32, data uint64) uint64
 	ReadRAMBytes(address uint32, length uint32) ([]byte, uint64)
 	allocatePages(startPage uint32, count uint32)
 	GetCurrentHeapPointer() uint32
@@ -33,7 +35,6 @@ type RAM struct {
 	output_address       uint32
 	output_end           uint32
 
-	first64k [65536]byte // first 64K of memory, used for special purposes
 	stack    []byte
 	rw_data  []byte
 	ro_data  []byte
@@ -108,19 +109,42 @@ func (ram *RAM) SetPageAccess(pageIndex int, access byte) {
 	// TODO: match the model of below ... but how?
 }
 
-// inRange reports whether the half-open interval [address, address+length) lies fully within [start, end).  It is crafted to avoid uint32 overflow.
+func (ram *RAM) WriteRAMBytes64(address uint32, data uint64) uint64 {
+	heapEnd := Z_func(ram.current_heap_pointer)
 
-func inRange(address, length, start, end uint32) bool {
-	if length == 0 {
-		return true
+	// RW data / heap region (writable up to heapEnd)
+	if address >= ram.rw_data_address && address <= heapEnd-8 {
+		offset := address - ram.rw_data_address
+		// Safety guard for dynamic growth; usually elided by compiler
+		if offEnd := offset + 8; offEnd > uint32(len(ram.rw_data)) {
+			return OOB
+		}
+		binary.LittleEndian.PutUint64(ram.rw_data[offset:offset+8], data)
+		return OK
 	}
-	// Must start inside region.
-	if address < start || address >= end {
-		return false
+
+	// Output region (writable)
+	if address >= ram.output_address && address <= ram.output_end-8 {
+		offset := address - ram.output_address
+		binary.LittleEndian.PutUint64(ram.output[offset:offset+8], data)
+		return OK
 	}
-	// address + length <= end  ⇔  address <= end - length
-	// (works even when length is large; avoids overflow)
-	return address <= end-length
+
+	// Stack region (writable)
+	if address >= ram.stack_address && address <= ram.stack_address_end-8 {
+		offset := address - ram.stack_address
+		binary.LittleEndian.PutUint64(ram.stack[offset:offset+8], data)
+		return OK
+	}
+
+	// RO data region (writes are OOB but we mimic prior behavior of copying then OOB)
+	if address >= ram.ro_data_address && address <= ram.ro_data_address_end-8 {
+		offset := address - ram.ro_data_address
+		binary.LittleEndian.PutUint64(ram.ro_data[offset:offset+8], data)
+		return OOB
+	}
+
+	return OOB
 }
 
 func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
@@ -130,29 +154,8 @@ func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
 	length := uint32(len(data))
 	heapEnd := Z_func(ram.current_heap_pointer)
 
-	// First 64K (special, write is OOB)
-	if inRange(address, length, 0, 65536) {
-		// Preserve existing semantics: writes to first64k return OOB.
-		copy(ram.first64k[address:], data)
-		return OOB
-	}
-
-	// Output region (writable)
-	if inRange(address, length, ram.output_address, ram.output_end) {
-		offset := address - ram.output_address
-		copy(ram.output[offset:offset+length], data)
-		return OK
-	}
-
-	// Stack region (writable)
-	if inRange(address, length, ram.stack_address, ram.stack_address_end) {
-		offset := address - ram.stack_address
-		copy(ram.stack[offset:offset+length], data)
-		return OK
-	}
-
 	// RW data / heap region (writable up to heapEnd)
-	if inRange(address, length, ram.rw_data_address, heapEnd) {
+	if address >= ram.rw_data_address && address <= heapEnd-length {
 		offset := address - ram.rw_data_address
 		// Safety guard for dynamic growth; usually elided by compiler
 		if offEnd := offset + length; offEnd > uint32(len(ram.rw_data)) {
@@ -162,8 +165,22 @@ func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
 		return OK
 	}
 
+	// Output region (writable)
+	if address >= ram.output_address && address <= ram.output_end-length {
+		offset := address - ram.output_address
+		copy(ram.output[offset:offset+length], data)
+		return OK
+	}
+
+	// Stack region (writable)
+	if address >= ram.stack_address && address <= ram.stack_address_end-length {
+		offset := address - ram.stack_address
+		copy(ram.stack[offset:offset+length], data)
+		return OK
+	}
+
 	// RO data region (writes are OOB but we mimic prior behavior of copying then OOB)
-	if inRange(address, length, ram.ro_data_address, ram.ro_data_address_end) {
+	if address >= ram.ro_data_address && address <= ram.ro_data_address_end-length {
 		offset := address - ram.ro_data_address
 		copy(ram.ro_data[offset:offset+length], data)
 		return OOB
@@ -173,36 +190,10 @@ func (ram *RAM) WriteRAMBytes(address uint32, data []byte) uint64 {
 }
 
 func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
-	if length == 0 {
-		return []byte{}, OK
-	}
 	heapEnd := Z_func(ram.current_heap_pointer)
 
-	// Output region
-	if inRange(address, length, ram.output_address, ram.output_end) {
-		offset := address - ram.output_address
-		if offset+length > uint32(len(ram.output)) {
-			return nil, OOB
-		}
-		return ram.output[offset : offset+length], OK
-	}
-
-	// First 64K (special; read returns OOB per existing semantics)
-	if inRange(address, length, 0, 65536) {
-		return ram.first64k[address : address+length], OOB
-	}
-
-	// Stack
-	if inRange(address, length, ram.stack_address, ram.stack_address_end) {
-		offset := address - ram.stack_address
-		if offset+length > uint32(len(ram.stack)) {
-			return nil, OOB
-		}
-		return ram.stack[offset : offset+length], OK
-	}
-
 	// RW data / heap
-	if inRange(address, length, ram.rw_data_address, heapEnd) {
+	if address >= ram.rw_data_address && address <= heapEnd-length {
 		offset := address - ram.rw_data_address
 		if offset+length > uint32(len(ram.rw_data)) {
 			return nil, OOB
@@ -211,12 +202,29 @@ func (ram *RAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 	}
 
 	// RO data
-	if inRange(address, length, ram.ro_data_address, ram.ro_data_address_end) {
+	if address >= ram.ro_data_address && address <= ram.ro_data_address_end-length {
 		offset := address - ram.ro_data_address
 		if offset+length > uint32(len(ram.ro_data)) {
 			return nil, OOB
 		}
 		return ram.ro_data[offset : offset+length], OK
+	}
+	// Output region
+	if address >= ram.output_address && address <= ram.output_end-length {
+		offset := address - ram.output_address
+		if offset+length > uint32(len(ram.output)) {
+			return nil, OOB
+		}
+		return ram.output[offset : offset+length], OK
+	}
+
+	// Stack
+	if address >= ram.stack_address && address <= ram.stack_address_end-length {
+		offset := address - ram.stack_address
+		if offset+length > uint32(len(ram.stack)) {
+			return nil, OOB
+		}
+		return ram.stack[offset : offset+length], OK
 	}
 
 	return nil, OOB
@@ -234,7 +242,6 @@ func (ram *RAM) allocatePages(startPage uint32, count uint32) {
 
 func (ram *RAM) GetCurrentHeapPointer() uint32 {
 	return ram.current_heap_pointer
-
 }
 
 func (ram *RAM) SetCurrentHeapPointer(pointer uint32) {
