@@ -32,7 +32,7 @@ blake2 = "0.10"
 crate-type = ["staticlib"]
 
 [profile.release]
-lto = true
+lto = false
 panic = "abort" 
 strip = true
 codegen-units = 1

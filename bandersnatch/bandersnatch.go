@@ -71,7 +71,7 @@ G.3: Ring for Ticket Generation
 
 const (
 	X_BANDERSNATCH_SEED = "jam_val_key_bandersnatch"
-	MAX_CACHE_SIZE      = 64
+	MAX_CACHE_SIZE      = 128
 )
 
 type lruCache[T any] struct {
@@ -136,9 +136,15 @@ func (c *lruCache[T]) evictOldest() {
 
 var commitmentCache = newLRUCache[[]byte](MAX_CACHE_SIZE, nil)
 var verifierCache_global = newLRUCache[uintptr](MAX_CACHE_SIZE, func(ptr uintptr) {
-	fmt.Printf("DEBUG: free_verifier called for ptr=%x\n", ptr)
 	C.free_verifier(unsafe.Pointer(ptr))
 })
+
+type ThreadLocalCache struct {
+	cache map[string]uintptr
+	keys  []string
+}
+
+var threadLocalCaches sync.Map
 
 type BanderSnatchSecret [SecretLen]byte
 type BanderSnatchKey [PubkeyLen]byte
@@ -181,36 +187,25 @@ func BytesToBanderSnatchKey(b []byte) (bs BanderSnatchKey, err error) {
 
 // InitBanderSnatchKey initializes the BanderSnatch keys using the provided seed.
 func InitBanderSnatchKey(seed []byte) (key BanderSnatchKey, secret BanderSnatchSecret, err error) {
-	// Check if the seed length is 32 bytes
 	if len(seed) != SeedLen {
 		return key, secret, fmt.Errorf("seed length must be %v bytes", SeedLen)
 	}
 
-	//bandersnatch_seed := seed
 	bandersnatch_seed := common.ComputeHash(append([]byte(X_BANDERSNATCH_SEED), seed...))
 
-	// Retrieve the public key
 	banderSnatch_pub, err := getBanderSnatchPublicKey(bandersnatch_seed)
 	if err != nil {
 		return key, secret, fmt.Errorf("failed to get public key: %v", err)
 	}
 
-	// Retrieve the private key
 	banderSnatch_priv, err := getBanderSnatchPrivateKey(bandersnatch_seed)
 	if err != nil {
 		return key, secret, fmt.Errorf("failed to get private key: %v", err)
 	}
-	// fmt.Printf("seed:%x\n", seed)
-	// fmt.Printf("bandersnatch_seed: %x\n", bandersnatch_seed)
-	// fmt.Printf("banderSnatch_pub: %x\n", banderSnatch_pub)
-	// fmt.Printf("banderSnatch_priv: %x\n", banderSnatch_priv)
-
 	return banderSnatch_pub, banderSnatch_priv, nil
 }
 
-// goal : speed up the processes
 func getBanderSnatchPublicKey(seed []byte) (BanderSnatchKey, error) {
-	//pubKey := make([]byte, 32) // Adjust size as necessary
 	pubKey := BanderSnatchKey{}
 	C.get_public_key(
 		(*C.uchar)(unsafe.Pointer(&seed[0])),
@@ -222,7 +217,6 @@ func getBanderSnatchPublicKey(seed []byte) (BanderSnatchKey, error) {
 }
 
 func getBanderSnatchPrivateKey(seed []byte) (BanderSnatchSecret, error) {
-	//secret := make([]byte, 32) // Adjust size as necessary
 	secret := BanderSnatchSecret{}
 	C.get_private_key(
 		(*C.uchar)(unsafe.Pointer(&seed[0])),
@@ -234,7 +228,6 @@ func getBanderSnatchPrivateKey(seed []byte) (BanderSnatchSecret, error) {
 }
 
 func InitRingSet(ringset []BanderSnatchKey) (ringsetBytes []byte) {
-	// Flatten pubkeys into a single byte slice
 	for _, pubkey := range ringset {
 		ringsetBytes = append(ringsetBytes, pubkey[:]...)
 	}
@@ -287,16 +280,30 @@ func RingVrfVerifyWithCache(ringSize int, ringsetBytes []byte, signature, vrfInp
 	ptr, ok := verifierCache_global.get(key)
 
 	if !ok {
-		v := C.create_verifier(
-			(*C.uchar)(unsafe.Pointer(&ringsetBytes[0])),
-			C.size_t(len(ringsetBytes)),
-			C.size_t(ringSize),
-		)
-		if v == nil {
-			return nil, fmt.Errorf("create verifier failed")
+		verifierCache_global.mu.Lock()
+		ptr, ok = verifierCache_global.cache[key]
+		if !ok {
+			v := C.create_verifier(
+				(*C.uchar)(unsafe.Pointer(&ringsetBytes[0])),
+				C.size_t(len(ringsetBytes)),
+				C.size_t(ringSize),
+			)
+			if v == nil {
+				verifierCache_global.mu.Unlock()
+				return nil, fmt.Errorf("create verifier failed")
+			}
+			ptr = uintptr(v)
+
+			if len(verifierCache_global.cache) < verifierCache_global.maxSize {
+				verifierCache_global.cache[key] = ptr
+				verifierCache_global.keys = append(verifierCache_global.keys, key)
+			} else {
+				verifierCache_global.mu.Unlock()
+				verifierCache_global.put(key, ptr)
+				verifierCache_global.mu.Lock()
+			}
 		}
-		ptr = uintptr(v)
-		verifierCache_global.put(key, ptr)
+		verifierCache_global.mu.Unlock()
 	}
 
 	out := make([]byte, VRFOutputLen)
@@ -424,7 +431,7 @@ func VRFOutput(privateKey BanderSnatchSecret, vrfInputData, auxData []byte) ([]b
 	return vrfOutput, nil
 }
 
-// Return vrfOutput given valid signature -- inputs are different though so probably not necessary?
+// Return vrfOutput given valid signature
 func VRFSignedOutput(signature []byte) ([]byte, error) {
 	vrfOutput := make([]byte, 32)
 	if len(signature) == RingSignatureLen {
@@ -464,16 +471,11 @@ func GetRingCommitment(ringSize int, ringsetBytes []byte) ([]byte, error) {
 	ringsetHash := common.Blake2Hash(ringsetBytes)
 	cacheKey := hex.EncodeToString(ringsetHash.Bytes())
 
-	// Check cache first
 	if cachedCommitment, exists := commitmentCache.get(cacheKey); exists {
-		// Return a copy to prevent external modification of cached data
 		result := make([]byte, len(cachedCommitment))
 		copy(result, cachedCommitment)
 		return result, nil
 	}
-
-	// Not in cache, compute the commitment
-	//fmt.Printf("GetRingCommitment (computing): len(ringsetBytes)=%d, ringSize=%d c=%s\n", len(ringsetBytes), ringSize, common.Blake2Hash(ringsetBytes))
 
 	emptyBytes := make([]byte, BlsLen)
 	commitmentBytes := make([]byte, BlsLen)
@@ -489,11 +491,17 @@ func GetRingCommitment(ringSize int, ringsetBytes []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to compute ring commitment")
 	}
 
-	// Store in cache
-	// Make a copy before storing to prevent external modification
 	cachedValue := make([]byte, len(commitmentBytes))
 	copy(cachedValue, commitmentBytes)
 	commitmentCache.put(cacheKey, cachedValue)
 
 	return commitmentBytes, nil
+}
+
+func InitCache() {
+	C.init_cache()
+}
+
+func init() {
+	InitCache()
 }

@@ -10,7 +10,7 @@ import (
 func GetJAMTestVectorPath(subDir ...string) string {
 	p := os.Getenv("JAM_TESTVECTORS_PATH")
 	if p == "" {
-		p = "/Users/sourabhniyogi/Desktop/jam-test-vectors"
+		p = "/Users/michael/Desktop/jam-test-vectors"
 	}
 	absPath, err := filepath.Abs(p)
 	if err != nil {

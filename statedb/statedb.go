@@ -368,14 +368,14 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	//γz :epoch’s root, a Bandersnatch ring root composed with the one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
 	//γa :the ticket accumulator, a series of highest-scoring ticket identifiers to be used for the next epoch (epoch N+1)
 	//γs :current epoch’s slot-sealer series, which is either a full complement of E tickets or, in the case of a fallback mode, a series of E Bandersnatch keys (epoch N)
-	t0 := time.Now()
+
 	sf := s.GetSafrole()
 	if sf == nil {
 		log.Crit(log.SDB, "UpdateTrieState: NO SAFROLE")
 	}
-	benchRec.Add("- UpdateTrieState:GetSafrole", time.Since(t0))
+	//benchRec.Add("- UpdateTrieState:GetSafrole", time.Since(t0))
 
-	t0 = time.Now()
+	t0 := time.Now()
 	sb := sf.GetSafroleBasicState()
 	benchRec.Add("- UpdateTrieState:GetSafroleBasicState", time.Since(t0))
 
@@ -804,7 +804,7 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 				return true, nil, nil, err
 			}
 			mode := "safrole"
-			if sf0.GetEpochT() == 0 {
+			if sf0.GetEpochTWithPhase(targetJCE) == 0 {
 				mode = "fallback"
 			}
 			log.Info(log.SDB, "Authored Block", "mode", mode, "AUTHOR", s.Id, "p", common.Str(proposedBlk.GetParentHeaderHash()), "h", common.Str(proposedBlk.Header.Hash()), "e'", currEpoch, "m'", currPhase, "len(γ_a')",
@@ -933,13 +933,17 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block, sf0 *SafroleState) (isValid
 	block_author_ietf_pub := bandersnatch.BanderSnatchKey(signing_validator.GetBandersnatchKey())
 
 	// compute c within (6.15) & (6.16)
-	blockSealEntropy := sf0.Entropy[3]
+	blockSealEntropy := sf0.Entropy[3] // Use entropy[3] for VRF input
+
 	var c []byte
-	if sf0.GetEpochT() == 1 {
+
+	if sf0.GetEpochTWithPhase(targetJCE) == 1 {
+		// Safrole
 		_, currPhase := sf0.EpochAndPhase(targetJCE)
 		winning_ticket := (sf0.TicketsOrKeys.Tickets)[currPhase]
 		c = ticketSealVRFInput(blockSealEntropy, uint8(winning_ticket.Attempt))
 	} else {
+		// Fallback
 		c = append([]byte(types.X_F), blockSealEntropy.Bytes()...)
 	}
 
@@ -996,7 +1000,7 @@ func (s *StateDB) SealBlockWithEntropy(blockAuthorPub bandersnatch.BanderSnatchK
 	// Prepare a container to store all intermediate values for debugging / auditing
 
 	blockSealEntropy := sf0.Entropy[3]
-	if sf0.GetEpochT() == 1 {
+	if sf0.GetEpochTWithPhase(targetJCE) == 1 {
 		_, currPhase := sf0.EpochAndPhase(targetJCE)
 		winningTicket := sf0.TicketsOrKeys.Tickets[currPhase]
 		ticketID := winningTicket.Id
@@ -1059,7 +1063,7 @@ func (s *StateDB) ValidateVRFSealInput(ticketID common.Hash, targetJCE uint32) (
 		log.Error(log.SDB, "GetPosteriorSafroleEntropy", "err", err)
 		return false, fmt.Errorf("ValidateVRFSealInput Failed: GetPosteriorSafroleEntropy")
 	}
-	if sf0.GetEpochT() == 0 {
+	if sf0.GetEpochTWithPhase(targetJCE) == 0 {
 		return true, nil
 	}
 

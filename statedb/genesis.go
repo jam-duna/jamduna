@@ -322,22 +322,29 @@ func NewStateDBFromStateKeyVals(sdb *storage.StateDBStorage, stateKeyVals *State
 }
 
 func NewStateDBFromStateTransition(sdb *storage.StateDBStorage, statetransition *StateTransition) (statedb *StateDB, err error) {
+	t0 := time.Now()
+
 	statedb, err = newStateDB(sdb, common.Hash{})
 	if err != nil {
 		return statedb, err
 	}
+	benchRec.Add("NewStateDBFromStateTransition:newStateDB", time.Since(t0))
+	t0 = time.Now()
 	statedb.Block = &(statetransition.Block)
 	isGenesis := IsGenesisSTF(statetransition)
 	if isGenesis && false {
 		statetransition.PreState = statetransition.PostState // Allow genesis stf to use poststate as prestate for first non-genesis block
 	}
 	statedb.StateRoot = statedb.UpdateAllTrieStateRaw(statetransition.PreState) // NOTE: MK -- USE PRESTATE
+	benchRec.Add("NewStateDBFromStateTransition:UpdateAllTrieStateRaw", time.Since(t0))
+	t0 = time.Now()
 	//fmt.Printf("NewStateDBFromStateTransition StateRoot: %s | isGenesis:%v\n", statedb.StateRoot.String(), isGenesis)
 	if (statedb.StateRoot != statetransition.Block.Header.ParentStateRoot && statetransition.Block.Header.ParentStateRoot != common.Hash{}) {
 		return nil, fmt.Errorf("StateRoot %s != ParentStateRoot %s", statedb.StateRoot.String(), statetransition.Block.Header.ParentStateRoot.String())
 	}
 	statedb.JamState = NewJamState()
 	statedb.RecoverJamState(statedb.StateRoot)
+	benchRec.Add("NewStateDBFromStateTransition:RecoverJamState", time.Since(t0))
 	return statedb, nil
 }
 

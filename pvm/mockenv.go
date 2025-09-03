@@ -25,14 +25,6 @@ func NewMockHostEnv() *MockHostEnv {
 	return &MockHostEnv{db: test_db}
 }
 
-// func (mh *MockHostEnv) GetXContext() *types.XContext {
-// 	return new(types.XContext)
-// }
-
-// func (mh *MockHostEnv) SetXContext(x *types.XContext) {}
-
-// func (mh *MockHostEnv) UpdateXContext(x *types.XContext) {}
-
 func (mh *MockHostEnv) GetID() uint16 {
 	return mh.id
 }

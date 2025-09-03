@@ -89,44 +89,53 @@ func (s *StateDB) getWRStatus() (hasRecentWR, hasStaleWR []bool) {
 }
 
 func (s *StateDB) checkAssurance(a types.Assurance, anchor common.Hash, validators types.Validators, hasRecentWR, hasStaleWR []bool) error {
+	return s.checkAssuranceInline(a, anchor, validators, len(validators), hasRecentWR)
+}
+
+func (s *StateDB) checkAssuranceInline(a types.Assurance, anchor common.Hash, validators types.Validators, validatorsLen int, hasRecentWR []bool) error {
 
 	// (11.11) assurance's anchor `a_a` to be the parent block hash `H_p`.
 	if a.Anchor != anchor {
 		return jamerrors.ErrABadParentHash
 	}
 
-	// (11.13)
-	if int(a.ValidatorIndex) >= len(validators) {
+	// (11.13) - check validator index
+	validatorIdx := int(a.ValidatorIndex)
+	if validatorIdx >= validatorsLen {
 		return jamerrors.ErrABadValidatorIndex
 	}
 
-	// (11.13)
-	if err := a.VerifySignature(validators[a.ValidatorIndex]); err != nil {
+	// (11.15)  if a bit `a_f[c]` is set for a core, there must be a pending work-report on that core
+	if !a.ValidBitfield(hasRecentWR) {
+		return jamerrors.ErrABadCore
+	}
+
+	// (11.13) TIME CONSUMING signature verification -- use go routine? look inside
+	if err := a.VerifySignature(validators[validatorIdx]); err != nil {
 		log.Error(log.SDB, "Assurance signature verification failed", "err", err, "validator_index", a.ValidatorIndex)
 		return jamerrors.ErrABadSignature
 	}
 
-	// (11.15) if a bit `a_f[c]` is set for a core, there must be a pending work-report on that core
-	if !a.ValidBitfield(hasRecentWR) {
-		return jamerrors.ErrABadCore
-	}
 	return nil
 }
 
 func (s *StateDB) GetValidAssurances(assurances []types.Assurance, anchor common.Hash, sortRequired bool) (checkedAssurances []types.Assurance, err error) {
+	if len(assurances) == 0 {
+		return assurances, nil
+	}
+
 	validators := s.GetSafrole().CurrValidators
-	hasRecentWR, hasStaleWR := s.getWRStatus()
+	hasRecentWR, _ := s.getWRStatus()
+	validatorsLen := len(validators)
 
 	for _, a := range assurances {
-		if err := s.checkAssurance(a, anchor, validators, hasRecentWR, hasStaleWR); err == nil {
-			// no error, so add to the list of valid assurances
-			checkedAssurances = append(checkedAssurances, a)
-		} else {
+		if err := s.checkAssuranceInline(a, anchor, validators, validatorsLen, hasRecentWR); err != nil {
 			log.Error(log.SDB, "GetValidAssurances checkAssurance", "err", err)
 			return nil, err
 		}
 	}
-	// Sort the assurances by validator index
+
+	checkedAssurances = assurances
 	if sortRequired {
 		sort.Slice(checkedAssurances, func(i, j int) bool {
 			return checkedAssurances[i].ValidatorIndex < checkedAssurances[j].ValidatorIndex

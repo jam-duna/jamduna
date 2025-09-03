@@ -10,10 +10,12 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/pvm"
+	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -75,6 +77,8 @@ func runSingleSTFTestAndSave(t *testing.T, filename string, content string, pvmB
 
 func runSingleSTFTest(t *testing.T, filename string, content string, pvmBackend string, runPrevalidation bool) {
 	t.Helper()
+	start := time.Now()
+	t0 := time.Now()
 	testDir := t.TempDir()
 
 	test_storage, err := initStorage(testDir)
@@ -83,16 +87,22 @@ func runSingleSTFTest(t *testing.T, filename string, content string, pvmBackend 
 		return
 	}
 	defer test_storage.Close()
+	benchRec.Add("runSingleSTFTest:initStorage", time.Since(t0))
 
+	t0 = time.Now()
 	stf, err := parseSTFFile(filename, content)
 	if err != nil {
 		t.Errorf("❌ [%s] Failed to parse STF: %v", filename, err)
 		return
 	}
+	benchRec.Add("runSingleSTFTest:parseSTFFile", time.Since(t0))
 
+	t0 = time.Now()
 	diffs, err := CheckStateTransitionWithOutput(test_storage, &stf, nil, pvmBackend, runPrevalidation)
+	benchRec.Add("runSingleSTFTest:CheckStateTransitionWithOutput", time.Since(t0))
+	elapsed := time.Since(start)
 	if err == nil {
-		fmt.Printf("✅ [%s] PostState.StateRoot %s matches\n", filename, stf.PostState.StateRoot)
+		fmt.Printf("✅ [%s] PostState.StateRoot %s matches (%.5fms)\n", filename, stf.PostState.StateRoot, float64(elapsed.Nanoseconds())/1000000)
 		return
 	}
 	if err.Error() == "OMIT" {
@@ -100,19 +110,23 @@ func runSingleSTFTest(t *testing.T, filename string, content string, pvmBackend 
 	}
 
 	HandleDiffs(diffs)
-	t.Errorf("❌ [%s] Test failed: %v", filename, err)
+	t.Errorf("❌ [%s] Test failed: %v (%.5fms)", filename, err, float64(elapsed.Nanoseconds())/1000000)
 }
 
 func parseSTFFile(filename, content string) (StateTransition, error) {
 	var stf StateTransition
 	var err error
 	if strings.HasSuffix(filename, ".bin") {
+		t0 := time.Now()
 		stf0, _, err := types.Decode([]byte(content), reflect.TypeOf(StateTransition{}))
 		if err == nil {
 			stf = stf0.(StateTransition)
 		}
+		benchRec.Add("parseSTFFile:Decode", time.Since(t0))
 	} else {
+		t0 := time.Now()
 		err = json.Unmarshal([]byte(content), &stf)
+		benchRec.Add("parseSTFFile:Unmarshal", time.Since(t0))
 	}
 	return stf, err
 }
@@ -135,57 +149,14 @@ func TestStateTransitionInterpreter(t *testing.T) {
 	})
 }
 
-func TestStateTransitionSandbox(t *testing.T) {
-	pvm.PvmLogging = true
-	pvm.UseTally = false       // enable tally for this test
-	pvm.SetUseEcalli500(false) // use ecalli500 for log check in x86
-	pvm.SetDebugCompiler(true) // enable debug mode for compiler
-	filename := "./00000019.json"
-	filename = path.Join(common.GetJAMTestVectorPath("stf"), "traces/storage/00000060.json")
-	// filename = path.Join(GetJAMTestVectorPath(), "traces/storage_light/00000016.json"
-
-	content, err := os.ReadFile(filename)
-	if err != nil {
-		t.Fatalf("failed to read file %s: %v", filename, err)
-	}
-	log.InitLogger("debug")
-	log.EnableModule(log.PvmAuthoring)
-	log.EnableModule("pvm_validator")
-	t.Run(filepath.Base(filename), func(t *testing.T) {
-		runSingleSTFTest(t, filename, string(content), pvm.BackendSandbox, false)
-
-	})
-}
-
-func TestStateTransitionCompiler(t *testing.T) {
-	pvm.PvmLogging = true
-	pvm.UseTally = false       // enable tally for this test
-	pvm.SetUseEcalli500(false) // use ecalli500 for log check in x86
-	pvm.SetDebugCompiler(true) // enable debug mode for compiler
-	filename := "./00000019.json"
-	filename = path.Join(common.GetJAMTestVectorPath("stf"), "traces/storage_light/00000016.json")
-
-	content, err := os.ReadFile(filename)
-	if err != nil {
-		t.Fatalf("failed to read file %s: %v", filename, err)
-	}
-	log.InitLogger("debug")
-	log.EnableModule(log.PvmAuthoring)
-	log.EnableModule("pvm_validator")
-	t.Run(filepath.Base(filename), func(t *testing.T) {
-		runSingleSTFTest(t, filename, string(content), pvm.BackendCompiler, false)
-
-	})
-}
-
 func TestTracesInterpreter(t *testing.T) {
 	log.InitLogger("debug")
 	// pvm.PvmLogging = true
 
 	// Define all the directories you want to test in a single slice.
 	testDirs := []string{
-		// path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
-		// path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
+		//path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
+		//path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
@@ -206,7 +177,7 @@ func TestTracesInterpreter(t *testing.T) {
 			}
 
 			for _, e := range entries {
-				if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || (e.Name() == "00000000.json" || e.Name() == "genesis.json") {
+				if e.IsDir() || !strings.HasSuffix(e.Name(), ".bin") || (e.Name() == "00000000.bin" || e.Name() == "genesis.bin") {
 					continue
 				}
 
@@ -218,7 +189,7 @@ func TestTracesInterpreter(t *testing.T) {
 					continue
 				}
 
-				fmt.Printf("Running test for file: %s\n", filename)
+				//				fmt.Printf("Running test for file: %s\n", filename)
 
 				// Run the actual test logic for each file as a distinct sub-test.
 				t.Run(e.Name(), func(t *testing.T) {
@@ -227,13 +198,15 @@ func TestTracesInterpreter(t *testing.T) {
 			}
 		})
 	}
-
+	dump_performance(t)
+}
+func dump_performance(t *testing.T) {
 	rows := BenchRows() // expose recorder snapshot via a small helper (see below)
 	if len(rows) == 0 {
 		t.Fatalf("no timing rows recorded; did you run with -tags benchprofile ?")
 	}
 
-	fmt.Println("\n=== Top 40 by TOTAL time ===")
+	fmt.Println("\n=== statedb: Top 40 by TOTAL time ===")
 	for i, r := range rows {
 		if i == 40 {
 			break
@@ -241,8 +214,19 @@ func TestTracesInterpreter(t *testing.T) {
 		fmt.Printf("%-45s  total=%-12s count=%-4d mean=%-10s p95=%-10s max=%-10s\n",
 			r.Name, r.Total, r.Count, r.Mean, r.P95, r.Max)
 	}
+
+	fmt.Println("\n=== pvm: Top 40 by TOTAL time ===")
 	rows = pvm.BenchRows()
-	fmt.Println("\n=== Top 40 by TOTAL time ===")
+	for i, r := range rows {
+		if i == 40 {
+			break
+		}
+		fmt.Printf("%-45s  total=%-12s count=%-4d mean=%-10s p95=%-10s max=%-10s\n",
+			r.Name, r.Total, r.Count, r.Mean, r.P95, r.Max)
+	}
+
+	fmt.Println("\n=== trie: Top 40 by TOTAL time ===")
+	rows = trie.BenchRows()
 	for i, r := range rows {
 		if i == 40 {
 			break
@@ -279,7 +263,7 @@ func TestTracesCompiler(t *testing.T) {
 			}
 
 			for _, e := range entries {
-				if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || e.Name() == "00000000.json" {
+				if e.IsDir() || !strings.HasSuffix(e.Name(), ".bin") || e.Name() == "genesis.bin" {
 					continue
 				}
 
@@ -290,7 +274,7 @@ func TestTracesCompiler(t *testing.T) {
 					continue
 				}
 
-				fmt.Printf("Running test for file: %s\n", filename)
+				//				fmt.Printf("Running test for file: %s\n", filename)
 
 				t.Run(e.Name(), func(t *testing.T) {
 					runSingleSTFTest(t, filename, string(content), pvm.BackendCompiler, false)
@@ -298,86 +282,43 @@ func TestTracesCompiler(t *testing.T) {
 			}
 		})
 	}
+	dump_performance(t)
+
 }
-func TestTracesSandbox(t *testing.T) {
+func TestSingleCompare(t *testing.T) {
+	// DO NOT CHANGE THIS
 	log.InitLogger("debug")
-	// pvm.PvmLogging = true
-
-	// Define all the directories you want to test in a single slice.
-	testDirs := []string{
-		//"../cmd/importblocks/rawdata/safrole/state_transitions/",
-		//path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
-		//path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
+	filename := "/Users/michael/Desktop/jam-test-vectors/traces/storage_light/00000004.bin"
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		t.Errorf("failed to read file %s: %v", filename, err)
 	}
-
-	// Iterate over each directory.
-	for _, dir := range testDirs {
-		// Create a local copy of dir for the sub-test to capture correctly.
-		// This avoids issues where the sub-tests might all run with the last value of 'dir'.
-		currentDir := dir
-
-		t.Run(fmt.Sprintf("Directory_%s", filepath.Base(currentDir)), func(t *testing.T) {
-			entries, err := os.ReadDir(currentDir)
-			if err != nil {
-				// Use t.Fatalf to stop the test for this directory if we can't read it.
-				t.Fatalf("failed to read directory %s: %v", currentDir, err)
-			}
-
-			for _, e := range entries {
-				if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || e.Name() == "00000000.json" {
-					continue
-				}
-
-				filename := filepath.Join(currentDir, e.Name())
-				content, err := os.ReadFile(filename)
-				if err != nil {
-					// Use t.Errorf to report the error but continue with other files.
-					t.Errorf("failed to read file %s: %v", filename, err)
-					continue
-				}
-
-				fmt.Printf("Running test for file: %s\n", filename)
-
-				// Run the actual test logic for each file as a distinct sub-test.
-				t.Run(e.Name(), func(t *testing.T) {
-					runSingleSTFTest(t, filename, string(content), pvm.BackendSandbox, false)
-				})
-			}
-		})
-	}
-}
-func TestCompareJson(t *testing.T) {
-	var testdata1 types.Validator
-	var testdata2 types.Validator
-	testdata1 = types.Validator{
-		Ed25519: types.HexToEd25519Key("0x1"),
-	}
-	testdata2 = types.Validator{
-		Ed25519: types.HexToEd25519Key("0x2"),
-	}
-	diff := CompareJSON(testdata1, testdata2)
-	fmt.Print(diff)
+	//	t.Run("compare", func(t *testing.T) {
+	runSingleSTFTest(t, filename, string(content), pvm.BackendCompiler, false)
+	runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter, false)
+	runSingleSTFTest(t, filename, string(content), pvm.BackendCompiler, false)
+	runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter, false)
+	// })
 }
 
-func GetFuzzReportsPath() (string, error) {
+func GetFuzzReportsPath(subDir ...string) (string, error) {
 	fuzzPath := os.Getenv("JAM_CONFORMANCE_PATH")
 	if fuzzPath == "" {
 		return "", fmt.Errorf("JAM_CONFORMANCE_PATH environment variable is not set")
 	}
-	return filepath.Abs(fuzzPath)
+	targetDir := "fuzz-reports" // Default sub dir
+	if len(subDir) > 0 {
+		targetDir = subDir[0]
+	}
+	return filepath.Abs(filepath.Join(fuzzPath, targetDir))
 }
 
-// export DUNA_CONFORMANCE_PATH=~/Desktop/reports
-func GetDunaReportsPath() (string, error) {
+func GetDunaReportsPath(subDir ...string) (string, error) {
 	dunaPath := os.Getenv("DUNA_CONFORMANCE_PATH")
 	if dunaPath == "" {
 		return "", fmt.Errorf("DUNA_CONFORMANCE_PATH environment variable is not set")
 	}
-	return filepath.Abs(dunaPath)
+	return filepath.Abs(filepath.Join(dunaPath, filepath.Join(subDir...)))
 }
 
 func findFuzzTestFiles(sourcePath, targetVersion string, excludedTeams []string) ([]string, error) {
@@ -425,38 +366,49 @@ func TestSingleFuzzTrace(t *testing.T) {
 	}
 
 	// solved with the ASSIGN reordering
-	fileMap["8741"] = "fuzz-reports/0.7.0/traces/1756548741/00000059.bin"
-	fileMap["8916"] = "fuzz-reports/0.7.0/traces/1756548916/00000082.bin"
+	fileMap["8741"] = "0.7.0/traces/1756548741/00000059.bin"
+	fileMap["8916"] = "0.7.0/traces/1756548916/00000082.bin"
 
 	// solved by reordering BLESS host function
-	fileMap["8459"] = "fuzz-reports/0.7.0/traces/1756548459/00000042.bin"
+	fileMap["8459"] = "0.7.0/traces/1756548459/00000042.bin"
 
 	// solved with WHAT fix on MACHINE host function
-	fileMap["8583"] = "fuzz-reports/0.7.0/traces/1756548583/00000009.bin"
+	fileMap["8583"] = "0.7.0/traces/1756548583/00000009.bin"
 
 	// [MC] upon EJECT, do we delete the preimage we newed and it appears our DeleteService doesn't work?
 	//  EJECT WHO 0xff2400e90048008e0000000000000000000000000000000000000000000000
-	fileMap["8706"] = "fuzz-reports/0.7.0/traces/1756548706/00000094.bin"
+	fileMap["8706"] = "0.7.0/traces/1756548706/00000094.bin"
 
-	// test one of them out
-	team := "8706"
-	filename, exists := fileMap[team]
-	if !exists {
-		t.Fatalf("team %s not found in fileMap", team)
-	}
-	filename = filepath.Join(jamConformancePath, filename)
-	content, err := os.ReadFile(filename)
-	if err != nil {
-		t.Fatalf("failed to read file %s: %v", filename, err)
-	}
+	fileMap["2661"] = "0.7.0/traces/1756792661/00000027.bin"
+	fileMap["0723"] = "0.7.0/traces/1756790723/00000011.bin"
+	fileMap["1458"] = "0.7.0/traces/1756791458/00000041.bin"
+	fileMap["4312"] = "0.7.0/traces/1756814312/00000025.bin"
 
 	log.InitLogger("debug")
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule("pvm_validator")
 	log.EnableModule(log.SDB)
-	t.Run(filepath.Base(filename), func(t *testing.T) {
-		runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter, true)
-	})
+
+	// test one of them out
+	tc := []string{"2661", "0723", "1458", "4312"}
+
+	for _, team := range tc {
+		filename, exists := fileMap[team]
+		if !exists {
+			t.Fatalf("team %s not found in fileMap", team)
+		}
+
+		filename = filepath.Join(jamConformancePath, filename)
+
+		content, err := os.ReadFile(filename)
+		if err != nil {
+			t.Fatalf("failed to read file %s: %v", filename, err)
+		}
+
+		t.Run(filepath.Base(filename), func(t *testing.T) {
+			runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter, true)
+		})
+	}
 }
 
 func testFuzzTraceInternal(t *testing.T, saveOutput bool) {
@@ -469,8 +421,8 @@ func testFuzzTraceInternal(t *testing.T, saveOutput bool) {
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule("pvm_validator")
 
-	targetVersion := "0.6.7"
-	excludedTeams := []string{"vinwolf"}
+	targetVersion := "0.7.0"
+	excludedTeams := []string{""}
 
 	sourcePath, err := GetFuzzReportsPath()
 	if err != nil {

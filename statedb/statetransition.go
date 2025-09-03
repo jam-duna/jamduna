@@ -8,6 +8,7 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/storage"
@@ -174,10 +175,12 @@ func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, 
 
 func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTransition, ancestorSet map[common.Hash]uint32, pvmBackend string, runPrevalidation bool, writeFile ...string) (diffs map[string]DiffState, err error) {
 	// Apply the state transition
+	t0 := time.Now()
 	preState, err := NewStateDBFromStateTransition(storage, st)
 	if err != nil {
 		return nil, err
 	}
+	benchRec.Add("CheckStateTransitionWithOutput:SETUP", time.Since(t0))
 
 	if runPrevalidation {
 		if bytes.Equal(preState.StateRoot.Bytes(), st.PostState.StateRoot.Bytes()) {
@@ -203,8 +206,13 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 	s0.AncestorSet = ancestorSet
 	s1, err := ApplyStateTransitionFromBlock(s0, context.Background(), &(st.Block), nil, pvmBackend)
 	if err != nil {
-		fmt.Printf("!!! ApplyStateTransitionFromBlock error: %v\n", err)
-		return nil, err
+		if bytes.Equal(s1.StateRoot.Bytes(), st.PostState.StateRoot.Bytes()) {
+			fmt.Printf("✳️  FAILED TRANSITION EXPECTED - PreState = PostState : %v\n", s1.StateRoot.Hex())
+			return nil, nil
+		} else {
+			fmt.Printf("❌  ApplyStateTransitionFromBlock error: %v, s1.StateRoot:%v\n", err, s1.StateRoot.Hex())
+			return nil, err
+		}
 	}
 
 	if bytes.Compare(st.PostState.StateRoot.Bytes(), s1.StateRoot.Bytes()) == 0 {

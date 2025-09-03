@@ -57,25 +57,42 @@ func SafroleBasicStateFromBytes(data []byte) (SafroleBasicState, error) {
 }
 
 func (s *SafroleState) GetNextRingCommitment() ([]byte, error) {
+	validatorsBytes := make([]byte, 0)
+	for _, validator := range s.NextValidators {
+		validatorsBytes = append(validatorsBytes, validator.Bandersnatch[:]...)
+	}
+	currentHash := common.Blake2Hash(validatorsBytes)
+
+	if s.nextValidatorsHash == currentHash && len(s.cachedNextRingCommitment) > 0 {
+		return s.cachedNextRingCommitment, nil
+	}
+
 	ringBytes, ringSize := s.GetRingSet("Next")
 	if len(ringBytes) == 0 {
 		return nil, fmt.Errorf("not ready yet")
 	}
+
 	nextRingCommitment, err := bandersnatch.GetRingCommitment(ringSize, ringBytes)
 	if err != nil {
 		return nil, err
 	}
+
+	s.cachedNextRingCommitment = nextRingCommitment
+	s.nextValidatorsHash = currentHash
+
 	return nextRingCommitment, err
 }
 
 func (s *SafroleState) GetSafroleBasicState() SafroleBasicState {
 	nextRingCommitment, _ := s.GetNextRingCommitment()
-	return SafroleBasicState{
+
+	basicState := SafroleBasicState{
 		NextValidators:    []types.Validator(s.NextValidators),
 		TicketAccumulator: s.NextEpochTicketsAccumulator,
 		SlotSealerSeries:  s.TicketsOrKeys,
 		RingCommitment:    nextRingCommitment,
 	}
+	return basicState
 }
 
 func (s *SafroleState) GetNextN2(targetJCE uint32) common.Hash {
@@ -128,6 +145,10 @@ type SafroleState struct {
 
 	// []bandersnatch.ValidatorKeySet
 	TicketsVerifierKey []byte `json:"tickets_verifier_key"`
+
+	// Cache for expensive ring commitment computation
+	cachedNextRingCommitment []byte      `json:"-"`
+	nextValidatorsHash       common.Hash `json:"-"`
 }
 
 func NewSafroleState() *SafroleState {
@@ -575,7 +596,6 @@ func (s *SafroleState) validateTicketWithRing(t *types.Ticket, shifted bool, rin
 		return common.Hash{}, jamerrors.ErrTBadTicketAttemptNumber
 	}
 
-	//step 0: derive ticketVRFInput
 	entroptIdx := 2
 	targetEpochRandomness := s.Entropy[entroptIdx]
 	isTicketSubmissionClosed := s.IsTicketSubmissionClosed(uint32(s.Timeslot))
@@ -583,8 +603,8 @@ func (s *SafroleState) validateTicketWithRing(t *types.Ticket, shifted bool, rin
 	if isTicketSubmissionClosed || shifted {
 		entroptIdx = 1
 		targetEpochRandomness = s.Entropy[entroptIdx]
-		ticketVRFInput := ticketSealVRFInput(targetEpochRandomness, t.Attempt)
 
+		ticketVRFInput := ticketSealVRFInput(targetEpochRandomness, t.Attempt)
 		ticket_id, err := bandersnatch.RingVrfVerifyWithCache(ringSize, ringBytes, t.Signature[:], ticketVRFInput, []byte{})
 		if err == nil {
 			return common.BytesToHash(ticket_id), nil
@@ -726,7 +746,6 @@ func (s *SafroleState) computeFallbackAuthorityIndex(targetRandomness common.Has
 
 // Fallback is using the perspective of right now
 func (s *SafroleState) GetFallbackValidator(slot_index uint32) common.Hash {
-	// fallback validator has been updated
 	return s.TicketsOrKeys.Keys[slot_index]
 }
 
@@ -751,10 +770,17 @@ func (s *SafroleState) GetEpochType() string {
 }
 
 func (s *SafroleState) GetEpochT() int {
-	if len(s.TicketsOrKeys.Tickets) > 0 {
+	if len(s.TicketsOrKeys.Tickets) >= types.EpochLength {
 		return 1
 	}
 	return 0
+}
+
+func (s *SafroleState) GetEpochTWithPhase(targetJCE uint32) int {
+	if len(s.TicketsOrKeys.Tickets) >= types.EpochLength {
+		return 1 // safrole
+	}
+	return 0 // fallback
 }
 
 // eq 59
@@ -908,7 +934,7 @@ func (s *SafroleState) ApplyStateTransitionTickets(ctx context.Context, tickets 
 		//fmt.Printf("ApplyStateTransitionTickets ValidateSafrole len(E_T)=%d | len(validated_tickets)=%d. Err=%v", len(tickets), len(validated_tickets), err)
 		return *s, err
 	}
-	benchRec.Add("- ApplyStateTransitionTickets:ValidateSafrole", time.Since(t0))
+	//benchRec.Add("- ApplyStateTransitionTickets:ValidateSafrole", time.Since(t0))
 
 	// tally existing ticketIDs
 	ticketIDs := make(map[common.Hash]uint8)
@@ -1116,7 +1142,6 @@ func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32,
 		accMap[a.Id] = true
 	}
 
-	t0 := time.Now()
 	ticketBodies := make([]types.TicketBody, 0) // n
 	var wg sync.WaitGroup
 	errors := make(chan error, len(tickets))
@@ -1152,7 +1177,7 @@ func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32,
 		}(t, ringBytes, ringSize, accMap)
 	}
 	wg.Wait()
-	benchRec.Add("-- ValidateSafrole:ParallelValidation", time.Since(t0))
+	//benchRec.Add("-- ValidateSafrole:ParallelValidation", time.Since(t0))
 
 	select {
 	case err := <-errors:
@@ -1540,7 +1565,10 @@ func VerifySafroleSTF(old_sf_origin *SafroleState, new_sf_origin *SafroleState, 
 	// 6.15~6.20
 	blockSealEntropy := new_sf.Entropy[3]
 	var c []byte
-	if new_sf.GetEpochT() == 1 {
+	if new_sf.GetEpochTWithPhase(slot_header) == 1 {
+		if new_phase >= uint32(len(new_sf.TicketsOrKeys.Tickets)) {
+			return fmt.Errorf("new_phase %v >= len(Tickets) %v", new_phase, len(new_sf.TicketsOrKeys.Tickets))
+		}
 		winning_ticket := (new_sf.TicketsOrKeys.Tickets)[new_phase]
 		c = ticketSealVRFInput(blockSealEntropy, uint8(winning_ticket.Attempt))
 	} else {
@@ -1564,10 +1592,10 @@ func VerifySafroleSTF(old_sf_origin *SafroleState, new_sf_origin *SafroleState, 
 	)
 	if err != nil {
 		log.Error(log.SDB, "IetfVrfVerify Failed", "validatorIdx", validatorIdx, "block_author_ietf_pub", block_author_ietf_pub.String(), "H_s(seal)", H_s, "c", c, "m(headerWithoutSig)", m, "err", err)
-		log.Error(log.SDB, "IetfVrfVerify Failed (Extra)", "slot", slot_header, "type", new_sf.GetEpochT(), "validatorIdx", validatorIdx, "blockSealEntropy n[3]", blockSealEntropy, "Entropy", new_sf.Entropy)
+		log.Error(log.SDB, "IetfVrfVerify Failed (Extra)", "slot", slot_header, "type", new_sf.GetEpochTWithPhase(slot_header), "validatorIdx", validatorIdx, "blockSealEntropy n[3]", blockSealEntropy, "Entropy", new_sf.Entropy)
 		return fmt.Errorf("VerifyBlockHeader Failed: H_s Verification")
 	} else {
-		log.Error(log.SDB, "IetfVrfVerify OK (H_s)", "slot", slot_header, "type", new_sf.GetEpochT(), "validatorIdx", validatorIdx, "blockSealEntropy n[3]", blockSealEntropy, "Entropy", new_sf.Entropy)
+		log.Error(log.SDB, "IetfVrfVerify OK (H_s)", "slot", slot_header, "type", new_sf.GetEpochTWithPhase(slot_header), "validatorIdx", validatorIdx, "blockSealEntropy n[3]", blockSealEntropy, "Entropy", new_sf.Entropy)
 	}
 	// H_v Verification (6.17)
 	H_v := header.EntropySource[:]

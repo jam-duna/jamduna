@@ -8,7 +8,17 @@ import (
 
 const (
 	AddressSpace = 1 << 32
+	PageSize     = 4096
+	TotalPages   = AddressSpace / PageSize
 )
+
+type RAMInterface interface {
+	WriteRAMBytes(address uint32, data []byte) uint64
+	ReadRAMBytes(address uint32, length uint32) ([]byte, uint64)
+	allocatePages(startPage uint32, count uint32)
+	GetCurrentHeapPointer() uint32
+	SetCurrentHeapPointer(pointer uint32)
+}
 
 type AccessMode struct {
 	Inaccessible bool `json:"inaccessible"`
@@ -65,26 +75,6 @@ func (ram *RawRAM) SetCurrentHeapPointer(pointer uint32) {
 	ram.current_heap_pointer = pointer
 	//fmt.Printf("SetCurrentHeapPointer: %x\n", ram.current_heap_pointer)
 
-}
-
-func (ram *RawRAM) ReadRegister(index int) (uint64, uint64) {
-	if index < 0 || index >= len(ram.register) {
-		return 0, OOB
-	}
-	return ram.register[index], OK
-}
-
-func (ram *RawRAM) WriteRegister(index int, value uint64) uint64 {
-	if index < 0 || index >= len(ram.register) {
-		return OOB
-	}
-	//	fmt.Printf("WriteRegister: index %d, value %x\n", index, value)
-	ram.register[index] = value
-	return OK
-}
-
-func (ram *RawRAM) ReadRegisters() []uint64 {
-	return ram.register
 }
 
 func (ram *RawRAM) allocatePages(startPage uint32, count uint32) {

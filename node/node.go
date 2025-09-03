@@ -441,8 +441,7 @@ func StandardizePVMBackend(pvm_mode string) string {
 		} else {
 			log.Warn(log.Node, fmt.Sprintf("COMPILER Not Supported. Defaulting to interpreter"))
 		}
-	case "SANDBOX", "RECOMPILER_SANDBOX", "COMPILER_SANDBOX":
-		pvmBackend = pvm.BackendSandbox
+
 	default:
 		log.Warn(log.Node, fmt.Sprintf("Unknown PVM mode [%s], defaulting to interpreter", pvm_mode))
 		pvmBackend = pvm.BackendInterpreter

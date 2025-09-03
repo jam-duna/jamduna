@@ -82,6 +82,10 @@ func ApplyStateTransitionTickets(oldState *StateDB, ctx context.Context, blk *ty
 // given previous safrole, applt state transition using block
 // σ'≡Υ(σ,B)
 func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block, validated_tickets map[common.Hash]common.Hash, pvmBackend string) (s *StateDB, err error) {
+	t1 := time.Now()
+	defer func() {
+		benchRec.Add("ApplyStateTransitionFromBlock", time.Since(t1))
+	}()
 
 	s = oldState.Copy()
 	if s.StateRoot != blk.Header.ParentStateRoot {
@@ -118,7 +122,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	// 0.6.2 4.7 - Recent History Dagga (β†) [No other state related]
 	t0 := time.Now()
 	s.ApplyStateRecentHistoryDagga(blk.Header.ParentStateRoot)
-	benchRec.Add("ApplyStateRecentHistoryDagga", time.Since(t0))
+	//benchRec.Add("ApplyStateRecentHistoryDagga", time.Since(t0))
 
 	select {
 	case <-ctx.Done():
@@ -135,7 +139,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		}
 	}
 
-	t0 = time.Now()
 	assurances := blk.Assurances()
 	assurances, err = s.GetValidAssurances(assurances, blk.Header.ParentHeaderHash, false)
 	if err != nil {
@@ -148,12 +151,9 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	}
 	benchRec.Add("GetValidAssurances", time.Since(t0))
 
-	// TODO - 4.12 - Dispute
 	// 0.6.2 Safrole 4.5,4.8,4.9,4.10,4.11 [post dispute state , pre designed validators iota]
 	t0 = time.Now()
-
 	sf := s.GetSafrole()
-	// Shawn to check: should it be sf0 here?
 	sf.OffenderState = s.GetJamState().DisputesState.Offenders
 	s2, err := sf.ApplyStateTransitionTickets(ctx, ticketExts, targetJCE, sf_header, validated_tickets) // Entropy computed!
 	if err != nil {
@@ -188,18 +188,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		return s, fmt.Errorf("block header is not valid err=%v", headerErr)
 	}
 	benchRec.Add("VerifyBlockHeader", time.Since(t0))
-	t0 = time.Now()
 
-	// ------ VerifySafroleSTF ------
-	t0 = time.Now()
-	safrole_debug := false
-	if safrole_debug {
-		err = VerifySafroleSTF(sf, &s2, blk)
-		if err != nil {
-			return s, fmt.Errorf("VerifySafroleSTF %v", err)
-		}
-	}
-	benchRec.Add("VerifySafroleSTF", time.Since(t0))
 	// ------ tallyStatistics ------
 	t0 = time.Now()
 
@@ -232,7 +221,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		s.JamState.tallyStatistics(uint32(validatorIndex), "reports", 1)
 		// fmt.Printf("Validator %d: %d reports\n", validatorIndex, nreports)
 	}
-	// 4.17 Accmuulation [need available work report, ϑ, ξ, δ, χ, ι, φ]
+	// 4.17 Accumulation [need available work report, ϑ, ξ, δ, χ, ι, φ]
 	// 12.20 gas counting
 	var gas uint64
 	var gas_counting uint64
@@ -261,7 +250,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	benchRec.Add("OuterAccumulate", time.Since(t0))
 
 	// ------ ProcessDeferredTransfers ------
-	t0 = time.Now()
+	//t0 = time.Now()
 	// (χ′, δ†, ι′, φ′)
 	// 12.24 transfer δ‡
 	timeslot := s.GetTimeslot() // τ′
@@ -289,7 +278,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 			}
 		}
 	}
-	benchRec.Add("ProcessDeferredTransfers", time.Since(t0))
+	//benchRec.Add("ProcessDeferredTransfers", time.Since(t0))
 
 	// ---------  ApplyXContext/computeStateUpdates ------
 	t0 = time.Now()
@@ -339,12 +328,12 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 
 	// ---------  ApplyStateTransitionAuthorizations ------
 	// 4.19 α'[need φ', so after accumulation]
-	t0 = time.Now()
+	//t0 = time.Now()
 	err = s.ApplyStateTransitionAuthorizations()
 	if err != nil {
 		return s, err
 	}
-	benchRec.Add("ApplyStateTransitionAuthorizations", time.Since(t0))
+	//benchRec.Add("ApplyStateTransitionAuthorizations", time.Since(t0))
 
 	// ---------  NewWellBalancedTree ------
 	// n.r = M_B( [ s \ E_4(s) ++ E(h) | (s,h) in C] , H_K)

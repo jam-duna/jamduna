@@ -7,12 +7,10 @@ use bandersnatch::{
     RingProofParams, Secret,
 };
 
-// Additional cryptographic dependencies for unified functionality
 use sha2::Sha256;
 use ark_bls12_381::Bls12_381;
 use ark_ff::Zero;
 
-// BLS signature functionality
 use w3f_bls::{
     serialize::SerializableToBytes,
     double::{DoublePublicKeyScheme, DoublePublicKey},
@@ -23,46 +21,66 @@ use w3f_bls::{
     Signed,
 };
 
-// Reed-Solomon erasure coding
 use reed_solomon_simd::{ReedSolomonDecoder, ReedSolomonEncoder};
-
-// FFI types
 use std::os::raw::{c_int, c_uchar, c_uint};
+use std::sync::OnceLock;
+use std::collections::HashMap;
 
-//const RING_SIZE: usize = 6;
-//const RING_SIZE: usize = 1023;
-
-// This is the IETF `Prove` procedure output as described in section 2.2
-// of the Bandersnatch VRFs specification
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 struct IetfVrfSignature {
     output: Output,
     proof: IetfProof,
 }
 
-// This is the IETF `Prove` procedure output as described in section 4.2
-// of the Bandersnatch VRFs specification
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 struct RingVrfSignature {
     output: Output,
-    // This contains both the Pedersen proof and actual ring proof.
-    proof: RingProof,
+    proof: RingProof, // pedersen + ring proof bundled
 }
 
-// Construct ring proof parameters for a given ring size
-fn ring_proof_params(ring_size: usize) -> RingProofParams {
+// cache ring proof params - deserializing zcash SRS takes ~100ms
+static PCS_PARAMS_CACHE: OnceLock<std::sync::Mutex<HashMap<usize, Box<RingProofParams>>>> = OnceLock::new();
+
+fn init_common_ring_sizes() {
+    let cache = PCS_PARAMS_CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let mut cache_guard = cache.lock().unwrap();
+    
+    // precompute for common JAM ring sizes to avoid first-call penalty
+    let common_sizes = [6, 1023];
+    
     use bandersnatch::PcsParams;
     let buf: &[u8] = include_bytes!("../zcash-srs-2-11-uncompressed.bin");
     let pcs_params = PcsParams::deserialize_uncompressed_unchecked(&mut &buf[..]).unwrap();
-    RingProofParams::from_pcs_params(ring_size, pcs_params).unwrap()
+    
+    for &size in &common_sizes {
+        if let Ok(params) = RingProofParams::from_pcs_params(size, pcs_params.clone()) {
+            cache_guard.insert(size, Box::new(params));
+        }
+    }
 }
 
-// Construct VRF Input Point from arbitrary data (section 1.2)
+fn ring_proof_params(ring_size: usize) -> RingProofParams {
+    let cache = PCS_PARAMS_CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let mut cache_guard = cache.lock().unwrap();
+    
+    if let Some(cached_params) = cache_guard.get(&ring_size) {
+        return (**cached_params).clone();
+    }
+    
+    // not cached, compute params
+    use bandersnatch::PcsParams;
+    let buf: &[u8] = include_bytes!("../zcash-srs-2-11-uncompressed.bin");
+    let pcs_params = PcsParams::deserialize_uncompressed_unchecked(&mut &buf[..]).unwrap();
+    let params = RingProofParams::from_pcs_params(ring_size, pcs_params).unwrap();
+    
+    cache_guard.insert(ring_size, Box::new(params.clone()));
+    params
+}
+
 fn vrf_input_point(vrf_input_data: &[u8]) -> Input {
     Input::new(vrf_input_data).unwrap()
 }
 
-// Prover actor.
 struct Prover {
     pub prover_idx: usize,
     pub secret: Secret,
@@ -70,17 +88,7 @@ struct Prover {
 }
 
 impl Prover {
-/*    pub fn new(ring: Vec<Public>, prover_idx: usize, seed: &[u8]) -> Self {
-        Self {
-            prover_idx,
-            secret: Secret::from_seed(seed), //Check: seed is being hash again before being turned into ScalarField. Not sure if this is corret
-            ring,
-        }
-    }*/
 
-    /// Anonymous VRF signature.
-    ///
-    /// Used for tickets submission.
     pub fn ring_vrf_sign(&self, vrf_input_data: &[u8], aux_data: &[u8]) -> Result<([u8; 32], Vec<u8>), ()>
     {
         use ark_vrf::ring::Prover as _;
@@ -88,30 +96,27 @@ impl Prover {
        let input = vrf_input_point(vrf_input_data);
         let output = self.secret.output(input);
 
-        // Backend currently requires the wrapped type (plain affine points)
         let pts: Vec<_> = self.ring.iter().map(|pk| pk.0).collect();
 
-        // Proof construction
         let params = ring_proof_params(self.ring.len());
         let prover_key = params.prover_key(&pts);
-        let prover = params.prover(prover_key, self.prover_idx); //MK: this is using specific prover. Uestion: can we pass in ANY prover (e.g hardcoding prover0)
+        let prover = params.prover(prover_key, self.prover_idx);
         let proof = self.secret.prove(input, output, aux_data, &prover);
 
-        // Output and Ring Proof bundled together (as per section 2.2)
         let signature = RingVrfSignature { output, proof };
         let vrf_output = signature.output;
 
         let vrf_output_hash: [u8; 32] = match vrf_output.hash()[..32].try_into() {
             Ok(hash) => hash,
             Err(_) => {
-                eprintln!("Failed to convert VRF output hash to array");
+                eprintln!("vrf output hash conversion failed");
                 return Err(());
             }
         };
 
         let mut buf = Vec::new();
         if let Err(_) = signature.serialize_compressed(&mut buf) {
-            eprintln!("Failed to serialize signature");
+            eprintln!("signature serialize failed");
             return Err(());
         }
 
@@ -121,20 +126,23 @@ impl Prover {
 }
 
 type RingCommitment = ark_vrf::ring::RingCommitment<bandersnatch::BandersnatchSha512Ell2>;
+type RingVerifierKey = ark_vrf::ring::RingVerifierKey<bandersnatch::BandersnatchSha512Ell2>;
 
-// Verifier actor.
 struct Verifier {
     pub commitment: RingCommitment,
     pub ring: Vec<Public>,
+    verifier_key: RingVerifierKey, // cached - expensive to recompute
+    params: RingProofParams,
 }
 
 impl Verifier {
     fn new(ring: Vec<Public>) -> Self {
         let pts: Vec<_> = ring.iter().map(|pk| pk.0).collect();
-        let verifier_key = ring_proof_params(ring.len()).verifier_key(&pts);
+        let params = ring_proof_params(ring.len());
+        let verifier_key = params.verifier_key(&pts);
         let commitment = verifier_key.commitment();
 
-        Self { ring, commitment }
+        Self { ring, commitment, verifier_key, params }
     }
 
     pub fn ring_vrf_verify(
@@ -145,101 +153,33 @@ impl Verifier {
     ) -> Result<[u8; 32], ()> {
         use ark_vrf::ring::Verifier as _;
 
-        // Gracefully handle invalid signature
         let signature = match RingVrfSignature::deserialize_compressed_unchecked(signature) {
             Ok(sig) => sig,
-            Err(_e) => {
-                //println!("Failed to deserialize signature: {:?}", e);
-                return Err(());
-            }
+            Err(_) => return Err(()),
         };
 
         let input = vrf_input_point(vrf_input_data);
         let output = signature.output;
 
-        let params = ring_proof_params(self.ring.len());
-        let verifier_key = params.verifier_key(&self.ring.iter().map(|pk| pk.0).collect::<Vec<_>>());
-        let verifier = params.verifier(verifier_key);
+        let verifier = self.params.verifier(self.verifier_key.clone());
 
         if Public::verify(input, output, aux_data, &signature.proof, &verifier).is_err() {
             return Err(());
         }
 
-        // Convert VRF output hash to array and handle errors
         let vrf_output_hash: [u8; 32] = match output.hash()[..32].try_into() {
             Ok(hash) => hash,
             Err(_) => {
-                eprintln!("Failed to convert VRF output hash to array");
+                eprintln!("vrf output hash conversion failed");
                 return Err(());
             }
         };
-
-        // Print VRF output hash if needed
-        // println!("vrf-output-hash: {}", hex::encode(vrf_output_hash));
 
         Ok(vrf_output_hash)
     }
 
-/*
-    /// Non-Anonymous VRF signature verification.
-    ///
-    /// Used for ticket claim verification during block import.
-    /// Not used with Safrole test vectors.
-    ///
-    /// On success returns the VRF output hash.
-    pub fn ietf_vrf_verify(
-        &self,
-        vrf_input_data: &[u8],
-        aux_data: &[u8],
-        signature: &[u8],
-        signer_key_index: usize,
-    ) -> Result<[u8; 32], ()> {
-        use ark_vrf::ietf::Verifier as _;
-
-        let signature = match IetfVrfSignature::deserialize_compressed_unchecked(signature) {
-            Ok(sig) => sig,
-            Err(_) => {
-                eprintln!("Failed to deserialize compressed signature");
-                return Err(());
-            }
-        };
-
-        let input = match vrf_input_point(vrf_input_data) {
-            Some(input) => input,
-            None => {
-                eprintln!("Failed to create VRF input point");
-                return Err(()); // or handle the error accordingly
-            }
-        };
-        let output = signature.output;
-
-        let public = &self.ring[signer_key_index];
-        if public
-            .verify(input, output, aux_data, &signature.proof)
-            .is_err()
-        {
-            println!("Ring signature verification failure");
-            return Err(());
-        }
-        //println!("Ietf signature verified");
-
-        // This is the actual value used as ticket-id/score
-        // NOTE: as far as vrf_input_data is the same, this matches the one produced
-        // using the ring-vrf (regardless of aux_data).
-        let vrf_output_hash: [u8; 32] = match output.hash()[..32].try_into() {
-            Ok(hash) => hash,
-            Err(_) => {
-                eprintln!("Failed to convert VRF output hash to array");
-                return Err(());
-            }
-        };
-        //println!(" vrf-output-hash: {}", hex::encode(vrf_output_hash));
-        Ok(vrf_output_hash)
-    }
-     */
 }
 
-//use hex;
 use std::slice;
 
 #[no_mangle]
@@ -250,31 +190,13 @@ pub extern "C" fn get_public_key(
     pub_key_len: usize,
 ) {
     use std::ptr;
- //   use std::slice;
- //   use ark_serialize::CanonicalSerialize;
- //   use ark_serialize::CanonicalDeserialize;
 
     // Convert seed bytes to a slice
     let seed_slice = unsafe { slice::from_raw_parts(seed_bytes, seed_len) };
 
-    // Generate the private key from the scalar
     let secret = Secret::from_seed(seed_slice);
-    //println!("Reconstructed Public Key: {:?}", secret.public);
 
-/*
-    // Deserialize the private key from bytes
-    let secret = match Secret::deserialize_compressed_unchecked(&seed_slice[..]) {
-        Ok(secret) => secret,
-        Err(e) => {
-            eprintln!("Failed to deserialize private key: {}", e);
-            return;
-        }
-    };
-*/
-
-    // Get the public key from the private key
     let public_key = secret.public();
-    //println!("Public Key: {:?}", public_key);
 
     // Serialize the public key to bytes
     let mut pk_bytes = Vec::new();
@@ -282,10 +204,6 @@ pub extern "C" fn get_public_key(
         eprintln!("Failed to serialize public key: {}", e);
         return;
     }
-
-    // Convert the public key bytes to a hex string
-    //let pk_hex = hex::encode(&pk_bytes);
-    //println!("Public Key(hex): {}", pk_hex);
 
     // Ensure the provided buffer is large enough to hold the public key bytes
     if pub_key_len < pk_bytes.len() {
@@ -307,38 +225,19 @@ pub extern "C" fn get_private_key(
     secret_len: usize,
 ) {
     use std::ptr;
-    //use std::slice;
-    //use ark_serialize::CanonicalSerialize;
-    //use ark_serialize::CanonicalDeserialize;
 
     // Convert seed bytes to a slice
     let seed_slice = unsafe { slice::from_raw_parts(seed_bytes, seed_len) };
 
 
-    // Generate the private key from the seed
     let secret = Secret::from_seed(seed_slice);
-    //println!("Secret: {:?}", secret);
 
-/*
-    // Deserialize the private key from bytes
-    let secret = match Secret::deserialize_compressed_unchecked(&seed_slice[..]) {
-        Ok(secret) => secret,
-        Err(e) => {
-            eprintln!("Failed to deserialize private key: {}", e);
-            return;
-        }
-    };
-*/
     // Serialize the secret to bytes
     let mut secret_bytes_vec = Vec::new();
     if let Err(e) = secret.scalar.serialize_compressed(&mut secret_bytes_vec) {
         eprintln!("Failed to serialize secret: {}", e);
         return;
     }
-
-    // Convert the priv key bytes to a hex string
-    //let priv_hex = hex::encode(&secret_bytes_vec);
-    //println!("Priv Key(hex): {}", priv_hex);
 
     // Ensure the provided buffer is large enough to hold the secret bytes
     if secret_len < secret_bytes_vec.len() {
@@ -395,7 +294,6 @@ pub extern "C" fn ietf_vrf_sign(
 
         let proof =  private_key.prove(input, output, aux_data);
 
-        // Output and IETF Proof bundled together (as per section 2.2)
         let signature = IetfVrfSignature { output, proof };
         let mut buf = Vec::new();
         match signature.serialize_compressed(&mut buf) {
@@ -537,8 +435,7 @@ pub extern "C" fn ring_vrf_sign(
         ring_set.push(public_key);
     }
 
-    // Set prover_idx based on pubkey's index in ring_set
-
+    // find our key in the ring
     // Derive the public key from the private key
     let derived_public_key = private_key.public();
 
@@ -561,11 +458,9 @@ pub extern "C" fn ring_vrf_sign(
             return 0;
         }
     };
-    //println!("derived_public_key {:?} idx:{:?}", derived_public_key, derived_prover_idx);
-
     // Create the Prover instance
     let prover = Prover {
-        prover_idx:derived_prover_idx, //use prover_idx
+        prover_idx:derived_prover_idx,
         secret: private_key,
         ring: ring_set,
     };
@@ -616,20 +511,10 @@ pub extern "C" fn ietf_vrf_verify(
     vrf_output: *mut c_uchar,
     vrf_output_len: usize
 ) -> c_int {
-    //use std::slice;
-    //use ark_vrf::suites::bandersnatch::edwards::Public;
-    //use ark_serialize::CanonicalDeserialize;
-   // use std::os::raw::c_uchar;
-
     let prover_public_slice = unsafe { slice::from_raw_parts(prover_public_bytes, prover_public_len) };
     let signature_slice = unsafe { slice::from_raw_parts(signature_bytes, signature_len) };
     let vrf_input_data_slice = unsafe { slice::from_raw_parts(vrf_input_data_bytes, vrf_input_data_len) };
     let aux_data_slice = unsafe { slice::from_raw_parts(aux_data_bytes, aux_data_len) };
-
-    //println!("Prover public slice (hex): {:?}", hex::encode(prover_public_slice));
-
-    // Check the length of the public key slice
-    //println!("Prover public slice length: {}", prover_public_slice.len());
 
     let prover_public = match Public::deserialize_compressed_unchecked(prover_public_slice) {
         Ok(public_key) => public_key,
@@ -680,15 +565,12 @@ fn ietf_vrf_verify_iml(
     let input = vrf_input_point(vrf_input_data);
     let output = signature.output;
 
-    //println!("Public key: {:?}", prover_public);
     if prover_public
         .verify(input, output, aux_data, &signature.proof)
         .is_err()
     {
-        //println!("Ietf signature verification failure");
         return Err(());
     }
-    //println!("Ietf signature verified");
 
     let vrf_output_hash: [u8; 32] = match output.hash()[..32].try_into() {
         Ok(hash) => hash,
@@ -698,7 +580,6 @@ fn ietf_vrf_verify_iml(
         }
     };
 
-    //println!(" vrf-output-hash: {}", hex::encode(vrf_output_hash));
     Ok(vrf_output_hash)
 }
 
@@ -721,7 +602,6 @@ pub extern "C" fn get_ring_commitment(
     let  padding_point = Public::from(RingProofParams::padding_point());
     for i in 0..ring_size {
         let pubkey_bytes = &ring_set_slice[i * 32..(i + 1) * 32];
-        // eprintln!("pubkey_bytes: {:?}", hex::encode(pubkey_bytes));
         let public_key = if pubkey_bytes.iter().all(|&b| b == 0) {
             padding_point.clone()
         } else {
@@ -748,7 +628,6 @@ pub extern "C" fn get_ring_commitment(
             return;
         }
     }
-    //println!("Verifier commitment: {:?}", hex::encode(&commitment_bytes));
     // Ensure the provided buffer is large enough to hold the commitment
     if commitment_len < commitment_bytes.len() {
         eprintln!("Provided buffer is too small for the commitment");
@@ -775,10 +654,6 @@ pub extern "C" fn ring_vrf_verify(
     vrf_output: *mut c_uchar,
     vrf_output_len: usize
 ) -> c_int {
-    /*println!(
-        "pubkeys_length: {}, signature_hex_len: {}, vrf_input_data_len: {}, aux_data_len: {}",
-        pubkeys_length, signature_hex_len, vrf_input_data_len, aux_data_len
-    ); */
 
     // Convert input pointers to slices
     let _pubkeys_slice = unsafe { slice::from_raw_parts(pubkeys_bytes, pubkeys_length) };
@@ -791,16 +666,7 @@ pub extern "C" fn ring_vrf_verify(
         unsafe { slice::from_raw_parts(aux_data_bytes, aux_data_len) }
     };
 
-    /*
-    println!("pubkeys_slice: {}", hex::encode(pubkeys_slice));
-    println!("signature_slice: {}", hex::encode(signature_slice));
-    println!(
-        "vrf_input_data_slice: {}",
-        hex::encode(vrf_input_data_slice)
-    );
-    println!("aux_data_slice: {}", hex::encode(aux_data_slice));
-    */
-    // Assuming each pubkey is 32 bytes, split the pubkeys slice into individual pubkeys
+    // each pubkey is 32 bytes
     let mut ring_set: Vec<Public> = Vec::new();
     let _params = ring_proof_params(ring_size);
     let  padding_point = Public::from(RingProofParams::padding_point());
@@ -829,8 +695,6 @@ pub extern "C" fn ring_vrf_verify(
     // Store the VRF output hash
     match res {
         Ok(vrf_output_hash) => {
-            //println!("Verification successful");
-            //println!("VRF output hash: {}", hex::encode(vrf_output_hash));
             // Ensure the provided buffer is large enough to hold the VRF output
             if vrf_output_len < vrf_output_hash.len() {
                 return 0;
@@ -1228,6 +1092,11 @@ pub extern "C" fn free_verifier(verifier: *mut Verifier) {
             let _ = Box::from_raw(verifier);
         }
     }
+}
+
+#[no_mangle]
+pub extern "C" fn init_cache() {
+    init_common_ring_sizes();
 }
 
 #[cfg(test)]

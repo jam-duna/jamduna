@@ -177,6 +177,8 @@ int ring_vrf_verify_with_verifier(
 
 void free_verifier(void* verifier_ptr);
 
+void init_cache();
+
 void encode(
     const unsigned char* input_ptr,
     size_t input_len,

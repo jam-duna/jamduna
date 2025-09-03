@@ -9,17 +9,101 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
+	"time"
+	"unsafe"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/sdbtiming"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 )
 
+var benchRec = sdbtiming.New()
+
+func BenchRows() []sdbtiming.Row { return benchRec.Snapshot() }
+
 const (
 	debug        = "trie"
-	stateKeySize = 32 // the "actual" size is 31 but we use common.Hash with the 32 byte being 0 INCLUDING IN METADATA right now
+	stateKeySize = 32    // the "actual" size is 31 but we use common.Hash with the 32 byte being 0 INCLUDING IN METADATA right now
+	maxCacheSize = 10000 // Maximum number of cached hash results -- play with this
 )
+
+// hashCache: caches hash computations with computeHashCached replacing computeHash
+type hashCache struct {
+	mu     sync.RWMutex
+	cache  map[string][]byte
+	keyMap map[string]int // key -> index mapping
+	keys   []string       // circular buffer for LRU
+	head   int            // next insertion position
+	size   int            // current number of items
+}
+
+var globalHashCache = &hashCache{
+	cache:  make(map[string][]byte, maxCacheSize),
+	keyMap: make(map[string]int, maxCacheSize),
+	keys:   make([]string, maxCacheSize),
+	head:   0,
+	size:   0,
+}
+
+func (hc *hashCache) get(data []byte) ([]byte, bool) {
+	// optimized with unsafe
+	key := unsafe.String(unsafe.SliceData(data), len(data))
+	hc.mu.RLock()
+	hash, exists := hc.cache[key]
+	hc.mu.RUnlock()
+	return hash, exists
+}
+
+func (hc *hashCache) set(data []byte, hash []byte) {
+	// optimized with unsafe
+	key := unsafe.String(unsafe.SliceData(data), len(data))
+	hc.mu.Lock()
+	defer hc.mu.Unlock()
+
+	// happy case: update the value
+	if _, exists := hc.cache[key]; exists {
+		hc.cache[key] = hash
+		return
+	}
+
+	// evict oldest entry if cache full
+	if hc.size >= maxCacheSize {
+
+		oldest := hc.keys[hc.head]
+		if oldest != "" {
+			delete(hc.cache, oldest)
+			delete(hc.keyMap, oldest)
+		}
+	} else {
+		hc.size++
+	}
+
+	// add a new entry - TODO: make this not use string?
+	keyStr := string(data)
+	hc.keys[hc.head] = keyStr
+	hc.cache[keyStr] = hash
+	hc.keyMap[keyStr] = hc.head
+	hc.head = (hc.head + 1) % maxCacheSize
+}
+
+// KEY operation: computeHashCached wraps computeHash with globalHashCache
+func computeHashCached(data []byte) []byte {
+	t0 := time.Now()
+
+	if hash, exists := globalHashCache.get(data); exists {
+		benchRec.Add("computeHashCached:HIT", time.Since(t0))
+		return hash
+	}
+	// Compute hash if not cached and cache it!
+	hash := computeHash(data)
+	globalHashCache.set(data, hash)
+	benchRec.Add("computeHashCached:MISS", time.Since(t0))
+
+	return hash
+}
 
 type KeyVal struct {
 	Key        []byte `json:"k"`
@@ -32,7 +116,6 @@ type KeyVals struct {
 	KeyVals []KeyVal
 }
 
-// TODO: stanley to figure what this is
 type BMTProof []common.Hash
 
 // Node represents a node in the Merkle Tree
@@ -143,7 +226,7 @@ func NewMerkleTreeWithPath(data [][2][]byte, optionalPath ...string) *MerkleTree
 }
 
 func NewMerkleTree(data [][2][]byte, db *storage.StateDBStorage) *MerkleTree {
-	if data == nil || len(data) == 0 {
+	if len(data) == 0 {
 		return &MerkleTree{Root: nil, db: db}
 	}
 	root := buildMerkleTree(data, 0)
@@ -163,10 +246,11 @@ func buildMerkleTree(kvs [][2][]byte, i int) *Node {
 		//computeHash(encoded) -> kvs[0][1]
 		//kvs[0][1] -> computeHash(encoded) X NOT like this
 		//will only store the value if less than 32 bytes
-		return &Node{Hash: computeHash(encoded), Key: kvs[0][0]}
+		return &Node{Hash: computeHashCached(encoded), Key: kvs[0][0]}
 	}
 	// Recursive Case: B(M(l),M(r))
-	var l, r [][2][]byte
+	l := make([][2][]byte, 0, len(kvs)/2+1)
+	r := make([][2][]byte, 0, len(kvs)/2+1)
 	for _, kv := range kvs {
 		if bit(kv[0], i) {
 			r = append(r, kv)
@@ -178,7 +262,7 @@ func buildMerkleTree(kvs [][2][]byte, i int) *Node {
 	left := buildMerkleTree(l, i+1)
 	right := buildMerkleTree(r, i+1)
 	encoded := branch(left.Hash, right.Hash)
-	return &Node{Hash: computeHash(encoded), Left: left, Right: right}
+	return &Node{Hash: computeHashCached(encoded), Left: left, Right: right}
 }
 
 // Equation(D.3) in GP 0.6.2
@@ -196,35 +280,38 @@ func branch(left, right []byte) []byte {
 // Equation(D.4) in GP 0.6.2
 // leaf encodes a key-value pair into a leaf node
 func leaf(k, v []byte) []byte {
+	t0 := time.Now()
+	var result [64]byte
+
 	// Embedded-value leaf node
 	if len(v) <= 32 {
-		head := byte(0b10000000 | len(v))
-		tmpk := make([]byte, len(k))
-		copy(tmpk, k)
-		if len(tmpk) > 31 {
-			tmpk = tmpk[:31]
+		result[0] = byte(0b10000000 | len(v))
+		if len(k) > 31 {
+			copy(result[1:32], k[:31])
 		} else {
-			tmpk = append(tmpk, make([]byte, 31-len(tmpk))...)
+			copy(result[1:1+len(k)], k)
+			// Zero padding is already done by make()
 		}
-		value := append(v, make([]byte, 32-len(v))...)
-		return append([]byte{head}, append(tmpk, value...)...)
+		copy(result[32:32+len(v)], v)
 	} else {
 		// Regular leaf node
-		head := byte(0b11000000)
-		tmpk := make([]byte, len(k))
-		copy(tmpk, k)
-		if len(tmpk) > 31 {
-			tmpk = tmpk[:31]
+		result[0] = byte(0b11000000)
+		if len(k) > 31 {
+			copy(result[1:32], k[:31])
 		} else {
-			tmpk = append(tmpk, make([]byte, 31-len(tmpk))...)
+			copy(result[1:1+len(k)], k)
+			// Zero padding is already done by make()
 		}
-		hash := computeHash(v)
-		return append([]byte{head}, append(tmpk, hash...)...)
+		hash := computeHashCached(v)
+		copy(result[32:64], hash)
 	}
+	benchRec.Add("leaf", time.Since(t0))
+	return result[:]
 }
 
 // decodeLeaf decodes a leaf node into its key and value/hash
 func decodeLeaf(leaf []byte) (k []byte, v []byte, isEmbedded bool, err error) {
+	t0 := time.Now()
 	if len(leaf) != 64 {
 		return nil, nil, false, fmt.Errorf("invalid leaf length %v", len(leaf))
 	}
@@ -236,12 +323,15 @@ func decodeLeaf(leaf []byte) (k []byte, v []byte, isEmbedded bool, err error) {
 		// Embedded-value leaf node
 		valueSize := int(head & 0b00111111) // Extract the value size from the lower 6 bits
 		value := leaf[32 : 32+valueSize]
+		benchRec.Add("decodeLeaf", time.Since(t0))
 		return key, value, true, nil
 	} else if head&0b11000000 == 0b11000000 {
 		// Regular leaf node
 		hash := leaf[32:64]
+		benchRec.Add("decodeLeaf", time.Since(t0))
 		return key, hash, false, nil
 	} else {
+		benchRec.Add("decodeLeaf", time.Since(t0))
 		return nil, nil, false, fmt.Errorf("invalid leaf node header")
 	}
 }
@@ -302,7 +392,9 @@ func (t *MerkleTree) levelDBSetBranch(branchHash, value []byte) {
 }
 
 func (t *MerkleTree) levelDBGetBranch(branchHash []byte) (*Node, error) {
+	t0 := time.Now()
 	value, ok, err := t.levelDBGet(branchHash)
+	benchRec.Add("levelDBGetBranch:levelDBGet", time.Since(t0))
 	if err != nil || !ok {
 		return nil, err
 	}
@@ -337,8 +429,8 @@ func (t *MerkleTree) levelDBGetBranch(branchHash []byte) (*Node, error) {
 
 func (t *MerkleTree) levelDBSetLeaf(encodedLeaf, value []byte, key []byte) {
 	_k, _v, isEmbedded, _ := decodeLeaf(encodedLeaf)
-	encodedLeafHash := computeHash(encodedLeaf)
-	encodedLeafHashVal := computeHash(append(encodedLeafHash, value...))
+	encodedLeafHash := computeHashCached(encodedLeaf)
+	encodedLeafHashVal := computeHashCached(append(encodedLeafHash, value...))
 	//t.levelDBSet(key, encodedLeafHashVal)
 	t.levelDBSet(encodedLeafHashVal, key)
 	if isEmbedded {
@@ -386,7 +478,9 @@ func (t *MerkleTree) levelDBSet(k, v []byte) error {
 	if t.db == nil {
 		return fmt.Errorf("database is not initialized")
 	}
+	t0 := time.Now()
 	err := t.db.WriteRawKV(k, v)
+	benchRec.Add("levelDBSet:WriteRawKV", time.Since(t0))
 	if err != nil {
 		return fmt.Errorf("failed to set key %s: %v", k, err)
 	}
@@ -402,8 +496,9 @@ func (t *MerkleTree) levelDBGet(k []byte) ([]byte, bool, error) {
 	if t.db == nil {
 		return nil, false, fmt.Errorf("database is not initialized")
 	}
-	//value, err := t.db.Get(k, nil)
+	t0 := time.Now()
 	value, ok, err := t.db.ReadRawKV(k)
+	benchRec.Add("levelDBGet:ReadRawKV", time.Since(t0))
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to get key [%s]: %v", k, err)
 	} else if !ok {
@@ -413,8 +508,9 @@ func (t *MerkleTree) levelDBGet(k []byte) ([]byte, bool, error) {
 }
 
 func (t *MerkleTree) levelDBGetNode(nodeHash []byte) (*Node, error) {
-	//value, _ := t.db.Get([]byte(nodeHash), nil)
+	t0 := time.Now()
 	value, _, _ := t.db.ReadRawKV(nodeHash)
+	benchRec.Add("levelDBGetNode:ReadRawKV", time.Since(t0))
 	zeroHash := make([]byte, 32)
 	if compareBytes(nodeHash, zeroHash) || value == nil {
 		return &Node{
@@ -423,8 +519,9 @@ func (t *MerkleTree) levelDBGetNode(nodeHash []byte) (*Node, error) {
 	}
 	leafKey, _, _ := t.levelDBGetLeaf(nodeHash)
 	if leafKey != nil {
+		t0 = time.Now()
 		leafValue, _, _ := t.db.ReadRawKV(computeHash([]byte(append(nodeHash, leafKey...))))
-		//leafValue, _ := t.db.Get([]byte(append(nodeHash, leafKey...)), nil)
+		benchRec.Add("levelDBGetNode:ReadRawKV", time.Since(t0))
 		return &Node{
 			Hash: nodeHash,
 			Key:  leafValue,
@@ -616,7 +713,9 @@ func (t *MerkleTree) GetRealKey(key [31]byte, value []byte) []byte {
 
 	leafKey, _, _ := t.levelDBGetLeaf(nodeHash)
 	if leafKey != nil {
+		t0 := time.Now()
 		realKey, _, _ := t.db.ReadRawKV(computeHash([]byte(append(nodeHash, leafKey...))))
+		benchRec.Add("GetRealKey:ReadRawKV", time.Since(t0))
 		return realKey
 	}
 	return nil
@@ -1003,7 +1102,10 @@ func (t *MerkleTree) insertNode(node *Node, key, value []byte, depth int) *Node 
 	}
 
 	node.Hash = computeHash(branch(leftHash, rightHash))
-	t.levelDBSetBranch(node.Hash, append(leftHash, rightHash...))
+	var branchData [64]byte
+	copy(branchData[:32], leftHash)
+	copy(branchData[32:64], rightHash)
+	t.levelDBSetBranch(node.Hash, branchData[:])
 	return node
 }
 
@@ -1049,7 +1151,10 @@ func (t *MerkleTree) createBranchNode(node *Node, key, value []byte, depth int) 
 	}
 
 	node.Hash = computeHash(branch(leftHash, rightHash))
-	t.levelDBSetBranch(node.Hash, append(leftHash, rightHash...))
+	var branchData [64]byte
+	copy(branchData[:32], leftHash)
+	copy(branchData[32:64], rightHash)
+	t.levelDBSetBranch(node.Hash, branchData[:])
 	return node
 }
 
@@ -1109,7 +1214,10 @@ func (t *MerkleTree) updateTree(node *Node, key, value []byte, depth int) {
 		node.Right = &Node{Hash: make([]byte, 32)}
 	}
 	node.Hash = computeHash(branch(leftHash, rightHash))
-	t.levelDBSetBranch(node.Hash, append(leftHash, rightHash...))
+	var branchData [64]byte
+	copy(branchData[:32], leftHash)
+	copy(branchData[32:64], rightHash)
+	t.levelDBSetBranch(node.Hash, branchData[:])
 }
 
 // Get retrieves the value of a specific key in the Merkle Tree
@@ -1148,7 +1256,9 @@ func (t *MerkleTree) getValue(node *Node, key []byte, depth int) ([]byte, bool, 
 		}
 
 		if t.db != nil {
+			t0 := time.Now()
 			valueRaw, okRaw, errRaw := t.db.ReadRawKV(node.Key)
+			benchRec.Add("getValue:ReadRawKV", time.Since(t0))
 			if errRaw != nil {
 				return nil, false, fmt.Errorf("ReadRawKV: Error %v", errRaw)
 			} else if !okRaw {

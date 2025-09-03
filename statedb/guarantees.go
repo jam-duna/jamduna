@@ -113,8 +113,8 @@ func (s *StateDB) VerifyGuaranteeBasic(g types.Guarantee, targetJCE uint32) erro
 	}
 
 	// signature verification against current or previous validator set
-	validators := s.JamState.chooseValidatorSet(g.Slot)
-	if err := g.Verify(validators); err != nil {
+	validators, prevValidators := s.JamState.chooseValidatorSets(g.Slot)
+	if err := g.Verify(validators, prevValidators); err != nil {
 		return err
 	}
 
@@ -166,6 +166,12 @@ func (j *JamState) chooseValidatorSet(slot uint32) types.Validators {
 		return j.SafroleState.PrevValidators
 	}
 	return j.SafroleState.CurrValidators
+}
+func (j *JamState) chooseValidatorSets(slot uint32) (types.Validators, types.Validators) {
+	// if j.IsPreviousValidators(slot) {
+	// 	return j.SafroleState.PrevValidators, j.SafroleState.CurrValidators
+	// }
+	return j.SafroleState.CurrValidators, j.SafroleState.PrevValidators
 }
 
 // CheckSortedGuarantees ensures guarantees are sorted by core index.

@@ -146,7 +146,7 @@ func (g *GuaranteeCredential) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (g *Guarantee) Verify(CurrV []Validator) error {
+func (g *Guarantee) Verify(CurrV []Validator, PrevV []Validator) error {
 	signtext := g.Report.computeWorkReportBytes()
 	//verify the signature
 	numErrors := 0
@@ -154,14 +154,15 @@ func (g *Guarantee) Verify(CurrV []Validator) error {
 		//verify the signature
 		// [i.ValidatorIndex].Ed25519
 		validatorKey := CurrV[i.ValidatorIndex].GetEd25519Key()
-		if !Ed25519Verify(validatorKey, signtext, i.Signature) {
+		prevValidatorKey := PrevV[i.ValidatorIndex].GetEd25519Key()
+		if !Ed25519Verify(validatorKey, signtext, i.Signature) && !Ed25519Verify(prevValidatorKey, signtext, i.Signature) {
 			numErrors++
-			// fmt.Printf("[guarantee:Verify] reportHash: %v; ERR %d invalid signature in guarantee by validator %v [PubKey: %s]\n", g.Report.Hash().String(), numErrors, i.ValidatorIndex, common.Bytes2Hex(validatorKey[:]))
-			// fmt.Printf("work report hash : %s\n", g.Report.Hash().String())
-			// fmt.Printf("sign salt : %s\n", common.Bytes2Hex(signtext))
-			// fmt.Printf("signature : %s\n", common.Bytes2Hex(i.Signature[:]))
+			//fmt.Printf("[guarantee:Verify] reportHash: %v; ERR invalid signature in guarantee by validator %v [validatorKey: %s prevValidatorKey: %s]\n", g.Report.Hash().String(), i.ValidatorIndex, common.Bytes2Hex(validatorKey[:]), common.Bytes2Hex(prevValidatorKey[:]))
+			//fmt.Printf("work report hash : %s\n", g.Report.Hash().String())
+			//fmt.Printf("sign salt : %s\n", common.Bytes2Hex(signtext))
+			//fmt.Printf("signature : %s\n", common.Bytes2Hex(i.Signature[:]))
 		} else {
-			//fmt.Printf("[guarantee:Verify] reportHash: %v; OK signature in guarantee by validator %v [PubKey: %s]\n", g.Report.Hash().String(), i.ValidatorIndex, common.Bytes2Hex(validatorKey[:]))
+			// fmt.Printf("[guarantee:Verify] reportHash: %v; OK signature in guarantee by validator %v [PubKey: %s]\n", g.Report.Hash().String(), i.ValidatorIndex, common.Bytes2Hex(validatorKey[:]))
 		}
 	}
 	if numErrors > 0 {

@@ -2,8 +2,6 @@ package pvm
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
@@ -56,36 +54,41 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 		vm.Standard_Program_Initialization(a) // eq 264/265
 		vm.standardInitTime = common.Elapsed(startTime)
 		startTime = time.Now()
-		vm.Execute(types.EntryPointRefine, false)
+		startTime = time.Now()
+		//vm.Execute(types.EntryPointRefine, false)
+		vm.EntryPoint = types.EntryPointRefine
+		vm.IsChild = false
+		err := vm.ExecuteWithCGO()
+		if err != nil {
+			log.Error(vm.logging, "C VM execution failed", "error", err)
+		}
 		vm.executionTime = common.Elapsed(startTime)
-	case BackendSandbox:
-		rvm, err := NewCompilerSandboxVM(vm)
-		if err != nil {
-			log.Error(vm.logging, "CompilerVM creation failed", "error", err)
-			return
-		}
-		vm.initializationTime = common.Elapsed(startTime)
-		startTime = time.Now()
-		if err = rvm.Standard_Program_Initialization_SandBox(a); err != nil {
-			log.Error(vm.logging, "CompilerVM Standard_Program_Initialization failed", "error", err)
-			return
-		} // eq 264/265
-		vm.standardInitTime = common.Elapsed(startTime)
-		rvm.ExecuteSandBox(types.EntryPointRefine)
+
 	case BackendCompiler:
-		rvm, err := NewCompilerVM(vm)
-		if err != nil {
-			log.Error(vm.logging, "CompilerVM creation failed", "error", err)
-			return
-		}
-		vm.initializationTime = common.Elapsed(startTime)
-		startTime = time.Now()
-		if err = rvm.Standard_Program_Initialization(a); err != nil {
-			log.Error(vm.logging, "CompilerVM Standard_Program_Initialization failed", "error", err)
-			return
-		} // eq 264/265
+		vm.Standard_Program_Initialization(a) // eq 264/265
 		vm.standardInitTime = common.Elapsed(startTime)
-		rvm.Execute(types.EntryPointRefine)
+		startTime = time.Now()
+		vm.EntryPoint = types.EntryPointRefine
+		vm.IsChild = false
+		err := vm.ExecuteWithCGO()
+		if err != nil {
+			log.Error(vm.logging, "C VM execution failed", "error", err)
+		}
+		vm.executionTime = common.Elapsed(startTime)
+	case "legacy_compiler":
+		// rvm, err := NewCompilerVM(vm)
+		// if err != nil {
+		// 	log.Error(vm.logging, "CompilerVM creation failed", "error", err)
+		// 	return
+		// }
+		// vm.initializationTime = common.Elapsed(startTime)
+		// startTime = time.Now()
+		// if err = rvm.Standard_Program_Initialization(a); err != nil {
+		// 	log.Error(vm.logging, "CompilerVM Standard_Program_Initialization failed", "error", err)
+		// 	return
+		// } // eq 264/265
+		// vm.standardInitTime = common.Elapsed(startTime)
+		// rvm.Execute(types.EntryPointRefine)
 	default:
 		log.Crit(vm.logging, "Unknown VM mode", "mode", vm.Backend)
 		panic(0)
@@ -149,7 +152,6 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	vm.AccumulateOperandElements = elements
 	vm.N = n
 	vm.Gas = int64(g)
-	// (*ServiceAccount, bool, error)
 
 	x_s, found := X.U.ServiceAccounts[s]
 	if !found {
@@ -163,29 +165,32 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	switch vm.Backend {
 	case BackendInterpreter:
 		vm.Standard_Program_Initialization(input_bytes) // eq 264/265
-		vm.Execute(types.EntryPointAccumulate, false)   // F ∈ Ω⟨(X, X)⟩
-	case BackendSandbox:
-		rvm, err := NewCompilerSandboxVM(vm)
+		vm.EntryPoint = types.EntryPointAccumulate
+		vm.IsChild = false
+		//vm.Execute(types.EntryPointAccumulate, false)   // F ∈ Ω⟨(X, X)⟩
+		err := vm.ExecuteWithCGO()
 		if err != nil {
-			log.Error(vm.logging, "CompilerVM creation failed", "error", err)
-			return
+			log.Error(vm.logging, "C VM execution failed", "error", err)
 		}
-		if err = rvm.Standard_Program_Initialization_SandBox(input_bytes); err != nil {
-			log.Error(vm.logging, "CompilerVM Standard_Program_Initialization failed", "error", err)
-			return
-		}
-		rvm.ExecuteSandBox(types.EntryPointAccumulate)
 	case BackendCompiler:
-		rvm, err := NewCompilerVM(vm)
+		vm.Standard_Program_Initialization(input_bytes) // eq 264/265
+		vm.EntryPoint = types.EntryPointAccumulate
+		vm.IsChild = false
+		err := vm.ExecuteWithCGO()
 		if err != nil {
-			log.Error(vm.logging, "CompilerVM creation failed", "error", err)
-			return
+			log.Error(vm.logging, "C VM execution failed", "error", err)
 		}
-		if err = rvm.Standard_Program_Initialization(input_bytes); err != nil {
-			log.Error(vm.logging, "CompilerVM Standard_Program_Initialization failed", "error", err)
-			return
-		}
-		rvm.Execute(types.EntryPointAccumulate)
+	case "legacy_compiler":
+		// rvm, err := NewCompilerVM(vm)
+		// if err != nil {
+		// 	log.Error(vm.logging, "CompilerVM creation failed", "error", err)
+		// 	return
+		// }
+		// if err = rvm.Standard_Program_Initialization(input_bytes); err != nil {
+		// 	log.Error(vm.logging, "CompilerVM Standard_Program_Initialization failed", "error", err)
+		// 	return
+		// }
+		// rvm.Execute(types.EntryPointAccumulate)
 	default:
 		log.Crit(vm.logging, "Unknown VM mode", "mode", vm.Backend)
 		panic(0)
@@ -195,30 +200,6 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	return r, res, x_s
 }
 
-func (vm *VM) serviceIDlog() string {
-	return fmt.Sprintf("%d_%s.json", vm.Service_index, vm.Mode)
-}
-
-func (vm *VM) initLogs() {
-	if true {
-		return
-	}
-
-	// ensure the directory exists
-	if err := os.MkdirAll(vm.Backend, 0755); err != nil {
-		log.Error(vm.logging, "Error ensuring directory exists", "error", err)
-		return
-	}
-	// check if file exists, if not create it with 0 length
-	filePath := filepath.Join(vm.Backend, vm.serviceIDlog())
-	f, err := os.Create(filePath)
-	if err != nil {
-		log.Error(vm.logging, "Error creating log file", "file", filePath, "error", err)
-		return
-	}
-	defer f.Close()
-}
-
 func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAccount) (r types.Result, res uint64) {
 	vm.Mode = ModeOnTransfer
 	// a = E(t)   take transfer memos t and encode them
@@ -226,29 +207,32 @@ func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAc
 	switch vm.Backend {
 	case BackendInterpreter:
 		vm.Standard_Program_Initialization(arguments) // eq 264/265
-		vm.Execute(types.EntryPointOnTransfer, false)
-	case BackendSandbox:
-		rvm, err := NewCompilerSandboxVM(vm)
+		vm.EntryPoint = types.EntryPointOnTransfer
+		vm.IsChild = false
+		//vm.Execute(types.EntryPointOnTransfer, false)
+		err := vm.ExecuteWithCGO()
 		if err != nil {
-			log.Error(vm.logging, "CompilerVM creation failed", "error", err)
-			return
+			log.Error(vm.logging, "C VM execution failed", "error", err)
 		}
-		if err = rvm.Standard_Program_Initialization_SandBox(arguments); err != nil {
-			log.Error(vm.logging, "CompilerVM Standard_Program_Initialization failed", "error", err)
-			return
-		} // eq 264/265
-		rvm.ExecuteSandBox(types.EntryPointOnTransfer)
 	case BackendCompiler:
-		rvm, err := NewCompilerVM(vm)
+		vm.Standard_Program_Initialization(arguments) // eq 264/265
+		vm.EntryPoint = types.EntryPointOnTransfer
+		vm.IsChild = false
+		err := vm.ExecuteWithCGO()
 		if err != nil {
-			log.Error(vm.logging, "CompilerVM creation failed", "error", err)
-			return
+			log.Error(vm.logging, "C VM execution failed", "error", err)
 		}
-		if err = rvm.Standard_Program_Initialization(arguments); err != nil {
-			log.Error(vm.logging, "CompilerVM Standard_Program_Initialization failed", "error", err)
-			return
-		}
-		rvm.Execute(types.EntryPointOnTransfer)
+	case "legacy_compiler":
+		// rvm, err := NewCompilerVM(vm)
+		// if err != nil {
+		// 	log.Error(vm.logging, "CompilerVM creation failed", "error", err)
+		// 	return
+		// }
+		// if err = rvm.Standard_Program_Initialization(arguments); err != nil {
+		// 	log.Error(vm.logging, "CompilerVM Standard_Program_Initialization failed", "error", err)
+		// 	return
+		// }
+		// rvm.Execute(types.EntryPointOnTransfer)
 	default:
 		log.Crit(vm.logging, "Unknown VM mode", "mode", vm.Backend)
 		panic(12)
@@ -268,29 +252,32 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Resul
 	switch vm.Backend {
 	case BackendInterpreter:
 		vm.Standard_Program_Initialization(a) // eq 264/265
-		vm.Execute(types.EntryPointAuthorization, false)
-	case BackendSandbox:
-		rvm, err := NewCompilerSandboxVM(vm)
+		vm.EntryPoint = types.EntryPointAuthorization
+		vm.IsChild = false
+		//vm.Execute(types.EntryPointAuthorization, false)
+		err := vm.ExecuteWithCGO()
 		if err != nil {
-			log.Error(vm.logging, "CompilerVM creation failed", "error", err)
-			return
+			log.Error(vm.logging, "C VM execution failed", "error", err)
 		}
-		if err = rvm.Standard_Program_Initialization_SandBox(a); err != nil {
-			log.Error(vm.logging, "CompilerVM Standard_Program_Initialization failed", "error", err)
-			return
-		} // eq 264/265
-		rvm.ExecuteSandBox(types.EntryPointAuthorization)
 	case BackendCompiler:
-		rvm, err := NewCompilerVM(vm)
+		vm.Standard_Program_Initialization(a) // eq 264/265
+		vm.EntryPoint = types.EntryPointAuthorization
+		vm.IsChild = false
+		err := vm.ExecuteWithCGO()
 		if err != nil {
-			log.Error(vm.logging, "CompilerVM creation failed", "error", err)
-			return
+			log.Error(vm.logging, "C VM execution failed", "error", err)
 		}
-		if err = rvm.Standard_Program_Initialization(a); err != nil {
-			log.Error(vm.logging, "CompilerVM Standard_Program_Initialization failed", "error", err)
-			return
-		}
-		rvm.Execute(types.EntryPointAuthorization)
+	case "legacy_compiler":
+		// rvm, err := NewCompilerVM(vm)
+		// if err != nil {
+		// 	log.Error(vm.logging, "CompilerVM creation failed", "error", err)
+		// 	return
+		// }
+		// if err = rvm.Standard_Program_Initialization(a); err != nil {
+		// 	log.Error(vm.logging, "CompilerVM Standard_Program_Initialization failed", "error", err)
+		// 	return
+		// }
+		// rvm.Execute(types.EntryPointAuthorization)
 	default:
 		log.Crit(vm.logging, "Unknown VM mode", "mode", vm.Backend)
 		panic(22)
@@ -310,9 +297,9 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 		log.Trace(vm.logging, "getArgumentOutputs - Error", "result", vm.ResultCode, "mode", vm.Mode, "service", string(vm.ServiceMetadata))
 		return r, 0
 	}
-	o, _ := vm.Ram.ReadRegister(7)
-	l, _ := vm.Ram.ReadRegister(8)
-	output, res := vm.Ram.ReadRAMBytes(uint32(o), uint32(l))
+	o := vm.register[7]
+	l := vm.register[8]
+	output, res := vm.ReadRAMBytes(uint32(o), uint32(l))
 	//log.Info(vm.logging, "getArgumentOutputs - OK", "output", fmt.Sprintf("%x", output), "l", l)
 	if vm.ResultCode == types.WORKDIGEST_OK && res == 0 {
 		r.Ok = output

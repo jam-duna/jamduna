@@ -4,6 +4,14 @@ import "fmt"
 
 // Appendix A - Instuctions
 
+func init() {
+	initDispatchTable()
+}
+
+type OpcodeHandler func(vm *VM, operands []byte)
+
+var dispatchTable [256]OpcodeHandler
+
 // A.5.1. Instructions without Arguments.
 const (
 	TRAP        = 0
@@ -25,7 +33,7 @@ const (
 	STORE_IMM_U8  = 30
 	STORE_IMM_U16 = 31
 	STORE_IMM_U32 = 32
-	STORE_IMM_U64 = 33 // NEW, 32-bit twin = store_imm_u32
+	STORE_IMM_U64 = 33
 )
 
 // A.5.5. Instructions with Arguments of One Offset.
@@ -94,14 +102,14 @@ const (
 	STORE_IND_U8      = 120
 	STORE_IND_U16     = 121
 	STORE_IND_U32     = 122
-	STORE_IND_U64     = 123 // hotspot
+	STORE_IND_U64     = 123
 	LOAD_IND_U8       = 124
 	LOAD_IND_I8       = 125
 	LOAD_IND_U16      = 126
 	LOAD_IND_I16      = 127
 	LOAD_IND_U32      = 128
 	LOAD_IND_I32      = 129
-	LOAD_IND_U64      = 130 // hotspot
+	LOAD_IND_U64      = 130
 	ADD_IMM_32        = 131
 	AND_IMM           = 132
 	XOR_IMM           = 133
@@ -120,7 +128,7 @@ const (
 	SHAR_R_IMM_ALT_32 = 146
 	CMOV_IZ_IMM       = 147
 	CMOV_NZ_IMM       = 148
-	ADD_IMM_64        = 149 // hotspot
+	ADD_IMM_64        = 149
 	MUL_IMM_64        = 150
 	SHLO_L_IMM_64     = 151
 	SHLO_R_IMM_64     = 152
@@ -189,9 +197,9 @@ const (
 	AND_INV       = 224
 	OR_INV        = 225
 	XNOR          = 226
-	MAX           = 227
+	MAX_          = 227
 	MAX_U         = 228
-	MIN           = 229
+	MIN_          = 229
 	MIN_U         = 230
 )
 
@@ -262,9 +270,7 @@ func dumpLoadGeneric(_ string, regA int, addrOrVx uint64, value uint64, bits int
 }
 
 func dumpLoadImm(_ string, regA int, addrOrVx uint64, value uint64, bits int, signed bool) {
-	if !PvmTrace {
-		return
-	}
+
 	prefix := "u"
 	if signed {
 		prefix = "i"
@@ -277,9 +283,7 @@ func dumpLoadImm(_ string, regA int, addrOrVx uint64, value uint64, bits int, si
 }
 
 func dumpMov(regD, regA int, result uint64) {
-	if !PvmTrace {
-		return
-	}
+
 	if PvmInterpretation {
 		fmt.Printf("\t%s = %s \n", reg(regD), reg(regA))
 	}
@@ -287,9 +291,7 @@ func dumpMov(regD, regA int, result uint64) {
 }
 
 func dumpThreeRegOp(opname string, regD, regA, regB int, _, _, result uint64) {
-	if !PvmTrace {
-		return
-	}
+
 	if PvmInterpretation {
 		fmt.Printf("\t%s = %s %s %s\n", reg(regD), reg(regA), opname, reg(regB))
 	}
@@ -297,9 +299,7 @@ func dumpThreeRegOp(opname string, regD, regA, regB int, _, _, result uint64) {
 }
 
 func dumpBinOp(name string, regA, regB int, vx, result uint64) {
-	if !PvmTrace {
-		return
-	}
+
 	if PvmInterpretation {
 		fmt.Printf("\t%s = %s %s 0x%x\n", reg(regA), reg(regB), name, vx)
 	}
@@ -307,9 +307,7 @@ func dumpBinOp(name string, regA, regB int, vx, result uint64) {
 }
 
 func dumpCmpOp(name string, regA, regB int, vx, result uint64) {
-	if !PvmTrace {
-		return
-	}
+
 	if PvmInterpretation {
 		fmt.Printf("\t%s = %s %s 0x%x\n", reg(regA), name, reg(regB), vx)
 	}
@@ -317,9 +315,7 @@ func dumpCmpOp(name string, regA, regB int, vx, result uint64) {
 }
 
 func dumpShiftOp(name string, regA, regB int, shift, result uint64) {
-	if !PvmTrace {
-		return
-	}
+
 	if PvmInterpretation {
 		fmt.Printf("\t%s = %s %s %x\n", reg(regA), reg(regB), name, shift)
 	}
@@ -327,16 +323,12 @@ func dumpShiftOp(name string, regA, regB int, shift, result uint64) {
 }
 
 func dumpRotOp(_ string, regDst, src string, shift, result uint64) {
-	if !PvmTrace {
-		return
-	}
+
 	fmt.Printf("%s %s = rotR %s by %x = %x\n", prefixTrace, regDst, src, shift, result)
 }
 
 func dumpCmovOp(name string, regA, regB int, _, _, result uint64, _ bool) {
-	if !PvmTrace {
-		return
-	}
+
 	if PvmInterpretation {
 		fmt.Printf("\t%s = if %s %s\n", reg(regA), reg(regB), name)
 	}
@@ -344,16 +336,12 @@ func dumpCmovOp(name string, regA, regB int, _, _, result uint64, _ bool) {
 }
 
 func dumpJumpOffset(_ string, offset int64, pc uint64) {
-	if !PvmTrace {
-		return
-	}
+
 	fmt.Printf("*** jump %d\n", int64(int64(pc)+int64(offset)))
 }
 
 func dumpBranch(name string, regA, regB int, valueA, valueB, vx uint64, taken bool) {
-	if !PvmTrace {
-		return
-	}
+
 	cond := branchCondSymbol(name)
 	if PvmInterpretation {
 		fmt.Printf("\tjump %d if %s (%x) %s %s (%x)\n", vx, reg(regA), valueA, cond, reg(regB), valueB)
@@ -364,9 +352,7 @@ func dumpBranch(name string, regA, regB int, valueA, valueB, vx uint64, taken bo
 }
 
 func dumpBranchImm(name string, regA int, _, vx, vy uint64, _, taken bool) {
-	if !PvmTrace {
-		return
-	}
+
 	cond := branchCondSymbol(name)
 	if PvmInterpretation {
 		fmt.Printf("\tjump %d if %s %s 0x%x\n", vy, reg(regA), cond, vx)
@@ -387,9 +373,6 @@ func boolToUint(b bool) uint64 {
 // op is the opcode name (e.g. "COUNT_SET_BITS_64"), dest/src are register indices,
 // valueA is the source register value, and result is the computed result.
 func dumpTwoRegs(op string, destReg, srcReg int, valueA, result uint64) {
-	if !PvmTrace {
-		return
-	}
 
 	// map opcode to the short function name used in the dump
 	var fnName string
@@ -429,4 +412,176 @@ func dumpTwoRegs(op string, destReg, srcReg int, valueA, result uint64) {
 	}
 	fmt.Printf("%s %s = 0x%x\n", prefixTrace, reg(destReg), result)
 
+}
+
+func initDispatchTable() {
+	// Initialize all opcodes to default handler
+	for i := 0; i < 256; i++ {
+		dispatchTable[i] = handleTRAP
+	}
+
+	// A.5.1 No arguments
+	dispatchTable[TRAP] = handleTRAP
+	dispatchTable[FALLTHROUGH] = handleFALLTHROUGH
+
+	// A.5.2 One immediate
+	dispatchTable[ECALLI] = handleECALLI
+
+	// A.5.3 One Register and One Extended Width Immediate
+	dispatchTable[LOAD_IMM_64] = handleLOAD_IMM_64
+
+	// A.5.4 Two Immediates
+	dispatchTable[STORE_IMM_U8] = handleSTORE_IMM_U8
+	dispatchTable[STORE_IMM_U16] = handleSTORE_IMM_U16
+	dispatchTable[STORE_IMM_U32] = handleSTORE_IMM_U32
+	dispatchTable[STORE_IMM_U64] = handleSTORE_IMM_U64
+
+	// A.5.5 One offset
+	dispatchTable[JUMP] = handleJUMP
+
+	// A.5.6 One Register and One Immediate
+	dispatchTable[JUMP_IND] = handleJUMP_IND
+	dispatchTable[LOAD_IMM] = handleLOAD_IMM
+	dispatchTable[LOAD_U8] = handleLOAD_U8
+	dispatchTable[LOAD_I8] = handleLOAD_I8
+	dispatchTable[LOAD_U16] = handleLOAD_U16
+	dispatchTable[LOAD_I16] = handleLOAD_I16
+	dispatchTable[LOAD_U32] = handleLOAD_U32
+	dispatchTable[LOAD_I32] = handleLOAD_I32
+	dispatchTable[LOAD_U64] = handleLOAD_U64
+	dispatchTable[STORE_U8] = handleSTORE_U8
+	dispatchTable[STORE_U16] = handleSTORE_U16
+	dispatchTable[STORE_U32] = handleSTORE_U32
+	dispatchTable[STORE_U64] = handleSTORE_U64
+
+	// A.5.7 One Register and Two Immediates
+	dispatchTable[STORE_IMM_IND_U8] = handleSTORE_IMM_IND_U8
+	dispatchTable[STORE_IMM_IND_U16] = handleSTORE_IMM_IND_U16
+	dispatchTable[STORE_IMM_IND_U32] = handleSTORE_IMM_IND_U32
+	dispatchTable[STORE_IMM_IND_U64] = handleSTORE_IMM_IND_U64
+
+	// A.5.8 One Register, One Immediate and One Offset
+	dispatchTable[LOAD_IMM_JUMP] = handleLOAD_IMM_JUMP
+	dispatchTable[BRANCH_EQ_IMM] = handleBRANCH_EQ_IMM
+	dispatchTable[BRANCH_NE_IMM] = handleBRANCH_NE_IMM
+	dispatchTable[BRANCH_LT_U_IMM] = handleBRANCH_LT_U_IMM
+	dispatchTable[BRANCH_LE_U_IMM] = handleBRANCH_LE_U_IMM
+	dispatchTable[BRANCH_GE_U_IMM] = handleBRANCH_GE_U_IMM
+	dispatchTable[BRANCH_GT_U_IMM] = handleBRANCH_GT_U_IMM
+	dispatchTable[BRANCH_LT_S_IMM] = handleBRANCH_LT_S_IMM
+	dispatchTable[BRANCH_LE_S_IMM] = handleBRANCH_LE_S_IMM
+	dispatchTable[BRANCH_GE_S_IMM] = handleBRANCH_GE_S_IMM
+	dispatchTable[BRANCH_GT_S_IMM] = handleBRANCH_GT_S_IMM
+
+	// A.5.9 Two Registers
+	dispatchTable[MOVE_REG] = handleMOVE_REG
+	dispatchTable[SBRK] = handleSBRK
+	dispatchTable[COUNT_SET_BITS_64] = handleCOUNT_SET_BITS_64
+	dispatchTable[COUNT_SET_BITS_32] = handleCOUNT_SET_BITS_32
+	dispatchTable[LEADING_ZERO_BITS_64] = handleLEADING_ZERO_BITS_64
+	dispatchTable[LEADING_ZERO_BITS_32] = handleLEADING_ZERO_BITS_32
+	dispatchTable[TRAILING_ZERO_BITS_64] = handleTRAILING_ZERO_BITS_64
+	dispatchTable[TRAILING_ZERO_BITS_32] = handleTRAILING_ZERO_BITS_32
+	dispatchTable[SIGN_EXTEND_8] = handleSIGN_EXTEND_8
+	dispatchTable[SIGN_EXTEND_16] = handleSIGN_EXTEND_16
+	dispatchTable[ZERO_EXTEND_16] = handleZERO_EXTEND_16
+	dispatchTable[REVERSE_BYTES] = handleREVERSE_BYTES
+
+	// A.5.10 Two Registers and One Immediate
+	dispatchTable[STORE_IND_U8] = handleSTORE_IND_U8
+	dispatchTable[STORE_IND_U16] = handleSTORE_IND_U16
+	dispatchTable[STORE_IND_U32] = handleSTORE_IND_U32
+	dispatchTable[STORE_IND_U64] = handleSTORE_IND_U64
+	dispatchTable[LOAD_IND_U8] = handleLOAD_IND_U8
+	dispatchTable[LOAD_IND_I8] = handleLOAD_IND_I8
+	dispatchTable[LOAD_IND_U16] = handleLOAD_IND_U16
+	dispatchTable[LOAD_IND_I16] = handleLOAD_IND_I16
+	dispatchTable[LOAD_IND_U32] = handleLOAD_IND_U32
+	dispatchTable[LOAD_IND_I32] = handleLOAD_IND_I32
+	dispatchTable[LOAD_IND_U64] = handleLOAD_IND_U64
+	dispatchTable[ADD_IMM_32] = handleADD_IMM_32
+	dispatchTable[AND_IMM] = handleAND_IMM
+	dispatchTable[XOR_IMM] = handleXOR_IMM
+	dispatchTable[OR_IMM] = handleOR_IMM
+	dispatchTable[MUL_IMM_32] = handleMUL_IMM_32
+	dispatchTable[SET_LT_U_IMM] = handleSET_LT_U_IMM
+	dispatchTable[SET_LT_S_IMM] = handleSET_LT_S_IMM
+	dispatchTable[SHLO_L_IMM_32] = handleSHLO_L_IMM_32
+	dispatchTable[SHLO_R_IMM_32] = handleSHLO_R_IMM_32
+	dispatchTable[SHAR_R_IMM_32] = handleSHAR_R_IMM_32
+	dispatchTable[NEG_ADD_IMM_32] = handleNEG_ADD_IMM_32
+	dispatchTable[SET_GT_U_IMM] = handleSET_GT_U_IMM
+	dispatchTable[SET_GT_S_IMM] = handleSET_GT_S_IMM
+	dispatchTable[SHLO_L_IMM_ALT_32] = handleSHLO_L_IMM_ALT_32
+	dispatchTable[SHLO_R_IMM_ALT_32] = handleSHLO_R_IMM_ALT_32
+	dispatchTable[SHAR_R_IMM_ALT_32] = handleSHAR_R_IMM_ALT_32
+	dispatchTable[CMOV_IZ_IMM] = handleCMOV_IZ_IMM
+	dispatchTable[CMOV_NZ_IMM] = handleCMOV_NZ_IMM
+	dispatchTable[ADD_IMM_64] = handleADD_IMM_64
+	dispatchTable[MUL_IMM_64] = handleMUL_IMM_64
+	dispatchTable[SHLO_L_IMM_64] = handleSHLO_L_IMM_64
+	dispatchTable[SHLO_R_IMM_64] = handleSHLO_R_IMM_64
+	dispatchTable[SHAR_R_IMM_64] = handleSHAR_R_IMM_64
+	dispatchTable[NEG_ADD_IMM_64] = handleNEG_ADD_IMM_64
+	dispatchTable[SHLO_L_IMM_ALT_64] = handleSHLO_L_IMM_ALT_64
+	dispatchTable[SHLO_R_IMM_ALT_64] = handleSHLO_R_IMM_ALT_64
+	dispatchTable[SHAR_R_IMM_ALT_64] = handleSHAR_R_IMM_ALT_64
+	dispatchTable[ROT_R_64_IMM] = handleROT_R_64_IMM
+	dispatchTable[ROT_R_64_IMM_ALT] = handleROT_R_64_IMM_ALT
+	dispatchTable[ROT_R_32_IMM] = handleROT_R_32_IMM
+	dispatchTable[ROT_R_32_IMM_ALT] = handleROT_R_32_IMM_ALT
+
+	// A.5.11 Two Registers and One Offset
+	dispatchTable[BRANCH_EQ] = handleBRANCH_EQ
+	dispatchTable[BRANCH_NE] = handleBRANCH_NE
+	dispatchTable[BRANCH_LT_U] = handleBRANCH_LT_U
+	dispatchTable[BRANCH_LT_S] = handleBRANCH_LT_S
+	dispatchTable[BRANCH_GE_U] = handleBRANCH_GE_U
+	dispatchTable[BRANCH_GE_S] = handleBRANCH_GE_S
+
+	// A.5.12 Two Registers and Two Immediates
+	dispatchTable[LOAD_IMM_JUMP_IND] = handleLOAD_IMM_JUMP_IND
+
+	// A.5.13 Three Registers
+	dispatchTable[ADD_32] = handleADD_32
+	dispatchTable[SUB_32] = handleSUB_32
+	dispatchTable[MUL_32] = handleMUL_32
+	dispatchTable[DIV_U_32] = handleDIV_U_32
+	dispatchTable[DIV_S_32] = handleDIV_S_32
+	dispatchTable[REM_U_32] = handleREM_U_32
+	dispatchTable[REM_S_32] = handleREM_S_32
+	dispatchTable[SHLO_L_32] = handleSHLO_L_32
+	dispatchTable[SHLO_R_32] = handleSHLO_R_32
+	dispatchTable[SHAR_R_32] = handleSHAR_R_32
+	dispatchTable[ADD_64] = handleADD_64
+	dispatchTable[SUB_64] = handleSUB_64
+	dispatchTable[MUL_64] = handleMUL_64
+	dispatchTable[DIV_U_64] = handleDIV_U_64
+	dispatchTable[DIV_S_64] = handleDIV_S_64
+	dispatchTable[REM_U_64] = handleREM_U_64
+	dispatchTable[REM_S_64] = handleREM_S_64
+	dispatchTable[SHLO_L_64] = handleSHLO_L_64
+	dispatchTable[SHLO_R_64] = handleSHLO_R_64
+	dispatchTable[SHAR_R_64] = handleSHAR_R_64
+	dispatchTable[AND] = handleAND
+	dispatchTable[XOR] = handleXOR
+	dispatchTable[OR] = handleOR
+	dispatchTable[MUL_UPPER_S_S] = handleMUL_UPPER_S_S
+	dispatchTable[MUL_UPPER_U_U] = handleMUL_UPPER_U_U
+	dispatchTable[MUL_UPPER_S_U] = handleMUL_UPPER_S_U
+	dispatchTable[SET_LT_U] = handleSET_LT_U
+	dispatchTable[SET_LT_S] = handleSET_LT_S
+	dispatchTable[CMOV_IZ] = handleCMOV_IZ
+	dispatchTable[CMOV_NZ] = handleCMOV_NZ
+	dispatchTable[ROT_L_64] = handleROT_L_64
+	dispatchTable[ROT_L_32] = handleROT_L_32
+	dispatchTable[ROT_R_64] = handleROT_R_64
+	dispatchTable[ROT_R_32] = handleROT_R_32
+	dispatchTable[AND_INV] = handleAND_INV
+	dispatchTable[OR_INV] = handleOR_INV
+	dispatchTable[XNOR] = handleXNOR
+	dispatchTable[MAX_] = handleMAX
+	dispatchTable[MAX_U] = handleMAX_U
+	dispatchTable[MIN_] = handleMIN
+	dispatchTable[MIN_U] = handleMIN_U
 }

@@ -218,7 +218,7 @@ func TestRefineStateTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
-	pvmBackends := []string{pvm.BackendInterpreter} //, pvm.BackendInterpreter, pvm.BackendSandbox}
+	pvmBackends := []string{pvm.BackendInterpreter} //, pvm.BackendInterpreter
 	//pvmBackends := []string{pvm.BackendInterpreter}
 	for _, pvmBackend := range pvmBackends {
 		if runtime.GOOS != "linux" && pvmBackend == pvm.BackendCompiler {

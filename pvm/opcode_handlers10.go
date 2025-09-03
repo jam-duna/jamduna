@@ -3,604 +3,2122 @@ package pvm
 import (
 	"encoding/binary"
 	"math/bits"
-
-	"github.com/colorfulnotion/jam/types"
 )
 
-// A.5.10 Two Registers and One Immediate handlers - STORE operations
+// A.5.10. Instructions with Arguments of Two Registers and One Immediate.
 
-func (vm *VM) handleSTORE_IND_U8(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	addr := uint32((uint64(valueB) + vx) % (1 << 32))
-	errCode := vm.Ram.WriteRAMBytes(addr, []byte{byte(uint8(valueA))})
-	dumpStoreGeneric("STORE_IND_U8", uint64(addr), reg(registerIndexA), valueA&0xff, 8)
+func handleSTORE_IND_U8(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueA := vm.register[registerIndexA]
+	valueB := vm.register[registerIndexB]
+	addr := uint32(valueB + vx)
+	value := uint8(valueA)
+	errCode := vm.WriteRAMBytes8(addr, value)
+
 	if errCode != OK {
-		vm.ResultCode = types.WORKDIGEST_PANIC
-		vm.MachineState = PANIC
-		vm.terminated = true
-		vm.Fault_address = uint32(errCode)
+		vm.panic(errCode)
 		return
+	}
+	if PvmTrace {
+		dumpStoreGeneric("STORE_IND_U8", uint64(addr), reg(registerIndexA), uint64(value), 8)
 	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleSTORE_IND_U16(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	addr := uint32((uint64(valueB) + vx) % (1 << 32))
-	errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(valueA%(1<<16), 2))
-	dumpStoreGeneric("STORE_IND_U16", uint64(addr), reg(registerIndexA), valueA&0xffff, 16)
+func handleSTORE_IND_U16(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueA := vm.register[registerIndexA]
+	valueB := vm.register[registerIndexB]
+	addr := uint32(valueB + vx)
+	value := uint16(valueA)
+	errCode := vm.WriteRAMBytes16(addr, value)
 	if errCode != OK {
-		vm.ResultCode = types.WORKDIGEST_PANIC
-		vm.MachineState = PANIC
-		vm.terminated = true
-		vm.Fault_address = uint32(errCode)
+		vm.panic(errCode)
 		return
+	}
+	if PvmTrace {
+		dumpStoreGeneric("STORE_IND_U16", uint64(addr), reg(registerIndexA), uint64(value), 16)
 	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleSTORE_IND_U32(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	addr := uint32((uint64(valueB) + vx) % (1 << 32))
-	errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(valueA%(1<<32), 4))
-	dumpStoreGeneric("STORE_IND_U32", uint64(addr), reg(registerIndexA), valueA&0xffffffff, 32)
+func handleSTORE_IND_U32(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueA := vm.register[registerIndexA]
+	valueB := vm.register[registerIndexB]
+	addr := uint32(valueB + vx)
+	value := uint32(valueA)
+	errCode := vm.WriteRAMBytes32(addr, value)
 	if errCode != OK {
-		vm.ResultCode = types.WORKDIGEST_PANIC
-		vm.MachineState = PANIC
-		vm.terminated = true
-		vm.Fault_address = uint32(errCode)
+		vm.panic(errCode)
 		return
+	}
+	if PvmTrace {
+		dumpStoreGeneric("STORE_IND_U32", uint64(addr), reg(registerIndexA), uint64(value), 32)
 	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleSTORE_IND_U64(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	addr := uint32((uint64(valueB) + vx) % (1 << 32))
-	errCode := vm.Ram.WriteRAMBytes64(addr, valueA)
+func handleSTORE_IND_U64(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueA := vm.register[registerIndexA]
+	addr := uint32(vm.register[registerIndexB] + vx)
+	errCode := vm.WriteRAMBytes64(addr, valueA)
+	if errCode != OK {
+		vm.panic(errCode)
+		return
+	}
 	if PvmTrace {
 		dumpStoreGeneric("STORE_IND_U64", uint64(addr), reg(registerIndexA), valueA, 64)
-	}
-	if errCode != OK {
-		vm.ResultCode = types.WORKDIGEST_PANIC
-		vm.MachineState = PANIC
-		vm.terminated = true
-		vm.Fault_address = uint32(errCode)
-		return
 	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
 // LOAD operations
 
-func (vm *VM) handleLOAD_IND_U8(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	addr := uint32((uint64(valueB) + vx) % (1 << 32))
-	value, errCode := vm.Ram.ReadRAMBytes(addr, 1)
+func handleLOAD_IND_U8(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
+	addr := uint32(valueB + vx)
+	value, errCode := vm.ReadRAMBytes8(addr)
 	if errCode != OK {
-		vm.ResultCode = types.WORKDIGEST_PANIC
-		vm.MachineState = PANIC
-		vm.terminated = true
-		vm.Fault_address = uint32(errCode)
+		vm.panic(errCode)
 		return
 	}
-	result := uint64(uint8(value[0]))
-	dumpLoadGeneric("LOAD_IND_U8", registerIndexA, uint64(addr), result, 8, false)
-	vm.Ram.WriteRegister(registerIndexA, result)
-	vm.pc += 1 + uint64(len(operands))
-}
-
-func (vm *VM) handleLOAD_IND_I8(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	addr := uint32((uint64(valueB) + vx) % (1 << 32))
-	value, errCode := vm.Ram.ReadRAMBytes(addr, 1)
-	if errCode != OK {
-		vm.ResultCode = types.WORKDIGEST_PANIC
-		vm.MachineState = PANIC
-		vm.terminated = true
-		vm.Fault_address = uint32(errCode)
-		return
-	}
-	result := uint64(int8(value[0]))
-	dumpLoadGeneric("LOAD_IND_I8", registerIndexA, uint64(addr), result, 8, true)
-	vm.Ram.WriteRegister(registerIndexA, result)
-	vm.pc += 1 + uint64(len(operands))
-}
-
-func (vm *VM) handleLOAD_IND_U16(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	addr := uint32((uint64(valueB) + vx) % (1 << 32))
-	value, errCode := vm.Ram.ReadRAMBytes(addr, 2)
-	if errCode != OK {
-		vm.ResultCode = types.WORKDIGEST_PANIC
-		vm.MachineState = PANIC
-		vm.terminated = true
-		vm.Fault_address = uint32(errCode)
-		return
-	}
-	result := types.DecodeE_l(value)
-	dumpLoadGeneric("LOAD_IND_U16", registerIndexA, uint64(addr), result, 16, false)
-	vm.Ram.WriteRegister(registerIndexA, result)
-	vm.pc += 1 + uint64(len(operands))
-}
-
-func (vm *VM) handleLOAD_IND_I16(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	addr := uint32((uint64(valueB) + vx) % (1 << 32))
-	value, errCode := vm.Ram.ReadRAMBytes(addr, 2)
-	if errCode != OK {
-		vm.ResultCode = types.WORKDIGEST_PANIC
-		vm.MachineState = PANIC
-		vm.terminated = true
-		vm.Fault_address = uint32(errCode)
-		return
-	}
-	result := uint64(int16(types.DecodeE_l(value)))
-	dumpLoadGeneric("LOAD_IND_I16", registerIndexA, uint64(addr), result, 16, true)
-	vm.Ram.WriteRegister(registerIndexA, result)
-	vm.pc += 1 + uint64(len(operands))
-}
-
-func (vm *VM) handleLOAD_IND_U32(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	addr := uint32((uint64(valueB) + vx) % (1 << 32))
-	value, errCode := vm.Ram.ReadRAMBytes(addr, 4)
-	if errCode != OK {
-		vm.ResultCode = types.WORKDIGEST_PANIC
-		vm.MachineState = PANIC
-		vm.terminated = true
-		vm.Fault_address = uint32(errCode)
-		return
-	}
-	result := types.DecodeE_l(value)
-	dumpLoadGeneric("LOAD_IND_U32", registerIndexA, uint64(addr), result, 32, false)
-	vm.Ram.WriteRegister(registerIndexA, result)
-	vm.pc += 1 + uint64(len(operands))
-}
-
-func (vm *VM) handleLOAD_IND_I32(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	addr := uint32((uint64(valueB) + vx) % (1 << 32))
-	value, errCode := vm.Ram.ReadRAMBytes(addr, 4)
-	if errCode != OK {
-		vm.ResultCode = types.WORKDIGEST_PANIC
-		vm.MachineState = PANIC
-		vm.terminated = true
-		vm.Fault_address = uint32(errCode)
-		return
-	}
-	result := uint64(int32(types.DecodeE_l(value)))
-	dumpLoadGeneric("LOAD_IND_I32", registerIndexA, uint64(addr), result, 32, true)
-	vm.Ram.WriteRegister(registerIndexA, result)
-	vm.pc += 1 + uint64(len(operands))
-}
-
-func (vm *VM) handleLOAD_IND_U64(opcode byte, operands []byte) {
-
-	registerIndexA := min(12, int(operands[0]&0x0F))
-	registerIndexB := min(12, int(operands[0]>>4))
-	lx := min(4, max(0, len(operands)-1))
-	vx := x_encode(types.DecodeE_l(operands[1:1+lx]), uint32(lx))
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	value, errCode := vm.Ram.ReadRAMBytes(uint32((uint64(valueB) + vx)), 8)
-	if errCode != OK {
-		vm.ResultCode = types.WORKDIGEST_PANIC
-		vm.MachineState = PANIC
-		vm.terminated = true
-		vm.Fault_address = uint32(errCode)
-		return
-	}
+	result := uint64(value)
+	vm.register[registerIndexA] = result
 	if PvmTrace {
-		dumpLoadGeneric("LOAD_IND_U64", registerIndexA, uint64((uint64(valueB) + vx)), binary.LittleEndian.Uint64(value), 64, false)
+		dumpLoadGeneric("LOAD_IND_U8", registerIndexA, uint64(addr), result, 8, false)
 	}
-	vm.Ram.WriteRegister(registerIndexA, binary.LittleEndian.Uint64(value))
 	vm.pc += 1 + uint64(len(operands))
+}
+
+func handleLOAD_IND_I8(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
+	addr := uint32(valueB + vx)
+	value, errCode := vm.ReadRAMBytes8(addr)
+	if errCode != OK {
+		vm.panic(errCode)
+		return
+	}
+	result := uint64(int8(value))
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpLoadGeneric("LOAD_IND_I8", registerIndexA, uint64(addr), result, 8, true)
+	}
+	vm.pc += 1 + uint64(len(operands))
+}
+
+func handleLOAD_IND_U16(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
+	addr := uint32(valueB + vx)
+	value, errCode := vm.ReadRAMBytes16(addr)
+	if errCode != OK {
+		vm.panic(errCode)
+		return
+	}
+	result := uint64(value)
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpLoadGeneric("LOAD_IND_U16", registerIndexA, uint64(addr), result, 16, false)
+	}
+	vm.pc += 1 + uint64(len(operands))
+}
+
+func handleLOAD_IND_I16(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
+	addr := uint32(valueB + vx)
+	value, errCode := vm.ReadRAMBytes16(addr)
+	if errCode != OK {
+		vm.panic(errCode)
+		return
+	}
+	result := uint64(int16(value))
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpLoadGeneric("LOAD_IND_I16", registerIndexA, uint64(addr), result, 16, true)
+	}
+	vm.pc += 1 + uint64(len(operands))
+}
+
+func handleLOAD_IND_U32(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
+	addr := uint32(valueB + vx)
+	value, errCode := vm.ReadRAMBytes32(addr)
+	if errCode != OK {
+		vm.panic(errCode)
+		return
+	}
+	result := uint64(value)
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpLoadGeneric("LOAD_IND_U32", registerIndexA, uint64(addr), result, 32, false)
+	}
+	vm.pc += 1 + uint64(len(operands))
+}
+
+func handleLOAD_IND_I32(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
+	addr := uint32(valueB + vx)
+	value, errCode := vm.ReadRAMBytes32(addr)
+	if errCode != OK {
+		vm.panic(errCode)
+		return
+	}
+	result := uint64(int32(value))
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpLoadGeneric("LOAD_IND_I32", registerIndexA, uint64(addr), result, 32, true)
+	}
+	vm.pc += 1 + uint64(len(operands))
+}
+
+func handleLOAD_IND_U64(vm *VM, operands []byte) {
+	registerIndexA := int(operands[0] & 0x0F)
+	registerIndexB := int(operands[0] >> 4)
+
+	operandsLen := len(operands)
+	operandLen := operandsLen - 1
+	if operandLen > 8 {
+		operandLen = 8
+	}
+	var offset uint64
+	switch operandLen {
+	case 0:
+		offset = 0
+	case 1:
+		// Sign extend 8-bit to 64-bit
+		offset = uint64(int64(int8(operands[1])))
+	case 2:
+		// Sign extend 16-bit to 64-bit
+		rawValue := uint16(operands[1]) | uint16(operands[2])<<8
+		offset = uint64(int64(int16(rawValue)))
+	case 4:
+		// Sign extend 32-bit to 64-bit
+		rawValue := uint32(operands[1]) | uint32(operands[2])<<8 |
+			uint32(operands[3])<<16 | uint32(operands[4])<<24
+		offset = uint64(int64(int32(rawValue)))
+	case 8:
+		offset = binary.LittleEndian.Uint64(operands[1:9])
+	default:
+		var rawValue uint64
+		for i := 0; i < operandLen; i++ {
+			rawValue |= uint64(operands[1+i]) << (8 * i)
+		}
+		// Sign extend to 64-bit
+		shift := uint(64 - 8*operandLen)
+		offset = uint64(int64(rawValue<<shift) >> shift)
+	}
+
+	memoryAddress := uint32(vm.register[registerIndexB] + offset)
+	loadedValue, errCode := vm.ReadRAMBytes64(memoryAddress)
+	if errCode != OK {
+		vm.panic(errCode)
+		return
+	}
+	vm.register[registerIndexA] = loadedValue
+
+	if PvmTrace {
+		dumpLoadGeneric("LOAD_IND_U64", registerIndexA, uint64(memoryAddress), loadedValue, 64, false)
+	}
+
+	vm.pc += 1 + uint64(operandsLen)
 }
 
 // Arithmetic operations
 
-func (vm *VM) handleADD_IMM_32(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	result := x_encode((valueB+vx)%(1<<32), 4)
-	dumpBinOp("+", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
-	vm.pc += 1 + uint64(len(operands))
-}
+func handleADD_IMM_32(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
 
-func (vm *VM) handleADD_IMM_64(opcode byte, operands []byte) {
-	registerIndexA := min(12, int(operands[0]&0x0F))
-	registerIndexB := min(12, int(operands[0]>>4))
-	lx := min(4, max(0, len(operands)-1))
-	vx := x_encode(types.DecodeE_l(operands[1:1+lx]), uint32(lx))
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	result := valueB + vx
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
+	sum32 := (valueB + vx) & 0xFFFFFFFF
+	result := sum32
+	if sum32&0x80000000 != 0 {
+		result |= 0xFFFFFFFF00000000
+	}
+	vm.register[registerIndexA] = result
 	if PvmTrace {
 		dumpBinOp("+", registerIndexA, registerIndexB, vx, result)
 	}
-	vm.Ram.WriteRegister(registerIndexA, result)
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleAND_IMM(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
+func handleADD_IMM_64(vm *VM, operands []byte) {
+	// Extract register indices directly
+	registerIndexA := int(operands[0] & 0x0F)
+	registerIndexB := int(operands[0] >> 4)
+
+	// Calculate available operand bytes (limit to 8 for immediate value)
+	operandLen := len(operands) - 1
+	if operandLen > 8 {
+		operandLen = 8
+	}
+
+	// Combined decode and sign-extend operation to avoid intermediate values
+	var vx uint64
+	if operandLen == 0 {
+		vx = 0
+	} else if operandLen >= 8 {
+		// 8-byte operands
+		vx = binary.LittleEndian.Uint64(operands[1:9])
+	} else {
+		// For shorter operands, decode and sign-extend in one step
+		var rawValue uint64
+		operandBytes := operands[1 : 1+operandLen]
+
+		// Inline little-endian decode for common cases
+		switch operandLen {
+		case 1:
+			rawValue = uint64(operandBytes[0])
+		case 2:
+			rawValue = uint64(operandBytes[0]) | uint64(operandBytes[1])<<8
+		case 3:
+			rawValue = uint64(operandBytes[0]) | uint64(operandBytes[1])<<8 | uint64(operandBytes[2])<<16
+		case 4:
+			rawValue = uint64(operandBytes[0]) | uint64(operandBytes[1])<<8 |
+				uint64(operandBytes[2])<<16 | uint64(operandBytes[3])<<24
+		default:
+			// For 5-7 bytes, construct directly
+			rawValue = 0
+			for i, b := range operandBytes {
+				rawValue |= uint64(b) << (8 * i)
+			}
+		}
+
+		// Inline sign extension: shift left then arithmetic right shift
+		shift := uint(64 - 8*operandLen)
+		vx = uint64(int64(rawValue<<shift) >> shift)
+	}
+
+	result := vm.register[registerIndexB] + vx
+	vm.register[registerIndexA] = result
+
+	if PvmTrace {
+		dumpBinOp("+", registerIndexA, registerIndexB, vx, result)
+	}
+
+	vm.pc += 1 + uint64(len(operands))
+}
+
+func handleAND_IMM(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
 	result := valueB & vx
-	dumpBinOp("&", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpBinOp("&", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleXOR_IMM(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
+func handleXOR_IMM(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
 	result := valueB ^ vx
-	dumpBinOp("^", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpBinOp("^", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleOR_IMM(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
+func handleOR_IMM(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
 	result := valueB | vx
-	dumpBinOp("|", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpBinOp("|", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleMUL_IMM_32(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	result := x_encode((valueB*vx)%(1<<32), 4)
-	dumpBinOp("*", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+func handleMUL_IMM_32(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
+	prod32 := (valueB * vx) & 0xFFFFFFFF
+	result := prod32
+	if prod32&0x80000000 != 0 {
+		result |= 0xFFFFFFFF00000000
+	}
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpBinOp("*", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleMUL_IMM_64(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
+func handleMUL_IMM_64(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
 	result := valueB * vx
-	dumpBinOp("*", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpBinOp("*", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleSET_LT_U_IMM(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	result := boolToUint(valueB < vx)
-	dumpCmpOp("<u", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+func handleSET_LT_U_IMM(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
+	var result uint64
+	if valueB < vx {
+		result = 1
+	}
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpCmpOp("<u", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleSET_LT_S_IMM(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	result := boolToUint(int64(valueB) < int64(vx))
-	dumpCmpOp("<s", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+func handleSET_LT_S_IMM(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
+	var result uint64
+	if int64(valueB) < int64(vx) {
+		result = 1
+	}
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpCmpOp("<s", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleSET_GT_U_IMM(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	result := boolToUint(valueB > vx)
-	dumpCmpOp("u>", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+func handleSET_GT_U_IMM(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
+	var result uint64
+	if valueB > vx {
+		result = 1
+	}
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpCmpOp("u>", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleSET_GT_S_IMM(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	result := boolToUint(int64(valueB) > int64(vx))
-	dumpCmpOp("s>", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+func handleSET_GT_S_IMM(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
+	var result uint64
+	if int64(valueB) > int64(vx) {
+		result = 1
+	}
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpCmpOp("s>", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleNEG_ADD_IMM_32(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	result := x_encode((vx-valueB)%(1<<32), 4)
-	dumpBinOp("-+", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+func handleNEG_ADD_IMM_32(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
+	diff32 := (vx - valueB) & 0xFFFFFFFF
+	result := diff32
+	if diff32&0x80000000 != 0 {
+		result |= 0xFFFFFFFF00000000
+	}
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpBinOp("-+", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleNEG_ADD_IMM_64(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
+func handleNEG_ADD_IMM_64(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
 	result := vx - valueB
-	dumpBinOp("-+", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpBinOp("-+", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
 // Shift operations
 
-func (vm *VM) handleSHLO_L_IMM_32(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	result := x_encode(valueB<<(vx&63)%(1<<32), 4)
-	dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+func handleSHLO_L_IMM_32(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
+	shift32 := (valueB << (vx & 63)) & 0xFFFFFFFF
+	result := shift32
+	if shift32&0x80000000 != 0 {
+		result |= 0xFFFFFFFF00000000
+	}
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleSHLO_L_IMM_64(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
+func handleSHLO_L_IMM_64(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
 	result := valueB << (vx & 63)
-	dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleSHLO_R_IMM_32(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	result := x_encode(uint64(uint32(valueB)>>(vx&31)), 4)
-	dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+func handleSHLO_R_IMM_32(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
+	shift32 := uint32(valueB) >> (vx & 31)
+	result := uint64(shift32)
+	if shift32&0x80000000 != 0 {
+		result |= 0xFFFFFFFF00000000
+	}
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleSHLO_R_IMM_64(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
+func handleSHLO_R_IMM_64(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
 	result := valueB >> (vx & 63)
-	dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleSHAR_R_IMM_32(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
+func handleSHAR_R_IMM_32(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
 	result := uint64(int64(int32(valueB) >> (vx & 31)))
-	dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleSHAR_R_IMM_64(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
+func handleSHAR_R_IMM_64(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
 	result := uint64(int64(valueB) >> (vx & 63))
-	dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleSHLO_L_IMM_ALT_32(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	result := x_encode(vx<<(valueB&63)%(1<<32), 4)
-	dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+func handleSHLO_L_IMM_ALT_32(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
+	shift32 := (vx << (valueB & 63)) & 0xFFFFFFFF
+	result := shift32
+	if shift32&0x80000000 != 0 {
+		result |= 0xFFFFFFFF00000000
+	}
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleSHLO_L_IMM_ALT_64(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
+func handleSHLO_L_IMM_ALT_64(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
 	result := vx << (valueB & 63)
-	dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleSHLO_R_IMM_ALT_32(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	result := x_encode(vx>>(valueB&63)%(1<<32), 4)
-	dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+func handleSHLO_R_IMM_ALT_32(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
+	shift32 := (vx >> (valueB & 63)) & 0xFFFFFFFF
+	result := shift32
+	if shift32&0x80000000 != 0 {
+		result |= 0xFFFFFFFF00000000
+	}
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleSHLO_R_IMM_ALT_64(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
+func handleSHLO_R_IMM_ALT_64(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
 	result := vx >> (valueB & 63)
-	dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleSHAR_R_IMM_ALT_32(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
+func handleSHAR_R_IMM_ALT_32(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
 	result := uint64(int32(vx) >> (valueB & 31))
-	dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleSHAR_R_IMM_ALT_64(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
+func handleSHAR_R_IMM_ALT_64(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
 	result := uint64(int64(vx) >> (valueB & 63))
-	dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
 // Rotation operations
 
-func (vm *VM) handleROT_R_64_IMM(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
+func handleROT_R_64_IMM(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
 	result := bits.RotateLeft64(valueB, -int(vx&63))
-	dumpRotOp("ROT_R_64_IMM", reg(registerIndexA), reg(registerIndexB), vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpRotOp("ROT_R_64_IMM", reg(registerIndexA), reg(registerIndexB), vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleROT_R_64_IMM_ALT(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
+func handleROT_R_64_IMM_ALT(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
 	result := bits.RotateLeft64(vx, -int(valueB&63))
-	dumpRotOp("ROT_R_64_IMM_ALT", reg(registerIndexA), reg(registerIndexB), vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpRotOp("ROT_R_64_IMM_ALT", reg(registerIndexA), reg(registerIndexB), vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleROT_R_32_IMM(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	result := x_encode(uint64(bits.RotateLeft32(uint32(valueB), -int(vx&31))), 4)
-	dumpRotOp("ROT_R_32_IMM", reg(registerIndexA), reg(registerIndexB), vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+func handleROT_R_32_IMM(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
+	rot32 := bits.RotateLeft32(uint32(valueB), -int(vx&31))
+	result := uint64(rot32)
+	if rot32&0x80000000 != 0 {
+		result |= 0xFFFFFFFF00000000
+	}
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpRotOp("ROT_R_32_IMM", reg(registerIndexA), reg(registerIndexB), vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleROT_R_32_IMM_ALT(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-	result := x_encode(uint64(bits.RotateLeft32(uint32(vx), -int(valueB&31))), 4)
-	dumpRotOp("ROT_R_32_IMM_ALT", reg(registerIndexA), reg(registerIndexB), vx, result)
-	vm.Ram.WriteRegister(registerIndexA, result)
+func handleROT_R_32_IMM_ALT(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueB := vm.register[registerIndexB]
+	rot32 := bits.RotateLeft32(uint32(vx), -int(valueB&31))
+	result := uint64(rot32)
+	if rot32&0x80000000 != 0 {
+		result |= 0xFFFFFFFF00000000
+	}
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpRotOp("ROT_R_32_IMM_ALT", reg(registerIndexA), reg(registerIndexB), vx, result)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
 // Conditional move operations
 
-func (vm *VM) handleCMOV_IZ_IMM(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
+func handleCMOV_IZ_IMM(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueA := vm.register[registerIndexA]
+	valueB := vm.register[registerIndexB]
 	result := vx
 	if valueB != 0 {
 		result = valueA
 	}
-	dumpCmovOp("== 0", registerIndexA, registerIndexB, vx, valueA, result, true)
-	vm.Ram.WriteRegister(registerIndexA, result)
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpCmovOp("== 0", registerIndexA, registerIndexB, vx, valueA, result, true)
+	}
 	vm.pc += 1 + uint64(len(operands))
 }
 
-func (vm *VM) handleCMOV_NZ_IMM(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
+func handleCMOV_NZ_IMM(vm *VM, operands []byte) {
+	var registerIndexA, registerIndexB int
+	var vx uint64
+	if len(operands) == 0 {
+		registerIndexA, registerIndexB, vx = 0, 0, 0
+	} else {
+		firstByte := operands[0]
+		registerIndexA = min(12, int(firstByte&0x0F))
+		registerIndexB = min(12, int(firstByte)/16)
+
+		lx := min(4, max(0, len(operands)-1))
+		if lx > 0 && 1+lx <= len(operands) {
+			slice := operands[1 : 1+lx]
+			var decoded uint64
+			switch len(slice) {
+			case 1:
+				decoded = uint64(slice[0])
+			case 2:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8
+			case 3:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16
+			case 4:
+				decoded = uint64(slice[0]) | uint64(slice[1])<<8 | uint64(slice[2])<<16 | uint64(slice[3])<<24
+			default:
+				if len(slice) >= 8 {
+					decoded = binary.LittleEndian.Uint64(slice[:8])
+				} else {
+					decoded = 0
+					for i, b := range slice {
+						decoded |= uint64(b) << (8 * i)
+					}
+				}
+			}
+			shift := uint(64 - 8*lx)
+			vx = uint64(int64(decoded<<shift) >> shift)
+		}
+	}
+
+	valueA := vm.register[registerIndexA]
+	valueB := vm.register[registerIndexB]
 	var result uint64
 	if valueB != 0 {
 		result = vx
 	} else {
 		result = valueA
 	}
-	dumpCmovOp("!= 0", registerIndexA, registerIndexB, vx, valueA, result, false)
-	vm.Ram.WriteRegister(registerIndexA, result)
+	vm.register[registerIndexA] = result
+	if PvmTrace {
+		dumpCmovOp("!= 0", registerIndexA, registerIndexB, vx, valueA, result, false)
+	}
 	vm.pc += 1 + uint64(len(operands))
-}
-
-// A.5.11 Two Registers and One Offset handlers
-
-func (vm *VM) handleBRANCH_EQ(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx0 := extractTwoRegsOneOffset(operands)
-	vx := uint64(int64(vm.pc) + int64(vx0))
-	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-
-	taken := valueA == valueB
-	dumpBranch("BRANCH_EQ", registerIndexA, registerIndexB, valueA, valueB, vx, taken)
-	if taken {
-		vm.branch(vx, true)
-	} else {
-		vm.pc += uint64(1 + len(operands))
-	}
-}
-
-func (vm *VM) handleBRANCH_NE(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx0 := extractTwoRegsOneOffset(operands)
-	vx := uint64(int64(vm.pc) + int64(vx0))
-	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-
-	taken := valueA != valueB
-	dumpBranch("BRANCH_NE", registerIndexA, registerIndexB, valueA, valueB, vx, taken)
-	if taken {
-		vm.branch(vx, true)
-	} else {
-		vm.pc += uint64(1 + len(operands))
-	}
-}
-
-func (vm *VM) handleBRANCH_LT_U(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx0 := extractTwoRegsOneOffset(operands)
-	vx := uint64(int64(vm.pc) + int64(vx0))
-	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-
-	taken := valueA < valueB
-	dumpBranch("BRANCH_LT_U", registerIndexA, registerIndexB, valueA, valueB, vx, taken)
-	if taken {
-		vm.branch(vx, true)
-	} else {
-		vm.pc += uint64(1 + len(operands))
-	}
-}
-
-func (vm *VM) handleBRANCH_LT_S(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx0 := extractTwoRegsOneOffset(operands)
-	vx := uint64(int64(vm.pc) + int64(vx0))
-	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-
-	taken := int64(valueA) < int64(valueB)
-	dumpBranch("BRANCH_LT_S", registerIndexA, registerIndexB, valueA, valueB, vx, taken)
-	if taken {
-		vm.branch(vx, true)
-	} else {
-		vm.pc += uint64(1 + len(operands))
-	}
-}
-
-func (vm *VM) handleBRANCH_GE_U(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx0 := extractTwoRegsOneOffset(operands)
-	vx := uint64(int64(vm.pc) + int64(vx0))
-	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-
-	taken := valueA >= valueB
-	dumpBranch("BRANCH_GE_U", registerIndexA, registerIndexB, valueA, valueB, vx, taken)
-	if taken {
-		vm.branch(vx, true)
-	} else {
-		vm.pc += uint64(1 + len(operands))
-	}
-}
-
-func (vm *VM) handleBRANCH_GE_S(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx0 := extractTwoRegsOneOffset(operands)
-	vx := uint64(int64(vm.pc) + int64(vx0))
-	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
-
-	taken := int64(valueA) >= int64(valueB)
-	dumpBranch("BRANCH_GE_S", registerIndexA, registerIndexB, valueA, valueB, vx, taken)
-	if taken {
-		vm.branch(vx, true)
-	} else {
-		vm.pc += uint64(1 + len(operands))
-	}
 }
