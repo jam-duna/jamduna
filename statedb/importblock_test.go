@@ -135,7 +135,7 @@ func TestStateTransitionInterpreter(t *testing.T) {
 	pvm.PvmLogging = false
 	pvm.PvmTrace = false // enable PVM trace for this test
 
-	filename := path.Join(common.GetJAMTestVectorPath("traces"), "preimages/00000008.json")
+	filename := path.Join(common.GetJAMTestVectorPath("traces"), "preimages/00000042.json")
 
 	content, err := os.ReadFile(filename)
 	if err != nil {
@@ -288,7 +288,7 @@ func TestTracesCompiler(t *testing.T) {
 func TestSingleCompare(t *testing.T) {
 	// DO NOT CHANGE THIS
 	log.InitLogger("debug")
-	filename := "/Users/michael/Desktop/jam-test-vectors/traces/storage_light/00000004.bin"
+	filename := "/Users/sourabhniyogi/Desktop/jam-test-vectors/traces/storage_light/00000004.bin"
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Errorf("failed to read file %s: %v", filename, err)

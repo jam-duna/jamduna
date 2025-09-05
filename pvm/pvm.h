@@ -313,10 +313,7 @@ int vm_charge_gas(VM* vm, int host_func_id);
 void vm_invoke_host_call(VM* vm, int host_func_id);
 
 // CGO Integration Functions
-VM* pvm_create(uint32_t service_index, 
-               uint8_t* code, size_t code_len,
-               uint64_t* initial_regs, size_t num_regs,
-               uint64_t initial_pc);
+VM* pvm_create(uint32_t service_index, uint8_t* code, size_t code_len, uint64_t* initial_regs, size_t num_regs, uint64_t initial_pc);
 
 void pvm_destroy(VM* vm);
 
@@ -327,18 +324,10 @@ void pvm_set_bitmask(VM* vm, uint8_t* bitmask, size_t bitmask_len);
 void pvm_set_jump_table(VM* vm, uint32_t* j_table, size_t j_size);
 
 // Memory region setup (called from Go)
-void pvm_set_memory_regions(VM* vm,
-                           uint8_t* rw_data, uint32_t rw_size,
-                           uint8_t* ro_data, uint32_t ro_size,
-                           uint8_t* output, uint32_t output_size,
-                           uint8_t* stack, uint32_t stack_size);
+void pvm_set_memory_regions(VM* vm, uint8_t* rw_data, uint32_t rw_size, uint8_t* ro_data, uint32_t ro_size, uint8_t* output, uint32_t output_size, uint8_t* stack, uint32_t stack_size);
 
 // Set memory addresses for bounds checking
-void pvm_set_memory_bounds(VM* vm,
-                          uint32_t rw_addr, uint32_t rw_end,
-                          uint32_t ro_addr, uint32_t ro_end,
-                          uint32_t output_addr, uint32_t output_end,
-                          uint32_t stack_addr, uint32_t stack_end);
+void pvm_set_memory_bounds(VM* vm, uint32_t rw_addr, uint32_t rw_end, uint32_t ro_addr, uint32_t ro_end, uint32_t output_addr, uint32_t output_end, uint32_t stack_addr, uint32_t stack_end);
 
 // Register access
 uint64_t* pvm_get_registers_ptr(VM* vm);
@@ -349,8 +338,7 @@ uint64_t pvm_get_register(VM* vm, int reg_idx);
 int pvm_execute(VM* vm, int entry_point, int is_child);
 
 // Host call callback setup  
-void pvm_set_host_callback(VM* vm, 
-                          void (*callback)(VM* vm, int host_func_id));
+void pvm_set_host_callback(VM* vm, void (*callback)(VM* vm, int host_func_id));
 
 
 const char* branch_cond_symbol(const char* name);
@@ -362,13 +350,14 @@ uint64_t vm_write_ram_bytes_16(VM* vm, uint32_t address, uint16_t data);
 uint64_t vm_write_ram_bytes_32(VM* vm, uint32_t address, uint32_t data);
 uint64_t vm_write_ram_bytes_64(VM* vm, uint32_t address, uint64_t data);
 uint64_t vm_write_ram_bytes(VM* vm, uint32_t address, uint8_t* data, uint32_t length);
+uint64_t vm_read_ram_bytes(VM* vm, uint32_t address, uint32_t length, uint8_t* buffer);
 uint8_t vm_read_ram_bytes_8(VM* vm, uint32_t addr, int* err_code);
 uint16_t vm_read_ram_bytes_16(VM* vm, uint32_t addr, int* err_code);
 uint32_t vm_read_ram_bytes_32(VM* vm, uint32_t addr, int* err_code);
 uint64_t vm_read_ram_bytes_64(VM* vm, uint32_t addr, int* err_code);
 uint32_t vm_get_current_heap_pointer(VM* vm);
 void vm_set_current_heap_pointer(VM* vm, uint32_t pointer);
-void vm_allocate_pages(VM* vm, uint32_t idx_start, uint32_t page_count);
+void vm_allocate_pages(VM* vm, uint32_t start_page, uint32_t page_count);
 uint32_t p_func(uint32_t x);
 
 // Debug/trace functions

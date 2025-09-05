@@ -1,6 +1,8 @@
 package pvm
 
-// #include "pvm.h"
+/*
+#include "pvm.h"
+*/
 import "C"
 import (
 	"encoding/binary"
@@ -54,6 +56,7 @@ func (ram *VM) WriteRAMBytes64(address uint32, data uint64) uint64 {
 }
 
 func (ram *VM) WriteRAMBytes32(address uint32, data uint32) uint64 {
+
 	heapEnd := Z_func(ram.current_heap_pointer)
 
 	// RW data / heap region (writable up to heapEnd)
@@ -92,6 +95,7 @@ func (ram *VM) WriteRAMBytes32(address uint32, data uint32) uint64 {
 }
 
 func (ram *VM) WriteRAMBytes16(address uint32, data uint16) uint64 {
+
 	heapEnd := Z_func(ram.current_heap_pointer)
 
 	// RW data / heap region (writable up to heapEnd)
@@ -130,6 +134,7 @@ func (ram *VM) WriteRAMBytes16(address uint32, data uint16) uint64 {
 }
 
 func (ram *VM) WriteRAMBytes8(address uint32, data uint8) uint64 {
+
 	heapEnd := Z_func(ram.current_heap_pointer)
 
 	// RW data / heap region (writable up to heapEnd)
@@ -168,9 +173,11 @@ func (ram *VM) WriteRAMBytes8(address uint32, data uint8) uint64 {
 }
 
 func (ram *VM) WriteRAMBytes(address uint32, data []byte) uint64 {
+
 	if len(data) == 0 {
 		return OK
 	}
+
 	length := uint32(len(data))
 	heapEnd := Z_func(ram.current_heap_pointer)
 
@@ -210,6 +217,7 @@ func (ram *VM) WriteRAMBytes(address uint32, data []byte) uint64 {
 }
 
 func (ram *VM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
+
 	heapEnd := Z_func(ram.current_heap_pointer)
 
 	// RW data / heap
@@ -238,11 +246,11 @@ func (ram *VM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
 		// Range check already validates offset+length <= stack bounds
 		return ram.stack[offset : offset+length], OK
 	}
-
 	return nil, OOB
 }
 
 func (ram *VM) ReadRAMBytes8(address uint32) (uint8, uint64) {
+
 	heapEnd := Z_func(ram.current_heap_pointer)
 
 	// RW data / heap
@@ -285,6 +293,7 @@ func (ram *VM) ReadRAMBytes8(address uint32) (uint8, uint64) {
 }
 
 func (ram *VM) ReadRAMBytes16(address uint32) (uint16, uint64) {
+
 	heapEnd := Z_func(ram.current_heap_pointer)
 
 	// RW data / heap
@@ -315,6 +324,7 @@ func (ram *VM) ReadRAMBytes16(address uint32) (uint16, uint64) {
 }
 
 func (ram *VM) ReadRAMBytes32(address uint32) (uint32, uint64) {
+
 	heapEnd := Z_func(ram.current_heap_pointer)
 
 	// RW data / heap
@@ -354,7 +364,6 @@ func (ram *VM) ReadRAMBytes32(address uint32) (uint32, uint64) {
 }
 
 func (ram *VM) ReadRAMBytes64(address uint32) (uint64, uint64) {
-	// Use C implementation if CGO integration is active
 	if ram.cVM != nil {
 		var errCode C.int
 		result := C.vm_read_ram_bytes_64((*C.VM)(ram.cVM), C.uint32_t(address), &errCode)

@@ -67,7 +67,6 @@ void handle_SBRK(VM* vm, uint8_t* operands, size_t operand_len) {
     int register_index_a = (int)(reg_byte >> 4);
     if (register_index_d > 12) register_index_d = 12;
     if (register_index_a > 12) register_index_a = 12;
-    
     uint64_t value_a = vm->registers[register_index_a];
     
     if (value_a == 0) {
@@ -79,17 +78,15 @@ void handle_SBRK(VM* vm, uint8_t* operands, size_t operand_len) {
     uint64_t result = (uint64_t)vm_get_current_heap_pointer(vm);
     uint32_t next_page_boundary = p_func(vm_get_current_heap_pointer(vm));
     uint64_t new_heap_pointer = (uint64_t)vm_get_current_heap_pointer(vm) + value_a;
-    
+
     if (new_heap_pointer > (uint64_t)next_page_boundary) {
         uint32_t final_boundary = p_func((uint32_t)new_heap_pointer);
         uint32_t idx_start = next_page_boundary / Z_P;
         uint32_t idx_end = final_boundary / Z_P;
         uint32_t page_count = idx_end - idx_start;
-        
         vm_allocate_pages(vm, idx_start, page_count);
     }
     vm_set_current_heap_pointer(vm, (uint32_t)new_heap_pointer);
-    
 #if PVM_TRACE
         dump_two_regs("SBRK", register_index_d, register_index_a, value_a, result);
 #endif

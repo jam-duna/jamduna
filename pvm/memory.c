@@ -1,6 +1,5 @@
 #include "pvm.h"
 
-
 uint32_t vm_get_current_heap_pointer(VM* vm) {
     return vm->current_heap_pointer;
 }
@@ -12,8 +11,6 @@ void vm_set_current_heap_pointer(VM* vm, uint32_t pointer) {
 void vm_allocate_pages(VM* vm, uint32_t start_page, uint32_t page_count) {
     uint32_t required = (start_page + page_count) * Z_P;
     if (vm->rw_data_address_end - vm->rw_data_address < required) {
-        // In a real implementation, this would need to grow the rw_data buffer
-        // For now, we'll just update the end address
         vm->rw_data_address_end = vm->rw_data_address + required;
     }
 }

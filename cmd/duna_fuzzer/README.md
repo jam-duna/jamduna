@@ -3,7 +3,7 @@
 
 1. Be sure to change FUZZER_VERSION in  duna_fuzzer.go to the latest version 
 ```
-FUZZ_VERSION = "0.7.0.6"
+FUZZ_VERSION = "0.7.0.7"
 ```
 
 2. Make the fuzzer
@@ -40,14 +40,14 @@ Check that our target has no issue!
 5. After changing the version in the command below to match up, publish to https://github.com/jam-duna/jamtestnet
 
 ```
-gh release create v0.7.0.6 \
+gh release create v0.7.0.7 \
   $JAM_PATH/cmd/duna_fuzzer/duna_fuzzer_linux \
   $JAM_PATH/cmd/duna_fuzzer/duna_fuzzer_mac \
   $JAM_PATH/cmd/duna_target/duna_target_linux \
   $JAM_PATH/cmd/duna_target/duna_target_mac \
   --repo jam-duna/jamtestnet \
-  --title "v0.7.0.6 Fuzzer + Fuzzer target" \
-  --notes $'Release v0.7.0.6 of duna_fuzzer and duna_target\n\nIncludes:\n- duna_fuzzer_mac\n- duna_fuzzer_linux\n- duna_target_mac\n- duna_target_linux'  
+  --title "v0.7.0.7 Fuzzer + Fuzzer target" \
+  --notes $'Release v0.7.0.7 of duna_fuzzer and duna_target\n\nIncludes:\n- duna_fuzzer_mac\n- duna_fuzzer_linux\n- duna_target_mac\n- duna_target_linux'  
 ```
 
 

@@ -561,17 +561,17 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 	rwSize := heap_end - rw_data_address
 	roSize := ro_data_address_end - ro_data_address
 	outputSize := a_size
-	
+
 	// Get buffer from pool - no zeroing overhead
 	totalSize := stackSize + rwSize + roSize + outputSize
 	if totalSize <= 20*1024*1024 {
 		buffer := bufferPool.Get().([]byte)
-		
+
 		// Slice the buffer for each component
 		offset := uint32(0)
 		vm.stack = buffer[offset : offset+stackSize]
 		offset += stackSize
-		vm.rw_data = buffer[offset : offset+rwSize]  
+		vm.rw_data = buffer[offset : offset+rwSize]
 		offset += rwSize
 		vm.ro_data = buffer[offset : offset+roSize]
 		offset += roSize
@@ -583,9 +583,9 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		vm.ro_data = make([]byte, roSize)
 		vm.output = make([]byte, outputSize)
 	}
-	
+
 	benchRec.Add("NewVM:alloc", time.Since(t0))
-	
+
 	t0 = time.Now()
 	copy(vm.ro_data[:], o_byte[:])
 	copy(vm.rw_data[:], w_byte[:])
@@ -958,6 +958,7 @@ func (vm *VM) SyncRegistersFromC() {
 	for i := 0; i < 13 && i < len(vm.register); i++ {
 		vm.register[i] = uint64(vm.cRegs[i])
 	}
+	vm.current_heap_pointer = uint32(C.vm_get_current_heap_pointer((*C.VM)(vm.cVM)))
 	if PvmTrace2 {
 		fmt.Printf("Synced registers from C to Go: %v\n", vm.register)
 	}
@@ -971,6 +972,7 @@ func (vm *VM) SyncRegistersToC() {
 	for i := 0; i < 13 && i < len(vm.register); i++ {
 		vm.cRegs[i] = C.uint64_t(vm.register[i])
 	}
+	C.vm_set_current_heap_pointer((*C.VM)(vm.cVM), C.uint32_t(vm.current_heap_pointer))
 	if PvmTrace2 {
 		fmt.Printf("Synced registers from Go to C: %v\n", vm.register)
 	}

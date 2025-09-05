@@ -362,13 +362,6 @@ func dumpBranchImm(name string, regA int, _, vx, vy uint64, _, taken bool) {
 	}
 }
 
-func boolToUint(b bool) uint64 {
-	if b {
-		return 1
-	}
-	return 0
-}
-
 // dumpTwoRegs prints a two-register operation trace.
 // op is the opcode name (e.g. "COUNT_SET_BITS_64"), dest/src are register indices,
 // valueA is the source register value, and result is the computed result.

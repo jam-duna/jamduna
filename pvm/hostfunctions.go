@@ -1680,8 +1680,6 @@ func (vm *VM) hostHistoricalLookup() {
 var lastFrameTime time.Time
 var frameCounter uint16
 
-const minFrameCounter = 350 // when analytics start
-
 // Export segment host-call
 func (vm *VM) hostExport() {
 	p := vm.register[7] // a0 = 7

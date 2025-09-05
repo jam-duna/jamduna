@@ -418,7 +418,7 @@ int pvm_execute(VM* vm, int entry_point, int is_child) {
         init_dispatch_table();
         dispatch_initialized = 1;
     }
-    
+    int step = 0;
     // Main execution loop with optimized gas checking
     while (!vm->terminated && vm->gas > 0) {
         if (vm->pc >= vm->code_len) {
@@ -455,7 +455,7 @@ int pvm_execute(VM* vm, int entry_point, int is_child) {
         ; // Empty statement after label
         uint8_t* operands = vm->code + vm->pc + 1;
         vm->gas--;  // Decrement gas once per instruction
-        
+        step++;
         // Dispatch to handler
         if (dispatch_table[opcode]) {
             dispatch_table[opcode](vm, operands, len_operands);
@@ -465,18 +465,18 @@ int pvm_execute(VM* vm, int entry_point, int is_child) {
             continue;
         }
        // Performance: comment out per-instruction logging (most critical bottleneck)
-       // if (pvm_logging) {
-       //     printf("CGo: %s %d %llu Gas: %lld Registers: [%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu]\n", 
-       //            get_opcode_name(opcode), step, (unsigned long long)vm->pc, (long long)vm->gas,
-       //            (unsigned long long)vm->registers[0], (unsigned long long)vm->registers[1], 
-       //            (unsigned long long)vm->registers[2], (unsigned long long)vm->registers[3],
-       //            (unsigned long long)vm->registers[4], (unsigned long long)vm->registers[5], 
-       //            (unsigned long long)vm->registers[6], (unsigned long long)vm->registers[7],
-       //            (unsigned long long)vm->registers[8], (unsigned long long)vm->registers[9], 
-       //            (unsigned long long)vm->registers[10], (unsigned long long)vm->registers[11],
-       //            (unsigned long long)vm->registers[12]);
-       //     fflush(stdout);
-       // }
+        if (pvm_logging) {
+            printf("CGo: %s %d %llu Gas: %lld Registers: [%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu]\n", 
+                   get_opcode_name(opcode), step, (unsigned long long)vm->pc, (long long)vm->gas,
+                   (unsigned long long)vm->registers[0], (unsigned long long)vm->registers[1], 
+                   (unsigned long long)vm->registers[2], (unsigned long long)vm->registers[3],
+                   (unsigned long long)vm->registers[4], (unsigned long long)vm->registers[5], 
+                   (unsigned long long)vm->registers[6], (unsigned long long)vm->registers[7],
+                   (unsigned long long)vm->registers[8], (unsigned long long)vm->registers[9], 
+                   (unsigned long long)vm->registers[10], (unsigned long long)vm->registers[11],
+                   (unsigned long long)vm->registers[12]);
+            fflush(stdout);
+        }
       
 
         // Gas check is now handled in loop condition - no need for redundant check
