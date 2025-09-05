@@ -135,8 +135,7 @@ func TestStateTransitionInterpreter(t *testing.T) {
 	pvm.PvmLogging = false
 	pvm.PvmTrace = false // enable PVM trace for this test
 
-	filename := path.Join(common.GetJAMTestVectorPath("traces"), "preimages/00000042.json")
-
+	filename := path.Join(common.GetJAMTestVectorPath("traces"), "1757062927/00000091.json")
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
@@ -306,7 +305,7 @@ func GetFuzzReportsPath(subDir ...string) (string, error) {
 	if fuzzPath == "" {
 		return "", fmt.Errorf("JAM_CONFORMANCE_PATH environment variable is not set")
 	}
-	targetDir := "fuzz-reports" // Default sub dir
+	targetDir := "" // Default sub dir
 	if len(subDir) > 0 {
 		targetDir = subDir[0]
 	}
@@ -365,24 +364,10 @@ func TestSingleFuzzTrace(t *testing.T) {
 		t.Fatalf("failed to get fuzz reports path: %v", err)
 	}
 
-	// solved with the ASSIGN reordering
-	fileMap["8741"] = "0.7.0/traces/1756548741/00000059.bin"
-	fileMap["8916"] = "0.7.0/traces/1756548916/00000082.bin"
-
-	// solved by reordering BLESS host function
-	fileMap["8459"] = "0.7.0/traces/1756548459/00000042.bin"
-
-	// solved with WHAT fix on MACHINE host function
-	fileMap["8583"] = "0.7.0/traces/1756548583/00000009.bin"
-
-	// [MC] upon EJECT, do we delete the preimage we newed and it appears our DeleteService doesn't work?
-	//  EJECT WHO 0xff2400e90048008e0000000000000000000000000000000000000000000000
-	fileMap["8706"] = "0.7.0/traces/1756548706/00000094.bin"
-
-	fileMap["2661"] = "0.7.0/traces/1756792661/00000027.bin"
-	fileMap["0723"] = "0.7.0/traces/1756790723/00000011.bin"
-	fileMap["1458"] = "0.7.0/traces/1756791458/00000041.bin"
-	fileMap["4312"] = "0.7.0/traces/1756814312/00000025.bin"
+	// WE ARE SUPPOSED TO REJECT THIS: -- there are no extrinsics -- slot is 48.  There is no epoch mark
+	// https://github.com/davxy/jam-conformance/blob/main/fuzz-reports/0.7.0/traces/1757062927/00000091.json
+	// Diff on 5 keys: [C3 (Recent History), C4 (Safrole State), C6 (Entropy), C11 (Tau), C13 (Stats)]
+	fileMap["2927"] = "0.7.0/traces/1757062927/00000091.json"
 
 	log.InitLogger("debug")
 	log.EnableModule(log.PvmAuthoring)
@@ -390,7 +375,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 	log.EnableModule(log.SDB)
 
 	// test one of them out
-	tc := []string{"2661", "0723", "1458", "4312"}
+	tc := []string{"2927"}
 
 	for _, team := range tc {
 		filename, exists := fileMap[team]

@@ -162,6 +162,12 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	}
 	benchRec.Add("ApplyStateTransitionTickets", time.Since(t0))
 
+	isNewEpoch := sf.IsNewEpoch(targetJCE)
+	if isNewEpoch && epochMark == nil {
+		log.Warn(log.SDB, "New epoch but no epoch mark", "NewEpoch", targetJCE, "epochMark", epochMark)
+		return s, fmt.Errorf("new epoch but no epoch mark")
+	}
+
 	t0 = time.Now()
 
 	//the epochMark validators should be in gamma k'
