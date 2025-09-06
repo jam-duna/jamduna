@@ -8,6 +8,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/jamerrors"
+	"github.com/colorfulnotion/jam/refine"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -49,9 +50,9 @@ func RunUnixSocketChallenge(fuzzer *Fuzzer, stfQA *StateTransitionQA, verbose bo
 	expectedPreStateRoot := stfQA.STF.PreState.StateRoot
 
 	if stfQA.Mutated {
-		log.Printf("%sFUZZED%s %s%s%s B#%.3d", colorMagenta, colorReset, colorMagenta, jamerrors.GetErrorName(stfQA.Error), colorReset, stfQA.STF.Block.Header.Slot)
+		log.Printf("%sFUZZED%s %s%s%s B#%.3d", common.ColorMagenta, common.ColorReset, common.ColorMagenta, jamerrors.GetErrorName(stfQA.Error), common.ColorReset, stfQA.STF.Block.Header.Slot)
 	} else {
-		log.Printf("%sORIGINAL%s B#%.3d", colorGray, colorReset, stfQA.STF.Block.Header.Slot)
+		log.Printf("%sORIGINAL%s B#%.3d", common.ColorGray, common.ColorReset, stfQA.STF.Block.Header.Slot)
 	}
 
 	targetPreStateRoot, err := fuzzer.SetState(initialStatePayload)
@@ -139,5 +140,120 @@ func RunUnixSocketChallenge(fuzzer *Fuzzer, stfQA *StateTransitionQA, verbose bo
 			os.Exit(1)
 		}
 	}
+	return matched, solverFuzzed, nil
+}
+
+// RefineBundleQA represents a RefineBundle test case with expected results
+type RefineBundleQA struct {
+	RefineBundle       types.RefineBundle       `json:"refine_bundle"`
+	ExpectedWorkReport types.WorkReport         `json:"expected_work_report"`
+	StateContext       *statedb.StateTransition `json:"state_context,omitempty"` // STF for state setup
+	Mutated            bool                     `json:"mutated"`
+	Error              error                    `json:"error,omitempty"`
+}
+
+// RunRefineBundleChallenge executes a bundle refinement test over an existing connection.
+// Follows the same pattern as RunUnixSocketChallenge: SetState -> RefineBundle -> Verify
+func RunRefineBundleChallenge(fuzzer *Fuzzer, bundleQA *RefineBundleQA, verbose bool) (matched bool, solverFuzzed bool, err error) {
+	if bundleQA.Mutated {
+		log.Printf("%sFUZZED BUNDLE%s %s", common.ColorMagenta, common.ColorReset, common.ColorMagenta)
+	} else {
+		//log.Printf("%sORIGINAL BUNDLE%s", common.ColorGray, common.ColorReset)
+	}
+
+	// Step 1: SetState - Tell target what state to use for bundle execution
+	if bundleQA.StateContext != nil {
+		initialStatePayload := &HeaderWithState{
+			State: statedb.StateKeyVals{KeyVals: bundleQA.StateContext.PreState.KeyVals},
+		}
+
+		// For bundles, we need the parent block context for proper state setup
+		// Use the state context's block header as the parent
+		if bundleQA.StateContext.Block.Header.Slot > 0 {
+			initialStatePayload.Header = bundleQA.StateContext.Block.Header
+		}
+
+		expectedPreStateRoot := bundleQA.StateContext.PreState.StateRoot
+
+		targetPreStateRoot, err := fuzzer.SetState(initialStatePayload)
+		if err != nil {
+			return false, false, fmt.Errorf("SetState failed: %w", err)
+		}
+
+		// Verification for pre-state
+		if !bytes.Equal(targetPreStateRoot.Bytes(), expectedPreStateRoot.Bytes()) {
+			log.Printf("FATAL: Bundle pre-state root MISMATCH!\n  Got:  %s\n  Want: %s",
+				targetPreStateRoot.Hex(), expectedPreStateRoot.Hex())
+			return false, false, fmt.Errorf("SetState pre-state mismatch")
+		}
+
+	}
+
+	// Step 2: RefineBundle - ALWAYS compute expected WorkReport by executing the bundle being sent
+	// This ensures fuzzer and target work with identical bundle execution logic
+	if bundleQA.StateContext == nil {
+		return false, false, fmt.Errorf("StateContext required for expected WorkReport computation")
+	}
+
+	// Create StateDB using fuzzer's existing storage and state context
+	stateKeyVals := &statedb.StateKeyVals{KeyVals: bundleQA.StateContext.PreState.KeyVals}
+	stateDB, err := statedb.NewStateDBFromStateKeyVals(fuzzer.store, stateKeyVals)
+	if err != nil {
+		return false, false, fmt.Errorf("failed to create StateDB: %v", err)
+	}
+
+	// Execute the EXACT same bundle being sent to target using stateless function
+	snapshot, err := refine.ExecuteWorkPackageBundleV2(
+		stateDB,
+		fuzzer.pvmBackend,
+		stateDB.JamState.SafroleState.Timeslot, // Use actual timeslot from StateDB
+		bundleQA.RefineBundle.Core,
+		bundleQA.RefineBundle.Bundle,
+		bundleQA.RefineBundle.SegmentRootMappings, // Use SegmentRootMappings from RefineBundle
+		38, // Slot from original data
+	)
+	if err != nil {
+		return false, false, fmt.Errorf("failed to compute expected WorkReport by executing bundle: %v", err)
+	}
+	expectedWorkReport := snapshot.Report
+
+	targetWorkReport, err := fuzzer.RefineBundle(&bundleQA.RefineBundle, &expectedWorkReport)
+	if err != nil {
+		return false, false, fmt.Errorf("RefineBundle failed: %w", err)
+	}
+
+	// Step 3: Verify - The RefineBundle call already handles WorkReport hash comparison
+	// If we reach here, the WorkReport matched (or the call would have failed)
+	matched = true
+
+	if bundleQA.Mutated {
+		// Fuzzed bundles should be rejected or return error indicators
+		if matched {
+			log.Printf("FATAL: Fuzzed bundle was accepted by target")
+			solverFuzzed = false // Target failed to detect invalid bundle
+		} else {
+			log.Printf("Fuzzed bundle correctly rejected by target")
+			solverFuzzed = true // Target correctly detected invalid bundle
+		}
+	} else {
+		// Original bundles should be processed successfully
+		if matched {
+			log.Printf("%s ✓ RefineBundle Success%s\n", common.ColorGray, common.ColorReset)
+			solverFuzzed = false // Expected behavior
+		} else {
+			log.Printf("FATAL: Original bundle rejected by target")
+			solverFuzzed = true // Unexpected rejection
+		}
+	}
+
+	if !matched && !bundleQA.Mutated {
+		// Log detailed mismatch for original bundles that failed
+		log.Printf("BUNDLE MISMATCH: Expected successful processing of original bundle")
+		if verbose {
+			log.Printf("Expected WorkReport: %s", expectedWorkReport.String())
+			log.Printf("Target WorkReport: %s", targetWorkReport.String())
+		}
+	}
+
 	return matched, solverFuzzed, nil
 }

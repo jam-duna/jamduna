@@ -21,6 +21,7 @@ import (
 
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/pvm"
+	"github.com/colorfulnotion/jam/refine"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
@@ -31,8 +32,11 @@ import (
 )
 
 const (
-	algo_stf    = "test/00000017.bin"
-	algo_bundle = "test/00000017_0xaa03ac39deda658dc4ec97c9c38995a3e99b111fafb1dfe24a14feb6f47db038_0_3_guarantor.bin"
+	algo_stf    = "test/00000028.bin"
+	algo_bundle = "test/00000028_0xa7ccd053a7c4399d1939f542935b944eb2c755d9be4062ec4410fad52f7a6111_0_0_guarantor.bin"
+
+	fib_stf    = "test/00000040.bin"
+	fib_bundle = "test/00000040_0x785e35b04dc1a03988f9cc8b51571633f5c6f309f802e3026a61c28119361673_0_0_guarantor.bin"
 
 	game_of_stf    = "test/03233539.bin"
 	game_of_bundle = "test/03233538_0x8d63f7ce582bdf289283594871633c9018384b65f2699890d8321c5441b95c53_1_3233538_guarantor_follower.bin"
@@ -190,14 +194,11 @@ func initPProf(t *testing.T) {
 	})
 }
 
-// go test -run=TestRefineStateTransitions
-func TestRefineStateTransitions(t *testing.T) {
-	pvm.PvmLogging = true
-	pvm.PvmTrace = true
+func testRefineStateTransitions(t *testing.T, filename_stf, filename_bundle string) {
+	//pvm.PvmLogging = true
+	//pvm.PvmTrace = true
 	pvm.RecordTime = true
 	initPProf(t)
-	filename_stf := corevm_stf
-	filename_bundle := corevm_bundle
 
 	stf, err := ReadStateTransition(filename_stf)
 	if err != nil {
@@ -211,7 +212,7 @@ func TestRefineStateTransitions(t *testing.T) {
 			err)
 	}
 
-	fmt.Printf("Read bundle snapshot from file %s: %v\n", filename_bundle, bundle_snapshot)
+	fmt.Printf("Read bundle snapshot from file %s: %v\n", filename_bundle, types.ToJSONHexIndent(bundle_snapshot))
 
 	levelDBPath := "/tmp/testdb"
 	store, err := storage.NewStateDBStorage(levelDBPath)
@@ -358,6 +359,10 @@ func TestRefineAlgo3(t *testing.T) {
 		gasUsed := make(map[string]uint)
 		backends := []string{pvm.BackendCompiler}
 		for _, pvmBackend := range backends {
+			if runtime.GOOS != "linux" {
+				pvmBackend = pvm.BackendInterpreter
+				log.Warn(log.Node, fmt.Sprintf("COMPILER Not Supported. Defaulting to interpreter"))
+			}
 			modified_wp := bundle_snapshot.Bundle.WorkPackage
 			modified_wp.WorkItems[1].RefineGasLimit = 4_000_000_000
 			if pickRandom {
@@ -587,6 +592,48 @@ func testRefineStateTransition(pvmBackend string, store *storage.StateDBStorage,
 		i = 1
 	}
 	algo_res := re_workReport.Results[i]
+	algo_res_errCode := algo_res.Result.Err
+	algo_res_status = types.ResultCode(algo_res_errCode)
+	if algo_res_errCode != types.WORKDIGEST_OK {
+		algo_res_err = fmt.Errorf(types.ResultCode(algo_res_errCode))
+	} else {
+		algo_res_status = "OK"
+	}
+	algo_gasused = algo_res.GasUsed
+	return algo_gasused, algo_res_status, algo_res_err
+}
+
+func testUnifiedRefineStateTransition(pvmBackend string, store *storage.StateDBStorage, bundle_snapshot *types.WorkPackageBundleSnapshot, stf *statedb.StateTransition, t *testing.T) (algo_gasused uint, algo_res_status string, algo_res_err error) {
+	//t.Logf("Testing refine state transition using refine package with pvmBackend: %s", pvmBackend)
+	sdb, err := statedb.NewStateDBFromStateTransitionPost(store, stf)
+	if err != nil {
+		t.Fatalf("Failed to create state DB from state transition: %v", err)
+	}
+
+	// Use refine package instead of node's executeWorkPackageBundle
+	start := time.Now()
+	reexecuted_snapshot, err := refine.ExecuteWorkPackageBundleV1(
+		sdb,
+		pvmBackend,
+		sdb.JamState.SafroleState.Timeslot,
+		uint16(bundle_snapshot.CoreIndex),
+		bundle_snapshot.Bundle,
+		bundle_snapshot.SegmentRootLookup,
+		bundle_snapshot.Slot,
+	)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("Error executing work package bundle with refine package: %v", err)
+	}
+
+	t.Logf("[%s-REFINE] Work Report[Hash: %v. Total Elapsed: %v]\n", pvmBackend, reexecuted_snapshot.Report.Hash(), elapsed)
+
+	i := 0
+	if len(reexecuted_snapshot.Report.Results) > 1 {
+		i = 1
+	}
+	algo_res := reexecuted_snapshot.Report.Results[i]
 	algo_res_errCode := algo_res.Result.Err
 	algo_res_status = types.ResultCode(algo_res_errCode)
 	if algo_res_errCode != types.WORKDIGEST_OK {
@@ -905,4 +952,47 @@ func TestGenerateTestCase(t *testing.T) {
 			fmt.Printf("Cleaned up storage for test case %s\n", testCase.Name)
 		})
 	}
+}
+
+func TestCoreEvmRefine(t *testing.T) {
+	testRefineStateTransitions(t, corevm_stf, corevm_bundle)
+}
+
+func TestFibRefine(t *testing.T) {
+	testRefineStateTransitions(t, fib_stf, fib_bundle)
+}
+
+func TestAlgoRefineComparison(t *testing.T) {
+	pvm.RecordTime = true
+	initPProf(t)
+
+	stf, err := ReadStateTransition(algo_stf)
+	if err != nil {
+		t.Fatalf("failed to read state transition from file %s: %v", algo_stf, err)
+	}
+
+	bundle_snapshot, err := ReadBundleSnapshot(algo_bundle)
+	if err != nil {
+		t.Fatalf("failed to read state transition from file %s: %v", algo_bundle, err)
+	}
+
+	levelDBPath := "/tmp/testdb_comparison"
+	store, err := storage.NewStateDBStorage(levelDBPath)
+	if err != nil {
+		t.Fatalf("Failed to create storage: %v", err)
+	}
+
+	pvmBackend := pvm.BackendInterpreter
+
+	t.Run("NodeExecuteWorkPackageBundle", func(t *testing.T) {
+		testRefineStateTransition(pvmBackend, store, bundle_snapshot, stf, t)
+	})
+
+	t.Run("UnifiedRefineStateTransition", func(t *testing.T) {
+		testUnifiedRefineStateTransition(pvmBackend, store, bundle_snapshot, stf, t)
+	})
+}
+
+func TestAlgoRefine(t *testing.T) {
+	testRefineStateTransitions(t, algo_stf, algo_bundle)
 }

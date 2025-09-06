@@ -55,10 +55,10 @@ const (
 
 const (
 	isWriteSnapshot        = false
-	isWriteTransition      = false
-	isWriteBundleFollower  = false
-	isWriteBundleGuarantor = false
-	isWriteBundleAuditor   = false
+	isWriteTransition      = true
+	isWriteBundleFollower  = true
+	isWriteBundleGuarantor = true
+	isWriteBundleAuditor   = true
 )
 
 const (

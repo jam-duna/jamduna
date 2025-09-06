@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand"
 	"reflect"
+	"sort"
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
@@ -137,6 +138,29 @@ func NewRand(seed []byte) *rand.Rand {
 	return rand.New(source)
 }
 
+func StartFuzzingProducerWithOptions(fuzzer *Fuzzer, output chan<- StateTransitionQA, baseSTFs []*statedb.StateTransition, invalidRate float64, numBlocks int, disableShuffling bool) {
+	defer close(output)
+	
+	// Sort baseSTFs by block slot if shuffling is disabled
+	if disableShuffling {
+		sort.Slice(baseSTFs, func(i, j int) bool {
+			return baseSTFs[i].Block.Header.Slot < baseSTFs[j].Block.Header.Slot
+		})
+		log.Printf("FUZZER: Shuffling disabled - sorted %d STFs by block slot", len(baseSTFs))
+	}
+	
+	modes := []string{"safrole", "assurances"}
+	finalSTFs, err := fuzzer.FuzzWithTargetedInvalidRateWithOptions(modes, baseSTFs, invalidRate, numBlocks, disableShuffling)
+	if err != nil {
+		log.Printf("FUZZER: Failed to fuzz blocks: %v", err)
+		return
+	}
+
+	for _, stfQA := range finalSTFs {
+		output <- stfQA
+	}
+}
+
 func StartFuzzingProducer(fuzzer *Fuzzer, output chan<- StateTransitionQA, baseSTFs []*statedb.StateTransition, invalidRate float64, numBlocks int) {
 	defer close(output)
 	rng := NewRand(fuzzer.GetSeed())
@@ -212,6 +236,93 @@ func (f *Fuzzer) FuzzSingleStf(store *storage.StateDBStorage, stf_org *statedb.S
 	}
 
 	return resultQA, nil
+}
+
+func (f *Fuzzer) FuzzWithTargetedInvalidRateWithOptions(modes []string, stfs []*statedb.StateTransition, invalidRate float64, numBlocks int, disableShuffling bool) (finalSTFs []StateTransitionQA, err error) {
+	allowFuzzing := true
+	seed := f.GetSeed()
+	store, err := statedb.InitStorage("/tmp/test_locala")
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize storage: %v", err)
+	}
+
+	numInvalidBlocks := int(float64(numBlocks) * invalidRate)
+	numValidBlocks := numBlocks - numInvalidBlocks
+	if numInvalidBlocks == 0 {
+		allowFuzzing = false
+	}
+	fmt.Printf("Seed=%x InvalidRate=%.2f -> invalidBlocks=%d | validBlocks=%d | total=%d\n",
+		seed, invalidRate, numInvalidBlocks, numValidBlocks, numBlocks,
+	)
+
+	if !disableShuffling {
+		f.Shuffle(stfs)
+	}
+
+	var allPossibleMutations []STFError
+	var validBlockPool []*statedb.StateTransition
+	validateInput := false
+	for _, stf := range stfs {
+		if validateInput {
+			diffs, stfErr := statedb.CheckStateTransitionWithOutput(store, stf, nil, f.pvmBackend, false)
+			if stfErr != nil {
+				statedb.HandleDiffs(diffs)
+				return nil, fmt.Errorf("invalid base STF provided: %v | %v", stfErr, stf.ToJSON())
+			}
+		}
+
+		validBlockPool = append(validBlockPool, stf)
+		mutations := selectImportBlocksErrorArr(seed, store, modes, stf, allowFuzzing)
+		if len(mutations) > 0 {
+			allPossibleMutations = append(allPossibleMutations, mutations...)
+		}
+	}
+
+	if numInvalidBlocks > 0 && len(allPossibleMutations) == 0 {
+		log.Println("No STFs are fuzzable to generate the required invalid blocks.")
+		return nil, fmt.Errorf("no STFs are fuzzable")
+	}
+
+	var fuzzedSTFs []StateTransitionQA
+	if numInvalidBlocks > 0 {
+		if !disableShuffling {
+			f.Shuffle(allPossibleMutations)
+		}
+		for i := 0; i < numInvalidBlocks; i++ {
+			mutation := allPossibleMutations[i%len(allPossibleMutations)]
+			fuzzedSTFs = append(fuzzedSTFs, StateTransitionQA{
+				Mutated: true,
+				Error:   mutation.Error, // The specific error for this mutation
+				STF:     mutation.StateTransition,
+			})
+		}
+	}
+
+	var finalValidSTFs []StateTransitionQA
+	if numValidBlocks > 0 {
+		if len(validBlockPool) == 0 {
+			return nil, fmt.Errorf("cannot generate valid blocks: no source STFs available")
+		}
+		if !disableShuffling {
+			f.Shuffle(validBlockPool)
+		}
+		for i := 0; i < numValidBlocks; i++ {
+			stf := validBlockPool[i%len(validBlockPool)]
+			finalValidSTFs = append(finalValidSTFs, StateTransitionQA{
+				Mutated: false,
+				Error:   nil,
+				STF:     stf,
+			})
+		}
+	}
+
+	finalSTFs = append(fuzzedSTFs, finalValidSTFs...)
+	if !disableShuffling {
+		f.Shuffle(finalSTFs)
+	}
+
+	log.Printf("Fuzz completed: %d invalid blocks, %d valid blocks", len(fuzzedSTFs), len(finalValidSTFs))
+	return finalSTFs, nil
 }
 
 func (f *Fuzzer) FuzzWithTargetedInvalidRate(modes []string, stfs []*statedb.StateTransition, invalidRate float64, numBlocks int) (finalSTFs []StateTransitionQA, err error) {
@@ -494,20 +605,20 @@ func selectAllImportBlocksErrors(seed []byte, store *storage.StateDBStorage, mod
 
 	if !allowFuzzing {
 		if debugFuzz {
-			fmt.Printf("[#%v e=%v,m=%03d] %sSkip Fuzzing%s  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, colorGray, colorReset, oValidatorPub, oValidatorIdx)
+			fmt.Printf("[#%v e=%v,m=%03d] %sSkip Fuzzing%s  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, common.ColorGray, common.ColorReset, oValidatorPub, oValidatorIdx)
 		}
 		return oSlot, oEpoch, oPhase, nil, nil
 	}
 
 	if len(aggregatedErrors) == 0 {
 		if debugFuzz {
-			fmt.Printf("[#%v e=%v,m=%03d] %sNotFuzzable%s  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, colorGray, colorReset, oValidatorPub, oValidatorIdx)
+			fmt.Printf("[#%v e=%v,m=%03d] %sNotFuzzable%s  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, common.ColorGray, common.ColorReset, oValidatorPub, oValidatorIdx)
 		}
 		return oSlot, oEpoch, oPhase, nil, nil
 	}
 
 	if debugFuzz {
-		fmt.Printf("[#%v e=%v,m=%03d] %sFuzzable   %s  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, colorMagenta, colorReset, oValidatorPub, oValidatorIdx)
+		fmt.Printf("[#%v e=%v,m=%03d] %sFuzzable   %s  Author: %v (Idx:%v)\n", oSlot, oEpoch, oPhase, common.ColorMagenta, common.ColorReset, oValidatorPub, oValidatorIdx)
 	}
 
 	for _, selectedError := range aggregatedErrors {
@@ -626,7 +737,7 @@ func selectAllImportBlocksErrors(seed []byte, store *storage.StateDBStorage, mod
 	if len(errorList) > 0 {
 		possibleErrs := errorList
 		if debugFuzz || true {
-			fmt.Printf("[#%v e=%v,m=%03d] %v possible mutations = %s%v%s\n", oSlot, oEpoch, oPhase, len(possibleErrs), colorMagenta, jamerrors.GetErrorNames(possibleErrs), colorReset)
+			fmt.Printf("[#%v e=%v,m=%03d] %v possible mutations = %s%v%s\n", oSlot, oEpoch, oPhase, len(possibleErrs), common.ColorMagenta, jamerrors.GetErrorNames(possibleErrs), common.ColorReset)
 		}
 		return oSlot, oEpoch, oPhase, mutatedSTFs, possibleErrs
 	}

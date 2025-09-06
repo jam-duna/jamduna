@@ -43,10 +43,12 @@ func main() {
 	fReg.RegisterFlag("socket", nil, socket, "Path for the Unix domain socket to connect to", &socket)
 
 	fuzzerInfo := fuzz.PeerInfo{
-		Name:       "jam-duna-fuzzer-v0.1",
-		AppVersion: fuzz.Version{Major: 0, Minor: 6, Patch: 7},
-		JamVersion: fuzz.Version{Major: 0, Minor: 6, Patch: 7},
+		AppVersion: fuzz.ParseVersion(fuzz.APP_VERSION),
+		JamVersion: fuzz.ParseVersion(fuzz.JAM_VERSION),
+		Name:       "jam-duna-fuzzer",
 	}
+
+	fuzzerInfo.SetASNSpecific()
 
 	fReg.ProcessRegistry()
 

@@ -67,18 +67,48 @@ done
 # --- 2) Dedupe prefixes ---
 unique_prefixes=($(printf "%s\n" "${prefixes[@]}" | sort -u))
 
-# --- 3) Copy state_transitions for each prefix ---
+# --- 3) Copy state_transitions for each prefix AND their parents ---
 for pre in "${unique_prefixes[@]}"; do
-  echo "→ Block ${pre}: copying state_transitions..."
-  for i in {0..5}; do
-    ST_DIR="${DATADIR}/${JOBID}/node${i}/data/state_transitions"
-    [ -d "${ST_DIR}" ] || continue
-    for suf in bin hex json; do
-      [[ "$suf" == "hex" && "$INCLUDE_HEX" == false ]] && continue
-      src="${ST_DIR}/${pre}.${suf}"
-      [ -f "${src}" ] && cp -f "${src}" "${DEST_DIR}/"
+  # Convert prefix to number to calculate parent
+  pre_num=$(echo "$pre" | sed 's/^0*//')  # Remove leading zeros
+  [ -n "$pre_num" ] || pre_num=0          # Handle "00000000" case
+  
+  # Calculate parent slot (current - 1)
+  if [ "$pre_num" -gt 0 ]; then
+    parent_num=$((pre_num - 1))
+    parent_pre=$(printf "%08d" "$parent_num")
+    
+    echo "→ Block ${pre}: copying state_transitions (+ parent ${parent_pre})..."
+    
+    # Copy both current and parent state transitions
+    for target_pre in "$pre" "$parent_pre"; do
+      for i in {0..5}; do
+        ST_DIR="${DATADIR}/${JOBID}/node${i}/data/state_transitions"
+        [ -d "${ST_DIR}" ] || continue
+        for suf in bin hex json; do
+          [[ "$suf" == "hex" && "$INCLUDE_HEX" == false ]] && continue
+          src="${ST_DIR}/${target_pre}.${suf}"
+          if [ -f "${src}" ]; then
+            cp -f "${src}" "${DEST_DIR}/"
+            if [ "$target_pre" = "$parent_pre" ]; then
+              echo "   ↳ Copied parent STF: ${target_pre}.${suf}"
+            fi
+          fi
+        done
+      done
     done
-  done
+  else
+    echo "→ Block ${pre}: copying state_transitions (no parent for slot 0)..."
+    for i in {0..5}; do
+      ST_DIR="${DATADIR}/${JOBID}/node${i}/data/state_transitions"
+      [ -d "${ST_DIR}" ] || continue
+      for suf in bin hex json; do
+        [[ "$suf" == "hex" && "$INCLUDE_HEX" == false ]] && continue
+        src="${ST_DIR}/${pre}.${suf}"
+        [ -f "${src}" ] && cp -f "${src}" "${DEST_DIR}/"
+      done
+    done
+  fi
 done
 
 echo "Done! Files are in: ${DEST_DIR}"

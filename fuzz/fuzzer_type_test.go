@@ -36,17 +36,11 @@ func testFullMessageEncoding(t *testing.T, msg *Message, expectedFullMessage []b
 
 func TestEncodeDecodePeerInfo(t *testing.T) {
 	peerInfo := PeerInfo{
-		Name: "fuzzer",
-		AppVersion: Version{
-			Major: 0,
-			Minor: 1,
-			Patch: 23,
-		},
-		JamVersion: Version{
-			Major: 0,
-			Minor: 6,
-			Patch: 6,
-		},
+		//FuzzVersion: 1,
+		Name:       "fuzzer",
+		AppVersion: ParseVersion("0.1.23"),
+		JamVersion: ParseVersion("0.7.0"),
+		//Features:    FeatureBundleRefinement,
 	}
 	msg := &Message{PeerInfo: &peerInfo}
 

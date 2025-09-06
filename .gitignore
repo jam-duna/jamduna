@@ -76,3 +76,12 @@ assets/zcash-srs-2-11-uncompressed.bin
 /cmd/duna_bench/duna_bench_*
 /cmd/duna_bench/reports
 /reports
+duna_target
+/duna_fuzzer
+duna_bench
+
+# Allow refine test data to be committed
+!cmd/duna_fuzzer/refine/
+!cmd/duna_fuzzer/refine/*
+# But exclude .DS_Store files from refine directory
+cmd/duna_fuzzer/refine/.DS_Store

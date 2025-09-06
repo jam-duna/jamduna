@@ -71,7 +71,7 @@ G.3: Ring for Ticket Generation
 
 const (
 	X_BANDERSNATCH_SEED = "jam_val_key_bandersnatch"
-	MAX_CACHE_SIZE      = 128
+	MAX_CACHE_SIZE      = 1024
 )
 
 type lruCache[T any] struct {

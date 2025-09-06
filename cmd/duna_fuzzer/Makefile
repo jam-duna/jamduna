@@ -9,13 +9,23 @@ NETWORK          ?= tiny
 LATEST_TS        := $(shell ls -1 "$(JAMDIR)" 2>/dev/null | sort -n | tail -1)
 TS               ?= $(LATEST_TS)
 JOBID            ?=
+DEFAULT_ASN_VERSION := 0
 
 # Use the active SDK for header/lib paths on macOS builds.
 SDK_PATH         := $(shell xcrun --show-sdk-path)
 
-.PHONY: all build run test-fallback test-safrole test-assurances clean cpnode cpstf fuzz fuzz_only
+.PHONY: all build run test-fallback test-safrole test-assurances clean cpnode cpstf fuzz fuzz_only make asn0 asn1
 
 all: build
+
+# Default ASN version build (follows DEFAULT_ASN_VERSION)
+make: asn$(DEFAULT_ASN_VERSION)
+
+# ASN.0 builds (default) 
+asn0: static_fuzzer0_linux static_fuzzer0_mac
+
+# ASN.1 builds
+asn1: static_fuzzer1_linux static_fuzzer1_mac
 
 dynamic_build:
 	@echo "Building dynamic duna_fuzzer for current platform..."
@@ -49,6 +59,52 @@ static_fuzzer_mac:
 	-o $(BINARY_NAME)_mac .
 	@rm -f ../../ffi/libunicorn.a
 	@echo "Build complete for duna_fuzzer_mac on macOS (amd64)."
+
+static_fuzzer0_linux:
+	@echo "Building static duna_fuzzer (ASN.0) for Linux (amd64)..."
+	@ln -sf $(CURDIR)/../../ffi/libunicorn.linux_amd64.a ../../ffi/libunicorn.a
+	-@GOOS=linux GOARCH=amd64 CC=x86_64-linux-musl-gcc CGO_ENABLED=1 \
+	go build -tags="cgo,$(NETWORK)" \
+	-ldflags="-s -w -extldflags '-static'" \
+	-o $(if $(filter 0,$(DEFAULT_ASN_VERSION)),$(BINARY_NAME)_linux,$(BINARY_NAME)_asn0_linux) .
+	@rm -f ../../ffi/libunicorn.a
+	@echo "Build complete for $(if $(filter 0,$(DEFAULT_ASN_VERSION)),$(BINARY_NAME)_linux,$(BINARY_NAME)_asn0_linux) on Linux (amd64)."
+
+static_fuzzer0_mac:
+	@echo "Building static duna_fuzzer (ASN.0) for macOS (amd64)..."
+	@ln -sf $(CURDIR)/../../ffi/libunicorn.mac.a ../../ffi/libunicorn.a
+	-@MACOSX_DEPLOYMENT_TARGET=14.0 \
+	  GOOS=darwin GOARCH=amd64 CC=clang CGO_ENABLED=1 \
+	  CGO_CFLAGS="-mmacosx-version-min=14.0 -isysroot $(SDK_PATH)" \
+	  CGO_LDFLAGS="-mmacosx-version-min=14.0 -isysroot $(SDK_PATH)" \
+	go build -tags="cgo,$(NETWORK)" \
+	-ldflags="-s -w" \
+	-o $(if $(filter 0,$(DEFAULT_ASN_VERSION)),$(BINARY_NAME)_mac,$(BINARY_NAME)_asn0_mac) .
+	@rm -f ../../ffi/libunicorn.a
+	@echo "Build complete for $(if $(filter 0,$(DEFAULT_ASN_VERSION)),$(BINARY_NAME)_mac,$(BINARY_NAME)_asn0_mac) on macOS (amd64)."
+
+static_fuzzer1_linux:
+	@echo "Building static duna_fuzzer (ASN.1) for Linux (amd64)..."
+	@ln -sf $(CURDIR)/../../ffi/libunicorn.linux_amd64.a ../../ffi/libunicorn.a
+	-@GOOS=linux GOARCH=amd64 CC=x86_64-linux-musl-gcc CGO_ENABLED=1 \
+	go build -tags="cgo,$(NETWORK),asn1" \
+	-ldflags="-s -w -extldflags '-static'" \
+	-o $(if $(filter 1,$(DEFAULT_ASN_VERSION)),$(BINARY_NAME)_linux,$(BINARY_NAME)_asn1_linux) .
+	@rm -f ../../ffi/libunicorn.a
+	@echo "Build complete for $(if $(filter 1,$(DEFAULT_ASN_VERSION)),$(BINARY_NAME)_linux,$(BINARY_NAME)_asn1_linux) on Linux (amd64)."
+
+static_fuzzer1_mac:
+	@echo "Building static duna_fuzzer (ASN.1) for macOS (amd64)..."
+	@ln -sf $(CURDIR)/../../ffi/libunicorn.mac.a ../../ffi/libunicorn.a
+	-@MACOSX_DEPLOYMENT_TARGET=14.0 \
+	  GOOS=darwin GOARCH=amd64 CC=clang CGO_ENABLED=1 \
+	  CGO_CFLAGS="-mmacosx-version-min=14.0 -isysroot $(SDK_PATH)" \
+	  CGO_LDFLAGS="-mmacosx-version-min=14.0 -isysroot $(SDK_PATH)" \
+	go build -tags="cgo,$(NETWORK),asn1" \
+	-ldflags="-s -w" \
+	-o $(if $(filter 1,$(DEFAULT_ASN_VERSION)),$(BINARY_NAME)_mac,$(BINARY_NAME)_asn1_mac) .
+	@rm -f ../../ffi/libunicorn.a
+	@echo "Build complete for $(if $(filter 1,$(DEFAULT_ASN_VERSION)),$(BINARY_NAME)_mac,$(BINARY_NAME)_asn1_mac) on macOS (amd64)."
 
 run:
 	go build -tags=$(NETWORK) -o $(BINARY_NAME_FUZZ) ../fuzzer
@@ -94,5 +150,6 @@ fuzz: fuzz_only
 	./fuzzed_zipper.sh
 
 clean:
-	rm -f $(BINARY_NAME) $(BINARY_NAME_FUZZ) $(BINARY_NAME)_linux $(BINARY_NAME)_mac $(BINARY_NAME)_dynamic
+	rm -f $(BINARY_NAME) $(BINARY_NAME_FUZZ) $(BINARY_NAME)_linux $(BINARY_NAME)_mac $(BINARY_NAME)_dynamic \
+	      $(BINARY_NAME)_asn0_linux $(BINARY_NAME)_asn0_mac $(BINARY_NAME)_asn1_linux $(BINARY_NAME)_asn1_mac
 

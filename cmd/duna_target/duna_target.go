@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -21,26 +20,41 @@ func Terminate(stopCh chan os.Signal) {
 func main() {
 	// ./duna_target_mac -pvm-logging debug
 	// ./duna_fuzzer_mac --test-dir ~/Desktop/jamtestnet/0.6.7/algo  --socket=/tmp/jam_target.sock
-	socketPath := flag.String("socket", "/tmp/jam_target.sock", "Path for the Unix domain socket")
-	pvmLogging := flag.String("pvm-logging", "none", "Logging level (none, debug, trace)")
-	flag.Parse()
+
+	var socketPath string = "/tmp/jam_target.sock"
+	var pvmLogging string = "none"
+	version := false
+
+	fReg := fuzz.NewFlagRegistry("duna_target")
+	fReg.RegisterFlag("socket", nil, socketPath, "Path for the Unix domain socket", &socketPath)
+	fReg.RegisterFlag("pvm-logging", nil, pvmLogging, "Logging level (none, debug, trace)", &pvmLogging)
+	fReg.RegisterFlag("version", "v", version, "Display version information", &version)
+	fReg.ProcessRegistry()
 
 	// Define the target's identity.
 	targetInfo := fuzz.PeerInfo{
-		Name:       fmt.Sprintf("jam-duna-target-%s", fuzz.FUZZ_VERSION),
-		AppVersion: fuzz.Version{Major: 0, Minor: 7, Patch: 0},
-		JamVersion: fuzz.Version{Major: 0, Minor: 7, Patch: 0},
+		AppVersion: fuzz.ParseVersion(fuzz.APP_VERSION),
+		JamVersion: fuzz.ParseVersion(fuzz.JAM_VERSION),
+		Name:       "jam-duna-target",
 	}
-	if pvmLogging != nil {
-		if *pvmLogging == "trace" {
+
+	targetInfo.SetASNSpecific()
+
+	fmt.Printf("Target Info:\n\n%s\n\n", targetInfo.Info())
+	if version {
+		return
+	}
+
+	pvm.RecordTime = false
+	if pvmLogging != "" {
+		if pvmLogging == "trace" {
 			pvm.PvmLogging = true
 			pvm.PvmTrace = true
-		} else if *pvmLogging == "debug" {
+		} else if pvmLogging == "debug" {
 			pvm.PvmLogging = true
 		}
 	}
-
-	target := fuzz.NewTarget(*socketPath, targetInfo, "interpreter")
+	target := fuzz.NewTarget(socketPath, targetInfo, "interpreter")
 
 	// Graceful shutdown setup
 	stopCh := make(chan os.Signal, 1)
@@ -52,7 +66,7 @@ func main() {
 		os.Exit(0)
 	}()
 
-	log.Printf("Starting target on socket: %s", *socketPath)
+	log.Printf("Starting target on socket: %s", socketPath)
 	if err := target.Start(); err != nil {
 		log.Fatalf("Target failed to start: %v", err)
 	}

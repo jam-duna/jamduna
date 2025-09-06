@@ -5,12 +5,8 @@ import (
 
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
-	"path/filepath"
-	"reflect"
 	"sort"
-	"strings"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/statedb"
@@ -86,143 +82,37 @@ func InitFuzzStorage(testDir string) (*storage.StateDBStorage, error) {
 
 }
 
-func ReadStateTransitionBIN(filename string) (stf *statedb.StateTransition, err error) {
-	stBytes, err := os.ReadFile(filename)
-	if err != nil {
-		fmt.Printf("Error reading file %s: %v\n", filename, err)
-		return nil, fmt.Errorf("error reading file %s: %v", filename, err)
-	}
-	// Decode st from stBytes
-	b, _, err := types.Decode(stBytes, reflect.TypeOf(statedb.StateTransition{}))
-	if err != nil {
-		fmt.Printf("Error decoding block %s: %v\n", filename, err)
-		return nil, fmt.Errorf("error decoding block %s: %v", filename, err)
-	}
-	st, ok := b.(statedb.StateTransition)
-	if !ok {
-		return nil, fmt.Errorf("failed to type assert decoded data to StateTransition; got type %T", b)
-	}
-	stf = &st // Assign the address of the resulting value to the pointer 'stf'.
-	return stf, nil
-}
+// DeduplicateStateTransitions removes duplicate state transitions based on prestate->poststate root pairs
+// This handles cases where the same STF exists in both .bin and .json formats
+func DeduplicateStateTransitions(stfs []*statedb.StateTransition) []*statedb.StateTransition {
+	seen := make(map[string]*statedb.StateTransition)
 
-func ReadStateTransitionJSON(path string) (*statedb.StateTransition, error) {
-	file, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("could not read file %s: %w", path, err)
-	}
+	for _, stf := range stfs {
+		// Create unique key from prestate and poststate roots
+		preStateRoot := stf.PreState.StateRoot.Hex()
+		postStateRoot := stf.PostState.StateRoot.Hex()
+		key := preStateRoot + "->" + postStateRoot
 
-	var st statedb.StateTransition
-	if err := json.Unmarshal(file, &st); err != nil {
-		return nil, fmt.Errorf("could not unmarshal json from %s: %w", path, err)
-	}
-	return &st, nil
-}
-
-func ReadStateTransition(filename string) (stf *statedb.StateTransition, err error) {
-	if filename == "" {
-		return nil, fmt.Errorf("filename cannot be empty")
-	}
-	if len(filename) > 0 && filename[len(filename)-4:] == ".bin" {
-		return ReadStateTransitionBIN(filename)
-	}
-	return ReadStateTransitionJSON(filename)
-}
-
-func ReadStateTransitions(baseDir string) (stfs []*statedb.StateTransition, err error) {
-	stfs = make([]*statedb.StateTransition, 0)
-	stFiles, err := os.ReadDir(baseDir)
-	if err != nil {
-		return stfs, fmt.Errorf("failed to read directory: %v", err)
-	}
-	fmt.Printf("Selected Dir: %v\n", baseDir)
-	file_idx := 0
-	useJSON := true
-	useBIN := true
-	for _, file := range stFiles {
-		//fmt.Printf("Processing file: %s\n", file.Name())
-		if strings.HasSuffix(file.Name(), ".bin") || strings.HasSuffix(file.Name(), ".json") {
-			stPath := filepath.Join(baseDir, file.Name())
-			isJSON := strings.HasSuffix(file.Name(), ".json")
-			isBin := strings.HasSuffix(file.Name(), ".bin")
-			if useJSON && isJSON {
-				//fmt.Printf("Reading JSON file: %s\n", stPath)
-				stf, err := ReadStateTransition(stPath)
-				if err != nil {
-					log.Printf("Error reading state transition file %s: %v\n", file.Name(), err)
-					continue
-				}
-				stfs = append(stfs, stf)
-				file_idx++
-			}
-			if useBIN && isBin {
-				//fmt.Printf("Reading BIN file: %s\n", stPath)
-				stf, err := ReadStateTransition(stPath)
-				if err != nil {
-					log.Printf("Error reading state transition file %s: %v\n", file.Name(), err)
-					continue
-				}
-				stfs = append(stfs, stf)
-				file_idx++
-			}
+		// first one wins for dedup
+		if _, exists := seen[key]; !exists {
+			seen[key] = stf
 		}
 	}
-	fmt.Printf("Loaded %v state transitions\n", len(stfs))
-	return stfs, nil
+
+	// back to slice form
+	deduplicated := make([]*statedb.StateTransition, 0, len(seen))
+	for _, stf := range seen {
+		deduplicated = append(deduplicated, stf)
+	}
+
+	return deduplicated
 }
 
-func ReadStateTransitionsOLD(baseDir, dir string) (stfs []*statedb.StateTransition, err error) {
-	stfs = make([]*statedb.StateTransition, 0)
-	state_transitions_dir := filepath.Join(baseDir, dir, "state_transitions")
-	stFiles, err := os.ReadDir(state_transitions_dir)
-	if err != nil {
-		return stfs, fmt.Errorf("failed to read directory: %v", err)
-	}
-	fmt.Printf("Selected Dir: %v\n", dir)
-	file_idx := 0
-	for _, file := range stFiles {
-		if strings.HasSuffix(file.Name(), ".bin") {
-			file_idx++
-			// Extract epoch and phase from filename `${epoch}_${phase}.bin`
-			// parts := strings.Split(strings.TrimSuffix(file.Name(), ".bin"), "_")
-
-			// Read the st file
-			stPath := filepath.Join(state_transitions_dir, file.Name())
-			stBytes, err := os.ReadFile(stPath)
-			if err != nil {
-				log.Printf("Error reading block file %s: %v\n", file.Name(), err)
-				continue
-			}
-
-			// Decode st from stBytes
-			b, _, err := types.Decode(stBytes, reflect.TypeOf(statedb.StateTransition{}))
-			if err != nil {
-				log.Printf("Error decoding block %s: %v\n", file.Name(), err)
-				continue
-			}
-			// Store the state transition in the stateTransitions map
-			stf := b.(statedb.StateTransition)
-			stfs = append(stfs, &stf)
-		} else if strings.HasSuffix(file.Name(), ".json") {
-			file_idx++
-			// Read the st file
-			stPath := filepath.Join(state_transitions_dir, file.Name())
-			stBytes, err := os.ReadFile(stPath)
-			if err != nil {
-				log.Printf("Error reading block file %s: %v\n", file.Name(), err)
-				continue
-			}
-			var st statedb.StateTransition
-			err = json.Unmarshal(stBytes, &st)
-			if err != nil {
-				log.Printf("Error decoding block %s: %v\n", file.Name(), err)
-				continue
-			}
-			stfs = append(stfs, &st)
-		}
-	}
-	fmt.Printf("Loaded %v state transitions\n", len(stfs))
-	return stfs, nil
+// Helper function to create deduplication key for consistency
+func CreateSTFDeduplicationKey(stf *statedb.StateTransition) string {
+	preStateRoot := stf.PreState.StateRoot.Hex()
+	postStateRoot := stf.PostState.StateRoot.Hex()
+	return preStateRoot + "->" + postStateRoot
 }
 
 type ExecutionReport struct {
@@ -365,54 +255,4 @@ func (dr *JsonDiffReport) String() string {
 		return fmt.Sprintf("Error marshaling JsonDiffReport: %v", err)
 	}
 	return string(jsonBytes)
-}
-
-func (dr *JsonDiffReport) SaveToFile(dir string, currTS uint32, slot uint32, stfQA *StateTransitionQA) error {
-	if dir == "" {
-		return fmt.Errorf("directory cannot be empty")
-	}
-
-	//tfQA, *targetStateKeyVals
-
-	if dr != nil {
-		jsonBytes, err := json.MarshalIndent(dr, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal execution report: %v", err)
-		}
-
-		fn := fmt.Sprintf("report_%08d.json", slot)
-		filePath := filepath.Join(dir, fmt.Sprintf("%d", currTS), fn)
-
-		fileDir := filepath.Dir(filePath)
-
-		if err := os.MkdirAll(fileDir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory %s: %w", fileDir, err)
-		}
-
-		if err := os.WriteFile(filePath, jsonBytes, 0644); err != nil {
-			return fmt.Errorf("failed to write execution report to file %s: %w", filePath, err)
-		}
-		log.Printf("✅ Execution report saved to: %s", filePath)
-	}
-	if stfQA != nil && stfQA.STF != nil {
-		stfBytes, err := json.MarshalIndent(stfQA, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal state transition: %v", err)
-		}
-
-		fn := fmt.Sprintf("%08d.json", slot)
-		filePath := filepath.Join(dir, fmt.Sprintf("%d", currTS), "traces", fn)
-
-		fileDir := filepath.Dir(filePath)
-
-		if err := os.MkdirAll(fileDir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory %s: %w", fileDir, err)
-		}
-
-		if err := os.WriteFile(filePath, stfBytes, 0644); err != nil {
-			return fmt.Errorf("failed to write state transition to file %s: %w", filePath, err)
-		}
-		log.Printf("✅ State transition saved to: %s", filePath)
-	}
-	return nil
 }

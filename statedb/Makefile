@@ -80,15 +80,15 @@ test-network:
 
 trace_interpreter:
 	@echo "Running 'TestTraces' with timeout $(LongTimeout) for network='$(NETWORK)' ..."
-	@cd $(STATEDB_DIR) && go test -v -timeout $(LongTimeout) -run TestTracesInterpreter  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
+	@cd $(STATEDB_DIR) && go test -v -timeout $(LongTimeout) -run TestTracesInterpreter  -tags "$(NETWORK) $(TESTING) benchprofile" -network=$(NETWORK)
 
 trace_compiler:
 	@echo "Running 'TestTraceCompiler' with timeout $(LongTimeout) for network='$(NETWORK)' ..."
-	@cd $(STATEDB_DIR) && go test -v -timeout $(LongTimeout) -run TestTracesCompiler  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)	
+	@cd $(STATEDB_DIR) && go test -v -timeout $(LongTimeout) -run TestTracesCompiler  -tags "$(NETWORK) $(TESTING) benchprofile" -network=$(NETWORK)	
 
 trace_sandbox:
 	@echo "Running 'TestTraceSandbox' with timeout $(LongTimeout) for network='$(NETWORK)' ..."
-	@cd $(STATEDB_DIR) && go test -v -timeout $(LongTimeout) -run TestTracesSandbox  -tags "$(NETWORK) $(TESTING)" -network=$(NETWORK)
+	@cd $(STATEDB_DIR) && go test -v -timeout $(LongTimeout) -run TestTracesSandbox  -tags "$(NETWORK) $(TESTING) benchprofile" -network=$(NETWORK)
 
 single_fuzz:
 	@echo "Running 'TestSingleFuzzTrace' with timeout $(TIMEOUT) for network='$(NETWORK)' ..."

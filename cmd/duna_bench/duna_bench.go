@@ -49,9 +49,11 @@ type Version struct {
 }
 
 type TargetInfo struct {
-	Name       string  `json:"name"`
-	AppVersion Version `json:"app_version"`
-	JamVersion Version `json:"jam_version"`
+	Name        string  `json:"name"`
+	FuzzVersion int     `json:"fuzz_version"`
+	AppVersion  Version `json:"app_version"`
+	JamVersion  Version `json:"jam_version"`
+	Features    int     `json:"features"`
 }
 
 type BenchStats struct {
@@ -63,6 +65,9 @@ type BenchStats struct {
 	ImportMinMs  float64 `json:"import_min_ms"`
 	ImportMaxMs  float64 `json:"import_max_ms"`
 	ImportMeanMs float64 `json:"import_mean_ms"`
+	ImportP01Ms  float64 `json:"import_p01_ms"`
+	ImportP10Ms  float64 `json:"import_p10_ms"`
+	ImportP25Ms  float64 `json:"import_p25_ms"`
 	ImportP50Ms  float64 `json:"import_p50_ms"`
 	ImportP75Ms  float64 `json:"import_p75_ms"`
 	ImportP90Ms  float64 `json:"import_p90_ms"`
@@ -206,6 +211,7 @@ func (bs *BenchmarkStats) GenerateJSONReport(testDir string, totalBenchmarkTime 
 	}
 
 	if bs.TargetPeerInfo != nil {
+		bs.TargetPeerInfo.SetASNSpecific()
 		targetInfo.Name = bs.TargetPeerInfo.Name
 		targetInfo.AppVersion = Version{
 			Major: int(bs.TargetPeerInfo.AppVersion.Major),
@@ -228,6 +234,9 @@ func (bs *BenchmarkStats) GenerateJSONReport(testDir string, totalBenchmarkTime 
 		ImportMinMs:  float64(bs.MinTime.Nanoseconds()) / 1e6,
 		ImportMaxMs:  float64(bs.MaxTime.Nanoseconds()) / 1e6,
 		ImportMeanMs: float64(bs.CalculateAverage().Nanoseconds()) / 1e6,
+		ImportP01Ms:  float64(bs.CalculatePercentile(0.01).Nanoseconds()) / 1e6,
+		ImportP10Ms:  float64(bs.CalculatePercentile(0.1).Nanoseconds()) / 1e6,
+		ImportP25Ms:  float64(bs.CalculatePercentile(0.25).Nanoseconds()) / 1e6,
 		ImportP50Ms:  float64(bs.CalculatePercentile(0.5).Nanoseconds()) / 1e6,
 		ImportP75Ms:  float64(bs.CalculatePercentile(0.75).Nanoseconds()) / 1e6,
 		ImportP90Ms:  float64(bs.CalculatePercentile(0.9).Nanoseconds()) / 1e6,
@@ -265,6 +274,12 @@ func (bs *BenchmarkStats) GenerateJSONReport(testDir string, totalBenchmarkTime 
 func (bs *BenchmarkStats) DumpMetrics() string {
 	avg := bs.CalculateAverage()
 	median := bs.CalculateMedian()
+	p1 := bs.CalculatePercentile(0.01)
+	p10 := bs.CalculatePercentile(0.1)
+	p25 := bs.CalculatePercentile(0.25)
+	p75 := bs.CalculatePercentile(0.75)
+	p90 := bs.CalculatePercentile(0.9)
+	p99 := bs.CalculatePercentile(0.99)
 
 	result := fmt.Sprintf(`Benchmark Results:
   Total Transitions: %d
@@ -276,6 +291,12 @@ func (bs *BenchmarkStats) DumpMetrics() string {
   Median Time: %v
   Min Time: %v
   Max Time: %v
+  P01 Time: %v
+  P10 Time: %v
+  P25 Time: %v
+  P75 Time: %v
+  P90 Time: %v
+  P99 Time: %v
   Success Rate: %.2f%%`,
 		bs.TotalTransitions,
 		bs.SuccessfulRuns,
@@ -286,6 +307,12 @@ func (bs *BenchmarkStats) DumpMetrics() string {
 		median,
 		bs.MinTime,
 		bs.MaxTime,
+		p1,
+		p10,
+		p25,
+		p75,
+		p90,
+		p99,
 		float64(bs.SuccessfulRuns)/float64(bs.TotalTransitions)*100,
 	)
 
@@ -339,11 +366,8 @@ func deduplicateStateTransitionsWithFilenames(stfs []*StateTransitionWithFilenam
 	seen := make(map[string]*StateTransitionWithFilename)
 
 	for _, stfWithFilename := range stfs {
-		stf := stfWithFilename.STF
-		// Create unique key from prestate and poststate roots
-		preStateRoot := stf.PreState.StateRoot.Hex()
-		postStateRoot := stf.PostState.StateRoot.Hex()
-		key := preStateRoot + "->" + postStateRoot
+		// Use shared deduplication key logic for consistency
+		key := fuzz.CreateSTFDeduplicationKey(stfWithFilename.STF)
 
 		// first one wins for dedup
 		if _, exists := seen[key]; !exists {
@@ -570,8 +594,6 @@ func main() {
 	log.SetFlags(0)
 	log.SetOutput(&customLogWriter{})
 
-	fmt.Printf("duna_bench - JAM Duna %s Sequential Benchmarker\n", fuzz.FUZZ_VERSION)
-
 	dir := "/tmp/importBlock"
 	enableRPC := false
 	useUnixSocket := true
@@ -579,6 +601,7 @@ func main() {
 	report_dir := "./reports"
 	max_transitions := 0
 	no_color := false
+	version := false
 
 	jConfig := types.ConfigJamBlocks{
 		HTTP:        "http://localhost:8088/",
@@ -595,7 +618,7 @@ func main() {
 	fReg := fuzz.NewFlagRegistry("duna_bench")
 	fReg.RegisterFlag("seed", nil, jConfig.Seed, "Seed for random number generation (as hex)", &jConfig.Seed)
 	fReg.RegisterFlag("network", "n", jConfig.Network, "JAM network size", &jConfig.Network)
-	fReg.RegisterFlag("verbose", "v", jConfig.Verbose, "Enable detailed logging", &jConfig.Verbose)
+	fReg.RegisterFlag("verbose", nil, jConfig.Verbose, "Enable detailed logging", &jConfig.Verbose)
 	fReg.RegisterFlag("statistics", nil, jConfig.Statistics, "Print statistics interval", &jConfig.Statistics)
 	fReg.RegisterFlag("dir", nil, dir, "Storage directory", &dir)
 	fReg.RegisterFlag("test-dir", nil, test_dir, "Test data directory", &test_dir)
@@ -605,7 +628,21 @@ func main() {
 	fReg.RegisterFlag("pvm-backend", nil, jConfig.PVMBackend, "PVM backend to use (Compiler or Interpreter)", &jConfig.PVMBackend)
 	fReg.RegisterFlag("max-transitions", nil, max_transitions, "Maximum number of transitions to benchmark (0 = all)", &max_transitions)
 	fReg.RegisterFlag("no-color", nil, no_color, "Disable terminal colors", &no_color)
+
+	fReg.RegisterFlag("version", "v", version, "Display version information", &version)
 	fReg.ProcessRegistry()
+
+	benchInfo := fuzz.PeerInfo{
+		Name:       "jam-duna-bench",
+		AppVersion: fuzz.ParseVersion(fuzz.APP_VERSION),
+		JamVersion: fuzz.ParseVersion(fuzz.JAM_VERSION),
+	}
+	benchInfo.SetASNSpecific()
+
+	fmt.Printf("Duna Bench Info:\b\n%s\n\n", benchInfo.Info())
+	if version {
+		return
+	}
 
 	fmt.Printf("Config: %v\n", jConfig)
 	fmt.Printf("Max transitions: %d (0 = all)\n", max_transitions)
@@ -615,12 +652,6 @@ func main() {
 	// Disable colors if requested
 	if no_color {
 		DisableColors()
-	}
-
-	benchInfo := fuzz.PeerInfo{
-		Name:       fmt.Sprintf("jam-duna-bench-%s", fuzz.FUZZ_VERSION),
-		AppVersion: fuzz.Version{Major: 0, Minor: 7, Patch: 0},
-		JamVersion: fuzz.Version{Major: 0, Minor: 7, Patch: 0},
 	}
 
 	fuzzer, err := fuzz.NewFuzzer(dir, report_dir, jConfig.Socket, benchInfo, jConfig.PVMBackend)
@@ -666,7 +697,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Handshake failed: %v", err)
 		} else {
-			log.Printf("Handshake successful: %v", peerInfo)
+			log.Printf("Handshake successful: %s", peerInfo.PrettyString(false))
 			fuzzer.SetTargetPeerInfo(*peerInfo)
 			stats.TargetPeerInfo = peerInfo
 		}
@@ -705,7 +736,11 @@ func main() {
 	log.Printf("Benchmark completed in %.2fs\n", totalBenchmarkTime.Seconds())
 	log.Printf("Final Results:\n%s\n", stats.DumpMetrics())
 
-	os.MkdirAll(report_dir, 0755)
+	testDirName := filepath.Base(test_dir)
+	reportSubDir := filepath.Join(report_dir, testDirName)
+	reportAllDir := filepath.Join(report_dir, "all")
+	os.MkdirAll(reportSubDir, 0755)
+	os.MkdirAll(reportAllDir, 0755)
 
 	timestamp := time.Now().Unix()
 
@@ -715,24 +750,37 @@ func main() {
 		targetName = getTargetNameForFile(stats.TargetPeerInfo.Name)
 	}
 
-	// Always generate both JSON and text reports
-
 	// Generate JSON report
 	jsonReport := stats.GenerateJSONReport(test_dir, totalBenchmarkTime)
 	jsonBytes, err := json.MarshalIndent(jsonReport, "", "  ")
 	if err != nil {
 		log.Printf("Error generating JSON report: %v", err)
 	} else {
-		jsonReportFile := filepath.Join(report_dir, fmt.Sprintf("bench_report_%s_%d.json", targetName, timestamp))
+		filename := fmt.Sprintf("report_%s_%s_%d.json", testDirName, targetName, timestamp)
+
+		jsonReportFile := filepath.Join(reportSubDir, filename)
 		if err := os.WriteFile(jsonReportFile, jsonBytes, 0644); err != nil {
 			log.Printf("Warning: Failed to write JSON report file: %v", err)
 		} else {
 			log.Printf("JSON benchmark report saved to: %s", jsonReportFile)
 		}
+
+		jsonReportAllFile := filepath.Join(reportAllDir, filename)
+		if err := os.WriteFile(jsonReportAllFile, jsonBytes, 0644); err != nil {
+			log.Printf("Warning: Failed to write JSON report file to all directory: %v", err)
+		}
 	}
 
 	// Generate text report
-	textReportFile := filepath.Join(report_dir, fmt.Sprintf("bench_report_%s_%d.txt", targetName, timestamp))
+	textFilename := fmt.Sprintf("report_%s_%s_%d.txt", testDirName, targetName, timestamp)
+
+	// Get target info for text report
+	var targetInfoText string
+	if stats.TargetPeerInfo != nil {
+		targetInfoText = fmt.Sprintf("Target Info:\n%s", stats.TargetPeerInfo.Info())
+	} else {
+		targetInfoText = "Target Info: Unknown"
+	}
 
 	reportContent := fmt.Sprintf(`Duna Bench Report
 Generated: %s
@@ -741,8 +789,10 @@ Test Directory: %s
 
 %s
 
+%s
+
 Per-Transition Results:
-`, time.Now().Format(time.RFC3339), totalBenchmarkTime, test_dir, stats.DumpMetrics())
+`, time.Now().Format(time.RFC3339), totalBenchmarkTime, test_dir, targetInfoText, stats.DumpMetrics())
 
 	for i, duration := range stats.TransitionTimes {
 		filename := "unknown"
@@ -752,9 +802,13 @@ Per-Transition Results:
 		reportContent += fmt.Sprintf("%s: %v\n", filename, duration)
 	}
 
+	textReportFile := filepath.Join(reportSubDir, textFilename)
 	if err := os.WriteFile(textReportFile, []byte(reportContent), 0644); err != nil {
 		log.Printf("Warning: Failed to write text report file: %v", err)
-	} else {
-		log.Printf("Text benchmark report saved to: %s", textReportFile)
+	}
+
+	textReportAllFile := filepath.Join(reportAllDir, textFilename)
+	if err := os.WriteFile(textReportAllFile, []byte(reportContent), 0644); err != nil {
+		log.Printf("Warning: Failed to write text report file to all directory: %v", err)
 	}
 }
