@@ -24,7 +24,7 @@ func ExecuteWorkPackageBundleV1(stateDB *statedb.StateDB, pvmBackend string, tim
 	}
 
 	// Execute authorization
-	vm_auth := statedb.NewVMFromCode(authindex, authcode, 0, 0, stateDB, pvmBackend)
+	vm_auth := statedb.NewVMFromCode(authindex, authcode, 0, 0, stateDB, pvmBackend, types.IsAuthorizedGasAllocation)
 	vm_auth.SetPVMContext(log.FirstGuarantorOrAuditor)
 	auth_result := vm_auth.ExecuteAuthorization(workPackage, workPackageCoreIndex)
 	auth_output := auth_result.Ok
@@ -53,7 +53,7 @@ func ExecuteWorkPackageBundleV1(stateDB *statedb.StateDB, pvmBackend string, tim
 		}
 
 		// Execute refine
-		vm := statedb.NewVMFromCode(serviceIndex, code, 0, 0, stateDB, pvmBackend)
+		vm := statedb.NewVMFromCode(serviceIndex, code, 0, 0, stateDB, pvmBackend, workItem.RefineGasLimit)
 		vm.Timeslot = timeslot
 		vm.SetCore(workPackageCoreIndex)
 		vm.SetPVMContext(log.FirstGuarantorOrAuditor)
@@ -221,7 +221,7 @@ func ExecuteWPAuthorization(stateDB *statedb.StateDB, pvmBackend string, workPac
 		return types.Result{}, nil, 0, common.Hash{}, fmt.Errorf("failed to get authorization code: %v", err)
 	}
 
-	vm_auth := statedb.NewVMFromCode(authindex, authcode, 0, 0, stateDB, pvmBackend)
+	vm_auth := statedb.NewVMFromCode(authindex, authcode, 0, 0, stateDB, pvmBackend, 0)
 	vm_auth.SetPVMContext(log.FirstGuarantorOrAuditor)
 	auth_result := vm_auth.ExecuteAuthorization(workPackage, workPackageCoreIndex)
 	auth_output := auth_result.Ok
@@ -252,7 +252,7 @@ func ExecuteWBRefinement(stateDB *statedb.StateDB, pvmBackend string, timeslot u
 		}
 
 		// Execute refine
-		vm := statedb.NewVMFromCode(serviceIndex, code, 0, 0, stateDB, pvmBackend)
+		vm := statedb.NewVMFromCode(serviceIndex, code, 0, 0, stateDB, pvmBackend, 0)
 		vm.Timeslot = timeslot
 		vm.SetCore(workPackageCoreIndex)
 		vm.SetPVMContext(log.FirstGuarantorOrAuditor)

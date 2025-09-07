@@ -188,8 +188,6 @@ func (vm *VM) hostFunction(host_fn int) (bool, error) {
 		return true, nil
 
 	case TRANSFER:
-		gas := vm.ReadRegister(9)
-		vm.SetGas(vm.GetGas() - int64(gas))
 		vm.hostTransfer()
 		return true, nil
 
@@ -260,7 +258,7 @@ func (vm *VM) hostFunction(host_fn int) (bool, error) {
 		return true, nil
 
 	default:
-		vm.SetGas(vm.GetGas() + g)
+
 		vm.terminated = true
 		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
@@ -1107,7 +1105,7 @@ func (vm *VM) hostInvoke() {
 	new_machine.logging = vm.logging
 	new_machine.IsChild = true
 	// Set gas for the new machine
-	new_machine.SetGas(int64(g))
+	//new_machine.SetGas(int64(g))
 	switch vm.Backend {
 	case BackendInterpreter:
 		new_machine.Execute()

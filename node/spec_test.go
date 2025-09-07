@@ -184,7 +184,7 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 
 	pvmStart := time.Now()
 
-	vm_auth := statedb.NewVMFromCode(authindex, authcode, 0, 0, s, statedb.BackendInterpreter)
+	vm_auth := statedb.NewVMFromCode(authindex, authcode, 0, 0, s, statedb.BackendInterpreter, types.IsAuthorizedGasAllocation)
 
 	r := vm_auth.ExecuteAuthorization(workPackage, 0)
 	p_u := workPackage.AuthorizationCodeHash
@@ -205,7 +205,7 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 			log.Crit(log.Node, "executeWorkPackageBundle: Code and CodeHash Mismatch")
 		}
 		// fmt.Printf("index %d, code len=%d\n", service_index, len(code))
-		vm := statedb.NewVMFromCode(service_index, code, 0, 0, s, statedb.BackendInterpreter)
+		vm := statedb.NewVMFromCode(service_index, code, 0, 0, s, statedb.BackendInterpreter, workItem.RefineGasLimit)
 		vm.Timeslot = s.JamState.SafroleState.Timeslot
 		vm.SetCore(0)
 

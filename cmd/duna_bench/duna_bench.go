@@ -14,7 +14,6 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/fuzz"
-	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -611,7 +610,7 @@ func main() {
 		InvalidRate: 0,
 		Statistics:  50,
 		Network:     "tiny",
-		PVMBackend:  pvm.BackendInterpreter,
+		PVMBackend:  statedb.BackendInterpreter,
 		Seed:        "0x44554E41",
 	}
 

@@ -349,7 +349,7 @@ func (s *StateDB) ParallelizedAccumulate(
 	for k := range freeAccumulation {
 		serviceMap[k] = struct{}{}
 	}
-	
+
 	services := make([]uint32, 0, len(serviceMap))
 	for service := range serviceMap {
 		services = append(services, service)
@@ -641,7 +641,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, workReports []types.W
 
 	//(B.8) start point
 	t0 = time.Now()
-	vm := NewVMFromCode(serviceID, code, 0, 0, sd, pvmBackend)
+	vm := NewVMFromCode(serviceID, code, 0, 0, sd, pvmBackend, g)
 	pvmContext := log.PvmValidating
 	if sd.Authoring == log.GeneralAuthoring {
 		pvmContext = log.PvmAuthoring
@@ -653,7 +653,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, workReports []types.W
 	vm.Timeslot = timeslot
 	t0 = time.Now()
 
-	r, _, x_s := vm.ExecuteAccumulate(timeslot, serviceID, g, operandElements, xContext, sd.JamState.SafroleState.Entropy[0])
+	r, _, x_s := vm.ExecuteAccumulate(timeslot, serviceID, operandElements, xContext, sd.JamState.SafroleState.Entropy[0])
 	benchRec.Add("ExecuteAccumulate", time.Since(t0))
 	exceptional = false
 	if r.Err == types.WORKDIGEST_OOG || r.Err == types.WORKDIGEST_PANIC {
@@ -713,13 +713,12 @@ func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, sel
 		return 0, uint(len(selectedTransfers)), nil
 	}
 
-	vm := NewVMFromCode(self_index, code, 0, 0, s, pvmBackend)
+	vm := NewVMFromCode(self_index, code, 0, 0, s, pvmBackend, gas)
 	pvmContext := log.PvmValidating
 	if s.Authoring == log.GeneralAuthoring {
 		pvmContext = log.PvmAuthoring
 	}
 	vm.SetPVMContext(pvmContext)
-	vm.SetGas(int64(gas))
 
 	var input_argument []byte
 	encode_time_slot, _ := types.Encode(time_slot)

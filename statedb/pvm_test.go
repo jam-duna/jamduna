@@ -56,22 +56,19 @@ func pvm_test_backend(tc TestCase, backend string) error {
 		rawCodeBytes[i] = byte(val)
 	}
 
-	pvm := NewVM(serviceAcct, rawCodeBytes, tc.InitialRegs, uint64(tc.InitialPC), 4096, hostENV, false, []byte{}, backend)
-	defer pvm.Destroy()
-
-	// Setup memory
-	for _, mem := range tc.InitialMemory {
-		pvm.WriteRAMBytes(mem.Address, mem.Data[:])
-	}
-
 	// setup Gas
 	var initialGas int64 = tc.InitialGas
 	if tc.InitialGas == 0 {
 		initialGas = 10000 // Default gas for tests
 	}
 
-	// Set gas in C VM
-	pvm.SetGas(initialGas)
+	pvm := NewVM(serviceAcct, rawCodeBytes, tc.InitialRegs, uint64(tc.InitialPC), 4096, hostENV, false, []byte{}, backend, uint64(initialGas))
+	defer pvm.Destroy()
+
+	// Setup memory
+	for _, mem := range tc.InitialMemory {
+		pvm.WriteRAMBytes(mem.Address, mem.Data[:])
+	}
 
 	pvm.EntryPoint = uint32(tc.InitialPC)
 	pvm.IsChild = false
@@ -164,7 +161,6 @@ func TestPVMAll(t *testing.T) {
 	// show the match rate
 	fmt.Printf("Match rate: %v/%v\n", count-total_mismatch, count)
 }
-
 
 // Helper function to compare two integer slices
 func equalIntSlices(a, b []uint64) bool {

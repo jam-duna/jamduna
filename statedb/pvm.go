@@ -15,7 +15,7 @@ import (
 // #cgo LDFLAGS: ${SRCDIR}/../pvm/lib/libpvm.a
 /*
 #include "pvm.h"
-extern pvm_host_result_t goInvokeHostFunction(pvm_vm_t* vm, int hostFuncID, void* userData);
+extern pvm_host_result_t goInvokeHostFunction(pvm_vm_t* vm, int hostFuncID);
 */
 import "C"
 
@@ -356,7 +356,8 @@ func Z_func(x uint32) uint32 {
 }
 
 // NewVM initializes a new VM with a given program
-func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC uint64, initialHeap uint64, hostENV types.HostEnv, jam_ready_blob bool, Metadata []byte, pvmBackend string) *VM {
+// NewVM initializes a new VM with a given program
+func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC uint64, initialHeap uint64, hostENV types.HostEnv, jam_ready_blob bool, Metadata []byte, pvmBackend string, initialGas uint64) *VM {
 
 	if len(pvmBackend) == 0 {
 		panic("pvmBackend cannot be empty")
@@ -408,14 +409,27 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 	if len(p.Code) == 0 {
 		panic("No code provided to NewVM")
 	}
-	// Create VM using FFI API
+	// Create VM using FFI API with integrated setup
+	var bitmaskPtr *C.uint8_t
+	var jumpTablePtr *C.uint32_t
+
+	if len(p.K) > 0 {
+		bitmaskPtr = (*C.uint8_t)(unsafe.Pointer(&p.K[0]))
+	}
+	if len(p.J) > 0 {
+		jumpTablePtr = (*C.uint32_t)(unsafe.Pointer(&p.J[0]))
+	}
+
 	vm.cVM = C.pvm_create(
 		C.uint32_t(vm.Service_index),
 		(*C.uint8_t)(unsafe.Pointer(&p.Code[0])),
 		C.size_t(len(p.Code)),
 		(*C.uint64_t)(unsafe.Pointer(&initialRegs[0])),
-		C.size_t(len(initialRegs)),
-		C.uint64_t(initialPC))
+		bitmaskPtr,
+		C.size_t(len(p.K)),
+		jumpTablePtr,
+		C.size_t(len(p.J)),
+		C.uint64_t(initialGas))
 
 	// o - read-only
 	ro_data_address := uint32(Z_Z)
@@ -426,17 +440,8 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		return nil
 	}
 
-	// Set bitmask and jump table using FFI API
-	C.pvm_set_bitmask(vm.cVM, (*C.uint8_t)(unsafe.Pointer(&p.K[0])), C.size_t(len(p.K)))
-	if len(p.J) > 0 {
-		C.pvm_set_jump_table(vm.cVM, (*C.uint32_t)(unsafe.Pointer(&p.J[0])), C.size_t(len(p.J)))
-	}
-
 	// Set host function callback
-	C.pvm_set_host_callback(vm.cVM, C.pvm_host_callback_t(C.goInvokeHostFunction), nil)
-
-	// Set initial gas to 0 (gas will be set later by specific execution methods)
-	C.pvm_set_gas(vm.cVM, C.uint64_t(0))
+	C.pvm_set_host_callback(vm.cVM, C.pvm_host_callback_t(C.goInvokeHostFunction))
 
 	// Set logging and tracing based on PvmLogging
 	if PvmLogging {
@@ -489,15 +494,14 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 	vm.VMs = nil
 	return vm
 }
-
-func NewVMFromCode(serviceIndex uint32, code []byte, i uint64, initialHeap uint64, hostENV types.HostEnv, pvmBackend string) *VM {
+func NewVMFromCode(serviceIndex uint32, code []byte, i uint64, initialHeap uint64, hostENV types.HostEnv, pvmBackend string, initialGas uint64) *VM {
 	// strip metadata
 	metadata, c := types.SplitMetadataAndCode(code)
-	return NewVM(serviceIndex, c, []uint64{}, i, initialHeap, hostENV, true, []byte(metadata), pvmBackend)
+	return NewVM(serviceIndex, c, []uint64{}, i, initialHeap, hostENV, true, []byte(metadata), pvmBackend, initialGas)
 }
 
 //export goInvokeHostFunction
-func goInvokeHostFunction(cvm *C.pvm_vm_t, hostFuncID C.int, userData unsafe.Pointer) C.pvm_host_result_t {
+func goInvokeHostFunction(cvm *C.pvm_vm_t, hostFuncID C.int) C.pvm_host_result_t {
 	// Look up the Go VM from our mapping
 	vm, ok := vmMap[cvm]
 	if !ok {
@@ -623,20 +627,6 @@ func (ram *VM) WriteRAMBytes(address uint32, data []byte) uint64 {
 	return uint64(C.pvm_write_ram_bytes(ram.cVM, C.uint32_t(address), (*C.uint8_t)(&data[0]), C.uint32_t(len(data))))
 }
 
-func (vm *VM) GetHeapPointer() uint32 {
-	return uint32(C.pvm_get_heap_pointer(vm.cVM))
-}
-
-func (vm *VM) SetHeapPointer(pointer uint32) {
-	C.pvm_set_heap_pointer(vm.cVM, C.uint32_t(pointer))
-}
-
-func (vm *VM) SetGas(gas int64) {
-	if vm.cVM != nil {
-		C.pvm_set_gas(vm.cVM, C.uint64_t(gas))
-	}
-}
-
 func (vm *VM) GetGas() int64 {
 	if vm.cVM != nil {
 		return int64(C.pvm_get_gas(vm.cVM))
@@ -696,8 +686,6 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	vm.WorkItemIndex = workitemIndex
 	vm.WorkPackage = workPackage
 
-	// Set gas for this execution
-	vm.SetGas(int64(workitem.RefineGasLimit))
 	vm.N = n
 	vm.Authorization = authorization.Ok
 	vm.Extrinsics = extrinsics
@@ -711,7 +699,7 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	return r, res, exportedSegments
 }
 
-func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.AccumulateOperandElements, X *types.XContext, n common.Hash) (r types.Result, res uint64, xs *types.ServiceAccount) {
+func (vm *VM) ExecuteAccumulate(t uint32, s uint32, elements []types.AccumulateOperandElements, X *types.XContext, n common.Hash) (r types.Result, res uint64, xs *types.ServiceAccount) {
 	vm.Mode = ModeAccumulate
 	vm.X = X //⎩I(u, s), I(u, s)⎫⎭
 	vm.Y = X.Clone()
@@ -724,9 +712,6 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, g uint64, elements []types.A
 	input_bytes = append(input_bytes, o_bytes...)
 	vm.AccumulateOperandElements = elements
 	vm.N = n
-
-	// Set gas for this execution
-	vm.SetGas(int64(g))
 
 	x_s, found := X.U.ServiceAccounts[s]
 	if !found {
@@ -759,8 +744,6 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Resul
 	// NOT 0.7.0 COMPLIANT
 	a, _ := types.Encode(uint8(c))
 
-	// Set gas for this execution
-	vm.SetGas(types.IsAuthorizedGasAllocation)
 	// fmt.Printf("ExecuteAuthorization - c=%d len(p_bytes)=%d len(c_bytes)=%d len(a)=%d a=%x WP=%s\n", c, len(p_bytes), len(c_bytes), len(a), a, p.String())
 	vm.executeWithBackend(a, types.EntryPointAuthorization)
 	r, _ = vm.getArgumentOutputs()

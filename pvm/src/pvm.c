@@ -4,14 +4,17 @@
 #include <stdio.h>
 #include <inttypes.h>
 
+
 // ===============================
-// VM Lifecycle
+// VM Lifecycle: pvm_create, pvm_set_memory_bounds, pvm_execute, pvm_destroy
 // ===============================
 
 pvm_vm_t* pvm_create(uint32_t service_index, 
                         const uint8_t* code, size_t code_len,
-                        const uint64_t* initial_regs, size_t num_regs,
-                        uint64_t initial_pc) {
+                        const uint64_t* initial_regs,
+                        const uint8_t* bitmask, size_t bitmask_len,
+                        const uint32_t* jump_table, size_t jump_table_len,
+                        uint64_t initial_gas) {
     if (!code || code_len == 0) {
         return NULL;
     }
@@ -26,7 +29,7 @@ pvm_vm_t* pvm_create(uint32_t service_index,
     vm->service_index = service_index;
     vm->code = (uint8_t*)code;  // Share pointer, don't copy
     vm->code_len = (uint32_t)code_len;
-    vm->pc = initial_pc;
+    vm->pc = 0;
     vm->core_index = 2048;
     vm->gas = 0;
     vm->terminated = 0;
@@ -36,14 +39,16 @@ pvm_vm_t* pvm_create(uint32_t service_index,
     vm->host_func_id = 0;
     vm->is_child = 0;
 
-    // Initialize registers
-    for (size_t i = 0; i < MIN(num_regs, REG_SIZE) && i < 13; i++) {
-        vm->registers[i] = initial_regs[i];
-    }
-
-    // Clear remaining registers
-    for (size_t i = num_regs; i < REG_SIZE; i++) {
-        vm->registers[i] = 0;
+    // Initialize registers (always 13 registers)
+    if (initial_regs) {
+        for (size_t i = 0; i < REG_SIZE; i++) {
+            vm->registers[i] = initial_regs[i];
+        }
+    } else {
+        // Clear all registers if no initial values provided
+        for (size_t i = 0; i < REG_SIZE; i++) {
+            vm->registers[i] = 0;
+        }
     }
 
     // Initialize memory pointers to NULL (will be set later)
@@ -56,18 +61,100 @@ pvm_vm_t* pvm_create(uint32_t service_index,
 
     // Initialize CGO integration fields for compatibility
     vm->initializing = 1;
-    vm->go_invoke_host_func = NULL;
-    vm->sync_registers_to_go = 0;
+    vm->ext_invoke_host_func = NULL;
 
     // Initialize FFI host callback fields
     vm->host_callback = NULL;
-    vm->user_data = NULL;
 
     // Initialize logging and tracing (disabled by default)
     vm->pvm_logging = 1;
     vm->pvm_tracing = 0;
 
+    // Setup bitmask, jump table, and gas internally
+    if (bitmask && bitmask_len > 0) {
+        vm->bitmask = (uint8_t*)bitmask;
+        vm->bitmask_len = (uint32_t)bitmask_len;
+    }
+    
+    if (jump_table && jump_table_len > 0) {
+        vm->j = (uint32_t*)jump_table;
+        vm->j_size = (uint32_t)jump_table_len;
+    }
+    
+    vm->gas = initial_gas;
+
     return vm;  // Return VM directly
+}
+
+void pvm_set_memory_bounds(pvm_vm_t* vm,
+                          uint32_t rw_addr, uint32_t rw_end,
+                          uint32_t ro_addr, uint32_t ro_end,
+                          uint32_t output_addr, uint32_t output_end,
+                          uint32_t stack_addr, uint32_t stack_end) {
+    if (!vm) return;
+    
+    if (vm->pvm_tracing) {
+        printf("pvm_set_memory_bounds: Setting memory bounds and allocating buffers\n");
+        printf("  RW: 0x%x - 0x%x\n", rw_addr, rw_end);
+        printf("  RO: 0x%x - 0x%x\n", ro_addr, ro_end);
+        printf("  Output: 0x%x - 0x%x\n", output_addr, output_end);
+        printf("  Stack: 0x%x - 0x%x\n", stack_addr, stack_end);
+    }
+    
+
+    vm->rw_data_address = rw_addr;
+    vm->rw_data_address_end = rw_end;
+    vm->ro_data_address = ro_addr;
+    vm->ro_data_address_end = ro_end;
+    vm->output_address = output_addr;
+    vm->output_end = output_end;
+    vm->stack_address = stack_addr;
+    vm->stack_address_end = stack_end;
+    
+    if (rw_end > rw_addr) {
+        uint32_t rw_size = rw_end - rw_addr;
+        if (vm->rw_data) {
+            free(vm->rw_data);
+        }
+        vm->rw_data = (uint8_t*)calloc(rw_size + 4*1024*1024, 1);
+        if (!vm->rw_data) {
+            printf("ERROR: Failed to allocate RW buffer of size %u\n", rw_size);
+            return;
+        }
+    }
+    
+    if (ro_end > ro_addr) {
+        uint32_t ro_size = ro_end - ro_addr;
+        if (vm->ro_data) {
+            free(vm->ro_data);
+        }
+        vm->ro_data = (uint8_t*)calloc(ro_size, 1);
+        if ( vm->pvm_tracing ) {
+            printf("  Allocated RO buffer: %u bytes at %p\n", ro_size, (void*)vm->ro_data);
+        }
+        
+    }
+    
+    if (output_end > output_addr) {
+        uint32_t output_size = output_end - output_addr;
+        if (vm->output) {
+            free(vm->output);
+        }
+        vm->output = (uint8_t*)calloc(output_size, 1);
+    }
+    
+    if (stack_end > stack_addr) {
+        uint32_t stack_size = stack_end - stack_addr;
+        if (vm->stack) {
+            free(vm->stack);
+        }
+        vm->stack = (uint8_t*)calloc(stack_size, 1);
+
+        if (vm->pvm_tracing) {
+            printf("  Allocated Stack buffer: %u bytes\n", stack_size);
+        }
+
+    }
 }
 
 pvm_result_t pvm_execute(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child) {
@@ -84,9 +171,7 @@ pvm_result_t pvm_execute(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child) 
     vm->is_child = is_child;
     vm->initializing = 0;
 
-    
     // VM initialized successfully
-    
     if (!vm->code || vm->code_len == 0 || !vm->bitmask || vm->bitmask_len == 0) {
         vm->result_code = WORKDIGEST_PANIC;
         vm->machine_state = PANIC;
@@ -170,157 +255,73 @@ pvm_result_t pvm_execute(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child) 
             pvm_panic(vm, WHAT);
             continue;
         }
-       // Performance: comment out per-instruction logging (most critical bottleneck)
-       
-        // DISABLED: This printf causes memory corruption due to excessive logging
-        // printf("%s %d %llu Gas: %lld Registers: [%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu]\n", 
-        //            get_opcode_name(opcode), step, (unsigned long long)vm->pc, (long long)vm->gas,
-        //            (unsigned long long)vm->registers[0], (unsigned long long)vm->registers[1], 
-        //            (unsigned long long)vm->registers[2], (unsigned long long)vm->registers[3],
-        //            (unsigned long long)vm->registers[4], (unsigned long long)vm->registers[5], 
-        //            (unsigned long long)vm->registers[6], (unsigned long long)vm->registers[7],
-        //            (unsigned long long)vm->registers[8], (unsigned long long)vm->registers[9], 
-        //            (unsigned long long)vm->registers[10], (unsigned long long)vm->registers[11],
-        //            (unsigned long long)vm->registers[12]);
-        // fflush(stdout);
-
+        if (vm->pvm_logging && 0) {
+            printf("%s %d %llu Gas: %lld Registers: [%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu]\n", 
+                    get_opcode_name(opcode), step, (unsigned long long)vm->pc, (long long)vm->gas,
+                    (unsigned long long)vm->registers[0], (unsigned long long)vm->registers[1], 
+                    (unsigned long long)vm->registers[2], (unsigned long long)vm->registers[3],
+                    (unsigned long long)vm->registers[4], (unsigned long long)vm->registers[5], 
+                    (unsigned long long)vm->registers[6], (unsigned long long)vm->registers[7],
+                    (unsigned long long)vm->registers[8], (unsigned long long)vm->registers[9], 
+                    (unsigned long long)vm->registers[10], (unsigned long long)vm->registers[11],
+                    (unsigned long long)vm->registers[12]);
+            fflush(stdout);
+        }
     }
     
     // Handle out-of-gas condition
     if (!vm->terminated && vm->gas <= 0) {
-        printf("OUT_OF_GAS: VM ran out of gas after %d steps, final gas=%lld, pc=0x%llx\n", 
+        if ( vm->pvm_tracing ) {
+            printf("OUT_OF_GAS: VM ran out of gas after %d steps, final gas=%lld, pc=0x%llx\n", 
                step, (long long)vm->gas, (unsigned long long)vm->pc);
-        fflush(stdout);
+            fflush(stdout);
+        }
         vm->result_code = WORKDIGEST_OOG;
         vm->machine_state = OOG;
         vm->terminated = 1;
     } else if (!vm->terminated) {
         vm->result_code = WORKDIGEST_OK;
     }
-    
-    // Performance: comment out VM_EXIT trace
-    // printf("TRACE VM_EXIT result_code=%d terminated=%d gas=%lld\n", 
-    //        vm->result_code, vm->terminated, (long long)vm->gas);
-    // fflush(stdout);
-    
+
+    if (vm->pvm_tracing) {
+        printf("TRACE VM_EXIT result_code=%d terminated=%d gas=%lld\n", 
+               vm->result_code, vm->terminated, (long long)vm->gas);
+        fflush(stdout);
+    }
+
     return 0;
 }
 
-// ===============================
-// Program Initialization
-// ===============================
 
-void pvm_set_bitmask(pvm_vm_t* vm, const uint8_t* bitmask, size_t len) {
-    if (!vm  || !bitmask) return;
-    
-    vm->bitmask = (uint8_t*)bitmask;
-    vm->bitmask_len = (uint32_t)len;
-}
-
-void pvm_set_jump_table(pvm_vm_t* vm, const uint32_t* table, size_t len) {
-    if (!vm  || !table) return;
-    
-    vm->j = (uint32_t*)table;
-    vm->j_size = (uint32_t)len;
-}
-
-void pvm_set_gas(pvm_vm_t* vm, uint64_t gas) {
-    if (!vm ) return;
-    
-    vm->gas = gas;
-}
-
-
-void pvm_set_memory_bounds(pvm_vm_t* vm,
-                          uint32_t rw_addr, uint32_t rw_end,
-                          uint32_t ro_addr, uint32_t ro_end,
-                          uint32_t output_addr, uint32_t output_end,
-                          uint32_t stack_addr, uint32_t stack_end) {
+// VM cleanup
+void pvm_destroy(pvm_vm_t* vm) {
     if (!vm) return;
     
-    if (vm->pvm_tracing) {
-        printf("pvm_set_memory_bounds: Setting memory bounds and allocating buffers\n");
-        printf("  RW: 0x%x - 0x%x\n", rw_addr, rw_end);
-        printf("  RO: 0x%x - 0x%x\n", ro_addr, ro_end);
-        printf("  Output: 0x%x - 0x%x\n", output_addr, output_end);
-        printf("  Stack: 0x%x - 0x%x\n", stack_addr, stack_end);
+    // Free allocated memory buffers
+    if (vm->rw_data) {
+        free(vm->rw_data);
     }
-    
-
-    vm->rw_data_address = rw_addr;
-    vm->rw_data_address_end = rw_end;
-    vm->ro_data_address = ro_addr;
-    vm->ro_data_address_end = ro_end;
-    vm->output_address = output_addr;
-    vm->output_end = output_end;
-    vm->stack_address = stack_addr;
-    vm->stack_address_end = stack_end;
-    
-    if (rw_end > rw_addr) {
-        uint32_t rw_size = rw_end - rw_addr;
-        if (vm->rw_data) {
-            free(vm->rw_data);
-        }
-        vm->rw_data = (uint8_t*)calloc(rw_size + 4*1024*1024, 1);
-        if (!vm->rw_data) {
-            printf("ERROR: Failed to allocate RW buffer of size %u\n", rw_size);
-            return;
-        }
+    if (vm->ro_data) {
+        free(vm->ro_data);
     }
-    
-    if (ro_end > ro_addr) {
-        uint32_t ro_size = ro_end - ro_addr;
-        if (vm->ro_data) {
-            free(vm->ro_data);
-        }
-        vm->ro_data = (uint8_t*)calloc(ro_size, 1);
-        if ( vm->pvm_tracing ) {
-            printf("  Allocated RO buffer: %u bytes at %p\n", ro_size, (void*)vm->ro_data);
-        }
-        
+    if (vm->output) {
+        free(vm->output);
     }
-    
-    if (output_end > output_addr) {
-        uint32_t output_size = output_end - output_addr;
-        if (vm->output) {
-            free(vm->output);
-        }
-        vm->output = (uint8_t*)calloc(output_size, 1);
+    if (vm->stack) {
+        free(vm->stack);
     }
+    // DO NOT FREE THESE: they are owned by the caller
+    // free(vm->code);
+    // free(vm->bitmask);
+    // free(vm->j);
     
-    if (stack_end > stack_addr) {
-        uint32_t stack_size = stack_end - stack_addr;
-        if (vm->stack) {
-            free(vm->stack);
-        }
-        vm->stack = (uint8_t*)calloc(stack_size, 1);
-
-        if (vm->pvm_tracing) {
-            printf("  Allocated Stack buffer: %u bytes\n", stack_size);
-        }
-
-    }
+    free(vm);
 }
+
 
 // ===============================
-// VM State Access
+// VM State Access: registers, result code, gas, machine state
 // ===============================
-
-uint64_t pvm_get_gas(pvm_vm_t* vm) {
-    if (!vm ) return 0;
-    return vm->gas;
-}
-
-uint64_t pvm_get_pc(pvm_vm_t* vm) {
-    if (!vm ) return 0;
-    return vm->pc;
-}
-
-uint8_t pvm_get_machine_state(pvm_vm_t* vm) {
-    if (!vm ) return 0;
-    return (uint8_t)vm->machine_state;
-}
-
 void pvm_set_register(pvm_vm_t* vm, int index, uint64_t value) {
     if (!vm  || index < 0 || index >= REG_SIZE) return;
     vm->registers[index] = value;
@@ -336,36 +337,46 @@ const uint64_t* pvm_get_registers(pvm_vm_t* vm) {
     return vm->registers;
 }
 
-uint32_t pvm_get_heap_pointer(pvm_vm_t* vm) {
-    if (!vm ) return 0;
-    return vm->current_heap_pointer;
+// Result codes
+int pvm_get_result_code(pvm_vm_t* vm) {
+    if (!vm ) return -1;
+    return vm->result_code;
 }
 
+int pvm_is_terminated(pvm_vm_t* vm) {
+    if (!vm ) return 1;
+    return vm->terminated;
+}
+
+uint64_t pvm_get_gas(pvm_vm_t* vm) {
+    if (!vm ) return 0;
+    return vm->gas;
+}
+
+uint8_t pvm_get_machine_state(pvm_vm_t* vm) {
+    if (!vm ) return 0;
+    return (uint8_t)vm->machine_state;
+}
+
+// Heap Management: we should be able to eliminate this method
 void pvm_set_heap_pointer(pvm_vm_t* vm, uint32_t pointer) {
     if (!vm ) return;
     vm->current_heap_pointer = pointer;
 }
 
-// ===============================
-// Memory Operations
-// ===============================
-
-uint32_t pvm_get_current_heap_pointer(pvm_vm_t* vm) {
-    if (!vm ) return 0;
-    return vm->current_heap_pointer;
-}
-
-void pvm_set_current_heap_pointer(pvm_vm_t* vm, uint32_t pointer) {
-    if (!vm ) return;
-    vm->current_heap_pointer = pointer;
-}
-
 void pvm_allocate_pages(pvm_vm_t* vm, uint32_t start_page, uint32_t page_count) {
-    // TODO: fix this function to properly manage memory allocation as the heap epxands
+    // TODO: fix this function to properly manage memory allocation as the heap expands
     uint32_t required = (start_page + page_count) * Z_P;
     if (vm->rw_data_address_end - vm->rw_data_address < required) {
         vm->rw_data_address_end = vm->rw_data_address + required;
     }
+}
+
+static inline uint32_t ceiling_divide(uint32_t a, uint32_t b) {
+    return (a + b - 1) / b;
+}
+uint32_t p_func(uint32_t x) {
+    return Z_P * ceiling_divide(x, Z_P);
 }
 
 static inline void put_uint16_le(uint8_t* buf, uint16_t val) {
@@ -434,14 +445,6 @@ uint64_t pvm_write_ram_bytes_8(pvm_vm_t* vm, uint32_t address, uint8_t data) {
         vm->stack[offset] = data;
         return OK;
     }
-
-    // RO data region (writes are OOB but we mimic prior behavior of copying then OOB)
-    if (address >= vm->ro_data_address && address < vm->ro_data_address_end) {
-        uint32_t offset = address - vm->ro_data_address;
-        vm->ro_data[offset] = data;
-        return OOB;
-    }
-
     return OOB;
 }
 
@@ -473,13 +476,6 @@ uint64_t pvm_write_ram_bytes_16(pvm_vm_t* vm, uint32_t address, uint16_t data) {
         return OK;
     }
 
-    // RO data region (writes are OOB but we mimic prior behavior of copying then OOB)
-    if (address >= vm->ro_data_address && address <= vm->ro_data_address_end - 2) {
-        uint32_t offset = address - vm->ro_data_address;
-        put_uint16_le(vm->ro_data + offset, data);
-        return OOB;
-    }
-
     return OOB;
 }
 uint64_t pvm_write_ram_bytes_32(pvm_vm_t* vm, uint32_t address, uint32_t data) {
@@ -509,14 +505,6 @@ uint64_t pvm_write_ram_bytes_32(pvm_vm_t* vm, uint32_t address, uint32_t data) {
         put_uint32_le(vm->stack + offset, data);
         return OK;
     }
-
-    // RO data region (writes are OOB but we mimic prior behavior of copying then OOB)
-    if (address >= vm->ro_data_address && address <= vm->ro_data_address_end - 4) {
-        uint32_t offset = address - vm->ro_data_address;
-        put_uint32_le(vm->ro_data + offset, data);
-        return OOB;
-    }
-
     return OOB;
 }
 
@@ -548,17 +536,8 @@ uint64_t pvm_write_ram_bytes_64(pvm_vm_t* vm, uint32_t address, uint64_t data) {
         put_uint64_le(vm->stack + offset, data);
         return OK;
     }
-
-    // RO data region (writes are OOB but we mimic prior behavior of copying then OOB)
-    if (address >= vm->ro_data_address && address <= vm->ro_data_address_end - 8) {
-        uint32_t offset = address - vm->ro_data_address;
-        put_uint64_le(vm->ro_data + offset, data);
-        return OOB;
-    }
-
     return OOB;
 }
-
 
 uint64_t pvm_write_ram_bytes(pvm_vm_t* vm, uint32_t address, const uint8_t* data, uint32_t length) {
     if (!vm  || !data) return OOB;
@@ -614,7 +593,7 @@ uint64_t pvm_write_ram_bytes(pvm_vm_t* vm, uint32_t address, const uint8_t* data
     }
 
     if (vm->pvm_tracing) {
-        printf("  Write failed: address 0x%x not in any memory region\n", address);
+        printf("Write failed: address 0x%x not in any memory region\n", address);
     }
     return OOB;
 }
@@ -775,6 +754,7 @@ uint64_t pvm_read_ram_bytes_64(pvm_vm_t* vm, uint32_t address, int* error_code) 
     *error_code = OOB;
     return 0;
 }
+
 uint64_t pvm_read_ram_bytes(pvm_vm_t* vm, uint32_t address, uint8_t* buffer, uint32_t length, int* error_code) {
     if (!vm  || !buffer) {
         if (error_code) *error_code = (int)OOB;
@@ -813,14 +793,13 @@ uint64_t pvm_read_ram_bytes(pvm_vm_t* vm, uint32_t address, uint8_t* buffer, uin
     return OOB;
 }
 
-
 // ===============================
 // Debug and Tracing
 // ===============================
 
 void pvm_set_logging(pvm_vm_t* vm, int enable) {
     if (!vm ) return;
-    vm->pvm_logging = 1; //enable ? 1 : 0;
+    vm->pvm_logging = enable ? 1 : 0;
 }
 
 void pvm_set_tracing(pvm_vm_t* vm, int enable) {
@@ -828,172 +807,6 @@ void pvm_set_tracing(pvm_vm_t* vm, int enable) {
     vm->pvm_tracing = enable ? 1 : 0;
 }
 
-int pvm_get_result_code(pvm_vm_t* vm) {
-    if (!vm ) return -1;
-    return vm->result_code;
-}
-
-int pvm_is_terminated(pvm_vm_t* vm) {
-    if (!vm ) return 1;
-    return vm->terminated;
-}
-
-
-
-// Get opcode name for logging
-const char* get_opcode_name(uint8_t opcode) {
-    switch (opcode) {
-        case 0: return "TRAP";
-        case 1: return "FALLTHROUGH";
-        case 10: return "ECALLI";
-        case 20: return "LOAD_IMM_64";
-        case 30: return "STORE_IMM_U8";
-        case 31: return "STORE_IMM_U16";
-        case 32: return "STORE_IMM_U32";
-        case 33: return "STORE_IMM_U64";
-        case 40: return "JUMP";
-        case 50: return "JUMP_IND";
-        case 51: return "LOAD_IMM";
-        case 52: return "LOAD_U8";
-        case 53: return "LOAD_I8";
-        case 54: return "LOAD_U16";
-        case 55: return "LOAD_I16";
-        case 56: return "LOAD_U32";
-        case 57: return "LOAD_I32";
-        case 58: return "LOAD_U64";
-        case 59: return "STORE_U8";
-        case 60: return "STORE_U16";
-        case 61: return "STORE_U32";
-        case 62: return "STORE_U64";
-        case 70: return "STORE_IMM_IND_U8";
-        case 71: return "STORE_IMM_IND_U16";
-        case 72: return "STORE_IMM_IND_U32";
-        case 73: return "STORE_IMM_IND_U64";
-        case 80: return "LOAD_IMM_JUMP";
-        case 81: return "BRANCH_EQ_IMM";
-        case 82: return "BRANCH_NE_IMM";
-        case 83: return "BRANCH_LT_U_IMM";
-        case 84: return "BRANCH_LE_U_IMM";
-        case 85: return "BRANCH_GE_U_IMM";
-        case 86: return "BRANCH_GT_U_IMM";
-        case 87: return "BRANCH_LT_S_IMM";
-        case 88: return "BRANCH_LE_S_IMM";
-        case 89: return "BRANCH_GE_S_IMM";
-        case 90: return "BRANCH_GT_S_IMM";
-        case 100: return "MOVE_REG";
-        case 101: return "SBRK";
-        case 102: return "COUNT_SET_BITS_64";
-        case 103: return "COUNT_SET_BITS_32";
-        case 104: return "LEADING_ZERO_BITS_64";
-        case 105: return "LEADING_ZERO_BITS_32";
-        case 106: return "TRAILING_ZERO_BITS_64";
-        case 107: return "TRAILING_ZERO_BITS_32";
-        case 108: return "SIGN_EXTEND_8";
-        case 109: return "SIGN_EXTEND_16";
-        case 110: return "ZERO_EXTEND_16";
-        case 111: return "REVERSE_BYTES";
-        case 120: return "STORE_IND_U8";
-        case 121: return "STORE_IND_U16";
-        case 122: return "STORE_IND_U32";
-        case 123: return "STORE_IND_U64";
-        case 124: return "LOAD_IND_U8";
-        case 125: return "LOAD_IND_I8";
-        case 126: return "LOAD_IND_U16";
-        case 127: return "LOAD_IND_I16";
-        case 128: return "LOAD_IND_U32";
-        case 129: return "LOAD_IND_I32";
-        case 130: return "LOAD_IND_U64";
-        case 131: return "ADD_IMM_32";
-        case 132: return "AND_IMM";
-        case 133: return "XOR_IMM";
-        case 134: return "OR_IMM";
-        case 135: return "MUL_IMM_32";
-        case 136: return "SET_LT_U_IMM";
-        case 137: return "SET_LT_S_IMM";
-        case 138: return "SHLO_L_IMM_32";
-        case 139: return "SHLO_R_IMM_32";
-        case 140: return "SHAR_R_IMM_32";
-        case 141: return "NEG_ADD_IMM_32";
-        case 142: return "SET_GT_U_IMM";
-        case 143: return "SET_GT_S_IMM";
-        case 144: return "SHLO_L_IMM_ALT_32";
-        case 145: return "SHLO_R_IMM_ALT_32";
-        case 146: return "SHAR_R_IMM_ALT_32";
-        case 147: return "CMOV_IZ_IMM";
-        case 148: return "CMOV_NZ_IMM";
-        case 149: return "ADD_IMM_64";
-        case 150: return "MUL_IMM_64";
-        case 151: return "SHLO_L_IMM_64";
-        case 152: return "SHLO_R_IMM_64";
-        case 153: return "SHAR_R_IMM_64";
-        case 154: return "NEG_ADD_IMM_64";
-        case 155: return "SHLO_L_IMM_ALT_64";
-        case 156: return "SHLO_R_IMM_ALT_64";
-        case 157: return "SHAR_R_IMM_ALT_64";
-        case 158: return "ROT_R_64_IMM";
-        case 159: return "ROT_R_64_IMM_ALT";
-        case 160: return "ROT_R_32_IMM";
-        case 161: return "ROT_R_32_IMM_ALT";
-        case 170: return "BRANCH_EQ";
-        case 171: return "BRANCH_NE";
-        case 172: return "BRANCH_LT_U";
-        case 173: return "BRANCH_LT_S";
-        case 174: return "BRANCH_GE_U";
-        case 175: return "BRANCH_GE_S";
-        case 180: return "LOAD_IMM_JUMP_IND";
-        case 190: return "ADD_32";
-        case 191: return "SUB_32";
-        case 192: return "MUL_32";
-        case 193: return "DIV_U_32";
-        case 194: return "DIV_S_32";
-        case 195: return "REM_U_32";
-        case 196: return "REM_S_32";
-        case 197: return "SHLO_L_32";
-        case 198: return "SHLO_R_32";
-        case 199: return "SHAR_R_32";
-        case 200: return "ADD_64";
-        case 201: return "SUB_64";
-        case 202: return "MUL_64";
-        case 203: return "DIV_U_64";
-        case 204: return "DIV_S_64";
-        case 205: return "REM_U_64";
-        case 206: return "REM_S_64";
-        case 207: return "SHLO_L_64";
-        case 208: return "SHLO_R_64";
-        case 209: return "SHAR_R_64";
-        case 210: return "AND";
-        case 211: return "XOR";
-        case 212: return "OR";
-        case 213: return "MUL_UPPER_S_S";
-        case 214: return "MUL_UPPER_U_U";
-        case 215: return "MUL_UPPER_S_U";
-        case 216: return "SET_LT_U";
-        case 217: return "SET_LT_S";
-        case 218: return "CMOV_IZ";
-        case 219: return "CMOV_NZ";
-        case 220: return "ROT_L_64";
-        case 221: return "ROT_L_32";
-        case 222: return "ROT_R_64";
-        case 223: return "ROT_R_32";
-        case 224: return "AND_INV";
-        case 225: return "OR_INV";
-        case 226: return "XNOR";
-        case 227: return "MAX_";
-        case 228: return "MAX_U";
-        case 229: return "MIN_";
-        case 230: return "MIN_U";
-        default: return "UNKNOWN";
-    }
-}
-
-// Utility functions
-static inline uint32_t ceiling_divide(uint32_t a, uint32_t b) {
-    return (a + b - 1) / b;
-}
-
-uint32_t p_func(uint32_t x) {
-    return Z_P * ceiling_divide(x, Z_P);
-}
 
 // VM panic function
 void pvm_panic(VM* vm, uint64_t err_code) {
@@ -1003,75 +816,13 @@ void pvm_panic(VM* vm, uint64_t err_code) {
     vm->fault_address = (uint32_t)err_code;
 }
 
-// Dynamic jump function
-void pvm_djump(VM* vm, uint64_t a) {
-    if (a == (uint64_t)((1ULL << 32) - (1ULL << 16))) {
-        vm->terminated = 1;
-        vm->result_code = WORKDIGEST_OK;
-    } else if (a == 0 || a > (uint64_t)(vm->j_size * Z_A) || a % Z_A != 0) {
-        vm->terminated = 1;
-        vm->result_code = WORKDIGEST_PANIC;
-        vm->machine_state = PANIC;
-    } else {
-        vm->pc = (uint64_t)vm->j[(a / Z_A) - 1];
-    }
-}
-
-// Branch function
-void pvm_branch(VM* vm, uint64_t vx, int condition) {
-    if (condition) {
-        vm->pc = vx;
-    } else {
-        vm->result_code = WORKDIGEST_PANIC;
-        vm->machine_state = PANIC;
-        vm->terminated = 1;
-    }
-}
-
-
-int pvm_charge_gas(pvm_vm_t* vm, int host_func_id) {
-    (void)vm; // Suppress unused parameter warning
-    const int LOG_HOST_FN = 100;
-    if (host_func_id == LOG_HOST_FN) {
-        return 0;
-    }
-    return 10;
-}
-
-// VM cleanup
-
-void pvm_destroy(pvm_vm_t* vm) {
-    if (!vm) return;
-    
-    // Free allocated memory buffers
-    if (vm->rw_data) {
-        free(vm->rw_data);
-    }
-    if (vm->ro_data) {
-        free(vm->ro_data);
-    }
-    if (vm->output) {
-        free(vm->output);
-    }
-    if (vm->stack) {
-        free(vm->stack);
-    }
-    // free(vm->code);
-    // free(vm->bitmask);
-    // free(vm->j);
-    // free(vm->o_byte);
-    // free(vm->w_byte);
-    
-    free(vm);
-}
-
 // ===============================
 // Host Function Callbacks
 // ===============================
 
-// Internal callback wrapper that translates from internal VM callback to FFI callback
+// Maps internal VM callback to FFI callback
 void internal_host_callback_wrapper(VM* internal_vm, int host_func_id) {
-    if (!internal_vm || !internal_vm->go_invoke_host_func) return;
+    if (!internal_vm || !internal_vm->ext_invoke_host_func) return;
     
     // Find the FFI VM that owns this internal VM
     // Note: This is a simplified approach. In practice, you'd want a proper registry.
@@ -1079,7 +830,7 @@ void internal_host_callback_wrapper(VM* internal_vm, int host_func_id) {
 
     if (ext_vm && ext_vm->host_callback) {
         pvm_host_callback_t callback = (pvm_host_callback_t)ext_vm->host_callback;
-        pvm_host_result_t result = callback(ext_vm, host_func_id, ext_vm->user_data);
+        pvm_host_result_t result = callback(ext_vm, host_func_id);
 
         // Handle callback result
         switch (result) {
@@ -1100,20 +851,16 @@ void internal_host_callback_wrapper(VM* internal_vm, int host_func_id) {
     }
 }
 
-
-void pvm_set_host_callback(pvm_vm_t* vm, pvm_host_callback_t callback, void* user_data) {
+void pvm_set_host_callback(pvm_vm_t* vm, pvm_host_callback_t callback) {
     if (!vm ) return;
-    
     vm->host_callback = (void*)callback;
-    vm->user_data = user_data;
-    
     if (callback) {
         // Set up the internal callback wrapper
-        vm->go_invoke_host_func = internal_host_callback_wrapper;
-        // Hack: store FFI VM pointer in ext_vm for callback lookup
+        vm->ext_invoke_host_func = internal_host_callback_wrapper;
+        // Store FFI VM pointer in ext_vm for callback lookup
         vm->ext_vm = (uint8_t*)vm;
     } else {
-        vm->go_invoke_host_func = NULL;
+        vm->ext_invoke_host_func = NULL;
         vm->ext_vm = NULL;
     }
 }

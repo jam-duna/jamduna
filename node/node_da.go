@@ -300,7 +300,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 
 	pvmStart := time.Now()
 
-	vm_auth := statedb.NewVMFromCode(authindex, authcode, 0, 0, targetStateDB, pvmBackend)
+	vm_auth := statedb.NewVMFromCode(authindex, authcode, 0, 0, targetStateDB, pvmBackend, types.IsAuthorizedGasAllocation)
 
 	r := vm_auth.ExecuteAuthorization(workPackage, workPackageCoreIndex)
 	p_u := workPackage.AuthorizationCodeHash
@@ -320,7 +320,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 			log.Crit(log.Node, "executeWorkPackageBundle: Code and CodeHash Mismatch")
 		}
 		// fmt.Printf("index %d, code len=%d\n", service_index, len(code))
-		vm := statedb.NewVMFromCode(service_index, code, 0, 0, targetStateDB, pvmBackend)
+		vm := statedb.NewVMFromCode(service_index, code, 0, 0, targetStateDB, pvmBackend, workItem.RefineGasLimit)
 		vm.Timeslot = n.statedb.JamState.SafroleState.Timeslot
 		vm.SetCore(workPackageCoreIndex)
 
