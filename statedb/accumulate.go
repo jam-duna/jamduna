@@ -10,7 +10,6 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -340,17 +339,21 @@ func (s *StateDB) ParallelizedAccumulate(
 
 	GasUsage = make([]Usage, 0, 64)
 
-	// Build the service set: s = {rs S w ∈ w, r ∈ wr} ∪ K(f )
-	services := make([]uint32, 0, 64)
+	// Build the service set: s = {rs S w ∈ w, r ∈ wr} ∪ K(f ) - optimized with map
+	serviceMap := make(map[uint32]struct{}, 64)
 	for _, wr := range workReports {
 		for _, digest := range wr.Results {
-			services = append(services, digest.ServiceID)
+			serviceMap[digest.ServiceID] = struct{}{}
 		}
 	}
 	for k := range freeAccumulation {
-		services = append(services, k)
+		serviceMap[k] = struct{}{}
 	}
-	services = UniqueUint32Slice(services)
+	
+	services := make([]uint32, 0, len(serviceMap))
+	for service := range serviceMap {
+		services = append(services, service)
+	}
 	if len(services) == 0 {
 		return 0, nil, nil, nil
 	}
@@ -638,7 +641,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, workReports []types.W
 
 	//(B.8) start point
 	t0 = time.Now()
-	vm := pvm.NewVMFromCode(serviceID, code, 0, sd, pvmBackend)
+	vm := NewVMFromCode(serviceID, code, 0, 0, sd, pvmBackend)
 	pvmContext := log.PvmValidating
 	if sd.Authoring == log.GeneralAuthoring {
 		pvmContext = log.PvmAuthoring
@@ -656,7 +659,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, workReports []types.W
 	if r.Err == types.WORKDIGEST_OOG || r.Err == types.WORKDIGEST_PANIC {
 		exceptional = true
 		accumulation_output = vm.Y.Yield
-		gasUsed = g - uint64(max(vm.Gas, 0))
+		gasUsed = g - uint64(max(vm.GetGas(), 0))
 		xy = &(vm.Y)
 
 		if r.Err == types.WORKDIGEST_OOG {
@@ -667,7 +670,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, workReports []types.W
 		return
 	}
 	xy = vm.X
-	gasUsed = g - uint64(max(vm.Gas, 0))
+	gasUsed = g - uint64(max(vm.GetGas(), 0))
 	res := ""
 	if len(r.Ok) == 32 {
 		accumulation_output = common.BytesToHash(r.Ok)
@@ -710,13 +713,13 @@ func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, sel
 		return 0, uint(len(selectedTransfers)), nil
 	}
 
-	vm := pvm.NewVMFromCode(self_index, code, 0, s, pvmBackend)
+	vm := NewVMFromCode(self_index, code, 0, 0, s, pvmBackend)
 	pvmContext := log.PvmValidating
 	if s.Authoring == log.GeneralAuthoring {
 		pvmContext = log.PvmAuthoring
 	}
 	vm.SetPVMContext(pvmContext)
-	vm.Gas = int64(gas)
+	vm.SetGas(int64(gas))
 
 	var input_argument []byte
 	encode_time_slot, _ := types.Encode(time_slot)
@@ -727,7 +730,7 @@ func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, sel
 	input_argument = append(input_argument, encodeService_index...)
 	input_argument = append(input_argument, encodeSelectedTransfers...)
 	vm.ExecuteTransfer(input_argument, self)
-	gasUsed = int64(gas) - vm.Gas
+	gasUsed = int64(gas) - vm.GetGas()
 	return gasUsed, uint(len(selectedTransfers)), nil
 }
 

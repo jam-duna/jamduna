@@ -719,7 +719,7 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		/*
 			Following flds are not copied over..?
 
-			VMs       map[uint32]*pvm.VM
+			VMs       map[uint32]*VM
 			vmMutex   sync.Mutex
 			X 		  XContext
 			S 		  uint32

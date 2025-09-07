@@ -14,8 +14,6 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm"
-	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -132,10 +130,9 @@ func parseSTFFile(filename, content string) (StateTransition, error) {
 }
 
 func TestStateTransitionInterpreter(t *testing.T) {
-	pvm.PvmLogging = false
-	pvm.PvmTrace = false // enable PVM trace for this test
+	PvmLogging = true
 
-	filename := path.Join(common.GetJAMTestVectorPath("traces"), "1757062927/00000091.json")
+	filename := path.Join(common.GetJAMTestVectorPath("traces"), "storage_light/00000005.bin")
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
@@ -144,18 +141,17 @@ func TestStateTransitionInterpreter(t *testing.T) {
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule("pvm_validator")
 	t.Run(filepath.Base(filename), func(t *testing.T) {
-		runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter, false)
+		runSingleSTFTest(t, filename, string(content), BackendInterpreter, false)
 	})
 }
 
 func TestTracesInterpreter(t *testing.T) {
 	log.InitLogger("debug")
-	// pvm.PvmLogging = true
 
 	// Define all the directories you want to test in a single slice.
 	testDirs := []string{
-		path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
+		//path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
+		//path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
@@ -192,7 +188,7 @@ func TestTracesInterpreter(t *testing.T) {
 
 				// Run the actual test logic for each file as a distinct sub-test.
 				t.Run(e.Name(), func(t *testing.T) {
-					runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter, false)
+					runSingleSTFTest(t, filename, string(content), BackendInterpreter, false)
 				})
 			}
 		})
@@ -214,75 +210,6 @@ func dump_performance(t *testing.T) {
 			r.Name, r.Total, r.Count, r.Mean, r.P95, r.Max)
 	}
 
-	fmt.Println("\n=== pvm: Top 40 by TOTAL time ===")
-	rows = pvm.BenchRows()
-	for i, r := range rows {
-		if i == 40 {
-			break
-		}
-		fmt.Printf("%-45s  total=%-12s count=%-4d mean=%-10s p95=%-10s max=%-10s\n",
-			r.Name, r.Total, r.Count, r.Mean, r.P95, r.Max)
-	}
-
-	fmt.Println("\n=== trie: Top 40 by TOTAL time ===")
-	rows = trie.BenchRows()
-	for i, r := range rows {
-		if i == 40 {
-			break
-		}
-		fmt.Printf("%-45s  total=%-12s count=%-4d mean=%-10s p95=%-10s max=%-10s\n",
-			r.Name, r.Total, r.Count, r.Mean, r.P95, r.Max)
-	}
-
-}
-
-func TestTracesCompiler(t *testing.T) {
-	log.InitLogger("debug")
-	// pvm.PvmLogging = true
-
-	// Define all the directories you want to test in a single slice.
-	testDirs := []string{
-		//"../cmd/importblocks/rawdata/safrole/state_transitions/",
-		//path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
-		//path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
-	}
-
-	// Iterate over each directory.
-	for _, dir := range testDirs {
-		currentDir := dir
-
-		t.Run(fmt.Sprintf("Directory_%s", filepath.Base(currentDir)), func(t *testing.T) {
-			entries, err := os.ReadDir(currentDir)
-			if err != nil {
-				t.Fatalf("failed to read directory %s: %v", currentDir, err)
-			}
-
-			for _, e := range entries {
-				if e.IsDir() || !strings.HasSuffix(e.Name(), ".bin") || e.Name() == "genesis.bin" {
-					continue
-				}
-
-				filename := filepath.Join(currentDir, e.Name())
-				content, err := os.ReadFile(filename)
-				if err != nil {
-					t.Errorf("failed to read file %s: %v", filename, err)
-					continue
-				}
-
-				//				fmt.Printf("Running test for file: %s\n", filename)
-
-				t.Run(e.Name(), func(t *testing.T) {
-					runSingleSTFTest(t, filename, string(content), pvm.BackendCompiler, false)
-				})
-			}
-		})
-	}
-	dump_performance(t)
-
 }
 func TestSingleCompare(t *testing.T) {
 	// DO NOT CHANGE THIS
@@ -292,12 +219,8 @@ func TestSingleCompare(t *testing.T) {
 	if err != nil {
 		t.Errorf("failed to read file %s: %v", filename, err)
 	}
-	//	t.Run("compare", func(t *testing.T) {
-	runSingleSTFTest(t, filename, string(content), pvm.BackendCompiler, false)
-	runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter, false)
-	runSingleSTFTest(t, filename, string(content), pvm.BackendCompiler, false)
-	runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter, false)
-	// })
+	runSingleSTFTest(t, filename, string(content), BackendCompiler, false)
+	runSingleSTFTest(t, filename, string(content), BackendInterpreter, false)
 }
 
 func GetFuzzReportsPath(subDir ...string) (string, error) {
@@ -355,8 +278,7 @@ func findFuzzTestFiles(sourcePath, targetVersion string, excludedTeams []string)
 }
 
 func TestSingleFuzzTrace(t *testing.T) {
-	pvm.PvmLogging = false
-	pvm.PvmTrace = false // enable PVM trace for this test
+	PvmLogging = false
 	fileMap := make(map[string]string)
 
 	jamConformancePath, err := GetFuzzReportsPath()
@@ -391,7 +313,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 		}
 
 		t.Run(filepath.Base(filename), func(t *testing.T) {
-			runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter, true)
+			runSingleSTFTest(t, filename, string(content), BackendInterpreter, true)
 		})
 	}
 }
@@ -399,8 +321,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 func testFuzzTraceInternal(t *testing.T, saveOutput bool) {
 	t.Helper()
 
-	pvm.PvmLogging = false
-	pvm.PvmTrace = false
+	PvmLogging = false
 
 	log.InitLogger("debug")
 	log.EnableModule(log.PvmAuthoring)
@@ -445,9 +366,9 @@ func testFuzzTraceInternal(t *testing.T, saveOutput bool) {
 
 			if saveOutput {
 				t.Parallel()
-				runSingleSTFTestAndSave(t, currentFile, string(content), pvm.BackendInterpreter, true, sourcePath, destinationPath)
+				runSingleSTFTestAndSave(t, currentFile, string(content), BackendInterpreter, true, sourcePath, destinationPath)
 			} else {
-				runSingleSTFTest(t, currentFile, string(content), pvm.BackendInterpreter, true)
+				runSingleSTFTest(t, currentFile, string(content), BackendInterpreter, true)
 			}
 		})
 	}

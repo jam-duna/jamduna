@@ -11,7 +11,6 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/jamerrors"
-	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
@@ -140,7 +139,7 @@ func NewRand(seed []byte) *rand.Rand {
 
 func StartFuzzingProducerWithOptions(fuzzer *Fuzzer, output chan<- StateTransitionQA, baseSTFs []*statedb.StateTransition, invalidRate float64, numBlocks int, disableShuffling bool) {
 	defer close(output)
-	
+
 	// Sort baseSTFs by block slot if shuffling is disabled
 	if disableShuffling {
 		sort.Slice(baseSTFs, func(i, j int) bool {
@@ -148,7 +147,7 @@ func StartFuzzingProducerWithOptions(fuzzer *Fuzzer, output chan<- StateTransiti
 		})
 		log.Printf("FUZZER: Shuffling disabled - sorted %d STFs by block slot", len(baseSTFs))
 	}
-	
+
 	modes := []string{"safrole", "assurances"}
 	finalSTFs, err := fuzzer.FuzzWithTargetedInvalidRateWithOptions(modes, baseSTFs, invalidRate, numBlocks, disableShuffling)
 	if err != nil {
@@ -720,7 +719,7 @@ func selectAllImportBlocksErrors(seed []byte, store *storage.StateDBStorage, mod
 			}
 
 			// TODO: need ancestorSet
-			stfErrActual := statedb.CheckStateTransition(store, &stfMutated, nil, pvm.BackendInterpreter)
+			stfErrActual := statedb.CheckStateTransition(store, &stfMutated, nil, statedb.BackendInterpreter)
 			if stfErrActual == stfErrExpected || true {
 				errorList = append(errorList, stfErrExpected)
 				mutatedSTFs = append(mutatedSTFs, stfMutated)

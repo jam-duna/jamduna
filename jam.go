@@ -15,7 +15,6 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/node"
-	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/spf13/cobra"
@@ -159,7 +158,7 @@ func main() {
 		Run: func(cmd *cobra.Command, args []string) {
 			stfFile := args[0]
 			outputFile := "poststate.json"
-			pvm.PvmLogging = true
+			statedb.PvmLogging = true
 			log.InitLogger("debug")
 			log.EnableModule(log.PvmAuthoring)
 			log.EnableModule(log.PvmValidating)
@@ -281,7 +280,7 @@ func main() {
 			// Run the JAM DUNA node
 			now := time.Now()
 			loc := now.Location()
-			pvm.PvmLogging = false
+			statedb.PvmLogging = false
 			log.InitLogger(logLevel)
 
 			log.EnableModule(log.PvmAuthoring)
@@ -403,10 +402,10 @@ func main() {
 	runCmd.Flags().StringVar(&chainSpec, chainSpecFlag, "chainspec.json", `Chain to run. "polkadot", "dev", or the path of a chain spec file`)
 
 	desc := flagDescription("The PVM backend to use", map[string]string{
-		pvm.BackendInterpreter: "Use a PVM interpreter. Slow, but works everywhere",
-		pvm.BackendCompiler:    "Use a PVM compiler. Fast, but is Linux-only",
+		statedb.BackendInterpreter: "Use a PVM interpreter. Slow, but works everywhere",
+		statedb.BackendCompiler:    "Use a PVM compiler. Fast, but is Linux-only",
 	})
-	runCmd.Flags().StringVar(&pvmBackend, pvmBackendFlag, pvm.BackendInterpreter, desc)
+	runCmd.Flags().StringVar(&pvmBackend, pvmBackendFlag, statedb.BackendInterpreter, desc)
 	runCmd.Flags().IntVar(&peerID, peerIDFlag, 0, "Peer ID of this node. If not specified, a new peer ID will be generated. The corresponding secret key will not be persisted.")
 	runCmd.Flags().StringVar(&externalIP, externalIPFlag, "", "External IP of this node, as used by other nodes to connect. If not specified, this will be guessed.")
 	runCmd.Flags().StringVar(&listenIP, listenIPFlag, "", "IP address to listen on. `::` (the default) means all addresses. [default: ::]")

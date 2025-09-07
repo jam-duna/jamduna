@@ -11,7 +11,6 @@ import (
 	"github.com/colorfulnotion/jam/chainspecs"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
@@ -182,12 +181,11 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 	if err != nil {
 		return
 	}
-	pvmContext := log.FirstGuarantorOrAuditor
 
 	pvmStart := time.Now()
 
-	vm_auth := pvm.NewVMFromCode(authindex, authcode, 0, s, pvm.BackendInterpreter)
-	vm_auth.SetPVMContext(pvmContext)
+	vm_auth := statedb.NewVMFromCode(authindex, authcode, 0, 0, s, statedb.BackendInterpreter)
+
 	r := vm_auth.ExecuteAuthorization(workPackage, 0)
 	p_u := workPackage.AuthorizationCodeHash
 	p_p := workPackage.ConfigurationBlob
@@ -207,10 +205,10 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 			log.Crit(log.Node, "executeWorkPackageBundle: Code and CodeHash Mismatch")
 		}
 		// fmt.Printf("index %d, code len=%d\n", service_index, len(code))
-		vm := pvm.NewVMFromCode(service_index, code, 0, s, pvm.BackendInterpreter)
+		vm := statedb.NewVMFromCode(service_index, code, 0, 0, s, statedb.BackendInterpreter)
 		vm.Timeslot = s.JamState.SafroleState.Timeslot
 		vm.SetCore(0)
-		vm.SetPVMContext(pvmContext)
+
 		output, _, exported_segments := vm.ExecuteRefine(uint32(index), workPackage, r, make([][][]byte, 0), workItem.ExportCount, types.ExtrinsicsBlobs{}, p_a, common.Hash{})
 
 		expectedSegmentCnt := int(workItem.ExportCount)
@@ -233,7 +231,7 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 			CodeHash:            workItem.CodeHash,
 			PayloadHash:         common.Blake2Hash(workItem.Payload),
 			Gas:                 workItem.AccumulateGasLimit, // put a
-			GasUsed:             uint(workItem.RefineGasLimit - uint64(vm.Gas)),
+			GasUsed:             uint(workItem.RefineGasLimit - uint64(vm.GetGas())),
 			NumImportedSegments: uint(len(workItem.ImportedSegments)),
 			NumExportedSegments: uint(expectedSegmentCnt),
 			NumExtrinsics:       0,

@@ -13,7 +13,6 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/node"
-	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
@@ -225,7 +224,7 @@ func MakeDisputes(store *storage.StateDBStorage, stf *statedb.StateTransition, v
 		return false, err, nil
 	}
 	dispute_block = dispute_prestate.Block.Copy()
-	dispute_poststate, err := statedb.ApplyStateTransitionFromBlock(dispute_prestate, context.Background(), dispute_block, nil, pvm.BackendInterpreter)
+	dispute_poststate, err := statedb.ApplyStateTransitionFromBlock(dispute_prestate, context.Background(), dispute_block, nil, statedb.BackendInterpreter)
 	if err != nil {
 		fmt.Println(dispute_block.String())
 		return false, fmt.Errorf("ApplyStateTransitionFromBlock Error:%v", err), nil

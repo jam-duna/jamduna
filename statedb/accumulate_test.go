@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/nsf/jsondiff"

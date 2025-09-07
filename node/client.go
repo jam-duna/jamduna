@@ -543,15 +543,16 @@ func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*W
 			numacc := 0
 			for _, workPackageHash := range workPackageHashes {
 				if status, ok := c.WorkPackage[workPackageHash]; ok {
-					if status == "accumulated" {
+					switch status {
+					case "accumulated":
 						log.Info(log.Node, "Work package accumulated", "hash", workPackageHash.Hex())
 						numacc++
-					} else if status == "guaranteed" {
+					case "guaranteed":
 						if workPackageLastStatus[workPackageHash] == "submitted" {
 							workPackageLastStatus[workPackageHash] = "guaranteed"
 							log.Info(log.Node, "Work package guaranteed", "hash", workPackageHash.Hex())
 						}
-					} else {
+					default:
 						log.Info(log.Node, fmt.Sprintf("Work package status:%s", status), "hash", workPackageHash.Hex())
 					}
 				}

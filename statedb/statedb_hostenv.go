@@ -9,7 +9,7 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-const OK uint32 = 0
+const OK uint64 = 0
 
 func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.ServiceUpdate, err error) {
 	if !sa.Mutable {

@@ -1,105 +1,113 @@
-.PHONY: coverage_host_test coverage_pvm clean clean_host clean_pvm refine accumulate general pvm
-TAGS ?= tiny
+# PVM FFI Library Makefile
 
-COVERAGE_FILES=coverage1.out coverage2.out coverage3.out
-FINAL_COVERAGE=final_coverage.out
-HTML_COVERAGE_HOST=coverage_host_test.html
-HTML_COVERAGE_PVM=coverage_pvm.html
+# Compiler and flags
+CC = gcc
+AR = ar
+CFLAGS = -Wall -Wextra -O3 -std=c99 -fPIC 
+INCLUDES = -Iinclude
+SRCDIR = src
+OBJDIR = obj
+LIBDIR = lib
+INCDIR = include
 
-# Run host function tests and merge coverage reports
-coverage_host_test: clean_host
-	@clear
-	@echo "Running TestRefine (with generation)..."
-	@go test -run TestGenerateRefineTestVectors -tags network_test,$(TAGS)
-	@go test -cover -coverprofile=coverage1.out -run TestRefine -tags network_test,$(TAGS)
-	@echo "Running TestAccumulate (with generation)..."
-	@go test -run TestGenerateAccumulateTestVectors -tags network_test,$(TAGS)
-	@go test -cover -coverprofile=coverage2.out -run TestAccumulate -tags network_test,$(TAGS)
-	@echo "Running TestGeneral (with generation)..."
-	@go test -run TestGenerateGeneralTestVectors -tags network_test,$(TAGS)
-	@go test -cover -coverprofile=coverage3.out -run TestGeneral -tags network_test,$(TAGS)
-	@echo "Merging coverage reports..."
-	@cat $(COVERAGE_FILES) | grep -h -v "mode: " > coverage.out
-	@echo "mode: set" | cat - coverage.out > $(FINAL_COVERAGE)
-	@echo "Generating HTML coverage report for host tests..."
-	@go tool cover -html=$(FINAL_COVERAGE) -o $(HTML_COVERAGE_HOST)
-	@echo "Coverage report generated: $(HTML_COVERAGE_HOST)"
-	@echo "Deleting .out files..."
-	@rm -f $(COVERAGE_FILES) coverage.out $(FINAL_COVERAGE)
-	@echo "Temporary .out files deleted."
+# Library name
+LIBNAME = libpvm.a
+SONAME = libpvm.so
 
-# Run PVM tests and generate coverage report
-coverage_pvm: clean_pvm
-	@clear
-	@echo "Running PVM tests with coverage..."
-	@go test -cover -coverprofile=coverage_pvm.out -run TestPVM -tags network_test,$(TAGS)
-	@echo "Generating HTML coverage report for PVM tests..."
-	@go tool cover -html=coverage_pvm.out -o $(HTML_COVERAGE_PVM)
-	@echo "Coverage report generated: $(HTML_COVERAGE_PVM)"
-	@echo "Deleting PVM .out file..."
-	@rm -f coverage_pvm.out
-	@echo "Temporary PVM .out file deleted."
+# Source files
+SOURCES = $(wildcard $(SRCDIR)/*.c)
+OBJECTS = $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 
-# Clean up all coverage files
+# Default target
+all: directories $(LIBDIR)/$(LIBNAME) $(LIBDIR)/$(SONAME)
+
+# Create necessary directories
+directories:
+	@mkdir -p $(OBJDIR) $(LIBDIR)
+
+# Static library
+$(LIBDIR)/$(LIBNAME): $(OBJECTS)
+	$(AR) rcs $@ $(OBJECTS)
+	@echo "Static library created: $@"
+
+# Shared library
+$(LIBDIR)/$(SONAME): $(OBJECTS)
+	$(CC) -shared -o $@ $(OBJECTS)
+	@echo "Shared library created: $@"
+
+# Compile object files
+$(OBJDIR)/%.o: $(SRCDIR)/%.c
+	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+
+# Debug build
+debug: CFLAGS += -g -DDEBUG 
+debug: clean all
+
+# Release build with optimization
+release: CFLAGS += -O3 -DNDEBUG 
+release: clean all
+
+# Clean build artifacts
 clean:
-	@clear
-	@rm -f $(COVERAGE_FILES) coverage.out coverage_pvm.out $(FINAL_COVERAGE) $(HTML_COVERAGE_HOST) $(HTML_COVERAGE_PVM)
-	@echo "Cleaned up all coverage files"
+	rm -rf $(OBJDIR) $(LIBDIR)
+	@echo "Cleaned build artifacts"
 
-# Clean up only host function test coverage files
-clean_host:
-	@clear
-	@rm -f $(COVERAGE_FILES) coverage.out $(FINAL_COVERAGE) $(HTML_COVERAGE_HOST)
-	@echo "Cleaned up host function coverage files"
+# Install (copy headers and library to system directories)
+install: all
+	@echo "Installing headers to /usr/local/include..."
+	cp -r $(INCDIR)/*.h /usr/local/include/
+	@echo "Installing library to /usr/local/lib..."
+	cp $(LIBDIR)/$(LIBNAME) /usr/local/lib/
+	cp $(LIBDIR)/$(SONAME) /usr/local/lib/
+	@echo "Installation complete"
 
-# Clean up only PVM test coverage files
-clean_pvm:
-	@clear
-	@rm -f coverage_pvm.out $(HTML_COVERAGE_PVM)
-	@echo "Cleaned up PVM coverage files"
+# Uninstall
+uninstall:
+	rm -f /usr/local/include/pvm.h
+	rm -f /usr/local/lib/$(LIBNAME)
+	rm -f /usr/local/lib/$(SONAME)
+	@echo "Uninstallation complete"
 
-# Run refine test
-refine:
-	@clear
-	@echo "Generating Refine test vectors..."
-	@go test -run TestGenerateRefineTestVectors -tags network_test,$(TAGS)
-	@echo "Running Refine host function testing..."
-	@go test -run TestRefine -tags network_test,$(TAGS)
+# Test compilation (requires test files)
+test: all
+	@echo "Building tests..."
+	@if [ -d tests ]; then \
+		$(CC) $(CFLAGS) $(INCLUDES) -Llib -lpvm tests/*.c -o tests/test_runner; \
+		echo "Test executable created: tests/test_runner"; \
+	else \
+		echo "No tests directory found. Skipping test build."; \
+	fi
 
-# Run accumulate test
-accumulate:
-	@clear
-	@echo "Generating Accumulate test vectors..."
-	@go test -run TestGenerateAccumulateTestVectors -tags network_test,$(TAGS)
-	@echo "Running Accumulate host function testing..."
-	@go test -run TestAccumulate -tags network_test,$(TAGS)
+# Print build information
+info:
+	@echo "PVM FFI Library Build Configuration:"
+	@echo "  CC: $(CC)"
+	@echo "  CFLAGS: $(CFLAGS)"
+	@echo "  INCLUDES: $(INCLUDES)"
+	@echo "  Sources: $(SOURCES)"
+	@echo "  Objects: $(OBJECTS)"
+	@echo "  Target Library: $(LIBDIR)/$(LIBNAME)"
 
-# Run general test
-general:
-	@clear
-	@echo "Generating General test vectors..."
-	@go test -run TestGenerateGeneralTestVectors -tags network_test,$(TAGS)
-	@echo "Running General host function testing..."
-	@go test -run TestGeneral -tags network_test,$(TAGS)
+# List all C files that will be compiled
+list-sources:
+	@echo "Source files to be compiled:"
+	@for src in $(SOURCES); do echo "  $$src"; done
 
-# Run PVM test without coverage
-pvm:
-	@clear
-	@echo "Running PVM tests..."
-	@go test -run TestPVM -tags network_test,$(TAGS)
+# Check for missing dependencies
+check-deps:
+	@echo "Checking for required tools..."
+	@which $(CC) > /dev/null || (echo "ERROR: $(CC) not found" && exit 1)
+	@which $(AR) > /dev/null || (echo "ERROR: $(AR) not found" && exit 1)
+	@echo "All required tools found"
 
-# Run PVM test without coverage
-revm:
-	@clear
-	@echo "Running Revm tests..."
-	@go test -timeout=1h -run TestRevm -tags network_test,$(TAGS)
+# Format code (if clang-format is available)
+format:
+	@if which clang-format > /dev/null 2>&1; then \
+		echo "Formatting C source files..."; \
+		find $(SRCDIR) $(INCDIR) -name "*.c" -o -name "*.h" | xargs clang-format -i; \
+		echo "Code formatting complete"; \
+	else \
+		echo "clang-format not found, skipping code formatting"; \
+	fi
 
-doom:
-	@clear
-	@echo "Running Doom tests..."
-	@go test -timeout=24h -run TestDoom -tags network_test,$(TAGS)
-
-hello_world:
-	@clear
-	@echo "Running Hello-Wrold tests..."
-	@go test -timeout=1h -run TestHelloWorld -tags network_test,$(TAGS)
+.PHONY: all directories debug release clean install uninstall test info list-sources check-deps format

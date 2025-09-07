@@ -35,7 +35,6 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/grandpa"
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
@@ -62,9 +61,9 @@ const (
 )
 
 const (
-	enableInit  = false
-	numNodes    = types.TotalValidators
-	quicAddr    = "127.0.0.1:%d"
+	enableInit = false
+	numNodes   = types.TotalValidators
+	//quicAddr    = "127.0.0.1:%d"
 	Grandpa     = false
 	GrandpaEasy = true
 	Audit       = false
@@ -73,7 +72,6 @@ const (
 	revalidate  = false // turn off for production (or publication of traces)
 
 	paranoidVerification = false // turn off for production
-	writeJAMPNTestVector = false // turn on true when generating JAMNP test vectors only
 
 	// GOAL: centralize use of context timeout parameters here, avoid hard
 	TinyTimeout                = 2000 * time.Millisecond
@@ -86,7 +84,6 @@ const (
 	RefineTimeout              = 36 * time.Second        // 36
 	RefineAndAccumalateTimeout = (36 + 60) * time.Second // 96
 
-	useCompiler        = true
 	fudgeFactorJCE     = 1
 	DefaultChannelSize = 200
 )
@@ -434,17 +431,17 @@ func StandardizePVMBackend(pvm_mode string) string {
 	var pvmBackend string
 	switch mode {
 	case "INTERPRETER":
-		pvmBackend = pvm.BackendInterpreter
+		pvmBackend = statedb.BackendInterpreter
 	case "COMPILER", "RECOMPILER", "X86":
 		if runtime.GOOS == "linux" {
-			pvmBackend = pvm.BackendCompiler
+			pvmBackend = statedb.BackendCompiler
 		} else {
 			log.Warn(log.Node, fmt.Sprintf("COMPILER Not Supported. Defaulting to interpreter"))
 		}
 
 	default:
 		log.Warn(log.Node, fmt.Sprintf("Unknown PVM mode [%s], defaulting to interpreter", pvm_mode))
-		pvmBackend = pvm.BackendInterpreter
+		pvmBackend = statedb.BackendInterpreter
 	}
 	return pvmBackend
 }

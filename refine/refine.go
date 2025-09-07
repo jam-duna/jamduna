@@ -7,7 +7,6 @@ import (
 	"github.com/colorfulnotion/jam/bls"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
@@ -25,11 +24,11 @@ func ExecuteWorkPackageBundleV1(stateDB *statedb.StateDB, pvmBackend string, tim
 	}
 
 	// Execute authorization
-	vm_auth := pvm.NewVMFromCode(authindex, authcode, 0, stateDB, pvmBackend)
+	vm_auth := statedb.NewVMFromCode(authindex, authcode, 0, 0, stateDB, pvmBackend)
 	vm_auth.SetPVMContext(log.FirstGuarantorOrAuditor)
 	auth_result := vm_auth.ExecuteAuthorization(workPackage, workPackageCoreIndex)
 	auth_output := auth_result.Ok
-	authGasUsed := int64(types.IsAuthorizedGasAllocation) - vm_auth.Gas
+	authGasUsed := int64(types.IsAuthorizedGasAllocation) - vm_auth.GetGas()
 
 	// Compute authorization hash
 	p_u := workPackage.AuthorizationCodeHash
@@ -54,7 +53,7 @@ func ExecuteWorkPackageBundleV1(stateDB *statedb.StateDB, pvmBackend string, tim
 		}
 
 		// Execute refine
-		vm := pvm.NewVMFromCode(serviceIndex, code, 0, stateDB, pvmBackend)
+		vm := statedb.NewVMFromCode(serviceIndex, code, 0, 0, stateDB, pvmBackend)
 		vm.Timeslot = timeslot
 		vm.SetCore(workPackageCoreIndex)
 		vm.SetPVMContext(log.FirstGuarantorOrAuditor)
@@ -93,7 +92,7 @@ func ExecuteWorkPackageBundleV1(stateDB *statedb.StateDB, pvmBackend string, tim
 			CodeHash:            workItem.CodeHash,
 			PayloadHash:         common.Blake2Hash(workItem.Payload),
 			Gas:                 workItem.AccumulateGasLimit,
-			GasUsed:             uint(workItem.RefineGasLimit - uint64(vm.Gas)),
+			GasUsed:             uint(workItem.RefineGasLimit - uint64(vm.GetGas())),
 			NumImportedSegments: uint(len(workItem.ImportedSegments)),
 			NumExportedSegments: uint(expectedSegmentCnt),
 			NumExtrinsics:       uint(len(packageBundle.ExtrinsicData)),
@@ -222,11 +221,11 @@ func ExecuteWPAuthorization(stateDB *statedb.StateDB, pvmBackend string, workPac
 		return types.Result{}, nil, 0, common.Hash{}, fmt.Errorf("failed to get authorization code: %v", err)
 	}
 
-	vm_auth := pvm.NewVMFromCode(authindex, authcode, 0, stateDB, pvmBackend)
+	vm_auth := statedb.NewVMFromCode(authindex, authcode, 0, 0, stateDB, pvmBackend)
 	vm_auth.SetPVMContext(log.FirstGuarantorOrAuditor)
 	auth_result := vm_auth.ExecuteAuthorization(workPackage, workPackageCoreIndex)
 	auth_output := auth_result.Ok
-	authGasUsed := int64(types.IsAuthorizedGasAllocation) - vm_auth.Gas
+	authGasUsed := int64(types.IsAuthorizedGasAllocation) - vm_auth.GetGas()
 	authorizer_hash := ComputeAuthHash(workPackage)
 
 	return auth_result, auth_output, authGasUsed, authorizer_hash, nil
@@ -253,7 +252,7 @@ func ExecuteWBRefinement(stateDB *statedb.StateDB, pvmBackend string, timeslot u
 		}
 
 		// Execute refine
-		vm := pvm.NewVMFromCode(serviceIndex, code, 0, stateDB, pvmBackend)
+		vm := statedb.NewVMFromCode(serviceIndex, code, 0, 0, stateDB, pvmBackend)
 		vm.Timeslot = timeslot
 		vm.SetCore(workPackageCoreIndex)
 		vm.SetPVMContext(log.FirstGuarantorOrAuditor)
@@ -290,7 +289,7 @@ func ExecuteWBRefinement(stateDB *statedb.StateDB, pvmBackend string, timeslot u
 			CodeHash:            workItem.CodeHash,
 			PayloadHash:         common.Blake2Hash(workItem.Payload),
 			Gas:                 workItem.AccumulateGasLimit,
-			GasUsed:             uint(workItem.RefineGasLimit - uint64(vm.Gas)),
+			GasUsed:             uint(workItem.RefineGasLimit - uint64(vm.GetGas())),
 			NumImportedSegments: uint(len(workItem.ImportedSegments)),
 			NumExportedSegments: uint(expectedSegmentCnt),
 			NumExtrinsics:       uint(len(packageBundle.ExtrinsicData)),

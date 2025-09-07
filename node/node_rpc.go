@@ -14,7 +14,6 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -702,7 +701,7 @@ func (j *Jam) TraceBlock(req []string, res *string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
 	defer cancel()
-	s1, err := statedb.ApplyStateTransitionFromBlock(sdb, ctx, block, nil, pvm.BackendInterpreter)
+	s1, err := statedb.ApplyStateTransitionFromBlock(sdb, ctx, block, nil, statedb.BackendInterpreter)
 	if err != nil {
 		log.Error(log.Node, "TraceBlock", "err", err)
 		return err

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/fuzz"
-	"github.com/colorfulnotion/jam/pvm"
+	"github.com/colorfulnotion/jam/statedb"
 )
 
 func Terminate(stopCh chan os.Signal) {
@@ -45,13 +45,13 @@ func main() {
 		return
 	}
 
-	pvm.RecordTime = false
+	statedb.RecordTime = false
 	if pvmLogging != "" {
 		if pvmLogging == "trace" {
-			pvm.PvmLogging = true
-			pvm.PvmTrace = true
+			statedb.PvmLogging = true
+
 		} else if pvmLogging == "debug" {
-			pvm.PvmLogging = true
+			statedb.PvmLogging = true
 		}
 	}
 	target := fuzz.NewTarget(socketPath, targetInfo, "interpreter")

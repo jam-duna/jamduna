@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/refine"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
@@ -104,7 +103,7 @@ func CompareJSON(obj1, obj2 interface{}) string {
 			}
 
 			// unmarshal each line into your entry type
-			var orig, recp pvm.VMLog
+			var orig, recp statedb.VMLog
 			if err := json.Unmarshal(s1.Bytes(), &orig); err != nil {
 				t.Fatalf("failed to unmarshal line %d of vm_log.json: %v", i, err)
 			}
@@ -195,9 +194,8 @@ func initPProf(t *testing.T) {
 }
 
 func testRefineStateTransitions(t *testing.T, filename_stf, filename_bundle string) {
-	//pvm.PvmLogging = true
-	//pvm.PvmTrace = true
-	pvm.RecordTime = true
+
+	statedb.RecordTime = true
 	initPProf(t)
 
 	stf, err := ReadStateTransition(filename_stf)
@@ -219,12 +217,12 @@ func testRefineStateTransitions(t *testing.T, filename_stf, filename_bundle stri
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
-	pvmBackends := []string{pvm.BackendInterpreter} //, pvm.BackendInterpreter
+	pvmBackends := []string{statedb.BackendInterpreter} //, statedb.BackendInterpreter
 	//pvmBackends := []string{pvm.BackendInterpreter}
 	for _, pvmBackend := range pvmBackends {
-		if runtime.GOOS != "linux" && pvmBackend == pvm.BackendCompiler {
+		if runtime.GOOS != "linux" && pvmBackend == statedb.BackendCompiler {
 			t.Logf("pvmBackend=%s on non-linux platform NOT supported", pvmBackend)
-			pvmBackend = pvm.BackendInterpreter
+			pvmBackend = statedb.BackendInterpreter
 		}
 		t.Run(fmt.Sprintf("pvmBackend=%s", pvmBackend), func(t *testing.T) {
 			testRefineStateTransition(pvmBackend, store, bundle_snapshot, stf, t)
@@ -305,9 +303,8 @@ func DebugBundleSnapshot(b *types.WorkPackageBundleSnapshot, gasUsed ...uint) {
 }
 
 func TestRefineAlgo3(t *testing.T) {
-	pvm.PvmLogging = false
-	pvm.PvmTrace = false
-	pvm.RecordTime = true
+	statedb.PvmLogging = false
+	statedb.RecordTime = true
 	initPProf(t)
 	filename_stf := algo_stf
 	filename_bundle := algo_bundle
@@ -357,11 +354,11 @@ func TestRefineAlgo3(t *testing.T) {
 			continue
 		}
 		gasUsed := make(map[string]uint)
-		backends := []string{pvm.BackendCompiler}
+		backends := []string{statedb.BackendCompiler}
 		for _, pvmBackend := range backends {
 			if runtime.GOOS != "linux" {
-				pvmBackend = pvm.BackendInterpreter
-				log.Warn(log.Node, fmt.Sprintf("COMPILER Not Supported. Defaulting to interpreter"))
+				pvmBackend = statedb.BackendInterpreter
+				log.Warn(log.Node, "compiler Not Supported. Defaulting to interpreter")
 			}
 			modified_wp := bundle_snapshot.Bundle.WorkPackage
 			modified_wp.WorkItems[1].RefineGasLimit = 4_000_000_000
@@ -503,9 +500,8 @@ func findLastSuccessN(t *testing.T, algoID int, pvmBackend string, stf *statedb.
 }
 
 func TestRefineAutoAlgo(t *testing.T) {
-	pvm.PvmLogging = false
-	pvm.PvmTrace = false
-	pvm.RecordTime = true
+	statedb.PvmLogging = false
+	statedb.RecordTime = true
 	initPProf(t)
 
 	stf, err := ReadStateTransition(algo_stf)
@@ -521,10 +517,10 @@ func TestRefineAutoAlgo(t *testing.T) {
 	for algoID := algoID_start; algoID <= algoID_end; algoID++ {
 		t.Run(fmt.Sprintf("Algo_%d", algoID), func(t *testing.T) {
 			fmt.Printf("--- Searching for last success for Algorithm ID: %d ---\n", algoID)
-			pvmBackend := pvm.BackendCompiler
+			pvmBackend := statedb.BackendCompiler
 			if runtime.GOOS != "linux" {
-				pvmBackend = pvm.BackendInterpreter
-				log.Warn(log.Node, fmt.Sprintf("COMPILER Not Supported. Defaulting to interpreter"))
+				pvmBackend = statedb.BackendInterpreter
+				log.Warn(log.Node, "compiler not supported - defaulting to interpreter")
 			}
 
 			lastN := findLastSuccessN(t, algoID, pvmBackend, stf)
@@ -595,7 +591,7 @@ func testRefineStateTransition(pvmBackend string, store *storage.StateDBStorage,
 	algo_res_errCode := algo_res.Result.Err
 	algo_res_status = types.ResultCode(algo_res_errCode)
 	if algo_res_errCode != types.WORKDIGEST_OK {
-		algo_res_err = fmt.Errorf(types.ResultCode(algo_res_errCode))
+		algo_res_err = fmt.Errorf("%s", types.ResultCode(algo_res_errCode))
 	} else {
 		algo_res_status = "OK"
 	}
@@ -637,7 +633,7 @@ func testUnifiedRefineStateTransition(pvmBackend string, store *storage.StateDBS
 	algo_res_errCode := algo_res.Result.Err
 	algo_res_status = types.ResultCode(algo_res_errCode)
 	if algo_res_errCode != types.WORKDIGEST_OK {
-		algo_res_err = fmt.Errorf(types.ResultCode(algo_res_errCode))
+		algo_res_err = fmt.Errorf("Result Code: %s", types.ResultCode(algo_res_errCode))
 	} else {
 		algo_res_status = "OK"
 	}
@@ -646,9 +642,8 @@ func testUnifiedRefineStateTransition(pvmBackend string, store *storage.StateDBS
 }
 
 func TestAlgoExecMax(t *testing.T) {
-	pvm.PvmLogging = true
-	pvm.PvmTrace = true
-	pvm.RecordTime = true
+	statedb.PvmLogging = true
+	statedb.RecordTime = true
 
 	stf, err := ReadStateTransition(algo_stf)
 	if err != nil {
@@ -694,9 +689,9 @@ func TestAlgoExecMax(t *testing.T) {
 			algo_gas_used := uint(0)
 
 			output := captureOutput(func() {
-				pvmBackend := pvm.BackendCompiler
+				pvmBackend := statedb.BackendCompiler
 				if runtime.GOOS != "linux" {
-					pvmBackend = pvm.BackendInterpreter
+					pvmBackend = statedb.BackendInterpreter
 				}
 
 				levelDBPath := fmt.Sprintf("/tmp/summary-db-algo%d-n%d", algoID, n)
@@ -807,9 +802,8 @@ func testRefineStateTransitionInvoke(pvmBackend string, store *storage.StateDBSt
 	t.Logf("All nodes produced identical results.")
 }
 func TestRefineInvokeLimit(t *testing.T) {
-	pvm.PvmLogging = true
-	pvm.PvmTrace = true
-	pvm.RecordTime = true
+	statedb.PvmLogging = true
+	statedb.RecordTime = true
 	initPProf(t)
 	filename_stf := game_of_stf
 	filename_bundle := game_of_bundle
@@ -831,8 +825,8 @@ func TestRefineInvokeLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
-	//pvmBackends := []string{pvm.BackendInterpreter}
-	pvmBackend := pvm.BackendInterpreter
+	//pvmBackends := []string{statedb.BackendInterpreter}
+	pvmBackend := statedb.BackendInterpreter
 	t.Run(fmt.Sprintf("pvmBackend=%s", pvmBackend), func(t *testing.T) {
 		testRefineStateTransitionInvoke(pvmBackend, store, bundle_snapshot, stf, t)
 	})
@@ -910,9 +904,8 @@ func TestGenerateTestCase(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.Name, func(t *testing.T) {
-			pvm.PvmLogging = false
-			pvm.PvmTrace = false
-			pvm.RecordTime = false
+			statedb.PvmLogging = false
+			statedb.RecordTime = false
 			initPProf(t)
 
 			levelDBPath := fmt.Sprintf("/tmp/testdb-%s", testCase.Name)
@@ -921,7 +914,7 @@ func TestGenerateTestCase(t *testing.T) {
 				t.Fatalf("Failed to create storage: %v", err)
 			}
 
-			report := testRefine(pvm.BackendInterpreter, store, testCase.BundleSnapShot, stf, t)
+			report := testRefine(statedb.BackendInterpreter, store, testCase.BundleSnapShot, stf, t)
 			fmt.Printf("Test case %s executed successfully with report: %v\n", testCase.Name, report.Hash().String())
 
 			// write the report to the dir
@@ -963,7 +956,7 @@ func TestFibRefine(t *testing.T) {
 }
 
 func TestAlgoRefineComparison(t *testing.T) {
-	pvm.RecordTime = true
+	statedb.RecordTime = true
 	initPProf(t)
 
 	stf, err := ReadStateTransition(algo_stf)
@@ -982,7 +975,7 @@ func TestAlgoRefineComparison(t *testing.T) {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
 
-	pvmBackend := pvm.BackendInterpreter
+	pvmBackend := statedb.BackendInterpreter
 
 	t.Run("NodeExecuteWorkPackageBundle", func(t *testing.T) {
 		testRefineStateTransition(pvmBackend, store, bundle_snapshot, stf, t)

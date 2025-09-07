@@ -35,7 +35,7 @@ cmd/importblocks/core.zip
 
 # FFI static libs  
 ffi/libcrypto.*.a
-ffi/libunicorn.*.a
+
 
 # state DB test data
 /statedb/testdata/
@@ -55,6 +55,7 @@ guarantees/*.json
 **/.DS_Store
 .DS_Store
 
+jam
 bin/jam
 bin/*
 !bin/jam*

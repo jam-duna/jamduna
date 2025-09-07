@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/fuzz"
-	"github.com/colorfulnotion/jam/pvm"
+	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -54,7 +54,7 @@ func main() {
 
 	fmt.Printf("jConfig: %v\n", jConfig)
 
-	fuzzer, err := fuzz.NewFuzzer(dir, report_dir, socket, fuzzerInfo, pvm.BackendInterpreter)
+	fuzzer, err := fuzz.NewFuzzer(dir, report_dir, socket, fuzzerInfo, statedb.BackendInterpreter)
 	if err != nil {
 		log.Fatalf("Failed to initialize fuzzer: %v", err)
 	}

@@ -8,7 +8,7 @@ import (
 	"github.com/colorfulnotion/jam/bls"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm"
+	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -286,7 +286,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 	if err != nil {
 		return
 	}
-	pvmContext := log.OtherGuarantor
+
 	pvmBackend := n.pvmBackend
 	if firstGuarantorOrAuditor {
 		/*
@@ -294,19 +294,19 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 				pvmBackend = pvm.BackendCompiler // MK: DO NOT MUTATE/HARDCODE pvmBackend
 			}
 		*/
-		pvmContext = log.FirstGuarantorOrAuditor
+
 		n.nodeSelf.Telemetry(log.MsgTypeWorkPackageBundle, package_bundle, "codec_encoded", types.EncodeAsHex(package_bundle))
 	}
 
 	pvmStart := time.Now()
 
-	vm_auth := pvm.NewVMFromCode(authindex, authcode, 0, targetStateDB, pvmBackend)
-	vm_auth.SetPVMContext(pvmContext)
+	vm_auth := statedb.NewVMFromCode(authindex, authcode, 0, 0, targetStateDB, pvmBackend)
+
 	r := vm_auth.ExecuteAuthorization(workPackage, workPackageCoreIndex)
 	p_u := workPackage.AuthorizationCodeHash
 	p_p := workPackage.ConfigurationBlob
 	p_a := common.Blake2Hash(append(p_u.Bytes(), p_p...))
-	authGasUsed := int64(types.IsAuthorizedGasAllocation) - vm_auth.Gas
+	authGasUsed := int64(types.IsAuthorizedGasAllocation) - vm_auth.GetGas()
 	var segments [][]byte
 	for index, workItem := range workPackage.WorkItems {
 		// map workItem.ImportedSegments into segment
@@ -320,10 +320,10 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 			log.Crit(log.Node, "executeWorkPackageBundle: Code and CodeHash Mismatch")
 		}
 		// fmt.Printf("index %d, code len=%d\n", service_index, len(code))
-		vm := pvm.NewVMFromCode(service_index, code, 0, targetStateDB, pvmBackend)
+		vm := statedb.NewVMFromCode(service_index, code, 0, 0, targetStateDB, pvmBackend)
 		vm.Timeslot = n.statedb.JamState.SafroleState.Timeslot
 		vm.SetCore(workPackageCoreIndex)
-		vm.SetPVMContext(pvmContext)
+
 		output, _, exported_segments := vm.ExecuteRefine(uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData, p_u, common.BytesToHash(trie.H0))
 
 		expectedSegmentCnt := int(workItem.ExportCount)
@@ -347,7 +347,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 			CodeHash:            workItem.CodeHash,
 			PayloadHash:         common.Blake2Hash(workItem.Payload),
 			Gas:                 workItem.AccumulateGasLimit,
-			GasUsed:             uint(workItem.RefineGasLimit - uint64(vm.Gas)),
+			GasUsed:             uint(workItem.RefineGasLimit - uint64(vm.GetGas())),
 			NumImportedSegments: uint(len(workItem.ImportedSegments)),
 			NumExportedSegments: uint(expectedSegmentCnt),
 			NumExtrinsics:       uint(len(package_bundle.ExtrinsicData)),

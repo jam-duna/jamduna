@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
@@ -34,11 +33,11 @@ func NewFuzzer(storageDir string, reportDir string, socketPath string, fuzzerInf
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize fuzzer's local storage: %w", err)
 	}
-	if strings.ToLower(pvmBackend) != pvm.BackendInterpreter && strings.ToLower(pvmBackend) != pvm.BackendCompiler {
-		pvmBackend = pvm.BackendInterpreter
+	if strings.ToLower(pvmBackend) != statedb.BackendInterpreter && strings.ToLower(pvmBackend) != statedb.BackendCompiler {
+		pvmBackend = statedb.BackendInterpreter
 		fmt.Printf("Invalid PVM backend specified. Defaulting to Interpreter\n")
-	} else if runtime.GOOS != "linux" && strings.ToLower(pvmBackend) != pvm.BackendInterpreter {
-		pvmBackend = pvm.BackendInterpreter
+	} else if runtime.GOOS != "linux" && strings.ToLower(pvmBackend) != statedb.BackendInterpreter {
+		pvmBackend = statedb.BackendInterpreter
 		fmt.Printf("%v Not supported on %v Defaulting to Interpreter\n", pvmBackend, runtime.GOOS)
 	}
 

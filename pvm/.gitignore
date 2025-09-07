@@ -1,7 +1,2 @@
-*.pprof
-*.txt
-test_case/*
-interpreter/*
-sandbox/*
-sandbox_bak/*
-compiler/*
+obj/*.o
+*.o

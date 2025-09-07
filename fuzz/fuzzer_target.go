@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/refine"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
@@ -38,11 +37,11 @@ func NewTarget(socketPath string, targetInfo PeerInfo, pvmBackend string) *Targe
 	if err != nil {
 		log.Fatalf("Failed to create state DB storage: %v", err)
 	}
-	if strings.ToLower(pvmBackend) != pvm.BackendInterpreter && strings.ToLower(pvmBackend) != pvm.BackendCompiler {
-		pvmBackend = pvm.BackendInterpreter
+	if strings.ToLower(pvmBackend) != statedb.BackendInterpreter && strings.ToLower(pvmBackend) != statedb.BackendCompiler {
+		pvmBackend = statedb.BackendInterpreter
 		fmt.Printf("Invalid PVM backend specified. Defaulting to Interpreter\n")
-	} else if runtime.GOOS != "linux" && strings.ToLower(pvmBackend) != pvm.BackendInterpreter {
-		pvmBackend = pvm.BackendInterpreter
+	} else if runtime.GOOS != "linux" && strings.ToLower(pvmBackend) != statedb.BackendInterpreter {
+		pvmBackend = statedb.BackendInterpreter
 		fmt.Printf("Defaulting to Interpreter\n")
 	}
 
