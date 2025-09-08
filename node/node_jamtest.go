@@ -17,7 +17,6 @@ import (
 	"github.com/colorfulnotion/jam/chainspecs"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm"
 
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
@@ -38,7 +37,7 @@ var jce_manual = flag.Bool("jce_manual", false, "jce_manual")
 var jam_node = flag.Bool("jam_node", false, "jam_node")
 var jam_local_client = flag.Bool("jam_local_client", false, "jam_local_client")
 var manifest = flag.Bool("manifest", false, "manifest")
-var pvmBackend = flag.String("pvm_backend", pvm.BackendInterpreter, "PVM mode to use (interpreter, compiler, sandbox)")
+var pvmBackend = flag.String("pvm_backend", statedb.BackendInterpreter, "PVM mode to use (interpreter, compiler, sandbox)")
 
 const (
 	webServicePort    = 8079
@@ -139,7 +138,7 @@ func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) 
 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		pvmBackend := pvm.BackendInterpreter
+		pvmBackend := statedb.BackendInterpreter
 		node, err := newNode(uint16(i), validatorSecrets[i], chainSpec, pvmBackend, epoch0Timestamp, peers, peerList, nodePaths[i], int(basePort)+i, jceMode)
 		if err != nil {
 			return nil, err
@@ -297,8 +296,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 				nodes[i].SetPVMBackend(*pvmBackend)
 			} else {
 				if i%2 == 1 {
-					if useCompiler && runtime.GOOS == "linux" {
-						compilerBackend := pvm.BackendCompiler
+					if runtime.GOOS == "linux" {
+						compilerBackend := statedb.BackendCompiler
 						pvmBackend = &compilerBackend
 					}
 				}

@@ -55,7 +55,6 @@ func ExecuteWorkPackageBundleV1(stateDB *statedb.StateDB, pvmBackend string, tim
 		// Execute refine
 		vm := statedb.NewVMFromCode(serviceIndex, code, 0, 0, stateDB, pvmBackend, workItem.RefineGasLimit)
 		vm.Timeslot = timeslot
-		vm.SetCore(workPackageCoreIndex)
 		vm.SetPVMContext(log.FirstGuarantorOrAuditor)
 
 		refineStart := time.Now()
@@ -254,7 +253,6 @@ func ExecuteWBRefinement(stateDB *statedb.StateDB, pvmBackend string, timeslot u
 		// Execute refine
 		vm := statedb.NewVMFromCode(serviceIndex, code, 0, 0, stateDB, pvmBackend, 0)
 		vm.Timeslot = timeslot
-		vm.SetCore(workPackageCoreIndex)
 		vm.SetPVMContext(log.FirstGuarantorOrAuditor)
 
 		refineStart := time.Now()

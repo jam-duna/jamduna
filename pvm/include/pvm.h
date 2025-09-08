@@ -108,7 +108,8 @@ struct VM {
     uint32_t stack_address;
     uint32_t stack_address_end;
     uint32_t current_heap_pointer;
-    
+    uint32_t max_heapsize;
+
     // Code and data segments
     uint32_t code_len;
     uint32_t bitmask_len;
@@ -226,7 +227,7 @@ void pvm_set_tracing(pvm_vm_t* vm, int enable);
 // VM Core functions (private, not intended for FFI)
 const char* reg_name(int index);
 
-void pvm_allocate_pages(pvm_vm_t* vm, uint32_t start_page, uint32_t page_count);
+void pvm_expand_heap(pvm_vm_t* vm, uint32_t new_size);
 void pvm_panic(VM* vm, uint64_t err_code);
 extern void (*dispatch_table[256])(VM*, uint8_t*, size_t);
 void init_dispatch_table(void);
@@ -235,6 +236,7 @@ void pvm_branch(VM* vm, uint64_t vx, int condition);
 void pvm_djump(VM* vm, uint64_t a);
 
 uint32_t p_func(uint32_t x);
+uint32_t mb_func(uint32_t x);
 
 #ifdef __cplusplus
 }

@@ -195,6 +195,57 @@ func TestTracesInterpreter(t *testing.T) {
 	}
 	dump_performance(t)
 }
+
+func TestTracesRecompiler(t *testing.T) {
+	log.InitLogger("debug")
+
+	// Define all the directories you want to test in a single slice.
+	testDirs := []string{
+		//path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
+		//path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
+	}
+
+	// Iterate over each directory.
+	for _, dir := range testDirs {
+		// Create a local copy of dir for the sub-test to capture correctly.
+		// This avoids issues where the sub-tests might all run with the last value of 'dir'.
+		currentDir := dir
+
+		t.Run(fmt.Sprintf("Directory_%s", filepath.Base(currentDir)), func(t *testing.T) {
+			entries, err := os.ReadDir(currentDir)
+			if err != nil {
+				// Use t.Fatalf to stop the test for this directory if we can't read it.
+				t.Fatalf("failed to read directory %s: %v", currentDir, err)
+			}
+
+			for _, e := range entries {
+				if e.IsDir() || !strings.HasSuffix(e.Name(), ".bin") || (e.Name() == "00000000.bin" || e.Name() == "genesis.bin") {
+					continue
+				}
+
+				filename := filepath.Join(currentDir, e.Name())
+				content, err := os.ReadFile(filename)
+				if err != nil {
+					// Use t.Errorf to report the error but continue with other files.
+					t.Errorf("failed to read file %s: %v", filename, err)
+					continue
+				}
+
+				//				fmt.Printf("Running test for file: %s\n", filename)
+
+				// Run the actual test logic for each file as a distinct sub-test.
+				t.Run(e.Name(), func(t *testing.T) {
+					runSingleSTFTest(t, filename, string(content), BackendCompiler, false)
+				})
+			}
+		})
+	}
+	dump_performance(t)
+}
 func dump_performance(t *testing.T) {
 	rows := BenchRows() // expose recorder snapshot via a small helper (see below)
 	if len(rows) == 0 {
@@ -278,7 +329,7 @@ func findFuzzTestFiles(sourcePath, targetVersion string, excludedTeams []string)
 }
 
 func TestSingleFuzzTrace(t *testing.T) {
-	PvmLogging = false
+	PvmLogging = true
 	fileMap := make(map[string]string)
 
 	jamConformancePath, err := GetFuzzReportsPath()
@@ -286,10 +337,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 		t.Fatalf("failed to get fuzz reports path: %v", err)
 	}
 
-	// WE ARE SUPPOSED TO REJECT THIS: -- there are no extrinsics -- slot is 48.  There is no epoch mark
-	// https://github.com/davxy/jam-conformance/blob/main/fuzz-reports/0.7.0/traces/1757062927/00000091.json
-	// Diff on 5 keys: [C3 (Recent History), C4 (Safrole State), C6 (Entropy), C11 (Tau), C13 (Stats)]
-	fileMap["2927"] = "0.7.0/traces/1757062927/00000091.json"
+	fileMap["2927"] = "fuzz-reports/0.7.0/traces/1756548459/00000042.json"
 
 	log.InitLogger("debug")
 	log.EnableModule(log.PvmAuthoring)

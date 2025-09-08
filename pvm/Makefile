@@ -18,8 +18,8 @@ SONAME = libpvm.so
 SOURCES = $(wildcard $(SRCDIR)/*.c)
 OBJECTS = $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 
-# Default target
-all: directories $(LIBDIR)/$(LIBNAME) $(LIBDIR)/$(SONAME)
+# Default target (static library only - no dynamic builds allowed)
+all: directories $(LIBDIR)/$(LIBNAME)
 
 # Create necessary directories
 directories:

@@ -225,7 +225,6 @@ void handle_ECALLI(VM* vm, uint8_t* operands, size_t operand_len) {
 // A.5.3. Instructions with Arguments of One Register and One Extended Width Immediate
 void handle_LOAD_IMM_64(VM* vm, uint8_t* operands, size_t operand_len) {
     int register_index_a = MIN(12, (int)(operands[0] % 16));
-    int lx = 8;
     uint8_t* slice = operands + 1;
     uint64_t vx;
     
@@ -340,6 +339,7 @@ void handle_STORE_IMM_U64(VM* vm, uint8_t* operands, size_t operand_len) {
 
 // A.5.5. Instructions with Arguments of One Offset
 void handle_JUMP(VM* vm, uint8_t* operands, size_t operand_len) {
+    (void)operands; // Suppress unused parameter warning
     int64_t vx;
     int lx = MIN(4, (int)operand_len);
     
@@ -1121,19 +1121,12 @@ void handle_SBRK(VM* vm, uint8_t* operands, size_t operand_len) {
     uint64_t new_heap_pointer = (uint64_t)vm->current_heap_pointer + value_a;
 
     if (new_heap_pointer > (uint64_t)next_page_boundary) {
-        if ( vm->pvm_tracing ) {
-            printf("TRACE SBRK: new_heap_pointer=0x%llx next_page_boundary=0x%x\n",
-                   (unsigned long long)new_heap_pointer, next_page_boundary);
-            fflush(stdout);
-        }
-        uint32_t final_boundary = p_func((uint32_t)new_heap_pointer);
-        uint32_t idx_start = next_page_boundary / Z_P;
-        uint32_t idx_end = final_boundary / Z_P;
-        uint32_t page_count = idx_end - idx_start;
-        pvm_allocate_pages(vm, idx_start, page_count);
+        uint32_t new_heap_pointer_expanded = p_func((uint32_t)new_heap_pointer);
+        pvm_expand_heap(vm, new_heap_pointer_expanded);
     }
 
     vm->current_heap_pointer = (uint32_t)new_heap_pointer;
+    vm->rw_data_address_end = vm->current_heap_pointer;
 
     vm->registers[register_index_d] = result;
     vm->pc += 1 + operand_len;
@@ -1361,6 +1354,7 @@ static void parse_two_reg_one_imm(uint8_t* operands, size_t operand_len, int* re
 
 // Store operations
 void handle_STORE_IND_U8(VM* vm, uint8_t* operands, size_t operand_len) {
+    (void)operands; // Suppress unused parameter warning
     int register_index_a = 0, register_index_b = 0;
     uint64_t vx = 0;
     
@@ -1418,6 +1412,7 @@ void handle_STORE_IND_U8(VM* vm, uint8_t* operands, size_t operand_len) {
 }
 
 void handle_STORE_IND_U16(VM* vm, uint8_t* operands, size_t operand_len) {
+    (void)operands; // Suppress unused parameter warning
     int register_index_a = 0, register_index_b = 0;
     uint64_t vx = 0;
     
@@ -1459,6 +1454,7 @@ void handle_STORE_IND_U16(VM* vm, uint8_t* operands, size_t operand_len) {
 }
 
 void handle_STORE_IND_U32(VM* vm, uint8_t* operands, size_t operand_len) {
+    (void)operands; // Suppress unused parameter warning
     int register_index_a = 0, register_index_b = 0;
     uint64_t vx = 0;
     
@@ -1501,6 +1497,7 @@ void handle_STORE_IND_U32(VM* vm, uint8_t* operands, size_t operand_len) {
 }
 
 void handle_STORE_IND_U64(VM* vm, uint8_t* operands, size_t operand_len) {
+    (void)operands; // Suppress unused parameter warning
     int register_index_a = 0, register_index_b = 0;
     uint64_t vx = 0;
     
@@ -1662,6 +1659,7 @@ void handle_LOAD_IND_I32(VM* vm, uint8_t* operands, size_t operand_len) {
 }
 
 void handle_LOAD_IND_U64(VM* vm, uint8_t* operands, size_t operand_len) {
+    (void)operands; // Suppress unused parameter warning
     int register_index_a = 0, register_index_b = 0;
     uint64_t offset = 0;
     

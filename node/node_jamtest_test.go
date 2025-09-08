@@ -8,8 +8,6 @@ import (
 	"fmt"
 	_ "net/http/pprof"
 	"testing"
-
-	"github.com/colorfulnotion/jam/pvm"
 )
 
 const (
@@ -60,7 +58,6 @@ func TestRubic(t *testing.T) {
 
 func TestFib(t *testing.T) {
 	initPProf(t)
-	pvm.UseTally = false
 	targetN := TargetedN_Fib
 	if *targetNum > 0 {
 		targetN = *targetNum
@@ -70,7 +67,6 @@ func TestFib(t *testing.T) {
 
 func TestAlgo(t *testing.T) {
 	initPProf(t)
-	pvm.UseTally = false
 	targetN := TargetedN_Fib
 	if *targetNum > 0 {
 		targetN = *targetNum
@@ -88,7 +84,6 @@ func TestFib2(t *testing.T) {
 }
 
 func TestAuthCopy(t *testing.T) {
-	pvm.UseTally = true
 	targetN := TargetedN_Fib
 	if *targetNum > 0 {
 		targetN = *targetNum

@@ -207,7 +207,6 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 		// fmt.Printf("index %d, code len=%d\n", service_index, len(code))
 		vm := statedb.NewVMFromCode(service_index, code, 0, 0, s, statedb.BackendInterpreter, workItem.RefineGasLimit)
 		vm.Timeslot = s.JamState.SafroleState.Timeslot
-		vm.SetCore(0)
 
 		output, _, exported_segments := vm.ExecuteRefine(uint32(index), workPackage, r, make([][][]byte, 0), workItem.ExportCount, types.ExtrinsicsBlobs{}, p_a, common.Hash{})
 

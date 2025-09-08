@@ -323,6 +323,43 @@ cryptolib:
 	@cp bandersnatch/target/release/libcrypto.*.a ffi/
 	@echo "libcrypto.a files ready."
 
+pvmlib:
+	@echo "Building PVM library statically for all platforms..."
+	@mkdir -p pvm_tmp
+	@echo "  Building for Linux amd64..."
+	@CC=x86_64-linux-musl-gcc AR=x86_64-linux-musl-ar make -C pvm clean
+	@CC=x86_64-linux-musl-gcc AR=x86_64-linux-musl-ar make -C pvm CC=x86_64-linux-musl-gcc AR=x86_64-linux-musl-ar
+	@cp pvm/lib/libpvm.a pvm_tmp/libpvm.linux_amd64.a
+	@echo "  Building for Linux arm64..."
+	@if command -v aarch64-linux-musl-gcc >/dev/null 2>&1; then \
+		CC=aarch64-linux-musl-gcc AR=aarch64-linux-musl-ar make -C pvm clean; \
+		CC=aarch64-linux-musl-gcc AR=aarch64-linux-musl-ar make -C pvm CC=aarch64-linux-musl-gcc AR=aarch64-linux-musl-ar; \
+		cp pvm/lib/libpvm.a pvm_tmp/libpvm.linux_arm64.a; \
+	else \
+		echo "    Skipping Linux arm64 (no aarch64-linux-musl-gcc)"; \
+	fi
+	@echo "  Building for macOS amd64..."
+	@CC=clang AR=ar make -C pvm clean
+	@CC=clang AR=ar make -C pvm CC=clang AR=ar CFLAGS="-Wall -Wextra -O3 -std=c99 -fPIC -target x86_64-apple-macos10.12"
+	@cp pvm/lib/libpvm.a pvm_tmp/libpvm.mac_amd64.a
+	@echo "  Building for macOS arm64..."
+	@CC=clang AR=ar make -C pvm clean
+	@CC=clang AR=ar make -C pvm CC=clang AR=ar CFLAGS="-Wall -Wextra -O3 -std=c99 -fPIC -target arm64-apple-macos11"
+	@cp pvm/lib/libpvm.a pvm_tmp/libpvm.mac_arm64.a
+	@echo "  Building for Windows amd64..."
+	@if command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then \
+		CC=x86_64-w64-mingw32-gcc AR=x86_64-w64-mingw32-ar make -C pvm clean; \
+		CC=x86_64-w64-mingw32-gcc AR=x86_64-w64-mingw32-ar make -C pvm CC=x86_64-w64-mingw32-gcc AR=x86_64-w64-mingw32-ar; \
+		cp pvm/lib/libpvm.a pvm_tmp/libpvm.windows_amd64.a; \
+	else \
+		echo "    Skipping Windows amd64 (no x86_64-w64-mingw32-gcc)"; \
+	fi
+	@echo "  Copying platform libraries to ffi directory..."
+	@cp pvm_tmp/libpvm.*.a ffi/
+	@cp pvm_tmp/libpvm.*.a pvm/lib/
+	@rm -rf pvm_tmp
+	@echo "libpvm.a files ready in ffi/ and pvm/lib/."
+	
 cargo_clean:
 	@echo "Cleaning FFI libraries!"
 	@cd bandersnatch && cargo clean
@@ -330,7 +367,9 @@ cargo_clean:
 
 ffi_force: cargo_clean ffi
 
-ffi: cryptolib
+ffi: cryptolib pvmlib
+
+
 
 beauty:
 	@echo "Running go fmt on all Go files..."

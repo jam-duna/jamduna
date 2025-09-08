@@ -1,0 +1,252 @@
+package statedb
+
+import (
+	"fmt"
+	"sync"
+	"unsafe"
+)
+
+// #cgo CFLAGS: -I${SRCDIR}/../pvm/include
+// #cgo linux,amd64 LDFLAGS: -L${SRCDIR}/../ffi -lpvm.linux_amd64
+// #cgo linux,arm64 LDFLAGS: -L${SRCDIR}/../ffi -lpvm.linux_arm64
+// #cgo darwin,amd64 LDFLAGS: -L${SRCDIR}/../ffi -lpvm.mac_amd64
+// #cgo darwin,arm64 LDFLAGS: -L${SRCDIR}/../ffi -lpvm.mac_arm64
+// #cgo windows,amd64 LDFLAGS: -L${SRCDIR}/../ffi -lpvm.windows_amd64
+/*
+#include "pvm.h"
+extern pvm_host_result_t goInvokeHostFunction(pvm_vm_t* vm, int hostFuncID);
+*/
+import "C"
+
+var (
+	vmMap   = make(map[*C.pvm_vm_t]*VM)
+	vmMapMu sync.RWMutex
+)
+
+type Interpreter struct {
+	cVM *C.pvm_vm_t // FFI VM handle
+}
+
+func NewInterpreter(Service_index uint32, p *Program, initialRegs []uint64, initialPC uint64, initialGas uint64, vm *VM) *Interpreter {
+	// Create VM using FFI API with integrated setup
+	var bitmaskPtr *C.uint8_t
+	var jumpTablePtr *C.uint32_t
+
+	if len(p.K) > 0 {
+		bitmaskPtr = (*C.uint8_t)(unsafe.Pointer(&p.K[0]))
+	}
+	if len(p.J) > 0 {
+		jumpTablePtr = (*C.uint32_t)(unsafe.Pointer(&p.J[0]))
+	}
+
+	cVM := C.pvm_create(
+		C.uint32_t(vm.Service_index),
+		(*C.uint8_t)(unsafe.Pointer(&p.Code[0])),
+		C.size_t(len(p.Code)),
+		(*C.uint64_t)(unsafe.Pointer(&initialRegs[0])),
+		bitmaskPtr,
+		C.size_t(len(p.K)),
+		jumpTablePtr,
+		C.size_t(len(p.J)),
+		C.uint64_t(initialGas))
+	// TODO: correct error handling
+	if cVM == nil {
+		return nil
+	}
+
+	vmMapMu.Lock()
+	vmMap[cVM] = vm
+	vmMapMu.Unlock()
+	return &Interpreter{
+		cVM: cVM,
+	}
+}
+func (vm *Interpreter) SetMemoryBounds(rwAddr, rwEnd, roAddr, roEnd, outputAddr, outputEnd, stackAddr, stackEnd uint32) {
+	C.pvm_set_memory_bounds(vm.cVM,
+		C.uint32_t(rwAddr), C.uint32_t(rwEnd),
+		C.uint32_t(roAddr), C.uint32_t(roEnd),
+		C.uint32_t(outputAddr), C.uint32_t(outputEnd),
+		C.uint32_t(stackAddr), C.uint32_t(stackEnd))
+}
+
+// Destroy cleans up the C VM resources
+func (vm *Interpreter) Destroy() {
+	if vm.cVM != nil {
+		vmMapMu.Lock()
+		delete(vmMap, vm.cVM)
+		vmMapMu.Unlock()
+		C.pvm_destroy(vm.cVM)
+		vm.cVM = nil
+	}
+}
+
+func (ram *Interpreter) WriteRAMBytes(address uint32, data []byte) uint64 {
+	if len(data) == 0 {
+		return OK
+	}
+
+	// VM must be created before writing
+	if ram.cVM == nil {
+		return OOB // Return error if VM not ready
+	}
+
+	return uint64(C.pvm_write_ram_bytes(ram.cVM, C.uint32_t(address), (*C.uint8_t)(&data[0]), C.uint32_t(len(data))))
+}
+
+func (vm *Interpreter) SetHeapPointer(pointer uint32) {
+	C.pvm_set_heap_pointer(vm.cVM, C.uint32_t(pointer))
+}
+
+func (vm *Interpreter) GetGas() int64 {
+	if vm.cVM != nil {
+		return int64(C.pvm_get_gas(vm.cVM))
+	}
+	return 0
+}
+
+// ReadRegister reads a register value from the C VM
+func (vm *Interpreter) ReadRegister(idx int) uint64 {
+	if vm.cVM == nil || idx < 0 || idx >= 13 {
+		return 0
+	}
+	return uint64(C.pvm_get_register(vm.cVM, C.int(idx)))
+}
+
+// WriteRegister writes a register value to the C VM
+func (vm *Interpreter) WriteRegister(idx int, value uint64) {
+	if vm.cVM == nil || idx < 0 || idx >= 13 {
+		return
+	}
+	C.pvm_set_register(vm.cVM, C.int(idx), C.uint64_t(value))
+}
+
+// ReadRegisters returns all register values from the C VM as an array
+func (vm *Interpreter) ReadRegisters() [13]uint64 {
+	var registers [13]uint64
+	if vm.cVM == nil {
+		return registers
+	}
+
+	for i := 0; i < 13; i++ {
+		registers[i] = uint64(C.pvm_get_register(vm.cVM, C.int(i)))
+	}
+	return registers
+}
+
+func (ram *Interpreter) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
+	if length == 0 {
+		return []byte{}, OK
+	}
+
+	buffer := make([]byte, length)
+	var errCode C.int
+	result := C.pvm_read_ram_bytes(ram.cVM, C.uint32_t(address), (*C.uint8_t)(&buffer[0]), C.uint32_t(length), &errCode)
+	if errCode != 0 {
+		return nil, uint64(errCode)
+	}
+	return buffer, uint64(result)
+}
+
+func (vm *Interpreter) SetHostCallBack() {
+	// Set host function callback
+	C.pvm_set_host_callback(vm.cVM, C.pvm_host_callback_t(C.goInvokeHostFunction))
+}
+func (vm *Interpreter) SetLogging() {
+	// Set logging and tracing based on PvmLogging
+	if PvmLogging {
+		C.pvm_set_logging(vm.cVM, C.int(1))
+	} else {
+		C.pvm_set_logging(vm.cVM, C.int(0))
+	}
+	C.pvm_set_tracing(vm.cVM, C.int(0))
+}
+
+// Execute runs VM execution using the C interpreter
+func (vm *Interpreter) Execute(pvm *VM, EntryPoint uint32) error {
+	// ***** Execute ****
+	result := C.pvm_execute(vm.cVM, C.uint32_t(EntryPoint), 0)
+
+	//fmt.Printf("===> Post-execution  Gas=%d, ResultCode=%d\n", vm.GetGas(), vm.ResultCode)
+
+	// Get post-execution state
+	pvm.ResultCode = vm.GetResultCode()
+	pvm.MachineState = vm.GetMachineState()
+	pvm.terminated = vm.IsTerminated()
+	switch result {
+	case C.PVM_RESULT_OK:
+		return nil
+	case C.PVM_RESULT_PANIC:
+		return nil
+	case C.PVM_RESULT_HOST_CALL:
+		return nil
+	case C.PVM_RESULT_OOG:
+		return nil
+	default:
+		return fmt.Errorf("VM execution failed with result code %d", result)
+	}
+}
+func (vm *Interpreter) IsTerminated() bool {
+	return C.pvm_is_terminated(vm.cVM) != 0
+}
+func (vm *Interpreter) GetResultCode() uint8 {
+	return uint8(C.pvm_get_result_code(vm.cVM))
+}
+func (vm *Interpreter) GetMachineState() uint8 {
+	// Get post-execution state
+	return uint8(C.pvm_get_machine_state(vm.cVM))
+}
+
+//export goInvokeHostFunction
+func goInvokeHostFunction(cvm *C.pvm_vm_t, hostFuncID C.int) C.pvm_host_result_t {
+	// Look up the Go VM from our mapping
+	vmMapMu.RLock()
+	vm, ok := vmMap[cvm]
+	vmMapMu.RUnlock()
+	if !ok {
+		// VM not found, this shouldn't happen - log error and return
+		fmt.Printf("Error: goInvokeHostFunction called with unknown C VM pointer\n")
+		return C.PVM_HOST_ERROR
+	}
+
+	// Invoke Go host function with panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("Host function %d panicked: %v\n", hostFuncID, r)
+			// Set VM to panic state
+			vm.MachineState = PANIC
+			vm.ResultCode = PANIC
+			vm.terminated = true
+		}
+	}()
+
+	// Call the host function
+	vm.InvokeHostCall(int(hostFuncID))
+
+	// Check if VM was terminated by host function
+	if vm.terminated {
+		return C.PVM_HOST_TERMINATE
+	}
+
+	// Check if host function caused panic
+	if vm.MachineState == PANIC {
+		return C.PVM_HOST_ERROR
+	}
+
+	return C.PVM_HOST_CONTINUE
+}
+
+func (vm *Interpreter) Init(argumentData []byte) (err error) {
+	if len(argumentData) == 0 {
+		argumentData = []byte{0}
+	}
+
+	// argument
+	argAddr := uint32(0xFFFFFFFF) - Z_Z - Z_I + 1
+	vm.WriteRegister(0, uint64(0xFFFFFFFF-(1<<16)+1))
+	vm.WriteRegister(1, uint64(0xFFFFFFFF-2*Z_Z-Z_I+1))
+	vm.WriteRegister(7, uint64(argAddr))
+	vm.WriteRegister(8, uint64(uint32(len(argumentData))))
+	vm.WriteRAMBytes(argAddr, argumentData)
+
+	return nil
+}

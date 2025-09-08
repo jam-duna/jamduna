@@ -3,37 +3,19 @@ package statedb
 import (
 	"fmt"
 	"math"
-	"sync"
-	"unsafe"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/pvm/program"
 	"github.com/colorfulnotion/jam/types"
 )
 
-// #cgo CFLAGS: -I${SRCDIR}/../pvm/include
-// #cgo LDFLAGS: ${SRCDIR}/../pvm/lib/libpvm.a
-/*
-#include "pvm.h"
-extern pvm_host_result_t goInvokeHostFunction(pvm_vm_t* vm, int hostFuncID);
-*/
-import "C"
-
-// Buffer pool to eliminate allocation overhead
-var bufferPool = sync.Pool{
-	New: func() interface{} {
-		return make([]byte, 20*1024*1024) // 20MB buffer
-	},
-}
-
 const (
-	BackendInterpreter = "interpreter" // Pure Go backend
-	BackendCompiler    = "compiler"    // CGO C backend
+	BackendInterpreter = "interpreter" // C interpreter
+	BackendCompiler    = "compiler"    // X86 recompiler
 )
 
 const (
-	regSize = 13
-
 	W_X = 1024
 	M   = 128
 	V   = 1023
@@ -53,13 +35,28 @@ const (
 )
 
 var (
-	PvmLogging = true
-
-	// VM mapping for callbacks
-	vmMap = make(map[*C.pvm_vm_t]*VM)
+	PvmLogging = false
 )
 
+type ExecutionVM interface {
+	ReadRegister(int) uint64
+	ReadRegisters() [13]uint64
+	WriteRegister(int, uint64)
+	ReadRAMBytes(uint32, uint32) ([]byte, uint64)
+	WriteRAMBytes(uint32, []byte) uint64
+	SetHeapPointer(uint32)
+
+	GetGas() int64
+
+	Init(argument_data_a []byte) (err error)
+	Execute(vm *VM, EntryPoint uint32) error
+	Destroy()
+}
+
 type VM struct {
+	ExecutionVM
+	VMs map[uint32]*ExecutionVM
+
 	Backend        string
 	IsChild        bool
 	ResultCode     uint8
@@ -67,15 +64,17 @@ type VM struct {
 	MachineState   uint8
 	Fault_address  uint32
 	terminated     bool
-	hostCall       bool // ̵h in GP
-	host_func_id   int  // h in GP
 
+	Mode    string
 	hostenv types.HostEnv
+	logging string
 
-	cVM *C.pvm_vm_t // FFI VM handle
-	VMs map[uint32]*VM
+	// service metadata
+	ServiceAccount  *types.ServiceAccount
+	Service_index   uint32
+	ServiceMetadata []byte
 
-	// Work Package Inputs
+	// Refine Inputs and Outputs
 	WorkItemIndex             uint32
 	WorkPackage               types.WorkPackage
 	Extrinsics                types.ExtrinsicsBlobs
@@ -84,43 +83,19 @@ type VM struct {
 	AccumulateOperandElements []types.AccumulateOperandElements
 	Transfers                 []types.DeferredTransfer
 	N                         common.Hash
+	Delta                     map[uint32]*types.ServiceAccount
 
-	// Invocation functions entry point
-	EntryPoint uint32
-
-	logging string
-
-	// Refine argument
 	RefineM_map        map[uint32]*RefineM
 	Exports            [][]byte
 	ExportSegmentIndex uint32
 
-	// Accumulate argument
+	// Accumulate (used in host functions)
 	X        *types.XContext
 	Y        types.XContext
 	Timeslot uint32
-
-	// General argument
-	ServiceAccount *types.ServiceAccount
-	Service_index  uint32
-	CoreIndex      uint16
-
-	Delta map[uint32]*types.ServiceAccount
-
-	// service metadata
-	ServiceMetadata []byte
-	Mode            string
-	Identifier      string
 }
 
-type Program struct {
-	JSize uint64
-	Z     uint8
-	CSize uint64
-	J     []uint32
-	Code  []byte
-	K     []byte
-}
+type Program program.Program
 
 const (
 	NONE = (1 << 64) - 1 // 2^32 - 1 15
@@ -141,56 +116,6 @@ const (
 	HOST  = 3 // host-call̵ h
 	OOG   = 4 // out-of-gas ∞
 )
-
-func extractBytes(input []byte) ([]byte, []byte) {
-	/*
-		In GP_0.36 (272):
-		If the input value of (272) is large, "l" will also increase and vice versa.
-		"l" is than be used to encode first byte and the reaming "l" bytes.
-		If the first byte is large, that means the number of the entire encoded bytes is large and vice versa.
-		So the first byte can be used to determine the number of bytes to extract and the rule is as follows:
-	*/
-
-	if len(input) == 0 {
-		return nil, input
-	}
-
-	firstByte := input[0]
-	var numBytes int
-
-	// Determine the number of bytes to extract based on the value of the 0th byte.
-	switch {
-	case firstByte < 128:
-		numBytes = 1
-	case firstByte >= 128 && firstByte < 192:
-		numBytes = 2
-	case firstByte >= 192 && firstByte < 224:
-		numBytes = 3
-	case firstByte >= 224 && firstByte < 240:
-		numBytes = 4
-	case firstByte >= 240 && firstByte < 248:
-		numBytes = 5
-	case firstByte >= 248 && firstByte < 252:
-		numBytes = 6
-	case firstByte >= 252 && firstByte < 254:
-		numBytes = 7
-	case firstByte >= 254:
-		numBytes = 8
-	default:
-		numBytes = 1
-	}
-
-	// If the input length is insufficient to extract the specified number of bytes, return the original input.
-	if len(input) < numBytes {
-		return input, nil
-	}
-
-	// Extract the specified number of bytes and return the remaining bytes.
-	extracted := input[:numBytes]
-	remaining := input[numBytes:]
-
-	return extracted, remaining
-}
 
 func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, []byte) {
 	pure := p
@@ -222,11 +147,11 @@ func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, 
 		// fmt.Printf("DecodeProgram o_size: %d, w_size: %d, z_val: %d, s_val: %d len(w_byte)=%d\n", o_size, w_size, z_val, s_val, len(w_byte))
 		return nil, 0, 0, 0, 0, nil, nil
 	}
-	return decodeCorePart(pure[offset:]), uint32(o_size), uint32(w_size), uint32(z_val), uint32(s_val), o_byte, w_byte
+	return (*Program)(decodeCorePart(pure[offset:])), uint32(o_size), uint32(w_size), uint32(z_val), uint32(s_val), o_byte, w_byte
 }
 
 func DecodeProgram_pure_pvm_blob(p []byte) *Program {
-	return decodeCorePart(p)
+	return (*Program)(decodeCorePart(p))
 }
 
 // EncodeProgram encodes raw instruction code and bitmask into a PVM blob format
@@ -278,71 +203,9 @@ func compressBits(bitmask []byte) []byte {
 
 	return compressed
 }
-func expandBits(k_bytes []byte, c_size uint32) []byte {
-	totalBits := len(k_bytes) * 8
-	if totalBits > int(c_size) {
-		totalBits = int(c_size)
-	}
-	kCombined := make([]byte, totalBits)
-	bitIndex := 0
 
-	for _, b := range k_bytes {
-		if bitIndex+8 <= totalBits {
-			kCombined[bitIndex+0] = b & 1
-			kCombined[bitIndex+1] = (b >> 1) & 1
-			kCombined[bitIndex+2] = (b >> 2) & 1
-			kCombined[bitIndex+3] = (b >> 3) & 1
-			kCombined[bitIndex+4] = (b >> 4) & 1
-			kCombined[bitIndex+5] = (b >> 5) & 1
-			kCombined[bitIndex+6] = (b >> 6) & 1
-			kCombined[bitIndex+7] = (b >> 7) & 1
-			bitIndex += 8
-		} else {
-			// Handle final partial byte...
-			for i := 0; bitIndex < totalBits; i++ {
-				kCombined[bitIndex] = (b >> i) & 1
-				bitIndex++
-			}
-			break
-		}
-	}
-	return kCombined
-}
+var decodeCorePart = program.DecodeCorePart
 
-func decodeCorePart(p []byte) *Program {
-
-	j_size_b, p_remaining := extractBytes(p)
-	z_b, p_remaining := extractBytes(p_remaining)
-	c_size_b, p_remaining := extractBytes(p_remaining)
-
-	j_size, _ := types.DecodeE(j_size_b)
-	z, _ := types.DecodeE(z_b)
-	c_size, _ := types.DecodeE(c_size_b)
-
-	j_len := j_size * z
-	c_len := c_size
-
-	j_byte := p_remaining[:min(len(p_remaining), int(j_len))]
-	c_byte := p_remaining[min(len(p_remaining), int(j_len)):min(len(p_remaining), int(j_len+c_len))]
-	k_bytes := p_remaining[min(len(p_remaining), int(j_len+c_len)):]
-
-	var j_array []uint32
-	for i := 0; i < len(j_byte); i += int(z) {
-		end := min(i+int(z), len(j_byte))
-		j_array = append(j_array, uint32(types.DecodeE_l(j_byte[i:end])))
-	}
-
-	// build bitmask
-	kCombined := expandBits(k_bytes, uint32(c_size))
-	return &Program{
-		JSize: j_size,
-		Z:     uint8(z),
-		CSize: c_size,
-		J:     j_array,
-		Code:  c_byte,
-		K:     kCombined,
-	}
-}
 func CeilingDivide(a, b uint32) uint32 {
 	return (a + b - 1) / b
 }
@@ -355,7 +218,6 @@ func Z_func(x uint32) uint32 {
 	return Z_Z * CeilingDivide(x, Z_Z)
 }
 
-// NewVM initializes a new VM with a given program
 // NewVM initializes a new VM with a given program
 func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC uint64, initialHeap uint64, hostENV types.HostEnv, jam_ready_blob bool, Metadata []byte, pvmBackend string, initialGas uint64) *VM {
 
@@ -387,7 +249,6 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		Exports:         make([][]byte, 0),
 		Service_index:   service_index,
 		ServiceMetadata: Metadata,
-		CoreIndex:       2048,
 		Backend:         pvmBackend,
 	}
 
@@ -409,246 +270,70 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 	if len(p.Code) == 0 {
 		panic("No code provided to NewVM")
 	}
-	// Create VM using FFI API with integrated setup
-	var bitmaskPtr *C.uint8_t
-	var jumpTablePtr *C.uint32_t
+	if vm.Backend == BackendInterpreter {
+		// Create VM using FFI API
+		machine := NewInterpreter(service_index, p, initialRegs, initialPC, initialGas, vm)
+		vm.ExecutionVM = machine
 
-	if len(p.K) > 0 {
-		bitmaskPtr = (*C.uint8_t)(unsafe.Pointer(&p.K[0]))
-	}
-	if len(p.J) > 0 {
-		jumpTablePtr = (*C.uint32_t)(unsafe.Pointer(&p.J[0]))
-	}
+		// o - read-only
+		ro_data_address := uint32(Z_Z)
+		ro_data_address_end := ro_data_address + P_func(o_size)
 
-	vm.cVM = C.pvm_create(
-		C.uint32_t(vm.Service_index),
-		(*C.uint8_t)(unsafe.Pointer(&p.Code[0])),
-		C.size_t(len(p.Code)),
-		(*C.uint64_t)(unsafe.Pointer(&initialRegs[0])),
-		bitmaskPtr,
-		C.size_t(len(p.K)),
-		jumpTablePtr,
-		C.size_t(len(p.J)),
-		C.uint64_t(initialGas))
+		machine.SetHostCallBack()
+		machine.SetLogging()
+		// s - stack
+		p_s := P_func(s)
+		stack_address := uint32(uint64(1<<32) - uint64(2*Z_Z) - uint64(Z_I) - uint64(p_s))
+		stack_address_end := uint32(uint64(1<<32) - uint64(2*Z_Z) - uint64(Z_I))
 
-	// o - read-only
-	ro_data_address := uint32(Z_Z)
-	ro_data_address_end := ro_data_address + P_func(o_size)
+		// a - argument outputs
+		output_address := uint32(0xFFFFFFFF) - Z_Z - Z_I + 1
+		output_end := uint32(0xFFFFFFFF)
 
-	// TODO: correct error handling
-	if vm.cVM == nil {
-		return nil
-	}
+		// w - read-write
+		rw_data_address := uint32(2*Z_Z) + Z_func(o_size)
+		rw_data_address_end := rw_data_address + P_func(w_size)
+		current_heap_pointer := rw_data_address_end
 
-	// Set host function callback
-	C.pvm_set_host_callback(vm.cVM, C.pvm_host_callback_t(C.goInvokeHostFunction))
-
-	// Set logging and tracing based on PvmLogging
-	if PvmLogging {
-		C.pvm_set_logging(vm.cVM, C.int(1))
-	} else {
-		C.pvm_set_logging(vm.cVM, C.int(1))
-	}
-	C.pvm_set_tracing(vm.cVM, C.int(0))
-
-	// s - stack
-	p_s := P_func(s)
-	stack_address := uint32(uint64(1<<32) - uint64(2*Z_Z) - uint64(Z_I) - uint64(p_s))
-	stack_address_end := uint32(uint64(1<<32) - uint64(2*Z_Z) - uint64(Z_I))
-
-	// a - argument outputs
-	output_address := uint32(0xFFFFFFFF) - Z_Z - Z_I + 1
-	output_end := uint32(0xFFFFFFFF)
-
-	vmMap[vm.cVM] = vm
-
-	// w - read-write
-	rw_data_address := uint32(2*Z_Z) + Z_func(o_size)
-	rw_data_address_end := rw_data_address + P_func(w_size)
-	current_heap_pointer := rw_data_address_end
-
-	z_o := Z_func(o_size)
-	z_w := Z_func(w_size + z*Z_P)
-	z_s := Z_func(s)
-	requiredMemory = uint64(5*Z_Z + z_o + z_w + z_s + Z_I)
-	if requiredMemory > math.MaxUint32 {
-		log.Error(vm.logging, "Standard Program Initialization Error")
-	}
-
-	C.pvm_set_heap_pointer(vm.cVM, C.uint32_t(current_heap_pointer))
-	vm.SetMemoryBounds(rw_data_address, rw_data_address_end, ro_data_address, ro_data_address_end, output_address, output_end, stack_address, stack_address_end)
-	if len(o_byte) > 0 {
-		result := vm.WriteRAMBytes(Z_Z, o_byte)
-		if result != OK {
-			fmt.Printf("Warning: Failed to initialize o_byte data: error %d\n", result)
-			panic(3)
+		z_o := Z_func(o_size)
+		z_w := Z_func(w_size + z*Z_P)
+		z_s := Z_func(s)
+		requiredMemory = uint64(5*Z_Z + z_o + z_w + z_s + Z_I)
+		if requiredMemory > math.MaxUint32 {
+			log.Error(vm.logging, "Standard Program Initialization Error")
 		}
-	}
-	if len(w_byte) > 0 {
-		result := vm.WriteRAMBytes(rw_data_address, w_byte)
-		if result != OK {
-			fmt.Printf("Warning: Failed to initialize w_byte data: error %d\n", result)
+		machine.SetHeapPointer(current_heap_pointer)
+		machine.SetMemoryBounds(rw_data_address, rw_data_address_end, ro_data_address, ro_data_address_end, output_address, output_end, stack_address, stack_address_end)
+		if len(o_byte) > 0 {
+			result := vm.WriteRAMBytes(Z_Z, o_byte)
+			if result != OK {
+				fmt.Printf("Warning: Failed to initialize o_byte data: error %d\n", result)
+				panic("Failed to initialize o_byte data")
+			}
 		}
+		if len(w_byte) > 0 {
+			result := vm.WriteRAMBytes(rw_data_address, w_byte)
+			if result != OK {
+				fmt.Printf("Warning: Failed to initialize w_byte data: error %d\n", result)
+				panic("Failed to initialize w_byte data")
+			}
+		}
+	} else if vm.Backend == BackendCompiler {
+		rvm := NewRecompilerVM(service_index, code, initialRegs, initialPC, initialHeap, hostENV, jam_ready_blob, Metadata, initialGas, pvmBackend)
+		if rvm == nil {
+			return nil
+		}
+		vm.ExecutionVM = rvm
 	}
 
 	vm.VMs = nil
 	return vm
 }
+
 func NewVMFromCode(serviceIndex uint32, code []byte, i uint64, initialHeap uint64, hostENV types.HostEnv, pvmBackend string, initialGas uint64) *VM {
 	// strip metadata
 	metadata, c := types.SplitMetadataAndCode(code)
 	return NewVM(serviceIndex, c, []uint64{}, i, initialHeap, hostENV, true, []byte(metadata), pvmBackend, initialGas)
-}
-
-//export goInvokeHostFunction
-func goInvokeHostFunction(cvm *C.pvm_vm_t, hostFuncID C.int) C.pvm_host_result_t {
-	// Look up the Go VM from our mapping
-	vm, ok := vmMap[cvm]
-	if !ok {
-		// VM not found, this shouldn't happen - log error and return
-		fmt.Printf("Error: goInvokeHostFunction called with unknown C VM pointer\n")
-		return C.PVM_HOST_ERROR
-	}
-
-	// Set host call state
-	vm.hostCall = true
-	vm.host_func_id = int(hostFuncID)
-
-	// Invoke Go host function with panic recovery
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Printf("Host function %d panicked: %v\n", hostFuncID, r)
-			// Set VM to panic state
-			vm.MachineState = PANIC
-			vm.ResultCode = PANIC
-			vm.terminated = true
-		}
-		vm.hostCall = false
-		vm.host_func_id = 0
-	}()
-
-	// Call the host function
-	vm.InvokeHostCall(int(hostFuncID))
-
-	// Check if VM was terminated by host function
-	if vm.terminated {
-		return C.PVM_HOST_TERMINATE
-	}
-
-	// Check if host function caused panic
-	if vm.MachineState == PANIC {
-		return C.PVM_HOST_ERROR
-	}
-
-	return C.PVM_HOST_CONTINUE
-}
-
-// Execute runs VM execution using the C interpreter
-func (vm *VM) Execute() error {
-	// ***** Execute ****
-	result := C.pvm_execute(vm.cVM, C.uint32_t(vm.EntryPoint), 0)
-
-	// Get post-execution state
-	vm.ResultCode = uint8(C.pvm_get_result_code(vm.cVM))
-	vm.MachineState = uint8(C.pvm_get_machine_state(vm.cVM))
-	vm.terminated = C.pvm_is_terminated(vm.cVM) != 0
-
-	//fmt.Printf("===> Post-execution  Gas=%d, ResultCode=%d\n", vm.GetGas(), vm.ResultCode)
-
-	switch result {
-	case C.PVM_RESULT_OK:
-		return nil
-	case C.PVM_RESULT_PANIC:
-		return nil
-	case C.PVM_RESULT_HOST_CALL:
-		return nil
-	case C.PVM_RESULT_OOG:
-		return nil
-	default:
-		return fmt.Errorf("VM execution failed with result code %d", result)
-	}
-}
-
-// ReadRegister reads a register value from the C VM
-func (vm *VM) ReadRegister(idx int) uint64 {
-	if vm.cVM == nil || idx < 0 || idx >= 13 {
-		return 0
-	}
-	return uint64(C.pvm_get_register(vm.cVM, C.int(idx)))
-}
-
-// WriteRegister writes a register value to the C VM
-func (vm *VM) WriteRegister(idx int, value uint64) {
-	if vm.cVM == nil || idx < 0 || idx >= 13 {
-		return
-	}
-	C.pvm_set_register(vm.cVM, C.int(idx), C.uint64_t(value))
-}
-
-// ReadRegisters returns all register values from the C VM as an array
-func (vm *VM) ReadRegisters() [13]uint64 {
-	var registers [13]uint64
-	if vm.cVM == nil {
-		return registers
-	}
-
-	for i := 0; i < 13; i++ {
-		registers[i] = uint64(C.pvm_get_register(vm.cVM, C.int(i)))
-	}
-	return registers
-}
-
-func (ram *VM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
-	if length == 0 {
-		return []byte{}, OK
-	}
-
-	buffer := make([]byte, length)
-	var errCode C.int
-	result := C.pvm_read_ram_bytes(ram.cVM, C.uint32_t(address), (*C.uint8_t)(&buffer[0]), C.uint32_t(length), &errCode)
-
-	if errCode != 0 {
-		return nil, uint64(errCode)
-	}
-
-	return buffer, uint64(result)
-}
-
-func (ram *VM) WriteRAMBytes(address uint32, data []byte) uint64 {
-	if len(data) == 0 {
-		return OK
-	}
-
-	// VM must be created before writing
-	if ram.cVM == nil {
-		return OOB // Return error if VM not ready
-	}
-
-	return uint64(C.pvm_write_ram_bytes(ram.cVM, C.uint32_t(address), (*C.uint8_t)(&data[0]), C.uint32_t(len(data))))
-}
-
-func (vm *VM) GetGas() int64 {
-	if vm.cVM != nil {
-		return int64(C.pvm_get_gas(vm.cVM))
-	}
-	return 0
-}
-
-func (vm *VM) SetMemoryBounds(rwAddr, rwEnd, roAddr, roEnd, outputAddr, outputEnd, stackAddr, stackEnd uint32) {
-	C.pvm_set_memory_bounds(vm.cVM,
-		C.uint32_t(rwAddr), C.uint32_t(rwEnd),
-		C.uint32_t(roAddr), C.uint32_t(roEnd),
-		C.uint32_t(outputAddr), C.uint32_t(outputEnd),
-		C.uint32_t(stackAddr), C.uint32_t(stackEnd))
-}
-
-// Destroy cleans up the C VM resources
-func (vm *VM) Destroy() {
-	if vm.cVM != nil {
-		delete(vmMap, vm.cVM)
-		C.pvm_destroy(vm.cVM)
-		vm.cVM = nil
-	}
 }
 
 var RecordTime = true
@@ -661,19 +346,13 @@ func (vm *VM) GetServiceIndex() uint32 {
 	return vm.Service_index
 }
 
-func (vm *VM) SetCore(coreIndex uint16) {
-	vm.CoreIndex = coreIndex
-}
-
 // input by order([work item index],[workpackage itself], [result from IsAuthorized], [import segments], [export count])
 func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash, n common.Hash) (r types.Result, res uint64, exportedSegments [][]byte) {
 	vm.Mode = ModeRefine
 
 	workitem := workPackage.WorkItems[workitemIndex]
 
-	// ADD IN 0.6.6
 	a := types.E(uint64(workitemIndex))
-	//fmt.Printf("ExecuteRefine  workitemIndex %d bytes - %x\n", len(a), a)
 	serviceBytes := types.E(uint64(workitem.Service))
 	a = append(a, serviceBytes...)
 	//fmt.Printf("ExecuteRefine  s %d bytes - %x\n", len(serviceBytes), serviceBytes)
@@ -751,46 +430,12 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Resul
 }
 
 func (vm *VM) executeWithBackend(argumentData []byte, entryPoint uint32) {
-	switch vm.Backend {
-	case BackendInterpreter:
-		if len(argumentData) == 0 {
-			argumentData = []byte{0}
-		}
-
-		// argument
-		argAddr := uint32(0xFFFFFFFF) - Z_Z - Z_I + 1
-		vm.WriteRegister(0, uint64(0xFFFFFFFF-(1<<16)+1))
-		vm.WriteRegister(1, uint64(0xFFFFFFFF-2*Z_Z-Z_I+1))
-		vm.WriteRegister(7, uint64(argAddr))
-		vm.WriteRegister(8, uint64(uint32(len(argumentData))))
-		vm.WriteRAMBytes(argAddr, argumentData)
-
-		// fmt.Printf("Standard Program Initialization: %s=%x %s=%x\n", reg(7), argAddr, reg(8), uint32(len(argument_data_a)))
-
-		vm.EntryPoint = entryPoint
-		vm.IsChild = false
-		err := vm.Execute()
-		if err != nil {
-			log.Error(vm.logging, "C VM execution failed", "error", err)
-		}
-
-	case BackendCompiler:
-		// rvm, err := NewCompilerVM(vm)
-		// if err != nil {
-		// 	log.Error(vm.logging, "CompilerVM creation failed", "error", err)
-		// 	return
-		// }
-		// vm.initializationTime = common.Elapsed(startTime)
-		// startTime = time.Now()
-		// if err = rvm.Standard_Program_Initialization(argumentData); err != nil {
-		// 	log.Error(vm.logging, "CompilerVM Standard_Program_Initialization failed", "error", err)
-		// 	return
-		// }
-		// vm.standardInitTime = common.Elapsed(startTime)
-		// rvm.Execute(entryPoint)
-	default:
-		log.Crit(vm.logging, "Unknown VM mode", "mode", vm.Backend)
-		panic(0)
+	// fmt.Printf("Standard Program Initialization: %s=%x %s=%x\n", reg(7), argAddr, reg(8), uint32(len(argument_data_a)))
+	vm.Init(argumentData)
+	vm.IsChild = false
+	err := vm.ExecutionVM.Execute(vm, entryPoint)
+	if err != nil {
+		log.Error(vm.logging, "C VM execution failed", "error", err)
 	}
 }
 

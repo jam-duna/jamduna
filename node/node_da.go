@@ -289,12 +289,6 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 
 	pvmBackend := n.pvmBackend
 	if firstGuarantorOrAuditor {
-		/*
-			if useCompiler {
-				pvmBackend = pvm.BackendCompiler // MK: DO NOT MUTATE/HARDCODE pvmBackend
-			}
-		*/
-
 		n.nodeSelf.Telemetry(log.MsgTypeWorkPackageBundle, package_bundle, "codec_encoded", types.EncodeAsHex(package_bundle))
 	}
 
@@ -322,7 +316,6 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		// fmt.Printf("index %d, code len=%d\n", service_index, len(code))
 		vm := statedb.NewVMFromCode(service_index, code, 0, 0, targetStateDB, pvmBackend, workItem.RefineGasLimit)
 		vm.Timeslot = n.statedb.JamState.SafroleState.Timeslot
-		vm.SetCore(workPackageCoreIndex)
 
 		output, _, exported_segments := vm.ExecuteRefine(uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData, p_u, common.BytesToHash(trie.H0))
 

@@ -3,6 +3,7 @@ package types
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"time"
 )
 
@@ -99,6 +100,64 @@ const (
 	PVMInitSegmentSize               = 1 << 16 // Z_Q = 2^16: The standard pvm program initialization segment size. See section A.7.
 	RecoveryThreshold                = 2
 )
+
+type Parameters struct {
+	// E_8: B_I, B_L, B_S
+	MinElectiveServiceItemBalance  uint64 `json:"min_elective_service_item_balance"`  // B_I
+	MinElectiveServiceOctetBalance uint64 `json:"min_elective_service_octet_balance"` // B_L
+	BaseServiceBalance             uint64 `json:"base_service_balance"`               // B_S
+
+	// E_2: C
+	TotalCores uint16 `json:"total_cores"` // C
+
+	// E_4: D, E
+	PreimageExpiryPeriod uint32 `json:"preimage_expiry_period"` // D
+	EpochLength          uint32 `json:"epoch_length"`           // E
+
+	// E_8: G_A, G_I, G_R, G_T
+	AccumulationGasAllocation  uint64 `json:"accumulation_gas_allocation"`  // G_A
+	IsAuthorizedGasAllocation  uint64 `json:"is_authorized_gas_allocation"` // G_I
+	RefineGasAllocation        uint64 `json:"refine_gas_allocation"`        // G_R
+	AccumulateGasAllocation_GT uint64 `json:"accumulate_gas_allocation_gt"` // G_T
+
+	// E_2: H, I, J, K
+	RecentHistorySize              uint16 `json:"recent_history_size"`                 // H
+	MaxWorkItemsPerPackage         uint16 `json:"max_work_items_per_package"`          // I
+	MaxDependencyItemsInWorkReport uint16 `json:"max_dependency_items_in_work_report"` // J
+	MaxTicketsPerExtrinsic         uint16 `json:"max_tickets_per_extrinsic"`           // K
+
+	// E_4: L
+	LookupAnchorMaxAge uint32 `json:"lookup_anchor_max_age"` // L
+
+	// E_2: N, O
+	TicketEntriesPerValidator uint16 `json:"ticket_entries_per_validator"` // N
+	MaxAuthorizationPoolItems uint16 `json:"max_authorization_pool_items"` // O
+
+	// E_2: P, Q, R, T, U, V
+	SecondsPerSlot                   uint16 `json:"seconds_per_slot"`                    // P
+	MaxAuthorizationQueueItems       uint16 `json:"max_authorization_queue_items"`       // Q
+	RotationPeriod                   uint16 `json:"rotation_period"`                     // R
+	ExtrinsicMaximumPerPackage       uint16 `json:"extrinsic_maximum_per_package"`       // T
+	UnavailableWorkReplacementPeriod uint16 `json:"unavailable_work_replacement_period"` // U
+	TotalValidators                  uint16 `json:"total_validators"`                    // V
+
+	// E_4: W_A, W_B, W_C, W_E, W_G, W_M, W_P, W_R, W_T, W_X, Y
+	MaxIsAuthorizedCodeBytes  uint32 `json:"max_is_authorized_code_bytes"`  // W_A
+	MaxEncodedWorkPackageSize uint32 `json:"max_encoded_work_package_size"` // W_B
+	MaxServiceCodeSize        uint32 `json:"max_service_code_size"`         // W_C
+	ECPieceSize               uint32 `json:"ec_piece_size"`                 // W_E
+	MaxImports                uint32 `json:"max_imports"`                   // W_M
+	NumECPiecesPerSegment     uint32 `json:"num_ec_pieces_per_segment"`     // W_P
+	MaxEncodedWorkReportSize  uint32 `json:"max_encoded_work_report_size"`  // W_R
+	TransferMemoSize          uint32 `json:"transfer_memo_size"`            // W_T
+	MaxExports                uint32 `json:"max_exports"`                   // W_X
+	TicketSubmissionEndSlot   uint32 `json:"ticket_submission_end_slot"`    // Y
+}
+
+func (p *Parameters) String() string {
+	prettyJSON, _ := json.MarshalIndent(p, "", "  ")
+	return string(prettyJSON)
+}
 
 // 0.7.0 Bytes encodes the AccountState as a byte slice
 func ParameterBytes() ([]byte, error) {

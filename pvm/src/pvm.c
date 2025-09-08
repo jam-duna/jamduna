@@ -67,7 +67,7 @@ pvm_vm_t* pvm_create(uint32_t service_index,
     vm->host_callback = NULL;
 
     // Initialize logging and tracing (disabled by default)
-    vm->pvm_logging = 1;
+    vm->pvm_logging = 0;
     vm->pvm_tracing = 0;
 
     // Setup bitmask, jump table, and gas internally
@@ -116,7 +116,8 @@ void pvm_set_memory_bounds(pvm_vm_t* vm,
         if (vm->rw_data) {
             free(vm->rw_data);
         }
-        vm->rw_data = (uint8_t*)calloc(rw_size + 4*1024*1024, 1);
+        vm->max_heapsize = mb_func(rw_size);
+        vm->rw_data = (uint8_t*)calloc(vm->max_heapsize, 1);
         if (!vm->rw_data) {
             printf("ERROR: Failed to allocate RW buffer of size %u\n", rw_size);
             return;
@@ -246,8 +247,7 @@ pvm_result_t pvm_execute(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child) 
                    (long long)vm->gas, step, (unsigned long long)vm->pc, get_opcode_name(opcode), opcode);
             fflush(stdout);
         }
-        
-        // Dispatch to handler
+        // Advance PC to next instruction, dispatch to handler
         if (dispatch_table[opcode]) {
             dispatch_table[opcode](vm, operands, len_operands);
         } else {
@@ -364,12 +364,46 @@ void pvm_set_heap_pointer(pvm_vm_t* vm, uint32_t pointer) {
     vm->current_heap_pointer = pointer;
 }
 
-void pvm_allocate_pages(pvm_vm_t* vm, uint32_t start_page, uint32_t page_count) {
-    // TODO: fix this function to properly manage memory allocation as the heap expands
-    uint32_t required = (start_page + page_count) * Z_P;
-    if (vm->rw_data_address_end - vm->rw_data_address < required) {
-        vm->rw_data_address_end = vm->rw_data_address + required;
+void pvm_expand_heap(pvm_vm_t* vm, uint32_t new_heap_pointer) {
+    if (!vm ) return;
+    if (new_heap_pointer <= vm->current_heap_pointer) {
+        // No need to shrink!
+        return;
     }
+
+    // Calculate new heap size - use p_func for proper alignment
+    uint32_t current_size = vm->max_heapsize;
+    uint32_t required_size = new_heap_pointer - vm->rw_data_address;
+    uint32_t new_size = mb_func(required_size); 
+    
+    if (new_size <= current_size) {
+        // Current heap is already large enough, just update pointer
+        vm->current_heap_pointer = new_heap_pointer;
+        return;
+    }
+    
+    // 1. Create new heap of the correct size
+    uint8_t* new_heap = (uint8_t*)calloc(new_size, 1);
+    if (!new_heap) {
+        // Out of memory - could set machine state to panic
+        pvm_panic(vm, OOB);
+        return;
+    }
+    
+    // 2. Copy the old heap into the new heap
+    if (vm->rw_data && current_size > 0) {
+        memcpy(new_heap, vm->rw_data, current_size);
+    }
+    
+    // 3. Free the old heap
+    if (vm->rw_data) {
+        free(vm->rw_data);
+    }
+    
+    // 4. Update VM state with new heap
+    vm->rw_data = new_heap;
+    vm->max_heapsize = new_size;
+    vm->current_heap_pointer = new_heap_pointer;
 }
 
 static inline uint32_t ceiling_divide(uint32_t a, uint32_t b) {
@@ -378,6 +412,11 @@ static inline uint32_t ceiling_divide(uint32_t a, uint32_t b) {
 uint32_t p_func(uint32_t x) {
     return Z_P * ceiling_divide(x, Z_P);
 }
+
+uint32_t mb_func(uint32_t x) {
+    return 1024*1024 * ceiling_divide(x, 1024*1024);
+}
+
 
 static inline void put_uint16_le(uint8_t* buf, uint16_t val) {
     buf[0] = (uint8_t)(val & 0xFF);

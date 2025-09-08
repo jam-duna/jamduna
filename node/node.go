@@ -61,9 +61,9 @@ const (
 )
 
 const (
-	enableInit = false
-	numNodes   = types.TotalValidators
-	//quicAddr    = "127.0.0.1:%d"
+	enableInit  = false
+	numNodes    = types.TotalValidators
+	quicAddr    = "127.0.0.1:%d"
 	Grandpa     = false
 	GrandpaEasy = true
 	Audit       = false

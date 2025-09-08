@@ -1108,7 +1108,7 @@ func (vm *VM) hostInvoke() {
 	//new_machine.SetGas(int64(g))
 	switch vm.Backend {
 	case BackendInterpreter:
-		new_machine.Execute()
+		// new_machine.Execute(new_machine.pc)
 	case BackendCompiler:
 		// if recRam, ok := m_n.U.(*CompilerRam); ok {
 		// 	log.Info(vm.logging, "INVOKE: Compiler", "n", n, "o", o, "g", int64(g))
@@ -1162,12 +1162,12 @@ func (vm *VM) hostInvoke() {
 
 	//TODO: who
 
-	if new_machine.hostCall {
-		vm.WriteRegister(7, HOST)
-		vm.WriteRegister(8, uint64(new_machine.host_func_id))
-		// m_n.I = new_machine.pc + 1
-		return
-	}
+	//if new_machine.hostCall {
+	//vm.WriteRegister(7, HOST)
+	//vm.WriteRegister(8, uint64(new_machine.host_func_id))
+	// m_n.I = new_machine.pc + 1
+	//	return
+	//}
 
 	if new_machine.MachineState == FAULT {
 		vm.WriteRegister(7, FAULT)
