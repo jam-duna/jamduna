@@ -31,7 +31,6 @@ func NewInterpreter(Service_index uint32, p *Program, initialRegs []uint64, init
 	// Create VM using FFI API with integrated setup
 	var bitmaskPtr *C.uint8_t
 	var jumpTablePtr *C.uint32_t
-
 	if len(p.K) > 0 {
 		bitmaskPtr = (*C.uint8_t)(unsafe.Pointer(&p.K[0]))
 	}

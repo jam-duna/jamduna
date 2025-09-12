@@ -32,10 +32,10 @@ import (
 
 const (
 	algo_stf    = "test/00000028.bin"
-	algo_bundle = "test/00000028_0xa7ccd053a7c4399d1939f542935b944eb2c755d9be4062ec4410fad52f7a6111_0_0_guarantor.bin"
+	algo_bundle = "test/00000028_0x160796ba2f7702def36204c86172246ebf9d71f10e35f92dce734748b4ccdc4a_0_0_guarantor.bin"
 
 	fib_stf    = "test/00000040.bin"
-	fib_bundle = "test/00000040_0x785e35b04dc1a03988f9cc8b51571633f5c6f309f802e3026a61c28119361673_0_0_guarantor.bin"
+	fib_bundle = "test/00000040_0xedc4231ad4f9dfae4788e523507e1fa022bb17383124cad2802a292f0d7803fd_0_0_guarantor.bin"
 
 	game_of_stf    = "test/03233539.bin"
 	game_of_bundle = "test/03233538_0x8d63f7ce582bdf289283594871633c9018384b65f2699890d8321c5441b95c53_1_3233538_guarantor_follower.bin"

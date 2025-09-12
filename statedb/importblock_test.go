@@ -102,6 +102,8 @@ func runSingleSTFTest(t *testing.T, filename string, content string, pvmBackend 
 	if err == nil {
 		fmt.Printf("✅ [%s] PostState.StateRoot %s matches (%.5fms)\n", filename, stf.PostState.StateRoot, float64(elapsed.Nanoseconds())/1000000)
 		return
+	} else {
+		fmt.Printf("Fail With Error: %v\n", err)
 	}
 	if err.Error() == "OMIT" {
 		//	t.Skipf("⚠️ OMIT: Test case for [%s] is marked to be omitted.", filename)
@@ -130,7 +132,7 @@ func parseSTFFile(filename, content string) (StateTransition, error) {
 }
 
 func TestStateTransitionInterpreter(t *testing.T) {
-	PvmLogging = true
+	PvmLogging = false
 
 	filename := path.Join(common.GetJAMTestVectorPath("traces"), "storage_light/00000005.bin")
 	content, err := os.ReadFile(filename)
@@ -150,8 +152,8 @@ func TestTracesInterpreter(t *testing.T) {
 
 	// Define all the directories you want to test in a single slice.
 	testDirs := []string{
-		//path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
-		//path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
@@ -329,15 +331,19 @@ func findFuzzTestFiles(sourcePath, targetVersion string, excludedTeams []string)
 }
 
 func TestSingleFuzzTrace(t *testing.T) {
-	PvmLogging = true
+	PvmLogging = false
 	fileMap := make(map[string]string)
 
 	jamConformancePath, err := GetFuzzReportsPath()
 	if err != nil {
 		t.Fatalf("failed to get fuzz reports path: %v", err)
 	}
+	// this is about one last key
+	// unknown    | Expected: 0x60000000000000003f72b36f023e0a26ba5e3bb25dccd8bc38055b9561f7ca61fecb0c957de7e577206cdcffffffffff00000000000000000a000000000000000a00000000000000127802000000000005000000ffffffffffffffff000000000800000000000000
+	// unknown    | Actual:   0x60000000000000003f72b36f023e0a26ba5e3bb25dccd8bc38055b9561f7ca61fecb0c957de7e577206cdcffffffffff00000000000000000a000000000000000a00000000000000127802000000000005000000ffffffffffffffff000000000b00000000000000
+	fileMap["1757422206"] = "fuzz-reports/0.7.0/traces/1757422206/00000011.json"
 
-	fileMap["2927"] = "fuzz-reports/0.7.0/traces/1756548459/00000042.json"
+	fileMap["1757406238"] = "fuzz-reports/0.7.0/traces/1757406238/00000008.json"
 
 	log.InitLogger("debug")
 	log.EnableModule(log.PvmAuthoring)
@@ -345,7 +351,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 	log.EnableModule(log.SDB)
 
 	// test one of them out
-	tc := []string{"2927"}
+	tc := []string{"1757422206", "1757406238"}
 
 	for _, team := range tc {
 		filename, exists := fileMap[team]

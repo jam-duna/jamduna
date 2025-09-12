@@ -43,7 +43,8 @@ func main() {
 	test_dir := "./rawdata"
 	report_dir := "./reports"
 	refineMode := false
-	disableShuffling := false
+	shuffling := false
+
 	version := false
 
 	jConfig := types.ConfigJamBlocks{
@@ -72,7 +73,7 @@ func main() {
 	fReg.RegisterFlag("use-unix-socket", nil, useUnixSocket, "Enable to use Unix domain socket for communication", &useUnixSocket)
 	fReg.RegisterFlag("pvm-backend", nil, jConfig.PVMBackend, "PVM backend to use (Compiler or Interpreter)", &jConfig.PVMBackend)
 	fReg.RegisterFlag("refine", "r", refineMode, "Enable RefineBundle challenge testing (mutually exclusive with block testing)", &refineMode)
-	fReg.RegisterFlag("disable-shuffling", nil, disableShuffling, "Disable shuffling and sort blocks by slot number", &disableShuffling)
+	fReg.RegisterFlag("shuffling", nil, shuffling, "Enable shuffling of blocks", &shuffling)
 	fReg.RegisterFlag("version", "v", version, "Display version information", &version)
 	fReg.ProcessRegistry()
 
@@ -80,19 +81,15 @@ func main() {
 		statedb.RecordTime = false
 	}
 
-	fuzzerInfo := fuzz.PeerInfo{
-		AppVersion: fuzz.ParseVersion(fuzz.APP_VERSION),
-		JamVersion: fuzz.ParseVersion(fuzz.JAM_VERSION),
-		Name:       "jam-duna-fuzzer",
-	}
-
-	fuzzerInfo.SetASNSpecific()
+	fuzzerInfo := createFuzzerPeerInfo()
+	fuzzerInfo.SetDefaults()
 
 	fmt.Printf("Fuzzer Info:\n\n%s\n\n", fuzzerInfo.Info())
 	if version {
 		return
 	}
 
+	disableShuffling := !shuffling
 	if refineMode {
 		disableShuffling = true
 		//log.Printf("Refinement mode: will read RefineBundle tests from embedded files")
@@ -187,11 +184,11 @@ func main() {
 		defer fuzzer.Close()
 		peerInfo, err := fuzzer.Handshake()
 		if err != nil {
-			log.Printf("Handshake failed: %v", err)
+			log.Printf("Handshake Failed: %v", err)
 			Terminate(stopCh)
 		} else {
-			log.Printf("Handshake successful: %s", peerInfo.PrettyString(false))
-			fuzzer.SetTargetPeerInfo(*peerInfo)
+			log.Printf("Handshake SUCC: %s", peerInfo.PrettyString(false))
+			fuzzer.SetTargetPeerInfo(peerInfo)
 		}
 	}
 

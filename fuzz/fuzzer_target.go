@@ -21,13 +21,15 @@ import (
 
 // Target represents the server-side implementation that the fuzzer connects to.
 type Target struct {
-	listener   net.Listener
-	socketPath string
-	targetInfo PeerInfo
-	store      *storage.StateDBStorage     // Storage backend for the state database.
-	stateDB    *statedb.StateDB            // This can be used to manage state transitions.
-	stateDBMap map[common.Hash]common.Hash // [headererHash]posteriorStateRoot
-	pvmBackend string                      // Backend to use for state transitions, e.g., "Interpreter" or "Compiler".
+	listener      net.Listener
+	socketPath    string
+	targetInfo    PeerInfo
+	store         *storage.StateDBStorage     // Storage backend for the state database.
+	stateDB       *statedb.StateDB            // This can be used to manage state transitions.
+	stateDBMap    map[common.Hash]common.Hash // [headererHash]posteriorStateRoot
+	pvmBackend    string                      // Backend to use for state transitions, e.g., "Interpreter" or "Compiler".
+	exportsLookup map[common.Hash]common.Hash // [workPackageHash or exportsRoot] -> segmentsHash
+	exportsData   map[common.Hash][][]byte    // [segmentsHash] -> exportedSegments
 }
 
 // NewTarget creates a new target instance, armed with a specific test case.
@@ -46,12 +48,14 @@ func NewTarget(socketPath string, targetInfo PeerInfo, pvmBackend string) *Targe
 	}
 
 	return &Target{
-		socketPath: socketPath,
-		targetInfo: targetInfo,
-		store:      store,
-		stateDB:    nil,
-		stateDBMap: make(map[common.Hash]common.Hash),
-		pvmBackend: pvmBackend,
+		socketPath:    socketPath,
+		targetInfo:    targetInfo,
+		store:         store,
+		stateDB:       nil,
+		stateDBMap:    make(map[common.Hash]common.Hash),
+		pvmBackend:    pvmBackend,
+		exportsLookup: make(map[common.Hash]common.Hash),
+		exportsData:   make(map[common.Hash][][]byte),
 	}
 }
 
@@ -109,6 +113,8 @@ func (t *Target) handleConnection(conn net.Conn) {
 		switch {
 		case msg.PeerInfo != nil:
 			response = t.onPeerInfo(msg.PeerInfo)
+		case msg.Initialize != nil:
+			response = t.onInitialize(msg.Initialize)
 		case msg.SetState != nil:
 			response = t.onSetState(msg.SetState)
 		case msg.ImportBlock != nil:
@@ -117,6 +123,8 @@ func (t *Target) handleConnection(conn net.Conn) {
 			response = t.onGetState(msg.GetState)
 		case msg.RefineBundle != nil:
 			response = t.onRefineBundle(msg.RefineBundle)
+		case msg.GetExports != nil:
+			response = t.onGetExports(msg.GetExports)
 		default:
 			log.Printf("%sReceived unknown or unexpected message type%s", common.ColorRed, common.ColorReset)
 			return // Terminate on unexpected messages.
@@ -131,12 +139,51 @@ func (t *Target) handleConnection(conn net.Conn) {
 
 // --- Message Handlers ---
 
-func (t *Target) onPeerInfo(fuzzerInfo *PeerInfo) *Message {
+func (t *Target) onPeerInfo(fuzzerInfo PeerInfo) *Message {
 	log.Printf("%s[INCOMING REQ]%s PeerInfo", common.ColorBlue, common.ColorReset)
-	log.Printf("%sReceived handshake from fuzzer: %s%s", common.ColorGray, fuzzerInfo.Name, common.ColorReset)
+	log.Printf("%sReceived handshake from fuzzer: %s%s", common.ColorGray, fuzzerInfo.GetName(), common.ColorReset)
 	log.Printf("%sFuzzer ↓ \n%s%s", common.ColorGray, fuzzerInfo.PrettyString(true), common.ColorReset)
 	log.Printf("%s[OUTGOING RSP]%s PeerInfo", common.ColorGreen, common.ColorReset)
-	return &Message{PeerInfo: &t.targetInfo}
+	return &Message{PeerInfo: t.targetInfo}
+}
+
+// onInitialize processes Initialize messages (V1 protocol)
+func (t *Target) onInitialize(req *Initialize) *Message {
+	log.Printf("%s[INCOMING REQ]%s Initialize", common.ColorBlue, common.ColorReset)
+	log.Printf("%sReceived Initialize request with %d ancestry items and %d KVs%s",
+		common.ColorGray, len(req.Ancestry), len(req.KeyVals.KeyVals), common.ColorReset)
+
+	headerHash := req.Header.Hash()
+	log.Printf("%sInitializing state with header: %s%s", common.ColorGray, headerHash.Hex(), common.ColorReset)
+
+	// Log ancestry information if provided
+	if len(req.Ancestry) > 0 {
+		log.Printf("%sAncestry provided:%s", common.ColorGray, common.ColorReset)
+		for i, ancestor := range req.Ancestry {
+			//TODO: The lookup anchor of each report in the guarantees extrinsic (E_G) must be part of the last imported headers in the chain
+			log.Printf("%s  [%d] Header: %s (Slot: %d) %s", common.ColorGray, i, ancestor.HeaderHash.Hex(), ancestor.Slot, common.ColorReset)
+		}
+	}
+
+	// Reuse the same logic as onSetState but with Initialize structure
+	startTime := time.Now()
+	recoveredStateDB, err := statedb.NewStateDBFromStateKeyVals(t.store, &req.KeyVals)
+	recoveredStateDBStateRoot := recoveredStateDB.StateRoot
+	if err != nil {
+		stateRecoveryDuration := time.Since(startTime)
+		log.Printf("%sState recovery failed (took %.3fms): %v%s", common.ColorRed, float64(stateRecoveryDuration.Nanoseconds())/1e6, err, common.ColorReset)
+		return &Message{StateRoot: &recoveredStateDBStateRoot}
+	}
+
+	t.SetStateDB(recoveredStateDB)
+	stateRecoveryDuration := time.Since(startTime)
+	log.Printf("%sState recovery completed (took %.3fms)%s", common.ColorGray, float64(stateRecoveryDuration.Nanoseconds())/1e6, common.ColorReset)
+	log.Printf("%sState_Root: %v%s", common.ColorGray, recoveredStateDBStateRoot.Hex(), common.ColorReset)
+	log.Printf("%sHeaderHash: %v%s", common.ColorGray, headerHash.Hex(), common.ColorReset)
+
+	t.stateDBMap[headerHash] = recoveredStateDBStateRoot
+	log.Printf("%s[OUTGOING RSP]%s StateRoot", common.ColorGreen, common.ColorReset)
+	return &Message{StateRoot: &recoveredStateDBStateRoot}
 }
 
 // onSetState validates the received state against the test vector's PreState.
@@ -194,6 +241,14 @@ func (t *Target) onImportBlock(req *types.Block) *Message {
 
 	if jamErr != nil {
 		log.Printf("%s[IMPORTBK ERR] %v (took %.3fms)%s", common.ColorRed, jamErr, float64(transitionDuration.Nanoseconds())/1e6, common.ColorReset)
+
+		// V1 protocol sends Error message on ImportBlock failure
+		if GetProtocolHandler().GetProtocolVersion() == ProtocolV1 {
+			log.Printf("%s[OUTGOING RSP]%s Error", common.ColorGreen, common.ColorReset)
+			return &Message{Error: &struct{}{}}
+		}
+
+		// V0/V0r protocols return pre-state root on failure
 		return &Message{StateRoot: &preStateRoot}
 	}
 	log.Printf("%sState transition applied (took %.3fms)%s", common.ColorGray, float64(transitionDuration.Nanoseconds())/1e6, common.ColorReset)
@@ -256,14 +311,24 @@ func (t *Target) onRefineBundle(req *types.RefineBundle) *Message {
 	var workReport *types.WorkReport
 	if err != nil {
 		log.Printf("%s[REFINEBK ERR] %v (took %.3fms)%s", common.ColorRed, err, float64(executionDuration.Nanoseconds())/1e6, common.ColorReset)
-		// Return empty WorkReport on error
 		workReport = &types.WorkReport{}
 	} else {
-		// Extract WorkReport from the executed bundle snapshot
 		workReport = &bundleSnapshot.Report
 
+		_, exportedSegments, refineErr := refine.ExecuteWBRefinement(
+			t.stateDB,
+			t.pvmBackend,
+			t.stateDB.GetTimeslot(),
+			core,
+			bundle,
+			types.Result{Ok: req.AuthTrace}, // Synthetic auth result
+		)
+
+		if refineErr == nil && len(exportedSegments) > 0 {
+			t.storeExportedSegments(workPackageHash, workReport.AvailabilitySpec.ExportedSegmentRoot, exportedSegments)
+		}
+
 		log.Printf("%sBundle execution completed (took %.3fms)%s", common.ColorGray, float64(executionDuration.Nanoseconds())/1e6, common.ColorReset)
-		// Log the executed report hash for comparison
 		executedReportHash := workReport.Hash()
 		log.Printf("%sExec ReportHash: %s%s", common.ColorGray, executedReportHash.Hex(), common.ColorReset)
 		//log.Printf("%sExec WorkReport: %s%s", common.ColorGray, workReport.String(), common.ColorReset)
@@ -272,8 +337,60 @@ func (t *Target) onRefineBundle(req *types.RefineBundle) *Message {
 	return &Message{WorkReport: workReport}
 }
 
+func (t *Target) onGetExports(req *common.Hash) *Message {
+	log.Printf("%s[INCOMING REQ]%s GetExports - Hash: %s", common.ColorBlue, common.ColorReset, req.Hex())
+
+	exportedSegments, found := t.getExportedSegments(*req)
+	if !found {
+		// Return empty segments array
+		emptySegments := make([][]byte, 0)
+		log.Printf("%s[OUTGOING RSP]%s Segments - 0 segments (not found)", common.ColorGreen, common.ColorReset)
+		return &Message{Segments: &emptySegments}
+	}
+
+	log.Printf("%s[OUTGOING RSP]%s Segments - %d segments", common.ColorGreen, common.ColorReset, len(exportedSegments))
+	return &Message{Segments: &exportedSegments}
+}
+
+// storeExportedSegments stores exported segments with indirection to avoid data duplication
+func (t *Target) storeExportedSegments(workPackageHash, exportsRoot common.Hash, exportedSegments [][]byte) {
+	segmentsHash := common.BytesToHash(append([]byte("segments"), workPackageHash.Bytes()...))
+
+	t.exportsData[segmentsHash] = exportedSegments
+
+	t.exportsLookup[workPackageHash] = segmentsHash
+
+	if exportsRoot != (common.Hash{}) {
+		t.exportsLookup[exportsRoot] = segmentsHash
+	}
+
+	log.Printf("%sStored %d exported segments with hash %s for work package %s%s",
+		common.ColorGray, len(exportedSegments), segmentsHash.Hex(), workPackageHash.Hex(), common.ColorReset)
+}
+
+// getExportedSegments retrieves exported segments by looking up via workPackageHash or exportsRoot
+func (t *Target) getExportedSegments(requestHash common.Hash) ([][]byte, bool) {
+	// Look up the segments hash by the requested hash
+	// This could be either a work package hash or an exported segment root
+	segmentsHash, found := t.exportsLookup[requestHash]
+	if !found {
+		log.Printf("%sNo exported segments lookup found for hash %s%s", common.ColorRed, requestHash.Hex(), common.ColorReset)
+		return nil, false
+	}
+
+	exportedSegments, dataFound := t.exportsData[segmentsHash]
+	if !dataFound {
+		log.Printf("%sNo exported segments data found for segments hash %s%s", common.ColorRed, segmentsHash.Hex(), common.ColorReset)
+		return nil, false
+	}
+
+	log.Printf("%sFound %d exported segments via segments hash %s for request hash %s%s",
+		common.ColorGray, len(exportedSegments), segmentsHash.Hex(), requestHash.Hex(), common.ColorReset)
+	return exportedSegments, true
+}
+
 func sendMessage(conn net.Conn, msg *Message) error {
-	encodedBody, err := encode(msg)
+	encodedBody, err := GetProtocolHandler().Encode(msg)
 	if err != nil {
 		return fmt.Errorf("%sfailed to encode message: %w%s", common.ColorRed, err, common.ColorReset)
 	}
@@ -303,5 +420,5 @@ func readMessage(conn net.Conn) (*Message, error) {
 		return nil, fmt.Errorf("%sfailed to read message body: %w%s", common.ColorRed, err, common.ColorReset)
 	}
 
-	return decode(body)
+	return GetProtocolHandler().Decode(body)
 }

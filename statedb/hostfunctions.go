@@ -135,7 +135,7 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 		return true, fmt.Errorf("out of gas")
 	}
 	if PvmLogging {
-		// fmt.Printf("%d %s: Calling host function: %s %d\n", vm.Service_index, vm.Mode, HostFnToName(host_fn), host_fn)
+		fmt.Printf("%d %s: Calling host function: %s %d [gas: %d]\n", vm.Service_index, vm.Mode, HostFnToName(host_fn), host_fn, vm.GetGas())
 	}
 
 	return vm.hostFunction(host_fn)
@@ -258,12 +258,8 @@ func (vm *VM) hostFunction(host_fn int) (bool, error) {
 		return true, nil
 
 	default:
-
-		vm.terminated = true
-		vm.ResultCode = types.WORKDIGEST_PANIC
-		vm.MachineState = PANIC
-		log.Error(vm.logging, "UNKNOWN HOST CALL", "host_fn", host_fn)
-		return false, fmt.Errorf("unknown host call: %d", host_fn)
+		vm.WriteRegister(7, WHAT)
+		return true, nil
 	}
 }
 
@@ -310,7 +306,6 @@ func (vm *VM) hostInfo() {
 			log.Debug(vm.logging, "INFO NONE", "s", omega_7)
 			return
 		}
-		//fmt.Printf("INFO %d %x\n", i, encoded)
 		buf.Write(encoded)
 	}
 
@@ -326,13 +321,18 @@ func (vm *VM) hostInfo() {
 		vm.MachineState = PANIC
 		return
 	}
-	log.Trace(vm.logging, "INFO OK", "s", fmt.Sprintf("%d", omega_7), "info", fmt.Sprintf("%v", elements))
 	vm.WriteRegister(7, lenval)
 	vm.HostResultCode = OK
 }
 
 // Bless updates
 func (vm *VM) hostBless() {
+	if vm.Mode != ModeAccumulate {
+		vm.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+	}
+
 	m := vm.ReadRegister(7)
 	a := vm.ReadRegister(8)
 	v := vm.ReadRegister(9)
@@ -395,6 +395,12 @@ func (vm *VM) hostBless() {
 
 // Assign Core x_c[i]
 func (vm *VM) hostAssign() {
+	if vm.Mode != ModeAccumulate {
+		vm.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+	}
+
 	c := vm.ReadRegister(7)
 	o := vm.ReadRegister(8)
 	a := vm.ReadRegister(9)
@@ -435,6 +441,12 @@ func (vm *VM) hostAssign() {
 
 // Designate validators
 func (vm *VM) hostDesignate() {
+	if vm.Mode != ModeAccumulate {
+		vm.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+	}
+
 	o := vm.ReadRegister(7)
 	v, errCode := vm.ReadRAMBytes(uint32(o), 336*types.TotalValidators)
 	if errCode != OK {
@@ -500,6 +512,11 @@ func new_check(i uint32, u_d map[uint32]*types.ServiceAccount) uint32 {
 
 // New service
 func (vm *VM) hostNew() {
+	if vm.Mode != ModeAccumulate {
+		vm.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+	}
 
 	xContext := vm.X
 	xs, _ := xContext.GetX_s()
@@ -525,7 +542,6 @@ func (vm *VM) hostNew() {
 		log.Debug(vm.logging, "hostNew: NEW CASH xs.Balance < x_s_t", "xs.Balance", xs.Balance, "x_s_t", x_s_t, "x_s_index", xs.ServiceIndex)
 		return
 	}
-
 	privilegedService_m := vm.X.U.PrivilegedState.ManagerServiceID
 	if privilegedService_m != xs.ServiceIndex && f != 0 {
 		// only ManagerServiceID can bestow gratis
@@ -539,7 +555,6 @@ func (vm *VM) hostNew() {
 
 	xi := xContext.NewServiceIndex
 	// simulate a with c, g, m
-
 	// [Gratis] a_r:t; a_f,a_a:0; a_p:x_s
 	a := &types.ServiceAccount{
 		ServiceIndex:       xi,
@@ -589,6 +604,12 @@ func (vm *VM) hostNew() {
 
 // Upgrade service
 func (vm *VM) hostUpgrade() {
+	if vm.Mode != ModeAccumulate {
+		vm.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+	}
+
 	xContext := vm.X
 	xs, _ := xContext.GetX_s()
 	o := vm.ReadRegister(7)
@@ -615,6 +636,7 @@ func (vm *VM) hostUpgrade() {
 
 // Transfer host call
 func (vm *VM) hostTransfer() {
+
 	d := vm.ReadRegister(7)
 	a := vm.ReadRegister(8)
 	g := vm.ReadRegister(9)
@@ -646,26 +668,25 @@ func (vm *VM) hostTransfer() {
 		return
 	}
 	t := types.DeferredTransfer{Amount: a, GasLimit: g, SenderIndex: vm.X.ServiceIndex, ReceiverIndex: uint32(d)} // CHECK
-	log.Info(vm.logging, "TRANSFER START", "sender", fmt.Sprintf("%d", t.SenderIndex), "receiver", fmt.Sprintf("%d", d), "amount", fmt.Sprintf("%d", a), "gaslimit", g, "x_s_bal", xs.Balance, "DeferredTransfer", t.String())
 
 	if g < receiver.GasLimitM {
 		vm.WriteRegister(7, LOW)
 		vm.HostResultCode = LOW
-		log.Debug(vm.logging, "TRANSFER LOW", "g", g, "GasLimitM", receiver.GasLimitM)
+		log.Info(vm.logging, "TRANSFER LOW", "g", g, "GasLimitM", receiver.GasLimitM)
 		return
 	}
 
 	if xs.Balance < xs.ComputeThreshold() {
 		vm.WriteRegister(7, CASH)
 		vm.HostResultCode = CASH
-		log.Debug(vm.logging, "TRANSFER CASH", "xs.Balance", xs.Balance, "xs_t", xs.ComputeThreshold())
+		log.Info(vm.logging, "TRANSFER CASH", "xs.Balance", xs.Balance, "xs_t", xs.ComputeThreshold())
 		return
 	}
 
 	xs.DecBalance(a)
 	copy(t.Memo[:], m[:])
 	vm.X.Transfers = append(vm.X.Transfers, t)
-	log.Debug(vm.logging, "TRANSFER OK", "sender", fmt.Sprintf("%d", t.SenderIndex), "receiver", fmt.Sprintf("%d", d), "amount", fmt.Sprintf("%d", a), "gaslimit", g, "x_s_bal", xs.Balance, "DeferredTransfer", t.String())
+	log.Info(vm.logging, "TRANSFER OK", "sender", fmt.Sprintf("%d", t.SenderIndex), "receiver", fmt.Sprintf("%d", d), "amount", fmt.Sprintf("%d", a), "gaslimit", g, "x_s_bal", xs.Balance, "DeferredTransfer", t.String())
 	vm.WriteRegister(7, OK)
 	vm.HostResultCode = OK
 }
@@ -679,6 +700,12 @@ func (vm *VM) hostGas() {
 }
 
 func (vm *VM) hostQuery() {
+	if vm.Mode != ModeAccumulate {
+		vm.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+	}
+
 	o := vm.ReadRegister(7)
 	z := vm.ReadRegister(8)
 	h, errCode := vm.ReadRAMBytes(uint32(o), 32)
@@ -928,6 +955,12 @@ func (vm *VM) hostFetch() {
 }
 
 func (vm *VM) hostYield() {
+	if vm.Mode != ModeAccumulate {
+		vm.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+	}
+
 	o := vm.ReadRegister(7)
 	h, errCode := vm.ReadRAMBytes(uint32(o), 32)
 	if errCode != OK {
@@ -944,6 +977,12 @@ func (vm *VM) hostYield() {
 }
 
 func (vm *VM) hostProvide() {
+	if vm.Mode != ModeAccumulate {
+		vm.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+	}
+
 	omega_7 := vm.ReadRegister(7)
 	o := vm.ReadRegister(8)
 	z := vm.ReadRegister(9)
@@ -1004,6 +1043,12 @@ func (vm *VM) hostProvide() {
 }
 
 func (vm *VM) hostEject() {
+	if vm.Mode != ModeAccumulate {
+		vm.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+	}
+
 	d := vm.ReadRegister(7)
 	o := vm.ReadRegister(8)
 	h, err := vm.ReadRAMBytes(uint32(o), 32)
@@ -1059,6 +1104,13 @@ func (vm *VM) hostEject() {
 
 // Invoke
 func (vm *VM) hostInvoke() {
+
+	if vm.Mode != ModeRefine {
+		vm.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+	}
+
 	n := vm.ReadRegister(7)
 	o := vm.ReadRegister(8)
 
@@ -1194,6 +1246,12 @@ func (vm *VM) hostInvoke() {
 
 // Lookup preimage
 func (vm *VM) hostLookup() {
+	if vm.Mode != ModeAccumulate {
+		vm.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+	}
+
 	omega_7 := vm.ReadRegister(7)
 
 	var a *types.ServiceAccount
@@ -1274,6 +1332,12 @@ func (vm *VM) getXUDS(serviceindex uint64) (a *types.ServiceAccount, errCode uin
 
 // Read Storage
 func (vm *VM) hostRead() {
+	if vm.Mode != ModeAccumulate {
+		vm.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+	}
+
 	// Assume that all ram can be read and written
 	omega_7 := vm.ReadRegister(7)
 	s_star := omega_7
@@ -1331,6 +1395,12 @@ func (vm *VM) hostRead() {
 
 // Write Storage a_s(x,y)
 func (vm *VM) hostWrite() {
+	if vm.Mode != ModeAccumulate {
+		vm.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+	}
+
 	var a *types.ServiceAccount
 	a = vm.ServiceAccount
 	if a == nil {
@@ -1384,7 +1454,9 @@ func (vm *VM) hostWrite() {
 			a.NumStorageItems++
 			a.StorageSize += (AccountStorageConst + val_len + key_len) // [Gratis] Add ∑ 34 + |y| + |x|
 		}
-		log.Trace(vm.logging, "WRITE NONE", "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "v", fmt.Sprintf("%x", v), "kLen", key_len, "vlen", len(v), "storage_source", storage_source)
+		log.Trace(vm.logging, "WRITE NONE",
+			"vo", fmt.Sprintf("%x", vo), "vz", vz,
+			"numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "v", fmt.Sprintf("%x", v), "kLen", key_len, "vlen", len(v), "storage_source", storage_source)
 
 		vm.WriteRegister(7, NONE)
 	} else {
@@ -1397,14 +1469,14 @@ func (vm *VM) hostWrite() {
 			a.StorageSize -= (AccountStorageConst + prev_l + key_len) // [Gratis] Sub ∑ 34 + |y| + |x|
 			l = uint64(prev_l)                                        // this should not be NONE
 			vm.WriteRegister(7, l)
-			//log.Debug(vm.logging, "WRITE (as DELETE) NONE ", "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "v", fmt.Sprintf("%x", v), "vlen", len(v))
+			log.Trace(vm.logging, "WRITE (as DELETE) NONE ", "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "v", fmt.Sprintf("%x", v), "vlen", len(v))
 		} else {
 			// write via update;  |x| (val_len), a_i (storageItem) unchanged
 			a.StorageSize += val_len
 			a.StorageSize -= prev_l
 			l = prev_l
 			vm.WriteRegister(7, l)
-			//log.Debug(vm.logging, "WRITE OK", "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "v", fmt.Sprintf("%x", v), "vlen", len(v), "oldValue", fmt.Sprintf("%x", oldValue))
+			log.Trace(vm.logging, "WRITE OK", "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "v", fmt.Sprintf("%x", v), "vlen", len(v), "oldValue", fmt.Sprintf("%x", oldValue))
 		}
 	}
 	log.Trace(vm.logging, "WRITE storage", "s", fmt.Sprintf("%d", a.ServiceIndex), "a_o", a.StorageSize, "a_i", a.NumStorageItems)
@@ -1412,6 +1484,12 @@ func (vm *VM) hostWrite() {
 
 // Solicit preimage a_l(h,z)
 func (vm *VM) hostSolicit() {
+	if vm.Mode != ModeAccumulate {
+		vm.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+	}
+
 	xs, _ := vm.X.GetX_s()
 	// Got l of X_s by setting s = 1, z = z(from RAM)
 	o := vm.ReadRegister(7)
@@ -1461,6 +1539,12 @@ func (vm *VM) hostSolicit() {
 
 // Forget preimage a_l(h,z)
 func (vm *VM) hostForget() {
+	if vm.Mode != ModeAccumulate {
+		vm.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+	}
+
 	x_s, _ := vm.X.GetX_s()
 	o := vm.ReadRegister(7)
 	z := vm.ReadRegister(8)
@@ -1529,6 +1613,12 @@ func (vm *VM) hostForget() {
 
 // HistoricalLookup determines whether the preimage of some hash h was available for lookup by some service account a at some timeslot t, and if so, provide its preimage
 func (vm *VM) hostHistoricalLookup() {
+	if vm.Mode != ModeRefine {
+		vm.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+	}
+
 	var a = &types.ServiceAccount{}
 	delta := vm.Delta
 	s := vm.Service_index
@@ -1578,6 +1668,12 @@ func (vm *VM) hostHistoricalLookup() {
 
 // Export segment host-call
 func (vm *VM) hostExport() {
+	if vm.Mode != ModeRefine {
+		vm.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+	}
+
 	p := vm.ReadRegister(7) // a0 = 7
 	z := vm.ReadRegister(8) // a1 = 8
 
@@ -1590,8 +1686,6 @@ func (vm *VM) hostExport() {
 		vm.terminated = true
 		return
 	}
-
-	vm.Exports = append(vm.Exports, x)
 
 	vm.WriteRegister(7, OK)
 	vm.HostResultCode = OK
@@ -1619,11 +1713,9 @@ func (vm *VM) hostExport() {
 
 func (vm *VM) hostMachine() {
 	if vm.Mode != ModeRefine {
-		// TODO:
 		vm.WriteRegister(7, WHAT)
 		vm.HostResultCode = WHAT
 		return
-
 	}
 	po := vm.ReadRegister(7)
 	pz := vm.ReadRegister(8)
@@ -1658,6 +1750,12 @@ func (vm *VM) hostMachine() {
 }
 
 func (vm *VM) hostPeek() {
+	if vm.Mode != ModeRefine {
+		vm.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+	}
+
 	n := vm.ReadRegister(7)
 	o := vm.ReadRegister(8)
 	s := vm.ReadRegister(9)
@@ -1691,6 +1789,11 @@ func (vm *VM) hostPeek() {
 }
 
 func (vm *VM) hostPoke() {
+	if vm.Mode != ModeRefine {
+		vm.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+	}
 	n := vm.ReadRegister(7) // machine
 	s := vm.ReadRegister(8) // source
 	o := vm.ReadRegister(9) // dest
@@ -1723,6 +1826,11 @@ func (vm *VM) hostPoke() {
 }
 
 func (vm *VM) hostExpunge() {
+	if vm.Mode != ModeRefine {
+		vm.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+	}
 	n := vm.ReadRegister(7)
 	m, ok := vm.RefineM_map[uint32(n)]
 	if !ok {
@@ -1739,6 +1847,11 @@ func (vm *VM) hostExpunge() {
 }
 
 func (vm *VM) hostPages() {
+	if vm.Mode != ModeRefine {
+		vm.WriteRegister(7, WHAT)
+		vm.HostResultCode = WHAT
+		return
+	}
 	n := vm.ReadRegister(7)  // n: machine number
 	p := vm.ReadRegister(8)  // p: page number
 	c := vm.ReadRegister(9)  // c: number of pages to change
@@ -1808,7 +1921,7 @@ func (vm *VM) hostLog() {
 	if vm.IsChild {
 		serviceMetadata = fmt.Sprintf("%s-child", serviceMetadata)
 	}
-	loggingVerbose := false
+	loggingVerbose := true
 	if !loggingVerbose {
 		return
 	}

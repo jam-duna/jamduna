@@ -204,14 +204,21 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 	s0 := preState
 	s0.Id = storage.NodeID
 	s0.AncestorSet = ancestorSet
+	bad_stf := bytes.Equal(st.PreState.StateRoot.Bytes(), st.PostState.StateRoot.Bytes())
 	s1, err := ApplyStateTransitionFromBlock(s0, context.Background(), &(st.Block), nil, pvmBackend)
+	bad_stf_from_us := bytes.Equal(s1.StateRoot.Bytes(), st.PostState.StateRoot.Bytes())
 	if err != nil {
-		if bytes.Equal(s1.StateRoot.Bytes(), st.PostState.StateRoot.Bytes()) {
+		if bad_stf_from_us {
 			fmt.Printf("✳️  FAILED TRANSITION EXPECTED - PreState = PostState : %v\n", s1.StateRoot.Hex())
 			return nil, nil
 		} else {
 			fmt.Printf("❌  ApplyStateTransitionFromBlock error: %v, s1.StateRoot:%v\n", err, s1.StateRoot.Hex())
 			return nil, err
+		}
+	} else {
+		if bad_stf && !bad_stf_from_us {
+			fmt.Printf("❌  FAILED TRANSITION EXPECTED - PreState = PostState : %v\n", s1.StateRoot.Hex())
+			return nil, fmt.Errorf("FAILED TRANSITION EXPECTED - PreState = PostState, but we didn't catch it")
 		}
 	}
 

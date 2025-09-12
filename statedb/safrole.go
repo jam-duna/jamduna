@@ -1116,8 +1116,30 @@ func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32,
 	if valid_tickets == nil {
 		valid_tickets = make(map[common.Hash]common.Hash)
 	}
-	prevEpoch, _ := s.EpochAndPhase(uint32(s.Timeslot))
+
+	prevEpoch, prevPhase := s.EpochAndPhase(uint32(s.Timeslot))
 	currEpoch, currPhase := s.EpochAndPhase(targetJCE)
+	// ticket mark check
+	if prevEpoch == currEpoch && prevPhase < types.TicketSubmissionEndSlot && currPhase >= types.TicketSubmissionEndSlot && len(s.NextEpochTicketsAccumulator) == types.EpochLength {
+		if header.TicketsMark == nil {
+			return nil, fmt.Errorf("TicketsMark missing in header")
+		}
+		if len(header.TicketsMark) != types.EpochLength {
+			return nil, fmt.Errorf("TicketsMark length mismatch")
+		}
+		for _, t := range header.TicketsMark {
+			if t.Attempt >= types.TicketEntriesPerValidator {
+				return nil, fmt.Errorf("TicketsMark attempt exceeds maximum allowed: %d", types.TicketEntriesPerValidator)
+			}
+		}
+		ticketMarks := header.TicketsMark
+		// verify ticket mark
+		verified, err := VerifyWinningMarker([types.EpochLength]*types.TicketBody(ticketMarks), s.computeTicketSlotBinding(s.NextEpochTicketsAccumulator))
+		if !verified || err != nil {
+			return nil, fmt.Errorf("VerifyWinningMarker Failed:%s", err)
+		}
+	}
+
 	s2 := cloneSafroleState(*s) // CHECK: why cloning here?
 	if currPhase >= types.TicketSubmissionEndSlot && len(tickets) > 0 {
 		return nil, jamerrors.ErrTEpochLotteryOver

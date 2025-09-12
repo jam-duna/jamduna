@@ -32,13 +32,8 @@ func main() {
 	fReg.ProcessRegistry()
 
 	// Define the target's identity.
-	targetInfo := fuzz.PeerInfo{
-		AppVersion: fuzz.ParseVersion(fuzz.APP_VERSION),
-		JamVersion: fuzz.ParseVersion(fuzz.JAM_VERSION),
-		Name:       "jam-duna-target",
-	}
-
-	targetInfo.SetASNSpecific()
+	targetInfo := createTargetPeerInfo()
+	targetInfo.SetDefaults()
 
 	fmt.Printf("Target Info:\n\n%s\n\n", targetInfo.Info())
 	if version {

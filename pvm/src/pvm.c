@@ -210,7 +210,7 @@ pvm_result_t pvm_execute(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child) 
         }
         
         for (uint64_t i = vm->pc + 1; i < limit; i++) {
-            if (vm->bitmask[i] == 1) {
+            if (vm->bitmask[i]) {
                 len_operands = i - vm->pc - 1;
                 goto found;
             }
@@ -230,23 +230,7 @@ pvm_result_t pvm_execute(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child) 
     found:
         ; // Empty statement after label
         uint8_t* operands = vm->code + vm->pc + 1;
-        
-        // Log gas before decrement if low
-        if (vm->gas <= 10) {
-            printf("GAS_WARNING: Before decrement - gas=%lld, step=%d, pc=0x%llx, opcode=%s(%d)\n", 
-                   (long long)vm->gas, step, (unsigned long long)vm->pc, get_opcode_name(opcode), opcode);
-            fflush(stdout);
-        }
-        
         vm->gas--;  // Decrement gas once per instruction
-        step++;
-        
-        // Log if we just went negative
-        if (vm->gas <= 0) {
-            printf("GAS_EXHAUSTED: gas=%lld, step=%d, pc=0x%llx, opcode=%s(%d)\n", 
-                   (long long)vm->gas, step, (unsigned long long)vm->pc, get_opcode_name(opcode), opcode);
-            fflush(stdout);
-        }
         // Advance PC to next instruction, dispatch to handler
         if (dispatch_table[opcode]) {
             dispatch_table[opcode](vm, operands, len_operands);
@@ -255,9 +239,9 @@ pvm_result_t pvm_execute(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child) 
             pvm_panic(vm, WHAT);
             continue;
         }
-        if (vm->pvm_logging && 0) {
-            printf("%s %d %llu Gas: %lld Registers: [%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu]\n", 
-                    get_opcode_name(opcode), step, (unsigned long long)vm->pc, (long long)vm->gas,
+        if (vm->pvm_logging) {
+            printf("%s %d %llu Gas@S%u: %lld Registers: [%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu]\n", 
+                    get_opcode_name(opcode), step, (unsigned long long)vm->pc, vm->service_index, (long long)vm->gas,
                     (unsigned long long)vm->registers[0], (unsigned long long)vm->registers[1], 
                     (unsigned long long)vm->registers[2], (unsigned long long)vm->registers[3],
                     (unsigned long long)vm->registers[4], (unsigned long long)vm->registers[5], 
@@ -267,6 +251,7 @@ pvm_result_t pvm_execute(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child) 
                     (unsigned long long)vm->registers[12]);
             fflush(stdout);
         }
+        step++;
     }
     
     // Handle out-of-gas condition

@@ -86,3 +86,5 @@ duna_bench
 !cmd/duna_fuzzer/refine/*
 # But exclude .DS_Store files from refine directory
 cmd/duna_fuzzer/refine/.DS_Store
+/cmd/duna_fuzzer/refine_algo
+/cmd/duna_fuzzer/refine_fib

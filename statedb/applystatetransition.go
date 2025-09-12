@@ -252,7 +252,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 
 	// ------ OuterAccumulate ------
 	t0 = time.Now()
-	num_accumulations, deferred_transfers, accumulation_output, gasUsage := s.OuterAccumulate(gas, accumulate_input_wr, o, f, pvmBackend) // outer accumulate
+	num_accumulations, deferred_transfers, accumulation_output, gasUsage := s.OuterAccumulate(gas, accumulate_input_wr, o, f, pvmBackend, make(map[uint32]*types.XContext)) // outer accumulate
 	benchRec.Add("OuterAccumulate", time.Since(t0))
 
 	// ------ ProcessDeferredTransfers ------

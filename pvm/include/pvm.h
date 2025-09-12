@@ -232,7 +232,7 @@ void pvm_panic(VM* vm, uint64_t err_code);
 extern void (*dispatch_table[256])(VM*, uint8_t*, size_t);
 void init_dispatch_table(void);
 const char* get_opcode_name(uint8_t opcode);
-void pvm_branch(VM* vm, uint64_t vx, int condition);
+void pvm_branch(VM* vm, uint64_t vx);
 void pvm_djump(VM* vm, uint64_t a);
 
 uint32_t p_func(uint32_t x);

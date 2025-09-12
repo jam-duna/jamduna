@@ -34,7 +34,7 @@ func ConvertSnapshotToMultipleRefineBundleQA(snapshot *types.WorkPackageBundleSn
 	var originalExpectedReport types.WorkReport
 	var originalAuthGasUsed uint
 	var originalAuthTrace []byte
-	
+
 	if useRefinePackage && matchingSTF != nil {
 		fmt.Printf("Computing ExpectedWorkReport for original bundle using refine package...\n")
 
@@ -292,8 +292,9 @@ func MutateAlgoBundle(original types.WorkPackageBundle, seed uint64) types.WorkP
 	algoWorkItemIdx := 1
 	debug := true
 
-	sz := seed % 10
-	isSimple := (seed%2 == 0)
+	sz := seed % 365
+	isSimple := true
+	//isSimple := (seed%2 == 0)
 
 	// Create a deep copy to ensure mutations don't affect original
 	mutated := DeepCopyWorkPackageBundle(original)
@@ -321,7 +322,7 @@ func GenerateAlgoPayload(sz int, isSimple bool) []byte {
 		return algo_payload
 	}
 	algo_payload := make([]byte, sz*2)
-	useCase := "top40"
+	useCase := "top5"
 	var algos []uint8
 	top5 := []uint8{7, 8, 9, 11, 53}
 	top10 := []uint8{0, 4, 7, 8, 9, 11, 23, 27, 52, 53}

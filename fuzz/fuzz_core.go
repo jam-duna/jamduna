@@ -736,7 +736,7 @@ func selectAllImportBlocksErrors(seed []byte, store *storage.StateDBStorage, mod
 	if len(errorList) > 0 {
 		possibleErrs := errorList
 		if debugFuzz || true {
-			fmt.Printf("[#%v e=%v,m=%03d] %v possible mutations = %s%v%s\n", oSlot, oEpoch, oPhase, len(possibleErrs), common.ColorMagenta, jamerrors.GetErrorNames(possibleErrs), common.ColorReset)
+			fmt.Printf("[#%03v e=%v,m=%03d] %v possible mutations = %s%v%s\n", oSlot, oEpoch, oPhase, len(possibleErrs), common.ColorMagenta, jamerrors.GetErrorNames(possibleErrs), common.ColorReset)
 		}
 		return oSlot, oEpoch, oPhase, mutatedSTFs, possibleErrs
 	}

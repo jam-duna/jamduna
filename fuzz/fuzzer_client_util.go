@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/jamerrors"
@@ -34,6 +35,48 @@ func HasParentStfs(stfs []*statedb.StateTransition, target_stf *statedb.StateTra
 	return false
 }
 
+// BuildAncestry creates ancestry chain for V1 Initialize message
+// Returns up to maxDepth ancestors starting from the parent of blockToImport
+func BuildAncestry(stfs []*statedb.StateTransition, blockToImport *types.Block, maxDepth int) []AncestryItem {
+	var ancestry []AncestryItem
+
+	// Start with the parent of the block we're about to import
+	currentParentHash := blockToImport.Header.ParentHeaderHash
+
+	for len(ancestry) < maxDepth {
+		// Find the parent block
+		var parentBlock *types.Block
+		for _, stf := range stfs {
+			if stf.Block.Header.HeaderHash() == currentParentHash {
+				parentBlock = &stf.Block
+				break
+			}
+		}
+
+		// If we can't find the parent, stop building ancestry
+		if parentBlock == nil {
+			break
+		}
+
+		// Add this ancestor to the list
+		ancestryItem := AncestryItem{
+			Slot:       parentBlock.Header.Slot,
+			HeaderHash: parentBlock.Header.HeaderHash(),
+		}
+		ancestry = append(ancestry, ancestryItem)
+
+		// Move to the next parent
+		currentParentHash = parentBlock.Header.ParentHeaderHash
+
+		// If we reach a zero hash (genesis), stop
+		if currentParentHash == (common.Hash{}) {
+			break
+		}
+	}
+
+	return ancestry
+}
+
 // RunUnixSocketChallenge executes a state transition test over an existing connection.
 func RunUnixSocketChallenge(fuzzer *Fuzzer, stfQA *StateTransitionQA, verbose bool, stfs []*statedb.StateTransition) (matched bool, solverFuzzed bool, err error) {
 	initialStatePayload := &HeaderWithState{
@@ -55,15 +98,19 @@ func RunUnixSocketChallenge(fuzzer *Fuzzer, stfQA *StateTransitionQA, verbose bo
 		log.Printf("%sORIGINAL%s B#%.3d", common.ColorGray, common.ColorReset, stfQA.STF.Block.Header.Slot)
 	}
 
-	targetPreStateRoot, err := fuzzer.SetState(initialStatePayload)
+	// For V1 protocol with ancestry support, build ancestry chain
+	// According to V1 spec, tiny chains use max depth of 24
+	ancestry := BuildAncestry(stfs, &stfQA.STF.Block, MaxAncestorsLengthA)
+
+	targetPreStateRoot, err := fuzzer.InitializeOrSetState(initialStatePayload, ancestry)
 	if err != nil {
-		return false, false, fmt.Errorf("SetState failed: %w", err)
+		return false, false, fmt.Errorf("InitializeOrSetState failed: %w", err)
 	}
 
 	// Verification for pre-state.
 	if !bytes.Equal(targetPreStateRoot.Bytes(), expectedPreStateRoot.Bytes()) {
 		log.Printf("FATAL: Pre-state root MISMATCH!\n  Got:  %s\n  Want: %s", targetPreStateRoot.Hex(), expectedPreStateRoot.Hex())
-		return false, false, fmt.Errorf("SetState failed: %w", err)
+		return false, false, fmt.Errorf("InitializeOrSetState failed: %w", err)
 	}
 
 	blockToProcess := &stfQA.STF.Block
@@ -73,6 +120,18 @@ func RunUnixSocketChallenge(fuzzer *Fuzzer, stfQA *StateTransitionQA, verbose bo
 
 	targetPostStateRoot, err := fuzzer.ImportBlock(blockToProcess)
 	if err != nil {
+		// Check if this is a V1 Error response (correct detection of fuzzed block)
+		if strings.Contains(err.Error(), "target returned Error") {
+			// V1 Error response - treat as correct detection
+			if stfQA.Mutated {
+				// Fuzzed block correctly detected by target
+				return true, true, nil // matched=true, solverFuzzed=true
+			} else {
+				// Original block incorrectly rejected - this is an error
+				return false, false, fmt.Errorf("ImportBlock failed: %w", err)
+			}
+		}
+		// Other types of ImportBlock errors
 		return false, false, fmt.Errorf("ImportBlock failed: %w", err)
 	}
 
@@ -175,16 +234,18 @@ func RunRefineBundleChallenge(fuzzer *Fuzzer, bundleQA *RefineBundleQA, verbose 
 
 		expectedPreStateRoot := bundleQA.StateContext.PreState.StateRoot
 
-		targetPreStateRoot, err := fuzzer.SetState(initialStatePayload)
+		// For bundle challenges, use empty ancestry since we don't have full chain context
+		emptyAncestry := []AncestryItem{}
+		targetPreStateRoot, err := fuzzer.InitializeOrSetState(initialStatePayload, emptyAncestry)
 		if err != nil {
-			return false, false, fmt.Errorf("SetState failed: %w", err)
+			return false, false, fmt.Errorf("InitializeOrSetState failed: %w", err)
 		}
 
 		// Verification for pre-state
 		if !bytes.Equal(targetPreStateRoot.Bytes(), expectedPreStateRoot.Bytes()) {
 			log.Printf("FATAL: Bundle pre-state root MISMATCH!\n  Got:  %s\n  Want: %s",
 				targetPreStateRoot.Hex(), expectedPreStateRoot.Hex())
-			return false, false, fmt.Errorf("SetState pre-state mismatch")
+			return false, false, fmt.Errorf("InitializeOrSetState pre-state mismatch")
 		}
 
 	}
@@ -218,8 +279,54 @@ func RunRefineBundleChallenge(fuzzer *Fuzzer, bundleQA *RefineBundleQA, verbose 
 	expectedWorkReport := snapshot.Report
 
 	targetWorkReport, err := fuzzer.RefineBundle(&bundleQA.RefineBundle, &expectedWorkReport)
-	if err != nil {
-		return false, false, fmt.Errorf("RefineBundle failed: %w", err)
+
+	exportSegmentsByPackageHashErr := err // Save the RefineBundle error for later
+
+	// Only test GetExports if there are actually exported segments
+	// Check if target has exports by looking at ExportedSegmentLength > 0
+	if targetWorkReport != nil && targetWorkReport.AvailabilitySpec.ExportedSegmentLength > 0 {
+		workPackageHash := bundleQA.RefineBundle.Bundle.PackageHash()
+		log.Printf("%sGetExports (via WP Hash: %s)%s",
+			common.ColorCyan, workPackageHash.Hex(), common.ColorReset)
+
+		exportSegmentsByPackageHash, getExportsErr := fuzzer.GetExports(&workPackageHash)
+		if getExportsErr != nil {
+			log.Printf("%sGetExports via WP Hash failed: %v%s", common.ColorRed, getExportsErr, common.ColorReset)
+		} else {
+			log.Printf("%sGetExports via WP Hash returned %d segments%s", common.ColorGreen, len(*exportSegmentsByPackageHash), common.ColorReset)
+		}
+
+		// Also test with exports root if available (non-zero hash)
+		if targetWorkReport.AvailabilitySpec.ExportedSegmentRoot != (common.Hash{}) {
+			exportsRoot := targetWorkReport.AvailabilitySpec.ExportedSegmentRoot
+			log.Printf("%sGetExports (via ExportsRoot: %s)%s", common.ColorCyan, exportsRoot.Hex(), common.ColorReset)
+
+			exportSegmentsByRoot, err := fuzzer.GetExports(&exportsRoot)
+			if err != nil {
+				log.Printf("%sGetExports via ExportsRoot failed: %v%s", common.ColorRed, err, common.ColorReset)
+			} else {
+				log.Printf("%sGetExports via ExportsRoot returned %d segments%s", common.ColorGreen, len(*exportSegmentsByRoot), common.ColorReset)
+
+				// Verify both calls return the same data
+				if exportSegmentsByPackageHash != nil && len(*exportSegmentsByPackageHash) == len(*exportSegmentsByRoot) {
+					log.Printf("%sBoth GetExports calls returned same number of segments%s", common.ColorGreen, common.ColorReset)
+				} else {
+					log.Printf("%sGetExports calls returned different results%s", common.ColorYellow, common.ColorReset)
+				}
+			}
+		}
+	} else {
+		if targetWorkReport == nil {
+			log.Printf("%sNo WorkReport received, skipping GetExports test%s", common.ColorGray, common.ColorReset)
+		} else {
+			log.Printf("%sNo exported segments (count: %d), skipping GetExports test%s",
+				common.ColorGray, targetWorkReport.AvailabilitySpec.ExportedSegmentLength, common.ColorReset)
+		}
+	}
+
+	// Now handle the original RefineBundle error if there was one
+	if exportSegmentsByPackageHashErr != nil {
+		return false, false, fmt.Errorf("RefineBundle failed: %w", exportSegmentsByPackageHashErr)
 	}
 
 	// Step 3: Verify - The RefineBundle call already handles WorkReport hash comparison

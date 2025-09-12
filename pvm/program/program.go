@@ -85,6 +85,18 @@ func DecodeCorePart(p []byte) *Program {
 
 	// build bitmask
 	kCombined := expandBits(k_bytes, uint32(c_size))
+	startBasicBlock := true
+	for i, v := range kCombined {
+		if v > 0 {
+			if startBasicBlock {
+				kCombined[i] |= 2
+				startBasicBlock = false
+			}
+			if IsBasicBlockInstruction(c_byte[i]) {
+				startBasicBlock = true
+			}
+		}
+	}
 	return &Program{
 		JSize: j_size,
 		Z:     uint8(z),
@@ -94,6 +106,16 @@ func DecodeCorePart(p []byte) *Program {
 		K:     kCombined,
 	}
 }
+
+func IsBasicBlockInstruction(opcode byte) bool {
+	switch opcode {
+	case 0, 1, 40, 50, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 170, 171, 172, 173, 174, 175, 180:
+		return true
+	default:
+		return false
+	}
+}
+
 func expandBits(k_bytes []byte, c_size uint32) []byte {
 	totalBits := len(k_bytes) * 8
 	if totalBits > int(c_size) {

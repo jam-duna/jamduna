@@ -270,14 +270,28 @@ The effective gas consumed by w1+w2 is 91_982. So, since the gas required by w3 
 
 In the end the service 0 calls into accumulate twice and not once: One time for w1+w2 and one for w3
 */
-func (s *StateDB) OuterAccumulate(g uint64, workReports []types.WorkReport, o *types.PartialState, freeAccumulation map[uint32]uint32, pvmBackend string) (num_accumulations uint64, transfers []types.DeferredTransfer, accumulation_output []types.AccumulationOutput, GasUsage []Usage) {
+func (s *StateDB) updateRecentAccumulation(o *types.PartialState, accumulated_partial map[uint32]*types.XContext) {
+	ts := s.JamState.SafroleState.Timeslot
+	for svc, part := range accumulated_partial {
+		if part == nil || part.U == nil || part.U.ServiceAccounts == nil {
+			continue
+		}
+		if sa, ok := part.U.ServiceAccounts[svc]; ok && sa != nil {
+			//fmt.Printf(" svc %v sa.RecentAccumulation %v ts %v\n", svc, sa.RecentAccumulation, ts)
+			sa.UpdateRecentAccumulation(ts)
+			o.ServiceAccounts[svc] = sa
+		}
+	}
+}
+
+func (s *StateDB) OuterAccumulate(g uint64, workReports []types.WorkReport, o *types.PartialState, freeAccumulation map[uint32]uint32, pvmBackend string, accumulated_partial map[uint32]*types.XContext) (num_accumulations uint64, transfers []types.DeferredTransfer, accumulation_output []types.AccumulationOutput, GasUsage []Usage) {
 	var gas_tmp uint64
 	i := uint64(0)
 	// calculate how to maximize the work reports to enter the parallelized accumulation
 	done := false
 	for _, workReport := range workReports {
 		for _, workDigest := range workReport.Results {
-			if gas_tmp <= types.AccumulateGasAllocation_GT {
+			if gas_tmp+workDigest.Gas <= types.AccumulateGasAllocation_GT {
 				gas_tmp += workDigest.Gas
 			} else {
 				done = true
@@ -293,35 +307,24 @@ func (s *StateDB) OuterAccumulate(g uint64, workReports []types.WorkReport, o *t
 
 	if len(workReports) == 0 { // if i = 0, then nothing to do
 		num_accumulations = 0
-
 		transfers = make([]types.DeferredTransfer, 0)
 		accumulation_output = make([]types.AccumulationOutput, 0)
 		GasUsage = make([]Usage, 0)
 		return
 	}
-	p_gasUsed, p_transfers, p_outputs, p_gasUsage := s.ParallelizedAccumulate(o, workReports[0:i], freeAccumulation, pvmBackend) // parallelized accumulation the 0 to i work reports
-	if i >= uint64(len(workReports)) {
-		return i, p_transfers, p_outputs, p_gasUsage
-	}
-	incNum, incTransfers, incAccumulationOutput, incGasUsage := s.OuterAccumulate(g-p_gasUsed, workReports[i:], o, nil, pvmBackend) // recursive call to the rest of the work reports
-	num_accumulations = i + incNum
+	p_gasUsed, p_transfers, p_outputs, p_gasUsage := s.ParallelizedAccumulate(o, workReports[0:i], freeAccumulation, pvmBackend, accumulated_partial) // parallelized accumulation the 0 to i work reports
 
-	transfers = append(incTransfers, p_transfers...)
-	for _, p_output := range p_outputs {
-		duplicate := false
-		for _, acc_output := range incAccumulationOutput {
-			if acc_output.Service == p_output.Service && acc_output.Output == p_output.Output {
-				duplicate = true
-				break
-			}
-		}
-
-		if p_output.Output != (common.Hash{}) && !duplicate {
-			accumulation_output = append(accumulation_output, p_output)
-		}
+	if len(workReports[i:]) > 0 { // if i = len(workReports), then nothing more to do
+		incNum, incTransfers, incAccumulationOutput, incGasUsage := s.OuterAccumulate(g-p_gasUsed, workReports[i:], o, nil, pvmBackend, accumulated_partial) // recursive call to the rest of the work reports
+		num_accumulations = i + incNum
+		accumulation_output = append(p_outputs, incAccumulationOutput...)
+		transfers = append(incTransfers, p_transfers...)
+		GasUsage = append(p_gasUsage, incGasUsage...)
+		s.updateRecentAccumulation(o, accumulated_partial)
+		return
 	}
-	GasUsage = append(p_gasUsage, incGasUsage...)
-	return
+	s.updateRecentAccumulation(o, accumulated_partial)
+	return i, p_transfers, p_outputs, p_gasUsage
 }
 
 /*
@@ -335,6 +338,7 @@ func (s *StateDB) ParallelizedAccumulate(
 	workReports []types.WorkReport,
 	freeAccumulation map[uint32]uint32,
 	pvmBackend string,
+	accumulated_partial map[uint32]*types.XContext,
 ) (totalGasUsed uint64, transfers []types.DeferredTransfer, accumulation_output []types.AccumulationOutput, GasUsage []Usage) {
 
 	GasUsage = make([]Usage, 0, 64)
@@ -357,8 +361,6 @@ func (s *StateDB) ParallelizedAccumulate(
 	if len(services) == 0 {
 		return 0, nil, nil, nil
 	}
-
-	ts := s.JamState.SafroleState.Timeslot
 
 	// --- Parallel section: call SingleAccumulate per service in a worker pool ---
 	type accRes struct {
@@ -418,7 +420,6 @@ func (s *StateDB) ParallelizedAccumulate(
 	sort.Slice(results, func(i, j int) bool { return results[i].service < results[j].service })
 
 	// put all the results back together in o
-	accumulated_partial := make(map[uint32]*types.XContext, len(results))
 	empty := common.Hash{}
 
 	for _, r := range results {
@@ -463,17 +464,6 @@ func (s *StateDB) ParallelizedAccumulate(
 		}
 
 		accumulated_partial[r.service] = r.XY
-	}
-
-	// UpdateRecentAccumulation
-	for svc, part := range accumulated_partial {
-		if part == nil || part.U == nil || part.U.ServiceAccounts == nil {
-			continue
-		}
-		if sa, ok := part.U.ServiceAccounts[svc]; ok && sa != nil {
-			sa.UpdateRecentAccumulation(ts)
-			o.ServiceAccounts[svc] = sa
-		}
 	}
 
 	// sort by Service id
@@ -663,9 +653,9 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, workReports []types.W
 		xy = &(vm.Y)
 
 		if r.Err == types.WORKDIGEST_OOG {
-			log.Trace(sd.Authoring, "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", serviceID), "accumulation_output", accumulation_output, "x_s", x_s)
+			log.Info(sd.Authoring, "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", serviceID), "accumulation_output", accumulation_output, "x_s", x_s)
 		} else {
-			log.Trace(sd.Authoring, "BEEFY PANIC @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", serviceID), "accumulation_output", accumulation_output, "x_s", x_s)
+			log.Info(sd.Authoring, "BEEFY PANIC @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", serviceID), "accumulation_output", accumulation_output, "x_s", x_s)
 		}
 		return
 	}
@@ -679,7 +669,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, workReports []types.W
 		accumulation_output = vm.X.Yield
 		res = "yield"
 	}
-	log.Trace(debugB, fmt.Sprintf("BEEFY OK-HALT with %s @SINGLE ACCUMULATE", res), "s", fmt.Sprintf("%d", serviceID), "accumulation_output", accumulation_output)
+	log.Info(debugB, fmt.Sprintf("BEEFY OK-HALT with %s @SINGLE ACCUMULATE", res), "s", fmt.Sprintf("%d", serviceID), "accumulation_output", accumulation_output)
 	return
 }
 

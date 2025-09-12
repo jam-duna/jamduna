@@ -141,10 +141,10 @@ func (f *Fuzzer) GetFuzzerInfo() PeerInfo {
 
 // --- Protocol Methods ---
 
-func (f *Fuzzer) Handshake() (*PeerInfo, error) {
-	log.Printf("%s[OUTGOING REQ]%s PeerInfo - Fuzzer %s%s%s", common.ColorGreen, common.ColorReset, common.ColorYellow, f.fuzzerInfo.Name, common.ColorReset)
+func (f *Fuzzer) Handshake() (PeerInfo, error) {
+	log.Printf("%s[OUTGOING REQ]%s PeerInfo - Fuzzer %s%s%s", common.ColorGreen, common.ColorReset, common.ColorYellow, f.fuzzerInfo.GetName(), common.ColorReset)
 	//log.Printf("%sFuzzer Info: %s%s", common.ColorGray, f.fuzzerInfo.PrettyString(true), common.ColorReset)
-	msgToSend := &Message{PeerInfo: &f.fuzzerInfo}
+	msgToSend := &Message{PeerInfo: f.fuzzerInfo}
 	if err := f.sendMessage(msgToSend); err != nil {
 		return nil, err
 	}
@@ -155,14 +155,41 @@ func (f *Fuzzer) Handshake() (*PeerInfo, error) {
 	if receivedMsg.PeerInfo == nil {
 		return nil, fmt.Errorf("expected PeerInfo from target, but got a different message type")
 	}
-	log.Printf("%s[INCOMING RSP]%s PeerInfo - Target %s%s%s", common.ColorBlue, common.ColorReset, common.ColorYellow, receivedMsg.PeerInfo.Name, common.ColorReset)
+	log.Printf("%s[INCOMING RSP]%s PeerInfo - Target %s%s%s", common.ColorBlue, common.ColorReset, common.ColorYellow, receivedMsg.PeerInfo.GetName(), common.ColorReset)
 	log.Printf("%sTarget ↓ \n%s%s", common.ColorGray, receivedMsg.PeerInfo.PrettyString(true), common.ColorReset)
+
+	// Validate FuzzVersion compatibility
+	fuzzerVersion := f.fuzzerInfo.GetFuzzVersion()
+	targetVersion := receivedMsg.PeerInfo.GetFuzzVersion()
+	if fuzzerVersion != targetVersion {
+		return nil, fmt.Errorf("FuzzVersion mismatch: fuzzer has version %d, target has version %d - terminating connection", fuzzerVersion, targetVersion)
+	}
+	//log.Printf("%sFuzzVersion validation passed: both fuzzer and target use version %d%s", common.ColorGreen, fuzzerVersion, common.ColorReset)
+
+	f.targetInfo = receivedMsg.PeerInfo
 	return receivedMsg.PeerInfo, nil
 }
 
 func (f *Fuzzer) SetState(state *HeaderWithState) (*common.Hash, error) {
 	log.Printf("%s[OUTGOING REQ]%s SetState    - Hash: %s", common.ColorGreen, common.ColorReset, state.Header.Hash().Hex())
 	msgToSend := &Message{SetState: state}
+	if err := f.sendMessage(msgToSend); err != nil {
+		return nil, err
+	}
+	receivedMsg, err := f.readMessage()
+	if err != nil {
+		return nil, err
+	}
+	if receivedMsg.StateRoot == nil {
+		return nil, fmt.Errorf("expected StateRoot, got different type")
+	}
+	log.Printf("%s[INCOMING RSP]%s StateRoot   - Hash: %s", common.ColorBlue, common.ColorReset, receivedMsg.StateRoot.Hex())
+	return receivedMsg.StateRoot, nil
+}
+
+func (f *Fuzzer) Initialize(init *Initialize) (*common.Hash, error) {
+	log.Printf("%s[OUTGOING REQ]%s Initialize  - Header: %s %s(AncestryLen:%d)%s", common.ColorGreen, common.ColorReset, init.Header.Hash().Hex(), common.ColorGray, len(init.Ancestry), common.ColorReset)
+	msgToSend := &Message{Initialize: init}
 	if err := f.sendMessage(msgToSend); err != nil {
 		return nil, err
 	}
@@ -187,8 +214,16 @@ func (f *Fuzzer) ImportBlock(block *types.Block) (*common.Hash, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Handle Error response (V1 protocol)
+	if receivedMsg.Error != nil {
+		log.Printf("%s[INCOMING RSP]%s Error - Rejected By Target%s", common.ColorBlue, common.ColorGray, common.ColorReset)
+		return nil, fmt.Errorf("ImportBlock failed - target returned Error")
+	}
+
+	// Handle StateRoot response (success case or V0/V0r error with pre-state root)
 	if receivedMsg.StateRoot == nil {
-		return nil, fmt.Errorf("expected StateRoot, got different type")
+		return nil, fmt.Errorf("expected StateRoot or Error, got different type")
 	}
 	log.Printf("%s[INCOMING RSP]%s StateRoot   - Hash: %s", common.ColorBlue, common.ColorReset, receivedMsg.StateRoot.Hex())
 	return receivedMsg.StateRoot, nil
@@ -214,7 +249,7 @@ func (f *Fuzzer) GetState(hash *common.Hash) (*statedb.StateKeyVals, error) {
 func (f *Fuzzer) RefineBundle(refineBundle *types.RefineBundle, expectedWorkReport *types.WorkReport) (*types.WorkReport, error) {
 	workPackageHash := refineBundle.Bundle.PackageHash()
 	log.Printf("%s[OUTGOING REQ]%s RefineBundle", common.ColorGreen, common.ColorReset)
-	//fmt.Printf("%s%v%s\n", common.ColorGray, refineBundle.StringL(), common.ColorReset)
+	fmt.Printf("%s%v%s\n", common.ColorGray, refineBundle.StringL(), common.ColorReset)
 	log.Printf("%sWorkPackageHash: %v%s\n", common.ColorGray, workPackageHash.Hex(), common.ColorReset)
 	//fmt.Printf("%sOutgoing Bundle: %s%s", common.ColorGray, refineBundle.Bundle.StringL(), common.ColorReset)
 
@@ -249,10 +284,30 @@ func (f *Fuzzer) RefineBundle(refineBundle *types.RefineBundle, expectedWorkRepo
 	return receivedMsg.WorkReport, nil
 }
 
+func (f *Fuzzer) GetExports(hash *common.Hash) (*[][]byte, error) {
+	log.Printf("%s[OUTGOING REQ]%s GetExports  - Hash: %s", common.ColorGreen, common.ColorReset, hash.Hex())
+	msgToSend := &Message{GetExports: hash}
+	if err := f.sendMessage(msgToSend); err != nil {
+		return nil, err
+	}
+	receivedMsg, err := f.readMessage()
+	if err != nil {
+		return nil, err
+	}
+	if receivedMsg.Segments == nil {
+		return nil, fmt.Errorf("expected Segments, got different type")
+	}
+	log.Printf("%s[INCOMING RSP]%s Segments - %d segments", common.ColorBlue, common.ColorReset, len(*receivedMsg.Segments))
+	for i, segment := range *receivedMsg.Segments {
+		fmt.Printf("%sSegment %d - Hash: %s%s\n", common.ColorGray, i, common.Blake2Hash(segment), common.ColorReset)
+	}
+	return receivedMsg.Segments, nil
+}
+
 // --- Network Helpers ---
 
 func (f *Fuzzer) sendMessage(msg *Message) error {
-	encodedBody, err := encode(msg)
+	encodedBody, err := GetProtocolHandler().Encode(msg)
 	if err != nil {
 		return fmt.Errorf("%sfailed to encode message: %w%s", common.ColorRed, err, common.ColorReset)
 	}
@@ -278,5 +333,40 @@ func (f *Fuzzer) readMessage() (*Message, error) {
 	if _, err := io.ReadFull(f.conn, body); err != nil {
 		return nil, fmt.Errorf("%sfailed to read message body: %w%s", common.ColorRed, err, common.ColorReset)
 	}
-	return decode(body)
+
+	msg, err := GetProtocolHandler().Decode(body)
+	if err != nil {
+		return nil, err
+	}
+
+	/*
+		if len(body) > 0 {
+			log.Printf("DEBUG: Received message with tag=%d, length=%d", body[0], msgLength)
+		}
+		if msg.Error != nil {
+			log.Printf("DEBUG: Decoded as Error message")
+		} else if msg.StateRoot != nil {
+			log.Printf("DEBUG: Decoded as StateRoot message")
+		}
+	*/
+
+	return msg, nil
+}
+
+// InitializeOrSetState chooses between Initialize (V1) or SetState (V0/V0r) based on protocol version
+func (f *Fuzzer) InitializeOrSetState(state *HeaderWithState, ancestry []AncestryItem) (*common.Hash, error) {
+	protocolVersion := GetProtocolHandler().GetProtocolVersion()
+
+	if protocolVersion == ProtocolV1 {
+		// V1 protocol always uses Initialize (with or without ancestry)
+		initMsg := &Initialize{
+			Header:   state.Header,
+			KeyVals:  state.State,
+			Ancestry: ancestry, // May be empty if ancestry not supported
+		}
+		return f.Initialize(initMsg)
+	} else {
+		// V0/V0r protocols use SetState
+		return f.SetState(state)
+	}
 }

@@ -105,7 +105,7 @@ type BenchmarkStats struct {
 	TransitionSuccess []bool
 	TransitionErrors  []error
 	ErrorMessages     map[string]int
-	TargetPeerInfo    *fuzz.PeerInfo
+	TargetPeerInfo    fuzz.PeerInfo
 }
 
 func (bs *BenchmarkStats) AddResult(duration time.Duration, success bool, err error, filename string, timeSlot uint32) {
@@ -210,17 +210,19 @@ func (bs *BenchmarkStats) GenerateJSONReport(testDir string, totalBenchmarkTime 
 	}
 
 	if bs.TargetPeerInfo != nil {
-		bs.TargetPeerInfo.SetASNSpecific()
-		targetInfo.Name = bs.TargetPeerInfo.Name
+		bs.TargetPeerInfo.SetDefaults()
+		targetInfo.Name = bs.TargetPeerInfo.GetName()
+		appVer := bs.TargetPeerInfo.GetAppVersion()
 		targetInfo.AppVersion = Version{
-			Major: int(bs.TargetPeerInfo.AppVersion.Major),
-			Minor: int(bs.TargetPeerInfo.AppVersion.Minor),
-			Patch: int(bs.TargetPeerInfo.AppVersion.Patch),
+			Major: int(appVer.Major),
+			Minor: int(appVer.Minor),
+			Patch: int(appVer.Patch),
 		}
+		jamVer := bs.TargetPeerInfo.GetJamVersion()
 		targetInfo.JamVersion = Version{
-			Major: int(bs.TargetPeerInfo.JamVersion.Major),
-			Minor: int(bs.TargetPeerInfo.JamVersion.Minor),
-			Patch: int(bs.TargetPeerInfo.JamVersion.Patch),
+			Major: int(jamVer.Major),
+			Minor: int(jamVer.Minor),
+			Patch: int(jamVer.Patch),
 		}
 	}
 
@@ -465,10 +467,12 @@ func benchmarkImportBlockOnly(fuzzer *fuzz.Fuzzer, stfQA *fuzz.StateTransitionQA
 
 	expectedPreStateRoot := stfQA.STF.PreState.StateRoot
 
-	// SetState (not timed)
-	targetPreStateRoot, err := fuzzer.SetState(initialStatePayload)
+	// Initialize or SetState based on protocol version (not timed)
+	maxAncestryDepth := 24
+	ancestry := fuzz.BuildAncestry(allStfs, &stfQA.STF.Block, maxAncestryDepth)
+	targetPreStateRoot, err := fuzzer.InitializeOrSetState(initialStatePayload, ancestry)
 	if err != nil {
-		return 0, false, fmt.Errorf("SetState failed: %w", err)
+		return 0, false, fmt.Errorf("InitializeOrSetState failed: %w", err)
 	}
 
 	// Verify pre-state
@@ -631,14 +635,10 @@ func main() {
 	fReg.RegisterFlag("version", "v", version, "Display version information", &version)
 	fReg.ProcessRegistry()
 
-	benchInfo := fuzz.PeerInfo{
-		Name:       "jam-duna-bench",
-		AppVersion: fuzz.ParseVersion(fuzz.APP_VERSION),
-		JamVersion: fuzz.ParseVersion(fuzz.JAM_VERSION),
-	}
-	benchInfo.SetASNSpecific()
+	benchInfo := createBenchPeerInfo()
+	benchInfo.SetDefaults()
 
-	fmt.Printf("Duna Bench Info:\b\n%s\n\n", benchInfo.Info())
+	fmt.Printf("Duna Bench Info:\b\n%s\n\n", benchInfo.PrettyString(false))
 	if version {
 		return
 	}
@@ -697,7 +697,6 @@ func main() {
 			log.Fatalf("Handshake failed: %v", err)
 		} else {
 			log.Printf("Handshake successful: %s", peerInfo.PrettyString(false))
-			fuzzer.SetTargetPeerInfo(*peerInfo)
 			stats.TargetPeerInfo = peerInfo
 		}
 	}
@@ -746,7 +745,7 @@ func main() {
 	// build filename with target info
 	targetName := "unknown"
 	if stats.TargetPeerInfo != nil {
-		targetName = getTargetNameForFile(stats.TargetPeerInfo.Name)
+		targetName = getTargetNameForFile(stats.TargetPeerInfo.GetName())
 	}
 
 	// Generate JSON report
