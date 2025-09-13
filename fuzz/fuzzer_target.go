@@ -3,6 +3,7 @@ package fuzz
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -19,6 +20,13 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+// StateTransition represents a complete state transition for debugging
+type StateTransition struct {
+	PreState  statedb.StateSnapshotRaw `json:"pre_state"`
+	Block     types.Block              `json:"block"`
+	PostState statedb.StateSnapshotRaw `json:"post_state"`
+}
+
 // Target represents the server-side implementation that the fuzzer connects to.
 type Target struct {
 	listener      net.Listener
@@ -30,10 +38,13 @@ type Target struct {
 	pvmBackend    string                      // Backend to use for state transitions, e.g., "Interpreter" or "Compiler".
 	exportsLookup map[common.Hash]common.Hash // [workPackageHash or exportsRoot] -> segmentsHash
 	exportsData   map[common.Hash][][]byte    // [segmentsHash] -> exportedSegments
+	debugState    bool                        // Enable detailed state debugging output
+	dumpStf       bool                        // Dump state transition files for debugging
+	dumpLocation  string                      // Directory path for STF dump files
 }
 
 // NewTarget creates a new target instance, armed with a specific test case.
-func NewTarget(socketPath string, targetInfo PeerInfo, pvmBackend string) *Target {
+func NewTarget(socketPath string, targetInfo PeerInfo, pvmBackend string, debugState bool, dumpStf bool, dumpLocation string) *Target {
 	levelDBPath := fmt.Sprintf("/tmp/target_%d", time.Now().Unix())
 	store, err := storage.NewStateDBStorage(levelDBPath)
 	if err != nil {
@@ -56,6 +67,9 @@ func NewTarget(socketPath string, targetInfo PeerInfo, pvmBackend string) *Targe
 		pvmBackend:    pvmBackend,
 		exportsLookup: make(map[common.Hash]common.Hash),
 		exportsData:   make(map[common.Hash][][]byte),
+		debugState:    debugState,
+		dumpStf:       dumpStf,
+		dumpLocation:  dumpLocation,
 	}
 }
 
@@ -92,6 +106,14 @@ func (t *Target) Stop() {
 }
 
 func (t *Target) SetStateDB(target_state *statedb.StateDB) {
+	oldStateRoot := common.Hash{}
+	if t.stateDB != nil {
+		oldStateRoot = t.stateDB.StateRoot
+	}
+	if t.debugState {
+		log.Printf("%s[SET_STATE_DB]%s Old StateRoot: %s -> New StateRoot: %s", common.ColorYellow, common.ColorReset, oldStateRoot.Hex(), target_state.StateRoot.Hex())
+		log.Printf("%s[SET_STATE_DB]%s HeaderHash: %s, Block: %v", common.ColorYellow, common.ColorReset, target_state.HeaderHash.Hex(), target_state.Block != nil)
+	}
 	t.stateDB = target_state
 }
 
@@ -224,7 +246,17 @@ func (t *Target) onSetState(req *HeaderWithState) *Message {
 func (t *Target) onImportBlock(req *types.Block) *Message {
 	log.Printf("%s[INCOMING REQ]%s ImportBlock", common.ColorBlue, common.ColorReset)
 	headerHash := req.Header.Hash()
-	log.Printf("%sReceived ImportBlock request for HeaderHash: %s%s", common.ColorGray, headerHash.Hex(), common.ColorReset)
+	fmt.Printf("%sHeaderHash: %s (Slot: %d)\n%s", common.ColorGray, headerHash.Hex(), req.Header.Slot, common.ColorReset)
+	fmt.Printf("%sParentHeaderHash: %s\nParent StateRoot: %s\n%s", common.ColorGray, req.Header.ParentHeaderHash.Hex(), req.Header.ParentStateRoot.Hex(), common.ColorReset)
+
+	if t.debugState {
+		blockJSON, err := json.MarshalIndent(req, "", "  ")
+		if err != nil {
+			log.Printf("Error marshaling block: %v", err)
+		} else {
+			fmt.Printf("%s\n", blockJSON)
+		}
+	}
 
 	// apply state transition using block and the current stateDB
 	if t.stateDB == nil {
@@ -235,25 +267,78 @@ func (t *Target) onImportBlock(req *types.Block) *Message {
 	preState := t.stateDB
 	preStateRoot := preState.StateRoot
 
+	// Check if we need to fork from a different state
+	if req.Header.ParentStateRoot != preStateRoot {
+
+		// Look for the correct parent state in our stateDBMap
+		var foundParentHeaderHash common.Hash
+		for headerHash, stateRoot := range t.stateDBMap {
+			if stateRoot == req.Header.ParentStateRoot {
+				foundParentHeaderHash = headerHash
+				if t.debugState {
+					log.Printf("%s[FORK_DEBUG]%s Found parent state: HeaderHash=%s has StateRoot=%s%s", common.ColorMagenta, common.ColorReset, headerHash.Hex(), stateRoot.Hex(), common.ColorReset)
+				}
+				break
+			}
+		}
+
+		if foundParentHeaderHash != (common.Hash{}) {
+
+			// Create a copy of our current state and recover the parent state
+			forkState := preState.Copy()
+			forkState.RecoverJamState(req.Header.ParentStateRoot)
+			forkState.HeaderHash = foundParentHeaderHash
+			forkState.StateRoot = req.Header.ParentStateRoot
+			if t.debugState {
+				log.Printf("%s[FORK_DEBUG]%s Fork state prepared: HeaderHash=%s, StateRoot=%s%s", common.ColorMagenta, common.ColorReset, forkState.HeaderHash.Hex(), forkState.StateRoot.Hex(), common.ColorReset)
+			}
+			// Use the fork state instead of current state
+			preState = forkState
+			preStateRoot = forkState.StateRoot
+		} else {
+			log.Printf("%s[FORK_DEBUG]%s ERROR: Could not find parent state with StateRoot=%s%s", common.ColorRed, common.ColorReset, req.Header.ParentStateRoot.Hex(), common.ColorReset)
+		}
+	}
+
+	// Work with a copy of the state to avoid mutation on failure
+	stateCopy := preState.Copy()
+
 	startTime := time.Now()
-	postState, jamErr := statedb.ApplyStateTransitionFromBlock(preState, context.Background(), req, nil, pvmBackend)
+	postState, jamErr := statedb.ApplyStateTransitionFromBlock(stateCopy, context.Background(), req, nil, pvmBackend)
 	transitionDuration := time.Since(startTime)
 
 	if jamErr != nil {
 		log.Printf("%s[IMPORTBK ERR] %v (took %.3fms)%s", common.ColorRed, jamErr, float64(transitionDuration.Nanoseconds())/1e6, common.ColorReset)
 
+		// Dump STF files for debugging if enabled
+		if t.dumpStf {
+			t.dumpStateTransitionFiles(preState, req, nil, jamErr, "failed")
+		}
+
 		// V1 protocol sends Error message on ImportBlock failure
 		if GetProtocolHandler().GetProtocolVersion() == ProtocolV1 {
 			log.Printf("%s[OUTGOING RSP]%s Error", common.ColorGreen, common.ColorReset)
-			return &Message{Error: &struct{}{}}
+			errorMsg := jamErr.Error()
+			return &Message{Error: &errorMsg}
 		}
 
 		// V0/V0r protocols return pre-state root on failure
 		return &Message{StateRoot: &preStateRoot}
 	}
+
+	// Dump STF files for debugging if enabled
+	if t.dumpStf {
+		t.dumpStateTransitionFiles(preState, req, postState, nil, "success")
+	}
+
 	log.Printf("%sState transition applied (took %.3fms)%s", common.ColorGray, float64(transitionDuration.Nanoseconds())/1e6, common.ColorReset)
-	log.Printf("%sPost State_Root: %v%s", common.ColorGray, postState.StateRoot.Hex(), common.ColorReset)
-	log.Printf("%sPost HeaderHash: %v%s", common.ColorGray, headerHash.Hex(), common.ColorReset)
+
+	if t.debugState {
+		log.Printf("%sPost State_Root: %v%s", common.ColorGray, postState.StateRoot.Hex(), common.ColorReset)
+		log.Printf("%sPost HeaderHash: %v%s", common.ColorGray, headerHash.Hex(), common.ColorReset)
+	}
+
+	// Only update target state on successful import
 	postStateRoot := postState.StateRoot
 	t.SetStateDB(postState)
 	t.stateDBMap[headerHash] = postStateRoot
@@ -265,22 +350,27 @@ func (t *Target) onImportBlock(req *types.Block) *Message {
 func (t *Target) onGetState(req *common.Hash) *Message {
 	headerHash := *req
 	log.Printf("%s[INCOMING REQ]%s GetState", common.ColorBlue, common.ColorReset)
-	log.Printf("Received GetState request headerHash: %s", headerHash.Hex())
+	log.Printf("%sReceived GetState request headerHash: %s%s", common.ColorGray, headerHash.Hex(), common.ColorReset)
+
 	if t.stateDBMap[headerHash] == (common.Hash{}) {
-		log.Printf("%sError: No state found for headerHash: %s%s", common.ColorRed, headerHash.Hex(), common.ColorReset)
+		log.Printf("%s[GET_STATE_DEBUG]%s Error: No state found for headerHash: %s%s", common.ColorRed, common.ColorReset, headerHash.Hex(), common.ColorReset)
 		return &Message{State: &statedb.StateKeyVals{}}
 	}
 
 	// Fetch back the state root from the map
 	stateRoot := t.stateDBMap[headerHash]
-	log.Printf("Recovering state for headerHash: %s with stateRoot: %s", headerHash.Hex(), stateRoot.Hex())
+	//log.Printf("%s[GET_STATE_DEBUG]%s Recovering state for headerHash: %s with stateRoot: %s%s", common.ColorGray, common.ColorReset, headerHash.Hex(), stateRoot.Hex(), common.ColorReset)
+	//log.Printf("%s[GET_STATE_DEBUG]%s Current stateDB: HeaderHash=%s, StateRoot=%s%s", common.ColorGray, common.ColorReset, t.stateDB.HeaderHash.Hex(), t.stateDB.StateRoot.Hex(), common.ColorReset)
+
 	recoveredStateDB := t.stateDB.Copy()
 	recoveredStateDB.RecoverJamState(stateRoot)
+
+	log.Printf("%s[GET_STATE_DEBUG]%s After recovery: HeaderHash=%s, StateRoot=%s%s", common.ColorGray, common.ColorReset, recoveredStateDB.HeaderHash.Hex(), recoveredStateDB.StateRoot.Hex(), common.ColorReset)
 
 	stateKeyVals := statedb.StateKeyVals{
 		KeyVals: recoveredStateDB.GetAllKeyValues(),
 	}
-	log.Printf("%s[OUTGOING RSP]%s State", common.ColorGreen, common.ColorReset)
+	log.Printf("%s[OUTGOING RSP]%s State (with %d key-value pairs)", common.ColorGreen, common.ColorReset, len(stateKeyVals.KeyVals))
 	return &Message{State: &stateKeyVals}
 }
 
@@ -404,6 +494,71 @@ func sendMessage(conn net.Conn, msg *Message) error {
 		return fmt.Errorf("%sfailed to write message body: %w%s", common.ColorRed, err, common.ColorReset)
 	}
 	return nil
+}
+
+// dumpStateTransitionFiles dumps state transition information for debugging
+func (t *Target) dumpStateTransitionFiles(preState *statedb.StateDB, block *types.Block, postState *statedb.StateDB, err error, status string) {
+	if block == nil {
+		return
+	}
+
+	headerHash := block.Header.Hash().Hex()
+	slot := block.Header.Slot
+
+	// Ensure the dump directory exists
+	if err := os.MkdirAll(t.dumpLocation, 0755); err != nil {
+		log.Printf("%s[STF_DUMP_ERR] Failed to create dump directory %s: %v%s", common.ColorRed, t.dumpLocation, err, common.ColorReset)
+		return
+	}
+
+	filename := fmt.Sprintf("%s/stf_dump_slot%d_%s_%s.json", t.dumpLocation, slot, headerHash, status)
+
+	// Create StateTransition struct
+	transition := StateTransition{
+		Block: *block,
+	}
+
+	// Convert preState to StateSnapshotRaw if available
+	if preState != nil {
+		transition.PreState = statedb.StateSnapshotRaw{
+			StateRoot: preState.StateRoot,
+			KeyVals:   preState.GetAllKeyValues(),
+		}
+	}
+
+	// Convert postState to StateSnapshotRaw if available
+	if postState != nil {
+		transition.PostState = statedb.StateSnapshotRaw{
+			StateRoot: postState.StateRoot,
+			KeyVals:   postState.GetAllKeyValues(),
+		}
+	}
+
+	// Marshal the StateTransition struct
+	data, jsonErr := json.MarshalIndent(transition, "", "  ")
+	if jsonErr != nil {
+		log.Printf("%s[STF_DUMP_ERR] Failed to marshal STF data: %v%s", common.ColorRed, jsonErr, common.ColorReset)
+		return
+	}
+
+	// Add error information if present (append to file or separate handling)
+	if err != nil {
+		errorInfo := map[string]interface{}{
+			"error":  err.Error(),
+			"status": status,
+		}
+		errorData, _ := json.MarshalIndent(errorInfo, "", "  ")
+		data = append(data, []byte("\n// Error information:\n// ")...)
+		data = append(data, errorData...)
+	}
+
+	writeErr := os.WriteFile(filename, data, 0644)
+	if writeErr != nil {
+		log.Printf("%s[STF_DUMP_ERR] Failed to write STF file: %v%s", common.ColorRed, writeErr, common.ColorReset)
+		return
+	}
+
+	log.Printf("%s[STF_DUMP] Wrote %s%s", common.ColorBlue, filename, common.ColorReset)
 }
 
 func readMessage(conn net.Conn) (*Message, error) {

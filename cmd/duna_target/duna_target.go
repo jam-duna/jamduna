@@ -23,11 +23,17 @@ func main() {
 
 	var socketPath string = "/tmp/jam_target.sock"
 	var pvmLogging string = "none"
+	var debugState bool = false
+	var dumpStf bool = false
+	var dumpLocation string = "./stf"
 	version := false
 
 	fReg := fuzz.NewFlagRegistry("duna_target")
 	fReg.RegisterFlag("socket", nil, socketPath, "Path for the Unix domain socket", &socketPath)
 	fReg.RegisterFlag("pvm-logging", nil, pvmLogging, "Logging level (none, debug, trace)", &pvmLogging)
+	fReg.RegisterFlag("debug-state", nil, debugState, "Enable detailed state debugging output", &debugState)
+	fReg.RegisterFlag("dump-stf", nil, dumpStf, "Dump state transition files for debugging", &dumpStf)
+	fReg.RegisterFlag("dump-location", nil, dumpLocation, "Directory path for STF dump files", &dumpLocation)
 	fReg.RegisterFlag("version", "v", version, "Display version information", &version)
 	fReg.ProcessRegistry()
 
@@ -49,7 +55,7 @@ func main() {
 			statedb.PvmLogging = true
 		}
 	}
-	target := fuzz.NewTarget(socketPath, targetInfo, "interpreter")
+	target := fuzz.NewTarget(socketPath, targetInfo, "interpreter", debugState, dumpStf, dumpLocation)
 
 	// Graceful shutdown setup
 	stopCh := make(chan os.Signal, 1)

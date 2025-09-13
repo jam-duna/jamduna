@@ -16,7 +16,7 @@ const (
 
 // major.minor.patch
 var (
-	PATCH_VERSION = 10 // Bump this for patch releases
+	PATCH_VERSION = 11 // Bump this for patch releases
 	APP_VERSION   = fmt.Sprintf("0.2.%v", PATCH_VERSION)
 	JAM_VERSION   = fmt.Sprintf("%v.%v", GP_VERSION, PATCH_VERSION) // Tag as <0.7.0><.x> for our jam binary release
 )
@@ -196,7 +196,7 @@ type Message struct {
 
 	// V1 messages
 	Initialize *Initialize `json:"initialize,omitempty"` // Tag [1] in V1
-	Error      *struct{}   `json:"error,omitempty"`      // Tag [255] in V1
+	Error      *string     `json:"error,omitempty"`      // Tag [255] in V1
 
 	// V0r extended messages
 	RefineBundle *types.RefineBundle `json:"refine_bundle,omitempty"` // Tag [6] in V0r

@@ -1120,7 +1120,7 @@ func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32,
 	prevEpoch, prevPhase := s.EpochAndPhase(uint32(s.Timeslot))
 	currEpoch, currPhase := s.EpochAndPhase(targetJCE)
 	// ticket mark check
-	if prevEpoch == currEpoch && prevPhase < types.TicketSubmissionEndSlot && currPhase >= types.TicketSubmissionEndSlot && len(s.NextEpochTicketsAccumulator) == types.EpochLength {
+	if prevEpoch == currEpoch && (prevPhase < types.TicketSubmissionEndSlot && currPhase >= types.TicketSubmissionEndSlot) && len(s.NextEpochTicketsAccumulator) == types.EpochLength {
 		if header.TicketsMark == nil {
 			return nil, fmt.Errorf("TicketsMark missing in header")
 		}
@@ -1137,6 +1137,10 @@ func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32,
 		verified, err := VerifyWinningMarker([types.EpochLength]*types.TicketBody(ticketMarks), s.computeTicketSlotBinding(s.NextEpochTicketsAccumulator))
 		if !verified || err != nil {
 			return nil, fmt.Errorf("VerifyWinningMarker Failed:%s", err)
+		}
+	} else {
+		if header.TicketsMark != nil {
+			return nil, fmt.Errorf("TicketsMark should be nil in header")
 		}
 	}
 

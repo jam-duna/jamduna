@@ -75,6 +75,8 @@ libjava*.dylib
 assets/zcash-srs-2-11-uncompressed.bin
 /cmd/duna_fuzzer/rawdata
 /cmd/duna_bench/duna_bench_*
+/cmd/duna_replay/duna_replay_*
+/cmd/duna_bench/duna_targeth_*
 /cmd/duna_bench/reports
 /reports
 duna_target
@@ -88,3 +90,6 @@ duna_bench
 cmd/duna_fuzzer/refine/.DS_Store
 /cmd/duna_fuzzer/refine_algo
 /cmd/duna_fuzzer/refine_fib
+/fuzz/v1
+
+/stf

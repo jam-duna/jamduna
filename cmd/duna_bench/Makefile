@@ -9,9 +9,6 @@ build: static_bench$(DEFAULT_ASN_VERSION)_linux static_bench$(DEFAULT_ASN_VERSIO
 # Default ASN version build (follows DEFAULT_ASN_VERSION)
 make: asn$(DEFAULT_ASN_VERSION)
 
-# ASN.0 builds (default) 
-asn0: static_bench0_linux static_bench0_mac
-
 # ASN.1 builds (spec-compliant)
 asn1: static_bench1_linux static_bench1_mac
 
@@ -45,29 +42,6 @@ static_bench_mac:
 	-o $(BINARY_NAME)_mac .
 	@rm -f ../../ffi/libpvm.a
 	@echo "Build complete: $(BINARY_NAME)_mac"
-
-static_bench0_linux:
-	@echo "Building static $(BINARY_NAME) (ASN.0) for Linux (amd64)..."
-	@ln -sf $(CURDIR)/../../ffi/libpvm.linux_amd64.a ../../ffi/libpvm.a
-	-@GOOS=linux GOARCH=amd64 CC=x86_64-linux-musl-gcc CGO_ENABLED=1 \
-	go build -tags="cgo,$(NETWORK),asn0" \
-	-ldflags="-s -w -extldflags '-static'" \
-	-o $(if $(filter 0,$(DEFAULT_ASN_VERSION)),$(BINARY_NAME)_linux,$(BINARY_NAME)_asn0_linux) .
-	@rm -f ../../ffi/libpvm.a
-	@echo "Build complete: $(if $(filter 0,$(DEFAULT_ASN_VERSION)),$(BINARY_NAME)_linux,$(BINARY_NAME)_asn0_linux)"
-
-static_bench0_mac:
-	@echo "Building static $(BINARY_NAME) (ASN.0) for macOS (amd64)..."
-	@ln -sf $(CURDIR)/../../ffi/libpvm.mac_amd64.a ../../ffi/libpvm.a
-	-@MACOSX_DEPLOYMENT_TARGET=14.0 \
-	  GOOS=darwin GOARCH=amd64 CC=clang CGO_ENABLED=1 \
-	  CGO_CFLAGS="-mmacosx-version-min=14.0 -isysroot $(SDK_PATH)" \
-	  CGO_LDFLAGS="-mmacosx-version-min=14.0 -isysroot $(SDK_PATH)" \
-	go build -tags="cgo,$(NETWORK),asn0" \
-	-ldflags="-s -w" \
-	-o $(if $(filter 0,$(DEFAULT_ASN_VERSION)),$(BINARY_NAME)_mac,$(BINARY_NAME)_asn0_mac) .
-	@rm -f ../../ffi/libpvm.a
-	@echo "Build complete: $(if $(filter 0,$(DEFAULT_ASN_VERSION)),$(BINARY_NAME)_mac,$(BINARY_NAME)_asn0_mac)"
 
 static_bench1_linux:
 	@echo "Building static $(BINARY_NAME) (ASN.1) for Linux (amd64)..."
@@ -117,5 +91,5 @@ static_bench0r_mac:
 
 clean:
 	rm -f $(BINARY_NAME) $(BINARY_NAME)_linux $(BINARY_NAME)_mac $(BINARY_NAME)_dynamic \
-	      $(BINARY_NAME)_asn0_linux $(BINARY_NAME)_asn0_mac $(BINARY_NAME)_asn1_linux $(BINARY_NAME)_asn1_mac \
+	      $(BINARY_NAME)_asn1_linux $(BINARY_NAME)_asn1_mac \
 	      $(BINARY_NAME)_asn0r_linux $(BINARY_NAME)_asn0r_mac

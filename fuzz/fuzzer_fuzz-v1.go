@@ -131,8 +131,8 @@ func Encode(msg *Message) ([]byte, error) {
 	case msg.State != nil:
 		tag, data = 5, *msg.State // [5]
 	case msg.Error != nil:
-		// Error ::= NULL - no data to encode
-		return []byte{255}, nil // [255]
+		// Error ::= UTF8String - encode the error message
+		tag, data = 255, *msg.Error // [255]
 	default:
 		return nil, fmt.Errorf("cannot encode empty message")
 	}
@@ -155,9 +155,10 @@ func Decode(data []byte) (*Message, error) {
 	encodedBody := data[1:]
 	msg := &Message{}
 
-	// Special case for Error message (tag 255) - Error ::= NULL
+	// Special case for Error message (tag 255) - Error ::= UTF8String
 	if tag == 255 {
-		msg.Error = &struct{}{}
+		errorMsg := string(encodedBody)
+		msg.Error = &errorMsg
 		return msg, nil
 	}
 

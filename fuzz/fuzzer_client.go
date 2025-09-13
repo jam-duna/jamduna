@@ -370,3 +370,12 @@ func (f *Fuzzer) InitializeOrSetState(state *HeaderWithState, ancestry []Ancestr
 		return f.SetState(state)
 	}
 }
+
+// Public wrappers for replay tool
+func (f *Fuzzer) SendMessage(msg *Message) error {
+	return f.sendMessage(msg)
+}
+
+func (f *Fuzzer) ReadMessage() (*Message, error) {
+	return f.readMessage()
+}
