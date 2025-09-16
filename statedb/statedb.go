@@ -854,16 +854,22 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 	num_preimages := uint32(0)
 	num_octets := uint32(0)
 
-	//TODO: (eq 156) need to make sure E_P is sorted. by what??
-	//validate (eq 156)
-	// for i := 1; i < len(preimages); i++ {
-	// 	if preimages[i].Requester <= preimages[i-1].Requester {
-	// 		return 0, 0, fmt.Errorf(errServiceIndices)
-	// 	}
-	// }
+	//(12.39) EP sort by serviceID & blob byte sequence
+	for i := 1; i < len(preimages); i++ {
+		curr := preimages[i]
+		prev := preimages[i-1]
+		if curr.Requester < prev.Requester {
+			return 0, 0, fmt.Errorf(errServiceIndices)
+		} else if curr.Requester == prev.Requester {
+			// If Requester is the same, compare Blob by byte sequence
+			if bytes.Compare(curr.Blob, prev.Blob) <= 0 {
+				return 0, 0, fmt.Errorf(errServiceIndices)
+			}
+		}
+	}
 
+	// (12.42)
 	for _, l := range preimages {
-		// validate eq 157
 		_, err := s.ValidateAddPreimage(l.Requester, l.Blob)
 		if err != nil {
 			log.Error(log.SDB, "ApplyStateTransitionPreimages:ValidateAddPreimage", "n", s.Id, "err", err)
@@ -871,9 +877,8 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 		}
 	}
 
-	// ready for state transisiton
+	// (12.43) ready for state transition
 	for _, l := range preimages {
-		// (eq 158)
 		// δ†[s]p[H(p)] = p
 		// δ†[s]l[H(p),∣p∣] = [τ′]
 		log.Trace(log.P, "WriteServicePreimageBlob", "Service_Index", l.Service_Index(), "Blob", l.Blob)
@@ -944,6 +949,11 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block, sf0 *SafroleState) (isValid
 		c = ticketSealVRFInput(blockSealEntropy, uint8(winning_ticket.Attempt))
 	} else {
 		// Fallback
+		_, currPhase := sf0.EpochAndPhase(targetJCE)
+		currentValidatorKey := (sf0.TicketsOrKeys.Keys)[currPhase]
+		if !bytes.Equal(currentValidatorKey.Bytes(), block_author_ietf_pub.Bytes()) {
+			return false, validatorIdx, block_author_ietf_pub, fmt.Errorf("VerifyBlockHeader Failed: FallbackMode ValidatorKeyMismatch")
+		}
 		c = append([]byte(types.X_F), blockSealEntropy.Bytes()...)
 	}
 

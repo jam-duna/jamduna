@@ -11,12 +11,14 @@ import (
 )
 
 const (
-	GP_VERSION = "0.7.0"
+	GP_VERSION      = "0.7.0"
+	FUZZ_VERSION_V1 = 1
+	FUZZ_VERSION_V0 = 0
 )
 
 // major.minor.patch
 var (
-	PATCH_VERSION = 11 // Bump this for patch releases
+	PATCH_VERSION = 12 // Bump this for patch releases
 	APP_VERSION   = fmt.Sprintf("0.2.%v", PATCH_VERSION)
 	JAM_VERSION   = fmt.Sprintf("%v.%v", GP_VERSION, PATCH_VERSION) // Tag as <0.7.0><.x> for our jam binary release
 )
@@ -203,4 +205,8 @@ type Message struct {
 	WorkReport   *types.WorkReport   `json:"work_report,omitempty"`   // Tag [7] in V0r
 	GetExports   *common.Hash        `json:"get_exports,omitempty"`   // Tag [8] in V0r
 	Segments     *[][]byte           `json:"segments,omitempty"`      // Tag [9] in V0r
+}
+
+func CreatePeerInfo(appName string) PeerInfo {
+	return CreateVersionedPeerInfo(appName)
 }

@@ -239,6 +239,7 @@ pvm_result_t pvm_execute(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child) 
             pvm_panic(vm, WHAT);
             continue;
         }
+
         if (vm->pvm_logging) {
             printf("%s %d %llu Gas@S%u: %lld Registers: [%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu]\n", 
                     get_opcode_name(opcode), step, (unsigned long long)vm->pc, vm->service_index, (long long)vm->gas,
@@ -343,6 +344,10 @@ uint8_t pvm_get_machine_state(pvm_vm_t* vm) {
     return (uint8_t)vm->machine_state;
 }
 
+void pvm_set_result_code(pvm_vm_t* vm, uint64_t result_code) {
+    if (!vm ) return;
+    vm->result_code = (int)result_code;
+}
 // Heap Management: we should be able to eliminate this method
 void pvm_set_heap_pointer(pvm_vm_t* vm, uint32_t pointer) {
     if (!vm ) return;
@@ -568,14 +573,14 @@ uint64_t pvm_write_ram_bytes(pvm_vm_t* vm, uint32_t address, const uint8_t* data
     if (length == 0) {
         return OK;
     }
-    
+
     uint32_t heap_end = p_func(vm->current_heap_pointer);
     if (vm->pvm_tracing) {
-         printf("pvm_write_ram_bytes: address=0x%x, length=%d\n", address, length);
-         printf("  RW region: 0x%x - 0x%x (heap_end=0x%x)\n", vm->rw_data_address, vm->rw_data_address_end, heap_end);
-         printf("  Output region: 0x%x - 0x%x\n", vm->output_address, vm->output_end);
-         printf("  Stack region: 0x%x - 0x%x\n", vm->stack_address, vm->stack_address_end);
-         printf("  RO region: 0x%x - 0x%x\n", vm->ro_data_address, vm->ro_data_address_end);
+        printf("pvm_write_ram_bytes: address=0x%x, length=%d\n", address, length);
+        printf("  RW region: 0x%x - 0x%x (heap_end=0x%x)\n", vm->rw_data_address, vm->rw_data_address_end, heap_end);
+        printf("  Output region: 0x%x - 0x%x\n", vm->output_address, vm->output_end);
+        printf("  Stack region: 0x%x - 0x%x\n", vm->stack_address, vm->stack_address_end);
+        printf("  RO region: 0x%x - 0x%x\n", vm->ro_data_address, vm->ro_data_address_end);
     }
 
     // RW data / heap region (writable up to heap_end)
@@ -765,6 +770,7 @@ uint64_t pvm_read_ram_bytes_64(pvm_vm_t* vm, uint32_t address, int* error_code) 
     if (address >= vm->output_address && address <= vm->output_end - 8) {
         uint32_t offset = address - vm->output_address;
         *error_code = OK;
+//        printf("pvm_read_ram_bytes_64: address=0x%x, data=0x%llx\n", address, (unsigned long long)get_uint64_le(vm->output + offset));
         return get_uint64_le(vm->output + offset);
     }
 
@@ -831,9 +837,8 @@ void pvm_set_tracing(pvm_vm_t* vm, int enable) {
     vm->pvm_tracing = enable ? 1 : 0;
 }
 
-
 // VM panic function
-void pvm_panic(VM* vm, uint64_t err_code) {
+void pvm_panic(pvm_vm_t* vm, uint64_t err_code) {
     vm->result_code = WORKDIGEST_PANIC;
     vm->machine_state = PANIC;
     vm->terminated = 1;

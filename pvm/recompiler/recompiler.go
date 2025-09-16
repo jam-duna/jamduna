@@ -204,6 +204,14 @@ func (rvm *RecompilerVM) GetGas() int64 {
 	return rvm.Gas
 }
 
+func (rvm *RecompilerVM) Panic(uint64) {
+	// TODO
+}
+
+func (rvm *RecompilerVM) SetHostResultCode(errCode uint64) {
+	// TODO
+}
+
 func (rvm *RecompilerVM) SetHeapPointer(addr uint32) {
 	rvm.RecompilerRam.current_heap_pointer = addr
 }

@@ -1,8 +1,10 @@
 package types
 
 import (
+	"bytes"
 	"fmt"
 	"reflect"
+	"sort"
 	"sync"
 
 	"github.com/colorfulnotion/jam/common"
@@ -334,6 +336,16 @@ func (ep *ExtrinsicPool) GetPreimageFromPool() []*Preimages {
 		}
 		preimages = append(preimages, preimage)
 	}
+
+	// Sort by service_index (requester), then by blob if requester is the same
+	sort.Slice(preimages, func(i, j int) bool {
+		if preimages[i].Service_Index() != preimages[j].Service_Index() {
+			return preimages[i].Service_Index() < preimages[j].Service_Index()
+		}
+		// If service_index is the same, sort by blob byte sequence
+		return bytes.Compare(preimages[i].Blob, preimages[j].Blob) < 0
+	})
+
 	return preimages
 }
 

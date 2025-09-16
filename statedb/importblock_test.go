@@ -331,7 +331,7 @@ func findFuzzTestFiles(sourcePath, targetVersion string, excludedTeams []string)
 }
 
 func TestSingleFuzzTrace(t *testing.T) {
-	PvmLogging = false
+
 	fileMap := make(map[string]string)
 
 	jamConformancePath, err := GetFuzzReportsPath()
@@ -339,19 +339,28 @@ func TestSingleFuzzTrace(t *testing.T) {
 		t.Fatalf("failed to get fuzz reports path: %v", err)
 	}
 	// this is about one last key
-	// unknown    | Expected: 0x60000000000000003f72b36f023e0a26ba5e3bb25dccd8bc38055b9561f7ca61fecb0c957de7e577206cdcffffffffff00000000000000000a000000000000000a00000000000000127802000000000005000000ffffffffffffffff000000000800000000000000
-	// unknown    | Actual:   0x60000000000000003f72b36f023e0a26ba5e3bb25dccd8bc38055b9561f7ca61fecb0c957de7e577206cdcffffffffff00000000000000000a000000000000000a00000000000000127802000000000005000000ffffffffffffffff000000000b00000000000000
-	fileMap["1757422206"] = "fuzz-reports/0.7.0/traces/1757422206/00000011.json"
+	/*
+	   --- FAIL: TestFuzzTrace/fuzz-reports/0.7.0/traces/1757841566/00000200.bin (0.02s)
+	   --- FAIL: TestFuzzTrace/fuzz-reports/0.7.0/traces/1757843609/00000034.bin (0.05s)
+	   --- FAIL: TestFuzzTrace/fuzz-reports/0.7.0/traces/1757843719/00000035.bin (0.03s)
+	   --- FAIL: TestFuzzTrace/fuzz-reports/0.7.0/traces/1757843735/00000010.bin (0.56s)
+	   --- FAIL: TestFuzzTrace/fuzz-reports/0.7.0/traces/1757862468/00000160.bin (0.47s)
+	   --- FAIL: TestFuzzTrace/fuzz-reports/0.7.0/traces/1757862472/00000160.bin (0.39s)
+	*/
 
-	fileMap["1757406238"] = "fuzz-reports/0.7.0/traces/1757406238/00000008.json"
-
+	fileMap["1757841566"] = "fuzz-reports/0.7.0/traces/1757841566/00000200.json"
+	fileMap["1757843609"] = "fuzz-reports/0.7.0/traces/1757843609/00000034.json"
+	fileMap["1757843719"] = "fuzz-reports/0.7.0/traces/1757843719/00000035.json"
+	fileMap["1757843735"] = "fuzz-reports/0.7.0/traces/1757843735/00000010.json"
+	fileMap["1757862468"] = "fuzz-reports/0.7.0/traces/1757862468/00000160.json"
+	fileMap["1757862472"] = "fuzz-reports/0.7.0/traces/1757862472/00000160.json"
+	PvmLogging = false
 	log.InitLogger("debug")
-	log.EnableModule(log.PvmAuthoring)
-	log.EnableModule("pvm_validator")
+	// log.EnableModule(log.PvmAuthoring)
+	// log.EnableModule("pvm_validator")
 	log.EnableModule(log.SDB)
 
-	// test one of them out
-	tc := []string{"1757422206", "1757406238"}
+	tc := []string{"1757862468", "1757862472", "1757841566", "1757843609", "1757843719", "1757843735"}
 
 	for _, team := range tc {
 		filename, exists := fileMap[team]

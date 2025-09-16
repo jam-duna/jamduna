@@ -1,0 +1,29 @@
+package types
+
+import (
+	"bytes"
+	"fmt"
+	"testing"
+
+	"github.com/colorfulnotion/jam/common"
+)
+
+func TestParam(t *testing.T) {
+
+	data := common.FromHex("0x0a00000000000000010000000000000064000000000000000200200000000c000000809698000000000080f0fa020000000000ca9a3b00000000002d3101000000000800100008000300403800000300080006005000040080000500060000fa0000017cd20000093d0004000000000c00000204000000c0000080000000000c00000a000000")
+	var params Parameters
+	params.FromBytes(data)
+	t.Logf("params: %+v", params)
+	paramBytes, err := ParameterBytes()
+	if err != nil {
+		t.Fatalf("ParameterBytes error: %v", err)
+	}
+	if !bytes.Equal(paramBytes, data) {
+		t.Fatalf("ParameterBytes do not match original data")
+	}
+	t.Logf("✅ ParameterBytes match original data")
+	fmt.Printf("ParameterBytes: %x\n", paramBytes)
+	fmt.Printf("ParameterString: %s\n", params.String())
+	params.PrintFieldsHex()
+
+}

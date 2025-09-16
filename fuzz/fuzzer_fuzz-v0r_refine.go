@@ -15,23 +15,23 @@ import (
 
 // PeerInfoV0r ::= SEQUENCE {fuzz-version, app-version, jam-version, features, name}
 type PeerInfoV0r struct {
-	FuzzVersion uint8    `json:"fuzz_version"`
-	AppVersion  Version  `json:"app_version"`
-	JamVersion  Version  `json:"jam_version"`
-	Features    Features `json:"features"`
-	Name        string   `json:"name"`
+	FuzzVersion  uint8    `json:"fuzz_version"`
+	AppVersion   Version  `json:"app_version"`
+	JamVersion   Version  `json:"jam_version"`
+	FuzzFeatures Features `json:"fuzz_features"`
+	AppName      string   `json:"app_name"`
 }
 
 // Implement PeerInfo interface
-func (p *PeerInfoV0r) GetName() string           { return p.Name }
+func (p *PeerInfoV0r) GetName() string           { return p.AppName }
 func (p *PeerInfoV0r) GetAppVersion() Version    { return p.AppVersion }
 func (p *PeerInfoV0r) GetJamVersion() Version    { return p.JamVersion }
 func (p *PeerInfoV0r) GetProtocolVersion() uint8 { return ProtocolV0r }
 func (p *PeerInfoV0r) GetFuzzVersion() uint8     { return p.FuzzVersion }
-func (p *PeerInfoV0r) GetFeatures() Features     { return p.Features }
+func (p *PeerInfoV0r) GetFeatures() Features     { return p.FuzzFeatures }
 func (p *PeerInfoV0r) SetDefaults() {
 	p.FuzzVersion = uint8(1)
-	p.Features = FeatureBundleRefinement
+	p.FuzzFeatures = FeatureBundleRefinement
 }
 
 // FeaturesDisplay represents feature flags for JSON output
@@ -59,13 +59,13 @@ func (p *PeerInfoV0r) PrettyString(isIndented bool) string {
 		AppVersion:  fmt.Sprintf("%d.%d.%d", p.AppVersion.Major, p.AppVersion.Minor, p.AppVersion.Patch),
 		JamVersion:  fmt.Sprintf("%d.%d.%d", p.JamVersion.Major, p.JamVersion.Minor, p.JamVersion.Patch),
 		Features: FeaturesDisplay{
-			BlockAncestry:    (p.Features & FeatureBlockAncestry) != 0,
-			SimpleForking:    (p.Features & FeatureSimpleForking) != 0,
-			BundleRefinement: (p.Features & FeatureBundleRefinement) != 0,
-			Exports:          (p.Features & FeatureExports) != 0,
-			Extension:        (p.Features & FeatureExtension) != 0,
+			BlockAncestry:    (p.FuzzFeatures & FeatureBlockAncestry) != 0,
+			SimpleForking:    (p.FuzzFeatures & FeatureSimpleForking) != 0,
+			BundleRefinement: (p.FuzzFeatures & FeatureBundleRefinement) != 0,
+			Exports:          (p.FuzzFeatures & FeatureExports) != 0,
+			Extension:        (p.FuzzFeatures & FeatureExtension) != 0,
 		},
-		Name: p.Name,
+		Name: p.AppName,
 	}
 	var err error
 	var jsonBytes []byte
@@ -90,15 +90,15 @@ func (p *PeerInfoV0r) Info() string {
   AppVersion: %d.%d.%d
   JAMVersion: %d.%d.%d
   Features: BlockAncestry=%v, SimpleForking=%v, BundleRefinement=%v, Export=%v, Extension=%v`,
-		p.Name,
+		p.AppName,
 		p.FuzzVersion,
 		p.AppVersion.Major, p.AppVersion.Minor, p.AppVersion.Patch,
 		p.JamVersion.Major, p.JamVersion.Minor, p.JamVersion.Patch,
-		(p.Features&FeatureBlockAncestry) != 0,
-		(p.Features&FeatureSimpleForking) != 0,
-		(p.Features&FeatureBundleRefinement) != 0,
-		(p.Features&FeatureExports) != 0,
-		(p.Features&FeatureExtension) != 0)
+		(p.FuzzFeatures&FeatureBlockAncestry) != 0,
+		(p.FuzzFeatures&FeatureSimpleForking) != 0,
+		(p.FuzzFeatures&FeatureBundleRefinement) != 0,
+		(p.FuzzFeatures&FeatureExports) != 0,
+		(p.FuzzFeatures&FeatureExtension) != 0)
 }
 
 // --- V0r JAM Codec Functions ---
@@ -247,4 +247,14 @@ func (h *V0rProtocolHandler) Decode(data []byte) (*Message, error) {
 
 func (h *V0rProtocolHandler) GetProtocolVersion() uint8 {
 	return ProtocolV0r
+}
+
+func CreateVersionedPeerInfo(appName string) PeerInfo {
+	return &PeerInfoV0r{
+		FuzzVersion:  FUZZ_VERSION_V1,
+		FuzzFeatures: FeatureSimpleForking,
+		JamVersion:   ParseVersion(JAM_VERSION),
+		AppName:      appName,
+		AppVersion:   ParseVersion(APP_VERSION),
+	}
 }

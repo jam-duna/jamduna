@@ -653,9 +653,9 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, workReports []types.W
 		xy = &(vm.Y)
 
 		if r.Err == types.WORKDIGEST_OOG {
-			log.Info(sd.Authoring, "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", serviceID), "accumulation_output", accumulation_output, "x_s", x_s)
+			log.Trace(sd.Authoring, "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", serviceID), "accumulation_output", accumulation_output, "x_s", x_s)
 		} else {
-			log.Info(sd.Authoring, "BEEFY PANIC @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", serviceID), "accumulation_output", accumulation_output, "x_s", x_s)
+			log.Trace(sd.Authoring, "BEEFY PANIC @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", serviceID), "accumulation_output", accumulation_output, "x_s", x_s)
 		}
 		return
 	}
@@ -669,7 +669,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, workReports []types.W
 		accumulation_output = vm.X.Yield
 		res = "yield"
 	}
-	log.Info(debugB, fmt.Sprintf("BEEFY OK-HALT with %s @SINGLE ACCUMULATE", res), "s", fmt.Sprintf("%d", serviceID), "accumulation_output", accumulation_output)
+	log.Trace(debugB, fmt.Sprintf("BEEFY OK-HALT with %s @SINGLE ACCUMULATE", res), "s", fmt.Sprintf("%d", serviceID), "accumulation_output", accumulation_output)
 	return
 }
 

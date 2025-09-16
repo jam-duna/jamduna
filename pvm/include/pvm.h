@@ -191,6 +191,8 @@ const uint64_t* pvm_get_registers(pvm_vm_t* vm);
 
 // Set heap pointer
 void pvm_set_heap_pointer(pvm_vm_t* vm, uint32_t pointer);
+void pvm_set_result_code(pvm_vm_t* vm, uint64_t result_code);
+void pvm_panic(pvm_vm_t* vm, uint64_t err_code);
 
 // ===============================
 // Memory Operations (FFI API)
@@ -228,11 +230,12 @@ void pvm_set_tracing(pvm_vm_t* vm, int enable);
 const char* reg_name(int index);
 
 void pvm_expand_heap(pvm_vm_t* vm, uint32_t new_size);
-void pvm_panic(VM* vm, uint64_t err_code);
 extern void (*dispatch_table[256])(VM*, uint8_t*, size_t);
 void init_dispatch_table(void);
 const char* get_opcode_name(uint8_t opcode);
-void pvm_branch(VM* vm, uint64_t vx);
+// Branch helper: if taken==0 -> advance pc by 1+operand_len (fall-through),
+// else validate target vx via bitmask and set pc or panic.
+void pvm_branch(VM* vm, uint64_t vx, int taken, size_t operand_len);
 void pvm_djump(VM* vm, uint64_t a);
 
 uint32_t p_func(uint32_t x);

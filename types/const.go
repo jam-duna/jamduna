@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
+	"reflect"
 	"time"
 )
 
@@ -69,7 +71,7 @@ const (
 	MaxWorkItemsPerPackage           = 16             // I = 4: The maximum amount of work items in a package.
 	MaxDependencyItemsInWorkReport   = 8              // J: The maximum number of dependency items in a work-report.
 	MaxTicketsPerExtrinsic           = 3              // K: The maximum number of tickets which may be submitted in a single extrinsic.
-	LookupAnchorMaxAge               = 14400          // L = 14,400: The maximum age in timeslots of the lookup anchor.
+	LookupAnchorMaxAge               = 24             // L = 14,400: The maximum age in timeslots of the lookup anchor.
 	TicketEntriesPerValidator        = 3              // N: The number of ticket entries per validator.
 	MaxAuthorizationPoolItems        = 8              // O: The maximum number of items in the authorizations pool.
 	SecondsPerSlot                   = 6              // P = 6: The slot period, in seconds.
@@ -157,6 +159,29 @@ type Parameters struct {
 func (p *Parameters) String() string {
 	prettyJSON, _ := json.MarshalIndent(p, "", "  ")
 	return string(prettyJSON)
+}
+
+func (p *Parameters) FromBytes(data []byte) error {
+	decoded, _, err := Decode(data, reflect.TypeOf(&Parameters{}))
+	if err != nil {
+		return err
+	}
+	param, ok := decoded.(*Parameters)
+	if !ok {
+		return fmt.Errorf("invalid type assertion")
+	}
+	*p = *param
+	return nil
+}
+
+func (p *Parameters) PrintFieldsHex() {
+	v := reflect.ValueOf(*p)
+	typeOfS := v.Type()
+
+	for i := 0; i < v.NumField(); i++ {
+		field := v.Field(i)
+		fmt.Printf("%s: %x\n", typeOfS.Field(i).Name, field.Interface())
+	}
 }
 
 // 0.7.0 Bytes encodes the AccountState as a byte slice

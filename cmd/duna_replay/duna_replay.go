@@ -69,8 +69,8 @@ func main() {
 	fmt.Printf("Test Directory: %s\n", testDir)
 	fmt.Printf("Verbose: %v\n\n", verbose)
 
-	// Create fuzzer info (acts as the fuzzer peer)
-	fuzzerInfo := createReplayFuzzerInfo()
+	fuzzerInfo := fuzz.CreatePeerInfo("duna-fuzzer")
+	fuzzerInfo.SetDefaults()
 
 	// Load trace steps
 	steps, err := loadTraceSteps(testDir)
@@ -125,16 +125,6 @@ func main() {
 	} else {
 		fmt.Printf("❌ %d/%d responses matched (%.1f%% match rate)\n",
 			matched, totalSteps, float64(matched)/float64(totalSteps)*100)
-	}
-}
-
-func createReplayFuzzerInfo() fuzz.PeerInfo {
-	return &fuzz.PeerInfoV1{
-		FuzzVersion: 1,
-		Features:    fuzz.FeatureSimpleForking, // Match the fuzzer features from the trace
-		Name:        "duna-replay",
-		AppVersion:  fuzz.ParseVersion("0.2.10"),
-		JamVersion:  fuzz.ParseVersion("0.7.0"),
 	}
 }
 

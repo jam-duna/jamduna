@@ -7,11 +7,11 @@ DEFAULT_ASN_VERSION = 1
 
 1. Be sure to change PATCH_VERSION in fuzzer_asn.go to the latest version 
 ```
-PATCH_VERSION = 11
+PATCH_VERSION = 12
 
 # JAM_VERSION = <GP_VERSION>.<PATCH_VERSION>
 GP_VERSION = 0.7.0
-JAM_VERSION = 0.7.0.11
+JAM_VERSION = 0.7.0.12
 ```
 
 2. Make the fuzzer with DEFAULT_ASN_VERSION
@@ -48,14 +48,14 @@ Check that our target has no issue!
 5. After changing the version in the command below to match up, publish to https://github.com/jam-duna/jamtestnet
 
 ```
-gh release create v0.7.0.11 \
+gh release create v0.7.0.12 \
   $JAM_PATH/cmd/duna_fuzzer/duna_fuzzer_linux \
   $JAM_PATH/cmd/duna_fuzzer/duna_fuzzer_mac \
   $JAM_PATH/cmd/duna_target/duna_target_linux \
   $JAM_PATH/cmd/duna_target/duna_target_mac \
   --repo jam-duna/jamtestnet \
-  --title "v0.7.0.11 Fuzzer + Fuzzer target" \
-  --notes $'Release v0.7.0.11 of duna_fuzzer and duna_target\n\nIncludes:\n- duna_fuzzer_mac\n- duna_fuzzer_linux\n- duna_target_mac\n- duna_target_linux'  
+  --title "v0.7.0.12 Fuzzer + Fuzzer target" \
+  --notes $'Release v0.7.0.12 of duna_fuzzer and duna_target\n\nIncludes:\n- duna_fuzzer_mac\n- duna_fuzzer_linux\n- duna_target_mac\n- duna_target_linux'  
 ```
 
 

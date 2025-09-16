@@ -352,7 +352,8 @@ void handle_JUMP(VM* vm, uint8_t* operands, size_t operand_len) {
         uint32_t shift = 64 - 8 * lx;
         vx = (int64_t)((int64_t)(decoded << shift) >> shift);
     }
-    pvm_branch(vm, (uint64_t)((int64_t)vm->pc + vx));
+    //printf("----- handle_JUMP %llx\n", (unsigned long long)(vm->pc + vx));
+    pvm_branch(vm, (uint64_t)((int64_t)vm->pc + vx), 1, operand_len);
 }  
 
 
@@ -370,13 +371,24 @@ void pvm_djump(VM* vm, uint64_t a) {
     }
 }
 
-void pvm_branch(VM* vm, uint64_t vx) {
-    if ( vx < vm->bitmask_len && ( vm->bitmask[vx] & 2 ) ) {
+void pvm_branch(VM* vm, uint64_t vx, int taken, size_t operand_len) {
+
+    if (taken == 1 && vx < vm->bitmask_len && (vm->bitmask[vx] & 2)) {
+       // printf("----- pvm_branch vx=%x/%x bitmask[vx]=%d\n", vx, vm->bitmask_len, vm->bitmask[vx]);
         vm->pc = vx;
-    } else {
+    } else if (!(vm->bitmask[vx] & 2)) {
+        // Branch marked taken but invalid target
+        if (vx >= vm->bitmask_len) {
+            //printf("Error: vx out of bounds (vx=%x, bitmask_len=%x)\n", vx, vm->bitmask_len);
+        } else if (!(vm->bitmask[vx] & 2)) {
+            //printf("Error: invalid branch target (vx=%x not marked executable)\n", vx);
+        }
         vm->result_code = WORKDIGEST_PANIC;
         vm->machine_state = PANIC;
         vm->terminated = 1;
+    } else {
+        // Not taken; increment pc for fall-through
+        vm->pc += 1 + operand_len;
     }
 }
 
@@ -868,7 +880,7 @@ void handle_LOAD_IMM_JUMP(VM* vm, uint8_t* operands, size_t operand_len) {
     vm->registers[register_index_a] = vx;
     uint64_t target = (uint64_t)((int64_t)vm->pc + vy0);
     
-    pvm_branch(vm, target);
+    pvm_branch(vm, target, 1, operand_len);
 }
 
 void handle_BRANCH_EQ_IMM(VM* vm, uint8_t* operands, size_t operand_len) {
@@ -882,11 +894,7 @@ void handle_BRANCH_EQ_IMM(VM* vm, uint8_t* operands, size_t operand_len) {
     int taken = (value_a == vx);
     
     
-    if (taken) {
-        pvm_branch(vm, target);
-    } else {
-        vm->pc += 1 + operand_len;
-    }
+    pvm_branch(vm, target, taken, operand_len);
 }
 
 void handle_BRANCH_NE_IMM(VM* vm, uint8_t* operands, size_t operand_len) {
@@ -899,11 +907,7 @@ void handle_BRANCH_NE_IMM(VM* vm, uint8_t* operands, size_t operand_len) {
     uint64_t target = (uint64_t)((int64_t)vm->pc + vy0);
     int taken = (value_a != vx);
     
-    if (taken) {
-        pvm_branch(vm, target);
-    } else {
-        vm->pc += 1 + operand_len;
-    }
+    pvm_branch(vm, target, taken, operand_len);
 }
 
 void handle_BRANCH_LT_U_IMM(VM* vm, uint8_t* operands, size_t operand_len) {
@@ -916,11 +920,7 @@ void handle_BRANCH_LT_U_IMM(VM* vm, uint8_t* operands, size_t operand_len) {
     uint64_t target = (uint64_t)((int64_t)vm->pc + vy0);
     int taken = (value_a < vx);
     
-    if (taken) {
-        pvm_branch(vm, target);
-    } else {
-        vm->pc += 1 + operand_len;
-    }
+    pvm_branch(vm, target, taken, operand_len);
 }
 
 void handle_BRANCH_LE_U_IMM(VM* vm, uint8_t* operands, size_t operand_len) {
@@ -934,11 +934,7 @@ void handle_BRANCH_LE_U_IMM(VM* vm, uint8_t* operands, size_t operand_len) {
     int taken = (value_a <= vx);
     
     
-    if (taken) {
-        pvm_branch(vm, target);
-    } else {
-        vm->pc += 1 + operand_len;
-    }
+    pvm_branch(vm, target, taken, operand_len);
 }
 
 void handle_BRANCH_GE_U_IMM(VM* vm, uint8_t* operands, size_t operand_len) {
@@ -952,11 +948,7 @@ void handle_BRANCH_GE_U_IMM(VM* vm, uint8_t* operands, size_t operand_len) {
     int taken = (value_a >= vx);
     
     
-    if (taken) {
-        pvm_branch(vm, target);
-    } else {
-        vm->pc += 1 + operand_len;
-    }
+    pvm_branch(vm, target, taken, operand_len);
 }
 
 void handle_BRANCH_GT_U_IMM(VM* vm, uint8_t* operands, size_t operand_len) {
@@ -969,11 +961,7 @@ void handle_BRANCH_GT_U_IMM(VM* vm, uint8_t* operands, size_t operand_len) {
     uint64_t target = (uint64_t)((int64_t)vm->pc + vy0);
     int taken = (value_a > vx);
     
-    if (taken) {
-        pvm_branch(vm, target);
-    } else {
-        vm->pc += 1 + operand_len;
-    }
+    pvm_branch(vm, target, taken, operand_len);
 }
 
 void handle_BRANCH_LT_S_IMM(VM* vm, uint8_t* operands, size_t operand_len) {
@@ -987,11 +975,7 @@ void handle_BRANCH_LT_S_IMM(VM* vm, uint8_t* operands, size_t operand_len) {
     int taken = ((int64_t)value_a < (int64_t)vx);
     
     
-    if (taken) {
-        pvm_branch(vm, target);
-    } else {
-        vm->pc += 1 + operand_len;
-    }
+    pvm_branch(vm, target, taken, operand_len);
 }
 
 void handle_BRANCH_LE_S_IMM(VM* vm, uint8_t* operands, size_t operand_len) {
@@ -1005,11 +989,7 @@ void handle_BRANCH_LE_S_IMM(VM* vm, uint8_t* operands, size_t operand_len) {
     int taken = ((int64_t)value_a <= (int64_t)vx);
     
     
-    if (taken) {
-        pvm_branch(vm, target);
-    } else {
-        vm->pc += 1 + operand_len;
-    }
+    pvm_branch(vm, target, taken, operand_len);
 }
 
 void handle_BRANCH_GE_S_IMM(VM* vm, uint8_t* operands, size_t operand_len) {
@@ -1023,11 +1003,7 @@ void handle_BRANCH_GE_S_IMM(VM* vm, uint8_t* operands, size_t operand_len) {
     int taken = ((int64_t)value_a >= (int64_t)vx);
     
     
-    if (taken) {
-        pvm_branch(vm, target);
-    } else {
-        vm->pc += 1 + operand_len;
-    }
+    pvm_branch(vm, target, taken, operand_len);
 }
 
 void handle_BRANCH_GT_S_IMM(VM* vm, uint8_t* operands, size_t operand_len) {
@@ -1041,11 +1017,7 @@ void handle_BRANCH_GT_S_IMM(VM* vm, uint8_t* operands, size_t operand_len) {
     int taken = ((int64_t)value_a > (int64_t)vx);
     
     
-    if (taken) {
-        pvm_branch(vm, target);
-    } else {
-        vm->pc += 1 + operand_len;
-    }
+    pvm_branch(vm, target, taken, operand_len);
 }
 
 // A.5.9. Instructions with Arguments of Two Registers
@@ -2220,11 +2192,7 @@ void handle_BRANCH_EQ(VM* vm, uint8_t* operands, size_t operand_len) {
     uint64_t value_b = vm->registers[register_index_b];
     int taken = (value_a == value_b);
     
-    if (taken) {
-        pvm_branch(vm, target);
-    } else {
-        vm->pc += 1 + operand_len;
-    }
+    pvm_branch(vm, target, taken, operand_len);
 }
 
 void handle_BRANCH_NE(VM* vm, uint8_t* operands, size_t operand_len) {
@@ -2237,11 +2205,7 @@ void handle_BRANCH_NE(VM* vm, uint8_t* operands, size_t operand_len) {
     uint64_t value_b = vm->registers[register_index_b];
     int taken = (value_a != value_b);
     
-    if (taken) {
-        pvm_branch(vm, target);
-    } else {
-        vm->pc += 1 + operand_len;
-    }
+    pvm_branch(vm, target, taken, operand_len);
 }
 
 void handle_BRANCH_LT_U(VM* vm, uint8_t* operands, size_t operand_len) {
@@ -2254,11 +2218,7 @@ void handle_BRANCH_LT_U(VM* vm, uint8_t* operands, size_t operand_len) {
     uint64_t value_b = vm->registers[register_index_b];
     int taken = (value_a < value_b);
     
-    if (taken) {
-        pvm_branch(vm, target);
-    } else {
-        vm->pc += 1 + operand_len;
-    }
+    pvm_branch(vm, target, taken, operand_len);
 }
 
 void handle_BRANCH_LT_S(VM* vm, uint8_t* operands, size_t operand_len) {
@@ -2271,11 +2231,7 @@ void handle_BRANCH_LT_S(VM* vm, uint8_t* operands, size_t operand_len) {
     uint64_t value_b = vm->registers[register_index_b];
     int taken = ((int64_t)value_a < (int64_t)value_b);
     
-    if (taken) {
-        pvm_branch(vm, target);
-    } else {
-        vm->pc += 1 + operand_len;
-    }
+    pvm_branch(vm, target, taken, operand_len);
 }
 
 void handle_BRANCH_GE_U(VM* vm, uint8_t* operands, size_t operand_len) {
@@ -2288,11 +2244,7 @@ void handle_BRANCH_GE_U(VM* vm, uint8_t* operands, size_t operand_len) {
     uint64_t value_b = vm->registers[register_index_b];
     int taken = (value_a >= value_b);
     
-    if (taken) {
-        pvm_branch(vm, target);
-    } else {
-        vm->pc += 1 + operand_len;
-    }
+    pvm_branch(vm, target, taken, operand_len);
 }
 
 void handle_BRANCH_GE_S(VM* vm, uint8_t* operands, size_t operand_len) {
@@ -2305,11 +2257,7 @@ void handle_BRANCH_GE_S(VM* vm, uint8_t* operands, size_t operand_len) {
     uint64_t value_b = vm->registers[register_index_b];
     int taken = ((int64_t)value_a >= (int64_t)value_b);
     
-    if (taken) {
-        pvm_branch(vm, target);
-    } else {
-        vm->pc += 1 + operand_len;
-    }
+    pvm_branch(vm, target, taken, operand_len);
 }
 
 

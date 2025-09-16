@@ -42,14 +42,7 @@ func main() {
 	fReg.RegisterFlag("rpc", nil, enableRPC, "Start RPC server", &enableRPC)
 	fReg.RegisterFlag("socket", nil, socket, "Path for the Unix domain socket to connect to", &socket)
 
-	fuzzerInfo := &fuzz.PeerInfoV1{
-		FuzzVersion: 1,
-		Features:    0,
-		AppVersion:  fuzz.ParseVersion(fuzz.APP_VERSION),
-		JamVersion:  fuzz.ParseVersion(fuzz.JAM_VERSION),
-		Name:        "jam-duna-fuzzer",
-	}
-
+	fuzzerInfo := fuzz.CreatePeerInfo("passive-duna-fuzzer")
 	fuzzerInfo.SetDefaults()
 
 	fReg.ProcessRegistry()

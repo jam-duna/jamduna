@@ -48,11 +48,11 @@ type Version struct {
 }
 
 type TargetInfo struct {
-	Name        string  `json:"name"`
-	FuzzVersion int     `json:"fuzz_version"`
-	AppVersion  Version `json:"app_version"`
-	JamVersion  Version `json:"jam_version"`
-	Features    int     `json:"features"`
+	AppName      string  `json:"name"`
+	FuzzVersion  int     `json:"fuzz_version"`
+	AppVersion   Version `json:"app_version"`
+	JamVersion   Version `json:"jam_version"`
+	FuzzFeatures int     `json:"features"`
 }
 
 type BenchStats struct {
@@ -204,14 +204,14 @@ func (bs *BenchmarkStats) CalculateStandardDeviation() float64 {
 func (bs *BenchmarkStats) GenerateJSONReport(testDir string, totalBenchmarkTime time.Duration) *JSONReport {
 	// Create target info
 	targetInfo := TargetInfo{
-		Name:       "unknown",
+		AppName:    "unknown",
 		AppVersion: Version{Major: 0, Minor: 0, Patch: 0},
 		JamVersion: Version{Major: 0, Minor: 0, Patch: 0},
 	}
 
 	if bs.TargetPeerInfo != nil {
 		bs.TargetPeerInfo.SetDefaults()
-		targetInfo.Name = bs.TargetPeerInfo.GetName()
+		targetInfo.AppName = bs.TargetPeerInfo.GetName()
 		appVer := bs.TargetPeerInfo.GetAppVersion()
 		targetInfo.AppVersion = Version{
 			Major: int(appVer.Major),
@@ -635,7 +635,7 @@ func main() {
 	fReg.RegisterFlag("version", "v", version, "Display version information", &version)
 	fReg.ProcessRegistry()
 
-	benchInfo := createBenchPeerInfo()
+	benchInfo := fuzz.CreatePeerInfo("duna-bench")
 	benchInfo.SetDefaults()
 
 	fmt.Printf("Duna Bench Info:\b\n%s\n\n", benchInfo.PrettyString(false))

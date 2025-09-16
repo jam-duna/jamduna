@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sync"
 	"unsafe"
+
+	"github.com/colorfulnotion/jam/log"
 )
 
 // #cgo CFLAGS: -I${SRCDIR}/../pvm/include
@@ -96,6 +98,13 @@ func (vm *Interpreter) SetHeapPointer(pointer uint32) {
 	C.pvm_set_heap_pointer(vm.cVM, C.uint32_t(pointer))
 }
 
+func (vm *Interpreter) SetHostResultCode(c uint64) {
+	C.pvm_set_result_code(vm.cVM, C.uint64_t(c))
+}
+
+func (vm *Interpreter) Panic(errCode uint64) {
+	C.pvm_panic(vm.cVM, C.uint64_t(errCode))
+}
 func (vm *Interpreter) GetGas() int64 {
 	if vm.cVM != nil {
 		return int64(C.pvm_get_gas(vm.cVM))
@@ -136,13 +145,13 @@ func (ram *Interpreter) ReadRAMBytes(address uint32, length uint32) ([]byte, uin
 	if length == 0 {
 		return []byte{}, OK
 	}
-
 	buffer := make([]byte, length)
 	var errCode C.int
 	result := C.pvm_read_ram_bytes(ram.cVM, C.uint32_t(address), (*C.uint8_t)(&buffer[0]), C.uint32_t(length), &errCode)
 	if errCode != 0 {
 		return nil, uint64(errCode)
 	}
+	// fmt.Printf("ReadRAMBytes: address=0x%X, length=%d buffer: %x\n", address, length, buffer)
 	return buffer, uint64(result)
 }
 
@@ -221,14 +230,16 @@ func goInvokeHostFunction(cvm *C.pvm_vm_t, hostFuncID C.int) C.pvm_host_result_t
 	// Call the host function
 	vm.InvokeHostCall(int(hostFuncID))
 
+	// Check if host function caused panic
+	if vm.MachineState == PANIC {
+		vm.Panic(PANIC)
+		log.Error(vm.logging, fmt.Sprintf("HostCall %s (%d) PANIC!", HostFnToName(int(hostFuncID)), hostFuncID))
+		return C.PVM_HOST_ERROR
+	}
+
 	// Check if VM was terminated by host function
 	if vm.terminated {
 		return C.PVM_HOST_TERMINATE
-	}
-
-	// Check if host function caused panic
-	if vm.MachineState == PANIC {
-		return C.PVM_HOST_ERROR
 	}
 
 	return C.PVM_HOST_CONTINUE
