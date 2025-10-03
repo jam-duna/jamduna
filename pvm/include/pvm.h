@@ -109,7 +109,8 @@ struct VM {
     uint32_t stack_address_end;
     uint32_t current_heap_pointer;
     uint32_t max_heapsize;
-
+    uint32_t start_pc;
+    
     // Code and data segments
     uint32_t code_len;
     uint32_t bitmask_len;

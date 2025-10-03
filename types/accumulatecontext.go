@@ -95,10 +95,16 @@ type AuthorizationQueue [TotalCores][MaxAuthorizationQueueItems]common.Hash
 
 // U: The set of partial state, used during accumulation. See (12.13).
 type PartialState struct {
-	ServiceAccounts    map[uint32]*ServiceAccount `json:"D"`                   // d: Service accounts δ
-	UpcomingValidators Validators                 `json:"upcoming_validators"` // i: Upcoming validators keys ι
-	QueueWorkReport    AuthorizationQueue         `json:"authorizations_pool"` // q: queue of authorizers φ
-	PrivilegedState    PrivilegedServiceState     `json:"privileged_state"`    // x: Privileged state χ
+	ServiceAccounts map[uint32]*ServiceAccount `json:"D"` // d: Service accounts δ
+
+	UpcomingValidators Validators `json:"upcoming_validators"` // i: Upcoming validators keys ι (DESIGNATE)
+	UpcomingDirty      bool       `json:"-"`                   // Dirty flag to indicate if the upcoming validators have been modified
+
+	QueueWorkReport AuthorizationQueue `json:"authorizations_pool"` // q: queue of authorizers φ (ASSIGN)
+	QueueDirty      bool               `json:"-"`                   // Dirty flag to indicate if the queue has been modified
+
+	PrivilegedState PrivilegedServiceState `json:"privileged_state"` // x: Privileged state χ (BLESS)
+	PrivilegedDirty bool                   `json:"-"`                // Dirty flag to indicate if the state has been modified
 }
 
 func (u *PartialState) Checkpoint() {

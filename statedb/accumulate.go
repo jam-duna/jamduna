@@ -454,15 +454,25 @@ func (s *StateDB) ParallelizedAccumulate(
 					}
 				}
 			}
-			// QueueWorkReport / UpcomingValidators
-			o.QueueWorkReport = r.XY.U.QueueWorkReport
-			o.UpcomingValidators = r.XY.U.UpcomingValidators
-
-			for k, v := range r.XY.U.PrivilegedState.AlwaysAccServiceID {
-				o.PrivilegedState.AlwaysAccServiceID[k] = v
+			// QueueWorkReport updated only if QueueDirty is set (via ASSIGN host function)
+			if r.XY.U.QueueDirty {
+				o.QueueWorkReport = r.XY.U.QueueWorkReport
 			}
-		}
+			// UpcomingValidators updated only if UpcomingDirty is set (via DESIGNATE host function)
+			if r.XY.U.UpcomingDirty {
+				o.UpcomingValidators = r.XY.U.UpcomingValidators
+			}
+			// PrivilegedState updated only if PrivilegedDirty is set (via BLESS host function)
+			if r.XY.U.PrivilegedDirty {
+				for k, v := range r.XY.U.PrivilegedState.AlwaysAccServiceID {
+					o.PrivilegedState.AlwaysAccServiceID[k] = v
+				}
+				o.PrivilegedState.ManagerServiceID = r.XY.U.PrivilegedState.ManagerServiceID
+				o.PrivilegedState.AuthQueueServiceID = r.XY.U.PrivilegedState.AuthQueueServiceID
+				o.PrivilegedState.UpcomingValidatorsServiceID = r.XY.U.PrivilegedState.UpcomingValidatorsServiceID
+			}
 
+		}
 		accumulated_partial[r.service] = r.XY
 	}
 
@@ -682,6 +692,10 @@ func TransferSelect(t []types.DeferredTransfer, d uint32) []types.DeferredTransf
 			output = append(output, transfer)
 		}
 	}
+	// sort by sender index for deterministic order
+	sort.Slice(output, func(i, j int) bool {
+		return (output[i].SenderIndex < output[j].SenderIndex && (i < j))
+	})
 	return output
 }
 
@@ -711,15 +725,22 @@ func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, sel
 	vm.SetPVMContext(pvmContext)
 
 	var input_argument []byte
-	encode_time_slot, _ := types.Encode(time_slot)
-	encodeService_index, _ := types.Encode(self_index)
-	encodeSelectedTransfers, _ := types.Encode(selectedTransfers)
 
-	input_argument = append(input_argument, encode_time_slot...)
-	input_argument = append(input_argument, encodeService_index...)
-	input_argument = append(input_argument, encodeSelectedTransfers...)
+	// https://graypaper.fluffylabs.dev/#/38c4e62/307b04307b04?v=0.7.0
+	t_bytes := types.E(uint64(time_slot))
+	s_bytes := types.E(uint64(self_index))
+	num_transfers_bytes := types.E(uint64(len(selectedTransfers)))
+	input_argument = append(input_argument, t_bytes...)
+	input_argument = append(input_argument, s_bytes...)
+	input_argument = append(input_argument, num_transfers_bytes...)
+
+	vm.Transfers = selectedTransfers
+	for _, transfer := range selectedTransfers {
+		log.Info(s.Authoring, "selectedTransfers", "d", self_index, "from", fmt.Sprintf("%d", transfer.SenderIndex), "to", fmt.Sprintf("%d", transfer.ReceiverIndex), "amount", transfer.Amount)
+	}
 	vm.ExecuteTransfer(input_argument, self)
 	gasUsed = int64(gas) - vm.GetGas()
+	fmt.Printf("HostTransfer service %d gasUsed %d gasProvided %d\n", self_index, gasUsed, gas)
 	return gasUsed, uint(len(selectedTransfers)), nil
 }
 

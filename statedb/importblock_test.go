@@ -338,30 +338,55 @@ func TestSingleFuzzTrace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get fuzz reports path: %v", err)
 	}
-	// this is about one last key
-	/*
-	   --- FAIL: TestFuzzTrace/fuzz-reports/0.7.0/traces/1757841566/00000200.bin (0.02s)
-	   --- FAIL: TestFuzzTrace/fuzz-reports/0.7.0/traces/1757843609/00000034.bin (0.05s)
-	   --- FAIL: TestFuzzTrace/fuzz-reports/0.7.0/traces/1757843719/00000035.bin (0.03s)
-	   --- FAIL: TestFuzzTrace/fuzz-reports/0.7.0/traces/1757843735/00000010.bin (0.56s)
-	   --- FAIL: TestFuzzTrace/fuzz-reports/0.7.0/traces/1757862468/00000160.bin (0.47s)
-	   --- FAIL: TestFuzzTrace/fuzz-reports/0.7.0/traces/1757862472/00000160.bin (0.39s)
-	*/
 
-	fileMap["1757841566"] = "fuzz-reports/0.7.0/traces/1757841566/00000200.json"
-	fileMap["1757843609"] = "fuzz-reports/0.7.0/traces/1757843609/00000034.json"
-	fileMap["1757843719"] = "fuzz-reports/0.7.0/traces/1757843719/00000035.json"
-	fileMap["1757843735"] = "fuzz-reports/0.7.0/traces/1757843735/00000010.json"
-	fileMap["1757862468"] = "fuzz-reports/0.7.0/traces/1757862468/00000160.json"
-	fileMap["1757862472"] = "fuzz-reports/0.7.0/traces/1757862472/00000160.json"
-	PvmLogging = false
+	// SN fixed with PrivilegedState having 3 new dirty bits
+	fileMap["1758621952"] = "fuzz-reports/0.7.0/traces/_new/1758621952/00000292.json" // FIXED
+	fileMap["1758622000"] = "fuzz-reports/0.7.0/traces/_new/1758622000/00000230.json" // FIXED
+	fileMap["1758622051"] = "fuzz-reports/0.7.0/traces/_new/1758622051/00000094.json" // FIXED
+	fileMap["1758622160"] = "fuzz-reports/0.7.0/traces/_new/1758622160/00000009.json" // FIXED
+	fileMap["1758622524"] = "fuzz-reports/0.7.0/traces/_new/1758622524/00000039.json" // FIXED
+	fileMap["1758622104"] = "fuzz-reports/0.7.0/traces/_new/1758622104/00000022.json" // FIXED
+
+	// SN fixed with Transfer arg corrected
+	fileMap["1758621412"] = "fuzz-reports/0.7.0/traces/_new/1758621412/00000025.json"  // FIXED
+	fileMap["1758621498"] = "fuzz-reports/0.7.0/traces/_new/1758621498/00000025.json"  // FIXED
+	fileMap["1758636775"] = "fuzz-reports/0.7.0/traces/_new2/1758636775/00000014.json" // FIXED
+	fileMap["1758636961"] = "fuzz-reports/0.7.0/traces/_new2/1758636961/00000018.json" // FIXED
+	fileMap["1758637024"] = "fuzz-reports/0.7.0/traces/_new2/1758637024/00000018.json" // FIXED
+	fileMap["1758637136"] = "fuzz-reports/0.7.0/traces/_new2/1758637136/00000019.json" // FIXED
+	fileMap["1758637250"] = "fuzz-reports/0.7.0/traces/_new2/1758637250/00000016.json" // FIXED
+	fileMap["1758637297"] = "fuzz-reports/0.7.0/traces/_new2/1758637297/00000016.json" // FIXED
+	fileMap["1758637363"] = "fuzz-reports/0.7.0/traces/_new2/1758637363/00000023.json" // FIXED
+	fileMap["1758637447"] = "fuzz-reports/0.7.0/traces/_new2/1758637447/00000062.json" // FIXED
+	fileMap["1758637485"] = "fuzz-reports/0.7.0/traces/_new2/1758637485/00000019.json" // FIXED
+
+	// SC fixed this is because the MEMO gas is really big that our gas counter have bug to deal with it
+	// with the fix, we  get an OOG and use the value from the check point
+	fileMap["1758621547"] = "fuzz-reports/0.7.0/traces/_new/1758621547/00000033.json"  // FIXED
+	fileMap["1758637332"] = "fuzz-reports/0.7.0/traces/_new2/1758637332/00000017.json" // FIXED
+	fileMap["1758636819"] = "fuzz-reports/0.7.0/traces/_new2/1758636819/00000022.json" // FIXED
+	fileMap["1758636573"] = "fuzz-reports/0.7.0/traces/_new2/1758636573/00000033.json" // FIXED
+	fileMap["1758637203"] = "fuzz-reports/0.7.0/traces/_new2/1758637203/00000059.json" // FIXED
+
+	// SKIPPING these failures -- we will ignore these for now
+	// SC has a panic on service 3202820790 with HostFunction INFO Calling host function: INFO 5 [gas: 4982637] from a memory access
+	// not fully fixed, see this hardDebug := fetch == uint64(vm.Service_index) && vm.GetGas() == 4982637
+	fileMap["1758621171"] = "fuzz-reports/0.7.0/traces/_new/1758621171/00000237.json" // SKIP for now
+
+	// SKIP these ones for now, need more investigation
+	fileMap["1758622403"] = "fuzz-reports/0.7.0/traces/_new/1758622403/00000239.json"  // SKIP for now
+	fileMap["1758622442"] = "fuzz-reports/0.7.0/traces/_new/1758622442/00000164.json"  // SKIP for now
+	fileMap["1758708840"] = "fuzz-reports/0.7.0/traces/_new2/1758708840/00000958.json" // SKIP for now
+
+	PvmLogging = true
+	DebugHostFunctions = true
 	log.InitLogger("debug")
 	// log.EnableModule(log.PvmAuthoring)
 	// log.EnableModule("pvm_validator")
 	log.EnableModule(log.SDB)
 
-	tc := []string{"1757862468", "1757862472", "1757841566", "1757843609", "1757843719", "1757843735"}
-
+	tc := []string{"1758621171"}
+	PvmLogging = false
 	for _, team := range tc {
 		filename, exists := fileMap[team]
 		if !exists {

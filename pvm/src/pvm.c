@@ -166,10 +166,10 @@ pvm_result_t pvm_execute(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child) 
     
      // --- IGNORE ---
     if (!vm) return -1;
-    
     vm->terminated = 0;
     vm->pc = (uint64_t)entry_point;
     vm->is_child = is_child;
+    vm->start_pc = entry_point;
     vm->initializing = 0;
 
     // VM initialized successfully
@@ -257,7 +257,7 @@ pvm_result_t pvm_execute(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child) 
     
     // Handle out-of-gas condition
     if (!vm->terminated && vm->gas <= 0) {
-        if ( vm->pvm_tracing ) {
+        if ( vm->pvm_tracing ){
             printf("OUT_OF_GAS: VM ran out of gas after %d steps, final gas=%lld, pc=0x%llx\n", 
                step, (long long)vm->gas, (unsigned long long)vm->pc);
             fflush(stdout);

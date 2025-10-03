@@ -17,7 +17,7 @@ const (
 
 const (
 	W_X = 1024
-	M   = 128
+	M   = types.TransferMemoSize
 	V   = 1023
 	Z_A = 2
 
@@ -387,7 +387,7 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, elements []types.AccumulateO
 	input_bytes := make([]byte, 0)
 	t_bytes := types.E(uint64(t))
 	s_bytes := types.E(uint64(s))
-	o_bytes := types.E(uint64(len(elements))) // TODO: check
+	o_bytes := types.E(uint64(len(elements))) // https://graypaper.fluffylabs.dev/#/38c4e62/2f4a022f4a02?v=0.7.0
 	input_bytes = append(input_bytes, t_bytes...)
 	input_bytes = append(input_bytes, s_bytes...)
 	input_bytes = append(input_bytes, o_bytes...)
@@ -411,10 +411,8 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, elements []types.AccumulateO
 
 func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAccount) (r types.Result, res uint64) {
 	vm.Mode = ModeOnTransfer
-	// a = E(t)   take transfer memos t and encode them
 	vm.ServiceAccount = service_account
 	vm.executeWithBackend(arguments, types.EntryPointOnTransfer)
-	// return vm.getArgumentOutputs()
 	r.Err = vm.ResultCode
 	r.Ok = []byte{}
 	return r, 0

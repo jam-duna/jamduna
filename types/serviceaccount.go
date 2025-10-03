@@ -460,7 +460,7 @@ func (s *ServiceAccount) ReadLookup(blobHash common.Hash, z uint32, sdb HostEnv)
 
 // a_c - account code hash c
 func (s *ServiceAccount) SetCodeHash(codeHash common.Hash) {
-	if s.Mutable == false {
+	if !s.Mutable {
 		log.Crit(module, "SetCodeHash")
 	}
 	s.Dirty = true
@@ -470,14 +470,14 @@ func (s *ServiceAccount) SetCodeHash(codeHash common.Hash) {
 // a_b - account balance b, which must be greater than a_t (The threshold needed in terms of its storage footprint)
 // Note this could be IncBalance DecBalance instead?
 func (s *ServiceAccount) DecBalance(balance uint64) {
-	if s.Mutable == false {
+	if !s.Mutable {
 		log.Crit(module, "SetBalance")
 	}
 	s.Dirty = true
 	s.Balance -= balance
 }
 func (s *ServiceAccount) IncBalance(balance uint64) {
-	if s.Mutable == false {
+	if !s.Mutable {
 		log.Crit(module, "SetBalance")
 	}
 	s.Dirty = true
@@ -486,7 +486,7 @@ func (s *ServiceAccount) IncBalance(balance uint64) {
 
 // a_g - the minimum gas required in order to execute the Accumulate entry-point of the service's code,
 func (s *ServiceAccount) SetGasLimitG(g uint64) {
-	if s.Mutable == false {
+	if !s.Mutable {
 		log.Crit(module, "SetGasLimitG")
 	}
 	s.Dirty = true
@@ -495,7 +495,7 @@ func (s *ServiceAccount) SetGasLimitG(g uint64) {
 
 // a_m - the minimum required for the On Transfer entry-point.
 func (s *ServiceAccount) SetGasLimitM(g uint64) {
-	if s.Mutable == false {
+	if !s.Mutable {
 		log.Crit(module, "SetGasLimitM")
 	}
 	s.Dirty = true
@@ -504,7 +504,7 @@ func (s *ServiceAccount) SetGasLimitM(g uint64) {
 
 // a_l - total number of octets used in storage (9.3)
 func (s *ServiceAccount) SetStorageSize(storageSize uint64) {
-	if s.Mutable == false {
+	if !s.Mutable {
 		log.Crit(module, "SetStorageSize")
 	}
 	s.Dirty = true
@@ -513,7 +513,7 @@ func (s *ServiceAccount) SetStorageSize(storageSize uint64) {
 
 // a_i - the number of items in storage (9.3)
 func (s *ServiceAccount) SetNumStorageItems(numStorageItems uint32) {
-	if s.Mutable == false {
+	if !s.Mutable {
 		log.Crit(module, "SetNumStorageItems")
 	}
 	s.Dirty = true
@@ -521,7 +521,7 @@ func (s *ServiceAccount) SetNumStorageItems(numStorageItems uint32) {
 }
 
 func (s *ServiceAccount) WriteStorage(serviceIndex uint32, mu_k []byte, val []byte, Isdeleted bool, source string) {
-	if s.Mutable == false {
+	if !s.Mutable {
 		log.Crit(log.PvmAuthoring, "WriteStorage Mutable Err: Called WriteStorage on immutable ServiceAccount", "serviceIndex", serviceIndex, "mu_k", fmt.Sprintf("%x", mu_k), "val", fmt.Sprintf("%x", val), "source", source)
 	}
 

@@ -44,6 +44,26 @@ const (
 	LOG               = 100
 )
 
+var DebugHostFunctions = true
+
+func (vm *VM) DebugHostFunction(hostFn int, format string, a ...any) {
+	if !DebugHostFunctions {
+		return
+	}
+	colors := []string{
+		"\x1b[32m", // green
+		"\x1b[33m", // yellow
+		"\x1b[34m", // blue
+		"\x1b[35m", // magenta
+		"\x1b[36m", // cyan
+	}
+	reset := "\x1b[0m"
+	color := colors[hostFn%len(colors)]
+	fmt.Printf("%s[%d]***** HostFunction %s ", color, vm.Service_index, HostFnToName(hostFn))
+	fmt.Printf(format, a...)
+	fmt.Printf("%s\n", reset)
+}
+
 var hostFnNames = map[int]string{
 	GAS:               "GAS",
 	FETCH:             "FETCH",
@@ -127,13 +147,7 @@ type Refine_parameters struct {
 // InvokeHostCall handles host calls
 // Returns true if the call results in a halt condition, otherwise false
 func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
-
-	if vm.GetGas()-g < 0 {
-		vm.ResultCode = types.WORKDIGEST_OOG
-		vm.MachineState = OOG
-		log.Warn(vm.logging, "OOG", "host_fn", host_fn, "gas", vm.GetGas(), "g", g)
-		return true, fmt.Errorf("out of gas")
-	}
+	vm.DebugHostFunction(host_fn, "Calling host function: %s %d [gas: %d]", HostFnToName(host_fn), host_fn, vm.GetGas())
 	if PvmLogging {
 		fmt.Printf("%d %s: Calling host function: %s %d [gas: %d]\n", vm.Service_index, vm.Mode, HostFnToName(host_fn), host_fn, vm.GetGas())
 	}
@@ -281,6 +295,7 @@ func (vm *VM) hostInfo() {
 	bo := vm.ReadRegister(8)
 	f := vm.ReadRegister(9)
 	l := vm.ReadRegister(10)
+	// fmt.Printf("hostInfo ----> w7 %d, w8=%x, w9=%d, w10=%d\n", omega_7, bo, f, l)
 
 	// [Gratis] Different encoding than serviceAccount; E(a_c, E8(a_b,a_t,a_g,a_m,a_o), E4(a_i), E8(a_f), E4(a_r,a_a,a_p))
 	var buf bytes.Buffer
@@ -312,9 +327,10 @@ func (vm *VM) hostInfo() {
 	lenval := uint64(len(val))
 	f = min(f, lenval)
 	l = min(l, lenval-f)
-
+	//	vm.DebugHostFunction(INFO, "lookup index %d, bo=%x, f=%d, l=%d, val=0x%x (%d bytes)", fetch, bo, f, l, val[f:f+l], len(val))
 	errcode := vm.WriteRAMBytes(uint32(bo), val[f:f+l])
-	if errcode != OK {
+	//	hardDebug := fetch == uint64(vm.Service_index) && vm.GetGas() == 4982637
+	if errcode != OK { //|| hardDebug {
 		vm.terminated = true
 		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
@@ -337,9 +353,8 @@ func (vm *VM) hostBless() {
 	v := vm.ReadRegister(9)
 	o := vm.ReadRegister(10)
 	n := vm.ReadRegister(11)
-
+	fmt.Printf("BLESS m=%d a=0x%x v=%d o=%d n=%d\n", m, a, v, o, n)
 	bold_z := make(map[uint32]uint64)
-	//TODO: check who!!
 	for i := 0; i < int(n); i++ {
 		data, err := vm.ReadRAMBytes(uint32(o)+uint32(i)*12, 12)
 		if err != OK {
@@ -354,7 +369,6 @@ func (vm *VM) hostBless() {
 		g := binary.LittleEndian.Uint64(data[4:12])
 		bold_z[s] = g
 	}
-
 	bold_a := [types.TotalCores]uint32{}
 	for i := 0; i < types.TotalCores; i++ {
 		data, err := vm.ReadRAMBytes(uint32(a)+uint32(i)*4, 4)
@@ -375,18 +389,29 @@ func (vm *VM) hostBless() {
 	if privilegedService_m != xs.ServiceIndex {
 		vm.WriteRegister(7, HUH)
 		vm.SetHostResultCode(HUH)
-		log.Debug(vm.logging, "BLESS HUH", "ManagerServiceID", privilegedService_m, "xs", xs.ServiceIndex)
+		log.Warn(vm.logging, "BLESS HUH", "m", fmt.Sprintf("%d", m), "a", fmt.Sprintf("%d", a), "v", fmt.Sprintf("%d", v), "ManagerServiceID", privilegedService_m, "xs", xs.ServiceIndex)
 		return
 	}
+	set := []uint64{m, v}
+	for _, id := range set {
 
-	if m > (1<<32)-1 || v > (1<<32)-1 {
-		vm.WriteRegister(7, WHO)
-		vm.SetHostResultCode(WHO)
-		log.Debug(vm.logging, "BLESS WHO", "m", fmt.Sprintf("%d", m), "a", fmt.Sprintf("%d", a), "v", fmt.Sprintf("%d", v))
-		return
+		if m > (1<<32)-1 || v > (1<<32)-1 {
+			vm.WriteRegister(7, WHO)
+			vm.SetHostResultCode(WHO)
+			log.Debug(vm.logging, "BLESS WHO", "m", fmt.Sprintf("%d", m), "a", fmt.Sprintf("%d", a), "v", fmt.Sprintf("%d", v))
+			return
+		} else {
+			_, found, _ := vm.hostenv.GetService(uint32(id))
+			if !found {
+				vm.WriteRegister(7, WHO)
+				vm.SetHostResultCode(WHO)
+				log.Debug(vm.logging, "BLESS WHO", "m", fmt.Sprintf("%d", m), "a", fmt.Sprintf("%d", a), "v", fmt.Sprintf("%d", v))
+			}
+		}
 	}
 
 	// Set (x'p)_m, (x'p)_a, (x'p)_v
+	vm.X.U.PrivilegedDirty = true
 	vm.X.U.PrivilegedState.ManagerServiceID = uint32(m)
 	vm.X.U.PrivilegedState.AuthQueueServiceID = bold_a
 	vm.X.U.PrivilegedState.UpcomingValidatorsServiceID = uint32(v)
@@ -438,6 +463,8 @@ func (vm *VM) hostAssign() {
 
 	copy(vm.X.U.QueueWorkReport[c][:], bold_q[:])
 	vm.X.U.PrivilegedState.AuthQueueServiceID[c] = uint32(a)
+	vm.X.U.QueueDirty = true
+
 	log.Debug(vm.logging, "ASSIGN OK", "c", c, "AuthQueueServiceID[c]", a, "xs", xs.ServiceIndex)
 	vm.WriteRegister(7, OK)
 	vm.SetHostResultCode(OK)
@@ -479,6 +506,8 @@ func (vm *VM) hostDesignate() {
 		v_bold[i] = newv
 	}
 	vm.X.U.UpcomingValidators = v_bold
+	vm.X.U.UpcomingDirty = true
+
 	log.Debug(vm.logging, "DESIGNATE OK", "validatorsLen", len(v_bold), "TotalValidators", types.TotalValidators, "UpcomingValidatorsServiceID", privilegedService_v, "xs", xs.ServiceIndex)
 	vm.WriteRegister(7, OK)
 	vm.SetHostResultCode(OK)
@@ -640,6 +669,11 @@ func (vm *VM) hostUpgrade() {
 
 // Transfer host call
 func (vm *VM) hostTransfer() {
+	if vm.Mode != ModeAccumulate {
+		vm.WriteRegister(7, WHAT)
+		vm.SetHostResultCode(WHAT)
+		return
+	}
 
 	d := vm.ReadRegister(7)
 	a := vm.ReadRegister(8)
@@ -647,32 +681,23 @@ func (vm *VM) hostTransfer() {
 	o := vm.ReadRegister(10)
 
 	xs, _ := vm.X.GetX_s()
-
-	D := vm.X.U.ServiceAccounts
-
-	var receiver *types.ServiceAccount
-	var founded bool
-	receiver, founded = D[uint32(d)]
-	if !founded {
-		receiver, founded, _ = vm.hostenv.GetService(uint32(d))
-		if !founded {
-			vm.WriteRegister(7, WHO)
-			vm.SetHostResultCode(WHO)
-			log.Debug(vm.logging, "TRANSFER WHO", "d", d)
-			return
-		}
-		vm.X.U.ServiceAccounts[uint32(d)] = receiver
-	}
-
 	m, errCode := vm.ReadRAMBytes(uint32(o), M)
+	log.Info(vm.logging, "TRANSFER attempt", "d", d, "a", a, "g", g, "o", o)
 	if errCode != OK {
 		vm.terminated = true
 		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
+		log.Info(vm.logging, "TRANSFER PANIC", "d", d)
 		return
 	}
-	t := types.DeferredTransfer{Amount: a, GasLimit: g, SenderIndex: vm.X.ServiceIndex, ReceiverIndex: uint32(d)} // CHECK
-
+	receiver, _ := vm.getXUDS(d)
+	if receiver == nil {
+		vm.WriteRegister(7, WHO)
+		vm.SetHostResultCode(WHO)
+		log.Info(vm.logging, "TRANSFER WHO", "d", d)
+		return
+	}
+	log.Info(vm.logging, "TRANSFER receiver", "g", g, "receiver.GasLimitM", receiver.GasLimitM, "receiver.ServiceIndex", receiver.ServiceIndex)
 	if g < receiver.GasLimitM {
 		vm.WriteRegister(7, LOW)
 		vm.SetHostResultCode(LOW)
@@ -687,10 +712,13 @@ func (vm *VM) hostTransfer() {
 		return
 	}
 
+	t := types.DeferredTransfer{Amount: a, GasLimit: g, SenderIndex: vm.X.ServiceIndex, ReceiverIndex: uint32(d)} // CHECK
 	xs.DecBalance(a)
+	receiver.ALLOW_MUTABLE() // make sure all service accounts can be written
+
 	copy(t.Memo[:], m[:])
 	vm.X.Transfers = append(vm.X.Transfers, t)
-	log.Info(vm.logging, "TRANSFER OK", "sender", fmt.Sprintf("%d", t.SenderIndex), "receiver", fmt.Sprintf("%d", d), "amount", fmt.Sprintf("%d", a), "gaslimit", g, "x_s_bal", xs.Balance, "DeferredTransfer", t.String())
+	log.Info(vm.logging, "TRANSFER OK", "g", g, "sender", fmt.Sprintf("%d", t.SenderIndex), "receiver", fmt.Sprintf("%d", d), "amount", fmt.Sprintf("%d", a), "gaslimit", g, "x_s_bal", xs.Balance, "DeferredTransfer", t.String())
 	vm.WriteRegister(7, OK)
 	vm.SetHostResultCode(OK)
 }
@@ -769,7 +797,9 @@ func (vm *VM) hostFetch() {
 	var v_Bytes []byte
 	mode := vm.Mode
 	allowed := false
-
+	fmt.Println("Fetch", "mode", mode, "datatype", datatype)
+	// determine if allowed
+	// datatype:
 	switch mode {
 	case ModeIsAuthorized:
 		switch datatype {
@@ -926,12 +956,16 @@ func (vm *VM) hostFetch() {
 
 		case 16: // E(|t) all transfers
 			if vm.Transfers != nil {
+				for i, t := range vm.Transfers {
+					log.Info(vm.logging, "FETCH E(|t) all transfers sort check", "i", i, "t", t.String())
+				}
 				v_Bytes, _ = types.Encode(vm.Transfers)
 			}
 
 		case 17: // E(t[w_11])
 			if vm.Transfers != nil && omega_11 < uint64(len(vm.Transfers)) {
 				v_Bytes, _ = types.Encode(vm.Transfers[omega_11])
+				log.Info(vm.logging, "FETCH E(t[w_11])", "w_11", omega_11, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "len", len(v_Bytes))
 			}
 		}
 	} else {
@@ -947,7 +981,7 @@ func (vm *VM) hostFetch() {
 
 	f := min(uint64(len(v_Bytes)), omega_8)   // offset
 	l := min(uint64(len(v_Bytes))-f, omega_9) // max length
-
+	vm.DebugHostFunction(FETCH, "datatype = %d, f=%d, l=%d , v=0x%x", datatype, f, l, v_Bytes[f:f+l])
 	errCode := vm.WriteRAMBytes(uint32(o), v_Bytes[f:f+l])
 	if errCode != OK {
 		vm.Panic(errCode)
@@ -1238,7 +1272,7 @@ func (vm *VM) hostInvoke() {
 
 // Lookup preimage
 func (vm *VM) hostLookup() {
-	if vm.Mode != ModeAccumulate {
+	if !(vm.Mode == ModeAccumulate || vm.Mode == ModeOnTransfer) {
 		vm.WriteRegister(7, WHAT)
 		vm.SetHostResultCode(WHAT)
 		return
@@ -1320,7 +1354,7 @@ func (vm *VM) getXUDS(serviceindex uint64) (a *types.ServiceAccount, errCode uin
 
 // Read Storage
 func (vm *VM) hostRead() {
-	if vm.Mode != ModeAccumulate {
+	if !(vm.Mode == ModeAccumulate || vm.Mode == ModeOnTransfer) {
 		vm.WriteRegister(7, WHAT)
 		vm.SetHostResultCode(WHAT)
 		return
@@ -1365,7 +1399,7 @@ func (vm *VM) hostRead() {
 	if !ok { // || true
 		vm.WriteRegister(7, NONE)
 		vm.HostResultCode = NONE
-		log.Debug(vm.logging, "READ NONE", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "ok", ok, "val", fmt.Sprintf("%x", val), "len(val)", len(val), "source", storage_source)
+		log.Warn(vm.logging, "READ NONE", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "ok", ok, "val", fmt.Sprintf("%x", val), "len(val)", len(val), "source", storage_source)
 		return
 	}
 	log.Trace(vm.logging, "READ OK", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "ok", ok, "val", fmt.Sprintf("%x", val), "len(val)", len(val), "source", storage_source)
@@ -1373,6 +1407,7 @@ func (vm *VM) hostRead() {
 	lenval = uint64(len(val))
 	f = min(uint64(len(val)), vm.ReadRegister(11))   // offset
 	l = min(uint64(len(val))-f, vm.ReadRegister(12)) // max length
+	vm.DebugHostFunction(READ, "bo=%x, f=%d, l=%d, val=0x%x", bo, f, l, val[f:f+l])
 	if errCode := vm.WriteRAMBytes(uint32(bo), val[f:f+l]); errCode != OK {
 		log.Error(vm.logging, "READ RAM WRITE ERROR", "err", errCode)
 		vm.Panic(errCode)
@@ -1383,7 +1418,7 @@ func (vm *VM) hostRead() {
 
 // Write Storage a_s(x,y)
 func (vm *VM) hostWrite() {
-	if vm.Mode != ModeAccumulate {
+	if !(vm.Mode == ModeAccumulate || vm.Mode == ModeOnTransfer) {
 		vm.WriteRegister(7, WHAT)
 		vm.SetHostResultCode(WHAT)
 		return
@@ -1427,6 +1462,7 @@ func (vm *VM) hostWrite() {
 		}
 		//l = uint64(len(v))
 	}
+	vm.DebugHostFunction(WRITE, "writing val 0x%x", v)
 	a.WriteStorage(a.ServiceIndex, mu_k, v, vz == 0, storage_source)
 	vm.ResultCode = uint8(OK)
 	vm.SetHostResultCode(OK)

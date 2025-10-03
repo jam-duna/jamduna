@@ -106,10 +106,17 @@ func (vm *Interpreter) Panic(errCode uint64) {
 	C.pvm_panic(vm.cVM, C.uint64_t(errCode))
 }
 func (vm *Interpreter) GetGas() int64 {
-	if vm.cVM != nil {
-		return int64(C.pvm_get_gas(vm.cVM))
+	// not sure why the oog state is corrected be set but can't get the gas correctly
+	if vm.cVM == nil {
+		return 0
 	}
-	return 0
+	// If the machine is out-of-gas, normalize to 0 to match expected semantics
+	// even if the native side didn’t explicitly zero the counter.
+	ms := C.pvm_get_machine_state(vm.cVM)
+	if uint8(ms) == OOG {
+		return 0
+	}
+	return int64(C.pvm_get_gas(vm.cVM))
 }
 
 // ReadRegister reads a register value from the C VM
@@ -151,7 +158,7 @@ func (ram *Interpreter) ReadRAMBytes(address uint32, length uint32) ([]byte, uin
 	if errCode != 0 {
 		return nil, uint64(errCode)
 	}
-	// fmt.Printf("ReadRAMBytes: address=0x%X, length=%d buffer: %x\n", address, length, buffer)
+	//fmt.Printf("ReadRAMBytes: address=0x%X, length=%d buffer: %x\n", address, length, buffer)
 	return buffer, uint64(result)
 }
 
@@ -228,8 +235,11 @@ func goInvokeHostFunction(cvm *C.pvm_vm_t, hostFuncID C.int) C.pvm_host_result_t
 	}()
 
 	// Call the host function
-	vm.InvokeHostCall(int(hostFuncID))
-
+	_, err := vm.InvokeHostCall(int(hostFuncID))
+	if err != nil {
+		log.Error(vm.logging, fmt.Sprintf("HostCall %s (%d) ERROR: %v", HostFnToName(int(hostFuncID)), hostFuncID, err))
+		return C.PVM_HOST_TERMINATE
+	}
 	// Check if host function caused panic
 	if vm.MachineState == PANIC {
 		vm.Panic(PANIC)

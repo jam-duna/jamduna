@@ -191,23 +191,42 @@ void handle_ECALLI(VM* vm, uint8_t* operands, size_t operand_len) {
     // Charge gas before host call - inlined logic
     const int LOG_HOST_FN = 100;
     const int TRANSFER_HOST_FN = 20; // NOTE: this could change in future!!
-    int gas_charge;
+    uint64_t gas_charge;
+    uint64_t additional_charge = 0;
     if (vm->host_func_id == LOG_HOST_FN) {
         gas_charge = 0;
-    } else if (vm->host_func_id == TRANSFER_HOST_FN) {
-        gas_charge = 10 + vm->registers[9];
     } else {
         gas_charge = 10;
+        if (vm->host_func_id == TRANSFER_HOST_FN && (vm->start_pc == 5)) {
+            additional_charge = vm->registers[9];
+        }
+    }
+    if (vm->gas < (uint64_t)(gas_charge + additional_charge)) {
+        // Not enough gas for host call
+        if (vm->pvm_tracing) {
+            printf("OUT_OF_GAS: Not enough gas for host call %d, required %lu, available %lld\n", 
+                   vm->host_func_id, (unsigned long)(gas_charge + additional_charge), (long long)vm->gas);
+            fflush(stdout);
+        }
+        vm->gas = 0;
+        vm->result_code = WORKDIGEST_OOG;
+        vm->machine_state = OOG;
+        vm->terminated = 1;
+        return;
     }
     vm->gas -= (int64_t)gas_charge;
-    
-    if (vm->pvm_tracing) {
-    // printf("Host call: function %d\n", vm->host_func_id);
-    }
-    
+
+    printf("handle_ECALLI: %d [gas: %lu] [additional_charge: %lu] [service %ld entrypoint %d]\n",
+        vm->host_func_id, (unsigned long)gas_charge, (unsigned long)additional_charge, (long)vm->service_index, vm->start_pc);
+
     // Trampoline to ext_invoke_host_func with error handling
     if (vm->ext_invoke_host_func) {
         vm->ext_invoke_host_func(vm, vm->host_func_id);
+        if (vm->host_func_id == TRANSFER_HOST_FN ) {
+            if (vm->registers[7] == OK) {
+                vm->gas -= (int64_t)additional_charge;
+            }
+        }
         if (vm->terminated) {
             return;
         }
