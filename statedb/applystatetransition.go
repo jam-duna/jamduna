@@ -227,7 +227,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 		s.JamState.tallyStatistics(uint32(validatorIndex), "reports", 1)
 		// fmt.Printf("Validator %d: %d reports\n", validatorIndex, nreports)
 	}
-	// 4.17 Accumulation [need available work report, ϑ, ξ, δ, χ, ι, φ]
+
 	// 12.20 gas counting
 	var gas uint64
 	var gas_counting uint64
@@ -242,7 +242,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if gas < gas_counting {
 		gas = gas_counting
 	}
-	var f map[uint32]uint32
+	var f map[uint32]uint64
 	accumulate_input_wr := s.AvailableWorkReport
 	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
 
@@ -251,19 +251,12 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	benchRec.Add("tallyStatistics", time.Since(t0))
 
 	// ------ OuterAccumulate ------
+	deferred_transfers := make([]types.DeferredTransfer, 0)
 	t0 = time.Now()
-	num_accumulations, deferred_transfers, accumulation_output, gasUsage := s.OuterAccumulate(gas, accumulate_input_wr, o, f, pvmBackend, make(map[uint32]*types.XContext)) // outer accumulate
+	num_accumulations, accumulation_output, gasUsage := s.OuterAccumulate(gas, deferred_transfers, accumulate_input_wr, o, f, pvmBackend, make(map[uint32]*types.XContext)) // outer accumulate
 	benchRec.Add("OuterAccumulate", time.Since(t0))
 
-	// ------ ProcessDeferredTransfers ------
-	//t0 = time.Now()
 	// (χ′, δ†, ι′, φ′)
-	// 12.24 transfer δ‡
-	timeslot := s.GetTimeslot() // τ′
-	transferStats, err := s.ProcessDeferredTransfers(o, timeslot, deferred_transfers, pvmBackend)
-	if err != nil {
-		return s, err
-	}
 	for _, sa := range o.ServiceAccounts {
 		sa.ALLOW_MUTABLE() // make sure all service accounts can be written
 		sa.Dirty = true
@@ -328,8 +321,7 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	if err != nil {
 		return s, err
 	}
-
-	s.JamState.tallyServiceStatistics(guarantees, preimages, accumulateStats, transferStats)
+	s.JamState.tallyServiceStatistics(guarantees, preimages, accumulateStats)
 	benchRec.Add("tallyStatistics", time.Since(t0))
 
 	// ---------  ApplyStateTransitionAuthorizations ------

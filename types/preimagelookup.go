@@ -16,7 +16,7 @@ Section 12.1. Preimage Integration. Prior to accumulation, we must first integra
 */
 // LookupEntry represents a single entry in the lookup extrinsic.
 type Preimages struct {
-	Requester uint32 `json:"requester"` // fixed length E_4(s): https://graypaper.fluffylabs.dev/#/38c4e62/3a85013a8501?v=0.7.0
+	Requester uint32 `json:"requester"` // fixed length E_4(s)
 	Blob      []byte `json:"blob"`
 }
 

@@ -42,7 +42,7 @@ type SegmentRootLookupItemHistory struct {
 // SegmentRootLookup represents a list of SegmentRootLookupItem
 type SegmentRootLookupHistory []SegmentRootLookupItemHistory
 
-type WorkReport struct { // 0.7.0 C.27 11.2
+type WorkReport struct {
 	AvailabilitySpec  AvailabilitySpecifier `json:"package_spec"`        // s
 	RefineContext     RefineContext         `json:"context"`             // bold-c
 	CoreIndex         uint                  `json:"core_index"`          // c

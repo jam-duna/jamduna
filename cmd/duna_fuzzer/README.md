@@ -10,8 +10,8 @@ DEFAULT_ASN_VERSION = 1
 PATCH_VERSION = 13
 
 # JAM_VERSION = <GP_VERSION>.<PATCH_VERSION>
-GP_VERSION = 0.7.0
-JAM_VERSION = 0.7.0.13
+GP_VERSION = 0.7.1
+JAM_VERSION = 0.7.1.0
 ```
 
 2. Make the fuzzer with DEFAULT_ASN_VERSION
@@ -38,7 +38,7 @@ Run the target:
 
 Run the fuzzer with some test directory:
 ```
-./duna_fuzzer_mac --test-dir ~/Github/jamtestnet/0.7.0/jam-conformance 
+./duna_fuzzer_mac --test-dir ~/Github/jamtestnet/0.7.1/jam-conformance 
 ./duna_fuzzer_mac --test-dir ~/Github/jam/jamtestvectors/traces/preimages
 ./duna_fuzzer_mac --test-dir ~/Github/jam/jamtestvectors/traces/storage
 ```
@@ -48,14 +48,14 @@ Check that our target has no issue!
 5. After changing the version in the command below to match up, publish to https://github.com/jam-duna/jamtestnet
 
 ```
-gh release create v0.7.0.13 \
+gh release create v0.7.1.0 \
   $JAM_PATH/cmd/duna_fuzzer/duna_fuzzer_linux \
   $JAM_PATH/cmd/duna_fuzzer/duna_fuzzer_mac \
   $JAM_PATH/cmd/duna_target/duna_target_linux \
   $JAM_PATH/cmd/duna_target/duna_target_mac \
   --repo jam-duna/jamtestnet \
-  --title "v0.7.0.13 Fuzzer + Fuzzer target" \
-  --notes $'Release v0.7.0.13 of duna_fuzzer and duna_target\n\nIncludes:\n- duna_fuzzer_mac\n- duna_fuzzer_linux\n- duna_target_mac\n- duna_target_linux'  
+  --title "v0.7.1.0 Fuzzer + Fuzzer target" \
+  --notes $'Release v0.7.1.0 of duna_fuzzer and duna_target\n\nIncludes:\n- duna_fuzzer_mac\n- duna_fuzzer_linux\n- duna_target_mac\n- duna_target_linux'  
 ```
 
 

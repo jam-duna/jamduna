@@ -68,18 +68,16 @@ type CoreStatistics struct {
 
 // GP 6.4 Eq 13.7
 type ServiceStatistics struct {
-	NumPreimages             uint `json:"provided_count"`        //p
-	NumBytesPreimages        uint `json:"provided_size"`         //p
-	NumResults               uint `json:"refinement_count"`      //r-n
-	RefineGasUsed            uint `json:"refinement_gas_used"`   //r-u
-	NumImportedSegments      uint `json:"imports"`               //i
-	NumExportedSegments      uint `json:"exports"`               //e
-	NumBytesExtrinsics       uint `json:"extrinsic_size"`        //z
-	NumExtrinsics            uint `json:"extrinsic_count"`       //x
-	AccumulateNumWorkReports uint `json:"accumulate_count"`      //a
-	AccumulateGasUsed        uint `json:"accumulate_gas_used"`   //a
-	TransferNumTransfers     uint `json:"on_transfers_count"`    //t
-	TransferGasUsed          uint `json:"on_transfers_gas_used"` //t
+	NumPreimages             uint `json:"provided_count"`      //p
+	NumBytesPreimages        uint `json:"provided_size"`       //p
+	NumResults               uint `json:"refinement_count"`    //r-n
+	RefineGasUsed            uint `json:"refinement_gas_used"` //r-u
+	NumImportedSegments      uint `json:"imports"`             //i
+	NumExportedSegments      uint `json:"exports"`             //e
+	NumBytesExtrinsics       uint `json:"extrinsic_size"`      //z
+	NumExtrinsics            uint `json:"extrinsic_count"`     //x
+	AccumulateNumWorkReports uint `json:"accumulate_count"`    //a
+	AccumulateGasUsed        uint `json:"accumulate_gas_used"` //a
 }
 
 func (v *ValidatorStatistics) Encode() []byte {

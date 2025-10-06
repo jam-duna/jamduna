@@ -714,6 +714,12 @@ uint32_t pvm_read_ram_bytes_32(pvm_vm_t* vm, uint32_t address, int* error_code) 
     }
     uint32_t heap_end = p_func(vm->current_heap_pointer);
 
+    // printf("pvm_read_ram_bytes_32: address=0x%x\n", address);
+    //     printf("  RW region: 0x%x - 0x%x (heap_end=0x%x)\n", vm->rw_data_address, vm->rw_data_address_end, heap_end);
+    //     printf("  Output region: 0x%x - 0x%x\n", vm->output_address, vm->output_end);
+    //     printf("  Stack region: 0x%x - 0x%x\n", vm->stack_address, vm->stack_address_end);
+    //     printf("  RO region: 0x%x - 0x%x\n", vm->ro_data_address, vm->ro_data_address_end);
+
     // RW data / heap
     if (address >= vm->rw_data_address && address <= heap_end - 4) {
         uint32_t offset = address - vm->rw_data_address;

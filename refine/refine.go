@@ -59,6 +59,7 @@ func ExecuteWorkPackageBundleV1(stateDB *statedb.StateDB, pvmBackend string, tim
 
 		refineStart := time.Now()
 		output, _, exported_segments := vm.ExecuteRefine(
+			workPackageCoreIndex,
 			uint32(index), workPackage, auth_result, importsegments,
 			workItem.ExportCount, packageBundle.ExtrinsicData,
 			p_u, common.BytesToHash(trie.H0),
@@ -257,6 +258,7 @@ func ExecuteWBRefinement(stateDB *statedb.StateDB, pvmBackend string, timeslot u
 
 		refineStart := time.Now()
 		output, _, exported_segments := vm.ExecuteRefine(
+			workPackageCoreIndex,
 			uint32(index), workPackage, auth_result, importsegments,
 			workItem.ExportCount, packageBundle.ExtrinsicData,
 			p_u, common.BytesToHash(trie.H0),

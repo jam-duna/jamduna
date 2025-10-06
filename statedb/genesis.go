@@ -86,6 +86,8 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 	j.PrivilegedServiceIndices.AuthQueueServiceID = authQueueServiceID
 	j.PrivilegedServiceIndices.UpcomingValidatorsServiceID = BootstrapServiceCode
 	j.PrivilegedServiceIndices.ManagerServiceID = BootstrapServiceCode
+	// 0.7.1 introduces RegistrarServiceID
+	j.PrivilegedServiceIndices.RegistrarServiceID = BootstrapServiceCode
 	for i := 0; i < types.TotalCores; i++ {
 		j.AuthorizationsPool[i] = make([]common.Hash, types.MaxAuthorizationPoolItems)
 		var temp [types.MaxAuthorizationQueueItems]common.Hash

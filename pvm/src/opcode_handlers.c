@@ -1639,10 +1639,11 @@ void handle_LOAD_IND_I32(VM* vm, uint8_t* operands, size_t operand_len) {
     int err_code;
     uint32_t value = pvm_read_ram_bytes_32(vm, addr, &err_code);
     if (err_code != OK) {
+        printf("PANIC: LOAD_IND_I32 failed to read memory at address 0x%08X, error code %d\n", addr, err_code);
         pvm_panic(vm, err_code);
         return;
     }
-    
+    // printf("DEBUG: LOAD_IND_I32 read value 0x%08X from address 0x%08X\n", value, addr);
     uint64_t result = (uint64_t)(int32_t)value;
     vm->registers[register_index_a] = result;
     vm->pc += 1 + operand_len;
@@ -1755,6 +1756,8 @@ void handle_ADD_IMM_64(VM* vm, uint8_t* operands, size_t operand_len) {
     
     uint64_t result = vm->registers[register_index_b] + vx;
     vm->registers[register_index_a] = result;
+    //printf("--- DEBUG: ADD_IMM_64 R%d result=0x%016llX (R%d + %016llX)\n", register_index_a, (unsigned long long)result, register_index_b, (unsigned long long)vx);
+
     vm->pc += 1 + operand_len;
 }
 

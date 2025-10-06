@@ -185,8 +185,8 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 	pvmStart := time.Now()
 
 	vm_auth := statedb.NewVMFromCode(authindex, authcode, 0, 0, s, statedb.BackendInterpreter, types.IsAuthorizedGasAllocation)
-
-	r := vm_auth.ExecuteAuthorization(workPackage, 0)
+	workPackageCoreIndex := uint16(0)
+	r := vm_auth.ExecuteAuthorization(workPackage, workPackageCoreIndex)
 	p_u := workPackage.AuthorizationCodeHash
 	p_p := workPackage.ConfigurationBlob
 	p_a := common.Blake2Hash(append(p_u.Bytes(), p_p...))
@@ -208,7 +208,7 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 		vm := statedb.NewVMFromCode(service_index, code, 0, 0, s, statedb.BackendInterpreter, workItem.RefineGasLimit)
 		vm.Timeslot = s.JamState.SafroleState.Timeslot
 
-		output, _, exported_segments := vm.ExecuteRefine(uint32(index), workPackage, r, make([][][]byte, 0), workItem.ExportCount, types.ExtrinsicsBlobs{}, p_a, common.Hash{})
+		output, _, exported_segments := vm.ExecuteRefine(workPackageCoreIndex, uint32(index), workPackage, r, make([][][]byte, 0), workItem.ExportCount, types.ExtrinsicsBlobs{}, p_a, common.Hash{})
 
 		expectedSegmentCnt := int(workItem.ExportCount)
 		if expectedSegmentCnt != len(exported_segments) {
