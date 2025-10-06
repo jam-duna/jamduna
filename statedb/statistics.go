@@ -52,7 +52,7 @@ func (n *JamState) tallyCoreStatistics(guarantees []types.Guarantee, newlyAvaila
 	return nil
 }
 
-func (n *JamState) tallyServiceStatistics(guarantees []types.Guarantee, preimages []types.Preimages, accumulateStats map[uint32]*accumulateStatistics, transferStats map[uint32]*transferStatistics) {
+func (n *JamState) tallyServiceStatistics(guarantees []types.Guarantee, preimages []types.Preimages, accumulateStats map[uint32]*accumulateStatistics) {
 	stats := make(map[uint32]*types.ServiceStatistics)
 	for _, g := range guarantees { // w -- R(...)
 		for _, v := range g.Report.Results {
@@ -95,15 +95,6 @@ func (n *JamState) tallyServiceStatistics(guarantees []types.Guarantee, preimage
 			cs.AccumulateGasUsed += a.gasUsed
 		}
 
-	}
-	for s, t := range transferStats { // X
-		cs, ok := stats[s]
-		if !ok {
-			cs = &types.ServiceStatistics{}
-			stats[s] = cs
-		}
-		cs.TransferGasUsed += t.gasUsed
-		cs.TransferNumTransfers += t.numTransfers
 	}
 	// incorporate stats into ValidatorStatistics
 	n.ValidatorStatistics.ServiceStatistics = make(map[uint32]types.ServiceStatistics)

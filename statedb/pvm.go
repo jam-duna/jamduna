@@ -76,15 +76,15 @@ type VM struct {
 	ServiceMetadata []byte
 
 	// Refine Inputs and Outputs
-	WorkItemIndex             uint32
-	WorkPackage               types.WorkPackage
-	Extrinsics                types.ExtrinsicsBlobs
-	Authorization             []byte
-	Imports                   [][][]byte
-	AccumulateOperandElements []types.AccumulateOperandElements
-	Transfers                 []types.DeferredTransfer
-	N                         common.Hash
-	Delta                     map[uint32]*types.ServiceAccount
+	WorkItemIndex    uint32
+	WorkPackage      types.WorkPackage
+	Extrinsics       types.ExtrinsicsBlobs
+	Authorization    []byte
+	Imports          [][][]byte
+	AccumulateInputs []types.AccumulateInput
+	Transfers        []types.DeferredTransfer
+	N                common.Hash
+	Delta            map[uint32]*types.ServiceAccount
 
 	RefineM_map        map[uint32]*RefineM
 	Exports            [][]byte
@@ -245,7 +245,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		o_byte = []byte{}
 		w_byte = make([]byte, w_size)
 	}
-
+	fmt.Printf("NewVM: o_size=%d, w_size=%d, z=%d, s=%d, code_len=%d\n", o_size, w_size, z, s, len(code))
 	vm := &VM{
 		hostenv:         hostENV, //check if we need this
 		Exports:         make([][]byte, 0),
@@ -257,7 +257,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 	requiredMemory := uint64(uint64(5*Z_Z) + uint64(Z_func(o_size)) + uint64(Z_func(w_size+z*Z_P)) + uint64(Z_func(s)) + uint64(Z_I))
 	if requiredMemory > math.MaxUint32 {
 		log.Error(vm.logging, "Standard Program Initialization Error")
-		// TODO
+		return nil
 	}
 
 	// Create C VM immediately with initial registers
@@ -294,7 +294,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 
 		// w - read-write
 		rw_data_address := uint32(2*Z_Z) + Z_func(o_size)
-		rw_data_address_end := rw_data_address + P_func(w_size)
+		rw_data_address_end := rw_data_address + P_func(w_size) + z*Z_P
 		current_heap_pointer := rw_data_address_end
 
 		z_o := Z_func(o_size)
@@ -306,6 +306,8 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		}
 		machine.SetHeapPointer(current_heap_pointer)
 		machine.SetMemoryBounds(rw_data_address, rw_data_address_end, ro_data_address, ro_data_address_end, output_address, output_end, stack_address, stack_address_end)
+		fmt.Printf("Memory bounds set: RW [0x%x - 0x%x], RO [0x%x - 0x%x], Output [0x%x - 0x%x], Stack [0x%x - 0x%x]\n",
+			rw_data_address, rw_data_address_end, ro_data_address, ro_data_address_end, output_address, output_end, stack_address, stack_address_end)
 		if len(o_byte) > 0 {
 			result := vm.WriteRAMBytes(Z_Z, o_byte)
 			if result != OK {
@@ -349,12 +351,13 @@ func (vm *VM) GetServiceIndex() uint32 {
 }
 
 // input by order([work item index],[workpackage itself], [result from IsAuthorized], [import segments], [export count])
-func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash, n common.Hash) (r types.Result, res uint64, exportedSegments [][]byte) {
+func (vm *VM) ExecuteRefine(core uint16, workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash, n common.Hash) (r types.Result, res uint64, exportedSegments [][]byte) {
 	vm.Mode = ModeRefine
 
 	workitem := workPackage.WorkItems[workitemIndex]
 
-	a := types.E(uint64(workitemIndex))
+	// core index is now a refine argument in 0.7.4
+	a := append(types.E(uint64(core)), types.E(uint64(workitemIndex))...)
 	serviceBytes := types.E(uint64(workitem.Service))
 	a = append(a, serviceBytes...)
 	//fmt.Printf("ExecuteRefine  s %d bytes - %x\n", len(serviceBytes), serviceBytes)
@@ -380,18 +383,19 @@ func (vm *VM) ExecuteRefine(workitemIndex uint32, workPackage types.WorkPackage,
 	return r, res, exportedSegments
 }
 
-func (vm *VM) ExecuteAccumulate(t uint32, s uint32, elements []types.AccumulateOperandElements, X *types.XContext, n common.Hash) (r types.Result, res uint64, xs *types.ServiceAccount) {
+func (vm *VM) ExecuteAccumulate(t uint32, s uint32, inputs []types.AccumulateInput, X *types.XContext, n common.Hash) (r types.Result, res uint64, xs *types.ServiceAccount) {
 	vm.Mode = ModeAccumulate
 	vm.X = X //⎩I(u, s), I(u, s)⎫⎭
 	vm.Y = X.Clone()
 	input_bytes := make([]byte, 0)
 	t_bytes := types.E(uint64(t))
 	s_bytes := types.E(uint64(s))
-	o_bytes := types.E(uint64(len(elements))) // https://graypaper.fluffylabs.dev/#/38c4e62/2f4a022f4a02?v=0.7.0
+	o_bytes := types.E(uint64(len(inputs)))
+
 	input_bytes = append(input_bytes, t_bytes...)
 	input_bytes = append(input_bytes, s_bytes...)
 	input_bytes = append(input_bytes, o_bytes...)
-	vm.AccumulateOperandElements = elements
+	vm.AccumulateInputs = inputs
 	vm.N = n
 
 	x_s, found := X.U.ServiceAccounts[s]
@@ -409,18 +413,9 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, elements []types.AccumulateO
 	return r, res, x_s
 }
 
-func (vm *VM) ExecuteTransfer(arguments []byte, service_account *types.ServiceAccount) (r types.Result, res uint64) {
-	vm.Mode = ModeOnTransfer
-	vm.ServiceAccount = service_account
-	vm.executeWithBackend(arguments, types.EntryPointOnTransfer)
-	r.Err = vm.ResultCode
-	r.Ok = []byte{}
-	return r, 0
-}
-
 func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Result) {
 	vm.Mode = ModeIsAuthorized
-	// NOT 0.7.0 COMPLIANT
+	// CHECK: NOT 0.7.0 COMPLIANT
 	a, _ := types.Encode(uint8(c))
 
 	// fmt.Printf("ExecuteAuthorization - c=%d len(p_bytes)=%d len(c_bytes)=%d len(a)=%d a=%x WP=%s\n", c, len(p_bytes), len(c_bytes), len(a), a, p.String())

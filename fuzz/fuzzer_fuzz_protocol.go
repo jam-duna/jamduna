@@ -11,16 +11,16 @@ import (
 )
 
 const (
-	GP_VERSION      = "0.7.0"
+	GP_VERSION      = "0.7.1"
 	FUZZ_VERSION_V1 = 1
 	FUZZ_VERSION_V0 = 0
 )
 
 // major.minor.patch
 var (
-	PATCH_VERSION = 13 // Bump this for patch releases
-	APP_VERSION   = fmt.Sprintf("0.2.%v", PATCH_VERSION)
-	JAM_VERSION   = fmt.Sprintf("%v.%v", GP_VERSION, PATCH_VERSION) // Tag as <0.7.0><.x> for our jam binary release
+	PATCH_VERSION = 0 // Bump this for patch releases
+	APP_VERSION   = fmt.Sprintf("0.3.%v", PATCH_VERSION)
+	JAM_VERSION   = fmt.Sprintf("%v.%v", GP_VERSION, PATCH_VERSION) // Tag as <0.7.1><.x> for our jam binary release
 )
 
 /*

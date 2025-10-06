@@ -54,6 +54,30 @@ type ServiceAccount struct {
 	Preimage map[string]*PreimageObject `json:"-"` // H(p)  -> p
 }
 
+func NewEmptyServiceAccount(serviceIndex uint32, c []byte, g uint64, m uint64, storageSize uint64, gratisOffset uint64, createdSlot uint32, parentService uint32) *ServiceAccount {
+	a := &ServiceAccount{
+		ServiceIndex:       serviceIndex,
+		Mutable:            false,
+		Dirty:              false,
+		CodeHash:           common.BytesToHash(c),
+		Balance:            0,
+		GasLimitG:          g,
+		GasLimitM:          m,
+		StorageSize:        storageSize,   //a_l =  ∑ 81+z per (h,z) + ∑ 34 + |y| + |x|; Initialized for first a_l
+		GratisOffset:       gratisOffset,  //a_f = 0
+		NumStorageItems:    2,             //a_s = 2⋅∣al∣+∣as∣; Initialized for first a_l
+		CreateTime:         createdSlot,   //a_r = t // check pre vs post?
+		RecentAccumulation: 0,             //a_a = 0
+		ParentService:      parentService, //a_p = x_s
+		Storage:            make(map[string]*StorageObject),
+		Lookup:             make(map[string]*LookupObject),
+		Preimage:           make(map[string]*PreimageObject),
+		Checkpointed:       false, // this is updated to true upon Checkpoint
+		NewAccount:         true,  // with this flag, if an account is Dirty OR Checkpointed && NewAccount then it is written
+	}
+	return a
+}
+
 func (s *ServiceAccount) Clone() *ServiceAccount {
 	// Start by cloning primitive fields directly
 	clone := ServiceAccount{
@@ -179,7 +203,8 @@ func (o *PreimageObject) Clone() *PreimageObject {
 
 // Convert the ServiceAccount to a byte slice.
 // ac ++ E8(b,g,m,o,f) ++E4(i,r,a,p)
-// 32 + 8*5 + 4*4 = 88
+// 1 + 32 + 8*5 + 4*4 = 89
+const ACCOUNT_VERSION = 0
 
 // Bytes encodes the AccountState as a byte slice
 func (s *ServiceAccount) Bytes() ([]byte, error) {
@@ -191,6 +216,13 @@ func (s *ServiceAccount) Bytes() ([]byte, error) {
 
 	writeUint32 := func(value uint32) error {
 		return binary.Write(&buf, binary.LittleEndian, value)
+	}
+	writeUint8 := func(value uint8) error {
+		return binary.Write(&buf, binary.LittleEndian, value)
+	}
+	// 0.7.1 Includes version byte prefix for accounts version 0 byte https://graypaper.fluffylabs.dev/#/1c979cb/3b81033b8103?v=0.7.1
+	if err := writeUint8(ACCOUNT_VERSION); err != nil {
+		return nil, err
 	}
 	if _, err := buf.Write(s.CodeHash.Bytes()); err != nil {
 		return nil, err
@@ -230,7 +262,7 @@ func (s *ServiceAccount) Bytes() ([]byte, error) {
 // Recover reconstructs an AccountState from a byte slice
 func (s *ServiceAccount) Recover(data []byte) error {
 	// Ensure the length of the data is correct (88 bytes)
-	expectedLen := 32 + 8*5 + 4*4 // 32 bytes for CodeHash, 5 * 8 bytes for uint64, 4 * 4 bytes for uint32
+	expectedLen := 32 + 8*5 + 4*4 + 1 // 32 bytes for CodeHash, 5 * 8 bytes for uint64, 4 * 4 bytes for uint32
 	if len(data) != expectedLen {
 		return fmt.Errorf("invalid data length: expected %d, got %d", expectedLen, len(data))
 	}
@@ -238,6 +270,21 @@ func (s *ServiceAccount) Recover(data []byte) error {
 	// Create a reader from the data
 	buf := bytes.NewReader(data)
 
+	readUint8 := func() (uint8, error) {
+		var value uint8
+		err := binary.Read(buf, binary.LittleEndian, &value)
+		return value, err
+	}
+
+	// 0.7.1 Includes version byte prefix for accounts version 0 byte https://graypaper.fluffylabs.dev/#/1c979cb/3b81033b8103?v=0.7.1
+	var err1 error
+	versionByte, err1 := readUint8()
+	if err1 != nil {
+		return err1
+	}
+	if versionByte != 0 {
+		return fmt.Errorf("unsupported account version: expected 0, got %d", versionByte)
+	}
 	// Read CodeHash (32 bytes)
 	codeHashBytes := make([]byte, 32)
 	if _, err := buf.Read(codeHashBytes); err != nil {

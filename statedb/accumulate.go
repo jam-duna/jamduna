@@ -284,14 +284,14 @@ func (s *StateDB) updateRecentAccumulation(o *types.PartialState, accumulated_pa
 	}
 }
 
-func (s *StateDB) OuterAccumulate(g uint64, workReports []types.WorkReport, o *types.PartialState, freeAccumulation map[uint32]uint32, pvmBackend string, accumulated_partial map[uint32]*types.XContext) (num_accumulations uint64, transfers []types.DeferredTransfer, accumulation_output []types.AccumulationOutput, GasUsage []Usage) {
+func (s *StateDB) OuterAccumulate(g uint64, transfersIn []types.DeferredTransfer, workReports []types.WorkReport, o *types.PartialState, freeAccumulation map[uint32]uint64, pvmBackend string, accumulated_partial map[uint32]*types.XContext) (num_accumulations uint64, accumulation_output []types.AccumulationOutput, GasUsage []Usage) {
 	var gas_tmp uint64
+	// calculate i: https://graypaper.fluffylabs.dev/#/1c979cb/17cf0117cf01?v=0.7.1
 	i := uint64(0)
-	// calculate how to maximize the work reports to enter the parallelized accumulation
 	done := false
 	for _, workReport := range workReports {
 		for _, workDigest := range workReport.Results {
-			if gas_tmp+workDigest.Gas <= types.AccumulateGasAllocation_GT {
+			if gas_tmp+workDigest.Gas <= g {
 				gas_tmp += workDigest.Gas
 			} else {
 				done = true
@@ -307,24 +307,38 @@ func (s *StateDB) OuterAccumulate(g uint64, workReports []types.WorkReport, o *t
 
 	if len(workReports) == 0 { // if i = 0, then nothing to do
 		num_accumulations = 0
-		transfers = make([]types.DeferredTransfer, 0)
 		accumulation_output = make([]types.AccumulationOutput, 0)
 		GasUsage = make([]Usage, 0)
 		return
 	}
-	p_gasUsed, p_transfers, p_outputs, p_gasUsage := s.ParallelizedAccumulate(o, workReports[0:i], freeAccumulation, pvmBackend, accumulated_partial) // parallelized accumulation the 0 to i work reports
-
-	if len(workReports[i:]) > 0 { // if i = len(workReports), then nothing more to do
-		incNum, incTransfers, incAccumulationOutput, incGasUsage := s.OuterAccumulate(g-p_gasUsed, workReports[i:], o, nil, pvmBackend, accumulated_partial) // recursive call to the rest of the work reports
+	// transfers with ParallelizedAccumulate
+	p_gasUsed, transfersOut, p_outputs, p_gasUsage := s.ParallelizedAccumulate(o, transfersIn, workReports[0:i], freeAccumulation, pvmBackend, accumulated_partial) // parallelized accumulation the 0 to i work reports
+	// n https://graypaper.fluffylabs.dev/#/1c979cb/17e70117e701?v=0.7.1
+	len_t := len(transfersIn)
+	len_free := len(freeAccumulation)
+	n := i + uint64(len_t) + uint64(len_free)
+	transfer_gases := uint64(0)
+	for _, t := range transfersIn {
+		transfer_gases += uint64(t.GasLimit)
+	}
+	gstar := g + transfer_gases
+	if n > 0 { // if i = len(workReports), then nothing more to do
+		// compute gstar https://graypaper.fluffylabs.dev/#/1c979cb/172e02172e02?v=0.7.1
+		for _, t := range transfersIn {
+			gstar += uint64(t.GasLimit)
+		}
+		gstar -= p_gasUsed
+		incNum, incAccumulationOutput, incGasUsage := s.OuterAccumulate(gstar, transfersOut, workReports[i:], o, nil, pvmBackend, accumulated_partial) // recursive call to the rest of the work reports
 		num_accumulations = i + incNum
 		accumulation_output = append(p_outputs, incAccumulationOutput...)
-		transfers = append(incTransfers, p_transfers...)
+
 		GasUsage = append(p_gasUsage, incGasUsage...)
 		s.updateRecentAccumulation(o, accumulated_partial)
 		return
 	}
 	s.updateRecentAccumulation(o, accumulated_partial)
-	return i, p_transfers, p_outputs, p_gasUsage
+	// TODO: check if should we use the GasUsage?
+	return i, p_outputs, p_gasUsage
 }
 
 /*
@@ -335,15 +349,16 @@ now with accRess go func!
 */
 func (s *StateDB) ParallelizedAccumulate(
 	o *types.PartialState,
+	transfersIn []types.DeferredTransfer,
 	workReports []types.WorkReport,
-	freeAccumulation map[uint32]uint32,
+	freeAccumulation map[uint32]uint64,
 	pvmBackend string,
 	accumulated_partial map[uint32]*types.XContext,
-) (totalGasUsed uint64, transfers []types.DeferredTransfer, accumulation_output []types.AccumulationOutput, GasUsage []Usage) {
+) (totalGasUsed uint64, transfersOut []types.DeferredTransfer, accumulation_output []types.AccumulationOutput, GasUsage []Usage) {
 
 	GasUsage = make([]Usage, 0, 64)
 
-	// Build the service set: s = {rs S w ∈ w, r ∈ wr} ∪ K(f ) - optimized with map
+	// the service map: s = {rs S w ∈ w, r ∈ wr} ∪ K(f ) https://graypaper.fluffylabs.dev/#/1c979cb/173803173803?v=0.7.1
 	serviceMap := make(map[uint32]struct{}, 64)
 	for _, wr := range workReports {
 		for _, digest := range wr.Results {
@@ -353,7 +368,9 @@ func (s *StateDB) ParallelizedAccumulate(
 	for k := range freeAccumulation {
 		serviceMap[k] = struct{}{}
 	}
-
+	for _, t := range transfersIn {
+		serviceMap[t.ReceiverIndex] = struct{}{}
+	}
 	services := make([]uint32, 0, len(serviceMap))
 	for service := range serviceMap {
 		services = append(services, service)
@@ -385,7 +402,7 @@ func (s *StateDB) ParallelizedAccumulate(
 		defer wg.Done()
 		for service := range jobCh {
 			t0 := time.Now()
-			out, gas, XY, exceptional := s.SingleAccumulate(o, workReports, freeAccumulation, service, pvmBackend)
+			out, gas, XY, exceptional := s.SingleAccumulate(o, transfersIn, workReports, freeAccumulation, service, pvmBackend)
 			benchRec.Add("SingleAccumulate", time.Since(t0))
 			resCh <- accRes{
 				service:     service,
@@ -409,23 +426,36 @@ func (s *StateDB) ParallelizedAccumulate(
 	close(resCh)
 
 	// Collect results into a slice and sort for deterministic merge order
-	results := make([]accRes, 0, len(services))
+	acc_results := make([]accRes, 0, len(services))
 	for r := range resCh {
 		if r.XY == nil {
 			log.Warn(log.SDB, "SingleAccumulate returned nil XContext", "service", r.service)
 			continue
 		}
-		results = append(results, r)
+		acc_results = append(acc_results, r)
 	}
-	sort.Slice(results, func(i, j int) bool { return results[i].service < results[j].service })
+	sort.Slice(acc_results, func(i, j int) bool { return acc_results[i].service < acc_results[j].service })
 
 	// put all the results back together in o
 	empty := common.Hash{}
+	transfersService := make([]uint32, 0)
+	transfersMap := make(map[uint32][]types.DeferredTransfer)
+	m := o.PrivilegedState.ManagerServiceID
+	originalA := o.PrivilegedState.AuthQueueServiceID
+	originalR := o.PrivilegedState.RegistrarServiceID
+	originalU := o.PrivilegedState.UpcomingValidatorsServiceID
 
-	for _, r := range results {
+	var manangerMutatedA bool
+	var manangerMutatedR bool
+	var manangerMutatedU bool
+
+	for _, r := range acc_results {
 		totalGasUsed += r.gasUsed
 		GasUsage = append(GasUsage, Usage{Service: r.service, Gas: r.gasUsed})
-
+		var managerState *types.PartialState
+		if r.service == m {
+			managerState = r.XY.U
+		}
 		// b = {(s,b) | b = ∆1(...)_b, b ≠ ∅}
 		if r.output != empty {
 			accumulation_output = append(accumulation_output, types.AccumulationOutput{
@@ -436,7 +466,8 @@ func (s *StateDB) ParallelizedAccumulate(
 
 		// t = [∆1(... )_t]  (deferred transfers)
 		if r.XY != nil && len(r.XY.Transfers) > 0 {
-			transfers = append(transfers, r.XY.Transfers...)
+			transfersMap[r.service] = r.XY.Transfers
+			transfersService = append(transfersService, r.service)
 		}
 
 		// Service accounts
@@ -462,18 +493,54 @@ func (s *StateDB) ParallelizedAccumulate(
 			if r.XY.U.UpcomingDirty {
 				o.UpcomingValidators = r.XY.U.UpcomingValidators
 			}
+			// TODO: ------ support Owned Privileges
+			// https://graypaper.fluffylabs.dev/#/1c979cb/174904174904?v=0.7.1
 			// PrivilegedState updated only if PrivilegedDirty is set (via BLESS host function)
-			if r.XY.U.PrivilegedDirty {
-				for k, v := range r.XY.U.PrivilegedState.AlwaysAccServiceID {
+			if r.XY.U.PrivilegedDirty && managerState != nil {
+
+				// always update z
+				for k, v := range managerState.PrivilegedState.AlwaysAccServiceID {
 					o.PrivilegedState.AlwaysAccServiceID[k] = v
 				}
-				o.PrivilegedState.ManagerServiceID = r.XY.U.PrivilegedState.ManagerServiceID
-				o.PrivilegedState.AuthQueueServiceID = r.XY.U.PrivilegedState.AuthQueueServiceID
-				o.PrivilegedState.UpcomingValidatorsServiceID = r.XY.U.PrivilegedState.UpcomingValidatorsServiceID
+
+				// always update m
+				o.PrivilegedState.ManagerServiceID = managerState.PrivilegedState.ManagerServiceID
+
+				// manager's priority is higher than others
+				if originalA != managerState.PrivilegedState.AuthQueueServiceID {
+					manangerMutatedA = true
+					o.PrivilegedState.AuthQueueServiceID = managerState.PrivilegedState.AuthQueueServiceID
+				}
+				if originalR != managerState.PrivilegedState.RegistrarServiceID {
+					manangerMutatedR = true
+					o.PrivilegedState.RegistrarServiceID = managerState.PrivilegedState.RegistrarServiceID
+				}
+				if originalU != managerState.PrivilegedState.UpcomingValidatorsServiceID {
+					manangerMutatedU = true
+					o.PrivilegedState.UpcomingValidatorsServiceID = managerState.PrivilegedState.UpcomingValidatorsServiceID
+				}
+			} else if r.XY.U.PrivilegedDirty {
+				// manager's priority is higher than others
+				if !manangerMutatedA {
+					o.PrivilegedState.AuthQueueServiceID = r.XY.U.PrivilegedState.AuthQueueServiceID
+				}
+				if !manangerMutatedR {
+					o.PrivilegedState.RegistrarServiceID = r.XY.U.PrivilegedState.RegistrarServiceID
+				}
+				if !manangerMutatedU {
+					o.PrivilegedState.UpcomingValidatorsServiceID = r.XY.U.PrivilegedState.UpcomingValidatorsServiceID
+				}
 			}
 
 		}
 		accumulated_partial[r.service] = r.XY
+	}
+
+	// sort transfersOut for deterministic order https://graypaper.fluffylabs.dev/#/1c979cb/178b03178b03?v=0.7.1
+	sort.Slice(transfersService, func(i, j int) bool { return transfersService[i] < transfersService[j] })
+	transfersOut = make([]types.DeferredTransfer, 0)
+	for _, svc := range transfersService {
+		transfersOut = append(transfersOut, transfersMap[svc]...)
 	}
 
 	// sort by Service id
@@ -526,11 +593,12 @@ func (sdb *StateDB) NewXContext(u *types.PartialState, s uint32, serviceAccount 
 	encoded := append(encoded_service, append(encoded_entropy, encoded_timeslot...)...)
 	hash := common.Blake2Hash(encoded).Bytes()
 	decoded := uint32(types.DecodeE_l(hash[:4]))
+	const S = 1 << 16
 
 	x := &types.XContext{
 		U:               u.Clone(), // IMPORTANT: writes in one service (Fib, Trib) are readable by another (Meg) in ordered accumulation
 		ServiceIndex:    s,
-		NewServiceIndex: sdb.NewXContext_Check(decoded%((1<<32)-(1<<9)) + (1 << 8)),
+		NewServiceIndex: sdb.NewXContext_Check(decoded%((1<<32)-S-(1<<8)) + S),
 	}
 
 	// IMPORTABLE NOW WE MAKE A COPY of serviceAccount AND MAKE IT MUTABLE
@@ -572,32 +640,50 @@ the actual pvm gas used. This function wrangles the work-
 items of a particular service from a set of work-reports and
 invokes pvm execution
 */
-// ∆1
-// eq 176
-func (sd *StateDB) SingleAccumulate(o *types.PartialState, workReports []types.WorkReport, freeAccumulation map[uint32]uint32, serviceID uint32, pvmBackend string) (accumulation_output common.Hash, gasUsed uint64, xy *types.XContext, exceptional bool) {
+func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.DeferredTransfer, workReports []types.WorkReport, freeAccumulation map[uint32]uint64, serviceID uint32, pvmBackend string) (accumulation_output common.Hash, gasUsed uint64, xy *types.XContext, exceptional bool) {
 	t0 := time.Now()
 
-	// gas need to check again
-	// check if serviceID is in f
-	gas := uint32(0)
+	// gas https://graypaper.fluffylabs.dev/#/1c979cb/181901181901?v=0.7.1
+	// 1. gas from free accumulation of this service (if any)
+	gas := uint64(0)
 	if _, ok := freeAccumulation[serviceID]; ok {
 		gas = freeAccumulation[serviceID]
 	}
-	// add all gas from work reports
+	// 2. gas from work reports / digests of this service
 	for _, workReport := range workReports {
 		for _, workDigest := range workReport.Results {
 			if workDigest.ServiceID == serviceID {
-				gas += uint32(workDigest.Gas)
+				gas += uint64(workDigest.Gas)
 			}
 		}
 	}
+	// 3. gas from selected transfers with this service as the destination
+	var selectedTransfers []types.DeferredTransfer
+	for _, transfer := range transfersIn {
+		if transfer.ReceiverIndex == serviceID {
+			selectedTransfers = append(selectedTransfers, transfer)
+			gas += uint64(transfer.GasLimit)
+		}
+	}
 
+	// Put the accumulation items I together: https://graypaper.fluffylabs.dev/#/1c979cb/18fd0018fd00?v=0.7.1
+	var inputs []types.AccumulateInput
+
+	// i^T: transfers sorted by { SenderIndex, index } for deterministic order https://graypaper.fluffylabs.dev/#/1c979cb/183c01183c01?v=0.7.1
+	sort.Slice(selectedTransfers, func(i, j int) bool {
+		if selectedTransfers[i].SenderIndex == selectedTransfers[j].SenderIndex {
+			return i < j
+		}
+		return selectedTransfers[i].SenderIndex < selectedTransfers[j].SenderIndex
+	})
+	for _, transfer := range selectedTransfers {
+		inputs = append(inputs, types.AccumulateInput{InputType: types.ACCUMULATE_INPUT_TRANSFERS, T: &transfer})
+	}
+	// i^U:  accumulation operand elements
 	operandElements := make([]types.AccumulateOperandElements, 0)
-	g := uint64(0)
 	for _, workReport := range workReports {
 		for _, workDigest := range workReport.Results {
 			if workDigest.ServiceID == serviceID {
-				g += workDigest.Gas
 				operandElement := types.AccumulateOperandElements{
 					WorkPackageHash:     workReport.AvailabilitySpec.WorkPackageHash,
 					ExportedSegmentRoot: workReport.AvailabilitySpec.ExportedSegmentRoot,
@@ -611,6 +697,9 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, workReports []types.W
 				operandElements = append(operandElements, operandElement)
 			}
 		}
+	}
+	for _, oe := range operandElements {
+		inputs = append(inputs, types.AccumulateInput{InputType: types.ACCUMULATE_INPUT_OPERANDS, A: &oe})
 	}
 
 	//  get serviceAccount from U.D[s] FIRST
@@ -641,7 +730,10 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, workReports []types.W
 
 	//(B.8) start point
 	t0 = time.Now()
-	vm := NewVMFromCode(serviceID, code, 0, 0, sd, pvmBackend, g)
+	for _, t := range selectedTransfers {
+		serviceAccount.Balance += t.Amount // incoming transfers increase balance
+	}
+	vm := NewVMFromCode(serviceID, code, 0, 0, sd, pvmBackend, gas)
 	pvmContext := log.PvmValidating
 	if sd.Authoring == log.GeneralAuthoring {
 		pvmContext = log.PvmAuthoring
@@ -651,15 +743,16 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, workReports []types.W
 	vm.SetPVMContext(pvmContext)
 	timeslot := sd.JamState.SafroleState.Timeslot
 	vm.Timeslot = timeslot
+
 	t0 = time.Now()
 
-	r, _, x_s := vm.ExecuteAccumulate(timeslot, serviceID, operandElements, xContext, sd.JamState.SafroleState.Entropy[0])
+	r, _, x_s := vm.ExecuteAccumulate(timeslot, serviceID, inputs, xContext, sd.JamState.SafroleState.Entropy[0])
 	benchRec.Add("ExecuteAccumulate", time.Since(t0))
 	exceptional = false
+	gasUsed = gas - uint64(max(vm.GetGas(), 0))
 	if r.Err == types.WORKDIGEST_OOG || r.Err == types.WORKDIGEST_PANIC {
 		exceptional = true
 		accumulation_output = vm.Y.Yield
-		gasUsed = g - uint64(max(vm.GetGas(), 0))
 		xy = &(vm.Y)
 
 		if r.Err == types.WORKDIGEST_OOG {
@@ -670,7 +763,6 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, workReports []types.W
 		return
 	}
 	xy = vm.X
-	gasUsed = g - uint64(max(vm.GetGas(), 0))
 	res := ""
 	if len(r.Ok) == 32 {
 		accumulation_output = common.BytesToHash(r.Ok)
@@ -699,67 +791,7 @@ func TransferSelect(t []types.DeferredTransfer, d uint32) []types.DeferredTransf
 	return output
 }
 
-func (s *StateDB) HostTransfer(self *types.ServiceAccount, time_slot uint32, self_index uint32, t []types.DeferredTransfer, pvmBackend string) (gasUsed int64, transferCount uint, err error) { // select transfers eq 12.23
-	selectedTransfers := TransferSelect(t, self_index)
-	if len(selectedTransfers) == 0 {
-		return 0, 0, nil
-	}
-	gas := uint64(0)
-	for _, transfer := range selectedTransfers {
-		self.Balance += transfer.Amount
-		gas += transfer.GasLimit
-	}
-
-	// this create PreimageObject in ServiceAccount with Accessed = true
-	ok, code, preimage_source := self.ReadPreimage(self.CodeHash, s)
-	if !ok {
-		log.Trace(log.SDB, "GetPreimage ERR in HostTransfer", "ok", ok, "s", self_index, "codeHash", self.CodeHash, "preimage_source", preimage_source)
-		return 0, uint(len(selectedTransfers)), nil
-	}
-
-	vm := NewVMFromCode(self_index, code, 0, 0, s, pvmBackend, gas)
-	pvmContext := log.PvmValidating
-	if s.Authoring == log.GeneralAuthoring {
-		pvmContext = log.PvmAuthoring
-	}
-	vm.SetPVMContext(pvmContext)
-
-	var input_argument []byte
-
-	// https://graypaper.fluffylabs.dev/#/38c4e62/307b04307b04?v=0.7.0
-	t_bytes := types.E(uint64(time_slot))
-	s_bytes := types.E(uint64(self_index))
-	num_transfers_bytes := types.E(uint64(len(selectedTransfers)))
-	input_argument = append(input_argument, t_bytes...)
-	input_argument = append(input_argument, s_bytes...)
-	input_argument = append(input_argument, num_transfers_bytes...)
-
-	vm.Transfers = selectedTransfers
-	for _, transfer := range selectedTransfers {
-		log.Info(s.Authoring, "selectedTransfers", "d", self_index, "from", fmt.Sprintf("%d", transfer.SenderIndex), "to", fmt.Sprintf("%d", transfer.ReceiverIndex), "amount", transfer.Amount)
-	}
-	vm.ExecuteTransfer(input_argument, self)
-	gasUsed = int64(gas) - vm.GetGas()
-	fmt.Printf("HostTransfer service %d gasUsed %d gasProvided %d\n", self_index, gasUsed, gas)
-	return gasUsed, uint(len(selectedTransfers)), nil
-}
-
 // eq 12.24
-func (s *StateDB) ProcessDeferredTransfers(o *types.PartialState, time_slot uint32, t []types.DeferredTransfer, pvmBackend string) (transferStats map[uint32]*transferStatistics, err error) {
-	transferStats = make(map[uint32]*transferStatistics)
-	for service, serviceAccount := range o.ServiceAccounts {
-		gasUsed, transferCount, err := s.HostTransfer(serviceAccount, time_slot, uint32(service), t, pvmBackend)
-		if err != nil {
-			return transferStats, err
-		}
-		transferStats[serviceAccount.ServiceIndex] = &transferStatistics{
-			gasUsed:      uint(gasUsed),
-			numTransfers: transferCount,
-		}
-		log.Debug(s.Authoring, "ProcessDeferredTransfers", "service", fmt.Sprintf("%d", serviceAccount.ServiceIndex), "gasUsed", gasUsed, "transferCount", transferCount)
-	}
-	return transferStats, nil
-}
 
 func (s *StateDB) ApplyStateTransitionAccumulation(w_star []types.WorkReport, num uint64, previousTimeslot uint32) {
 	jam := s.GetJamState()

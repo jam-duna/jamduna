@@ -52,9 +52,10 @@ func (aam *AlwaysAccMap) UnmarshalJSON(data []byte) error {
 }
 
 type PrivilegedServiceState struct {
-	ManagerServiceID            uint32             `json:"bless"`      // χₘ ∈ ℕₛ: Manager service index – authorized to alter χ and assign deposits.
-	AuthQueueServiceID          [TotalCores]uint32 `json:"designate"`  // χₐ ∈ ⟦ℕₛ⟧𝒞: List of service indices (one per core) that can modify authorizer queue φ. One per core
-	UpcomingValidatorsServiceID uint32             `json:"assign"`     // χᵥ ∈ ℕₛ: Service index allowed to set ι. (upcoming validator)
+	ManagerServiceID            uint32             `json:"bless"`     // χₘ ∈ ℕₛ: Manager service index – authorized to alter χ and assign deposits.
+	AuthQueueServiceID          [TotalCores]uint32 `json:"designate"` // χₐ ∈ ⟦ℕₛ⟧𝒞: List of service indices (one per core) that can modify authorizer queue φ. One per core
+	UpcomingValidatorsServiceID uint32             `json:"assign"`    // χᵥ ∈ ℕₛ: Service index allowed to set ι. (upcoming validator)
+	RegistrarServiceID          uint32             `json:"registrar"`
 	AlwaysAccServiceID          AlwaysAccMap       `json:"always_acc"` // χ𝗀 ∈ 𝒟(ℕₛ → ℕG): Services that auto-accumulate gas per block. (is this renamed as "z")
 }
 
@@ -62,6 +63,7 @@ func (k PrivilegedServiceState) Copy() PrivilegedServiceState {
 	copy := PrivilegedServiceState{
 		ManagerServiceID:            k.ManagerServiceID,
 		UpcomingValidatorsServiceID: k.UpcomingValidatorsServiceID,
+		RegistrarServiceID:          k.RegistrarServiceID,
 		AlwaysAccServiceID:          make(AlwaysAccMap),
 	}
 	copy.AuthQueueServiceID = k.AuthQueueServiceID
@@ -75,6 +77,7 @@ func (k *PrivilegedServiceState) GetAllServices() []uint32 {
 	services := make(map[uint32]bool)
 	services[k.ManagerServiceID] = true            // Manager service index
 	services[k.UpcomingValidatorsServiceID] = true // Upcoming validator service index
+	services[k.RegistrarServiceID] = true          // Registrar service index
 	for _, serviceIndex := range k.AuthQueueServiceID {
 		services[serviceIndex] = true // Designated service indices
 	}
@@ -240,7 +243,30 @@ func (d DeferredTransfer) Clone() DeferredTransfer {
 	}
 }
 
-// 0.7.0 Eq 12.19 C.32  The accumulation operand element, corresponding to a single work item information
+// https://graypaper.fluffylabs.dev/#/1c979cb/3ac3043ac304?v=0.7.1
+const (
+	ACCUMULATE_INPUT_OPERANDS  = 0
+	ACCUMULATE_INPUT_TRANSFERS = 1
+)
+
+type AccumulateInput struct {
+	InputType uint8
+	T         *DeferredTransfer          `json:"transfer,omitempty"`   // when InputType == 0
+	A         *AccumulateOperandElements `json:"accumulate,omitempty"` // when InputType == 1
+}
+
+func (a AccumulateInput) Encode() []byte {
+	if a.InputType == ACCUMULATE_INPUT_TRANSFERS {
+		transferBytes, err := Encode(a.T)
+		if err != nil {
+			return nil
+		}
+		return append([]byte{ACCUMULATE_INPUT_TRANSFERS}, transferBytes...)
+	}
+	return append([]byte{ACCUMULATE_INPUT_OPERANDS}, a.A.Encode()...)
+}
+
+// The accumulation operand element, corresponding to a single work item information
 type AccumulateOperandElements struct {
 	WorkPackageHash     common.Hash `json:"H"` // p = (w_s)_p WorkPackageHash
 	ExportedSegmentRoot common.Hash `json:"E"` // e = (w_s)_e ExportedSegmentRoot
@@ -251,17 +277,6 @@ type AccumulateOperandElements struct {
 	Trace               []byte      `json:"O"` // t = w_t Trace
 }
 
-/*
-	o := types.AccumulateOperandElements{
-			H: common.Hash{}, // REVIEW
-			E: common.Hash{}, // REVIEW
-			A: p_a,
-			O: r.Ok,
-			Y: result.PayloadHash,
-			G: uint(result.Gas),
-			D: result.Result,
-		}
-*/
 func (a *AccumulateOperandElements) String() string {
 	return ToJSONHex(a)
 }

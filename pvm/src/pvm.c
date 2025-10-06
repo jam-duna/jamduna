@@ -714,6 +714,7 @@ uint32_t pvm_read_ram_bytes_32(pvm_vm_t* vm, uint32_t address, int* error_code) 
     }
     uint32_t heap_end = p_func(vm->current_heap_pointer);
 
+
     // RW data / heap
     if (address >= vm->rw_data_address && address <= heap_end - 4) {
         uint32_t offset = address - vm->rw_data_address;

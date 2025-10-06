@@ -134,7 +134,7 @@ func parseSTFFile(filename, content string) (StateTransition, error) {
 func TestStateTransitionInterpreter(t *testing.T) {
 	PvmLogging = false
 
-	filename := path.Join(common.GetJAMTestVectorPath("traces"), "storage_light/00000005.bin")
+	filename := path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light/00000060.bin")
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
@@ -152,14 +152,14 @@ func TestTracesInterpreter(t *testing.T) {
 
 	// Define all the directories you want to test in a single slice.
 	testDirs := []string{
+		// PASS
 		path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
 	}
-
 	// Iterate over each directory.
 	for _, dir := range testDirs {
 		// Create a local copy of dir for the sub-test to capture correctly.
@@ -267,12 +267,12 @@ func dump_performance(t *testing.T) {
 func TestSingleCompare(t *testing.T) {
 	// DO NOT CHANGE THIS
 	log.InitLogger("debug")
-	filename := "/Users/sourabhniyogi/Desktop/jam-test-vectors/traces/storage_light/00000004.bin"
+	filename := "/root/go/src/github.com/colorfulnotion/jam-test-vectors/traces/storage_light/00000008.bin"
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Errorf("failed to read file %s: %v", filename, err)
 	}
-	runSingleSTFTest(t, filename, string(content), BackendCompiler, false)
+	// runSingleSTFTest(t, filename, string(content), BackendCompiler, false)
 	runSingleSTFTest(t, filename, string(content), BackendInterpreter, false)
 }
 
@@ -339,35 +339,6 @@ func TestSingleFuzzTrace(t *testing.T) {
 		t.Fatalf("failed to get fuzz reports path: %v", err)
 	}
 
-	// SN fixed with PrivilegedState having 3 new dirty bits
-	fileMap["1758621952"] = "fuzz-reports/0.7.0/traces/_new/1758621952/00000292.json" // FIXED
-	fileMap["1758622000"] = "fuzz-reports/0.7.0/traces/_new/1758622000/00000230.json" // FIXED
-	fileMap["1758622051"] = "fuzz-reports/0.7.0/traces/_new/1758622051/00000094.json" // FIXED
-	fileMap["1758622160"] = "fuzz-reports/0.7.0/traces/_new/1758622160/00000009.json" // FIXED
-	fileMap["1758622524"] = "fuzz-reports/0.7.0/traces/_new/1758622524/00000039.json" // FIXED
-	fileMap["1758622104"] = "fuzz-reports/0.7.0/traces/_new/1758622104/00000022.json" // FIXED
-
-	// SN fixed with Transfer arg corrected
-	fileMap["1758621412"] = "fuzz-reports/0.7.0/traces/_new/1758621412/00000025.json"  // FIXED
-	fileMap["1758621498"] = "fuzz-reports/0.7.0/traces/_new/1758621498/00000025.json"  // FIXED
-	fileMap["1758636775"] = "fuzz-reports/0.7.0/traces/_new2/1758636775/00000014.json" // FIXED
-	fileMap["1758636961"] = "fuzz-reports/0.7.0/traces/_new2/1758636961/00000018.json" // FIXED
-	fileMap["1758637024"] = "fuzz-reports/0.7.0/traces/_new2/1758637024/00000018.json" // FIXED
-	fileMap["1758637136"] = "fuzz-reports/0.7.0/traces/_new2/1758637136/00000019.json" // FIXED
-	fileMap["1758637250"] = "fuzz-reports/0.7.0/traces/_new2/1758637250/00000016.json" // FIXED
-	fileMap["1758637297"] = "fuzz-reports/0.7.0/traces/_new2/1758637297/00000016.json" // FIXED
-	fileMap["1758637363"] = "fuzz-reports/0.7.0/traces/_new2/1758637363/00000023.json" // FIXED
-	fileMap["1758637447"] = "fuzz-reports/0.7.0/traces/_new2/1758637447/00000062.json" // FIXED
-	fileMap["1758637485"] = "fuzz-reports/0.7.0/traces/_new2/1758637485/00000019.json" // FIXED
-
-	// SC fixed this is because the MEMO gas is really big that our gas counter have bug to deal with it
-	// with the fix, we  get an OOG and use the value from the check point
-	fileMap["1758621547"] = "fuzz-reports/0.7.0/traces/_new/1758621547/00000033.json"  // FIXED
-	fileMap["1758637332"] = "fuzz-reports/0.7.0/traces/_new2/1758637332/00000017.json" // FIXED
-	fileMap["1758636819"] = "fuzz-reports/0.7.0/traces/_new2/1758636819/00000022.json" // FIXED
-	fileMap["1758636573"] = "fuzz-reports/0.7.0/traces/_new2/1758636573/00000033.json" // FIXED
-	fileMap["1758637203"] = "fuzz-reports/0.7.0/traces/_new2/1758637203/00000059.json" // FIXED
-
 	// SKIPPING these failures -- we will ignore these for now
 	// SC has a panic on service 3202820790 with HostFunction INFO Calling host function: INFO 5 [gas: 4982637] from a memory access
 	// not fully fixed, see this hardDebug := fetch == uint64(vm.Service_index) && vm.GetGas() == 4982637
@@ -415,7 +386,7 @@ func testFuzzTraceInternal(t *testing.T, saveOutput bool) {
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule("pvm_validator")
 
-	targetVersion := "0.7.0"
+	targetVersion := "0.7.1"
 	excludedTeams := []string{""}
 
 	sourcePath, err := GetFuzzReportsPath()

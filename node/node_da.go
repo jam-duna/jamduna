@@ -317,7 +317,8 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		vm := statedb.NewVMFromCode(service_index, code, 0, 0, targetStateDB, pvmBackend, workItem.RefineGasLimit)
 		vm.Timeslot = n.statedb.JamState.SafroleState.Timeslot
 
-		output, _, exported_segments := vm.ExecuteRefine(uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData, p_u, common.BytesToHash(trie.H0))
+		// 0.7.1 : core index is part of refine args
+		output, _, exported_segments := vm.ExecuteRefine(workPackageCoreIndex, uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData, p_u, common.BytesToHash(trie.H0))
 
 		expectedSegmentCnt := int(workItem.ExportCount)
 		if expectedSegmentCnt != len(exported_segments) {

@@ -189,6 +189,8 @@ func (s *StateDB) ApplyXContext(U *types.PartialState) (stateUpdate *types.State
 	privilegedIndices.AuthQueueServiceID = privilegedState.AuthQueueServiceID
 	privilegedIndices.ManagerServiceID = privilegedState.ManagerServiceID
 	privilegedIndices.UpcomingValidatorsServiceID = privilegedState.UpcomingValidatorsServiceID
+	// 0.7.1 introduces RegistrarServiceID
+	privilegedIndices.RegistrarServiceID = privilegedState.RegistrarServiceID
 
 	// Optimize map copying - check if we need to allocate new map
 	if privilegedIndices.AlwaysAccServiceID == nil || len(privilegedState.AlwaysAccServiceID) > len(privilegedIndices.AlwaysAccServiceID) {

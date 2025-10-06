@@ -263,7 +263,7 @@ func ReportVerify(jsonFile string, exceptErr error) error {
 	post_state.GetStateFromReportState(report.PostState)
 	db.JamState.ProcessGuarantees(context.TODO(), db.Block.Guarantees(), db.PreviousGuarantorAssignments)
 	db.JamState.tallyCoreStatistics(db.Block.Guarantees(), nil, nil)
-	db.JamState.tallyServiceStatistics(db.Block.Guarantees(), nil, nil, nil)
+	db.JamState.tallyServiceStatistics(db.Block.Guarantees(), nil, nil)
 	if exceptErr == nil {
 		for i, availability_assignment := range db.JamState.AvailabilityAssignments {
 			if !reflect.DeepEqual(availability_assignment, post_state.AvailabilityAssignments[i]) {

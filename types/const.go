@@ -78,6 +78,7 @@ const (
 	MaxAuthorizationQueueItems       = 80             // Q: The maximum number of items in the authorizations queue.
 	RotationPeriod                   = 4              // R
 	ValidatorCoreRotationPeriod      = 4              // R: The rotation period of validator-core assignments, in timeslots.
+	MinPubServiceIndex               = 2 ^ 16         // Minimum public service index
 	ExtrinsicMaximumPerPackage       = 128            //T = 128: The maximum number of extrinsics in a work-package.
 	UnavailableWorkReplacementPeriod = 5              // U = 5: The period in timeslots after which reported but unavailable work may be replaced.
 	TotalValidators                  = 6              // V: The total number of validators.
@@ -184,7 +185,7 @@ func (p *Parameters) PrintFieldsHex() {
 	}
 }
 
-// 0.7.0 Bytes encodes the AccountState as a byte slice
+// Bytes encodes the AccountState as a byte slice
 func ParameterBytes() ([]byte, error) {
 	var buf bytes.Buffer
 
@@ -242,7 +243,7 @@ func ParameterBytes() ([]byte, error) {
 	if err := writeUint16(MaxDependencyItemsInWorkReport); err != nil { // J
 		return nil, err
 	}
-	if err := writeUint16(MaxTicketsPerExtrinsic); err != nil { // K (NEW in 0.7.0 [polkajam uses in 0.6.7])
+	if err := writeUint16(MaxTicketsPerExtrinsic); err != nil { // K
 		return nil, err
 	}
 
@@ -251,7 +252,7 @@ func ParameterBytes() ([]byte, error) {
 		return nil, err
 	}
 	// E_2: N, O
-	if err := writeUint16(TicketEntriesPerValidator); err != nil { // N (NEW in 0.7.0 [polkajam uses in 0.6.7])
+	if err := writeUint16(TicketEntriesPerValidator); err != nil { // N
 		return nil, err
 	}
 	if err := writeUint16(MaxAuthorizationPoolItems); err != nil { // O

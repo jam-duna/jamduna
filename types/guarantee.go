@@ -47,7 +47,7 @@ The core index of each guarantee must be unique and guarantees must be in ascend
 */
 // Credential represents a series of tuples of a signature and a validator index.
 type GuaranteeCredential struct {
-	ValidatorIndex uint16           `json:"validator_index"` // fixed length E_2(v): https://graypaper.fluffylabs.dev/#/38c4e62/3adb013adb01?v=0.7.0
+	ValidatorIndex uint16           `json:"validator_index"` // fixed length E_2(v)
 	Signature      Ed25519Signature `json:"signature"`
 }
 
@@ -60,7 +60,7 @@ func (cred *GuaranteeCredential) ToBytes() ([]byte, error) {
 		return nil, err
 	}
 
-	// Serialize Signature (64 bytes for Ed25519Signature) https://graypaper.fluffylabs.dev/#/38c4e62/3adb013adb01?v=0.7.0
+	// Serialize Signature (64 bytes for Ed25519Signature)
 	if _, err := buf.Write(cred.Signature[:]); err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func (cred *GuaranteeCredential) ToBytes() ([]byte, error) {
 func (cred *GuaranteeCredential) FromBytes(data []byte) error {
 	buf := bytes.NewReader(data)
 
-	// Deserialize ValidatorIndex (2 bytes) https://graypaper.fluffylabs.dev/#/38c4e62/3adb013adb01?v=0.7.0
+	// Deserialize ValidatorIndex (2 bytes)
 	if err := binary.Read(buf, binary.LittleEndian, &cred.ValidatorIndex); err != nil {
 		return err
 	}

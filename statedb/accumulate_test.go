@@ -301,21 +301,17 @@ func testAccumulateSTF(testname string, TestCase AccumulateTestCase, t *testing.
 		fmt.Printf("key: %d, code: %x\n", key, p_codes[key])
 		fmt.Printf("key: %d, storage: %v\n", key, p_stroage[key])
 	}
-	var f map[uint32]uint32
+	var f map[uint32]uint64
 	s.JamState.SafroleState.Timeslot = TestCase.Input.Slot
 	var g uint64 = 1000000000000000000
 	old_timeslot := TestCase.PreState.Slot
 	s.AvailableWorkReport = TestCase.Input.Reports
 	accumulate_input_wr := TestCase.Input.Reports
 	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
-	n, T, _, _ := s.OuterAccumulate(g, accumulate_input_wr, o, f, pvm.BackendInterpreter, make(map[uint32]*types.XContext))
+	transfersIn := make([]types.DeferredTransfer, 0)
+	n, _, _ := s.OuterAccumulate(g, transfersIn, accumulate_input_wr, o, f, BackendInterpreter, make(map[uint32]*types.XContext))
 	if err != nil {
 		t.Errorf("OuterAccumulate failed: %v", err)
-	}
-	// Not sure whether transfer happens here
-	timeslot := s.GetTimeslot() // Not sure whether τ ′ is set up like this
-	if len(T) > 0 {
-		s.ProcessDeferredTransfers(o, timeslot, T, pvm.BackendInterpreter)
 	}
 	// make sure all service accounts can be written
 	for _, sa := range o.ServiceAccounts {
@@ -419,20 +415,16 @@ func AccumulateSTF(testname string, TestCase AccumulateTestCase) error {
 
 	//post state here
 	_, _, p_stroage := post_state.GetStateFromAccumulateState(TestCase.PostState)
-	var f map[uint32]uint32
+	var f map[uint32]uint64
 	s.JamState.SafroleState.Timeslot = TestCase.Input.Slot
 	var g uint64 = 1000000000000000000
 	old_timeslot := TestCase.PreState.Slot
 	s.AvailableWorkReport = TestCase.Input.Reports
 	accumulate_input_wr := TestCase.Input.Reports
 	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
-	n, T, _, _ := s.OuterAccumulate(g, accumulate_input_wr, o, f, pvm.BackendInterpreter, make(map[uint32]*types.XContext))
+	transfersIn := make([]types.DeferredTransfer, 0)
+	n, _, _ := s.OuterAccumulate(g, transfersIn, accumulate_input_wr, o, f, BackendInterpreter, make(map[uint32]*types.XContext))
 
-	// Not sure whether transfer happens here
-	timeslot := s.GetTimeslot() // Not sure whether τ ′ is set up like this
-	if len(T) > 0 {
-		s.ProcessDeferredTransfers(o, timeslot, T, pvm.BackendInterpreter)
-	}
 	// make sure all service accounts can be written
 	for _, sa := range o.ServiceAccounts {
 		sa.Mutable = true

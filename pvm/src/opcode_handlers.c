@@ -1642,7 +1642,6 @@ void handle_LOAD_IND_I32(VM* vm, uint8_t* operands, size_t operand_len) {
         pvm_panic(vm, err_code);
         return;
     }
-    
     uint64_t result = (uint64_t)(int32_t)value;
     vm->registers[register_index_a] = result;
     vm->pc += 1 + operand_len;
@@ -1755,6 +1754,7 @@ void handle_ADD_IMM_64(VM* vm, uint8_t* operands, size_t operand_len) {
     
     uint64_t result = vm->registers[register_index_b] + vx;
     vm->registers[register_index_a] = result;
+
     vm->pc += 1 + operand_len;
 }
 

@@ -351,9 +351,11 @@ func (vm *VM) hostBless() {
 	m := vm.ReadRegister(7)
 	a := vm.ReadRegister(8)
 	v := vm.ReadRegister(9)
-	o := vm.ReadRegister(10)
-	n := vm.ReadRegister(11)
-	fmt.Printf("BLESS m=%d a=0x%x v=%d o=%d n=%d\n", m, a, v, o, n)
+	// 0.7.1 introduces RegistrarServiceID which is set in Bless
+	r := vm.ReadRegister(10)
+	o := vm.ReadRegister(11)
+	n := vm.ReadRegister(12)
+	fmt.Printf("BLESS m=%d a=0x%x v=%d r=%d o=%d n=%d\n", m, a, v, r, o, n)
 	bold_z := make(map[uint32]uint64)
 	for i := 0; i < int(n); i++ {
 		data, err := vm.ReadRAMBytes(uint32(o)+uint32(i)*12, 12)
@@ -392,7 +394,7 @@ func (vm *VM) hostBless() {
 		log.Warn(vm.logging, "BLESS HUH", "m", fmt.Sprintf("%d", m), "a", fmt.Sprintf("%d", a), "v", fmt.Sprintf("%d", v), "ManagerServiceID", privilegedService_m, "xs", xs.ServiceIndex)
 		return
 	}
-	set := []uint64{m, v}
+	set := []uint64{m, v, r}
 	for _, id := range set {
 
 		if m > (1<<32)-1 || v > (1<<32)-1 {
@@ -414,6 +416,7 @@ func (vm *VM) hostBless() {
 	vm.X.U.PrivilegedDirty = true
 	vm.X.U.PrivilegedState.ManagerServiceID = uint32(m)
 	vm.X.U.PrivilegedState.AuthQueueServiceID = bold_a
+	vm.X.U.PrivilegedState.RegistrarServiceID = uint32(r)
 	vm.X.U.PrivilegedState.UpcomingValidatorsServiceID = uint32(v)
 	vm.X.U.PrivilegedState.AlwaysAccServiceID = bold_z
 
@@ -567,14 +570,10 @@ func (vm *VM) hostNew() {
 	g := vm.ReadRegister(9)
 	m := vm.ReadRegister(10)
 	f := vm.ReadRegister(11)
-
+	// in 0.7.1 this "i" is used with the registrar to choose serviceIDs < 64K https://graypaper.fluffylabs.dev/#/1c979cb/36da0336da03?v=0.7.1
+	// TODO: MC to review Small serviceIDs < 64K with registrar below
+	i := vm.ReadRegister(12)
 	x_s_t := xs.ComputeThreshold()
-	if xs.Balance < x_s_t {
-		vm.WriteRegister(7, CASH)
-		vm.SetHostResultCode(CASH) //balance insufficient
-		log.Debug(vm.logging, "hostNew: NEW CASH xs.Balance < x_s_t", "xs.Balance", xs.Balance, "x_s_t", x_s_t, "x_s_index", xs.ServiceIndex)
-		return
-	}
 	privilegedService_m := vm.X.U.PrivilegedState.ManagerServiceID
 	if privilegedService_m != xs.ServiceIndex && f != 0 {
 		// only ManagerServiceID can bestow gratis
@@ -583,56 +582,75 @@ func (vm *VM) hostNew() {
 		log.Debug(vm.logging, "hostNew: HUH", "ManagerServiceID", privilegedService_m, "xs", xs.ServiceIndex)
 		return
 	}
+	if xs.Balance < x_s_t {
+		vm.WriteRegister(7, CASH)
+		vm.SetHostResultCode(CASH) //balance insufficient
+		log.Debug(vm.logging, "hostNew: NEW CASH xs.Balance < x_s_t", "xs.Balance", xs.Balance, "x_s_t", x_s_t, "x_s_index", xs.ServiceIndex)
+		return
+	}
 
-	// xs has enough balance to fund service creation of a AND covering its own threshold
+	x_e_r := xContext.U.PrivilegedState.RegistrarServiceID
+	_, alreadyInservice := xContext.U.GetService(uint32(i))
+	if x_e_r == xs.ServiceIndex && i < types.MinPubServiceIndex && alreadyInservice {
+		vm.WriteRegister(7, FULL)
+		vm.SetHostResultCode(FULL)
+		log.Debug(vm.logging, "hostNew: NEW FULL", "i", i, "RegistrarServiceID", x_e_r, "xs", xs.ServiceIndex)
+		return
+	}
+	a := &types.ServiceAccount{}
+	// selected service index
+	if x_e_r == xs.ServiceIndex && i < types.MinPubServiceIndex {
+		a = types.NewEmptyServiceAccount(
+			uint32(i),
+			c,
+			uint64(g),
+			uint64(m),
+			uint64(AccountLookupConst+l),
+			uint64(f),
+			vm.Timeslot,
+			xs.ServiceIndex,
+		)
+	} else { // auto-select service index
+		// xs has enough balance to fund service creation of a AND covering its own threshold
 
-	xi := xContext.NewServiceIndex
-	// simulate a with c, g, m
-	// [Gratis] a_r:t; a_f,a_a:0; a_p:x_s
-	a := &types.ServiceAccount{
-		ServiceIndex:       xi,
-		Mutable:            false,
-		Dirty:              false,
-		CodeHash:           common.BytesToHash(c),
-		Balance:            0,
-		GasLimitG:          uint64(g),
-		GasLimitM:          uint64(m),
-		StorageSize:        uint64(AccountLookupConst + l), //a_l =  ∑ 81+z per (h,z) + ∑ 34 + |y| + |x|; Initialized for first a_l
-		GratisOffset:       uint64(f),                      //a_f = 0
-		NumStorageItems:    2,                              //a_s = 2⋅∣al∣+∣as∣; Initialized for first a_l
-		CreateTime:         vm.Timeslot,                    //a_r = t // check pre vs post?
-		RecentAccumulation: 0,                              //a_a = 0
-		ParentService:      xs.ServiceIndex,                //a_p = x_s
-		Storage:            make(map[string]*types.StorageObject),
-		Lookup:             make(map[string]*types.LookupObject),
-		Preimage:           make(map[string]*types.PreimageObject),
-		Checkpointed:       false, // this is updated to true upon Checkpoint
-		NewAccount:         true,  // with this flag, if an account is Dirty OR Checkpointed && NewAccount then it is written
+		xi := xContext.NewServiceIndex
+		// simulate a with c, g, m
+		// [Gratis] a_r:t; a_f,a_a:0; a_p:x_s
+		a = types.NewEmptyServiceAccount(
+			xi,
+			c,
+			uint64(g),
+			uint64(m),
+			uint64(AccountLookupConst+l),
+			uint64(f),
+			vm.Timeslot,
+			xs.ServiceIndex,
+		)
+		// update the new service index in x_i
+		xContext.NewServiceIndex = new_check(xi, xContext.U.ServiceAccounts)
+		const bump = uint32(42)
+		const minServiceIndex = uint32(256)
+		const maxServiceIndex = uint32(4294966784)
+		const serviceIndexRangeSize = maxServiceIndex - minServiceIndex + 1
+
+		if xi < minServiceIndex {
+			xi = minServiceIndex
+		}
+		offset := xi - minServiceIndex
+		nextOffset := (offset + bump) % serviceIndexRangeSize
+		proposed_i := minServiceIndex + nextOffset
+		xContext.NewServiceIndex = new_check(proposed_i, xContext.U.ServiceAccounts)
 	}
 	a.ALLOW_MUTABLE()
 	a.Balance = a.ComputeThreshold()
 	xs.DecBalance(a.Balance) // (x's)b <- (xs)b - at
-	xContext.NewServiceIndex = new_check(xi, xContext.U.ServiceAccounts)
-
-	const bump = uint32(42)
-	const minServiceIndex = uint32(256)
-	const maxServiceIndex = uint32(4294966784)
-	const serviceIndexRangeSize = maxServiceIndex - minServiceIndex + 1
-
-	if xi < minServiceIndex {
-		xi = minServiceIndex
-	}
-	offset := xi - minServiceIndex
-	nextOffset := (offset + bump) % serviceIndexRangeSize
-	proposed_i := minServiceIndex + nextOffset
-	xContext.NewServiceIndex = new_check(proposed_i, xContext.U.ServiceAccounts)
-
+	newServiceIndex := a.ServiceIndex
 	a.WriteLookup(common.BytesToHash(c), uint32(l), []uint32{}, "memory")
 
-	xContext.U.ServiceAccounts[xi] = a // this new account is included but only is written if (a) non-exceptional (b) exceptional and checkpointed
-	vm.WriteRegister(7, uint64(xi))
+	xContext.U.ServiceAccounts[newServiceIndex] = a // this new account is included but only is written if (a) non-exceptional (b) exceptional and checkpointed
+	vm.WriteRegister(7, uint64(newServiceIndex))
 	vm.SetHostResultCode(OK)
-	log.Debug(vm.logging, "NEW OK", "SERVICE", fmt.Sprintf("%d", xi), "code_hash_ptr", fmt.Sprintf("%x", o), "code_hash_ptr", fmt.Sprintf("%x", c), "code_len", l, "min_item_gas", g, "min_memo_gas", m)
+	log.Debug(vm.logging, "NEW OK", "SERVICE", fmt.Sprintf("%d", newServiceIndex), "code_hash_ptr", fmt.Sprintf("%x", o), "code_hash_ptr", fmt.Sprintf("%x", c), "code_len", l, "min_item_gas", g, "min_memo_gas", m)
 }
 
 // Upgrade service
@@ -831,7 +849,6 @@ func (vm *VM) hostFetch() {
 		}
 	}
 	log.Trace(vm.logging, "FETCH", "mode", mode, "allowed", allowed, "datatype", datatype, "omega_7", o, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12)
-	log.Trace(vm.logging, "FETCH", "mode", mode, "allowed", allowed, "datatype", datatype, "vm.Extrinsics", fmt.Sprintf("%x", vm.Extrinsics), "wp", vm.WorkPackage)
 
 	if allowed {
 		switch datatype {
@@ -944,28 +961,16 @@ func (vm *VM) hostFetch() {
 			}
 
 		case 14: // E(|o) all accumulation operands
-			if vm.AccumulateOperandElements != nil {
-				v_Bytes, _ = types.Encode(vm.AccumulateOperandElements)
+			if vm.AccumulateInputs != nil {
+				// CHECK: these should be encoded with the # of inputs, then a byte discriminator in front to indicate transfer vs accum operand (0 vs 1)
+				v_Bytes, _ = types.Encode(vm.AccumulateInputs)
 			}
 
 		case 15: // E(o[w_11])
-			if vm.AccumulateOperandElements != nil && omega_11 < uint64(len(vm.AccumulateOperandElements)) {
-				v_Bytes, _ = types.Encode(vm.AccumulateOperandElements[omega_11])
+			if vm.AccumulateInputs != nil && omega_11 < uint64(len(vm.AccumulateInputs)) {
+				// CHECK: these should a byte discriminator in front to indicate transfer vs accum operand (0 vs 1)
+				v_Bytes, _ = types.Encode(vm.AccumulateInputs[omega_11])
 				log.Info(vm.logging, "FETCH E(o[w_11])", "w_11", omega_11, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "len", len(v_Bytes))
-			}
-
-		case 16: // E(|t) all transfers
-			if vm.Transfers != nil {
-				for i, t := range vm.Transfers {
-					log.Info(vm.logging, "FETCH E(|t) all transfers sort check", "i", i, "t", t.String())
-				}
-				v_Bytes, _ = types.Encode(vm.Transfers)
-			}
-
-		case 17: // E(t[w_11])
-			if vm.Transfers != nil && omega_11 < uint64(len(vm.Transfers)) {
-				v_Bytes, _ = types.Encode(vm.Transfers[omega_11])
-				log.Info(vm.logging, "FETCH E(t[w_11])", "w_11", omega_11, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "len", len(v_Bytes))
 			}
 		}
 	} else {
