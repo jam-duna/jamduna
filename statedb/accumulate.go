@@ -445,9 +445,9 @@ func (s *StateDB) ParallelizedAccumulate(
 	originalR := o.PrivilegedState.RegistrarServiceID
 	originalU := o.PrivilegedState.UpcomingValidatorsServiceID
 
-	var manangerMutatedA bool
-	var manangerMutatedR bool
-	var manangerMutatedU bool
+	var managerMutatedA bool
+	var managerMutatedR bool
+	var managerMutatedU bool
 
 	for _, r := range acc_results {
 		totalGasUsed += r.gasUsed
@@ -493,11 +493,9 @@ func (s *StateDB) ParallelizedAccumulate(
 			if r.XY.U.UpcomingDirty {
 				o.UpcomingValidators = r.XY.U.UpcomingValidators
 			}
-			// TODO: ------ support Owned Privileges
-			// https://graypaper.fluffylabs.dev/#/1c979cb/174904174904?v=0.7.1
+			// *** TODO: MC to review Owned Privileges implementation below https://graypaper.fluffylabs.dev/#/1c979cb/174904174904?v=0.7.1
 			// PrivilegedState updated only if PrivilegedDirty is set (via BLESS host function)
 			if r.XY.U.PrivilegedDirty && managerState != nil {
-
 				// always update z
 				for k, v := range managerState.PrivilegedState.AlwaysAccServiceID {
 					o.PrivilegedState.AlwaysAccServiceID[k] = v
@@ -508,26 +506,26 @@ func (s *StateDB) ParallelizedAccumulate(
 
 				// manager's priority is higher than others
 				if originalA != managerState.PrivilegedState.AuthQueueServiceID {
-					manangerMutatedA = true
+					managerMutatedA = true
 					o.PrivilegedState.AuthQueueServiceID = managerState.PrivilegedState.AuthQueueServiceID
 				}
 				if originalR != managerState.PrivilegedState.RegistrarServiceID {
-					manangerMutatedR = true
+					managerMutatedR = true
 					o.PrivilegedState.RegistrarServiceID = managerState.PrivilegedState.RegistrarServiceID
 				}
 				if originalU != managerState.PrivilegedState.UpcomingValidatorsServiceID {
-					manangerMutatedU = true
+					managerMutatedU = true
 					o.PrivilegedState.UpcomingValidatorsServiceID = managerState.PrivilegedState.UpcomingValidatorsServiceID
 				}
 			} else if r.XY.U.PrivilegedDirty {
 				// manager's priority is higher than others
-				if !manangerMutatedA {
+				if !managerMutatedA {
 					o.PrivilegedState.AuthQueueServiceID = r.XY.U.PrivilegedState.AuthQueueServiceID
 				}
-				if !manangerMutatedR {
+				if !managerMutatedR {
 					o.PrivilegedState.RegistrarServiceID = r.XY.U.PrivilegedState.RegistrarServiceID
 				}
-				if !manangerMutatedU {
+				if !managerMutatedU {
 					o.PrivilegedState.UpcomingValidatorsServiceID = r.XY.U.PrivilegedState.UpcomingValidatorsServiceID
 				}
 			}

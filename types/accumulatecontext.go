@@ -52,11 +52,11 @@ func (aam *AlwaysAccMap) UnmarshalJSON(data []byte) error {
 }
 
 type PrivilegedServiceState struct {
-	ManagerServiceID            uint32             `json:"bless"`     // χₘ ∈ ℕₛ: Manager service index – authorized to alter χ and assign deposits.
-	AuthQueueServiceID          [TotalCores]uint32 `json:"designate"` // χₐ ∈ ⟦ℕₛ⟧𝒞: List of service indices (one per core) that can modify authorizer queue φ. One per core
-	UpcomingValidatorsServiceID uint32             `json:"assign"`    // χᵥ ∈ ℕₛ: Service index allowed to set ι. (upcoming validator)
-	RegistrarServiceID          uint32             `json:"registrar"`
-	AlwaysAccServiceID          AlwaysAccMap       `json:"always_acc"` // χ𝗀 ∈ 𝒟(ℕₛ → ℕG): Services that auto-accumulate gas per block. (is this renamed as "z")
+	ManagerServiceID            uint32             `json:"bless"`      // χₘ ∈ ℕₛ: Manager service index – authorized to alter χ and assign deposits.
+	AuthQueueServiceID          [TotalCores]uint32 `json:"designate"`  // χₐ ∈ ⟦ℕₛ⟧𝒞: List of service indices (one per core) that can modify authorizer queue φ. One per core
+	UpcomingValidatorsServiceID uint32             `json:"assign"`     // χᵥ ∈ ℕₛ: Service index allowed to set ι. (upcoming validator)
+	RegistrarServiceID          uint32             `json:"registrar"`  // χr ∈ ℕₛ: Service index allowed to register new services.
+	AlwaysAccServiceID          AlwaysAccMap       `json:"always_acc"` // χz ∈ 𝒟(ℕₛ → ℕG): Services that auto-accumulate gas per block. (is this renamed as "z" from "g")
 }
 
 func (k PrivilegedServiceState) Copy() PrivilegedServiceState {

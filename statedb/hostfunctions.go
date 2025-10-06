@@ -416,8 +416,8 @@ func (vm *VM) hostBless() {
 	vm.X.U.PrivilegedDirty = true
 	vm.X.U.PrivilegedState.ManagerServiceID = uint32(m)
 	vm.X.U.PrivilegedState.AuthQueueServiceID = bold_a
-	vm.X.U.PrivilegedState.RegistrarServiceID = uint32(r)
 	vm.X.U.PrivilegedState.UpcomingValidatorsServiceID = uint32(v)
+	vm.X.U.PrivilegedState.RegistrarServiceID = uint32(r)
 	vm.X.U.PrivilegedState.AlwaysAccServiceID = bold_z
 
 	vm.WriteRegister(7, OK)
@@ -528,21 +528,25 @@ func (vm *VM) hostCheckpoint() {
 // implements https://graypaper.fluffylabs.dev/#/5f542d7/313103313103
 func new_check(i uint32, u_d map[uint32]*types.ServiceAccount) uint32 {
 	bump := uint32(1)
-	minServiceIndex := uint32(256)
-	maxServiceIndex := uint32(4294966784) // 2^32 - 2^9
-	serviceIndexRangeSize := maxServiceIndex - minServiceIndex + 1
 
-	if i < minServiceIndex {
-		i = minServiceIndex
+	// Define S = 2^16 = 65536, the Minimum Public Service Index
+	minPubserviceIdx := uint32(types.MinPubServiceIndex) // 65536
+
+	// The range size is R = 2^32 - 2^8 - S, 4294967296 - 256 - 65536, or 4294901504
+	serviceIndexRangeSize := uint32(4294967040) - minPubserviceIdx
+
+	if i < minPubserviceIdx {
+		i = minPubserviceIdx
 	}
 
 	for {
 		if _, ok := u_d[i]; !ok {
 			return i
 		}
-		offset := i - minServiceIndex
+		// This applies the formal shift: (i - S + 1) mod R + S
+		offset := i - minPubserviceIdx
 		nextOffset := (offset + bump) % serviceIndexRangeSize
-		i = minServiceIndex + nextOffset
+		i = minPubserviceIdx + nextOffset
 	}
 }
 
@@ -571,7 +575,7 @@ func (vm *VM) hostNew() {
 	m := vm.ReadRegister(10)
 	f := vm.ReadRegister(11)
 	// in 0.7.1 this "i" is used with the registrar to choose serviceIDs < 64K https://graypaper.fluffylabs.dev/#/1c979cb/36da0336da03?v=0.7.1
-	// TODO: MC to review Small serviceIDs < 64K with registrar below
+	// *** TODO: MC to review Small serviceIDs < 64K with registrar below
 	i := vm.ReadRegister(12)
 	x_s_t := xs.ComputeThreshold()
 	privilegedService_m := vm.X.U.PrivilegedState.ManagerServiceID
@@ -598,10 +602,13 @@ func (vm *VM) hostNew() {
 		return
 	}
 	a := &types.ServiceAccount{}
-	// selected service index
+	var newServiceIndex uint32
+
+	// selected service index (registrar privilege for small indices)
 	if x_e_r == xs.ServiceIndex && i < types.MinPubServiceIndex {
+		newServiceIndex = uint32(i)
 		a = types.NewEmptyServiceAccount(
-			uint32(i),
+			newServiceIndex,
 			c,
 			uint64(g),
 			uint64(m),
@@ -613,11 +620,24 @@ func (vm *VM) hostNew() {
 	} else { // auto-select service index
 		// xs has enough balance to fund service creation of a AND covering its own threshold
 
+		const bump = uint32(42)
+		const minPubserviceIdx = uint32(types.MinPubServiceIndex) // 65536
+		const serviceIndexRangeSize = uint32(4294901504)          // 2^32 - 2^8 - S(65536)
+
 		xi := xContext.NewServiceIndex
+		if xi < minPubserviceIdx {
+			xi = minPubserviceIdx
+		} else {
+			xi = minPubserviceIdx + ((xi - minPubserviceIdx) % serviceIndexRangeSize)
+		}
+		proposed_xi := minPubserviceIdx + ((xi - minPubserviceIdx + bump) % serviceIndexRangeSize)
+		// update the new service index in x_i = check(S + (xi - S + 42) mod (2^42 - S - 2^8))
+		newServiceIndex = new_check(proposed_xi, xContext.U.ServiceAccounts)
+
 		// simulate a with c, g, m
 		// [Gratis] a_r:t; a_f,a_a:0; a_p:x_s
 		a = types.NewEmptyServiceAccount(
-			xi,
+			newServiceIndex,
 			c,
 			uint64(g),
 			uint64(m),
@@ -626,25 +646,13 @@ func (vm *VM) hostNew() {
 			vm.Timeslot,
 			xs.ServiceIndex,
 		)
-		// update the new service index in x_i
-		xContext.NewServiceIndex = new_check(xi, xContext.U.ServiceAccounts)
-		const bump = uint32(42)
-		const minServiceIndex = uint32(256)
-		const maxServiceIndex = uint32(4294966784)
-		const serviceIndexRangeSize = maxServiceIndex - minServiceIndex + 1
-
-		if xi < minServiceIndex {
-			xi = minServiceIndex
-		}
-		offset := xi - minServiceIndex
-		nextOffset := (offset + bump) % serviceIndexRangeSize
-		proposed_i := minServiceIndex + nextOffset
-		xContext.NewServiceIndex = new_check(proposed_i, xContext.U.ServiceAccounts)
+		// (B.14) prepare for the next new service -- DO NOT CALL new_chec here
+		xContext.NewServiceIndex = minPubserviceIdx + ((newServiceIndex - minPubserviceIdx + 1) % serviceIndexRangeSize)
 	}
 	a.ALLOW_MUTABLE()
 	a.Balance = a.ComputeThreshold()
 	xs.DecBalance(a.Balance) // (x's)b <- (xs)b - at
-	newServiceIndex := a.ServiceIndex
+	newServiceIndex = a.ServiceIndex
 	a.WriteLookup(common.BytesToHash(c), uint32(l), []uint32{}, "memory")
 
 	xContext.U.ServiceAccounts[newServiceIndex] = a // this new account is included but only is written if (a) non-exceptional (b) exceptional and checkpointed
