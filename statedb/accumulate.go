@@ -338,7 +338,7 @@ func (s *StateDB) OuterAccumulate(g uint64, transfersIn []types.DeferredTransfer
 	}
 	s.updateRecentAccumulation(o, accumulated_partial)
 	// TODO: check if should we use the GasUsage?
-	return i, p_outputs, p_gasUsage
+	return i, p_outputs, GasUsage
 }
 
 /*
@@ -468,6 +468,11 @@ func (s *StateDB) ParallelizedAccumulate(
 		if r.XY != nil && len(r.XY.Transfers) > 0 {
 			transfersMap[r.service] = r.XY.Transfers
 			transfersService = append(transfersService, r.service)
+			for _, t := range r.XY.Transfers {
+				service, _ := r.XY.U.GetService(t.ReceiverIndex)
+				service.IncBalance(t.Amount)
+
+			}
 		}
 
 		// Service accounts
@@ -519,13 +524,22 @@ func (s *StateDB) ParallelizedAccumulate(
 				}
 			} else if r.XY.U.PrivilegedDirty {
 				// manager's priority is higher than others
-				if !managerMutatedA {
-					o.PrivilegedState.AuthQueueServiceID = r.XY.U.PrivilegedState.AuthQueueServiceID
+				allowMutatatedIndex := 0
+				allowMutated := false
+				for index, idx := range originalA {
+					if idx == r.service {
+						allowMutatatedIndex = index
+						allowMutated = true
+						break
+					}
 				}
-				if !managerMutatedR {
+				if !managerMutatedA && allowMutated {
+					o.PrivilegedState.AuthQueueServiceID[allowMutatatedIndex] = r.XY.U.PrivilegedState.AuthQueueServiceID[allowMutatatedIndex]
+				}
+				if !managerMutatedR && r.service == originalR {
 					o.PrivilegedState.RegistrarServiceID = r.XY.U.PrivilegedState.RegistrarServiceID
 				}
-				if !managerMutatedU {
+				if !managerMutatedU && r.service == originalU {
 					o.PrivilegedState.UpcomingValidatorsServiceID = r.XY.U.PrivilegedState.UpcomingValidatorsServiceID
 				}
 			}

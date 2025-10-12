@@ -44,7 +44,7 @@ const (
 	LOG               = 100
 )
 
-var DebugHostFunctions = true
+var DebugHostFunctions = false
 
 func (vm *VM) DebugHostFunction(hostFn int, format string, a ...any) {
 	if !DebugHostFunctions {
@@ -384,20 +384,10 @@ func (vm *VM) hostBless() {
 		}
 		bold_a[i] = binary.LittleEndian.Uint32(data)
 	}
-
-	xContext := vm.X
-	xs, _ := xContext.GetX_s() //vm.X.S.ServiceIndex
-	privilegedService_m := vm.X.U.PrivilegedState.ManagerServiceID
-	if privilegedService_m != xs.ServiceIndex {
-		vm.WriteRegister(7, HUH)
-		vm.SetHostResultCode(HUH)
-		log.Warn(vm.logging, "BLESS HUH", "m", fmt.Sprintf("%d", m), "a", fmt.Sprintf("%d", a), "v", fmt.Sprintf("%d", v), "ManagerServiceID", privilegedService_m, "xs", xs.ServiceIndex)
-		return
-	}
 	set := []uint64{m, v, r}
 	for _, id := range set {
 
-		if m > (1<<32)-1 || v > (1<<32)-1 {
+		if id > (1<<32)-1 {
 			vm.WriteRegister(7, WHO)
 			vm.SetHostResultCode(WHO)
 			log.Debug(vm.logging, "BLESS WHO", "m", fmt.Sprintf("%d", m), "a", fmt.Sprintf("%d", a), "v", fmt.Sprintf("%d", v))
@@ -630,10 +620,8 @@ func (vm *VM) hostNew() {
 		} else {
 			xi = minPubserviceIdx + ((xi - minPubserviceIdx) % serviceIndexRangeSize)
 		}
-		proposed_xi := minPubserviceIdx + ((xi - minPubserviceIdx + bump) % serviceIndexRangeSize)
 		// update the new service index in x_i = check(S + (xi - S + 42) mod (2^42 - S - 2^8))
-		newServiceIndex = new_check(proposed_xi, xContext.U.ServiceAccounts)
-
+		newServiceIndex = xi
 		// simulate a with c, g, m
 		// [Gratis] a_r:t; a_f,a_a:0; a_p:x_s
 		a = types.NewEmptyServiceAccount(
@@ -646,8 +634,8 @@ func (vm *VM) hostNew() {
 			vm.Timeslot,
 			xs.ServiceIndex,
 		)
-		// (B.14) prepare for the next new service -- DO NOT CALL new_chec here
-		xContext.NewServiceIndex = minPubserviceIdx + ((newServiceIndex - minPubserviceIdx + 1) % serviceIndexRangeSize)
+		to_check := minPubserviceIdx + (newServiceIndex - minPubserviceIdx + bump)
+		xContext.NewServiceIndex = new_check(to_check, xContext.U.ServiceAccounts) % serviceIndexRangeSize
 	}
 	a.ALLOW_MUTABLE()
 	a.Balance = a.ComputeThreshold()
@@ -737,8 +725,15 @@ func (vm *VM) hostTransfer() {
 		log.Info(vm.logging, "TRANSFER CASH", "xs.Balance", xs.Balance, "xs_t", xs.ComputeThreshold())
 		return
 	}
-
-	t := types.DeferredTransfer{Amount: a, GasLimit: g, SenderIndex: vm.X.ServiceIndex, ReceiverIndex: uint32(d)} // CHECK
+	var memo [M]byte
+	copy(memo[:], m)
+	t := types.DeferredTransfer{
+		Amount:        a,
+		GasLimit:      g,
+		SenderIndex:   vm.X.ServiceIndex,
+		Memo:          memo,
+		ReceiverIndex: uint32(d),
+	} // CHECK
 	xs.DecBalance(a)
 	receiver.ALLOW_MUTABLE() // make sure all service accounts can be written
 

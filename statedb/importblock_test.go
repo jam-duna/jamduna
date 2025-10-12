@@ -159,6 +159,7 @@ func TestTracesInterpreter(t *testing.T) {
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy"),
 	}
 	// Iterate over each directory.
 	for _, dir := range testDirs {
@@ -203,12 +204,13 @@ func TestTracesRecompiler(t *testing.T) {
 
 	// Define all the directories you want to test in a single slice.
 	testDirs := []string{
-		//path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
-		//path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy"),
 	}
 
 	// Iterate over each directory.
@@ -241,6 +243,7 @@ func TestTracesRecompiler(t *testing.T) {
 
 				// Run the actual test logic for each file as a distinct sub-test.
 				t.Run(e.Name(), func(t *testing.T) {
+					fmt.Printf("testing file %s\n", filename)
 					runSingleSTFTest(t, filename, string(content), BackendCompiler, false)
 				})
 			}
@@ -267,7 +270,8 @@ func dump_performance(t *testing.T) {
 func TestSingleCompare(t *testing.T) {
 	// DO NOT CHANGE THIS
 	log.InitLogger("debug")
-	filename := "/root/go/src/github.com/colorfulnotion/jam-test-vectors/traces/storage_light/00000008.bin"
+	PvmLogging = false
+	filename := "/root/go/src/github.com/colorfulnotion/jam-test-vectors/traces/fuzzy/00000161.bin"
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Errorf("failed to read file %s: %v", filename, err)
@@ -356,8 +360,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 	// log.EnableModule("pvm_validator")
 	log.EnableModule(log.SDB)
 
-	tc := []string{"1758621171"}
-	PvmLogging = false
+	tc := []string{"1757862468", "1757862472", "1757841566", "1757843609", "1757843719", "1757843735"}
 	for _, team := range tc {
 		filename, exists := fileMap[team]
 		if !exists {
