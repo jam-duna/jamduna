@@ -12,6 +12,10 @@ import (
 	"github.com/colorfulnotion/jam/statedb"
 )
 
+// defaultBackend can be set at build time via -ldflags "-X main.defaultBackend=compiler"
+// Default is interpreter for compatibility
+var defaultBackend = statedb.BackendInterpreter
+
 func Terminate(stopCh chan os.Signal) {
 	stopCh <- syscall.SIGTERM
 	time.Sleep(100 * time.Millisecond)
@@ -55,7 +59,7 @@ func main() {
 			statedb.PvmLogging = true
 		}
 	}
-	target := fuzz.NewTarget(socketPath, targetInfo, "interpreter", debugState, dumpStf, dumpLocation)
+	target := fuzz.NewTarget(socketPath, targetInfo, defaultBackend, debugState, dumpStf, dumpLocation)
 
 	// Graceful shutdown setup
 	stopCh := make(chan os.Signal, 1)

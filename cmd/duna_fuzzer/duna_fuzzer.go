@@ -24,6 +24,10 @@ const (
 	magicConst   = 1107
 )
 
+// defaultBackend can be set at build time via -ldflags "-X main.defaultBackend=compiler"
+// Default is interpreter for compatibility
+var defaultBackend = statedb.BackendInterpreter
+
 func validateImportBlockConfig(jConfig types.ConfigJamBlocks) {
 	if jConfig.Network != "tiny" {
 		log.Fatalf("Invalid --network value: %s. Must be 'tiny'.", jConfig.Network)
@@ -55,7 +59,7 @@ func main() {
 		InvalidRate: 0,
 		Statistics:  100,
 		Network:     "tiny",
-		PVMBackend:  statedb.BackendInterpreter,
+		PVMBackend:  defaultBackend,
 		Seed:        "0x44554E41",
 	}
 

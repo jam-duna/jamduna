@@ -21,6 +21,10 @@ const (
 	defaultTraceDir = "/Users/michael/Github/jam/fuzz/v1"
 )
 
+// defaultBackend can be set at build time via -ldflags "-X main.defaultBackend=compiler"
+// Default is interpreter for compatibility
+var defaultBackend = statedb.BackendInterpreter
+
 // TraceStep represents a single step in the V1 protocol trace
 type TraceStep struct {
 	StepNumber  int
@@ -90,7 +94,7 @@ func main() {
 	}
 
 	// Create fuzzer instance using the existing infrastructure
-	fuzzer, err := fuzz.NewFuzzer("", "", socketPath, fuzzerInfo, statedb.BackendInterpreter)
+	fuzzer, err := fuzz.NewFuzzer("", "", socketPath, fuzzerInfo, defaultBackend)
 	if err != nil {
 		log.Fatalf("Failed to create fuzzer: %v", err)
 	}

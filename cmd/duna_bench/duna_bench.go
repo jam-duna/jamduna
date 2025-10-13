@@ -27,6 +27,10 @@ var (
 	colorSuccess   = "\033[32m"
 )
 
+// defaultBackend can be set at build time via -ldflags "-X main.defaultBackend=compiler"
+// Default is interpreter for compatibility
+var defaultBackend = statedb.BackendInterpreter
+
 func DisableColors() {
 	// turn off colors for CI environments
 	colorReset = ""
@@ -614,7 +618,7 @@ func main() {
 		InvalidRate: 0,
 		Statistics:  50,
 		Network:     "tiny",
-		PVMBackend:  statedb.BackendInterpreter,
+		PVMBackend:  defaultBackend,
 		Seed:        "0x44554E41",
 	}
 
