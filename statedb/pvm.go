@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	BackendInterpreter = "interpreter" // C interpreter
-	BackendCompiler    = "compiler"    // X86 recompiler
+	BackendInterpreter     = "interpreter" // C interpreter
+	BackendCompiler        = "compiler"    // X86 recompiler
+	BackendCompilerSandbox = "sandbox"
 )
 
 const (
@@ -245,7 +246,6 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		o_byte = []byte{}
 		w_byte = make([]byte, w_size)
 	}
-	fmt.Printf("NewVM: o_size=%d, w_size=%d, z=%d, s=%d, code_len=%d\n", o_size, w_size, z, s, len(code))
 	vm := &VM{
 		hostenv:         hostENV, //check if we need this
 		Exports:         make([][]byte, 0),
@@ -323,12 +323,19 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 			}
 		}
 	} else if vm.Backend == BackendCompiler {
-		rvm := NewRecompilerVM(service_index, code, initialRegs, initialPC, initialHeap, hostENV, jam_ready_blob, Metadata, initialGas, pvmBackend)
+		rvm := NewRecompilerVM(service_index, initialRegs, initialPC, initialHeap, hostENV, jam_ready_blob, Metadata, initialGas, p, o_size, w_size, z, s, o_byte, w_byte)
 		if rvm == nil {
 			return nil
 		}
 		vm.ExecutionVM = rvm
 	}
+	//  else if vm.Backend == BackendCompilerSandbox {
+	// 	rvm := NewRecompilerVMSandbox(service_index, code, initialRegs, initialPC, initialHeap, hostENV, jam_ready_blob, Metadata, initialGas, pvmBackend)
+	// 	if rvm == nil {
+	// 		return nil
+	// 	}
+	// 	vm.ExecutionVM = rvm
+	// }
 
 	vm.VMs = nil
 	return vm
@@ -409,7 +416,6 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, inputs []types.AccumulateInp
 
 	vm.executeWithBackend(input_bytes, types.EntryPointAccumulate)
 	r, res = vm.getArgumentOutputs()
-
 	return r, res, x_s
 }
 
@@ -432,6 +438,7 @@ func (vm *VM) executeWithBackend(argumentData []byte, entryPoint uint32) {
 	if err != nil {
 		log.Error(vm.logging, "C VM execution failed", "error", err)
 	}
+	vm.ResultCode = vm.GetResultCode()
 }
 
 func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
@@ -461,4 +468,12 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 	r.Err = types.WORKDIGEST_PANIC
 	//log.Error(vm.logging, "getArgumentOutputs - PANIC", "result", vm.ResultCode, "mode", vm.Mode, "service", string(vm.ServiceMetadata))
 	return r, 0
+}
+
+func (vm *VM) GetMachineState() uint8 {
+	return vm.MachineState
+}
+
+func (vm *VM) GetResultCode() uint8 {
+	return vm.ResultCode
 }

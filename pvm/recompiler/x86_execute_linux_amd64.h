@@ -15,14 +15,6 @@ extern "C" {
 // @length: size of the buffer in bytes
 // @reg_ptr: pointer to a 14-element uint64_t array for register dump
 int execute_x86(uint8_t* code, size_t length, void* reg_ptr);
-// Declaration of the Go-exported host call stub
-// Ecalli: handles host call from JIT code
-void Ecalli(void* rvmPtr, int32_t opcode);
-
-// Returns the function pointer of the Go-exported Ecalli for JIT stubs
-void* get_ecalli_address(void);
-void* get_sbrk_address(void);
-
 void* alloc_executable(size_t size);
 void free_executable(void* ptr, size_t size);
 

@@ -146,3 +146,36 @@ func expandBits(k_bytes []byte, c_size uint32) []byte {
 	}
 	return kCombined
 }
+
+func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, []byte) {
+	pure := p
+	// see A.37
+	o_size := types.DecodeE_l(pure[:3])
+	w_size := types.DecodeE_l(pure[3:6])
+	z_val := types.DecodeE_l(pure[6:8])
+	s_val := types.DecodeE_l(pure[8:11])
+
+	var o_byte, w_byte []byte
+	offset := uint64(11)
+	if offset+o_size <= uint64(len(pure)) {
+		o_byte = pure[offset : offset+o_size]
+	} else {
+		o_byte = make([]byte, o_size)
+	}
+	offset += o_size
+
+	if offset+w_size <= uint64(len(pure)) {
+		w_byte = pure[offset : offset+w_size]
+	} else {
+		w_byte = make([]byte, w_size)
+	}
+	offset += w_size
+
+	c_size := types.DecodeE_l(pure[offset : offset+4])
+	offset += 4
+	if len(pure[offset:]) != int(c_size) {
+		// fmt.Printf("DecodeProgram o_size: %d, w_size: %d, z_val: %d, s_val: %d len(w_byte)=%d\n", o_size, w_size, z_val, s_val, len(w_byte))
+		return nil, 0, 0, 0, 0, nil, nil
+	}
+	return DecodeCorePart(pure[offset:]), uint32(o_size), uint32(w_size), uint32(z_val), uint32(s_val), o_byte, w_byte
+}

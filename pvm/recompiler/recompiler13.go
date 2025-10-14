@@ -594,23 +594,36 @@ func generateBinaryOp32(opcode byte) func(inst Instruction) []byte {
 
 		// ─── CASE A: conflict dst==src2 ───
 		if r2 == rd {
-			// 1) push rax
-			code = append(code, emitPushReg(RAX)...)
+			// choose a scratch register different from operands
+			scratchIdx := -1
+			for i := range regInfoList {
+				if i != r1 && i != r2 {
+					scratchIdx = i
+					break
+				}
+			}
+			if scratchIdx == -1 {
+				panic("generateBinaryOp32: no scratch register available")
+			}
+			scratch := regInfoList[scratchIdx]
 
-			// 2) mov eax, src2d
-			code = append(code, emitMovEaxFromReg32(src2)...)
+			// 1) push scratch to preserve original value
+			code = append(code, emitPushReg(scratch)...)
+
+			// 2) mov scratch32, src2d (save original dst/src2 value)
+			code = append(code, emitMovRegReg32(scratch, src2)...)
 
 			// 3) mov dst32, src1d
 			code = append(code, emitMovRegReg32(dst, src1)...)
 
-			// 4) dst32 = dst32 <op> eax
-			code = append(code, emitBinaryOpRegEax32(opcode, dst)...)
+			// 4) dst32 = dst32 <op> scratch32
+			code = append(code, emitBinaryOpRegReg32(opcode, dst, scratch)...)
 
 			// 5) sign‑extend into 64 bits
 			code = append(code, emitMovsxd64(dst, dst)...)
 
-			// 6) pop rax
-			code = append(code, emitPopReg(RAX)...)
+			// 6) pop scratch (restore register)
+			code = append(code, emitPopReg(scratch)...)
 			return code
 		}
 

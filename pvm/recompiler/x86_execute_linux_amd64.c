@@ -11,13 +11,6 @@
 #include <stdio.h>
 #include "x86_execute_linux_amd64.h"
 
-// Forward declaration of the Go-exported host calls
-extern void Ecalli(void* rvmPtr, int32_t opcode);
-void* get_ecalli_address(void) { return (void*)Ecalli; }
-
-extern void Sbrk(void* rvmPtr);
-void* get_sbrk_address(void) { return (void*)Sbrk; }
-
 // Thread-local jump buffer and register pointer
 static __thread sigjmp_buf tls_jump_env;
 static __thread void*      tls_global_reg_ptr;
@@ -78,6 +71,9 @@ static void signal_handler(int sig, siginfo_t *si, void *arg) {
     regPtr[10] = ctx->uc_mcontext.gregs[REG_R13];
     regPtr[11] = ctx->uc_mcontext.gregs[REG_R14];
     regPtr[12] = ctx->uc_mcontext.gregs[REG_R15];
+
+    // Store crash information in additional slots
+    regPtr[32] = rip;   // Store RIP for crash analysis
 
     // Jump back to the recovery point in execute_x86
     siglongjmp(tls_jump_env, 1);

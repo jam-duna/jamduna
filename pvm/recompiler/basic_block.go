@@ -13,7 +13,6 @@ const (
 
 type BasicBlock struct {
 	Instructions []Instruction
-	GasUsage     int64
 
 	X86PC             uint64
 	X86Code           []byte
@@ -27,21 +26,22 @@ type BasicBlock struct {
 	PVMNextPC uint64 // the next PC in PVM after this block, which is the "FALSE" case
 
 	LastInstructionOffset int
+	needPatchNextx86Pc    bool
 }
 
 type Instruction struct {
-	Opcode byte
-	Args   []byte
-	Step   int
-	Pc     uint64
+	Opcode   byte
+	Args     []byte
+	Step     int
+	Pc       uint64
+	GasUsage int64
 }
 
 func NewBasicBlock(x86pc uint64) *BasicBlock {
 	return &BasicBlock{
-		Instructions:      make([]Instruction, 0),
-		GasUsage:          0,
+		Instructions:      make([]Instruction, 0, 8), // Pre-allocate with typical capacity
 		X86PC:             x86pc,
-		pvmPC_TO_x86Index: make(map[uint32]int),
+		pvmPC_TO_x86Index: make(map[uint32]int, 8), // Pre-allocate with typical capacity
 	}
 }
 

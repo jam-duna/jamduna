@@ -44,6 +44,10 @@ ffi/libcrypto.*.a
 /statedb/sandbox/
 /statedb/interpreter/
 /statedb/test/
+/statedb/pvmx*
+
+/statedb/*.out
+/statedb/*.test
 # service guarantees JSON
 guarantees/*.json
 

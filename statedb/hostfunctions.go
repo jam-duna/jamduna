@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -147,11 +148,18 @@ type Refine_parameters struct {
 // InvokeHostCall handles host calls
 // Returns true if the call results in a halt condition, otherwise false
 func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
+
+	t0 := time.Now()
 	vm.DebugHostFunction(host_fn, "Calling host function: %s %d [gas: %d]", HostFnToName(host_fn), host_fn, vm.GetGas())
 	if PvmLogging {
 		fmt.Printf("%d %s: Calling host function: %s %d [gas: %d]\n", vm.Service_index, vm.Mode, HostFnToName(host_fn), host_fn, vm.GetGas())
 	}
-	return vm.hostFunction(host_fn)
+	vm.hostFunction(host_fn)
+	if vm.MachineState == PANIC {
+		vm.ExecutionVM.Panic(uint64(host_fn))
+	}
+	benchRec.Add("InvokeHostCall", time.Since(t0))
+	return true, nil
 }
 
 func (vm *VM) hostFunction(host_fn int) (bool, error) {
@@ -342,6 +350,7 @@ func (vm *VM) hostInfo() {
 
 // Bless updates
 func (vm *VM) hostBless() {
+	fmt.Println("hostBless")
 	if vm.Mode != ModeAccumulate {
 		vm.WriteRegister(7, WHAT)
 		vm.SetHostResultCode(WHAT)
@@ -373,6 +382,7 @@ func (vm *VM) hostBless() {
 	}
 	bold_a := [types.TotalCores]uint32{}
 	for i := 0; i < types.TotalCores; i++ {
+
 		data, err := vm.ReadRAMBytes(uint32(a)+uint32(i)*4, 4)
 		if err != OK {
 			vm.terminated = true
@@ -693,7 +703,6 @@ func (vm *VM) hostTransfer() {
 	a := vm.ReadRegister(8)
 	g := vm.ReadRegister(9)
 	o := vm.ReadRegister(10)
-
 	xs, _ := vm.X.GetX_s()
 	m, errCode := vm.ReadRAMBytes(uint32(o), M)
 	log.Info(vm.logging, "TRANSFER attempt", "d", d, "a", a, "g", g, "o", o)
@@ -818,7 +827,6 @@ func (vm *VM) hostFetch() {
 	var v_Bytes []byte
 	mode := vm.Mode
 	allowed := false
-	fmt.Println("Fetch", "mode", mode, "datatype", datatype)
 	// determine if allowed
 	// datatype:
 	switch mode {
@@ -1935,7 +1943,7 @@ func (vm *VM) hostLog() {
 	if vm.IsChild {
 		serviceMetadata = fmt.Sprintf("%s-child", serviceMetadata)
 	}
-	loggingVerbose := true
+	loggingVerbose := false
 	if !loggingVerbose {
 		return
 	}

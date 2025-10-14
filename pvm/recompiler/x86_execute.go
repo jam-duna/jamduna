@@ -35,16 +35,7 @@ func ExecuteX86(code []byte, regBuf []byte) (ret int, usec int64, err error) {
 	}
 
 	// Allocate executable memory in C
-	codePtr := C.alloc_executable(C.size_t(len(code)))
-	if codePtr == nil {
-		return -2, 0, fmt.Errorf("C.alloc_executable failed")
-	}
-	size := C.size_t(len(code))
-	defer C.free_executable(codePtr, C.size_t(size))
-
-	// Copy x86 code into the executable buffer
-	C.memcpy(codePtr, unsafe.Pointer(&code[0]), C.size_t(len(code)))
-
+	codePtr := unsafe.Pointer(&code[0])
 	// Pass pointer to register dump buffer
 	regPtr := unsafe.Pointer(&regBuf[0])
 
@@ -55,12 +46,4 @@ func ExecuteX86(code []byte, regBuf []byte) (ret int, usec int64, err error) {
 	runtime.UnlockOSThread()
 	usec = time.Since(start).Microseconds()
 	return int(r), usec, err
-}
-
-func GetEcalliAddress() uintptr {
-	return uintptr(C.get_ecalli_address())
-}
-
-func GetSbrkAddress() uintptr {
-	return uintptr(C.get_sbrk_address())
 }

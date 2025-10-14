@@ -3,18 +3,26 @@ package recompiler
 import (
 	"encoding/binary"
 	"fmt"
-	"unsafe"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 )
 
-func (vm *RecompilerVM) Compile(startStep uint64) {
-	// init the recompiler
-	vm.basicBlocks = make(map[uint64]*BasicBlock)
-	vm.x86Blocks = make(map[uint64]*BasicBlock)
+func (vm *X86Compiler) Compile(startStep uint64) {
+	// Optimization 1: Pre-allocate maps with estimated capacity
+	estimatedBlocks := uint64(len(vm.code)) / 4 // ~4 instructions per block average
+	if estimatedBlocks < 32 {
+		estimatedBlocks = 32
+	}
+
+	// init the recompiler with pre-allocated capacity
+	vm.basicBlocks = make(map[uint64]*BasicBlock, estimatedBlocks)
+	vm.x86Blocks = make(map[uint64]*BasicBlock, estimatedBlocks)
 	vm.x86PC = 0
-	vm.x86Code = make([]byte, 0)
+
+	// Optimization 2: Pre-allocate x86Code with estimated size (4x expansion ratio)
+	estimatedCodeSize := uint64(len(vm.code)) * 4
+	vm.x86Code = make([]byte, 0, estimatedCodeSize)
 
 	// emit start block
 	block := NewBasicBlock(vm.x86PC)
@@ -39,75 +47,98 @@ func (vm *RecompilerVM) Compile(startStep uint64) {
 	vm.appendBlock(block)
 }
 
-// u32 only
+// u32 only - Optimized version with fixed-size array
 func GenerateMovMemImm(addr uint64, imm uint32) []byte {
 	// Total length: 1 (push rax) + 2 (REX,B8) +8 (addr) +2 (C7,modrm) +4 (imm32) +1 (pop rax) = 18 bytes
-	code := make([]byte, 0, 18)
+	// Use array instead of slice for better performance
+	var code [18]byte
+	idx := 0
 
 	// push rax
-	code = append(code, 0x50)
+	code[idx] = 0x50
+	idx++
 
 	// movabs rax, addr  =>  48 B8 <addr64 little-endian>
-	code = append(code, 0x48, 0xB8)
-	addrBytes := make([]byte, 8)
-	binary.LittleEndian.PutUint64(addrBytes, addr)
-	code = append(code, addrBytes...)
+	code[idx] = 0x48
+	code[idx+1] = 0xB8
+	idx += 2
+
+	// Direct bytes manipulation instead of creating temporary slice
+	binary.LittleEndian.PutUint64(code[idx:idx+8], addr)
+	idx += 8
 
 	// mov dword ptr [rax], imm32  =>  C7 00 <imm32 little-endian>
-	code = append(code, 0xC7, 0x00)
-	immBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(immBytes, imm)
-	code = append(code, immBytes...)
+	code[idx] = 0xC7
+	code[idx+1] = 0x00
+	idx += 2
+
+	binary.LittleEndian.PutUint32(code[idx:idx+4], imm)
+	idx += 4
 
 	// pop rax
-	code = append(code, 0x58)
+	code[idx] = 0x58
 
-	return code
+	// Return slice view of the array - this is much faster than append operations
+	return code[:]
 }
-func (vm *RecompilerVM) translateBasicBlock(startPC uint64) *BasicBlock {
+
+const nextx86SlotPatch = 0x8686_8686_8686_8686
+
+func (vm *X86Compiler) translateBasicBlock(startPC uint64) *BasicBlock {
 	pc := startPC
 	block := NewBasicBlock(vm.x86PC)
 
+	// Optimization 3: Pre-allocate instruction slice with typical capacity
+	block.Instructions = make([]Instruction, 0, 8)
+
 	hitBasicBlock := false
+	chargeGasInstrunctionIndex := 0
 	for pc < uint64(len(vm.code)) {
 		op := vm.code[pc]
 
 		olen := vm.skip(pc)
-		var operands []byte
-
-		operands = vm.code[pc+1 : pc+1+olen]
+		operands := vm.code[pc+1 : pc+1+olen]
 		if pc == 0 && op == JUMP && showDisassembly {
 			fmt.Printf("JUMP at PC %d with operands %x\n", pc, operands)
 			fmt.Printf("operands length: %d\n", olen)
 			fmt.Printf("code hash %v", common.Blake2Hash(vm.code))
 		}
+		block.AddInstruction(op, operands, int(pc), pc)
 		if op == ECALLI {
 			lx := uint32(types.DecodeE_l(operands))
 			host_func_id := int(lx)
-			block.GasUsage += int64(vm.chargeGas(host_func_id))
+			block.Instructions[chargeGasInstrunctionIndex].GasUsage += int64(vm.chargeGas(host_func_id))
 			if debugRecompiler && false {
 				fmt.Printf("ECALLI at PC %d with operands %x\n", pc, operands)
 			}
 		}
-		block.AddInstruction(op, operands, int(pc), pc)
 		pc0 := pc
 		pc += uint64(olen) + 1
-		block.GasUsage += 1
+		block.Instructions[chargeGasInstrunctionIndex].GasUsage += 1
 		if IsBasicBlockInstruction(op) {
 			vm.setJumpMetadata(block, op, operands, pc0)
-
 			hitBasicBlock = true
-
 			break
 		}
+		chargeGasInstrunctionIndex = len(block.Instructions)
 	}
 
 	if len(block.Instructions) == 0 {
 		return nil
 	}
 
-	// translate the instructions to x86 code
-	var code []byte
+	// Optimization 4: Improved capacity estimation based on instruction types
+	estimatedCodeSize := 32 // Base overhead
+	for _, inst := range block.Instructions {
+		switch inst.Opcode {
+		case ECALLI:
+			estimatedCodeSize += 80 // ECALLI generates more code
+		default:
+			estimatedCodeSize += 10 // Average instruction size
+		}
+	}
+	code := make([]byte, 0, estimatedCodeSize)
+
 	for i, inst := range block.Instructions {
 		codeLen := len(code)
 
@@ -117,62 +148,74 @@ func (vm *RecompilerVM) translateBasicBlock(startPC uint64) *BasicBlock {
 			if vm.isPCCounting {
 				code = append(code, GenerateMovMemImm(uint64(pc_addr), pvm_pc)...)
 			}
-			if useEcalli500 {
-				Ecallcode := append(vm.DumpRegisterToMemory(true), EmitCallToEcalliStub(uintptr(unsafe.Pointer(vm)), int(500))...)
-				Ecallcode = append(Ecallcode, vm.RestoreRegisterInX86()...)
-				code = append(code, Ecallcode...)
-			}
-			if vm.isChargingGas {
-				code = append(code, generateGasCheck(uint32(block.GasUsage))...)
-			}
+
 			if vm.IsBlockCounting {
 				basicBlockCounterAddr := pc_addr + 8
 				code = append(code, generateIncMem(basicBlockCounterAddr)...)
 			}
 		}
+		if vm.isChargingGas {
+			code = append(code, generateGasCheck(uint32(inst.GasUsage))...)
+		}
 		if inst.Opcode == ECALLI {
-			// 1. Dump registers to memory.
-			// 2. Set up C ABI registers (rdi, esi).
+			block.needPatchNextx86Pc = true
 			opcode := uint32(types.DecodeE_l(inst.Args))
-			var Ecallcode []byte
-			if !vm.IsChild {
-				Ecallcode = append(vm.DumpRegisterToMemory(true), EmitCallToEcalliStub(uintptr(unsafe.Pointer(vm)), int(opcode))...)
-				Ecallcode = append(Ecallcode, vm.RestoreRegisterInX86()...)
-				code = append(code, Ecallcode...)
-			} else {
-				Ecallcode, _ = vm.BuildWriteContextSlotCode(vmStateSlotIndex, HOST, 8)
-				host_id_code, _ := vm.BuildWriteContextSlotCode(hostFuncIdIndex, uint64(opcode), 4)
-				load_rip_code, _ := vm.BuildWriteRipToContextSlotCode(ripSlotIndex)
-				Ecallcode = append(Ecallcode, host_id_code...)
-				Ecallcode = append(Ecallcode, load_rip_code...)
-				// fmt.Printf("Ecalli %d at PC %d with operands %x\n", opcode, inst.Pc, inst.Args)
-				Ecallcode = append(Ecallcode, vm.DumpRegisterToMemory(false)...)
-				Ecallcode = append(Ecallcode, X86_OP_RET)
-				code = append(code, Ecallcode...)
-			}
+
+			// Optimization 5: Build ECALLI code directly into main buffer to eliminate intermediate allocations
+			vmStateCode, _ := BuildWriteContextSlotCode(vmStateSlotIndex, HOST, 8)
+			hostIdCode, _ := BuildWriteContextSlotCode(hostFuncIdIndex, uint64(opcode), 4)
+			pcCode, _ := BuildWriteContextSlotCode(pcSlotIndex, inst.Pc, 8)
+			// next x86 instruction address
+			nextx86Code, _ := BuildWriteContextSlotCode(nextx86SlotIndex, nextx86SlotPatch, 8)
+			dumpCode := DumpRegisterToMemory(false)
+
+			// Direct append to main code buffer - no intermediate slice
+			code = append(code, vmStateCode...)
+			code = append(code, hostIdCode...)
+			code = append(code, pcCode...)
+			code = append(code, nextx86Code...)
+			code = append(code, dumpCode...)
+			code = append(code, X86_OP_RET)
+
 			block.pvmPC_TO_x86Index[uint32(inst.Pc)] = codeLen
 		} else if inst.Opcode == SBRK {
+			block.needPatchNextx86Pc = true
 			dstIdx, srcIdx := extractTwoRegisters(inst.Args)
-			Sbrkcode := append(vm.DumpRegisterToMemory(true), EmitCallToSbrkStub(uintptr(unsafe.Pointer(vm)), uint32(srcIdx), uint32(dstIdx))...)
-			Sbrkcode = append(Sbrkcode, vm.RestoreRegisterInX86()...)
-			code = append(code, Sbrkcode...)
+			// vm.sbrkRegA[inst.Pc] = int(srcIdx)
+			sbrkACode, _ := BuildWriteContextSlotCode(sbrkAIndex, uint64(srcIdx), 4)
+			// vm.sbrkRegD[inst.Pc] = int(dstIdx)
+			sbrkDCode, _ := BuildWriteContextSlotCode(sbrkDIndex, uint64(dstIdx), 4)
+			vmStateCode, _ := BuildWriteContextSlotCode(vmStateSlotIndex, SBRK, 8)
+			pcCode, _ := BuildWriteContextSlotCode(pcSlotIndex, inst.Pc, 8)
+			// next x86 instruction address
+			nextx86Code, _ := BuildWriteContextSlotCode(nextx86SlotIndex, nextx86SlotPatch, 8)
+			dumpCode := DumpRegisterToMemory(false)
+			// Direct append to main code buffer - no intermediate slice
+			code = append(code, sbrkACode...)
+			code = append(code, sbrkDCode...)
+			code = append(code, vmStateCode...)
+			code = append(code, pcCode...)
+			code = append(code, nextx86Code...)
+			code = append(code, dumpCode...)
+			code = append(code, X86_OP_RET)
 			block.pvmPC_TO_x86Index[uint32(inst.Pc)] = codeLen
 		} else if translateFunc, ok := pvmByteCodeToX86Code[inst.Opcode]; ok {
 			if i == len(block.Instructions)-1 {
 				block.LastInstructionOffset = len(code)
 			}
 			additionalCode := translateFunc(inst)
-			//disassemble the additionalCode and build the tally map
 			code = append(code, additionalCode...)
 			block.pvmPC_TO_x86Index[uint32(inst.Pc)] = codeLen
 		}
 	}
+
 	// add a trap if we didn't hit a basic block instruction at the end
 	if !hitBasicBlock {
-		code = append(code, generateTrap(Instruction{
+		trapCode := generateTrap(Instruction{
 			Opcode: TRAP,
 			Args:   nil,
-		})...)
+		})
+		code = append(code, trapCode...)
 		block.JumpType = TRAP_JUMP
 	}
 
@@ -184,13 +227,13 @@ func (vm *RecompilerVM) translateBasicBlock(startPC uint64) *BasicBlock {
 	vm.appendBlock(block)
 
 	if showDisassembly {
-		str := vm.Disassemble(block.X86Code)
+		str := Disassemble(block.X86Code)
 		fmt.Printf("Translated block at PVM PC %d to x86 PC %x with %d instructions: %s\n%s", startPC, block.X86PC, len(block.Instructions), block.String(), str)
 	}
 	return block
 }
 
-func (vm *RecompilerVM) setJumpMetadata(block *BasicBlock, opcode byte, operands []byte, pc uint64) {
+func (vm *X86Compiler) setJumpMetadata(block *BasicBlock, opcode byte, operands []byte, pc uint64) {
 	switch {
 	case opcode == JUMP:
 		block.JumpType = DIRECT_JUMP
@@ -230,7 +273,7 @@ func (vm *RecompilerVM) setJumpMetadata(block *BasicBlock, opcode byte, operands
 	}
 }
 
-func (vm *RecompilerVM) finalizeJumpTargets(J []uint32) {
+func (vm *X86Compiler) finalizeJumpTargets(J []uint32) {
 	// end := vm.findEndBlock(TERMINATED)
 	for _, block := range vm.basicBlocks {
 		if block.JumpType == DIRECT_JUMP {
@@ -253,7 +296,7 @@ func (vm *RecompilerVM) finalizeJumpTargets(J []uint32) {
 	}
 }
 
-func (vm *RecompilerVM) patchJumpConditional(block *BasicBlock, targetTruePC uint64) {
+func (vm *X86Compiler) patchJumpConditional(block *BasicBlock, targetTruePC uint64) {
 	blockEnd := block.X86PC + uint64(len(block.X86Code))
 
 	// The instruction after Jcc+imm32 lives at blockEnd-5
@@ -272,14 +315,14 @@ func (vm *RecompilerVM) patchJumpConditional(block *BasicBlock, targetTruePC uin
 }
 
 // patchJump updates the last instruction in the block to jump to the target PC -- works with JUMP and LOAD_IMM_JUMP
-func (vm *RecompilerVM) patchJump(block *BasicBlock, targetPC uint64) {
+func (vm *X86Compiler) patchJump(block *BasicBlock, targetPC uint64) {
 	endOfBlock := block.X86PC + uint64(len(block.X86Code))
 	offset := int32(targetPC) - int32(endOfBlock)
 	binary.LittleEndian.PutUint32(vm.x86Code[endOfBlock-4:endOfBlock], uint32(offset))
 }
 
 // patchJumpTable updates each instruction in the block to jump to the target PC -- works with JUMP and LOAD_IMM_JUMP
-func (vm *RecompilerVM) patchJumpIndirectTable(J []uint32) {
+func (vm *X86Compiler) patchJumpIndirectTable(J []uint32) {
 	for i := 0; i < len(J); i++ {
 		targetBlock, exist := vm.basicBlocks[uint64(J[i])]
 		if !exist {
@@ -297,7 +340,12 @@ func (vm *RecompilerVM) patchJumpIndirectTable(J []uint32) {
 	}
 }
 
-func (vm *RecompilerVM) appendBlock(block *BasicBlock) {
+// patching next pc const
+const EcalliCodeIdx = 146
+const SbrkCodeIdx = 185
+const nextPcStartOffset = 119 // remember to add the code index
+
+func (vm *X86Compiler) appendBlock(block *BasicBlock) {
 	startLen := len(vm.x86Code)
 	vm.x86Code = append(vm.x86Code, block.X86Code...)
 	block.X86PC = vm.x86PC
@@ -313,6 +361,14 @@ func (vm *RecompilerVM) appendBlock(block *BasicBlock) {
 		x86_realpc := startLen + idx
 		vm.InstMapX86ToPVM[x86_realpc] = pvm_pc
 		vm.InstMapPVMToX86[pvm_pc] = x86_realpc
+		if block.needPatchNextx86Pc && (inst.Opcode == SBRK || inst.Opcode == ECALLI) {
+			codeIdx := SbrkCodeIdx
+			if inst.Opcode == ECALLI {
+				codeIdx = EcalliCodeIdx
+			}
+			binary.LittleEndian.PutUint64(vm.x86Code[x86_realpc+codeIdx:x86_realpc+codeIdx+8], uint64(x86_realpc+codeIdx+nextPcStartOffset))
+
+		}
 		if debugRecompiler && false {
 			fmt.Printf("Mapped PVM PC %d to x86 PC %x\n", pvm_pc, x86_realpc)
 		}

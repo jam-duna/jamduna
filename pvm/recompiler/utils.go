@@ -476,14 +476,31 @@ func z_encode(a uint64, n uint32) int64 {
 }
 
 // skip function calculates the distance to the next instruction
-func (vm *RecompilerVM) skip(pc uint64) uint64 {
+func (vm *X86Compiler) skip(pc uint64) uint64 {
 	n := uint64(len(vm.bitmask))
 	end := pc + 25
 	if end > n {
 		end = n
 	}
 	for i := pc + 1; i < end; i++ {
-		if vm.bitmask[i] == 0x01 {
+		if vm.bitmask[i] > 0 {
+			return i - pc - 1
+		}
+	}
+	if end < pc+25 {
+		return end - pc - 1
+	}
+	return 24
+}
+
+func Skip(bitmask []byte, pc uint64) uint64 {
+	n := uint64(len(bitmask))
+	end := pc + 25
+	if end > n {
+		end = n
+	}
+	for i := pc + 1; i < end; i++ {
+		if bitmask[i] == 0x01 {
 			return i - pc - 1
 		}
 	}

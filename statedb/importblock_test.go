@@ -243,7 +243,6 @@ func TestTracesRecompiler(t *testing.T) {
 
 				// Run the actual test logic for each file as a distinct sub-test.
 				t.Run(e.Name(), func(t *testing.T) {
-					fmt.Printf("testing file %s\n", filename)
 					runSingleSTFTest(t, filename, string(content), BackendCompiler, false)
 				})
 			}
@@ -278,6 +277,19 @@ func TestSingleCompare(t *testing.T) {
 	}
 	// runSingleSTFTest(t, filename, string(content), BackendCompiler, false)
 	runSingleSTFTest(t, filename, string(content), BackendInterpreter, false)
+	// runSingleSTFTest(t, filename, string(content), BackendCompilerC, false)
+}
+func TestSingleRecompilerGo(t *testing.T) {
+	// DO NOT CHANGE THIS
+	log.InitLogger("debug")
+	filename := "/root/go/src/github.com/colorfulnotion/jam-test-vectors/traces/fuzzy/00000163.bin"
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		t.Errorf("failed to read file %s: %v", filename, err)
+	}
+	// runSingleSTFTest(t, filename, string(content), BackendCompiler, false)
+	// runSingleSTFTest(t, filename, string(content), BackendInterpreter, false)
+	runSingleSTFTest(t, filename, string(content), BackendCompiler, false)
 }
 
 func GetFuzzReportsPath(subDir ...string) (string, error) {
@@ -334,7 +346,7 @@ func findFuzzTestFiles(sourcePath, targetVersion string, excludedTeams []string)
 	return testFiles, nil
 }
 
-func TestSingleFuzzTrace(t *testing.T) {
+func TestSingleFuzzTraceGo(t *testing.T) {
 
 	fileMap := make(map[string]string)
 
@@ -375,9 +387,9 @@ func TestSingleFuzzTrace(t *testing.T) {
 		}
 
 		t.Run(filepath.Base(filename), func(t *testing.T) {
-			runSingleSTFTest(t, filename, string(content), BackendInterpreter, true)
+			runSingleSTFTest(t, filename, string(content), BackendCompiler, true)
 		})
-	}
+	} //1056616417
 }
 
 func testFuzzTraceInternal(t *testing.T, saveOutput bool) {

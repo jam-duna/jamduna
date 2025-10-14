@@ -1,5 +1,4 @@
-// run test: go test ./statedb -v
-package statedb
+package recompiler
 
 import (
 	"bytes"
@@ -10,8 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm/recompiler"
+	"github.com/colorfulnotion/jam/pvm/program"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -41,73 +41,9 @@ type TestCase struct {
 	ExpectedRegs   []uint64     `json:"expected-regs"`
 	ExpectedPC     uint32       `json:"expected-pc"`
 	ExpectedMemory []TestMemory `json:"expected-memory"`
+	ExpectedGas    int64        `json:"expected-gas"`
 }
 
-func pvm_test(tc TestCase, testMode string) error {
-	// Test with Go backend by default, but can be changed for comparison
-	switch testMode {
-	case "recompiler":
-		return recompiler_test(tc)
-	case "C_FFI":
-		return pvm_test_backend(tc, BackendInterpreter)
-	default:
-		return pvm_test_backend(tc, BackendInterpreter)
-	}
-}
-
-func pvm_test_backend(tc TestCase, backend string) error {
-	hostENV := NewMockHostEnv()
-	serviceAcct := uint32(0) // stub
-
-	// Convert test code to raw instruction bytes
-	rawCodeBytes := make([]byte, len(tc.Code))
-	for i, val := range tc.Code {
-		rawCodeBytes[i] = byte(val)
-	}
-
-	// setup Gas
-	var initialGas int64 = tc.InitialGas
-	if tc.InitialGas == 0 {
-		initialGas = 10000 // Default gas for tests
-	}
-
-	pvm := NewVM(serviceAcct, rawCodeBytes, tc.InitialRegs, uint64(tc.InitialPC), 4096, hostENV, false, []byte{}, backend, uint64(initialGas))
-	defer pvm.Destroy()
-
-	// Setup memory
-	for _, mem := range tc.InitialMemory {
-		pvm.WriteRAMBytes(mem.Address, mem.Data[:])
-	}
-
-	pvm.IsChild = false
-	err := pvm.Execute(pvm, uint32(tc.InitialPC))
-	if err != nil {
-		return fmt.Errorf("C execution failed: %v", err)
-	}
-
-	// Check the registers
-	actualRegs := pvm.ReadRegisters()
-	if equalIntSlices(actualRegs[:], tc.ExpectedRegs) {
-		// fmt.Printf("Register match for test %s \n", tc.Name)
-		return nil
-	}
-
-	resultCode := pvm.ResultCode
-	resultCodeStr := types.HostResultCodeToString[resultCode]
-	if resultCodeStr == "page-fault" {
-		resultCodeStr = "panic"
-	}
-	expectedCodeStr := tc.ExpectedStatus
-	if expectedCodeStr == "page-fault" {
-		expectedCodeStr = "panic"
-	}
-	if resultCodeStr == expectedCodeStr {
-		fmt.Printf("Result code match for test %s: %s\n", tc.Name, resultCodeStr)
-	} else {
-		return fmt.Errorf("result code mismatch for test %s: expected %s, got %s", tc.Name, expectedCodeStr, resultCodeStr)
-	}
-	return fmt.Errorf("register mismatch for test %s: expected %v, got %v", tc.Name, tc.ExpectedRegs, actualRegs)
-}
 func recompiler_test(tc TestCase) error {
 	var num_mismatch int
 	serviceAcct := uint32(0) // stub
@@ -118,20 +54,32 @@ func recompiler_test(tc TestCase) error {
 		rawCodeBytes[i] = byte(val)
 	}
 	fmt.Printf("running test: %s\n", tc.Name)
-	hostENV := NewMockHostEnv()
-	p := DecodeProgram_pure_pvm_blob(rawCodeBytes)
-	o_size := 0
-	w_size := 0
-	z := 0
-	s := 0
-	o_byte := []byte{}
-	w_byte := make([]byte, w_size)
+	var p *program.Program
+	var o_size, w_size, z, s uint32
+	var o_byte, w_byte []byte
 
-	rvm := NewRecompilerVM(serviceAcct, tc.InitialRegs, uint64(tc.InitialPC), 4096, hostENV, false, []byte{}, 100000, p, uint32(o_size), uint32(w_size), uint32(z), uint32(s), o_byte, w_byte)
+	p = program.DecodeCorePart(rawCodeBytes)
+	o_size = 0
+	w_size = uint32(4096)
+	z = 0
+	s = 0
+	o_byte = []byte{}
+	w_byte = make([]byte, w_size)
+
+	rvm, _ := NewRecompilerVM(serviceAcct, p.Code, tc.InitialRegs, uint64(tc.InitialPC))
+
+	rvm.SetMemoryBounds(o_size, w_size, z, s, o_byte, w_byte)
+	// w - read-write
+	rw_data_address := uint32(2*Z_Z) + Z_func(o_size)
+	rw_data_address_end := rw_data_address + P_func(w_size)
+	current_heap_pointer := rw_data_address_end
+	rvm.SetHeapPointer(current_heap_pointer)
+	rvm.SetBitMask(p.K)
+	rvm.SetJumpTable(p.J)
 	// Set the initial memory
 	for _, mem := range tc.InitialMemory {
 		//pvm.Ram.SetPageAccess(mem.Address/PageSize, 1, AccessMode{Readable: false, Writable: true, Inaccessible: false})
-		rvm.SetMemAccess(mem.Address, uint32(len(mem.Data)), recompiler.PageMutable)
+		rvm.SetMemAccess(mem.Address, uint32(len(mem.Data)), PageMutable)
 		rvm.WriteRAMBytes(mem.Address, mem.Data[:])
 	}
 	// if len(tc.InitialMemory) == 0 {
@@ -142,7 +90,7 @@ func recompiler_test(tc TestCase) error {
 	for _, pm := range tc.InitialPageMap {
 		// Set the page access based on the initial page map
 		if pm.IsWritable {
-			err := rvm.SetMemAccess(pm.Address, pm.Length, recompiler.PageMutable)
+			err := rvm.SetMemAccess(pm.Address, pm.Length, PageMutable)
 			if err != nil {
 				return fmt.Errorf("failed to set memory access for address %x: %w", pm.Address, err)
 			}
@@ -158,9 +106,9 @@ func recompiler_test(tc TestCase) error {
 		rvm.WriteRegister(i, reg)
 		fmt.Printf("Register %d initialized to %d\n", i, reg)
 	}
-	vm := &VM{}
-	vm.ExecutionVM = rvm
-	rvm.Execute(vm, 0)
+	rvm.Gas = tc.InitialGas
+	rvm.HostFunc = NewDummyHostFunc(rvm)
+	rvm.Execute(uint32(rvm.pc))
 	// check the memory
 	for _, mem := range tc.ExpectedMemory {
 		data, err := rvm.ReadMemory(mem.Address, uint32(len(mem.Data)))
@@ -191,7 +139,6 @@ func recompiler_test(tc TestCase) error {
 		}
 	}
 	rvm.Close()
-	return nil
 	resultCodeStr := types.HostResultCodeToString[resultCode]
 	if resultCodeStr == "page-fault" {
 		resultCodeStr = "panic"
@@ -200,12 +147,18 @@ func recompiler_test(tc TestCase) error {
 	if expectedCodeStr == "page-fault" {
 		expectedCodeStr = "panic"
 	}
-	if resultCodeStr == expectedCodeStr {
-		fmt.Printf("Result code match for test %s: %s\n", tc.Name, resultCodeStr)
-	} else {
+
+	if resultCodeStr != expectedCodeStr {
 		return fmt.Errorf("result code mismatch for test %s: expected %s, got %s", tc.Name, expectedCodeStr, resultCodeStr)
 	}
-	return fmt.Errorf("register mismatch for test %s: expected %v, got %v", tc.Name, tc.ExpectedRegs, rvm.ReadRegisters())
+
+	// expectedGas := tc.ExpectedGas
+	// actualGas := rvm.Gas
+	// if expectedGas != actualGas {
+	// 	return fmt.Errorf("gas mismatch for test %s: expected %d, got %d", tc.Name, expectedGas, actualGas)
+	// }
+
+	return nil
 }
 
 // BackendResult holds the execution result from a backend
@@ -217,10 +170,9 @@ type BackendResult struct {
 }
 
 func TestPVMAll(t *testing.T) {
-	mode := "C_FFI" // change to "C_FFI" to test the C backend
 	log.InitLogger("debug")
 	// Directory containing the JSON files
-	dir := "programs"
+	dir := "../../statedb/programs"
 
 	// Read all files in the directory
 	files, err := os.ReadDir(dir)
@@ -262,7 +214,7 @@ func TestPVMAll(t *testing.T) {
 		}
 		name := testCase.Name
 		t.Run(name, func(t *testing.T) {
-			err = pvm_test(testCase, mode)
+			err = recompiler_test(testCase)
 			if err != nil {
 				t.Errorf("❌ [%s] Test failed: %v", name, err)
 			} else {
@@ -290,7 +242,7 @@ func equalIntSlices(a, b []uint64) bool {
 
 func TestSinglePVM(t *testing.T) {
 	log.InitLogger("debug")
-	filename := "programs/inst_ecalli_100.json"
+	filename := "../../statedb/programs/inst_add_32.json"
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("Failed to read test file %s: %v", filename, err)
@@ -318,72 +270,79 @@ func TestSinglePVM(t *testing.T) {
 	})
 }
 
-func TestBranchEqNok(t *testing.T) {
-	mode := "C_FFI" // change to "C_FFI" to test the C backend
-	log.InitLogger("debug")
-	filename := "programs/inst_branch_eq_nok.json"
-	data, err := os.ReadFile(filename)
+func TestHashService(t *testing.T) {
+	serviceAcct := uint32(0) // stub
+
+	// Convert test code to raw instruction bytes (matches Go exactly)
+	doomFile := "../../services/blake2b_child.pvm"
+	rawCodeBytes, err := os.ReadFile(doomFile)
 	if err != nil {
-		t.Fatalf("Failed to read test file %s: %v", filename, err)
+		t.Fatalf("Failed to read Doom PVM file: %v", err)
 	}
 
-	var tc TestCase
-	err = json.Unmarshal(data, &tc)
+	// CRITICAL: Use DecodeCorePart like Go does (matches recompiler_test.go line 59)
+	p, o_size, w_size, z, s, o_byte, w_byte := program.DecodeProgram(rawCodeBytes)
+
+	// Create C FFI VM with decoded program code (matches Go line 67)
+	vm, err := NewRecompilerVM(serviceAcct, p.Code, make([]uint64, 13), 0)
 	if err != nil {
-		t.Fatalf("Failed to unmarshal test case from %s: %v", filename, err)
+		t.Fatalf("failed to create RecompilerVM: %v", err)
+	}
+	defer vm.Close()
+	rw_data_address := uint32(2*Z_Z) + Z_func(o_size)
+	rw_data_address_end := rw_data_address + P_func(w_size)
+	current_heap_pointer := rw_data_address_end
+	vm.SetHeapPointer(current_heap_pointer)
+	vm.SetMemoryBounds(o_size, w_size, z, s, o_byte, w_byte)
+	// CRITICAL: Set bitmask and jump table from decoded program (matches Go lines 75-76)
+	// This is the correct way! Go calls: rvm.SetBitMask(p.K) and rvm.SetJumpTable(p.J)
+	vm.SetGas(10000000)
+	err = vm.SetBitMask(p.K)
+	if err != nil {
+		t.Fatalf("failed to set bitmask: %v", err)
+	}
+	vm.HostFunc = NewDummyHostFunc(vm)
+	vm.Init([]byte{})
+
+	// Check memory at 0x130040 before execution
+	checkAddr := uint32(0x130040)
+	checkData, _ := vm.ReadRAMBytes(checkAddr, 40)
+	fmt.Printf("GO BEFORE execution - Memory at 0x%x: %v\n", checkAddr, checkData)
+	fmt.Printf("GO BEFORE execution - As string: %q\n", string(checkData))
+
+	// DEBUG: Print jump table before setting it
+	err = vm.SetJumpTable(p.J)
+	if err != nil {
+		t.Fatalf("failed to set jump table: %v", err)
 	}
 
-	// Debug: Print the program bytes and expected behavior
-	t.Logf("Program bytes: %v", tc.Code)
-	t.Logf("Initial regs: %v", tc.InitialRegs)
-	t.Logf("Expected regs: %v", tc.ExpectedRegs)
-	t.Logf("Expected PC: %d", tc.ExpectedPC)
-	t.Logf("Expected status: %s", tc.ExpectedStatus)
+	vm.Execute(0)
+	fmt.Printf("Go registers after execute: %v\n", vm.ReadRegisters())
+	return_address := vm.ReadRegister(7)
+	fmt.Printf("Go return_address: %d\n", return_address)
+	return_length := vm.ReadRegister(8)
+	fmt.Printf("Go return_length: %d\n", return_length)
+	return_data, _ := vm.ReadRAMBytes(uint32(return_address), uint32(return_length))
 
-	// Test with C FFI backend directly
-	t.Run("C_FFI", func(t *testing.T) {
-		err = pvm_test(tc, mode)
-		if err != nil {
-			t.Errorf("CGO backend test failed for %s: %v", tc.Name, err)
-		}
-	})
-}
-
-func TestLoadU32(t *testing.T) {
-	mode := "C_FFI" // change to "C_FFI" to test the C backend
-	log.InitLogger("debug")
-	filename := "programs/inst_load_u32.json"
-	data, err := os.ReadFile(filename)
-	if err != nil {
-		t.Fatalf("Failed to read test file %s: %v", filename, err)
+	hash_data := common.Hex2Bytes("0xdeadbeef")
+	//hash 10 times
+	for i := 0; i < 100; i++ {
+		hash_data = common.Blake2Hash(hash_data[:]).Bytes()
+	}
+	if !bytes.Equal(hash_data, return_data) {
+		t.Fatalf("Hash mismatch: expected %x, got %x", hash_data, return_data)
+	} else {
+		fmt.Printf("Hash match: %x\n", return_data)
 	}
 
-	var tc TestCase
-	err = json.Unmarshal(data, &tc)
-	if err != nil {
-		t.Fatalf("Failed to unmarshal test case from %s: %v", filename, err)
-	}
-
-	// Debug: Print the program bytes and expected behavior
-	t.Logf("Program bytes: %v", tc.Code)
-	t.Logf("Initial regs: %v", tc.InitialRegs)
-	t.Logf("Expected regs: %v", tc.ExpectedRegs)
-	t.Logf("Expected PC: %d", tc.ExpectedPC)
-	t.Logf("Expected status: %s", tc.ExpectedStatus)
-
-	// Test with C FFI backend directly
-	t.Run("C_FFI", func(t *testing.T) {
-		err = pvm_test(tc, mode)
-		if err != nil {
-			t.Errorf("CGO backend test failed for %s: %v", tc.Name, err)
-		}
-	})
+	// read out the gas
+	gasLeft := vm.GetGas()
+	fmt.Printf("Gas left after execute: %d\n", gasLeft)
 }
 
 func TestEcalli(t *testing.T) {
-	mode := "recompiler" // change to "C_FFI" to test the C backend
 	log.InitLogger("debug")
-	filename := "programs/inst_ecalli_100.json"
+	filename := "../../statedb/programs/inst_ecalli_100.json"
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("Failed to read test file %s: %v", filename, err)
@@ -394,9 +353,63 @@ func TestEcalli(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to unmarshal test case from %s: %v", filename, err)
 	}
-
-	err = pvm_test(tc, mode)
-	if err != nil {
-		t.Errorf("CGO backend test failed for %s: %v", tc.Name, err)
+	serviceAcct := uint32(0) // stub
+	// metadata, c := types.SplitMetadataAndCode(tc.Code)
+	// Convert test code to raw instruction bytes
+	rawCodeBytes := make([]byte, len(tc.Code))
+	for i, val := range tc.Code {
+		rawCodeBytes[i] = byte(val)
 	}
+	fmt.Printf("running test: %s\n", tc.Name)
+	var p *program.Program
+	var o_size, w_size, z, s uint32
+	var o_byte, w_byte []byte
+
+	p = program.DecodeCorePart(rawCodeBytes)
+	o_size = 0
+	w_size = uint32(4096)
+	z = 0
+	s = 0
+	o_byte = []byte{}
+	w_byte = make([]byte, w_size)
+
+	rvm, _ := NewRecompilerVM(serviceAcct, p.Code, tc.InitialRegs, uint64(tc.InitialPC))
+
+	rvm.SetMemoryBounds(o_size, w_size, z, s, o_byte, w_byte)
+	// w - read-write
+	rw_data_address := uint32(2*Z_Z) + Z_func(o_size)
+	rw_data_address_end := rw_data_address + P_func(w_size)
+	current_heap_pointer := rw_data_address_end
+	rvm.SetHeapPointer(current_heap_pointer)
+	rvm.SetBitMask(p.K)
+	rvm.SetJumpTable(p.J)
+	// Set the initial memory
+	for _, mem := range tc.InitialMemory {
+		//pvm.Ram.SetPageAccess(mem.Address/PageSize, 1, AccessMode{Readable: false, Writable: true, Inaccessible: false})
+		rvm.SetMemAccess(mem.Address, uint32(len(mem.Data)), PageMutable)
+		rvm.WriteRAMBytes(mem.Address, mem.Data[:])
+	}
+	rvm.Gas = 100000000000
+	for _, pm := range tc.InitialPageMap {
+		// Set the page access based on the initial page map
+		if pm.IsWritable {
+			err := rvm.SetMemAccess(pm.Address, pm.Length, PageMutable)
+			if err != nil {
+				t.Fatalf("failed to set memory access for address %x: %v", pm.Address, err)
+			}
+		}
+	}
+
+	for _, mem := range tc.InitialMemory {
+		// Write the initial memory contents
+		rvm.WriteMemory(mem.Address, mem.Data)
+	}
+	rvm.SetPC(0)
+	for i, reg := range tc.InitialRegs {
+		rvm.WriteRegister(i, reg)
+		fmt.Printf("Register %d initialized to %d\n", i, reg)
+	}
+	rvm.Gas = 100000
+	rvm.HostFunc = NewDummyHostFunc(rvm)
+	rvm.Execute(uint32(0))
 }

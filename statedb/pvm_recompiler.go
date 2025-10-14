@@ -10,28 +10,10 @@ type Recompiler struct {
 	*recompiler.RecompilerVM
 }
 
-func NewRecompilerVM(service_index uint32, code []byte, initialRegs []uint64, initialPC uint64, initialHeap uint64, hostENV types.HostEnv, jam_ready_blob bool, Metadata []byte, initialGas uint64, pvmBackend string) *Recompiler {
-	if len(pvmBackend) == 0 {
-		panic("pvmBackend cannot be empty")
-	}
+func NewRecompilerVM(service_index uint32, initialRegs []uint64, initialPC uint64, initialHeap uint64, hostENV types.HostEnv, jam_ready_blob bool, Metadata []byte, initialGas uint64, p *Program, o_size uint32, w_size uint32, z uint32, s uint32, o_byte []byte, w_byte []byte) *Recompiler {
+	code := p.Code
 	if len(code) == 0 {
 		return nil
-	}
-
-	var p *Program
-	var o_size, w_size, z, s uint32
-	var o_byte, w_byte []byte
-
-	if jam_ready_blob {
-		p, o_size, w_size, z, s, o_byte, w_byte = DecodeProgram(code)
-	} else {
-		p = DecodeProgram_pure_pvm_blob(code)
-		o_size = 0
-		w_size = uint32(initialHeap)
-		z = 0
-		s = 0
-		o_byte = []byte{}
-		w_byte = make([]byte, w_size)
 	}
 	rvm, err := recompiler.NewRecompilerVM(service_index, p.Code, initialRegs, initialPC)
 	if err != nil {
@@ -42,7 +24,7 @@ func NewRecompilerVM(service_index uint32, code []byte, initialRegs []uint64, in
 	rvm.SetMemoryBounds(o_size, w_size, z, s, o_byte, w_byte)
 	// w - read-write
 	rw_data_address := uint32(2*Z_Z) + Z_func(o_size)
-	rw_data_address_end := rw_data_address + P_func(w_size)
+	rw_data_address_end := rw_data_address + P_func(w_size) + z*Z_P
 	current_heap_pointer := rw_data_address_end
 	rvm.SetHeapPointer(current_heap_pointer)
 	rvm.SetBitMask(p.K)
@@ -59,6 +41,7 @@ func NewRecompilerVM(service_index uint32, code []byte, initialRegs []uint64, in
 func (rvm *Recompiler) Execute(VM *VM, entry uint32) error {
 	rvm.HostFunc = VM
 	rvm.RecompilerVM.Execute(entry)
+	VM.ResultCode = rvm.GetResultCode()
 	return nil
 }
 

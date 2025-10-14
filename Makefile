@@ -327,24 +327,24 @@ pvmlib:
 	@echo "Building PVM library statically for all platforms..."
 	@mkdir -p pvm_tmp
 	@echo "  Building for Linux amd64..."
-	@CC=x86_64-linux-musl-gcc AR=x86_64-linux-musl-ar make -C pvm clean
-	@CC=x86_64-linux-musl-gcc AR=x86_64-linux-musl-ar make -C pvm CC=x86_64-linux-musl-gcc AR=x86_64-linux-musl-ar
+	@CC=x86_64-linux-musl-gcc AR=x86_64-linux-musl-ar CFLAGS="-Wall -Wextra -O3 -std=c99 -fPIC" make -C pvm clean
+	@CC=x86_64-linux-musl-gcc AR=x86_64-linux-musl-ar CFLAGS="-Wall -Wextra -O3 -std=c99 -fPIC" make -C pvm CC=x86_64-linux-musl-gcc AR=x86_64-linux-musl-ar CFLAGS="-Wall -Wextra -O3 -std=c99 -fPIC"
 	@cp pvm/lib/libpvm.a pvm_tmp/libpvm.linux_amd64.a
 	@echo "  Building for Linux arm64..."
 	@if command -v aarch64-linux-musl-gcc >/dev/null 2>&1; then \
-		CC=aarch64-linux-musl-gcc AR=aarch64-linux-musl-ar make -C pvm clean; \
-		CC=aarch64-linux-musl-gcc AR=aarch64-linux-musl-ar make -C pvm CC=aarch64-linux-musl-gcc AR=aarch64-linux-musl-ar; \
+		CC=aarch64-linux-musl-gcc AR=aarch64-linux-musl-ar CFLAGS="-Wall -Wextra -O3 -std=c99 -fPIC" make -C pvm clean; \
+		CC=aarch64-linux-musl-gcc AR=aarch64-linux-musl-ar CFLAGS="-Wall -Wextra -O3 -std=c99 -fPIC" make -C pvm CC=aarch64-linux-musl-gcc AR=aarch64-linux-musl-ar CFLAGS="-Wall -Wextra -O3 -std=c99 -fPIC"; \
 		cp pvm/lib/libpvm.a pvm_tmp/libpvm.linux_arm64.a; \
 	else \
 		echo "    Skipping Linux arm64 (no aarch64-linux-musl-gcc)"; \
 	fi
 	@echo "  Building for macOS amd64..."
-	@CC=clang AR=ar make -C pvm clean
-	@CC=clang AR=ar make -C pvm CC=clang AR=ar CFLAGS="-Wall -Wextra -O3 -std=c99 -fPIC -target x86_64-apple-macos10.12"
+	@CC=clang AR=ar CFLAGS="-Wall -Wextra -O3 -std=c99 -fPIC" make -C pvm clean
+	@CC=clang AR=ar CFLAGS="-Wall -Wextra -O3 -std=c99 -fPIC -target x86_64-apple-macos10.12" make -C pvm CC=clang AR=ar CFLAGS="-Wall -Wextra -O3 -std=c99 -fPIC -target x86_64-apple-macos10.12"
 	@cp pvm/lib/libpvm.a pvm_tmp/libpvm.mac_amd64.a
 	@echo "  Building for macOS arm64..."
-	@CC=clang AR=ar make -C pvm clean
-	@CC=clang AR=ar make -C pvm CC=clang AR=ar CFLAGS="-Wall -Wextra -O3 -std=c99 -fPIC -target arm64-apple-macos11"
+	@CC=clang AR=ar CFLAGS="-Wall -Wextra -O3 -std=c99 -fPIC" make -C pvm clean
+	@CC=clang AR=ar CFLAGS="-Wall -Wextra -O3 -std=c99 -fPIC -target arm64-apple-macos11" make -C pvm CC=clang AR=ar CFLAGS="-Wall -Wextra -O3 -std=c99 -fPIC -target arm64-apple-macos11"
 	@cp pvm/lib/libpvm.a pvm_tmp/libpvm.mac_arm64.a
 	@echo "  Building for Windows amd64..."
 	@if command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then \
@@ -354,11 +354,44 @@ pvmlib:
 	else \
 		echo "    Skipping Windows amd64 (no x86_64-w64-mingw32-gcc)"; \
 	fi
+
+	# Build the recompiler C implementation for the same set of targets and copy libs alongside libpvm
+	@echo "  Building recompiler C library for Linux amd64..."
+	@CC=x86_64-linux-musl-gcc AR=x86_64-linux-musl-ar make -C pvm/recompiler_c clean
+	@CC=x86_64-linux-musl-gcc AR=x86_64-linux-musl-ar CFLAGS="-Wall -Wextra -std=c99 -fPIC -O3 -DNDEBUG" make -C pvm/recompiler_c CC=x86_64-linux-musl-gcc AR=x86_64-linux-musl-ar CFLAGS="-Wall -Wextra -std=c99 -fPIC -O3 -DNDEBUG"
+	@cp pvm/recompiler_c/lib/libcompiler.a pvm_tmp/libcompiler.linux_amd64.a || true
+	@echo "  Building recompiler C library for Linux arm64..."
+	@if command -v aarch64-linux-musl-gcc >/dev/null 2>&1; then \
+		CC=aarch64-linux-musl-gcc AR=aarch64-linux-musl-ar make -C pvm/recompiler_c clean; \
+		CC=aarch64-linux-musl-gcc AR=aarch64-linux-musl-ar CFLAGS="-Wall -Wextra -std=c99 -fPIC -O3 -DNDEBUG" make -C pvm/recompiler_c CC=aarch64-linux-musl-gcc AR=aarch64-linux-musl-ar CFLAGS="-Wall -Wextra -std=c99 -fPIC -O3 -DNDEBUG"; \
+		cp pvm/recompiler_c/lib/libcompiler.a pvm_tmp/libcompiler.linux_arm64.a; \
+	else \
+		echo "    Skipping recompiler Linux arm64 (no aarch64-linux-musl-gcc)"; \
+	fi
+	@echo "  Building recompiler C library for macOS amd64..."
+	@CC=clang AR=ar make -C pvm/recompiler_c clean
+	@CC=clang AR=ar CFLAGS="-Wall -Wextra -std=c99 -fPIC -O3 -DNDEBUG -target x86_64-apple-macos10.12" make -C pvm/recompiler_c CC=clang AR=ar CFLAGS="-Wall -Wextra -std=c99 -fPIC -O3 -DNDEBUG -target x86_64-apple-macos10.12"
+	@cp pvm/recompiler_c/lib/libcompiler.a pvm_tmp/libcompiler.mac_amd64.a || true
+	@echo "  Building recompiler C library for macOS arm64..."
+	@CC=clang AR=ar make -C pvm/recompiler_c clean
+	@CC=clang AR=ar CFLAGS="-Wall -Wextra -std=c99 -fPIC -O3 -DNDEBUG -target arm64-apple-macos11" make -C pvm/recompiler_c CC=clang AR=ar CFLAGS="-Wall -Wextra -std=c99 -fPIC -O3 -DNDEBUG -target arm64-apple-macos11"
+	@cp pvm/recompiler_c/lib/libcompiler.a pvm_tmp/libcompiler.mac_arm64.a || true
+	@echo "  Building recompiler C library for Windows amd64..."
+	@if command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then \
+		CC=x86_64-w64-mingw32-gcc AR=x86_64-w64-mingw32-ar make -C pvm/recompiler_c clean; \
+		CC=x86_64-w64-mingw32-gcc AR=x86_64-w64-mingw32-ar CFLAGS="-Wall -Wextra -std=c99 -fPIC -O3 -DNDEBUG" make -C pvm/recompiler_c CC=x86_64-w64-mingw32-gcc AR=x86_64-w64-mingw32-ar CFLAGS="-Wall -Wextra -std=c99 -fPIC -O3 -DNDEBUG"; \
+		cp pvm/recompiler_c/lib/libcompiler.a pvm_tmp/libcompiler.windows_amd64.a; \
+	else \
+		echo "    Skipping recompiler Windows amd64 (no x86_64-w64-mingw32-gcc)"; \
+	fi
+
 	@echo "  Copying platform libraries to ffi directory..."
-	@cp pvm_tmp/libpvm.*.a ffi/
-	@cp pvm_tmp/libpvm.*.a pvm/lib/
+	@cp pvm_tmp/libpvm.*.a ffi/ || true
+	@cp pvm_tmp/libcompiler.*.a ffi/ || true
+	@cp pvm_tmp/libpvm.*.a pvm/lib/ || true
+	@cp pvm_tmp/libcompiler.*.a pvm/recompiler_c/lib/ || true
 	@rm -rf pvm_tmp
-	@echo "libpvm.a files ready in ffi/ and pvm/lib/."
+	@echo "libpvm.*.a and libcompiler.*.a files ready in ffi/ and pvm/lib/ (and pvm/recompiler_c/lib/)."
 	
 cargo_clean:
 	@echo "Cleaning FFI libraries!"

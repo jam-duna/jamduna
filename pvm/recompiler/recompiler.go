@@ -4,24 +4,24 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"runtime/debug"
+	"os"
 	"slices"
 	"strings"
-	"sync"
 	"syscall"
-	"time"
 	"unsafe"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm/program"
+	"github.com/colorfulnotion/jam/pvm/recompiler_c/recompiler_c"
 	"github.com/colorfulnotion/jam/types"
 	"golang.org/x/arch/x86/x86asm"
+	"golang.org/x/sys/unix"
 )
 
 const (
-	PageInaccessible = 0
-	PageMutable      = 1
-	PageImmutable    = 2
+	PageInaccessible = unix.PROT_NONE
+	PageMutable      = unix.PROT_READ | unix.PROT_WRITE
+	PageImmutable    = unix.PROT_READ
 )
 
 const (
@@ -60,22 +60,23 @@ const (
 	blockCounterSlotIndex = 16 // Block counter is at index 16
 
 	indirectJumpPointSlot = 20 // Indirect jump point is at index 20
+	nextx86SlotIndex      = 21 // Next x86 instruction address is at index 29 : for sbrk and ecalli
+
+	sbrkAIndex = 22 // Sbrk A is at index 22
+	sbrkDIndex = 23 // Sbrk D is at index 23
 
 	vmStateSlotIndex = 30 // VM state is at index 30
 	hostFuncIdIndex  = 31 // Host function ID is at index 31
 	ripSlotIndex     = 32 // RIP is at index 32
+	heapPointerSlot  = 33 // Heap pointer is at index 33
 )
 
 type RecompilerVM struct {
 	*program.Program
 	*RecompilerRam
+	compiler Compiler
 	HostFunc
-	JSize   uint64
-	Z       uint8
-	J       []uint32
-	code    []byte
-	bitmask []byte
-	pc      uint64
+	pc uint64
 	//
 	Gas          int64
 	IsChild      bool
@@ -86,26 +87,53 @@ type RecompilerVM struct {
 	hostCall     bool // ̵h in GP
 	host_func_id int  // h in GP
 
-	o_size uint32
-	w_size uint32
-	z      uint32
-	s      uint32
-	o_byte []byte
-	w_byte []byte
-
+	o_size          uint32
+	w_size          uint32
+	z               uint32
+	s               uint32
+	o_byte          []byte
+	w_byte          []byte
+	code            []byte
 	ServiceMetadata []byte
 	Service_index   uint32
-
-	mu        sync.Mutex
-	startCode []byte
-	exitCode  []byte
 
 	realCode []byte
 	codeAddr uintptr
 
+	InstMapPVMToX86 map[uint32]int // maps PVM PC to the x86 PC index
+	InstMapX86ToPVM map[int]uint32 // maps x86 PC to the PVM PC
+
+	initializationTime uint32 // time taken to initialize the VM
+	standardInitTime   uint32
+	compileTime        uint32
+	executionTime      uint32
+
+	//	snapshot *EmulatorSnapShot
+
+	basicBlockExecutionCounter map[uint64]int // PVM PC to execution count
+
+	OP_tally map[string]*X86InstTally `json:"tally"`
+
+	vmBasicBlock int
+
+	x86Code   []byte
+	djumpAddr uintptr // address of the jump table in x86Code
+
+	reuseCode bool // whether to reuse the existing x86Code buffer
+}
+
+type X86Compiler struct {
+	JSize   uint64
+	Z       uint8
+	J       []uint32
+	code    []byte
+	bitmask []byte
+
+	startCode []byte
+	exitCode  []byte
+
 	x86Blocks map[uint64]*BasicBlock // by x86 PC
 	x86PC     uint64
-	x86Code   []byte
 
 	JumpTableOffset  uint64         // offset for the jump table in x86Code
 	JumpTableOffset2 uint64         // offset for the jump table in x86Code
@@ -124,24 +152,47 @@ type RecompilerVM struct {
 	isPCCounting    bool
 	IsBlockCounting bool // whether to count basic blocks
 
-	initializationTime uint32 // time taken to initialize the VM
-	standardInitTime   uint32
-	compileTime        uint32
-	executionTime      uint32
-
-	//	snapshot *EmulatorSnapShot
-
 	basicBlocks map[uint64]*BasicBlock // by PVM PC
+	x86Code     []byte
+}
 
-	basicBlockExecutionCounter map[uint64]int // PVM PC to execution count
+type Compiler interface {
+	SetJumpTable(j []uint32) error
+	SetBitMask(bitmask []byte) error
+	CompileX86Code(startPC uint64) (x86code []byte, djumpAddr uintptr, InstMapPVMToX86 map[uint32]int, InstMapX86ToPVM map[int]uint32)
+}
 
-	OP_tally map[string]*X86InstTally `json:"tally"`
+func NewX86Compiler(code []byte) *X86Compiler {
+	return &X86Compiler{
+		code:            code,
+		x86Blocks:       make(map[uint64]*BasicBlock),
+		JumpTableMap:    make([]uint64, 0),
+		InstMapPVMToX86: make(map[uint32]int),
+		InstMapX86ToPVM: make(map[int]uint32),
+		x86Instructions: make(map[int]x86asm.Inst),
+		basicBlocks:     make(map[uint64]*BasicBlock),
+		isChargingGas:   true,  // default to charging gas
+		isPCCounting:    false, // default to counting PC
+		IsBlockCounting: false, // default to not counting basic blocks
+		Z:               0,
+	}
+}
 
-	vmBasicBlock int
+func (compiler *X86Compiler) SetJumpTable(j []uint32) error {
+	compiler.J = j
+	compiler.JSize = uint64(len(j))
+	return nil
+}
+
+func (compiler *X86Compiler) SetBitMask(bitmask []byte) error {
+	compiler.bitmask = bitmask
+	return nil
 }
 
 type HostFunc interface {
 	InvokeHostCall(host_fn int) (bool, error)
+	GetResultCode() uint8
+	GetMachineState() uint8
 }
 
 // vm.cVM = C.pvm_create(
@@ -159,25 +210,38 @@ func NewRecompilerVM(serviceIndex uint32, code []byte, initialRegs []uint64, ini
 	}
 	// Assemble the VM
 	rvm := &RecompilerVM{
-		code:            code,
 		pc:              initialPC,
 		Service_index:   serviceIndex,
-		JumpTableMap:    make([]uint64, 0),
 		InstMapX86ToPVM: make(map[int]uint32),
 		InstMapPVMToX86: make(map[uint32]int),
-
-		pc_addr:         uint64(ram.regDumpAddr + uintptr((len(regInfoList)+1)*8)),
-		basicBlocks:     make(map[uint64]*BasicBlock),
-		isChargingGas:   true,  // default to charging gas
-		isPCCounting:    false, // default to counting PC
-		IsBlockCounting: false, // default to not counting basic blocks
+		code:            code,
 	}
 	rvm.RecompilerRam = ram
 	for i := range initialRegs {
 		rvm.WriteRegister(i, initialRegs[i])
 	}
+
+	err = rvm.GetX86FromPVMX(code)
+	if err != nil {
+		fmt.Printf("GetX86FromPVMX failed: %v\n", err)
+		if compiler_usage == compiler_go {
+			rvm.compiler = NewX86Compiler(code)
+		} else if compiler_usage == compiler_c {
+			rvm.compiler = recompiler_c.NewC_Compiler(code)
+		}
+	} else {
+		rvm.reuseCode = true
+	}
 	return rvm, nil
 }
+
+var compiler_usage = compiler_c
+
+const (
+	compiler_go = "compiler_go"
+	compiler_c  = "compiler_c"
+)
+
 func (rvm *RecompilerVM) SetPC(pc uint64) {
 	rvm.pc = pc
 }
@@ -186,13 +250,16 @@ func (rvm *RecompilerVM) GetPC() uint64 {
 	return rvm.pc
 }
 func (rvm *RecompilerVM) SetBitMask(bitmask []byte) error {
-	rvm.bitmask = bitmask
+	if rvm.compiler != nil {
+		rvm.compiler.SetBitMask(bitmask)
+	}
 	return nil
 }
 
 func (rvm *RecompilerVM) SetJumpTable(j []uint32) error {
-	rvm.J = j
-	rvm.JSize = uint64(len(j))
+	if rvm.compiler != nil {
+		rvm.compiler.SetJumpTable(j)
+	}
 	return nil
 }
 
@@ -204,8 +271,14 @@ func (rvm *RecompilerVM) GetGas() int64 {
 	return rvm.Gas
 }
 
+func (rvm *RecompilerVM) GetResultCode() uint8 {
+	state, _ := rvm.ReadContextSlot(vmStateSlotIndex)
+	return uint8(state)
+}
+
 func (rvm *RecompilerVM) Panic(uint64) {
-	// TODO
+	rvm.MachineState = PANIC
+	rvm.WriteContextSlot(vmStateSlotIndex, uint64(PANIC), 8)
 }
 
 func (rvm *RecompilerVM) SetHostResultCode(errCode uint64) {
@@ -229,30 +302,23 @@ func (rvm *RecompilerVM) SetMemoryBounds(o_size uint32,
 	rvm.s = s
 	rvm.o_byte = o_byte
 	rvm.w_byte = w_byte
-
 }
 
 // add jump indirects
 const entryPatch = 0x99999999
+const regDumpMemPatch = 0x8888_8888_8888_8888
 
-func (vm *RecompilerVM) initStartCode() {
+func (vm *X86Compiler) initStartCode() {
 
-	vm.startCode = append(vm.startCode, encodeMovImm(BaseRegIndex, uint64(vm.RecompilerRam.realMemAddr))...)
+	vm.startCode = append(vm.startCode, encodeMovImm(BaseRegIndex, regDumpMemPatch)...)
 	// initialize registers: mov rX, imm from vm.register
 	for i := 0; i < regSize; i++ {
-		immVal := vm.ReadRegister(i)
-		code := encodeMovImm(i, immVal)
-		if showDisassembly {
-			fmt.Printf("Initialize Register %d (%s) = %d\n", i, regInfoList[i].Name, immVal)
-		}
+		offset := byte(i * 8)
+		code := encodeMem64ToReg(i, BaseRegIndex, offset)
 		vm.startCode = append(vm.startCode, code...)
 	}
-	gasRegMemAddr := uint64(vm.RecompilerRam.regDumpAddr) + uint64(len(regInfoList)*8)
-	if showDisassembly {
-		fmt.Printf("Initialize Gas %d = %d\n", gasRegMemAddr, vm.Gas)
-	}
-	vm.startCode = append(vm.startCode, encodeMovImm64ToMem(gasRegMemAddr, uint64(vm.Gas))...)
-
+	// Adjust R12 from regDumpAddr to realMemAddr: R12 = regDumpAddr + regMemsize
+	vm.startCode = append(vm.startCode, emitAddR12Imm32(regMemsize)...)
 	// padding with jump to the entry point
 	vm.startCode = append(vm.startCode, X86_OP_JMP_REL32) // JMP rel32
 	// use entryPatch as a placeholder 0x99999999
@@ -261,7 +327,7 @@ func (vm *RecompilerVM) initStartCode() {
 	vm.startCode = append(vm.startCode, patch...)
 
 	// Build exit code in temporary buffer
-	exitCode := encodeMovImm(BaseRegIndex, uint64(vm.RecompilerRam.regDumpAddr))
+	exitCode := emitSubR12Imm32(regMemsize)
 	for i := 0; i < len(regInfoList); i++ {
 		if i == BaseRegIndex {
 			continue // skip R12 into [R12]
@@ -270,15 +336,6 @@ func (vm *RecompilerVM) initStartCode() {
 		exitCode = append(exitCode, encodeMovRegToMem(i, BaseRegIndex, offset)...)
 	}
 	vm.exitCode = append(exitCode, X86_OP_RET)
-}
-func (vm *RecompilerRam) GetDirtyPages() []int {
-	dirtyPages := make([]int, 0)
-	for pageIndex, _ := range vm.dirtyPages {
-		if vm.dirtyPages[pageIndex] {
-			dirtyPages = append(dirtyPages, pageIndex)
-		}
-	}
-	return dirtyPages
 }
 
 // initDJumpFunc initializes the dynamic jump table function for indirect jumps.
@@ -292,7 +349,7 @@ func (vm *RecompilerRam) GetDirtyPages() []int {
 //
 // If all checks pass, it computes the handler address and jumps to the appropriate handler.
 // The function also patches the generated code with the correct relative offsets for jumps and handlers.
-func (vm *RecompilerVM) initDJumpFunc(x86CodeLen int) {
+func (vm *X86Compiler) initDJumpFunc(x86CodeLen int) {
 	type pending struct {
 		jeOff   int
 		handler uintptr
@@ -431,9 +488,9 @@ func (vm *RecompilerVM) initDJumpFunc(x86CodeLen int) {
 	}
 
 	// Patch panic jumps to point to the panic stub
-	panicStubAddr := vm.codeAddr + uintptr(len(code))
+	panicStubAddr := uintptr(len(code))
 	for _, off := range panicOffs {
-		rel := int32(int64(panicStubAddr) - int64(vm.codeAddr) - int64(off) - 4)
+		rel := int32(int64(panicStubAddr) - int64(off) - 4)
 		binary.LittleEndian.PutUint32(code[off:], uint32(rel))
 	}
 
@@ -442,8 +499,8 @@ func (vm *RecompilerVM) initDJumpFunc(x86CodeLen int) {
 	code = append(code, emitUd2InitDJump()...)
 
 	// Patch JE ret stub to point to the return stub
-	retStubAddr := vm.codeAddr + uintptr(len(code))
-	relRet := int32(int64(retStubAddr) - int64(vm.codeAddr) - int64(offJEret) - 6)
+	retStubAddr := uintptr(len(code))
+	relRet := int32(int64(retStubAddr) - int64(offJEret) - 6)
 	binary.LittleEndian.PutUint32(code[offJEret+2:offJEret+6], uint32(relRet))
 
 	// Return stub: POP jumpIndTempReg, then exit code
@@ -478,50 +535,11 @@ func (vm *RecompilerVM) initDJumpFunc(x86CodeLen int) {
 
 func (vm *RecompilerVM) Close() error {
 	var errs []error
-
-	if vm.x86Code != nil {
-		if err := syscall.Munmap(vm.x86Code); err != nil {
-			errs = append(errs, fmt.Errorf("x86Code: %w", err))
-		}
-		vm.x86Code = nil
-	}
-
 	if len(errs) > 0 {
 		return fmt.Errorf("Close encountered errors: %v", errs)
 	}
 
 	return nil
-}
-
-func (rvm *RecompilerVM) Disassemble(code []byte) string {
-	var sb strings.Builder
-	offset := 0
-	if rvm.x86Instructions == nil {
-		rvm.x86Instructions = make(map[int]x86asm.Inst)
-	}
-	for offset < len(code) {
-		inst, err := x86asm.Decode(code[offset:], 64)
-		length := inst.Len
-		if err != nil {
-			sb.WriteString(fmt.Sprintf("0x%04x: db 0x%02x\n", offset, code[offset]))
-			offset++
-			continue
-		}
-
-		var hexBytes []string
-		for i := 0; i < length; i++ {
-			hexBytes = append(hexBytes, fmt.Sprintf("%02x", code[offset+i]))
-		}
-		sb.WriteString(fmt.Sprintf(
-			"0x%04x: %-16s %s\n",
-			offset,
-			strings.Join(hexBytes, " "),
-			inst.String(),
-		))
-		rvm.x86Instructions[offset] = inst
-		offset += length
-	}
-	return sb.String()
 }
 func Disassemble(code []byte) string {
 	var sb strings.Builder
@@ -550,102 +568,43 @@ func Disassemble(code []byte) string {
 	return sb.String()
 }
 
-func (vm *RecompilerVM) ExecuteX86Code(x86code []byte) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			debug.PrintStack()
-			vm.ResultCode = PANIC
-			vm.MachineState = PANIC
-			err = fmt.Errorf("ExecuteX86Code panic: %v", r)
-		}
-	}()
-	vm.initDJumpFunc(len(x86code))
-	codeAddr, err := syscall.Mmap(
-		-1, 0, len(x86code)+len(vm.djumpTableFunc),
-		syscall.PROT_READ|syscall.PROT_WRITE|syscall.PROT_EXEC,
-		syscall.MAP_ANON|syscall.MAP_PRIVATE,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to mmap exec code: %w", err)
-	}
-
-	vm.realCode = codeAddr
-	vm.codeAddr = uintptr(unsafe.Pointer(&vm.realCode[0]))
-	if err != nil {
-		return fmt.Errorf("failed to mmap djumpTableFunc: %w", err)
-	}
-	// ca := make([]byte, 8)
-	// binary.LittleEndian.PutUint64(ca, uint64(vm.codeAddr))
-	// for c := 0; c < int(vm.JumpTableOffset2); c++ {
-	// 	if x86code[c] == 0xba && x86code[c+1] == 0xef && x86code[c+2] == 0xef && x86code[c+3] == 0xef {
-	// 		copy(x86code[c+1:c+9], ca)
-	// 	}
-	// }
-	vm.djumpAddr = vm.codeAddr + uintptr(len(x86code))
-	vm.finalizeJumpTargets(vm.J)
-
-	copy(codeAddr, x86code)
-	copy(codeAddr[len(x86code):], vm.djumpTableFunc)
-	err = syscall.Mprotect(codeAddr, syscall.PROT_READ|syscall.PROT_EXEC)
-	if err != nil {
-		return fmt.Errorf("failed to mprotect exec code: %w", err)
-	}
-
-	save := false
-	if save {
-		// Ensure the directory exists
-		if err := syscall.Mkdir("test_code", 0755); err != nil && err != syscall.EEXIST {
-			return fmt.Errorf("failed to create directory: %w", err)
-		}
-		file, err := syscall.Open("test_code/output.bin", syscall.O_WRONLY|syscall.O_CREAT|syscall.O_TRUNC, 0644)
-		if err != nil {
-			return fmt.Errorf("failed to open output file: %w", err)
-		}
-		defer syscall.Close(file)
-		// write the x86 code to the file
-		if _, err := syscall.Write(file, x86code); err != nil {
-			return fmt.Errorf("failed to write x86 code to file: %w", err)
-		}
-		// write the djumpTableFunc to the file
-	}
-	if showDisassembly {
-		str := vm.Disassemble(vm.realCode)
-		fmt.Printf("ALL COMBINED Disassembled x86 code:\n%s\n", str)
-	}
-	crashed, _, err := ExecuteX86(codeAddr, vm.regDumpMem)
-	for i := 0; i < regSize; i++ {
-		regValue := binary.LittleEndian.Uint64(vm.regDumpMem[i*8:])
-		if showDisassembly {
-			fmt.Printf("%s = %d\n", regInfoList[i].Name, regValue)
-		}
-		vm.WriteRegister(i, regValue)
-	}
-	if crashed == -1 || err != nil {
-		vm.ResultCode = PANIC
-		vm.MachineState = PANIC
-		fmt.Printf("PANIC in ExecuteX86Code: %v\n", err)
-		fmt.Printf("codeAddr: 0x%x\n", vm.codeAddr)
-		fmt.Printf("djumpAddr: 0x%x\n", vm.djumpAddr)
-		fmt.Printf("sbrk address: 0x%x\n", GetSbrkAddress())
-		fmt.Printf("Ecall address: 0x%x\n", GetEcalliAddress())
-		return fmt.Errorf("ExecuteX86 crash detected (return -1)")
-	}
-
-	for i := 0; i < regSize; i++ {
-		regValue := binary.LittleEndian.Uint64(vm.regDumpMem[i*8:])
-		if showDisassembly {
-			fmt.Printf("%s = %d\n", regInfoList[i].Name, regValue)
-		}
-		vm.WriteRegister(i, regValue)
-	}
-	return nil
+type X86Instr struct {
+	Offset      int
+	Instruction x86asm.Inst
 }
 
-func (vm *RecompilerVM) ExecuteX86CodeWithEntry(x86code []byte, entry uint32) (err error) {
-	startTime := time.Now()
-	vm.initDJumpFunc(len(x86code))
+func DisassembleInstructions(code []byte) []X86Instr {
+	instructions := make([]X86Instr, 0)
+	offset := 0
+	for offset < len(code) {
+		inst, err := x86asm.Decode(code[offset:], 64)
+		length := inst.Len
+		if err != nil {
+			offset++
+			continue
+		}
+		instructions = append(instructions, X86Instr{
+			Offset:      offset,
+			Instruction: inst,
+		})
+		offset += length
+	}
+	return instructions
+}
+
+const entryOffset = 82
+const regDumpOffset = 2
+
+func (rvm *X86Compiler) Patch() {
+	rvm.djumpAddr = uintptr(len(rvm.x86Code))
+	rvm.initDJumpFunc(len(rvm.x86Code))
+	rvm.finalizeJumpTargets(rvm.J)
+	rvm.x86Code = append(rvm.x86Code, rvm.djumpTableFunc...)
+}
+
+func (vm *RecompilerVM) ExecuteX86CodeWithEntry(entry uint32) (err error) {
 	codeAddr, err := syscall.Mmap(
-		-1, 0, len(x86code)+len(vm.djumpTableFunc),
+		-1, 0, len(vm.x86Code),
 		syscall.PROT_READ|syscall.PROT_WRITE|syscall.PROT_EXEC,
 		syscall.MAP_ANON|syscall.MAP_PRIVATE,
 	)
@@ -658,18 +617,9 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(x86code []byte, entry uint32) (e
 	if err != nil {
 		return fmt.Errorf("failed to mmap djumpTableFunc: %w", err)
 	}
-	// ca := make([]byte, 8)
-	// binary.LittleEndian.PutUint64(ca, uint64(vm.codeAddr))
-	// for c := 0; c < int(vm.JumpTableOffset2); c++ {
-	// 	if x86code[c] == 0xba && x86code[c+1] == 0xef && x86code[c+2] == 0xef && x86code[c+3] == 0xef {
-	// 		copy(x86code[c+1:c+9], ca)
-	// 	}
-	// }
-	vm.djumpAddr = vm.codeAddr + uintptr(len(x86code))
-	vm.finalizeJumpTargets(vm.J)
+	// find the real memory placeholder and patch it
 
-	var patchInstIdx = -1
-	entryPatchImm := entryPatch
+	binary.LittleEndian.PutUint64(vm.x86Code[regDumpOffset:regDumpOffset+8], uint64(vm.regDumpAddr))
 	// use entryPatch as a placeholder 0x99999999
 	//get the x86 pc
 	x86PC, ok := vm.InstMapPVMToX86[entry]
@@ -681,65 +631,24 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(x86code []byte, entry uint32) (e
 	}
 	patch := make([]byte, 4)
 	binary.LittleEndian.PutUint32(patch, entryPatch)
-	for i := 0; i < len(x86code)-5; i++ {
-		if x86code[i] == 0xE9 && // JMP rel32
-			x86code[i+1] == 0x99 &&
-			x86code[i+2] == 0x99 &&
-			x86code[i+3] == 0x99 &&
-			x86code[i+4] == 0x99 {
-			// found a placeholder for the entry patch
-			patchInstIdx = i
-			// replace it with the actual entry patch
-			binary.LittleEndian.PutUint32(x86code[i+1:i+5], uint32(x86PC-i-5))
-			if showDisassembly {
-				fmt.Printf("Patching entry point at index %d with 0x%X\n", patchInstIdx, entryPatchImm)
-			}
-			break
-		}
-	}
+	binary.LittleEndian.PutUint32(vm.x86Code[entryOffset+1:entryOffset+5], uint32(x86PC-entryOffset-5))
+	vm.djumpAddr += vm.codeAddr
 	vm.WriteContextSlot(indirectJumpPointSlot, uint64(vm.djumpAddr), 8)
 
 	// if patchInstIdx == -1 {
 	// 	return fmt.Errorf("no entry patch placeholder found in x86 code")
 	// }
-	copy(codeAddr, x86code)
-	copy(codeAddr[len(x86code):], vm.djumpTableFunc)
-	err = syscall.Mprotect(codeAddr, syscall.PROT_READ|syscall.PROT_EXEC)
-	if err != nil {
-		return fmt.Errorf("failed to mprotect exec code: %w", err)
-	}
-
-	save := false
-	if save {
-		// Ensure the directory exists
-		if err := syscall.Mkdir("test_code", 0755); err != nil && err != syscall.EEXIST {
-			return fmt.Errorf("failed to create directory: %w", err)
-		}
-		file, err := syscall.Open("test_code/output.bin", syscall.O_WRONLY|syscall.O_CREAT|syscall.O_TRUNC, 0644)
-		if err != nil {
-			return fmt.Errorf("failed to open output file: %w", err)
-		}
-		defer syscall.Close(file)
-		// write the x86 code to the file
-		if _, err := syscall.Write(file, x86code); err != nil {
-			return fmt.Errorf("failed to write x86 code to file: %w", err)
-		}
-		// write the djumpTableFunc to the file
-	}
+	copy(codeAddr, vm.x86Code)
+	// Keep PROT_WRITE|PROT_EXEC for fast patching during Resume()
+	// Security note: This allows self-modifying code but improves performance
 
 	if showDisassembly {
-		str := vm.Disassemble(vm.realCode)
+		str := Disassemble(vm.realCode)
 		fmt.Printf("ALL COMBINED Disassembled x86 code:\n%s\n", str)
 	}
-	vm.compileTime += common.Elapsed(startTime)
-	startTime = time.Now()
 	crashed, _, err := ExecuteX86(codeAddr, vm.regDumpMem)
-	for i := 0; i < regSize; i++ {
-		regValue := binary.LittleEndian.Uint64(vm.regDumpMem[i*8:])
-		if showDisassembly {
-			fmt.Printf("%s = %d\n", regInfoList[i].Name, regValue)
-		}
-		vm.WriteRegister(i, regValue)
+	if err != nil {
+		return fmt.Errorf("ExecuteX86 failed: %w", err)
 	}
 	gas, err := vm.ReadContextSlot(gasSlotIndex)
 	if err != nil {
@@ -753,60 +662,191 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(x86code []byte, entry uint32) (e
 		fmt.Printf("codeAddr: 0x%x\n", vm.codeAddr)
 		fmt.Printf("djumpAddr: 0x%x\n", vm.djumpAddr)
 		fmt.Printf("realMemory address: 0x%x\n", vm.realMemAddr)
-		fmt.Printf("sbrk address: 0x%x\n", GetSbrkAddress())
-		fmt.Printf("Ecall address: 0x%x\n", GetEcalliAddress())
-		return fmt.Errorf("ExecuteX86 crash detected (return -1)")
-	}
 
-	for i := 0; i < regSize; i++ {
-		regValue := binary.LittleEndian.Uint64(vm.regDumpMem[i*8:])
-		if showDisassembly {
-			fmt.Printf("%s = %d\n", regInfoList[i].Name, regValue)
-		}
-		vm.WriteRegister(i, regValue)
+		// restore the gas calculation
+		// rip, _ := vm.ReadContextSlot(ripSlotIndex)
+		// if rip > 0 && rip < uint64(len(vm.realCode)) {
+		// 	// get the code offset out
+		// 	codeAddr := vm.codeAddr
+		// 	offset := int(rip - uint64(codeAddr))
+		// 	var pvm_pc uint32
+		// 	var x86_pc int
+		// 	// get the pvm pc out
+		// 	for i := offset; i > 0; i-- {
+		// 		pvm_pc, ok = vm.InstMapX86ToPVM[i]
+		// 		x86_pc = i
+		// 		if ok {
+		// 			break
+		// 		}
+		// 	}
+		// 	basicBlock, basicBlockFound := vm.basicBlocks[uint64(x86_pc)]
+		// 	if !basicBlockFound {
+		// 		fmt.Printf("Basic block not found for x86 PC: %d\n", x86_pc)
+		// 		return fmt.Errorf("Basic block not found for x86 PC: %d", x86_pc)
+		// 	}
+		// 	for _, instr := range basicBlock.Instructions {
+		// 		overCharged := false
+		// 		if instr.Pc == uint64(pvm_pc) {
+		// 			overCharged = true
+		// 			continue
+		// 		}
+		// 		if overCharged && vm.isChargingGas {
+		// 			vm.Gas += 1
+		// 		}
+		// 	}
+
+		// }
+		return fmt.Errorf("ExecuteX86 crash detected (return -1) gas = %d", vm.Gas)
 	}
 	// get the pc out
-	rip, _ := vm.ReadContextSlot(ripSlotIndex)
-	codeAddress := uint64(vm.codeAddr)
-	offset := rip - codeAddress
-	maximum := uint64(100)
-	var pc uint32
-	for i := offset; i >= offset-maximum; i-- {
-		if inst, ok := vm.InstMapX86ToPVM[int(i)]; ok {
-			opcode := vm.code[inst]
-			fmt.Printf("PC found: %d at x86 offset: 0x%x (RIP: 0x%x) %s\n", inst, i, rip, opcode_str(opcode))
-			if opcode == ECALLI {
-				pc = inst + 1 // todo vm.skip()
-			}
-			break
-		}
-	}
-	vm.pc = uint64(pc)
+	vm.pc, _ = vm.ReadContextSlot(pcSlotIndex)
 	// vm state
 	vmState, _ := vm.ReadContextSlot(vmStateSlotIndex)
-	host_id, _ := vm.ReadContextSlot(hostFuncIdIndex)
+	if vmState == HOST {
+		vm.hostCall = true
+		host_id, _ := vm.ReadContextSlot(hostFuncIdIndex)
+		vm.host_func_id = int(host_id) // reset host function ID
+	}
 	// get the vmstate out
+	vm.MachineState = uint8(vmState)
+	return nil
+}
+
+func (vm *RecompilerVM) Resume() error {
+
+	u64x86PC, err := vm.ReadContextSlot(nextx86SlotIndex)
+	patchInstIdx := entryOffset
+	codeAddr := vm.realCode
+	if err != nil && vm.pc != 0 {
+		fmt.Printf("post-host call: pc %d not found in InstMapPVMToX86, isChild %v\n", vm.pc, vm.IsChild)
+		return fmt.Errorf("post-host call: pc %d not found in InstMapPVMToX86, isChild %v", vm.pc, vm.IsChild)
+	}
+	x86PC := int(u64x86PC)
+	// Direct patch - no mprotect needed (code already has PROT_WRITE|PROT_EXEC)
+	binary.LittleEndian.PutUint32(codeAddr[patchInstIdx+1:patchInstIdx+5], uint32(x86PC-patchInstIdx-5))
+	vm.WriteContextSlot(vmStateSlotIndex, uint64(0), 8) // reset vm state
+	vm.MachineState = 0
+	crashed, _, err := ExecuteX86(codeAddr, vm.regDumpMem)
+	if err != nil {
+		return fmt.Errorf("ExecuteX86 failed: %w", err)
+	}
+
+	// Batch read all needed context slots for better performance
+	slots, err := vm.ReadContextSlots(gasSlotIndex, pcSlotIndex, vmStateSlotIndex, hostFuncIdIndex)
+	if err != nil {
+		return fmt.Errorf("failed to read context slots: %w", err)
+	}
+	vm.Gas = int64(slots[0])
+	vm.pc = slots[1]
+	vmState := slots[2]
+	host_id := slots[3]
+
+	if crashed == -1 || err != nil {
+		vm.ResultCode = PANIC
+		vm.MachineState = PANIC
+		fmt.Printf("PANIC in ExecuteX86Code: %v\n", err)
+		fmt.Printf("codeAddr: 0x%x\n", vm.codeAddr)
+		fmt.Printf("djumpAddr: 0x%x\n", vm.djumpAddr)
+		fmt.Printf("realMemory address: 0x%x\n", vm.realMemAddr)
+
+		// restore the gas calculation
+		// rip, _ := vm.ReadContextSlot(ripSlotIndex)
+		// if rip > 0 && rip < uint64(len(vm.realCode)) {
+		// 	// get the code offset out
+		// 	codeAddr := vm.codeAddr
+		// 	offset := int(rip - uint64(codeAddr))
+		// 	var pvm_pc uint32
+		// 	var x86_pc int
+		// 	// get the pvm pc out
+		// 	for i := offset; i > 0; i-- {
+		// 		pvm_pc, ok = vm.InstMapX86ToPVM[i]
+		// 		x86_pc = i
+		// 		if ok {
+		// 			break
+		// 		}
+		// 	}
+		// 	basicBlock, basicBlockFound := vm.basicBlocks[uint64(x86_pc)]
+		// 	if !basicBlockFound {
+		// 		fmt.Printf("Basic block not found for x86 PC: %d\n", x86_pc)
+		// 		return fmt.Errorf("Basic block not found for x86 PC: %d", x86_pc)
+		// 	}
+		// 	for _, instr := range basicBlock.Instructions {
+		// 		overCharged := false
+		// 		if instr.Pc == uint64(pvm_pc) {
+		// 			overCharged = true
+		// 			continue
+		// 		}
+		// 		if overCharged && vm.isChargingGas {
+		// 			vm.Gas += 1
+		// 		}
+		// 	}
+
+		// }
+		return fmt.Errorf("ExecuteX86 crash detected (return -1) gas = %d", vm.Gas)
+	}
+
+	// Update machine state based on execution result
 	if vmState == HOST {
 		vm.hostCall = true
 		vm.host_func_id = int(host_id) // reset host function ID
 	}
 	vm.MachineState = uint8(vmState)
-	vm.executionTime = common.Elapsed(startTime)
 	return nil
 }
 
-func (rvm *RecompilerVM) Execute(entry uint32) {
-	startTime := time.Now()
-	rvm.pc = 0
+func (compiler *X86Compiler) CompileX86Code(startPC uint64) (x86code []byte, djumpAddr uintptr, InstMapPVMToX86 map[uint32]int, InstMapX86ToPVM map[int]uint32) {
+	compiler.initStartCode()
+	compiler.Compile(startPC)
+	compiler.x86Code = append(compiler.x86Code, emitTrap()...) // in case direct fallthrough
+	compiler.Patch()
+	return compiler.x86Code, compiler.djumpAddr, compiler.InstMapPVMToX86, compiler.InstMapX86ToPVM
+}
 
-	rvm.initStartCode()
-	rvm.Compile(rvm.pc)
-	rvm.compileTime = common.Elapsed(startTime)
-	rvm.x86Code = append(rvm.x86Code, emitTrap()...) // in case direct fallthrough
-	if err := rvm.ExecuteX86CodeWithEntry(rvm.x86Code, entry); err != nil {
+func (rvm *RecompilerVM) Execute(entry uint32) {
+	// startTime := time.Now()
+	rvm.pc = 0
+	rvm.WriteContextSlot(gasSlotIndex, uint64(rvm.Gas), 8)
+
+	if !rvm.reuseCode {
+		rvm.x86Code, rvm.djumpAddr, rvm.InstMapPVMToX86, rvm.InstMapX86ToPVM = rvm.compiler.CompileX86Code(rvm.pc)
+		err1 := rvm.SavePVMX()
+		if err1 != nil {
+			fmt.Printf("SavePVMX failed: %v\n", err1)
+		}
+	}
+	// rvm.compileTime = common.Elapsed(startTime)
+	// startTime = time.Now()
+	if err := rvm.ExecuteX86CodeWithEntry(entry); err != nil {
 		// we don't have to return this , just print it
 		fmt.Printf("ExecuteX86 crash detected: %v\n", err)
 	}
+
+	for rvm.MachineState == HOST || rvm.MachineState == SBRK {
+		if rvm.MachineState == HOST {
+			err := rvm.HandleEcalli()
+			if err != nil {
+				fmt.Printf("HandleEcalli failed: %v\n", err)
+				break
+			}
+		} else if rvm.MachineState == SBRK {
+			err := rvm.HandleSbrk()
+			if err != nil {
+				fmt.Printf("HandleSbrk failed: %v\n", err)
+				break
+			}
+		}
+		if rvm.HostFunc.GetMachineState() == PANIC {
+			fmt.Printf("PANIC after host call\n")
+			break
+		}
+		err := rvm.Resume()
+		if err != nil {
+			fmt.Printf("Resume after host call failed: %v\n", err)
+			rvm.WriteContextSlot(vmStateSlotIndex, uint64(PANIC), 8)
+			break
+		}
+	}
+	// rvm.executionTime = common.Elapsed(startTime)
 }
 
 // Standard_Program_Initialization initializes the program memory and registers
@@ -818,6 +858,7 @@ func (vm *RecompilerVM) Init(argument_data_a []byte) (err error) {
 	//1)
 	// o_byte
 	o_len := len(vm.o_byte)
+
 	if err = vm.SetMemAccess(Z_Z, uint32(o_len), PageMutable); err != nil {
 		return fmt.Errorf("SetMemAccess1 failed o_len=%d (o_byte): %w", o_len, err)
 	}
@@ -890,21 +931,20 @@ func (vm *RecompilerVM) Init(argument_data_a []byte) (err error) {
 	return nil
 }
 
-func (vm *RecompilerVM) WriteContextSlot(slot_index int, value uint64, size int) error {
+func (vm *RecompilerVM) WriteContextSlot(slotIndex int, value uint64, size int) error {
 	if vm.regDumpAddr == 0 {
 		return fmt.Errorf("regDumpAddr is not initialized")
 	}
-	addr := uintptr(slot_index * 8)
+	start := slotIndex * 8
+	if start+size > len(vm.regDumpMem) {
+		return fmt.Errorf("out of bounds: slot=%d size=%d len=%d", slotIndex, size, len(vm.regDumpMem))
+	}
 
 	switch size {
 	case 4:
-		var buf [8]byte
-		binary.LittleEndian.PutUint32(buf[:4], uint32(value))
-		copy(vm.regDumpMem[addr:], buf[:])
+		binary.LittleEndian.PutUint32(vm.regDumpMem[start:start+4], uint32(value))
 	case 8:
-		var buf [8]byte
-		binary.LittleEndian.PutUint64(buf[:], value)
-		copy(vm.regDumpMem[addr:], buf[:])
+		binary.LittleEndian.PutUint64(vm.regDumpMem[start:start+8], value)
 	default:
 		return fmt.Errorf("unsupported size: %d", size)
 	}
@@ -914,31 +954,31 @@ func (vm *RecompilerVM) WriteContextSlot(slot_index int, value uint64, size int)
 // BuildWriteContextSlotCode emits x86-64 machine code that, when executed,
 // stores `value` into vm.regDumpAddr + slot_index*8.
 // size must be 4 or 8 (bytes).
-func (vm *RecompilerVM) BuildWriteContextSlotCode(slotIndex int, value uint64, size int) ([]byte, error) {
-	if vm.regDumpAddr == 0 {
-		return nil, fmt.Errorf("regDumpAddr is not initialized")
+func BuildWriteContextSlotCode(slotIndex int, value uint64, size int) ([]byte, error) {
+	if slotIndex < 0 {
+		return nil, fmt.Errorf("invalid slot index: %d", slotIndex)
 	}
 	if size != 4 && size != 8 {
 		return nil, fmt.Errorf("unsupported size: %d", size)
 	}
 
-	// Absolute target address: same place as WriteContextSlot
-	target := uintptr(uintptr(vm.regDumpAddr) + uintptr(slotIndex*8))
-
 	var code []byte
 	// Helpers
 	emit := func(b ...byte) { code = append(code, b...) }
-	emitImm32 := func(x uint32) {
-		var t [4]byte
-		binary.LittleEndian.PutUint32(t[:], x)
-		code = append(code, t[:]...)
-	}
 	emitImm64 := func(x uint64) {
 		var t [8]byte
 		binary.LittleEndian.PutUint64(t[:], x)
 		code = append(code, t[:]...)
 	}
+	emitImm32 := func(x uint32) {
+		var t [4]byte
+		binary.LittleEndian.PutUint32(t[:], x)
+		code = append(code, t[:]...)
+	}
 	code = append(code, emitPushReg(RAX)...)
+
+	slotOffset := uint32(slotIndex * 8)
+	dumpOffset := uint32(dumpSize)
 
 	switch size {
 	case 8:
@@ -946,19 +986,35 @@ func (vm *RecompilerVM) BuildWriteContextSlotCode(slotIndex int, value uint64, s
 		emit(0x48, 0xB8)
 		emitImm64(value)
 
-		// 48 A3 moffs64       ; mov [moffs64], rax
-		emit(0x48, 0xA3)
-		emitImm64(uint64(target))
-
 	case 4:
 		// B8 imm32            ; mov eax, imm32
 		emit(0xB8)
 		emitImm32(uint32(value))
-
-		// A3 moffs64          ; mov [moffs64], eax  (operand-size=32)
-		emit(0xA3)
-		emitImm64(uint64(target))
 	}
+
+	// Temporarily shift R12 from the real memory base to the register-dump slot.
+	code = append(code, emitSubR12Imm32(dumpOffset)...)
+
+	if slotOffset != 0 {
+		code = append(code, emitAddR12Imm32(slotOffset)...)
+	}
+
+	switch size {
+	case 8:
+		// 49 89 04 24        ; mov [r12], rax
+		emit(0x49, 0x89, 0x04, 0x24)
+	case 4:
+		// 41 89 04 24        ; mov [r12], eax
+		emit(0x41, 0x89, 0x04, 0x24)
+	}
+
+	if slotOffset != 0 {
+		code = append(code, emitSubR12Imm32(slotOffset)...)
+	}
+
+	// Restore R12 to the real memory base
+	code = append(code, emitAddR12Imm32(dumpOffset)...)
+
 	// Restore RAX and return
 	code = append(code, emitPopReg(RAX)...)
 
@@ -968,16 +1024,12 @@ func (vm *RecompilerVM) BuildWriteRipToContextSlotCode(slotIndex int) ([]byte, e
 	if vm.regDumpAddr == 0 {
 		return nil, fmt.Errorf("regDumpAddr is not initialized")
 	}
-	// Slot is always 8-byte aligned
-	target := uintptr(uintptr(vm.regDumpAddr) + uintptr(slotIndex*8))
+	if slotIndex < 0 {
+		return nil, fmt.Errorf("invalid slot index: %d", slotIndex)
+	}
 
 	var code []byte
 	emit := func(b ...byte) { code = append(code, b...) }
-	emitImm64 := func(x uint64) {
-		var t [8]byte
-		binary.LittleEndian.PutUint64(t[:], x)
-		code = append(code, t[:]...)
-	}
 
 	// Save RAX
 	code = append(code, emitPushReg(RAX)...)
@@ -986,9 +1038,25 @@ func (vm *RecompilerVM) BuildWriteRipToContextSlotCode(slotIndex int) ([]byte, e
 	// This loads the address of the next instruction into RAX.
 	emit(0x48, 0x8D, 0x05, 0x00, 0x00, 0x00, 0x00)
 
-	// 48 A3 moffs64          ; mov [moffs64], rax
-	emit(0x48, 0xA3)
-	emitImm64(uint64(target))
+	slotOffset := uint32(slotIndex * 8)
+	dumpOffset := uint32(dumpSize)
+
+	// Temporarily repoint R12 to the register dump buffer.
+	code = append(code, emitSubR12Imm32(dumpOffset)...)
+
+	if slotOffset != 0 {
+		code = append(code, emitAddR12Imm32(slotOffset)...)
+	}
+
+	// 49 89 04 24          ; mov [r12], rax
+	emit(0x49, 0x89, 0x04, 0x24)
+
+	if slotOffset != 0 {
+		code = append(code, emitSubR12Imm32(slotOffset)...)
+	}
+
+	// Restore R12 to the real memory base
+	code = append(code, emitAddR12Imm32(dumpOffset)...)
 
 	// Restore RAX
 	code = append(code, emitPopReg(RAX)...)
@@ -1000,15 +1068,31 @@ func (vm *RecompilerVM) ReadContextSlot(slot_index int) (uint64, error) {
 	if vm.regDumpAddr == 0 {
 		return 0, fmt.Errorf("regDumpAddr is not initialized")
 	}
-	addr := uintptr(slot_index * 8)
-	var value uint64
-	// just read it out
-	data := vm.regDumpMem[addr : addr+8]
-	if len(data) < 8 {
+
+	start := slot_index * 8
+	if start+8 > len(vm.regDumpMem) {
 		return 0, fmt.Errorf("not enough data to read from regDumpMem at index %d", slot_index)
 	}
-	value = binary.LittleEndian.Uint64(data)
-	return value, nil
+
+	return *(*uint64)(unsafe.Pointer(&vm.regDumpMem[start])), nil
+}
+
+// ReadContextSlots reads multiple context slots in a single batch operation for better performance.
+// This reduces overhead compared to multiple individual ReadContextSlot calls.
+func (vm *RecompilerVM) ReadContextSlots(slotIndices ...int) ([]uint64, error) {
+	if vm.regDumpAddr == 0 {
+		return nil, fmt.Errorf("regDumpAddr is not initialized")
+	}
+
+	results := make([]uint64, len(slotIndices))
+	for i, slotIdx := range slotIndices {
+		start := slotIdx * 8
+		if start+8 > len(vm.regDumpMem) {
+			return nil, fmt.Errorf("not enough data to read from regDumpMem at index %d", slotIdx)
+		}
+		results[i] = *(*uint64)(unsafe.Pointer(&vm.regDumpMem[start]))
+	}
+	return results, nil
 }
 
 // A.5.2. Instructions with Arguments of One Immediate. InstructionI1
@@ -1150,26 +1234,6 @@ func generateCompareBranch(jcc byte) func(inst Instruction) []byte {
 	}
 }
 
-func (vm *RecompilerVM) GetMemory() (map[int][]byte, map[int]int) {
-	memory := make(map[int][]byte)
-	pageMap := make(map[int]int)
-	for index, _ := range vm.dirtyPages {
-		pageMap[index] = 1 // Initialize with 0 access count
-	}
-	for i := 0; i < TotalPages; i++ {
-		if _, ok := pageMap[i]; ok {
-			// fmt.Printf("Page %d: access %d\n", i, access)
-			data, err := vm.ReadMemory(uint32(i*PageSize), PageSize)
-			if err != nil {
-				continue
-			}
-			memory[i] = data
-			// fmt.Printf("Page %d: %v\n", i, common.BytesToHash(data))
-		}
-	}
-	return memory, pageMap
-}
-
 type X86InstTally struct {
 	PVM_OP           string                       `json:"pvm_op"`
 	X86_Map          map[string]*X86InternalTally `json:"x86_map"`
@@ -1198,4 +1262,114 @@ func (vm *RecompilerVM) AddPVMCount(pvm_OP string) {
 		vm.OP_tally[pvm_OP] = entry
 	}
 	entry.TotalPVM++
+}
+
+type PVMX struct {
+	DjumpEntry      uint64 `json:"djump_entry"`
+	SavingX86Entry0 uint64 `json:"saving_x86_entry0"`
+	SavingX86Entry5 uint64 `json:"saving_x86_entry5"`
+	X86Code         []byte `json:"x86_code"`
+}
+
+func EncodePVMX(p *PVMX) ([]byte, error) {
+	x86Len := uint32(len(p.X86Code))
+	size := 8 + 8 + 8 + 4 + len(p.X86Code) // 3 uint64 + length(uint32) + data
+	buf := make([]byte, size)
+	pos := 0
+
+	binary.LittleEndian.PutUint64(buf[pos:], p.DjumpEntry)
+	pos += 8
+	binary.LittleEndian.PutUint64(buf[pos:], p.SavingX86Entry0)
+	pos += 8
+	binary.LittleEndian.PutUint64(buf[pos:], p.SavingX86Entry5)
+	pos += 8
+	binary.LittleEndian.PutUint32(buf[pos:], x86Len)
+	pos += 4
+	copy(buf[pos:], p.X86Code)
+
+	return buf, nil
+}
+
+func DecodePVMX(data []byte) (*PVMX, error) {
+	if len(data) < 28 {
+		return nil, fmt.Errorf("data too short")
+	}
+	pos := 0
+	p := &PVMX{}
+	p.DjumpEntry = binary.LittleEndian.Uint64(data[pos:])
+	pos += 8
+	p.SavingX86Entry0 = binary.LittleEndian.Uint64(data[pos:])
+	pos += 8
+	p.SavingX86Entry5 = binary.LittleEndian.Uint64(data[pos:])
+	pos += 8
+
+	x86Len := binary.LittleEndian.Uint32(data[pos:])
+	pos += 4
+	if len(data[pos:]) < int(x86Len) {
+		return nil, fmt.Errorf("truncated x86_code: want %d bytes, got %d", x86Len, len(data[pos:]))
+	}
+	// Use slicing instead of allocate+copy for better performance
+	// This is safe because the data buffer is not reused after this function returns
+	p.X86Code = data[pos : pos+int(x86Len)]
+	return p, nil
+}
+
+// tmp directory
+const tmpDir = "/tmp/pvmx_tmp"
+
+func (vm *RecompilerVM) SavePVMX() error {
+	pvmx := PVMX{
+		DjumpEntry:      uint64(vm.djumpAddr),
+		SavingX86Entry0: uint64(vm.InstMapPVMToX86[0]),
+		SavingX86Entry5: uint64(vm.InstMapPVMToX86[5]),
+		X86Code:         vm.x86Code,
+	}
+	// use codec to encode
+	data, err := EncodePVMX(&pvmx)
+	if err != nil {
+		return fmt.Errorf("failed to encode PVMX: %w", err)
+	}
+	// write to file
+	// check if the dir exists
+	if _, err := os.Stat(tmpDir); os.IsNotExist(err) {
+		err = os.Mkdir(tmpDir, 0755)
+		if err != nil {
+			return fmt.Errorf("failed to create tmp dir: %w", err)
+		}
+	}
+	// get the pvm code and compute the hash
+	pvm_code := vm.code
+	pvm_hash := common.Blake2Hash(pvm_code)
+	filename := fmt.Sprintf("%s/%v.pvmx", tmpDir, pvm_hash)
+	err = os.WriteFile(filename, data, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write PVMX to file: %w", err)
+	}
+	if debugRecompiler {
+		fmt.Printf("Saved PVMX to %s\n", filename)
+	}
+	return nil
+}
+
+func (vm *RecompilerVM) GetX86FromPVMX(code []byte) error {
+	// Compute hash directly without intermediate variable
+	pvm_hash := common.Blake2Hash(code)
+	// Optimize filename construction - avoid fmt.Sprintf overhead
+	filename := tmpDir + "/" + pvm_hash.String() + ".pvmx"
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return fmt.Errorf("failed to read PVMX from file: %w", err)
+	}
+	pvmx, err := DecodePVMX(data)
+	if err != nil {
+		return fmt.Errorf("failed to decode PVMX: %w", err)
+	}
+	vm.djumpAddr = uintptr(pvmx.DjumpEntry)
+	vm.InstMapPVMToX86[0] = int(pvmx.SavingX86Entry0)
+	vm.InstMapPVMToX86[5] = int(pvmx.SavingX86Entry5)
+	vm.x86Code = pvmx.X86Code
+	if debugRecompiler {
+		fmt.Printf("Loaded PVMX from %s\n", filename)
+	}
+	return nil
 }

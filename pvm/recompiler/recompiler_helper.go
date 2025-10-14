@@ -217,6 +217,23 @@ func encodeMovRegToMem(srcIdx, baseIdx int, offset byte) []byte {
 		return []byte{rex, X86_OP_MOV_RM_R, modrm, offset}
 	}
 }
+
+func encodeMem64ToReg(dstIdx, baseIdx int, offset byte) []byte {
+	dst := regInfoList[dstIdx]
+	base := regInfoList[baseIdx]
+	rex := buildREX(true, dst.REXBit == 1, false, base.REXBit == 1)
+	if base.RegBits == 4 { // R12
+		// Must use SIB encoding when rm=4 (R12)
+		modrm := buildModRM(1, dst.RegBits, 4) // mod=01 (disp8), reg=dst, rm=100 (SIB)
+		sib := buildSIB(0, 4, base.RegBits)    // scale=0, index=none(4), base=R12
+		return []byte{rex, X86_OP_MOV_R_RM, modrm, sib, offset}
+	} else {
+		// Normal encoding
+		modrm := buildModRM(1, dst.RegBits, base.RegBits) // mod=01 (disp8), reg=dst, rm=base
+		return []byte{rex, X86_OP_MOV_R_RM, modrm, offset}
+	}
+}
+
 func encodeMovImm64ToMem(memAddr uint64, imm uint64) []byte {
 	// this instruction only do once
 	// move it on top of the start code to save push & pop
@@ -290,18 +307,40 @@ func encodeU64(v uint64) []byte {
 	return buf
 }
 
-func (rvm *RecompilerVM) DumpRegisterToMemory(move_back bool) []byte {
-	code := encodeMovImm(BaseRegIndex, uint64(rvm.regDumpAddr))
-	// for each register, mov [BaseRegIndex + i*8], rX
+func DumpRegisterToMemory(move_back bool) []byte {
+	dumpOffset := int32(dumpSize)
+
+	code := make([]byte, 0, len(regInfoList)*8*3)
+	if move_back {
+		// Preserve RAX; we reuse it when writing the R12 slot.
+		code = append(code, emitPushReg(RAX)...)
+	}
+
+	// Temporarily reposition R12 to the register dump buffer (regDumpAddr = realMemAddr - dumpSize).
+	code = append(code, emitAddRegImm32(BaseReg, -dumpOffset)...)
+
+	// Write every register into the dump buffer.
 	for i := 0; i < len(regInfoList); i++ {
 		off := byte(i * 8)
+
+		if i == BaseRegIndex && move_back {
+			// Store the real memory base (original R12 value) into its slot.
+			code = append(code, emitMovRegToReg64(RAX, BaseReg)...)
+			code = append(code, emitAddRegImm32(RAX, dumpOffset)...)
+			code = append(code, encodeMovRegToMem(0, BaseRegIndex, off)...)
+			continue
+		}
+
 		dumpInstr := encodeMovRegToMem(i, BaseRegIndex, off)
 		code = append(code, dumpInstr...)
 	}
-
 	if move_back {
-		// restore the base register to BaseRegIndex
-		code = append(code, encodeMovImm(BaseRegIndex, uint64(rvm.realMemAddr))...)
+		// Restore R12 to the real memory base.
+		code = append(code, emitAddRegImm32(BaseReg, dumpOffset)...)
+
+		// Restore RAX.
+		code = append(code, emitPopReg(RAX)...)
+
 	}
 	return code
 }
@@ -353,17 +392,6 @@ func generateIncMem(addr uint64) []byte {
 
 	return code
 }
-func (rvm *RecompilerVM) RestoreRegisterInX86() []byte {
-	restoredCode := make([]byte, 0)
-	for i := 0; i < regSize; i++ {
-		reg := regInfoList[i]
-		// MOV rX, [dumpAddr + i*8]
-		movInstr := generateLoadMemToReg(reg, uint64(rvm.regDumpAddr)+uint64(i*8))
-		restoredCode = append(restoredCode, movInstr...)
-	}
-	return restoredCode
-}
-
 func generateJumpRegMem(srcReg X86Reg, rel int32) []byte {
 	// Use the new emit helper function
 	return emitJmpRegMemDisp(srcReg, rel)
@@ -698,6 +726,28 @@ func emitAddRegImm32(reg X86Reg, imm int32) []byte {
 		result = append(result, immBytes...)
 		return result
 	}
+}
+
+// emitAddR12Imm32 emits: ADD r12, imm32
+// 49 81 C4 imm32
+func emitAddR12Imm32(imm uint32) []byte {
+	code := make([]byte, 7)
+	code[0] = 0x49 // REX.WB
+	code[1] = 0x81 // ADD r/m64, imm32
+	code[2] = 0xC4 // ModR/M: mod=11, reg=0 (ADD), rm=100 (R12)
+	binary.LittleEndian.PutUint32(code[3:7], imm)
+	return code
+}
+
+// emitSubR12Imm32 emits: SUB r12, imm32
+// 49 81 EC imm32
+func emitSubR12Imm32(imm uint32) []byte {
+	code := make([]byte, 7)
+	code[0] = 0x49 // REX.WB
+	code[1] = 0x81 // SUB r/m64, imm32
+	code[2] = 0xEC // ModR/M: mod=11, reg=5 (SUB), rm=100 (R12)
+	binary.LittleEndian.PutUint32(code[3:7], imm)
+	return code
 }
 
 // ================================================================================================
@@ -1978,4 +2028,12 @@ func emitJaInitDJump() []byte {
 
 func emitJneInitDJump() []byte {
 	return []byte{X86_PREFIX_0F, X86_2OP_JNE, 0, 0, 0, 0}
+}
+
+func GetPvmeToX86Code() map[byte]func(Instruction) []byte {
+	return pvmByteCodeToX86Code
+}
+
+func GetOpcodeStr(opcode byte) string {
+	return opcode_str(opcode)
 }

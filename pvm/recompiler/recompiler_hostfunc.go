@@ -2,181 +2,11 @@ package recompiler
 
 import "C"
 import (
-	"encoding/binary"
 	"fmt"
-	"os"
-	"unsafe"
 
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/types"
 )
-
-// Ecalli is the host call invoked by the recompiled x86 code. It updates the VM state.
-//
-//export Ecalli
-func Ecalli(rvmPtr unsafe.Pointer, opcode int32) {
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, "Ecalli: panic recovered: %v\n", r)
-		}
-	}()
-	vm := (*RecompilerVM)(rvmPtr)
-	// Acquire lock to ensure thread-safety
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
-
-	// Reload registers from memory before executing host call
-	for i := range vm.ReadRegisters() {
-		vm.WriteRegister(i, binary.LittleEndian.Uint64(vm.regDumpMem[i*8:]))
-	}
-	// Invoke the host logic, e.g., gas charging and actual operation
-	// fmt.Fprintf(os.Stderr, "Ecalli called with opcode: %d, gas: %d\n", opcode, vm.Gas)
-	if vm.isChargingGas {
-		gas, err := vm.ReadContextSlot(gasSlotIndex)
-		if err != nil {
-			log.Error("x86", "Ecalli: failed to read gas from context slot", "error", err)
-		}
-		vm.Gas = int64(gas)
-	} else {
-		vm.Gas = 100000
-	}
-	if opcode == 500 {
-		var err error
-		if useEcalli500 {
-			if vm.isPCCounting {
-				// read 4 bytes from vm.pc_addr
-				vm.pc, err = vm.ReadContextSlot(pcSlotIndex)
-				if err != nil {
-					log.Error("x86", "Ecalli: failed to read pc from context slot", "error", err)
-				}
-			}
-
-			// fmt.Printf("Ecalli: pc=%d, operands=%v, gas=%d\n", vm.pc, operands, vm.Gas)
-			// fmt.Fprintf(os.Stderr, "Ecalli: pc=%d, gas=%d\n", vm.pc, vm.Gas)
-			var blockCounter uint64
-			if vm.IsBlockCounting {
-				blockCounter, err = vm.ReadContextSlot(blockCounterSlotIndex)
-				if err != nil {
-					log.Error("x86", "Ecalli: failed to read blockCounter from context slot", "error", err)
-				}
-			}
-			// get the block counter from the register dump memory
-			vm.vmBasicBlock = int(blockCounter)
-			vm.basicBlockExecutionCounter[vm.pc]++
-			if blockCounter%100_000_000 == 0 {
-				if blockCounter >= 999_000_000_000_000 {
-					fmt.Fprintf(os.Stderr, "+++ Ecalli: blockCounter=%d, pc=%d, gas=%d\n", blockCounter, vm.pc, vm.Gas)
-				} else if blockCounter > 0 {
-					fmt.Fprintf(os.Stderr, "--- Ecalli: blockCounter=%d, pc=%d, gas=%d\n", blockCounter, vm.pc, vm.Gas)
-				}
-
-			}
-		}
-		return
-	}
-
-	vm.InvokeHostCall(int(opcode))
-	if opcode == 20 {
-		vm.WriteContextSlot(gasSlotIndex, uint64(vm.Gas), 8)
-	}
-
-}
-
-// Ecalli is the host call invoked by the recompiled x86 code. It updates the VM state.
-//
-//export Sbrk
-func Sbrk(rvmPtr unsafe.Pointer, registerIndexA uint32, registerIndexD uint32) {
-	vm := (*RecompilerVM)(rvmPtr)
-	// Acquire lock to ensure thread-safety
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
-
-	// Reload registers from memory before executing host call
-	for i := range vm.ReadRegisters() {
-		vm.WriteRegister(i, binary.LittleEndian.Uint64(vm.regDumpMem[i*8:]))
-	}
-	// Invoke the host logic, e.g., gas charging and actual operation
-	// fmt.Fprintf(os.Stderr, "Sbrk: registerIndexA=%d, registerIndexD=%d\n", registerIndexA, registerIndexD)
-	vm.InvokeSbrk(registerIndexA, registerIndexD)
-}
-func EmitCallToSbrkStub(rvmPtr uintptr, registerIndexA uint32, registerIndexD uint32) []byte {
-	var stub []byte
-	stub = append(stub, emitPushReg(RAX)...)                  // push rax
-	stub = append(stub, emitPushReg(RDI)...)                  // push rdi
-	stub = append(stub, encodeMovRdiImm64(uint64(rvmPtr))...) // mov rdi, rvmPtr
-	stub = append(stub, encodeMovEsiImm32(registerIndexA)...) // mov esi, valueA
-	stub = append(stub, encodeMovEdxImm32(registerIndexD)...) // mov edx, registerIndexD
-
-	// movabs rax, &Sbrk
-	addr := GetSbrkAddress()
-	stub = append(stub, encodeMovabsRaxImm64(uint64(addr))...)
-
-	stub = append(stub, encodeCallRax()...) // call rax
-	stub = append(stub, emitPopReg(RDI)...) // pop rdi
-	stub = append(stub, emitPopReg(RAX)...) // pop rax
-	return stub
-}
-
-// EcalliCode generates the x86_64 machine code snippet that:
-// 1. Dumps registers to memory.
-// 2. Sets up C ABI registers (rdi, esi).
-// 3. Calls the Ecalli function.
-// It returns the combined machine code bytes.
-func (rvm *RecompilerVM) EcalliCode(opcode int) ([]byte, error) {
-	// 1. Dump registers to memory
-	code := rvm.DumpRegisterToMemory(true)
-
-	// 2. Generate call stub to Ecalli
-	stub := EmitCallToEcalliStub(uintptr(unsafe.Pointer(rvm)), opcode)
-
-	// 3. Append stub to code
-	code = append(code, stub...)
-	return code, nil
-}
-
-// EmitCallToEcalliStub creates the machine code stub that sets up the arguments
-// and calls the Ecalli function using an absolute indirect call via RAX.
-func EmitCallToEcalliStub(rvmPtr uintptr, opcode int) []byte {
-	var stub []byte
-	// stub = append(stub, 0x50) // push rax
-	// stub = append(stub, 0x57) // push rdi
-	// mov rdi, rvmPtr
-	stub = append(stub, encodeMovRdiImm64(uint64(rvmPtr))...)
-	// mov esi, opcode
-	stub = append(stub, encodeMovEsiImm32(uint32(opcode))...)
-	// movabs rax, <address of Ecalli>
-	addr := GetEcalliAddress()
-	// fmt.Printf("EmitCallToEcalliStub: addr=0x%x, opcode=%d\n", addr, opcode)
-
-	stub = append(stub, encodeMovabsRaxImm64(uint64(addr))...)
-	// call rax
-	stub = append(stub, encodeCallRax()...)
-	// stub = append(stub, 0x5F) // pop rdi
-	// stub = append(stub, 0x58) // pop rax
-	return stub
-}
-
-// EmitCallToEcalliStub creates the machine code stub that sets up the arguments
-// and calls the Ecalli function using an absolute indirect call via RAX.
-func EmitCallToEcalliStubPushPop(rvmPtr uintptr, opcode int) []byte {
-	var stub []byte
-	stub = append(stub, emitPushReg(RAX)...) // push rax
-	stub = append(stub, emitPushReg(RDI)...) // push rdi
-	// mov rdi, rvmPtr
-	stub = append(stub, encodeMovRdiImm64(uint64(rvmPtr))...)
-	// mov esi, opcode
-	stub = append(stub, encodeMovEsiImm32(uint32(opcode))...)
-	// movabs rax, <address of Ecalli>
-	addr := GetEcalliAddress()
-	fmt.Printf("EmitCallToEcalliStub: addr=0x%x, opcode=%d\n", addr, opcode)
-
-	stub = append(stub, encodeMovabsRaxImm64(uint64(addr))...)
-	// call rax
-	stub = append(stub, encodeCallRax()...)
-	stub = append(stub, emitPopReg(RDI)...) // pop rdi
-	stub = append(stub, emitPopReg(RAX)...) // pop rax
-
-	return stub
-}
 
 // encodeMovRdiImm64 encodes 'mov rdi, imm64'.
 func encodeMovRdiImm64(imm uint64) []byte {
@@ -201,80 +31,12 @@ func encodeCallRax() []byte {
 	return emitCallReg(RAX) // RAX is at index 0
 }
 
-func (vm *RecompilerVM) chargeGas(host_fn int) uint64 {
-	beforeGas := vm.Gas
+func (vm *X86Compiler) chargeGas(host_fn int) uint64 {
 	chargedGas := uint64(10) // We deduct 10 here
-	exp := fmt.Sprintf("HOSTFUNC %d", host_fn)
 
 	switch host_fn {
-	case TRANSFER:
-		exp = "TRANSFER"
-	case READ:
-		exp = "READ"
-	case WRITE:
-		exp = "WRITE"
-	case NEW:
-		exp = "NEW"
-	case FETCH:
-		exp = "FETCH"
-	case EXPORT:
-		exp = "EXPORT"
-	case GAS:
-		exp = "GAS"
-	case LOOKUP:
-		exp = "LOOKUP"
-	case INFO:
-		exp = "INFO"
-	case BLESS:
-		exp = "BLESS"
-	case ASSIGN:
-		exp = "ASSIGN"
-	case DESIGNATE:
-		exp = "DESIGNATE"
-	case CHECKPOINT:
-		exp = "CHECKPOINT"
-	case UPGRADE:
-		exp = "UPGRADE"
-	case EJECT:
-		exp = "EJECT"
-	case QUERY:
-		exp = "QUERY"
-	case SOLICIT:
-		exp = "SOLICIT"
-	case FORGET:
-		exp = "FORGET"
-	case YIELD:
-		exp = "YIELD"
-	case PROVIDE:
-		exp = "PROVIDE"
-	case HISTORICAL_LOOKUP:
-		exp = "HISTORICAL_LOOKUP"
-	case MACHINE:
-		exp = "MACHINE"
-	case PEEK:
-		exp = "PEEK"
-	case POKE:
-		exp = "POKE"
-		/*
-			case ZERO:
-				exp = "ZERO"
-			case VOID:
-				exp = "VOID"
-		*/
-	case INVOKE:
-		exp = "INVOKE"
-	case EXPUNGE:
-		exp = "EXPUNGE"
 	case LOG:
-		exp = "LOG"
 		chargedGas = 0
-	}
-	if false {
-		fmt.Fprintf(os.Stderr, "RecompilerVM: chargeGas: host_fn=%d, beforeGas=%d, chargedGas=%d, exp=%s\n",
-			host_fn,
-			beforeGas,
-			chargedGas,
-			exp)
 	}
 	return chargedGas
 }
@@ -305,14 +67,106 @@ func (vm *RecompilerVM) InvokeSbrk(registerA uint32, registerIndexD uint32) (res
 	return result
 }
 
-type DummyHostFunc struct {
+type HostFuncVM interface {
+	// CPU registers
+	ReadRegister(int) uint64
+	// Memory
+	ReadRAMBytes(offset uint32, length uint32) ([]byte, uint64)
 }
 
-func NewDummyHostFunc() *DummyHostFunc {
-	return &DummyHostFunc{}
+type DummyHostFunc struct {
+	vm HostFuncVM
+}
+
+func NewDummyHostFunc(vm HostFuncVM) *DummyHostFunc {
+	return &DummyHostFunc{vm: vm}
 }
 
 func (d *DummyHostFunc) InvokeHostCall(host_fn int) (bool, error) {
 	fmt.Printf("RecompilerVM: DUMMY InvokeHostCall: host_fn=%d\n", host_fn)
+	if host_fn == LOG {
+		vm := d.vm
+		// JIP-1 https://hackmd.io/@polkadot/jip1
+		level := vm.ReadRegister(7)
+		message := vm.ReadRegister(10)
+		messagelen := vm.ReadRegister(11)
+
+		messageBytes, errCode := vm.ReadRAMBytes(uint32(message), uint32(messagelen))
+		if errCode != OK {
+			log.Error("x86", "DummyHostFunc: LOG: failed to read message from RAM", "error", errCode)
+			return true, nil
+		}
+		switch level {
+		case 0: // 0: User agent displays as fatal error
+			fmt.Printf("[CRIT] DUMMY HOSTLOG: %s\n", string(messageBytes))
+		case 1: // 1: User agent displays as warning
+			fmt.Printf("[WARN] DUMMY HOSTLOG: %s\n", string(messageBytes))
+		case 2: // 2: User agent displays as important information
+			fmt.Printf("[INFO] DUMMY HOSTLOG: %s\n", string(messageBytes))
+		case 3: // 3: User agent displays as helpful information
+			fmt.Printf("[DEBUG] DUMMY HOSTLOG: %s\n", string(messageBytes))
+		case 4: // 4: User agent displays as pedantic information
+			fmt.Printf("[TRACE] DUMMY HOSTLOG: %s\n", string(messageBytes))
+		}
+	}
 	return true, nil
+}
+
+func (vm *RecompilerVM) HandleEcalli() error {
+	if !vm.hostCall || vm.MachineState != HOST {
+		return fmt.Errorf("not in host call state")
+	}
+
+	if vm.host_func_id == TRANSFER {
+		gas, err := vm.ReadContextSlot(gasSlotIndex)
+		if err != nil {
+			return fmt.Errorf("failed to read gas slot: %w", err)
+		}
+		gas -= vm.ReadRegister(9)
+		if gas < 0 {
+			vm.MachineState = PANIC
+			vm.ResultCode = types.WORKDIGEST_OOG
+			return fmt.Errorf("out of gas in transfer")
+		}
+		err = vm.WriteContextSlot(gasSlotIndex, gas, 8)
+		if err != nil {
+			return fmt.Errorf("failed to write gas slot: %w", err)
+		}
+	}
+
+	ok, err := vm.InvokeHostCall(vm.host_func_id)
+	if err != nil || !ok {
+		return fmt.Errorf("InvokeHostCall failed: %w", err)
+	}
+	if ok {
+		// if the host call handled the state change, we reset it to normal
+		if vm.MachineState == PANIC {
+			vm.ResultCode = PANIC
+			fmt.Printf("PANIC in host call\n")
+			return fmt.Errorf("PANIC in host call")
+		}
+	}
+	vm.hostCall = false
+	vm.MachineState = 0
+	return nil
+}
+
+func (vm *RecompilerVM) HandleSbrk() error {
+	regAint, err1 := vm.ReadContextSlot(sbrkAIndex)
+	regDint, err2 := vm.ReadContextSlot(sbrkDIndex)
+	if err1 != nil || err2 != nil {
+		return fmt.Errorf("Sbrk call at PC %d missing register info", vm.pc)
+	}
+	regA := uint32(regAint)
+	regD := uint32(regDint)
+	vm.InvokeSbrk(regA, regD)
+	return nil
+}
+
+func (d *DummyHostFunc) GetResultCode() uint8 {
+	return 0
+}
+
+func (d *DummyHostFunc) GetMachineState() uint8 {
+	return 0
 }
