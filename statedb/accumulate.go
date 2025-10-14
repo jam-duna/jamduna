@@ -304,8 +304,10 @@ func (s *StateDB) OuterAccumulate(g uint64, transfersIn []types.DeferredTransfer
 			i++
 		}
 	}
-
-	if len(workReports) == 0 { // if i = 0, then nothing to do
+	len_t := len(transfersIn)
+	len_free := len(freeAccumulation)
+	n := i + uint64(len_t) + uint64(len_free)
+	if n == 0 { // if i = 0, then nothing to do
 		num_accumulations = 0
 		accumulation_output = make([]types.AccumulationOutput, 0)
 		GasUsage = make([]Usage, 0)
@@ -314,31 +316,24 @@ func (s *StateDB) OuterAccumulate(g uint64, transfersIn []types.DeferredTransfer
 	// transfers with ParallelizedAccumulate
 	p_gasUsed, transfersOut, p_outputs, p_gasUsage := s.ParallelizedAccumulate(o, transfersIn, workReports[0:i], freeAccumulation, pvmBackend, accumulated_partial) // parallelized accumulation the 0 to i work reports
 	// n https://graypaper.fluffylabs.dev/#/1c979cb/17e70117e701?v=0.7.1
-	len_t := len(transfersIn)
-	len_free := len(freeAccumulation)
-	n := i + uint64(len_t) + uint64(len_free)
+
 	transfer_gases := uint64(0)
 	for _, t := range transfersIn {
 		transfer_gases += uint64(t.GasLimit)
 	}
 	gstar := g + transfer_gases
-	if n > 0 { // if i = len(workReports), then nothing more to do
-		// compute gstar https://graypaper.fluffylabs.dev/#/1c979cb/172e02172e02?v=0.7.1
-		for _, t := range transfersIn {
-			gstar += uint64(t.GasLimit)
-		}
-		gstar -= p_gasUsed
-		incNum, incAccumulationOutput, incGasUsage := s.OuterAccumulate(gstar, transfersOut, workReports[i:], o, nil, pvmBackend, accumulated_partial) // recursive call to the rest of the work reports
-		num_accumulations = i + incNum
-		accumulation_output = append(p_outputs, incAccumulationOutput...)
 
-		GasUsage = append(p_gasUsage, incGasUsage...)
-		s.updateRecentAccumulation(o, accumulated_partial)
-		return
+	// compute gstar https://graypaper.fluffylabs.dev/#/1c979cb/172e02172e02?v=0.7.1
+	for _, t := range transfersIn {
+		gstar += uint64(t.GasLimit)
 	}
-	s.updateRecentAccumulation(o, accumulated_partial)
-	// TODO: check if should we use the GasUsage?
-	return i, p_outputs, GasUsage
+	gstar -= p_gasUsed
+	incNum, incAccumulationOutput, incGasUsage := s.OuterAccumulate(gstar, transfersOut, workReports[i:], o, nil, pvmBackend, accumulated_partial) // recursive call to the rest of the work reports
+	num_accumulations = i + incNum
+	accumulation_output = append(p_outputs, incAccumulationOutput...)
+
+	p_gasUsage = append(p_gasUsage, incGasUsage...)
+	return num_accumulations, accumulation_output, p_gasUsage
 }
 
 /*
@@ -370,6 +365,8 @@ func (s *StateDB) ParallelizedAccumulate(
 	}
 	for _, t := range transfersIn {
 		serviceMap[t.ReceiverIndex] = struct{}{}
+		receiver, _ := o.GetService(t.ReceiverIndex)
+		receiver.IncBalance(t.Amount)
 	}
 	services := make([]uint32, 0, len(serviceMap))
 	for service := range serviceMap {
@@ -468,11 +465,6 @@ func (s *StateDB) ParallelizedAccumulate(
 		if r.XY != nil && len(r.XY.Transfers) > 0 {
 			transfersMap[r.service] = r.XY.Transfers
 			transfersService = append(transfersService, r.service)
-			for _, t := range r.XY.Transfers {
-				service, _ := r.XY.U.GetService(t.ReceiverIndex)
-				service.IncBalance(t.Amount)
-
-			}
 		}
 
 		// Service accounts
@@ -742,9 +734,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 
 	//(B.8) start point
 	t0 = time.Now()
-	for _, t := range selectedTransfers {
-		serviceAccount.Balance += t.Amount // incoming transfers increase balance
-	}
+
 	vm := NewVMFromCode(serviceID, code, 0, 0, sd, pvmBackend, gas)
 	pvmContext := log.PvmValidating
 	if sd.Authoring == log.GeneralAuthoring {

@@ -253,9 +253,10 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	// ------ OuterAccumulate ------
 	deferred_transfers := make([]types.DeferredTransfer, 0)
 	t0 = time.Now()
-	num_accumulations, accumulation_output, gasUsage := s.OuterAccumulate(gas, deferred_transfers, accumulate_input_wr, o, f, pvmBackend, make(map[uint32]*types.XContext)) // outer accumulate
+	accumulated_partial := make(map[uint32]*types.XContext)
+	num_accumulations, accumulation_output, gasUsage := s.OuterAccumulate(gas, deferred_transfers, accumulate_input_wr, o, f, pvmBackend, accumulated_partial) // outer accumulate
 	benchRec.Add("OuterAccumulate", time.Since(t0))
-
+	// s.updateRecentAccumulation(o, accumulated_partial)
 	// (χ′, δ†, ι′, φ′)
 	for _, sa := range o.ServiceAccounts {
 		sa.ALLOW_MUTABLE() // make sure all service accounts can be written
@@ -270,6 +271,17 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 				stats = &accumulateStatistics{}
 			}
 			stats.numWorkReports++
+
+			part, ok2 := accumulated_partial[service]
+			if ok2 {
+				sa, ok3 := part.U.ServiceAccounts[service]
+				if ok3 {
+					sa.UpdateRecentAccumulation(s.GetTimeslot())
+					o.ServiceAccounts[service] = sa
+					sa.Dirty = true
+				}
+			}
+
 			if stats.numWorkReports > 0 {
 				accumulateStats[service] = stats
 			} else {

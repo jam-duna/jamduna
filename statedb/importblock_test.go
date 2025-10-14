@@ -134,7 +134,7 @@ func parseSTFFile(filename, content string) (StateTransition, error) {
 func TestStateTransitionInterpreter(t *testing.T) {
 	PvmLogging = false
 
-	filename := path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light/00000060.bin")
+	filename := path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy/00000004.bin")
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
@@ -271,7 +271,7 @@ func TestSingleCompare(t *testing.T) {
 	// DO NOT CHANGE THIS
 	log.InitLogger("debug")
 	PvmLogging = false
-	filename := "/root/go/src/github.com/colorfulnotion/jam-test-vectors/traces/fuzzy/00000161.bin"
+	filename := "/Users/zhongxuanyou/Documents/GitHub/jam-test-vectors/traces/fuzzy/00000170.bin"
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Errorf("failed to read file %s: %v", filename, err)
