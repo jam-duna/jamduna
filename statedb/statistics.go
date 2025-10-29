@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/colorfulnotion/jam/jamerrors"
+	jamerrors "github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/types"
 )
 

@@ -14,12 +14,12 @@ import (
 
 	"testing"
 
-	"github.com/colorfulnotion/jam/chainspecs"
+	chainspecs "github.com/colorfulnotion/jam/chainspecs"
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/types"
+	types "github.com/colorfulnotion/jam/types"
 	"golang.org/x/exp/rand"
 
 	_ "net/http/pprof"
@@ -31,6 +31,15 @@ import (
 const (
 	DefaultRefineGasLimit     = uint64(400_000_000)
 	DefaultAccumulateGasLimit = uint64(4_000_000)
+
+	webServicePort    = 8079
+	runSamePvmbackend = true
+
+	SafroleTestEpochLen = 4 // Safrole
+	FallbackEpochLen    = 4 // Fallback
+	EmptyEpochLen       = 10
+
+	TargetedN_EVM = 10
 )
 
 var jce_manual = flag.Bool("jce_manual", false, "jce_manual")
@@ -38,11 +47,17 @@ var jam_node = flag.Bool("jam_node", false, "jam_node")
 var jam_local_client = flag.Bool("jam_local_client", false, "jam_local_client")
 var manifest = flag.Bool("manifest", false, "manifest")
 var pvmBackend = flag.String("pvm_backend", statedb.BackendInterpreter, "PVM mode to use (interpreter, compiler, sandbox)")
+var targetNum = flag.Int("targetN", -1, "targetN")
 
-const (
-	webServicePort    = 8079
-	runSamePvmbackend = true
-)
+func generateJobID() string {
+	seed := uint64(time.Now().UnixNano()) // nano seconds. but still not unique
+	source := rand.NewSource(seed)
+	r := rand.New(source)
+	var out [8]byte
+	binary.LittleEndian.PutUint64(out[:], r.Uint64())
+	jobID := fmt.Sprintf("%x", out)
+	return jobID
+}
 
 func SetLevelDBPaths(numNodes int) []string {
 	node_paths := make([]string, numNodes)
@@ -60,14 +75,8 @@ func SetLevelDBPaths(numNodes int) []string {
 }
 
 func computeLevelDBPath(id string, unixtimestamp int, jobID string) (string, error) {
-	/* standardize on
-	/tmp/<user>/jam/<unixtimestamp>_<jobID>/testdb#
-
-	/tmp/ntust/jam/1727903082_<jID>/node1/leveldb/
-	/tmp/ntust/jam/1727903082_<jID>/node1/data/
-
-	/tmp/root/jam/1727903082_<jID>/node1/
-
+	/* standardize on /tmp/<user>/jam/<unixtimestamp>_<jobID>/testdb#
+	Example: /tmp/root/jam/1727903082_<jID>/node1/
 	*/
 	currentUser, err := user.Current()
 	if err != nil {
@@ -129,7 +138,6 @@ func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) 
 	}
 
 	log.InitLogger("debug")
-
 	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork(types.Network, basePort)
 
 	if err != nil {
@@ -143,6 +151,7 @@ func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) 
 		if err != nil {
 			return nil, err
 		}
+
 		nodes[i] = node
 	}
 	return nodes, nil
@@ -155,12 +164,13 @@ func GetService(serviceNames []string, getmetadata bool) (services map[string]*t
 func getServices(serviceNames []string, getmetadata bool) (services map[string]*types.TestService, err error) {
 	services = make(map[string]*types.TestService)
 	for i, serviceName := range serviceNames {
-		fileName := fmt.Sprintf("/services/%s.pvm", serviceName)
+		fileName := fmt.Sprintf("/services/%s/%s.pvm", serviceName, serviceName)
+
 		var code []byte
 		if getmetadata {
 			code, _ = types.ReadCodeWithMetadata(fileName, serviceName)
 		} else {
-			fileName := common.GetFilePath(fmt.Sprintf("/services/%s.pvm", serviceName))
+			fileName := common.GetFilePath(fileName)
 			code, _ = os.ReadFile(fileName)
 		}
 
@@ -178,7 +188,7 @@ func getServices(serviceNames []string, getmetadata bool) (services map[string]*
 	return
 }
 
-// run any test with dispute using testName_dispute (i.e fib_dispute)
+// run any test with dispute using testName_dispute (i.e majik_dispute)
 func testWithDispute(raw_jam string) (jam string, isDisputeMode bool) {
 	const suffix = "_dispute"
 	if strings.HasSuffix(raw_jam, suffix) {
@@ -211,39 +221,10 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	case "safrole", "fallback":
 		defaultDelay = 0 * types.SecondsPerSlot * time.Second
 		sendTickets = (jam == "safrole")
-	case "megatron":
-		serviceNames = []string{"fib", "tribonacci", "megatron", "auth_copy"} // Others include: "padovan", "pell", "racaman"
-	case "transfer", "scaled_transfer":
-		serviceNames = []string{"transfer_0", "transfer_1", "auth_copy"} // 2 transfer services share the same code
-	case "balances", "scaled_balances":
-		serviceNames = []string{"balances", "auth_copy"}
-	case "empty":
-		serviceNames = []string{"delay", "auth_copy"}
-	case "blake2b":
-		serviceNames = []string{"blake2b"}
-	case "rubic":
-		serviceNames = []string{"fib", "auth_copy"}
-	case "fib":
-		serviceNames = []string{"fib", "auth_copy"}
 	case "algo":
 		serviceNames = []string{"algo", "auth_copy"}
-	case "fib2":
-		serviceNames = []string{"corevm", "auth_copy"}
-	case "game_of_life":
-		sendTickets = true // game_of_life does not use tickets
-		if *manifest {
-			serviceNames = []string{"game_of_life_manifest", "auth_copy"}
-		} else {
-			serviceNames = []string{"game_of_life", "auth_copy"}
-		}
-	case "auth_copy":
-		serviceNames = []string{"auth_copy"}
-	case "revm":
-		serviceNames = []string{"revm_test", "auth_copy"}
-	case "all":
-		serviceNames = []string{"fib", "tribonacci", "megatron", "auth_copy", "game_of_life"}
 	default:
-		serviceNames = []string{"auth_copy", "fib"}
+		serviceNames = []string{"evm", "auth_copy"}
 	}
 
 	var bNode JNode
@@ -386,7 +367,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	jceManager = nil
 	var previous_service_idx uint32
 	requireNew := true
-	if strings.Compare(jam, "fib") == 0 || strings.Compare(jam, "algo") == 0 || strings.Compare(jam, "game_of_life") == 0 {
+	if strings.Compare(jam, "algo") == 0 || strings.Compare(jam, "evm") == 0 {
 		requireNew = false
 	}
 
@@ -397,15 +378,11 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	serviceCodeList := make([][]byte, 0)
 	serviceCodeHashList := []string{}
 	for serviceName, service := range testServices {
-		if serviceName == "auth_copy" {
-			service.ServiceCode = statedb.AuthCopyServiceCode
-			continue
-		}
-		if serviceName == "fib" {
-			service.ServiceCode = statedb.FibServiceCode
-		}
 		if serviceName == "algo" {
 			service.ServiceCode = statedb.AlgoServiceCode
+		}
+		if serviceName == "evm" {
+			service.ServiceCode = statedb.EVMServiceCode
 		}
 		workItem := types.WorkItem{
 			Service:            bootstrapService,
@@ -501,41 +478,9 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		FallbackBufferTime := 10
 		safrole(jceManager)
 		waitForTermination(tNode, "fallback", FallbackEpochLen, FallbackBufferTime, t)
-	case "fib":
-		fib(bNode, testServices, targetN)
+	case "evm":
+		EvmTest(t, bNode, testServices, "fib")
 	case "algo":
 		algo(bNode, testServices, targetN)
-	case "rubic":
-		rubic(bNode, testServices, targetN)
-	case "fib2":
-		//targetN := 100
-		fib2(bNode, testServices, 10)
-	case "game_of_life":
-		//targetN := 20
-		game_of_life(bNode, testServices, targetN, *manifest)
-	case "megatron":
-		megatron(bNode, testServices, 5)
-	case "auth_copy":
-		reassign(bNode, testServices)
-
-	// TODO: modernize those tests?
-	case "transfer":
-		transferNum := targetN
-		transfer(bNode, testServices, transferNum)
-	case "scaled_transfer":
-		transferNum := 10
-		splitTransferNum := targetN
-		scaled_transfer(bNode, testServices, transferNum, splitTransferNum)
-	case "balances":
-		// not using anything
-		balances(bNode, testServices)
-	case "scaled_balances":
-		targetN_mint := targetN
-		targetN_transfer := targetN
-		scaled_balances(bNode, testServices, targetN_mint, targetN_transfer)
-	case "blake2b":
-		blake2b(bNode, testServices)
-	case "revm":
-		revm(bNode, testServices)
 	}
 }

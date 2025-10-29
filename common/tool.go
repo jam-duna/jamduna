@@ -273,10 +273,13 @@ func DecodeJustification(compact []byte, numECPiecesPerSegment int) ([][]byte, e
 
 // Stub
 func GetFilePathForNetwork(network string) string {
-	// Use environment variable JAM_PATH, but if its not set, use
-	basePath := os.Getenv("JAM_PATH")
+	// Use environment variable MAJIK_PATH first (for majik fork), then JAM_PATH, but if neither is set, use default
+	basePath := os.Getenv("MAJIK_PATH")
 	if basePath == "" {
-		basePath = "/root/go/src/github.com/colorfulnotion/jam/"
+		panic("MAJIK_PATH environment variable is not set")
+	}
+	if basePath == "" {
+		basePath = "/root/Desktop/majik"
 	}
 
 	// Construct the full file path using filepath package
@@ -286,10 +289,13 @@ func GetFilePathForNetwork(network string) string {
 }
 
 func GetFilePath(fn string) string {
-	// Use environment variable JAM_PATH, but if its not set, use
-	basePath := os.Getenv("JAM_PATH")
+	// Use environment variable MAJIK_PATH first (for majik fork), then JAM_PATH, but if neither is set, use default
+	basePath := os.Getenv("MAJIK_PATH")
 	if basePath == "" {
-		basePath = "/root/go/src/github.com/colorfulnotion/jam/"
+		basePath = os.Getenv("JAM_PATH")
+	}
+	if basePath == "" {
+		panic("MAJIK_PATH environment variable is not set")
 	}
 
 	// Construct the full file path using filepath package
@@ -396,6 +402,11 @@ func BytesToHexStr(v interface{}) interface{} {
 func Elapsed(startTime time.Time) uint32 {
 	return uint32(time.Since(startTime).Microseconds())
 }
+
+func ElapsedNanos(startTime time.Time) uint64 {
+	return uint64(time.Since(startTime).Nanoseconds())
+}
+
 func FormatElapsed(micros uint32) string {
 	duration := time.Duration(micros) * time.Microsecond
 	return formatDuration(duration)

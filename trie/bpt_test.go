@@ -153,8 +153,14 @@ func TestMerkleTree(t *testing.T) {
 				t.Errorf("Unable to generate Proof for key [%x].Err %v\n", key, err)
 			}
 
+			// Convert [][]byte to []common.Hash
+			pathHashes := make([]common.Hash, len(path))
+			for i, p := range path {
+				copy(pathHashes[i][:], p)
+			}
+
 			// Test Valid Proof
-			if tree.Verify(key, value, expectedHash, path) {
+			if VerifyRaw(key, value, expectedHash, pathHashes) {
 				if debugBPT {
 					fmt.Printf("Proof for key [%x] is valid.\n", key)
 				}
@@ -236,7 +242,14 @@ func TestBPTProof(t *testing.T) {
 	if debugBPT {
 		fmt.Printf("levelDBGet key=%x, value=%x\n", key, value)
 	}
-	if tree.Verify(key, value, tree.GetRootHash(), path) {
+
+	// Convert [][]byte to []common.Hash
+	pathHashes := make([]common.Hash, len(path))
+	for i, p := range path {
+		copy(pathHashes[i][:], p)
+	}
+
+	if VerifyRaw(key, value, tree.GetRootHash(), pathHashes) {
 		if debugBPT {
 			fmt.Printf("Proof for key [%x] is valid.\n", key)
 		}
@@ -246,7 +259,7 @@ func TestBPTProof(t *testing.T) {
 
 	// Test Invalid Proof
 	invalidValue := []byte("invalid")
-	if tree.Verify(key, invalidValue, exceptedRootHash, path) {
+	if VerifyRaw(key, invalidValue, exceptedRootHash, pathHashes) {
 		t.Errorf("Proof for key [%x] with invalid value is valid.\n", invalidValue)
 	} else {
 		if debugBPT {

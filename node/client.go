@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/types"
+	types "github.com/colorfulnotion/jam/types"
 	"github.com/gorilla/websocket"
 )
 
@@ -706,59 +706,6 @@ func (c *NodeClient) GetAvailabilityAssignments(coreIdx uint32) (*statedb.CoreSt
 	return &CoreState, nil
 }
 
-func (c *NodeClient) GetSegments(importedSegments []types.ImportSegment) (raw_segments [][]byte, err error) {
-	raw_segments = make([][]byte, len(importedSegments))
-	for idx, segment := range importedSegments {
-		segmentBytes, err := c.Segment(segment.RequestedHash, segment.Index)
-		if err != nil {
-			return nil, err
-		}
-		raw_segments[idx] = segmentBytes
-	}
-	return raw_segments, nil
-}
-
-func (c *NodeClient) GetSegmentsByRequestedHash(requestedHashes common.Hash, count int) (raw_segments [][]byte, err error) {
-	for i := 0; i < count; i++ {
-		segmentIndex := uint16(i)
-		segmentBytes, err := c.Segment(requestedHashes, segmentIndex)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get segment %d for hash %s: %w", segmentIndex, requestedHashes.Hex(), err)
-		}
-		raw_segments = append(raw_segments, segmentBytes)
-	}
-	if len(raw_segments) != count {
-		return nil, fmt.Errorf("expected %d segments, got %d", count, len(raw_segments))
-	}
-	return raw_segments, nil
-}
-
-func (c *NodeClient) Segment(wphash common.Hash, segmentIndex uint16) ([]byte, error) {
-	// Convert the segment index to a string
-	segmentIndexStr := strconv.FormatUint(uint64(segmentIndex), 10)
-	req := []string{wphash.Hex(), segmentIndexStr}
-
-	var res string
-	err := c.CallWithRetry("jam.Segment", req, &res)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert the hex string back to bytes
-	// segmentBytes := common.Hex2Bytes(res)
-
-	type getSegmentResponse struct {
-		Segment       []byte        `json:"segment"`
-		Justification []common.Hash `json:"justification"`
-	}
-	var parsed getSegmentResponse
-	_ = json.Unmarshal([]byte(res), &parsed)
-
-	segmentBytes := parsed.Segment
-
-	return segmentBytes, nil
-}
-
 func (nc *NodeClient) GetBuildVersion() (string, error) {
 	var result string
 	err := nc.CallWithRetry("jam.GetBuildVersion", []string{}, &result)
@@ -928,6 +875,16 @@ func (c *NodeClient) GetServiceStorage(serviceIndex uint32, storageKey []byte) (
 	return storageBytes, true, nil
 }
 
+func (c *NodeClient) ReadStateWitness(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error) {
+	// Stub implementation - not supported for remote clients
+	return types.StateWitness{}, false, fmt.Errorf("ReadStateWitness not supported for remote clients")
+}
+
+func (c *NodeClient) GetStateWitnesses(workReports []*types.WorkReport) ([]types.StateWitness, common.Hash, error) {
+	// Stub implementation - not supported for remote clients
+	return nil, common.Hash{}, fmt.Errorf("GetStateWitnesses not supported for remote clients")
+}
+
 func (c *NodeClient) WaitForServiceValue(serviceIndex uint32, storageKey []byte) (service_index uint32, err error) {
 	ctxWait, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()
@@ -946,4 +903,13 @@ func (c *NodeClient) WaitForServiceValue(serviceIndex uint32, storageKey []byte)
 			}
 		}
 	}
+}
+
+// FetchJAMDASegments implements the JNode interface for NodeClient
+func (c *NodeClient) FetchJAMDASegments(workPackageHash common.Hash, indexStart uint16, indexEnd uint16, payloadLength uint32) (payload []byte, err error) {
+	return nil, fmt.Errorf("FetchJAMDASegments not supported for remote NodeClient connections yet")
+}
+
+func (c *NodeClient) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
+	return nil, nil, fmt.Errorf("BuildBundle not supported for remote NodeClient connections yet")
 }

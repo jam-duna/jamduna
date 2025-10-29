@@ -30,15 +30,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/colorfulnotion/jam/bls"
-	"github.com/colorfulnotion/jam/chainspecs"
+	bls "github.com/colorfulnotion/jam/bls"
+	chainspecs "github.com/colorfulnotion/jam/chainspecs"
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/grandpa"
-	"github.com/colorfulnotion/jam/log"
+	grandpa "github.com/colorfulnotion/jam/grandpa"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/storage"
-	"github.com/colorfulnotion/jam/trie"
-	"github.com/colorfulnotion/jam/types"
+	storage "github.com/colorfulnotion/jam/storage"
+	telemetry "github.com/colorfulnotion/jam/telemetry"
+	trie "github.com/colorfulnotion/jam/trie"
+	types "github.com/colorfulnotion/jam/types"
 
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/qlog"
@@ -122,6 +123,9 @@ type NodeContent struct {
 	hub             *Hub
 	tlsConfig       *tls.Config
 	clientTLSConfig *tls.Config
+
+	// Telemetry (JIP-3)
+	telemetryClient *telemetry.TelemetryClient
 	store           *storage.StateDBStorage
 	// holds a map of the hash to the stateDB
 	statedbMap      map[common.Hash]*statedb.StateDB
@@ -146,6 +150,13 @@ type NodeContent struct {
 	servicesMutex sync.Mutex
 
 	workPackageQueue sync.Map
+	seenWorkPackages sync.Map
+
+	// DA segment cache: (erasureRoot, segmentIndex) -> segment bytes
+	segmentCache map[string][]byte
+	// DA justification cache: (erasureRoot, segmentIndex) -> justification hashes
+	justificationCache map[string][]common.Hash
+	segmentCacheMutex  sync.RWMutex
 
 	loaded_services_dir string
 	block_tree          *types.BlockTree
@@ -156,6 +167,9 @@ type NodeContent struct {
 
 	jceManagerMutex sync.Mutex
 	jceManager      *ManualJCEManager
+
+	// Ethereum transaction pool for guarantor mempool
+	txPool *TxPool
 }
 
 func NewNodeContent(id uint16, store *storage.StateDBStorage, pvmBackend string) NodeContent {
@@ -175,9 +189,13 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage, pvmBackend string)
 		workReportsCh:        make(chan types.WorkReport, DefaultChannelSize),
 		servicesMap:          make(map[uint32]*types.ServiceSummary),
 		workPackageQueue:     sync.Map{},
+		seenWorkPackages:     sync.Map{},
+		segmentCache:         make(map[string][]byte),
+		justificationCache:   make(map[string][]common.Hash),
 		new_timeslot_chan:    make(chan uint32, 1),
 		extrinsic_pool:       types.NewExtrinsicPool(),
 		pvmBackend:           pvmBackend,
+		telemetryClient:      telemetry.NewNoOpTelemetryClient(),
 	}
 }
 
@@ -300,6 +318,25 @@ type Node struct {
 	WriteDebugFlag      bool
 }
 
+func (n *Node) handleGuaranteeDiscarded(guarantee types.Guarantee, discardReason byte) {
+	if n.telemetryClient == nil {
+		return
+	}
+
+	guarantors := make([]uint16, len(guarantee.Signatures))
+	for i, cred := range guarantee.Signatures {
+		guarantors[i] = cred.ValidatorIndex
+	}
+
+	outline := telemetry.GuaranteeOutline{
+		WorkReportHash: guarantee.Report.Hash(),
+		Slot:           guarantee.Slot,
+		Guarantors:     guarantors,
+	}
+
+	n.telemetryClient.GuaranteeDiscarded(outline, discardReason)
+}
+
 func (n *Node) GetIsSync() bool {
 	n.IsSyncMu.RLock()
 	defer n.IsSyncMu.RUnlock()
@@ -308,10 +345,19 @@ func (n *Node) GetIsSync() bool {
 func (n *Node) SetIsSync(isSync bool, why string) {
 	n.IsSyncMu.Lock()
 	defer n.IsSyncMu.Unlock()
+
+	// Check if sync status is actually changing
+	previousSyncStatus := n.IsSync
+
 	if !isSync {
 		log.Info(log.B, "SetIsSync", "n", n.String(), "isSync", isSync, "reason", why)
 	}
 	n.IsSync = isSync
+
+	// Emit telemetry event if sync status changed
+	if previousSyncStatus != isSync {
+		n.telemetryClient.SyncStatusChanged(isSync)
+	}
 }
 
 func (n *Node) GetLatestBlockInfo() *JAMSNP_BlockInfo {
@@ -383,6 +429,115 @@ func (n *NodeContent) String() string {
 	return fmt.Sprintf("[N%d]", n.id)
 }
 
+// FetchJAMDASegments implements DA segment retrieval with caching
+//
+// Current implementation:
+// - Fast path: All segments cached → return immediately (no network)
+// - Slow path: Any cache miss → fetch FULL contiguous range [indexStart, indexEnd)
+// - Cache stores segments only (justificationCache populated but not checked)
+//
+// Known limitations (TODO for future hardening):
+//  1. Sparse fetch not supported: reconstructSegments uses absolute page indices,
+//     so passing sparse indices (e.g., [5, 65]) panics when accessing clonedProofs[1]
+//     because pageIdx calculation assumes contiguous ranges starting from page 0.
+//  2. Justifications not truly cached: justificationCache is written but never read,
+//     so first lookup always misses even when segment bytes exist. This is acceptable
+//     for now since we always re-verify via reconstructSegments anyway.
+//
+// Future work:
+// - Option A: Teach reconstructSegments to map sparse indices to relative proof positions
+// - Option B: Chunk missing indices into contiguous ranges and fetch separately
+// - Option C: Implement proper justification caching if CDT verification becomes expensive
+// FetchJAMDASegments implements DA segment retrieval with caching and payload extraction
+func (n *NodeContent) FetchJAMDASegments(workPackageHash common.Hash, indexStart uint16, indexEnd uint16, payloadLength uint32) (payload []byte, err error) {
+	log.Debug(log.DA, "FetchJAMDASegments called", "wph", workPackageHash.Hex(), "indexStart", indexStart, "indexEnd", indexEnd, "payloadLength", payloadLength)
+	var rawSegments []byte
+	if indexEnd <= indexStart {
+		return nil, fmt.Errorf("FetchJAMDASegments: invalid range - indexEnd (%d) <= indexStart (%d)", indexEnd, indexStart)
+	}
+
+	si := n.WorkReportSearch(workPackageHash)
+	if si == nil {
+		return nil, fmt.Errorf("FetchJAMDASegments: no WorkReport found for workPackageHash %s", workPackageHash.Hex())
+	}
+	erasureRoot := si.WorkReport.AvailabilitySpec.ErasureRoot
+
+	numSegments := int(indexEnd - indexStart)
+	cachedSegments := make([][]byte, numSegments)
+	missingIndices := make([]uint16, 0)
+
+	n.segmentCacheMutex.RLock()
+	for i := 0; i < numSegments; i++ {
+		segIdx := indexStart + uint16(i)
+		cacheKey := fmt.Sprintf("%s:%d", erasureRoot.Hex(), segIdx)
+		segment, segExists := n.segmentCache[cacheKey]
+
+		if segExists {
+			cachedSegments[i] = segment
+		} else {
+			missingIndices = append(missingIndices, segIdx)
+		}
+	}
+	n.segmentCacheMutex.RUnlock()
+
+	if len(missingIndices) == 0 {
+		rawSegments = make([]byte, 0, numSegments*types.SegmentSize)
+		for _, segment := range cachedSegments {
+			rawSegments = append(rawSegments, segment...)
+		}
+		log.Trace(log.DA, "FetchJAMDASegments: all segments cached (fast path)",
+			"wph", workPackageHash.Hex(),
+			"indexStart", indexStart,
+			"indexEnd", indexEnd,
+			"rawSize", len(rawSegments))
+	} else {
+		log.Debug(log.DA, "FetchJAMDASegments: cache miss, fetching full range",
+			"wph", workPackageHash.Hex(),
+			"indexStart", indexStart,
+			"indexEnd", indexEnd,
+			"cached", numSegments-len(missingIndices),
+			"missing", len(missingIndices))
+
+		fullIndices := make([]uint16, numSegments)
+		for i := 0; i < numSegments; i++ {
+			fullIndices[i] = indexStart + uint16(i)
+		}
+		si.Indices = fullIndices
+
+		fetchedSegments, _, err := n.reconstructSegments(si, 0)
+		if err != nil {
+			return nil, fmt.Errorf("FetchJAMDASegments: reconstructSegments failed: %v", err)
+		}
+
+		if len(fetchedSegments) != numSegments {
+			return nil, fmt.Errorf("FetchJAMDASegments: expected %d fetched segments, got %d", numSegments, len(fetchedSegments))
+		}
+
+		n.segmentCacheMutex.Lock()
+		for i := 0; i < numSegments; i++ {
+			if fetchedSegments[i] != nil {
+				segIdx := indexStart + uint16(i)
+				cacheKey := fmt.Sprintf("%s:%d", erasureRoot.Hex(), segIdx)
+				n.segmentCache[cacheKey] = fetchedSegments[i]
+			}
+		}
+		n.segmentCacheMutex.Unlock()
+
+		rawSegments = make([]byte, 0, numSegments*types.SegmentSize)
+		for _, segment := range fetchedSegments {
+			if segment == nil {
+				return nil, fmt.Errorf("FetchJAMDASegments: nil segment in final payload")
+			}
+			rawSegments = append(rawSegments, segment...)
+		}
+	}
+
+	if len(rawSegments) < int(payloadLength) {
+		return nil, fmt.Errorf("FetchJAMDASegments: not enough data to extract payload")
+	}
+	return rawSegments[:payloadLength], nil
+}
+
 func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 	n.credential = credential
 	if false {
@@ -400,7 +555,7 @@ func createNode(id uint16, credential types.ValidatorSecret, chainspec *chainspe
 
 func PrintSpec(chainspec *chainspecs.ChainSpec) error {
 	levelDBPath := "/tmp/xxx"
-	store, err := storage.NewStateDBStorage(levelDBPath)
+	store, err := storage.NewStateDBStorage(levelDBPath, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient())
 	if err != nil {
 		return err
 	}
@@ -449,7 +604,7 @@ func StandardizePVMBackend(pvm_mode string) string {
 func (n *Node) SetPVMBackend(pvm_mode string) {
 	pvmBackend := StandardizePVMBackend(pvm_mode)
 	n.pvmBackend = pvmBackend
-	log.Info(log.Node, fmt.Sprintf("PVM Backend: [%s]", pvmBackend))
+	log.Trace(log.Node, fmt.Sprintf("PVM Backend: [%s]", pvmBackend))
 }
 
 func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, epoch0Timestamp uint64, peers []string, startPeerList map[uint16]*Peer, dataDir string, port int, jceMode string) (*Node, error) {
@@ -459,12 +614,20 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 	fmt.Printf("[N%v] addr=%v, dataDir=%v\n", id, addr, dataDir) //REQUIRED FOR CAPTURING JOBID. DO NOT DELETE THIS LINE!!
 	//REQUIRED FOR CAPTURING JOBID. DO NOT DELETE THIS LINE!!
 
+	// Create NodeContent with a placeholder store for JAMDA interface
+	nodeContent := NewNodeContent(id, nil, StandardizePVMBackend(pvmBackend))
+
 	levelDBPath := fmt.Sprintf("%v/leveldb/%d/", dataDir, port)
-	store, err := storage.NewStateDBStorage(levelDBPath)
+	// Create a temporary no-op telemetry client for storage initialization
+	tempTelemetryClient := telemetry.NewNoOpTelemetryClient()
+	store, err := storage.NewStateDBStorage(levelDBPath, &nodeContent, tempTelemetryClient)
 	if err != nil {
 		return nil, fmt.Errorf("NewStateDBStorage[port:%d] Err %v", port, err)
 	}
 	store.NodeID = id
+	// Now set the store field on nodeContent
+	nodeContent.store = store
+
 	var cert tls.Certificate
 	ed25519_priv := ed25519.PrivateKey(credential.Ed25519Secret[:])
 	ed25519_pub := ed25519_priv.Public().(ed25519.PublicKey)
@@ -474,7 +637,7 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 		return nil, fmt.Errorf("error generating self-signed certificate: %v", err)
 	}
 	node := &Node{
-		NodeContent: NewNodeContent(id, store, StandardizePVMBackend(pvmBackend)), // mkcheck
+		NodeContent: nodeContent,
 		IsSync:      true,
 		peers:       peers,
 		clients:     make(map[string]string),
@@ -509,6 +672,9 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 		WriteDebugFlag: true,
 	}
 	node.NodeContent.nodeSelf = node
+	node.extrinsic_pool.SetGuaranteeDiscardCallback(node.handleGuaranteeDiscarded)
+	// Initialize with a no-op telemetry client by default (can be replaced with InitTelemetry)
+
 	var _statedb *statedb.StateDB
 
 	stateTransition := &statedb.StateTransition{}
@@ -526,7 +692,7 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 	if err != nil {
 		return nil, fmt.Errorf("NewStateDBFromStateTransition Err %v", err)
 	}
-
+	//	log.Info(log.Node, "GenesisState KeyVals", "prestate", stateTransition.PreState.String())
 	block := _statedb.Block
 	if block == nil {
 		return nil, fmt.Errorf("NewStateDBFromStateTransition block is nil")
@@ -568,7 +734,7 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 	alpn := "jamnp-s/0/" + x
 
 	node.node_name = fmt.Sprintf("%s-%d", GetJAMNetwork(), id)
-	log.Info(log.Node, "ALPN configuration",
+	log.Trace(log.Node, "ALPN configuration",
 		"genesis_hash", block.Header.HeaderHash().Hex(),
 		"alpn", alpn,
 		"alpn_builder", alpn_builder,
@@ -776,7 +942,67 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 	node.jceMode = jceMode
 	node.runJCE()
 
+	// Start periodic status telemetry reporting
+	go node.runStatusTelemetry()
+
 	return node, nil
+}
+
+// collectStatusData gathers all the status information needed for telemetry
+func (n *Node) collectStatusData() (totalPeers, validatorPeers, blockAnnouncementStreamPeers uint32, guaranteesPerCore []byte, shardsInAvailabilityStore uint32, shardsSize uint64, preimagesInPool, preimagesSize uint32) {
+	// Count total peers
+	totalPeers = uint32(len(n.peersInfo))
+
+	// Count validator peers (assuming all peers in peersInfo are validators)
+	validatorPeers = totalPeers
+
+	// Count peers with block announcement streams open
+	n.UP0_streamMu.Lock()
+	blockAnnouncementStreamPeers = uint32(len(n.UP0_stream))
+	n.UP0_streamMu.Unlock()
+
+	// Get guarantees per core from statedb
+	if n.statedb != nil && n.statedb.JamState != nil {
+		// Get the number of cores from the state
+		coreCount := len(n.statedb.JamState.ValidatorStatistics.CoreStatistics)
+		if coreCount == 0 {
+			coreCount = 341 // Default JAM core count
+		}
+		guaranteesPerCore = make([]byte, coreCount)
+
+		// Count guarantees in each core from the guarantee pool
+		for i := 0; i < coreCount; i++ {
+			// For now, set to 0 - would need to implement proper guarantee counting
+			guaranteesPerCore[i] = 0
+		}
+	} else {
+		// Default to empty array if state is not available
+		guaranteesPerCore = make([]byte, 0)
+	}
+
+	// Get shards in availability store (placeholder implementation)
+	shardsInAvailabilityStore = 0
+	shardsSize = 0
+
+	// Get preimages in pool (placeholder implementation)
+	preimagesInPool = 0
+	preimagesSize = 0
+
+	return
+}
+
+// runStatusTelemetry runs a goroutine that periodically emits status telemetry
+func (n *Node) runStatusTelemetry() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			totalPeers, validatorPeers, blockAnnouncementStreamPeers, guaranteesPerCore, shardsInAvailabilityStore, shardsSize, preimagesInPool, preimagesSize := n.collectStatusData()
+			n.telemetryClient.Status(totalPeers, validatorPeers, blockAnnouncementStreamPeers, guaranteesPerCore, shardsInAvailabilityStore, shardsSize, preimagesInPool, preimagesSize)
+		}
+	}
 }
 
 func (n *Node) runJCE() {
@@ -843,77 +1069,6 @@ func RunGrandpaGraphServer(watchNode *Node, basePort uint16) {
 	}
 }
 
-func (n *Node) GetSegments(importedSegments []types.ImportSegment) (raw_segments [][]byte, err error) {
-	workReportSearchMap := make(map[common.Hash]*SpecIndex)
-	erasureRootIndex := make(map[common.Hash]*SpecIndex)
-
-	// Step 1: resolve WorkReport for each RequestedHash
-	for _, importedSegment := range importedSegments {
-		si, ok := workReportSearchMap[importedSegment.RequestedHash]
-		if !ok {
-			si = n.WorkReportSearch(importedSegment.RequestedHash)
-			if si == nil {
-				return nil, fmt.Errorf("WorkReportSearch(%s) not found", importedSegment.RequestedHash)
-			}
-			workReportSearchMap[importedSegment.RequestedHash] = si
-		}
-
-		erasureRoot := si.WorkReport.AvailabilitySpec.ErasureRoot
-		oldSi, exists := erasureRootIndex[erasureRoot]
-		if exists {
-			oldSi.AddIndex(importedSegment.Index)
-		} else {
-			si.AddIndex(importedSegment.Index)
-			erasureRootIndex[erasureRoot] = si
-		}
-	}
-
-	// Step 2: reconstruct segments for each erasure root
-	segmentDataMap := make(map[common.Hash][][]byte)
-	for erasureRoot, si := range erasureRootIndex {
-		segments, _, err := n.reconstructSegments(si)
-		if err != nil {
-			return nil, fmt.Errorf("reconstructSegments failed for erasureRoot %s: %v", erasureRoot, err)
-		}
-		segmentDataMap[erasureRoot] = segments
-	}
-
-	// Step 3: map back to original import order
-	raw_segments = make([][]byte, len(importedSegments))
-	for i, importedSegment := range importedSegments {
-		si := workReportSearchMap[importedSegment.RequestedHash]
-		erasureRoot := si.WorkReport.AvailabilitySpec.ErasureRoot
-		segments := segmentDataMap[erasureRoot]
-		for j, idx := range si.Indices {
-			if idx == importedSegment.Index {
-				raw_segments[i] = segments[j]
-				break
-			}
-		}
-	}
-	return raw_segments, nil
-}
-
-func (n *Node) GetSegmentsByRequestedHash(RequestedHash common.Hash, count int) (raw_segments [][]byte, err error) {
-
-	ExportedSegmentLength := count
-
-	importedSegments := make([]types.ImportSegment, 0)
-	for i := 0; i < int(ExportedSegmentLength); i++ {
-		importedSegment := types.ImportSegment{
-			RequestedHash: RequestedHash,
-			Index:         uint16(i),
-		}
-		importedSegments = append(importedSegments, importedSegment)
-	}
-
-	raw_segments, err = n.GetSegments(importedSegments)
-	if err != nil {
-		return nil, fmt.Errorf("GetSegments failed: %v", err)
-	}
-	return raw_segments, nil
-}
-
 func (n *Node) GetWorkReport(requestedHash common.Hash) (wr *types.WorkReport, err error) {
 	specIndex := n.WorkReportSearch(requestedHash)
 	if specIndex == nil {
@@ -930,6 +1085,14 @@ func (n *Node) GetService(serviceIndex uint32) (sa *types.ServiceAccount, ok boo
 
 func (n *Node) GetServiceStorage(serviceIndex uint32, k []byte) ([]byte, bool, error) {
 	return n.getState().GetTrie().GetServiceStorage(serviceIndex, k)
+}
+
+func (n *Node) ReadStateWitness(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error) {
+	return n.getState().ReadStateWitness(serviceID, objectID, fetchPayloadFromDA)
+}
+
+func (n *Node) GetStateWitnesses(workReports []*types.WorkReport) ([]types.StateWitness, common.Hash, error) {
+	return n.getState().GetStateWitnesses(workReports)
 }
 
 func (n *Node) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex uint32, preimage []byte) (err error) {
@@ -975,12 +1138,36 @@ const (
 // RobustSubmitAndWaitForWorkPackages will retry SubmitAndWaitForWorkPackages up to 4 times
 func RobustSubmitAndWaitForWorkPackages(ctx context.Context, n JNode, reqs []*WorkPackageRequest) (*types.WorkReport, error) {
 	var lastErr error
+	log.Info(log.Node, "RobustSubmitAndWaitForWorkPackages START", "maxTries", maxRobustTries, "refineTimeout", RefineTimeout)
+
 	for attempt := 1; attempt <= maxRobustTries; attempt++ {
-		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
+		log.Info(log.Node, "RobustSubmitAndWaitForWorkPackages attempt", "attempt", attempt, "maxTries", maxRobustTries)
+
+		// Use the caller's context directly, but with a reasonable per-attempt timeout
+		// If caller's timeout is long, allow longer per-attempt timeout
+		attemptTimeout := RefineTimeout
+		if deadline, ok := ctx.Deadline(); ok {
+			remaining := time.Until(deadline)
+			// Use min of remaining time and 2x RefineTimeout for longer operations
+			maxAttemptTimeout := RefineTimeout * 2
+			if remaining < maxAttemptTimeout {
+				attemptTimeout = remaining
+			} else {
+				attemptTimeout = maxAttemptTimeout
+			}
+		}
+
+		attemptCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
 		defer cancel()
 
-		hashes, err := n.SubmitAndWaitForWorkPackages(ctx, reqs)
+		log.Info(log.Node, "RobustSubmitAndWaitForWorkPackages attempt timeout", "attempt", attempt, "timeout", attemptTimeout)
+
+		startTime := time.Now()
+		hashes, err := n.SubmitAndWaitForWorkPackages(attemptCtx, reqs)
+		elapsed := time.Since(startTime)
+
 		if err == nil {
+			log.Info(log.Node, "RobustSubmitAndWaitForWorkPackages SUCCESS", "attempt", attempt, "elapsed", elapsed)
 			wr, err := n.GetWorkReport(hashes[0])
 			if err != nil {
 				log.Error(log.Node, "GetWorkReport ERR", "err", err)
@@ -989,9 +1176,14 @@ func RobustSubmitAndWaitForWorkPackages(ctx context.Context, n JNode, reqs []*Wo
 			return wr, nil
 		}
 		lastErr = err
-		log.Warn(log.Node, "RobustSubmitAndWaitForWorkPackages", "attempt", attempt, "err", err)
-		// small backoff between retries
-		time.Sleep(5 * time.Second)
+		log.Warn(log.Node, "RobustSubmitAndWaitForWorkPackages", "attempt", attempt, "elapsed", elapsed, "err", err)
+
+		// Check if we should continue retrying
+		if attempt < maxRobustTries {
+			log.Info(log.Node, "RobustSubmitAndWaitForWorkPackages retrying", "nextAttempt", attempt+1, "backoffSeconds", 5)
+			// small backoff between retries
+			time.Sleep(5 * time.Second)
+		}
 	}
 
 	return nil, fmt.Errorf("all retries failed after %d attempts: %w", maxRobustTries, lastErr)
@@ -1002,12 +1194,9 @@ func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPac
 	accumulated := make(map[common.Hash]bool)
 	identifierToIndex := make(map[string]int)
 
-	// Initialize refine context and identifier map
-	refineCtx := n.getRefineContext()
+	// Initialize identifier map and build bundles to set RefineContext
 	for i, req := range reqs {
 		identifierToIndex[req.Identifier] = i
-		rc := refineCtx.Clone()
-		req.WorkPackage.RefineContext = *rc
 	}
 
 	// Populate prerequisite hashes
@@ -1035,8 +1224,12 @@ func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPac
 
 	// Submit each work package to a random peer on the assigned core
 	for _, req := range reqs {
-		fmt.Printf("Submitting work package: %s\n", req.WorkPackage.String())
-		n.SubmitWPSameCore(req.WorkPackage, req.ExtrinsicsBlobs)
+		//fmt.Printf("Submitting work package: %s\n", req.WorkPackage.String())
+		err := n.SubmitWPSameCore(req.WorkPackage, req.ExtrinsicsBlobs)
+		if err != nil {
+			log.Error(log.Node, "Work package submission failed", "identifier", req.Identifier, "hash", workPackageHashes[identifierToIndex[req.Identifier]].Hex(), "err", err)
+			return workPackageHashes, fmt.Errorf("work package submission failed for %s: %w", req.Identifier, err)
+		}
 		log.Info(log.Node, "Work package submitted", "identifier", req.Identifier, "hash", workPackageHashes[identifierToIndex[req.Identifier]].Hex())
 	}
 
@@ -1044,20 +1237,37 @@ func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPac
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
+	log.Info(log.Node, "SubmitAndWaitForWorkPackages waiting for accumulation", "expectedCount", len(reqs), "hashes", func() []string {
+		var hashStrs []string
+		for _, h := range workPackageHashes {
+			hashStrs = append(hashStrs, h.Hex())
+		}
+		return hashStrs
+	}())
+
 	for accumulatedCount := 0; accumulatedCount < len(reqs); {
 		select {
 		case <-ctx.Done():
+			log.Warn(log.Node, "SubmitAndWaitForWorkPackages context cancelled", "accumulatedCount", accumulatedCount, "expectedCount", len(reqs), "err", ctx.Err())
 			return workPackageHashes, ctx.Err()
 		case <-ticker.C:
+			log.Debug(log.Node, "SubmitAndWaitForWorkPackages checking accumulation history", "accumulatedCount", accumulatedCount, "expectedCount", len(reqs))
+			prevAccumulatedCount := accumulatedCount
 			for j := types.EpochLength - 1; j > 0; j-- {
 				history := n.statedb.JamState.AccumulationHistory[j]
+				if len(history.WorkPackageHash) > 0 {
+					log.Debug(log.Node, "Checking accumulation history slot", "slot", j, "hashCount", len(history.WorkPackageHash))
+				}
 				for _, hash := range history.WorkPackageHash {
 					if seen, exists := accumulated[hash]; exists && !seen {
 						accumulated[hash] = true
 						accumulatedCount++
-						log.Info(log.Node, "Work package accumulated", "hash", hash.Hex(), "count", accumulatedCount)
+						log.Info(log.Node, "Work package accumulated", "hash", hash.Hex(), "slot", j, "count", accumulatedCount, "expectedCount", len(reqs))
 					}
 				}
+			}
+			if accumulatedCount == prevAccumulatedCount {
+				log.Debug(log.Node, "No new accumulations found", "accumulatedCount", accumulatedCount, "expectedCount", len(reqs))
 			}
 		}
 	}
@@ -1068,7 +1278,7 @@ func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPac
 
 func (n *Node) SubmitAndWaitForWorkPackage(ctx context.Context, wp *WorkPackageRequest) (common.Hash, error) {
 	//fmt.Printf("NODE SubmitAndWaitForWorkPackage %s\n", wp.WorkPackage.Hash())
-	wp.WorkPackage.RefineContext = n.getRefineContext()
+	// RefineContext is already set by BuildBundle - don't overwrite it
 	err := n.SubmitWPSameCore(wp.WorkPackage, wp.ExtrinsicsBlobs)
 	if err != nil {
 		log.Error(log.Node, "SubmitAndWaitForWorkPackage", "err", err, "id", wp.Identifier)
@@ -1237,7 +1447,7 @@ func (n *NodeContent) SubmitWPSameCore(wp types.WorkPackage, extrinsicsBlobs typ
 	log.Info(log.G, "SubmitWPSameCore SUBMISSION Start", "NODE", n.id, "validators", peers, "coreIndex", coreIndex, "slot", slot)
 
 	// if we want to process it ourselves, this should be true
-	allowSelfSubmission := false
+	allowSelfSubmission := true
 	if allowSelfSubmission {
 		n.workPackageQueue.Store(workPackageHash, &WPQueueItem{
 			workPackage:        wp,
@@ -1400,6 +1610,10 @@ func (n *NodeContent) addStateDB(_statedb *statedb.StateDB) error {
 			headerHash = _statedb.GetHeaderHash()
 		}
 		n.statedb = _statedb
+		//best block update here
+		if telemetryClient := n.telemetryClient; telemetryClient != nil {
+			telemetryClient.BestBlockChanged(_statedb.GetSafrole().Timeslot, _statedb.GetBlock().Header.HeaderHash())
+		}
 		n.statedbMap[headerHash] = _statedb
 		log.Debug(log.B, "addStateDB", "statedb", n.statedb.GetHeaderHash().Hex())
 		return nil
@@ -1413,6 +1627,10 @@ func (n *NodeContent) addStateDB(_statedb *statedb.StateDB) error {
 			return nil
 		}
 		n.statedb = _statedb
+		//best block update here
+		if telemetryClient := n.telemetryClient; telemetryClient != nil {
+			telemetryClient.BestBlockChanged(_statedb.GetSafrole().Timeslot, _statedb.GetBlock().Header.HeaderHash())
+		}
 		n.statedbMap[_statedb.GetHeaderHash()] = _statedb
 		log.Debug(log.B, "addStateDB", "statedb", n.statedb.GetHeaderHash().Hex())
 	} else {
@@ -1471,7 +1689,26 @@ func (n *Node) lookupPubKey(pubKey string) (uint16, bool) {
 }
 
 func (n *Node) handleConnection(conn quic.Connection) {
-	defer conn.CloseWithError(0, "closing connection")
+	defer func() {
+		// Emit Disconnected telemetry before closing
+		remoteAddr := conn.RemoteAddr().String()
+		host, port, err := net.SplitHostPort(remoteAddr)
+		if err == nil {
+			if _, _, addrParseErr := telemetry.ParseTelemetryAddress(host, port); addrParseErr == nil {
+				n.clientsMutex.Lock()
+				pubKey, ok := n.clients[remoteAddr]
+				n.clientsMutex.Unlock()
+				if ok {
+					if validatorIndex, found := n.lookupPubKey(pubKey); found {
+						peerIDBytes := n.PeerID32(uint16(validatorIndex))
+						// Connection side is unknown in this context, so pass nil
+						n.telemetryClient.Disconnected(peerIDBytes, nil, "connection closed")
+					}
+				}
+			}
+		}
+		conn.CloseWithError(0, "closing connection")
+	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -1482,12 +1719,28 @@ func (n *Node) handleConnection(conn quic.Connection) {
 		log.Warn(log.Node, "handleConnection", "remoteAddr", remoteAddr, "host", host, "port", port)
 		return
 	}
+
+	// Emit ConnectingIn event early to track all connection attempts
+	var telemetryEventID uint64
+	var telemetryConnecting bool
+	addrBytes, addrPort, addrParseErr := telemetry.ParseTelemetryAddress(host, port)
+	if addrParseErr != nil {
+		log.Warn(log.Node, "handleConnection: telemetry address parse failed", "remoteAddr", remoteAddr, "err", addrParseErr)
+	} else {
+		telemetryEventID = n.telemetryClient.GetEventID()
+		n.telemetryClient.ConnectingIn(addrBytes, addrPort)
+		telemetryConnecting = true
+	}
+
 	n.clientsMutex.Lock()
 	pubKey, ok := n.clients[remoteAddr]
 	n.clientsMutex.Unlock()
 
 	if !ok {
 		log.Warn(log.Node, "handleConnection DROPPING - not found in n.client", "remoteAddr", remoteAddr)
+		if telemetryConnecting {
+			n.telemetryClient.ConnectInFailed(telemetryEventID, "peer not in client list")
+		}
 		return
 	}
 
@@ -1526,6 +1779,11 @@ func (n *Node) handleConnection(conn quic.Connection) {
 		}
 	}
 
+	if telemetryConnecting {
+		peerIDBytes := n.PeerID32(uint16(validatorIndex))
+		n.telemetryClient.ConnectedIn(telemetryEventID, peerIDBytes)
+	}
+	// handle all incoming streams from this connection
 	for {
 		stream, err := conn.AcceptStream(ctx)
 		if err != nil {
@@ -1595,7 +1853,12 @@ func (n *Node) getEpoch() uint32 {
 
 // broadcast sends the object to all peers
 // TODO: Use worker pools to limit concurrent goroutines to like a few hundred at most
-func (n *Node) broadcast(ctxParent context.Context, obj interface{}) {
+func (n *Node) broadcast(ctxParent context.Context, obj interface{}, evID ...uint64) {
+	// Extract eventID if provided, otherwise default to 0
+	var eventID uint64
+	if len(evID) > 0 {
+		eventID = evID[0]
+	}
 	objType := reflect.TypeOf(obj)
 
 	for id, p := range n.peersInfo {
@@ -1630,7 +1893,7 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) {
 			case reflect.TypeOf(types.Ticket{}):
 				t := obj.(types.Ticket)
 				epoch := n.getEpoch()
-				if err := peer.SendTicketDistribution(ctx, epoch, t, false); err != nil {
+				if err := peer.SendTicketDistribution(ctx, epoch, t, false, eventID); err != nil {
 					log.Warn(log.Quic, "SendTicketDistribution", "n", n.String(), "->p", peer.PeerID, "err", err)
 				}
 			case reflect.TypeOf(JAMSNP_BlockAnnounce{}):
@@ -1657,17 +1920,21 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}) {
 				err = sendQuicBytes(ctx, up0_stream, block_a_bytes, peerID, UP0_BlockAnnouncement)
 				if err != nil {
 					log.Warn(log.Quic, "SendBlockAnnouncement:sendQuicBytes (broadcast)", "n", n.String(), "err", err)
+				} else {
+					// Telemetry: Block announced (event 62) - Connection Side 0 (announcer/sender)
+					peerIDBytes := n.PeerID32(peerID)
+					n.telemetryClient.BlockAnnounced(peerIDBytes, 0, b.Header.Slot, h)
 				}
 
 			case reflect.TypeOf(types.Guarantee{}):
 				g := obj.(types.Guarantee)
-				if err := peer.SendWorkReportDistribution(ctx, g.Report, g.Slot, g.Signatures); err != nil {
+				if err := peer.SendWorkReportDistribution(ctx, g.Report, g.Slot, g.Signatures, eventID); err != nil {
 					log.Warn(log.Quic, "SendWorkReportDistribution", "n", n.String(), "err", err)
 					return
 				}
 			case reflect.TypeOf(types.Assurance{}):
 				a := obj.(types.Assurance)
-				if err := peer.SendAssurance(ctx, &a); err != nil {
+				if err := peer.SendAssurance(ctx, &a, eventID); err != nil {
 					log.Warn(log.Quic, "SendAssurance", "n", n.String(), "err", err)
 					return
 				}
@@ -1883,6 +2150,37 @@ func (n *Node) applyChildrenRecursively(ctx context.Context, node *types.BT_Node
 
 func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) error {
 	nextBlock := nextBlockNode.Block
+
+	// Telemetry: Importing (event 43) - Block importing begins
+	importingEventID := n.telemetryClient.GetEventID()
+
+	// Create BlockOutline from the block being imported
+	blockBytes := nextBlock.Bytes()
+	preimages := nextBlock.PreimageLookups()
+
+	// Calculate total preimage size
+	var preimagesSizeInBytes uint32
+	for _, preimage := range preimages {
+		preimagesSizeInBytes += uint32(len(preimage.Blob))
+	}
+
+	// Count dispute verdicts
+	dispute := nextBlock.Disputes()
+	numDisputeVerdicts := uint32(len(dispute.Verdict))
+
+	blockOutline := telemetry.BlockOutline{
+		SizeInBytes:          uint32(len(blockBytes)),
+		HeaderHash:           nextBlock.Header.Hash(),
+		NumTickets:           uint32(len(nextBlock.Tickets())),
+		NumPreimages:         uint32(len(preimages)),
+		PreimagesSizeInBytes: preimagesSizeInBytes,
+		NumGuarantees:        uint32(len(nextBlock.Guarantees())),
+		NumAssurances:        uint32(len(nextBlock.Assurances())),
+		NumDisputeVerdicts:   numDisputeVerdicts,
+	}
+
+	n.telemetryClient.Importing(nextBlock.Header.Slot, blockOutline)
+	blockEventID := n.telemetryClient.GetEventID()
 	// if !n.appliedFirstBlock {
 	// 	if nextBlock.Header.ParentHeaderHash == genesisBlockHash {
 	// 		n.appliedFirstBlock = true
@@ -1905,9 +2203,13 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	}
 	start = time.Now()
 	valid_tickets := n.extrinsic_pool.GetTicketIDPairFromPool(used_entropy)
-	newStateDB, err := statedb.ApplyStateTransitionFromBlock(recoveredStateDB, ctx, nextBlock, valid_tickets, n.pvmBackend)
+	newStateDB, err := statedb.ApplyStateTransitionFromBlock(blockEventID, recoveredStateDB, ctx, nextBlock, valid_tickets, n.pvmBackend)
 	stateTransitionElapsed := common.ElapsedStr(start)
 	if err != nil {
+		// Telemetry: BlockExecutionFailed (event 46) - Block execution failed after importing
+
+		n.telemetryClient.BlockExecutionFailed(importingEventID, err.Error())
+
 		fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
 		return fmt.Errorf("ApplyStateTransitionFromBlock failed: %w", err)
 	}
@@ -1916,6 +2218,39 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	newStateDB.Block = nextBlock
 	newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
 	n.clearQueueUsingBlock(nextBlock.Extrinsic.Guarantees)
+
+	// Store work reports from guarantees to KV database for future guarantors
+	// This must happen before the next work package is guaranteed
+	numGuaranteedReports := 0
+	for _, assignment := range newStateDB.JamState.AvailabilityAssignments {
+		if assignment != nil {
+			if err := n.StoreWorkReport(assignment.WorkReport); err != nil {
+				log.Error(log.Node, "ApplyBlock: StoreWorkReport (guarantee) failed", "n", n.String(),
+					"workPackageHash", assignment.WorkReport.AvailabilitySpec.WorkPackageHash.String_short(),
+					"err", err)
+			} else {
+				log.Trace(log.Node, "ApplyBlock: Stored work report (guarantee)", "n", n.String(),
+					"workPackageHash", assignment.WorkReport.AvailabilitySpec.WorkPackageHash.String_short(),
+					"coreIndex", assignment.WorkReport.CoreIndex)
+				numGuaranteedReports++
+			}
+		}
+	}
+	// Also store available work reports (from assurances) to KV database
+	log.Trace(log.Node, "ApplyBlock: Checking available work reports", "n", n.String(),
+		"numGuaranteed", numGuaranteedReports,
+		"numAvailableWorkReports", len(newStateDB.AvailableWorkReport))
+	for _, wr := range newStateDB.AvailableWorkReport {
+		if err := n.StoreWorkReport(wr); err != nil {
+			log.Error(log.Node, "ApplyBlock: StoreWorkReport (assurance) failed", "n", n.String(),
+				"workPackageHash", wr.AvailabilitySpec.WorkPackageHash.String_short(),
+				"err", err)
+		} else {
+			log.Trace(log.Node, "ApplyBlock: Stored work report (assurance)", "n", n.String(),
+				"workPackageHash", wr.AvailabilitySpec.WorkPackageHash.String_short(),
+				"coreIndex", wr.CoreIndex)
+		}
+	}
 
 	// 2. Update services for new state
 	n.updateServiceMap(newStateDB, nextBlock)
@@ -1956,7 +2291,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	if newStateDB.JamState.SafroleState.GetEpochT() == 0 {
 		mode = "fallback"
 	}
-	log.Info(log.B, "Imported Block", // "n", n.String(),
+	log.Trace(log.B, "Imported Block", // "n", n.String(),
 		"mode", mode,
 		"author", nextBlock.Header.AuthorIndex,
 		"p", nextBlock.Header.ParentHeaderHash.String_short(),
@@ -2007,82 +2342,6 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 			}
 		}
 
-		if CE138_test {
-			fmt.Printf("CE138_test: START\n")
-			for _, workReport := range n.statedb.AvailableWorkReport {
-				spec := workReport.AvailabilitySpec
-				coreIndex := workReport.CoreIndex
-				workPackageHash := spec.WorkPackageHash
-
-				workPackageBundle, err := n.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength, workReport.SegmentRootLookup, coreIndex, spec.ExportedSegmentLength)
-				if err != nil {
-					log.Error(log.Audit, "FetchWorkPackageBundle:reconstructPackageBundleSegments", "err", err)
-					continue
-				}
-				if workPackageBundle.PackageHash() != workPackageHash {
-					log.Error(log.Audit, "auditWorkReport:FetchWorkPackageBundle package mismatch")
-					continue
-				}
-				wr, _, pvmElapsed, _, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, n.statedb.GetTimeslot(), false)
-				if err != nil {
-					log.Error(log.Audit, "auditWorkReport:executeWorkPackageBundle", "err", err)
-					continue
-				}
-				if reflect.DeepEqual(wr, workReport) {
-					log.Info(log.DA, "reconstructPackageBundleSegments: WorkReport matches", "n", n.String(),
-						"coreIndex", coreIndex,
-						"workPackageHash", workPackageHash.String_short(),
-						"pvmElapsed", pvmElapsed,
-						"workReport", workReport.Hash())
-				} else {
-					log.Error(log.DA, "reconstructPackageBundleSegments: WorkReport mismatch", "n", n.String(),
-						"coreIndex", coreIndex,
-						"workPackageHash", workPackageHash.String_short(),
-						"pvmElapsed", pvmElapsed,
-						"workReport", workReport.Hash(),
-					)
-
-				}
-			}
-		}
-
-		if CE138_test && false {
-			for _, workReport := range n.statedb.AvailableWorkReport {
-				spec := workReport.AvailabilitySpec
-				coreIndex := workReport.CoreIndex
-				workPackageHash := spec.WorkPackageHash
-
-				workPackageBundle, err := n.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength, workReport.SegmentRootLookup, coreIndex, spec.ExportedSegmentLength)
-				if err != nil {
-					log.Error(log.Audit, "FetchWorkPackageBundle:reconstructPackageBundleSegments", "err", err)
-					continue
-				}
-				if workPackageBundle.PackageHash() != workPackageHash {
-					log.Error(log.Audit, "auditWorkReport:FetchWorkPackageBundle package mismatch")
-					continue
-				}
-				wr, _, pvmElapsed, _, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, n.statedb.GetTimeslot(), false)
-				if err != nil {
-					log.Error(log.Audit, "auditWorkReport:executeWorkPackageBundle", "err", err)
-					continue
-				}
-				if reflect.DeepEqual(wr, workReport) {
-					log.Info(log.DA, "reconstructPackageBundleSegments: WorkReport matches", "n", n.String(),
-						"coreIndex", coreIndex,
-						"workPackageHash", workPackageHash.String_short(),
-						"pvmElapsed", pvmElapsed,
-						"workReport", workReport.Hash())
-				} else {
-					log.Error(log.DA, "reconstructPackageBundleSegments: WorkReport mismatch", "n", n.String(),
-						"coreIndex", coreIndex,
-						"workPackageHash", workPackageHash.String_short(),
-						"pvmElapsed", pvmElapsed,
-						"workReport", workReport.Hash(),
-					)
-
-				}
-			}
-		}
 	} else {
 		log.Info(log.Quic, "ApplyBlock: latest_block not equal to nextBlock", "n", n.String(), "latest_block", latest_block_info.HeaderHash.String_short(), "nextBlock", nextBlock.Header.Hash().String_short())
 	}
@@ -2133,7 +2392,6 @@ func (n *Node) assureNewBlock(ctx context.Context, b *types.Block, sdb *statedb.
 		bestBlock := bestBlockNode.Block
 		go n.hub.ReceiveLatestBlock(finalizedBlock, bestBlock, sdb, false)
 	}
-	assureStart := time.Now()
 
 	if len(b.Extrinsic.Guarantees) > 0 {
 		var wg sync.WaitGroup
@@ -2185,8 +2443,13 @@ func (n *Node) assureNewBlock(ctx context.Context, b *types.Block, sdb *statedb.
 	if numCores == 0 {
 		return nil
 	}
-	n.broadcast(ctx, a) // via CE141
-	n.Telemetry(log.MsgTypeAssurance, a, "elapsed", common.Elapsed(assureStart), "codec_encoded", types.EncodeAsHex(a))
+
+	// Telemetry: DistributingAssurance (event 126) - Emitted when an assurer begins distributing an assurance
+	eventID := n.telemetryClient.GetEventID()
+	n.telemetryClient.DistributingAssurance(a.Anchor, a.Bitfield[:])
+
+	n.broadcast(ctx, a, eventID) // via CE141
+	n.telemetryClient.AssuranceDistributed(eventID)
 
 	return nil
 }
@@ -2203,7 +2466,7 @@ func (n *Node) processBlock(blk *types.Block) error {
 
 // reconstructSegments uses CE139 and CAN use CE140 upon failure
 // We continuily use erasureRoot to ask the question
-func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, justifications [][]common.Hash, err error) {
+func (n *NodeContent) reconstructSegments(si *SpecIndex, eventID uint64) (segments [][]byte, justifications [][]common.Hash, err error) {
 	requests_original := make([]CE139_request, types.TotalValidators)
 
 	// this will track the proofpages
@@ -2237,7 +2500,7 @@ func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, jus
 	for validatorIdx, req := range requests_original {
 		requests[uint16(validatorIdx)] = req
 	}
-	responses, err := n.makeRequests(requests, types.RecoveryThreshold, SmallTimeout, LargeTimeout)
+	responses, err := n.makeRequests(requests, types.RecoveryThreshold, SmallTimeout, LargeTimeout, eventID)
 	if err != nil {
 		fmt.Printf("Error in fetching import segments By ErasureRoot: %v\n", err)
 		return segments, justifications, err
@@ -2298,6 +2561,11 @@ func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, jus
 		clonedSegs[i] = cloned
 	}
 	justifications = make([][]common.Hash, indicesLen)
+
+	// Track segment verification for telemetry
+	var failedIndices []uint16
+	var verifiedIndices []uint16
+
 	for i, segmentIndex := range si.Indices {
 		pageSize := 1 << trie.PageFixedDepth
 		pageIdx := int(segmentIndex) / pageSize
@@ -2306,6 +2574,8 @@ func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, jus
 		decodedData, _, err := types.Decode(pagedProofByte, reflect.TypeOf(types.PageProof{}))
 		if err != nil {
 			fmt.Printf("Failed to decode page proof: %v", err)
+			failedIndices = append(failedIndices, segmentIndex)
+			continue
 		}
 		recoveredPageProof := decodedData.(types.PageProof)
 		//fmt.Printf("recoveredPageProof: %v\n", recoveredPageProof)
@@ -2313,26 +2583,45 @@ func (n *NodeContent) reconstructSegments(si *SpecIndex) (segments [][]byte, jus
 		fullJustification, err := trie.PageProofToFullJustification(pagedProofByte, pageIdx, subTreeIdx)
 		if err != nil {
 			fmt.Printf("fullJustification len: %d, PageProofToFullJustification ERR: %v.", len(fullJustification), err)
+			failedIndices = append(failedIndices, segmentIndex)
+			continue
 		}
 		leafHash := recoveredPageProof.LeafHashes[subTreeIdx]
 		derived_globalRoot_j0 := trie.VerifyCDTJustificationX(leafHash.Bytes(), int(segmentIndex), fullJustification, 0)
 		if common.BytesToHash(derived_globalRoot_j0) != common.BytesToHash(si.WorkReport.AvailabilitySpec.ExportedSegmentRoot[:]) {
 			log.Error(log.DA, "cdttree:VerifyCDTJustificationX", "derived_globalRoot_j0", common.BytesToHash(derived_globalRoot_j0), "ExportedSegmentRoot", si.WorkReport.AvailabilitySpec.ExportedSegmentRoot)
-			return segments, justifications, err
+			failedIndices = append(failedIndices, segmentIndex)
 		} else {
-			log.Debug(log.DA, "cdttree:VerifyCDTJustificationX Justified", "ExportedSegmentRoot", common.BytesToHash(si.WorkReport.AvailabilitySpec.ExportedSegmentRoot[:]))
+			log.Debug(log.DA, "cdttree:VerifyCDTJustificationX Justified", "segmentIndex", segmentIndex, "ExportedSegmentRoot", common.BytesToHash(si.WorkReport.AvailabilitySpec.ExportedSegmentRoot[:]))
+			verifiedIndices = append(verifiedIndices, segmentIndex)
+			justifications[i] = fullJustification
 		}
-		justifications[i] = fullJustification
 	}
+
 	if len(clonedSegs) != indicesLen {
 		log.Error(log.DA, "reconstructSegments", "l", len(clonedSegs), "l2", len(justifications))
+	} else {
+		log.Trace(log.DA, "cdttree:VerifyCDTJustificationX Justified", "ExportedSegmentRoot", common.BytesToHash(si.WorkReport.AvailabilitySpec.ExportedSegmentRoot[:]), "numSegments", len(clonedSegs), "numJustifications", len(justifications), "Indices", si.Indices)
 	}
+	// Return error if any segments failed verification; Emit segment verification telemetry events
+	if len(failedIndices) > 0 {
+		// Telemetry: SegmentVerificationFailed (event 171)
+		reason := "segment proof verification failed against segments-root"
+		n.telemetryClient.SegmentVerificationFailed(eventID, failedIndices, reason)
+		return segments, justifications, fmt.Errorf("segment verification failed for indices: %v", failedIndices)
+	}
+	// Telemetry: SegmentsVerified (event 172)
+	n.telemetryClient.SegmentsVerified(eventID, verifiedIndices)
 
 	return clonedSegs, justifications, nil
 }
 
 // HERE we are in a AUDITING situation, if verification fails, we can still execute the work package by using CE140?
 func (n *NodeContent) reconstructPackageBundleSegments(erasureRoot common.Hash, blength uint32, segmentRootLookup types.SegmentRootLookup, coreIndex uint, exportedSegmentLength uint16) (types.WorkPackageBundle, error) {
+	eventID := n.telemetryClient.GetEventID()
+	// Telemetry: ReconstructingBundle (event 146) - Bundle reconstruction begins
+	isTrivial := false // TODO: support "trivial" reconstruction
+	n.telemetryClient.ReconstructingBundle(eventID, isTrivial)
 
 	// Prepare requests to validators
 	requestsOriginal := make([]CE138_request, types.TotalValidators)
@@ -2350,7 +2639,7 @@ func (n *NodeContent) reconstructPackageBundleSegments(erasureRoot common.Hash, 
 	}
 	// calling fetchall
 	if attemptReconstruction {
-		n.FetchAllBundleAndSegmentShards(uint16(coreIndex), erasureRoot, exportedSegmentLength, true)
+		n.FetchAllBundleAndSegmentShards(uint16(coreIndex), erasureRoot, exportedSegmentLength, true, eventID)
 	}
 
 	// Fetch shard responses
@@ -2424,7 +2713,7 @@ func (n *NodeContent) reconstructPackageBundleSegments(erasureRoot common.Hash, 
 	}
 
 	// IMPORTANT: Verify the reconstructed bundle against the segment root lookup
-	verified, verifyErr := n.VerifyBundle(&workPackageBundle, segmentRootLookup)
+	verified, verifyErr := n.VerifyBundle(&workPackageBundle, segmentRootLookup, eventID)
 	if verifyErr != nil {
 		log.Warn(log.Node, "reconstructPackageBundleSegments: VerifyBundle errored", "err", verifyErr)
 		return types.WorkPackageBundle{}, fmt.Errorf("verify bundle failed: %w", verifyErr)
@@ -2433,6 +2722,9 @@ func (n *NodeContent) reconstructPackageBundleSegments(erasureRoot common.Hash, 
 		log.Warn(log.Node, "reconstructPackageBundleSegments: bundle verification failed")
 		return types.WorkPackageBundle{}, fmt.Errorf("bundle verification failed")
 	}
+
+	// Telemetry: BundleReconstructed (event 147) - Bundle reconstruction completed successfully
+	n.telemetryClient.BundleReconstructed(eventID)
 
 	return workPackageBundle, nil
 }
@@ -2666,8 +2958,10 @@ func (n *Node) runJCEManually() {
 		case <-ticker.C:
 			prevJCE := n.GetCurrJCE()
 			if prevJCE >= types.EpochLength && prevJCE < types.EpochLength*2 {
-				n.GenerateTickets(prevJCE)
-				n.BroadcastTickets(prevJCE)
+				eventID := n.GenerateTickets(prevJCE)
+				if eventID > 0 {
+					n.BroadcastTickets(prevJCE, eventID)
+				}
 			}
 		case newJCE := <-n.new_timeslot_chan:
 			time.Sleep(1500 * time.Millisecond)
@@ -2704,6 +2998,34 @@ func (n *Node) GetCurrJCE() uint32 {
 	return n.currJCE
 }
 
+// GetJCETimestamp returns the JAM Common Era timestamp (in microseconds) associated with the
+// current JCE slot, matching the specification described in TELEMETRY.md.
+func (n *Node) GetJCETimestamp() uint64 {
+	curr := n.GetCurrJCE()
+
+	n.jce_timestamp_mutex.Lock()
+	var slotTime time.Time
+	if n.jce_timestamp != nil {
+		if ts, ok := n.jce_timestamp[curr]; ok {
+			slotTime = ts
+		}
+	}
+	n.jce_timestamp_mutex.Unlock()
+
+	if slotTime.IsZero() {
+		// Fall back to deterministic slot timestamp if we have not yet cached the wall clock time.
+		seconds := n.GetSlotTimestamp(curr)
+		slotTime = time.Unix(int64(seconds), 0).UTC()
+	}
+
+	slotTime = slotTime.UTC()
+	if slotTime.Before(common.JceStart) {
+		return 0
+	}
+
+	return uint64(slotTime.Sub(common.JceStart) / time.Microsecond)
+}
+
 func (n *Node) SetCurrJCE(currJCE uint32) {
 	n.currJCEMutex.Lock()
 	defer n.currJCEMutex.Unlock()
@@ -2736,8 +3058,8 @@ func (n *Node) SetCurrJCE(currJCE uint32) {
 
 		if currEpoch > 0 && (realPhase == 5) { // } || realPhase == types.EpochLength) {
 			// nextEpochFirst-endPhase <= currJCE <= nextEpochFirst
-			n.GenerateTickets(stateslot)
-			n.BroadcastTickets(stateslot)
+			eventID := n.GenerateTickets(stateslot)
+			n.BroadcastTickets(stateslot, eventID)
 		}
 	}
 
@@ -2838,7 +3160,6 @@ func (n *Node) runAuthoring() {
 				}
 				log.Debug(log.B, "runAuthoring: Gonna Author Slot", "n", n.String(), "slotMap", string(slotMapjson))
 			}
-			makeblock_start := time.Now()
 
 			type processResult struct {
 				isAuthorized bool
@@ -2892,7 +3213,6 @@ func (n *Node) runAuthoring() {
 			n.StoreBlock(newBlock, n.id, true)
 			n.processBlock(newBlock)
 
-			n.authorTelemetry(newBlock, newStateDB, common.Elapsed(makeblock_start))
 			n.SetLatestBlockInfo(
 				&JAMSNP_BlockInfo{
 					HeaderHash: newBlock.Header.Hash(),
@@ -2966,31 +3286,6 @@ func (n *Node) runAuthoring() {
 			n.extrinsic_pool.RemoveUsedExtrinsicFromPool(newBlock, newStateDB.GetSafrole().Entropy[2], IsClosed)
 		case log := <-logChan:
 			go n.WriteLog(log, true)
-		}
-	}
-}
-
-func (n *Node) Telemetry(msgType uint8, obj interface{}, tags ...interface{}) {
-	if false {
-		sender_id := n.GetEd25519Key().String()
-		log.Telemetry(msgType, sender_id, obj, tags...)
-
-	}
-}
-
-func (n *Node) authorTelemetry(b *types.Block, newStateDB *statedb.StateDB, elapsed uint32) {
-	n.Telemetry(log.MsgTypeBlock, b, "elapsed", elapsed, "codec_encoded", types.EncodeAsHex(b))
-	for _, p := range b.Extrinsic.Preimages {
-		n.Telemetry(log.MsgTypePreimage, p, "metadata", fmt.Sprintf("blob_len=%v|h=%v|s=%v", len(p.Blob), p.Hash(), p.Requester))
-	}
-	n.Telemetry(log.MsgTypeStatistics, newStateDB.JamState.ValidatorStatistics, "codec_encoded", types.EncodeAsHex(newStateDB.JamState.ValidatorStatistics))
-	serviceUpdates := newStateDB.GetStateUpdates().GetServiceUpdates()
-	for _, upd := range serviceUpdates {
-		if upd != nil && upd.ServiceInfo != nil {
-			if upd.ServiceInfo.Info.NewAccount {
-				info := upd.ServiceInfo.Info
-				n.Telemetry(log.MsgTypeNewService, upd.ServiceInfo.Info, "codec_encoded", types.EncodeAsHex(info))
-			}
 		}
 	}
 }

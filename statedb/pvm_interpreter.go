@@ -36,6 +36,7 @@ func NewInterpreter(Service_index uint32, p *Program, initialRegs []uint64, init
 	if len(p.K) > 0 {
 		bitmaskPtr = (*C.uint8_t)(unsafe.Pointer(&p.K[0]))
 	}
+
 	if len(p.J) > 0 {
 		jumpTablePtr = (*C.uint32_t)(unsafe.Pointer(&p.J[0]))
 	}
@@ -92,6 +93,10 @@ func (ram *Interpreter) WriteRAMBytes(address uint32, data []byte) uint64 {
 	}
 
 	return uint64(C.pvm_write_ram_bytes(ram.cVM, C.uint32_t(address), (*C.uint8_t)(&data[0]), C.uint32_t(len(data))))
+}
+
+func (vm *Interpreter) SetPage(uint32, uint32, uint8) {
+
 }
 
 func (vm *Interpreter) SetHeapPointer(pointer uint32) {
@@ -259,7 +264,6 @@ func (vm *Interpreter) Init(argumentData []byte) (err error) {
 	if len(argumentData) == 0 {
 		argumentData = []byte{0}
 	}
-
 	// argument
 	argAddr := uint32(0xFFFFFFFF) - Z_Z - Z_I + 1
 	vm.WriteRegister(0, uint64(0xFFFFFFFF-(1<<16)+1))

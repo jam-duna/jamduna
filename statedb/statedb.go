@@ -16,11 +16,12 @@ import (
 	"os"
 	"sort"
 
-	"github.com/colorfulnotion/jam/bandersnatch"
+	bandersnatch "github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/storage"
-	"github.com/colorfulnotion/jam/trie"
+	log "github.com/colorfulnotion/jam/log"
+	storage "github.com/colorfulnotion/jam/storage"
+	telemetry "github.com/colorfulnotion/jam/telemetry"
+	trie "github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -55,7 +56,8 @@ type StateDB struct {
 
 	ElapsedMicrosecondsValidation uint32
 
-	AncestorSet map[common.Hash]uint32 `json:"ancestorSet"` // AncestorSet is a set of block headers which include the recent 24 hrs of blocks
+	AncestorSet       map[common.Hash]uint32               `json:"ancestorSet"` // AncestorSet is a set of block headers which include the recent 24 hrs of blocks
+	BlockServicesCost map[uint32]*telemetry.AccumulateCost `json:"blockServicesCost"`
 }
 
 func (s *StateDB) MarshalJSON() ([]byte, error) {
@@ -204,23 +206,22 @@ var StateKeyMap = map[byte]string{
 // Initial services
 const (
 	BootstrapServiceCode  = 0
-	BootstrapServiceFile  = "/services/bootstrap.pvm"
-	BootStrapNullAuthFile = "/services/null_authorizer.pvm"
-
-	FibServiceCode = 15
-	FibServiceFile = "/services/fib.pvm"
+	BootstrapServiceFile  = "/services/bootstrap/bootstrap.pvm"
+	BootStrapNullAuthFile = "/services/null_authorizer/null_authorizer.pvm"
 
 	AlgoServiceCode = 10
-	AlgoServiceFile = "/services/algo.pvm"
+	AlgoServiceFile = "/services/algo/algo.pvm"
 
 	AuthCopyServiceCode = 20
-	AuthCopyServiceFile = "/services/auth_copy.pvm"
+	AuthCopyServiceFile = "/services/auth_copy/auth_copy.pvm"
 
-	GameOfLifeCode         = 30
-	GameOfLifeFile         = "/services/game_of_life.pvm"
-	GameOfLifeChildFile    = "services/game_of_life_child.pvm"
-	GameOfLifeChildLogFile = "services/game_of_life_child_with_log.pvm"
+	EVMServiceCode = 35
+	EVMServiceFile = "/services/evm/evm.pvm"
 )
+
+func RequiresBackendGo(s uint32) bool {
+	return s == EVMServiceCode
+}
 
 func (s *StateDB) GetHeaderHash() common.Hash {
 	return s.Block.Header.Hash()
@@ -754,20 +755,45 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 		isAuthorizedBlockBuilder, ticketID, _, _ := sf0.IsAuthorizedBuilder(targetJCE, common.Hash(credential.BandersnatchPub), ticketIDs)
 		currEpoch, currPhase := s.JamState.SafroleState.EpochAndPhase(targetJCE)
 		if isAuthorizedBlockBuilder {
-			// Add MakeBlock span
-			// if s.sdb.SendTrace {
-			// 	tracer := s.sdb.Tp.Tracer("NodeTracer")
-			// 	// s.InitEpochPhaseContext()
-			// 	ctx, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] ProcessState -> MakeBlock", s.sdb.NodeID))
-			// 	s.sdb.UpdateBlockContext(ctx)
-			// 	defer span.End()
-			// }
+			telemetryClient := s.sdb.GetTelemetryClient()
+			// Telemetry: Authoring (event 40) - Block authoring begins
+			authoringEventID := telemetryClient.GetEventID()
+			telemetryClient.Authoring(targetJCE, s.HeaderHash)
 
 			proposedBlk, err := s.MakeBlock(ctx, credential, targetJCE, ticketID, extrinsic_pool)
 			if err != nil {
+				// Telemetry: AuthoringFailed (event 41) - Block authoring failed
+				telemetryClient.AuthoringFailed(authoringEventID, err.Error())
 				log.Error(log.SDB, "ProcessState:MakeBlock", "author", s.Id, "currJCE", currJCE, "e'", currEpoch, "m'", currPhase, "err", err)
 				return true, nil, nil, err
 			}
+
+			// Telemetry: Authored (event 42) - Block has been authored
+			// Create BlockOutline from the proposed block
+			blockBytes := proposedBlk.Bytes()
+			preimages := proposedBlk.PreimageLookups()
+
+			// Calculate total preimage size
+			var preimagesSizeInBytes uint32
+			for _, preimage := range preimages {
+				preimagesSizeInBytes += uint32(len(preimage.Blob))
+			}
+
+			// Count dispute verdicts (Disputes() returns a single Dispute, not a slice)
+			dispute := proposedBlk.Disputes()
+			numDisputeVerdicts := uint32(len(dispute.Verdict))
+
+			blockOutline := telemetry.BlockOutline{
+				SizeInBytes:          uint32(len(blockBytes)),
+				HeaderHash:           proposedBlk.Header.Hash(),
+				NumTickets:           uint32(len(proposedBlk.Tickets())),
+				NumPreimages:         uint32(len(preimages)),
+				PreimagesSizeInBytes: preimagesSizeInBytes,
+				NumGuarantees:        uint32(len(proposedBlk.Guarantees())),
+				NumAssurances:        uint32(len(proposedBlk.Assurances())),
+				NumDisputeVerdicts:   numDisputeVerdicts,
+			}
+			telemetryClient.Authored(authoringEventID, blockOutline)
 
 			if blockAuthoringChaos {
 				if noAuthoring := SimulateBlockAuthoringInterruption(proposedBlk); noAuthoring {
@@ -775,22 +801,6 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 				}
 			}
 
-			// Add ApplyStateTransitionFromBlock span
-			/*if s.sdb.Tp != nil && s.sdb.BlockContext != nil && s.sdb.SendTrace {
-				tracer := s.sdb.Tp.Tracer("NodeTracer")
-
-				var block_hash common.Hash
-				if proposedBlk == nil {
-					block_hash = common.Hash{}
-				} else {
-					block_hash = proposedBlk.Header.Hash()
-				}
-				tags := trace.WithAttributes(attribute.String("BlockHash", common.Str(block_hash)))
-				_, span := tracer.Start(s.sdb.BlockContext, fmt.Sprintf("[N%d] ProcessState -> ApplyStateTransitionFromBlock", s.sdb.NodeID), tags)
-				// oldState.sdbs.UpdateBlockContext(ctx)
-				defer span.End()
-			}
-			*/
 			var used_entropy common.Hash // to avoid jump epoch
 			if proposedBlk.EpochMark() != nil {
 				used_entropy = proposedBlk.EpochMark().TicketsEntropy
@@ -798,8 +808,10 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 				used_entropy = s.GetSafrole().Entropy[2]
 			}
 			valid_tickets := extrinsic_pool.GetTicketIDPairFromPool(used_entropy)
-			newStateDB, err := ApplyStateTransitionFromBlock(s, ctx, proposedBlk, valid_tickets, pvmBackend) // shawn to check.. valid_tickets was nil here before
+			newStateDB, err := ApplyStateTransitionFromBlock(authoringEventID, s, ctx, proposedBlk, valid_tickets, pvmBackend) // shawn to check.. valid_tickets was nil here before
 			if err != nil {
+				// Telemetry: BlockExecutionFailed (event 46) - Block execution failed after authoring
+				telemetryClient.BlockExecutionFailed(authoringEventID, err.Error())
 				log.Error(log.SDB, "ProcessState:ApplyStateTransitionFromBlock", "s.ID", s.Id, "currJCE", currJCE, "e'", currEpoch, "m'", currPhase, "err", err)
 				return true, nil, nil, err
 			}

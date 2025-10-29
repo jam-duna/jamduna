@@ -8,12 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/colorfulnotion/jam/chainspecs"
+	chainspecs "github.com/colorfulnotion/jam/chainspecs"
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/storage"
-	"github.com/colorfulnotion/jam/types"
+	storage "github.com/colorfulnotion/jam/storage"
+	telemetry "github.com/colorfulnotion/jam/telemetry"
+	types "github.com/colorfulnotion/jam/types"
 )
 
 type SpecTestCase struct {
@@ -132,7 +133,7 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 	}
 	stateTransition.Block.Header = header.(types.BlockHeader)
 	levelDBPath := "/tmp/testdb"
-	store, err := storage.NewStateDBStorage(levelDBPath)
+	store, err := storage.NewStateDBStorage(levelDBPath, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient())
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 
@@ -185,8 +186,11 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 	pvmStart := time.Now()
 
 	vm_auth := statedb.NewVMFromCode(authindex, authcode, 0, 0, s, statedb.BackendInterpreter, types.IsAuthorizedGasAllocation)
+	if vm_auth == nil {
+		t.Fatalf("Failed to create VM for authorization (corrupted bytecode?)")
+	}
 	workPackageCoreIndex := uint16(0)
-	r := vm_auth.ExecuteAuthorization(workPackage, workPackageCoreIndex)
+	r := vm_auth.ExecuteAuthorization(authcode, workPackageCoreIndex)
 	p_u := workPackage.AuthorizationCodeHash
 	p_p := workPackage.ConfigurationBlob
 	p_a := common.Blake2Hash(append(p_u.Bytes(), p_p...))
@@ -206,6 +210,9 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 		}
 		// fmt.Printf("index %d, code len=%d\n", service_index, len(code))
 		vm := statedb.NewVMFromCode(service_index, code, 0, 0, s, statedb.BackendInterpreter, workItem.RefineGasLimit)
+		if vm == nil {
+			t.Fatalf("Failed to create VM for service %d (corrupted bytecode?)", service_index)
+		}
 		vm.Timeslot = s.JamState.SafroleState.Timeslot
 
 		output, _, exported_segments := vm.ExecuteRefine(workPackageCoreIndex, uint32(index), workPackage, r, make([][][]byte, 0), workItem.ExportCount, types.ExtrinsicsBlobs{}, p_a, common.Hash{})

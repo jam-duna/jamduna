@@ -95,3 +95,33 @@ func (a WorkPackage) MarshalJSON() ([]byte, error) {
 		WorkItems:             a.WorkItems,
 	})
 }
+
+// Clone creates a deep copy of the WorkPackage
+func (a *WorkPackage) Clone() WorkPackage {
+	clone := WorkPackage{
+		AuthCodeHost:          a.AuthCodeHost,
+		AuthorizationCodeHash: a.AuthorizationCodeHash,
+		RefineContext:         a.RefineContext,
+	}
+
+	// Deep copy byte slices
+	if a.AuthorizationToken != nil {
+		clone.AuthorizationToken = make([]byte, len(a.AuthorizationToken))
+		copy(clone.AuthorizationToken, a.AuthorizationToken)
+	}
+
+	if a.ConfigurationBlob != nil {
+		clone.ConfigurationBlob = make([]byte, len(a.ConfigurationBlob))
+		copy(clone.ConfigurationBlob, a.ConfigurationBlob)
+	}
+
+	// Deep copy WorkItems slice
+	if a.WorkItems != nil {
+		clone.WorkItems = make([]WorkItem, len(a.WorkItems))
+		for i, item := range a.WorkItems {
+			clone.WorkItems[i] = item.Clone()
+		}
+	}
+
+	return clone
+}

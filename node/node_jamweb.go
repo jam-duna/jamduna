@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/storage"
-	"github.com/colorfulnotion/jam/types"
+	storage "github.com/colorfulnotion/jam/storage"
+	types "github.com/colorfulnotion/jam/types"
 	"github.com/gorilla/websocket"
 )
 

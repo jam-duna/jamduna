@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -41,8 +41,8 @@ func (n *Node) TerminateAt(offsetTimeSlot uint32, maxTimeAllowed uint32) (bool, 
 			continue
 		}
 		if time.Since(startTime).Seconds() >= float64(maxTimeAllowed) {
-			s := fmt.Sprintf("[TIMEOUT] H_t=%v e'=%v,m'=%v | missing %v Slot!", currTimeSlot, currEpoch, currPhase, currTimeSlot-initialTimeSlot)
-			return false, fmt.Errorf(s)
+			return false, fmt.Errorf("[TIMEOUT] H_t=%v e'=%v,m'=%v | missing %v Slot!",
+				currTimeSlot, currEpoch, currPhase, currTimeSlot-initialTimeSlot)
 		}
 	}
 	return true, nil

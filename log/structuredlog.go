@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -72,53 +71,6 @@ func (l StructuredLog) MarshalJSON() ([]byte, error) {
 	}
 	buf.WriteByte('}')
 	return buf.Bytes(), nil
-}
-
-func Telemetry(code uint8, sender_id string, msg interface{}, kv ...interface{}) {
-	msgJSON, err := json.Marshal(msg)
-	if err != nil {
-		Error("Telemetry: Failed to marshal msg", "err", err)
-		return
-	}
-
-	log := StructuredLog{
-		Sender:  sender_id,
-		Time:    time.Now().UTC(),
-		MsgType: strconv.Itoa(int(code)),
-		MsgJSON: msgJSON,
-	}
-
-	kvMap := toMap(kv...)
-
-	// Build metadata
-	metaParts := []string{}
-	if userMeta, ok := kvMap["metadata"]; ok && userMeta != nil {
-		metaParts = append(metaParts, fmt.Sprint(userMeta))
-	}
-	if len(metaParts) > 0 {
-		meta := strings.Join(metaParts, "|")
-		log.Metadata = &meta
-	}
-
-	// Populate optional fields
-	if v, ok := kvMap["elapsed"]; ok {
-		log.Elapsed = parseUint32(v)
-	}
-	if v, ok := kvMap["codec_encoded"]; ok {
-		log.MsgCodec = fmt.Sprint(v)
-	}
-	if v, ok := kvMap["time"]; ok {
-		if t, ok := v.(time.Time); ok {
-			log.Time = t
-		}
-	}
-
-	msgBytes, err := json.Marshal(log)
-	if err != nil {
-		Error("Telemetry: Failed to marshal msg", "err", err)
-		return
-	}
-	Root().Telemetry(string(msgBytes))
 }
 
 func toMap(kv ...interface{}) map[string]interface{} {

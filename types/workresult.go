@@ -18,6 +18,11 @@ const (
 	WORKDIGEST_OVERSIZE   = 4
 	WORKDIGEST_BAD        = 5
 	WORKDIGEST_BIG        = 6
+
+	// WORKRESULT aliases for WORKDIGEST constants
+	WORKRESULT_OK    = WORKDIGEST_OK
+	WORKRESULT_OOG   = WORKDIGEST_OOG
+	WORKRESULT_PANIC = WORKDIGEST_PANIC
 )
 
 var HostResultCodeToString map[uint8]string = map[uint8]string{

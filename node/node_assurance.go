@@ -8,8 +8,8 @@ import (
 	"slices"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/trie"
+	log "github.com/colorfulnotion/jam/log"
+	trie "github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -42,23 +42,26 @@ func (n *Node) generateAssurance(headerHash common.Hash, timeslot uint32) (a typ
 	a.Anchor = headerHash
 	a.ValidatorIndex = n.id
 	a.Sign(n.GetEd25519Secret())
+
+	n.telemetryClient.AssuranceProvided(a)
 	return
 }
 
 // upon audit, this does CE138 AND CE139 calls to ALL Assurers
-func (n *NodeContent) FetchAllBundleAndSegmentShards(coreIdx uint16, erasureRoot common.Hash, exportedSegmentLength uint16, verify bool) {
+func (n *NodeContent) FetchAllBundleAndSegmentShards(coreIdx uint16, erasureRoot common.Hash, exportedSegmentLength uint16, verify bool, eventID uint64) {
 	// Auditor -> Assurer CE138
 	shardIdxMap := make(map[uint16]uint16) // shardIdx -> validatorIdx
 	for vIdx := range types.TotalValidators {
 		shardIdx := ComputeShardIndex(coreIdx, uint16(vIdx))
 		shardIdxMap[shardIdx] = uint16(vIdx)
 	}
+
 	resps := make([]trie.Bundle138Resp, types.TotalValidators)
 	for i := range types.TotalValidators {
 		shardIdx := uint16(i)
 		vIdx := shardIdxMap[shardIdx]
 		//bundleShard []byte, sClub common.Hash, encodedPath []byte, err error
-		bundleShard, sClub, encodedPath, err := n.peersInfo[vIdx].SendBundleShardRequest(context.TODO(), erasureRoot, shardIdx)
+		bundleShard, sClub, encodedPath, err := n.peersInfo[vIdx].SendBundleShardRequest(context.TODO(), erasureRoot, shardIdx, eventID)
 		if err == nil {
 			resps[shardIdx] = trie.Bundle138Resp{
 				TreeLen:     types.TotalValidators,
@@ -97,7 +100,7 @@ func (n *NodeContent) FetchAllBundleAndSegmentShards(coreIdx uint16, erasureRoot
 			shardIdx := uint16(i)
 			vIdx := shardIdxMap[shardIdx]
 			// segmentShards []byte, justifications [][]byte, err error
-			segmentShards, justifications, err := n.peersInfo[vIdx].SendSegmentShardRequest(context.TODO(), erasureRoot, shardIdx, allsegmentindices, verify)
+			segmentShards, justifications, err := n.peersInfo[vIdx].SendSegmentShardRequest(context.TODO(), erasureRoot, shardIdx, allsegmentindices, verify, eventID)
 			if err == nil {
 				resps[i] = trie.Segment139Resp{
 					ShardIdx:       shardIdx,
@@ -191,6 +194,7 @@ func (n *Node) assureData(ctx context.Context, g types.Guarantee) error {
 	coredIdx := g.Report.CoreIndex
 	vIdx := n.id
 	shardIdx := ComputeShardIndex(uint16(coredIdx), vIdx) // shardIdx != validatorIdx
+	workReportHash := g.Report.Hash()
 
 	const maxRetries = 3
 	var bundleShard []byte
@@ -250,6 +254,8 @@ func (n *Node) assureData(ctx context.Context, g types.Guarantee) error {
 		log.Error(log.DA, "assureData: StoreWorkReport failed", "coredIdx", coredIdx, "shardIdx", "validatorIdx", vIdx, "shardIdx", shardIdx, "n", n.String(), "err", err)
 		return fmt.Errorf("StoreWorkReport: %w", err)
 	}
+
+	n.telemetryClient.ContextAvailable(workReportHash, uint16(coredIdx), g.Slot, spec)
 
 	n.markAssuring(spec.WorkPackageHash)
 

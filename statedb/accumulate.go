@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
+	telemetry "github.com/colorfulnotion/jam/telemetry"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -304,10 +305,8 @@ func (s *StateDB) OuterAccumulate(g uint64, transfersIn []types.DeferredTransfer
 			i++
 		}
 	}
-	len_t := len(transfersIn)
-	len_free := len(freeAccumulation)
-	n := i + uint64(len_t) + uint64(len_free)
-	if n == 0 { // if i = 0, then nothing to do
+
+	if len(workReports) == 0 { // if i = 0, then nothing to do
 		num_accumulations = 0
 		accumulation_output = make([]types.AccumulationOutput, 0)
 		GasUsage = make([]Usage, 0)
@@ -316,24 +315,31 @@ func (s *StateDB) OuterAccumulate(g uint64, transfersIn []types.DeferredTransfer
 	// transfers with ParallelizedAccumulate
 	p_gasUsed, transfersOut, p_outputs, p_gasUsage := s.ParallelizedAccumulate(o, transfersIn, workReports[0:i], freeAccumulation, pvmBackend, accumulated_partial) // parallelized accumulation the 0 to i work reports
 	// n https://graypaper.fluffylabs.dev/#/1c979cb/17e70117e701?v=0.7.1
-
+	len_t := len(transfersIn)
+	len_free := len(freeAccumulation)
+	n := i + uint64(len_t) + uint64(len_free)
 	transfer_gases := uint64(0)
 	for _, t := range transfersIn {
 		transfer_gases += uint64(t.GasLimit)
 	}
 	gstar := g + transfer_gases
+	if n > 0 { // if i = len(workReports), then nothing more to do
+		// compute gstar https://graypaper.fluffylabs.dev/#/1c979cb/172e02172e02?v=0.7.1
+		for _, t := range transfersIn {
+			gstar += uint64(t.GasLimit)
+		}
+		gstar -= p_gasUsed
+		incNum, incAccumulationOutput, incGasUsage := s.OuterAccumulate(gstar, transfersOut, workReports[i:], o, nil, pvmBackend, accumulated_partial) // recursive call to the rest of the work reports
+		num_accumulations = i + incNum
+		accumulation_output = append(p_outputs, incAccumulationOutput...)
 
-	// compute gstar https://graypaper.fluffylabs.dev/#/1c979cb/172e02172e02?v=0.7.1
-	for _, t := range transfersIn {
-		gstar += uint64(t.GasLimit)
+		GasUsage = append(p_gasUsage, incGasUsage...)
+		s.updateRecentAccumulation(o, accumulated_partial)
+		return
 	}
-	gstar -= p_gasUsed
-	incNum, incAccumulationOutput, incGasUsage := s.OuterAccumulate(gstar, transfersOut, workReports[i:], o, nil, pvmBackend, accumulated_partial) // recursive call to the rest of the work reports
-	num_accumulations = i + incNum
-	accumulation_output = append(p_outputs, incAccumulationOutput...)
-
-	p_gasUsage = append(p_gasUsage, incGasUsage...)
-	return num_accumulations, accumulation_output, p_gasUsage
+	s.updateRecentAccumulation(o, accumulated_partial)
+	// TODO: check if should we use the GasUsage?
+	return i, p_outputs, p_gasUsage
 }
 
 /*
@@ -365,8 +371,6 @@ func (s *StateDB) ParallelizedAccumulate(
 	}
 	for _, t := range transfersIn {
 		serviceMap[t.ReceiverIndex] = struct{}{}
-		receiver, _ := o.GetService(t.ReceiverIndex)
-		receiver.IncBalance(t.Amount)
 	}
 	services := make([]uint32, 0, len(serviceMap))
 	for service := range serviceMap {
@@ -516,22 +520,13 @@ func (s *StateDB) ParallelizedAccumulate(
 				}
 			} else if r.XY.U.PrivilegedDirty {
 				// manager's priority is higher than others
-				allowMutatatedIndex := 0
-				allowMutated := false
-				for index, idx := range originalA {
-					if idx == r.service {
-						allowMutatatedIndex = index
-						allowMutated = true
-						break
-					}
+				if !managerMutatedA {
+					o.PrivilegedState.AuthQueueServiceID = r.XY.U.PrivilegedState.AuthQueueServiceID
 				}
-				if !managerMutatedA && allowMutated {
-					o.PrivilegedState.AuthQueueServiceID[allowMutatatedIndex] = r.XY.U.PrivilegedState.AuthQueueServiceID[allowMutatatedIndex]
-				}
-				if !managerMutatedR && r.service == originalR {
+				if !managerMutatedR {
 					o.PrivilegedState.RegistrarServiceID = r.XY.U.PrivilegedState.RegistrarServiceID
 				}
-				if !managerMutatedU && r.service == originalU {
+				if !managerMutatedU {
 					o.PrivilegedState.UpcomingValidatorsServiceID = r.XY.U.PrivilegedState.UpcomingValidatorsServiceID
 				}
 			}
@@ -647,6 +642,14 @@ invokes pvm execution
 func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.DeferredTransfer, workReports []types.WorkReport, freeAccumulation map[uint32]uint64, serviceID uint32, pvmBackend string) (accumulation_output common.Hash, gasUsed uint64, xy *types.XContext, exceptional bool) {
 	t0 := time.Now()
 
+	serviceCost, exist := sd.BlockServicesCost[serviceID]
+	if !exist {
+		if sd.BlockServicesCost == nil {
+			sd.BlockServicesCost = make(map[uint32]*telemetry.AccumulateCost)
+		}
+		serviceCost = &telemetry.AccumulateCost{}
+		sd.BlockServicesCost[serviceID] = serviceCost
+	}
 	// gas https://graypaper.fluffylabs.dev/#/1c979cb/181901181901?v=0.7.1
 	// 1. gas from free accumulation of this service (if any)
 	gas := uint64(0)
@@ -658,6 +661,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 		for _, workDigest := range workReport.Results {
 			if workDigest.ServiceID == serviceID {
 				gas += uint64(workDigest.Gas)
+				serviceCost.NumItemsAccumulated++
 			}
 		}
 	}
@@ -667,6 +671,8 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 		if transfer.ReceiverIndex == serviceID {
 			selectedTransfers = append(selectedTransfers, transfer)
 			gas += uint64(transfer.GasLimit)
+			serviceCost.TransferProcessingGas += uint64(transfer.GasLimit) // NOT SURE IF THIS IS THE RIGHT PLACE
+			serviceCost.NumTransfersProcessed++
 		}
 	}
 
@@ -734,8 +740,16 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 
 	//(B.8) start point
 	t0 = time.Now()
+	for _, t := range selectedTransfers {
+		serviceAccount.Balance += t.Amount // incoming transfers increase balance
+	}
 
 	vm := NewVMFromCode(serviceID, code, 0, 0, sd, pvmBackend, gas)
+	if vm == nil {
+		log.Error(log.Node, "SingleAccumulate: failed to create VM (corrupted bytecode?)", "serviceID", serviceID)
+		exceptional = true
+		return
+	}
 	pvmContext := log.PvmValidating
 	if sd.Authoring == log.GeneralAuthoring {
 		pvmContext = log.PvmAuthoring
@@ -748,7 +762,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 
 	t0 = time.Now()
 
-	r, _, x_s := vm.ExecuteAccumulate(timeslot, serviceID, inputs, xContext, sd.JamState.SafroleState.Entropy[0])
+	r, _, x_s := vm.ExecuteAccumulate(timeslot, serviceID, inputs, xContext, sd.JamState.SafroleState.Entropy[0], serviceCost)
 	benchRec.Add("ExecuteAccumulate", time.Since(t0))
 	exceptional = false
 	gasUsed = gas - uint64(max(vm.GetGas(), 0))
@@ -774,6 +788,9 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 		res = "yield"
 	}
 	log.Trace(debugB, fmt.Sprintf("BEEFY OK-HALT with %s @SINGLE ACCUMULATE", res), "s", fmt.Sprintf("%d", serviceID), "accumulation_output", accumulation_output)
+
+	serviceCost.TotalGasUsed += gasUsed
+	serviceCost.NumAccumulateCalls++
 	return
 }
 

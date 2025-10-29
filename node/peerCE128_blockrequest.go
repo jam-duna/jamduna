@@ -8,7 +8,8 @@ import (
 	"io"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
+	telemetry "github.com/colorfulnotion/jam/telemetry"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -78,13 +79,6 @@ func (req *JAMSNPBlockRequest) FromBytes(data []byte) error {
 }
 
 func (p *Peer) SendBlockRequest(ctx context.Context, headerHash common.Hash, direction uint8, maximumBlocks uint32) (blocks []types.Block, err error) {
-	// span for block request => response here
-	if p.node.store.SendTrace {
-		tracer := p.node.store.Tp.Tracer("NodeTracer")
-		_, span := tracer.Start(p.node.store.BlockAnnouncementContext, fmt.Sprintf("[N%d] SendBlockRequest", p.node.store.NodeID))
-		// p.node.UpdateBlockContext(ctx)
-		defer span.End()
-	}
 
 	req := &JAMSNPBlockRequest{
 		HeaderHash:    headerHash,
@@ -96,6 +90,10 @@ func (p *Peer) SendBlockRequest(ctx context.Context, headerHash common.Hash, dir
 		return blocks, err
 	}
 	code := uint8(CE128_BlockRequest)
+
+	// Telemetry: Sending block request (event 63)
+	p.node.telemetryClient.SendingBlockRequest(p.GetPeer32(), headerHash, direction, maximumBlocks)
+
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
 		return blocks, err
@@ -107,39 +105,80 @@ func (p *Peer) SendBlockRequest(ctx context.Context, headerHash common.Hash, dir
 		return blocks, err
 	}
 	stream.Close()
+
+	// Telemetry: Block request sent (event 66) - note: SendingBlockRequest doesn't return eventID
+	// We'll use a simple timestamp-based eventID
+	eventID := p.node.telemetryClient.GetEventID()
+	p.node.telemetryClient.BlockRequestSent(eventID)
+
 	respBytes, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
 	if err != nil {
 		log.Error(log.Node, "CE128 SendBlockRequest:receiveQuicBytes", "peerID", p.String(), "err", err)
+		// Telemetry: Block request failed (event 65)
+		p.node.telemetryClient.BlockRequestFailed(eventID, err.Error())
 		return blocks, err
 	}
 
 	decodedBlocks, err := types.DecodeBlocks(respBytes)
 	if err != nil {
 		log.Error(log.Node, "CE128 DecodeBlocks", "peerID", p.String(), "err", err)
+		// Telemetry: Block request failed (event 65)
+		p.node.telemetryClient.BlockRequestFailed(eventID, err.Error())
 		return blocks, err
 	}
+
+	// Telemetry: Block transferred (event 68) for each block
+	for i, block := range decodedBlocks {
+		isLast := i == len(decodedBlocks)-1
+		blockBytes, _ := types.Encode(block)
+		blockOutline := telemetry.BlockOutline{
+			SizeInBytes:          uint32(len(blockBytes)),
+			HeaderHash:           block.Header.Hash(),
+			NumTickets:           uint32(len(block.Extrinsic.Tickets)),
+			NumPreimages:         uint32(len(block.Extrinsic.Preimages)),
+			PreimagesSizeInBytes: 0, // TODO: calculate actual size
+			NumGuarantees:        uint32(len(block.Extrinsic.Guarantees)),
+			NumAssurances:        uint32(len(block.Extrinsic.Assurances)),
+			NumDisputeVerdicts:   0, // TODO: get from block if available
+		}
+		p.node.telemetryClient.BlockTransferred(eventID, block.Header.Slot, blockOutline, isLast)
+	}
+
 	return decodedBlocks, nil
 }
 func (n *NodeContent) onBlockRequest(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) (err error) {
 	var newReq JAMSNPBlockRequest
 	defer stream.Close()
 
+	// Telemetry: Receiving block request (event 64)
+	eventID := n.telemetryClient.GetEventID()
+	n.telemetryClient.ReceivingBlockRequest(n.PeerID32(peerID))
+
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
 	if err != nil {
 		fmt.Printf("%s onBlockRequest Error deserializing: %v\n", n.String(), err)
+		// Telemetry: Block request failed (event 65)
+		n.telemetryClient.BlockRequestFailed(eventID, err.Error())
 		return fmt.Errorf("onBlockRequest: failed to deserialize: %w", err)
 	}
+
+	// Telemetry: Block request received (event 67)
+	n.telemetryClient.BlockRequestReceived(eventID, newReq.HeaderHash, newReq.Direction, newReq.MaximumBlocks)
 
 	// read the request and response with a set of blocks
 	blocks, ok, err := n.BlocksLookup(newReq.HeaderHash, newReq.Direction, newReq.MaximumBlocks)
 	if err != nil {
 		log.Error(log.Node, "onBlockRequest", "headerHash", newReq.HeaderHash, "err", err)
 		stream.CancelWrite(ErrKeyNotFound)
+		// Telemetry: Block request failed (event 65)
+		n.telemetryClient.BlockRequestFailed(eventID, err.Error())
 		return fmt.Errorf("onBlockRequest: lookup failed: %w", err)
 	}
 	if !ok {
 		log.Error(log.Node, "onBlockRequest NOT OK", "headerHash", newReq.HeaderHash, "direction", newReq.Direction)
+		// Telemetry: Block request failed (event 65)
+		n.telemetryClient.BlockRequestFailed(eventID, "blocks not found")
 		return nil
 	}
 	var blockBytes []byte
@@ -171,7 +210,26 @@ func (n *NodeContent) onBlockRequest(ctx context.Context, stream quic.Stream, ms
 	err = sendQuicBytes(ctx, stream, blockBytes, n.id, CE128_BlockRequest)
 	if err != nil {
 		log.Warn(log.Node, "onBlockRequest sendQuicBytes", "headerHash", newReq.HeaderHash, "direction", newReq.Direction, "err", err)
+		// Telemetry: Block request failed (event 65)
+		n.telemetryClient.BlockRequestFailed(eventID, err.Error())
 		return fmt.Errorf("onBlockRequest: sendQuicBytes failed: %w", err)
+	}
+
+	// Telemetry: Block transferred (event 68) for each block
+	for i, block := range blocks {
+		isLast := i == len(blocks)-1
+		blockBytes, _ := types.Encode(block)
+		blockOutline := telemetry.BlockOutline{
+			SizeInBytes:          uint32(len(blockBytes)),
+			HeaderHash:           block.Header.Hash(),
+			NumTickets:           uint32(len(block.Extrinsic.Tickets)),
+			NumPreimages:         uint32(len(block.Extrinsic.Preimages)),
+			PreimagesSizeInBytes: 0, // TODO: calculate actual size
+			NumGuarantees:        uint32(len(block.Extrinsic.Guarantees)),
+			NumAssurances:        uint32(len(block.Extrinsic.Assurances)),
+			NumDisputeVerdicts:   0, // TODO: get from block if available
+		}
+		n.telemetryClient.BlockTransferred(eventID, block.Header.Slot, blockOutline, isLast)
 	}
 
 	// <-- FIN

@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/types"
+	types "github.com/colorfulnotion/jam/types"
 )
 
 type CE139_request struct {
@@ -162,13 +162,6 @@ func (n *NodeContent) getServiceIdxStorage(headerHash common.Hash, service_idx u
 }
 
 func (n *Node) processBlockAnnouncement(ctx context.Context, np_blockAnnouncement JAMSNP_BlockAnnounce) ([]types.Block, error) {
-	if n.store.SendTrace {
-		tracer := n.store.Tp.Tracer("NodeTracer")
-		traceCtx, span := tracer.Start(ctx, fmt.Sprintf("[N%d] processBlockAnnouncement", n.store.NodeID))
-		n.store.UpdateBlockAnnouncementContext(traceCtx)
-		defer span.End()
-		ctx = traceCtx // Use the span context for everything that follows
-	}
 
 	validatorIndex := np_blockAnnouncement.Header.AuthorIndex
 	p, ok := n.peersInfo[validatorIndex]
@@ -330,6 +323,8 @@ func (n *Node) runBlocksTickets() {
 	}
 }
 
+var tmpBlockHash = common.Hash{}
+
 func (n *Node) runReceiveBlock() {
 	pulseTicker := time.NewTicker(100 * time.Millisecond)
 	defer pulseTicker.Stop()
@@ -399,6 +394,12 @@ func (n *Node) runReceiveBlock() {
 			}
 			if GrandpaEasy {
 				n.block_tree.EasyFinalization()
+				if tmpBlockHash != n.block_tree.GetLastFinalizedBlock().Block.Header.HeaderHash() {
+					// new finalized block
+					block := n.block_tree.GetLastFinalizedBlock().Block
+					n.telemetryClient.FinalizedBlockChanged(block.Header.Slot, tmpBlockHash)
+					tmpBlockHash = block.Header.Hash()
+				}
 			}
 			go func() {
 				latst_finalized_block := n.block_tree.GetLastFinalizedBlock()
@@ -500,7 +501,11 @@ func (n *Node) RunRPCCommand() {
 var CurrentSlot = uint32(12)
 
 // process request
-func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interface{}) (resp interface{}, err error) {
+func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interface{}, evID ...uint64) (resp interface{}, err error) {
+	var eventID uint64
+	if len(evID) > 0 {
+		eventID = evID[0]
+	}
 	// Get the peer ID from the object
 	msgType := getMessageType(obj)
 	if msgType == "unknown" {
@@ -566,7 +571,7 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 		log.Trace(log.DA, "CE138_request: SendBundleShardRequest", "n", n.String(), "erasureRoot", erasureRoot, "Req peer shardIndex", peerID, "peer.PeerID", peer.PeerID)
 
 		startTime := time.Now()
-		bundleShard, sClub, encodedPath, err := peer.SendBundleShardRequest(ctx, erasureRoot, req.ShardIndex)
+		bundleShard, sClub, encodedPath, err := peer.SendBundleShardRequest(ctx, erasureRoot, req.ShardIndex, eventID)
 		rtt := time.Since(startTime)
 		log.Debug(log.DA, "CE138_request: SendBundleShardRequest RTT", "n", n.String(), "peerID", peerID, "rtt", rtt)
 		if err != nil {
@@ -610,7 +615,7 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 			}
 			return self_response, nil
 		}
-		segmentShards, selected_justifications, err := peer.SendSegmentShardRequest(ctx, erasureRoot, req.ShardIndex, segmentIndices, false)
+		segmentShards, selected_justifications, err := peer.SendSegmentShardRequest(ctx, erasureRoot, req.ShardIndex, segmentIndices, false, eventID)
 		if err != nil {
 			return resp, err
 		}
@@ -631,10 +636,16 @@ func (n *NodeContent) makeRequests(
 	objs map[uint16]interface{},
 	minSuccess int,
 	singleTimeout, overallTimeout time.Duration,
+	evID ...uint64,
 ) ([]interface{}, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), overallTimeout)
 	defer cancel()
-
+	var eventID uint64
+	if len(evID) > 0 {
+		eventID = evID[0]
+	} else {
+		eventID = 0
+	}
 	var (
 		wg           sync.WaitGroup
 		resultsCh    = make(chan interface{}, len(objs)) // still bounded
@@ -656,7 +667,7 @@ func (n *NodeContent) makeRequests(
 			reqCtx, reqCancel := context.WithTimeout(ctx, singleTimeout)
 			defer reqCancel()
 
-			res, err := n.sendRequest(reqCtx, peerID, obj)
+			res, err := n.sendRequest(reqCtx, peerID, obj, eventID)
 			if err != nil {
 				log.Trace(log.DA, "sendRequest failed", "peerID", peerID, "err", err)
 				return

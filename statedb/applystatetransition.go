@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/jamerrors"
-	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/sdbtiming"
-	"github.com/colorfulnotion/jam/trie"
+	jamerrors "github.com/colorfulnotion/jam/jamerrors"
+	log "github.com/colorfulnotion/jam/log"
+	sdbtiming "github.com/colorfulnotion/jam/sdbtiming"
+	telemetry "github.com/colorfulnotion/jam/telemetry"
+	trie "github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -81,7 +82,7 @@ func ApplyStateTransitionTickets(oldState *StateDB, ctx context.Context, blk *ty
 
 // given previous safrole, applt state transition using block
 // σ'≡Υ(σ,B)
-func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *types.Block, validated_tickets map[common.Hash]common.Hash, pvmBackend string) (s *StateDB, err error) {
+func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx context.Context, blk *types.Block, validated_tickets map[common.Hash]common.Hash, pvmBackend string) (s *StateDB, err error) {
 	t1 := time.Now()
 	defer func() {
 		benchRec.Add("ApplyStateTransitionFromBlock", time.Since(t1))
@@ -190,6 +191,22 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	}
 	// ------ VerifyBlockHeader ------
 	isValid, _, _, headerErr := s.VerifyBlockHeader(blk, &s2)
+
+	// Telemetry: Block verification result
+	if telemetryClient := s.sdb.GetTelemetryClient(); telemetryClient != nil && oldState.Id != blk.Header.AuthorIndex { //author skip
+		if !isValid || headerErr != nil {
+			// BlockVerificationFailed (event 44)
+			reason := "unknown verification failure"
+			if headerErr != nil {
+				reason = headerErr.Error()
+			}
+			telemetryClient.BlockVerificationFailed(blockEventID, reason)
+		} else {
+			// BlockVerified (event 45)
+			telemetryClient.BlockVerified(blockEventID)
+		}
+	}
+
 	if !isValid || headerErr != nil {
 		return s, fmt.Errorf("block header is not valid err=%v", headerErr)
 	}
@@ -253,10 +270,14 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	// ------ OuterAccumulate ------
 	deferred_transfers := make([]types.DeferredTransfer, 0)
 	t0 = time.Now()
-	accumulated_partial := make(map[uint32]*types.XContext)
-	num_accumulations, accumulation_output, gasUsage := s.OuterAccumulate(gas, deferred_transfers, accumulate_input_wr, o, f, pvmBackend, accumulated_partial) // outer accumulate
+	num_accumulations, accumulation_output, gasUsage := s.OuterAccumulate(gas, deferred_transfers, accumulate_input_wr, o, f, pvmBackend, make(map[uint32]*types.XContext)) // outer accumulate
 	benchRec.Add("OuterAccumulate", time.Since(t0))
-	// s.updateRecentAccumulation(o, accumulated_partial)
+
+	// Telemetry: Accumulate result available (event 48)
+	if telemetryClient := s.sdb.GetTelemetryClient(); telemetryClient != nil {
+		telemetryClient.AccumulateResultAvailable(blk.Header.Slot, blk.Header.Hash())
+	}
+
 	// (χ′, δ†, ι′, φ′)
 	for _, sa := range o.ServiceAccounts {
 		sa.ALLOW_MUTABLE() // make sure all service accounts can be written
@@ -271,17 +292,6 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 				stats = &accumulateStatistics{}
 			}
 			stats.numWorkReports++
-
-			part, ok2 := accumulated_partial[service]
-			if ok2 {
-				sa, ok3 := part.U.ServiceAccounts[service]
-				if ok3 {
-					sa.UpdateRecentAccumulation(s.GetTimeslot())
-					o.ServiceAccounts[service] = sa
-					sa.Dirty = true
-				}
-			}
-
 			if stats.numWorkReports > 0 {
 				accumulateStats[service] = stats
 			} else {
@@ -384,6 +394,22 @@ func ApplyStateTransitionFromBlock(oldState *StateDB, ctx context.Context, blk *
 	// ---------  UpdateTrieState ------
 	s.StateRoot = s.UpdateTrieState()
 	benchRec.Add("UpdateTrieState", time.Since(t0))
+
+	// Telemetry: BlockExecuted (event 47) - Block execution completed successfully
+	if telemetryClient := s.sdb.GetTelemetryClient(); telemetryClient != nil {
+		// Convert accumulateStats to ServiceAccumulateCost format for telemetry
+		services := make([]telemetry.ServiceAccumulateCost, 0, len(accumulateStats))
+		for serviceID, cost := range s.BlockServicesCost {
+			services = append(services,
+				telemetry.ServiceAccumulateCost{
+					ServiceID: serviceID,
+					Cost:      *cost,
+				},
+			)
+		}
+		telemetryClient.BlockExecuted(blockEventID, services)
+	}
+
 	return s, nil
 }
 

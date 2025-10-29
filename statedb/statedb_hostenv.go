@@ -5,7 +5,8 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
+	trie "github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -324,6 +325,100 @@ func (s *StateDB) HistoricalLookup(a *types.ServiceAccount, t uint32, blob_hash 
 			return nil
 		}
 	}
+}
+
+// ReadObject fetches ObjectRef and state proof for given objectID
+func (s *StateDB) ReadStateWitness(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error) {
+	tree := s.GetTrie()
+
+	// Use the low-level trie method to get value, proof, and state root
+	valueBytes, proofBytes, _, ok, err := tree.GetServiceStorageWithProof(serviceID, objectID[:])
+	if err != nil {
+		return types.StateWitness{}, false, err
+	}
+	if !ok {
+		return types.StateWitness{}, false, nil
+	}
+
+	// Deserialize ObjectRef from storage
+	offset := 0
+	objRef, err := types.DeserializeObjectRef(valueBytes, &offset)
+	if err != nil {
+		return types.StateWitness{}, true, fmt.Errorf("failed to deserialize ObjectRef: %w", err)
+	}
+
+	// Convert [][]byte proof to []common.Hash
+	path := make([]common.Hash, len(proofBytes))
+	for i, p := range proofBytes {
+		if len(p) != 32 {
+			return types.StateWitness{}, true, fmt.Errorf("invalid proof hash length: expected 32, got %d", len(p))
+		}
+		copy(path[i][:], p)
+	}
+
+	witness := types.StateWitness{
+		ObjectID: objectID,
+		Ref:      objRef,
+		Path:     path,
+	}
+
+	// Optionally fetch payload via FetchJAMDASegments
+	if fetchPayloadFromDA {
+		payload, err := s.sdb.FetchJAMDASegments(objRef.WorkPackageHash, objRef.IndexStart, objRef.IndexEnd, objRef.PayloadLength)
+		if err != nil {
+			// Don't fail if CE139 read fails, just leave payload empty
+			witness.Payload = []byte{}
+		} else {
+			witness.Payload = payload
+		}
+	}
+
+	return witness, true, nil
+}
+
+// VerifyStateWitness verifies a StateWitness proof against a state root
+//
+//	every imported object must undergo same verification against refine context state root
+func VerifyStateWitness(witness types.StateWitness, stateRoot common.Hash) bool {
+	return trie.Verify(witness.Ref.ServiceID, witness.ObjectID[:], witness.Ref.Serialize(), stateRoot[:], witness.Path)
+}
+
+// GetStateWitnesses extracts state witnesses for all objects referenced in the work report (for all work items)
+func (s *StateDB) GetStateWitnesses(workReports []*types.WorkReport) (witnesses []types.StateWitness, stateRoot common.Hash, err error) {
+	stateRoot = s.GetStateRoot()
+	witnesses = make([]types.StateWitness, 0)
+
+	// for all work items in the work report, extract witnesses for every objectID in the write intent
+	for _, workReport := range workReports {
+		for _, r := range workReport.Results {
+			if len(r.Result.Ok) > 0 {
+				effects, err := types.DeserializeExecutionEffects(r.Result.Ok)
+				if err != nil {
+					return nil, common.Hash{}, fmt.Errorf("DeserializeExecutionEffects failed: %v", err)
+				}
+				// Use ReadStateWitness to get proof with built-in verification
+				for _, intent := range effects.WriteIntents {
+					objectID := intent.Effect.ObjectID
+					w, ok, err := s.ReadStateWitness(r.ServiceID, objectID, false)
+					if err != nil {
+						return nil, common.Hash{}, fmt.Errorf("ReadStateWitness failed: %v", err)
+					} else if !ok {
+						// It is important to recognize that when conflicts arise, a write intent may
+						// reference an object that was not actually written.
+						return nil, common.Hash{}, fmt.Errorf("ReadStateWitness NOT FOUND: %v", objectID)
+					}
+					witnesses = append(witnesses, w)
+				}
+			}
+		}
+	}
+	// Verify the witness (for paranoia)
+	for _, w := range witnesses {
+		if !VerifyStateWitness(w, stateRoot) {
+			return nil, common.Hash{}, fmt.Errorf("ReadStateWitness NOT VERIFIED: %v", w.ObjectID)
+		}
+	}
+	return witnesses, stateRoot, nil
 }
 
 func (s *StateDB) GetForgets() []*types.SubServiceRequestResult {

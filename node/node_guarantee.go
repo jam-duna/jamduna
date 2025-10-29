@@ -12,7 +12,8 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
+	telemetry "github.com/colorfulnotion/jam/telemetry"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -24,6 +25,7 @@ type WPQueueItem struct {
 	nextAttemptAfterTS int64
 	numFailures        int
 	slot               uint32 // the slot for which this work package is intended
+	eventID            uint64
 }
 
 func (n *Node) runWPQueue() {
@@ -67,8 +69,9 @@ func (n *Node) clearQueueUsingBlock(guarantees []types.Guarantee) {
 //
 //	(1) uses WorkReportSearch to ensure that the WorkReports have been seen for all work items and thus imported segments are fetchable
 //	(2) uses CE139 in reconstructSegments to get all the imported segments and their justifications
-func (n *Node) buildBundle(wpQueueItem *WPQueueItem) (bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, err error) {
+func (n *NodeContent) buildBundle(wpQueueItem *WPQueueItem) (bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, err error) {
 	workPackage := wpQueueItem.workPackage
+	eventID := wpQueueItem.eventID
 	segmentRootLookup = make(types.SegmentRootLookup, 0)
 	workReportSearchMap := make(map[common.Hash]*SpecIndex)
 	segmentRootLookupMap := make(map[common.Hash]common.Hash)
@@ -109,11 +112,25 @@ func (n *Node) buildBundle(wpQueueItem *WPQueueItem) (bundle types.WorkPackageBu
 	receiveSegmentMapping := make(map[common.Hash][][]byte)
 	justificationsMapping := make(map[common.Hash][][]common.Hash)
 	for erasureRoot, specIndex := range erasureRootIndex {
-		receiveSegments, specJustifications, err := n.reconstructSegments(specIndex)
+		// Telemetry: ReconstructingSegments (event 168) - Segment reconstruction begins
+		var receiveSegments [][]byte
+		var specJustifications [][]common.Hash
+		var err error
+
+		isTrivial := false // CE139 reconstruction is not trivial (uses erasure coding)
+		n.telemetryClient.ReconstructingSegments(eventID, specIndex.Indices, isTrivial)
+
+		receiveSegments, specJustifications, err = n.reconstructSegments(specIndex, eventID)
 		if err != nil {
+			// Telemetry: SegmentReconstructionFailed (event 169)
+			n.telemetryClient.SegmentReconstructionFailed(eventID, err.Error())
 			log.Warn(log.Node, "reconstructSegments", "err", err)
 			return bundle, segmentRootLookup, err
 		}
+
+		// Telemetry: SegmentsReconstructed (event 170) - Segment reconstruction succeeded
+		n.telemetryClient.SegmentsReconstructed(eventID)
+
 		if len(receiveSegments) != len(specIndex.Indices) {
 			return bundle, segmentRootLookup, fmt.Errorf("receiveSegments and specIndex.Indices length mismatch")
 		}
@@ -167,7 +184,7 @@ func (n *Node) buildBundle(wpQueueItem *WPQueueItem) (bundle types.WorkPackageBu
 
 	bundle = types.WorkPackageBundle{
 		WorkPackage:       workPackage,
-		ExtrinsicData:     wpQueueItem.extrinsics,
+		ExtrinsicData:     []types.ExtrinsicsBlobs{wpQueueItem.extrinsics},
 		ImportSegmentData: importSegments,
 		Justification:     justifications, // recipients use VerifyBundle
 	}
@@ -200,8 +217,6 @@ func saveGuaranteeDerivation(gd GuaranteeDerivation) (err error) {
 }
 
 func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
-	var pvmElapsed uint32 // REVIEW: we seem to execute multiple times sometimes???
-
 	// counting the time for this function execution
 	coreIndex := wpItem.coreIndex
 	slot := wpItem.slot
@@ -212,6 +227,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		log.Error(log.Node, "processWPQueueItem", "n", n.String(), "err", err, "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
 		return false
 	}
+	n.telemetryClient.ImportsReceived(wpItem.eventID)
 	//n.getStateDBByHeaderHash()
 
 	curr_statedb := n.statedb.Copy()
@@ -242,7 +258,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 			if coworker.PeerID == n.id {
 				var execErr error
 				var bundleSnapshot *types.WorkPackageBundleSnapshot
-				report, d, pvmElapsed, bundleSnapshot, execErr = n.executeWorkPackageBundle(coreIndex, bundle, segmentRootLookup, slot, true)
+				report, d, _, bundleSnapshot, execErr = n.executeWorkPackageBundle(coreIndex, bundle, segmentRootLookup, slot, true, wpItem.eventID)
 				if execErr != nil {
 					log.Warn(log.Node, "processWPQueueItem", "err", execErr)
 					return
@@ -260,9 +276,10 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 			} else {
 				ctx, cancel := context.WithTimeout(context.Background(), MiniTimeout)
 				defer cancel()
-				fellow_response, errfellow := coworker.ShareWorkPackage(ctx, coreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519, coworker.PeerID)
+				fellow_response, errfellow := coworker.ShareWorkPackage(ctx, coreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519, coworker.PeerID, wpItem.eventID)
 				if errfellow != nil {
 					log.Warn(log.Node, "processWPQueueItem", "n", n.String(), "errfellow", errfellow)
+					n.telemetryClient.WorkPackageSharingFailed(wpItem.eventID, n.PeerID32(coworker.PeerID), errfellow.Error())
 					return
 				}
 				mutex.Lock()
@@ -272,8 +289,8 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		}()
 	}
 	wg.Wait()
-	selfWorkReportHash := guarantee.Report.Hash()
 
+	selfWorkReportHash := guarantee.Report.Hash()
 	for key, fellow_response := range fellow_responses {
 
 		validator_idx := curr_statedb.GetSafrole().GetCurrValidatorIndex(key)
@@ -283,6 +300,15 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 
 		fellowWorkReportHash := fellow_response.WorkReportHash
 		fellowSignature := fellow_response.Signature
+
+		// Log comparison details
+		log.Trace(log.G, "processWPQueueItem comparing work report hashes",
+			"n", n.String(),
+			"fellowValidator", key.String()[:16]+"...",
+			"selfHash", selfWorkReportHash.String(),
+			"fellowHash", fellowWorkReportHash.String(),
+			"match", selfWorkReportHash == fellowWorkReportHash)
+
 		if selfWorkReportHash == fellowWorkReportHash {
 			guarantee.Signatures = append(guarantee.Signatures, types.GuaranteeCredential{
 				ValidatorIndex: uint16(validator_idx),
@@ -295,7 +321,6 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		} else {
 			if (guarantee.Report.GetWorkPackageHash() != common.Hash{}) {
 				log.Warn(log.G, "processWPQueueItem Guarantee from fellow did not match", "n", n.String(), "selfWorkReportHash", selfWorkReportHash, "fellowWorkReportHash", fellowWorkReportHash)
-				log.Warn(log.G, "our reports", "n", n.String(), "selfWorkReport", guarantee.Report.String())
 				//return false
 			}
 		}
@@ -306,7 +331,18 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		// log.Info(log.G, "processWPQueueItem Guarantee enough signatures", "n", n.id, "guarantee.Slot", guarantee.Slot, "numSig", len(guarantee.Signatures), "guarantee.Signatures", types.ToJSONHex(guarantee.Signatures), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
 		ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
 		defer cancel()
-		n.broadcast(ctx, guarantee) // send via CE135
+		guarantorIndices := make([]uint16, len(guarantee.Signatures))
+		for i, sig := range guarantee.Signatures {
+			guarantorIndices[i] = sig.ValidatorIndex
+		}
+		guaranteeOutline := telemetry.GuaranteeOutline{
+			WorkReportHash: guarantee.Report.Hash(),
+			Slot:           guarantee.Slot,
+			Guarantors:     guarantorIndices,
+		}
+		n.telemetryClient.GuaranteeBuilt(wpItem.eventID, guaranteeOutline)
+		n.broadcast(ctx, guarantee, wpItem.eventID) // send via CE135
+		n.telemetryClient.GuaranteesDistributed(wpItem.eventID)
 
 		go saveGuaranteeDerivation(GuaranteeDerivation{
 			Bundle:            bundle,
@@ -319,13 +355,12 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		if err != nil {
 			log.Error(log.G, "processWPQueueItem:processGuarantee:", "n", n.String(), "err", err)
 		}
-		log.Info(log.G, "processWPQueueItem Guarantee processed", "n", n.String(), "guarantee.Slot", guarantee.Slot, "numSig", len(guarantee.Signatures), "guarantee.Signatures", types.ToJSONHex(guarantee.Signatures), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
+		log.Trace(log.G, "processWPQueueItem Guarantee processed", "n", n.String(), "guarantee.Slot", guarantee.Slot, "numSig", len(guarantee.Signatures), "guarantee.Signatures", types.ToJSONHex(guarantee.Signatures), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
 	} else {
 		log.Debug(log.G, "processWPQueueItem Guarantee not enough signatures", "n", n.String(), "guarantee.Signatures", types.ToJSONHex(guarantee.Signatures), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
 		return false
 	}
-	metadata := fmt.Sprintf("role=Guarantor|numSig=%d", len(guarantee.Signatures))
-	n.Telemetry(log.MsgTypeWorkReport, guarantee.Report, "msg_type", getMessageType(guarantee.Report), "metadata", metadata, "elapsed", pvmElapsed, "codec_encoded", types.EncodeAsHex(guarantee.Report))
+
 	return true
 }
 

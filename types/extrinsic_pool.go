@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 )
 
 type ExtrinsicPool struct {
@@ -19,6 +19,8 @@ type ExtrinsicPool struct {
 	queuedGuarantees map[uint32]map[uint16]*Guarantee // use timeslot to store guarantees, and core index to distinguish
 	knownGuarantees  map[common.Hash]*uint32          // use package hash to store guarantees
 	guaranteeMutex   sync.Mutex
+	// optional callback invoked when a guarantee is discarded from the pool
+	guaranteeDiscardCallback func(Guarantee, byte)
 	// tickets queue storage
 	queuedTickets map[common.Hash]map[common.Hash]*Ticket // use entropy hash to store tickets, and ticket id to distinguish
 	knownTickets  map[common.Hash]struct{}                // use first 32 bytes of ticket signature to distinguish
@@ -31,14 +33,23 @@ type ExtrinsicPool struct {
 
 func NewExtrinsicPool() *ExtrinsicPool {
 	return &ExtrinsicPool{
-		queuedAssurances: make(map[common.Hash]map[uint16]*Assurance),
-		queuedGuarantees: make(map[uint32]map[uint16]*Guarantee),
-		knownGuarantees:  make(map[common.Hash]*uint32),
-		queuedTickets:    make(map[common.Hash]map[common.Hash]*Ticket),
-		knownTickets:     make(map[common.Hash]struct{}),
-		queuedPreimages:  make(map[common.Hash]*Preimages),
-		knownPreimages:   make(map[common.Hash]uint32),
+		queuedAssurances:         make(map[common.Hash]map[uint16]*Assurance),
+		queuedGuarantees:         make(map[uint32]map[uint16]*Guarantee),
+		knownGuarantees:          make(map[common.Hash]*uint32),
+		queuedTickets:            make(map[common.Hash]map[common.Hash]*Ticket),
+		knownTickets:             make(map[common.Hash]struct{}),
+		queuedPreimages:          make(map[common.Hash]*Preimages),
+		knownPreimages:           make(map[common.Hash]uint32),
+		guaranteeDiscardCallback: nil,
 	}
+}
+
+// SetGuaranteeDiscardCallback registers a callback that is invoked whenever a guarantee
+// is discarded from the local pool.
+func (ep *ExtrinsicPool) SetGuaranteeDiscardCallback(cb func(Guarantee, byte)) {
+	ep.guaranteeMutex.Lock()
+	defer ep.guaranteeMutex.Unlock()
+	ep.guaranteeDiscardCallback = cb
 }
 
 func (ep *ExtrinsicPool) RemoveUsedExtrinsicFromPool(block *Block, used_entropy common.Hash, IsTicketSubmissionClosed bool) {
@@ -47,7 +58,7 @@ func (ep *ExtrinsicPool) RemoveUsedExtrinsicFromPool(block *Block, used_entropy 
 	ep.RemoveAssurancesFromPool(parent_hash)
 	// Remove guarantees
 	for _, guarantee := range block.Extrinsic.Guarantees {
-		ep.RemoveOldGuarantees(guarantee)
+		ep.RemoveOldGuarantees(guarantee, GuaranteeDiscardReasonReportedOnChain)
 	}
 	// Remove tickets
 	if IsTicketSubmissionClosed { // if ticket submission is closed, remove all tickets from useless entropy
@@ -106,15 +117,19 @@ func (ep *ExtrinsicPool) RemoveAssurancesFromPool(parentHash common.Hash) error 
 
 func (ep *ExtrinsicPool) AddGuaranteeToPool(guarantee Guarantee) error {
 	ep.guaranteeMutex.Lock()
-	defer ep.guaranteeMutex.Unlock()
-	// Store the guarantee in the tip's queued guarantee
 	if _, exists := ep.knownGuarantees[guarantee.Report.AvailabilitySpec.WorkPackageHash]; exists {
+		cb := ep.guaranteeDiscardCallback
+		ep.guaranteeMutex.Unlock()
+		if cb != nil {
+			cb(guarantee, GuaranteeDiscardReasonReplacedByBetter)
+		}
 		return fmt.Errorf("guarantee %s already exists", guarantee.Report.AvailabilitySpec.WorkPackageHash.String_short())
 	}
 	if _, exists := ep.queuedGuarantees[guarantee.Slot]; !exists {
 		ep.queuedGuarantees[guarantee.Slot] = make(map[uint16]*Guarantee)
 	}
 	ep.queuedGuarantees[guarantee.Slot][uint16(guarantee.Report.CoreIndex)] = &guarantee
+	ep.guaranteeMutex.Unlock()
 	return nil // Success
 }
 
@@ -149,18 +164,26 @@ func (ep *ExtrinsicPool) GetSpecGuaranteeFromPool(accepted_slot uint32, core_ind
 	return nil
 }
 
-// remove the guarantees that are already used by the block
-func (ep *ExtrinsicPool) RemoveOldGuarantees(guarantee Guarantee) error {
+// remove the guarantees that are already used by the block or otherwise discarded
+func (ep *ExtrinsicPool) RemoveOldGuarantees(guarantee Guarantee, discardReason byte) error {
 	ep.guaranteeMutex.Lock()
-	defer ep.guaranteeMutex.Unlock()
+	removed := false
 	if slotMap, exists := ep.queuedGuarantees[guarantee.Slot]; exists {
+		if _, exists := slotMap[uint16(guarantee.Report.CoreIndex)]; exists {
+			removed = true
+		}
 		delete(slotMap, uint16(guarantee.Report.CoreIndex))
 		if len(slotMap) == 0 {
 			delete(ep.queuedGuarantees, guarantee.Slot)
 		}
 	}
-	known_guarantee_hash := guarantee.Report.AvailabilitySpec.WorkPackageHash
-	ep.knownGuarantees[known_guarantee_hash] = &guarantee.Slot
+	knownGuaranteeHash := guarantee.Report.AvailabilitySpec.WorkPackageHash
+	ep.knownGuarantees[knownGuaranteeHash] = &guarantee.Slot
+	cb := ep.guaranteeDiscardCallback
+	ep.guaranteeMutex.Unlock()
+	if removed && cb != nil {
+		cb(guarantee, discardReason)
+	}
 	return nil // Success
 }
 

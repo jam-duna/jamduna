@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/storage"
+	storage "github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/nsf/jsondiff"
 	"github.com/yudai/gojsondiff"
@@ -136,7 +136,7 @@ func ComputeStateTransition(storage *storage.StateDBStorage, stc *StateTransitio
 		return false, nil, nil, fmt.Errorf("PreState Error")
 	}
 	scBlock := stc.Block
-	postState, jamErr := ApplyStateTransitionFromBlock(preState, context.Background(), &scBlock, nil, pvmBackend)
+	postState, jamErr := ApplyStateTransitionFromBlock(0, preState, context.Background(), &scBlock, nil, pvmBackend)
 	if jamErr != nil {
 		// When validating Fuzzed STC, we shall expect jamError
 		return true, nil, jamErr, nil
@@ -160,7 +160,7 @@ func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, 
 	}
 	s0.Id = storage.NodeID
 	s0.AncestorSet = ancestorSet
-	s1, err := ApplyStateTransitionFromBlock(s0, context.Background(), &(st.Block), nil, pvmBackend)
+	s1, err := ApplyStateTransitionFromBlock(0, s0, context.Background(), &(st.Block), nil, pvmBackend)
 	if err != nil {
 		return err
 	}
@@ -205,7 +205,7 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 	s0.Id = storage.NodeID
 	s0.AncestorSet = ancestorSet
 	bad_stf := bytes.Equal(st.PreState.StateRoot.Bytes(), st.PostState.StateRoot.Bytes())
-	s1, err := ApplyStateTransitionFromBlock(s0, context.Background(), &(st.Block), nil, pvmBackend)
+	s1, err := ApplyStateTransitionFromBlock(0, s0, context.Background(), &(st.Block), nil, pvmBackend)
 	bad_stf_from_us := bytes.Equal(s1.StateRoot.Bytes(), st.PostState.StateRoot.Bytes())
 	if err != nil {
 		if bad_stf_from_us {

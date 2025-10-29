@@ -24,10 +24,10 @@ TARGET_PARAM = $(if $(filter -1,$(TargetN)),,$(shell echo -targetN=$(TargetN)))
 # PVM mode parameter to be passed to go test
 PVM_PARAM = -pvm_backend=$(PVM_BACKEND)
 
-fib :
-	@echo "Running TestFib$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT) in $(PVM_BACKEND) mode..."
-	@echo "go test -timeout $(TIMEOUT) -v -run '^TestFib$$' -tags \"network_test,$(TAGS)\" $(TARGET_PARAM) -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)"
-	@go test -timeout $(TIMEOUT) -v -run '^TestFib$$' \
+evm:
+	@echo "Running TestEVM$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT) in $(PVM_BACKEND) mode..."
+	@echo "go test -timeout $(TIMEOUT) -v -run '^TestEVM$$' -tags \"network_test,$(TAGS)\" $(TARGET_PARAM) -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)"
+	@go test -timeout $(TIMEOUT) -v -run '^TestEVM$$' \
 	  -tags "network_test,$(TAGS)" $(TARGET_PARAM) \
 	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)
 
@@ -52,48 +52,20 @@ doom :
 	  -tags "network_test,$(TAGS)" $(TARGET_PARAM) \
 	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)
 
-rubic :
-	@echo "Running TestRubic$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT) in $(PVM_BACKEND) mode..."
-	@echo "go test -timeout $(TIMEOUT) -v -run '^TestRubic$$' -tags \"network_test,$(TAGS)\" $(TARGET_PARAM) -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)"
-	@go test -timeout $(TIMEOUT) -v -run '^TestRubic$$' \
+
+evm2 :
+	@echo "Running TestEVM2$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT) in $(PVM_BACKEND) mode..."
+	@echo "go test -timeout $(TIMEOUT) -v -run '^TestEVM2$$' -tags \"network_test,$(TAGS)\" $(TARGET_PARAM)  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)"
+	@go test -timeout $(TIMEOUT) -v -run '^TestEVM2$$' \
 	  -tags "network_test,$(TAGS)" $(TARGET_PARAM) \
 	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)
 
-fib2 :
-	@echo "Running TestFib2$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT) in $(PVM_BACKEND) mode..."
-	@echo "go test -timeout $(TIMEOUT) -v -run '^TestFib2$$' -tags \"network_test,$(TAGS)\" $(TARGET_PARAM)  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)"
-	@go test -timeout $(TIMEOUT) -v -run '^TestFib2$$' \
-	  -tags "network_test,$(TAGS)" $(TARGET_PARAM) \
-	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)
-
-fib2L :
-	$(MAKE) fib2 TargetN=100
-
-game_of_life :
-	@echo "Running TestGameOfLife$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT) in $(PVM_BACKEND) mode..."
-	@echo "go test -timeout $(TIMEOUT) -v -run TestGameOfLife -tags \"network_test,$(TAGS)\" $(TARGET_PARAM) -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) -manifest=$(MANIFEST) $(PVM_PARAM)"
-	@go test -timeout $(TIMEOUT) -v -run TestGameOfLife \
-	  -tags "network_test,$(TAGS)" $(TARGET_PARAM) \
-	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) -manifest=$(MANIFEST) $(PVM_PARAM)
+evm2L :
+	$(MAKE) evm2 TargetN=100
 
 auth_copy:
 	@echo "Running TestAuthCopy$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT) in $(PVM_BACKEND) mode..."
 	@go test -timeout $(TIMEOUT) -v -run '^TestAuthCopy$$' \
-	  -tags "network_test,$(TAGS)" $(TARGET_PARAM) \
-	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)
-megatron:
-	@TARGET_N=$(if $(filter -1,$(TargetN)),$(MEG_S),$(TargetN)); \
-	echo "Running TestMegatron with targetN=$$TARGET_N and timeout $(TIMEOUT) in $(PVM_BACKEND) mode..."; \
-	echo "go test -timeout $(TIMEOUT) -v -run TestMegatron -tags \"network_test,$(TAGS)\" -targetN=$$TARGET_N  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)"; \
-	go test -timeout $(TIMEOUT) -v -run TestMegatron \
-	  -tags "network_test,$(TAGS)" \
-	  -targetN=$$TARGET_N \
-	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)
-
-revm :
-	@echo "Running TestRevm$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT) in $(PVM_BACKEND) mode..."
-	@echo "go test -timeout $(TIMEOUT) -v -run TestRevm -tags \"network_test,$(TAGS)\" $(TARGET_PARAM) -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)"
-	@go test -timeout $(TIMEOUT) -v -run TestRevm \
 	  -tags "network_test,$(TAGS)" $(TARGET_PARAM) \
 	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)
 
@@ -108,9 +80,9 @@ safrole:
 	@go test -timeout 20m -v -run TestSafrole -tags "network_test,$(TAGS)" -jam_node=true
 
 disputes:
-	@echo "Running TestFibDisputes with timeout $(TIMEOUT)..."
-	@echo "go test -timeout $(TIMEOUT) -v -run TestFibDisputes -tags \"network_test,$(TAGS)\" -jce_manual=$(JCE_MANUAL) -jam_node=true"
-	@go test -timeout $(TIMEOUT) -v -run TestFibDisputes \
+	@echo "Running TestEVMDisputes with timeout $(TIMEOUT)..."
+	@echo "go test -timeout $(TIMEOUT) -v -run TestEVMDisputes -tags \"network_test,$(TAGS)\" -jce_manual=$(JCE_MANUAL) -jam_node=true"
+	@go test -timeout $(TIMEOUT) -v -run TestEVMDisputes \
 	  -tags "network_test,$(TAGS)" \
 	  -jce_manual=$(JCE_MANUAL) -jam_node=true
 

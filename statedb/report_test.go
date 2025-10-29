@@ -16,10 +16,10 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/jamerrors"
-	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/storage"
-	"github.com/colorfulnotion/jam/trie"
+	jamerrors "github.com/colorfulnotion/jam/jamerrors"
+	log "github.com/colorfulnotion/jam/log"
+	storage "github.com/colorfulnotion/jam/storage"
+	trie "github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -185,7 +185,7 @@ func ReportVerify(jsonFile string, exceptErr error) error {
 	rand.Seed(time.Now().UnixNano()) // Seed the random number generator
 	db_path := fmt.Sprintf("/tmp/testReport_%d", rand.Intn(100000000))
 
-	sdb, err := storage.NewStateDBStorage(db_path)
+	sdb, err := storage.NewStateDBStorage(db_path, storage.NewMockJAMDA(), nil)
 	if err != nil {
 		return fmt.Errorf("Reports FAIL: failed to create storage: %v", err)
 	}
@@ -237,7 +237,7 @@ func ReportVerify(jsonFile string, exceptErr error) error {
 	}
 
 	if len(errors) > 0 && exceptErr == nil {
-		fmt.Printf(report.Input.Guarantee[0].Report.String())
+		fmt.Printf("%s", report.Input.Guarantee[0].Report.String())
 		return fmt.Errorf("Reports FAIL: failed to verify guarantee: %v", errors)
 	}
 	if len(errors) == 0 && exceptErr != nil {

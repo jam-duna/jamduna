@@ -2,18 +2,112 @@ package node
 
 import (
 	"fmt"
+	"net"
+	"strings"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/types"
+	telemetry "github.com/colorfulnotion/jam/telemetry"
+	types "github.com/colorfulnotion/jam/types"
 )
 
 func (n *NodeContent) GetBlockTree() *types.BlockTree {
 	return n.block_tree
 }
 
+// PeerID32 looks up a peer by ID and returns their Ed25519 public key as [32]byte for telemetry.
+// If the peer is not found, returns a zero-filled [32]byte.
+func (n *NodeContent) PeerID32(peerID uint16) [32]byte {
+	if peer, ok := n.peersInfo[peerID]; ok {
+		return [32]byte(peer.Validator.Ed25519)
+	}
+	// Return empty key if peer not found
+	return [32]byte{}
+}
+
 func (n *NodeContent) SetServiceDir(dir string) {
 	n.loaded_services_dir = dir
+}
+
+// InitTelemetry initializes the telemetry client with the given host:port.
+// An empty hostPort disables telemetry by keeping a no-op client configured.
+func (n *Node) InitTelemetry(hostPort string) error {
+	trimmed := strings.TrimSpace(hostPort)
+	if trimmed == "" {
+		client := telemetry.NewNoOpTelemetryClient()
+		n.telemetryClient = client
+		if n.store != nil {
+			n.store.SetTelemetryClient(client)
+		}
+		return nil
+	}
+
+	host, port, err := net.SplitHostPort(trimmed)
+	if err != nil {
+		return fmt.Errorf("invalid telemetry address format, expected host:port, got: %s: %w", hostPort, err)
+	}
+
+	client := telemetry.NewTelemetryClient(host, port)
+
+	nodeInfo, err := n.buildTelemetryNodeInfo()
+	if err != nil {
+		return fmt.Errorf("failed to build telemetry node info: %w", err)
+	}
+
+	if err := client.Connect(nodeInfo); err != nil {
+		return fmt.Errorf("failed to connect telemetry client: %w", err)
+	}
+
+	n.telemetryClient = client
+	if n.store != nil {
+		n.store.SetTelemetryClient(client)
+	}
+
+	return nil
+}
+
+// buildTelemetryNodeInfo constructs the NodeInfo payload required by the
+// telemetry server connection handshake.
+func (n *Node) buildTelemetryNodeInfo() (telemetry.NodeInfo, error) {
+	var info telemetry.NodeInfo
+
+	if n.block_tree == nil {
+		return info, fmt.Errorf("block tree not initialized")
+	}
+
+	root := n.block_tree.GetRoot()
+	if root == nil || root.Block == nil {
+		return info, fmt.Errorf("genesis block not available")
+	}
+	info.GenesisHeaderHash = root.Block.Header.HeaderHash()
+
+	edKey := common.Hash(n.credential.Ed25519Pub)
+	copy(info.PeerID[:], edKey.Bytes())
+
+	listenerAddr := n.server.Addr()
+	if listenerAddr == nil {
+		return info, fmt.Errorf("network listener not initialized")
+	}
+	host, port, err := net.SplitHostPort(listenerAddr.String())
+	if err != nil {
+		return info, fmt.Errorf("invalid listen address %q: %w", listenerAddr.String(), err)
+	}
+	addrBytes, addrPort, err := telemetry.ParseTelemetryAddress(host, port)
+	if err != nil {
+		return info, fmt.Errorf("failed to encode peer address: %w", err)
+	}
+	info.PeerAddress = addrBytes
+	info.PeerPort = addrPort
+
+	if n.pvmBackend == statedb.BackendCompiler {
+		info.NodeFlags |= 1
+	}
+
+	info.NodeName = n.node_name
+	info.NodeVersion = n.GetBuild()
+	info.Note = fmt.Sprintf("validator %d", n.id)
+
+	return info, nil
 }
 
 func (n *NodeContent) LoadService(service_name string) ([]byte, error) {

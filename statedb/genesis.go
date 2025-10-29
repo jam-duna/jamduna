@@ -9,11 +9,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/colorfulnotion/jam/bandersnatch"
-	"github.com/colorfulnotion/jam/bls"
+	bandersnatch "github.com/colorfulnotion/jam/bandersnatch"
+	bls "github.com/colorfulnotion/jam/bls"
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/storage"
+	log "github.com/colorfulnotion/jam/log"
+	storage "github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -109,11 +109,6 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 			ServiceName: "bootstrap",
 		},
 		{
-			ServiceCode: FibServiceCode,
-			FileName:    FibServiceFile,
-			ServiceName: "fib",
-		},
-		{
 			ServiceCode: AlgoServiceCode,
 			FileName:    AlgoServiceFile,
 			ServiceName: "algo",
@@ -124,9 +119,9 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 			ServiceName: "auth_copy",
 		},
 		{
-			ServiceCode: GameOfLifeCode,
-			FileName:    GameOfLifeFile,
-			ServiceName: "game_of_life",
+			ServiceCode: uint32(EVMServiceCode),
+			FileName:    EVMServiceFile,
+			ServiceName: "evm",
 		},
 	}
 	auth_pvm := common.GetFilePath(BootStrapNullAuthFile)
@@ -149,7 +144,7 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 
 		code, err0 := types.ReadCodeWithMetadata(service.FileName, service.ServiceName)
 		if err0 != nil {
-			return nil, err
+			return nil, err0
 		}
 
 		var balance uint64 = uint64(10000000000)
@@ -186,24 +181,26 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 
 			statedb.WriteServicePreimageBlob(service.ServiceCode, code)
 			statedb.WriteServicePreimageLookup(service.ServiceCode, codeHash, codeLen, bootStrapAnchor)
+
+			for _, preimageFile := range service.Preimages {
+				preimagePath := common.GetFilePath(preimageFile)
+				preimageBytes, err := os.ReadFile(preimagePath)
+				if err != nil {
+					return nil, fmt.Errorf("failed to read preimage file %s: %v", preimagePath, err)
+				}
+				//fmt.Printf("Preimage file %s read successfully, size %d bytes. bytes=%0x\n", preimageFile, len(preimageBytes), preimageBytes)
+				preimageHash := common.Blake2Hash(preimageBytes)
+				preimageLen := uint32(len(preimageBytes))
+				fmt.Printf("Service=%v(%v) Preimage file %s, hash %s, len %d. bytes=%0x\n", service.ServiceName, service.ServiceCode, preimageFile, preimageHash.String(), preimageLen, preimageBytes)
+				statedb.WriteServicePreimageBlob(service.ServiceCode, preimageBytes)
+				statedb.WriteServicePreimageLookup(service.ServiceCode, preimageHash, preimageLen, bootStrapAnchor)
+				// Update storage size and item count for each preimage
+				sa.StorageSize += uint64(32 + preimageLen) // 32 bytes for hash + length of preimage
+				sa.NumStorageItems += 2                    // one for blob and one for lookup
+			}
 			statedb.writeService(service.ServiceCode, &sa)
 
-			fmt.Printf("Service %s (fn:%s), codeHash %s, codeLen=%d, anchor %v\n", service.ServiceName, service.FileName, codeHash.String(), codeLen, bootStrapAnchor)
-			if service.ServiceCode == GameOfLifeCode {
-				// write the child code with preimage and lookup
-				files := []string{GameOfLifeChildFile, GameOfLifeChildLogFile}
-				for _, game_file := range files {
-					child_code, err := os.ReadFile(game_file)
-					if err != nil {
-						return nil, err
-					}
-					child_code_hash := common.Blake2Hash(child_code)
-					child_code_len := uint32(len(child_code))
-					statedb.WriteServicePreimageBlob(GameOfLifeCode, child_code)
-					statedb.WriteServicePreimageLookup(GameOfLifeCode, child_code_hash, child_code_len, bootStrapAnchor)
-					fmt.Printf("Game_of_life_child codeHash %s, codeLen=%d, anchor %v\n", child_code_hash.String(), child_code_len, bootStrapAnchor)
-				}
-			}
+			fmt.Printf("Service %d %s (fn:%s), codeHash %s, codeLen=%d, anchor %v\n", service.ServiceCode, service.ServiceName, service.FileName, codeHash.String(), codeLen, bootStrapAnchor)
 		}
 	}
 	fmt.Printf("Bootstrap AuthorizationHash: %v\n", auth_code_hash_hash) //p_a

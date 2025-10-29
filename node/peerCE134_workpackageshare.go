@@ -9,7 +9,8 @@ import (
 	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
+	telemetry "github.com/colorfulnotion/jam/telemetry"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -222,6 +223,7 @@ func (p *Peer) ShareWorkPackage(
 	segmentRootLookup types.SegmentRootLookup,
 	pubKey types.Ed25519Key,
 	peerID uint16,
+	EventId uint64,
 ) (newReq JAMSNPWorkPackageShareResponse, err error) {
 
 	// Prepare the request
@@ -250,22 +252,36 @@ func (p *Peer) ShareWorkPackage(
 	stream, streamErr := p.openStream(ctx, code)
 	if streamErr != nil {
 		err = fmt.Errorf("openStream[CE134_WorkPackageShare]: %v", streamErr)
+		// Telemetry: Work package failed (event 92)
+		p.node.telemetryClient.WorkPackageFailed(EventId, streamErr.Error())
 		return
 	}
+	// Telemetry: Sharing work package (event 98)
+	bundleBytes := bundle.Bytes()
+	wpOutline := telemetry.WorkPackageOutline{
+		WorkPackageHash: bundle.WorkPackage.Hash(),
+		SizeInBytes:     uint32(len(bundleBytes)),
+	}
+	p.node.telemetryClient.SharingWorkPackage(EventId, p.GetPeer32(), wpOutline)
+
 	slot := common.GetWallClockJCE(fudgeFactorJCE)
 	log.Debug(log.R, "CE134-ShareWorkPackage OUTGOING", "NODE", p.node.id, "peer", peerID, "coreIndex", coreIndex, "slot", slot)
 	// Send request
 	// --> Core Index ++ Segment Root Mappings
 	if err = sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
 		err = fmt.Errorf("sendQuicBytes1[CE134_WorkPackageShare]: %v", err)
+		// Telemetry: Work package failed (event 92)
+		p.node.telemetryClient.WorkPackageFailed(EventId, err.Error())
 		return
 	}
 	// --> Work Package Bundle
 	if err = sendQuicBytes(ctx, stream, encodedBundle, p.PeerID, code); err != nil {
 		err = fmt.Errorf("sendQuicBytes2[CE134_WorkPackageShare]: %v", err)
+		// Telemetry: Work package failed (event 92)
+		p.node.telemetryClient.WorkPackageFailed(EventId, err.Error())
 		return
 	}
-	log.Info(log.G, "onWorkPackageShare OUTGOING QUIC", "mapLen", len(reqBytes), "bundleLen", len(encodedBundle), "CoreIndex ++ SegmentRootMappings", fmt.Sprintf("0x%x", reqBytes))
+	log.Trace(log.G, "onWorkPackageShare OUTGOING QUIC", "mapLen", len(reqBytes), "bundleLen", len(encodedBundle), "CoreIndex ++ SegmentRootMappings", fmt.Sprintf("0x%x", reqBytes))
 	log.Trace(log.G, "onWorkPackageShare OUTGOING QUIC", "bundleLen", len(encodedBundle), "encodedBundle", fmt.Sprintf("0x%x", encodedBundle))
 	log.Trace(log.G, "onWorkPackageShare OUTGOING",
 		"workpackage", bundle.WorkPackage.Hash(),
@@ -275,7 +291,7 @@ func (p *Peer) ShareWorkPackage(
 		"workPackageBundleBytes", fmt.Sprintf("0x%x", bundle.Bytes()),
 		"workPackageBundle", bundle.String(),
 	)
-
+	p.node.telemetryClient.BundleSent(EventId, p.node.PeerID32(p.PeerID))
 	// --> FIN
 	stream.Close()
 
@@ -284,19 +300,29 @@ func (p *Peer) ShareWorkPackage(
 	respBytes, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
 	if err != nil {
 		err = fmt.Errorf("receiveQuicBytes[CE134_WorkPackageShare]: %v", err)
+		// Telemetry: Work package failed (event 92)
+		p.node.telemetryClient.WorkPackageFailed(EventId, err.Error())
 		return
 	}
 
 	// Deserialize and verify signature against the workReportHash
 	if err = newReq.FromBytes(respBytes); err != nil {
 		err = fmt.Errorf("FromBytes[CE134_WorkPackageShare]: %v", err)
+		// Telemetry: Work package failed (event 92)
+		p.node.telemetryClient.WorkPackageFailed(EventId, err.Error())
 		return
 	}
 	workReportHash := newReq.WorkReportHash
 	signature := newReq.Signature
 	if !types.Ed25519Verify(pubKey, types.ComputeWorkReportSignBytesWithHash(workReportHash), signature) {
-		return newReq, fmt.Errorf("invalid signature on WorkReportHash: %x", workReportHash)
+		err = fmt.Errorf("invalid signature on WorkReportHash: %x", workReportHash)
+		// Telemetry: Work package failed (event 92)
+		p.node.telemetryClient.WorkPackageFailed(EventId, err.Error())
+		return newReq, err
 	}
+
+	// Telemetry: Work report signature received (event 104)
+	p.node.telemetryClient.WorkReportSignatureReceived(EventId, p.GetPeer32(), workReportHash)
 
 	return newReq, nil
 }
@@ -318,17 +344,21 @@ func CompareSegmentRootLookup(a, b types.SegmentRootLookup) (bool, error) {
 func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) (err error) {
 	defer stream.Close()
 
+	eventID := n.telemetryClient.GetEventID()
+
 	// --> Core Index ++ Segment Root Mappings
 	var newReq JAMSNPWorkPackageShare
 	err = newReq.FromBytes(msg)
 	if err != nil {
 		fmt.Println("Error deserializing:", err)
+		// Telemetry: Work package failed (event 92)
+		n.telemetryClient.WorkPackageFailed(eventID, err.Error())
 		return fmt.Errorf("onWorkPackageShare: decode share message: %w", err)
 	}
 
 	// Verify that we are in the the core based on the WALL CLOCK TIME
 	slot := common.GetWallClockJCE(fudgeFactorJCE)
-	_, assignments := n.statedb.CalculateAssignments(slot)
+	prevAssignments, assignments := n.statedb.CalculateAssignments(slot)
 	inSet := false
 	for _, assignment := range assignments {
 		if assignment.CoreIndex == newReq.CoreIndex && types.Ed25519Key(assignment.Validator.Ed25519.PublicKey()) == n.GetEd25519Key() {
@@ -336,11 +366,22 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 			break
 		}
 	}
+	// Allow work packages from previous epoch assignments during transitions
+	allowPrevAssignments := true
+	if allowPrevAssignments && !inSet {
+		for _, assignment := range prevAssignments {
+			if assignment.CoreIndex == newReq.CoreIndex && types.Ed25519Key(assignment.Validator.Ed25519.PublicKey()) == n.GetEd25519Key() {
+				inSet = true
+				break
+			}
+		}
+	}
 	log.Debug(log.R, "CE134-ShareWorkPackage INCOMING", "NODE", n.id, "peer", peerID, "coreIndex", newReq.CoreIndex, "slot", slot)
 	if !inSet {
 		return fmt.Errorf("core index %d is not in the current guarantor assignments", newReq.CoreIndex)
 	}
 
+	n.telemetryClient.WorkPackageBeingShared(n.PeerID32(peerID))
 	// --> Work Package Bundle
 	// Read message length (4 bytes)
 	msgLenBytes := make([]byte, 4)
@@ -362,14 +403,22 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	bundle, _, err := types.DecodeBundle(encodedBundle)
 	if err != nil {
 		fmt.Println("Error deserializing:", err)
+		// Telemetry: Work package failed (event 92)
+		n.telemetryClient.WorkPackageFailed(eventID, err.Error())
 		return fmt.Errorf("onWorkPackageShare: decode bundle: %w\nencodedBundle data:\n%x", err, encodedBundle)
 	}
-	log.Info(log.G, "onWorkPackageShare INCOMING QUIC", "mapLen", len(msg), "bundleLen", len(encodedBundle), "CoreIndex ++ SegmentRootMappings", fmt.Sprintf("0x%x", msg))
+	log.Trace(log.G, "onWorkPackageShare INCOMING QUIC", "mapLen", len(msg), "bundleLen", len(encodedBundle), "CoreIndex ++ SegmentRootMappings", fmt.Sprintf("0x%x", msg))
 	log.Trace(log.G, "onWorkPackageShare INCOMING QUIC", "bundleLen", len(encodedBundle), "encodedBundle", fmt.Sprintf("0x%x", encodedBundle))
+	workPackageHash := bundle.WorkPackage.Hash()
+	if _, loaded := n.seenWorkPackages.LoadOrStore(workPackageHash, struct{}{}); loaded {
+		n.telemetryClient.DuplicateWorkPackage(eventID, newReq.CoreIndex, workPackageHash)
+		return nil
+	}
+
 	recoveredBundleByte := bundle.Bytes()
 
 	if !bytes.Equal(encodedBundle, recoveredBundleByte) {
-		log.Error(log.G, "onWorkPackageShare INCOMING Bundle Ecnode/Decode mismatch",
+		log.Error(log.G, "onWorkPackageShare INCOMING Bundle Encode/Decode mismatch",
 			"workpackage", bundle.WorkPackage.Hash(),
 			"bundle_Len", len(encodedBundle),
 			"coreIndex", newReq.CoreIndex,
@@ -392,6 +441,11 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		"workPackageBundleBytes", fmt.Sprintf("0x%x", encodedBundle),
 		"workPackageBundle", bundle.String(),
 	)
+	wpOutline := telemetry.WorkPackageOutline{
+		WorkPackageHash: bundle.WorkPackage.Hash(),
+		SizeInBytes:     uint32(len(encodedBundle)),
+	}
+	n.telemetryClient.WorkPackageReceived(eventID, wpOutline)
 
 	received_segmentRootLookup := make([]types.SegmentRootLookupItem, 0)
 	for _, sr := range newReq.SegmentRoots {
@@ -408,8 +462,22 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		return fmt.Errorf("onWorkPackageShare: context cancelled before VerifyBundle")
 	default:
 	}
+
+	// Verify extrinsic data consistency with work package extrinsic hashes
+	for itemIndex, workItem := range bundle.WorkPackage.WorkItems {
+		if itemIndex < len(bundle.ExtrinsicData) {
+			if err := workItem.CheckExtrinsics(bundle.ExtrinsicData[itemIndex]); err != nil {
+				log.Error(log.Node, "onWorkPackageShare: extrinsic verification failed", "itemIndex", itemIndex, "err", err)
+				return fmt.Errorf("extrinsic data inconsistent with hashes for item %d: %w", itemIndex, err)
+			}
+		}
+	}
+
+	// Telemetry: Extrinsic data received and verified (event 96)
+	n.telemetryClient.ExtrinsicDataReceived(eventID)
+
 	// Since the bundle is not trusted, do a VerifyBundle first
-	verified, err := n.VerifyBundle(bundle, received_segmentRootLookup)
+	verified, err := n.VerifyBundle(bundle, received_segmentRootLookup, eventID)
 	if !verified {
 		log.Warn(log.Node, "VerifyBundle failure", "node", n.id, "verified", verified)
 		// TODO: reconstruct the segments
@@ -425,9 +493,11 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	default:
 	}
 
-	workReport, _, pvmElapsed, bundleSnapshot, err := n.executeWorkPackageBundle(wpCoreIndex, *bundle, received_segmentRootLookup, n.statedb.GetTimeslot(), false)
+	workReport, _, pvmElapsed, bundleSnapshot, err := n.executeWorkPackageBundle(wpCoreIndex, *bundle, received_segmentRootLookup, n.statedb.GetTimeslot(), false, eventID)
 	if err != nil {
 		log.Warn(log.Node, "onWorkPackageShare: executeWorkPackageBundle", "node", n.id, "err", err, "pvmElapsed", pvmElapsed)
+		// Telemetry: Work package failed (event 92)
+		n.telemetryClient.WorkPackageFailed(eventID, err.Error())
 		return fmt.Errorf("onWorkPackageShare: executeWorkPackageBundle: %w", err)
 	}
 	if bundleSnapshot != nil && isWriteBundleFollower {
@@ -460,8 +530,10 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		return fmt.Errorf("onWorkPackageShare: No guarantee signature")
 	}
 
+	// Log fellow work report details before computing hash
+	fellowWorkReportHash := guarantee.Report.Hash()
 	req := JAMSNPWorkPackageShareResponse{
-		WorkReportHash: guarantee.Report.Hash(),
+		WorkReportHash: fellowWorkReportHash,
 		Signature:      guarantee.Signatures[0].Signature,
 	}
 	log.Trace(log.G, "onWorkPackageShare", "n", n.String(), "wph", req.WorkReportHash, "wp", workReport.String(), "sig", req.Signature.String())
@@ -470,6 +542,9 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	if err != nil {
 		return fmt.Errorf("onWorkPackageShare: ToBytes failed: %w", err)
 	}
+
+	// Telemetry: Sending work report signature (event 103)
+	n.telemetryClient.WorkReportSignatureSent(eventID)
 
 	err = sendQuicBytes(ctx, stream, reqBytes, n.id, CE134_WorkPackageShare)
 	if err != nil {

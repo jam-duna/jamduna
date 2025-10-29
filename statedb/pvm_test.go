@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/pvm/recompiler"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -119,15 +119,7 @@ func recompiler_test(tc TestCase) error {
 	}
 	fmt.Printf("running test: %s\n", tc.Name)
 	hostENV := NewMockHostEnv()
-	p := DecodeProgram_pure_pvm_blob(rawCodeBytes)
-	o_size := 0
-	w_size := 0
-	z := 0
-	s := 0
-	o_byte := []byte{}
-	w_byte := make([]byte, w_size)
-
-	rvm := NewRecompilerVM(serviceAcct, tc.InitialRegs, uint64(tc.InitialPC), 4096, hostENV, false, []byte{}, 100000, p, uint32(o_size), uint32(w_size), uint32(z), uint32(s), o_byte, w_byte)
+	rvm := NewRecompilerVM(serviceAcct, rawCodeBytes, tc.InitialRegs, uint64(tc.InitialPC), 4096, hostENV, false, []byte{}, 100000, "recompiler")
 	// Set the initial memory
 	for _, mem := range tc.InitialMemory {
 		//pvm.Ram.SetPageAccess(mem.Address/PageSize, 1, AccessMode{Readable: false, Writable: true, Inaccessible: false})

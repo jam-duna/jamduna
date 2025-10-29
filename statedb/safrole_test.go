@@ -14,9 +14,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/colorfulnotion/jam/bandersnatch"
+	bandersnatch "github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/jamerrors"
+	jamerrors "github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/stretchr/testify/require"
 )

@@ -9,6 +9,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/telemetry"
 	"github.com/colorfulnotion/jam/types"
 
 	"embed"
@@ -136,13 +137,16 @@ func GenSpec(dev DevConfig) (chainSpec *ChainSpec, err error) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	sdb, err := storage.NewStateDBStorage(tmpDir)
+	sdb, err := storage.NewStateDBStorage(tmpDir, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient())
 	if err != nil {
 		return chainSpec, err
 	}
 	trace, err := statedb.MakeGenesisStateTransition(sdb, 0, "tiny", address)
 	if err != nil {
 		return chainSpec, err
+	}
+	if trace == nil {
+		return chainSpec, fmt.Errorf("MakeGenesisStateTransition returned nil trace")
 	}
 	chainSpec.GenesisState = trace.PostState.KeyVals
 	chainSpec.GenesisHeader, _ = trace.Block.Header.Bytes()

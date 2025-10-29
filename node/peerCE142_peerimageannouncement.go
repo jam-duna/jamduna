@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -55,18 +55,28 @@ func (p *Peer) SendPreimageAnnouncement(ctx context.Context, pa *types.PreimageA
 	code := uint8(CE142_PreimageAnnouncement)
 	p.AddKnownHash(pa.PreimageHash)
 
+	// Telemetry: Preimage announced (event 191) - sending side
+	connectionSide := byte(0) // Local is announcer
+	p.node.telemetryClient.PreimageAnnounced(p.GetPeer32(), connectionSide, pa.ServiceIndex, pa.PreimageHash, pa.PreimageLen)
+
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
+		// Telemetry: Preimage announcement failed (event 190)
+		p.node.telemetryClient.PreimageAnnouncementFailed(p.GetPeer32(), connectionSide, err.Error())
 		return fmt.Errorf("openStream[CE142_PreimageAnnouncement]: %w", err)
 	}
 	defer stream.Close()
 
 	paBytes, err := pa.ToBytes()
 	if err != nil {
+		// Telemetry: Preimage announcement failed (event 190)
+		p.node.telemetryClient.PreimageAnnouncementFailed(p.GetPeer32(), connectionSide, err.Error())
 		return fmt.Errorf("ToBytes[CE142_PreimageAnnouncement]: %w", err)
 	}
 
 	if err := sendQuicBytes(ctx, stream, paBytes, p.PeerID, code); err != nil {
+		// Telemetry: Preimage announcement failed (event 190)
+		p.node.telemetryClient.PreimageAnnouncementFailed(p.GetPeer32(), connectionSide, err.Error())
 		return fmt.Errorf("sendQuicBytes[CE142_PreimageAnnouncement]: %w", err)
 	}
 
@@ -76,11 +86,19 @@ func (p *Peer) SendPreimageAnnouncement(ctx context.Context, pa *types.PreimageA
 func (n *Node) onPreimageAnnouncement(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
 	defer stream.Close()
 
+	// Telemetry: Preimage announced (event 191) - receiving side
+	connectionSide := byte(1) // Remote is announcer
+
 	var preimageAnnouncement types.PreimageAnnouncement
 	if err := preimageAnnouncement.FromBytes(msg); err != nil {
 		log.Error(log.P, "onPreimageAnnouncement: failed to decode", "err", err)
+		// Telemetry: Preimage announcement failed (event 190)
+		n.telemetryClient.PreimageAnnouncementFailed(n.PeerID32(peerID), connectionSide, err.Error())
 		return fmt.Errorf("onPreimageAnnouncement: decode failed: %w", err)
 	}
+
+	// Telemetry: Preimage announced (event 191)
+	n.telemetryClient.PreimageAnnounced(n.PeerID32(peerID), connectionSide, preimageAnnouncement.ServiceIndex, preimageAnnouncement.PreimageHash, preimageAnnouncement.PreimageLen)
 
 	p, ok := n.peersInfo[peerID]
 	if !ok {
@@ -136,23 +154,40 @@ Node -> Node
 func (p *Peer) SendPreimageRequest(ctx context.Context, preimageHash common.Hash) ([]byte, error) {
 	code := uint8(CE143_PreimageRequest)
 
+	// Telemetry: Sending preimage request (event 193)
+	eventID := p.node.telemetryClient.GetEventID()
+	p.node.telemetryClient.SendingPreimageRequest(p.GetPeer32(), preimageHash)
+
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
+		// Telemetry: Preimage request failed (event 195)
+		p.node.telemetryClient.PreimageRequestFailed(eventID, err.Error())
 		return nil, fmt.Errorf("openStream[CE143_PreimageRequest]: %w", err)
 	}
 
 	// --> Hash
 	respBytes := preimageHash.Bytes()
 	if err := sendQuicBytes(ctx, stream, respBytes, p.PeerID, code); err != nil {
+		// Telemetry: Preimage request failed (event 195)
+		p.node.telemetryClient.PreimageRequestFailed(eventID, err.Error())
 		return nil, fmt.Errorf("sendQuicBytes[CE143_PreimageRequest]: %w", err)
 	}
+
+	// Telemetry: Preimage request sent (event 196)
+	p.node.telemetryClient.PreimageRequestSent(eventID)
+
 	// --> FIN
 	stream.Close()
 
 	preimage, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
 	if err != nil {
+		// Telemetry: Preimage request failed (event 195)
+		p.node.telemetryClient.PreimageRequestFailed(eventID, err.Error())
 		return nil, fmt.Errorf("receiveQuicBytes[CE143_PreimageRequest]: %w", err)
 	}
+
+	// Telemetry: Preimage transferred (event 198)
+	p.node.telemetryClient.PreimageTransferred(eventID, uint32(len(preimage)))
 
 	return preimage, nil
 }
@@ -160,10 +195,22 @@ func (p *Peer) SendPreimageRequest(ctx context.Context, preimageHash common.Hash
 func (n *NodeContent) onPreimageRequest(ctx context.Context, stream quic.Stream, msg []byte) error {
 	defer stream.Close()
 
+	// Telemetry: Receiving preimage request (event 194)
+	// Note: peerID not available in this context, using zero hash as placeholder
+	eventID := n.telemetryClient.GetEventID()
+	var zeroPeerID [32]byte
+	n.telemetryClient.ReceivingPreimageRequest(zeroPeerID)
+
 	preimageHash := common.BytesToHash(msg)
+
+	// Telemetry: Preimage request received (event 197)
+	n.telemetryClient.PreimageRequestReceived(eventID, preimageHash)
+
 	preimage, ok := n.extrinsic_pool.GetPreimageByHash(preimageHash)
 	if !ok {
 		log.Warn(log.P, "onPreimageRequest", "n", n.id, "hash", preimageHash, "msg", "preimage not found")
+		// Telemetry: Preimage request failed (event 195)
+		n.telemetryClient.PreimageRequestFailed(eventID, "preimage not found")
 		return nil
 	}
 
@@ -171,8 +218,13 @@ func (n *NodeContent) onPreimageRequest(ctx context.Context, stream quic.Stream,
 
 	respBytes := preimage.Blob
 	if err := sendQuicBytes(ctx, stream, respBytes, n.id, code); err != nil {
+		// Telemetry: Preimage request failed (event 195)
+		n.telemetryClient.PreimageRequestFailed(eventID, err.Error())
 		return fmt.Errorf("onPreimageRequest: sendQuicBytes failed: %w", err)
 	}
+
+	// Telemetry: Preimage transferred (event 198)
+	n.telemetryClient.PreimageTransferred(eventID, uint32(len(preimage.Blob)))
 
 	log.Trace(log.P, "onPreimageRequest", "n", n.id, "hash", preimageHash, "size", len(preimage.Blob))
 	return nil

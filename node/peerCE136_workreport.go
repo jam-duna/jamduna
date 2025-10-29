@@ -31,12 +31,6 @@ Node -> Node
 func (p *Peer) SendWorkReportRequest(ctx context.Context, workReportHash common.Hash) (types.WorkReport, error) {
 	code := uint8(CE136_WorkReportRequest)
 
-	if p.node.store.SendTrace {
-		tracer := p.node.store.Tp.Tracer("NodeTracer")
-		_, span := tracer.Start(ctx, fmt.Sprintf("[N%d] SendWorkReportRequest", p.node.store.NodeID))
-		defer span.End()
-	}
-
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
 		return types.WorkReport{}, fmt.Errorf("openStream[CE136_WorkReportRequest]: %w", err)

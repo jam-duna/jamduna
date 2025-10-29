@@ -4,8 +4,17 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
+)
+
+// Payload type constants for work package discrimination
+var (
+	PayloadTransactions = []byte("T") // Normal transaction execution with signed RLP-encoded transactions
+	PayloadCall         = []byte("B") // EstimateGas/Call mode for unsigned transaction simulation
+	PayloadBlock        = []byte("P") // Block building mode (Phase II)
+	PayloadGenesis      = []byte("G") // Bootstrap mode for initializing state with 'A'/'K' commands
 )
 
 /*
@@ -156,4 +165,59 @@ func (a WorkItem) MarshalJSON() ([]byte, error) {
 		Extrinsics:         a.Extrinsics,
 		ExportCount:        a.ExportCount,
 	})
+}
+
+// Clone creates a deep copy of the WorkItem
+func (w *WorkItem) Clone() WorkItem {
+	clone := WorkItem{
+		Service:            w.Service,
+		CodeHash:           w.CodeHash,
+		RefineGasLimit:     w.RefineGasLimit,
+		AccumulateGasLimit: w.AccumulateGasLimit,
+		ExportCount:        w.ExportCount,
+	}
+
+	// Deep copy Payload
+	if w.Payload != nil {
+		clone.Payload = make([]byte, len(w.Payload))
+		copy(clone.Payload, w.Payload)
+	}
+
+	// Deep copy ImportedSegments
+	if w.ImportedSegments != nil {
+		clone.ImportedSegments = make([]ImportSegment, len(w.ImportedSegments))
+		copy(clone.ImportedSegments, w.ImportedSegments)
+	}
+
+	// Deep copy Extrinsics
+	if w.Extrinsics != nil {
+		clone.Extrinsics = make([]WorkItemExtrinsic, len(w.Extrinsics))
+		copy(clone.Extrinsics, w.Extrinsics)
+	}
+
+	return clone
+}
+
+// CheckExtrinsics verifies that the provided extrinsic blobs match the extrinsic hashes in the work item
+func (w *WorkItem) CheckExtrinsics(extrinsicBlobs ExtrinsicsBlobs) error {
+	if len(extrinsicBlobs) != len(w.Extrinsics) {
+		return fmt.Errorf("extrinsic count mismatch: expected %d, got %d", len(w.Extrinsics), len(extrinsicBlobs))
+	}
+
+	for i, expectedExtrinsic := range w.Extrinsics {
+		blob := extrinsicBlobs[i]
+
+		// Check length
+		if uint32(len(blob)) != expectedExtrinsic.Len {
+			return fmt.Errorf("extrinsic %d length mismatch: expected %d, got %d", i, expectedExtrinsic.Len, len(blob))
+		}
+
+		// Check hash
+		actualHash := common.Blake2Hash(blob)
+		if actualHash != expectedExtrinsic.Hash {
+			return fmt.Errorf("extrinsic %d hash mismatch: expected %s, got %s", i, expectedExtrinsic.Hash.String(), actualHash.String())
+		}
+	}
+
+	return nil
 }

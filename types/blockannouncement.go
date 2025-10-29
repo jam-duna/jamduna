@@ -3,8 +3,9 @@ package types
 import (
 	"bytes"
 	"encoding/binary"
-	"github.com/colorfulnotion/jam/common"
 	"io"
+
+	"github.com/colorfulnotion/jam/common"
 )
 
 type BlockAnnouncement struct {

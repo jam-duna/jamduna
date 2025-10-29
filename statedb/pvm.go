@@ -3,17 +3,19 @@ package statedb
 import (
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/pvm/program"
+	telemetry "github.com/colorfulnotion/jam/telemetry"
 	"github.com/colorfulnotion/jam/types"
 )
 
 const (
-	BackendInterpreter     = "interpreter" // C interpreter
-	BackendCompiler        = "compiler"    // X86 recompiler
-	BackendCompilerSandbox = "sandbox"
+	BackendGo          = "go"
+	BackendInterpreter = "interpreter" // C interpreter
+	BackendCompiler    = "compiler"    // X86 recompiler
 )
 
 const (
@@ -39,6 +41,19 @@ var (
 	PvmLogging = false
 )
 
+func (vm *VM) SetLabelPC(labels map[int]string) {
+	// Delegate to underlying VMGo if using Go backend
+	if vmgo, ok := vm.ExecutionVM.(*VMGo); ok {
+		vmgo.SetLabelPC(labels)
+	}
+	// Labels are not supported in C/recompiler backends
+}
+
+func (vm *VM) SetGas(gas int64) {
+	// Stub: gas is not currently tracked in the VM
+
+}
+
 type ExecutionVM interface {
 	ReadRegister(int) uint64
 	ReadRegisters() [13]uint64
@@ -50,6 +65,8 @@ type ExecutionVM interface {
 	GetGas() int64
 	Panic(uint64)
 	SetHostResultCode(uint64)
+	SetPage(uint32, uint32, uint8)
+
 	Init(argument_data_a []byte) (err error)
 	Execute(vm *VM, EntryPoint uint32) error
 	Destroy()
@@ -77,17 +94,19 @@ type VM struct {
 	ServiceMetadata []byte
 
 	// Refine Inputs and Outputs
-	WorkItemIndex    uint32
-	WorkPackage      types.WorkPackage
-	Extrinsics       types.ExtrinsicsBlobs
-	Authorization    []byte
-	Imports          [][][]byte
+	WorkItemIndex uint32
+	WorkPackage   types.WorkPackage
+	Extrinsics    types.ExtrinsicsBlobs
+	Authorization []byte
+	Imports       [][][]byte
+	Witnesses     map[common.Hash]types.StateWitness // Track fetched objects with proofs by object_id
+
 	AccumulateInputs []types.AccumulateInput
 	Transfers        []types.DeferredTransfer
 	N                common.Hash
 	Delta            map[uint32]*types.ServiceAccount
 
-	RefineM_map        map[uint32]*RefineM
+	RefineM_map        map[uint32]*VM
 	Exports            [][]byte
 	ExportSegmentIndex uint32
 
@@ -95,6 +114,24 @@ type VM struct {
 	X        *types.XContext
 	Y        types.XContext
 	Timeslot uint32
+
+	// MoveVM stack state for test comparison
+	MoveStackVal     []uint64
+	MoveStackTypeVal []uint64
+
+	// Contract-scoped storage: map[contractAddress][storageSlot]value
+	// Values are arbitrary-length byte slices scoped per contract
+	// Contract address is the full 32-byte object_id for JAM object identification
+	contractStorage map[common.Hash]map[common.Hash][]byte
+
+	// Transient storage (EIP-1153): map[contractAddress][storageSlot]value
+	// Like contractStorage but cleared at the end of each transaction
+	// Used by TLOAD (0x5C) and TSTORE (0x5D) opcodes
+	transientStorage map[common.Hash]map[common.Hash][]byte
+
+	AccumulateCost *telemetry.AccumulateCost
+
+	compileTimeStart time.Time
 }
 
 type Program program.Program
@@ -126,7 +163,6 @@ func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, 
 	w_size := types.DecodeE_l(pure[3:6])
 	z_val := types.DecodeE_l(pure[6:8])
 	s_val := types.DecodeE_l(pure[8:11])
-	s_val = 8192
 	//fmt.Printf("DecodeProgram: o_size=%d, w_size=%d, z_val=%d, s_val=%d, total_header_size=11\n",o_size, w_size, z_val, s_val)
 	var o_byte, w_byte []byte
 	offset := uint64(11)
@@ -223,7 +259,7 @@ func Z_func(x uint32) uint32 {
 
 // NewVM initializes a new VM with a given program
 func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC uint64, initialHeap uint64, hostENV types.HostEnv, jam_ready_blob bool, Metadata []byte, pvmBackend string, initialGas uint64) *VM {
-
+	compileTimeStart := time.Now()
 	if len(pvmBackend) == 0 {
 		panic("pvmBackend cannot be empty")
 	}
@@ -246,12 +282,15 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		o_byte = []byte{}
 		w_byte = make([]byte, w_size)
 	}
+
 	vm := &VM{
-		hostenv:         hostENV, //check if we need this
-		Exports:         make([][]byte, 0),
-		Service_index:   service_index,
-		ServiceMetadata: Metadata,
-		Backend:         pvmBackend,
+		hostenv:          hostENV, //check if we need this
+		Exports:          make([][]byte, 0),
+		Witnesses:        make(map[common.Hash]types.StateWitness),
+		Service_index:    service_index,
+		ServiceMetadata:  Metadata,
+		Backend:          pvmBackend,
+		compileTimeStart: compileTimeStart,
 	}
 
 	requiredMemory := uint64(uint64(5*Z_Z) + uint64(Z_func(o_size)) + uint64(Z_func(w_size+z*Z_P)) + uint64(Z_func(s)) + uint64(Z_I))
@@ -272,15 +311,60 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 	if len(p.Code) == 0 {
 		panic("No code provided to NewVM")
 	}
-	if vm.Backend == BackendInterpreter {
-		// Create VM using FFI API
-		machine := NewInterpreter(service_index, p, initialRegs, initialPC, initialGas, vm)
+	if RequiresBackendGo(service_index) || vm.Backend == BackendGo {
+		machine := NewVMGo(service_index, p, initialRegs, initialPC, initialGas, hostENV)
+		machine.Gas = int64(initialGas)
 		vm.ExecutionVM = machine
-
 		// o - read-only
 		ro_data_address := uint32(Z_Z)
 		ro_data_address_end := ro_data_address + P_func(o_size)
+		// s - stack
+		p_s := P_func(s)
+		stack_address := uint32(uint64(1<<32) - uint64(2*Z_Z) - uint64(Z_I) - uint64(p_s))
+		stack_address_end := uint32(uint64(1<<32) - uint64(2*Z_Z) - uint64(Z_I))
 
+		// a - argument outputs
+		output_address := uint32(0xFFFFFFFF) - Z_Z - Z_I + 1
+		output_end := uint32(0xFFFFFFFF)
+
+		// w - read-write
+		rw_data_address := uint32(2*Z_Z) + Z_func(o_size)
+		rw_data_address_end := rw_data_address + P_func(w_size) + z*Z_P
+		current_heap_pointer := rw_data_address_end
+
+		z_o := Z_func(o_size)
+		z_w := Z_func(w_size + z*Z_P)
+		z_s := Z_func(s)
+		requiredMemory = uint64(5*Z_Z + z_o + z_w + z_s + Z_I)
+		if requiredMemory > math.MaxUint32 {
+			log.Error(vm.logging, "Standard Program Initialization Error")
+		}
+
+		machine.SetHeapPointer(current_heap_pointer)
+		machine.SetMemoryBounds(rw_data_address, rw_data_address_end, ro_data_address, ro_data_address_end, output_address, output_end, stack_address, stack_address_end)
+
+		if len(o_byte) > 0 {
+			result := vm.WriteRAMBytes(Z_Z, o_byte)
+			if result != OK {
+				fmt.Printf("Warning: Failed to initialize o_byte data: error %d\n", result)
+				panic("Failed to initialize o_byte data")
+			}
+		}
+		if len(w_byte) > 0 {
+			result := vm.WriteRAMBytes(rw_data_address, w_byte)
+			if result != OK {
+				fmt.Printf("Warning: Failed to initialize w_byte data: error %d\n", result)
+				panic("Failed to initialize w_byte data")
+			}
+		}
+	} else if vm.Backend == BackendInterpreter {
+		// Create VM using FFI API
+		machine := NewInterpreter(service_index, p, initialRegs, initialPC, initialGas, vm)
+
+		vm.ExecutionVM = machine
+		// o - read-only
+		ro_data_address := uint32(Z_Z)
+		ro_data_address_end := ro_data_address + P_func(o_size)
 		machine.SetHostCallBack()
 		machine.SetLogging()
 		// s - stack
@@ -304,10 +388,10 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		if requiredMemory > math.MaxUint32 {
 			log.Error(vm.logging, "Standard Program Initialization Error")
 		}
+
 		machine.SetHeapPointer(current_heap_pointer)
 		machine.SetMemoryBounds(rw_data_address, rw_data_address_end, ro_data_address, ro_data_address_end, output_address, output_end, stack_address, stack_address_end)
-		fmt.Printf("Memory bounds set: RW [0x%x - 0x%x], RO [0x%x - 0x%x], Output [0x%x - 0x%x], Stack [0x%x - 0x%x]\n",
-			rw_data_address, rw_data_address_end, ro_data_address, ro_data_address_end, output_address, output_end, stack_address, stack_address_end)
+		//fmt.Printf("rw 0x%x-0x%x, ro 0x%x-0x%x, output 0x%x-0x%x, stack 0x%x-0x%x\n", rw_data_address, rw_data_address_end, ro_data_address, ro_data_address_end, output_address, output_end, stack_address, stack_address_end)
 		if len(o_byte) > 0 {
 			result := vm.WriteRAMBytes(Z_Z, o_byte)
 			if result != OK {
@@ -323,19 +407,12 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 			}
 		}
 	} else if vm.Backend == BackendCompiler {
-		rvm := NewRecompilerVM(service_index, initialRegs, initialPC, initialHeap, hostENV, jam_ready_blob, Metadata, initialGas, p, o_size, w_size, z, s, o_byte, w_byte)
+		rvm := NewRecompilerVM(service_index, code, initialRegs, initialPC, initialHeap, hostENV, jam_ready_blob, Metadata, initialGas, pvmBackend)
 		if rvm == nil {
 			return nil
 		}
 		vm.ExecutionVM = rvm
 	}
-	//  else if vm.Backend == BackendCompilerSandbox {
-	// 	rvm := NewRecompilerVMSandbox(service_index, code, initialRegs, initialPC, initialHeap, hostENV, jam_ready_blob, Metadata, initialGas, pvmBackend)
-	// 	if rvm == nil {
-	// 		return nil
-	// 	}
-	// 	vm.ExecutionVM = rvm
-	// }
 
 	vm.VMs = nil
 	return vm
@@ -348,6 +425,10 @@ func NewVMFromCode(serviceIndex uint32, code []byte, i uint64, initialHeap uint6
 }
 
 var RecordTime = true
+
+func (vm *VM) SetJumpTable(a *program.Program) {
+	// TODO: implement if needed
+}
 
 func (vm *VM) SetServiceIndex(index uint32) {
 	vm.Service_index = index
@@ -363,17 +444,14 @@ func (vm *VM) ExecuteRefine(core uint16, workitemIndex uint32, workPackage types
 
 	workitem := workPackage.WorkItems[workitemIndex]
 
-	// core index is now a refine argument in 0.7.4
+	// core index is now a refine argument in 0.7.1
 	a := append(types.E(uint64(core)), types.E(uint64(workitemIndex))...)
 	serviceBytes := types.E(uint64(workitem.Service))
 	a = append(a, serviceBytes...)
-	//fmt.Printf("ExecuteRefine  s %d bytes - %x\n", len(serviceBytes), serviceBytes)
 	encoded_workitem_payload, _ := types.Encode(workitem.Payload)
-	a = append(a, encoded_workitem_payload...) // variable number of bytes
-	//fmt.Printf("ExecuteRefine  payload %d bytes - %x\n", len(encoded_workitem_payload), encoded_workitem_payload)
+	a = append(a, encoded_workitem_payload...)   // variable number of bytes
 	a = append(a, workPackage.Hash().Bytes()...) // 32
 
-	//fmt.Printf("ExecuteRefine TOTAL len(a)=%d %x\n", len(a), a)
 	vm.WorkItemIndex = workitemIndex
 	vm.WorkPackage = workPackage
 
@@ -381,8 +459,9 @@ func (vm *VM) ExecuteRefine(core uint16, workitemIndex uint32, workPackage types
 	vm.Authorization = authorization.Ok
 	vm.Extrinsics = extrinsics
 	vm.Imports = importsegments
+
 	vm.executeWithBackend(a, types.EntryPointRefine)
-	r, res = vm.getArgumentOutputs()
+	r, res = vm.GetArgumentOutputs()
 
 	log.Trace(vm.logging, string(vm.ServiceMetadata), "Result", r.String(), "fault_address", vm.Fault_address, "resultCode", vm.ResultCode)
 	exportedSegments = vm.Exports
@@ -390,7 +469,8 @@ func (vm *VM) ExecuteRefine(core uint16, workitemIndex uint32, workPackage types
 	return r, res, exportedSegments
 }
 
-func (vm *VM) ExecuteAccumulate(t uint32, s uint32, inputs []types.AccumulateInput, X *types.XContext, n common.Hash) (r types.Result, res uint64, xs *types.ServiceAccount) {
+func (vm *VM) ExecuteAccumulate(t uint32, s uint32, inputs []types.AccumulateInput, X *types.XContext, n common.Hash, serviceCost *telemetry.AccumulateCost) (r types.Result, res uint64, xs *types.ServiceAccount) {
+	vm.AccumulateCost = serviceCost
 	vm.Mode = ModeAccumulate
 	vm.X = X //⎩I(u, s), I(u, s)⎫⎭
 	vm.Y = X.Clone()
@@ -415,33 +495,44 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, inputs []types.AccumulateInp
 	vm.ServiceAccount = x_s
 
 	vm.executeWithBackend(input_bytes, types.EntryPointAccumulate)
-	r, res = vm.getArgumentOutputs()
+	r, res = vm.GetArgumentOutputs()
+
 	return r, res, x_s
 }
 
-func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Result) {
+func (vm *VM) ExecuteAuthorization(code []byte, c uint16) (r types.Result) {
 	vm.Mode = ModeIsAuthorized
-	// CHECK: NOT 0.7.0 COMPLIANT
-	a, _ := types.Encode(uint8(c))
-
-	// fmt.Printf("ExecuteAuthorization - c=%d len(p_bytes)=%d len(c_bytes)=%d len(a)=%d a=%x WP=%s\n", c, len(p_bytes), len(c_bytes), len(a), a, p.String())
-	vm.executeWithBackend(a, types.EntryPointAuthorization)
-	r, _ = vm.getArgumentOutputs()
+	if false {
+		// todo: use code
+		a, _ := types.Encode(uint8(c))
+		// fmt.Printf("ExecuteAuthorization - c=%d len(p_bytes)=%d len(c_bytes)=%d len(a)=%d a=%x WP=%s\n", c, len(p_bytes), len(c_bytes), len(a), a, p.String())
+		vm.executeWithBackend(a, types.EntryPointAuthorization)
+		r, _ = vm.GetArgumentOutputs()
+	}
+	r = types.Result{
+		Ok: []byte{},
+	}
 	return r
+
+}
+
+func (vm *VM) ExecuteWithBackend(argumentData []byte, entryPoint uint32) {
+	vm.executeWithBackend(argumentData, entryPoint)
 }
 
 func (vm *VM) executeWithBackend(argumentData []byte, entryPoint uint32) {
-	// fmt.Printf("Standard Program Initialization: %s=%x %s=%x\n", reg(7), argAddr, reg(8), uint32(len(argument_data_a)))
+	if vm.AccumulateCost != nil {
+		vm.AccumulateCost.LoadCompileTimeNs += common.ElapsedNanos(vm.compileTimeStart)
+	}
 	vm.Init(argumentData)
 	vm.IsChild = false
 	err := vm.ExecutionVM.Execute(vm, entryPoint)
 	if err != nil {
 		log.Error(vm.logging, "C VM execution failed", "error", err)
 	}
-	vm.ResultCode = vm.GetResultCode()
 }
 
-func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
+func (vm *VM) GetArgumentOutputs() (r types.Result, res uint64) {
 	if vm.ResultCode == types.WORKDIGEST_OOG {
 		r.Err = types.WORKDIGEST_OOG
 		log.Error(vm.logging, "getArgumentOutputs - OOG", "service", string(vm.ServiceMetadata))
@@ -470,10 +561,11 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 	return r, 0
 }
 
-func (vm *VM) GetMachineState() uint8 {
-	return vm.MachineState
-}
-
+// HostFunc interface implementation
 func (vm *VM) GetResultCode() uint8 {
 	return vm.ResultCode
+}
+
+func (vm *VM) GetMachineState() uint8 {
+	return vm.MachineState
 }

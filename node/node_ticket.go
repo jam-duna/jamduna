@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/types"
+	types "github.com/colorfulnotion/jam/types"
 )
 
 func (n *Node) GetSelfTicketsIDs(currPhase uint32, isEpochChanged bool) ([]common.Hash, error) {
@@ -32,8 +32,13 @@ func (n *Node) GetSelfTicketsIDs(currPhase uint32, isEpochChanged bool) ([]commo
 // this function is now won't broadcast the tickets to the network
 func (n *Node) generateEpochTickets(usedEntropy common.Hash) ([]types.TicketBucket, error) {
 	sf := n.statedb.GetSafrole()
-	auth_secret, _ := statedb.ConvertBanderSnatchSecret(n.GetBandersnatchSecret())
-	tickets, microseconds := sf.GenerateTickets(auth_secret, usedEntropy)
+
+	authSecret, err := statedb.ConvertBanderSnatchSecret(n.GetBandersnatchSecret())
+	if err != nil {
+		return nil, fmt.Errorf("convert bandersnatch secret: %w", err)
+	}
+
+	tickets, microseconds := sf.GenerateTickets(authSecret, usedEntropy)
 	n.ticketsMutex.Lock()
 	if n.selfTickets[usedEntropy] == nil {
 		n.selfTickets[usedEntropy] = make([]types.TicketBucket, 0)
@@ -47,7 +52,8 @@ func (n *Node) generateEpochTickets(usedEntropy common.Hash) ([]types.TicketBuck
 	return buckets, nil
 }
 
-func (n *Node) GenerateTickets(jce uint32) {
+func (n *Node) GenerateTickets(jce uint32) (eventID uint64) {
+	eventID = 0
 	sf := n.statedb.GetSafrole()
 	actualEpoch, _ := sf.EpochAndPhase(jce)
 	// timeslot mark
@@ -65,8 +71,26 @@ func (n *Node) GenerateTickets(jce uint32) {
 		return
 	}
 	if !n.IsTicketGenerated(usedEntropy) {
-		n.generateEpochTickets(usedEntropy)
+		eventID = n.telemetryClient.GetEventID()
+		n.telemetryClient.GeneratingTickets(sf.GetEpoch())
+
+		buckets, err := n.generateEpochTickets(usedEntropy)
+		if err != nil {
+			n.telemetryClient.TicketGenerationFailed(eventID, err.Error())
+			log.Warn(log.Node, "GenerateTickets: generateEpochTickets failed", "err", err)
+			return
+		}
+
+		vrfOutputs := make([][32]byte, 0, len(buckets))
+		for _, bucket := range buckets {
+			var output [32]byte
+			copy(output[:], bucket.TicketID.Bytes())
+			vrfOutputs = append(vrfOutputs, output)
+		}
+
+		n.telemetryClient.TicketsGenerated(eventID, vrfOutputs)
 	}
+	return eventID
 }
 
 func (n *Node) IsTicketGenerated(entropy common.Hash) bool {
@@ -75,7 +99,7 @@ func (n *Node) IsTicketGenerated(entropy common.Hash) bool {
 	_, ok := n.selfTickets[entropy]
 	return ok
 }
-func (n *Node) BroadcastTickets(currJCE uint32) {
+func (n *Node) BroadcastTickets(currJCE uint32, eventID uint64) {
 	if !n.sendTickets {
 		return
 	}
@@ -106,12 +130,12 @@ func (n *Node) BroadcastTickets(currJCE uint32) {
 		shouldSend := !*bucket.IsBroadcasted || (!*bucket.IsIncluded && n.resendTickets)
 		if shouldSend {
 			if proxy == n.id {
-				n.broadcast(ctx, ticket) // we are the proxy, so just use CE132
+				n.broadcast(ctx, ticket, eventID) // we are the proxy, so just use CE132
 			} else {
 				// first step: send to proxy with CE131
 				peer := n.peersInfo[proxy]
 				epoch := n.getEpoch()
-				if err := peer.SendTicketDistribution(ctx, epoch, ticket, true); err != nil {
+				if err := peer.SendTicketDistribution(ctx, epoch, ticket, true, eventID); err != nil {
 					log.Warn(log.Quic, "SendTicketDistribution", "n", n.String(), "->p", peer.PeerID, "err", err)
 				}
 			}

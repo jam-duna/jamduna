@@ -122,7 +122,6 @@ type Logger interface {
 	// Handler returns the underlying handler of the inner logger.
 	Handler() slog.Handler
 
-	Telemetry(s string)
 	RecordLogs()
 	GetRecordedLogs() ([]byte, error)
 }
@@ -220,13 +219,6 @@ func (l *logger) Write(level slog.Level, module string, msg string, attrs ...any
 		l.addLog(r)
 	}
 }
-func (l *logger) Telemetry(str string) {
-	err := l.writer.Info(str)
-	if err != nil {
-		l.Error("Failed to write telemetry log", "error", err)
-	}
-}
-
 func (l *logger) RecordLogs() {
 	l.recordingLog = true
 }

@@ -38,3 +38,38 @@ func (rc *RefineContext) Clone() *RefineContext {
 func (rc *RefineContext) String() string {
 	return ToJSON(rc)
 }
+
+// SerializeRefineContext serializes RefineContext to fixed binary format for Rust compatibility
+// Format: [anchor:32][state_root:32][beefy_root:32][lookup_anchor:32][lookup_anchor_slot:4 LE][prereq_count:4 LE][prerequisites:32*count]
+func (rc *RefineContext) SerializeRefineContext() []byte {
+	prereqCount := uint32(len(rc.Prerequisites))
+	size := 32 + 32 + 32 + 32 + 4 + 4 + (32 * len(rc.Prerequisites))
+	buf := make([]byte, 0, size)
+
+	// 1. Anchor (32 bytes)
+	buf = append(buf, rc.Anchor[:]...)
+
+	// 2. StateRoot (32 bytes)
+	buf = append(buf, rc.StateRoot[:]...)
+
+	// 3. BeefyRoot (32 bytes)
+	buf = append(buf, rc.BeefyRoot[:]...)
+
+	// 4. LookupAnchor (32 bytes)
+	buf = append(buf, rc.LookupAnchor[:]...)
+
+	// 5. LookupAnchorSlot (4 bytes, little endian)
+	buf = append(buf, byte(rc.LookupAnchorSlot), byte(rc.LookupAnchorSlot>>8),
+		byte(rc.LookupAnchorSlot>>16), byte(rc.LookupAnchorSlot>>24))
+
+	// 6. Prerequisites count (4 bytes, little endian)
+	buf = append(buf, byte(prereqCount), byte(prereqCount>>8),
+		byte(prereqCount>>16), byte(prereqCount>>24))
+
+	// 7. Prerequisites (32 bytes each)
+	for _, hash := range rc.Prerequisites {
+		buf = append(buf, hash[:]...)
+	}
+
+	return buf
+}

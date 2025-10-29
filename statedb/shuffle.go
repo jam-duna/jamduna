@@ -2,6 +2,7 @@ package statedb
 
 import (
 	"encoding/binary"
+
 	"github.com/colorfulnotion/jam/common"
 )
 

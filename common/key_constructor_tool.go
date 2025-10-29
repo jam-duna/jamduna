@@ -5,6 +5,13 @@ import (
 	//"fmt"
 )
 
+func Compute_storage_opaqueKey(s uint32, rawKey []byte) []byte {
+	as_internal_key := Compute_storageKey_internal(rawKey)
+	account_storage_key := ComputeC_sh(s, as_internal_key)
+	opaqueKey := account_storage_key.Bytes()
+	return opaqueKey
+}
+
 // k -> E4(2^32-1)++k for a_s
 func Compute_storageKey_internal(rawKey []byte) []byte {
 	prefixBytes := make([]byte, 4)

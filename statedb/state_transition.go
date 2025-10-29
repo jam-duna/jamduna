@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/colorfulnotion/jam/storage"
+	storage "github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/yudai/gojsondiff"
 	"github.com/yudai/gojsondiff/formatter"
@@ -33,7 +33,7 @@ func initStorage(testDir string) (*storage.StateDBStorage, error) {
 		}
 	}
 
-	sdb_storage, err := storage.NewStateDBStorage(testDir)
+	sdb_storage, err := storage.NewStateDBStorage(testDir, storage.NewMockJAMDA(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("error with storage: %v", err)
 	}

@@ -9,7 +9,16 @@ import (
 	"io"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/jamerrors"
+	jamerrors "github.com/colorfulnotion/jam/jamerrors"
+)
+
+// Guarantee discard reasons used for telemetry instrumentation.
+const (
+	GuaranteeDiscardReasonReportedOnChain     byte = 0 // Work-package reported on-chain
+	GuaranteeDiscardReasonReplacedByBetter    byte = 1 // Replaced by better guarantee
+	GuaranteeDiscardReasonCannotReportOnChain byte = 2 // Cannot be reported on-chain
+	GuaranteeDiscardReasonTooManyGuarantees   byte = 3 // Too many guarantees retained locally
+	GuaranteeDiscardReasonOther               byte = 4 // Other/unspecified reason
 )
 
 /*

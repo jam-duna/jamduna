@@ -6,11 +6,11 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/colorfulnotion/jam/bandersnatch"
+	bandersnatch "github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/types"
+	types "github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
 
@@ -100,12 +100,6 @@ func (t *Tranche0Evidence) FromBytes(data []byte) error {
 }
 
 func (p *Peer) SendAuditAnnouncement(ctx context.Context, announcement JAMSNPAuditAnnouncement, evidence interface{}) error {
-	// Start span if tracing is enabled
-	if p.node.store.SendTrace {
-		tracer := p.node.store.Tp.Tracer("NodeTracer")
-		_, span := tracer.Start(ctx, fmt.Sprintf("[N%d] SendAuditAnnouncement", p.node.store.NodeID))
-		defer span.End()
-	}
 	log.Debug(log.Node, "SendAuditAnnouncement", "peerID", p.PeerID, "headerHash", announcement.HeaderHash.String_short(), "tranche", announcement.Tranche)
 	code := uint8(CE144_AuditAnnouncement)
 	stream, err := p.openStream(ctx, code)

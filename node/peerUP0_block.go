@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -192,6 +192,12 @@ func (p *Peer) GetOrInitBlockAnnouncementStream(ctx context.Context) (quic.Strea
 	n.UP0_streamMu.Lock()
 	n.UP0_stream[uint16(validator_index)] = stream
 	log.Trace(log.B, "InitBlockAnnouncementStream", "node", n.id, "->peer", p.PeerID)
+
+	// Telemetry: BlockAnnouncementStreamOpened (event 60) - Local side opened stream
+	connectionSide := byte(0) // 0 = Local side opened the stream
+	peerIDBytes := n.PeerID32(p.PeerID)
+	n.telemetryClient.BlockAnnouncementStreamOpened(peerIDBytes, connectionSide)
+
 	n.UP0_streamMu.Unlock()
 	var wg sync.WaitGroup
 	var errChan = make(chan error, 2)
@@ -330,6 +336,11 @@ func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16
 	n.UP0_stream[peerID] = stream
 	n.UP0_streamMu.Unlock()
 
+	// Telemetry: BlockAnnouncementStreamOpened (event 60) - Remote side opened stream
+	connectionSide := byte(1) // 1 = Remote side opened the stream
+	peerIDBytes := n.PeerID32(peerID)
+	n.telemetryClient.BlockAnnouncementStreamOpened(peerIDBytes, connectionSide)
+
 	go n.runBlockAnnouncement(stream, peerID)
 	return nil
 }
@@ -345,6 +356,9 @@ func (n *Node) runBlockAnnouncement(stream quic.Stream, peerID uint16) {
 		delete(n.UP0_stream, peerID)
 		n.UP0_streamMu.Unlock()
 		log.Trace(log.B, "runBlockAnnouncement cleanup", "peerID", peerID)
+		// Emit telemetry event for block announcement stream closed (Event 61)
+		peerIDBytes := n.PeerID32(peerID)
+		n.telemetryClient.BlockAnnouncementStreamClosed(peerIDBytes, 0, "stream cleanup")
 	}()
 
 	code := uint8(UP0_BlockAnnouncement)
@@ -360,6 +374,12 @@ func (n *Node) runBlockAnnouncement(stream quic.Stream, peerID uint16) {
 		var ann JAMSNP_BlockAnnounce
 		if err := ann.FromBytes(raw); err != nil {
 			log.Error(log.Node, "runBlockAnnouncement decode error", "peerID", peerID, "err", err)
+			// Emit telemetry event for malformed block announcement
+			peerIDBytes := n.PeerID32(peerID)
+			n.telemetryClient.BlockAnnouncementMalformed(peerIDBytes, err.Error())
+			// Also emit PeerMisbehaved since malformed messages are protocol violations
+			n.telemetryClient.PeerMisbehaved(peerIDBytes, "malformed block announcement: "+err.Error())
+
 			return
 		}
 
@@ -378,6 +398,9 @@ func (n *Node) runBlockAnnouncement(stream quic.Stream, peerID uint16) {
 		select {
 		case n.blockAnnouncementsCh <- ann:
 			n.ba_checker.Set(h, peerID)
+			// Emit telemetry event for block announced (received from peer)
+			peerIDBytes := n.PeerID32(peerID)
+			n.telemetryClient.BlockAnnounced(peerIDBytes, 1, ann.Header.Slot, h)
 		default:
 			log.Warn(log.Node, "runBlockAnnouncement: channel full",
 				"peerID", peerID,

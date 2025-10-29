@@ -224,7 +224,7 @@ func MakeDisputes(store *storage.StateDBStorage, stf *statedb.StateTransition, v
 		return false, err, nil
 	}
 	dispute_block = dispute_prestate.Block.Copy()
-	dispute_poststate, err := statedb.ApplyStateTransitionFromBlock(dispute_prestate, context.Background(), dispute_block, nil, statedb.BackendInterpreter)
+	dispute_poststate, err := statedb.ApplyStateTransitionFromBlock(0, dispute_prestate, context.Background(), dispute_block, nil, statedb.BackendInterpreter)
 	if err != nil {
 		fmt.Println(dispute_block.String())
 		return false, fmt.Errorf("ApplyStateTransitionFromBlock Error:%v", err), nil
@@ -258,7 +258,7 @@ func main() {
 		}
 	}
 	// Make disputes
-	store, err := storage.NewStateDBStorage("/tmp/disputes")
+	store, err := storage.NewStateDBStorage("/tmp/disputes", nil, nil)
 	if err != nil {
 		log.Fatalf("Error creating storage: %v", err)
 	}

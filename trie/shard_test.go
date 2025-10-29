@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/colorfulnotion/jam/bls"
+	bls "github.com/colorfulnotion/jam/bls"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 )

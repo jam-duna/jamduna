@@ -3,7 +3,7 @@ package statedb
 import (
 	"fmt"
 
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -17,6 +17,7 @@ func (s *StateDB) GetAuthorizeCode(wp types.WorkPackage) (auth_code_real []byte,
 	// t := wp.RefineContext.LookupAnchorSlot
 
 	// code := s.HistoricalLookup(author_sevice, t, p_u)
+
 	code, _, err := s.ReadServicePreimageBlob(p_h, p_u)
 	if err != nil {
 		log.Error(log.G, "GetAuthorizeCode: ReadServicePreimageBlob error", "workPackage", wp.String(), "codeHash", p_u, "error", err)

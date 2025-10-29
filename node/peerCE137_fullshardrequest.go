@@ -8,7 +8,7 @@ import (
 	"io"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/quic-go/quic-go"
 )
 
@@ -82,20 +82,20 @@ func (p *Peer) SendFullShardRequest(
 	shardIndex uint16,
 ) (bundleShard []byte, concatSegmentShards []byte, encodedPath []byte, err error) {
 
-	if p.node.store.SendTrace {
-		tracer := p.node.store.Tp.Tracer("NodeTracer")
-		_, span := tracer.Start(ctx, fmt.Sprintf("[N%d] SendFullShardRequest", p.node.store.NodeID))
-		defer span.End()
-	}
-
 	if ctx.Err() != nil {
 		return nil, nil, nil, ctx.Err()
 	}
 
 	code := uint8(CE137_FullShardRequest)
 
+	// Telemetry: Sending shard request (event 120)
+	eventID := p.node.telemetryClient.GetEventID()
+	p.node.telemetryClient.SendingShardRequest(p.GetPeer32(), erasureRoot, shardIndex)
+
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
+		// Telemetry: Shard request failed (event 122)
+		p.node.telemetryClient.ShardRequestFailed(eventID, err.Error())
 		return nil, nil, nil, fmt.Errorf("openStream[CE137]: %w", err)
 	}
 
@@ -107,43 +107,68 @@ func (p *Peer) SendFullShardRequest(
 	reqBytes, err := req.ToBytes()
 	if err != nil {
 		stream.Close()
+		// Telemetry: Shard request failed (event 122)
+		p.node.telemetryClient.ShardRequestFailed(eventID, err.Error())
 		return nil, nil, nil, fmt.Errorf("ToBytes[ShardRequest]: %w", err)
 	}
 
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
+		// Telemetry: Shard request failed (event 122)
+		p.node.telemetryClient.ShardRequestFailed(eventID, err.Error())
 		return nil, nil, nil, fmt.Errorf("sendQuicBytes[CE137]: %w", err)
 	}
 	//--> FIN
 	stream.Close()
+
+	// Telemetry: Shard request sent (event 123)
+	p.node.telemetryClient.ShardRequestSent(eventID)
 
 	// <-- Bundle Shard
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
 	// <-- Justification
 	parts, err := receiveMultiple(ctx, stream, 3, p.PeerID, code)
 	if err != nil {
+		// Telemetry: Shard request failed (event 122)
+		p.node.telemetryClient.ShardRequestFailed(eventID, err.Error())
 		return nil, nil, nil, fmt.Errorf("receiveMultiple[CE137]: %w", err)
 	}
+
+	// Telemetry: Shards transferred (event 125)
+	p.node.telemetryClient.ShardsTransferred(eventID)
 
 	return parts[0], parts[1], parts[2], nil
 }
 
 // guarantor receives CE137 request from assurer by erasureRoot and shard index
-func (n *Node) onFullShardRequest(ctx context.Context, stream quic.Stream, msg []byte) error {
+func (n *Node) onFullShardRequest(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
 	defer stream.Close()
+
+	// Telemetry: Receiving shard request (event 121)
+	eventID := n.telemetryClient.GetEventID()
+	n.telemetryClient.ReceivingShardRequest(n.PeerID32(peerID))
 
 	var req JAMSNPShardRequest
 	if err := req.FromBytes(msg); err != nil {
 		log.Error(log.DA, "onFullShardRequest: failed to deserialize", "err", err)
+		// Telemetry: Shard request failed (event 122)
+		n.telemetryClient.ShardRequestFailed(eventID, err.Error())
 		return fmt.Errorf("onFullShardRequest: decode failed: %w", err)
 	}
+
+	// Telemetry: Shard request received (event 124)
+	n.telemetryClient.ShardRequestReceived(eventID, req.ErasureRoot, req.ShardIndex)
 
 	bundleShard, exportedSegmentsAndProofShards, encodedPath, ok, err := n.GetFullShard_Guarantor(req.ErasureRoot, req.ShardIndex)
 	if err != nil {
 		stream.CancelWrite(ErrKeyNotFound)
+		// Telemetry: Shard request failed (event 122)
+		n.telemetryClient.ShardRequestFailed(eventID, err.Error())
 		return fmt.Errorf("onFullShardRequest: GetFullShard_Guarantor failed: %w", err)
 	}
 	if !ok {
 		stream.CancelWrite(ErrKeyNotFound)
+		// Telemetry: Shard request failed (event 122)
+		n.telemetryClient.ShardRequestFailed(eventID, "shard not found")
 		return fmt.Errorf("onFullShardRequest: shard not found for root=%v, shardIndex=%d", req.ErasureRoot, req.ShardIndex)
 	}
 
@@ -161,8 +186,13 @@ func (n *Node) onFullShardRequest(ctx context.Context, stream quic.Stream, msg [
 
 	// <-- Justification
 	if err := sendQuicBytes(ctx, stream, encodedPath, n.id, code); err != nil {
+		// Telemetry: Shard request failed (event 122)
+		n.telemetryClient.ShardRequestFailed(eventID, err.Error())
 		return fmt.Errorf("onFullShardRequest: send justification failed: %w", err)
 	}
+
+	// Telemetry: Shards transferred (event 125)
+	n.telemetryClient.ShardsTransferred(eventID)
 
 	log.Trace(log.DA, "onFullShardRequest completed", "n", n.String(),
 		"erasureRoot", req.ErasureRoot,

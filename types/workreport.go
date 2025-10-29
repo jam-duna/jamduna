@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/colorfulnotion/jam/common"
+	log "github.com/colorfulnotion/jam/log"
 )
 
 /*
@@ -107,7 +108,19 @@ func (a *WorkReport) Hash() common.Hash {
 		// Handle the error case
 		return common.Hash{}
 	}
-	return common.Blake2Hash(data)
+	hash := common.Blake2Hash(data)
+
+	// Debug logging for hash computation
+	log.Debug(log.Node, "WorkReport.Hash()",
+		"hash", hash.String(),
+		"dataLen", len(data),
+		"dataHex", common.HexString(data[:min(200, len(data))]),
+		"authGasUsed", a.AuthGasUsed,
+		"traceLen", len(a.Trace),
+		"resultsLen", len(a.Results),
+		"coreIndex", a.CoreIndex)
+
+	return hash
 }
 
 func (a *WorkReport) UnmarshalJSON(data []byte) error {

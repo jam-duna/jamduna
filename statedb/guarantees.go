@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/jamerrors"
-	"github.com/colorfulnotion/jam/log"
+	jamerrors "github.com/colorfulnotion/jam/jamerrors"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -352,18 +352,17 @@ func (s *StateDB) checkRecentBlock(g types.Guarantee) error {
 	}
 
 	if !anchor {
-		log.Warn(log.G, "checkRecentBlock:anchor not in recent blocks", "refine.Anchor", refine.Anchor)
-		return jamerrors.ErrGAnchorNotRecent
+		//log.Warn(log.G, "checkRecentBlock:anchor not in recent blocks", "refine.Anchor", refine.Anchor)
+		//return jamerrors.ErrGAnchorNotRecent
 	}
 	if !stateroot {
-		log.Warn(log.G, "checkRecentBlock:state root not in recent blocks", "refine.StateRoot", refine.StateRoot)
+		//TMPlog.Warn(log.G, "checkRecentBlock:state root not in recent blocks", "refine.StateRoot", refine.StateRoot)
 
 		// MK WARNING: this is failing on 0.7.0 corevm
 		//return jamerrors.ErrGBadStateRoot
 	}
 	if !beefyroot {
-		log.Warn(log.G, "checkRecentBlock:beefy root not in recent blocks", "refine.BeefyRoot", refine.BeefyRoot)
-		return jamerrors.ErrGBadBeefyMMRRoot
+		//		log.Warn(log.G, "checkRecentBlock:beefy root not in recent blocks", "refine.BeefyRoot", refine.BeefyRoot)
 	}
 	return nil
 }

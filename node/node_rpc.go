@@ -6,20 +6,24 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/rpc"
 	"os"
 	"reflect"
 	"runtime"
 	"strconv"
 
+	_ "net/http/pprof"
+
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/types"
+	types "github.com/colorfulnotion/jam/types"
 )
 
 type Jam struct {
 	*NodeContent
+	node JNode // Reference to the full node that implements JNode interface
 }
 
 var MethodDescriptionMap = map[string]string{
@@ -44,9 +48,36 @@ var MethodDescriptionMap = map[string]string{
 	"Code":                 "Code(serviceIndex string) -> json string",
 	"ListServices":         "ListServices() -> json string",
 	"AuditWorkPackage":     "AuditWorkPackage(workPackageHash string) -> json WorkReport",
-	"Segment":              "Segment(requestedHash string, index int) -> hex string",
-	"Encode":               "Encode(objectType string, input string) -> hexstring",
-	"Decode":               "Decode(objectType string, input string) -> json string",
+
+	"Encode": "Encode(objectType string, input string) -> hexstring",
+	"Decode": "Decode(objectType string, input string) -> json string",
+
+	// Ethereum JSON-RPC methods
+	// node_rpc_evmnetwork.go - Network/Metadata
+	"ChainId":     "ChainId() -> chain ID hex",
+	"Accounts":    "Accounts() -> account addresses array",
+	"GasPrice":    "GasPrice() -> gas price hex",
+	"EstimateGas": "EstimateGas(txObj json, blockNumber string) -> gas estimate hex",
+	"GetCode":     "GetCode(address string, blockNumber string) -> bytecode hex",
+
+	// node_rpc_evmcontracts.go - State Access
+	"GetBalance":          "GetBalance(address string, blockNumber string) -> uint256 hex",
+	"GetStorageAt":        "GetStorageAt(address string, position string, blockNumber string) -> value hex",
+	"GetTransactionCount": "GetTransactionCount(address string, blockNumber string) -> uint256 hex",
+
+	// node_rpc_evmtx.go - Transaction
+	"GetTransactionReceipt": "GetTransactionReceipt(txHash string) -> receipt json",
+	"GetTransactionByHash":  "GetTransactionByHash(txHash string) -> transaction json",
+	"GetLogs":               "GetLogs(filter json) -> logs json array",
+	"SendRawTransaction":    "SendRawTransaction(signedTxData hex) -> txHash",
+	"Call":                  "Call(txObj json, blockNumber string) -> data hex",
+
+	// node_rpc_evmblock.go - Block + Transaction pool management methods
+	"GetBlockByHash":   "GetBlockByHash(blockHash string, fullTx bool) -> block json",
+	"GetBlockByNumber": "GetBlockByNumber(blockNumber string, fullTx bool) -> block json",
+	"TxPoolStatus":     "TxPoolStatus() -> pool statistics json",
+	"TxPoolContent":    "TxPoolContent() -> pending and queued transactions json",
+	"TxPoolInspect":    "TxPoolInspect() -> human readable pool summary",
 }
 
 type NodeStatusServer struct {
@@ -365,6 +396,7 @@ func (j *Jam) BestBlock(req []string, res *string) error {
 
 // see GP 11.1.2 Refinement Context where there TWO historical blocks A+B but only A has to be in RecentBlocks
 func (n *NodeContent) getRefineContext(prereqs ...common.Hash) types.RefineContext {
+	panic(1234)
 	// TODO: approx finality by 5 blocks
 	finalityApproxConst := 5
 	anchor := common.Hash{}
@@ -640,7 +672,7 @@ func (j *Jam) ServiceValue(req []string, res *string) error {
 	return nil
 }
 
-func (n *NodeContent) getSegments(requestedHash common.Hash, index []uint16) (segment [][]byte, justifications [][]common.Hash, err error) {
+func (n *NodeContent) getSegments(requestedHash common.Hash, index []uint16, eventID uint64) (segment [][]byte, justifications [][]common.Hash, err error) {
 	si := n.WorkReportSearch(requestedHash)
 	if si == nil {
 		return nil, nil, fmt.Errorf("requestedHash not found")
@@ -648,7 +680,7 @@ func (n *NodeContent) getSegments(requestedHash common.Hash, index []uint16) (se
 	for _, idx := range index {
 		si.AddIndex(idx)
 	}
-	segments, justifications, err := n.reconstructSegments(si)
+	segments, justifications, err := n.reconstructSegments(si, eventID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -701,7 +733,7 @@ func (j *Jam) TraceBlock(req []string, res *string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
 	defer cancel()
-	s1, err := statedb.ApplyStateTransitionFromBlock(sdb, ctx, block, nil, statedb.BackendInterpreter)
+	s1, err := statedb.ApplyStateTransitionFromBlock(0, sdb, ctx, block, nil, statedb.BackendInterpreter)
 	if err != nil {
 		log.Error(log.Node, "TraceBlock", "err", err)
 		return err
@@ -737,7 +769,7 @@ func (j *Jam) AuditWorkPackage(req []string, res *string) error {
 	log.RecordLogs()
 	log.EnableModule(log.FirstGuarantorOrAuditor)
 
-	workReport2, _, wr_pvm_elapsed, _, err := j.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, j.statedb.GetTimeslot(), true)
+	workReport2, _, wr_pvm_elapsed, _, err := j.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, j.statedb.GetTimeslot(), true, 0)
 	if err != nil {
 		return err
 	}
@@ -753,45 +785,6 @@ func (j *Jam) AuditWorkPackage(req []string, res *string) error {
 		return err
 	}
 	*res = string(logs)
-	return nil
-}
-
-// GetSegment(requestedHash string, index int) -> hex string
-func (j *Jam) Segment(req []string, res *string) (err error) {
-	if len(req) != 2 {
-		return fmt.Errorf("invalid number of arguments")
-	}
-	requestedHash := common.HexToHash(req[0])
-
-	var index uint16
-	indicesStr := req[1]
-	err = json.Unmarshal([]byte(indicesStr), &index)
-	if err != nil {
-		return fmt.Errorf("invalid index %s (must be between 0 and export_count-1)", indicesStr)
-	}
-
-	indices := make([]uint16, 1)
-	indices[0] = index
-	segments, justifications, err := j.getSegments(requestedHash, indices)
-	if err != nil {
-		return err
-	}
-	type getSegmentResponse struct {
-		Segment       []byte        `json:"segment"`
-		Justification []common.Hash `json:"justification"`
-	}
-	if len(segments) != 1 {
-		return fmt.Errorf("segment not found")
-	}
-	response := getSegmentResponse{
-		Segment:       segments[0],
-		Justification: justifications[0],
-	}
-	r, err := json.Marshal(response)
-	if err != nil {
-		return err
-	}
-	*res = string(r)
 	return nil
 }
 
@@ -898,20 +891,6 @@ func (j *Jam) SubmitWorkPackage(req []string, res *string) error {
 	return nil
 }
 
-func (j *Jam) GetRefineContext(req []string, res *string) error {
-	if len(req) != 0 {
-		return fmt.Errorf("invalid number of arguments")
-	}
-	// Access statedb via Node reference
-	refinecontext := j.getRefineContext() // not sure
-	j.getLatestFinalizedBlockSlot()
-	//fmt.Printf("JAM SERVER GetRefineContext: %s\n", refinecontext.String())
-
-	// json marshal the refine context
-	*res = refinecontext.String()
-	return nil
-}
-
 func (j *Jam) WorkReport(req []string, res *string) error {
 	fmt.Printf("jam.WorkReport called with req=%v\n", req)
 	if len(req) != 1 {
@@ -985,25 +964,33 @@ func (j *Jam) Decode(req []string, res *string) error {
 
 // server ========================================
 func (n *Node) StartRPCServer(validatorIndex int) {
-	n.NodeContent.startRPCServerImpl(validatorIndex)
+	n.NodeContent.startRPCServerImpl(validatorIndex, n)
 }
 
-func (n *NodeContent) startRPCServerImpl(validatorIndex int) {
+func (n *NodeContent) startRPCServerImpl(validatorIndex int, node JNode) {
 	jam := new(Jam)
 	jam.NodeContent = n
+	jam.node = node
 	// register the rpc methods
 	rpc.RegisterName("jam", jam)
-	address := fmt.Sprintf(":%d", DefaultTCPPort+validatorIndex)
+	// register ethereum rpc methods with eth_ prefix
+	rpc.RegisterName("eth", jam)
 
-	listener, err := net.Listen("tcp", address)
+	// Start TCP RPC server
+	tcpAddress := fmt.Sprintf(":%d", DefaultTCPPort+validatorIndex)
+	listener, err := net.Listen("tcp", tcpAddress)
 	if err != nil {
-		fmt.Println("Failed to start RPC server:", err)
+		fmt.Println("Failed to start TCP RPC server:", err)
 		return
 	}
 	defer listener.Close()
-	fmt.Println("RPC server started, listening on", address)
+	fmt.Println("RPC server started, listening on", tcpAddress)
 
-	// Listen for requests
+	// Start HTTP JSON-RPC server
+	httpPort := 8545 + validatorIndex // Standard Ethereum port + offset
+	go n.startHTTPJSONRPCServer(httpPort, jam)
+
+	// Listen for TCP RPC requests
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -1011,6 +998,149 @@ func (n *NodeContent) startRPCServerImpl(validatorIndex int) {
 			continue
 		}
 		go rpc.ServeConn(conn)
+	}
+}
+
+// startHTTPJSONRPCServer starts an HTTP JSON-RPC server
+func (n *NodeContent) startHTTPJSONRPCServer(port int, jam *Jam) {
+	address := fmt.Sprintf(":%d", port)
+
+	// Create a new ServeMux to avoid conflicts between multiple nodes
+	mux := http.NewServeMux()
+
+	// Handle JSON-RPC requests
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		if r.Method != "POST" {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req struct {
+			JSONRPC string        `json:"jsonrpc"`
+			Method  string        `json:"method"`
+			Params  []interface{} `json:"params"`
+			ID      interface{}   `json:"id"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		// Convert params to string slice (current RPC methods expect []string)
+		stringParams := make([]string, len(req.Params))
+		for i, param := range req.Params {
+			switch v := param.(type) {
+			case string:
+				stringParams[i] = v
+			case bool:
+				stringParams[i] = strconv.FormatBool(v)
+			case float64:
+				// Check if it's an integer value
+				if v == float64(int64(v)) {
+					stringParams[i] = strconv.FormatInt(int64(v), 10)
+				} else {
+					stringParams[i] = strconv.FormatFloat(v, 'f', -1, 64)
+				}
+			default:
+				// For complex types, marshal to JSON string
+				jsonBytes, err := json.Marshal(param)
+				if err != nil {
+					http.Error(w, fmt.Sprintf("Failed to convert param %v to string", param), http.StatusBadRequest)
+					return
+				}
+				stringParams[i] = string(jsonBytes)
+			}
+		}
+
+		// Call the RPC method
+		var result string
+		err := callJamMethod(jam, req.Method, stringParams, &result)
+
+		response := map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+		}
+
+		if err != nil {
+			response["error"] = map[string]interface{}{
+				"code":    -32603,
+				"message": err.Error(),
+			}
+		} else {
+			// Try to parse result as JSON, if it fails return as string
+			var jsonResult interface{}
+			if json.Unmarshal([]byte(result), &jsonResult) == nil {
+				response["result"] = jsonResult
+			} else {
+				response["result"] = result
+			}
+		}
+
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		json.NewEncoder(w).Encode(response)
+	})
+
+	fmt.Printf("HTTP JSON-RPC server started, listening on %s\n", address)
+	if err := http.ListenAndServe(address, mux); err != nil {
+		fmt.Printf("Failed to start HTTP JSON-RPC server: %v\n", err)
+	}
+}
+
+// callJamMethod calls the appropriate method on the Jam struct
+func callJamMethod(jam *Jam, method string, params []string, result *string) error {
+	switch method {
+	// Ethereum methods
+	case "eth_chainId":
+		return jam.ChainId(params, result)
+	case "eth_accounts":
+		return jam.Accounts(params, result)
+	case "eth_gasPrice":
+		return jam.GasPrice(params, result)
+	case "eth_getBalance":
+		return jam.GetBalance(params, result)
+	case "eth_getStorageAt":
+		return jam.GetStorageAt(params, result)
+	case "eth_getTransactionCount":
+		return jam.GetTransactionCount(params, result)
+	case "eth_getCode":
+		return jam.GetCode(params, result)
+	case "eth_estimateGas":
+		return jam.EstimateGas(params, result)
+	case "eth_call":
+		return jam.Call(params, result)
+	case "eth_sendRawTransaction":
+		return jam.SendRawTransaction(params, result)
+	case "eth_getTransactionReceipt":
+		return jam.GetTransactionReceipt(params, result)
+	case "eth_getTransactionByHash":
+		return jam.GetTransactionByHash(params, result)
+	case "eth_getLogs":
+		return jam.GetLogs(params, result)
+	case "eth_getBlockByHash":
+		return jam.GetBlockByHash(params, result)
+	case "eth_getBlockByNumber":
+		return jam.GetBlockByNumber(params, result)
+	// JAM methods
+	case "jam_txPoolStatus":
+		return jam.TxPoolStatus(params, result)
+	case "jam_txPoolContent":
+		return jam.TxPoolContent(params, result)
+	case "jam_txPoolInspect":
+		return jam.TxPoolInspect(params, result)
+	default:
+		return fmt.Errorf("method not found: %s", method)
 	}
 }
 
@@ -1278,3 +1408,6 @@ func decodeapi(objectType, input string) (string, error) {
 
 	return string(decodedJSON), nil
 }
+
+// Port and network configuration
+// Note: Port variables are defined in node_rpc_port.go

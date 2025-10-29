@@ -14,9 +14,9 @@ import (
 	"unsafe"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/sdbtiming"
-	"github.com/colorfulnotion/jam/storage"
+	log "github.com/colorfulnotion/jam/log"
+	sdbtiming "github.com/colorfulnotion/jam/sdbtiming"
+	storage "github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -26,6 +26,7 @@ func BenchRows() []sdbtiming.Row { return benchRec.Snapshot() }
 
 const (
 	debug        = "trie"
+	debugVerbose = false
 	stateKeySize = 32    // the "actual" size is 31 but we use common.Hash with the 32 byte being 0 INCLUDING IN METADATA right now
 	maxCacheSize = 10000 // Maximum number of cached hash results -- play with this
 )
@@ -187,7 +188,7 @@ func initLevelDB(optionalPath ...string) (*storage.StateDBStorage, error) {
 	if len(optionalPath) > 0 {
 		path = optionalPath[0]
 	}
-	stateDBStorage, err := storage.NewStateDBStorage(path)
+	stateDBStorage, err := storage.NewStateDBStorage(path, storage.NewMockJAMDA(), nil)
 	return stateDBStorage, err
 }
 
@@ -985,6 +986,25 @@ func (t *MerkleTree) GetServiceStorage(s uint32, k []byte) ([]byte, bool, error)
 	return value, true, nil
 }
 
+// same as above but with proof
+func (t *MerkleTree) GetServiceStorageWithProof(s uint32, k []byte) ([]byte, [][]byte, common.Hash, bool, error) {
+	as_internal_key := common.Compute_storageKey_internal(k)
+	account_storage_key := common.ComputeC_sh(s, as_internal_key)
+	stateKey := account_storage_key.Bytes()
+
+	// Get Storage from trie
+	value, ok, err := t.Get(stateKey)
+	if !ok || err != nil {
+		return nil, nil, common.Hash{}, ok, err
+	}
+	stateRoot := t.GetRoot()
+	proof, err := t.Trace(stateKey)
+	if err != nil {
+		return nil, nil, common.Hash{}, false, err
+	}
+	return value, proof, stateRoot, true, nil
+}
+
 // Delete Storage key(hash)
 func (t *MerkleTree) DeleteServiceStorage(s uint32, k []byte) error {
 	as_internal_key := common.Compute_storageKey_internal(k)
@@ -1019,7 +1039,6 @@ func (t *MerkleTree) GetPreImageBlob(s uint32, blobHash common.Hash) (value []by
 	ap_internal_key := common.Compute_preimageBlob_internal(blobHash)
 	account_preimage_hash := common.ComputeC_sh(s, ap_internal_key)
 	stateKey := account_preimage_hash.Bytes()
-	// fmt.Printf("**** GetPreImageBlob C(s=%d, h=%x)=%x\n", s, ap_internal_key, stateKey)
 	value, ok, err = t.Get(stateKey)
 	if !ok || err != nil {
 		return nil, ok, err
@@ -1356,18 +1375,42 @@ func (t *MerkleTree) getPath(node *Node, key []byte, depth int, path *[][]byte) 
 }
 
 // Verify verifies the path to a specific key in the Merkle Tree
-func (t *MerkleTree) Verify(key []byte, value []byte, rootHash []byte, path [][]byte) bool {
+func Verify(serviceID uint32, key []byte, value []byte, rootHash []byte, path []common.Hash) bool {
+	// Compute opaque key from service ID and key
+	opaqueKey := common.Compute_storage_opaqueKey(serviceID, key)
+
 	if len(path) == 0 {
-		return compareBytes(computeHash(leaf(key, value)), rootHash)
+		leafHashSingle := computeHash(leaf(opaqueKey, value))
+		return compareBytes(leafHashSingle, rootHash)
+	}
+
+	leafHash := computeHash(leaf(opaqueKey, value))
+
+	for i := len(path) - 1; i >= 0; i-- {
+		if bit(opaqueKey, i) {
+			leafHash = computeHash(branch(path[i][:], leafHash))
+		} else {
+			leafHash = computeHash(branch(leafHash, path[i][:]))
+		}
+	}
+	return compareBytes(leafHash, rootHash)
+}
+
+// VerifyRaw verifies a Merkle proof for a raw key (without service ID encoding)
+// Used primarily for testing low-level trie operations
+func VerifyRaw(key []byte, value []byte, rootHash []byte, path []common.Hash) bool {
+	if len(path) == 0 {
+		leafHashSingle := computeHash(leaf(key, value))
+		return compareBytes(leafHashSingle, rootHash)
 	}
 
 	leafHash := computeHash(leaf(key, value))
 
 	for i := len(path) - 1; i >= 0; i-- {
 		if bit(key, i) {
-			leafHash = computeHash(branch(path[i], leafHash))
+			leafHash = computeHash(branch(path[i][:], leafHash))
 		} else {
-			leafHash = computeHash(branch(leafHash, path[i]))
+			leafHash = computeHash(branch(leafHash, path[i][:]))
 		}
 	}
 	return compareBytes(leafHash, rootHash)

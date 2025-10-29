@@ -26,7 +26,7 @@ func ExecuteWorkPackageBundleV1(stateDB *statedb.StateDB, pvmBackend string, tim
 	// Execute authorization
 	vm_auth := statedb.NewVMFromCode(authindex, authcode, 0, 0, stateDB, pvmBackend, types.IsAuthorizedGasAllocation)
 	vm_auth.SetPVMContext(log.FirstGuarantorOrAuditor)
-	auth_result := vm_auth.ExecuteAuthorization(workPackage, workPackageCoreIndex)
+	auth_result := vm_auth.ExecuteAuthorization(workPackage.AuthorizationToken, workPackageCoreIndex)
 	auth_output := auth_result.Ok
 	authGasUsed := int64(types.IsAuthorizedGasAllocation) - vm_auth.GetGas()
 
@@ -61,7 +61,7 @@ func ExecuteWorkPackageBundleV1(stateDB *statedb.StateDB, pvmBackend string, tim
 		output, _, exported_segments := vm.ExecuteRefine(
 			workPackageCoreIndex,
 			uint32(index), workPackage, auth_result, importsegments,
-			workItem.ExportCount, packageBundle.ExtrinsicData,
+			workItem.ExportCount, packageBundle.ExtrinsicData[index],
 			p_u, common.BytesToHash(trie.H0),
 		)
 		refineElapsed := time.Since(refineStart)
@@ -223,7 +223,7 @@ func ExecuteWPAuthorization(stateDB *statedb.StateDB, pvmBackend string, workPac
 
 	vm_auth := statedb.NewVMFromCode(authindex, authcode, 0, 0, stateDB, pvmBackend, types.IsAuthorizedGasAllocation)
 	vm_auth.SetPVMContext(log.FirstGuarantorOrAuditor)
-	auth_result := vm_auth.ExecuteAuthorization(workPackage, workPackageCoreIndex)
+	auth_result := vm_auth.ExecuteAuthorization(workPackage.AuthorizationToken, workPackageCoreIndex)
 	auth_output := auth_result.Ok
 	authGasUsed := int64(types.IsAuthorizedGasAllocation) - vm_auth.GetGas()
 	authorizer_hash := ComputeAuthHash(workPackage)
@@ -260,7 +260,7 @@ func ExecuteWBRefinement(stateDB *statedb.StateDB, pvmBackend string, timeslot u
 		output, _, exported_segments := vm.ExecuteRefine(
 			workPackageCoreIndex,
 			uint32(index), workPackage, auth_result, importsegments,
-			workItem.ExportCount, packageBundle.ExtrinsicData,
+			workItem.ExportCount, packageBundle.ExtrinsicData[index],
 			p_u, common.BytesToHash(trie.H0),
 		)
 		refineElapsed := time.Since(refineStart)

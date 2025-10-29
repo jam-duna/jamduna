@@ -6,11 +6,11 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-
 	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
+	telemetry "github.com/colorfulnotion/jam/telemetry"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -119,18 +119,17 @@ func (p *Peer) SendWorkReportDistribution(
 	wr types.WorkReport,
 	slot uint32,
 	credentials []types.GuaranteeCredential,
-	kv ...interface{},
+	eventID uint64,
 ) error {
 	code := uint8(CE135_WorkReportDistribution)
 
-	if p.node.store.SendTrace {
-		tracer := p.node.store.Tp.Tracer("NodeTracer")
-		_, span := tracer.Start(ctx, fmt.Sprintf("[N%d] SendWorkReportDistribution", p.node.store.NodeID))
-		defer span.End()
-	}
+	// Telemetry: Sending guarantee (event 106)
+	p.node.telemetryClient.SendingGuarantee(eventID, p.GetPeer32())
 
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
+		// Telemetry: Guarantee send failed (event 107)
+		p.node.telemetryClient.GuaranteeSendFailed(eventID, err.Error())
 		return fmt.Errorf("openStream[CE135_WorkReportDistribution]: %w", err)
 	}
 	defer stream.Close()
@@ -143,23 +142,37 @@ func (p *Peer) SendWorkReportDistribution(
 	}
 	reqBytes, err := newReq.ToBytes()
 	if err != nil {
+		// Telemetry: Guarantee send failed (event 107)
+		p.node.telemetryClient.GuaranteeSendFailed(eventID, err.Error())
 		return fmt.Errorf("ToBytes[CE135_WorkReportDistribution]: %w", err)
 	}
-	log.Debug(log.G, "onWorkReportDistribution OUTGOING SPEC", "workReport", wr.AvailabilitySpec.String())
+
 	log.Debug(log.G, "onWorkReportDistribution OUTGOING REPORT", "workReport", wr.String())
 
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
+		// Telemetry: Guarantee send failed (event 107)
+		p.node.telemetryClient.GuaranteeSendFailed(eventID, err.Error())
 		return fmt.Errorf("sendQuicBytes[CE135_WorkReportDistribution]: %w", err)
 	}
+
+	// Telemetry: Guarantee sent (event 108)
+	p.node.telemetryClient.GuaranteeSent(eventID)
 
 	return nil
 }
 
 func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
 	defer stream.Close()
+
+	// Telemetry: Receiving guarantee (event 110)
+	eventID := n.telemetryClient.GetEventID()
+	n.telemetryClient.ReceivingGuarantee(n.PeerID32(peerID))
+
 	var newReq JAMSNPWorkReport
 	if err := newReq.FromBytes(msg); err != nil {
 		log.Error(log.G, "onWorkReportDistribution", "err", err)
+		// Telemetry: Guarantee receive failed (event 111)
+		n.telemetryClient.GuaranteeReceiveFailed(eventID, err.Error())
 		return fmt.Errorf("onWorkReportDistribution: failed to decode message: %w", err)
 	}
 
@@ -168,6 +181,17 @@ func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream,
 		Report:     workReport,
 		Slot:       newReq.Slot,
 		Signatures: newReq.Credentials,
+	}
+
+	// Build GuaranteeOutline for telemetry
+	guarantors := make([]uint16, len(newReq.Credentials))
+	for i, cred := range newReq.Credentials {
+		guarantors[i] = cred.ValidatorIndex
+	}
+	guaranteeOutline := telemetry.GuaranteeOutline{
+		WorkReportHash: workReport.Hash(),
+		Slot:           newReq.Slot,
+		Guarantors:     guarantors,
 	}
 
 	select {
@@ -213,6 +237,9 @@ func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream,
 	default:
 		log.Warn(log.G, "onWorkReportDistribution", "msg", "workReportsCh full, dropping work report")
 	}
+
+	// Telemetry: Guarantee received (event 112)
+	n.telemetryClient.GuaranteeReceived(eventID, guaranteeOutline)
 
 	return nil
 }

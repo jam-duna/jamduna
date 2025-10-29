@@ -6,7 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -94,7 +94,7 @@ func (ticket *JAMSNPTicketDistribution) FromBytes(data []byte) error {
 }
 
 // SendTicketDistribution sends a ticket to the peer.
-func (p *Peer) SendTicketDistribution(ctx context.Context, epoch uint32, t types.Ticket, isProxy bool, kv ...interface{}) error {
+func (p *Peer) SendTicketDistribution(ctx context.Context, epoch uint32, t types.Ticket, isProxy bool, eventID uint64) error {
 	req := &JAMSNPTicketDistribution{
 		Epoch:     epoch,
 		Attempt:   t.Attempt,
@@ -107,28 +107,49 @@ func (p *Peer) SendTicketDistribution(ctx context.Context, epoch uint32, t types
 	}
 
 	code := uint8(CE131_TicketDistribution)
+	wasCE132 := false
 	if !isProxy {
 		code = CE132_TicketDistribution
+		wasCE132 = true
 	}
+
+	// Extract VRF output from signature (assuming it's available in t)
+	// For now, we'll use a placeholder since Ticket structure may not have output directly
+	var vrfOutput [32]byte
+	// TODO: Extract actual VRF output from ticket signature
+
+	// Telemetry: Ticket transferred (event 84) - sending side
+	connectionSide := byte(0) // Local is sender
 
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
+		// Telemetry: Ticket transfer failed (event 83)
+		p.node.telemetryClient.TicketTransferFailed(p.GetPeer32(), connectionSide, wasCE132, err.Error())
 		return fmt.Errorf("openStream failed: %w", err)
 	}
 	defer stream.Close()
 
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
+		// Telemetry: Ticket transfer failed (event 83)
+		p.node.telemetryClient.TicketTransferFailed(p.GetPeer32(), connectionSide, wasCE132, err.Error())
 		return fmt.Errorf("sendQuicBytes failed: %w", err)
 	}
 
+	p.node.telemetryClient.TicketTransferred(p.GetPeer32(), connectionSide, wasCE132, epoch, t.Attempt, vrfOutput)
 	return nil
 }
 
 func (n *Node) onTicketDistribution(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16, msgType uint8) error {
 	defer stream.Close()
+
+	wasCE132 := (msgType == CE132_TicketDistribution)
+	connectionSide := byte(1) // Remote is sender
+
 	var newReq JAMSNPTicketDistribution
 	// Deserialize byte array back into the struct
 	if err := newReq.FromBytes(msg); err != nil {
+		// Telemetry: Ticket transfer failed (event 83)
+		n.telemetryClient.TicketTransferFailed(n.PeerID32(peerID), connectionSide, wasCE132, err.Error())
 		return fmt.Errorf("onTicketDistribution: failed to decode ticket distribution: %w %d", err, peerID)
 	}
 
@@ -137,6 +158,11 @@ func (n *Node) onTicketDistribution(ctx context.Context, stream quic.Stream, msg
 	var ticket types.Ticket
 	ticket.Attempt = newReq.Attempt
 	ticket.Signature = newReq.Signature
+
+	// Extract VRF output (placeholder for now)
+	var vrfOutput [32]byte
+	// TODO: Extract actual VRF output from ticket signature
+
 	if !n.GetIsSync() {
 		return nil
 	}
@@ -164,5 +190,8 @@ func (n *Node) onTicketDistribution(ctx context.Context, stream quic.Stream, msg
 		// IMPORTANT: avoid blocking if ticketsCh full
 		log.Warn(log.Node, "onTicketDistribution: tickets channel full, dropped ticket")
 	}
+
+	// Telemetry: Ticket transferred (event 84) - receiving side
+	n.telemetryClient.TicketTransferred(n.PeerID32(peerID), connectionSide, wasCE132, newReq.Epoch, newReq.Attempt, vrfOutput)
 	return nil
 }

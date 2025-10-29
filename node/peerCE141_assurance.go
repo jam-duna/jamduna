@@ -4,13 +4,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
-
-	"io"
 )
 
 /*
@@ -82,7 +81,7 @@ func (assurance *JAMSNPAssuranceDistribution) FromBytes(data []byte) error {
 
 // SendAssurance sends an assurance to the peer
 // variadic kv is used to pass key-value pairs to telemetry
-func (p *Peer) SendAssurance(ctx context.Context, a *types.Assurance, kv ...interface{}) error {
+func (p *Peer) SendAssurance(ctx context.Context, a *types.Assurance, eventID uint64) error {
 	req := &JAMSNPAssuranceDistribution{
 		Anchor:    a.Anchor,
 		Bitfield:  a.Bitfield,
@@ -95,22 +94,22 @@ func (p *Peer) SendAssurance(ctx context.Context, a *types.Assurance, kv ...inte
 	}
 
 	code := uint8(CE141_AssuranceDistribution)
-
-	if p.node.store.SendTrace {
-		tracer := p.node.store.Tp.Tracer("NodeTracer")
-		_, span := tracer.Start(ctx, fmt.Sprintf("[N%d] SendAssurance", p.node.store.NodeID))
-		defer span.End()
-	}
-
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
+		// Telemetry: Assurance send failed (event 127)
+		p.node.telemetryClient.AssuranceSendFailed(eventID, p.GetPeer32(), err.Error())
 		return fmt.Errorf("openStream[CE141_AssuranceDistribution]: %w", err)
 	}
 	defer stream.Close()
 
 	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
+		// Telemetry: Assurance send failed (event 127)
+		p.node.telemetryClient.AssuranceSendFailed(eventID, p.GetPeer32(), err.Error())
 		return fmt.Errorf("sendQuicBytes[CE141_AssuranceDistribution]: %w", err)
 	}
+
+	// Telemetry: Assurance sent (event 128)
+	p.node.telemetryClient.AssuranceSent(eventID, p.GetPeer32())
 
 	return nil
 }
@@ -120,8 +119,13 @@ func (n *Node) onAssuranceDistribution(ctx context.Context, stream quic.Stream, 
 
 	var newReq JAMSNPAssuranceDistribution
 	if err := newReq.FromBytes(msg); err != nil {
+		// Telemetry: Assurance receive failed (event 130)
+		n.telemetryClient.AssuranceReceiveFailed(n.PeerID32(peerID), err.Error())
 		return fmt.Errorf("onAssuranceDistribution: failed to decode message: %w", err)
 	}
+
+	// Telemetry: Assurance received (event 131)
+	n.telemetryClient.AssuranceReceived(n.PeerID32(peerID), newReq.Anchor)
 
 	assurance := types.Assurance{
 		Anchor:         newReq.Anchor,

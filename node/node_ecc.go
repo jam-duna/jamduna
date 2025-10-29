@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/storage"
+	storage "github.com/colorfulnotion/jam/storage"
 )
 
 func (n *NodeContent) GetStorage() (*storage.StateDBStorage, error) {

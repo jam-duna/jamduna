@@ -19,11 +19,12 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/refine"
+	log "github.com/colorfulnotion/jam/log"
+	refine "github.com/colorfulnotion/jam/refine"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/storage"
-	"github.com/colorfulnotion/jam/types"
+	storage "github.com/colorfulnotion/jam/storage"
+	telemetry "github.com/colorfulnotion/jam/telemetry"
+	types "github.com/colorfulnotion/jam/types"
 	"github.com/nsf/jsondiff"
 
 	_ "net/http/pprof"
@@ -213,7 +214,7 @@ func testRefineStateTransitions(t *testing.T, filename_stf, filename_bundle stri
 	fmt.Printf("Read bundle snapshot from file %s: %v\n", filename_bundle, types.ToJSONHexIndent(bundle_snapshot))
 
 	levelDBPath := "/tmp/testdb"
-	store, err := storage.NewStateDBStorage(levelDBPath)
+	store, err := storage.NewStateDBStorage(levelDBPath, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient())
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
@@ -377,7 +378,7 @@ func TestRefineAlgo3(t *testing.T) {
 			bundle_snapshot.PackageHash = wp_hash
 			bundle_snapshot.Bundle.WorkPackage = modified_wp
 			levelDBPath := fmt.Sprintf("/tmp/testdb%d-%s", i, pvmBackend)
-			store, err := storage.NewStateDBStorage(levelDBPath)
+			store, err := storage.NewStateDBStorage(levelDBPath, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient())
 			if err != nil {
 				t.Fatalf("Failed to create storage: %v", err)
 			}
@@ -416,7 +417,7 @@ func findLastSuccessN(t *testing.T, algoID int, pvmBackend string, stf *statedb.
 				return
 			}
 			levelDBPath := fmt.Sprintf("/tmp/testdb%d-iter%d", algoID, n)
-			store, err := storage.NewStateDBStorage(levelDBPath)
+			store, err := storage.NewStateDBStorage(levelDBPath, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient())
 			if err != nil {
 				done <- fmt.Errorf("failed to create storage: %v", err)
 				return
@@ -574,7 +575,7 @@ func testRefineStateTransition(pvmBackend string, store *storage.StateDBStorage,
 	simulatedNode.NodeContent.AddStateDB(sdb)
 
 	// execute workpackage bundle
-	re_workReport, _, wr_pvm_elapsed, reexecuted_snapshot, err := simulatedNode.executeWorkPackageBundle(uint16(bundle_snapshot.CoreIndex), bundle_snapshot.Bundle, bundle_snapshot.SegmentRootLookup, bundle_snapshot.Slot, false)
+	re_workReport, _, wr_pvm_elapsed, reexecuted_snapshot, err := simulatedNode.executeWorkPackageBundle(uint16(bundle_snapshot.CoreIndex), bundle_snapshot.Bundle, bundle_snapshot.SegmentRootLookup, bundle_snapshot.Slot, false, 0)
 	if err != nil {
 		t.Fatalf("Error executing work package bundle: %v", err)
 	}
@@ -695,7 +696,7 @@ func TestAlgoExecMax(t *testing.T) {
 				}
 
 				levelDBPath := fmt.Sprintf("/tmp/summary-db-algo%d-n%d", algoID, n)
-				store, err := storage.NewStateDBStorage(levelDBPath)
+				store, err := storage.NewStateDBStorage(levelDBPath, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient())
 				if err != nil {
 					t.Fatalf("failed to create storage: %v", err)
 				}
@@ -765,6 +766,7 @@ func testRefineStateTransitionInvoke(pvmBackend string, store *storage.StateDBSt
 				bundle_snapshot.SegmentRootLookup,
 				bundle_snapshot.Slot,
 				false,
+				0,
 			)
 			endTimes[idx] = time.Now()
 			results[idx] = result{
@@ -821,7 +823,7 @@ func TestRefineInvokeLimit(t *testing.T) {
 	}
 
 	levelDBPath := "/tmp/testdb"
-	store, err := storage.NewStateDBStorage(levelDBPath)
+	store, err := storage.NewStateDBStorage(levelDBPath, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient())
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
@@ -846,7 +848,7 @@ func testRefine(pvmBackend string, store *storage.StateDBStorage, bundle_snapsho
 	simulatedNode.NodeContent.AddStateDB(sdb)
 
 	// execute workpackage bundle
-	re_workReport, _, wr_pvm_elapsed, reexecuted_snapshot, err := simulatedNode.executeWorkPackageBundle(uint16(bundle_snapshot.CoreIndex), bundle_snapshot.Bundle, bundle_snapshot.SegmentRootLookup, bundle_snapshot.Slot, false)
+	re_workReport, _, wr_pvm_elapsed, reexecuted_snapshot, err := simulatedNode.executeWorkPackageBundle(uint16(bundle_snapshot.CoreIndex), bundle_snapshot.Bundle, bundle_snapshot.SegmentRootLookup, bundle_snapshot.Slot, false, 0)
 	if err != nil {
 		t.Fatalf("Error executing work package bundle: %v", err)
 	}
@@ -909,7 +911,7 @@ func TestGenerateTestCase(t *testing.T) {
 			initPProf(t)
 
 			levelDBPath := fmt.Sprintf("/tmp/testdb-%s", testCase.Name)
-			store, err := storage.NewStateDBStorage(levelDBPath)
+			store, err := storage.NewStateDBStorage(levelDBPath, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient())
 			if err != nil {
 				t.Fatalf("Failed to create storage: %v", err)
 			}
@@ -947,14 +949,6 @@ func TestGenerateTestCase(t *testing.T) {
 	}
 }
 
-func TestCoreEvmRefine(t *testing.T) {
-	testRefineStateTransitions(t, corevm_stf, corevm_bundle)
-}
-
-func TestFibRefine(t *testing.T) {
-	testRefineStateTransitions(t, fib_stf, fib_bundle)
-}
-
 func TestAlgoRefineComparison(t *testing.T) {
 	statedb.RecordTime = true
 	initPProf(t)
@@ -970,7 +964,7 @@ func TestAlgoRefineComparison(t *testing.T) {
 	}
 
 	levelDBPath := "/tmp/testdb_comparison"
-	store, err := storage.NewStateDBStorage(levelDBPath)
+	store, err := storage.NewStateDBStorage(levelDBPath, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient())
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}

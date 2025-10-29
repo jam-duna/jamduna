@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -134,7 +134,7 @@ func parseSTFFile(filename, content string) (StateTransition, error) {
 func TestStateTransitionInterpreter(t *testing.T) {
 	PvmLogging = false
 
-	filename := path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy/00000004.bin")
+	filename := path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light/00000060.bin")
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
@@ -159,7 +159,6 @@ func TestTracesInterpreter(t *testing.T) {
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy"),
 	}
 	// Iterate over each directory.
 	for _, dir := range testDirs {
@@ -204,13 +203,12 @@ func TestTracesRecompiler(t *testing.T) {
 
 	// Define all the directories you want to test in a single slice.
 	testDirs := []string{
-		path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
+		//path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
+		//path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy"),
 	}
 
 	// Iterate over each directory.
@@ -269,27 +267,13 @@ func dump_performance(t *testing.T) {
 func TestSingleCompare(t *testing.T) {
 	// DO NOT CHANGE THIS
 	log.InitLogger("debug")
-	PvmLogging = false
-	filename := "/Users/zhongxuanyou/Documents/GitHub/jam-test-vectors/traces/fuzzy/00000170.bin"
+	filename := "/root/go/src/github.com/jam-duna/majik-test-vectors/traces/storage_light/00000008.bin"
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Errorf("failed to read file %s: %v", filename, err)
 	}
 	// runSingleSTFTest(t, filename, string(content), BackendCompiler, false)
 	runSingleSTFTest(t, filename, string(content), BackendInterpreter, false)
-	// runSingleSTFTest(t, filename, string(content), BackendCompilerC, false)
-}
-func TestSingleRecompilerGo(t *testing.T) {
-	// DO NOT CHANGE THIS
-	log.InitLogger("debug")
-	filename := "/root/go/src/github.com/colorfulnotion/jam-test-vectors/traces/fuzzy/00000163.bin"
-	content, err := os.ReadFile(filename)
-	if err != nil {
-		t.Errorf("failed to read file %s: %v", filename, err)
-	}
-	// runSingleSTFTest(t, filename, string(content), BackendCompiler, false)
-	// runSingleSTFTest(t, filename, string(content), BackendInterpreter, false)
-	runSingleSTFTest(t, filename, string(content), BackendCompiler, false)
 }
 
 func GetFuzzReportsPath(subDir ...string) (string, error) {
@@ -346,7 +330,7 @@ func findFuzzTestFiles(sourcePath, targetVersion string, excludedTeams []string)
 	return testFiles, nil
 }
 
-func TestSingleFuzzTraceGo(t *testing.T) {
+func TestSingleFuzzTrace(t *testing.T) {
 
 	fileMap := make(map[string]string)
 
@@ -366,13 +350,14 @@ func TestSingleFuzzTraceGo(t *testing.T) {
 	fileMap["1758708840"] = "fuzz-reports/0.7.0/traces/_new2/1758708840/00000958.json" // SKIP for now
 
 	PvmLogging = true
-	DebugHostFunctions = true
+	//	DebugHostFunctions = true
 	log.InitLogger("debug")
 	// log.EnableModule(log.PvmAuthoring)
 	// log.EnableModule("pvm_validator")
 	log.EnableModule(log.SDB)
 
-	tc := []string{"1757862468", "1757862472", "1757841566", "1757843609", "1757843719", "1757843735"}
+	tc := []string{"1758621171"}
+	PvmLogging = false
 	for _, team := range tc {
 		filename, exists := fileMap[team]
 		if !exists {
@@ -387,9 +372,9 @@ func TestSingleFuzzTraceGo(t *testing.T) {
 		}
 
 		t.Run(filepath.Base(filename), func(t *testing.T) {
-			runSingleSTFTest(t, filename, string(content), BackendCompiler, true)
+			runSingleSTFTest(t, filename, string(content), BackendInterpreter, true)
 		})
-	} //1056616417
+	}
 }
 
 func testFuzzTraceInternal(t *testing.T, saveOutput bool) {

@@ -1,12 +1,11 @@
 package node
 
 import (
-	"context"
 	"fmt"
 
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/types"
+	types "github.com/colorfulnotion/jam/types"
 )
 
 func (n *Node) processTicket(ticket types.Ticket) error {
@@ -45,14 +44,6 @@ func (n *Node) processAssurance(assurance types.Assurance) error {
 	}
 
 	// store it into extrinsic pool
-	// TODO: add tracer event
-	if n.store.SendTrace {
-		tracer := n.store.Tp.Tracer("NodeTracer")
-		_, span := tracer.Start(context.Background(), fmt.Sprintf("[N%d] AddAssuranceToPool", n.store.NodeID))
-		// n.UpdateAssuranceContext(ctx)
-		defer span.End()
-	}
-
 	err := n.extrinsic_pool.AddAssuranceToPool(assurance)
 	if err != nil {
 		log.Error(log.A, "processAssurance:AddAssuranceToPool", "err", err)

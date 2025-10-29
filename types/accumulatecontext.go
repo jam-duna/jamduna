@@ -251,8 +251,8 @@ const (
 
 type AccumulateInput struct {
 	InputType uint8
-	T         *DeferredTransfer          `json:"transfer,omitempty"`   // when InputType == 0
-	A         *AccumulateOperandElements `json:"accumulate,omitempty"` // when InputType == 1
+	T         *DeferredTransfer          `json:"transfer,omitempty"`   // when InputType == 1
+	A         *AccumulateOperandElements `json:"accumulate,omitempty"` // when InputType == 0
 }
 
 func (a AccumulateInput) Encode() []byte {
@@ -268,13 +268,13 @@ func (a AccumulateInput) Encode() []byte {
 
 // The accumulation operand element, corresponding to a single work item information
 type AccumulateOperandElements struct {
-	WorkPackageHash     common.Hash `json:"H"` // p = (w_s)_p WorkPackageHash
-	ExportedSegmentRoot common.Hash `json:"E"` // e = (w_s)_e ExportedSegmentRoot
-	AuthorizerHash      common.Hash `json:"A"` // a = w_a AuthorizerHash
-	PayloadHash         common.Hash `json:"Y"` // y = r_y PayloadHash
-	Gas                 uint        `json:"G"` // g = r_g Gas
-	Result              Result      `json:"D"` // l = r_l Result
-	Trace               []byte      `json:"O"` // t = w_t Trace
+	WorkPackageHash     common.Hash `json:"workPackageHash"`     // p = (w_s)_p WorkPackageHash
+	ExportedSegmentRoot common.Hash `json:"exportedSegmentRoot"` // e = (w_s)_e ExportedSegmentRoot
+	AuthorizerHash      common.Hash `json:"authorizerHash"`      // a = w_a AuthorizerHash
+	PayloadHash         common.Hash `json:"payloadHash"`         // y = r_y PayloadHash
+	Gas                 uint        `json:"gas"`                 // g = r_g Gas
+	Result              Result      `json:"result"`              // l = r_l Result
+	Trace               []byte      `json:"trace"`               // t = w_t Trace
 }
 
 func (a *AccumulateOperandElements) String() string {
@@ -337,13 +337,13 @@ func (a *DeferredTransfer) String() string {
 
 func DecodedWrangledResults(o *AccumulateOperandElements) string {
 	aux := struct {
-		WorkPackageHash     common.Hash `json:"H"`
-		ExportedSegmentRoot common.Hash `json:"E"`
-		AuthorizerHash      common.Hash `json:"A"`
-		PayloadHash         common.Hash `json:"Y"`
-		Gas                 uint        `json:"G"`
-		D                   string      `json:"D"`
-		Trace               string      `json:"O"`
+		WorkPackageHash     common.Hash `json:"workPackageHash"`
+		ExportedSegmentRoot common.Hash `json:"exportedSegmentRoot"`
+		AuthorizerHash      common.Hash `json:"authorizerHash"`
+		PayloadHash         common.Hash `json:"payloadHash"`
+		Gas                 uint        `json:"gas"`
+		Result              string      `json:"result"`
+		Trace               string      `json:"trace"`
 	}{
 		WorkPackageHash:     o.WorkPackageHash,
 		ExportedSegmentRoot: o.ExportedSegmentRoot,
@@ -354,7 +354,7 @@ func DecodedWrangledResults(o *AccumulateOperandElements) string {
 	}
 
 	ResultBytes, _ := Encode(o.Result)
-	aux.D = fmt.Sprintf("0x%x", ResultBytes)
+	aux.Result = fmt.Sprintf("0x%x", ResultBytes)
 	enc, err := json.Marshal(aux)
 	if err != nil {
 		return fmt.Sprintf("Error marshaling JSON: %v", err)

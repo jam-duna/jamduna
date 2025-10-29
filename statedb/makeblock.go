@@ -6,7 +6,7 @@ import (
 	"sort"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -99,7 +99,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 			if AcceptableGuaranteeError(err) {
 				// don't remove from pool if ErrGFutureReportSlot, ErrGCoreEngaged
 			} else {
-				extrinsic_pool.RemoveOldGuarantees(g)
+				extrinsic_pool.RemoveOldGuarantees(g, types.GuaranteeDiscardReasonCannotReportOnChain)
 			}
 			continue
 		} else {
@@ -117,11 +117,11 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 	p_c := make(map[uint16]bool)
 	for _, g := range valid {
 		if err := s.checkRecentWorkPackage(g, valid); err != nil {
-			extrinsic_pool.RemoveOldGuarantees(g)
+			extrinsic_pool.RemoveOldGuarantees(g, types.GuaranteeDiscardReasonCannotReportOnChain)
 			continue
 		}
 		if err := s.checkPrereq(g, valid); err != nil {
-			extrinsic_pool.RemoveOldGuarantees(g)
+			extrinsic_pool.RemoveOldGuarantees(g, types.GuaranteeDiscardReasonCannotReportOnChain)
 			continue
 		}
 		wph := g.Report.GetWorkPackageHash()
@@ -134,7 +134,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 
 			final = append(final, g)
 		} else {
-			extrinsic_pool.RemoveOldGuarantees(g)
+			extrinsic_pool.RemoveOldGuarantees(g, types.GuaranteeDiscardReasonReplacedByBetter)
 		}
 	}
 	sort.Slice(final, func(i, j int) bool {

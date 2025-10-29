@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/trie"
+	log "github.com/colorfulnotion/jam/log"
+	trie "github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -279,7 +279,7 @@ func (n *NodeContent) GetMeta_Guarantor(erasureRoot common.Hash) (bClubs []commo
 	return
 }
 
-func (n *NodeContent) StoreMeta_Guarantor(as *types.AvailabilitySpecifier, d AvailabilitySpecifierDerivation) {
+func (n *NodeContent) StoreBundleSpecSegments(as *types.AvailabilitySpecifier, d AvailabilitySpecifierDerivation, b types.WorkPackageBundle, segments [][]byte) {
 	erasure_root_u := as.ErasureRoot
 	erasure_bKey := fmt.Sprintf("erasureBChunk-%v", erasure_root_u)
 	bChunkJson, _ := json.Marshal(d.BundleChunks)
@@ -297,6 +297,23 @@ func (n *NodeContent) StoreMeta_Guarantor(as *types.AvailabilitySpecifier, d Ava
 	sClubsJson, _ := json.Marshal(d.SClubs)
 
 	n.WriteRawKV(erasure_sClubsKey, sClubsJson)
+
+	// store bundle for CE 148
+	erasure_bundleKey := fmt.Sprintf("erasureBundle-%v", erasure_root_u)
+	if err := n.WriteRawKV(erasure_bundleKey, b.Bytes()); err != nil {
+		log.Warn(log.Node, "StoreBundleSpecSegments: failed to persist bundle", "erasureRoot", erasure_root_u, "err", err)
+	}
+
+	// store segments for CE 147
+	segmentsKey := fmt.Sprintf("erasureSegments-%v", as.ExportedSegmentRoot)
+	encodedSegments, err := types.Encode(segments)
+	if err != nil {
+		log.Error(log.Node, "StoreBundleSpecSegments: failed to encode segments", "erasureRoot", erasure_root_u, "err", err)
+		return
+	}
+	if err := n.WriteRawKV(segmentsKey, encodedSegments); err != nil {
+		log.Warn(log.Node, "StoreBundleSpecSegments: failed to persist segments", "segmentsRoot", as.ExportedSegmentRoot, "err", err)
+	}
 }
 
 func generateErasureRootShardIdxKey(section string, erasureRoot common.Hash, shardIndex uint16) string {
@@ -670,12 +687,12 @@ func (si *SpecIndex) AddIndex(idx uint16) bool {
 
 // Look up the erasureRoot, exportedSegmentRoot, workpackageHash for either kind of hash: segment root OR workPackageHash
 func (n *NodeContent) WorkReportSearch(h common.Hash) (si *SpecIndex) {
-
 	// scan through recentblocks
 
 	wrBytes, ok, err := n.ReadRawKV([]byte(generateSpecKey(h)))
 	if err != nil || !ok {
 		log.Error(log.DA, "ErasureRootLookUP", "err", err)
+		panic(1234)
 		return nil
 	}
 

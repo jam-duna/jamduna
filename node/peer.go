@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
+	telemetry "github.com/colorfulnotion/jam/telemetry"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 
@@ -35,12 +37,14 @@ const (
 	CE143_PreimageRequest              = 143
 	CE144_AuditAnnouncement            = 144
 	CE145_JudgmentPublication          = 145
-	CE192_VoteMessage                  = 192
-	CE193_CommitMessage                = 193
-	CE194_NeighborMessage              = 194
-	CE195_Catchup                      = 195
-	CE224_BLSSignature                 = 224
-	CE225_BLSAggregateSignature        = 225
+	CE146_VoteMessage                  = 146
+	CE147_BundleRequest                = 147
+	CE148_SegmentRequest               = 148
+	CE149_Catchup                      = 149
+	CE150_CommitMessage                = 150
+	CE151_NeighborMessage              = 151
+	CE152_BLSSignature                 = 152
+	CE153_BLSAggregateSignature        = 153
 
 	useQuicDeadline = false
 )
@@ -86,6 +90,10 @@ func NewPeer(n *Node, validatorIndex uint16, validator types.Validator, peerAddr
 	return p
 }
 
+func (p *Peer) GetPeer32() [32]byte {
+	return [32]byte(p.Validator.Ed25519)
+}
+
 func (p *Peer) AddKnownHash(h common.Hash) {
 	p.knownHashes = append(p.knownHashes, h)
 	if len(p.knownHashes) > 128 {
@@ -112,6 +120,21 @@ func (p *Peer) openStream(ctx context.Context, code uint8) (quic.Stream, error) 
 
 	var err error
 	if p.conn == nil {
+		var (
+			eventID             uint64
+			telemetryConnecting bool
+		)
+		host, port, splitErr := net.SplitHostPort(p.PeerAddr)
+		if splitErr != nil {
+			log.Warn(log.Node, "openStream: failed to split peer address", "peerAddr", p.PeerAddr, "err", splitErr)
+		} else if addrBytes, portNum, parseErr := telemetry.ParseTelemetryAddress(host, port); parseErr != nil {
+			log.Warn(log.Node, "openStream: failed to parse peer address for telemetry", "peerAddr", p.PeerAddr, "err", parseErr)
+		} else {
+			eventID = p.node.telemetryClient.GetEventID()
+			p.node.telemetryClient.ConnectingOut(p.GetPeer32(), addrBytes, portNum)
+			telemetryConnecting = true
+		}
+
 		dialCtx := ctx
 		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 			var cancel context.CancelFunc
@@ -124,10 +147,16 @@ func (p *Peer) openStream(ctx context.Context, code uint8) (quic.Stream, error) 
 			if err.Error() != "Context cancelled" {
 				log.Error(log.Node, "DialAddr failed", "node", p.node.id, "peerID", p.PeerID, "err", err)
 			}
+			if telemetryConnecting {
+				p.node.telemetryClient.ConnectOutFailed(eventID, err.Error())
+			}
 			return nil, fmt.Errorf("[P%d] DialAddr failed: %w", p.PeerID, err)
 		} else {
 			go p.node.nodeSelf.handleConnection(conn)
 			p.conn = conn
+			if telemetryConnecting {
+				p.node.telemetryClient.ConnectedOut(eventID)
+			}
 		}
 	}
 
@@ -340,25 +369,25 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		return n.onFullShardRequest(ctx, stream, msg)
+		return n.onFullShardRequest(ctx, stream, msg, peerID)
 	case CE138_BundleShardRequest:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		return n.onBundleShardRequest(ctx, stream, msg)
+		return n.onBundleShardRequest(ctx, stream, msg, peerID)
 	case CE139_SegmentShardRequest:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		return n.onSegmentShardRequest(ctx, stream, msg, false)
+		return n.onSegmentShardRequest(ctx, stream, msg, false, peerID)
 	case CE140_SegmentShardRequestP:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		return n.onSegmentShardRequest(ctx, stream, msg, true)
+		return n.onSegmentShardRequest(ctx, stream, msg, true, peerID)
 	case CE141_AssuranceDistribution:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
@@ -381,17 +410,29 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 			return nil
 		}
 		return n.onJudgmentPublication(ctx, stream, msg, peerID)
-	case CE192_VoteMessage:
+	case CE147_BundleRequest:
+		if !n.GetIsSync() {
+			n.AbortStream(stream, ErrStateNotSynced)
+			return nil
+		}
+		return n.onBundleRequest(ctx, stream, msg, peerID)
+	case CE148_SegmentRequest:
+		if !n.GetIsSync() {
+			n.AbortStream(stream, ErrStateNotSynced)
+			return nil
+		}
+		return n.onSegmentRequest(ctx, stream, msg, peerID)
+	case CE146_VoteMessage:
 		return n.onVoteMessage(ctx, stream, msg)
-	case CE193_CommitMessage:
+	case CE150_CommitMessage:
 		return n.onCommitMessage(ctx, stream, msg)
-	case CE194_NeighborMessage:
+	case CE151_NeighborMessage:
 		//return n.onNeighborMessage(ctx, stream, msg)
-	case CE195_Catchup:
-		//return n.onCatchup(ctx, stream, msg)
-	case CE224_BLSSignature:
+	case CE149_Catchup:
+		return n.onCatchUpRequest(ctx, stream, msg, peerID)
+	case CE152_BLSSignature:
 		//return n.onBLSSignature(ctx, stream, msg)
-	case CE225_BLSAggregateSignature:
+	case CE153_BLSAggregateSignature:
 		//return n.onBLSAggregateSignature(ctx, stream, msg)
 	default:
 		return errors.New("unknown message type")

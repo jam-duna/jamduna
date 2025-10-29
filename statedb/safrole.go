@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/colorfulnotion/jam/bandersnatch"
-	"github.com/colorfulnotion/jam/log"
+	bandersnatch "github.com/colorfulnotion/jam/bandersnatch"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 
 	"encoding/json"
@@ -16,7 +16,7 @@ import (
 	"sync"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/jamerrors"
+	jamerrors "github.com/colorfulnotion/jam/jamerrors"
 )
 
 type SafroleHeader struct {

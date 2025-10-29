@@ -10,7 +10,8 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
+	telemetry "github.com/colorfulnotion/jam/telemetry"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -73,11 +74,6 @@ func (pkg *JAMSNPWorkPackage) FromBytes(data []byte) error {
 }
 
 func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPackage, extrinsics types.ExtrinsicsBlobs, core_idx uint16) (err error) {
-	if pkg.RefineContext.LookupAnchorSlot == 1 {
-		if len(pkg.RefineContext.Prerequisites) == 0 {
-			// TODO "Prerequisite is empty"
-		}
-	}
 
 	req := JAMSNPWorkPackage{
 		CoreIndex:   core_idx,
@@ -89,11 +85,23 @@ func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPack
 		return err
 	}
 	code := uint8(CE133_WorkPackageSubmission)
+
+	// Telemetry: Work package submission (event 90)
+	EventID := p.node.telemetryClient.GetEventID()
+	wpBytes, _ := types.Encode(pkg)
+	wpOutline := telemetry.WorkPackageOutline{
+		WorkPackageHash: pkg.Hash(),
+		SizeInBytes:     uint32(len(wpBytes)),
+	}
+
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
 		log.Error(log.Node, "SendWorkPackageSubmission0", "err", err)
+		// Telemetry: Work package failed (event 92)
+		p.node.telemetryClient.WorkPackageFailed(EventID, err.Error())
 		return err
 	}
+	p.node.telemetryClient.WorkPackageSubmission(EventID, p.GetPeer32(), wpOutline)
 	slot := common.GetWallClockJCE(fudgeFactorJCE)
 	log.Debug(log.R, "CE133-SendWorkPackageSubmission OUTGOING", "NODE", p.node.id, "peerID", p.PeerID, "coreIndex", core_idx, "slot", slot, "wp_hash", pkg.Hash())
 	//--> Core Index ++ Work Package
@@ -101,6 +109,8 @@ func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPack
 	if err != nil {
 		log.Error(log.Node, "SendWorkPackageSubmission1", "err", err)
 		stream.Close()
+		// Telemetry: Work package failed (event 92)
+		p.node.telemetryClient.WorkPackageFailed(EventID, err.Error())
 		return err
 	}
 
@@ -114,6 +124,8 @@ func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPack
 	if err = sendQuicBytes(ctx, stream, extrinsicsBytes, p.PeerID, code); err != nil {
 		log.Error(log.Node, "SendWorkPackageSubmission Encode", "err", err)
 		stream.Close()
+		// Telemetry: Work package failed (event 92)
+		p.node.telemetryClient.WorkPackageFailed(EventID, err.Error())
 		return
 	}
 	stream.Close()
@@ -122,12 +134,18 @@ func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPack
 
 func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) (err error) {
 	defer stream.Close()
+
+	// Telemetry: Receiving work package submission
+	EventID := n.telemetryClient.GetEventID()
+
 	// --> Core Index ++ Work Package
 	var newReq JAMSNPWorkPackage
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)
 	if err != nil {
 		log.Error(log.G, "onWorkPackageSubmission:FromBytes", "err", err)
+		// Telemetry: Work package failed (event 92)
+		n.telemetryClient.WorkPackageFailed(EventID, err.Error())
 		return fmt.Errorf("onWorkPackageSubmission: decode failed: %w", err)
 	}
 	// --> [Extrinsic] (Message length should equal sum of extrinsic data lengths)
@@ -150,7 +168,7 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 			break
 		}
 	}
-	allowPrevAssignments := false // if this was true then inSet would always be true in tiny.
+	allowPrevAssignments := true // Allow work packages from previous epoch assignments during transitions
 	if allowPrevAssignments {
 		for _, assignment := range prevAssignments {
 			if assignment.CoreIndex == newReq.CoreIndex && types.Ed25519Key(assignment.Validator.Ed25519.PublicKey()) == n.GetEd25519Key() {
@@ -183,8 +201,24 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 		return fmt.Errorf("error in decoding data: %w", err)
 	}
 
+	// Verify extrinsic data consistency with work package extrinsic hashes
+	if len(newReq.WorkPackage.WorkItems) > 0 {
+		if err := newReq.WorkPackage.WorkItems[0].CheckExtrinsics(extrinsics); err != nil {
+			log.Error(log.Node, "onWorkPackageSubmission: extrinsic verification failed", "err", err)
+			return fmt.Errorf("extrinsic data inconsistent with hashes: %w", err)
+		}
+	}
+
+	// Telemetry: Extrinsic data received and verified (event 96)
+	n.telemetryClient.ExtrinsicDataReceived(EventID)
+
 	s := n.statedb
 	workPackageHash := newReq.WorkPackage.Hash()
+
+	if _, loaded := n.seenWorkPackages.LoadOrStore(workPackageHash, struct{}{}); loaded {
+		n.telemetryClient.DuplicateWorkPackage(EventID, newReq.CoreIndex, workPackageHash)
+		return nil
+	}
 
 	// Respect context cancellation early if already expired
 	select {
@@ -204,6 +238,14 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 		}
 	}
 
+	// Telemetry: Work package received (event 94)
+	wpBytes, _ := types.Encode(newReq.WorkPackage)
+	wpOutline := telemetry.WorkPackageOutline{
+		WorkPackageHash: newReq.WorkPackage.Hash(),
+		SizeInBytes:     uint32(len(wpBytes)),
+	}
+	n.telemetryClient.WorkPackageReceived(EventID, wpOutline)
+
 	// Only the FIRST guarantor will receive this
 	n.workPackageQueue.Store(workPackageHash, &WPQueueItem{
 		workPackage:        newReq.WorkPackage,
@@ -212,6 +254,7 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 		addTS:              time.Now().Unix(),
 		nextAttemptAfterTS: time.Now().Unix(),
 		slot:               slot,
+		eventID:            EventID,
 	})
 
 	return nil

@@ -6,13 +6,13 @@ import (
 	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 )
 
 // WorkPackageBundle represents a work package.
 type WorkPackageBundle struct {
 	WorkPackage       WorkPackage       `json:"work_package"`    // P: workPackage
-	ExtrinsicData     ExtrinsicsBlobs   `json:"extrinsics"`      // X: extrinsic data for some workitem argument w
+	ExtrinsicData     []ExtrinsicsBlobs `json:"extrinsics"`      // X: extrinsic data for each workitem
 	ImportSegmentData [][][]byte        `json:"import_segments"` // M: import segment data, previouslly called m (each of segment is size of W_G)
 	Justification     [][][]common.Hash `json:"justifications"`  // J: justifications of segment data build using CDT
 }
@@ -127,14 +127,16 @@ func DecodeBundle(remaining []byte) (*WorkPackageBundle, uint32, error) {
 	// Create a new WorkPackageBundle
 	bundle := &WorkPackageBundle{
 		WorkPackage:       wp,
-		ExtrinsicData:     make(ExtrinsicsBlobs, 0),
+		ExtrinsicData:     make([]ExtrinsicsBlobs, len(wp.WorkItems)),
 		ImportSegmentData: make([][][]byte, len(wp.WorkItems)),
 		Justification:     make([][][]common.Hash, len(wp.WorkItems)),
 	}
 	// Decode the extrinsic data using *work items*
-	for _, wpItem := range wp.WorkItems {
+	for workItemIndex, wpItem := range wp.WorkItems {
 		extrinsics := wpItem.Extrinsics
+		workItemExtrinsics := make(ExtrinsicsBlobs, 0)
 		if len(extrinsics) == 0 {
+			bundle.ExtrinsicData[workItemIndex] = workItemExtrinsics
 			continue
 		}
 		for _, x := range extrinsics {
@@ -147,10 +149,11 @@ func DecodeBundle(remaining []byte) (*WorkPackageBundle, uint32, error) {
 			if len(remaining) < int(l) {
 				return nil, length, fmt.Errorf("not enough data for extrinsic %s", h)
 			}
-			bundle.ExtrinsicData = append(bundle.ExtrinsicData, remaining[:l])
+			workItemExtrinsics = append(workItemExtrinsics, remaining[:l])
 			length += uint32(l)
 			remaining = remaining[l:]
 		}
+		bundle.ExtrinsicData[workItemIndex] = workItemExtrinsics
 	}
 
 	// Decode the imported segment data using *work items*
@@ -196,11 +199,13 @@ func (b *WorkPackageBundle) Bytes() []byte {
 		return nil
 	}
 	// Append the extrinsic data
-	for _, extrinsic := range b.ExtrinsicData {
-		if len(extrinsic) == 0 {
-			continue
+	for _, workItemExtrinsics := range b.ExtrinsicData {
+		for _, extrinsic := range workItemExtrinsics {
+			if len(extrinsic) == 0 {
+				continue
+			}
+			encode = append(encode, extrinsic...)
 		}
-		encode = append(encode, extrinsic...)
 	}
 	// Append the import segment data
 	for _, wpItemSegments := range b.ImportSegmentData {

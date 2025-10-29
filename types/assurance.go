@@ -6,7 +6,7 @@ import (
 	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/jamerrors"
+	jamerrors "github.com/colorfulnotion/jam/jamerrors"
 )
 
 /*

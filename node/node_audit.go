@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
-	"github.com/colorfulnotion/jam/bandersnatch"
+	bandersnatch "github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/types"
+	types "github.com/colorfulnotion/jam/types"
 )
 
 // initial setup for audit, require auditdb, announcement, and judgement (need mutex)
@@ -688,23 +689,17 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	}
 
 	n.workReportsMutex.Unlock()
+
 	spec := workReport.AvailabilitySpec
-	workPackageHash := spec.WorkPackageHash
-	coreIndex := workReport.CoreIndex
-
-	// now call C138 to get bundle_shard from C assurers, do ec reconstruction for b
-	// IMPORTANT: within reconstructPackageBundleSegments is a call to VerifyBundle
-	workPackageBundle, err := n.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength, workReport.SegmentRootLookup, coreIndex, spec.ExportedSegmentLength)
+	// TODO: need original 3 guarantors of headerHash
+	guarantors := n.getGuarantorsByHeaderHash(headerHash)
+	workPackageBundle, err := n.fetchWorkPackageBundle(spec, workReport.SegmentRootLookup, workReport.CoreIndex, guarantors)
 	if err != nil {
-		log.Error(log.Audit, "FetchWorkPackageBundle:reconstructPackageBundleSegments", "err", err)
-		return
-	}
-	if workPackageBundle.PackageHash() != workPackageHash {
-		log.Error(log.Audit, "auditWorkReport:FetchWorkPackageBundle package mismatch")
+		log.Error(log.Audit, "auditWorkReport:FetchWorkPackageBundle", "err", err)
 		return
 	}
 
-	wr, _, pvmElapsed, bundleSnapshot, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, n.statedb.GetTimeslot(), false)
+	wr, _, pvmElapsed, bundleSnapshot, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, n.statedb.GetTimeslot(), false, 0)
 	if err != nil {
 		return
 	}
@@ -751,6 +746,34 @@ func (n *Node) DistributeJudgements(judges []types.Judgement, headerHash common.
 				"validator", j.Validator)
 		}
 	}
+}
+
+// fetchWorkPackageBundle: fast path from guarantors, then slow path via reconstruction
+func (n *Node) fetchWorkPackageBundle(spec types.AvailabilitySpecifier, segmentRootLookup types.SegmentRootLookup, coreIndex uint, guarantors []uint16) (types.WorkPackageBundle, error) {
+	eventID := n.telemetryClient.GetEventID()
+	// Fast path: Try to fetch bundle from original 3 guarantors with CE148
+	for i, peer := range n.peersInfo {
+		if slices.Contains(guarantors, uint16(i)) {
+			bundle, err := peer.SendBundleRequest(context.Background(), spec.ErasureRoot, eventID)
+			if err != nil {
+				continue
+			}
+			return *bundle, nil
+		}
+	}
+
+	// Slow path: call C138 to get bundle_shard from C assurers, do ec reconstruction for b
+	// IMPORTANT: within reconstructPackageBundleSegments is a call to VerifyBundle
+	workPackageBundle, err := n.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength, segmentRootLookup, coreIndex, spec.ExportedSegmentLength)
+	if err != nil {
+		return types.WorkPackageBundle{}, fmt.Errorf("reconstructPackageBundleSegments failed: %v", err)
+	}
+
+	if workPackageBundle.PackageHash() != spec.WorkPackageHash {
+		return types.WorkPackageBundle{}, fmt.Errorf("package hash mismatch: expected %s, got %s", spec.WorkPackageHash.String(), workPackageBundle.PackageHash().String())
+	}
+
+	return workPackageBundle, nil
 }
 
 // we should have a function to check if the block is audited
@@ -854,6 +877,26 @@ func (n *Node) TraceOldGuarantee(headerHash common.Hash, workpackage_hash common
 		}
 	}
 	return types.Guarantee{}, fmt.Errorf("TraceOldGuarantee: wp %v not found", workpackage_hash)
+}
+
+// getGuarantorsByHeaderHash returns the guarantor validator indices for a given header hash
+func (n *Node) getGuarantorsByHeaderHash(headerHash common.Hash) []uint16 {
+	// Get the StateDB for the specific header hash
+	statedb, ok := n.getStateDBByHeaderHash(headerHash)
+	if !ok {
+		log.Warn(log.Audit, "getGuarantorsByHeaderHash: StateDB not found for header", "headerHash", headerHash)
+		return []uint16{0}
+	}
+
+	// Extract guarantor indices from GuarantorAssignments
+	var guarantors []uint16
+	for _, assignment := range statedb.GuarantorAssignments {
+		// Get validator index using GetCurrValidatorIndex
+		validatorIndex := statedb.GetSafrole().GetCurrValidatorIndex(assignment.Validator.GetEd25519Key())
+		guarantors = append(guarantors, uint16(validatorIndex))
+	}
+	log.Debug(log.Audit, "getGuarantorsByHeaderHash", "headerHash", headerHash, "guarantorCount", len(guarantors), "guarantors", guarantors)
+	return guarantors
 }
 
 // every time we make an announcement, we should broadcast it to the network
