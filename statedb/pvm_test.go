@@ -119,7 +119,15 @@ func recompiler_test(tc TestCase) error {
 	}
 	fmt.Printf("running test: %s\n", tc.Name)
 	hostENV := NewMockHostEnv()
-	rvm := NewRecompilerVM(serviceAcct, rawCodeBytes, tc.InitialRegs, uint64(tc.InitialPC), 4096, hostENV, false, []byte{}, 100000, "recompiler")
+	p := DecodeProgram_pure_pvm_blob(rawCodeBytes)
+	o_size := 0
+	w_size := 0
+	z := 0
+	s := 0
+	o_byte := []byte{}
+	w_byte := make([]byte, w_size)
+
+	rvm := NewRecompilerVM(serviceAcct, tc.InitialRegs, uint64(tc.InitialPC), 4096, hostENV, false, []byte{}, 100000, p, uint32(o_size), uint32(w_size), uint32(z), uint32(s), o_byte, w_byte)
 	// Set the initial memory
 	for _, mem := range tc.InitialMemory {
 		//pvm.Ram.SetPageAccess(mem.Address/PageSize, 1, AccessMode{Readable: false, Writable: true, Inaccessible: false})

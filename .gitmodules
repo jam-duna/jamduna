@@ -1,3 +1,7 @@
 [submodule "services"]
 	path = services
 	url = git@github.com:jam-duna/services.git
+[submodule "pvm"]
+	path = pvm
+	url = git@github.com:jam-duna/pvm.git
+	branch = main

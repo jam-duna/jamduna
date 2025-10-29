@@ -1,61 +1,15 @@
-# Git Submodules Migration Guide for JAM
+# JAM Submodules 
 
-## Overview
-This document provides instructions for converting the `services/` directory into a Git submodule using the same services repository that is used in the majik project. This allows for shared service implementations across different JAM implementations while maintaining independent versioning.
+This documents using the `services` and `pvm` as Git submodule in the JAM project:
 
-## Objectives
-1. Replace the local `services/` directory with the jam-duna/services submodule
-2. Maintain consistency with the majik repository's service implementations
-3. Enable independent development and versioning of services
-4. Allow easy updates from the upstream services repository
+- services: https://github.com/jam-duna/services/
+- pvm: https://github.com/colorfulnotion/jam/issues
 
-## Prerequisites
-- Ensure all local changes in `services/` are committed or backed up
-- Have write access to your jam repository
-- Git version 2.13 or higher (for better submodule support)
-
-## Migration Steps
-
-### Step 1: Backup Current Services (Optional but Recommended)
-```bash
-# Create a backup branch with current services
-cd /Users/sourabhniyogi/Documents/jam
-git checkout -b backup-services-before-submodule
-git add .
-git commit -m "Backup: services directory before submodule migration"
-git checkout main  # or your main branch
-```
-
-### Step 2: Remove Existing Services Directory
-```bash
-# Remove the services directory from git tracking
-git rm -r services/
-git commit -m "Remove services directory to prepare for submodule"
-```
-
-### Step 3: Add Services as Submodule
-```bash
-# Add the jam-duna/services repository as a submodule
-git submodule add git@github.com:jam-duna/services.git services
-git commit -m "Add services as submodule from jam-duna/services"
-```
-
-### Step 4: Initialize and Update Submodule
-```bash
-# Initialize and fetch the submodule content
-git submodule update --init --recursive
-```
-
-### Step 5: Push Changes
-```bash
-# Push the changes to your repository
-git push origin main  # or your branch name
-```
-
-## Working with Submodules
+Submodules can support different JAM implementations working with our EVM/.. services + PVM recompiler.
 
 ### For Fresh Clones
-When someone clones your repository fresh, they need to initialize submodules:
+
+When cloning this repository fresh, initialize submodules:
 ```bash
 git clone git@github.com:colorfulnotion/jam.git
 cd jam
@@ -88,7 +42,7 @@ If you need to make changes to the services:
 
 2. **Create a new branch for your changes:**
    ```bash
-   git checkout -b feature/your-feature-name
+   git checkout -b your-feature-name
    ```
 
 3. **Make your changes and commit:**
@@ -100,7 +54,7 @@ If you need to make changes to the services:
 
 4. **Push to the services repository:**
    ```bash
-   git push origin feature/your-feature-name
+   git push origin your-feature-name
    ```
 
 5. **Create a pull request in the jam-duna/services repository**
@@ -113,55 +67,23 @@ If you need to make changes to the services:
    git commit -m "Update services submodule with new changes"
    ```
 
-## Build System Updates
+## Cheat sheet
 
-### Update Makefile (if needed)
-Add these targets to your Makefile for convenient submodule management:
 
 ```makefile
-.PHONY: init-submodules update-submodules
-
-init-submodules:
-	git submodule update --init --recursive
-
-update-submodules:
-	git submodule update --remote --merge
-
-# Add to your existing build target
-build: init-submodules
-	# Your existing build commands
+make init-submodules
+make update-submodules
 ```
 
-### Update CI/CD Pipeline
-Ensure your CI/CD pipeline initializes submodules:
-
-**GitHub Actions example:**
-```yaml
-- name: Checkout code
-  uses: actions/checkout@v3
-  with:
-    submodules: recursive
-```
-
-**Or manually:**
-```yaml
-- name: Checkout code
-  uses: actions/checkout@v3
-- name: Initialize submodules
-  run: git submodule update --init --recursive
-```
-
-## Common Commands Reference
 
 | Command | Description |
 |---------|-------------|
-| `git submodule status` | Check status of all submodules |
 | `git submodule update --init` | Initialize and update submodules |
 | `git submodule update --remote` | Update submodules to latest remote commits |
+| `git submodule status` | Check status of all submodules |
 | `git submodule foreach git pull origin main` | Pull latest changes in all submodules |
 | `git diff --submodule` | See detailed changes in submodules |
 
-## Troubleshooting
 
 ### Submodule not initialized
 If you see an empty `services/` directory:
@@ -190,13 +112,7 @@ git add services
 git commit
 ```
 
-### Authentication issues
-If you encounter authentication issues with SSH:
-1. Ensure your SSH key is added to GitHub
-2. Test connection: `ssh -T git@github.com`
-3. If using HTTPS, you may need to configure credentials
-
-## Important Notes
+## Important!
 
 1. **Submodule commits are references**: The main repository stores a reference to a specific commit in the submodule, not the actual files.
 
@@ -212,8 +128,3 @@ If you encounter authentication issues with SSH:
 - [jam-duna/services Repository](https://github.com/jam-duna/services)
 - [GitHub: Working with Submodules](https://github.blog/2016-02-01-working-with-submodules/)
 
-## Contact
-
-For issues or questions about the services submodule, please open an issue in the appropriate repository:
-- Services implementation: https://github.com/jam-duna/services/issues
-- JAM integration: https://github.com/colorfulnotion/jam/issues

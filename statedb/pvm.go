@@ -407,7 +407,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 			}
 		}
 	} else if vm.Backend == BackendCompiler {
-		rvm := NewRecompilerVM(service_index, code, initialRegs, initialPC, initialHeap, hostENV, jam_ready_blob, Metadata, initialGas, pvmBackend)
+		rvm := NewRecompilerVM(service_index, initialRegs, initialPC, initialHeap, hostENV, jam_ready_blob, Metadata, initialGas, p, o_size, w_size, z, s, o_byte, w_byte)
 		if rvm == nil {
 			return nil
 		}

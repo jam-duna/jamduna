@@ -273,13 +273,10 @@ func DecodeJustification(compact []byte, numECPiecesPerSegment int) ([][]byte, e
 
 // Stub
 func GetFilePathForNetwork(network string) string {
-	// Use environment variable MAJIK_PATH first (for majik fork), then JAM_PATH, but if neither is set, use default
-	basePath := os.Getenv("MAJIK_PATH")
+	// Use environment variable JAM_PATH first (for majik fork), then JAM_PATH, but if neither is set, use default
+	basePath := os.Getenv("JAM_PATH")
 	if basePath == "" {
-		panic("MAJIK_PATH environment variable is not set")
-	}
-	if basePath == "" {
-		basePath = "/root/Desktop/majik"
+		panic("JAM_PATH environment variable is not set")
 	}
 
 	// Construct the full file path using filepath package
@@ -289,13 +286,10 @@ func GetFilePathForNetwork(network string) string {
 }
 
 func GetFilePath(fn string) string {
-	// Use environment variable MAJIK_PATH first (for majik fork), then JAM_PATH, but if neither is set, use default
-	basePath := os.Getenv("MAJIK_PATH")
+	// Use environment variable JAM_PATH first (for majik fork), then JAM_PATH, but if neither is set, use default
+	basePath := os.Getenv("JAM_PATH")
 	if basePath == "" {
-		basePath = os.Getenv("JAM_PATH")
-	}
-	if basePath == "" {
-		panic("MAJIK_PATH environment variable is not set")
+		panic("JAM_PATH environment variable is not set")
 	}
 
 	// Construct the full file path using filepath package

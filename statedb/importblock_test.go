@@ -267,13 +267,13 @@ func dump_performance(t *testing.T) {
 func TestSingleCompare(t *testing.T) {
 	// DO NOT CHANGE THIS
 	log.InitLogger("debug")
-	filename := "/root/go/src/github.com/jam-duna/majik-test-vectors/traces/storage_light/00000008.bin"
+	filename := "/root/go/src/github.com/colorfulnotion/jam-test-vectors/traces/storage_light/00000008.bin"
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Errorf("failed to read file %s: %v", filename, err)
 	}
 	// runSingleSTFTest(t, filename, string(content), BackendCompiler, false)
-	runSingleSTFTest(t, filename, string(content), BackendInterpreter, false)
+	runSingleSTFTest(t, filename, string(content), BackendCompiler, false)
 }
 
 func GetFuzzReportsPath(subDir ...string) (string, error) {
