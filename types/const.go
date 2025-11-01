@@ -78,7 +78,7 @@ const (
 	MaxAuthorizationQueueItems       = 80             // Q: The maximum number of items in the authorizations queue.
 	RotationPeriod                   = 4              // R
 	ValidatorCoreRotationPeriod      = 4              // R: The rotation period of validator-core assignments, in timeslots.
-	MinPubServiceIndex               = 2 ^ 16         // Minimum public service index
+	MinPubServiceIndex               = 1 << 16        // Minimum public service index (65536)
 	ExtrinsicMaximumPerPackage       = 128            // T = 128: The maximum number of extrinsics in a work-package.
 	UnavailableWorkReplacementPeriod = 5              // U = 5: The period in timeslots after which reported but unavailable work may be replaced.
 	TotalValidators                  = 6              // V: The total number of validators.

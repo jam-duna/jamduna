@@ -41,52 +41,51 @@ func initStorage(testDir string) (*storage.StateDBStorage, error) {
 
 }
 
-// printHexDiff prints two byte slices as hex, highlighting any mismatched byte in red.
+// printHexDiff prints two byte slices as hex, highlighting mismatched bytes in red.
+// If data exceeds 1KB, truncates output with "..."
 func printHexDiff(label string, exp, act []byte) {
-	// Print the “Expected” line
-	fmt.Printf("%-10s | Expected: 0x", label)
-	max := len(exp)
-	if len(act) > max {
-		max = len(act)
-	}
-	for i := 0; i < max; i++ {
-		var b byte
-		var match bool
-		if i < len(exp) {
-			b = exp[i]
-			if i < len(act) && exp[i] == act[i] {
-				match = true
-			}
-		}
-		hex := fmt.Sprintf("%02x", b)
-		if !match {
-			fmt.Print(colorRed, hex, colorReset)
-		} else {
-			fmt.Print(hex)
-		}
-	}
-	fmt.Println()
+	const maxDisplay = 1024 // 1KB limit
 
-	// Print the “Actual” line
-	fmt.Printf("%-10s | Actual:   0x", label)
-	for i := 0; i < max; i++ {
-		var b byte
-		var match bool
-		if i < len(act) {
-			b = act[i]
-			if i < len(exp) && exp[i] == act[i] {
-				match = true
+	// Helper function to print hex line
+	printHexLine := func(prefix string, a, b []byte) {
+		fmt.Printf("%-10s | %s0x", label, prefix)
+
+		max := len(a)
+		if len(b) > max {
+			max = len(b)
+		}
+		if max > maxDisplay {
+			max = maxDisplay
+		}
+
+		for i := 0; i < max; i++ {
+			var val byte
+			var match bool
+			if i < len(a) {
+				val = a[i]
+				if i < len(b) && a[i] == b[i] {
+					match = true
+				}
+			}
+			hex := fmt.Sprintf("%02x", val)
+			if !match {
+				fmt.Print(colorRed, hex, colorReset)
+			} else {
+				fmt.Print(hex)
 			}
 		}
-		hex := fmt.Sprintf("%02x", b)
-		if !match {
-			fmt.Print(colorRed, hex, colorReset)
-		} else {
-			fmt.Print(hex)
+
+		if len(a) > maxDisplay || len(b) > maxDisplay {
+			fmt.Print("...")
 		}
+		fmt.Println()
 	}
-	fmt.Println()
+
+	// Print both Expected and Actual
+	printHexLine("Expected: ", exp, act)
+	printHexLine("Actual:   ", act, exp)
 }
+
 func SortDiffKeys(keys []string) {
 	sort.Slice(keys, func(i, j int) bool {
 		strip := func(k string) string {

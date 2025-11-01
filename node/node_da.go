@@ -299,7 +299,7 @@ func (n *NodeContent) authorizeWP(workPackage types.WorkPackage, workPackageCore
 		return
 	}
 
-	r = vm_auth.ExecuteAuthorization(authcode, workPackageCoreIndex)
+	r = vm_auth.ExecuteAuthorization(workPackage, workPackageCoreIndex)
 
 	p_u := workPackage.AuthorizationCodeHash
 	p_p := workPackage.ConfigurationBlob

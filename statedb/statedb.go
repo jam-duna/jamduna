@@ -964,6 +964,18 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block, sf0 *SafroleState) (isValid
 		_, currPhase := sf0.EpochAndPhase(targetJCE)
 		currentValidatorKey := (sf0.TicketsOrKeys.Keys)[currPhase]
 		if !bytes.Equal(currentValidatorKey.Bytes(), block_author_ietf_pub.Bytes()) {
+			fmt.Printf("=== VALIDATOR KEY MISMATCH ===\n")
+			fmt.Printf("block_author_ietf_pub (received): %v\n", block_author_ietf_pub)
+			fmt.Printf("currentValidatorKey (expected):   %v\n", currentValidatorKey)
+			fmt.Printf("currPhase: %d\n", currPhase)
+			fmt.Printf("=== Validator List ===\n")
+			for i, v := range sf0.TicketsOrKeys.Keys {
+				marker := "   "
+				if i == int(currPhase) {
+					marker = ">>>"
+				}
+				fmt.Printf("%s validator %d : %v\n", marker, i, v)
+			}
 			return false, validatorIdx, block_author_ietf_pub, fmt.Errorf("VerifyBlockHeader Failed: FallbackMode ValidatorKeyMismatch")
 		}
 		c = append([]byte(types.X_F), blockSealEntropy.Bytes()...)

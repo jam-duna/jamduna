@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	log "github.com/colorfulnotion/jam/log"
-	telemetry "github.com/colorfulnotion/jam/telemetry"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
 type BeefyPool []HistoryState
+
+var isDebugGasBreakdown = true
 
 // v0.4.5 eq.165 - W^!
 func AccumulatedImmediately(workReports []types.WorkReport) []types.WorkReport {
@@ -305,8 +306,10 @@ func (s *StateDB) OuterAccumulate(g uint64, transfersIn []types.DeferredTransfer
 			i++
 		}
 	}
-
-	if len(workReports) == 0 { // if i = 0, then nothing to do
+	len_t := len(transfersIn)
+	len_free := len(freeAccumulation)
+	n := i + uint64(len_t) + uint64(len_free)
+	if n == 0 { // if i = 0, then nothing to do
 		num_accumulations = 0
 		accumulation_output = make([]types.AccumulationOutput, 0)
 		GasUsage = make([]Usage, 0)
@@ -315,31 +318,24 @@ func (s *StateDB) OuterAccumulate(g uint64, transfersIn []types.DeferredTransfer
 	// transfers with ParallelizedAccumulate
 	p_gasUsed, transfersOut, p_outputs, p_gasUsage := s.ParallelizedAccumulate(o, transfersIn, workReports[0:i], freeAccumulation, pvmBackend, accumulated_partial) // parallelized accumulation the 0 to i work reports
 	// n https://graypaper.fluffylabs.dev/#/1c979cb/17e70117e701?v=0.7.1
-	len_t := len(transfersIn)
-	len_free := len(freeAccumulation)
-	n := i + uint64(len_t) + uint64(len_free)
+
 	transfer_gases := uint64(0)
 	for _, t := range transfersIn {
 		transfer_gases += uint64(t.GasLimit)
 	}
 	gstar := g + transfer_gases
-	if n > 0 { // if i = len(workReports), then nothing more to do
-		// compute gstar https://graypaper.fluffylabs.dev/#/1c979cb/172e02172e02?v=0.7.1
-		for _, t := range transfersIn {
-			gstar += uint64(t.GasLimit)
-		}
-		gstar -= p_gasUsed
-		incNum, incAccumulationOutput, incGasUsage := s.OuterAccumulate(gstar, transfersOut, workReports[i:], o, nil, pvmBackend, accumulated_partial) // recursive call to the rest of the work reports
-		num_accumulations = i + incNum
-		accumulation_output = append(p_outputs, incAccumulationOutput...)
 
-		GasUsage = append(p_gasUsage, incGasUsage...)
-		s.updateRecentAccumulation(o, accumulated_partial)
-		return
+	// compute gstar https://graypaper.fluffylabs.dev/#/1c979cb/172e02172e02?v=0.7.1
+	for _, t := range transfersIn {
+		gstar += uint64(t.GasLimit)
 	}
-	s.updateRecentAccumulation(o, accumulated_partial)
-	// TODO: check if should we use the GasUsage?
-	return i, p_outputs, p_gasUsage
+	gstar -= p_gasUsed
+	incNum, incAccumulationOutput, incGasUsage := s.OuterAccumulate(gstar, transfersOut, workReports[i:], o, nil, pvmBackend, accumulated_partial) // recursive call to the rest of the work reports
+	num_accumulations = i + incNum
+	accumulation_output = append(p_outputs, incAccumulationOutput...)
+
+	p_gasUsage = append(p_gasUsage, incGasUsage...)
+	return num_accumulations, accumulation_output, p_gasUsage
 }
 
 /*
@@ -371,6 +367,8 @@ func (s *StateDB) ParallelizedAccumulate(
 	}
 	for _, t := range transfersIn {
 		serviceMap[t.ReceiverIndex] = struct{}{}
+		// Transfer balance credits are applied in SingleAccumulate
+		// so they're applied to the worker's XContext and persisted during merge
 	}
 	services := make([]uint32, 0, len(serviceMap))
 	for service := range serviceMap {
@@ -379,6 +377,8 @@ func (s *StateDB) ParallelizedAccumulate(
 	if len(services) == 0 {
 		return 0, nil, nil, nil
 	}
+	// Sort services for deterministic processing order
+	sort.Slice(services, func(i, j int) bool { return services[i] < services[j] })
 
 	// --- Parallel section: call SingleAccumulate per service in a worker pool ---
 	type accRes struct {
@@ -389,53 +389,92 @@ func (s *StateDB) ParallelizedAccumulate(
 		exceptional bool
 	}
 
-	par := runtime.GOMAXPROCS(0) // tune if desired
+	par := runtime.GOMAXPROCS(0)
 	if par < 1 {
 		par = 1
 	}
 
-	jobCh := make(chan uint32, len(services))
-	resCh := make(chan accRes, len(services))
-	var wg sync.WaitGroup
+	const isParallel = false
 
-	// SingleAccumulate!
-	worker := func() {
-		defer wg.Done()
-		for service := range jobCh {
+	// TODO: Parallel execution with go func causes RACE CONDITIONS
+	var acc_results []accRes
+
+	if isParallel {
+		// PARALLEL EXECUTION (UNSAFE - has race conditions on 'o *types.PartialState')
+		jobCh := make(chan uint32, len(services))
+		resCh := make(chan accRes, len(services))
+		var wg sync.WaitGroup
+
+		worker := func() {
+			defer wg.Done()
+			for service := range jobCh {
+				t0 := time.Now()
+				// RACE: All workers access shared 'o' without synchronization!
+				fmt.Printf("ParallelizedAccumulate worker processing service %v\n", service)
+				out, gas, XY, exceptional := s.SingleAccumulate(o, transfersIn, workReports, freeAccumulation, service, pvmBackend)
+				benchRec.Add("SingleAccumulate", time.Since(t0))
+
+				if XY == nil {
+					log.Warn(log.SDB, "SingleAccumulate returned nil XContext", "service", service)
+					continue
+				}
+
+				resCh <- accRes{
+					service:     service,
+					output:      out,
+					gasUsed:     gas,
+					XY:          XY,
+					exceptional: exceptional,
+				}
+			}
+		}
+
+		// Start worker goroutines
+		wg.Add(par)
+		for i := 0; i < par; i++ {
+			go worker()
+		}
+
+		// Send jobs in sorted order (but workers finish in random order)
+		for _, svc := range services {
+			jobCh <- svc
+		}
+		close(jobCh)
+
+		// Wait for all workers
+		wg.Wait()
+		close(resCh)
+
+		// Collect results and sort for deterministic merge
+		acc_results = make([]accRes, 0, len(services))
+		for r := range resCh {
+			acc_results = append(acc_results, r)
+		}
+		// Sort results by service ID to ensure deterministic merge order
+		sort.Slice(acc_results, func(i, j int) bool { return acc_results[i].service < acc_results[j].service })
+	} else {
+		// SEQUENTIAL EXECUTION (SAFE - deterministic, no race conditions)
+		acc_results = make([]accRes, 0, len(services))
+		for _, service := range services {
 			t0 := time.Now()
 			out, gas, XY, exceptional := s.SingleAccumulate(o, transfersIn, workReports, freeAccumulation, service, pvmBackend)
 			benchRec.Add("SingleAccumulate", time.Since(t0))
-			resCh <- accRes{
+
+			if XY == nil {
+				log.Warn(log.SDB, "SingleAccumulate returned nil XContext", "service", service)
+				continue
+			}
+
+			acc_results = append(acc_results, accRes{
 				service:     service,
 				output:      out,
 				gasUsed:     gas,
 				XY:          XY,
 				exceptional: exceptional,
-			}
+			})
 		}
+		// Results are already sorted since services is sorted
 	}
-
-	wg.Add(par)
-	for i := 0; i < par; i++ {
-		go worker()
-	}
-	for _, svc := range services {
-		jobCh <- svc
-	}
-	close(jobCh)
-	wg.Wait()
-	close(resCh)
-
-	// Collect results into a slice and sort for deterministic merge order
-	acc_results := make([]accRes, 0, len(services))
-	for r := range resCh {
-		if r.XY == nil {
-			log.Warn(log.SDB, "SingleAccumulate returned nil XContext", "service", r.service)
-			continue
-		}
-		acc_results = append(acc_results, r)
-	}
-	sort.Slice(acc_results, func(i, j int) bool { return acc_results[i].service < acc_results[j].service })
 
 	// put all the results back together in o
 	empty := common.Hash{}
@@ -475,12 +514,13 @@ func (s *StateDB) ParallelizedAccumulate(
 		if r.XY != nil && r.XY.U != nil {
 			if r.XY.U.ServiceAccounts != nil {
 				for sid, sa := range r.XY.U.ServiceAccounts {
+					shouldUpdate := sa.Dirty || sa.NewAccount || sa.DeletedAccount || sa.Checkpointed
 					if r.exceptional {
 						if sa.Checkpointed {
 							sa.Dirty = true
 							o.ServiceAccounts[sid] = sa
 						}
-					} else {
+					} else if shouldUpdate {
 						sa.Dirty = true
 						o.ServiceAccounts[sid] = sa
 					}
@@ -520,13 +560,22 @@ func (s *StateDB) ParallelizedAccumulate(
 				}
 			} else if r.XY.U.PrivilegedDirty {
 				// manager's priority is higher than others
-				if !managerMutatedA {
-					o.PrivilegedState.AuthQueueServiceID = r.XY.U.PrivilegedState.AuthQueueServiceID
+				allowMutatatedIndex := 0
+				allowMutated := false
+				for index, idx := range originalA {
+					if idx == r.service {
+						allowMutatatedIndex = index
+						allowMutated = true
+						break
+					}
 				}
-				if !managerMutatedR {
+				if !managerMutatedA && allowMutated {
+					o.PrivilegedState.AuthQueueServiceID[allowMutatatedIndex] = r.XY.U.PrivilegedState.AuthQueueServiceID[allowMutatatedIndex]
+				}
+				if !managerMutatedR && r.service == originalR {
 					o.PrivilegedState.RegistrarServiceID = r.XY.U.PrivilegedState.RegistrarServiceID
 				}
-				if !managerMutatedU {
+				if !managerMutatedU && r.service == originalU {
 					o.PrivilegedState.UpcomingValidatorsServiceID = r.XY.U.PrivilegedState.UpcomingValidatorsServiceID
 				}
 			}
@@ -549,6 +598,28 @@ func (s *StateDB) ParallelizedAccumulate(
 		})
 	}
 
+	//12.21
+	tmpProvide := make(map[uint32][]byte)
+	for _, xContext := range accumulated_partial {
+		for _, provide := range xContext.Provided {
+			tmpProvide[provide.ServiceIndex] = provide.P_data
+		}
+	}
+	for toService, preImageBytes := range tmpProvide {
+		service, ok := o.ServiceAccounts[toService]
+		if !ok {
+			continue
+		}
+		preImageLength := uint32(len(preImageBytes))
+		preImageHash := common.Blake2Hash(preImageBytes)
+		ok, lookups, _ := service.ReadLookup(preImageHash, preImageLength, s)
+		if len(lookups) == 0 && ok && (service.NewAccount || service.Dirty) && !service.DeletedAccount {
+			service.WritePreimage(preImageHash, preImageBytes, "12.21")
+			service.WriteLookup(preImageHash, preImageLength, []uint32{s.GetTimeslot()}, "12.21")
+			fmt.Printf("set service %d preimage: %x\n", service.ServiceIndex, preImageHash)
+		}
+	}
+
 	return
 }
 
@@ -565,10 +636,13 @@ func UniqueUint32Slice(slice []uint32) []uint32 {
 }
 
 // Implements B13 recursive check https://graypaper.fluffylabs.dev/#/5f542d7/2e0d032e0d03
+// GP 0.7.1: i = ((i - S + 1) mod R) + S where S = 2^16, R = 2^32 - S - 2^8
 func (sdb *StateDB) NewXContext_Check(i uint32) uint32 {
+	const S = 1 << 16                  // 65536
+	const R = (1 << 32) - S - (1 << 8) // 4294901504
+
 	for sdb.k_exist(i) {
-		// 2^8 = 256, 2^32 - 2^9 = 4294966784
-		i = (uint32(i-uint32(256)+1) % uint32(4294966784)) + uint32(256)
+		i = ((i - S + 1) % R) + S
 	}
 	return i
 }
@@ -642,38 +716,45 @@ invokes pvm execution
 func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.DeferredTransfer, workReports []types.WorkReport, freeAccumulation map[uint32]uint64, serviceID uint32, pvmBackend string) (accumulation_output common.Hash, gasUsed uint64, xy *types.XContext, exceptional bool) {
 	t0 := time.Now()
 
-	serviceCost, exist := sd.BlockServicesCost[serviceID]
-	if !exist {
-		if sd.BlockServicesCost == nil {
-			sd.BlockServicesCost = make(map[uint32]*telemetry.AccumulateCost)
-		}
-		serviceCost = &telemetry.AccumulateCost{}
-		sd.BlockServicesCost[serviceID] = serviceCost
-	}
 	// gas https://graypaper.fluffylabs.dev/#/1c979cb/181901181901?v=0.7.1
 	// 1. gas from free accumulation of this service (if any)
 	gas := uint64(0)
+	gasFree := uint64(0)
 	if _, ok := freeAccumulation[serviceID]; ok {
+		gasFree = freeAccumulation[serviceID]
 		gas = freeAccumulation[serviceID]
 	}
 	// 2. gas from work reports / digests of this service
+	gasWorkReports := uint64(0)
+	numWorkDigests := 0
 	for _, workReport := range workReports {
 		for _, workDigest := range workReport.Results {
 			if workDigest.ServiceID == serviceID {
-				gas += uint64(workDigest.Gas)
-				serviceCost.NumItemsAccumulated++
+				numWorkDigests++
+				digestGas := uint64(workDigest.Gas)
+				gas += digestGas
+				gasWorkReports += digestGas
 			}
 		}
 	}
 	// 3. gas from selected transfers with this service as the destination
 	var selectedTransfers []types.DeferredTransfer
+	gasTransfers := uint64(0)
 	for _, transfer := range transfersIn {
 		if transfer.ReceiverIndex == serviceID {
 			selectedTransfers = append(selectedTransfers, transfer)
 			gas += uint64(transfer.GasLimit)
-			serviceCost.TransferProcessingGas += uint64(transfer.GasLimit) // NOT SURE IF THIS IS THE RIGHT PLACE
-			serviceCost.NumTransfersProcessed++
+			gasTransfers += uint64(transfer.GasLimit)
 		}
+	}
+
+	if isDebugGasBreakdown {
+		log.Info(log.SDB, "SingleAccumulate GAS BREAKDOWN", "service", fmt.Sprintf("%d", serviceID),
+			"total_gas", gas,
+			"from_free", gasFree,
+			"from_work_reports", gasWorkReports, "num_digests", numWorkDigests,
+			"from_transfers", gasTransfers, "num_transfers", len(selectedTransfers),
+			"num_workReports", len(workReports))
 	}
 
 	// Put the accumulation items I together: https://graypaper.fluffylabs.dev/#/1c979cb/18fd0018fd00?v=0.7.1
@@ -723,6 +804,18 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 		}
 	}
 
+	// Apply transfer balance credits BEFORE creating XContext
+	// This ensures the balance increment is in the initial account state
+	if len(selectedTransfers) > 0 {
+		serviceAccount.ALLOW_MUTABLE()
+		for _, t := range selectedTransfers {
+			serviceAccount.IncBalance(t.Amount)
+		}
+		// Store in o.ServiceAccounts so other workers see the updated balance
+		serviceAccount.Dirty = true
+		o.ServiceAccounts[serviceID] = serviceAccount
+	}
+
 	xContext := sd.NewXContext(o, serviceID, serviceAccount)
 
 	xy = xContext // if code does not exist, fallback to this
@@ -731,6 +824,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 		log.Error(log.SDB, "InitXContextService ERR", "s", serviceID, "error", err)
 		return
 	}
+
 	ok, code, preimage_source := serviceAccount.ReadPreimage(serviceAccount.CodeHash, sd)
 	if !ok {
 		log.Warn(log.SDB, "GetPreimage ERR", "ok", ok, "s", serviceID, "codeHash", serviceAccount.CodeHash, "preimage_source", preimage_source)
@@ -740,16 +834,8 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 
 	//(B.8) start point
 	t0 = time.Now()
-	for _, t := range selectedTransfers {
-		serviceAccount.Balance += t.Amount // incoming transfers increase balance
-	}
 
 	vm := NewVMFromCode(serviceID, code, 0, 0, sd, pvmBackend, gas)
-	if vm == nil {
-		log.Error(log.Node, "SingleAccumulate: failed to create VM (corrupted bytecode?)", "serviceID", serviceID)
-		exceptional = true
-		return
-	}
 	pvmContext := log.PvmValidating
 	if sd.Authoring == log.GeneralAuthoring {
 		pvmContext = log.PvmAuthoring
@@ -762,7 +848,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 
 	t0 = time.Now()
 
-	r, _, x_s := vm.ExecuteAccumulate(timeslot, serviceID, inputs, xContext, sd.JamState.SafroleState.Entropy[0], serviceCost)
+	r, _, x_s := vm.ExecuteAccumulate(timeslot, serviceID, inputs, xContext, sd.JamState.SafroleState.Entropy[0]) //n is posterior entropy
 	benchRec.Add("ExecuteAccumulate", time.Since(t0))
 	exceptional = false
 	gasUsed = gas - uint64(max(vm.GetGas(), 0))
@@ -788,9 +874,6 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 		res = "yield"
 	}
 	log.Trace(debugB, fmt.Sprintf("BEEFY OK-HALT with %s @SINGLE ACCUMULATE", res), "s", fmt.Sprintf("%d", serviceID), "accumulation_output", accumulation_output)
-
-	serviceCost.TotalGasUsed += gasUsed
-	serviceCost.NumAccumulateCalls++
 	return
 }
 

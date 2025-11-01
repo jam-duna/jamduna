@@ -1140,6 +1140,17 @@ func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32,
 		}
 	} else {
 		if header.TicketsMark != nil {
+			fmt.Printf("=== TicketsMark SHOULD BE NIL ===\n")
+			fmt.Printf("prevEpoch: %d, prevPhase: %d\n", prevEpoch, prevPhase)
+			fmt.Printf("currEpoch: %d, currPhase: %d\n", currEpoch, currPhase)
+			fmt.Printf("TicketSubmissionEndSlot: %d\n", types.TicketSubmissionEndSlot)
+			fmt.Printf("NextEpochTicketsAccumulator length: %d\n", len(s.NextEpochTicketsAccumulator))
+			fmt.Printf("header.TicketsMark length: %d\n", len(header.TicketsMark))
+			fmt.Printf("Condition check: prevEpoch == currEpoch && (prevPhase < TicketSubmissionEndSlot && currPhase >= TicketSubmissionEndSlot) && len(NextEpochTicketsAccumulator) == EpochLength\n")
+			fmt.Printf("  prevEpoch == currEpoch: %v\n", prevEpoch == currEpoch)
+			fmt.Printf("  prevPhase < TicketSubmissionEndSlot: %v\n", prevPhase < types.TicketSubmissionEndSlot)
+			fmt.Printf("  currPhase >= TicketSubmissionEndSlot: %v\n", currPhase >= types.TicketSubmissionEndSlot)
+			fmt.Printf("  len(NextEpochTicketsAccumulator) == EpochLength: %v\n", len(s.NextEpochTicketsAccumulator) == types.EpochLength)
 			return nil, fmt.Errorf("TicketsMark should be nil in header")
 		}
 	}

@@ -58,7 +58,7 @@ else ifeq ($(UNAME_S),Darwin)
   endif
 endif
 
-.PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean jam_without_ffi_build run_parallel_jam kill_parallel_jam run_jam build_remote_nodes run_jam_remote_nodes da jamweb validatetraces testnet init-submodules update-submodules evm_jamtest algo_jamtest safrole_jamtest
+.PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean jam_without_ffi_build run_parallel_jam kill_parallel_jam run_jam build_remote_nodes run_jam_remote_nodes da jamweb validatetraces testnet init-submodules update-submodules update-pvm-submodule update-services-submodule evm_jamtest algo_jamtest safrole_jamtest
 
 # Submodule management targets
 init-submodules:
@@ -68,6 +68,78 @@ init-submodules:
 update-submodules:
 	@echo "Updating git submodules..."
 	git submodule update --remote --merge
+
+# Update pvm submodule to a specific commit or latest from local pvm repo
+# Usage:
+#   make update-pvm-submodule COMMIT=456513b  (specific commit)
+#   make update-pvm-submodule                  (use latest from local ../pvm repo)
+update-pvm-submodule:
+	@if [ -z "$(COMMIT)" ]; then \
+		if [ -d "../pvm" ] && [ -d "../pvm/.git" ]; then \
+			LATEST_COMMIT=$$(cd ../pvm && git rev-parse HEAD); \
+			SHORT_COMMIT=$$(cd ../pvm && git rev-parse --short HEAD); \
+			echo "No COMMIT specified. Using latest from local pvm repo: $$SHORT_COMMIT"; \
+			echo "Updating pvm submodule to commit $$SHORT_COMMIT..."; \
+			(cd pvm && git fetch origin && git checkout $$LATEST_COMMIT); \
+			git add pvm; \
+			echo "✓ pvm submodule updated to $$SHORT_COMMIT and staged"; \
+			echo "Next steps:"; \
+			echo "  1. Review: git status"; \
+			echo "  2. Commit: git commit -m 'Update pvm submodule to $$SHORT_COMMIT'"; \
+			echo "  3. Push: git push origin $$(git rev-parse --abbrev-ref HEAD)"; \
+		else \
+			echo "Error: No COMMIT specified and ../pvm directory not found"; \
+			echo "Usage:"; \
+			echo "  make update-pvm-submodule COMMIT=456513b  (specific commit)"; \
+			echo "  make update-pvm-submodule                  (use latest from ../pvm)"; \
+			exit 1; \
+		fi; \
+	else \
+		echo "Updating pvm submodule to commit $(COMMIT)..."; \
+		(cd pvm && git fetch origin && git checkout $(COMMIT)); \
+		git add pvm; \
+		echo "✓ pvm submodule updated to $(COMMIT) and staged"; \
+		echo "Next steps:"; \
+		echo "  1. Review: git status"; \
+		echo "  2. Commit: git commit -m 'Update pvm submodule to $(COMMIT)'"; \
+		echo "  3. Push: git push origin $$(git rev-parse --abbrev-ref HEAD)"; \
+	fi
+
+# Update services submodule to a specific commit or latest from local services repo
+# Usage:
+#   make update-services-submodule COMMIT=abc123  (specific commit)
+#   make update-services-submodule                 (use latest from local ../services repo)
+update-services-submodule:
+	@if [ -z "$(COMMIT)" ]; then \
+		if [ -d "../services" ] && [ -d "../services/.git" ]; then \
+			LATEST_COMMIT=$$(cd ../services && git rev-parse HEAD); \
+			SHORT_COMMIT=$$(cd ../services && git rev-parse --short HEAD); \
+			echo "No COMMIT specified. Using latest from local services repo: $$SHORT_COMMIT"; \
+			echo "Updating services submodule to commit $$SHORT_COMMIT..."; \
+			cd services && git fetch origin && git checkout $$LATEST_COMMIT; \
+			git add services; \
+			echo "✓ services submodule updated to $$SHORT_COMMIT and staged"; \
+			echo "Next steps:"; \
+			echo "  1. Review: git status"; \
+			echo "  2. Commit: git commit -m 'Update services submodule to $$SHORT_COMMIT'"; \
+			echo "  3. Push: git push origin $$(git rev-parse --abbrev-ref HEAD)"; \
+		else \
+			echo "Error: No COMMIT specified and ../services directory not found"; \
+			echo "Usage:"; \
+			echo "  make update-services-submodule COMMIT=abc123  (specific commit)"; \
+			echo "  make update-services-submodule                 (use latest from ../services)"; \
+			exit 1; \
+		fi; \
+	else \
+		echo "Updating services submodule to commit $(COMMIT)..."; \
+		cd services && git fetch origin && git checkout $(COMMIT); \
+		git add services; \
+		echo "✓ services submodule updated to $(COMMIT) and staged"; \
+		echo "Next steps:"; \
+		echo "  1. Review: git status"; \
+		echo "  2. Commit: git commit -m 'Update services submodule to $(COMMIT)'"; \
+		echo "  3. Push: git push origin $$(git rev-parse --abbrev-ref HEAD)"; \
+	fi
 
 spin_localclient: jam kill_jam jam_clean spin_5 spin_0
 

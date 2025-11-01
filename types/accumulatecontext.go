@@ -217,9 +217,17 @@ func (X *XContext) Clone() (Y XContext) {
 		U:               X.U.Clone(),
 		Transfers:       make([]DeferredTransfer, len(X.Transfers)),
 		Yield:           X.Yield,
+		Provided:        make([]Provided, len(X.Provided)),
 	}
 	for i, t := range X.Transfers {
 		Y.Transfers[i] = t.Clone()
+	}
+	for i, p := range X.Provided {
+		Y.Provided[i] = Provided{
+			ServiceIndex: p.ServiceIndex,
+			P_data:       make([]byte, len(p.P_data)),
+		}
+		copy(Y.Provided[i].P_data, p.P_data)
 	}
 	return
 }

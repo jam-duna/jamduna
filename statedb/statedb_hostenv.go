@@ -19,7 +19,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 	if !sa.Dirty {
 		return nil, nil
 	}
-	log.Trace(log.SDB, "!writeAccount", "service_idx", sa.ServiceIndex, "dirty", sa.Dirty, "s", sa.JsonString())
+	log.Info(log.SDB, "!writeAccount", "service_idx", sa.ServiceIndex, "dirty", sa.Dirty, "s", sa.JsonString())
 
 	service_idx := sa.GetServiceIndex()
 	tree := s.GetTrie()
@@ -28,7 +28,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 	serviceUpdate = types.NewServiceUpdate(service_idx)
 	t0 := time.Now()
 	for _, storage := range sa.Storage {
-		log.Trace(log.SDB, "writeAccount Storage", "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", storage.InternalKey, "storage.Accessed", storage.Accessed, "storage.Deleted", storage.Deleted, "storage.source", storage.Source)
+		log.Info(log.SDB, "writeAccount Storage", "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", storage.InternalKey, "value", fmt.Sprintf("%x", storage.Value), "storage.Accessed", storage.Accessed, "storage.Deleted", storage.Deleted, "storage.Dirty", storage.Dirty, "storage.source", storage.Source)
 		as_internal_key := storage.InternalKey
 		if storage.Dirty {
 			if storage.Deleted {
@@ -66,7 +66,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 
 	t0 = time.Now()
 	for blob_hash_str, v := range sa.Lookup {
-		log.Trace(log.SDB, "writeAccount Lookup", "service_idx", service_idx, "blob_hash_str", blob_hash_str, "v.Dirty", v.Dirty, "v.Deleted", v.Deleted, "v.Z", v.Z, "v.Timeslots", v.Timeslots, "source", v.Source)
+		log.Info(log.SDB, "writeAccount Lookup", "service_idx", service_idx, "blob_hash_str", blob_hash_str, "v.Dirty", v.Dirty, "v.Deleted", v.Deleted, "v.Z", v.Z, "v.Timeslots", v.Timeslots, "source", v.Source)
 		blob_hash := common.HexToHash(blob_hash_str)
 		if v.Dirty {
 			if v.Deleted {

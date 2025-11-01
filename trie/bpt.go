@@ -859,7 +859,7 @@ func (t *MerkleTree) SetService(s uint32, v []byte) (err error) {
 	*/
 	service_account := common.ComputeC_is(s)
 	stateKey := service_account.Bytes()
-
+	fmt.Printf("**** SetService C(255, %d)=%x\n", s, stateKey)
 	t.Insert(stateKey, v)
 	return nil // TODO
 }

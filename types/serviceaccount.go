@@ -21,7 +21,6 @@ const (
 const (
 	EntryPointRefine        = 0
 	EntryPointAccumulate    = 5
-	EntryPointOnTransfer    = 10
 	EntryPointAuthorization = 0
 	EntryPointGeneric       = 255
 )
@@ -32,7 +31,7 @@ type ServiceAccount struct {
 	CodeHash           common.Hash `json:"code_hash"`           //a_c - account code hash c
 	Balance            uint64      `json:"balance"`             //a_b - account balance b, which must be greater than a_t (The threshold needed in terms of its storage footprint)
 	GasLimitG          uint64      `json:"min_item_gas"`        //a_g - the minimum gas required in order to execute the Accumulate entry-point of the service's code,
-	GasLimitM          uint64      `json:"min_memo_gas"`        //a_m - the minimum required for the On Transfer entry-point.
+	GasLimitM          uint64      `json:"min_memo_gas"`        //a_m - the minimum gas required per deferred transfer.
 	StorageSize        uint64      `json:"bytes"`               //a_o - total number of octets used in storage (9.3) -- renamed from code_size
 	GratisOffset       uint64      `json:"gratis_offset"`       //a_f - the gratis storage offset
 	NumStorageItems    uint32      `json:"items"`               //a_i - the number of items in storage (9.3)
@@ -518,14 +517,16 @@ func (s *ServiceAccount) SetCodeHash(codeHash common.Hash) {
 // Note this could be IncBalance DecBalance instead?
 func (s *ServiceAccount) DecBalance(balance uint64) {
 	if !s.Mutable {
-		log.Crit(module, "SetBalance")
+		log.Crit(module, "DecBalance SetBalance Non-Mutable Err")
+		return
 	}
 	s.Dirty = true
 	s.Balance -= balance
 }
 func (s *ServiceAccount) IncBalance(balance uint64) {
 	if !s.Mutable {
-		log.Crit(module, "SetBalance")
+		log.Crit(module, "IncBalance SetBalance Non-Mutable Err")
+		return
 	}
 	s.Dirty = true
 	s.Balance += balance

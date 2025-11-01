@@ -7,11 +7,10 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	jamerrors "github.com/colorfulnotion/jam/jamerrors"
-	log "github.com/colorfulnotion/jam/log"
-	sdbtiming "github.com/colorfulnotion/jam/sdbtiming"
-	telemetry "github.com/colorfulnotion/jam/telemetry"
-	trie "github.com/colorfulnotion/jam/trie"
+	"github.com/colorfulnotion/jam/jamerrors"
+	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/sdbtiming"
+	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -191,22 +190,6 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 	}
 	// ------ VerifyBlockHeader ------
 	isValid, _, _, headerErr := s.VerifyBlockHeader(blk, &s2)
-
-	// Telemetry: Block verification result
-	if telemetryClient := s.sdb.GetTelemetryClient(); telemetryClient != nil && oldState.Id != blk.Header.AuthorIndex { //author skip
-		if !isValid || headerErr != nil {
-			// BlockVerificationFailed (event 44)
-			reason := "unknown verification failure"
-			if headerErr != nil {
-				reason = headerErr.Error()
-			}
-			telemetryClient.BlockVerificationFailed(blockEventID, reason)
-		} else {
-			// BlockVerified (event 45)
-			telemetryClient.BlockVerified(blockEventID)
-		}
-	}
-
 	if !isValid || headerErr != nil {
 		return s, fmt.Errorf("block header is not valid err=%v", headerErr)
 	}
@@ -270,14 +253,10 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 	// ------ OuterAccumulate ------
 	deferred_transfers := make([]types.DeferredTransfer, 0)
 	t0 = time.Now()
-	num_accumulations, accumulation_output, gasUsage := s.OuterAccumulate(gas, deferred_transfers, accumulate_input_wr, o, f, pvmBackend, make(map[uint32]*types.XContext)) // outer accumulate
+	accumulated_partial := make(map[uint32]*types.XContext)
+	num_accumulations, accumulation_output, gasUsage := s.OuterAccumulate(gas, deferred_transfers, accumulate_input_wr, o, f, pvmBackend, accumulated_partial) // outer accumulate
 	benchRec.Add("OuterAccumulate", time.Since(t0))
-
-	// Telemetry: Accumulate result available (event 48)
-	if telemetryClient := s.sdb.GetTelemetryClient(); telemetryClient != nil {
-		telemetryClient.AccumulateResultAvailable(blk.Header.Slot, blk.Header.Hash())
-	}
-
+	// s.updateRecentAccumulation(o, accumulated_partial)
 	// (χ′, δ†, ι′, φ′)
 	for _, sa := range o.ServiceAccounts {
 		sa.ALLOW_MUTABLE() // make sure all service accounts can be written
@@ -292,6 +271,17 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 				stats = &accumulateStatistics{}
 			}
 			stats.numWorkReports++
+
+			part, ok2 := accumulated_partial[service]
+			if ok2 {
+				sa, ok3 := part.U.ServiceAccounts[service]
+				if ok3 {
+					sa.UpdateRecentAccumulation(s.GetTimeslot())
+					o.ServiceAccounts[service] = sa
+					sa.Dirty = true
+				}
+			}
+
 			if stats.numWorkReports > 0 {
 				accumulateStats[service] = stats
 			} else {
@@ -301,14 +291,6 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 	}
 	//benchRec.Add("ProcessDeferredTransfers", time.Since(t0))
 
-	// ---------  ApplyXContext/computeStateUpdates ------
-	t0 = time.Now()
-	s.stateUpdate = s.ApplyXContext(o)
-	benchRec.Add("ApplyXContext", time.Since(t0))
-
-	t0 = time.Now()
-	// finalize stateUpdates
-	s.computeStateUpdates(blk) // review targetJCE input
 	for _, gas_usage := range gasUsage {
 		service := gas_usage.Service
 		stats, ok := accumulateStats[service]
@@ -318,6 +300,37 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 		stats.gasUsed += uint(gas_usage.Gas)
 		accumulateStats[service] = stats
 	}
+
+	// ---------  ApplyXContext/computeStateUpdates ------
+	// IMPORTANT: Must run BEFORE updating RecentAccumulation
+	// so worker results are merged into o.ServiceAccounts first
+	t0 = time.Now()
+	// GP 0.7.2 Eq. 12.29: S ≡ {(s ↦ (G(s), N(s))) | G(s) + N(s) ≠ 0}
+	// Update RecentAccumulation for services with gas usage but no work reports
+	// (Services with work reports already updated inline above at lines 277-284)
+	// This must happen AFTER ApplyXContext so updates are applied to merged accounts
+	ts := s.JamState.SafroleState.Timeslot
+	for service, stats := range accumulateStats {
+		if stats == nil {
+			continue
+		}
+		// Only process services with gas usage but no work reports
+		if stats.gasUsed > 0 && stats.numWorkReports == 0 {
+			// Get the merged account from o.ServiceAccounts (after ApplyXContext)
+			if sa, ok := o.ServiceAccounts[service]; ok && sa != nil {
+				sa.ALLOW_MUTABLE()
+				sa.UpdateRecentAccumulation(ts)
+				fmt.Printf("===service %d, timeslot %d\n", sa.ServiceIndex, ts)
+				sa.Dirty = true
+			}
+		}
+	}
+	s.stateUpdate = s.ApplyXContext(o)
+	benchRec.Add("ApplyXContext", time.Since(t0))
+
+	t0 = time.Now()
+	// finalize stateUpdates
+	s.computeStateUpdates(blk) // review targetJCE input
 	benchRec.Add("computeStateUpdates", time.Since(t0))
 
 	// ---------  ApplyStateTransitionAccumulation ------
@@ -394,22 +407,6 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 	// ---------  UpdateTrieState ------
 	s.StateRoot = s.UpdateTrieState()
 	benchRec.Add("UpdateTrieState", time.Since(t0))
-
-	// Telemetry: BlockExecuted (event 47) - Block execution completed successfully
-	if telemetryClient := s.sdb.GetTelemetryClient(); telemetryClient != nil {
-		// Convert accumulateStats to ServiceAccumulateCost format for telemetry
-		services := make([]telemetry.ServiceAccumulateCost, 0, len(accumulateStats))
-		for serviceID, cost := range s.BlockServicesCost {
-			services = append(services,
-				telemetry.ServiceAccumulateCost{
-					ServiceID: serviceID,
-					Cost:      *cost,
-				},
-			)
-		}
-		telemetryClient.BlockExecuted(blockEventID, services)
-	}
-
 	return s, nil
 }
 

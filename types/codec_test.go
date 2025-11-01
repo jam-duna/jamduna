@@ -186,3 +186,22 @@ func TestBundleDecode(t *testing.T) {
 		t.Fatalf("Failed to decode data: %v", err)
 	}
 }
+func TestServiceBytes(t *testing.T) {
+
+	service := uint32(0)
+	serviceBytes := common.FromHex("0x00777c5d69ff8de299a9cd68236c0ec673038177773f61303997c8edb16024ccbb733c04000000000010270000000000001027000000000000ba6c0200000000000000000000000000100000000e000000700000004ea6dc6b")
+
+	sa, err := ServiceAccountFromBytes(service, serviceBytes)
+	if err != nil {
+		return
+	}
+	fmt.Printf("Service Account 1: %+v\n", sa.String())
+
+	serviceBytes2 := common.FromHex("0x00777c5d69ff8de299a9cd68236c0ec673038177773f61303997c8edb16024ccbb733c04000000000010270000000000001027000000000000926c0200000000000000000000000000100000000e000000700000004ea6dc6b")
+
+	sa2, err := ServiceAccountFromBytes(service, serviceBytes2)
+	if err != nil {
+		return
+	}
+	fmt.Printf("Service Account 2: %+v\n", sa2.String())
+}

@@ -2189,7 +2189,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	// 1. Prepare recovered state from parent
 	start := time.Now()
 	recoveredStateDB := n.statedb.Copy()
-	recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot) // it don't even know if it got the correct state
+	recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot)
 	recoveredStateDB.UnsetPosteriorEntropy()
 	recoveredStateDB.StateRoot = nextBlock.Header.ParentStateRoot
 	recoveredStateDB.Block = nextBlock

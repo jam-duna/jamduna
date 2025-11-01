@@ -2,6 +2,7 @@ package statedb
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 	"unsafe"
 
@@ -236,6 +237,11 @@ func goInvokeHostFunction(cvm *C.pvm_vm_t, hostFuncID C.int) C.pvm_host_result_t
 			vm.MachineState = PANIC
 			vm.ResultCode = PANIC
 			vm.terminated = true
+
+			// print stack trace
+			stackBuf := make([]byte, 1024*8)
+			n := runtime.Stack(stackBuf, false)
+			fmt.Printf("Stack trace:\n%s\n", string(stackBuf[:n]))
 		}
 	}()
 
