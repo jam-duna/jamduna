@@ -692,7 +692,7 @@ func (n *NodeContent) WorkReportSearch(h common.Hash) (si *SpecIndex) {
 	wrBytes, ok, err := n.ReadRawKV([]byte(generateSpecKey(h)))
 	if err != nil || !ok {
 		log.Error(log.DA, "ErasureRootLookUP", "err", err)
-		panic(1234)
+		panic("WorkReportSearch NOT FOUND")
 		return nil
 	}
 

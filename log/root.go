@@ -12,6 +12,7 @@ const (
 	// PVM Context (vm.logging)
 	PvmAuthoring            = "pvm_authoring"   // PVM Authoring
 	PvmValidating           = "pvm_validator"   // PVM Validator
+	Builder                 = "builder"         // Builder
 	FirstGuarantorOrAuditor = "first_guarantor" // First Guarantor or Auditor
 	OtherGuarantor          = "other_guarantor" // 2nd/3rd Guarantor
 

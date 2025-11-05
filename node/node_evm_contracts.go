@@ -370,7 +370,7 @@ func (n *NodeContent) ReadObjectRef(stateDB *statedb.StateDB, serviceCode uint32
 func (n *NodeContent) readContractStorageValue(stateDB *statedb.StateDB, contractAddress common.Address, storageKey common.Hash) (common.Hash, error) {
 	// 1. Read SSR metadata to resolve shard ID
 	ssrObjectID := ssr_to_objectID(contractAddress)
-	witness, found, err := stateDB.ReadStateWitness(statedb.EVMServiceCode, ssrObjectID, true)
+	witness, found, err := stateDB.ReadStateWitnessRef(statedb.EVMServiceCode, ssrObjectID, true)
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("failed to read SSR metadata for %s: %v", contractAddress.String(), err)
 	}
@@ -396,7 +396,7 @@ func (n *NodeContent) readContractStorageValue(stateDB *statedb.StateDB, contrac
 
 	// 4. Read the shard from DA
 	shardObjectID := shard_to_objectID(contractAddress, shardID.toBytes())
-	witness, found, err = stateDB.ReadStateWitness(statedb.EVMServiceCode, shardObjectID, true)
+	witness, found, err = stateDB.ReadStateWitnessRef(statedb.EVMServiceCode, shardObjectID, true)
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("failed to read shard: %v", err)
 	}
@@ -442,7 +442,7 @@ func (n *NodeContent) GetCode(address common.Address, blockNumber string) ([]byt
 
 	// Read contract code from DA
 	codeObjectID := code_to_objectID(address)
-	witness, found, err := stateDB.ReadStateWitness(statedb.EVMServiceCode, codeObjectID, true)
+	witness, found, err := stateDB.ReadStateWitnessRef(statedb.EVMServiceCode, codeObjectID, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read contract code: %v", err)
 	}

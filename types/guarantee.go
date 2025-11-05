@@ -15,7 +15,7 @@ import (
 // Guarantee discard reasons used for telemetry instrumentation.
 const (
 	GuaranteeDiscardReasonReportedOnChain     byte = 0 // Work-package reported on-chain
-	GuaranteeDiscardReasonReplacedByBetter    byte = 1 // Replaced by better guarantee
+	GuaranteeDiscardReasonReplacedByBetter    byte = 1 // Replaced by better guarantee -- NOT CLEAR about "better" (signature count?)
 	GuaranteeDiscardReasonCannotReportOnChain byte = 2 // Cannot be reported on-chain
 	GuaranteeDiscardReasonTooManyGuarantees   byte = 3 // Too many guarantees retained locally
 	GuaranteeDiscardReasonOther               byte = 4 // Other/unspecified reason

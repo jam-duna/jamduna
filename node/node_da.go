@@ -20,6 +20,49 @@ const (
 	debugSpec = false
 )
 
+// PayloadType discriminator matching Rust enum
+type PayloadType byte
+
+const (
+	PayloadTypeBuilder      PayloadType = 0x00
+	PayloadTypeTransactions PayloadType = 0x01
+	PayloadTypeBlocks       PayloadType = 0x02
+	PayloadTypeCall         PayloadType = 0x03
+)
+
+// buildPayload constructs a payload byte array for any payload type
+func buildPayload(payloadType PayloadType, count int, numWitnesses int) []byte {
+	payload := make([]byte, 7)
+	payload[0] = byte(payloadType)
+	binary.LittleEndian.PutUint32(payload[1:5], uint32(count))
+	binary.LittleEndian.PutUint16(payload[5:7], uint16(numWitnesses))
+	return payload
+}
+
+func appendExtrinsicWitnessesToWorkItem(workItem *types.WorkItem, extrinsicsBlobs *[]types.ExtrinsicsBlobs, index int, witnesses []types.StateWitness) {
+	for _, witness := range witnesses {
+		witnessBytes := witness.SerializeWitness()
+		(*extrinsicsBlobs)[index] = append((*extrinsicsBlobs)[index], witnessBytes)
+		witnessExtrinsic := types.WorkItemExtrinsic{
+			Hash: common.Blake2Hash(witnessBytes),
+			Len:  uint32(len(witnessBytes)),
+		}
+		workItem.Extrinsics = append(workItem.Extrinsics, witnessExtrinsic)
+	}
+}
+
+func appendExtrinsicWitnessesRawToWorkItem(workItem *types.WorkItem, extrinsicsBlobs *[]types.ExtrinsicsBlobs, index int, witnesses []types.StateWitnessRaw) {
+	for _, witness := range witnesses {
+		witnessBytes := witness.SerializeWitnessRaw()
+		(*extrinsicsBlobs)[index] = append((*extrinsicsBlobs)[index], witnessBytes)
+		witnessExtrinsic := types.WorkItemExtrinsic{
+			Hash: common.Blake2Hash(witnessBytes),
+			Len:  uint32(len(witnessBytes)),
+		}
+		workItem.Extrinsics = append(workItem.Extrinsics, witnessExtrinsic)
+	}
+}
+
 type AvailabilitySpecifierDerivation struct {
 	BClubs        []common.Hash             `json:"bClubs"`
 	SClubs        []common.Hash             `json:"sClubs"`
@@ -288,7 +331,13 @@ func (n *NodeContent) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup
 
 // authorizeWP executes the authorization step for a work package
 func (n *NodeContent) authorizeWP(workPackage types.WorkPackage, workPackageCoreIndex uint16, targetStateDB *statedb.StateDB, pvmBackend string) (r types.Result, p_a common.Hash, authGasUsed int64, err error) {
-	authcode, _, authindex, err := n.statedb.GetAuthorizeCode(workPackage)
+	log.Info(log.Node, "authorizeWP", "NODE", n.id, "workPackage", workPackage.Hash(), "workPackageCoreIndex", workPackageCoreIndex, "stateRoot", n.statedb.GetStateRoot().Hex(), "targetRoot", targetStateDB.GetStateRoot().Hex())
+	currStateDBRoot := n.statedb.GetStateRoot()
+	targetStateDBRoot := targetStateDB.GetStateRoot()
+	if currStateDBRoot.Hex() != targetStateDBRoot.Hex() {
+		log.Warn(log.Node, "authorizeWP: state root mismatch", "NODE", n.id, "workPackage", workPackage.Hash(), "currentStateDBRoot", currStateDBRoot.Hex(), "targetStateDBRoot", targetStateDBRoot.Hex())
+	}
+	authcode, _, authindex, err := targetStateDB.GetAuthorizeCode(workPackage)
 	if err != nil {
 		return
 	}
@@ -298,6 +347,19 @@ func (n *NodeContent) authorizeWP(workPackage types.WorkPackage, workPackageCore
 		err = fmt.Errorf("authorizeWP: failed to create VM for authorization (corrupted bytecode?)")
 		return
 	}
+
+	/*
+		authcode, _, authindex, err := n.statedb.GetAuthorizeCode(workPackage)
+		if err != nil {
+			return
+		}
+
+		vm_auth := statedb.NewVMFromCode(authindex, authcode, 0, 0, targetStateDB, pvmBackend, types.IsAuthorizedGasAllocation)
+		if vm_auth == nil {
+			err = fmt.Errorf("authorizeWP: failed to create VM for authorization (corrupted bytecode?)")
+			return
+		}
+	*/
 
 	r = vm_auth.ExecuteAuthorization(workPackage, workPackageCoreIndex)
 
@@ -312,12 +374,21 @@ func (n *NodeContent) authorizeWP(workPackage types.WorkPackage, workPackageCore
 // BuildBundle maps a work package into a work package bundle which is LIKE executeWorkPackageBundle, but does NOT require ExportCount + importedSegments to be pre-set,
 // Instead, it updates the workpackage work items: (1)  ExportCount ImportedSegments with a special HostFetchWitness call
 
-func (n *NodeContent) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
+func (n *NodeContent) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
 	wp := workPackage.Clone()
 
 	targetStateDB := n.getPVMStateDB()
 	currentStateRoot := targetStateDB.GetStateRoot()
-
+	log.Info(log.DA, "BuildBundle: currentStateRoot", "NODE", n.id, "stateRoot", currentStateRoot.Hex())
+	wp.RefineContext = types.RefineContext{
+		Anchor:           targetStateDB.GetHeaderHash(),
+		StateRoot:        currentStateRoot,
+		BeefyRoot:        common.Hash{}, // TODO: set correctly
+		LookupAnchor:     targetStateDB.GetHeaderHash(),
+		LookupAnchorSlot: targetStateDB.JamState.SafroleState.Timeslot,
+		Prerequisites:    []common.Hash{}, // TODO: improve this
+	}
+	log.Info(log.DA, "BuildBundle: RefineContext", "NODE", n.id, "refineContext", fmt.Sprintf("%+v", wp.RefineContext))
 	authorization, p_a, authGasUsed, err := n.authorizeWP(wp, coreIndex, targetStateDB, n.pvmBackend)
 	if err != nil {
 		return nil, nil, err
@@ -329,14 +400,33 @@ func (n *NodeContent) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs
 	for index, workItem := range wp.WorkItems {
 		code, ok, err0 := targetStateDB.ReadServicePreimageBlob(workItem.Service, workItem.CodeHash)
 		if err != nil || !ok || len(code) == 0 {
-			return nil, nil, fmt.Errorf("buildBundle:ReadServicePreimageBlob:s_id %v, codehash %v, err %v, ok=%v", workItem.Service, workItem.CodeHash, err0, ok)
+			return nil, nil, fmt.Errorf("BuildBundle:ReadServicePreimageBlob:s_id %v, codehash %v, err %v, ok=%v", workItem.Service, workItem.CodeHash, err0, ok)
 		}
+
+		// Capture original transaction count BEFORE any witnesses are appended
+		originalTxCount := uint32(len(wp.WorkItems[index].Extrinsics))
+
+		// Add all objectWitnesses of type receipt as extrinsics
+		if len(rawObjectIDs) != 0 {
+			witnesses := []types.StateWitnessRaw{}
+			for _, objectID := range rawObjectIDs {
+				witness, ok, _, err := n.statedb.ReadStateWitnessRaw(workItem.Service, objectID)
+				if err != nil {
+					log.Warn(log.DA, "BuildBundle: ReadStateWitnessRaw failed", "objectID", objectID, "err", err)
+					return nil, nil, err
+				} else if ok {
+					witnesses = append(witnesses, witness)
+				}
+			}
+			appendExtrinsicWitnessesRawToWorkItem(&wp.WorkItems[index], &extrinsicsBlobs, index, witnesses)
+		}
+
 		vm := statedb.NewVMFromCode(workItem.Service, code, 0, 0, targetStateDB, n.pvmBackend, workItem.RefineGasLimit)
 		if vm == nil {
-			return nil, nil, fmt.Errorf("buildBundle:NewVMFromCode:s_id %v, codehash %v, err %v, ok=%v", workItem.Service, workItem.CodeHash, err0, ok)
+			return nil, nil, fmt.Errorf("BuildBundle:NewVMFromCode:s_id %v, codehash %v, err %v, ok=%v", workItem.Service, workItem.CodeHash, err0, ok)
 		}
 		vm.Timeslot = n.statedb.JamState.SafroleState.Timeslot
-		vm.SetPVMContext(log.FirstGuarantorOrAuditor)
+		vm.SetPVMContext(log.Builder)
 		importsegments := make([][][]byte, len(wp.WorkItems))
 		result, _, exported_segments := vm.ExecuteRefine(coreIndex, uint32(index), wp, authorization, importsegments, 0, extrinsicsBlobs[index], p_a, common.BytesToHash(trie.H0))
 
@@ -345,27 +435,17 @@ func (n *NodeContent) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs
 			log.Warn(log.DA, "BuildBundle: GetBuilderWitnesses failed", "err", err)
 			return nil, nil, err
 		}
-		// tx_count is the number of transaction extrinsics (before adding witnesses)
-		txCount := uint32(len(wp.WorkItems[index].Extrinsics))
 		wp.WorkItems[index].ExportCount = uint16(len(exported_segments))
 		wp.WorkItems[index].ImportedSegments = importedSegments
-		// Append witnesses to extrinsicsBlobs and update witness_count in PayloadTransaction
-		witnessCount := uint16(len(witnesses))
-		for _, witness := range witnesses {
-			witnessBytes := witness.SerializeWitness()
-			extrinsicsBlobs[index] = append(extrinsicsBlobs[index], witnessBytes)
-			witnessExtrinsic := types.WorkItemExtrinsic{
-				Hash: common.Blake2Hash(witnessBytes),
-				Len:  uint32(len(witnessBytes)),
-			}
-			wp.WorkItems[index].Extrinsics = append(wp.WorkItems[index].Extrinsics, witnessExtrinsic)
-		}
+
+		// Append builder witnesses to extrinsicsBlobs
+		builderWitnessCount := len(witnesses)
+		appendExtrinsicWitnessesToWorkItem(&wp.WorkItems[index], &extrinsicsBlobs, index, witnesses)
+
+		// Update payload metadata if it's PayloadTransactions format
 		if len(wp.WorkItems[index].Payload) >= 1 && bytes.Equal(wp.WorkItems[index].Payload[:1], types.PayloadTransactions) {
-			newPayload := make([]byte, 7)
-			newPayload[0] = 'T'
-			binary.LittleEndian.PutUint32(newPayload[1:5], txCount)
-			binary.LittleEndian.PutUint16(newPayload[5:7], witnessCount)
-			wp.WorkItems[index].Payload = newPayload
+			totalWitnessCount := uint16(builderWitnessCount)
+			wp.WorkItems[index].Payload = buildPayload(PayloadTypeBuilder, int(originalTxCount), int(totalWitnessCount))
 		}
 
 		// Append exported segments (append slice directly)
@@ -398,9 +478,9 @@ func (n *NodeContent) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs
 		coreIndex:   coreIndex,
 		extrinsics:  extrinsicsBlobs[0], // buildBundle expects single ExtrinsicsBlobs
 	}
-	bundle, _, err := n.buildBundle(wpQueueItem)
+	bundle, _, err := n.BuildBundleFromWPQueueItem(wpQueueItem)
 	if err != nil {
-		log.Warn(log.DA, "BuildBundle: buildBundle failed", "err", err)
+		log.Warn(log.DA, "BuildBundle: BuildBundleFromWPQueueItem failed", "err", err)
 		return nil, nil, err
 	}
 
@@ -416,6 +496,7 @@ func (n *NodeContent) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs
 		LookupAnchorSlot: targetStateDB.JamState.SafroleState.Timeslot,
 		Prerequisites:    []common.Hash{},
 	}
+	log.Info(log.DA, "BuildBundle: RefineContext", "refineContext", fmt.Sprintf("%+v", bundle.WorkPackage.RefineContext))
 
 	// Create AvailabilitySpecifier and WorkReport
 	spec, _ := n.NewAvailabilitySpecifier(bundle, segments)
@@ -436,9 +517,21 @@ func (n *NodeContent) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs
 // executeWorkPackageBundle can be called by a guarantor OR an auditor -- the caller MUST do  VerifyBundle call prior to execution (verifying the imported segments)
 // If eventID is non-zero, telemetry events for Authorized and Refined will be emitted
 func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, slot uint32, firstGuarantorOrAuditor bool, eventID uint64) (work_report types.WorkReport, d AvailabilitySpecifierDerivation, elapsed uint32, bundleSnapshot *types.WorkPackageBundleSnapshot, err error) {
+	targetStateRoot := package_bundle.WorkPackage.RefineContext.StateRoot
+	log.Info(log.Node, "executeWorkPackageBundle START", "NODE", n.id, "targetStateRoot", targetStateRoot.Hex())
+	targetStateDB, err := n.getTargetStateDB(targetStateRoot)
+	if err != nil {
+		return work_report, d, 0, bundleSnapshot, fmt.Errorf("executeWorkPackageBundle:getTargetStateDB: %v", err)
+	}
+	//targetStateDB := n.getPVMStateDB() // this line is NOT OK
+	// if targetStateRoot != targetStateDB.GetStateRoot() {
+	// 	log.Warn(log.Node, "executeWorkPackageBundle: Mismatched state root", "expected", targetStateRoot.Hex(), "got", targetStateDB.GetStateRoot().Hex())
+	// 	// TODO: load the correct state root into targetStateDB
+	// }
+
 	importsegments := make([][][]byte, len(package_bundle.WorkPackage.WorkItems))
 	results := []types.WorkDigest{}
-	targetStateDB := n.getPVMStateDB()
+
 	workPackage := package_bundle.WorkPackage
 
 	// Import Segments
@@ -466,6 +559,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 
 	var segments [][]byte
 	refineCosts := make([]telemetry.RefineCost, 0, len(workPackage.WorkItems))
+	vmLogging := "unknown"
 	for index, workItem := range workPackage.WorkItems {
 		// map workItem.ImportedSegments into segment
 		service_index := workItem.Service
@@ -490,10 +584,13 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		} else {
 			vm.SetPVMContext(log.OtherGuarantor)
 		}
+		vmLogging = vm.GetVMLogging()
+
 		// 0.7.1 : core index is part of refine args
 		execStart := time.Now()
 		output, _, exported_segments := vm.ExecuteRefine(workPackageCoreIndex, uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData[index], workPackage.AuthorizationCodeHash, common.BytesToHash(trie.H0))
 		execElapsed := time.Since(execStart)
+		fmt.Printf("***** [N%d]ExecuteRefine Service %d WorkItem %d ExportedSegments %d ExecElapsed %v *****\n", n.id, service_index, index, len(exported_segments), execElapsed)
 		compileElapsed := time.Since(compileStart)
 
 		expectedSegmentCnt := int(workItem.ExportCount)
@@ -501,7 +598,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		segmentCountMismatch := (expectedSegmentCnt != actualSegmentCnt)
 
 		if segmentCountMismatch {
-			log.Trace(log.Node, "executeWorkPackageBundle: ExportCount and ExportedSegments Mismatch", "ExportCount", expectedSegmentCnt, "ExportedSegments", actualSegmentCnt, "ExportedSegments", common.FormatPaddedBytesArray(exported_segments, 20))
+			log.Info(log.Node, "executeWorkPackageBundle: ExportCount and ExportedSegments Mismatch", "ExportCount", expectedSegmentCnt, "ExportedSegments", actualSegmentCnt, "ExportedSegments", common.FormatPaddedBytesArray(exported_segments, 20))
 			// Non-first guarantors/auditors trust the first guarantor's ExportCount
 			// and use actual segment count for appending to segments slice
 			if !firstGuarantorOrAuditor {
@@ -576,7 +673,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		Results:           results,
 		AuthGasUsed:       uint(authGasUsed),
 	}
-	log.Trace(log.Node, "executeWorkPackageBundle", "NODE", n.id, "workReport", workReport.String())
+	log.Info(log.Node, "executeWorkPackageBundle", "NODE", n.id, "role", vmLogging, "reportHash", workReport.Hash(), "workReport", workReport.String())
 
 	n.StoreBundleSpecSegments(spec, d, package_bundle, segments)
 	pvmElapsed := common.Elapsed(pvmStart)

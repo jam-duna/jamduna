@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -17,9 +18,10 @@ type JNode interface {
 	GetWorkReport(requestedHash common.Hash) (*types.WorkReport, error)
 	GetService(service uint32) (sa *types.ServiceAccount, ok bool, err error)
 	GetServiceStorage(serviceID uint32, storageKey []byte) ([]byte, bool, error)
-	ReadStateWitness(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error)
+	ReadStateWitnessRef(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error)
+	ReadStateWitnessRaw(serviceID uint32, objectID common.Hash) (types.StateWitnessRaw, bool, common.Hash, error)
 	GetStateWitnesses(workReports []*types.WorkReport) ([]types.StateWitness, common.Hash, error)
-	BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16) (b *types.WorkPackageBundle, wr *types.WorkReport, err error)
+	BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash) (b *types.WorkPackageBundle, wr *types.WorkReport, err error)
 
 	// Ethereum internal methods (called by Jam RPC wrappers)
 	// Network Metadata
@@ -41,9 +43,12 @@ type JNode interface {
 	// Transaction Queries
 	GetTransactionReceipt(txHash common.Hash) (*EthereumTransactionReceipt, error)
 	GetTransactionByHash(txHash common.Hash) (*EthereumTransactionResponse, error)
+	GetTransactionByBlockHashAndIndex(blockHash common.Hash, index uint32) (*EthereumTransactionResponse, error)
+	GetTransactionByBlockNumberAndIndex(blockNumber string, index uint32) (*EthereumTransactionResponse, error)
 	GetLogs(fromBlock, toBlock uint32, addresses []common.Address, topics [][]common.Hash) ([]EthereumLog, error)
 
 	// Block Queries
-	GetBlockByHash(blockHash common.Hash, fullTx bool) (*EthereumBlock, error)
-	GetBlockByNumber(blockNumber string, fullTx bool) (*EthereumBlock, error)
+	GetLatestBlockNumber() (uint32, error)
+	GetBlockByHash(blockHash common.Hash, fullTx bool) (*statedb.EthereumBlock, error)
+	GetBlockByNumber(blockNumber string, fullTx bool) (*statedb.EthereumBlock, error)
 }

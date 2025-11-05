@@ -9,90 +9,6 @@ import (
 	"github.com/colorfulnotion/jam/statedb"
 )
 
-// TransactionReceipt represents the parsed transaction receipt from storage
-type TransactionReceipt struct {
-	Hash     common.Hash
-	Success  bool
-	UsedGas  uint64
-	Payload  []byte
-	LogsData []byte
-}
-
-// parseRawReceipt parses the raw receipt data into a TransactionReceipt struct
-//
-// Receipt format: [version:1][tx_hash:32][tx_type:1][status:1][used_gas:8][tx_payload_len:4][tx_payload]
-// [logs_payload_len:4][logs_payload][tx_index:2][cumulative_gas:8][logs_bloom:256][receipt_hash:32]
-func parseRawReceipt(data []byte) (*TransactionReceipt, error) {
-	if len(data) < 1+32+1+1+8+4 { // version + hash + tx_type + success + gas + payload_len minimum
-		return nil, fmt.Errorf("transaction receipt data too short: %d bytes", len(data))
-	}
-
-	offset := 0
-
-	// Parse version (1 byte)
-	version := data[offset]
-	offset += 1
-
-	// Parse hash (32 bytes)
-	var hash common.Hash
-	copy(hash[:], data[offset:offset+32])
-	offset += 32
-
-	// Parse tx_type (1 byte) - EIP-2718
-	txType := data[offset]
-	offset += 1
-
-	// Parse success flag (1 byte)
-	success := data[offset] == 1
-	offset += 1
-
-	// Parse used gas (8 bytes, little-endian)
-	usedGas := binary.LittleEndian.Uint64(data[offset : offset+8])
-	offset += 8
-
-	// Parse payload length and payload
-	if len(data) < offset+4 {
-		return nil, fmt.Errorf("insufficient data for payload length")
-	}
-	payloadLen := binary.LittleEndian.Uint32(data[offset : offset+4])
-	offset += 4
-
-	if len(data) < offset+int(payloadLen) {
-		return nil, fmt.Errorf("insufficient data for payload")
-	}
-	payload := make([]byte, payloadLen)
-	copy(payload, data[offset:offset+int(payloadLen)])
-	offset += int(payloadLen)
-
-	// Parse logs length and logs
-	if len(data) < offset+4 {
-		return nil, fmt.Errorf("insufficient data for logs length")
-	}
-	logsLen := binary.LittleEndian.Uint32(data[offset : offset+4])
-	offset += 4
-
-	if len(data) < offset+int(logsLen) {
-		return nil, fmt.Errorf("insufficient data for logs")
-	}
-	logsData := make([]byte, logsLen)
-	copy(logsData, data[offset:offset+int(logsLen)])
-	offset += int(logsLen)
-
-	// Optional canonical fields (version 1): [tx_index:2][cumulative_gas:8][logs_bloom:256][receipt_hash:32]
-	// These fields are present if version == 1, but we don't need to parse them for current RPC implementation
-	// They will be used by future RPC enhancements for proper Ethereum receipt compatibility
-	_ = version // Suppress unused variable warning
-	_ = txType  // Suppress unused variable warning
-
-	return &TransactionReceipt{
-		Hash:     hash,
-		Success:  success,
-		UsedGas:  usedGas,
-		Payload:  payload,
-		LogsData: logsData,
-	}, nil
-}
-
 // LogFilter represents the filter criteria for eth_getLogs
 type LogFilter struct {
 	FromBlock interface{}   `json:"fromBlock,omitempty"` // "latest", "earliest", "pending", or hex number
@@ -151,33 +67,32 @@ func (n *NodeContent) GetLogs(fromBlock, toBlock uint32, addresses []common.Addr
 
 // getLogsFromBlock retrieves logs from a specific block that match the filter criteria
 func (n *NodeContent) getLogsFromBlock(blockNumber uint32, addresses []common.Address, topics [][]common.Hash) ([]EthereumLog, error) {
-	// 1. Get all transaction hashes from the block
-	blockTxHashes, err := n.readBlockFromStorage(blockNumber)
+	// 1. Get all transaction hashes from the block (use canonical metadata)
+	evmBlock, err := n.readBlockByNumber(blockNumber)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read block %d: %v", blockNumber, err)
 	}
+	blockTxHashes := evmBlock.TxHashes
+	blockHashHex := evmBlock.ComputeHash().String()
 
 	var blockLogs []EthereumLog
 
-	// Block-scoped log index counter for Ethereum-compliant unique log indices
-	var logIndexCounter uint64 = 0
-
-	// 2. For each transaction, get its receipt and extract logs
+	// For each transaction, get its receipt and extract logs
 	for txIndex, txHash := range blockTxHashes {
 		// Get transaction receipt using ReadObject abstraction
 		receiptObjectID := tx_to_objectID(txHash)
-		witness, found, err := n.statedb.ReadStateWitness(statedb.EVMServiceCode, receiptObjectID, true)
+		witness, found, err := n.statedb.ReadStateWitnessRef(statedb.EVMServiceCode, receiptObjectID, false)
 		if err != nil || !found {
 			log.Warn(log.Node, "getLogsFromBlock: Failed to read receipt", "txHash", txHash.String(), "error", err)
 			continue
 		}
 
-		// Parse receipt
-		receipt, err := parseRawReceipt(witness.Payload)
+		receipt, err := statedb.ParseRawReceipt(witness.Payload)
 		if err != nil {
 			log.Warn(log.Node, "getLogsFromBlock: Failed to parse receipt", "txHash", txHash.String(), "error", err)
 			continue
 		}
+		ref := witness.Ref
 
 		// Extract and filter logs from this transaction
 		if len(receipt.LogsData) > 0 {
@@ -185,9 +100,9 @@ func (n *NodeContent) getLogsFromBlock(blockNumber uint32, addresses []common.Ad
 				receipt.LogsData,
 				txHash,
 				fmt.Sprintf("0x%x", blockNumber),
-				"0x0000000000000000000000000000000000000000000000000000000000000001", // TODO: Real block hash
+				blockHashHex,
 				fmt.Sprintf("0x%x", txIndex),
-				&logIndexCounter, // Block-scoped counter for unique log indices
+				uint64(ref.LogIndex),
 			)
 			if err != nil {
 				log.Warn(log.Node, "getLogsFromBlock: Failed to parse logs", "txHash", txHash.String(), "error", err)
@@ -263,22 +178,13 @@ func matchesTopicsFilter(logTopics []string, topicFilter [][]common.Hash) bool {
 	return true
 }
 
-// calculateLogsBloom generates a 256-byte Ethereum logs bloom filter from logs
-// For now, returns an empty bloom (all zeros). Full implementation will be added in Phase II.
-func calculateLogsBloom(logs []EthereumLog) string {
-	// TODO: Implement proper Ethereum bloom filter per LOGS-BLOOM.md
-	// For each log: hash address and topics with Keccak-256, set bits using 3x 11-bit slices
-	bloom := make([]byte, 256)
-	return "0x" + common.Bytes2Hex(bloom)
-}
-
 // parseLogsFromReceipt parses logs from receipt LogsData
 // Format from Rust helpers.rs:715-746:
 // [log_count:2][address:20][topic_count:1][topics:32*N][data_len:4][data:N]
-//
+// å
 // logIndexCounter is a pointer to a block-scoped counter for Ethereum-compliant log indices.
 // Each log increments the counter so logIndex is unique across the entire block, not per-transaction.
-func parseLogsFromReceipt(logsData []byte, txHash common.Hash, blockNumber, blockHash, txIndex string, logIndexCounter *uint64) ([]EthereumLog, error) {
+func parseLogsFromReceipt(logsData []byte, txHash common.Hash, blockNumber, blockHash, txIndex string, logIndexStart uint64) ([]EthereumLog, error) {
 	if len(logsData) < 2 {
 		// No logs or insufficient data
 		return []EthereumLog{}, nil
@@ -331,13 +237,8 @@ func parseLogsFromReceipt(logsData []byte, txHash common.Hash, blockNumber, bloc
 		if offset+int(dataLen) > len(logsData) {
 			return nil, fmt.Errorf("insufficient data for log %d data", i)
 		}
-		data := "0x" + common.Bytes2Hex(logsData[offset:offset+int(dataLen)])
+		data := common.Bytes2Hex(logsData[offset:offset+int(dataLen)])
 		offset += int(dataLen)
-
-		// Build Ethereum log
-		// Use block-scoped logIndexCounter for Ethereum-compliant unique log indices
-		currentLogIndex := *logIndexCounter
-		*logIndexCounter += 1 // Increment for next log in block
 
 		logs = append(logs, EthereumLog{
 			Address:          address.String(),
@@ -347,7 +248,7 @@ func parseLogsFromReceipt(logsData []byte, txHash common.Hash, blockNumber, bloc
 			TransactionHash:  txHash.String(),
 			TransactionIndex: txIndex,
 			BlockHash:        blockHash,
-			LogIndex:         fmt.Sprintf("0x%x", currentLogIndex),
+			LogIndex:         fmt.Sprintf("0x%x", logIndexStart+uint64(i)),
 			Removed:          false,
 		})
 	}

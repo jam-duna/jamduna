@@ -11,7 +11,7 @@ type TestService struct {
 	Code            []byte
 	ServiceName     string
 	MetadataAndCode []byte
-	Preimages       []string
+	Storage         map[common.Hash][]byte
 }
 
 type ServiceInfo struct {

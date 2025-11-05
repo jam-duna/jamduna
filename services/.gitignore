@@ -1,0 +1,23 @@
+*.pvm
+*.txt
+
+# Rust Build Artifacts
+target/
+Cargo.lock
+
+# IDE and Editor Files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Temporary Files
+*.tmp
+*.temp
+*/*.txt
+*/*.pvm

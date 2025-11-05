@@ -12,8 +12,9 @@ const (
 	ObjectKindSsrMetadata ObjectKind = 0x02
 	// ObjectKindReceipt - receipt object (kind=0x03)
 	ObjectKindReceipt ObjectKind = 0x03
-	// ObjectKindTransaction - transaction object (kind=0x04)
-	ObjectKindTransaction ObjectKind = 0x04
+	// ObjectKindRaw - raw object (kind=0x04) - this is special in that its not in DA but in JAM State
+	ObjectKindRaw   ObjectKind = 0x04
+	ObjectKindBlock ObjectKind = 0x05
 )
 
 // Emoji returns the emoji representation for this object kind
@@ -27,7 +28,7 @@ func (k ObjectKind) Emoji() string {
 		return "🗺️"
 	case ObjectKindReceipt:
 		return "🧾"
-	case ObjectKindTransaction:
+	case ObjectKindRaw:
 		return "📤"
 	default:
 		return "❓"

@@ -101,6 +101,25 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 			WorkPackageHash: make([]common.Hash, 0),
 		}
 	}
+	storage := make(map[common.Hash][]byte)
+
+	// Set up EVM block 0 in genesis, Initialize BLOCK_NUMBER_KEY with 0
+	//   BLOCK_NUMBER_KEY =  block_number (LE) || parent_hash.
+	// Refine only allows authorized builders
+	// Accumulate only allows increments on BLOCK_NUMBER_KEY when there is a timestamp greater than this
+	// SubmitGenesisWorkPackage uses ReadStateWitness must submit extrinsics that match these storage entries
+	storage[getBlockNumberKey()] = serializeBlockNumber(0, common.Hash{})
+	// this is the genesis block
+	storage[blockNumberToObjectID(0)] = SerializeEvmBlockPayload(&EvmBlockPayload{
+		Number:        0,
+		ParentHash:    common.Hash{},
+		LogsBloom:     [256]byte{},
+		GasLimit:      30000000,
+		Timestamp:     0,
+		TxHashes:      []common.Hash{},
+		ReceiptHashes: []common.Hash{},
+	})
+
 	// Load services into genesis state
 	services := []types.TestService{
 		{
@@ -122,8 +141,10 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 			ServiceCode: uint32(EVMServiceCode),
 			FileName:    EVMServiceFile,
 			ServiceName: "evm",
+			Storage:     storage,
 		},
 	}
+
 	auth_pvm := common.GetFilePath(BootStrapNullAuthFile)
 	auth_code_bytes, err0 := os.ReadFile(auth_pvm)
 	if err0 != nil {
@@ -182,21 +203,8 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 			statedb.WriteServicePreimageBlob(service.ServiceCode, code)
 			statedb.WriteServicePreimageLookup(service.ServiceCode, codeHash, codeLen, bootStrapAnchor)
 
-			for _, preimageFile := range service.Preimages {
-				preimagePath := common.GetFilePath(preimageFile)
-				preimageBytes, err := os.ReadFile(preimagePath)
-				if err != nil {
-					return nil, fmt.Errorf("failed to read preimage file %s: %v", preimagePath, err)
-				}
-				//fmt.Printf("Preimage file %s read successfully, size %d bytes. bytes=%0x\n", preimageFile, len(preimageBytes), preimageBytes)
-				preimageHash := common.Blake2Hash(preimageBytes)
-				preimageLen := uint32(len(preimageBytes))
-				fmt.Printf("Service=%v(%v) Preimage file %s, hash %s, len %d. bytes=%0x\n", service.ServiceName, service.ServiceCode, preimageFile, preimageHash.String(), preimageLen, preimageBytes)
-				statedb.WriteServicePreimageBlob(service.ServiceCode, preimageBytes)
-				statedb.WriteServicePreimageLookup(service.ServiceCode, preimageHash, preimageLen, bootStrapAnchor)
-				// Update storage size and item count for each preimage
-				sa.StorageSize += uint64(32 + preimageLen) // 32 bytes for hash + length of preimage
-				sa.NumStorageItems += 2                    // one for blob and one for lookup
+			for k, v := range service.Storage {
+				statedb.WriteServiceStorage(service.ServiceCode, k.Bytes(), v)
 			}
 			statedb.writeService(service.ServiceCode, &sa)
 

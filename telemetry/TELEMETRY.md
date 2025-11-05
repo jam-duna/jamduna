@@ -309,7 +309,7 @@ These events concern JAMNP-S connections.
 - Connection events (20-27): `node/network.go` - in connection handlers
 - Peer misbehavior (28): Throughout networking code where protocol violations are detected
 
-### 20: Connection refused 🔴 POST-MIGRATION
+### 20: Connection refused 🔴 DEFERRED
 
 Emitted when a connection attempt from a peer is refused.
 
@@ -388,7 +388,7 @@ Emitted when a connection to a peer is broken.
 #### Call sites -- ✅ shawn audited
 - [node/node.go](../node/node.go#L1656) — `(*Node).handleConnection`
 
-### 28: Peer misbehaved 🔴 POST-MIGRATION
+### 28: Peer misbehaved 🔴 DEFERRED
 Emitted when a peer misbehaves. Misbehaviour is any behaviour which is objectively not compliant
 with the network protocol or the GP. This includes for example sending a malformed message or an
 invalid signature. This does _not_ include, for example, timing out (timeouts are subjective) or
@@ -991,7 +991,7 @@ emitted.
 #### Call sites -- ✅ sourabh audited (moved location)
 - [node/peerCE135_workreportdistribution.go](../node/peerCE135_workreportdistribution.go#L216) — `(*Node).onWorkReportDistribution`
 
-### 113: Guarantee discarded -- 🔴 POST-MIGRATION
+### 113: Guarantee discarded -- ✅ sourabh audited (needs some clarification..)
 
 Emitted when a guarantee is discarded from the local guarantee pool.
 

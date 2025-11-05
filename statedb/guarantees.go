@@ -272,7 +272,14 @@ func (s *StateDB) checkServicesExist(g types.Guarantee) error {
 			return err
 		}
 		if !ok {
-			log.Warn(log.G, "checkServicesExist: serviceID not found", "serviceID", result.ServiceID, "slot", s.GetTimeslot())
+			log.Warn(log.G, "!!!! checkServicesExist: serviceID not found", "serviceID", result.ServiceID, "slot", s.GetTimeslot(), "s.ID", s.Id)
+			keyValues := s.GetAllKeyValues()
+			log.Info(log.Node, "!!!! getTargetStateDB: Recovered state key-values", "numKeyValues", len(keyValues))
+
+			for _, kv := range keyValues {
+				fmt.Printf("[Key] 0x%x Len=%d\n", kv.Key, len(kv.Value))
+			}
+			panic("serviceID not found")
 			return jamerrors.ErrGBadServiceID
 		}
 	}

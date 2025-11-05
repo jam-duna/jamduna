@@ -147,7 +147,7 @@ func (p *Peer) SendWorkReportDistribution(
 		return fmt.Errorf("ToBytes[CE135_WorkReportDistribution]: %w", err)
 	}
 
-	log.Debug(log.G, "onWorkReportDistribution OUTGOING SPEC",
+	log.Trace(log.G, "onWorkReportDistribution OUTGOING SPEC",
 		"n", p.node.store.NodeID,
 		//"peerID", peerID,
 		"workPackageHash", wr.GetWorkPackageHash(),
@@ -156,7 +156,7 @@ func (p *Peer) SendWorkReportDistribution(
 		//"slot", guarantee.Slot,
 	)
 
-	log.Debug(log.G, "onWorkReportDistribution OUTGOING REPORT",
+	log.Trace(log.G, "onWorkReportDistribution OUTGOING REPORT",
 		"n", p.node.store.NodeID,
 		"workPackageHash", wr.GetWorkPackageHash(),
 		"workReportHash", wr.Hash(),
@@ -207,7 +207,7 @@ func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream,
 		log.Warn(log.G, "onWorkReportDistribution", "msg", "guaranteesCh full, dropping guarantee")
 	}
 
-	log.Debug(log.G, "onWorkReportDistribution INCOMING SPEC",
+	log.Trace(log.G, "onWorkReportDistribution INCOMING SPEC",
 		"n", n.String(),
 		"peerID", peerID,
 		"workPackageHash", workReport.GetWorkPackageHash(),
@@ -216,7 +216,7 @@ func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream,
 		"slot", guarantee.Slot,
 	)
 
-	log.Debug(log.G, "onWorkReportDistribution INCOMING REPORT",
+	log.Trace(log.G, "onWorkReportDistribution INCOMING REPORT",
 		"n", n.String(),
 		"workPackageHash", workReport.GetWorkPackageHash(),
 		"workReportHash", workReport.Hash(),

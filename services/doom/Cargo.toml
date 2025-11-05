@@ -1,0 +1,16 @@
+
+[package]
+name = "doom"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "doom"
+path = "src/main.rs"
+
+[dependencies]
+polkavm-derive = { workspace = true }
+simplealloc = { workspace = true }
+polkavm = { workspace = true }
+primitive-types = { version = "0.12", default-features = false, features = ["impl-serde"] }

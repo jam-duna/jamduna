@@ -60,10 +60,6 @@ endif
 
 .PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean jam_without_ffi_build run_parallel_jam kill_parallel_jam run_jam build_remote_nodes run_jam_remote_nodes da jamweb validatetraces testnet init-submodules update-submodules update-pvm-submodule update-services-submodule evm_jamtest algo_jamtest safrole_jamtest
 
-# Submodule management targets
-init-submodules:
-	@echo "Initializing git submodules..."
-	git submodule update --init --recursive
 
 update-submodules:
 	@echo "Updating git submodules..."
@@ -168,7 +164,7 @@ run_6:
 		RUST_LOG=chain-core=debug,jam_node=trace $(POLKAJAM_BIN)  --chain ${CHAINSPEC} run --pvm-backend $(PVM_BACKEND) --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
 	done
 
-jam: init-submodules
+jam:
 	@echo "Building JAM...  "
 	mkdir -p $(OUTPUT_DIR)
 	go build -tags=  -o $(OUTPUT_DIR)/$(ARCH)/$(BINARY) .
@@ -473,7 +469,7 @@ pvmlib:
 	@cp pvm_tmp/libcompiler.*.a pvm/recompiler_c/lib/ || true
 	@rm -rf pvm_tmp
 	@echo "libpvm.*.a and libcompiler.*.a files ready in ffi/ and pvm/lib/ (and pvm/recompiler_c/lib/)."
-	
+
 cargo_clean:
 	@echo "Cleaning FFI libraries!"
 	@cd bandersnatch && cargo clean

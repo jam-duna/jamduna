@@ -1072,13 +1072,6 @@ Guarantee Discard Reason =
 	4 (Other)
 	(Single byte)
 */
-const (
-	GuaranteeDiscardReason_ReportedOnChain     = types.GuaranteeDiscardReasonReportedOnChain
-	GuaranteeDiscardReason_ReplacedByBetter    = types.GuaranteeDiscardReasonReplacedByBetter
-	GuaranteeDiscardReason_CannotReportOnChain = types.GuaranteeDiscardReasonCannotReportOnChain
-	GuaranteeDiscardReason_TooManyGuarantees   = types.GuaranteeDiscardReasonTooManyGuarantees
-	GuaranteeDiscardReason_Other               = types.GuaranteeDiscardReasonOther
-)
 
 // TODO: IMPLEMENT THIS in node_author.go or guarantee pool management
 // GuaranteeDiscarded creates payload for guarantee discarded event (discriminator 113)

@@ -83,7 +83,7 @@ func (mh *MockHostEnv) ReadServicePreimageLookup(s uint32, blob_hash common.Hash
 }
 
 // ReadStateWitness fetches StateWitness for given objectID
-func (mh *MockHostEnv) ReadStateWitness(serviceID uint32, objectID common.Hash, FetchJAMDASegments bool) (types.StateWitness, bool, error) {
+func (mh *MockHostEnv) ReadStateWitnessRef(serviceID uint32, objectID common.Hash, FetchJAMDASegments bool) (types.StateWitness, bool, error) {
 	// Mock implementation: return dummy StateWitness
 	witness := types.StateWitness{
 		ObjectID: objectID,

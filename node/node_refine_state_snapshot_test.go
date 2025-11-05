@@ -35,14 +35,8 @@ const (
 	algo_stf    = "test/00000028.bin"
 	algo_bundle = "test/00000028_0x160796ba2f7702def36204c86172246ebf9d71f10e35f92dce734748b4ccdc4a_0_0_guarantor.bin"
 
-	fib_stf    = "test/00000040.bin"
-	fib_bundle = "test/00000040_0xedc4231ad4f9dfae4788e523507e1fa022bb17383124cad2802a292f0d7803fd_0_0_guarantor.bin"
-
 	game_of_stf    = "test/03233539.bin"
 	game_of_bundle = "test/03233538_0x8d63f7ce582bdf289283594871633c9018384b65f2699890d8321c5441b95c53_1_3233538_guarantor_follower.bin"
-
-	corevm_stf    = "test/03448350.bin"
-	corevm_bundle = "test/03448350_0x7d72894b366ec40836e90cb0c80bde3235190ffa15b188b9eb2a678c886e9a9b_0_3448350_guarantor_follower.bin"
 )
 
 func CompareJSON(obj1, obj2 interface{}) string {

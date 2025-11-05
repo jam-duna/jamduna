@@ -25,10 +25,12 @@ type ExtrinsicPool struct {
 	queuedTickets map[common.Hash]map[common.Hash]*Ticket // use entropy hash to store tickets, and ticket id to distinguish
 	knownTickets  map[common.Hash]struct{}                // use first 32 bytes of ticket signature to distinguish
 	ticketMutex   sync.Mutex
+
 	// preimage queue storage
-	queuedPreimages map[common.Hash]*Preimages // use AccountPreimageHash hash to store preimages
-	knownPreimages  map[common.Hash]uint32     // use AccountPreimageHash hash to store preimages
-	preimageMutex   sync.Mutex
+	queuedPreimages         map[common.Hash]*Preimages // use AccountPreimageHash hash to store preimages
+	knownPreimages          map[common.Hash]uint32     // use AccountPreimageHash hash to store preimages
+	preimageMutex           sync.Mutex
+	preimageDiscardCallback func(Preimages, byte)
 }
 
 func NewExtrinsicPool() *ExtrinsicPool {
@@ -50,6 +52,14 @@ func (ep *ExtrinsicPool) SetGuaranteeDiscardCallback(cb func(Guarantee, byte)) {
 	ep.guaranteeMutex.Lock()
 	defer ep.guaranteeMutex.Unlock()
 	ep.guaranteeDiscardCallback = cb
+}
+
+// SetPreimagesDiscardCallback registers a callback that is invoked whenever a preimage
+// is discarded from the local pool.
+func (ep *ExtrinsicPool) SetPreimagesDiscardCallback(cb func(Preimages, byte)) {
+	ep.preimageMutex.Lock()
+	defer ep.preimageMutex.Unlock()
+	ep.preimageDiscardCallback = cb
 }
 
 func (ep *ExtrinsicPool) RemoveUsedExtrinsicFromPool(block *Block, used_entropy common.Hash, IsTicketSubmissionClosed bool) {
@@ -191,11 +201,11 @@ func (ep *ExtrinsicPool) RemoveOldGuarantees(guarantee Guarantee, discardReason 
 func (ep *ExtrinsicPool) RemoveGuaranteesFromPool(accepted_slot uint32) error {
 	ep.guaranteeMutex.Lock()
 	defer ep.guaranteeMutex.Unlock()
-	if _, exists := ep.queuedGuarantees[accepted_slot]; exists {
-		delete(ep.queuedGuarantees, accepted_slot)
-	}
+
+	delete(ep.queuedGuarantees, accepted_slot)
 	for guarantee_hash, slot := range ep.knownGuarantees {
 		if *slot < accepted_slot-2*EpochLength {
+			// TODO: invoke callback with GuaranteeDiscardReasonOther?
 			delete(ep.knownGuarantees, guarantee_hash)
 		}
 	}
@@ -389,12 +399,8 @@ func (ep *ExtrinsicPool) RemoveOldPreimages(block_EPs []Preimages, timeslot uint
 	defer ep.preimageMutex.Unlock()
 	for _, block_EP := range block_EPs {
 		ah := block_EP.AccountHash()
-		if _, exists := ep.queuedPreimages[ah]; exists {
-			delete(ep.queuedPreimages, ah)
-		}
-		if _, exists := ep.knownPreimages[ah]; exists {
-			delete(ep.knownPreimages, ah)
-		}
+		delete(ep.queuedPreimages, ah)
+		delete(ep.knownPreimages, ah)
 		timeslot_tmp := timeslot
 		ep.knownPreimages[ah] = timeslot_tmp
 	}
@@ -402,6 +408,17 @@ func (ep *ExtrinsicPool) RemoveOldPreimages(block_EPs []Preimages, timeslot uint
 	for account_preimage_hash, ts := range ep.knownPreimages {
 		if ts < timeslot-2*EpochLength {
 			delete(ep.knownPreimages, account_preimage_hash)
+			cb := ep.preimageDiscardCallback
+			if cb != nil {
+				cb(*ep.queuedPreimages[account_preimage_hash], PreimageDiscardReasonOther)
+				/*
+					PreimageDiscardReasonOnChain      byte = 0 // (Provided on-chain)
+					PreimageDiscardReasonNotRequested byte = 1 // (Not requested on-chain)
+					PreimageDiscardReasonTooMany      byte = 2 // (Too many preimages)
+					PreimageDiscardReasonOther        byte = 3 // (Other)
+				*/
+
+			}
 		}
 	}
 	return nil // Success

@@ -25,7 +25,7 @@ const (
 // Host Function Name Mapping and Debug Helpers
 // ============================================================================
 
-var DebugHostFunctions = true
+var DebugHostFunctions = false
 
 // DebugHostFunction prints colorized debug information about host function calls
 func (vm *VM) DebugHostFunction(hostFn int, format string, a ...any) {

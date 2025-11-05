@@ -1,0 +1,9 @@
+[package]
+name = "utils"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+polkavm-derive = { workspace = true }
+primitive-types = { version = "0.12", default-features = false }
+sha3 = { version = "0.10", default-features = false }

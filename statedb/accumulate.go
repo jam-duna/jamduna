@@ -749,7 +749,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 	}
 
 	if isDebugGasBreakdown {
-		log.Info(log.SDB, "SingleAccumulate GAS BREAKDOWN", "service", fmt.Sprintf("%d", serviceID),
+		log.Trace(log.SDB, "SingleAccumulate GAS BREAKDOWN", "service", fmt.Sprintf("%d", serviceID),
 			"total_gas", gas,
 			"from_free", gasFree,
 			"from_work_reports", gasWorkReports, "num_digests", numWorkDigests,

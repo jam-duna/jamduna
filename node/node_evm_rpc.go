@@ -441,6 +441,115 @@ func (j *Jam) GetTransactionReceipt(req []string, res *string) error {
 	return nil
 }
 
+// GetTransactionByBlockHashAndIndex fetches a transaction by block hash and index
+//
+// Parameters:
+// - blockHash (string): Block hash as hex-encoded string
+// - index (string): Transaction index in block as hex-encoded uint
+//
+// Returns:
+// - object|null: Transaction object or null if not found
+//
+// Example curl call:
+// curl -X POST http://localhost:8545 -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"eth_getTransactionByBlockHashAndIndex","params":["0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef","0x0"],"id":1}'
+func (j *Jam) GetTransactionByBlockHashAndIndex(req []string, res *string) error {
+	if len(req) != 2 {
+		return fmt.Errorf("invalid number of arguments: expected 2, got %d", len(req))
+	}
+	blockHashStr := req[0]
+	indexStr := req[1]
+
+	log.Info(log.Node, "GetTransactionByBlockHashAndIndex", "blockHash", blockHashStr, "index", indexStr)
+
+	// Parse block hash
+	blockHash := common.HexToHash(blockHashStr)
+
+	// Parse transaction index
+	if len(indexStr) < 2 || indexStr[:2] != "0x" {
+		return fmt.Errorf("invalid index format: %s", indexStr)
+	}
+	index, err := strconv.ParseUint(indexStr[2:], 16, 64)
+	if err != nil {
+		return fmt.Errorf("failed to parse index: %v", err)
+	}
+
+	// Get transaction using internal method
+	ethTx, err := j.node.GetTransactionByBlockHashAndIndex(blockHash, uint32(index))
+	if err != nil {
+		log.Warn(log.Node, "GetTransactionByBlockHashAndIndex: Failed", "error", err)
+		*res = "null"
+		return nil
+	}
+
+	if ethTx == nil {
+		*res = "null"
+		return nil
+	}
+
+	// Convert to JSON
+	txBytes, err := json.Marshal(ethTx)
+	if err != nil {
+		return fmt.Errorf("failed to marshal transaction: %v", err)
+	}
+
+	*res = string(txBytes)
+	log.Info(log.Node, "GetTransactionByBlockHashAndIndex: Found transaction", "blockHash", blockHashStr, "index", index)
+	return nil
+}
+
+// GetTransactionByBlockNumberAndIndex fetches a transaction by block number and index
+//
+// Parameters:
+// - blockNumber (string): Block number ("latest", "earliest", "pending", or hex number)
+// - index (string): Transaction index in block as hex-encoded uint
+//
+// Returns:
+// - object|null: Transaction object or null if not found
+//
+// Example curl call:
+// curl -X POST http://localhost:8545 -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"eth_getTransactionByBlockNumberAndIndex","params":["latest","0x0"],"id":1}'
+func (j *Jam) GetTransactionByBlockNumberAndIndex(req []string, res *string) error {
+	if len(req) != 2 {
+		return fmt.Errorf("invalid number of arguments: expected 2, got %d", len(req))
+	}
+	blockNumberStr := req[0]
+	indexStr := req[1]
+
+	log.Info(log.Node, "GetTransactionByBlockNumberAndIndex", "blockNumber", blockNumberStr, "index", indexStr)
+
+	// Parse transaction index
+	if len(indexStr) < 2 || indexStr[:2] != "0x" {
+		return fmt.Errorf("invalid index format: %s", indexStr)
+	}
+	index, err := strconv.ParseUint(indexStr[2:], 16, 64)
+	if err != nil {
+		return fmt.Errorf("failed to parse index: %v", err)
+	}
+
+	// Get transaction using internal method
+	ethTx, err := j.node.GetTransactionByBlockNumberAndIndex(blockNumberStr, uint32(index))
+	if err != nil {
+		log.Warn(log.Node, "GetTransactionByBlockNumberAndIndex: Failed", "error", err)
+		*res = "null"
+		return nil
+	}
+
+	if ethTx == nil {
+		*res = "null"
+		return nil
+	}
+
+	// Convert to JSON
+	txBytes, err := json.Marshal(ethTx)
+	if err != nil {
+		return fmt.Errorf("failed to marshal transaction: %v", err)
+	}
+
+	*res = string(txBytes)
+	log.Info(log.Node, "GetTransactionByBlockNumberAndIndex: Found transaction", "blockNumber", blockNumberStr, "index", index)
+	return nil
+}
+
 // GetTransactionByHash fetches a transaction by hash from JAM State/DA.
 //
 // Parameters:
@@ -635,6 +744,29 @@ func (j *Jam) GetLogs(req []string, res *string) error {
 }
 
 // ===== Block Queries =====
+
+// BlockNumber returns the number of the most recent block
+//
+// Parameters: none
+//
+// Returns:
+// - string: Block number as hex-encoded uint256
+//
+// Example curl call:
+// curl -X POST http://localhost:8545 -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+func (j *Jam) BlockNumber(req []string, res *string) error {
+	log.Info(log.Node, "BlockNumber")
+
+	// Call internal method to get latest block number
+	blockNumber, err := j.node.GetLatestBlockNumber()
+	if err != nil {
+		return fmt.Errorf("failed to get latest block number: %v", err)
+	}
+
+	*res = fmt.Sprintf("0x%x", blockNumber)
+	log.Debug(log.Node, "BlockNumber: Returning block number", "blockNumber", *res)
+	return nil
+}
 
 // GetBlockByHash fetches a JAM block with all EVM transactions across cores.
 //

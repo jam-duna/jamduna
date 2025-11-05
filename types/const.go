@@ -76,7 +76,7 @@ const (
 	MaxAuthorizationPoolItems        = 8              // O: The maximum number of items in the authorizations pool.
 	SecondsPerSlot                   = 6              // P = 6: The slot period, in seconds.
 	MaxAuthorizationQueueItems       = 80             // Q: The maximum number of items in the authorizations queue.
-	RotationPeriod                   = 4              // R
+	RotationPeriod                   = 4              // R: was 4
 	ValidatorCoreRotationPeriod      = 4              // R: The rotation period of validator-core assignments, in timeslots.
 	MinPubServiceIndex               = 1 << 16        // Minimum public service index (65536)
 	ExtrinsicMaximumPerPackage       = 128            // T = 128: The maximum number of extrinsics in a work-package.
@@ -343,4 +343,3 @@ const (
 	Keccak  string = "keccak"
 	Blake2b string = "blake2b"
 )
-

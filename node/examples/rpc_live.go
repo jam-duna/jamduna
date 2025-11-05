@@ -27,6 +27,7 @@ const (
 	RefreshSeconds = 10 // Refresh every 10 seconds (comprehensive tests take longer)
 	IssuerAddress  = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266" // Alice from Hardhat
 	USDMAddress    = "0x0000000000000000000000000000000000000001"
+	HTTPPort       = 8545 // Ethereum JSON-RPC HTTP port
 )
 
 type TestResult struct {
@@ -162,6 +163,8 @@ func testGetBalance(client *rpc.Client, address string, label string) TestResult
 	fmt.Printf("Test: GetBalance (%s)\n", label)
 	fmt.Println("-" + repeat("-", 50))
 
+	printCurlCommand("eth_getBalance", []interface{}{address, "latest"})
+
 	var balance string
 	err := client.Call("jam.GetBalance", []string{address, "latest"}, &balance)
 
@@ -200,6 +203,8 @@ func testGetTransactionCount(client *rpc.Client, address string) TestResult {
 	fmt.Println("Test: GetTransactionCount")
 	fmt.Println("-" + repeat("-", 50))
 
+	printCurlCommand("eth_getTransactionCount", []interface{}{address, "latest"})
+
 	var nonce string
 	err := client.Call("jam.GetTransactionCount", []string{address, "latest"}, &nonce)
 
@@ -227,6 +232,8 @@ func testGetStorageAt(client *rpc.Client) TestResult {
 	// Compute storage key for balanceOf[issuer]
 	// balanceOf mapping is at slot 0: storage_key = keccak256(abi.encode(address, slot))
 	storageKey := computeMappingStorageKey(IssuerAddress, 0)
+
+	printCurlCommand("eth_getStorageAt", []interface{}{USDMAddress, storageKey, "latest"})
 
 	var value string
 	err := client.Call("jam.GetStorageAt", []string{USDMAddress, storageKey, "latest"}, &value)
@@ -344,6 +351,8 @@ func testGetTransactionReceipt(client *rpc.Client) TestResult {
 		return TestResult{Name: "GetTransactionReceipt", Success: false, Error: fmt.Errorf("invalid tx hash")}
 	}
 
+	printCurlCommand("eth_getTransactionReceipt", []interface{}{txHash})
+
 	var result string
 	err = client.Call("jam.GetTransactionReceipt", []string{txHash}, &result)
 	if err != nil {
@@ -403,6 +412,8 @@ func testGetTransactionByHash(client *rpc.Client) TestResult {
 		return TestResult{Name: "GetTransactionByHash", Success: false, Error: fmt.Errorf("invalid tx hash")}
 	}
 
+	printCurlCommand("eth_getTransactionByHash", []interface{}{txHash})
+
 	var result string
 	err = client.Call("jam.GetTransactionByHash", []string{txHash}, &result)
 	if err != nil {
@@ -427,6 +438,8 @@ func testGetTransactionByHash(client *rpc.Client) TestResult {
 func testGetBlockByNumber(client *rpc.Client) TestResult {
 	fmt.Println("Test: GetBlockByNumber")
 	fmt.Println("-" + repeat("-", 50))
+
+	printCurlCommand("eth_getBlockByNumber", []interface{}{"latest", false})
 
 	var result string
 	err := client.Call("jam.GetBlockByNumber", []string{"latest", "false"}, &result)
@@ -473,6 +486,8 @@ func testGetBlockByHash(client *rpc.Client) TestResult {
 	}
 
 	fmt.Printf(" Fetching block %s:\n", blockHash)
+
+	printCurlCommand("eth_getBlockByHash", []interface{}{blockHash, false})
 
 	var result string
 	err = client.Call("jam.GetBlockByHash", []string{blockHash, "false"}, &result)
@@ -563,4 +578,19 @@ func repeat(s string, count int) string {
 		result += s
 	}
 	return result
+}
+
+// generateCurlCommand creates a curl command for Ethereum JSON-RPC
+func generateCurlCommand(method string, params []interface{}) string {
+	paramsJSON, _ := json.Marshal(params)
+	rpcRequest := fmt.Sprintf(`{"jsonrpc":"2.0","method":"%s","params":%s,"id":1}`, method, string(paramsJSON))
+
+	return fmt.Sprintf(`curl -X POST http://localhost:%d \
+  -H "Content-Type: application/json" \
+  --data '%s'`, HTTPPort, rpcRequest)
+}
+
+// printCurlCommand prints a formatted curl command
+func printCurlCommand(method string, params []interface{}) {
+	fmt.Printf("\n📋 Curl command:\n%s\n\n", generateCurlCommand(method, params))
 }

@@ -1,0 +1,65 @@
+[workspace]
+members = [
+	"fuzz",
+	"interpreter",
+	"jsontests",
+	"jsontests/proc-macro",
+	"precompile",
+	"future",
+	"compat",
+	"mainnet",
+
+	"features/evm64",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.89.0"
+license = "Apache-2.0"
+authors = ["rust-evm Developers <contact-rust-evm@pacna.org>"]
+repository = "https://github.com/rust-ethereum/evm"
+keywords = ["no_std", "ethereum", "evm"]
+
+[workspace.dependencies]
+evm = { version = "1.0.0", path = ".", default-features = false }
+evm-interpreter = { version = "1.0.0", path = "interpreter", default-features = false }
+evm-precompile = { version = "1.0.0", path = "precompile", default-features = false }
+evm-mainnet = { version = "1.0.0", path = "mainnet", default-features = false }
+evm-compat = { version = "0.1.0", path = "compat", default-features = false }
+
+[package]
+name = "evm"
+version = "1.0.0"
+edition = { workspace = true }
+rust-version = { workspace = true }
+license = { workspace = true }
+authors = { workspace = true }
+repository = { workspace = true }
+keywords = { workspace = true }
+description = "Ethereum Virtual Machine"
+
+[dependencies]
+primitive-types = { version = "0.12", default-features = false, features = ["rlp"] }
+sha3 = { version = "0.10", default-features = false }
+evm-interpreter = { workspace = true }
+
+[dev-dependencies]
+hex = { version = "0.4", features = [ "serde" ] }
+
+[features]
+default = ["std"]
+std = [
+	"primitive-types/std",
+	"sha3/std",
+	"evm-interpreter/std",
+]
+scale = [
+	"primitive-types/codec",
+	"primitive-types/scale-info",
+	"evm-interpreter/scale",
+]
+serde = [
+	"primitive-types/impl-serde",
+	"evm-interpreter/serde",
+]

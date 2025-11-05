@@ -24,6 +24,14 @@ func (p *Preimages) Hash() common.Hash {
 	return common.Blake2Hash(p.Blob)
 }
 
+// Preimage Discard Reason
+const (
+	PreimageDiscardReasonOnChain      byte = 0 // (Provided on-chain)
+	PreimageDiscardReasonNotRequested byte = 1 // (Not requested on-chain)
+	PreimageDiscardReasonTooMany      byte = 2 // (Too many preimages)
+	PreimageDiscardReasonOther        byte = 3 // (Other)
+)
+
 func ComputeAccountHash(s uint32, preimageHash common.Hash) common.Hash {
 	return common.Blake2Hash(append(preimageHash.Bytes(), binary.LittleEndian.AppendUint32(nil, s)...))
 }

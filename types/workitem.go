@@ -11,10 +11,10 @@ import (
 
 // Payload type constants for work package discrimination
 var (
+	PayloadGenesis      = []byte("G") // Genesis block payload
+	PayloadBuilder      = []byte("B") // Builder does not require state witnesses
 	PayloadTransactions = []byte("T") // Normal transaction execution with signed RLP-encoded transactions
-	PayloadCall         = []byte("B") // EstimateGas/Call mode for unsigned transaction simulation
-	PayloadBlock        = []byte("P") // Block building mode (Phase II)
-	PayloadGenesis      = []byte("G") // Bootstrap mode for initializing state with 'A'/'K' commands
+	PayloadCall         = []byte("C") // EstimateGas/Call mode for unsigned transaction simulation
 )
 
 /*

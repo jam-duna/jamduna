@@ -659,6 +659,37 @@ func NewStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 	return newStateDB(sdb, blockHash)
 }
 
+// NewStateDBFromStateRoot creates a StateDB instance from a JAM state root
+// The state root points to the binary merkle trie root containing all state.
+// This is used for historical state queries where we need to reconstruct
+// the state at a specific block without replaying transactions.
+//
+// Parameters:
+//   - stateRoot: The 32-byte Blake2b hash of the trie root for the desired state
+//   - sdb: Storage backend for reading trie nodes
+//
+// Returns:
+//   - statedb: StateDB initialized with historical state
+//   - err: Error if trie initialization or state recovery fails
+func NewStateDBFromStateRoot(stateRoot common.Hash, sdb *storage.StateDBStorage) (statedb *StateDB, err error) {
+	statedb = newEmptyStateDB(sdb)
+	statedb.Finalized = true // Historical state is always finalized
+	statedb.StateRoot = stateRoot
+	statedb.JamState = NewJamState()
+
+	// Initialize merkle tree from the state root hash
+	// This reconstructs the trie structure from stored nodes in LevelDB
+	statedb.trie = statedb.CopyTrieState(stateRoot)
+	if statedb.trie == nil {
+		return nil, fmt.Errorf("failed to initialize merkle tree from state root %s", stateRoot.Hex())
+	}
+
+	// Recover JamState from the trie (reads C1-C15 state keys)
+	statedb.RecoverJamState(stateRoot)
+
+	return statedb, nil
+}
+
 // newStateDB initiates the StateDB using the blockHash+bn; the bn input must refer to the epoch for which the blockHash belongs to
 func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *StateDB, err error) {
 	statedb = newEmptyStateDB(sdb)
@@ -739,7 +770,7 @@ func GenerateEpochPhaseTraceID(epoch uint32, phase uint32) string {
 	return hex.EncodeToString(traceIDBytes[:])
 }
 
-func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential types.ValidatorSecret, ticketIDs []common.Hash, extrinsic_pool *types.ExtrinsicPool, pvmBackend string) (isAuthorizedBlockBuilder bool, blk *types.Block, sdb *StateDB, err error) {
+func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential types.ValidatorSecret, ticketIDs []common.Hash, extrinsic_pool *types.ExtrinsicPool, pvmBackend string) (isAuthorizedBlockRefiner bool, blk *types.Block, sdb *StateDB, err error) {
 	genesisReady := s.JamState.SafroleState.CheckFirstPhaseReady(currJCE)
 	if !genesisReady {
 		//log.Warn(log.SDB, "ProcessState:GenesisNotReady", "currJCE", currJCE)
@@ -752,9 +783,9 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 		if err != nil {
 			return false, nil, nil, err
 		}
-		isAuthorizedBlockBuilder, ticketID, _, _ := sf0.IsAuthorizedBuilder(targetJCE, common.Hash(credential.BandersnatchPub), ticketIDs)
+		isAuthorizedBlockRefiner, ticketID, _, _ := sf0.IsAuthorizedBuilder(targetJCE, common.Hash(credential.BandersnatchPub), ticketIDs)
 		currEpoch, currPhase := s.JamState.SafroleState.EpochAndPhase(targetJCE)
-		if isAuthorizedBlockBuilder {
+		if isAuthorizedBlockRefiner {
 			telemetryClient := s.sdb.GetTelemetryClient()
 			// Telemetry: Authoring (event 40) - Block authoring begins
 			authoringEventID := telemetryClient.GetEventID()
@@ -823,11 +854,11 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 				len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), "blk", proposedBlk.Str())
 			return true, proposedBlk, newStateDB, nil
 		}
-		log.Debug(log.B, "ProcessState:NotAuthorizedBlockBuilder timeSlotReady", "currJCE", currJCE, "targetJCE", targetJCE, "credential", credential.BandersnatchPub.Hash(), "ticket", len(ticketIDs), "isAuthorizedBlockBuilder", isAuthorizedBlockBuilder)
+		log.Debug(log.B, "ProcessState:NotAuthorizedBlockRefiner timeSlotReady", "currJCE", currJCE, "targetJCE", targetJCE, "credential", credential.BandersnatchPub.Hash(), "ticket", len(ticketIDs), "isAuthorizedBlockRefiner", isAuthorizedBlockRefiner)
 		return false, nil, nil, nil
 	}
 	//waiting for block ... potentially submit ticket here
-	log.Debug(log.B, "ProcessState:NotAuthorizedBlockBuilder", "currJCE", currJCE, "targetJCE", targetJCE, "credential", credential.BandersnatchPub.Hash(), "ticketLen", len(ticketIDs))
+	log.Debug(log.B, "ProcessState:NotAuthorizedBlockRefiner", "currJCE", currJCE, "targetJCE", targetJCE, "credential", credential.BandersnatchPub.Hash(), "ticketLen", len(ticketIDs))
 	return false, nil, nil, nil
 }
 
@@ -840,7 +871,11 @@ func (s *StateDB) SetID(id uint16) {
 	s.JamState.SafroleState.Id = id
 }
 
-// TODO: REMOVE THESE and use service account object methods INSTEAD!
+func (s *StateDB) WriteServiceStorage(service uint32, k []byte, v []byte) {
+	tree := s.GetTrie()
+	tree.SetServiceStorage(service, k, v)
+}
+
 func (s *StateDB) WriteServicePreimageBlob(service uint32, blob []byte) {
 	tree := s.GetTrie()
 	tree.SetPreImageBlob(service, blob)

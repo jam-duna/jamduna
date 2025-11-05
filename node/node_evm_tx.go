@@ -38,7 +38,7 @@ type EthereumTransactionResponse struct {
 }
 
 // convertPayloadToEthereumTransaction converts the transaction payload to Ethereum format
-func convertPayloadToEthereumTransaction(receipt *TransactionReceipt) (*EthereumTransactionResponse, error) {
+func convertPayloadToEthereumTransaction(receipt *statedb.TransactionReceipt) (*EthereumTransactionResponse, error) {
 	// The payload contains the RLP-encoded Ethereum transaction (from main.rs line 499: extrinsic.clone())
 	// This can be a legacy tx, EIP-2930, or EIP-1559 transaction
 
@@ -172,12 +172,10 @@ func parseTransactionObject(txObj map[string]interface{}) (*EthereumTransaction,
 
 // getTransactionByHash reads a transaction object from storage using its hash
 func (n *NodeContent) getTransactionByHash(txHash common.Hash) (*EthereumTransactionResponse, error) {
-	// Use the new ReadObject abstraction to get the transaction receipt payload from DA
-	// This does a two-step process:
-	// 1. Read ObjectRef from EVM service storage using txHash as key
-	// 2. Use ObjectRef to fetch actual receipt payload from DA using FetchJAMDASegments
+	// Use ReadStateWitnessRef to get the transaction receipt with metadata from DA
+	// This includes the Ref field which contains block number and transaction index
 	receiptObjectID := tx_to_objectID(txHash)
-	witness, found, err := n.statedb.ReadStateWitness(statedb.EVMServiceCode, receiptObjectID, true)
+	witness, found, err := n.statedb.ReadStateWitnessRef(statedb.EVMServiceCode, receiptObjectID, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read transaction receipt: %v", err)
 	}
@@ -186,7 +184,7 @@ func (n *NodeContent) getTransactionByHash(txHash common.Hash) (*EthereumTransac
 	}
 
 	// Parse the receipt data according to serialize_receipt format
-	receipt, err := parseRawReceipt(witness.Payload)
+	receipt, err := statedb.ParseRawReceipt(witness.Payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse transaction receipt: %v", err)
 	}
@@ -197,19 +195,20 @@ func (n *NodeContent) getTransactionByHash(txHash common.Hash) (*EthereumTransac
 		return nil, fmt.Errorf("failed to convert payload to Ethereum transaction: %v", err)
 	}
 
-	// Search last 20 blocks to find block metadata
-	const maxSearchDepth = 20
-	blockNum, blockHash, txIndex, err := n.findBlockForTransaction(txHash, maxSearchDepth)
+	// Get block metadata from the receipt's Ref field
+	ref := witness.Ref
+	evmBlock, err := n.readBlockByNumber(ref.EvmBlock)
 	if err != nil {
-		// Transaction exists in DA but not in any block yet
-		log.Warn(log.Node, "getTransactionByHash: Transaction found but block not found",
-			"txHash", txHash.String(), "error", err)
-		// Return transaction with nil block fields (pending state)
+		// If block can't be read, return transaction without block metadata (pending state)
+		log.Warn(log.Node, "getTransactionByHash: Failed to read block metadata",
+			"txHash", txHash.String(), "blockNum", ref.EvmBlock, "error", err)
 		return ethTx, nil
 	}
 
 	// Populate block metadata
-	blockNumber := fmt.Sprintf("0x%x", blockNum)
+	blockHash := evmBlock.ComputeHash().String()
+	blockNumber := fmt.Sprintf("0x%x", ref.EvmBlock)
+	txIndex := fmt.Sprintf("0x%x", ref.TxSlot)
 	ethTx.BlockHash = &blockHash
 	ethTx.BlockNumber = &blockNumber
 	ethTx.TransactionIndex = &txIndex
@@ -242,9 +241,9 @@ func (n *NodeContent) EstimateGas(from common.Address, to *common.Address, gas u
 	extrinsicBlobs := make(types.ExtrinsicsBlobs, 1)
 	extrinsicBlobs[0] = extrinsic
 
-	_, workReport, err := n.BuildBundle(*workPackage, []types.ExtrinsicsBlobs{extrinsicBlobs}, 0)
+	_, workReport, err := n.BuildBundle(*workPackage, []types.ExtrinsicsBlobs{extrinsicBlobs}, 0, nil)
 	if err != nil {
-		return 0, fmt.Errorf("failed to build bundle: %v", err)
+		return 0, fmt.Errorf("failed to simulate result: %v", err)
 	}
 
 	if len(workReport.Results) == 0 || len(workReport.Results[0].Result.Ok) == 0 {
@@ -367,7 +366,7 @@ func (n *NodeContent) createSimulationWorkPackage(tx *EthereumTransaction) (*typ
 			{
 				Service:            statedb.EVMServiceCode,
 				CodeHash:           evmService.CodeHash,
-				Payload:            types.PayloadCall, // "B" mode for EstimateGas/Call with unsigned call data
+				Payload:            buildPayload(PayloadTypeCall, 1, 0),
 				RefineGasLimit:     types.RefineGasAllocation / 2,
 				AccumulateGasLimit: types.AccumulationGasAllocation / 2,
 				ImportedSegments:   []types.ImportSegment{}, // Empty for simulation
@@ -394,7 +393,7 @@ func (n *NodeContent) executeSimulationWorkPackage(workPackage *types.WorkPackag
 	// Execute the work package with proper parameters
 	// Use core index 0 for simulation, current slot, and mark as not first guarantor
 	// TODO: accept extrinsicsBlobs input as this only works for one work item
-	_, workReport, err := n.BuildBundle(*workPackage, []types.ExtrinsicsBlobs{extrinsicBlobs}, 0)
+	_, workReport, err := n.BuildBundle(*workPackage, []types.ExtrinsicsBlobs{extrinsicBlobs}, 0, nil)
 	if err != nil {
 		return nil, fmt.Errorf("BuildBundle failed: %v", err)
 	}
@@ -533,7 +532,7 @@ func (n *NodeContent) findBlockForTransaction(txHash common.Hash, maxSearchDepth
 
 	// Search backwards from latest block
 	for blockNum := latestBlock; blockNum >= startBlock; blockNum-- {
-		txHashes, err := n.readBlockFromStorage(blockNum)
+		evmBlock, err := n.readBlockByNumber(blockNum)
 		if err != nil {
 			// Block not found or error reading - continue to previous block
 			if blockNum == 1 {
@@ -541,12 +540,13 @@ func (n *NodeContent) findBlockForTransaction(txHash common.Hash, maxSearchDepth
 			}
 			continue
 		}
+		txHashes := evmBlock.TxHashes
 
 		// Check if txHash is in this block
 		for i, hash := range txHashes {
 			if hash == txHash {
-				// Found it! Calculate block hash and return metadata
-				blockHashBytes := common.Blake2Hash(binary.LittleEndian.AppendUint32(nil, blockNum))
+				// Found it! Use canonical block hash
+				blockHashBytes := evmBlock.ComputeHash()
 				txIndex := fmt.Sprintf("0x%x", i)
 				return blockNum, blockHashBytes.String(), txIndex, nil
 			}
@@ -560,24 +560,50 @@ func (n *NodeContent) findBlockForTransaction(txHash common.Hash, maxSearchDepth
 	return 0, "", "", fmt.Errorf("transaction not found in last %d blocks", maxSearchDepth)
 }
 
+// computeLogsBloom creates a bloom filter from logs
+func computeLogsBloom(logs []EthereumLog) string {
+	if len(logs) == 0 {
+		// Return 256 bytes (512 hex chars) of zeros
+		return ethereumCommon.Bytes2Hex(make([]byte, 256))
+	}
+
+	// Create a bloom filter (256 bytes = 2048 bits)
+	var bloom ethereumTypes.Bloom
+
+	// Add each log's address and topics to the bloom filter
+	for _, log := range logs {
+		// Add address to bloom
+		address := ethereumCommon.HexToAddress(log.Address)
+		bloom.Add(address.Bytes())
+
+		// Add each topic to bloom
+		for _, topic := range log.Topics {
+			topicHash := ethereumCommon.HexToHash(topic)
+			bloom.Add(topicHash.Bytes())
+		}
+	}
+
+	return ethereumCommon.Bytes2Hex(bloom[:])
+}
+
 // GetTransactionReceipt fetches a transaction receipt
 func (n *NodeContent) GetTransactionReceipt(txHash common.Hash) (*EthereumTransactionReceipt, error) {
 	// Use ReadObject to get receipt from DA
 	receiptObjectID := tx_to_objectID(txHash)
-	witness, found, err := n.statedb.ReadStateWitness(statedb.EVMServiceCode, receiptObjectID, true)
+	witness, found, err := n.statedb.ReadStateWitnessRef(statedb.EVMServiceCode, receiptObjectID, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read transaction receipt: %v", err)
 	}
-
 	if !found {
 		return nil, nil // Transaction not found
 	}
 
 	// Parse raw receipt
-	receipt, err := parseRawReceipt(witness.Payload)
+	receipt, err := statedb.ParseRawReceipt(witness.Payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse receipt: %v", err)
 	}
+	ref := witness.Ref
 
 	// Parse transaction from receipt payload (RLP-encoded transaction)
 	ethTx, err := convertPayloadToEthereumTransaction(receipt)
@@ -585,48 +611,20 @@ func (n *NodeContent) GetTransactionReceipt(txHash common.Hash) (*EthereumTransa
 		return nil, fmt.Errorf("failed to parse transaction from receipt: %v", err)
 	}
 
-	// Search last 20 blocks to find which block contains this transaction
-	const maxSearchDepth = 20
-	blockNum, blockHash, txIndex, err := n.findBlockForTransaction(txHash, maxSearchDepth)
+	evmBlock, err := n.readBlockByNumber(ref.EvmBlock)
 	if err != nil {
-		// Transaction receipt exists in DA but not found in any block
-		// This could happen if blocks haven't been written yet during accumulate
-		log.Warn(log.Node, "GetTransactionReceipt: Transaction receipt exists but block not found",
-			"txHash", txHash.String(), "error", err)
-		return nil, fmt.Errorf("transaction block not found: %v", err)
+		return nil, fmt.Errorf("failed to read block metadata for receipt: %v", err)
 	}
-
-	blockNumber := fmt.Sprintf("0x%x", blockNum)
-
-	// Calculate block-scoped log index by counting logs from all previous transactions in block
-	var logIndexCounter uint64 = 0
-
-	// Read the block to get all transaction hashes
-	blockTxHashes, err := n.readBlockFromStorage(blockNum)
-	if err == nil {
-		// Count logs from transactions 0 to txIndex-1
-		txIndexInt := 0
-		fmt.Sscanf(txIndex, "0x%x", &txIndexInt)
-
-		for i := 0; i < txIndexInt && i < len(blockTxHashes); i++ {
-			prevTxHash := blockTxHashes[i]
-			prevReceiptObjectID := tx_to_objectID(prevTxHash)
-			prevWitness, found, err := n.statedb.ReadStateWitness(statedb.EVMServiceCode, prevReceiptObjectID, true)
-			if err == nil && found {
-				prevReceipt, err := parseRawReceipt(prevWitness.Payload)
-				if err == nil && len(prevReceipt.LogsData) >= 2 {
-					// Count logs in this receipt (first 2 bytes = log count)
-					logCount := binary.LittleEndian.Uint16(prevReceipt.LogsData[0:2])
-					logIndexCounter += uint64(logCount)
-				}
-			}
-		}
-	}
-
+	blockHash := evmBlock.ComputeHash().String()
+	blockNumber := fmt.Sprintf("0x%x", ref.EvmBlock)
+	txIndex := fmt.Sprintf("0x%x", ref.TxSlot)
 	// Parse logs from receipt LogsData if available
 	var logs []EthereumLog
 	if len(receipt.LogsData) > 0 {
-		logs, err = parseLogsFromReceipt(receipt.LogsData, txHash, blockNumber, blockHash, txIndex, &logIndexCounter)
+		logIndexStart := receipt.LogIndexStart
+
+		logs, err = parseLogsFromReceipt(receipt.LogsData, txHash, blockNumber,
+			blockHash, txIndex, logIndexStart)
 		if err != nil {
 			log.Warn(log.Node, "GetTransactionReceipt: Failed to parse logs", "error", err)
 			logs = []EthereumLog{} // Use empty logs on parse failure
@@ -636,15 +634,37 @@ func (n *NodeContent) GetTransactionReceipt(txHash common.Hash) (*EthereumTransa
 	// Determine contract address for contract creation
 	var contractAddress *string
 	if ethTx.To == nil {
-		// Contract creation - calculate contract address from sender + nonce
-		// TODO: This needs proper nonce from the transaction
-		contractAddr := "0x0000000000000000000000000000000000000000" // Placeholder
+
+		senderAddr := ethereumCommon.HexToAddress(ethTx.From)
+
+		// Parse nonce
+		var nonce uint64
+		fmt.Sscanf(ethTx.Nonce, "0x%x", &nonce)
+
+		// Calculate CREATE contract address using go-ethereum's built-in function
+		contractAddr := crypto.CreateAddress(senderAddr, nonce).Hex()
 		contractAddress = &contractAddr
+
+		// Note: CREATE2 detection would require parsing input data to check for CREATE2 opcode
+		// For now, we only handle CREATE transactions (when To == nil)
 	}
 
 	txType := "0x0"
 	if payload := receipt.Payload; len(payload) > 0 && payload[0] < 0x80 {
 		txType = fmt.Sprintf("0x%x", payload[0])
+	}
+
+	var logsBloom string
+	if receipt.LogsBloom != [256]byte{} {
+		logsBloom = ethereumCommon.Bytes2Hex(receipt.LogsBloom[:])
+	} else {
+		log.Warn(log.Node, "GetTransactionReceipt: Receipt missing logs bloom, computing from logs")
+		logsBloom = computeLogsBloom(logs)
+	}
+
+	cumulativeGasUsed := receipt.CumulativeGas
+	if cumulativeGasUsed == 0 {
+		cumulativeGasUsed = receipt.UsedGas
 	}
 
 	// Build Ethereum receipt with transaction details from parsed RLP transaction
@@ -655,11 +675,11 @@ func (n *NodeContent) GetTransactionReceipt(txHash common.Hash) (*EthereumTransa
 		BlockNumber:       blockNumber,
 		From:              ethTx.From,
 		To:                ethTx.To,
-		CumulativeGasUsed: fmt.Sprintf("0x%x", receipt.UsedGas), // TODO: Calculate cumulative gas across block
+		CumulativeGasUsed: fmt.Sprintf("0x%x", cumulativeGasUsed),
 		GasUsed:           fmt.Sprintf("0x%x", receipt.UsedGas),
 		ContractAddress:   contractAddress,
 		Logs:              logs,
-		LogsBloom:         "", // TODO
+		LogsBloom:         logsBloom,
 		Status:            boolToHexStatus(receipt.Success),
 		EffectiveGasPrice: ethTx.GasPrice,
 		Type:              txType,

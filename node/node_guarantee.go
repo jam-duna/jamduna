@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
@@ -69,7 +68,7 @@ func (n *Node) clearQueueUsingBlock(guarantees []types.Guarantee) {
 //
 //	(1) uses WorkReportSearch to ensure that the WorkReports have been seen for all work items and thus imported segments are fetchable
 //	(2) uses CE139 in reconstructSegments to get all the imported segments and their justifications
-func (n *NodeContent) buildBundle(wpQueueItem *WPQueueItem) (bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, err error) {
+func (n *NodeContent) BuildBundleFromWPQueueItem(wpQueueItem *WPQueueItem) (bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, err error) {
 	workPackage := wpQueueItem.workPackage
 	eventID := wpQueueItem.eventID
 	segmentRootLookup = make(types.SegmentRootLookup, 0)
@@ -222,7 +221,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 	slot := wpItem.slot
 
 	// here we are a first guarantor building a bundle (imported segments, justifications, extrinsics)
-	bundle, segmentRootLookup, err := n.buildBundle(wpItem)
+	bundle, segmentRootLookup, err := n.BuildBundleFromWPQueueItem(wpItem)
 	if err != nil {
 		log.Error(log.Node, "processWPQueueItem", "n", n.String(), "err", err, "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
 		return false
@@ -237,58 +236,42 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		return false
 	}
 	log.Info(log.Node, "processWPQueueItem", "n", n.id, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
-	var wg sync.WaitGroup
+	//var wg sync.WaitGroup
 	mutex := &sync.Mutex{}
 	fellow_responses := make(map[types.Ed25519Key]JAMSNPWorkPackageShareResponse)
 	coworkers := n.GetCoreCoWorkerPeersByStateDB(coreIndex, curr_statedb)
 	var guarantee types.Guarantee
 	var report types.WorkReport
 	var d AvailabilitySpecifierDerivation
-	for _, coworker := range coworkers {
-		wg.Add(1)
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Error(log.G, "panic in coworker goroutine", "err", r)
-					fmt.Printf("stack trace: %s\n", string(debug.Stack()))
-				}
-				wg.Done()
-			}()
-			// if it's itself, execute the workpackage
-			if coworker.PeerID == n.id {
-				var execErr error
-				var bundleSnapshot *types.WorkPackageBundleSnapshot
-				report, d, _, bundleSnapshot, execErr = n.executeWorkPackageBundle(coreIndex, bundle, segmentRootLookup, slot, true, wpItem.eventID)
-				if execErr != nil {
-					log.Warn(log.Node, "processWPQueueItem", "err", execErr)
-					return
-				}
-				if bundleSnapshot != nil && isWriteBundleGuarantor {
-					// packageHash_coreIndex_slot_audit
-					desc := fmt.Sprintf("%s_%d_%d_%s", bundleSnapshot.Bundle.WorkPackage.Hash(), bundleSnapshot.CoreIndex, n.id, "guarantor")
-					n.writeLogWithDescription(bundleSnapshot, bundleSnapshot.Slot, desc, false)
-				}
-				guarantee.Report = report
-				signerSecret := n.GetEd25519Secret()
-				gc := report.Sign(signerSecret, uint16(n.GetCurrValidatorIndex()))
-				guarantee.Signatures = append(guarantee.Signatures, gc)
-				return
-			} else {
-				ctx, cancel := context.WithTimeout(context.Background(), MiniTimeout)
-				defer cancel()
-				fellow_response, errfellow := coworker.ShareWorkPackage(ctx, coreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519, coworker.PeerID, wpItem.eventID)
-				if errfellow != nil {
-					log.Warn(log.Node, "processWPQueueItem", "n", n.String(), "errfellow", errfellow)
-					n.telemetryClient.WorkPackageSharingFailed(wpItem.eventID, n.PeerID32(coworker.PeerID), errfellow.Error())
-					return
-				}
-				mutex.Lock()
-				fellow_responses[coworker.Validator.Ed25519] = fellow_response
-				mutex.Unlock()
-			}
-		}()
+
+	// Do our own execution first
+	var execErr error
+	report, d, _, _, execErr = n.executeWorkPackageBundle(coreIndex, bundle, segmentRootLookup, slot, true, wpItem.eventID)
+	if execErr != nil {
+		log.Warn(log.Node, "processWPQueueItem", "err", execErr)
+		panic(111)
 	}
-	wg.Wait()
+	guarantee.Report = report
+	signerSecret := n.GetEd25519Secret()
+	gc := report.Sign(signerSecret, uint16(n.GetCurrValidatorIndex()))
+	guarantee.Signatures = append(guarantee.Signatures, gc)
+
+	for _, coworker := range coworkers {
+		if coworker.PeerID == n.id {
+			continue
+		}
+		fellow_response, errfellow := coworker.ShareWorkPackage(context.Background(), coreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519, coworker.PeerID, wpItem.eventID)
+		if errfellow != nil {
+			log.Warn(log.Node, "processWPQueueItem", "n", n.String(), "errfellow", errfellow)
+			n.telemetryClient.WorkPackageSharingFailed(wpItem.eventID, n.PeerID32(coworker.PeerID), errfellow.Error())
+
+		}
+		mutex.Lock()
+		fellow_responses[coworker.Validator.Ed25519] = fellow_response
+		mutex.Unlock()
+		// do just ONE of our coworkers
+		//break
+	}
 
 	selfWorkReportHash := guarantee.Report.Hash()
 	for key, fellow_response := range fellow_responses {
@@ -302,7 +285,7 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		fellowSignature := fellow_response.Signature
 
 		// Log comparison details
-		log.Trace(log.G, "processWPQueueItem comparing work report hashes",
+		log.Info(log.G, "processWPQueueItem comparing work report hashes",
 			"n", n.String(),
 			"fellowValidator", key.String()[:16]+"...",
 			"selfHash", selfWorkReportHash.String(),

@@ -318,11 +318,11 @@ type Node struct {
 	WriteDebugFlag      bool
 }
 
-func (n *Node) handleGuaranteeDiscarded(guarantee types.Guarantee, discardReason byte) {
-	if n.telemetryClient == nil {
-		return
-	}
+func (n *Node) handlePreimageDiscarded(preimage types.Preimages, discardReason byte) {
+	n.telemetryClient.PreimageDiscarded(preimage.Hash(), preimage.BlobLength(), discardReason)
+}
 
+func (n *Node) handleGuaranteeDiscarded(guarantee types.Guarantee, discardReason byte) {
 	guarantors := make([]uint16, len(guarantee.Signatures))
 	for i, cred := range guarantee.Signatures {
 		guarantors[i] = cred.ValidatorIndex
@@ -450,7 +450,6 @@ func (n *NodeContent) String() string {
 // - Option C: Implement proper justification caching if CDT verification becomes expensive
 // FetchJAMDASegments implements DA segment retrieval with caching and payload extraction
 func (n *NodeContent) FetchJAMDASegments(workPackageHash common.Hash, indexStart uint16, indexEnd uint16, payloadLength uint32) (payload []byte, err error) {
-	log.Debug(log.DA, "FetchJAMDASegments called", "wph", workPackageHash.Hex(), "indexStart", indexStart, "indexEnd", indexEnd, "payloadLength", payloadLength)
 	var rawSegments []byte
 	if indexEnd <= indexStart {
 		return nil, fmt.Errorf("FetchJAMDASegments: invalid range - indexEnd (%d) <= indexStart (%d)", indexEnd, indexStart)
@@ -486,12 +485,14 @@ func (n *NodeContent) FetchJAMDASegments(workPackageHash common.Hash, indexStart
 			rawSegments = append(rawSegments, segment...)
 		}
 		log.Trace(log.DA, "FetchJAMDASegments: all segments cached (fast path)",
+			"n", n.String(),
 			"wph", workPackageHash.Hex(),
 			"indexStart", indexStart,
 			"indexEnd", indexEnd,
 			"rawSize", len(rawSegments))
 	} else {
-		log.Debug(log.DA, "FetchJAMDASegments: cache miss, fetching full range",
+		log.Info(log.DA, "FetchJAMDASegments: cache miss, fetching full range",
+			"n", n.String(),
 			"wph", workPackageHash.Hex(),
 			"indexStart", indexStart,
 			"indexEnd", indexEnd,
@@ -673,6 +674,7 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 	}
 	node.NodeContent.nodeSelf = node
 	node.extrinsic_pool.SetGuaranteeDiscardCallback(node.handleGuaranteeDiscarded)
+	node.extrinsic_pool.SetPreimagesDiscardCallback(node.handlePreimageDiscarded)
 	// Initialize with a no-op telemetry client by default (can be replaced with InitTelemetry)
 
 	var _statedb *statedb.StateDB
@@ -1087,8 +1089,12 @@ func (n *Node) GetServiceStorage(serviceIndex uint32, k []byte) ([]byte, bool, e
 	return n.getState().GetTrie().GetServiceStorage(serviceIndex, k)
 }
 
-func (n *Node) ReadStateWitness(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error) {
-	return n.getState().ReadStateWitness(serviceID, objectID, fetchPayloadFromDA)
+func (n *Node) ReadStateWitnessRef(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error) {
+	return n.getState().ReadStateWitnessRef(serviceID, objectID, fetchPayloadFromDA)
+}
+
+func (n *Node) ReadStateWitnessRaw(serviceID uint32, objectID common.Hash) (types.StateWitnessRaw, bool, common.Hash, error) {
+	return n.getState().ReadStateWitnessRaw(serviceID, objectID)
 }
 
 func (n *Node) GetStateWitnesses(workReports []*types.WorkReport) ([]types.StateWitness, common.Hash, error) {
@@ -1225,6 +1231,10 @@ func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPac
 	// Submit each work package to a random peer on the assigned core
 	for _, req := range reqs {
 		//fmt.Printf("Submitting work package: %s\n", req.WorkPackage.String())
+		if strings.Contains(strings.ToUpper(req.Identifier), "AUTH") || strings.Contains(strings.ToUpper(req.Identifier), "ALGO") {
+			req.WorkPackage.RefineContext = n.getRefineContext()
+			log.Info(log.Node, "SubmitAndWaitForWorkPackage RefineContext", "id", req.Identifier, "refineContext", req.WorkPackage.RefineContext.String())
+		}
 		err := n.SubmitWPSameCore(req.WorkPackage, req.ExtrinsicsBlobs)
 		if err != nil {
 			log.Error(log.Node, "Work package submission failed", "identifier", req.Identifier, "hash", workPackageHashes[identifierToIndex[req.Identifier]].Hex(), "err", err)
@@ -1278,7 +1288,6 @@ func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPac
 
 func (n *Node) SubmitAndWaitForWorkPackage(ctx context.Context, wp *WorkPackageRequest) (common.Hash, error) {
 	//fmt.Printf("NODE SubmitAndWaitForWorkPackage %s\n", wp.WorkPackage.Hash())
-	// RefineContext is already set by BuildBundle - don't overwrite it
 	err := n.SubmitWPSameCore(wp.WorkPackage, wp.ExtrinsicsBlobs)
 	if err != nil {
 		log.Error(log.Node, "SubmitAndWaitForWorkPackage", "err", err, "id", wp.Identifier)
@@ -2132,6 +2141,12 @@ func (n *Node) applyChildrenRecursively(ctx context.Context, node *types.BT_Node
 			continue
 		}
 		if err := n.ApplyBlock(ctx, child); err != nil {
+			log.Error(log.B, "applyChildrenRecursively", "n", n.String(),
+				"child", child.Block.Header.Hash().String_short(),
+				"slot", child.Block.Header.Slot,
+				"author", child.Block.Header.AuthorIndex,
+				"err", err,
+			)
 			return fmt.Errorf("applyChildrenRecursively: ApplyBlock failed for %v: %w", child.Block.Header.Hash(), err)
 		}
 		if err := n.applyChildrenRecursively(ctx, child); err != nil {
@@ -2735,6 +2750,66 @@ func (n *NodeContent) getPVMStateDB() *statedb.StateDB {
 	return target_statedb
 }
 
+func NewSafroleState() *statedb.SafroleState {
+	return &statedb.SafroleState{
+		Id:                   9999,
+		Timeslot:             0, // MK check! was common.ComputeTimeUnit(types.TimeUnitMode)
+		Entropy:              statedb.Entropy{},
+		PrevValidators:       []types.Validator{},
+		CurrValidators:       []types.Validator{},
+		NextValidators:       []types.Validator{},
+		DesignatedValidators: []types.Validator{},
+		TicketsOrKeys:        statedb.TicketsOrKeys{},
+		TicketsVerifierKey:   []byte{},
+	}
+}
+
+func NewJamState() *statedb.JamState {
+	return &statedb.JamState{
+		//AvailabilityAssignments:  make([types.TotalCores]*CoreState),
+		SafroleState: NewSafroleState(),
+	}
+}
+
+func (n *NodeContent) getTargetStateDB(stateRoot common.Hash) (*statedb.StateDB, error) {
+	// refine's executeWorkPackage is a statelessish process
+	currentStateDB := n.statedb.Copy()
+	currentStateRoot := currentStateDB.GetStateRoot()
+
+	if stateRoot.Hex() == currentStateRoot.Hex() {
+		keyValues := currentStateDB.GetAllKeyValues()
+		log.Info(log.Node, "!!getTargetStateDB: Recovered state key-values", "n", n.id, "numKeyValues", len(keyValues))
+		return currentStateDB, nil
+	}
+	log.Warn(log.Node, "getTargetStateDB: REFETCH REQUIRED", "n", n.id, "expected", stateRoot.Hex(), "got", currentStateRoot.Hex())
+	statedb.NewStateDBFromStateRoot(stateRoot, n.statedb.GetStorage())
+
+	// recoveredStateDB, err := statedb.NewStateDBFromStateRoot(stateRoot, n.statedb.GetStorage())
+	// if err != nil {
+	// 	log.Error(log.Node, "Failed to recover state", "stateRoot", stateRoot.Hex(), "error", err)
+	// 	return nil, fmt.Errorf("Failed to recover state")
+	// }
+
+	recoveredStateDB := n.statedb.Copy()
+	recoveredStateDB.JamState = NewJamState()
+	recoveredStateDB.RecoverJamState(stateRoot)
+	recoveredStateDB.StateRoot = recoveredStateDB.UpdateTrieState()
+
+	log.Info(log.Node, "getTargetStateDB: Recovered state root", "n", n.id, "stateRoot", recoveredStateDB.GetStateRoot().Hex())
+	keyValues := recoveredStateDB.GetAllKeyValues()
+	log.Info(log.Node, "getTargetStateDB: Recovered state key-values", "n", n.id, "numKeyValues", len(keyValues))
+
+	if len(keyValues) <= 16 {
+		panic("too few keyvalues in recovered stateDB")
+	}
+
+	for _, kv := range keyValues {
+		fmt.Printf("[Key] 0x%x Len=%d\n", kv.Key, len(kv.Value))
+	}
+
+	return recoveredStateDB, nil
+}
+
 // AddPreimageToPool adds a new preimage to the extrinsic pool NO VALIDATION IS REQUIRED
 func (n *NodeContent) AddPreimageToPool(serviceID uint32, preimage []byte) (err error) {
 	// here we check that it has been solicited (or new)
@@ -3190,11 +3265,11 @@ func (n *Node) runAuthoring() {
 				continue
 			}
 
-			isAuthorizedBlockBuilder := result.isAuthorized
+			isAuthorizedBlockRefiner := result.isAuthorized
 			newBlock := result.newBlock
 			newStateDB := result.newStateDB
 
-			if !isAuthorizedBlockBuilder {
+			if !isAuthorizedBlockRefiner {
 				log.Trace(log.B, "runAuthoring: Not Authorized", "n", n.String(), "JCE", currJCE)
 				n.author_status = "not authoring"
 				continue

@@ -128,7 +128,6 @@ func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, 
 	w_size := types.DecodeE_l(pure[3:6])
 	z_val := types.DecodeE_l(pure[6:8])
 	s_val := types.DecodeE_l(pure[8:11])
-	s_val = 8192
 	//fmt.Printf("DecodeProgram: o_size=%d, w_size=%d, z_val=%d, s_val=%d, total_header_size=11\n",o_size, w_size, z_val, s_val)
 	var o_byte, w_byte []byte
 	offset := uint64(11)
@@ -310,8 +309,8 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		}
 		machine.SetHeapPointer(current_heap_pointer)
 		machine.SetMemoryBounds(rw_data_address, rw_data_address_end, ro_data_address, ro_data_address_end, output_address, output_end, stack_address, stack_address_end)
-		fmt.Printf("Memory bounds set: RW [0x%x - 0x%x], RO [0x%x - 0x%x], Output [0x%x - 0x%x], Stack [0x%x - 0x%x]\n",
-			rw_data_address, rw_data_address_end, ro_data_address, ro_data_address_end, output_address, output_end, stack_address, stack_address_end)
+		//fmt.Printf("Memory bounds set: RW [0x%x - 0x%x], RO [0x%x - 0x%x], Output [0x%x - 0x%x], Stack [0x%x - 0x%x]\n",
+		//		rw_data_address, rw_data_address_end, ro_data_address, ro_data_address_end, output_address, output_end, stack_address, stack_address_end)
 		if len(o_byte) > 0 {
 			result := vm.WriteRAMBytes(Z_Z, o_byte)
 			if result != OK {
@@ -352,6 +351,10 @@ func NewVMFromCode(serviceIndex uint32, code []byte, i uint64, initialHeap uint6
 }
 
 var RecordTime = true
+
+func (vm *VM) GetVMLogging() string {
+	return vm.logging
+}
 
 func (vm *VM) SetServiceIndex(index uint32) {
 	vm.Service_index = index
@@ -417,7 +420,6 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, inputs []types.AccumulateInp
 	x_s.Mutable = true
 	vm.X.U.ServiceAccounts[s] = x_s
 	vm.ServiceAccount = x_s
-
 	vm.executeWithBackend(input_bytes, types.EntryPointAccumulate)
 	r, res = vm.getArgumentOutputs()
 	return r, res, x_s

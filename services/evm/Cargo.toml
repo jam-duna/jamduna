@@ -1,0 +1,21 @@
+
+[package]
+name = "evm"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "evm"
+path = "src/main.rs"
+
+[dependencies]
+polkavm-derive = { workspace = true }
+simplealloc = { workspace = true }
+utils = { path = "../utils" }
+primitive-types = { version = "0.12", default-features = false }
+evm = { path = "../vendor/evm", default-features = false }
+hex = { version = "0.4", default-features = false, features = ["alloc"] }
+sha3 = { version = "0.10", default-features = false }
+rlp = { version = "0.5", default-features = false }
+libsecp256k1 = { version = "0.7", default-features = false, features = ["static-context"] }

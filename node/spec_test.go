@@ -190,7 +190,7 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 		t.Fatalf("Failed to create VM for authorization (corrupted bytecode?)")
 	}
 	workPackageCoreIndex := uint16(0)
-	r := vm_auth.ExecuteAuthorization(authcode, workPackageCoreIndex)
+	r := vm_auth.ExecuteAuthorization(workPackage, workPackageCoreIndex)
 	p_u := workPackage.AuthorizationCodeHash
 	p_p := workPackage.ConfigurationBlob
 	p_a := common.Blake2Hash(append(p_u.Bytes(), p_p...))

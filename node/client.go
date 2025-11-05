@@ -875,9 +875,14 @@ func (c *NodeClient) GetServiceStorage(serviceIndex uint32, storageKey []byte) (
 	return storageBytes, true, nil
 }
 
-func (c *NodeClient) ReadStateWitness(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error) {
+func (c *NodeClient) ReadStateWitnessRef(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error) {
 	// Stub implementation - not supported for remote clients
-	return types.StateWitness{}, false, fmt.Errorf("ReadStateWitness not supported for remote clients")
+	return types.StateWitness{}, false, fmt.Errorf("ReadStateWitnessRef not supported for remote clients")
+}
+
+func (c *NodeClient) ReadStateWitnessRaw(serviceID uint32, objectID common.Hash) (types.StateWitnessRaw, bool, common.Hash, error) {
+	// Stub implementation - not supported for remote clients
+	return types.StateWitnessRaw{}, false, common.Hash{}, fmt.Errorf("ReadStateWitnessRaw not supported for remote clients")
 }
 
 func (c *NodeClient) GetStateWitnesses(workReports []*types.WorkReport) ([]types.StateWitness, common.Hash, error) {
@@ -910,6 +915,6 @@ func (c *NodeClient) FetchJAMDASegments(workPackageHash common.Hash, indexStart 
 	return nil, fmt.Errorf("FetchJAMDASegments not supported for remote NodeClient connections yet")
 }
 
-func (c *NodeClient) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
+func (c *NodeClient) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
 	return nil, nil, fmt.Errorf("BuildBundle not supported for remote NodeClient connections yet")
 }

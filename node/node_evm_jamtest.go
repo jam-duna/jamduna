@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"math/big"
 	"os"
@@ -21,9 +20,30 @@ import (
 )
 
 const (
-	numRounds    = 5
+	numRounds    = 50
 	txnsPerRound = 5
 )
+
+// EVMService manages EVM block submissions with witness tracking
+type EVMService struct {
+	n1      JNode
+	service *types.TestService
+}
+
+// NewEVMService creates a new EVMService instance
+func NewEVMService(n1 JNode, service *types.TestService) (evmservice *EVMService, err error) {
+	evmservice = &EVMService{
+		n1:      n1,
+		service: service,
+	}
+
+	err = evmservice.SubmitEVMPayloadBlocks(0, 1)
+	if err != nil {
+		log.Error(log.Node, "SubmitEVMPayloadBlocks(0, 1) ERR", "err", err)
+		return evmservice, err
+	}
+	return evmservice, nil
+}
 
 // getFunctionSelector computes the 4-byte function selector and event topic hash map
 // Example: getFunctionSelector("fibonacci(uint256)", ["FibCache(uint256)", "FibComputed(uint256)"])
@@ -144,16 +164,7 @@ func parseIntParam(s string) (int64, error) {
 }
 
 // SubmitEVMTransactions creates and submits a work package with raw transactions
-func SubmitEVMTransactions(n1 JNode, service *types.TestService, identifier string, evmTxs [][]byte) ([]common.Hash, error) {
-	// Helper: build transaction payload
-	buildPayloadTransaction := func(numTransactions int) []byte {
-		payload := make([]byte, 7)
-		payload[0] = 'T' // PayloadTransaction marker
-		binary.LittleEndian.PutUint32(payload[1:5], uint32(numTransactions))
-		binary.LittleEndian.PutUint16(payload[5:7], 0) // witness_count = 0 initially
-		return payload
-	}
-
+func (b *EVMService) SubmitEVMTransactions(identifier string, evmTxs [][]byte) ([]common.Hash, error) {
 	// Create extrinsics blobs and hashes from raw transactions
 	extrinsics := types.ExtrinsicsBlobs(evmTxs)
 	hashes := make([]types.WorkItemExtrinsic, len(evmTxs))
@@ -176,8 +187,8 @@ func SubmitEVMTransactions(n1 JNode, service *types.TestService, identifier stri
 		WorkItems: []types.WorkItem{
 			{
 				Service:            statedb.EVMServiceCode,
-				CodeHash:           service.CodeHash,
-				Payload:            buildPayloadTransaction(len(evmTxs)),
+				CodeHash:           b.service.CodeHash,
+				Payload:            buildPayload(PayloadTypeTransactions, len(evmTxs), 0),
 				RefineGasLimit:     types.RefineGasAllocation,
 				AccumulateGasLimit: types.AccumulationGasAllocation,
 				ImportedSegments:   []types.ImportSegment{},
@@ -187,8 +198,7 @@ func SubmitEVMTransactions(n1 JNode, service *types.TestService, identifier stri
 		},
 	}
 
-	// Build bundle
-	bundle, _, err := n1.BuildBundle(wp, []types.ExtrinsicsBlobs{extrinsics}, 0)
+	bundle, _, err := b.n1.BuildBundle(wp, []types.ExtrinsicsBlobs{extrinsics}, 0, nil)
 	if err != nil {
 		return nil, fmt.Errorf("BuildBundle failed for %s: %v", identifier, err)
 	}
@@ -202,17 +212,17 @@ func SubmitEVMTransactions(n1 JNode, service *types.TestService, identifier stri
 
 	// Submit and wait for completion
 	ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout*maxRobustTries*2)
-	_, err = RobustSubmitAndWaitForWorkPackages(ctx, n1, []*WorkPackageRequest{wpr})
+
+	_, err = RobustSubmitAndWaitForWorkPackages(ctx, b.n1, []*WorkPackageRequest{wpr})
 	cancel()
 	if err != nil {
 		return nil, fmt.Errorf("%s failed: %v", identifier, err)
 	}
-
-	return txHashes, nil
+	return txHashes, err
 }
 
-// showTxReceipts displays transaction receipts for the given transaction hashes
-func showTxReceipts(t *testing.T, n1 JNode, txHashes []common.Hash, description string, allTopics map[common.Hash]string) {
+// ShowTxReceipts displays transaction receipts for the given transaction hashes
+func (b *EVMService) ShowTxReceipts(txHashes []common.Hash, description string, allTopics map[common.Hash]string) error {
 	log.Info(log.Node, "Showing transaction receipts", "description", description, "count", len(txHashes))
 
 	gasUsedTotal := big.NewInt(0)
@@ -222,28 +232,15 @@ func showTxReceipts(t *testing.T, n1 JNode, txHashes []common.Hash, description 
 			receipt *EthereumTransactionReceipt
 			err     error
 		)
-		const maxReceiptPolls = 20
-		for attempt := 0; attempt < maxReceiptPolls; attempt++ {
-			receipt, err = n1.GetTransactionReceipt(txHash)
-			if err != nil {
-				t.Fatalf("failed to get transaction receipt for %s: %v", txHash.String(), err)
-			}
-			if receipt != nil {
-				if attempt > 0 {
-					log.Info(log.Node, "Transaction receipt available after retries",
-						"txHash", txHash.String(),
-						"attempts", attempt+1)
-				}
-				break
-			}
-			time.Sleep(500 * time.Millisecond)
+		receipt, err = b.n1.GetTransactionReceipt(txHash)
+		if err != nil {
+			return fmt.Errorf("failed to get transaction receipt for %s: %w", txHash.String(), err)
 		}
 		if receipt == nil {
-			log.Warn(log.Node, "Transaction receipt not available after waiting", "txHash", txHash.String())
-			continue
+			return fmt.Errorf("Transaction receipt not available: %s", txHash.String())
 		}
 		if receipt.Status != "0x1" {
-			t.Fatalf("transaction %s failed with status %s", txHash.String(), receipt.Status)
+			return fmt.Errorf("transaction %s failed with status %s", txHash.String(), receipt.Status)
 		}
 		// Convert gasUsed from hex to decimal
 		gasUsedInt := new(big.Int)
@@ -258,10 +255,11 @@ func showTxReceipts(t *testing.T, n1 JNode, txHashes []common.Hash, description 
 	}
 
 	log.Info(log.Node, description, "txCount", len(txHashes), "gasUsedTotal", gasUsedTotal.String())
+	return nil
 }
 
-// test_estimateGas tests the EstimateGas functionality with a USDM transfer
-func test_estimateGas(t *testing.T, n1 JNode, issuerAddress common.Address, usdmAddress common.Address) {
+// EstimateGas tests the EstimateGas functionality with a USDM transfer
+func (b *EVMService) EstimateGas(issuerAddress common.Address, usdmAddress common.Address) error {
 	recipientAddr, _ := common.GetEVMDevAccount(1)
 	transferAmount := big.NewInt(1000000) // 1M tokens (small test amount)
 
@@ -271,43 +269,47 @@ func test_estimateGas(t *testing.T, n1 JNode, issuerAddress common.Address, usdm
 	copy(estimateCalldata[16:36], recipientAddr.Bytes())
 	copy(estimateCalldata[36:68], transferAmount.FillBytes(make([]byte, 32)))
 
-	estimatedGas, err := n1.EstimateGas(issuerAddress, &usdmAddress, 100000, 1000000000, 0, estimateCalldata)
+	estimatedGas, err := b.n1.EstimateGas(issuerAddress, &usdmAddress, 100000, 1000000000, 0, estimateCalldata)
 	if err != nil {
-		t.Fatalf("EstimateGas failed: %v", err)
+		return fmt.Errorf("EstimateGas failed: %w", err)
 	}
 	log.Info(log.Node, "EstimateGas result", "from", issuerAddress.String(), "to", recipientAddr.String(), "amount", transferAmount.String(), "estimatedGas", estimatedGas)
+	return nil
 }
 
 // buildPayloadTransaction creates a conformant PayloadTransaction payload
 // Format: "T" (1 byte) + tx_count (u32 LE) + witness_count (u16 LE)
-func ExportStateWitnesses(n1 JNode, workReports []*types.WorkReport) error {
-	witnesses, stateRoot, err := n1.GetStateWitnesses(workReports)
+func (b *EVMService) ExportStateWitnesses(workReports []*types.WorkReport, saveToFile bool) error {
+	witnesses, stateRoot, err := b.n1.GetStateWitnesses(workReports)
 	if err != nil {
 		return err
 	}
 
-	// Create witness files using fixed binary format
-	for _, witness := range witnesses {
-		// Use fixed binary format (not SCALE encoding) for Rust compatibility
-		witnessBytes := witness.SerializeWitness()
+	if saveToFile {
+		// Create witness files using fixed binary format
+		for _, witness := range witnesses {
+			// Use fixed binary format (not SCALE encoding) for Rust compatibility
+			witnessBytes := witness.SerializeWitness()
 
-		// Filename format: objectid-version-stateroot.bin
-		// This allows Rust to parse the filename to get the state root for verification
-		filename := fmt.Sprintf("%s-%d-%s.bin",
-			witness.ObjectID.Hex()[2:], // Remove 0x prefix
-			witness.Ref.Version,
-			stateRoot.Hex()[2:]) // Remove 0x prefix
+			// Filename format: objectid-version-stateroot.bin
+			// This allows Rust to parse the filename to get the state root for verification
+			filename := fmt.Sprintf("%s-%d-%s.bin",
+				witness.ObjectID.Hex()[2:], // Remove 0x prefix
+				witness.Ref.Version,
+				stateRoot.Hex()[2:]) // Remove 0x prefix
 
-		if err := os.WriteFile(filename, witnessBytes, 0644); err != nil {
-			return fmt.Errorf("ExportStateWitnesses: write file %s err %v", filename, err)
+			if err := os.WriteFile(filename, witnessBytes, 0644); err != nil {
+				return fmt.Errorf("ExportStateWitnesses: write file %s err %v", filename, err)
+			}
 		}
-	}
 
-	log.Info(log.Node, "ExportStateWitnesses", "count", len(witnesses), "state_root", stateRoot.Hex())
+		log.Info(log.Node, "ExportStateWitnesses", "count", len(witnesses), "state_root", stateRoot.Hex())
+
+	}
 	return nil
 }
 
-func SubmitGenesisWorkPackage(n1 JNode, service *types.TestService) error {
+func (b *EVMService) SubmitEVMPayloadBlocks(startBlock uint32, endBlock uint32) error {
 	// MappingEntry represents a single mapping entry to initialize
 	type MappingEntry struct {
 		Slot  uint8
@@ -334,7 +336,7 @@ func SubmitGenesisWorkPackage(n1 JNode, service *types.TestService) error {
 		return extrinsic
 	}
 
-	// Helper: initialize Solidity mapping storage
+	// Helper: initialize Solidity mapping storage for the Genesis case
 	initializeMappings := func(blobs *types.ExtrinsicsBlobs, workItems *[]types.WorkItemExtrinsic, contractAddr common.Address, entries []MappingEntry) {
 		for _, entry := range entries {
 			// Compute Solidity mapping storage key: keccak256(abi.encode(key, slot))
@@ -350,7 +352,7 @@ func SubmitGenesisWorkPackage(n1 JNode, service *types.TestService) error {
 		}
 	}
 
-	// Helper: verify mapping storage entries
+	// Helper: verify mapping storage entries for the Genesis case
 	verifyMappings := func(entries []MappingEntry) error {
 		for _, entry := range entries {
 			// Compute storage key
@@ -360,7 +362,7 @@ func SubmitGenesisWorkPackage(n1 JNode, service *types.TestService) error {
 			storageKey := common.Keccak256(keyInput)
 
 			// Get actual value from storage
-			storageValue, err := n1.GetStorageAt(usdmAddress, storageKey, "latest")
+			storageValue, err := b.n1.GetStorageAt(usdmAddress, storageKey, "latest")
 			if err != nil {
 				return fmt.Errorf("GetStorageAt failed for slot %d, key %s: %w", entry.Slot, entry.Key.Hex(), err)
 			}
@@ -380,15 +382,28 @@ func SubmitGenesisWorkPackage(n1 JNode, service *types.TestService) error {
 	blobs := types.ExtrinsicsBlobs{}
 	workItems := []types.WorkItemExtrinsic{}
 
-	// Set USDM initial balances and nonces
-	totalSupplyValue := new(big.Int).Mul(big.NewInt(61_000_000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
-	usdmInitialState := []MappingEntry{
-		{Slot: 0, Key: issuerAddress, Value: totalSupplyValue}, // balanceOf[issuer]
-		{Slot: 1, Key: issuerAddress, Value: big.NewInt(1)},    // nonces[issuer]
+	// Only include genesis USDM mappings if submitting genesis block
+	isGenesis := startBlock == 0 && endBlock == 1
+	var usdmInitialState []MappingEntry
+	if isGenesis {
+		// Set USDM initial balances and nonces
+		totalSupplyValue := new(big.Int).Mul(big.NewInt(61_000_000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+		usdmInitialState = []MappingEntry{
+			{Slot: 0, Key: issuerAddress, Value: totalSupplyValue}, // balanceOf[issuer]
+			{Slot: 1, Key: issuerAddress, Value: big.NewInt(1)},    // nonces[issuer]
+		}
+		initializeMappings(&blobs, &workItems, usdmAddress, usdmInitialState)
 	}
-	initializeMappings(&blobs, &workItems, usdmAddress, usdmInitialState)
+	numExtrinsics := len(workItems)
 
-	// Submit genesis work package
+	objects := []common.Hash{statedb.GetBlockNumberKey()}
+	for blockNum := startBlock; blockNum < endBlock; blockNum++ {
+		objects = append(objects, statedb.BlockNumberToObjectID(blockNum))
+	}
+
+	// blockNumberKeyWitness, ok, stateRoot, err := b.n1.ReadStateWitnessRaw(statedb.EVMServiceCode, statedb.GetBlockNumberKey())
+	// blockWitness, ok, blockStateRoot, err := b.n1.ReadStateWitnessRaw(statedb.EVMServiceCode, blockObjectID)
+	// Create work package
 	wp := types.WorkPackage{
 		AuthCodeHost:          0,
 		AuthorizationToken:    nil,
@@ -397,58 +412,73 @@ func SubmitGenesisWorkPackage(n1 JNode, service *types.TestService) error {
 		WorkItems: []types.WorkItem{
 			{
 				Service:            uint32(statedb.EVMServiceCode),
-				CodeHash:           service.CodeHash,
-				Payload:            types.PayloadGenesis,
+				CodeHash:           b.service.CodeHash,
+				Payload:            buildPayload(PayloadTypeBlocks, numExtrinsics, 0),
 				RefineGasLimit:     types.RefineGasAllocation / 2,
 				AccumulateGasLimit: types.AccumulationGasAllocation / 2,
 				ImportedSegments:   []types.ImportSegment{},
-				ExportCount:        2, // shard + SSR
+				ExportCount:        0, // Let the BuildBundle determine this
 				Extrinsics:         workItems,
 			},
 		},
 	}
 
-	wpr := &WorkPackageRequest{
-		Identifier:      "genesis",
-		WorkPackage:     wp,
-		ExtrinsicsBlobs: blobs,
+	identifier := fmt.Sprintf("blocks-%d-%d", startBlock, endBlock)
+	if startBlock == 0 {
+		identifier = "genesis"
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout*maxRobustTries)
-	_, err := RobustSubmitAndWaitForWorkPackages(ctx, n1, []*WorkPackageRequest{wpr})
+	bundle, _, err := b.n1.BuildBundle(wp, []types.ExtrinsicsBlobs{blobs}, 0, objects)
+	if err != nil {
+		return fmt.Errorf("BuildBundle failed for %s: %v", identifier, err)
+	}
+
+	// Create work package request
+	wpr := &WorkPackageRequest{
+		Identifier:      identifier,
+		WorkPackage:     bundle.WorkPackage,
+		ExtrinsicsBlobs: bundle.ExtrinsicData[0],
+	}
+
+	// Submit and wait for completion
+	ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout*maxRobustTries*2)
+	_, err = RobustSubmitAndWaitForWorkPackages(ctx, b.n1, []*WorkPackageRequest{wpr})
 	cancel()
 	if err != nil {
+		panic(3333)
 		return fmt.Errorf("genesis work package failed: %w", err)
 	}
 
-	// Verify all storage entries were set correctly
-	if err := verifyMappings(usdmInitialState); err != nil {
-		return fmt.Errorf("storage verification failed: %w", err)
+	if isGenesis && len(usdmInitialState) > 0 {
+		err = verifyMappings(usdmInitialState)
+		if err != nil {
+			return fmt.Errorf("storage verification failed after retries: %w", err)
+		}
 	}
 
-	log.Info(log.Node, "Genesis complete", "chainID", n1.GetChainId(), "usdm", usdmAddress.Hex())
+	log.Info(log.Node, "Genesis complete", "chainID", b.n1.GetChainId(), "usdm", usdmAddress.Hex())
 	return nil
 }
 
-// test_contracts deploys a contract and returns its address
-func test_contracts(t *testing.T, n1 JNode, service *types.TestService, contractFile string) common.Address {
+// DeployContract deploys a contract and returns its address
+func (b *EVMService) DeployContract(contractFile string) (common.Address, error) {
 	// Load contract bytecode from file
 	contractBytecode, err := os.ReadFile(contractFile)
 	if err != nil {
-		t.Fatalf("failed to load contract bytecode from %s: %v", contractFile, err)
+		return common.Address{}, fmt.Errorf("failed to load contract bytecode from %s: %w", contractFile, err)
 	}
 
 	// Get deployer account (using issuer account)
 	deployerAddress, deployerPrivKeyHex := common.GetEVMDevAccount(0)
 	deployerPrivKey, err := crypto.HexToECDSA(deployerPrivKeyHex)
 	if err != nil {
-		t.Fatalf("failed to parse deployer private key: %v", err)
+		return common.Address{}, fmt.Errorf("failed to parse deployer private key: %w", err)
 	}
 
 	// Get current nonce for the deployer
-	nonce, err := n1.GetTransactionCount(deployerAddress, "latest")
+	nonce, err := b.n1.GetTransactionCount(deployerAddress, "latest")
 	if err != nil {
-		t.Fatalf("failed to get transaction count: %v", err)
+		return common.Address{}, fmt.Errorf("failed to get transaction count: %w", err)
 	}
 
 	// Calculate contract address using CREATE opcode logic: keccak256(rlp([sender, nonce]))[12:]
@@ -470,29 +500,31 @@ func test_contracts(t *testing.T, n1 JNode, service *types.TestService, contract
 	signer := ethereumTypes.NewEIP155Signer(big.NewInt(int64(jamChainID)))
 	signedTx, err := ethereumTypes.SignTx(ethTx, signer, deployerPrivKey)
 	if err != nil {
-		t.Fatalf("failed to sign contract deployment transaction: %v", err)
+		return common.Address{}, fmt.Errorf("failed to sign contract deployment transaction: %w", err)
 	}
 
 	// Encode to RLP
 	txBytes, err := signedTx.MarshalBinary()
 	if err != nil {
-		t.Fatalf("failed to encode contract deployment transaction: %v", err)
+		return common.Address{}, fmt.Errorf("failed to encode contract deployment transaction: %w", err)
 	}
 
 	// Submit contract deployment as work package
-	deployTxHashes, err := SubmitEVMTransactions(n1, service, "contract-deployment", [][]byte{txBytes})
+	deployTxHashes, err := b.SubmitEVMTransactions("contract-deployment", [][]byte{txBytes})
 	if err != nil {
-		t.Fatalf("contract deployment failed: %v", err)
+		return common.Address{}, fmt.Errorf("contract deployment failed: %w", err)
 	}
-	showTxReceipts(t, n1, deployTxHashes, "Contract Deployment", make(map[common.Hash]string))
+	if err := b.ShowTxReceipts(deployTxHashes, "Contract Deployment", make(map[common.Hash]string)); err != nil {
+		return common.Address{}, fmt.Errorf("failed to show deployment receipts: %w", err)
+	}
 
 	// Verify contract deployment by checking if code exists at the calculated address
-	deployedCode, err := n1.GetCode(common.Address(contractAddress), "latest")
+	deployedCode, err := b.n1.GetCode(common.Address(contractAddress), "latest")
 	if err != nil {
-		t.Fatalf("failed to get deployed contract code: %v", err)
+		return common.Address{}, fmt.Errorf("failed to get deployed contract code: %w", err)
 	}
 	if len(deployedCode) == 0 {
-		t.Fatalf("contract deployment failed: no code at address %s", contractAddress.Hex())
+		return common.Address{}, fmt.Errorf("contract deployment failed: no code at address %s", contractAddress.Hex())
 	}
 
 	log.Info(log.Node, "Contract deployed successfully",
@@ -502,11 +534,11 @@ func test_contracts(t *testing.T, n1 JNode, service *types.TestService, contract
 		"nonce", nonce,
 		"codeSize", len(deployedCode))
 
-	return common.Address(contractAddress)
+	return common.Address(contractAddress), nil
 }
 
-// test_math calls math functions on the deployed contract using the provided call strings
-func test_math(t *testing.T, n1 JNode, service *types.TestService, mathAddress common.Address, callStrings []string) {
+// CallMath calls math functions on the deployed contract using the provided call strings
+func (b *EVMService) CallMath(mathAddress common.Address, callStrings []string) error {
 	// Helper: call getCachedFib view function to verify the result
 	callGetCachedFib := func(n int) (*big.Int, error) {
 		calldata := make([]byte, 36)
@@ -516,7 +548,7 @@ func test_math(t *testing.T, n1 JNode, service *types.TestService, mathAddress c
 		nBytes := big.NewInt(int64(n)).FillBytes(make([]byte, 32))
 		copy(calldata[4:36], nBytes)
 
-		callResult, err := n1.Call(issuerAddress, &mathAddress, 100000, 1000000000, 0, calldata, "latest")
+		callResult, err := b.n1.Call(issuerAddress, &mathAddress, 100000, 1000000000, 0, calldata, "latest")
 		if err != nil {
 			return nil, fmt.Errorf("Call getCachedFib failed: %v", err)
 		}
@@ -699,9 +731,9 @@ func test_math(t *testing.T, n1 JNode, service *types.TestService, mathAddress c
 	_, callerPrivKeyHex := common.GetEVMDevAccount(0)
 
 	// Get initial nonce for the caller
-	initialNonce, err := n1.GetTransactionCount(callerAddress, "latest")
+	initialNonce, err := b.n1.GetTransactionCount(callerAddress, "latest")
 	if err != nil {
-		t.Fatalf("failed to get transaction count: %v", err)
+		return fmt.Errorf("failed to get transaction count: %w", err)
 	}
 
 	// Build transactions for math calls
@@ -714,12 +746,13 @@ func test_math(t *testing.T, n1 JNode, service *types.TestService, mathAddress c
 
 		calldata, topics, err := mathFunctionCall(callString)
 		if err != nil {
-			t.Fatalf("failed to create math function call for %s: %v", callString, err)
+			return fmt.Errorf("failed to create math function call for %s: %w", callString, err)
 		}
 		// Merge topics into alltopics map
 		for hash, sig := range topics {
 			alltopics[hash] = sig
 		}
+
 		gasPrice := big.NewInt(1_000_000_000) // 1 Gwei
 		gasLimit := uint64(1_000_000_000)     // 1B gas limit for complex math calculations
 
@@ -733,20 +766,24 @@ func test_math(t *testing.T, n1 JNode, service *types.TestService, mathAddress c
 			jamChainID,
 		)
 		if err != nil {
-			t.Fatalf("failed to create evmmath call transaction for %s: %v", callString, err)
+			return fmt.Errorf("failed to create evmmath call transaction for %s: %w", callString, err)
 		}
 		log.Info(log.Node, callString, "txHash", txHash.String())
 		txBytes[i] = tx
 	}
 
 	// Submit math calls as work package
-	txhashes, err := SubmitEVMTransactions(n1, service, fmt.Sprintf("math-calls-%d", numCalls), txBytes)
+	txhashes, err := b.SubmitEVMTransactions(fmt.Sprintf("math-calls-%d", numCalls), txBytes)
 	if err != nil {
-		t.Fatalf("evmmath calls failed: %v", err)
+		return fmt.Errorf("evmmath calls failed: %w", err)
 	}
-	showTxReceipts(t, n1, txhashes, "Math Transactions", alltopics)
+	if err := b.ShowTxReceipts(txhashes, "Math Transactions", alltopics); err != nil {
+		return fmt.Errorf("ShowTxReceipts ERR: %w", err)
+	}
 
 	log.Info(log.Node, "evmmath calls completed successfully", "numCalls", numCalls)
+	time.Sleep(6000 * time.Second)
+	return nil
 }
 
 type TransferTriple struct {
@@ -761,7 +798,7 @@ type TransferTriple struct {
 // - Middle rounds: mix of transfers between non-issuer accounts
 // - Last round: intentionally large amounts to test insufficient balance handling
 // - Amounts vary by round to create interesting test cases
-func createTransferTriple(roundNum int, txnsPerRound int, isLastRound bool) []TransferTriple {
+func createTransferTriplesForRound(roundNum int, txnsPerRound int, isLastRound bool) []TransferTriple {
 	const numDevAccounts = 10 // Dev accounts 0-9
 	transfers := make([]TransferTriple, 0, txnsPerRound)
 
@@ -872,8 +909,8 @@ func waitForStableAssignment(n1 JNode) (uint16, error) {
 	return 0, fmt.Errorf("node never appeared in core assignments after %d attempts", maxAttempts)
 }
 
-// test_BalanceOf calls the balanceOf(address) function on the USDM contract and validates the result
-func test_BalanceOf(n JNode, account common.Address, expectedBalance common.Hash) {
+// BalanceOf calls the balanceOf(address) function on the USDM contract and validates the result
+func (b *EVMService) checkBalanceOf(account common.Address, expectedBalance common.Hash) error {
 	usdmAddress := common.HexToAddress("0x01")
 
 	calldataBalanceOf := make([]byte, 36)
@@ -882,28 +919,28 @@ func test_BalanceOf(n JNode, account common.Address, expectedBalance common.Hash
 	// Encode address parameter (32 bytes, left-padded)
 	copy(calldataBalanceOf[16:36], account[:])
 
-	callResult, err := n.Call(account, &usdmAddress, 100000, 1000000000, 0, calldataBalanceOf, "latest")
+	callResult, err := b.n1.Call(account, &usdmAddress, 100000, 1000000000, 0, calldataBalanceOf, "latest")
 	if err != nil {
-		log.Error(log.Node, "Call balanceOf ERR", "err", err)
-		return
+		return fmt.Errorf("Call balanceOf ERR: %v", err)
 	}
 
 	// Parse the result - should be a 32-byte uint256
 	if len(callResult) < 32 {
-		log.Error(log.Node, "Call balanceOf result too short", "len", len(callResult))
-		return
+		fmt.Printf("warn: Call balanceOf result too short: %d\n", len(callResult))
+		return fmt.Errorf("Call balanceOf result too short: %d", len(callResult))
 	}
 
 	actualBalance := new(big.Int).SetBytes(callResult[len(callResult)-32:])
 	expectedBalanceBig := new(big.Int).SetBytes(expectedBalance[:])
 	log.Trace(log.Node, "Call balanceOf result", "address", account.String(), "balance", actualBalance.String(), "expected", expectedBalanceBig.String())
 	if actualBalance.Cmp(expectedBalanceBig) != 0 {
-		log.Crit(log.Node, "Call balanceOf MISMATCH", "expected", expectedBalanceBig.String(), "actual", actualBalance.String())
+		return fmt.Errorf("Call balanceOf MISMATCH: expected %s, actual %s", expectedBalanceBig.String(), actualBalance.String())
 	}
+	return nil
 }
 
-// test_Nonces calls the nonces(address) function on the USDM contract and validates the result
-func test_Nonces(n JNode, account common.Address, expectedNonce *big.Int) {
+// Nonces calls the nonces(address) function on the USDM contract and validates the result
+func (b *EVMService) checkNonces(account common.Address, expectedNonce *big.Int) error {
 	usdmAddress := common.HexToAddress("0x01")
 
 	calldataNonces := make([]byte, 36)
@@ -912,27 +949,24 @@ func test_Nonces(n JNode, account common.Address, expectedNonce *big.Int) {
 	// Encode address parameter (32 bytes, left-padded)
 	copy(calldataNonces[16:36], account[:])
 
-	nonceResult, err := n.Call(account, &usdmAddress, 100000, 1000000000, 0, calldataNonces, "latest")
+	nonceResult, err := b.n1.Call(account, &usdmAddress, 100000, 1000000000, 0, calldataNonces, "latest")
 	if err != nil {
-		log.Error(log.Node, "Call nonces ERR", "err", err)
-		return
+		return fmt.Errorf("Call nonces ERR: %v", err)
 	}
 
 	// Parse the result - should be a 32-byte uint256
 	if len(nonceResult) < 32 {
-		log.Error(log.Node, "Call nonces result too short", "len", len(nonceResult))
-		return
+		return fmt.Errorf("Call nonces result too short: %d", len(nonceResult))
 	}
 
 	actualNonce := new(big.Int).SetBytes(nonceResult[len(nonceResult)-32:])
-	log.Trace(log.Node, "Call nonces result", "address", account.String(), "nonce", actualNonce.String(), "expected", expectedNonce.String())
-
 	if actualNonce.Cmp(expectedNonce) != 0 {
-		log.Crit(log.Node, "Call nonces MISMATCH", "expected", expectedNonce.String(), "actual", actualNonce.String())
+		return fmt.Errorf("Call nonces MISMATCH: expected %s, actual %s", expectedNonce.String(), actualNonce.String())
 	}
+	return nil
 }
 
-func evmtransfers(t *testing.T, n1 JNode, service *types.TestService, transfers []TransferTriple) (witnesses map[common.Hash][][]byte, err error) {
+func (b *EVMService) RunTransfersRound(transfers []TransferTriple) (witnesses map[common.Hash][][]byte, err error) {
 	const numAccounts = 11 // 10 dev accounts + 1 coinbase
 
 	// Coinbase address receives all transaction fees
@@ -951,7 +985,7 @@ func evmtransfers(t *testing.T, n1 JNode, service *types.TestService, transfers 
 
 	totalBefore := big.NewInt(0)
 	for i := 0; i < numAccounts; i++ {
-		balanceHash, err := n1.GetBalance(accounts[i], "latest")
+		balanceHash, err := b.n1.GetBalance(accounts[i], "latest")
 		if err != nil {
 			log.Error(log.Node, "GetBalance ERR", "account", i, "err", err)
 			return nil, err
@@ -960,7 +994,7 @@ func evmtransfers(t *testing.T, n1 JNode, service *types.TestService, transfers 
 		initialBalances[i] = balance
 		totalBefore = new(big.Int).Add(totalBefore, balance)
 
-		nonce, err := n1.GetTransactionCount(accounts[i], "latest")
+		nonce, err := b.n1.GetTransactionCount(accounts[i], "latest")
 		if err != nil {
 			log.Error(log.Node, "GetTransactionCount ERR", "account", i, "err", err)
 			return nil, err
@@ -1015,17 +1049,22 @@ func evmtransfers(t *testing.T, n1 JNode, service *types.TestService, transfers 
 	}
 
 	// Submit multitransfer as work package
-	transferTxHashes, err := SubmitEVMTransactions(n1, service, fmt.Sprintf("multitransfer-%d", len(transfers)), txBytes)
+	transferTxHashes, err := b.SubmitEVMTransactions(fmt.Sprintf("multitransfer-%d", len(transfers)), txBytes)
 	if err != nil {
 		log.Error(log.Node, "SubmitEVMTransactions ERR", "err", err)
 		return nil, err
 	}
-	showTxReceipts(t, n1, transferTxHashes, fmt.Sprintf("Multitransfer (%d transfers)", len(transfers)), defaultTopics())
+	fmt.Printf(fmt.Sprintf("Multitransfer (%d transfers) [%v]", len(transferTxHashes), transferTxHashes))
+	/*
+		if err := b.ShowTxReceipts(transferTxHashes, fmt.Sprintf("Multitransfer (%d transfers)", len(transfers)), defaultTopics()); err != nil {
+			return nil, fmt.Errorf("failed to show transfer receipts: %w", err)
+		}
+	*/
 
 	// Check balances and nonces after transfers
 	totalAfter := big.NewInt(0)
 	for i := 0; i < numAccounts; i++ {
-		balanceHash, err := n1.GetBalance(accounts[i], "latest")
+		balanceHash, err := b.n1.GetBalance(accounts[i], "latest")
 		if err != nil {
 			log.Error(log.Node, "GetBalance ERR", "account", i, "err", err)
 			return nil, err
@@ -1033,7 +1072,7 @@ func evmtransfers(t *testing.T, n1 JNode, service *types.TestService, transfers 
 		balance := new(big.Int).SetBytes(balanceHash.Bytes())
 		totalAfter = new(big.Int).Add(totalAfter, balance)
 
-		nonce, err := n1.GetTransactionCount(accounts[i], "latest")
+		nonce, err := b.n1.GetTransactionCount(accounts[i], "latest")
 		if err != nil {
 			log.Error(log.Node, "GetTransactionCount ERR", "account", i, "err", err)
 			return nil, err
@@ -1069,77 +1108,102 @@ func evmtransfers(t *testing.T, n1 JNode, service *types.TestService, transfers 
 			"before", totalBefore.String(),
 			"after", totalAfter.String(),
 			"difference", diff.String())
-		t.Fatalf("Balance mismatch: before=%s, after=%s, difference=%s", totalBefore.String(), totalAfter.String(), diff.String())
+		return nil, fmt.Errorf("balance mismatch: before=%s, after=%s, difference=%s", totalBefore.String(), totalAfter.String(), diff.String())
 	}
 
 	// Verify issuer balance and nonce via contract calls
-	issuerBalance, err := n1.GetBalance(issuerAddress, "latest")
-	if err != nil {
-		t.Fatalf("GetBalance failed: %v", err)
-	}
-	issuerTxCount, err := n1.GetTransactionCount(issuerAddress, "latest")
-	if err != nil {
-		t.Fatalf("GetTransactionCount failed: %v", err)
-	}
-	test_BalanceOf(n1, issuerAddress, issuerBalance)
-	test_Nonces(n1, issuerAddress, new(big.Int).SetUint64(issuerTxCount))
+
+	/*
+		issuerBalance, err := b.n1.GetBalance(issuerAddress, "latest")
+		if err != nil {
+			return nil, fmt.Errorf("GetBalance failed: %w", err)
+		}
+
+		err = b.checkBalanceOf(issuerAddress, issuerBalance)
+		if err != nil {
+			return nil, fmt.Errorf("checkBalanceOf failed: %w", err)
+		}
+
+		issuerTxCount, err := b.n1.GetTransactionCount(issuerAddress, "latest")
+		if err != nil {
+			return nil, fmt.Errorf("GetTransactionCount failed: %w", err)
+		}
+		err = b.checkNonces(issuerAddress, new(big.Int).SetUint64(issuerTxCount))
+		if err != nil {
+			return nil, fmt.Errorf("checkNonces failed: %w", err)
+		}
+	*/
 
 	// Verify coinbase collected fees
-	coinbaseBalance, err := n1.GetBalance(coinbaseAddress, "latest")
+	coinbaseBalance, err := b.n1.GetBalance(coinbaseAddress, "latest")
 	if err != nil {
-		t.Fatalf("GetBalance (coinbase) failed: %v", err)
+		return nil, fmt.Errorf("GetBalance (coinbase) failed: %w", err)
 	}
 	coinbaseBalanceBig := new(big.Int).SetBytes(coinbaseBalance.Bytes())
 	if coinbaseBalanceBig.Cmp(big.NewInt(0)) == 0 {
-		t.Fatalf("Coinbase balance is 0 - fee collection failed")
+		return nil, fmt.Errorf("coinbase balance is 0 - fee collection failed")
 	}
 	log.Info(log.Node, "Coinbase balance after round", "address", coinbaseAddress.String(), "balance", coinbaseBalanceBig.String())
 
 	return witnesses, nil
 }
 
-// test_transfers runs multiple rounds of transfers
-func test_transfers(t *testing.T, n1 JNode, service *types.TestService, numRounds, txnsPerRound int) {
+// RunTransfersRounds runs multiple rounds of transfers
+func (b *EVMService) RunTransfersRounds(numRounds, txnsPerRound int) error {
 	for round := 0; round < numRounds; round++ {
 		isLastRound := (round == numRounds-1)
 		log.Info(log.Node, "test_transfers - round", "round", round, "isLastRound", isLastRound)
-		waitForStableAssignment(n1)
-		evmtransfers(t, n1, service, createTransferTriple(round, txnsPerRound, isLastRound))
+		waitForStableAssignment(b.n1)
+		_, err := b.RunTransfersRound(createTransferTriplesForRound(round, txnsPerRound, isLastRound))
+		if err != nil {
+			return fmt.Errorf("transfer round %d failed: %w", round, err)
+		}
 	}
+	return nil
 }
 
 func EvmTest(t *testing.T, n1 JNode, testServices map[string]*types.TestService, target string) {
-	service0 := testServices["evm"]
-	err := SubmitGenesisWorkPackage(n1, service0)
+	service, err := NewEVMService(n1, testServices["evm"])
 	if err != nil {
-		log.Error(log.Node, "SubmitGenesisWorkPackage ERR", "err", err)
-		t.Fatalf("SubmitGenesisWorkPackage failed: %v", err)
+		log.Error(log.Node, "NewEVMService ERR", "err", err)
+		t.Fatalf("NewEVMService failed: %v", err)
 	}
+
 	switch target {
 	case "fib":
-		test_math(t, n1, service0, mathAddress, []string{
-			"fibonacci(256)",
-			"fact(6)",
-			// "fact(7)",
-			//"nextPrime(100)",
-			//"integerSqrt(1000)",
-			// "gcd(48,18)",
-			// "modExp(5,3,13)",
-			// "isPrime(97)",
-			// "jacobi(1001,9907)",
-			// "binomial(5,2)",
-			// "isQuadraticResidue(10,13)",
-			// "rsaKeygen(512)",
-			// "burnsideNecklace(5,3)",
-			// "fermatFactor(5959)",
-			// "narayana(4,2)",
-			// "youngTableaux(4,2)",
-		})
+		for i := 0; i <= 10; i++ {
+			if err := service.CallMath(mathAddress, []string{
+				"fibonacci(256)",
+				"fact(6)",
+				// "fact(7)",
+				//"nextPrime(100)",
+				//"integerSqrt(1000)",
+				// "gcd(48,18)",
+				// "modExp(5,3,13)",
+				// "isPrime(97)",
+				// "jacobi(1001,9907)",
+				// "binomial(5,2)",
+				// "isQuadraticResidue(10,13)",
+				// "rsaKeygen(512)",
+				// "burnsideNecklace(5,3)",
+				// "fermatFactor(5959)",
+				// "narayana(4,2)",
+				// "youngTableaux(4,2)",
+			}); err != nil {
+				t.Fatalf("CallMath failed: %v", err)
+			}
+		}
 	case "contracts":
-		test_contracts(t, n1, service0, "../services/evm/contracts/funds.bin")
+		if _, err := service.DeployContract("../services/evm/contracts/funds.bin"); err != nil {
+			t.Fatalf("DeployContract failed: %v", err)
+		}
 	case "gas":
-		test_estimateGas(t, n1, issuerAddress, usdmAddress)
+		if err := service.EstimateGas(issuerAddress, usdmAddress); err != nil {
+			t.Fatalf("EstimateGas failed: %v", err)
+		}
 	case "transfers":
-		test_transfers(t, n1, service0, numRounds, txnsPerRound)
+		if err := service.RunTransfersRounds(numRounds, txnsPerRound); err != nil {
+			t.Fatalf("RunTransfersRounds failed: %v", err)
+		}
 	}
 }

@@ -1,0 +1,371 @@
+# EVM Call and EstimateGas Implementation
+
+This document explains how the EVM service handles unsigned call data for `eth_call` and `eth_estimateGas` RPC methods using payload type "B".
+
+## Overview
+
+The EVM service supports three payload types:
+- **"G" (Genesis)**: Bootstrap mode for initializing state with 'A'/'K' commands
+- **"B" (Basic Call)**: EstimateGas/Call mode for unsigned transaction simulation (NEW)
+- **Default**: Normal transaction execution with signed RLP-encoded transactions
+
+Payload "B" enables static calls and gas estimation without requiring transaction signatures, which is essential for read-only operations like `balanceOf()` queries.
+
+## Architecture
+
+### Request Flow
+
+```
+eth_call / eth_estimateGas RPC
+    ↓
+Node creates WorkPackage with payload "B"
+    ↓
+EVM service receives single extrinsic with unsigned call data
+    ↓
+decode_call_args() parses call parameters
+    ↓
+EVM runtime executes the call
+    ↓
+Returns: ExecutionEffects + call output
+```
+
+### Data Format
+
+#### Input (Extrinsic Format)
+```
+caller(20) + target(20) + gas_limit(32) + gas_price(32) +
+value(32) + call_kind(4) + data_len(8) + data
+```
+
+**Field Details:**
+- `caller`: 20-byte address initiating the call
+- `target`: 20-byte contract address (or zero for contract creation)
+- `gas_limit`: 32-byte big-endian gas limit
+- `gas_price`: 32-byte big-endian gas price
+- `value`: 32-byte big-endian ETH value to transfer
+- `call_kind`: 4-byte little-endian (0 = CALL, 1 = CREATE)
+- `data_len`: 8-byte little-endian length of call data
+- `data`: Variable-length call data (e.g., function selector + arguments)
+
+#### Output (Result Format)
+```
+ExecutionEffects Serialization + Call Output
+```
+
+**ExecutionEffects Structure:**
+- `export_count`: 2 bytes (little-endian u16) - always 0 for payload "B"
+- `gas_used`: 8 bytes (little-endian u64)
+- `write_intents_count`: 2 bytes (little-endian u16) - always 0 for payload "B"
+- `write_intents`: Empty for payload "B"
+
+**Call Output:**
+- Appended after ExecutionEffects
+- Variable length bytes returned by the EVM execution
+- For `balanceOf()`: 32-byte uint256 balance value
+
+Total size: 12 bytes (ExecutionEffects header) + output length
+
+## Implementation Details
+
+### Rust Service (services/evm/src/main.rs)
+
+#### Payload "B" Detection (Line 196)
+```rust
+} else if work_item.payload == b"B" {
+    // Payload "B": EstimateGas/Call mode - single extrinsic with unsigned call data
+    // This mode is used for eth_estimateGas and eth_call RPCs
+```
+
+#### Call Arguments Decoding (Line 214)
+```rust
+let decoded = match decode_call_args(extrinsic.as_ptr() as u64, extrinsic.len() as u64) {
+    Some(d) => d,
+    None => {
+        call_log(1, None, "❌ Payload 'B': Failed to decode call args");
+        return empty_output();
+    }
+};
+```
+
+The `decode_call_args()` function (tx.rs):
+- Parses unsigned call data without signature verification
+- Validates minimum buffer length (148 bytes)
+- Extracts all transaction parameters
+- Returns `DecodedTransactArgs` struct
+
+#### EVM Execution (Line 269)
+```rust
+let result = evm::transact(args, None, &mut overlay, &invoker);
+```
+
+Executes the call using the same EVM runtime as signed transactions, but:
+- No signature verification
+- **Gas price set to zero** - no balance deductions for gas fees
+- No state modifications are persisted (read-only)
+- No receipts generated
+- No transaction records created
+
+#### Result Serialization (Lines 272-304)
+```rust
+match result {
+    Ok(tx_result) => {
+        let gas_used = tx_result.used_gas.as_u64();
+        let output = match tx_result.call_create {
+            evm::standard::TransactValueCallCreate::Call { retval, .. } => retval,
+            evm::standard::TransactValueCallCreate::Create { .. } => Vec::new(),
+        };
+
+        // Create ExecutionEffects with gas_used
+        let execution_effects = utils::effects::ExecutionEffects {
+            write_intents: Vec::new(),
+            export_count: 0,
+            gas_used,
+        };
+
+        // Serialize and append output
+        let mut buffer = serialize_execution_effects(&execution_effects, &candidate_writes);
+        buffer.extend_from_slice(&output);
+
+        return leak_output(buffer);
+    }
+}
+```
+
+### Go Node (node/node_evm_tx.go)
+
+#### Creating Simulation Work Package (Line 362)
+```go
+Payload: []byte("B"), // "B" mode for EstimateGas/Call with unsigned call data
+ExportCount: 0,       // No exports for static call
+```
+
+The extrinsic format matches the Rust input specification exactly.
+
+#### Parsing Results (Lines 415-441)
+```go
+effects, err := statedb.DeserializeExecutionEffects(result.Ok)
+if err != nil {
+    // Handle error
+}
+
+// ExecutionEffects format: [export_count:2][gas_used:8][write_intents_count:2][write_intents...]
+// For payload "B", write_intents should be empty (count=0)
+effectsHeaderSize := 12 // 2 + 8 + 2
+
+if len(result.Ok) > effectsHeaderSize {
+    // Extract the call output (everything after ExecutionEffects header)
+    callOutput := result.Ok[effectsHeaderSize:]
+    return callOutput, nil
+}
+```
+
+#### EstimateGas Implementation (Lines 220-273)
+Returns only the `gas_used` value from ExecutionEffects:
+```go
+effects, err := statedb.DeserializeExecutionEffects(workReport.Results[0].Result.Ok)
+return effects.GasUsed, nil
+```
+
+#### Call Implementation (Lines 275-281)
+Returns the call output bytes:
+```go
+callOutput := result.Ok[effectsSize:]
+return callOutput, nil
+```
+
+## Example: balanceOf() Query
+
+### Test Implementation (node/node_jamtest_evm.go:234-260)
+
+```go
+// Test Call for balanceOf(devAccount0)
+devAccount0, _ := common.GetEVMDevAccount(0)
+
+// balanceOf(address) selector: 0x70a08231
+calldataBalanceOf := make([]byte, 36)
+calldataBalanceOf[0] = 0x70  // Function selector byte 1
+calldataBalanceOf[1] = 0xa0  // Function selector byte 2
+calldataBalanceOf[2] = 0x82  // Function selector byte 3
+calldataBalanceOf[3] = 0x31  // Function selector byte 4
+
+// Encode address parameter (32 bytes, left-padded)
+copy(calldataBalanceOf[16:36], devAccount0[:])
+
+// Execute the call
+callResult, err := n1.Call(devAccount0, &usdmAddress, 100000, 1000000000, 0, calldataBalanceOf, "latest")
+
+// Parse result - should be 61MM * 10^18
+expectedBalance := new(big.Int).Mul(big.NewInt(61_000_000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+actualBalance := new(big.Int).SetBytes(callResult[len(callResult)-32:])
+
+if actualBalance.Cmp(expectedBalance) != 0 {
+    log.Error(log.Node, "Call balanceOf MISMATCH", "expected", expectedBalance, "actual", actualBalance)
+}
+```
+
+### Execution Flow
+
+1. **Node constructs extrinsic**:
+   ```
+   [devAccount0:20][usdmAddress:20][100000:32][1000000000:32]
+   [0:32][0:4][36:8][0x70a08231...address:36]
+   ```
+
+2. **Rust service decodes**:
+   - Caller: devAccount0
+   - Target: usdmAddress (0x01)
+   - Gas limit: 100000
+   - Data: `0x70a08231` + left-padded address
+
+3. **EVM executes**:
+   - Calls USDM contract at 0x01
+   - Executes `balanceOf(address)` function
+   - Returns 32-byte uint256 balance
+
+4. **Rust service returns**:
+   ```
+   [export_count:2][gas_used:8][write_count:2][balance:32]
+   ```
+   Total: 12 + 32 = 44 bytes
+
+5. **Node parses**:
+   - Skips first 12 bytes (ExecutionEffects header)
+   - Extracts remaining bytes as balance (32 bytes)
+   - Converts to big.Int: 61,000,000 × 10^18
+
+## Key Differences from Signed Transactions
+
+| Aspect | Payload "B" (Call/Estimate) | Normal Transactions |
+|--------|----------------------------|---------------------|
+| **Signature** | Not required | Required (verified via secp256k1) |
+| **State Changes** | Not persisted | Persisted to state |
+| **Receipts** | Not generated | Generated and stored |
+| **RLP Encoding** | Not required | Required for tx hash |
+| **Gas Charging** | Simulated only | Charged to caller |
+| **Nonce Check** | Skipped | Validated |
+| **Exports** | 0 (no DA objects) | 3+ (receipts, shards, SSR) |
+
+## Gas Computation
+
+For payload "B", gas is computed using the **JAM Gas Model**:
+- EVM opcodes have zero cost
+- Gas consumption is measured via JAM host function calls
+- The `gas_used` value represents pure JAM gas (not vendor gas)
+
+See `jam_gas.rs` for the JAMGasState implementation.
+
+## Error Handling
+
+### Rust Service Errors
+- **Insufficient extrinsics**: Returns empty output with error log
+- **Decode failure**: Returns empty output with error log
+- **Execution failure**: Returns empty output with error log
+
+### Go Node Errors
+- **Simulation failure**: Returns error to RPC caller
+- **Deserialization failure**: Logs warning, returns raw result
+- **No results**: Returns "no result from simulation" error
+
+## Testing
+
+Run the EVM test suite to verify payload "B" functionality:
+```bash
+go test -tags network_test -run TestEVM
+```
+
+The test performs:
+1. Genesis bootstrap with USDM contract deployment
+2. Balance initialization (61MM USDM to devAccount0)
+3. `balanceOf()` call via payload "B"
+4. Balance verification
+5. Multiple signed transfer transactions
+
+Expected result: balanceOf call returns exactly 61,000,000 × 10^18.
+
+## Future Enhancements
+
+Potential improvements for payload "B" mode:
+- **Block number support**: Execute calls at historical state
+- **Access lists**: Support EIP-2930 access list transactions
+- **Tracing**: Return execution traces for debugging
+- **Gas optimization**: Binary search for optimal gas limit
+- **Batch calls**: Support multiple calls in single work package
+
+## Related Files
+
+- **Rust Service**:
+  - `services/evm/src/main.rs` - PayloadCall handler
+  - `services/evm/src/tx.rs` - decode_call_args
+  - `services/evm/src/jam_gas.rs` - JAM gas model
+
+- **Go Node**:
+  - `node/node_evm_tx.go` (lines 220-281) - Call/EstimateGas
+  - `node/node_evm_tx.go` (lines 283-378) - Work package creation
+  - `node/node_jamtest_evm.go` (lines 234-260) - balanceOf test
+
+- **Utilities**:
+  - `services/utils/src/effects.rs` - ExecutionEffects definition
+  - `statedb/effects.go` - Go-side deserialization
+
+## Comparison to Standard Ethereum
+
+Standard Ethereum RPC:
+```
+eth_call → Direct state read (no work package)
+eth_estimateGas → Binary search on gas limit
+```
+
+JAM EVM (Payload "B"):
+```
+eth_call → Work package with payload "B" → Single execution
+eth_estimateGas → Work package with payload "B" → Single execution
+```
+
+Benefits of JAM approach:
+- Consistent execution model across all operations
+- Proper gas accounting via JAM host functions
+- Verifiable results via work reports
+- Compatible with JAM's work package architecture
+
+## Security Considerations
+
+1. **No Authentication**: Payload "B" accepts any caller address without signature verification. This is safe because:
+   - State changes are not persisted
+   - Used only for read-only operations
+   - Gas is not actually charged
+
+2. **Gas Limits**: Calls are still subject to gas limits to prevent DoS:
+   - Default limit: RefineGasAllocation / 2
+   - Can be overridden per call
+   - Prevents infinite loops
+
+3. **State Isolation**: Each call operates on a clean overlay that is discarded after execution.
+
+## Troubleshooting
+
+### Common Issues
+
+**Issue**: Call returns empty output
+- **Cause**: EVM execution reverted
+- **Solution**: Check contract exists, function signature is correct, and parameters are valid
+
+**Issue**: Wrong gas estimate
+- **Cause**: Gas limit too low for actual execution
+- **Solution**: Increase gas limit parameter in Call/EstimateGas
+
+**Issue**: Balance mismatch
+- **Cause**: State not properly initialized or wrong storage slot
+- **Solution**: Verify genesis bootstrap completed successfully, check storage key computation
+
+### Debug Logging
+
+Enable verbose logging in Rust:
+```rust
+call_log(2, None, &format!("📞 Payload 'B': Call from={:?}, gas_limit={}", caller, gas_limit));
+```
+
+Enable debug logging in Go:
+```go
+log.Debug(log.Node, "executeSimulationWorkPackage: extracted call output",
+    "gas_used", effects.GasUsed, "output_len", len(callOutput))
+```

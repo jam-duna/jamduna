@@ -66,13 +66,16 @@ var MethodDescriptionMap = map[string]string{
 	"GetTransactionCount": "GetTransactionCount(address string, blockNumber string) -> uint256 hex",
 
 	// node_rpc_evmtx.go - Transaction
-	"GetTransactionReceipt": "GetTransactionReceipt(txHash string) -> receipt json",
-	"GetTransactionByHash":  "GetTransactionByHash(txHash string) -> transaction json",
-	"GetLogs":               "GetLogs(filter json) -> logs json array",
-	"SendRawTransaction":    "SendRawTransaction(signedTxData hex) -> txHash",
-	"Call":                  "Call(txObj json, blockNumber string) -> data hex",
+	"GetTransactionReceipt":               "GetTransactionReceipt(txHash string) -> receipt json",
+	"GetTransactionByHash":                "GetTransactionByHash(txHash string) -> transaction json",
+	"GetTransactionByBlockHashAndIndex":   "GetTransactionByBlockHashAndIndex(blockHash string, index string) -> transaction json",
+	"GetTransactionByBlockNumberAndIndex": "GetTransactionByBlockNumberAndIndex(blockNumber string, index string) -> transaction json",
+	"GetLogs":                             "GetLogs(filter json) -> logs json array",
+	"SendRawTransaction":                  "SendRawTransaction(signedTxData hex) -> txHash",
+	"Call":                                "Call(txObj json, blockNumber string) -> data hex",
 
 	// node_rpc_evmblock.go - Block + Transaction pool management methods
+	"BlockNumber":      "BlockNumber() -> block number hex",
 	"GetBlockByHash":   "GetBlockByHash(blockHash string, fullTx bool) -> block json",
 	"GetBlockByNumber": "GetBlockByNumber(blockNumber string, fullTx bool) -> block json",
 	"TxPoolStatus":     "TxPoolStatus() -> pool statistics json",
@@ -396,7 +399,6 @@ func (j *Jam) BestBlock(req []string, res *string) error {
 
 // see GP 11.1.2 Refinement Context where there TWO historical blocks A+B but only A has to be in RecentBlocks
 func (n *NodeContent) getRefineContext(prereqs ...common.Hash) types.RefineContext {
-	panic(1234)
 	// TODO: approx finality by 5 blocks
 	finalityApproxConst := 5
 	anchor := common.Hash{}
@@ -670,25 +672,6 @@ func (j *Jam) ServiceValue(req []string, res *string) error {
 	}
 	*res = common.Bytes2Hex(storage)
 	return nil
-}
-
-func (n *NodeContent) getSegments(requestedHash common.Hash, index []uint16, eventID uint64) (segment [][]byte, justifications [][]common.Hash, err error) {
-	si := n.WorkReportSearch(requestedHash)
-	if si == nil {
-		return nil, nil, fmt.Errorf("requestedHash not found")
-	}
-	for _, idx := range index {
-		si.AddIndex(idx)
-	}
-	segments, justifications, err := n.reconstructSegments(si, eventID)
-	if err != nil {
-		return nil, nil, err
-	}
-	if paranoidVerification {
-		// for each segment, verify the justification (which is a pageproof)
-
-	}
-	return segments, justifications, nil
 }
 
 // GetWorkPackageByHash(workPackageHash string) -> json WorkReport
@@ -1126,8 +1109,14 @@ func callJamMethod(jam *Jam, method string, params []string, result *string) err
 		return jam.GetTransactionReceipt(params, result)
 	case "eth_getTransactionByHash":
 		return jam.GetTransactionByHash(params, result)
+	case "eth_getTransactionByBlockHashAndIndex":
+		return jam.GetTransactionByBlockHashAndIndex(params, result)
+	case "eth_getTransactionByBlockNumberAndIndex":
+		return jam.GetTransactionByBlockNumberAndIndex(params, result)
 	case "eth_getLogs":
 		return jam.GetLogs(params, result)
+	case "eth_blockNumber":
+		return jam.BlockNumber(params, result)
 	case "eth_getBlockByHash":
 		return jam.GetBlockByHash(params, result)
 	case "eth_getBlockByNumber":

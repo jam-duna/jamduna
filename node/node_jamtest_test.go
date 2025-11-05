@@ -30,3 +30,12 @@ func TestAlgo(t *testing.T) {
 	}
 	jamtest(t, "algo", targetN)
 }
+
+func TestAuthCopy(t *testing.T) {
+	initPProf(t)
+	targetN := TargetedN_EVM
+	if *targetNum > 0 {
+		targetN = *targetNum
+	}
+	jamtest(t, "auth_copy", targetN)
+}

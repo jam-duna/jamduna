@@ -18,6 +18,97 @@ type StateWitness struct {
 	Payload  []byte        `json:"-"` // Not serialized, populated when FetchJAMDASegments=true
 }
 
+type StateWitnessRaw struct {
+	ObjectID      common.Hash   `json:"objectId"`
+	ServiceID     uint32        `json:"serviceId"`
+	Path          []common.Hash `json:"path,omitempty"`
+	PayloadLength uint32        `json:"payloadLength"`
+	Payload       []byte        `json:"-"` // Not serialized, populated when FetchJAMDASegments=true
+}
+
+// SerializeWitnessRaw serializes a StateWitnessRaw to binary format
+// Format: object_id (32 bytes) + service_id (4 bytes LE) + payload_length (4 bytes LE) + payload (variable) + proofs (32 bytes each)
+func (w StateWitnessRaw) SerializeWitnessRaw() []byte {
+	// Calculate total size: 32 (object_id) + 4 (service_id) + 4 (payload_length) + payload + proofs
+	size := 32 + 4 + 4 + len(w.Payload) + (len(w.Path) * 32)
+	buf := make([]byte, 0, size)
+
+	// 1. ObjectID (32 bytes)
+	buf = append(buf, w.ObjectID[:]...)
+
+	// 2. ServiceID (4 bytes LE)
+	serviceIDBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(serviceIDBytes, w.ServiceID)
+	buf = append(buf, serviceIDBytes...)
+
+	// 3. PayloadLength (4 bytes LE)
+	lengthBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(lengthBytes, w.PayloadLength)
+	buf = append(buf, lengthBytes...)
+
+	// 4. Payload (variable length)
+	buf = append(buf, w.Payload...)
+
+	// 5. Proof hashes (32 bytes each)
+	for _, hash := range w.Path {
+		buf = append(buf, hash[:]...)
+	}
+
+	return buf
+}
+
+// DeserializeStateWitnessRaw deserializes a StateWitnessRaw from binary format
+// Format: object_id (32 bytes) + service_id (4 bytes LE) + payload_length (4 bytes LE) + payload (variable) + proofs (32 bytes each)
+func DeserializeStateWitnessRaw(data []byte) (StateWitnessRaw, error) {
+	const minSize = 32 + 4 + 4 // object_id + service_id + payload_length
+	if len(data) < minSize {
+		return StateWitnessRaw{}, fmt.Errorf("DeserializeStateWitnessRaw: need at least %d bytes, got %d", minSize, len(data))
+	}
+
+	offset := 0
+
+	// 1. ObjectID (32 bytes)
+	var objectID common.Hash
+	copy(objectID[:], data[offset:offset+32])
+	offset += 32
+
+	// 2. ServiceID (4 bytes LE)
+	serviceID := binary.LittleEndian.Uint32(data[offset : offset+4])
+	offset += 4
+
+	// 3. PayloadLength (4 bytes LE)
+	payloadLength := binary.LittleEndian.Uint32(data[offset : offset+4])
+	offset += 4
+
+	// 4. Payload (variable length)
+	if len(data) < offset+int(payloadLength) {
+		return StateWitnessRaw{}, fmt.Errorf("DeserializeStateWitnessRaw: need %d bytes for payload at offset %d, got %d", payloadLength, offset, len(data)-offset)
+	}
+	payload := make([]byte, payloadLength)
+	copy(payload, data[offset:offset+int(payloadLength)])
+	offset += int(payloadLength)
+
+	// 5. Proof hashes (32 bytes each)
+	remaining := len(data) - offset
+	if remaining%32 != 0 {
+		return StateWitnessRaw{}, fmt.Errorf("DeserializeStateWitnessRaw: proof data not aligned to 32 bytes (remaining=%d)", remaining)
+	}
+	proofCount := remaining / 32
+	path := make([]common.Hash, proofCount)
+	for i := 0; i < proofCount; i++ {
+		copy(path[i][:], data[offset:offset+32])
+		offset += 32
+	}
+
+	return StateWitnessRaw{
+		ObjectID:      objectID,
+		ServiceID:     serviceID,
+		Path:          path,
+		PayloadLength: payloadLength,
+		Payload:       payload,
+	}, nil
+}
+
 // ObjectRef contains metadata for a JAM service object
 //
 // Fields filled at REFINE time (deterministic):
@@ -40,7 +131,7 @@ type ObjectRef struct {
 	ObjKind         uint8       `json:"objectKind"` // ObjectKind (1 byte)
 
 	// Accumulate-time fields (finalized ordering metadata)
-	TxSlot2  uint8  `json:"txSlot2"`  // Reserved/padding (1 byte)
+	LogIndex uint8  `json:"logIndex"` // Reserved/padding (1 byte)
 	TxSlot   uint16 `json:"txSlot"`   // Transaction slot/index (2 bytes)
 	Timeslot uint32 `json:"timeslot"` // JAM block slot; maps 1:1 to canonical block hash
 	GasUsed  uint32 `json:"gasUsed"`  // Non-zero for receipt objects
@@ -80,7 +171,7 @@ func (o ObjectRef) Serialize() []byte {
 	buf = append(buf, four...)
 
 	buf = append(buf, o.ObjKind)                 // 1 byte
-	buf = append(buf, o.TxSlot2)                 // 1 byte
+	buf = append(buf, o.LogIndex)                // 1 byte
 	binary.LittleEndian.PutUint16(tmp, o.TxSlot) // 2 bytes
 	buf = append(buf, tmp...)
 
@@ -109,9 +200,9 @@ func DeserializeObjectRef(data []byte, offset *int) (ObjectRef, error) {
 		IndexEnd:      binary.LittleEndian.Uint16(data[*offset+38 : *offset+40]),
 		Version:       binary.LittleEndian.Uint32(data[*offset+40 : *offset+44]),
 		PayloadLength: binary.LittleEndian.Uint32(data[*offset+44 : *offset+48]),
-		// New field order: ObjKind, TxSlot2, TxSlot, Timeslot, GasUsed, EvmBlock
+		// New field order: ObjKind, LogIndex, TxSlot, Timeslot, GasUsed, EvmBlock
 		ObjKind:  data[*offset+48],
-		TxSlot2:  data[*offset+49],
+		LogIndex: data[*offset+49],
 		TxSlot:   binary.LittleEndian.Uint16(data[*offset+50 : *offset+52]),
 		Timeslot: binary.LittleEndian.Uint32(data[*offset+52 : *offset+56]),
 		GasUsed:  binary.LittleEndian.Uint32(data[*offset+56 : *offset+60]),
@@ -143,24 +234,45 @@ type ObjectDependency struct {
 type ExecutionEffects struct {
 	ExportCount  uint16        `json:"exportCount"`
 	GasUsed      uint64        `json:"gasUsed"`
+	StateRoot    common.Hash   `json:"stateRoot"`
 	WriteIntents []WriteIntent `json:"writeIntents,omitempty"`
 }
 
 // DeserializeExecutionEffects deserializes ExecutionEffects from refine output.
-// Format: export_count (2B) | gas_used (8B) | tx_count (2B) | count (2B) | ObjectCandidateWrite entries (metadata-only, no payloads).
+// Modern format: export_count (2B) | gas_used (8B) | count (2B) | ObjectCandidateWrite entries.
+// Supports payload data for Receipt and Block objects only.
 func DeserializeExecutionEffects(data []byte) (ExecutionEffects, error) {
-	// Phase 1B format (current): export_count (2B) | gas_used (8B) | tx_count (2B) | count (2B) | ObjectCandidateWrites...
-	if len(data) < 14 {
-		return ExecutionEffects{}, fmt.Errorf("DeserializeExecutionEffects: data too short (need >= 14, got %d)", len(data))
+	if len(data) == 0 {
+		return ExecutionEffects{
+			WriteIntents: []WriteIntent{},
+		}, nil
 	}
 
-	exportCount := binary.LittleEndian.Uint16(data[0:2])
-	gasUsed := binary.LittleEndian.Uint64(data[2:10])
-	txCount := binary.LittleEndian.Uint16(data[10:12])
+	offset := 0
 
-	// ObjectCandidateWrite array format: 2-byte count
-	count := binary.LittleEndian.Uint16(data[12:14])
-	offset := 14
+	// Export count (2 bytes) - mandatory
+	if len(data) < 2 {
+		return ExecutionEffects{}, fmt.Errorf("DeserializeExecutionEffects: need >= 2 bytes, got %d", len(data))
+	}
+	exportCount := binary.LittleEndian.Uint16(data[0:2])
+	offset = 2
+
+	// Gas used (8 bytes) - mandatory
+	if len(data) < 10 {
+		return ExecutionEffects{}, fmt.Errorf("DeserializeExecutionEffects: need >= 10 bytes for gas_used, got %d", len(data))
+	}
+	gasUsed := binary.LittleEndian.Uint64(data[2:10])
+	offset = 10
+
+	// Count (2 bytes) - mandatory
+	if len(data) < offset+2 {
+		return ExecutionEffects{}, fmt.Errorf("DeserializeExecutionEffects: need >= %d bytes for count, got %d", offset+2, len(data))
+	}
+	count := binary.LittleEndian.Uint16(data[offset : offset+2])
+	offset += 2
+
+	// State root is no longer included in the serialized format
+	var stateRoot common.Hash
 
 	writeIntents := make([]WriteIntent, 0, count)
 	for i := uint16(0); i < count; i++ {
@@ -169,21 +281,27 @@ func DeserializeExecutionEffects(data []byte) (ExecutionEffects, error) {
 			return ExecutionEffects{}, fmt.Errorf("DeserializeExecutionEffects: candidate %d: %w", i, err)
 		}
 
+		// Retain inline payload for receipt objects (used by accumulate for logs reconstruction).
+		// All other object kinds should not carry inline payload in ExecutionEffects.
+		payload := candidate.Payload
+		if candidate.RefInfo.ObjKind != uint8(common.ObjectKindReceipt) {
+			payload = nil
+		}
+
 		writeIntents = append(writeIntents, WriteIntent{
 			Effect: WriteEffectEntry{
 				ObjectID: candidate.ObjectID,
 				RefInfo:  candidate.RefInfo,
-				Payload:  nil, // ObjectCandidateWrite doesn't include payloads
+				Payload:  payload,
 			},
 			Dependencies: deps,
 		})
 	}
 
-	_ = txCount // txCount available for future use
-
 	return ExecutionEffects{
 		ExportCount:  exportCount,
 		GasUsed:      gasUsed,
+		StateRoot:    stateRoot,
 		WriteIntents: writeIntents,
 	}, nil
 }
@@ -192,6 +310,7 @@ func DeserializeExecutionEffects(data []byte) (ExecutionEffects, error) {
 type ObjectCandidateWrite struct {
 	ObjectID common.Hash
 	RefInfo  ObjectRef
+	Payload  []byte // Payload data for Receipt objects only
 }
 
 // DeserializeObjectCandidateWrite deserializes a single ObjectCandidateWrite entry
@@ -242,9 +361,25 @@ func DeserializeObjectCandidateWrite(data []byte, offset *int) (ObjectCandidateW
 		}
 	}
 
+	// Read payload if present for Receipt objects only (payload serialized inline after dependencies)
+	var payload []byte
+	if refInfo.ObjKind == uint8(common.ObjectKindReceipt) {
+		payloadLen := int(refInfo.PayloadLength)
+		if len(data) < *offset+payloadLen {
+			return ObjectCandidateWrite{}, nil, 0, fmt.Errorf(
+				"DeserializeObjectCandidateWrite: need %d bytes for object payload (kind=%d) at offset %d, have %d",
+				payloadLen, refInfo.ObjKind, *offset, len(data)-*offset,
+			)
+		}
+		payload = make([]byte, payloadLen)
+		copy(payload, data[*offset:*offset+payloadLen])
+		*offset += payloadLen
+	}
+
 	candidate := ObjectCandidateWrite{
 		ObjectID: objectID,
 		RefInfo:  refInfo,
+		Payload:  payload,
 	}
 
 	consumed := *offset - startOffset
@@ -315,10 +450,10 @@ func CreateImportSegmentsAndWitness(
 }
 
 // SerializeWitness serializes a StateWitness to the fixed binary format expected by Rust
-// Format: object_id (32 bytes) + object_ref (64 bytes) + proof_count (4 bytes LE) + proofs (32 bytes each)
+// Format: object_id (32 bytes) + object_ref (64 bytes) + proofs (32 bytes each, no length prefix)
 func (w StateWitness) SerializeWitness() []byte {
 	// Calculate total size
-	size := 32 + 64 + 4 + (len(w.Path) * 32)
+	size := 32 + 64 + (len(w.Path) * 32)
 	buf := make([]byte, 0, size)
 
 	// 1. ObjectID (32 bytes)
@@ -327,11 +462,7 @@ func (w StateWitness) SerializeWitness() []byte {
 	// 2. ObjectRef (64 bytes) - use existing Serialize method
 	buf = append(buf, w.Ref.Serialize()...)
 
-	// 3. Proof count (4 bytes, little endian)
-	proofCount := uint32(len(w.Path))
-	buf = append(buf, byte(proofCount), byte(proofCount>>8), byte(proofCount>>16), byte(proofCount>>24))
-
-	// 4. Proof hashes (32 bytes each)
+	// 3. Proof hashes (32 bytes each)
 	for _, hash := range w.Path {
 		buf = append(buf, hash[:]...)
 	}

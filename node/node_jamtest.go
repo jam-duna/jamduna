@@ -366,8 +366,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	var jceManager *ManualJCEManager
 	jceManager = nil
 	var previous_service_idx uint32
-	requireNew := true
-	if strings.Compare(jam, "algo") == 0 || strings.Compare(jam, "evm") == 0 {
+	requireNew := false
+	if strings.Compare(jam, "algo") == 0 || strings.Compare(jam, "evm") == 0 || strings.Compare(jam, "safrole") == 0 {
 		requireNew = false
 	}
 
@@ -479,8 +479,14 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		safrole(jceManager)
 		waitForTermination(tNode, "fallback", FallbackEpochLen, FallbackBufferTime, t)
 	case "evm":
-		EvmTest(t, bNode, testServices, "fib")
+		EvmTest(t, bNode, testServices, "transfers")
+		//EvmTest(t, bNode, testServices, "fib")
+		//time.Sleep(600 * time.Second)
 	case "algo":
 		algo(bNode, testServices, targetN)
+	case "auth_copy":
+		reassign(bNode, testServices, targetN)
+	default:
+		t.Fatalf("Unknown jam test: %s\n", jam)
 	}
 }

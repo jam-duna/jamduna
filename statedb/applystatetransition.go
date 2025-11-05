@@ -383,7 +383,7 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 			log.Warn(log.GeneralAuthoring, "BEEFY-C", "output", sa.Output)
 		} else {
 			leaves = append(leaves, leafBytes)
-			log.Info(debugB, "BEEFY-C", "s", fmt.Sprintf("%d", sa.Service), "h", sa.Output, "encoded", fmt.Sprintf("%x", leafBytes))
+			log.Trace(log.GeneralAuthoring, "BEEFY-C", "s", fmt.Sprintf("%d", sa.Service), "h", sa.Output, "encoded", fmt.Sprintf("%x", leafBytes))
 		}
 	}
 
@@ -520,6 +520,7 @@ func (s *StateDB) ApplyStateTransitionAvailabilityAssignments(ctx context.Contex
 	// Guarantees checks
 	for _, g := range guarantees {
 		if err := s.VerifyGuaranteeBasic(g, targetJCE); err != nil {
+			panic(fmt.Sprintf("ApplyStateTransitionAvailabilityAssignments: VerifyGuaranteeBasic failed: %v", err))
 			return nil, err
 		}
 	}

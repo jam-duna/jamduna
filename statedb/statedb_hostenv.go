@@ -19,7 +19,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 	if !sa.Dirty {
 		return nil, nil
 	}
-	log.Info(log.SDB, "!writeAccount", "service_idx", sa.ServiceIndex, "dirty", sa.Dirty, "s", sa.JsonString())
+	log.Trace(log.SDB, "!writeAccount", "service_idx", sa.ServiceIndex, "dirty", sa.Dirty, "s", sa.JsonString())
 
 	service_idx := sa.GetServiceIndex()
 	tree := s.GetTrie()
@@ -28,7 +28,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 	serviceUpdate = types.NewServiceUpdate(service_idx)
 	t0 := time.Now()
 	for _, storage := range sa.Storage {
-		log.Info(log.SDB, "writeAccount Storage", "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", storage.InternalKey, "value", fmt.Sprintf("%x", storage.Value), "storage.Accessed", storage.Accessed, "storage.Deleted", storage.Deleted, "storage.Dirty", storage.Dirty, "storage.source", storage.Source)
+		log.Trace(log.SDB, "writeAccount Storage", "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", storage.InternalKey, "value", fmt.Sprintf("%x", storage.Value), "storage.Accessed", storage.Accessed, "storage.Deleted", storage.Deleted, "storage.Dirty", storage.Dirty, "storage.source", storage.Source)
 		as_internal_key := storage.InternalKey
 		if storage.Dirty {
 			if storage.Deleted {
@@ -66,7 +66,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 
 	t0 = time.Now()
 	for blob_hash_str, v := range sa.Lookup {
-		log.Info(log.SDB, "writeAccount Lookup", "service_idx", service_idx, "blob_hash_str", blob_hash_str, "v.Dirty", v.Dirty, "v.Deleted", v.Deleted, "v.Z", v.Z, "v.Timeslots", v.Timeslots, "source", v.Source)
+		log.Trace(log.SDB, "writeAccount Lookup", "service_idx", service_idx, "blob_hash_str", blob_hash_str, "v.Dirty", v.Dirty, "v.Deleted", v.Deleted, "v.Z", v.Z, "v.Timeslots", v.Timeslots, "source", v.Source)
 		blob_hash := common.HexToHash(blob_hash_str)
 		if v.Dirty {
 			if v.Deleted {
@@ -272,7 +272,7 @@ func (s *StateDB) ReadServicePreimageBlob(service uint32, blob_hash common.Hash)
 	if err != nil || !ok {
 		return
 	} else {
-		log.Trace(log.P, "ReadServicePreimageBlob", "service", service, "blob_hash", blob_hash, "len(blob)", len(blob))
+		log.Info(log.P, "ReadServicePreimageBlob", "service", service, "blob_hash", blob_hash, "len(blob)", len(blob))
 		return
 	}
 }
@@ -283,7 +283,7 @@ func (s *StateDB) ReadServicePreimageLookup(service uint32, blob_hash common.Has
 	if err != nil || !ok {
 		return
 	}
-	log.Trace(log.P, "ReadServicePreimageLookup", "service", service, "blob_hash", blob_hash, "blob_length", blob_length, time_slots)
+	log.Info(log.P, "ReadServicePreimageLookup", "service", service, "blob_hash", blob_hash, "blob_length", blob_length, time_slots)
 	return
 
 }
@@ -327,8 +327,81 @@ func (s *StateDB) HistoricalLookup(a *types.ServiceAccount, t uint32, blob_hash 
 	}
 }
 
+// convertProofToHashes converts [][]byte proof to []common.Hash
+// Panics if proof hash length is not 32 bytes (indicates trie corruption)
+func convertProofToHashes(proofBytes [][]byte) []common.Hash {
+	path := make([]common.Hash, len(proofBytes))
+	for i, p := range proofBytes {
+		if len(p) != 32 {
+			panic(fmt.Sprintf("invalid proof hash length: expected 32, got %d at index %d", len(p), i))
+		}
+		copy(path[i][:], p)
+	}
+	return path
+}
+
+func (s *StateDB) ReadStateWitnessRaw(serviceID uint32, objectID common.Hash) (types.StateWitnessRaw, bool, common.Hash, error) {
+	tree := s.GetTrie()
+	// Use the low-level trie method to get value, proof, and state root
+	valueBytes, proofBytes, stateRoot, ok, err := tree.GetServiceStorageWithProof(serviceID, objectID[:])
+	if err != nil {
+		return types.StateWitnessRaw{}, false, common.Hash{}, err
+	}
+	if !ok {
+		return types.StateWitnessRaw{}, false, common.Hash{}, nil
+	}
+	path := convertProofToHashes(proofBytes)
+	// ObjectKindRaw cases
+	if objectID == GetBlockNumberKey() {
+		// BLOCK_NUMBER_KEY: RAW storage (no ObjectRef, just raw value)
+		// Value format: block_number (4 bytes LE) + parent_hash (32 bytes) = 36 bytes
+		witness := types.StateWitnessRaw{
+			ObjectID:      objectID,
+			ServiceID:     serviceID,
+			Path:          path,
+			PayloadLength: uint32(len(valueBytes)),
+			Payload:       valueBytes, // RAW value from JAM State
+		}
+		return witness, true, stateRoot, nil
+	}
+
+	isBlockObject, blockNumber := IsBlockObjectID(objectID)
+	if isBlockObject {
+		// Block objects: JAM State contains only EvmBlockPayload (no ObjectRef)
+		// We need to reconstruct ObjectRef from the block data and objectID
+		if len(valueBytes) < 4 {
+			return types.StateWitnessRaw{}, true, common.Hash{}, fmt.Errorf("invalid Block object value length: expected at least 4, got %d", len(valueBytes))
+		}
+
+		// Deserialize EvmBlockPayload to extract block details
+		evmBlock, err := DeserializeEvmBlockPayload(valueBytes)
+		if err != nil {
+			log.Error(log.SDB, "ReadStateWitness:DeserializeEvmBlockPayload", "objectID", objectID, "expected", blockNumber)
+			return types.StateWitnessRaw{}, true, common.Hash{}, fmt.Errorf("failed to deserialize EvmBlockPayload: %w", err)
+		}
+
+		// Verify block number matches
+		if evmBlock.Number != uint64(blockNumber) {
+			log.Error(log.SDB, "ReadStateWitness:Block number mismatch", "objectID", objectID, "expected", blockNumber, "got", evmBlock.Number)
+			return types.StateWitnessRaw{}, true, common.Hash{}, fmt.Errorf("block number mismatch: objectID has %d, payload has %d", blockNumber, evmBlock.Number)
+		}
+
+		// For Block objects, JAM State contains the complete EvmBlockPayload
+		witness := types.StateWitnessRaw{
+			ObjectID:      objectID,
+			ServiceID:     serviceID,
+			Path:          path,
+			PayloadLength: uint32(len(valueBytes)),
+			Payload:       valueBytes, // Complete EvmBlockPayload from JAM State
+		}
+
+		return witness, true, stateRoot, nil
+	}
+	return types.StateWitnessRaw{}, false, common.Hash{}, fmt.Errorf("ReadStateWitnessRaw: unsupported ObjectID: %v", objectID)
+}
+
 // ReadObject fetches ObjectRef and state proof for given objectID
-func (s *StateDB) ReadStateWitness(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error) {
+func (s *StateDB) ReadStateWitnessRef(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error) {
 	tree := s.GetTrie()
 
 	// Use the low-level trie method to get value, proof, and state root
@@ -339,21 +412,17 @@ func (s *StateDB) ReadStateWitness(serviceID uint32, objectID common.Hash, fetch
 	if !ok {
 		return types.StateWitness{}, false, nil
 	}
+	path := convertProofToHashes(proofBytes)
 
+	// Receipt and other objects: JAM State starts with ObjectRef
+	if len(valueBytes) < 64 {
+		return types.StateWitness{}, true, fmt.Errorf("invalid value length: expected at least 64, got %d", len(valueBytes))
+	}
 	// Deserialize ObjectRef from storage
 	offset := 0
-	objRef, err := types.DeserializeObjectRef(valueBytes, &offset)
-	if err != nil {
-		return types.StateWitness{}, true, fmt.Errorf("failed to deserialize ObjectRef: %w", err)
-	}
-
-	// Convert [][]byte proof to []common.Hash
-	path := make([]common.Hash, len(proofBytes))
-	for i, p := range proofBytes {
-		if len(p) != 32 {
-			return types.StateWitness{}, true, fmt.Errorf("invalid proof hash length: expected 32, got %d", len(p))
-		}
-		copy(path[i][:], p)
+	objRef, deserErr := types.DeserializeObjectRef(valueBytes[0:64], &offset)
+	if deserErr != nil {
+		return types.StateWitness{}, true, fmt.Errorf("failed to deserialize ObjectRef: %w", deserErr)
 	}
 
 	witness := types.StateWitness{
@@ -362,8 +431,15 @@ func (s *StateDB) ReadStateWitness(serviceID uint32, objectID common.Hash, fetch
 		Path:     path,
 	}
 
-	// Optionally fetch payload via FetchJAMDASegments
-	if fetchPayloadFromDA {
+	// Handle payload based on object type
+	if objRef.ObjKind == uint8(common.ObjectKindReceipt) {
+		// Receipt objects: JAM State = ObjectRef + receipt_payload
+		// Extract the receipt payload from the remaining bytes after ObjectRef
+		if len(valueBytes) > 64 {
+			witness.Payload = valueBytes[64:] // Receipt payload starts after ObjectRef
+		}
+	} else if fetchPayloadFromDA {
+		// For other objects, optionally fetch payload via FetchJAMDASegments
 		payload, err := s.sdb.FetchJAMDASegments(objRef.WorkPackageHash, objRef.IndexStart, objRef.IndexEnd, objRef.PayloadLength)
 		if err != nil {
 			// Don't fail if CE139 read fails, just leave payload empty
@@ -376,11 +452,16 @@ func (s *StateDB) ReadStateWitness(serviceID uint32, objectID common.Hash, fetch
 	return witness, true, nil
 }
 
-// VerifyStateWitness verifies a StateWitness proof against a state root
+// VerifyStateWitnessRef verifies a StateWitness proof against a state root
 //
 //	every imported object must undergo same verification against refine context state root
-func VerifyStateWitness(witness types.StateWitness, stateRoot common.Hash) bool {
+func VerifyStateWitnessRef(witness types.StateWitness, stateRoot common.Hash) bool {
 	return trie.Verify(witness.Ref.ServiceID, witness.ObjectID[:], witness.Ref.Serialize(), stateRoot[:], witness.Path)
+}
+
+// VerifyStateWitnessRaw verifies a StateWitnessRaw proof against a state root
+func VerifyStateWitnessRaw(witness types.StateWitnessRaw, stateRoot common.Hash) bool {
+	return trie.Verify(witness.ServiceID, witness.ObjectID[:], witness.Payload, stateRoot[:], witness.Path)
 }
 
 // GetStateWitnesses extracts state witnesses for all objects referenced in the work report (for all work items)
@@ -396,16 +477,22 @@ func (s *StateDB) GetStateWitnesses(workReports []*types.WorkReport) (witnesses 
 				if err != nil {
 					return nil, common.Hash{}, fmt.Errorf("DeserializeExecutionEffects failed: %v", err)
 				}
-				// Use ReadStateWitness to get proof with built-in verification
+				// Use ReadStateWitnessRef to get proof with built-in verification
 				for _, intent := range effects.WriteIntents {
 					objectID := intent.Effect.ObjectID
-					w, ok, err := s.ReadStateWitness(r.ServiceID, objectID, false)
+
+					// Skip Block objects - they don't have ObjectRef entries in JAM state
+					if intent.Effect.RefInfo.ObjKind == uint8(common.ObjectKindBlock) || intent.Effect.RefInfo.ObjKind == uint8(common.ObjectKindReceipt) {
+						continue
+					}
+
+					w, ok, err := s.ReadStateWitnessRef(r.ServiceID, objectID, false)
 					if err != nil {
-						return nil, common.Hash{}, fmt.Errorf("ReadStateWitness failed: %v", err)
+						return nil, common.Hash{}, fmt.Errorf("ReadStateWitnessRef failed: %v", err)
 					} else if !ok {
 						// It is important to recognize that when conflicts arise, a write intent may
 						// reference an object that was not actually written.
-						return nil, common.Hash{}, fmt.Errorf("ReadStateWitness NOT FOUND: %v", objectID)
+						return nil, common.Hash{}, fmt.Errorf("ReadStateWitnessRef NOT FOUND: %v", objectID)
 					}
 					witnesses = append(witnesses, w)
 				}
@@ -414,8 +501,8 @@ func (s *StateDB) GetStateWitnesses(workReports []*types.WorkReport) (witnesses 
 	}
 	// Verify the witness (for paranoia)
 	for _, w := range witnesses {
-		if !VerifyStateWitness(w, stateRoot) {
-			return nil, common.Hash{}, fmt.Errorf("ReadStateWitness NOT VERIFIED: %v", w.ObjectID)
+		if !VerifyStateWitnessRef(w, stateRoot) {
+			return nil, common.Hash{}, fmt.Errorf("ReadStateWitnessRef NOT VERIFIED: %v", w.ObjectID)
 		}
 	}
 	return witnesses, stateRoot, nil

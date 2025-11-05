@@ -46,7 +46,7 @@ type Target struct {
 // NewTarget creates a new target instance, armed with a specific test case.
 func NewTarget(socketPath string, targetInfo PeerInfo, pvmBackend string, debugState bool, dumpStf bool, dumpLocation string) *Target {
 	levelDBPath := fmt.Sprintf("/tmp/target_%d", time.Now().Unix())
-	store, err := storage.NewStateDBStorage(levelDBPath)
+	store, err := storage.NewStateDBStorage(levelDBPath, nil, nil)
 	if err != nil {
 		log.Fatalf("Failed to create state DB storage: %v", err)
 	}
@@ -304,7 +304,7 @@ func (t *Target) onImportBlock(req *types.Block) *Message {
 	stateCopy := preState.Copy()
 
 	startTime := time.Now()
-	postState, jamErr := statedb.ApplyStateTransitionFromBlock(stateCopy, context.Background(), req, nil, pvmBackend)
+	postState, jamErr := statedb.ApplyStateTransitionFromBlock(0, stateCopy, context.Background(), req, nil, pvmBackend)
 	transitionDuration := time.Since(startTime)
 
 	if jamErr != nil {
