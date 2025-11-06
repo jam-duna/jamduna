@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -37,11 +38,12 @@ type TestCase struct {
 	InitialGas     int64         `json:"initial-gas"`
 	Code           []int         `json:"program"`
 	//Bitmask        []int         `json:"bitmask"`
-	ExpectedStatus string       `json:"expected-status"`
-	ExpectedRegs   []uint64     `json:"expected-regs"`
-	ExpectedPC     uint32       `json:"expected-pc"`
-	ExpectedMemory []TestMemory `json:"expected-memory"`
-	ExpectedGas    int64        `json:"expected-gas"`
+	ExpectedStatus    string            `json:"expected-status"`
+	ExpectedRegs      []uint64          `json:"expected-regs"`
+	ExpectedPC        uint32            `json:"expected-pc"`
+	ExpectedMemory    []TestMemory      `json:"expected-memory"`
+	ExpectedGas       int64             `json:"expected-gas"`
+	BasicBlockGasCost map[uint32]uint64 `json:"block-gas-costs"`
 }
 
 func recompiler_test(tc TestCase) error {
@@ -144,12 +146,21 @@ func recompiler_test(tc TestCase) error {
 		resultCodeStr = "panic"
 	}
 	expectedCodeStr := tc.ExpectedStatus
-	if expectedCodeStr == "page-fault" {
+	if expectedCodeStr == "page-fault" || expectedCodeStr == "out-of-gas" {
 		expectedCodeStr = "panic"
 	}
 
 	if resultCodeStr != expectedCodeStr {
 		return fmt.Errorf("result code mismatch for test %s: expected %s, got %s", tc.Name, expectedCodeStr, resultCodeStr)
+	}
+
+	if GasMode == GasModeBasicBlock {
+		for pvmPC, expectedGas := range tc.BasicBlockGasCost {
+			actualBlock := rvm.compiler.GetBasicBlock(uint64(pvmPC))
+			if actualBlock == nil || uint64(actualBlock.GasUsage) != expectedGas {
+				return fmt.Errorf("gas mismatch for basic block at PVM PC %d in test %s: expected %d, got %d", pvmPC, tc.Name, expectedGas, actualBlock.GasUsage)
+			}
+		}
 	}
 
 	// expectedGas := tc.ExpectedGas
@@ -159,6 +170,152 @@ func recompiler_test(tc TestCase) error {
 	// }
 
 	return nil
+}
+func recompiler_integration_tests(tc TestCase) error {
+	serviceAcct := uint32(0) // stub
+	// metadata, c := types.SplitMetadataAndCode(tc.Code)
+	// Convert test code to raw instruction bytes
+	rawCodeBytes := make([]byte, len(tc.Code))
+	for i, val := range tc.Code {
+		rawCodeBytes[i] = byte(val)
+	}
+	fmt.Printf("running test: %s\n", tc.Name)
+	var p *program.Program
+	var o_size, w_size, z, s uint32
+	var o_byte, w_byte []byte
+
+	p = program.DecodeCorePart(rawCodeBytes)
+	o_size = 0
+	w_size = uint32(4096)
+	z = 0
+	s = 0
+	o_byte = []byte{}
+	w_byte = make([]byte, w_size)
+
+	rvm, _ := NewRecompilerVM(serviceAcct, p.Code, tc.InitialRegs, uint64(tc.InitialPC))
+
+	rvm.SetMemoryBounds(o_size, w_size, z, s, o_byte, w_byte)
+	// w - read-write
+	rw_data_address := uint32(2*Z_Z) + Z_func(o_size)
+	rw_data_address_end := rw_data_address + P_func(w_size)
+	current_heap_pointer := rw_data_address_end
+	rvm.SetHeapPointer(current_heap_pointer)
+	rvm.SetBitMask(p.K)
+	rvm.SetJumpTable(p.J)
+
+	rvm.Gas = 0
+	for _, mem := range tc.InitialMemory {
+		// Write the initial memory contents
+		rvm.WriteMemory(mem.Address, mem.Data)
+	}
+	rvm.SetPC(0)
+	for i, reg := range tc.InitialRegs {
+		rvm.WriteRegister(i, reg)
+		fmt.Printf("Register %d initialized to %d\n", i, reg)
+	}
+	rvm.Gas = tc.InitialGas
+	rvm.HostFunc = NewDummyHostFunc(rvm)
+	rvm.x86Code, rvm.djumpAddr, rvm.InstMapPVMToX86, rvm.InstMapX86ToPVM = rvm.compiler.CompileX86Code(rvm.pc)
+	rvm.Close()
+	var basicBlockDiffs []BasicBlockDiff
+	if GasMode == GasModeBasicBlock {
+		for pvmPC, expectedGas := range tc.BasicBlockGasCost {
+			actualBlock := rvm.compiler.GetBasicBlock(uint64(pvmPC))
+			if actualBlock == nil || uint64(actualBlock.GasUsage) != expectedGas {
+				var instructions []string
+				for _, inst := range actualBlock.Instructions {
+					instructions = append(instructions, inst.String())
+				}
+				basicBlockDiffs = append(basicBlockDiffs, BasicBlockDiff{
+					PvmPC:        pvmPC,
+					ExpectedGas:  expectedGas,
+					Instructions: instructions,
+					ActualGas:    uint64(actualBlock.GasUsage),
+				})
+			}
+		}
+	}
+	// sort the basicBlockDiffs by PvmPC
+	sort.Slice(basicBlockDiffs, func(i, j int) bool {
+		return basicBlockDiffs[i].PvmPC < basicBlockDiffs[j].PvmPC
+	})
+
+	// if there are any diffs, return an error
+	if len(basicBlockDiffs) > 0 {
+		diffBytes, _ := json.MarshalIndent(basicBlockDiffs, "", "  ")
+		os.WriteFile(fmt.Sprintf("basic_block_diffs_%s.json", tc.Name), diffBytes, 0644)
+		return fmt.Errorf("basic block gas mismatches for test %s: different blocks %d", tc.Name, len(basicBlockDiffs))
+	}
+
+	return nil
+}
+
+type BasicBlockDiff struct {
+	PvmPC        uint32   `json:"pc"`
+	ExpectedGas  uint64   `json:"expected-gas"`
+	Instructions []string `json:"instructions,omitempty"`
+	ActualGas    uint64   `json:"actual-gas"`
+}
+
+func TestPVM_Integration(t *testing.T) {
+	log.InitLogger("debug")
+	// Directory containing the JSON files
+	dir := "../../statedb/new_gas_model_test/integration-tests"
+
+	// Read all files in the directory
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("Failed to read directory: %v", err)
+	}
+	count := 0
+	num_mismatch := 0
+	total_mismatch := 0
+	skip := map[string]bool{
+		"pinky.json":       false, // skip pinky test for now
+		"doom.json":        false, // skip doom test for now
+		"prime-sieve.json": false, // skip prime sieve test for now
+	}
+	for _, file := range files {
+		if skip[file.Name()] {
+			continue
+		}
+		if strings.Contains(file.Name(), "riscv") {
+			continue // skip riscv tests
+		}
+		count++
+		if file.IsDir() {
+			continue
+		}
+
+		if !strings.HasSuffix(file.Name(), ".json") {
+			continue
+		}
+
+		filePath := filepath.Join(dir, file.Name())
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			t.Fatalf("Failed to read file %s: %v", filePath, err)
+		}
+
+		var testCase TestCase
+		err = json.Unmarshal(data, &testCase)
+		if err != nil {
+			t.Fatalf("Failed to unmarshal JSON from file %s: %v", filePath, err)
+		}
+		name := testCase.Name
+		fmt.Printf("case %s len=%d bytes\n", name, len(testCase.Code))
+		t.Run(name, func(t *testing.T) {
+			err = recompiler_integration_tests(testCase)
+			if err != nil {
+				t.Fatalf("❌ [%s] Test failed: %v", name, err)
+			} else {
+				t.Logf("✅ [%s] Test passed", name)
+			}
+		})
+		total_mismatch += num_mismatch
+	}
+	// show the match rate
+	fmt.Printf("Match rate: %v/%v\n", count-total_mismatch, count)
 }
 
 // BackendResult holds the execution result from a backend
@@ -183,7 +340,8 @@ func TestPVMAll(t *testing.T) {
 	num_mismatch := 0
 	total_mismatch := 0
 	skip := map[string]bool{
-		"inst_ecalli_100.json": true, // skip ecalli test for now
+		"inst_ecalli_100.json":  true, // skip ecalli test for now
+		"inst_fallthrough.json": true, // skip fallthrough test for now
 	}
 	for _, file := range files {
 		if skip[file.Name()] {

@@ -217,6 +217,7 @@ func TestTracesRecompiler(t *testing.T) {
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy_light"),
 	}
 
 	// Iterate over each directory.

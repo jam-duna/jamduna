@@ -1,0 +1,51 @@
+{
+  "name": "gas_register_move",
+  "initial-pc": 0,
+  "initial-gas": 10000,
+  "program": [
+    0,
+    0,
+    9,
+    51,
+    5,
+    1,
+    100,
+    87,
+    149,
+    120,
+    1,
+    0,
+    41,
+    1
+  ],
+  "steps": [
+    {
+      "kind": "run"
+    },
+    {
+      "kind": "assert",
+      "status": "panic",
+      "gas": 9997,
+      "pc": 8,
+      "regs": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        1,
+        2,
+        0,
+        0,
+        0,
+        0
+      ],
+      "memory": []
+    }
+  ],
+  "block-gas-costs": {
+    "0": 3
+  }
+}

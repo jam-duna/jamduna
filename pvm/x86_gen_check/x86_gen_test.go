@@ -13,35 +13,35 @@ import (
 )
 
 func TestCompilePVM(t *testing.T) {
-	dir := "../../services"
-	// Read all files in the directory
-	files, err := os.ReadDir(dir)
+	pattern := filepath.Join("..", "..", "services", "*", "*.pvm")
+	matches, err := filepath.Glob(pattern)
 	if err != nil {
-		t.Fatalf("Failed to read directory: %v", err)
+		t.Fatalf("Glob failed: %v", err)
 	}
-	for _, file := range files {
-		if !strings.Contains(file.Name(), ".pvm") {
-			continue
-		}
-		if file.IsDir() {
-			continue
-		}
-		fmt.Printf("testing file: %s\n", file.Name())
+	if len(matches) == 0 {
+		t.Fatalf("No .pvm files found with pattern %s", pattern)
+	}
 
-		filePath := filepath.Join(dir, file.Name())
-		data, err := os.ReadFile(filePath)
-		if err != nil {
-			t.Fatalf("Failed to read file %s: %v", filePath, err)
+	for _, path := range matches {
+		if strings.Contains(path, "_blob") {
+			continue
 		}
-		code, bitmask, jumpTable := ParsePvmByteCode(data)
-		t.Run(file.Name(), func(t *testing.T) {
+		path := path // capture
+		name := filepath.Base(path)
+		t.Logf("testing file: %s", path)
+		t.Run(name, func(t *testing.T) {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("Failed to read file %s: %v", path, err)
+			}
+			code, bitmask, jumpTable := ParsePvmByteCode(data)
 			testPvmFileCompiler(t, code, bitmask, jumpTable)
 		})
 	}
 }
 
 func testPvmFileCompiler(t *testing.T, code []byte, bitmask []byte, jumpTable []uint32) {
-
+	fmt.Printf("PVM code length: %d, bitmask length: %d, jumpTable length: %d\n", len(code), len(bitmask), len(jumpTable))
 	// go side
 	compilerGo := recompiler.NewX86Compiler(code)
 	err := compilerGo.SetBitMask(bitmask)

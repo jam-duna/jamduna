@@ -44,6 +44,7 @@ const (
 const (
 	TRAP        = 0
 	FALLTHROUGH = 1
+	UNLIKELY    = 3
 )
 
 // A.5.2. Instructions with Arguments of One Immediate.

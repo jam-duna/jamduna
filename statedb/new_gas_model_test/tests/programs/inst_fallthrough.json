@@ -1,0 +1,43 @@
+{
+  "name": "inst_fallthrough",
+  "initial-pc": 0,
+  "initial-gas": 10000,
+  "program": [
+    0,
+    0,
+    1,
+    1,
+    1
+  ],
+  "steps": [
+    {
+      "kind": "run"
+    },
+    {
+      "kind": "assert",
+      "status": "panic",
+      "gas": 9996,
+      "pc": 1,
+      "regs": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "memory": []
+    }
+  ],
+  "block-gas-costs": {
+    "0": 2,
+    "1": 2
+  }
+}

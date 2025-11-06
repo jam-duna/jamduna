@@ -1,0 +1,77 @@
+{
+  "name": "inst_load_u32",
+  "initial-pc": 0,
+  "initial-gas": 10000,
+  "program": [
+    0,
+    0,
+    5,
+    56,
+    7,
+    0,
+    0,
+    2,
+    1
+  ],
+  "steps": [
+    {
+      "kind": "map",
+      "address": 131072,
+      "length": 4096,
+      "is_writable": true
+    },
+    {
+      "kind": "write",
+      "address": 131072,
+      "contents": [
+        18,
+        52,
+        86,
+        120
+      ]
+    },
+    {
+      "kind": "set-reg",
+      "reg": 7,
+      "value": 3735928559
+    },
+    {
+      "kind": "run"
+    },
+    {
+      "kind": "assert",
+      "status": "panic",
+      "gas": 9975,
+      "pc": 5,
+      "regs": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        2018915346,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "memory": [
+        {
+          "address": 131072,
+          "contents": [
+            18,
+            52,
+            86,
+            120
+          ]
+        }
+      ]
+    }
+  ],
+  "block-gas-costs": {
+    "0": 25
+  }
+}

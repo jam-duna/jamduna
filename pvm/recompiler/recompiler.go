@@ -14,11 +14,19 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/pvm/program"
-	"github.com/colorfulnotion/jam/pvm/recompiler_c/recompiler_c"
 	"github.com/colorfulnotion/jam/types"
 	"golang.org/x/arch/x86/x86asm"
 	"golang.org/x/sync/singleflight"
 	"golang.org/x/sys/unix"
+)
+
+var ALWAYS_COMPILE = false
+var compiler_usage = compiler_c
+
+const (
+	GasModeBasicBlock  = iota
+	GasModeInstruction = 1
+	GasMode            = GasModeInstruction
 )
 
 const (
@@ -165,6 +173,7 @@ type Compiler interface {
 	SetJumpTable(j []uint32) error
 	SetBitMask(bitmask []byte) error
 	CompileX86Code(startPC uint64) (x86code []byte, djumpAddr uintptr, InstMapPVMToX86 map[uint32]int, InstMapX86ToPVM map[int]uint32)
+	GetBasicBlock(pvmPC uint64) *BasicBlock
 }
 
 func NewX86Compiler(code []byte) *X86Compiler {
@@ -227,20 +236,18 @@ func NewRecompilerVM(serviceIndex uint32, code []byte, initialRegs []uint64, ini
 	}
 
 	err = rvm.GetX86FromPVMX(code)
-	if err != nil {
+	if err != nil || ALWAYS_COMPILE {
 		fmt.Printf("GetX86FromPVMX failed: %v\n", err)
 		if compiler_usage == compiler_go {
 			rvm.compiler = NewX86Compiler(code)
 		} else if compiler_usage == compiler_c {
-			rvm.compiler = recompiler_c.NewC_Compiler(code)
+			rvm.compiler = NewRecompilerC(code)
 		}
 	} else {
 		rvm.reuseCode = true
 	}
 	return rvm, nil
 }
-
-var compiler_usage = compiler_go
 
 const (
 	compiler_go = "compiler_go"
@@ -700,6 +707,8 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(entry uint32) (err error) {
 
 		}
 		return fmt.Errorf("ExecuteX86 crash detected (return -1) gas = %d", vm.Gas)
+	} else {
+		fmt.Printf("ExecuteX86 completed successfully, gas = %d\n", vm.Gas)
 	}
 	// get the pc out
 	vm.pc, _ = vm.ReadContextSlot(pcSlotIndex)
@@ -798,6 +807,15 @@ func (vm *RecompilerVM) Resume() error {
 func (compiler *X86Compiler) CompileX86Code(startPC uint64) (x86code []byte, djumpAddr uintptr, InstMapPVMToX86 map[uint32]int, InstMapX86ToPVM map[int]uint32) {
 	compiler.initStartCode()
 	compiler.Compile(startPC)
+	if GasMode == GasModeBasicBlock {
+		// panic check for this trap
+		gas_check_code := generateGasCheck(2)
+		offsetPanic := len(compiler.x86Code)
+		pc := len(compiler.code)
+		compiler.InstMapPVMToX86[uint32(pc)] = offsetPanic
+		compiler.InstMapX86ToPVM[offsetPanic] = uint32(pc)
+		compiler.x86Code = append(compiler.x86Code, gas_check_code...)
+	}
 	compiler.x86Code = append(compiler.x86Code, emitTrap()...) // in case direct fallthrough
 	compiler.Patch()
 	return compiler.x86Code, compiler.djumpAddr, compiler.InstMapPVMToX86, compiler.InstMapX86ToPVM
@@ -1021,6 +1039,15 @@ func BuildWriteContextSlotCode(slotIndex int, value uint64, size int) ([]byte, e
 
 	return code, nil
 }
+
+func (cmp *X86Compiler) GetBasicBlock(pvmPC uint64) *BasicBlock {
+	block, exists := cmp.basicBlocks[pvmPC]
+	if !exists {
+		return nil
+	}
+	return block
+}
+
 func (vm *RecompilerVM) BuildWriteRipToContextSlotCode(slotIndex int) ([]byte, error) {
 	if vm.regDumpAddr == 0 {
 		return nil, fmt.Errorf("regDumpAddr is not initialized")
@@ -1140,9 +1167,11 @@ func generateJumpIndirect(inst Instruction) []byte {
 	}
 	vx := x_encode(types.DecodeE_l(operands[1:1+lx]), uint32(lx))
 	base := regInfoList[baseIdx]
-
-	buf := make([]byte, 0, 32)
-
+	buf := make([]byte, 0, 64)
+	if GasMode == GasModeBasicBlock {
+		pc_code, _ := BuildWriteContextSlotCode(pcSlotIndex, inst.Pc, 8)
+		buf = append(buf, pc_code...)
+	}
 	// 1) PUSH jumpIndTempReg with exact manual construction
 	buf = append(buf, emitPushRegJumpIndirect(jumpIndTempReg)...)
 
@@ -1166,7 +1195,10 @@ func generateLoadImmJumpIndirect(inst Instruction) []byte {
 	indexReg := regInfoList[indexRegIdx]
 
 	var buf []byte
-
+	if GasMode == GasModeBasicBlock {
+		pcCode, _ := BuildWriteContextSlotCode(pcSlotIndex, inst.Pc, 8)
+		buf = append(buf, pcCode...)
+	}
 	// 1) PUSH jumpIndTempReg
 	buf = append(buf, emitPushRegLoadImmJumpIndirect(jumpIndTempReg)...)
 

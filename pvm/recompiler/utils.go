@@ -11,6 +11,7 @@ func opcode_str(opcode byte) string {
 	opcodeMap := map[byte]string{
 		0:   "TRAP",
 		1:   "FALLTHROUGH",
+		3:   "UNLIKELY",
 		10:  "ECALLI",
 		20:  "LOAD_IMM_64",
 		30:  "STORE_IMM_U8",

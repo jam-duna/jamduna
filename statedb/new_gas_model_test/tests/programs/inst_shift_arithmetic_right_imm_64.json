@@ -1,0 +1,49 @@
+{
+  "name": "inst_shift_arithmetic_right_imm_64",
+  "initial-pc": 0,
+  "initial-gas": 10000,
+  "program": [
+    0,
+    0,
+    3,
+    153,
+    121,
+    3,
+    1
+  ],
+  "steps": [
+    {
+      "kind": "set-reg",
+      "reg": 7,
+      "value": 18446744071562068085
+    },
+    {
+      "kind": "run"
+    },
+    {
+      "kind": "assert",
+      "status": "panic",
+      "gas": 9998,
+      "pc": 3,
+      "regs": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        18446744071562068085,
+        0,
+        18446744073441116174,
+        0,
+        0,
+        0
+      ],
+      "memory": []
+    }
+  ],
+  "block-gas-costs": {
+    "0": 2
+  }
+}

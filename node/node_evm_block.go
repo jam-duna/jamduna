@@ -203,37 +203,6 @@ func (n *NodeContent) readBlockByHash(blockHash common.Hash) (*statedb.EvmBlockP
 		if blockNum == 1 {
 			break
 		}
-		payload := witness.Payload
-		block, err := statedb.DeserializeEvmBlockPayload(payload)
-		if err != nil {
-			return nil, fmt.Errorf("failed to deserialize block ref for block hash %s: %v", blockHash, err)
-		}
-		return block, nil
-	}
-	block, err := statedb.DeserializeEvmBlockPayload(witness.Payload)
-	if err != nil {
-		return nil, fmt.Errorf("failed to deserialize block ref for block hash %s: %v", blockHash, err)
-	}
-	return block, nil
-}
-
-// blockNumberToObjectID converts block number to 32-byte ObjectID (matches Rust implementation)
-// Rust: key = [0xFF; 32] with block_number in last 4 bytes (little-endian)
-func blockNumberToObjectID(blockNumber uint32) common.Hash {
-	var key [32]byte
-	for i := range key {
-		key[i] = 0xFF
-	}
-	binary.LittleEndian.PutUint32(key[28:32], blockNumber)
-	return common.BytesToHash(key[:])
-}
-
-func (n *NodeContent) GetBlockByHash(blockHash common.Hash, fullTx bool) (*statedb.EthereumBlock, error) {
-	// Use new canonical path: fetch EvmBlockPayload from DA via ReadStateWitness
-	evmBlock, err := n.readBlockByHash(blockHash)
-	if err != nil {
-		// Block not found or error reading from DA
-		return nil, err
 	}
 
 	return nil, fmt.Errorf("block not found: %s", blockHash.Hex())

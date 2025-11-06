@@ -232,7 +232,6 @@ static int64_t z_encode(uint64_t a, uint32_t n) {
 }
 
 static uint8_t build_rex(bool w, bool r, bool x, bool b) {
-    if (!w && !r && !x && !b) return 0;
     return 0x40 | (w ? 8 : 0) | (r ? 4 : 0) | (x ? 2 : 0) | (b ? 1 : 0);
 }
 
@@ -340,39 +339,36 @@ static void extract_two_regs(const uint8_t* args, uint8_t* r1, uint8_t* r2) {
 // Extract two immediates (matches Go's extractTwoImm) 
 // Note: This version assumes args_size is known for proper ly calculation
 static void extract_two_imms_with_size(const uint8_t* args, size_t args_size, uint32_t* imm1, uint32_t* imm2) {
-    // lx := min(4, int(args[0])%8)
-    int lx = ((int)args[0] % 8) > 4 ? 4 : ((int)args[0] % 8);
-    
-    // ly := min(4, max(0, len(args)-lx-1))  
+    // Mirror Go's extractTwoImm behaviour exactly.
+    uint8_t control = args_size > 0 ? args[0] : 0;
+
+    int lx = control % 8;
+    if (lx > 4) lx = 4;
+
     int remaining = (int)args_size - lx - 1;
-    int ly = remaining > 4 ? 4 : (remaining > 0 ? remaining : 1);
-    
-    // vx = x_encode(types.DecodeE_l(args[1:1+lx]), uint32(lx))
-    uint64_t raw_vx = 0;
-    for (int i = 0; i < lx; i++) {
-        raw_vx |= ((uint64_t)args[1 + i]) << (i * 8);
+    int ly = remaining;
+    if (ly > 4) ly = 4;
+    if (ly < 0) ly = 0;
+    if (ly == 0) {
+        // Go appends an extra zero byte when ly == 0.
+        ly = 1;
     }
-    
-    // vy = x_encode(types.DecodeE_l(args[1+lx:1+lx+ly]), uint32(ly))
-    uint64_t raw_vy = 0;
-    for (int i = 0; i < ly; i++) {
-        raw_vy |= ((uint64_t)args[1 + lx + i]) << (i * 8);
+
+    uint8_t buf_x[4] = {0};
+    uint8_t buf_y[4] = {0};
+
+    for (int i = 0; i < lx && (1 + i) < (int)args_size; i++) {
+        buf_x[i] = args[1 + i];
     }
-    
-    // Apply sign extension
-    if (lx > 0 && lx < 8) {
-        int shift = 64 - 8*lx;
-        *imm1 = (uint32_t)((uint64_t)((int64_t)(raw_vx << shift)) >> shift);
-    } else {
-        *imm1 = (uint32_t)raw_vx;
+    for (int i = 0; i < ly && (1 + lx + i) < (int)args_size; i++) {
+        buf_y[i] = args[1 + lx + i];
     }
-    
-    if (ly > 0 && ly < 8) {
-        int shift = 64 - 8*ly;
-        *imm2 = (uint32_t)((uint64_t)((int64_t)(raw_vy << shift)) >> shift);
-    } else {
-        *imm2 = (uint32_t)raw_vy;
-    }
+
+    uint64_t raw_vx = decode_little_endian(buf_x, lx);
+    uint64_t raw_vy = decode_little_endian(buf_y, ly);
+
+    *imm1 = (uint32_t)x_encode(raw_vx, (uint32_t)lx);
+    *imm2 = (uint32_t)x_encode(raw_vy, (uint32_t)ly);
 }
 
 // Wrapper for backwards compatibility
@@ -741,16 +737,16 @@ static x86_encode_result_t emit_mov_reg_to_reg64(x86_codegen_t* gen, x86_reg_t d
     x86_encode_result_t result = {0};
     const reg_info_t* dst_info = &reg_info_list[dst];
     const reg_info_t* src_info = &reg_info_list[src];
-    
+
     if (x86_codegen_ensure_capacity(gen, 3) != 0) return result;
     uint32_t start_offset = gen->offset;
-    
-    uint8_t rex = build_rex(true, src_info->rex_bit, false, dst_info->rex_bit); // W=1 for 64-bit
+
+    uint8_t rex = build_rex_always(true, src_info->rex_bit, false, dst_info->rex_bit); // W=1 for 64-bit
     gen->buffer[gen->offset++] = rex;
-    
+
     gen->buffer[gen->offset++] = X86_OP_MOV_RM_R; // 0x89 - MOV r/m64, r64
     gen->buffer[gen->offset++] = 0xC0 | (src_info->reg_bits << 3) | dst_info->reg_bits;
-    
+
     result.code = &gen->buffer[start_offset];
     result.size = gen->offset - start_offset;
     return result;
@@ -1284,12 +1280,45 @@ static x86_encode_result_t emit_mov_dst_from_src_shift_op64b(x86_codegen_t* gen,
 // 32-bit division/remainder specialized functions
 // emitMovEaxFromRegDivUOp32: MOV EAX, reg32 (for unsigned division 32-bit)
 static x86_encode_result_t emit_mov_eax_from_reg_div_u_op32(x86_codegen_t* gen, x86_reg_t src) {
-    return emit_mov_reg_reg32(gen, X86_RAX, src);
+    x86_encode_result_t result = {0};
+    const reg_info_t* src_info = &reg_info_list[src];
+
+    if (x86_codegen_ensure_capacity(gen, 3) != 0) return result;
+    uint32_t start_offset = gen->offset;
+
+    // Match Go's emitMovEaxFromRegDivUOp32:
+    // - Always emit base REX prefix (0x40) and set B when src in high registers
+    uint8_t rex = 0x40 | (src_info->rex_bit ? 0x01 : 0x00);
+    gen->buffer[gen->offset++] = rex;
+
+    // 0x8B /0 = MOV r32, r/m32 (dest=EAX)
+    gen->buffer[gen->offset++] = X86_OP_MOV_R_RM;
+    gen->buffer[gen->offset++] = 0xC0 | (0 << 3) | src_info->reg_bits; // reg=EAX (0), rm=src
+
+    result.code = &gen->buffer[start_offset];
+    result.size = gen->offset - start_offset;
+    result.offset = start_offset;
+    return result;
 }
 
 // emitMovEaxFromRegRemUOp32: MOV EAX, reg32 (for unsigned remainder 32-bit)
 static x86_encode_result_t emit_mov_eax_from_reg_rem_u_op32(x86_codegen_t* gen, x86_reg_t src) {
-    return emit_mov_reg_reg32(gen, X86_RAX, src);
+    x86_encode_result_t result = {0};
+    const reg_info_t* src_info = &reg_info_list[src];
+
+    if (x86_codegen_ensure_capacity(gen, 3) != 0) return result;
+    uint32_t start_offset = gen->offset;
+
+    uint8_t rex = 0x40 | (src_info->rex_bit ? 0x01 : 0x00);
+    gen->buffer[gen->offset++] = rex;
+
+    gen->buffer[gen->offset++] = X86_OP_MOV_R_RM;
+    gen->buffer[gen->offset++] = 0xC0 | (0 << 3) | src_info->reg_bits;
+
+    result.code = &gen->buffer[start_offset];
+    result.size = gen->offset - start_offset;
+    result.offset = start_offset;
+    return result;
 }
 
 // Result MOV functions for division/remainder operations
@@ -1316,12 +1345,44 @@ static x86_encode_result_t emit_movsxd_dst_eax_rem_u_op32(x86_codegen_t* gen, x8
 
 // emitMovDstEdxRemUOp32: MOV dst32, EDX (store remainder in 32-bit)
 static x86_encode_result_t emit_mov_dst_edx_rem_u_op32(x86_codegen_t* gen, x86_reg_t dst) {
-    return emit_mov_reg_reg32(gen, dst, X86_RDX);
+    x86_encode_result_t result = {0};
+    const reg_info_t* dst_info = &reg_info_list[dst];
+
+    if (x86_codegen_ensure_capacity(gen, 3) != 0) return result;
+    uint32_t start_offset = gen->offset;
+
+    uint8_t rex = build_rex(false, false, false, dst_info->rex_bit);
+    if (rex != 0) {
+        gen->buffer[gen->offset++] = rex;
+    }
+
+    gen->buffer[gen->offset++] = X86_OP_MOV_RM_R; // 0x89
+    gen->buffer[gen->offset++] = 0xC0 | (2 << 3) | dst_info->reg_bits; // reg=EDX (2), rm=dst
+
+    result.code = &gen->buffer[start_offset];
+    result.size = gen->offset - start_offset;
+    result.offset = start_offset;
+    return result;
 }
 
 // emitMovDstEaxDivUOp32: MOV dst32, EAX (store division result in 32-bit)
 static x86_encode_result_t emit_mov_dst_eax_div_u_op32(x86_codegen_t* gen, x86_reg_t dst) {
-    return emit_mov_reg_reg32(gen, dst, X86_RAX);
+    x86_encode_result_t result = {0};
+    const reg_info_t* dst_info = &reg_info_list[dst];
+
+    if (x86_codegen_ensure_capacity(gen, 3) != 0) return result;
+    uint32_t start_offset = gen->offset;
+
+    uint8_t rex = build_rex(true, false, false, dst_info->rex_bit); // W=1 for zero-extend into 64-bit dst
+    gen->buffer[gen->offset++] = rex;
+
+    gen->buffer[gen->offset++] = X86_OP_MOV_RM_R; // 0x89
+    gen->buffer[gen->offset++] = 0xC0 | (0 << 3) | dst_info->reg_bits; // reg=EAX (0), rm=dst
+
+    result.code = &gen->buffer[start_offset];
+    result.size = gen->offset - start_offset;
+    result.offset = start_offset;
+    return result;
 }
 
 // Additional specialized MOV constants
@@ -1593,6 +1654,46 @@ static x86_encode_result_t emit_div_mem_stack_rem_u_op64_rdx(x86_codegen_t* gen)
     return result;
 }
 
+// emitDivMemStackRemUOp32RAX: DIV dword ptr [RSP+8] (handles divisor aliasing RAX)
+static x86_encode_result_t emit_div_mem_stack_rem_u_op32_rax(x86_codegen_t* gen) {
+    x86_encode_result_t result = {0};
+
+    if (x86_codegen_ensure_capacity(gen, 7) != 0) return result;
+    uint32_t start_offset = gen->offset;
+
+    // Encoding matches Go's emitDivMemStackRemUOp32RAX: F7 B4 24 08 00 00 00
+    gen->buffer[gen->offset++] = 0xF7; // DIV r/m32
+    gen->buffer[gen->offset++] = 0xB4; // ModRM: mod=10, reg=110 (DIV), r/m=100 (SIB)
+    gen->buffer[gen->offset++] = 0x24; // SIB: scale=00, index=100 (none), base=100 (RSP)
+    gen->buffer[gen->offset++] = 0x08; // disp32 = 8 (original RAX is at [RSP+8])
+    gen->buffer[gen->offset++] = 0x00;
+    gen->buffer[gen->offset++] = 0x00;
+    gen->buffer[gen->offset++] = 0x00;
+
+    result.code = &gen->buffer[start_offset];
+    result.size = gen->offset - start_offset;
+    result.offset = start_offset;
+    return result;
+}
+
+// emitDivMemStackRemUOp32RDX: DIV dword ptr [RSP] (handles divisor aliasing RDX)
+static x86_encode_result_t emit_div_mem_stack_rem_u_op32_rdx(x86_codegen_t* gen) {
+    x86_encode_result_t result = {0};
+
+    if (x86_codegen_ensure_capacity(gen, 4) != 0) return result;
+    uint32_t start_offset = gen->offset;
+
+    // Encoding matches Go's emitDivMemStackRemUOp32RDX: F7 34 24
+    gen->buffer[gen->offset++] = 0xF7; // DIV r/m32
+    gen->buffer[gen->offset++] = 0x34; // ModRM: mod=00, reg=110 (DIV), r/m=100 (SIB)
+    gen->buffer[gen->offset++] = 0x24; // SIB: scale=00, index=100 (none), base=100 (RSP)
+
+    result.code = &gen->buffer[start_offset];
+    result.size = gen->offset - start_offset;
+    result.offset = start_offset;
+    return result;
+}
+
 // emitIdivMemStackRemSOp64: IDIV qword ptr [rsp] (for signed remainder operations)
 static x86_encode_result_t emit_idiv_mem_stack_rem_s_op64(x86_codegen_t* gen) {
     x86_encode_result_t result = {0};
@@ -1605,6 +1706,24 @@ static x86_encode_result_t emit_idiv_mem_stack_rem_s_op64(x86_codegen_t* gen) {
     gen->buffer[gen->offset++] = 0x3C; // ModRM: mod=00, reg=111 (IDIV), r/m=100 (SIB)
     gen->buffer[gen->offset++] = 0x24; // SIB: scale=00, index=100 (none), base=100 (RSP)
     
+    result.code = &gen->buffer[start_offset];
+    result.size = gen->offset - start_offset;
+    result.offset = start_offset;
+    return result;
+}
+
+// emitIdivMemStackRemSOp32RDX: IDIV dword ptr [RSP] (handles divisor aliasing RDX)
+static x86_encode_result_t emit_idiv_mem_stack_rem_s_op32_rdx(x86_codegen_t* gen) {
+    x86_encode_result_t result = {0};
+
+    if (x86_codegen_ensure_capacity(gen, 4) != 0) return result;
+    uint32_t start_offset = gen->offset;
+
+    // Encoding aligns with Go's emitIdivMemStackRemSOp32RDX: F7 3C 24
+    gen->buffer[gen->offset++] = 0xF7; // IDIV r/m32
+    gen->buffer[gen->offset++] = 0x3C; // ModRM: mod=00, reg=111 (IDIV), r/m=100 (SIB)
+    gen->buffer[gen->offset++] = 0x24; // SIB: scale=00, index=100 (none), base=100 (RSP)
+
     result.code = &gen->buffer[start_offset];
     result.size = gen->offset - start_offset;
     result.offset = start_offset;
@@ -3282,17 +3401,17 @@ static x86_encode_result_t emit_seta(x86_codegen_t* gen, x86_reg_t reg) {
 static x86_encode_result_t emit_setg(x86_codegen_t* gen, x86_reg_t reg) {
     x86_encode_result_t result = {0};
     const reg_info_t* reg_info = &reg_info_list[reg];
-    
+
     if (x86_codegen_ensure_capacity(gen, 4) != 0) return result;
     uint32_t start_offset = gen->offset;
-    
-    uint8_t rex = build_rex(false, false, false, reg_info->rex_bit);
-    if (rex) gen->buffer[gen->offset++] = rex;
-    
+
+    uint8_t rex = build_rex_always(false, false, false, reg_info->rex_bit);
+    gen->buffer[gen->offset++] = rex;
+
     gen->buffer[gen->offset++] = X86_PREFIX_0F;
     gen->buffer[gen->offset++] = X86_OP2_SETG; // 0x9F - SETG r/m8
     gen->buffer[gen->offset++] = 0xC0 | reg_info->reg_bits;
-    
+
     result.code = &gen->buffer[start_offset];
     result.size = gen->offset - start_offset;
     result.offset = start_offset;
@@ -3675,7 +3794,6 @@ static x86_encode_result_t generate_set_gt_u_imm(x86_codegen_t* gen, const instr
 }
 
 // generate_set_gt_s_imm: SET_GT_S_IMM instruction (compare register with immediate, signed greater)
-// Go pattern: XOR dst32, dst32; CMP src, imm32; SETG dst8
 static x86_encode_result_t generate_set_gt_s_imm(x86_codegen_t* gen, const instruction_t* inst) {
     uint8_t dst_idx, src_idx;
     uint32_t imm;
@@ -3683,22 +3801,39 @@ static x86_encode_result_t generate_set_gt_s_imm(x86_codegen_t* gen, const instr
     
     x86_reg_t dst = pvm_reg_to_x86[dst_idx];
     x86_reg_t src = pvm_reg_to_x86[src_idx];
-    
-    // Dynamic implementation using proper helper functions  
     x86_encode_result_t result = {0};
     uint32_t start_offset = gen->offset;
+
+    // Match Go's generateImmSetCondOp32New special-case for aliasing (dst == src)
+    if (dst_idx == src_idx) {
+        // 1) PUSH RCX (scratch)
+        emit_push_reg(gen, X86_RCX);
+
+        // 2) MOV RCX, dst (copy original value)
+        emit_mov_reg_to_reg_with_manual_construction(gen, X86_RCX, dst);
+
+        // 3) XOR dst32, dst32 (clear destination)
+        emit_xor_reg32(gen, dst, dst);
+
+        // 4) CMP RCX, imm32 (signed compare)
+        emit_cmp_reg_imm32_force81(gen, X86_RCX, (int32_t)imm);
+
+        // 5) SETG dst8
+        emit_setg(gen, dst);
+
+        // 6) POP RCX
+        emit_pop_reg(gen, X86_RCX);
+
+        result.size = gen->offset - start_offset;
+        result.code = &gen->buffer[start_offset];
+        result.offset = start_offset;
+        return result;
+    }
     
-    // 1) XOR dst32, dst32 - clear destination register
-    x86_encode_result_t xor_result = emit_xor_reg32(gen, dst, dst);
-    if (xor_result.size == 0) return result;
-    
-    // 2) CMP src, imm32 - compare register with 32-bit immediate
-    x86_encode_result_t cmp_result = emit_cmp_reg_imm32(gen, src, (int32_t)imm);
-    if (cmp_result.size == 0) return result;
-    
-    // 3) SETG dst8 - set if greater (signed)
-    x86_encode_result_t setg_result = emit_setg(gen, dst);
-    if (setg_result.size == 0) return result;
+    // Non-alias case
+    emit_xor_reg32(gen, dst, dst);
+    emit_cmp_reg_imm32_force81(gen, src, (int32_t)imm);
+    emit_setg(gen, dst);
     
     result.size = gen->offset - start_offset;
     result.code = &gen->buffer[start_offset];
@@ -4125,21 +4260,28 @@ static x86_encode_result_t generate_count_set_bits_32(x86_codegen_t* gen, const 
 }
 
 // generate_reverse_bytes64: REVERSE_BYTES instruction - byte swap (BSWAP)
-// Go pattern: uses emitBswap64(dst) 
+// Go pattern: uses emitBswap64(dst, src) which does MOV if dst!=src, then BSWAP
 static x86_encode_result_t generate_reverse_bytes64(x86_codegen_t* gen, const instruction_t* inst) {
     x86_encode_result_t result = {0};
     uint32_t start_offset = gen->offset;
-    
+
     // Extract dst and src from two-register instruction
     uint8_t dst_idx, src_idx;
     extract_two_regs(inst->args, &dst_idx, &src_idx);
-    
+
     x86_reg_t dst = pvm_reg_to_x86[dst_idx];
-    
-    // Use existing emit_bswap64 function
+    x86_reg_t src = pvm_reg_to_x86[src_idx];
+
+    // If src and dst are different, first move src to dst (Go pattern)
+    if (dst != src) {
+        x86_encode_result_t mov_result = emit_mov_reg_to_reg64(gen, dst, src);
+        if (mov_result.size == 0) return result;
+    }
+
+    // Then perform BSWAP on dst
     x86_encode_result_t bswap_result = emit_bswap64(gen, dst);
     if (bswap_result.size == 0) return result;
-    
+
     result.code = &gen->buffer[start_offset];
     result.size = gen->offset - start_offset;
     result.offset = start_offset;
@@ -5901,93 +6043,70 @@ static x86_encode_result_t generate_mul_32(x86_codegen_t* gen, const instruction
 // Division/Remainder Instructions
 // ======================================
 
-// generate_rem_u_32: REM_U_32 instruction (32-bit unsigned remainder)
-// Go pattern: PUSH RAX+RDX; MOV EAX,src; TEST src2; JNE doDiv; MOVSXD dst,EAX; JMP end; doDiv: XOR EDX; DIV src2; MOV dst,EDX; end: POP RDX+RAX
 static x86_encode_result_t generate_rem_u_32(x86_codegen_t* gen, const instruction_t* inst) {
     uint8_t src_idx, src2_idx, dst_idx;
     extract_three_regs(inst->args, &src_idx, &src2_idx, &dst_idx);
-    
-    x86_reg_t src = pvm_reg_to_x86[src_idx];   // first operand
-    x86_reg_t src2 = pvm_reg_to_x86[src2_idx]; // second operand
-    x86_reg_t dst = pvm_reg_to_x86[dst_idx];   // destination
-    
-    const reg_info_t* src_info = &reg_info_list[src];
-    const reg_info_t* src2_info = &reg_info_list[src2];
-    const reg_info_t* dst_info = &reg_info_list[dst];
-    
-    // Manual inline implementation matching Go's generateRemUOp32 with dynamic registers
+
+    x86_reg_t src = pvm_reg_to_x86[src_idx];
+    x86_reg_t src2 = pvm_reg_to_x86[src2_idx];
+    x86_reg_t dst = pvm_reg_to_x86[dst_idx];
+
     x86_encode_result_t result = {0};
-    if (x86_codegen_ensure_capacity(gen, 50) != 0) return result;
     uint32_t start_offset = gen->offset;
-    
-    // Push RAX and RDX: 50 52
-    gen->buffer[gen->offset++] = 0x50;  // PUSH RAX
-    gen->buffer[gen->offset++] = 0x52;  // PUSH RDX
-    
-    // MOV EAX, src (32-bit)
-    uint8_t rex1 = 0x40; // REX base
-    if (src_info->rex_bit) rex1 |= 0x01; // REX.B
-    uint8_t mod1 = 0xC0 | (0x00 << 3) | src_info->reg_bits; // reg=0/EAX, rm=src
-    gen->buffer[gen->offset++] = rex1;
-    gen->buffer[gen->offset++] = 0x8B;  // MOV r32, r/m32
-    gen->buffer[gen->offset++] = mod1;
-    
-    // TEST src2, src2 (32-bit)
-    uint8_t rex2 = 0x40; // REX base
-    if (src2_info->rex_bit) rex2 |= 0x05; // REX.RB
-    uint8_t mod2 = 0xC0 | (src2_info->reg_bits << 3) | src2_info->reg_bits; // reg=src2, rm=src2
-    gen->buffer[gen->offset++] = rex2;
-    gen->buffer[gen->offset++] = 0x85;  // TEST r/m32, r32
-    gen->buffer[gen->offset++] = mod2;
-    
-    // JNE doDiv (+8 bytes): 0F 85 08 00 00 00
-    gen->buffer[gen->offset++] = 0x0F;  // Two-byte opcode prefix
-    gen->buffer[gen->offset++] = 0x85;  // JNE rel32
-    gen->buffer[gen->offset++] = 0x08;  // +8 offset
-    gen->buffer[gen->offset++] = 0x00;
-    gen->buffer[gen->offset++] = 0x00;
-    gen->buffer[gen->offset++] = 0x00;
-    
-    // Zero case: MOVSXD dst, EAX (64-bit)
-    uint8_t rex3 = 0x48; // REX.W
-    if (dst_info->rex_bit) rex3 |= 0x04; // REX.R
-    uint8_t mod3 = 0xC0 | (dst_info->reg_bits << 3) | 0x00; // reg=dst, rm=0/EAX
-    gen->buffer[gen->offset++] = rex3;
-    gen->buffer[gen->offset++] = 0x63;  // MOVSXD opcode
-    gen->buffer[gen->offset++] = mod3;
-    
-    // JMP end (+9 bytes): E9 09 00 00 00
-    gen->buffer[gen->offset++] = 0xE9;  // JMP rel32
-    gen->buffer[gen->offset++] = 0x09;  // +9 offset
-    gen->buffer[gen->offset++] = 0x00;
-    gen->buffer[gen->offset++] = 0x00;
-    gen->buffer[gen->offset++] = 0x00;
-    
-    // doDiv: XOR EDX, EDX: 40 31 D2
-    gen->buffer[gen->offset++] = 0x40;  // REX prefix
-    gen->buffer[gen->offset++] = 0x31;  // XOR r/m32, r32
-    gen->buffer[gen->offset++] = 0xD2;  // ModRM (reg=2/EDX, rm=2/EDX)
-    
-    // DIV src2 (32-bit)
-    uint8_t rex4 = 0x40; // REX base
-    if (src2_info->rex_bit) rex4 |= 0x01; // REX.B
-    uint8_t mod4 = 0xC0 | (0x06 << 3) | src2_info->reg_bits; // reg=6/DIV, rm=src2
-    gen->buffer[gen->offset++] = rex4;
-    gen->buffer[gen->offset++] = 0xF7;  // Group 3 unary opcode
-    gen->buffer[gen->offset++] = mod4;
-    
-    // MOV dst, EDX (32-bit)
-    uint8_t rex5 = 0x40; // REX base
-    if (dst_info->rex_bit) rex5 |= 0x01; // REX.B
-    uint8_t mod5 = 0xC0 | (0x02 << 3) | dst_info->reg_bits; // reg=2/EDX, rm=dst
-    gen->buffer[gen->offset++] = rex5;
-    gen->buffer[gen->offset++] = 0x89;  // MOV r/m32, r32
-    gen->buffer[gen->offset++] = mod5;
-    
-    // end: POP RDX, POP RAX: 5A 58
-    gen->buffer[gen->offset++] = 0x5A;  // POP RDX
-    gen->buffer[gen->offset++] = 0x58;  // POP RAX
-    
+
+    // Preserve RAX/RDX which DIV clobbers
+    emit_push_reg(gen, X86_RAX);
+    emit_push_reg(gen, X86_RDX);
+
+    // MOV EAX, src32
+    emit_mov_eax_from_reg_rem_u_op32(gen, src);
+
+    // TEST src2, src2
+    emit_test_reg32(gen, src2, src2);
+
+    // JNE doDiv
+    uint32_t jne_offset = gen->offset;
+    emit_jne32(gen);
+
+    // divisor == 0 → result = sign-extended dividend (a)
+    emit_movsxd_dst_eax_rem_u_op32(gen, dst);
+
+    // Jump to epilogue
+    uint32_t jmp_offset = gen->offset;
+    emit_jmp32(gen);
+
+    // doDiv:
+    uint32_t do_div_offset = gen->offset;
+
+    // Zero high part, perform division
+    emit_xor_reg32(gen, X86_RDX, X86_RDX);
+
+    bool is_src2_rax = (src2_idx == 0);
+    bool is_src2_rdx = (src2_idx == 2);
+
+    if (is_src2_rax) {
+        emit_div_mem_stack_rem_u_op32_rax(gen);
+    } else if (is_src2_rdx) {
+        emit_div_mem_stack_rem_u_op32_rdx(gen);
+    } else {
+        emit_div32(gen, src2);
+    }
+
+    // MOV dst, EDX (remainder in EDX)
+    emit_mov_dst_edx_rem_u_op32(gen, dst);
+
+    // Patch control flow before restoring registers
+    uint32_t end_offset = gen->offset;
+
+    int32_t jne_disp = (int32_t)(do_div_offset - (jne_offset + 6));
+    *(int32_t*)&gen->buffer[jne_offset + 2] = jne_disp;
+
+    int32_t jmp_disp = (int32_t)(end_offset - (jmp_offset + 5));
+    *(int32_t*)&gen->buffer[jmp_offset + 1] = jmp_disp;
+
+    // Restore caller state
+    emit_pop_rdx_rax_rem_u_op32(gen);
+
     result.code = &gen->buffer[start_offset];
     result.size = gen->offset - start_offset;
     result.offset = start_offset;
@@ -6105,108 +6224,94 @@ static x86_encode_result_t generate_rem_u_64(x86_codegen_t* gen, const instructi
     return result;
 }
 
-// generate_rem_s_32: REM_S_32 instruction (32-bit signed remainder)  
-// Following Go's generateRemSOp32 using proper emit functions
 static x86_encode_result_t generate_rem_s_32(x86_codegen_t* gen, const instruction_t* inst) {
     uint8_t src_idx, src2_idx, dst_idx;
     extract_three_regs(inst->args, &src_idx, &src2_idx, &dst_idx);
-    
+
     x86_reg_t src = pvm_reg_to_x86[src_idx];
-    x86_reg_t src2 = pvm_reg_to_x86[src2_idx];  
+    x86_reg_t src2 = pvm_reg_to_x86[src2_idx];
     x86_reg_t dst = pvm_reg_to_x86[dst_idx];
-    
+
     x86_encode_result_t result = {0};
     uint32_t start_offset = gen->offset;
-    
-    // Prologue: save RAX, RDX
+
+    // Save RAX/RDX
     emit_push_reg(gen, X86_RAX);
     emit_push_reg(gen, X86_RDX);
-    
-    // MOV EAX, src32
+
+    // MOV EAX, src
     emit_mov_reg32_to_reg32(gen, X86_RAX, src);
-    
-    // TEST src2, src2 (check divisor==0)
+
+    // TEST src2, src2
     emit_test_reg32(gen, src2, src2);
-    
+
     // JE zeroDiv
     uint32_t je_zero_offset = gen->offset;
     emit_je_rel32(gen);
-    
-    // CMP EAX, 0x80000000 (detect INT32_MIN)
+
+    // CMP EAX, INT32_MIN
     emit_cmp_reg_imm32_min_int_32bit(gen, X86_RAX);
-    
-    // JNE doDiv (normal path if not INT32_MIN)
+
+    // JNE doDiv
     uint32_t jne_div1_offset = gen->offset;
     emit_jne32(gen);
-    
-    // CMP src2, -1 (divisor == -1?)
-    emit_cmp_reg_imm_byte_32bit(gen, src2, -1);
-    
-    // JNE doDiv (if not -1, go doDiv)
+
+    // CMP src2, -1
+    emit_cmp_reg_imm_byte_32bit(gen, src2, X86_NEG_ONE);
+
+    // JNE doDiv
     uint32_t jne_div2_offset = gen->offset;
     emit_jne32(gen);
-    
-    // Overflow case: INT32_MIN % -1 → remainder = 0
-    // XOR EAX, EAX (clear EAX to 0)
+
+    // Overflow remainder = 0
     emit_xor_eax_eax(gen);
-    
-    // MOVSXD dst, EAX (sign-extend 0 into dst)
     emit_movsxd64(gen, dst, X86_RAX);
-    
-    // JMP end
-    uint32_t jmp_end1_offset = gen->offset;
+
+    uint32_t jmp_overflow_end_offset = gen->offset;
     emit_jmp32(gen);
-    
-    // doDiv path
-    uint32_t dodiv_start = gen->offset;
-    
-    // CDQ (sign-extend EAX → EDX:EAX)
+
+    // doDiv:
+    uint32_t dodiv_offset = gen->offset;
+
     emit_cdq(gen);
-    
-    // IDIV src2
-    emit_idiv32(gen, src2);
-    
-    // MOVSXD dst, EDX (move remainder into dst)
+
+    bool is_src2_rdx = (src2_idx == 2);
+    if (is_src2_rdx) {
+        emit_idiv_mem_stack_rem_s_op32_rdx(gen);
+    } else {
+        emit_idiv32(gen, src2);
+    }
+
     emit_movsxd64(gen, dst, X86_RDX);
-    
-    // JMP end
-    uint32_t jmp_end2_offset = gen->offset;
+
+    uint32_t jmp_div_end_offset = gen->offset;
     emit_jmp32(gen);
-    
-    // zeroDiv label: divisor=0
-    uint32_t zerodiv_start = gen->offset;
-    
-    // MOVSXD dst, EAX (dividend becomes result)
+
+    // zeroDiv:
+    uint32_t zero_offset = gen->offset;
     emit_movsxd64(gen, dst, X86_RAX);
-    
-    // end label  
-    uint32_t end_start = gen->offset;
-    
-    // Epilogue: restore RDX, RAX
+
+    // end:
+    uint32_t end_offset = gen->offset;
     emit_pop_reg(gen, X86_RDX);
     emit_pop_reg(gen, X86_RAX);
-    
-    // Fix up jump offsets
-    // JE zeroDiv
-    int32_t je_zero_disp = zerodiv_start - (je_zero_offset + 6);
-    *(int32_t*)&gen->buffer[je_zero_offset + 2] = je_zero_disp;
-    
-    // JNE doDiv (first one)
-    int32_t jne_div1_disp = dodiv_start - (jne_div1_offset + 6);  
+
+    // Patch jumps
+    int32_t je_disp = (int32_t)(zero_offset - (je_zero_offset + 6));
+    *(int32_t*)&gen->buffer[je_zero_offset + 2] = je_disp;
+
+    int32_t jne_div1_disp = (int32_t)(dodiv_offset - (jne_div1_offset + 6));
     *(int32_t*)&gen->buffer[jne_div1_offset + 2] = jne_div1_disp;
-    
-    // JNE doDiv (second one) 
-    int32_t jne_div2_disp = dodiv_start - (jne_div2_offset + 6);
+
+    int32_t jne_div2_disp = (int32_t)(dodiv_offset - (jne_div2_offset + 6));
     *(int32_t*)&gen->buffer[jne_div2_offset + 2] = jne_div2_disp;
-    
-    // JMP end (first one)
-    int32_t jmp_end1_disp = end_start - (jmp_end1_offset + 5);
-    *(int32_t*)&gen->buffer[jmp_end1_offset + 1] = jmp_end1_disp;
-    
-    // JMP end (second one)
-    int32_t jmp_end2_disp = end_start - (jmp_end2_offset + 5);
-    *(int32_t*)&gen->buffer[jmp_end2_offset + 1] = jmp_end2_disp;
-    
+
+    int32_t jmp_overflow_disp = (int32_t)(end_offset - (jmp_overflow_end_offset + 5));
+    *(int32_t*)&gen->buffer[jmp_overflow_end_offset + 1] = jmp_overflow_disp;
+
+    int32_t jmp_div_disp = (int32_t)(end_offset - (jmp_div_end_offset + 5));
+    *(int32_t*)&gen->buffer[jmp_div_end_offset + 1] = jmp_div_disp;
+
     result.code = &gen->buffer[start_offset];
     result.size = gen->offset - start_offset;
     result.offset = start_offset;
@@ -7482,27 +7587,39 @@ static x86_encode_result_t generate_shlo_l_imm_alt_32(x86_codegen_t* gen, const 
     if (x86_codegen_ensure_capacity(gen, 30) != 0) return result;
     uint32_t start_offset = gen->offset;
     
-    // Follow Go's generateImmShiftOp32Alt pattern: PUSH/MOVABS/MOV/SHIFT/POP
-    // Expected: 51 49 BB 01 00 FF FF FF FF FF FF 4C 89 D1 49 D3 E3 59
-    
-    // 1) Save RCX if needed (PUSH RCX = 51)
+    // Follow Go's generateImmShiftOp32Alt updated sequence:
+    // 1) Save RCX if needed
+    // 2) Move shift count into RCX before clobbering dst
+    // 3) Load 64-bit immediate into dst
+    // 4) Perform 64-bit shift using CL
+    // 5) Truncate to 32-bit via AND dst, 0xFFFFFFFF
+    // 6) Sign-extend back to 64-bit using MOVSXD
+    // 7) Restore RCX if it was saved
+
+    // 1) Save RCX if needed
     bool need_save_rcx = (src != X86_RCX);
     if (need_save_rcx) {
         emit_push_reg(gen, X86_RCX);
     }
     
-    // 2) MOVABS dst64, imm64 - load immediate to destination as 64-bit
-    emit_mov_imm_to_reg64(gen, dst, imm_uint64);
-    
-    // 3) MOV RCX, src64 - put shift count in CL
+    // 2) MOV RCX, src64 - put shift count in CL before clobbering dst
     if (src != X86_RCX) {
         emit_mov_reg_to_reg64(gen, X86_RCX, src);
     }
     
-    // 4) SHL dst, CL - shift full 64-bit operation
-    emit_shift_reg_cl(gen, dst, 4); // subcode=4 (SHL)
+    // 3) MOVABS dst64, imm64 - load immediate into destination
+    emit_mov_imm_to_reg64(gen, dst, imm_uint64);
     
-    // 5) Restore RCX if we saved it (POP RCX = 59)
+    // 4) SHL dst, CL - perform 64-bit shift based on CL
+    emit_shift_reg_cl(gen, dst, 4); // subcode=4 (SHL)
+
+    // 5) AND dst, 0xFFFFFFFF - truncate to 32-bit
+    emit_alu_reg_imm32(gen, dst, X86_REG_AND, (int32_t)0xFFFFFFFF);
+
+    // 6) MOVSXD dst, dst32 - sign-extend truncated value back to 64-bit
+    emit_movsxd64(gen, dst, dst);
+    
+    // 7) Restore RCX if we saved it
     if (need_save_rcx) {
         emit_pop_reg(gen, X86_RCX);
     }
@@ -7707,40 +7824,48 @@ static x86_encode_result_t generate_shlo_r_imm_alt_64(x86_codegen_t* gen, const 
         imm_uint64 = imm32;
     }
     
-    x86_reg_t dst = pvm_reg_to_x86[dst_idx];
     x86_reg_t src = pvm_reg_to_x86[src_idx];
-    
+    x86_reg_t dst = pvm_reg_to_x86[dst_idx];
+    bool same_reg = (dst_idx == src_idx);
+    x86_reg_t base_reg = X86_R12;
+
     x86_encode_result_t result = {0};
     if (x86_codegen_ensure_capacity(gen, 30) != 0) return result;
     uint32_t start_offset = gen->offset;
     
-    // Follow Go's generateImmShiftOp64Alt pattern: PUSH/MOVABS/XCHG/SHIFT/XCHG/POP
-    
-    // 1) Save RCX if needed
+    // Match Go's generateImmShiftOp64Alt handling for same-register case
+    if (same_reg) {
+        emit_push_reg(gen, base_reg);
+        dst = base_reg;
+        emit_mov_reg_to_reg_imm_shift_op64_alt(gen, src, dst);
+    }
+
     bool need_save_rcx = (dst != X86_RCX);
+    bool need_xchg = (src != X86_RCX);
+
     if (need_save_rcx) {
         emit_push_reg(gen, X86_RCX);
     }
     
-    // 2) MOVABS dst64, imm64 - load immediate to destination as 64-bit
     emit_mov_imm_to_reg64(gen, dst, imm_uint64);
     
-    // 3) XCHG RCX, src64 - put shift count in CL (uses XCHG not MOV)
-    if (src != X86_RCX) {
-        emit_xchg_reg64(gen, src, X86_RCX);
+    if (need_xchg) {
+        emit_xchg_reg_rcx_imm_shift_op64_alt(gen, src);
     }
     
-    // 4) SHR dst, CL - shift full 64-bit operation
-    emit_shift_reg_cl(gen, dst, 5); // subcode=5 (SHR)
-    
-    // 5) XCHG RCX, src64 - restore (second XCHG)
-    if (src != X86_RCX) {
-        emit_xchg_reg64(gen, src, X86_RCX);
+    emit_shift_reg_cl_imm_shift_op64_alt(gen, dst, 5); // SHR
+
+    if (need_xchg) {
+        emit_xchg_reg_rcx_imm_shift_op64_alt(gen, src);
     }
     
-    // 6) Restore RCX if we saved it
     if (need_save_rcx) {
         emit_pop_reg(gen, X86_RCX);
+    }
+
+    if (same_reg) {
+        emit_mov_base_reg_to_src_imm_shift_op64_alt(gen, base_reg, src);
+        emit_pop_reg(gen, base_reg);
     }
     
     result.code = &gen->buffer[start_offset];
@@ -9195,292 +9320,166 @@ static x86_encode_result_t generate_cmov_nz(x86_codegen_t* gen, const instructio
 // generate_div_u_32: DIV_U_32 instruction - unsigned 32-bit division
 // Following Go's generateDivUOp32 pattern
 static x86_encode_result_t generate_div_u_32(x86_codegen_t* gen, const instruction_t* inst) {
-    x86_encode_result_t result = {0};
-    
-    // Extract src1, src2, dst from three-register instruction
     uint8_t src1_idx, src2_idx, dst_idx;
     extract_three_regs(inst->args, &src1_idx, &src2_idx, &dst_idx);
-    
-    x86_reg_t src1 = pvm_reg_to_x86[src1_idx < 12 ? src1_idx : 12];
-    x86_reg_t src2 = pvm_reg_to_x86[src2_idx < 12 ? src2_idx : 12];
-    x86_reg_t dst = pvm_reg_to_x86[dst_idx < 12 ? dst_idx : 12];
-    
-    if (x86_codegen_ensure_capacity(gen, 100) != 0) return result;
-    
-    size_t start_offset = gen->offset;
-    
-    // 1) PUSH RAX and RDX (used by DIV instruction)
-    x86_encode_result_t push_rax = emit_push_reg(gen, X86_RAX);
-    if (push_rax.size == 0) return result;
-    x86_encode_result_t push_rdx = emit_push_reg(gen, X86_RDX);
-    if (push_rdx.size == 0) return result;
-    
-    // 2) MOV EAX, src1 (move dividend to EAX)
-    x86_encode_result_t mov_eax = emit_mov_reg32(gen, X86_RAX, src1);
-    if (mov_eax.size == 0) return result;
-    
-    // 3) TEST src2, src2 (check if divisor is zero)
-    x86_encode_result_t test_src2 = emit_test_reg32(gen, src2, src2);
-    if (test_src2.size == 0) return result;
-    
-    // 4) JNE doDiv (jump if divisor is not zero)
-    size_t jne_offset = gen->offset;
-    if (x86_codegen_ensure_capacity(gen, 6) != 0) return result;
-    gen->buffer[gen->offset++] = X86_PREFIX_0F;  // Two-byte opcode prefix
-    gen->buffer[gen->offset++] = X86_OP2_JNE;    // JNE opcode
-    // Reserve space for 32-bit relative offset (will be patched later)
-    gen->buffer[gen->offset++] = 0;
-    gen->buffer[gen->offset++] = 0;
-    gen->buffer[gen->offset++] = 0;
-    gen->buffer[gen->offset++] = 0;
-    
-    // --- Division by zero path: set dst = maxUint64 (all 1s) ---
-    
-    // 5) XOR dst, dst (zero the destination)
-    x86_encode_result_t xor_dst = emit_xor_reg64(gen, dst, dst);
-    if (xor_dst.size == 0) return result;
-    
-    // 6) NOT dst (invert to get all 1s = maxUint64)
-    x86_encode_result_t not_dst = emit_not_reg64(gen, dst);
-    if (not_dst.size == 0) return result;
-    
-    // 7) JMP end
-    size_t jmp_offset = gen->offset;
-    if (x86_codegen_ensure_capacity(gen, 5) != 0) return result;
-    gen->buffer[gen->offset++] = X86_OP_JMP_REL32;  // JMP rel32
-    // Reserve space for 32-bit relative offset (will be patched later)
-    gen->buffer[gen->offset++] = 0;
-    gen->buffer[gen->offset++] = 0;
-    gen->buffer[gen->offset++] = 0;
-    gen->buffer[gen->offset++] = 0;
-    
-    // --- doDiv: Normal division path ---
-    size_t do_div_offset = gen->offset;
-    
-    // 8) XOR EDX, EDX (clear high 32 bits of dividend)
-    x86_encode_result_t xor_edx = emit_xor_reg32(gen, X86_RDX, X86_RDX);
-    if (xor_edx.size == 0) return result;
-    
-    // 9) DIV src2 (unsigned division: EDX:EAX / src2 → EAX=quotient, EDX=remainder)
-    x86_encode_result_t div_src2 = emit_div32(gen, src2);
-    if (div_src2.size == 0) return result;
-    
-    // 10) MOV dst, RAX (move quotient to destination, zero-extends to 64-bit)
-    // Use 64-bit MOV to match Go's emitMovDstEaxDivUOp32
-    if (x86_codegen_ensure_capacity(gen, 3) != 0) return result;
-    const reg_info_t* dst_info = &reg_info_list[dst];
-    uint8_t rex = 0x40 | 0x08; // X86_REX_BASE | X86_REX_W (64-bit operation)
-    if (dst_info->rex_bit) rex |= 0x01; // X86_REX_B
-    gen->buffer[gen->offset++] = rex;
-    gen->buffer[gen->offset++] = 0x89; // X86_OP_MOV_RM_R
-    gen->buffer[gen->offset++] = 0xC0 | (0 << 3) | dst_info->reg_bits; // ModRM: reg=0 (RAX), rm=dst
-    
-    // --- Patch jumps ---
-    size_t end_offset = gen->offset;
-    
-    // Patch JNE to jump to doDiv
-    int32_t jne_target = (int32_t)(do_div_offset - (jne_offset + 6));
-    gen->buffer[jne_offset + 2] = (uint8_t)(jne_target & 0xFF);
-    gen->buffer[jne_offset + 3] = (uint8_t)((jne_target >> 8) & 0xFF);
-    gen->buffer[jne_offset + 4] = (uint8_t)((jne_target >> 16) & 0xFF);
-    gen->buffer[jne_offset + 5] = (uint8_t)((jne_target >> 24) & 0xFF);
-    
-    // Patch JMP to jump to end
-    int32_t jmp_target = (int32_t)(end_offset - (jmp_offset + 5));
-    gen->buffer[jmp_offset + 1] = (uint8_t)(jmp_target & 0xFF);
-    gen->buffer[jmp_offset + 2] = (uint8_t)((jmp_target >> 8) & 0xFF);
-    gen->buffer[jmp_offset + 3] = (uint8_t)((jmp_target >> 16) & 0xFF);
-    gen->buffer[jmp_offset + 4] = (uint8_t)((jmp_target >> 24) & 0xFF);
-    
-    // 11) POP RDX, RAX (restore registers in reverse order)
-    x86_encode_result_t pop_rdx = emit_pop_reg(gen, X86_RDX);
-    if (pop_rdx.size == 0) return result;
-    x86_encode_result_t pop_rax = emit_pop_reg(gen, X86_RAX);
-    if (pop_rax.size == 0) return result;
-    
-    result.size = gen->offset - start_offset;
+
+    x86_reg_t src1 = pvm_reg_to_x86[src1_idx];
+    x86_reg_t src2 = pvm_reg_to_x86[src2_idx];
+    x86_reg_t dst = pvm_reg_to_x86[dst_idx];
+
+    x86_encode_result_t result = {0};
+    uint32_t start_offset = gen->offset;
+
+    // Preserve RAX/RDX (clobbered by DIV)
+    emit_push_reg(gen, X86_RAX);
+    emit_push_reg(gen, X86_RDX);
+
+    // MOV EAX, dividend
+    emit_mov_eax_from_reg_div_u_op32(gen, src1);
+
+    // TEST divisor, divisor
+    emit_test_reg32(gen, src2, src2);
+
+    // JNE doDiv
+    uint32_t jne_offset = gen->offset;
+    emit_jne32(gen);
+
+    // divisor == 0 → return maxUint64
+    emit_xor_reg64(gen, dst, dst);
+    emit_not_reg64(gen, dst);
+
+    // Jump to epilogue
+    uint32_t jmp_offset = gen->offset;
+    emit_jmp32(gen);
+
+    // doDiv:
+    uint32_t do_div_offset = gen->offset;
+
+    // Clear high half and perform division
+    emit_xor_reg32(gen, X86_RDX, X86_RDX);
+
+    bool is_src2_rax = (src2_idx == 0);
+    bool is_src2_rdx = (src2_idx == 2);
+
+    if (is_src2_rax) {
+        emit_div_mem_stack_rem_u_op32_rax(gen);
+    } else if (is_src2_rdx) {
+        emit_div_mem_stack_rem_u_op32_rdx(gen);
+    } else {
+        emit_div32(gen, src2);
+    }
+
+    // Move quotient into dst (zero-extend)
+    emit_mov_dst_eax_div_u_op32(gen, dst);
+
+    // Patch control flow
+    uint32_t end_offset = gen->offset;
+
+    int32_t jne_disp = (int32_t)(do_div_offset - (jne_offset + 6));
+    *(int32_t*)&gen->buffer[jne_offset + 2] = jne_disp;
+
+    int32_t jmp_disp = (int32_t)(end_offset - (jmp_offset + 5));
+    *(int32_t*)&gen->buffer[jmp_offset + 1] = jmp_disp;
+
+    // Restore registers
+    emit_pop_rdx_rax_div_u_op32(gen);
+
     result.code = &gen->buffer[start_offset];
+    result.size = gen->offset - start_offset;
+    result.offset = start_offset;
     return result;
 }
 // generate_div_s_32: DIV_S_32 instruction - signed 32-bit division
 // Following Go's generateDivSOp32 pattern
 static x86_encode_result_t generate_div_s_32(x86_codegen_t* gen, const instruction_t* inst) {
-    x86_encode_result_t result = {0};
-    
-    // Extract src1, src2, dst from three-register instruction
     uint8_t src1_idx, src2_idx, dst_idx;
     extract_three_regs(inst->args, &src1_idx, &src2_idx, &dst_idx);
-    
-    x86_reg_t src1 = pvm_reg_to_x86[src1_idx < 12 ? src1_idx : 12];
-    x86_reg_t src2 = pvm_reg_to_x86[src2_idx < 12 ? src2_idx : 12];
-    x86_reg_t dst = pvm_reg_to_x86[dst_idx < 12 ? dst_idx : 12];
-    
-    if (x86_codegen_ensure_capacity(gen, 200) != 0) return result;
-    
-    size_t start_offset = gen->offset;
-    
-    // 1) PUSH RAX and RDX (used by IDIV instruction)
-    x86_encode_result_t push_rax = emit_push_reg(gen, X86_RAX);
-    if (push_rax.size == 0) return result;
-    x86_encode_result_t push_rdx = emit_push_reg(gen, X86_RDX);
-    if (push_rdx.size == 0) return result;
-    
-    // 2) MOV EAX, src1 (move dividend to EAX)
-    x86_encode_result_t mov_eax = emit_mov_reg32(gen, X86_RAX, src1);
-    if (mov_eax.size == 0) return result;
-    
-    // 3) TEST src2, src2 (check if divisor is zero)
-    x86_encode_result_t test_src2 = emit_test_reg32(gen, src2, src2);
-    if (test_src2.size == 0) return result;
-    
-    // 4) JNE div_not_zero (jump if divisor is not zero)
-    size_t jne_div_offset = gen->offset;
-    if (x86_codegen_ensure_capacity(gen, 6) != 0) return result;
-    gen->buffer[gen->offset++] = X86_PREFIX_0F;  // Two-byte opcode prefix
-    gen->buffer[gen->offset++] = X86_OP2_JNE;    // JNE opcode
-    // Reserve space for 32-bit relative offset (will be patched later)
-    gen->buffer[gen->offset++] = 0;
-    gen->buffer[gen->offset++] = 0;
-    gen->buffer[gen->offset++] = 0;
-    gen->buffer[gen->offset++] = 0;
-    
-    // --- Division by zero path: set dst = maxUint64 (all 1s) ---
-    
-    // 5) XOR dst, dst (zero the destination)
-    x86_encode_result_t xor_dst = emit_xor_reg64(gen, dst, dst);
-    if (xor_dst.size == 0) return result;
-    
-    // 6) NOT dst (invert to get all 1s = maxUint64)
-    x86_encode_result_t not_dst = emit_not_reg64(gen, dst);
-    if (not_dst.size == 0) return result;
-    
-    // 7) JMP end
-    size_t jmp_end_offset = gen->offset;
-    if (x86_codegen_ensure_capacity(gen, 5) != 0) return result;
-    gen->buffer[gen->offset++] = X86_OP_JMP_REL32;  // JMP rel32
-    // Reserve space for 32-bit relative offset (will be patched later)
-    gen->buffer[gen->offset++] = 0;
-    gen->buffer[gen->offset++] = 0;
-    gen->buffer[gen->offset++] = 0;
-    gen->buffer[gen->offset++] = 0;
-    
-    // --- div_not_zero: Check for overflow case ---
-    size_t div_not_zero_offset = gen->offset;
-    
-    // 8) CMP EAX, X86_MIN_INT32 (check if dividend is MinInt32)
-    x86_encode_result_t cmp_min = emit_cmp_reg_imm32_min_int_32bit(gen, X86_RAX);
-    if (cmp_min.size == 0) return result;
-    
-    // 9) JNE normal_div
-    size_t jne_ovf1_offset = gen->offset;
-    if (x86_codegen_ensure_capacity(gen, 6) != 0) return result;
-    gen->buffer[gen->offset++] = X86_PREFIX_0F;  // Two-byte opcode prefix
-    gen->buffer[gen->offset++] = X86_OP2_JNE;    // JNE opcode
-    // Reserve space for 32-bit relative offset (will be patched later)
-    gen->buffer[gen->offset++] = 0;
-    gen->buffer[gen->offset++] = 0;
-    gen->buffer[gen->offset++] = 0;
-    gen->buffer[gen->offset++] = 0;
-    
-    // 10) CMP src2, -1 (check if divisor is -1)
-    x86_encode_result_t cmp_neg1 = emit_cmp_reg_imm_byte_32bit(gen, src2, X86_NEG_ONE);
-    if (cmp_neg1.size == 0) return result;
-    
-    // 11) JNE normal_div
-    size_t jne_ovf2_offset = gen->offset;
-    if (x86_codegen_ensure_capacity(gen, 6) != 0) return result;
-    gen->buffer[gen->offset++] = X86_PREFIX_0F;  // Two-byte opcode prefix
-    gen->buffer[gen->offset++] = X86_OP2_JNE;    // JNE opcode
-    // Reserve space for 32-bit relative offset (will be patched later)
-    gen->buffer[gen->offset++] = 0;
-    gen->buffer[gen->offset++] = 0;
-    gen->buffer[gen->offset++] = 0;
-    gen->buffer[gen->offset++] = 0;
-    
-    // --- Overflow path: dst = uint64(dividend) via MOVSXD dst, EAX ---
-    
-    // 12) MOVSXD dst, EAX (sign-extend EAX to 64-bit in dst)
-    if (x86_codegen_ensure_capacity(gen, 3) != 0) return result;
-    const reg_info_t* dst_info = &reg_info_list[dst];
-    uint8_t rex_movsxd = 0x40 | 0x08; // X86_REX_BASE | X86_REX_W (64-bit operation)
-    if (dst_info->rex_bit) rex_movsxd |= 0x04; // X86_REX_R (for dst in reg field)
-    gen->buffer[gen->offset++] = rex_movsxd;
-    gen->buffer[gen->offset++] = 0x63; // X86_OP_MOVSXD
-    gen->buffer[gen->offset++] = 0xC0 | (dst_info->reg_bits << 3) | 0; // ModRM: reg=dst, rm=0 (EAX)
-    
-    // 13) JMP end
-    size_t jmp_ovf_end_offset = gen->offset;
-    if (x86_codegen_ensure_capacity(gen, 5) != 0) return result;
-    gen->buffer[gen->offset++] = X86_OP_JMP_REL32;  // JMP rel32
-    // Reserve space for 32-bit relative offset (will be patched later)
-    gen->buffer[gen->offset++] = 0;
-    gen->buffer[gen->offset++] = 0;
-    gen->buffer[gen->offset++] = 0;
-    gen->buffer[gen->offset++] = 0;
-    
-    // --- normal_div: Normal signed division path ---
-    size_t normal_div_offset = gen->offset;
-    
-    // 14) CDQ (sign-extend EAX to EDX:EAX)
-    x86_encode_result_t cdq_result = emit_cdq(gen);
-    if (cdq_result.size == 0) return result;
-    
-    // 15) IDIV src2 (signed division: EDX:EAX / src2 → EAX=quotient, EDX=remainder)
-    x86_encode_result_t idiv_src2 = emit_idiv32(gen, src2);
-    if (idiv_src2.size == 0) return result;
-    
-    // 16) MOVSXD dst, EAX (sign-extend quotient to 64-bit)
-    if (x86_codegen_ensure_capacity(gen, 3) != 0) return result;
-    uint8_t rex_movsxd2 = 0x40 | 0x08; // X86_REX_BASE | X86_REX_W (64-bit operation)
-    if (dst_info->rex_bit) rex_movsxd2 |= 0x04; // X86_REX_R (for dst in reg field)
-    gen->buffer[gen->offset++] = rex_movsxd2;
-    gen->buffer[gen->offset++] = 0x63; // X86_OP_MOVSXD
-    gen->buffer[gen->offset++] = 0xC0 | (dst_info->reg_bits << 3) | 0; // ModRM: reg=dst, rm=0 (EAX)
-    
-    // --- Patch jumps ---
-    size_t end_offset = gen->offset;
-    
-    // Patch JNE div_not_zero to jump to div_not_zero
-    int32_t jne_div_target = (int32_t)(div_not_zero_offset - (jne_div_offset + 6));
-    gen->buffer[jne_div_offset + 2] = (uint8_t)(jne_div_target & 0xFF);
-    gen->buffer[jne_div_offset + 3] = (uint8_t)((jne_div_target >> 8) & 0xFF);
-    gen->buffer[jne_div_offset + 4] = (uint8_t)((jne_div_target >> 16) & 0xFF);
-    gen->buffer[jne_div_offset + 5] = (uint8_t)((jne_div_target >> 24) & 0xFF);
-    
-    // Patch JNE overflow jumps to jump to normal_div
-    int32_t jne_ovf_target = (int32_t)(normal_div_offset - (jne_ovf1_offset + 6));
-    gen->buffer[jne_ovf1_offset + 2] = (uint8_t)(jne_ovf_target & 0xFF);
-    gen->buffer[jne_ovf1_offset + 3] = (uint8_t)((jne_ovf_target >> 8) & 0xFF);
-    gen->buffer[jne_ovf1_offset + 4] = (uint8_t)((jne_ovf_target >> 16) & 0xFF);
-    gen->buffer[jne_ovf1_offset + 5] = (uint8_t)((jne_ovf_target >> 24) & 0xFF);
-    
-    int32_t jne_ovf2_target = (int32_t)(normal_div_offset - (jne_ovf2_offset + 6));
-    gen->buffer[jne_ovf2_offset + 2] = (uint8_t)(jne_ovf2_target & 0xFF);
-    gen->buffer[jne_ovf2_offset + 3] = (uint8_t)((jne_ovf2_target >> 8) & 0xFF);
-    gen->buffer[jne_ovf2_offset + 4] = (uint8_t)((jne_ovf2_target >> 16) & 0xFF);
-    gen->buffer[jne_ovf2_offset + 5] = (uint8_t)((jne_ovf2_target >> 24) & 0xFF);
-    
-    // Patch JMP end jumps to jump to end
-    int32_t jmp_end_target = (int32_t)(end_offset - (jmp_end_offset + 5));
-    gen->buffer[jmp_end_offset + 1] = (uint8_t)(jmp_end_target & 0xFF);
-    gen->buffer[jmp_end_offset + 2] = (uint8_t)((jmp_end_target >> 8) & 0xFF);
-    gen->buffer[jmp_end_offset + 3] = (uint8_t)((jmp_end_target >> 16) & 0xFF);
-    gen->buffer[jmp_end_offset + 4] = (uint8_t)((jmp_end_target >> 24) & 0xFF);
-    
-    int32_t jmp_ovf_end_target = (int32_t)(end_offset - (jmp_ovf_end_offset + 5));
-    gen->buffer[jmp_ovf_end_offset + 1] = (uint8_t)(jmp_ovf_end_target & 0xFF);
-    gen->buffer[jmp_ovf_end_offset + 2] = (uint8_t)((jmp_ovf_end_target >> 8) & 0xFF);
-    gen->buffer[jmp_ovf_end_offset + 3] = (uint8_t)((jmp_ovf_end_target >> 16) & 0xFF);
-    gen->buffer[jmp_ovf_end_offset + 4] = (uint8_t)((jmp_ovf_end_target >> 24) & 0xFF);
-    
-    // 17) POP RDX, RAX (restore registers in reverse order)
-    x86_encode_result_t pop_rdx = emit_pop_reg(gen, X86_RDX);
-    if (pop_rdx.size == 0) return result;
-    x86_encode_result_t pop_rax = emit_pop_reg(gen, X86_RAX);
-    if (pop_rax.size == 0) return result;
-    
-    result.size = gen->offset - start_offset;
+
+    x86_reg_t src1 = pvm_reg_to_x86[src1_idx];
+    x86_reg_t src2 = pvm_reg_to_x86[src2_idx];
+    x86_reg_t dst = pvm_reg_to_x86[dst_idx];
+
+    x86_encode_result_t result = {0};
+    uint32_t start_offset = gen->offset;
+
+    // Preserve caller RAX/RDX
+    emit_push_reg(gen, X86_RAX);
+    emit_push_reg(gen, X86_RDX);
+
+    // MOV EAX, dividend
+    emit_mov_eax_from_reg32(gen, src1);
+
+    // TEST divisor, divisor
+    emit_test_reg32(gen, src2, src2);
+
+    // JNE div_not_zero
+    uint32_t jne_div_offset = gen->offset;
+    emit_jne32(gen);
+
+    // divisor == 0 → dst = maxUint64
+    emit_xor_reg64(gen, dst, dst);
+    emit_not_reg64(gen, dst);
+
+    // Jump to epilogue
+    uint32_t jmp_end_offset = gen->offset;
+    emit_jmp32(gen);
+
+    // div_not_zero:
+    uint32_t div_not_zero_offset = gen->offset;
+
+    // Check for overflow case a==MinInt32 && b==-1
+    emit_cmp_reg_imm32_min_int_32bit(gen, X86_RAX);
+    uint32_t jne_ovf1_offset = gen->offset;
+    emit_jne32(gen);
+
+    emit_cmp_reg_imm_byte_32bit(gen, src2, X86_NEG_ONE);
+    uint32_t jne_ovf2_offset = gen->offset;
+    emit_jne32(gen);
+
+    // Overflow: result = uint64(a) via MOVSXD dst, EAX
+    emit_movsxd64(gen, dst, X86_RAX);
+
+    uint32_t jmp_ovf_end_offset = gen->offset;
+    emit_jmp32(gen);
+
+    // normal_div:
+    uint32_t normal_div_offset = gen->offset;
+
+    emit_cdq(gen);
+
+    bool is_src2_rdx = (src2_idx == 2);
+    if (is_src2_rdx) {
+        emit_idiv_mem_stack_rem_s_op32_rdx(gen);
+    } else {
+        emit_idiv32(gen, src2);
+    }
+
+    emit_movsxd64(gen, dst, X86_RAX);
+
+    // Patch control flow
+    uint32_t end_offset = gen->offset;
+
+    int32_t jne_div_disp = (int32_t)(div_not_zero_offset - (jne_div_offset + 6));
+    *(int32_t*)&gen->buffer[jne_div_offset + 2] = jne_div_disp;
+
+    int32_t jne_ovf1_disp = (int32_t)(normal_div_offset - (jne_ovf1_offset + 6));
+    *(int32_t*)&gen->buffer[jne_ovf1_offset + 2] = jne_ovf1_disp;
+
+    int32_t jne_ovf2_disp = (int32_t)(normal_div_offset - (jne_ovf2_offset + 6));
+    *(int32_t*)&gen->buffer[jne_ovf2_offset + 2] = jne_ovf2_disp;
+
+    int32_t jmp_end_disp = (int32_t)(end_offset - (jmp_end_offset + 5));
+    *(int32_t*)&gen->buffer[jmp_end_offset + 1] = jmp_end_disp;
+
+    int32_t jmp_ovf_end_disp = (int32_t)(end_offset - (jmp_ovf_end_offset + 5));
+    *(int32_t*)&gen->buffer[jmp_ovf_end_offset + 1] = jmp_ovf_end_disp;
+
+    // Restore RDX, RAX
+    emit_pop_rdx_rax(gen);
+
     result.code = &gen->buffer[start_offset];
+    result.size = gen->offset - start_offset;
+    result.offset = start_offset;
     return result;
 }
 

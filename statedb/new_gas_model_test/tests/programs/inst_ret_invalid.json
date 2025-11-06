@@ -1,0 +1,43 @@
+{
+  "name": "inst_ret_invalid",
+  "initial-pc": 0,
+  "initial-gas": 10000,
+  "program": [
+    0,
+    0,
+    2,
+    50,
+    0,
+    1
+  ],
+  "steps": [
+    {
+      "kind": "run"
+    },
+    {
+      "kind": "assert",
+      "status": "panic",
+      "gas": 9978,
+      "pc": 0,
+      "regs": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "memory": []
+    }
+  ],
+  "block-gas-costs": {
+    "0": 22
+  }
+}

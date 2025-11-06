@@ -1,0 +1,48 @@
+{
+  "name": "gas_resource_limits_mul",
+  "initial-pc": 0,
+  "initial-gas": 10000,
+  "program": [
+    0,
+    0,
+    7,
+    202,
+    152,
+    7,
+    202,
+    186,
+    8,
+    0,
+    73
+  ],
+  "steps": [
+    {
+      "kind": "run"
+    },
+    {
+      "kind": "assert",
+      "status": "panic",
+      "gas": 9994,
+      "pc": 6,
+      "regs": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "memory": []
+    }
+  ],
+  "block-gas-costs": {
+    "0": 6
+  }
+}

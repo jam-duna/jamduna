@@ -1,0 +1,49 @@
+{
+  "name": "inst_cmov_if_zero_imm_nok",
+  "initial-pc": 0,
+  "initial-gas": 10000,
+  "program": [
+    0,
+    0,
+    3,
+    147,
+    167,
+    100,
+    1
+  ],
+  "steps": [
+    {
+      "kind": "set-reg",
+      "reg": 10,
+      "value": 1
+    },
+    {
+      "kind": "run"
+    },
+    {
+      "kind": "assert",
+      "status": "panic",
+      "gas": 9998,
+      "pc": 3,
+      "regs": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0
+      ],
+      "memory": []
+    }
+  ],
+  "block-gas-costs": {
+    "0": 2
+  }
+}

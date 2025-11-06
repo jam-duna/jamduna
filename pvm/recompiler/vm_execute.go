@@ -107,7 +107,14 @@ func (vm *X86Compiler) translateBasicBlock(startPC uint64) *BasicBlock {
 			fmt.Printf("operands length: %d\n", olen)
 			fmt.Printf("code hash %v", common.Blake2Hash(vm.code))
 		}
-		block.AddInstruction(op, operands, int(pc), pc)
+		instruction := Instruction{
+			Opcode: op,
+			Args:   operands,
+			Pc:     pc,
+		}
+		instruction.GetArgs()
+
+		block.Instructions = append(block.Instructions, instruction)
 		if op == ECALLI {
 			lx := uint32(types.DecodeE_l(operands))
 			host_func_id := int(lx)
@@ -119,12 +126,49 @@ func (vm *X86Compiler) translateBasicBlock(startPC uint64) *BasicBlock {
 		pc0 := pc
 		pc += uint64(olen) + 1
 		block.Instructions[chargeGasInstrunctionIndex].GasUsage += 1
+		if instruction.IsBranchInstruction() && GasMode == GasModeBasicBlock {
+			if pc+uint64(instruction.Offset1) >= uint64(len(vm.code)) {
+				if debugGasModel {
+					fmt.Printf("branch target 1 out of range pc=%d, offset1=%d so put trap\n", pc, instruction.Offset1)
+				}
+				block.Instructions[len(block.Instructions)-1].BranchTarget1 = 0
+				block.Instructions[len(block.Instructions)-1].BranchTarget2 = vm.code[pc]
+			} else {
+
+				block.Instructions[len(block.Instructions)-1].BranchTarget1 = vm.code[pc0+uint64(instruction.Offset1)]
+				block.Instructions[len(block.Instructions)-1].BranchTarget2 = vm.code[pc]
+				if debugGasModel {
+					fmt.Printf("branch target 1 pc=%d, offset1=%d so target1=%d %s\n", pc, instruction.Offset1, pc+uint64(instruction.Offset1), opcode_str(vm.code[pc+uint64(instruction.Offset1)]))
+					fmt.Printf("branch target 2 pc=%d, offset2=%d so target2=%d %s\n", pc, instruction.Offset2, pc, opcode_str(vm.code[pc]))
+				}
+			}
+
+		}
 		if IsBasicBlockInstruction(op) {
 			vm.setJumpMetadata(block, op, operands, pc0)
 			hitBasicBlock = true
 			break
+		} else if pc >= uint64(len(vm.code)) && GasMode == GasModeBasicBlock {
+			trap_instruction := Instruction{
+				Opcode: TRAP,
+				Args:   nil,
+				Pc:     pc,
+			}
+			block.Instructions = append(block.Instructions, trap_instruction)
+			vm.setJumpMetadata(block, op, operands, pc0)
+			break
 		}
+
 		chargeGasInstrunctionIndex = len(block.Instructions)
+	}
+	if debugGasModel {
+		fmt.Printf("---basic block pc=%d---\n", startPC)
+		for i, inst := range block.Instructions {
+			fmt.Printf("[%d] %s srcReg=%d, destReg=%d\n", i, inst.String(), inst.SourceRegs, inst.DestRegs)
+		}
+	}
+	if GasMode == GasModeBasicBlock {
+		block.GasModel.TransitionCycle(block.Instructions)
 	}
 
 	if len(block.Instructions) == 0 {
@@ -158,8 +202,13 @@ func (vm *X86Compiler) translateBasicBlock(startPC uint64) *BasicBlock {
 				code = append(code, generateIncMem(basicBlockCounterAddr)...)
 			}
 		}
-		if vm.isChargingGas {
+		if vm.isChargingGas && GasMode == GasModeInstruction {
 			code = append(code, generateGasCheck(uint32(inst.GasUsage))...)
+		} else if vm.isChargingGas && GasMode == GasModeBasicBlock && i == 0 {
+			gas_usage_int := max(1, block.GasModel.CycleCounter-3)
+			gas_usage := uint32(gas_usage_int)
+			code = append(code, generateGasCheck(gas_usage)...)
+			block.GasUsage = gas_usage
 		}
 		// Insert debug tracing call if enabled
 		// Skip ECALLI and SBRK because they dump registers themselves
@@ -232,6 +281,9 @@ func (vm *X86Compiler) translateBasicBlock(startPC uint64) *BasicBlock {
 	block.PVMNextPC = pc
 	vm.basicBlocks[startPC] = block
 	vm.x86Blocks[block.X86PC] = block
+	if debugGasModel {
+		fmt.Printf("basic block pc %d gas %d ,instruction length %d\n", startPC, block.GasUsage, len(block.Instructions))
+	}
 
 	vm.appendBlock(block)
 
@@ -393,9 +445,15 @@ func generateGasCheck(gasCharge uint32) []byte {
 
 	// JNS skip_trap
 	jumpPos := len(code)
-	code = append(code, 0x79, 0x00) // JNS rel8
-	code = append(code, 0x0F, 0x0B)
+	code = append(code, 0x79, 0x00) // JNS rel8 - if gas is sufficient, jump to skip_trap
 
+	// Gas insufficient: add back the gas before triggering trap
+	if GasMode == GasModeBasicBlock {
+		code = append(code, generateAddMem64Imm32(BaseReg, offset, gasCharge)...)
+	}
+	code = append(code, 0x0F, 0x0B) // UD2 - trigger trap
+
+	// skip_trap:
 	// Patch rel8
 	code[jumpPos+1] = byte(len(code) - (jumpPos + 2)) // calculate relative jump distance
 
@@ -419,6 +477,44 @@ func generateSubMem64Imm32(reg X86Reg, offset int64, gasCost uint32) []byte {
 	// --- ModRM ---
 	// mod = 10 (disp32), reg = 5 (SUB), rm = reg.RegBits
 	modrm := byte(0x80 | (5 << 3) | (reg.RegBits & 0x07))
+	code = append(code, modrm)
+
+	// --- SIB (required for r12/r13/r14/r15) ---
+	if reg.RegBits&0x07 == 4 {
+		// SIB: scale=0, index=none(100), base=100 (RSP/r12)
+		sib := byte(0x24)
+		code = append(code, sib)
+	}
+
+	// --- disp32 ---
+	disp := make([]byte, 4)
+	binary.LittleEndian.PutUint32(disp, uint32(offset))
+	code = append(code, disp...)
+
+	// --- imm32 ---
+	imm := make([]byte, 4)
+	binary.LittleEndian.PutUint32(imm, uint32(gasCost))
+	code = append(code, imm...)
+
+	return code
+}
+
+func generateAddMem64Imm32(reg X86Reg, offset int64, gasCost uint32) []byte {
+	var code []byte
+
+	// --- REX Prefix ---
+	rex := byte(0x48) // REX.W = 1
+	if reg.REXBit == 1 {
+		rex |= 0x01 // REX.B = 1
+	}
+	code = append(code, rex)
+
+	// --- Opcode: 81 /0 (ADD r/m64, imm32) ---
+	code = append(code, 0x81)
+
+	// --- ModRM ---
+	// mod = 10 (disp32), reg = 0 (ADD), rm = reg.RegBits
+	modrm := byte(0x80 | (0 << 3) | (reg.RegBits & 0x07))
 	code = append(code, modrm)
 
 	// --- SIB (required for r12/r13/r14/r15) ---

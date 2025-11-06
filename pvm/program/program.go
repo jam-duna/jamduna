@@ -154,7 +154,7 @@ func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, 
 	w_size := types.DecodeE_l(pure[3:6])
 	z_val := types.DecodeE_l(pure[6:8])
 	s_val := types.DecodeE_l(pure[8:11])
-
+	//fmt.Printf("DecodeProgram: o_size=%d, w_size=%d, z_val=%d, s_val=%d, total_header_size=11\n",o_size, w_size, z_val, s_val)
 	var o_byte, w_byte []byte
 	offset := uint64(11)
 	if offset+o_size <= uint64(len(pure)) {
@@ -177,5 +177,5 @@ func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, 
 		// fmt.Printf("DecodeProgram o_size: %d, w_size: %d, z_val: %d, s_val: %d len(w_byte)=%d\n", o_size, w_size, z_val, s_val, len(w_byte))
 		return nil, 0, 0, 0, 0, nil, nil
 	}
-	return DecodeCorePart(pure[offset:]), uint32(o_size), uint32(w_size), uint32(z_val), uint32(s_val), o_byte, w_byte
+	return (*Program)(DecodeCorePart(pure[offset:])), uint32(o_size), uint32(w_size), uint32(z_val), uint32(s_val), o_byte, w_byte
 }
