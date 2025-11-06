@@ -287,6 +287,8 @@ pub struct StateWitness {
     pub ref_info: ObjectRef,
     /// Merkle proof fields
     pub path: Vec<[u8; 32]>,
+    /// Payload (only populated for RAW witnesses)
+    pub payload: Option<Vec<u8>>,
 }
 
 impl StateWitness {
@@ -321,6 +323,7 @@ impl StateWitness {
                 object_id,
                 ref_info,
                 path,
+                payload: None,
             });
         }
 
@@ -359,70 +362,93 @@ impl StateWitness {
             object_id,
             ref_info,
             path,
+            payload: None,
         })
     }
 
-    /// Creates a write effect from this state witness and a set of imported segments.
-    /// Uses the first segment (at index_start) to extract the initial payload chunk after
-    /// metadata. Appends payload from subsequent segments up to but not including index_end.
-    /// Validates that the final payload length equals the payload_length declared in the
-    /// witness' ObjectRef.
-    pub fn create_write_effect(&self, work_item_index: u16) -> Option<WriteEffectEntry> {
+    /// Fetches the payload from this state witness and a set of imported segments.
+    pub fn fetch_object_payload(&self, work_item: &crate::functions::WorkItem, work_item_index: u16) -> Option<Vec<u8>> {
         use crate::functions::fetch_imported_segment;
+
+        log_debug(&format!(
+            "fetch_object_payload: object_id={}, ref_info.index_start={}, ref_info.index_end={}, ref_info.payload_length={}",
+            format_object_id(self.object_id),
+            self.ref_info.index_start,
+            self.ref_info.index_end,
+            self.ref_info.payload_length
+        ));
 
         let start = self.ref_info.index_start as u64;
         let end = self.ref_info.index_end as u64;
         if end <= start {
+            log_error(&format!(
+                "fetch_object_payload: end <= start ({} <= {}), returning None",
+                end, start
+            ));
             return None;
         }
 
-        // Fetch first segment bytes (expected to contain [ObjectId || ObjectRef || payload_part0])
-        let first_bytes = fetch_imported_segment(work_item_index, start as u32).ok()?;
-        if first_bytes.is_empty() {
-            return None;
-        }
-
-        // Skip metadata: object_id (32 bytes) + ObjectRef (64 bytes) = 96 bytes
-        let metadata_size = 32 + 64;
-        if first_bytes.len() < metadata_size {
-            return None;
-        }
-        let offset = metadata_size;
-
-        // Begin assembling full payload: remainder of first segment after metadata
-        let mut payload = Vec::with_capacity(self.ref_info.payload_length as usize);
-        payload.extend_from_slice(&first_bytes[offset..]);
-
-        // Append payload from subsequent segments [start+1, end)
-        for seg_idx in (start + 1)..end {
-            let bytes = fetch_imported_segment(work_item_index, seg_idx as u32).ok()?;
-            if bytes.is_empty() {
+        let (start, end) = match work_item.get_imported_segments_range(&self.ref_info) {
+            Some(range) => {
+                log_debug(&format!(
+                    "fetch_object_payload: found imported_segments range: start={}, end={}",
+                    range.0, range.1
+                ));
+                range
+            }
+            None => {
+                log_error(&format!(
+                    "fetch_object_payload: get_imported_segments_range returned None for object_id={}",
+                    format_object_id(self.object_id)
+                ));
                 return None;
             }
-            // Subsequent segments are payload-only
+        };
+
+        let mut payload: Vec<u8> = Vec::new();
+        for seg_idx in start..end {
+            log_debug(&format!(
+                "fetch_object_payload: fetching segment {} for work_item_index={}",
+                seg_idx, work_item_index
+            ));
+            let bytes = match fetch_imported_segment(work_item_index, seg_idx as u32) {
+                Ok(b) => b,
+                Err(e) => {
+                    log_error(&format!(
+                        "fetch_object_payload: fetch_imported_segment failed for seg_idx={}, error={:?}",
+                        seg_idx, e
+                    ));
+                    return None;
+                }
+            };
+            if bytes.is_empty() {
+                log_error(&format!(
+                    "fetch_object_payload: segment {} is empty, returning None",
+                    seg_idx
+                ));
+                return None;
+            }
+            log_debug(&format!(
+                "fetch_object_payload: segment {} fetched {} bytes",
+                seg_idx, bytes.len()
+            ));
             payload.extend_from_slice(&bytes);
         }
 
-        // Validate total length matches declared payload_length in the witness' ObjectRef
-        let expected_len = self.ref_info.payload_length as usize;
-        if payload.len() != expected_len {
-            call_log(
-                2,
-                None,
-                &format!(
-                    "create_write_effect: assembled payload length = {} DOES NOT match expected = {}",
-                    payload.len(),
-                    expected_len
-                ),
-            );
-            return None;
-        }
+        log_debug(&format!(
+            "fetch_object_payload: assembled payload length={}, expected={}",
+            payload.len(),
+            self.ref_info.payload_length
+        ));
 
-        Some(WriteEffectEntry {
-            object_id: self.object_id,
-            ref_info: self.ref_info.clone(),
-            payload,
-        })
+        payload.truncate(self.ref_info.payload_length as usize);
+
+        log_debug(&format!(
+            "fetch_object_payload: success, returning payload of length={}",
+            payload.len()
+        ));
+
+        Some(payload)
     }
 
     /// Verifies this state witness against a state_root using Merkle proof verification
@@ -543,6 +569,7 @@ impl StateWitness {
             object_id,
             ref_info,
             path,
+            payload: Some(payload.to_vec()),
         })
     }
 

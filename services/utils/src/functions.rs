@@ -1510,6 +1510,69 @@ pub struct WorkItem {
     pub imported_segments: Vec<ImportSegment>,
     pub work_item_extrinsics: Vec<WorkItemExtrinsic>,
 }
+
+impl WorkItem {
+    /// Returns the range (start_index, end_index) within imported_segments that match
+    /// the work_package_hash and index range from the given ObjectRef.
+    /// Returns None if no matching segments are found.
+    pub fn get_imported_segments_range(&self, object_ref: &crate::objects::ObjectRef) -> Option<(usize, usize)> {
+        let target_hash = &object_ref.work_package_hash;
+        let index_start = object_ref.index_start;
+        let index_end = object_ref.index_end;
+
+        log_debug(&format!(
+            "get_imported_segments_range: looking for work_package_hash={:?}, index_start={}, index_end={}, total imported_segments={}",
+            target_hash,
+            index_start,
+            index_end,
+            self.imported_segments.len()
+        ));
+
+        let mut start_pos: Option<usize> = None;
+        let mut end_pos: Option<usize> = None;
+
+        for (i, segment) in self.imported_segments.iter().enumerate() {
+            if segment.work_package_hash == *target_hash {
+                log_debug(&format!(
+                    "get_imported_segments_range: segment[{}] matches hash, segment.index={}",
+                    i, segment.index
+                ));
+                if segment.index >= index_start && segment.index < index_end {
+                    if start_pos.is_none() {
+                        start_pos = Some(i);
+                        log_debug(&format!(
+                            "get_imported_segments_range: set start_pos={}",
+                            i
+                        ));
+                    }
+                    end_pos = Some(i + 1);
+                    log_debug(&format!(
+                        "get_imported_segments_range: updated end_pos={}",
+                        i + 1
+                    ));
+                }
+            }
+        }
+
+        match (start_pos, end_pos) {
+            (Some(start), Some(end)) => {
+                log_debug(&format!(
+                    "get_imported_segments_range: success, returning range ({}, {})",
+                    start, end
+                ));
+                Some((start, end))
+            }
+            _ => {
+                log_error(&format!(
+                    "get_imported_segments_range: no matching segments found for work_package_hash={:?}, index_start={}, index_end={}",
+                    target_hash, index_start, index_end
+                ));
+                None
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct WorkItemExtrinsic {
     pub hash: [u8; 32],

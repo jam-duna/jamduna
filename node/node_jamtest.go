@@ -265,6 +265,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 			JCEMode = JCEFast
 		}
 		JCEMode = JCEFast //MK:TODO. bring back faster mode. This seems extremely slow
+		//JCEMode = JCEDefault
 
 		nodes, err := SetUpNodes(JCEMode, numNodes, basePort)
 		if err != nil {
@@ -286,8 +287,11 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		}
 
 		// Handling Safrole
+		sendTickets = false
 		for _, n := range nodes {
-			n.SetSendTickets(sendTickets)
+			if sendTickets {
+				n.SetSendTickets(sendTickets)
+			}
 		}
 
 		// Handling Dispute Mode

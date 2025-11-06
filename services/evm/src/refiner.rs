@@ -17,7 +17,6 @@ use crate::{
 };
 use utils::effects::WriteEffectEntry;
 
-
 /// Payload type discriminator
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PayloadType {
@@ -477,7 +476,7 @@ impl BlockRefiner {
 
             log_info( "  🔨 Matching call_create...");
             let call_create = match decoded.call_create {
-                DecodedCallCreate::Call { address, data } => {
+                DecodedCallCreate::Call { address, ref data } => {
                     if data.len() >= 4 {
                         let mut selector = [0u8; 4];
                         selector.copy_from_slice(&data[0..4]);
@@ -510,12 +509,12 @@ impl BlockRefiner {
                             ),
                         );
                     }
-                    TransactArgsCallCreate::Call { address, data }
+                    TransactArgsCallCreate::Call { address, data: data.clone() }
                 }
-                DecodedCallCreate::Create { init_code } => {
+                DecodedCallCreate::Create { ref init_code } => {
                     log_debug(&format!("  CREATE with {} bytes init_code", init_code.len()));
                     TransactArgsCallCreate::Create {
-                        init_code,
+                        init_code: init_code.clone(),
                         salt: None,
                     }
                 }
@@ -600,7 +599,26 @@ impl BlockRefiner {
                         ExitError::Reverted => "Reverted".to_string(),
                         ExitError::Fatal(fatal) => format!("Fatal({:?})", fatal),
                     };
-                    log_error(&format!("  Transaction {} failed: {} ({:?})", tx_index, error_detail, error));
+
+                    // Log detailed transaction context on failure
+                    log_error(&format!("  ❌ Transaction {} failed: {} ({:?})", tx_index, error_detail, error));
+                    log_error(&format!("     Caller: {:?}", decoded.caller));
+                    log_error(&format!("     Gas limit: {}", decoded.gas_limit));
+                    log_error(&format!("     Gas price: {}", decoded.gas_price));
+                    log_error(&format!("     Value: {}", decoded.value));
+                    match &decoded.call_create {
+                        DecodedCallCreate::Call { address, data } => {
+                            log_error(&format!("     Call to: {:?}", address));
+                            log_error(&format!("     Calldata: {} bytes", data.len()));
+                            if data.len() >= 4 {
+                                log_error(&format!("     Selector: 0x{:02x}{:02x}{:02x}{:02x}",
+                                    data[0], data[1], data[2], data[3]));
+                            }
+                        }
+                        DecodedCallCreate::Create { init_code } => {
+                            log_error(&format!("     Create with {} bytes init_code", init_code.len()));
+                        }
+                    };
                     match overlay.revert_transaction() {
                         Ok(_) => {}
                         Err(_) => {
@@ -639,8 +657,8 @@ impl BlockRefiner {
                         }
                         Err(_) => {
                             log_error(&format!(
-                                "  ⚠️  Caller insufficient balance for JAM gas fee (need {})",
-                                gas_fee
+                                "  ⚠️  Caller insufficient balance for JAM gas fee (need {} = {} x {})",
+                                gas_fee, jam_gas_used, gas_price
                             ));
                         }
                     }
@@ -681,7 +699,7 @@ impl BlockRefiner {
     ///
     /// Returns Some(ExecutionEffects) or None if any operation fails.
     pub fn from_work_item(
-        _work_item_index: u16,
+        work_item_index: u16,
         work_item: &WorkItem,
         extrinsics: &[Vec<u8>],
         refine_state_root: [u8; 32],
@@ -698,12 +716,10 @@ impl BlockRefiner {
             metadata.witness_count,
             extrinsics.len()
         ));
-        // Build verified witnesses map from state witness extrinsics
-        let mut object_refs_map = BTreeMap::new();
-
         // Only process witnesses for PayloadTransaction/PayloadBuilder
         let witness_start_idx = metadata.payload_size as usize;
-
+        let mut block_builder = BlockRefiner::new();
+        let mut imported_objects: BTreeMap<ObjectId, (ObjectRef, Vec<u8>)> = BTreeMap::new();
         for (idx, extrinsic) in extrinsics.iter().enumerate() {
             // Skip transaction extrinsics
             if idx < witness_start_idx {
@@ -721,11 +737,28 @@ impl BlockRefiner {
                     Ok(state_witness) => {
                         let object_id = state_witness.object_id;
                         let version = state_witness.ref_info.version;
-                        let path_len = state_witness.path.len();
                         let object_ref = state_witness.ref_info.clone();
-                        object_refs_map.insert(object_id, object_ref);
-                        log_info(&format!("✅ Verified state witness for object {} (version {}, {} proof hashes)",
-                                 format_object_id(object_id), version, path_len));
+                        if metadata.payload_type == PayloadType::Transactions {
+                            if let Some(payload) = state_witness.fetch_object_payload( work_item, work_item_index) {
+                                let payload_len = payload.len();
+                                imported_objects.insert(object_id, (object_ref, payload));
+                                log_info(&format!("✅ PayloadTransactions: Verified + imported object {} (version {}, payload_length={})",
+                                        format_object_id(object_id),  version, payload_len));
+                            } else {
+                                log_info(&format!("⚠️  PayloadTransactions: Verified witness but could not fetch payload for object {} (version {})",
+                                        format_object_id(object_id), version));
+                            }
+                        } else {
+                            if let Some(payload) = state_witness.fetch_object_payload( work_item, work_item_index) {
+                                let payload_len = payload.len();
+                                imported_objects.insert(object_id, (object_ref, payload));
+                                log_info(&format!("✅ PayloadBuilder (WHY???) Verified + imported object {} (version {}, payload_length={})",
+                                        format_object_id(object_id), version, payload_len));
+                            } else {
+                                log_info(&format!("⚠️  PayloadBuilder: Verified witness but could not fetch payload for object {} (version {})",
+                                        format_object_id(object_id), version));
+                            }
+                        }
                     }
                     Err(e) => {
                         log_error(&format!("Failed to deserialize or verify witness at index {}: {:?}", idx, e));
@@ -738,11 +771,12 @@ impl BlockRefiner {
                     Ok(state_witness) => {
                         let object_id = state_witness.object_id;
                         let version = state_witness.ref_info.version;
-                        let path_len = state_witness.path.len();
                         let object_ref = state_witness.ref_info.clone();
-                        object_refs_map.insert(object_id, object_ref);
-                        log_info(&format!("✅ Verified state witness for object {} (version {}, {} proof hashes)",
-                                 format_object_id(object_id), version, path_len));
+                        let payload_len = state_witness.payload.as_ref().map(|p| p.len()).unwrap_or(0);
+                        imported_objects.insert(object_id, (object_ref, state_witness.payload.unwrap_or_default()));
+                        log_info(&format!("✅ PayloadBlocks: Verified + imported object {} (version {}, payload_length={})",
+                            format_object_id(object_id),  version, payload_len));
+
                     }
                     Err(e) => {
                         log_error(&format!("Failed to deserialize or verify witness at index {}: {:?}", idx, e));
@@ -752,8 +786,7 @@ impl BlockRefiner {
             }
         }
 
-        let mut block_builder = BlockRefiner::new();
-        log_info(&format!("📥 Refine: Set up block builder for {} objects", block_builder.objects_map.len()));
+        log_info(&format!("📥 Refine: Set up block builder for {} objects", imported_objects.len()));
 
         // Create environment/backend from work item context
         use primitive_types::{U256, H160};
@@ -776,9 +809,10 @@ impl BlockRefiner {
             chain_id: U256::from(work_item.service),
             block_difficulty: U256::zero(),
             block_randomness: None,
+            payload_type: metadata.payload_type,
         };
 
-        let backend = MajikBackend::new(environment, block_builder.objects_map.clone());
+        let backend = MajikBackend::new(environment, imported_objects.clone());
 
         // Execute based on payload type
         let mut execution_effects = if metadata.payload_type == PayloadType::Blocks {

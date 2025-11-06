@@ -164,6 +164,16 @@ func newEmptyStateDB(sdb *storage.StateDBStorage) (statedb *StateDB) {
 	return statedb
 }
 
+func NewCleanStateDB(sdb *storage.StateDBStorage, id uint16) *StateDB {
+	statedb := new(StateDB)
+	statedb.SetStorage(sdb)
+	statedb.JamState = NewJamState() // Need to create JamState before SetID
+	statedb.SetID(id)
+	statedb.trie = trie.NewMerkleTree(nil, sdb)
+	statedb.logChan = make(chan storage.LogMessage, 100)
+	return statedb
+}
+
 // state-key constructor functions C(X)
 const (
 	C1  = "CoreAuthPool"
@@ -358,9 +368,13 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 
 	// Because we have safrolestate as internal state, JamState is NOT enough.
 	d.SafroleState.NextEpochTicketsAccumulator = d.SafroleBasicState.TicketAccumulator   // γa: Ticket accumulator for the next epoch (epoch N+1) DONE
-	d.SafroleState.TicketsVerifierKey = d.SafroleBasicState.RingCommitment               // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
-	d.SafroleState.TicketsOrKeys = d.SafroleBasicState.SlotSealerSeries                  // γs: Current epoch’s slot-sealer series (epoch N)
-	d.SafroleState.NextValidators = types.Validators(d.SafroleBasicState.NextValidators) // γk: Next epoch’s validators (epoch N+1)
+	d.SafroleState.TicketsVerifierKey = d.SafroleBasicState.RingCommitment               // γz: Epoch's root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch's validators (epoch N+1)
+	d.SafroleState.TicketsOrKeys = d.SafroleBasicState.SlotSealerSeries                  // γs: Current epoch's slot-sealer series (epoch N)
+	d.SafroleState.NextValidators = types.Validators(d.SafroleBasicState.NextValidators) // γk: Next epoch's validators (epoch N+1)
+
+	// Update the trie and state root to point to the recovered state
+	s.trie = t
+	s.StateRoot = stateRoot
 }
 
 func (s *StateDB) UpdateTrieState() common.Hash {
@@ -677,15 +691,21 @@ func NewStateDBFromStateRoot(stateRoot common.Hash, sdb *storage.StateDBStorage)
 	statedb.StateRoot = stateRoot
 	statedb.JamState = NewJamState()
 
-	// Initialize merkle tree from the state root hash
-	// This reconstructs the trie structure from stored nodes in LevelDB
-	statedb.trie = statedb.CopyTrieState(stateRoot)
-	if statedb.trie == nil {
-		return nil, fmt.Errorf("failed to initialize merkle tree from state root %s", stateRoot.Hex())
-	}
+	// handled in RecoverJamState now
+	/*
+		statedb.trie = statedb.CopyTrieState(stateRoot)
+		if statedb.trie == nil {
+			return nil, fmt.Errorf("failed to initialize merkle tree from state root %s", stateRoot.Hex())
+		}
+	*/
 
 	// Recover JamState from the trie (reads C1-C15 state keys)
 	statedb.RecoverJamState(stateRoot)
+
+	// Verify that recovery succeeded by checking if trie was initialized
+	if statedb.trie == nil {
+		return nil, fmt.Errorf("failed to initialize merkle tree from state root %s", stateRoot.Hex())
+	}
 
 	return statedb, nil
 }
@@ -850,8 +870,18 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 			if sf0.GetEpochTWithPhase(targetJCE) == 0 {
 				mode = "fallback"
 			}
-			log.Info(log.SDB, "Authored Block", "mode", mode, "AUTHOR", s.Id, "p", common.Str(proposedBlk.GetParentHeaderHash()), "h", common.Str(proposedBlk.Header.Hash()), "e'", currEpoch, "m'", currPhase, "len(γ_a')",
-				len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator), "blk", proposedBlk.Str())
+			blk_str := fmt.Sprintf("Authored Block(n=%v)", s.Id)
+			log.Info(log.SDB, blk_str,
+				"mode", mode,
+				"AUTHOR", s.Id,
+				"p", common.Str(proposedBlk.GetParentHeaderHash()),
+				//"s", common.Str(proposedBlk.Header.ParentStateRoot),
+				"s+", newStateDB.StateRoot.String_short(),
+				"h", common.Str(proposedBlk.Header.Hash()),
+				"e'", currEpoch,
+				"m'", currPhase,
+				"len(γ_a')", len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator),
+				"blk", proposedBlk.Str())
 			return true, proposedBlk, newStateDB, nil
 		}
 		log.Debug(log.B, "ProcessState:NotAuthorizedBlockRefiner timeSlotReady", "currJCE", currJCE, "targetJCE", targetJCE, "credential", credential.BandersnatchPub.Hash(), "ticket", len(ticketIDs), "isAuthorizedBlockRefiner", isAuthorizedBlockRefiner)

@@ -99,6 +99,7 @@ pub struct EnvironmentData {
     pub chain_id: U256,
     pub block_difficulty: U256,
     pub block_randomness: Option<H256>,
+    pub payload_type: crate::refiner::PayloadType,
 }
 
 // ===== MajikBackend =====
@@ -225,14 +226,40 @@ impl MajikBackend {
     fn import_shard(&self, address: H160, shard_id: ShardId) -> Option<(ObjectRef, ShardData)> {
         let object_id = shard_object_id(address, shard_id);
 
+        log_debug(&format!(
+            "  import_shard: address={:?}, shard_id (ld={}, prefix={:02x}{:02x}...), object_id={}",
+            address,
+            shard_id.ld,
+            shard_id.prefix56[0],
+            shard_id.prefix56[1],
+            crate::sharding::format_object_id(&object_id)
+        ));
+
         // Check if already in imported_objects cache
         {
             let imported = self.imported_objects.borrow();
             if let Some((object_ref, payload)) = imported.get(&object_id) {
+                log_debug(&format!(
+                    "  Found in imported_cache: address={:?}, shard_id (ld={}, prefix={:02x}{:02x}...), object_id={}",
+                    address,
+                    shard_id.ld,
+                    shard_id.prefix56[0],
+                    shard_id.prefix56[1],
+                    crate::sharding::format_object_id(&object_id)
+                ));
                 let shard_data = deserialize_shard(payload)?;
                 return Some((object_ref.clone(), shard_data));
             }
         }
+
+        log_debug(&format!(
+            "  Not in imported_cache, fetching from DA: address={:?}, shard_id (ld={}, prefix={:02x}{:02x}...), object_id={}",
+            address,
+            shard_id.ld,
+            shard_id.prefix56[0],
+            shard_id.prefix56[1],
+            crate::sharding::format_object_id(&object_id)
+        ));
 
         // Use fetch_object host function (254) to get both ObjectRef and payload
         const MAX_SHARD_SIZE: usize = 64 * 1024; // 64KB max shard size
@@ -294,13 +321,30 @@ impl MajikBackend {
     fn import_code(&self, address: H160) -> Option<(ObjectRef, Vec<u8>)> {
         let object_id = code_object_id(address);
 
+        log_debug(&format!(
+            "  import_code: address={:?}, object_id={}",
+            address,
+            crate::sharding::format_object_id(&object_id)
+        ));
+
         // Check imported_objects cache first
         {
             let imported = self.imported_objects.borrow();
             if let Some((object_ref, payload)) = imported.get(&object_id) {
+                log_debug(&format!(
+                    "  Found in imported_cache: address={:?}, object_id={}",
+                    address,
+                    crate::sharding::format_object_id(&object_id)
+                ));
                 return Some((object_ref.clone(), payload.clone()));
             }
         }
+
+        log_debug(&format!(
+            "  Not in imported_cache, fetching from DA: address={:?}, object_id={}",
+            address,
+            crate::sharding::format_object_id(&object_id)
+        ));
 
         // Use fetch_object host function (254)
         const MAX_CODE_SIZE: usize = 24576; // 24KB max contract size (EIP-170)
@@ -900,7 +944,10 @@ impl RuntimeBaseBackend for MajikBackend {
                 }
             }
         }
-
+        // TODO: Re-enable this check once we properly handle DA imports for different payload types
+        // if self.environment.payload_type != crate::refiner::PayloadType::Builder {
+        //     return H256::zero();
+        // }
         // Cache miss - attempt DA import via import_shard()
         if let Some((_object_ref, shard_data)) = self.import_shard(address, shard_id) {
             // Search in the freshly imported shard

@@ -873,7 +873,7 @@ func (t *MerkleTree) GetService(s uint32) ([]byte, bool, error) {
 		//fmt.Printf("GetService Not Found: s=%d, stateKey=%x\n", s, stateKey)
 		return nil, ok, nil
 	}
-
+	//fmt.Printf("GetService Found: s=%d, stateKey=%x\n", s, stateKey)
 	return value, true, nil
 }
 

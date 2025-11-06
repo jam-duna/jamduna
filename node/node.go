@@ -664,7 +664,7 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 		grandpaPrimaryMessageCh:   make(chan grandpa.VoteMessage, DefaultChannelSize),
 		grandpaCommitMessageCh:    make(chan grandpa.CommitMessage, DefaultChannelSize),
 
-		sendTickets:   true,
+		sendTickets:   false,
 		resendTickets: false, // activate this when you want to resend tickets
 
 		dataDir: dataDir,
@@ -860,7 +860,7 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 		recoveredStateDB := _statedb.Copy()
 		recoveredStateDB.RecoverJamState(finalizedBlock.Header.ParentStateRoot) // it don't even know if it got the correct state
 		recoveredStateDB.UnsetPosteriorEntropy()
-		recoveredStateDB.StateRoot = finalizedBlock.Header.ParentStateRoot
+		//recoveredStateDB.StateRoot = finalizedBlock.Header.ParentStateRoot // Now set inside RecoverJamState
 		recoveredStateDB.Block = finalizedBlock.Copy()
 	}
 	genesisBlockHash = block.Header.Hash()
@@ -2163,6 +2163,24 @@ func (n *Node) applyChildrenRecursively(ctx context.Context, node *types.BT_Node
 	return nil
 }
 
+func dumpStateDBKeyValues(db *statedb.StateDB, description string, nodeID uint16, slot uint32) {
+	kvList := db.GetAllKeyValues()
+	stateRoot := db.GetStateRoot()
+
+	var kvDump strings.Builder
+	kvDump.WriteString(fmt.Sprintf("\n[N%d][Slot=%d] ===== %s %d key-values (Root:%v)=====\n",
+		nodeID, slot, description, len(kvList), stateRoot))
+
+	for i, kv := range kvList {
+		valHash := common.Blake2Hash(kv.Value)
+		kvDump.WriteString(fmt.Sprintf("[N%d][Slot=%d][Key %d][ValHash] 0x%x -> %s Len=%d\n",
+			nodeID, slot, i, kv.Key, valHash.String_short(), len(kv.Value)))
+	}
+
+	kvDump.WriteString(fmt.Sprintf("[N%d][Slot=%d] ===== End of %s key-values =====\n", nodeID, slot, description))
+	fmt.Print(kvDump.String())
+}
+
 func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) error {
 	nextBlock := nextBlockNode.Block
 
@@ -2203,11 +2221,24 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	// }
 	// 1. Prepare recovered state from parent
 	start := time.Now()
-	recoveredStateDB := n.statedb.Copy()
+
+	recoveredStateDB := statedb.NewCleanStateDB(n.statedb.GetStorage(), n.statedb.GetID())
 	recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot)
 	recoveredStateDB.UnsetPosteriorEntropy()
-	recoveredStateDB.StateRoot = nextBlock.Header.ParentStateRoot
 	recoveredStateDB.Block = nextBlock
+
+	dumpStateDBKeyValues(recoveredStateDB, "Recovered", n.id, nextBlock.Header.Slot)
+
+	postRecoveryKV := recoveredStateDB.GetAllKeyValues()
+	if len(postRecoveryKV) <= 16 {
+		log.Warn(log.B, "!!!! ApplyBlock: NewStateDBFromStateRoot returned too few keys!",
+			"n", n.String(),
+			"slot", nextBlock.Header.Slot,
+			"expected", nextBlock.Header.ParentStateRoot.Hex(),
+			"got", recoveredStateDB.GetStateRoot().Hex(),
+		)
+	}
+
 	recoverElapsed := time.Since(start)
 
 	var used_entropy common.Hash
@@ -2218,6 +2249,13 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	}
 	start = time.Now()
 	valid_tickets := n.extrinsic_pool.GetTicketIDPairFromPool(used_entropy)
+	log.Info(log.B, "ApplyBlock: valid_tickets", "n", n.String(),
+		"used_entropy", used_entropy,
+		"slot", nextBlock.Header.Slot,
+		"num_valid_tickets", len(valid_tickets),
+		"valid_tickets", valid_tickets,
+	)
+
 	newStateDB, err := statedb.ApplyStateTransitionFromBlock(blockEventID, recoveredStateDB, ctx, nextBlock, valid_tickets, n.pvmBackend)
 	stateTransitionElapsed := common.ElapsedStr(start)
 	if err != nil {
@@ -2228,10 +2266,14 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 		fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
 		return fmt.Errorf("ApplyStateTransitionFromBlock failed: %w", err)
 	}
+
+	dumpStateDBKeyValues(newStateDB, "IMMEDIATE post-transition", n.id, nextBlock.Header.Slot)
+
 	start = time.Now()
 	// newStateDB.GetAllKeyValues()
 	newStateDB.Block = nextBlock
 	newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
+
 	n.clearQueueUsingBlock(nextBlock.Extrinsic.Guarantees)
 
 	// Store work reports from guarantees to KV database for future guarantors
@@ -2306,10 +2348,12 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	if newStateDB.JamState.SafroleState.GetEpochT() == 0 {
 		mode = "fallback"
 	}
-	log.Trace(log.B, "Imported Block", // "n", n.String(),
+	log.Info(log.B, fmt.Sprintf("Imported Block(n=%v)", n.id), // "n", n.String(),
 		"mode", mode,
 		"author", nextBlock.Header.AuthorIndex,
 		"p", nextBlock.Header.ParentHeaderHash.String_short(),
+		//"s", nextBlock.Header.ParentStateRoot.String_short(),
+		"s+", newStateDB.StateRoot.String_short(),
 		"h", common.Str(nextBlock.Header.Hash()),
 		"e'", currEpoch, "m'", currPhase,
 		"len(γ_a')", len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator),
@@ -2777,8 +2821,9 @@ func (n *NodeContent) getTargetStateDB(stateRoot common.Hash) (*statedb.StateDB,
 	currentStateRoot := currentStateDB.GetStateRoot()
 
 	if stateRoot.Hex() == currentStateRoot.Hex() {
-		keyValues := currentStateDB.GetAllKeyValues()
-		log.Info(log.Node, "!!getTargetStateDB: Recovered state key-values", "n", n.id, "numKeyValues", len(keyValues))
+		dumpStateDBKeyValues(currentStateDB, "getTargetStateDB: Current", n.id, currentStateDB.GetSafrole().GetTimeSlot())
+		//keyValues := currentStateDB.GetAllKeyValues()
+		//log.Info(log.Node, "!!getTargetStateDB: currentStateDB state key-values", "n", n.id, "stateRoot", currentStateDB.GetStateRoot().Hex(), "numKeyValues", len(keyValues))
 		return currentStateDB, nil
 	}
 	log.Warn(log.Node, "getTargetStateDB: REFETCH REQUIRED", "n", n.id, "expected", stateRoot.Hex(), "got", currentStateRoot.Hex())
@@ -2793,19 +2838,12 @@ func (n *NodeContent) getTargetStateDB(stateRoot common.Hash) (*statedb.StateDB,
 	recoveredStateDB := n.statedb.Copy()
 	recoveredStateDB.JamState = NewJamState()
 	recoveredStateDB.RecoverJamState(stateRoot)
-	recoveredStateDB.StateRoot = recoveredStateDB.UpdateTrieState()
+	//recoveredStateDB.StateRoot = stateRoot // Now set inside RecoverJamState
+	//recoveredStateDB.StateRoot = recoveredStateDB.UpdateTrieState()
 
 	log.Info(log.Node, "getTargetStateDB: Recovered state root", "n", n.id, "stateRoot", recoveredStateDB.GetStateRoot().Hex())
-	keyValues := recoveredStateDB.GetAllKeyValues()
-	log.Info(log.Node, "getTargetStateDB: Recovered state key-values", "n", n.id, "numKeyValues", len(keyValues))
 
-	if len(keyValues) <= 16 {
-		panic("too few keyvalues in recovered stateDB")
-	}
-
-	for _, kv := range keyValues {
-		fmt.Printf("[Key] 0x%x Len=%d\n", kv.Key, len(kv.Value))
-	}
+	dumpStateDBKeyValues(recoveredStateDB, "getTargetStateDB: Recovered", n.id, recoveredStateDB.GetSafrole().GetTimeSlot())
 
 	return recoveredStateDB, nil
 }

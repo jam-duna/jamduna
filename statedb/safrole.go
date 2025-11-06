@@ -19,6 +19,11 @@ import (
 	jamerrors "github.com/colorfulnotion/jam/jamerrors"
 )
 
+const (
+	useSerializedValidation = true
+	useSerializedGeneration = true
+)
+
 type SafroleHeader struct {
 	ParentHash         common.Hash
 	PriorStateRoot     common.Hash
@@ -483,7 +488,7 @@ func (s *SafroleState) GetRingSet(phase string) (ringBytes []byte, ringSize int)
 	return ringBytes, ringSize
 }
 
-func (s *SafroleState) GenerateTickets(secret bandersnatch.BanderSnatchSecret, usedEntropy common.Hash) ([]types.Ticket, []uint32) {
+func (s *SafroleState) generateTicketsParallel(secret bandersnatch.BanderSnatchSecret, usedEntropy common.Hash) ([]types.Ticket, []uint32) {
 	tickets := make([]types.Ticket, types.TicketEntriesPerValidator)
 	microseconds := make([]uint32, types.TicketEntriesPerValidator)
 	var wg sync.WaitGroup
@@ -517,6 +522,33 @@ func (s *SafroleState) GenerateTickets(secret bandersnatch.BanderSnatchSecret, u
 
 	return tickets, microseconds
 }
+
+func (s *SafroleState) generateTicketsSerialized(secret bandersnatch.BanderSnatchSecret, usedEntropy common.Hash) ([]types.Ticket, []uint32) {
+	tickets := make([]types.Ticket, types.TicketEntriesPerValidator)
+	microseconds := make([]uint32, types.TicketEntriesPerValidator)
+
+	for attempt := uint8(0); attempt < types.TicketEntriesPerValidator; attempt++ {
+		entropy := usedEntropy
+		ticket, ms, err := s.generateTicket(secret, entropy, attempt)
+		if err == nil {
+			tickets[attempt] = ticket
+			microseconds[attempt] = ms
+		} else {
+			fmt.Printf("Error generating ticket for attempt %d: %v\n", attempt, err)
+		}
+	}
+
+	return tickets, microseconds
+}
+
+func (s *SafroleState) GenerateTickets(secret bandersnatch.BanderSnatchSecret, usedEntropy common.Hash) ([]types.Ticket, []uint32) {
+	if useSerializedGeneration {
+		return s.generateTicketsSerialized(secret, usedEntropy)
+	} else {
+		return s.generateTicketsParallel(secret, usedEntropy)
+	}
+}
+
 func (s *SafroleState) SimulateTicket(secret bandersnatch.BanderSnatchSecret, targetEpochRandomness common.Hash, attempt uint8) (types.Ticket, uint32, error) {
 	return s.generateTicket(secret, targetEpochRandomness, attempt)
 }
@@ -1110,6 +1142,93 @@ func (s *SafroleState) ValidateTicketTransition(targetJCE uint32, fresh_randomne
 	return s2, epochAdvanced, nil
 }
 
+func (s2 *SafroleState) validateTicketsParallel(tickets []types.Ticket, isShifted bool, ringBytes []byte, ringSize int, accMap map[common.Hash]bool, valid_tickets map[common.Hash]common.Hash) error {
+	var wg sync.WaitGroup
+	errors := make(chan error, len(tickets))
+	var mu sync.Mutex
+
+	for _, t := range tickets {
+		wg.Add(1)
+
+		go func(t types.Ticket, ringBytes []byte, rSize int, accMap map[common.Hash]bool) {
+			defer wg.Done()
+			if t.Attempt >= types.TicketEntriesPerValidator {
+				errors <- jamerrors.ErrTBadTicketAttemptNumber
+				return
+			}
+			// see if ticket exists in valid_tickets
+			ticket_hash := t.Hash()
+			ticket_id, ticketWasValid := valid_tickets[ticket_hash]
+			var err error
+			if !ticketWasValid {
+				ticket_id, err = s2.validateTicketWithRing(&t, isShifted, ringBytes, rSize)
+				if err != nil {
+					errors <- jamerrors.ErrTBadRingProof
+					return
+				}
+				mu.Lock()
+				valid_tickets[ticket_hash] = ticket_id
+				mu.Unlock()
+			}
+
+			if accMap[ticket_id] {
+				errors <- jamerrors.ErrTTicketAlreadyInState
+				return
+			}
+		}(t, ringBytes, ringSize, accMap)
+	}
+	wg.Wait()
+
+	select {
+	case err := <-errors:
+		if err != nil {
+			return err
+		}
+	default:
+		// No error
+	}
+
+	return nil
+}
+
+func (s2 *SafroleState) ValidateTickets(tickets []types.Ticket, isShifted bool, ringBytes []byte, ringSize int, accMap map[common.Hash]bool, valid_tickets map[common.Hash]common.Hash) error {
+	var err error
+	if useSerializedValidation {
+		// SERIALIZED: Deterministic, consensus-safe
+		err = s2.validateTicketsSerialized(tickets, isShifted, ringBytes, ringSize, accMap, valid_tickets)
+	} else {
+		// PARALLEL: Faster but may have non-deterministic behavior
+		err = s2.validateTicketsParallel(tickets, isShifted, ringBytes, ringSize, accMap, valid_tickets)
+	}
+	return err
+}
+
+func (s2 *SafroleState) validateTicketsSerialized(tickets []types.Ticket, isShifted bool, ringBytes []byte, ringSize int, accMap map[common.Hash]bool, valid_tickets map[common.Hash]common.Hash) error {
+	for _, t := range tickets {
+		if t.Attempt >= types.TicketEntriesPerValidator {
+			return jamerrors.ErrTBadTicketAttemptNumber
+		}
+
+		// see if ticket exists in valid_tickets
+		ticket_hash := t.Hash()
+		ticket_id, ticketWasValid := valid_tickets[ticket_hash]
+		var err error
+		if !ticketWasValid {
+			ticket_id, err = s2.validateTicketWithRing(&t, isShifted, ringBytes, ringSize)
+			if err != nil {
+				return jamerrors.ErrTBadRingProof
+			}
+			valid_tickets[ticket_hash] = ticket_id
+		}
+
+		if accMap[ticket_id] {
+			return jamerrors.ErrTTicketAlreadyInState
+		}
+	}
+
+	return nil
+}
+
 // this function is for validate the block input is correct or not
 // should use the s3
 func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32, header types.BlockHeader, valid_tickets map[common.Hash]common.Hash) ([]types.TicketBody, error) {
@@ -1180,49 +1299,10 @@ func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32,
 	}
 
 	ticketBodies := make([]types.TicketBody, 0) // n
-	var wg sync.WaitGroup
-	errors := make(chan error, len(tickets))
-	var mu sync.Mutex
-	for _, t := range tickets {
-		wg.Add(1)
 
-		go func(t types.Ticket, ringBytes []byte, rSize int, accMap map[common.Hash]bool) {
-			defer wg.Done()
-			if t.Attempt >= types.TicketEntriesPerValidator {
-				errors <- jamerrors.ErrTBadTicketAttemptNumber
-				return
-			}
-			// see if ticket exists in valid_tickets
-			ticket_hash := t.Hash()
-			ticket_id, ticketWasValid := valid_tickets[ticket_hash]
-			var err error
-			if !ticketWasValid {
-				ticket_id, err = s2.validateTicketWithRing(&t, isShifted, ringBytes, rSize)
-				if err != nil {
-					errors <- jamerrors.ErrTBadRingProof
-					return
-				}
-				mu.Lock()
-				valid_tickets[ticket_hash] = ticket_id
-				mu.Unlock()
-			}
-
-			if accMap[ticket_id] {
-				errors <- jamerrors.ErrTTicketAlreadyInState
-				return
-			}
-		}(t, ringBytes, ringSize, accMap)
-	}
-	wg.Wait()
-	//benchRec.Add("-- ValidateSafrole:ParallelValidation", time.Since(t0))
-
-	select {
-	case err := <-errors:
-		if err != nil {
-			return nil, err
-		}
-	default:
-		// No error
+	err := s2.ValidateTickets(tickets, isShifted, ringBytes, ringSize, accMap, valid_tickets)
+	if err != nil {
+		return nil, err
 	}
 
 	for _, t := range tickets {

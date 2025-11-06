@@ -288,7 +288,7 @@ func (t *Target) onImportBlock(req *types.Block) *Message {
 			forkState := preState.Copy()
 			forkState.RecoverJamState(req.Header.ParentStateRoot)
 			forkState.HeaderHash = foundParentHeaderHash
-			forkState.StateRoot = req.Header.ParentStateRoot
+			//forkState.StateRoot = req.Header.ParentStateRoot // Now set inside RecoverJamState
 			if t.debugState {
 				log.Printf("%s[FORK_DEBUG]%s Fork state prepared: HeaderHash=%s, StateRoot=%s%s", common.ColorMagenta, common.ColorReset, forkState.HeaderHash.Hex(), forkState.StateRoot.Hex(), common.ColorReset)
 			}

@@ -335,7 +335,7 @@ func (n *NodeContent) authorizeWP(workPackage types.WorkPackage, workPackageCore
 	currStateDBRoot := n.statedb.GetStateRoot()
 	targetStateDBRoot := targetStateDB.GetStateRoot()
 	if currStateDBRoot.Hex() != targetStateDBRoot.Hex() {
-		log.Warn(log.Node, "authorizeWP: state root mismatch", "NODE", n.id, "workPackage", workPackage.Hash(), "currentStateDBRoot", currStateDBRoot.Hex(), "targetStateDBRoot", targetStateDBRoot.Hex())
+		log.Warn(log.Node, "authorizeWP: state root mismatch; USING targetStateDB", "NODE", n.id, "workPackage", workPackage.Hash(), "currentStateDBRoot", currStateDBRoot.Hex(), "targetStateDBRoot", targetStateDBRoot.Hex())
 	}
 	authcode, _, authindex, err := targetStateDB.GetAuthorizeCode(workPackage)
 	if err != nil {

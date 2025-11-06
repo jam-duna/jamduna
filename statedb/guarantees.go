@@ -269,18 +269,17 @@ func (s *StateDB) checkServicesExist(g types.Guarantee) error {
 		// check if serviceID exists
 		_, ok, err := s.GetService(result.ServiceID)
 		if err != nil {
+			log.Warn(log.G, "!!!! checkServicesExist: serviceID ERROR", "s.ID", s.Id, "serviceID", result.ServiceID, "slot", s.GetTimeslot(), "s.root", s.GetStateRoot().Hex(), "err", err)
 			return err
 		}
 		if !ok {
-			log.Warn(log.G, "!!!! checkServicesExist: serviceID not found", "serviceID", result.ServiceID, "slot", s.GetTimeslot(), "s.ID", s.Id)
+			log.Warn(log.G, "!!!! checkServicesExist: serviceID not found", "s.ID", s.Id, "serviceID", result.ServiceID, "slot", s.GetTimeslot(), "s.root", s.GetStateRoot().Hex())
 			keyValues := s.GetAllKeyValues()
 			log.Info(log.Node, "!!!! getTargetStateDB: Recovered state key-values", "numKeyValues", len(keyValues))
-
-			for _, kv := range keyValues {
-				fmt.Printf("[Key] 0x%x Len=%d\n", kv.Key, len(kv.Value))
-			}
 			panic("serviceID not found")
 			return jamerrors.ErrGBadServiceID
+		} else {
+			//log.Info(log.G, "!!!! checkServicesExist: serviceID found", "s.ID", s.Id, "serviceID", result.ServiceID, "slot", s.GetTimeslot(), "s.root", s.GetStateRoot().Hex(), "acct", acct.String())
 		}
 	}
 	return nil
