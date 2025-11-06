@@ -634,7 +634,6 @@ func (n *NodeContent) GetTransactionReceipt(txHash common.Hash) (*EthereumTransa
 	// Determine contract address for contract creation
 	var contractAddress *string
 	if ethTx.To == nil {
-
 		senderAddr := ethereumCommon.HexToAddress(ethTx.From)
 
 		// Parse nonce

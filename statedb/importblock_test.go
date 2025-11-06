@@ -151,7 +151,7 @@ func TestStateTransitionInterpreter(t *testing.T) {
 }
 
 func TestTracesInterpreter(t *testing.T) {
-	PvmLogging = false
+	PvmLogging = true
 	DebugHostFunctions = true
 	log.InitLogger("debug")
 
@@ -216,6 +216,7 @@ func TestTracesRecompiler(t *testing.T) {
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy"),
 	}
 
 	// Iterate over each directory.

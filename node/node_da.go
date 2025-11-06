@@ -379,7 +379,11 @@ func (n *NodeContent) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs
 
 	targetStateDB := n.getPVMStateDB()
 	currentStateRoot := targetStateDB.GetStateRoot()
+<<<<<<< HEAD
+	log.Info(log.DA, "BuildBundle: currentStateRoot", "stateRoot", currentStateRoot.Hex())
+=======
 	log.Info(log.DA, "BuildBundle: currentStateRoot", "NODE", n.id, "stateRoot", currentStateRoot.Hex())
+>>>>>>> origin/main
 	wp.RefineContext = types.RefineContext{
 		Anchor:           targetStateDB.GetHeaderHash(),
 		StateRoot:        currentStateRoot,
@@ -388,7 +392,11 @@ func (n *NodeContent) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs
 		LookupAnchorSlot: targetStateDB.JamState.SafroleState.Timeslot,
 		Prerequisites:    []common.Hash{}, // TODO: improve this
 	}
+<<<<<<< HEAD
+	log.Info(log.DA, "BuildBundle: RefineContext", "refineContext", fmt.Sprintf("%+v", wp.RefineContext))
+=======
 	log.Info(log.DA, "BuildBundle: RefineContext", "NODE", n.id, "refineContext", fmt.Sprintf("%+v", wp.RefineContext))
+>>>>>>> origin/main
 	authorization, p_a, authGasUsed, err := n.authorizeWP(wp, coreIndex, targetStateDB, n.pvmBackend)
 	if err != nil {
 		return nil, nil, err

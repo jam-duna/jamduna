@@ -274,11 +274,11 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 	if len(p.Code) == 0 {
 		panic("No code provided to NewVM")
 	}
+	vm.InitialGas = initialGas
 	if vm.Backend == BackendInterpreter {
 		// Create VM using FFI API
 		machine := NewInterpreter(service_index, p, initialRegs, initialPC, initialGas, vm)
 		vm.ExecutionVM = machine
-		vm.InitialGas = initialGas
 
 		// o - read-only
 		ro_data_address := uint32(Z_Z)

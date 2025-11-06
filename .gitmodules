@@ -1,4 +1,0 @@
-[submodule "pvm"]
-	path = pvm
-	url = git@github.com:jam-duna/pvm.git
-	branch = main
