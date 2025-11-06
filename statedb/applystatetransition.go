@@ -320,7 +320,7 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 			if sa, ok := o.ServiceAccounts[service]; ok && sa != nil {
 				sa.ALLOW_MUTABLE()
 				sa.UpdateRecentAccumulation(ts)
-				fmt.Printf("===service %d, timeslot %d\n", sa.ServiceIndex, ts)
+				//fmt.Printf("===service %d, timeslot %d\n", sa.ServiceIndex, ts)
 				sa.Dirty = true
 			}
 		}
@@ -520,7 +520,7 @@ func (s *StateDB) ApplyStateTransitionAvailabilityAssignments(ctx context.Contex
 	// Guarantees checks
 	for _, g := range guarantees {
 		if err := s.VerifyGuaranteeBasic(g, targetJCE); err != nil {
-			panic(fmt.Sprintf("ApplyStateTransitionAvailabilityAssignments: VerifyGuaranteeBasic failed: %v", err))
+			//panic(fmt.Sprintf("ApplyStateTransitionAvailabilityAssignments: VerifyGuaranteeBasic failed: %v", err))
 			return nil, err
 		}
 	}

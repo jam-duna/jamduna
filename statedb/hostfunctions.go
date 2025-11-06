@@ -71,14 +71,16 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 		gasUsed = vm.InitialGas - currentGas
 	}
 
-	vm.DebugHostFunction(host_fn, "Calling host function: %s %d [gas: %d, used: %d]", HostFnToName(host_fn), host_fn, currentGas, gasUsed)
-	if PvmLogging {
-		fmt.Printf("%d %s: Calling host function: %s %d [gas: %d, used: %d]\n", vm.Service_index, vm.Mode, HostFnToName(host_fn), host_fn, currentGas, gasUsed)
-	}
 	ok, err := vm.hostFunction(host_fn)
 	if vm.MachineState == PANIC {
 		vm.ExecutionVM.Panic(uint64(host_fn))
 	}
+
+	// Log after host function call to match javajam format
+	if PvmLogging || true {
+		fmt.Printf("Calling host function: %s %d [gas used: %d, gas remaining: %d] [service: %d]\n", HostFnToName(host_fn), host_fn, gasUsed, currentGas, vm.Service_index)
+	}
+	vm.DebugHostFunction(host_fn, "Calling host function: %s %d [gas: %d, used: %d]", HostFnToName(host_fn), host_fn, currentGas, gasUsed)
 	// Shawn to check .... potentiall problematic
 	benchRec.Add("InvokeHostCall", time.Since(t0))
 	return ok, err
@@ -211,46 +213,26 @@ func (vm *VM) hostFunction(host_fn int) (bool, error) {
 
 // Information-on-Service (similar to hostRead)
 func (vm *VM) hostInfo() {
-
-	isHardCode := false
-	if isHardCode {
-
-		// HARDCODED: Panic when service 2792803811 calls hostInfo second time at gas=1984585
-		// This is test 00000118.bin - service should panic on second INFO call
-		if vm.Service_index == 2792803811 && vm.GetGas() == 1984585 {
-			fmt.Printf("[hostInfo] HARDCODED: Panicking on service 2792803811 at gas=1984585 (00000118.bin)\n")
-			vm.terminated = true
-			vm.ResultCode = types.WORKDIGEST_PANIC
-			vm.MachineState = PANIC
-			return
-		}
-	}
 	omega_7 := vm.ReadRegister(7)
-	fmt.Printf("[hostInfo] START: omega_7=%d, service_index=%d, gas=%d\n", omega_7, vm.Service_index, vm.GetGas())
 
 	var fetch uint64
 	if omega_7 == NONE {
 		fetch = uint64(vm.Service_index)
-		fmt.Printf("[hostInfo] omega_7 is NONE, using service_index: %d\n", fetch)
 	} else {
 		fetch = omega_7
-		fmt.Printf("[hostInfo] omega_7 is NOT NONE, using omega_7: %d\n", fetch)
 	}
 
 	t, errCode := vm.getXUDS(fetch)
 	if errCode != OK {
-		fmt.Printf("[hostInfo] getXUDS FAILED: fetch=%d, errCode=%d -> Returning NONE\n", fetch, errCode)
 		vm.WriteRegister(7, NONE)
 		vm.SetHostResultCode(NONE)
 		log.Debug(vm.logging, "INFO NONE", "s", omega_7)
 		return
 	}
-	fmt.Printf("[hostInfo] getXUDS OK: fetch=%d, CodeHash=0x%v\n", fetch, t.CodeHash)
 
 	bo := vm.ReadRegister(8)
 	f := vm.ReadRegister(9)
 	l := vm.ReadRegister(10)
-	fmt.Printf("[hostInfo] Registers: bo=0x%x, f=%d, l=%d\n", bo, f, l)
 
 	// [Gratis] Different encoding than serviceAccount; E(a_c, E8(a_b,a_t,a_g,a_m,a_o), E4(a_i), E8(a_f), E4(a_r,a_a,a_p))
 	var buf bytes.Buffer
@@ -268,44 +250,25 @@ func (vm *VM) hostInfo() {
 		t.ParentService,      // a_p E4
 	}
 
-	fmt.Printf("[hostInfo] Encoding elements:\n")
-	fmt.Printf("  CodeHash=0x%v\n", t.CodeHash)
-	fmt.Printf("  Balance=%d\n", t.Balance)
-	fmt.Printf("  ComputeThreshold=%d\n", t.ComputeThreshold())
-	fmt.Printf("  GasLimitG=%d\n", t.GasLimitG)
-	fmt.Printf("  GasLimitM=%d\n", t.GasLimitM)
-	fmt.Printf("  StorageSize=%d\n", t.StorageSize)
-	fmt.Printf("  NumStorageItems=%d\n", t.NumStorageItems)
-	fmt.Printf("  GratisOffset=%d\n", t.GratisOffset)
-	fmt.Printf("  CreateTime=%d\n", t.CreateTime)
-	fmt.Printf("  RecentAccumulation=%d\n", t.RecentAccumulation)
-	fmt.Printf("  ParentService=%d\n", t.ParentService)
-
-	for i, elem := range elements {
+	for _, elem := range elements {
 		encoded, err := types.Encode(elem)
 		if err != nil {
-			fmt.Printf("[hostInfo] Encoding FAILED at element %d: %v -> Returning NONE\n", i, err)
 			vm.WriteRegister(7, NONE)
 			vm.SetHostResultCode(NONE)
 			log.Debug(vm.logging, "INFO NONE", "s", omega_7)
 			return
 		}
 		buf.Write(encoded)
-		fmt.Printf("[hostInfo] Encoded element %d, len=%d, cumulative_len=%d\n", i, len(encoded), buf.Len())
 	}
 
 	val := buf.Bytes()
 	lenval := uint64(len(val))
-	fmt.Printf("[hostInfo] Total encoded length: %d bytes\n", lenval)
 
 	f_orig := f
 	l_orig := l
-	fmt.Printf("[hostInfo] Original request: f=%d, l=%d (f+l=%d)\n", f_orig, l_orig, f_orig+l_orig)
 
 	// Check if the ORIGINAL (unclamped) request is out of bounds - this should panic!
 	if f_orig > lenval || f_orig+l_orig > lenval {
-		fmt.Printf("[hostInfo] ERROR: Original request out of bounds! f=%d, l=%d, f+l=%d > lenval=%d -> PANIC\n",
-			f_orig, l_orig, f_orig+l_orig, lenval)
 		vm.terminated = true
 		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
@@ -315,27 +278,30 @@ func (vm *VM) hostInfo() {
 	// Gray Paper 0.7.1 (B.27): let f = min(φ₁₁, |v|), let l = min(φ₁₂, |v| − f)
 	f = min(f, lenval)
 	l = min(l, lenval-f)
-	fmt.Printf("[hostInfo] After clamping: f=%d, l=%d, extracting [%d:%d]\n", f, l, f, f+l)
 
-	fmt.Printf("[hostInfo] Writing to RAM: bo=0x%x, len=%d, data=0x%x\n", bo, l, val[f:f+l])
-	errcode := vm.WriteRAMBytes(uint32(bo), val[f:f+l])
+	bytesToWrite := val[f : f+l]
+	errcode := vm.WriteRAMBytes(uint32(bo), bytesToWrite)
 
 	if errcode != OK {
-		fmt.Printf("[hostInfo] WriteRAMBytes FAILED: errcode=%d -> PANIC\n", errcode)
 		vm.terminated = true
 		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
 		return
 	}
 
-	fmt.Printf("[hostInfo] SUCCESS: Setting w7=%d, returning OK, gas=%d\n", lenval, vm.GetGas())
+	bytesPreview := bytesToWrite
+	if len(bytesPreview) > 96 {
+		bytesPreview = bytesPreview[:96]
+	}
+	log.Info(vm.logging, "HOSTINFO", "RAM_write",
+		fmt.Sprintf("bo=0x%x,len=%d", bo, l), "vm.Service_index", fmt.Sprintf("%d", vm.Service_index),
+		"fetch", fmt.Sprintf("%d", fetch), "bytes", fmt.Sprintf("0x%x", bytesPreview))
 	vm.WriteRegister(7, lenval)
 	vm.SetHostResultCode(OK)
 }
 
 // Bless updates
 func (vm *VM) hostBless() {
-	fmt.Println("hostBless")
 	if vm.Mode != ModeAccumulate {
 		vm.WriteRegister(7, WHAT)
 		vm.SetHostResultCode(WHAT)
@@ -349,7 +315,7 @@ func (vm *VM) hostBless() {
 	r := vm.ReadRegister(10)
 	o := vm.ReadRegister(11)
 	n := vm.ReadRegister(12)
-	fmt.Printf("BLESS m=%d a=0x%x v=%d r=%d o=%d n=%d\n", m, a, v, r, o, n)
+	//fmt.Printf("BLESS m=%d a=0x%x v=%d r=%d o=%d n=%d\n", m, a, v, r, o, n)
 	bold_z := make(map[uint32]uint64)
 	for i := 0; i < int(n); i++ {
 		data, err := vm.ReadRAMBytes(uint32(o)+uint32(i)*12, 12)
@@ -701,7 +667,7 @@ func (vm *VM) hostTransfer() {
 	o := vm.ReadRegister(10)
 	xs, _ := vm.X.GetX_s()
 	m, errCode := vm.ReadRAMBytes(uint32(o), M)
-	log.Info(vm.logging, "TRANSFER attempt", "d", d, "a", a, "g", g, "o", o)
+	log.Trace(vm.logging, "TRANSFER attempt", "d", d, "a", a, "g", g, "o", o)
 	if errCode != OK {
 		vm.terminated = true
 		vm.ResultCode = types.WORKDIGEST_PANIC
@@ -716,7 +682,7 @@ func (vm *VM) hostTransfer() {
 		log.Info(vm.logging, "TRANSFER WHO", "d", d)
 		return
 	}
-	log.Info(vm.logging, "TRANSFER receiver", "g", g, "receiver.GasLimitM", receiver.GasLimitM, "receiver.ServiceIndex", receiver.ServiceIndex)
+	log.Trace(vm.logging, "TRANSFER receiver", "g", g, "receiver.GasLimitM", receiver.GasLimitM, "receiver.ServiceIndex", receiver.ServiceIndex)
 	if g < receiver.GasLimitM {
 		vm.WriteRegister(7, LOW)
 		vm.SetHostResultCode(LOW)
@@ -746,7 +712,7 @@ func (vm *VM) hostTransfer() {
 
 	copy(t.Memo[:], m[:])
 	vm.X.Transfers = append(vm.X.Transfers, t)
-	log.Info(vm.logging, "TRANSFER OK", "g", g, "sender", fmt.Sprintf("%d", t.SenderIndex), "receiver", fmt.Sprintf("%d", d), "amount", fmt.Sprintf("%d", a), "gaslimit", g, "x_s_bal", xs.Balance, "DeferredTransfer", t.String())
+	log.Trace(vm.logging, "TRANSFER OK", "g", g, "sender", fmt.Sprintf("%d", t.SenderIndex), "receiver", fmt.Sprintf("%d", d), "amount", fmt.Sprintf("%d", a), "gaslimit", g, "x_s_bal", xs.Balance, "DeferredTransfer", t.String())
 	vm.WriteRegister(7, OK)
 	vm.SetHostResultCode(OK)
 }
@@ -963,11 +929,11 @@ func (vm *VM) hostFetch() {
 			}
 		}
 	} else {
-		log.Warn(vm.logging, "FETCH FAIL NOT ALLOWED", "mode", mode, "allowed", allowed, "datatype", datatype, "omega_7", o, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12)
+		log.Trace(vm.logging, "FETCH FAIL NOT ALLOWED", "mode", mode, "allowed", allowed, "datatype", datatype, "omega_7", o, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12)
 	}
 
 	if v_Bytes == nil {
-		log.Warn(vm.logging, "FETCH FAIL v_Bytes==nil", "mode", mode, "allowed", allowed, "datatype", datatype, "omega_7", o, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12)
+		log.Trace(vm.logging, "FETCH FAIL v_Bytes==nil", "mode", mode, "allowed", allowed, "datatype", datatype, "omega_7", o, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12)
 		vm.WriteRegister(7, NONE)
 		vm.SetHostResultCode(NONE)
 		return
@@ -979,10 +945,16 @@ func (vm *VM) hostFetch() {
 	errCode := vm.WriteRAMBytes(uint32(o), v_Bytes[f:f+l])
 	if errCode != OK {
 		vm.Panic(errCode)
-		log.Warn(vm.logging, "FETCH FAIL", "datatype", datatype, "o", o, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "l", l, "f", f, "f+l", f+l, "v_Bytes[f..f+l]", fmt.Sprintf("%x", v_Bytes[f:f+l]))
+		log.Trace(vm.logging, "FETCH FAIL", "datatype", datatype, "o", o, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "l", l, "f", f, "f+l", f+l, "v_Bytes[f..f+l]", fmt.Sprintf("%x", v_Bytes[f:f+l]))
 		return
 	}
-	log.Trace(vm.logging, "FETCH SUCC", "datatype", datatype, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "o", fmt.Sprintf("%x", o), "v_Bytes", fmt.Sprintf("%x", v_Bytes), "l", l, "f", f, "f+l", f+l, "v_Bytes[f..f+l]", fmt.Sprintf("%x", v_Bytes[f:]))
+	dataPreview := v_Bytes[f : f+l]
+	if len(dataPreview) > 160 {
+		dataPreview = dataPreview[:160]
+	}
+	log.Info(vm.logging, "FETCH", "service", fmt.Sprintf("%d", vm.Service_index),
+		"gas_used", fmt.Sprintf("%d", vm.InitialGas-uint64(vm.GetGas())), "gas_remaining", fmt.Sprintf("%d", vm.GetGas()), "RAM_write", fmt.Sprintf("o=0x%x,len=%d", o, l), "data", fmt.Sprintf("datatype=%d,bytes=0x%x", datatype, dataPreview))
+
 	vm.WriteRegister(7, uint64(len(v_Bytes)))
 }
 
@@ -1461,6 +1433,9 @@ func (vm *VM) hostRead() {
 		vm.Panic(errCode)
 		return
 	}
+	as_internal_key := common.Compute_storageKey_internal(mu_k)
+	account_storage_key := fmt.Sprintf("0x%x", common.ComputeC_sh(a.ServiceIndex, as_internal_key).Bytes()[:31])
+	log.Info(vm.logging, "READ", "JAM_State", fmt.Sprintf("s=%d,key=0x%x", a.ServiceIndex, mu_k), "account_storage_key", account_storage_key, "value", fmt.Sprintf("0x%x", val[f:f+l]), "RAM_write", fmt.Sprintf("bo=0x%x,f=%d,l=%d", bo, f, l))
 	vm.WriteRegister(7, lenval)
 }
 
@@ -1502,8 +1477,7 @@ func (vm *VM) hostWrite() {
 	// [0.6.7] No more hashing of mu_k
 	//k := common.ServiceStorageKey(a.ServiceIndex, mu_k) // this does E_4(s) ... mu_4
 	a_t := a.ComputeThreshold()
-	if a_t > a.Balance {
-		//fmt.Printf("[hostWrite] FULL: a_t=%d > balance=%d -> Returning FULL error code\n", a_t, a.Balance)
+	if a_t >= a.Balance { // REVIEW https://graypaper.fluffylabs.dev/#/1c979cb/327d03327d03?v=0.7.1
 		vm.WriteRegister(7, FULL)
 		vm.SetHostResultCode(FULL)
 		log.Error(vm.logging, "WRITE FULL", "a_t", a_t, "balance", a.Balance)
@@ -1539,6 +1513,9 @@ func (vm *VM) hostWrite() {
 	}
 	vm.DebugHostFunction(WRITE, "writing val 0x%x from address 0x%x, length %d", v, vo, vz)
 	a.WriteStorage(a.ServiceIndex, mu_k, v, vz == 0, storage_source)
+	as_internal_key := common.Compute_storageKey_internal(mu_k)
+	account_storage_key := fmt.Sprintf("0x%x", common.ComputeC_sh(a.ServiceIndex, as_internal_key).Bytes()[:31])
+	log.Info(vm.logging, "WRITE", "JAM_State", fmt.Sprintf("s=%d,key=0x%x", a.ServiceIndex, mu_k), "account_storage_key", account_storage_key, "value", fmt.Sprintf("0x%x", v), "RAM_read", fmt.Sprintf("vo=0x%x,vz=%d", vo, vz))
 	vm.ResultCode = uint8(OK)
 	vm.SetHostResultCode(OK)
 
@@ -1550,7 +1527,7 @@ func (vm *VM) hostWrite() {
 			a.NumStorageItems++
 			a.StorageSize += (AccountStorageConst + val_len + key_len) // [Gratis] Add ∑ 34 + |y| + |x|
 		}
-		log.Debug(vm.logging, "WRITE NONE",
+		log.Trace(vm.logging, "WRITE NONE",
 			"vo", fmt.Sprintf("%x", vo), "vz", vz,
 			"numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "v", fmt.Sprintf("%x", v), "kLen", key_len, "vlen", len(v), "storage_source", storage_source)
 
@@ -1567,7 +1544,7 @@ func (vm *VM) hostWrite() {
 			l = uint64(prev_l)                                        // this should not be NONE
 			vm.WriteRegister(7, l)
 			//fmt.Printf("[hostWrite] Result: delete existing, prevLen=%d, w7=%d\n", prev_l, l)
-			log.Debug(vm.logging, "WRITE (as DELETE) NONE ", "vo", fmt.Sprintf("%x", vo), "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "v", fmt.Sprintf("%x", v), "vlen", len(v))
+			log.Trace(vm.logging, "WRITE (as DELETE) NONE ", "vo", fmt.Sprintf("%x", vo), "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "v", fmt.Sprintf("%x", v), "vlen", len(v))
 		} else {
 			// write via update;  |x| (val_len), a_i (storageItem) unchanged
 			a.StorageSize += val_len
@@ -1576,10 +1553,10 @@ func (vm *VM) hostWrite() {
 			vm.WriteRegister(7, l)
 			//fmt.Printf("[hostWrite] Result: update existing, prevLen=%d, w7=%d\n", prev_l, l)
 
-			log.Debug(vm.logging, "WRITE OK", "vo", fmt.Sprintf("0x%x", vo), "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("0x%x", mu_k), "kLen", len(mu_k), "v", fmt.Sprintf("0x%x", v), "vlen", len(v), "oldValue", fmt.Sprintf("0x%x", oldValue))
+			log.Trace(vm.logging, "WRITE OK", "vo", fmt.Sprintf("0x%x", vo), "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("0x%x", mu_k), "kLen", len(mu_k), "v", fmt.Sprintf("0x%x", v), "vlen", len(v), "oldValue", fmt.Sprintf("0x%x", oldValue))
 		}
 	}
-	log.Debug(vm.logging, "WRITE storage", "s", fmt.Sprintf("%d", a.ServiceIndex), "a_o", a.StorageSize, "a_i", a.NumStorageItems)
+	log.Trace(vm.logging, "WRITE storage", "s", fmt.Sprintf("%d", a.ServiceIndex), "a_o", a.StorageSize, "a_i", a.NumStorageItems)
 }
 
 // Solicit preimage a_l(h,z)
@@ -1608,7 +1585,10 @@ func (vm *VM) hostSolicit() {
 		xs.WriteLookup(account_lookuphash, uint32(z), []uint32{}, lookup_source)
 		xs.NumStorageItems += 2
 		xs.StorageSize += AccountLookupConst + uint64(z)
-		//log.Trace(vm.logging, "SOLICIT OK", "h", account_lookuphash, "z", z, "newvalue", []uint32{}, "lookup_source", lookup_source)
+		al_internal_key := common.Compute_preimageLookup_internal(account_lookuphash, uint32(z))
+		account_storage_key := fmt.Sprintf("0x%x", common.ComputeC_sh(xs.ServiceIndex, al_internal_key).Bytes()[:31])
+		log.Info(vm.logging, "SOLICIT OK", "service", xs.ServiceIndex,
+			"account_lookuphash", account_lookuphash, "z", z, "newvalue", []uint32{}, "account_storage_key", account_storage_key, "lookup_source", lookup_source)
 		vm.WriteRegister(7, OK)
 		vm.SetHostResultCode(OK)
 		return
@@ -1623,7 +1603,9 @@ func (vm *VM) hostSolicit() {
 	}
 	if len(X_s_l) == 2 { // [x, y] => [x, y, t]
 		xs.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...), lookup_source)
-		//log.Trace(vm.logging, "SOLICIT OK 2", "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
+		al_internal_key := common.Compute_preimageLookup_internal(account_lookuphash, uint32(z))
+		account_storage_key := fmt.Sprintf("0x%x", common.ComputeC_sh(xs.ServiceIndex, al_internal_key).Bytes()[:31])
+		log.Info(vm.logging, "SOLICIT OK 2", "service", xs.ServiceIndex, "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...), "account_storage_key", account_storage_key)
 		vm.WriteRegister(7, OK)
 		vm.SetHostResultCode(OK)
 		return
@@ -1664,6 +1646,8 @@ func (vm *VM) hostForget() {
 		log.Debug(vm.logging, "FORGET HUH", "h", account_lookuphash, "o", o, "lookup_source", lookup_source)
 		return
 	}
+	al_internal_key := common.Compute_preimageLookup_internal(account_lookuphash, uint32(z))
+	account_storage_key := fmt.Sprintf("0x%x", common.ComputeC_sh(x_s.ServiceIndex, al_internal_key).Bytes()[:31])
 	if len(X_s_l) == 0 {
 		// 0 [] case is when we solicited but never got a preimage, so we can forget it
 		x_s.WriteLookup(account_lookuphash, uint32(z), nil, lookup_source) // nil means delete the lookup
@@ -1671,7 +1655,7 @@ func (vm *VM) hostForget() {
 		// storage accounting
 		x_s.NumStorageItems -= 2
 		x_s.StorageSize -= AccountLookupConst + uint64(z)
-		log.Debug(vm.logging, "FORGET OK A", "h", account_lookuphash, "z", z, "vm.Timeslot", vm.Timeslot, "X_s_l[1]", X_s_l[1], "expiry", (vm.Timeslot - types.PreimageExpiryPeriod), "types.PreimageExpiryPeriod", types.PreimageExpiryPeriod)
+		log.Info(vm.logging, "FORGET OK A", "h", account_lookuphash, "z", z, "vm.Timeslot", vm.Timeslot, "X_s_l[1]", X_s_l[1], "expiry", (vm.Timeslot - types.PreimageExpiryPeriod), "types.PreimageExpiryPeriod", types.PreimageExpiryPeriod, "account_storage_key", account_storage_key)
 		vm.WriteRegister(7, OK)
 		vm.SetHostResultCode(OK)
 		return
@@ -1682,7 +1666,7 @@ func (vm *VM) hostForget() {
 		// storage accounting
 		x_s.NumStorageItems -= 2
 		x_s.StorageSize -= AccountLookupConst + uint64(z)
-		log.Debug(vm.logging, "FORGET OK B", "h", account_lookuphash, "z", z, "vm.Timeslot", vm.Timeslot, "X_s_l[1]", X_s_l[1], "expiry", (vm.Timeslot - types.PreimageExpiryPeriod), "types.PreimageExpiryPeriod", types.PreimageExpiryPeriod)
+		log.Info(vm.logging, "FORGET OK B", "h", account_lookuphash, "z", z, "vm.Timeslot", vm.Timeslot, "X_s_l[1]", X_s_l[1], "expiry", (vm.Timeslot - types.PreimageExpiryPeriod), "types.PreimageExpiryPeriod", types.PreimageExpiryPeriod, "account_storage_key", account_storage_key)
 		vm.WriteRegister(7, OK)
 		vm.SetHostResultCode(OK)
 		return
@@ -1691,7 +1675,7 @@ func (vm *VM) hostForget() {
 		x_s.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...), lookup_source) // [x, t]
 		vm.WriteRegister(7, OK)
 		vm.SetHostResultCode(OK)
-		log.Debug(vm.logging, "FORGET OK C", "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...))
+		log.Info(vm.logging, "FORGET OK C", "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...), "account_storage_key", account_storage_key)
 		return
 	} else if len(X_s_l) == 3 && X_s_l[1]+types.PreimageExpiryPeriod < vm.Timeslot {
 		// [x,y,w] => [w, t] where y is the current time, the time we are forgetting
@@ -1699,7 +1683,7 @@ func (vm *VM) hostForget() {
 		x_s.WriteLookup(account_lookuphash, uint32(z), X_s_l, lookup_source) // [w, t]
 		vm.WriteRegister(7, OK)
 		vm.SetHostResultCode(OK)
-		log.Debug(vm.logging, "FORGET OK D", "h", account_lookuphash, "z", z, "newvalue", X_s_l)
+		log.Info(vm.logging, "FORGET OK D", "h", account_lookuphash, "z", z, "newvalue", X_s_l, "account_storage_key", account_storage_key)
 		return
 	}
 	vm.WriteRegister(7, HUH)

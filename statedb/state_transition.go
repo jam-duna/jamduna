@@ -46,6 +46,18 @@ func initStorage(testDir string) (*storage.StateDBStorage, error) {
 func printHexDiff(label string, exp, act []byte) {
 	const maxDisplay = 1024 // 1KB limit
 
+	// Check for missing keys
+	if len(exp) == 0 && len(act) > 0 {
+		fmt.Printf("%-10s | Expected: \033[33m<MISSING IN EXPECTED>\033[0m\n", label)
+		fmt.Printf("%-10s | Actual:   0x%x\n", label, act)
+		return
+	}
+	if len(act) == 0 && len(exp) > 0 {
+		fmt.Printf("%-10s | Expected: 0x%x\n", label, exp)
+		fmt.Printf("%-10s | Actual:   \033[33m<MISSING IN ACTUAL>\033[0m\n", label)
+		return
+	}
+
 	// Helper function to print hex line
 	printHexLine := func(prefix string, a, b []byte) {
 		fmt.Printf("%-10s | %s0x", label, prefix)

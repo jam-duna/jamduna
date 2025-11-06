@@ -870,7 +870,7 @@ func (t *MerkleTree) GetService(s uint32) ([]byte, bool, error) {
 	if err != nil {
 		return nil, false, fmt.Errorf("GetService Error: %v", err) //Need to differentiate not found vs leveldb error
 	} else if !ok {
-		fmt.Printf("GetService Not Found: s=%d, stateKey=%x\n", s, stateKey)
+		//fmt.Printf("GetService Not Found: s=%d, stateKey=%x\n", s, stateKey)
 		return nil, ok, nil
 	}
 

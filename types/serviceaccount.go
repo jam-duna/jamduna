@@ -126,7 +126,7 @@ type StorageObject struct {
 }
 
 func (o *StorageObject) String() string {
-	return fmt.Sprintf("Value: [%x] Deleted: %v Dirty: %v InternalKey: %v Key: %x Value: %x, Source: %s", o.Value, o.Deleted, o.Dirty, o.InternalKey, o.Key, o.Value, o.Source)
+	return fmt.Sprintf("Value: [%x] Deleted: %v Dirty: %v StorageKey: %v Key: %x Value: %x", o.Value, o.Deleted, o.Dirty, o.StorageKey, o.Key, o.Value)
 }
 func (o *StorageObject) Clone() *StorageObject {
 	// Deep copy the Key+Value slice
@@ -219,6 +219,7 @@ func (s *ServiceAccount) Bytes() ([]byte, error) {
 	writeUint8 := func(value uint8) error {
 		return binary.Write(&buf, binary.LittleEndian, value)
 	}
+
 	// 0.7.1 Includes version byte prefix for accounts version 0 byte https://graypaper.fluffylabs.dev/#/1c979cb/3b81033b8103?v=0.7.1
 	if err := writeUint8(ACCOUNT_VERSION); err != nil {
 		return nil, err
@@ -254,6 +255,19 @@ func (s *ServiceAccount) Bytes() ([]byte, error) {
 	}
 	if err := writeUint32(uint32(s.ParentService)); err != nil {
 		return nil, err
+	}
+	debugService := s.ServiceIndex > 0
+	if debugService {
+		service_account := common.ComputeC_is(s.ServiceIndex)
+		stateKey := service_account.Bytes()
+		storageSizeLE := make([]byte, 8)
+		binary.LittleEndian.PutUint64(storageSizeLE, s.StorageSize)
+		log.Info(log.SDB, "ServiceAccount Write", "Service", fmt.Sprintf("%d", s.ServiceIndex),
+			"service_state_key", fmt.Sprintf("0x%x", stateKey[:31]),
+			"StorageSize (dec)", fmt.Sprintf("%d", s.StorageSize),
+			"StorageSize (LE)", fmt.Sprintf("0x%x", storageSizeLE),
+			"NumStorageItems", fmt.Sprintf("%d", s.NumStorageItems),
+			"Bytes", fmt.Sprintf("%x", buf.Bytes()))
 	}
 	return buf.Bytes(), nil
 }
@@ -387,10 +401,10 @@ func ServiceAccountFromBytes(service_index uint32, state_data []byte) (*ServiceA
 // Convert the ServiceAccount to a human-readable string.
 func (s *ServiceAccount) String() string {
 	// Initial account information
-	str := fmt.Sprintf("ServiceAccount %d CodeHash: %v B=%d (%x) G=%v M=%v O=%v F=%v | I=%v R=%v A=%v P=%v [Mutable: %v]\n",
+	str := fmt.Sprintf("ServiceAccount %d CodeHash: %v B=%d (%x) G=%v M=%v O=%v F=%v | I=%v R=%v A=%v P=%v [Mutable: %v Dirty: %v]\n",
 		s.ServiceIndex, s.CodeHash.Hex(), s.Balance, s.Balance, s.GasLimitG, s.GasLimitM, s.StorageSize, s.GratisOffset, //E8(ab,ag,am,ao,af)
 		s.NumStorageItems, s.CreateTime, s.RecentAccumulation, s.ParentService, // E4(ai,ar,aa,ap)
-		s.Mutable)
+		s.Mutable, s.Dirty)
 
 	// Lookup entries
 	str2 := ""
@@ -665,6 +679,39 @@ func (s *ServiceAccount) UpdateRecentAccumulation(timeslot uint32) {
 	}
 	s.Dirty = true
 	s.RecentAccumulation = timeslot
+}
+func (s *ServiceAccount) MergeUpdates(other *ServiceAccount) {
+	for k, v := range other.Storage {
+		if _, found := s.Storage[k]; !found {
+			// Only copy if not a deletion
+			if !v.Deleted {
+				s.Storage[k] = v
+			}
+		}
+	}
+	for k, v := range other.Lookup {
+		if _, found := s.Lookup[k]; !found {
+			// Only copy if not a deletion
+			if !v.Deleted {
+				s.Lookup[k] = v
+			}
+		}
+	}
+	for k, v := range other.Preimage {
+		if _, found := s.Preimage[k]; !found {
+			// Only copy if not a deletion
+			if !v.Deleted {
+				s.Preimage[k] = v
+			}
+		}
+	}
+	// This needs to consider deletes
+	if other.StorageSize > s.StorageSize {
+		s.StorageSize = other.StorageSize
+	}
+	if other.NumStorageItems > s.NumStorageItems {
+		s.NumStorageItems = other.NumStorageItems
+	}
 }
 
 // (9.8) [Gratis] max(0, BS + BI ⋅ ai + BL ⋅ ao − af )

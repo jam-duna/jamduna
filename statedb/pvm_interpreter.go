@@ -254,7 +254,7 @@ func goInvokeHostFunction(cvm *C.pvm_vm_t, hostFuncID C.int) C.pvm_host_result_t
 	// Check if host function caused panic
 	if vm.MachineState == PANIC {
 		vm.Panic(PANIC)
-		log.Error(vm.logging, fmt.Sprintf("HostCall %s (%d) PANIC!", HostFnToName(int(hostFuncID)), hostFuncID))
+		//log.Error(vm.logging, fmt.Sprintf("HostCall %s (%d) PANIC!", HostFnToName(int(hostFuncID)), hostFuncID))
 		return C.PVM_HOST_ERROR
 	}
 

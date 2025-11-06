@@ -191,6 +191,14 @@ func (U PartialState) Dump(prefix string, id uint16) {
 	fmt.Printf("[N%d]\n\n", id)
 }
 
+func (U *PartialState) DebugServiceAccounts() string {
+	result := "PartialState ServiceAccounts:\n"
+	for serviceIndex, serviceAccount := range U.ServiceAccounts {
+		result += fmt.Sprintf("Service %d:\n%s\n", serviceIndex, serviceAccount.String())
+	}
+	return result
+}
+
 type XContext struct {
 	NewServiceIndex uint32             `json:"new_service_index"`
 	ServiceIndex    uint32             `json:"service_index"`

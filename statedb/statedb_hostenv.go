@@ -32,7 +32,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 		as_internal_key := storage.InternalKey
 		if storage.Dirty {
 			if storage.Deleted {
-				log.Trace(s.Authoring, "writeAccount DELETE", "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", as_internal_key, "storage.Accessed", storage.Accessed, "storage.Deleted", storage.Deleted, "storage.source", storage.Source)
+				log.Info(s.Authoring, "writeAccount DELETE", "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", as_internal_key, "storage.Accessed", storage.Accessed, "storage.Deleted", storage.Deleted, "storage.source", storage.Source)
 				if storage.Source == "trie" {
 					err = tree.DeleteServiceStorage(service_idx, storage.Key)
 					if err != nil {
@@ -272,7 +272,7 @@ func (s *StateDB) ReadServicePreimageBlob(service uint32, blob_hash common.Hash)
 	if err != nil || !ok {
 		return
 	} else {
-		log.Info(log.P, "ReadServicePreimageBlob", "service", service, "blob_hash", blob_hash, "len(blob)", len(blob))
+		log.Trace(log.P, "ReadServicePreimageBlob", "service", service, "blob_hash", blob_hash, "len(blob)", len(blob))
 		return
 	}
 }

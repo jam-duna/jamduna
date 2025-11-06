@@ -1,6 +1,7 @@
 package statedb
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -8,6 +9,8 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -155,12 +158,12 @@ func TestTracesInterpreter(t *testing.T) {
 	// Define all the directories you want to test in a single slice.
 	testDirs := []string{
 		// PASS
-		path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy"),
 		// path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy_light"),
 	}
@@ -271,13 +274,19 @@ func dump_performance(t *testing.T) {
 func TestSingleCompare(t *testing.T) {
 	// DO NOT CHANGE THIS
 	log.InitLogger("debug")
-	filename := "/root/go/src/github.com/colorfulnotion/jam-test-vectors/traces/storage_light/00000008.bin"
+	PvmLogging = false
+
+	// 4keys
+	filename := "/Users/michael/Desktop/jam-test-vectors/traces/fuzzy/00000112.bin"
+
+	// 3keys
+	filename = "/Users/michael/Desktop/jam-test-vectors/traces/fuzzy/00000156.bin"
+
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Errorf("failed to read file %s: %v", filename, err)
 	}
-	// runSingleSTFTest(t, filename, string(content), BackendCompiler, false)
-	runSingleSTFTest(t, filename, string(content), BackendCompiler, false)
+	runSingleSTFTest(t, filename, string(content), BackendInterpreter, false)
 }
 
 func GetFuzzReportsPath(subDir ...string) (string, error) {
@@ -443,4 +452,92 @@ func TestFuzzTrace(t *testing.T) {
 
 func TestPublishFuzzTrace(t *testing.T) {
 	testFuzzTraceInternal(t, true)
+}
+
+type logFile struct {
+	file    *os.File
+	writer  *bufio.Writer
+	lastGas int64
+}
+
+func TestLogSplit(t *testing.T) {
+	// Open input file
+	fn := "156-javajam.log"
+	inputFile, err := os.Open(fn)
+	if err != nil {
+		t.Fatalf("Error opening %s: %v", fn, err)
+	}
+	defer inputFile.Close()
+
+	// Regular expression to extract gas from the line
+	// Looking for pattern: Gas: NUMBER
+	gasRegex := regexp.MustCompile(`Gas:\s+(\d+)`)
+
+	var logFiles []*logFile
+	scanner := bufio.NewScanner(inputFile)
+
+	lineNum := 0
+	for scanner.Scan() {
+		line := scanner.Text()
+		lineNum++
+
+		// Extract gas from the line
+		matches := gasRegex.FindStringSubmatch(line)
+		if matches == nil {
+			// Skip lines without gas information
+			continue
+		}
+
+		gas, err := strconv.ParseInt(matches[1], 10, 64)
+		if err != nil {
+			t.Logf("Warning: Could not parse gas value '%s' on line %d\n", matches[1], lineNum)
+			continue
+		}
+
+		// Find a matching file where gas is decreasing
+		matched := false
+		for _, lf := range logFiles {
+			if gas < lf.lastGas {
+				// Gas decreased, append to this file
+				lf.writer.WriteString(line + "\n")
+				lf.lastGas = gas
+				matched = true
+				break
+			}
+		}
+
+		// If no match found, create a new file
+		if !matched {
+			fileNum := len(logFiles)
+			filename := fmt.Sprintf("%s-%d.txt", fn, fileNum)
+			newFile, err := os.Create(filename)
+			if err != nil {
+				t.Fatalf("Error creating %s: %v", filename, err)
+			}
+
+			writer := bufio.NewWriter(newFile)
+			writer.WriteString(line + "\n")
+
+			logFile := &logFile{
+				file:    newFile,
+				writer:  writer,
+				lastGas: gas,
+			}
+			logFiles = append(logFiles, logFile)
+			t.Logf("Created %s (starting gas: %d)", filename, gas)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("Error reading javajam.log: %v", err)
+	}
+
+	// Flush and close all files
+	for i, lf := range logFiles {
+		lf.writer.Flush()
+		lf.file.Close()
+		t.Logf("Closed javajam-%d.txt (final gas: %d)", i, lf.lastGas)
+	}
+
+	t.Logf("Successfully split %d lines into %d files", lineNum, len(logFiles))
 }

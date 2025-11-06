@@ -515,13 +515,14 @@ func (s *StateDB) ParallelizedAccumulate(
 			if r.XY.U.ServiceAccounts != nil {
 				for sid, sa := range r.XY.U.ServiceAccounts {
 					shouldUpdate := sa.Dirty || sa.NewAccount || sa.DeletedAccount || sa.Checkpointed
-					if r.exceptional {
-						if sa.Checkpointed {
-							sa.Dirty = true
-							o.ServiceAccounts[sid] = sa
-						}
-					} else if shouldUpdate {
+					doUpdate := (r.exceptional && sa.Checkpointed) || (!r.exceptional && shouldUpdate)
+
+					if doUpdate {
 						sa.Dirty = true
+						// Merge Storage/Lookup/Preimage from existing into sa before replacing
+						if existing, exists := o.ServiceAccounts[sid]; exists {
+							sa.MergeUpdates(existing)
+						}
 						o.ServiceAccounts[sid] = sa
 					}
 				}
@@ -619,7 +620,7 @@ func (s *StateDB) ParallelizedAccumulate(
 			fmt.Printf("set service %d preimage: %x\n", service.ServiceIndex, preImageHash)
 		}
 	}
-
+	fmt.Printf("AFTER ParallelizedAccumulate: %s\n", o.DebugServiceAccounts())
 	return
 }
 
@@ -827,15 +828,21 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 
 	ok, code, preimage_source := serviceAccount.ReadPreimage(serviceAccount.CodeHash, sd)
 	if !ok {
-		log.Warn(log.SDB, "GetPreimage ERR", "ok", ok, "s", serviceID, "codeHash", serviceAccount.CodeHash, "preimage_source", preimage_source)
+		log.Debug(log.SDB, "GetPreimage ERR", "ok", ok, "s", serviceID, "codeHash", serviceAccount.CodeHash, "preimage_source", preimage_source)
 		return
 	}
 	benchRec.Add("SingleAccumulate:Setup", time.Since(t0))
 
 	//(B.8) start point
 	t0 = time.Now()
+	if serviceID == 1809622522 {
+		PvmLogging = true
+	}
 
 	vm := NewVMFromCode(serviceID, code, 0, 0, sd, pvmBackend, gas)
+	if serviceID == 2084712938 {
+		PvmLogging = false
+	}
 	pvmContext := log.PvmValidating
 	if sd.Authoring == log.GeneralAuthoring {
 		pvmContext = log.PvmAuthoring
@@ -865,15 +872,17 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 		return
 	}
 	xy = vm.X
-	res := ""
+
+	res := "SingleAccumulate: "
 	if len(r.Ok) == 32 {
 		accumulation_output = common.BytesToHash(r.Ok)
-		res = "32byte"
+		res += "32byte"
 	} else {
 		accumulation_output = vm.X.Yield
-		res = "yield"
+		res += "yield"
 	}
-	log.Trace(debugB, fmt.Sprintf("BEEFY OK-HALT with %s @SINGLE ACCUMULATE", res), "s", fmt.Sprintf("%d", serviceID), "accumulation_output", accumulation_output)
+
+	fmt.Printf("AFTER SingleAccumulate (%d): %s\n", serviceID, vm.X.U.DebugServiceAccounts())
 	return
 }
 

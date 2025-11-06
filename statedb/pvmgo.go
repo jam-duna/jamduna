@@ -625,7 +625,7 @@ func (vm *VMGo) step(stepn int) error {
 					// Check if host function caused panic
 					if vm.MachineState == PANIC {
 						vm.Panic(PANIC)
-						fmt.Printf("HostCall %s (%d) PANIC!\n", HostFnToName(vm.host_func_id), vm.host_func_id)
+						//fmt.Printf("HostCall %s (%d) PANIC!\n", HostFnToName(vm.host_func_id), vm.host_func_id)
 						return
 					}
 				}
