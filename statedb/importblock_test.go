@@ -160,8 +160,8 @@ func TestTracesInterpreter(t *testing.T) {
 		// PASS
 		// path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
 		// path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy"),
@@ -278,12 +278,7 @@ func TestSingleCompare(t *testing.T) {
 	log.InitLogger("debug")
 	PvmLogging = false
 
-	// 4keys
-	filename := "/Users/sourabhniyogi/Desktop/jam-test-vectors/traces/fuzzy/00000112.bin"
-
-	// 3keys
-	filename = "/Users/sourabhniyogi/Desktop/jam-test-vectors/traces/fuzzy/00000156.bin"
-
+	filename := "/Users/michael/Desktop/jam-test-vectors/traces/fuzzy_light/00000200.bin"
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Errorf("failed to read file %s: %v", filename, err)

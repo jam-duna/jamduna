@@ -209,7 +209,7 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 	bad_stf_from_us := bytes.Equal(s1.StateRoot.Bytes(), st.PostState.StateRoot.Bytes())
 	if err != nil {
 		if bad_stf_from_us {
-			fmt.Printf("✳️  ERROR EXPECTED - PreState = PostState : %v\n", s1.StateRoot.Hex())
+			//fmt.Printf("✳️  ERROR EXPECTED - PreState = PostState : %v\n", s1.StateRoot.Hex())
 			return nil, nil
 		} else {
 			fmt.Printf("❌  ApplyStateTransitionFromBlock error: %v, s1.StateRoot:%v\n", err, s1.StateRoot.Hex())

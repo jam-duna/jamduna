@@ -2,6 +2,7 @@ package statedb
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"runtime"
 	"sort"
@@ -334,6 +335,23 @@ func (s *StateDB) OuterAccumulate(g uint64, transfersIn []types.DeferredTransfer
 	num_accumulations = i + incNum
 	accumulation_output = append(p_outputs, incAccumulationOutput...)
 
+	// REVIEW can we simplify this since we do this on the return?
+	if len(accumulation_output) > 1 {
+		seen := make(map[[36]byte]struct{}, len(accumulation_output))
+		uniq := accumulation_output[:0]
+		for _, ao := range accumulation_output {
+			var key [36]byte
+			binary.LittleEndian.PutUint32(key[:4], ao.Service)
+			copy(key[4:], ao.Output[:])
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			uniq = append(uniq, ao)
+		}
+		accumulation_output = uniq
+	}
+
 	p_gasUsage = append(p_gasUsage, incGasUsage...)
 	return num_accumulations, accumulation_output, p_gasUsage
 }
@@ -514,16 +532,15 @@ func (s *StateDB) ParallelizedAccumulate(
 		if r.XY != nil && r.XY.U != nil {
 			if r.XY.U.ServiceAccounts != nil {
 				for sid, sa := range r.XY.U.ServiceAccounts {
-					shouldUpdate := sa.Dirty || sa.NewAccount || sa.DeletedAccount || sa.Checkpointed
-					doUpdate := (r.exceptional && sa.Checkpointed) || (!r.exceptional && shouldUpdate)
-
-					if doUpdate {
-						sa.Dirty = true
-						// Merge Storage/Lookup/Preimage from existing into sa before replacing
+					if sa.Dirty {
+						//fmt.Printf("Merging service account %d into o\n", sid)
 						if existing, exists := o.ServiceAccounts[sid]; exists {
-							sa.MergeUpdates(existing)
+							existing.MergeUpdates(sa)
+							existing.Dirty = true
+							o.ServiceAccounts[sid] = existing // Must reassign to map
+						} else {
+							o.ServiceAccounts[sid] = sa
 						}
-						o.ServiceAccounts[sid] = sa
 					}
 				}
 			}
@@ -668,8 +685,12 @@ func (sdb *StateDB) NewXContext(u *types.PartialState, s uint32, serviceAccount 
 	decoded := uint32(types.DecodeE_l(hash[:4]))
 	const S = 1 << 16
 
+	clone := u.Clone()
+	// IMPORTANT: this is critical for MergeUpdates
+	clone.ResetDirtyFlags()
+
 	x := &types.XContext{
-		U:               u.Clone(), // IMPORTANT: writes in one service (Fib, Trib) are readable by another (Meg) in ordered accumulation
+		U:               clone,
 		ServiceIndex:    s,
 		NewServiceIndex: sdb.NewXContext_Check(decoded%((1<<32)-S-(1<<8)) + S),
 	}

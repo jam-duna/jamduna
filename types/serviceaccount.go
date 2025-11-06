@@ -41,10 +41,12 @@ type ServiceAccount struct {
 
 	// Mutable is used to determine if the account can be modified.
 	// X.D will have Mutable=false, but X.D.U will have Mutable=True
-	Mutable      bool `json:"-"`
-	NewAccount   bool `json:"-"`
-	Checkpointed bool `json:"-"`
-	Dirty        bool `json:"-"`
+	Mutable    bool `json:"-"`
+	NewAccount bool `json:"-"`
+	Dirty      bool `json:"-"`
+
+	NumStorageItemsDirty bool `json:"-"`
+	StorageSizeDirty     bool `json:"-"`
 
 	DeletedAccount bool `json:"-"` // if true, this account is deleted
 
@@ -68,11 +70,10 @@ func NewEmptyServiceAccount(serviceIndex uint32, c []byte, g uint64, m uint64, s
 		CreateTime:         createdSlot,   //a_r = t // check pre vs post?
 		RecentAccumulation: 0,             //a_a = 0
 		ParentService:      parentService, //a_p = x_s
-		Storage:            make(map[string]*StorageObject),
-		Lookup:             make(map[string]*LookupObject),
-		Preimage:           make(map[string]*PreimageObject),
-		Checkpointed:       false, // this is updated to true upon Checkpoint
-		NewAccount:         true,  // with this flag, if an account is Dirty OR Checkpointed && NewAccount then it is written
+		Storage:    make(map[string]*StorageObject),
+		Lookup:     make(map[string]*LookupObject),
+		Preimage:   make(map[string]*PreimageObject),
+		NewAccount: true, // with this flag, if an account is Dirty OR NewAccount then it is written
 	}
 	return a
 }
@@ -80,22 +81,23 @@ func NewEmptyServiceAccount(serviceIndex uint32, c []byte, g uint64, m uint64, s
 func (s *ServiceAccount) Clone() *ServiceAccount {
 	// Start by cloning primitive fields directly
 	clone := ServiceAccount{
-		ServiceIndex:       s.ServiceIndex,
-		CodeHash:           s.CodeHash,
-		Balance:            s.Balance,
-		GasLimitG:          s.GasLimitG,
-		GasLimitM:          s.GasLimitM,
-		StorageSize:        s.StorageSize,
-		GratisOffset:       s.GratisOffset,
-		NumStorageItems:    s.NumStorageItems,
-		CreateTime:         s.CreateTime,
-		RecentAccumulation: s.RecentAccumulation,
-		ParentService:      s.ParentService,
-		Dirty:              s.Dirty,
-		NewAccount:         s.NewAccount,
-		DeletedAccount:     s.DeletedAccount,
-		Checkpointed:       s.Checkpointed,
-		Mutable:            s.Mutable, // should ALLOW_MUTABLE explicitly... check??
+		ServiceIndex:         s.ServiceIndex,
+		CodeHash:             s.CodeHash,
+		Balance:              s.Balance,
+		GasLimitG:            s.GasLimitG,
+		GasLimitM:            s.GasLimitM,
+		StorageSize:          s.StorageSize,
+		StorageSizeDirty:     s.StorageSizeDirty,
+		GratisOffset:         s.GratisOffset,
+		NumStorageItems:      s.NumStorageItems,
+		NumStorageItemsDirty: s.NumStorageItemsDirty,
+		CreateTime:           s.CreateTime,
+		RecentAccumulation:   s.RecentAccumulation,
+		ParentService:        s.ParentService,
+		Dirty:          s.Dirty,
+		NewAccount:     s.NewAccount,
+		DeletedAccount: s.DeletedAccount,
+		Mutable:        s.Mutable, // should ALLOW_MUTABLE explicitly... check??
 	}
 
 	clone.Storage = make(map[string]*StorageObject, len(s.Storage))
@@ -262,7 +264,7 @@ func (s *ServiceAccount) Bytes() ([]byte, error) {
 		stateKey := service_account.Bytes()
 		storageSizeLE := make([]byte, 8)
 		binary.LittleEndian.PutUint64(storageSizeLE, s.StorageSize)
-		log.Trace(log.SDB, "ServiceAccount Write", "Service", fmt.Sprintf("%d", s.ServiceIndex),
+		log.Info(log.SDB, "ServiceAccount Write", "Service", fmt.Sprintf("%d", s.ServiceIndex),
 			"service_state_key", fmt.Sprintf("0x%x", stateKey[:31]),
 			"StorageSize (dec)", fmt.Sprintf("%d", s.StorageSize),
 			"StorageSize (LE)", fmt.Sprintf("0x%x", storageSizeLE),
@@ -546,40 +548,55 @@ func (s *ServiceAccount) IncBalance(balance uint64) {
 	s.Balance += balance
 }
 
-// a_g - the minimum gas required in order to execute the Accumulate entry-point of the service's code,
-func (s *ServiceAccount) SetGasLimitG(g uint64) {
+// AdjustNumStorageItems adjusts the number of storage items by delta and marks it dirty
+func (s *ServiceAccount) AdjustNumStorageItems(delta int32) {
 	if !s.Mutable {
-		log.Crit(module, "SetGasLimitG")
+		log.Crit(module, "Called AdjustNumStorageItems on immutable ServiceAccount", "service", s.ServiceIndex)
 	}
-	s.Dirty = true
-	s.GasLimitG = g
+	// Handle underflow - don't let it go negative
+	if delta < 0 && uint32(-delta) > s.NumStorageItems {
+		s.NumStorageItems = 0
+	} else {
+		s.NumStorageItems = uint32(int32(s.NumStorageItems) + delta)
+	}
+	s.NumStorageItemsDirty = true
 }
 
-// a_m - the minimum required for the On Transfer entry-point.
-func (s *ServiceAccount) SetGasLimitM(g uint64) {
+// AdjustStorageSize adjusts the storage size by delta and marks it dirty if changed
+func (s *ServiceAccount) AdjustStorageSize(delta int64) {
 	if !s.Mutable {
-		log.Crit(module, "SetGasLimitM")
+		log.Crit(module, "Called AdjustStorageSize on immutable ServiceAccount", "service", s.ServiceIndex)
 	}
-	s.Dirty = true
-	s.GasLimitM = g
+	if delta == 0 {
+		return
+	}
+	// Handle underflow - don't let it go negative
+	if delta < 0 && uint64(-delta) > s.StorageSize {
+		s.StorageSize = 0
+	} else {
+		s.StorageSize = uint64(int64(s.StorageSize) + delta)
+	}
+	// Only mark dirty if there was an actual change
+	if delta != 0 {
+		s.StorageSizeDirty = true
+	}
 }
 
-// a_l - total number of octets used in storage (9.3)
-func (s *ServiceAccount) SetStorageSize(storageSize uint64) {
-	if !s.Mutable {
-		log.Crit(module, "SetStorageSize")
+// ResetDirtyFlags clears the dirty markers on the account -- This works with MergeUpdates so that
+// we don't keep re-merging other accounts which may be stale overwriting newer mutations (e.g. storage counters).
+func (s *ServiceAccount) ResetDirtyFlags() {
+	s.Dirty = false
+	s.NumStorageItemsDirty = false
+	s.StorageSizeDirty = false
+	for _, storage := range s.Storage {
+		storage.Dirty = false
 	}
-	s.Dirty = true
-	s.StorageSize = storageSize
-}
-
-// a_i - the number of items in storage (9.3)
-func (s *ServiceAccount) SetNumStorageItems(numStorageItems uint32) {
-	if !s.Mutable {
-		log.Crit(module, "SetNumStorageItems")
+	for _, lookup := range s.Lookup {
+		lookup.Dirty = false
 	}
-	s.Dirty = true
-	s.NumStorageItems = numStorageItems
+	for _, preimage := range s.Preimage {
+		preimage.Dirty = false
+	}
 }
 
 func (s *ServiceAccount) WriteStorage(serviceIndex uint32, mu_k []byte, val []byte, Isdeleted bool, source string) {
@@ -593,7 +610,9 @@ func (s *ServiceAccount) WriteStorage(serviceIndex uint32, mu_k []byte, val []by
 	s.Dirty = true
 
 	storeObj, exists := s.Storage[as_internal_key_str]
+	prevLen := 0
 	if exists {
+		prevLen = len(storeObj.Value)
 		storeObj.Accessed = true
 		storeObj.Dirty = true
 		storeObj.Deleted = Isdeleted
@@ -614,6 +633,18 @@ func (s *ServiceAccount) WriteStorage(serviceIndex uint32, mu_k []byte, val []by
 		}
 	}
 
+	// REVIEW: why do we need this?
+	if Isdeleted {
+		s.NumStorageItemsDirty = true
+		s.StorageSizeDirty = true
+	} else if !exists {
+		if len(val) > 0 {
+			s.NumStorageItemsDirty = true
+			s.StorageSizeDirty = true
+		}
+	} else if exists && len(val) != prevLen {
+		s.StorageSizeDirty = true
+	}
 }
 
 func (s *ServiceAccount) WritePreimage(blobHash common.Hash, preimage []byte, source string) {
@@ -680,37 +711,24 @@ func (s *ServiceAccount) UpdateRecentAccumulation(timeslot uint32) {
 	s.Dirty = true
 	s.RecentAccumulation = timeslot
 }
-func (s *ServiceAccount) MergeUpdates(other *ServiceAccount) {
-	for k, v := range other.Storage {
-		if _, found := s.Storage[k]; !found {
-			// Only copy if not a deletion
-			if !v.Deleted {
-				s.Storage[k] = v
-			}
-		}
+
+func (s *ServiceAccount) MergeUpdates(updates *ServiceAccount) {
+	for k, v := range updates.Storage {
+		s.Storage[k] = v
 	}
-	for k, v := range other.Lookup {
-		if _, found := s.Lookup[k]; !found {
-			// Only copy if not a deletion
-			if !v.Deleted {
-				s.Lookup[k] = v
-			}
-		}
+	for k, v := range updates.Lookup {
+		s.Lookup[k] = v
 	}
-	for k, v := range other.Preimage {
-		if _, found := s.Preimage[k]; !found {
-			// Only copy if not a deletion
-			if !v.Deleted {
-				s.Preimage[k] = v
-			}
-		}
+	for k, v := range updates.Preimage {
+		s.Preimage[k] = v
 	}
-	// This needs to consider deletes
-	if other.StorageSize > s.StorageSize {
-		s.StorageSize = other.StorageSize
+	if updates.NumStorageItemsDirty {
+		s.NumStorageItems = updates.NumStorageItems
+		s.NumStorageItemsDirty = true
 	}
-	if other.NumStorageItems > s.NumStorageItems {
-		s.NumStorageItems = other.NumStorageItems
+	if updates.StorageSizeDirty {
+		s.StorageSize = updates.StorageSize
+		s.StorageSizeDirty = true
 	}
 }
 

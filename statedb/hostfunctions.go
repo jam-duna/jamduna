@@ -615,7 +615,7 @@ func (vm *VM) hostNew() {
 	xContext.U.ServiceAccounts[newServiceIndex] = a // this new account is included but only is written if (a) non-exceptional (b) exceptional and checkpointed
 	vm.WriteRegister(7, uint64(newServiceIndex))
 	vm.SetHostResultCode(OK)
-	log.Debug(vm.logging, "NEW OK", "SERVICE", fmt.Sprintf("%d", newServiceIndex), "code_hash_ptr", fmt.Sprintf("%x", o), "code_hash_ptr", fmt.Sprintf("%x", c), "code_len", l, "min_item_gas", g, "min_memo_gas", m)
+	log.Trace(vm.logging, "NEW OK", "SERVICE", fmt.Sprintf("%d", newServiceIndex), "code_hash_ptr", fmt.Sprintf("%x", o), "code_hash_ptr", fmt.Sprintf("%x", c), "code_len", l, "min_item_gas", g, "min_memo_gas", m)
 }
 
 // Upgrade service
@@ -1433,10 +1433,7 @@ func (vm *VM) hostRead() {
 
 // Write Storage a_s(x,y)
 func (vm *VM) hostWrite() {
-	//fmt.Printf("[hostWrite] START: service=%d, gas=%d\n", vm.Service_index, vm.GetGas())
-
 	if vm.Mode != ModeAccumulate {
-		//fmt.Printf("[hostWrite] WHAT: Not in Accumulate mode\n")
 		vm.WriteRegister(7, WHAT)
 		vm.SetHostResultCode(WHAT)
 		return
@@ -1451,100 +1448,79 @@ func (vm *VM) hostWrite() {
 	kz := vm.ReadRegister(8)
 	vo := vm.ReadRegister(9)
 	vz := vm.ReadRegister(10)
-	//fmt.Printf("[hostWrite] Registers: ko=0x%x, kz=%d, vo=0x%x, vz=%d\n", ko, kz, vo, vz)
 
 	mu_k, err_k := vm.ReadRAMBytes(uint32(ko), uint32(kz))
-	//fmt.Printf("***** hostWrite: ReadRAMBytes ko= %x kz=%d ==> end: %x vo=%x vz=%x\n", ko, kz, ko+uint64(kz), vo, vz)
 	if err_k != OK {
-		//fmt.Printf("[hostWrite] ERROR reading key from RAM: ko=0x%x, kz=%d, err=%d, gas_before=%d -> PANIC\n", ko, kz, err_k, vm.GetGas())
 		vm.Panic(err_k)
 		vm.terminated = true
 		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
-		//fmt.Printf("[hostWrite] After Panic: gas=%d, terminated=%v, MachineState=%d\n", vm.GetGas(), vm.terminated, vm.MachineState)
 		log.Debug(vm.logging, "WRITE RAM", "err", err_k)
 		return
 	}
-	//fmt.Printf("[hostWrite] Key read successfully: mu_k=0x%x (len=%d)\n", mu_k, len(mu_k))
-	// [0.6.7] No more hashing of mu_k
-	//k := common.ServiceStorageKey(a.ServiceIndex, mu_k) // this does E_4(s) ... mu_4
-	a_t := a.ComputeThreshold()
-	if a_t >= a.Balance { // REVIEW https://graypaper.fluffylabs.dev/#/1c979cb/327d03327d03?v=0.7.1
-		vm.WriteRegister(7, FULL)
-		vm.SetHostResultCode(FULL)
-		log.Debug(vm.logging, "WRITE FULL", "a_t", a_t, "balance", a.Balance)
-		return
-	}
-
-	l := uint64(NONE)
+	key_len := uint64(len(mu_k)) // x in a_s(x,y) |y|
 	exists, oldValue, storage_source := a.ReadStorage(mu_k, vm.hostenv)
-	//fmt.Printf("[hostWrite] ReadStorage: exists=%v, oldLen=%d, storage_source=%s\n", exists, len(oldValue), storage_source)
-	if exists {
-		printLen := len(oldValue)
-		if printLen > 64 {
-			printLen = 64
-		}
-		// fmt.Printf("[hostWrite] Existing value preview (len=%d): 0x%x\n", len(oldValue), oldValue[:printLen])
-	}
+	prevLen := uint64(len(oldValue))
+
 	v := []byte{}
 	err := uint64(0)
+	val_len := uint64(0) // y in a_s(x,y) |x|
 	if vz > 0 {
-		//fmt.Printf("[hostWrite] Reading value from RAM: vo=0x%x, vz=%d\n", vo, vz)
 		v, err = vm.ReadRAMBytes(uint32(vo), uint32(vz))
 		if err != OK {
-			//fmt.Printf("[hostWrite] ERROR reading value from RAM: vo=0x%x, vz=%d, err=%d, gas_before=%d -> PANIC\n", vo, vz, err, vm.GetGas())
 			vm.Panic(err)
 			vm.terminated = true
 			vm.ResultCode = types.WORKDIGEST_PANIC
 			vm.MachineState = PANIC
-			//fmt.Printf("[hostWrite] After Panic (value): gas=%d, terminated=%v, MachineState=%d\n", vm.GetGas(), vm.terminated, vm.MachineState)
 			return
 		}
-		//fmt.Printf("[hostWrite] Value read successfully: v=0x%x (len=%d)\n", v, len(v))
-		//l = uint64(len(v))
+		val_len = uint64(len(v))
 	}
 	vm.DebugHostFunction(WRITE, "writing val 0x%x from address 0x%x, length %d", v, vo, vz)
+
+	deltaItems := int32(0)
+	deltaSize := int64(0)
+	response := uint64(NONE)
+
+	if !exists {
+		if val_len > 0 {
+			deltaItems = 1
+			deltaSize = int64(AccountStorageConst + val_len + key_len)
+		}
+	} else {
+		response = prevLen
+		if val_len == 0 {
+			deltaItems = -1
+			deltaSize = -int64(AccountStorageConst + prevLen + key_len)
+		} else {
+			deltaSize = int64(val_len) - int64(prevLen)
+		}
+	}
+
+	var threshold uint64
+	if deltaItems > 0 || deltaSize > 0 {
+		threshold = a.ComputeThresholdDelta(deltaItems, deltaSize)
+	} else {
+		threshold = a.ComputeThreshold()
+	}
+	if a.Balance < threshold {
+		vm.WriteRegister(7, FULL)
+		vm.SetHostResultCode(FULL)
+		log.Debug(vm.logging, "WRITE FULL", "service", a.ServiceIndex, "threshold", threshold, "balance", a.Balance, "deltaItems", deltaItems, "deltaSize", deltaSize)
+		return
+	}
+
 	a.WriteStorage(a.ServiceIndex, mu_k, v, vz == 0, storage_source)
 	vm.ResultCode = uint8(OK)
 	vm.SetHostResultCode(OK)
 
-	key_len := uint64(len(mu_k)) // x in a_s(x,y) |y|
-	val_len := uint64(len(v))    // y in a_s(x,y) |x|
-
-	if !exists {
-		if val_len > 0 {
-			a.NumStorageItems++
-			a.StorageSize += (AccountStorageConst + val_len + key_len) // [Gratis] Add ∑ 34 + |y| + |x|
-		}
-		log.Trace(vm.logging, "WRITE NONE",
-			"vo", fmt.Sprintf("%x", vo), "vz", vz,
-			"numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "v", fmt.Sprintf("%x", v), "kLen", key_len, "vlen", len(v), "storage_source", storage_source)
-
-		vm.WriteRegister(7, NONE)
-		//fmt.Printf("[hostWrite] Result: wrote new item, w7=%d (NONE)\n", uint64(NONE))
-	} else {
-		prev_l := uint64(len(oldValue))
-		if val_len == 0 {
-			// delete
-			if a.NumStorageItems > 0 {
-				a.NumStorageItems--
-			}
-			a.StorageSize -= (AccountStorageConst + prev_l + key_len) // [Gratis] Sub ∑ 34 + |y| + |x|
-			l = uint64(prev_l)                                        // this should not be NONE
-			vm.WriteRegister(7, l)
-			//fmt.Printf("[hostWrite] Result: delete existing, prevLen=%d, w7=%d\n", prev_l, l)
-			log.Trace(vm.logging, "WRITE (as DELETE) NONE ", "vo", fmt.Sprintf("%x", vo), "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "v", fmt.Sprintf("%x", v), "vlen", len(v))
-		} else {
-			// write via update;  |x| (val_len), a_i (storageItem) unchanged
-			a.StorageSize += val_len
-			a.StorageSize -= prev_l
-			l = prev_l
-			vm.WriteRegister(7, l)
-			//fmt.Printf("[hostWrite] Result: update existing, prevLen=%d, w7=%d\n", prev_l, l)
-
-			log.Trace(vm.logging, "WRITE OK", "vo", fmt.Sprintf("0x%x", vo), "numStorageItems", a.NumStorageItems, "StorageSize", a.StorageSize, "l", l, "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("0x%x", mu_k), "kLen", len(mu_k), "v", fmt.Sprintf("0x%x", v), "vlen", len(v), "oldValue", fmt.Sprintf("0x%x", oldValue))
-		}
+	if deltaItems != 0 {
+		a.AdjustNumStorageItems(deltaItems)
 	}
+	if deltaSize != 0 {
+		a.AdjustStorageSize(deltaSize)
+	}
+	vm.WriteRegister(7, response)
 	log.Trace(vm.logging, "WRITE storage", "s", fmt.Sprintf("%d", a.ServiceIndex), "a_o", a.StorageSize, "a_i", a.NumStorageItems)
 }
 
@@ -1568,35 +1544,19 @@ func (vm *VM) hostSolicit() {
 	}
 	account_lookuphash := common.BytesToHash(hBytes)
 
-	// Calculate threshold with overflow protection
-	// Check for overflow in addition first
-	if uint64(xs.StorageSize) > ^uint64(0)-uint64(z) {
-		// Addition would overflow, trigger FULL
+	// Calculate threshold with overflow protection using ComputeThresholdDelta
+	// SOLICIT adds 2 items (lookup + preimage) and z bytes
+	threshold := xs.ComputeThresholdDelta(2, int64(z))
+	if threshold == ^uint64(0) {
+		// Overflow occurred in threshold calculation
 		vm.WriteRegister(7, FULL)
 		vm.SetHostResultCode(FULL)
-		//log.Trace(vm.logging, "SOLICIT FULL", "h", account_lookuphash, "z", z, "overflow", true)
 		return
 	}
-
-	storageOctets := uint64(xs.StorageSize) + uint64(z)
-	octetCost := uint64(types.MinElectiveServiceOctetBalance)
-
-	// Check for overflow in multiplication
-	if octetCost > 0 && storageOctets > ^uint64(0)/octetCost {
-		// Multiplication would overflow, trigger FULL
-		vm.WriteRegister(7, FULL)
-		vm.SetHostResultCode(FULL)
-		//log.Trace(vm.logging, "SOLICIT FULL", "h", account_lookuphash, "z", z, "overflow", true)
-		return
-	}
-
-	threshold := types.BaseServiceBalance +
-		types.MinElectiveServiceItemBalance*uint64(int32(xs.NumStorageItems)) +
-		octetCost*storageOctets
 	if xs.Balance < threshold {
 		vm.WriteRegister(7, FULL)
 		vm.SetHostResultCode(FULL)
-		log.Debug(vm.logging, "SOLICIT FULL threshold reached", "h", account_lookuphash, "z", z)
+		log.Debug(vm.logging, "SOLICIT FULL threshold reached", "h", account_lookuphash, "z", z, "threshold", threshold, "xs.Balance", xs.Balance)
 		return
 	}
 	log.Debug(vm.logging, "SOLICIT threshold check passed", "h", account_lookuphash, "z", z, "threshold", threshold, "xs.Balance", xs.Balance)
@@ -1604,8 +1564,8 @@ func (vm *VM) hostSolicit() {
 	if !ok {
 		// when preimagehash is not found, put it into solicit request - so we can ask other DAs
 		xs.WriteLookup(account_lookuphash, uint32(z), []uint32{}, lookup_source)
-		xs.NumStorageItems += 2
-		xs.StorageSize += AccountLookupConst + uint64(z)
+		xs.AdjustNumStorageItems(2)
+		xs.AdjustStorageSize(int64(AccountLookupConst + uint64(z)))
 		vm.WriteRegister(7, OK)
 		vm.SetHostResultCode(OK)
 		return
@@ -1663,8 +1623,8 @@ func (vm *VM) hostForget() {
 		x_s.WriteLookup(account_lookuphash, uint32(z), nil, lookup_source) // nil means delete the lookup
 		x_s.WritePreimage(account_blobhash, []byte{}, preimage_source)     // []byte{} means delete the preimage. TODO: should be preimage_source
 		// storage accounting
-		x_s.NumStorageItems -= 2
-		x_s.StorageSize -= AccountLookupConst + uint64(z)
+		x_s.AdjustNumStorageItems(-2)
+		x_s.AdjustStorageSize(-int64(AccountLookupConst + uint64(z)))
 		log.Info(vm.logging, "FORGET OK A", "h", account_lookuphash, "z", z, "vm.Timeslot", vm.Timeslot, "X_s_l[1]", X_s_l[1], "expiry", (vm.Timeslot - types.PreimageExpiryPeriod), "types.PreimageExpiryPeriod", types.PreimageExpiryPeriod, "account_storage_key", account_storage_key)
 		vm.WriteRegister(7, OK)
 		vm.SetHostResultCode(OK)
@@ -1674,8 +1634,8 @@ func (vm *VM) hostForget() {
 		x_s.WriteLookup(account_lookuphash, uint32(z), nil, lookup_source) // nil means delete the lookup
 		x_s.WritePreimage(account_blobhash, []byte{}, preimage_source)     // []byte{} means delete the preimage
 		// storage accounting
-		x_s.NumStorageItems -= 2
-		x_s.StorageSize -= AccountLookupConst + uint64(z)
+		x_s.AdjustNumStorageItems(-2)
+		x_s.AdjustStorageSize(-int64(AccountLookupConst + uint64(z)))
 		log.Info(vm.logging, "FORGET OK B", "h", account_lookuphash, "z", z, "vm.Timeslot", vm.Timeslot, "X_s_l[1]", X_s_l[1], "expiry", (vm.Timeslot - types.PreimageExpiryPeriod), "types.PreimageExpiryPeriod", types.PreimageExpiryPeriod, "account_storage_key", account_storage_key)
 		vm.WriteRegister(7, OK)
 		vm.SetHostResultCode(OK)

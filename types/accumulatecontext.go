@@ -114,7 +114,6 @@ func (u *PartialState) Checkpoint() {
 	for _, sa := range u.ServiceAccounts {
 		if sa.NewAccount || sa.Dirty {
 			sa.Dirty = true
-			sa.Checkpointed = true
 		}
 	}
 }
@@ -157,6 +156,16 @@ func (u *PartialState) Clone() *PartialState {
 	return v
 }
 
+// ResetDirtyFlags clears dirty markers on the partial state clone so that only
+// mutations performed during the next execution round are merged back.
+func (u *PartialState) ResetDirtyFlags() {
+	u.QueueDirty = false
+	u.UpcomingDirty = false
+	u.PrivilegedDirty = false
+	for _, sa := range u.ServiceAccounts {
+		sa.ResetDirtyFlags()
+	}
+}
 func (ah AccumulationHistory) String() string {
 	jsonBytes, err := json.Marshal(ah)
 	if err != nil {
