@@ -256,13 +256,13 @@ func (s *ServiceAccount) Bytes() ([]byte, error) {
 	if err := writeUint32(uint32(s.ParentService)); err != nil {
 		return nil, err
 	}
-	debugService := s.ServiceIndex > 0
+	debugService := false
 	if debugService {
 		service_account := common.ComputeC_is(s.ServiceIndex)
 		stateKey := service_account.Bytes()
 		storageSizeLE := make([]byte, 8)
 		binary.LittleEndian.PutUint64(storageSizeLE, s.StorageSize)
-		log.Info(log.SDB, "ServiceAccount Write", "Service", fmt.Sprintf("%d", s.ServiceIndex),
+		log.Trace(log.SDB, "ServiceAccount Write", "Service", fmt.Sprintf("%d", s.ServiceIndex),
 			"service_state_key", fmt.Sprintf("0x%x", stateKey[:31]),
 			"StorageSize (dec)", fmt.Sprintf("%d", s.StorageSize),
 			"StorageSize (LE)", fmt.Sprintf("0x%x", storageSizeLE),
@@ -716,8 +716,37 @@ func (s *ServiceAccount) MergeUpdates(other *ServiceAccount) {
 
 // (9.8) [Gratis] max(0, BS + BI ⋅ ai + BL ⋅ ao − af )
 func (s *ServiceAccount) ComputeThreshold() uint64 {
-	footprint := BaseServiceBalance + MinElectiveServiceItemBalance*uint64(s.NumStorageItems) + MinElectiveServiceOctetBalance*s.StorageSize
-	// af ≥ (BS+BI⋅ai+BL⋅ao)
+	footprint := BaseServiceBalance +
+		MinElectiveServiceItemBalance*uint64(int32(s.NumStorageItems)) +
+		MinElectiveServiceOctetBalance*(uint64(int64(s.StorageSize)))
+		// af ≥ (BS+BI⋅ai+BL⋅ao)
+	if s.GratisOffset >= footprint {
+		return 0
+	}
+	// BS+BI⋅ai+BL⋅ao - af
+	return footprint - s.GratisOffset
+}
+
+func (s *ServiceAccount) ComputeThresholdDelta(deltaNumStorageItems int32, deltaStorageSize int64) uint64 {
+	// Check for overflow in addition first
+	if uint64(s.StorageSize) > ^uint64(0)-uint64(deltaStorageSize) {
+		// Addition would overflow, return max uint64
+		return ^uint64(0)
+	}
+
+	storageOctets := uint64(s.StorageSize) + uint64(deltaStorageSize)
+	octetCost := uint64(MinElectiveServiceOctetBalance)
+
+	// Check for overflow in multiplication
+	if octetCost > 0 && storageOctets > ^uint64(0)/octetCost {
+		// Multiplication would overflow, return max uint64
+		return ^uint64(0)
+	}
+
+	footprint := BaseServiceBalance +
+		MinElectiveServiceItemBalance*uint64(int32(s.NumStorageItems)+deltaNumStorageItems) +
+		octetCost*storageOctets
+		// af ≥ (BS+BI⋅ai+BL⋅ao)
 	if s.GratisOffset >= footprint {
 		return 0
 	}

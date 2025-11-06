@@ -602,11 +602,11 @@ func (s *StateDB) checkCodeHash(g types.Guarantee) error {
 			return err
 		}
 		if !ok {
-			log.Warn(log.G, "checkCodeHash: serviceID not found", "serviceID", serviceID, "slot", s.GetTimeslot())
+			log.Debug(log.G, "checkCodeHash: serviceID not found", "serviceID", serviceID, "slot", s.GetTimeslot())
 			return jamerrors.ErrGBadCodeHash
 		}
 		if codeHash != service.CodeHash {
-			log.Warn(log.G, "checkCodeHash: codeHash != service.CodeHash", "serviceID", serviceID, "codeHash", codeHash, "service.CodeHash", service.CodeHash)
+			log.Debug(log.G, "checkCodeHash: codeHash != service.CodeHash", "serviceID", serviceID, "codeHash", codeHash, "service.CodeHash", service.CodeHash)
 			return jamerrors.ErrGBadCodeHash
 		}
 	}

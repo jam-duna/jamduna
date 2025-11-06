@@ -151,8 +151,8 @@ func TestStateTransitionInterpreter(t *testing.T) {
 }
 
 func TestTracesInterpreter(t *testing.T) {
-	PvmLogging = true
-	DebugHostFunctions = true
+	PvmLogging = false
+	DebugHostFunctions = false
 	log.InitLogger("debug")
 
 	// Define all the directories you want to test in a single slice.
@@ -160,12 +160,12 @@ func TestTracesInterpreter(t *testing.T) {
 		// PASS
 		// path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
 		// path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
-		// path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
-		// path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
-		// path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
-		// path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy"),
-		// path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy_light"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy_light"),
 	}
 	// Iterate over each directory.
 	for _, dir := range testDirs {
@@ -278,10 +278,10 @@ func TestSingleCompare(t *testing.T) {
 	PvmLogging = false
 
 	// 4keys
-	filename := "/Users/michael/Desktop/jam-test-vectors/traces/fuzzy/00000112.bin"
+	filename := "/Users/sourabhniyogi/Desktop/jam-test-vectors/traces/fuzzy/00000112.bin"
 
 	// 3keys
-	filename = "/Users/michael/Desktop/jam-test-vectors/traces/fuzzy/00000156.bin"
+	filename = "/Users/sourabhniyogi/Desktop/jam-test-vectors/traces/fuzzy/00000156.bin"
 
 	content, err := os.ReadFile(filename)
 	if err != nil {
@@ -363,7 +363,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 	fileMap["1758622442"] = "fuzz-reports/0.7.0/traces/_new/1758622442/00000164.json"  // SKIP for now
 	fileMap["1758708840"] = "fuzz-reports/0.7.0/traces/_new2/1758708840/00000958.json" // SKIP for now
 
-	PvmLogging = true
+	PvmLogging = false
 	//	DebugHostFunctions = true
 	log.InitLogger("debug")
 	// log.EnableModule(log.PvmAuthoring)

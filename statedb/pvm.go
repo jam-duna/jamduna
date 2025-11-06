@@ -450,7 +450,7 @@ func (vm *VM) executeWithBackend(argumentData []byte, entryPoint uint32) {
 func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 	if vm.ResultCode == types.WORKDIGEST_OOG {
 		r.Err = types.WORKDIGEST_OOG
-		log.Error(vm.logging, "getArgumentOutputs - OOG", "service", string(vm.ServiceMetadata))
+		log.Debug(vm.logging, "getArgumentOutputs - OOG", "service", string(vm.ServiceMetadata))
 		return r, 0
 	}
 	//o := 0xFFFFFFFF - Z_Z - Z_I + 1

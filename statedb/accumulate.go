@@ -617,10 +617,9 @@ func (s *StateDB) ParallelizedAccumulate(
 		if len(lookups) == 0 && ok && (service.NewAccount || service.Dirty) && !service.DeletedAccount {
 			service.WritePreimage(preImageHash, preImageBytes, "12.21")
 			service.WriteLookup(preImageHash, preImageLength, []uint32{s.GetTimeslot()}, "12.21")
-			fmt.Printf("set service %d preimage: %x\n", service.ServiceIndex, preImageHash)
 		}
 	}
-	fmt.Printf("AFTER ParallelizedAccumulate: %s\n", o.DebugServiceAccounts())
+	//fmt.Printf("AFTER ParallelizedAccumulate: %s\n", o.DebugServiceAccounts())
 	return
 }
 
@@ -836,7 +835,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 	//(B.8) start point
 	t0 = time.Now()
 	if serviceID == 1809622522 {
-		PvmLogging = true
+		PvmLogging = false
 	}
 
 	vm := NewVMFromCode(serviceID, code, 0, 0, sd, pvmBackend, gas)
@@ -882,7 +881,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 		res += "yield"
 	}
 
-	fmt.Printf("AFTER SingleAccumulate (%d): %s\n", serviceID, vm.X.U.DebugServiceAccounts())
+	//fmt.Printf("AFTER SingleAccumulate (%d): %s\n", serviceID, vm.X.U.DebugServiceAccounts())
 	return
 }
 
