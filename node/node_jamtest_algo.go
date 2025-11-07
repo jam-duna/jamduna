@@ -18,7 +18,7 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 
 	isSimple := targetN == 39
 	service0 := testServices["algo"]
-	serviceAuth := testServices["auth_copy"]
+
 	algo_serviceIdx := service0.ServiceCode
 	auth_serviceIdx := uint32(statedb.AuthCopyServiceCode)
 
@@ -37,22 +37,13 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 			ConfigurationBlob:     nil,
 			WorkItems: []types.WorkItem{
 				{
-					Service:            auth_serviceIdx,
-					CodeHash:           serviceAuth.CodeHash,
-					Payload:            auth_payload,
-					RefineGasLimit:     types.RefineGasAllocation / 2,
-					AccumulateGasLimit: types.AccumulationGasAllocation / 2,
-					ImportedSegments:   nil,
-					ExportCount:        0,
-				},
-				{
 					Service:            algo_serviceIdx,
 					CodeHash:           service0.CodeHash,
 					Payload:            algo_payload,
 					RefineGasLimit:     types.RefineGasAllocation / 2,
 					AccumulateGasLimit: types.AccumulationGasAllocation / 2,
 					ImportedSegments:   imported,
-					ExportCount:        0,
+					ExportCount:        uint16(len(algo_payload) / 2),
 				},
 			},
 		}

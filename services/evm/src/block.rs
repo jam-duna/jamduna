@@ -493,7 +493,7 @@ impl EvmBlockPayload {
     }
 
     /// Write BLOCK_NUMBER_KEY with current block_number + parent_hash
-    fn write_blocknumber_key(block_number: u32, parent_hash: &[u8; 32]) {
+    pub fn write_blocknumber_key(block_number: u32, parent_hash: &[u8; 32]) {
         let mut buffer = Vec::with_capacity(4 + 32);
         buffer.extend_from_slice(&block_number.to_le_bytes());
         buffer.extend_from_slice(parent_hash);

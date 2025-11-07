@@ -3,6 +3,7 @@ package statedb
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"slices"
 	"sort"
@@ -369,7 +370,7 @@ func (vm *VM) hostBless() {
 	vm.X.U.PrivilegedState.AlwaysAccServiceID = bold_z
 
 	vm.WriteRegister(7, OK)
-	log.Debug(vm.logging, "BLESS OK", "m", fmt.Sprintf("%d", m), "a", fmt.Sprintf("%d", a), "v", fmt.Sprintf("%d", v))
+	log.Info(vm.logging, "BLESS OK", "m", fmt.Sprintf("%d", m), "a", fmt.Sprintf("%d", a), "v", fmt.Sprintf("%d", v), "r", fmt.Sprintf("%d", r), "o", o, "n", n)
 	vm.SetHostResultCode(OK)
 }
 
@@ -443,7 +444,7 @@ func (vm *VM) hostDesignate() {
 	if privilegedService_v != xs.ServiceIndex {
 		vm.WriteRegister(7, HUH)
 		vm.SetHostResultCode(HUH)
-		log.Debug(vm.logging, "DESIGNATE HUH", "UpcomingValidatorsServiceID", privilegedService_v, "xs", xs.ServiceIndex)
+		log.Info(vm.logging, "DESIGNATE HUH", "UpcomingValidatorsServiceID", privilegedService_v, "xs", xs.ServiceIndex)
 		return
 	}
 	v_bold := make([]types.Validator, types.TotalValidators)
@@ -454,12 +455,15 @@ func (vm *VM) hostDesignate() {
 		copy(newv.Ed25519[:], keys[32:32+32])
 		copy(newv.Bls[:], keys[64:64+144])
 		copy(newv.Metadata[:], keys[64+144:])
+		log.Info(vm.logging, "DESIGNATE validator", "i", i,
+			"bandersnatch", hex.EncodeToString(newv.Bandersnatch[:]),
+			"ed25519", hex.EncodeToString(newv.Ed25519[:]))
 		v_bold[i] = newv
 	}
 	vm.X.U.UpcomingValidators = v_bold
 	vm.X.U.UpcomingDirty = true
 
-	log.Debug(vm.logging, "DESIGNATE OK", "validatorsLen", len(v_bold), "TotalValidators", types.TotalValidators, "UpcomingValidatorsServiceID", privilegedService_v, "xs", xs.ServiceIndex)
+	log.Info(vm.logging, "DESIGNATE OK", "UpcomingValidatorsServiceID", privilegedService_v, "validatorsLen", len(v_bold), "TotalValidators", types.TotalValidators, "xs", xs.ServiceIndex)
 	vm.WriteRegister(7, OK)
 	vm.SetHostResultCode(OK)
 }

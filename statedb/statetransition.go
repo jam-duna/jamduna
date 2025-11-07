@@ -3,6 +3,7 @@ package statedb
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -21,6 +22,38 @@ import (
 type StateTransitionChallenge struct {
 	PreState StateSnapshotRaw `json:"pre_state"`
 	Block    types.Block      `json:"block"`
+}
+
+// parseAndLogValidators parses c7 validator data and prints each validator
+func parseAndLogValidators(label string, data []byte) {
+	if len(data) == 0 {
+		fmt.Printf("%-10s | %s: %d validators\n", "c7", label, 0)
+		return
+	}
+
+	// Each validator is 336 bytes
+	const validatorSize = 336
+	numValidators := len(data) / validatorSize
+
+	fmt.Printf("%-10s | %s: %d validators\n", "c7", label, numValidators)
+
+	for i := 0; i < numValidators && (i+1)*validatorSize <= len(data); i++ {
+		validatorBytes := data[i*validatorSize : (i+1)*validatorSize]
+
+		// Parse validator structure:
+		// Bandersnatch: bytes 0-31 (32 bytes)
+		// Ed25519: bytes 32-63 (32 bytes)
+		// Bls: bytes 64-207 (144 bytes)
+		// Metadata: bytes 208-335 (128 bytes)
+
+		bandersnatch := validatorBytes[0:32]
+		ed25519 := validatorBytes[32:64]
+
+		fmt.Printf("%-10s | %s validator %d: bandersnatch=%s ed25519=%s\n",
+			"c7", label, i,
+			hex.EncodeToString(bandersnatch),
+			hex.EncodeToString(ed25519))
+	}
 }
 
 func (s *StateTransitionChallenge) String() string {
@@ -322,8 +355,16 @@ func HandleDiffs(diffs map[string]DiffState) {
 
 		fmt.Println(strings.Repeat("=", 40))
 		fmt.Printf("\033[34mState Key: %s (%s)\033[0m\n", stateType, key[:64])
-		fmt.Printf("%-10s | PreState : 0x%x\n", stateType, val.Prestate)
-		printHexDiff(stateType, val.ExpectedPostState, val.ActualPostState)
+
+		// Special handling for c7 (validator keys) - parse and display validators
+		if stateType == "c7" {
+			parseAndLogValidators("PreState", val.Prestate)
+			parseAndLogValidators("Expected", val.ExpectedPostState)
+			parseAndLogValidators("Actual", val.ActualPostState)
+		} else {
+			fmt.Printf("%-10s | PreState : 0x%x\n", stateType, val.Prestate)
+			printHexDiff(stateType, val.ExpectedPostState, val.ActualPostState)
+		}
 
 		if stateType != "unknown" {
 			expJSON, _ := StateDecodeToJson(val.ExpectedPostState, stateType)

@@ -870,8 +870,7 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 			if sf0.GetEpochTWithPhase(targetJCE) == 0 {
 				mode = "fallback"
 			}
-			blk_str := fmt.Sprintf("Authored Block(n=%v)", s.Id)
-			log.Info(log.SDB, blk_str,
+			log.Info(log.SDB, "Authored Block",
 				"mode", mode,
 				"AUTHOR", s.Id,
 				"p", common.Str(proposedBlk.GetParentHeaderHash()),

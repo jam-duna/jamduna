@@ -23,6 +23,7 @@ func TestEVM(t *testing.T) {
 }
 
 func TestAlgo(t *testing.T) {
+
 	initPProf(t)
 	targetN := TargetedN_EVM
 	if *targetNum > 0 {

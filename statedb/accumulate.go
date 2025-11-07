@@ -16,7 +16,7 @@ import (
 
 type BeefyPool []HistoryState
 
-var isDebugGasBreakdown = true
+var debugValidators = true
 
 // v0.4.5 eq.165 - W^!
 func AccumulatedImmediately(workReports []types.WorkReport) []types.WorkReport {
@@ -550,6 +550,16 @@ func (s *StateDB) ParallelizedAccumulate(
 			}
 			// UpcomingValidators updated only if UpcomingDirty is set (via DESIGNATE host function)
 			if r.XY.U.UpcomingDirty {
+				if debugValidators && len(r.XY.U.UpcomingValidators) > 0 {
+					validatorsBytes := make([]byte, len(r.XY.U.UpcomingValidators)*336)
+					for i, v := range r.XY.U.UpcomingValidators {
+						copy(validatorsBytes[i*336:], v.Bandersnatch[:])
+						copy(validatorsBytes[i*336+32:], v.Ed25519[:])
+						copy(validatorsBytes[i*336+64:], v.Bls[:])
+						copy(validatorsBytes[i*336+208:], v.Metadata[:])
+					}
+					parseAndLogValidators("APPLYING UpcomingValidators in ParallelizedAccumulate", validatorsBytes)
+				}
 				o.UpcomingValidators = r.XY.U.UpcomingValidators
 			}
 			// *** TODO: MC to review Owned Privileges implementation below https://graypaper.fluffylabs.dev/#/1c979cb/174904174904?v=0.7.1
@@ -637,6 +647,19 @@ func (s *StateDB) ParallelizedAccumulate(
 		}
 	}
 	//fmt.Printf("AFTER ParallelizedAccumulate: %s\n", o.DebugServiceAccounts())
+
+	// Debug: show validators after ParallelizedAccumulate
+	if len(o.UpcomingValidators) > 0 {
+		validatorsBytes := make([]byte, len(o.UpcomingValidators)*336)
+		for i, v := range o.UpcomingValidators {
+			copy(validatorsBytes[i*336:], v.Bandersnatch[:])
+			copy(validatorsBytes[i*336+32:], v.Ed25519[:])
+			copy(validatorsBytes[i*336+64:], v.Bls[:])
+			copy(validatorsBytes[i*336+208:], v.Metadata[:])
+		}
+		parseAndLogValidators("AFTER ParallelizedAccumulate", validatorsBytes)
+	}
+
 	return
 }
 
@@ -740,9 +763,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 	// gas https://graypaper.fluffylabs.dev/#/1c979cb/181901181901?v=0.7.1
 	// 1. gas from free accumulation of this service (if any)
 	gas := uint64(0)
-	gasFree := uint64(0)
 	if _, ok := freeAccumulation[serviceID]; ok {
-		gasFree = freeAccumulation[serviceID]
 		gas = freeAccumulation[serviceID]
 	}
 	// 2. gas from work reports / digests of this service
@@ -767,15 +788,6 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 			gas += uint64(transfer.GasLimit)
 			gasTransfers += uint64(transfer.GasLimit)
 		}
-	}
-
-	if isDebugGasBreakdown {
-		log.Trace(log.SDB, "SingleAccumulate GAS BREAKDOWN", "service", fmt.Sprintf("%d", serviceID),
-			"total_gas", gas,
-			"from_free", gasFree,
-			"from_work_reports", gasWorkReports, "num_digests", numWorkDigests,
-			"from_transfers", gasTransfers, "num_transfers", len(selectedTransfers),
-			"num_workReports", len(workReports))
 	}
 
 	// Put the accumulation items I together: https://graypaper.fluffylabs.dev/#/1c979cb/18fd0018fd00?v=0.7.1
@@ -903,6 +915,20 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 	}
 
 	//fmt.Printf("AFTER SingleAccumulate (%d): %s\n", serviceID, vm.X.U.DebugServiceAccounts())
+
+	if debugValidators {
+		if len(xy.U.UpcomingValidators) > 0 {
+			validatorsBytes := make([]byte, len(xy.U.UpcomingValidators)*336)
+			for i, v := range xy.U.UpcomingValidators {
+				copy(validatorsBytes[i*336:], v.Bandersnatch[:])
+				copy(validatorsBytes[i*336+32:], v.Ed25519[:])
+				copy(validatorsBytes[i*336+64:], v.Bls[:])
+				copy(validatorsBytes[i*336+208:], v.Metadata[:])
+			}
+			parseAndLogValidators("AFTER SingleAccumulate", validatorsBytes)
+		}
+	}
+
 	return
 }
 

@@ -3,7 +3,6 @@ package statedb
 import (
 	"fmt"
 	"math"
-	"os"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -350,11 +349,6 @@ func NewVMFromCode(serviceIndex uint32, code []byte, i uint64, initialHeap uint6
 	metadata, c := types.SplitMetadataAndCode(code)
 
 	code = c
-	service_name := common.Blake2Hash(code)
-	err := os.WriteFile(fmt.Sprintf("service_%v.pvm", service_name), code, 0644)
-	if err != nil {
-		fmt.Printf("Warning: Failed to write service code to file: %v\n", err)
-	}
 
 	return NewVM(serviceIndex, c, []uint64{}, i, initialHeap, hostENV, true, []byte(metadata), pvmBackend, initialGas)
 }

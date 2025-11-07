@@ -2178,7 +2178,7 @@ func dumpStateDBKeyValues(db *statedb.StateDB, description string, nodeID uint16
 	}
 
 	kvDump.WriteString(fmt.Sprintf("[N%d][Slot=%d] ===== End of %s key-values =====\n", nodeID, slot, description))
-	fmt.Print(kvDump.String())
+	//fmt.Print(kvDump.String())
 }
 
 func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) error {
@@ -2249,7 +2249,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	}
 	start = time.Now()
 	valid_tickets := n.extrinsic_pool.GetTicketIDPairFromPool(used_entropy)
-	log.Info(log.B, "ApplyBlock: valid_tickets", "n", n.String(),
+	log.Trace(log.B, "ApplyBlock: valid_tickets", "n", n.String(),
 		"used_entropy", used_entropy,
 		"slot", nextBlock.Header.Slot,
 		"num_valid_tickets", len(valid_tickets),
@@ -2348,7 +2348,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	if newStateDB.JamState.SafroleState.GetEpochT() == 0 {
 		mode = "fallback"
 	}
-	log.Info(log.B, fmt.Sprintf("Imported Block(n=%v)", n.id), // "n", n.String(),
+	log.Trace(log.B, fmt.Sprintf("Imported Block(n=%v)", n.id), // "n", n.String(),
 		"mode", mode,
 		"author", nextBlock.Header.AuthorIndex,
 		"p", nextBlock.Header.ParentHeaderHash.String_short(),

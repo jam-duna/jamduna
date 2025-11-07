@@ -3,8 +3,6 @@
 #![allow(non_snake_case)]
 
 extern crate alloc;
-use alloc::collections::BinaryHeap;
-use alloc::collections::VecDeque;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
@@ -12,7 +10,6 @@ use alloc::vec::Vec;
 use core::mem;
 //use core::mem::transmute;
 use core::primitive::u64;
-use hashbrown::HashMap;
 
 const SIZE0: usize = 0x10000;
 // allocate memory for stack
@@ -28,8 +25,18 @@ static ALLOCATOR: SimpleAlloc<SIZE1> = SimpleAlloc::new();
 use core::slice;
 use core::sync::atomic::{AtomicU64, Ordering};
 use utils::constants::FIRST_READABLE_ADDRESS;
-use utils::functions::{call_log, parse_accumulate_args, parse_refine_args, parse_accumulate_operand_args, write_result};
-use utils::host_functions::{fetch, gas, write};
+use utils::functions::{call_log, log_info, log_error, parse_accumulate_args, parse_refine_args};
+use utils::host_functions::gas;
+use utils::effects::{ExecutionEffects, WriteIntent, WriteEffectEntry};
+use utils::objects::ObjectRef;
+use utils::hash_functions::blake2b_hash;
+use evm_service::{EvmBlockPayload, deserialize_execution_effects, format_object_id};
+
+#[cfg(target_arch = "riscv32")]
+use polkavm_derive::sbrk as polkavm_sbrk;
+
+#[cfg(not(target_arch = "riscv32"))]
+fn polkavm_sbrk(_size: usize) {}
 
 /// A simple xorshift64* PRNG
 #[derive(Clone, Copy)]
@@ -2437,2295 +2444,236 @@ fn tarjan_scc(adj: &Vec<Vec<bool>>) -> Vec<Vec<usize>> {
     comps
 }
 
-// Bipartite Matching (DFS augmenting paths)
-fn bipartite_match(adj: &Vec<Vec<bool>>) -> usize {
-    let n = adj.len();
-    let m = adj[0].len();
-    let mut match_r = vec![None; m];
-    fn dfs(u: usize, adj: &Vec<Vec<bool>>, seen: &mut Vec<bool>, match_r: &mut Vec<Option<usize>>) -> bool {
-        for v in 0..adj[0].len() {
-            if adj[u][v] && !seen[v] {
-                seen[v] = true;
-                if match_r[v].is_none() || dfs(match_r[v].unwrap(), adj, seen, match_r) {
-                    match_r[v] = Some(u);
-                    return true;
-                }
-            }
-        }
-        false
-    }
-    let mut result = 0;
-    for u in 0..n {
-        let mut seen = vec![false; m];
-        if dfs(u, adj, &mut seen, &mut match_r) {
-            result += 1;
-        }
-    }
-    result
-}
-
-// Global Min‑Cut (Stoer‑Wagner)
-fn stoer_wagner(mut w: Vec<Vec<u64>>) -> u64 {
-    let mut n = w.len();
-    let mut vertices: Vec<usize> = (0..n).collect();
-    let mut best = u64::MAX;
-    while n > 1 {
-        let mut added = vec![false; vertices.len()];
-        let mut weights = vec![0u64; vertices.len()];
-        let mut prev = 0;
-        for j in 0..n {
-            let mut sel = None;
-            for i in 0..n {
-                if !added[i] && (sel.is_none() || weights[i] > weights[sel.unwrap()]) {
-                    sel = Some(i);
-                }
-            }
-            let sel = sel.unwrap();
-            added[sel] = true;
-            if j == n - 1 {
-                best = best.min(weights[sel]);
-                // merge sel and prev
-                for i in 0..n {
-                    w[prev][i] = w[prev][i].wrapping_add(w[sel][i]);
-                    w[i][prev] = w[prev][i];
-                }
-                vertices.remove(sel);
-                w.remove(sel);
-                for row in w.iter_mut() {
-                    row.remove(sel);
-                }
-                n -= 1;
-                break;
-            }
-            prev = sel;
-            for j in 0..n {
-                if !added[j] {
-                    weights[j] = weights[j].wrapping_add(w[sel][j]);
-                }
-            }
-        }
-    }
-    best
-}
-
-// Graph Isomorphism (brute over permutations)
-fn next_graph_permutation(v: &mut [usize]) -> bool {
-    let n = v.len();
-    if n < 2 {
-        return false;
-    }
-    let mut i = n - 1;
-    while i > 0 && v[i - 1] >= v[i] {
-        i -= 1;
-    }
-    if i == 0 {
-        return false;
-    }
-    let mut j = n - 1;
-    while v[j] <= v[i - 1] {
-        j -= 1;
-    }
-    v.swap(i - 1, j);
-    v[i..].reverse();
-    true
-}
-fn is_isomorphic(a: &Vec<Vec<bool>>, b: &Vec<Vec<bool>>) -> bool {
-    let n = a.len();
-    let mut perm: Vec<usize> = (0..n).collect();
-    loop {
-        let mut ok = true;
-        for i in 0..n {
-            for j in 0..n {
-                if a[i][j] != b[perm[i]][perm[j]] {
-                    ok = false;
-                    break;
-                }
-            }
-            if !ok {
-                break;
-            }
-        }
-        if ok {
-            return true;
-        }
-        if !next_graph_permutation(&mut perm) {
-            break;
-        }
-    }
-    false
-}
-
-// Pick’s Theorem Application ─────────────────────────────────────────
-
-/// Given a simple lattice‐polygon (vertices in order), returns
-/// (2×area, boundary_points, interior_points) via Pick’s theorem.
-fn pick_theorem(poly: &[(i64, i64)]) -> (i64, i64, i64) {
-    let n = poly.len();
-    // 2 * signed area
-    let mut area2 = 0i64;
-    for i in 0..n {
-        let (x1, y1) = poly[i];
-        let (x2, y2) = poly[(i + 1) % n];
-        area2 += x1 * y2 - x2 * y1;
-    }
-    let area2 = area2.abs();
-    // lattice points on boundary
-    let mut b = 0i64;
-    for i in 0..n {
-        let (x1, y1) = poly[i];
-        let (x2, y2) = poly[(i + 1) % n];
-        let dx = (x2 - x1).abs() as u64;
-        let dy = (y2 - y1).abs() as u64;
-        b += gcd(dx, dy) as i64;
-    }
-    // interior by Pick: area2 = 2I + B - 2  ⇒ I = (area2 - B + 2)/2
-    let i = (area2 - b + 2) / 2;
-    (area2, b, i)
-}
-
-// Manhattan Distance ─────────────────────────────────────────────────
-fn manhattan(p: (i64, i64), q: (i64, i64)) -> u64 {
-    let dx = (p.0 - q.0).abs() as u64;
-    let dy = (p.1 - q.1).abs() as u64;
-    dx + dy
-}
-
-fn chebyshev(p: (i64, i64), q: (i64, i64)) -> u64 {
-    let dx = (p.0 - q.0).abs() as u64;
-    let dy = (p.1 - q.1).abs() as u64;
-    dx.max(dy)
-}
-
-// Integer Point‑in‑Polygon Test ──────────────────────────────────────
-fn point_in_polygon(pt: (i64, i64), poly: &[(i64, i64)]) -> bool {
-    let (x, y) = pt;
-    let n = poly.len();
-    let mut inside = false;
-    for i in 0..n {
-        let (xi, yi) = poly[i];
-        let (xj, yj) = poly[(i + 1) % n];
-        if (yi > y) != (yj > y) {
-            // compute intersection X‐coord of edge with horizontal line y
-            let x_int = xi + (y - yi) * (xj - xi) / (yj - yi);
-            if x < x_int {
-                inside = !inside;
-            }
-        }
-    }
-    inside
-}
-
-// Convex Hull (Gift Wrapping) ─────────────────────────────────────────
-fn orientation(a: (i64, i64), b: (i64, i64), c: (i64, i64)) -> i64 {
-    let (ax, ay) = a;
-    let (bx, by) = b;
-    let (cx, cy) = c;
-    (bx - ax) as i64 * (cy - ay) as i64 - (by - ay) as i64 * (cx - ax) as i64
-}
-
-fn convex_hull(points: &[(i64, i64)]) -> Vec<(i64, i64)> {
-    let n = points.len();
-    if n < 3 {
-        return points.to_vec();
-    }
-    // find leftmost lowest
-    let mut left = 0;
-    for i in 1..n {
-        if points[i].0 < points[left].0 || (points[i].0 == points[left].0 && points[i].1 < points[left].1) {
-            left = i;
-        }
-    }
-    let mut hull = Vec::new();
-    let mut p = left;
-    loop {
-        hull.push(points[p]);
-        let mut q = (p + 1) % n;
-        for r in 0..n {
-            if orientation(points[p], points[q], points[r]) < 0 {
-                q = r;
-            }
-        }
-        p = q;
-        if p == left {
-            break;
-        }
-    }
-    hull
-}
-
-// 43. Heap Sort
-fn heap_sort(a: &mut [u64]) {
-    let n = a.len();
-    // build max-heap
-    for start in (0..n / 2).rev() {
-        sift_down(a, start, n);
-    }
-    // sort
-    for end in (1..n).rev() {
-        a.swap(0, end);
-        sift_down(a, 0, end);
-    }
-
-    fn sift_down(a: &mut [u64], start: usize, end: usize) {
-        let mut root = start;
-        loop {
-            let child = 2 * root + 1;
-            if child >= end {
-                break;
-            }
-            let mut swap = root;
-            if a[swap] < a[child] {
-                swap = child;
-            }
-            if child + 1 < end && a[swap] < a[child + 1] {
-                swap = child + 1;
-            }
-            if swap == root {
-                break;
-            }
-            a.swap(root, swap);
-            root = swap;
-        }
-    }
-}
-
-// Line‑Segment Intersection
-fn on_segment(p: (i64, i64), q: (i64, i64), r: (i64, i64)) -> bool {
-    let (px, py) = p;
-    let (qx, qy) = q;
-    let (rx, ry) = r;
-    px >= qx.min(rx) && px <= qx.max(rx) && py >= qy.min(ry) && py <= qy.max(ry)
-}
-
-fn segments_intersect(p1: (i64, i64), p2: (i64, i64), p3: (i64, i64), p4: (i64, i64)) -> bool {
-    let o1 = orientation(p1, p2, p3);
-    let o2 = orientation(p1, p2, p4);
-    let o3 = orientation(p3, p4, p1);
-    let o4 = orientation(p3, p4, p2);
-    if (o1 > 0 && o2 < 0 || o1 < 0 && o2 > 0) && (o3 > 0 && o4 < 0 || o3 < 0 && o4 > 0) {
-        return true;
-    }
-    // collinear cases
-    if o1 == 0 && on_segment(p3, p1, p2) {
-        return true;
-    }
-    if o2 == 0 && on_segment(p4, p1, p2) {
-        return true;
-    }
-    if o3 == 0 && on_segment(p1, p3, p4) {
-        return true;
-    }
-    if o4 == 0 && on_segment(p2, p3, p4) {
-        return true;
-    }
-    false
-}
-
-// Flood‑Fill Algorithm
-fn flood_fill(grid: &mut Vec<Vec<u8>>, sx: usize, sy: usize, new_color: u8) {
-    let h = grid.len();
-    let w = grid[0].len();
-    let orig = grid[sy][sx];
-    if orig == new_color {
-        return;
-    }
-    let mut stack = vec![(sx, sy)];
-    while let Some((x, y)) = stack.pop() {
-        if grid[y][x] != orig {
-            continue;
-        }
-        grid[y][x] = new_color;
-        if x > 0 {
-            stack.push((x - 1, y));
-        }
-        if x + 1 < w {
-            stack.push((x + 1, y));
-        }
-        if y > 0 {
-            stack.push((x, y - 1));
-        }
-        if y + 1 < h {
-            stack.push((x, y + 1));
-        }
-    }
-}
-
-// Scan‑Line Polygon Fill
-fn scanline_fill(poly: &[(i64, i64)], width: usize, height: usize) -> Vec<Vec<bool>> {
-    let n = poly.len();
-    let mut grid = vec![vec![false; width]; height];
-    for y in 0..height {
-        let yy = y as i64;
-        let mut xs = Vec::new();
-        for i in 0..n {
-            let (xi, yi) = poly[i];
-            let (xj, yj) = poly[(i + 1) % n];
-            if (yi <= yy && yy < yj) || (yj <= yy && yy < yi) {
-                let x_int = xi + (yy - yi) * (xj - xi) / (yj - yi);
-                xs.push(x_int);
-            }
-        }
-        xs.sort_unstable();
-        let mut k = 0;
-        while k + 1 < xs.len() {
-            let x0 = xs[k].max(0) as usize;
-            let x1 = xs[k + 1].min((width - 1) as i64) as usize;
-            for x in x0..=x1 {
-                grid[y][x] = true;
-            }
-            k += 2;
-        }
-    }
-    grid
-}
-
-// Cohen–Sutherland Line Clipping ─────────────────────────────────────
-
-const LEFT: i32 = 1;
-const RIGHT: i32 = 2;
-const BOTTOM: i32 = 4;
-const TOP: i32 = 8;
-
-fn region_code(x: i64, y: i64, xmin: i64, ymin: i64, xmax: i64, ymax: i64) -> i32 {
-    let mut code = 0;
-    if x < xmin {
-        code |= LEFT;
-    } else if x > xmax {
-        code |= RIGHT;
-    }
-    if y < ymin {
-        code |= BOTTOM;
-    } else if y > ymax {
-        code |= TOP;
-    }
-    code
-}
-
-fn cohen_sutherland_clip(
-    mut x0: i64,
-    mut y0: i64,
-    mut x1: i64,
-    mut y1: i64,
-    xmin: i64,
-    ymin: i64,
-    xmax: i64,
-    ymax: i64,
-) -> Option<((i64, i64), (i64, i64))> {
-    let mut code0 = region_code(x0, y0, xmin, ymin, xmax, ymax);
-    let mut code1 = region_code(x1, y1, xmin, ymin, xmax, ymax);
-    loop {
-        if code0 == 0 && code1 == 0 {
-            return Some(((x0, y0), (x1, y1)));
-        }
-        if (code0 & code1) != 0 {
-            return None;
-        }
-        let code_out = if code0 != 0 { code0 } else { code1 };
-        let (nx, ny) = if (code_out & TOP) != 0 {
-            let x = x0 + (x1 - x0) * (ymax - y0) / (y1 - y0);
-            (x, ymax)
-        } else if (code_out & BOTTOM) != 0 {
-            let x = x0 + (x1 - x0) * (ymin - y0) / (y1 - y0);
-            (x, ymin)
-        } else if (code_out & RIGHT) != 0 {
-            let y = y0 + (y1 - y0) * (xmax - x0) / (x1 - x0);
-            (xmax, y)
-        } else {
-            let y = y0 + (y1 - y0) * (xmin - x0) / (x1 - x0);
-            (xmin, y)
-        };
-        if code_out == code0 {
-            x0 = nx;
-            y0 = ny;
-            code0 = region_code(x0, y0, xmin, ymin, xmax, ymax);
-        } else {
-            x1 = nx;
-            y1 = ny;
-            code1 = region_code(x1, y1, xmin, ymin, xmax, ymax);
-        }
-    }
-}
-
-// ─── 40. Midpoint Circle Algorithm (Variant) ────────────────────────────────
-
-fn midpoint_circle(cx: i64, cy: i64, r: i64) -> Vec<(i64, i64)> {
-    let mut pts = Vec::new();
-    let mut x = 0;
-    let mut y = r;
-    let mut d = 1 - r;
-    while x <= y {
-        pts.extend_from_slice(&[
-            (cx + x, cy + y),
-            (cx - x, cy + y),
-            (cx + x, cy - y),
-            (cx - x, cy - y),
-            (cx + y, cy + x),
-            (cx - y, cy + x),
-            (cx + y, cy - x),
-            (cx - y, cy - x),
-        ]);
-        if d < 0 {
-            d += 2 * x + 3;
-        } else {
-            d += 2 * (x - y) + 5;
-            y -= 1;
-        }
-        x += 1;
-    }
-    pts
-}
-
-// 41. Merge Sort
-fn merge_sort(a: &mut [u64]) {
-    let n = a.len();
-    if n <= 1 {
-        return;
-    }
-    let mid = n / 2;
-    merge_sort(&mut a[..mid]);
-    merge_sort(&mut a[mid..]);
-    let mut tmp = a.to_vec();
-    let (mut i, mut j, mut k) = (0, mid, 0);
-    while i < mid && j < n {
-        if a[i] <= a[j] {
-            tmp[k] = a[i];
-            i += 1;
-        } else {
-            tmp[k] = a[j];
-            j += 1;
-        }
-        k += 1;
-    }
-    while i < mid {
-        tmp[k] = a[i];
-        i += 1;
-        k += 1;
-    }
-    while j < n {
-        tmp[k] = a[j];
-        j += 1;
-        k += 1;
-    }
-    a.copy_from_slice(&tmp);
-}
-
-// 42. Quick Sort (integer keys)
-fn quick_sort(a: &mut [u64]) {
-    if a.len() <= 1 {
-        return;
-    }
-    let pivot = a[a.len() / 2];
-    let (mut left, mut right) = (0, a.len() - 1);
-    while left <= right {
-        while a[left] < pivot {
-            left += 1;
-        }
-        while a[right] > pivot {
-            right = right.saturating_sub(1);
-        }
-        if left <= right {
-            a.swap(left, right);
-            left += 1;
-            right = right.saturating_sub(1);
-        }
-    }
-    if right > 0 {
-        quick_sort(&mut a[..=right]);
-    }
-    quick_sort(&mut a[left..]);
-}
-
-// 44. Counting Sort
-fn counting_sort(a: &[u64]) -> Vec<u64> {
-    if a.is_empty() {
-        return vec![];
-    }
-    let &max = a.iter().max().unwrap();
-    let mut cnt = vec![0usize; (max as usize) + 1];
-    for &x in a {
-        cnt[x as usize] += 1;
-    }
-    let mut out = Vec::with_capacity(a.len());
-    for (val, &c) in cnt.iter().enumerate() {
-        for _ in 0..c {
-            out.push(val as u64);
-        }
-    }
-    out
-}
-
-// Radix Sort (LSD, base 256)fn radix_sort(a: &mut [u64]) {
-fn radix_sort(a: &mut [u64]) {
-    let n = a.len();
-    let mut buf = vec![0u64; n];
-    let base = 256;
-
-    for shift in (0..64).step_by(8) {
-        let mut cnt = vec![0usize; base];
-
-        // count digits
-        for &x in a.iter() {
-            let d = ((x >> shift) & 0xFF) as usize;
-            cnt[d] += 1;
-        }
-
-        // prefix‑sum
-        for i in 1..base {
-            cnt[i] += cnt[i - 1];
-        }
-
-        // scatter backwards
-        for &x in a.iter().rev() {
-            let d = ((x >> shift) & 0xFF) as usize;
-            cnt[d] -= 1;
-            buf[cnt[d]] = x;
-        }
-
-        // copy back
-        a.copy_from_slice(&buf);
-    }
-}
-
-// 46. Binary Indexed Tree (Fenwick Tree)
-struct Fenwick {
-    f: Vec<u64>,
-}
-
-impl Fenwick {
-    fn from_vec(a: &[u64]) -> Self {
-        let n = a.len();
-        let mut f = vec![0; n];
-        for i in 0..n {
-            f[i] += a[i];
-            let j = i | (i + 1);
-            if j < n {
-                f[j] += f[i];
-            }
-        }
-        Fenwick { f }
-    }
-    /// sum of elements [0..=i]
-    fn sum(&self, mut i: usize) -> u64 {
-        let mut s = 0;
-        loop {
-            s += self.f[i];
-            // compute the parent index
-            let j = i & (i + 1);
-            // if j == 0, we’re done
-            if j == 0 {
-                break;
-            }
-            // now safe to subtract
-            i = j - 1;
-        }
-        s
-    }
-}
-
-// Segment Tree (range sum)
-struct SegTree {
-    n: usize,
-    t: Vec<u64>,
-}
-impl SegTree {
-    fn from_vec(a: &[u64]) -> Self {
-        let n = a.len();
-        let mut t = vec![0; 2 * n];
-        for i in 0..n {
-            t[n + i] = a[i];
-        }
-        for i in (1..n).rev() {
-            t[i] = t[2 * i] + t[2 * i + 1];
-        }
-        SegTree { n, t }
-    }
-    // sum over [l..=r]
-    fn query(&self, mut l: usize, mut r: usize) -> u64 {
-        let n = self.n;
-        l += n;
-        r += n;
-        let mut s = 0;
-        while l <= r {
-            if l & 1 == 1 {
-                s += self.t[l];
-                l += 1;
-            }
-            if r & 1 == 0 {
-                s += self.t[r];
-                r -= 1;
-            }
-            l >>= 1;
-            r >>= 1;
-        }
-        s
-    }
-}
-
-// Quadratic Residue Test (Euler’s criterion)
-fn is_quadratic_residue(a: u64, p: u64) -> bool {
-    if a % p == 0 {
-        return true;
-    }
-    mod_exp(a % p, (p - 1) / 2, p) == 1
-}
-
-// Carmichael Function λ(n)
-fn carmichael(n: u64) -> u64 {
-    let mut facs = trial_division_wheel(n);
-    let mut counts = HashMap::new();
-    for p in facs.drain(..) {
-        *counts.entry(p).or_insert(0) += 1;
-    }
-    let mut res = 1;
-    for (&p, &k) in &counts {
-        let lam = if p == 2 && k >= 3 { 1 << (k - 2) } else { p.pow(k - 1) * (p - 1) };
-        res = lcm(res, lam);
-    }
-    res
-}
-
-// Multiplicative Order of a mod n
-fn multiplicative_order(a: u64, n: u64) -> Option<u64> {
-    if gcd(a, n) != 1 {
-        return None;
-    }
-    let mut cur = a % n;
-    for k in 1..=n {
-        if cur == 1 {
-            return Some(k);
-        }
-        cur = cur.wrapping_mul(a) % n;
-    }
-    None
-}
-
-// Wilson’s Theorem Verification
-fn is_wilson_prime(p: u64) -> bool {
-    if p < 2 {
-        return false;
-    }
-    let mut f = 1u64;
-    for i in 1..p {
-        f = f.wrapping_mul(i) % p;
-    }
-    f == p - 1
-}
-
-// Solovay–Strassen Primality Test
-fn solovay_strassen(n: u64, k: u32) -> bool {
-    if n < 2 {
-        return false;
-    }
-    for _ in 0..k {
-        let a = get_random_number() % (n - 2) + 2;
-        let x = jacobi(a, n);
-        let r = mod_exp(a, (n - 1) / 2, n) as i64;
-        if x == 0 || (r - x) % (n as i64) != 0 {
-            return false;
-        }
-    }
-    true
-}
-
-// Fermat Factorization
-fn fermat_factor(n: u64) -> Option<(u64, u64)> {
-    if n < 2 {
-        return None;
-    }
-    let mut x = integer_sqrt(n).saturating_add(1);
-    loop {
-        let t = x * x - n;
-        let y = integer_sqrt(t);
-        if y * y == t {
-            return Some((x - y, x + y));
-        }
-        x += 1;
-    }
-}
-
-// Trial Division with Wheel (2,3)
-fn trial_division_wheel(mut n: u64) -> Vec<u64> {
-    let mut f = Vec::new();
-    for &p in &[2, 3] {
-        while n % p == 0 {
-            f.push(p);
-            n /= p;
-        }
-    }
-    let mut i = 5;
-    while i * i <= n {
-        for d in [i, i + 2].iter() {
-            while n % *d == 0 {
-                f.push(*d);
-                n /= *d;
-            }
-        }
-        i += 6;
-    }
-    if n > 1 {
-        f.push(n);
-    }
-    f
-}
-
-// Pocklington Primality Test (using small a values)
-fn pocklington(n: u64) -> bool {
-    if n < 2 {
-        return false;
-    }
-    let facs = trial_division_wheel(n - 1);
-    let mut pf = facs.clone();
-    pf.sort();
-    pf.dedup();
-    for &a in &[2u64, 3u64] {
-        if a >= n {
-            continue;
-        }
-        if mod_exp(a, n - 1, n) != 1 {
-            return false;
-        }
-        for &q in &pf {
-            let g = gcd(mod_exp(a, (n - 1) / q, n).wrapping_sub(1), n);
-            if g != 1 {
-                return false;
-            }
-        }
-        return true;
-    }
-    false
-}
-
-// Diffie-Hellman Key Exchange —
-fn diffie_hellman() -> u64 {
-    // fixed small prime and generator
-    let p = 23;
-    let g = 5;
-    let a = (get_random_number() % (p - 2)) + 1;
-    let b = (get_random_number() % (p - 2)) + 1;
-    //let A = mod_exp(g, a, p);
-    let B = mod_exp(g, b, p);
-    mod_exp(B, a, p) // shared secret
-}
-
-// Shamir’s Secret Sharing (t-of-n) —
-fn shamir_share(secret: u64, t: usize, n: usize, prime: u64) -> Vec<(u64, u64)> {
-    let mut coeffs = Vec::with_capacity(t);
-    coeffs.push(secret % prime);
-    for _ in 1..t {
-        coeffs.push(get_random_number() % prime);
-    }
-    let mut shares = Vec::with_capacity(n);
-    for x in 1..=(n as u64) {
-        let mut y = 0u64;
-        for (i, &c) in coeffs.iter().enumerate() {
-            y = (y + (c as u64) * mod_exp(x, i as u64, prime) as u64) % prime as u64;
-        }
-        shares.push((x, y as u64));
-    }
-    shares
-}
-
-// Linear Feedback Shift Register (16-bit taps) —
-fn lfsr_next(state: &mut u16) -> u16 {
-    // taps at bits 0,2,3,5 for a 16-bit register
-    let bit = ((*state >> 0) ^ (*state >> 2) ^ (*state >> 3) ^ (*state >> 5)) & 1;
-    *state = (*state >> 1) | (bit << 15);
-    *state
-}
-
-// Blum Blum Shub Generator —
-fn bbs_next(x: u64, n: u64) -> u64 {
-    x.wrapping_mul(x) % n
-}
-// One-Time Pad (XOR) —
-fn otp_encrypt(m: u64, k: u64) -> u64 {
-    m ^ k
-}
-
-// Caesar Cipher (ASCII letters) —
-fn caesar(ch: char, shift: u8) -> char {
-    if ch.is_ascii_alphabetic() {
-        let base = if ch.is_ascii_lowercase() { b'a' } else { b'A' } as u8;
-        ((ch as u8 - base + shift % 26) % 26 + base) as char
-    } else {
-        ch
-    }
-}
-// 65. Pollard’s p−1 factorization
-fn pollards_p_minus_one(n: u64, bound: u64) -> Option<u64> {
-    let mut a = 2u64;
-    for p in 2..=bound {
-        if is_prime_small(p) {
-            a = mod_exp(a, p, n);
-        }
-    }
-    let d = gcd(a.wrapping_sub(1), n);
-    if d > 1 && d < n {
-        Some(d)
-    } else {
-        None
-    }
-}
-
-// Traveling Salesman (Held-Karp DP)
-fn tsp_held_karp(dist: &Vec<Vec<u64>>) -> u64 {
-    let n = dist.len();
-    let size = 1 << n;
-    let mut dp = vec![vec![u64::MAX / 2; n]; size];
-    dp[1][0] = 0;
-    for mask in 1..size {
-        if mask & 1 == 0 {
-            continue;
-        }
-        for u in 0..n {
-            if mask & (1 << u) == 0 {
-                continue;
-            }
-            let prev_mask = mask ^ (1 << u);
-            if prev_mask == 0 {
-                continue;
-            }
-            for v in 0..n {
-                if prev_mask & (1 << v) != 0 {
-                    dp[mask][u] = dp[mask][u].min(dp[prev_mask][v] + dist[v][u]);
-                }
-            }
-        }
-    }
-    let full = size - 1;
-    (0..n).map(|u| dp[full][u] + dist[u][0]).min().unwrap()
-}
-
-// Set Cover (Greedy Approximation)
-fn set_cover_greedy(universe_size: usize, sets: &Vec<Vec<usize>>) -> Vec<usize> {
-    let mut covered = vec![false; universe_size];
-    let mut result = Vec::new();
-    while covered.iter().any(|&c| !c) {
-        let (idx, _) = sets
-            .iter()
-            .enumerate()
-            .max_by_key(|&(_, s)| s.iter().filter(|&&e| !covered[e]).count())
-            .unwrap();
-        result.push(idx);
-        for &e in &sets[idx] {
-            covered[e] = true;
-        }
-    }
-    result
-}
-
-// Bin Packing (First Fit Decreasing)
-fn bin_packing_ffd(sizes: &mut Vec<u64>, cap: u64) -> usize {
-    sizes.sort_unstable_by(|a, b| b.cmp(a));
-    let mut bins = Vec::new();
-    for &s in sizes.iter() {
-        if let Some(bin) = bins.iter_mut().find(|b| **b + s <= cap) {
-            *bin += s;
-        } else {
-            bins.push(s);
-        }
-    }
-    bins.len()
-}
-
-// Graph Coloring (Greedy)
-fn greedy_coloring(adj: &Vec<Vec<bool>>) -> usize {
-    let n = adj.len();
-    let mut color = vec![None; n];
-    for u in 0..n {
-        let mut used = vec![false; n];
-        for v in 0..n {
-            if adj[u][v] {
-                if let Some(c) = color[v] {
-                    used[c] = true;
-                }
-            }
-        }
-        color[u] = Some(used.iter().position(|&u| !u).unwrap());
-    }
-    color.into_iter().map(|c| c.unwrap()).max().unwrap() + 1
-}
-
-// Maximum Independent Set (brute)
-fn mis_bruteforce(adj: &Vec<Vec<bool>>) -> usize {
-    let n = adj.len();
-    let mut best = 0;
-    for mask in 0..(1 << n) {
-        let mut ok = true;
-        let mut cnt = 0;
-        for u in 0..n {
-            if mask & (1 << u) != 0 {
-                cnt += 1;
-                for v in u + 1..n {
-                    if mask & (1 << v) != 0 && adj[u][v] {
-                        ok = false;
-                        break;
-                    }
-                }
-                if !ok {
-                    break;
-                }
-            }
-        }
-        if ok {
-            best = best.max(cnt);
-        }
-    }
-    best
-}
-
-// Vertex Cover (2-Approximation)
-fn vertex_cover_approx(adj: &Vec<Vec<bool>>) -> Vec<(usize, usize)> {
-    let n = adj.len();
-    let mut used_edge = vec![vec![false; n]; n];
-    let mut cover = Vec::new();
-    for u in 0..n {
-        for v in u + 1..n {
-            if adj[u][v] && !used_edge[u][v] {
-                cover.push((u, v));
-                for w in 0..n {
-                    used_edge[u][w] = true;
-                    used_edge[w][u] = true;
-                    used_edge[v][w] = true;
-                    used_edge[w][v] = true;
-                }
-            }
-        }
-    }
-    cover
-}
-
-// Steiner Tree Approximation (MST on terminals)
-fn steiner_approx(adj: &Vec<Vec<u64>>, terminals: &[usize]) -> u64 {
-    let k = terminals.len();
-    let mut in_mst = vec![false; k];
-    let mut key = vec![u64::MAX; k];
-    key[0] = 0;
-    let mut total = 0;
-    for _ in 0..k {
-        // pick minimum‐key vertex
-        let u = (0..k).filter(|&i| !in_mst[i]).min_by_key(|&i| key[i]).unwrap();
-        in_mst[u] = true;
-        total += key[u];
-        // update neighbors
-        for v in 0..k {
-            if !in_mst[v] {
-                let w = adj[terminals[u]][terminals[v]];
-                if w < key[v] {
-                    key[v] = w;
-                }
-            }
-        }
-    }
-    total
-}
-
-// Job Scheduling (Shortest Processing Time first)
-fn schedule_spt(jobs: &[(usize, u64)]) -> Vec<usize> {
-    let mut arr = jobs.to_vec();
-    arr.sort_unstable_by_key(|&(_, t)| t);
-    arr.into_iter().map(|(i, _)| i).collect()
-}
-
-// Inclusion–Exclusion Principle for m sets
-// Inclusion–Exclusion Principle for m sets
-fn inc_ex_count(sets: &Vec<Vec<usize>>, universe: usize) -> usize {
-    let m = sets.len();
-    let mut total = 0;
-
-    // make the range a `usize` range
-    let max_mask = 1usize << m;
-    for mask in 1usize..max_mask {
-        // now count_ones() is on `usize`
-        let bits = mask.count_ones() as usize;
-
-        let mut cnt = 0;
-        'x: for x in 0..universe {
-            for i in 0..m {
-                if (mask & (1 << i)) != 0 && !sets[i].contains(&x) {
-                    continue 'x;
-                }
-            }
-            cnt += 1;
-        }
-
-        // odd subsets add, even subtract
-        if bits % 2 == 1 {
-            total += cnt;
-        } else {
-            total -= cnt;
-        }
-    }
-
-    total
-}
-
-// Burnside’s Lemma for necklace colorings
-fn burnside_necklace(n: usize, k: u64) -> u64 {
-    let n64 = n as u64;
-    (0..n)
-        .map(|r| {
-            let g = gcd(r as u64, n64); // cast r and n to u64
-            k.pow(g as u32) // cast gcd result to u32
-        })
-        .sum::<u64>()
-        / n64
-}
-
-// factorial and binomial for rook & tableaux
-fn fact(n: u64) -> u64 {
-    (1..=n).map(|x| x as u64).product()
-}
-fn binom(n: usize, k: usize) -> u64 {
-    (1..=k).fold(1u64, |acc, i| acc * (n + 1 - i) as u64 / i as u64)
-}
-
-// Rook polynomial coefficients for n×n board
-fn rook_poly(n: usize) -> Vec<u64> {
-    (0..=n).map(|r| binom(n, r).pow(2) * fact(r as u64)).collect()
-}
-
-// Permanent of a 0‑1 matrix via Ryser’s formula
-// Permanent of a 0‑1 matrix via Ryser’s formula
-fn permanent(a: &Vec<Vec<u64>>) -> u64 {
-    let n = a.len();
-    let mut res = 0i64;
-
-    // build a usize‐typed range
-    let max_mask = 1usize.checked_shl(n as u32).expect("n too large for bitmask");
-
-    for mask in 1usize..max_mask {
-        // now mask: usize, so count_ones() is defined
-        let bits = mask.count_ones() as i64;
-
-        let mut prod = 1i64;
-        for j in 0..n {
-            let mut sum = 0i64;
-            for i in 0..n {
-                // also make the 1<<i a usize‐shift
-                if (mask & (1usize << i)) != 0 {
-                    sum += a[i][j] as i64;
-                }
-            }
-            prod *= sum;
-        }
-
-        if bits % 2 == 1 {
-            res += prod;
-        } else {
-            res -= prod;
-        }
-    }
-
-    res as u64
-}
-
-// Vandermonde Determinant
-fn vandermonde(x: &Vec<i64>) -> i64 {
-    let n = x.len();
-    let mut prod = 1i64;
-    for i in 0..n {
-        for j in i + 1..n {
-            prod *= (x[j] - x[i]) as i64;
-        }
-    }
-    prod
-}
-
-// Young Tableaux count for r×c rectangle via hook‐length
-fn young_tableaux(rc: (usize, usize)) -> u64 {
-    let (r, c) = rc;
-    let n = (r * c) as u64;
-    let mut denom = 1u64;
-    for i in 0..r {
-        for j in 0..c {
-            let hook = (r - i) + (c - j) - 1;
-            denom *= hook as u64;
-        }
-    }
-    fact(n) / denom
-}
-
-// Fibonacci via Matrix Exponentiation
-fn fib_matrix(n: u64) -> u64 {
-    fn mul(a: [[u64; 2]; 2], b: [[u64; 2]; 2]) -> [[u64; 2]; 2] {
-        [
-            [a[0][0] * b[0][0] + a[0][1] * b[1][0], a[0][0] * b[0][1] + a[0][1] * b[1][1]],
-            [a[1][0] * b[0][0] + a[1][1] * b[1][0], a[1][0] * b[0][1] + a[1][1] * b[1][1]],
-        ]
-    }
-    let mut res = [[1, 0], [0, 1]];
-    let mut base = [[1, 1], [1, 0]];
-    let mut exp = n;
-    while exp > 0 {
-        if exp & 1 == 1 {
-            res = mul(res, base);
-        }
-        base = mul(base, base);
-        exp >>= 1;
-    }
-    res[0][1]
-}
-
-// Frobenius Coin Problem (two denominations)
-fn frobenius(a: u64, b: u64) -> u64 {
-    if gcd(a, b) != 1 {
-        return 0;
-    }
-    a * b - a - b
-}
-
-// Partition Function p(n) mod m via pentagonal recurrence
-fn partition_mod(n: usize, m: u64) -> u64 {
-    let mut p = vec![0u64; n + 1];
-    p[0] = 1;
-    for i in 1..=n {
-        let mut k = 1;
-        while {
-            let g1 = k * (3 * k - 1) / 2;
-            let g2 = k * (3 * k + 1) / 2;
-            if g1 > i {
-                false
-            } else {
-                let sign = if k % 2 == 0 { m - 1 } else { 1 };
-                p[i] = (p[i] + sign * p[i - g1] % m) % m;
-                if g2 <= i {
-                    p[i] = (p[i] + sign * p[i - g2] % m) % m;
-                }
-                true
-            }
-        } {
-            k += 1;
-        }
-    }
-    p[n]
-}
-
-// q‑Analog [n]_q = (q^n - 1)/(q - 1)
-fn q_analog(n: u64, q: u64) -> u64 {
-    if q == 1 {
-        n
-    } else {
-        (q.pow(n as u32) - 1) / (q - 1)
-    }
-}
-
-// Cyclotomic Polynomial Evaluation Φ_n(x)
-// Cyclotomic Polynomial Evaluation Φ_n(x)
-fn cyclotomic(n: u64, x: u64) -> u64 {
-    if n == 1 {
-        return x + 1;
-    }
-
-    let mut result = 1u64;
-    for d in 1..=n {
-        if n % d == 0 {
-            let term = if x == 1 {
-                // (1^d - 1)/(1 - 1) is d
-                d
-            } else {
-                // Promote to 128 bits so pow and sub never overflow
-                let xp: u128 = (x as u128).wrapping_pow(d as u32);
-                let numerator = xp.saturating_sub(1); // always >= 0 in u128
-                let denominator = (x - 1) as u128; // nonzero
-                (numerator / denominator) as u64 // fits back in u64
-            };
-            result = result.saturating_mul(term);
-        }
-    }
-    result
-}
-
-// Möbius Inversion: given g up to N, recover f
-fn mobius_inversion(g: &[u64]) -> Vec<i64> {
-    let n = g.len() - 1;
-    let mut mu = vec![0i64; n + 1];
-    for i in 1..=n {
-        mu[i] = mobius(i as u64);
-    }
-    let mut f = vec![0i64; n + 1];
-    for i in 1..=n {
-        let mut sum = 0i64;
-        for d in 1..=i {
-            if i % d == 0 {
-                sum += mu[d] * g[i / d] as i64;
-            }
-        }
-        f[i] = sum;
-    }
-    f
-}
-
-// Ramsey Number Bounds for small (a,b)
-fn ramsey_bounds(a: usize, b: usize) -> (usize, usize) {
-    match (a, b) {
-        (3, 3) => (6, 6),
-        (3, 4) | (4, 3) => (9, 9),
-        (4, 4) => (18, 25),
-        (3, 5) | (5, 3) => (14, 25),
-        _ => (0, 0),
-    }
-}
-
-// Bellman–Ford Shortest Paths
-fn bellman_ford(n: usize, edges: &[(usize, usize, i64)], src: usize) -> Option<Vec<i64>> {
-    let mut dist = vec![i64::MAX / 2; n];
-    dist[src] = 0;
-    for _ in 0..n - 1 {
-        for &(u, v, w) in edges {
-            if dist[u] + w < dist[v] {
-                dist[v] = dist[u] + w;
-            }
-        }
-    }
-    // check for negative cycle
-    for &(u, v, w) in edges {
-        if dist[u] + w < dist[v] {
-            return None;
-        }
-    }
-    Some(dist)
-}
-
-// Floyd–Warshall All-Pairs Shortest Paths
-fn floyd_warshall(dist: &mut Vec<Vec<i64>>) {
-    let n = dist.len();
-    for k in 0..n {
-        for i in 0..n {
-            for j in 0..n {
-                let nd = dist[i][k].saturating_add(dist[k][j]);
-                if nd < dist[i][j] {
-                    dist[i][j] = nd;
-                }
-            }
-        }
-    }
-}
-
-// 71. Graph Diameter via BFS (unweighted)
-fn graph_diameter(adj: &Vec<Vec<usize>>) -> usize {
-    let n = adj.len();
-    let mut maxd = 0;
-    let mut dist = vec![usize::MAX; n];
-    for s in 0..n {
-        dist.fill(usize::MAX);
-        let mut q = VecDeque::new();
-        dist[s] = 0;
-        q.push_back(s);
-        while let Some(u) = q.pop_front() {
-            for &v in &adj[u] {
-                if dist[v] == usize::MAX {
-                    dist[v] = dist[u] + 1;
-                    q.push_back(v);
-                }
-            }
-        }
-        for &d in &dist {
-            if d != usize::MAX && d > maxd {
-                maxd = d;
-            }
-        }
-    }
-    maxd
-}
-
-// 72. Articulation Points (Tarjan)
-fn articulation_points(adj: &Vec<Vec<usize>>) -> Vec<usize> {
-    let n = adj.len();
-    let mut time = 0;
-    let mut disc = vec![0; n];
-    let mut low = vec![0; n];
-    let mut parent = vec![usize::MAX; n];
-    let mut ap = vec![false; n];
-
-    fn dfs(
-        u: usize,
-        time: &mut usize,
-        disc: &mut [usize],
-        low: &mut [usize],
-        parent: &mut [usize],
-        ap: &mut [bool],
-        adj: &Vec<Vec<usize>>,
-    ) {
-        *time += 1;
-        disc[u] = *time;
-        low[u] = *time;
-        let mut children = 0;
-        for &v in &adj[u] {
-            if disc[v] == 0 {
-                children += 1;
-                parent[v] = u;
-                dfs(v, time, disc, low, parent, ap, adj);
-                low[u] = low[u].min(low[v]);
-                if parent[u] == usize::MAX && children > 1 {
-                    ap[u] = true;
-                }
-                if parent[u] != usize::MAX && low[v] >= disc[u] {
-                    ap[u] = true;
-                }
-            } else if v != parent[u] {
-                low[u] = low[u].min(disc[v]);
-            }
-        }
-    }
-
-    for u in 0..n {
-        if disc[u] == 0 {
-            dfs(u, &mut time, &mut disc, &mut low, &mut parent, &mut ap, adj);
-        }
-    }
-    ap.iter().enumerate().filter(|&(_, &is_ap)| is_ap).map(|(i, _)| i).collect()
-}
-
-// 73. Bridge Finding (Tarjan)
-fn find_bridges(adj: &Vec<Vec<usize>>) -> Vec<(usize, usize)> {
-    let n = adj.len();
-    let mut time = 0;
-    let mut disc = vec![0; n];
-    let mut low = vec![0; n];
-    let mut parent = vec![usize::MAX; n];
-    let mut bridges = Vec::new();
-
-    fn dfs(
-        u: usize,
-        time: &mut usize,
-        disc: &mut [usize],
-        low: &mut [usize],
-        parent: &mut [usize],
-        adj: &Vec<Vec<usize>>,
-        bridges: &mut Vec<(usize, usize)>,
-    ) {
-        *time += 1;
-        disc[u] = *time;
-        low[u] = *time;
-        for &v in &adj[u] {
-            if disc[v] == 0 {
-                parent[v] = u;
-                dfs(v, time, disc, low, parent, adj, bridges);
-                low[u] = low[u].min(low[v]);
-                if low[v] > disc[u] {
-                    bridges.push((u, v));
-                }
-            } else if v != parent[u] {
-                low[u] = low[u].min(disc[v]);
-            }
-        }
-    }
-
-    for u in 0..n {
-        if disc[u] == 0 {
-            dfs(u, &mut time, &mut disc, &mut low, &mut parent, adj, &mut bridges);
-        }
-    }
-    bridges
-}
-
-// 76. Bron–Kerbosch Maximal Cliques
-fn bron_kerbosch(r: Vec<usize>, mut p: Vec<usize>, mut x: Vec<usize>, adj: &Vec<Vec<bool>>, cliques: &mut Vec<Vec<usize>>) {
-    // If no more candidates and no excluded, r is a maximal clique
-    if p.is_empty() && x.is_empty() {
-        cliques.push(r);
-        return;
-    }
-
-    // We iterate over a *snapshot* of p, so we clone once here
-    for &v in &p.clone() {
-        // 1) R₂ = R ∪ {v}
-        let mut r2 = r.clone();
-        r2.push(v);
-
-        // 2) P₂ = P ∩ N(v), X₂ = X ∩ N(v)
-        let p2: Vec<usize> = p.iter().filter(|&&u| adj[v][u]).cloned().collect();
-        let x2: Vec<usize> = x.iter().filter(|&&u| adj[v][u]).cloned().collect();
-
-        // 3) Recurse
-        bron_kerbosch(r2, p2, x2, adj, cliques);
-
-        // 4) Move v from P to X for the next iteration
-        p.retain(|&u| u != v);
-        x.push(v);
-    }
-}
-
-// 77. Greedy Dominating Set
-fn greedy_dominating_set(adj: &Vec<Vec<bool>>) -> Vec<usize> {
-    let n = adj.len();
-    let mut dominated = vec![false; n];
-    let mut ds = Vec::new();
-    while dominated.iter().any(|&d| !d) {
-        let mut best = 0;
-        let mut best_u = 0;
-        for u in 0..n {
-            let cover = adj[u].iter().enumerate().filter(|&(v, &e)| e && !dominated[v]).count() + if !dominated[u] { 1 } else { 0 };
-            if cover > best {
-                best = cover;
-                best_u = u;
-            }
-        }
-        ds.push(best_u);
-        dominated[best_u] = true;
-        for v in 0..n {
-            if adj[best_u][v] {
-                dominated[v] = true;
-            }
-        }
-    }
-    ds
-}
-
-// 80. Closest Pair of Points (brute‑force)
-fn closest_pair(points: &[(i64, i64)]) -> ((i64, i64), (i64, i64), u64) {
-    let mut best = u64::MAX;
-    let mut pair = (points[0], points[0]);
-    let n = points.len();
-    for i in 0..n {
-        for j in i + 1..n {
-            let dx = points[i].0 - points[j].0;
-            let dy = points[i].1 - points[j].1;
-            let dist2 = (dx * dx + dy * dy) as u64;
-            if dist2 < best {
-                best = dist2;
-                pair = (points[i], points[j]);
-            }
-        }
-    }
-    (pair.0, pair.1, best)
-}
-
-// ─── 83. Graham Scan Convex Hull ────────────────────────────────────────────
-#[allow(dead_code)]
-fn graham_hull(pts: &Vec<(i64, i64)>) -> Vec<(i64, i64)> {
-    let mut p = pts.clone();
-    p.sort_unstable();
-    //let n = p.len();
-    let mut lower = Vec::new();
-    for &pt in &p {
-        while lower.len() >= 2 && orientation(lower[lower.len() - 2], lower[lower.len() - 1], pt) <= 0 {
-            lower.pop();
-        }
-        lower.push(pt);
-    }
-    let mut upper = Vec::new();
-    for &pt in p.iter().rev() {
-        while upper.len() >= 2 && orientation(upper[upper.len() - 2], upper[upper.len() - 1], pt) <= 0 {
-            upper.pop();
-        }
-        upper.push(pt);
-    }
-    lower.pop();
-    upper.pop();
-    lower.extend(upper);
-    lower
-}
-
-// ─── 84. Rotating Calipers (Diameter) ──────────────────────────────────────
-
-fn diameter(pts: &Vec<(i64, i64)>) -> u64 {
-    let ch = graham_hull(pts);
-    let m = ch.len();
-    if m < 2 {
-        return 0;
-    }
-    let mut j = 1;
-    let mut best = 0;
-    for i in 0..m {
-        let ni = (i + 1) % m;
-        while orientation(ch[i], ch[ni], ch[(j + 1) % m]).abs() > orientation(ch[i], ch[ni], ch[j]).abs() {
-            j = (j + 1) % m;
-        }
-        best = best.max(dist2(ch[i], ch[j]));
-        best = best.max(dist2(ch[ni], ch[j]));
-    }
-    best
-}
-
-// ─── 86. Convex Polygon Triangulation (fan) ─────────────────────────────────
-#[allow(dead_code)]
-fn triangulate_convex(poly: &Vec<(i64, i64)>) -> Vec<(usize, usize, usize)> {
-    let n = poly.len();
-    let mut tris = Vec::new();
-    for i in 1..n - 1 {
-        tris.push((0, i, i + 1));
-    }
-    tris
-}
-
-// ─── 87. Minkowski Sum (naïve + hull) ───────────────────────────────────────
-
-fn minkowski_sum(a: &Vec<(i64, i64)>, b: &Vec<(i64, i64)>) -> Vec<(i64, i64)> {
-    let mut sum = Vec::new();
-    for &pa in a {
-        for &pb in b {
-            sum.push((pa.0 + pb.0, pa.1 + pb.1));
-        }
-    }
-    graham_hull(&sum)
-}
-
-// ─── 88. Visibility Graph (naïve) ───────────────────────────────────────────
-#[allow(dead_code)]
-fn visibility_graph(poly: &Vec<(i64, i64)>) -> Vec<Vec<bool>> {
-    let n = poly.len();
-    let mut g = vec![vec![false; n]; n];
-    for i in 0..n {
-        for j in i + 1..n {
-            let mut ok = true;
-            for k in 0..n {
-                let k2 = (k + 1) % n;
-                if segments_intersect(poly[i], poly[j], poly[k], poly[k2]) {
-                    ok = false;
-                    break;
-                }
-            }
-            if ok {
-                g[i][j] = true;
-                g[j][i] = true;
-            }
-        }
-    }
-    g
-}
-
-// 93. Integer Matrix Multiplication (Strassen) for 2×2
-#[allow(dead_code)]
-fn strassen_2x2(a: [[i64; 2]; 2], b: [[i64; 2]; 2]) -> [[i64; 2]; 2] {
-    let m1 = (a[0][0] + a[1][1]) * (b[0][0] + b[1][1]);
-    let m2 = (a[1][0] + a[1][1]) * b[0][0];
-    let m3 = a[0][0] * (b[0][1] - b[1][1]);
-    let m4 = a[1][1] * (b[1][0] - b[0][0]);
-    let m5 = (a[0][0] + a[0][1]) * b[1][1];
-    let m6 = (a[1][0] - a[0][0]) * (b[0][0] + b[0][1]);
-    let m7 = (a[0][1] - a[1][1]) * (b[1][0] + b[1][1]);
-    [[m1 + m4 - m5 + m7, m3 + m5], [m2 + m4, m1 - m2 + m3 + m6]]
-}
-
-// 96. Eigenvalue Bounds (Gershgorin)
-#[allow(dead_code)]
-fn gershgorin_bounds(mat: &Vec<Vec<i64>>) -> Vec<(i64, i64)> {
-    let n = mat.len();
-    let mut bounds = Vec::with_capacity(n);
-    for i in 0..n {
-        let center = mat[i][i] as i64;
-        let mut radius = 0i64;
-        for j in 0..n {
-            if j != i {
-                radius += mat[i][j].abs() as i64;
-            }
-        }
-        bounds.push((center - radius, center + radius));
-    }
-    bounds
-}
-
-// 97. Matrix Rank via Fraction‑Free Row Reduction
-fn matrix_rank(mut a: Vec<Vec<i64>>) -> usize {
-    let m = a.len();
-    let n = a[0].len();
-    let mut rank = 0;
-    for c in 0..n {
-        if rank == m {
-            break;
-        }
-        // find a nonzero pivot in column c at or below row `rank`
-        let mut piv = rank;
-        while piv < m && a[piv][c] == 0 {
-            piv += 1;
-        }
-        if piv == m {
-            continue;
-        }
-        // swap pivot into place
-        a.swap(rank, piv);
-
-        // eliminate all other rows
-        for i in 0..m {
-            if i != rank && a[i][c] != 0 {
-                let ai = a[i][c];
-                let ar = a[rank][c];
-                for j in c..n {
-                    // use wrapping arithmetic to avoid panic
-                    let prod1 = ai.wrapping_mul(a[rank][j]);
-                    let prod2 = ar.wrapping_mul(a[i][j]);
-                    a[i][j] = prod1.wrapping_sub(prod2);
-                }
-            }
-        }
-
-        rank += 1;
-    }
-    rank
-}
-
-// 98. Condition Number Estimation for 2×2 matrix (∞-norm)
-fn condition_number_2x2(a: [[i64; 2]; 2]) -> u64 {
-    let norm_a = ((a[0][0].abs() + a[0][1].abs()).max(a[1][0].abs() + a[1][1].abs())) as u64;
-    let det = a[0][0] * a[1][1] - a[0][1] * a[1][0];
-    if det == 0 {
-        return u64::MAX;
-    }
-    let norm_inv = ((a[1][1].abs() + a[0][1].abs()).max(a[0][0].abs() + a[1][0].abs())) as u64;
-    norm_a * norm_inv / det.abs() as u64
-}
-
-// 99. Sparse Matrix-Vector Multiplication
-#[allow(dead_code)]
-fn spmv(rows: &Vec<Vec<(usize, i64)>>, x: &Vec<i64>) -> Vec<i64> {
-    let m = rows.len();
-    let mut y = vec![0i64; m];
-    for i in 0..m {
-        for &(j, v) in &rows[i] {
-            y[i] += v * x[j];
-        }
-    }
-    y
-}
-
-// 100. Singular Value Bounds via Frobenius and max-entry norms
-fn singular_value_bounds(a: &Vec<Vec<i64>>) -> (u64, u64) {
-    let mut frob2 = 0u64;
-    let mut maxv = 0i64;
-    for row in a {
-        for &v in row {
-            let av = v.abs() as u64;
-            frob2 += av * av;
-            maxv = maxv.max(v.abs());
-        }
-    }
-    let upper = integer_sqrt(frob2);
-    let lower = maxv as u64;
-    (lower, upper)
-}
-
-// Brent’s Pollard Rho
-fn pollard_rho_brent(n: u64) -> Option<u64> {
-    if n < 2 {
-        return None;
-    }
-
-    // seed values are all u64
-    let mut y: u64 = get_random_number() % n;
-    let c: u64 = get_random_number() % n;
-    let m: u64 = (get_random_number() % (n - 1)) + 1;
-
-    // counters / accumulators must be u64 as well
-    let mut g: u64 = 1;
-    let mut r: u64 = 1;
-    let mut q: u64 = 1;
-
-    let mut x: u64 = 0;
-    let mut ys: u64 = 0;
-
-    while g == 1 {
-        x = y;
-        // “tortoise” step
-        for _ in 0..r {
-            y = (y.wrapping_mul(y).wrapping_add(c)) % n;
-        }
-        let mut k: u64 = 0;
-        // “hare” in blocks of size m
-        while k < r && g == 1 {
-            ys = y;
-            for _ in 0..m {
-                y = (y.wrapping_mul(y).wrapping_add(c)) % n;
-                let diff = if x > y { x - y } else { y - x };
-                // now q is u64, diff is u64 → wrapping_mul resolves!
-                q = q.wrapping_mul(diff) % n;
-            }
-            g = gcd(q, n);
-            k += m;
-        }
-        r <<= 1;
-    }
-
-    // if we hit a failure cycle, backtrack
-    if g == n {
-        loop {
-            ys = (ys.wrapping_mul(ys).wrapping_add(c)) % n;
-            let diff = if x > ys { x - ys } else { ys - x };
-            g = gcd(diff, n);
-            if g > 1 {
-                break;
-            }
-        }
-    }
-
-    if g == n {
-        None
-    } else {
-        Some(g)
-    }
-}
-
-fn solve_quadratic_mod(a: u64, b: u64, c: u64, p: u64) -> Vec<u64> {
-    // 1) Compute `2a mod p` as a u64
-    let two_a = (2u128 * (a as u128) % p as u128) as u64;
-
-    // 2) Find its modular inverse in the i64‐world
-    let inv2a_i = mod_inv(two_a as i64, p as i64).expect("2*a should be invertible mod p");
-
-    // 3) Convert that i64 back into [0..p) as u64
-    let inv2a = (inv2a_i.rem_euclid(p as i64)) as u64;
-
-    // 4) Compute discriminant d = b^2 − 4ac  (mod p)
-    let b2 = (b as u128 * b as u128 % p as u128) as u64;
-    let four_ac = ((4u128 * (a as u128) % p as u128) * (c as u128) % p as u128) as u64;
-    let d = (b2 + p - (four_ac % p)) % p;
-
-    // 5) Try to take a square root mod p
-    if let Some(s) = tonelli_shanks(d, p) {
-        // numerator = −b ± s  mod p
-        let neg_b = (p - (b % p)) % p;
-        let num1 = (neg_b + s) % p;
-        let num2 = (neg_b + (p - s)) % p;
-
-        // the two solutions:
-        let x1 = num1.wrapping_mul(inv2a) % p;
-        let x2 = num2.wrapping_mul(inv2a) % p;
-
-        if x1 == x2 {
-            vec![x1]
-        } else {
-            vec![x1, x2]
-        }
-    } else {
-        // no solution
-        vec![]
-    }
-}
-
-// 3. Rabin Cryptosystem Core
-fn rabin_encrypt(m: u64, n: u64) -> u64 {
-    m.wrapping_mul(m) % n
-}
-fn rabin_decrypt(c: u64, p: u64, q: u64) -> Vec<u64> {
-    let n = p * q;
-    let r_p = tonelli_shanks(c % p, p).unwrap_or(0);
-    let r_q = tonelli_shanks(c % q, q).unwrap_or(0);
-    let inv_p = mod_inv(p as i64, q as i64).unwrap() as u64;
-    let inv_q = mod_inv(q as i64, p as i64).unwrap() as u64;
-    let mut res = Vec::new();
-    for &s_p in &[r_p, (p - r_p) % p] {
-        for &s_q in &[r_q, (q - r_q) % q] {
-            let x = (s_p.wrapping_mul(q).wrapping_mul(inv_q) + s_q.wrapping_mul(p).wrapping_mul(inv_p)) % n;
-            res.push(x);
-        }
-    }
-    res
-}
-
-// 4. Merkle-Hellman Knapsack
-#[allow(dead_code)]
-fn mh_keygen(n: usize) -> (Vec<u64>, u64, u64) {
-    let mut w = Vec::with_capacity(n);
-    let mut sum = 0;
-    for _ in 0..n {
-        let x = sum + (get_random_number() % 10 + 1);
-        w.push(x);
-        sum += x;
-    }
-    let q = sum + (get_random_number() % 10 + 1);
-    let mut r = get_random_number() % q;
-    while gcd(r, q) != 1 {
-        r = get_random_number() % q;
-    }
-    let beta = w.iter().map(|&wi| wi * r % q).collect();
-    (beta, q, r)
-}
-fn mh_encrypt(pubkey: &Vec<u64>, msg: &[u8]) -> u64 {
-    msg.iter().zip(pubkey).map(|(&b, &k)| (b as u64) * k).sum()
-}
-
-#[allow(dead_code)]
-fn mh_decrypt(w: &Vec<u64>, q: u64, r: u64, c: u64) -> Vec<u8> {
-    let inv_r = mod_inv(r as i64, q as i64).unwrap() as u64;
-    let mut s = c.wrapping_mul(inv_r) % q;
-    let mut m = Vec::new();
-    for &wi in w.iter().rev() {
-        if wi <= s {
-            m.push(1);
-            s -= wi;
-        } else {
-            m.push(0);
-        }
-    }
-    m.reverse();
-    m
-}
-
-// 5. Recurrence Relation Solver (companion matrix)
-#[allow(dead_code)]
-fn rec_nth(coefs: &[i64], init: &[i64], n: u64) -> i64 {
-    let k = coefs.len();
-    if n < k as u64 {
-        return init[n as usize];
-    }
-    // build matrix
-    let mut m = vec![vec![0i64; k]; k];
-    for i in 0..k - 1 {
-        m[i + 1][i] = 1;
-    }
-    for j in 0..k {
-        m[0][j] = coefs[j];
-    }
-    let mp = mat_pow_i64(m, n - (k as u64 - 1));
-    let mut res = 0i64;
-    for i in 0..k {
-        res += mp[0][i] as i64 * init[k - 1 - i] as i64;
-    }
-    res as i64
-}
-
-#[allow(dead_code)]
-fn mat_mul_i64(a: Vec<Vec<i64>>, b: Vec<Vec<i64>>) -> Vec<Vec<i64>> {
-    let n = a.len();
-    let mut c = vec![vec![0; n]; n];
-    for i in 0..n {
-        for j in 0..n {
-            for k in 0..n {
-                c[i][j] += a[i][k] * b[k][j];
-            }
-        }
-    }
-    c
-}
-fn mat_pow_i64(mut m: Vec<Vec<i64>>, mut e: u64) -> Vec<Vec<i64>> {
-    let n = m.len();
-    let mut res = vec![vec![0; n]; n];
-    for i in 0..n {
-        res[i][i] = 1;
-    }
-    while e > 0 {
-        if e & 1 == 1 {
-            res = mat_mul_i64(res, m.clone());
-        }
-        m = mat_mul_i64(m.clone(), m.clone());
-        e >>= 1;
-    }
-    res
-}
-
-// 6. Linear Diophantine Solver ax+by+cz=d
-fn solve_linear3(a: i64, b: i64, c: i64, d: i64) -> Option<(i64, i64, i64)> {
-    // 1) gcd of a,b
-    let (g, x0, y0) = extended_gcd(a, b);
-
-    // 2) gcd of g,c
-    let (g2, u, z0) = extended_gcd(g, c);
-
-    // If g2 == 0, then a==b==c==0.
-    // Equation is 0·x + 0·y + 0·z = d.
-    if g2 == 0 {
-        return if d == 0 {
-            // any (x,y,z) works; choose (0,0,0)
-            Some((0, 0, 0))
-        } else {
-            None
-        };
-    }
-
-    // Now g2 != 0, safe to mod
-    if d % g2 != 0 {
-        return None;
-    }
-
-    // Scale the particular solution by d/g2
-    let k = d / g2;
-    let x00 = x0 * u * k;
-    let y00 = y0 * u * k;
-    let z00 = z0 * k;
-
-    Some((x00, y00, z00))
-}
-
-// 7. kShortest Paths (Yen’s, simple BFS–Dijkstra)
-#[allow(dead_code)]
-fn k_shortest(src: usize, dst: usize, adj: &Vec<Vec<(usize, u64)>>, k: usize) -> Vec<u64> {
-    let mut res = Vec::new();
-    let mut pq = BinaryHeap::new();
-    pq.push((0xFFFFFFFFFFFFFFFF, vec![src])); // max-heap: store (-cost, path)
-    while let Some((nc, path)) = pq.pop() {
-        let cost = !nc;
-        let u = *path.last().unwrap();
-        if u == dst {
-            res.push(cost);
-            if res.len() >= k {
-                break;
-            }
-        }
-        for &(v, w) in &adj[u] {
-            if !path.contains(&v) {
-                let mut p2 = path.clone();
-                p2.push(v);
-                pq.push((!(cost + w), p2));
-            }
-        }
-    }
-    res
-}
-
-// Continued Fraction Factorization (basic)
-#[allow(dead_code)]
-fn cf_factor(n: u64) -> Option<u64> {
-    if n % 2 == 0 {
-        return Some(2);
-    }
-    let a0 = integer_sqrt(n);
-    if a0 * a0 == n {
-        return Some(a0);
-    }
-
-    let mut p_prev = 0u64;
-    let mut p = a0;
-    let mut q = n - a0 * a0;
-    let mut a = a0;
-    let mut h2 = 0u64;
-    let mut h1 = 1u64;
-    let mut k2 = 1u64;
-    let mut k1 = 0u64;
-
-    for _ in 0..5000 {
-        // 1) Next convergent h/k
-        let h = a.wrapping_mul(h1).wrapping_add(h2);
-        let k = a.wrapping_mul(k1).wrapping_add(k2);
-
-        // 2) f = h² − n·k², skip on overflow
-        let hh = match h.checked_mul(h) {
-            Some(v) => v,
-            None => continue,
-        };
-        let kk = match k.checked_mul(k) {
-            Some(v) => v,
-            None => continue,
-        };
-        let nk = match (n as u128).checked_mul(kk as u128) {
-            Some(v) => v,
-            None => continue,
-        };
-
-        let af = if (hh as u128) >= nk {
-            (hh as u128 - nk) as u64
-        } else {
-            (nk - hh as u128) as u64
-        };
-
-        // 3) perfect square?
-        let s = integer_sqrt(af);
-        if s != 0 && s * s == af {
-            let g = gcd(h + s, n);
-            if g > 1 && g < n {
-                return Some(g);
-            }
-        }
-
-        // 4) advance CF terms—but in i128 to avoid underflow
-        //    numerator = n - p_next^2
-        let p_next = a.wrapping_mul(q).wrapping_sub(p_prev);
-        let numerator = (n as i128) - (p_next as i128) * (p_next as i128);
-        if numerator < 0 {
-            // numerical glitch—skip this iteration
-            p_prev = p;
-            p = p_next;
-            // keep q and a unchanged so we don’t break the CF stream
-            h2 = h1;
-            h1 = h;
-            k2 = k1;
-            k1 = k;
-            continue;
-        }
-        // guard division by zero
-        if q == 0 {
-            break;
-        }
-        let q_next = (numerator / (q as i128)) as u64;
-        let a_next = (a0 + p_next) / q_next;
-
-        // rotate state
-        p_prev = p;
-        p = p_next;
-        q = q_next;
-        a = a_next;
-        h2 = h1;
-        h1 = h;
-        k2 = k1;
-        k1 = k;
-    }
-    None
-}
-
-// RSA Key Generation
-fn rsa_keygen() -> (u64, u64, u64) {
-    let p = next_prime(get_random_number() % 1000 + 100);
-    let mut q;
-    loop {
-        q = next_prime(get_random_number() % 1000 + 100);
-        if q != p {
-            break;
-        }
-    }
-    let n = p * q;
-    let phi = (p - 1) * (q - 1);
-    let e = 65537 % phi;
-    let d = mod_inv(e as i64, phi as i64).unwrap() as u64;
-    (n, e, d)
-}
-
-// ─── 17. ElGamal Key Generation ────────────────────────────────────────────
-#[allow(dead_code)]
-fn elgamal_keygen() -> (u64, u64, u64, u64) {
-    let p = next_prime(get_random_number() % 1000 + 100);
-    let g = primitive_root(p);
-    let x = (get_random_number() % (p - 2)) + 1;
-    let h = mod_exp(g, x, p);
-    (p, g, h, x)
-}
-
-// ─── 19. DSA Core ─────────────────────────────────────────────────────────
-
-fn dsa_sign(m: u64, p: u64, q: u64, g: u64, x: u64) -> (u64, u64) {
-    let k = (get_random_number() % (q - 1)) + 1;
-    let r = mod_exp(g, k, p) % q;
-    let kinv = mod_inv(k as i64, q as i64).unwrap() as u64;
-    let s = (kinv * ((m + x * r) % q)) % q;
-    (r, s)
-}
-fn dsa_verify(m: u64, r: u64, s: u64, p: u64, q: u64, g: u64, y: u64) -> bool {
-    if r == 0 || r >= q || s == 0 || s >= q {
-        return false;
-    }
-    let w = mod_inv(s as i64, q as i64).unwrap() as u64;
-    let u1 = (m * w) % q;
-    let u2 = (r * w) % q;
-    let v = (mod_exp(g, u1, p) * mod_exp(y, u2, p) % p) % q;
-    v == r
-}
-
-// ─── 53. Generating Function Coefficients ─────────────────────────────────
-
-fn gf_coeff(P: &[i64], Q: &[i64], N: usize) -> Vec<i64> {
-    let d = Q.len() - 1;
-    let mut a = vec![0i64; N + 1];
-    for n in 0..=N {
-        let mut sum = if n < P.len() { P[n] } else { 0 };
-        for i in 1..=d {
-            if n >= i {
-                sum -= a[n - i] * Q[i];
-            }
-        }
-        a[n] = sum / Q[0];
-    }
-    a
-}
-
-// ─── 81. Range Tree Queries (1D) ──────────────────────────────────────────
-
-struct RangeTree1D {
-    xs: Vec<i64>,
-}
-
-impl RangeTree1D {
-    fn new(mut xs: Vec<i64>) -> Self {
-        xs.sort_unstable();
-        RangeTree1D { xs }
-    }
-    fn query(&self, l: i64, r: i64) -> usize {
-        let left = self.xs.binary_search(&l).unwrap_or_else(|i| i);
-        let right = self.xs.binary_search(&r).unwrap_or_else(|i| i);
-        if right >= left {
-            right - left
-        } else {
-            0
-        }
-    }
-}
-
-fn run_program(idx: u8) -> u64 {
+fn run_program(idx: u8) -> (u64, Vec<u64>) {
     let gas_start = unsafe { gas() };
 
-    match idx {
+    let result = match idx {
         0 => {
             let n = (get_random_number() % 30) as u32;
-            call_log(3, None, &format!("tribonacci({}) = {}", n, tribonacci(n)));
+            let res = tribonacci(n);
+            call_log(3, None, &format!("tribonacci({}) = {}", n, res));
+            vec![res]
         }
 
         1 => {
             // Narayana Numbers
             let n = (get_random_number() % 20) + 1;
             let k = (get_random_number() % n) + 1;
-            call_log(3, None, &format!("narayana({}, {}) = {}", n, k, narayana(n, k)));
+            let res = narayana(n, k);
+            call_log(3, None, &format!("narayana({}, {}) = {}", n, k, res));
+            vec![res]
         }
         2 => {
             // Motzkin Numbers
             let n = (get_random_number() % 20) as usize;
-            call_log(3, None, &format!("motzkin({}) = {}", n, motzkin(n)));
+            let res = motzkin(n);
+            call_log(3, None, &format!("motzkin({}) = {}", n, res));
+            vec![res]
         }
 
         3 => {
-            // Quadratic Residue Test
-            let p = ((get_random_number() % 50) | 1) + 2;
-            let a = get_random_number() % p;
-            call_log(
-                3,
-                None,
-                &format!("is_quadratic_residue({}, {}) = {}", a, p, is_quadratic_residue(a, p)),
-            );
-        }
-
-        4 => {
-            // Wilson's Theorem
-            let p = ((get_random_number() % 50) | 1) + 2;
-            call_log(3, None, &format!("is_wilson_prime({}) = {}", p, is_wilson_prime(p)));
-        }
-        5 => {
-            // Solovay Strassen Test
-            let n = (get_random_number() % 1000) + 3 | 1;
-            call_log(3, None, &format!("solovay_strassen({}) = {}", n, solovay_strassen(n, 5)));
-        }
-        6 => {
-            // Fermat Factorization ;
-            let n = ((get_random_number() % 500) + 4) * 2 + 1;
-            call_log(3, None, &format!("fermat_factor({}) = {:?}", n, fermat_factor(n)));
-        }
-
-        7 => {
-            // Diffie-Hellman Shared Secret
-            call_log(3, None, &format!("diffie hellman {}", diffie_hellman()));
-        }
-
-        8 => {
-            // LFSR Sequence (16-bit)
-            let mut state = (get_random_number() & 0xFFFF) as u16;
-            // generate 8 bits
-            let mut byte = 0u8;
-            for i in 0..8 {
-                let bit = (lfsr_next(&mut state) & 1) as u8;
-                byte |= bit << i;
-            }
-            call_log(3, None, &format!("lfsr {:02X}", byte));
-        }
-        9 => {
-            // Blum Blum Shub Output
-            let p = 1009u64;
-            let q = 1013u64;
-            let n = p * q;
-            let mut x = get_random_number() % n;
-            while gcd(x, n) != 1 {
-                x = get_random_number() % n;
-            }
-            x = bbs_next(x, n);
-            call_log(3, None, &format!("bbs_next {}", x));
-        }
-
-        10 => {
-            // Bin Packing FFD
-            let mut items = (0..10).map(|_| get_random_number() % 50 + 1).collect::<Vec<_>>();
-            let bins = bin_packing_ffd(&mut items, 100);
-            call_log(3, None, &format!("bin_packing_ffd = {}", bins));
-        }
-        11 => {
-            // Burnside’s Necklace
-            let n = (get_random_number() % 10 + 1) as usize;
-            let k = get_random_number() % 5 + 2;
-            call_log(
-                3,
-                None,
-                &format!("burnside_necklace distinct colorings = {}", burnside_necklace(n, k)),
-            );
-        }
-
-        12 => {
-            // Young Tableaux
-            let r = (get_random_number() % 4 + 1) as usize;
-            let c = (get_random_number() % 4 + 1) as usize;
-            call_log(3, None, &format!("young_tableaux {}×{} → {}", r, c, young_tableaux((r, c))));
-        }
-        13 => {
-            // Frobenius Coin
-            let a = (get_random_number() % 20) + 2;
-            let b = (get_random_number() % 20) + 2;
-            call_log(3, None, &format!("frobenius({}, {}) = {}", a, b, frobenius(a, b)));
-        }
-        14 => {
-            // Partition mod m
-            let n = (get_random_number() % 50) as usize;
-            let m = (get_random_number() % 100) + 1;
-            call_log(3, None, &format!("p({}) mod {} = {}", n, m, partition_mod(n, m)));
-        }
-        15 => {
-            // q-Analog
-            let n = get_random_number() % 20;
-            let q = (get_random_number() % 5) + 1;
-            call_log(3, None, &format!("q_analog[{}]_{} = {}", n, q, q_analog(n, q)));
-        }
-
-        16 => {
-            // Condition Number (2x2)
-            let a = [
-                [(get_random_number() % 101) as i64 - 50, (get_random_number() % 101) as i64 - 50],
-                [(get_random_number() % 101) as i64 - 50, (get_random_number() % 101) as i64 - 50],
-            ];
-            let cond = condition_number_2x2(a);
-            call_log(3, None, &format!("condition_number_2x2 A={:?} ={}", a, cond));
-        }
-
-        17 => {
-            // Pollard-Rho Brent
-            let n = (get_random_number() % 1000) | 1;
-            call_log(3, None, &format!("pollard_rho_brent {:?}", pollard_rho_brent(n)));
-        }
-        18 => {
-            // 1D Range Tree Query
-
-            let xs: Vec<i64> = (0..20).map(|_| (get_random_number() % 100) as i64).collect();
-            let tree = RangeTree1D::new(xs);
-            let a = (get_random_number() % 100) as i64;
-            let b = (get_random_number() % 100) as i64;
-            let (l, r) = if a <= b { (a, b) } else { (b, a) };
-            let cnt = tree.query(l, r);
-            call_log(3, None, &format!("OneDRangeTreeQuery [{},{}] → {}", l, r, cnt));
-        }
-
-        19 => {
-            // RSA KeyGen
-            let (n, e, d) = rsa_keygen();
-            call_log(3, None, &format!("rsa_keygen n={}, e={}, d={}", n, e, d));
-        }
-
-        20 => {
-            // DSA Sign/Verify
-            // fixed params
-            let p = next_prime(500);
-            let q = next_prime(100);
-            let g = primitive_root(p);
-            let x = (get_random_number() % (q - 1)) + 1;
-            let y = mod_exp(g, x, p);
-
-            let m = get_random_number() % q;
-            let (r, s) = dsa_sign(m, p, q, g, x);
-            let ok = dsa_verify(m, r, s, p, q, g, y);
-            call_log(3, None, &format!("m={}, r={}, s={}, ok={}", m, r, s, ok));
-        }
-        21 => {
-            //  GF Coeffs of 1/(1-x-x^2)
-            let P = vec![1];
-            let Q = vec![1, -1, -1];
-            let n = (get_random_number() % 20) as usize;
-            let coeffs = gf_coeff(&P, &Q, n);
-            call_log(3, None, &format!("gf_coeff[{}] = {}", n, coeffs[n]));
-        }
-        22 => {
             // Legendre Symbol
             let p = ((get_random_number() % 1000) | 1) + 2;
             let a = (get_random_number() % p) as i64;
-            call_log(
-                3,
-                None,
-                &format!("legendre_symbol ( {}/{}) = {}", a, p, legendre_symbol(a, p as i64)),
-            );
+            let res = legendre_symbol(a, p as i64);
+            call_log(3, None, &format!("legendre_symbol ( {}/{}) = {}", a, p, res));
+            vec![res as u64]
+        }
+        4 => {
+            // Tonelli-Shanks Algorithm
+            let p = ((get_random_number() % 1000) | 1) + 2;
+            let n = get_random_number() % p;
+            match tonelli_shanks(n, p) {
+                Some(r) => {
+                    call_log(3, None, &format!("tonelli_shanks({}, {}) = {}", n, p, r));
+                    vec![r]
+                }
+                None => {
+                    call_log(3, None, &format!("tonelli_shanks({}, {}) = none", n, p));
+                    vec![0]
+                }
+            }
+        }
+        5 => {
+            // Miller-Rabin Primality Test
+            let n = ((get_random_number() % 10_000) | 1) + 2;
+            let res = is_prime_miller(n);
+            call_log(3, None, &format!("is_prime_miller({}) = {}", n, res));
+            vec![res as u64]
+        }
+        6 => {
+            // Prime Factorization
+            let n = (get_random_number() % 10_000) + 2;
+            let factors = prime_factors(n);
+            call_log(3, None, &format!("prime_factors({}) = {:?}", n, factors));
+            factors
+        }
+        7 => {
+            // Primitive Root
+            let p = next_prime((get_random_number() % 100) + 2);
+            let res = primitive_root(p);
+            call_log(3, None, &format!("primitive_root({}) = {}", p, res));
+            vec![res]
+        }
+        8 => {
+            // Fibonacci pair
+            let n = get_random_number() % 50;
+            let (f1, f2) = fib(n);
+            call_log(3, None, &format!("fib({}) = ({}, {})", n, f1, f2));
+            vec![f1, f2]
+        }
+        9 => {
+            // Catalan Number
+            let n = get_random_number() % 20;
+            let res = catalan(n);
+            call_log(3, None, &format!("catalan({}) = {}", n, res));
+            vec![res]
+        }
+        10 => {
+            // Bell Number
+            let n = (get_random_number() % 15) as usize;
+            let res = bell(n);
+            call_log(3, None, &format!("bell({}) = {}", n, res));
+            vec![res]
+        }
+        11 => {
+            // Derangement
+            let n = (get_random_number() % 20) as u32;
+            let res = derangement(n);
+            call_log(3, None, &format!("derangement({}) = {}", n, res));
+            vec![res]
+        }
+        12 => {
+            // Eulerian Number
+            let n = (get_random_number() % 12) as usize + 1;
+            let k = (get_random_number() % n as u64) as usize;
+            let res = eulerian(n, k);
+            call_log(3, None, &format!("eulerian({}, {}) = {}", n, k, res));
+            vec![res]
+        }
+        13 => {
+            // Partition Count
+            let n = (get_random_number() % 50) as usize;
+            let res = partition_count(n);
+            call_log(3, None, &format!("partition_count({}) = {}", n, res));
+            vec![res]
+        }
+        14 => {
+            // Perfect Power Test
+            let n = (get_random_number() % 100_000) + 2;
+            match perfect_power(n) {
+                Some((base, exp)) => {
+                    call_log(3, None, &format!("perfect_power({}) = {}^{}", n, base, exp));
+                    vec![base, exp as u64]
+                }
+                None => {
+                    call_log(3, None, &format!("perfect_power({}) = none", n));
+                    vec![n, 1]
+                }
+            }
+        }
+        15 => {
+            // Binomial Coefficient
+            let n = get_random_number() % 30;
+            let k = get_random_number() % (n + 1);
+            let res = binomial(n, k);
+            call_log(3, None, &format!("binomial({}, {}) = {}", n, k, res));
+            vec![res]
+        }
+        16 => {
+            // Extended GCD
+            let a = (get_random_number() % 1000) as i64 + 1;
+            let b = (get_random_number() % 1000) as i64 + 1;
+            let (g, x, y) = extended_gcd(a, b);
+            call_log(3, None, &format!("extended_gcd({}, {}) = gcd={}, x={}, y={}", a, b, g, x, y));
+            vec![g as u64, x as u64, y as u64]
+        }
+        17 => {
+            // Chinese Remainder Theorem (CRT2)
+            let a1 = (get_random_number() % 100) as i64;
+            let n1 = ((get_random_number() % 98) + 2) as i64;
+            let a2 = (get_random_number() % 100) as i64;
+            let n2 = ((get_random_number() % 98) + 2) as i64;
+            if gcd(n1 as u64, n2 as u64) == 1 {
+                let res = crt2(a1, n1, a2, n2);
+                call_log(3, None, &format!("crt2({} mod {}, {} mod {}) = {}", a1, n1, a2, n2, res));
+                vec![res as u64]
+            } else {
+                call_log(3, None, &format!("crt2 - moduli not coprime"));
+                vec![0]
+            }
+        }
+        18 => {
+            // LCM (Least Common Multiple)
+            let a = (get_random_number() % 10_000) + 1;
+            let b = (get_random_number() % 10_000) + 1;
+            let res = lcm(a, b);
+            call_log(3, None, &format!("lcm({}, {}) = {}", a, b, res));
+            vec![res]
+        }
+        19 => {
+            // Knapsack 0/1
+            let n = (get_random_number() % 8) as usize + 3;
+            let mut weights = Vec::new();
+            let mut values = Vec::new();
+            for _ in 0..n {
+                weights.push((get_random_number() % 20 + 1) as usize);
+                values.push(get_random_number() % 50 + 1);
+            }
+            let cap = (get_random_number() % 50 + 20) as usize;
+            let res = knapsack(&weights, &values, cap);
+            call_log(3, None, &format!("knapsack(cap={}) = {}", cap, res));
+            vec![res]
+        }
+        20 => {
+            // LCS (Longest Common Subsequence)
+            let len1 = (get_random_number() % 10 + 5) as usize;
+            let len2 = (get_random_number() % 10 + 5) as usize;
+            let mut a = Vec::new();
+            let mut b = Vec::new();
+            for _ in 0..len1 {
+                a.push((get_random_number() % 26 + 97) as u8); // a-z
+            }
+            for _ in 0..len2 {
+                b.push((get_random_number() % 26 + 97) as u8);
+            }
+            let res = lcs(&a, &b);
+            call_log(3, None, &format!("lcs(len1={}, len2={}) = {}", len1, len2, res));
+            vec![res as u64]
+        }
+        21 => {
+            // LIS (Longest Increasing Subsequence)
+            let len = (get_random_number() % 15 + 5) as usize;
+            let mut seq = Vec::new();
+            for _ in 0..len {
+                seq.push(get_random_number() % 100);
+            }
+            let res = lis_length(&seq);
+            call_log(3, None, &format!("lis_length(len={}) = {}", len, res));
+            vec![res as u64]
+        }
+        22 => {
+            // Levenshtein Distance (Edit Distance)
+            let len1 = (get_random_number() % 10 + 5) as usize;
+            let len2 = (get_random_number() % 10 + 5) as usize;
+            let mut a = Vec::new();
+            let mut b = Vec::new();
+            for _ in 0..len1 {
+                a.push((get_random_number() % 26 + 97) as u8); // a-z
+            }
+            for _ in 0..len2 {
+                b.push((get_random_number() % 26 + 97) as u8);
+            }
+            let res = levenshtein(&a, &b);
+            call_log(3, None, &format!("levenshtein(len1={}, len2={}) = {}", len1, len2, res));
+            vec![res as u64]
         }
         23 => {
             // Lucas–Lehmer Test
             let p = (get_random_number() % 50) + 2;
-            call_log(3, None, &format!("lucas_lehmer M_{} is prime? {}", p, lucas_lehmer(p)));
+            let res = lucas_lehmer(p);
+            call_log(3, None, &format!("lucas_lehmer M_{} is prime? {}", p, res));
+            vec![res as u64]
         }
         24 => {
             // Lucas Sequence
@@ -4735,17 +2683,22 @@ fn run_program(idx: u8) -> u64 {
             let m = (get_random_number() % 100) as i64 + 1;
             let (U, V) = lucas_sequence(n, P, Q, m);
             call_log(3, None, &format!("lucas_sequence U_{},V_{} mod {} = ({},{})", n, n, m, U, V));
+            vec![U as u64, V as u64]
         }
 
         25 => {
             // Baillie–PSW Primality Test
             let n = ((get_random_number() % 10_000) | 1) + 2;
-            call_log(3, None, &format!("baillie_psw {} is prime? {}", n, baillie_psw(n)));
+            let res = baillie_psw(n);
+            call_log(3, None, &format!("baillie_psw {} is prime? {}", n, res));
+            vec![res as u64]
         }
         26 => {
             // Newton Integer √
             let n = get_random_number() % 1_000_000;
-            call_log(3, None, &format!("newton_sqrt {} = {}", n, newton_sqrt(n)));
+            let res = newton_sqrt(n);
+            call_log(3, None, &format!("newton_sqrt {} = {}", n, res));
+            vec![res]
         }
         27 => {
             // Bareiss 3×3 Determinant
@@ -4755,7 +2708,9 @@ fn run_program(idx: u8) -> u64 {
                     mat[i][j] = (get_random_number() % 101) as i64 - 50;
                 }
             }
-            call_log(3, None, &format!("det_bareiss_3x3 det = {}", det_bareiss_3x3(mat)));
+            let res = det_bareiss_3x3(mat);
+            call_log(3, None, &format!("det_bareiss_3x3 det = {}", res));
+            vec![res as u64]
         }
         28 => {
             // Smith Normal Form 2×2
@@ -4765,10 +2720,10 @@ fn run_program(idx: u8) -> u64 {
             ];
             let (d1, d2) = smith_normal_form_2x2(mat);
             call_log(3, None, &format!("smith_normal_form_2x2 diag({}, {})", d1, d2));
+            vec![d1 as u64, d2 as u64]
         }
         29 => {
             // Hermite Normal Form 2×2
-
             let mat = [
                 [(get_random_number() % 101) as i64 - 50, (get_random_number() % 101) as i64 - 50],
                 [(get_random_number() % 101) as i64 - 50, (get_random_number() % 101) as i64 - 50],
@@ -4779,6 +2734,7 @@ fn run_program(idx: u8) -> u64 {
                 None,
                 &format!("hermite_normal_form_2x2 H = [[{},{}],[{},{}]]", h[0][0], h[0][1], h[1][0], h[1][1]),
             );
+            vec![h[0][0] as u64, h[0][1] as u64, h[1][0] as u64, h[1][1] as u64]
         }
         30 => {
             // LLL Reduction in 2D
@@ -4786,6 +2742,7 @@ fn run_program(idx: u8) -> u64 {
             let b2 = ((get_random_number() % 101) as i64 - 50, (get_random_number() % 101) as i64 - 50);
             let (r1, r2) = lll_reduce_2d(b1, b2);
             call_log(3, None, &format!("lll_reduce_2d b1={:?}, b2={:?}", r1, r2));
+            vec![r1.0 as u64, r1.1 as u64, r2.0 as u64, r2.1 as u64]
         }
 
         31 => {
@@ -4793,53 +2750,65 @@ fn run_program(idx: u8) -> u64 {
             let base = get_random_number() % 1_000;
             let exp = get_random_number() % 1_000;
             let m = (get_random_number() % 1_000) + 1;
-            call_log(
-                3,
-                None,
-                &format!("mod_exp_ladder({}, {}, {}) = {}", base, exp, m, mod_exp_ladder(base, exp, m)),
-            );
+            let res = mod_exp_ladder(base, exp, m);
+            call_log(3, None, &format!("mod_exp_ladder({}, {}, {}) = {}", base, exp, m, res));
+            vec![res]
         }
 
         32 => {
-            // Stein’s Binary GCD
+            // Stein's Binary GCD
             let a = get_random_number() % 1_000_000;
             let b = get_random_number() % 1_000_000;
-            call_log(3, None, &format!("stein_gcd({}, {}) = {}", a, b, stein_gcd(a, b)));
+            let res = stein_gcd(a, b);
+            call_log(3, None, &format!("stein_gcd({}, {}) = {}", a, b, res));
+            vec![res]
         }
         33 => {
             // Subtraction‑Only GCD
             let a = get_random_number() % 1_000_000;
             let b = get_random_number() % 1_000_000;
-            call_log(3, None, &format!("sub_gcd({}, {}) = {}", a, b, sub_gcd(a, b)));
+            let res = sub_gcd(a, b);
+            call_log(3, None, &format!("sub_gcd({}, {}) = {}", a, b, res));
+            vec![res]
         }
 
         34 => {
             // Integer Log via Multiplication
             let n = (get_random_number() % 1_000_000) + 1;
             let b = (get_random_number() % 9) + 2;
-            call_log(3, None, &format!("integer_log_mul({}, {}) = {}", n, b, integer_log_mul(n, b)));
+            let res = integer_log_mul(n, b);
+            call_log(3, None, &format!("integer_log_mul({}, {}) = {}", n, b, res));
+            vec![res as u64]
         }
         35 => {
             // Integer Log via Division
             let n = (get_random_number() % 1_000_000) + 1;
             let b = (get_random_number() % 9) + 2;
-            call_log(3, None, &format!("integer_log_div({}, {}) = {}", n, b, integer_log_div(n, b)));
+            let res = integer_log_div(n, b);
+            call_log(3, None, &format!("integer_log_div({}, {}) = {}", n, b, res));
+            vec![res as u64]
         }
         36 => {
             // Perfect Square Test
             let n = get_random_number() % 1_000_000;
-            call_log(3, None, &format!("is_perfect_square({}) = {}", n, is_perfect_square(n)));
+            let res = is_perfect_square(n);
+            call_log(3, None, &format!("is_perfect_square({}) = {}", n, res));
+            vec![res as u64]
         }
 
         37 => {
             // Coin Change Count
             let n = (get_random_number() % 100) as usize;
-            call_log(3, None, &format!("coin_change_count({})={}", n, coin_change_count(n)));
+            let res = coin_change_count(n);
+            call_log(3, None, &format!("coin_change_count({})={}", n, res));
+            vec![res]
         }
         38 => {
             // Coin Change Min
             let n = (get_random_number() % 100) as usize;
-            call_log(3, None, &format!("coin_change_min({})={}", n, coin_change_min(n)));
+            let res = coin_change_min(n);
+            call_log(3, None, &format!("coin_change_min({})={}", n, res));
+            vec![res as u64]
         }
 
         39 => {
@@ -4850,6 +2819,10 @@ fn run_program(idx: u8) -> u64 {
             let me = mod_exp(base, exp, m);
             let inv = mod_inv(base as i64, m as i64);
             call_log(3, None, &format!("mod_exp({},{},{})={}, mod_inv={:?}", base, exp, m, me, inv));
+            match inv {
+                Some(i) => vec![me, i as u64],
+                None => vec![me],
+            }
         }
         40 => {
             // CRT2, Garner & Nth‑Root
@@ -4857,8 +2830,11 @@ fn run_program(idx: u8) -> u64 {
             let n1 = ((get_random_number() % 98) + 2) as i64;
             let a2 = (get_random_number() % 100) as i64;
             let n2 = ((get_random_number() % 98) + 2) as i64;
+            let mut results = Vec::new();
             if gcd(n1 as u64, n2 as u64) == 1 {
-                call_log(3, None, &format!("crt2 = {}", crt2(a1, n1, a2, n2)));
+                let crt_res = crt2(a1, n1, a2, n2);
+                call_log(3, None, &format!("crt2 = {}", crt_res));
+                results.push(crt_res as u64);
             }
             // Garner
             let mods = [2, 3, 5];
@@ -4867,15 +2843,16 @@ fn run_program(idx: u8) -> u64 {
                 (get_random_number() % 3) as i64,
                 (get_random_number() % 5) as i64,
             ];
-            call_log(3, None, &format!("garner = {}", garner(&rems, &mods)));
+            let garner_res = garner(&rems, &mods);
+            call_log(3, None, &format!("garner = {}", garner_res));
+            results.push(garner_res as u64);
             // Nth‑root
             let n = get_random_number() % 1_000_000;
             let k = (get_random_number() % 4) + 2;
-            call_log(
-                3,
-                None,
-                &format!("nth_root({},{}) = {}", n, k, integer_nth_root(n, k.try_into().unwrap())),
-            );
+            let root_res = integer_nth_root(n, k.try_into().unwrap());
+            call_log(3, None, &format!("nth_root({},{}) = {}", n, k, root_res));
+            results.push(root_res);
+            results
         }
 
         41 => {
@@ -4884,13 +2861,16 @@ fn run_program(idx: u8) -> u64 {
             for i in 0..NTT_N {
                 poly[i] = get_random_number() % MOD_NTT;
             }
-            call_log(3, None, &format!("ntt({:?}) = {:?}", poly, ntt(&poly)));
+            let res = ntt(&poly);
+            call_log(3, None, &format!("ntt({:?}) = {:?}", poly, res));
+            res.to_vec()
         }
         42 => {
             // CORDIC Rotation
             let angle = (get_random_number() % 200_001) as i32 - 100_000;
             let (c, s) = cordic(angle);
             call_log(3, None, &format!("angle={} → cos≈{}, sin≈{}", angle, c, s));
+            vec![c as u64, s as u64]
         }
 
         43 => {
@@ -4900,18 +2880,27 @@ fn run_program(idx: u8) -> u64 {
                 a: 1664525,
                 c: 1013904223,
             };
-            call_log(3, None, &format!("lcg.next() = {}", lcg.next()));
-            call_log(3, None, &format!("xorshift64 = {}", xorshift64(get_random_number() as u64)));
+            let lcg_res = lcg.next();
+            call_log(3, None, &format!("lcg.next() = {}", lcg_res));
+
+            let xor_res = xorshift64(get_random_number() as u64);
+            call_log(3, None, &format!("xorshift64 = {}", xor_res));
+
             let mut pcg = Pcg {
                 state: get_random_number() as u64,
                 inc: get_random_number() as u64,
             };
-            call_log(3, None, &format!("pcg.next() = {}", pcg.next()));
+            let pcg_res = pcg.next();
+            call_log(3, None, &format!("pcg.next() = {}", pcg_res));
+
             let mut mwc = Mwc {
                 state: get_random_number() as u64,
                 carry: get_random_number() as u64 & 0xFFFF_FFFF,
             };
-            call_log(3, None, &format!("mwc.next() = {}", mwc.next()));
+            let mwc_res = mwc.next();
+            call_log(3, None, &format!("mwc.next() = {}", mwc_res));
+
+            vec![lcg_res as u64, xor_res, pcg_res as u64, mwc_res as u64]
         }
         44 => {
             // CRC32, Adler-32, FNV-1a, Murmur, Jenkins
@@ -4920,119 +2909,186 @@ fn run_program(idx: u8) -> u64 {
             for _ in 0..len {
                 data.push(get_random_number() as u8);
             }
+            let crc = crc32(&data);
+            let adler = adler32(&data);
+            let fnv = fnv1a(&data);
+            let murmur = murmur3_finalizer(get_random_number() as u32);
+            let jenk = jenkins(&data);
             call_log(
                 3,
                 None,
                 &format!(
                     "crc32={:08x}, adler32={:08x}, fnv1a={:08x}, murmur3={:08x}, jenkins={:08x}",
-                    crc32(&data),
-                    adler32(&data),
-                    fnv1a(&data),
-                    murmur3_finalizer(get_random_number() as u32),
-                    jenkins(&data)
+                    crc, adler, fnv, murmur, jenk
                 ),
             );
+            vec![crc as u64, adler as u64, fnv as u64, murmur as u64, jenk as u64]
         }
         45 => {
-            // Euler’s Totient φ(n)
+            // Euler's Totient φ(n)
             let n = (get_random_number() % 100_000) + 1;
-            call_log(3, None, &format!("eulerTotient phi({}) = {}", n, phi(n)));
+            let res = phi(n);
+            call_log(3, None, &format!("eulerTotient phi({}) = {}", n, res));
+            vec![res]
         }
 
         46 => {
             // Linear SieveMu
             let n = (get_random_number() % 1_000) as usize + 1;
             let mu = linear_mu(n);
-            call_log(3, None, &format!("linear_mu n={}, [n]={}", n, mu[n]));
+            let res = mu[n];
+            call_log(3, None, &format!("linear_mu n={}, [n]={}", n, res));
+            vec![res as u64]
         }
         47 => {
             // Sum of Divisors
             let n = (get_random_number() % 100_000) + 1;
-            call_log(3, None, &format!("SumOfDivisors sigma({}) = {}", n, sigma(n)));
+            let res = sigma(n);
+            call_log(3, None, &format!("SumOfDivisors sigma({}) = {}", n, res));
+            vec![res]
         }
         48 => {
             // Divisor Count d(n)
             let n = (get_random_number() % 100_000) + 1;
-            call_log(3, None, &format!("divisor_count({}) = {}", n, divisor_count(n)));
+            let res = divisor_count(n);
+            call_log(3, None, &format!("divisor_count({}) = {}", n, res));
+            vec![res]
         }
         49 => {
             // Mobius
             let n = (get_random_number() % 100_000) + 1;
-            call_log(3, None, &format!("mobius({}) = {}", n, mobius(n)));
+            let res = mobius(n);
+            call_log(3, None, &format!("mobius({}) = {}", n, res));
+            vec![res as u64]
         }
         50 => {
             // Dirichlet Convolution (1 * id)
             let n = (get_random_number() % 1_000) + 1;
-            call_log(
-                3,
-                None,
-                &format!("dirichlet_convolution (1 * id)({}) = {}", n, dirichlet_convolution(n, |_| 1, |d| d)),
-            );
+            let res = dirichlet_convolution(n, |_| 1, |d| d);
+            call_log(3, None, &format!("dirichlet_convolution (1 * id)({}) = {}", n, res));
+            vec![res]
         }
         51 => {
             // Jacobi Symbol (a/n)
             let n = ((get_random_number() % 999) | 1) + 2; // odd ≥3
             let a = (get_random_number() % (n as u64)) as i64;
-            call_log(
-                2,
-                None,
-                &format!(
-                    "jacobi( {}/{}) = {}",
-                    a,
-                    n,
-                    jacobi(a.try_into().unwrap(), (n as i64).try_into().unwrap())
-                ),
-            );
+            let res = jacobi(a.try_into().unwrap(), (n as i64).try_into().unwrap());
+            call_log(2, None, &format!("jacobi( {}/{}) = {}", a, n, res));
+            vec![res as u64]
         }
         52 => {
-            // Cipolla’s Algorithm
+            // Cipolla's Algorithm
             let p = ((get_random_number() % 1000) | 1) + 2;
             let n = get_random_number() % p;
             match cipolla(n, p) {
-                Some(r) => call_log(3, None, &format!("{}", r)),
-                None => call_log(3, None, &format!("none")),
+                Some(r) => {
+                    call_log(3, None, &format!("{}", r));
+                    vec![r]
+                }
+                None => {
+                    call_log(3, None, &format!("none"));
+                    vec![idx as u64]
+                }
             }
         }
         53..=u8::MAX => {
             call_log(2, None, &format!("not implemented {}", idx));
+            vec![idx as u64]
         }
-    }
+    };
 
     let gas_end = unsafe { gas() };
-    return gas_start - gas_end;
+    (gas_start - gas_end, result)
 }
 
 #[polkavm_derive::polkavm_export]
 extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
 
-       polkavm_derive::sbrk(1024*1024);
+       polkavm_sbrk(1024*1024);
     let args = if let Some(a) = parse_refine_args(start_address, length) {
         a
     } else {
         return (FIRST_READABLE_ADDRESS as u64, 0);
     };
 
-    let out_ptr = core::ptr::addr_of!(output_bytes_32) as *const u8 as u64;
-    let mut bytes_written = 0u64;
     let payload_ptr = args.wi_payload_start_address as *const u8;
     let payload_len = args.wi_payload_length as usize;
     let payload = unsafe { slice::from_raw_parts(payload_ptr, payload_len) };
 
-    // run each (program_id, count) pair
+    // run each (program_id, count) pair and create WriteIntents
     let pairs = payload_len / 2;
     call_log(2, None, &format!("algo refine PAYLOAD {} {}", payload_len, pairs));
+
+    let mut write_intents = Vec::new();
+    let mut total_gas_used = 0u64;
+        let mut export_count: u16 = 0;
+
     for i in 0..pairs {
         let program_id = payload[i * 2];
         let p_id = program_id % 170;
         let count = payload[i * 2 + 1] as u64;
-        let iterations = count * count * count as u64;
+        let iterations = 1 as u64;
         call_log(2, None, &format!("algo refine PROGRAM_ID {} ITERATIONS {}", program_id, iterations));
         let mut gas_used = 0 as u64;
+        let mut all_results = Vec::new();
         for _ in 0..iterations {
-            gas_used += run_program(p_id);
+            let (gas, result) = run_program(p_id);
+            gas_used += gas;
+            all_results.extend(result);
         }
-        // after the last run, grab your sum_bytes
-        // only store up to 32 slots
+        total_gas_used += gas_used;
+
+        // Create a WriteIntent for this pair
+        // Object ID: hash of (pair_index, program_id)
+        let mut id_bytes = [0u8; 2];
+        id_bytes[0] = i as u8;
+        id_bytes[1] = program_id;
+        let object_id = blake2b_hash(&id_bytes);
+
+        // Payload: program_id (1 byte) + count (1 byte) + gas_used (8 bytes LE) + all results (8 bytes each LE)
+        let mut intent_payload = Vec::new();
+        intent_payload.push(program_id);
+        intent_payload.push(count as u8);
+        intent_payload.extend_from_slice(&gas_used.to_le_bytes());
+        for result in all_results {
+            intent_payload.extend_from_slice(&result.to_le_bytes());
+        }
+
+        let mut write_intent = WriteIntent {
+            effect: WriteEffectEntry {
+                object_id,
+                ref_info: ObjectRef {
+                    service_id: args.wi_service_index,
+                    work_package_hash: args.wphash,
+                    index_start: export_count,
+                    index_end: export_count + 1,
+                    version: 1,
+                    payload_length: intent_payload.len() as u32,
+                    timeslot: 0,
+                    gas_used: gas_used as u32,
+                    evm_block: 0,
+                    object_kind: 0,
+                    log_index: 0,
+                    tx_slot: i as u16,
+                },
+                payload: intent_payload,
+            },
+            dependencies: Vec::new(),
+        };
+        // Export payloads to DA segments
+            match write_intent.effect.export_effect(export_count as usize) {
+                Ok(next_index) => {
+                    export_count = next_index;
+                }
+                Err(e) => {
+                    log_error(&format!("  ❌ Failed to export write intent {}: {:?}", i, e));
+                }
+            }
+        write_intents.push(write_intent);
+
+
+
+
         call_log(
             2,
             None,
@@ -5040,59 +3096,207 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
         )
     }
 
-    return (args.wi_payload_start_address, payload_len as u64);
+    // Create ExecutionEffects
+    let effects = ExecutionEffects {
+        export_count,
+        gas_used: total_gas_used,
+        state_root: [0u8; 32],
+        write_intents,
+    };
+
+    // Serialize ExecutionEffects
+    // Format: export_count (2B) | gas_used (8B) | count (2B) | WriteIntent entries
+    let mut buffer = Vec::new();
+    buffer.extend_from_slice(&effects.export_count.to_le_bytes());
+    buffer.extend_from_slice(&effects.gas_used.to_le_bytes());
+
+    let count = effects.write_intents.len() as u16;
+    buffer.extend_from_slice(&count.to_le_bytes());
+
+    for intent in &effects.write_intents {
+        // Serialize: object_id (32B) + object_ref (64B) + dep_count (2B) + payload_length (4B) + payload
+        buffer.extend_from_slice(&intent.effect.object_id);
+        buffer.extend_from_slice(&intent.effect.ref_info.serialize());
+
+        let dep_count = intent.dependencies.len() as u16;
+        buffer.extend_from_slice(&dep_count.to_le_bytes());
+
+        let payload_len = intent.effect.payload.len() as u32;
+        buffer.extend_from_slice(&payload_len.to_le_bytes());
+        buffer.extend_from_slice(&intent.effect.payload);
+    }
+
+    // Leak buffer and return pointer/length
+    let ptr = buffer.as_mut_ptr() as u64;
+    let len = buffer.len() as u64;
+
+
+    return (ptr, len);
 }
 
 #[unsafe(no_mangle)]
 static mut output_bytes_32: [u8; 32] = [0; 32];
-static mut operand: [u8; 512] = [0; 512];
 
 #[polkavm_derive::polkavm_export]
 extern "C" fn accumulate(start_address: u64, length: u64) -> (u64, u64) {
-       polkavm_derive::sbrk(1024*1024);
+    polkavm_sbrk(1024*1024);
 
-    let (_timeslot, _service_index, num_accumulate_inputs) = if let Some(args) = parse_accumulate_args(start_address, length) {
+    let (timeslot, service_id, num_accumulate_inputs) = if let Some(args) = parse_accumulate_args(start_address, length) {
         (args.t, args.s, args.num_accumulate_inputs)
     } else {
         return (FIRST_READABLE_ADDRESS as u64, 0);
     };
-    // fetch 36 byte output which will be (32 byte p_u_hash + 4 byte "a" from payload y)
-    let operand_ptr = core::ptr::addr_of!(operand) as *const u8 as u64;
-    let operand_len = unsafe { fetch(operand_ptr, 0, 512, 15, 0, 0) };
-    let (payload_ptr, payload_len) = match parse_accumulate_operand_args(operand_ptr, operand_len) {
-        Some(args) => (args.output_ptr, args.output_len),
-        None => return (FIRST_READABLE_ADDRESS as u64, 0),
+
+    log_info(&format!("algo accumulate: service_id={} timeslot={} num_inputs={}", service_id, timeslot, num_accumulate_inputs));
+
+    // Fetch accumulate inputs
+    use utils::functions::fetch_accumulate_inputs;
+    let accumulate_inputs = match fetch_accumulate_inputs(num_accumulate_inputs as u64) {
+        Ok(inputs) => inputs,
+        Err(e) => {
+            log_error(&format!("Failed to fetch accumulate inputs: {:?}", e));
+            return (FIRST_READABLE_ADDRESS as u64, 0);
+        }
     };
-    if payload_len < 2 {
-        call_log(2, None, &format!("payload_len too small: {}", payload_len));
+
+    // Read current block number from storage using BLOCK_NUMBER_KEY
+    let block_number = match EvmBlockPayload::read_blocknumber_key(service_id) {
+        Some(num) => num,
+        None => {
+            log_info("Failed to read block number, using 0");
+            0
+        }
+    };
+    let next_block_number = block_number + 1;
+    log_info(&format!("Current block_number={}, next={}", block_number, next_block_number));
+
+    // Collect all WriteIntents from all inputs
+    let mut tx_hashes = Vec::new();
+    let mut receipt_hashes = Vec::new();
+    let mut total_gas_used = 0u64;
+
+    for (idx, input) in accumulate_inputs.iter().enumerate() {
+        use utils::functions::AccumulateInput;
+        let AccumulateInput::OperandElements(operand_elem) = input else {
+            log_error(&format!("Input #{} not OperandElements", idx));
+            continue;
+        };
+
+        let Some(ok_data) = operand_elem.result.ok.as_ref() else {
+            log_error(&format!("Input #{} has no ok_data", idx));
+            continue;
+        };
+
+        // Deserialize ExecutionEffects using EVM's deserializer
+        match deserialize_execution_effects(ok_data) {
+            Some(envelope) => {
+                log_info(&format!("Input #{}: {} writes, gas_used={}", idx, envelope.writes.len(), envelope.gas_used));
+                total_gas_used += envelope.gas_used;
+
+                // Write each object_ref to storage and collect hashes
+                for write in envelope.writes {
+                    // Write object_ref to storage (object_id => object_ref)
+                    write.object_ref.write(&write.object_id);
+
+                    // Add to tx_hashes (the object_id itself)
+                    tx_hashes.push(write.object_id);
+
+                    // Compute hash of object_ref for receipt_hashes
+                    let ref_hash = blake2b_hash(&write.object_ref.serialize());
+                    receipt_hashes.push(ref_hash);
+
+                    log_info(&format!("Wrote object_id={}", format_object_id(&write.object_id)));
+                }
+            }
+            None => {
+                log_error(&format!("Failed to deserialize input #{}", idx));
+            }
+        }
+    }
+
+    // Create block payload using EvmBlockPayload structure
+    let parent_hash = read_parent_hash(service_id, block_number as u64);
+
+    let mut block_payload = EvmBlockPayload {
+        number: next_block_number as u64,
+        parent_hash,
+        logs_bloom: [0u8; 256],  // Algo service doesn't use logs
+        transactions_root: [0u8; 32],  // Will be computed below
+        state_root: [0u8; 32],  // Could be set to JAM state root if needed
+        receipts_root: [0u8; 32],  // Will be computed below
+        miner: [0u8; 20],  // Could be set to validator address
+        extra_data: [0u8; 32],  // Could store algo-specific metadata
+        size: 0,  // Computed during serialization
+        gas_limit: 30_000_000,
+        gas_used: total_gas_used,
+        timestamp: timeslot as u64,
+        tx_hashes,
+        receipt_hashes,
+    };
+
+    // Compute transactions root and receipts root using EVM's BMT method
+    block_payload.transactions_root = block_payload.compute_transactions_root();
+    block_payload.receipts_root = block_payload.compute_receipts_root();
+
+    // Write block to storage (reuses EvmBlockPayload::write method)
+    if block_payload.write().is_none() {
+        log_error("Failed to write block to storage");
         return (FIRST_READABLE_ADDRESS as u64, 0);
     }
-    let payload = unsafe { core::slice::from_raw_parts(payload_ptr as *const u8, payload_len as usize) };
-    let pairs = payload_len / 2;
-    call_log(
-        2,
-        None,
-        &format!("algo {:x?} # of programs: {}", &payload[..payload_len as usize], pairs),
-    );
 
-    for j in 0..pairs {
-        let x = (2 * j) as usize;
-        let program_id = payload[x] % 53 as u8;
-        let count = payload[x+1] as u64;
-        let iterations = count * count as u64; // accumulate is square, refine is cube
-        call_log(2, None, &format!("PROGRAM_ID {} ITERATIONS {}", program_id, iterations));
-        let mut gas_used = 0 as u64;
-        for _ in 0..iterations {
-            gas_used += run_program(program_id);
-        }
-        call_log(
-            2,
-            None,
-            &format!("algo run_accumulate {} ITERATIONS {} gas_used {}", program_id, iterations, gas_used),
-        );
+    // Compute block hash from header
+    let block_hash = block_payload.compute_block_hash();
 
-        call_log(2, None, &format!("algo {} p_id={} gas_used={}", j, program_id, gas_used));
+    // Update block number key using EVM's method
+    EvmBlockPayload::write_blocknumber_key(next_block_number, &block_hash);
+
+    log_info(&format!(
+        "Block #{} finalized: {} txs, gas={}, block_hash={}, tx_root={}, receipt_root={}",
+        next_block_number,
+        block_payload.tx_hashes.len(),
+        total_gas_used,
+        format_object_id(&block_hash),
+        format_object_id(&block_payload.transactions_root),
+        format_object_id(&block_payload.receipts_root)
+    ));
+
+    // Return block hash by copying to FIRST_READABLE_ADDRESS
+    unsafe {
+        let dest = FIRST_READABLE_ADDRESS as *mut u8;
+        core::ptr::copy_nonoverlapping(block_hash.as_ptr(), dest, 32);
+    }
+    (FIRST_READABLE_ADDRESS as u64, 32)
+}
+
+fn read_parent_hash(service_id: u32, block_number: u64) -> [u8; 32] {
+    if block_number == 0 {
+        return [0u8; 32]; // Genesis parent
     }
 
-    (payload_ptr as u64, payload_len)
+    // Read from BLOCK_NUMBER_KEY which contains block_number + parent_hash
+    use utils::constants::BLOCK_NUMBER_KEY;
+    use utils::host_functions::read as host_read;
+    use utils::constants::NONE;
+
+    let mut buffer = [0u8; 36]; // 4 bytes block_number + 32 bytes parent_hash
+
+    let len = unsafe {
+        host_read(
+            service_id as u64,
+            BLOCK_NUMBER_KEY.as_ptr() as u64,
+            BLOCK_NUMBER_KEY.len() as u64,
+            buffer.as_mut_ptr() as u64,
+            0,
+            buffer.len() as u64,
+        )
+    };
+
+    if len == NONE || len < 36 {
+        return [0u8; 32];
+    }
+
+    // Extract parent_hash from bytes 4-36
+    let mut parent_hash = [0u8; 32];
+    parent_hash.copy_from_slice(&buffer[4..36]);
+    parent_hash
 }

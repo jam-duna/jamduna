@@ -13,5 +13,6 @@ path = "src/main.rs"
 polkavm-derive = { workspace = true }
 simplealloc = { workspace = true }
 utils = { path = "../utils" }
+evm = { path = "../evm" }
 hashbrown = "0.12"
 primitive-types = { version = "0.12", default-features = false, features = ["impl-serde"] }

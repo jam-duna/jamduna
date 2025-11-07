@@ -192,9 +192,16 @@ func ValidateStateTransitionFile(filename string, storageDir string, outputDir s
 		fmt.Println(strings.Repeat("=", 40))
 		fmt.Printf("\033[34mState Key: %s (%s)\033[0m\n", stateType, key[:64])
 
-		// raw‐byte diff
-		fmt.Printf("%-10s | PreState : 0x%x\n", stateType, val.Prestate)
-		printHexDiff(stateType, val.ExpectedPostState, val.ActualPostState)
+		// Special handling for c7 (validator keys) - parse and display validators
+		if stateType == "c7" {
+			parseAndLogValidators("PreState", val.Prestate)
+			parseAndLogValidators("Expected", val.ExpectedPostState)
+			parseAndLogValidators("Actual", val.ActualPostState)
+		} else {
+			// raw‐byte diff
+			fmt.Printf("%-10s | PreState : 0x%x\n", stateType, val.Prestate)
+			printHexDiff(stateType, val.ExpectedPostState, val.ActualPostState)
+		}
 
 		// JSON diff, if we know the struct type
 		if stateType != "unknown" {

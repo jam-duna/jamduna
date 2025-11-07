@@ -349,15 +349,9 @@ func TestSingleFuzzTrace(t *testing.T) {
 		t.Fatalf("failed to get fuzz reports path: %v", err)
 	}
 
-	// SKIPPING these failures -- we will ignore these for now
-	// SC has a panic on service 3202820790 with HostFunction INFO Calling host function: INFO 5 [gas: 4982637] from a memory access
-	// not fully fixed, see this hardDebug := fetch == uint64(vm.Service_index) && vm.GetGas() == 4982637
-	fileMap["1758621171"] = "fuzz-reports/0.7.0/traces/_new/1758621171/00000237.json" // SKIP for now
-
-	// SKIP these ones for now, need more investigation
-	fileMap["1758622403"] = "fuzz-reports/0.7.0/traces/_new/1758622403/00000239.json"  // SKIP for now
-	fileMap["1758622442"] = "fuzz-reports/0.7.0/traces/_new/1758622442/00000164.json"  // SKIP for now
-	fileMap["1758708840"] = "fuzz-reports/0.7.0/traces/_new2/1758708840/00000958.json" // SKIP for now
+	// C7 [NextEpochValidatorKeys] failure
+	fileMap["1761664779"] = "fuzz-reports/0.7.1/traces/1761664779/00000008.bin"
+	fileMap["1761654684"] = "fuzz-reports/0.7.1/traces/1761654684/00000056.bin"
 
 	PvmLogging = false
 	//	DebugHostFunctions = true
@@ -366,7 +360,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 	// log.EnableModule("pvm_validator")
 	log.EnableModule(log.SDB)
 
-	tc := []string{"1758621171"}
+	tc := []string{"1761654684", "1761664779"}
 	PvmLogging = false
 	for _, team := range tc {
 		filename, exists := fileMap[team]

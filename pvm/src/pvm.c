@@ -229,6 +229,7 @@ pvm_result_t pvm_execute(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child) 
         
     found:
         ; // Empty statement after label
+        uint64_t prevpc = vm->pc;
         uint8_t* operands = vm->code + vm->pc + 1;
         vm->gas--;  // Decrement gas once per instruction
         // Advance PC to next instruction, dispatch to handler
@@ -241,8 +242,8 @@ pvm_result_t pvm_execute(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child) 
         }
 
         if (vm->pvm_logging) {
-            printf("%s %d %llu Gas@S%u: %lld Registers: [%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu]\n", 
-                    get_opcode_name(opcode), step, (unsigned long long)vm->pc, vm->service_index, (long long)vm->gas,
+            printf("%s %d %llu Gas: %lld Registers:[%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu]\n", 
+                   get_opcode_name(opcode), step+1, (unsigned long long)prevpc,  (long long)vm->gas,
                     (unsigned long long)vm->registers[0], (unsigned long long)vm->registers[1], 
                     (unsigned long long)vm->registers[2], (unsigned long long)vm->registers[3],
                     (unsigned long long)vm->registers[4], (unsigned long long)vm->registers[5], 
