@@ -34,11 +34,6 @@ func ApplyStateTransitionTickets(oldState *StateDB, ctx context.Context, blk *ty
 	s.Block = blk
 	s.ParentHeaderHash = blk.Header.ParentHeaderHash
 	s.HeaderHash = blk.Header.Hash()
-	if s.Id == blk.Header.AuthorIndex {
-		s.Authoring = log.GeneralAuthoring
-	} else {
-		s.Authoring = log.GeneralValidating
-	}
 	log.Trace(s.Authoring, "ApplyStateTransitionFromBlock", "n", s.Id, "p", s.ParentHeaderHash, "headerhash", s.HeaderHash, "stateroot", s.StateRoot)
 	targetJCE := blk.TimeSlot()
 	// 17+18 -- takes the PREVIOUS accumulationRoot which summarizes C a set of (service, result) pairs and
@@ -102,11 +97,6 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 	s.Block = blk
 	s.ParentHeaderHash = blk.Header.ParentHeaderHash
 	s.HeaderHash = blk.Header.Hash()
-	if s.Id == blk.Header.AuthorIndex {
-		s.Authoring = log.GeneralAuthoring
-	} else {
-		s.Authoring = log.GeneralValidating
-	}
 
 	targetJCE := blk.TimeSlot()
 	// 17+18 -- takes the PREVIOUS accumulationRoot which summarizes C a set of (service, result) pairs and
@@ -520,7 +510,7 @@ func (s *StateDB) ApplyStateTransitionAvailabilityAssignments(ctx context.Contex
 	// Guarantees checks
 	for _, g := range guarantees {
 		if err := s.VerifyGuaranteeBasic(g, targetJCE); err != nil {
-			//panic(fmt.Sprintf("ApplyStateTransitionAvailabilityAssignments: VerifyGuaranteeBasic failed: %v", err))
+			log.Error(log.SDB, "ApplyStateTransitionAvailabilityAssignments", "GuaranteeErr", err)
 			return nil, err
 		}
 	}

@@ -284,9 +284,12 @@ func (s *StateDB) GetStateUpdates() *types.StateUpdate {
 func (s *StateDB) SetJamState(jamState *JamState) {
 	s.JamState = jamState
 }
-func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
+func (s *StateDB) RecoverJamState(stateRoot common.Hash) error {
 	// Now read C1.....C15 from the trie and put it back into JamState
-	t := s.CopyTrieState(stateRoot)
+	t, err := s.CopyTrieState(stateRoot)
+	if err != nil {
+		return err
+	}
 
 	coreAuthPoolEncode, err := t.GetState(C1)
 	if err != nil {
@@ -386,9 +389,9 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	s.SetTrie(t)
 	s.StateRoot = t.GetRoot()
 	if s.StateRoot.Hex() != stateRoot.Hex() {
-		log.Crit(log.SDB, "UpdateTrieState: StateRoot mismatch", "Actual", s.StateRoot.Hex(), "expected", stateRoot.Hex())
-		panic("StateRoot mismatch after recovery")
+		return fmt.Errorf("StateRoot mismatch after recovery: actual=%s, expected=%s", s.StateRoot.Hex(), stateRoot.Hex())
 	}
+	return nil
 }
 
 func (s *StateDB) UpdateTrieState() common.Hash {
@@ -469,7 +472,11 @@ func (s *StateDB) GetAllKeyValues() []KeyVal {
 	startKey := common.Hex2Bytes("0x0000000000000000000000000000000000000000000000000000000000000000")
 	endKey := common.Hex2Bytes("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
 	maxSize := uint32(math.MaxUint32)
-	t := s.CopyTrieState(s.StateRoot)
+	t, err := s.CopyTrieState(s.StateRoot)
+	if err != nil {
+		log.Crit(log.SDB, "GetAllKeyValues: failed to copy trie state", "error", err)
+		return []KeyVal{}
+	}
 	foundKeyVal, _, _ := t.GetStateByRange(startKey, endKey, maxSize)
 
 	tmpKeyVals := make([]KeyVal, 0)
@@ -726,7 +733,9 @@ func NewStateDBFromBlock(sdb *storage.StateDBStorage, block *types.Block) (state
 	statedb.Block = block
 	statedb.ParentHeaderHash = block.Header.ParentHeaderHash
 	statedb.StateRoot = block.Header.ParentStateRoot
-	statedb.RecoverJamState(statedb.StateRoot)
+	if err := statedb.RecoverJamState(statedb.StateRoot); err != nil {
+		return nil, fmt.Errorf("failed to recover state for block %s: %w", block.Header.Hash().Hex(), err)
+	}
 	// Because we have safrolestate as internal state, JamState is NOT enough.
 	s := statedb.JamState
 	s.SafroleState.NextEpochTicketsAccumulator = s.SafroleBasicState.TicketAccumulator   // γa: Ticket accumulator for the next epoch (epoch N+1) DONE
@@ -746,7 +755,10 @@ func NewStateDBFromStateRoot(stateRoot common.Hash, sdb *storage.StateDBStorage)
 	//recoveredStateDB.StateRoot = stateRoot
 	recoveredStateDB.JamState = NewJamState()
 
-	recoveredStateDB.RecoverJamState(stateRoot)
+	err = recoveredStateDB.RecoverJamState(stateRoot)
+	if err != nil {
+		return nil, fmt.Errorf("failed to recover state from root %s: %w", stateRoot.Hex(), err)
+	}
 
 	//DumpStateDBKeyValues(recoveredStateDB, "Recovered", 0, 0)
 
@@ -793,9 +805,12 @@ func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 	return statedb, nil
 }
 
-func (s *StateDB) CopyTrieState(stateRoot common.Hash) *trie.MerkleTree {
-	t, _ := trie.InitMerkleTreeFromHash(stateRoot.Bytes(), s.sdb)
-	return t
+func (s *StateDB) CopyTrieState(stateRoot common.Hash) (*trie.MerkleTree, error) {
+	t, err := trie.InitMerkleTreeFromHash(stateRoot.Bytes(), s.sdb)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize trie from state root %s: %w", stateRoot.Hex(), err)
+	}
+	return t, nil
 }
 
 // Copy generates a copy of the StateDB
@@ -804,6 +819,13 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 	// T.P.G.A.
 	tmpAvailableWorkReport := make([]types.WorkReport, len(s.AvailableWorkReport))
 	copy(tmpAvailableWorkReport, s.AvailableWorkReport)
+
+	copiedTrie, err := s.CopyTrieState(s.StateRoot)
+	if err != nil {
+		log.Crit(log.SDB, "Copy: failed to copy trie state", "error", err)
+		return nil
+	}
+
 	newStateDB = &StateDB{
 		Id:                  s.Id,
 		Block:               s.Block.Copy(), // You might need to deep copy the Block if it's mutable
@@ -812,10 +834,11 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		StateRoot:           s.StateRoot,
 		JamState:            s.JamState.Copy(), // DisputesState has a Copy method
 		sdb:                 s.sdb,
-		trie:                s.CopyTrieState(s.StateRoot),
+		trie:                copiedTrie,
 		logChan:             make(chan storage.LogMessage, 100),
 		AvailableWorkReport: tmpAvailableWorkReport,
 		AncestorSet:         s.AncestorSet, // TODO: CHECK why we have this in CheckStateTransition
+		Authoring:           s.Authoring,
 		/*
 			Following flds are not copied over..?
 
@@ -856,7 +879,7 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 		if isAuthorizedBlockRefiner {
 			telemetryClient := s.sdb.GetTelemetryClient()
 			// Telemetry: Authoring (event 40) - Block authoring begins
-			authoringEventID := telemetryClient.GetEventID()
+			authoringEventID := telemetryClient.GetEventID(s.HeaderHash)
 			telemetryClient.Authoring(targetJCE, s.HeaderHash)
 
 			proposedBlk, err := s.MakeBlock(ctx, credential, targetJCE, ticketID, extrinsic_pool)
@@ -866,6 +889,7 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 				log.Error(log.SDB, "ProcessState:MakeBlock", "author", s.Id, "currJCE", currJCE, "e'", currEpoch, "m'", currPhase, "err", err)
 				return true, nil, nil, err
 			}
+			log.Info(log.SDB, "Proposed Block", "authoring", s.Authoring)
 
 			// Telemetry: Authored (event 42) - Block has been authored
 			// Create BlockOutline from the proposed block

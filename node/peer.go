@@ -120,17 +120,15 @@ func (p *Peer) openStream(ctx context.Context, code uint8) (quic.Stream, error) 
 
 	var err error
 	if p.conn == nil {
-		var (
-			eventID             uint64
-			telemetryConnecting bool
-		)
+		eventID := p.node.telemetryClient.GetEventID(p.GetPeer32())
+		telemetryConnecting := false
 		host, port, splitErr := net.SplitHostPort(p.PeerAddr)
 		if splitErr != nil {
 			log.Warn(log.Node, "openStream: failed to split peer address", "peerAddr", p.PeerAddr, "err", splitErr)
 		} else if addrBytes, portNum, parseErr := telemetry.ParseTelemetryAddress(host, port); parseErr != nil {
 			log.Warn(log.Node, "openStream: failed to parse peer address for telemetry", "peerAddr", p.PeerAddr, "err", parseErr)
 		} else {
-			eventID = p.node.telemetryClient.GetEventID()
+
 			p.node.telemetryClient.ConnectingOut(p.GetPeer32(), addrBytes, portNum)
 			telemetryConnecting = true
 		}

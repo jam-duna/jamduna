@@ -858,7 +858,12 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 	if FinalizedOk {
 		finalizedBlock = block
 		recoveredStateDB := _statedb.Copy()
-		recoveredStateDB.RecoverJamState(finalizedBlock.Header.ParentStateRoot) // it don't even know if it got the correct state
+		if recoveredStateDB == nil {
+			return nil, fmt.Errorf("failed to copy initial stateDB")
+		}
+		if err := recoveredStateDB.RecoverJamState(finalizedBlock.Header.ParentStateRoot); err != nil {
+			return nil, fmt.Errorf("failed to recover finalized parent state: %w", err)
+		}
 		recoveredStateDB.UnsetPosteriorEntropy()
 		//recoveredStateDB.StateRoot = finalizedBlock.Header.ParentStateRoot // Now set inside RecoverJamState
 		recoveredStateDB.Block = finalizedBlock.Copy()
@@ -1223,18 +1228,20 @@ func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPac
 
 	// Compute hashes and track accumulation status
 	for i, req := range reqs {
+
+		if strings.Contains(strings.ToUpper(req.Identifier), "AUTH") || strings.Contains(strings.ToUpper(req.Identifier), "ALGO") {
+			req.WorkPackage.RefineContext = n.getRefineContext()
+			log.Info(log.Node, "SubmitAndWaitForWorkPackage RefineContext", "id", req.Identifier, "refineContext", req.WorkPackage.RefineContext.String())
+		}
 		hash := req.WorkPackage.Hash()
 		workPackageHashes[i] = hash
 		accumulated[hash] = false
+		log.Info(log.Node, "Prepared work package", "identifier", req.Identifier, "hash", hash.Hex(), "prerequisites", req.WorkPackage.RefineContext.Prerequisites)
 	}
 
 	// Submit each work package to a random peer on the assigned core
 	for _, req := range reqs {
 		//fmt.Printf("Submitting work package: %s\n", req.WorkPackage.String())
-		if strings.Contains(strings.ToUpper(req.Identifier), "AUTH") || strings.Contains(strings.ToUpper(req.Identifier), "ALGO") {
-			req.WorkPackage.RefineContext = n.getRefineContext()
-			log.Info(log.Node, "SubmitAndWaitForWorkPackage RefineContext", "id", req.Identifier, "refineContext", req.WorkPackage.RefineContext.String())
-		}
 		err := n.SubmitWPSameCore(req.WorkPackage, req.ExtrinsicsBlobs)
 		if err != nil {
 			log.Error(log.Node, "Work package submission failed", "identifier", req.Identifier, "hash", workPackageHashes[identifierToIndex[req.Identifier]].Hex(), "err", err)
@@ -1261,12 +1268,11 @@ func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPac
 			log.Warn(log.Node, "SubmitAndWaitForWorkPackages context cancelled", "accumulatedCount", accumulatedCount, "expectedCount", len(reqs), "err", ctx.Err())
 			return workPackageHashes, ctx.Err()
 		case <-ticker.C:
-			log.Debug(log.Node, "SubmitAndWaitForWorkPackages checking accumulation history", "accumulatedCount", accumulatedCount, "expectedCount", len(reqs))
 			prevAccumulatedCount := accumulatedCount
 			for j := types.EpochLength - 1; j > 0; j-- {
 				history := n.statedb.JamState.AccumulationHistory[j]
 				if len(history.WorkPackageHash) > 0 {
-					log.Debug(log.Node, "Checking accumulation history slot", "slot", j, "hashCount", len(history.WorkPackageHash))
+					log.Debug(log.Node, "Checking accumulation history slot", "n", n.id, "slot", j, "hashCount", len(history.WorkPackageHash))
 				}
 				for _, hash := range history.WorkPackageHash {
 					if seen, exists := accumulated[hash]; exists && !seen {
@@ -1456,7 +1462,7 @@ func (n *NodeContent) SubmitWPSameCore(wp types.WorkPackage, extrinsicsBlobs typ
 	log.Info(log.G, "SubmitWPSameCore SUBMISSION Start", "NODE", n.id, "validators", peers, "coreIndex", coreIndex, "slot", slot)
 
 	// if we want to process it ourselves, this should be true
-	allowSelfSubmission := true
+	allowSelfSubmission := false
 	if allowSelfSubmission {
 		n.workPackageQueue.Store(workPackageHash, &WPQueueItem{
 			workPackage:        wp,
@@ -1728,22 +1734,20 @@ func (n *Node) handleConnection(conn quic.Connection) {
 		log.Warn(log.Node, "handleConnection", "remoteAddr", remoteAddr, "host", host, "port", port)
 		return
 	}
+	n.clientsMutex.Lock()
+	pubKey, ok := n.clients[remoteAddr]
+	n.clientsMutex.Unlock()
 
 	// Emit ConnectingIn event early to track all connection attempts
-	var telemetryEventID uint64
-	var telemetryConnecting bool
+	telemetryEventID := n.telemetryClient.GetEventID(pubKey)
+	telemetryConnecting := false
 	addrBytes, addrPort, addrParseErr := telemetry.ParseTelemetryAddress(host, port)
 	if addrParseErr != nil {
 		log.Warn(log.Node, "handleConnection: telemetry address parse failed", "remoteAddr", remoteAddr, "err", addrParseErr)
 	} else {
-		telemetryEventID = n.telemetryClient.GetEventID()
 		n.telemetryClient.ConnectingIn(addrBytes, addrPort)
 		telemetryConnecting = true
 	}
-
-	n.clientsMutex.Lock()
-	pubKey, ok := n.clients[remoteAddr]
-	n.clientsMutex.Unlock()
 
 	if !ok {
 		log.Warn(log.Node, "handleConnection DROPPING - not found in n.client", "remoteAddr", remoteAddr)
@@ -2185,7 +2189,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	nextBlock := nextBlockNode.Block
 
 	// Telemetry: Importing (event 43) - Block importing begins
-	importingEventID := n.telemetryClient.GetEventID()
+	importingEventID := n.telemetryClient.GetEventID(nextBlock.Header.HeaderHash())
 
 	// Create BlockOutline from the block being imported
 	blockBytes := nextBlock.Bytes()
@@ -2213,7 +2217,6 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	}
 
 	n.telemetryClient.Importing(nextBlock.Header.Slot, blockOutline)
-	blockEventID := n.telemetryClient.GetEventID()
 	// if !n.appliedFirstBlock {
 	// 	if nextBlock.Header.ParentHeaderHash == genesisBlockHash {
 	// 		n.appliedFirstBlock = true
@@ -2224,7 +2227,9 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	recoveredStateDB, err := statedb.NewStateDBFromStateRoot(nextBlock.Header.ParentStateRoot, n.statedb.GetStorage())
 	if err != nil {
 		log.Error(log.Node, "NewStateDBFromStateRoot: Failed to recover state", "stateRoot", nextBlock.Header.ParentStateRoot.Hex(), "error", err)
+		return err
 	}
+
 	statedb.DumpStateDBKeyValues(recoveredStateDB, "Recovered", n.id, false)
 	start := time.Now()
 
@@ -2258,7 +2263,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 		"valid_tickets", valid_tickets,
 	)
 
-	newStateDB, err := statedb.ApplyStateTransitionFromBlock(blockEventID, recoveredStateDB, ctx, nextBlock, valid_tickets, n.pvmBackend)
+	newStateDB, err := statedb.ApplyStateTransitionFromBlock(importingEventID, recoveredStateDB, ctx, nextBlock, valid_tickets, n.pvmBackend)
 	stateTransitionElapsed := common.ElapsedStr(start)
 	if err != nil {
 		// Telemetry: BlockExecutionFailed (event 46) - Block execution failed after importing
@@ -2505,7 +2510,7 @@ func (n *Node) assureNewBlock(ctx context.Context, b *types.Block, sdb *statedb.
 	}
 
 	// Telemetry: DistributingAssurance (event 126) - Emitted when an assurer begins distributing an assurance
-	eventID := n.telemetryClient.GetEventID()
+	eventID := n.telemetryClient.GetEventID(b.Header.Hash())
 	n.telemetryClient.DistributingAssurance(a.Anchor, a.Bitfield[:])
 
 	n.broadcast(ctx, a, eventID) // via CE141
@@ -2677,8 +2682,12 @@ func (n *NodeContent) reconstructSegments(si *SpecIndex, eventID uint64) (segmen
 }
 
 // HERE we are in a AUDITING situation, if verification fails, we can still execute the work package by using CE140?
-func (n *NodeContent) reconstructPackageBundleSegments(erasureRoot common.Hash, blength uint32, segmentRootLookup types.SegmentRootLookup, coreIndex uint, exportedSegmentLength uint16) (types.WorkPackageBundle, error) {
-	eventID := n.telemetryClient.GetEventID()
+func (n *NodeContent) reconstructPackageBundleSegments(spec types.AvailabilitySpecifier, segmentRootLookup types.SegmentRootLookup, coreIndex uint) (types.WorkPackageBundle, error) {
+	erasureRoot := spec.ErasureRoot
+	blength := spec.BundleLength
+	exportedSegmentLength := spec.ExportedSegmentLength
+
+	eventID := n.telemetryClient.GetEventID(spec.WorkPackageHash)
 	// Telemetry: ReconstructingBundle (event 146) - Bundle reconstruction begins
 	isTrivial := false // TODO: support "trivial" reconstruction
 	n.telemetryClient.ReconstructingBundle(eventID, isTrivial)
@@ -2825,7 +2834,7 @@ func (n *NodeContent) getTargetStateDB(stateRoot common.Hash) (*statedb.StateDB,
 		statedb.DumpStateDBKeyValues(currentStateDB, "getTargetStateDB: Current", n.id, false)
 		return currentStateDB, nil
 	}
-	log.Warn(log.Node, "getTargetStateDB: REFETCH REQUIRED", "n", n.id, "expected", stateRoot.Hex(), "got", currentStateRoot.Hex())
+	log.Trace(log.Node, "getTargetStateDB: REFETCH REQUIRED", "n", n.id, "expected", stateRoot.Hex(), "got", currentStateRoot.Hex())
 
 	recoveredStateDB, err := statedb.NewStateDBFromStateRoot(stateRoot, n.statedb.GetStorage())
 	if err != nil {
@@ -2833,7 +2842,7 @@ func (n *NodeContent) getTargetStateDB(stateRoot common.Hash) (*statedb.StateDB,
 		return nil, fmt.Errorf("failed to recover state: %w", err)
 	}
 
-	log.Info(log.Node, "getTargetStateDB: Recovered state root", "n", n.id, "stateRoot", recoveredStateDB.GetStateRoot().Hex())
+	log.Debug(log.Node, "getTargetStateDB: Recovered state root", "n", n.id, "stateRoot", recoveredStateDB.GetStateRoot().Hex())
 	statedb.DumpStateDBKeyValues(recoveredStateDB, "getTargetStateDB: Recovered", n.id, false)
 
 	return recoveredStateDB, nil

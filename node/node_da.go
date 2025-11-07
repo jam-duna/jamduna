@@ -307,12 +307,17 @@ func (n *NodeContent) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup
 					// Emit WorkPackageHashMapped (event 160)
 					n.telemetryClient.WorkPackageHashMapped(eventID, x.WorkPackageHash, x.SegmentRoot)
 				}
-				// Also emit SegmentsRootMapped (event 161) - mapping segments-root to erasure-root
-				// Note: In this context, we don't have direct access to the erasure root,
-				// but this would typically be the availability spec's erasure root
-				// For now, we'll emit a second mapping event to indicate the segments-root usage
-				// TODO: n.telemetryClient.SegmentsRootMapped(eventID, x.SegmentRoot, i.RequestedHash)
-
+				if i.RequestedHash == x.SegmentRoot {
+					// Also emit SegmentsRootMapped (event 161) - mapping segments-root to erasure-root
+					// Note: In this context, we don't have direct access to the erasure root,
+					// but this would typically be the availability spec's erasure root, so we use WorkReportSearch (is this a problem?)
+					wph := x.WorkPackageHash
+					si := n.WorkReportSearch(wph)
+					if si != nil {
+						erasureRoot := si.WorkReport.AvailabilitySpec.ErasureRoot
+						n.telemetryClient.SegmentsRootMapped(eventID, x.SegmentRoot, erasureRoot)
+					}
+				}
 			}
 			// requestedHash MUST map to exportedSegmentRoot
 			segmentData := importedSegments[segmentIdx]
@@ -331,11 +336,11 @@ func (n *NodeContent) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup
 
 // authorizeWP executes the authorization step for a work package
 func (n *NodeContent) authorizeWP(workPackage types.WorkPackage, workPackageCoreIndex uint16, targetStateDB *statedb.StateDB, pvmBackend string) (r types.Result, p_a common.Hash, authGasUsed int64, err error) {
-	log.Info(log.Node, "authorizeWP", "NODE", n.id, "workPackage", workPackage.Hash(), "workPackageCoreIndex", workPackageCoreIndex, "stateRoot", n.statedb.GetStateRoot().Hex(), "targetRoot", targetStateDB.GetStateRoot().Hex())
+	log.Trace(log.Node, "authorizeWP", "NODE", n.id, "workPackage", workPackage.Hash(), "workPackageCoreIndex", workPackageCoreIndex, "stateRoot", n.statedb.GetStateRoot().Hex(), "targetRoot", targetStateDB.GetStateRoot().Hex())
 	currStateDBRoot := n.statedb.GetStateRoot()
 	targetStateDBRoot := targetStateDB.GetStateRoot()
 	if currStateDBRoot.Hex() != targetStateDBRoot.Hex() {
-		log.Warn(log.Node, "authorizeWP: state root mismatch; USING targetStateDB", "NODE", n.id, "workPackage", workPackage.Hash(), "currentStateDBRoot", currStateDBRoot.Hex(), "targetStateDBRoot", targetStateDBRoot.Hex())
+		log.Trace(log.Node, "authorizeWP: state root mismatch; USING targetStateDB", "NODE", n.id, "workPackage", workPackage.Hash(), "currentStateDBRoot", currStateDBRoot.Hex(), "targetStateDBRoot", targetStateDBRoot.Hex())
 	}
 	authcode, _, authindex, err := targetStateDB.GetAuthorizeCode(workPackage)
 	if err != nil {
@@ -518,7 +523,7 @@ func (n *NodeContent) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs
 // If eventID is non-zero, telemetry events for Authorized and Refined will be emitted
 func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, slot uint32, firstGuarantorOrAuditor bool, eventID uint64) (work_report types.WorkReport, d AvailabilitySpecifierDerivation, elapsed uint32, bundleSnapshot *types.WorkPackageBundleSnapshot, err error) {
 	targetStateRoot := package_bundle.WorkPackage.RefineContext.StateRoot
-	log.Info(log.Node, "executeWorkPackageBundle START", "NODE", n.id, "targetStateRoot", targetStateRoot.Hex())
+	log.Trace(log.Node, "executeWorkPackageBundle START", "NODE", n.id, "targetStateRoot", targetStateRoot.Hex())
 	targetStateDB, err := n.getTargetStateDB(targetStateRoot)
 	if err != nil {
 		return work_report, d, 0, bundleSnapshot, fmt.Errorf("executeWorkPackageBundle:getTargetStateDB: %v", err)
@@ -673,7 +678,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		Results:           results,
 		AuthGasUsed:       uint(authGasUsed),
 	}
-	log.Info(log.Node, "executeWorkPackageBundle", "NODE", n.id, "role", vmLogging, "reportHash", workReport.Hash(), "workReport", workReport.String())
+	log.Info(log.Node, "executeWorkPackageBundle", "NODE", n.id, "role", vmLogging, "reportHash", workReport.Hash()) //, "workReport", workReport.String())
 
 	n.StoreBundleSpecSegments(spec, d, package_bundle, segments)
 	pvmElapsed := common.Elapsed(pvmStart)

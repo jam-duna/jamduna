@@ -10,7 +10,7 @@ import (
 func (s *StateDB) GetAuthorizeCode(wp types.WorkPackage) (auth_code_real []byte, package_metadata []byte, host uint32, err error) {
 	p_h := wp.AuthCodeHost
 	p_u := wp.AuthorizationCodeHash
-	log.Info(log.G, "GetAuthorizeCode: start", "workPackage", wp.Hash(), "codeHost", p_h, "codeHash", p_u, "stateRoot", s.StateRoot)
+	log.Trace(log.G, "GetAuthorizeCode: start", "workPackage", wp.Hash(), "codeHost", p_h, "codeHash", p_u, "stateRoot", s.StateRoot)
 	// author_sevice, _, err := s.getServiceAccount(p_h)
 	// if err != nil {
 	// 	return nil, 0, err

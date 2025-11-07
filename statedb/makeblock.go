@@ -11,15 +11,17 @@ import (
 )
 
 // make block generate block prior to state execution
-// TODO: include extrinsic data update
 func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecret, targetJCE uint32, ticketID common.Hash, extrinsic_pool *types.ExtrinsicPool) (bl *types.Block, err error) {
 	sf := s.GetSafrole()
 	isNewEpoch := sf.IsNewEpoch(targetJCE)
 	needWinningMarker := sf.IseWinningMarkerNeeded(targetJCE)
 	stateRoot := s.GetStateRoot()
 	s.JamState.CheckInvalidCoreIndex()
-	s.RecoverJamState(stateRoot)
+	if err := s.RecoverJamState(stateRoot); err != nil {
+		return nil, err
+	}
 	s.JamState.CheckInvalidCoreIndex()
+	s.Authoring = log.GeneralAuthoring
 
 	b := types.NewBlock()
 	h := types.NewBlockHeader()
@@ -98,6 +100,7 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 		if err := tmpstatedb.VerifyGuaranteeBasic(g, targetJCE); err != nil {
 			if AcceptableGuaranteeError(err) {
 				// don't remove from pool if ErrGFutureReportSlot, ErrGCoreEngaged
+				log.Warn(log.G, "[IGNORE]MakeBlock: VerifyGuaranteeBasic:acceptable error", "err", err)
 			} else {
 				extrinsic_pool.RemoveOldGuarantees(g, types.GuaranteeDiscardReasonCannotReportOnChain)
 			}

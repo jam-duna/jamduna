@@ -37,7 +37,7 @@ func NewTelemetryClient(host, port string) *TelemetryClient {
 
 // GetEventID returns a new unique event ID for linking related telemetry events.
 // Event IDs are assigned sequentially starting from 0 as per JIP-3 specification.
-func (c *TelemetryClient) GetEventID() uint64 {
+func (c *TelemetryClient) GetEventID(...interface{}) uint64 {
 	c.eventIDMu.Lock()
 	defer c.eventIDMu.Unlock()
 	id := c.nextEventID

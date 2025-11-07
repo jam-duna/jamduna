@@ -60,9 +60,11 @@ func (n *Node) processGuarantee(g types.Guarantee, caller string) error {
 	err := s.VerifyGuaranteeBasic(g, 0) // By passing in 0 we don't check against the statedb slot
 	if err != nil {
 		if !statedb.AcceptableGuaranteeError(err) {
+			log.Error(log.G, "processGuarantee:VerifyGuaranteeBasic", "caller", caller, "err", err)
 			return err
+		} else {
+			log.Trace(log.G, "[IGNORE]processGuarantee:VerifyGuaranteeBasic:acceptable error", "caller", caller, "err", err)
 		}
-		log.Warn(log.G, "processGuarantee:VerifyGuaranteeBasic", "caller", caller, "err", err)
 		return err
 	}
 	err = n.extrinsic_pool.AddGuaranteeToPool(g)

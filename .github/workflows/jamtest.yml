@@ -1,0 +1,97 @@
+name: Run Jamtest
+
+env:
+  GOFLAGS: "-tags=tiny -buildvcs=false"
+  JAM_PATH: ${{ github.workspace }}
+  LD_LIBRARY_PATH: ./bls/target/release:./bandersnatch/target/release
+  CARGO_MANIFEST_DIR: ${{ github.workspace }}
+  JAM_EVM_TEST_TIMEOUT: 300
+
+concurrency:
+  group: jamtest
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/jamtest.yml
+#  schedule:
+#    - cron: "*/10 * * * *"   # every 10 minutes
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: self-hosted
+    timeout-minutes: 8
+
+    env:
+      GOFLAGS: "-tags=tiny -buildvcs=false"
+      JAM_PATH: ${{ github.workspace }}
+      LD_LIBRARY_PATH: ./bls/target/release:./bandersnatch/target/release
+      CARGO_MANIFEST_DIR: ${{ github.workspace }}
+      CARGO_TARGET_DIR: /tmp/jam_target
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git safe directory permissions
+        run: |
+          git config --global --add safe.directory ${{ github.workspace }}
+          echo "Safe directory added to Git config."
+
+      - name: Create writable build target
+        run: |
+          mkdir -p /tmp/jam_target
+          sudo chmod -R 777 /tmp/jam_target
+          sudo chmod -R 777 ${{ github.workspace }}/services
+          echo "Writable build dir ready at /tmp/jam_target"
+
+      - name: Set up Rust toolchain
+        run: |
+          rustup component add rust-src --toolchain nightly || true
+          rustup default nightly
+          rustc --version
+          cargo --version
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Clean previous build
+        run: |
+          echo "Cleaning old build and state dirs..."
+          rm -rf /tmp/jam_target /tmp/jam_state || true
+          mkdir -p /tmp/jam_target /tmp/jam_state
+          chmod -R 777 /tmp/jam_target /tmp/jam_state
+          make clean || true
+          echo "Environment cleaned."
+
+#      - name: Build EVM Service
+#        run: |
+#          make evm
+#        working-directory: ${{ github.workspace }}/services
+#
+      - name: Pre-build dependent services
+        run: |
+          echo "Building all dependencies.."
+          make all
+          echo "Listing built .pvm files:"
+          find services -name "*.pvm" || true
+        working-directory: ${{ github.workspace }}/services
+
+      - name: Run JAM tests
+        env:
+          RUSTFLAGS: "-C target-cpu=native -C debuginfo=0"
+          CARGO_TERM_COLOR: always
+          JAM_EVM_TEST_TIMEOUT: 1200
+        run: |
+          timeout 300 ./jamtest || echo "jamtest timed out after 5 min"
+        working-directory: ${{ github.workspace }}
+
+

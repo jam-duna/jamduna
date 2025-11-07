@@ -536,7 +536,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		WorkReportHash: fellowWorkReportHash,
 		Signature:      guarantee.Signatures[0].Signature,
 	}
-	log.Info(log.G, "!!!onWorkPackageShare", "n", n.String(), "reportHash", req.WorkReportHash, "wp", workReport.String(), "sig", req.Signature.String())
+	log.Trace(log.G, "onWorkPackageShare", "n", n.String(), "reportHash", req.WorkReportHash) //, "wp", workReport.String(), "sig", req.Signature.String())
 
 	reqBytes, err := req.ToBytes()
 	if err != nil {

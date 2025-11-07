@@ -258,9 +258,9 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		basePort = 40000
 
 		JCEMode := JCEDefault
-		if *jce_manual {
-			JCEMode = JCEManual
-		}
+		// if *jce_manual {
+		// 	JCEMode = JCEManual
+		// }
 		if jam == "safrole" || jam == "fallback" {
 			JCEMode = JCEFast
 		}

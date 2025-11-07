@@ -745,7 +745,7 @@ func (j *Jam) AuditWorkPackage(req []string, res *string) error {
 	spec := workReport.AvailabilitySpec
 	// now call C138 to get bundle_shard from C assurers, do ec reconstruction for b
 	// IMPORTANT: within reconstructPackageBundleSegments is a call to VerifyBundle
-	workPackageBundle, err := j.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength, workReport.SegmentRootLookup, workReport.CoreIndex, spec.ExportedSegmentLength)
+	workPackageBundle, err := j.reconstructPackageBundleSegments(spec, workReport.SegmentRootLookup, workReport.CoreIndex)
 	if err != nil {
 		return err
 	}

@@ -1,1676 +1,1013 @@
-# JIP-3: Telemetry
-
-[JIP-3 Sheet (10/28/25)](https://docs.google.com/spreadsheets/d/1_4el3j2W5FaGP8MaLRb7M5PHYwam57d06FByuwUKoY0/edit?gid=591416875#gid=591416875)
-
-Specification for JAM node telemetry allowing integration into JAM Tart (Testing, Analytics and
-Research Telemetry).
-
-## Connection to telemetry server
-
-Nodes shall provide a CLI option `--telemetry HOST:PORT`. Nodes, with said CLI option given, shall
-make a TCP/IP connection to said endpoint.
-
-## Message encoding
-
-Data sent over the connection to the telemetry server shall consist of variable-length messages.
-Each message is sent in two parts. First, the size (in bytes) of the message content is sent,
-encoded as a little-endian 32-bit unsigned integer. Second, the message content itself is sent.
-Note that this message encoding matches JAMNP-S.
-
-Message content shall be encoded as per regular JAM serialization. That is, a message with fields
-$a$, $b$, $c$, etc shall be encoded as $\mathcal{E}(a, b, c, ...)$. Fields of type `u8`, `u16`,
-`u32`, and `u64` shall be encoded using $\mathcal{E}_1$, $\mathcal{E}_2$, $\mathcal{E}_4$, and
-$\mathcal{E}_8$ respectively (ie they should use fixed-length encoding).
-
-## Notation
-
-In the type/message definitions below:
-
-- Fields are identified by their type, eg `u32`, with their meaning given in parentheses when not
-  self-evident.
-- `[T; N]` means a fixed-length sequence of $N$ elements each of type $T$.
-- `A ++ B ++ ...` means a tuple $(A, B, ...)$.
-- `len++` preceding a sequence type indicates that the sequence should be explicitly prefixed by
-  its length when encoding. The length should be encoded using variable-length general natural
-  number serialization.
-
-## Types
-
-The following types are defined:
-
-    bool = 0 (False) OR 1 (True)
-    Option<T> = 0 OR (1 ++ T)
-    String<N> = len++[u8] (len <= N, byte sequence must be valid UTF-8)
-    Reason = String<128> (Freeform reason for eg failure of an operation, may be empty if unknown)
-
-    Timestamp = u64 (Microseconds since the beginning of the Jam "Common Era")
-    Event ID = u64
-
-    JAM Parameters = Exactly as returned by the fetch host call defined in the GP
-
-    Peer ID = [u8; 32] (Ed25519 public key)
-    Peer Address = [u8; 16] ++ u16 (IPv6 address plus port)
-    Connection Side = 0 (Local) OR 1 (Remote)
-
-    Slot = u32
-    Epoch Index = u32 (Slot / E)
-    Validator Index = u16
-    Core Index = u16
-    Service ID = u32
-    Shard Index = u16
-
-    Hash = [u8; 32]
-    Header Hash = Hash
-    Work-Package Hash = Hash
-    Work-Report Hash = Hash
-    Erasure-Root = Hash
-    Segments-Root = Hash
-    Ed25519 Signature = [u8; 64]
-
-    Block Outline =
-        u32 (Size in bytes) ++
-        Header Hash ++
-        u32 (Number of tickets) ++
-        u32 (Number of preimages) ++
-        u32 (Total size of preimages in bytes) ++
-        u32 (Number of guarantees) ++
-        u32 (Number of assurances) ++
-        u32 (Number of dispute verdicts)
-
-    Gas = u64
-    Exec Cost =
-        Gas (Gas used) ++
-        u64 (Elapsed wall-clock time in nanoseconds)
-    Is-Authorized Cost =
-        Exec Cost (Total) ++
-        u64 (Time taken to load and compile the code, in nanoseconds) ++
-        Exec Cost (Host calls)
-    Refine Cost =
-        Exec Cost (Total) ++
-        u64 (Time taken to load and compile the code, in nanoseconds) ++
-        Exec Cost (historical_lookup calls) ++
-        Exec Cost (machine/expunge calls) ++
-        Exec Cost (peek/poke/pages calls) ++
-        Exec Cost (invoke calls) ++
-        Exec Cost (Other host calls)
-    Accumulate Cost =
-        u32 (Number of accumulate calls) ++
-        u32 (Number of transfers processed) ++
-        u32 (Number of items accumulated) ++
-        Exec Cost (Total) ++
-        u64 (Time taken to load and compile the code, in nanoseconds) ++
-        Exec Cost (read/write calls) ++
-        Exec Cost (lookup calls) ++
-        Exec Cost (query/solicit/forget/provide calls) ++
-        Exec Cost (info/new/upgrade/eject calls) ++
-        Exec Cost (transfer calls) ++
-        Gas (Total gas charged for transfer processing by destination services) ++
-        Exec Cost (Other host calls)
-
-    Root Identifier = Segments-Root OR Work-Package Hash
-    Import Spec =
-        Root Identifier ++
-        u16 (Export index, plus 2^15 if Root Identifier is a Work-Package Hash)
-    Import Segment ID = u16 (Index in overall list of work-package imports, or for a proof page,
-        2^15 plus index of a proven page)
-    Work-Item Outline =
-        Service ID ++
-        u32 (Payload size) ++
-        Gas (Refine gas limit) ++
-        Gas (Accumulate gas limit) ++
-        u32 (Sum of extrinsic lengths) ++
-        len++[Import Spec] ++
-        u16 (Number of exported segments)
-    Work-Package Outline =
-        u32 (Work-package size in bytes, excluding extrinsic data) ++
-        Work-Package Hash ++
-        Header Hash (Anchor) ++
-        Slot (Lookup anchor slot) ++
-        len++[Work-Package Hash] (Prerequisites) ++
-        len++[Work-Item Outline]
-
-    Work-Report Outline =
-        Work-Report Hash ++
-        u32 (Bundle size in bytes) ++
-        Erasure-Root ++
-        Segments-Root
-
-    Guarantee Outline =
-        Work-Report Hash ++
-        Slot ++
-        len++[Validator Index] (Guarantors)
-    Guarantee Discard Reason =
-        0 (Work-package reported on-chain) OR
-        1 (Replaced by better guarantee) OR
-        2 (Cannot be reported on-chain) OR
-        3 (Too many guarantees) OR
-        4 (Other)
-        (Single byte)
-
-    Announced Preimage Forget Reason =
-        0 (Provided on-chain) OR
-        1 (Not requested on-chain) OR
-        2 (Failed to acquire preimage) OR
-        3 (Too many announced preimages) OR
-        4 (Bad length) OR
-        5 (Other)
-        (Single byte)
-    Preimage Discard Reason =
-        0 (Provided on-chain) OR
-        1 (Not requested on-chain) OR
-        2 (Too many preimages) OR
-        3 (Other)
-        (Single byte)
-
-## Node information message
-
-The first message sent on each connection to the telemetry server should contain information about
-the connecting node:
-
-    0 (Single byte, telemetry protocol version)
-    JAM Parameters
-    Header Hash (Genesis header hash)
-    Peer ID
-    Peer Address
-    u32 (Node flags)
-    String<32> (Name of node implementation, eg "PolkaJam")
-    String<32> (Version of node implementation, eg "1.0")
-    String<16> (Gray Paper version implemented by the node, eg "0.7.1")
-    String<512> (Freeform note with additional information about the node)
-
-**Implementation location:** `node/telemetry.go` - on initial connection establishment
-
-The node flags field should be treated as a bitmask. The following bits are defined:
-
-- Bit 0 (LSB): 1 means the node uses a PVM recompiler, 0 means the node uses a PVM interpreter.
-
-All other bits should be set to 0.
-
-## Event messages
-
-Following the initial node information message, a message should be sent every time one of the
-events defined below occurs.
-
-For ease of implementation, "sent" events (such as "bundle sent") may be emitted once all of the
-data has been queued at the QUIC level; it is not necessary to wait for the data to actually be
-sent over the network or acknowledged by the peer.
-
-### Universal fields
-
-All event messages begin with a `Timestamp` field indicating the time of the event, followed by a
-single-byte discriminator identifying the event type. For brevity, the timestamp and discriminator
-are omitted in the event definitions below.
-
-The discriminator value for each event type is given in the relevant section heading. For example,
-the "connection refused" event has discriminator 20.
-
-### Event IDs
-
-Each event sent over a connection is implicitly given an ID:
-
-- The first event is given ID 0.
-- The event immediately following an event E is given the ID of event E plus N, where N is the
-  number of dropped events if E is a "dropped" event, or 1 otherwise.
-
-Event IDs are used to link related events. For example, the "connected out" event contains the ID
-of the corresponding "connecting out" event.
-
-## Meta events
-
-### 0: Dropped
-
-If, due to for example limited buffer space, a node needs to drop a contiguous series of events
-before they can be transmitted over the connection to the telemetry server, the dropped events
-should be replaced with a single "dropped" event:
-
-    Timestamp (Timestamp of the last dropped event)
-    u64 (Number of dropped events)
-
-**Implementation location:** `node/telemetry.go` - in telemetry event buffer management
-
-A dropped event may also be emitted as the first event on a connection, if the events emitted by
-the node will not start with ID 0. In this case the number of dropped events should be set to the
-ID of the following event and the timestamps should be filled with plausible values. A node may
-wish to do this for example if it loses its connection to the telemetry server and then reconnects,
-to avoid having to renumber events internally. Note that this is not intended to require any
-special handling on the server.
-
-Dropped events should not be common and except in the case just described are expected to only be
-produced if the node or network become overloaded.
-
-Note that each dropped event message contains _two_ `Timestamp` fields: the universal `Timestamp`
-field included in all event messages, which should be taken from the _first_ dropped event, and the
-`Timestamp` field defined above, which should be taken from the _last_ dropped event.
-
-## Status events
-
-### 10: Status
-
-Emitted periodically (approximately every 2 seconds), to provide a summary of the node's current
-state. Note that most of this information can be derived from other events.
-
-    u32 (Total number of peers)
-    u32 (Number of validator peers)
-    u32 (Number of peers with a block announcement stream open)
-    [u8; C] (Number of guarantees in pool, by core; C is the total number of cores)
-    u32 (Number of shards in availability store)
-    u64 (Total size of shards in availability store, in bytes)
-    u32 (Number of preimages in pool, ready to be included in a block)
-    u32 (Total size of preimages in pool, in bytes)
-
-**Implementation location:** `node/node.go` - periodic status ticker (every 2s)
-
-#### Call sites -- ✅ shawn audited
-- [node/node.go](../node/node.go#L1008) — `(*Node).runStatusTelemetry`
-
-### 11: Best block changed
-
-Emitted when the node's best block changes.
-
-    Slot (New best slot)
-    Header Hash (New best header hash)
-
-**Implementation location:** `statedb/statedb.go` - in `UpdateBestBlock()` or when new blocks are accepted
-
-#### Call sites -- ✅ sourabh audited
-- [node/node.go](../node/node.go#L1571) — `(*NodeContent).addStateDB`
-- [node/node.go](../node/node.go#L1590) — `(*NodeContent).addStateDB`
-
-### 12: Finalized block changed
-
-Emitted when the latest finalized block (from the node's perspective) changes.
-
-    Slot (New finalized slot)
-    Header Hash (New finalized header hash)
-
-**Implementation location:** `node/node_request.go` - after block finalization in `runReceiveBlock`
-
-#### Call sites -- ✅ shawn audited
-- [node/node_request.go](../node/node_request.go#L400) — `(*Node).runReceiveBlock`
-
-### 13: Sync status changed
-
-Emitted when the node's sync status changes. This status is subjective, indicating whether or not
-the node believes it is sufficiently synced with the network to be able to perform all of the
-duties of a validator node (authoring, guaranteeing, assuring, auditing, and so on).
-
-    bool (Does the node believe it is sufficiently in sync with the network?)
-
-**Implementation location:** `node/sync.go` - when sync status transitions
-
-#### Call sites -- ✅ sourabh audited
-- [node/node.go](../node/node.go#L360) — `(*Node).SetIsSync`
-
-## Networking events
-
-These events concern JAMNP-S connections.
-
-**Implementation locations for events 20-28:**
-- Connection events (20-27): `node/network.go` - in connection handlers
-- Peer misbehavior (28): Throughout networking code where protocol violations are detected
-
-### 20: Connection refused 🔴 DEFERRED
-
-Emitted when a connection attempt from a peer is refused.
-
-    Peer Address
-
-> I think this one is for the blacklist. we currently don't have this kind of implementation
-
-
-### 21: Connecting in
-
-Emitted when a connection attempt from a peer is accepted. This event should be emitted as soon as
-possible. In particular it should be emitted _before_ the connection handshake completes.
-
-    Peer Address
-
-#### Call sites -- ✅ shawn audited
-- [node/node.go](../node/node.go#L1687) — `(*Node).handleConnection`
-
-### 22: Connect in failed
-
-Emitted when an incoming connection attempt fails.
-
-    Event ID (ID of the corresponding "connecting in" event)
-    Reason
-
-#### Call sites -- ✅ shawn audited
-- [node/node.go](../node/node.go#L1701) — `(*Node).handleConnection`
-
-### 23: Connected in
-
-Emitted when an incoming connection attempt succeeds.
-
-    Event ID (ID of the corresponding "connecting in" event)
-    Peer ID
-
-#### Call sites -- ✅ shawn audited
-- [node/node.go](../node/node.go#L1740) - `(*Node).handleConnection`
-
-### 24: Connecting out
-
-Emitted when an outgoing connection attempt is initiated.
-
-    Peer ID
-    Peer Address
-
-#### Call sites -- ✅ shawn audited
-- [node/peer.go](../node/peer.go#L135) — `(*Peer).openStream`
-
-### 25: Connect out failed
-
-Emitted when an outgoing connection attempt fails.
-
-    Event ID (ID of the corresponding "connecting out" event)
-    Reason
-
-#### Call sites -- ✅ shawn audited
-- [node/peer.go](../node/peer.go#L156) — `(*Peer).openStream`
-
-### 26: Connected out
-
-Emitted when an outgoing connection attempt succeeds.
-
-    Event ID (ID of the corresponding "connecting out" event)
-
-#### Call sites -- ✅ shawn audited
-- [node/peer.go](../node/peer.go#L165) — `(*Peer).openStream`
-
-### 27: Disconnected
-
-Emitted when a connection to a peer is broken.
-
-    Peer ID
-    Option<Connection Side> (Terminator of the connection, may be omitted in case of eg a timeout)
-    Reason
-
-#### Call sites -- ✅ shawn audited
-- [node/node.go](../node/node.go#L1656) — `(*Node).handleConnection`
-
-### 28: Peer misbehaved 🔴 DEFERRED
-Emitted when a peer misbehaves. Misbehaviour is any behaviour which is objectively not compliant
-with the network protocol or the GP. This includes for example sending a malformed message or an
-invalid signature. This does _not_ include, for example, timing out (timeouts are subjective) or
-prematurely closing a stream (this is permitted by the network protocol).
-
-    Peer ID
-    Reason
-
-#### Call sites -- 
-- [node/peerUP0_block.go](../node/peerUP0_block.go#L397) — `(*Node).runBlockAnnouncement`
-
-> we need different treatment for this one. we probably should discuss some error expression with Emett
-
-## Block authoring/importing events
-
-These events concern the block authoring and importing pipelines. Note that some events are common
-to both authoring and importing, eg "block executed".
-
-**Implementation locations for events 40-47:**
-- Authoring events (40-42, 47): `node/node.go` - in `AuthorBlock()` and block building logic
-- Importing events (43-47): `node/node.go` - in `ImportBlock()` and block verification logic
-- Execution events (46-47): `statedb/statedb.go` - in accumulation and state transition code
-
-### 40: Authoring
-
-Emitted when authoring of a new block begins.
-
-    Slot
-    Header Hash (Of the parent block)
-
-#### Call sites -- ✅ sourabh audited 
-- [statedb/statedb.go](../statedb/statedb.go#L766) — `(*StateDB).ProcessState`
-
-### 41: Authoring failed
-
-Emitted if block authoring fails for some reason.
-
-    Event ID (ID of the corresponding "authoring" event)
-    Reason
-
-#### Call sites -- ✅ sourabh audited
-- [statedb/statedb.go](../statedb/statedb.go#L784) — `(*StateDB).ProcessState`
-
-### 42: Authored
-
-Emitted when a new block has been authored. This should be emitted as soon the contents of the
-block have been determined, ideally before accumulation is performed and the new state root is
-computed (which is included only in the following block).
-
-    Event ID (ID of the corresponding "authoring" event)
-    Block Outline
-
-#### Call sites -- ✅ sourabh audited
-- [statedb/statedb.go](../statedb/statedb.go#L818) — `(*StateDB).ProcessState`
-
-### 43: Importing
-
-Emitted when importing of a block begins. This should not be emitted by the block author; the
-author should emit the "authoring" event instead.
-
-    Slot
-    Block Outline
-
-NOTE: this should have an EventID
-
-#### Call sites -- ✅ sourabh audited
-- [node/node.go](../node/node.go#L2161) — `(*Node).ApplyBlock`
-
-### 44: Block verification failed
-
-Emitted if verification of a block being imported fails for some reason. This includes if the block
-is determined to be invalid, ie it does not satisfy all the validity conditions listed in the GP.
-In this case, a "peer misbehaved" event should also be emitted for the peer which sent the block.
-
-This event should never be emitted by the block author (authors should emit the "authoring failed"
-event instead).
-
-    Event ID (ID of the corresponding "importing" event)
-    Reason
-
-#### Call sites -- ✅ shawn audited
-- [statedb/applystatetransition.go](../statedb/applystatetransition.go#L204) — `ApplyStateTransitionFromBlock`
-- this one contains reason. need error defined
-- we can have a 2 stage block verification. but currently we only have one in `s.VerifyBlockHeader`
-
-
-### 45: Block verified -- 🔴 POST-MIGRATION
-
-Emitted once a block being imported has been verified. That is, the block satisfies all the
-validity conditions listed in the GP. This should be emitted as soon as this has been determined,
-ideally before accumulation is performed and the new state root is computed. This should not be
-emitted by the block author (the author should emit the "authored" event instead).
-
-    Event ID (ID of the corresponding "importing" event)
-
-#### Call sites 
-- [statedb/applystatetransition.go](../statedb/applystatetransition.go#L209) — `ApplyStateTransitionFromBlock`
-
-### 46: Block execution failed   -- 🔴 POST-MIGRATION
-
-Emitted if execution of a block fails after authoring/verification. This can happen if, for
-example, there is a collision amongst created service IDs during accumulation.
-
-    Event ID (ID of the corresponding "authoring" or "importing" event)
-    Reason
-
-#### Call sites 
-- [node/node.go](../node/node.go#L2193) — `(*Node).ApplyBlock`
-- [statedb/statedb.go](../statedb/statedb.go#L856) — `(*StateDB).ProcessState`
-
-### 47: Block executed 🔴 POST-MIGRATION
-
-Emitted following successful execution of a block. This should be emitted by both the block author
-and importers.
-
-    Event ID (ID of the corresponding "authoring" or "importing" event)
-    len++[Service ID ++ Accumulate Cost] (Accumulated services and the cost of their accumulate calls)
-
-Each service should be listed at most once in the accumulated services list. The length of the
-accumulated services list should not exceed 500. If more than 500 services are accumulated in a
-block, the costs of the services with lowest total gas usage should be combined and reported with
-service ID 0xffffffff (note that this is otherwise not a valid service ID). Ties should be broken
-by combining services with greater IDs.
-
-#### Call sites 
-- [statedb/applystatetransition.go](../statedb/applystatetransition.go#L438) — `ApplyStateTransitionFromBlock`
-
-## Block distribution events
-
-These events concern announcement and transfer of blocks between peers.
-
-**Implementation locations for events 60-68:**
-- Block announcement streams (60-62): `node/network.go` - in UP 0 stream handlers
-- Block requests (63-68): `node/network.go` - in CE 128 request/response handlers
-
-### 60: Block announcement stream opened
-
-Emitted when a block announcement stream (UP 0) is opened.
-
-    Peer ID
-    Connection Side (The side that opened the stream)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerUP0_block.go](../node/peerUP0_block.go#L200) — `(*Peer).GetOrInitBlockAnnouncementStream`
-- [node/peerUP0_block.go](../node/peerUP0_block.go#L346) — `(*Node).onBlockAnnouncement`
-
-### 61: Block announcement stream closed
-
-Emitted when a block announcement stream (UP 0) is closed. This need not be emitted if the stream
-is closed due to disconnection.
-
-    Peer ID
-    Connection Side (The side that closed the stream)
-    Reason
-
-#### Call sites --  ✅ sourabh audited
-- [node/peerUP0_block.go](../node/peerUP0_block.go#L371) — `(*Node).runBlockAnnouncement`
-
-### 62: Block announced
-
-Emitted when a block announcement is sent to or received from a peer (UP 0).
-
-    Peer ID
-    Connection Side (Announcer)
-    Slot
-    Header Hash
-
-#### Call sites -- ✅ sourabh audited 
-- [node/peerUP0_block.go](../node/peerUP0_block.go#L422) — `(*Node).runBlockAnnouncement` (receiving)
-- [node/node.go](../node/node.go#L1913) — broadcast loop (sending)
-
-### 63: Sending block request
-
-Emitted when a node begins sending a block request to a peer (CE 128).
-
-    Peer ID (Recipient)
-    Header Hash
-    0 (Ascending exclusive) OR 1 (Descending inclusive) (Direction, single byte)
-    u32 (Maximum number of blocks)
-
-#### Call sites -- ✅ sourabh audited 
-- [node/peerCE128_blockrequest.go](../node/peerCE128_blockrequest.go#L95) — `(*Peer).SendBlockRequest`
-
-### 64: Receiving block request
-
-Emitted by the recipient when a node begins sending a block request (CE 128).
-
-    Peer ID (Sender)
-
-#### Call sites -- ✅ sourabh audited 
-- [node/peerCE128_blockrequest.go](../node/peerCE128_blockrequest.go#L165) — `(*NodeContent).onBlockRequest`
-
-### 65: Block request failed
-
-Emitted when a block request (CE 128) fails.
-
-    Event ID (ID of the corresponding "sending block request" or "receiving block request" event)
-    Reason
-
-#### Call sites -- ✅ sourabh audited 
-- [node/peerCE128_blockrequest.go](../node/peerCE128_blockrequest.go#L122) — `(*Peer).SendBlockRequest`
-- [node/peerCE128_blockrequest.go](../node/peerCE128_blockrequest.go#L132) — `(*Peer).SendBlockRequest`
-- [node/peerCE128_blockrequest.go](../node/peerCE128_blockrequest.go#L174) — `(*NodeContent).onBlockRequest`
-- [node/peerCE128_blockrequest.go](../node/peerCE128_blockrequest.go#L191) — `(*NodeContent).onBlockRequest`
-- [node/peerCE128_blockrequest.go](../node/peerCE128_blockrequest.go#L199) — `(*NodeContent).onBlockRequest`
-- [node/peerCE128_blockrequest.go](../node/peerCE128_blockrequest.go#L234) — `(*NodeContent).onBlockRequest`
-
-### 66: Block request sent
-
-Emitted once a block request has been sent to a peer (CE 128). This should be emitted after the
-intial message containing the request details has been transmitted.
-
-    Event ID (ID of the corresponding "sending block request" event)
-
-#### Call sites -- ✅ sourabh audited 
-- [node/peerCE128_blockrequest.go](../node/peerCE128_blockrequest.go#L114) — `(*Peer).SendBlockRequest`
-
-### 67: Block request received
-
-Emitted once a block request has been received from a peer (CE 128).
-
-    Event ID (ID of the corresponding "receiving block request" event)
-    Header Hash
-    0 (Ascending exclusive) OR 1 (Descending inclusive) (Direction, single byte)
-    u32 (Maximum number of blocks)
-
-#### Call sites -- ✅ sourabh audited 
-- [node/peerCE128_blockrequest.go](../node/peerCE128_blockrequest.go#L181) — `(*NodeContent).onBlockRequest`
-
-### 68: Block transferred
-
-Emitted when a block has been fully sent to or received from a peer (CE 128).
-
-In the case of a received block, this event may be emitted before any checks are performed. If the
-block is found to be invalid or to not match the request, a "peer misbehaved" event should be
-emitted; emitting a "block request failed" event is optional.
-
-    Event ID (ID of the corresponding "sending block request" or "receiving block request" event)
-    Slot
-    Block Outline
-    bool (Last block for the request?)
-
-#### Call sites -- ✅ sourabh audited 
-- [node/peerCE128_blockrequest.go](../node/peerCE128_blockrequest.go#L152) — `(*Peer).SendBlockRequest`
-- [node/peerCE128_blockrequest.go](../node/peerCE128_blockrequest.go#L254) — `(*NodeContent).onBlockRequest`
-
-## Safrole ticket events
-
-These events concern generation and distribution of tickets for the Safrole lottery.
-
-**Implementation locations for events 80-84:**
-- Ticket generation (80-82): `statedb/safrole.go` - in VRF ticket generation logic
-- Ticket transfer (83-84): `node/network.go` - in CE 131/132 handlers
-
-### 80: Generating tickets
-
-Emitted when generation of a new set of Safrole tickets begins.
-
-    Epoch Index (The epoch the tickets are to be used in)
-
-#### Call sites -- ✅ sourabh audited 
-- [node/node_ticket.go](../node/node_ticket.go#L74) — `(*Node).GenerateTickets`
-
-### 81: Ticket generation failed
-
-Emitted if Safrole ticket generation fails.
-
-    Event ID (ID of the corresponding "generating tickets" event)
-    Reason
-
-#### Call sites -- ✅ sourabh audited
-- [node/node_ticket.go](../node/node_ticket.go#L80) — `(*Node).GenerateTickets`
-
-### 82: Tickets generated
-
-Emitted once a set of Safrole tickets has been generated.
-
-    Event ID (ID of the corresponding "generating tickets" event) 
-    len++[[u8; 32]] (Ticket VRF outputs, index is attempt number)
-
-#### Call sites -- ✅ sourabh audited
-- [node/node_ticket.go](../node/node_ticket.go#L94) — `(*Node).GenerateTickets`
-
-### 83: Ticket transfer failed
-
-Emitted when a Safrole ticket send or receive fails (CE 131/132).
-
-    Peer ID
-    Connection Side (Sender)
-    bool (Was CE 132 used?)
-    Reason
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE131_ticketdistribution.go](../node/peerCE131_ticketdistribution.go#L130) — `(*Peer).SendTicketDistribution`
-- [node/peerCE131_ticketdistribution.go](../node/peerCE131_ticketdistribution.go#L139) — `(*Peer).SendTicketDistribution`
-- [node/peerCE131_ticketdistribution.go](../node/peerCE131_ticketdistribution.go#L158) — `(*Node).onTicketDistribution`
-
-### 84: Ticket transferred
-
-Emitted when a Safrole ticket is sent to or received from a peer (CE 131/132).
-
-In the case of a received ticket, this should be emitted before the ticket is checked. If the
-ticket is found to be invalid, a "peer misbehaved" event should be emitted.
-
-    Peer ID
-    Connection Side (Sender)
-    bool (Was CE 132 used?)
-    Epoch Index (The epoch the ticket is to be used in)
-    0 OR 1 (Single byte, ticket attempt number)
-    [u8; 32] (VRF output)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE131_ticketdistribution.go](../node/peerCE131_ticketdistribution.go#L123) — `(*Peer).SendTicketDistribution`
-- [node/peerCE131_ticketdistribution.go](../node/peerCE131_ticketdistribution.go#L175) — `(*Node).onTicketDistribution`
-
-## Guaranteeing events
-
-These events concern the guaranteeing pipeline and guarantee pool.
-
-**Implementation locations for events 90-113:**
-- Work-package submission (90-109): `node/node_guarantor.go` - in guarantor pipeline
-- Work-package sharing (91-103): `node/node_guarantor.go` - in primary/secondary guarantor logic
-- Guarantee distribution (106-113): `node/network.go` - in CE 135 handlers and guarantee pool management
-- Authorization/Refine/Build (95, 101-102): `node/node_guarantor.go` - in PVM execution callbacks
-
-### 90: Work-package submission
-
-Emitted when a builder opens a stream to submit a work-package (CE 133/146). This should be emitted
-as soon as the stream is opened, before the work-package is read from the stream.
-
-    Peer ID (Builder)
-    bool (Using CE 146?)
-
-#### Call sites -- ✅ shawn audited
-- [node/peerCE133_workpackagesubmission.go](../node/peerCE133_workpackagesubmission.go#L101) — `(*Peer).SendWorkPackageSubmission`
-
-### 91: Work-package being shared --  ✅ shawn audited
-
-Emitted by the secondary guarantor when a work-package sharing stream is opened (CE 134). This
-should be emitted as soon as the stream is opened, before any messages are read from the stream.
-
-    Peer ID (Primary guarantor)
-
-### 92: Work-package failed
-
-Emitted if receiving a work-package from a builder or another guarantor fails, or processing of a
-received work-package fails. This may be emitted at any point in the guarantor pipeline.
-
-    Event ID (ID of the corresponding "work-package submission" or "work-package being shared" event)
-    Reason
-
-#### Call sites --  ✅ shawn audited
-- [node/peerCE133_workpackagesubmission.go](../node/peerCE133_workpackagesubmission.go#L109) — `(*Peer).SendWorkPackageSubmission`
-- [node/peerCE133_workpackagesubmission.go](../node/peerCE133_workpackagesubmission.go#L122) — `(*Peer).SendWorkPackageSubmission`
-- [node/peerCE133_workpackagesubmission.go](../node/peerCE133_workpackagesubmission.go#L139) — `(*Peer).SendWorkPackageSubmission`
-- [node/peerCE133_workpackagesubmission.go](../node/peerCE133_workpackagesubmission.go#L164) — `(*Node).onWorkPackageSubmission`
-- [node/peerCE134_workpackageshare.go](../node/peerCE134_workpackageshare.go#L266) — `(*Peer).ShareWorkPackage`
-- [node/peerCE134_workpackageshare.go](../node/peerCE134_workpackageshare.go#L278) — `(*Peer).ShareWorkPackage`
-- [node/peerCE134_workpackageshare.go](../node/peerCE134_workpackageshare.go#L287) — `(*Peer).ShareWorkPackage`
-- [node/peerCE134_workpackageshare.go](../node/peerCE134_workpackageshare.go#L312) — `(*Peer).ShareWorkPackage`
-- [node/peerCE134_workpackageshare.go](../node/peerCE134_workpackageshare.go#L322) — `(*Peer).ShareWorkPackage`
-- [node/peerCE134_workpackageshare.go](../node/peerCE134_workpackageshare.go#L332) — `(*Peer).ShareWorkPackage`
-- [node/peerCE134_workpackageshare.go](../node/peerCE134_workpackageshare.go#L375) — `(*Node).onWorkPackageShare`
-- [node/peerCE134_workpackageshare.go](../node/peerCE134_workpackageshare.go#L418) — `(*Node).onWorkPackageShare`
-- [node/peerCE134_workpackageshare.go](../node/peerCE134_workpackageshare.go#L498) — `(*Node).onWorkPackageShare`
-
-### 93: Duplicate work-package
-
-Emitted when a "duplicate" work-package is received from a builder or shared by another guarantor
-(CE 133/134). A duplicate work-package is one that exactly matches (same hash) a previously
-received work-package. This event may be emitted at any point in the guarantor pipeline. In
-particular, it may be emitted instead of a "work-package received" event. An efficient
-implementation should check for duplicates early on to avoid wasted effort!
-
-In the case of a duplicate work-package received from a builder, no further events should be
-emitted referencing the submission.
-
-In the case of a duplicate work-package shared by another guarantor, only one more event should be
-emitted referencing the "work-package being shared" event: either a "work-package failed" event
-indicating failure or a "work-report signature sent" event indicating success.
-
-    Event ID (ID of the corresponding "work-package submission" or "work-package being shared" event)
-    Core Index
-    Work-Package Hash
-
-#### Call sites --  ✅ shawn audited
-- [node/peerCE133_workpackagesubmission.go](../node/peerCE133_workpackagesubmission.go#L230) — `(*Node).onWorkPackageSubmission`
-
-### 94: Work-package received
-
-Emitted once a work-package has been received from a builder or a primary guarantor (CE 133/134).
-This should be emitted _before_ authorization is checked, and ideally before the extrinsic data and
-imports are received/fetched. 
-
-    Event ID (ID of the corresponding "work-package submission" or "work-package being shared" event)
-    Core Index
-    Work-Package Outline
-
-#### Call sites -- ✅ shawn audited
-- [node/peerCE133_workpackagesubmission.go](../node/peerCE133_workpackagesubmission.go#L260) — `(*Node).onWorkPackageSubmission`
-
-### 95: Authorized ✅ shawn audited
-
-Emitted once basic validity checks have been performed on a received work-package, including the
-authorization check. This should be emitted by both primary (received the work-package from a
-builder) and secondary (received the work-package from a primary) guarantors.
-
-    Event ID (ID of the corresponding "work-package submission" or "work-package being shared" event)
-    Is-Authorized Cost
-
-#### Call sites -- ✅ sourabh audited 
-- [node/node_guarantee.go](../node/node_guarantee.go#L283) — `(*Node).processWPQueueItem`
-
-### 96: Extrinsic data received
-
-Emitted once the extrinsic data for a work-package has been received from a builder or a primary
-guarantor (CE 133/134) and verified as consistent with the extrinsic hashes in the work-package.
-
-    Event ID (ID of the corresponding "work-package submission" or "work-package being shared" event)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE133_workpackagesubmission.go](../node/peerCE133_workpackagesubmission.go#L222) — `(*Node).onWorkPackageSubmission`
-
-### 97: Imports received
-
-Emitted once all the imports for a work-package have been fetched/received and verified.
-
-    Event ID (ID of the corresponding "work-package submission" or "work-package being shared" event)
-
-#### Call sites -- ✅ sourabh audited
-- [node/node_guarantee.go](../node/node_guarantee.go#L243) — `(*Node).processWPQueueItem`
-
-### 98: Sharing work-package
-
-Emitted by the primary guarantor when a work-package sharing stream is opened (CE 134).
-
-    Event ID (ID of the corresponding "work-package submission" event)
-    Peer ID (Secondary guarantor)
-
-#### Call sites --  ✅ sourabh audited 
-- [node/peerCE134_workpackageshare.go](../node/peerCE134_workpackageshare.go#L258) — `(*Peer).ShareWorkPackage`
-
-### 99: Work-package sharing failed
-
-Emitted if sharing a work-package with another guarantor fails (CE 134). Possible failures include
-failure to send the bundle, failure to receive a work-report signature, or receipt of an invalid
-work-report signature (in this case, a "peer misbehaved" event should also be emitted for the
-secondary guarantor). This event should only be emitted by the primary guarantor; the secondary
-guarantor should emit the "work-package failed" event on failure.
-
-    Event ID (ID of the corresponding "work-package submission" event)
-    Peer ID (Secondary guarantor)
-    Reason
-
-#### Call sites -- ✅ sourabh audited 
-- [node/node_guarantee.go](../node/node_guarantee.go#L314) — `(*Node).processWPQueueItem`
-
-### 100: Bundle sent
-
-Emitted by the primary guarantor once a work-package bundle has been sent to a secondary guarantor
-(CE 134).
-
-    Event ID (ID of the corresponding "work-package submission" event)
-    Peer ID (Secondary guarantor)
-
-#### Call sites -- ✅ shawn audited
-- [node/node_guarantee.go](../node/node_guarantee.go#L319) — `(*Node).processWPQueueItem`
-
-### 101: Refined
-
-Emitted once a work-package has been refined locally. This should be emitted by both primary and
-secondary guarantors.
-
-    Event ID (ID of the corresponding "work-package submission" or "work-package being shared" event)
-    len++[Refine Cost] (Cost of refine call for each work item)
-
-#### Call sites -- ✅ sourabh audited (moved call site into executeWorkPackageBundle)
-- [node/node_da] -- TODO
-
-### 102: Work-report built
-
-Emitted once a work-report has been built for a work-package. This should be emitted by both
-primary and secondary guarantors.
-
-    Event ID (ID of the corresponding "work-package submission" or "work-package being shared" event)
-    Work-Report Outline
-
-#### Call sites -- ✅ sourabh audited (moved call site into executeWorkPackageBundle)
-- [node/node_da.go](../node/node_da.go#L621) — `(*NodeContent).executeWorkPackageBundle`
-
-### 103: Work-report signature sent
-
-Emitted once a work-report signature for a shared work-package has been sent to the primary
-guarantor (CE 134). This is the final event in the guaranteeing pipeline for secondary guarantors.
-
-    Event ID (ID of the corresponding "work-package being shared" event)
-
-#### Call sites -- ✅ sourabh audited (there was a duplicate telemetry function and duplicate calls)
-- [node/peerCE134_workpackageshare.go](../node/peerCE134_workpackageshare.go#L545) — `(*Node).onWorkPackageShare`
-
-### 104: Work-report signature received
-
-Emitted by the primary guarantor once a valid work-report signature has been received from a
-secondary guarantor (CE 134). If an invalid work-report signature is received, a "work-package
-sharing failed" event should be emitted instead, as well as a "peer misbehaved" event.
-
-    Event ID (ID of the corresponding "work-package submission" event)
-    Peer ID (Secondary guarantor)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE134_workpackageshare.go](../node/peerCE134_workpackageshare.go#L339) — `(*Peer).ShareWorkPackage`
-
-### 105: Guarantee built
-
-Emitted by the primary guarantor once a work-report guarantee has been built. If a secondary
-guarantor is slow to send their signature, this event may be emitted twice: once for the guarantee
-with just two signatures, and again for the guarantee with all three signatures.
-
-    Event ID (ID of the corresponding "work-package submission" event)
-    Guarantee Outline
-
-#### Call sites -- ✅ sourabh audited
-- [node/node_guarantee.go](../node/node_guarantee.go#L380) — `(*Node).processWPQueueItem`
-
-### 106: Sending guarantee
-
-Emitted when a guarantor begins sending a work-report guarantee to another validator, for potential
-inclusion in a block (CE 135). This should reference the "guarantee built" event corresponding to
-the guarantee that is being sent.
-
-    Event ID (ID of the corresponding "guarantee built" event)
-    Peer ID (Recipient)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE135_workreportdistribution.go](../node/peerCE135_workreportdistribution.go#L131) — `(*Peer).SendWorkReportDistribution`
-
-### 107: Guarantee send failed
-
-Emitted if sending a work-report guarantee fails (CE 135).
-
-    Event ID (ID of the corresponding "sending guarantee" event)
-    Reason
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE135_workreportdistribution.go](../node/peerCE135_workreportdistribution.go#L138) — `(*Peer).SendWorkReportDistribution`
-- [node/peerCE135_workreportdistribution.go](../node/peerCE135_workreportdistribution.go#L154) — `(*Peer).SendWorkReportDistribution`
-- [node/peerCE135_workreportdistribution.go](../node/peerCE135_workreportdistribution.go#L164) — `(*Peer).SendWorkReportDistribution`
-
-### 108: Guarantee sent
-
-Emitted if sending a work-report guarantee succeeds (CE 135).
-
-    Event ID (ID of the corresponding "sending guarantee" event)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE135_workreportdistribution.go](../node/peerCE135_workreportdistribution.go#L171) — `(*Peer).SendWorkReportDistribution`
-
-### 109: Guarantees distributed
-
-Emitted by the primary guarantor once they have finished distributing the work-report guarantee(s).
-This is the final event in the guaranteeing pipeline for primary guarantors.
-
-This event may be emitted even if the guarantor was not successful in sending the guarantee(s) to
-any other validator, although the guarantor may prefer to emit a "work-package failed" event in
-that case.
-
-    Event ID (ID of the corresponding "work-package submission" event)
-
-#### Call sites -- ✅ sourabh audited
-- [node/node_guarantee.go](../node/node_guarantee.go#L384) — `(*Node).processWPQueueItem`
-
-### 110: Receiving guarantee
-
-Emitted by the recipient when a guarantor begins sending a work-report guarantee (CE 135).
-
-    Peer ID (Sender)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE135_workreportdistribution.go](../node/peerCE135_workreportdistribution.go#L183) — `(*Node).onWorkReportDistribution`
-
-### 111: Guarantee receive failed
-
-Emitted if receiving a work-report guarantee fails (CE 135).
-
-    Event ID (ID of the corresponding "receiving guarantee" event)
-    Reason
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE135_workreportdistribution.go](../node/peerCE135_workreportdistribution.go#L191) — `(*Node).onWorkReportDistribution`
-
-### 112: Guarantee received
-
-Emitted if receiving a work-report guarantee succeeds (CE 135). This should be emitted before the
-guarantee is checked. If the guarantee is found to be invalid, a "peer misbehaved" event should be
-emitted.
-
-    Event ID (ID of the corresponding "receiving guarantee" event)
-    Guarantee Outline
-
-#### Call sites -- ✅ sourabh audited (moved location)
-- [node/peerCE135_workreportdistribution.go](../node/peerCE135_workreportdistribution.go#L216) — `(*Node).onWorkReportDistribution`
-
-### 113: Guarantee discarded -- ✅ sourabh audited (needs some clarification..)
-
-Emitted when a guarantee is discarded from the local guarantee pool.
-
-    Guarantee Outline
-    Guarantee Discard Reason
-
-#### Call sites 
-- [node/node.go](../node/node.go#L336) — `(*Node).handleGuaranteeDiscarded`
-- we don't have such event I think?
-
-## Availability distribution events
-
-These events concern availability shard and assurance distribution.
-
-**Implementation locations for events 120-131:**
-- Shard requests (120-125): `node/network.go` - in CE 137 handlers
-- Assurance distribution (126-131): `node/node_assurer.go` - in assurance logic and CE 141 handlers
-
-### 120: Sending shard request
-
-Emitted when an assurer begins sending a shard request to a guarantor (CE 137).
-
-    Peer ID (Guarantor)
-    Erasure-Root
-    Shard Index
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE137_fullshardrequest.go](../node/peerCE137_fullshardrequest.go#L93) — `(*Peer).SendFullShardRequest`
-
-### 121: Receiving shard request
-
-Emitted by the recipient when an assurer begins sending a shard request (CE 137).
-
-    Peer ID (Assurer)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE137_fullshardrequest.go](../node/peerCE137_fullshardrequest.go#L162) — `(*Node).onFullShardRequest`
-
-### 122: Shard request failed
-
-Emitted when a shard request fails (CE 137). This should be emitted by both sides, ie the assurer
-and the guarantor.
-
-    Event ID (ID of the corresponding "sending shard request" or "receiving shard request" event)
-    Reason
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE137_fullshardrequest.go](../node/peerCE137_fullshardrequest.go#L100) — `(*Peer).SendFullShardRequest`
-- [node/peerCE137_fullshardrequest.go](../node/peerCE137_fullshardrequest.go#L115) — `(*Peer).SendFullShardRequest`
-- [node/peerCE137_fullshardrequest.go](../node/peerCE137_fullshardrequest.go#L123) — `(*Peer).SendFullShardRequest`
-- [node/peerCE137_fullshardrequest.go](../node/peerCE137_fullshardrequest.go#L142) — `(*Peer).SendFullShardRequest`
-- [node/peerCE137_fullshardrequest.go](../node/peerCE137_fullshardrequest.go#L170) — `(*Node).onFullShardRequest`
-- [node/peerCE137_fullshardrequest.go](../node/peerCE137_fullshardrequest.go#L185) — `(*Node).onFullShardRequest`
-- [node/peerCE137_fullshardrequest.go](../node/peerCE137_fullshardrequest.go#L193) — `(*Node).onFullShardRequest`
-- [node/peerCE137_fullshardrequest.go](../node/peerCE137_fullshardrequest.go#L214) — `(*Node).onFullShardRequest`
-
-### 123: Shard request sent
-
-Emitted once a shard request has been sent to a guarantor (CE 137). This should be emitted after
-the initial message containing the request details has been transmitted.
-
-    Event ID (ID of the corresponding "sending shard request" event)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE137_fullshardrequest.go](../node/peerCE137_fullshardrequest.go#L132) — `(*Peer).SendFullShardRequest`
-
-### 124: Shard request received
-
-Emitted once a shard request has been received from an assurer (CE 137).
-
-    Event ID (ID of the corresponding "receiving shard request" event)
-    Erasure-Root
-    Shard Index
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE137_fullshardrequest.go](../node/peerCE137_fullshardrequest.go#L177) — `(*Node).onFullShardRequest`
-
-### 125: Shards transferred
-
-Emitted when a shard request completes successfully (CE 137). This should be emitted by both sides,
-ie the assurer and the guarantor.
-
-    Event ID (ID of the corresponding "sending shard request" or "receiving shard request" event)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE137_fullshardrequest.go](../node/peerCE137_fullshardrequest.go#L149) — `(*Peer).SendFullShardRequest`
-- [node/peerCE137_fullshardrequest.go](../node/peerCE137_fullshardrequest.go#L221) — `(*Node).onFullShardRequest`
-
-### 126: Distributing assurance
-
-Emitted when an assurer begins distributing an assurance to other validators, for potential
-inclusion in a block.
-
-    Header Hash (Assurance anchor)
-    [u8; ceil(C / 8)] (Availability bitfield; one bit per core, C is the total number of cores)
-
-#### Call sites --  ✅ sourabh audited 
-- [node/node.go](../node/node.go#L1826) — `(*Node).broadcast`
-
-### 127: Assurance send failed
-
-Emitted when an assurer fails to send an assurance to another validator (CE 141).
-
-    Event ID (ID of the corresponding "distributing assurance" event)
-    Peer ID (Recipient)
-    Reason
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE141_assurance.go](../node/peerCE141_assurance.go#L109) — `(*Peer).SendAssurance`
-- [node/peerCE141_assurance.go](../node/peerCE141_assurance.go#L118) — `(*Peer).SendAssurance`
-
-### 128: Assurance sent
-
-Emitted by assurers after sending an assurance to another validator (CE 141).
-
-    Event ID (ID of the corresponding "distributing assurance" event)
-    Peer ID (Recipient)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE141_assurance.go](../node/peerCE141_assurance.go#L125) — `(*Peer).SendAssurance`
-
-### 129: Assurance distributed
-
-Emitted once an assurer has finished distributing an assurance.
-
-This event should be emitted even if the assurer was not successful in sending the assurance to any
-other validator. The success of the distribution should be determined by the "assurance send
-failed" and "assurance sent" events emitted by the assurer, as well as the "assurance receive
-failed" and "assurance received" events emitted by the recipient validators.
-
-    Event ID (ID of the corresponding "distributing assurance" event)
-
-#### Call sites -- ✅ sourabh audited 
-- [node/node.go](../node/node.go#L1836) — `(*Node).broadcast`
-
-### 130: Assurance receive failed
-
-Emitted when a validator fails to receive an assurance from a peer (CE 141).
-
-    Peer ID (Sender)
-    Reason
-
-#### Call sites -- ✅ sourabh audited 
-- [node/peerCE141_assurance.go](../node/peerCE141_assurance.go#L138) — `(*Node).onAssuranceDistribution`
-
-### 131: Assurance received
-
-Emitted when an assurance is received from a peer (CE 141). This should be emitted as soon as the
-assurance is received, before checking if it is valid. If the assurance is found to be invalid, a
-"peer misbehaved" event should be emitted. [PROBLEM: WE ARE NOT DOING THIS!!!]
-
-    Peer ID (Sender)
-    Header Hash (Assurance anchor)
-
-#### Call sites -- ✅ sourabh audited 
-- [node/peerCE141_assurance.go](../node/peerCE141_assurance.go#L145) — `(*Node).onAssuranceDistribution`
-
-## Bundle recovery events
-
-These events concern recovery of work-package bundles for auditing.
-
-**Implementation locations for events 140-153:**
-- Bundle shard requests (140-145): `node/node_auditor.go` - in CE 138 handlers and bundle reconstruction
-- Bundle requests (148-153): `node/node_auditor.go` - in CE 147 handlers
-
-### 140: Sending bundle shard request
-
-Emitted when an auditor begins sending a bundle shard request to an assurer (CE 138).
-
-    Event ID (TODO, should reference auditing event)
-    Peer ID (Assurer)
-    Shard Index
-
-#### Call sites -- ✅ sourabh audited 
-- [node/peerCE138_bundleshardrequest.go](../node/peerCE138_bundleshardrequest.go#L47) — `(*Peer).SendBundleShardRequest`
-
-### 141: Receiving bundle shard request
-
-Emitted by the recipient when an auditor begins sending a bundle shard request (CE 138).
-
-    Peer ID (Auditor)
-
-#### Call sites -- ✅ sourabh audited 
-- [node/peerCE138_bundleshardrequest.go](../node/peerCE138_bundleshardrequest.go#L149) — `(*Node).onBundleShardRequest`
-
-### 142: Bundle shard request failed
-
-Emitted when a bundle shard request fails (CE 138). This should be emitted by both sides, ie the
-auditor and the assurer.
-
-    Event ID (ID of the corresponding "sending bundle shard request" or "receiving bundle shard request" event)
-    Reason
-
-#### Call sites -- ✅ sourabh audited 
-- [node/peerCE138_bundleshardrequest.go](../node/peerCE138_bundleshardrequest.go#L54) — `(*Peer).SendBundleShardRequest`
-- [node/peerCE138_bundleshardrequest.go](../node/peerCE138_bundleshardrequest.go#L69) — `(*Peer).SendBundleShardRequest`
-- [node/peerCE138_bundleshardrequest.go](../node/peerCE138_bundleshardrequest.go#L79) — `(*Peer).SendBundleShardRequest`
-- [node/peerCE138_bundleshardrequest.go](../node/peerCE138_bundleshardrequest.go#L96) — `(*Peer).SendBundleShardRequest`
-- [node/peerCE138_bundleshardrequest.go](../node/peerCE138_bundleshardrequest.go#L114) — `(*Peer).SendBundleShardRequest`
-- [node/peerCE138_bundleshardrequest.go](../node/peerCE138_bundleshardrequest.go#L125) — `(*Peer).SendBundleShardRequest`
-- [node/peerCE138_bundleshardrequest.go](../node/peerCE138_bundleshardrequest.go#L156) — `(*Node).onBundleShardRequest`
-- [node/peerCE138_bundleshardrequest.go](../node/peerCE138_bundleshardrequest.go#L174) — `(*Node).onBundleShardRequest`
-- [node/peerCE138_bundleshardrequest.go](../node/peerCE138_bundleshardrequest.go#L182) — `(*Node).onBundleShardRequest`
-- [node/peerCE138_bundleshardrequest.go](../node/peerCE138_bundleshardrequest.go#L211) — `(*Node).onBundleShardRequest`
-
-### 143: Bundle shard request sent
-
-Emitted once a bundle shard request has been sent to an assurer (CE 138). This should be emitted
-after the initial message containing the request details has been transmitted.
-
-    Event ID (ID of the corresponding "sending bundle shard request" event)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE138_bundleshardrequest.go](../node/peerCE138_bundleshardrequest.go#L88) — `(*Peer).SendBundleShardRequest`
-
-### 144: Bundle shard request received
-
-Emitted once a bundle shard request has been received from an auditor (CE 138).
-
-    Event ID (ID of the corresponding "receiving bundle shard request" event)
-    Erasure-Root
-    Shard Index
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE138_bundleshardrequest.go](../node/peerCE138_bundleshardrequest.go#L163) — `(*Node).onBundleShardRequest`
-
-### 145: Bundle shard transferred
-
-Emitted when a bundle shard request completes successfully (CE 138). This should be emitted by both
-sides, ie the auditor and the assurer.
-
-    Event ID (ID of the corresponding "sending bundle shard request" or "receiving bundle shard request" event)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE138_bundleshardrequest.go](../node/peerCE138_bundleshardrequest.go#L132) — `(*Peer).SendBundleShardRequest`
-- [node/peerCE138_bundleshardrequest.go](../node/peerCE138_bundleshardrequest.go#L218) — `(*Node).onBundleShardRequest`
-
-### 146: Reconstructing bundle
-
-Emitted when reconstruction of a bundle from shards received from assurers begins.
-
-    Event ID 
-    bool (Is this a trivial reconstruction, using only original-data shards?)
-
-#### Call sites -- ✅ sourabh audited
-- [node/node.go](../node/node.go#L2624) — `(*NodeContent).reconstructPackageBundleSegments`
-
-### 147: Bundle reconstructed
-
-Emitted once a bundle has been successfully reconstructed from shards.
-
-    Event ID
-
-#### Call sites -- ✅ sourabh audited
-- [node/node.go](../node/node.go#L2731) — `(*NodeContent).reconstructPackageBundleSegments`
-
-### 148: Sending bundle request
-
-Emitted when an auditor begins sending a bundle request to a guarantor (CE 147).
-
-    Event ID 
-    Peer ID (Guarantor)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE147_bundlerequest.go](../node/peerCE147_bundlerequest.go#L38) — `(*Peer).SendBundleRequest`
-
-### 149: Receiving bundle request
-
-Emitted by the recipient when an auditor begins sending a bundle request (CE 147).
-
-    Peer ID (Auditor)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE147_bundlerequest.go](../node/peerCE147_bundlerequest.go#L111) — `(*Node).onBundleRequest`
-
-### 150: Bundle request failed
-
-Emitted when a bundle request fails (CE 147). This should be emitted by both sides, ie the auditor
-and the guarantor.
-
-    Event ID (ID of the corresponding "sending bundle request" or "receiving bundle request" event)
-    Reason
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE147_bundlerequest.go](../node/peerCE147_bundlerequest.go#L45) — `(*Peer).SendBundleRequest`
-- [node/peerCE147_bundlerequest.go](../node/peerCE147_bundlerequest.go#L55) — `(*Peer).SendBundleRequest`
-- [node/peerCE147_bundlerequest.go](../node/peerCE147_bundlerequest.go#L73) — `(*Peer).SendBundleRequest`
-- [node/peerCE147_bundlerequest.go](../node/peerCE147_bundlerequest.go#L83) — `(*Peer).SendBundleRequest`
-- [node/peerCE147_bundlerequest.go](../node/peerCE147_bundlerequest.go#L118) — `(*Node).onBundleRequest`
-- [node/peerCE147_bundlerequest.go](../node/peerCE147_bundlerequest.go#L145) — `(*Node).onBundleRequest`
-- [node/peerCE147_bundlerequest.go](../node/peerCE147_bundlerequest.go#L161) — `(*Node).onBundleRequest`
-
-### 151: Bundle request sent
-
-Emitted once a bundle request has been sent to a guarantor (CE 147). This should be emitted after
-the initial message containing the request details has been transmitted.
-
-    Event ID (ID of the corresponding "sending bundle request" event)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE147_bundlerequest.go](../node/peerCE147_bundlerequest.go#L62) — `(*Peer).SendBundleRequest`
-
-### 152: Bundle request received
-
-Emitted once a bundle request has been received from an auditor (CE 147).
-
-    Event ID (ID of the corresponding "receiving bundle request" event)
-    Erasure-Root
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE147_bundlerequest.go](../node/peerCE147_bundlerequest.go#L127) — `(*Node).onBundleRequest`
-
-### 153: Bundle transferred
-
-Emitted when a bundle request completes successfully (CE 147). This should be emitted by both
-sides, ie the auditor and the guarantor.
-
-    Event ID (ID of the corresponding "sending bundle request" or "receiving bundle request" event)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE147_bundlerequest.go](../node/peerCE147_bundlerequest.go#L90) — `(*Peer).SendBundleRequest`
-- [node/peerCE147_bundlerequest.go](../node/peerCE147_bundlerequest.go#L168) — `(*Node).onBundleRequest`
-
-## Segment recovery events
-
-These events concern recovery of segments exported by work-packages. Segments are recovered by
-primary guarantors, hence these events reference "work-package submission" events.
-
-**Implementation locations for events 160-178:**
-- Segment shard requests (162-167): `node/node_guarantor.go` - in CE 139/140 handlers and segment reconstruction
-- Segment requests (173-178): `node/node_guarantor.go` - in CE 148 handlers
-- Segment verification (171-172): `node/node_guarantor.go` - after segment reconstruction
-
-### 160: Work-package hash mapped
-
-Emitted when a work-package hash is mapped to a segments-root for the purpose of segment recovery.
-
-    Event ID (ID of the corresponding "work-package submission" event)
-    Work-Package Hash
-    Segments-Root
-
-#### Call sites -- ✅ sourabh audited
-- [node/node_da.go](../node/node_da.go#L269) — `(*NodeContent).VerifyBundle`
-
-### 161: Segments-root mapped  🔴 POST-MIGRATION
-
-Emitted when a segments-root is mapped to an erasure-root for the purpose of segment recovery.
-
-    Event ID (ID of the corresponding "work-package submission" event)
-    Segments-Root
-    Erasure-Root
-
-#### Call sites
-- [node/node_da.go](../node/node_da.go#L277) — `(*NodeContent).VerifyBundle`
-
-### 162: Sending segment shard request
-
-Emitted when a guarantor begins sending a segment shard request to an assurer (CE 139/140).
-
-    Event ID (ID of the corresponding "work-package submission" event)
-    Peer ID (Assurer)
-    bool (Using CE 140?)
-    len++[Import Segment ID ++ Shard Index] (Segment shards being requested)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE139_140_segmentshardrequest.go](../node/peerCE139_140_segmentshardrequest.go#L146) — `(*Peer).SendSegmentShardRequest`
-
-### 163: Receiving segment shard request
-
-Emitted by the recipient when a node begins sending a segment shard request (CE 139/140).
-
-    Peer ID (Sender)
-    bool (Using CE 140?)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE139_140_segmentshardrequest.go](../node/peerCE139_140_segmentshardrequest.go#L234) — `(*Node).onSegmentShardRequest`
-
-### 164: Segment shard request failed
-
-Emitted when a segment shard request fails (CE 139/140). This should be emitted by both sides.
-
-    Event ID (ID of the corresponding "sending segment shard request" or "receiving segment shard request" event)
-    Reason
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE139_140_segmentshardrequest.go](../node/peerCE139_140_segmentshardrequest.go#L153) — `(*Peer).SendSegmentShardRequest`
-- [node/peerCE139_140_segmentshardrequest.go](../node/peerCE139_140_segmentshardrequest.go#L170) — `(*Peer).SendSegmentShardRequest`
-- [node/peerCE139_140_segmentshardrequest.go](../node/peerCE139_140_segmentshardrequest.go#L179) — `(*Peer).SendSegmentShardRequest`
-- [node/peerCE139_140_segmentshardrequest.go](../node/peerCE139_140_segmentshardrequest.go#L196) — `(*Peer).SendSegmentShardRequest`
-- [node/peerCE139_140_segmentshardrequest.go](../node/peerCE139_140_segmentshardrequest.go#L207) — `(*Peer).SendSegmentShardRequest`
-- [node/peerCE139_140_segmentshardrequest.go](../node/peerCE139_140_segmentshardrequest.go#L243) — `(*Node).onSegmentShardRequest`
-- [node/peerCE139_140_segmentshardrequest.go](../node/peerCE139_140_segmentshardrequest.go#L260) — `(*Node).onSegmentShardRequest`
-- [node/peerCE139_140_segmentshardrequest.go](../node/peerCE139_140_segmentshardrequest.go#L269) — `(*Node).onSegmentShardRequest`
-- [node/peerCE139_140_segmentshardrequest.go](../node/peerCE139_140_segmentshardrequest.go#L286) — `(*Node).onSegmentShardRequest`
-- [node/peerCE139_140_segmentshardrequest.go](../node/peerCE139_140_segmentshardrequest.go#L298) — `(*Node).onSegmentShardRequest`
-- [node/peerCE139_140_segmentshardrequest.go](../node/peerCE139_140_segmentshardrequest.go#L306) — `(*Node).onSegmentShardRequest`
-
-### 165: Segment shard request sent
-
-Emitted once a segment shard request has been sent to an assurer (CE 139/140). This should be
-emitted after the initial message containing the request details has been transmitted.
-
-    Event ID (ID of the corresponding "sending segment shard request" event)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE139_140_segmentshardrequest.go](../node/peerCE139_140_segmentshardrequest.go#L188) — `(*Peer).SendSegmentShardRequest`
-
-### 166: Segment shard request received
-
-Emitted once a segment shard request has been received (CE 139/140).
-
-    Event ID (ID of the corresponding "receiving segment shard request" event)
-    u16 (Number of segment shards requested)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE139_140_segmentshardrequest.go](../node/peerCE139_140_segmentshardrequest.go#L251) — `(*Node).onSegmentShardRequest`
-
-### 167: Segment shards transferred
-
-Emitted when a segment shard request completes successfully (CE 139/140). This should be emitted by
-both sides.
-
-    Event ID (ID of the corresponding "sending segment shard request" or "receiving segment shard request" event)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE139_140_segmentshardrequest.go](../node/peerCE139_140_segmentshardrequest.go#L215) — `(*Peer).SendSegmentShardRequest`
-- [node/peerCE139_140_segmentshardrequest.go](../node/peerCE139_140_segmentshardrequest.go#L315) — `(*Node).onSegmentShardRequest`
-
-### 168: Reconstructing segments
-
-Emitted when reconstruction of a set of segments from shards received from assurers begins.
-
-    Event ID (ID of the corresponding "work-package submission" event)
-    len++[Import Segment ID] (Segments being reconstructed)
-    bool (Is this a trivial reconstruction, using only original-data shards?)
-
-#### Call sites -- ✅ sourabh audited
-- [node/node_guarantee.go](../node/node_guarantee.go#L122) — `(*NodeContent).buildBundle`
-
-### 169: Segment reconstruction failed
-
-Emitted if reconstruction of a set of segments fails.
-
-    Event ID (ID of the corresponding "reconstructing segments" event)
-    Reason
-
-#### Call sites -- ✅ sourabh audited
-- [node/node_guarantee.go](../node/node_guarantee.go#L129) — `(*NodeContent).buildBundle`
-
-### 170: Segments reconstructed
-
-Emitted once a set of segments has been successfully reconstructed from shards.
-
-    Event ID (ID of the corresponding "reconstructing segments" event)
-
-#### Call sites -- ✅ sourabh audited
-- [node/node_guarantee.go](../node/node_guarantee.go#L137) — `(*NodeContent).buildBundle`
-
-### 171: Segment verification failed
-
-Emitted if, following reconstruction of a segment and its proof page, extraction or verification of
-the segment proof fails. This should only be possible in two cases:
-
-- CE 139 was used to fetch some of the segment shards. CE 139 responses are not justified;
-  requesters cannot verify that returned shards are consistent with their erasure-roots.
-- The erasure-root or segments-root is incorrect. This implies an invalid work-report for the
-  exporting work-package.
-
-For efficiency, multiple segments may be reported in a single event.
-
-    Event ID (ID of the corresponding "work-package submission" event)
-    len++[u16] (Indices of the failed segments in the import list)
-    Reason
-
-#### Call sites -- ✅ sourabh audited
-- [node/node.go](../node/node.go#L2588) — `(*NodeContent).reconstructSegments`
-
-### 172: Segments verified
-
-Emitted once a reconstructed segment has been successfully verified against the corresponding
-segments-root. For efficiency, multiple segments may be reported in a single event.
-
-    Event ID (ID of the corresponding "work-package submission" event)
-    len++[u16] (Indices of the verified segments in the import list)
-
-#### Call sites -- ✅ sourabh audited
-- [node/node.go](../node/node.go#L2595) — `(*NodeContent).reconstructSegments`
-
-### 173: Sending segment request
-
-Emitted when a guarantor begins sending a segment request to a previous guarantor (CE 148). Note
-that proof pages need not (and in fact cannot) be requested using this protocol, hence the use of
-`u16` rather than `Import Segment ID` to identify each requested segment.
-
-    Event ID (ID of the corresponding "work-package submission" event)
-    Peer ID (Previous guarantor)
-    len++[u16] (Indices of requested segments in overall list of work-package imports)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE148_segmentrequest.go](../node/peerCE148_segmentrequest.go#L132) — `(*Peer).SendSegmentRequest`
-
-### 174: Receiving segment request
-
-Emitted by the recipient when a guarantor begins sending a segment request (CE 148).
-
-    Peer ID (Guarantor)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE148_segmentrequest.go](../node/peerCE148_segmentrequest.go#L231) — `(*Node).onSegmentRequest`
-
-### 175: Segment request failed
-
-Emitted when a segment request fails (CE 148). This should be emitted by both sides.
-
-    Event ID (ID of the corresponding "sending segment request" or "receiving segment request" event)
-    Reason
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE148_segmentrequest.go](../node/peerCE148_segmentrequest.go#L139) — `(*Peer).SendSegmentRequest`
-- [node/peerCE148_segmentrequest.go](../node/peerCE148_segmentrequest.go#L155) — `(*Peer).SendSegmentRequest`
-- [node/peerCE148_segmentrequest.go](../node/peerCE148_segmentrequest.go#L177) — `(*Peer).SendSegmentRequest`
-- [node/peerCE148_segmentrequest.go](../node/peerCE148_segmentrequest.go#L187) — `(*Peer).SendSegmentRequest`
-- [node/peerCE148_segmentrequest.go](../node/peerCE148_segmentrequest.go#L197) — `(*Peer).SendSegmentRequest`
-- [node/peerCE148_segmentrequest.go](../node/peerCE148_segmentrequest.go#L240) — `(*Node).onSegmentRequest`
-- [node/peerCE148_segmentrequest.go](../node/peerCE148_segmentrequest.go#L271) — `(*Node).onSegmentRequest`
-- [node/peerCE148_segmentrequest.go](../node/peerCE148_segmentrequest.go#L288) — `(*Node).onSegmentRequest`
-- [node/peerCE148_segmentrequest.go](../node/peerCE148_segmentrequest.go#L298) — `(*Node).onSegmentRequest`
-
-### 176: Segment request sent
-
-Emitted once a segment request has been sent to a previous guarantor (CE 148). This should be
-emitted after the initial message containing the request details has been transmitted.
-
-    Event ID (ID of the corresponding "sending segment request" event)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE148_segmentrequest.go](../node/peerCE148_segmentrequest.go#L162) — `(*Peer).SendSegmentRequest`
-
-### 177: Segment request received
-
-Emitted once a segment request has been received from a guarantor (CE 148).
-
-    Event ID (ID of the corresponding "receiving segment request" event)
-    u16 (Number of segments requested)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE148_segmentrequest.go](../node/peerCE148_segmentrequest.go#L247) — `(*Node).onSegmentRequest`
-
-### 178: Segments transferred
-
-Emitted when a segment request completes successfully (CE 148). This should be emitted by both
-sides.
-
-    Event ID (ID of the corresponding "sending segment request" or "receiving segment request" event)
-
-#### Call sites -- ✅ sourabh audited
-- [node/peerCE148_segmentrequest.go](../node/peerCE148_segmentrequest.go#L210) — `(*Peer).SendSegmentRequest`
-- [node/peerCE148_segmentrequest.go](../node/peerCE148_segmentrequest.go#L306) — `(*Node).onSegmentRequest`
-
-## Preimage distribution events
-
-These events concern distribution of preimages for inclusion in blocks.
-
-**Implementation locations for events 190-199:**
-- Preimage announcements (190-192): `node/network.go` - in CE 142 handlers
-- Preimage requests (193-198): `node/network.go` - in CE 143 handlers
-- Preimage pool management (192, 199): `node/preimage_pool.go` - in pool logic
-
-### 190: Preimage announcement failed
-
-Emitted when a preimage announcement fails (CE 142).
-
-    Peer ID
-    Connection Side (Announcer)
-    Reason
-
-#### Call sites -- ✅ sourabh audited 
-- [node/peerCE142_peerimageannouncement.go](../node/peerCE142_peerimageannouncement.go#L67) — `(*Peer).SendPreimageAnnouncement`
-- [node/peerCE142_peerimageannouncement.go](../node/peerCE142_peerimageannouncement.go#L77) — `(*Peer).SendPreimageAnnouncement`
-- [node/peerCE142_peerimageannouncement.go](../node/peerCE142_peerimageannouncement.go#L85) — `(*Peer).SendPreimageAnnouncement`
-- [node/peerCE142_peerimageannouncement.go](../node/peerCE142_peerimageannouncement.go#L104) — `(*Node).onPreimageAnnouncement`
-
-### 191: Preimage announced
-
-Emitted when a preimage announcement is sent to or received from a peer (CE 142).
-
-    Peer ID
-    Connection Side (Announcer)
-    Service ID (Requesting service)
-    Hash
-    u32 (Preimage length)
-
-#### Call sites -- ✅ sourabh audited 
-- [node/peerCE142_peerimageannouncement.go](../node/peerCE142_peerimageannouncement.go#L60) — `(*Peer).SendPreimageAnnouncement`
-- [node/peerCE142_peerimageannouncement.go](../node/peerCE142_peerimageannouncement.go#L111) — `(*Node).onPreimageAnnouncement`
-
-### 192: Announced preimage forgotten 🔴 POST-MIGRATION
-
-Emitted when a preimage announced by a peer is forgotten about. This event should not be emitted
-for preimages the node managed to acquire (if such a preimage is discarded, a "preimage discarded"
-event should be emitted instead).
-
-    Service ID (Requesting service)
-    Hash
-    u32 (Preimage length)
-    Announced Preimage Forget Reason
-
-### 193: Sending preimage request 
-
-Emitted when a validator begins sending a preimage request to a peer (CE 143).
-
-    Peer ID (Recipient)
-    Hash
-
-#### Call sites -- ✅ sourabh audited 
-- [node/peerCE142_peerimageannouncement.go](../node/peerCE142_peerimageannouncement.go#L171) — `(*Peer).SendPreimageRequest`
-
-### 194: Receiving preimage request
-
-Emitted by the recipient when a validator begins sending a preimage request (CE 143).
-
-    Peer ID (Sender)
-
-#### Call sites -- ✅ sourabh audited 
-- [node/peerCE142_peerimageannouncement.go](../node/peerCE142_peerimageannouncement.go#L226) — `(*NodeContent).onPreimageRequest`
-
-### 195: Preimage request failed
-
-Emitted when a preimage request (CE 143) fails.
-
-    Event ID (ID of the corresponding "sending preimage request" or "receiving preimage request" event)
-    Reason
-
-#### Call sites -- ✅ sourabh audited 
-- [node/peerCE142_peerimageannouncement.go](../node/peerCE142_peerimageannouncement.go#L178) — `(*Peer).SendPreimageRequest`
-- [node/peerCE142_peerimageannouncement.go](../node/peerCE142_peerimageannouncement.go#L188) — `(*Peer).SendPreimageRequest`
-- [node/peerCE142_peerimageannouncement.go](../node/peerCE142_peerimageannouncement.go#L205) — `(*Peer).SendPreimageRequest`
-- [node/peerCE142_peerimageannouncement.go](../node/peerCE142_peerimageannouncement.go#L241) — `(*NodeContent).onPreimageRequest`
-- [node/peerCE142_peerimageannouncement.go](../node/peerCE142_peerimageannouncement.go#L252) — `(*NodeContent).onPreimageRequest`
-
-### 196: Preimage request sent
-
-Emitted once a preimage request has been sent to a peer (CE 143). This should be emitted after the
-initial message containing the request details has been transmitted.
-
-    Event ID (ID of the corresponding "sending preimage request" event)
-
-#### Call sites -- ✅ sourabh audited 
-- [node/peerCE142_peerimageannouncement.go](../node/peerCE142_peerimageannouncement.go#L195) — `(*Peer).SendPreimageRequest`
-
-### 197: Preimage request received
-
-Emitted once a preimage request has been received from a peer (CE 143).
-
-    Event ID (ID of the corresponding "receiving preimage request" event)
-    Hash
-
-#### Call sites -- ✅ sourabh audited 
-- [node/peerCE142_peerimageannouncement.go](../node/peerCE142_peerimageannouncement.go#L233) — `(*NodeContent).onPreimageRequest`
-
-### 198: Preimage transferred
-
-Emitted when a preimage has been fully sent to or received from a peer (CE 143).
-
-    Event ID (ID of the corresponding "sending preimage request" or "receiving preimage request" event)
-    u32 (Preimage length)
-
-#### Call sites -- ✅ sourabh audited 
-- [node/peerCE142_peerimageannouncement.go](../node/peerCE142_peerimageannouncement.go#L212) — `(*Peer).SendPreimageRequest`
-- [node/peerCE142_peerimageannouncement.go](../node/peerCE142_peerimageannouncement.go#L259) — `(*NodeContent).onPreimageRequest`
-
-### 199: Preimage discarded -- 🔴 POST-MIGRATION
-
-Emitted when a preimage is discarded from the local preimage pool.
-
-Note that in the case where the preimage was requested by multiple services, there may not be a
-unique discard reason. For example, the preimage may have been provided to one service, while
-another service may have stopped requesting it. In this case, either reason may be reported.
-
-    Hash
-    u32 (Preimage length)
-    Preimage Discard Reason
+# Jaeger Integration for JAM Telemetry
+
+## Overview
+
+This document describes how JAM's JIP-3 telemetry integrates with Jaeger for distributed tracing across nodes. Unlike traditional intra-node event tracking, this approach enables inter-node trace correlation using JAM protocol identifiers (work package hashes, header hashes, etc.) as trace IDs.
+
+## Key Concept: Dual-Purpose Event IDs
+
+The `GetEventID()` function supports two modes:
+
+1. **Intra-node (JIP-3)**: Sequential `u64` Event IDs for local event linking within a single node
+2. **Inter-node (Jaeger)**: JAM protocol identifiers (hashes) for distributed trace correlation across nodes
+
+```go
+// Intra-node: Sequential Event ID for JIP-3 telemetry server
+eventID := telemetryClient.GetEventID()
+// Returns: sequential u64 (e.g., 0, 1, 2, ...)
+// Sends: JIP-3 event with u64 eventID to TART Server
+
+// Inter-node: Use work package hash as trace identifier for Jaeger
+eventID := telemetryClient.GetEventID(workPackageHash)
+// Returns: u64 derived from hash (first 8 bytes)
+// Sends:
+//   - JIP-3 event with u64 eventID to TART Server
+//   - OpenTelemetry span with full hash as traceID to Jaeger
+```
+
+**Important**: When a hash is provided to `GetEventID()`, the TelemetryClient:
+1. Returns a u64 (first 8 bytes of hash) for use in JIP-3 messages to TART
+2. Also sends the full hash as a trace ID to Jaeger for inter-node correlation
+
+## Architecture
+
+```
+┌─────────────────────────────────┐         ┌─────────────────────────────────┐
+│        JAM Node 1               │         │        JAM Node 2               │
+│        (Guarantor)              │         │        (Auditor)                │
+│                                 │         │                                 │
+│  ┌───────────────────────────┐ │         │  ┌───────────────────────────┐ │
+│  │   TelemetryClient         │ │         │  │   TelemetryClient         │ │
+│  │                           │ │         │  │                           │ │
+│  │ • GetEventID()     → u64  │ │         │  │ • GetEventID()     → u64  │ │
+│  │ • GetEventID(hash) → u64  │ │         │  │ • GetEventID(hash) → u64  │ │
+│  └─────┬─────────────────┬───┘ │         │  └─────┬─────────────────┬───┘ │
+└────────┼─────────────────┼─────┘         └────────┼─────────────────┼─────┘
+         │                 │                        │                 │
+         │ JIP-3           │ OpenTelemetry          │ JIP-3           │ OpenTelemetry
+         │ (u64 EventID)   │ (Trace ID from hash)   │ (u64 EventID)   │ (Trace ID from hash)
+         │                 │                        │                 │
+         ▼                 │                        ▼                 │
+┌────────────────────┐     │                ┌────────────────────┐     │
+│   TART Server      │     │                │   TART Server      │     │
+│   (JIP-3)          │     │                │   (JIP-3)          │     │
+│                    │     │                │                    │     │
+│ • Intra-node       │     │                │ • Intra-node       │     │
+│   event tracking   │     │                │   event tracking   │     │
+│ • Sequential IDs   │     │                │   Sequential IDs   │     │
+│ • Analysis/Debug   │     │                │ • Analysis/Debug   │     │
+└────────────────────┘     │                └────────────────────┘     │
+                           │                                           │
+                           └───────────────┬───────────────────────────┘
+                                           │
+                                           │ OTLP
+                                           │ (Spans with Trace ID)
+                                           ▼
+                                   ┌───────────────┐
+                                   │    Jaeger     │
+                                   │   Backend     │
+                                   │               │
+                                   │ • Inter-node  │
+                                   │   correlation │
+                                   │ • Trace IDs:  │
+                                   │   - WP Hash   │
+                                   │   - Header    │
+                                   │   - Erasure   │
+                                   └───────┬───────┘
+                                           │
+                                           │ http://localhost:16686
+                                           ▼
+                                   ┌───────────────┐
+                                   │  Jaeger UI    │
+                                   │ (Trace View)  │
+                                   └───────────────┘
+```
+
+## Complete Event Mapping for Jaeger
+
+This table maps all telemetry events (10-199) to their Jaeger trace IDs. Events with **no trace ID** are intra-node only (use sequential IDs for TART).
+
+| Event # | Event Name | Trace ID (Jaeger) | Notes |
+|---------|------------|-------------------|-------|
+| **10** | Status | None | Intra-node only |
+| **11** | Best Block Changed | Header Hash | Block header changed |
+| **12** | Finalized Block Changed | Header Hash | Block finalization |
+| **13** | Sync Status Changed | None | Intra-node only |
+| 14-19 | *[Gap]* | - | - |
+| **20** | Connection Refused | Peer ID | P2P connection |
+| **21** | Connecting In | Peer ID | P2P connection |
+| **22** | Connect In Failed | Peer ID | P2P connection |
+| **23** | Connected In | Peer ID | P2P connection |
+| **24** | Connecting Out | Peer ID | P2P connection |
+| **25** | Connect Out Failed | Peer ID | P2P connection |
+| **26** | Connected Out | Peer ID | P2P connection |
+| **27** | Disconnected | Peer ID | P2P connection |
+| **28** | Peer Misbehaved | Peer ID | P2P connection |
+| 29-39 | *[Gap]* | - | - |
+| **40** | Authoring | Header Hash | Block authoring start |
+| **41** | Authoring Failed | Header Hash | Block authoring failed |
+| **42** | Authored | Header Hash | Block authoring complete |
+| **43** | Importing | Header Hash | Block import start |
+| **44** | Block Verification Failed | Header Hash | Block verification failed |
+| **45** | Block Verified | Header Hash | Block verification complete |
+| **46** | Block Execution Failed | Header Hash | Block execution failed |
+| **47** | Block Executed | Header Hash | Block execution complete |
+| **48** | Accumulate Result Available | Header Hash | Accumulate result ready |
+| 49-59 | *[Gap]* | - | - |
+| **60** | Block Announcement Stream Opened | Peer ID | Stream opened |
+| **61** | Block Announcement Stream Closed | Peer ID | Stream closed |
+| **62** | Block Announced | Header Hash | Block announcement |
+| **63** | Sending Block Request | Header Hash | Request block |
+| **64** | Receiving Block Request | Header Hash | Receive block request |
+| **65** | Block Request Failed | Header Hash | Block request failed |
+| **66** | Block Request Sent | Header Hash | Block request sent |
+| **67** | Block Request Received | Header Hash | Block request received |
+| **68** | Block Transferred | Header Hash | Block transfer complete |
+| 69-70 | *[Gap]* | - | - |
+| **71** | Block Announcement Malformed | None | Intra-node only |
+| 72-79 | *[Gap]* | - | - |
+| **80** | Generating Tickets | Epoch Index (u32) | Ticket generation start |
+| **81** | Ticket Generation Failed | Epoch Index (u32) | Ticket generation failed |
+| **82** | Tickets Generated | Epoch Index (u32) | Ticket generation complete |
+| **83** | Ticket Transfer Failed | Epoch Index (u32) | Ticket transfer failed |
+| **84** | Ticket Transferred | Epoch Index (u32) | Ticket transfer complete |
+| 85-89 | *[Gap]* | - | - |
+| **90** | Work Package Submission | Work Package Hash | WP submitted |
+| **91** | Work Package Being Shared | Work Package Hash | WP sharing start |
+| **92** | Work Package Failed | Work Package Hash | WP failed |
+| **93** | Duplicate Work Package | Work Package Hash | WP duplicate detected |
+| **94** | Work Package Received | Work Package Hash | WP received |
+| **95** | Authorized | Work Package Hash | WP authorized |
+| **96** | Extrinsic Data Received | Work Package Hash | Extrinsic data received |
+| **97** | Imports Received | Work Package Hash | Imports received |
+| **98** | Sharing Work Package | Work Package Hash | WP sharing |
+| **99** | Work Package Sharing Failed | Work Package Hash | WP sharing failed |
+| **100** | Bundle Sent | Work Package Hash | Bundle sent |
+| **101** | Refined | Work Package Hash | Refinement complete |
+| **102** | Work Report Built | Work Package Hash | Work report built |
+| **103** | Work Report Signature Sent | Work Package Hash | Signature sent |
+| **104** | Work Report Signature Received | Work Package Hash | Signature received |
+| **105** | Guarantee Built | Work Package Hash | Guarantee built |
+| **106** | Sending Guarantee | Work Package Hash | Sending guarantee |
+| **107** | Guarantee Send Failed | Work Package Hash | Guarantee send failed |
+| **108** | Guarantee Sent | Work Package Hash | Guarantee sent |
+| **109** | Guarantees Distributed | Work Package Hash | Guarantees distributed |
+| **110** | Receiving Guarantee | Work Package Hash | Receiving guarantee |
+| **111** | Guarantee Receive Failed | Work Package Hash | Guarantee receive failed |
+| **112** | Guarantee Received | Work Package Hash | Guarantee received |
+| **113** | Guarantee Discarded | Work Package Hash | Guarantee discarded |
+| 114-119 | *[Gap]* | - | - |
+| **120** | Sending Shard Request | Erasure Root | Shard request start |
+| **121** | Receiving Shard Request | Erasure Root | Shard request received |
+| **122** | Shard Request Failed | Erasure Root | Shard request failed |
+| **123** | Shard Request Sent | Erasure Root | Shard request sent |
+| **124** | Shard Request Received | Erasure Root | Shard request received |
+| **125** | Shards Transferred | Erasure Root | Shards transferred |
+| **126** | Distributing Assurance | Erasure Root | Assurance distribution start |
+| **127** | Assurance Send Failed | Erasure Root | Assurance send failed |
+| **128** | Assurance Sent | Erasure Root | Assurance sent |
+| **129** | Assurance Distributed | Erasure Root | Assurance distributed |
+| **130** | Assurance Receive Failed | Erasure Root | Assurance receive failed |
+| **131** | Assurance Received | Erasure Root | Assurance received |
+| **132** | Context Available | Erasure Root | Context available |
+| **133** | Assurance Provided | Erasure Root | Assurance provided |
+| 134-139 | *[Gap]* | - | - |
+| **140** | Sending Bundle Shard Request | Erasure Root | Bundle shard request start |
+| **141** | Receiving Bundle Shard Request | Erasure Root | Bundle shard request received |
+| **142** | Bundle Shard Request Failed | Erasure Root | Bundle shard request failed |
+| **143** | Bundle Shard Request Sent | Erasure Root | Bundle shard request sent |
+| **144** | Bundle Shard Request Received | Erasure Root | Bundle shard request received |
+| **145** | Bundle Shard Transferred | Erasure Root | Bundle shard transferred |
+| **146** | Reconstructing Bundle | Erasure Root | Bundle reconstruction start |
+| **147** | Bundle Reconstructed | Erasure Root | Bundle reconstructed |
+| **148** | Sending Bundle Request | Erasure Root | Bundle request start |
+| **149** | Receiving Bundle Request | Erasure Root | Bundle request received |
+| **150** | Bundle Request Failed | Erasure Root | Bundle request failed |
+| **151** | Bundle Request Sent | Erasure Root | Bundle request sent |
+| **152** | Bundle Request Received | Erasure Root | Bundle request received |
+| **153** | Bundle Transferred | Erasure Root | Bundle transferred |
+| 154-159 | *[Gap]* | - | - |
+| **160** | Work Package Hash Mapped | Segments Root | WP hash mapped |
+| **161** | Segments Root Mapped | Segments Root | Segments root mapped |
+| **162** | Sending Segment Shard Request | Segments Root | Segment shard request start |
+| **163** | Receiving Segment Shard Request | Segments Root | Segment shard request received |
+| **164** | Segment Shard Request Failed | Segments Root | Segment shard request failed |
+| **165** | Segment Shard Request Sent | Segments Root | Segment shard request sent |
+| **166** | Segment Shard Request Received | Segments Root | Segment shard request received |
+| **167** | Segment Shards Transferred | Segments Root | Segment shards transferred |
+| **168** | Reconstructing Segments | Segments Root | Segment reconstruction start |
+| **169** | Segment Reconstruction Failed | Segments Root | Segment reconstruction failed |
+| **170** | Segments Reconstructed | Segments Root | Segments reconstructed |
+| **171** | Segment Verification Failed | Segments Root | Segment verification failed |
+| **172** | Segments Verified | Segments Root | Segments verified |
+| **173** | Sending Segment Request | Segments Root | Segment request start |
+| **174** | Receiving Segment Request | Segments Root | Segment request received |
+| **175** | Segment Request Failed | Segments Root | Segment request failed |
+| **176** | Segment Request Sent | Segments Root | Segment request sent |
+| **177** | Segment Request Received | Segments Root | Segment request received |
+| **178** | Segments Transferred | Segments Root | Segments transferred |
+| 179-189 | *[Gap]* | - | - |
+| **190** | Preimage Announcement Failed | Preimage Hash | Preimage announcement failed |
+| **191** | Preimage Announced | Preimage Hash | Preimage announced |
+| **192** | Announced Preimage Forgotten | Preimage Hash | Preimage forgotten |
+| **193** | Sending Preimage Request | Preimage Hash | Preimage request start |
+| **194** | Receiving Preimage Request | Preimage Hash | Preimage request received |
+| **195** | Preimage Request Failed | Preimage Hash | Preimage request failed |
+| **196** | Preimage Request Sent | Preimage Hash | Preimage request sent |
+| **197** | Preimage Request Received | Preimage Hash | Preimage request received |
+| **198** | Preimage Transferred | Preimage Hash | Preimage transferred |
+| **199** | Preimage Discarded | Preimage Hash | Preimage discarded |
+
+### Trace ID Summary
+
+**Trace ID Types:**
+- **Header Hash** (Events 11-12, 40-48, 62-68): Block-related operations
+- **Peer ID** (Events 20-28, 60-61): P2P networking operations
+- **Epoch Index (u32)** (Events 80-84): Ticket generation and transfer
+- **Work Package Hash** (Events 90-113): Work package pipeline
+- **Erasure Root** (Events 120-133, 140-153): Availability and bundle recovery
+- **Segments Root** (Events 160-178): Segment distribution and recovery
+- **Preimage Hash** (Events 190-199): Preimage distribution
+- **None** (Events 10, 13, 71): Intra-node only, no cross-node correlation
+
+**Gaps in Event Numbering:**
+- 14-19 (6 events)
+- 29-39 (11 events)
+- 49-59 (11 events)
+- 69-70 (2 events)
+- 72-79 (8 events)
+- 85-89 (5 events)
+- 114-119 (6 events)
+- 134-139 (6 events)
+- 154-159 (6 events)
+- 179-189 (11 events)
+
+**Total:** 78 gaps out of 190 possible event numbers
+
+## Event-to-Span Mapping
+
+### Work Package Pipeline (Cross-Node Trace)
+
+**Trace ID**: Work Package Hash
+**Nodes Involved**: Builder → Primary Guarantor → Secondary Guarantors → Auditor
+
+```
+Builder Node:
+  eventID := telemetryClient.GetEventID(wpHash)
+  └─> 90: WorkPackageSubmission
+      → TART: Event 90 with u64 eventID
+      → Jaeger: Span "work-package-submission" with traceID=wpHash
+
+Primary Guarantor Node:
+  eventID := telemetryClient.GetEventID(wpHash)  // Same wpHash → same trace
+  ├─> 94: WorkPackageReceived
+  │   → TART: Event 94 with same u64
+  │   → Jaeger: Span "work-package-received" with same traceID
+  │
+  ├─> 95: Authorized(eventID, isAuthorizedCost)
+  │   → TART: Event 95, child of 94
+  │   → Jaeger: Span "authorized"
+  │
+  ├─> 97: ImportsReceived(eventID)
+  │   → Jaeger: Span "imports-received"
+  │
+  ├─> 98: SharingWorkPackage(eventID, secondary1PeerID)
+  │   → Jaeger: Span "sharing-work-package"
+  │
+  ├─> 100: BundleSent(eventID, secondary1PeerID)
+  │   → Jaeger: Span "bundle-sent"
+  │
+  ├─> 101: Refined(eventID, refineCosts)
+  │   → Jaeger: Span "refined"
+  │
+  ├─> 102: WorkReportBuilt(eventID, workReportOutline)
+  │   → Jaeger: Span "work-report-built"
+  │
+  ├─> 105: GuaranteeBuilt(eventID, guaranteeOutline)
+  │   → Jaeger: Span "guarantee-built"
+  │
+  └─> 109: GuaranteesDistributed(eventID)
+      → Jaeger: Span "guarantees-distributed"
+
+Secondary Guarantor 1 Node:
+  eventID := telemetryClient.GetEventID(wpHash)  // Same wpHash → joins trace
+  ├─> 91: WorkPackageBeingShared(eventID, primaryPeerID)
+  │   → Jaeger: Span "work-package-being-shared" with same traceID
+  │
+  ├─> 95: Authorized(eventID, isAuthorizedCost)
+  │   → Jaeger: Span "authorized"
+  │
+  ├─> 101: Refined(eventID, refineCosts)
+  │   → Jaeger: Span "refined"
+  │
+  ├─> 102: WorkReportBuilt(eventID, workReportOutline)
+  │   → Jaeger: Span "work-report-built"
+  │
+  └─> 103: WorkReportSignatureSent(eventID)
+      → Jaeger: Span "work-report-signature-sent"
+
+Secondary Guarantor 2 Node:
+  eventID := telemetryClient.GetEventID(wpHash)  // Same wpHash → joins trace
+  ├─> 91: WorkPackageBeingShared(eventID, primaryPeerID)
+  ├─> 95: Authorized(eventID, isAuthorizedCost)
+  ├─> 101: Refined(eventID, refineCosts)
+  ├─> 102: WorkReportBuilt(eventID, workReportOutline)
+  └─> 103: WorkReportSignatureSent(eventID)
+
+Auditor Node:
+  eventID := telemetryClient.GetEventID(wpHash)  // Same wpHash → joins trace
+  ├─> 140: SendingBundleShardRequest(eventID, peerID, shardIndex)
+  │   → Jaeger: Span "sending-bundle-shard-request" with same traceID
+  │
+  ├─> 145: BundleShardsTransferred(eventID)
+  │   → Jaeger: Span "bundle-shards-transferred"
+  │
+  ├─> 146: ReconstructingBundle(eventID, trivialReconstruction)
+  │   → Jaeger: Span "reconstructing-bundle"
+  │
+  └─> 147: BundleReconstructed(eventID)
+      → Jaeger: Span "bundle-reconstructed"
+```
+
+**Visualization in Jaeger**: Single trace showing the complete work package journey across all nodes.
+
+### Block Pipeline (Cross-Node Trace)
+
+**Trace ID**: Header Hash
+**Nodes Involved**: Author → Peer Nodes (Importers)
+
+```
+Author Node:
+  eventID := telemetryClient.GetEventID(headerHash)
+  ├─> 40: Authoring(eventID, slot, parentHash)
+  │   → TART: Event 40 with u64 eventID
+  │   → Jaeger: Span "authoring" with traceID=headerHash
+  │
+  ├─> 42: Authored(eventID, blockOutline)
+  │   → TART: Event 42, child of 40
+  │   → Jaeger: Span "authored"
+  │
+  ├─> 47: BlockExecuted(eventID, accumulatedServices)
+  │   → Jaeger: Span "block-executed"
+  │
+  └─> 62: BlockAnnounced(peerID, connectionSide, slot, headerHash)
+      → Jaeger: Span "block-announced" (broadcast)
+
+Importer Node 1:
+  eventID := telemetryClient.GetEventID(headerHash)  // Same headerHash → same trace
+  ├─> 62: BlockAnnounced(peerID, connectionSide, slot, headerHash)
+  │   → Jaeger: Span "block-announced" (received) with same traceID
+  │
+  ├─> 63: SendingBlockRequest(eventID, peerID, headerHash, direction, maxBlocks)
+  │   → TART: Event 63
+  │   → Jaeger: Span "sending-block-request"
+  │
+  ├─> 66: BlockRequestSent(eventID)
+  │   → Jaeger: Span "block-request-sent"
+  │
+  ├─> 68: BlockTransferred(eventID, slot, blockOutline, isLast)
+  │   → Jaeger: Span "block-transferred"
+  │
+  ├─> 43: Importing(eventID, slot, blockOutline)
+  │   → TART: Event 43
+  │   → Jaeger: Span "importing"
+  │
+  ├─> 45: BlockVerified(eventID)
+  │   → Jaeger: Span "block-verified"
+  │
+  └─> 47: BlockExecuted(eventID, accumulatedServices)
+      → Jaeger: Span "block-executed"
+
+Importer Node 2:
+  eventID := telemetryClient.GetEventID(headerHash)  // Same headerHash → same trace
+  ├─> 62: BlockAnnounced(peerID, connectionSide, slot, headerHash)
+  ├─> 63: SendingBlockRequest(eventID, peerID, headerHash, direction, maxBlocks)
+  ├─> 66: BlockRequestSent(eventID)
+  ├─> 68: BlockTransferred(eventID, slot, blockOutline, isLast)
+  ├─> 43: Importing(eventID, slot, blockOutline)
+  ├─> 45: BlockVerified(eventID)
+  └─> 47: BlockExecuted(eventID, accumulatedServices)
+```
+
+### Availability Distribution (Cross-Node Trace)
+
+**Trace ID**: Erasure Root
+**Nodes Involved**: Guarantor → Assurers
+
+```
+Guarantor Node:
+  eventID := telemetryClient.GetEventID(erasureRoot)
+  └─> 120: ShardsAvailable(eventID, erasureRoot, numShards)
+      → TART: Event 120 with u64 eventID
+      → Jaeger: Span "shards-available" with traceID=erasureRoot
+
+Assurer Node 1:
+  eventID := telemetryClient.GetEventID(erasureRoot)  // Same erasureRoot → same trace
+  ├─> 137: SendingShardRequest(eventID, peerID, erasureRoot, shardIndex)
+  │   → TART: Event 137 with same u64
+  │   → Jaeger: Span "sending-shard-request" with same traceID
+  │
+  ├─> 138: ShardTransferred(eventID, peerID, erasureRoot, shardIndex, size)
+  │   → TART: Event 138, child of 137
+  │   → Jaeger: Span "shard-transferred"
+  │
+  ├─> 139: DistributingAssurance(eventID, erasureRoot, shardIndex)
+  │   → TART: Event 139, child of 138
+  │   → Jaeger: Span "distributing-assurance"
+  │
+  └─> 141: AssuranceDistributed(eventID, erasureRoot, validatorIndices)
+      → TART: Event 141, child of 139
+      → Jaeger: Span "assurance-distributed"
+
+Assurer Node 2:
+  eventID := telemetryClient.GetEventID(erasureRoot)  // Same erasureRoot → same trace
+  ├─> 137: SendingShardRequest(eventID, peerID, erasureRoot, shardIndex)
+  │   → TART: Event 137 with same u64
+  │   → Jaeger: Span "sending-shard-request" with same traceID
+  │
+  ├─> 138: ShardTransferred(eventID, peerID, erasureRoot, shardIndex, size)
+  │   → Jaeger: Span "shard-transferred"
+  │
+  ├─> 139: DistributingAssurance(eventID, erasureRoot, shardIndex)
+  │   → Jaeger: Span "distributing-assurance"
+  │
+  └─> 141: AssuranceDistributed(eventID, erasureRoot, validatorIndices)
+      → Jaeger: Span "assurance-distributed"
+
+Note: All Assurer nodes use the same erasureRoot, enabling Jaeger to visualize
+parallel shard distribution across the network in a single trace.
+```
+
+## Implementation
+
+### TelemetryClient Changes
+
+The `GetEventID()` method now accepts an optional `interface{}` parameter and handles dual output:
+
+```go
+// telemetry/telemetry_client.go
+
+type ServerType int
+
+const (
+    ServerTypeTART ServerType = iota
+    ServerTypeJaeger
+)
+
+type TelemetryClient struct {
+    addr        string
+    conn        net.Conn
+    serverType  ServerType
+    nextEventID uint64
+    eventIDMu   sync.Mutex
+
+    // OpenTelemetry components (only used for Jaeger)
+    tracer      trace.Tracer
+    activeSpans map[uint64]trace.Span  // eventID -> active span
+    mu          sync.RWMutex
+}
+
+// GetEventID returns an event ID for telemetry.
+// - If no argument: generates sequential u64 (TART) or no-op (Jaeger - context required)
+// - If argument provided:
+//   * TART server: generates sequential u64 (ignores context)
+//   * Jaeger server: derives u64 from hash/u64/u32 context
+func (c *TelemetryClient) GetEventID(context ...interface{}) uint64 {
+    if c.serverType == ServerTypeTART {
+        // TART: Always use sequential Event ID
+        c.eventIDMu.Lock()
+        defer c.eventIDMu.Unlock()
+        id := c.nextEventID
+        c.nextEventID++
+        return id
+    }
+
+    // Jaeger: Require context
+    if len(context) == 0 {
+        return 0 // No event ID without context for Jaeger
+    }
+
+    // Handle direct u64
+    if eventID, ok := context[0].(uint64); ok {
+        return eventID
+    }
+
+    // Convert hash/u32 to u64
+    return hashToEventID(context[0])
+}
+
+func hashToEventID(identifier interface{}) uint64 {
+    switch v := identifier.(type) {
+    case [32]byte:
+        // Use first 8 bytes of hash as u64
+        return binary.BigEndian.Uint64(v[:8])
+    case []byte:
+        if len(v) >= 8 {
+            return binary.BigEndian.Uint64(v[:8])
+        }
+    case uint32: // For epoch index
+        return uint64(v)
+    }
+    return 0
+}
+
+// When sending telemetry events, the client sends to either TART or Jaeger:
+func (c *TelemetryClient) sendEvent(eventType uint8, eventID uint64, data []byte) error {
+    if c.serverType == ServerTypeTART {
+        // Send JIP-3 event to TART Server (with sequential u64 eventID)
+        if c.conn != nil {
+            return c.sendJIP3Event(eventType, eventID, data)
+        }
+        return nil
+    }
+
+    // Send OpenTelemetry span to Jaeger (with eventID from hash/u64/u32)
+    if c.tracer != nil {
+        return c.sendSpanToJaeger(eventType, eventID, data)
+    }
+
+    return nil
+}
+
+// sendSpanToJaeger creates and sends an OpenTelemetry span to Jaeger
+// Constructs a 16-byte trace ID from the eventID (which is derived from hash/u64/u32):
+//   * First 8 bytes: the eventID (big-endian)
+//   * Second 8 bytes: zeros (padding to meet Jaeger's 16-byte requirement)
+func (c *TelemetryClient) sendSpanToJaeger(eventType uint8, eventID uint64, data []byte) error {
+    // Construct 16-byte trace ID: eventID in first 8 bytes, zeros in second 8 bytes
+    traceID := make([]byte, 16)
+    binary.BigEndian.PutUint64(traceID[0:8], eventID)
+    // traceID[8:16] is already zero-initialized
+
+    // Get or create span for this event
+    c.mu.Lock()
+    span, exists := c.activeSpans[eventID]
+    if !exists {
+        // Create new span with trace ID
+        spanName := eventTypeToSpanName(eventType)
+        ctx := context.Background()
+
+        // Create span context with our trace ID
+        spanCtx := trace.NewSpanContext(trace.SpanContextConfig{
+            TraceID:    trace.TraceID(traceID),
+            SpanID:     trace.SpanID(generateSpanID()),
+            TraceFlags: trace.FlagsSampled,
+        })
+        ctx = trace.ContextWithSpanContext(ctx, spanCtx)
+
+        // Start the span
+        ctx, span = c.tracer.Start(ctx, spanName, trace.WithSpanKind(trace.SpanKindInternal))
+        c.activeSpans[eventID] = span
+    }
+    c.mu.Unlock()
+
+    // Add event attributes
+    c.addEventAttributes(span, eventType, data)
+
+    // End span immediately (can be enhanced to track span lifecycle)
+    span.End()
+
+    // Clean up
+    c.mu.Lock()
+    delete(c.activeSpans, eventID)
+    c.mu.Unlock()
+
+    return nil
+}
+
+func generateSpanID() [8]byte {
+    var id [8]byte
+    rand.Read(id[:])
+    return id
+}
+
+func eventTypeToSpanName(eventType uint8) string {
+    names := map[uint8]string{
+        90:  "work-package-submission",
+        94:  "work-package-received",
+        95:  "authorized",
+        101: "refined",
+        40:  "authoring",
+        42:  "authored",
+        43:  "importing",
+        62:  "block-announced",
+        120: "shards-available",
+        137: "sending-shard-request",
+        138: "shard-transferred",
+        141: "assurance-distributed",
+    }
+    if name, ok := names[eventType]; ok {
+        return name
+    }
+    return fmt.Sprintf("event-%d", eventType)
+}
+
+func (c *TelemetryClient) addEventAttributes(span trace.Span, eventType uint8, data []byte) {
+    span.SetAttributes(
+        attribute.String("jam.event_type", fmt.Sprintf("CE%d", eventType)),
+        attribute.Int64("jam.timestamp", time.Now().UnixNano()),
+    )
+
+    // Event-specific attributes parsed from data
+    if len(data) == 0 {
+        return
+    }
+
+    switch eventType {
+    case 94: // WorkPackageReceived
+        if len(data) >= 34 {
+            span.SetAttributes(
+                attribute.String("jam.work_package_hash", hex.EncodeToString(data[:32])),
+                attribute.Int("jam.core_index", int(binary.LittleEndian.Uint16(data[32:34]))),
+            )
+        }
+    case 62: // BlockAnnounced
+        if len(data) >= 36 {
+            span.SetAttributes(
+                attribute.String("jam.header_hash", hex.EncodeToString(data[:32])),
+                attribute.Int64("jam.slot", int64(binary.LittleEndian.Uint32(data[32:36]))),
+            )
+        }
+    case 101: // Refined
+        if len(data) >= 8 {
+            span.SetAttributes(
+                attribute.Int64("jam.gas_used", int64(binary.LittleEndian.Uint64(data[:8]))),
+            )
+        }
+    }
+}
+```
+
+### Usage Patterns in Code
+
+This section maps the telemetry event constants to their expected trace ID contexts for Jaeger integration.
+
+#### Status Events (10-13)
+```go
+// Event 10: Status - Intra-node only
+telemetryClient.Status(...)  // No GetEventID() call
+
+// Event 11: Best Block Changed - Header Hash
+eventID := telemetryClient.GetEventID(headerHash)
+telemetryClient.BestBlockChanged(eventID, slot, headerHash)
+
+// Event 12: Finalized Block Changed - Header Hash
+eventID := telemetryClient.GetEventID(headerHash)
+telemetryClient.FinalizedBlockChanged(eventID, slot, headerHash)
+
+// Event 13: Sync Status Changed - Intra-node only
+telemetryClient.SyncStatusChanged(...)  
+```
+
+#### Networking Events (20-28)
+```go
+// All use Peer ID as trace context
+eventID := telemetryClient.GetEventID(peerID)
+
+// Event 20-28: Connection lifecycle
+telemetryClient.ConnectionRefused(eventID, peerID, reason)
+telemetryClient.ConnectingIn(eventID, peerID)
+telemetryClient.ConnectInFailed(eventID, peerID, error)
+telemetryClient.ConnectedIn(eventID, peerID)
+telemetryClient.ConnectingOut(eventID, peerID)
+telemetryClient.ConnectOutFailed(eventID, peerID, error)
+telemetryClient.ConnectedOut(eventID, peerID)
+telemetryClient.Disconnected(eventID, peerID)
+telemetryClient.PeerMisbehaved(eventID, peerID, reason)
+```
+
+#### Block Events (40-48)
+```go
+// All use Header Hash as trace context
+eventID := telemetryClient.GetEventID(headerHash)
+
+// Event 40-48: Block authoring and execution
+telemetryClient.Authoring(slot, parentHash)
+telemetryClient.AuthoringFailed(eventID, error)
+telemetryClient.Authored(eventID, blockOutline)
+telemetryClient.Importing(slot, headerHash)
+telemetryClient.BlockVerificationFailed(eventID, error)
+telemetryClient.BlockVerified(eventID)
+telemetryClient.BlockExecutionFailed(eventID, error)
+telemetryClient.BlockExecuted(eventID, accumulatedServices)
+telemetryClient.AccumulateResultAvailable(headerHash)
+```
+
+#### Block Announcement Events (60-68, 71)
+```go
+// Events 60-61: Use Peer ID
+eventID := telemetryClient.GetEventID(peerID)
+telemetryClient.BlockAnnouncementStreamOpened(eventID, peerID)
+telemetryClient.BlockAnnouncementStreamClosed(eventID, peerID)
+
+// Events 62-68: Use Header Hash
+eventID := telemetryClient.GetEventID(headerHash)
+telemetryClient.BlockAnnounced(peerID, slot, headerHash)
+telemetryClient.SendingBlockRequest(peerID, headerHash)
+telemetryClient.ReceivingBlockRequest(peerID, headerHash)
+telemetryClient.BlockRequestFailed(eventID, error)
+telemetryClient.BlockRequestSent(eventID, peerID)
+telemetryClient.BlockRequestReceived(eventID, peerID)
+telemetryClient.BlockTransferred(eventID, peerID, size)
+
+// Event 71: Intra-node only
+telemetryClient.BlockAnnouncementMalformed(eventID, peerID)  // TODO
+```
+
+#### Safrole Events (80-84)
+```go
+// All use Epoch Index (u32) as trace context
+eventID := telemetryClient.GetEventID(epochIndex)
+
+// Event 80-84: Ticket generation and transfer
+telemetryClient.GeneratingTickets(epochIndex)
+telemetryClient.TicketGenerationFailed(eventID, error)
+telemetryClient.TicketsGenerated(eventID, count)
+telemetryClient.TicketTransferFailed(eventID, peerID, error)
+telemetryClient.TicketTransferred(eventID, peerID, count)
+```
+
+#### Work Package Events (90-113)
+```go
+// All use Work Package Hash as trace context
+eventID := telemetryClient.GetEventID(workPackageHash)
+
+// Event 90-113: Work package and guarantee pipeline
+telemetryClient.WorkPackageSubmission(eventID, workPackage)
+telemetryClient.WorkPackageBeingShared(eventID, peerID)
+telemetryClient.WorkPackageFailed(eventID, error)
+telemetryClient.DuplicateWorkPackage(eventID, workPackageHash)
+telemetryClient.WorkPackageReceived(eventID, peerID, coreIndex)
+telemetryClient.Authorized(eventID, isAuthorizedCost)
+telemetryClient.ExtrinsicDataReceived(eventID, size)
+telemetryClient.ImportsReceived(eventID, count)
+telemetryClient.SharingWorkPackage(eventID, peerID)
+telemetryClient.WorkPackageSharingFailed(eventID, peerID, error)
+telemetryClient.BundleSent(eventID, peerID)
+telemetryClient.Refined(eventID, refineCosts)
+telemetryClient.WorkReportBuilt(eventID, workReport)
+telemetryClient.WorkReportSignatureSent(eventID, peerID)
+telemetryClient.WorkReportSignatureReceived(eventID, peerID)
+telemetryClient.GuaranteeBuilt(eventID, guarantee)
+telemetryClient.SendingGuarantee(eventID, validatorIndex)
+telemetryClient.GuaranteeSendFailed(eventID, validatorIndex, error)
+telemetryClient.GuaranteeSent(eventID, validatorIndex)
+telemetryClient.GuaranteesDistributed(eventID, count)
+telemetryClient.ReceivingGuarantee(eventID, peerID)
+telemetryClient.GuaranteeReceiveFailed(eventID, peerID, error)
+telemetryClient.GuaranteeReceived(eventID, peerID, guarantee)
+telemetryClient.GuaranteeDiscarded(eventID, reason)
+```
+
+#### Assurance Events (120-133)
+```go
+// All use Erasure Root as trace context
+eventID := telemetryClient.GetEventID(erasureRoot)
+
+// Event 120-133: Shard request and assurance distribution
+telemetryClient.SendingShardRequest(peerID, erasureRoot, shardIndex)
+telemetryClient.ReceivingShardRequest(peerID, erasureRoot, shardIndex)
+telemetryClient.ShardRequestFailed(eventID, peerID, error)
+telemetryClient.ShardRequestSent(eventID, peerID)
+telemetryClient.ShardRequestReceived(eventID, peerID)
+telemetryClient.ShardsTransferred(eventID, peerID, count)
+telemetryClient.DistributingAssurance(erasureRoot, shardIndex)
+telemetryClient.AssuranceSendFailed(eventID, validatorIndex, error)
+telemetryClient.AssuranceSent(eventID, validatorIndex)
+telemetryClient.AssuranceDistributed(eventID, validatorIndices)
+telemetryClient.AssuranceReceiveFailed(eventID, peerID, error)
+telemetryClient.AssuranceReceived(eventID, peerID)
+telemetryClient.ContextAvailable(erasureRoot)
+telemetryClient.AssuranceProvided(erasureRoot)
+```
+
+#### Bundle Recovery Events (140-153)
+```go
+// All use Erasure Root as trace context
+eventID := telemetryClient.GetEventID(erasureRoot)
+
+// Event 140-153: Bundle shard request and reconstruction
+telemetryClient.SendingBundleShardRequest(peerID, erasureRoot, shardIndex)
+telemetryClient.ReceivingBundleShardRequest(peerID, erasureRoot, shardIndex)
+telemetryClient.BundleShardRequestFailed(eventID, peerID, error)
+telemetryClient.BundleShardRequestSent(eventID, peerID)
+telemetryClient.BundleShardRequestReceived(eventID, peerID)
+telemetryClient.BundleShardTransferred(eventID, peerID, size)
+telemetryClient.ReconstructingBundle(erasureRoot)
+telemetryClient.BundleReconstructed(erasureRoot)
+telemetryClient.SendingBundleRequest(peerID, erasureRoot)
+telemetryClient.ReceivingBundleRequest(peerID, erasureRoot)
+telemetryClient.BundleRequestFailed(eventID, peerID, error)
+telemetryClient.BundleRequestSent(eventID, peerID)
+telemetryClient.BundleRequestReceived(eventID, peerID)
+telemetryClient.BundleTransferred(eventID, peerID, size)
+```
+
+#### Segment Events (160-178)
+```go
+// All use Segments Root as trace context
+eventID := telemetryClient.GetEventID(segmentsRoot)
+
+// Event 160-178: Segment mapping, shard request, and reconstruction
+telemetryClient.WorkPackageHashMapped(workPackageHash, segmentsRoot)
+telemetryClient.SegmentsRootMapped(segmentsRoot)
+telemetryClient.SendingSegmentShardRequest(peerID, segmentsRoot, shardIndex)
+telemetryClient.ReceivingSegmentShardRequest(peerID, segmentsRoot, shardIndex)
+telemetryClient.SegmentShardRequestFailed(eventID, peerID, error)
+telemetryClient.SegmentShardRequestSent(eventID, peerID)
+telemetryClient.SegmentShardRequestReceived(eventID, peerID)
+telemetryClient.SegmentShardsTransferred(eventID, peerID, count)
+telemetryClient.ReconstructingSegments(segmentsRoot)
+telemetryClient.SegmentReconstructionFailed(eventID, error)
+telemetryClient.SegmentsReconstructed(segmentsRoot)
+telemetryClient.SegmentVerificationFailed(eventID, error)
+telemetryClient.SegmentsVerified(segmentsRoot)
+telemetryClient.SendingSegmentRequest(peerID, segmentsRoot)
+telemetryClient.ReceivingSegmentRequest(peerID, segmentsRoot)
+telemetryClient.SegmentRequestFailed(eventID, peerID, error)
+telemetryClient.SegmentRequestSent(eventID, peerID)
+telemetryClient.SegmentRequestReceived(eventID, peerID)
+telemetryClient.SegmentsTransferred(eventID, peerID, size)
+```
+
+#### Preimage Events (190-199)
+```go
+// All use Preimage Hash as trace context
+eventID := telemetryClient.GetEventID(preimageHash)
+
+// Event 190-199: Preimage announcement and request
+telemetryClient.PreimageAnnouncementFailed(eventID, error)
+telemetryClient.PreimageAnnounced(preimageHash, size)
+telemetryClient.AnnouncedPreimageForgotten(preimageHash)
+telemetryClient.SendingPreimageRequest(peerID, preimageHash)
+telemetryClient.ReceivingPreimageRequest(peerID, preimageHash)
+telemetryClient.PreimageRequestFailed(eventID, peerID, error)
+telemetryClient.PreimageRequestSent(eventID, peerID)
+telemetryClient.PreimageRequestReceived(eventID, peerID)
+telemetryClient.PreimageTransferred(eventID, peerID, size)
+telemetryClient.PreimageDiscarded(preimageHash)
+```
+
+## Initialization
+
+The TelemetryClient needs to be initialized with an OpenTelemetry tracer:
+
+```go
+import (
+    "go.opentelemetry.io/otel"
+    "go.opentelemetry.io/otel/exporters/jaeger"
+    "go.opentelemetry.io/otel/sdk/trace"
+)
+
+func NewTelemetryClient(addr string, serverType ServerType) (*TelemetryClient, error) {
+    client := &TelemetryClient{
+        addr:       addr,
+        serverType: serverType,
+    }
+
+    if serverType == ServerTypeTART {
+        // Connect to TART Server
+        conn, err := net.Dial("tcp", addr)
+        if err != nil {
+            return nil, err
+        }
+        client.conn = conn
+    } else {
+        // Create Jaeger exporter
+        exporter, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(addr)))
+        if err != nil {
+            return nil, err
+        }
+
+        // Create trace provider
+        tp := trace.NewTracerProvider(
+            trace.WithBatcher(exporter),
+            trace.WithSampler(trace.AlwaysSample()),
+        )
+        otel.SetTracerProvider(tp)
+
+        // Create tracer
+        client.tracer = tp.Tracer("jam-telemetry")
+        client.activeSpans = make(map[uint64]trace.Span)
+    }
+
+    return client, nil
+}
+```
+
+## Deployment
+
+### Option 1: Standalone Adapter (Recommended)
+
+```yaml
+# docker-compose.yaml
+services:
+  jam-node-1:
+    image: jam-node:latest
+    command: --telemetry adapter:9615
+
+  jam-node-2:
+    image: jam-node:latest
+    command: --telemetry adapter:9615
+
+  telemetry-adapter:
+    image: jam-telemetry-adapter:latest
+    ports:
+      - "9615:9615"  # JIP-3 listener
+    environment:
+      - JAEGER_ENDPOINT=http://jaeger:14268/api/traces
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"  # UI
+      - "14268:14268"  # HTTP collector
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+```
+
+### Option 2: Embedded Adapter
+
+Add Jaeger exporter directly to JAM node (requires more code changes).
+
+## Benefits
+
+1. **Cross-Node Visibility**: See complete work package journey across builder, guarantors, and auditors
+2. **Performance Analysis**: Identify bottlenecks in multi-node workflows
+3. **Debugging**: Trace failures across node boundaries
+4. **Latency Analysis**: Measure time between nodes (e.g., submission to guarantee)
+5. **Correlation**: Link block authoring on one node to importing on others
+
+## Example Traces in Jaeger
+
+### Work Package Trace
+```
+Trace ID: 0x1a2b3c4d... (Work Package Hash)
+Duration: 850ms
+
+Spans:
+├─ work-package-submission (Builder, 0-10ms)
+├─ work-package-received (Guarantor-1, 15-20ms)
+├─ authorized (Guarantor-1, 20-120ms)
+├─ imports-received (Guarantor-1, 120-180ms)
+├─ sharing-work-package (Guarantor-1 → Guarantor-2, 180-200ms)
+│  ├─ work-package-being-shared (Guarantor-2, 190-195ms)
+│  ├─ authorized (Guarantor-2, 195-280ms)
+│  ├─ refined (Guarantor-2, 280-450ms)
+│  └─ work-report-signature-sent (Guarantor-2, 450-455ms)
+├─ refined (Guarantor-1, 200-500ms)
+├─ work-report-built (Guarantor-1, 500-550ms)
+├─ guarantee-built (Guarantor-1, 550-600ms)
+└─ guarantees-distributed (Guarantor-1, 600-850ms)
+```
+
+### Block Trace
+```
+Trace ID: 0x9f8e7d6c... (Header Hash)
+Duration: 1200ms
+
+Spans:
+├─ authoring (Validator-1, 0-800ms)
+│  ├─ authored (Validator-1, 500-600ms)
+│  └─ block-executed (Validator-1, 600-800ms)
+├─ block-announced (Validator-1 → Network, 800-805ms)
+├─ importing (Validator-2, 810-1100ms)
+│  ├─ block-verified (Validator-2, 850-900ms)
+│  └─ block-executed (Validator-2, 900-1100ms)
+└─ importing (Validator-3, 820-1200ms)
+   ├─ block-verified (Validator-3, 870-920ms)
+   └─ block-executed (Validator-3, 920-1200ms)
+```
+
+## Configuration
+
+```yaml
+# adapter-config.yaml
+adapter:
+  listen_address: "0.0.0.0:9615"
+  buffer_size: 10000
+
+jaeger:
+  endpoint: "http://jaeger:14268/api/traces"
+  service_name: "jam-network"
+
+opentelemetry:
+  batch_timeout: "5s"
+  batch_size: 512
+  max_export_batch_size: 512
+
+trace_correlation:
+  # Map Event ID prefixes to trace types
+  work_package: true
+  block: true
+  availability: true
+  preimage: true
+```
+
+## Next Steps
+
+1. Implement adapter core (JIP-3 TCP listener)
+2. Build event-to-span conversion logic
+3. Add trace correlation by identifier type
+4. Test with multi-node scenarios
+5. Deploy and validate traces in Jaeger UI

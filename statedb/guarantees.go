@@ -147,12 +147,12 @@ func (s *StateDB) checkAssignment(g types.Guarantee, ts uint32) error {
 	for _, sig := range g.Signatures {
 		core, ok := lookup[sig.ValidatorIndex]
 		if !ok || core != uint16(g.Report.CoreIndex) {
-			log.Warn(log.G, "checkAssignment: G14-ErrGWrongAssignment",
-				"validator", sig.ValidatorIndex,
-				"ok", ok,
-				"slot", g.Slot,
-				"expectedCore", g.Report.CoreIndex,
-				"actualCore", core)
+			// log.Warn(log.G, "checkAssignment: G14-ErrGWrongAssignment",
+			// 	"validator", sig.ValidatorIndex,
+			// 	"ok", ok,
+			// 	"slot", g.Slot,
+			// 	"expectedCore", g.Report.CoreIndex,
+			// 	"actualCore", core)
 			return jamerrors.ErrGWrongAssignment
 		}
 		// fmt.Printf("Validator %d: %s (Assigned to Core %d), g slot %d\n", sig.ValidatorIndex, assignments[sig.ValidatorIndex].Validator.Ed25519, core, g.Slot)
@@ -275,8 +275,7 @@ func (s *StateDB) checkServicesExist(g types.Guarantee) error {
 		if !ok {
 			log.Warn(log.G, "!!!! checkServicesExist: serviceID not found", "s.ID", s.Id, "serviceID", result.ServiceID, "slot", s.GetTimeslot(), "s.root", s.GetStateRoot().Hex())
 			keyValues := s.GetAllKeyValues()
-			log.Info(log.Node, "!!!! getTargetStateDB: Recovered state key-values", "numKeyValues", len(keyValues))
-			panic("serviceID not found")
+			log.Debug(log.Node, "getTargetStateDB: Recovered state key-values", "numKeyValues", len(keyValues))
 			return jamerrors.ErrGBadServiceID
 		} else {
 			//log.Info(log.G, "!!!! checkServicesExist: serviceID found", "s.ID", s.Id, "serviceID", result.ServiceID, "slot", s.GetTimeslot(), "s.root", s.GetStateRoot().Hex(), "acct", acct.String())

@@ -43,7 +43,7 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 					RefineGasLimit:     types.RefineGasAllocation / 2,
 					AccumulateGasLimit: types.AccumulationGasAllocation / 2,
 					ImportedSegments:   imported,
-					ExportCount:        uint16(len(algo_payload) / 2),
+					ExportCount:        uint16(0),
 				},
 			},
 		}

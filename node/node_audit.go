@@ -691,7 +691,7 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	n.workReportsMutex.Unlock()
 
 	spec := workReport.AvailabilitySpec
-	// TODO: need original 3 guarantors of headerHash
+	// get original 3 guarantors of headerHash
 	guarantors := n.getGuarantorsByHeaderHash(headerHash)
 	workPackageBundle, err := n.fetchWorkPackageBundle(spec, workReport.SegmentRootLookup, workReport.CoreIndex, guarantors)
 	if err != nil {
@@ -750,13 +750,23 @@ func (n *Node) DistributeJudgements(judges []types.Judgement, headerHash common.
 
 // fetchWorkPackageBundle: fast path from guarantors, then slow path via reconstruction
 func (n *Node) fetchWorkPackageBundle(spec types.AvailabilitySpecifier, segmentRootLookup types.SegmentRootLookup, coreIndex uint, guarantors []uint16) (types.WorkPackageBundle, error) {
-	eventID := n.telemetryClient.GetEventID()
-	// Fast path: Try to fetch bundle from original 3 guarantors with CE148
+	eventID := n.telemetryClient.GetEventID(spec.WorkPackageHash)
+	// Fast path: Try to fetch bundle from original 3 guarantors with CE147
 	for i, peer := range n.peersInfo {
 		if slices.Contains(guarantors, uint16(i)) {
 			bundle, err := peer.SendBundleRequest(context.Background(), spec.ErasureRoot, eventID)
 			if err != nil {
 				continue
+			}
+			// Verify the bundle against the segment root lookup
+			verified, err := n.VerifyBundle(bundle, segmentRootLookup, eventID)
+			if err != nil {
+				log.Warn(log.Node, "fetchWorkPackageBundle: VerifyBundle errored", "err", err)
+				return types.WorkPackageBundle{}, fmt.Errorf("verify bundle failed: %w", err)
+			}
+			if !verified {
+				log.Warn(log.Node, "fetchWorkPackageBundle: bundle verification failed")
+				return types.WorkPackageBundle{}, fmt.Errorf("bundle verification failed")
 			}
 			return *bundle, nil
 		}
@@ -764,7 +774,7 @@ func (n *Node) fetchWorkPackageBundle(spec types.AvailabilitySpecifier, segmentR
 
 	// Slow path: call C138 to get bundle_shard from C assurers, do ec reconstruction for b
 	// IMPORTANT: within reconstructPackageBundleSegments is a call to VerifyBundle
-	workPackageBundle, err := n.reconstructPackageBundleSegments(spec.ErasureRoot, spec.BundleLength, segmentRootLookup, coreIndex, spec.ExportedSegmentLength)
+	workPackageBundle, err := n.reconstructPackageBundleSegments(spec, segmentRootLookup, coreIndex)
 	if err != nil {
 		return types.WorkPackageBundle{}, fmt.Errorf("reconstructPackageBundleSegments failed: %v", err)
 	}

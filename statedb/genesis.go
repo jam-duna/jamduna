@@ -313,7 +313,9 @@ func NewStateDBFromStateTransitionPost(sdb *storage.StateDBStorage, statetransit
 	statedb.Block = &(statetransition.Block)
 	statedb.StateRoot = statedb.UpdateAllTrieStateRaw(statetransition.PostState) // NOTE: MK -- USE POSTSTATE
 	statedb.JamState = NewJamState()
-	statedb.RecoverJamState(statedb.StateRoot)
+	if err := statedb.RecoverJamState(statedb.StateRoot); err != nil {
+		return nil, err
+	}
 	return statedb, nil
 }
 
@@ -324,7 +326,9 @@ func NewStateDBFromStateKeyVals(sdb *storage.StateDBStorage, stateKeyVals *State
 	}
 	statedb.StateRoot = statedb.UpdateAllTrieKeyVals(*stateKeyVals)
 	statedb.JamState = NewJamState()
-	statedb.RecoverJamState(statedb.StateRoot)
+	if err := statedb.RecoverJamState(statedb.StateRoot); err != nil {
+		return nil, err
+	}
 	return statedb, nil
 }
 
@@ -350,7 +354,9 @@ func NewStateDBFromStateTransition(sdb *storage.StateDBStorage, statetransition 
 		return nil, fmt.Errorf("StateRoot %s != ParentStateRoot %s", statedb.StateRoot.String(), statetransition.Block.Header.ParentStateRoot.String())
 	}
 	statedb.JamState = NewJamState()
-	statedb.RecoverJamState(statedb.StateRoot)
+	if err := statedb.RecoverJamState(statedb.StateRoot); err != nil {
+		return nil, err
+	}
 	benchRec.Add("NewStateDBFromStateTransition:RecoverJamState", time.Since(t0))
 	return statedb, nil
 }

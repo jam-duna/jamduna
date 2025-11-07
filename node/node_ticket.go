@@ -71,8 +71,9 @@ func (n *Node) GenerateTickets(jce uint32) (eventID uint64) {
 		return
 	}
 	if !n.IsTicketGenerated(usedEntropy) {
-		eventID = n.telemetryClient.GetEventID()
-		n.telemetryClient.GeneratingTickets(sf.GetEpoch())
+		epoch := sf.GetEpoch()
+		eventID = n.telemetryClient.GetEventID(epoch)
+		n.telemetryClient.GeneratingTickets(epoch)
 
 		buckets, err := n.generateEpochTickets(usedEntropy)
 		if err != nil {

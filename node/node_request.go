@@ -125,7 +125,10 @@ func (n *NodeContent) GetState(headerHash common.Hash, startKey [31]byte, endKey
 		return boundarynodes, keyvalues, false, err
 	}
 	stateRoot := blocks[0].Header.ParentStateRoot
-	trie := s.CopyTrieState(stateRoot)
+	trie, err := s.CopyTrieState(stateRoot)
+	if err != nil {
+		return boundarynodes, keyvalues, false, err
+	}
 	foundKeyVal, boundaryNode, err := trie.GetStateByRange(startKey[:], endKey[:], maximumSize)
 	if err != nil {
 		return boundarynodes, keyvalues, false, err
@@ -147,7 +150,10 @@ func (n *NodeContent) getServiceIdxStorage(headerHash common.Hash, service_idx u
 		return boundarynodes, keyvalues, false, err
 	}
 	stateRoot := blocks[0].Header.ParentStateRoot
-	stateTrie := s.CopyTrieState(stateRoot)
+	stateTrie, err := s.CopyTrieState(stateRoot)
+	if err != nil {
+		return boundarynodes, keyvalues, false, err
+	}
 
 	storageKey := common.Compute_storageKey_internal(rawKey)
 	service_account := common.ComputeC_sh(service_idx, storageKey)

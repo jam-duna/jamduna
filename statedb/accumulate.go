@@ -817,7 +817,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 					PayloadHash:         workDigest.PayloadHash,
 					Result:              workDigest.Result,
 				}
-				log.Debug(sd.Authoring, "SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", serviceID), "wrangledResults", types.DecodedWrangledResults(&operandElement))
+				log.Debug(sd.Authoring, "SINGLE ACCUMULATE", "Authoring", sd.Authoring, "s", fmt.Sprintf("%d", serviceID), "wrangledResults", types.DecodedWrangledResults(&operandElement))
 				operandElements = append(operandElements, operandElement)
 			}
 		}
@@ -867,14 +867,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 
 	//(B.8) start point
 	t0 = time.Now()
-	if serviceID == 1809622522 {
-		PvmLogging = false
-	}
-
 	vm := NewVMFromCode(serviceID, code, 0, 0, sd, pvmBackend, gas)
-	if serviceID == 2084712938 {
-		PvmLogging = false
-	}
 	pvmContext := log.PvmValidating
 	if sd.Authoring == log.GeneralAuthoring {
 		pvmContext = log.PvmAuthoring

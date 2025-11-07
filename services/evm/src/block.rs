@@ -236,7 +236,7 @@ impl EvmBlockPayload {
     /// Create a new EvmBlockPayload with given parameters
     pub fn new(
         number: u64,
-        entropy: [u8; 32],
+        _entropy: [u8; 32],
         timestamp: u64,
         parent_hash: [u8; 32],
         state_root: [u8; 32],
@@ -658,6 +658,36 @@ impl EvmBlockPayload {
 
         log_info(&format!("Successfully deleted block {} and its hash", block_number));
         Some(())
+    }
+
+    /// Read parent hash for a given block number from storage
+    pub fn read_parent_hash(service_id: u32, block_number: u64) -> [u8; 32] {
+        if block_number == 0 {
+            return [0u8; 32]; // Genesis parent
+        }
+
+        // Read from BLOCK_NUMBER_KEY which contains block_number + parent_hash
+        let mut buffer = [0u8; 36]; // 4 bytes block_number + 32 bytes parent_hash
+
+        let len = unsafe {
+            host_read(
+                service_id as u64,
+                BLOCK_NUMBER_KEY.as_ptr() as u64,
+                BLOCK_NUMBER_KEY.len() as u64,
+                buffer.as_mut_ptr() as u64,
+                0,
+                buffer.len() as u64,
+            )
+        };
+
+        if len == NONE || len < 36 {
+            return [0u8; 32];
+        }
+
+        // Extract parent_hash from bytes 4-36
+        let mut parent_hash = [0u8; 32];
+        parent_hash.copy_from_slice(&buffer[4..36]);
+        parent_hash
     }
 
 }

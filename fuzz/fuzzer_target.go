@@ -286,15 +286,20 @@ func (t *Target) onImportBlock(req *types.Block) *Message {
 
 			// Create a copy of our current state and recover the parent state
 			forkState := preState.Copy()
-			forkState.RecoverJamState(req.Header.ParentStateRoot)
-			forkState.HeaderHash = foundParentHeaderHash
-			//forkState.StateRoot = req.Header.ParentStateRoot // Now set inside RecoverJamState
-			if t.debugState {
-				log.Printf("%s[FORK_DEBUG]%s Fork state prepared: HeaderHash=%s, StateRoot=%s%s", common.ColorMagenta, common.ColorReset, forkState.HeaderHash.Hex(), forkState.StateRoot.Hex(), common.ColorReset)
+			if forkState == nil {
+				log.Printf("%s[FORK_DEBUG]%s ERROR: failed to copy current state for forking%s", common.ColorRed, common.ColorReset, common.ColorReset)
+			} else if err := forkState.RecoverJamState(req.Header.ParentStateRoot); err != nil {
+				log.Printf("%s[FORK_DEBUG]%s ERROR: unable to recover fork state: %v%s", common.ColorRed, common.ColorReset, err, common.ColorReset)
+			} else {
+				forkState.HeaderHash = foundParentHeaderHash
+				//forkState.StateRoot = req.Header.ParentStateRoot // Now set inside RecoverJamState
+				if t.debugState {
+					log.Printf("%s[FORK_DEBUG]%s Fork state prepared: HeaderHash=%s, StateRoot=%s%s", common.ColorMagenta, common.ColorReset, forkState.HeaderHash.Hex(), forkState.StateRoot.Hex(), common.ColorReset)
+				}
+				// Use the fork state instead of current state
+				preState = forkState
+				preStateRoot = forkState.StateRoot
 			}
-			// Use the fork state instead of current state
-			preState = forkState
-			preStateRoot = forkState.StateRoot
 		} else {
 			log.Printf("%s[FORK_DEBUG]%s ERROR: Could not find parent state with StateRoot=%s%s", common.ColorRed, common.ColorReset, req.Header.ParentStateRoot.Hex(), common.ColorReset)
 		}
@@ -363,7 +368,14 @@ func (t *Target) onGetState(req *common.Hash) *Message {
 	//log.Printf("%s[GET_STATE_DEBUG]%s Current stateDB: HeaderHash=%s, StateRoot=%s%s", common.ColorGray, common.ColorReset, t.stateDB.HeaderHash.Hex(), t.stateDB.StateRoot.Hex(), common.ColorReset)
 
 	recoveredStateDB := t.stateDB.Copy()
-	recoveredStateDB.RecoverJamState(stateRoot)
+	if recoveredStateDB == nil {
+		log.Printf("%s[GET_STATE_DEBUG]%s Error: failed to copy state for headerHash: %s%s", common.ColorRed, common.ColorReset, headerHash.Hex(), common.ColorReset)
+		return &Message{State: &statedb.StateKeyVals{}}
+	}
+	if err := recoveredStateDB.RecoverJamState(stateRoot); err != nil {
+		log.Printf("%s[GET_STATE_DEBUG]%s Error recovering state: %v%s", common.ColorRed, common.ColorReset, err, common.ColorReset)
+		return &Message{State: &statedb.StateKeyVals{}}
+	}
 
 	log.Printf("%s[GET_STATE_DEBUG]%s After recovery: HeaderHash=%s, StateRoot=%s%s", common.ColorGray, common.ColorReset, recoveredStateDB.HeaderHash.Hex(), recoveredStateDB.StateRoot.Hex(), common.ColorReset)
 
