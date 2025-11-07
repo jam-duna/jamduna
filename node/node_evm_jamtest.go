@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	numRounds    = 3
+	numRounds    = 50
 	txnsPerRound = 1
 )
 

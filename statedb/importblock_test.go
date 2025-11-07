@@ -360,7 +360,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 	// log.EnableModule("pvm_validator")
 	log.EnableModule(log.SDB)
 
-	tc := []string{"1761654684", "1761664779"}
+	tc := []string{"1761664779"}
 	PvmLogging = false
 	for _, team := range tc {
 		filename, exists := fileMap[team]

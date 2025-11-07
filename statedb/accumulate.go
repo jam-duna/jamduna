@@ -549,7 +549,7 @@ func (s *StateDB) ParallelizedAccumulate(
 				o.QueueWorkReport = r.XY.U.QueueWorkReport
 			}
 			// UpcomingValidators updated only if UpcomingDirty is set (via DESIGNATE host function)
-			if r.XY.U.UpcomingDirty {
+			if r.XY.U.UpcomingDirty && r.XY.ServiceIndex == o.PrivilegedState.UpcomingValidatorsServiceID {
 				if debugValidators && len(r.XY.U.UpcomingValidators) > 0 {
 					validatorsBytes := make([]byte, len(r.XY.U.UpcomingValidators)*336)
 					for i, v := range r.XY.U.UpcomingValidators {
