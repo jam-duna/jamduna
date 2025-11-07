@@ -485,7 +485,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	case "evm":
 		EvmTest(t, bNode, testServices, "transfers")
 		//EvmTest(t, bNode, testServices, "fib")
-		//time.Sleep(600 * time.Second)
+		time.Sleep(600 * time.Second)
 	case "algo":
 		algo(bNode, testServices, targetN)
 	case "auth_copy":

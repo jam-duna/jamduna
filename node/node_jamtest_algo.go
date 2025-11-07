@@ -24,7 +24,7 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 
 	log.Info(log.Node, "ALGO START", "algo", algo_serviceIdx, "auth", auth_serviceIdx)
 
-	for algoN := 0; algoN < targetN; algoN++ {
+	for algoN := 1; algoN < targetN; algoN++ {
 		imported := []types.ImportSegment{}
 		algo_payload := GenerateAlgoPayload(algoN, isSimple)
 

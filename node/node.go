@@ -2220,14 +2220,16 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	// 	}
 	// }
 	// 1. Prepare recovered state from parent
+
+	recoveredStateDB, err := statedb.NewStateDBFromStateRoot(nextBlock.Header.ParentStateRoot, n.statedb.GetStorage())
+	if err != nil {
+		log.Error(log.Node, "NewStateDBFromStateRoot: Failed to recover state", "stateRoot", nextBlock.Header.ParentStateRoot.Hex(), "error", err)
+	}
+	statedb.DumpStateDBKeyValues(recoveredStateDB, "Recovered", n.id, false)
 	start := time.Now()
 
-	recoveredStateDB := statedb.NewCleanStateDB(n.statedb.GetStorage(), n.statedb.GetID())
-	recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot)
 	recoveredStateDB.UnsetPosteriorEntropy()
-	recoveredStateDB.Block = nextBlock
-
-	dumpStateDBKeyValues(recoveredStateDB, "Recovered", n.id, nextBlock.Header.Slot)
+	//recoveredStateDB.Block = nextBlock
 
 	postRecoveryKV := recoveredStateDB.GetAllKeyValues()
 	if len(postRecoveryKV) <= 16 {
@@ -2267,10 +2269,9 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 		return fmt.Errorf("ApplyStateTransitionFromBlock failed: %w", err)
 	}
 
-	dumpStateDBKeyValues(newStateDB, "IMMEDIATE post-transition", n.id, nextBlock.Header.Slot)
+	statedb.DumpStateDBKeyValues(newStateDB, "IMMEDIATE post-transition", n.id, false)
 
 	start = time.Now()
-	// newStateDB.GetAllKeyValues()
 	newStateDB.Block = nextBlock
 	newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
 
@@ -2821,29 +2822,19 @@ func (n *NodeContent) getTargetStateDB(stateRoot common.Hash) (*statedb.StateDB,
 	currentStateRoot := currentStateDB.GetStateRoot()
 
 	if stateRoot.Hex() == currentStateRoot.Hex() {
-		dumpStateDBKeyValues(currentStateDB, "getTargetStateDB: Current", n.id, currentStateDB.GetSafrole().GetTimeSlot())
-		//keyValues := currentStateDB.GetAllKeyValues()
-		//log.Info(log.Node, "!!getTargetStateDB: currentStateDB state key-values", "n", n.id, "stateRoot", currentStateDB.GetStateRoot().Hex(), "numKeyValues", len(keyValues))
+		statedb.DumpStateDBKeyValues(currentStateDB, "getTargetStateDB: Current", n.id, false)
 		return currentStateDB, nil
 	}
 	log.Warn(log.Node, "getTargetStateDB: REFETCH REQUIRED", "n", n.id, "expected", stateRoot.Hex(), "got", currentStateRoot.Hex())
-	statedb.NewStateDBFromStateRoot(stateRoot, n.statedb.GetStorage())
 
-	// recoveredStateDB, err := statedb.NewStateDBFromStateRoot(stateRoot, n.statedb.GetStorage())
-	// if err != nil {
-	// 	log.Error(log.Node, "Failed to recover state", "stateRoot", stateRoot.Hex(), "error", err)
-	// 	return nil, fmt.Errorf("Failed to recover state")
-	// }
-
-	recoveredStateDB := n.statedb.Copy()
-	recoveredStateDB.JamState = NewJamState()
-	recoveredStateDB.RecoverJamState(stateRoot)
-	//recoveredStateDB.StateRoot = stateRoot // Now set inside RecoverJamState
-	//recoveredStateDB.StateRoot = recoveredStateDB.UpdateTrieState()
+	recoveredStateDB, err := statedb.NewStateDBFromStateRoot(stateRoot, n.statedb.GetStorage())
+	if err != nil {
+		log.Error(log.Node, "getTargetStateDB: Failed to recover state", "stateRoot", stateRoot.Hex(), "error", err)
+		return nil, fmt.Errorf("failed to recover state: %w", err)
+	}
 
 	log.Info(log.Node, "getTargetStateDB: Recovered state root", "n", n.id, "stateRoot", recoveredStateDB.GetStateRoot().Hex())
-
-	dumpStateDBKeyValues(recoveredStateDB, "getTargetStateDB: Recovered", n.id, recoveredStateDB.GetSafrole().GetTimeSlot())
+	statedb.DumpStateDBKeyValues(recoveredStateDB, "getTargetStateDB: Recovered", n.id, false)
 
 	return recoveredStateDB, nil
 }

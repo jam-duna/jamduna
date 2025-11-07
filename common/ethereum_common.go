@@ -27,8 +27,11 @@ func (h Hash) String() string {
 }
 
 func (h Hash) String_short() string {
-	//
 	return fmt.Sprintf("%s..%s", h.Hex()[2:6], h.Hex()[62:66])
+}
+
+func (h Hash) String_shortLen(length int) string {
+	return h.Hex()[2 : 2+length]
 }
 
 // Hex returns the hexadecimal string representation of the hash.

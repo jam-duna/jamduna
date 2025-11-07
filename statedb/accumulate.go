@@ -16,7 +16,7 @@ import (
 
 type BeefyPool []HistoryState
 
-var debugValidators = true
+var debugValidators = false
 
 // v0.4.5 eq.165 - W^!
 func AccumulatedImmediately(workReports []types.WorkReport) []types.WorkReport {
@@ -649,7 +649,7 @@ func (s *StateDB) ParallelizedAccumulate(
 	//fmt.Printf("AFTER ParallelizedAccumulate: %s\n", o.DebugServiceAccounts())
 
 	// Debug: show validators after ParallelizedAccumulate
-	if len(o.UpcomingValidators) > 0 {
+	if len(o.UpcomingValidators) > 0 && debugValidators {
 		validatorsBytes := make([]byte, len(o.UpcomingValidators)*336)
 		for i, v := range o.UpcomingValidators {
 			copy(validatorsBytes[i*336:], v.Bandersnatch[:])

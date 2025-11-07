@@ -354,6 +354,7 @@ func GenerateAlgoPayload(sz int, isSimple bool) []byte {
 			algo_payload[i*2] = byte(sz)
 			algo_payload[i*2+1] = byte(5)
 		}
+		fmt.Printf("GenerateAlgoPayload SIMPLE: sz=%d, payload: %x:\n", sz, algo_payload)
 		return algo_payload
 	}
 	algo_payload := make([]byte, sz*2)

@@ -132,3 +132,7 @@ func (mh *MockHostEnv) WriteServicePreimageBlob(s uint32, blob []byte) {
 func (mh *MockHostEnv) WriteServicePreimageLookup(s uint32, blob_hash common.Hash, blob_length uint32, time_slots []uint32) {
 	// TODO: elimnate the need for this by adjusting genesis.go
 }
+
+func (mh *MockHostEnv) GetParentStateRoot() common.Hash {
+	return common.Hash{}
+}

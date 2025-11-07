@@ -239,13 +239,14 @@ impl EvmBlockPayload {
         entropy: [u8; 32],
         timestamp: u64,
         parent_hash: [u8; 32],
+        state_root: [u8; 32],
     ) -> Self {
         Self {
             number,
-           parent_hash, 
+            parent_hash, 
             logs_bloom: [0u8; 256],
             transactions_root: [0u8; 32],
-            state_root: entropy,
+            state_root,
             receipts_root: [0u8; 32],
             miner: [0u8; 20],
             extra_data: [0u8; 32],
@@ -371,8 +372,21 @@ impl EvmBlockPayload {
             Self::write_blocknumber_key(block_number + 1, &parent_block_hash);
             log_info(&format!("📝 Updated BLOCK_NUMBER_KEY to block {}", block_number + 1));
 
+            // Fetch the state root from the host environment
+            use utils::functions::fetch_state_root;
+            let state_root = match fetch_state_root() {
+                Ok(root) => {
+                    log_info(&format!("✅ Fetched state_root: {}", format_object_id(&root)));
+                    root
+                },
+                Err(e) => {
+                    log_error(&format!("❌ Failed to fetch state_root: {:?}, using zero hash", e));
+                    [0u8; 32]
+                }
+            };
+
             // Create new block with incremented number
-            let new_block = Self::new((block_number + 1) as u64, entropy, timestamp, parent_block_hash);
+            let new_block = Self::new((block_number + 1) as u64, entropy, timestamp, parent_block_hash, state_root);
             log_info(&format!("🎉 Created new block {} with timestamp={}", new_block.number, new_block.timestamp));
             Some(new_block)
         }

@@ -793,26 +793,53 @@ func (vm *VM) hostFetch() {
 	mode := vm.Mode
 	allowed := false
 
+	const (
+		PARAMETER_BYTE_0                              = 0  // 0: Parameter Bytes
+		ENTROPY_1                                     = 1  // 1: The Entropy/Random Accumulator (n)
+		AUTHORIZATION_2                               = 2  // 2: The Authorization Trace/Data (r)
+		EXTRINSIC_BY_WORK_PACKAGE_EXTRINSIC_INDEX_3   = 3  // 3: Specific Extrinsic by Work Package Index (x[φ11]φ12)
+		EXTRINSICS_BY_WORK_ITEM_4                     = 4  // 4: Extrinsics by Current Work Item Index (x[i]φ11)
+		IMPORTED_SEGMENT_BY_WORK_ITEM_SEGMENT_INDEX_5 = 5  // 5: Specific Imported Segment by Work Package Index (i[φ11]φ12)
+		IMPORTED_SEGMENT_BY_WORK_ITEM_INDEX_6         = 6  // 6: Imported Segment by Current Work Item Index (i[i]φ11)
+		WORK_PACKAGE_7                                = 7  // 7: Encoded Work Package (E(p))
+		AUTH_CODE_AND_CONFIG_BLOB_8                   = 8  // 8: Authorization Code Hash + Configuration Blob (E(pu, ↕pf))
+		AUTHORIZATION_TOKEN_9                         = 9  // 9: Authorization Token (pj)
+		REFINE_CONTEXT_10                             = 10 // 10: Encoded Refine Context (E(pc))
+		ALL_WORK_ITEMS_11                             = 11 // 11: All Work Items (Encoded using Custom Encoding S, E(↕[S(w) ∣ w <− pw]))
+		SPECIFIC_WORK_ITEM_S_ENCODED_12               = 12 // 12: Specific Work Item S-Encoding (S(pw[φ11]))
+		WORK_ITEM_PAYLOAD_13                          = 13 // 13: Specific Work Item Payload (pw[φ11]y)
+		ALL_ACCUMULATION_OPERANDS_14                  = 14 // 14: All Accumulation Operands (E(↕o))
+		SPECIFIC_ACCUMULATION_OPERAND_15              = 15 // 15: Specific Accumulation Operand (E(o[φ11]))
+	)
+
+	//CUSTOM hostfetch:
+	const (
+		CUSTOM_STATE_ROOT_FETCH = 250
+	)
+
 	// determine if allowed
 	// datatype:
 	switch mode {
 	case ModeIsAuthorized:
 		switch datatype {
-		case 0, 7, 8, 9, 10, 11, 12, 13:
+		//0, 7, 8, 9, 10, 11, 12, 13
+		case PARAMETER_BYTE_0, WORK_PACKAGE_7, AUTH_CODE_AND_CONFIG_BLOB_8, AUTHORIZATION_TOKEN_9, REFINE_CONTEXT_10, ALL_WORK_ITEMS_11, SPECIFIC_WORK_ITEM_S_ENCODED_12, WORK_ITEM_PAYLOAD_13:
 			allowed = true
 		default:
 			allowed = false
 		}
 	case ModeRefine:
 		switch datatype {
-		case 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13:
+		//0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13
+		case PARAMETER_BYTE_0, ENTROPY_1, AUTHORIZATION_2, EXTRINSIC_BY_WORK_PACKAGE_EXTRINSIC_INDEX_3, EXTRINSICS_BY_WORK_ITEM_4, IMPORTED_SEGMENT_BY_WORK_ITEM_SEGMENT_INDEX_5, IMPORTED_SEGMENT_BY_WORK_ITEM_INDEX_6, WORK_PACKAGE_7, AUTH_CODE_AND_CONFIG_BLOB_8, AUTHORIZATION_TOKEN_9, REFINE_CONTEXT_10, ALL_WORK_ITEMS_11, SPECIFIC_WORK_ITEM_S_ENCODED_12, WORK_ITEM_PAYLOAD_13:
 			allowed = true
 		default:
 			allowed = false
 		}
 	case ModeAccumulate:
 		switch datatype {
-		case 0, 1, 14, 15:
+		//0, 1, 14, 15, 250
+		case PARAMETER_BYTE_0, ENTROPY_1, ALL_ACCUMULATION_OPERANDS_14, SPECIFIC_ACCUMULATION_OPERAND_15, CUSTOM_STATE_ROOT_FETCH:
 			allowed = true
 		default:
 			allowed = false
@@ -823,30 +850,31 @@ func (vm *VM) hostFetch() {
 	if allowed {
 		switch datatype {
 
-		case 0:
+		case PARAMETER_BYTE_0:
 			v_Bytes, _ = types.ParameterBytes()
 		//0a00000000000000010000000000000064000000000000000200200000000c000000809698000000000080f0fa020000000000ca9a3b00000000002d3101000000000800100008000300403800000300080006005000040080000500060000fa0000017cd20000093d0004000000000c00000204000000c0000080000000000c00000a000000
 		//[8: B_I]        [8: B_L].       [8: B_S].       [C.][4:D   ][4:E   ][8:G_A.        ][8:G_I.        ][8:G_R         ][8:G_T*        ][H ][I ][J ][K ][4:L   ][N ][O ][P ][Q ][R ][T ][U ][V ][4:W_A ][4:W_B ][4:W_C ][4:W_E ][4:W_M ][4:W_P ][4:W_R*][4:W_T ][4:W_X ][4:Y.  ]
 
-		case 1: // n
+		case ENTROPY_1: // n
 			v_Bytes = vm.N.Bytes()
 
-		case 2:
+		case AUTHORIZATION_2: // r
 			v_Bytes = vm.Authorization
-		case 3: // a SPECIFIC extrinsic of a work item -- note that this does NOT have a variable-length prefix
+
+		case EXTRINSIC_BY_WORK_PACKAGE_EXTRINSIC_INDEX_3: // a SPECIFIC extrinsic of a work item -- note that this does NOT have a variable-length prefix
 			extrinsic_number := omega_12
 			if len(vm.Extrinsics) > 0 {
 				v_Bytes = vm.Extrinsics[extrinsic_number]
 				// fmt.Printf("hostFetch case 4: Extrinsics length %d %x\n", len(v_Bytes), v_Bytes)
 			}
-		case 4: // ALL extrinsics of a work item -- note that this has a variable-length prefix
+		case EXTRINSICS_BY_WORK_ITEM_4: // ALL extrinsics of a work item -- note that this has a variable-length prefix
 			if len(vm.Extrinsics) > 0 {
 				v_Bytes, _ = types.Encode(vm.Extrinsics)
 			} else {
 				v_Bytes = []byte{0}
 			}
 
-		case 5: // a SPECIFIC imported segment of a work item -- not that this does not have a variable length prefix
+		case IMPORTED_SEGMENT_BY_WORK_ITEM_SEGMENT_INDEX_5: // a SPECIFIC imported segment of a work item -- not that this does not have a variable length prefix
 			workItem := omega_11
 			segmentIndex := omega_12
 			if vm.Imports != nil {
@@ -857,7 +885,7 @@ func (vm *VM) hostFetch() {
 					}
 				}
 			}
-		case 6:
+		case IMPORTED_SEGMENT_BY_WORK_ITEM_INDEX_6:
 			// get imported segment by work item index
 			if omega_11 < uint64(len(vm.Imports[vm.WorkItemIndex])) {
 				v_Bytes = append([]byte{}, vm.Imports[vm.WorkItemIndex][omega_11][:]...)
@@ -871,11 +899,11 @@ func (vm *VM) hostFetch() {
 				// fmt.Printf("FETCH 6 FAIL omega_11 %d vs len(vm.Imports[vm.WorkItemIndex=%d])=%d\n", omega_11, vm.WorkItemIndex, len(vm.Imports[vm.WorkItemIndex]))
 			}
 
-		case 7: // encode work package
+		case WORK_PACKAGE_7: // encode work package
 			v_Bytes, _ = types.Encode(vm.WorkPackage)
 			//log.Info(vm.logging, "FETCH wp", "len(v_Bytes)", len(v_Bytes))
 
-		case 8: // p_u + | p_p
+		case AUTH_CODE_AND_CONFIG_BLOB_8: // p_u + | p_p
 			type pp struct {
 				PHash common.Hash `json:"hash"`
 				PBlob []byte      `json:"blob"`
@@ -887,12 +915,14 @@ func (vm *VM) hostFetch() {
 			}
 			v_Bytes, _ = types.Encode(p)
 			//log.Info(vm.logging, "FETCH p_u + | p_p", "p_u", vm.WorkPackage.AuthorizationCodeHash, "p_p", vm.WorkPackage.ConfigurationBlob, "len", len(v_Bytes))
-		case 9: // p_j
+
+		case AUTHORIZATION_TOKEN_9: // p_j
 			v_Bytes = vm.WorkPackage.AuthorizationToken
 
-		case 10: // p_X (refine context)
+		case REFINE_CONTEXT_10: // p_X (refine context)
 			v_Bytes = vm.WorkPackage.RefineContext.SerializeRefineContext()
-		case 11: // all work items
+
+		case ALL_WORK_ITEMS_11: // all work items
 			v_Bytes = make([]byte, 0)
 			// TODO: add discriminator in front
 			for i, w := range vm.WorkPackage.WorkItems {
@@ -901,33 +931,39 @@ func (vm *VM) hostFetch() {
 				v_Bytes = append(v_Bytes, s_bytes...)
 			}
 
-		case 12: // S(w) for specific work item w_11
+		case SPECIFIC_WORK_ITEM_S_ENCODED_12: // S(w) for specific work item w_11
 			if omega_11 < uint64(len(vm.WorkPackage.WorkItems)) {
 				w := vm.WorkPackage.WorkItems[omega_11]
 				v_Bytes, _ = types.Encode(w)
 			}
 			break
 
-		case 13: // p_w[w_11]_y
+		case WORK_ITEM_PAYLOAD_13: // p_w[w_11]_y
 			if omega_11 < uint64(len(vm.WorkPackage.WorkItems)) {
 				w := vm.WorkPackage.WorkItems[omega_11]
 				v_Bytes = w.Payload
 				log.Trace(vm.logging, "FETCH p_w[w_11]_y", "w_11", omega_11, "payload", fmt.Sprintf("%x", v_Bytes), "len", len(v_Bytes))
 			}
 
-		case 14: // E(|o) all accumulation operands
+		case ALL_ACCUMULATION_OPERANDS_14: // E(|o) all accumulation operands
 			if vm.AccumulateInputs != nil {
 				// CHECK: these should be encoded with the # of inputs, then a byte discriminator in front to indicate transfer vs accum operand (0 vs 1)
 				v_Bytes, _ = types.Encode(vm.AccumulateInputs)
 			} else {
 				v_Bytes = []byte{0}
 			}
-		case 15: // E(o[w_11])
+
+		case SPECIFIC_ACCUMULATION_OPERAND_15: // E(o[w_11])
 			if vm.AccumulateInputs != nil && omega_11 < uint64(len(vm.AccumulateInputs)) {
 				// CHECK: these should a byte discriminator in front to indicate transfer vs accum operand (0 vs 1)
 				v_Bytes, _ = types.Encode(vm.AccumulateInputs[omega_11])
 				log.Trace(vm.logging, "FETCH E(o[w_11])", "w_11", omega_11, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "len", len(v_Bytes))
 			}
+		case CUSTOM_STATE_ROOT_FETCH:
+			// Return the parent state root (state before current block execution)
+			v_Bytes, _ = types.Encode(vm.hostenv.GetParentStateRoot())
+			log.Trace(vm.logging, "FETCH parent stateroot", "w_11", omega_11, "stateroot", fmt.Sprintf("%x", v_Bytes), "len", len(v_Bytes))
+
 		}
 	} else {
 		log.Trace(vm.logging, "FETCH FAIL NOT ALLOWED", "mode", mode, "allowed", allowed, "datatype", datatype, "omega_7", o, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12)
@@ -1964,7 +2000,7 @@ func (vm *VM) hostLog() {
 		serviceMetadata = fmt.Sprintf("%s-child", serviceMetadata)
 	}
 	loggingVerbose := false
-	if vm.logging == log.FirstGuarantorOrAuditor || vm.logging == log.OtherGuarantor || vm.logging == log.Builder {
+	if vm.logging == log.FirstGuarantorOrAuditor || vm.logging == log.OtherGuarantor || vm.logging == log.Builder || vm.logging == log.PvmAuthoring {
 		loggingVerbose = true
 	}
 	if !loggingVerbose {

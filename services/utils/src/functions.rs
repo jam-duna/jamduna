@@ -1396,6 +1396,33 @@ pub fn fetch_extrinsic(work_item_index: u16, index: u32) -> HarnessResult<Vec<u8
     }
 }
 
+/// Fetches the state root from the host environment
+pub fn fetch_state_root() -> HarnessResult<[u8; 32]> {
+    const FETCH_DATATYPE_STATE_ROOT: u64 = 250;
+    let mut buffer = vec![0u8; 32];
+    match fetch_data(
+        &mut buffer,
+        FETCH_DATATYPE_STATE_ROOT,
+        0,
+        0,
+        32,
+    )? {
+        Some(data) => {
+            if data.len() == 32 {
+                let mut state_root = [0u8; 32];
+                state_root.copy_from_slice(&data);
+                Ok(state_root)
+            } else {
+                Err(HarnessError::InvalidResponse)
+            }
+        },
+        None => {
+            // Return zero hash if no state root is available
+            Ok([0u8; 32])
+        }
+    }
+}
+
 /// Fetches extrinsics by index from the host environment
 pub fn fetch_extrinsics(work_item_index: u16) -> HarnessResult<Vec<Vec<u8>>> {
     const FETCH_DATATYPE_EXTRINSICS: u64 = 4;

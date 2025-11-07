@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"time"
 
 	"encoding/binary"
@@ -241,10 +242,19 @@ func (s *StateDB) GetStateRoot() common.Hash {
 	return s.StateRoot
 }
 
+func (s *StateDB) GetParentStateRoot() common.Hash {
+	// this is "root" before trie gets flushed
+	return s.StateRoot
+}
+
 func (s *StateDB) GetTentativeStateRoot() common.Hash {
 	// return the trie root at the moment
 	t := s.GetTrie()
 	return t.GetRoot()
+}
+
+func (s *StateDB) SetTrie(t *trie.MerkleTree) {
+	s.trie = t
 }
 
 func (s *StateDB) GetTrie() *trie.MerkleTree {
@@ -373,8 +383,12 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) {
 	d.SafroleState.NextValidators = types.Validators(d.SafroleBasicState.NextValidators) // γk: Next epoch's validators (epoch N+1)
 
 	// Update the trie and state root to point to the recovered state
-	s.trie = t
-	s.StateRoot = stateRoot
+	s.SetTrie(t)
+	s.StateRoot = t.GetRoot()
+	if s.StateRoot.Hex() != stateRoot.Hex() {
+		log.Crit(log.SDB, "UpdateTrieState: StateRoot mismatch", "Actual", s.StateRoot.Hex(), "expected", stateRoot.Hex())
+		panic("StateRoot mismatch after recovery")
+	}
 }
 
 func (s *StateDB) UpdateTrieState() common.Hash {
@@ -651,6 +665,59 @@ func (s *StateDB) String() string {
 	return types.ToJSON(s)
 }
 
+func DumpStateDBKeyValues(db *StateDB, description string, nodeID uint16, showDump bool) {
+	if !showDump {
+		return
+	}
+
+	kvList := db.GetAllKeyValues()
+	stateRoot := db.GetStateRoot()
+
+	var kvDump strings.Builder
+
+	var timeslot uint64 = 0
+	for _, kv := range kvList {
+		if len(kv.Key) >= 2 && kv.Key[0] == 0x0B && kv.Key[1] == 0x00 {
+			timeslot = types.DecodeE_l(kv.Value)
+			fmt.Printf("decoded timeslot: %v\n", timeslot)
+			break
+		}
+	}
+
+	kvDump.WriteString(fmt.Sprintf("\n[N%d][Slot=%d] ===== %s %d key-values (Root:%v)=====\n", nodeID, timeslot, description, len(kvList), stateRoot))
+
+	var c13Value []byte
+	for i, kv := range kvList {
+		valHash := common.Blake2Hash(kv.Value)
+		kvDump.WriteString(fmt.Sprintf("[N%d][Slot=%d][Key %d][ValHash] 0x%x -> %s Len=%d\n",
+			nodeID, timeslot, i, kv.Key, valHash.String_shortLen(4), len(kv.Value)))
+
+		// Capture C13 (ValidatorStatistics) value if found (key 0x0d00)
+		if len(kv.Key) >= 2 && kv.Key[0] == 0x0d && kv.Key[1] == 0x00 {
+			c13Value = kv.Value
+		}
+	}
+
+	kvDump.WriteString(fmt.Sprintf("[N%d][Slot=%d] ===== End of %s key-values =====\n", nodeID, timeslot, description))
+
+	// Decode and print C13 (ValidatorStatistics) if found
+	c13Debug := false
+	if len(c13Value) > 0 && c13Debug {
+		var validatorStats types.ValidatorStatistics
+		decoded, _, err := types.Decode(c13Value, reflect.TypeOf(validatorStats))
+		if err == nil && decoded != nil {
+			validatorStats = decoded.(types.ValidatorStatistics)
+			c13JSON, jsonErr := json.MarshalIndent(validatorStats, "", "  ")
+			if jsonErr == nil {
+				kvDump.WriteString(fmt.Sprintf("\n[N%d][Slot=%d] ===== C13 ValidatorStatistics JSON =====\n", nodeID, timeslot))
+				kvDump.WriteString(string(c13JSON))
+				kvDump.WriteString(fmt.Sprintf("\n[N%d][Slot=%d] ===== End C13 ValidatorStatistics JSON =====\n", nodeID, timeslot))
+			}
+		}
+	}
+	fmt.Print(kvDump.String())
+}
+
 func NewStateDBFromBlock(sdb *storage.StateDBStorage, block *types.Block) (statedb *StateDB, err error) {
 	statedb = newEmptyStateDB(sdb)
 	statedb.Finalized = false
@@ -673,41 +740,22 @@ func NewStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 	return newStateDB(sdb, blockHash)
 }
 
-// NewStateDBFromStateRoot creates a StateDB instance from a JAM state root
-// The state root points to the binary merkle trie root containing all state.
-// This is used for historical state queries where we need to reconstruct
-// the state at a specific block without replaying transactions.
-//
-// Parameters:
-//   - stateRoot: The 32-byte Blake2b hash of the trie root for the desired state
-//   - sdb: Storage backend for reading trie nodes
-//
-// Returns:
-//   - statedb: StateDB initialized with historical state
-//   - err: Error if trie initialization or state recovery fails
-func NewStateDBFromStateRoot(stateRoot common.Hash, sdb *storage.StateDBStorage) (statedb *StateDB, err error) {
-	statedb = newEmptyStateDB(sdb)
-	statedb.Finalized = true // Historical state is always finalized
-	statedb.StateRoot = stateRoot
-	statedb.JamState = NewJamState()
+func NewStateDBFromStateRoot(stateRoot common.Hash, sdb *storage.StateDBStorage) (recoveredStateDB *StateDB, err error) {
+	recoveredStateDB = newEmptyStateDB(sdb)
+	recoveredStateDB.Finalized = true // Historical state is always finalized
+	//recoveredStateDB.StateRoot = stateRoot
+	recoveredStateDB.JamState = NewJamState()
 
-	// handled in RecoverJamState now
-	/*
-		statedb.trie = statedb.CopyTrieState(stateRoot)
-		if statedb.trie == nil {
-			return nil, fmt.Errorf("failed to initialize merkle tree from state root %s", stateRoot.Hex())
-		}
-	*/
+	recoveredStateDB.RecoverJamState(stateRoot)
 
-	// Recover JamState from the trie (reads C1-C15 state keys)
-	statedb.RecoverJamState(stateRoot)
+	//DumpStateDBKeyValues(recoveredStateDB, "Recovered", 0, 0)
 
 	// Verify that recovery succeeded by checking if trie was initialized
-	if statedb.trie == nil {
+	if recoveredStateDB.trie == nil {
 		return nil, fmt.Errorf("failed to initialize merkle tree from state root %s", stateRoot.Hex())
 	}
 
-	return statedb, nil
+	return recoveredStateDB, nil
 }
 
 // newStateDB initiates the StateDB using the blockHash+bn; the bn input must refer to the epoch for which the blockHash belongs to

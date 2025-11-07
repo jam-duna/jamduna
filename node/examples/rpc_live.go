@@ -89,41 +89,71 @@ func main() {
 func runAllTests(client *rpc.Client, countdown int) {
 	results := []TestResult{}
 
-	// Test 1: TxPoolStatus
+	// Test 1: GetLatestBlockNumber
+	results = append(results, testGetLatestBlockNumber(client))
+
+	// Test 2: TxPoolStatus
 	results = append(results, testTxPoolStatus(client))
 
-	// Test 2: GetBalance (issuer)
+	// Test 3: GetBalance (issuer)
 	results = append(results, testGetBalance(client, IssuerAddress, "Issuer (Alice)"))
 
-	// Test 3: GetBalance (zero address)
-	results = append(results, testGetBalance(client, "0x0000000000000000000000000000000000000000", "Zero Address"))
+	// Test 4: GetBalance (historical block - tests state root path)
+	results = append(results, testGetBalanceHistorical(client))
 
-	// Test 4: GetTransactionCount
+	// Test 5: GetTransactionCount
 	results = append(results, testGetTransactionCount(client, IssuerAddress))
 
-	// Test 5: GetStorageAt (USDM contract)
+	// Test 6: GetStorageAt (USDM contract)
 	results = append(results, testGetStorageAt(client))
 
-	// Test 6: TxPoolContent
+	// Test 7: TxPoolContent
 	results = append(results, testTxPoolContent(client))
 
-	// Test 7: TxPoolInspect
+	// Test 8: TxPoolInspect
 	results = append(results, testTxPoolInspect(client))
 
-	// Test 8: GetTransactionReceipt
+	// Test 9: GetTransactionReceipt
 	results = append(results, testGetTransactionReceipt(client))
 
-	// Test 9: GetTransactionByHash
+	// Test 10: GetTransactionByHash
 	results = append(results, testGetTransactionByHash(client))
 
-	// Test 10: GetBlockByNumber
+	// Test 11: GetBlockByNumber
 	results = append(results, testGetBlockByNumber(client))
 
-	// Test 11: GetBlockByHash
+	// Test 12: GetBlockByHash
 	results = append(results, testGetBlockByHash(client))
 
 	// Print summary
 	printSummary(results, countdown)
+}
+
+func testGetLatestBlockNumber(client *rpc.Client) TestResult {
+	fmt.Println("Test: GetLatestBlockNumber (eth_blockNumber)")
+	fmt.Println("-" + repeat("-", 50))
+
+	printCurlCommand("eth_blockNumber", []interface{}{})
+
+	var result string
+	err := client.Call("jam.GetLatestBlockNumber", []string{}, &result)
+
+	if err != nil {
+		fmt.Printf("❌ Failed: %v\n\n", err)
+		return TestResult{Name: "GetLatestBlockNumber", Success: false, Error: err}
+	}
+
+	fmt.Printf(" Block Number (hex): %s\n", result)
+
+	// Parse and display as decimal
+	if len(result) > 2 {
+		blockNum := new(big.Int)
+		blockNum.SetString(result[2:], 16)
+		fmt.Printf(" Block Number (dec): %s\n", blockNum.String())
+	}
+
+	fmt.Println()
+	return TestResult{Name: "GetLatestBlockNumber", Success: true, Output: result}
 }
 
 func testTxPoolStatus(client *rpc.Client) TestResult {
@@ -197,6 +227,60 @@ func testGetBalance(client *rpc.Client, address string, label string) TestResult
 	fmt.Println()
 
 	return TestResult{Name: fmt.Sprintf("GetBalance(%s)", label), Success: true, Output: balance}
+}
+
+func testGetBalanceHistorical(client *rpc.Client) TestResult {
+	fmt.Println("Test: GetBalance (Historical Block - Testing State Root Path)")
+	fmt.Println("-" + repeat("-", 50))
+
+	// First, get the latest block number
+	var latestBlockHex string
+	err := client.Call("jam.GetLatestBlockNumber", []string{}, &latestBlockHex)
+	if err != nil {
+		fmt.Printf("❌ Failed to get latest block number: %v\n\n", err)
+		return TestResult{Name: "GetBalance(Historical)", Success: false, Error: err}
+	}
+
+	// Parse latest block number
+	latestBlock := new(big.Int)
+	latestBlock.SetString(latestBlockHex[2:], 16)
+
+	// Calculate block number - 1
+	historicalBlock := new(big.Int).Sub(latestBlock, big.NewInt(1))
+
+	// If we're at block 0 or 1, skip this test
+	if historicalBlock.Cmp(big.NewInt(0)) <= 0 {
+		fmt.Printf("⚠️  Skipping test - not enough blocks yet (latest: %s)\n\n", latestBlock.String())
+		return TestResult{Name: "GetBalance(Historical)", Success: true, Output: "skipped"}
+	}
+
+	historicalBlockHex := fmt.Sprintf("0x%x", historicalBlock)
+
+	fmt.Printf(" Latest Block: %s (decimal: %s)\n", latestBlockHex, latestBlock.String())
+	fmt.Printf(" Testing Block: %s (decimal: %s)\n", historicalBlockHex, historicalBlock.String())
+
+	printCurlCommand("eth_getBalance", []interface{}{IssuerAddress, historicalBlockHex})
+
+	var balance string
+	err = client.Call("jam.GetBalance", []string{IssuerAddress, historicalBlockHex}, &balance)
+
+	if err != nil {
+		fmt.Printf("❌ Failed: %v\n\n", err)
+		return TestResult{Name: "GetBalance(Historical)", Success: false, Error: err}
+	}
+
+	fmt.Printf(" Address: %s\n", IssuerAddress)
+	fmt.Printf(" Balance at block %s: %s\n", historicalBlock.String(), balance)
+
+	// Parse and display balance in decimal
+	balanceDec := new(big.Int)
+	balanceDec.SetString(balance[2:], 16)
+	fmt.Printf(" Balance (decimal): %s wei\n", balanceDec.String())
+
+	fmt.Printf("✅ Successfully queried historical state (tests GetParentStateRoot path)\n")
+	fmt.Println()
+
+	return TestResult{Name: "GetBalance(Historical)", Success: true, Output: balance}
 }
 
 func testGetTransactionCount(client *rpc.Client, address string) TestResult {

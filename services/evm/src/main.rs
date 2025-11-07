@@ -28,8 +28,7 @@ mod receipt;
 mod tx;
 #[path = "bmt.rs"]
 mod bmt;
-#[path = "mmr.rs"]
-mod mmr;
+
 
 use alloc::{format, vec::Vec};
 use writes::serialize_execution_effects;
@@ -80,10 +79,10 @@ use utils::{
         parse_accumulate_args, parse_refine_args, fetch_accumulate_inputs,
     },
 };
-const SIZE0: usize = 0x100000;
+const SIZE0: usize = 0x200000;
 min_stack_size!(SIZE0);
 
-const SIZE1: usize = 0x100000;
+const SIZE1: usize = 0x200000;
 #[global_allocator]
 static ALLOCATOR: SimpleAlloc<SIZE1> = SimpleAlloc::new();
 

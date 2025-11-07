@@ -874,6 +874,29 @@ func (j *Jam) GetBlockByNumber(req []string, res *string) error {
 	return nil
 }
 
+// GetLatestBlockNumber returns the number of most recent block
+//
+// Parameters: none
+//
+// Returns:
+// - string: Block number as hex-encoded string (e.g., "0x1")
+//
+// Example curl call:
+// curl -X POST http://localhost:8545 -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+func (j *Jam) GetLatestBlockNumber(req []string, res *string) error {
+	log.Debug(log.Node, "GetLatestBlockNumber")
+
+	// Call public method (same as BlockNumber/eth_blockNumber)
+	blockNumber, err := j.node.GetLatestBlockNumber()
+	if err != nil {
+		return fmt.Errorf("failed to get latest block number: %v", err)
+	}
+
+	*res = fmt.Sprintf("0x%x", blockNumber)
+	log.Debug(log.Node, "GetLatestBlockNumber: Returning block number", "blockNumber", *res)
+	return nil
+}
+
 // ===== Helper Functions =====
 
 // parseBlockParameter parses a block parameter (string or number) to uint32

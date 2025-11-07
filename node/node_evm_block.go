@@ -106,7 +106,9 @@ func (n *NodeContent) getHistoricalState(blockNumber uint32) (*statedb.StateDB, 
 	}
 
 	// Reconstruct StateDB from the block's state root
+	fmt.Printf("Reconstructing historical state for block %d with state root %s\n", blockNumber, evmBlock.StateRoot.Hex())
 	historicalState, err := statedb.NewStateDBFromStateRoot(evmBlock.StateRoot, n.statedb.GetStorage())
+	statedb.DumpStateDBKeyValues(historicalState, "Recovered historicalState", n.id, true)
 	if err != nil {
 		log.Warn(log.Node, "Failed to reconstruct historical state, using current state",
 			"blockNumber", blockNumber, "stateRoot", evmBlock.StateRoot.Hex(), "error", err)

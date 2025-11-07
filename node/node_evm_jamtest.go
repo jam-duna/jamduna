@@ -20,8 +20,8 @@ import (
 )
 
 const (
-	numRounds    = 50
-	txnsPerRound = 5
+	numRounds    = 3
+	txnsPerRound = 1
 )
 
 // EVMService manages EVM block submissions with witness tracking

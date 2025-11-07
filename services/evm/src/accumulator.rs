@@ -7,7 +7,6 @@ use utils::{
 };
 use crate::{
     block::EvmBlockPayload,
-    mmr::MMR,
     receipt::TransactionReceiptRecord,
     sharding::{ObjectKind, format_object_id},
     writes::{ExecutionEffectsEnvelope, deserialize_execution_effects},
@@ -19,7 +18,6 @@ pub struct BlockAccumulator {
     pub service_id: u32,
     pub envelopes: Vec<ExecutionEffectsEnvelope>,
     pub current_block: EvmBlockPayload,
-    pub mmr: MMR,
     pub log_index_start: u64,
 }
 
@@ -64,8 +62,8 @@ impl BlockAccumulator {
         let block_hash = accumulator.current_block.compute_block_hash();
         EvmBlockPayload::write_blockhash_mapping_pub(&block_hash, accumulator.current_block.number as u32);
 
-        // Write MMR to storage and return MMR root
-        accumulator.mmr.write_mmr()
+        // Return the block hash as the accumulate root
+        Some(block_hash)
     }
 
     /// Create new BlockAccumulator and determine next block number from storage
@@ -113,15 +111,11 @@ impl BlockAccumulator {
             }
         };
 
-        // Read MMR from storage
-        let mmr = MMR::read_mmr(service_id)?;
 
-        log_info(&format!("🎯 BlockAccumulator created successfully with {} envelopes, {} MMR peaks", envelopes.len(), mmr.peaks.len()));
         Some(BlockAccumulator {
             service_id,
             envelopes,
             current_block,
-            mmr,
             log_index_start: 0,
         })
     }
@@ -206,7 +200,6 @@ impl BlockAccumulator {
         }
 
         log_info(&format!("📝 Writing Receipt object_id: {}, receipt_hash: {}", format_object_id(&candidate.object_id), format_object_id(&receipt_hash)));
-        self.mmr.append(receipt_hash);
         Some(())
     }
 }
