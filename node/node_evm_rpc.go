@@ -7,6 +7,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/statedb"
 )
 
 // ===== Network Metadata =====
@@ -249,7 +250,7 @@ func (j *Jam) EstimateGas(req []string, res *string) error {
 		return fmt.Errorf("failed to parse transaction object: %v", err)
 	}
 
-	tx, err := parseTransactionObject(txObj)
+	tx, err := statedb.ParseTransactionObject(txObj)
 	if err != nil {
 		return fmt.Errorf("failed to parse transaction fields: %v", err)
 	}
@@ -310,7 +311,7 @@ func (j *Jam) Call(req []string, res *string) error {
 		return fmt.Errorf("failed to parse transaction object: %v", err)
 	}
 
-	callTx, err := parseTransactionObject(txObj)
+	callTx, err := statedb.ParseTransactionObject(txObj)
 	if err != nil {
 		return fmt.Errorf("failed to parse transaction fields: %v", err)
 	}
@@ -637,7 +638,7 @@ func (j *Jam) GetLogs(req []string, res *string) error {
 	log.Info(log.Node, "EthGetLogs", "filter", filterJson)
 
 	// 1. Parse the filter object
-	var filter LogFilter
+	var filter statedb.LogFilter
 	if err := json.Unmarshal([]byte(filterJson), &filter); err != nil {
 		return fmt.Errorf("failed to parse filter object: %v", err)
 	}
@@ -658,7 +659,7 @@ func (j *Jam) GetLogs(req []string, res *string) error {
 
 	// Resolve toBlock
 	if filter.ToBlock == nil {
-		toBlock, err = j.getLatestBlockNumber()
+		toBlock, err = j.GetLatestBlockNumber()
 		if err != nil {
 			return fmt.Errorf("failed to get latest block: %v", err)
 		}
@@ -883,18 +884,14 @@ func (j *Jam) GetBlockByNumber(req []string, res *string) error {
 //
 // Example curl call:
 // curl -X POST http://localhost:8545 -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
-func (j *Jam) GetLatestBlockNumber(req []string, res *string) error {
-	log.Debug(log.Node, "GetLatestBlockNumber")
-
+func (j *Jam) GetLatestBlockNumber() (uint32, error) {
 	// Call public method (same as BlockNumber/eth_blockNumber)
 	blockNumber, err := j.node.GetLatestBlockNumber()
 	if err != nil {
-		return fmt.Errorf("failed to get latest block number: %v", err)
+		return 0, fmt.Errorf("failed to get latest block number: %v", err)
 	}
 
-	*res = fmt.Sprintf("0x%x", blockNumber)
-	log.Debug(log.Node, "GetLatestBlockNumber: Returning block number", "blockNumber", *res)
-	return nil
+	return blockNumber, err
 }
 
 // ===== Helper Functions =====
@@ -905,11 +902,11 @@ func (j *Jam) parseBlockParameter(param interface{}) (uint32, error) {
 	case string:
 		switch v {
 		case "latest":
-			return j.getLatestBlockNumber()
+			return j.GetLatestBlockNumber()
 		case "earliest":
 			return 1, nil // Genesis block
 		case "pending":
-			return j.getLatestBlockNumber() // Use latest for pending
+			return j.GetLatestBlockNumber() // Use latest for pending
 		default:
 			// Parse hex number
 			if len(v) >= 2 && v[:2] == "0x" {
@@ -1001,20 +998,8 @@ func (j *Jam) TxPoolContent(req []string, res *string) error {
 		return nil
 	}
 
-	j.txPool.mutex.RLock()
-	defer j.txPool.mutex.RUnlock()
-
-	// Get pending transactions
-	pending := make([]string, 0, len(j.txPool.pending))
-	for hash := range j.txPool.pending {
-		pending = append(pending, hash.String())
-	}
-
-	// Get queued transactions
-	queued := make([]string, 0, len(j.txPool.queued))
-	for hash := range j.txPool.queued {
-		queued = append(queued, hash.String())
-	}
+	// Get pending and queued transactions from pool
+	pending, queued := j.txPool.GetTxPoolContent()
 
 	result := map[string]interface{}{
 		"pending": pending,
@@ -1059,4 +1044,59 @@ func (j *Jam) TxPoolInspect(req []string, res *string) error {
 
 	log.Debug(log.Node, "TxPoolInspect: Returning pool inspect", "result", *res)
 	return nil
+}
+
+// resolveBlockNumberToState resolves a block number string to a StateDB
+func (n *NodeContent) resolveBlockNumberToState(blockNumberStr string) (*statedb.StateDB, error) {
+	switch blockNumberStr {
+	case "latest", "pending":
+		// Use current state for latest/pending
+		return n.statedb, nil
+
+	case "earliest":
+		// Load genesis state (block 1)
+		return n.getHistoricalState(1)
+
+	default:
+		// Parse hex block number
+		if len(blockNumberStr) >= 2 && blockNumberStr[:2] == "0x" {
+			blockNum, err := strconv.ParseUint(blockNumberStr[2:], 16, 32)
+			if err != nil {
+				return nil, fmt.Errorf("invalid block number format: %v", err)
+			}
+			return n.getHistoricalState(uint32(blockNum))
+		}
+
+		return nil, fmt.Errorf("invalid block number format: %s", blockNumberStr)
+	}
+}
+
+// getHistoricalState reconstructs StateDB from a block's state root
+func (n *NodeContent) getHistoricalState(blockNumber uint32) (*statedb.StateDB, error) {
+	// Read block metadata to get state root
+	serviceID := uint32(n.GetChainId())
+	evmBlock, err := n.statedb.ReadBlockByNumber(serviceID, blockNumber)
+	if err != nil {
+		log.Warn(log.Node, "Failed to read block metadata, using current state",
+			"blockNumber", blockNumber, "error", err)
+		return n.statedb, nil
+	}
+
+	storage, err := n.GetStorage()
+	if err != nil {
+		log.Warn(log.Node, "Failed to get storage for historical state, using current state",
+			"blockNumber", blockNumber, "error", err)
+		return n.statedb, nil
+	}
+	// Reconstruct StateDB from the block's state root
+	fmt.Printf("Reconstructing historical state for block %d with state root %s\n", blockNumber, evmBlock.StateRoot.Hex())
+	historicalState, err := statedb.NewStateDBFromStateRoot(evmBlock.StateRoot, storage)
+	// DumpStateDBKeyValues(historicalState, "Recovered historicalState", n.id, true)
+	if err != nil {
+		log.Warn(log.Node, "Failed to reconstruct historical state, using current state",
+			"blockNumber", blockNumber, "stateRoot", evmBlock.StateRoot.Hex(), "error", err)
+		return n.statedb, nil
+	}
+
+	return historicalState, nil
 }

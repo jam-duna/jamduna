@@ -482,10 +482,6 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		FallbackBufferTime := 10
 		safrole(jceManager)
 		waitForTermination(tNode, "fallback", FallbackEpochLen, FallbackBufferTime, t)
-	case "evm":
-		EvmTest(t, bNode, testServices, "transfers")
-		//EvmTest(t, bNode, testServices, "fib")
-		time.Sleep(3600 * time.Second)
 	case "algo":
 		algo(bNode, testServices, targetN)
 	case "auth_copy":

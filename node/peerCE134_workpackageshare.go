@@ -477,7 +477,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	n.telemetryClient.ExtrinsicDataReceived(eventID)
 
 	// Since the bundle is not trusted, do a VerifyBundle first
-	verified, err := n.VerifyBundle(bundle, received_segmentRootLookup, eventID)
+	verified, err := n.statedb.VerifyBundle(bundle, received_segmentRootLookup, eventID)
 	if !verified {
 		log.Warn(log.Node, "VerifyBundle failure", "node", n.id, "verified", verified)
 		// TODO: reconstruct the segments
@@ -493,19 +493,13 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	default:
 	}
 
-	workReport, _, pvmElapsed, bundleSnapshot, err := n.executeWorkPackageBundle(wpCoreIndex, *bundle, received_segmentRootLookup, n.statedb.GetTimeslot(), false, eventID)
+	workReport, err := n.executeWorkPackageBundle(wpCoreIndex, *bundle, received_segmentRootLookup, n.statedb.GetTimeslot(), false, eventID)
 	if err != nil {
-		log.Warn(log.Node, "onWorkPackageShare: executeWorkPackageBundle", "node", n.id, "err", err, "pvmElapsed", pvmElapsed)
+		log.Warn(log.Node, "onWorkPackageShare: executeWorkPackageBundle", "node", n.id, "err", err)
 		// Telemetry: Work package failed (event 92)
 		n.telemetryClient.WorkPackageFailed(eventID, err.Error())
 		return fmt.Errorf("onWorkPackageShare: executeWorkPackageBundle: %w", err)
 	}
-	if bundleSnapshot != nil && isWriteBundleFollower {
-		// packageHash_coreIndex_slot_guarantor_follower
-		desc := fmt.Sprintf("%s_%d_%d_%s", bundleSnapshot.Bundle.WorkPackage.Hash(), bundleSnapshot.CoreIndex, bundleSnapshot.Slot, "guarantor_follower")
-		n.writeLogWithDescription(bundleSnapshot, bundleSnapshot.Slot, desc, false)
-	}
-
 	select {
 	case n.workReportsCh <- workReport:
 		// successfully sent

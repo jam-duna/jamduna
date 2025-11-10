@@ -989,10 +989,9 @@ impl MajikBackend {
                 };
 
                 log_debug(&format!(
-                    "    📦 ObjectCandidateWrite: kind={}, payload_len={}, actual_payload_len={}",
+                    "    📦 ObjectCandidateWrite:object_id={}  kind={}",
+                    format_object_id(&intent.effect.object_id),
                     intent.effect.ref_info.object_kind,
-                    intent.effect.ref_info.payload_length,
-                    payload.len()
                 ));
 
                 ObjectCandidateWrite {

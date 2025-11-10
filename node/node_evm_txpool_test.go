@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/statedb"
 	ethereumCommon "github.com/ethereum/go-ethereum/common"
 	ethereumTypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -26,20 +27,20 @@ func TestTxPoolBasicOperations(t *testing.T) {
 		t.Errorf("Expected empty pool, got pending: %d, queued: %d", stats.PendingCount, stats.QueuedCount)
 	}
 
-	// Create a real USDM transfer transaction: issuerAddress sends 1000 USDM to target
+	// Create a real USDM transfer transaction: statedb.IssuerAddress sends 1000 USDM to target
 	amount := new(big.Int).Mul(big.NewInt(1000), big.NewInt(1e18)) // 1000 USDM
 	gasPrice := big.NewInt(1_000_000_000)                          // 1 Gwei
 	gasLimit := uint64(100_000)
 
 	targetAddr := common.HexToAddress(targetAddressHex)
-	tx, _, _, err := createSignedUSDMTransfer(issuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, jamChainID)
+	tx, _, _, err := statedb.CreateSignedUSDMTransfer(statedb.IssuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, statedb.JamChainID)
 	if err != nil {
 		t.Fatalf("Failed to create signed transaction: %v", err)
 	}
 
 	// Verify sender is the issuer address
-	if tx.From != issuerAddress {
-		t.Errorf("Expected sender %s, got %s", issuerAddress.String(), tx.From.String())
+	if tx.From != statedb.IssuerAddress {
+		t.Errorf("Expected sender %s, got %s", statedb.IssuerAddress.String(), tx.From.String())
 	}
 
 	// Add transaction to pool
@@ -91,7 +92,7 @@ func TestTxPoolValidation(t *testing.T) {
 	gasLimit := uint64(100_000)
 
 	targetAddr := common.HexToAddress(targetAddressHex)
-	tx, _, _, err := createSignedUSDMTransfer(issuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, jamChainID)
+	tx, _, _, err := statedb.CreateSignedUSDMTransfer(statedb.IssuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, statedb.JamChainID)
 	if err != nil {
 		t.Fatalf("Failed to create signed transaction: %v", err)
 	}
@@ -121,7 +122,7 @@ func TestParseRawTransaction(t *testing.T) {
 	gasLimit := uint64(100_000)
 
 	targetAddr := common.HexToAddress(targetAddressHex)
-	tx, rawTxBytes, _, err := createSignedUSDMTransfer(issuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, jamChainID)
+	tx, rawTxBytes, _, err := statedb.CreateSignedUSDMTransfer(statedb.IssuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, statedb.JamChainID)
 	if err != nil {
 		t.Fatalf("Failed to create signed transaction: %v", err)
 	}
@@ -140,12 +141,12 @@ func TestParseRawTransaction(t *testing.T) {
 	}
 
 	// Verify sender was already recovered
-	if tx.From != issuerAddress {
-		t.Errorf("Expected sender %s, got %s", issuerAddress.String(), tx.From.String())
+	if tx.From != statedb.IssuerAddress {
+		t.Errorf("Expected sender %s, got %s", statedb.IssuerAddress.String(), tx.From.String())
 	}
 
 	// Test parsing from raw bytes
-	tx2, err := ParseRawTransaction(rawTxBytes)
+	tx2, err := statedb.ParseRawTransaction(rawTxBytes)
 	if err != nil {
 		t.Fatalf("Failed to parse transaction from bytes: %v", err)
 	}
@@ -156,17 +157,17 @@ func TestParseRawTransaction(t *testing.T) {
 		t.Fatalf("Failed to recover sender: %v", err)
 	}
 
-	if sender != issuerAddress {
-		t.Errorf("Expected sender %s, got %s", issuerAddress.String(), sender.String())
+	if sender != statedb.IssuerAddress {
+		t.Errorf("Expected sender %s, got %s", statedb.IssuerAddress.String(), sender.String())
 	}
 
 	// Verify transaction is to USDM contract
-	if tx.To == nil || *tx.To != usdmAddress {
-		t.Errorf("Expected transaction to USDM contract %s", usdmAddress.String())
+	if tx.To == nil || *tx.To != statedb.UsdmAddress {
+		t.Errorf("Expected transaction to USDM contract %s", statedb.UsdmAddress.String())
 	}
 
 	// Test with invalid bytes
-	_, err = ParseRawTransaction([]byte{0x01, 0x02, 0x03})
+	_, err = statedb.ParseRawTransaction([]byte{0x01, 0x02, 0x03})
 	if err == nil {
 		t.Errorf("Expected error for invalid RLP")
 	}
@@ -184,7 +185,7 @@ func TestTxPoolCleanup(t *testing.T) {
 	gasLimit := uint64(100_000)
 
 	targetAddr := common.HexToAddress(targetAddressHex)
-	tx, _, _, err := createSignedUSDMTransfer(issuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, jamChainID)
+	tx, _, _, err := statedb.CreateSignedUSDMTransfer(statedb.IssuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, statedb.JamChainID)
 	if err != nil {
 		t.Fatalf("Failed to create signed transaction: %v", err)
 	}
@@ -207,7 +208,7 @@ func TestTxPoolCleanup(t *testing.T) {
 // TestEIP1559Transaction verifies that EIP-1559 typed transactions are properly handled
 func TestEIP1559Transaction(t *testing.T) {
 	// Parse private key
-	privateKey, err := crypto.HexToECDSA(issuerPrivateKeyHex)
+	privateKey, err := crypto.HexToECDSA(statedb.IssuerPrivateKeyHex)
 	if err != nil {
 		t.Fatalf("Failed to parse private key: %v", err)
 	}
@@ -223,7 +224,7 @@ func TestEIP1559Transaction(t *testing.T) {
 	copy(calldata[36:68], amountBytes)
 
 	// Create EIP-1559 transaction (type 2)
-	chainID := big.NewInt(int64(jamChainID))
+	chainID := big.NewInt(int64(statedb.JamChainID))
 	gasTipCap := big.NewInt(2_000_000_000)  // 2 Gwei
 	gasFeeCap := big.NewInt(10_000_000_000) // 10 Gwei
 
@@ -233,7 +234,7 @@ func TestEIP1559Transaction(t *testing.T) {
 		GasTipCap: gasTipCap,
 		GasFeeCap: gasFeeCap,
 		Gas:       100_000,
-		To:        (*ethereumCommon.Address)(&usdmAddress),
+		To:        (*ethereumCommon.Address)(&statedb.UsdmAddress),
 		Value:     big.NewInt(0),
 		Data:      calldata,
 	})
@@ -252,17 +253,17 @@ func TestEIP1559Transaction(t *testing.T) {
 	}
 
 	// Parse the raw transaction
-	tx, err := ParseRawTransaction(rlpBytes)
+	tx, err := statedb.ParseRawTransaction(rlpBytes)
 	if err != nil {
 		t.Fatalf("Failed to parse EIP-1559 transaction: %v", err)
 	}
 
 	// Verify transaction type is stored
-	if tx.inner == nil {
+	if tx.Inner == nil {
 		t.Fatal("Inner transaction not stored")
 	}
-	if tx.inner.Type() != ethereumTypes.DynamicFeeTxType {
-		t.Errorf("Expected transaction type %d, got %d", ethereumTypes.DynamicFeeTxType, tx.inner.Type())
+	if tx.Inner.Type() != ethereumTypes.DynamicFeeTxType {
+		t.Errorf("Expected transaction type %d, got %d", ethereumTypes.DynamicFeeTxType, tx.Inner.Type())
 	}
 
 	// Verify signature recovery works for EIP-1559
@@ -271,7 +272,7 @@ func TestEIP1559Transaction(t *testing.T) {
 		t.Fatalf("Failed to recover sender from EIP-1559 transaction: %v", err)
 	}
 
-	expectedSender := issuerAddress
+	expectedSender := statedb.IssuerAddress
 	if sender != expectedSender {
 		t.Errorf("Sender mismatch: expected %s, got %s", expectedSender.String(), sender.String())
 	}
@@ -282,7 +283,7 @@ func TestEIP1559Transaction(t *testing.T) {
 // TestEIP2930Transaction verifies that EIP-2930 access list transactions are properly handled
 func TestEIP2930Transaction(t *testing.T) {
 	// Parse private key
-	privateKey, err := crypto.HexToECDSA(issuerPrivateKeyHex)
+	privateKey, err := crypto.HexToECDSA(statedb.IssuerPrivateKeyHex)
 	if err != nil {
 		t.Fatalf("Failed to parse private key: %v", err)
 	}
@@ -298,7 +299,7 @@ func TestEIP2930Transaction(t *testing.T) {
 	copy(calldata[36:68], amountBytes)
 
 	// Create EIP-2930 transaction (type 1) with access list
-	chainID := big.NewInt(int64(jamChainID))
+	chainID := big.NewInt(int64(statedb.JamChainID))
 	gasPrice := big.NewInt(5_000_000_000) // 5 Gwei
 
 	ethTx := ethereumTypes.NewTx(&ethereumTypes.AccessListTx{
@@ -306,11 +307,11 @@ func TestEIP2930Transaction(t *testing.T) {
 		Nonce:    0,
 		GasPrice: gasPrice,
 		Gas:      100_000,
-		To:       (*ethereumCommon.Address)(&usdmAddress),
+		To:       (*ethereumCommon.Address)(&statedb.UsdmAddress),
 		Value:    big.NewInt(0),
 		Data:     calldata,
 		AccessList: ethereumTypes.AccessList{
-			{Address: ethereumCommon.Address(usdmAddress), StorageKeys: []ethereumCommon.Hash{}},
+			{Address: ethereumCommon.Address(statedb.UsdmAddress), StorageKeys: []ethereumCommon.Hash{}},
 		},
 	})
 
@@ -328,17 +329,17 @@ func TestEIP2930Transaction(t *testing.T) {
 	}
 
 	// Parse the raw transaction
-	tx, err := ParseRawTransaction(rlpBytes)
+	tx, err := statedb.ParseRawTransaction(rlpBytes)
 	if err != nil {
 		t.Fatalf("Failed to parse EIP-2930 transaction: %v", err)
 	}
 
 	// Verify transaction type is stored
-	if tx.inner == nil {
+	if tx.Inner == nil {
 		t.Fatal("Inner transaction not stored")
 	}
-	if tx.inner.Type() != ethereumTypes.AccessListTxType {
-		t.Errorf("Expected transaction type %d, got %d", ethereumTypes.AccessListTxType, tx.inner.Type())
+	if tx.Inner.Type() != ethereumTypes.AccessListTxType {
+		t.Errorf("Expected transaction type %d, got %d", ethereumTypes.AccessListTxType, tx.Inner.Type())
 	}
 
 	// Verify signature recovery works for EIP-2930
@@ -347,7 +348,7 @@ func TestEIP2930Transaction(t *testing.T) {
 		t.Fatalf("Failed to recover sender from EIP-2930 transaction: %v", err)
 	}
 
-	expectedSender := issuerAddress
+	expectedSender := statedb.IssuerAddress
 	if sender != expectedSender {
 		t.Errorf("Sender mismatch: expected %s, got %s", expectedSender.String(), sender.String())
 	}

@@ -8,7 +8,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
-	ethereumTypes "github.com/ethereum/go-ethereum/core/types"
+	"github.com/colorfulnotion/jam/statedb"
 )
 
 // TxPoolStatus represents the status of a transaction in the pool
@@ -23,10 +23,10 @@ const (
 
 // TxPoolEntry represents a transaction entry in the pool
 type TxPoolEntry struct {
-	Tx       *EthereumTransaction `json:"transaction"`
-	Status   TxPoolStatus         `json:"status"`
-	AddedAt  time.Time            `json:"addedAt"`
-	Attempts int                  `json:"attempts"`
+	Tx       *statedb.EthereumTransaction `json:"transaction"`
+	Status   TxPoolStatus                 `json:"status"`
+	AddedAt  time.Time                    `json:"addedAt"`
+	Attempts int                          `json:"attempts"`
 }
 
 // TxPool manages pending Ethereum transactions for the guarantor
@@ -88,7 +88,7 @@ func NewTxPool() *TxPool {
 }
 
 // AddTransaction adds a new transaction to the pool after validation
-func (pool *TxPool) AddTransaction(tx *EthereumTransaction) error {
+func (pool *TxPool) AddTransaction(tx *statedb.EthereumTransaction) error {
 	pool.mutex.Lock()
 	defer pool.mutex.Unlock()
 
@@ -127,7 +127,7 @@ func (pool *TxPool) AddTransaction(tx *EthereumTransaction) error {
 }
 
 // GetTransaction retrieves a transaction by hash
-func (pool *TxPool) GetTransaction(hash common.Hash) (*EthereumTransaction, bool) {
+func (pool *TxPool) GetTransaction(hash common.Hash) (*statedb.EthereumTransaction, bool) {
 	pool.mutex.RLock()
 	defer pool.mutex.RUnlock()
 
@@ -141,11 +141,11 @@ func (pool *TxPool) GetTransaction(hash common.Hash) (*EthereumTransaction, bool
 }
 
 // GetPendingTransactions returns all pending transactions
-func (pool *TxPool) GetPendingTransactions() []*EthereumTransaction {
+func (pool *TxPool) GetPendingTransactions() []*statedb.EthereumTransaction {
 	pool.mutex.RLock()
 	defer pool.mutex.RUnlock()
 
-	txs := make([]*EthereumTransaction, 0, len(pool.pending))
+	txs := make([]*statedb.EthereumTransaction, 0, len(pool.pending))
 	for _, entry := range pool.pending {
 		txs = append(txs, entry.Tx)
 	}
@@ -223,8 +223,28 @@ func (pool *TxPool) CleanupExpiredTransactions() {
 	}
 }
 
+// GetTxPoolContent returns the pending and queued transaction hashes
+func (pool *TxPool) GetTxPoolContent() (pending []string, queued []string) {
+	pool.mutex.RLock()
+	defer pool.mutex.RUnlock()
+
+	// Get pending transactions
+	pending = make([]string, 0, len(pool.pending))
+	for hash := range pool.pending {
+		pending = append(pending, hash.String())
+	}
+
+	// Get queued transactions
+	queued = make([]string, 0, len(pool.queued))
+	for hash := range pool.queued {
+		queued = append(queued, hash.String())
+	}
+
+	return pending, queued
+}
+
 // validateTransaction performs basic transaction validation
-func (pool *TxPool) validateTransaction(tx *EthereumTransaction) error {
+func (pool *TxPool) validateTransaction(tx *statedb.EthereumTransaction) error {
 	// Check transaction size
 	if tx.Size > pool.config.MaxTxSize {
 		return fmt.Errorf("transaction size %d exceeds maximum %d", tx.Size, pool.config.MaxTxSize)
@@ -249,7 +269,7 @@ func (pool *TxPool) validateTransaction(tx *EthereumTransaction) error {
 }
 
 // shouldQueue determines if a transaction should be queued based on nonce
-func (pool *TxPool) shouldQueue(tx *EthereumTransaction) bool {
+func (pool *TxPool) shouldQueue(tx *statedb.EthereumTransaction) bool {
 	// TODO: Implement proper nonce checking against current state
 	// For now, assume all transactions should go to pending
 	return false
@@ -317,26 +337,4 @@ func (pool *TxPool) removeFromQueued(entry *TxPoolEntry) {
 			delete(pool.queuedBySender, tx.From)
 		}
 	}
-}
-
-// EthereumTransaction represents a parsed Ethereum transaction
-type EthereumTransaction struct {
-	Hash     common.Hash     `json:"hash"`
-	From     common.Address  `json:"from"`
-	To       *common.Address `json:"to"`
-	Value    *big.Int        `json:"value"`
-	Gas      uint64          `json:"gas"`
-	GasPrice *big.Int        `json:"gasPrice"`
-	Nonce    uint64          `json:"nonce"`
-	Data     []byte          `json:"data"`
-	V        *big.Int        `json:"v"`
-	R        *big.Int        `json:"r"`
-	S        *big.Int        `json:"s"`
-
-	// JAM-specific fields
-	ReceivedAt time.Time `json:"receivedAt"`
-	Size       uint64    `json:"size"`
-
-	// Store the original go-ethereum transaction for proper type handling
-	inner *ethereumTypes.Transaction `json:"-"`
 }

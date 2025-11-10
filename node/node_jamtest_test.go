@@ -14,7 +14,6 @@ func TestSafrole(t *testing.T) {
 }
 
 func TestEVM(t *testing.T) {
-	initPProf(t)
 	targetN := TargetedN_EVM
 	if *targetNum > 0 {
 		targetN = *targetNum
@@ -23,8 +22,6 @@ func TestEVM(t *testing.T) {
 }
 
 func TestAlgo(t *testing.T) {
-
-	initPProf(t)
 	targetN := TargetedN_EVM
 	if *targetNum > 0 {
 		targetN = *targetNum
@@ -33,7 +30,6 @@ func TestAlgo(t *testing.T) {
 }
 
 func TestAuthCopy(t *testing.T) {
-	initPProf(t)
 	targetN := TargetedN_EVM
 	if *targetNum > 0 {
 		targetN = *targetNum

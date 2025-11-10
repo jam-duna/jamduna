@@ -21,7 +21,7 @@ pub mod block;
 #[path = "refiner.rs"]
 mod refiner;
 #[path = "accumulator.rs"]
-mod accumulator;
+pub mod accumulator;
 #[path = "backend.rs"]
 mod backend;
 #[path = "state.rs"]

@@ -362,11 +362,11 @@ func MakeAvailabilitySpecifier(packageBundle types.WorkPackageBundle, exportSegm
 
 	// Build b♣ and s♣
 	bClubStart := time.Now()
-	bClubs := buildBClub(b)
+	bClubs := BuildBClub(b)
 	bClubElapsed := time.Since(bClubStart)
 
 	sClubStart := time.Now()
-	sClubs := buildSClub(exportSegments)
+	sClubs := BuildSClub(exportSegments)
 	sClubElapsed := time.Since(sClubStart)
 	fmt.Printf("%sGen b♣: %v \nGen s♣: %v%s\n", common.ColorGray, bClubElapsed, sClubElapsed, common.ColorReset)
 
@@ -375,7 +375,7 @@ func MakeAvailabilitySpecifier(packageBundle types.WorkPackageBundle, exportSegm
 	exportedSegmentRoot := exportedSegmentTree.RootHash()
 
 	// Generate ErasureRoot
-	erasureRoot := generateErasureRoot(bClubs, sClubs)
+	erasureRoot := GenerateErasureRoot(bClubs, sClubs)
 
 	spec := &types.AvailabilitySpecifier{
 		WorkPackageHash:       packageBundle.WorkPackage.Hash(),
@@ -388,7 +388,7 @@ func MakeAvailabilitySpecifier(packageBundle types.WorkPackageBundle, exportSegm
 	return spec
 }
 
-func buildBClub(b []byte) []common.Hash {
+func BuildBClub(b []byte) []common.Hash {
 	// Padding b to the length of W_G
 	paddedB := common.PadToMultipleOfN(b, types.ECPieceSize)
 
@@ -410,7 +410,7 @@ func buildBClub(b []byte) []common.Hash {
 	return bClubs
 }
 
-func buildSClub(segments [][]byte) []common.Hash {
+func BuildSClub(segments [][]byte) []common.Hash {
 	if len(segments) == 0 {
 		return make([]common.Hash, types.TotalValidators)
 	}
@@ -446,7 +446,7 @@ func buildSClub(segments [][]byte) []common.Hash {
 	return sClubs
 }
 
-func generateErasureRoot(bClubs []common.Hash, sClubs []common.Hash) common.Hash {
+func GenerateErasureRoot(bClubs []common.Hash, sClubs []common.Hash) common.Hash {
 	erasureTree := generateErasureTree(bClubs, sClubs)
 	return erasureTree.RootHash()
 }

@@ -111,6 +111,9 @@ func (T TicketsOrKeys) Decode(data []byte) (interface{}, uint32) {
 	if err != nil {
 		return TicketsOrKeys{}, 0
 	}
+	if decoded == nil {
+		return TicketsOrKeys{}, 0
+	}
 	ticketsOrKeys = decoded.(CTicketsOrKeys).CT2T()
 	return ticketsOrKeys, length
 }

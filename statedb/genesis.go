@@ -131,6 +131,7 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 			ServiceCode: AlgoServiceCode,
 			FileName:    AlgoServiceFile,
 			ServiceName: "algo",
+			Storage:     storage,
 		},
 		{
 			ServiceCode: AuthCopyServiceCode,

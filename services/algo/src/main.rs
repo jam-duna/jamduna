@@ -23,13 +23,56 @@ static ALLOCATOR: SimpleAlloc<SIZE1> = SimpleAlloc::new();
 
 use core::slice;
 use core::sync::atomic::{AtomicU64, Ordering};
-use utils::functions::{log_info, log_error, parse_accumulate_args, parse_refine_args};
+use utils::functions::{log_info, log_error, parse_accumulate_args, parse_refine_args, fetch_accumulate_inputs};
 use utils::helpers::{leak_output, empty_output};
 use utils::host_functions::gas;
 use utils::effects::{ExecutionEffects, WriteIntent, WriteEffectEntry};
 use utils::objects::ObjectRef;
 use utils::hash_functions::blake2b_hash;
-use evm_service::{EvmBlockPayload, deserialize_execution_effects, format_object_id, serialize_execution_effects};
+use evm_service::{accumulator, serialize_execution_effects, format_object_id};
+
+// Log structure matching EVM Log format
+#[derive(Clone)]
+pub struct Log {
+    pub address: [u8; 20],     // H160
+    pub topics: Vec<[u8; 32]>, // Vec<H256>
+    pub data: Vec<u8>,         // Vec<u8>
+}
+
+/// Serialize logs to binary format matching EVM receipt format
+/// Format: [log_count:u16][Log...][Log...]
+/// Each Log: [address:20B][topic_count:u8][topics:32B*N][data_len:u32][data:bytes]
+fn serialize_logs(logs: &[Log]) -> Vec<u8> {
+    let mut result = Vec::new();
+
+    // Log count (2 bytes LE)
+    let count = logs.len() as u16;
+    result.extend_from_slice(&count.to_le_bytes());
+
+    // Serialize each log
+    for log in logs {
+        // Address (20 bytes)
+        result.extend_from_slice(&log.address);
+
+        // Topic count (1 byte)
+        let topic_count = log.topics.len() as u8;
+        result.push(topic_count);
+
+        // Topics (32 bytes each)
+        for topic in &log.topics {
+            result.extend_from_slice(topic);
+        }
+
+        // Data length (4 bytes LE)
+        let data_len = log.data.len() as u32;
+        result.extend_from_slice(&data_len.to_le_bytes());
+
+        // Data
+        result.extend_from_slice(&log.data);
+    }
+
+    result
+}
 
 #[cfg(target_arch = "riscv32")]
 use polkavm_derive::sbrk as polkavm_sbrk;
@@ -1362,14 +1405,43 @@ fn motzkin(n: usize) -> u64 {
 fn lcm(a: u64, b: u64) -> u64 {
     a / gcd(a, b) * b
 }
-fn run_program(idx: u8) -> (u64, Vec<u64>) {
+/// Helper to create a u256 topic from a u64 value (LE encoding in first 8 bytes)
+fn u64_to_topic(val: u64) -> [u8; 32] {
+    let mut topic = [0u8; 32];
+    topic[0..8].copy_from_slice(&val.to_le_bytes());
+    topic
+}
+
+/// Helper to convert program results into a log
+/// Creates log with topics: [program_id, input1, input2, ...] and data containing outputs
+fn results_to_log(program_id: u8, inputs: &[u64], outputs: &[u64]) -> Log {
+    let mut topics = vec![u64_to_topic(program_id as u64)];
+    for &input in inputs {
+        topics.push(u64_to_topic(input));
+    }
+
+    // Put outputs in log data (serialized as LE u64s)
+    let mut data = Vec::new();
+    for &output in outputs {
+        data.extend_from_slice(&output.to_le_bytes());
+    }
+
+    Log {
+        address: [0u8; 20],
+        topics,
+        data,
+    }
+}
+
+fn run_program(idx: u8) -> (u64, Vec<Log>) {
     let gas_start = unsafe { gas() };
 
     let result = match idx {
         0 => {
+            // Tribonacci
             let n = (get_random_number() % 30) as u32;
             let res = tribonacci(n);
-            vec![res]
+            vec![results_to_log(0, &[n as u64], &[res])]
         }
 
         1 => {
@@ -1377,13 +1449,13 @@ fn run_program(idx: u8) -> (u64, Vec<u64>) {
             let n = (get_random_number() % 20) + 1;
             let k = (get_random_number() % n) + 1;
             let res = narayana(n, k);
-            vec![res]
+            vec![results_to_log(1, &[n, k], &[res])]
         }
         2 => {
             // Motzkin Numbers
             let n = (get_random_number() % 20) as usize;
             let res = motzkin(n);
-            vec![res]
+            vec![results_to_log(2, &[n as u64], &[res])]
         }
 
         3 => {
@@ -1391,120 +1463,113 @@ fn run_program(idx: u8) -> (u64, Vec<u64>) {
             let p = ((get_random_number() % 1000) | 1) + 2;
             let a = (get_random_number() % p) as i64;
             let res = legendre_symbol(a, p as i64);
-            vec![res as u64]
+            vec![results_to_log(3, &[a as u64, p], &[res as u64])]
         }
         4 => {
             // Tonelli-Shanks Algorithm
             let p = ((get_random_number() % 1000) | 1) + 2;
             let n = get_random_number() % p;
-            match tonelli_shanks(n, p) {
-                Some(r) => vec![r],
-                None => vec![0],
-            }
+            let res = match tonelli_shanks(n, p) {
+                Some(r) => r,
+                None => 0,
+            };
+            vec![results_to_log(4, &[n, p], &[res])]
         }
         5 => {
             // Miller-Rabin Primality Test
             let n = ((get_random_number() % 10_000) | 1) + 2;
             let res = is_prime_miller(n);
-            vec![res as u64]
+            vec![results_to_log(5, &[n], &[res as u64])]
         }
         6 => {
             // Prime Factorization
             let n = (get_random_number() % 10_000) + 2;
             let factors = prime_factors(n);
-            factors
+            vec![results_to_log(6, &[n], &factors)]
         }
         7 => {
             // Primitive Root
             let p = next_prime((get_random_number() % 100) + 2);
             let res = primitive_root(p);
-            vec![res]
+            vec![results_to_log(7, &[p], &[res])]
         }
         8 => {
             // Fibonacci pair
             let n = get_random_number() % 50;
             let (f1, f2) = fib(n);
-            vec![f1, f2]
+            vec![results_to_log(8, &[n], &[f1, f2])]
         }
         9 => {
             // Catalan Number
             let n = get_random_number() % 20;
             let res = catalan(n);
-            vec![res]
+            vec![results_to_log(9, &[n], &[res])]
         }
         10 => {
             // Bell Number
             let n = (get_random_number() % 15) as usize;
             let res = bell(n);
-            vec![res]
+            vec![results_to_log(10, &[n as u64], &[res])]
         }
         11 => {
             // Derangement
             let n = (get_random_number() % 20) as u32;
             let res = derangement(n);
-            vec![res]
+            vec![results_to_log(11, &[n as u64], &[res])]
         }
         12 => {
             // Eulerian Number
             let n = (get_random_number() % 12) as usize + 1;
             let k = (get_random_number() % n as u64) as usize;
             let res = eulerian(n, k);
-            vec![res]
+            vec![results_to_log(12, &[n as u64, k as u64], &[res])]
         }
         13 => {
             // Partition Count
             let n = (get_random_number() % 50) as usize;
             let res = partition_count(n);
-            vec![res]
+            vec![results_to_log(13, &[n as u64], &[res])]
         }
         14 => {
             // Perfect Power Test
             let n = (get_random_number() % 100_000) + 2;
-            match perfect_power(n) {
-                Some((base, exp)) => {
-                    vec![base, exp as u64]
-                }
-                None => {
-                    vec![n, 1]
-                }
-            }
+            let (base, exp) = match perfect_power(n) {
+                Some((b, e)) => (b, e as u64),
+                None => (n, 1),
+            };
+            vec![results_to_log(14, &[n], &[base, exp])]
         }
         15 => {
-            // Binomial Coefficient
             let n = get_random_number() % 30;
             let k = get_random_number() % (n + 1);
             let res = binomial(n, k);
-            vec![res]
+            vec![results_to_log(15, &[n, k], &[res])]
         }
         16 => {
-            // Extended GCD
             let a = (get_random_number() % 1000) as i64 + 1;
             let b = (get_random_number() % 1000) as i64 + 1;
             let (g, x, y) = extended_gcd(a, b);
-            vec![g as u64, x as u64, y as u64]
+            vec![results_to_log(16, &[a as u64, b as u64], &[g as u64, x as u64, y as u64])]
         }
         17 => {
-            // Chinese Remainder Theorem (CRT2)
             let a1 = (get_random_number() % 100) as i64;
             let n1 = ((get_random_number() % 98) + 2) as i64;
             let a2 = (get_random_number() % 100) as i64;
             let n2 = ((get_random_number() % 98) + 2) as i64;
-            if gcd(n1 as u64, n2 as u64) == 1 {
-                let res = crt2(a1, n1, a2, n2);
-                vec![res as u64]
+            let res = if gcd(n1 as u64, n2 as u64) == 1 {
+                crt2(a1, n1, a2, n2) as u64
             } else {
-                vec![0]
-            }
+                0
+            };
+            vec![results_to_log(17, &[a1 as u64, n1 as u64, a2 as u64, n2 as u64], &[res])]
         }
         18 => {
-            // LCM (Least Common Multiple)
             let a = (get_random_number() % 10_000) + 1;
             let b = (get_random_number() % 10_000) + 1;
             let res = lcm(a, b);
-            vec![res]
+            vec![results_to_log(18, &[a, b], &[res])]
         }
         19 => {
-            // Knapsack 0/1
             let n = (get_random_number() % 8) as usize + 3;
             let mut weights = Vec::new();
             let mut values = Vec::new();
@@ -1514,78 +1579,69 @@ fn run_program(idx: u8) -> (u64, Vec<u64>) {
             }
             let cap = (get_random_number() % 50 + 20) as usize;
             let res = knapsack(&weights, &values, cap);
-            vec![res]
+            vec![results_to_log(19, &[n as u64, cap as u64], &[res])]
         }
         20 => {
-            // LCS (Longest Common Subsequence)
             let len1 = (get_random_number() % 10 + 5) as usize;
             let len2 = (get_random_number() % 10 + 5) as usize;
             let mut a = Vec::new();
             let mut b = Vec::new();
             for _ in 0..len1 {
-                a.push((get_random_number() % 26 + 97) as u8); // a-z
+                a.push((get_random_number() % 26 + 97) as u8);
             }
             for _ in 0..len2 {
                 b.push((get_random_number() % 26 + 97) as u8);
             }
             let res = lcs(&a, &b);
-            vec![res as u64]
+            vec![results_to_log(20, &[len1 as u64, len2 as u64], &[res as u64])]
         }
         21 => {
-            // LIS (Longest Increasing Subsequence)
             let len = (get_random_number() % 15 + 5) as usize;
             let mut seq = Vec::new();
             for _ in 0..len {
                 seq.push(get_random_number() % 100);
             }
             let res = lis_length(&seq);
-            vec![res as u64]
+            vec![results_to_log(21, &[len as u64], &[res as u64])]
         }
         22 => {
-            // Levenshtein Distance (Edit Distance)
             let len1 = (get_random_number() % 10 + 5) as usize;
             let len2 = (get_random_number() % 10 + 5) as usize;
             let mut a = Vec::new();
             let mut b = Vec::new();
             for _ in 0..len1 {
-                a.push((get_random_number() % 26 + 97) as u8); // a-z
+                a.push((get_random_number() % 26 + 97) as u8);
             }
             for _ in 0..len2 {
                 b.push((get_random_number() % 26 + 97) as u8);
             }
             let res = levenshtein(&a, &b);
-            vec![res as u64]
+            vec![results_to_log(22, &[len1 as u64, len2 as u64], &[res as u64])]
         }
         23 => {
-            // Lucas–Lehmer Test
             let p = (get_random_number() % 50) + 2;
             let res = lucas_lehmer(p);
-            vec![res as u64]
+            vec![results_to_log(23, &[p], &[res as u64])]
         }
         24 => {
-            // Lucas Sequence
             let n = get_random_number() % 20;
             let P = 1;
             let Q = 1;
             let m = (get_random_number() % 100) as i64 + 1;
             let (U, V) = lucas_sequence(n, P, Q, m);
-            vec![U as u64, V as u64]
+            vec![results_to_log(24, &[n, P as u64, Q as u64, m as u64], &[U as u64, V as u64])]
         }
-
         25 => {
-            // Baillie–PSW Primality Test
             let n = ((get_random_number() % 10_000) | 1) + 2;
             let res = baillie_psw(n);
-            vec![res as u64]
+            vec![results_to_log(25, &[n], &[res as u64])]
         }
         26 => {
-            // Newton Integer √
             let n = get_random_number() % 1_000_000;
             let res = newton_sqrt(n);
-            vec![res]
+            vec![results_to_log(26, &[n], &[res])]
         }
         27 => {
-            // Bareiss 3×3 Determinant
             let mut mat = [[0i64; 3]; 3];
             for i in 0..3 {
                 for j in 0..3 {
@@ -1593,32 +1649,29 @@ fn run_program(idx: u8) -> (u64, Vec<u64>) {
                 }
             }
             let res = det_bareiss_3x3(mat);
-            vec![res as u64]
+            vec![results_to_log(27, &[], &[res as u64])]
         }
         28 => {
-            // Smith Normal Form 2×2
             let mat = [
                 [(get_random_number() % 101) as i64 - 50, (get_random_number() % 101) as i64 - 50],
                 [(get_random_number() % 101) as i64 - 50, (get_random_number() % 101) as i64 - 50],
             ];
             let (d1, d2) = smith_normal_form_2x2(mat);
-            vec![d1 as u64, d2 as u64]
+            vec![results_to_log(28, &[], &[d1 as u64, d2 as u64])]
         }
         29 => {
-            // Hermite Normal Form 2×2
             let mat = [
                 [(get_random_number() % 101) as i64 - 50, (get_random_number() % 101) as i64 - 50],
                 [(get_random_number() % 101) as i64 - 50, (get_random_number() % 101) as i64 - 50],
             ];
             let h = hermite_normal_form_2x2(mat);
-            vec![h[0][0] as u64, h[0][1] as u64, h[1][0] as u64, h[1][1] as u64]
+            vec![results_to_log(29, &[], &[h[0][0] as u64, h[0][1] as u64, h[1][0] as u64, h[1][1] as u64])]
         }
         30 => {
-            // LLL Reduction in 2D
             let b1 = ((get_random_number() % 101) as i64 - 50, (get_random_number() % 101) as i64 - 50);
             let b2 = ((get_random_number() % 101) as i64 - 50, (get_random_number() % 101) as i64 - 50);
             let (r1, r2) = lll_reduce_2d(b1, b2);
-            vec![r1.0 as u64, r1.1 as u64, r2.0 as u64, r2.1 as u64]
+            vec![results_to_log(30, &[], &[r1.0 as u64, r1.1 as u64, r2.0 as u64, r2.1 as u64])]
         }
 
         31 => {
@@ -1627,7 +1680,7 @@ fn run_program(idx: u8) -> (u64, Vec<u64>) {
             let exp = get_random_number() % 1_000;
             let m = (get_random_number() % 1_000) + 1;
             let res = mod_exp_ladder(base, exp, m);
-            vec![res]
+            vec![results_to_log(idx, &[], &[res])]
         }
 
         32 => {
@@ -1635,14 +1688,14 @@ fn run_program(idx: u8) -> (u64, Vec<u64>) {
             let a = get_random_number() % 1_000_000;
             let b = get_random_number() % 1_000_000;
             let res = stein_gcd(a, b);
-            vec![res]
+            vec![results_to_log(idx, &[], &[res])]
         }
         33 => {
             // Subtraction‑Only GCD
             let a = get_random_number() % 1_000_000;
             let b = get_random_number() % 1_000_000;
             let res = sub_gcd(a, b);
-            vec![res]
+            vec![results_to_log(idx, &[], &[res])]
         }
 
         34 => {
@@ -1650,49 +1703,48 @@ fn run_program(idx: u8) -> (u64, Vec<u64>) {
             let n = (get_random_number() % 1_000_000) + 1;
             let b = (get_random_number() % 9) + 2;
             let res = integer_log_mul(n, b);
-            vec![res as u64]
+            vec![results_to_log(idx, &[], &[res as u64])]
         }
         35 => {
             // Integer Log via Division
             let n = (get_random_number() % 1_000_000) + 1;
             let b = (get_random_number() % 9) + 2;
             let res = integer_log_div(n, b);
-            vec![res as u64]
+            vec![results_to_log(idx, &[], &[res as u64])]
         }
         36 => {
             // Perfect Square Test
             let n = get_random_number() % 1_000_000;
             let res = is_perfect_square(n);
-            vec![res as u64]
+            vec![results_to_log(idx, &[], &[res as u64])]
         }
 
         37 => {
             // Coin Change Count
             let n = (get_random_number() % 100) as usize;
             let res = coin_change_count(n);
-            vec![res]
+            vec![results_to_log(idx, &[], &[res])]
         }
         38 => {
             // Coin Change Min
             let n = (get_random_number() % 100) as usize;
             let res = coin_change_min(n);
-            vec![res as u64]
+            vec![results_to_log(idx, &[], &[res as u64])]
         }
 
         39 => {
-            // Modular Exponentiation & Inverse
             let base = (get_random_number() % 1000) + 1;
             let exp = get_random_number() % 1000;
             let m = (get_random_number() % 999) + 1;
             let me = mod_exp(base, exp, m);
             let inv = mod_inv(base as i64, m as i64);
-            match inv {
+            let outputs = match inv {
                 Some(i) => vec![me, i as u64],
                 None => vec![me],
-            }
+            };
+            vec![results_to_log(idx, &[], &outputs)]
         }
         40 => {
-            // CRT2, Garner & Nth‑Root
             let a1 = (get_random_number() % 100) as i64;
             let n1 = ((get_random_number() % 98) + 2) as i64;
             let a2 = (get_random_number() % 100) as i64;
@@ -1702,7 +1754,6 @@ fn run_program(idx: u8) -> (u64, Vec<u64>) {
                 let crt_res = crt2(a1, n1, a2, n2);
                 results.push(crt_res as u64);
             }
-            // Garner
             let mods = [2, 3, 5];
             let rems = [
                 (get_random_number() % 2) as i64,
@@ -1711,28 +1762,26 @@ fn run_program(idx: u8) -> (u64, Vec<u64>) {
             ];
             let garner_res = garner(&rems, &mods);
             results.push(garner_res as u64);
-            // Nth‑root
             let n = get_random_number() % 1_000_000;
             let k = (get_random_number() % 4) + 2;
             let root_res = integer_nth_root(n, k.try_into().unwrap());
             results.push(root_res);
-            results
+            vec![results_to_log(idx, &[], &results)]
         }
 
         41 => {
-            // Number Theoretic Transform
             let mut poly = [0u64; NTT_N];
             for i in 0..NTT_N {
                 poly[i] = get_random_number() % MOD_NTT;
             }
             let res = ntt(&poly);
-            res.to_vec()
+            vec![results_to_log(idx, &[], &res)]
         }
         42 => {
             // CORDIC Rotation
             let angle = (get_random_number() % 200_001) as i32 - 100_000;
             let (c, s) = cordic(angle);
-            vec![c as u64, s as u64]
+            vec![results_to_log(idx, &[], &[c as u64, s as u64])]
         }
 
         43 => {
@@ -1758,7 +1807,7 @@ fn run_program(idx: u8) -> (u64, Vec<u64>) {
             };
             let mwc_res = mwc.next();
 
-            vec![lcg_res as u64, xor_res, pcg_res as u64, mwc_res as u64]
+            vec![results_to_log(idx, &[], &[lcg_res as u64, xor_res, pcg_res as u64, mwc_res as u64])]
         }
         44 => {
             // CRC32, Adler-32, FNV-1a, Murmur, Jenkins
@@ -1772,13 +1821,13 @@ fn run_program(idx: u8) -> (u64, Vec<u64>) {
             let fnv = fnv1a(&data);
             let murmur = murmur3_finalizer(get_random_number() as u32);
             let jenk = jenkins(&data);
-            vec![crc as u64, adler as u64, fnv as u64, murmur as u64, jenk as u64]
+            vec![results_to_log(idx, &[], &[crc as u64, adler as u64, fnv as u64, murmur as u64, jenk as u64])]
         }
         45 => {
             // Euler's Totient φ(n)
             let n = (get_random_number() % 100_000) + 1;
             let res = phi(n);
-            vec![res]
+            vec![results_to_log(idx, &[], &[res])]
         }
 
         46 => {
@@ -1786,38 +1835,38 @@ fn run_program(idx: u8) -> (u64, Vec<u64>) {
             let n = (get_random_number() % 1_000) as usize + 1;
             let mu = linear_mu(n);
             let res = mu[n];
-            vec![res as u64]
+            vec![results_to_log(idx, &[], &[res as u64])]
         }
         47 => {
             // Sum of Divisors
             let n = (get_random_number() % 100_000) + 1;
             let res = sigma(n);
-            vec![res]
+            vec![results_to_log(idx, &[], &[res])]
         }
         48 => {
             // Divisor Count d(n)
             let n = (get_random_number() % 100_000) + 1;
             let res = divisor_count(n);
-            vec![res]
+            vec![results_to_log(idx, &[], &[res])]
         }
         49 => {
             // Mobius
             let n = (get_random_number() % 100_000) + 1;
             let res = mobius(n);
-            vec![res as u64]
+            vec![results_to_log(idx, &[], &[res as u64])]
         }
         50 => {
             // Dirichlet Convolution (1 * id)
             let n = (get_random_number() % 1_000) + 1;
             let res = dirichlet_convolution(n, |_| 1, |d| d);
-            vec![res]
+            vec![results_to_log(idx, &[], &[res])]
         }
         51 => {
             // Jacobi Symbol (a/n)
             let n = ((get_random_number() % 999) | 1) + 2; // odd ≥3
             let a = (get_random_number() % (n as u64)) as i64;
             let res = jacobi(a.try_into().unwrap(), (n as i64).try_into().unwrap());
-            vec![res as u64]
+            vec![results_to_log(idx, &[], &[res as u64])]
         }
         52 => {
             // Cipolla's Algorithm
@@ -1825,15 +1874,15 @@ fn run_program(idx: u8) -> (u64, Vec<u64>) {
             let n = get_random_number() % p;
             match cipolla(n, p) {
                 Some(r) => {
-                    vec![r]
+                    vec![results_to_log(idx, &[], &[r])]
                 }
                 None => {
-                    vec![idx as u64]
+                    vec![results_to_log(idx, &[], &[idx as u64])]
                 }
             }
         }
         53..=u8::MAX => {
-            vec![idx as u64]
+            vec![results_to_log(idx, &[], &[idx as u64])]
         }
     };
 
@@ -1863,24 +1912,24 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
 
     let mut write_intents = Vec::new();
     let mut total_gas_used = 0u64;
-        let export_count: u16 = 0;
+    let mut export_count: u16 = 0;
 
     for i in 0..pairs {
         let program_id = payload[i * 2];
         let p_id = program_id % 170;
         let count = payload[i * 2 + 1] as u64;
-        let iterations = (count*count as u64).min(100); // Limit to 500 iterations to prevent overflow
+        let iterations = (count*count as u64).min(10); // Limit to 500 iterations to prevent overflow
         log_info(&format!("🔢 refine: pair #{} - program_id={}, count={}, iterations={} (capped)", i, program_id, count, iterations));
         let mut gas_used = 0 as u64;
-        let mut all_results = Vec::new();
-        log_info(&format!("🔁 refine: starting {} iterations for program_id={}", iterations, p_id));
+        let mut all_logs = Vec::new();
         for iter in 0..iterations {
-            if iter % 100 == 0 {
-                log_info(&format!("🔄 refine: iteration {}/{} for program_id={}", iter, iterations, p_id));
+            if iter % 10 == 0 {
+                let gas_remaining = unsafe { gas() };
+                log_info(&format!("🔄 refine: iteration {}/{} for program_id={}, gas_remaining={}", iter, iterations, p_id, gas_remaining));
             }
-            let (gas, result) = run_program(p_id);
+            let (gas, logs) = run_program(p_id);
             gas_used += gas;
-            all_results.extend(result);
+            all_logs.extend(logs);
         }
         log_info(&format!("✅ refine: completed {} iterations for program_id={}, gas_used={}", iterations, p_id, gas_used));
         total_gas_used += gas_used;
@@ -1892,16 +1941,14 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
         id_bytes[1] = program_id;
         let object_id = blake2b_hash(&id_bytes);
 
-        // Payload: program_id (1 byte) + count (1 byte) + gas_used (8 bytes LE) + all results (8 bytes each LE)
+        // Receipt payload format: [logs_len:4][logs_payload]
+        // Serialize logs using EVM log format
+        let logs_payload = serialize_logs(&all_logs);
         let mut intent_payload = Vec::new();
-        intent_payload.push(program_id);
-        intent_payload.push(count as u8);
-        intent_payload.extend_from_slice(&gas_used.to_le_bytes());
-        for result in all_results {
-            intent_payload.extend_from_slice(&result.to_le_bytes());
-        }
+        intent_payload.extend_from_slice(&(logs_payload.len() as u32).to_le_bytes()); // logs_len
+        intent_payload.extend_from_slice(&logs_payload); // logs data
 
-        let write_intent = WriteIntent {
+        let mut write_intent = WriteIntent {
             effect: WriteEffectEntry {
                 object_id,
                 ref_info: ObjectRef {
@@ -1914,7 +1961,7 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
                     timeslot: 0,
                     gas_used: gas_used as u32,
                     evm_block: 0,
-                    object_kind: 0,
+                    object_kind: 3, // ObjectKind::Receipt
                     log_index: 0,
                     tx_slot: i as u16,
                 },
@@ -1923,15 +1970,14 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
             dependencies: Vec::new(),
         };
         // Export payloads to DA segments
-        /*
-            match write_intent.effect.export_effect(export_count as usize) {
-                Ok(next_index) => {
-                    export_count = next_index;
-                }
-                Err(e) => {
-                    log_error(&format!("  ❌ Failed to export write intent {}: {:?}", i, e));
-                }
-            }*/
+        match write_intent.effect.export_effect(export_count as usize) {
+            Ok(next_index) => {
+                export_count = next_index;
+            }
+            Err(e) => {
+                log_error(&format!("  ❌ Failed to export write intent {}: {:?}", i, e));
+            }
+        }
         write_intents.push(write_intent);
         log_info(&format!("📝 refine: created WriteIntent for pair #{}, object_id={}", i, format_object_id(&object_id)));
     }
@@ -1955,132 +2001,30 @@ static mut output_bytes_32: [u8; 32] = [0; 32];
 
 #[polkavm_derive::polkavm_export]
 extern "C" fn accumulate(start_address: u64, length: u64) -> (u64, u64) {
-    log_info(&format!("🚀 accumulate called with start_address=0x{:x}, length={}", start_address, length));
     polkavm_sbrk(1024*1024);
 
-    let (timeslot, service_id, num_accumulate_inputs) = if let Some(args) = parse_accumulate_args(start_address, length) {
-        (args.t, args.s, args.num_accumulate_inputs)
-    } else {
+    let Some(args) = parse_accumulate_args(start_address, length) else {
+        log_error("Accumulate: parse_accumulate_args failed");
         return empty_output();
     };
 
-    log_info(&format!("algo accumulate: service_id={} timeslot={} num_inputs={}", service_id, timeslot, num_accumulate_inputs));
+    if args.num_accumulate_inputs == 0 {
+        log_error("Accumulate: num_accumulate_inputs is zero, returning empty");
+        return empty_output();
+    }
 
-    // Fetch accumulate inputs
-    use utils::functions::fetch_accumulate_inputs;
-    let accumulate_inputs = match fetch_accumulate_inputs(num_accumulate_inputs as u64) {
+    let accumulate_inputs = match fetch_accumulate_inputs(args.num_accumulate_inputs as u64) {
         Ok(inputs) => inputs,
         Err(e) => {
-            log_error(&format!("Failed to fetch accumulate inputs: {:?}", e));
+            log_error(&format!("Accumulate: fetch_accumulate_inputs failed: {:?}", e));
             return empty_output();
         }
     };
 
-    // Read current block number from storage using BLOCK_NUMBER_KEY
-    let block_number = match EvmBlockPayload::read_blocknumber_key(service_id) {
-        Some(num) => num,
-        None => {
-            log_info("Failed to read block number, using 0");
-            0
-        }
-    };
-    let next_block_number = block_number + 1;
-    log_info(&format!("Current block_number={}, next={}", block_number, next_block_number));
-
-    // Collect all WriteIntents from all inputs
-    let mut tx_hashes = Vec::new();
-    let mut receipt_hashes = Vec::new();
-    let mut total_gas_used = 0u64;
-
-    for (idx, input) in accumulate_inputs.iter().enumerate() {
-        use utils::functions::AccumulateInput;
-        let AccumulateInput::OperandElements(operand_elem) = input else {
-            log_error(&format!("Input #{} not OperandElements", idx));
-            continue;
-        };
-
-        let Some(ok_data) = operand_elem.result.ok.as_ref() else {
-            log_error(&format!("Input #{} has no ok_data", idx));
-            continue;
-        };
-
-        log_info(&format!("📥 accumulate processing input #{}: ok_data length={}", idx, ok_data.len()));
-
-        // Deserialize ExecutionEffects using EVM's deserializer
-        match deserialize_execution_effects(ok_data) {
-            Some(envelope) => {
-                log_info(&format!("✅ deserialized input #{}: export_count={}, gas_used={}, writes={}", idx, envelope.export_count, envelope.gas_used, envelope.writes.len()));
-                total_gas_used += envelope.gas_used;
-
-                // Write each object_ref to storage and collect hashes
-                for write in envelope.writes {
-                    // Write object_ref to storage (object_id => object_ref)
-                    write.object_ref.write(&write.object_id);
-
-                    // Add to tx_hashes (the object_id itself)
-                    tx_hashes.push(write.object_id);
-
-                    // Compute hash of object_ref for receipt_hashes
-                    let ref_hash = blake2b_hash(&write.object_ref.serialize());
-                    receipt_hashes.push(ref_hash);
-
-                    log_info(&format!("Wrote object_id={}", format_object_id(&write.object_id)));
-                }
-            }
-            None => {
-                log_error(&format!("❌ Failed to deserialize input #{} with ok_data length={}", idx, ok_data.len()));
-            }
-        }
-    }
-
-    // Create block payload using EvmBlockPayload structure
-    let parent_hash = EvmBlockPayload::read_parent_hash(service_id, block_number as u64);
-
-    let mut block_payload = EvmBlockPayload {
-        number: next_block_number as u64,
-        parent_hash,
-        logs_bloom: [0u8; 256],  // Algo service doesn't use logs
-        transactions_root: [0u8; 32],  // Will be computed below
-        state_root: [0u8; 32],  // Could be set to JAM state root if needed
-        receipts_root: [0u8; 32],  // Will be computed below
-        miner: [0u8; 20],  // Could be set to validator address
-        extra_data: [0u8; 32],  // Could store algo-specific metadata
-        size: 0,  // Computed during serialization
-        gas_limit: 30_000_000,
-        gas_used: total_gas_used,
-        timestamp: timeslot as u64,
-        tx_hashes,
-        receipt_hashes,
-    };
-
-    // Compute transactions root and receipts root using EVM's BMT method
-    block_payload.transactions_root = block_payload.compute_transactions_root();
-    block_payload.receipts_root = block_payload.compute_receipts_root();
-
-    // Write block to storage (reuses EvmBlockPayload::write method)
-    if block_payload.write().is_none() {
-        log_error("Failed to write block to storage");
+    // Accumulate execution effects from any payloads (Transactions, Blocks)
+    let Some(accumulate_root) = accumulator::BlockAccumulator::accumulate(args.s, args.t, &accumulate_inputs) else {
         return empty_output();
-    }
+    };
 
-    // Compute block hash from header
-    let block_hash = block_payload.compute_block_hash();
-
-    // Update block number key using EVM's method
-    EvmBlockPayload::write_blocknumber_key(next_block_number, &block_hash);
-
-    log_info(&format!(
-        "Block #{} finalized: {} txs, gas={}, block_hash={}, tx_root={}, receipt_root={}",
-        next_block_number,
-        block_payload.tx_hashes.len(),
-        total_gas_used,
-        format_object_id(&block_hash),
-        format_object_id(&block_payload.transactions_root),
-        format_object_id(&block_payload.receipts_root)
-    ));
-
-    // Return block hash using leak_output
-    let block_hash_vec = block_hash.to_vec();
-    log_info(&format!("🎯 accumulate returning block_hash={}", format_object_id(&block_hash)));
-    leak_output(block_hash_vec)
+    leak_output(accumulate_root.to_vec())
 }

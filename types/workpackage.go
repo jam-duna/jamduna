@@ -33,6 +33,17 @@ type WorkPackage struct {
 	WorkItems []WorkItem `json:"items"`
 }
 
+type WPQueueItem struct {
+	WorkPackage        WorkPackage
+	CoreIndex          uint16
+	Extrinsics         ExtrinsicsBlobs
+	AddTS              int64
+	NextAttemptAfterTS int64
+	NumFailures        int
+	Slot               uint32 // the slot for which this work package is intended
+	EventID            uint64
+}
+
 func (a *WorkPackage) String() string {
 	return ToJSON(a)
 }

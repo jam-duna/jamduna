@@ -247,14 +247,14 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 	n.telemetryClient.WorkPackageReceived(EventID, wpOutline)
 
 	// Only the FIRST guarantor will receive this
-	n.workPackageQueue.Store(workPackageHash, &WPQueueItem{
-		workPackage:        newReq.WorkPackage,
-		coreIndex:          newReq.CoreIndex,
-		extrinsics:         extrinsics,
-		addTS:              time.Now().Unix(),
-		nextAttemptAfterTS: time.Now().Unix(),
-		slot:               slot,
-		eventID:            EventID,
+	n.workPackageQueue.Store(workPackageHash, &types.WPQueueItem{
+		WorkPackage:        newReq.WorkPackage,
+		CoreIndex:          newReq.CoreIndex,
+		Extrinsics:         extrinsics,
+		AddTS:              time.Now().Unix(),
+		NextAttemptAfterTS: time.Now().Unix(),
+		Slot:               slot,
+		EventID:            EventID,
 	})
 
 	return nil

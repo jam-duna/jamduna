@@ -26,7 +26,7 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 
 	for algoN := 1; algoN < targetN; algoN++ {
 		imported := []types.ImportSegment{}
-		algo_payload := GenerateAlgoPayload(algoN, isSimple)
+		algo_payload := statedb.GenerateAlgoPayload(algoN, isSimple)
 
 		auth_payload := make([]byte, 4)
 		binary.LittleEndian.PutUint32(auth_payload, uint32(auth_serviceIdx))
@@ -43,7 +43,7 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 					RefineGasLimit:     types.RefineGasAllocation / 2,
 					AccumulateGasLimit: types.AccumulationGasAllocation / 2,
 					ImportedSegments:   imported,
-					ExportCount:        uint16(0),
+					ExportCount:        uint16(algoN),
 				},
 			},
 		}

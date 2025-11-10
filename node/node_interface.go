@@ -21,7 +21,6 @@ type JNode interface {
 	ReadStateWitnessRef(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error)
 	ReadStateWitnessRaw(serviceID uint32, objectID common.Hash) (types.StateWitnessRaw, bool, common.Hash, error)
 	GetStateWitnesses(workReports []*types.WorkReport) ([]types.StateWitness, common.Hash, error)
-	BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash) (b *types.WorkPackageBundle, wr *types.WorkReport, err error)
 
 	// Ethereum internal methods (called by Jam RPC wrappers)
 	// Network Metadata
@@ -41,11 +40,11 @@ type JNode interface {
 	SendRawTransaction(signedTxData []byte) (common.Hash, error)
 
 	// Transaction Queries
-	GetTransactionReceipt(txHash common.Hash) (*EthereumTransactionReceipt, error)
-	GetTransactionByHash(txHash common.Hash) (*EthereumTransactionResponse, error)
-	GetTransactionByBlockHashAndIndex(blockHash common.Hash, index uint32) (*EthereumTransactionResponse, error)
-	GetTransactionByBlockNumberAndIndex(blockNumber string, index uint32) (*EthereumTransactionResponse, error)
-	GetLogs(fromBlock, toBlock uint32, addresses []common.Address, topics [][]common.Hash) ([]EthereumLog, error)
+	GetTransactionReceipt(txHash common.Hash) (*statedb.EthereumTransactionReceipt, error)
+	GetTransactionByHash(txHash common.Hash) (*statedb.EthereumTransactionResponse, error)
+	GetTransactionByBlockHashAndIndex(blockHash common.Hash, index uint32) (*statedb.EthereumTransactionResponse, error)
+	GetTransactionByBlockNumberAndIndex(blockNumber string, index uint32) (*statedb.EthereumTransactionResponse, error)
+	GetLogs(fromBlock, toBlock uint32, addresses []common.Address, topics [][]common.Hash) ([]statedb.EthereumLog, error)
 
 	// Block Queries
 	GetLatestBlockNumber() (uint32, error)

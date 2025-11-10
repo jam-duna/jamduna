@@ -365,6 +365,10 @@ impl EvmBlockPayload {
             let parent_block_hash = current_block.finalize(service_id)?;
             log_info(&format!("🏁 Finalized current block {}, parent_hash: {}", block_number, format_object_id(&parent_block_hash)));
 
+            // Write the finalized block back to storage with computed roots
+            current_block.write()?;
+            log_info(&format!("💾 Wrote finalized block {} to storage", block_number));
+
             // NOTE: Block hash mapping is written in accumulator AFTER the block is fully written
             // This ensures the hash matches the final stored block state
 
@@ -423,6 +427,13 @@ impl EvmBlockPayload {
     pub fn finalize(&mut self, service_id: u32) -> Option<[u8; 32]> {
         self.transactions_root = self.compute_transactions_root();
         self.receipts_root = self.compute_receipts_root();
+        log_info(&format!("🔐 Finalized block {}: tx_root={}, receipts_root={}, tx_count={}, receipt_count={}",
+            self.number,
+            format_object_id(&self.transactions_root),
+            format_object_id(&self.receipts_root),
+            self.tx_hashes.len(),
+            self.receipt_hashes.len()
+        ));
         if self.number > MAX_BLOCKS_IN_JAM_STATE as u64 {
             Self::delete_block(service_id, (self.number - MAX_BLOCKS_IN_JAM_STATE as u64) as u32)?;
         };

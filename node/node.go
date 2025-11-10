@@ -26,6 +26,7 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1464,13 +1465,13 @@ func (n *NodeContent) SubmitWPSameCore(wp types.WorkPackage, extrinsicsBlobs typ
 	// if we want to process it ourselves, this should be true
 	allowSelfSubmission := false
 	if allowSelfSubmission {
-		n.workPackageQueue.Store(workPackageHash, &WPQueueItem{
-			workPackage:        wp,
-			coreIndex:          coreIndex,
-			extrinsics:         extrinsicsBlobs,
-			addTS:              time.Now().Unix(),
-			nextAttemptAfterTS: time.Now().Unix(),
-			slot:               slot, // IMPORTANT: this will be used as guarantee.Slot
+		n.workPackageQueue.Store(workPackageHash, &types.WPQueueItem{
+			WorkPackage:        wp,
+			CoreIndex:          coreIndex,
+			Extrinsics:         extrinsicsBlobs,
+			AddTS:              time.Now().Unix(),
+			NextAttemptAfterTS: time.Now().Unix(),
+			Slot:               slot, // IMPORTANT: this will be used as guarantee.Slot
 		})
 		log.Info(log.G, "SubmitWPSameCore SUBMISSION SELF", "coreIndex", coreIndex)
 		return nil
@@ -2187,65 +2188,18 @@ func dumpStateDBKeyValues(db *statedb.StateDB, description string, nodeID uint16
 
 func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) error {
 	nextBlock := nextBlockNode.Block
-
-	// Telemetry: Importing (event 43) - Block importing begins
-	importingEventID := n.telemetryClient.GetEventID(nextBlock.Header.HeaderHash())
-
-	// Create BlockOutline from the block being imported
-	blockBytes := nextBlock.Bytes()
-	preimages := nextBlock.PreimageLookups()
-
-	// Calculate total preimage size
-	var preimagesSizeInBytes uint32
-	for _, preimage := range preimages {
-		preimagesSizeInBytes += uint32(len(preimage.Blob))
-	}
-
-	// Count dispute verdicts
-	dispute := nextBlock.Disputes()
-	numDisputeVerdicts := uint32(len(dispute.Verdict))
-
-	blockOutline := telemetry.BlockOutline{
-		SizeInBytes:          uint32(len(blockBytes)),
-		HeaderHash:           nextBlock.Header.Hash(),
-		NumTickets:           uint32(len(nextBlock.Tickets())),
-		NumPreimages:         uint32(len(preimages)),
-		PreimagesSizeInBytes: preimagesSizeInBytes,
-		NumGuarantees:        uint32(len(nextBlock.Guarantees())),
-		NumAssurances:        uint32(len(nextBlock.Assurances())),
-		NumDisputeVerdicts:   numDisputeVerdicts,
-	}
-
-	n.telemetryClient.Importing(nextBlock.Header.Slot, blockOutline)
 	// if !n.appliedFirstBlock {
 	// 	if nextBlock.Header.ParentHeaderHash == genesisBlockHash {
 	// 		n.appliedFirstBlock = true
 	// 	}
 	// }
 	// 1. Prepare recovered state from parent
-
-	recoveredStateDB, err := statedb.NewStateDBFromStateRoot(nextBlock.Header.ParentStateRoot, n.statedb.GetStorage())
-	if err != nil {
-		log.Error(log.Node, "NewStateDBFromStateRoot: Failed to recover state", "stateRoot", nextBlock.Header.ParentStateRoot.Hex(), "error", err)
-		return err
-	}
-
-	statedb.DumpStateDBKeyValues(recoveredStateDB, "Recovered", n.id, false)
 	start := time.Now()
-
+	recoveredStateDB := n.statedb.Copy()
+	recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot) // it don't even know if it got the correct state
 	recoveredStateDB.UnsetPosteriorEntropy()
-	//recoveredStateDB.Block = nextBlock
-
-	postRecoveryKV := recoveredStateDB.GetAllKeyValues()
-	if len(postRecoveryKV) <= 16 {
-		log.Warn(log.B, "!!!! ApplyBlock: NewStateDBFromStateRoot returned too few keys!",
-			"n", n.String(),
-			"slot", nextBlock.Header.Slot,
-			"expected", nextBlock.Header.ParentStateRoot.Hex(),
-			"got", recoveredStateDB.GetStateRoot().Hex(),
-		)
-	}
-
+	recoveredStateDB.StateRoot = nextBlock.Header.ParentStateRoot
+	recoveredStateDB.Block = nextBlock
 	recoverElapsed := time.Since(start)
 
 	var used_entropy common.Hash
@@ -2256,64 +2210,17 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	}
 	start = time.Now()
 	valid_tickets := n.extrinsic_pool.GetTicketIDPairFromPool(used_entropy)
-	log.Trace(log.B, "ApplyBlock: valid_tickets", "n", n.String(),
-		"used_entropy", used_entropy,
-		"slot", nextBlock.Header.Slot,
-		"num_valid_tickets", len(valid_tickets),
-		"valid_tickets", valid_tickets,
-	)
-
-	newStateDB, err := statedb.ApplyStateTransitionFromBlock(importingEventID, recoveredStateDB, ctx, nextBlock, valid_tickets, n.pvmBackend)
+	newStateDB, err := statedb.ApplyStateTransitionFromBlock(0, recoveredStateDB, ctx, nextBlock, valid_tickets, n.pvmBackend)
 	stateTransitionElapsed := common.ElapsedStr(start)
 	if err != nil {
-		// Telemetry: BlockExecutionFailed (event 46) - Block execution failed after importing
-
-		n.telemetryClient.BlockExecutionFailed(importingEventID, err.Error())
-
 		fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
 		return fmt.Errorf("ApplyStateTransitionFromBlock failed: %w", err)
 	}
-
-	statedb.DumpStateDBKeyValues(newStateDB, "IMMEDIATE post-transition", n.id, false)
-
 	start = time.Now()
+	// newStateDB.GetAllKeyValues()
 	newStateDB.Block = nextBlock
 	newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
-
 	n.clearQueueUsingBlock(nextBlock.Extrinsic.Guarantees)
-
-	// Store work reports from guarantees to KV database for future guarantors
-	// This must happen before the next work package is guaranteed
-	numGuaranteedReports := 0
-	for _, assignment := range newStateDB.JamState.AvailabilityAssignments {
-		if assignment != nil {
-			if err := n.StoreWorkReport(assignment.WorkReport); err != nil {
-				log.Error(log.Node, "ApplyBlock: StoreWorkReport (guarantee) failed", "n", n.String(),
-					"workPackageHash", assignment.WorkReport.AvailabilitySpec.WorkPackageHash.String_short(),
-					"err", err)
-			} else {
-				log.Trace(log.Node, "ApplyBlock: Stored work report (guarantee)", "n", n.String(),
-					"workPackageHash", assignment.WorkReport.AvailabilitySpec.WorkPackageHash.String_short(),
-					"coreIndex", assignment.WorkReport.CoreIndex)
-				numGuaranteedReports++
-			}
-		}
-	}
-	// Also store available work reports (from assurances) to KV database
-	log.Trace(log.Node, "ApplyBlock: Checking available work reports", "n", n.String(),
-		"numGuaranteed", numGuaranteedReports,
-		"numAvailableWorkReports", len(newStateDB.AvailableWorkReport))
-	for _, wr := range newStateDB.AvailableWorkReport {
-		if err := n.StoreWorkReport(wr); err != nil {
-			log.Error(log.Node, "ApplyBlock: StoreWorkReport (assurance) failed", "n", n.String(),
-				"workPackageHash", wr.AvailabilitySpec.WorkPackageHash.String_short(),
-				"err", err)
-		} else {
-			log.Trace(log.Node, "ApplyBlock: Stored work report (assurance)", "n", n.String(),
-				"workPackageHash", wr.AvailabilitySpec.WorkPackageHash.String_short(),
-				"coreIndex", wr.CoreIndex)
-		}
-	}
 
 	// 2. Update services for new state
 	n.updateServiceMap(newStateDB, nextBlock)
@@ -2354,12 +2261,10 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	if newStateDB.JamState.SafroleState.GetEpochT() == 0 {
 		mode = "fallback"
 	}
-	log.Trace(log.B, fmt.Sprintf("Imported Block(n=%v)", n.id), // "n", n.String(),
+	log.Info(log.B, "Imported Block", // "n", n.String(),
 		"mode", mode,
 		"author", nextBlock.Header.AuthorIndex,
 		"p", nextBlock.Header.ParentHeaderHash.String_short(),
-		//"s", nextBlock.Header.ParentStateRoot.String_short(),
-		"s+", newStateDB.StateRoot.String_short(),
 		"h", common.Str(nextBlock.Header.Hash()),
 		"e'", currEpoch, "m'", currPhase,
 		"len(γ_a')", len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator),
@@ -2407,10 +2312,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 			}
 		}
 
-	} else {
-		log.Info(log.Quic, "ApplyBlock: latest_block not equal to nextBlock", "n", n.String(), "latest_block", latest_block_info.HeaderHash.String_short(), "nextBlock", nextBlock.Header.Hash().String_short())
 	}
-
 	// 6. Cleanup used extrinsics
 	isClosed := n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetTimeslot())
 	n.extrinsic_pool.RemoveUsedExtrinsicFromPool(nextBlock, n.statedb.GetSafrole().Entropy[2], isClosed)
@@ -2742,7 +2644,7 @@ func (n *NodeContent) reconstructPackageBundleSegments(spec types.AvailabilitySp
 		bClub := common.Blake2Hash(daResp.BundleShard)
 		sClub := daResp.SClub
 		leaf := common.BuildBundleSegment(bClub, sClub)
-		verified, _ := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(daResp.ShardIndex), leaf, decodedPath, "reconstructPackageBundleSegments")
+		verified, _ := statedb.VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(daResp.ShardIndex), leaf, decodedPath, "reconstructPackageBundleSegments")
 		if verified {
 			bundleShards[numShards] = daResp.BundleShard
 			indexes[numShards] = uint32(daResp.ShardIndex)
@@ -2782,7 +2684,7 @@ func (n *NodeContent) reconstructPackageBundleSegments(spec types.AvailabilitySp
 	}
 
 	// IMPORTANT: Verify the reconstructed bundle against the segment root lookup
-	verified, verifyErr := n.VerifyBundle(&workPackageBundle, segmentRootLookup, eventID)
+	verified, verifyErr := n.statedb.VerifyBundle(&workPackageBundle, segmentRootLookup, eventID)
 	if verifyErr != nil {
 		log.Warn(log.Node, "reconstructPackageBundleSegments: VerifyBundle errored", "err", verifyErr)
 		return types.WorkPackageBundle{}, fmt.Errorf("verify bundle failed: %w", verifyErr)
@@ -2825,27 +2727,61 @@ func NewJamState() *statedb.JamState {
 	}
 }
 
-func (n *NodeContent) getTargetStateDB(stateRoot common.Hash) (*statedb.StateDB, error) {
-	// refine's executeWorkPackage is a statelessish process
-	currentStateDB := n.statedb.Copy()
-	currentStateRoot := currentStateDB.GetStateRoot()
-
-	if stateRoot.Hex() == currentStateRoot.Hex() {
-		statedb.DumpStateDBKeyValues(currentStateDB, "getTargetStateDB: Current", n.id, false)
-		return currentStateDB, nil
+func (n *NodeContent) getTargetStateDB(blockNumber string) (*statedb.StateDB, error) {
+	// Handle "latest" - return current stateDB
+	if blockNumber == "latest" || blockNumber == "" {
+		return n.statedb, nil
 	}
-	log.Trace(log.Node, "getTargetStateDB: REFETCH REQUIRED", "n", n.id, "expected", stateRoot.Hex(), "got", currentStateRoot.Hex())
 
-	recoveredStateDB, err := statedb.NewStateDBFromStateRoot(stateRoot, n.statedb.GetStorage())
+	// Handle "earliest" - block 0
+	if blockNumber == "earliest" {
+		blockNumber = "0x0"
+	}
+
+	// Handle "pending" - treat as latest for now
+	if blockNumber == "pending" {
+		return n.statedb, nil
+	}
+
+	// Parse hex string
+	if !strings.HasPrefix(blockNumber, "0x") {
+		return nil, fmt.Errorf("invalid block number format: %s", blockNumber)
+	}
+
+	// Check if this is a 32-byte hash (66 chars: "0x" + 64 hex chars) - treat as stateRoot
+	if len(blockNumber) == 66 {
+		stateRoot := common.HexToHash(blockNumber)
+		return n.getStateDBByStateRoot(stateRoot)
+	}
+
+	// Parse as block number (shorter hex string)
+	blockNum, err := strconv.ParseUint(blockNumber[2:], 16, 32)
 	if err != nil {
-		log.Error(log.Node, "getTargetStateDB: Failed to recover state", "stateRoot", stateRoot.Hex(), "error", err)
-		return nil, fmt.Errorf("failed to recover state: %w", err)
+		return nil, fmt.Errorf("invalid block number: %s", blockNumber)
 	}
 
-	log.Debug(log.Node, "getTargetStateDB: Recovered state root", "n", n.id, "stateRoot", recoveredStateDB.GetStateRoot().Hex())
-	statedb.DumpStateDBKeyValues(recoveredStateDB, "getTargetStateDB: Recovered", n.id, false)
+	// Fetch the block to get its stateRoot
+	// Use EVMServiceCode for now - could be parameterized if needed
+	block, err := n.statedb.ReadBlockByNumber(statedb.EVMServiceCode, uint32(blockNum))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read block %d: %v", blockNum, err)
+	}
 
-	return recoveredStateDB, nil
+	// Look up stateDB by stateRoot
+	return n.getStateDBByStateRoot(block.StateRoot)
+}
+
+// getStateDBByStateRoot looks up a StateDB by its stateRoot in the statedbMap
+func (n *NodeContent) getStateDBByStateRoot(stateRoot common.Hash) (*statedb.StateDB, error) {
+	n.statedbMapMutex.Lock()
+	defer n.statedbMapMutex.Unlock()
+
+	targetStateDB, ok := n.statedbMap[stateRoot]
+	if !ok {
+		return nil, fmt.Errorf("stateDB not found for stateRoot: %s", stateRoot.Hex())
+	}
+
+	return targetStateDB, nil
 }
 
 // AddPreimageToPool adds a new preimage to the extrinsic pool NO VALIDATION IS REQUIRED

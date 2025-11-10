@@ -17,6 +17,10 @@ import (
 	types "github.com/colorfulnotion/jam/types"
 )
 
+const (
+	debugSpec = false
+)
+
 type SpecTestCase struct {
 	B                string                      `json:"b"`
 	BClubs           []common.Hash               `json:"bClubs,omitempty"`
@@ -58,13 +62,12 @@ func testAvailabilitySpec(t *testing.T, exportCount uint16) {
 			fmt.Printf("segment %d: %x... (%d bytes)\n", i, segments[i][0:36], len(segments[i]))
 		}
 	}
-	n := &Node{}
 	// Build b♣ and s♣
-	bClubs, bShards := n.buildBClub(b)
-	sClubs, sShards := n.buildSClub(segments)
+	bClubs, bShards := statedb.BuildBClub(b)
+	sClubs, sShards := statedb.BuildSClub(segments)
 	// u = (bClub, sClub)
-	erasure_root_u := generateErasureRoot(bClubs, sClubs)
-	exported_segment_root_e := generateExportedSegmentsRoot(segments)
+	erasure_root_u := statedb.GenerateErasureRoot(bClubs, sClubs)
+	exported_segment_root_e := statedb.GenerateExportedSegmentsRoot(segments)
 
 	// Return the Availability Specifier
 	availabilitySpecifier := types.AvailabilitySpecifier{

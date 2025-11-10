@@ -10,6 +10,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/statedb"
 	trie "github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -279,7 +280,7 @@ func (n *NodeContent) GetMeta_Guarantor(erasureRoot common.Hash) (bClubs []commo
 	return
 }
 
-func (n *NodeContent) StoreBundleSpecSegments(as *types.AvailabilitySpecifier, d AvailabilitySpecifierDerivation, b types.WorkPackageBundle, segments [][]byte) {
+func (n *NodeContent) StoreBundleSpecSegments(as *types.AvailabilitySpecifier, d statedb.AvailabilitySpecifierDerivation, b types.WorkPackageBundle, segments [][]byte) {
 	erasure_root_u := as.ErasureRoot
 	erasure_bKey := fmt.Sprintf("erasureBChunk-%v", erasure_root_u)
 	bChunkJson, _ := json.Marshal(d.BundleChunks)
@@ -316,7 +317,7 @@ func (n *NodeContent) StoreBundleSpecSegments(as *types.AvailabilitySpecifier, d
 	}
 }
 
-func generateErasureRootShardIdxKey(section string, erasureRoot common.Hash, shardIndex uint16) string {
+func GenerateErasureRootShardIdxKey(section string, erasureRoot common.Hash, shardIndex uint16) string {
 	return fmt.Sprintf("%s_%v_%d", section, erasureRoot, shardIndex)
 }
 
@@ -405,7 +406,7 @@ func VerifyFullShard(erasureRoot common.Hash, shardIndex uint16, bundleShard []b
 	if err != nil {
 		return false, err
 	}
-	verified, recovered_erasureRoot := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), bundle_segment_pair, path, "VerifyFullShard")
+	verified, recovered_erasureRoot := statedb.VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), bundle_segment_pair, path, "VerifyFullShard")
 	if !verified {
 		log.Warn(log.Node, "VerifyFullShard VerifyWBTJustification FAILED", "erasureRoot", erasureRoot, "shardIdx", shardIndex, "treeLen", types.TotalValidators,
 			"bundle_segment_pair", fmt.Sprintf("%x", bundle_segment_pair), "path", fmt.Sprintf("%x", path))
@@ -424,19 +425,19 @@ func (n *Node) GetFullShard_Guarantor(erasureRoot common.Hash, shardIndex uint16
 		return bundleShard, exported_segments_and_proofpageShards, justification, false, err
 	}
 	bundle_segment_pairs := common.BuildBundleSegmentPairs(bClubs, sClubs)
-	treeLen, leafHash, path, isFound := GenerateWBTJustification(erasureRoot, uint16(shardIndex), bundle_segment_pairs)
+	treeLen, leafHash, path, isFound := statedb.GenerateWBTJustification(erasureRoot, uint16(shardIndex), bundle_segment_pairs)
 	if !isFound {
 		return bundleShard, exported_segments_and_proofpageShards, justification, false, fmt.Errorf("not found")
 	}
 	encodedPath, _ := common.EncodeJustification(path, types.NumECPiecesPerSegment)
 	if paranoidVerification {
 		decodedPath, _ := common.DecodeJustification(encodedPath, types.NumECPiecesPerSegment)
-		verified, _ := VerifyWBTJustification(treeLen, erasureRoot, uint16(shardIndex), leafHash, decodedPath, "GetFullShard_Guarantor")
+		verified, _ := statedb.VerifyWBTJustification(treeLen, erasureRoot, uint16(shardIndex), leafHash, decodedPath, "GetFullShard_Guarantor")
 		if !verified {
 			log.Crit(log.DA, "GetFullShard_Guarantor")
 		}
 		if !reflect.DeepEqual(path, decodedPath) {
-			log.Crit(log.DA, "generateErasureRoot:JustificationsPath mismatch")
+			log.Crit(log.DA, "GenerateErasureRoot:JustificationsPath mismatch")
 		}
 	}
 	return recoveredbECChunks[shardIndex].Data, recoveredsECChunksArray[shardIndex].Data, encodedPath, true, nil
@@ -478,7 +479,7 @@ func (n *NodeContent) StoreFullShardJustification(erasureRoot common.Hash, shard
 	// levelDB key->Val (* Required for multi validator case or CE200s)
 	// *f_erasureRoot_<erasureRoot> -> [f_erasureRoot_<shardIdx>]
 	// f_erasureRoot_<erasureRoot>_<shardIdx> -> bClubHash++sClub ++ default_justification
-	f_es_key := generateErasureRootShardIdxKey("f", erasureRoot, shardIndex)
+	f_es_key := GenerateErasureRootShardIdxKey("f", erasureRoot, shardIndex)
 	bundle_segment_pair := common.BuildBundleSegment(bClub, sClub)
 	f_es_val := append(bundle_segment_pair, encodedPath...)
 	n.WriteRawKV(f_es_key, f_es_val)
@@ -487,7 +488,7 @@ func (n *NodeContent) StoreFullShardJustification(erasureRoot common.Hash, shard
 
 // USED
 func (n *NodeContent) GetFullShardJustification(erasureRoot common.Hash, shardIndex uint16) (bClubH common.Hash, sClubH common.Hash, encodedPath []byte, err error) {
-	f_es_key := generateErasureRootShardIdxKey("f", erasureRoot, shardIndex)
+	f_es_key := GenerateErasureRootShardIdxKey("f", erasureRoot, shardIndex)
 	log.Trace(log.DA, "GetFullShardJustification", "n", n.id, "f_es_key", f_es_key)
 
 	data, ok, err := n.ReadRawKV([]byte(f_es_key))
@@ -508,7 +509,7 @@ func (n *NodeContent) GetFullShardJustification(erasureRoot common.Hash, shardIn
 func (n *NodeContent) StoreAuditDA_Assurer(erasureRoot common.Hash, shardIndex uint16, bundleShard []byte) (err error) {
 	// *b_erasureRoot_<erasureRoot> -> [b_erasureRoot_<shardIdx>]
 	// b_erasureRoot_<shardIdx> -> bundleShard
-	b_es_key := generateErasureRootShardIdxKey("b", erasureRoot, shardIndex)
+	b_es_key := GenerateErasureRootShardIdxKey("b", erasureRoot, shardIndex)
 	n.WriteRawKV(b_es_key, bundleShard)
 	log.Trace(log.DA, "StoreAuditDA", "b_es_key", b_es_key, "bundleShard", bundleShard)
 	return nil
@@ -542,7 +543,7 @@ func (n *NodeContent) StoreWorkReport(wr types.WorkReport) error {
 
 // Long-term ImportDA - Used to Store sClub (segmentShard) by Assurers (at least 672 epochs)
 func (n *NodeContent) StoreImportDA_Assurer(erasureRoot common.Hash, shardIndex uint16, concatenatedShards []byte) (err error) {
-	s_es_key := generateErasureRootShardIdxKey("s", erasureRoot, shardIndex)
+	s_es_key := GenerateErasureRootShardIdxKey("s", erasureRoot, shardIndex)
 	n.WriteRawKV(s_es_key, concatenatedShards) // this has segment shards AND proof page shards
 	return nil
 }
@@ -557,7 +558,7 @@ func VerifyBundleShard(erasureRoot common.Hash, shardIndex uint16, bundleShard [
 	}
 
 	bundle_segment_pair := common.BuildBundleSegment(bClub, sClub)
-	verified, recovered_erasureRoot := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), bundle_segment_pair, decodedPath, "VerifyBundleShard")
+	verified, recovered_erasureRoot := statedb.VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), bundle_segment_pair, decodedPath, "VerifyBundleShard")
 	if !verified {
 		log.Crit(log.Node, "VerifyBundleShard:VerifyWBTJustification VERIFICATION FAILURE", "erasureRoot", erasureRoot, "shardIndex", shardIndex, "bundle_segment_pair", common.Bytes2Hex(bundle_segment_pair), "decodedPath", fmt.Sprintf("%x", decodedPath))
 		return false, fmt.Errorf("justification Error: expected=%v | recovered=%v", erasureRoot, recovered_erasureRoot)
@@ -571,7 +572,7 @@ func VerifyBundleShard(erasureRoot common.Hash, shardIndex uint16, bundleShard [
 // Ans Source : CE137_FullShard (via StoreAuditDA)
 func (n *NodeContent) GetBundleShard_Assurer(erasureRoot common.Hash, shardIndex uint16) (bundleShard []byte, sClub common.Hash, justification []byte, ok bool, err error) {
 
-	b_es_key := generateErasureRootShardIdxKey("b", erasureRoot, shardIndex)
+	b_es_key := GenerateErasureRootShardIdxKey("b", erasureRoot, shardIndex)
 	bundleShard, _, err = n.ReadRawKV([]byte(b_es_key))
 	if err != nil {
 		return nil, sClub, nil, false, err
@@ -620,10 +621,10 @@ func VerifySegmentShard(erasureRoot common.Hash, shardIndex uint16, segmentShard
 	log.Trace(log.DA, "VerifySegmentShard", "bClub", bClub, "bPath", fmt.Sprintf("%x", bPath))
 	//segmentLeafHash := common.ComputeLeafHash_WBT_Blake2B(segmentShard)
 
-	_, recovered_sClub := VerifyWBTJustification(exportedSegmentLen, erasureRoot, segmentIndex, segmentShard, bPath, "VerifySegmentShard_call1")
+	_, recovered_sClub := statedb.VerifyWBTJustification(exportedSegmentLen, erasureRoot, segmentIndex, segmentShard, bPath, "VerifySegmentShard_call1")
 
 	bundle_segment_pair := common.BuildBundleSegment(bClub, recovered_sClub)
-	verified, recovered_erasureRoot := VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), bundle_segment_pair, fPath, "VerifySegmentShard_call2")
+	verified, recovered_erasureRoot := statedb.VerifyWBTJustification(types.TotalValidators, erasureRoot, uint16(shardIndex), bundle_segment_pair, fPath, "VerifySegmentShard_call2")
 	if !verified {
 		return false, fmt.Errorf("Segment Justification Error: expected=%v | recovered=%v", erasureRoot, recovered_erasureRoot)
 	}
@@ -634,7 +635,7 @@ func VerifySegmentShard(erasureRoot common.Hash, shardIndex uint16, segmentShard
 // Qns Source : CE139_SegmentShard / CE140
 // Ans Source : CE137_FullShard
 func (n *NodeContent) GetSegmentShard_Assurer(erasureRoot common.Hash, shardIndex uint16, segmentIndices []uint16, withJustification bool) (selected_segments [][]byte, selected_justifications [][]byte, ok bool, err error) {
-	s_es_key := generateErasureRootShardIdxKey("s", erasureRoot, shardIndex)
+	s_es_key := GenerateErasureRootShardIdxKey("s", erasureRoot, shardIndex)
 	concatenatedShards, ok, err := n.ReadRawKV([]byte(s_es_key))
 	if err != nil {
 		return selected_segments, selected_justifications, false, err
@@ -692,7 +693,7 @@ func (n *NodeContent) WorkReportSearch(h common.Hash) (si *SpecIndex) {
 	wrBytes, ok, err := n.ReadRawKV([]byte(generateSpecKey(h)))
 	if err != nil || !ok {
 		log.Error(log.DA, "ErasureRootLookUP", "err", err)
-		panic("WorkReportSearch NOT FOUND")
+
 		return nil
 	}
 

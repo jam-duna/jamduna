@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math/rand"
-	"os"
 	"sort"
 	"sync"
 	"time"
@@ -16,17 +14,6 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-type WPQueueItem struct {
-	workPackage        types.WorkPackage
-	coreIndex          uint16
-	extrinsics         types.ExtrinsicsBlobs
-	addTS              int64
-	nextAttemptAfterTS int64
-	numFailures        int
-	slot               uint32 // the slot for which this work package is intended
-	eventID            uint64
-}
-
 func (n *Node) runWPQueue() {
 	pulseTicker := time.NewTicker(100 * time.Millisecond)
 	defer pulseTicker.Stop()
@@ -36,18 +23,18 @@ func (n *Node) runWPQueue() {
 
 	for range pulseTicker.C {
 		n.workPackageQueue.Range(func(key, value interface{}) bool {
-			wpItem := value.(*WPQueueItem)
-			if time.Now().Unix() >= wpItem.nextAttemptAfterTS {
-				wpItem.nextAttemptAfterTS = time.Now().Unix()
+			wpItem := value.(*types.WPQueueItem)
+			if time.Now().Unix() >= wpItem.NextAttemptAfterTS {
+				wpItem.NextAttemptAfterTS = time.Now().Unix()
 				if n.processWPQueueItem(wpItem) {
 					n.workPackageQueue.Delete(key)
 					return false
 				} else {
 					// allow 6 seconds between attempts, which may result in a core rotation
-					wpItem.nextAttemptAfterTS = time.Now().Unix() + types.SecondsPerSlot
-					wpItem.numFailures++
-					if wpItem.numFailures > 3 {
-						log.Warn(log.G, "runWPQueue", "n", n.String(), "numFailures", wpItem.numFailures)
+					wpItem.NextAttemptAfterTS = time.Now().Unix() + types.SecondsPerSlot
+					wpItem.NumFailures++
+					if wpItem.NumFailures > 3 {
+						log.Warn(log.G, "runWPQueue", "n", n.String(), "numFailures", wpItem.NumFailures)
 						n.workPackageQueue.Delete(key)
 						return false
 					}
@@ -68,9 +55,9 @@ func (n *Node) clearQueueUsingBlock(guarantees []types.Guarantee) {
 //
 //	(1) uses WorkReportSearch to ensure that the WorkReports have been seen for all work items and thus imported segments are fetchable
 //	(2) uses CE139 in reconstructSegments to get all the imported segments and their justifications
-func (n *NodeContent) BuildBundleFromWPQueueItem(wpQueueItem *WPQueueItem) (bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, err error) {
-	workPackage := wpQueueItem.workPackage
-	eventID := wpQueueItem.eventID
+func (n *NodeContent) BuildBundleFromWPQueueItem(wpQueueItem *types.WPQueueItem) (bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, err error) {
+	workPackage := wpQueueItem.WorkPackage
+	eventID := wpQueueItem.EventID
 	segmentRootLookup = make(types.SegmentRootLookup, 0)
 	workReportSearchMap := make(map[common.Hash]*SpecIndex)
 	segmentRootLookupMap := make(map[common.Hash]common.Hash)
@@ -183,70 +170,45 @@ func (n *NodeContent) BuildBundleFromWPQueueItem(wpQueueItem *WPQueueItem) (bund
 
 	bundle = types.WorkPackageBundle{
 		WorkPackage:       workPackage,
-		ExtrinsicData:     []types.ExtrinsicsBlobs{wpQueueItem.extrinsics},
+		ExtrinsicData:     []types.ExtrinsicsBlobs{wpQueueItem.Extrinsics},
 		ImportSegmentData: importSegments,
 		Justification:     justifications, // recipients use VerifyBundle
 	}
 	return bundle, segmentRootLookup, nil
 }
 
-type GuaranteeDerivation struct {
-	Bundle            types.WorkPackageBundle         `json:"bundle"`
-	CoreIndex         uint16                          `json:"core_index"`
-	SegmentRootLookup types.SegmentRootLookup         `json:"segment_root_lookup"`
-	Guarantee         types.Guarantee                 `json:"guarantee"`
-	SpecDerivation    AvailabilitySpecifierDerivation `json:"spec_derivation"`
-}
-
-func saveGuaranteeDerivation(gd GuaranteeDerivation) (err error) {
-	// Encode to JSON
-	data := types.ToJSON(gd)
-	// check if there is a directory to write called refine_testvector
-	if _, err := os.Stat("guarantees"); os.IsNotExist(err) {
-		if err := os.Mkdir("guarantees", 0755); err != nil {
-			return err
-		}
-	}
-	// Write to file
-	filename := fmt.Sprintf("guarantees/%s.json", gd.Bundle.WorkPackage.Hash())
-	if err := os.WriteFile(filename, []byte(data), 0644); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
+func (n *Node) processWPQueueItem(wpItem *types.WPQueueItem) bool {
 	// counting the time for this function execution
-	coreIndex := wpItem.coreIndex
-	slot := wpItem.slot
+	coreIndex := wpItem.CoreIndex
+	slot := wpItem.Slot
 
 	// here we are a first guarantor building a bundle (imported segments, justifications, extrinsics)
 	bundle, segmentRootLookup, err := n.BuildBundleFromWPQueueItem(wpItem)
 	if err != nil {
-		log.Error(log.Node, "processWPQueueItem", "n", n.String(), "err", err, "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
+		log.Error(log.Node, "processWPQueueItem", "n", n.String(), "err", err,
+			"nextAttemptAfterTS", wpItem.NextAttemptAfterTS, "wpItem.workPackage.Hash()", wpItem.WorkPackage.Hash())
 		return false
 	}
-	n.telemetryClient.ImportsReceived(wpItem.eventID)
+	n.telemetryClient.ImportsReceived(wpItem.EventID)
 	//n.getStateDBByHeaderHash()
 
 	curr_statedb := n.statedb.Copy()
 	err = curr_statedb.VerifyPackage(bundle)
 	if err != nil {
-		log.Error(log.Node, "processWPQueueItem -  wp not verified", "n", n.String(), "err", err, "nextAttemptAfterTS", wpItem.nextAttemptAfterTS, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
+		log.Error(log.Node, "processWPQueueItem -  wp not verified", "n", n.String(), "err", err, "nextAttemptAfterTS", wpItem.NextAttemptAfterTS, "wpItem.workPackage.Hash()", wpItem.WorkPackage.Hash())
 		return false
 	}
-	log.Info(log.Node, "processWPQueueItem", "n", n.id, "wpItem.workPackage.Hash()", wpItem.workPackage.Hash())
+	log.Info(log.Node, "processWPQueueItem", "n", n.id, "wpItem.workPackage.Hash()", wpItem.WorkPackage.Hash())
 	//var wg sync.WaitGroup
 	mutex := &sync.Mutex{}
 	fellow_responses := make(map[types.Ed25519Key]JAMSNPWorkPackageShareResponse)
 	coworkers := n.GetCoreCoWorkerPeersByStateDB(coreIndex, curr_statedb)
 	var guarantee types.Guarantee
 	var report types.WorkReport
-	var d AvailabilitySpecifierDerivation
 
 	// Do our own execution first
 	var execErr error
-	report, d, _, _, execErr = n.executeWorkPackageBundle(coreIndex, bundle, segmentRootLookup, slot, true, wpItem.eventID)
+	report, execErr = n.executeWorkPackageBundle(coreIndex, bundle, segmentRootLookup, slot, true, wpItem.EventID)
 	if execErr != nil {
 		log.Warn(log.Node, "processWPQueueItem", "err", execErr)
 		panic(111)
@@ -260,10 +222,10 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 		if coworker.PeerID == n.id {
 			continue
 		}
-		fellow_response, errfellow := coworker.ShareWorkPackage(context.Background(), coreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519, coworker.PeerID, wpItem.eventID)
+		fellow_response, errfellow := coworker.ShareWorkPackage(context.Background(), coreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519, coworker.PeerID, wpItem.EventID)
 		if errfellow != nil {
 			log.Warn(log.Node, "processWPQueueItem", "n", n.String(), "errfellow", errfellow)
-			n.telemetryClient.WorkPackageSharingFailed(wpItem.eventID, n.PeerID32(coworker.PeerID), errfellow.Error())
+			n.telemetryClient.WorkPackageSharingFailed(wpItem.EventID, n.PeerID32(coworker.PeerID), errfellow.Error())
 
 		}
 		mutex.Lock()
@@ -323,77 +285,32 @@ func (n *Node) processWPQueueItem(wpItem *WPQueueItem) bool {
 			Slot:           guarantee.Slot,
 			Guarantors:     guarantorIndices,
 		}
-		n.telemetryClient.GuaranteeBuilt(wpItem.eventID, guaranteeOutline)
-		n.broadcast(ctx, guarantee, wpItem.eventID) // send via CE135
-		n.telemetryClient.GuaranteesDistributed(wpItem.eventID)
+		n.telemetryClient.GuaranteeBuilt(wpItem.EventID, guaranteeOutline)
+		n.broadcast(ctx, guarantee, wpItem.EventID) // send via CE135
+		n.telemetryClient.GuaranteesDistributed(wpItem.EventID)
 
-		go saveGuaranteeDerivation(GuaranteeDerivation{
-			Bundle:            bundle,
-			CoreIndex:         coreIndex,
-			SegmentRootLookup: segmentRootLookup,
-			Guarantee:         guarantee,
-			SpecDerivation:    d,
-		})
 		err := n.processGuarantee(guarantee, "processWPQueueItem") // should it be curr_statedb.GetTimeslot() here?
 		if err != nil {
 			log.Error(log.G, "processWPQueueItem:processGuarantee:", "n", n.String(), "err", err)
 		}
-		log.Trace(log.G, "processWPQueueItem Guarantee processed", "n", n.String(), "guarantee.Slot", guarantee.Slot, "numSig", len(guarantee.Signatures), "guarantee.Signatures", types.ToJSONHex(guarantee.Signatures), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
+		log.Trace(log.G, "processWPQueueItem Guarantee processed", "n", n.String(), "guarantee.Slot", guarantee.Slot, "numSig", len(guarantee.Signatures), "guarantee.Signatures", types.ToJSONHex(guarantee.Signatures), "nextAttemptAfterTS", wpItem.NextAttemptAfterTS)
 	} else {
-		log.Debug(log.G, "processWPQueueItem Guarantee not enough signatures", "n", n.String(), "guarantee.Signatures", types.ToJSONHex(guarantee.Signatures), "nextAttemptAfterTS", wpItem.nextAttemptAfterTS)
+		log.Debug(log.G, "processWPQueueItem Guarantee not enough signatures", "n", n.String(), "guarantee.Signatures", types.ToJSONHex(guarantee.Signatures), "nextAttemptAfterTS", wpItem.NextAttemptAfterTS)
 		return false
 	}
 
 	return true
 }
 
-func GenerateAlgoPayload(sz int, isSimple bool) []byte {
-	if isSimple {
-		algo_payload := make([]byte, 2)
-		for i := 0; i < 1; i++ {
-			algo_payload[i*2] = byte(sz)
-			algo_payload[i*2+1] = byte(5)
-		}
-		fmt.Printf("GenerateAlgoPayload SIMPLE: sz=%d, payload: %x:\n", sz, algo_payload)
-		return algo_payload
+// executeWorkPackageBundle can be called by a guarantor OR an auditor -- the caller MUST do  VerifyBundle call prior to execution (verifying the imported segments)
+// If eventID is non-zero, telemetry events for Authorized and Refined will be emitted
+func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle,
+	segmentRootLookup types.SegmentRootLookup, slot uint32, firstGuarantorOrAuditor bool, eventID uint64) (work_report types.WorkReport, err error) {
+	targetAnchor := package_bundle.WorkPackage.RefineContext.Anchor
+	targetStateDB, err := n.getTargetStateDB(targetAnchor.String())
+	if err != nil {
+		return work_report, fmt.Errorf("executeWorkPackageBundle:getTargetStateDB: %v", err)
 	}
-	algo_payload := make([]byte, sz*2)
-	useCase := "top40"
-	var algos []uint8
-	top5 := []uint8{7, 8, 9, 11, 53}
-	top10 := []uint8{0, 4, 7, 8, 9, 11, 23, 27, 52, 53}
-	top20 := []uint8{0, 1, 3, 4, 7, 8, 9, 11, 12, 13, 23, 26, 27, 28, 35, 36, 50, 51, 52, 53}
-	top30 := []uint8{0, 1, 2, 3, 4, 5, 7, 8, 9, 11, 12, 13, 21, 22, 23, 26, 27, 28, 32, 34, 35, 36, 45, 47, 48, 49, 50, 51, 52, 53}
-	top40 := []uint8{0, 1, 2, 3, 4, 5, 7, 8, 9, 11, 12, 13, 18, 19, 20, 21, 22, 23, 24, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 39, 40, 42, 45, 47, 48, 49, 50, 51, 52, 53}
-	all := []uint8{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 42, 44, 45, 47, 48, 49, 50, 51, 52, 53} // exclude 10, 15, 16, 41, 43, 46
-	switch useCase {
-	case "top5":
-		algos = top5
-	case "top10":
-		algos = top10
-	case "top20":
-		algos = top20
-	case "top30":
-		algos = top30
-	case "top40":
-		algos = top40
-	default:
-		algos = all
-	}
-	algo_payload_str := make([]string, sz)
-	for j := 0; j < sz; j++ {
-		// pick a random element from algos
-		p := algos[rand.Intn(len(algos))]
-
-		// pick a random number from c_min, c_min+c_rand
-		c_rand := rand.Intn(8)
-		c_min := 30
-
-		c_n := c_min + c_rand
-		algo_payload[j*2] = byte(p)
-		algo_payload[j*2+1] = byte(c_n)
-		algo_payload_str[j] = fmt.Sprintf("algo_%03d\t n=%d^3\t Iter=%d\n", p, c_n, c_n*c_n*c_n)
-	}
-	fmt.Printf("GenerateAlgoPayload: sz=%d, payload: %x:\n%v\n", sz, algo_payload, algo_payload_str)
-	return algo_payload
+	workReport, err := targetStateDB.ExecuteWorkPackageBundle(workPackageCoreIndex, package_bundle, segmentRootLookup, slot, firstGuarantorOrAuditor, eventID, n.pvmBackend)
+	return workReport, err
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"net/http"
 	"net/rpc"
@@ -752,16 +753,16 @@ func (j *Jam) AuditWorkPackage(req []string, res *string) error {
 	log.RecordLogs()
 	log.EnableModule(log.FirstGuarantorOrAuditor)
 
-	workReport2, _, wr_pvm_elapsed, _, err := j.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, j.statedb.GetTimeslot(), true, 0)
+	workReport2, err := j.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, j.statedb.GetTimeslot(), true, 0)
 	if err != nil {
 		return err
 	}
 
 	// check that workReport == workReport2
 	if workReport.Hash() == workReport2.Hash() {
-		log.Info(log.Node, "AuditWorkPackage", "auditResult", workReport.Hash() == workReport2.Hash(), "workReport", workReport, "elapsed", wr_pvm_elapsed)
+		log.Info(log.Node, "AuditWorkPackage", "auditResult", workReport.Hash() == workReport2.Hash(), "workReport", workReport)
 	} else {
-		log.Error(log.Node, "AuditWorkPackage", "auditResult", workReport.Hash() == workReport2.Hash(), "workReport", workReport, "elapsed", wr_pvm_elapsed)
+		log.Error(log.Node, "AuditWorkPackage", "auditResult", workReport.Hash() == workReport2.Hash(), "workReport", workReport)
 	}
 	logs, err := log.GetRecordedLogs()
 	if err != nil {
@@ -1400,3 +1401,235 @@ func decodeapi(objectType, input string) (string, error) {
 
 // Port and network configuration
 // Note: Port variables are defined in node_rpc_port.go
+
+// SendRawTransaction submits a signed transaction to the mempool
+func (n *NodeContent) SendRawTransaction(signedTxData []byte) (common.Hash, error) {
+	// Parse the raw transaction
+	tx, err := statedb.ParseRawTransaction(signedTxData)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("failed to parse transaction: %v", err)
+	}
+
+	// Recover sender from signature
+	sender, err := tx.RecoverSender()
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("failed to recover sender: %v", err)
+	}
+	tx.From = sender
+
+	// Get or create transaction pool
+	if n.txPool == nil {
+		n.txPool = NewTxPool()
+		log.Info(log.Node, "SendRawTransaction: Created new TxPool")
+	}
+
+	// Validate signature - sender recovery already done above, verify it's valid
+	if sender == (common.Address{}) {
+		return common.Hash{}, fmt.Errorf("invalid signature: unable to recover sender address")
+	}
+
+	// Validate nonce against current state
+	currentNonce, err := n.statedb.GetTransactionCount(sender)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("failed to get current nonce for validation: %v", err)
+	}
+	if tx.Nonce < currentNonce {
+		return common.Hash{}, fmt.Errorf("nonce too low: transaction nonce %d, account nonce %d", tx.Nonce, currentNonce)
+	}
+
+	// Validate balance - sender must have enough to cover value + gas costs
+	balance, err := n.statedb.GetBalance(sender)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("failed to get balance for validation: %v", err)
+	}
+	balanceBig := new(big.Int).SetBytes(balance.Bytes())
+
+	// Calculate total cost: value + (gas * gasPrice)
+	gasCost := new(big.Int).Mul(new(big.Int).SetUint64(tx.Gas), tx.GasPrice)
+	totalCost := new(big.Int).Add(tx.Value, gasCost)
+
+	if balanceBig.Cmp(totalCost) < 0 {
+		return common.Hash{}, fmt.Errorf("insufficient funds: balance %s, required %s (value %s + gas cost %s)",
+			balanceBig.String(), totalCost.String(), tx.Value.String(), gasCost.String())
+	}
+
+	// Validate gas limit against block gas limit (RefineGasAllocation per work item)
+	maxGasLimit := uint64(types.RefineGasAllocation)
+	if tx.Gas > maxGasLimit {
+		return common.Hash{}, fmt.Errorf("gas limit too high: transaction gas %d exceeds maximum %d", tx.Gas, maxGasLimit)
+	}
+
+	// Minimum gas for basic transaction is 1000
+	const minTxGas = 1000
+	if tx.Gas < minTxGas {
+		return common.Hash{}, fmt.Errorf("gas limit too low: transaction gas %d is below minimum %d", tx.Gas, minTxGas)
+	}
+
+	// Add transaction to mempool
+	err = n.txPool.AddTransaction(tx)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("failed to add transaction to mempool: %v", err)
+	}
+
+	log.Info(log.Node, "SendRawTransaction: Transaction added to mempool",
+		"hash", tx.Hash.String(),
+		"from", tx.From.String(),
+		"nonce", tx.Nonce)
+
+	return tx.Hash, nil
+}
+
+// JNode interface implementations - JAM-specific methods
+
+func (n *NodeContent) GetService(service uint32) (sa *types.ServiceAccount, ok bool, err error) {
+	return n.statedb.GetService(service)
+}
+
+func (n *NodeContent) GetServiceStorage(serviceID uint32, storageKey []byte) ([]byte, bool, error) {
+	return n.statedb.ReadServiceStorage(serviceID, storageKey)
+}
+
+func (n *NodeContent) ReadStateWitnessRef(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error) {
+	return n.statedb.ReadStateWitnessRef(serviceID, objectID, fetchPayloadFromDA)
+}
+
+func (n *NodeContent) ReadStateWitnessRaw(serviceID uint32, objectID common.Hash) (types.StateWitnessRaw, bool, common.Hash, error) {
+	return n.statedb.ReadStateWitnessRaw(serviceID, objectID)
+}
+
+func (n *NodeContent) GetStateWitnesses(workReports []*types.WorkReport) ([]types.StateWitness, common.Hash, error) {
+	return n.statedb.GetStateWitnesses(workReports)
+}
+
+// JNode interface implementations - Basic info methods
+
+func (n *NodeContent) GetChainId() uint64 {
+	return n.statedb.GetChainId()
+}
+
+func (n *NodeContent) GetAccounts() []common.Address {
+	return n.statedb.GetAccounts()
+}
+
+func (n *NodeContent) GetGasPrice() uint64 {
+	return n.statedb.GetGasPrice()
+}
+
+// JNode interface implementations - Contract State methods
+
+func (n *NodeContent) GetBalance(address common.Address, blockNumber string) (common.Hash, error) {
+	targetStateDB, err := n.getTargetStateDB(blockNumber)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return targetStateDB.GetBalance(address)
+}
+
+func (n *NodeContent) GetStorageAt(address common.Address, position common.Hash, blockNumber string) (common.Hash, error) {
+	targetStateDB, err := n.getTargetStateDB(blockNumber)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return targetStateDB.GetStorageAt(address, position)
+}
+
+func (n *NodeContent) GetTransactionCount(address common.Address, blockNumber string) (uint64, error) {
+	targetStateDB, err := n.getTargetStateDB(blockNumber)
+	if err != nil {
+		return 0, err
+	}
+	return targetStateDB.GetTransactionCount(address)
+}
+
+func (n *NodeContent) GetCode(address common.Address, blockNumber string) ([]byte, error) {
+	targetStateDB, err := n.getTargetStateDB(blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	return targetStateDB.GetCode(address)
+}
+
+// JNode interface implementations - Transaction Operations
+
+func (n *NodeContent) EstimateGas(from common.Address, to *common.Address, gas uint64, gasPrice uint64, value uint64, data []byte) (uint64, error) {
+	return n.statedb.EstimateGas(from, to, gas, gasPrice, value, data, n.pvmBackend)
+}
+
+func (n *NodeContent) Call(from common.Address, to *common.Address, gas uint64, gasPrice uint64, value uint64, data []byte, blockNumber string) ([]byte, error) {
+	return n.statedb.Call(from, to, gas, gasPrice, value, data, blockNumber, n.pvmBackend)
+}
+
+// JNode interface implementations - Transaction Queries
+
+func (n *NodeContent) GetTransactionReceipt(txHash common.Hash) (*statedb.EthereumTransactionReceipt, error) {
+	serviceID := uint32(n.GetChainId())
+	return n.statedb.GetTransactionReceipt(serviceID, txHash)
+}
+
+func (n *NodeContent) GetTransactionByHash(txHash common.Hash) (*statedb.EthereumTransactionResponse, error) {
+	serviceID := uint32(n.GetChainId())
+	receipt, ref, err := n.statedb.GetTransactionByHash(serviceID, txHash)
+	if err != nil {
+		return nil, err
+	}
+	if receipt == nil {
+		return nil, nil // Transaction not found
+	}
+
+	// Convert the original payload to Ethereum transaction format
+	ethTx, err := statedb.ConvertPayloadToEthereumTransaction(receipt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert payload to Ethereum transaction: %v", err)
+	}
+
+	// Get block metadata from the receipt's Ref field
+	evmBlock, err := n.statedb.ReadBlockByNumber(serviceID, ref.EvmBlock)
+	if err != nil {
+		// If block can't be read, return transaction without block metadata (pending state)
+		log.Warn(log.Node, "GetTransactionByHash: Failed to read block metadata",
+			"txHash", txHash.String(), "blockNum", ref.EvmBlock, "error", err)
+		return ethTx, nil
+	}
+
+	// Populate block metadata
+	blockHash := evmBlock.ComputeHash().String()
+	blockNumber := fmt.Sprintf("0x%x", ref.EvmBlock)
+	txIndex := fmt.Sprintf("0x%x", ref.TxSlot)
+	ethTx.BlockHash = &blockHash
+	ethTx.BlockNumber = &blockNumber
+	ethTx.TransactionIndex = &txIndex
+
+	return ethTx, nil
+}
+
+func (n *NodeContent) GetTransactionByBlockHashAndIndex(blockHash common.Hash, index uint32) (*statedb.EthereumTransactionResponse, error) {
+	serviceID := uint32(n.GetChainId())
+	return n.statedb.GetTransactionByBlockHashAndIndex(serviceID, blockHash, index)
+}
+
+func (n *NodeContent) GetTransactionByBlockNumberAndIndex(blockNumber string, index uint32) (*statedb.EthereumTransactionResponse, error) {
+	serviceID := uint32(n.GetChainId())
+	return n.statedb.GetTransactionByBlockNumberAndIndex(serviceID, blockNumber, index)
+}
+
+func (n *NodeContent) GetLogs(fromBlock, toBlock uint32, addresses []common.Address, topics [][]common.Hash) ([]statedb.EthereumLog, error) {
+	serviceID := uint32(n.GetChainId())
+	return n.statedb.GetLogs(serviceID, fromBlock, toBlock, addresses, topics)
+}
+
+// JNode interface implementations - Block Queries
+
+func (n *NodeContent) GetLatestBlockNumber() (uint32, error) {
+	serviceID := uint32(n.GetChainId())
+	return n.statedb.GetLatestBlockNumber(serviceID)
+}
+
+func (n *NodeContent) GetBlockByHash(blockHash common.Hash, fullTx bool) (*statedb.EthereumBlock, error) {
+	serviceID := uint32(n.GetChainId())
+	return n.statedb.GetBlockByHash(serviceID, blockHash, fullTx)
+}
+
+func (n *NodeContent) GetBlockByNumber(blockNumber string, fullTx bool) (*statedb.EthereumBlock, error) {
+	serviceID := uint32(n.GetChainId())
+	return n.statedb.GetBlockByNumberFormatted(serviceID, blockNumber, fullTx)
+}

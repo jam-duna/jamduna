@@ -699,14 +699,9 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 		return
 	}
 
-	wr, _, pvmElapsed, bundleSnapshot, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, n.statedb.GetTimeslot(), false, 0)
+	wr, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, n.statedb.GetTimeslot(), false, 0)
 	if err != nil {
 		return
-	}
-	if bundleSnapshot != nil && isWriteBundleAuditor {
-		// packageHash_coreIndex_slot_audit
-		desc := fmt.Sprintf("%s_%d_%d_%s", bundleSnapshot.Bundle.WorkPackage.Hash(), bundleSnapshot.CoreIndex, n.id, "audit")
-		n.writeLogWithDescription(bundleSnapshot, bundleSnapshot.Slot, desc, false)
 	}
 
 	select {
@@ -719,14 +714,14 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	auditPass := false
 	if spec.ErasureRoot == wr.AvailabilitySpec.ErasureRoot {
 		auditPass = true
-		log.Debug(log.Audit, "auditWorkReport:executeWorkPackageBundle PASS", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash(), "pvmElapsed", pvmElapsed)
+		log.Debug(log.Audit, "auditWorkReport:executeWorkPackageBundle PASS", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash())
 	} else {
-		log.Warn(log.Audit, "auditWorkReport:executeWorkPackageBundle FAIL", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash(), "pvmElapsed", pvmElapsed)
+		log.Warn(log.Audit, "auditWorkReport:executeWorkPackageBundle FAIL", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash())
 	}
 
 	judgement, err = n.MakeJudgement(workReport, auditPass)
 	elapse := common.ElapsedStr(start)
-	log.Debug(log.B, "auditWorkReport", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash(), "start time", start, "pvmElapsed", pvmElapsed, "total judge elapse", elapse)
+	log.Debug(log.B, "auditWorkReport", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash(), "start time", start, "total judge elapse", elapse)
 	return
 }
 
@@ -759,7 +754,8 @@ func (n *Node) fetchWorkPackageBundle(spec types.AvailabilitySpecifier, segmentR
 				continue
 			}
 			// Verify the bundle against the segment root lookup
-			verified, err := n.VerifyBundle(bundle, segmentRootLookup, eventID)
+			// TODO: get the bundle refine context statedb
+			verified, err := n.statedb.VerifyBundle(bundle, segmentRootLookup, eventID)
 			if err != nil {
 				log.Warn(log.Node, "fetchWorkPackageBundle: VerifyBundle errored", "err", err)
 				return types.WorkPackageBundle{}, fmt.Errorf("verify bundle failed: %w", err)
