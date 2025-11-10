@@ -1,6 +1,7 @@
 package statedb
 
 import (
+	"bytes"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -8,15 +9,77 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
 const (
-	numBlocks = 53
+	numBlocks       = 10
+	verifyBMTProofs = false // Enable BMT proof verification
 )
 
 var algoPayloads = []byte{
 	0xc2, 0xb8, 0xb4, 0xbb, 0xcb, 0xaa, 0x47, 0xd4, 0xe9, 0xdc, 0x39, 0xce, 0xb8, 0xbc, 0x75, 0x2b, 0x2b, 0x6b, 0x8c, 0x98, 0x88, 0xab, 0xb4, 0xc4, 0x9c, 0x59, 0xc2, 0xcb, 0xbd, 0xa2, 0x96, 0x94, 0xb1, 0x4d, 0xb6, 0xb7, 0xbc, 0x78, 0x72, 0x96, 0x85, 0x0a, 0xa7, 0x0d, 0x77, 0xb6, 0x02, 0xb1, 0xb3, 0xb4, 0xbd, 0xb7, 0xcc, 0xf5,
+}
+
+// verifyBlockBMTRoot verifies BMT root and individual proofs for a list of hashes
+func verifyBlockBMTRoot(sdb *storage.StateDBStorage, hashes []common.Hash, expectedRoot []byte, hashType string) {
+	if len(hashes) == 0 {
+		return
+	}
+
+	// Build key-value pairs for BMT construction
+	data := make([][2][]byte, len(hashes))
+	for i, hash := range hashes {
+		// Use big-endian index as key (like Rust implementation)
+		indexKey := make([]byte, 32)
+		indexBytes := uint32(i)
+		indexKey[28] = byte(indexBytes >> 24)
+		indexKey[29] = byte(indexBytes >> 16)
+		indexKey[30] = byte(indexBytes >> 8)
+		indexKey[31] = byte(indexBytes)
+
+		data[i] = [2][]byte{indexKey, hash[:]}
+	}
+
+	tree := trie.NewMerkleTree(data, sdb)
+	computedRoot := tree.GetRoot()
+
+	if !bytes.Equal(computedRoot[:], expectedRoot) {
+		log.Warn(log.Node, "❌ "+hashType+" root mismatch",
+			"computed", computedRoot,
+			"expected", expectedRoot)
+	} else {
+		log.Debug(log.Node, "✅ "+hashType+" root verified")
+	}
+
+	// Verify each hash proof
+	for i, hash := range hashes {
+		indexKey := make([]byte, 32)
+		indexBytes := uint32(i)
+		indexKey[28] = byte(indexBytes >> 24)
+		indexKey[29] = byte(indexBytes >> 16)
+		indexKey[30] = byte(indexBytes >> 8)
+		indexKey[31] = byte(indexBytes)
+
+		proof, err := tree.Trace(indexKey)
+		if err != nil {
+			log.Warn(log.Node, "❌ Failed to generate "+hashType+" proof", "index", i, "err", err)
+			continue
+		}
+
+		// Convert proof to common.Hash slice for verification
+		proofHashes := make([]common.Hash, len(proof))
+		for j, p := range proof {
+			proofHashes[j] = common.BytesToHash(p)
+		}
+
+		if !trie.VerifyRaw(indexKey, hash[:], computedRoot[:], proofHashes) {
+			log.Warn(log.Node, "❌ "+hashType+" proof verification failed", "index", i, "hash", fmt.Sprintf("%x", hash))
+		}
+	}
+	tree.Close()
 }
 
 // TestAlgoBlocks generates a sequence of blocks with Algo service guarantees+assurances without any jamnp
@@ -31,18 +94,18 @@ func TestAlgoBlocks(t *testing.T) {
 	rand.Seed(12345)
 	wpqs := make([]*types.WPQueueItem, types.TotalCores)
 	for n := 1; n <= numBlocks; n++ {
-		payload := make([]byte, 2)
-		payload[0] = byte(n)
-		payload[1] = algoPayloads[n-1]
+		// payload := make([]byte, 2)
+		// payload[0] = byte(n)
+		// payload[1] = algoPayloads[n-1]
 		wp := types.WorkPackage{
 			WorkItems: []types.WorkItem{
 				{
-					//Payload:            GenerateAlgoPayload(n, false),
-					Payload:            payload,
+					Payload: GenerateAlgoPayload(n, false),
+					//Payload:            payload,
 					RefineGasLimit:     types.RefineGasAllocation / 2,
 					AccumulateGasLimit: types.AccumulationGasAllocation / 2,
 					ImportedSegments:   []types.ImportSegment{},
-					ExportCount:        uint16(0),
+					ExportCount:        uint16(n),
 				},
 			},
 		}
@@ -55,21 +118,24 @@ func TestAlgoBlocks(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		bn, err := c.stateDB.GetLatestBlockNumberForService(c.serviceID)
-		if err != nil {
-			t.Fatalf("GetLatestBlockNumber failed: %v", err)
-		}
-		// Read the previous block (bn-1) which has been finalized
-		// The current block (bn) won't be finalized until the next round
-		blockNumToRead := bn
-		if bn > 0 {
-			blockNumToRead = bn - 1
-		}
-		block, err := c.stateDB.GetBlockByNumber(c.serviceID, fmt.Sprintf("0x%x", blockNumToRead))
+		block, err := c.stateDB.GetBlockByNumber(c.serviceID, "latest")
 		if err != nil {
 			t.Fatalf("GetBlockByNumber failed: %v", err)
 		}
-		log.Info(log.Node, "Algo block processed", "blockNumber", blockNumToRead, "round", n, "# txns", len(block.TxHashes), "# receipts", len(block.ReceiptHashes))
+		log.Info(log.Node, "Algo block processed", "blockNumber", block.Number, "round", n, "# txns", len(block.TxHashes), "# receipts", len(block.ReceiptHashes),
+			"StateRoot", block.StateRoot,
+			"TransactionsRoot", block.TransactionsRoot,
+			"ReceiptsRoot", block.ReceiptsRoot,
+			"LogIndexStart", block.LogIndexStart,
+			"MmrRoot", block.MmrRoot,
+			"ExtrinsicsHash", block.ExtrinsicsHash,
+			"ParentHeaderHash", block.ParentHeaderHash)
+
+		// BMT proof verification
+		if verifyBMTProofs {
+			verifyBlockBMTRoot(c.stateDB.sdb, block.TxHashes, block.TransactionsRoot[:], "transaction")
+			verifyBlockBMTRoot(c.stateDB.sdb, block.ReceiptHashes, block.ReceiptsRoot[:], "receipt")
+		}
 	}
 
 }

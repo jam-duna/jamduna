@@ -10,197 +10,152 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-// make block generate block prior to state execution
-func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecret, targetJCE uint32, ticketID common.Hash, extrinsic_pool *types.ExtrinsicPool) (bl *types.Block, err error) {
+func (s *StateDB) CollectExtrinsicData(
+	ctx context.Context,
+	targetJCE uint32,
+	extrinsicPool *types.ExtrinsicPool,
+) (types.ExtrinsicData, error) {
+
 	sf := s.GetSafrole()
-	isNewEpoch := sf.IsNewEpoch(targetJCE)
 	needWinningMarker := sf.IseWinningMarkerNeeded(targetJCE)
-	stateRoot := s.GetStateRoot()
-	s.JamState.CheckInvalidCoreIndex()
-	if err := s.RecoverJamState(stateRoot); err != nil {
-		return nil, err
-	}
-	s.JamState.CheckInvalidCoreIndex()
-	s.Authoring = log.GeneralAuthoring
 
-	b := types.NewBlock()
-	h := types.NewBlockHeader()
 	extrinsicData := types.NewExtrinsic()
-	h.ParentHeaderHash = s.HeaderHash
-	h.ParentStateRoot = stateRoot
-	h.Slot = targetJCE
-	b.Header = *h
-	// eq 71
-	if isNewEpoch {
-		epochMarker := sf.GenerateEpochMarker()
-		//a tuple of the epoch randomness and a sequence of Bandersnatch keys defining the Bandersnatch valida- tor keys (kb) beginning in the next epoch
-		h.EpochMark = epochMarker
-	}
-	// Extrinsic Data has 5 different Extrinsics
-	// E_P - Preimages:  aggregate queuedPreimageLookups into extrinsicData.Preimages
-	extrinsicData.Preimages = make([]types.Preimages, 0)
 
-	// Make sure this Preimages is ready to be included..
-	queued_preimage := extrinsic_pool.GetPreimageFromPool()
-	log.Trace(log.P, "MakeBlock: Queued Preimages", "len", len(queued_preimage), "slot", targetJCE)
-	for _, preimageLookup := range queued_preimage {
-		_, err := s.ValidateAddPreimage(preimageLookup.Requester, preimageLookup.Blob)
-		if err == nil {
-			pl, err := preimageLookup.DeepCopy()
-			if err != nil {
-				continue
-			}
-			extrinsicData.Preimages = append(extrinsicData.Preimages, pl)
-			extrinsic_pool.RemoveOldPreimages([]types.Preimages{*preimageLookup}, targetJCE)
-		} else {
+	// ---------- E_P: Preimages ----------
+	extrinsicData.Preimages = make([]types.Preimages, 0)
+	queuedPreimage := extrinsicPool.GetPreimageFromPool()
+	log.Trace(log.P, "MakeBlock: Queued Preimages", "len", len(queuedPreimage), "slot", targetJCE)
+
+	for _, preimageLookup := range queuedPreimage {
+		if _, err := s.ValidateAddPreimage(preimageLookup.Requester, preimageLookup.Blob); err != nil {
 			log.Warn(log.P, "ValidateLookup", "err", err)
-			//extrinsic_pool.RemoveOldPreimages([]types.Preimages{*preimageLookup}, targetJCE)
 			continue
 		}
+		pl, err := preimageLookup.DeepCopy()
+		if err != nil {
+			continue
+		}
+		extrinsicData.Preimages = append(extrinsicData.Preimages, pl)
+		extrinsicPool.RemoveOldPreimages([]types.Preimages{*preimageLookup}, targetJCE)
 	}
 
-	// 156: These pairs must be ordered and without duplicates
+	// ordered & dedup by Requester (using the original bubble sort implementation)
 	for i := 0; i < len(extrinsicData.Preimages); i++ {
 		for j := 0; j < len(extrinsicData.Preimages)-1; j++ {
 			if extrinsicData.Preimages[j].Requester > extrinsicData.Preimages[j+1].Requester {
-				extrinsicData.Preimages[j], extrinsicData.Preimages[j+1] = extrinsicData.Preimages[j+1], extrinsicData.Preimages[j]
+				extrinsicData.Preimages[j], extrinsicData.Preimages[j+1] =
+					extrinsicData.Preimages[j+1], extrinsicData.Preimages[j]
 			}
 		}
 	}
 
-	// E_A - Assurances -- these have already been signature checked and the response is ordered by validator index
-	//   HOWEVER, the bitfield needs to be validated with respect to availability_assignment (nil vs timeslot)
-	unvalidatedAssurances := extrinsic_pool.GetAssurancesFromPool(h.ParentHeaderHash)
-	// HERE we use availability_assignment validate all assurances and sort them
-	extrinsicData.Assurances, err = s.GetValidAssurances(unvalidatedAssurances, h.ParentHeaderHash, true)
+	// ---------- E_A: Assurances ----------
+	unvalidatedAssurances := extrinsicPool.GetAssurancesFromPool(s.HeaderHash)
+	assurances, err := s.GetValidAssurances(unvalidatedAssurances, s.HeaderHash, true)
 	if err != nil {
-		return nil, err
+		return types.ExtrinsicData{}, err
 	}
+	extrinsicData.Assurances = assurances
 
+	// Build tmpState for Guarantees verification
 	tmpState := s.JamState.Copy()
 	tmpState.ComputeAvailabilityAssignments(extrinsicData.Assurances, targetJCE)
-	// E_G - Guarantees: aggregate queuedGuarantees into extrinsicData.Guarantees
+
+	// ---------- E_G: Guarantees ----------
 	extrinsicData.Guarantees = make([]types.Guarantee, 0)
+
 	currRotationIdx := s.GetTimeslot() / types.ValidatorCoreRotationPeriod
 	previousIdx := currRotationIdx - 1
 	acceptedTimeslot := previousIdx * types.ValidatorCoreRotationPeriod
-	queuedGuarantees := extrinsic_pool.GetGuaranteesFromPool(acceptedTimeslot)
-	log.Trace(log.G, "MakeBlock: Queued Guarantees for slot", "len", len(queuedGuarantees), "slot", targetJCE, "acceptedTs", acceptedTimeslot)
-	// collect and pre-validate queued guarantees
+
+	queuedGuarantees := extrinsicPool.GetGuaranteesFromPool(acceptedTimeslot)
+	log.Trace(log.G, "MakeBlock: Queued Guarantees for slot",
+		"len", len(queuedGuarantees), "slot", targetJCE, "acceptedTs", acceptedTimeslot)
+
 	var valid []types.Guarantee
 	tmpstatedb := s.Copy()
-	tmpstatedb.JamState = tmpState // use the tmp state (updated availability_assignment) to validate guarantees, which can avoid the core engaged error but still validated state transition
+	tmpstatedb.JamState = tmpState
+
 	for _, q := range queuedGuarantees {
 		g, err := q.DeepCopy()
 		if err != nil {
 			continue
 		}
-
-		// per-guarantee MakeBlock checks (core index, sigs, assignment, gas, timeouts…)
 		if err := tmpstatedb.VerifyGuaranteeBasic(g, targetJCE); err != nil {
 			if AcceptableGuaranteeError(err) {
-				// don't remove from pool if ErrGFutureReportSlot, ErrGCoreEngaged
 				log.Warn(log.G, "[IGNORE]MakeBlock: VerifyGuaranteeBasic:acceptable error", "err", err)
 			} else {
-				extrinsic_pool.RemoveOldGuarantees(g, types.GuaranteeDiscardReasonCannotReportOnChain)
+				extrinsicPool.RemoveOldGuarantees(g, types.GuaranteeDiscardReasonCannotReportOnChain)
 			}
 			continue
-		} else {
-			valid = append(valid, g)
 		}
-		// cancellation point
+		valid = append(valid, g)
+
 		if err := ctx.Err(); err != nil {
-			return bl, fmt.Errorf("MakeBlock: %w", err)
+			return types.ExtrinsicData{}, fmt.Errorf("CollectExtrinsicData: %w", err)
 		}
 	}
 
-	// inter-dependency checks among guarantees
+	// Inter-dependency: recent work / prerequisites / uniqueness by wph + coreIndex
 	var final []types.Guarantee
 	p_w := make(map[common.Hash]bool)
 	p_c := make(map[uint16]bool)
+
 	for _, g := range valid {
 		if err := s.checkRecentWorkPackage(g, valid); err != nil {
-			extrinsic_pool.RemoveOldGuarantees(g, types.GuaranteeDiscardReasonCannotReportOnChain)
+			extrinsicPool.RemoveOldGuarantees(g, types.GuaranteeDiscardReasonCannotReportOnChain)
 			continue
 		}
 		if err := s.checkPrereq(g, valid); err != nil {
-			extrinsic_pool.RemoveOldGuarantees(g, types.GuaranteeDiscardReasonCannotReportOnChain)
+			extrinsicPool.RemoveOldGuarantees(g, types.GuaranteeDiscardReasonCannotReportOnChain)
 			continue
 		}
 		wph := g.Report.GetWorkPackageHash()
 		coreIndex := uint16(g.Report.CoreIndex)
-		_, ok := p_w[wph]
-		_, ok2 := p_c[coreIndex]
-		if !ok && !ok2 {
-			p_w[wph] = true       // unique by wph
-			p_c[coreIndex] = true // unique by coreindex
 
+		if !p_w[wph] && !p_c[coreIndex] {
+			p_w[wph] = true
+			p_c[coreIndex] = true
 			final = append(final, g)
 		} else {
-			extrinsic_pool.RemoveOldGuarantees(g, types.GuaranteeDiscardReasonReplacedByBetter)
+			extrinsicPool.RemoveOldGuarantees(g, types.GuaranteeDiscardReasonReplacedByBetter)
 		}
 	}
+
 	sort.Slice(final, func(i, j int) bool {
 		return final[i].Report.CoreIndex < final[j].Report.CoreIndex
 	})
 	extrinsicData.Guarantees = final
 
-	// E_D - Disputes: aggregate queuedDisputes into extrinsicData.Disputes
-	// d := s.GetJamState()
+	// ---------- E_D: Disputes ----------
+	// TODO retained; per your original note, bring it in if needed
 
-	// extrinsicData.Disputes = make([]types.Dispute, 0)
-	// dispute := FormDispute(s.queuedVotes)
-	// if d.NeedsOffendersMarker(&dispute) {
-	// 	// Handle the case where the dispute does not need an offenders marker.
-	// 	OffendMark, err := d.GetOffenderMark(dispute)
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-	// 	h.OffendersMark = OffendMark.OffenderKey
-	// }
-
-	// TODO: 103 Verdicts v must be ordered by report hash.
-	// TODO: 104 Offender signatures c and f must each be ordered by the validator’s Ed25519 key.
-	// TODO: 105 There may be no duplicate report hashes within the extrinsic, nor amongst any past reported hashes.
-	// target_Epoch, target_Phase := sf.EpochAndPhase(targetJCE)
-
-	// eq 72
-	if needWinningMarker {
-		winningMarker, err := sf.GenerateWinningMarker()
-		//block is the first after the end of the submission period for tickets and if the ticket accumulator is saturated
-		if err == nil {
-			h.TicketsMark = winningMarker
-		}
-	} else {
-		// If there's new ticketID, add them into extrinsic
-		// Question: can we submit tickets at the exact tail end block?
+	// ---------- Tickets ----------
+	if !needWinningMarker {
 		extrinsicData.Tickets = make([]types.Ticket, 0)
-		// add the limitation for receiving tickets
-		if s.JamState.SafroleState.IsTicketSubmissionClosed(targetJCE) && !isNewEpoch {
-			// s.queuedTickets = make(map[common.Hash]types.Ticket)
 
-		} else {
-			// get the ticket from the pool by using the next_n2 entropy
-			next_n2 := s.JamState.SafroleState.GetNextN2(targetJCE)
-			tmp_accumulator := make([]types.TicketBody, len(s.JamState.SafroleState.NextEpochTicketsAccumulator))
-			copy(tmp_accumulator, s.JamState.SafroleState.NextEpochTicketsAccumulator)
-			// remove the tickets that already in state from the pool
-			for _, ticket := range tmp_accumulator {
-				extrinsic_pool.RemoveTicketFromPool(ticket.Id, next_n2)
+		if !s.JamState.SafroleState.IsTicketSubmissionClosed(targetJCE) {
+			nextN2 := s.JamState.SafroleState.GetNextN2(targetJCE)
+
+			tmpAcc := make([]types.TicketBody, len(s.JamState.SafroleState.NextEpochTicketsAccumulator))
+			copy(tmpAcc, s.JamState.SafroleState.NextEpochTicketsAccumulator)
+
+			for _, ticket := range tmpAcc {
+				extrinsicPool.RemoveTicketFromPool(ticket.Id, nextN2)
 			}
-			// get the clean tickets out from the pool
-			tickets := extrinsic_pool.GetTicketsFromPool(next_n2)
-			SortTicketsById(tickets) // first include the better id
+
+			tickets := extrinsicPool.GetTicketsFromPool(nextN2)
+			SortTicketsById(tickets)
 			if len(tickets) > types.MaxTicketsPerExtrinsic {
 				tickets = tickets[:types.MaxTicketsPerExtrinsic]
 			}
+
 			for _, ticket := range tickets {
-				ticket_body := ticket.ToBody()
-				tmp_accumulator = append(tmp_accumulator, ticket_body)
+				tmpAcc = append(tmpAcc, ticket.ToBody())
 			}
-			SortTicketBodies(tmp_accumulator)
-			tmp_accumulator = TrimTicketBodies(tmp_accumulator)
-			// only include the tickets that will be included in the accumulator
+			SortTicketBodies(tmpAcc)
+			tmpAcc = TrimTicketBodies(tmpAcc)
+
 			for _, ticket := range tickets {
 				t, err := ticket.DeepCopy()
 				if err != nil {
@@ -210,52 +165,107 @@ func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecre
 				if s.JamState.SafroleState.InTicketAccumulator(ticketID) {
 					continue
 				}
-				if TicketInTmpAccumulator(ticketID, tmp_accumulator) {
+				if TicketInTmpAccumulator(ticketID, tmpAcc) {
 					extrinsicData.Tickets = append(extrinsicData.Tickets, t)
-					// shawn to check: should we remove tickets here after inclusion? so that even if tickets are "bad" - they wont get proposed repeatedly
-					//extrinsic_pool.RemoveTicketFromPool(ticketID, next_n2)
 				} else {
-					extrinsic_pool.RemoveTicketFromPool(ticketID, next_n2)
+					extrinsicPool.RemoveTicketFromPool(ticketID, nextN2)
 				}
+
 				select {
 				case <-ctx.Done():
-					return bl, fmt.Errorf("MakeBlock: Add ticket canceled")
+					return types.ExtrinsicData{}, fmt.Errorf("CollectExtrinsicData: Add ticket canceled")
 				default:
 				}
 			}
+		}
+	}
 
+	return extrinsicData, nil
+}
+func (s *StateDB) BuildBlock(
+	ctx context.Context,
+	credential types.ValidatorSecret,
+	targetJCE uint32,
+	ticketID common.Hash,
+	extrinsicData *types.ExtrinsicData,
+) (*types.Block, error) {
+	sf := s.GetSafrole()
+	isNewEpoch := sf.IsNewEpoch(targetJCE)
+	needWinningMarker := sf.IseWinningMarkerNeeded(targetJCE)
+
+	stateRoot := s.GetStateRoot()
+	s.JamState.CheckInvalidCoreIndex()
+	if err := s.RecoverJamState(stateRoot); err != nil {
+		return nil, err
+	}
+	s.JamState.CheckInvalidCoreIndex()
+	s.Authoring = log.GeneralAuthoring
+
+	// 2) Assemble Header
+	h := types.NewBlockHeader()
+	h.ParentHeaderHash = s.HeaderHash
+	h.ParentStateRoot = stateRoot
+	h.Slot = targetJCE
+
+	if isNewEpoch {
+		epochMarker := sf.GenerateEpochMarker()
+		h.EpochMark = epochMarker
+	}
+
+	if needWinningMarker {
+		winningMarker, err := sf.GenerateWinningMarker()
+		if err == nil {
+			h.TicketsMark = winningMarker
 		}
 	}
 
 	h.ExtrinsicHash = extrinsicData.Hash()
-	author_index, err := sf.GetAuthorIndex(credential.BandersnatchPub.Hash(), "Curr")
-	if err != nil {
-		return bl, err
-	}
-	h.AuthorIndex = author_index
-	b.Extrinsic = extrinsicData
 
-	block_author_ietf_priv, err := ConvertBanderSnatchSecret(credential.BandersnatchSecret)
+	authorIndex, err := sf.GetAuthorIndex(credential.BandersnatchPub.Hash(), "Curr")
 	if err != nil {
-		return bl, err
+		return nil, err
 	}
-	block_author_ietf_pub, err := ConvertBanderSnatchPub(credential.BandersnatchPub[:])
-	if err != nil {
-		return bl, err
-	}
-
-	// For Primary, Verify ticketID actually matched the expected winning ticket
-	_, ticketIDErr := s.ValidateVRFSealInput(ticketID, targetJCE)
-	if ticketIDErr != nil {
-		return bl, err
-	}
-
+	h.AuthorIndex = authorIndex
+	fmt.Printf("author %d %v\n", authorIndex, credential.BandersnatchPub.Hash().Hex())
+	// 3) Assemble Block
+	b := types.NewBlock()
 	b.Header = *h
-	sealedBlock, sealErr := s.SealBlockWithEntropy(block_author_ietf_pub, block_author_ietf_priv, author_index, targetJCE, b)
-	if sealErr != nil {
-		return bl, sealErr
+	b.Extrinsic = *extrinsicData
+
+	// 4) VRF / Seal
+	blockAuthorPriv, err := ConvertBanderSnatchSecret(credential.BandersnatchSecret)
+	if err != nil {
+		return nil, err
 	}
+	blockAuthorPub, err := ConvertBanderSnatchPub(credential.BandersnatchPub[:])
+	if err != nil {
+		return nil, err
+	}
+
+	if _, ticketErr := s.ValidateVRFSealInput(ticketID, targetJCE); ticketErr != nil {
+		return nil, ticketErr
+	}
+
+	sealedBlock, sealErr := s.SealBlockWithEntropy(
+		blockAuthorPub,
+		blockAuthorPriv,
+		authorIndex,
+		targetJCE,
+		b,
+	)
+	if sealErr != nil {
+		return nil, sealErr
+	}
+
 	return sealedBlock, nil
+}
+
+func (s *StateDB) MakeBlock(ctx context.Context, credential types.ValidatorSecret, targetJCE uint32, ticketID common.Hash, extrinsic_pool *types.ExtrinsicPool) (bl *types.Block, err error) {
+	extrinsicData, err := s.CollectExtrinsicData(ctx, targetJCE, extrinsic_pool)
+	if err != nil {
+		return nil, err
+	}
+	return s.BuildBlock(ctx, credential, targetJCE, ticketID, &extrinsicData)
 }
 
 func (s *StateDB) ReSignDisputeBlock(credential types.ValidatorSecret, new_assurances []types.Assurance) error {

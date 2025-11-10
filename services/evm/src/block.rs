@@ -18,7 +18,7 @@ use crate::{
     sharding::format_object_id,
 };
 
-const BLOCK_HEADER_SIZE: usize = 476;
+const BLOCK_HEADER_SIZE: usize = 580;
 const HASH_SIZE: usize = 32;
 const BLOOM_SIZE: usize = 256;
 const MAX_BLOCKS_IN_JAM_STATE: u64 = 403_200; // 28 days worth of blocks at 6s each
@@ -37,7 +37,7 @@ fn block_number_to_object_id(block_number: u32) -> ObjectId {
 /// This structure is exported to DA as ObjectKind::Block
 #[derive(Debug, Clone)]
 pub struct EvmBlockPayload {
-    // 476-byte fixed header (hashed for block ID)
+    // 580-byte fixed header (hashed for block ID)
     /// Block number
     pub number: u64,
     /// Previous block hash
@@ -48,8 +48,16 @@ pub struct EvmBlockPayload {
     pub transactions_root: [u8; 32],
     /// JAM state root
     pub state_root: [u8; 32],
+    /// Log index start
+    pub log_index_start: u64,
     /// BMT root of receipts
     pub receipts_root: [u8; 32],
+    /// MMR root
+    pub mmr_root: [u8; 32],
+    /// Extrinsics hash
+    pub extrinsics_hash: [u8; 32],
+    /// Parent header hash
+    pub parent_header_hash: [u8; 32],
     /// Builder address
     pub miner: [u8; 20],
     /// JAM entropy
@@ -85,7 +93,15 @@ impl EvmBlockPayload {
         offset += HASH_SIZE;
         buffer[offset..offset + HASH_SIZE].copy_from_slice(&self.state_root);
         offset += HASH_SIZE;
+        buffer[offset..offset + 8].copy_from_slice(&self.log_index_start.to_le_bytes());
+        offset += 8;
         buffer[offset..offset + HASH_SIZE].copy_from_slice(&self.receipts_root);
+        offset += HASH_SIZE;
+        buffer[offset..offset + HASH_SIZE].copy_from_slice(&self.mmr_root);
+        offset += HASH_SIZE;
+        buffer[offset..offset + HASH_SIZE].copy_from_slice(&self.extrinsics_hash);
+        offset += HASH_SIZE;
+        buffer[offset..offset + HASH_SIZE].copy_from_slice(&self.parent_header_hash);
         offset += HASH_SIZE;
         buffer[offset..offset + 20].copy_from_slice(&self.miner);
         offset += 20;
@@ -132,7 +148,7 @@ impl EvmBlockPayload {
 
         let mut offset = 0;
 
-        // Parse fixed header (476 bytes)
+        // Parse fixed header (580 bytes)
         let number = u64::from_le_bytes(data[offset..offset + 8].try_into().map_err(|_| "Invalid number")?);
         offset += 8;
 
@@ -152,8 +168,23 @@ impl EvmBlockPayload {
             .try_into().map_err(|_| "Invalid state_root")?;
         offset += HASH_SIZE;
 
+        let log_index_start = u64::from_le_bytes(data[offset..offset + 8].try_into().map_err(|_| "Invalid log_index_start")?);
+        offset += 8;
+
         let receipts_root: [u8; HASH_SIZE] = data[offset..offset + HASH_SIZE]
             .try_into().map_err(|_| "Invalid receipts_root")?;
+        offset += HASH_SIZE;
+
+        let mmr_root: [u8; HASH_SIZE] = data[offset..offset + HASH_SIZE]
+            .try_into().map_err(|_| "Invalid mmr_root")?;
+        offset += HASH_SIZE;
+
+        let extrinsics_hash: [u8; HASH_SIZE] = data[offset..offset + HASH_SIZE]
+            .try_into().map_err(|_| "Invalid extrinsics_hash")?;
+        offset += HASH_SIZE;
+
+        let parent_header_hash: [u8; HASH_SIZE] = data[offset..offset + HASH_SIZE]
+            .try_into().map_err(|_| "Invalid parent_header_hash")?;
         offset += HASH_SIZE;
 
         let miner: [u8; 20] = data[offset..offset + 20]
@@ -221,7 +252,11 @@ impl EvmBlockPayload {
             logs_bloom,
             transactions_root,
             state_root,
+            log_index_start,
             receipts_root,
+            mmr_root,
+            extrinsics_hash,
+            parent_header_hash,
             miner,
             extra_data,
             size,
@@ -236,18 +271,32 @@ impl EvmBlockPayload {
     /// Create a new EvmBlockPayload with given parameters
     pub fn new(
         number: u64,
-        _entropy: [u8; 32],
         timestamp: u64,
         parent_hash: [u8; 32],
-        state_root: [u8; 32],
+        header: utils::functions::BlockHeader,
+        log_index_start: u64,
     ) -> Self {
+        use utils::functions::{log_info, format_object_id};
+
+        // Log all 4 header attributes
+        log_info(&format!("🏗️ Creating EVM block with header attributes:"));
+        log_info(&format!("  📄 Parent Header Hash: {}", format_object_id(header.parent_header_hash)));
+        log_info(&format!("  🌳 Parent State Root: {}", format_object_id(header.parent_state_root)));
+        log_info(&format!("  📦 Extrinsic Hash: {}", format_object_id(header.extrinsic_hash)));
+        log_info(&format!("  🕐 Slot: {} Timestamp: {}", header.slot, timestamp));
+        log_info(&format!("  🔢 Log Index Start: {}", log_index_start));
+
         Self {
             number,
-            parent_hash, 
+            parent_hash,
             logs_bloom: [0u8; 256],
             transactions_root: [0u8; 32],
-            state_root,
+            state_root: header.parent_state_root,
+            log_index_start,
             receipts_root: [0u8; 32],
+            mmr_root: [0u8; 32],
+            extrinsics_hash: header.extrinsic_hash,
+            parent_header_hash: header.parent_header_hash,
             miner: [0u8; 20],
             extra_data: [0u8; 32],
             size: 0,
@@ -359,38 +408,32 @@ impl EvmBlockPayload {
         } else {
             // we have a new timestamp, so we need to create a new block!
             log_info(&format!("🆕 Creating new block: current_timestamp={} < new_timestamp={}", current_block.timestamp, timestamp));
-            let entropy = [0u8; 32]; // TODO: get this from fetch, is it important to use this as a differentiator?
 
             // Finalize the current block and get its hash to use as parent
             let parent_block_hash = current_block.finalize(service_id)?;
-            log_info(&format!("🏁 Finalized current block {}, parent_hash: {}", block_number, format_object_id(&parent_block_hash)));
+            log_info(&format!("🏁 Finalized current block {}, parent_hash: {}", block_number, format_object_id(parent_block_hash)));
 
             // Write the finalized block back to storage with computed roots
             current_block.write()?;
             log_info(&format!("💾 Wrote finalized block {} to storage", block_number));
 
-            // NOTE: Block hash mapping is written in accumulator AFTER the block is fully written
-            // This ensures the hash matches the final stored block state
-
             // Write the finalized parent block hash to storage
             Self::write_blocknumber_key(block_number + 1, &parent_block_hash);
             log_info(&format!("📝 Updated BLOCK_NUMBER_KEY to block {}", block_number + 1));
 
-            // Fetch the state root from the host environment
-            use utils::functions::fetch_state_root;
-            let state_root = match fetch_state_root() {
-                Ok(root) => {
-                    log_info(&format!("✅ Fetched state_root: {}", format_object_id(&root)));
-                    root
+            // Fetch the current block header from the host environment
+            use utils::functions::{fetch_header, format_object_id};
+            // Calculate next log index start: previous block's log_index_start + number of tx_hashes in previous block
+            let next_log_index_start = current_block.log_index_start + current_block.tx_hashes.len() as u64;
+            let new_block = match fetch_header() {
+                Some(header) => {
+                    Self::new((block_number + 1) as u64, timestamp, parent_block_hash, header, next_log_index_start)
                 },
-                Err(e) => {
-                    log_error(&format!("❌ Failed to fetch state_root: {:?}, using zero hash", e));
-                    [0u8; 32]
+                None => {
+                    log_error(&format!("❌ Failed to fetch block header, creating block with default values"));
+                    return None;
                 }
             };
-
-            // Create new block with incremented number
-            let new_block = Self::new((block_number + 1) as u64, entropy, timestamp, parent_block_hash, state_root);
             log_info(&format!("🎉 Created new block {} with timestamp={}", new_block.number, new_block.timestamp));
             Some(new_block)
         }
@@ -425,8 +468,8 @@ impl EvmBlockPayload {
 
     /// Finalize block by computing roots and returning block hash
     pub fn finalize(&mut self, service_id: u32) -> Option<[u8; 32]> {
-        self.transactions_root = self.compute_transactions_root();
-        self.receipts_root = self.compute_receipts_root();
+        //self.transactions_root = self.compute_transactions_root();
+        //self.receipts_root = self.compute_receipts_root();
         log_info(&format!("🔐 Finalized block {}: tx_root={}, receipts_root={}, tx_count={}, receipt_count={}",
             self.number,
             format_object_id(&self.transactions_root),

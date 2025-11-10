@@ -136,3 +136,19 @@ func (mh *MockHostEnv) WriteServicePreimageLookup(s uint32, blob_hash common.Has
 func (mh *MockHostEnv) GetParentStateRoot() common.Hash {
 	return common.Hash{}
 }
+
+func (mh *MockHostEnv) GetHeader() *types.BlockHeader {
+	// Return a mock header for testing
+	return &types.BlockHeader{
+		ParentHeaderHash: common.Hash{},
+		ParentStateRoot:  common.Hash{},
+		ExtrinsicHash:    common.Hash{},
+		Slot:             0,
+		EpochMark:        nil,
+		TicketsMark:      nil,
+		OffendersMark:    []types.Ed25519Key{},
+		AuthorIndex:      0,
+		EntropySource:    types.BandersnatchVrfSignature{},
+		Seal:             types.BandersnatchVrfSignature{},
+	}
+}

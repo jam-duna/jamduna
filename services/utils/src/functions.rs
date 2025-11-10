@@ -40,6 +40,70 @@ use crate::host_functions::*;
 pub type Hash32 = [u8; 32];
 pub type ObjectId = Hash32;
 
+/// BlockHeader struct matching the Go BlockHeader for deserialization
+#[derive(Debug, Clone)]
+pub struct BlockHeader {
+    pub parent_header_hash: Hash32,
+    pub parent_state_root: Hash32,
+    pub extrinsic_hash: Hash32,
+    pub slot: u32,
+    // Note: The following fields are complex types that would need full definitions:
+    // pub epoch_mark: Option<EpochMark>,
+    // pub tickets_mark: Option<Vec<TicketBody>>,
+    // pub offenders_mark: Vec<Ed25519Key>,
+    // pub author_index: u16,
+    // pub entropy_source: BandersnatchVrfSignature,
+    // pub seal: BandersnatchVrfSignature,
+    // For now, we'll include the basic fields that are most commonly needed
+}
+
+impl BlockHeader {
+    /// Attempts to deserialize a BlockHeader from encoded bytes
+    /// This is a simplified version that handles the basic fields
+    pub fn deserialize(data: &[u8]) -> Option<Self> {
+        // This is a simplified deserialization - the actual implementation
+        // would need to handle the full JAM encoding format
+        if data.len() < 100 {  // Minimum size for basic fields
+            return None;
+        }
+
+        let mut offset = 0;
+
+        // Extract parent_header_hash (32 bytes)
+        let mut parent_header_hash = [0u8; 32];
+        parent_header_hash.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
+
+        // Extract parent_state_root (32 bytes)
+        let mut parent_state_root = [0u8; 32];
+        parent_state_root.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
+
+        // Extract extrinsic_hash (32 bytes)
+        let mut extrinsic_hash = [0u8; 32];
+        extrinsic_hash.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
+
+        // Extract slot (4 bytes, little-endian)
+        if data.len() < offset + 4 {
+            return None;
+        }
+        let slot = u32::from_le_bytes([
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ]);
+
+        Some(BlockHeader {
+            parent_header_hash,
+            parent_state_root,
+            extrinsic_hash,
+            slot,
+        })
+    }
+}
+
 // Parse refine args
 #[repr(C)]
 #[derive(Debug, Clone)]
@@ -1396,29 +1460,40 @@ pub fn fetch_extrinsic(work_item_index: u16, index: u32) -> HarnessResult<Vec<u8
     }
 }
 
-/// Fetches the state root from the host environment
-pub fn fetch_state_root() -> HarnessResult<[u8; 32]> {
-    const FETCH_DATATYPE_STATE_ROOT: u64 = 250;
-    let mut buffer = vec![0u8; 32];
+/// Fetches the current block header from the host environment
+pub fn fetch_header() -> Option<BlockHeader> {
+    const FETCH_DATATYPE_HEADER: u64 = 16;
+    // Allocate a very large buffer size for the encoded header to handle any JAM header
+    // JAM headers can be very large due to complex types (tickets, signatures, epoch marks, etc.)
+    let mut buffer = vec![0u8; 32768];
     match fetch_data(
         &mut buffer,
-        FETCH_DATATYPE_STATE_ROOT,
+        FETCH_DATATYPE_HEADER,
         0,
         0,
-        32,
-    )? {
-        Some(data) => {
-            if data.len() == 32 {
-                let mut state_root = [0u8; 32];
-                state_root.copy_from_slice(&data);
-                Ok(state_root)
-            } else {
-                Err(HarnessError::InvalidResponse)
+        32768,
+    ) {
+        Ok(Some(data)) => {
+            log_info(&format!("✅ fetch_header: Got {} bytes of header data", data.len()));
+            // Attempt to deserialize the header from the fetched data
+            match BlockHeader::deserialize(&data) {
+                Some(header) => {
+                    log_info(&format!("✅ fetch_header: Successfully deserialized header"));
+                    Some(header)
+                },
+                None => {
+                    log_error(&format!("❌ fetch_header: Failed to deserialize {} bytes of header data", data.len()));
+                    None
+                }
             }
         },
-        None => {
-            // Return zero hash if no state root is available
-            Ok([0u8; 32])
+        Ok(None) => {
+            log_info(&format!("⚠️ fetch_header: No header available from host"));
+            None
+        },
+        Err(e) => {
+            log_error(&format!("❌ fetch_header: Error occurred during fetch: {:?}", e));
+            None
         }
     }
 }

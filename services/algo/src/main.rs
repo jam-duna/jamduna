@@ -15,7 +15,7 @@ const SIZE0: usize = 0x40000;
 use polkavm_derive::min_stack_size;
 min_stack_size!(SIZE0);
 
-const SIZE1: usize = 0x40000;
+const SIZE1: usize = 0x400000;
 // allocate memory for heap
 use simplealloc::SimpleAlloc;
 #[global_allocator]
@@ -1893,7 +1893,8 @@ fn run_program(idx: u8) -> (u64, Vec<Log>) {
 #[polkavm_derive::polkavm_export]
 extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
     log_info(&format!("🚀 refine called with start_address=0x{:x}, length={}", start_address, length));
-    polkavm_sbrk(2048*2048);
+    // preallocate 100mb for output
+    polkavm_sbrk(1000 * 1024 * 1024); 
     let args = if let Some(a) = parse_refine_args(start_address, length) {
         a
     } else {
@@ -1920,18 +1921,28 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
         let count = payload[i * 2 + 1] as u64;
         let iterations = (count*count as u64).min(10); // Limit to 500 iterations to prevent overflow
         log_info(&format!("🔢 refine: pair #{} - program_id={}, count={}, iterations={} (capped)", i, program_id, count, iterations));
+//        let iterations = count*count*count as u64; // Uncapped iterations (count^3)
+//        log_info(&format!("🔢 refine: pair #{} - program_id={}, count={}, iterations={}", i, program_id, count, iterations));
         let mut gas_used = 0 as u64;
         let mut all_logs = Vec::new();
+        let mut actual_iterations = 0;
         for iter in 0..iterations {
-            if iter % 10 == 0 {
+            if iter % 1000 == 0 {
                 let gas_remaining = unsafe { gas() };
                 log_info(&format!("🔄 refine: iteration {}/{} for program_id={}, gas_remaining={}", iter, iterations, p_id, gas_remaining));
+                
+                // Check if we're running low on gas (reserve 10M gas for cleanup)
+                if gas_remaining < 10_000_000 {
+                    log_info(&format!("⚠️ refine: stopping early at iteration {} due to low gas (remaining={})", iter, gas_remaining));
+                    break;
+                }
             }
             let (gas, logs) = run_program(p_id);
             gas_used += gas;
             all_logs.extend(logs);
+            actual_iterations = iter + 1;
         }
-        log_info(&format!("✅ refine: completed {} iterations for program_id={}, gas_used={}", iterations, p_id, gas_used));
+        log_info(&format!("✅ refine: completed {}/{} iterations for program_id={}, gas_used={}", actual_iterations, iterations, p_id, gas_used));
         total_gas_used += gas_used;
 
         // Create a WriteIntent for this pair
@@ -1944,9 +1955,13 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
         // Receipt payload format: [logs_len:4][logs_payload]
         // Serialize logs using EVM log format
         let logs_payload = serialize_logs(&all_logs);
+        // Encode a receipt-like structure: [logs_len][logs][status][cumulative_gas][log_index][tx_hash]
         let mut intent_payload = Vec::new();
-        intent_payload.extend_from_slice(&(logs_payload.len() as u32).to_le_bytes()); // logs_len
-        intent_payload.extend_from_slice(&logs_payload); // logs data
+        intent_payload.extend_from_slice(&(logs_payload.len() as u32).to_le_bytes());
+        intent_payload.extend_from_slice(&logs_payload);
+        intent_payload.extend_from_slice(&[1u8]); // status OK
+        intent_payload.extend_from_slice(&(gas_used as u64).to_le_bytes());
+        intent_payload.extend_from_slice(&(i as u32).to_le_bytes());
 
         let mut write_intent = WriteIntent {
             effect: WriteEffectEntry {
@@ -1986,13 +2001,10 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
     // Create ExecutionEffects
     log_info(&format!("✅ refine: creating ExecutionEffects with {} write_intents, total_gas_used={}", write_intents.len(), total_gas_used));
     let execution_effects = ExecutionEffects {
-        export_count,
-        gas_used: total_gas_used,
-        state_root: [0u8; 32],
         write_intents,
     };
     let buffer = serialize_execution_effects(&execution_effects);
-    log_info(&format!("🎯 refine returning buffer length={}, export_count={}, gas_used={}", buffer.len(), execution_effects.export_count, execution_effects.gas_used));
+    log_info(&format!("🎯 refine returning buffer length={}", buffer.len()));
     leak_output(buffer)
 }
 

@@ -642,12 +642,12 @@ func (stateDB *StateDB) EstimateGas(from common.Address, to *common.Address, gas
 		return 0, fmt.Errorf("no result from simulation")
 	}
 
-	effects, err := types.DeserializeExecutionEffects(workReport.Results[0].Result.Ok)
+	_, err = types.DeserializeExecutionEffects(workReport.Results[0].Result.Ok)
 	if err != nil {
 		return 0, fmt.Errorf("failed to deserialize execution effects: %v", err)
 	}
 
-	return effects.GasUsed, nil
+	return 0, nil
 }
 
 // Call simulates a transaction execution without submitting it
@@ -794,9 +794,9 @@ func (stateDB *StateDB) executeSimulationWorkPackage(wpq *types.WPQueueItem, pvm
 		// Return the output from the first work result
 		result := workReport.Results[0].Result
 		if len(result.Ok) > 0 {
-			// Parse ExecutionEffects to extract gas_used and call output
+			// Parse ExecutionEffects to extract call output
 			// Format: ExecutionEffects serialization + call output appended
-			effects, err := types.DeserializeExecutionEffects(result.Ok)
+			_, err := types.DeserializeExecutionEffects(result.Ok)
 			if err != nil {
 				log.Warn(log.Node, "executeSimulationWorkPackage: failed to deserialize effects", "err", err)
 				// Return raw result if deserialization fails
@@ -804,17 +804,17 @@ func (stateDB *StateDB) executeSimulationWorkPackage(wpq *types.WPQueueItem, pvm
 			}
 
 			// The call output is appended after the serialized ExecutionEffects
-			// ExecutionEffects format: [export_count:2][gas_used:8][write_intents_count:2][write_intents...]
+			// ExecutionEffects format: [write_intents_count:2][write_intents...]
 			// For payload "B", write_intents should be empty (count=0)
-			// Header size: 2 + 8 + 2 = 12 bytes
-			effectsHeaderSize := 12
+			// Header size: 2 bytes
+			effectsHeaderSize := 2
 
 			// For payload "B", there should be no write intents, so output starts immediately after header
 			if len(result.Ok) > effectsHeaderSize {
 				// Extract the call output (everything after ExecutionEffects header)
 				callOutput := result.Ok[effectsHeaderSize:]
 				log.Debug(log.Node, "executeSimulationWorkPackage: extracted call output",
-					"gas_used", effects.GasUsed,
+					"gas_used", 0,
 					"output_len", len(callOutput))
 				return workReport, nil
 			}

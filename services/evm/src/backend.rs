@@ -960,9 +960,6 @@ impl MajikBackend {
         self.emit_receipts(receipts, work_package_hash, &mut write_intents);
 
         utils::effects::ExecutionEffects {
-            export_count: 0,
-            gas_used: 0,
-            state_root: [0u8; 32],
             write_intents,
         }
     }

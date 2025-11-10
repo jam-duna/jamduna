@@ -1275,3 +1275,11 @@ func HeaderContains(headers []types.BlockHeader, checkHeader types.BlockHeader) 
 	}
 	return false
 }
+
+// GetHeader returns the current block header for accumulate mode
+func (s *StateDB) GetHeader() *types.BlockHeader {
+	if s.Block != nil {
+		return &s.Block.Header
+	}
+	return nil
+}

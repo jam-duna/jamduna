@@ -403,9 +403,6 @@ impl BlockRefiner {
         ));
 
         Ok(ExecutionEffects {
-            export_count: 0,
-            gas_used: 0,
-            state_root: [0u8; 32],
             write_intents,
         })
     }
@@ -676,9 +673,9 @@ impl BlockRefiner {
         }
 
 
-        let mut effects = overlay.deconstruct(refine_args.wphash, &receipts);
+        let effects = overlay.deconstruct(refine_args.wphash, &receipts);
 
-        effects.gas_used = total_jam_gas_used; // Total JAM gas consumed across all transactions
+        // Note: gas_used field removed from ExecutionEffects - was: total_jam_gas_used
 
         log_info(
             &format!(
@@ -826,7 +823,7 @@ impl BlockRefiner {
             }
         } else if metadata.payload_type == PayloadType::Call {
             // Call mode - return early from refine_call_payload
-            return refine_call_payload(backend, &config, extrinsics, refine_state_root);
+            return refine_call_payload(backend, &config, extrinsics);
         } else if metadata.payload_type == PayloadType::Transactions || metadata.payload_type == PayloadType::Builder {
             // Execute transactions
             let mut block_builder = block_builder;
@@ -860,7 +857,7 @@ impl BlockRefiner {
                 }
             }
         }
-        execution_effects.export_count = export_count;
+        // Note: export_count field removed from ExecutionEffects - was: export_count
 
         Some(execution_effects)
     }
@@ -875,7 +872,6 @@ pub fn refine_call_payload(
     mut backend: MajikBackend,
     config: &evm::standard::Config,
     extrinsics: &[Vec<u8>],
-    refine_state_root: [u8; 32],
 ) -> Option<ExecutionEffects> {
     use evm::interpreter::etable::DispatchEtable;
     use evm::interpreter::trap::CallCreateTrap;
@@ -969,9 +965,6 @@ pub fn refine_call_payload(
             // Create ExecutionEffects with gas_used and return the output
             Some(ExecutionEffects {
                 write_intents: Vec::new(),
-                export_count: 0,
-                gas_used,
-                state_root: refine_state_root,
             })
         }
         Err(error) => {

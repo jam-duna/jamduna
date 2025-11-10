@@ -240,6 +240,7 @@ func (j *JamState) checkReportPendingOnCore(g types.Guarantee) error {
 		}
 	}
 	if !find {
+		log.Error(log.G, "g.Report.AuthorizerHash not found", "hash", g.Report.AuthorizerHash, "len(authorizations_pool)", authorizations_pool)
 		return jamerrors.ErrGCoreUnexpectedAuthorizer
 	}
 	return nil

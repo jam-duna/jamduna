@@ -32,12 +32,6 @@ static mut SEGMENT_BUFFER: [u8; SEGMENT_SIZE as usize] = [0u8; SEGMENT_SIZE as u
 /// Complete effects of execution
 #[derive(Debug, Clone)]
 pub struct ExecutionEffects {
-    /// Total number of host export calls performed when materializing payloads.
-    pub export_count: u16,
-    /// Total gas used across all committed transactions in refine.
-    pub gas_used: u64,
-    /// Constructed by BlockRefiner (post-bootstrap state root, receipts root, etc.)
-    pub state_root: [u8; 32],
     pub write_intents: Vec<WriteIntent>,
 }
 

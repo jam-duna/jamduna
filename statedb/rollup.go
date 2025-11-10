@@ -112,12 +112,6 @@ func (c *Rollup) processWPQueueItems(wpqs []*types.WPQueueItem) error {
 	}
 	bootstrapAuthCodeHash := common.Blake2Hash(authCodeEnc)
 
-	// Add bootstrap authorization to pool for all cores
-	authorizerHash := common.Blake2Hash(append(bootstrapAuthCodeHash.Bytes(), []byte(nil)...))
-	for i := 0; i < types.TotalCores; i++ {
-		statedb.JamState.AuthorizationsPool[i][0] = authorizerHash
-	}
-
 	ctx := context.Background()
 	guarantees := make([]types.Guarantee, types.TotalCores)
 	for coreIndex, wpq := range wpqs {
@@ -148,19 +142,37 @@ func (c *Rollup) processWPQueueItems(wpqs []*types.WPQueueItem) error {
 		}
 
 		// Populate ExtrinsicData - one ExtrinsicsBlobs per WorkItem
-		// For now, assume single WorkItem per WorkPackage (matches SubmitEVMTransactions pattern)
+		// Iterate over wp.WorkItems and copy the corresponding extrinsics for each work item
 		extrinsicData := make([]types.ExtrinsicsBlobs, len(wp.WorkItems))
-		if len(wp.WorkItems) > 0 {
-			// Assign all extrinsics to the first work item
-			extrinsicData[0] = wpq.Extrinsics
+		for i := range wp.WorkItems {
+			// For each work item, extract its corresponding extrinsics from wp.WorkItems[i].Extrinsics
+			workItemExtrinsics := make(types.ExtrinsicsBlobs, len(wp.WorkItems[i].Extrinsics))
+			for j, extrinsic := range wp.WorkItems[i].Extrinsics {
+				// Find the corresponding extrinsic data in wpq.Extrinsics based on the hash
+				for _, data := range wpq.Extrinsics {
+					if common.Blake2Hash(data) == extrinsic.Hash {
+						workItemExtrinsics[j] = data
+						break
+					}
+				}
+			}
+			extrinsicData[i] = workItemExtrinsics
 		}
 
 		// Create work package bundle
 		bundle := types.WorkPackageBundle{
 			WorkPackage:       wp,
 			ExtrinsicData:     extrinsicData,
-			ImportSegmentData: [][][]byte{{}},
-			Justification:     [][][]common.Hash{{}},
+			ImportSegmentData: make([][][]byte, len(wp.WorkItems)),
+			Justification:     make([][][]common.Hash, len(wp.WorkItems)),
+		}
+
+		// Initialize ImportSegmentData and Justification for each work item
+		for i := range wp.WorkItems {
+			// Initialize empty import segment data (actual data would be loaded from external source based on ImportedSegments)
+			bundle.ImportSegmentData[i] = [][]byte{}
+			// Initialize empty justifications for now (could be populated from segment justifications)
+			bundle.Justification[i] = [][]common.Hash{}
 		}
 
 		// Execute refine to get work report, Set work report core index
@@ -169,7 +181,10 @@ func (c *Rollup) processWPQueueItems(wpqs []*types.WPQueueItem) error {
 			return fmt.Errorf("failed ExecuteWorkPackageBundle: %v", err)
 		}
 		workReport.CoreIndex = uint(coreIndex)
+		for _, result := range workReport.Results {
+			fmt.Printf("service %d -- result =%d\n", c.serviceID, result.Result.Err)
 
+		}
 		// Create guarantee with 3 validator signatures from validators assigned to core 0
 		guarantee := types.Guarantee{
 			Report:     workReport,
@@ -213,23 +228,6 @@ func (c *Rollup) processWPQueueItems(wpqs []*types.WPQueueItem) error {
 		}
 	}
 
-	// Create block with guarantee and assurances
-	block := types.NewBlock()
-	header := types.NewBlockHeader()
-	header.ParentHeaderHash = statedb.HeaderHash
-	header.ParentStateRoot = statedb.GetStateRoot()
-	header.Slot = statedb.GetTimeslot() + 1
-	header.AuthorIndex = 0
-
-	// Check if we need an epoch mark for this slot
-	safrole := statedb.GetSafrole()
-	if safrole.IsNewEpoch(header.Slot) {
-		epochMark := safrole.GenerateEpochMarker()
-		header.EpochMark = epochMark
-	}
-
-	block.Header = *header
-
 	extrinsic := types.NewExtrinsic()
 	extrinsic.Guarantees = activeGuarantees
 
@@ -244,7 +242,7 @@ func (c *Rollup) processWPQueueItems(wpqs []*types.WPQueueItem) error {
 			for i := 0; i < 6 && i < types.TotalValidators; i++ {
 				validatorIdx := uint16(i)
 				assurance := types.Assurance{
-					Anchor:         header.ParentHeaderHash,
+					Anchor:         statedb.HeaderHash,
 					Bitfield:       [types.Avail_bitfield_bytes]byte{},
 					ValidatorIndex: validatorIdx,
 				}
@@ -260,16 +258,15 @@ func (c *Rollup) processWPQueueItems(wpqs []*types.WPQueueItem) error {
 		extrinsic.Assurances = assurances
 	}
 
-	block.Extrinsic = extrinsic
-
 	// Fallback sealing: Find validator index matching the fallback key
-	_, currPhase := safrole.EpochAndPhase(header.Slot)
-	fallbackKey := safrole.TicketsOrKeys.Keys[currPhase]
-	var authorIndex uint16
+	targetJCE := statedb.GetTimeslot() + 1
 	var validatorSecret *types.ValidatorSecret
+
+	sf0, _ := statedb.GetPosteriorSafroleEntropy(targetJCE) // always be hit
+
 	for i := 0; i < types.TotalValidators; i++ {
-		if validators[i].Bandersnatch.Hash() == fallbackKey {
-			authorIndex = uint16(i)
+		isAuthorizedBlockRefiner, _, _, _ := sf0.IsAuthorizedBuilder(targetJCE, common.Hash(validators[i].Bandersnatch), []common.Hash{})
+		if isAuthorizedBlockRefiner {
 			validatorSecret = &validatorSecrets[i]
 			break
 		}
@@ -277,31 +274,21 @@ func (c *Rollup) processWPQueueItems(wpqs []*types.WPQueueItem) error {
 	if validatorSecret == nil {
 		return fmt.Errorf("could not find validator matching fallback key")
 	}
-	header.AuthorIndex = authorIndex
-	block.Header = *header
 
-	blockAuthorPriv, err := ConvertBanderSnatchSecret(validatorSecret.BandersnatchSecret)
-	if err != nil {
-		return fmt.Errorf("failed to convert bandersnatch secret: %w", err)
-	}
-	blockAuthorPub, err := ConvertBanderSnatchPub(validatorSecret.BandersnatchPub[:])
-	if err != nil {
-		return fmt.Errorf("failed to convert bandersnatch pub: %w", err)
-	}
-
-	sealedBlock, err := statedb.SealBlockWithEntropy(blockAuthorPub, blockAuthorPriv, authorIndex, header.Slot, block)
-	if err != nil {
-		return fmt.Errorf("failed to seal block: %w", err)
-	}
-
+	// build block
+	sealedBlock, _ := statedb.BuildBlock(ctx, *validatorSecret, statedb.GetTimeslot()+1, common.Hash{}, &extrinsic)
 	// Apply state transition
+	// Add bootstrap authorization to pool for all cores
+	authorizerHash := common.Blake2Hash(append(bootstrapAuthCodeHash.Bytes(), []byte(nil)...))
+	for i := 0; i < types.TotalCores; i++ {
+		statedb.JamState.AuthorizationsPool[i][0] = authorizerHash
+	}
 	newStateDB, err := ApplyStateTransitionFromBlock(0, statedb, ctx, sealedBlock, nil, "interpreter")
 	if err != nil {
 		return fmt.Errorf("failed to apply state transition: %w", err)
 	}
 
 	c.stateDB = newStateDB
-
 	// Pipeline current guarantee for next block's assurances
 	c.previousGuarantees = &guarantees
 

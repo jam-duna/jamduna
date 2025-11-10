@@ -87,20 +87,24 @@ func (p *EvmBlockPayload) ToEthereumBlock(fullTx bool) *EthereumBlock {
 // EvmBlockPayload represents the unified EVM block structure exported to JAM DA
 // This structure matches the Rust EvmBlockPayload exactly
 type EvmBlockPayload struct {
-	// Fixed fields (476 bytes) - used for block hash computation
-	Number           uint64         // Offset 0, 8 bytes
-	ParentHash       common.Hash    // Offset 8, 32 bytes
-	LogsBloom        [256]byte      // Offset 40, 256 bytes
-	TransactionsRoot common.Hash    // Offset 296, 32 bytes
-	StateRoot        common.Hash    // Offset 328, 32 bytes
-	ReceiptsRoot     common.Hash    // Offset 360, 32 bytes
-	Miner            common.Address // Offset 392, 20 bytes
-	ExtraData        [32]byte       // Offset 412, 32 bytes (JAM entropy)
-	Size             uint64         // Offset 444, 8 bytes
-	GasLimit         uint64         // Offset 452, 8 bytes
-	GasUsed          uint64         // Offset 460, 8 bytes
-	Timestamp        uint64         // Offset 468, 8 bytes
-	// Total fixed: 476 bytes
+	// Fixed fields (580 bytes) - used for block hash computation
+	Number            uint64         // Offset 0, 8 bytes
+	ParentHash        common.Hash    // Offset 8, 32 bytes
+	LogsBloom         [256]byte      // Offset 40, 256 bytes
+	TransactionsRoot  common.Hash    // Offset 296, 32 bytes
+	StateRoot         common.Hash    // Offset 328, 32 bytes
+	LogIndexStart     uint64         // Offset 360, 8 bytes
+	ReceiptsRoot      common.Hash    // Offset 368, 32 bytes
+	MmrRoot           common.Hash    // Offset 400, 32 bytes
+	ExtrinsicsHash    common.Hash    // Offset 432, 32 bytes
+	ParentHeaderHash  common.Hash    // Offset 464, 32 bytes
+	Miner             common.Address // Offset 496, 20 bytes
+	ExtraData         [32]byte       // Offset 516, 32 bytes (JAM entropy)
+	Size              uint64         // Offset 548, 8 bytes
+	GasLimit          uint64         // Offset 556, 8 bytes
+	GasUsed           uint64         // Offset 564, 8 bytes
+	Timestamp         uint64         // Offset 572, 8 bytes
+	// Total fixed: 580 bytes
 
 	// Variable-length fields (not part of hash computation)
 	TxHashes      []common.Hash // Transaction hashes (for transactions_root BMT and tx lookup)
@@ -110,12 +114,12 @@ type EvmBlockPayload struct {
 // SerializeEvmBlockPayload serializes an EvmBlockPayload to bytes
 // Matches the Rust serialize() format exactly
 func SerializeEvmBlockPayload(payload *EvmBlockPayload) []byte {
-	// Calculate total size: 476 (fixed) + 4 (tx_count) + len(TxHashes)*32 + 4 (receipt_count) + len(ReceiptHashes)*32
-	size := 476 + 4 + len(payload.TxHashes)*32 + 4 + len(payload.ReceiptHashes)*32
+	// Calculate total size: 580 (fixed) + 4 (tx_count) + len(TxHashes)*32 + 4 (receipt_count) + len(ReceiptHashes)*32
+	size := 580 + 4 + len(payload.TxHashes)*32 + 4 + len(payload.ReceiptHashes)*32
 	data := make([]byte, size)
 	offset := 0
 
-	// Serialize fixed fields (476 bytes total)
+	// Serialize fixed fields (580 bytes total)
 	binary.LittleEndian.PutUint64(data[offset:offset+8], payload.Number)
 	offset += 8
 
@@ -131,7 +135,19 @@ func SerializeEvmBlockPayload(payload *EvmBlockPayload) []byte {
 	copy(data[offset:offset+32], payload.StateRoot[:])
 	offset += 32
 
+	binary.LittleEndian.PutUint64(data[offset:offset+8], payload.LogIndexStart)
+	offset += 8
+
 	copy(data[offset:offset+32], payload.ReceiptsRoot[:])
+	offset += 32
+
+	copy(data[offset:offset+32], payload.MmrRoot[:])
+	offset += 32
+
+	copy(data[offset:offset+32], payload.ExtrinsicsHash[:])
+	offset += 32
+
+	copy(data[offset:offset+32], payload.ParentHeaderHash[:])
 	offset += 32
 
 	copy(data[offset:offset+20], payload.Miner[:])
@@ -176,15 +192,15 @@ func SerializeEvmBlockPayload(payload *EvmBlockPayload) []byte {
 // DeserializeEvmBlockPayload deserializes an EvmBlockPayload from bytes
 // Matches the Rust serialize() format exactly
 func DeserializeEvmBlockPayload(data []byte) (*EvmBlockPayload, error) {
-	// Minimum size: 476 + 4 + 4 = 484 bytes (fixed fields + tx_count + receipt_count)
-	if len(data) < 484 {
-		return nil, fmt.Errorf("block payload too short: got %d bytes, need at least 484", len(data))
+	// Minimum size: 580 + 4 + 4 = 588 bytes (fixed fields + tx_count + receipt_count)
+	if len(data) < 588 {
+		return nil, fmt.Errorf("block payload too short: got %d bytes, need at least 588", len(data))
 	}
 
 	offset := 0
 	payload := &EvmBlockPayload{}
 
-	// Parse fixed fields (476 bytes total)
+	// Parse fixed fields (580 bytes total)
 	payload.Number = binary.LittleEndian.Uint64(data[offset : offset+8])
 	offset += 8
 
@@ -200,7 +216,19 @@ func DeserializeEvmBlockPayload(data []byte) (*EvmBlockPayload, error) {
 	copy(payload.StateRoot[:], data[offset:offset+32])
 	offset += 32
 
+	payload.LogIndexStart = binary.LittleEndian.Uint64(data[offset : offset+8])
+	offset += 8
+
 	copy(payload.ReceiptsRoot[:], data[offset:offset+32])
+	offset += 32
+
+	copy(payload.MmrRoot[:], data[offset:offset+32])
+	offset += 32
+
+	copy(payload.ExtrinsicsHash[:], data[offset:offset+32])
+	offset += 32
+
+	copy(payload.ParentHeaderHash[:], data[offset:offset+32])
 	offset += 32
 
 	copy(payload.Miner[:], data[offset:offset+20])

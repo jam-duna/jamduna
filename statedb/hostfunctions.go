@@ -810,6 +810,7 @@ func (vm *VM) hostFetch() {
 		WORK_ITEM_PAYLOAD_13                          = 13 // 13: Specific Work Item Payload (pw[φ11]y)
 		ALL_ACCUMULATION_OPERANDS_14                  = 14 // 14: All Accumulation Operands (E(↕o))
 		SPECIFIC_ACCUMULATION_OPERAND_15              = 15 // 15: Specific Accumulation Operand (E(o[φ11]))
+		HEADER_16                                     = 16 // 16: Header
 	)
 
 	//CUSTOM hostfetch:
@@ -839,7 +840,7 @@ func (vm *VM) hostFetch() {
 	case ModeAccumulate:
 		switch datatype {
 		//0, 1, 14, 15, 250
-		case PARAMETER_BYTE_0, ENTROPY_1, ALL_ACCUMULATION_OPERANDS_14, SPECIFIC_ACCUMULATION_OPERAND_15, CUSTOM_STATE_ROOT_FETCH:
+		case PARAMETER_BYTE_0, ENTROPY_1, ALL_ACCUMULATION_OPERANDS_14, SPECIFIC_ACCUMULATION_OPERAND_15, HEADER_16, CUSTOM_STATE_ROOT_FETCH:
 			allowed = true
 		default:
 			allowed = false
@@ -959,6 +960,16 @@ func (vm *VM) hostFetch() {
 				v_Bytes, _ = types.Encode(vm.AccumulateInputs[omega_11])
 				log.Trace(vm.logging, "FETCH E(o[w_11])", "w_11", omega_11, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "len", len(v_Bytes))
 			}
+		case HEADER_16:
+			// Return the current block header
+			if header := vm.hostenv.GetHeader(); header != nil {
+				v_Bytes, _ = types.Encode(header)
+				log.Trace(vm.logging, "FETCH current header", "header", fmt.Sprintf("%x", v_Bytes), "len", len(v_Bytes))
+			} else {
+				log.Warn(vm.logging, "FETCH current header", "warning", "GetHeader() returned nil")
+				v_Bytes = []byte{} // Set empty bytes when no header available
+			}
+
 		case CUSTOM_STATE_ROOT_FETCH:
 			// Return the parent state root (state before current block execution)
 			v_Bytes, _ = types.Encode(vm.hostenv.GetParentStateRoot())

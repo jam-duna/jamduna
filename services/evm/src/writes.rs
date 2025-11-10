@@ -195,7 +195,7 @@ pub struct ExecutionEffectsEnvelope {
 }
 
 /// Serialize ExecutionEffects metadata and candidate writes.
-/// Format: export_count (2B) | gas_used (8B) | tx_count (2B) | state_root (32B) | count (2B) | ObjectCandidateWrite entries
+/// Format: count (2B) | ObjectCandidateWrite entries
 pub fn serialize_execution_effects(
     effects: &utils::effects::ExecutionEffects,
 ) -> Vec<u8> {
@@ -207,9 +207,6 @@ pub fn serialize_execution_effects(
 
 
     let mut buffer = Vec::new();
-
-    buffer.extend_from_slice(&effects.export_count.to_le_bytes());
-    buffer.extend_from_slice(&effects.gas_used.to_le_bytes());
 
     let count = writes.len() as u16;
     buffer.extend_from_slice(&count.to_le_bytes());
@@ -232,30 +229,13 @@ pub fn deserialize_execution_effects(data: &[u8]) -> Option<ExecutionEffectsEnve
         });
     }
 
-    // Export count (2 bytes) must always be present
-    if data.len() < 2 {
-        log_error("❌ deserialize_execution_effects: data too short for export_count");
-        return None;
-    }
-    let export_count = u16::from_le_bytes([data[0], data[1]]);
-
-    // Gas used (8 bytes) – mandatory
-    if data.len() < 10 {
-        log_error("❌ deserialize_execution_effects: data too short for gas_used");
-        return None;
-    }
-    let gas_used = u64::from_le_bytes([
-        data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9],
-    ]);
-    let mut offset: usize = 10;
-
     // Write count (2 bytes) – mandatory
-    if data.len() < offset + 2 {
+    if data.len() < 2 {
         log_error("❌ deserialize_execution_effects: data too short for count");
         return None;
     }
-    let count = u16::from_le_bytes([data[offset], data[offset + 1]]) as usize;
-    offset += 2;
+    let count = u16::from_le_bytes([data[0], data[1]]) as usize;
+    let mut offset = 2;
 
     let mut writes = Vec::with_capacity(count);
     for i in 0..count {
@@ -274,8 +254,8 @@ pub fn deserialize_execution_effects(data: &[u8]) -> Option<ExecutionEffectsEnve
     }
 
     Some(ExecutionEffectsEnvelope {
-        export_count,
-        gas_used,
+        export_count: 0,
+        gas_used: 0,
         writes,
     })
 }

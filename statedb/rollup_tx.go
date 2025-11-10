@@ -304,7 +304,7 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		output, _, exported_segments := vm.ExecuteRefine(workPackageCoreIndex, uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData[index], workPackage.AuthorizationCodeHash, common.BytesToHash(trie.H0))
 		execElapsed := time.Since(execStart)
 		compileElapsed := time.Since(compileStart)
-
+		fmt.Printf("compile and execute time %v\n", compileElapsed)
 		expectedSegmentCnt := int(workItem.ExportCount)
 		actualSegmentCnt := len(exported_segments)
 		segmentCountMismatch := (expectedSegmentCnt != actualSegmentCnt)

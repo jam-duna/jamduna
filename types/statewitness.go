@@ -232,9 +232,6 @@ type ObjectDependency struct {
 }
 
 type ExecutionEffects struct {
-	ExportCount  uint16        `json:"exportCount"`
-	GasUsed      uint64        `json:"gasUsed"`
-	StateRoot    common.Hash   `json:"stateRoot"`
 	WriteIntents []WriteIntent `json:"writeIntents,omitempty"`
 }
 
@@ -250,29 +247,14 @@ func DeserializeExecutionEffects(data []byte) (ExecutionEffects, error) {
 
 	offset := 0
 
-	// Export count (2 bytes) - mandatory
+	// Count (2 bytes) - mandatory
 	if len(data) < 2 {
-		return ExecutionEffects{}, fmt.Errorf("DeserializeExecutionEffects: need >= 2 bytes, got %d", len(data))
+		return ExecutionEffects{}, fmt.Errorf("DeserializeExecutionEffects: need >= 2 bytes for count, got %d", len(data))
 	}
-	exportCount := binary.LittleEndian.Uint16(data[0:2])
+	count := binary.LittleEndian.Uint16(data[0:2])
 	offset = 2
 
-	// Gas used (8 bytes) - mandatory
-	if len(data) < 10 {
-		return ExecutionEffects{}, fmt.Errorf("DeserializeExecutionEffects: need >= 10 bytes for gas_used, got %d", len(data))
-	}
-	gasUsed := binary.LittleEndian.Uint64(data[2:10])
-	offset = 10
-
-	// Count (2 bytes) - mandatory
-	if len(data) < offset+2 {
-		return ExecutionEffects{}, fmt.Errorf("DeserializeExecutionEffects: need >= %d bytes for count, got %d", offset+2, len(data))
-	}
-	count := binary.LittleEndian.Uint16(data[offset : offset+2])
-	offset += 2
-
 	// State root is no longer included in the serialized format
-	var stateRoot common.Hash
 
 	writeIntents := make([]WriteIntent, 0, count)
 	for i := uint16(0); i < count; i++ {
@@ -299,9 +281,6 @@ func DeserializeExecutionEffects(data []byte) (ExecutionEffects, error) {
 	}
 
 	return ExecutionEffects{
-		ExportCount:  exportCount,
-		GasUsed:      gasUsed,
-		StateRoot:    stateRoot,
 		WriteIntents: writeIntents,
 	}, nil
 }
