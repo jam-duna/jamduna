@@ -2,7 +2,6 @@ package types
 
 import (
 	//	"bytes"
-	"crypto/ed25519"
 	"encoding/json"
 
 	//	"errors"
@@ -10,6 +9,7 @@ import (
 	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/ed25519"
 )
 
 const (

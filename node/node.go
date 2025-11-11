@@ -3,7 +3,6 @@ package node
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
 	"crypto/rand"
 	"net/rpc"
 	"runtime"
@@ -34,6 +33,7 @@ import (
 	bls "github.com/colorfulnotion/jam/bls"
 	chainspecs "github.com/colorfulnotion/jam/chainspecs"
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/ed25519"
 	grandpa "github.com/colorfulnotion/jam/grandpa"
 	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"

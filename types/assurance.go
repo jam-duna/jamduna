@@ -1,11 +1,11 @@
 package types
 
 import (
-	"crypto/ed25519"
 	"encoding/json"
 	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/ed25519"
 	jamerrors "github.com/colorfulnotion/jam/jamerrors"
 )
 

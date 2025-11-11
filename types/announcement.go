@@ -1,11 +1,11 @@
 package types
 
 import (
-	"crypto/ed25519"
 	"fmt"
 	"sync"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/ed25519"
 )
 
 // TrancheAnnouncement should probably just be [trancheIdx]AnnounceBucket
