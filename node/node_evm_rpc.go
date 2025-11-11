@@ -8,6 +8,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/statedb/evmtypes"
 )
 
 // ===== Network Metadata =====
@@ -250,7 +251,7 @@ func (j *Jam) EstimateGas(req []string, res *string) error {
 		return fmt.Errorf("failed to parse transaction object: %v", err)
 	}
 
-	tx, err := statedb.ParseTransactionObject(txObj)
+	tx, err := evmtypes.ParseTransactionObject(txObj)
 	if err != nil {
 		return fmt.Errorf("failed to parse transaction fields: %v", err)
 	}
@@ -311,7 +312,7 @@ func (j *Jam) Call(req []string, res *string) error {
 		return fmt.Errorf("failed to parse transaction object: %v", err)
 	}
 
-	callTx, err := statedb.ParseTransactionObject(txObj)
+	callTx, err := evmtypes.ParseTransactionObject(txObj)
 	if err != nil {
 		return fmt.Errorf("failed to parse transaction fields: %v", err)
 	}
@@ -638,7 +639,7 @@ func (j *Jam) GetLogs(req []string, res *string) error {
 	log.Info(log.Node, "EthGetLogs", "filter", filterJson)
 
 	// 1. Parse the filter object
-	var filter statedb.LogFilter
+	var filter evmtypes.LogFilter
 	if err := json.Unmarshal([]byte(filterJson), &filter); err != nil {
 		return fmt.Errorf("failed to parse filter object: %v", err)
 	}

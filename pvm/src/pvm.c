@@ -373,15 +373,15 @@ void pvm_expand_heap(pvm_vm_t* vm, uint32_t new_heap_pointer) {
         return;
     }
     
-    // 1. Create new heap of the correct size
+    // 1. Create new heap of the correct size (calloc zeros all bytes)
     uint8_t* new_heap = (uint8_t*)calloc(new_size, 1);
     if (!new_heap) {
         // Out of memory - could set machine state to panic
         pvm_panic(vm, OOB);
         return;
     }
-    
-    // 2. Copy the old heap into the new heap
+
+    // 2. Copy the old heap into the new heap (expanded portion remains zeroed)
     if (vm->rw_data && current_size > 0) {
         memcpy(new_heap, vm->rw_data, current_size);
     }

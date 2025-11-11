@@ -9,7 +9,8 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/jamerrors"
-	"github.com/colorfulnotion/jam/refine"
+
+	//	"github.com/colorfulnotion/jam/refine"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -211,6 +212,7 @@ type RefineBundleQA struct {
 	Error              error                    `json:"error,omitempty"`
 }
 
+/*
 // RunRefineBundleChallenge executes a bundle refinement test over an existing connection.
 // Follows the same pattern as RunUnixSocketChallenge: SetState -> RefineBundle -> Verify
 func RunRefineBundleChallenge(fuzzer *Fuzzer, bundleQA *RefineBundleQA, verbose bool) (matched bool, solverFuzzed bool, err error) {
@@ -364,3 +366,4 @@ func RunRefineBundleChallenge(fuzzer *Fuzzer, bundleQA *RefineBundleQA, verbose 
 
 	return matched, solverFuzzed, nil
 }
+*/

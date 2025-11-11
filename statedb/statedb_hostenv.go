@@ -6,6 +6,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	trie "github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -352,7 +353,7 @@ func (s *StateDB) ReadStateWitnessRaw(serviceID uint32, objectID common.Hash) (t
 	}
 	path := convertProofToHashes(proofBytes)
 	// ObjectKindRaw cases
-	if objectID == GetBlockNumberKey() {
+	if objectID == evmtypes.GetBlockNumberKey() {
 		// BLOCK_NUMBER_KEY: RAW storage (no ObjectRef, just raw value)
 		// Value format: block_number (4 bytes LE) + parent_hash (32 bytes) = 36 bytes
 		witness := types.StateWitnessRaw{
@@ -365,7 +366,7 @@ func (s *StateDB) ReadStateWitnessRaw(serviceID uint32, objectID common.Hash) (t
 		return witness, true, stateRoot, nil
 	}
 
-	isBlockObject, blockNumber := IsBlockObjectID(objectID)
+	isBlockObject, blockNumber := evmtypes.IsBlockObjectID(objectID)
 	if isBlockObject {
 		// Block objects: JAM State contains only EvmBlockPayload (no ObjectRef)
 		// We need to reconstruct ObjectRef from the block data and objectID
@@ -374,7 +375,7 @@ func (s *StateDB) ReadStateWitnessRaw(serviceID uint32, objectID common.Hash) (t
 		}
 
 		// Deserialize EvmBlockPayload to extract block details
-		evmBlock, err := DeserializeEvmBlockPayload(valueBytes)
+		evmBlock, err := evmtypes.DeserializeEvmBlockPayload(valueBytes)
 		if err != nil {
 			log.Error(log.SDB, "ReadStateWitness:DeserializeEvmBlockPayload", "objectID", objectID, "expected", blockNumber)
 			return types.StateWitnessRaw{}, true, common.Hash{}, fmt.Errorf("failed to deserialize EvmBlockPayload: %w", err)

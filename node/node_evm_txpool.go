@@ -8,7 +8,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/statedb/evmtypes"
 )
 
 // TxPoolStatus represents the status of a transaction in the pool
@@ -23,7 +23,7 @@ const (
 
 // TxPoolEntry represents a transaction entry in the pool
 type TxPoolEntry struct {
-	Tx       *statedb.EthereumTransaction `json:"transaction"`
+	Tx       *evmtypes.EthereumTransaction `json:"transaction"`
 	Status   TxPoolStatus                 `json:"status"`
 	AddedAt  time.Time                    `json:"addedAt"`
 	Attempts int                          `json:"attempts"`
@@ -88,7 +88,7 @@ func NewTxPool() *TxPool {
 }
 
 // AddTransaction adds a new transaction to the pool after validation
-func (pool *TxPool) AddTransaction(tx *statedb.EthereumTransaction) error {
+func (pool *TxPool) AddTransaction(tx *evmtypes.EthereumTransaction) error {
 	pool.mutex.Lock()
 	defer pool.mutex.Unlock()
 
@@ -127,7 +127,7 @@ func (pool *TxPool) AddTransaction(tx *statedb.EthereumTransaction) error {
 }
 
 // GetTransaction retrieves a transaction by hash
-func (pool *TxPool) GetTransaction(hash common.Hash) (*statedb.EthereumTransaction, bool) {
+func (pool *TxPool) GetTransaction(hash common.Hash) (*evmtypes.EthereumTransaction, bool) {
 	pool.mutex.RLock()
 	defer pool.mutex.RUnlock()
 
@@ -141,11 +141,11 @@ func (pool *TxPool) GetTransaction(hash common.Hash) (*statedb.EthereumTransacti
 }
 
 // GetPendingTransactions returns all pending transactions
-func (pool *TxPool) GetPendingTransactions() []*statedb.EthereumTransaction {
+func (pool *TxPool) GetPendingTransactions() []*evmtypes.EthereumTransaction {
 	pool.mutex.RLock()
 	defer pool.mutex.RUnlock()
 
-	txs := make([]*statedb.EthereumTransaction, 0, len(pool.pending))
+	txs := make([]*evmtypes.EthereumTransaction, 0, len(pool.pending))
 	for _, entry := range pool.pending {
 		txs = append(txs, entry.Tx)
 	}
@@ -244,7 +244,7 @@ func (pool *TxPool) GetTxPoolContent() (pending []string, queued []string) {
 }
 
 // validateTransaction performs basic transaction validation
-func (pool *TxPool) validateTransaction(tx *statedb.EthereumTransaction) error {
+func (pool *TxPool) validateTransaction(tx *evmtypes.EthereumTransaction) error {
 	// Check transaction size
 	if tx.Size > pool.config.MaxTxSize {
 		return fmt.Errorf("transaction size %d exceeds maximum %d", tx.Size, pool.config.MaxTxSize)
@@ -269,7 +269,7 @@ func (pool *TxPool) validateTransaction(tx *statedb.EthereumTransaction) error {
 }
 
 // shouldQueue determines if a transaction should be queued based on nonce
-func (pool *TxPool) shouldQueue(tx *statedb.EthereumTransaction) bool {
+func (pool *TxPool) shouldQueue(tx *evmtypes.EthereumTransaction) bool {
 	// TODO: Implement proper nonce checking against current state
 	// For now, assume all transactions should go to pending
 	return false

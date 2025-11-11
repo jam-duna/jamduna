@@ -11,6 +11,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	storage "github.com/colorfulnotion/jam/storage"
 	types "github.com/colorfulnotion/jam/types"
 	ethereumCommon "github.com/ethereum/go-ethereum/common"
@@ -39,6 +40,28 @@ type Rollup struct {
 	previousGuarantees *[]types.Guarantee
 	storage            *storage.StateDBStorage
 	pvmBackend         string
+}
+
+// defaultWorkPackage creates a work package with common default values
+// Caller should override fields as needed for their specific use case
+func defaultWorkPackage(serviceID uint32, service *types.ServiceAccount) types.WorkPackage {
+	return types.WorkPackage{
+		AuthCodeHost:          0,
+		AuthorizationCodeHash: bootstrap_auth_codehash,
+		AuthorizationToken:    nil,
+		ConfigurationBlob:     nil,
+		RefineContext:         types.RefineContext{}, // Caller should set this
+		WorkItems: []types.WorkItem{
+			{
+				Service:            serviceID,
+				CodeHash:           service.CodeHash,
+				RefineGasLimit:     types.RefineGasAllocation,
+				AccumulateGasLimit: types.AccumulationGasAllocation,
+				ImportedSegments:   []types.ImportSegment{},
+				ExportCount:        0,
+			},
+		},
+	}
 }
 
 // PayloadType discriminator matching Rust enum
@@ -321,50 +344,9 @@ func (c *Rollup) findAuthorizedValidator(validators []types.Validator, validator
 	return nil, fmt.Errorf("could not find validator matching fallback key")
 }
 
-// getFunctionSelector computes the 4-byte function selector and event topic hash map
-// Example: getFunctionSelector("fibonacci(uint256)", ["FibCache(uint256)", "FibComputed(uint256)"])
-// returns ([4]byte{0x61, 0x04, 0x7f, 0xf4}, map[hash]"FibCache(uint256)", map[hash]"FibComputed(uint256)")
-func getFunctionSelector(funcSig string, eventSigs []string) ([4]byte, map[common.Hash]string) {
-	// Compute function selector
-	funcHash := crypto.Keccak256([]byte(funcSig))
-	var selector [4]byte
-	copy(selector[:], funcHash[:4])
-
-	// Compute event topic hashes and map to signatures
-	topics := make(map[common.Hash]string, len(eventSigs))
-	for _, eventSig := range eventSigs {
-		eventHash := crypto.Keccak256([]byte(eventSig))
-		topics[common.BytesToHash(eventHash[:32])] = eventSig
-	}
-
-	return selector, topics
-}
-
-// defaultTopics returns a map of topic hashes to event signatures for common ERC20/ERC1155 events
-func defaultTopics() map[common.Hash]string {
-	erc20Events := []string{
-		"Transfer(address,address,uint256)", // Most common - token transfers
-		"Approval(address,address,uint256)", // Second most common - approve allowances
-		"Mint(address,uint256)",             // Minting new tokens
-		"Burn(address,uint256)",             // Burning tokens
-		"Burn(uint256)",
-		"Mint(uint256)",
-		"Deposit(address,uint256)",                                   // Wrapped tokens deposit
-		"Withdrawal(address,uint256)",                                // Wrapped tokens withdrawal
-		"Swap(address,address,uint256,uint256)",                      // Token swaps
-		"TransferSingle(address,address,address,uint256,uint256)",    // ERC1155 single transfer
-		"TransferBatch(address,address,address,uint256[],uint256[])", // ERC1155 batch transfer
-		"ApprovalForAll(address,address,bool)",                       // ERC1155 approval for all
-	}
-
-	topics := make(map[common.Hash]string, len(erc20Events))
-	for _, eventSig := range erc20Events {
-		eventHash := crypto.Keccak256([]byte(eventSig))
-		topics[common.BytesToHash(eventHash[:32])] = eventSig
-	}
-
-	return topics
-}
+// Function aliases for compatibility
+var getFunctionSelector = evmtypes.GetFunctionSelector
+var defaultTopics = evmtypes.DefaultTopics
 
 // parseIntParam parses an integer parameter, supporting decimal and hex (0x prefix)
 func parseIntParam(s string) (int64, error) {
@@ -507,7 +489,7 @@ func (c *Rollup) CallMath(mathAddress common.Address, callStrings []string) (txB
 	}
 
 	// Helper: create signed transaction that calls a contract method
-	createSignedContractCall := func(privateKeyHex string, nonce uint64, to common.Address, calldata []byte, gasPrice *big.Int, gasLimit uint64, chainID uint64) (*EthereumTransaction, []byte, common.Hash, error) {
+	createSignedContractCall := func(privateKeyHex string, nonce uint64, to common.Address, calldata []byte, gasPrice *big.Int, gasLimit uint64, chainID uint64) (*evmtypes.EthereumTransaction, []byte, common.Hash, error) {
 		// Parse private key
 		privateKey, err := crypto.HexToECDSA(privateKeyHex)
 		if err != nil {
@@ -541,7 +523,7 @@ func (c *Rollup) CallMath(mathAddress common.Address, callStrings []string) (txB
 		txHash := common.Keccak256(rlpBytes)
 
 		// Parse into EthereumTransaction
-		tx, err := ParseRawTransactionBytes(rlpBytes)
+		tx, err := evmtypes.ParseRawTransactionBytes(rlpBytes)
 		if err != nil {
 			return nil, nil, common.Hash{}, err
 		}
@@ -577,8 +559,8 @@ func (c *Rollup) CallMath(mathAddress common.Address, callStrings []string) (txB
 			alltopics[hash] = sig
 		}
 
-		gasPrice := big.NewInt(1_000_000_000) // 1 Gwei
-		gasLimit := uint64(1_000_000_000)     // 1B gas limit for complex math calculations
+		gasPrice := big.NewInt(1)         // 1 wei
+		gasLimit := uint64(1_000_000_000) // 1B gas limit for complex math calculations
 
 		_, tx, txHash, err := createSignedContractCall(
 			callerPrivKeyHex,
@@ -600,7 +582,7 @@ func (c *Rollup) CallMath(mathAddress common.Address, callStrings []string) (txB
 }
 
 // SubmitEVMTransactions creates and submits a work package with raw transactions, processes it, and returns the resulting block
-func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte) (*EvmBlockPayload, error) {
+func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte) (*evmtypes.EvmBlockPayload, error) {
 	bundles := make([]*types.WorkPackageBundle, len(evmTxsMulticore))
 
 	for coreIndex, evmTxs := range evmTxsMulticore {
@@ -622,31 +604,15 @@ func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte) (*EvmBlockPay
 		}
 
 		// Create work package
-		wp := types.WorkPackage{
-			AuthCodeHost:          0,
-			AuthorizationToken:    nil,
-			AuthorizationCodeHash: bootstrap_auth_codehash,
-			ConfigurationBlob:     nil,
-			WorkItems: []types.WorkItem{
-				{
-					Service:            b.serviceID,
-					CodeHash:           service.CodeHash,
-					Payload:            buildPayload(PayloadTypeTransactions, len(evmTxs), 0),
-					RefineGasLimit:     types.RefineGasAllocation,
-					AccumulateGasLimit: types.AccumulationGasAllocation,
-					ImportedSegments:   []types.ImportSegment{},
-					ExportCount:        0, // Let the BuildBundle determine this
-					Extrinsics:         hashes,
-				},
-			},
-		}
+		wp := defaultWorkPackage(b.serviceID, service)
+		wp.WorkItems[0].Payload = buildPayload(PayloadTypeTransactions, len(evmTxs), 0)
+		wp.WorkItems[0].Extrinsics = hashes
 
 		//  BuildBundle should return a Bundle (with ImportedSegments)
 		bundle2, _, err := b.stateDB.BuildBundle(wp, []types.ExtrinsicsBlobs{evmTxs}, uint16(coreIndex), nil, b.pvmBackend)
 		if err != nil {
 			return nil, fmt.Errorf("BuildBundle failed: %v", err)
 		}
-		//showBundleImportedSegments(bundle2, "after BuildBundle")
 		bundles[coreIndex] = bundle2
 	}
 
@@ -666,45 +632,39 @@ func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte) (*EvmBlockPay
 }
 
 // ShowTxReceipts displays transaction receipts for the given transaction hashes
-func (b *Rollup) ShowTxReceipts(evmBlock *EvmBlockPayload, txHashes []common.Hash, description string, allTopics map[common.Hash]string) error {
+func (b *Rollup) ShowTxReceipts(evmBlock *evmtypes.EvmBlockPayload, txHashes []common.Hash, description string, allTopics map[common.Hash]string) error {
 	log.Info(log.Node, "Showing transaction receipts", "description", description, "count", len(txHashes))
 
 	gasUsedTotal := big.NewInt(0)
 	txIndexByHash := make(map[common.Hash]int, len(evmBlock.TxHashes))
 	for idx, hash := range evmBlock.TxHashes {
 		txIndexByHash[hash] = idx
+		fmt.Printf("ADDED txIndexByHash: %s -> %d\n", hash.String(), idx)
 	}
-	receiptCount := len(evmBlock.ReceiptHashes)
+	//	receiptCount := len(evmBlock.ReceiptHashes)
 
 	for _, txHash := range txHashes {
 		receipt, err := b.stateDB.GetTransactionReceipt(b.serviceID, txHash)
 		if err != nil {
 			return fmt.Errorf("failed to get transaction receipt for %s: %w", txHash.String(), err)
 		}
-		if receipt == nil {
-			return fmt.Errorf("Transaction receipt not available: %s", txHash.String())
-		}
-		// Convert gasUsed from hex to decimal
+
 		gasUsedInt := new(big.Int)
 		gasUsedInt.SetString(strings.TrimPrefix(receipt.GasUsed, "0x"), 16)
 		gasUsedTotal.Add(gasUsedTotal, gasUsedInt)
-
+		txIndexString := receipt.TransactionIndex
+		txIndex, err := strconv.ParseUint(txIndexString[2:], 10, 64)
+		if err != nil {
+			return fmt.Errorf("failed to convert txIndexString to uint64: %w", err)
+		}
 		log.Info(log.Node, "✅ Transaction succeeded",
 			"txHash", txHash.String(),
+			"index", txIndex,
 			"len(logs)", len(receipt.Logs),
 			"gasUsed", gasUsedInt.String())
-		showEthereumLogs(txHash, receipt.Logs, allTopics)
+		evmtypes.ShowEthereumLogs(txHash, receipt.Logs, allTopics)
 		if verifyServiceProof {
-			txIndex, ok := txIndexByHash[txHash]
-			if !ok {
-				log.Warn(log.Node, "✗ Skipping service proof verification", "reason", "tx not in block", "txHash", common.Str(txHash))
-				continue
-			}
-			if txIndex >= receiptCount {
-				log.Warn(log.Node, "✗ Skipping service proof verification", "reason", "receipt index out of range", "txHash", common.Str(txHash), "txIndex", txIndex, "receiptCount", receiptCount)
-				continue
-			}
-			position := evmBlock.LogIndexStart + uint64(txIndex)
+			position := evmBlock.LogIndexStart + txIndex
 			proof, err := b.stateDB.GenerateServiceProof(b.serviceID, b.stateDB.GetMMRStorageKey(), position, evmBlock.LogIndexStart, evmBlock.ReceiptHashes)
 			if err != nil {
 				log.Info(log.Node, "No receipt inclusion proof available", "position", position, "txHash", common.Str(txHash), "err", err)
@@ -754,7 +714,7 @@ func (b *Rollup) ExportStateWitnesses(workReports []*types.WorkReport, saveToFil
 	return nil
 }
 
-func (b *Rollup) SubmitEVMPayloadBlocks(startBlock uint32, endBlock uint32) (*EvmBlockPayload, error) {
+func (b *Rollup) SubmitEVMPayloadBlocks(startBlock uint32, endBlock uint32) (*evmtypes.EvmBlockPayload, error) {
 	// MappingEntry represents a single mapping entry to initialize
 	type MappingEntry struct {
 		Slot  uint8
@@ -806,43 +766,26 @@ func (b *Rollup) SubmitEVMPayloadBlocks(startBlock uint32, endBlock uint32) (*Ev
 		// Set USDM initial balances and nonces
 		totalSupplyValue := new(big.Int).Mul(big.NewInt(61_000_000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
 		usdmInitialState := []MappingEntry{
-			{Slot: 0, Key: IssuerAddress, Value: totalSupplyValue}, // balanceOf[issuer]
-			{Slot: 1, Key: IssuerAddress, Value: big.NewInt(1)},    // nonces[issuer]
+			{Slot: 0, Key: evmtypes.IssuerAddress, Value: totalSupplyValue}, // balanceOf[issuer]
+			{Slot: 1, Key: evmtypes.IssuerAddress, Value: big.NewInt(1)},    // nonces[issuer]
 		}
-		initializeMappings(&blobs, &workItems, UsdmAddress, usdmInitialState)
+		initializeMappings(&blobs, &workItems, evmtypes.UsdmAddress, usdmInitialState)
 	}
 	numExtrinsics := len(workItems)
 
-	objects := []common.Hash{GetBlockNumberKey()}
+	objects := []common.Hash{evmtypes.GetBlockNumberKey()}
 	for blockNum := startBlock; blockNum < endBlock; blockNum++ {
-		objects = append(objects, BlockNumberToObjectID(blockNum))
+		objects = append(objects, evmtypes.BlockNumberToObjectID(blockNum))
 	}
 	service, ok, err := b.stateDB.GetService(b.serviceID)
 	if err != nil || !ok {
 		return nil, fmt.Errorf("EVM service not found: %v", err)
 	}
 
-	// blockNumberKeyWitness, ok, stateRoot, err := b.ReadStateWitnessRaw(RollupCode, GetBlockNumberKey())
-	// blockWitness, ok, blockStateRoot, err := b.ReadStateWitnessRaw(RollupCode, blockObjectID)
 	// Create work package
-	wp := types.WorkPackage{
-		AuthCodeHost:          0,
-		AuthorizationToken:    nil,
-		ConfigurationBlob:     nil,
-		AuthorizationCodeHash: bootstrap_auth_codehash,
-		WorkItems: []types.WorkItem{
-			{
-				Service:            uint32(b.serviceID),
-				CodeHash:           service.CodeHash,
-				Payload:            buildPayload(PayloadTypeBlocks, numExtrinsics, 0),
-				RefineGasLimit:     types.RefineGasAllocation / 2,
-				AccumulateGasLimit: types.AccumulationGasAllocation,
-				ImportedSegments:   []types.ImportSegment{},
-				ExportCount:        0, // Let the BuildBundle determine this
-				Extrinsics:         workItems,
-			},
-		},
-	}
+	wp := defaultWorkPackage(b.serviceID, service)
+	wp.WorkItems[0].Payload = buildPayload(PayloadTypeBlocks, numExtrinsics, 0)
+	wp.WorkItems[0].Extrinsics = workItems
 
 	bundle := &types.WorkPackageBundle{
 		WorkPackage:   wp,
@@ -954,7 +897,7 @@ func (b *Rollup) createTransferTriplesForRound(roundNum int, txnsPerRound int, i
 }
 
 // DeployContract deploys a contract and returns its address
-func (b *Rollup) DeployContract(contractFile string) (*EvmBlockPayload, common.Address, error) {
+func (b *Rollup) DeployContract(contractFile string) (*evmtypes.EvmBlockPayload, common.Address, error) {
 	// Load contract bytecode from file
 	contractBytecode, err := os.ReadFile(contractFile)
 	if err != nil {

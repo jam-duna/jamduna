@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/refine"
+	// "github.com/colorfulnotion/jam/refine"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
@@ -386,59 +386,60 @@ func (t *Target) onGetState(req *common.Hash) *Message {
 	return &Message{State: &stateKeyVals}
 }
 
-func (t *Target) onRefineBundle(req *types.RefineBundle) *Message {
-	workPackageHash := req.Bundle.PackageHash()
-	log.Printf("%s[INCOMING REQ]%s RefineBundle", common.ColorBlue, common.ColorReset)
-	core := req.Core
-	bundle := req.Bundle
-	segRootMappings := req.SegmentRootMappings
+/*
+	func (t *Target) onRefineBundle(req *types.RefineBundle) *Message {
+		workPackageHash := req.Bundle.PackageHash()
+		log.Printf("%s[INCOMING REQ]%s RefineBundle", common.ColorBlue, common.ColorReset)
+		core := req.Core
+		bundle := req.Bundle
+		segRootMappings := req.SegmentRootMappings
 
-	log.Printf("%sWorkPackageHash: %v (bundleLen: %d, core: %d)%s", common.ColorGray, workPackageHash.Hex(), len(bundle.Bytes()), core, common.ColorReset)
-	//log.Printf("%sReceived Bundle: %s%s", common.ColorGray, bundle.StringL(), common.ColorReset)
+		log.Printf("%sWorkPackageHash: %v (bundleLen: %d, core: %d)%s", common.ColorGray, workPackageHash.Hex(), len(bundle.Bytes()), core, common.ColorReset)
+		//log.Printf("%sReceived Bundle: %s%s", common.ColorGray, bundle.StringL(), common.ColorReset)
 
-	startTime := time.Now()
-	bundleSnapshot, err := refine.ExecuteWorkPackageBundleSkipAuth(
-		t.stateDB,
-		t.pvmBackend,
-		t.stateDB.GetTimeslot(), // timeslot
-		core,                    // workPackageCoreIndex from RefineBundle
-		bundle,
-		segRootMappings,
-		t.stateDB.GetTimeslot(), // slot
-		req.AuthGasUsed,         // authGasUsed from RefineBundle
-		req.AuthTrace,           // authTrace from RefineBundle
-	)
-	executionDuration := time.Since(startTime)
-
-	var workReport *types.WorkReport
-	if err != nil {
-		log.Printf("%s[REFINEBK ERR] %v (took %.3fms)%s", common.ColorRed, err, float64(executionDuration.Nanoseconds())/1e6, common.ColorReset)
-		workReport = &types.WorkReport{}
-	} else {
-		workReport = &bundleSnapshot.Report
-
-		_, exportedSegments, refineErr := refine.ExecuteWBRefinement(
+		startTime := time.Now()
+		bundleSnapshot, err := refine.ExecuteWorkPackageBundleSkipAuth(
 			t.stateDB,
 			t.pvmBackend,
-			t.stateDB.GetTimeslot(),
-			core,
+			t.stateDB.GetTimeslot(), // timeslot
+			core,                    // workPackageCoreIndex from RefineBundle
 			bundle,
-			types.Result{Ok: req.AuthTrace}, // Synthetic auth result
+			segRootMappings,
+			t.stateDB.GetTimeslot(), // slot
+			req.AuthGasUsed,         // authGasUsed from RefineBundle
+			req.AuthTrace,           // authTrace from RefineBundle
 		)
+		executionDuration := time.Since(startTime)
 
-		if refineErr == nil && len(exportedSegments) > 0 {
-			t.storeExportedSegments(workPackageHash, workReport.AvailabilitySpec.ExportedSegmentRoot, exportedSegments)
+		var workReport *types.WorkReport
+		if err != nil {
+			log.Printf("%s[REFINEBK ERR] %v (took %.3fms)%s", common.ColorRed, err, float64(executionDuration.Nanoseconds())/1e6, common.ColorReset)
+			workReport = &types.WorkReport{}
+		} else {
+			workReport = &bundleSnapshot.Report
+
+			_, exportedSegments, refineErr := refine.ExecuteWBRefinement(
+				t.stateDB,
+				t.pvmBackend,
+				t.stateDB.GetTimeslot(),
+				core,
+				bundle,
+				types.Result{Ok: req.AuthTrace}, // Synthetic auth result
+			)
+
+			if refineErr == nil && len(exportedSegments) > 0 {
+				t.storeExportedSegments(workPackageHash, workReport.AvailabilitySpec.ExportedSegmentRoot, exportedSegments)
+			}
+
+			log.Printf("%sBundle execution completed (took %.3fms)%s", common.ColorGray, float64(executionDuration.Nanoseconds())/1e6, common.ColorReset)
+			executedReportHash := workReport.Hash()
+			log.Printf("%sExec ReportHash: %s%s", common.ColorGray, executedReportHash.Hex(), common.ColorReset)
+			//log.Printf("%sExec WorkReport: %s%s", common.ColorGray, workReport.String(), common.ColorReset)
 		}
-
-		log.Printf("%sBundle execution completed (took %.3fms)%s", common.ColorGray, float64(executionDuration.Nanoseconds())/1e6, common.ColorReset)
-		executedReportHash := workReport.Hash()
-		log.Printf("%sExec ReportHash: %s%s", common.ColorGray, executedReportHash.Hex(), common.ColorReset)
-		//log.Printf("%sExec WorkReport: %s%s", common.ColorGray, workReport.String(), common.ColorReset)
+		log.Printf("%s[OUTGOING RSP]%s WorkReport", common.ColorGreen, common.ColorReset)
+		return &Message{WorkReport: workReport}
 	}
-	log.Printf("%s[OUTGOING RSP]%s WorkReport", common.ColorGreen, common.ColorReset)
-	return &Message{WorkReport: workReport}
-}
-
+*/
 func (t *Target) onGetExports(req *common.Hash) *Message {
 	log.Printf("%s[INCOMING REQ]%s GetExports - Hash: %s", common.ColorBlue, common.ColorReset, req.Hex())
 

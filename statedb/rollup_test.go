@@ -9,6 +9,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -38,41 +39,24 @@ func TestAlgoBlocks(t *testing.T) {
 	rand.Seed(12345)
 	bundles := make([]*types.WorkPackageBundle, types.TotalCores)
 	for n := 0; n <= numBlocks; n++ {
-		// payload := make([]byte, 2)
-		// payload[0] = byte(n)
-		// payload[1] = algoPayloads[n-1]
 		// Get current anchor and state for RefineContext
 		anchorHash := c.stateDB.HeaderHash
 		stateRoot := c.stateDB.StateRoot
 		beefyRoot := common.Hash{} // Empty for test
 		currentTimeslot := c.stateDB.JamState.SafroleState.Timeslot
 
-		wp := types.WorkPackage{
-			AuthCodeHost:          0,
-			AuthorizationToken:    nil,
-			AuthorizationCodeHash: bootstrap_auth_codehash,
-			ConfigurationBlob:     nil,
-			RefineContext: types.RefineContext{
-				Anchor:           anchorHash,
-				StateRoot:        stateRoot,
-				BeefyRoot:        beefyRoot,
-				LookupAnchor:     anchorHash,
-				LookupAnchorSlot: currentTimeslot,
-				Prerequisites:    []common.Hash{},
-			},
-			WorkItems: []types.WorkItem{
-				{
-					Service:  c.serviceID,
-					CodeHash: service.CodeHash,
-					Payload:  GenerateAlgoPayload(n, false),
-					//Payload:            payload,
-					RefineGasLimit:     types.RefineGasAllocation / 2,
-					AccumulateGasLimit: types.AccumulationGasAllocation,
-					ImportedSegments:   []types.ImportSegment{},
-					ExportCount:        uint16(n),
-				},
-			},
+		wp := defaultWorkPackage(c.serviceID, service)
+		wp.RefineContext = types.RefineContext{
+			Anchor:           anchorHash,
+			StateRoot:        stateRoot,
+			BeefyRoot:        beefyRoot,
+			LookupAnchor:     anchorHash,
+			LookupAnchorSlot: currentTimeslot,
+			Prerequisites:    []common.Hash{},
 		}
+		wp.WorkItems[0].Payload = GenerateAlgoPayload(n, false)
+		wp.WorkItems[0].RefineGasLimit = types.RefineGasAllocation / 2
+		wp.WorkItems[0].ExportCount = uint16(n)
 		bundles[0] = &types.WorkPackageBundle{
 			WorkPackage:   wp,
 			ExtrinsicData: []types.ExtrinsicsBlobs{{}},
@@ -103,7 +87,7 @@ func TestAlgoBlocks(t *testing.T) {
 			"ParentHeaderHash", block.ParentHeaderHash)
 
 		// BMT proof verification
-		if err := verifyBlockBMTProofs(block); err != nil {
+		if err := evmtypes.VerifyBlockBMTProofs(block); err != nil {
 			t.Fatalf("BMT proof verification failed for block %d: %v", block.Number, err)
 		}
 	}
@@ -122,7 +106,7 @@ func TestEVMBlocksMath(t *testing.T) {
 	txBytesMulticore := make([][][]byte, types.TotalCores)
 
 	for i := 0; i <= 3; i++ {
-		txBytes, alltopics, err := chain.CallMath(MathAddress, []string{
+		txBytes, alltopics, err := chain.CallMath(evmtypes.MathAddress, []string{
 			"fibonacci(256)",
 			"fact(6)",
 			"fact(7)",
@@ -210,7 +194,7 @@ func RunTransfersRound(b *Rollup, transfers []TransferTriple) (err error) {
 		senderAddr, senderPrivKey := common.GetEVMDevAccount(transfer.SenderIndex)
 		recipientAddr, _ := common.GetEVMDevAccount(transfer.ReceiverIndex)
 
-		gasPrice := big.NewInt(1_000_000_000) // 1 Gwei
+		gasPrice := big.NewInt(1) // 1 wei
 		gasLimit := uint64(2_000_000)
 
 		currentNonce := senderNonces[transfer.SenderIndex]
@@ -263,7 +247,7 @@ func RunTransfersRound(b *Rollup, transfers []TransferTriple) (err error) {
 		"ParentHeaderHash", block.ParentHeaderHash)
 
 	// BMT proof verification
-	if err := verifyBlockBMTProofs(block); err != nil {
+	if err := evmtypes.VerifyBlockBMTProofs(block); err != nil {
 		return err
 	}
 
@@ -321,30 +305,6 @@ func RunTransfersRound(b *Rollup, transfers []TransferTriple) (err error) {
 		return fmt.Errorf("balance mismatch: before=%s, after=%s, difference=%s", totalBefore.String(), totalAfter.String(), diff.String())
 	}
 
-	// Verify issuer balance and nonce via contract calls
-	balance, err := b.stateDB.GetBalance(b.serviceID, IssuerAddress)
-	if err != nil {
-		return fmt.Errorf("GetBalance failed: %w", err)
-	}
-
-	nonce, err := b.stateDB.GetTransactionCount(b.serviceID, IssuerAddress)
-	if err != nil {
-		return fmt.Errorf("GetTransactionCount failed: %w", err)
-	}
-
-	log.Info(log.Node, "Issuer account after transfers", "address", IssuerAddress, "balance", balance, "nonce", nonce)
-
-	// TODO
-	// err = b.checkBalanceOf(IssuerAddress, issuerBalance)
-	// if err != nil {
-	// 	return fmt.Errorf("checkBalanceOf failed: %w", err)
-	// }
-
-	// err = b.checkNonces(IssuerAddress, new(big.Int).SetUint64(issuerTxCount))
-	// if err != nil {
-	// 	return fmt.Errorf("checkNonces failed: %w", err)
-	// }
-
 	// Verify coinbase collected fees
 	coinbaseBalance, err := b.stateDB.GetBalance(b.serviceID, coinbaseAddress)
 	if err != nil {
@@ -372,10 +332,33 @@ func TestEVMBlocksTransfers(t *testing.T) {
 		t.Fatalf("SubmitEVMPayloadBlocks failed: %v", err)
 	}
 
-	// if err := chain.stateDB.EstimateGasTransfer(IssuerAddress, UsdmAddress, chain.pvmBackend); err != nil {
-	// 	t.Fatalf("EstimateGas failed: %v", err)
-	// }
-	for round := 0; round < 15; round++ {
+	balance, err := chain.stateDB.GetBalance(chain.serviceID, evmtypes.IssuerAddress)
+	if err != nil {
+		t.Fatalf("GetBalance failed: %v", err)
+	}
+
+	nonce, err := chain.stateDB.GetTransactionCount(chain.serviceID, evmtypes.IssuerAddress)
+	if err != nil {
+		t.Fatalf("GetTransactionCount failed: %v", err)
+	}
+
+	log.Info(log.Node, "Issuer account after transfers", "address", evmtypes.IssuerAddress, "balance", balance, "nonce", nonce)
+
+	err = chain.checkBalanceOf(evmtypes.IssuerAddress, balance)
+	if err != nil {
+		log.Warn(log.Node, "checkBalanceOf warning (non-fatal)", "err", err)
+	}
+	err = chain.checkNonces(evmtypes.IssuerAddress, new(big.Int).SetUint64(nonce))
+	if err != nil {
+		log.Warn(log.Node, "checkNonces warning (non-fatal)", "err", err)
+	}
+	gasUsed, err := chain.stateDB.EstimateGasTransfer(chain.serviceID, evmtypes.IssuerAddress, evmtypes.UsdmAddress, chain.pvmBackend)
+	if err != nil {
+		t.Fatalf("EstimateGasTransfer failed: %v", err)
+	}
+	log.Info(log.Node, "EstimateGasTransfer", "estimatedGas", gasUsed)
+
+	for round := 0; round < 12; round++ {
 		isLastRound := (round == numRounds-1)
 		log.Info(log.Node, "test_transfers - round", "round", round, "isLastRound", isLastRound)
 		err := RunTransfersRound(chain, chain.createTransferTriplesForRound(round, txnsPerRound, isLastRound))

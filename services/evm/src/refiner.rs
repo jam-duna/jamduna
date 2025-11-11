@@ -6,7 +6,7 @@ use evm::interpreter::ExitError;
 use evm::backend::{RuntimeBackend, RuntimeEnvironment};
 use utils::{
     effects::{ObjectRef, ObjectId, ExecutionEffects, WriteIntent},
-    functions::{log_error, log_info, log_debug, format_object_id, RefineArgs, WorkItem},
+    functions::{log_error, log_info, log_debug, format_object_id, format_segment, RefineArgs, WorkItem},
     hash_functions::keccak256,
 };
 use crate::{
@@ -961,16 +961,17 @@ impl BlockRefiner {
 
                 log_info(
                     &format!(
-                        "✅ Payload Call: Success, gas_used={}, output_len={}",
+                        "✅ Payload Call: Success, gas_used={}, output_len={}, output={}",
                         gas_used,
-                        output.len()
+                        output.len(),
+                        format_segment(&output)
                     ),
                 );
 
                 // create WriteIntent
                 let write_intent = WriteIntent {
                     effect: WriteEffectEntry {
-                        object_id: [0u8; 32],
+                        object_id: [0xCCu8; 32],
                         ref_info: ObjectRef {
                             service_id: 0,
                             work_package_hash: [0u8; 32],

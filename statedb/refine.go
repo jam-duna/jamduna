@@ -2,13 +2,8 @@ package statedb
 
 import (
 	"bytes"
-	"crypto/ecdsa"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"math/big"
 	"reflect"
-	"strconv"
 	"time"
 
 	bls "github.com/colorfulnotion/jam/bls"
@@ -17,104 +12,11 @@ import (
 	"github.com/colorfulnotion/jam/telemetry"
 	"github.com/colorfulnotion/jam/trie"
 	types "github.com/colorfulnotion/jam/types"
-	ethereumCommon "github.com/ethereum/go-ethereum/common"
-	ethereumTypes "github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 )
 
-// EthereumTransaction represents a parsed Ethereum transaction
-type EthereumTransaction struct {
-	Hash     common.Hash     `json:"hash"`
-	From     common.Address  `json:"from"`
-	To       *common.Address `json:"to"`
-	Value    *big.Int        `json:"value"`
-	Gas      uint64          `json:"gas"`
-	GasPrice *big.Int        `json:"gasPrice"`
-	Nonce    uint64          `json:"nonce"`
-	Data     []byte          `json:"data"`
-	V        *big.Int        `json:"v"`
-	R        *big.Int        `json:"r"`
-	S        *big.Int        `json:"s"`
-
-	// JAM-specific fields
-	ReceivedAt time.Time `json:"receivedAt"`
-	Size       uint64    `json:"size"`
-
-	// Store the original go-ethereum transaction for proper type handling
-	Inner *ethereumTypes.Transaction `json:"-"`
-}
-
-// EthereumTransactionResponse represents a complete Ethereum transaction for JSON-RPC responses
-type EthereumTransactionResponse struct {
-	Hash             string  `json:"hash"`
-	Nonce            string  `json:"nonce"`
-	BlockHash        *string `json:"blockHash"`
-	BlockNumber      *string `json:"blockNumber"`
-	TransactionIndex *string `json:"transactionIndex"`
-	From             string  `json:"from"`
-	To               *string `json:"to"`
-	Value            string  `json:"value"`
-	GasPrice         string  `json:"gasPrice"`
-	Gas              string  `json:"gas"`
-	Input            string  `json:"input"`
-	V                string  `json:"v"`
-	R                string  `json:"r"`
-	S                string  `json:"s"`
-}
-
-// ConvertPayloadToEthereumTransaction converts the transaction payload to Ethereum format
-func ConvertPayloadToEthereumTransaction(receipt *TransactionReceipt) (*EthereumTransactionResponse, error) {
-	// The payload contains the RLP-encoded Ethereum transaction (from main.rs line 499: extrinsic.clone())
-	// This can be a legacy tx, EIP-2930, or EIP-1559 transaction
-
-	payload := receipt.Payload
-	if len(payload) == 0 {
-		return nil, fmt.Errorf("empty payload")
-	}
-
-	// Decode the RLP-encoded Ethereum transaction using go-ethereum
-	var tx ethereumTypes.Transaction
-	err := tx.UnmarshalBinary(payload)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode RLP transaction: %v", err)
-	}
-
-	// Extract transaction fields
-	var to *string
-	if tx.To() != nil {
-		toAddr := tx.To().Hex()
-		to = &toAddr
-	}
-
-	// Recover sender address from signature
-	signer := ethereumTypes.LatestSignerForChainID(tx.ChainId())
-	from, err := signer.Sender(&tx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to recover sender: %v", err)
-	}
-
-	input := "0x" + hex.EncodeToString(tx.Data())
-
-	// Extract v, r, s from signature
-	v, r, s := tx.RawSignatureValues()
-
-	return &EthereumTransactionResponse{
-		Hash:             receipt.Hash.String(),
-		Nonce:            fmt.Sprintf("0x%x", tx.Nonce()),
-		BlockHash:        nil, // Will be set by caller
-		BlockNumber:      nil, // Will be set by caller
-		TransactionIndex: nil, // Will be set by caller
-		From:             from.Hex(),
-		To:               to,
-		Value:            fmt.Sprintf("0x%x", tx.Value()),
-		GasPrice:         fmt.Sprintf("0x%x", tx.GasPrice()),
-		Gas:              fmt.Sprintf("0x%x", tx.Gas()),
-		Input:            input,
-		V:                fmt.Sprintf("0x%x", v),
-		R:                fmt.Sprintf("0x%x", r),
-		S:                fmt.Sprintf("0x%x", s),
-	}, nil
-}
+const (
+	debugSpec = false
+)
 
 // boolToHexStatus converts a boolean success status to hex status string
 func boolToHexStatus(success bool) string {
@@ -122,100 +24,6 @@ func boolToHexStatus(success bool) string {
 		return "0x1"
 	}
 	return "0x0"
-}
-
-// ParseTransactionObject parses a JSON transaction object into an EthereumTransaction
-func ParseTransactionObject(txObj map[string]interface{}) (*EthereumTransaction, error) {
-	tx := &EthereumTransaction{}
-
-	// Parse 'to' field
-	if toStr, ok := txObj["to"].(string); ok && toStr != "" {
-		to := common.HexToAddress(toStr)
-		tx.To = &to
-	}
-
-	// Parse 'from' field
-	if fromStr, ok := txObj["from"].(string); ok && fromStr != "" {
-		tx.From = common.HexToAddress(fromStr)
-	}
-
-	// Parse 'data' field
-	if dataStr, ok := txObj["data"].(string); ok && dataStr != "" {
-		if len(dataStr) >= 2 && dataStr[:2] == "0x" {
-			tx.Data = common.FromHex(dataStr)
-		}
-	}
-
-	// Parse 'value' field
-	if valueStr, ok := txObj["value"].(string); ok && valueStr != "" {
-		if len(valueStr) >= 2 && valueStr[:2] == "0x" {
-			if value, success := big.NewInt(0).SetString(valueStr[2:], 16); success {
-				tx.Value = value
-			}
-		}
-	}
-	if tx.Value == nil {
-		tx.Value = big.NewInt(0)
-	}
-
-	// Parse 'gas' field
-	if gasStr, ok := txObj["gas"].(string); ok && gasStr != "" {
-		if len(gasStr) >= 2 && gasStr[:2] == "0x" {
-			if gas, err := strconv.ParseUint(gasStr[2:], 16, 64); err == nil {
-				tx.Gas = gas
-			}
-		}
-	}
-	if tx.Gas == 0 {
-		tx.Gas = 21000 // Default gas limit
-	}
-
-	// Parse 'gasPrice' field
-	if gasPriceStr, ok := txObj["gasPrice"].(string); ok && gasPriceStr != "" {
-		if len(gasPriceStr) >= 2 && gasPriceStr[:2] == "0x" {
-			if gasPrice, success := big.NewInt(0).SetString(gasPriceStr[2:], 16); success {
-				tx.GasPrice = gasPrice
-			}
-		}
-	}
-	if tx.GasPrice == nil {
-		tx.GasPrice = big.NewInt(1000000000) // 1 Gwei default
-	}
-
-	// Parse 'nonce' field
-	if nonceStr, ok := txObj["nonce"].(string); ok && nonceStr != "" {
-		if len(nonceStr) >= 2 && nonceStr[:2] == "0x" {
-			if nonce, err := strconv.ParseUint(nonceStr[2:], 16, 64); err == nil {
-				tx.Nonce = nonce
-			}
-		}
-	}
-	// Note: If nonce is 0, caller should check if it was explicitly provided or needs to be fetched
-
-	return tx, nil
-}
-
-// getTransactionByHash reads a transaction receipt from storage using its hash
-// Returns the raw TransactionReceipt and ObjectRef for metadata
-func (n *StateDB) getTransactionByHash(serviceID uint32, txHash common.Hash) (*TransactionReceipt, *types.ObjectRef, error) {
-	// Use ReadStateWitnessRef to get the transaction receipt with metadata from DA
-	// This includes the Ref field which contains block number and transaction index
-	receiptObjectID := tx_to_objectID(txHash)
-	witness, found, err := n.ReadStateWitnessRef(serviceID, receiptObjectID, false)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read transaction receipt: %v", err)
-	}
-	if !found {
-		return nil, nil, nil // Transaction not found
-	}
-
-	// Parse the receipt data according to serialize_receipt format
-	receipt, err := ParseRawReceipt(witness.Payload)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to parse transaction receipt: %v", err)
-	}
-
-	return receipt, &witness.Ref, nil
 }
 
 // authorizeWP executes the authorization step for a work package
@@ -407,9 +215,8 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 	return workReport, nil
 }
 
-// BuildBundle maps a work package into a WPQueueItem using JAMDA interface
-// Instead, it updates the workpackage work items: (1)  ExportCount ImportedSegments with a special HostFetchWitness call
-
+// BuildBundle maps a work package into a WorkPackageBundle using JAMDA interface
+// It updates the workpackage work items: (1)  ExportCount ImportedSegments with a special HostFetchWitness call
 func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash, pvmBackend string) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
 	wp := workPackage.Clone()
 
@@ -525,6 +332,11 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 	bundle.ExtrinsicData = extrinsicsBlobs
 
 	// BuildBundle creates its own RefineContext with the targetStateDB state root (after execution)
+	// Also restore authorization fields that were lost in BuildBundleFromWPQueueItem
+	bundle.WorkPackage.AuthCodeHost = wp.AuthCodeHost
+	bundle.WorkPackage.AuthorizationCodeHash = wp.AuthorizationCodeHash
+	bundle.WorkPackage.AuthorizationToken = wp.AuthorizationToken
+	bundle.WorkPackage.ConfigurationBlob = wp.ConfigurationBlob
 	bundle.WorkPackage.RefineContext = types.RefineContext{
 		Anchor:           anchorHash,
 		StateRoot:        currentStateRoot,
@@ -534,15 +346,12 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 		Prerequisites:    []common.Hash{},
 	}
 
-	return &bundle, nil, nil
-}
-
-func showBundleImportedSegments(bundle *types.WorkPackageBundle, caption string) {
-	for i, workItemSegments := range bundle.ImportSegmentData {
-		for j, data := range workItemSegments {
-			fmt.Printf("%s: ImportSegmentData[%d][%d] len=%d\n", caption, i, j, len(data))
-		}
+	// Create work report from results -- note that this does not have availability spec
+	workReport := &types.WorkReport{
+		Results: results,
 	}
+
+	return &bundle, workReport, nil
 }
 
 // getBeefyRootForAnchor returns the BEEFY root recorded for the given anchor header hash.
@@ -560,359 +369,6 @@ func (s *StateDB) getBeefyRootForAnchor(anchor common.Hash) common.Hash {
 
 	return recent[len(recent)-1].B
 }
-
-// computeLogsBloom creates a bloom filter from logs
-func computeLogsBloom(logs []EthereumLog) string {
-	if len(logs) == 0 {
-		// Return 256 bytes (512 hex chars) of zeros
-		return ethereumCommon.Bytes2Hex(make([]byte, 256))
-	}
-
-	// Create a bloom filter (256 bytes = 2048 bits)
-	var bloom ethereumTypes.Bloom
-
-	// Add each log's address and topics to the bloom filter
-	for _, log := range logs {
-		// Add address to bloom
-		address := ethereumCommon.HexToAddress(log.Address)
-		bloom.Add(address.Bytes())
-
-		// Add each topic to bloom
-		for _, topic := range log.Topics {
-			topicHash := ethereumCommon.HexToHash(topic)
-			bloom.Add(topicHash.Bytes())
-		}
-	}
-
-	return ethereumCommon.Bytes2Hex(bloom[:])
-}
-
-// GetTransactionByHash fetches a transaction receipt by hash
-// Returns raw TransactionReceipt and ObjectRef
-func (n *StateDB) GetTransactionByHash(serviceID uint32, txHash common.Hash) (*TransactionReceipt, *types.ObjectRef, error) {
-	return n.getTransactionByHash(serviceID, txHash)
-}
-
-// GetTransactionByHashFormatted fetches a transaction and returns it in Ethereum JSON-RPC format
-func (n *StateDB) GetTransactionByHashFormatted(serviceID uint32, txHash common.Hash) (*EthereumTransactionResponse, error) {
-	receipt, ref, err := n.getTransactionByHash(serviceID, txHash)
-	if err != nil {
-		return nil, err
-	}
-	if receipt == nil {
-		return nil, nil // Transaction not found
-	}
-
-	// Convert the original payload to Ethereum transaction format
-	ethTx, err := ConvertPayloadToEthereumTransaction(receipt)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert payload to Ethereum transaction: %v", err)
-	}
-
-	// Get block metadata from the receipt's Ref field
-	evmBlock, err := n.ReadBlockByNumber(serviceID, ref.EvmBlock)
-	if err != nil {
-		// If block can't be read, return transaction without block metadata (pending state)
-		log.Warn(log.Node, "GetTransactionByHashFormatted: Failed to read block metadata",
-			"txHash", txHash.String(), "blockNum", ref.EvmBlock, "error", err)
-		return ethTx, nil
-	}
-
-	// Populate block metadata
-	blockHash := evmBlock.ComputeHash().String()
-	blockNumber := fmt.Sprintf("0x%x", ref.EvmBlock)
-	txIndex := fmt.Sprintf("0x%x", ref.TxSlot)
-	ethTx.BlockHash = &blockHash
-	ethTx.BlockNumber = &blockNumber
-	ethTx.TransactionIndex = &txIndex
-
-	return ethTx, nil
-}
-
-// ParseRawTransactionBytes parses a raw signed transaction from bytes
-func ParseRawTransactionBytes(rawTxBytes []byte) (*EthereumTransaction, error) {
-	// Decode transaction (handles both legacy RLP and typed transactions)
-	var ethTx ethereumTypes.Transaction
-	if err := ethTx.UnmarshalBinary(rawTxBytes); err != nil {
-		return nil, fmt.Errorf("failed to decode transaction: %v", err)
-	}
-
-	// Extract signature values
-	v, r, s := ethTx.RawSignatureValues()
-
-	// Convert 'to' address
-	var to *common.Address
-	if ethTx.To() != nil {
-		addr := common.BytesToAddress(ethTx.To().Bytes())
-		to = &addr
-	}
-
-	// Create our transaction structure
-	tx := &EthereumTransaction{
-		Hash:       common.BytesToHash(ethTx.Hash().Bytes()),
-		From:       common.Address{}, // Will be recovered from signature
-		To:         to,
-		Value:      ethTx.Value(),
-		Gas:        ethTx.Gas(),
-		GasPrice:   ethTx.GasPrice(),
-		Nonce:      ethTx.Nonce(),
-		Data:       ethTx.Data(),
-		V:          v,
-		R:          r,
-		S:          s,
-		ReceivedAt: time.Now(),
-		Size:       uint64(len(rawTxBytes)),
-		Inner:      &ethTx, // Store original transaction for type-aware operations
-	}
-	return tx, nil
-}
-
-// ParseRawTransaction parses a raw signed transaction from bytes
-func ParseRawTransaction(rawTxBytes []byte) (*EthereumTransaction, error) {
-	return ParseRawTransactionBytes(rawTxBytes)
-}
-
-// RecoverSender recovers the sender address from transaction signature
-func (tx *EthereumTransaction) RecoverSender() (common.Address, error) {
-	// Validate signature values
-	if tx.V == nil || tx.R == nil || tx.S == nil {
-		return common.Address{}, fmt.Errorf("missing signature components")
-	}
-
-	// If we have the inner transaction, use it directly with LatestSignerForChainID
-	// which automatically selects the correct signer for typed transactions
-	if tx.Inner != nil {
-		// Use LatestSignerForChainID to support all transaction types (legacy, EIP-2930, EIP-1559)
-		chainID := tx.Inner.ChainId()
-		if chainID == nil {
-			// For unprotected transactions, try Homestead signer
-			from, err := ethereumTypes.Sender(ethereumTypes.HomesteadSigner{}, tx.Inner)
-			if err != nil {
-				return common.Address{}, fmt.Errorf("failed to recover sender: %v", err)
-			}
-			recoveredAddr := common.BytesToAddress(from.Bytes())
-			log.Debug(log.Node, "RecoverSender (Homestead)", "hash", tx.Hash.String(), "from", recoveredAddr.String())
-			return recoveredAddr, nil
-		}
-
-		signer := ethereumTypes.LatestSignerForChainID(chainID)
-		from, err := ethereumTypes.Sender(signer, tx.Inner)
-		if err != nil {
-			return common.Address{}, fmt.Errorf("failed to recover sender: %v", err)
-		}
-		recoveredAddr := common.BytesToAddress(from.Bytes())
-		log.Debug(log.Node, "RecoverSender", "hash", tx.Hash.String(), "from", recoveredAddr.String(), "type", tx.Inner.Type())
-		return recoveredAddr, nil
-	}
-
-	// Fallback for legacy code path: reconstruct transaction
-	// Create signer based on V value (EIP-155 or Homestead)
-	var signer ethereumTypes.Signer
-	if tx.V.Sign() != 0 && isProtectedV(tx.V) {
-		// EIP-155 transaction with chain ID
-		chainID := deriveChainId(tx.V)
-		signer = ethereumTypes.NewEIP155Signer(chainID)
-	} else {
-		// Pre-EIP155 homestead transaction
-		signer = ethereumTypes.HomesteadSigner{}
-	}
-
-	// Reconstruct the transaction for signature recovery
-	var to *common.Address
-	if tx.To != nil {
-		ethAddr := (ethereumCommon.Address)(*tx.To)
-		to = (*common.Address)(&ethAddr)
-	}
-
-	// Create go-ethereum transaction
-	ethTx := ethereumTypes.NewTx(&ethereumTypes.LegacyTx{
-		Nonce:    tx.Nonce,
-		GasPrice: tx.GasPrice,
-		Gas:      tx.Gas,
-		To:       (*ethereumCommon.Address)(to),
-		Value:    tx.Value,
-		Data:     tx.Data,
-		V:        tx.V,
-		R:        tx.R,
-		S:        tx.S,
-	})
-
-	// Recover sender address using the signer
-	from, err := ethereumTypes.Sender(signer, ethTx)
-	if err != nil {
-		return common.Address{}, fmt.Errorf("failed to recover sender: %v", err)
-	}
-
-	recoveredAddr := common.BytesToAddress(from.Bytes())
-	log.Debug(log.Node, "RecoverSender (legacy fallback)", "hash", tx.Hash.String(), "from", recoveredAddr.String())
-
-	return recoveredAddr, nil
-}
-
-// isProtectedV checks if V value indicates an EIP-155 transaction
-func isProtectedV(v *big.Int) bool {
-	if v.BitLen() <= 8 {
-		vInt := v.Uint64()
-		return vInt != 27 && vInt != 28
-	}
-	// Anything larger than 8 bits must be protected (chain ID encoding)
-	return true
-}
-
-// deriveChainId derives the chain ID from V value for EIP-155 transactions
-func deriveChainId(v *big.Int) *big.Int {
-	if v.BitLen() <= 64 {
-		vInt := v.Uint64()
-		if vInt == 27 || vInt == 28 {
-			return new(big.Int)
-		}
-		return new(big.Int).SetUint64((vInt - 35) / 2)
-	}
-	// V = CHAIN_ID * 2 + 35 + {0, 1}
-	// CHAIN_ID = (V - 35) / 2
-	chainID := new(big.Int).Sub(v, big.NewInt(35))
-	chainID.Div(chainID, big.NewInt(2))
-	return chainID
-}
-
-// VerifySignature verifies the transaction signature against a public key
-func (tx *EthereumTransaction) VerifySignature(pubkey *ecdsa.PublicKey) bool {
-	// Recover the sender address from the signature
-	sender, err := tx.RecoverSender()
-	if err != nil {
-		log.Warn(log.Node, "VerifySignature: failed to recover sender", "error", err)
-		return false
-	}
-
-	// Derive address from public key using crypto.PubkeyToAddress
-	expectedAddr := crypto.PubkeyToAddress(*pubkey)
-
-	// Compare recovered sender with expected address
-	isValid := sender == common.BytesToAddress(expectedAddr.Bytes())
-
-	log.Debug(log.Node, "VerifySignature", "hash", tx.Hash.String(), "valid", isValid, "sender", sender.String())
-
-	return isValid
-}
-
-// ToJSON returns a JSON representation of the transaction
-func (tx *EthereumTransaction) ToJSON() string {
-	// Create a JSON-compatible representation with proper hex encoding
-	jsonTx := struct {
-		Hash     string  `json:"hash"`
-		From     string  `json:"from"`
-		To       *string `json:"to"`
-		Value    string  `json:"value"`
-		Gas      string  `json:"gas"`
-		GasPrice string  `json:"gasPrice"`
-		Nonce    string  `json:"nonce"`
-		Data     string  `json:"data"`
-		V        string  `json:"v,omitempty"`
-		R        string  `json:"r,omitempty"`
-		S        string  `json:"s,omitempty"`
-	}{
-		Hash:     tx.Hash.String(),
-		From:     tx.From.String(),
-		Value:    "0x" + tx.Value.Text(16),
-		Gas:      fmt.Sprintf("0x%x", tx.Gas),
-		GasPrice: "0x" + tx.GasPrice.Text(16),
-		Nonce:    fmt.Sprintf("0x%x", tx.Nonce),
-		Data:     "0x" + hex.EncodeToString(tx.Data),
-	}
-
-	// Set 'to' field (null for contract creation)
-	if tx.To != nil {
-		toStr := tx.To.String()
-		jsonTx.To = &toStr
-	}
-
-	// Include signature values if present
-	if tx.V != nil && tx.V.Sign() != 0 {
-		jsonTx.V = "0x" + tx.V.Text(16)
-	}
-	if tx.R != nil && tx.R.Sign() != 0 {
-		jsonTx.R = "0x" + tx.R.Text(16)
-	}
-	if tx.S != nil && tx.S.Sign() != 0 {
-		jsonTx.S = "0x" + tx.S.Text(16)
-	}
-
-	// Marshal to JSON
-	jsonBytes, err := json.Marshal(jsonTx)
-	if err != nil {
-		log.Warn(log.Node, "ToJSON: failed to marshal transaction", "error", err)
-		return "{}"
-	}
-
-	return string(jsonBytes)
-}
-
-// createSignedUSDMTransfer creates a signed transaction that transfers USDM tokens
-// Returns the parsed EthereumTransaction, RLP-encoded bytes, transaction hash, and error
-func CreateSignedUSDMTransfer(privateKeyHex string, nonce uint64, to common.Address, amount *big.Int, gasPrice *big.Int, gasLimit uint64, chainID uint64) (*EthereumTransaction, []byte, common.Hash, error) {
-	// Parse private key
-	privateKey, err := crypto.HexToECDSA(privateKeyHex)
-	if err != nil {
-		return nil, nil, common.Hash{}, err
-	}
-
-	// USDM transfer function signature: transfer(address,uint256)
-	// Function selector: 0xa9059cbb
-	calldata := make([]byte, 68)
-	copy(calldata[0:4], []byte{0xa9, 0x05, 0x9c, 0xbb}) // transfer(address,uint256) selector
-
-	// Encode recipient address (32 bytes, left-padded)
-	copy(calldata[16:36], to.Bytes())
-
-	// Encode amount (32 bytes)
-	amountBytes := amount.FillBytes(make([]byte, 32))
-	copy(calldata[36:68], amountBytes)
-
-	// Create transaction to USDM contract
-	ethTx := ethereumTypes.NewTransaction(
-		nonce,
-		ethereumCommon.Address(UsdmAddress),
-		big.NewInt(0), // value = 0 for token transfer
-		gasLimit,
-		gasPrice,
-		calldata,
-	)
-
-	// Sign transaction
-	signer := ethereumTypes.NewEIP155Signer(big.NewInt(int64(chainID)))
-	signedTx, err := ethereumTypes.SignTx(ethTx, signer, privateKey)
-	if err != nil {
-		return nil, nil, common.Hash{}, err
-	}
-
-	// Encode to RLP
-	rlpBytes, err := signedTx.MarshalBinary()
-	if err != nil {
-		return nil, nil, common.Hash{}, err
-	}
-
-	// Calculate transaction hash (Ethereum uses Keccak256)
-	txHash := common.Keccak256(rlpBytes)
-
-	// Parse into EthereumTransaction
-	tx, err := ParseRawTransactionBytes(rlpBytes)
-	if err != nil {
-		return nil, nil, common.Hash{}, err
-	}
-
-	// Recover sender from signature
-	sender, err := tx.RecoverSender()
-	if err != nil {
-		return nil, nil, common.Hash{}, err
-	}
-	tx.From = sender
-
-	return tx, rlpBytes, txHash, nil
-}
-
-const (
-	debugSpec = false
-)
 
 func appendExtrinsicWitnessesToWorkItem(workItem *types.WorkItem, extrinsicsBlobs *[]types.ExtrinsicsBlobs, index int, witnesses []types.StateWitness) {
 	for _, witness := range witnesses {

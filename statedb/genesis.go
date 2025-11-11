@@ -13,6 +13,7 @@ import (
 	bls "github.com/colorfulnotion/jam/bls"
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	storage "github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -108,9 +109,9 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 	// Refine only allows authorized builders
 	// Accumulate only allows increments on BLOCK_NUMBER_KEY when there is a timestamp greater than this
 	// SubmitGenesisWorkPackage uses ReadStateWitness must submit extrinsics that match these storage entries
-	storage[getBlockNumberKey()] = serializeBlockNumber(0, common.Hash{})
+	storage[evmtypes.GetBlockNumberKey()] = evmtypes.SerializeBlockNumber(0, common.Hash{})
 	// this is the genesis block
-	storage[blockNumberToObjectID(0)] = SerializeEvmBlockPayload(&EvmBlockPayload{
+	storage[evmtypes.BlockNumberToObjectID(0)] = evmtypes.SerializeEvmBlockPayload(&evmtypes.EvmBlockPayload{
 		Number:        0,
 		ParentHash:    common.Hash{},
 		LogsBloom:     [256]byte{},

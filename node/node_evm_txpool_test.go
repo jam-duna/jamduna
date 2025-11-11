@@ -13,6 +13,10 @@ import (
 )
 
 const (
+	// Hardhat Account #0 (Issuer/Alice) - First account from standard Hardhat/Anvil test mnemonic
+	// "test test test test test test test test test test test junk"
+	issuerPrivateKeyHex = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+
 	// Target address (Hardhat Account #1)
 	targetAddressHex = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 )
@@ -33,7 +37,7 @@ func TestTxPoolBasicOperations(t *testing.T) {
 	gasLimit := uint64(100_000)
 
 	targetAddr := common.HexToAddress(targetAddressHex)
-	tx, _, _, err := statedb.CreateSignedUSDMTransfer(statedb.IssuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, statedb.JamChainID)
+	tx, _, _, err := statedb.CreateSignedUSDMTransfer(issuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, statedb.JamChainID)
 	if err != nil {
 		t.Fatalf("Failed to create signed transaction: %v", err)
 	}
@@ -92,7 +96,7 @@ func TestTxPoolValidation(t *testing.T) {
 	gasLimit := uint64(100_000)
 
 	targetAddr := common.HexToAddress(targetAddressHex)
-	tx, _, _, err := statedb.CreateSignedUSDMTransfer(statedb.IssuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, statedb.JamChainID)
+	tx, _, _, err := statedb.CreateSignedUSDMTransfer(issuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, statedb.JamChainID)
 	if err != nil {
 		t.Fatalf("Failed to create signed transaction: %v", err)
 	}
@@ -122,7 +126,7 @@ func TestParseRawTransaction(t *testing.T) {
 	gasLimit := uint64(100_000)
 
 	targetAddr := common.HexToAddress(targetAddressHex)
-	tx, rawTxBytes, _, err := statedb.CreateSignedUSDMTransfer(statedb.IssuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, statedb.JamChainID)
+	tx, rawTxBytes, _, err := statedb.CreateSignedUSDMTransfer(issuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, statedb.JamChainID)
 	if err != nil {
 		t.Fatalf("Failed to create signed transaction: %v", err)
 	}
@@ -185,7 +189,7 @@ func TestTxPoolCleanup(t *testing.T) {
 	gasLimit := uint64(100_000)
 
 	targetAddr := common.HexToAddress(targetAddressHex)
-	tx, _, _, err := statedb.CreateSignedUSDMTransfer(statedb.IssuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, statedb.JamChainID)
+	tx, _, _, err := statedb.CreateSignedUSDMTransfer(issuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, statedb.JamChainID)
 	if err != nil {
 		t.Fatalf("Failed to create signed transaction: %v", err)
 	}
@@ -208,7 +212,7 @@ func TestTxPoolCleanup(t *testing.T) {
 // TestEIP1559Transaction verifies that EIP-1559 typed transactions are properly handled
 func TestEIP1559Transaction(t *testing.T) {
 	// Parse private key
-	privateKey, err := crypto.HexToECDSA(statedb.IssuerPrivateKeyHex)
+	privateKey, err := crypto.HexToECDSA(issuerPrivateKeyHex)
 	if err != nil {
 		t.Fatalf("Failed to parse private key: %v", err)
 	}
@@ -283,7 +287,7 @@ func TestEIP1559Transaction(t *testing.T) {
 // TestEIP2930Transaction verifies that EIP-2930 access list transactions are properly handled
 func TestEIP2930Transaction(t *testing.T) {
 	// Parse private key
-	privateKey, err := crypto.HexToECDSA(statedb.IssuerPrivateKeyHex)
+	privateKey, err := crypto.HexToECDSA(issuerPrivateKeyHex)
 	if err != nil {
 		t.Fatalf("Failed to parse private key: %v", err)
 	}

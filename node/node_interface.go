@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -40,14 +40,14 @@ type JNode interface {
 	SendRawTransaction(signedTxData []byte) (common.Hash, error)
 
 	// Transaction Queries
-	GetTransactionReceipt(txHash common.Hash) (*statedb.EthereumTransactionReceipt, error)
-	GetTransactionByHash(txHash common.Hash) (*statedb.EthereumTransactionResponse, error)
-	GetTransactionByBlockHashAndIndex(blockHash common.Hash, index uint32) (*statedb.EthereumTransactionResponse, error)
-	GetTransactionByBlockNumberAndIndex(blockNumber string, index uint32) (*statedb.EthereumTransactionResponse, error)
-	GetLogs(fromBlock, toBlock uint32, addresses []common.Address, topics [][]common.Hash) ([]statedb.EthereumLog, error)
+	GetTransactionReceipt(txHash common.Hash) (*evmtypes.EthereumTransactionReceipt, error)
+	GetTransactionByHash(txHash common.Hash) (*evmtypes.EthereumTransactionResponse, error)
+	GetTransactionByBlockHashAndIndex(blockHash common.Hash, index uint32) (*evmtypes.EthereumTransactionResponse, error)
+	GetTransactionByBlockNumberAndIndex(blockNumber string, index uint32) (*evmtypes.EthereumTransactionResponse, error)
+	GetLogs(fromBlock, toBlock uint32, addresses []common.Address, topics [][]common.Hash) ([]evmtypes.EthereumLog, error)
 
 	// Block Queries
 	GetLatestBlockNumber() (uint32, error)
-	GetBlockByHash(blockHash common.Hash, fullTx bool) (*statedb.EthereumBlock, error)
-	GetBlockByNumber(blockNumber string, fullTx bool) (*statedb.EthereumBlock, error)
+	GetBlockByHash(blockHash common.Hash, fullTx bool) (*evmtypes.EthereumBlock, error)
+	GetBlockByNumber(blockNumber string, fullTx bool) (*evmtypes.EthereumBlock, error)
 }

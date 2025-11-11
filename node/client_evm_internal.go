@@ -6,7 +6,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/statedb/evmtypes"
 )
 
 // Ethereum internal methods stub implementation on NodeClient
@@ -193,8 +193,8 @@ func (c *NodeClient) SendRawTransaction(signedTxData []byte) (common.Hash, error
 }
 
 // GetTransactionReceipt fetches a transaction receipt from remote node
-func (c *NodeClient) GetTransactionReceipt(txHash common.Hash) (*statedb.EthereumTransactionReceipt, error) {
-	var receipt statedb.EthereumTransactionReceipt
+func (c *NodeClient) GetTransactionReceipt(txHash common.Hash) (*evmtypes.EthereumTransactionReceipt, error) {
+	var receipt evmtypes.EthereumTransactionReceipt
 	err := c.client.Call("eth_getTransactionReceipt", []string{txHash.String()}, &receipt)
 	if err != nil {
 		return nil, fmt.Errorf("eth_getTransactionReceipt RPC failed: %v", err)
@@ -204,8 +204,8 @@ func (c *NodeClient) GetTransactionReceipt(txHash common.Hash) (*statedb.Ethereu
 }
 
 // GetTransactionByHash fetches a transaction by hash from remote node
-func (c *NodeClient) GetTransactionByHash(txHash common.Hash) (*statedb.EthereumTransactionResponse, error) {
-	var tx statedb.EthereumTransactionResponse
+func (c *NodeClient) GetTransactionByHash(txHash common.Hash) (*evmtypes.EthereumTransactionResponse, error) {
+	var tx evmtypes.EthereumTransactionResponse
 	err := c.client.Call("eth_getTransactionByHash", []string{txHash.String()}, &tx)
 	if err != nil {
 		return nil, fmt.Errorf("eth_getTransactionByHash RPC failed: %v", err)
@@ -215,7 +215,7 @@ func (c *NodeClient) GetTransactionByHash(txHash common.Hash) (*statedb.Ethereum
 }
 
 // GetLogs fetches event logs matching a filter from remote node
-func (c *NodeClient) GetLogs(fromBlock, toBlock uint32, addresses []common.Address, topics [][]common.Hash) ([]statedb.EthereumLog, error) {
+func (c *NodeClient) GetLogs(fromBlock, toBlock uint32, addresses []common.Address, topics [][]common.Hash) ([]evmtypes.EthereumLog, error) {
 	filter := map[string]interface{}{
 		"fromBlock": fmt.Sprintf("0x%x", fromBlock),
 		"toBlock":   fmt.Sprintf("0x%x", toBlock),
@@ -245,7 +245,7 @@ func (c *NodeClient) GetLogs(fromBlock, toBlock uint32, addresses []common.Addre
 		filter["topics"] = topicsArray
 	}
 
-	var logs []statedb.EthereumLog
+	var logs []evmtypes.EthereumLog
 	err := c.client.Call("eth_getLogs", []interface{}{filter}, &logs)
 	if err != nil {
 		return nil, fmt.Errorf("eth_getLogs RPC failed: %v", err)
@@ -276,9 +276,9 @@ func (c *NodeClient) GetLatestBlockNumber() (uint32, error) {
 }
 
 // GetTransactionByBlockHashAndIndex fetches a transaction by block hash and index from remote node
-func (c *NodeClient) GetTransactionByBlockHashAndIndex(blockHash common.Hash, index uint32) (*statedb.EthereumTransactionResponse, error) {
+func (c *NodeClient) GetTransactionByBlockHashAndIndex(blockHash common.Hash, index uint32) (*evmtypes.EthereumTransactionResponse, error) {
 	indexHex := fmt.Sprintf("0x%x", index)
-	var tx statedb.EthereumTransactionResponse
+	var tx evmtypes.EthereumTransactionResponse
 	err := c.client.Call("eth_getTransactionByBlockHashAndIndex", []interface{}{blockHash.String(), indexHex}, &tx)
 	if err != nil {
 		return nil, fmt.Errorf("eth_getTransactionByBlockHashAndIndex RPC failed: %v", err)
@@ -288,9 +288,9 @@ func (c *NodeClient) GetTransactionByBlockHashAndIndex(blockHash common.Hash, in
 }
 
 // GetTransactionByBlockNumberAndIndex fetches a transaction by block number and index from remote node
-func (c *NodeClient) GetTransactionByBlockNumberAndIndex(blockNumber string, index uint32) (*statedb.EthereumTransactionResponse, error) {
+func (c *NodeClient) GetTransactionByBlockNumberAndIndex(blockNumber string, index uint32) (*evmtypes.EthereumTransactionResponse, error) {
 	indexHex := fmt.Sprintf("0x%x", index)
-	var tx statedb.EthereumTransactionResponse
+	var tx evmtypes.EthereumTransactionResponse
 	err := c.client.Call("eth_getTransactionByBlockNumberAndIndex", []interface{}{blockNumber, indexHex}, &tx)
 	if err != nil {
 		return nil, fmt.Errorf("eth_getTransactionByBlockNumberAndIndex RPC failed: %v", err)
@@ -300,8 +300,8 @@ func (c *NodeClient) GetTransactionByBlockNumberAndIndex(blockNumber string, ind
 }
 
 // GetBlockByHash fetches a block by hash from remote node
-func (c *NodeClient) GetBlockByHash(blockHash common.Hash, fullTx bool) (*statedb.EthereumBlock, error) {
-	var block statedb.EthereumBlock
+func (c *NodeClient) GetBlockByHash(blockHash common.Hash, fullTx bool) (*evmtypes.EthereumBlock, error) {
+	var block evmtypes.EthereumBlock
 	err := c.client.Call("eth_getBlockByHash", []interface{}{blockHash.String(), fullTx}, &block)
 	if err != nil {
 		return nil, fmt.Errorf("eth_getBlockByHash RPC failed: %v", err)
@@ -311,8 +311,8 @@ func (c *NodeClient) GetBlockByHash(blockHash common.Hash, fullTx bool) (*stated
 }
 
 // GetBlockByNumber fetches a block by number from remote node
-func (c *NodeClient) GetBlockByNumber(blockNumber string, fullTx bool) (*statedb.EthereumBlock, error) {
-	var block statedb.EthereumBlock
+func (c *NodeClient) GetBlockByNumber(blockNumber string, fullTx bool) (*evmtypes.EthereumBlock, error) {
+	var block evmtypes.EthereumBlock
 	err := c.client.Call("eth_getBlockByNumber", []interface{}{blockNumber, fullTx}, &block)
 	if err != nil {
 		return nil, fmt.Errorf("eth_getBlockByNumber RPC failed: %v", err)

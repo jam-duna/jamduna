@@ -42,7 +42,6 @@ type WPQueueItem struct {
 	NumFailures        int
 	Slot               uint32 // the slot for which this work package is intended
 	EventID            uint64
-	WitnessesRequired  bool
 }
 
 func (a *WorkPackage) String() string {
