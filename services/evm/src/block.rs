@@ -468,8 +468,8 @@ impl EvmBlockPayload {
 
     /// Finalize block by computing roots and returning block hash
     pub fn finalize(&mut self, service_id: u32) -> Option<[u8; 32]> {
-        //self.transactions_root = self.compute_transactions_root();
-        //self.receipts_root = self.compute_receipts_root();
+        self.transactions_root = self.compute_transactions_root();
+        self.receipts_root = self.compute_receipts_root();
         log_info(&format!("🔐 Finalized block {}: tx_root={}, receipts_root={}, tx_count={}, receipt_count={}",
             self.number,
             format_object_id(&self.transactions_root),
@@ -500,8 +500,9 @@ impl EvmBlockPayload {
             .enumerate()
             .map(|(index, hash)| {
                 let mut key = [0u8; 32];
-                let index_bytes = (index as u32).to_be_bytes();
-                key[28..32].copy_from_slice(&index_bytes);
+                // Use little-endian encoding at the start of the key (natural position)
+                let index_bytes = (index as u32).to_le_bytes();
+                key[0..4].copy_from_slice(&index_bytes);
                 (key, hash.to_vec())
             })
             .collect();
@@ -525,8 +526,9 @@ impl EvmBlockPayload {
             .enumerate()
             .map(|(index, hash)| {
                 let mut key = [0u8; 32];
-                let index_bytes = (index as u32).to_be_bytes();
-                key[28..32].copy_from_slice(&index_bytes);
+                // Use little-endian encoding at the start of the key (natural position)
+                let index_bytes = (index as u32).to_le_bytes();
+                key[0..4].copy_from_slice(&index_bytes);
                 (key, hash.to_vec())
             })
             .collect();

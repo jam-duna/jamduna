@@ -53,18 +53,22 @@ fn build_bmt_recursive(kvs: &[([u8; 32], Vec<u8>)], bit_index: usize) -> [u8; 32
 
 /// Encode JAM leaf node according to Graypaper D.4
 /// Format: [header|31B key|32B value_or_hash]
+///
+/// This function MUST match the Go implementation in trie/bpt.go::leaf()
 fn encode_jam_leaf(key: &[u8; 32], value: &[u8]) -> [u8; 64] {
     let mut result = [0u8; 64];
 
     if value.len() <= 32 {
         // Embedded-value leaf node
         result[0] = 0b10000000 | (value.len() as u8);
-        result[1..32].copy_from_slice(&key[1..32]); // 31 bytes of key
+        // Copy first 31 bytes of key (matching Go: k[:31])
+        result[1..32].copy_from_slice(&key[0..31]);
         result[32..32+value.len()].copy_from_slice(value);
     } else {
         // Regular leaf node with hash reference
         result[0] = 0b11000000;
-        result[1..32].copy_from_slice(&key[1..32]); // 31 bytes of key
+        // Copy first 31 bytes of key (matching Go: k[:31])
+        result[1..32].copy_from_slice(&key[0..31]);
 
         let value_hash = blake2b(value);
         result[32..64].copy_from_slice(&value_hash);

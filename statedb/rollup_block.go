@@ -88,22 +88,22 @@ func (p *EvmBlockPayload) ToEthereumBlock(fullTx bool) *EthereumBlock {
 // This structure matches the Rust EvmBlockPayload exactly
 type EvmBlockPayload struct {
 	// Fixed fields (580 bytes) - used for block hash computation
-	Number            uint64         // Offset 0, 8 bytes
-	ParentHash        common.Hash    // Offset 8, 32 bytes
-	LogsBloom         [256]byte      // Offset 40, 256 bytes
-	TransactionsRoot  common.Hash    // Offset 296, 32 bytes
-	StateRoot         common.Hash    // Offset 328, 32 bytes
-	LogIndexStart     uint64         // Offset 360, 8 bytes
-	ReceiptsRoot      common.Hash    // Offset 368, 32 bytes
-	MmrRoot           common.Hash    // Offset 400, 32 bytes
-	ExtrinsicsHash    common.Hash    // Offset 432, 32 bytes
-	ParentHeaderHash  common.Hash    // Offset 464, 32 bytes
-	Miner             common.Address // Offset 496, 20 bytes
-	ExtraData         [32]byte       // Offset 516, 32 bytes (JAM entropy)
-	Size              uint64         // Offset 548, 8 bytes
-	GasLimit          uint64         // Offset 556, 8 bytes
-	GasUsed           uint64         // Offset 564, 8 bytes
-	Timestamp         uint64         // Offset 572, 8 bytes
+	Number           uint64         // Offset 0, 8 bytes
+	ParentHash       common.Hash    // Offset 8, 32 bytes
+	LogsBloom        [256]byte      // Offset 40, 256 bytes
+	TransactionsRoot common.Hash    // Offset 296, 32 bytes
+	StateRoot        common.Hash    // Offset 328, 32 bytes
+	LogIndexStart    uint64         // Offset 360, 8 bytes
+	ReceiptsRoot     common.Hash    // Offset 368, 32 bytes
+	MmrRoot          common.Hash    // Offset 400, 32 bytes
+	ExtrinsicsHash   common.Hash    // Offset 432, 32 bytes
+	ParentHeaderHash common.Hash    // Offset 464, 32 bytes
+	Miner            common.Address // Offset 496, 20 bytes
+	ExtraData        [32]byte       // Offset 516, 32 bytes (JAM entropy)
+	Size             uint64         // Offset 548, 8 bytes
+	GasLimit         uint64         // Offset 556, 8 bytes
+	GasUsed          uint64         // Offset 564, 8 bytes
+	Timestamp        uint64         // Offset 572, 8 bytes
 	// Total fixed: 580 bytes
 
 	// Variable-length fields (not part of hash computation)
@@ -422,8 +422,10 @@ func (n *StateDB) getLatestBlockNumber(serviceID uint32) (uint32, error) {
 	// Parse block_number (first 4 bytes, little-endian)
 	blockNumber := binary.LittleEndian.Uint32(valueBytes[:4])
 	// parent_hash is at valueBytes[4:36] but we don't need it for this function
-
-	return blockNumber, nil
+	if blockNumber > 0 {
+		return blockNumber - 1, nil
+	}
+	return 0, nil
 }
 
 // readBlockByNumber reads block using blockNumberToObjectID key from JAM State or from JAM DA if its archived there

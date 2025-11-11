@@ -1101,7 +1101,7 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block, sf0 *SafroleState) (isValid
 		currentValidatorKey := (sf0.TicketsOrKeys.Keys)[currPhase]
 		if !bytes.Equal(currentValidatorKey.Bytes(), block_author_ietf_pub.Bytes()) {
 			fmt.Printf("=== VALIDATOR KEY MISMATCH ===\n")
-			fmt.Printf("block_author_ietf_pub (received): %v\n", block_author_ietf_pub)
+			fmt.Printf("block_author_ietf_pub (received): 0x%v\n", block_author_ietf_pub)
 			fmt.Printf("currentValidatorKey (expected):   %v\n", currentValidatorKey)
 			fmt.Printf("currPhase: %d\n", currPhase)
 			fmt.Printf("=== Validator List ===\n")

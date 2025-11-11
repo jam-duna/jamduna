@@ -759,7 +759,7 @@ func (stateDB *StateDB) createSimulationWPQueueItem(tx *EthereumTransaction) (*t
 				CodeHash:           evmService.CodeHash,
 				Payload:            buildPayload(PayloadTypeCall, 1, 0),
 				RefineGasLimit:     types.RefineGasAllocation / 2,
-				AccumulateGasLimit: types.AccumulationGasAllocation / 2,
+				AccumulateGasLimit: types.AccumulationGasAllocation,
 				ImportedSegments:   []types.ImportSegment{}, // Empty for simulation
 				ExportCount:        0,                       // No exports for static call
 				Extrinsics: []types.WorkItemExtrinsic{

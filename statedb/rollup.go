@@ -208,7 +208,9 @@ func (c *Rollup) processWPQueueItems(wpqs []*types.WPQueueItem) error {
 
 		// Log block information
 		for i, wd := range workReport.Results {
-			fmt.Printf("  WorkDigest[%d] (ServiceID=%d): GasUsed=%d, Result=%x (%d bytes)\n", i, wd.ServiceID, wd.GasUsed, wd.Result.Ok, len(wd.Result.Ok))
+			fmt.Printf("  WorkDigest[%d] (ServiceID=%d): GasUsed=%d, Result= (%d bytes)\n", i, wd.ServiceID, wd.GasUsed, len(wd.Result.Ok))
+			//fmt.Printf("  WorkDigest[%d] (ServiceID=%d): Result=%x \n", i, wd.ServiceID, len(wd.Result.Ok))
+
 			if len(wd.Result.Ok) >= 12 {
 				export_count := binary.LittleEndian.Uint16(wd.Result.Ok[0:2])
 				gas_used := binary.LittleEndian.Uint64(wd.Result.Ok[2:10])
@@ -256,6 +258,9 @@ func (c *Rollup) processWPQueueItems(wpqs []*types.WPQueueItem) error {
 			}
 		}
 		extrinsic.Assurances = assurances
+		log.Info(log.Node, "GENERATING GUARANTEE")
+	} else {
+		log.Info(log.Node, "**** No previous guarantees, skipping assurances ***")
 	}
 
 	// Fallback sealing: Find validator index matching the fallback key
@@ -285,6 +290,7 @@ func (c *Rollup) processWPQueueItems(wpqs []*types.WPQueueItem) error {
 	}
 	newStateDB, err := ApplyStateTransitionFromBlock(0, statedb, ctx, sealedBlock, nil, "interpreter")
 	if err != nil {
+		panic(err)
 		return fmt.Errorf("failed to apply state transition: %w", err)
 	}
 
@@ -779,7 +785,7 @@ func (b *Rollup) SubmitEVMPayloadBlocks(startBlock uint32, endBlock uint32) (*ty
 				CodeHash:           service.CodeHash,
 				Payload:            buildPayload(PayloadTypeBlocks, numExtrinsics, 0),
 				RefineGasLimit:     types.RefineGasAllocation / 2,
-				AccumulateGasLimit: types.AccumulationGasAllocation / 2,
+				AccumulateGasLimit: types.AccumulationGasAllocation,
 				ImportedSegments:   []types.ImportSegment{},
 				ExportCount:        0, // Let the BuildBundle determine this
 				Extrinsics:         workItems,

@@ -1919,7 +1919,7 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
         let program_id = payload[i * 2];
         let p_id = program_id % 170;
         let count = payload[i * 2 + 1] as u64;
-        let iterations = (count*count as u64).min(10); // Limit to 500 iterations to prevent overflow
+        let iterations = (count*count as u64).min(2); // Limit to 500 iterations to prevent overflow
         log_info(&format!("🔢 refine: pair #{} - program_id={}, count={}, iterations={} (capped)", i, program_id, count, iterations));
 //        let iterations = count*count*count as u64; // Uncapped iterations (count^3)
 //        log_info(&format!("🔢 refine: pair #{} - program_id={}, count={}, iterations={}", i, program_id, count, iterations));
@@ -2015,28 +2015,40 @@ static mut output_bytes_32: [u8; 32] = [0; 32];
 extern "C" fn accumulate(start_address: u64, length: u64) -> (u64, u64) {
     polkavm_sbrk(1024*1024);
 
+    log_info(&format!("🏁 Algo Accumulate called: start_address={}, length={}", start_address, length));
+
     let Some(args) = parse_accumulate_args(start_address, length) else {
-        log_error("Accumulate: parse_accumulate_args failed");
+        log_error("❌ Algo Accumulate: parse_accumulate_args failed");
         return empty_output();
     };
 
+    log_info(&format!("✅ Algo Accumulate: Parsed args - service_id={}, timeslot={}, num_inputs={}", args.s, args.t, args.num_accumulate_inputs));
+
     if args.num_accumulate_inputs == 0 {
-        log_error("Accumulate: num_accumulate_inputs is zero, returning empty");
+        log_error("❌ Algo Accumulate: num_accumulate_inputs is zero, returning empty");
         return empty_output();
     }
 
     let accumulate_inputs = match fetch_accumulate_inputs(args.num_accumulate_inputs as u64) {
-        Ok(inputs) => inputs,
+        Ok(inputs) => {
+            log_info(&format!("✅ Algo Accumulate: Fetched {} inputs successfully", inputs.len()));
+            inputs
+        },
         Err(e) => {
-            log_error(&format!("Accumulate: fetch_accumulate_inputs failed: {:?}", e));
+            log_error(&format!("❌ Algo Accumulate: fetch_accumulate_inputs failed: {:?}", e));
             return empty_output();
         }
     };
 
+    log_info(&format!("🔄 Algo Accumulate: Calling BlockAccumulator::accumulate with service_id={}, timeslot={}, inputs={}", args.s, args.t, accumulate_inputs.len()));
+
     // Accumulate execution effects from any payloads (Transactions, Blocks)
     let Some(accumulate_root) = accumulator::BlockAccumulator::accumulate(args.s, args.t, &accumulate_inputs) else {
+        log_error("❌ Algo Accumulate: BlockAccumulator::accumulate returned None");
         return empty_output();
     };
+
+    log_info(&format!("✅ Algo Accumulate: Success! Returning root: {}", format_object_id(&accumulate_root)));
 
     leak_output(accumulate_root.to_vec())
 }

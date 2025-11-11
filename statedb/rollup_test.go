@@ -1,7 +1,7 @@
 package statedb
 
 import (
-	"bytes"
+	"encoding/binary"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -9,77 +9,105 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
 const (
-	numBlocks       = 10
-	verifyBMTProofs = false // Enable BMT proof verification
+	numBlocks       = 53
+	verifyBMTProofs = true
+	debugBMTProofs  = true
 )
 
 var algoPayloads = []byte{
 	0xc2, 0xb8, 0xb4, 0xbb, 0xcb, 0xaa, 0x47, 0xd4, 0xe9, 0xdc, 0x39, 0xce, 0xb8, 0xbc, 0x75, 0x2b, 0x2b, 0x6b, 0x8c, 0x98, 0x88, 0xab, 0xb4, 0xc4, 0x9c, 0x59, 0xc2, 0xcb, 0xbd, 0xa2, 0x96, 0x94, 0xb1, 0x4d, 0xb6, 0xb7, 0xbc, 0x78, 0x72, 0x96, 0x85, 0x0a, 0xa7, 0x0d, 0x77, 0xb6, 0x02, 0xb1, 0xb3, 0xb4, 0xbd, 0xb7, 0xcc, 0xf5,
 }
 
-// verifyBlockBMTRoot verifies BMT root and individual proofs for a list of hashes
-func verifyBlockBMTRoot(sdb *storage.StateDBStorage, hashes []common.Hash, expectedRoot []byte, hashType string) {
+// verifyBlockBMTProofs verifies that the BMT roots in a block are correctly computed
+func verifyBlockBMTProofs(t *testing.T, block *EvmBlockPayload) error {
+	t.Logf("🔍 Verifying BMT proofs for block %d: txCount=%d, receiptCount=%d", block.Number, len(block.TxHashes), len(block.ReceiptHashes))
+
+	// Verify Transactions Root
+	if len(block.TxHashes) > 0 {
+		computedTxRoot := computeBMTRootFromHashes(t, block.TxHashes)
+		if computedTxRoot != block.TransactionsRoot {
+			return fmt.Errorf("TransactionsRoot mismatch: computed=%s, stored=%s",
+				computedTxRoot.String(), block.TransactionsRoot.String())
+		}
+		//log.Info(log.Node, "✅ TransactionsRoot verified", "blockNum", block.Number, "root", computedTxRoot.String(), "count", len(block.TxHashes))
+		t.Logf("✅ TransactionsRoot verified for block %d: root=%s, count=%d", block.Number, computedTxRoot.String(), len(block.TxHashes))
+	}
+
+	// Verify Receipts Root
+	if len(block.ReceiptHashes) > 0 {
+		computedReceiptRoot := computeBMTRootFromHashes(t, block.ReceiptHashes)
+		if computedReceiptRoot != block.ReceiptsRoot {
+			return fmt.Errorf("ReceiptsRoot mismatch: computed=%s, stored=%s",
+				computedReceiptRoot.String(), block.ReceiptsRoot.String())
+		}
+		//log.Info(log.Node, "✅ ReceiptsRoot verified", "blockNum", block.Number, "root", computedReceiptRoot.String(), "count", len(block.ReceiptHashes))
+		t.Logf("✅ ReceiptsRoot verified for block %d: root=%s, count=%d", block.Number, computedReceiptRoot.String(), len(block.ReceiptHashes))
+	}
+
+	return nil
+}
+
+// computeBMTRootFromHashes computes the BMT root from a list of hashes indexed by position
+// and optionally verifies each proof path when debugBMTProofs is enabled
+func computeBMTRootFromHashes(t *testing.T, hashes []common.Hash) common.Hash {
 	if len(hashes) == 0 {
-		return
+		// Empty BMT root - use blake2b of empty bytes
+		return common.Blake2Hash([]byte{})
 	}
 
-	// Build key-value pairs for BMT construction
-	data := make([][2][]byte, len(hashes))
+	kvPairs := make([][2][]byte, len(hashes))
 	for i, hash := range hashes {
-		// Use big-endian index as key (like Rust implementation)
-		indexKey := make([]byte, 32)
-		indexBytes := uint32(i)
-		indexKey[28] = byte(indexBytes >> 24)
-		indexKey[29] = byte(indexBytes >> 16)
-		indexKey[30] = byte(indexBytes >> 8)
-		indexKey[31] = byte(indexBytes)
+		var key [32]byte
+		// Use little-endian encoding at the start of the key (natural position)
+		binary.LittleEndian.PutUint32(key[0:4], uint32(i))
 
-		data[i] = [2][]byte{indexKey, hash[:]}
+		kvPairs[i] = [2][]byte{key[:], hash[:]}
 	}
 
-	tree := trie.NewMerkleTree(data, sdb)
-	computedRoot := tree.GetRoot()
-
-	if !bytes.Equal(computedRoot[:], expectedRoot) {
-		log.Warn(log.Node, "❌ "+hashType+" root mismatch",
-			"computed", computedRoot,
-			"expected", expectedRoot)
-	} else {
-		log.Debug(log.Node, "✅ "+hashType+" root verified")
+	tree := trie.NewMerkleTree(kvPairs, nil)
+	if tree.Root == nil {
+		return common.Hash{}
 	}
 
-	// Verify each hash proof
-	for i, hash := range hashes {
-		indexKey := make([]byte, 32)
-		indexBytes := uint32(i)
-		indexKey[28] = byte(indexBytes >> 24)
-		indexKey[29] = byte(indexBytes >> 16)
-		indexKey[30] = byte(indexBytes >> 8)
-		indexKey[31] = byte(indexBytes)
+	var root common.Hash
+	copy(root[:], tree.Root.Hash)
 
-		proof, err := tree.Trace(indexKey)
-		if err != nil {
-			log.Warn(log.Node, "❌ Failed to generate "+hashType+" proof", "index", i, "err", err)
-			continue
+	if debugBMTProofs {
+		numFailures := 0
+		for i, hash := range hashes {
+			var key [32]byte
+			binary.LittleEndian.PutUint32(key[0:4], uint32(i))
+
+			rawProof, err := tree.Trace(key[:])
+			if err != nil {
+				log.Error(log.Node, "❌ Failed to trace path", "index", i, "key", common.BytesToHash(key[:]).String(), "err", err)
+				numFailures++
+				continue
+			}
+
+			proofPath := make([]common.Hash, len(rawProof))
+			for j, p := range rawProof {
+				proofPath[j] = common.BytesToHash(p)
+			}
+
+			verified := trie.VerifyRaw(key[:], hash[:], root[:], proofPath)
+			if !verified {
+				log.Error(log.Node, "❌ BMT proof verification FAILED", "index", i, "key", common.BytesToHash(key[:]).String(), "value", hash.String(), "root", root.String(), "proofLen", len(proofPath))
+				numFailures++
+			}
 		}
-
-		// Convert proof to common.Hash slice for verification
-		proofHashes := make([]common.Hash, len(proof))
-		for j, p := range proof {
-			proofHashes[j] = common.BytesToHash(p)
-		}
-
-		if !trie.VerifyRaw(indexKey, hash[:], computedRoot[:], proofHashes) {
-			log.Warn(log.Node, "❌ "+hashType+" proof verification failed", "index", i, "hash", fmt.Sprintf("%x", hash))
+		if numFailures == 0 {
+			//log.Info(log.Node, "✅ BMT proof path verified", "len", len(hashes))
+			t.Logf("✅ BMT proof verified. Root=%s, count=%d", root.String(), len(hashes))
 		}
 	}
-	tree.Close()
+
+	return root
 }
 
 // TestAlgoBlocks generates a sequence of blocks with Algo service guarantees+assurances without any jamnp
@@ -93,7 +121,7 @@ func TestAlgoBlocks(t *testing.T) {
 
 	rand.Seed(12345)
 	wpqs := make([]*types.WPQueueItem, types.TotalCores)
-	for n := 1; n <= numBlocks; n++ {
+	for n := 0; n <= numBlocks; n++ {
 		// payload := make([]byte, 2)
 		// payload[0] = byte(n)
 		// payload[1] = algoPayloads[n-1]
@@ -103,7 +131,7 @@ func TestAlgoBlocks(t *testing.T) {
 					Payload: GenerateAlgoPayload(n, false),
 					//Payload:            payload,
 					RefineGasLimit:     types.RefineGasAllocation / 2,
-					AccumulateGasLimit: types.AccumulationGasAllocation / 2,
+					AccumulateGasLimit: types.AccumulationGasAllocation,
 					ImportedSegments:   []types.ImportSegment{},
 					ExportCount:        uint16(n),
 				},
@@ -133,8 +161,14 @@ func TestAlgoBlocks(t *testing.T) {
 
 		// BMT proof verification
 		if verifyBMTProofs {
-			verifyBlockBMTRoot(c.stateDB.sdb, block.TxHashes, block.TransactionsRoot[:], "transaction")
-			verifyBlockBMTRoot(c.stateDB.sdb, block.ReceiptHashes, block.ReceiptsRoot[:], "receipt")
+			//verifyBlockBMTRoot(c.stateDB.sdb, block.TxHashes, block.TransactionsRoot[:], "transaction")
+			//verifyBlockBMTRoot(c.stateDB.sdb, block.ReceiptHashes, block.ReceiptsRoot[:], "receipt")
+		}
+
+		if verifyBMTProofs {
+			if err := verifyBlockBMTProofs(t, block); err != nil {
+				t.Fatalf("BMT proof verification failed for block %d: %v", block.Number, err)
+			}
 		}
 	}
 
