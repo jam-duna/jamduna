@@ -91,16 +91,12 @@ const (
 )
 
 var auth_code_bytes, _ = os.ReadFile(common.GetFilePath(statedb.BootStrapNullAuthFile))
-
 var auth_code = statedb.AuthorizeCode{
 	PackageMetaData:   []byte("bootstrap"),
 	AuthorizationCode: auth_code_bytes,
 }
-
 var auth_code_encoded_bytes, _ = auth_code.Encode()
-
 var auth_code_hash = common.Blake2Hash(auth_code_encoded_bytes) //pu
-var auth_code_hash_hash = common.Blake2Hash(auth_code_hash[:])  //pa
 var bootstrap_auth_codehash = auth_code_hash
 
 type NodeContent struct {
@@ -2433,7 +2429,7 @@ func (n *Node) processBlock(blk *types.Block) error {
 
 // reconstructSegments uses CE139 and CAN use CE140 upon failure
 // We continuily use erasureRoot to ask the question
-func (n *NodeContent) reconstructSegments(si *SpecIndex, eventID uint64) (segments [][]byte, justifications [][]common.Hash, err error) {
+func (n *NodeContent) reconstructSegments(si *storage.SpecIndex, eventID uint64) (segments [][]byte, justifications [][]common.Hash, err error) {
 	requests_original := make([]CE139_request, types.TotalValidators)
 
 	// this will track the proofpages

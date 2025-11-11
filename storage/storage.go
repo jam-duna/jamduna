@@ -3,11 +3,14 @@ package storage
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"sync"
 
 	"github.com/colorfulnotion/jam/common"
 	telemetry "github.com/colorfulnotion/jam/telemetry"
+	"github.com/colorfulnotion/jam/types"
 	"github.com/syndtr/goleveldb/leveldb"
 	leveldbstorage "github.com/syndtr/goleveldb/leveldb/storage"
 )
@@ -95,6 +98,11 @@ func newFileStateDBStorage(path string, jamda JAMDA, telemetryClient *telemetry.
 		telemetryClient: telemetryClient,
 	}
 	return &s, nil
+}
+
+// GetJAMDA returns the JAMDA interface instance
+func (s *StateDBStorage) GetJAMDA() JAMDA {
+	return s.jamda
 }
 
 // IsMemoryBased returns whether this storage instance is using memory-based storage
@@ -310,4 +318,83 @@ func (store *StateDBStorage) CleanBlockContext() {
 
 func (store *StateDBStorage) CleanBlockAnnouncementContext() {
 	store.BlockAnnouncementContext = context.Background()
+}
+
+// SpecIndex holds a WorkReport and associated segment indices
+type SpecIndex struct {
+	WorkReport types.WorkReport `json:"spec"`
+	Indices    []uint16         `json:"indices"`
+}
+
+// String returns JSON representation of SpecIndex
+func (si *SpecIndex) String() string {
+	jsonBytes, err := json.Marshal(si)
+	if err != nil {
+		return fmt.Sprintf("%v", err)
+	}
+	return string(jsonBytes)
+}
+
+// AddIndex adds an index to the SpecIndex if not already present
+func (si *SpecIndex) AddIndex(idx uint16) bool {
+	if !common.Uint16Contains(si.Indices, idx) {
+		si.Indices = append(si.Indices, idx)
+		return true
+	}
+	return false
+}
+
+// generateSpecKey generates the storage key for a request hash
+// requestHash (packageHash(wp) or SegmentRoot(e)) -> ErasureRoot(u)
+func generateSpecKey(requestHash common.Hash) string {
+	return fmt.Sprintf("rtou_%v", requestHash)
+}
+
+// WorkReportSearch looks up the erasureRoot, exportedSegmentRoot, workpackageHash
+// for either kind of hash: segment root OR workPackageHash
+func (store *StateDBStorage) WorkReportSearch(h common.Hash) *SpecIndex {
+	wrBytes, ok, err := store.ReadRawKV([]byte(generateSpecKey(h)))
+	if err != nil || !ok {
+		return nil
+	}
+
+	wr, _, err := types.Decode(wrBytes, reflect.TypeOf(types.WorkReport{}))
+	if err != nil {
+		return nil
+	}
+
+	workReport := wr.(types.WorkReport)
+	return &SpecIndex{
+		WorkReport: workReport,
+		Indices:    make([]uint16, 0),
+	}
+}
+
+// StoreWorkReport stores a WorkReport with mappings for workPackageHash, segmentRoot, and erasureRoot
+func (store *StateDBStorage) StoreWorkReport(wr types.WorkReport) error {
+	spec := wr.AvailabilitySpec
+	erasureRoot := spec.ErasureRoot
+	segmentRoot := spec.ExportedSegmentRoot
+	workpackageHash := spec.WorkPackageHash
+
+	wrBytes, err := types.Encode(wr)
+	if err != nil {
+		return err
+	}
+
+	// Write 3 mappings:
+	// (a) workpackageHash => spec
+	// (b) segmentRoot => spec
+	// (c) erasureRoot => spec
+	if err := store.WriteRawKV([]byte(generateSpecKey(workpackageHash)), wrBytes); err != nil {
+		return err
+	}
+	if err := store.WriteRawKV([]byte(generateSpecKey(segmentRoot)), wrBytes); err != nil {
+		return err
+	}
+	if err := store.WriteRawKV([]byte(generateSpecKey(erasureRoot)), wrBytes); err != nil {
+		return err
+	}
+
+	return nil
 }

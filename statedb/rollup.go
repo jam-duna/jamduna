@@ -21,7 +21,17 @@ import (
 const (
 	numRounds    = 100
 	txnsPerRound = 1
+
+	verifyServiceProof = false
 )
+
+var auth_code_bytes, _ = os.ReadFile(common.GetFilePath(BootStrapNullAuthFile))
+var auth_code = AuthorizeCode{
+	PackageMetaData:   []byte("bootstrap"),
+	AuthorizationCode: auth_code_bytes,
+}
+var auth_code_encoded_bytes, _ = auth_code.Encode()
+var bootstrap_auth_codehash = common.Blake2Hash(auth_code_encoded_bytes) //pu
 
 type Rollup struct {
 	stateDB            *StateDB
@@ -76,31 +86,90 @@ func NewRollup(testDir string, serviceID uint32) (*Rollup, error) {
 	return &chain, nil
 }
 
-// processWPQueueItems sets up test environment and processes a array of work packages into a block, with one WP per core
-//
-//	Technique: use fallback keys to seal, 3 validators sign each guarantee, 6 validators sign each assurance
-func (c *Rollup) processWPQueueItems(wpqs []*types.WPQueueItem) error {
-	// Generate validator secrets for signing similar to SetupNodes
+// processWorkPackageBundles processes work packages in non-pipelined mode
+// Block N: guarantees, Block N+1: assurances (two blocks per work package)
+func (c *Rollup) processWorkPackageBundles(bundles []*types.WorkPackageBundle) error {
+	validators, validatorSecrets, bootstrapAuthCodeHash, err := c.setupValidators()
+	if err != nil {
+		return err
+	}
+
+	// Execute bundles and create guarantees
+	_, activeGuarantees, err := c.executeAndGuarantee(bundles, validatorSecrets, c.stateDB)
+	if err != nil {
+		return err
+	}
+
+	// Block 1: guarantees only
+	extrinsic := types.NewExtrinsic()
+	extrinsic.Guarantees = activeGuarantees
+	if err := c.buildAndApplyBlock(context.Background(), validators, validatorSecrets, bootstrapAuthCodeHash, &extrinsic); err != nil {
+		return err
+	}
+
+	// Block 2: assurances only
+	extrinsic = types.NewExtrinsic()
+	extrinsic.Assurances = c.createAssurances(0, validatorSecrets, c.stateDB)
+	if err := c.buildAndApplyBlock(context.Background(), validators, validatorSecrets, bootstrapAuthCodeHash, &extrinsic); err != nil {
+		return err
+	}
+
+	c.previousGuarantees = nil
+	return nil
+}
+
+// processWorkPackageBundlesPipelined processes work packages in pipelined mode
+// Block N contains: guarantees for current work + assurances for PREVIOUS block's work
+// TODO: set up assurances bitfields correctly
+func (c *Rollup) processWorkPackageBundlesPipelined(bundles []*types.WorkPackageBundle) error {
+	validators, validatorSecrets, bootstrapAuthCodeHash, err := c.setupValidators()
+	if err != nil {
+		return err
+	}
+
+	// Execute bundles and create guarantees for current work
+	guarantees, activeGuarantees, err := c.executeAndGuarantee(bundles, validatorSecrets, c.stateDB)
+	if err != nil {
+		return err
+	}
+
+	// Build extrinsic with current guarantees and previous assurances
+	extrinsic := types.NewExtrinsic()
+	extrinsic.Guarantees = activeGuarantees
+	if c.previousGuarantees != nil {
+		extrinsic.Assurances = c.createAssurancesForGuarantees(c.previousGuarantees, validatorSecrets, c.stateDB)
+	}
+
+	if err := c.buildAndApplyBlock(context.Background(), validators, validatorSecrets, bootstrapAuthCodeHash, &extrinsic); err != nil {
+		return err
+	}
+
+	// Save guarantees for next block's assurances
+	c.previousGuarantees = &guarantees
+	return nil
+}
+
+// setupValidators generates validator secrets and bootstrap auth code hash
+func (c *Rollup) setupValidators() ([]types.Validator, []types.ValidatorSecret, common.Hash, error) {
 	validators, validatorSecrets, err := GenerateValidatorSecretSet(types.TotalValidators)
 	if err != nil {
-		return fmt.Errorf("failed to generate validator secrets: %w", err)
+		return nil, nil, common.Hash{}, fmt.Errorf("failed to generate validator secrets: %w", err)
 	}
-	statedb := c.stateDB
-	// Get the  service code hash
-	service, ok, err := statedb.GetService(uint32(c.serviceID))
-	if err != nil {
-		return fmt.Errorf("failed to get service: %w", err)
-	}
-	if !ok {
-		return fmt.Errorf("service %d not found", c.serviceID)
-	}
-	codeHash := service.CodeHash
 
-	// Get bootstrap authorization code hash
+	bootstrapAuthCodeHash, err := c.getBootstrapAuthCodeHash()
+	if err != nil {
+		return nil, nil, common.Hash{}, err
+	}
+
+	return validators, validatorSecrets, bootstrapAuthCodeHash, nil
+}
+
+// getBootstrapAuthCodeHash reads and hashes the bootstrap authorization code
+func (c *Rollup) getBootstrapAuthCodeHash() (common.Hash, error) {
 	authPvm := common.GetFilePath(BootStrapNullAuthFile)
 	authCodeBytes, err := os.ReadFile(authPvm)
 	if err != nil {
-		return fmt.Errorf("failed to read auth code: %w", err)
+		return common.Hash{}, fmt.Errorf("failed to read auth code: %w", err)
 	}
 	authCode := AuthorizeCode{
 		PackageMetaData:   []byte("bootstrap"),
@@ -108,197 +177,148 @@ func (c *Rollup) processWPQueueItems(wpqs []*types.WPQueueItem) error {
 	}
 	authCodeEnc, err := authCode.Encode()
 	if err != nil {
-		return fmt.Errorf("failed to encode auth code: %w", err)
+		return common.Hash{}, fmt.Errorf("failed to encode auth code: %w", err)
 	}
-	bootstrapAuthCodeHash := common.Blake2Hash(authCodeEnc)
+	return common.Blake2Hash(authCodeEnc), nil
+}
 
-	ctx := context.Background()
+// executeAndGuarantee executes bundles and creates signed guarantees
+func (c *Rollup) executeAndGuarantee(bundles []*types.WorkPackageBundle, validatorSecrets []types.ValidatorSecret, statedb *StateDB) ([]types.Guarantee, []types.Guarantee, error) {
 	guarantees := make([]types.Guarantee, types.TotalCores)
-	for coreIndex, wpq := range wpqs {
-		if wpq == nil {
+	activeGuarantees := make([]types.Guarantee, 0)
+
+	for coreIndex, bundle := range bundles {
+		if bundle == nil {
 			continue
 		}
-		wp := wpq.WorkPackage
-		// Fill in work package fields with current state
-		refineCtx := types.RefineContext{
-			Anchor:           statedb.HeaderHash,
-			StateRoot:        statedb.GetStateRoot(),
-			BeefyRoot:        common.Hash{},
-			LookupAnchor:     statedb.HeaderHash,
-			LookupAnchorSlot: statedb.GetTimeslot(),
-			Prerequisites:    []common.Hash{},
-		}
 
-		wp.AuthCodeHost = 0
-		wp.AuthorizationToken = nil
-		wp.AuthorizationCodeHash = bootstrapAuthCodeHash
-		wp.ConfigurationBlob = nil
-		wp.RefineContext = refineCtx
-
-		// Fill in service and code hash for work items
-		for i := range wp.WorkItems {
-			wp.WorkItems[i].Service = uint32(c.serviceID)
-			wp.WorkItems[i].CodeHash = codeHash
-		}
-
-		// Populate ExtrinsicData - one ExtrinsicsBlobs per WorkItem
-		// Iterate over wp.WorkItems and copy the corresponding extrinsics for each work item
-		extrinsicData := make([]types.ExtrinsicsBlobs, len(wp.WorkItems))
-		for i := range wp.WorkItems {
-			// For each work item, extract its corresponding extrinsics from wp.WorkItems[i].Extrinsics
-			workItemExtrinsics := make(types.ExtrinsicsBlobs, len(wp.WorkItems[i].Extrinsics))
-			for j, extrinsic := range wp.WorkItems[i].Extrinsics {
-				// Find the corresponding extrinsic data in wpq.Extrinsics based on the hash
-				for _, data := range wpq.Extrinsics {
-					if common.Blake2Hash(data) == extrinsic.Hash {
-						workItemExtrinsics[j] = data
-						break
-					}
-				}
-			}
-			extrinsicData[i] = workItemExtrinsics
-		}
-
-		// Create work package bundle
-		bundle := types.WorkPackageBundle{
-			WorkPackage:       wp,
-			ExtrinsicData:     extrinsicData,
-			ImportSegmentData: make([][][]byte, len(wp.WorkItems)),
-			Justification:     make([][][]common.Hash, len(wp.WorkItems)),
-		}
-
-		// Initialize ImportSegmentData and Justification for each work item
-		for i := range wp.WorkItems {
-			// Initialize empty import segment data (actual data would be loaded from external source based on ImportedSegments)
-			bundle.ImportSegmentData[i] = [][]byte{}
-			// Initialize empty justifications for now (could be populated from segment justifications)
-			bundle.Justification[i] = [][]common.Hash{}
-		}
-
-		// Execute refine to get work report, Set work report core index
-		workReport, err := statedb.ExecuteWorkPackageBundle(uint16(coreIndex), bundle, types.SegmentRootLookup{}, 0, false, 0, c.pvmBackend)
+		workReport, err := statedb.ExecuteWorkPackageBundle(uint16(coreIndex), *bundle, types.SegmentRootLookup{}, 0, false, 0, c.pvmBackend)
 		if err != nil {
-			return fmt.Errorf("failed ExecuteWorkPackageBundle: %v", err)
+			return nil, nil, fmt.Errorf("failed ExecuteWorkPackageBundle: %v", err)
 		}
 		workReport.CoreIndex = uint(coreIndex)
-		for _, result := range workReport.Results {
-			fmt.Printf("service %d -- result =%d\n", c.serviceID, result.Result.Err)
 
-		}
-		// Create guarantee with 3 validator signatures from validators assigned to core 0
-		guarantee := types.Guarantee{
-			Report:     workReport,
-			Slot:       statedb.GetTimeslot(),
-			Signatures: []types.GuaranteeCredential{},
-		}
-		_, assignments := statedb.CalculateAssignments(statedb.GetTimeslot())
-		var coreValidators []uint16
-		for idx, assignment := range assignments {
-			if assignment.CoreIndex == uint16(coreIndex) {
-				coreValidators = append(coreValidators, uint16(idx))
-			}
-		}
-
-		// Sign with the 3 validators assigned to core
-		for i := 0; i < 3 && i < len(coreValidators); i++ {
-			validatorIdx := coreValidators[i]
-			gc := workReport.Sign(validatorSecrets[validatorIdx].Ed25519Secret[:], validatorIdx)
-			guarantee.Signatures = append(guarantee.Signatures, gc)
-		}
-
-		// Log block information
-		for i, wd := range workReport.Results {
-			fmt.Printf("  WorkDigest[%d] (ServiceID=%d): GasUsed=%d, Result= (%d bytes)\n", i, wd.ServiceID, wd.GasUsed, len(wd.Result.Ok))
-			//fmt.Printf("  WorkDigest[%d] (ServiceID=%d): Result=%x \n", i, wd.ServiceID, len(wd.Result.Ok))
-
-			if len(wd.Result.Ok) >= 12 {
-				export_count := binary.LittleEndian.Uint16(wd.Result.Ok[0:2])
-				gas_used := binary.LittleEndian.Uint64(wd.Result.Ok[2:10])
-				count := binary.LittleEndian.Uint16(wd.Result.Ok[10:12])
-				fmt.Printf("    → Decoded: export_count=%d, gas_used=%d, write_count=%d\n", export_count, gas_used, count)
-			}
-		}
-
+		// Create guarantee with validator signatures
+		guarantee := c.createGuarantee(workReport, uint16(coreIndex), validatorSecrets, statedb)
 		guarantees[coreIndex] = guarantee
-	}
 
-	// Filter out empty guarantees (from nil wpqs)
-	var activeGuarantees []types.Guarantee
-	for i := range guarantees {
-		if len(guarantees[i].Signatures) > 0 {
-			activeGuarantees = append(activeGuarantees, guarantees[i])
+		if len(guarantee.Signatures) > 0 {
+			activeGuarantees = append(activeGuarantees, guarantee)
 		}
 	}
 
-	extrinsic := types.NewExtrinsic()
-	extrinsic.Guarantees = activeGuarantees
+	return guarantees, activeGuarantees, nil
+}
 
-	// Add assurances for previous block guarantee
-	if c.previousGuarantees != nil {
-		var assurances []types.Assurance
-		// Create assurances only for cores that had guarantees
-		for coreIndex := range *c.previousGuarantees {
-			if len((*c.previousGuarantees)[coreIndex].Signatures) == 0 {
-				continue
-			}
-			for i := 0; i < 6 && i < types.TotalValidators; i++ {
-				validatorIdx := uint16(i)
-				assurance := types.Assurance{
-					Anchor:         statedb.HeaderHash,
-					Bitfield:       [types.Avail_bitfield_bytes]byte{},
-					ValidatorIndex: validatorIdx,
-				}
-				// Set the bit for the core with the previous guarantee
-				assurance.SetBitFieldBit(uint16(coreIndex), true)
-
-				// Sign the assurance
-				assurance.Sign(validatorSecrets[i].Ed25519Secret[:])
-
-				assurances = append(assurances, assurance)
-			}
-		}
-		extrinsic.Assurances = assurances
-		log.Info(log.Node, "GENERATING GUARANTEE")
-	} else {
-		log.Info(log.Node, "**** No previous guarantees, skipping assurances ***")
+// createGuarantee creates a guarantee with 3 validator signatures
+func (c *Rollup) createGuarantee(workReport types.WorkReport, coreIndex uint16, validatorSecrets []types.ValidatorSecret, statedb *StateDB) types.Guarantee {
+	guarantee := types.Guarantee{
+		Report:     workReport,
+		Slot:       statedb.GetTimeslot(),
+		Signatures: []types.GuaranteeCredential{},
 	}
 
-	// Fallback sealing: Find validator index matching the fallback key
+	_, assignments := statedb.CalculateAssignments(statedb.GetTimeslot())
+	var coreValidators []uint16
+	for idx, assignment := range assignments {
+		if assignment.CoreIndex == coreIndex {
+			coreValidators = append(coreValidators, uint16(idx))
+		}
+	}
+
+	// Sign with the 3 validators assigned to core
+	for i := 0; i < 3 && i < len(coreValidators); i++ {
+		validatorIdx := coreValidators[i]
+		gc := workReport.Sign(validatorSecrets[validatorIdx].Ed25519Secret[:], validatorIdx)
+		guarantee.Signatures = append(guarantee.Signatures, gc)
+	}
+
+	return guarantee
+}
+
+// createAssurances creates assurances for a core
+func (c *Rollup) createAssurances(coreIndex uint16, validatorSecrets []types.ValidatorSecret, statedb *StateDB) []types.Assurance {
+	assurances := make([]types.Assurance, 0)
+
+	for i := 0; i < 6 && i < types.TotalValidators; i++ {
+		assurance := types.Assurance{
+			Anchor:         statedb.HeaderHash,
+			Bitfield:       [types.Avail_bitfield_bytes]byte{},
+			ValidatorIndex: uint16(i),
+		}
+		assurance.SetBitFieldBit(coreIndex, true)
+		assurance.Sign(validatorSecrets[i].Ed25519Secret[:])
+		assurances = append(assurances, assurance)
+	}
+
+	return assurances
+}
+
+// createAssurancesForGuarantees creates assurances for multiple guarantees
+func (c *Rollup) createAssurancesForGuarantees(guarantees *[]types.Guarantee, validatorSecrets []types.ValidatorSecret, statedb *StateDB) []types.Assurance {
+	assurances := make([]types.Assurance, 0)
+
+	for coreIndex := range *guarantees {
+		if len((*guarantees)[coreIndex].Signatures) == 0 {
+			continue
+		}
+		for i := 0; i < 6 && i < types.TotalValidators; i++ {
+			assurance := types.Assurance{
+				Anchor:         statedb.HeaderHash,
+				Bitfield:       [types.Avail_bitfield_bytes]byte{},
+				ValidatorIndex: uint16(i),
+			}
+			assurance.SetBitFieldBit(uint16(coreIndex), true)
+			assurance.Sign(validatorSecrets[i].Ed25519Secret[:])
+			assurances = append(assurances, assurance)
+		}
+	}
+
+	return assurances
+}
+
+// buildAndApplyBlock builds and applies a block with the given extrinsic
+func (c *Rollup) buildAndApplyBlock(ctx context.Context, validators []types.Validator, validatorSecrets []types.ValidatorSecret, bootstrapAuthCodeHash common.Hash, extrinsic *types.ExtrinsicData) error {
+	statedb := c.stateDB
 	targetJCE := statedb.GetTimeslot() + 1
-	var validatorSecret *types.ValidatorSecret
 
-	sf0, _ := statedb.GetPosteriorSafroleEntropy(targetJCE) // always be hit
-
-	for i := 0; i < types.TotalValidators; i++ {
-		isAuthorizedBlockRefiner, _, _, _ := sf0.IsAuthorizedBuilder(targetJCE, common.Hash(validators[i].Bandersnatch), []common.Hash{})
-		if isAuthorizedBlockRefiner {
-			validatorSecret = &validatorSecrets[i]
-			break
-		}
-	}
-	if validatorSecret == nil {
-		return fmt.Errorf("could not find validator matching fallback key")
+	// Find authorized block refiner
+	validatorSecret, err := c.findAuthorizedValidator(validators, validatorSecrets, targetJCE)
+	if err != nil {
+		return err
 	}
 
-	// build block
-	sealedBlock, _ := statedb.BuildBlock(ctx, *validatorSecret, statedb.GetTimeslot()+1, common.Hash{}, &extrinsic)
-	// Apply state transition
+	// Build block
+	sealedBlock, _ := statedb.BuildBlock(ctx, *validatorSecret, targetJCE, common.Hash{}, extrinsic)
+
 	// Add bootstrap authorization to pool for all cores
 	authorizerHash := common.Blake2Hash(append(bootstrapAuthCodeHash.Bytes(), []byte(nil)...))
 	for i := 0; i < types.TotalCores; i++ {
 		statedb.JamState.AuthorizationsPool[i][0] = authorizerHash
 	}
+
+	// Apply state transition
 	newStateDB, err := ApplyStateTransitionFromBlock(0, statedb, ctx, sealedBlock, nil, "interpreter")
 	if err != nil {
-		panic(err)
 		return fmt.Errorf("failed to apply state transition: %w", err)
 	}
 
 	c.stateDB = newStateDB
-	// Pipeline current guarantee for next block's assurances
-	c.previousGuarantees = &guarantees
-
 	return nil
+}
+
+// findAuthorizedValidator finds a validator authorized to build a block
+func (c *Rollup) findAuthorizedValidator(validators []types.Validator, validatorSecrets []types.ValidatorSecret, targetJCE uint32) (*types.ValidatorSecret, error) {
+	sf0, _ := c.stateDB.GetPosteriorSafroleEntropy(targetJCE)
+
+	for i := 0; i < types.TotalValidators; i++ {
+		isAuthorized, _, _, _ := sf0.IsAuthorizedBuilder(targetJCE, common.Hash(validators[i].Bandersnatch), []common.Hash{})
+		if isAuthorized {
+			return &validatorSecrets[i], nil
+		}
+	}
+
+	return nil, fmt.Errorf("could not find validator matching fallback key")
 }
 
 // getFunctionSelector computes the 4-byte function selector and event topic hash map
@@ -366,7 +386,7 @@ func parseIntParam(s string) (int64, error) {
 }
 
 // CallMath calls math functions on the deployed contract using the provided call strings
-func (c *Rollup) CallMath(mathAddress common.Address, callStrings []string) (txBytes [][]byte, err error) {
+func (c *Rollup) CallMath(mathAddress common.Address, callStrings []string) (txBytes [][]byte, alltopics map[common.Hash]string, err error) {
 
 	// mathCallSpec defines a mathematical function with its signature and events
 	type mathCallSpec struct {
@@ -535,22 +555,22 @@ func (c *Rollup) CallMath(mathAddress common.Address, callStrings []string) (txB
 	callerAddress, callerPrivKeyHex := common.GetEVMDevAccount(0)
 
 	// Get initial nonce for the caller from current state
-	initialNonce, err := c.stateDB.GetTransactionCount(callerAddress)
+	initialNonce, err := c.stateDB.GetTransactionCount(c.serviceID, callerAddress)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get transaction count for caller %s: %w", callerAddress.String(), err)
+		return nil, nil, fmt.Errorf("failed to get transaction count for caller %s: %w", callerAddress.String(), err)
 	}
 
 	// Build transactions for math calls
 	numCalls := len(callStrings)
 	txBytes = make([][]byte, numCalls)
-	alltopics := defaultTopics()
+	alltopics = defaultTopics()
 
 	for i, callString := range callStrings {
 		currentNonce := initialNonce + uint64(i)
 
 		calldata, topics, err := mathFunctionCall(callString)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create math function call for %s: %w", callString, err)
+			return nil, nil, fmt.Errorf("failed to create math function call for %s: %w", callString, err)
 		}
 		// Merge topics into alltopics map
 		for hash, sig := range topics {
@@ -570,29 +590,31 @@ func (c *Rollup) CallMath(mathAddress common.Address, callStrings []string) (txB
 			uint64(c.serviceID),
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create evmmath call transaction for %s: %w", callString, err)
+			return nil, nil, fmt.Errorf("failed to create evmmath call transaction for %s: %w", callString, err)
 		}
 		log.Info(log.Node, callString, "txHash", txHash.String())
 		txBytes[i] = tx
 	}
 
-	return txBytes, nil
+	return txBytes, alltopics, nil
 }
 
-// SubmitEVMTransactions creates and submits a work package with raw transactions
-func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte) ([]*types.WPQueueItem, error) {
-	wpqs := make([]*types.WPQueueItem, len(evmTxsMulticore))
+// SubmitEVMTransactions creates and submits a work package with raw transactions, processes it, and returns the resulting block
+func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte) (*EvmBlockPayload, error) {
+	bundles := make([]*types.WorkPackageBundle, len(evmTxsMulticore))
+
 	for coreIndex, evmTxs := range evmTxsMulticore {
+		if len(evmTxs) == 0 {
+			bundles[coreIndex] = nil
+			continue
+		}
 		// Create extrinsics blobs and hashes from raw transactions
 		hashes := make([]types.WorkItemExtrinsic, len(evmTxs))
-		txHashes := make([]common.Hash, len(evmTxs))
 		for i, tx := range evmTxs {
 			hashes[i] = types.WorkItemExtrinsic{
 				Hash: common.Blake2Hash(tx),
 				Len:  uint32(len(tx)),
 			}
-			// Calculate Ethereum transaction hash
-			txHashes[i] = common.Keccak256(tx)
 		}
 		service, ok, err := b.stateDB.GetService(b.serviceID)
 		if err != nil || !ok {
@@ -601,9 +623,10 @@ func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte) ([]*types.WPQ
 
 		// Create work package
 		wp := types.WorkPackage{
-			AuthCodeHost:       0,
-			AuthorizationToken: nil,
-			ConfigurationBlob:  nil,
+			AuthCodeHost:          0,
+			AuthorizationToken:    nil,
+			AuthorizationCodeHash: bootstrap_auth_codehash,
+			ConfigurationBlob:     nil,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            b.serviceID,
@@ -618,43 +641,48 @@ func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte) ([]*types.WPQ
 			},
 		}
 
-		// bundle, _, err := b.BuildBundle(wp, []types.ExtrinsicsBlobs{extrinsics}, 0, nil)
-		// if err != nil {
-		// 	return nil, fmt.Errorf("BuildBundle failed for %s: %v", identifier, err)
-		// }
-		wpqs[coreIndex] = &types.WPQueueItem{
-			WorkPackage: wp,
-			Extrinsics:  types.ExtrinsicsBlobs(evmTxs),
+		//  BuildBundle should return a Bundle (with ImportedSegments)
+		bundle2, _, err := b.stateDB.BuildBundle(wp, []types.ExtrinsicsBlobs{evmTxs}, uint16(coreIndex), nil, b.pvmBackend)
+		if err != nil {
+			return nil, fmt.Errorf("BuildBundle failed: %v", err)
 		}
+		//showBundleImportedSegments(bundle2, "after BuildBundle")
+		bundles[coreIndex] = bundle2
 	}
 
-	// if err := c.ShowTxReceipts(txhashes, "Math Transactions", alltopics); err != nil {
-	// 	return nil, fmt.Errorf("ShowTxReceipts ERR: %w", err)
-	// }
+	// Process the bundles
+	err := b.processWorkPackageBundles(bundles)
+	if err != nil {
+		return nil, fmt.Errorf("processWorkPackageBundles failed: %w", err)
+	}
 
-	return wpqs, nil
+	// Get and return the latest block
+	block, err := b.stateDB.GetBlockByNumber(b.serviceID, "latest")
+	if err != nil {
+		return nil, fmt.Errorf("GetBlockByNumber failed: %w", err)
+	}
+
+	return block, nil
 }
 
 // ShowTxReceipts displays transaction receipts for the given transaction hashes
-func (b *Rollup) ShowTxReceipts(txHashes []common.Hash, description string, allTopics map[common.Hash]string) error {
+func (b *Rollup) ShowTxReceipts(evmBlock *EvmBlockPayload, txHashes []common.Hash, description string, allTopics map[common.Hash]string) error {
 	log.Info(log.Node, "Showing transaction receipts", "description", description, "count", len(txHashes))
 
 	gasUsedTotal := big.NewInt(0)
+	txIndexByHash := make(map[common.Hash]int, len(evmBlock.TxHashes))
+	for idx, hash := range evmBlock.TxHashes {
+		txIndexByHash[hash] = idx
+	}
+	receiptCount := len(evmBlock.ReceiptHashes)
 
 	for _, txHash := range txHashes {
-		var (
-			receipt *EthereumTransactionReceipt
-			err     error
-		)
-		receipt, err = b.stateDB.GetTransactionReceipt(b.serviceID, txHash)
+		receipt, err := b.stateDB.GetTransactionReceipt(b.serviceID, txHash)
 		if err != nil {
 			return fmt.Errorf("failed to get transaction receipt for %s: %w", txHash.String(), err)
 		}
 		if receipt == nil {
 			return fmt.Errorf("Transaction receipt not available: %s", txHash.String())
-		}
-		if receipt.Status != "0x1" {
-			return fmt.Errorf("transaction %s failed with status %s", txHash.String(), receipt.Status)
 		}
 		// Convert gasUsed from hex to decimal
 		gasUsedInt := new(big.Int)
@@ -666,11 +694,33 @@ func (b *Rollup) ShowTxReceipts(txHashes []common.Hash, description string, allT
 			"len(logs)", len(receipt.Logs),
 			"gasUsed", gasUsedInt.String())
 		showEthereumLogs(txHash, receipt.Logs, allTopics)
-	}
+		if verifyServiceProof {
+			txIndex, ok := txIndexByHash[txHash]
+			if !ok {
+				log.Warn(log.Node, "✗ Skipping service proof verification", "reason", "tx not in block", "txHash", common.Str(txHash))
+				continue
+			}
+			if txIndex >= receiptCount {
+				log.Warn(log.Node, "✗ Skipping service proof verification", "reason", "receipt index out of range", "txHash", common.Str(txHash), "txIndex", txIndex, "receiptCount", receiptCount)
+				continue
+			}
+			position := evmBlock.LogIndexStart + uint64(txIndex)
+			proof, err := b.stateDB.GenerateServiceProof(b.serviceID, b.stateDB.GetMMRStorageKey(), position, evmBlock.LogIndexStart, evmBlock.ReceiptHashes)
+			if err != nil {
+				log.Info(log.Node, "No receipt inclusion proof available", "position", position, "txHash", common.Str(txHash), "err", err)
+			} else if proof.Verify() {
+				log.Info(log.Node, "✓ Receipt inclusion proven via MMR", "position", position, "txHash", common.Str(txHash))
+			} else {
+				log.Warn(log.Node, "✗ Receipt inclusion proof verification failed", "position", position, "txHash", common.Str(txHash))
+			}
+		}
 
+	}
 	log.Info(log.Node, description, "txCount", len(txHashes), "gasUsedTotal", gasUsedTotal.String())
 	return nil
 }
+
+// Generate and verify EVM Service proof for every position
 
 // // buildPayloadTransaction creates a conformant PayloadTransaction payload
 // // Format: "T" (1 byte) + tx_count (u32 LE) + witness_count (u16 LE)
@@ -704,7 +754,7 @@ func (b *Rollup) ExportStateWitnesses(workReports []*types.WorkReport, saveToFil
 	return nil
 }
 
-func (b *Rollup) SubmitEVMPayloadBlocks(startBlock uint32, endBlock uint32) (*types.WPQueueItem, error) {
+func (b *Rollup) SubmitEVMPayloadBlocks(startBlock uint32, endBlock uint32) (*EvmBlockPayload, error) {
 	// MappingEntry represents a single mapping entry to initialize
 	type MappingEntry struct {
 		Slot  uint8
@@ -776,9 +826,10 @@ func (b *Rollup) SubmitEVMPayloadBlocks(startBlock uint32, endBlock uint32) (*ty
 	// blockWitness, ok, blockStateRoot, err := b.ReadStateWitnessRaw(RollupCode, blockObjectID)
 	// Create work package
 	wp := types.WorkPackage{
-		AuthCodeHost:       0,
-		AuthorizationToken: nil,
-		ConfigurationBlob:  nil,
+		AuthCodeHost:          0,
+		AuthorizationToken:    nil,
+		ConfigurationBlob:     nil,
+		AuthorizationCodeHash: bootstrap_auth_codehash,
 		WorkItems: []types.WorkItem{
 			{
 				Service:            uint32(b.serviceID),
@@ -793,21 +844,24 @@ func (b *Rollup) SubmitEVMPayloadBlocks(startBlock uint32, endBlock uint32) (*ty
 		},
 	}
 
-	// bundle, _, err := b.BuildBundle(wp, []types.ExtrinsicsBlobs{blobs}, 0, objects)
-	// if err != nil {
-	// 	return fmt.Errorf("BuildBundle failed for %s: %v", identifier, err)
-	// }
-
-	wpq := &types.WPQueueItem{
-		WorkPackage: wp,
-		Extrinsics:  blobs,
+	bundle := &types.WorkPackageBundle{
+		WorkPackage:   wp,
+		ExtrinsicData: []types.ExtrinsicsBlobs{blobs},
 	}
 
-	// Note: Genesis verification should be performed AFTER processWPQueueItems has been called
-	// to allow the bootstrap extrinsics to execute and apply state changes.
-	// Verification can be done by calling b.stateDB.GetStorageAt() to check expected values.
+	// Process the bundle
+	err = b.processWorkPackageBundles([]*types.WorkPackageBundle{bundle})
+	if err != nil {
+		return nil, fmt.Errorf("processWorkPackageBundles failed: %w", err)
+	}
 
-	return wpq, nil
+	// Get and return the latest block
+	block, err := b.stateDB.GetBlockByNumber(b.serviceID, "latest")
+	if err != nil {
+		return nil, fmt.Errorf("GetBlockByNumber failed: %w", err)
+	}
+
+	return block, nil
 }
 
 type TransferTriple struct {
@@ -900,7 +954,7 @@ func (b *Rollup) createTransferTriplesForRound(roundNum int, txnsPerRound int, i
 }
 
 // DeployContract deploys a contract and returns its address
-func (b *Rollup) DeployContract(contractFile string) ([]*types.WPQueueItem, common.Address, error) {
+func (b *Rollup) DeployContract(contractFile string) (*EvmBlockPayload, common.Address, error) {
 	// Load contract bytecode from file
 	contractBytecode, err := os.ReadFile(contractFile)
 	if err != nil {
@@ -915,7 +969,7 @@ func (b *Rollup) DeployContract(contractFile string) ([]*types.WPQueueItem, comm
 	}
 
 	// Get current nonce for the deployer
-	nonce, err := b.stateDB.GetTransactionCount(deployerAddress)
+	nonce, err := b.stateDB.GetTransactionCount(b.serviceID, deployerAddress)
 	if err != nil {
 		return nil, common.Address{}, fmt.Errorf("failed to get transaction count: %w", err)
 	}
@@ -949,12 +1003,12 @@ func (b *Rollup) DeployContract(contractFile string) ([]*types.WPQueueItem, comm
 	multiCoreTxBytes := make([][][]byte, 1)
 	multiCoreTxBytes[0] = [][]byte{txBytes}
 	// Submit contract deployment as work package
-	wpqs, err := b.SubmitEVMTransactions(multiCoreTxBytes)
+	block, err := b.SubmitEVMTransactions(multiCoreTxBytes)
 	if err != nil {
 		return nil, common.Address{}, fmt.Errorf("contract deployment failed: %w", err)
 	}
 
-	return wpqs, contractAddress, nil
+	return block, contractAddress, nil
 }
 
 // BalanceOf calls the balanceOf(address) function on the USDM contract and validates the result
@@ -967,7 +1021,7 @@ func (b *Rollup) checkBalanceOf(account common.Address, expectedBalance common.H
 	// Encode address parameter (32 bytes, left-padded)
 	copy(calldataBalanceOf[16:36], account[:])
 
-	callResult, err := b.stateDB.Call(account, &usdmAddress, 100000, 1000000000, 0, calldataBalanceOf, "latest", b.pvmBackend)
+	callResult, err := b.stateDB.Call(b.serviceID, account, &usdmAddress, 100000, 1000000000, 0, calldataBalanceOf, "latest", b.pvmBackend)
 	if err != nil {
 		return fmt.Errorf("Call balanceOf ERR: %v", err)
 	}
@@ -997,7 +1051,7 @@ func (b *Rollup) checkNonces(account common.Address, expectedNonce *big.Int) err
 	// Encode address parameter (32 bytes, left-padded)
 	copy(calldataNonces[16:36], account[:])
 
-	nonceResult, err := b.stateDB.Call(account, &usdmAddress, 100000, 1000000000, 0, calldataNonces, "latest", b.pvmBackend)
+	nonceResult, err := b.stateDB.Call(b.serviceID, account, &usdmAddress, 100000, 1000000000, 0, calldataNonces, "latest", b.pvmBackend)
 	if err != nil {
 		return fmt.Errorf("Call nonces ERR: %v", err)
 	}

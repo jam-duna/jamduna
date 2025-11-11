@@ -226,7 +226,7 @@ func (s *StateDB) BuildBlock(
 		return nil, err
 	}
 	h.AuthorIndex = authorIndex
-	fmt.Printf("author %d %v\n", authorIndex, credential.BandersnatchPub.Hash().Hex())
+
 	// 3) Assemble Block
 	b := types.NewBlock()
 	b.Header = *h

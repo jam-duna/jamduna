@@ -7,6 +7,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 	"golang.org/x/crypto/blake2b"
 )
@@ -16,7 +17,8 @@ const (
 	// Hardhat Account #0 (Issuer/Alice) - First account from standard Hardhat/Anvil test mnemonic
 	// "test test test test test test test test test test test junk"
 	IssuerPrivateKeyHex = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-	JamChainID          = 42 // JAM chain ID for testing
+	JamChainID          = 42   // JAM chain ID for testing
+	debugBMTProofs      = true // Enable BMT proof verification
 )
 
 // EthereumBlock represents an Ethereum block for JSON-RPC responses (hex-encoded strings)
@@ -689,4 +691,79 @@ func (n *StateDB) GetBlockByNumberFormatted(serviceID uint32, blockNumberStr str
 	}
 
 	return ethBlock, nil
+}
+
+// verifyBlockBMTProofs verifies that the BMT roots in a block are correctly computed
+func verifyBlockBMTProofs(block *EvmBlockPayload) error {
+	// Verify Transactions Root
+	if len(block.TxHashes) > 0 {
+		computedTxRoot := computeBMTRootFromHashes(block.TxHashes)
+		if computedTxRoot != block.TransactionsRoot {
+			return fmt.Errorf("TransactionsRoot mismatch: computed=%s, stored=%s",
+				computedTxRoot.String(), block.TransactionsRoot.String())
+		}
+	}
+
+	// Verify Receipts Root
+	if len(block.ReceiptHashes) > 0 {
+		computedReceiptRoot := computeBMTRootFromHashes(block.ReceiptHashes)
+		if computedReceiptRoot != block.ReceiptsRoot {
+			return fmt.Errorf("ReceiptsRoot mismatch: computed=%s, stored=%s",
+				computedReceiptRoot.String(), block.ReceiptsRoot.String())
+		}
+	}
+
+	return nil
+}
+
+// computeBMTRootFromHashes computes the BMT root from a list of hashes indexed by position
+// and optionally verifies each proof path when debugBMTProofs is enabled
+func computeBMTRootFromHashes(hashes []common.Hash) common.Hash {
+	if len(hashes) == 0 {
+		// Empty BMT root - use blake2b of empty bytes
+		return common.Blake2Hash([]byte{})
+	}
+
+	kvPairs := make([][2][]byte, len(hashes))
+	for i, hash := range hashes {
+		var key [32]byte
+		// Use little-endian encoding at the start of the key (natural position)
+		binary.LittleEndian.PutUint32(key[0:4], uint32(i))
+
+		kvPairs[i] = [2][]byte{key[:], hash[:]}
+	}
+
+	tree := trie.NewMerkleTree(kvPairs, nil)
+	if tree.Root == nil {
+		return common.Hash{}
+	}
+
+	var root common.Hash
+	copy(root[:], tree.Root.Hash)
+
+	numFailures := 0
+	for i, hash := range hashes {
+		var key [32]byte
+		binary.LittleEndian.PutUint32(key[0:4], uint32(i))
+
+		rawProof, err := tree.Trace(key[:])
+		if err != nil {
+			log.Error(log.Node, "❌ Failed to trace path", "index", i, "key", common.BytesToHash(key[:]).String(), "err", err)
+			numFailures++
+			continue
+		}
+
+		proofPath := make([]common.Hash, len(rawProof))
+		for j, p := range rawProof {
+			proofPath[j] = common.BytesToHash(p)
+		}
+
+		verified := trie.VerifyRaw(key[:], hash[:], root[:], proofPath)
+		if !verified {
+			log.Error(log.Node, "❌ BMT proof verification FAILED", "index", i, "key", common.BytesToHash(key[:]).String(), "value", hash.String(), "root", root.String(), "proofLen", len(proofPath))
+			numFailures++
+		}
+	}
+
+	return root
 }

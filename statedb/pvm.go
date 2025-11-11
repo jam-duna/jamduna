@@ -391,6 +391,7 @@ func (vm *VM) ExecuteRefine(core uint16, workitemIndex uint32, workPackage types
 	vm.Authorization = authorization.Ok
 	vm.Extrinsics = extrinsics
 	vm.Imports = importsegments
+
 	vm.executeWithBackend(a, types.EntryPointRefine)
 	r, res = vm.getArgumentOutputs()
 

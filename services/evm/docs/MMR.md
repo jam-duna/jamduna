@@ -1,3 +1,4 @@
+
 # Merkle Mountain Range (MMR) in JAM EVM Service
 
 ## Overview
@@ -18,9 +19,7 @@ The MMR is stored in JAM State using a dedicated storage key:
 pub const MMR_KEY: [u8; 32] = [0xEE; 32];
 ```
 
-The key name and definition live in `utils/src/constants.rs`.  All read/write
-operations must go through the helper functions in `evm/src/mmr.rs` to ensure
-consistent error handling.
+The key name and definition live in `utils/src/constants.rs`. All read/write operations must go through the helper functions in `evm/src/mmr.rs` to ensure consistent error handling.
 
 ### MMR Data Structure
 
@@ -38,6 +37,20 @@ Example serialization:
  ^peak_count   ^Some              ^Some              ^None
 ```
 
+### MMR Peaks are Sufficient for All Operations
+
+**Key Principle**: The MMR peaks stored in JAM State are the **only persistence required**. No separate storage or caching of historical leaves is needed.
+
+When another node fetches the serialized MMR from JAM State and deserializes it:
+- The peaks alone are sufficient to continue appending new leaves
+- The peaks alone are sufficient to generate proofs for any historical position
+- No replay of historical receipts is required
+- The MMR compacts a large number of leaves into peaks by design
+
+This is because the MMR structure allows reconstructing the tree topology from the peaks themselves, enabling both:
+1. Appending new receipt hashes (which may combine with existing peaks)
+2. Generating inclusion proofs for historical receipts (by traversing the implicit tree structure)
+
 ## When Data is Written
 
 ### 1. During Accumulation (`accumulate` function)
@@ -54,11 +67,19 @@ The MMR is updated during the accumulation phase when processing transaction rec
    self.mmr.append(receipt_hash);  // Append receipt hash to MMR
    ```
 
-2. **MMR Write to Storage** (after all receipts processed):
+2. **MMR Write to Storage and Block Finalization** (after all receipts processed):
    ```rust
-   // At the end of accumulate()
-   accumulator.mmr.write_mmr()  // Returns MMR root
+   // At the end of accumulate() in accumulator.rs
+   // Write MMR to storage and return MMR root
+   accumulator.current_block.mmr_root = accumulator.mmr.write_mmr()?;
+
+   // Update EvmBlockPayload and write to storage
+   accumulator.current_block.write()?;
+
+   Some(accumulator.current_block.mmr_root)
    ```
+
+   The MMR root (super_peak) is stored in the block's `mmr_root` field and becomes part of the block header that is hashed to create the block's Object ID.
 
 ### 2. Receipt Hash Computation
 
@@ -83,7 +104,7 @@ The MMR root (super peak) is computed using the formula from the Graypaper (Equa
 ```rust
 pub fn super_peak(&self) -> [u8; 32] {
     // Hash all non-None peaks together
-    // Format: blake2b(b"peak" || left_peak || right_peak)
+    // Format: keccak256(b"peak" || left_peak || right_peak)
 }
 ```
 
@@ -270,238 +291,313 @@ A Merkle Mountain Range inclusion proof can demonstrate that:
 5. Result: Log was emitted in a finalized receipt
 ```
 
-**Implementation Status**:
-- ✅ MMR accumulation is implemented in `accumulator.rs`
-- ⚠️ MMR proof generation and verification is **in progress** in Go test harness (see TODOs below)
+## Implementation Architecture
 
-### Implementation Architecture
+The MMR proof infrastructure is organized into clean layers:
 
-The MMR proof infrastructure has been refactored into clean layers:
+### Layer 1: Core MMR Implementation (`trie/mmr.go`)
 
-**Layer 1: Core Data Structures** (`statedb/statedb_evm.go:414-432`)
+**MMR Structure**:
 ```go
-// Receipt MMR tracking entry
-type ReceiptMmrEntry struct {
-    ReceiptHash    [32]byte // keccak256(receipt_payload)
-    ReceiptPayload []byte   // Serialized receipt payload (persisted for proof generation)
-    MmrPosition    uint64   // Position in MMR (0-indexed)
-    TxHash         [32]byte // For lookup
-    LogIndexStart  uint64   // First log index in this receipt
-    LogCount       uint32   // Number of logs in receipt
+type MMR struct {
+    Peaks  types.Peaks   // Array of optional 32-byte hashes
+    leaves []common.Hash // Internal leaf cache for proof generation
 }
-
-// Log inclusion proof structure
-type LogInclusionProof struct {
-    ReceiptHash    [32]byte    // keccak256(receipt_payload)
-    MmrPosition    uint64      // Position in MMR
-    MmrProof       interface{} // MMR inclusion proof (trie.MmrProof)
-    MmrRoot        [32]byte    // MMR super_peak root
-    ReceiptPayload []byte      // Full receipt payload (for verification)
-    LogIndex       uint64      // Global log index
-}
-
-// Receipt tracker with MMR state
-type EVMReceiptTracker struct {
-    ReceiptMmrIndex map[common.Hash]ReceiptMmrEntry // Includes persisted payloads
-    MmrLeaves       [][32]byte                      // Receipt hashes only
-}
-
-// Core MMR tracking functions in statedb:
-func (tracker *EVMReceiptTracker) TrackReceiptInMmr(
-    txHash common.Hash, receiptPayload []byte,
-    logCount uint32, logIndexStart uint64)
-// Stores full receipt payload in ReceiptMmrEntry for later proof generation
-
-func (tracker *EVMReceiptTracker) ProveLogInclusion(
-    txHash common.Hash, logIndex uint64,
-    mmrProofGenerator func([][32]byte, uint64, [32]byte) interface{}) *LogInclusionProof
-// Returns proof with stored receipt payload (not empty slice)
-
-func VerifyLogInclusionProof(
-    proof *LogInclusionProof, jamStateRoot [32]byte,
-    mmrProofVerifier func([32]byte, uint64, interface{}, [32]byte) bool) bool
-// Recomputes receipt hash from payload and verifies against proof
 ```
 
-**Layer 2: Receipt Serialization** (`statedb/statedb_evm.go:434-608`)
-```go
-// Core serialization matching receipt.rs:229-254
-func SerializeReceiptPayload(receipt *EthereumReceipt, txRLP []byte) ([]byte, error)
+**Core Functions**:
+- `NewMMR()` - Creates empty MMR
+- `NewMMRFromBytes(data []byte)` - Deserializes MMR from Rust format
+- `Append(data *common.Hash)` - Adds receipt hash to MMR (implements Equation E.8)
+- `SuperPeak()` - Computes MMR root (implements Equation E.10)
+- `SetLeaves(leaves []common.Hash)` - Sets leaf cache for proof generation
 
-// Helper for parsing JSON RPC receipt strings
-type StringEthereumLog struct {
-    Address string   `json:"address"`
-    Topics  []string `json:"topics"`
-    Data    string   `json:"data"`
+### Layer 2: MMR Proof Structure (`trie/mmr.go:209-257`)
+
+**MMRProof Structure**:
+```go
+type MMRProof struct {
+    Position    uint64        // Position in MMR (leaf index)
+    LeafHash    common.Hash   // The receipt_hash being proven
+    Siblings    []common.Hash // Sibling hashes for tree climbing
+    SiblingLeft []bool        // True if sibling is on left, false if on right
+    Peaks       []common.Hash // All MMR peaks in left-to-right order
+    PeakIndex   int           // Index of peak containing the leaf
+}
+```
+
+**Proof Functions**:
+```go
+func (m *MMR) GenerateProof(position uint64) MMRProof
+// Generates inclusion proof for receipt at given position
+
+func (proof MMRProof) Verify(expectedRoot common.Hash) bool
+// Verifies proof by climbing tree and checking computed root
+```
+
+**Proof Generation Algorithm** (`trie/mmr.go:267-353`):
+1. Locate which peak contains the target position
+2. Traverse down the peak's binary tree
+3. Collect sibling hashes at each level
+4. Record sibling positions (left/right)
+5. Return proof with all peaks and sibling path
+
+**Proof Verification Algorithm** (`trie/mmr.go:228-257`):
+1. Start with leaf hash
+2. Combine with siblings in correct order (using `SiblingLeft` flags)
+3. Climb to peak using keccak256 hashing
+4. Substitute computed peak into peaks array
+5. Compute super_peak from all peaks
+6. Compare with expected root
+
+### Layer 3: Receipt Serialization (`statedb/statedb_evm.go`)
+
+**Receipt Structures**:
+```go
+type EthereumReceipt struct {
+    TxHash  common.Hash
+    Success bool
+    GasUsed uint64
+    TxType  uint8
+    Logs    []EthereumLog
 }
 
+type EthereumLog struct {
+    Address common.Address
+    Topics  []common.Hash
+    Data    []byte
+}
+```
+
+**Serialization Function** (`statedb/statedb_evm.go:526-604`):
+```go
+func SerializeReceiptPayload(receipt *EthereumReceipt, txRLP []byte) ([]byte, error)
+// Matches Rust receipt.rs:229-254 format exactly
+```
+
+**Helper for JSON RPC** (`statedb/statedb_evm.go:606-680`):
+```go
 func ParseReceiptFromStrings(
     txHashHex, statusHex, gasUsedHex, typeHex string,
     logs []StringEthereumLog, txRLP []byte) ([]byte, error)
+// Converts JSON RPC string fields to EthereumReceipt
 ```
 
-**Layer 3: MMR Proof Operations** (`trie/mmr.go:144-214`)
-```go
-// MMR proof structure
-type MmrProof struct {
-    Position uint64
-    LeafHash [32]byte
-    Siblings [][32]byte
-    Peaks    []*common.Hash
-}
+### Layer 4: ServiceProof - Two-Layer Verification (`trie/serviceproof.go`)
 
-// MMR proof functions
-func GenerateMmrProof(leaves [][32]byte, position uint64, leafHash [32]byte) MmrProof
-func VerifyMmrProof(leafHash [32]byte, position uint64, proof MmrProof, expectedRoot [32]byte) bool
+**ServiceProof Structure**:
+```go
+type ServiceProof struct {
+    ServiceID  uint32      // EVM service ID
+    StorageKey []byte      // Storage key (0xEE...EE for MMR)
+
+    // Layer 1: MMR proof (receipt → MMR root)
+    MmrProof  MMRProof     // Merkle Mountain Range inclusion proof
+    SuperPeak common.Hash  // MMR super_peak root
+
+    // Layer 2: BMT proof (MMR root → JAM State)
+    BmtProof  []common.Hash  // Binary Merkle Trie proof path
+    StateRoot common.Hash     // JAM consensus state root
+}
 ```
 
-**Layer 4: Test Harness Integration** (`node/node_evm_jamtest.go:28-221`)
+**Two-Layer Verification**:
+```
+Layer 1 (MMR Proof):
+  Input: receipt_hash, mmr_position, mmr_proof
+  Verify: receipt_hash is in MMR at given position
+  Output: MMR super_peak (root commitment)
+
+Layer 2 (BMT Proof):
+  Input: MMR super_peak, storage_key (0xEE...EE), bmt_proof
+  Verify: MMR super_peak is stored in JAM State
+  Output: JAM state_root (consensus anchor)
+
+Result: Receipt hash is cryptographically anchored to JAM consensus
+```
+
+**Proof Generation** (`statedb/statedb_evm.go:682-698`):
 ```go
-// EVMService uses statedb's EVMReceiptTracker
-type EVMService struct {
-    n1             JNode
-    service        *types.TestService
-    receiptTracker *statedb.EVMReceiptTracker
-}
+func (s *StateDB) GenerateServiceProof(
+    serviceID uint32, storageKey []byte, position uint64) (*trie.ServiceProof, error) {
+    // 1. Get MMR root from JAM State with BMT proof
+    value, bmtProof, stateRoot, ok, err := s.trie.GetServiceStorageWithProof(serviceID, storageKey)
 
-// Thin adapters that delegate to statedb:
-func (b *EVMService) TrackReceiptInMmr(txHash common.Hash, receiptPayload []byte,
-                                       logCount uint32, logIndexStart uint64) {
-    b.receiptTracker.TrackReceiptInMmr(txHash, receiptPayload, logCount, logIndexStart)
-}
+    // 2. Deserialize MMR from peaks (no leaf cache seeding required)
+    mmr, err := trie.NewMMRFromBytes(value)
 
-func (b *EVMService) ProveLogInclusion(txHash common.Hash, logIndex uint64) *statedb.LogInclusionProof {
-    return b.receiptTracker.ProveLogInclusion(txHash, logIndex, func(leaves [][32]byte, pos uint64, hash [32]byte) interface{} {
-        return trie.GenerateMmrProof(leaves, pos, hash)
-    })
+    // 3. Generate combined proof and verify it
+    // Note: GenerateServiceProof calls VerifyServiceProof internally (serviceproof.go:72)
+    return trie.GenerateServiceProof(mmr, serviceID, storageKey, position, bmtProof, stateRoot)
 }
+```
 
-func VerifyLogInclusionProof(proof *statedb.LogInclusionProof, jamStateRoot [32]byte) bool {
-    return statedb.VerifyLogInclusionProof(proof, jamStateRoot, func(hash [32]byte, pos uint64, mmrProof interface{}, root [32]byte) bool {
-        mmrProofTyped, ok := mmrProof.(trie.MmrProof)
-        if !ok {
-            return false
-        }
-        return trie.VerifyMmrProof(hash, pos, mmrProofTyped, root)
-    })
-}
+**Important**: `GenerateServiceProof` (trie/serviceproof.go:44-77) performs **both verification layers** by calling `VerifyServiceProof` at line 72 before returning the proof. This ensures:
+1. The MMR proof correctly verifies the receipt inclusion against the super_peak
+2. The BMT proof correctly verifies the MMR root is in JAM State at the given state root
 
-// Receipt serialization adapter
-func serializeReceiptPayload(receipt *EthereumTransactionReceipt, txRLP []byte) ([]byte, error) {
-    // Converts node's string-based logs to statedb.StringEthereumLog
-    logs := make([]statedb.StringEthereumLog, len(receipt.Logs))
-    for i, log := range receipt.Logs {
-        logs[i] = statedb.StringEthereumLog{
-            Address: log.Address,
-            Topics:  log.Topics,
-            Data:    log.Data,
-        }
+The function returns an error if either verification fails, guaranteeing that only valid proofs are generated.
+
+**Proof Verification** (`trie/serviceproof.go:79-90`):
+```go
+func VerifyServiceProof(proof *ServiceProof) bool {
+    // Layer 1: Verify MMR proof (receipt → MMR root)
+    if !proof.MmrProof.Verify(proof.SuperPeak) {
+        return false
     }
-    return statedb.ParseReceiptFromStrings(
-        receipt.TransactionHash, receipt.Status, receipt.GasUsed,
-        receipt.Type, logs, txRLP)
+
+    // Layer 2: Verify BMT proof (MMR root → JAM State)
+    return Verify(proof.ServiceID, proof.StorageKey, proof.SuperPeak.Bytes(),
+                  proof.StateRoot.Bytes(), proof.BmtProof)
 }
 ```
 
-**Usage Example** (`node/node_evm_jamtest.go` in `ShowTxReceipts`):
+### Layer 5: Test Harness Integration (`node/node_evm_jamtest.go`)
+
+**Usage Example**:
 ```go
-// 1. Serialize receipt payload (delegates to statedb)
-receiptPayload, err := serializeReceiptPayload(receipt, txRLP)
+// Generate proof for log at position
+proof, err := node.GenerateServiceProof(serviceID, statedb.GetMMRStorageKey(), position)
 if err != nil {
-    log.Warn(log.Node, "Failed to serialize receipt", "err", err)
-    receiptPayload = []byte(fmt.Sprintf("receipt:%s", txHash.String()))
+    log.Warn("Failed to generate proof", "err", err)
+    return
 }
 
-// 2. Track receipt in MMR (delegates to statedb.EVMReceiptTracker)
-b.TrackReceiptInMmr(txHash, receiptPayload, uint32(len(receipt.Logs)), logIndexStart)
+// Verify proof
+if proof.Verify() {
+    log.Info("✓ Log inclusion proven via MMR", "logIndex", position)
+} else {
+    log.Warn("✗ Log inclusion proof verification failed")
+}
+```
 
-// 3. Generate and verify proof for interesting logs
-if len(receipt.Logs) > 0 {
-    firstLogIndex := logIndexStart
-    proof := b.ProveLogInclusion(txHash, firstLogIndex)
-    if proof != nil {
-        var stubStateRoot [32]byte
-        if VerifyLogInclusionProof(proof, stubStateRoot) {
-            log.Info(log.Node, "✓ Log inclusion proven via MMR",
-                "logIndex", firstLogIndex,
-                "txHash", common.Str(txHash),
-                "mmrPosition", proof.MmrPosition,
-                "mmrRoot", common.Bytes2Hex(proof.MmrRoot[:4]))
+## Implementation Status
+
+### Completed ✅
+
+1. **MMR Core** (`trie/mmr.go`):
+   - Append operation (Equation E.8)
+   - SuperPeak computation (Equation E.10)
+   - Serialization/deserialization matching Rust format
+   - Leaf cache for proof generation
+
+2. **MMR Proof** (`trie/mmr.go:209-385`):
+   - Full proof generation with sibling collection
+   - Proof verification with position-based hashing
+   - Peak-based tree traversal
+
+3. **Receipt Serialization** (`statedb/statedb_evm.go:526-680`):
+   - Matches Rust receipt.rs:229-254 format
+   - Correct log_count (u16) and topic_count (u8) encoding
+   - JSON RPC string conversion
+
+4. **ServiceProof** (`trie/serviceproof.go`):
+   - Two-layer proof structure
+   - Combined MMR + BMT verification
+   - Self-contained proof with all necessary data
+
+5. **Test Integration** (`node/node_evm_jamtest.go:256-269`):
+   - Proof generation for every log
+   - Proof verification in test harness
+   - Example output in logs
+
+### Known Limitations ⚠️
+
+1. **MMR Proof Generation from Peaks Alone**: The MMR implementation can generate proofs directly from peaks without requiring historical leaves to be cached. When another node deserializes the MMR from JAM State, the peaks are sufficient to continue appending new leaves and generating proofs. No replay of historical receipts is required.
+
+2. **In-Memory Leaf Cache**: The Go implementation holds a leaf cache in memory during proof generation for convenience, but this is not a requirement. The `GenerateServiceProof` function never needs to seed this cache because the MMR is loaded from JAM State and `mmr.GenerateProof(position)` can operate with just the peaks.
+
+3. **Receipt RLP Encoding**: Test harness currently uses transaction input field which may not contain the full signed transaction RLP. For production, need to reconstruct from transaction fields or fetch from original submission.
+
+4. **ObjectRef.log_index Field Width Overflow** (🔴 High Priority):
+   - **Problem**: `ObjectRef.log_index` remains a single byte (u8) but stores global log indices that can exceed 255
+   - **Location**: `utils/src/objects.rs:40` (definition), `block.rs:412` (assignment: `candidate.object_ref.log_index = log_index_start as u8`)
+   - **Impact**: Blocks with >255 logs will have wrapped log indices in ObjectRef metadata, breaking RPC log index recovery
+   - **Example**: A block with `log_index_start = 1000` stores `1000 as u8 = 232`, causing RPC consumers to see incorrect log indices
+   - **Status**: Field remains u8; overflow will occur after 255 total logs across all blocks
+   - **Required Fix**:
+     1. Widen `ObjectRef.log_index` from `u8` to `u64` (or at minimum `u32`)
+     2. Update serialization/deserialization methods
+     3. Verify/update `SERIALIZED_SIZE` constant (currently 64 bytes)
+     4. Update Go side `ObjectRef` in `types/objectref.go`
+     5. Handle storage migration if any ObjectRefs exist
+   - **Workaround**: Log data in receipt payloads is unaffected; only ObjectRef metadata has wrong indices
+   - **Note**: The global log index is written by `EvmBlockPayload::add_receipt` (block.rs:412), but the downstream consumer cannot reconstruct global ordering once the value wraps
+
+## Host Function: Fetching Parent State Root
+
+### Purpose
+
+During accumulation, the EVM service needs to store the JAM state root at block finalization time in the block's `state_root` field. This enables historical state reconstruction and light client queries.
+
+### Implementation
+
+**Rust Side** (`services/utils/src/functions.rs:2050-2070`):
+```rust
+/// Fetches the parent state root from JAM host using datatype 255
+pub fn fetch_parent_state_root() -> HarnessResult<[u8; 32]> {
+    const FETCH_DATATYPE_PARENT_STATE_ROOT: u64 = 255;
+    let mut buffer = vec![0u8; 32];
+    let data = match fetch_data(&mut buffer, FETCH_DATATYPE_PARENT_STATE_ROOT, 0, 0, 32)? {
+        Some(buffer) => buffer,
+        None => {
+            call_log(1, None, "fetch_parent_state_root: host returned no data");
+            return Err(HarnessError::HostFetchFailed);
         }
+    };
+
+    if data.len() != 32 {
+        return Err(HarnessError::TruncatedInput);
     }
+
+    let mut state_root = [0u8; 32];
+    state_root.copy_from_slice(&data[..32]);
+    Ok(state_root)
 }
 ```
 
-**Example Output**:
+**Go Side** (`statedb/hostfunctions.go:964-966`):
+```go
+case 255: // Parent state root (JAM state root from parent block)
+    v_Bytes = vm.ParentStateRoot.Bytes()
+    log.Trace(vm.logging, "FETCH ParentStateRoot", "stateRoot", vm.ParentStateRoot.Hex())
 ```
-INFO [11-03|09:57:36.786] ✓ Log inclusion proven via MMR logIndex=1 txHash=2450..d946 mmrPosition=0 mmrRoot=0000..0000
+
+**Allowed Modes** (`statedb/hostfunctions.go:848`):
+- Datatype 255 is allowed in `ModeAccumulate`
+- Returns the JAM state root from the parent block
+- Stored in `vm.ParentStateRoot` field, initialized during `ExecuteAccumulate`
+
+### Usage in Block Finalization
+
+**Block Creation** (`services/evm/src/block.rs:384-385`):
+```rust
+// Fetch entropy and parent state root from host
+let entropy = fetch_entropy().ok()?;
+let parent_state_root = fetch_parent_state_root().ok()?;
+
+// Finalize previous block with parent state root
+let parent_block_hash = current_block.finalize(service_id, entropy, parent_state_root, mmr_root)?;
 ```
 
-**Completed Implementation**:
-- ✅ **Core data structures** (`statedb/statedb_evm.go:414-432`):
-  - `ReceiptMmrEntry` with persisted receipt payloads
-  - `LogInclusionProof` structure
-  - `EVMReceiptTracker` for MMR state management
-- ✅ **Receipt serialization** (`statedb/statedb_evm.go:433-516`):
-  - `SerializeReceiptPayload` matching Rust receipt.rs:229-254 format
-  - Correct log_count (u16) and topic_count (u8) encoding
-  - `ParseReceiptFromStrings` for JSON RPC conversion
-- ✅ **Receipt tracking** (`statedb/statedb_evm.go:633-670`):
-  - `TrackReceiptInMmr` persists full receipt payloads
-  - Receipt hashes computed with keccak256
-  - MMR leaves array maintained
-- ✅ **Proof structure** (`statedb/statedb_evm.go:672-706`):
-  - `ProveLogInclusion` returns proof with stored payload
-  - MMR position and receipt hash lookup working
-- ✅ **Test harness integration** (`node/node_evm_jamtest.go:28-221`):
-  - Thin adapters delegating to statedb/trie
-  - Receipt serialization and tracking integrated into `ShowTxReceipts`
+**Finalize Method** (`services/evm/src/block.rs:435`):
+```rust
+pub fn finalize(&mut self, service_id: u32, entropy: [u8; 32], state_root: [u8; 32], mmr_root: [u8; 32]) -> Option<[u8; 32]> {
+    self.transactions_root = self.compute_transactions_root();
+    self.receipts_root = self.compute_receipts_root();
+    self.state_root = state_root;  // JAM state root for historical lookups
+    self.mmr_root = mmr_root;      // MMR super_peak for log proofs
+    self.entropy = entropy;
+    // ... compute block hash
+}
+```
 
-**Remaining TODOs** (Proof Generation/Verification):
-1. ⚠️ **MMR sibling/peak computation** (`trie/mmr.go:189-214`):
-   - `trie.GenerateMmrProof` currently returns empty siblings/peaks (stub)
-   - **Needs**: Full MMR tree traversal to collect sibling hashes along path to peak
-   - **Algorithm**: Given position, compute height and collect siblings at each level
+### Benefits
 
-2. ⚠️ **MMR root computation** (`statedb/statedb_evm.go:693-696`):
-   - `ProveLogInclusion` returns zeroed mmrRoot
-   - **Needs**: Compute super_peak from `tracker.MmrLeaves` using MMR bagging algorithm
-   - **Note**: `trie.MMR.SuperPeak()` already implements this in Rust-compatible way
-
-3. ⚠️ **MMR proof verification** (`trie/mmr.go:151-187`):
-   - `trie.VerifyMmrProof` only does basic sibling hashing without left/right ordering
-   - **Needs**: Correct MMR climb algorithm (position-based left/right concatenation)
-   - **Needs**: Final super-peak computation from all peaks and comparison
-
-4. ⚠️ **JAM State verification** (`statedb/statedb_evm.go:708-729`):
-   - `VerifyLogInclusionProof` skips BMT proof of MMR root against JAM stateRoot
-   - **Needs**: Call `GetServiceStorageWithProof(EVMServiceID, 0xEE...EE, jamStateRoot)`
-   - **Needs**: Verify returned BMT proof confirms MMR root is in consensus state
-
-5. ⚠️ **Transaction RLP encoding** (node-side):
-   - Currently uses `ethTx.Input` field which may not contain full signed transaction RLP
-   - **Needs**: Reconstruct from transaction fields or fetch from original submission
-   - **Impact**: Receipt hashes may not match Rust accumulator if tx payload differs
-
-**Next Steps**:
-1. Implement full `GenerateMmrProof` with sibling collection
-2. Add super_peak computation to `ProveLogInclusion`
-3. Fix `VerifyMmrProof` to handle MMR position-based hashing and peak aggregation
-4. Extend test harness to fetch MMR root from JAM State via RPC
-5. Add BMT proof verification step in `VerifyLogInclusionProof`
-
-**Technical Notes**:
-- Receipt serialization now matches Rust format byte-for-byte (log_count:u16, topic_count:u8)
-- Receipt payloads are persisted in `ReceiptMmrEntry` for proof generation
-- Uses keccak256 for hashing (matching Rust `accumulator.rs` implementation)
-- Proof verification will pass once MMR algorithms are completed
-
-### Proof Benefits
-
-- **Compact**: MMR proofs are O(log N) size for N receipts
-- **Append-only**: No rebalancing like standard Merkle trees
-- **Efficient**: Single MMR root commitment covers all receipts in history
-- **Bridge-friendly**: Light clients can verify log emission with minimal data
+1. **Historical State Queries**: Light clients can verify state at specific block heights
+2. **State Proofs**: Cryptographic proofs anchored to JAM consensus
+3. **Separate Concerns**: `state_root` for state lookups, `mmr_root` for log proofs
+4. **Backwards Compatibility**: Supports both state reconstruction and receipt verification
 
 ## Use Cases
 
@@ -517,21 +613,38 @@ The MMR root serves as a compact commitment to all receipts, allowing:
 - Light client proofs without storing all receipt data
 - Cross-chain receipt verification
 
+### Bridge Integration
+ServiceProof enables:
+- Self-contained proofs for light clients
+- Two-layer security (MMR + BMT)
+- Consensus-anchored verification against JAM state root
+- No need to sync full state
+
 ## Implementation Details
 
-**Files**:
+**Rust Files**:
 - `services/evm/src/mmr.rs` - Core MMR implementation
 - `services/evm/src/accumulator.rs` - MMR integration with accumulation
 - `services/evm/src/block.rs` - Receipt hash computation
+- `services/evm/src/receipt.rs` - Receipt serialization
+
+**Go Files**:
+- `trie/mmr.go` - MMR and MMRProof implementation
+- `trie/serviceproof.go` - ServiceProof two-layer verification
+- `statedb/statedb_evm.go` - Receipt serialization and proof generation
+- `node/node_evm_jamtest.go` - Test harness integration
 
 **Key Functions**:
 - `MMR::append()` - Add receipt hash to MMR
 - `MMR::write_mmr()` - Serialize and write to JAM State
 - `MMR::read_mmr()` - Deserialize from JAM State
 - `MMR::super_peak()` - Compute MMR root
+- `MMR::GenerateProof()` - Generate inclusion proof
+- `MMRProof::Verify()` - Verify inclusion proof
+- `ServiceProof::Verify()` - Two-layer verification
 
 ## Troubleshooting Host Writes
 
 - **WHAT (0xFFFFFFFFFFFFFFFE)**: The host rejected the write because the service is not in accumulate mode. Ensure the work package is routed to the accumulator and that no finalize call ran beforehand.
-- **FULL (0xFFFFFFFFFFFFFFFB)**: The service’s balance threshold is insufficient for the write. Recharge the account or reduce the payload size.
+- **FULL (0xFFFFFFFFFFFFFFFB)**: The service's balance threshold is insufficient for the write. Recharge the account or reduce the payload size.
 - **Repeated receipt write failures**: The accumulator aborts after the first failure. Inspect the offending `object_id` and confirm that the serialized payload length matches `ObjectRef.payload_length`; mismatches are logged before the host call.

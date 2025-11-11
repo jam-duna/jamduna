@@ -366,14 +366,14 @@ func (stateDB *StateDB) ReadObjectRef(serviceCode uint32, objectID common.Hash) 
 }
 
 // GetBalance fetches the balance of an address from JAM State/DA
-func (b *StateDB) GetBalance(address common.Address) (common.Hash, error) {
+func (b *StateDB) GetBalance(serviceID uint32, address common.Address) (common.Hash, error) {
 
 	// Compute storage key for balance in USDM contract
 	storageKey := computeBalanceStorageKey(address)
 	log.Debug(log.Node, "GetBalance", "address", address.String(), "storageKey", storageKey.String(), "UsdmAddress", UsdmAddress.String())
 
 	// Read from SSR-sharded storage
-	value, err := b.readContractStorageValue(UsdmAddress, storageKey)
+	value, err := b.readContractStorageValue(serviceID, UsdmAddress, storageKey)
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("failed to read balance: %v", err)
 	}
@@ -383,9 +383,9 @@ func (b *StateDB) GetBalance(address common.Address) (common.Hash, error) {
 }
 
 // GetStorageAt reads contract storage at a specific position
-func (stateDB *StateDB) GetStorageAt(address common.Address, position common.Hash) (common.Hash, error) {
+func (stateDB *StateDB) GetStorageAt(serviceID uint32, address common.Address, position common.Hash) (common.Hash, error) {
 	// Read from SSR-sharded storage
-	value, err := stateDB.readContractStorageValue(address, position)
+	value, err := stateDB.readContractStorageValue(serviceID, address, position)
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("failed to read storage: %v", err)
 	}
@@ -394,12 +394,12 @@ func (stateDB *StateDB) GetStorageAt(address common.Address, position common.Has
 }
 
 // GetTransactionCount fetches the nonce (transaction count) of an address
-func (stateDB *StateDB) GetTransactionCount(address common.Address) (uint64, error) {
+func (stateDB *StateDB) GetTransactionCount(serviceID uint32, address common.Address) (uint64, error) {
 	// Compute storage key for nonce in USDM contract
 	storageKey := computeNonceStorageKey(address)
 
 	// Read from SSR-sharded storage
-	nonceHash, err := stateDB.readContractStorageValue(UsdmAddress, storageKey)
+	nonceHash, err := stateDB.readContractStorageValue(serviceID, UsdmAddress, storageKey)
 	if err != nil {
 		return 0, fmt.Errorf("failed to read nonce: %v", err)
 	}
@@ -410,10 +410,10 @@ func (stateDB *StateDB) GetTransactionCount(address common.Address) (uint64, err
 }
 
 // readContractStorageValue reads a storage value from any contract at a specific storage key
-func (stateDB *StateDB) readContractStorageValue(contractAddress common.Address, storageKey common.Hash) (common.Hash, error) {
+func (stateDB *StateDB) readContractStorageValue(serviceID uint32, contractAddress common.Address, storageKey common.Hash) (common.Hash, error) {
 	// 1. Read SSR metadata to resolve shard ID
 	ssrObjectID := ssr_to_objectID(contractAddress)
-	witness, found, err := stateDB.ReadStateWitnessRef(EVMServiceCode, ssrObjectID, true)
+	witness, found, err := stateDB.ReadStateWitnessRef(serviceID, ssrObjectID, true)
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("failed to read SSR metadata for %s: %v", contractAddress.String(), err)
 	}
@@ -439,7 +439,7 @@ func (stateDB *StateDB) readContractStorageValue(contractAddress common.Address,
 
 	// 4. Read the shard from DA
 	shardObjectID := shard_to_objectID(contractAddress, shardID.toBytes())
-	witness, found, err = stateDB.ReadStateWitnessRef(EVMServiceCode, shardObjectID, true)
+	witness, found, err = stateDB.ReadStateWitnessRef(serviceID, shardObjectID, true)
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("failed to read shard: %v", err)
 	}
@@ -459,7 +459,7 @@ func (stateDB *StateDB) readContractStorageValue(contractAddress common.Address,
 }
 
 // readUSDMStorageValue reads a storage value from the USDM contract at a specific slot for a given address
-func (stateDB *StateDB) readUSDMStorageValue(userAddress common.Address, slot uint8) (common.Hash, error) {
+func (stateDB *StateDB) readUSDMStorageValue(serviceID uint32, userAddress common.Address, slot uint8) (common.Hash, error) {
 	// 1. Compute the storage key for the specific slot and user address
 	var storageKey common.Hash
 	switch slot {
@@ -472,16 +472,16 @@ func (stateDB *StateDB) readUSDMStorageValue(userAddress common.Address, slot ui
 	}
 
 	// 3. Use the generic contract storage reader
-	return stateDB.readContractStorageValue(UsdmAddress, storageKey)
+	return stateDB.readContractStorageValue(serviceID, UsdmAddress, storageKey)
 }
 
 // GetCode returns the bytecode at a given address
-func (stateDB *StateDB) GetCode(address common.Address) ([]byte, error) {
+func (stateDB *StateDB) GetCode(serviceID uint32, address common.Address) ([]byte, error) {
 	// Resolve block number to state
 
 	// Read contract code from DA
 	codeObjectID := code_to_objectID(address)
-	witness, found, err := stateDB.ReadStateWitnessRef(EVMServiceCode, codeObjectID, true)
+	witness, found, err := stateDB.ReadStateWitnessRef(serviceID, codeObjectID, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read contract code: %v", err)
 	}
@@ -595,7 +595,7 @@ func (stateDB *StateDB) GetTransactionReceipt(serviceID uint32, txHash common.Ha
 }
 
 // // EstimateGas tests the EstimateGas functionality with a USDM transfer
-func (stateDB *StateDB) EstimateGasTransfer(issuerAddress common.Address, usdmAddress common.Address, pvmBackend string) error {
+func (stateDB *StateDB) EstimateGasTransfer(serviceID uint32, issuerAddress common.Address, usdmAddress common.Address, pvmBackend string) error {
 	recipientAddr, _ := common.GetEVMDevAccount(1)
 	transferAmount := big.NewInt(1000000) // 1M tokens (small test amount)
 
@@ -605,7 +605,7 @@ func (stateDB *StateDB) EstimateGasTransfer(issuerAddress common.Address, usdmAd
 	copy(estimateCalldata[16:36], recipientAddr.Bytes())
 	copy(estimateCalldata[36:68], transferAmount.FillBytes(make([]byte, 32)))
 
-	estimatedGas, err := stateDB.EstimateGas(issuerAddress, &usdmAddress, 100000, 1000000000, 0, estimateCalldata, pvmBackend)
+	estimatedGas, err := stateDB.EstimateGas(serviceID, issuerAddress, &usdmAddress, 100000, 1000000000, 0, estimateCalldata, pvmBackend)
 	if err != nil {
 		return fmt.Errorf("EstimateGas failed: %w", err)
 	}
@@ -614,7 +614,7 @@ func (stateDB *StateDB) EstimateGasTransfer(issuerAddress common.Address, usdmAd
 }
 
 // EstimateGas estimates the gas needed to execute a transaction
-func (stateDB *StateDB) EstimateGas(from common.Address, to *common.Address, gas uint64, gasPrice uint64, value uint64, data []byte, pvmBackend string) (uint64, error) {
+func (stateDB *StateDB) EstimateGas(serviceID uint32, from common.Address, to *common.Address, gas uint64, gasPrice uint64, value uint64, data []byte, pvmBackend string) (uint64, error) {
 	// Build Ethereum transaction for simulation
 	valueBig := new(big.Int).SetUint64(value)
 	gasPriceBig := new(big.Int).SetUint64(gasPrice)
@@ -628,7 +628,7 @@ func (stateDB *StateDB) EstimateGas(from common.Address, to *common.Address, gas
 	}
 
 	// Create simulation work package with payload "B"
-	wpq, err := stateDB.createSimulationWPQueueItem(tx)
+	wpq, err := stateDB.createSimulationWPQueueItem(serviceID, tx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create simulation work package: %v", err)
 	}
@@ -651,7 +651,7 @@ func (stateDB *StateDB) EstimateGas(from common.Address, to *common.Address, gas
 }
 
 // Call simulates a transaction execution without submitting it
-func (stateDB *StateDB) Call(from common.Address, to *common.Address, gas uint64, gasPrice uint64, value uint64, data []byte, blockNumber string, pvmBackend string) ([]byte, error) {
+func (stateDB *StateDB) Call(serviceID uint32, from common.Address, to *common.Address, gas uint64, gasPrice uint64, value uint64, data []byte, blockNumber string, pvmBackend string) ([]byte, error) {
 	// Build Ethereum transaction for simulation
 	valueBig := new(big.Int).SetUint64(value)
 	gasPriceBig := new(big.Int).SetUint64(gasPrice)
@@ -665,7 +665,7 @@ func (stateDB *StateDB) Call(from common.Address, to *common.Address, gas uint64
 	}
 
 	// Create simulation work package
-	wpq, err := stateDB.createSimulationWPQueueItem(tx)
+	wpq, err := stateDB.createSimulationWPQueueItem(serviceID, tx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create simulation work package: %v", err)
 	}
@@ -680,7 +680,7 @@ func (stateDB *StateDB) Call(from common.Address, to *common.Address, gas uint64
 }
 
 // createSimulationWorkPackage creates a work package for transaction simulation
-func (stateDB *StateDB) createSimulationWPQueueItem(tx *EthereumTransaction) (*types.WPQueueItem, error) {
+func (stateDB *StateDB) createSimulationWPQueueItem(serviceID uint32, tx *EthereumTransaction) (*types.WPQueueItem, error) {
 	// 1. Convert Ethereum transaction to JAM extrinsic format
 	// Extrinsic format: caller(20) + target(20) + gas_limit(32) + gas_price(32) + value(32) + call_kind(4) + data_len(8) + data
 	dataLen := len(tx.Data)
@@ -734,7 +734,7 @@ func (stateDB *StateDB) createSimulationWPQueueItem(tx *EthereumTransaction) (*t
 	copy(extrinsic[offset:], tx.Data)
 
 	// 2. Get the EVM service info
-	evmService, ok, err := stateDB.GetService(EVMServiceCode)
+	evmService, ok, err := stateDB.GetService(serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get EVM service: %v", err)
 	}
@@ -755,7 +755,7 @@ func (stateDB *StateDB) createSimulationWPQueueItem(tx *EthereumTransaction) (*t
 		ConfigurationBlob:  nil,
 		WorkItems: []types.WorkItem{
 			{
-				Service:            EVMServiceCode,
+				Service:            serviceID,
 				CodeHash:           evmService.CodeHash,
 				Payload:            buildPayload(PayloadTypeCall, 1, 0),
 				RefineGasLimit:     types.RefineGasAllocation / 2,
@@ -784,7 +784,7 @@ func (stateDB *StateDB) executeSimulationWorkPackage(wpq *types.WPQueueItem, pvm
 	// Execute the work package with proper parameters
 	// Use core index 0 for simulation, current slot, and mark as not first guarantor
 	// TODO: accept extrinsicsBlobs input as this only works for one work item
-	_, workReport, err = stateDB.BuildBundleWithStateWitnesses(wpq.WorkPackage, []types.ExtrinsicsBlobs{wpq.Extrinsics}, 0, nil, pvmBackend)
+	_, workReport, err = stateDB.BuildBundle(wpq.WorkPackage, []types.ExtrinsicsBlobs{wpq.Extrinsics}, 0, nil, pvmBackend)
 	if err != nil {
 		return nil, fmt.Errorf("BuildBundle failed: %v", err)
 	}

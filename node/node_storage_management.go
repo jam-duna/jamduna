@@ -11,6 +11,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
+	storage "github.com/colorfulnotion/jam/storage"
 	trie "github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -280,7 +281,7 @@ func (n *NodeContent) GetMeta_Guarantor(erasureRoot common.Hash) (bClubs []commo
 	return
 }
 
-func (n *NodeContent) StoreBundleSpecSegments(as *types.AvailabilitySpecifier, d statedb.AvailabilitySpecifierDerivation, b types.WorkPackageBundle, segments [][]byte) {
+func (n *NodeContent) StoreBundleSpecSegments(as *types.AvailabilitySpecifier, d types.AvailabilitySpecifierDerivation, b types.WorkPackageBundle, segments [][]byte) {
 	erasure_root_u := as.ErasureRoot
 	erasure_bKey := fmt.Sprintf("erasureBChunk-%v", erasure_root_u)
 	bChunkJson, _ := json.Marshal(d.BundleChunks)
@@ -515,30 +516,12 @@ func (n *NodeContent) StoreAuditDA_Assurer(erasureRoot common.Hash, shardIndex u
 	return nil
 }
 
-// requestHash (packageHash(wp) or SegmentRoot(e)) -> ErasureRoot(u)
-func generateSpecKey(requestHash common.Hash) string {
-	return fmt.Sprintf("rtou_%v", requestHash)
-}
-
 func (n *NodeContent) StoreWorkReport(wr types.WorkReport) error {
-	spec := wr.AvailabilitySpec
-	erasureRoot := spec.ErasureRoot
-	segementRoot := spec.ExportedSegmentRoot
-	workpackageHash := spec.WorkPackageHash
-
-	// write 3 mappings:
-	wrBytes, err := types.Encode(wr)
+	store, err := n.GetStorage()
 	if err != nil {
 		return err
 	}
-	// (a) workpackageHash => spec
-	// (b) segmentRoot => spec
-	// (c) erasureRoot => spec
-	n.WriteRawKV(generateSpecKey(workpackageHash), wrBytes)
-	n.WriteRawKV(generateSpecKey(segementRoot), wrBytes)
-	n.WriteRawKV(generateSpecKey(erasureRoot), wrBytes)
-
-	return nil
+	return store.StoreWorkReport(wr)
 }
 
 // Long-term ImportDA - Used to Store sClub (segmentShard) by Assurers (at least 672 epochs)
@@ -662,49 +645,12 @@ func (n *NodeContent) GetSegmentShard_Assurer(erasureRoot common.Hash, shardInde
 	return selected_segments, selected_justifications, true, nil
 }
 
-type SpecIndex struct {
-	WorkReport types.WorkReport `json:"spec"`
-	Indices    []uint16         `json:"indices"`
-}
-
 // Look up the erasureRoot, exportedSegmentRoot, workpackageHash for either kind of hash: segment root OR workPackageHash
-func (si *SpecIndex) String() string {
-	// print JSON
-	jsonBytes, err := json.Marshal(si)
+func (n *NodeContent) WorkReportSearch(h common.Hash) (si *storage.SpecIndex) {
+	store, err := n.GetStorage()
 	if err != nil {
-		return fmt.Sprintf("%v", err)
-	}
-	return string(jsonBytes)
-}
-
-// Look up the erasureRoot, exportedSegmentRoot, workpackageHash for either kind of hash: segment root OR workPackageHash
-func (si *SpecIndex) AddIndex(idx uint16) bool {
-	if !common.Uint16Contains(si.Indices, idx) {
-		si.Indices = append(si.Indices, idx)
-		return true
-	}
-	return false
-}
-
-// Look up the erasureRoot, exportedSegmentRoot, workpackageHash for either kind of hash: segment root OR workPackageHash
-func (n *NodeContent) WorkReportSearch(h common.Hash) (si *SpecIndex) {
-	// scan through recentblocks
-
-	wrBytes, ok, err := n.ReadRawKV([]byte(generateSpecKey(h)))
-	if err != nil || !ok {
-		log.Error(log.DA, "ErasureRootLookUP", "err", err)
-
+		log.Error(log.DA, "WorkReportSearch", "err", err)
 		return nil
 	}
-
-	wr, _, err := types.Decode(wrBytes, reflect.TypeOf(types.WorkReport{}))
-	if err != nil {
-		return nil
-	}
-
-	workReport := wr.(types.WorkReport)
-	return &SpecIndex{
-		WorkReport: workReport,
-		Indices:    make([]uint16, 0),
-	}
+	return store.WorkReportSearch(h)
 }

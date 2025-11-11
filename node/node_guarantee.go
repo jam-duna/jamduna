@@ -10,6 +10,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
+	storage "github.com/colorfulnotion/jam/storage"
 	telemetry "github.com/colorfulnotion/jam/telemetry"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -59,13 +60,13 @@ func (n *NodeContent) BuildBundleFromWPQueueItem(wpQueueItem *types.WPQueueItem)
 	workPackage := wpQueueItem.WorkPackage
 	eventID := wpQueueItem.EventID
 	segmentRootLookup = make(types.SegmentRootLookup, 0)
-	workReportSearchMap := make(map[common.Hash]*SpecIndex)
+	workReportSearchMap := make(map[common.Hash]*storage.SpecIndex)
 	segmentRootLookupMap := make(map[common.Hash]common.Hash)
 	// because CE139 requires erasureroot
-	erasureRootIndex := make(map[common.Hash]*SpecIndex)
-	workItemErasureRootsMapping := make([][]*SpecIndex, len(workPackage.WorkItems))
+	erasureRootIndex := make(map[common.Hash]*storage.SpecIndex)
+	workItemErasureRootsMapping := make([][]*storage.SpecIndex, len(workPackage.WorkItems))
 	for workItemIdx, workItem := range workPackage.WorkItems {
-		workItemErasureRootsMapping[workItemIdx] = make([]*SpecIndex, len(workItem.ImportedSegments))
+		workItemErasureRootsMapping[workItemIdx] = make([]*storage.SpecIndex, len(workItem.ImportedSegments))
 		for idx, importedSegment := range workItem.ImportedSegments {
 			// these are actually work package hashes or segment roots
 			si, ok := workReportSearchMap[importedSegment.RequestedHash]

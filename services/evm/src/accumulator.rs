@@ -10,6 +10,7 @@ use crate::{
     receipt::TransactionReceiptRecord,
     sharding::{ObjectKind, format_object_id},
     writes::{ExecutionEffectsEnvelope, deserialize_execution_effects},
+    mmr::MMR,
 };
 
 /// BlockAccumulator manages block storage and retrieval operations
@@ -19,6 +20,7 @@ pub struct BlockAccumulator {
     pub envelopes: Vec<ExecutionEffectsEnvelope>,
     pub current_block: EvmBlockPayload,
     pub log_index_start: u64,
+    pub mmr: MMR,
 }
 
 impl BlockAccumulator {
@@ -53,6 +55,10 @@ impl BlockAccumulator {
                 }
             }
         }
+
+        // Write MMR to storage and return MMR root
+        accumulator.current_block.mmr_root = accumulator.mmr.write_mmr()?;
+
         // Update EvmBlockPayload and write to storage
         accumulator.current_block.write()?;
 
@@ -111,12 +117,22 @@ impl BlockAccumulator {
             }
         };
 
+        // Read MMR from storage
+        let mmr = MMR::read_mmr(service_id)?;
+
+        log_info(&format!(
+            "🎯 BlockAccumulator created successfully with {} envelopes, {} MMR peaks, log_index_start={}",
+            envelopes.len(),
+            mmr.peaks.len(),
+            0
+        ));
 
         Some(BlockAccumulator {
             service_id,
             envelopes,
             current_block,
             log_index_start: 0,
+            mmr,
         })
     }
 
@@ -170,6 +186,9 @@ impl BlockAccumulator {
         use utils::host_functions::write;
 
         let (receipt_hash, new_log_index_start) = self.current_block.add_receipt(candidate, record, self.log_index_start);
+
+        // Append receipt hash to MMR
+        self.mmr.append(receipt_hash);
 
         // Update receipt payload with cumulative gas and log index (Phase 2)
         // self.current_block.gas_used now contains the cumulative gas up to and including this transaction

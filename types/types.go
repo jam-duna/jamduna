@@ -67,6 +67,13 @@ type ECChunkResponse struct {
 	Data        []byte `json:"data"`
 }
 
+type AvailabilitySpecifierDerivation struct {
+	BClubs        []common.Hash      `json:"bClubs"`
+	SClubs        []common.Hash      `json:"sClubs"`
+	BundleChunks  []DistributeECChunk `json:"bundle_chunks"`
+	SegmentChunks []DistributeECChunk `json:"segment_chunks"`
+}
+
 type ECChunkQuery struct {
 	SegmentRoot common.Hash `json:"segment_root"`
 }

@@ -10,7 +10,7 @@ use utils::{
     hash_functions::keccak256,
 };
 use crate::{
-    sharding::format_data_hex,
+    sharding::{format_data_hex, ObjectKind},
     state::{MajikOverlay, MajikBackend},
     tx::{DecodedCallCreate, decode_call_args, decode_transact_args},
     genesis,
@@ -686,6 +686,29 @@ impl BlockRefiner {
         Some(effects)
     }
 
+    /// Create default environment for a given service (chain_id)
+    fn create_environment(service_id: u32, payload_type: PayloadType) -> crate::state::EnvironmentData {
+        use primitive_types::{U256, H160};
+
+        // Coinbase address: 0xEaf3223589Ed19bcd171875AC1D0F99D31A5969c
+        const COINBASE_ADDRESS: H160 = H160([
+            0xEa, 0xf3, 0x22, 0x35, 0x89, 0xEd, 0x19, 0xbc, 0xd1, 0x71,
+            0x87, 0x5A, 0xC1, 0xD0, 0xF9, 0x9D, 0x31, 0xA5, 0x96, 0x9c,
+        ]);
+
+        crate::state::EnvironmentData {
+            block_number: U256::zero(),
+            block_timestamp: U256::zero(),
+            block_coinbase: COINBASE_ADDRESS,
+            block_gas_limit: U256::from(30_000_000u64),
+            block_base_fee_per_gas: U256::zero(),
+            chain_id: U256::from(service_id),
+            block_difficulty: U256::zero(),
+            block_randomness: None,
+            payload_type,
+        }
+    }
+
     /// Process work item and execute transactions, returning ExecutionEffects
     ///
     /// This method:
@@ -780,35 +803,20 @@ impl BlockRefiner {
                         return None;
                     }
                 }
+            } else  if metadata.payload_type == PayloadType::Call {
+                // Handle Call payload - early exit handled below
+                // No witness processing needed for Call payloads
             }
         }
 
         log_info(&format!("📥 Refine: Set up block builder for {} objects", imported_objects.len()));
 
         // Create environment/backend from work item context
-        use primitive_types::{U256, H160};
-        use crate::state::{MajikBackend, EnvironmentData};
+        use crate::state::{MajikBackend};
         use evm::standard::Config;
 
-        // Coinbase address: 0xEaf3223589Ed19bcd171875AC1D0F99D31A5969c
-        const COINBASE_ADDRESS: H160 = H160([
-            0xEa, 0xf3, 0x22, 0x35, 0x89, 0xEd, 0x19, 0xbc, 0xd1, 0x71,
-            0x87, 0x5A, 0xC1, 0xD0, 0xF9, 0x9D, 0x31, 0xA5, 0x96, 0x9c,
-        ]);
-
         let config = Config::shanghai();
-        let environment = EnvironmentData {
-            block_number: U256::zero(),
-            block_timestamp: U256::zero(),
-            block_coinbase: COINBASE_ADDRESS,
-            block_gas_limit: U256::from(30_000_000u64),
-            block_base_fee_per_gas: U256::zero(),
-            chain_id: U256::from(work_item.service),
-            block_difficulty: U256::zero(),
-            block_randomness: None,
-            payload_type: metadata.payload_type,
-        };
-
+        let environment = Self::create_environment(work_item.service, metadata.payload_type);
         let backend = MajikBackend::new(environment, imported_objects.clone());
 
         // Execute based on payload type
@@ -823,7 +831,7 @@ impl BlockRefiner {
             }
         } else if metadata.payload_type == PayloadType::Call {
             // Call mode - return early from refine_call_payload
-            return refine_call_payload(backend, &config, extrinsics);
+            return Self::refine_call_payload(backend, &config, extrinsics);
         } else if metadata.payload_type == PayloadType::Transactions || metadata.payload_type == PayloadType::Builder {
             // Execute transactions
             let mut block_builder = block_builder;
@@ -862,116 +870,140 @@ impl BlockRefiner {
         Some(execution_effects)
     }
 
-}
+    // ===== Payload Processing Functions =====
 
+    /// Refine call payload - handle EstimateGas/Call mode
+    pub fn refine_call_payload(
+        mut backend: MajikBackend,
+        config: &evm::standard::Config,
+        extrinsics: &[Vec<u8>],
+    ) -> Option<ExecutionEffects> {
+        use evm::interpreter::etable::DispatchEtable;
+        use evm::interpreter::trap::CallCreateTrap;
+        use evm::standard::{
+            EtableResolver, Invoker, TransactArgs, TransactArgsCallCreate,
+            TransactGasPrice,
+        };
+        use crate::jam_gas::JAMGasState;
+    
+        genesis::load_precompiles(&mut backend);
+        let mut overlay = MajikOverlay::new(backend, &config.runtime);
 
-// ===== Payload Processing Functions =====
-
-/// Refine call payload - handle EstimateGas/Call mode
-pub fn refine_call_payload(
-    mut backend: MajikBackend,
-    config: &evm::standard::Config,
-    extrinsics: &[Vec<u8>],
-) -> Option<ExecutionEffects> {
-    use evm::interpreter::etable::DispatchEtable;
-    use evm::interpreter::trap::CallCreateTrap;
-    use evm::standard::{
-        EtableResolver, Invoker, TransactArgs, TransactArgsCallCreate,
-        TransactGasPrice,
-    };
-    use crate::jam_gas::JAMGasState;
-   
-    genesis::load_precompiles(&mut backend);
-    let mut overlay = MajikOverlay::new(backend, &config.runtime);
-
-    if extrinsics.len() != 1 {
-        log_error(
-            &format!("❌ Payload 'B' expects exactly 1 extrinsic, got {}", extrinsics.len()),
-        );
-        return None;
-    }
-
-    let extrinsic = &extrinsics[0];
-
-    // Decode unsigned call arguments
-    let decoded = match decode_call_args(extrinsic.as_ptr() as u64, extrinsic.len() as u64) {
-        Some(d) => d,
-        None => {
-            log_error( "❌ Payload 'B': Failed to decode call args");
+        if extrinsics.len() != 1 {
+            log_error(
+                &format!("❌ Payload Call expects exactly 1 extrinsic, got {}", extrinsics.len()),
+            );
             return None;
         }
-    };
 
-    log_info(
-        &format!(
-            "📞 PayloadCall from={:?}, gas_limit={}, value={}",
-            decoded.caller, decoded.gas_limit, decoded.value
-        ),
-    );
+        let extrinsic = &extrinsics[0];
 
-    let etable: DispatchEtable<JAMGasState<'_>, MajikOverlay<'_>, CallCreateTrap> =
-        DispatchEtable::runtime();
-    let resolver = EtableResolver::new(&(), &etable);
-    let invoker = Invoker::new(&resolver);
+        // Decode unsigned call arguments
+        let decoded = match decode_call_args(extrinsic.as_ptr() as u64, extrinsic.len() as u64) {
+            Some(d) => d,
+            None => {
+                log_error( "❌ Payload Call: Failed to decode call args");
+                return None;
+            }
+        };
 
-    let call_create = match decoded.call_create {
-        DecodedCallCreate::Call { address, data } => {
-            log_info(
-                &format!("  CALL {:?}→{:?}, data_len={}", decoded.caller, address, data.len()),
-            );
-            TransactArgsCallCreate::Call { address, data }
-        }
-        DecodedCallCreate::Create { init_code } => {
-            log_info(
-                &format!("  CREATE with {} bytes init_code", init_code.len()),
-            );
-            TransactArgsCallCreate::Create {
-                init_code,
-                salt: None,
+        log_info(
+            &format!(
+                "📞 PayloadCall from={:?}, gas_limit={}, value={}",
+                decoded.caller, decoded.gas_limit, decoded.value
+            ),
+        );
+
+        let etable: DispatchEtable<JAMGasState<'_>, MajikOverlay<'_>, CallCreateTrap> =
+            DispatchEtable::runtime();
+        let resolver = EtableResolver::new(&(), &etable);
+        let invoker = Invoker::new(&resolver);
+
+        let call_create = match decoded.call_create {
+            DecodedCallCreate::Call { address, data } => {
+                log_info(
+                    &format!("  CALL {:?}→{:?}, data_len={}", decoded.caller, address, data.len()),
+                );
+                TransactArgsCallCreate::Call { address, data }
+            }
+            DecodedCallCreate::Create { init_code } => {
+                log_info(
+                    &format!("  CREATE with {} bytes init_code", init_code.len()),
+                );
+                TransactArgsCallCreate::Create {
+                    init_code,
+                    salt: None,
+                }
+            }
+        };
+
+        let args = TransactArgs {
+            caller: decoded.caller,
+            gas_limit: decoded.gas_limit,
+            gas_price: TransactGasPrice::Legacy(U256::zero()), // Zero gas price for read-only calls
+            value: decoded.value,
+            call_create,
+            access_list: Vec::new(),
+            config,
+        };
+
+        // Execute the call/estimate
+        let result = evm::transact(args, None, &mut overlay, &invoker);
+
+        match result {
+            Ok(tx_result) => {
+                let gas_used = tx_result.used_gas.as_u64();
+                // Extract output from call result
+                let output = match tx_result.call_create {
+                    evm::standard::TransactValueCallCreate::Call { retval, .. } => retval,
+                    evm::standard::TransactValueCallCreate::Create { .. } => Vec::new(),
+                };
+
+                log_info(
+                    &format!(
+                        "✅ Payload Call: Success, gas_used={}, output_len={}",
+                        gas_used,
+                        output.len()
+                    ),
+                );
+
+                // create WriteIntent
+                let write_intent = WriteIntent {
+                    effect: WriteEffectEntry {
+                        object_id: [0u8; 32],
+                        ref_info: ObjectRef {
+                            service_id: 0,
+                            work_package_hash: [0u8; 32],
+                            index_start: 0,
+                            index_end: 0,
+                            version: 0,
+                            payload_length: 0,
+                            timeslot: 0,
+                            gas_used: gas_used as u32,
+                            evm_block: 0,
+                            object_kind: ObjectKind::Receipt as u8,
+                            log_index: 0,
+                            tx_slot: 0,
+                        },
+                        payload: output,
+                    },
+                    dependencies: Vec::new(),
+                };
+
+                // Create ExecutionEffects and return
+                let effects = ExecutionEffects {
+                    write_intents: vec![write_intent],
+                };
+                Some(effects)
+            }
+            Err(error) => {
+                log_error(
+                    &format!("❌ PayloadCall failed: {:?}", error),
+                );
+                None
             }
         }
-    };
-
-    let args = TransactArgs {
-        caller: decoded.caller,
-        gas_limit: decoded.gas_limit,
-        gas_price: TransactGasPrice::Legacy(U256::zero()), // Zero gas price for read-only calls
-        value: decoded.value,
-        call_create,
-        access_list: Vec::new(),
-        config,
-    };
-
-    // Execute the call/estimate
-    let result = evm::transact(args, None, &mut overlay, &invoker);
-
-    match result {
-        Ok(tx_result) => {
-            let gas_used = tx_result.used_gas.as_u64();
-            // Extract output from call result
-            let output = match tx_result.call_create {
-                evm::standard::TransactValueCallCreate::Call { retval, .. } => retval,
-                evm::standard::TransactValueCallCreate::Create { .. } => Vec::new(),
-            };
-
-            log_info(
-                &format!(
-                    "✅ Payload 'B': Success, gas_used={}, output_len={}",
-                    gas_used,
-                    output.len()
-                ),
-            );
-
-            // Create ExecutionEffects with gas_used and return the output
-            Some(ExecutionEffects {
-                write_intents: Vec::new(),
-            })
-        }
-        Err(error) => {
-            log_error(
-                &format!("❌ PayloadCall failed: {:?}", error),
-            );
-            None
-        }
     }
+
 }
+

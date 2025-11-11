@@ -304,7 +304,9 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		output, _, exported_segments := vm.ExecuteRefine(workPackageCoreIndex, uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData[index], workPackage.AuthorizationCodeHash, common.BytesToHash(trie.H0))
 		execElapsed := time.Since(execStart)
 		compileElapsed := time.Since(compileStart)
-		fmt.Printf("compile and execute time %v\n", compileElapsed)
+		if pvmBackend == BackendCompiler {
+			fmt.Printf("*** %s compile and execute time %v\n", pvmBackend, compileElapsed)
+		}
 		expectedSegmentCnt := int(workItem.ExportCount)
 		actualSegmentCnt := len(exported_segments)
 		segmentCountMismatch := (expectedSegmentCnt != actualSegmentCnt)
@@ -376,7 +378,7 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		telemetryClient.Refined(eventID, refineCosts)
 	}
 
-	spec, _ := NewAvailabilitySpecifier(package_bundle, segments)
+	spec, d := NewAvailabilitySpecifier(package_bundle, segments)
 	workReport := types.WorkReport{
 		AvailabilitySpec:  *spec,
 		RefineContext:     workPackage.RefineContext,
@@ -387,9 +389,9 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		Results:           results,
 		AuthGasUsed:       uint(authGasUsed),
 	}
-	log.Info(log.Node, "executeWorkPackageBundle", "role", vmLogging, "reportHash", workReport.Hash())
+	log.Trace(log.Node, "executeWorkPackageBundle", "role", vmLogging, "reportHash", workReport.Hash())
 
-	// TODO s.GetStorage().StoreBundleSpecSegments(spec, d, package_bundle, segments)
+	s.GetStorage().GetJAMDA().StoreBundleSpecSegments(spec, d, package_bundle, segments)
 
 	// Telemetry: Work-report built (event 102)
 	if telemetryClient != nil {
@@ -405,10 +407,10 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 	return workReport, nil
 }
 
-// BuildBundle maps a work package into a work package bundle which is LIKE executeWorkPackageBundle, but does NOT require ExportCount + importedSegments to be pre-set,
+// BuildBundle maps a work package into a WPQueueItem using JAMDA interface
 // Instead, it updates the workpackage work items: (1)  ExportCount ImportedSegments with a special HostFetchWitness call
 
-func (s *StateDB) BuildBundleWithStateWitnesses(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash, pvmBackend string) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
+func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash, pvmBackend string) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
 	wp := workPackage.Clone()
 
 	currentStateRoot := s.GetStateRoot()
@@ -423,8 +425,7 @@ func (s *StateDB) BuildBundleWithStateWitnesses(workPackage types.WorkPackage, e
 		LookupAnchorSlot: s.JamState.SafroleState.Timeslot,
 		Prerequisites:    []common.Hash{}, // TODO: improve this
 	}
-	log.Info(log.DA, "BuildBundle: RefineContext", "NODE", s.Id, "refineContext", fmt.Sprintf("%+v", wp.RefineContext))
-	authorization, p_a, authGasUsed, err := s.authorizeWP(wp, coreIndex, pvmBackend)
+	authorization, p_a, _, err := s.authorizeWP(wp, coreIndex, pvmBackend)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -513,13 +514,14 @@ func (s *StateDB) BuildBundleWithStateWitnesses(workPackage types.WorkPackage, e
 		CoreIndex:   coreIndex,
 		Extrinsics:  extrinsicsBlobs[0], // buildBundle expects single ExtrinsicsBlobs
 	}
-	bundle, _, err := s.BuildBundleWithStateWitnesses(wpq.WorkPackage, []types.ExtrinsicsBlobs{wpq.Extrinsics}, wpq.CoreIndex, nil, pvmBackend)
+
+	bundle, _, err := s.GetStorage().GetJAMDA().BuildBundleFromWPQueueItem(wpq)
 	if err != nil {
 		log.Warn(log.DA, "BuildBundle: BuildBundleFromWPQueueItem failed", "err", err)
 		return nil, nil, err
 	}
 
-	// Update ExtrinsicData with all work items (buildBundle only handles first work item)
+	// // Update ExtrinsicData with all work items (buildBundle only handles first work item)
 	bundle.ExtrinsicData = extrinsicsBlobs
 
 	// BuildBundle creates its own RefineContext with the targetStateDB state root (after execution)
@@ -531,22 +533,16 @@ func (s *StateDB) BuildBundleWithStateWitnesses(workPackage types.WorkPackage, e
 		LookupAnchorSlot: s.JamState.SafroleState.Timeslot,
 		Prerequisites:    []common.Hash{},
 	}
-	log.Info(log.DA, "BuildBundle: RefineContext", "refineContext", fmt.Sprintf("%+v", bundle.WorkPackage.RefineContext))
 
-	// Create AvailabilitySpecifier and WorkReport
-	spec, _ := NewAvailabilitySpecifier(*bundle, segments)
-	workReport := &types.WorkReport{
-		AvailabilitySpec:  *spec,
-		RefineContext:     bundle.WorkPackage.RefineContext,
-		CoreIndex:         uint(coreIndex),
-		AuthorizerHash:    p_a,
-		Trace:             authorization.Ok,
-		SegmentRootLookup: types.SegmentRootLookup{}, // BuildBundle doesn't need segment root lookup
-		Results:           results,
-		AuthGasUsed:       uint(authGasUsed),
+	return &bundle, nil, nil
+}
+
+func showBundleImportedSegments(bundle *types.WorkPackageBundle, caption string) {
+	for i, workItemSegments := range bundle.ImportSegmentData {
+		for j, data := range workItemSegments {
+			fmt.Printf("%s: ImportSegmentData[%d][%d] len=%d\n", caption, i, j, len(data))
+		}
 	}
-
-	return bundle, workReport, nil
 }
 
 // getBeefyRootForAnchor returns the BEEFY root recorded for the given anchor header hash.
@@ -942,14 +938,7 @@ func appendExtrinsicWitnessesRawToWorkItem(workItem *types.WorkItem, extrinsicsB
 	}
 }
 
-type AvailabilitySpecifierDerivation struct {
-	BClubs        []common.Hash             `json:"bClubs"`
-	SClubs        []common.Hash             `json:"sClubs"`
-	BundleChunks  []types.DistributeECChunk `json:"bundle_chunks"`
-	SegmentChunks []types.DistributeECChunk `json:"segment_chunks"`
-}
-
-func NewAvailabilitySpecifier(package_bundle types.WorkPackageBundle, export_segments [][]byte) (availabilityspecifier *types.AvailabilitySpecifier, d AvailabilitySpecifierDerivation) {
+func NewAvailabilitySpecifier(package_bundle types.WorkPackageBundle, export_segments [][]byte) (availabilityspecifier *types.AvailabilitySpecifier, d types.AvailabilitySpecifierDerivation) {
 	// compile wp into b
 	b := package_bundle.Bytes() // check
 	// Build b♣ and s♣
@@ -965,7 +954,7 @@ func NewAvailabilitySpecifier(package_bundle types.WorkPackageBundle, export_seg
 	exportedSegmentTree := trie.NewCDMerkleTree(export_segments)
 	//exportedSegmentTree.PrintTree()
 
-	d = AvailabilitySpecifierDerivation{
+	d = types.AvailabilitySpecifierDerivation{
 		BClubs:        bClubs,
 		SClubs:        sClubs,
 		BundleChunks:  bEcChunks,

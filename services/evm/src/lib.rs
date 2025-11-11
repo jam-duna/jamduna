@@ -38,6 +38,8 @@ mod receipt;
 mod tx;
 #[path = "bmt.rs"]
 mod bmt;
+#[path = "mmr.rs"]
+pub mod mmr;
 
 // Re-export commonly used types
 pub use block::{EvmBlockPayload};

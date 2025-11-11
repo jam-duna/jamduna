@@ -1429,7 +1429,8 @@ func (n *NodeContent) SendRawTransaction(signedTxData []byte) (common.Hash, erro
 	}
 
 	// Validate nonce against current state
-	currentNonce, err := n.statedb.GetTransactionCount(sender)
+	serviceID := uint32(statedb.EVMServiceCode)
+	currentNonce, err := n.statedb.GetTransactionCount(serviceID, sender)
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("failed to get current nonce for validation: %v", err)
 	}
@@ -1438,7 +1439,7 @@ func (n *NodeContent) SendRawTransaction(signedTxData []byte) (common.Hash, erro
 	}
 
 	// Validate balance - sender must have enough to cover value + gas costs
-	balance, err := n.statedb.GetBalance(sender)
+	balance, err := n.statedb.GetBalance(serviceID, sender)
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("failed to get balance for validation: %v", err)
 	}
@@ -1522,7 +1523,8 @@ func (n *NodeContent) GetBalance(address common.Address, blockNumber string) (co
 	if err != nil {
 		return common.Hash{}, err
 	}
-	return targetStateDB.GetBalance(address)
+	serviceID := uint32(statedb.EVMServiceCode)
+	return targetStateDB.GetBalance(serviceID, address)
 }
 
 func (n *NodeContent) GetStorageAt(address common.Address, position common.Hash, blockNumber string) (common.Hash, error) {
@@ -1530,7 +1532,8 @@ func (n *NodeContent) GetStorageAt(address common.Address, position common.Hash,
 	if err != nil {
 		return common.Hash{}, err
 	}
-	return targetStateDB.GetStorageAt(address, position)
+	serviceID := uint32(statedb.EVMServiceCode)
+	return targetStateDB.GetStorageAt(serviceID, address, position)
 }
 
 func (n *NodeContent) GetTransactionCount(address common.Address, blockNumber string) (uint64, error) {
@@ -1538,7 +1541,8 @@ func (n *NodeContent) GetTransactionCount(address common.Address, blockNumber st
 	if err != nil {
 		return 0, err
 	}
-	return targetStateDB.GetTransactionCount(address)
+	serviceID := uint32(statedb.EVMServiceCode)
+	return targetStateDB.GetTransactionCount(serviceID, address)
 }
 
 func (n *NodeContent) GetCode(address common.Address, blockNumber string) ([]byte, error) {
@@ -1546,17 +1550,20 @@ func (n *NodeContent) GetCode(address common.Address, blockNumber string) ([]byt
 	if err != nil {
 		return nil, err
 	}
-	return targetStateDB.GetCode(address)
+	serviceID := uint32(statedb.EVMServiceCode)
+	return targetStateDB.GetCode(serviceID, address)
 }
 
 // JNode interface implementations - Transaction Operations
 
 func (n *NodeContent) EstimateGas(from common.Address, to *common.Address, gas uint64, gasPrice uint64, value uint64, data []byte) (uint64, error) {
-	return n.statedb.EstimateGas(from, to, gas, gasPrice, value, data, n.pvmBackend)
+	serviceID := uint32(statedb.EVMServiceCode)
+	return n.statedb.EstimateGas(serviceID, from, to, gas, gasPrice, value, data, n.pvmBackend)
 }
 
 func (n *NodeContent) Call(from common.Address, to *common.Address, gas uint64, gasPrice uint64, value uint64, data []byte, blockNumber string) ([]byte, error) {
-	return n.statedb.Call(from, to, gas, gasPrice, value, data, blockNumber, n.pvmBackend)
+	serviceID := uint32(statedb.EVMServiceCode)
+	return n.statedb.Call(serviceID, from, to, gas, gasPrice, value, data, blockNumber, n.pvmBackend)
 }
 
 // JNode interface implementations - Transaction Queries

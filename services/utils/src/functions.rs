@@ -1419,6 +1419,8 @@ pub fn fetch_data(
 pub fn fetch_imported_segment(work_item_index: u16, index: u32) -> HarnessResult<Vec<u8>> {
     const FETCH_DATATYPE_IMPORTED_SEGMENT: u64 = 5;
 
+    log_info(&format!("fetch_imported_segment: work_item_index={}, index={}", work_item_index, index));
+
     let mut buffer = vec![0u8; SEGMENT_SIZE as usize];
 
     unsafe {
@@ -1431,15 +1433,20 @@ pub fn fetch_imported_segment(work_item_index: u16, index: u32) -> HarnessResult
             index as u64,
         );
 
+        log_info(&format!("fetch_imported_segment: result_len={}", result_len));
+
         if result_len == 0 {
+            log_info("fetch_imported_segment: returning empty vector");
             return Ok(Vec::new());
         }
 
         if result_len > SEGMENT_SIZE {
+            log_info(&format!("fetch_imported_segment: error - result_len {} > SEGMENT_SIZE {}", result_len, SEGMENT_SIZE));
             return Err(HarnessError::HostFetchFailed);
         }
 
         buffer.truncate(result_len as usize);
+        log_info(&format!("fetch_imported_segment: success - returning {} bytes", result_len));
         Ok(buffer)
     }
 }

@@ -3,10 +3,12 @@ package statedb
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -167,4 +169,48 @@ func (saa SAccount) Encode() []byte {
 	}
 
 	return buffer.Bytes()
+}
+
+// GetMMRStorageKey returns the storage key used for MMR data
+func (s *StateDB) GetMMRStorageKey() []byte {
+	// MMR_KEY = [0xEE; 32] as defined in services/utils/src/constants.rs
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = 0xEE
+	}
+	return key
+}
+
+// GenerateServiceProof generates a complete two-layer proof for EVM service data
+// Returns a trie.ServiceProof that can be independently verified
+// position is the global MMR position, logIndexStart is the start index for this block
+func (s *StateDB) GenerateServiceProof(serviceID uint32, storageKey []byte, position uint64, logIndexStart uint64, receiptHashes []common.Hash) (*trie.ServiceProof, error) {
+	value, bmtProof, stateRoot, ok, err := s.trie.GetServiceStorageWithProof(serviceID, storageKey)
+	if !ok || err != nil {
+		return nil, fmt.Errorf("failed to get MMR root from JAM State: %w", err)
+	}
+
+	// Deserialize MMR from JAM State
+	mmr, err := trie.NewMMRFromBytes(value)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deserialize MMR: %w", err)
+	}
+
+	// Convert global position to block-local offset
+	if position < logIndexStart {
+		return nil, fmt.Errorf("position %d is before block start %d", position, logIndexStart)
+	}
+	localIndex := position - logIndexStart
+
+	// Get the leaf hash at the local position
+	if int(localIndex) >= len(receiptHashes) {
+		return nil, fmt.Errorf("local index %d out of range (have %d receipt hashes), position=%d, logIndexStart=%d", localIndex, len(receiptHashes), position, logIndexStart)
+	}
+	leafHash := receiptHashes[localIndex]
+
+	// Create a leaf store backed by receipt hashes with offset awareness
+	store := trie.LeafStoreWithOffset{Leaves: receiptHashes, Offset: logIndexStart}
+
+	// Delegate to trie package (uses mmr.LeafCount() internally)
+	return trie.GenerateServiceProof(mmr, serviceID, storageKey, position, leafHash, store, bmtProof, stateRoot)
 }

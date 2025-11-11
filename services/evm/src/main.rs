@@ -28,6 +28,8 @@ mod receipt;
 mod tx;
 #[path = "bmt.rs"]
 mod bmt;
+#[path = "mmr.rs"]
+mod mmr;
 
 
 use alloc::{format, vec::Vec};
