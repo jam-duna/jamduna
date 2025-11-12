@@ -356,8 +356,15 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		return fmt.Errorf("onWorkPackageShare: decode share message: %w", err)
 	}
 
-	// Verify that we are in the the core based on the WALL CLOCK TIME
-	slot := common.GetWallClockJCE(fudgeFactorJCE)
+	// Calculate slot based on JCE mode:
+	// - JCEDefault/JCEAUTO: Use statedb's current timeslot to ensure correct safrole state
+	// - JCEFast: Use wall clock + fudge factor for faster processing
+	var slot uint32
+	if n.jceMode == JCEDefault || n.jceMode == JCEAUTO {
+		slot = n.statedb.GetTimeslot()
+	} else {
+		slot = common.GetWallClockJCE(fudgeFactorJCE)
+	}
 	prevAssignments, assignments := n.statedb.CalculateAssignments(slot)
 	inSet := false
 	for _, assignment := range assignments {

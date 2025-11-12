@@ -889,7 +889,7 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 				log.Error(log.SDB, "ProcessState:MakeBlock", "author", s.Id, "currJCE", currJCE, "e'", currEpoch, "m'", currPhase, "err", err)
 				return true, nil, nil, err
 			}
-			log.Info(log.SDB, "Proposed Block", "authoring", s.Authoring)
+			//log.Info(log.SDB, "Proposed Block", "authoring", s.Authoring)
 
 			// Telemetry: Authored (event 42) - Block has been authored
 			// Create BlockOutline from the proposed block
@@ -945,9 +945,10 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 			log.Info(log.SDB, "Authored Block",
 				"mode", mode,
 				"AUTHOR", s.Id,
+				"n", s.Id,
+				"s+", newStateDB.StateRoot.String_short(),
 				"p", common.Str(proposedBlk.GetParentHeaderHash()),
 				//"s", common.Str(proposedBlk.Header.ParentStateRoot),
-				"s+", newStateDB.StateRoot.String_short(),
 				"h", common.Str(proposedBlk.Header.Hash()),
 				"e'", currEpoch,
 				"m'", currPhase,

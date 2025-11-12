@@ -265,7 +265,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 			JCEMode = JCEFast
 		}
 		JCEMode = JCEFast //MK:TODO. bring back faster mode. This seems extremely slow
-		//JCEMode = JCEDefault
+		JCEMode = JCEDefault
+		fmt.Printf("jamtest: JCEMode=%s\n", JCEMode)
 
 		nodes, err := SetUpNodes(JCEMode, numNodes, basePort)
 		if err != nil {

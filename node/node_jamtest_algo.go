@@ -22,7 +22,7 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 	algo_serviceIdx := service0.ServiceCode
 	auth_serviceIdx := uint32(statedb.AuthCopyServiceCode)
 
-	log.Info(log.Node, "ALGO START", "algo", algo_serviceIdx, "auth", auth_serviceIdx)
+	log.Info(log.Node, "ALGO START", "algo", algo_serviceIdx, "auth", auth_serviceIdx, "targetN", targetN, "isSimple", isSimple)
 
 	for algoN := 1; algoN < targetN; algoN++ {
 		imported := []types.ImportSegment{}
@@ -41,7 +41,7 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 					CodeHash:           service0.CodeHash,
 					Payload:            algo_payload,
 					RefineGasLimit:     types.RefineGasAllocation / 2,
-					AccumulateGasLimit: types.AccumulationGasAllocation / 2,
+					AccumulateGasLimit: types.AccumulationGasAllocation,
 					ImportedSegments:   imported,
 					ExportCount:        uint16(algoN),
 				},

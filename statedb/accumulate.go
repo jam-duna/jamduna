@@ -67,6 +67,10 @@ func Depandancy(w types.WorkReport) types.AccumulationQueue {
 	for key := range hashSet {
 		depandancy = append(depandancy, key)
 	}
+	// Sort for deterministic ordering across nodes
+	sort.Slice(depandancy, func(i, j int) bool {
+		return bytes.Compare(depandancy[i][:], depandancy[j][:]) < 0
+	})
 	result.WorkPackageHash = depandancy
 	return result
 }

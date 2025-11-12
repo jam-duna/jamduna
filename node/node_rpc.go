@@ -39,6 +39,7 @@ var MethodDescriptionMap = map[string]string{
 	"Parent":               "Parent(headerHash hexstring) -> string",
 	"StateRoot":            "StateRoot(headerHash hexstring) -> string",
 	"BeefyRoot":            "BeefyRoot(headerHash hexstring) -> string",
+	"GetRefineContext":     "GetRefineContext() -> json RefineContext",
 	"State":                "State(headerHash hexstring) -> string",
 	"Statistics":           "Statistics(headerHash hexstring) -> string",
 	"ServiceInfo":          "ServiceInfo(serviceIndex string) -> string",
@@ -197,6 +198,40 @@ func (j *Jam) GetBuildVersion(req []string, res *string) error {
 func (j *Jam) GetCurrJCE(req []string, res *string) error {
 	currJCE := j.NodeContent.nodeSelf.GetCurrJCE()
 	*res = fmt.Sprintf("%d", currJCE)
+	return nil
+}
+
+// GetRefineContext returns the current refine context for work package submission
+func (j *Jam) GetRefineContext(req []string, res *string) error {
+	// Get the latest state
+	sdb, ok := j.getStateDBByHeaderHash(j.statedb.HeaderHash)
+	if !ok {
+		return fmt.Errorf("state not found for current header hash")
+	}
+
+	// Build RefineContext
+	refineCtx := types.RefineContext{
+		Anchor:           j.statedb.HeaderHash,
+		StateRoot:        j.statedb.StateRoot,
+		BeefyRoot:        common.Hash{}, // Will be populated below
+		LookupAnchor:     j.statedb.HeaderHash,
+		LookupAnchorSlot: sdb.JamState.SafroleState.Timeslot,
+		Prerequisites:    []common.Hash{},
+	}
+
+	// Get the BEEFY root from recent blocks
+	recentBlocks := sdb.JamState.Snapshot(&statedb.StateSnapshotRaw{}, nil).RecentBlocks.B_H
+	if len(recentBlocks) > 0 {
+		refineCtx.BeefyRoot = recentBlocks[len(recentBlocks)-1].B
+	}
+
+	// Marshal to JSON
+	jsonBytes, err := json.Marshal(refineCtx)
+	if err != nil {
+		return fmt.Errorf("failed to marshal refine context: %w", err)
+	}
+
+	*res = string(jsonBytes)
 	return nil
 }
 

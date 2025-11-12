@@ -6,6 +6,10 @@ import (
 )
 
 func GenerateAlgoPayload(sz int, isSimple bool) []byte {
+	// Create a deterministic random generator based on sz for reproducible payloads
+	seed := int64(1107 + sz)
+	rng := rand.New(rand.NewSource(seed))
+
 	if isSimple {
 		algo_payload := make([]byte, 2)
 		for i := 0; i < 1; i++ {
@@ -16,7 +20,7 @@ func GenerateAlgoPayload(sz int, isSimple bool) []byte {
 		return algo_payload
 	}
 	algo_payload := make([]byte, sz*2)
-	useCase := "top40"
+	useCase := "top5"
 	var algos []uint8
 	top5 := []uint8{7, 8, 9, 11, 53}
 	top10 := []uint8{0, 4, 7, 8, 9, 11, 23, 27, 52, 53}
@@ -41,11 +45,11 @@ func GenerateAlgoPayload(sz int, isSimple bool) []byte {
 	algo_payload_str := make([]string, sz)
 	for j := 0; j < sz; j++ {
 		// pick a random element from algos
-		p := algos[rand.Intn(len(algos))]
+		p := algos[rng.Intn(len(algos))]
 
 		// pick a random number from c_min, c_min+c_rand
-		c_rand := rand.Intn(8)
-		c_min := 30
+		c_rand := rng.Intn(8)
+		c_min := 1
 
 		c_n := c_min + c_rand
 		algo_payload[j*2] = byte(p)

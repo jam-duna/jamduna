@@ -3,6 +3,7 @@ TAGS               ?= tiny
 MEG_L              ?= 911
 MEG_S              ?= 911
 TargetN            ?= 10
+TargetAlgoN		   ?= 50
 TargetAlgoShort    ?= 39
 JCE_MANUAL         ?= true
 JAM_NODE           ?= true
@@ -21,6 +22,9 @@ endif
 
 # Conditionally set -targetN, or empty if TargetN=-1
 TARGET_PARAM = $(if $(filter -1,$(TargetN)),,$(shell echo -targetN=$(TargetN)))
+
+TARGET_ALGOPARAM = $(if $(filter -1,$(TargetAlgoN)),,$(shell echo -targetN=$(TargetAlgoN)))
+
 # PVM mode parameter to be passed to go test
 PVM_PARAM = -pvm_backend=$(PVM_BACKEND)
 
@@ -32,10 +36,10 @@ evm:
 	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)
 
 algo :
-	@echo "Running TestAlgo$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT) in $(PVM_BACKEND) mode..."
-	@echo "go test -timeout $(TIMEOUT) -v -run '^TestAlgo$$' -tags \"network_test,$(TAGS)\" $(TARGET_PARAM) -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)"
+	@echo "Running TestAlgo$(if $(filter -1,$(TargetAlgoN)),, with targetN=$(TargetAlgoN)) and timeout $(TIMEOUT) in $(PVM_BACKEND) mode..."
+	@echo "go test -timeout $(TIMEOUT) -v -run '^TestAlgo$$' -tags \"network_test,$(TAGS)\" $(TARGET_ALGOPARAM) -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)"
 	@go test -timeout $(TIMEOUT) -v -run '^TestAlgo$$' \
-	  -tags "network_test,$(TAGS)" $(TARGET_PARAM) \
+	  -tags "network_test,$(TAGS)" $(TARGET_ALGOPARAM) \
 	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)
 
 algo_short :

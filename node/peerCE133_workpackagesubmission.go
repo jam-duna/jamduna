@@ -157,8 +157,15 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 		return err
 	}
 	msgLen := binary.LittleEndian.Uint32(msgLenBytes)
-	// Verify that we are in the the core based on the WALL CLOCK TIME
-	slot := common.GetWallClockJCE(fudgeFactorJCE)
+	// Calculate slot based on JCE mode:
+	// - JCEDefault/JCEAUTO: Use statedb's current timeslot to ensure correct safrole state
+	// - JCEFast: Use wall clock + fudge factor for faster processing
+	var slot uint32
+	if n.jceMode == JCEDefault || n.jceMode == JCEAUTO {
+		slot = n.statedb.GetTimeslot()
+	} else {
+		slot = common.GetWallClockJCE(fudgeFactorJCE)
+	}
 	log.Debug(log.R, "CE133-onWorkPackageSubmission INCOMING", "NODE", n.id, "peer", peerID, "workpackage", newReq.WorkPackage.Hash(), "slot", slot)
 	prevAssignments, assignments := n.statedb.CalculateAssignments(slot)
 	inSet := false

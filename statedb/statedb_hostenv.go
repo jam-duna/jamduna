@@ -21,6 +21,9 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 		return nil, nil
 	}
 	log.Trace(log.SDB, "!writeAccount", "service_idx", sa.ServiceIndex, "dirty", sa.Dirty, "s", sa.JsonString())
+	if sa.ServiceIndex == 10 {
+		//log.Info(log.SDB, "!writeAccount", "n", s.Id, "service_idx", sa.ServiceIndex, "dirty", sa.Dirty, "s", sa.JsonString())
+	}
 
 	service_idx := sa.GetServiceIndex()
 	tree := s.GetTrie()

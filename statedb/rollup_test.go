@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
-	"math/rand"
 	"testing"
 
 	"github.com/colorfulnotion/jam/common"
@@ -36,7 +35,6 @@ func TestAlgoBlocks(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("GetService failed: %v", err)
 	}
-	rand.Seed(12345)
 	bundles := make([]*types.WorkPackageBundle, types.TotalCores)
 	for n := 0; n <= numBlocks; n++ {
 		// Get current anchor and state for RefineContext

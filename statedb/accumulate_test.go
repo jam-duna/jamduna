@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	storage "github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/nsf/jsondiff"
@@ -423,7 +424,8 @@ func AccumulateSTF(testname string, TestCase AccumulateTestCase) error {
 	accumulate_input_wr := TestCase.Input.Reports
 	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
 	transfersIn := make([]types.DeferredTransfer, 0)
-	n, _, _ := s.OuterAccumulate(g, transfersIn, accumulate_input_wr, o, f, BackendInterpreter, make(map[uint32]*types.XContext))
+	num_accumulations, accumulation_output, accumulate_gas := s.OuterAccumulate(g, transfersIn, accumulate_input_wr, o, f, BackendInterpreter, make(map[uint32]*types.XContext))
+	log.Info(log.SDB, "AccumulateSTF", "num_accumulations", num_accumulations, "accumulate_gas", accumulate_gas, "accumulation_output", accumulation_output)
 
 	// make sure all service accounts can be written
 	for _, sa := range o.ServiceAccounts {
@@ -432,7 +434,7 @@ func AccumulateSTF(testname string, TestCase AccumulateTestCase) error {
 	}
 
 	s.ApplyXContext(o)
-	s.ApplyStateTransitionAccumulation(accumulate_input_wr, n, old_timeslot)
+	s.ApplyStateTransitionAccumulation(accumulate_input_wr, num_accumulations, old_timeslot)
 	// check if the state is equal to the post state
 	//use json to compare the states
 	newJam := s.JamState

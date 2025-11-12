@@ -1275,7 +1275,7 @@ func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPac
 					if seen, exists := accumulated[hash]; exists && !seen {
 						accumulated[hash] = true
 						accumulatedCount++
-						log.Info(log.Node, "Work package accumulated", "hash", hash.Hex(), "slot", j, "count", accumulatedCount, "expectedCount", len(reqs))
+						log.Info(log.Node, "Work package accumulated", "node", n.id, "hash", hash.Hex(), "slot", j, "count", accumulatedCount, "expectedCount", len(reqs))
 					}
 				}
 			}
@@ -1435,9 +1435,15 @@ func (n *NodeContent) SubmitWPSameCore(wp types.WorkPackage, extrinsicsBlobs typ
 	workPackageHash := wp.Hash()
 	var coreIndex uint16
 
-	// map the WALL CLOCK time to the coreIndex of THIS node and calculate all validator assignments
-	// NOTE: we use +1 to avoid the current JCE, we want the next one
-	slot := common.GetWallClockJCE(fudgeFactorJCE)
+	// Calculate slot based on JCE mode:
+	// - JCEDefault/JCEAUTO: Use statedb's current timeslot to ensure correct safrole state
+	// - JCEFast: Use wall clock + fudge factor for faster processing
+	var slot uint32
+	if n.nodeSelf.jceMode == JCEDefault || n.nodeSelf.jceMode == JCEAUTO {
+		slot = n.statedb.GetTimeslot()
+	} else {
+		slot = common.GetWallClockJCE(fudgeFactorJCE)
+	}
 	_, assignments := n.statedb.CalculateAssignments(slot)
 	for _, assignment := range assignments {
 		if types.Ed25519Key(assignment.Validator.Ed25519.PublicKey()) == n.GetEd25519Key() {
@@ -2183,6 +2189,11 @@ func dumpStateDBKeyValues(db *statedb.StateDB, description string, nodeID uint16
 }
 
 func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) error {
+	if n.jceMode == JCEFast {
+		n.currJCEMutex.Lock()
+		defer n.currJCEMutex.Unlock()
+	}
+
 	nextBlock := nextBlockNode.Block
 	// if !n.appliedFirstBlock {
 	// 	if nextBlock.Header.ParentHeaderHash == genesisBlockHash {
@@ -2191,10 +2202,25 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	// }
 	// 1. Prepare recovered state from parent
 	start := time.Now()
+
 	recoveredStateDB := n.statedb.Copy()
-	recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot) // it don't even know if it got the correct state
+	if recoveredStateDB.StateRoot != nextBlock.Header.ParentStateRoot {
+		log.Warn(log.B, "ApplyBlock: stateroot NOT the same. calling RecoverJamState", "n", n.String(),
+			"expected", nextBlock.Header.ParentStateRoot.String_short(),
+			"got", recoveredStateDB.StateRoot.String_short(),
+			"blk", nextBlock.Str(),
+		)
+		recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot) // it don't even know if it got the correct state
+		recoveredStateDB.StateRoot = nextBlock.Header.ParentStateRoot
+	}
+
+	/*
+		recoveredStateDB, err := statedb.NewStateDBFromStateRoot(nextBlock.Header.ParentStateRoot, n.store)
+		if err != nil {
+			return fmt.Errorf("NewStateDBFromStateRoot failed: %w", err)
+		}
+	*/
 	recoveredStateDB.UnsetPosteriorEntropy()
-	recoveredStateDB.StateRoot = nextBlock.Header.ParentStateRoot
 	recoveredStateDB.Block = nextBlock
 	recoverElapsed := time.Since(start)
 
@@ -2260,6 +2286,8 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	log.Info(log.B, "Imported Block", // "n", n.String(),
 		"mode", mode,
 		"author", nextBlock.Header.AuthorIndex,
+		"n", newStateDB.Id,
+		"s+", newStateDB.StateRoot.String_short(),
 		"p", nextBlock.Header.ParentHeaderHash.String_short(),
 		"h", common.Str(nextBlock.Header.Hash()),
 		"e'", currEpoch, "m'", currPhase,
@@ -2773,11 +2801,18 @@ func (n *NodeContent) getStateDBByStateRoot(stateRoot common.Hash) (*statedb.Sta
 	defer n.statedbMapMutex.Unlock()
 
 	targetStateDB, ok := n.statedbMap[stateRoot]
-	if !ok {
-		return nil, fmt.Errorf("stateDB not found for stateRoot: %s", stateRoot.Hex())
+	if ok {
+		return targetStateDB, nil
 	}
+	/*
+		targetStateDB, err := statedb.NewStateDBFromStateRoot(stateRoot, n.store)
+		if err != nil {
+			return nil, fmt.Errorf("NewStateDBFromStateRoot failed: %w", err)
+		}
+		return targetStateDB, nil
+	*/
+	return nil, fmt.Errorf("stateDB with stateRoot %s not found", stateRoot.String_short())
 
-	return targetStateDB, nil
 }
 
 // AddPreimageToPool adds a new preimage to the extrinsic pool NO VALIDATION IS REQUIRED
@@ -2961,7 +2996,8 @@ func (n *Node) runJCEDefault() {
 		select {
 		case <-ticker_pulse.C:
 			currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
-			n.SetCurrJCE(currJCE)
+			//n.SetCurrJCE(currJCE)
+			n.SetCurrJCESSimple(currJCE)
 			//do something with it
 		}
 	}
@@ -3071,6 +3107,22 @@ func (n *Node) GetJCETimestamp() uint64 {
 	return uint64(slotTime.Sub(common.JceStart) / time.Microsecond)
 }
 
+func (n *Node) SetCurrJCESSimple(currJCE uint32) {
+	// this would probably break safrole ticket mapping. But it's as clean as it can get
+	n.currJCEMutex.Lock()
+	defer n.currJCEMutex.Unlock()
+	prevJCE := n.currJCE
+	if prevJCE > currJCE {
+		log.Error(log.Node, "Invalid JCE: currJCE is less than previous JCE", "prevJCE", prevJCE, "currJCE", currJCE)
+		return
+	}
+	n.currJCE = currJCE
+	if prevJCE == currJCE {
+		return // set only once
+	}
+	fmt.Printf("Node %d: Update CurrJCE %d\n", n.id, currJCE)
+}
+
 func (n *Node) SetCurrJCE(currJCE uint32) {
 	n.currJCEMutex.Lock()
 	defer n.currJCEMutex.Unlock()
@@ -3079,11 +3131,11 @@ func (n *Node) SetCurrJCE(currJCE uint32) {
 		log.Error(log.Node, "Invalid JCE: currJCE is less than previous JCE", "prevJCE", prevJCE, "currJCE", currJCE)
 		return
 	}
-	//fmt.Printf("Node %d: Update CurrJCE %d\n", n.id, currJCE)
 	n.currJCE = currJCE
 	if prevJCE == currJCE {
 		return // set only once
 	}
+	fmt.Printf("Node %d: Update CurrJCE %d\n", n.id, currJCE)
 	n.jce_timestamp_mutex.Lock()
 	if n.jce_timestamp == nil {
 		n.jce_timestamp = make(map[uint32]time.Time)
@@ -3097,9 +3149,11 @@ func (n *Node) SetCurrJCE(currJCE uint32) {
 	n.jce_timestamp_mutex.Unlock()
 
 	if n.sendTickets {
+		n.statedbMutex.Lock()
 		stateslot := n.statedb.GetSafrole().Timeslot
 		currEpoch, _ := n.statedb.GetSafrole().EpochAndPhase(stateslot)
 		_, realPhase := n.statedb.GetSafrole().EpochAndPhase(currJCE)
+		n.statedbMutex.Unlock()
 
 		if currEpoch > 0 && (realPhase == 5) { // } || realPhase == types.EpochLength) {
 			// nextEpochFirst-endPhase <= currJCE <= nextEpochFirst
@@ -3107,7 +3161,6 @@ func (n *Node) SetCurrJCE(currJCE uint32) {
 			n.BroadcastTickets(stateslot, eventID)
 		}
 	}
-
 }
 
 func (n *Node) SetCompletedJCE(completedCurrJCE uint32) {
@@ -3212,6 +3265,10 @@ func (n *Node) runAuthoring() {
 				newStateDB   *statedb.StateDB
 			}
 			result, err := runWithTimeout(func() (processResult, error) {
+				// if n.jceMode == JCEFast {
+				// 	n.currJCEMutex.Lock()
+				// 	defer n.currJCEMutex.Unlock()
+				// }
 				n.statedbMutex.Lock()
 				defer n.statedbMutex.Unlock()
 				ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)

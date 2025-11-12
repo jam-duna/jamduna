@@ -577,3 +577,9 @@ safrole_jamtest: jam
 fallback_jamtest: jam
 	@echo "Running Fallback JAM tests..."
 	go test -tags=network_test ./node -run TestFallback -v
+
+compare_stf:
+	@echo "Building compare_stf tool..."
+	go build -o bin/compare_stf scripts/compare_stf.go
+
+.PHONY: compare_stf

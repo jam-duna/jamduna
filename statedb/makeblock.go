@@ -83,7 +83,7 @@ func (s *StateDB) CollectExtrinsicData(
 		}
 		if err := tmpstatedb.VerifyGuaranteeBasic(g, targetJCE); err != nil {
 			if AcceptableGuaranteeError(err) {
-				log.Warn(log.G, "[IGNORE]MakeBlock: VerifyGuaranteeBasic:acceptable error", "err", err)
+				log.Trace(log.G, "[IGNORE]MakeBlock: VerifyGuaranteeBasic:acceptable error", "err", err)
 			} else {
 				extrinsicPool.RemoveOldGuarantees(g, types.GuaranteeDiscardReasonCannotReportOnChain)
 			}
