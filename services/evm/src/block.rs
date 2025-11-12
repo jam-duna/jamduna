@@ -627,27 +627,34 @@ impl EvmBlockPayload {
             }
         };
 
-        // Compute the block hash from the header, Delete the block_hash key
+        // Compute the block hash from the header
         let block_hash = blake2b_hash(&block.serialize_header());
+
+        // FIXED: Delete block metadata (ObjectKind 0x06) and block_hash mapping
+        // Both are stored at the same key (block_hash):
+        // - Metadata: 96 bytes (transactions_root, receipts_root, mmr_root)
+        // - Mapping: 4 bytes (block_number)
+        // Single deletion removes both, preventing metadata orphaning
         let result = unsafe {
             host_write(block_hash.as_ptr() as u64, block_hash.len() as u64, 0, 0)
         };
         if result == WHAT || result == FULL {
-            log_error(&format!("❌ Failed to delete block_hash for block {}, error code: {}", block_number, result));
+            log_error(&format!("❌ Failed to delete metadata/mapping for block {}, error code: {}", block_number, result));
             return None;
         }
+        log_info(&format!("🗑️  Deleted metadata and hash mapping for block {}", block_number));
 
-        // Delete the block by number key
+        // Delete the block payload by number key
         let key = block_number_to_object_id(block_number);
         let result = unsafe {
             host_write(key.as_ptr() as u64, key.len() as u64, 0, 0)
         };
         if result == WHAT || result == FULL {
-            log_error(&format!("❌ Failed to delete block {} entry, error code: {}", block_number, result));
+            log_error(&format!("❌ Failed to delete block {} payload, error code: {}", block_number, result));
             return None;
         }
 
-        log_info(&format!("Successfully deleted block {} and its hash", block_number));
+        log_info(&format!("✅ Successfully deleted block {}, its metadata, and hash mapping", block_number));
         Some(())
     }
 

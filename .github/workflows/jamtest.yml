@@ -14,89 +14,13 @@ on:
   push:
     branches:
       - main
-#    paths:
-#      - .github/workflows/jamtest.yml
-  # Run algo_node_interpreter at minute 0 and 30 of every hour
+  # Run both algo_node_compiler every 15 minutes
   schedule:
-    - cron: "0,30 * * * *"
-    # Run algo_node_compiler at minute 15 and 45 of every hour
-    - cron: "15,45 * * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch:
 
 jobs:
-  run-interpreter:
-    if: ${{ github.event.schedule == '0,30 * * * *' || github.event_name == 'workflow_dispatch' }}
-    name: Run algo_node_interpreter
-    runs-on: self-hosted
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Configure Git safe directory
-        run: git config --global --add safe.directory ${{ github.workspace }}
-
-      - name: Prepare build environment
-        run: |
-          mkdir -p /tmp/algo_target
-          mkdir -p /tmp/algo_state
-          sudo chmod -R 777 /tmp/algo_target /tmp/algo_state ${{ github.workspace }}
-          echo "Environment prepared for interpreter build"
-
-      - name: Set up Rust toolchain
-        run: |
-          rustup component add rust-src --toolchain nightly || true
-          rustup default nightly
-          rustc --version
-          cargo --version
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.23'
-
-      - name: Build Services
-        working-directory: ${{ github.workspace }}/services
-        run: |
-          echo "Building services..."
-          make all
-          echo "Listing PVM files:"
-          find services -name "*.pvm" || true
-
-      - name: Build duna_spec
-        working-directory: ${{ github.workspace }}
-        run: |
-          echo "Building duna_spec..."
-          make duna_spec
-          echo "Listing PVM files:"
-          find services -name "*.pvm" || true
-
-#      - name: Upload PVM artifacts
-#        uses: actions/upload-artifact@v4
-#        with:
-#          name: duna-pvm
-#          path: |
-#            services/**/*.pvm
-#          retention-days: 1
-
-      - name: Run algo_node_interpreter
-        working-directory: ${{ github.workspace }}/node
-        run: |
-          echo "Running make algo_node_interpreter..."
-          make algo_node_interpreter
-
-      - name: List generated PVM files
-        run: find services -name "*.pvm" -maxdepth 3 || true
-
-      - name: Done
-        run: echo "algo_node_interpreter completed successfully."
-
-
-  run-compiler:
-    if: ${{ github.event.schedule == '15,45 * * * *' || github.event_name == 'workflow_dispatch' }}
+  run-algo-tests:
     name: Run algo_node_compiler
     runs-on: self-hosted
     timeout-minutes: 15
@@ -115,7 +39,7 @@ jobs:
           mkdir -p /tmp/algo_target
           mkdir -p /tmp/algo_state
           sudo chmod -R 777 /tmp/algo_target /tmp/algo_state ${{ github.workspace }}
-          echo "Environment prepared for compiler build"
+          echo "Environment prepared for builds"
 
       - name: Set up Rust toolchain
         run: |
@@ -150,9 +74,6 @@ jobs:
         run: |
           echo "Running make algo_node_compiler..."
           make algo_node_compiler
-
-      - name: List generated PVM files
-        run: find services -name "*.pvm" -maxdepth 3 || true
 
       - name: Done
         run: echo "algo_node_compiler completed successfully."

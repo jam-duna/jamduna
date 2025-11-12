@@ -50,8 +50,6 @@ const (
 	JCEManual  = "manual"
 	JCESimple  = "simple"
 	JCEDefault = "normal"
-	JCEFast    = "fast"
-	JCEAUTO    = "auto"
 )
 
 const (
@@ -584,7 +582,7 @@ func StandardizePVMBackend(pvm_mode string) string {
 	var pvmBackend string
 	switch mode {
 	case "INTERPRETER":
-		pvmBackend = statedb.BackendInterpreter
+		pvmBackend = statedb.BackendGoInterpreter
 	case "COMPILER", "RECOMPILER", "X86":
 		if runtime.GOOS == "linux" {
 			pvmBackend = statedb.BackendCompiler
@@ -596,7 +594,7 @@ func StandardizePVMBackend(pvm_mode string) string {
 
 	default:
 		log.Warn(log.Node, fmt.Sprintf("Unknown PVM mode [%s], defaulting to interpreter", pvm_mode))
-		pvmBackend = statedb.BackendInterpreter
+		pvmBackend = statedb.BackendGoInterpreter
 	}
 	return pvmBackend
 }
@@ -1002,13 +1000,7 @@ func (n *Node) runStatusTelemetry() {
 func (n *Node) runJCE() {
 	mode := n.jceMode
 	switch mode {
-	case JCEManual, JCESimple:
-		initialJCE := uint32(11)
-		n.SetCompletedJCE(initialJCE)
-		go n.runJCEManually()
-	case JCEFast:
-		go n.runFasterJCE()
-	case JCEAUTO, JCEDefault:
+	case JCEDefault:
 		go n.runJCEDefault()
 	default:
 		log.Error(log.Node, "runJCE", "mode", mode, "err", fmt.Errorf("unknown mode"))
@@ -1426,10 +1418,9 @@ func (n *NodeContent) SubmitWPSameCore(wp types.WorkPackage, extrinsicsBlobs typ
 	var coreIndex uint16
 
 	// Calculate slot based on JCE mode:
-	// - JCEDefault/JCEAUTO: Use statedb's current timeslot to ensure correct safrole state
-	// - JCEFast: Use wall clock + fudge factor for faster processing
+	// - JCEDefault: Use statedb's current timeslot to ensure correct safrole state
 	var slot uint32
-	if n.nodeSelf.jceMode == JCEDefault || n.nodeSelf.jceMode == JCEAUTO {
+	if n.nodeSelf.jceMode == JCEDefault {
 		slot = n.statedb.GetTimeslot()
 	} else {
 		slot = common.GetWallClockJCE(fudgeFactorJCE)
@@ -2179,10 +2170,6 @@ func dumpStateDBKeyValues(db *statedb.StateDB, description string, nodeID uint16
 }
 
 func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) error {
-	if n.jceMode == JCEFast {
-		n.currJCEMutex.Lock()
-		defer n.currJCEMutex.Unlock()
-	}
 
 	nextBlock := nextBlockNode.Block
 	// if !n.appliedFirstBlock {
@@ -2966,8 +2953,7 @@ func (n *Node) runJCEDefault() {
 		select {
 		case <-ticker_pulse.C:
 			currJCE := common.ComputeTimeUnit(types.TimeUnitMode)
-			//n.SetCurrJCE(currJCE)
-			n.SetCurrJCESSimple(currJCE)
+			n.SetCurrJCE(currJCE)
 			//do something with it
 		}
 	}
@@ -2997,26 +2983,6 @@ func (n *Node) runFasterJCE() {
 			if prevJCE > types.EpochLength {
 				n.SetCurrJCE(prevJCE + 1)
 			}
-		}
-	}
-}
-
-func (n *Node) runJCEManually() {
-	ticker := time.NewTicker(200 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			prevJCE := n.GetCurrJCE()
-			if prevJCE >= types.EpochLength && prevJCE < types.EpochLength*2 {
-				eventID := n.GenerateTickets(prevJCE)
-				if eventID > 0 {
-					n.BroadcastTickets(prevJCE, eventID)
-				}
-			}
-		case newJCE := <-n.new_timeslot_chan:
-			time.Sleep(1500 * time.Millisecond)
-			n.SetCurrJCE(newJCE)
 		}
 	}
 }
@@ -3233,10 +3199,7 @@ func (n *Node) runAuthoring() {
 				newStateDB   *statedb.StateDB
 			}
 			result, err := runWithTimeout(func() (processResult, error) {
-				// if n.jceMode == JCEFast {
-				// 	n.currJCEMutex.Lock()
-				// 	defer n.currJCEMutex.Unlock()
-				// }
+
 				n.statedbMutex.Lock()
 				defer n.statedbMutex.Unlock()
 				ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)

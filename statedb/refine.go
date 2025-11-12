@@ -220,7 +220,10 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash, pvmBackend string) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
 	wp := workPackage.Clone()
 
-	wp.RefineContext = s.GetRefineContext()
+	// CRITICAL: Capture RefineContext BEFORE execution (used for witness verification)
+	// The state root here matches the root used when witnesses were fetched
+	originalRefineContext := s.GetRefineContext()
+	wp.RefineContext = originalRefineContext
 	authorization, p_a, _, err := s.authorizeWP(wp, coreIndex, pvmBackend)
 	if err != nil {
 		return nil, nil, err
@@ -320,13 +323,15 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 	// // Update ExtrinsicData with all work items (buildBundle only handles first work item)
 	bundle.ExtrinsicData = extrinsicsBlobs
 
-	// BuildBundle creates its own RefineContext with the targetStateDB state root (after execution)
+	// CRITICAL: Restore ORIGINAL RefineContext (before execution) for witness verification
+	// ExecuteRefine mutated the state, so s.GetRefineContext() would return the wrong root.
+	// Witnesses were fetched using originalRefineContext.StateRoot, so proofs must verify against it.
 	// Also restore authorization fields that were lost in BuildBundleFromWPQueueItem
 	bundle.WorkPackage.AuthCodeHost = wp.AuthCodeHost
 	bundle.WorkPackage.AuthorizationCodeHash = wp.AuthorizationCodeHash
 	bundle.WorkPackage.AuthorizationToken = wp.AuthorizationToken
 	bundle.WorkPackage.ConfigurationBlob = wp.ConfigurationBlob
-	bundle.WorkPackage.RefineContext = s.GetRefineContext()
+	bundle.WorkPackage.RefineContext = originalRefineContext
 
 	// Create work report from results -- note that this does not have availability spec
 	workReport := &types.WorkReport{

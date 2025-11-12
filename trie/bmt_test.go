@@ -161,6 +161,7 @@ func TestMerkleTree(t *testing.T) {
 			}
 
 			// Test Valid Proof
+			fmt.Printf("VerifyRaw key=%x, value=%x, expectedHash=%x, pathHashes=%x\n", key, value, expectedHash, pathHashes)
 			if VerifyRaw(key, value, expectedHash, pathHashes) {
 				if debugBPT {
 					fmt.Printf("Proof for key [%x] is valid.\n", key)
@@ -182,6 +183,101 @@ func TestMerkleTree(t *testing.T) {
 		// os.RemoveAll(dbPath) // Clean up the LevelDB folder(if needed)
 		tree.Close()
 	}
+	DeleteLevelDB()
+}
+
+func TestBPTProofSimple(t *testing.T) {
+	debugBPT := true
+	data := [][2][]byte{
+		{hex2Bytes("f2a9fcaf8ae0ff770b0908ebdee1daf8457c0ef5e1106c89ad364236333c5fb3"), hex2Bytes("22c62f84ee5775d1e75ba6519f6dfae571eb1888768f2a203281579656b6a29097f7c7e2cf44e38da9a541d9b4c773db8b71e1d3")},
+		{hex2Bytes("f3a9fcaf8ae0ff770b0908ebdee1daf8457c0ef5e1106c89ad364236333c5fb3"), hex2Bytes("965ac2547cacec18429e88553142a605d649fbcd6a40a0ae5d51a8f218c8fd5c")},
+		{hex2Bytes("d7f99b746f23411983df92806725af8e5cb66eba9f200737accae4a1ab7f47b9"), hex2Bytes("965ac2547cacec18429e88553142a605d649fbcd6a40a0ae5d51a8f218c8fd5c")},
+		{hex2Bytes("59ee947b94bcc05634d95efb474742f6cd6531766e44670ec987270a6b5a4211"), hex2Bytes("72fdb0c99cf47feb85b2dad01ee163139ee6d34a8d893029a200aff76f4be5930b9000a1bbb2dc2b6c79f8f3c19906c94a3472349817af21181c3eef6b")},
+		{hex2Bytes("a3dc3bed1b0727caf428961bed11c9998ae2476d8a97fad203171b628363d9a2"), hex2Bytes("3f26db92922e86f6b538372608656a14762b3e93bd5d4f6a754d36f68ce0b28b")},
+		{hex2Bytes("15207c233b055f921701fc62b41a440d01dfa488016a97cc653a84afb5f94fd5"), hex2Bytes("be2a1eb0a1b961e9642c2e09c71d2f45aa653bb9a709bbc8cbad18022c9dcf2e")},
+		{hex2Bytes("b05ff8a05bb23c0d7b177d47ce466ee58fd55c6a0351a3040cf3cbf5225aab19"), hex2Bytes("5c43fcf60000000000000000000000006ba080e1534c41f5d44615813a7d1b2b57c950390000000000000000000000008863786bebe8eb9659df00b49f8f1eeec7e2c8c1")},
+		{hex2Bytes("df08871e8a54fde4834d83851469e635713615ab1037128df138a6cd223f1242"), hex2Bytes("b8bded4e1c")},
+		{hex2Bytes("3e7d409b9037b1fd870120de92ebb7285219ce4526c54701b888c5a13995f73c"), hex2Bytes("9bc5d0")},
+		{hex2Bytes("0100000000000000000000000000000000000000000000000000000000000000"), hex2Bytes("")},
+		{hex2Bytes("0100000000000000000000000000000000000000000000000000000000000200"), hex2Bytes("01")},
+	}
+	exceptedRootHash := hex2Bytes("511727325a0cd23890c21cda3c6f8b1c9fbdf37ed57b9a85ca77286356183dcf")
+
+	// Create an empty Merkle Tree
+	//level_db_path := "../leveldb/BPT"
+	test_db, _ := initLevelDB()
+	tree := NewMerkleTree(nil, test_db)
+	if debugBPT {
+		fmt.Printf("initial rootHash: %v\n", tree.GetRoot())
+	}
+
+	// Insert key-value pairs one by one
+	for index, kv := range data {
+		key := kv[0]
+		value := kv[1]
+		if debugBPT {
+			fmt.Printf("insert#%d, key=%x, value=%x\n", index, key, value)
+		}
+		tree.Insert(key, value)
+		tree.Flush()
+	}
+
+	if debugBPT {
+		//tree.printTree(tree.Root, 0)
+		fmt.Printf("Actual rootHash: %v\n", tree.GetRoot())
+	}
+	wrongKey := hex2Bytes("5dffe0e2c9f089d30e50b04ee562445cf2c0e7e7d677580ef0ccf2c6fa3522ff")
+	_, err := tree.Trace(wrongKey)
+	if err == nil {
+		t.Errorf("Proof should not exist non arbitrary key [%x].\n", wrongKey)
+	}
+
+	key := hex2Bytes("f2a9fcaf8ae0ff770b0908ebdee1daf8457c0ef5e1106c89ad364236333c5fb3")
+
+	path, err := tree.Trace(key)
+	if debugBPT {
+		fmt.Printf("Proof path for key %x: \n", key)
+	}
+	for i, p := range path {
+		if debugBPT {
+			fmt.Printf("  Node %d: %x\n", i, p)
+		}
+	}
+	if err != nil {
+		t.Errorf("Unable to generate Proof for key [%x].Err %v\n", key, err)
+	}
+
+	// Test Valid Proof
+	value, _, _ := tree.Get(key)
+	if debugBPT {
+		fmt.Printf("levelDBGet key=%x, value=%x\n", key, value)
+	}
+
+	// Convert [][]byte to []common.Hash
+	pathHashes := make([]common.Hash, len(path))
+	for i, p := range path {
+		copy(pathHashes[i][:], p)
+	}
+
+	fmt.Printf("VerifyRaw key=%x, value=%x, expectedHash=%x, pathHashes=%v\n", key, value, exceptedRootHash, pathHashes)
+	if VerifyRaw(key, value, tree.GetRoot().Bytes(), pathHashes) {
+		if debugBPT {
+			fmt.Printf("Proof for key [%x] is valid.\n", key)
+		}
+	} else {
+		t.Errorf("Proof for key [%x] is invalid.\n", key)
+	}
+
+	// Test Invalid Proof
+	invalidValue := []byte("invalid")
+	if VerifyRaw(key, invalidValue, exceptedRootHash, pathHashes) {
+		t.Errorf("Proof for key [%x] with invalid value is valid.\n", invalidValue)
+	} else {
+		if debugBPT {
+			fmt.Printf("Proof for key [%x] with invalid value is invalid.\n", invalidValue)
+		}
+	}
+	tree.Close()
 	DeleteLevelDB()
 }
 
@@ -215,7 +311,7 @@ func TestBPTProof(t *testing.T) {
 	}
 	_, _ = tree.Flush()
 
-	if debugBPT {
+	if debugBPT || true {
 		tree.printTree(tree.Root, 0)
 	}
 	wrongKey := hex2Bytes("5dffe0e2c9f089d30e50b04ee562445cf2c0e7e7d677580ef0ccf2c6fa3522ff")

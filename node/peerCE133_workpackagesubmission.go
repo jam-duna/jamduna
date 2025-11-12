@@ -158,10 +158,9 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 	}
 	msgLen := binary.LittleEndian.Uint32(msgLenBytes)
 	// Calculate slot based on JCE mode:
-	// - JCEDefault/JCEAUTO: Use statedb's current timeslot to ensure correct safrole state
-	// - JCEFast: Use wall clock + fudge factor for faster processing
+	// - JCEDefault: Use statedb's current timeslot to ensure correct safrole state
 	var slot uint32
-	if n.jceMode == JCEDefault || n.jceMode == JCEAUTO {
+	if n.jceMode == JCEDefault {
 		slot = n.statedb.GetTimeslot()
 	} else {
 		slot = common.GetWallClockJCE(fudgeFactorJCE)

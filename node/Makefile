@@ -1,9 +1,9 @@
-TIMEOUT            ?= 400h
+TIMEOUT            ?= 15m
 TAGS               ?= tiny
 MEG_L              ?= 911
 MEG_S              ?= 911
 TargetN            ?= 10
-TargetAlgoN		   ?= 50
+TargetAlgoN		   ?= 32
 TargetAlgoShort    ?= 39
 JCE_MANUAL         ?= true
 JAM_NODE           ?= true

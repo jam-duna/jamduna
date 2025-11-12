@@ -147,17 +147,6 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 		},
 	}
 
-	isIncludeEVM := false
-	if isIncludeEVM {
-		services = append(services, types.TestService{
-			ServiceCode: EVMServiceCode,
-			FileName:    EVMServiceFile,
-			ServiceName: "evm",
-		})
-	} else {
-		fmt.Printf("Genspec Without EVM Service\n")
-	}
-
 	auth_pvm := common.GetFilePath(BootStrapNullAuthFile)
 	auth_code_bytes, err0 := os.ReadFile(auth_pvm)
 	if err0 != nil {

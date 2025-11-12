@@ -261,10 +261,6 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		// if *jce_manual {
 		// 	JCEMode = JCEManual
 		// }
-		if jam == "safrole" || jam == "fallback" {
-			JCEMode = JCEFast
-		}
-		JCEMode = JCEFast //MK:TODO. bring back faster mode. This seems extremely slow
 		JCEMode = JCEDefault
 		fmt.Printf("jamtest: JCEMode=%s\n", JCEMode)
 
@@ -288,7 +284,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		}
 
 		// Handling Safrole
-		sendTickets = false
+		sendTickets = true
 		for _, n := range nodes {
 			if sendTickets {
 				n.SetSendTickets(sendTickets)
@@ -487,6 +483,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		algo(bNode, testServices, targetN)
 	case "auth_copy":
 		reassign(bNode, testServices, targetN)
+	case "evm":
+		evm(bNode, testServices, targetN)
 	default:
 		t.Fatalf("Unknown jam test: %s\n", jam)
 	}
