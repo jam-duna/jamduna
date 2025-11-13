@@ -5,7 +5,6 @@ import (
 	"reflect"
 
 	"bytes"
-	"encoding/json"
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
@@ -17,104 +16,20 @@ import (
 )
 
 func (n *NodeContent) StoreBlock(blk *types.Block, id uint16, debug bool) error {
-	// from block, derive blockHash & headerHash
-	s, err := n.GetStorage()
-	if err != nil {
-		fmt.Printf("Error getting storage: %v\n", err)
-		return err
-	}
-	headerhash := blk.Header.Hash()
-	blockHash := blk.Hash()
-
-	// header_<headerhash> -> blockHash.
-	headerPrefix := []byte("header_")
-	storeKey := append(headerPrefix, headerhash[:]...)
-	s.WriteRawKV(storeKey, blockHash[:])
-
-	// blk_<blockHash> -> codec(block)
-	blockPrefix := []byte("blk_")
-	blkStoreKey := append(blockPrefix, blockHash[:]...)
-	encodedblk, err := types.Encode(blk)
-	if err != nil {
-		fmt.Printf("Error encoding block: %v\n", err)
-		return err
-	}
-	s.WriteRawKV(blkStoreKey, encodedblk)
-
-	// store block by slot
-	// "blk_"+slot uint32 to []byte
-	slotPrefix := []byte("blk_")
-	slotStoreKey := append(slotPrefix, common.Uint32ToBytes(blk.Header.Slot)...)
-	s.WriteRawKV(slotStoreKey, encodedblk)
-
-	// child_<ParentHeaderHash>_headerhash -> blockHash and potentially use "seek"
-	childPrefix := []byte("child_")
-
-	childStoreKey := append(childPrefix, blk.Header.ParentHeaderHash[:]...)
-	childStoreKey = append(childStoreKey, headerhash[:]...)
-
-	s.WriteRawKV(childStoreKey, blockHash[:])
-	return nil
+	timestamp := n.GetSlotTimestamp(blk.Header.Slot)
+	return n.store.StoreBlock(blk, id, timestamp)
 }
 
-const block_key_string = "blk_finalized"
-
 func (n *NodeContent) StoreFinalizedBlock(blk *types.Block) error {
-	// from block, derive blockHash & headerHash
-	//fmt.Printf("Storing finalized block: %v HeaderHash: %v\n", blk.Header.Slot, blk.Header.Hash())
-	s, err := n.GetStorage()
-	if err != nil {
-		fmt.Printf("Error getting storage: %v\n", err)
-		return err
-	}
-	err = s.WriteRawKV([]byte(block_key_string), blk.Bytes())
-	return err
+	return n.store.StoreFinalizedBlock(blk)
 }
 
 func (n *NodeContent) GetFinalizedBlock() (*types.Block, error) {
-	s, err := n.GetStorage()
-	if err != nil {
-		fmt.Printf("Error getting storage: %v\n", err)
-		return nil, err
-	}
-	encodedblk, ok, err := s.ReadRawKV([]byte(block_key_string))
-	if err != nil {
-		fmt.Printf("Error reading block: %v\n", err)
-		return nil, err
-	}
-	if !ok {
-		return nil, nil
-	}
-	blk, _, err := types.Decode(encodedblk, reflect.TypeOf(types.Block{}))
-	if err != nil {
-		fmt.Printf("Error decoding block: %v\n", err)
-		return nil, err
-	}
-	b := blk.(types.Block)
-	return &b, nil
+	return n.store.GetFinalizedBlock()
 }
 
 func (n *NodeContent) GetFinalizedBlockInternal() (*types.Block, bool, error) {
-	s, err := n.GetStorage()
-	if err != nil {
-		fmt.Printf("Error getting storage: %v\n", err)
-		return nil, false, err
-	}
-	encodedblk, ok, err := s.ReadRawKV([]byte(block_key_string))
-	if err != nil {
-		fmt.Printf("Error reading block: %v\n", err)
-		return nil, false, err
-	}
-	if !ok {
-		return nil, false, nil
-	}
-	blk, _, err := types.Decode(encodedblk, reflect.TypeOf(types.Block{}))
-	if err != nil {
-		fmt.Printf("Error decoding block: %v\n", err)
-		return nil, false, err
-	}
-	b := blk.(types.Block)
-	return &b, true, nil
+	return n.store.GetFinalizedBlockInternal()
 }
 
 func stripPrefix(key []byte, prefix []byte) ([]byte, error) {
@@ -128,23 +43,13 @@ func stripPrefix(key []byte, prefix []byte) ([]byte, error) {
 }
 
 func (n *NodeContent) GetAscendingBlockByHeader(headerHash common.Hash) (childBlks []*types.Block, err error) {
+	keyvals, err := n.store.GetChildBlocks(headerHash)
+	if err != nil {
+		return nil, fmt.Errorf("error reading childStoreKey: %v", err)
+	}
 
-	// child_<parentHash>_headerhash -> blockHash and potentially use "seek"
 	prefix := []byte("child_")
 	childStoreKey := append(prefix, headerHash[:]...)
-	// fmt.Printf("childe store key: %x\n", childStoreKey)
-	s, _ := n.GetStorage()
-	keyvals, rErr := s.ReadRawKVWithPrefix(childStoreKey)
-	if rErr != nil {
-		return nil, fmt.Errorf("error reading childStoreKey: %v", rErr)
-	}
-	// for _, keyval := range keyvals {
-	// 	fmt.Printf("============================================\n")
-	// 	key := keyval[0]
-	// 	fmt.Printf("%x%x\n", key[:len(prefix)], key[len(prefix):])
-	// 	val := keyval[1]
-	// 	fmt.Printf("%x\n", val)
-	// }
 
 	log.Trace(log.Node, "GetAscendingBlockByHeader", "headerHash", headerHash, "keyvals", fmt.Sprintf("%x", keyvals))
 	// childBlks may contain forks !!!
@@ -184,223 +89,44 @@ func (n *NodeContent) GetSlotTimestamp(slot uint32) uint64 {
 }
 
 func (n *NodeContent) GetStoredBlockByHeader(blkHeader common.Hash) (*types.SBlock, error) {
-	//header_<headerhash> -> blockHash
-	headerPrefix := []byte("header_")
-	storeKey := append(headerPrefix, blkHeader[:]...)
-	blockHash, ok, err := n.ReadRawKV(storeKey)
-	if err != nil || !ok {
-		return nil, err
-	}
-	//blk_<blockHash> -> codec(block)
-	blockPrefix := []byte("blk_")
-	blkStoreKey := append(blockPrefix, blockHash...)
-	encodedblk, ok, err := n.ReadRawKV(blkStoreKey)
-	if err != nil {
-		fmt.Printf("Error reading block: %v\n", err)
-		return nil, err
-	} else if !ok {
-		return nil, fmt.Errorf("Block not found")
-	}
-	blk, _, err := types.Decode(encodedblk, reflect.TypeOf(types.Block{}))
-	if err != nil {
-		fmt.Printf("Error decoding block: %v\n", err)
-		return nil, err
-	}
-	b := blk.(types.Block)
-	sb := &types.SBlock{
-		Header:     b.Header,
-		Extrinsic:  b.Extrinsic,
-		HeaderHash: b.Header.Hash(),
-		Timestamp:  n.GetSlotTimestamp(b.Header.Slot),
-	}
-	return sb, nil
+	return n.store.GetBlockByHeader(blkHeader)
 }
 
 func (n *NodeContent) GetStoredBlockBySlot(slot uint32) (*types.SBlock, error) {
-	// "blk_"+slot uint32 to []byte
-	slotPrefix := []byte("blk_")
-	slotStoreKey := append(slotPrefix, common.Uint32ToBytes(slot)...)
-	encodedblk, ok, err := n.ReadRawKV(slotStoreKey)
-	if err != nil {
-		fmt.Printf("Error reading block: %v\n", err)
-		return nil, err
-	} else if !ok {
-		return nil, fmt.Errorf("Block not found")
-	}
-	blk, _, err := types.Decode(encodedblk, reflect.TypeOf(types.Block{}))
-	if err != nil {
-		fmt.Printf("Error decoding block: %v\n", err)
-		return nil, err
-	}
-	b := blk.(types.Block)
-	sb := &types.SBlock{
-		Header:     b.Header,
-		Extrinsic:  b.Extrinsic,
-		HeaderHash: b.Header.Hash(),
-		Timestamp:  n.GetSlotTimestamp(b.Header.Slot),
-	}
-	return sb, nil
+	return n.store.GetBlockBySlot(slot)
 }
 
 func (n *NodeContent) GetMeta_Guarantor(erasureRoot common.Hash) (bClubs []common.Hash, sClubs []common.Hash, bECChunks []types.DistributeECChunk, sECChunksArray []types.DistributeECChunk, err error) {
-	erasure_bKey := fmt.Sprintf("erasureBChunk-%v", erasureRoot)
-	erasure_bKey_val, ok, err := n.ReadRawKV([]byte(erasure_bKey))
-	if err != nil || !ok {
-		return
-	}
-	if err = json.Unmarshal(erasure_bKey_val, &bECChunks); err != nil {
-		return
-	}
-
-	erasure_sKey := fmt.Sprintf("erasureSChunk-%v", erasureRoot)
-	erasure_sKey_val, _, err := n.ReadRawKV([]byte(erasure_sKey)) // this has the segment shards AND proof page shards
-	if err != nil || !ok {
-		return
-	}
-	if err = json.Unmarshal(erasure_sKey_val, &sECChunksArray); err != nil {
-		return
-	}
-
-	erasure_bClubsKey := fmt.Sprintf("erasureBClubs-%v", erasureRoot)
-	erasure_bClubs_val, ok, err := n.ReadRawKV([]byte(erasure_bClubsKey))
-	if err != nil || !ok {
-		return
-	}
-	if err = json.Unmarshal(erasure_bClubs_val, &bClubs); err != nil {
-		return
-	}
-
-	erasure_sClubsKey := fmt.Sprintf("erasureSClubs-%v", erasureRoot)
-	erasure_sClubs_val, ok, err := n.ReadRawKV([]byte(erasure_sClubsKey))
-	if err != nil || !ok {
-		return
-	}
-	if err = json.Unmarshal(erasure_sClubs_val, &sClubs); err != nil {
-		return
-	}
-	return
+	return n.store.GetGuarantorMetadata(erasureRoot)
 }
 
 func (n *NodeContent) StoreBundleSpecSegments(as *types.AvailabilitySpecifier, d types.AvailabilitySpecifierDerivation, b types.WorkPackageBundle, segments [][]byte) {
-	erasure_root_u := as.ErasureRoot
-	erasure_bKey := fmt.Sprintf("erasureBChunk-%v", erasure_root_u)
-	bChunkJson, _ := json.Marshal(d.BundleChunks)
-	n.WriteRawKV(erasure_bKey, bChunkJson)
-
-	erasure_sKey := fmt.Sprintf("erasureSChunk-%v", erasure_root_u)
-	sChunkJson, _ := json.Marshal(d.SegmentChunks)
-	n.WriteRawKV(erasure_sKey, sChunkJson) // this has the segments ***AND*** proof pages
-
-	erasure_bClubsKey := fmt.Sprintf("erasureBClubs-%v", erasure_root_u)
-	bClubsJson, _ := json.Marshal(d.BClubs)
-	n.WriteRawKV(erasure_bClubsKey, bClubsJson)
-
-	erasure_sClubsKey := fmt.Sprintf("erasureSClubs-%v", erasure_root_u)
-	sClubsJson, _ := json.Marshal(d.SClubs)
-
-	n.WriteRawKV(erasure_sClubsKey, sClubsJson)
-
-	// store bundle for CE 148
-	erasure_bundleKey := fmt.Sprintf("erasureBundle-%v", erasure_root_u)
-	if err := n.WriteRawKV(erasure_bundleKey, b.Bytes()); err != nil {
-		log.Warn(log.Node, "StoreBundleSpecSegments: failed to persist bundle", "erasureRoot", erasure_root_u, "err", err)
-	}
-
-	// store segments for CE 147
-	segmentsKey := fmt.Sprintf("erasureSegments-%v", as.ExportedSegmentRoot)
 	encodedSegments, err := types.Encode(segments)
 	if err != nil {
-		log.Error(log.Node, "StoreBundleSpecSegments: failed to encode segments", "erasureRoot", erasure_root_u, "err", err)
+		log.Error(log.Node, "StoreBundleSpecSegments: failed to encode segments", "erasureRoot", as.ErasureRoot, "err", err)
 		return
 	}
-	if err := n.WriteRawKV(segmentsKey, encodedSegments); err != nil {
-		log.Warn(log.Node, "StoreBundleSpecSegments: failed to persist segments", "segmentsRoot", as.ExportedSegmentRoot, "err", err)
+
+	err = n.store.StoreBundleSpecSegments(
+		as.ErasureRoot,
+		as.ExportedSegmentRoot,
+		d.BundleChunks,
+		d.SegmentChunks,
+		d.BClubs,
+		d.SClubs,
+		b.Bytes(),
+		encodedSegments,
+	)
+	if err != nil {
+		log.Error(log.Node, "StoreBundleSpecSegments: failed to persist", "erasureRoot", as.ErasureRoot, "err", err)
 	}
 }
 
-func GenerateErasureRootShardIdxKey(section string, erasureRoot common.Hash, shardIndex uint16) string {
-	return fmt.Sprintf("%s_%v_%d", section, erasureRoot, shardIndex)
-}
-
-func SplitHashes(data []byte) []common.Hash {
-	var chunks []common.Hash
-	for i := 0; i < len(data); i += 32 {
-		end := i + 32
-		if end > len(data) {
-			end = len(data)
-		}
-		chunks = append(chunks, common.BytesToHash(data[i:end]))
-	}
-	return chunks
-}
-
-func SplitBytes(data []byte) [][]byte {
-	chunkSize := types.NumECPiecesPerSegment * 2
-	var chunks [][]byte
-	for i := 0; i < len(data); i += chunkSize {
-		end := i + chunkSize
-		if end > len(data) {
-			end = len(data)
-		}
-		chunks = append(chunks, data[i:end])
-	}
-	return chunks
-}
-
-// used in CE139/CE140 GetSegmentShard_Assurer
-func SplitToSegmentShards(concatenatedShards []byte) (segmentShards [][]byte) {
-	fixedSegmentSize := types.NumECPiecesPerSegment * 2
-	for i := 0; i < len(concatenatedShards); i += fixedSegmentSize {
-		shard := concatenatedShards[i : i+fixedSegmentSize]
-		segmentShards = append(segmentShards, shard)
-	}
-	return segmentShards
-}
-
-func SplitCompletExportToSegmentShards(concatenatedShards []byte) (segmentShards [][]byte, proofShards [][]byte) {
-	numSegmentPerPageProof := 64
-	fixedSegmentSize := types.NumECPiecesPerSegment * 2
-	dataLen := len(concatenatedShards)
-	numTotalShards := dataLen / fixedSegmentSize
-	numProofShards := (numTotalShards + numSegmentPerPageProof) / (1 + numSegmentPerPageProof)
-	numSegmentShards := numTotalShards - numProofShards
-
-	if numSegmentShards < 0 || numProofShards < 0 || numSegmentShards+numProofShards != numTotalShards || dataLen%fixedSegmentSize != 0 {
-		log.Error(log.Node, "SplitCompletExportToSegmentShards: invalid Seg Computation", "dataLen", dataLen, "fixedSegmentSize", fixedSegmentSize, "numSegmentShards", numSegmentShards, "numProofShards", numProofShards, "numTotalShards", numTotalShards)
-		return segmentShards, proofShards
-	}
-
-	segmentShards = make([][]byte, 0, numSegmentShards)
-	proofShards = make([][]byte, 0, numProofShards)
-	currentShardIndex := 0
-	for i := 0; i < dataLen; i += fixedSegmentSize {
-		shard := concatenatedShards[i : i+fixedSegmentSize]
-		if currentShardIndex < numSegmentShards {
-			segmentShards = append(segmentShards, shard)
-		} else {
-			proofShards = append(proofShards, shard)
-		}
-		currentShardIndex++
-	}
-	return segmentShards, proofShards
-}
-
-func ComputeShardIndex(coreIdx uint16, validatorIdx uint16) (shardIndex uint16) {
-	/*
-	   i = (cR+v) mod V
-	   i: shardIdx
-	   v: validatorIdx
-	   c: coreIdx
-	   R: RecoveryThreshold
-	   V: TotalValidators
-	*/
-	return (coreIdx*types.RecoveryThreshold + validatorIdx) % types.TotalValidators
-}
 
 // Verification: CE137_FullShard
 func VerifyFullShard(erasureRoot common.Hash, shardIndex uint16, bundleShard []byte, exported_segments_and_proofpageShards []byte, encodedPath []byte) (bool, error) {
 	bClub := common.Blake2Hash(bundleShard)
-	shards := SplitBytes(exported_segments_and_proofpageShards)
+	shards := storage.SplitBytes(exported_segments_and_proofpageShards)
 	sClub := trie.NewWellBalancedTree(shards, types.Blake2b).RootHash()
 	bundle_segment_pair := common.BuildBundleSegment(bClub, sClub)
 	path, err := common.DecodeJustification(encodedPath, types.NumECPiecesPerSegment)
@@ -453,7 +179,7 @@ func (n *NodeContent) StoreFullShard_Assurer(erasureRoot common.Hash, shardIndex
 	// Store path to Erasure Root
 
 	bClubH := common.Blake2Hash(bundleShard)
-	shards := SplitBytes(exported_segments_and_proofpageShards)
+	shards := storage.SplitBytes(exported_segments_and_proofpageShards)
 	sClubH := trie.NewWellBalancedTree(shards, types.Blake2b).RootHash()
 
 	n.StoreFullShardJustification(erasureRoot, shardIndex, bClubH, sClubH, encodedPath)
@@ -477,58 +203,26 @@ func (n *NodeContent) StoreFullShard_Assurer(erasureRoot common.Hash, shardIndex
 
 // USED
 func (n *NodeContent) StoreFullShardJustification(erasureRoot common.Hash, shardIndex uint16, bClub common.Hash, sClub common.Hash, encodedPath []byte) {
-	// levelDB key->Val (* Required for multi validator case or CE200s)
-	// *f_erasureRoot_<erasureRoot> -> [f_erasureRoot_<shardIdx>]
-	// f_erasureRoot_<erasureRoot>_<shardIdx> -> bClubHash++sClub ++ default_justification
-	f_es_key := GenerateErasureRootShardIdxKey("f", erasureRoot, shardIndex)
-	bundle_segment_pair := common.BuildBundleSegment(bClub, sClub)
-	f_es_val := append(bundle_segment_pair, encodedPath...)
-	n.WriteRawKV(f_es_key, f_es_val)
-	// log.Info(log.DA, "StoreFullShardJustification", "n", n.id, "erasureRoot", erasureRoot, "shardIndex", shardIndex, "f_es_key", f_es_key, "len(f_es_val)", len(f_es_val), "h(val)", common.Blake2Hash(f_es_val))
+	n.store.StoreFullShardJustification(erasureRoot, shardIndex, bClub, sClub, encodedPath)
 }
 
 // USED
 func (n *NodeContent) GetFullShardJustification(erasureRoot common.Hash, shardIndex uint16) (bClubH common.Hash, sClubH common.Hash, encodedPath []byte, err error) {
-	f_es_key := GenerateErasureRootShardIdxKey("f", erasureRoot, shardIndex)
-	log.Trace(log.DA, "GetFullShardJustification", "n", n.id, "f_es_key", f_es_key)
-
-	data, ok, err := n.ReadRawKV([]byte(f_es_key))
-	if err != nil || !ok {
-		return
-	}
-	if len(data) < 64 {
-		err = fmt.Errorf("GetFullShardJustification Bad data")
-		return
-	}
-	bClubH = common.Hash(data[:32])
-	sClubH = common.Hash(data[32:64])
-	encodedPath = data[64:]
-	return bClubH, sClubH, encodedPath, nil
+	return n.store.GetFullShardJustification(erasureRoot, shardIndex)
 }
 
 // Short-term Audit DA -  Used to Store bClub(bundleShard) by Assurers (til finality)
 func (n *NodeContent) StoreAuditDA_Assurer(erasureRoot common.Hash, shardIndex uint16, bundleShard []byte) (err error) {
-	// *b_erasureRoot_<erasureRoot> -> [b_erasureRoot_<shardIdx>]
-	// b_erasureRoot_<shardIdx> -> bundleShard
-	b_es_key := GenerateErasureRootShardIdxKey("b", erasureRoot, shardIndex)
-	n.WriteRawKV(b_es_key, bundleShard)
-	log.Trace(log.DA, "StoreAuditDA", "b_es_key", b_es_key, "bundleShard", bundleShard)
-	return nil
+	return n.store.StoreAuditDA(erasureRoot, shardIndex, bundleShard)
 }
 
 func (n *NodeContent) StoreWorkReport(wr types.WorkReport) error {
-	store, err := n.GetStorage()
-	if err != nil {
-		return err
-	}
-	return store.StoreWorkReport(wr)
+	return n.store.StoreWorkReport(&wr)
 }
 
 // Long-term ImportDA - Used to Store sClub (segmentShard) by Assurers (at least 672 epochs)
 func (n *NodeContent) StoreImportDA_Assurer(erasureRoot common.Hash, shardIndex uint16, concatenatedShards []byte) (err error) {
-	s_es_key := GenerateErasureRootShardIdxKey("s", erasureRoot, shardIndex)
-	n.WriteRawKV(s_es_key, concatenatedShards) // this has segment shards AND proof page shards
-	return nil
+	return n.store.StoreImportDA(erasureRoot, shardIndex, concatenatedShards)
 }
 
 // Verification: CE138_BundleShard_FullShard
@@ -554,15 +248,9 @@ func VerifyBundleShard(erasureRoot common.Hash, shardIndex uint16, bundleShard [
 // Qns Source : CE138_BundleShard --  Ask to Assurer From Auditor
 // Ans Source : CE137_FullShard (via StoreAuditDA)
 func (n *NodeContent) GetBundleShard_Assurer(erasureRoot common.Hash, shardIndex uint16) (bundleShard []byte, sClub common.Hash, justification []byte, ok bool, err error) {
-
-	b_es_key := GenerateErasureRootShardIdxKey("b", erasureRoot, shardIndex)
-	bundleShard, _, err = n.ReadRawKV([]byte(b_es_key))
-	if err != nil {
-		return nil, sClub, nil, false, err
-	}
-	_, sClub, encodedPath, err := n.GetFullShardJustification(erasureRoot, shardIndex)
-	if err != nil {
-		return nil, sClub, nil, false, err
+	bundleShard, sClub, encodedPath, ok, err := n.store.GetBundleShard(erasureRoot, shardIndex)
+	if err != nil || !ok {
+		return bundleShard, sClub, encodedPath, ok, err
 	}
 
 	// proof: retrieve b_erasureRoot_<shardIdx> ++ SClub ++ default_justification
@@ -618,15 +306,14 @@ func VerifySegmentShard(erasureRoot common.Hash, shardIndex uint16, segmentShard
 // Qns Source : CE139_SegmentShard / CE140
 // Ans Source : CE137_FullShard
 func (n *NodeContent) GetSegmentShard_Assurer(erasureRoot common.Hash, shardIndex uint16, segmentIndices []uint16, withJustification bool) (selected_segments [][]byte, selected_justifications [][]byte, ok bool, err error) {
-	s_es_key := GenerateErasureRootShardIdxKey("s", erasureRoot, shardIndex)
-	concatenatedShards, ok, err := n.ReadRawKV([]byte(s_es_key))
+	concatenatedShards, ok, err := n.store.GetSegmentShard(erasureRoot, shardIndex)
 	if err != nil {
 		return selected_segments, selected_justifications, false, err
 	}
 	if !ok {
 		return selected_segments, selected_justifications, false, nil
 	}
-	segmentShards := SplitToSegmentShards(concatenatedShards)
+	segmentShards := storage.SplitToSegmentShards(concatenatedShards)
 
 	selected_segments = make([][]byte, len(segmentIndices))
 	for i, segmentIndex := range segmentIndices {
@@ -647,10 +334,12 @@ func (n *NodeContent) GetSegmentShard_Assurer(erasureRoot common.Hash, shardInde
 
 // Look up the erasureRoot, exportedSegmentRoot, workpackageHash for either kind of hash: segment root OR workPackageHash
 func (n *NodeContent) WorkReportSearch(h common.Hash) (si *storage.SpecIndex) {
-	store, err := n.GetStorage()
-	if err != nil {
-		log.Error(log.DA, "WorkReportSearch", "err", err)
+	wr, ok := n.store.WorkReportSearch(h)
+	if !ok || wr == nil {
 		return nil
 	}
-	return store.WorkReportSearch(h)
+	return &storage.SpecIndex{
+		WorkReport: *wr,
+		Indices:    make([]uint16, 0),
+	}
 }

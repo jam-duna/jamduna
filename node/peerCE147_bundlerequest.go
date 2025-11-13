@@ -160,7 +160,7 @@ func (n *Node) getBundleByErasureRoot(erasureRoot common.Hash) (types.WorkPackag
 	erasure_bundleKey := fmt.Sprintf("erasureBundle-%v", erasureRoot)
 
 	// Read the bundle bytes from storage
-	bundleBytes, ok, err := n.ReadRawKV([]byte(erasure_bundleKey))
+	bundleBytes, ok, err := n.store.ReadRawKV([]byte(erasure_bundleKey))
 	if err != nil {
 		log.Warn(log.Node, "getBundleByErasureRoot: ReadRawKV failed",
 			"erasureRoot", erasureRoot,

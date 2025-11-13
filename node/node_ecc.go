@@ -3,11 +3,10 @@ package node
 import (
 	"fmt"
 
-	"github.com/colorfulnotion/jam/common"
 	storage "github.com/colorfulnotion/jam/storage"
 )
 
-func (n *NodeContent) GetStorage() (*storage.StateDBStorage, error) {
+func (n *NodeContent) GetStorage() (storage.JAMStorage, error) {
 	if n == nil {
 		return nil, fmt.Errorf("Node Not initiated")
 	}
@@ -17,79 +16,3 @@ func (n *NodeContent) GetStorage() (*storage.StateDBStorage, error) {
 	return n.store, nil
 }
 
-func (n *NodeContent) ReadKV(key common.Hash) ([]byte, error) {
-	store, err := n.GetStorage()
-	if err != nil {
-		return []byte{}, err
-	}
-	val, err := store.ReadKV(key)
-	if err != nil {
-		return []byte{}, fmt.Errorf("readKV K=%v not found", key)
-	}
-	return val, nil
-}
-
-func (n *NodeContent) WriteKV(key common.Hash, val []byte) error {
-	store, err := n.GetStorage()
-	if err != nil {
-		return err
-	}
-	err = store.WriteKV(key, val)
-	if err != nil {
-		return fmt.Errorf("writeKV K=%v|V=%x err:%v", key, val, err)
-	}
-	return nil
-}
-
-func (n *NodeContent) WriteRawKV(key string, val []byte) error {
-	store, err := n.GetStorage()
-	if err != nil {
-		return err
-	}
-
-	err = store.WriteRawKV([]byte(key), val)
-	if err != nil {
-		return fmt.Errorf("WriteRawKV K=%v|V=%x Err:%v", key, val, err)
-	}
-	return nil
-}
-
-func (n *NodeContent) WriteKVByte(key []byte, val []byte) error {
-	store, err := n.GetStorage()
-	if err != nil {
-		return err
-	}
-	err = store.WriteRawKV(key, val)
-	if err != nil {
-		return fmt.Errorf("WriteKVByte K=%v|V=%x Err:%v", key, val, err)
-	}
-	return nil
-}
-
-func (n *NodeContent) ReadRawKV(key []byte) ([]byte, bool, error) {
-	store, err := n.GetStorage()
-	if err != nil {
-		return []byte{}, false, err
-	}
-	val, ok, err := store.ReadRawKV([]byte(key))
-	if err != nil {
-		return []byte{}, false, fmt.Errorf("readRawKV Err:%v", err)
-	} else if !ok {
-		return []byte{}, false, fmt.Errorf("readRawKV K=%v not found", string(key))
-	}
-	return val, true, nil
-}
-
-func (n *NodeContent) ReadKVByte(key []byte) ([]byte, bool, error) {
-	store, err := n.GetStorage()
-	if err != nil {
-		return []byte{}, false, err
-	}
-	val, ok, err := store.ReadRawKV(key)
-	if err != nil {
-		return []byte{}, false, fmt.Errorf("ReadKVByte Err:%v", err)
-	} else if !ok {
-		return []byte{}, false, fmt.Errorf("ReadKVByte K=%v not found", key)
-	}
-	return val, true, nil
-}

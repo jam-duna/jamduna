@@ -70,7 +70,7 @@ Regular Leaf Node (64 bytes) [K,V] -> V >= 32bytes. too long, only store Hash
 // MerkleTree represents the entire Merkle Tree
 type MerkleTree struct {
 	Root       *Node
-	db         *storage.StateDBStorage
+	db         storage.JAMStorage
 	writeMutex sync.Mutex             // Protects concurrent writes to levelDB during Flush
 	writeBatch map[common.Hash][]byte // Batched writes (key -> value) - always batched
 	batchMutex sync.Mutex             // Protects the write batch
@@ -119,7 +119,7 @@ func DeleteLevelDB(optionalPath ...string) error {
 	return nil
 }
 
-func NewMerkleTree(data [][2][]byte, db *storage.StateDBStorage) *MerkleTree {
+func NewMerkleTree(data [][2][]byte, db storage.JAMStorage) *MerkleTree {
 	t := &MerkleTree{
 		Root:          nil,
 		db:            db,
@@ -259,7 +259,7 @@ func (t *MerkleTree) GetRoot() common.Hash {
 	return normalizeKey32(t.Root.Hash)
 }
 
-func InitMerkleTreeFromHash(root common.Hash, db *storage.StateDBStorage) (*MerkleTree, error) {
+func InitMerkleTreeFromHash(root common.Hash, db storage.JAMStorage) (*MerkleTree, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is not initialized")
 	}
@@ -341,7 +341,7 @@ func (t *MerkleTree) Flush() (common.Hash, error) {
 
 	batchWriteLen, err := t.flushBatchLocked()
 	root := t.GetRoot()
-	log.Info(log.P, "Flush", "n", t.db.NodeID, "s+", root.String_short(), "batchWriteLen", batchWriteLen)
+	log.Info(log.P, "Flush", "n", t.db.GetNodeID(), "s+", root.String_short(), "batchWriteLen", batchWriteLen)
 	return root, err
 }
 

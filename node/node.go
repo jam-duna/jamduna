@@ -123,7 +123,7 @@ type NodeContent struct {
 
 	// Telemetry (JIP-3)
 	telemetryClient *telemetry.TelemetryClient
-	store           *storage.StateDBStorage
+	store           storage.JAMStorage
 	// holds a map of the hash to the stateDB
 	statedbMap      map[common.Hash]*statedb.StateDB
 	statedbMapMutex sync.Mutex
@@ -2459,7 +2459,7 @@ func (n *NodeContent) reconstructSegments(si *storage.SpecIndex, eventID uint64)
 			ErasureRoot:    si.WorkReport.AvailabilitySpec.ErasureRoot,
 			SegmentIndices: allsegmentindices,
 			CoreIndex:      uint16(si.WorkReport.CoreIndex),
-			ShardIndex:     ComputeShardIndex(uint16(si.WorkReport.CoreIndex), uint16(validatorIdx)),
+			ShardIndex:     storage.ComputeShardIndex(uint16(si.WorkReport.CoreIndex), uint16(validatorIdx)),
 		}
 	}
 	requests := make(map[uint16]interface{})
@@ -2599,7 +2599,7 @@ func (n *NodeContent) reconstructPackageBundleSegments(spec types.AvailabilitySp
 		requestsOriginal[validatorIdx] = CE138_request{
 			ErasureRoot: erasureRoot,
 			CoreIndex:   uint16(coreIndex),
-			ShardIndex:  ComputeShardIndex(uint16(coreIndex), uint16(validatorIdx)),
+			ShardIndex:  storage.ComputeShardIndex(uint16(coreIndex), uint16(validatorIdx)),
 		}
 	}
 
@@ -3088,7 +3088,7 @@ func (n *Node) SetCurrJCESSimple(currJCE uint32) {
 	if prevJCE == currJCE {
 		return // set only once
 	}
-	fmt.Printf("Node %d: Update CurrJCE %d\n", n.id, currJCE)
+	//fmt.Printf("Node %d: Update CurrJCE %d\n", n.id, currJCE)
 }
 
 func (n *Node) SetCurrJCE(currJCE uint32) {
@@ -3190,7 +3190,6 @@ func (n *Node) runAuthoring() {
 	tickerPulse := time.NewTicker(TickTime * time.Millisecond)
 	defer tickerPulse.Stop()
 
-	logChan := n.store.GetChan()
 	n.statedb.GetSafrole().EpochFirstSlot = uint32(n.epoch0Timestamp / types.SecondsPerSlot)
 	lastAuthorizableJCE := uint32(0)
 
@@ -3349,8 +3348,7 @@ func (n *Node) runAuthoring() {
 			n.author_status = "authorizing:finished"
 			IsClosed := n.statedb.GetSafrole().IsTicketSubmissionClosed(n.statedb.GetTimeslot())
 			n.extrinsic_pool.RemoveUsedExtrinsicFromPool(newBlock, newStateDB.GetSafrole().Entropy[2], IsClosed)
-		case log := <-logChan:
-			go n.WriteLog(log, true)
+
 		}
 	}
 }

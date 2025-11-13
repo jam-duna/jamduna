@@ -9,6 +9,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
+	storage "github.com/colorfulnotion/jam/storage"
 	trie "github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -52,7 +53,7 @@ func (n *NodeContent) FetchAllBundleAndSegmentShards(coreIdx uint16, erasureRoot
 	// Auditor -> Assurer CE138
 	shardIdxMap := make(map[uint16]uint16) // shardIdx -> validatorIdx
 	for vIdx := range types.TotalValidators {
-		shardIdx := ComputeShardIndex(coreIdx, uint16(vIdx))
+		shardIdx := storage.ComputeShardIndex(coreIdx, uint16(vIdx))
 		shardIdxMap[shardIdx] = uint16(vIdx)
 	}
 
@@ -193,7 +194,7 @@ func (n *Node) assureData(ctx context.Context, g types.Guarantee) error {
 	spec := g.Report.AvailabilitySpec
 	coredIdx := g.Report.CoreIndex
 	vIdx := n.id
-	shardIdx := ComputeShardIndex(uint16(coredIdx), vIdx) // shardIdx != validatorIdx
+	shardIdx := storage.ComputeShardIndex(uint16(coredIdx), vIdx) // shardIdx != validatorIdx
 	workReportHash := g.Report.Hash()
 
 	const maxRetries = 3

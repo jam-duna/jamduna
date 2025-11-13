@@ -126,7 +126,7 @@ func (p *Peer) SendWorkReportDistribution(
 	// Telemetry tracing disabled - Tp field not available in this version
 	// if p.node.store.SendTrace {
 	// 	tracer := p.node.store.Tp.Tracer("NodeTracer")
-	// 	_, span := tracer.Start(ctx, fmt.Sprintf("[N%d] SendWorkReportDistribution", p.node.store.NodeID))
+	// 	_, span := tracer.Start(ctx, fmt.Sprintf("[N%d] SendWorkReportDistribution", p.node.id))
 	// 	defer span.End()
 	// }
 
@@ -148,7 +148,7 @@ func (p *Peer) SendWorkReportDistribution(
 	}
 
 	log.Trace(log.G, "onWorkReportDistribution OUTGOING SPEC",
-		"n", p.node.store.NodeID,
+		"n", p.node.id,
 		//"peerID", peerID,
 		"workPackageHash", wr.GetWorkPackageHash(),
 		"workReportHash", wr.Hash(),
@@ -157,14 +157,14 @@ func (p *Peer) SendWorkReportDistribution(
 	)
 
 	log.Trace(log.G, "onWorkReportDistribution OUTGOING REPORT",
-		"n", p.node.store.NodeID,
+		"n", p.node.id,
 		"workPackageHash", wr.GetWorkPackageHash(),
 		"workReportHash", wr.Hash(),
 		"workReport", wr.String(),
 	)
 
 	log.Trace(log.G, "onWorkReportDistribution OUTGOING REPORT BYTES",
-		"n", p.node.store.NodeID,
+		"n", p.node.id,
 		"workPackageHash", wr.GetWorkPackageHash(),
 		"workReportHash", wr.Hash(),
 		"workReportBytesLen", len(wr.Bytes()),

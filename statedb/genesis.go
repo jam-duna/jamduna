@@ -346,7 +346,7 @@ func NewStateDBFromStateKeyVals(sdb *storage.StateDBStorage, stateKeyVals *State
 	return statedb, nil
 }
 
-func NewStateDBFromStateTransition(sdb *storage.StateDBStorage, statetransition *StateTransition) (statedb *StateDB, err error) {
+func NewStateDBFromStateTransition(sdb storage.JAMStorage, statetransition *StateTransition) (statedb *StateDB, err error) {
 	t0 := time.Now()
 
 	statedb, err = newStateDB(sdb, common.Hash{})

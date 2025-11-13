@@ -40,7 +40,7 @@ type StateDB struct {
 	HeaderHash              common.Hash  `json:"headerHash"`
 	StateRoot               common.Hash  `json:"stateRoot"`
 	JamState                *JamState    `json:"Jamstate"`
-	sdb                     *storage.StateDBStorage
+	sdb                     storage.JAMStorage
 	trie                    *trie.MerkleTree
 	posteriorSafroleEntropy *SafroleState // used to manage entropy, validator, and winning ticket
 
@@ -157,7 +157,7 @@ func (s *StateDB) ValidateAddPreimage(serviceID uint32, blob []byte) (common.Has
 	}
 	return preimageHash, nil
 }
-func newEmptyStateDB(sdb *storage.StateDBStorage) (statedb *StateDB) {
+func newEmptyStateDB(sdb storage.JAMStorage) (statedb *StateDB) {
 	statedb = new(StateDB)
 	statedb.SetStorage(sdb)
 	statedb.trie = trie.NewMerkleTree(nil, sdb)
@@ -228,11 +228,11 @@ func (s *StateDB) GetTrie() *trie.MerkleTree {
 	return s.trie
 }
 
-func (s *StateDB) GetStorage() *storage.StateDBStorage {
+func (s *StateDB) GetStorage() storage.JAMStorage {
 	return s.sdb
 }
 
-func (s *StateDB) SetStorage(sdb *storage.StateDBStorage) {
+func (s *StateDB) SetStorage(sdb storage.JAMStorage) {
 	s.sdb = sdb
 }
 
@@ -345,8 +345,8 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 
 	// Log validator state for debugging
 	safrole := s.GetSafroleState()
-	log.Info(log.SDB, "Flush-ValidatorState",
-		"n", s.sdb.NodeID,
+	log.Info(log.SDB, "ValidatorState",
+		"n", s.sdb.GetNodeID(),
 		"prev", len(safrole.PrevValidators),
 		"curr", len(safrole.CurrValidators),
 		"next", len(safrole.NextValidators),
@@ -536,7 +536,7 @@ func NewStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 	return newStateDB(sdb, blockHash)
 }
 
-func NewStateDBFromStateRoot(stateRoot common.Hash, sdb *storage.StateDBStorage) (recoveredStateDB *StateDB, err error) {
+func NewStateDBFromStateRoot(stateRoot common.Hash, sdb storage.JAMStorage) (recoveredStateDB *StateDB, err error) {
 	recoveredStateDB = newEmptyStateDB(sdb)
 	recoveredStateDB.Finalized = true // Historical state is always finalized
 	recoveredStateDB.JamState = NewJamState()
@@ -555,7 +555,7 @@ func NewStateDBFromStateRoot(stateRoot common.Hash, sdb *storage.StateDBStorage)
 }
 
 // newStateDB initiates the StateDB using the blockHash+bn; the bn input must refer to the epoch for which the blockHash belongs to
-func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *StateDB, err error) {
+func newStateDB(sdb storage.JAMStorage, blockHash common.Hash) (statedb *StateDB, err error) {
 	statedb = newEmptyStateDB(sdb)
 	statedb.Finalized = false
 	statedb.trie = trie.NewMerkleTree(nil, sdb)

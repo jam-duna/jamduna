@@ -13,6 +13,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
+	storage "github.com/colorfulnotion/jam/storage"
 	trie "github.com/colorfulnotion/jam/trie"
 	types "github.com/colorfulnotion/jam/types"
 )
@@ -517,7 +518,7 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 	case "CE138_request":
 		req := obj.(CE138_request)
 		erasureRoot := req.ErasureRoot
-		shardIdx_self := ComputeShardIndex(req.CoreIndex, n.id)
+		shardIdx_self := storage.ComputeShardIndex(req.CoreIndex, n.id)
 
 		log.Trace(log.DA, "CE138_request: abc", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex, "coreIdx", req.CoreIndex)
 
@@ -575,7 +576,7 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 			return resp, err
 		}
 		// handle selfRequesting case
-		if req.ShardIndex == ComputeShardIndex(req.CoreIndex, n.id) {
+		if req.ShardIndex == storage.ComputeShardIndex(req.CoreIndex, n.id) {
 			selected_segmentshards, selected_justifications, ok, err := n.GetSegmentShard_Assurer(erasureRoot, req.ShardIndex, segmentIndices, false)
 			if err != nil {
 				return resp, err

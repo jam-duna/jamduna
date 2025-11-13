@@ -185,7 +185,7 @@ func ComputeStateTransition(storage *storage.StateDBStorage, stc *StateTransitio
 }
 
 // NOTE CheckStateTransition vs CheckStateTransitionWithOutput a good example of "copy-paste" coding increases in complexity
-func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, ancestorSet map[common.Hash]uint32, pvmBackend string) error {
+func CheckStateTransition(storage storage.JAMStorage, st *StateTransition, ancestorSet map[common.Hash]uint32, pvmBackend string) error {
 	// Apply the state transition
 	s0, err := NewStateDBFromStateTransition(storage, st)
 	if err != nil {
@@ -234,7 +234,7 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 	}
 
 	s0 := preState
-	s0.Id = storage.NodeID
+	s0.Id = storage.GetNodeID()
 	s0.AncestorSet = ancestorSet
 	bad_stf := bytes.Equal(st.PreState.StateRoot.Bytes(), st.PostState.StateRoot.Bytes())
 	s1, err := ApplyStateTransitionFromBlock(0, s0, context.Background(), &(st.Block), nil, pvmBackend)

@@ -15,6 +15,99 @@ import (
 	leveldbstorage "github.com/syndtr/goleveldb/leveldb/storage"
 )
 
+type JAMStorage interface {
+	// Core KV Operations - Low-level key-value access
+	ReadRawKV(key []byte) (value []byte, found bool, err error)
+	ReadRawKVWithPrefix(prefix []byte) ([][2][]byte, error)
+	WriteRawKV(key []byte, val []byte) error
+	ReadKV(key common.Hash) ([]byte, error)
+
+	// Block Storage Operations
+	// These methods handle block persistence and retrieval with multiple indices
+	StoreBlock(blk *types.Block, id uint16, slotTimestamp uint64) error
+	StoreFinalizedBlock(blk *types.Block) error
+	GetFinalizedBlock() (*types.Block, error)
+	GetFinalizedBlockInternal() (*types.Block, bool, error)
+	GetBlockByHeader(headerHash common.Hash) (*types.SBlock, error)
+	GetBlockBySlot(slot uint32) (*types.SBlock, error)
+	GetChildBlocks(parentHeaderHash common.Hash) ([][2][]byte, error)
+
+	// Data Availability - Guarantor Operations
+	// Guarantors create and distribute erasure-coded shards
+	StoreBundleSpecSegments(
+		erasureRoot common.Hash,
+		exportedSegmentRoot common.Hash,
+		bChunks []types.DistributeECChunk,
+		sChunks []types.DistributeECChunk,
+		bClubs []common.Hash,
+		sClubs []common.Hash,
+		bundle []byte,
+		encodedSegments []byte,
+	) error
+	GetGuarantorMetadata(erasureRoot common.Hash) (
+		bClubs []common.Hash,
+		sClubs []common.Hash,
+		bECChunks []types.DistributeECChunk,
+		sECChunksArray []types.DistributeECChunk,
+		err error,
+	)
+	GetFullShard(erasureRoot common.Hash, shardIndex uint16) (
+		bundleShard []byte,
+		segmentShards []byte,
+		justification []byte,
+		ok bool,
+		err error,
+	)
+
+	// Data Availability - Assurer Operations
+	// Assurers verify and store shards for availability
+	StoreFullShardJustification(
+		erasureRoot common.Hash,
+		shardIndex uint16,
+		bClub common.Hash,
+		sClub common.Hash,
+		encodedPath []byte,
+	) error
+	GetFullShardJustification(erasureRoot common.Hash, shardIndex uint16) (
+		bClubH common.Hash,
+		sClubH common.Hash,
+		encodedPath []byte,
+		err error,
+	)
+	StoreAuditDA(erasureRoot common.Hash, shardIndex uint16, bundleShard []byte) error
+	StoreImportDA(erasureRoot common.Hash, shardIndex uint16, concatenatedShards []byte) error
+	GetBundleShard(erasureRoot common.Hash, shardIndex uint16) (
+		bundleShard []byte,
+		sClub common.Hash,
+		justification []byte,
+		ok bool,
+		err error,
+	)
+	GetSegmentShard(erasureRoot common.Hash, shardIndex uint16) (
+		concatenatedShards []byte,
+		ok bool,
+		err error,
+	)
+
+	// Bundle and Segment Retrieval
+	GetBundleByErasureRoot(erasureRoot common.Hash) (types.WorkPackageBundle, bool)
+	GetSegmentsBySegmentRoot(segmentRoot common.Hash) ([][]byte, bool)
+	FetchJAMDASegments(workPackageHash common.Hash, indexStart uint16, indexEnd uint16, payloadLength uint32) (payload []byte, err error)
+
+	// Work Report Operations
+	StoreWorkReport(wr *types.WorkReport) error
+	WorkReportSearch(requestedHash common.Hash) (*types.WorkReport, bool)
+
+	// Node Identity and Telemetry
+	SetTelemetryClient(client *telemetry.TelemetryClient)
+	GetTelemetryClient() *telemetry.TelemetryClient
+	GetJAMDA() JAMDA
+	GetNodeID() uint16
+
+	// Lifecycle
+	Close() error
+}
+
 const (
 	CheckStateTransition = false
 )
@@ -40,7 +133,7 @@ type StateDBStorage struct {
 	BlockContext             context.Context
 	BlockAnnouncementContext context.Context
 	SendTrace                bool
-	NodeID                   uint16
+	nodeID                   uint16
 
 	// Telemetry client for emitting events
 	telemetryClient *telemetry.TelemetryClient
@@ -72,7 +165,7 @@ func NewStateDBStorage(path string, jamda JAMDA, telemetryClient *telemetry.Tele
 		logChan:         make(chan LogMessage, 100),
 		jamda:           jamda,
 		telemetryClient: telemetryClient,
-		NodeID:          nodeID,
+		nodeID:          nodeID,
 	}
 	return &s, nil
 }
@@ -80,6 +173,11 @@ func NewStateDBStorage(path string, jamda JAMDA, telemetryClient *telemetry.Tele
 // GetJAMDA returns the JAMDA interface instance
 func (s *StateDBStorage) GetJAMDA() JAMDA {
 	return s.jamda
+}
+
+// GetNodeID returns the node ID
+func (s *StateDBStorage) GetNodeID() uint16 {
+	return s.nodeID
 }
 
 // GetTelemetryClient returns the telemetry client for emitting events
@@ -162,18 +260,6 @@ func (store *StateDBStorage) DeleteRawK(key []byte) error {
 	return store.db.Delete(key, nil)
 }
 
-func (store *StateDBStorage) WriteLog(obj interface{}, timeslot uint32) {
-	msg := LogMessage{
-		Payload:  obj,
-		Timeslot: timeslot,
-	}
-	store.logChan <- msg
-}
-
-func (store *StateDBStorage) GetChan() chan LogMessage {
-	return store.logChan
-}
-
 func TestTrace(host string) bool {
 	return true
 }
@@ -244,26 +330,23 @@ func generateSpecKey(requestHash common.Hash) string {
 
 // WorkReportSearch looks up the erasureRoot, exportedSegmentRoot, workpackageHash
 // for either kind of hash: segment root OR workPackageHash
-func (store *StateDBStorage) WorkReportSearch(h common.Hash) *SpecIndex {
+func (store *StateDBStorage) WorkReportSearch(h common.Hash) (*types.WorkReport, bool) {
 	wrBytes, ok, err := store.ReadRawKV([]byte(generateSpecKey(h)))
 	if err != nil || !ok {
-		return nil
+		return nil, false
 	}
 
 	wr, _, err := types.Decode(wrBytes, reflect.TypeOf(types.WorkReport{}))
 	if err != nil {
-		return nil
+		return nil, false
 	}
 
 	workReport := wr.(types.WorkReport)
-	return &SpecIndex{
-		WorkReport: workReport,
-		Indices:    make([]uint16, 0),
-	}
+	return &workReport, true
 }
 
 // StoreWorkReport stores a WorkReport with mappings for workPackageHash, segmentRoot, and erasureRoot
-func (store *StateDBStorage) StoreWorkReport(wr types.WorkReport) error {
+func (store *StateDBStorage) StoreWorkReport(wr *types.WorkReport) error {
 	spec := wr.AvailabilitySpec
 	erasureRoot := spec.ErasureRoot
 	segmentRoot := spec.ExportedSegmentRoot
