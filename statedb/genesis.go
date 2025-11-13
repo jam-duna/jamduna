@@ -218,6 +218,13 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 			fmt.Printf("Service %d %s (fn:%s), codeHash %s, codeLen=%d, anchor %v\n", service.ServiceCode, service.ServiceName, service.FileName, codeHash.String(), codeLen, bootStrapAnchor)
 		}
 	}
+
+	// Flush service blobs to levelDB before calling UpdateTrieState
+	log.Info(log.SDB, "Genesis: Flushing service blobs to levelDB")
+	if _, err := statedb.trie.Flush(); err != nil {
+		return nil, fmt.Errorf("failed to flush service blobs: %w", err)
+	}
+
 	fmt.Printf("Bootstrap AuthorizationHash: %v\n", auth_code_hash_hash) //p_a
 	fmt.Printf("Bootstrap AuthorizationCodeHash: %v\n", auth_code_hash)  //p_u
 	for idx := range j.AuthorizationQueue {
@@ -320,7 +327,7 @@ func NewStateDBFromStateTransitionPost(sdb *storage.StateDBStorage, statetransit
 	statedb.Block = &(statetransition.Block)
 	statedb.StateRoot = statedb.UpdateAllTrieStateRaw(statetransition.PostState) // NOTE: MK -- USE POSTSTATE
 	statedb.JamState = NewJamState()
-	if err := statedb.RecoverJamState(statedb.StateRoot); err != nil {
+	if err := statedb.InitTrieAndLoadJamState(statedb.StateRoot); err != nil {
 		return nil, err
 	}
 	return statedb, nil
@@ -333,7 +340,7 @@ func NewStateDBFromStateKeyVals(sdb *storage.StateDBStorage, stateKeyVals *State
 	}
 	statedb.StateRoot = statedb.UpdateAllTrieKeyVals(*stateKeyVals)
 	statedb.JamState = NewJamState()
-	if err := statedb.RecoverJamState(statedb.StateRoot); err != nil {
+	if err := statedb.InitTrieAndLoadJamState(statedb.StateRoot); err != nil {
 		return nil, err
 	}
 	return statedb, nil
@@ -361,10 +368,10 @@ func NewStateDBFromStateTransition(sdb *storage.StateDBStorage, statetransition 
 		return nil, fmt.Errorf("StateRoot %s != ParentStateRoot %s", statedb.StateRoot.String(), statetransition.Block.Header.ParentStateRoot.String())
 	}
 	statedb.JamState = NewJamState()
-	if err := statedb.RecoverJamState(statedb.StateRoot); err != nil {
+	if err := statedb.InitTrieAndLoadJamState(statedb.StateRoot); err != nil {
 		return nil, err
 	}
-	benchRec.Add("NewStateDBFromStateTransition:RecoverJamState", time.Since(t0))
+	benchRec.Add("NewStateDBFromStateTransition:InitTrieAndLoadJamState", time.Since(t0))
 	return statedb, nil
 }
 

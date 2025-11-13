@@ -593,7 +593,6 @@ func (s *StateDB) checkRecentWorkPackage(g types.Guarantee, egs []types.Guarante
 
 // v0.5 eq 11.41
 func (s *StateDB) checkCodeHash(g types.Guarantee) error {
-	//prior_trie := s.CopyTrieState(s.StateRoot)
 	for _, result := range g.Report.Results {
 		serviceID := result.ServiceID
 		codeHash := result.CodeHash

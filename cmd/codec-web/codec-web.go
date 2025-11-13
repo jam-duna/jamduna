@@ -359,7 +359,7 @@ func initStorage(testDir string) (*storage.StateDBStorage, error) {
 		}
 	}
 
-	sdb_storage, err := storage.NewStateDBStorage(testDir, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient())
+	sdb_storage, err := storage.NewStateDBStorage(testDir, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient(), 0)
 	if err != nil {
 		return nil, fmt.Errorf("Error with storage: %v", err)
 	}

@@ -173,6 +173,6 @@ func Initial_bpt(db *storage.StateDBStorage) ([]byte, *MerkleTree, error) {
 	}
 
 	// Get the root hash of the tree
-	rootHash := tree.GetRootHash()
+	rootHash := tree.GetRoot().Bytes()
 	return rootHash, tree, nil
 }

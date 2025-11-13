@@ -195,7 +195,7 @@ func (s *StateDB) BuildBlock(
 
 	stateRoot := s.GetStateRoot()
 	s.JamState.CheckInvalidCoreIndex()
-	if err := s.RecoverJamState(stateRoot); err != nil {
+	if err := s.InitTrieAndLoadJamState(stateRoot); err != nil {
 		return nil, err
 	}
 	s.JamState.CheckInvalidCoreIndex()

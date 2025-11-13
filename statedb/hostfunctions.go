@@ -890,12 +890,7 @@ func (vm *VM) hostFetch() {
 			// get imported segment by work item index
 			if omega_11 < uint64(len(vm.Imports[vm.WorkItemIndex])) {
 				v_Bytes = append([]byte{}, vm.Imports[vm.WorkItemIndex][omega_11][:]...)
-				log.Trace(vm.logging, fmt.Sprintf("[N%d] %s Fetch imported segment", vm.hostenv.GetID(), vm.ServiceMetadata),
-					"h", fmt.Sprintf("%v", common.Blake2Hash(v_Bytes)),
-					"bytes", v_Bytes[0:20],
-					"l", len(v_Bytes),
-					"workItemIndex", vm.WorkItemIndex,
-					"w11", omega_11)
+
 			} else {
 				// fmt.Printf("FETCH 6 FAIL omega_11 %d vs len(vm.Imports[vm.WorkItemIndex=%d])=%d\n", omega_11, vm.WorkItemIndex, len(vm.Imports[vm.WorkItemIndex]))
 			}
@@ -2023,11 +2018,11 @@ func (vm *VM) hostLog() {
 	case 1: // 1: User agent displays as warning
 		fmt.Printf("\x1b[33m[WARN-%s] %s\x1b[0m\n", vm.logging, string(messageBytes))
 	case 2: // 2: User agent displays as important information
-		fmt.Printf("\x1b[32m[INFO-%s] %s\x1b[0m\n", vm.logging, string(messageBytes))
+	//	fmt.Printf("\x1b[32m[INFO-%s] %s\x1b[0m\n", vm.logging, string(messageBytes))
 	case 3: // 3: User agent displays as helpful information
-		fmt.Printf("\x1b[36m[DEBUG-%s] %s\x1b[0m\n", vm.logging, string(messageBytes))
+		//		fmt.Printf("\x1b[36m[DEBUG-%s] %s\x1b[0m\n", vm.logging, string(messageBytes))
 	case 4: // 4: User agent displays as pedantic information
-		fmt.Printf("\x1b[37m[TRACE-%s] %s\x1b[0m\n", vm.logging, string(messageBytes))
+		//	fmt.Printf("\x1b[37m[TRACE-%s] %s\x1b[0m\n", vm.logging, string(messageBytes))
 	}
 }
 

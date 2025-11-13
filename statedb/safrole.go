@@ -960,7 +960,6 @@ func (s *SafroleState) GetEpoch() uint32 {
 
 // statefrole_stf is the function to be tested
 func (s *SafroleState) ApplyStateTransitionTickets(ctx context.Context, tickets []types.Ticket, targetJCE uint32, header types.BlockHeader, validated_tickets map[common.Hash]common.Hash) (SafroleState, error) {
-	t0 := time.Now()
 	ticketBodies, err := s.ValidateSaforle(tickets, targetJCE, header, validated_tickets)
 	if err != nil {
 		//fmt.Printf("ApplyStateTransitionTickets ValidateSafrole len(E_T)=%d | len(validated_tickets)=%d. Err=%v", len(tickets), len(validated_tickets), err)
@@ -975,13 +974,12 @@ func (s *SafroleState) ApplyStateTransitionTickets(ctx context.Context, tickets 
 	}
 
 	// Process Extrinsic Tickets
-	t0 = time.Now()
 	fresh_randomness, err := s.GetFreshRandomness(header.EntropySource[:])
 	if err != nil {
 		fmt.Printf("GetFreshRandomness ERR %v (len=%d)", err, len(header.EntropySource[:]))
 		return *s, fmt.Errorf("GetFreshRandomness %v", err)
 	}
-	benchRec.Add("- ApplyStateTransitionTickets:GetFreshRandomness", time.Since(t0))
+	//benchRec.Add("- ApplyStateTransitionTickets:GetFreshRandomness", time.Since(t0))
 
 	s2, _, err := s.ValidateTicketTransition(targetJCE, fresh_randomness)
 	if err != nil {
@@ -1413,6 +1411,12 @@ func TrimTicketBodies(tickets []types.TicketBody) []types.TicketBody {
 }
 
 func (s *SafroleState) ChooseFallBackValidator() ([]common.Hash, error) {
+	// Check if there are any validators
+	if len(s.CurrValidators) == 0 {
+		panic("ChooseFallBackValidator: no current validators available")
+		return nil, fmt.Errorf("no validators available for fallback selection")
+	}
+
 	// get the bandersnatch keys of the validators
 	banderkeys := make([]common.Hash, 0)
 	for _, v := range s.CurrValidators {

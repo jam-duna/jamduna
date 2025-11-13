@@ -29,7 +29,7 @@ type Fuzzer struct {
 
 // NewFuzzer creates a new fuzzer instance.
 func NewFuzzer(storageDir string, reportDir string, socketPath string, fuzzerInfo PeerInfo, pvmBackend string) (*Fuzzer, error) {
-	sdbStorage, err := storage.NewStateDBStorage(storageDir, nil, nil)
+	sdbStorage, err := storage.NewStateDBStorage(storageDir, nil, nil, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize fuzzer's local storage: %w", err)
 	}

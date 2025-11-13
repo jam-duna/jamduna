@@ -548,7 +548,7 @@ func selectAllImportBlocksErrors(seed []byte, store *storage.StateDBStorage, mod
 	var aggregatedErrors []error
 	var mutatedSTFs []statedb.StateTransition
 	block := stf.Block
-	sdb, err := statedb.NewStateDBFromStateTransition(store, stf)
+	sdb, err := statedb.NewStateDBFromStateTransition(store, stf, 0)
 	if err != nil {
 		return 0, 0, 0, nil, nil
 	}

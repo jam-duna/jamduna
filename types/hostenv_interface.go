@@ -5,7 +5,6 @@ import (
 )
 
 type HostEnv interface {
-	GetID() uint16
 	GetService(service uint32) (*ServiceAccount, bool, error)
 	ReadServiceStorage(s uint32, k []byte) ([]byte, bool, error)
 	GetParentStateRoot() common.Hash

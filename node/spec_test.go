@@ -136,7 +136,7 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 	}
 	stateTransition.Block.Header = header.(types.BlockHeader)
 	levelDBPath := "/tmp/testdb"
-	store, err := storage.NewStateDBStorage(levelDBPath, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient())
+	store, err := storage.NewStateDBStorage(levelDBPath, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient(), 0)
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 

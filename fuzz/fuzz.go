@@ -74,7 +74,7 @@ func InitFuzzStorage(testDir string) (*storage.StateDBStorage, error) {
 		}
 	}
 
-	sdb_storage, err := storage.NewStateDBStorage(testDir, nil, nil)
+	sdb_storage, err := storage.NewStateDBStorage(testDir, nil, nil, 0)
 	if err != nil {
 		return nil, fmt.Errorf("error with storage: %v", err)
 	}

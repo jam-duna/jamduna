@@ -17,7 +17,6 @@ import (
 
 const (
 	CheckStateTransition = false
-	useMemory            = true
 )
 
 type LogMessage struct {
@@ -29,11 +28,10 @@ type LogMessage struct {
 
 // StateDBStorage struct to hold the LevelDB instance or in-memory map
 type StateDBStorage struct {
-	db       *leveldb.DB
-	memMap   map[string][]byte // In-memory storage when useMemory=true
-	mutex    sync.RWMutex      // Protects memMap for concurrent access
-	logChan  chan LogMessage
-	memBased bool // Track whether this instance is memory-based
+	db      *leveldb.DB
+	memMap  map[string][]byte // In-memory storage when useMemory=true
+	mutex   sync.RWMutex      // Protects memMap for concurrent access
+	logChan chan LogMessage
 
 	// JAM Data Availability interface
 	jamda JAMDA
@@ -58,28 +56,7 @@ const (
 
 // NewStateDBStorage initializes a new LevelDB store
 // Uses memory-based storage if useMemory is true, otherwise uses file-based storage
-func NewStateDBStorage(path string, jamda JAMDA, telemetryClient *telemetry.TelemetryClient) (*StateDBStorage, error) {
-	if useMemory {
-		return newMemoryStateDBStorage(jamda, telemetryClient)
-	}
-	return newFileStateDBStorage(path, jamda, telemetryClient)
-}
-
-// newMemoryStateDBStorage creates a memory-only storage using Go map (internal helper)
-func newMemoryStateDBStorage(jamda JAMDA, telemetryClient *telemetry.TelemetryClient) (*StateDBStorage, error) {
-	s := StateDBStorage{
-		db:              nil, // No LevelDB when using pure memory
-		memMap:          make(map[string][]byte),
-		logChan:         make(chan LogMessage, 100),
-		memBased:        true,
-		jamda:           jamda,
-		telemetryClient: telemetryClient,
-	}
-	return &s, nil
-}
-
-// newFileStateDBStorage creates a file-based storage (internal helper)
-func newFileStateDBStorage(path string, jamda JAMDA, telemetryClient *telemetry.TelemetryClient) (*StateDBStorage, error) {
+func NewStateDBStorage(path string, jamda JAMDA, telemetryClient *telemetry.TelemetryClient, nodeID uint16) (*StateDBStorage, error) {
 	db, err := leveldb.OpenFile(path, nil)
 	if err != nil {
 		// Fallback to memory storage if file fails
@@ -93,9 +70,9 @@ func newFileStateDBStorage(path string, jamda JAMDA, telemetryClient *telemetry.
 	s := StateDBStorage{
 		db:              db,
 		logChan:         make(chan LogMessage, 100),
-		memBased:        false,
 		jamda:           jamda,
 		telemetryClient: telemetryClient,
+		NodeID:          nodeID,
 	}
 	return &s, nil
 }
@@ -103,11 +80,6 @@ func newFileStateDBStorage(path string, jamda JAMDA, telemetryClient *telemetry.
 // GetJAMDA returns the JAMDA interface instance
 func (s *StateDBStorage) GetJAMDA() JAMDA {
 	return s.jamda
-}
-
-// IsMemoryBased returns whether this storage instance is using memory-based storage
-func (store *StateDBStorage) IsMemoryBased() bool {
-	return store.memBased
 }
 
 // GetTelemetryClient returns the telemetry client for emitting events
@@ -122,18 +94,6 @@ func (store *StateDBStorage) SetTelemetryClient(client *telemetry.TelemetryClien
 
 // ReadKV reads a value for a given key from the storage
 func (store *StateDBStorage) ReadKV(key common.Hash) ([]byte, error) {
-	if store.memBased {
-		store.mutex.RLock()
-		defer store.mutex.RUnlock()
-		data, exists := store.memMap[string(key.Bytes())]
-		if !exists {
-			return nil, fmt.Errorf("ReadKV %v: key not found", key)
-		}
-		// Return a copy to prevent external modifications
-		result := make([]byte, len(data))
-		copy(result, data)
-		return result, nil
-	}
 
 	data, err := store.db.Get(key.Bytes(), nil)
 	if err != nil {
@@ -144,57 +104,23 @@ func (store *StateDBStorage) ReadKV(key common.Hash) ([]byte, error) {
 
 // WriteKV writes a key-value pair to the storage
 func (store *StateDBStorage) WriteKV(key common.Hash, value []byte) error {
-	if store.memBased {
-		store.mutex.Lock()
-		defer store.mutex.Unlock()
-		// Store a copy to prevent external modifications
-		valueCopy := make([]byte, len(value))
-		copy(valueCopy, value)
-		store.memMap[string(key.Bytes())] = valueCopy
-		return nil
-	}
 
 	return store.db.Put(key.Bytes(), value, nil)
 }
 
 // DeleteK deletes a key from the storage
 func (store *StateDBStorage) DeleteK(key common.Hash) error {
-	if store.memBased {
-		store.mutex.Lock()
-		defer store.mutex.Unlock()
-		delete(store.memMap, string(key.Bytes()))
-		return nil
-	}
 
 	return store.db.Delete(key.Bytes(), nil)
 }
 
 // Close closes the storage
 func (store *StateDBStorage) Close() error {
-	if store.memBased {
-		store.mutex.Lock()
-		defer store.mutex.Unlock()
-		// Clear the map
-		store.memMap = nil
-		return nil
-	}
 
 	return store.db.Close()
 }
 
 func (store *StateDBStorage) ReadRawKV(key []byte) ([]byte, bool, error) {
-	if store.memBased {
-		store.mutex.RLock()
-		defer store.mutex.RUnlock()
-		data, exists := store.memMap[string(key)]
-		if !exists {
-			return nil, false, nil
-		}
-		// Return a copy to prevent external modifications
-		result := make([]byte, len(data))
-		copy(result, data)
-		return result, true, nil
-	}
 
 	data, err := store.db.Get(key, nil)
 	if err == leveldb.ErrNotFound {
@@ -206,25 +132,6 @@ func (store *StateDBStorage) ReadRawKV(key []byte) ([]byte, bool, error) {
 }
 
 func (store *StateDBStorage) ReadRawKVWithPrefix(prefix []byte) ([][2][]byte, error) {
-	if store.memBased {
-		store.mutex.RLock()
-		defer store.mutex.RUnlock()
-
-		var keyvals [][2][]byte
-
-		for k, v := range store.memMap {
-			if bytes.HasPrefix([]byte(k), prefix) {
-				// Make copies to prevent external modifications
-				keyCopy := make([]byte, len(k))
-				copy(keyCopy, []byte(k))
-				valueCopy := make([]byte, len(v))
-				copy(valueCopy, v)
-				keyval := [2][]byte{keyCopy, valueCopy}
-				keyvals = append(keyvals, keyval)
-			}
-		}
-		return keyvals, nil
-	}
 
 	iter := store.db.NewIterator(nil, nil)
 	defer iter.Release()
@@ -246,26 +153,11 @@ func (store *StateDBStorage) ReadRawKVWithPrefix(prefix []byte) ([][2][]byte, er
 }
 
 func (store *StateDBStorage) WriteRawKV(key []byte, value []byte) error {
-	if store.memBased {
-		store.mutex.Lock()
-		defer store.mutex.Unlock()
-		// Store copies to prevent external modifications
-		valueCopy := make([]byte, len(value))
-		copy(valueCopy, value)
-		store.memMap[string(key)] = valueCopy
-		return nil
-	}
 
 	return store.db.Put(key, value, nil)
 }
 
 func (store *StateDBStorage) DeleteRawK(key []byte) error {
-	if store.memBased {
-		store.mutex.Lock()
-		defer store.mutex.Unlock()
-		delete(store.memMap, string(key))
-		return nil
-	}
 
 	return store.db.Delete(key, nil)
 }

@@ -421,7 +421,6 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, inputs []types.AccumulateInp
 		log.Error(vm.logging, "ExecuteAccumulate - ServiceAccount not found in X.U.ServiceAccounts", "s", s, "X.U.ServiceAccounts", X.U.ServiceAccounts)
 		return
 	}
-	log.Info(vm.logging, "ExecuteAccumulate", "service_index", s)
 	x_s.Mutable = true
 	vm.X.U.ServiceAccounts[s] = x_s
 	vm.ServiceAccount = x_s

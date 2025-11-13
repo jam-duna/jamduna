@@ -213,10 +213,6 @@ func (j *JamState) newPartialState() *types.PartialState {
 	}
 }
 
-func (j *JamState) GetID() uint16 {
-	return j.SafroleState.Id
-}
-
 func (j *JamState) GetValidatorStats() string {
 	out := ""
 	for i := 0; i < types.TotalValidators; i++ {

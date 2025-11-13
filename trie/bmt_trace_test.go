@@ -127,8 +127,7 @@ func TestBPTE2E(t *testing.T) {
 			value := kv.Value
 			tree.Insert(key, value)
 		}
-
-		actualRoot := tree.GetRoot()
+		actualRoot, _ := tree.Flush()
 		if actualRoot != expectedRoot {
 			t.Errorf("%s: State root mismatch!\n  Got:      %s\n  Expected: %s", filename, actualRoot, expectedRoot)
 			db.Close()

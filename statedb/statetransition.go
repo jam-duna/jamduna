@@ -191,7 +191,6 @@ func CheckStateTransition(storage *storage.StateDBStorage, st *StateTransition, 
 	if err != nil {
 		return err
 	}
-	s0.Id = storage.NodeID
 	s0.AncestorSet = ancestorSet
 	s1, err := ApplyStateTransitionFromBlock(0, s0, context.Background(), &(st.Block), nil, pvmBackend)
 	if err != nil {
@@ -348,9 +347,7 @@ func HandleDiffs(diffs map[string]DiffState) {
 			stateType = m
 		} else {
 			keyFirstByte := common.FromHex(key)[0]
-			if tmp, ok := StateKeyMap[keyFirstByte]; ok {
-				stateType = tmp
-			}
+			stateType = fmt.Sprintf("C%d", keyFirstByte)
 		}
 
 		fmt.Println(strings.Repeat("=", 40))

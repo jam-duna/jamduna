@@ -258,7 +258,7 @@ func main() {
 		}
 	}
 	// Make disputes
-	store, err := storage.NewStateDBStorage("/tmp/disputes", nil, nil)
+	store, err := storage.NewStateDBStorage(NewStateDBStorage("/tmp/disputes", nil, nil), nil, nil, 0)
 	if err != nil {
 		log.Fatalf("Error creating storage: %v", err)
 	}

@@ -165,16 +165,6 @@ func newEmptyStateDB(sdb *storage.StateDBStorage) (statedb *StateDB) {
 	return statedb
 }
 
-func NewCleanStateDB(sdb *storage.StateDBStorage, id uint16) *StateDB {
-	statedb := new(StateDB)
-	statedb.SetStorage(sdb)
-	statedb.JamState = NewJamState() // Need to create JamState before SetID
-	statedb.SetID(id)
-	statedb.trie = trie.NewMerkleTree(nil, sdb)
-	statedb.logChan = make(chan storage.LogMessage, 100)
-	return statedb
-}
-
 // state-key constructor functions C(X)
 const (
 	C1  = "CoreAuthPool"
@@ -194,25 +184,6 @@ const (
 	C15 = "AccumulationHistory"
 	C16 = "AccumulationOutputs"
 )
-
-var StateKeyMap = map[byte]string{
-	0x01: "c1",
-	0x02: "c2",
-	0x03: "c3",
-	0x04: "c4",
-	0x05: "c5",
-	0x06: "c6",
-	0x07: "c7",
-	0x08: "c8",
-	0x09: "c9",
-	0x0A: "c10",
-	0x0B: "c11",
-	0x0C: "c12",
-	0x0D: "c13",
-	0x0E: "c14",
-	0x0F: "c15",
-	0x10: "c16",
-}
 
 // Initial services
 const (
@@ -253,10 +224,6 @@ func (s *StateDB) GetTentativeStateRoot() common.Hash {
 	return t.GetRoot()
 }
 
-func (s *StateDB) SetTrie(t *trie.MerkleTree) {
-	s.trie = t
-}
-
 func (s *StateDB) GetTrie() *trie.MerkleTree {
 	return s.trie
 }
@@ -284,99 +251,38 @@ func (s *StateDB) GetStateUpdates() *types.StateUpdate {
 func (s *StateDB) SetJamState(jamState *JamState) {
 	s.JamState = jamState
 }
-func (s *StateDB) RecoverJamState(stateRoot common.Hash) error {
-	// Now read C1.....C15 from the trie and put it back into JamState
-	t, err := s.CopyTrieState(stateRoot)
+
+// Reads C1.....C16 and puts it into JamState
+func (s *StateDB) InitTrieAndLoadJamState(stateRoot common.Hash) error {
+	t, err := trie.InitMerkleTreeFromHash(stateRoot, s.sdb)
 	if err != nil {
 		return err
 	}
 
-	coreAuthPoolEncode, err := t.GetState(C1)
+	// Batch read all 16 states in a single operation
+	states, err := t.GetStates()
 	if err != nil {
-		log.Crit(log.SDB, "Error reading C1 CoreAuthPool from trie", err)
-	}
-	authQueueEncode, err := t.GetState(C2)
-	if err != nil {
-		log.Crit(log.SDB, "Error reading C2 AuthQueue from trie: %v\n", err)
-	}
-	recentBlocksEncode, err := t.GetState(C3)
-	if err != nil {
-		log.Crit(log.SDB, "Error reading C3 RecentBlocks from trie: %v\n", err)
-	}
-	safroleStateEncode, err := t.GetState(C4)
-	if err != nil {
-		log.Crit(log.SDB, "Error reading C4 SafroleState from trie: %v\n", err)
-	}
-	disputeStateEncode, err := t.GetState(C5)
-	if err != nil {
-		log.Crit(log.SDB, "Error reading C5 DisputeState from trie: %v\n", err)
-	}
-	entropyEncode, err := t.GetState(C6)
-	if err != nil {
-		log.Crit(log.SDB, "Error reading C6 Entropy from trie: %v\n", err)
-	}
-	DesignedEpochValidatorsEncode, err := t.GetState(C7)
-	if err != nil {
-		log.Crit(log.SDB, "Error reading C7 NextEpochValidators from trie: %v\n", err)
-	}
-	currEpochValidatorsEncode, err := t.GetState(C8)
-	if err != nil {
-		log.Crit(log.SDB, "Error reading C8 CurrentEpochValidators from trie: %v\n", err)
-	}
-	priorEpochValidatorEncode, err := t.GetState(C9)
-	if err != nil {
-		log.Crit(log.SDB, "Error reading C9 PriorEpochValidators from trie: %v\n", err)
-	}
-	availability_assignmentEncode, err := t.GetState(C10)
-	if err != nil {
-		log.Crit(log.SDB, "Error reading C10 AvailabilityAssignments from trie: %v\n", err)
-	}
-	mostRecentBlockTimeSlotEncode, err := t.GetState(C11)
-	if err != nil {
-		log.Crit(log.SDB, "Error reading C11 MostRecentBlockTimeSlot from trie: %v\n", err)
-	}
-	privilegedServiceIndicesEncode, err := t.GetState(C12)
-	if err != nil {
-		log.Crit(log.SDB, "Error reading C12 PrivilegedServiceIndices from trie: %v\n", err)
-	}
-	piEncode, err := t.GetState(C13)
-	if err != nil {
-		log.Crit(log.SDB, "Error reading C13 ActiveValidator from trie: %v\n", err)
-	}
-	accumulateQueueEncode, err := t.GetState(C14)
-	if err != nil {
-		log.Crit(log.SDB, "Error reading C14 accunulateQueue from trie: %v\n", err)
-	}
-	accumulateHistoryEncode, err := t.GetState(C15)
-	if err != nil {
-		log.Crit(log.SDB, "Error reading C15 accunulateHistory from trie: %v\n", err)
-	}
-	accumulateOutputsEncode, err := t.GetState(C16)
-	if err != nil {
-		log.Crit(log.SDB, "Error reading C16 accunulateOutputs from trie: %v\n", err)
+		log.Crit(log.SDB, "Error reading states from trie", err)
 	}
 
-	//Decode(authQueueEncode) -> AuthorizationQueue
-	//set AuthorizationQueue back to JamState
-
+	// Load states into JamState (indices 0-15 map to C1-C16)
 	d := s.GetJamState()
-	d.SetAuthPool(coreAuthPoolEncode)
-	d.SetAuthQueue(authQueueEncode)
-	d.SetRecentBlocks(recentBlocksEncode)
-	d.SetSafroleState(safroleStateEncode)
-	d.SetDisputesState(disputeStateEncode)
-	d.SetEntropy(entropyEncode)
-	d.SetDesignatedValidators(DesignedEpochValidatorsEncode)
-	d.SetCurrEpochValidators(currEpochValidatorsEncode)
-	d.SetPriorEpochValidators(priorEpochValidatorEncode)
-	d.SetMostRecentBlockTimeSlot(mostRecentBlockTimeSlotEncode)
-	d.SetAvailabilityAssignments(availability_assignmentEncode)
-
-	d.SetPrivilegedServicesIndices(privilegedServiceIndicesEncode)
-	d.SetPi(piEncode)
-	d.SetAccumulateQueue(accumulateQueueEncode)
-	d.SetAccumulateHistory(accumulateHistoryEncode)
-	d.SetAccumulateOutputs(accumulateOutputsEncode)
+	d.SetAuthPool(states[0])                   // C1
+	d.SetAuthQueue(states[1])                  // C2
+	d.SetRecentBlocks(states[2])               // C3
+	d.SetSafroleState(states[3])               // C4
+	d.SetDisputesState(states[4])              // C5
+	d.SetEntropy(states[5])                    // C6
+	d.SetDesignatedValidators(states[6])       // C7
+	d.SetCurrEpochValidators(states[7])        // C8
+	d.SetPriorEpochValidators(states[8])       // C9
+	d.SetAvailabilityAssignments(states[9])    // C10
+	d.SetMostRecentBlockTimeSlot(states[10])   // C11
+	d.SetPrivilegedServicesIndices(states[11]) // C12
+	d.SetPi(states[12])                        // C13
+	d.SetAccumulateQueue(states[13])           // C14
+	d.SetAccumulateHistory(states[14])         // C15
+	d.SetAccumulateOutputs(states[15])         // C16
 	s.SetJamState(d)
 
 	// Because we have safrolestate as internal state, JamState is NOT enough.
@@ -385,12 +291,9 @@ func (s *StateDB) RecoverJamState(stateRoot common.Hash) error {
 	d.SafroleState.TicketsOrKeys = d.SafroleBasicState.SlotSealerSeries                  // γs: Current epoch's slot-sealer series (epoch N)
 	d.SafroleState.NextValidators = types.Validators(d.SafroleBasicState.NextValidators) // γk: Next epoch's validators (epoch N+1)
 
-	// Update the trie and state root to point to the recovered state
-	s.SetTrie(t)
-	s.StateRoot = t.GetRoot()
-	if s.StateRoot.Hex() != stateRoot.Hex() {
-		return fmt.Errorf("StateRoot mismatch after recovery: actual=%s, expected=%s", s.StateRoot.Hex(), stateRoot.Hex())
-	}
+	// Update the trie to point to the recovered state
+	s.trie = t
+	s.StateRoot = stateRoot
 	return nil
 }
 
@@ -412,58 +315,44 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	benchRec.Add("- UpdateTrieState:GetSafroleBasicState", time.Since(t0))
 
 	t0 = time.Now()
-	safroleStateEncode := sb.GetSafroleStateBytes()
-	entropyEncode := sf.GetEntropyBytes()
-	nextnextEpochValidatorsEncode := sf.GetNextNextEpochValidatorsBytes()
-	currEpochValidatorsEncode := sf.GetCurrEpochValidatorsBytes()
-	priorEpochValidatorEncode := sf.GetPriorEpochValidatorsBytes()
-	mostRecentBlockTimeSlotEncode := sf.GetMostRecentBlockTimeSlotBytes()
 	d := s.GetJamState()
-	disputeState := d.GetDisputesStateBytes()
-	availability_assignmentEncode := d.GetAvailabilityAssignmentsBytes()
-	piEncode := d.GetPiBytes()
-	coreAuthPoolEncode := d.GetAuthPoolBytes()
-	authQueueEncode := d.GetAuthQueueBytes()
-	privilegedServiceIndicesEncode := d.GetPrivilegedServicesIndicesBytes()
-	recentBlocksEncode := d.GetRecentBlocksBytes()
-	accumulateQueueEncode := d.GetAccumulationQueueBytes()
-	accumulateHistoryEncode := d.GetAccumulationHistoryBytes()
-	accumulateOutputsEncode := d.GetAccumulationOutputsBytes()
+	newStates := [16][]byte{
+		d.GetAuthPoolBytes(),                  // C1
+		d.GetAuthQueueBytes(),                 // C2
+		d.GetRecentBlocksBytes(),              // C3
+		sb.GetSafroleStateBytes(),             // C4
+		d.GetDisputesStateBytes(),             // C5
+		sf.GetEntropyBytes(),                  // C6
+		sf.GetNextNextEpochValidatorsBytes(),  // C7
+		sf.GetCurrEpochValidatorsBytes(),      // C8
+		sf.GetPriorEpochValidatorsBytes(),     // C9
+		d.GetAvailabilityAssignmentsBytes(),   // C10
+		sf.GetMostRecentBlockTimeSlotBytes(),  // C11
+		d.GetPrivilegedServicesIndicesBytes(), // C12
+		d.GetPiBytes(),                        // C13
+		d.GetAccumulationQueueBytes(),         // C14
+		d.GetAccumulationHistoryBytes(),       // C15
+		d.GetAccumulationOutputsBytes(),       // C16
+	}
 	benchRec.Add("- UpdateTrieState:Codec", time.Since(t0))
 
 	t := s.GetTrie()
-
-	t0 = time.Now()
-	t.SetState(C1, coreAuthPoolEncode)
-	t.SetState(C2, authQueueEncode)
-	t.SetState(C3, recentBlocksEncode)
-	t.SetState(C4, safroleStateEncode)
-	t.SetState(C5, disputeState)
-	t.SetState(C6, entropyEncode)
-	t.SetState(C7, nextnextEpochValidatorsEncode)
-	t.SetState(C8, currEpochValidatorsEncode)
-	t.SetState(C9, priorEpochValidatorEncode)
-	t.SetState(C10, availability_assignmentEncode)
-	t.SetState(C11, mostRecentBlockTimeSlotEncode)
-	t.SetState(C12, privilegedServiceIndicesEncode)
-	t.SetState(C13, piEncode)
-	t.SetState(C14, accumulateQueueEncode)
-	t.SetState(C15, accumulateHistoryEncode)
-	t.SetState(C16, accumulateOutputsEncode)
-	benchRec.Add("- UpdateTrieState:SetState", time.Since(t0))
-
-	updated_root := t.GetRoot()
-
-	t0 = time.Now()
-	verify := false
-	if verify {
-		t2, _ := trie.InitMerkleTreeFromHash(updated_root.Bytes(), s.sdb)
-		checkingResult, err := CheckingAllState(t, t2)
-		if !checkingResult || err != nil {
-			log.Crit(log.SDB, "CheckingAllState", "err", err)
-		}
-		benchRec.Add("- UpdateTrieState:Verify", time.Since(t0))
+	t.SetStates(newStates)
+	updated_root, err := t.Flush()
+	if err != nil {
+		log.Error(log.SDB, "UpdateTrieState: Flush failed", "err", err)
 	}
+
+	// Log validator state for debugging
+	safrole := s.GetSafroleState()
+	log.Info(log.SDB, "Flush-ValidatorState",
+		"n", s.sdb.NodeID,
+		"prev", len(safrole.PrevValidators),
+		"curr", len(safrole.CurrValidators),
+		"next", len(safrole.NextValidators),
+		"designated", len(safrole.DesignatedValidators),
+		"timeslot", safrole.Timeslot)
+
 	return updated_root
 }
 
@@ -472,9 +361,9 @@ func (s *StateDB) GetAllKeyValues() []KeyVal {
 	startKey := common.Hex2Bytes("0x0000000000000000000000000000000000000000000000000000000000000000")
 	endKey := common.Hex2Bytes("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
 	maxSize := uint32(math.MaxUint32)
-	t, err := s.CopyTrieState(s.StateRoot)
+	t, err := trie.InitMerkleTreeFromHash(s.StateRoot, s.sdb)
 	if err != nil {
-		log.Crit(log.SDB, "GetAllKeyValues: failed to copy trie state", "error", err)
+		log.Crit(log.SDB, "GetAllKeyValues: failed to init trie from hash", "error", err)
 		return []KeyVal{}
 	}
 	foundKeyVal, _, _ := t.GetStateByRange(startKey, endKey, maxSize)
@@ -534,7 +423,6 @@ func (s *StateDB) UpdateAllTrieState(genesis string) common.Hash {
 	json.Unmarshal(snapshotBytesRaw, &snapshotRaw)
 
 	t := s.GetTrie()
-	verify := true
 
 	for _, kv := range snapshotRaw.KeyVals {
 		t.SetRawKeyVal(kv.Key, kv.Value)
@@ -546,13 +434,6 @@ func (s *StateDB) UpdateAllTrieState(genesis string) common.Hash {
 		log.Crit(log.SDB, "UpdateAllTrieState:GetSafrole")
 	}
 
-	if verify {
-		t2, _ := trie.InitMerkleTreeFromHash(updated_root.Bytes(), s.sdb)
-		checkingResult, err := CheckingAllState(t, t2)
-		if !checkingResult || err != nil {
-			log.Crit(log.SDB, "UpdateAllTrieState:CheckingAllState", "err", err)
-		}
-	}
 	return updated_root
 }
 
@@ -567,7 +448,12 @@ func (s *StateDB) UpdateAllTrieStateRaw(snapshotRaw StateSnapshotRaw) common.Has
 	for _, kv := range snapshotRaw.KeyVals {
 		s.trie.SetRawKeyVal(kv.Key, kv.Value)
 	}
-	return s.trie.GetRoot()
+	// Flush all batched writes to levelDB and return root
+	root, err := s.trie.Flush()
+	if err != nil {
+		log.Error(log.SDB, "UpdateAllTrieStateRaw: Flush failed", "err", err)
+	}
+	return root
 }
 
 func (s *StateDB) GetSafroleState() *SafroleState {
@@ -575,95 +461,16 @@ func (s *StateDB) GetSafroleState() *SafroleState {
 }
 
 func CheckingAllState(t *trie.MerkleTree, t2 *trie.MerkleTree) (bool, error) {
-	c1a, _ := t.GetState(C1)
-	c1b, _ := t2.GetState(C1)
-	if !common.CompareBytes(c1a, c1b) {
-		log.Error(log.SDB, "CheckingAllState: C1 is not the same")
-		return false, fmt.Errorf("C1 is not the same")
-	}
-	c2a, _ := t.GetState(C2)
-	c2b, _ := t2.GetState(C2)
-	if !common.CompareBytes(c2a, c2b) {
-		log.Error(log.SDB, "CheckingAllState: C2 is not the same")
-		return false, fmt.Errorf("C2 is not the same")
-	}
-	c3a, _ := t.GetState(C3)
-	c3b, _ := t2.GetState(C3)
-	if !common.CompareBytes(c3a, c3b) {
-		log.Error(log.SDB, "CheckingAllState: C3 is not the same")
-		return false, fmt.Errorf("C3 is not the same")
-	}
-	c4a, _ := t.GetState(C4)
-	c4b, _ := t2.GetState(C4)
-	if !common.CompareBytes(c4a, c4b) {
-		log.Error(log.SDB, "CheckingAllState: C4 is not the same")
-		return false, fmt.Errorf("C4 is not the same")
-	}
-	c5a, _ := t.GetState(C5)
-	c5b, _ := t2.GetState(C5)
-	if !common.CompareBytes(c5a, c5b) {
-		log.Error(log.SDB, "CheckingAllState: C5 is not the same")
-		return false, fmt.Errorf("C5 is not the same")
-	}
-	c6a, _ := t.GetState(C6)
-	c6b, _ := t2.GetState(C6)
-	if !common.CompareBytes(c6a, c6b) {
-		log.Error(log.SDB, "CheckingAllState: C6 is not the same")
-		return false, fmt.Errorf("C6 is not the same")
-	}
-	c7a, _ := t.GetState(C7)
-	c7b, _ := t2.GetState(C7)
-	if !common.CompareBytes(c7a, c7b) {
-		log.Error(log.SDB, "CheckingAllState: C7 is not the same")
-		return false, fmt.Errorf("C7 is not the same")
-	}
-	c8a, _ := t.GetState(C8)
-	c8b, _ := t2.GetState(C8)
-	if !common.CompareBytes(c8a, c8b) {
-		log.Error(log.SDB, "CheckingAllState: C8 is not the same")
-		return false, fmt.Errorf("C8 is not the same")
-	}
-	c9a, _ := t.GetState(C9)
-	c9b, _ := t2.GetState(C9)
-	if !common.CompareBytes(c9a, c9b) {
-		log.Error(log.SDB, "CheckingAllState: C9 is not the same")
-		return false, fmt.Errorf("C9 is not the same")
-	}
-	c10a, _ := t.GetState(C10)
-	c10b, _ := t2.GetState(C10)
-	if !common.CompareBytes(c10a, c10b) {
-		log.Error(log.SDB, "CheckingAllState: C10 is not the same")
-		return false, fmt.Errorf("C10 is not the same")
-	}
-	c11a, _ := t.GetState(C11)
-	c11b, _ := t2.GetState(C11)
-	if !common.CompareBytes(c11a, c11b) {
-		log.Error(log.SDB, "CheckingAllState: C11 is not the same")
-		return false, fmt.Errorf("C11 is not the same")
-	}
-	c12a, _ := t.GetState(C12)
-	c12b, _ := t2.GetState(C12)
-	if !common.CompareBytes(c12a, c12b) {
-		log.Error(log.SDB, "CheckingAllState: C12 is not the same")
-		return false, fmt.Errorf("C12 is not the same")
-	}
-	c13a, _ := t.GetState(C13)
-	c13b, _ := t2.GetState(C13)
-	if !common.CompareBytes(c13a, c13b) {
-		log.Error(log.SDB, "CheckingAllState: C13 is not the same")
-		return false, fmt.Errorf("C13 is not the same")
-	}
-	c14a, _ := t.GetState(C14)
-	c14b, _ := t2.GetState(C14)
-	if !common.CompareBytes(c14a, c14b) {
-		log.Error(log.SDB, "CheckingAllState: C14 is not the same")
-		return false, fmt.Errorf("C14 is not the same")
-	}
-	c15a, _ := t.GetState(C15)
-	c15b, _ := t2.GetState(C15)
-	if !common.CompareBytes(c15a, c15b) {
-		log.Error(log.SDB, "CheckingAllState: C15 is not the same")
-		return false, fmt.Errorf("C15 is not the same")
+	statesA, _ := t.GetStates()
+	statesB, _ := t2.GetStates()
+
+	stateNames := []string{"C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10", "C11", "C12", "C13", "C14", "C15", "C16"}
+
+	for i := 0; i < 16; i++ {
+		if !common.CompareBytes(statesA[i], statesB[i]) {
+			log.Error(log.SDB, "CheckingAllState: state mismatch", "state", stateNames[i])
+			return false, fmt.Errorf("%s is not the same", stateNames[i])
+		}
 	}
 	return true, nil
 }
@@ -725,26 +532,6 @@ func DumpStateDBKeyValues(db *StateDB, description string, nodeID uint16, showDu
 	fmt.Print(kvDump.String())
 }
 
-func NewStateDBFromBlock(sdb *storage.StateDBStorage, block *types.Block) (statedb *StateDB, err error) {
-	statedb = newEmptyStateDB(sdb)
-	statedb.Finalized = false
-	statedb.trie = trie.NewMerkleTree(nil, sdb)
-	statedb.JamState = NewJamState()
-	statedb.Block = block
-	statedb.ParentHeaderHash = block.Header.ParentHeaderHash
-	statedb.StateRoot = block.Header.ParentStateRoot
-	if err := statedb.RecoverJamState(statedb.StateRoot); err != nil {
-		return nil, fmt.Errorf("failed to recover state for block %s: %w", block.Header.Hash().Hex(), err)
-	}
-	// Because we have safrolestate as internal state, JamState is NOT enough.
-	s := statedb.JamState
-	s.SafroleState.NextEpochTicketsAccumulator = s.SafroleBasicState.TicketAccumulator   // γa: Ticket accumulator for the next epoch (epoch N+1) DONE
-	s.SafroleState.TicketsVerifierKey = s.SafroleBasicState.RingCommitment               // γz: Epoch’s root, a Bandersnatch ring root composed with one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
-	s.SafroleState.TicketsOrKeys = s.SafroleBasicState.SlotSealerSeries                  // γs: Current epoch’s slot-sealer series (epoch N)
-	s.SafroleState.NextValidators = types.Validators(s.SafroleBasicState.NextValidators) // γk: Next epoch’s validators (epoch N+1)
-	return statedb, nil
-}
-
 func NewStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *StateDB, err error) {
 	return newStateDB(sdb, blockHash)
 }
@@ -752,15 +539,12 @@ func NewStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 func NewStateDBFromStateRoot(stateRoot common.Hash, sdb *storage.StateDBStorage) (recoveredStateDB *StateDB, err error) {
 	recoveredStateDB = newEmptyStateDB(sdb)
 	recoveredStateDB.Finalized = true // Historical state is always finalized
-	//recoveredStateDB.StateRoot = stateRoot
 	recoveredStateDB.JamState = NewJamState()
 
-	err = recoveredStateDB.RecoverJamState(stateRoot)
+	err = recoveredStateDB.InitTrieAndLoadJamState(stateRoot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to recover state from root %s: %w", stateRoot.Hex(), err)
 	}
-
-	//DumpStateDBKeyValues(recoveredStateDB, "Recovered", 0, 0)
 
 	// Verify that recovery succeeded by checking if trie was initialized
 	if recoveredStateDB.trie == nil {
@@ -805,14 +589,6 @@ func newStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 	return statedb, nil
 }
 
-func (s *StateDB) CopyTrieState(stateRoot common.Hash) (*trie.MerkleTree, error) {
-	t, err := trie.InitMerkleTreeFromHash(stateRoot.Bytes(), s.sdb)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize trie from state root %s: %w", stateRoot.Hex(), err)
-	}
-	return t, nil
-}
-
 // Copy generates a copy of the StateDB
 func (s *StateDB) Copy() (newStateDB *StateDB) {
 	// Create a new instance of StateDB
@@ -820,9 +596,9 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 	tmpAvailableWorkReport := make([]types.WorkReport, len(s.AvailableWorkReport))
 	copy(tmpAvailableWorkReport, s.AvailableWorkReport)
 
-	copiedTrie, err := s.CopyTrieState(s.StateRoot)
+	copiedTrie, err := trie.InitMerkleTreeFromHash(s.StateRoot, s.sdb)
 	if err != nil {
-		log.Crit(log.SDB, "Copy: failed to copy trie state", "error", err)
+		log.Crit(log.SDB, "Copy: failed to init trie from hash", "error", err)
 		return nil
 	}
 
@@ -943,9 +719,8 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 				mode = "fallback"
 			}
 			log.Info(log.SDB, "Authored Block",
-				"mode", mode,
-				"AUTHOR", s.Id,
 				"n", s.Id,
+				"AUTHOR", s.Id,
 				"s+", newStateDB.StateRoot.String_short(),
 				"p", common.Str(proposedBlk.GetParentHeaderHash()),
 				//"s", common.Str(proposedBlk.Header.ParentStateRoot),
@@ -953,6 +728,7 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 				"e'", currEpoch,
 				"m'", currPhase,
 				"len(γ_a')", len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator),
+				"mode", mode,
 				"blk", proposedBlk.Str())
 			return true, proposedBlk, newStateDB, nil
 		}
@@ -962,15 +738,6 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 	//waiting for block ... potentially submit ticket here
 	log.Debug(log.B, "ProcessState:NotAuthorizedBlockRefiner", "currJCE", currJCE, "targetJCE", targetJCE, "credential", credential.BandersnatchPub.Hash(), "ticketLen", len(ticketIDs))
 	return false, nil, nil, nil
-}
-
-func (s *StateDB) GetID() uint16 {
-	return s.Id
-}
-
-func (s *StateDB) SetID(id uint16) {
-	s.Id = id
-	s.JamState.SafroleState.Id = id
 }
 
 func (s *StateDB) WriteServiceStorage(service uint32, k []byte, v []byte) {
@@ -988,11 +755,8 @@ func (s *StateDB) WriteServicePreimageLookup(service uint32, blob_hash common.Ha
 }
 func (s *StateDB) DeleteServicePreimageKey(service uint32, blob_hash common.Hash) error {
 	tree := s.GetTrie()
-	err := tree.DeletePreImageBlob(service, blob_hash)
-	if err != nil {
-		log.Error(log.SDB, "DeleteServicePreimageKey:DeletePreImageBlob", "blob_hash", blob_hash, "err", err)
-		return err
-	}
+	tree.DeletePreImageBlob(service, blob_hash)
+
 	return nil
 }
 

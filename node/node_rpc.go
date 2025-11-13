@@ -1,7 +1,6 @@
 package node
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -724,47 +723,6 @@ func (j *Jam) WorkPackage(req []string, res *string) error {
 
 	workReport := si.WorkReport
 	*res = workReport.String()
-	return nil
-}
-
-func (j *Jam) TraceBlock(req []string, res *string) error {
-	if len(req) != 1 {
-		return fmt.Errorf("invalid number of arguments")
-	}
-	headerHash := common.HexToHash(req[0])
-	sblk, err := j.NodeContent.GetBlockByHeaderHash(headerHash)
-	if err != nil {
-		return fmt.Errorf("failed to get block by header hash %s: %w", headerHash.String(), err)
-	}
-	log.RecordLogs()
-	log.EnableModule(log.PvmAuthoring)
-	log.EnableModule(log.GeneralAuthoring)
-
-	block := &types.Block{
-		Header:    sblk.Header,
-		Extrinsic: sblk.Extrinsic,
-	}
-	sdb, err := statedb.NewStateDBFromBlock(j.NodeContent.store, block)
-	if err != nil {
-		return fmt.Errorf("NewStateDBBlock %s %s", headerHash.String(), err)
-	}
-
-	sdb.Id = block.Header.AuthorIndex
-
-	ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
-	defer cancel()
-	s1, err := statedb.ApplyStateTransitionFromBlock(0, sdb, ctx, block, nil, statedb.BackendInterpreter)
-	if err != nil {
-		log.Error(log.Node, "TraceBlock", "err", err)
-		return err
-	}
-	logs, err := log.GetRecordedLogs()
-	if err != nil {
-		log.Error(log.Node, "TraceBlock", "block", block.String(), "len(logs)", len(logs), "err", err)
-		return err
-	}
-	log.Info(log.Node, "TraceBlock", "block", block.String(), "len(logs)", len(logs), "s1.StateRoot", s1.StateRoot)
-	*res = string(logs)
 	return nil
 }
 

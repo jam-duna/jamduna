@@ -10,101 +10,18 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
-	"unsafe"
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
-	sdbtiming "github.com/colorfulnotion/jam/sdbtiming"
 	storage "github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 )
 
-var benchRec = sdbtiming.New()
-
-func BenchRows() []sdbtiming.Row { return benchRec.Snapshot() }
-
 const (
-	debug        = "trie"
-	debugVerbose = false
-	stateKeySize = 32    // the "actual" size is 31 but we use common.Hash with the 32 byte being 0 INCLUDING IN METADATA right now
-	maxCacheSize = 10000 // Maximum number of cached hash results -- play with this
+	debug              = "trie"
+	stateKeySize       = 32 // the "actual" size is 31 but we use common.Hash with the 32 byte being 0 INCLUDING IN METADATA right now
+	DefaultLevelDBPath = "/tmp/log/leveldb/bpt"
 )
-
-// hashCache: caches hash computations with computeHashCached replacing computeHash
-type hashCache struct {
-	mu     sync.RWMutex
-	cache  map[string][]byte
-	keyMap map[string]int // key -> index mapping
-	keys   []string       // circular buffer for LRU
-	head   int            // next insertion position
-	size   int            // current number of items
-}
-
-var globalHashCache = &hashCache{
-	cache:  make(map[string][]byte, maxCacheSize),
-	keyMap: make(map[string]int, maxCacheSize),
-	keys:   make([]string, maxCacheSize),
-	head:   0,
-	size:   0,
-}
-
-func (hc *hashCache) get(data []byte) ([]byte, bool) {
-	// optimized with unsafe
-	key := unsafe.String(unsafe.SliceData(data), len(data))
-	hc.mu.RLock()
-	hash, exists := hc.cache[key]
-	hc.mu.RUnlock()
-	return hash, exists
-}
-
-func (hc *hashCache) set(data []byte, hash []byte) {
-	// optimized with unsafe
-	key := unsafe.String(unsafe.SliceData(data), len(data))
-	hc.mu.Lock()
-	defer hc.mu.Unlock()
-
-	// happy case: update the value
-	if _, exists := hc.cache[key]; exists {
-		hc.cache[key] = hash
-		return
-	}
-
-	// evict oldest entry if cache full
-	if hc.size >= maxCacheSize {
-
-		oldest := hc.keys[hc.head]
-		if oldest != "" {
-			delete(hc.cache, oldest)
-			delete(hc.keyMap, oldest)
-		}
-	} else {
-		hc.size++
-	}
-
-	// add a new entry - TODO: make this not use string?
-	keyStr := string(data)
-	hc.keys[hc.head] = keyStr
-	hc.cache[keyStr] = hash
-	hc.keyMap[keyStr] = hc.head
-	hc.head = (hc.head + 1) % maxCacheSize
-}
-
-// KEY operation: computeHashCached wraps computeHash with globalHashCache
-func computeHashCached(data []byte) []byte {
-	t0 := time.Now()
-
-	if hash, exists := globalHashCache.get(data); exists {
-		benchRec.Add("computeHashCached:HIT", time.Since(t0))
-		return hash
-	}
-	// Compute hash if not cached and cache it!
-	hash := computeHash(data)
-	globalHashCache.set(data, hash)
-	benchRec.Add("computeHashCached:MISS", time.Since(t0))
-
-	return hash
-}
 
 type KeyVal struct {
 	Key        []byte `json:"k"`
@@ -126,31 +43,6 @@ type Node struct {
 	Left  *Node
 	Right *Node
 }
-
-// state-key constructor functions C(X)
-const (
-	C1  = "CoreAuthPool"
-	C2  = "AuthQueue"
-	C3  = "RecentBlocks"
-	C4  = "safroleState"
-	C5  = "PastJudgements"
-	C6  = "Entropy"
-	C7  = "NextEpochValidatorKeys"
-	C8  = "CurrentValidatorKeys"
-	C9  = "PriorEpochValidatorKeys"
-	C10 = "PendingReports"
-	C11 = "MostRecentBlockTimeslot"
-	C12 = "PrivilegedServiceIndices"
-	C13 = "ActiveValidator"
-	C14 = "AccumulationQueue"
-	C15 = "AccumulationHistory"
-	C16 = "AccumulationOutputs"
-)
-
-const (
-	LevelDBNull  = "null"
-	LevelDBEmpty = ""
-)
 
 /*
 Branch Node (64 bytes)
@@ -177,9 +69,27 @@ Regular Leaf Node (64 bytes) [K,V] -> V >= 32bytes. too long, only store Hash
 
 // MerkleTree represents the entire Merkle Tree
 type MerkleTree struct {
-	Root *Node
-	// levelDBMap map[string][]byte // <>
-	db *storage.StateDBStorage
+	Root       *Node
+	db         *storage.StateDBStorage
+	writeMutex sync.Mutex             // Protects concurrent writes to levelDB during Flush
+	writeBatch map[common.Hash][]byte // Batched writes (key -> value) - always batched
+	batchMutex sync.Mutex             // Protects the write batch
+
+	// Staged operations - no hashing, no levelDB until Flush
+	stagedInserts map[common.Hash][]byte // key -> value
+	stagedDeletes map[common.Hash]bool   // key -> true
+	stagedMutex   sync.Mutex             // Protects staged operations
+
+	// Tree structure protection
+	treeMutex sync.RWMutex // Protects Root and all Node structures
+}
+
+// normalizeKey32 ensures all keys are 32 bytes (zero-padded on right if shorter, truncated from right if longer)
+// Note we cannot use common.BytesToHash because it pads on the left
+func normalizeKey32(src []byte) common.Hash {
+	var hash common.Hash
+	copy(hash[:], src)
+	return hash
 }
 
 // NewMerkleTree creates a new Merkle Tree from the provided data
@@ -188,7 +98,7 @@ func initLevelDB(optionalPath ...string) (*storage.StateDBStorage, error) {
 	if len(optionalPath) > 0 {
 		path = optionalPath[0]
 	}
-	stateDBStorage, err := storage.NewStateDBStorage(path, storage.NewMockJAMDA(), nil)
+	stateDBStorage, err := storage.NewStateDBStorage(path, storage.NewMockJAMDA(), nil, 0)
 	return stateDBStorage, err
 }
 
@@ -209,45 +119,37 @@ func DeleteLevelDB(optionalPath ...string) error {
 	return nil
 }
 
-// NewMerkleTree creates a new Merkle Tree from the provided data
-func NewMerkleTreeWithPath(data [][2][]byte, optionalPath ...string) *MerkleTree {
-	path := "/tmp/log/leveldb/bpt"
-	if len(optionalPath) > 0 {
-		path = optionalPath[0]
-	}
-	db, err := initLevelDB(path)
-	if err != nil {
-		fmt.Printf("levelDB ERR: %v", err)
-	}
-	if data == nil || len(data) == 0 {
-		return &MerkleTree{Root: nil, db: db}
-	}
-	root := buildMerkleTree(data, 0)
-	return &MerkleTree{Root: root, db: db}
-}
-
 func NewMerkleTree(data [][2][]byte, db *storage.StateDBStorage) *MerkleTree {
-	if len(data) == 0 {
-		return &MerkleTree{Root: nil, db: db}
+	t := &MerkleTree{
+		Root:          nil,
+		db:            db,
+		writeBatch:    make(map[common.Hash][]byte),
+		stagedInserts: make(map[common.Hash][]byte),
+		stagedDeletes: make(map[common.Hash]bool),
 	}
-	root := buildMerkleTree(data, 0)
-	return &MerkleTree{Root: root, db: db}
+	if len(data) == 0 {
+		return t
+	}
+	root := t.buildMerkleTree(data, 0)
+	t.Root = root
+	return t
 }
 
-// buildMerkleTree constructs the Merkle tree from key-value pairs
-func buildMerkleTree(kvs [][2][]byte, i int) *Node {
+// buildMerkleTree constructs the Merkle tree from key-value pairs and stores them in levelDB
+func (t *MerkleTree) buildMerkleTree(kvs [][2][]byte, i int) *Node {
 	// Base Case - Empty Data |d| = 0
 	if len(kvs) == 0 {
 		return &Node{Hash: make([]byte, 32)}
 	}
 	// V(d) = {(K,v)}
 	if len(kvs) == 1 {
-		encoded := leaf(kvs[0][0], kvs[0][1])
-		//TODO: we should store (Hash, Value) in levelDB for future lookup
-		//computeHash(encoded) -> kvs[0][1]
-		//kvs[0][1] -> computeHash(encoded) X NOT like this
-		//will only store the value if less than 32 bytes
-		return &Node{Hash: computeHashCached(encoded), Key: kvs[0][0]}
+		encoded := leaf(kvs[0][0], kvs[0][1], t)
+		// Store (Hash, Value) in levelDB for future lookup
+		// computeHash(encoded) -> value mapping
+		if t.db != nil {
+			t.levelDBSetLeaf(encoded, kvs[0][1], kvs[0][0])
+		}
+		return &Node{Hash: computeHash(encoded), Key: kvs[0][0]}
 	}
 	// Recursive Case: B(M(l),M(r))
 	l := make([][2][]byte, 0, len(kvs)/2+1)
@@ -260,10 +162,15 @@ func buildMerkleTree(kvs [][2][]byte, i int) *Node {
 		}
 	}
 
-	left := buildMerkleTree(l, i+1)
-	right := buildMerkleTree(r, i+1)
+	left := t.buildMerkleTree(l, i+1)
+	right := t.buildMerkleTree(r, i+1)
 	encoded := branch(left.Hash, right.Hash)
-	return &Node{Hash: computeHashCached(encoded), Left: left, Right: right}
+	branchHash := computeHash(encoded)
+	// Store branch nodes in levelDB
+	if t.db != nil {
+		t.levelDBSetBranch(branchHash, encoded)
+	}
+	return &Node{Hash: branchHash, Left: left, Right: right}
 }
 
 // Equation(D.3) in GP 0.6.2
@@ -280,8 +187,7 @@ func branch(left, right []byte) []byte {
 
 // Equation(D.4) in GP 0.6.2
 // leaf encodes a key-value pair into a leaf node
-func leaf(k, v []byte) []byte {
-	t0 := time.Now()
+func leaf(k, v []byte, t *MerkleTree) []byte {
 	var result [64]byte
 
 	// Embedded-value leaf node
@@ -303,16 +209,14 @@ func leaf(k, v []byte) []byte {
 			copy(result[1:1+len(k)], k)
 			// Zero padding is already done by make()
 		}
-		hash := computeHashCached(v)
+		hash := computeHash(v)
 		copy(result[32:64], hash)
 	}
-	benchRec.Add("leaf", time.Since(t0))
 	return result[:]
 }
 
 // decodeLeaf decodes a leaf node into its key and value/hash
 func decodeLeaf(leaf []byte) (k []byte, v []byte, isEmbedded bool, err error) {
-	t0 := time.Now()
 	if len(leaf) != 64 {
 		return nil, nil, false, fmt.Errorf("invalid leaf length %v", len(leaf))
 	}
@@ -324,15 +228,12 @@ func decodeLeaf(leaf []byte) (k []byte, v []byte, isEmbedded bool, err error) {
 		// Embedded-value leaf node
 		valueSize := int(head & 0b00111111) // Extract the value size from the lower 6 bits
 		value := leaf[32 : 32+valueSize]
-		benchRec.Add("decodeLeaf", time.Since(t0))
 		return key, value, true, nil
 	} else if head&0b11000000 == 0b11000000 {
 		// Regular leaf node
 		hash := leaf[32:64]
-		benchRec.Add("decodeLeaf", time.Since(t0))
 		return key, hash, false, nil
 	} else {
-		benchRec.Add("decodeLeaf", time.Since(t0))
 		return nil, nil, false, fmt.Errorf("invalid leaf node header")
 	}
 }
@@ -349,27 +250,28 @@ func bit(k []byte, i int) bool {
 }
 
 func (t *MerkleTree) GetRoot() common.Hash {
+	t.treeMutex.RLock()
+	defer t.treeMutex.RUnlock()
+
 	if t.Root == nil {
-		return common.BytesToHash(make([]byte, 32))
+		return normalizeKey32(make([]byte, 32))
 	}
-	return common.BytesToHash(t.Root.Hash)
+	return normalizeKey32(t.Root.Hash)
 }
 
-// GetRootHash returns the root hash of the Merkle Tree
-func (t *MerkleTree) GetRootHash() []byte {
-	if t.Root == nil {
-		return make([]byte, 32)
-	}
-	return t.Root.Hash
-}
-
-func InitMerkleTreeFromHash(root []byte, db *storage.StateDBStorage) (*MerkleTree, error) {
+func InitMerkleTreeFromHash(root common.Hash, db *storage.StateDBStorage) (*MerkleTree, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is not initialized")
 	}
-	tree := &MerkleTree{Root: nil, db: db}
-	if compareBytes(root, common.Hex2Bytes("0000000000000000000000000000000000000000000000000000000000000000")) {
-		return &MerkleTree{Root: nil, db: db}, nil
+	tree := &MerkleTree{
+		Root:          nil,
+		db:            db,
+		writeBatch:    make(map[common.Hash][]byte),
+		stagedInserts: make(map[common.Hash][]byte),
+		stagedDeletes: make(map[common.Hash]bool),
+	}
+	if root == (common.Hash{}) {
+		return tree, nil
 	}
 	rootNode, err := tree.levelDBGetNode(root)
 	if err != nil {
@@ -377,6 +279,92 @@ func InitMerkleTreeFromHash(root []byte, db *storage.StateDBStorage) (*MerkleTre
 	}
 	tree.Root = rootNode
 	return tree, nil
+}
+
+// Flush commits all staged operations (computing hashes and rebuilding tree) and writes to levelDB
+func (t *MerkleTree) Flush() (common.Hash, error) {
+	// Step 1: Commit staged operations to tree (rebuild tree with hashing)
+	t.stagedMutex.Lock()
+	numOps := len(t.stagedInserts) + len(t.stagedDeletes)
+	if numOps == 0 {
+		t.stagedMutex.Unlock()
+	} else {
+		// Take a snapshot of staged ops to apply outside stagedMutex
+		deletes := t.stagedDeletes
+		inserts := t.stagedInserts
+
+		// Clear staged maps
+		t.stagedInserts = make(map[common.Hash][]byte)
+		t.stagedDeletes = make(map[common.Hash]bool)
+		t.stagedMutex.Unlock()
+
+		// Now mutate the tree under treeMutex, without holding stagedMutex
+		t.treeMutex.Lock()
+
+		// Process deletes first
+		for key := range deletes {
+			if t.Root != nil {
+				t.Root = t.deleteNode(t.Root, key[:], 0)
+			}
+		}
+
+		// Process inserts/updates
+		for key, value := range inserts {
+			keySlice := key[:]
+
+			node, err := t.findNode(t.Root, keySlice, 0)
+			encodedLeaf := leaf(keySlice, value, t)
+			t.levelDBSetLeaf(encodedLeaf, value, keySlice)
+
+			if err != nil {
+				// Insert new
+				if t.Root == nil {
+					t.Root = &Node{
+						Hash: computeHash(encodedLeaf),
+						Key:  keySlice,
+					}
+				} else {
+					t.Root = t.insertNode(t.Root, keySlice, value, 0)
+				}
+			} else {
+				// Update existing
+				node.Hash = computeHash(leaf(keySlice, value, t))
+				t.updateTree(t.Root, keySlice, value, 0)
+			}
+		}
+		t.treeMutex.Unlock()
+	}
+
+	// Step 2: Flush the write batch to LevelDB
+	t.batchMutex.Lock()
+	defer t.batchMutex.Unlock()
+
+	batchWriteLen, err := t.flushBatchLocked()
+	root := t.GetRoot()
+	log.Info(log.P, "Flush", "n", t.db.NodeID, "s+", root.String_short(), "batchWriteLen", batchWriteLen)
+	return root, err
+}
+
+// flushBatchLocked flushes the write batch - must be called with mutex
+func (t *MerkleTree) flushBatchLocked() (int, error) {
+	if len(t.writeBatch) == 0 {
+		return 0, nil
+	}
+
+	// Wait for exclusive access to levelDB writes -- levelDB CANNOT HANDLE CONCURRENT WRITES
+	t.writeMutex.Lock()
+	defer t.writeMutex.Unlock()
+
+	// Write all batched items (deletes don't *actually* delete in leveldb)
+	for key, value := range t.writeBatch {
+		err := t.db.WriteRawKV(key[:], value)
+		if err != nil {
+			return 0, fmt.Errorf("failed to flush key: %v", err)
+		}
+	}
+	batchWriteLen := len(t.writeBatch)
+	t.writeBatch = make(map[common.Hash][]byte)
+	return batchWriteLen, nil
 }
 
 func (t *MerkleTree) levelDBSetBranch(branchHash, value []byte) {
@@ -392,46 +380,10 @@ func (t *MerkleTree) levelDBSetBranch(branchHash, value []byte) {
 	t.levelDBSet(branchHash, append([]byte("branch"), value...))
 }
 
-func (t *MerkleTree) levelDBGetBranch(branchHash []byte) (*Node, error) {
-	t0 := time.Now()
-	value, ok, err := t.levelDBGet(branchHash)
-	benchRec.Add("levelDBGetBranch:levelDBGet", time.Since(t0))
-	if err != nil || !ok {
-		return nil, err
-	}
-	if value == nil {
-		return nil, fmt.Errorf("value is nil for key: %s", branchHash)
-	}
-	if len(value) < 38 {
-		return nil, fmt.Errorf("value is too short, expected at least 38 bytes but got %d bytes", len(value))
-	}
-	leftHash := make([]byte, 32)
-	copy(leftHash, value[6:38])
-	rightHash := value[38:]
-	copy(rightHash, value[38:])
-
-	leftNode, err := t.levelDBGetNode(leftHash)
-	if err != nil {
-		return nil, err
-	}
-
-	rightNode, err := t.levelDBGetNode(rightHash)
-	if err != nil {
-		return nil, err
-	}
-
-	n := Node{
-		Hash:  branchHash,
-		Left:  leftNode,
-		Right: rightNode,
-	}
-	return &n, nil
-}
-
 func (t *MerkleTree) levelDBSetLeaf(encodedLeaf, value []byte, key []byte) {
 	_k, _v, isEmbedded, _ := decodeLeaf(encodedLeaf)
-	encodedLeafHash := computeHashCached(encodedLeaf)
-	encodedLeafHashVal := computeHashCached(append(encodedLeafHash, value...))
+	encodedLeafHash := computeHash(encodedLeaf)
+	encodedLeafHashVal := computeHash(append(encodedLeafHash, value...))
 	//t.levelDBSet(key, encodedLeafHashVal)
 	t.levelDBSet(encodedLeafHashVal, key)
 	if isEmbedded {
@@ -451,8 +403,13 @@ func (t *MerkleTree) levelDBSetLeaf(encodedLeaf, value []byte, key []byte) {
 	}
 }
 
-func (t *MerkleTree) levelDBGetLeaf(nodeHash []byte) ([]byte, bool, error) {
-	encodedLeaf, ok, err := t.levelDBGet(nodeHash)
+// getDBLeafValue retrieves the value from a leaf node
+// Returns the actual value, not the key
+func (t *MerkleTree) getDBLeafValue(nodeHash []byte) ([]byte, bool, error) {
+	t.batchMutex.Lock()
+	defer t.batchMutex.Unlock()
+
+	encodedLeaf, ok, err := t.levelDBGetLocked(nodeHash)
 	if err != nil {
 		return nil, false, err
 	} else if !ok {
@@ -470,36 +427,42 @@ func (t *MerkleTree) levelDBGetLeaf(nodeHash []byte) ([]byte, bool, error) {
 	} else {
 		// regular leaf node: 2 bits | 2 bits | 6 bits (0s) | 31 bytes (key)
 		// value is greater than 32 bytes. lookup _v -> value
-		return t.levelDBGet(_v)
+		return t.levelDBGetLocked(_v)
 	}
 }
 
-// levelDBSet sets the value for the given key in the levelDBMap
+// levelDBSet adds the key-value pair to the write batch
+// Writes are not persisted until Flush() is called
 func (t *MerkleTree) levelDBSet(k, v []byte) error {
 	if t.db == nil {
 		return fmt.Errorf("database is not initialized")
 	}
-	t0 := time.Now()
-	err := t.db.WriteRawKV(k, v)
-	benchRec.Add("levelDBSet:WriteRawKV", time.Since(t0))
-	if err != nil {
-		return fmt.Errorf("failed to set key %s: %v", k, err)
-	}
+
+	// Always add to batch
+	t.batchMutex.Lock()
+	var keyHash common.Hash
+	copy(keyHash[:], k)
+	t.writeBatch[keyHash] = v
+	t.batchMutex.Unlock()
+
 	return nil
 }
 
-func (t *MerkleTree) LevelDBGet(k []byte) ([]byte, bool, error) {
-	return t.levelDBGet(k)
-}
-
-// levelDBGet gets the value for the given key from the levelDBMap
-func (t *MerkleTree) levelDBGet(k []byte) ([]byte, bool, error) {
+// levelDBGetLocked is the internal version that assumes batchMutex is already held
+func (t *MerkleTree) levelDBGetLocked(k []byte) ([]byte, bool, error) {
 	if t.db == nil {
 		return nil, false, fmt.Errorf("database is not initialized")
 	}
-	t0 := time.Now()
+
+	// Check write batch first (for reads of recently written but not yet flushed data)
+	var keyHash common.Hash
+	copy(keyHash[:], k)
+	if value, exists := t.writeBatch[keyHash]; exists {
+		return value, true, nil
+	}
+
+	// Not in batch, read from levelDB
 	value, ok, err := t.db.ReadRawKV(k)
-	benchRec.Add("levelDBGet:ReadRawKV", time.Since(t0))
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to get key [%s]: %v", k, err)
 	} else if !ok {
@@ -508,42 +471,91 @@ func (t *MerkleTree) levelDBGet(k []byte) ([]byte, bool, error) {
 	return value, true, nil
 }
 
-func (t *MerkleTree) levelDBGetNode(nodeHash []byte) (*Node, error) {
-	t0 := time.Now()
-	value, _, _ := t.db.ReadRawKV(nodeHash)
-	benchRec.Add("levelDBGetNode:ReadRawKV", time.Since(t0))
-	zeroHash := make([]byte, 32)
-	if compareBytes(nodeHash, zeroHash) || value == nil {
-		return &Node{
-			Hash: zeroHash,
-		}, nil
-	}
-	leafKey, _, _ := t.levelDBGetLeaf(nodeHash)
-	if leafKey != nil {
-		t0 = time.Now()
-		leafValue, _, _ := t.db.ReadRawKV(computeHash([]byte(append(nodeHash, leafKey...))))
-		benchRec.Add("levelDBGetNode:ReadRawKV", time.Since(t0))
-		return &Node{
-			Hash: nodeHash,
-			Key:  leafValue,
-		}, nil
-	}
-
-	if !compareBytes(value, zeroHash) {
-		return t.levelDBGetBranch(nodeHash)
-	} else {
-		return &Node{
-			Hash: zeroHash,
-		}, nil
-	}
+// levelDBGet gets the value for the given key - checks write batch first, then levelDB
+func (t *MerkleTree) levelDBGet(k []byte) ([]byte, bool, error) {
+	t.batchMutex.Lock()
+	defer t.batchMutex.Unlock()
+	return t.levelDBGetLocked(k)
 }
 
-// Close closes the levelDB connection
+func (t *MerkleTree) levelDBGetNode(nodeHash common.Hash) (*Node, error) {
+	if nodeHash == (common.Hash{}) {
+		return &Node{Hash: nodeHash[:]}, nil
+	}
+
+	// Try interpret nodeHash as leaf
+	leafValue, _, _ := t.getDBLeafValue(nodeHash[:])
+	if leafValue != nil {
+		// Use levelDBGet to see batched writes
+		encodedLeafHashVal := computeHash(append(nodeHash[:], leafValue...))
+		leafKey, _, _ := t.levelDBGet(encodedLeafHashVal)
+		return &Node{
+			Hash: nodeHash[:],
+			Key:  leafKey,
+		}, nil
+	}
+
+	// Otherwise treat as branch - use levelDBGet to check batch
+	value, ok, err := t.levelDBGet(nodeHash[:])
+	if err != nil {
+		return nil, err
+	}
+	zeroHash := common.Hash{}
+	if !ok || bytes.Equal(value, zeroHash[:]) {
+		return &Node{Hash: zeroHash[:]}, nil
+	}
+
+	// Decode branch node
+	if value == nil {
+		return nil, fmt.Errorf("value is nil for branch key: %s", nodeHash.Hex())
+	}
+	// Branch is stored as: []byte("branch") + 64 bytes = 6 + 64 = 70 bytes
+	if len(value) < 70 {
+		return nil, fmt.Errorf("branch value too short, expected 70 bytes but got %d bytes", len(value))
+	}
+
+	var leftHash common.Hash
+	copy(leftHash[:], value[6:38])
+
+	var rightHash common.Hash
+	copy(rightHash[:], value[38:70])
+
+	leftNode, err := t.levelDBGetNode(leftHash)
+	if err != nil {
+		return nil, err
+	}
+
+	rightNode, err := t.levelDBGetNode(rightHash)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Node{
+		Hash:  nodeHash[:],
+		Left:  leftNode,
+		Right: rightNode,
+	}, nil
+}
+
 func (t *MerkleTree) Close() error {
 	if t.db == nil {
 		return fmt.Errorf("database is not initialized")
 	}
 	return t.db.Close()
+}
+
+// StateDB DEBUG: GetBatchSize returns the current number of batched writes
+func (t *MerkleTree) GetBatchSize() int {
+	t.batchMutex.Lock()
+	defer t.batchMutex.Unlock()
+	return len(t.writeBatch)
+}
+
+// StateDB DEBUG: GetStagedSize returns the current number of staged operations
+func (t *MerkleTree) GetStagedSize() int {
+	t.stagedMutex.Lock()
+	defer t.stagedMutex.Unlock()
+	return len(t.stagedInserts) + len(t.stagedDeletes)
 }
 
 func (n *Node) String() string {
@@ -576,37 +588,45 @@ func (t *MerkleTree) PrintAllKeyValues() {
 	sortedKeyVals := sortKeyValsByKey(keyVals)
 
 	fmt.Printf("GetAllKeyValues right after %v\n", sortedKeyVals)
-	// for _, kv := range keyVals.KeyVals {
-	// 	fmt.Printf("[Key] %x\n[Value] %x\n", kv[0], kv[1])
-	// }
 }
 
 func (t *MerkleTree) PrintTree(node *Node, level int) {
+	t.treeMutex.RLock()
+	defer t.treeMutex.RUnlock()
+
 	fmt.Printf("\n----------------PrintTree START----------------\n")
 	t.printTree(node, level)
 	fmt.Printf("\n----------------PrintTree END----------------\n")
 }
 
-// maximum size: The total encoded length of the response
-// TODO: this should accept 31 byte keys and return 31 byte keys
-func (t *MerkleTree) GetStateByRange(starKey []byte, endKey []byte, maxSize uint32) (foundKeyVal []types.StateKeyValue, boundaryNode [][]byte, err error) {
+// GetStateByRange retrieves key-value pairs within a range see CE129
+func (t *MerkleTree) GetStateByRange(startKey []byte, endKey []byte, maxSize uint32) (foundKeyVal []types.StateKeyValue, boundaryNode [][]byte, err error) {
+	t.treeMutex.RLock()
+	defer t.treeMutex.RUnlock()
+
+	if t.Root == nil {
+		return []types.StateKeyValue{}, [][]byte{}, nil
+	}
+
 	foundKeyVal = make([]types.StateKeyValue, 0)
 	currenSize := uint32(0)
 	paddedStart := make([]byte, 32)
-	copy(paddedStart, starKey)
-	value, _, _ := t.Get(paddedStart)
+	copy(paddedStart, startKey)
+	value, _, _ := t.getFromStorageLocked(paddedStart)
 	found := false
 	end := false
 	if value != nil {
-		t.getTreeContentIncludeKey(t.Root, 0, starKey, endKey, &currenSize, maxSize, &foundKeyVal, &boundaryNode, &found, &end)
+		// startKey exists, so use inclusive range comparison
+		t.getTreeContentIncludeKey(t.Root, 0, startKey, endKey, &currenSize, maxSize, &foundKeyVal, &boundaryNode, &found, &end)
 	} else {
-		t.getTreeContent(t.Root, 0, starKey, endKey, &currenSize, maxSize, &foundKeyVal, &boundaryNode)
+		// startKey doesn't exist - collect all up to exact endKey
+		t.getTreeContent(t.Root, 0, startKey, endKey, &currenSize, maxSize, &foundKeyVal, &boundaryNode)
 	}
 	return foundKeyVal, boundaryNode, err
 }
 
-func (t *MerkleTree) getTreeContentIncludeKey(node *Node, level int, starKey []byte, endKey []byte, currenSize *uint32, maxSize uint32, foundkv *[]types.StateKeyValue, boundaryNodes *[][]byte, findKey *bool, end *bool) (ok bool) {
-	if *currenSize >= maxSize || *end {
+func (t *MerkleTree) getTreeContentIncludeKey(node *Node, level int, startKey []byte, endKey []byte, currenSize *uint32, maxSize uint32, foundkv *[]types.StateKeyValue, boundaryNodes *[][]byte, findKey *bool, end *bool) (ok bool) {
+	if node == nil || *currenSize >= maxSize || *end {
 		return true
 	}
 	nodeType := "Branch"
@@ -615,20 +635,20 @@ func (t *MerkleTree) getTreeContentIncludeKey(node *Node, level int, starKey []b
 	}
 	*boundaryNodes = append(*boundaryNodes, node.Hash)
 
-	value, _, _ := t.Get(node.Key)
+	value, _, _ := t.getFromStorageLocked(node.Key)
 
 	// Copy the original key into the new slice
 	if value != nil {
 		paddedStart := make([]byte, len(node.Key))
 		paddedEnd := make([]byte, len(node.Key))
 		// Copy the original key into the new slice
-		copy(paddedStart, starKey)
+		copy(paddedStart, startKey)
 		copy(paddedEnd, endKey)
 
 		if common.CompareBytes(node.Key, paddedStart) {
 			fmt.Printf("Found Key: %x\n", node.Key)
 			*boundaryNodes = make([][]byte, 0)
-			*boundaryNodes, _ = t.GetPath(node.Key)
+			*boundaryNodes, _ = t.getPathLocked(node.Key)
 			*boundaryNodes = append(*boundaryNodes, node.Hash)
 			*findKey = true
 		}
@@ -636,12 +656,8 @@ func (t *MerkleTree) getTreeContentIncludeKey(node *Node, level int, starKey []b
 			if (common.CompareKeys(paddedStart, node.Key) >= 0 && common.CompareKeys(paddedEnd, node.Key) >= 0) && (nodeType == "Leaf") {
 				// check if the key is within range..
 				// key is expected to 31 bytes
-
 				var k_31 [31]byte
 				copy(k_31[:], node.Key[:31])
-				if len(k_31) != 31 {
-					log.Crit(debug, "branch: input hashes must be 32 bytes")
-				}
 				stateKeyValue := types.StateKeyValue{
 					Key:   k_31,
 					Len:   uint8(len(value)),
@@ -658,14 +674,14 @@ func (t *MerkleTree) getTreeContentIncludeKey(node *Node, level int, starKey []b
 		}
 	}
 	if node.Left != nil || node.Right != nil {
-		t.getTreeContentIncludeKey(node.Left, level+1, starKey, endKey, currenSize, maxSize, foundkv, boundaryNodes, findKey, end)
-		t.getTreeContentIncludeKey(node.Right, level+1, starKey, endKey, currenSize, maxSize, foundkv, boundaryNodes, findKey, end)
+		t.getTreeContentIncludeKey(node.Left, level+1, startKey, endKey, currenSize, maxSize, foundkv, boundaryNodes, findKey, end)
+		t.getTreeContentIncludeKey(node.Right, level+1, startKey, endKey, currenSize, maxSize, foundkv, boundaryNodes, findKey, end)
 	}
 	return true
 }
 
-func (t *MerkleTree) getTreeContent(node *Node, level int, starKey []byte, endKey []byte, currenSize *uint32, maxSize uint32, foundkv *[]types.StateKeyValue, boundaryNodes *[][]byte) (ok bool) {
-	if *currenSize >= maxSize {
+func (t *MerkleTree) getTreeContent(node *Node, level int, startKey []byte, endKey []byte, currenSize *uint32, maxSize uint32, foundkv *[]types.StateKeyValue, boundaryNodes *[][]byte) (ok bool) {
+	if node == nil || *currenSize >= maxSize {
 		return true
 	}
 	nodeType := "Branch"
@@ -673,21 +689,18 @@ func (t *MerkleTree) getTreeContent(node *Node, level int, starKey []byte, endKe
 		nodeType = "Leaf"
 	}
 	*boundaryNodes = append(*boundaryNodes, node.Hash)
-	value, _, _ := t.Get(node.Key)
+	value, _, _ := t.getFromStorageLocked(node.Key)
 	if value != nil {
 		paddedStart := make([]byte, len(node.Key))
 		paddedEnd := make([]byte, len(node.Key))
 		// Copy the original key into the new slice
-		copy(paddedStart, starKey)
+		copy(paddedStart, startKey)
 		copy(paddedEnd, endKey)
 		if nodeType == "Leaf" {
 			// check if the key is within range..
 			// key is expected to 31 bytes
 			var k_31 [31]byte
 			copy(k_31[:], node.Key[:31])
-			if len(k_31) != 31 {
-				log.Crit(debug, "Key is not 31 bytes")
-			}
 			stateKeyValue := types.StateKeyValue{
 				Key:   k_31,
 				Len:   uint8(len(value)),
@@ -702,21 +715,21 @@ func (t *MerkleTree) getTreeContent(node *Node, level int, starKey []byte, endKe
 		}
 	}
 	if node.Left != nil || node.Right != nil {
-		t.getTreeContent(node.Left, level+1, starKey, endKey, currenSize, maxSize, foundkv, boundaryNodes)
-		t.getTreeContent(node.Right, level+1, starKey, endKey, currenSize, maxSize, foundkv, boundaryNodes)
+		t.getTreeContent(node.Left, level+1, startKey, endKey, currenSize, maxSize, foundkv, boundaryNodes)
+		t.getTreeContent(node.Right, level+1, startKey, endKey, currenSize, maxSize, foundkv, boundaryNodes)
 	}
 	return true
 }
 
 func (t *MerkleTree) GetRealKey(key [31]byte, value []byte) []byte {
-	encodedLeaf := leaf(key[:], value)
+	encodedLeaf := leaf(key[:], value, t)
 	nodeHash := computeHash(encodedLeaf)
 
-	leafKey, _, _ := t.levelDBGetLeaf(nodeHash)
-	if leafKey != nil {
-		t0 := time.Now()
-		realKey, _, _ := t.db.ReadRawKV(computeHash([]byte(append(nodeHash, leafKey...))))
-		benchRec.Add("GetRealKey:ReadRawKV", time.Since(t0))
+	leafValue, _, _ := t.getDBLeafValue(nodeHash)
+	if leafValue != nil {
+		encodedLeafHashVal := computeHash(append(nodeHash, leafValue...))
+		// Use levelDBGet to see batched writes
+		realKey, _, _ := t.levelDBGet(encodedLeafHashVal)
 		return realKey
 	}
 	return nil
@@ -735,7 +748,7 @@ func (t *MerkleTree) printTree(node *Node, level int) {
 		nodeType = "Leaf"
 	}
 	fmt.Printf("%s[%s Node] Key: %x, Hash: %x\n", strings.Repeat("  ", level), nodeType, node.Key, node.Hash)
-	value, _, _ := t.Get(node.Key)
+	value, _, _ := t.getFromStorageLocked(node.Key)
 	if value != nil {
 		fmt.Printf("%s  [Leaf Node] Value: %x\n", strings.Repeat("  ", level), value)
 	}
@@ -751,99 +764,47 @@ func (t *MerkleTree) SetRawKeyVal(key [31]byte, value []byte) {
 	t.Insert(key[:], value)
 }
 
-func (t *MerkleTree) SetState(_stateIdentifier string, value []byte) {
-	stateKey := make([]byte, 32)
+// SetStates sets multiple state values in a single batch operation
+// mask indicating which states to set
+func (t *MerkleTree) SetStates(values [16][]byte) {
+	// Get current states to detect changes
+	oldStates, _ := t.GetStates()
 
-	switch _stateIdentifier {
-	case C1:
-		stateKey[0] = 0x01
-	case C2:
-		stateKey[0] = 0x02
-	case C3:
-		stateKey[0] = 0x03
-	case C4:
-		stateKey[0] = 0x04
-	case C5:
-		stateKey[0] = 0x05
-	case C6:
-		stateKey[0] = 0x06
-	case C7:
-		stateKey[0] = 0x07
-	case C8:
-		stateKey[0] = 0x08
-	case C9:
-		stateKey[0] = 0x09
-	case C10:
-		stateKey[0] = 0x0A
-	case C11:
-		stateKey[0] = 0x0B
-	case C12:
-		stateKey[0] = 0x0C
-	case C13:
-		stateKey[0] = 0x0D
-	case C14:
-		stateKey[0] = 0x0E
-	case C15:
-		stateKey[0] = 0x0F
-	case C16:
-		stateKey[0] = 0x10
+	// Only insert states that have actually changed
+	for i := uint8(0); i < 16; i++ {
+		if !bytes.Equal(oldStates[i], values[i]) {
+			stateKey := make([]byte, 32)
+			stateKey[0] = i + 1 // State indices are 1-16
+			t.Insert(stateKey, values[i])
+		}
 	}
-	t.Insert(stateKey, value)
 }
 
-func (t *MerkleTree) GetState(_stateIdentifier string) ([]byte, error) {
-	stateKey := make([]byte, stateKeySize)
-
-	switch _stateIdentifier {
-	case C1:
-		stateKey[0] = 0x01
-	case C2:
-		stateKey[0] = 0x02
-	case C3:
-		stateKey[0] = 0x03
-	case C4:
-		stateKey[0] = 0x04
-	case C5:
-		stateKey[0] = 0x05
-	case C6:
-		stateKey[0] = 0x06
-	case C7:
-		stateKey[0] = 0x07
-	case C8:
-		stateKey[0] = 0x08
-	case C9:
-		stateKey[0] = 0x09
-	case C10:
-		stateKey[0] = 0x0A
-	case C11:
-		stateKey[0] = 0x0B
-	case C12:
-		stateKey[0] = 0x0C
-	case C13:
-		stateKey[0] = 0x0D
-	case C14:
-		stateKey[0] = 0x0E
-	case C15:
-		stateKey[0] = 0x0F
-	case C16:
-		stateKey[0] = 0x10
+// GetStates retrieves all 16 state values
+func (t *MerkleTree) GetStates() ([16][]byte, error) {
+	var states [16][]byte
+	for i := uint8(0); i < 16; i++ {
+		stateKey := make([]byte, stateKeySize)
+		stateKey[0] = i + 1 // State indices are 1-16
+		value, ok, err := t.Get(stateKey)
+		if err != nil {
+			return states, err
+		}
+		if ok {
+			states[i] = value
+		}
 	}
-	value, ok, err := t.Get(stateKey)
-	if !ok || err != nil {
-		// fmt.Printf("GetState stateKey=%x Error %v, %v\n", stateKey, ok, err)
-	}
-	return value, err
+	return states, nil
 }
 
 // DeleteService (hash)
-func (t *MerkleTree) DeleteService(s uint32) error {
+func (t *MerkleTree) DeleteService(s uint32) {
 	service_account := common.ComputeC_is(s)
 	stateKey := service_account.Bytes()
-	err := t.Delete(stateKey)
-	return err
+	t.Delete(stateKey)
 }
 
-func (t *MerkleTree) SetService(s uint32, v []byte) (err error) {
+func (t *MerkleTree) SetService(s uint32, v []byte) error {
 	/*
 		∀(s ↦ a) ∈ δ ∶ C(255, s) ↦ a c ⌢E 8 (a b ,a g ,a m ,a l )⌢E 4 (a i )
 		i: 255
@@ -860,7 +821,7 @@ func (t *MerkleTree) SetService(s uint32, v []byte) (err error) {
 	service_account := common.ComputeC_is(s)
 	stateKey := service_account.Bytes()
 	t.Insert(stateKey, v)
-	return nil // TODO
+	return nil
 }
 
 func (t *MerkleTree) GetService(s uint32) ([]byte, bool, error) {
@@ -868,30 +829,25 @@ func (t *MerkleTree) GetService(s uint32) ([]byte, bool, error) {
 	stateKey := service_account.Bytes()
 	value, ok, err := t.Get(stateKey)
 	if err != nil {
-		return nil, false, fmt.Errorf("GetService Error: %v", err) //Need to differentiate not found vs leveldb error
+		return nil, false, fmt.Errorf("GetService Error: %v", err)
 	} else if !ok {
-		//fmt.Printf("GetService Not Found: s=%d, stateKey=%x\n", s, stateKey)
 		return nil, ok, nil
 	}
-	//fmt.Printf("GetService Found: s=%d, stateKey=%x\n", s, stateKey)
 	return value, true, nil
 }
 
 // set a_l (with timeslot if we have E_P). For GP_0.3.5(158)
-func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32, time_slots []uint32) (err error) {
+func (t *MerkleTree) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32, time_slots []uint32) error {
 
 	al_internal_key := common.Compute_preimageLookup_internal(blob_hash, blob_len)
 	account_lookuphash := common.ComputeC_sh(s, al_internal_key) // C(s, (h,l))
 	stateKey := account_lookuphash.Bytes()
-	//fmt.Printf("**** SetPreImageLookup C(s=%d, h=%x)=%x\n", s, al_internal_key, stateKey)
 	vBytes, err := types.Encode(time_slots)
 	if err != nil {
 		fmt.Printf("SetPreImageLookup Encode Error: %v\n", err)
 	}
 	// Insert the value into the state
-
 	t.Insert(stateKey, vBytes)
-
 	return nil
 }
 
@@ -915,11 +871,6 @@ func (t *MerkleTree) GetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 
 	stateKey := account_lookuphash.Bytes()
 
-	/*
-		Follow GP_0.3.5(270, 273, 274, 276, 291)
-		Process State value(timeslots), covert []uint32 to []byte
-	*/
-
 	vByte, ok, err := t.Get(stateKey)
 	if err != nil {
 		return nil, ok, err
@@ -941,34 +892,18 @@ func (t *MerkleTree) GetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 }
 
 // Delete PreImageLookup key(hash)
-func (t *MerkleTree) DeletePreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32) error {
-
+func (t *MerkleTree) DeletePreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32) {
 	al_internal_key := common.Compute_preimageLookup_internal(blob_hash, blob_len)
 	account_lookuphash := common.ComputeC_sh(s, al_internal_key) // C(s, (h,l))
 	stateKey := account_lookuphash.Bytes()
-
-	err := t.Delete(stateKey)
-
-	return err
+	t.Delete(stateKey)
 }
 
 // Insert Storage Value into the trie
-func (t *MerkleTree) SetServiceStorage(s uint32, k []byte, storageValue []byte) (err error) {
+func (t *MerkleTree) SetServiceStorage(s uint32, k []byte, storageValue []byte) error {
 	as_internal_key := common.Compute_storageKey_internal(k)
 	account_storage_key := common.ComputeC_sh(s, as_internal_key)
 	stateKey := account_storage_key.Bytes()
-	/*
-		metaKey := fmt.Sprintf("meta_%x", stateKey)
-		metaKeyBytes, err := types.Encode(metaKey)
-		if err != nil {
-			fmt.Printf("SetServiceStorage Encode Error: %v\n", err)
-		}
-		metaVal := fmt.Sprintf("account_storage|s=%d|hk=%s k=%s", s, account_storage_key, k)
-		metaValBytes, err := types.Encode(metaVal)
-		if err != nil {
-			fmt.Printf("SetServiceStorage metaValBytes Encode Error: %v\n", err)
-		}
-		t.levelDBSet(metaKeyBytes, metaValBytes)*/
 	t.Insert(stateKey, storageValue)
 	return nil
 }
@@ -1006,16 +941,15 @@ func (t *MerkleTree) GetServiceStorageWithProof(s uint32, k []byte) ([]byte, [][
 }
 
 // Delete Storage key(hash)
-func (t *MerkleTree) DeleteServiceStorage(s uint32, k []byte) error {
+func (t *MerkleTree) DeleteServiceStorage(s uint32, k []byte) {
 	as_internal_key := common.Compute_storageKey_internal(k)
 	account_storage_key := common.ComputeC_sh(s, as_internal_key)
 	stateKey := account_storage_key.Bytes()
-	err := t.Delete(stateKey)
-	return err
+	t.Delete(stateKey)
 }
 
 // Set PreImage Blob for GP_0.3.5(158)
-func (t *MerkleTree) SetPreImageBlob(s uint32, blob []byte) (err error) {
+func (t *MerkleTree) SetPreImageBlob(s uint32, blob []byte) error {
 	/*
 		∀(s ↦ a) ∈ δ, (h ↦ p) ∈ a p ∶ C(s, h) ↦ p
 		(s, h) ↦ [n 0 ,h 0 ,n 1 ,h 1 ,n 2 ,h 2 ,n 3 ,h 3 ,h 4 ,h 5 ,...,h 27 ] where n = E 4 (s)
@@ -1032,7 +966,7 @@ func (t *MerkleTree) SetPreImageBlob(s uint32, blob []byte) (err error) {
 	stateKey := account_preimage_hash.Bytes()
 	// Insert Preimage Blob into trie
 	t.Insert(stateKey, blob)
-	return
+	return nil
 }
 
 func (t *MerkleTree) GetPreImageBlob(s uint32, blobHash common.Hash) (value []byte, ok bool, err error) {
@@ -1048,52 +982,38 @@ func (t *MerkleTree) GetPreImageBlob(s uint32, blobHash common.Hash) (value []by
 }
 
 // Delete PreImage Blob
-func (t *MerkleTree) DeletePreImageBlob(s uint32, blobHash common.Hash) error {
+func (t *MerkleTree) DeletePreImageBlob(s uint32, blobHash common.Hash) {
 	ap_internal_key := common.Compute_preimageBlob_internal(blobHash)
 	account_preimage_hash := common.ComputeC_sh(s, ap_internal_key)
-
 	stateKey := account_preimage_hash.Bytes()
-	err := t.Delete(stateKey)
-	return err
+	t.Delete(stateKey)
 }
 
-// Insert fixed-length hashed key with value for the BPT
-func (t *MerkleTree) Insert(key31 []byte, value []byte) {
-	key := make([]byte, 32)
-	copy(key[:], key31[:])
-	node, err := t.findNode(t.Root, key, 0)
-	if err != nil {
-		encodedLeaf := leaf(key, value)
-		t.levelDBSetLeaf(encodedLeaf, value, key)
-		if t.Root == nil {
-			t.Root = &Node{
-				Hash: computeHash(encodedLeaf),
-				Key:  key,
-			}
+// Insert stages the operation without computing hashes or touching levelDB
+func (t *MerkleTree) Insert(keyBytes []byte, value []byte) {
+	key := normalizeKey32(keyBytes)
 
-		} else {
-			t.Root = t.insertNode(t.Root, key, value, 0)
-		}
-	} else {
-		encodedLeaf := leaf(key, value)
-		t.levelDBSetLeaf(encodedLeaf, value, key)
-		t.updateNode(node, key, value)
-	}
+	t.stagedMutex.Lock()
+	defer t.stagedMutex.Unlock()
+
+	t.stagedInserts[key] = value
+	delete(t.stagedDeletes, key) // Cancel any pending delete
 }
 
+// insertNode is the internal version that actually performs the insertion with hashing
 func (t *MerkleTree) insertNode(node *Node, key, value []byte, depth int) *Node {
 	nullNode := Node{Hash: make([]byte, 32)}
 
 	if node == nil || compareBytes(node.Hash, nullNode.Hash) || depth > computeKeyLengthAsBit(key) {
 		return &Node{
-			Hash: computeHash(leaf(key, value)),
+			Hash: computeHash(leaf(key, value, t)),
 			Key:  key,
 		}
 	}
 
 	if node.Left == nil && node.Right == nil {
 		if compareBytes(node.Key, key) {
-			node.Hash = computeHash(leaf(key, value))
+			node.Hash = computeHash(leaf(key, value, t))
 			return node
 		}
 		return t.createBranchNode(node, key, value, depth)
@@ -1125,25 +1045,25 @@ func (t *MerkleTree) insertNode(node *Node, key, value []byte, depth int) *Node 
 	copy(branchData[:32], leftHash)
 	copy(branchData[32:64], rightHash)
 	t.levelDBSetBranch(node.Hash, branchData[:])
+
 	return node
 }
 
 func (t *MerkleTree) createBranchNode(node *Node, key, value []byte, depth int) *Node {
 	existingKey := node.Key
-	//existingValue, _ := t.GetValue_stanley(node.Key) // new but wrong
-	existingValue, _, _ := t.Get(node.Key)
+	existingValue, _, _ := t.getFromStorageLocked(node.Key)
 
-	// why do you need to null here?
+	// Clear the key since this is now a branch
 	node.Key = nil
 
 	if bit(existingKey, depth) {
 		node.Right = &Node{
-			Hash: computeHash(leaf(existingKey, existingValue)),
+			Hash: computeHash(leaf(existingKey, existingValue, t)),
 			Key:  existingKey,
 		}
 	} else {
 		node.Left = &Node{
-			Hash: computeHash(leaf(existingKey, existingValue)),
+			Hash: computeHash(leaf(existingKey, existingValue, t)),
 			Key:  existingKey,
 		}
 	}
@@ -1174,18 +1094,8 @@ func (t *MerkleTree) createBranchNode(node *Node, key, value []byte, depth int) 
 	copy(branchData[:32], leftHash)
 	copy(branchData[32:64], rightHash)
 	t.levelDBSetBranch(node.Hash, branchData[:])
-	return node
-}
 
-func (t *MerkleTree) Modify(key, value []byte) error {
-	node, err := t.findNode(t.Root, key, 0)
-	if err != nil {
-		return err
-	}
-	nodeHash := computeHash(leaf(key, value))
-	t.levelDBSet(nodeHash, value)
-	t.updateNode(node, key, value)
-	return nil
+	return node
 }
 
 func (t *MerkleTree) findNode(node *Node, key []byte, depth int) (*Node, error) {
@@ -1202,17 +1112,12 @@ func (t *MerkleTree) findNode(node *Node, key []byte, depth int) (*Node, error) 
 	}
 }
 
-func (t *MerkleTree) updateNode(node *Node, key, value []byte) {
-	node.Hash = computeHash(leaf(key, value))
-	t.updateTree(t.Root, key, value, 0)
-}
-
 func (t *MerkleTree) updateTree(node *Node, key, value []byte, depth int) {
 	if node == nil || depth > computeKeyLengthAsBit(key) {
 		return
 	}
 	if compareBytes(node.Key, key) {
-		node.Hash = computeHash(leaf(key, value))
+		node.Hash = computeHash(leaf(key, value, t))
 		return
 	}
 	if bit(key, depth) {
@@ -1232,6 +1137,7 @@ func (t *MerkleTree) updateTree(node *Node, key, value []byte, depth int) {
 	} else {
 		node.Right = &Node{Hash: make([]byte, 32)}
 	}
+
 	node.Hash = computeHash(branch(leftHash, rightHash))
 	var branchData [64]byte
 	copy(branchData[:32], leftHash)
@@ -1239,9 +1145,34 @@ func (t *MerkleTree) updateTree(node *Node, key, value []byte, depth int) {
 	t.levelDBSetBranch(node.Hash, branchData[:])
 }
 
-// Get retrieves the value of a specific key in the Merkle Tree
-// Add ok for detecting if the key is found or not
-func (t *MerkleTree) Get(key []byte) ([]byte, bool, error) {
+// Get retrieves the value - checks staged operations first, then committed tree
+func (t *MerkleTree) Get(keyBytes []byte) ([]byte, bool, error) {
+	key := normalizeKey32(keyBytes)
+
+	// First check staged operations
+	t.stagedMutex.Lock()
+
+	// Check if key is staged for deletion
+	if t.stagedDeletes[key] {
+		t.stagedMutex.Unlock()
+		return nil, false, nil
+	}
+
+	// Check if key has a staged insert
+	if value, exists := t.stagedInserts[key]; exists {
+		t.stagedMutex.Unlock()
+		return value, true, nil
+	}
+	t.stagedMutex.Unlock()
+
+	// Not in staged operations, check committed tree
+	t.treeMutex.RLock()
+	defer t.treeMutex.RUnlock()
+	return t.getFromStorageLocked(key[:])
+}
+
+// getFromStorageLocked retrieves value from the committed tree (assumes caller holds tree lock - R or W)
+func (t *MerkleTree) getFromStorageLocked(key []byte) ([]byte, bool, error) {
 	value, ok, err := t.getValue(t.Root, key, 0)
 	if err != nil {
 		return nil, ok, err
@@ -1251,8 +1182,15 @@ func (t *MerkleTree) Get(key []byte) ([]byte, bool, error) {
 	return value, true, nil
 }
 
+// getFromStorage is the public version that acquires the lock
+func (t *MerkleTree) getFromStorage(key []byte) ([]byte, bool, error) {
+	t.treeMutex.RLock()
+	defer t.treeMutex.RUnlock()
+	return t.getFromStorageLocked(key)
+}
+
 func (t *MerkleTree) GetValue(key []byte) ([]byte, error) {
-	value, ok, err := t.getValue(t.Root, key, 0)
+	value, ok, err := t.Get(key)
 	if err != nil || !ok {
 		return nil, fmt.Errorf("GetValue key not found: %x", key)
 	}
@@ -1265,26 +1203,13 @@ func (t *MerkleTree) getValue(node *Node, key []byte, depth int) ([]byte, bool, 
 	}
 
 	if compareBytes(node.Key, key) {
-		valueLeaf, okLeaf, errLeaf := t.levelDBGetLeaf(node.Hash)
+		leafValue, okLeaf, errLeaf := t.getDBLeafValue(node.Hash)
 		if errLeaf != nil {
 			return nil, false, fmt.Errorf("GetValue: Error %v", errLeaf)
 		} else if !okLeaf {
 			return nil, false, nil
-		} else if valueLeaf != nil {
-			return valueLeaf, true, nil
-		}
-
-		if t.db != nil {
-			t0 := time.Now()
-			valueRaw, okRaw, errRaw := t.db.ReadRawKV(node.Key)
-			benchRec.Add("getValue:ReadRawKV", time.Since(t0))
-			if errRaw != nil {
-				return nil, false, fmt.Errorf("ReadRawKV: Error %v", errRaw)
-			} else if !okRaw {
-				return nil, false, nil
-			} else if valueRaw != nil {
-				return valueRaw, true, nil
-			}
+		} else if leafValue != nil {
+			return leafValue, true, nil
 		}
 		return nil, false, fmt.Errorf("unexpected error: key:%x", key)
 	}
@@ -1297,12 +1222,17 @@ func (t *MerkleTree) getValue(node *Node, key []byte, depth int) ([]byte, bool, 
 }
 
 // Trace traces the path to a specific key in the Merkle Tree and returns the sibling hashes along the path
-func (t *MerkleTree) Trace(key []byte) ([][]byte, error) {
+func (t *MerkleTree) Trace(keyBytes []byte) ([][]byte, error) {
+	key := normalizeKey32(keyBytes)
+
+	t.treeMutex.RLock()
+	defer t.treeMutex.RUnlock()
+
 	if t.Root == nil {
 		return nil, errors.New("empty tree")
 	}
 	var path [][]byte
-	err := t.tracePath(t.Root, key, 0, &path)
+	err := t.tracePath(t.Root, key[:], 0, &path)
 	if err != nil {
 		return nil, err
 	}
@@ -1335,7 +1265,15 @@ func (t *MerkleTree) tracePath(node *Node, key []byte, depth int, path *[][]byte
 	}
 }
 
-func (t *MerkleTree) GetPath(key []byte) ([][]byte, error) {
+func (t *MerkleTree) GetPath(keyBytes []byte) ([][]byte, error) {
+	key := normalizeKey32(keyBytes)
+
+	t.treeMutex.RLock()
+	defer t.treeMutex.RUnlock()
+	return t.getPathLocked(key[:])
+}
+
+func (t *MerkleTree) getPathLocked(key []byte) ([][]byte, error) {
 	if t.Root == nil {
 		return nil, errors.New("empty tree")
 	}
@@ -1363,15 +1301,43 @@ func (t *MerkleTree) getPath(node *Node, key []byte, depth int, path *[][]byte) 
 		} else {
 			*path = append(*path, make([]byte, 32))
 		}
-		return t.tracePath(node.Right, key, depth+1, path)
+		return t.getPath(node.Right, key, depth+1, path)
 	} else {
 		if node.Hash != nil {
 			*path = append(*path, node.Hash)
 		} else {
 			*path = append(*path, make([]byte, 32))
 		}
-		return t.tracePath(node.Left, key, depth+1, path)
+		return t.getPath(node.Left, key, depth+1, path)
 	}
+}
+
+// leafStandalone is a standalone version of leaf for use in verification functions
+// that don't have access to a MerkleTree instance
+func leafStandalone(k, v []byte) []byte {
+	var result [64]byte
+
+	// Embedded-value leaf node
+	if len(v) <= 32 {
+		result[0] = byte(0b10000000 | len(v))
+		if len(k) > 31 {
+			copy(result[1:32], k[:31])
+		} else {
+			copy(result[1:1+len(k)], k)
+		}
+		copy(result[32:32+len(v)], v)
+	} else {
+		// Regular leaf node
+		result[0] = byte(0b11000000)
+		if len(k) > 31 {
+			copy(result[1:32], k[:31])
+		} else {
+			copy(result[1:1+len(k)], k)
+		}
+		hash := computeHash(v)
+		copy(result[32:64], hash)
+	}
+	return result[:]
 }
 
 // Verify verifies the path to a specific key in the Merkle Tree
@@ -1380,11 +1346,11 @@ func Verify(serviceID uint32, key []byte, value []byte, rootHash []byte, path []
 	opaqueKey := common.Compute_storage_opaqueKey(serviceID, key)
 
 	if len(path) == 0 {
-		leafHashSingle := computeHash(leaf(opaqueKey, value))
+		leafHashSingle := computeHash(leafStandalone(opaqueKey, value))
 		return compareBytes(leafHashSingle, rootHash)
 	}
 
-	leafHash := computeHash(leaf(opaqueKey, value))
+	leafHash := computeHash(leafStandalone(opaqueKey, value))
 
 	for i := len(path) - 1; i >= 0; i-- {
 		if bit(opaqueKey, i) {
@@ -1400,11 +1366,11 @@ func Verify(serviceID uint32, key []byte, value []byte, rootHash []byte, path []
 // Used primarily for testing low-level trie operations
 func VerifyRaw(key []byte, value []byte, rootHash []byte, path []common.Hash) bool {
 	if len(path) == 0 {
-		leafHashSingle := computeHash(leaf(key, value))
+		leafHashSingle := computeHash(leafStandalone(key, value))
 		return compareBytes(leafHashSingle, rootHash)
 	}
 
-	leafHash := computeHash(leaf(key, value))
+	leafHash := computeHash(leafStandalone(key, value))
 
 	for i := len(path) - 1; i >= 0; i-- {
 		if bit(key, i) {
@@ -1416,68 +1382,54 @@ func VerifyRaw(key []byte, value []byte, rootHash []byte, path []common.Hash) bo
 	return compareBytes(leafHash, rootHash)
 }
 
-// Delete removes a leaf node by key and reinserts remaining nodes into the tree
-func (t *MerkleTree) Delete(key []byte) error {
-	// Find the node to delete
-	node, err := t.findNode(t.Root, key, 0)
-	if err != nil {
-		//fmt.Printf("Delete: key not found: %x\n", key)
-		return err
-	}
+// Delete stages a deletion without modifying the tree
+func (t *MerkleTree) Delete(keyBytes []byte) {
+	key := normalizeKey32(keyBytes)
 
-	// Retrieve the value of the node to delete
-	value, ok, err := t.levelDBGetLeaf(node.Hash)
-	if err != nil {
-		return err
-	} else if !ok {
-		return fmt.Errorf("Delete: key not found: %x", key)
-	}
+	t.stagedMutex.Lock()
+	defer t.stagedMutex.Unlock()
 
-	// Collect remaining nodes' key-value pairs
-	remainingNodes := [][2][]byte{}
-	t.collectRemainingNodes(t.Root, key, &remainingNodes)
-
-	// Remove the node from levelDB
-	nodeHash := computeHash(leaf(key, value))
-	if false {
-		fmt.Printf("Psuedo Delete: key=%x, value=%x, nodeHash=%x in accessible??\n", key, value, nodeHash)
-	}
-	//t.db.DeleteK(common.BytesToHash(nodeHash))
-	//t.Close()
-	// Rebuild the tree without the deleted node
-	tree := NewMerkleTree(nil, t.db)
-	for _, kv := range remainingNodes {
-		tree.Insert(kv[0], kv[1])
-	}
-	t.Root = tree.Root
-	t.db = tree.db
-	return nil
+	t.stagedDeletes[key] = true
+	delete(t.stagedInserts, key) // Cancel any pending insert
 }
 
-// collectRemainingNodes collects all key-value pairs except for the one to be deleted
-func (t *MerkleTree) collectRemainingNodes(node *Node, deleteKey []byte, nodes *[][2][]byte) {
-	if node == nil {
-		return
+// deleteNode is the internal version that actually performs the deletion
+func (t *MerkleTree) deleteNode(node *Node, key []byte, depth int) *Node {
+	if node == nil || depth > computeKeyLengthAsBit(key) {
+		return node
 	}
 
-	// Skip the node to be deleted
-	if compareBytes(node.Key, deleteKey) {
-		return
+	// Found the leaf to delete
+	if compareBytes(node.Key, key) {
+		return nil
 	}
 
-	// Retrieve the value for the current node
-	value, _, err := t.levelDBGetLeaf(node.Hash)
-	if err == nil && node.Key != nil {
-		if value != nil {
-			*nodes = append(*nodes, [2][]byte{node.Key, value})
-		} else {
-			// ignore deleted leaf node from collectRemainingNodes (i.e node with value []byte being empty)
-		}
+	// Not a leaf, recurse
+	if bit(key, depth) {
+		node.Right = t.deleteNode(node.Right, key, depth+1)
+	} else {
+		node.Left = t.deleteNode(node.Left, key, depth+1)
 	}
 
-	// Recursively collect from left and right subtrees
-	t.collectRemainingNodes(node.Left, deleteKey, nodes)
-	t.collectRemainingNodes(node.Right, deleteKey, nodes)
+	// After deletion, check if this branch can be collapsed
+	if node.Left == nil && node.Right == nil {
+		return nil
+	}
+	if node.Left == nil {
+		return node.Right
+	}
+	if node.Right == nil {
+		return node.Left
+	}
+
+	// Recompute branch hash
+	node.Hash = computeHash(branch(node.Left.Hash, node.Right.Hash))
+	var branchData [64]byte
+	copy(branchData[:32], node.Left.Hash)
+	copy(branchData[32:64], node.Right.Hash)
+	t.levelDBSetBranch(node.Hash, branchData[:])
+
+	return node
 }
 
 // compareBytes compares two Tries
@@ -1491,14 +1443,14 @@ func compareTrees(node1, node2 *Node) bool {
 	}
 	if node1 == nil && node2 != nil {
 		fmt.Printf("Node1 empty. Node2 Not Empty\n")
-		fmt.Printf("Node1 %v\n", node1.String())
+		fmt.Printf("Node1 <nil>\n")
 		fmt.Printf("Node2 %v\n", node2.String())
 		return false
 	}
 	if node1 != nil && node2 == nil {
 		fmt.Printf("Node1 Not empty. Node2 Empty\n")
 		fmt.Printf("Node1 %v\n", node1.String())
-		fmt.Printf("Node2 %v\n", node2.String())
+		fmt.Printf("Node2 <nil>\n")
 		return false
 	}
 	if !compareBytes(node1.Hash, node2.Hash) {

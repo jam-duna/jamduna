@@ -253,7 +253,6 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 	// (χ′, δ†, ι′, φ′)
 	for _, sa := range o.ServiceAccounts {
 		sa.ALLOW_MUTABLE() // make sure all service accounts can be written
-		sa.Dirty = true
 	}
 	accumulated_workreports := accumulate_input_wr[:num_accumulations]
 	for _, report := range accumulated_workreports {
@@ -282,7 +281,6 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 			}
 		}
 	}
-	//benchRec.Add("ProcessDeferredTransfers", time.Since(t0))
 
 	for _, gas_usage := range gasUsage {
 		service := gas_usage.Service

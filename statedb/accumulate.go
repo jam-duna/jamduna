@@ -821,7 +821,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 					PayloadHash:         workDigest.PayloadHash,
 					Result:              workDigest.Result,
 				}
-				log.Debug(sd.Authoring, "SINGLE ACCUMULATE", "Authoring", sd.Authoring, "s", fmt.Sprintf("%d", serviceID), "wrangledResults", types.DecodedWrangledResults(&operandElement))
+				log.Trace(sd.Authoring, "SINGLE ACCUMULATE", "Authoring", sd.Authoring, "s", fmt.Sprintf("%d", serviceID), "wrangledResults", types.DecodedWrangledResults(&operandElement))
 				operandElements = append(operandElements, operandElement)
 			}
 		}

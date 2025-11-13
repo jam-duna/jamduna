@@ -12,7 +12,6 @@ import (
 
 // MockHostEnv struct implements the HostEnv interface with mock responses
 type MockHostEnv struct {
-	id               uint16
 	db               *storage.StateDBStorage
 	historicalLookup map[common.Hash][]byte
 }
@@ -24,11 +23,7 @@ func NewMockHostEnvDB() *storage.StateDBStorage {
 
 func NewMockHostEnv() *MockHostEnv {
 	test_db := NewMockHostEnvDB()
-	return &MockHostEnv{db: test_db, id: 0, historicalLookup: make(map[common.Hash][]byte)}
-}
-
-func (mh *MockHostEnv) GetID() uint16 {
-	return mh.id
+	return &MockHostEnv{db: test_db, historicalLookup: make(map[common.Hash][]byte)}
 }
 
 func (mh *MockHostEnv) GetDB() *storage.StateDBStorage {

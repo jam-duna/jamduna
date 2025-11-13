@@ -46,7 +46,7 @@ type Target struct {
 // NewTarget creates a new target instance, armed with a specific test case.
 func NewTarget(socketPath string, targetInfo PeerInfo, pvmBackend string, debugState bool, dumpStf bool, dumpLocation string) *Target {
 	levelDBPath := fmt.Sprintf("/tmp/target_%d", time.Now().Unix())
-	store, err := storage.NewStateDBStorage(levelDBPath, nil, nil)
+	store, err := storage.NewStateDBStorage(levelDBPath, nil, nil, 0)
 	if err != nil {
 		log.Fatalf("Failed to create state DB storage: %v", err)
 	}
@@ -288,11 +288,11 @@ func (t *Target) onImportBlock(req *types.Block) *Message {
 			forkState := preState.Copy()
 			if forkState == nil {
 				log.Printf("%s[FORK_DEBUG]%s ERROR: failed to copy current state for forking%s", common.ColorRed, common.ColorReset, common.ColorReset)
-			} else if err := forkState.RecoverJamState(req.Header.ParentStateRoot); err != nil {
+			} else if err := forkState.InitTrieAndLoadJamState(req.Header.ParentStateRoot); err != nil {
 				log.Printf("%s[FORK_DEBUG]%s ERROR: unable to recover fork state: %v%s", common.ColorRed, common.ColorReset, err, common.ColorReset)
 			} else {
 				forkState.HeaderHash = foundParentHeaderHash
-				//forkState.StateRoot = req.Header.ParentStateRoot // Now set inside RecoverJamState
+				//forkState.StateRoot = req.Header.ParentStateRoot // Now set inside InitTrieAndLoadJamState
 				if t.debugState {
 					log.Printf("%s[FORK_DEBUG]%s Fork state prepared: HeaderHash=%s, StateRoot=%s%s", common.ColorMagenta, common.ColorReset, forkState.HeaderHash.Hex(), forkState.StateRoot.Hex(), common.ColorReset)
 				}
@@ -372,7 +372,7 @@ func (t *Target) onGetState(req *common.Hash) *Message {
 		log.Printf("%s[GET_STATE_DEBUG]%s Error: failed to copy state for headerHash: %s%s", common.ColorRed, common.ColorReset, headerHash.Hex(), common.ColorReset)
 		return &Message{State: &statedb.StateKeyVals{}}
 	}
-	if err := recoveredStateDB.RecoverJamState(stateRoot); err != nil {
+	if err := recoveredStateDB.InitTrieAndLoadJamState(stateRoot); err != nil {
 		log.Printf("%s[GET_STATE_DEBUG]%s Error recovering state: %v%s", common.ColorRed, common.ColorReset, err, common.ColorReset)
 		return &Message{State: &statedb.StateKeyVals{}}
 	}

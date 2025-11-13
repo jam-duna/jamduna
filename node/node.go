@@ -553,7 +553,7 @@ func createNode(id uint16, credential types.ValidatorSecret, chainspec *chainspe
 
 func PrintSpec(chainspec *chainspecs.ChainSpec) error {
 	levelDBPath := "/tmp/xxx"
-	store, err := storage.NewStateDBStorage(levelDBPath, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient())
+	store, err := storage.NewStateDBStorage(levelDBPath, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient(), 0)
 	if err != nil {
 		return err
 	}
@@ -618,11 +618,10 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 	levelDBPath := fmt.Sprintf("%v/leveldb/%d/", dataDir, port)
 	// Create a temporary no-op telemetry client for storage initialization
 	tempTelemetryClient := telemetry.NewNoOpTelemetryClient()
-	store, err := storage.NewStateDBStorage(levelDBPath, &nodeContent, tempTelemetryClient)
+	store, err := storage.NewStateDBStorage(levelDBPath, &nodeContent, tempTelemetryClient, id)
 	if err != nil {
 		return nil, fmt.Errorf("NewStateDBStorage[port:%d] Err %v", port, err)
 	}
-	store.NodeID = id
 	// Now set the store field on nodeContent
 	nodeContent.store = store
 
@@ -854,20 +853,9 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 	_statedb.HeaderHash = block.Header.Hash()
 	if FinalizedOk {
 		finalizedBlock = block
-		recoveredStateDB := _statedb.Copy()
-		if recoveredStateDB == nil {
-			return nil, fmt.Errorf("failed to copy initial stateDB")
-		}
-		if err := recoveredStateDB.RecoverJamState(finalizedBlock.Header.ParentStateRoot); err != nil {
-			return nil, fmt.Errorf("failed to recover finalized parent state: %w", err)
-		}
-		recoveredStateDB.UnsetPosteriorEntropy()
-		//recoveredStateDB.StateRoot = finalizedBlock.Header.ParentStateRoot // Now set inside RecoverJamState
-		recoveredStateDB.Block = finalizedBlock.Copy()
 	}
 	genesisBlockHash = block.Header.Hash()
 	if err == nil {
-		_statedb.SetID(uint16(id))
 		node.addStateDB(_statedb)
 	} else {
 		fmt.Printf("NewGenesisStateDB ERR %v\n", err)
@@ -2203,23 +2191,10 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	// 1. Prepare recovered state from parent
 	start := time.Now()
 
-	recoveredStateDB := n.statedb.Copy()
-	if recoveredStateDB.StateRoot != nextBlock.Header.ParentStateRoot {
-		log.Warn(log.B, "ApplyBlock: stateroot NOT the same. calling RecoverJamState", "n", n.String(),
-			"expected", nextBlock.Header.ParentStateRoot.String_short(),
-			"got", recoveredStateDB.StateRoot.String_short(),
-			"blk", nextBlock.Str(),
-		)
-		recoveredStateDB.RecoverJamState(nextBlock.Header.ParentStateRoot) // it don't even know if it got the correct state
-		recoveredStateDB.StateRoot = nextBlock.Header.ParentStateRoot
+	recoveredStateDB, err := statedb.NewStateDBFromStateRoot(nextBlock.Header.ParentStateRoot, n.store)
+	if err != nil {
+		return fmt.Errorf("NewStateDBFromStateRoot failed: %w", err)
 	}
-
-	/*
-		recoveredStateDB, err := statedb.NewStateDBFromStateRoot(nextBlock.Header.ParentStateRoot, n.store)
-		if err != nil {
-			return fmt.Errorf("NewStateDBFromStateRoot failed: %w", err)
-		}
-	*/
 	recoveredStateDB.UnsetPosteriorEntropy()
 	recoveredStateDB.Block = nextBlock
 	recoverElapsed := time.Since(start)
@@ -2284,14 +2259,14 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 		mode = "fallback"
 	}
 	log.Info(log.B, "Imported Block", // "n", n.String(),
-		"mode", mode,
-		"author", nextBlock.Header.AuthorIndex,
 		"n", newStateDB.Id,
+		"author", nextBlock.Header.AuthorIndex,
 		"s+", newStateDB.StateRoot.String_short(),
 		"p", nextBlock.Header.ParentHeaderHash.String_short(),
 		"h", common.Str(nextBlock.Header.Hash()),
 		"e'", currEpoch, "m'", currPhase,
 		"len(γ_a')", len(newStateDB.JamState.SafroleState.NextEpochTicketsAccumulator),
+		"mode", mode,
 		"blk", nextBlock.Str(),
 	)
 	// TODO: write finalizd block kv here
@@ -2800,18 +2775,11 @@ func (n *NodeContent) getStateDBByStateRoot(stateRoot common.Hash) (*statedb.Sta
 	n.statedbMapMutex.Lock()
 	defer n.statedbMapMutex.Unlock()
 
-	targetStateDB, ok := n.statedbMap[stateRoot]
-	if ok {
-		return targetStateDB, nil
+	targetStateDB, err := statedb.NewStateDBFromStateRoot(stateRoot, n.store)
+	if err != nil {
+		return nil, fmt.Errorf("NewStateDBFromStateRoot failed: %w", err)
 	}
-	/*
-		targetStateDB, err := statedb.NewStateDBFromStateRoot(stateRoot, n.store)
-		if err != nil {
-			return nil, fmt.Errorf("NewStateDBFromStateRoot failed: %w", err)
-		}
-		return targetStateDB, nil
-	*/
-	return nil, fmt.Errorf("stateDB with stateRoot %s not found", stateRoot.String_short())
+	return targetStateDB, nil
 
 }
 
@@ -3135,7 +3103,6 @@ func (n *Node) SetCurrJCE(currJCE uint32) {
 	if prevJCE == currJCE {
 		return // set only once
 	}
-	fmt.Printf("Node %d: Update CurrJCE %d\n", n.id, currJCE)
 	n.jce_timestamp_mutex.Lock()
 	if n.jce_timestamp == nil {
 		n.jce_timestamp = make(map[uint32]time.Time)
@@ -3339,11 +3306,7 @@ func (n *Node) runAuthoring() {
 			go func() {
 				timeslot := newStateDB.GetSafrole().Timeslot
 				s := n.statedb
-				allStates := s.GetAllKeyValues()
-				ok, err := s.CompareStateRoot(allStates, newBlock.Header.ParentStateRoot)
-				if !ok || err != nil {
-					log.Crit(log.Node, "CompareStateRoot", "err", err)
-				}
+
 				st := buildStateTransitionStruct(oldstate, newBlock, newStateDB)
 				if isWriteTransition {
 					if err := n.writeDebug(st, timeslot, true); err != nil {

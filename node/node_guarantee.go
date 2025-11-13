@@ -248,7 +248,7 @@ func (n *Node) processWPQueueItem(wpItem *types.WPQueueItem) bool {
 		fellowSignature := fellow_response.Signature
 
 		// Log comparison details
-		log.Info(log.G, "processWPQueueItem comparing work report hashes",
+		log.Debug(log.G, "processWPQueueItem comparing work report hashes",
 			"n", n.String(),
 			"fellowValidator", key.String()[:16]+"...",
 			"selfHash", selfWorkReportHash.String(),
@@ -307,10 +307,9 @@ func (n *Node) processWPQueueItem(wpItem *types.WPQueueItem) bool {
 // If eventID is non-zero, telemetry events for Authorized and Refined will be emitted
 func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle,
 	segmentRootLookup types.SegmentRootLookup, slot uint32, firstGuarantorOrAuditor bool, eventID uint64) (work_report types.WorkReport, err error) {
-	targetAnchor := package_bundle.WorkPackage.RefineContext.Anchor
-	targetStateDB, err := n.getTargetStateDB(targetAnchor.String())
+	targetStateDB, err := n.getStateDBByStateRoot(package_bundle.WorkPackage.RefineContext.StateRoot)
 	if err != nil {
-		return work_report, fmt.Errorf("executeWorkPackageBundle:getTargetStateDB: %v", err)
+		return work_report, fmt.Errorf("executeWorkPackageBundle:getStateDBByStateRoot: %v", err)
 	}
 	workReport, err := targetStateDB.ExecuteWorkPackageBundle(workPackageCoreIndex, package_bundle, segmentRootLookup, slot, firstGuarantorOrAuditor, eventID, n.pvmBackend)
 	return workReport, err

@@ -13,6 +13,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
+	trie "github.com/colorfulnotion/jam/trie"
 	types "github.com/colorfulnotion/jam/types"
 )
 
@@ -125,42 +126,12 @@ func (n *NodeContent) GetState(headerHash common.Hash, startKey [31]byte, endKey
 		return boundarynodes, keyvalues, false, err
 	}
 	stateRoot := blocks[0].Header.ParentStateRoot
-	trie, err := s.CopyTrieState(stateRoot)
+	trie, err := trie.InitMerkleTreeFromHash(stateRoot, s.GetStorage())
 	if err != nil {
 		return boundarynodes, keyvalues, false, err
 	}
 	foundKeyVal, boundaryNode, err := trie.GetStateByRange(startKey[:], endKey[:], maximumSize)
 	if err != nil {
-		return boundarynodes, keyvalues, false, err
-	}
-	keyvalues = types.StateKeyValueList{Items: foundKeyVal}
-	return boundaryNode, keyvalues, true, nil
-}
-
-func (n *Node) GetServiceIdxStorage(headerHash common.Hash, service_idx uint32, rawKey []byte) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {
-	return n.getServiceIdxStorage(headerHash, service_idx, rawKey)
-}
-
-func (n *NodeContent) getServiceIdxStorage(headerHash common.Hash, service_idx uint32, rawKey []byte) (boundarynodes [][]byte, keyvalues types.StateKeyValueList, ok bool, err error) {
-	s := n.getPVMStateDB()
-	// stateRoot := s.GetStateRoot()
-	blocks, ok, err := n.BlocksLookup(headerHash, 1, 1)
-	if !ok || err != nil {
-		fmt.Printf("BlocksLookup ERR %v\n", err)
-		return boundarynodes, keyvalues, false, err
-	}
-	stateRoot := blocks[0].Header.ParentStateRoot
-	stateTrie, err := s.CopyTrieState(stateRoot)
-	if err != nil {
-		return boundarynodes, keyvalues, false, err
-	}
-
-	storageKey := common.Compute_storageKey_internal(rawKey)
-	service_account := common.ComputeC_sh(service_idx, storageKey)
-	maxSize := uint32(1000000)
-	foundKeyVal, boundaryNode, err := stateTrie.GetStateByRange(service_account[:], common.Hex2Bytes("0xFFFFFFFFFF"), maxSize)
-	if err != nil {
-		fmt.Printf("GetState ERR %v\n", err)
 		return boundarynodes, keyvalues, false, err
 	}
 	keyvalues = types.StateKeyValueList{Items: foundKeyVal}
