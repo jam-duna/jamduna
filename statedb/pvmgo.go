@@ -2,7 +2,6 @@ package statedb
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -13,6 +12,7 @@ import (
 	"github.com/colorfulnotion/jam/pvm/program"
 	"github.com/colorfulnotion/jam/types" // go get golang.org/x/example/hello/reverse
 	"golang.org/x/exp/slices"
+	"golang.org/x/sys/unix"
 )
 
 // ExecutionContext tracks the state of a specific contract execution context
@@ -59,7 +59,7 @@ type VMGo struct {
 	hostCall       bool // ̵h in GP
 	host_func_id   int  // h in GP
 	hostVM         *VM  // Reference to host VM for host function calls
-	Ram            *RawRAM
+	Ram            *RawRam
 	Gas            int64
 	hostenv        types.HostEnv
 
@@ -368,7 +368,19 @@ func (vm *VMGo) GetArgumentOutputs() (types.Result, uint64) {
 	return vm.getArgumentOutputs()
 }
 
-func (vm *VMGo) SetMemoryBounds(rwAddr, rwEnd, roAddr, roEnd, outputAddr, outputEnd, stackAddr, stackEnd uint32) {
+func (vm *VMGo) SetMemoryBounds(o_size uint32,
+	w_size uint32,
+	z uint32,
+	s uint32,
+	o_byte []byte,
+	w_byte []byte) {
+	// set memory bounds
+	vm.o_size = o_size
+	vm.w_size = w_size
+	vm.z = z
+	vm.s = s
+	vm.o_byte = o_byte
+	vm.w_byte = w_byte
 
 }
 
@@ -393,13 +405,11 @@ func NewVMGo(service_index uint32, p *Program, initialRegs []uint64, initialPC u
 		//contracts:       make(map[uint64]*ContractImage),
 		label_pc: make(map[int]string),
 	}
-
+	vm.Ram, _ = NewRawRam()
 	vm.moveSnapshot = newSnapshotReaderState()
 	vm.readCache = make(map[uint64]*cachedReadObject)
 	vm.readSet = make(map[readSetKey]readSetEntry)
 	vm.writeBuffer = make([]writeBufferEntry, 0)
-
-	vm.Ram = NewRawRAM()
 
 	for i := 0; i < len(initialRegs); i++ {
 		vm.Ram.WriteRegister(i, initialRegs[i])
@@ -421,7 +431,8 @@ func (vm *VMGo) Destroy() {
 func (vm *VMGo) Execute(host *VM, entryPoint uint32) error {
 	vm.terminated = false
 	vm.IsChild = false
-	vm.hostVM = host // Store host VM reference for host function calls
+	vm.hostVM = host           // Store host VM reference for host function calls
+	vm.EntryPoint = entryPoint // Store entry point for gas accounting
 	// A.2 deblob
 	if vm.code == nil {
 		vm.ResultCode = types.WORKRESULT_PANIC
@@ -444,7 +455,6 @@ func (vm *VMGo) Execute(host *VM, entryPoint uint32) error {
 		return errors.New("failed to decode bitmask")
 	}
 	vm.pc = uint64(entryPoint)
-	vm.Gas = 250_000_000
 	stepn := 1
 	for !vm.terminated {
 		// charge gas for all the next steps until hitting a basic block instruction
@@ -465,9 +475,9 @@ func (vm *VMGo) Execute(host *VM, entryPoint uint32) error {
 			if vm.Gas < 0 {
 				vm.ResultCode = types.WORKRESULT_OOG
 				vm.MachineState = OOG
+				vm.hostVM.ResultCode = types.WORKRESULT_OOG
 				vm.terminated = true
-
-				return errors.New("out of gas")
+				return fmt.Errorf("out of gas , gas = %d", vm.Gas)
 			}
 		}
 	}
@@ -476,6 +486,7 @@ func (vm *VMGo) Execute(host *VM, entryPoint uint32) error {
 	if !vm.terminated {
 		vm.ResultCode = types.WORKRESULT_OK
 	} else if vm.ResultCode != types.WORKRESULT_OK {
+		vm.hostVM.ResultCode = vm.ResultCode
 		fmt.Printf("VM terminated with error code %d at PC %d (%v, %s, %s) Gas:%v\n", vm.ResultCode, vm.pc, vm.Service_index, vm.Mode, string(vm.ServiceMetadata), vm.Gas)
 	}
 	return nil
@@ -489,27 +500,26 @@ func (vm *VMGo) WriteRAMBytes(addr uint32, data []byte) uint64 {
 	return vm.Ram.WriteRAMBytes(addr, data)
 }
 func (vm *VMGo) ReadRegister(index int) uint64 {
-	x, _ := vm.Ram.ReadRegister(index)
-	return x
+	return vm.Ram.ReadRegister(index)
 }
 func (vm *VMGo) WriteRegister(index int, value uint64) {
 	vm.Ram.WriteRegister(index, value)
 }
 
 func (vm *VMGo) ReadRegisters() [13]uint64 {
-	slice := vm.Ram.ReadRegisters()
-	var arr [13]uint64
-	copy(arr[:], slice)
-	return arr
+	return vm.Ram.ReadRegisters()
 }
 
 func (vm *VMGo) Panic(code uint64) {
 	vm.ResultCode = types.WORKRESULT_PANIC
+	vm.hostVM.ResultCode = types.WORKRESULT_PANIC
+	vm.terminated = true
 }
 
 func (vm *VMGo) SetHeapPointer(pointer uint32) {
 	// VMGo doesn't use a C-based heap pointer like Interpreter does
 	// This is a stub to satisfy the ExecutionVM interface
+	vm.Ram.SetCurrentHeapPointer(pointer)
 }
 
 func (vm *VMGo) SetHostResultCode(c uint64) {
@@ -532,17 +542,83 @@ func (vm *VMGo) SetCore(coreIndex uint16) {
 	vm.CoreIndex = coreIndex
 }
 
-func (vm *VMGo) Init(argumentData []byte) error {
-	if len(argumentData) == 0 {
-		argumentData = []byte{0}
+func (vm *VMGo) Init(argument_data_a []byte) error {
+	if len(argument_data_a) == 0 {
+		argument_data_a = []byte{0}
 	}
-	// argument
+	//1)
+	// o_byte
+	o_len := len(vm.o_byte)
+	var err error
+	if err = vm.Ram.SetMemAccess(Z_Z, uint32(o_len), PageMutable); err != nil {
+		return fmt.Errorf("SetMemAccess1 failed o_len=%d (o_byte): %w", o_len, err)
+	}
+	if err = vm.Ram.WriteMemory(Z_Z, vm.o_byte); err != nil {
+		return fmt.Errorf("WriteMemory failed (o_byte): %w", err)
+	}
+	if err = vm.Ram.SetMemAccess(Z_Z, uint32(o_len), PageImmutable); err != nil {
+		return fmt.Errorf("SetMemAccess2 failed (o_byte): %w", err)
+	}
+	//2)
+	//p|o|
+	p_o_len := P_func(uint32(o_len))
+	if err = vm.Ram.SetMemAccess(Z_Z+uint32(o_len), p_o_len, PageImmutable); err != nil {
+		return fmt.Errorf("SetMemAccess failed (p_o_byte): %w", err)
+	}
+
+	z_o := Z_func(vm.o_size)
+	z_w := Z_func(vm.w_size + vm.z*Z_P)
+	z_s := Z_func(vm.s)
+	requiredMemory := uint64(5*Z_Z + z_o + z_w + z_s + Z_I)
+	if requiredMemory > math.MaxUint32 {
+		return fmt.Errorf("Standard Program Initialization Error: requiredMemory too large")
+	}
+	// 3)
+	// w_byte
+	w_addr := 2*Z_Z + z_o
+	w_len := uint32(len(vm.w_byte))
+	if err = vm.Ram.SetMemAccess(w_addr, w_len, PageMutable); err != nil {
+		return fmt.Errorf("SetMemAccess failed (w_byte): %w", err)
+	}
+	if err = vm.Ram.WriteMemory(w_addr, vm.w_byte); err != nil {
+		return fmt.Errorf("WriteMemory failed (w_byte): %w", err)
+	}
+	// 4)
+	addr4 := 2*Z_Z + z_o + w_len
+	little_z := vm.z
+	len4 := P_func(w_len) + little_z*Z_P - w_len
+	if err = vm.Ram.SetMemAccess(addr4, len4, PageMutable); err != nil {
+		return fmt.Errorf("SetMemAccess failed (addr4): %w", err)
+	}
+	// 5)
+	addr5 := 0xFFFFFFFF + 1 - 2*Z_Z - Z_I - P_func(vm.s)
+	len5 := P_func(vm.s)
+	if err = vm.Ram.SetMemAccess(addr5, len5, PageMutable); err != nil {
+		return fmt.Errorf("SetMemAccess failed (addr5): %w", err)
+	}
+	// 6)
 	argAddr := uint32(0xFFFFFFFF) - Z_Z - Z_I + 1
+	if err = vm.Ram.SetMemAccess(argAddr, uint32(len(argument_data_a)), PageMutable); err != nil {
+		return fmt.Errorf("SetMemAccess failed (argAddr): %w", err)
+	}
+	if err = vm.Ram.WriteMemory(argAddr, argument_data_a); err != nil {
+		return fmt.Errorf("WriteMemory failed (argAddr): %w", err)
+	}
+	// set it back to immutable
+	if err = vm.Ram.SetMemAccess(argAddr+uint32(len(argument_data_a)), Z_I, PageImmutable); err != nil {
+		return fmt.Errorf("SetMemAccess failed (argAddr+len): %w", err)
+	}
+	// 7)
+	addr7 := argAddr + uint32(len(argument_data_a))
+	len7 := argAddr + P_func(uint32(len(argument_data_a))) - addr7
+	if err = vm.Ram.SetMemAccess(addr7, len7, PageImmutable); err != nil {
+		return fmt.Errorf("SetMemAccess failed (addr7): %w", err)
+	}
+
 	vm.WriteRegister(0, uint64(0xFFFFFFFF-(1<<16)+1))
 	vm.WriteRegister(1, uint64(0xFFFFFFFF-2*Z_Z-Z_I+1))
 	vm.WriteRegister(7, uint64(argAddr))
-	vm.WriteRegister(8, uint64(uint32(len(argumentData))))
-	vm.WriteRAMBytes(argAddr, argumentData)
+	vm.WriteRegister(8, uint64(uint32(len(argument_data_a))))
 
 	return nil
 }
@@ -555,8 +631,8 @@ func (vm *VMGo) getArgumentOutputs() (r types.Result, res uint64) {
 	if vm.ResultCode != types.WORKRESULT_OK {
 		return r, 0
 	}
-	o, _ := vm.Ram.ReadRegister(7)
-	l, _ := vm.Ram.ReadRegister(8)
+	o := vm.Ram.ReadRegister(7)
+	l := vm.Ram.ReadRegister(8)
 	output, res := vm.Ram.ReadRAMBytes(uint32(o), uint32(l))
 	if vm.ResultCode == types.WORKRESULT_OK && res == 0 {
 		r.Ok = output
@@ -585,7 +661,7 @@ func (vm *VMGo) step(stepn int) error {
 	if vm.pc >= uint64(len(vm.code)) {
 		return errors.New("program counter out of bounds")
 	}
-	//this_step_pc := vm.pc
+	prevpc := vm.pc
 	opcode := vm.code[vm.pc]
 	len_operands := vm.skip(vm.pc)
 	operands := vm.code[vm.pc+1 : vm.pc+1+len_operands]
@@ -601,8 +677,22 @@ func (vm *VMGo) step(stepn int) error {
 		// 	return childHostCall
 		// }
 		if vm.hostCall {
-			//vm.Gas -= int64(vm.chargeGas(vm.host_func_id))
+			if vm.host_func_id == LOG {
+
+			} else if vm.host_func_id == TRANSFER {
+				vm.Gas -= 10
+				vm.Gas -= int64(vm.ReadRegister(9))
+			} else {
+				vm.Gas -= 10
+			}
 			// Invoke host function with panic recovery
+			if vm.Gas < 0 {
+				fmt.Printf("Out of gas during host function %d call\n", vm.host_func_id)
+				vm.ResultCode = types.WORKRESULT_OOG
+				vm.MachineState = OOG
+				vm.terminated = true
+				return nil
+			}
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
@@ -626,6 +716,7 @@ func (vm *VMGo) step(stepn int) error {
 					if vm.MachineState == PANIC {
 						vm.Panic(PANIC)
 						//fmt.Printf("HostCall %s (%d) PANIC!\n", HostFnToName(vm.host_func_id), vm.host_func_id)
+						vm.terminated = true
 						return
 					}
 				}
@@ -688,10 +779,13 @@ func (vm *VMGo) step(stepn int) error {
 		registers := vm.Ram.ReadRegisters()
 		prettyHex := "["
 		for i := 0; i < 13; i++ {
-			prettyHex = prettyHex + fmt.Sprintf(" r%d:0x%02x", i, registers[i])
+			if i > 0 {
+				prettyHex = prettyHex + ", "
+			}
+			prettyHex = prettyHex + fmt.Sprintf("%d", registers[i])
 		}
 		prettyHex = prettyHex + "]"
-		//fmt.Printf("%-18s step:%6d pc:%6d gas:%d Registers:%s\n", opcode_str(opcode), stepn-1, vm.pc, vm.Gas, prettyHex)
+		fmt.Printf("%s %d %d Gas: %d Registers:%s\n", opcode_str(opcode), stepn, prevpc, vm.Gas, prettyHex)
 	}
 	if label, ok := vm.label_pc[int(vm.pc)]; ok {
 		fmt.Printf("[%s%s%s FINISH]\n", ColorBlue, lastLabel, ColorReset)
@@ -768,17 +862,29 @@ func (vm *VMGo) djump(a uint64) {
 		vm.ResultCode = types.WORKRESULT_PANIC
 		vm.MachineState = PANIC
 	} else {
-		vm.pc = uint64(vm.J[(a/Z_A)-1])
+		target_pc := uint64(vm.J[(a/Z_A)-1])
+		// Validate target PC is within bounds
+		if target_pc >= uint64(len(vm.code)) {
+			vm.terminated = true
+			vm.ResultCode = types.WORKRESULT_PANIC
+			vm.MachineState = PANIC
+		} else {
+			vm.pc = target_pc
+		}
 	}
 }
 
-func (vm *VMGo) branch(vx uint64, condition bool) {
-	if condition {
+func (vm *VMGo) branch(vx uint64, taken int, operand_len int) {
+	if taken == 1 && vx < uint64(len(vm.code)) && vx < uint64(len(vm.bitmask)) && (vm.bitmask[vx]&2) != 0 {
 		vm.pc = vx
-	} else {
+	} else if taken == 1 {
+		// Branch marked taken but invalid target
 		vm.ResultCode = types.WORKRESULT_PANIC
 		vm.MachineState = PANIC
 		vm.terminated = true
+	} else {
+		// Not taken; increment pc for fall-through
+		vm.pc += uint64(1 + operand_len)
 	}
 }
 
@@ -878,8 +984,8 @@ func (vm *VMGo) HandleTwoImms(opcode byte, operands []byte) {
 	addr := uint32(vx)
 	switch opcode {
 	case STORE_IMM_U8:
-		vm.Fault_address = uint32(vm.Ram.WriteRAMBytes(addr, []byte{uint8(vx)}))
-		dumpStoreGeneric("STORE_IMM_U8", uint64(addr), "imm", vx, 8)
+		vm.Fault_address = uint32(vm.Ram.WriteRAMBytes(addr, []byte{uint8(vy)}))
+		dumpStoreGeneric("STORE_IMM_U8", uint64(addr), "imm", vy, 8)
 	case STORE_IMM_U16:
 		vm.Fault_address = uint32(vm.Ram.WriteRAMBytes(addr, types.E_l(vy%(1<<16), 2)))
 		dumpStoreGeneric("STORE_IMM_U16", uint64(addr), "imm", vy%(1<<16), 16)
@@ -895,13 +1001,13 @@ func (vm *VMGo) HandleTwoImms(opcode byte, operands []byte) {
 func (vm *VMGo) HandleOneOffset(opcode byte, operands []byte) {
 	vx := extractOneOffset(operands)
 	dumpJumpOffset("JUMP", vx, vm.pc, vm.label_pc)
-	vm.branch(uint64(int64(vm.pc)+vx), true)
+	vm.branch(uint64(int64(vm.pc)+vx), 1, len(operands))
 }
 
 // A.5.6. Instructions with Arguments of One Register & One Immediate.
 func (vm *VMGo) HandleOneRegOneImm(opcode byte, operands []byte) {
 	registerIndexA, vx := extractOneRegOneImm(operands)
-	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
+	valueA := vm.Ram.ReadRegister(registerIndexA)
 
 	addr := uint32(vx)
 	switch opcode {
@@ -1047,7 +1153,7 @@ func (vm *VMGo) HandleOneRegOneImm(opcode byte, operands []byte) {
 // A.5.7. Instructions with Arguments of One Register & Two Immediates.
 func (vm *VMGo) HandleOneRegTwoImm(opcode byte, operands []byte) {
 	registerIndexA, vx, vy := extractOneReg2Imm(operands)
-	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
+	valueA := vm.Ram.ReadRegister(registerIndexA)
 	addr := uint32(valueA) + uint32(vx)
 	switch opcode {
 	case STORE_IMM_IND_U8:
@@ -1092,109 +1198,91 @@ func (vm *VMGo) HandleOneRegTwoImm(opcode byte, operands []byte) {
 // A.5.8 One Register, One Immediate and One Offset
 func (vm *VMGo) HandleOneRegOneImmOneOffset(opcode byte, operands []byte) {
 	registerIndexA, vx, vy0 := extractOneRegOneImmOneOffset(operands)
-	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
+	valueA := vm.Ram.ReadRegister(registerIndexA)
 	vy := uint64(int64(vm.pc) + vy0)
+	operand_len := len(operands)
 	switch opcode {
 	case LOAD_IMM_JUMP:
 		vm.Ram.WriteRegister(registerIndexA, vx)
 		dumpLoadImmJump("LOAD_IMM_JUMP", registerIndexA, vx)
-		vm.branch(vy, true)
+		vm.branch(vy, 1, operand_len)
 	case BRANCH_EQ_IMM:
-		taken := valueA == vx
-		dumpBranchImm("BRANCH_EQ_IMM", registerIndexA, valueA, vx, vy, false, taken)
-		if taken {
-			vm.branch(vy, true)
-		} else {
-			vm.pc += uint64(1 + len(operands))
+		taken := 0
+		if valueA == vx {
+			taken = 1
 		}
-
+		dumpBranchImm("BRANCH_EQ_IMM", registerIndexA, valueA, vx, vy, false, taken == 1)
+		vm.branch(vy, taken, operand_len)
 	case BRANCH_NE_IMM:
-		taken := valueA != vx
-		dumpBranchImm("BRANCH_NE_IMM", registerIndexA, valueA, vx, vy, false, taken)
-		if taken {
-			vm.branch(vy, true)
-		} else {
-			vm.pc += uint64(1 + len(operands))
+		taken := 0
+		if valueA != vx {
+			taken = 1
 		}
-
+		dumpBranchImm("BRANCH_NE_IMM", registerIndexA, valueA, vx, vy, false, taken == 1)
+		vm.branch(vy, taken, operand_len)
 	case BRANCH_LT_U_IMM:
-		taken := valueA < vx
-		dumpBranchImm("BRANCH_LT_U_IMM", registerIndexA, valueA, vx, vy, false, taken)
-		if taken {
-			vm.branch(vy, true)
-		} else {
-			vm.pc += uint64(1 + len(operands))
+		taken := 0
+		if valueA < vx {
+			taken = 1
 		}
-
+		dumpBranchImm("BRANCH_LT_U_IMM", registerIndexA, valueA, vx, vy, false, taken == 1)
+		vm.branch(vy, taken, operand_len)
 	case BRANCH_LE_U_IMM:
-		taken := valueA <= vx
-		dumpBranchImm("BRANCH_LE_U_IMM", registerIndexA, valueA, vx, vy, false, taken)
-		if taken {
-			vm.branch(vy, true)
-		} else {
-			vm.pc += uint64(1 + len(operands))
+		taken := 0
+		if valueA <= vx {
+			taken = 1
 		}
-
+		dumpBranchImm("BRANCH_LE_U_IMM", registerIndexA, valueA, vx, vy, false, taken == 1)
+		vm.branch(vy, taken, operand_len)
 	case BRANCH_GE_U_IMM:
-		taken := valueA >= vx
-		dumpBranchImm("BRANCH_GE_U_IMM", registerIndexA, valueA, vx, vy, false, taken)
-		if taken {
-			vm.branch(vy, true)
-		} else {
-			vm.pc += uint64(1 + len(operands))
+		taken := 0
+		if valueA >= vx {
+			taken = 1
 		}
-
+		dumpBranchImm("BRANCH_GE_U_IMM", registerIndexA, valueA, vx, vy, false, taken == 1)
+		vm.branch(vy, taken, operand_len)
 	case BRANCH_GT_U_IMM:
-		taken := valueA > vx
-		dumpBranchImm("BRANCH_GT_U_IMM", registerIndexA, valueA, vx, vy, false, taken)
-		if taken {
-			vm.branch(vy, true)
-		} else {
-			vm.pc += uint64(1 + len(operands))
+		taken := 0
+		if valueA > vx {
+			taken = 1
 		}
-
+		dumpBranchImm("BRANCH_GT_U_IMM", registerIndexA, valueA, vx, vy, false, taken == 1)
+		vm.branch(vy, taken, operand_len)
 	case BRANCH_LT_S_IMM:
-		taken := int64(valueA) < int64(vx)
-		dumpBranchImm("BRANCH_LT_S_IMM", registerIndexA, valueA, vx, vy, true, taken)
-		if taken {
-			vm.branch(vy, true)
-		} else {
-			vm.pc += uint64(1 + len(operands))
+		taken := 0
+		if int64(valueA) < int64(vx) {
+			taken = 1
 		}
-
+		dumpBranchImm("BRANCH_LT_S_IMM", registerIndexA, valueA, vx, vy, true, taken == 1)
+		vm.branch(vy, taken, operand_len)
 	case BRANCH_LE_S_IMM:
-		taken := int64(valueA) <= int64(vx)
-		dumpBranchImm("BRANCH_LE_S_IMM", registerIndexA, valueA, vx, vy, true, taken)
-		if taken {
-			vm.branch(vy, true)
-		} else {
-			vm.pc += uint64(1 + len(operands))
+		taken := 0
+		if int64(valueA) <= int64(vx) {
+			taken = 1
 		}
-
+		dumpBranchImm("BRANCH_LE_S_IMM", registerIndexA, valueA, vx, vy, true, taken == 1)
+		vm.branch(vy, taken, operand_len)
 	case BRANCH_GE_S_IMM:
-		taken := int64(valueA) >= int64(vx)
-		dumpBranchImm("BRANCH_GE_S_IMM", registerIndexA, valueA, vx, vy, true, taken)
-		if taken {
-			vm.branch(vy, true)
-		} else {
-			vm.pc += uint64(1 + len(operands))
+		taken := 0
+		if int64(valueA) >= int64(vx) {
+			taken = 1
 		}
-
+		dumpBranchImm("BRANCH_GE_S_IMM", registerIndexA, valueA, vx, vy, true, taken == 1)
+		vm.branch(vy, taken, operand_len)
 	case BRANCH_GT_S_IMM:
-		taken := int64(valueA) > int64(vx)
-		dumpBranchImm("BRANCH_GT_S_IMM", registerIndexA, valueA, vx, vy, true, taken)
-		if taken {
-			vm.branch(vy, true)
-		} else {
-			vm.pc += uint64(1 + len(operands))
+		taken := 0
+		if int64(valueA) > int64(vx) {
+			taken = 1
 		}
+		dumpBranchImm("BRANCH_GT_S_IMM", registerIndexA, valueA, vx, vy, true, taken == 1)
+		vm.branch(vy, taken, operand_len)
 	}
 }
 
 // A.5.9. Instructions with Arguments of Two Registers.
 func (vm *VMGo) HandleTwoRegs(opcode byte, operands []byte) {
 	registerIndexD, registerIndexA := extractTwoRegisters(operands)
-	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
+	valueA := vm.Ram.ReadRegister(registerIndexA)
 
 	var result uint64
 	switch opcode {
@@ -1261,8 +1349,8 @@ func (vm *VMGo) HandleTwoRegs(opcode byte, operands []byte) {
 // A.5.10 Two Registers and One Immediate
 func (vm *VMGo) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
-	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
+	valueA := vm.Ram.ReadRegister(registerIndexA)
+	valueB := vm.Ram.ReadRegister(registerIndexB)
 	addr := uint32((uint64(valueB) + vx) % (1 << 32))
 	var result uint64
 
@@ -1375,7 +1463,8 @@ func (vm *VMGo) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 			vm.Fault_address = uint32(errCode)
 			return
 		}
-		result = uint64(int32(types.DecodeE_l(value)))
+		rawDecoded := types.DecodeE_l(value)
+		result = uint64(int32(rawDecoded))
 		dumpLoadGeneric("LOAD_IND_I32", registerIndexA, uint64(addr), result, 32, true)
 	case LOAD_IND_U64:
 		value, errCode := vm.Ram.ReadRAMBytes(addr, 8)
@@ -1493,58 +1582,53 @@ func (vm *VMGo) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 func (vm *VMGo) HandleTwoRegsOneOffset(opcode byte, operands []byte) {
 	registerIndexA, registerIndexB, vx0 := extractTwoRegsOneOffset(operands)
 	vx := uint64(int64(vm.pc) + int64(vx0))
-	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
+	valueA := vm.Ram.ReadRegister(registerIndexA)
+	valueB := vm.Ram.ReadRegister(registerIndexB)
+	operand_len := len(operands)
 
 	switch opcode {
 	case BRANCH_EQ:
-		taken := valueA == valueB
-		dumpBranch("BRANCH_EQ", registerIndexA, registerIndexB, valueA, valueB, vx, taken)
-		if taken {
-			vm.branch(vx, true)
-		} else {
-			vm.pc += uint64(1 + len(operands))
+		taken := 0
+		if valueA == valueB {
+			taken = 1
 		}
+		dumpBranch("BRANCH_EQ", registerIndexA, registerIndexB, valueA, valueB, vx, taken == 1)
+		vm.branch(vx, taken, operand_len)
 	case BRANCH_NE:
-		taken := valueA != valueB
-		dumpBranch("BRANCH_NE", registerIndexA, registerIndexB, valueA, valueB, vx, taken)
-		if taken {
-			vm.branch(vx, true)
-		} else {
-			vm.pc += uint64(1 + len(operands))
+		taken := 0
+		if valueA != valueB {
+			taken = 1
 		}
+		dumpBranch("BRANCH_NE", registerIndexA, registerIndexB, valueA, valueB, vx, taken == 1)
+		vm.branch(vx, taken, operand_len)
 	case BRANCH_LT_U:
-		taken := valueA < valueB
-		dumpBranch("BRANCH_LT_U", registerIndexA, registerIndexB, valueA, valueB, vx, taken)
-		if taken {
-			vm.branch(vx, true)
-		} else {
-			vm.pc += uint64(1 + len(operands))
+		taken := 0
+		if valueA < valueB {
+			taken = 1
 		}
+		dumpBranch("BRANCH_LT_U", registerIndexA, registerIndexB, valueA, valueB, vx, taken == 1)
+		vm.branch(vx, taken, operand_len)
 	case BRANCH_LT_S:
-		taken := int64(valueA) < int64(valueB)
-		dumpBranch("BRANCH_LT_S", registerIndexA, registerIndexB, valueA, valueB, vx, taken)
-		if taken {
-			vm.branch(vx, true)
-		} else {
-			vm.pc += uint64(1 + len(operands))
+		taken := 0
+		if int64(valueA) < int64(valueB) {
+			taken = 1
 		}
+		dumpBranch("BRANCH_LT_S", registerIndexA, registerIndexB, valueA, valueB, vx, taken == 1)
+		vm.branch(vx, taken, operand_len)
 	case BRANCH_GE_U:
-		taken := valueA >= valueB
-		dumpBranch("BRANCH_GE_U", registerIndexA, registerIndexB, valueA, valueB, vx, taken)
-		if taken {
-			vm.branch(vx, true)
-		} else {
-			vm.pc += uint64(1 + len(operands))
+		taken := 0
+		if valueA >= valueB {
+			taken = 1
 		}
+		dumpBranch("BRANCH_GE_U", registerIndexA, registerIndexB, valueA, valueB, vx, taken == 1)
+		vm.branch(vx, taken, operand_len)
 	case BRANCH_GE_S:
-		taken := int64(valueA) >= int64(valueB)
-		dumpBranch("BRANCH_GE_S", registerIndexA, registerIndexB, valueA, valueB, vx, taken)
-		if taken {
-			vm.branch(vx, true)
-		} else {
-			vm.pc += uint64(1 + len(operands))
+		taken := 0
+		if int64(valueA) >= int64(valueB) {
+			taken = 1
 		}
+		dumpBranch("BRANCH_GE_S", registerIndexA, registerIndexB, valueA, valueB, vx, taken == 1)
+		vm.branch(vx, taken, operand_len)
 	default:
 		vm.ResultCode = types.WORKRESULT_PANIC
 		vm.MachineState = PANIC
@@ -1555,7 +1639,7 @@ func (vm *VMGo) HandleTwoRegsOneOffset(opcode byte, operands []byte) {
 // A.5.12. Instructions with Arguments of Two Registers and Two Immediates. (LOAD_IMM_JUMP_IND)
 func (vm *VMGo) HandleTwoRegsTwoImms(opcode byte, operands []byte) {
 	registerIndexA, registerIndexB, vx, vy := extractTwoRegsAndTwoImmediates(operands)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
+	valueB := vm.Ram.ReadRegister(registerIndexB)
 
 	vm.Ram.WriteRegister(registerIndexA, vx)
 
@@ -1566,8 +1650,8 @@ func (vm *VMGo) HandleTwoRegsTwoImms(opcode byte, operands []byte) {
 func (vm *VMGo) HandleThreeRegs(opcode byte, operands []byte) {
 	registerIndexA, registerIndexB, registerIndexD := extractThreeRegs(operands)
 
-	valueA, _ := vm.Ram.ReadRegister(registerIndexA)
-	valueB, _ := vm.Ram.ReadRegister(registerIndexB)
+	valueA := vm.Ram.ReadRegister(registerIndexA)
+	valueB := vm.Ram.ReadRegister(registerIndexB)
 
 	var result uint64
 	switch opcode {
@@ -1833,63 +1917,6 @@ var RecordLogSampleRate = 1
 
 type VMLogs []VMLog
 
-func (vm *VMGo) GetMemory() (map[int][]byte, map[int]int) {
-	memory := make(map[int][]byte)
-	pageMap := make(map[int]int)
-	for i := 0; i < TotalPages; i++ {
-		pageMap[i] = PageMutable
-	}
-	// 1) collect all the dirty, accessible pages
-	pages := vm.Ram.GetDirtyPages()
-	if len(pages) == 0 {
-		fmt.Println("No writable memory found in the snapshot.")
-		return memory, pageMap
-	}
-
-	// 2) sort so we can find contiguous runs
-	sort.Ints(pages)
-
-	// 3) walk the sorted list and group into runs
-	const pageSize = PageSize
-	bytesSaved := 0
-	for i := 0; i < len(pages); {
-		runStart := pages[i]
-		runEnd := runStart
-
-		// extend run while next page is exactly +1
-		j := i + 1
-		for j < len(pages) && pages[j] == runEnd+1 {
-			runEnd = pages[j]
-			j++
-		}
-
-		// 4) one ReadRAMBytes for the entire run
-		byteOffset := uint32(runStart * pageSize)
-		byteLen := uint32((runEnd - runStart + 1) * pageSize)
-		chunk, errCode := vm.Ram.ReadRAMBytes(byteOffset, byteLen)
-		if errCode == OOB {
-			fmt.Printf("Error reading memory at pages %d–%d: %v\n", runStart, runEnd, errCode)
-		} else if len(chunk) != int(byteLen) {
-			fmt.Printf("ReadRAMBytes returned %d bytes for pages %d–%d, expected %d\n",
-				len(chunk), runStart, runEnd, byteLen)
-		} else {
-			// 5) slice that big chunk back into per-page entries
-			for p := runStart; p <= runEnd; p++ {
-				off := (p - runStart) * pageSize
-				memory[p] = chunk[off : off+pageSize]
-				pageMap[p] = PageMutable
-			}
-			bytesSaved += (runEnd - runStart + 1) * pageSize
-			//fmt.Printf(" GetMemory pages %d to %d (%d bytes) %s\n", runStart, runEnd, (runEnd-runStart+1)*pageSize, common.Blake2Hash(chunk))
-		}
-
-		// move to the next run
-		i = j
-	}
-	//	fmt.Printf(" GetMemory %d\n", bytesSaved)
-	return memory, pageMap
-}
-
 func (vm *VMGo) SetPVMContext(l string) {
 	vm.logging = l
 }
@@ -2031,224 +2058,210 @@ const (
 	AddressSpace = 1 << 32
 	TotalPages   = AddressSpace / PageSize
 	PageSize     = 4096
-
-	PageMutable = 1
 )
 
-type AccessMode struct {
-	Inaccessible bool `json:"inaccessible"`
-	Writable     bool `json:"writable"`
-	Readable     bool `json:"readable"`
-}
+const (
+	PageInaccessible = unix.PROT_NONE
+	PageMutable      = unix.PROT_READ | unix.PROT_WRITE
+	PageImmutable    = unix.PROT_READ
+)
 
-type Page struct {
-	Value  []byte     `json:"data"`
-	Access AccessMode `json:"access"`
-	Dirty  bool       `json:"dirty"`
-}
-
-func (p *Page) ensureData() {
-	if p.Value == nil {
-		p.Value = make([]byte, PageSize)
-	}
-}
-
-type RawRAM struct {
+type RawRam struct {
+	reg                  [13]uint64
 	current_heap_pointer uint32
-	register             []uint64
-
-	Pages []*Page `json:"pages"`
+	memory               []byte
+	mem_access           map[int]int // Changed from array to map for lazy allocation
 }
 
-func NewRawRAM() *RawRAM {
-	ram := &RawRAM{
-		Pages:                make([]*Page, TotalPages),
-		register:             make([]uint64, regSize),
-		current_heap_pointer: 51 * 4096,
-	}
-	for i := uint32(0); i < 51; i++ {
-		ram.getOrAllocatePage(i)
-	}
-	return ram
+const memSize = 4 * 1024 * 1024 * 1024 // 4GB + 1MB
+
+func NewRawRam() (*RawRam, error) {
+	return &RawRam{
+		memory:     make([]byte, memSize),
+		mem_access: make(map[int]int), // Initialize the map
+		reg:        [13]uint64{},
+	}, nil
+}
+func (ram *RawRam) Close() error {
+	// deallocate resources if needed
+	ram.memory = nil
+
+	return nil
 }
 
-func (ram *RawRAM) GetDirtyPages() []int {
-	pages := make([]int, 0)
-	for idx, page := range ram.Pages {
-		if page != nil && page.Dirty {
-			pages = append(pages, idx)
+// GetMemAccess checks access rights for a memory range using mprotect probe.
+// DANGER: This function uses unsafe operations and can cause SIGSEGV if the address is invalid or inaccessible.
+func (ram *RawRam) GetMemAccess(address uint32, length uint32) (int, error) {
+	pageIndex := int(address / PageSize)
+	if pageIndex < 0 || pageIndex >= TotalPages {
+		return PageInaccessible, fmt.Errorf("invalid address")
+	}
+	// Map lookup with default value of PageInaccessible (0)
+	access, ok := ram.mem_access[pageIndex]
+	if !ok {
+		access = PageInaccessible
+	}
+	if pageIndex == 0 {
+		fmt.Printf("Page 0 Access = %d\n", access)
+	}
+	return access, nil
+}
+
+// ReadMemory reads data from a specific address in the memory if it's readable.
+func (ram *RawRam) ReadMemory(address uint32, length uint32) (data []byte, err error) {
+	if length == 0 {
+		return []byte{}, nil
+	}
+	endAddr := address + length
+	if endAddr < address {
+		return nil, fmt.Errorf("range overflow: addr=%x len=%d", address, length)
+	}
+	if int(endAddr) > len(ram.memory) {
+		return nil, fmt.Errorf("out of bounds: end=%x memlen=%d", endAddr, len(ram.memory))
+	}
+	access, err := ram.GetMemAccess(address, length)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get memory access: %w", err)
+	}
+	if access == PageInaccessible {
+		return nil, fmt.Errorf("memory at address %x is not readable", address)
+	}
+
+	return ram.memory[int(address):int(endAddr)], nil
+}
+
+// WriteMemory writes data to a specific address in the memory if it's writable.
+func (ram *RawRam) WriteMemory(address uint32, data []byte) error {
+	pageIndex := int(address / PageSize)
+	if pageIndex < 0 || pageIndex >= TotalPages {
+		return fmt.Errorf("invalid address %x for page index %d", address, pageIndex)
+	}
+
+	access, err := ram.GetMemAccess(address, uint32(len(data)))
+	if err != nil {
+		return fmt.Errorf("failed to get memory access: %w", err)
+	}
+	if access != PageMutable {
+		return fmt.Errorf("memory at address %x is not writable", address)
+	}
+
+	start := pageIndex * PageSize
+	offset := int(address % PageSize)
+	copy(ram.memory[start+offset:start+offset+len(data)], data)
+	return nil
+}
+
+// SetPageAccess sets the memory protection of a single page using BaseReg as memory base.
+func (ram *RawRam) SetPageAccess(pageIndex int, access int) error {
+	if pageIndex < 0 || pageIndex >= TotalPages {
+		return fmt.Errorf("invalid page index")
+	}
+	ram.mem_access[pageIndex] = access
+	return nil
+}
+func (ram *RawRam) SetPagesAccessRange(startPage, pageCount int, access int) error {
+	if startPage < 0 || pageCount <= 0 || startPage+pageCount > TotalPages {
+		return fmt.Errorf("invalid page range")
+	}
+	endPage := startPage + pageCount
+	for i := startPage; i < endPage; i++ {
+		ram.mem_access[i] = access
+	}
+	return nil
+}
+
+func (ram *RawRam) SetMemAccess(address uint32, length uint32, access byte) error {
+	if length == 0 {
+		return nil
+	}
+
+	// Check for overflow in address + length - 1
+	if address > ^uint32(0)-(length-1) {
+		return fmt.Errorf("invalid address/length: address=0x%x, length=0x%x", address, length)
+	}
+
+	// Calculate start and end page indices
+	startPage := int(address / PageSize)
+	endAddress := address + length - 1
+	endPage := int(endAddress / PageSize)
+
+	// Validate page indices
+	if startPage < 0 || startPage >= TotalPages || endPage < 0 || endPage >= TotalPages {
+		return fmt.Errorf(
+			"invalid address range: 0x%x(len=0x%x) spans pages %d~%d, total pages=%d",
+			address, length, startPage, endPage, TotalPages,
+		)
+	}
+
+	// Set access for each page in the range
+	return ram.SetPagesAccessRange(startPage, endPage-startPage+1, int(access))
+}
+
+func (ram *RawRam) WriteRAMBytes(address uint32, data []byte) (resultCode uint64) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("WriteRamBytes panic: %v\n", r)
+			resultCode = OOB // Out of bounds
+			return
 		}
+	}()
+	if len(data) == 0 {
+		return OK
 	}
-	return pages
+	err := ram.WriteMemory(address, data)
+	if err != nil {
+		fmt.Printf("WriteRamBytes error: %v\n", err)
+		return OOB
+	}
+	return OK
+}
+func (ram *RawRam) ReadRAMBytes(address uint32, length uint32) (data []byte, resultCode uint64) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("ReadRamBytes panic: %v\n", r)
+			data = nil
+			resultCode = OOB // Out of bounds
+		}
+	}()
+	if length == 0 {
+		return []byte{}, OK
+	}
+	data, err := ram.ReadMemory(address, length)
+	if err != nil {
+		fmt.Printf("ReadRamBytes error: %v\n", err)
+		return nil, OOB
+	}
+	return data, OK
 }
 
-func (ram *RawRAM) GetCurrentHeapPointer() uint32 {
+func (ram *RawRam) allocatePages(startPage uint32, count uint32) {
+	ram.SetPagesAccessRange(int(startPage), int(count), PageMutable)
+}
+
+// GetCurrentHeapPointer
+func (ram *RawRam) GetCurrentHeapPointer() uint32 {
 	return ram.current_heap_pointer
 }
 
-func (ram *RawRAM) SetCurrentHeapPointer(pointer uint32) {
+func (ram *RawRam) SetCurrentHeapPointer(pointer uint32) {
 	ram.current_heap_pointer = pointer
-	//fmt.Printf("SetCurrentHeapPointer: %x\n", ram.current_heap_pointer)
-
 }
 
-func (ram *RawRAM) ReadRegister(index int) (uint64, uint64) {
-	if index < 0 || index >= len(ram.register) {
-		return 0, OOB
-	}
-	return ram.register[index], OK
+// 	GetCurrentHeapPointer() uint32
+// 	SetCurrentHeapPointer(pointer uint32)
+// 	ReadRegister(index int) (uint64, uint64)
+// 	WriteRegister(index int, value uint64) uint64
+// 	ReadRegisters() []uint64
+
+func (ram *RawRam) ReadRegister(index int) uint64 {
+	return ram.reg[index]
 }
 
-func (ram *RawRAM) WriteRegister(index int, value uint64) uint64 {
-	if index < 0 || index >= len(ram.register) {
-		return OOB
-	}
-	//	fmt.Printf("WriteRegister: index %d, value %x\n", index, value)
-	ram.register[index] = value
-	return OK
+func (ram *RawRam) WriteRegister(index int, value uint64) {
+	ram.reg[index] = value
 }
 
-func (ram *RawRAM) ReadRegisters() []uint64 {
-	return ram.register
-}
-
-func (ram *RawRAM) allocatePages(startPage uint32, count uint32) {
-	for i := uint32(0); i < count; i++ {
-		ram.getOrAllocatePage(startPage + i)
-	}
-}
-
-func (ram *RawRAM) getOrAllocatePage(idx uint32) (*Page, error) {
-	if idx >= TotalPages {
-		return nil, fmt.Errorf("page index %d out of bounds (max %d)", idx, TotalPages-1)
-	}
-	p := ram.Pages[idx]
-	if p == nil {
-		p = &Page{
-			Access: AccessMode{Inaccessible: true},
-		}
-		ram.Pages[idx] = p
-	}
-	return p, nil
-}
-
-func (ram *RawRAM) SetPageAccess(pageIndex uint32, numPages uint32, mode AccessMode) uint64 {
-	for i := pageIndex; i < pageIndex+numPages; i++ {
-		page, err := ram.getOrAllocatePage(i)
-		if err != nil {
-			return OOB
-		}
-		page.Access = mode
-	}
-	return OK
-}
-
-func (ram *RawRAM) WriteRAMBytes(address uint32, data []byte) uint64 {
-	offset := address % PageSize
-	remaining := uint32(len(data))
-
-	for remaining > 0 {
-		currentPage := address / PageSize
-		pageOffset := offset
-
-		page, err := ram.getOrAllocatePage(currentPage)
-		if err != nil {
-			return OOB
-		}
-		// if !page.Access.Writable {
-		// 	fmt.Printf("WriteRAMBytes: page %d is not writable @ addresss %x\n", currentPage, address)
-		// 	panic(555)
-		// 	return uint64(address)
-		// }
-		page.ensureData()
-
-		bytesToWrite := PageSize - pageOffset
-		if bytesToWrite > remaining {
-			bytesToWrite = remaining
-		}
-		copy(page.Value[pageOffset:pageOffset+bytesToWrite], data[:bytesToWrite])
-		page.Dirty = true
-		address += bytesToWrite
-		data = data[bytesToWrite:]
-		remaining -= bytesToWrite
-		offset = 0
-	}
-
-	return OK
-}
-
-func (ram *RawRAM) ReadRAMBytes(address uint32, length uint32) ([]byte, uint64) {
-	result := make([]byte, 0, length)
-	offset := address % PageSize
-	remaining := length
-
-	for remaining > 0 {
-		currentPage := address / PageSize
-		pageOffset := offset
-
-		page, err := ram.getOrAllocatePage(currentPage)
-		if err != nil {
-
-			return nil, OOB
-		}
-		// if page.Access.Inaccessible {
-		// 	panic(999)
-		// 	return nil, uint64(address)
-		// }
-
-		bytesToRead := PageSize - pageOffset
-		if bytesToRead > remaining {
-			bytesToRead = remaining
-		}
-
-		pageSize := uint32(len(page.Value))
-		endPos := pageOffset + bytesToRead
-
-		if endPos <= pageSize {
-			result = append(result, page.Value[pageOffset:endPos]...)
-		} else {
-			if pageOffset < pageSize {
-				result = append(result, page.Value[pageOffset:pageSize]...)
-			}
-			result = append(result, make([]byte, bytesToRead-(pageSize-pageOffset))...)
-		}
-
-		address += bytesToRead
-		remaining -= bytesToRead
-		offset = 0
-	}
-
-	return result, OK
-}
-
-func (ram *RawRAM) Bytes() []byte {
-	buf := new(bytes.Buffer)
-	for idx, page := range ram.Pages {
-		if page == nil {
-			continue
-		}
-		keyBytes := make([]byte, 4)
-		binary.LittleEndian.PutUint32(keyBytes, uint32(idx))
-		buf.Write(keyBytes)
-		buf.Write(page.Value)
-	}
-	return buf.Bytes()
-}
-
-func (ram *RawRAM) DebugStatus() {
-	fmt.Println("RAM Status:")
-	for idx, page := range ram.Pages {
-		if page == nil {
-			fmt.Printf("Page %d: <nil>\n", idx)
-			continue
-		}
-		fmt.Printf(
-			"Page %d: Inaccessible=%v, Writable=%v, Readable=%v, DataAllocated=%v\n",
-			idx,
-			page.Access.Inaccessible,
-			page.Access.Writable,
-			page.Access.Readable,
-			page.Value != nil,
-		)
-	}
+// ReadRegisters returns a copy of the current register values.
+func (ram *RawRam) ReadRegisters() [regSize]uint64 {
+	return ram.reg
 }

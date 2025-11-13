@@ -3,6 +3,7 @@ package recompiler
 import "C"
 import (
 	"fmt"
+	"time"
 	"unsafe"
 
 	"github.com/colorfulnotion/jam/log"
@@ -98,10 +99,16 @@ func NewDummyHostFunc(vm HostFuncVM) *DummyHostFunc {
 	return &DummyHostFunc{vm: vm}
 }
 
+// NOTE: add "time" to the file imports (import "time")
+var lastFrameTime time.Time
+var frameCount uint64
+var totalFrameDuration time.Duration
+var totalCalled = 0
+
 func (d *DummyHostFunc) InvokeHostCall(host_fn int) (bool, error) {
-	fmt.Printf("RecompilerVM: DUMMY InvokeHostCall: host_fn=%d\n", host_fn)
+	vm := d.vm
 	if host_fn == LOG {
-		vm := d.vm
+
 		// JIP-1 https://hackmd.io/@polkadot/jip1
 		level := vm.ReadRegister(7)
 		message := vm.ReadRegister(10)
@@ -110,6 +117,10 @@ func (d *DummyHostFunc) InvokeHostCall(host_fn int) (bool, error) {
 		messageBytes, errCode := vm.ReadRAMBytes(uint32(message), uint32(messagelen))
 		if errCode != OK {
 			log.Error("x86", "DummyHostFunc: LOG: failed to read message from RAM", "error", errCode)
+			return true, nil
+		}
+		log := false
+		if !log {
 			return true, nil
 		}
 		switch level {
@@ -125,6 +136,37 @@ func (d *DummyHostFunc) InvokeHostCall(host_fn int) (bool, error) {
 			fmt.Printf("[TRACE] DUMMY HOSTLOG: %s\n", string(messageBytes))
 		}
 	}
+	if host_fn == EXPORT {
+		// EXPORT == frame out. Timestamp and compute instant & average frame rate.
+		now := time.Now()
+		if lastFrameTime.IsZero() {
+			lastFrameTime = now
+			fmt.Printf("RecompilerVM: DUMMY EXPORT called (first frame timestamp recorded)\n")
+		} else if totalCalled%250 == 0 {
+
+			dur := now.Sub(lastFrameTime)
+			lastFrameTime = now
+			frameCount++
+			totalFrameDuration += dur
+			avgDur := totalFrameDuration / time.Duration(frameCount)
+			fps := 0.0
+			avgFps := 0.0
+			if dur > 0 {
+				fps = 1.0 / dur.Seconds()
+			}
+			if avgDur > 0 {
+				avgFps = 1.0 / avgDur.Seconds()
+			}
+			p := vm.ReadRegister(7) // a0 = 7
+			z := vm.ReadRegister(8) // a1 = 8
+			z = min(z, types.SegmentSize)
+			x, _ := vm.ReadRAMBytes(uint32(p), uint32(z))
+			fmt.Printf("RecompilerVM: DUMMY EXPORT called - frame #%d duration=%v fps=%.2f avgFps=%.2f, data len %d\n", totalCalled, dur, fps, avgFps, len(x))
+		}
+
+		// x = slices.Clone(x)
+		totalCalled++
+	}
 	return true, nil
 }
 
@@ -138,20 +180,20 @@ func (vm *RecompilerVM) HandleEcalli() error {
 		if err != nil {
 			return fmt.Errorf("failed to read gas slot: %w", err)
 		}
+		before_gas := gas
 		transferGas := vm.ReadRegister(9)
-		fmt.Printf("transferGas %d, before gas deduction gas = %d\n", transferGas, gas)
 		gas -= transferGas
-		fmt.Printf("after gas deduction gas = %d\n", gas)
-		if gas < 0 {
-			vm.MachineState = PANIC
-			vm.ResultCode = types.WORKDIGEST_OOG
-			return fmt.Errorf("out of gas in transfer")
-		}
+
 		err = vm.WriteContextSlot(gasSlotIndex, gas, 8)
 		if err != nil {
 			return fmt.Errorf("failed to write gas slot: %w", err)
 		}
 		vm.SetGas(int64(gas))
+		if gas > before_gas {
+			vm.MachineState = PANIC
+			vm.ResultCode = types.WORKDIGEST_OOG
+			return fmt.Errorf("out of gas in transfer")
+		}
 	}
 
 	ok, err := vm.InvokeHostCall(vm.host_func_id)

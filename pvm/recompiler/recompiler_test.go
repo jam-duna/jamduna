@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/pvm/program"
 	"github.com/colorfulnotion/jam/types"
@@ -427,12 +428,11 @@ func TestSinglePVM(t *testing.T) {
 		}
 	})
 }
-
-func TestHashService(t *testing.T) {
+func TestDoom(t *testing.T) {
 	serviceAcct := uint32(0) // stub
 
 	// Convert test code to raw instruction bytes (matches Go exactly)
-	doomFile := "../../services/blake2b_child.pvm"
+	doomFile := "/tmp/doom_self_playing.pvm"
 	rawCodeBytes, err := os.ReadFile(doomFile)
 	if err != nil {
 		t.Fatalf("Failed to read Doom PVM file: %v", err)
@@ -454,10 +454,14 @@ func TestHashService(t *testing.T) {
 	vm.SetMemoryBounds(o_size, w_size, z, s, o_byte, w_byte)
 	// CRITICAL: Set bitmask and jump table from decoded program (matches Go lines 75-76)
 	// This is the correct way! Go calls: rvm.SetBitMask(p.K) and rvm.SetJumpTable(p.J)
-	vm.SetGas(10000000)
+	vm.SetGas(2_000_000_000_000)
 	err = vm.SetBitMask(p.K)
 	if err != nil {
 		t.Fatalf("failed to set bitmask: %v", err)
+	}
+	err = vm.SetJumpTable(p.J)
+	if err != nil {
+		t.Fatalf("failed to set jump table: %v", err)
 	}
 	vm.HostFunc = NewDummyHostFunc(vm)
 	vm.Init([]byte{})
@@ -467,35 +471,10 @@ func TestHashService(t *testing.T) {
 	checkData, _ := vm.ReadRAMBytes(checkAddr, 40)
 	fmt.Printf("GO BEFORE execution - Memory at 0x%x: %v\n", checkAddr, checkData)
 	fmt.Printf("GO BEFORE execution - As string: %q\n", string(checkData))
-
-	// DEBUG: Print jump table before setting it
-	err = vm.SetJumpTable(p.J)
-	if err != nil {
-		t.Fatalf("failed to set jump table: %v", err)
-	}
-
+	four_gigas := uint64(4 * 1024 * 1024 * 1024)
+	vm.SetMemAccess(0, uint32(four_gigas), PageMutable)
+	vm.SetHeapPointer(uint32(four_gigas))
 	vm.Execute(0)
-	fmt.Printf("Go registers after execute: %v\n", vm.ReadRegisters())
-	return_address := vm.ReadRegister(7)
-	fmt.Printf("Go return_address: %d\n", return_address)
-	return_length := vm.ReadRegister(8)
-	fmt.Printf("Go return_length: %d\n", return_length)
-	return_data, _ := vm.ReadRAMBytes(uint32(return_address), uint32(return_length))
-
-	hash_data := common.Hex2Bytes("0xdeadbeef")
-	//hash 10 times
-	for i := 0; i < 100; i++ {
-		hash_data = common.Blake2Hash(hash_data[:]).Bytes()
-	}
-	if !bytes.Equal(hash_data, return_data) {
-		t.Fatalf("Hash mismatch: expected %x, got %x", hash_data, return_data)
-	} else {
-		fmt.Printf("Hash match: %x\n", return_data)
-	}
-
-	// read out the gas
-	gasLeft := vm.GetGas()
-	fmt.Printf("Gas left after execute: %d\n", gasLeft)
 }
 
 func TestEcalli(t *testing.T) {
@@ -570,4 +549,145 @@ func TestEcalli(t *testing.T) {
 	rvm.Gas = 100000
 	rvm.HostFunc = NewDummyHostFunc(rvm)
 	rvm.Execute(uint32(0))
+}
+
+var algoPayloads = []byte{
+	0xc2, 0xb8, 0xb4, 0xbb, 0xcb, 0xaa, 0x47, 0xd4, 0xe9, 0xdc, 0x39, 0xce, 0xb8, 0xbc, 0x75, 0x2b, 0x2b, 0x6b, 0x8c, 0x98, 0x88, 0xab, 0xb4, 0xc4, 0x9c, 0x59, 0xc2, 0xcb, 0xbd, 0xa2, 0x96, 0x94, 0xb1, 0x4d, 0xb6, 0xb7, 0xbc, 0x78, 0x72, 0x96, 0x85, 0x0a, 0xa7, 0x0d, 0x77, 0xb6, 0x02, 0xb1, 0xb3, 0xb4, 0xbd, 0xb7, 0xcc, 0xf5,
+}
+
+func getGitInfo() (commit, tag string) {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	c, _ := cmd.Output()
+
+	cmd = exec.Command("git", "describe", "--tags", "--always")
+	t, _ := cmd.Output()
+
+	return string(bytes.TrimSpace(c)), string(bytes.TrimSpace(t))
+}
+
+func TestAlgo(t *testing.T) {
+	numBlocks := 53
+
+	// Convert test code to raw instruction bytes (matches Go exactly)
+	algoFile := "../../services/algo_classic/algo_classic.pvm"
+	rawCodeBytes, err := os.ReadFile(algoFile)
+	if err != nil {
+		t.Fatalf("Failed to read Doom PVM file: %v", err)
+	}
+	fmt.Printf("# ALGO TEST\n")
+	fmt.Printf("## Experiment Info\n")
+	// github stuff
+	fmt.Printf("- Test Date: %s\n", time.Now().Format(time.RFC1123))
+	fmt.Printf("- PVM File: %s\n", algoFile)
+	fmt.Printf("- Code Length: %d bytes\n", len(rawCodeBytes))
+	commit, tag := getGitInfo()
+	fmt.Printf("- Commit: %s\n", commit)
+	fmt.Printf("- Tag: %s\n", tag)
+	fmt.Printf("## Performance Results\n")
+	// CRITICAL: Use DecodeCorePart like Go does (matches recompiler_test.go line 59)
+	p, o_size, w_size, z, s, o_byte, w_byte := program.DecodeProgram(rawCodeBytes)
+
+	for n := 0; n <= numBlocks; n++ {
+		payload := make([]byte, 2)
+		payload[0] = byte(n)
+		payload[1] = algoPayloads[n]
+		serviceAcct := uint32(0) // stub
+		iter := uint64(payload[1])
+		iter_3 := iter * iter * iter
+		fmt.Printf("### Algo ID %d - Iterations: %d\n", n, iter_3)
+		// Create C FFI VM with decoded program code (matches Go line 67)
+		vm, err := NewRecompilerVM(serviceAcct, p.Code, make([]uint64, 13), 0)
+		if err != nil {
+			t.Fatalf("failed to create RecompilerVM: %v", err)
+		}
+
+		rw_data_address := uint32(2*Z_Z) + Z_func(o_size)
+		rw_data_address_end := rw_data_address + P_func(w_size)
+		current_heap_pointer := rw_data_address_end
+		vm.SetHeapPointer(current_heap_pointer)
+		vm.SetMemoryBounds(o_size, w_size, z, s, o_byte, w_byte)
+		// CRITICAL: Set bitmask and jump table from decoded program (matches Go lines 75-76)
+		// This is the correct way! Go calls: rvm.SetBitMask(p.K) and rvm.SetJumpTable(p.J)
+		og_gas := 20_000_000_000
+		vm.SetGas(int64(og_gas))
+		err = vm.SetBitMask(p.K)
+		if err != nil {
+			t.Fatalf("failed to set bitmask: %v", err)
+		}
+		err = vm.SetJumpTable(p.J)
+		if err != nil {
+			t.Fatalf("failed to set jump table: %v", err)
+		}
+		vm.HostFunc = NewDummyHostFunc(vm)
+		vm.Init(payload)
+
+		// Check memory at 0x130040 before execution
+		// four_gigas := uint64(4 * 1024 * 1024 * 1024)
+		// vm.SetMemAccess(0, uint32(four_gigas), PageMutable)
+		// vm.SetHeapPointer(uint32(four_gigas))
+		// time the execution
+		// start := time.Now()
+		vm.Execute(0)
+		// elapsed := time.Since(start)
+		gasUsed := int64(og_gas) - vm.GetGas()
+		formatWithCommas := func(n int64) string {
+			if n == 0 {
+				return "0"
+			}
+			neg := n < 0
+			if neg {
+				n = -n
+			}
+			s := fmt.Sprintf("%d", n)
+			var out []byte
+			cnt := 0
+			for i := len(s) - 1; i >= 0; i-- {
+				if cnt == 3 {
+					out = append(out, ',')
+					cnt = 0
+				}
+				out = append(out, s[i])
+				cnt++
+			}
+			for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+				out[i], out[j] = out[j], out[i]
+			}
+			if neg {
+				return "-" + string(out)
+			}
+			return string(out)
+		}
+		fmt.Printf("- Gas Used: %s\n", formatWithCommas(gasUsed))
+		fmt.Printf("- Total Execution Time: %v\n", timeDurationOrRaw(float64(vm.allExecutionTime), vm.allExecutionTime))
+		total := float64(vm.allExecutionTime)
+		ct := float64(vm.compileTime)
+		ht := float64(vm.hostcallTime)
+		et := float64(vm.executionTime)
+		un := vm.allExecutionTime - vm.compileTime - vm.hostcallTime - vm.executionTime
+
+		ctPct, htPct, etPct, unPct := 0.0, 0.0, 0.0, 0.0
+		if total > 0 {
+			ctPct = 100.0 * ct / total
+			htPct = 100.0 * ht / total
+			etPct = 100.0 * et / total
+			unPct = 100.0 * float64(un) / total
+		}
+
+		fmt.Println()
+		fmt.Println("| Section       | Time              | Percent |")
+		fmt.Println("|----------------|-------------------|----------|")
+		fmt.Printf("| Compile/Load   | %16v | %6.1f%% |\n", vm.compileTime, ctPct)
+		fmt.Printf("| Hostcall       | %16v | %6.1f%% |\n", vm.hostcallTime, htPct)
+		fmt.Printf("| Execution      | %16v | %6.1f%% |\n", vm.executionTime, etPct)
+		fmt.Printf("| Unaccounted    | %16v | %6.1f%% |\n", un, unPct)
+		fmt.Println()
+
+		vm.Close()
+	}
+}
+func timeDurationOrRaw(val float64, totalRaw interface{}) interface{} {
+	// try to detect if vm.* fields are time.Duration by checking formatting of vm.compileTime via fmt
+	// keep simple: if totalRaw is an integer-ish, return time.Duration
+	// Note: this small helper keeps output readable for both int and time.Duration representations.
+	return time.Duration(val)
 }

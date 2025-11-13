@@ -85,20 +85,37 @@ void x86_codegen_cleanup(x86_codegen_t* gen) {
 
 int x86_codegen_ensure_capacity(x86_codegen_t* gen, uint32_t additional_size) {
     if (!gen) return -1;
-    
+
     if (gen->offset + additional_size > gen->capacity) {
+        uint32_t needed = gen->offset + additional_size;
         uint32_t new_capacity = gen->capacity;
-        while (new_capacity < gen->offset + additional_size) {
+
+        // Prevent infinite loop and overflow
+        while (new_capacity < needed) {
+            // Check for overflow before doubling
+            if (new_capacity == 0 || new_capacity > UINT32_MAX / 2) {
+                DEBUG_X86("x86_codegen_ensure_capacity: capacity would overflow (current=%u, needed=%u)\n",
+                         new_capacity, needed);
+                fprintf(stderr, "CRITICAL: x86_codegen_ensure_capacity overflow detected (current=%u, needed=%u)\n",
+                        new_capacity, needed);
+                return -1;
+            }
             new_capacity *= 2;
         }
-        
+
         uint8_t* new_buffer = realloc(gen->buffer, new_capacity);
-        if (!new_buffer) return -1;
-        
+        if (!new_buffer) {
+            DEBUG_X86("x86_codegen_ensure_capacity: realloc FAILED for %u bytes\n", new_capacity);
+            fprintf(stderr, "CRITICAL: x86_codegen_ensure_capacity realloc failed for %u bytes (old capacity: %u)\n",
+                    new_capacity, gen->capacity);
+            return -1;
+        }
+
+        DEBUG_X86("x86_codegen_ensure_capacity: SUCCESS, new_capacity=%u (was %u)\n", new_capacity, gen->capacity);
         gen->buffer = new_buffer;
         gen->capacity = new_capacity;
     }
-    
+
     return 0;
 }
 

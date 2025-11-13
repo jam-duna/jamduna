@@ -6,10 +6,12 @@ AR ?= ar
 # Allow CFLAGS to be overridden from command line, otherwise use default
 CFLAGS ?= -Wall -Wextra -std=c99 -fPIC
 CFLAGS_DEBUG = $(CFLAGS) -g -O0 -DDEBUG
+CFLAGS_ASAN = $(CFLAGS) -g -O0 -DDEBUG -fsanitize=address -fno-omit-frame-pointer
 CFLAGS_RELEASE = $(CFLAGS) -O3 -DNDEBUG -march=native -g
 
 # No external library dependencies (removed unicorn, capstone)
 LDFLAGS =
+LDFLAGS_ASAN = -fsanitize=address
 
 # Directories
 SRC_DIR = src
@@ -30,12 +32,13 @@ SOURCES = $(SRC_DIR)/pvm_const.c \
 
 OBJECTS = $(SOURCES:$(SRC_DIR)/%.c=$(LIB_DIR)/%.o)
 OBJECTS_DEBUG = $(SOURCES:$(SRC_DIR)/%.c=$(LIB_DIR)/%-debug.o)
+OBJECTS_ASAN = $(SOURCES:$(SRC_DIR)/%.c=$(LIB_DIR)/%-asan.o)
 
 # Header dependencies
 HEADERS = $(wildcard $(INCLUDE_DIR)/*.h)
 
 # Default target
-.PHONY: all clean debug release help
+.PHONY: all clean debug release asan help
 
 all: release
 
@@ -46,6 +49,11 @@ release: $(SHARED_LIB) $(STATIC_LIB)
 # Debug build
 debug: CFLAGS := $(CFLAGS_DEBUG)
 debug: $(LIB_DIR)/$(LIBRARY_NAME)-debug.so $(LIB_DIR)/$(LIBRARY_NAME)-debug.a
+
+# ASan build
+asan: CFLAGS := $(CFLAGS_ASAN)
+asan: LDFLAGS := $(LDFLAGS_ASAN)
+asan: $(LIB_DIR)/$(LIBRARY_NAME)-asan.so $(LIB_DIR)/$(LIBRARY_NAME)-asan.a
 
 # Shared library (release)
 $(SHARED_LIB): $(OBJECTS) | $(LIB_DIR)
@@ -67,6 +75,16 @@ $(LIB_DIR)/$(LIBRARY_NAME)-debug.a: $(OBJECTS_DEBUG) | $(LIB_DIR)
 	$(AR) rcs $@ $^
 	@echo "Built debug static library: $@"
 
+# Shared library (asan)
+$(LIB_DIR)/$(LIBRARY_NAME)-asan.so: $(OBJECTS_ASAN) | $(LIB_DIR)
+	$(CC) -shared -o $@ $^ $(LDFLAGS_ASAN)
+	@echo "Built asan shared library: $@"
+
+# Static library (asan)
+$(LIB_DIR)/$(LIBRARY_NAME)-asan.a: $(OBJECTS_ASAN) | $(LIB_DIR)
+	$(AR) rcs $@ $^
+	@echo "Built asan static library: $@"
+
 # Object files (release)
 $(LIB_DIR)/%.o: $(SRC_DIR)/%.c $(HEADERS) | $(LIB_DIR)
 	$(CC) $(CFLAGS) -I$(INCLUDE_DIR) -c $< -o $@
@@ -74,6 +92,10 @@ $(LIB_DIR)/%.o: $(SRC_DIR)/%.c $(HEADERS) | $(LIB_DIR)
 # Object files (debug)
 $(LIB_DIR)/%-debug.o: $(SRC_DIR)/%.c $(HEADERS) | $(LIB_DIR)
 	$(CC) $(CFLAGS_DEBUG) -I$(INCLUDE_DIR) -c $< -o $@
+
+# Object files (asan)
+$(LIB_DIR)/%-asan.o: $(SRC_DIR)/%.c $(HEADERS) | $(LIB_DIR)
+	$(CC) $(CFLAGS_ASAN) -I$(INCLUDE_DIR) -c $< -o $@
 
 # Create directories
 $(LIB_DIR):

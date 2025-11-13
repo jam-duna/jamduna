@@ -23,6 +23,7 @@ members = [
     "utils",
     "evm",
     "algo",
+    "algo_classic",
     "bootstrap",
     "auth_copy",
     "null_authorizer",

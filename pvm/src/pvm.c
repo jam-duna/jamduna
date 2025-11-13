@@ -180,13 +180,12 @@ pvm_result_t pvm_execute(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child) 
         return -1;
     }
     
-    // Initialize dispatch table if not already done (static initialization)
-    static int dispatch_initialized = 0;
-    if (!dispatch_initialized) {
-        init_dispatch_table();
-        dispatch_initialized = 1;
-    }
+    // Initialize dispatch table if not already done (thread-safe initialization)
+    static pthread_once_t dispatch_init_once = PTHREAD_ONCE_INIT;
+    pthread_once(&dispatch_init_once, init_dispatch_table);
     int step = 0;
+    uint8_t last_opcode = 0; // Track last executed opcode
+    uint8_t second_last_opcode = 0; // Track second-to-last executed opcode
     // Main execution loop with optimized gas checking
     while (!vm->terminated && vm->gas > 0) {
 
@@ -196,6 +195,7 @@ pvm_result_t pvm_execute(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child) 
                        (unsigned long long)vm->pc, (long long)vm->gas, vm->code_len);
                 fflush(stdout);
             }
+            
             pvm_panic(vm, OOB);
             continue;
         }
@@ -229,14 +229,17 @@ pvm_result_t pvm_execute(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child) 
         
     found:
         ; // Empty statement after label
+        
         uint64_t prevpc = vm->pc;
         uint8_t* operands = vm->code + vm->pc + 1;
         vm->gas--;  // Decrement gas once per instruction
         // Advance PC to next instruction, dispatch to handler
         if (dispatch_table[opcode]) {
+            second_last_opcode = last_opcode;  // Save previous last_opcode
+            last_opcode = opcode;
             dispatch_table[opcode](vm, operands, len_operands);
         } else {
-            // printf("Unknown opcode: %d\n", opcode);
+            printf("Unknown opcode: %d\n", opcode);
             pvm_panic(vm, WHAT);
             continue;
         }
@@ -268,6 +271,16 @@ pvm_result_t pvm_execute(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child) 
         vm->terminated = 1;
     } else if (!vm->terminated) {
         vm->result_code = WORKDIGEST_OK;
+    } else {
+        // Safe opcode name retrieval - check bounds first
+        const char* opcode_name = "UNKNOWN";
+        if (vm->pc < vm->code_len) {
+            opcode_name = get_opcode_name(vm->code[vm->pc]);
+        }
+        // Get last executed opcode names
+        const char* last_opcode_name = get_opcode_name(last_opcode);
+        const char* second_last_opcode_name = get_opcode_name(second_last_opcode);
+
     }
 
     if (vm->pvm_tracing) {
@@ -338,6 +351,11 @@ int pvm_is_terminated(pvm_vm_t* vm) {
 uint64_t pvm_get_gas(pvm_vm_t* vm) {
     if (!vm ) return 0;
     return vm->gas;
+}
+
+uint64_t pvm_get_pc(pvm_vm_t* vm) {
+    if (!vm ) return 0;
+    return vm->pc;
 }
 
 uint8_t pvm_get_machine_state(pvm_vm_t* vm) {

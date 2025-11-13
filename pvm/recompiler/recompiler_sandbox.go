@@ -13,7 +13,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/colorfulnotion/jam/common"
 	"github.com/unicorn-engine/unicorn/bindings/go/unicorn"
 	uc "github.com/unicorn-engine/unicorn/bindings/go/unicorn"
 )
@@ -551,10 +550,11 @@ func (vm *RecompilerSandboxVM) ExecuteX86Code_SandBox_WithEntry(x86code []byte) 
 }
 
 func (rvm *RecompilerSandboxVM) ExecuteSandBox(entryPoint uint64) error {
-	startTime := time.Now()
+	compileStart := time.Now()
 	rvm.x86Code, rvm.djumpAddr, rvm.InstMapPVMToX86, rvm.InstMapX86ToPVM = rvm.compiler.CompileX86Code(entryPoint)
-	rvm.compileTime = common.Elapsed(startTime)
-	startTime = time.Now()
+	rvm.compileTime = time.Since(compileStart)
+
+	execStart := time.Now()
 	if execErr := rvm.ExecuteX86Code_SandBox_WithEntry(rvm.x86Code); execErr != nil {
 		fmt.Printf("ExecuteX86 crash detected: %v\n", execErr)
 	}
@@ -595,7 +595,7 @@ func (rvm *RecompilerSandboxVM) ExecuteSandBox(entryPoint uint64) error {
 	} else {
 		rvm.Gas = int64(gas)
 	}
-	rvm.executionTime = common.Elapsed(startTime)
+	rvm.allExecutionTime = time.Since(execStart)
 	return nil
 }
 func (vm *RecompilerSandboxVM) Resume() error {

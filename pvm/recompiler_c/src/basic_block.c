@@ -128,22 +128,34 @@ size_t basic_block_get_instruction_count(const basic_block_t* block) {
 // x86 code management
 int basic_block_append_x86_code(basic_block_t* block, const uint8_t* code, size_t size) {
     if (!block || !code || size == 0) return -1;
-    
+
     // Resize if needed
     if (block->x86_code_size + size > block->x86_code_capacity) {
+        size_t needed = block->x86_code_size + size;
         size_t new_capacity = block->x86_code_capacity;
-        while (new_capacity < block->x86_code_size + size) {
+
+        // Prevent infinite loop and overflow
+        while (new_capacity < needed) {
+            // Check for overflow before doubling
+            if (new_capacity == 0 || new_capacity > SIZE_MAX / 2) {
+                DEBUG_JIT("basic_block_append_x86_code: capacity would overflow (current=%zu, needed=%zu)\n",
+                         new_capacity, needed);
+                fprintf(stderr, "CRITICAL: basic_block_append_x86_code overflow detected\n");
+                return -1;
+            }
             new_capacity *= 2;
         }
+
         if (resize_x86_code(block, new_capacity) != 0) {
+            DEBUG_JIT("basic_block_append_x86_code: resize failed\n");
             return -1;
         }
     }
-    
+
     // Copy code
     memcpy(block->x86_code + block->x86_code_size, code, size);
     block->x86_code_size += size;
-    
+
     return 0;
 }
 
@@ -371,13 +383,20 @@ static int resize_instructions(basic_block_t* block, size_t new_capacity) {
 }
 
 static int resize_x86_code(basic_block_t* block, size_t new_capacity) {
+    DEBUG_JIT("resize_x86_code: current_capacity=%zu, new_capacity=%zu\n",
+              block->x86_code_capacity, new_capacity);
+
     uint8_t* new_code = realloc(block->x86_code, new_capacity);
     if (!new_code) {
+        DEBUG_JIT("resize_x86_code: realloc FAILED for %zu bytes\n", new_capacity);
+        fprintf(stderr, "CRITICAL: resize_x86_code realloc failed for %zu bytes (old capacity: %zu)\n",
+                new_capacity, block->x86_code_capacity);
         return -1;
     }
-    
+
     block->x86_code = new_code;
     block->x86_code_capacity = new_capacity;
+    DEBUG_JIT("resize_x86_code: SUCCESS, new_capacity=%zu\n", new_capacity);
     return 0;
 }
 

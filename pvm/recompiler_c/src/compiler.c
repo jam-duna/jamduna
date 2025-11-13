@@ -13,18 +13,12 @@
 #include <string.h>
 #include <stdio.h>
 
-// Debug macros (simplified - compiler only mode)
+// Debug macros
 #ifdef DEBUG
-#define DEBUG_JIT_PRINT(...) fprintf(stderr, __VA_ARGS__)
+#define DEBUG_JIT(...) fprintf(stderr, __VA_ARGS__)
 #else
-#define DEBUG_JIT_PRINT(...) ((void)0)
+#define DEBUG_JIT(...) ((void)0)
 #endif
-
-// Define DEBUG_JIT as a global variable for external linkage compatibility
-int DEBUG_JIT = 0;
-
-// Redefine DEBUG_JIT macro to use the print version
-#define DEBUG_JIT DEBUG_JIT_PRINT
 
 // Hash map implementation (from previous working code)
 #define JIT_HASH_MAP_SIZE 65536
@@ -446,12 +440,13 @@ int compiler_compile(compiler_t* compiler, uint64_t start_pc,
     compiler->entry_start_pc = (uint32_t)start_pc;
     
     // Initialize dynamic PC mapping arrays
-    uint32_t mapping_capacity = 16442; // Match Go's typical size
+    // Scale capacity based on bytecode size to avoid reallocation issues
+    uint32_t mapping_capacity = compiler->bytecode_size > 100000 ? 32768 : 16442;
     compiler->pvm_to_x86_capacity = mapping_capacity;
     compiler->x86_to_pvm_capacity = mapping_capacity;
-    
-    compiler->pvm_to_x86_map = (pc_map_entry_t*)malloc(mapping_capacity * sizeof(pc_map_entry_t));
-    compiler->x86_to_pvm_map = (pc_map_entry_t*)malloc(mapping_capacity * sizeof(pc_map_entry_t));
+
+    compiler->pvm_to_x86_map = (pc_map_entry_t*)calloc(mapping_capacity, sizeof(pc_map_entry_t));
+    compiler->x86_to_pvm_map = (pc_map_entry_t*)calloc(mapping_capacity, sizeof(pc_map_entry_t));
 
     if (compiler->djump_table_code) {
         free(compiler->djump_table_code);
@@ -819,6 +814,15 @@ static int jit_translate_basic_block_impl(compiler_t* compiler, basic_block_t* b
         // Use real PVM instruction translator if available
         if (inst->opcode < 256 && pvm_instruction_translators[inst->opcode] != NULL) {
             DEBUG_JIT("[JIT] Translating opcode=%u pc=%lu args_size=%zu\n", inst->opcode, inst->pc, inst->args_size);
+
+            // Reserve capacity for instruction translation (most instructions need < 256 bytes)
+            // This prevents buffer overflow in emit_* functions
+            if (x86_codegen_ensure_capacity(&gen, 256) != 0) {
+                DEBUG_JIT("[JIT] Failed to ensure capacity for opcode=%u\n", inst->opcode);
+                basic_block_destroy(block);
+                return -1;
+            }
+
             x86_encode_result_t result = pvm_instruction_translators[inst->opcode](&gen, inst);
             if (result.size == 0) {
                 DEBUG_JIT("[JIT] Translator for opcode=%u produced no code\n", inst->opcode);
@@ -866,11 +870,20 @@ static int jit_append_block(compiler_t* compiler, basic_block_t* block) {
     // Resize main x86 code buffer if needed
     if (compiler->x86_code_size + block_size > compiler->x86_code_capacity) {
         size_t new_capacity = (compiler->x86_code_size + block_size) * 2;
+        // Ensure new_capacity fits in uint32_t
+        if (new_capacity > UINT32_MAX) {
+            DEBUG_JIT("jit_append_block: x86 code buffer would exceed UINT32_MAX\n");
+            return -1;
+        }
+
         uint8_t* new_buffer = (uint8_t*)realloc(compiler->x86_code, new_capacity);
-        if (!new_buffer) return -1;
-        
+        if (!new_buffer) {
+            DEBUG_JIT("jit_append_block: realloc failed (requested %zu bytes)\n", new_capacity);
+            return -1;
+        }
+
         compiler->x86_code = new_buffer;
-        compiler->x86_code_capacity = new_capacity;
+        compiler->x86_code_capacity = (uint32_t)new_capacity;
     }
     
     // Append block code to main buffer
@@ -1012,8 +1025,20 @@ int jit_generate_djump_table(compiler_t* compiler) {
             if (new_capacity < offset + (required)) { \
                 new_capacity = offset + (required) + 128; \
             } \
+            /* Check for overflow */ \
+            if (new_capacity < capacity || new_capacity > UINT32_MAX - 1024) { \
+                DEBUG_JIT("ENSURE_CAP: capacity overflow (old=%u, new=%u, required=%u)\n", \
+                         capacity, new_capacity, (uint32_t)(required)); \
+                fprintf(stderr, "CRITICAL: ENSURE_CAP overflow in djump table\n"); \
+                if (handler_offsets) free(handler_offsets); \
+                if (pendings) free(pendings); \
+                free(code); \
+                return -1; \
+            } \
             uint8_t* new_buf = (uint8_t*)realloc(code, new_capacity); \
             if (!new_buf) { \
+                DEBUG_JIT("ENSURE_CAP: realloc FAILED for %u bytes\n", new_capacity); \
+                fprintf(stderr, "CRITICAL: ENSURE_CAP realloc failed for %u bytes\n", new_capacity); \
                 if (handler_offsets) free(handler_offsets); \
                 if (pendings) free(pendings); \
                 free(code); \
@@ -1301,16 +1326,30 @@ int jit_finalize_jumps(compiler_t* compiler) {
 
 int jit_add_pc_mapping(compiler_t* compiler, uint32_t pvm_pc, uint32_t x86_offset) {
     if (!compiler) {
+        DEBUG_JIT("jit_add_pc_mapping: NULL compiler\n");
         return -1;
     }
 
+    // Check for overflow before resizing
     if (compiler->pvm_to_x86_count >= compiler->pvm_to_x86_capacity) {
         uint32_t new_capacity = compiler->pvm_to_x86_capacity ? compiler->pvm_to_x86_capacity * 2 : 1024;
+        // Ensure we don't overflow
+        if (new_capacity > UINT32_MAX / sizeof(pc_map_entry_t)) {
+            DEBUG_JIT("jit_add_pc_mapping: capacity overflow detected\n");
+            return -1;
+        }
+
         pc_map_entry_t* new_entries = (pc_map_entry_t*)realloc(
             compiler->pvm_to_x86_map, new_capacity * sizeof(pc_map_entry_t));
         if (!new_entries) {
+            DEBUG_JIT("jit_add_pc_mapping: realloc failed for pvm_to_x86_map (requested %u entries)\n", new_capacity);
             return -1;
         }
+
+        // Clear newly allocated memory
+        memset(new_entries + compiler->pvm_to_x86_capacity, 0,
+               (new_capacity - compiler->pvm_to_x86_capacity) * sizeof(pc_map_entry_t));
+
         compiler->pvm_to_x86_map = new_entries;
         compiler->pvm_to_x86_capacity = new_capacity;
     }
@@ -1319,13 +1358,26 @@ int jit_add_pc_mapping(compiler_t* compiler, uint32_t pvm_pc, uint32_t x86_offse
     compiler->pvm_to_x86_map[compiler->pvm_to_x86_count].x86_offset = x86_offset;
     compiler->pvm_to_x86_count++;
 
+    // Same for x86_to_pvm
     if (compiler->x86_to_pvm_count >= compiler->x86_to_pvm_capacity) {
         uint32_t new_capacity = compiler->x86_to_pvm_capacity ? compiler->x86_to_pvm_capacity * 2 : 1024;
+        // Ensure we don't overflow
+        if (new_capacity > UINT32_MAX / sizeof(pc_map_entry_t)) {
+            DEBUG_JIT("jit_add_pc_mapping: capacity overflow detected for x86_to_pvm\n");
+            return -1;
+        }
+
         pc_map_entry_t* new_entries = (pc_map_entry_t*)realloc(
             compiler->x86_to_pvm_map, new_capacity * sizeof(pc_map_entry_t));
         if (!new_entries) {
+            DEBUG_JIT("jit_add_pc_mapping: realloc failed for x86_to_pvm_map (requested %u entries)\n", new_capacity);
             return -1;
         }
+
+        // Clear newly allocated memory
+        memset(new_entries + compiler->x86_to_pvm_capacity, 0,
+               (new_capacity - compiler->x86_to_pvm_capacity) * sizeof(pc_map_entry_t));
+
         compiler->x86_to_pvm_map = new_entries;
         compiler->x86_to_pvm_capacity = new_capacity;
     }

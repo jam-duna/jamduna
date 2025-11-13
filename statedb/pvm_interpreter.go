@@ -27,7 +27,8 @@ var (
 )
 
 type Interpreter struct {
-	cVM *C.pvm_vm_t // FFI VM handle
+	cVM  *C.pvm_vm_t // FFI VM handle
+	code []byte      // Program code
 }
 
 func NewInterpreter(Service_index uint32, p *Program, initialRegs []uint64, initialPC uint64, initialGas uint64, vm *VM) *Interpreter {
@@ -61,7 +62,8 @@ func NewInterpreter(Service_index uint32, p *Program, initialRegs []uint64, init
 	vmMap[cVM] = vm
 	vmMapMu.Unlock()
 	return &Interpreter{
-		cVM: cVM,
+		cVM:  cVM,
+		code: p.Code,
 	}
 }
 func (vm *Interpreter) SetMemoryBounds(rwAddr, rwEnd, roAddr, roEnd, outputAddr, outputEnd, stackAddr, stackEnd uint32) {
@@ -193,14 +195,25 @@ func (vm *Interpreter) Execute(pvm *VM, EntryPoint uint32) error {
 	pvm.ResultCode = vm.GetResultCode()
 	pvm.MachineState = vm.GetMachineState()
 	pvm.terminated = vm.IsTerminated()
-	switch result {
+	switch pvm.ResultCode {
 	case C.PVM_RESULT_OK:
 		return nil
 	case C.PVM_RESULT_PANIC:
+		// get the pc
+		// pc := C.pvm_get_pc(vm.cVM)
+		// opcode := vm.code[pc]
+		// log.Warn(log.GeneralAuthoring, fmt.Sprintf("pvm panic at pc 0x%x, opcode = %s", pc, recompiler.GetOpcodeStr(opcode)))
 		return nil
 	case C.PVM_RESULT_HOST_CALL:
+		// pc := C.pvm_get_pc(vm.cVM)
+		// opcode := vm.code[pc]
+		// log.Warn(log.GeneralAuthoring, fmt.Sprintf("pvm host call at pc 0x%x, opcode = %s", pc, recompiler.GetOpcodeStr(opcode)))
+
 		return nil
 	case C.PVM_RESULT_OOG:
+		// pc := C.pvm_get_pc(vm.cVM)
+		// opcode := vm.code[pc]
+		// log.Warn(log.GeneralAuthoring, fmt.Sprintf("pvm out of gas at pc 0x%x, opcode = %s", pc, recompiler.GetOpcodeStr(opcode)))
 		return nil
 	default:
 		return fmt.Errorf("VM execution failed with result code %d", result)

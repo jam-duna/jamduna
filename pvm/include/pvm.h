@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stddef.h>
+#include <pthread.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -177,6 +178,9 @@ void pvm_set_host_callback(pvm_vm_t* vm, pvm_host_callback_t callback);
 
 // Get current gas amount
 uint64_t pvm_get_gas(pvm_vm_t* vm);
+
+// Get program counter
+uint64_t pvm_get_pc(pvm_vm_t* vm);
 
 // Get machine state
 uint8_t pvm_get_machine_state(pvm_vm_t* vm);

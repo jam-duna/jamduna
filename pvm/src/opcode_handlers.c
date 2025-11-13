@@ -388,22 +388,25 @@ void pvm_djump(VM* vm, uint64_t a) {
         vm->result_code = WORKDIGEST_PANIC;
         vm->machine_state = PANIC;
     } else {
-        vm->pc = (uint64_t)vm->j[(a / Z_A) - 1];
+        uint64_t target_pc = (uint64_t)vm->j[(a / Z_A) - 1];
+        // Validate target PC is within bounds
+        if (target_pc >= vm->code_len) {
+            vm->terminated = 1;
+            vm->result_code = WORKDIGEST_PANIC;
+            vm->machine_state = PANIC;
+        } else {
+            vm->pc = target_pc;
+        }
     }
 }
 
 void pvm_branch(VM* vm, uint64_t vx, int taken, size_t operand_len) {
 
-    if (taken == 1 && vx < vm->bitmask_len && (vm->bitmask[vx] & 2)) {
+    if (taken == 1 && vx < vm->code_len && vx < vm->bitmask_len && (vm->bitmask[vx] & 2)) {
        // printf("----- pvm_branch vx=%x/%x bitmask[vx]=%d\n", vx, vm->bitmask_len, vm->bitmask[vx]);
         vm->pc = vx;
-    } else if (!(vm->bitmask[vx] & 2)) {
+    } else if (taken == 1) {
         // Branch marked taken but invalid target
-        if (vx >= vm->bitmask_len) {
-            //printf("Error: vx out of bounds (vx=%x, bitmask_len=%x)\n", vx, vm->bitmask_len);
-        } else if (!(vm->bitmask[vx] & 2)) {
-            //printf("Error: invalid branch target (vx=%x not marked executable)\n", vx);
-        }
         vm->result_code = WORKDIGEST_PANIC;
         vm->machine_state = PANIC;
         vm->terminated = 1;

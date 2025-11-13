@@ -2,7 +2,7 @@
 # This Makefile can build all JAM services independently of the main repository
 
 # Available services
-SERVICES = bootstrap evm auth_copy null_authorizer algo doom
+SERVICES = bootstrap evm auth_copy null_authorizer algo doom algo_classic
 
 # Build configuration
 TARGET_DIR = riscv64emac-unknown-none-polkavm/release
@@ -22,8 +22,7 @@ all: $(SERVICES)
 $(SERVICES): check-toolchain
 	@echo "Building $@ service..."
 	@cd $@ && cargo $(CARGO_FLAGS) --target $(TARGET_JSON) --target-dir ./target
-	@JAM_FLAGS=; \
-	cargo run -p polkatool jam-service $@/target/$(TARGET_DIR)/$@ -o $@/$@.pvm -d $@/$@_blob.pvm $$JAM_FLAGS && \
+	cargo run -p polkatool jam-service $$JAM_FLAGS $@/target/$(TARGET_DIR)/$@ -o $@/$@.pvm -d $@/$@_blob.pvm && \
 	cargo run -p polkatool disassemble $@/$@_blob.pvm --show-raw-bytes > ./$@/$@.txt && \
 	echo "Service $@ built successfully!"
 

@@ -5424,6 +5424,11 @@ static x86_encode_result_t generate_and_imm(x86_codegen_t* gen, const instructio
 
 // emit_mov_reg_to_reg_64: MOV dst64, src64
 static void emit_mov_reg_to_reg_64(x86_codegen_t* gen, uint8_t dst_pvm_reg, uint8_t src_pvm_reg) {
+    // Ensure we have capacity for 3 bytes (REX + opcode + ModRM)
+    if (x86_codegen_ensure_capacity(gen, 3) != 0) {
+        return;
+    }
+
     x86_reg_t dst_x86 = pvm_reg_to_x86[dst_pvm_reg];
     x86_reg_t src_x86 = pvm_reg_to_x86[src_pvm_reg];
     uint8_t rex = build_rex(true, reg_info_list[src_x86].rex_bit, false, reg_info_list[dst_x86].rex_bit);

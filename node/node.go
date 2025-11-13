@@ -591,6 +591,8 @@ func StandardizePVMBackend(pvm_mode string) string {
 		} else {
 			log.Warn(log.Node, fmt.Sprintf("COMPILER Not Supported. Defaulting to interpreter"))
 		}
+	case "GO_INTERPRETER", "GOINTERPRETER":
+		pvmBackend = statedb.BackendGoInterpreter
 
 	default:
 		log.Warn(log.Node, fmt.Sprintf("Unknown PVM mode [%s], defaulting to interpreter", pvm_mode))

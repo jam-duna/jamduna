@@ -110,6 +110,14 @@ disputes:
 		$(MAKE) $* PVM_BACKEND=interpreter; \
 	fi
 
+%_gointerpreter:
+	@if echo "$*" | grep -q "_client$$" || echo "$*" | grep -q "_localclient$$"; then \
+		echo "Warning: PVM mode '_gointerpreter' is ignored for non-node test '$*'."; \
+		$(MAKE) $*; \
+	else \
+		$(MAKE) $* PVM_BACKEND=go_interpreter; \
+	fi
+
 %_compiler:
 	@if [ "$(UNAME_S)" != "Linux" ]; then \
 		echo "Error: The 'compiler' PVM mode is only supported on Linux."; \

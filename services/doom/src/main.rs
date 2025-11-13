@@ -3,7 +3,6 @@
 
 extern crate alloc;
 use alloc::format;
-use alloc::vec;
 
 const SIZE0 : usize = (1 << 24) - (1 << 12);
 
@@ -24,6 +23,12 @@ static ALLOCATOR: SimpleAlloc<SIZE1> = SimpleAlloc::new(); // 2^24 - 1 - 4096, s
 
 use crate::vm::Vm;
 use polkavm::ProgramBlob;
+use utils::functions::call_log;
+#[cfg(target_arch = "riscv32")]
+use polkavm_derive::sbrk as polkavm_sbrk;
+
+#[cfg(not(target_arch = "riscv32"))]
+fn polkavm_sbrk(_size: usize) {}
 
 mod vm;
 
@@ -43,22 +48,10 @@ extern "C" {
 
 }
 
-// pub fn call_log(level: u64, target: Option<&str>, msg: &str) {
-//     let (target_address, target_length) = if let Some(target_str) = target {
-//         let target_bytes = target_str.as_bytes();
-//         (target_bytes.as_ptr() as u64, target_bytes.len() as u64)
-//     } else {
-//         (0, 0)
-//     };
-//     let msg_bytes = msg.as_bytes();
-//     let msg_address = msg_bytes.as_ptr() as u64;
-//     let msg_length = msg_bytes.len() as u64;
-//     unsafe { log(level, target_address, target_length, msg_address, msg_length) };
-// }
-
 #[polkavm_derive::polkavm_export]
 extern "C" fn refine(_start_address: u64, _length: u64) -> (u64, u64) {
-    // call_log(2, None, &format!("Refining..."));
+    call_log(2, None, &format!("Refining..."));
+    polkavm_derive::sbrk(1024*1024);
     const DOOM_PROGRAM: &[u8] = include_bytes!("../roms/doom.polkavm");
     const DOOM_ROM: &[u8] = include_bytes!("../roms/doom1.wad");
     
@@ -113,12 +106,11 @@ extern "C" fn refine(_start_address: u64, _length: u64) -> (u64, u64) {
         let Ok((_width, _height, frame)) = vm.run_for_a_frame() else {
             break;
         };
-    
-        for segment in frame.chunks(4104) {
-            unsafe {
-                export(segment.as_ptr() as u64, segment.len() as u64);
-            }
+        
+        unsafe {
+            export(frame.as_ptr() as u64, frame.len() as u64);
         }
+        
         step += 1;
     }
     return (0, 0);
@@ -133,11 +125,4 @@ extern "C" fn accumulate(_start_address: u64, _length: u64) -> (u64, u64) {
 #[polkavm_derive::polkavm_export]
 extern "C" fn on_transfer(_start_address: u64, _length: u64) -> (u64, u64) {
     (0 , 0)
-}
-
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    unsafe {
-        core::arch::asm!("unimp", options(noreturn));
-    }
 }

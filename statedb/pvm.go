@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	BackendInterpreter     = "interpreter" // C interpreter
-	BackendCompiler        = "compiler"    // X86 recompiler
+	BackendInterpreter     = "interpreter"    // C interpreter
+	BackendGoInterpreter   = "go_interpreter" // Go interpreter
+	BackendCompiler        = "compiler"       // X86 recompiler
 	BackendCompilerSandbox = "sandbox"
 )
 
@@ -331,6 +332,26 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 			return nil
 		}
 		vm.ExecutionVM = rvm
+	} else if vm.Backend == BackendGoInterpreter {
+		machine := NewVMGo(service_index, p, initialRegs, initialPC, initialGas, hostENV)
+		machine.Gas = int64(initialGas)
+		vm.ExecutionVM = machine
+		// o - read-only
+		rw_data_address := uint32(2*Z_Z) + Z_func(o_size)
+		rw_data_address_end := rw_data_address + P_func(w_size) + z*Z_P
+		current_heap_pointer := rw_data_address_end
+		machine.SetHeapPointer(current_heap_pointer)
+
+		z_o := Z_func(o_size)
+		z_w := Z_func(w_size + z*Z_P)
+		z_s := Z_func(s)
+		requiredMemory = uint64(5*Z_Z + z_o + z_w + z_s + Z_I)
+		if requiredMemory > math.MaxUint32 {
+			log.Error(vm.logging, "Standard Program Initialization Error")
+		}
+
+		machine.SetHeapPointer(current_heap_pointer)
+		machine.SetMemoryBounds(o_size, w_size, z, s, o_byte, w_byte)
 	}
 	//  else if vm.Backend == BackendCompilerSandbox {
 	// 	rvm := NewRecompilerVMSandbox(service_index, code, initialRegs, initialPC, initialHeap, hostENV, jam_ready_blob, Metadata, initialGas, pvmBackend)

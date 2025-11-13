@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/colorfulnotion/jam/common"
@@ -116,10 +117,13 @@ type RecompilerVM struct {
 	InstMapPVMToX86 map[uint32]int // maps PVM PC to the x86 PC index
 	InstMapX86ToPVM map[int]uint32 // maps x86 PC to the PVM PC
 
-	initializationTime uint32 // time taken to initialize the VM
-	standardInitTime   uint32
-	compileTime        uint32
-	executionTime      uint32
+	// Timing measurements using time.Duration for accuracy
+	initializationTime time.Duration // time taken to initialize the VM
+	standardInitTime   time.Duration
+	compileTime        time.Duration
+	executionTime      time.Duration // total time in x86 execution (excluding host calls)
+	hostcallTime       time.Duration // total time in host calls
+	allExecutionTime   time.Duration // total wall-clock time from Execute() start to finish
 
 	//	snapshot *EmulatorSnapShot
 
@@ -280,6 +284,7 @@ func (rvm *RecompilerVM) SetJumpTable(j []uint32) error {
 
 func (rvm *RecompilerVM) SetGas(gas int64) {
 	rvm.Gas = gas
+	rvm.WriteContextSlot(gasSlotIndex, uint64(gas), 8)
 }
 
 func (rvm *RecompilerVM) GetGas() int64 {
@@ -654,6 +659,7 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(entry uint32) (err error) {
 	// 	return fmt.Errorf("no entry patch placeholder found in x86 code")
 	// }
 	copy(codeAddr, vm.x86Code)
+
 	// Keep PROT_WRITE|PROT_EXEC for fast patching during Resume()
 	// Security note: This allows self-modifying code but improves performance
 
@@ -662,6 +668,7 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(entry uint32) (err error) {
 		fmt.Printf("ALL COMBINED Disassembled x86 code:\n%s\n", str)
 	}
 	crashed, _, err := ExecuteX86(codeAddr, vm.regDumpMem)
+
 	if err != nil {
 		return fmt.Errorf("ExecuteX86 failed: %w", err)
 	}
@@ -707,8 +714,6 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(entry uint32) (err error) {
 
 		}
 		return fmt.Errorf("ExecuteX86 crash detected (return -1) gas = %d", vm.Gas)
-	} else {
-		fmt.Printf("ExecuteX86 completed successfully, gas = %d\n", vm.Gas)
 	}
 	// get the pc out
 	vm.pc, _ = vm.ReadContextSlot(pcSlotIndex)
@@ -822,7 +827,7 @@ func (compiler *X86Compiler) CompileX86Code(startPC uint64) (x86code []byte, dju
 }
 
 func (rvm *RecompilerVM) Execute(entry uint32) {
-	// startTime := time.Now()
+	compileStart := time.Now()
 	rvm.pc = 0
 	rvm.WriteContextSlot(gasSlotIndex, uint64(rvm.Gas), 8)
 
@@ -833,14 +838,20 @@ func (rvm *RecompilerVM) Execute(entry uint32) {
 			fmt.Printf("SavePVMX failed: %v\n", err1)
 		}
 	}
-	// rvm.compileTime = common.Elapsed(startTime)
-	// startTime = time.Now()
+	rvm.compileTime = time.Since(compileStart)
+
+	hardStart := time.Now()
+	execStart := time.Now()
 	if err := rvm.ExecuteX86CodeWithEntry(entry); err != nil {
 		// we don't have to return this , just print it
 		fmt.Printf("ExecuteX86 crash detected: %v\n", err)
 	}
+	// executionTime captures the time spent in ExecuteX86CodeWithEntry
+	// This includes mmap setup + actual x86 execution
+	rvm.executionTime = time.Since(execStart)
 
 	for rvm.MachineState == HOST || rvm.MachineState == SBRK {
+		hostStart := time.Now()
 		if rvm.MachineState == HOST {
 			err := rvm.HandleEcalli()
 			if err != nil {
@@ -858,14 +869,19 @@ func (rvm *RecompilerVM) Execute(entry uint32) {
 			fmt.Printf("PANIC after host call\n")
 			break
 		}
+		rvm.hostcallTime += time.Since(hostStart)
+
+		resumeStart := time.Now()
 		err := rvm.Resume()
+		resumeTime := time.Since(resumeStart)
+		rvm.executionTime += resumeTime
 		if err != nil {
 			fmt.Printf("Resume after host call failed: %v\n", err)
 			rvm.WriteContextSlot(vmStateSlotIndex, uint64(PANIC), 8)
 			break
 		}
 	}
-	// rvm.executionTime = common.Elapsed(startTime)
+	rvm.allExecutionTime = time.Since(hardStart)
 }
 
 // Standard_Program_Initialization initializes the program memory and registers
