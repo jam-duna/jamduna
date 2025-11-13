@@ -157,7 +157,6 @@ func TestTracesInterpreter(t *testing.T) {
 
 	// Define all the directories you want to test in a single slice.
 	testDirs := []string{
-		// PASS
 		path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
@@ -278,7 +277,7 @@ func TestSingleCompare(t *testing.T) {
 	log.InitLogger("debug")
 	PvmLogging = false
 
-	filename := "/Users/michael/Desktop/jam-test-vectors/traces/fuzzy_light/00000200.bin"
+	filename := "/Users/sourabhniyogi/Desktop/jam-test-vectors/traces/storage_light/00000013.bin"
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Errorf("failed to read file %s: %v", filename, err)

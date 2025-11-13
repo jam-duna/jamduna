@@ -2,7 +2,6 @@ package statedb
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/colorfulnotion/jam/common"
 	storage "github.com/colorfulnotion/jam/storage"
@@ -36,11 +35,8 @@ func (mh *MockHostEnv) GetService(c uint32) (*types.ServiceAccount, bool, error)
 
 func (mh *MockHostEnv) ReadServiceStorage(s uint32, k []byte) (storage []byte, ok bool, err error) {
 	db := mh.GetDB()
-	_, tree, err := trie.Initial_bpt(db)
+	tree := trie.NewMerkleTree(nil, db)
 	defer tree.Close()
-	if err != nil {
-		log.Fatal("fail to connect to BPT")
-	}
 	storage, ok, err = tree.GetServiceStorage(s, k)
 	if err != nil || !ok {
 		return nil, false, err
@@ -50,11 +46,8 @@ func (mh *MockHostEnv) ReadServiceStorage(s uint32, k []byte) (storage []byte, o
 
 func (mh *MockHostEnv) ReadServicePreimageBlob(s uint32, blob_hash common.Hash) (blob []byte, ok bool, err error) {
 	db := mh.GetDB()
-	_, tree, err := trie.Initial_bpt(db)
+	tree := trie.NewMerkleTree(nil, db)
 	defer tree.Close()
-	if err != nil {
-		log.Fatal("fail to connect to BPT")
-	}
 	blob, ok, err = tree.GetPreImageBlob(s, blob_hash)
 	if err != nil || !ok {
 		return nil, false, err
@@ -64,12 +57,8 @@ func (mh *MockHostEnv) ReadServicePreimageBlob(s uint32, blob_hash common.Hash) 
 
 func (mh *MockHostEnv) ReadServicePreimageLookup(s uint32, blob_hash common.Hash, blob_length uint32) (time_slots []uint32, ok bool, err error) {
 	db := mh.GetDB()
-	_, tree, err := trie.Initial_bpt(db)
-	//tree := trie.NewMerkleTree(nil, db)
+	tree := trie.NewMerkleTree(nil, db)
 	defer tree.Close()
-	if err != nil {
-		log.Fatal("fail to connect to BPT")
-	}
 	time_slots, ok, err = tree.GetPreImageLookup(s, blob_hash, blob_length)
 	if err != nil || !ok {
 		return nil, false, err

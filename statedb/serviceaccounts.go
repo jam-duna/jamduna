@@ -3,12 +3,10 @@ package statedb
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -181,6 +179,7 @@ func (s *StateDB) GetMMRStorageKey() []byte {
 	return key
 }
 
+/*
 // GenerateServiceProof generates a complete two-layer proof for EVM service data
 // Returns a trie.ServiceProof that can be independently verified
 // position is the global MMR position, logIndexStart is the start index for this block
@@ -214,3 +213,4 @@ func (s *StateDB) GenerateServiceProof(serviceID uint32, storageKey []byte, posi
 	// Delegate to trie package (uses mmr.LeafCount() internally)
 	return trie.GenerateServiceProof(mmr, serviceID, storageKey, position, leafHash, store, bmtProof, stateRoot)
 }
+*/

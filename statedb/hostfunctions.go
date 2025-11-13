@@ -3,7 +3,6 @@ package statedb
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"slices"
 	"sort"
@@ -81,8 +80,7 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 	if PvmLogging {
 		fmt.Printf("Calling host function: %s %d [gas used: %d, gas remaining: %d] [service: %d]\n", HostFnToName(host_fn), host_fn, gasUsed, currentGas, vm.Service_index)
 	}
-	//vm.DebugHostFunction(host_fn, "Calling host function: %s %d [gas: %d, used: %d]", HostFnToName(host_fn), host_fn, currentGas, gasUsed)
-	// Shawn to check .... potentiall problematic
+
 	benchRec.Add("InvokeHostCall", time.Since(t0))
 	return ok, err
 }
@@ -227,7 +225,7 @@ func (vm *VM) hostInfo() {
 	if errCode != OK {
 		vm.WriteRegister(7, NONE)
 		vm.SetHostResultCode(NONE)
-		log.Debug(vm.logging, "INFO NONE", "s", omega_7)
+		log.Trace(vm.logging, "INFO NONE", "s", omega_7)
 		return
 	}
 
@@ -256,7 +254,7 @@ func (vm *VM) hostInfo() {
 		if err != nil {
 			vm.WriteRegister(7, NONE)
 			vm.SetHostResultCode(NONE)
-			log.Debug(vm.logging, "INFO NONE", "s", omega_7)
+			log.Trace(vm.logging, "INFO NONE", "s", omega_7)
 			return
 		}
 		buf.Write(encoded)
@@ -321,7 +319,7 @@ func (vm *VM) hostBless() {
 			vm.terminated = true
 			vm.ResultCode = types.WORKDIGEST_PANIC
 			vm.MachineState = PANIC
-			log.Debug(vm.logging, "BLESS MEM VIOLATION 1", "o", o, "n", n, "i", i)
+			log.Trace(vm.logging, "BLESS MEM VIOLATION 1", "o", o, "n", n, "i", i)
 			vm.Panic(PANIC)
 			return
 		}
@@ -338,7 +336,7 @@ func (vm *VM) hostBless() {
 			vm.ResultCode = types.WORKDIGEST_PANIC
 			vm.MachineState = PANIC
 			vm.Panic(PANIC)
-			log.Debug(vm.logging, "BLESS MEM VIOLATION 2", "o", o, "n", n, "i", i)
+			log.Trace(vm.logging, "BLESS MEM VIOLATION 2", "o", o, "n", n, "i", i)
 			return
 		}
 		bold_a[i] = binary.LittleEndian.Uint32(data)
@@ -349,14 +347,14 @@ func (vm *VM) hostBless() {
 		if id > (1<<32)-1 {
 			vm.WriteRegister(7, WHO)
 			vm.SetHostResultCode(WHO)
-			log.Debug(vm.logging, "BLESS WHO", "m", fmt.Sprintf("%d", m), "a", fmt.Sprintf("%d", a), "v", fmt.Sprintf("%d", v))
+			log.Trace(vm.logging, "BLESS WHO", "m", fmt.Sprintf("%d", m), "a", fmt.Sprintf("%d", a), "v", fmt.Sprintf("%d", v))
 			return
 		} else {
 			_, found, _ := vm.hostenv.GetService(uint32(id))
 			if !found {
 				vm.WriteRegister(7, WHO)
 				vm.SetHostResultCode(WHO)
-				log.Debug(vm.logging, "BLESS WHO", "m", fmt.Sprintf("%d", m), "a", fmt.Sprintf("%d", a), "v", fmt.Sprintf("%d", v))
+				log.Trace(vm.logging, "BLESS WHO", "m", fmt.Sprintf("%d", m), "a", fmt.Sprintf("%d", a), "v", fmt.Sprintf("%d", v))
 			}
 		}
 	}
@@ -370,7 +368,7 @@ func (vm *VM) hostBless() {
 	vm.X.U.PrivilegedState.AlwaysAccServiceID = bold_z
 
 	vm.WriteRegister(7, OK)
-	log.Info(vm.logging, "BLESS OK", "m", fmt.Sprintf("%d", m), "a", fmt.Sprintf("%d", a), "v", fmt.Sprintf("%d", v), "r", fmt.Sprintf("%d", r), "o", o, "n", n)
+	log.Trace(vm.logging, "BLESS OK", "m", fmt.Sprintf("%d", m), "a", fmt.Sprintf("%d", a), "v", fmt.Sprintf("%d", v), "r", fmt.Sprintf("%d", r), "o", o, "n", n)
 	vm.SetHostResultCode(OK)
 }
 
@@ -409,7 +407,7 @@ func (vm *VM) hostAssign() {
 	if privilegedService_a != xs.ServiceIndex {
 		vm.WriteRegister(7, HUH)
 		vm.SetHostResultCode(HUH)
-		log.Debug(vm.logging, "ASSIGN HUH", "c", c, "AuthQueueServiceID[c]", privilegedService_a, "xs", xs.ServiceIndex)
+		log.Trace(vm.logging, "ASSIGN HUH", "c", c, "AuthQueueServiceID[c]", privilegedService_a, "xs", xs.ServiceIndex)
 		return
 	}
 
@@ -417,7 +415,7 @@ func (vm *VM) hostAssign() {
 	vm.X.U.PrivilegedState.AuthQueueServiceID[c] = uint32(a)
 	vm.X.U.QueueDirty = true
 
-	log.Debug(vm.logging, "ASSIGN OK", "c", c, "AuthQueueServiceID[c]", a, "xs", xs.ServiceIndex)
+	log.Trace(vm.logging, "ASSIGN OK", "c", c, "AuthQueueServiceID[c]", a, "xs", xs.ServiceIndex)
 	vm.WriteRegister(7, OK)
 	vm.SetHostResultCode(OK)
 }
@@ -444,7 +442,7 @@ func (vm *VM) hostDesignate() {
 	if privilegedService_v != xs.ServiceIndex {
 		vm.WriteRegister(7, HUH)
 		vm.SetHostResultCode(HUH)
-		log.Info(vm.logging, "DESIGNATE HUH", "UpcomingValidatorsServiceID", privilegedService_v, "xs", xs.ServiceIndex)
+		log.Trace(vm.logging, "DESIGNATE HUH", "UpcomingValidatorsServiceID", privilegedService_v, "xs", xs.ServiceIndex)
 		return
 	}
 	v_bold := make([]types.Validator, types.TotalValidators)
@@ -455,15 +453,13 @@ func (vm *VM) hostDesignate() {
 		copy(newv.Ed25519[:], keys[32:32+32])
 		copy(newv.Bls[:], keys[64:64+144])
 		copy(newv.Metadata[:], keys[64+144:])
-		log.Info(vm.logging, "DESIGNATE validator", "i", i,
-			"bandersnatch", hex.EncodeToString(newv.Bandersnatch[:]),
-			"ed25519", hex.EncodeToString(newv.Ed25519[:]))
+
 		v_bold[i] = newv
 	}
 	vm.X.U.UpcomingValidators = v_bold
 	vm.X.U.UpcomingDirty = true
 
-	log.Info(vm.logging, "DESIGNATE OK", "UpcomingValidatorsServiceID", privilegedService_v, "validatorsLen", len(v_bold), "TotalValidators", types.TotalValidators, "xs", xs.ServiceIndex)
+	log.Trace(vm.logging, "DESIGNATE OK", "UpcomingValidatorsServiceID", privilegedService_v, "validatorsLen", len(v_bold), "TotalValidators", types.TotalValidators, "xs", xs.ServiceIndex)
 	vm.WriteRegister(7, OK)
 	vm.SetHostResultCode(OK)
 }
@@ -473,7 +469,7 @@ func (vm *VM) hostCheckpoint() {
 	vm.Y = vm.X.Clone()
 	vm.Y.U.Checkpoint()
 	vm.WriteRegister(7, uint64(vm.GetGas())) // CHECK
-	log.Debug(vm.logging, "CHECKPOINT", "g", fmt.Sprintf("%d", vm.GetGas()))
+	log.Trace(vm.logging, "CHECKPOINT", "g", fmt.Sprintf("%d", vm.GetGas()))
 	vm.SetHostResultCode(OK)
 }
 
@@ -520,7 +516,7 @@ func (vm *VM) hostNew() {
 		vm.terminated = true
 		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
-		log.Debug(vm.logging, "hostNew: MEM VIOLATION reading code hash", "o", o, "service_index", xs.ServiceIndex)
+		log.Trace(vm.logging, "hostNew: MEM VIOLATION reading code hash", "o", o, "service_index", xs.ServiceIndex)
 		return
 	}
 	l := vm.ReadRegister(8)
@@ -537,13 +533,13 @@ func (vm *VM) hostNew() {
 		// only ManagerServiceID can bestow gratis
 		vm.WriteRegister(7, HUH)
 		vm.SetHostResultCode(HUH)
-		log.Debug(vm.logging, "hostNew: HUH", "ManagerServiceID", privilegedService_m, "xs", xs.ServiceIndex)
+		log.Trace(vm.logging, "hostNew: HUH", "ManagerServiceID", privilegedService_m, "xs", xs.ServiceIndex)
 		return
 	}
 	if xs.Balance < x_s_t {
 		vm.WriteRegister(7, CASH)
 		vm.SetHostResultCode(CASH) //balance insufficient
-		log.Debug(vm.logging, "hostNew: NEW CASH xs.Balance < x_s_t", "xs.Balance", xs.Balance, "x_s_t", x_s_t, "x_s_index", xs.ServiceIndex)
+		log.Trace(vm.logging, "hostNew: NEW CASH xs.Balance < x_s_t", "xs.Balance", xs.Balance, "x_s_t", x_s_t, "x_s_index", xs.ServiceIndex)
 		return
 	}
 
@@ -552,7 +548,7 @@ func (vm *VM) hostNew() {
 	if x_e_r == xs.ServiceIndex && i < types.MinPubServiceIndex && alreadyInservice {
 		vm.WriteRegister(7, FULL)
 		vm.SetHostResultCode(FULL)
-		log.Debug(vm.logging, "hostNew: NEW FULL", "i", i, "RegistrarServiceID", x_e_r, "xs", xs.ServiceIndex)
+		log.Trace(vm.logging, "hostNew: NEW FULL", "i", i, "RegistrarServiceID", x_e_r, "xs", xs.ServiceIndex)
 		return
 	}
 	a := &types.ServiceAccount{}
@@ -609,7 +605,7 @@ func (vm *VM) hostNew() {
 	if a.Balance > xs.Balance || (xs.Balance-a.Balance) < x_s_t {
 		vm.WriteRegister(7, CASH)
 		vm.SetHostResultCode(CASH)
-		log.Debug(vm.logging, "hostNew: CASH insufficient balance for new service", "xs.Balance", xs.Balance, "a.Balance", a.Balance, "x_s_t", x_s_t, "would_underflow", a.Balance > xs.Balance)
+		log.Trace(vm.logging, "hostNew: CASH insufficient balance for new service", "xs.Balance", xs.Balance, "a.Balance", a.Balance, "x_s_t", x_s_t, "would_underflow", a.Balance > xs.Balance)
 		return
 	}
 	xs.DecBalance(a.Balance) // (x's)b <- (xs)b - at
@@ -650,7 +646,7 @@ func (vm *VM) hostUpgrade() {
 	xs.GasLimitM = m
 	vm.WriteRegister(7, OK)
 	// xContext.D[s] = xs // not sure if this is needed
-	log.Debug(vm.logging, "UPGRADE OK", "code_hash", fmt.Sprintf("%x", o), "code_hash_ptr", fmt.Sprintf("%x", c), "min_item_gas", g, "min_memo_gas", m)
+	log.Trace(vm.logging, "UPGRADE OK", "code_hash", fmt.Sprintf("%x", o), "code_hash_ptr", fmt.Sprintf("%x", c), "min_item_gas", g, "min_memo_gas", m)
 	vm.SetHostResultCode(OK)
 }
 
@@ -673,21 +669,21 @@ func (vm *VM) hostTransfer() {
 		vm.terminated = true
 		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
-		log.Debug(vm.logging, "TRANSFER PANIC", "d", d)
+		log.Trace(vm.logging, "TRANSFER PANIC", "d", d)
 		return
 	}
 	receiver, _ := vm.getXUDS(d)
 	if receiver == nil {
 		vm.WriteRegister(7, WHO)
 		vm.SetHostResultCode(WHO)
-		log.Debug(vm.logging, "TRANSFER WHO", "d", d)
+		log.Trace(vm.logging, "TRANSFER WHO", "d", d)
 		return
 	}
 	log.Trace(vm.logging, "TRANSFER receiver", "g", g, "receiver.GasLimitM", receiver.GasLimitM, "receiver.ServiceIndex", receiver.ServiceIndex)
 	if g < receiver.GasLimitM {
 		vm.WriteRegister(7, LOW)
 		vm.SetHostResultCode(LOW)
-		log.Info(vm.logging, "TRANSFER LOW", "g", g, "GasLimitM", receiver.GasLimitM)
+		log.Trace(vm.logging, "TRANSFER LOW", "g", g, "GasLimitM", receiver.GasLimitM)
 		return
 	}
 
@@ -696,7 +692,7 @@ func (vm *VM) hostTransfer() {
 	if a > xs.Balance || (xs.Balance-a) < threshold {
 		vm.WriteRegister(7, CASH)
 		vm.SetHostResultCode(CASH)
-		log.Debug(vm.logging, "TRANSFER CASH", "amount", a, "xs.Balance", xs.Balance, "threshold", threshold, "would_underflow", a > xs.Balance)
+		log.Trace(vm.logging, "TRANSFER CASH", "amount", a, "xs.Balance", xs.Balance, "threshold", threshold, "would_underflow", a > xs.Balance)
 		return
 	}
 	var memo [M]byte
@@ -749,7 +745,7 @@ func (vm *VM) hostQuery() {
 		vm.WriteRegister(7, NONE)
 		vm.WriteRegister(8, 0)
 		vm.SetHostResultCode(NONE)
-		log.Debug(vm.logging, "QUERY NONE", "h", account_lookuphash, "z", z, "lookup_source", lookup_source)
+		log.Trace(vm.logging, "QUERY NONE", "h", account_lookuphash, "z", z, "lookup_source", lookup_source)
 		return
 	}
 	switch len(anchor_timeslot) {
@@ -760,24 +756,24 @@ func (vm *VM) hostQuery() {
 		x := anchor_timeslot[0]
 		vm.WriteRegister(7, 1+(1<<32)*uint64(x))
 		vm.WriteRegister(8, 0)
-		log.Debug(vm.logging, "QUERY 1", "x", x)
+		log.Trace(vm.logging, "QUERY 1", "x", x)
 	case 2:
 		x := anchor_timeslot[0]
 		y := anchor_timeslot[1]
 		vm.WriteRegister(7, 2+(1<<32)*uint64(x))
 		vm.WriteRegister(8, uint64(y))
-		log.Debug(vm.logging, "QUERY 2", "x", x, "y", y)
+		log.Trace(vm.logging, "QUERY 2", "x", x, "y", y)
 	case 3:
 		x := anchor_timeslot[0]
 		y := anchor_timeslot[1]
 		z := anchor_timeslot[2]
-		log.Debug(vm.logging, "QUERY 3", "x", x, "y", y, "z", z)
+		log.Trace(vm.logging, "QUERY 3", "x", x, "y", y, "z", z)
 		vm.WriteRegister(7, 3+(1<<32)*uint64(x))
 		vm.WriteRegister(8, uint64(y)+(1<<32)*uint64(z))
 	}
 	w7 := vm.ReadRegister(7)
 	w8 := vm.ReadRegister(8)
-	log.Debug(vm.logging, "QUERY OK", "h", account_lookuphash, "z", z, "w7", w7, "w8", w8, "len(anchor_timeslot)", len(anchor_timeslot))
+	log.Trace(vm.logging, "QUERY OK", "h", account_lookuphash, "z", z, "w7", w7, "w8", w8, "len(anchor_timeslot)", len(anchor_timeslot))
 	vm.SetHostResultCode(OK)
 }
 
@@ -897,7 +893,7 @@ func (vm *VM) hostFetch() {
 
 		case WORK_PACKAGE_7: // encode work package
 			v_Bytes, _ = types.Encode(vm.WorkPackage)
-			//log.Info(vm.logging, "FETCH wp", "len(v_Bytes)", len(v_Bytes))
+			//log.Trace(vm.logging, "FETCH wp", "len(v_Bytes)", len(v_Bytes))
 
 		case AUTH_CODE_AND_CONFIG_BLOB_8: // p_u + | p_p
 			type pp struct {
@@ -910,7 +906,7 @@ func (vm *VM) hostFetch() {
 				PBlob: vm.WorkPackage.ConfigurationBlob,
 			}
 			v_Bytes, _ = types.Encode(p)
-			//log.Info(vm.logging, "FETCH p_u + | p_p", "p_u", vm.WorkPackage.AuthorizationCodeHash, "p_p", vm.WorkPackage.ConfigurationBlob, "len", len(v_Bytes))
+			//log.Trace(vm.logging, "FETCH p_u + | p_p", "p_u", vm.WorkPackage.AuthorizationCodeHash, "p_p", vm.WorkPackage.ConfigurationBlob, "len", len(v_Bytes))
 
 		case AUTHORIZATION_TOKEN_9: // p_j
 			v_Bytes = vm.WorkPackage.AuthorizationToken
@@ -1016,7 +1012,7 @@ func (vm *VM) hostYield() {
 	y := common.BytesToHash(h)
 	vm.X.Yield = y
 	vm.WriteRegister(7, OK)
-	log.Debug(vm.logging, "YIELD OK", "h", y)
+	log.Trace(vm.logging, "YIELD OK", "h", y)
 	vm.SetHostResultCode(OK)
 }
 
@@ -1046,7 +1042,7 @@ func (vm *VM) hostProvide() {
 	if a == nil {
 		vm.WriteRegister(7, WHO)
 		vm.SetHostResultCode(WHO)
-		log.Debug(vm.logging, "PROVIDE WHO", "omega_7", omega_7)
+		log.Trace(vm.logging, "PROVIDE WHO", "omega_7", omega_7)
 		return
 	}
 
@@ -1055,7 +1051,7 @@ func (vm *VM) hostProvide() {
 	if !(len(X_s_l) == 0) || !ok {
 		vm.WriteRegister(7, HUH)
 		vm.SetHostResultCode(HUH)
-		log.Debug(vm.logging, "PROVIDE HUH", "omega_7", omega_7, "h", h, "z", z, "lookup_source", lookup_source)
+		log.Trace(vm.logging, "PROVIDE HUH", "omega_7", omega_7, "h", h, "z", z, "lookup_source", lookup_source)
 		return
 	}
 
@@ -1070,7 +1066,7 @@ func (vm *VM) hostProvide() {
 	if exists {
 		vm.WriteRegister(7, HUH)
 		vm.SetHostResultCode(HUH)
-		log.Debug(vm.logging, "PROVIDE HUH", "omega_7", omega_7, "h", h, "z", z)
+		log.Trace(vm.logging, "PROVIDE HUH", "omega_7", omega_7, "h", h, "z", z)
 		return
 	}
 
@@ -1080,17 +1076,16 @@ func (vm *VM) hostProvide() {
 	})
 
 	vm.WriteRegister(7, OK)
-	log.Debug(vm.logging, "PROVIDE OK", "omega_7", omega_7, "h", h, "z", z)
+	log.Trace(vm.logging, "PROVIDE OK", "omega_7", omega_7, "h", h, "z", z)
 	vm.SetHostResultCode(OK)
 }
 
 func (vm *VM) hostEject() {
-	log.Debug(vm.logging, "EJECT ENTRY", "mode", vm.Mode, "r7", vm.ReadRegister(7), "r8", vm.ReadRegister(8))
 
 	if vm.Mode != ModeAccumulate {
 		vm.WriteRegister(7, WHAT)
 		vm.SetHostResultCode(WHAT)
-		log.Info(vm.logging, "EJECT WHAT - wrong mode", "mode", vm.Mode)
+		log.Trace(vm.logging, "EJECT WHAT - wrong mode", "mode", vm.Mode)
 		return
 	}
 
@@ -1103,47 +1098,37 @@ func (vm *VM) hostEject() {
 		return
 	}
 	vm.DebugHostFunction(EJECT, "h 0x%x from %o", h, o)
-	log.Debug(vm.logging, "EJECT params", "d", d, "o", o, "h", common.BytesToHash(h).Hex())
 
 	xContext := vm.X
 	bold_d, errCode := vm.getXUDS(d)
 	if errCode != OK || bold_d.DeletedAccount {
 		vm.WriteRegister(7, WHO)
 		vm.SetHostResultCode(WHO)
-		log.Debug(vm.logging, "EJECT WHO - getXUDS failed", "d", d, "errCode", errCode)
+		log.Trace(vm.logging, "EJECT WHO - getXUDS failed", "d", d, "errCode", errCode)
 		return
 	}
 	tst := common.Hash(types.E_l(uint64(vm.X.ServiceIndex), 32))
 	if d == uint64(xContext.ServiceIndex) || !bytes.Equal(tst.Bytes(), bold_d.CodeHash.Bytes()) {
 		vm.WriteRegister(7, WHO)
 		vm.SetHostResultCode(WHO)
-		log.Debug(vm.logging, "EJECT WHO -- cannot eject self", "d", fmt.Sprintf("%d", d), "vm.X.ServiceIndex", fmt.Sprintf("%d", vm.X.ServiceIndex))
+		log.Trace(vm.logging, "EJECT WHO -- cannot eject self", "d", fmt.Sprintf("%d", d), "vm.X.ServiceIndex", fmt.Sprintf("%d", vm.X.ServiceIndex))
 		return
 	}
 
 	if errCode != OK {
 		vm.WriteRegister(7, WHO)
 		vm.SetHostResultCode(WHO)
-		log.Info(vm.logging, "EJECT WHO - getXUDS failed", "d", d, "errCode", errCode)
+		log.Trace(vm.logging, "EJECT WHO - getXUDS failed", "d", d, "errCode", errCode)
 		return
 	}
 	//fmt.Printf("EJECT: x_s.ServiceIndex=%d bold_d.ServiceIndex=%d e32(s)=%s d.CodeHash=%s\n", vm.X.ServiceIndex, bold_d.ServiceIndex, tst, bold_d.CodeHash)
 	l := max(AccountLookupConst, bold_d.StorageSize) - AccountLookupConst
 	ok, D_lookup, lookup_source := bold_d.ReadLookup(common.BytesToHash(h), uint32(l), vm.hostenv)
 
-	log.Debug(vm.logging, "EJECT check conditions",
-		"lookup_ok", ok,
-		"NumStorageItems", bold_d.NumStorageItems,
-		"CodeHashMatch", bytes.Equal(tst.Bytes(), bold_d.CodeHash.Bytes()),
-		"E_32(x_s)", tst.Hex(),
-		"d.CodeHash", bold_d.CodeHash.Hex(),
-		"D_lookup", D_lookup,
-		"lookup_source", lookup_source)
-
 	if !ok || bold_d.NumStorageItems != 2 {
 		vm.WriteRegister(7, HUH)
 		vm.SetHostResultCode(HUH)
-		log.Info(vm.logging, "EJECT HUH - conditions not met",
+		log.Trace(vm.logging, "EJECT HUH - conditions not met",
 			"d", fmt.Sprintf("%d", d),
 			"h", h,
 			"l", l,
@@ -1154,21 +1139,10 @@ func (vm *VM) hostEject() {
 		return
 	}
 
-	log.Debug(vm.logging, "EJECT expiry check",
-		"len(D_lookup)", len(D_lookup),
-		"D_lookup", D_lookup,
-		"timeslot", vm.Timeslot,
-		"PreimageExpiryPeriod", types.PreimageExpiryPeriod)
-
 	// Check if D_lookup has any elements and use the last element for expiry check
 	if len(D_lookup) > 0 {
 		lastLookupTimeslot := D_lookup[len(D_lookup)-1]
 		expiryTimeslot := lastLookupTimeslot + uint32(types.PreimageExpiryPeriod)
-		log.Debug(vm.logging, "EJECT expiry calculation",
-			"lastLookupTimeslot", lastLookupTimeslot,
-			"expiryTimeslot", expiryTimeslot,
-			"currentTimeslot", vm.Timeslot,
-			"expired", expiryTimeslot < vm.Timeslot)
 
 		if expiryTimeslot < vm.Timeslot {
 			// credit balance AFTER expiry check succeeds
@@ -1180,7 +1154,7 @@ func (vm *VM) hostEject() {
 			xContext.U.ServiceAccounts[uint32(d)] = bold_d
 			bold_d.DeletedAccount = true
 			bold_d.Mutable = true
-			log.Debug(vm.logging, "EJECT OK", "d", fmt.Sprintf("%d", d))
+			log.Trace(vm.logging, "EJECT OK", "d", fmt.Sprintf("%d", d))
 			blobHash := common.BytesToHash(h)
 			bold_d.WriteLookup(blobHash, uint32(l), nil, "trie") // nil means delete the lookup
 			bold_d.WritePreimage(blobHash, []byte{}, "trie")     // []byte{} means delete the preimage. TODO: should be preimage_source
@@ -1190,7 +1164,7 @@ func (vm *VM) hostEject() {
 
 	vm.WriteRegister(7, HUH)
 	vm.SetHostResultCode(HUH)
-	log.Info(vm.logging, "EJECT HUH - expiry condition not met",
+	log.Trace(vm.logging, "EJECT HUH - expiry condition not met",
 		"len(D_lookup)", len(D_lookup),
 		"D_lookup", D_lookup,
 		"timeslot", vm.Timeslot)
@@ -1229,7 +1203,7 @@ func (vm *VM) hostInvoke() {
 
 	if !ok {
 		vm.WriteRegister(7, WHO)
-		log.Debug(vm.logging, "INVOKE WHO", "n", n)
+		log.Trace(vm.logging, "INVOKE WHO", "n", n)
 		vm.SetHostResultCode(WHO)
 		return
 	}
@@ -1253,7 +1227,7 @@ func (vm *VM) hostInvoke() {
 		// new_machine.Execute(new_machine.pc)
 	case BackendCompiler:
 		// if recRam, ok := m_n.U.(*CompilerRam); ok {
-		// 	log.Info(vm.logging, "INVOKE: Compiler", "n", n, "o", o, "g", int64(g))
+		// 	log.Trace(vm.logging, "INVOKE: Compiler", "n", n, "o", o, "g", int64(g))
 		// 	new_rvm, err := NewCompilerVMFromRam(new_machine, recRam)
 		// 	if err != nil {
 		// 		log.Error(vm.logging, "INVOKE: NewCompilerVMFromRam failed", "n", n, "o", o, "g", int64(g), "err", err)
@@ -1280,7 +1254,7 @@ func (vm *VM) hostInvoke() {
 	// Result after execution
 	postGas := new_machine.GetGas()
 	gasUsed := initGas - postGas
-	log.Info(vm.logging, "INVOKE: gas used", "n", n, "o", o, "g", int64(g), "gasUsed", gasUsed, "new_machine.MachineState", new_machine.MachineState)
+	log.Trace(vm.logging, "INVOKE: gas used", "n", n, "o", o, "g", int64(g), "gasUsed", gasUsed, "new_machine.MachineState", new_machine.MachineState)
 	gasBytes = types.E_l(uint64(new_machine.GetGas()), 8)
 	errCodeGas = vm.WriteRAMBytes(uint32(o), gasBytes)
 	if errCodeGas != OK {
@@ -1368,7 +1342,7 @@ func (vm *VM) hostLookup() {
 	ok, v, preimage_source = a.ReadPreimage(account_blobhash, vm.hostenv)
 	if !ok {
 		vm.WriteRegister(7, NONE)
-		log.Debug(vm.logging, "LOOKUP NONE", "s", fmt.Sprintf("%d", a.ServiceIndex), "h", account_blobhash, "preimage_source", preimage_source)
+		log.Trace(vm.logging, "LOOKUP NONE", "s", fmt.Sprintf("%d", a.ServiceIndex), "h", account_blobhash, "preimage_source", preimage_source)
 		vm.SetHostResultCode(NONE)
 		return
 	}
@@ -1459,7 +1433,7 @@ func (vm *VM) hostRead() {
 	if !ok { // || true
 		vm.WriteRegister(7, NONE)
 		vm.HostResultCode = NONE
-		//log.Debug(vm.logging, "READ NONE", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "ok", ok, "val", fmt.Sprintf("%x", val), "len(val)", len(val), "source", storage_source)
+		//log.Trace(vm.logging, "READ NONE", "s", fmt.Sprintf("%d", a.ServiceIndex), "mu_k", fmt.Sprintf("%x", mu_k), "kLen", len(mu_k), "ok", ok, "val", fmt.Sprintf("%x", val), "len(val)", len(val), "source", storage_source)
 		vm.DebugHostFunction(READ, "bo=%x, f=%d, l=%d, val=0x%x", bo, f, l, val[f:f+l])
 		return
 	}
@@ -1470,7 +1444,7 @@ func (vm *VM) hostRead() {
 	l = min(uint64(len(val))-f, vm.ReadRegister(12)) // max length
 	vm.DebugHostFunction(READ, "bo=%x, f=%d, l=%d, val=0x%x", bo, f, l, val[f:f+l])
 	if errCode := vm.WriteRAMBytes(uint32(bo), val[f:f+l]); errCode != OK {
-		log.Debug(vm.logging, "READ RAM WRITE ERROR", "err", errCode)
+		log.Trace(vm.logging, "READ RAM WRITE ERROR", "err", errCode)
 		vm.Panic(errCode)
 		return
 	}
@@ -1501,7 +1475,7 @@ func (vm *VM) hostWrite() {
 		vm.terminated = true
 		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
-		log.Debug(vm.logging, "WRITE RAM", "err", err_k)
+		log.Trace(vm.logging, "WRITE RAM", "err", err_k)
 		return
 	}
 	key_len := uint64(len(mu_k)) // x in a_s(x,y) |y|
@@ -1552,7 +1526,7 @@ func (vm *VM) hostWrite() {
 	if a.Balance < threshold {
 		vm.WriteRegister(7, FULL)
 		vm.SetHostResultCode(FULL)
-		log.Debug(vm.logging, "WRITE FULL", "service", a.ServiceIndex, "threshold", threshold, "balance", a.Balance, "deltaItems", deltaItems, "deltaSize", deltaSize)
+		log.Trace(vm.logging, "WRITE FULL", "service", a.ServiceIndex, "threshold", threshold, "balance", a.Balance, "deltaItems", deltaItems, "deltaSize", deltaSize)
 		return
 	}
 
@@ -1567,7 +1541,15 @@ func (vm *VM) hostWrite() {
 		a.AdjustStorageSize(deltaSize)
 	}
 	vm.WriteRegister(7, response)
-	log.Trace(vm.logging, "WRITE storage", "s", fmt.Sprintf("%d", a.ServiceIndex), "a_o", a.StorageSize, "a_i", a.NumStorageItems)
+	log.Trace(vm.logging, "WRITE storage",
+		"mu_k", fmt.Sprintf("%x", mu_k),
+		"deltaItems", deltaItems,
+		"deltaSize", deltaSize,
+		"key_len", int64(key_len),
+		"val_len", int64(val_len),
+		"prevLen", int64(prevLen),
+		"s", fmt.Sprintf("%d", a.ServiceIndex),
+		"a_o", a.StorageSize, "a_i", a.NumStorageItems)
 }
 
 // Solicit preimage a_l(h,z)
@@ -1584,7 +1566,7 @@ func (vm *VM) hostSolicit() {
 	z := vm.ReadRegister(8)                         // z: blob_len
 	hBytes, err_h := vm.ReadRAMBytes(uint32(o), 32) // h: blobHash
 	if err_h != OK {
-		log.Debug(vm.logging, "SOLICIT RAM READ ERROR", "err", err_h, "o", o, "z", z)
+		log.Trace(vm.logging, "SOLICIT RAM READ ERROR", "err", err_h, "o", o, "z", z)
 		vm.Panic(err_h)
 		return
 	}
@@ -1602,10 +1584,9 @@ func (vm *VM) hostSolicit() {
 	if xs.Balance < threshold {
 		vm.WriteRegister(7, FULL)
 		vm.SetHostResultCode(FULL)
-		log.Debug(vm.logging, "SOLICIT FULL threshold reached", "h", account_lookuphash, "z", z, "threshold", threshold, "xs.Balance", xs.Balance)
+		log.Trace(vm.logging, "SOLICIT FULL threshold reached", "h", account_lookuphash, "z", z, "threshold", threshold, "xs.Balance", xs.Balance)
 		return
 	}
-	log.Debug(vm.logging, "SOLICIT threshold check passed", "h", account_lookuphash, "z", z, "threshold", threshold, "xs.Balance", xs.Balance)
 	ok, X_s_l, lookup_source := xs.ReadLookup(account_lookuphash, uint32(z), vm.hostenv)
 	if !ok {
 		// when preimagehash is not found, put it into solicit request - so we can ask other DAs
@@ -1621,7 +1602,7 @@ func (vm *VM) hostSolicit() {
 		xs.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...), lookup_source)
 		al_internal_key := common.Compute_preimageLookup_internal(account_lookuphash, uint32(z))
 		account_storage_key := fmt.Sprintf("0x%x", common.ComputeC_sh(xs.ServiceIndex, al_internal_key).Bytes()[:31])
-		log.Info(vm.logging, "SOLICIT OK 2", "service", xs.ServiceIndex, "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...), "account_storage_key", account_storage_key)
+		log.Trace(vm.logging, "SOLICIT OK 2", "service", xs.ServiceIndex, "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...), "account_storage_key", account_storage_key)
 		vm.WriteRegister(7, OK)
 		vm.SetHostResultCode(OK)
 		return
@@ -1659,7 +1640,7 @@ func (vm *VM) hostForget() {
 	if !lookup_ok {
 		vm.WriteRegister(7, HUH)
 		vm.SetHostResultCode(HUH)
-		log.Debug(vm.logging, "FORGET HUH", "h", account_lookuphash, "o", o, "lookup_source", lookup_source)
+		log.Trace(vm.logging, "FORGET HUH", "h", account_lookuphash, "o", o, "lookup_source", lookup_source)
 		return
 	}
 	al_internal_key := common.Compute_preimageLookup_internal(account_lookuphash, uint32(z))
@@ -1671,7 +1652,7 @@ func (vm *VM) hostForget() {
 		// storage accounting
 		x_s.AdjustNumStorageItems(-2)
 		x_s.AdjustStorageSize(-int64(AccountLookupConst + uint64(z)))
-		log.Info(vm.logging, "FORGET OK A", "h", account_lookuphash, "z", z, "vm.Timeslot", vm.Timeslot, "X_s_l[1]", X_s_l[1], "expiry", (vm.Timeslot - types.PreimageExpiryPeriod), "types.PreimageExpiryPeriod", types.PreimageExpiryPeriod, "account_storage_key", account_storage_key)
+		log.Trace(vm.logging, "FORGET OK A", "h", account_lookuphash, "z", z, "vm.Timeslot", vm.Timeslot, "X_s_l[1]", X_s_l[1], "expiry", (vm.Timeslot - types.PreimageExpiryPeriod), "types.PreimageExpiryPeriod", types.PreimageExpiryPeriod, "account_storage_key", account_storage_key)
 		vm.WriteRegister(7, OK)
 		vm.SetHostResultCode(OK)
 		return
@@ -1682,7 +1663,7 @@ func (vm *VM) hostForget() {
 		// storage accounting
 		x_s.AdjustNumStorageItems(-2)
 		x_s.AdjustStorageSize(-int64(AccountLookupConst + uint64(z)))
-		log.Info(vm.logging, "FORGET OK B", "h", account_lookuphash, "z", z, "vm.Timeslot", vm.Timeslot, "X_s_l[1]", X_s_l[1], "expiry", (vm.Timeslot - types.PreimageExpiryPeriod), "types.PreimageExpiryPeriod", types.PreimageExpiryPeriod, "account_storage_key", account_storage_key)
+		log.Trace(vm.logging, "FORGET OK B", "h", account_lookuphash, "z", z, "vm.Timeslot", vm.Timeslot, "X_s_l[1]", X_s_l[1], "expiry", (vm.Timeslot - types.PreimageExpiryPeriod), "types.PreimageExpiryPeriod", types.PreimageExpiryPeriod, "account_storage_key", account_storage_key)
 		vm.WriteRegister(7, OK)
 		vm.SetHostResultCode(OK)
 		return
@@ -1691,7 +1672,7 @@ func (vm *VM) hostForget() {
 		x_s.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...), lookup_source) // [x, t]
 		vm.WriteRegister(7, OK)
 		vm.SetHostResultCode(OK)
-		log.Debug(vm.logging, "FORGET OK C", "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...), "account_storage_key", account_storage_key)
+		log.Trace(vm.logging, "FORGET OK C", "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...), "account_storage_key", account_storage_key)
 		return
 	} else if len(X_s_l) == 3 && X_s_l[1]+types.PreimageExpiryPeriod < vm.Timeslot {
 		// [x,y,w] => [w, t] where y is the current time, the time we are forgetting
@@ -1699,12 +1680,12 @@ func (vm *VM) hostForget() {
 		x_s.WriteLookup(account_lookuphash, uint32(z), X_s_l, lookup_source) // [w, t]
 		vm.WriteRegister(7, OK)
 		vm.SetHostResultCode(OK)
-		log.Info(vm.logging, "FORGET OK D", "h", account_lookuphash, "z", z, "newvalue", X_s_l, "account_storage_key", account_storage_key)
+		log.Trace(vm.logging, "FORGET OK D", "h", account_lookuphash, "z", z, "newvalue", X_s_l, "account_storage_key", account_storage_key)
 		return
 	}
 	vm.WriteRegister(7, HUH)
 	vm.SetHostResultCode(HUH)
-	log.Debug(vm.logging, "FORGET HUH", "h", account_lookuphash, "o", o)
+	log.Trace(vm.logging, "FORGET HUH", "h", account_lookuphash, "o", o)
 }
 
 // HistoricalLookup determines whether the preimage of some hash h was available for lookup by some service account a at some timeslot t, and if so, provide its preimage
@@ -1789,7 +1770,7 @@ func (vm *VM) hostExport() {
 		return
 	} else {
 		vm.WriteRegister(7, uint64(vm.ExportSegmentIndex)+uint64(len(vm.Exports)))
-		log.Debug(vm.logging, fmt.Sprintf("%s EXPORT#%d OK", vm.ServiceMetadata, uint64(len(vm.Exports))),
+		log.Trace(vm.logging, fmt.Sprintf("%s EXPORT#%d OK", vm.ServiceMetadata, uint64(len(vm.Exports))),
 			"p", p, "z", z, "vm.ExportSegmentIndex", vm.ExportSegmentIndex,
 			"segmenthash", fmt.Sprintf("%v", common.Blake2Hash(x)),
 			"segment20", fmt.Sprintf("%x", x[0:20]),
@@ -1944,27 +1925,27 @@ func (vm *VM) hostPages() {
 	if !ok {
 		vm.WriteRegister(7, WHO)
 		vm.SetHostResultCode(WHO)
-		log.Debug(vm.logging, "hostPages WHO", "n", n, "p", p, "c", c, "r", r)
+		log.Trace(vm.logging, "hostPages WHO", "n", n, "p", p, "c", c, "r", r)
 		return
 	}
 
 	if p > maxUint64-c {
 		vm.WriteRegister(7, HUH)
 		vm.SetHostResultCode(HUH)
-		log.Debug(vm.logging, "hostPages HUH", "n", n, "p", p, "c", c, "r", r)
+		log.Trace(vm.logging, "hostPages HUH", "n", n, "p", p, "c", c, "r", r)
 		return
 	}
 
 	if p < 16 || p+c >= (1<<32)/Z_P || r > 4 {
 		vm.WriteRegister(7, HUH)
 		vm.SetHostResultCode(HUH)
-		log.Debug(vm.logging, "hostPages HUH", "n", n, "p", p, "c", c, "r", r)
+		log.Trace(vm.logging, "hostPages HUH", "n", n, "p", p, "c", c, "r", r)
 		return
 	}
 	if p+c >= (1<<32)/Z_P && r > 2 {
 		vm.WriteRegister(7, HUH)
 		vm.SetHostResultCode(HUH)
-		log.Debug(vm.logging, "hostPages HUH", "n", n, "p", p, "c", c, "r", r)
+		log.Trace(vm.logging, "hostPages HUH", "n", n, "p", p, "c", c, "r", r)
 		return
 	}
 	page := uint32(p)
@@ -2005,9 +1986,9 @@ func (vm *VM) hostLog() {
 	if vm.IsChild {
 		serviceMetadata = fmt.Sprintf("%s-child", serviceMetadata)
 	}
-	loggingVerbose := true
+	loggingVerbose := false
 	if vm.logging == log.FirstGuarantorOrAuditor || vm.logging == log.Builder || vm.logging == log.PvmAuthoring {
-		loggingVerbose = true
+		loggingVerbose = false
 	}
 	if !loggingVerbose {
 		return
@@ -2018,11 +1999,11 @@ func (vm *VM) hostLog() {
 	case 1: // 1: User agent displays as warning
 		fmt.Printf("\x1b[33m[WARN-%s] %s\x1b[0m\n", vm.logging, string(messageBytes))
 	case 2: // 2: User agent displays as important information
-	//	fmt.Printf("\x1b[32m[INFO-%s] %s\x1b[0m\n", vm.logging, string(messageBytes))
+		fmt.Printf("\x1b[32m[INFO-%s] %s\x1b[0m\n", vm.logging, string(messageBytes))
 	case 3: // 3: User agent displays as helpful information
-		//		fmt.Printf("\x1b[36m[DEBUG-%s] %s\x1b[0m\n", vm.logging, string(messageBytes))
+		fmt.Printf("\x1b[36m[DEBUG-%s] %s\x1b[0m\n", vm.logging, string(messageBytes))
 	case 4: // 4: User agent displays as pedantic information
-		//	fmt.Printf("\x1b[37m[TRACE-%s] %s\x1b[0m\n", vm.logging, string(messageBytes))
+		fmt.Printf("\x1b[37m[TRACE-%s] %s\x1b[0m\n", vm.logging, string(messageBytes))
 	}
 }
 
@@ -2096,7 +2077,7 @@ func (vm *VM) HostFetchWitness() error {
 	funcName := "HostFetchWitness"
 	// Validate object_id length
 	if object_id_len != 32 {
-		log.Debug(vm.logging, funcName+": invalid object_id length", "object_id_len", object_id_len)
+		log.Trace(vm.logging, funcName+": invalid object_id length", "object_id_len", object_id_len)
 
 		vm.WriteRegister(7, 0) // Return 0 = not found
 		return nil
@@ -2105,14 +2086,14 @@ func (vm *VM) HostFetchWitness() error {
 	// Read object_id from memory
 	object_id_bytes, errCode := vm.ReadRAMBytes(object_id_ptr, object_id_len)
 	if errCode != OK {
-		log.Debug(vm.logging, funcName+": failed to read object_id from memory", "object_id_ptr", fmt.Sprintf("0x%x", object_id_ptr), "object_id_len", object_id_len, "error", errCode)
+		log.Trace(vm.logging, funcName+": failed to read object_id from memory", "object_id_ptr", fmt.Sprintf("0x%x", object_id_ptr), "object_id_len", object_id_len, "error", errCode)
 		vm.WriteRegister(7, 0)
 		return nil
 	}
 	// Convert object_id bytes to common.Hash
 	object_id := common.BytesToHash(object_id_bytes)
 	if vm.logging != log.Builder {
-		log.Debug(vm.logging, "HostFetchWitness returning empty", "role", vm.logging, "object_id", object_id)
+		log.Trace(vm.logging, "HostFetchWitness returning empty", "role", vm.logging, "object_id", object_id)
 		vm.WriteRegister(7, 0)
 		return nil
 	}
@@ -2170,7 +2151,7 @@ func (vm *VM) HostFetchWitness() error {
 	}
 
 	// Log appropriately
-	log.Info(vm.logging, funcName, "objectID", object_id, "wph", &objRef.WorkPackageHash, "ver", objRef.Version, "len(payload)", objRef.PayloadLength)
+	log.Trace(vm.logging, funcName, "objectID", object_id, "wph", &objRef.WorkPackageHash, "ver", objRef.Version, "len(payload)", objRef.PayloadLength)
 
 	vm.WriteRegister(7, total_size) // Return total bytes written
 	return nil

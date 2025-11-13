@@ -344,14 +344,14 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	}
 
 	// Log validator state for debugging
-	safrole := s.GetSafroleState()
-	log.Info(log.SDB, "ValidatorState",
-		"n", s.sdb.GetNodeID(),
-		"prev", len(safrole.PrevValidators),
-		"curr", len(safrole.CurrValidators),
-		"next", len(safrole.NextValidators),
-		"designated", len(safrole.DesignatedValidators),
-		"timeslot", safrole.Timeslot)
+	//safrole := s.GetSafroleState()
+	// log.Info(log.SDB, "ValidatorState",
+	// 	"n", s.sdb.GetNodeID(),
+	// 	"prev", len(safrole.PrevValidators),
+	// 	"curr", len(safrole.CurrValidators),
+	// 	"next", len(safrole.NextValidators),
+	// 	"designated", len(safrole.DesignatedValidators),
+	// 	"timeslot", safrole.Timeslot)
 
 	return updated_root
 }

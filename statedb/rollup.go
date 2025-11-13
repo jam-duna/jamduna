@@ -663,17 +663,17 @@ func (b *Rollup) ShowTxReceipts(evmBlock *evmtypes.EvmBlockPayload, txHashes []c
 			"len(logs)", len(receipt.Logs),
 			"gasUsed", gasUsedInt.String())
 		evmtypes.ShowEthereumLogs(txHash, receipt.Logs, allTopics)
-		if verifyServiceProof {
-			position := evmBlock.LogIndexStart + txIndex
-			proof, err := b.stateDB.GenerateServiceProof(b.serviceID, b.stateDB.GetMMRStorageKey(), position, evmBlock.LogIndexStart, evmBlock.ReceiptHashes)
-			if err != nil {
-				log.Info(log.Node, "No receipt inclusion proof available", "position", position, "txHash", common.Str(txHash), "err", err)
-			} else if proof.Verify() {
-				log.Info(log.Node, "✓ Receipt inclusion proven via MMR", "position", position, "txHash", common.Str(txHash))
-			} else {
-				log.Warn(log.Node, "✗ Receipt inclusion proof verification failed", "position", position, "txHash", common.Str(txHash))
-			}
-		}
+		// if verifyServiceProof {
+		// 	position := evmBlock.LogIndexStart + txIndex
+		// 	proof, err := b.stateDB.GenerateServiceProof(b.serviceID, b.stateDB.GetMMRStorageKey(), position, evmBlock.LogIndexStart, evmBlock.ReceiptHashes)
+		// 	if err != nil {
+		// 		log.Info(log.Node, "No receipt inclusion proof available", "position", position, "txHash", common.Str(txHash), "err", err)
+		// 	} else if proof.Verify() {
+		// 		log.Info(log.Node, "✓ Receipt inclusion proven via MMR", "position", position, "txHash", common.Str(txHash))
+		// 	} else {
+		// 		log.Warn(log.Node, "✗ Receipt inclusion proof verification failed", "position", position, "txHash", common.Str(txHash))
+		// 	}
+		// }
 
 	}
 	log.Info(log.Node, description, "txCount", len(txHashes), "gasUsedTotal", gasUsedTotal.String())

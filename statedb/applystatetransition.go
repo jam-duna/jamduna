@@ -246,7 +246,7 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 	accumulated_partial := make(map[uint32]*types.XContext)
 	num_accumulations, accumulation_output, gasUsage := s.OuterAccumulate(gas, deferred_transfers, accumulate_input_wr, o, f, pvmBackend, accumulated_partial) // outer accumulate
 	if num_accumulations > 0 {
-		log.Info(log.SDB, "ApplyStateTransition - OuterAccumulate", "n", s.Id, "blk", targetJCE, "s-", s.StateRoot.String_short(), "h.s-", blk.Header.ParentStateRoot.String_short(), "num_accumulations", num_accumulations, "gasUsage", gasUsage, "accumulation_output", accumulation_output)
+		log.Trace(log.SDB, "ApplyStateTransition - OuterAccumulate", "n", s.Id, "blk", targetJCE, "s-", s.StateRoot.String_short(), "h.s-", blk.Header.ParentStateRoot.String_short(), "num_accumulations", num_accumulations, "gasUsage", gasUsage, "accumulation_output", accumulation_output)
 	}
 	benchRec.Add("OuterAccumulate", time.Since(t0))
 	// s.updateRecentAccumulation(o, accumulated_partial)

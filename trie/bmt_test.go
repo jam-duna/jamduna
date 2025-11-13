@@ -558,8 +558,11 @@ func TestDelete(t *testing.T) {
 		isFailure := false
 		for i := len(data) - 1; i >= 0; i-- {
 			kv := data[i]
-			tree.Delete(kv[0])
-			_, err := tree.Flush()
+			err := tree.Delete(kv[0])
+			if err != nil {
+				t.Fatalf("Failed to delete key: %x, error: %v", kv[0], err)
+			}
+			_, err = tree.Flush()
 			if err != nil {
 				t.Fatalf("Failed to flush delete for key: %x, error: %v", kv[0], err)
 			}
@@ -587,7 +590,9 @@ func TestDelete(t *testing.T) {
 
 func TestStateKey(t *testing.T) {
 	test_db, _ := initLevelDB()
-	rootHash, tree, err := Initial_bpt(test_db)
+	tree := NewMerkleTree(nil, test_db)
+	var rootHash common.Hash
+	var err error
 	if err != nil {
 		t.Errorf("Failed to initial BPT %v", err)
 	}

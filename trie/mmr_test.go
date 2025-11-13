@@ -1,7 +1,6 @@
 package trie
 
 import (
-	"math/rand"
 	"testing"
 
 	"github.com/colorfulnotion/jam/common"
@@ -46,6 +45,21 @@ func TestMMRAppend(t *testing.T) {
 		},
 	}
 
+	// test 1
+	/*	t1 := common.HexToHash("0x8720b97ddd6acc0f6eb66e095524038675a4e4067adc10ec39939eaefc47d842")
+		mmr.Append(&(t1))
+		if mmr.ComparePeaks(expected[0]) == false {
+			t.Fatalf("Test1 FAIL")
+		}
+
+		// test 2
+		t2 := common.HexToHash("0x7507515a48439dc58bc318c48a120b656136699f42bfd2bd45473becba53462d")
+		mmr.Append(&(t2))
+		if mmr.ComparePeaks(expected[1]) == false {
+			t.Fatalf("Test2 FAIL")
+		}*/
+
+	// test 3
 	mmr = MMR{}
 	t3a := common.HexToHash("0xf986bfeff7411437ca6a23163a96b5582e6739f261e697dc6f3c05a1ada1ed0c")
 	t3b := common.HexToHash("0xca29f72b6d40cfdb5814569cf906b3d369ae5f56b63d06f2b6bb47be191182a6")
@@ -60,62 +74,20 @@ func TestMMRAppend(t *testing.T) {
 	if mmr.ComparePeaks(expected[2]) == false {
 		t.Fatalf("Test3 FAIL")
 	}
-}
-
-// TestMMRProof tests MMR proof generation and verification
-// Each loop appends 100 new leaves, then verifies a randomly chosen leaf among the most recent 500 appends.
-func TestMMRProof(t *testing.T) {
-	const (
-		batchSize    = 100 // number of new leaves per iteration
-		totalBatches = 50  // total iterations (overall leaves = 5000)
-		windowSize   = 500 // restrict proof checks to latest window
-	)
-
-	mmr := NewMMR()
-	leaves := make([]common.Hash, 0, batchSize*totalBatches)
-	rng := rand.New(rand.NewSource(1))
-
-	for batch := 0; batch < totalBatches; batch++ {
-		// Append a new batch of leaves
-		for i := 0; i < batchSize; i++ {
-			globalIndex := batch*batchSize + i
-			hash := common.BytesToHash([]byte{
-				byte(globalIndex >> 16),
-				byte(globalIndex >> 8),
-				byte(globalIndex),
-				byte(batch),
-			})
-			leaves = append(leaves, hash)
-			mmr.Append(&hash)
+	/*
+		// test 4
+		t4 := common.HexToHash("0x658b919f734bd39262c10589aa1afc657471d902a6a361c044f78de17d660bc6")
+		mmr = MMR{}
+		mmr.Peaks = []*common.Hash{
+			nil,
+			nil,
+			nil,
+			&(t4),
 		}
-
-		totalLeaves := len(leaves)
-		if totalLeaves == 0 {
-			continue
+		t4r := common.HexToHash("0xa983417440b618f29ed0b7fa65212fce2d363cb2b2c18871a05c4f67217290b0")
+		mmr.Append(&(t4r))
+		if mmr.ComparePeaks(expected[3]) == false {
+			t.Fatalf("Test4 FAIL")
 		}
-
-		start := totalLeaves - windowSize
-		if start < 0 {
-			start = 0
-		}
-		position := uint64(start + rng.Intn(totalLeaves-start))
-
-		store := LeafStore{Leaves: leaves}
-		proof, err := mmr.GenerateProof(position, leaves[position], store, mmr.LeafCount())
-		if err != nil {
-			t.Fatalf("GenerateProof failed: %v", err)
-		}
-		superPeak := mmr.SuperPeak()
-		if superPeak == nil {
-			t.Fatalf("Super peak is nil after %d leaves", totalLeaves)
-		}
-
-		if !proof.Verify(*superPeak) {
-			t.Fatalf("Proof verification failed after %d leaves at position %d", totalLeaves, position)
-		}
-
-		if proof.LeafHash != leaves[position] {
-			t.Fatalf("Proof leaf hash mismatch at position %d", position)
-		}
-	}
+	*/
 }

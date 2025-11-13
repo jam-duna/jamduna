@@ -339,9 +339,9 @@ func (t *MerkleTree) Flush() (common.Hash, error) {
 	t.batchMutex.Lock()
 	defer t.batchMutex.Unlock()
 
-	batchWriteLen, err := t.flushBatchLocked()
+	_, err := t.flushBatchLocked()
 	root := t.GetRoot()
-	log.Info(log.P, "Flush", "n", t.db.GetNodeID(), "s+", root.String_short(), "batchWriteLen", batchWriteLen)
+	//log.Info(log.P, "Flush", "n", t.db.GetNodeID(), "s+", root.String_short(), "batchWriteLen", batchWriteLen)
 	return root, err
 }
 
@@ -798,10 +798,10 @@ func (t *MerkleTree) GetStates() ([16][]byte, error) {
 }
 
 // DeleteService (hash)
-func (t *MerkleTree) DeleteService(s uint32) {
+func (t *MerkleTree) DeleteService(s uint32) error {
 	service_account := common.ComputeC_is(s)
 	stateKey := service_account.Bytes()
-	t.Delete(stateKey)
+	return t.Delete(stateKey)
 }
 
 func (t *MerkleTree) SetService(s uint32, v []byte) error {
@@ -892,11 +892,11 @@ func (t *MerkleTree) GetPreImageLookup(s uint32, blob_hash common.Hash, blob_len
 }
 
 // Delete PreImageLookup key(hash)
-func (t *MerkleTree) DeletePreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32) {
+func (t *MerkleTree) DeletePreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32) error {
 	al_internal_key := common.Compute_preimageLookup_internal(blob_hash, blob_len)
 	account_lookuphash := common.ComputeC_sh(s, al_internal_key) // C(s, (h,l))
 	stateKey := account_lookuphash.Bytes()
-	t.Delete(stateKey)
+	return t.Delete(stateKey)
 }
 
 // Insert Storage Value into the trie
@@ -941,11 +941,11 @@ func (t *MerkleTree) GetServiceStorageWithProof(s uint32, k []byte) ([]byte, [][
 }
 
 // Delete Storage key(hash)
-func (t *MerkleTree) DeleteServiceStorage(s uint32, k []byte) {
+func (t *MerkleTree) DeleteServiceStorage(s uint32, k []byte) error {
 	as_internal_key := common.Compute_storageKey_internal(k)
 	account_storage_key := common.ComputeC_sh(s, as_internal_key)
 	stateKey := account_storage_key.Bytes()
-	t.Delete(stateKey)
+	return t.Delete(stateKey)
 }
 
 // Set PreImage Blob for GP_0.3.5(158)
@@ -982,11 +982,11 @@ func (t *MerkleTree) GetPreImageBlob(s uint32, blobHash common.Hash) (value []by
 }
 
 // Delete PreImage Blob
-func (t *MerkleTree) DeletePreImageBlob(s uint32, blobHash common.Hash) {
+func (t *MerkleTree) DeletePreImageBlob(s uint32, blobHash common.Hash) error {
 	ap_internal_key := common.Compute_preimageBlob_internal(blobHash)
 	account_preimage_hash := common.ComputeC_sh(s, ap_internal_key)
 	stateKey := account_preimage_hash.Bytes()
-	t.Delete(stateKey)
+	return t.Delete(stateKey)
 }
 
 // Insert stages the operation without computing hashes or touching levelDB
@@ -1383,14 +1383,24 @@ func VerifyRaw(key []byte, value []byte, rootHash []byte, path []common.Hash) bo
 }
 
 // Delete stages a deletion without modifying the tree
-func (t *MerkleTree) Delete(keyBytes []byte) {
+func (t *MerkleTree) Delete(keyBytes []byte) error {
 	key := normalizeKey32(keyBytes)
+
+	// Check if the key exists before staging deletion
+	_, ok, err := t.Get(key[:])
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("key not found: cannot delete non-existent key %x", key)
+	}
 
 	t.stagedMutex.Lock()
 	defer t.stagedMutex.Unlock()
 
 	t.stagedDeletes[key] = true
 	delete(t.stagedInserts, key) // Cancel any pending insert
+	return nil
 }
 
 // deleteNode is the internal version that actually performs the deletion
@@ -1399,34 +1409,64 @@ func (t *MerkleTree) deleteNode(node *Node, key []byte, depth int) *Node {
 		return node
 	}
 
-	// Found the leaf to delete
-	if compareBytes(node.Key, key) {
-		return nil
+	// Check if this is an empty node (all zeros hash)
+	emptyHash := make([]byte, 32)
+	if node.Hash != nil && bytes.Equal(node.Hash, emptyHash) {
+		return node
 	}
 
-	// Not a leaf, recurse
+	// Found the leaf to delete
+	if node.Key != nil && compareBytes(node.Key, key) {
+		// Return empty node instead of nil
+		return &Node{Hash: make([]byte, 32)}
+	}
+
+	// Not a leaf, recurse down the tree
 	if bit(key, depth) {
 		node.Right = t.deleteNode(node.Right, key, depth+1)
 	} else {
 		node.Left = t.deleteNode(node.Left, key, depth+1)
 	}
 
-	// After deletion, check if this branch can be collapsed
-	if node.Left == nil && node.Right == nil {
-		return nil
-	}
-	if node.Left == nil {
-		return node.Right
-	}
-	if node.Right == nil {
-		return node.Left
+	// Check if both children are empty/nil
+	leftEmpty := node.Left == nil || (node.Left.Hash != nil && bytes.Equal(node.Left.Hash, emptyHash))
+	rightEmpty := node.Right == nil || (node.Right.Hash != nil && bytes.Equal(node.Right.Hash, emptyHash))
+
+	// If both children are empty, return empty node
+	if leftEmpty && rightEmpty {
+		return &Node{Hash: make([]byte, 32)}
 	}
 
-	// Recompute branch hash
-	node.Hash = computeHash(branch(node.Left.Hash, node.Right.Hash))
+	// If only one child exists and it's a leaf, collapse to it
+	if leftEmpty && !rightEmpty {
+		// Only right child exists
+		if node.Right.Left == nil && node.Right.Right == nil && node.Right.Key != nil {
+			// Right child is a leaf with a key
+			return node.Right
+		}
+	} else if rightEmpty && !leftEmpty {
+		// Only left child exists
+		if node.Left.Left == nil && node.Left.Right == nil && node.Left.Key != nil {
+			// Left child is a leaf with a key
+			return node.Left
+		}
+	}
+
+	// We have a valid branch - recompute the hash
+	leftHash := make([]byte, 32)
+	rightHash := make([]byte, 32)
+
+	if node.Left != nil && !bytes.Equal(node.Left.Hash, emptyHash) {
+		leftHash = node.Left.Hash
+	}
+	if node.Right != nil && !bytes.Equal(node.Right.Hash, emptyHash) {
+		rightHash = node.Right.Hash
+	}
+
+	node.Hash = computeHash(branch(leftHash, rightHash))
 	var branchData [64]byte
-	copy(branchData[:32], node.Left.Hash)
-	copy(branchData[32:64], node.Right.Hash)
+	copy(branchData[:32], leftHash)
+	copy(branchData[32:64], rightHash)
 	t.levelDBSetBranch(node.Hash, branchData[:])
 
 	return node

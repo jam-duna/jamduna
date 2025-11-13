@@ -2,7 +2,6 @@ package statedb
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
@@ -23,23 +22,18 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 
 	service_idx := sa.GetServiceIndex()
 	tree := s.GetTrie()
-	stagedSize := tree.GetStagedSize()
-	if stagedSize > 0 {
-		log.Info(log.SDB, "writeAccount:START",
-			"service", service_idx,
-			"staged_size", stagedSize,
-			"dirty", sa.Dirty)
-	}
+
 	serviceUpdate = types.NewServiceUpdate(service_idx)
-	t0 := time.Now()
 	for _, storage := range sa.Storage {
 		log.Trace(log.SDB, "writeAccount Storage", "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", storage.InternalKey, "value", fmt.Sprintf("%x", storage.Value), "storage.Accessed", storage.Accessed, "storage.Deleted", storage.Deleted, "storage.Dirty", storage.Dirty, "storage.source", storage.Source)
 		as_internal_key := storage.InternalKey
 		if storage.Dirty {
 			if storage.Deleted {
 				log.Debug(s.Authoring, "writeAccount DELETE", "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", as_internal_key, "storage.Accessed", storage.Accessed, "storage.Deleted", storage.Deleted, "storage.source", storage.Source)
-				tree.DeleteServiceStorage(service_idx, storage.Key)
-
+				err = tree.DeleteServiceStorage(service_idx, storage.Key)
+				if err != nil {
+					continue
+				}
 			} else {
 				// Here we are returning ALL storage values written
 				serviceUpdate.ServiceValue[as_internal_key] = &types.SubServiceValueResult{
@@ -58,21 +52,16 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 			}
 		}
 	}
-	stagedSize = tree.GetStagedSize()
-	if stagedSize > 0 {
-		log.Info(log.SDB, "writeAccount:Storage completed",
-			"service", service_idx,
-			"staged_size", stagedSize,
-			"duration_ms", time.Since(t0).Milliseconds())
-	}
 
-	t0 = time.Now()
 	for blob_hash_str, v := range sa.Lookup {
 		log.Trace(log.SDB, "writeAccount Lookup", "service_idx", service_idx, "blob_hash_str", blob_hash_str, "v.Dirty", v.Dirty, "v.Deleted", v.Deleted, "v.Z", v.Z, "v.Timeslots", v.Timeslots, "source", v.Source)
 		blob_hash := common.HexToHash(blob_hash_str)
 		if v.Dirty {
 			if v.Deleted {
-				tree.DeletePreImageLookup(service_idx, blob_hash, v.Z)
+				err = tree.DeletePreImageLookup(service_idx, blob_hash, v.Z)
+				if err != nil {
+					continue
+				}
 				//log.Debug("authoring", "tree.DeletePreImageLookup [FORGET OK]", "blob_hash", blob_hash, "v.Z", v.Z)
 				serviceUpdate.ServiceRequest[blob_hash_str] = &types.SubServiceRequestResult{
 					HeaderHash: s.HeaderHash,
@@ -98,22 +87,17 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 			}
 		}
 	}
-	stagedSize = tree.GetStagedSize()
-	if stagedSize > 0 {
-		log.Info(log.SDB, "writeAccount:Lookup completed",
-			"service", service_idx,
-			"staged_size", stagedSize,
-			"duration_ms", time.Since(t0).Milliseconds())
-	}
 
-	t0 = time.Now()
 	for blobHash_str, v := range sa.Preimage {
 		//log.Debug(log.SDB, "writeAccount Preimage", "service_idx", service_idx, "blobHash_str", blobHash_str, "v.Dirty", v.Dirty, "v.Deleted", v.Deleted, "len(v.Preimage)", len(v.Preimage), "source", v.Source)
 		blobHash := common.HexToHash(blobHash_str)
 		if v.Dirty {
 			if v.Deleted {
 				if v.Source == "trie" {
-					tree.DeletePreImageBlob(service_idx, blobHash)
+					err = tree.DeletePreImageBlob(service_idx, blobHash)
+					if err != nil {
+						continue
+					}
 					log.Trace("authoring", "DeletePreImageBlob [FORGET OK] A", "blobHash", blobHash, "v.Deleted", v.Deleted, "len(v.Preimage)", len(v.Preimage), "source", v.Source)
 				}
 			} else {
@@ -132,27 +116,11 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 			}
 		}
 	}
-	stagedSize = tree.GetStagedSize()
-	if stagedSize > 0 {
-		log.Info(log.SDB, "writeAccount:Preimage completed",
-			"service", service_idx,
-			"staged_size", stagedSize,
-			"duration_ms", time.Since(t0).Milliseconds())
-	}
-
 	if sa.DeletedAccount {
 		tree.DeleteService(service_idx)
 		//log.Info(log.SDB, "tree.DeleteService SUCCESS", "service_idx", service_idx)
 	} else {
-		t0 = time.Now()
 		err = s.writeService(service_idx, sa)
-		stagedSize = tree.GetStagedSize()
-		if stagedSize > 0 {
-			log.Info(log.SDB, "writeAccount:writeService completed",
-				"service", service_idx,
-				"staged_size", stagedSize,
-				"duration_ms", time.Since(t0).Milliseconds())
-		}
 	}
 	serviceUpdate.ServiceInfo = &types.SubServiceInfoResult{
 		HeaderHash: s.HeaderHash,
