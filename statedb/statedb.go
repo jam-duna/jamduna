@@ -248,6 +248,21 @@ func (s *StateDB) GetStateUpdates() *types.StateUpdate {
 	return s.stateUpdate
 }
 
+func (s *StateDB) GetRefineContext() types.RefineContext {
+	currentStateRoot := s.GetStateRoot()
+	anchorHash := s.GetHeaderHash()
+	beefyRoot := s.getBeefyRootForAnchor(anchorHash)
+
+	return types.RefineContext{
+		Anchor:           anchorHash,
+		StateRoot:        currentStateRoot,
+		BeefyRoot:        beefyRoot,
+		LookupAnchor:     anchorHash,
+		LookupAnchorSlot: s.JamState.SafroleState.Timeslot,
+		Prerequisites:    []common.Hash{},
+	}
+}
+
 func (s *StateDB) SetJamState(jamState *JamState) {
 	s.JamState = jamState
 }

@@ -6,7 +6,7 @@ use utils::{
     functions::{log_error, log_debug, log_info, AccumulateInput},
 };
 use crate::{
-    block::EvmBlockPayload,
+    block::{EvmBlockPayload, EvmBlockMetadata},
     receipt::TransactionReceiptRecord,
     sharding::{ObjectKind, format_object_id},
     writes::{ExecutionEffectsEnvelope, deserialize_execution_effects},
@@ -42,6 +42,33 @@ impl BlockAccumulator {
                         // Write Receipt objects as ObjectRef + payload to JAM State
                         accumulator.accumulate_receipt(&mut candidate, record)?;
                     }
+                    kind if kind == ObjectKind::BlockMetadata as u8 => {
+                        // Deserialize block metadata from payload and write to metadata objectID
+                        if !candidate.payload.is_empty() {
+                            match EvmBlockMetadata::deserialize(&candidate.payload) {
+                                Ok(metadata) => {
+                                    log_info(&format!("📦 Writing BlockMetadata: object_id={}, transactions_root={}, receipts_root={}, mmr_root={}",
+                                        format_object_id(&candidate.object_id),
+                                        format_object_id(&metadata.transactions_root),
+                                        format_object_id(&metadata.receipts_root),
+                                        format_object_id(&metadata.mmr_root)));
+
+                                    // Write metadata to the metadata objectID (computed from block header)
+                                    if metadata.write(&candidate.object_id).is_none() {
+                                        log_error(&format!("Failed to write BlockMetadata for object_id {}", format_object_id(&candidate.object_id)));
+                                        return None;
+                                    }
+                                }
+                                Err(e) => {
+                                    log_error(&format!("Failed to deserialize BlockMetadata for object_id {}: {}", format_object_id(&candidate.object_id), e));
+                                    return None;
+                                }
+                            }
+                        } else {
+                            log_error(&format!("BlockMetadata object_id {} has no payload", format_object_id(&candidate.object_id)));
+                            return None;
+                        }
+                    }
                     kind if kind == ObjectKind::Block as u8 => {
                         // Block objects are handled separately by EvmBlockPayload::write()
                         // They write only EvmBlockPayload data (no ObjectRef prefix)
@@ -56,11 +83,8 @@ impl BlockAccumulator {
             }
         }
 
-        // Write MMR to storage and return MMR root
-        accumulator.current_block.mmr_root = accumulator.mmr.write_mmr()?;
-
         // Update EvmBlockPayload and write to storage
-        accumulator.current_block.write()?;
+        accumulator.current_block.write(service_id)?;
 
         // Write block_hash → block_number mapping AFTER block is fully written
         // This ensures the hash is computed from the complete, finalized block

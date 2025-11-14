@@ -15,12 +15,13 @@ We want light clients (and bridges) to convince themselves that a transaction, r
 | Commitment            | Location                               | What it covers                                              |
 |-----------------------|----------------------------------------|-------------------------------------------------------------|
 | `stateRoot`           | JAM block header                       | `ObjectRef`s, contract shards, SSR metadata                 |
-| `transactionRoot`     | Block payload in DA                    | BMT root of transaction hashes                              |
-| `receiptRoot`         | Block payload in DA                    | BMT root of canonical receipt hashes                        |
+| `transactionRoot`     | Block metadata in service storage      | BMT root of transaction hashes                              |
+| `receiptRoot`         | Block metadata in service storage      | BMT root of canonical receipt hashes                        |
 | Transaction payloads  | DA exported by refine                  | RLP/typed transaction bodies                                |
 | Receipt payloads      | DA exported by refine                  | Receipt fields: status, cumulative gas, logs, bloom inputs  |
 | Block number index    | JAM service storage (accumulate)       | `block_number (4 LE) || parent_hash (32)`                   |
-| Block payload         | DA exported (future)                   | Transaction/receipt roots, logs bloom, tx/receipt hashes    |
+| Block payload         | JAM service storage (accumulate)       | EvmBlockPayload: header + tx/receipt hashes                 |
+| Block metadata        | JAM service storage (accumulate)       | EvmBlockMetadata: transactions_root + receipts_root + mmr_root (96 bytes) |
 
 Only `stateRoot` is consensus-anchored. Everything else either expires with the DA window (unless pinned) or lives in service storage that accumulate writes.
 
@@ -68,14 +69,52 @@ The service routes different payload types to different handlers using numeric t
 | Payload Type | Tag | Format | Purpose                | Handler |
 |--------------|-----|--------|------------------------|---------|
 | `Builder`    | `0x00` | `type_byte (1) + count (4 LE) + [witness_count (2 LE)]` | Builder-submitted txs  | `refine_payload_transactions()` |
-| `Transactions` | `0x01` | `type_byte (1) + count (4 LE) + [witness_count (2 LE)]` | Transaction execution | `refine_payload_transactions()` |
-| `Blocks`     | `0x02` | `type_byte (1) + extrinsics_count (4 LE)` | Bootstrap commands (A/K) | `genesis::execute_bootstrap()` |
+| `Transactions` | `0x01` | `type_byte (1) + count (4 LE) + [witness_count (2 LE)]` | Transaction execution + block metadata | `refine_payload_transactions()` |
+| `Blocks`     | `0x02` | `type_byte (1) + extrinsics_count (4 LE) + [witness_count (2 LE)]` | Genesis bootstrap (K commands only) | `refine_blocks_payload()` |
 | `Call`       | `0x03` | `type_byte (1) + count (4 LE) + [witness_count (2 LE)]` | eth_call / eth_estimateGas | `refine_call_payload()` |
 
 **Format Notes**:
 - All payloads start with a single type byte (0x00-0x03)
 - Count field (4 bytes LE) represents: tx_count for txs, extrinsics_count for blocks
-- Optional witness_count field (2 bytes LE) indicates state witnesses for validator efficiency
+- Witness_count field (2 bytes LE) indicates state witnesses included
+  - **For PayloadTransactions**: May include block witnesses (object_id pattern: `0xFF...FF[block_number:4 LE]`)
+  - **For PayloadBlocks**: Genesis block witness (block 0)
+  - Block witnesses enable automatic metadata computation (see section 3.2)
+
+### 3.2 Block Witnesses and Metadata Computation
+
+**Block Witness Pattern**:
+- Block payloads stored with ObjectID: `0xFF` repeated 28 times + block_number (4 bytes LE)
+- Helper: `is_block_number_state_witness(object_id) -> Option<u32>`
+- Returns `Some(block_number)` if pattern matches, `None` otherwise
+
+**Automatic Metadata Computation in PayloadTransactions**:
+
+When `PayloadTransactions` includes block witnesses, the refiner automatically computes metadata for those blocks:
+
+1. **Load witnesses**: Verify all witnesses against `refine_state_root`
+2. **Detect block witnesses**: Check each witness object_id with `is_block_number_state_witness()`
+3. **Deserialize block**: Extract `EvmBlockPayload` from witness payload
+4. **Compute metadata**: Calculate `transactions_root`, `receipts_root`, `mmr_root` from full block data
+5. **Create write intent**: Store metadata with ObjectID = `blake2b_hash(block.serialize_header()[0..HEADER_SIZE])`
+6. **Return in ExecutionEffects**: Metadata write intents appended alongside receipts
+
+**Why This Works**:
+- Block N is finalized during accumulate (contains all tx/receipt hashes)
+- Block N+1 transactions (next round) include witness for block N
+- Block N metadata computed from FULL block data in witness payload
+- Metadata lag (computed in N+1) is acceptable - only needed for queries
+
+**PayloadBlocks Usage**:
+- **Genesis only**: Block 0 initialization with 'K' storage commands
+- **No 'B' commands**: Removed (old approach was flawed)
+- **Includes block 0 witness**: Genesis block witness for metadata computation in first transaction round
+
+**Implementation**:
+- Rust: `refiner.rs:770-816` (block witness detection in PayloadTransactions)
+- Rust: `block.rs:37-56` (is_block_number_state_witness helper)
+- Go: `rollup.go:589-675` (SubmitEVMTransactions with witness collection)
+- Go: `rollup.go:756-879` (SubmitEVMPayloadBlocks genesis-only)
 
 ## 4. Lifecycle: From Execution to Proved Inclusion
 

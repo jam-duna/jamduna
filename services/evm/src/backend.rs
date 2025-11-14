@@ -976,10 +976,12 @@ impl MajikBackend {
             .write_intents
             .iter()
             .map(|intent| {
-                // Only preserve payload for receipts - needed to extract logs in accumulate
-                // for block metadata (logs_bloom, receipt_hashes)
+                // Preserve payload for receipts and block metadata - needed in accumulate
+                // Receipts: for extracting logs for block metadata (logs_bloom, receipt_hashes)
+                // BlockMetadata: for writing computed roots (transactions_root, receipts_root, mmr_root)
                 // Other objects (code, storage, SSR, blocks) already exported to DA in refine
-                let payload = if intent.effect.ref_info.object_kind == ObjectKind::Receipt as u8 {
+                let payload = if intent.effect.ref_info.object_kind == ObjectKind::Receipt as u8
+                    || intent.effect.ref_info.object_kind == ObjectKind::BlockMetadata as u8 {
                     intent.effect.payload.clone()
                 } else {
                     Vec::new()

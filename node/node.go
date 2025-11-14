@@ -2763,7 +2763,7 @@ func (n *NodeContent) getTargetStateDB(blockNumber string) (*statedb.StateDB, er
 
 	// Fetch the block to get its stateRoot
 	// Use EVMServiceCode for now - could be parameterized if needed
-	block, err := n.statedb.ReadBlockByNumber(statedb.EVMServiceCode, uint32(blockNum))
+	block, _, err := n.statedb.ReadBlockByNumber(statedb.EVMServiceCode, uint32(blockNum))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read block %d: %v", blockNum, err)
 	}

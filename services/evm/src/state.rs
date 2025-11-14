@@ -99,7 +99,7 @@ pub struct EnvironmentData {
     pub chain_id: U256,
     pub block_difficulty: U256,
     pub block_randomness: Option<H256>,
-    pub payload_type: crate::refiner::PayloadType,
+
 }
 
 // ===== MajikBackend =====
@@ -202,7 +202,7 @@ impl MajikBackend {
                         contract_storage.ssr = ssr_data;
                     }
                 }
-                Some(ObjectKind::Receipt) | Some(ObjectKind::Block)  => {
+                Some(ObjectKind::Receipt) | Some(ObjectKind::Block) | Some(ObjectKind::BlockMetadata) => {
                     // These object kinds are not imported during constructor - skip
                 }
                 None => {

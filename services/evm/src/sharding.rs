@@ -543,6 +543,8 @@ pub enum ObjectKind {
     Receipt = 0x03,
     /// Block object (kind=0x05)
     Block = 0x05,
+    /// Block metadata object (kind=0x06) - contains computed values
+    BlockMetadata = 0x06,
 }
 
 impl ObjectKind {
@@ -554,6 +556,7 @@ impl ObjectKind {
             0x02 => Some(Self::SsrMetadata),
             0x03 => Some(Self::Receipt),
             0x05 => Some(Self::Block),
+            0x06 => Some(Self::BlockMetadata),
             _ => None,
         }
     }

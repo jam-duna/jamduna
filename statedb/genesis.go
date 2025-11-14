@@ -135,6 +135,12 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 			Storage:     storage,
 		},
 		{
+			ServiceCode: EVMServiceCode,
+			FileName:    EVMServiceFile,
+			ServiceName: "evm",
+			Storage:     storage,
+		},
+		{
 			ServiceCode: AuthCopyServiceCode,
 			FileName:    AuthCopyServiceFile,
 			ServiceName: "auth_copy",

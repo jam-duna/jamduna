@@ -1986,9 +1986,9 @@ func (vm *VM) hostLog() {
 	if vm.IsChild {
 		serviceMetadata = fmt.Sprintf("%s-child", serviceMetadata)
 	}
-	loggingVerbose := false
+	loggingVerbose := true
 	if vm.logging == log.FirstGuarantorOrAuditor || vm.logging == log.Builder || vm.logging == log.PvmAuthoring {
-		loggingVerbose = false
+		loggingVerbose = true
 	}
 	if !loggingVerbose {
 		return

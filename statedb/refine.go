@@ -220,18 +220,7 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash, pvmBackend string) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
 	wp := workPackage.Clone()
 
-	currentStateRoot := s.GetStateRoot()
-	anchorHash := s.GetHeaderHash()
-	beefyRoot := s.getBeefyRootForAnchor(anchorHash)
-
-	wp.RefineContext = types.RefineContext{
-		Anchor:           anchorHash,
-		StateRoot:        currentStateRoot,
-		BeefyRoot:        beefyRoot,
-		LookupAnchor:     anchorHash,
-		LookupAnchorSlot: s.JamState.SafroleState.Timeslot,
-		Prerequisites:    []common.Hash{}, // TODO: improve this
-	}
+	wp.RefineContext = s.GetRefineContext()
 	authorization, p_a, _, err := s.authorizeWP(wp, coreIndex, pvmBackend)
 	if err != nil {
 		return nil, nil, err
@@ -337,14 +326,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 	bundle.WorkPackage.AuthorizationCodeHash = wp.AuthorizationCodeHash
 	bundle.WorkPackage.AuthorizationToken = wp.AuthorizationToken
 	bundle.WorkPackage.ConfigurationBlob = wp.ConfigurationBlob
-	bundle.WorkPackage.RefineContext = types.RefineContext{
-		Anchor:           anchorHash,
-		StateRoot:        currentStateRoot,
-		BeefyRoot:        beefyRoot,
-		LookupAnchor:     anchorHash,
-		LookupAnchorSlot: s.JamState.SafroleState.Timeslot,
-		Prerequisites:    []common.Hash{},
-	}
+	bundle.WorkPackage.RefineContext = s.GetRefineContext()
 
 	// Create work report from results -- note that this does not have availability spec
 	workReport := &types.WorkReport{

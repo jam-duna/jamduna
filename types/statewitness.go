@@ -27,11 +27,14 @@ type StateWitnessRaw struct {
 }
 
 // SerializeWitnessRaw serializes a StateWitnessRaw to binary format
-// Format: object_id (32 bytes) + service_id (4 bytes LE) + payload_length (4 bytes LE) + payload (variable) + proofs (32 bytes each)
+// Format: format_byte (0) + object_id (32 bytes) + service_id (4 bytes LE) + payload_length (4 bytes LE) + payload (variable) + proofs (32 bytes each)
 func (w StateWitnessRaw) SerializeWitnessRaw() []byte {
-	// Calculate total size: 32 (object_id) + 4 (service_id) + 4 (payload_length) + payload + proofs
-	size := 32 + 4 + 4 + len(w.Payload) + (len(w.Path) * 32)
+	// Calculate total size: 1 (format) + 32 (object_id) + 4 (service_id) + 4 (payload_length) + payload + proofs
+	size := 1 + 32 + 4 + 4 + len(w.Payload) + (len(w.Path) * 32)
 	buf := make([]byte, 0, size)
+
+	// 0. Format byte (0 = RAW)
+	buf = append(buf, 0)
 
 	// 1. ObjectID (32 bytes)
 	buf = append(buf, w.ObjectID[:]...)
@@ -58,14 +61,21 @@ func (w StateWitnessRaw) SerializeWitnessRaw() []byte {
 }
 
 // DeserializeStateWitnessRaw deserializes a StateWitnessRaw from binary format
-// Format: object_id (32 bytes) + service_id (4 bytes LE) + payload_length (4 bytes LE) + payload (variable) + proofs (32 bytes each)
+// Format: format_byte (0) + object_id (32 bytes) + service_id (4 bytes LE) + payload_length (4 bytes LE) + payload (variable) + proofs (32 bytes each)
 func DeserializeStateWitnessRaw(data []byte) (StateWitnessRaw, error) {
-	const minSize = 32 + 4 + 4 // object_id + service_id + payload_length
+	const minSize = 1 + 32 + 4 + 4 // format_byte + object_id + service_id + payload_length
 	if len(data) < minSize {
 		return StateWitnessRaw{}, fmt.Errorf("DeserializeStateWitnessRaw: need at least %d bytes, got %d", minSize, len(data))
 	}
 
 	offset := 0
+
+	// 0. Format byte (must be 0 for RAW)
+	formatByte := data[offset]
+	offset++
+	if formatByte != 0 {
+		return StateWitnessRaw{}, fmt.Errorf("DeserializeStateWitnessRaw: expected format byte 0, got %d", formatByte)
+	}
 
 	// 1. ObjectID (32 bytes)
 	var objectID common.Hash
@@ -263,10 +273,10 @@ func DeserializeExecutionEffects(data []byte) (ExecutionEffects, error) {
 			return ExecutionEffects{}, fmt.Errorf("DeserializeExecutionEffects: candidate %d: %w", i, err)
 		}
 
-		// Retain inline payload for receipt objects (used by accumulate for logs reconstruction).
+		// Retain inline payload for receipt and block metadata objects (used by accumulate).
 		// All other object kinds should not carry inline payload in ExecutionEffects.
 		payload := candidate.Payload
-		if candidate.RefInfo.ObjKind != uint8(common.ObjectKindReceipt) {
+		if candidate.RefInfo.ObjKind != uint8(common.ObjectKindReceipt) && candidate.RefInfo.ObjKind != uint8(common.ObjectKindBlockMetadata) {
 			payload = nil
 		}
 
@@ -340,9 +350,9 @@ func DeserializeObjectCandidateWrite(data []byte, offset *int) (ObjectCandidateW
 		}
 	}
 
-	// Read payload if present for Receipt objects only (payload serialized inline after dependencies)
+	// Read payload if present for Receipt and BlockMetadata objects (payload serialized inline after dependencies)
 	var payload []byte
-	if refInfo.ObjKind == uint8(common.ObjectKindReceipt) {
+	if refInfo.ObjKind == uint8(common.ObjectKindReceipt) || refInfo.ObjKind == uint8(common.ObjectKindBlockMetadata) {
 		payloadLen := int(refInfo.PayloadLength)
 		if len(data) < *offset+payloadLen {
 			return ObjectCandidateWrite{}, nil, 0, fmt.Errorf(
@@ -429,11 +439,14 @@ func CreateImportSegmentsAndWitness(
 }
 
 // SerializeWitness serializes a StateWitness to the fixed binary format expected by Rust
-// Format: object_id (32 bytes) + object_ref (64 bytes) + proofs (32 bytes each, no length prefix)
+// Format: format_byte (1) + object_id (32 bytes) + object_ref (64 bytes) + proofs (32 bytes each, no length prefix)
 func (w StateWitness) SerializeWitness() []byte {
 	// Calculate total size
-	size := 32 + 64 + (len(w.Path) * 32)
+	size := 1 + 32 + 64 + (len(w.Path) * 32)
 	buf := make([]byte, 0, size)
+
+	// 0. Format byte (1 = REF)
+	buf = append(buf, 1)
 
 	// 1. ObjectID (32 bytes)
 	buf = append(buf, w.ObjectID[:]...)

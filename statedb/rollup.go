@@ -582,7 +582,7 @@ func (c *Rollup) CallMath(mathAddress common.Address, callStrings []string) (txB
 }
 
 // SubmitEVMTransactions creates and submits a work package with raw transactions, processes it, and returns the resulting block
-func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte) (*evmtypes.EvmBlockPayload, error) {
+func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte, startBlock uint32, endBlock uint32) (*evmtypes.EvmBlockPayload, error) {
 	bundles := make([]*types.WorkPackageBundle, len(evmTxsMulticore))
 
 	for coreIndex, evmTxs := range evmTxsMulticore {
@@ -590,14 +590,30 @@ func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte) (*evmtypes.Ev
 			bundles[coreIndex] = nil
 			continue
 		}
-		// Create extrinsics blobs and hashes from raw transactions
-		hashes := make([]types.WorkItemExtrinsic, len(evmTxs))
+
+		// Collect block objectIDs if block range specified
+		var rawObjectIDs []common.Hash
+		if endBlock > startBlock {
+			for blockNum := startBlock; blockNum < endBlock; blockNum++ {
+				objectID := evmtypes.BlockNumberToObjectID(blockNum)
+				rawObjectIDs = append(rawObjectIDs, objectID)
+			}
+		}
+
+		// Create extrinsics blobs with transaction extrinsics only
+		numTxExtrinsics := len(evmTxs)
+		blobs := make(types.ExtrinsicsBlobs, numTxExtrinsics)
+		hashes := make([]types.WorkItemExtrinsic, numTxExtrinsics)
+
+		// Add transaction extrinsics
 		for i, tx := range evmTxs {
+			blobs[i] = tx
 			hashes[i] = types.WorkItemExtrinsic{
 				Hash: common.Blake2Hash(tx),
 				Len:  uint32(len(tx)),
 			}
 		}
+
 		service, ok, err := b.stateDB.GetService(b.serviceID)
 		if err != nil || !ok {
 			return nil, fmt.Errorf("EVM service not found: %v", err)
@@ -605,11 +621,11 @@ func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte) (*evmtypes.Ev
 
 		// Create work package
 		wp := defaultWorkPackage(b.serviceID, service)
-		wp.WorkItems[0].Payload = buildPayload(PayloadTypeTransactions, len(evmTxs), 0)
+		wp.WorkItems[0].Payload = buildPayload(PayloadTypeTransactions, numTxExtrinsics, len(rawObjectIDs))
 		wp.WorkItems[0].Extrinsics = hashes
 
 		//  BuildBundle should return a Bundle (with ImportedSegments)
-		bundle2, _, err := b.stateDB.BuildBundle(wp, []types.ExtrinsicsBlobs{evmTxs}, uint16(coreIndex), nil, b.pvmBackend)
+		bundle2, _, err := b.stateDB.BuildBundle(wp, []types.ExtrinsicsBlobs{blobs}, uint16(coreIndex), rawObjectIDs, b.pvmBackend)
 		if err != nil {
 			return nil, fmt.Errorf("BuildBundle failed: %v", err)
 		}
@@ -623,7 +639,7 @@ func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte) (*evmtypes.Ev
 	}
 
 	// Get and return the latest block
-	block, err := b.stateDB.GetBlockByNumber(b.serviceID, "latest")
+	block, _, err := b.stateDB.GetBlockByNumber(b.serviceID, "tentative")
 	if err != nil {
 		return nil, fmt.Errorf("GetBlockByNumber failed: %w", err)
 	}
@@ -714,7 +730,7 @@ func (b *Rollup) ExportStateWitnesses(workReports []*types.WorkReport, saveToFil
 	return nil
 }
 
-func (b *Rollup) SubmitEVMPayloadBlocks(startBlock uint32, endBlock uint32) (*evmtypes.EvmBlockPayload, error) {
+func (b *Rollup) SubmitEVMGenesis() (*evmtypes.EvmBlockPayload, *evmtypes.EvmBlockMetadata, error) {
 	// MappingEntry represents a single mapping entry to initialize
 	type MappingEntry struct {
 		Slot  uint8
@@ -760,32 +776,63 @@ func (b *Rollup) SubmitEVMPayloadBlocks(startBlock uint32, endBlock uint32) (*ev
 	blobs := types.ExtrinsicsBlobs{}
 	workItems := []types.WorkItemExtrinsic{}
 
-	// Only include genesis USDM mappings if submitting genesis block
-	isGenesis := startBlock == 0 && endBlock == 1
-	if isGenesis {
-		// Set USDM initial balances and nonces
-		totalSupplyValue := new(big.Int).Mul(big.NewInt(61_000_000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
-		usdmInitialState := []MappingEntry{
-			{Slot: 0, Key: evmtypes.IssuerAddress, Value: totalSupplyValue}, // balanceOf[issuer]
-			{Slot: 1, Key: evmtypes.IssuerAddress, Value: big.NewInt(1)},    // nonces[issuer]
-		}
-		initializeMappings(&blobs, &workItems, evmtypes.UsdmAddress, usdmInitialState)
+	// Set USDM initial balances and nonces
+	totalSupplyValue := new(big.Int).Mul(big.NewInt(61_000_000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+	usdmInitialState := []MappingEntry{
+		{Slot: 0, Key: evmtypes.IssuerAddress, Value: totalSupplyValue}, // balanceOf[issuer]
+		{Slot: 1, Key: evmtypes.IssuerAddress, Value: big.NewInt(1)},    // nonces[issuer]
 	}
+	initializeMappings(&blobs, &workItems, evmtypes.UsdmAddress, usdmInitialState)
+
 	numExtrinsics := len(workItems)
 
-	objects := []common.Hash{evmtypes.GetBlockNumberKey()}
-	for blockNum := startBlock; blockNum < endBlock; blockNum++ {
-		objects = append(objects, evmtypes.BlockNumberToObjectID(blockNum))
-	}
-	service, ok, err := b.stateDB.GetService(b.serviceID)
-	if err != nil || !ok {
-		return nil, fmt.Errorf("EVM service not found: %v", err)
+	// Add witness for genesis block (block 0) and calculate segments needed
+	witnesses := []types.StateWitnessRaw{}
+	objectID := evmtypes.BlockNumberToObjectID(0)
+	witness, ok, _, err := b.stateDB.ReadStateWitnessRaw(b.serviceID, objectID)
+	if err != nil {
+		log.Warn(log.Node, "SubmitEVMGenesis: ReadStateWitnessRaw failed", "blockNum", 0, "objectID", objectID, "err", err)
+		return nil, nil, fmt.Errorf("ReadStateWitnessRaw failed for genesis block: %w", err)
+	} else if ok {
+		// Calculate number of segments needed for genesis block's payload
+		//numSegments := (int(witness.PayloadLength) + types.SegmentSize - 1) / types.SegmentSize
+
+		log.Info(log.Node, "Adding witness for genesis block", "blockNum", 0, "objectID", objectID, "payload_length", witness.PayloadLength)
+		witnesses = append(witnesses, witness)
+	} else {
+		log.Warn(log.Node, "SubmitEVMGenesis: witness not found for genesis block", "objectID", objectID)
 	}
 
-	// Create work package
+	// Append witness as extrinsic
+	for _, witness := range witnesses {
+		witnessBytes := witness.SerializeWitnessRaw()
+		blobs = append(blobs, witnessBytes)
+		workItems = append(workItems, types.WorkItemExtrinsic{
+			Hash: common.Blake2Hash(witnessBytes),
+			Len:  uint32(len(witnessBytes)),
+		})
+	}
+
+	witnessCount := len(witnesses)
+	log.Info(log.Node, "SubmitEVMGenesis (genesis)", "numExtrinsics", numExtrinsics, "witnessCount", witnessCount)
+
+	service, ok, err := b.stateDB.GetService(b.serviceID)
+	if err != nil || !ok {
+		return nil, nil, fmt.Errorf("EVM service not found: %v", err)
+	}
+
+	// Create work package with updated witness count and refine context
 	wp := defaultWorkPackage(b.serviceID, service)
-	wp.WorkItems[0].Payload = buildPayload(PayloadTypeBlocks, numExtrinsics, 0)
+	wp.RefineContext = b.stateDB.GetRefineContext()
+	wp.WorkItems[0].Payload = buildPayload(PayloadTypeBlocks, numExtrinsics, witnessCount)
 	wp.WorkItems[0].Extrinsics = workItems
+
+	// Calculate ExportCount: 2 (for StorageShard + SSRMetadata) + total segments for genesis block
+	// Genesis adds 2 exports: 1 StorageShard + 1 SSRMetadata for USDM contract
+	expectedExports := 2
+	wp.WorkItems[0].ExportCount = uint16(expectedExports)
+
+	log.Info(log.Node, "WorkPackage RefineContext", "state_root", wp.RefineContext.StateRoot.Hex(), "anchor", wp.RefineContext.Anchor.Hex(), "export_count", expectedExports)
 
 	bundle := &types.WorkPackageBundle{
 		WorkPackage:   wp,
@@ -795,16 +842,16 @@ func (b *Rollup) SubmitEVMPayloadBlocks(startBlock uint32, endBlock uint32) (*ev
 	// Process the bundle
 	err = b.processWorkPackageBundles([]*types.WorkPackageBundle{bundle})
 	if err != nil {
-		return nil, fmt.Errorf("processWorkPackageBundles failed: %w", err)
+		return nil, nil, fmt.Errorf("processWorkPackageBundles failed: %w", err)
 	}
 
 	// Get and return the latest block
-	block, err := b.stateDB.GetBlockByNumber(b.serviceID, "latest")
+	block, metadata, err := b.stateDB.GetBlockByNumber(b.serviceID, "latest")
 	if err != nil {
-		return nil, fmt.Errorf("GetBlockByNumber failed: %w", err)
+		return nil, nil, fmt.Errorf("GetBlockByNumber failed: %w", err)
 	}
 
-	return block, nil
+	return block, metadata, nil
 }
 
 type TransferTriple struct {
@@ -946,7 +993,7 @@ func (b *Rollup) DeployContract(contractFile string) (*evmtypes.EvmBlockPayload,
 	multiCoreTxBytes := make([][][]byte, 1)
 	multiCoreTxBytes[0] = [][]byte{txBytes}
 	// Submit contract deployment as work package
-	block, err := b.SubmitEVMTransactions(multiCoreTxBytes)
+	block, err := b.SubmitEVMTransactions(multiCoreTxBytes, 0, 0)
 	if err != nil {
 		return nil, common.Address{}, fmt.Errorf("contract deployment failed: %w", err)
 	}

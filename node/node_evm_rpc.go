@@ -1076,7 +1076,7 @@ func (n *NodeContent) resolveBlockNumberToState(blockNumberStr string) (*statedb
 func (n *NodeContent) getHistoricalState(blockNumber uint32) (*statedb.StateDB, error) {
 	// Read block metadata to get state root
 	serviceID := uint32(n.GetChainId())
-	evmBlock, err := n.statedb.ReadBlockByNumber(serviceID, blockNumber)
+	evmBlock, _, err := n.statedb.ReadBlockByNumber(serviceID, blockNumber)
 	if err != nil {
 		log.Warn(log.Node, "Failed to read block metadata, using current state",
 			"blockNumber", blockNumber, "error", err)

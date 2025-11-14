@@ -142,6 +142,7 @@ impl BlockRefiner {
         let mut contracts: BTreeMap<H160, ContractBootstrap> = BTreeMap::new();
 
         log_info(&format!("🌱 Processing {} bootstrap extrinsics", extrinsics.len()));
+        let mut write_intents = Vec::new();
 
         // Parse bootstrap commands
         for (idx, blob) in extrinsics.iter().enumerate() {
@@ -228,7 +229,6 @@ impl BlockRefiner {
         }
 
         // Create write intents for Code, Shard, and SSR objects
-        let mut write_intents = Vec::new();
         log_info(&format!("📦 Converting {} contracts to DA objects", contracts.len()));
 
         for (address, contract_data) in contracts.iter() {
@@ -705,7 +705,7 @@ impl BlockRefiner {
             chain_id: U256::from(service_id),
             block_difficulty: U256::zero(),
             block_randomness: None,
-            payload_type,
+
         }
     }
 
@@ -725,7 +725,8 @@ impl BlockRefiner {
         refine_state_root: [u8; 32],
         refine_args: &RefineArgs,
     ) -> Option<ExecutionEffects> {
-        use utils::effects::StateWitness;
+        use utils::effects::{StateWitness, WriteIntent};
+        use crate::block::{EvmBlockPayload, EvmBlockMetadata};
 
         // Parse payload metadata
         let metadata = parse_payload_metadata(&work_item.payload)?;
@@ -740,6 +741,7 @@ impl BlockRefiner {
         let witness_start_idx = metadata.payload_size as usize;
         let mut block_builder = BlockRefiner::new();
         let mut imported_objects: BTreeMap<ObjectId, (ObjectRef, Vec<u8>)> = BTreeMap::new();
+        let mut block_write_intents: Vec<WriteIntent> = Vec::new();
         for (idx, extrinsic) in extrinsics.iter().enumerate() {
             // Skip transaction extrinsics
             if idx < witness_start_idx {
@@ -751,58 +753,109 @@ impl BlockRefiner {
                     extrinsic.len()
             ));
 
+
             if metadata.payload_type == PayloadType::Transactions || metadata.payload_type == PayloadType::Builder {
-                // Parse and verify state witness
-                match StateWitness::deserialize_and_verify(extrinsic, refine_state_root) {
-                    Ok(state_witness) => {
-                        let object_id = state_witness.object_id;
-                        let version = state_witness.ref_info.version;
-                        let object_ref = state_witness.ref_info.clone();
-                        if metadata.payload_type == PayloadType::Transactions {
-                            if let Some(payload) = state_witness.fetch_object_payload( work_item, work_item_index) {
-                                let payload_len = payload.len();
-                                imported_objects.insert(object_id, (object_ref, payload));
-                                log_info(&format!("✅ PayloadTransactions: Verified + imported object {} (version {}, payload_length={})",
-                                        format_object_id(object_id),  version, payload_len));
-                            } else {
-                                log_info(&format!("⚠️  PayloadTransactions: Verified witness but could not fetch payload for object {} (version {})",
-                                        format_object_id(object_id), version));
+                // Use the first byte of the extrinsic to determine witness format: 0 - RAW, 1 - REF
+                if extrinsic.is_empty() {
+                    log_error(&format!("Empty extrinsic at index {}", idx));
+                    return None;
+                }
+
+                let format_byte = extrinsic[0];
+                match format_byte {
+                    0 => {
+                        // RAW format -- verify state witness without object refs
+                        match StateWitness::deserialize_raw_and_verify(&extrinsic[1..], refine_state_root) {
+                            Ok(state_witness) => {
+                                let object_id = state_witness.object_id;
+                                let payload = state_witness.payload.unwrap_or_default();
+
+                                // Check if this witness is a block number witness (0xFF...FF pattern)
+                                if let Some(block_number) = crate::block::is_block_number_state_witness(&object_id) {
+                                    log_info(&format!("  📦 Block witness detected: block_number={}", block_number));
+
+                                    // Deserialize block payload and compute metadata
+                                    match EvmBlockPayload::deserialize(&payload) {
+                                        Ok(block) => {
+                                                log_info(&format!(
+                                                    "  📦 Block deserialized: object_id={}, block.number={}, tx_hashes={}, receipt_hashes={}",
+                                                    format_object_id(object_id),
+                                                    block.number,
+                                                    block.tx_hashes.len(),
+                                                    block.receipt_hashes.len()
+                                                ));
+
+                                                // Compute metadata from block payload
+                                                let metadata = EvmBlockMetadata::new(&block);
+
+                                                log_info(&format!(
+                                                    "  ✅ Metadata computed: transactions_root={}, receipts_root={}, mmr_root={}",
+                                                    format_object_id(metadata.transactions_root),
+                                                    format_object_id(metadata.receipts_root),
+                                                    format_object_id(metadata.mmr_root)
+                                                ));
+
+                                                // Create write intent for block metadata
+                                                let write_intent = WriteIntent {
+                                                    effect: metadata.to_write_effect_entry(&block, refine_args.wi_service_index, refine_args.wphash),
+                                                    dependencies: Vec::new(),
+                                                };
+                                                block_write_intents.push(write_intent);
+                                            }
+                                            Err(e) => {
+                                                log_error(&format!(
+                                                    "  Failed to deserialize block {}: {}",
+                                                    format_object_id(object_id),
+                                                    e
+                                                ));
+                                                return None;
+                                            }
+                                        }
+                                   
+                                }
                             }
-                        } else {
-                            if let Some(payload) = state_witness.fetch_object_payload( work_item, work_item_index) {
-                                let payload_len = payload.len();
-                                imported_objects.insert(object_id, (object_ref, payload));
-                                log_info(&format!("✅ PayloadBuilder (WHY???) Verified + imported object {} (version {}, payload_length={})",
-                                        format_object_id(object_id), version, payload_len));
-                            } else {
-                                log_info(&format!("⚠️  PayloadBuilder: Verified witness but could not fetch payload for object {} (version {})",
-                                        format_object_id(object_id), version));
+                            Err(e) => {
+                                log_error(&format!("Failed to deserialize or verify RAW witness at index {}: {:?}", idx, e));
+                                return None;
                             }
                         }
                     }
-                    Err(e) => {
-                        log_error(&format!("Failed to deserialize or verify witness at index {}: {:?}", idx, e));
-                        return None;
-                    }
-                }
-            } else if metadata.payload_type == PayloadType::Blocks {
-                // Parse and verify state witness of RAW format, which do not have object refs
-                match StateWitness::deserialize_raw_and_verify(extrinsic, refine_state_root) {
-                    Ok(state_witness) => {
-                        let object_id = state_witness.object_id;
-                        let version = state_witness.ref_info.version;
-                        let object_ref = state_witness.ref_info.clone();
-                        let payload_len = state_witness.payload.as_ref().map(|p| p.len()).unwrap_or(0);
-                        imported_objects.insert(object_id, (object_ref, state_witness.payload.unwrap_or_default()));
-                        log_info(&format!("✅ PayloadBlocks: Verified + imported object {} (version {}, payload_length={})",
-                            format_object_id(object_id),  version, payload_len));
+                    1 => {
+                        // REF format -- verify state witness with object refs
+                        match StateWitness::deserialize_and_verify(&extrinsic[1..], refine_state_root) {
+                            Ok(state_witness) => {
+                                let object_id = state_witness.object_id;
+                                let version = state_witness.ref_info.version;
+                                let object_ref = state_witness.ref_info.clone();
 
+                                let payload_type_str = if metadata.payload_type == PayloadType::Transactions {
+                                    "Transactions"
+                                } else {
+                                    "Builder"
+                                };
+
+                                if let Some(payload) = state_witness.fetch_object_payload(work_item, work_item_index) {
+                                    let payload_len = payload.len();
+                                    imported_objects.insert(object_id, (object_ref, payload));
+                                    log_info(&format!("✅ Payload{}: Verified + imported object {} (version {}, payload_length={})",
+                                        payload_type_str, format_object_id(object_id), version, payload_len));
+                                } else {
+                                    log_info(&format!("⚠️  Payload{}: Verified witness but could not fetch payload for object {} (version {})",
+                                        payload_type_str, format_object_id(object_id), version));
+                                }
+                            }
+                            Err(e) => {
+                                log_error(&format!("Failed to deserialize or verify REF witness at index {}: {:?}", idx, e));
+                                return None;
+                            }
+                        }
                     }
-                    Err(e) => {
-                        log_error(&format!("Failed to deserialize or verify witness at index {}: {:?}", idx, e));
+                    _ => {
+                        log_error(&format!("Invalid witness format byte {} at index {}", format_byte, idx));
                         return None;
                     }
                 }
+
             } else  if metadata.payload_type == PayloadType::Call {
                 // Handle Call payload - early exit handled below
                 // No witness processing needed for Call payloads
@@ -818,6 +871,9 @@ impl BlockRefiner {
         let config = Config::shanghai();
         let environment = Self::create_environment(work_item.service, metadata.payload_type);
         let backend = MajikBackend::new(environment, imported_objects.clone());
+
+        // Populate block_builder.objects_map with imported_objects for 'B' command access
+        block_builder.objects_map = imported_objects.clone();
 
         // Execute based on payload type
         let mut execution_effects = if metadata.payload_type == PayloadType::Blocks {
@@ -852,6 +908,12 @@ impl BlockRefiner {
             log_error(&format!("❌ Unknown payload type: {:?}", work_item.payload));
             return None;
         };
+
+        // Append block metadata write intents (from block witnesses in PayloadTransactions)
+        if !block_write_intents.is_empty() {
+            log_info(&format!("📦 Adding {} block metadata write intents", block_write_intents.len()));
+            execution_effects.write_intents.extend(block_write_intents);
+        }
 
         // Export payloads to DA segments
         let mut export_count: u16 = 0;

@@ -1,15 +1,16 @@
 # EVM Call and EstimateGas Implementation
 
-This document explains how the EVM service handles unsigned call data for `eth_call` and `eth_estimateGas` RPC methods using payload type "B".
+This document explains how the EVM service handles unsigned call data for `eth_call` and `eth_estimateGas` RPC methods using `PayloadType::Call` (0x03).
 
 ## Overview
 
-The EVM service supports three payload types:
-- **"G" (Genesis)**: Bootstrap mode for initializing state with 'A'/'K' commands
-- **"B" (Basic Call)**: EstimateGas/Call mode for unsigned transaction simulation (NEW)
-- **Default**: Normal transaction execution with signed RLP-encoded transactions
+The EVM service supports four payload types:
+- **PayloadType::Builder (0x00)**: Builder-submitted transaction bundles
+- **PayloadType::Transactions (0x01)**: Normal transaction execution with signed RLP-encoded transactions + optional block witnesses
+- **PayloadType::Blocks (0x02)**: Genesis bootstrap mode for initializing state with 'K' commands (genesis-only)
+- **PayloadType::Call (0x03)**: EstimateGas/Call mode for unsigned transaction simulation (read-only)
 
-Payload "B" enables static calls and gas estimation without requiring transaction signatures, which is essential for read-only operations like `balanceOf()` queries.
+`PayloadType::Call` enables static calls and gas estimation without requiring transaction signatures, which is essential for read-only operations like `balanceOf()` queries.
 
 ## Architecture
 
@@ -67,22 +68,32 @@ Total size: 12 bytes (ExecutionEffects header) + output length
 
 ## Implementation Details
 
-### Rust Service (services/evm/src/main.rs)
+### Rust Service (services/evm/src/refiner.rs)
 
-#### Payload "B" Detection (Line 196)
+#### PayloadType::Call Detection
 ```rust
-} else if work_item.payload == b"B" {
-    // Payload "B": EstimateGas/Call mode - single extrinsic with unsigned call data
-    // This mode is used for eth_estimateGas and eth_call RPCs
+match metadata.payload_type {
+    PayloadType::Call => {
+        // Single extrinsic with unsigned call data
+        // Used for eth_estimateGas and eth_call RPCs
+        return BlockRefiner::refine_call_payload(
+            refine_context,
+            extrinsics,
+            metadata.payload_size,
+        );
+    }
+    // ... other payload types
+}
 ```
 
-#### Call Arguments Decoding (Line 214)
+#### Call Arguments Decoding
+Located in `refine_call_payload()`:
 ```rust
 let decoded = match decode_call_args(extrinsic.as_ptr() as u64, extrinsic.len() as u64) {
     Some(d) => d,
     None => {
-        call_log(1, None, "❌ Payload 'B': Failed to decode call args");
-        return empty_output();
+        log_error("❌ PayloadCall: Failed to decode call args");
+        return None;
     }
 };
 ```
@@ -93,7 +104,7 @@ The `decode_call_args()` function (tx.rs):
 - Extracts all transaction parameters
 - Returns `DecodedTransactArgs` struct
 
-#### EVM Execution (Line 269)
+#### EVM Execution
 ```rust
 let result = evm::transact(args, None, &mut overlay, &invoker);
 ```
@@ -104,6 +115,7 @@ Executes the call using the same EVM runtime as signed transactions, but:
 - No state modifications are persisted (read-only)
 - No receipts generated
 - No transaction records created
+- No block witnesses processed
 
 #### Result Serialization (Lines 272-304)
 ```rust
@@ -133,10 +145,19 @@ match result {
 
 ### Go Node (node/node_evm_tx.go)
 
-#### Creating Simulation Work Package (Line 362)
+#### Creating Simulation Work Package
 ```go
-Payload: []byte("B"), // "B" mode for EstimateGas/Call with unsigned call data
-ExportCount: 0,       // No exports for static call
+// Build payload: type=0x03 (Call), tx_count=1, witness_count=0
+payload := make([]byte, 7)
+payload[0] = 0x03 // PayloadType::Call
+binary.LittleEndian.PutUint32(payload[1:5], 1)  // tx_count = 1
+binary.LittleEndian.PutUint16(payload[5:7], 0)  // witness_count = 0
+
+WorkItem: types.WorkItem{
+    Payload: payload,
+    ExportCount: 0,  // No exports for static call
+    ...
+}
 ```
 
 The extrinsic format matches the Rust input specification exactly.
@@ -235,19 +256,22 @@ if actualBalance.Cmp(expectedBalance) != 0 {
 
 ## Key Differences from Signed Transactions
 
-| Aspect | Payload "B" (Call/Estimate) | Normal Transactions |
-|--------|----------------------------|---------------------|
+| Aspect | PayloadType::Call (0x03) | PayloadType::Transactions (0x01) |
+|--------|----------------------------|-----------------------------------|
+| **Payload Format** | `0x03 + tx_count:4 + witness_count:2` | `0x01 + tx_count:4 + witness_count:2` |
 | **Signature** | Not required | Required (verified via secp256k1) |
 | **State Changes** | Not persisted | Persisted to state |
 | **Receipts** | Not generated | Generated and stored |
 | **RLP Encoding** | Not required | Required for tx hash |
 | **Gas Charging** | Simulated only | Charged to caller |
 | **Nonce Check** | Skipped | Validated |
-| **Exports** | 0 (no DA objects) | 3+ (receipts, shards, SSR) |
+| **Exports** | 0 (no DA objects) | Variable (receipts, shards, SSR, block metadata) |
+| **Block Witnesses** | Not supported | Optional (for metadata computation) |
+| **Handler** | `refine_call_payload()` | `refine_payload_transactions()` |
 
 ## Gas Computation
 
-For payload "B", gas is computed using the **JAM Gas Model**:
+For `PayloadType::Call`, gas is computed using the **JAM Gas Model**:
 - EVM opcodes have zero cost
 - Gas consumption is measured via JAM host function calls
 - The `gas_used` value represents pure JAM gas (not vendor gas)
@@ -294,18 +318,17 @@ Potential improvements for payload "B" mode:
 ## Related Files
 
 - **Rust Service**:
-  - `services/evm/src/main.rs` - PayloadCall handler
-  - `services/evm/src/tx.rs` - decode_call_args
+  - `services/evm/src/refiner.rs` - PayloadType routing and `refine_call_payload()` handler
+  - `services/evm/src/tx.rs` - `decode_call_args()` function
   - `services/evm/src/jam_gas.rs` - JAM gas model
 
 - **Go Node**:
-  - `node/node_evm_tx.go` (lines 220-281) - Call/EstimateGas
-  - `node/node_evm_tx.go` (lines 283-378) - Work package creation
-  - `node/node_jamtest_evm.go` (lines 234-260) - balanceOf test
+  - `node/node_evm_tx.go` - Call/EstimateGas implementation
+  - `statedb/rollup.go` - Work package creation with payload type 0x03
 
 - **Utilities**:
   - `services/utils/src/effects.rs` - ExecutionEffects definition
-  - `statedb/effects.go` - Go-side deserialization
+  - `types/statewitness.go` - Go-side ExecutionEffects deserialization
 
 ## Comparison to Standard Ethereum
 
@@ -315,21 +338,22 @@ eth_call → Direct state read (no work package)
 eth_estimateGas → Binary search on gas limit
 ```
 
-JAM EVM (Payload "B"):
+JAM EVM (PayloadType::Call):
 ```
-eth_call → Work package with payload "B" → Single execution
-eth_estimateGas → Work package with payload "B" → Single execution
+eth_call → Work package with PayloadType::Call (0x03) → Single execution
+eth_estimateGas → Work package with PayloadType::Call (0x03) → Single execution
 ```
 
 Benefits of JAM approach:
-- Consistent execution model across all operations
+- Consistent execution model across all operations (same EVM runtime)
 - Proper gas accounting via JAM host functions
 - Verifiable results via work reports
 - Compatible with JAM's work package architecture
+- Unified payload format across all operation types
 
 ## Security Considerations
 
-1. **No Authentication**: Payload "B" accepts any caller address without signature verification. This is safe because:
+1. **No Authentication**: `PayloadType::Call` accepts any caller address without signature verification. This is safe because:
    - State changes are not persisted
    - Used only for read-only operations
    - Gas is not actually charged

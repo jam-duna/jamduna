@@ -39,8 +39,8 @@ impl ObjectCandidateWrite {
             buffer.extend_from_slice(&dep.required_version.to_le_bytes());
         }
 
-        // Serialize payload for receipt objects only (block payloads are handled separately)
-        if self.object_ref.object_kind == ObjectKind::Receipt as u8 {
+        // Serialize payload for receipt and block metadata objects (other payloads are handled separately)
+        if self.object_ref.object_kind == ObjectKind::Receipt as u8 || self.object_ref.object_kind == ObjectKind::BlockMetadata as u8 {
             buffer.extend_from_slice(&self.payload);
         }
         buffer
@@ -149,8 +149,8 @@ impl ObjectCandidateWrite {
             });
         }
 
-        // Deserialize payload for receipt objects only
-        let payload = if object_ref.object_kind == ObjectKind::Receipt as u8 {
+        // Deserialize payload for receipt and block metadata objects
+        let payload = if object_ref.object_kind == ObjectKind::Receipt as u8 || object_ref.object_kind == ObjectKind::BlockMetadata as u8 {
             let payload_len = object_ref.payload_length as usize;
             if data.len() < offset + payload_len {
                 log_error(&format!(

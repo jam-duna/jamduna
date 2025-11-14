@@ -209,20 +209,7 @@ func (j *Jam) GetRefineContext(req []string, res *string) error {
 	}
 
 	// Build RefineContext
-	refineCtx := types.RefineContext{
-		Anchor:           j.statedb.HeaderHash,
-		StateRoot:        j.statedb.StateRoot,
-		BeefyRoot:        common.Hash{}, // Will be populated below
-		LookupAnchor:     j.statedb.HeaderHash,
-		LookupAnchorSlot: sdb.JamState.SafroleState.Timeslot,
-		Prerequisites:    []common.Hash{},
-	}
-
-	// Get the BEEFY root from recent blocks
-	recentBlocks := sdb.JamState.Snapshot(&statedb.StateSnapshotRaw{}, nil).RecentBlocks.B_H
-	if len(recentBlocks) > 0 {
-		refineCtx.BeefyRoot = recentBlocks[len(recentBlocks)-1].B
-	}
+	refineCtx := sdb.GetRefineContext()
 
 	// Marshal to JSON
 	jsonBytes, err := json.Marshal(refineCtx)
@@ -1584,7 +1571,7 @@ func (n *NodeContent) GetTransactionByHash(txHash common.Hash) (*evmtypes.Ethere
 	}
 
 	// Get block metadata from the receipt's Ref field
-	evmBlock, err := n.statedb.ReadBlockByNumber(serviceID, ref.EvmBlock)
+	evmBlock, _, err := n.statedb.ReadBlockByNumber(serviceID, ref.EvmBlock)
 	if err != nil {
 		// If block can't be read, return transaction without block metadata (pending state)
 		log.Warn(log.Node, "GetTransactionByHash: Failed to read block metadata",
@@ -1632,13 +1619,14 @@ func (n *NodeContent) GetBlockByHash(blockHash common.Hash, fullTx bool) (*evmty
 
 func (n *NodeContent) GetBlockByNumber(blockNumber string, fullTx bool) (*evmtypes.EthereumBlock, error) {
 	serviceID := uint32(n.GetChainId())
-	evmBlock, err := n.statedb.GetBlockByNumber(serviceID, blockNumber)
+	evmBlock, _, err := n.statedb.GetBlockByNumber(serviceID, blockNumber)
 	if err != nil {
 		return nil, err
 	}
 
-	// Convert EvmBlockPayload to Ethereum JSON-RPC format
-	ethBlock := evmBlock.ToEthereumBlock(fullTx)
+	// Generate metadata and convert EvmBlockPayload to Ethereum JSON-RPC format
+	metadata := evmtypes.NewEvmBlockMetadata(evmBlock)
+	ethBlock := evmBlock.ToEthereumBlock(metadata, fullTx)
 
 	// If fullTx requested, fetch full transaction objects
 	if fullTx {

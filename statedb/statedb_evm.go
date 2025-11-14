@@ -61,39 +61,65 @@ func (n *StateDB) GetLatestBlockNumber(serviceID uint32) (uint32, error) {
 	return 0, nil
 }
 
-// readBlockByNumber reads block using blockNumberToObjectID key from JAM State or from JAM DA if its archived there
-func (n *StateDB) ReadBlockByNumber(serviceID uint32, blockNumber uint32) (*evmtypes.EvmBlockPayload, error) {
+func (n *StateDB) ReadBlockMetadata(serviceID uint32, blockHash common.Hash) (*evmtypes.EvmBlockMetadata, error) {
+	// Read BlockMetadata from service storage using the block hash as key
+	metadataBytes, found, err := n.ReadServiceStorage(serviceID, blockHash.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("failed to read block metadata for hash %s: %v", blockHash.String(), err)
+	}
+	if !found {
+		return nil, fmt.Errorf("block metadata %s not found", blockHash.String())
+	}
+
+	metadata, err := evmtypes.DeserializeEvmBlockMetadata(metadataBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deserialize metadata for blockhash %s: %v", blockHash, err)
+	}
+	return metadata, nil
+}
+
+func (n *StateDB) ReadBlockByNumber(serviceID uint32, blockNumber uint32) (*evmtypes.EvmBlockPayload, *evmtypes.EvmBlockMetadata, error) {
 	// use ReadStateWitnessRaw to read block from JAM State by mapping the blockNumber to an objectID
 	objectID := evmtypes.BlockNumberToObjectID(blockNumber)
 	witness, found, _, err := n.ReadStateWitnessRaw(serviceID, objectID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read block for number %d: %v", blockNumber, err)
+		return nil, nil, fmt.Errorf("failed to read block for number %d: %v", blockNumber, err)
 	}
 	if !found {
-		return nil, fmt.Errorf("block %d not found", blockNumber)
+		return nil, nil, fmt.Errorf("block %d not found", blockNumber)
 	}
-
 	// if the payloadlength is 64 bytes, then it's an ObjectRef
 	if len(witness.Payload) == 64 {
 		// Read ObjectRef directly
 		witness, found, err := n.ReadStateWitnessRef(serviceID, objectID, true)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read object ref for block %d: %v", blockNumber, err)
+			return nil, nil, fmt.Errorf("failed to read object ref for block %d: %v", blockNumber, err)
 		} else if !found {
-			return nil, fmt.Errorf("object ref for block %d not found", blockNumber)
+			return nil, nil, fmt.Errorf("object ref for block %d not found", blockNumber)
 		}
 		payload := witness.Payload
 		block, err := evmtypes.DeserializeEvmBlockPayload(payload)
 		if err != nil {
-			return nil, fmt.Errorf("failed to deserialize block ref for block %d: %v", blockNumber, err)
+			return nil, nil, fmt.Errorf("failed to deserialize block ref for block %d: %v", blockNumber, err)
 		}
-		return block, nil
+		blockHash := block.ComputeHash()
+		metadata, err := n.ReadBlockMetadata(serviceID, blockHash)
+		if err != nil {
+			metadata = &evmtypes.EvmBlockMetadata{}
+		}
+
+		return block, metadata, nil
 	}
 	block, err := evmtypes.DeserializeEvmBlockPayload(witness.Payload)
 	if err != nil {
-		return nil, fmt.Errorf("failed to deserialize block ref for block %d: %v", blockNumber, err)
+		return nil, nil, fmt.Errorf("failed to deserialize block ref for block %d: %v", blockNumber, err)
 	}
-	return block, nil
+	blockHash := block.ComputeHash()
+	metadata, err := n.ReadBlockMetadata(serviceID, blockHash)
+	if err != nil {
+		metadata = &evmtypes.EvmBlockMetadata{}
+	}
+	return block, metadata, nil
 }
 
 func (n *StateDB) readBlockByHash(serviceID uint32, blockHash common.Hash) (*evmtypes.EvmBlockPayload, error) {
@@ -109,8 +135,9 @@ func (n *StateDB) readBlockByHash(serviceID uint32, blockHash common.Hash) (*evm
 
 		log.Info(log.Node, fmt.Sprintf("readBlockByHash: Found block number from hash mapping. Doing n.readBlockByNumber(%d)", blockNumber), "blockHash", blockHash.Hex(), "blockNumber", blockNumber)
 
-		// Read the block by number
-		return n.ReadBlockByNumber(serviceID, blockNumber)
+		// Read the block by number (ignore metadata since this function only returns block)
+		block, _, err := n.ReadBlockByNumber(serviceID, blockNumber)
+		return block, err
 	}
 
 	return nil, fmt.Errorf("block not found: %s", blockHash.Hex())
@@ -124,8 +151,9 @@ func (n *StateDB) GetBlockByHash(serviceID uint32, blockHash common.Hash, fullTx
 		return nil, err
 	}
 
-	// Convert EvmBlockPayload to Ethereum JSON-RPC format
-	ethBlock := evmBlock.ToEthereumBlock(fullTx)
+	// Generate metadata and convert EvmBlockPayload to Ethereum JSON-RPC format
+	metadata := evmtypes.NewEvmBlockMetadata(evmBlock)
+	ethBlock := evmBlock.ToEthereumBlock(metadata, fullTx)
 
 	// If fullTx requested, fetch full transaction objects
 	if fullTx {
@@ -189,7 +217,7 @@ func (n *StateDB) GetTransactionByBlockHashAndIndex(serviceID uint32, blockHash 
 // GetTransactionByBlockNumberAndIndex fetches a transaction by block number and transaction index
 func (n *StateDB) GetTransactionByBlockNumberAndIndex(serviceID uint32, blockNumberStr string, index uint32) (*evmtypes.EthereumTransactionResponse, error) {
 	// First, get the block to retrieve transaction hashes
-	block, err := n.GetBlockByNumber(serviceID, blockNumberStr)
+	block, _, err := n.GetBlockByNumber(serviceID, blockNumberStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get block: %v", err)
 	}
@@ -210,7 +238,7 @@ func (n *StateDB) GetTransactionByBlockNumberAndIndex(serviceID uint32, blockNum
 }
 
 // GetBlockByNumber fetches a block by number and returns raw EvmBlockPayload
-func (n *StateDB) GetBlockByNumber(serviceID uint32, blockNumberStr string) (*evmtypes.EvmBlockPayload, error) {
+func (n *StateDB) GetBlockByNumber(serviceID uint32, blockNumberStr string) (*evmtypes.EvmBlockPayload, *evmtypes.EvmBlockMetadata, error) {
 	// 1. Parse and resolve the block number
 	var targetBlockNumber uint32
 	var err error
@@ -219,26 +247,33 @@ func (n *StateDB) GetBlockByNumber(serviceID uint32, blockNumberStr string) (*ev
 	case "latest":
 		targetBlockNumber, err = n.GetLatestBlockNumber(serviceID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get latest block number: %v", err)
+			return nil, nil, fmt.Errorf("failed to get latest block number: %v", err)
 		}
+	case "tentative":
+		targetBlockNumber, err = n.GetLatestBlockNumber(serviceID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to get latest block number: %v", err)
+		}
+		targetBlockNumber += 1
+
 	case "earliest":
 		targetBlockNumber = 1 // Genesis block
 	case "pending":
 		// For pending, return latest for now
 		targetBlockNumber, err = n.GetLatestBlockNumber(serviceID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get latest block number: %v", err)
+			return nil, nil, fmt.Errorf("failed to get latest block number: %v", err)
 		}
 	default:
 		// Parse hex block number
 		if len(blockNumberStr) >= 2 && blockNumberStr[:2] == "0x" {
 			blockNum, parseErr := strconv.ParseUint(blockNumberStr[2:], 16, 32)
 			if parseErr != nil {
-				return nil, fmt.Errorf("invalid block number format: %v", parseErr)
+				return nil, nil, fmt.Errorf("invalid block number format: %v", parseErr)
 			}
 			targetBlockNumber = uint32(blockNum)
 		} else {
-			return nil, fmt.Errorf("invalid block number format: %s", blockNumberStr)
+			return nil, nil, fmt.Errorf("invalid block number format: %s", blockNumberStr)
 		}
 	}
 
@@ -266,7 +301,7 @@ func (n *StateDB) GetLogs(serviceID, fromBlock, toBlock uint32, addresses []comm
 // getLogsFromBlock retrieves logs from a specific block that match the filter criteria
 func (n *StateDB) getLogsFromBlock(serviceID uint32, blockNumber uint32, addresses []common.Address, topics [][]common.Hash) ([]evmtypes.EthereumLog, error) {
 	// 1. Get all transaction hashes from the block (use canonical metadata)
-	evmBlock, err := n.ReadBlockByNumber(serviceID, blockNumber)
+	evmBlock, _, err := n.ReadBlockByNumber(serviceID, blockNumber)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read block %d: %v", blockNumber, err)
 	}
@@ -365,7 +400,7 @@ func (n *StateDB) GetTransactionByHashFormatted(serviceID uint32, txHash common.
 	}
 
 	// Get block metadata from the receipt's Ref field
-	evmBlock, err := n.ReadBlockByNumber(serviceID, ref.EvmBlock)
+	evmBlock, _, err := n.ReadBlockByNumber(serviceID, ref.EvmBlock)
 	if err != nil {
 		// If block can't be read, return transaction without block metadata (pending state)
 		log.Warn(log.Node, "GetTransactionByHashFormatted: Failed to read block metadata",
@@ -550,7 +585,7 @@ func (stateDB *StateDB) GetTransactionReceipt(serviceID uint32, txHash common.Ha
 		return nil, fmt.Errorf("failed to parse transaction from receipt: %v", err)
 	}
 
-	evmBlock, err := stateDB.ReadBlockByNumber(serviceID, ref.EvmBlock)
+	evmBlock, _, err := stateDB.ReadBlockByNumber(serviceID, ref.EvmBlock)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read block metadata for receipt: %v", err)
 	}

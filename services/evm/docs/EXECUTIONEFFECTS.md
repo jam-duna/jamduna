@@ -224,7 +224,7 @@ Both Rust and Go implementations validate the complete payload structure:
 
 Certain object types require special handling due to their embedded payload:
 
-### Receipt Objects (ObjectKind::Receipt)
+### Receipt Objects (ObjectKind::Receipt = 0x03)
 
 1. **Refine Output**: Receipts append their receipt payload after dependencies
 2. **Deserialization**: Payload length is read from ObjectRef.payload_length
@@ -232,19 +232,75 @@ Certain object types require special handling due to their embedded payload:
 4. **StateWitness Reading**: Go ReadStateWitness extracts receipt payload directly from JAM State (no DA fetch needed)
 5. **Accumulate Phase**: Receipt payloads are used for log extraction and block metadata
 
-### Block Objects (ObjectKind::Block)
+### Block Objects (ObjectKind::Block = 0x05)
 
-1. **Refine Output**: Block payloads are stripped (not included in ExecutionEffects)
-2. **Deserialization**: ObjectRef.payload_length is set to 0 for Block objects
+1. **Refine Output**: Block payloads stored to DA during refine
+2. **ObjectID Pattern**: `0xFF` repeated 28 times + block_number (4 bytes LE)
 3. **JAM State Storage**: Values contain the complete EvmBlockPayload WITHOUT ObjectRef prefix
-4. **Content Structure**: Contains serialized EvmBlockPayload with block metadata and transaction data
-5. **StateWitness Reading**: Go ReadStateWitness puts EvmBlockPayload directly in Payload field (no DA fetch needed)
-6. **Accumulate Phase**: Block objects are skipped entirely in witness fetching
+4. **Content Structure**: Contains serialized EvmBlockPayload with:
+   - Fixed header (432 bytes): number, parent_hash, logs_bloom, roots, gas_used, timestamp, etc.
+   - Variable data: tx_hashes[], receipt_hashes[]
+5. **StateWitness Reading**: Go ReadStateWitness puts EvmBlockPayload directly in Payload field
+6. **Accumulate Phase**: Block payloads written via `EvmBlockPayload::write()`, stored at block_number ObjectID
 
-### Key Difference
+### Block Metadata Objects (ObjectKind::BlockMetadata = 0x06)
+
+**NEW**: Introduced for automatic metadata computation from block witnesses
+
+1. **Refine Output**: Created when block witness detected in PayloadTransactions
+   - Detection: Check if witness object_id matches pattern `0xFF...FF[block_number:4 LE]`
+   - Helper: `is_block_number_state_witness(object_id) -> Option<u32>`
+2. **Computation**: Deserialize EvmBlockPayload from witness, compute:
+   - `transactions_root`: BMT root of tx_hashes
+   - `receipts_root`: BMT root of receipt_hashes
+   - `mmr_root`: MMR root from accumulated receipts
+3. **ObjectID**: `blake2b_hash(block.serialize_header()[0..HEADER_SIZE])` where HEADER_SIZE = 432
+4. **Payload Format**: 96 bytes total (32 bytes × 3)
+   ```
+   transactions_root (32) || receipts_root (32) || mmr_root (32)
+   ```
+5. **Storage**:
+   - **Rust Write**: Uses `write()` host function directly to service storage (NOT DA export)
+   - **Key**: Block hash (computed from 432-byte header via Blake2b-256)
+   - **Value**: 96-byte serialized EvmBlockMetadata
+   - **Critical**: Metadata written to service storage, NOT exported to DA
+6. **Accumulate Phase**: Metadata written via `EvmBlockMetadata::write(&candidate.object_id)`
+   - `candidate.object_id` is the block hash computed in refine
+   - Stored as simple key-value in service storage
+7. **Go Read**: Uses `ReadServiceStorage(serviceID, blockHash)` to retrieve metadata
+   - **NOT `ReadStateWitnessRaw()`** - that function has special handling for blocks/receipts
+   - Reads raw 96-byte value directly from service storage
+8. **Purpose**: Enables fast block metadata queries without DA fetch
+
+**Block Witness Flow**:
+```
+Timeslot N (Accumulate):
+  - Block N finalized (contains all tx/receipt hashes)
+  - Block N written to DA (object_id = 0xFF...FF[N])
+
+Timeslot N+1 (Refine PayloadTransactions):
+  - Witness for block N included in extrinsics
+  - is_block_number_state_witness() detects block witness
+  - Deserialize EvmBlockPayload from witness
+  - Compute EvmBlockMetadata (roots)
+  - Create WriteIntent for metadata
+  - Transactions execute normally
+
+Timeslot N+1 (Accumulate):
+  - Block N metadata written to DA
+  - Block N+1 created (not yet finalized)
+```
+
+**Implementation References**:
+- Detection: `services/evm/src/refiner.rs:770-816`
+- Helper: `services/evm/src/block.rs:37-56`
+- Metadata: `services/evm/src/block.rs` (EvmBlockMetadata struct)
+
+### Key Differences
 
 - **Receipt objects**: JAM State = `ObjectRef + receipt_payload`
 - **Block objects**: JAM State = `EvmBlockPayload` (no ObjectRef prefix)
+- **Block metadata objects**: JAM State = `EvmBlockMetadata` (computed from block witness)
 
 ## Error Recovery
 

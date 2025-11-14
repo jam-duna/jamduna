@@ -864,6 +864,202 @@ match metadata.payload_type {
 ```
 
 
+## Block Metadata Computation via Witnesses (New Architecture)
+
+### Problem Statement
+
+EVM blocks need metadata (transactions_root, receipts_root, mmr_root) computed from the complete block data. However, transactions are executed incrementally during refine, and the full block is only available after accumulate completes. The previous approach using a 'B' command in PayloadBlocks was flawed because blocks from previous accumulate don't contain current transactions.
+
+### Solution: Automatic Block Witness Detection in PayloadTransactions
+
+Instead of explicit 'B' commands, block metadata is computed automatically when PayloadTransactions contains block witnesses from the previous accumulate cycle.
+
+**Key Insight**: A block witness (payload from previous accumulate) contains the FULL block data including all transaction hashes and receipt hashes. This allows computing metadata during the NEXT round's PayloadTransactions processing.
+
+### Architecture
+
+**Block Witness Identification**:
+- Block witnesses use ObjectID pattern: `0xFF` repeated 28 times + block_number (4 bytes LE)
+- Helper function: `is_block_number_state_witness(object_id) -> Option<u32>`
+- Returns `Some(block_number)` if object_id matches pattern, `None` otherwise
+
+**PayloadTransactions Processing with Block Witnesses**:
+1. Parse payload metadata: type=0x01 (Transactions), tx_count, witness_count
+2. Load and verify all witnesses (including block witnesses)
+3. Execute transaction extrinsics → create receipts
+4. **NEW**: Iterate through verified witnesses:
+   - For each witness, check if `is_block_number_state_witness(object_id)`
+   - If block witness detected:
+     - Deserialize `EvmBlockPayload` from witness payload
+     - Compute `EvmBlockMetadata::new(&block)` (transactions_root, receipts_root, mmr_root)
+     - Create `WriteIntent` for metadata with `effect = metadata.to_write_effect_entry(&block)`
+     - Append to execution_effects
+5. Return ExecutionEffects containing: receipts + code + storage + **block metadata**
+
+**PayloadBlocks (Genesis Only)**:
+- Used ONLY for genesis/bootstrap (block 0)
+- No 'B' commands (removed)
+- Only 'K' commands for storage initialization
+- Includes genesis block witness (block 0)
+
+**Block Metadata ObjectID**:
+- Computed as: `blake2b_hash(block.serialize_header()[0..HEADER_SIZE])`
+- HEADER_SIZE = 432 bytes (fixed header portion)
+- Stored as WriteIntent during refine, persisted during accumulate
+
+### Implementation Details
+
+**Rust (services/evm/src/refiner.rs)**:
+
+```rust
+// In refine_payload_transactions() after transaction execution:
+let mut block_write_intents: Vec<WriteIntent> = Vec::new();
+
+for (object_id, (ref_info, payload)) in verified_witnesses {
+    if let Some(block_number) = crate::block::is_block_number_state_witness(&object_id) {
+        log_info(&format!("  📦 Block witness detected: block_number={}", block_number));
+
+        match EvmBlockPayload::deserialize(&payload) {
+            Ok(block) => {
+                let metadata = EvmBlockMetadata::new(&block);
+                let write_intent = WriteIntent {
+                    effect: metadata.to_write_effect_entry(&block),
+                    dependencies: Vec::new(),
+                };
+                block_write_intents.push(write_intent);
+            }
+            Err(e) => {
+                log_error(&format!("Failed to deserialize block {}: {}", format_object_id(object_id), e));
+            }
+        }
+    }
+}
+
+// Append block metadata write intents to execution_effects
+execution_effects.append(&mut block_write_intents);
+```
+
+**Rust (services/evm/src/block.rs)**:
+
+```rust
+pub fn is_block_number_state_witness(object_id: &ObjectId) -> Option<u32> {
+    // Check if first 28 bytes are 0xFF
+    for i in 0..28 {
+        if object_id[i] != 0xFF {
+            return None;
+        }
+    }
+
+    // Extract block number from last 4 bytes (little-endian)
+    let block_number = u32::from_le_bytes([
+        object_id[28], object_id[29], object_id[30], object_id[31],
+    ]);
+    Some(block_number)
+}
+```
+
+**Go (statedb/rollup.go)**:
+
+```go
+// SubmitEVMTransactions now accepts block witness range
+func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte, startBlock uint32, endBlock uint32) (*evmtypes.EvmBlockPayload, error) {
+    // For each core:
+    // 1. Collect transaction extrinsics
+    // 2. If endBlock > startBlock:
+    //    - For blockNum in [startBlock, endBlock):
+    //      - Read witness for BlockNumberToObjectID(blockNum)
+    //      - Append witness as extrinsic
+    // 3. Build payload: type=0x01, tx_count, witness_count
+    // 4. Process work package
+}
+
+// SubmitEVMPayloadBlocks simplified to genesis-only
+func (b *Rollup) SubmitEVMPayloadBlocks(startBlock uint32, endBlock uint32) (*evmtypes.EvmBlockPayload, *evmtypes.EvmBlockMetadata, error) {
+    if startBlock != 0 || endBlock != 1 {
+        return nil, nil, fmt.Errorf("SubmitEVMPayloadBlocks is genesis-only")
+    }
+
+    // Genesis flow:
+    // 1. Add 'K' extrinsics for USDM storage initialization
+    // 2. Add witness for block 0
+    // 3. Build payload: type=0x02, extrinsic_count, witness_count=1
+    // 4. Process work package
+}
+```
+
+### Execution Flow Example
+
+**Genesis (Timeslot 0)**:
+```
+PayloadType::Blocks (0x02)
+- Extrinsics: ['K' storage init, 'K' storage init, ...]
+- Witnesses: [block_0_witness]
+- Refine: Initialize storage, create block 0 payload
+- Accumulate: Write block 0 to DA (object_id = 0xFF...FF00000000)
+```
+
+**Round 1 (Timeslot 2)**:
+```
+PayloadType::Transactions (0x01)
+- Extrinsics: [tx1_bytes]
+- Witnesses: [block_0_witness]
+- Refine:
+  1. Execute tx1 → create receipt
+  2. Detect block 0 witness
+  3. Deserialize block 0 payload
+  4. Compute metadata (transactions_root, receipts_root, mmr_root)
+  5. Create metadata write intent
+  6. Return: ExecutionEffects = [receipt, metadata]
+- Accumulate:
+  1. Write receipt to DA
+  2. Write metadata to DA (object_id = blake2b(block_0_header))
+  3. Create block 1 payload
+```
+
+**Round 2 (Timeslot 4)**:
+```
+PayloadType::Transactions (0x01)
+- Extrinsics: [tx2_bytes]
+- Witnesses: [block_1_witness]
+- Refine:
+  1. Execute tx2 → create receipt
+  2. Detect block 1 witness
+  3. Compute metadata for block 1
+  4. Create metadata write intent
+  5. Return: ExecutionEffects = [receipt, metadata]
+- Accumulate:
+  1. Write receipt to DA
+  2. Write metadata to DA
+  3. Create block 2 payload
+```
+
+### Critical Design Constraints
+
+1. **Witnesses require accumulate**: Block witnesses are only available AFTER accumulate writes them to DA. Cannot witness a block that was just created in the current timeslot.
+
+2. **Metadata lag**: Block N's metadata is computed during timeslot N+1 (when block N+1 is being created). This is acceptable because metadata is only needed for queries, not for block creation.
+
+3. **Genesis special case**: Block 0 witness is included in genesis PayloadBlocks, but metadata is computed in Round 1 when first transaction is processed.
+
+4. **Test implications**: First transaction round (round 0) cannot witness block 0 until after accumulate completes. Tests must either:
+   - Not witness block 0 in first round (use startBlock=0, endBlock=0)
+   - Manually trigger accumulate between genesis and round 0
+   - Accept that block 0 metadata is computed in round 1
+
+### Current Status
+
+**Implemented**:
+- ✅ `is_block_number_state_witness()` helper in block.rs
+- ✅ Block witness detection in PayloadTransactions (refiner.rs)
+- ✅ Metadata computation and WriteIntent creation
+- ✅ Go-side witness collection in SubmitEVMTransactions
+- ✅ PayloadBlocks simplified to genesis-only
+
+**Testing**:
+- ⚠️ Test failing: Block 1 has 0 transactions when it should have 1
+- Issue: Accumulate creates new block before receipts are added
+- Need to debug block creation timing in accumulate phase
+
 ## Genesis Bootstrap (Block 0)
 
 ### Overview
@@ -1140,12 +1336,18 @@ EvmBlockPayload {
    - Value: `block_number (4 bytes LE) || parent_hash (32 bytes)`
    - Updated by: `EvmBlockPayload::write_blocknumber_key()`
 
-2. **Block Metadata Key**:
-   - Key: Block hash (32 bytes) computed via `Blake2b-256(476-byte header)`
-   - Value: `ObjectRef` (64 bytes) pointing to block payload in DA
-   - Written during accumulate phase
+2. **Block Payload Key** (block by number):
+   - Key: `0xFF` repeated 28 times + `block_number (4 bytes LE)`
+   - Value: Complete `EvmBlockPayload` (no ObjectRef prefix)
+   - Written during accumulate phase via `EvmBlockPayload::write()`
 
-3. **Transaction Receipt Key**:
+3. **Block Metadata Key** (computed roots):
+   - Key: Block hash (32 bytes) computed via `Blake2b-256(432-byte header)`
+   - Value: `EvmBlockMetadata` (96 bytes): `transactions_root || receipts_root || mmr_root`
+   - Written during accumulate phase via `EvmBlockMetadata::write()`
+   - Read via `ReadServiceStorage()` in Go (NOT `ReadStateWitnessRaw`)
+
+4. **Transaction Receipt Key**:
    - Key: `tx_hash` (32 bytes) - keccak256 of RLP-encoded transaction
    - Value: `ObjectRef` (64 bytes) pointing to receipt in DA
 

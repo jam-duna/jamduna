@@ -3,7 +3,7 @@
 > **Implementation Status:** SSR structures and sharded storage  are implemented in `services/evm/src/state.rs`. 
 
 This specification defines a compact, scalable layout for **Ethereum-style contract storage** in JAM's Data Availability (DA) layer, extended with a **weekly storage rent** model. It combines:
-- 4 KB segments,
+- 4104-byte segments (with 96-byte metadata header in first segment),
 - sharded storage with **8-byte ShardId (prefix56)**,
 - a **compact Sparse Split Registry (SSR)** (no child IDs), and
 - a **global-depth–based rent** system billed weekly and stored in **SSR header lease metadata**.
@@ -34,8 +34,13 @@ pub struct ObjectRef {
 }
 ```
 
-- **Refine:** `Import(ObjectRef) -> Vec<Vec<u8>>`, `Export(Vec<Vec<u8>>) -> ObjectRef`
-- **Accumulate:** `Read(object_id) -> Option<ObjectRef>`, `Write(object_id, ObjectRef)` (with `version` checks)
+- **Refine:**
+  - `Import(ObjectRef) -> Vec<Vec<u8>>`: Fetches segments from DA
+  - `Export(Vec<Vec<u8>>) -> ObjectCandidateWrite`: Creates write intent for accumulate
+  - Verifies state witnesses against RefineContext.state_root
+- **Accumulate:**
+  - `Read(object_id) -> Option<ObjectRef>`: Looks up current version in JAM State
+  - `Write(object_id, ObjectRef)`: Writes new version (with conflict resolution)
 
 
 The scalability of JAM+EVM rests on JAM State being an index of what is held in JAM DA.  The trustlessness of JAM+EVM rests on each service verifying the imports against the Refine Context state root.
@@ -57,21 +62,46 @@ pub enum ObjectKind {
     /// Transaction object (kind=0x04) - DEPRECATED: No longer exported separately
     #[allow(dead_code)]
     Transaction = 0x04,
-    /// Block object (kind=0x05)
+    /// Block object (kind=0x05) - EVM block payload with tx/receipt hashes
     Block = 0x05,
+    /// Block metadata object (kind=0x06) - transactions_root, receipts_root, mmr_root
+    BlockMetadata = 0x06,
 }
-pub fn code_object_id (contract: Bytes20) -> ObjectId;
-pub fn ssr_object_id  (contract: Bytes20) -> ObjectId;
+pub fn code_object_id(contract: Bytes20) -> ObjectId;
+pub fn ssr_object_id(contract: Bytes20) -> ObjectId;
 pub fn shard_object_id(contract: Bytes20, shard: ShardId) -> ObjectId;
+
+// Block-related object IDs
+pub fn block_number_to_object_id(block_number: u32) -> ObjectId {
+    // Pattern: 0xFF repeated 28 times + block_number (4 bytes LE)
+    let mut id = [0xFF; 32];
+    id[28..32].copy_from_slice(&block_number.to_le_bytes());
+    id
+}
+
+pub fn block_metadata_object_id(block: &EvmBlockPayload) -> ObjectId {
+    // blake2b hash of block header (first HEADER_SIZE=432 bytes)
+    blake2b_hash(&block.serialize_header()[0..HEADER_SIZE])
+}
 ```
 
-Every contract has a fixed object id for its code and storage (SSR).  The SSR contains an index of shardIDs. 
+**Block Witness Pattern**: Block payloads use the `0xFF...FF[block_number]` pattern, which allows automatic detection during refine. When a witness with this pattern is encountered in `PayloadType::Transactions`, the refine process automatically computes block metadata (transactions_root, receipts_root, mmr_root) and exports it as a separate object.
+
+**ObjectKind Usage**:
+- **Code (0x00)**: Bytecode for smart contracts
+- **StorageShard (0x01)**: Sharded storage entries for contracts (including 0x01 precompile for balances/nonces)
+- **SsrMetadata (0x02)**: Sparse Split Registry for contract storage routing
+- **Receipt (0x03)**: Transaction receipts with logs
+- **Block (0x05)**: Complete EVM blocks with tx/receipt hashes (accumulated)
+- **BlockMetadata (0x06)**: Block metadata roots (computed in refine from block witnesses)
+
+Every contract has a fixed object id for its code and storage (SSR). The SSR contains an index of shardIDs. 
 
 All the data of a contract lives in shard segments.
 
 The SSR storage segments hold the shards like this:
 
-- **Dense segments**: 63 KV entries per 4 KB shard segment (64 B per entry + small header/footer).
+- **Dense segments**: 63 KV entries per shard segment (64 B per entry + 2 B count + 96 B metadata in first segment).
 - **Lazy import/export**: `refine` fetches only touched shards; `accumulate` exports only mutated shards.
 - **Shard-based growth**: split only hot shards via local depth (`ld`). Compact SSR entries encode splits.
 - **Deterministic addressing**: any node derives the same shard for `(contract, slot)`.
@@ -83,14 +113,14 @@ The SSR storage segments hold the shards like this:
 
 Balance and nonce for **all** accounts are stored as regular storage entries in the **0x01 precompile** contract:
 
-| Field | Contract | Storage Key | ObjectID |
-|-------|----------|-------------|----------|
-| Balance | `0x0000...0001` | `keccak256(address)` | `shard_object_id(0x01, shard_id_from_ssr)` |
-| Nonce | `0x0000...0001` | `keccak256(address) + 1` | Same shard as balance (adjacent key) |
+| Field | Contract | Storage Key | ObjectKind |
+|-------|----------|-------------|-----------|
+| Balance | `0x0000...0001` | `keccak256(address)` | StorageShard (0x01) |
+| Nonce | `0x0000...0001` | `keccak256(address) + 1` | StorageShard (0x01) |
 
 - The 0x01 precompile uses the **same SSR-based sharded storage** as regular contracts
 - Balance/nonce reads/writes are standard SLOAD/SSTORE operations (~200-500 gas)
-- ObjectKind=0x01 for 0x01's SSR, ObjectKind=0x02 for 0x01's shards
+- ObjectKind::SsrMetadata (0x02) for 0x01's SSR, ObjectKind::StorageShard (0x01) for 0x01's shards
 - Rent applies to 0x01's storage just like any contract
 
 > Any canonical layout is fine; pick one network-wide and keep it stable.
@@ -98,7 +128,17 @@ Balance and nonce for **all** accounts are stored as regular storage entries in 
 
 ### DA Segment Format
 
-Each object stored in JAM DA consists of one or more 4KB segments.   Note:** Shard data structures (SSRData, ShardData) are serialized into the payload portion.
+Each object stored in JAM DA consists of one or more **4104-byte segments** (`SegmentSize = 4104`).
+
+**Important**: The first segment of every object includes a 96-byte metadata header:
+```
+[ObjectID(32) || ObjectRef(64) || payload_part0]
+```
+
+- Segments 1..N contain the remaining payload data without headers
+- Shard data structures (SSRData, ShardData) are serialized into the payload portion
+- Total payload available in first segment: 4104 - 96 = 4008 bytes
+- Subsequent segments: 4104 bytes each
 
 
 Storage Entries (inside a shard) are like this:
@@ -122,12 +162,13 @@ struct ShardData {
 
 When serialized into a DA segment payload:
 ```
-[entry_count(1 byte) || EvmEntry₁(64) || EvmEntry₂(64) || ... || EvmEntryₙ(64)]
+[entry_count(2 bytes LE) || EvmEntry₁(64) || EvmEntry₂(64) || ... || EvmEntryₙ(64)]
 ```
 
-- **Capacity:** `(4096 − 1) / 64 = 63` entries max (1 byte for count, 64 bytes per entry)
+- **First segment capacity:** `(4008 − 2) / 64 = 62` entries (accounting for 96-byte metadata header)
+- **Practical capacity:** 63 entries max when considering multi-segment shards
 - Entries are **sorted by `key_h`** for binary search
-- Count byte enables quick validation and iteration
+- Count field (u16 LE) enables quick validation and iteration
 
 
 ### ContractStorage
@@ -226,7 +267,7 @@ struct SSRHeader {
 - `rent_balance: u64` — optional prepaid credits (tokens)
 - `reserved: [u8; 24]` — future use
 
-Header is kept in a single 4 KB SSR segment together with the SSR entries list.
+Header is kept in a single SSR segment together with the SSR entries list (first segment includes 96-byte DA metadata).
 
 Compact SSR Entry (9 bytes as implemented)
 
@@ -246,9 +287,9 @@ struct SSREntry {
 | 0x02 |  7   | `prefix56` — first `d` bits (zeros beyond `d`)   |
 
 - **Sorted by** `(d, prefix56)` (memcmp).
-- **Capacity (with minimal header):** `(4096 − 28) / 9 = 452` entries (28 B header + 452 × 9 B = 4096 B).
+- **Capacity (with minimal header):** `(4008 − 28) / 9 = 442` entries (28 B header + 442 × 9 B = 4006 B, fits in first segment after metadata).
 
-> If you do not inline the header with entries (separate pages), adjust arithmetic accordingly. Keeping header + entries in one 4 KB page keeps imports simple.
+> The SSR object uses the standard segment format with 96-byte metadata in the first segment. Remaining payload space (4008 bytes) holds the header and entries.
 
 An entry `{ d, ld, prefix56 }` means: **“All keys whose first `d` bits equal `prefix56` are governed at depth `ld`.”** No child IDs are stored; children arise implicitly from `ld` and `H` during lookup.
 
@@ -402,12 +443,12 @@ pub struct StorageFootprint {
 
 pub fn calculate_storage_footprint(header: &SSRHeader, code_segments: usize) -> StorageFootprint {
     let g = header.global_depth.min(16);              // cap for upper-bound estimate
-    let ssr_size_bytes = 4096u64;                     // 1 page for header+entries
+    let ssr_size_bytes = 4104u64;                     // 1 segment for header+entries
     let key_value_bytes = header.total_keys as u64 * 64u64;
     let on_chain_bytes = ssr_size_bytes + key_value_bytes;
 
     let max_shards = 1u64 << g;                       // at depth g
-    let segment_size = 4096u64;
+    let segment_size = 4104u64;
     let da_bytes = (max_shards + code_segments as u64) * segment_size;
 
     StorageFootprint { on_chain_bytes, da_bytes, total_bytes: on_chain_bytes + da_bytes }
@@ -511,10 +552,12 @@ This document explains the complete design, implementation, and mechanics of the
 
 ### The Problem
 
-JAM blockchain enforces a **4KB Data Availability (DA) segment limit**. Storage shards must serialize to ≤4096 bytes to fit in a single segment. Each entry is 64 bytes (32B key + 32B value), giving us:
+JAM blockchain uses **4104-byte Data Availability (DA) segments**. The first segment includes a 96-byte metadata header, leaving 4008 bytes for payload. Storage shards must serialize to fit within these constraints. Each entry is 64 bytes (32B key + 32B value), giving us:
 
 ```
-Max entries = (4096 - 2) / 64 = 63 entries (hard limit)
+First segment payload = 4008 bytes
+With 2-byte count field: (4008 - 2) / 64 = 62 entries
+Practical max with multi-segment support: 63 entries
 ```
 
 However, waiting until 63 entries means any additional write pushes us over the limit. We need **headroom for growth**.
@@ -623,7 +666,10 @@ pub struct EvmEntry {
 **Size calculation**:
 ```
 Size = 2 + (entries * 64)
-Max size = 2 + (63 * 64) = 4034 bytes < 4096 ✓
+Max size = 2 + (63 * 64) = 4034 bytes
+First segment available: 4008 bytes (after 96-byte metadata)
+Fits in first segment: 4034 > 4008 (requires 2 segments for max size)
+Practical single-segment limit: (4008 - 2) / 64 = 62 entries
 ```
 
 ### SSRHeader
@@ -1223,7 +1269,7 @@ This tutorial walks through concrete examples of how the **Sparse Split Registry
 
 ### What is a Shard?
 
-A **shard** is a 4 KB segment containing up to 63 storage key-value pairs for a contract. Each shard is identified by:
+A **shard** is a DA object containing up to 63 storage key-value pairs for a contract. Each shard serializes to one or two 4104-byte segments (with 96-byte metadata in first segment). Each shard is identified by:
 
 ```rust
 pub struct ShardId {
@@ -1675,16 +1721,15 @@ Each SSR entry: 32 bytes
 
 **New Compact Method**:
 ```
-Each SSR entry: 16 bytes
+Each SSR entry: 9 bytes
   - 1 byte: d (split point)
   - 1 byte: ld (local depth)
   - 7 bytes: prefix56
-  - 7 bytes: reserved
 
-200 exceptions × 16 bytes = 3,200 bytes
+200 exceptions × 9 bytes = 1,800 bytes
 ```
 
-**Savings**: 50% reduction in SSR size
+**Savings**: 72% reduction in SSR size (1,800 bytes vs 6,400 bytes)
 
 **Plus**: No need to store the 56 non-exception shards at all—they're implicit!
 
@@ -1805,7 +1850,7 @@ Step 5 (alternative): Split triggered
 2. **Cascading lookups**: Follow depth bumps until no more SSR entries match
 3. **Implicit children**: Child shard IDs are computed, not stored
 4. **Asymmetric growth**: Only hot shards split; cold shards stay shallow
-5. **Compact encoding**: 16 bytes per entry vs 32 bytes in explicit designs
+5. **Compact encoding**: 9 bytes per entry (d, ld, prefix56) vs 32+ bytes in explicit designs
 6. **Global depth**: Advances when most shards have split, reducing common lookup depth
 7. **Split threshold**: 34/63 entries balances density and efficiency
 8. **Deterministic**: Any node can independently resolve the same shard ID from `(contract, slot)`
@@ -1849,8 +1894,25 @@ Time 4: g=1, SSR=[{d=1,ld=2,p=1}, {d=1,ld=3,p=0}]
 
 ## Further Reading
 
-- **ShardId encoding**: See `take_prefix56()` and `hbit()` helpers
-- **SSR format**: 16-byte compact entry layout
+- **ShardId encoding**: See `take_prefix56()` and `hbit()` helpers in `services/evm/src/state.rs`
+- **SSR format**: 9-byte compact entry layout (d, ld, prefix56)
 - **Lookup algorithm**: `resolve_shard_id()` with iteration limit
 - **Split operation**: `split_shard_compact()` with bucket partitioning
 - **Global depth advancement**: Policy rules for when to increment g
+
+---
+
+## Related Documentation
+
+For related topics on the EVM service architecture, see:
+
+- **[BLOCKS.md](BLOCKS.md)** - Block creation, accumulation, and metadata computation via witnesses
+- **[CALLS.md](CALLS.md)** - eth_call and eth_estimateGas implementation with PayloadType::Call
+- **[EXECUTIONEFFECTS.md](EXECUTIONEFFECTS.md)** - Serialization format for refine→accumulate communication
+- **[PROOFS.md](PROOFS.md)** - State witnesses, Merkle proofs, and witness verification
+
+**Implementation Files**:
+- `services/evm/src/state.rs` - SSR data structures and sharding logic
+- `services/evm/src/refiner.rs` - Refine phase with witness verification
+- `services/evm/src/block.rs` - Block structures and witness detection helpers
+- `statedb/evmtypes/` - Go-side object structures and serialization
