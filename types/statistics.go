@@ -59,9 +59,9 @@ type CoreStatistics struct {
 	DALoad              uint `json:"da_load"`         // d
 	NumAssurances       uint `json:"popularity"`      // p
 	NumImportedSegments uint `json:"imports"`         // i
-	NumExportedSegments uint `json:"exports"`         // e
-	NumBytesExtrinsics  uint `json:"extrinsic_size"`  // z
 	NumExtrinsics       uint `json:"extrinsic_count"` // x
+	NumBytesExtrinsics  uint `json:"extrinsic_size"`  // z
+	NumExportedSegments uint `json:"exports"`         // e
 	TotalBundleLength   uint `json:"bundle_size"`     // b
 	GasUsed             uint `json:"gas_used"`        // u
 }
@@ -73,9 +73,9 @@ type ServiceStatistics struct {
 	NumResults               uint `json:"refinement_count"`    //r-n
 	RefineGasUsed            uint `json:"refinement_gas_used"` //r-u
 	NumImportedSegments      uint `json:"imports"`             //i
-	NumExportedSegments      uint `json:"exports"`             //e
-	NumBytesExtrinsics       uint `json:"extrinsic_size"`      //z
 	NumExtrinsics            uint `json:"extrinsic_count"`     //x
+	NumBytesExtrinsics       uint `json:"extrinsic_size"`      //z
+	NumExportedSegments      uint `json:"exports"`             //e
 	AccumulateNumWorkReports uint `json:"accumulate_count"`    //a
 	AccumulateGasUsed        uint `json:"accumulate_gas_used"` //a
 }

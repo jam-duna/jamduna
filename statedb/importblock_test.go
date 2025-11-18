@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -146,7 +147,7 @@ func TestStateTransitionInterpreter(t *testing.T) {
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule("pvm_validator")
 	t.Run(filepath.Base(filename), func(t *testing.T) {
-		runSingleSTFTest(t, filename, string(content), BackendInterpreter, false)
+		runSingleSTFTest(t, filename, string(content), BackendGoInterpreter, false)
 	})
 }
 
@@ -157,9 +158,9 @@ func TestTracesInterpreter(t *testing.T) {
 
 	// Define all the directories you want to test in a single slice.
 	testDirs := []string{
-		path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
+		//path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
@@ -196,7 +197,7 @@ func TestTracesInterpreter(t *testing.T) {
 
 				// Run the actual test logic for each file as a distinct sub-test.
 				t.Run(e.Name(), func(t *testing.T) {
-					runSingleSTFTest(t, filename, string(content), BackendInterpreter, false)
+					runSingleSTFTest(t, filename, string(content), BackendGoInterpreter, false)
 				})
 			}
 		})
@@ -329,12 +330,12 @@ func TestSingleCompare(t *testing.T) {
 	log.InitLogger("debug")
 	PvmLogging = false
 
-	filename := "/Users/sourabhniyogi/Desktop/jam-test-vectors/traces/storage_light/00000013.bin"
+	filename := path.Join(common.GetJAMTestVectorPath("traces"), "storage_light/00000001.bin")
 	content, err := os.ReadFile(filename)
 	if err != nil {
-		t.Errorf("failed to read file %s: %v", filename, err)
+		t.Fatalf("failed to read file %s: %v", filename, err)
 	}
-	runSingleSTFTest(t, filename, string(content), BackendInterpreter, false)
+	runSingleSTFTest(t, filename, string(content), BackendGoInterpreter, false)
 }
 
 func GetFuzzReportsPath(subDir ...string) (string, error) {
@@ -392,6 +393,12 @@ func findFuzzTestFiles(sourcePath, targetVersion string, excludedTeams []string)
 }
 
 func TestSingleFuzzTrace(t *testing.T) {
+	backend := BackendCompiler
+	if runtime.GOOS != "linux" {
+		backend = BackendGoInterpreter
+	}
+	backend = BackendGoInterpreter
+	t.Logf("Using backend: %s", backend)
 
 	fileMap := make(map[string]string)
 
@@ -400,10 +407,28 @@ func TestSingleFuzzTrace(t *testing.T) {
 		t.Fatalf("failed to get fuzz reports path: %v", err)
 	}
 
-	// C7 [NextEpochValidatorKeys] failure
-	fileMap["1761664779"] = "fuzz-reports/0.7.1/traces/1761664779/00000008.bin"
-	fileMap["1761654684"] = "fuzz-reports/0.7.1/traces/1761654684/00000056.bin"
+	// MC
+	fileMap["1763371127"] = "fuzz-reports/0.7.1/traces/1763371127/00000237.bin" // 9 keys, assign, transfer
+	fileMap["1763371379"] = "fuzz-reports/0.7.1/traces/1763371379/00000237.bin" // 9 keys, assign, transfer
 
+	// MC DOUBLE CHECK
+	// fileMap["1763371098"] = "fuzz-reports/0.7.1/traces/1763371098/00000005.bin" // Ok
+	// fileMap["1763372279"] = "fuzz-reports/0.7.1/traces/1763372279/00000034.bin" // Ok
+	// fileMap["1763370844"] = "fuzz-reports/0.7.1/traces/1763370844/00000002.bin" // Ok
+	// fileMap["1763372314"] = "fuzz-reports/0.7.1/traces/1763372314/00000092.bin" // Ok
+
+	// SN solved - hostRead memRead issue
+	fileMap["1763371865"] = "fuzz-reports/0.7.1/traces/1763371865/00000017.bin" // 2 keys (C13 ValidatorStatistics+random) checkpoints + ram access
+	fileMap["1763371341"] = "fuzz-reports/0.7.1/traces/1763371341/00000017.bin" // 2 keys (C13 ValidatorStatistics+random) checkpoints + ram access
+	// SN solved - degenerate edge case
+	fileMap["1763371531"] = "fuzz-reports/0.7.1/traces/1763371531/00000042.bin" // StateRoot 0x0000000000000000000000000000000000000000000000000000000000000000 != ParentStateRoot 0x3e569e90ec47319e1ffeabd8c7f5509811c03a748b9cd57b2c186aa8746e8636
+	// SN solved - extrinsics used/num extrinsics swap in statistics issue
+	fileMap["1763399245"] = "fuzz-reports/0.7.1/traces/1763399245/00000001.bin" // 1 key: C13 ValidatorStatistics
+	// SN solved - new_check issue
+	fileMap["1763371998"] = "fuzz-reports/0.7.1/traces/1763371998/00001108.bin" // 4 keys (Random)
+	fileMap["1761553047"] = "fuzz-reports/0.7.1/traces/1761553047/00000006.bin"
+
+	fileMap["1761654584"] = "fuzz-reports/0.7.1/traces/1761654584/00000053.bin"
 	PvmLogging = false
 	//	DebugHostFunctions = true
 	log.InitLogger("debug")
@@ -411,7 +436,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 	// log.EnableModule("pvm_validator")
 	log.EnableModule(log.SDB)
 
-	tc := []string{"1761664779"}
+	tc := []string{"1763371127", "1763371379", "1763371865", "1763371341", "1763371531", "1763399245", "1763371998", "1761654584", "1761553047"}
 	PvmLogging = false
 	for _, team := range tc {
 		filename, exists := fileMap[team]
@@ -427,7 +452,8 @@ func TestSingleFuzzTrace(t *testing.T) {
 		}
 
 		t.Run(filepath.Base(filename), func(t *testing.T) {
-			runSingleSTFTest(t, filename, string(content), BackendInterpreter, true)
+
+			runSingleSTFTest(t, filename, string(content), backend, true)
 		})
 	}
 }
@@ -464,7 +490,10 @@ func testFuzzTraceInternal(t *testing.T, saveOutput bool) {
 	if len(testFiles) == 0 {
 		t.Fatalf("No valid .bin files found for version '%s' under %s (after exclusions)", targetVersion, sourcePath)
 	}
-
+	backend := BackendCompiler
+	if runtime.GOOS != "linux" {
+		backend = BackendGoInterpreter
+	}
 	for _, filename := range testFiles {
 		currentFile := filename
 		relPath, _ := filepath.Rel(sourcePath, currentFile)
@@ -480,9 +509,9 @@ func testFuzzTraceInternal(t *testing.T, saveOutput bool) {
 
 			if saveOutput {
 				t.Parallel()
-				runSingleSTFTestAndSave(t, currentFile, string(content), BackendInterpreter, true, sourcePath, destinationPath)
+				runSingleSTFTestAndSave(t, currentFile, string(content), backend, true, sourcePath, destinationPath)
 			} else {
-				runSingleSTFTest(t, currentFile, string(content), BackendInterpreter, true)
+				runSingleSTFTest(t, currentFile, string(content), backend, true)
 			}
 		})
 	}

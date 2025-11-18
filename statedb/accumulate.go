@@ -323,17 +323,14 @@ func (s *StateDB) OuterAccumulate(g uint64, transfersIn []types.DeferredTransfer
 	// transfers with ParallelizedAccumulate
 	p_gasUsed, transfersOut, p_outputs, p_gasUsage := s.ParallelizedAccumulate(o, transfersIn, workReports[0:i], freeAccumulation, pvmBackend, accumulated_partial) // parallelized accumulation the 0 to i work reports
 	// n https://graypaper.fluffylabs.dev/#/1c979cb/17e70117e701?v=0.7.1
-
 	transfer_gases := uint64(0)
 	for _, t := range transfersIn {
 		transfer_gases += uint64(t.GasLimit)
 	}
+
+	// Corrected gstar calculation based on GP 0.7.1/0.7.2 Eq. 12.18: g* = g + sum(t_g) - sum(u*)
 	gstar := g + transfer_gases
 
-	// compute gstar https://graypaper.fluffylabs.dev/#/1c979cb/172e02172e02?v=0.7.1
-	for _, t := range transfersIn {
-		gstar += uint64(t.GasLimit)
-	}
 	gstar -= p_gasUsed
 	incNum, incAccumulationOutput, incGasUsage := s.OuterAccumulate(gstar, transfersOut, workReports[i:], o, nil, pvmBackend, accumulated_partial) // recursive call to the rest of the work reports
 	num_accumulations = i + incNum

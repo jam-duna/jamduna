@@ -144,7 +144,7 @@ func (t *Target) handleConnection(conn net.Conn) {
 		case msg.GetState != nil:
 			response = t.onGetState(msg.GetState)
 		case msg.RefineBundle != nil:
-			response = t.onRefineBundle(msg.RefineBundle)
+			//response = t.onRefineBundle(msg.RefineBundle)
 		case msg.GetExports != nil:
 			response = t.onGetExports(msg.GetExports)
 		default:

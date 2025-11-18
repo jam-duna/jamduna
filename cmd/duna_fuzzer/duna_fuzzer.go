@@ -133,15 +133,17 @@ func main() {
 
 	if refineMode {
 		// Refinement mode - load bundle tests and STFs from embedded files
-		bundle_tests, raw_stfs, err = fuzz.ReadEmbeddedRefineBundles(embeddedRefineFiles, jConfig.PVMBackend, nil)
-		if err != nil {
-			log.Printf("Failed to read embedded RefineBundleQA tests: %v", err)
-			Terminate(stopCh)
-		}
-		if len(bundle_tests) == 0 {
-			log.Printf("No RefineBundleQA test data available in embedded files. Exit!")
-			return
-		}
+		/*
+			bundle_tests, raw_stfs, err = fuzz.ReadEmbeddedRefineBundles(embeddedRefineFiles, jConfig.PVMBackend, nil)
+			if err != nil {
+				log.Printf("Failed to read embedded RefineBundleQA tests: %v", err)
+				Terminate(stopCh)
+			}
+			if len(bundle_tests) == 0 {
+				log.Printf("No RefineBundleQA test data available in embedded files. Exit!")
+				return
+			}
+		*/
 		//log.Printf("Loaded %d RefineBundleQA test cases and %d STFs from embedded refine files", len(bundle_tests), len(raw_stfs))
 	} else {
 		// Block challenge mode - only load state transitions from test-dir

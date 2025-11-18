@@ -544,11 +544,11 @@ func possibleError(seed []byte, selectedError error, block *types.Block, s *stat
 	}
 }
 
-func selectAllImportBlocksErrors(seed []byte, store *storage.StateDBStorage, modes []string, stf *statedb.StateTransition, allowFuzzing bool) (oSlot uint32, oEpoch int32, oPhase uint32, mutated_STFs []statedb.StateTransition, fuzzable_errors []error) {
+func selectAllImportBlocksErrors(seed []byte, store storage.JAMStorage, modes []string, stf *statedb.StateTransition, allowFuzzing bool) (oSlot uint32, oEpoch int32, oPhase uint32, mutated_STFs []statedb.StateTransition, fuzzable_errors []error) {
 	var aggregatedErrors []error
 	var mutatedSTFs []statedb.StateTransition
 	block := stf.Block
-	sdb, err := statedb.NewStateDBFromStateTransition(store, stf, 0)
+	sdb, err := statedb.NewStateDBFromStateTransition(store, stf)
 	if err != nil {
 		return 0, 0, 0, nil, nil
 	}

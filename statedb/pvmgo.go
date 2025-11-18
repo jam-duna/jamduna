@@ -693,34 +693,24 @@ func (vm *VMGo) step(stepn int) error {
 				vm.terminated = true
 				return nil
 			}
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						fmt.Printf("Host function %d panicked: %v\n", vm.host_func_id, r)
-						// Set VM to panic state
-						vm.MachineState = PANIC
-						vm.ResultCode = PANIC
-						vm.terminated = true
-					}
-				}()
 
-				// Call the host function
-				if vm.hostVM != nil {
-					_, err := vm.hostVM.InvokeHostCall(vm.host_func_id)
-					if err != nil {
-						fmt.Printf("HostCall %s (%d) ERROR: %v\n", HostFnToName(vm.host_func_id), vm.host_func_id, err)
-						vm.terminated = true
-						return
-					}
-					// Check if host function caused panic
-					if vm.MachineState == PANIC {
-						vm.Panic(PANIC)
-						//fmt.Printf("HostCall %s (%d) PANIC!\n", HostFnToName(vm.host_func_id), vm.host_func_id)
-						vm.terminated = true
-						return
-					}
+			// Call the host function
+			if vm.hostVM != nil {
+				_, err := vm.hostVM.InvokeHostCall(vm.host_func_id)
+				if err != nil {
+					fmt.Printf("HostCall %s (%d) ERROR: %v\n", HostFnToName(vm.host_func_id), vm.host_func_id, err)
+					vm.terminated = true
+					return nil
 				}
-			}()
+				// Check if host function caused panic
+				if vm.MachineState == PANIC {
+					vm.Panic(PANIC)
+					//fmt.Printf("HostCall %s (%d) PANIC!\n", HostFnToName(vm.host_func_id), vm.host_func_id)
+					vm.terminated = true
+					return nil
+				}
+			}
+
 			vm.hostCall = false
 		}
 	case opcode == LOAD_IMM_64: // A.5.3 One Register and One Extended Width Immediate

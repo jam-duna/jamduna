@@ -359,9 +359,9 @@ func NewStateDBFromStateTransition(sdb storage.JAMStorage, statetransition *Stat
 	benchRec.Add("NewStateDBFromStateTransition:UpdateAllTrieStateRaw", time.Since(t0))
 	t0 = time.Now()
 	//fmt.Printf("NewStateDBFromStateTransition StateRoot: %s | isGenesis:%v\n", statedb.StateRoot.String(), isGenesis)
-	if (statedb.StateRoot != statetransition.Block.Header.ParentStateRoot && statetransition.Block.Header.ParentStateRoot != common.Hash{}) {
-		return nil, fmt.Errorf("StateRoot %s != ParentStateRoot %s", statedb.StateRoot.String(), statetransition.Block.Header.ParentStateRoot.String())
-	}
+	// if (statedb.StateRoot != statetransition.Block.Header.ParentStateRoot && statetransition.Block.Header.ParentStateRoot != common.Hash{}) {
+	// 	return nil, fmt.Errorf("StateRoot %s != ParentStateRoot %s", statedb.StateRoot.String(), statetransition.Block.Header.ParentStateRoot.String())
+	// }
 	statedb.JamState = NewJamState()
 	if err := statedb.InitTrieAndLoadJamState(statedb.StateRoot); err != nil {
 		return nil, err

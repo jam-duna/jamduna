@@ -274,6 +274,7 @@ const (
 	ACCUMULATE_INPUT_TRANSFERS = 1
 )
 
+// (e.q 13.15)
 type AccumulateInput struct {
 	InputType uint8
 	T         *DeferredTransfer          `json:"transfer,omitempty"`   // when InputType == 1
@@ -325,7 +326,11 @@ func (a AccumulateOperandElements) Encode() []byte {
 		return nil
 	}
 
-	gBytes := E(uint64(a.Gas))
+	//gBytes := E(uint64(a.Gas))
+	gBytes, err := Encode(a.Gas)
+	if err != nil {
+		return nil
+	}
 
 	dBytes, err := Encode(a.Result)
 	if err != nil {

@@ -3,6 +3,7 @@ package statedb
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"slices"
 	"sort"
@@ -265,7 +266,6 @@ func (vm *VM) hostInfo() {
 
 	f_orig := f
 	l_orig := l
-
 	// Check if the ORIGINAL (unclamped) request is out of bounds - this should panic!
 	if f_orig > lenval || f_orig+l_orig > lenval {
 		vm.terminated = true
@@ -287,6 +287,7 @@ func (vm *VM) hostInfo() {
 		vm.MachineState = PANIC
 		return
 	}
+	vm.DebugHostFunction(INFO, "bo=%x, f=%d, l=%d , v=0x%x", bo, f, l, val[f:f+l])
 
 	bytesPreview := bytesToWrite
 	if len(bytesPreview) > 96 {
@@ -486,12 +487,10 @@ func new_check(i uint32, u_d map[uint32]*types.ServiceAccount) uint32 {
 	if i < minPubserviceIdx {
 		i = minPubserviceIdx
 	}
-
 	for {
 		if _, ok := u_d[i]; !ok {
 			return i
 		}
-		// This applies the formal shift: (i - S + 1) mod R + S
 		offset := i - minPubserviceIdx
 		nextOffset := (offset + bump) % serviceIndexRangeSize
 		i = minPubserviceIdx + nextOffset
@@ -544,7 +543,7 @@ func (vm *VM) hostNew() {
 	}
 
 	x_e_r := xContext.U.PrivilegedState.RegistrarServiceID
-	_, alreadyInservice := xContext.U.GetService(uint32(i))
+	_, alreadyInservice := xContext.U.ServiceAccounts[uint32(i)]
 	if x_e_r == xs.ServiceIndex && i < types.MinPubServiceIndex && alreadyInservice {
 		vm.WriteRegister(7, FULL)
 		vm.SetHostResultCode(FULL)
@@ -581,7 +580,7 @@ func (vm *VM) hostNew() {
 			xi = minPubserviceIdx + ((xi - minPubserviceIdx) % serviceIndexRangeSize)
 		}
 		// update the new service index in x_i = check(S + (xi - S + 42) mod (2^42 - S - 2^8))
-		newServiceIndex = xi
+		newServiceIndex = new_check(xi, xContext.U.ServiceAccounts)
 		// simulate a with c, g, m
 		// [Gratis] a_r:t; a_f,a_a:0; a_p:x_s
 		a = types.NewEmptyServiceAccount(
@@ -848,9 +847,14 @@ func (vm *VM) hostFetch() {
 		switch datatype {
 
 		case PARAMETER_BYTE_0:
-			v_Bytes, _ = types.ParameterBytes()
-		//0a00000000000000010000000000000064000000000000000200200000000c000000809698000000000080f0fa020000000000ca9a3b00000000002d3101000000000800100008000300403800000300080006005000040080000500060000fa0000017cd20000093d0004000000000c00000204000000c0000080000000000c00000a000000
-		//[8: B_I]        [8: B_L].       [8: B_S].       [C.][4:D   ][4:E   ][8:G_A.        ][8:G_I.        ][8:G_R         ][8:G_T*        ][H ][I ][J ][K ][4:L   ][N ][O ][P ][Q ][R ][T ][U ][V ][4:W_A ][4:W_B ][4:W_C ][4:W_E ][4:W_M ][4:W_P ][4:W_R*][4:W_T ][4:W_X ][4:Y.  ]
+			var err error
+			v_Bytes, err = types.ParameterBytes()
+			//0a00000000000000010000000000000064000000000000000200200000000c000000809698000000000080f0fa020000000000ca9a3b00000000002d3101000000000800100008000300403800000300080006005000040080000500060000fa0000017cd20000093d0004000000000c00000204000000c0000080000000000c00000a000000
+			//[8: B_I]        [8: B_L].       [8: B_S].       [C.][4:D   ][4:E   ][8:G_A.        ][8:G_I.        ][8:G_R         ][8:G_T*        ][H ][I ][J ][K ][4:L   ][N ][O ][P ][Q ][R ][T ][U ][V ][4:W_A ][4:W_B ][4:W_C ][4:W_E ][4:W_M ][4:W_P ][4:W_R*][4:W_T ][4:W_X ][4:Y.  ]
+			if err != nil {
+				log.Error(vm.logging, "ParameterBytes() failed", "error", err)
+			}
+			log.Trace(vm.logging, "ParameterBytes result", "len", len(v_Bytes), "bytes", hex.EncodeToString(v_Bytes))
 
 		case ENTROPY_1: // n
 			v_Bytes = vm.N.Bytes()
@@ -980,7 +984,7 @@ func (vm *VM) hostFetch() {
 
 	f := min(uint64(len(v_Bytes)), omega_8)   // offset
 	l := min(uint64(len(v_Bytes))-f, omega_9) // max length
-	//	vm.DebugHostFunction(FETCH, "datatype = %d, f=%d, l=%d , v=0x%x", datatype, f, l, v_Bytes[f:f+l])
+	vm.DebugHostFunction(FETCH, "datatype = %d, o=%x, f=%d, l=%d , v=0x%x", datatype, o, f, l, v_Bytes[f:f+l])
 	errCode := vm.WriteRAMBytes(uint32(o), v_Bytes[f:f+l])
 	if errCode != OK {
 		vm.Panic(errCode)
@@ -1081,7 +1085,6 @@ func (vm *VM) hostProvide() {
 }
 
 func (vm *VM) hostEject() {
-
 	if vm.Mode != ModeAccumulate {
 		vm.WriteRegister(7, WHAT)
 		vm.SetHostResultCode(WHAT)
@@ -1393,7 +1396,6 @@ func (vm *VM) hostRead() {
 		vm.SetHostResultCode(WHAT)
 		return
 	}
-
 	// Assume that all ram can be read and written
 	omega_7 := vm.ReadRegister(7)
 	s_star := omega_7
@@ -1401,6 +1403,16 @@ func (vm *VM) hostRead() {
 	var errCode uint64
 	if omega_7 == maxUint64 {
 		s_star = uint64(vm.Service_index)
+	}
+	ko := vm.ReadRegister(8)
+	kz := vm.ReadRegister(9)
+	mu_k, err_k := vm.ReadRAMBytes(uint32(ko), uint32(kz)) // this is the raw key.
+	if err_k != OK {
+		vm.Panic(err_k)
+		vm.terminated = true
+		vm.ResultCode = types.WORKDIGEST_PANIC
+		vm.MachineState = PANIC
+		return
 	}
 	if s_star == uint64(vm.Service_index) {
 		a = vm.ServiceAccount
@@ -1412,16 +1424,9 @@ func (vm *VM) hostRead() {
 			return
 		}
 	}
-	ko := vm.ReadRegister(8)
-	kz := vm.ReadRegister(9)
 	bo := vm.ReadRegister(10)
 	f := vm.ReadRegister(11)
 	l := vm.ReadRegister(12)
-	mu_k, err_k := vm.ReadRAMBytes(uint32(ko), uint32(kz)) // this is the raw key.
-	if err_k != OK {
-		vm.Panic(err_k)
-		return
-	}
 	// [0.6.7] No more hashing of mu_k
 	//k := common.ServiceStorageKey(a.ServiceIndex, mu_k) // this does E_4(s) ... mu_4
 	ok, val, storage_source := a.ReadStorage(mu_k, vm.hostenv)
@@ -1446,6 +1451,9 @@ func (vm *VM) hostRead() {
 	if errCode := vm.WriteRAMBytes(uint32(bo), val[f:f+l]); errCode != OK {
 		log.Trace(vm.logging, "READ RAM WRITE ERROR", "err", errCode)
 		vm.Panic(errCode)
+		vm.terminated = true
+		vm.ResultCode = types.WORKDIGEST_PANIC
+		vm.MachineState = PANIC
 		return
 	}
 	vm.WriteRegister(7, lenval)
@@ -1475,7 +1483,7 @@ func (vm *VM) hostWrite() {
 		vm.terminated = true
 		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
-		log.Trace(vm.logging, "WRITE RAM", "err", err_k)
+		log.Trace(vm.logging, "WRITE RAM ERROR", "err", err_k)
 		return
 	}
 	key_len := uint64(len(mu_k)) // x in a_s(x,y) |y|
@@ -1492,6 +1500,7 @@ func (vm *VM) hostWrite() {
 			vm.terminated = true
 			vm.ResultCode = types.WORKDIGEST_PANIC
 			vm.MachineState = PANIC
+			log.Trace(vm.logging, "WRITE RAM ERROR", "err", err)
 			return
 		}
 		val_len = uint64(len(v))
@@ -1526,7 +1535,7 @@ func (vm *VM) hostWrite() {
 	if a.Balance < threshold {
 		vm.WriteRegister(7, FULL)
 		vm.SetHostResultCode(FULL)
-		log.Trace(vm.logging, "WRITE FULL", "service", a.ServiceIndex, "threshold", threshold, "balance", a.Balance, "deltaItems", deltaItems, "deltaSize", deltaSize)
+		log.Trace(vm.logging, "@@@ WRITE FULL", "service", a.ServiceIndex, "threshold", threshold, "balance", a.Balance, "deltaItems", deltaItems, "deltaSize", deltaSize)
 		return
 	}
 
@@ -1541,14 +1550,25 @@ func (vm *VM) hostWrite() {
 		a.AdjustStorageSize(deltaSize)
 	}
 	vm.WriteRegister(7, response)
+
+	as_internal_key := common.Compute_storageKey_internal(mu_k)
+	as_internal_key_str := common.Bytes2Hex(as_internal_key[:])
+	account_storage_key := fmt.Sprintf("0x%x", common.ComputeC_sh(a.ServiceIndex, as_internal_key).Bytes()[:31])
+
 	log.Trace(vm.logging, "WRITE storage",
 		"mu_k", fmt.Sprintf("%x", mu_k),
+		"opaque_key", as_internal_key_str,
+		"as_key", account_storage_key,
+		"service", a.ServiceIndex,
 		"deltaItems", deltaItems,
 		"deltaSize", deltaSize,
 		"key_len", int64(key_len),
+		"val", fmt.Sprintf("%x", v),
 		"val_len", int64(val_len),
 		"prevLen", int64(prevLen),
 		"s", fmt.Sprintf("%d", a.ServiceIndex),
+		"v_o", fmt.Sprintf("0x%x", vo),
+		"v_z", fmt.Sprintf("%d", vz),
 		"a_o", a.StorageSize, "a_i", a.NumStorageItems)
 }
 
@@ -1652,7 +1672,7 @@ func (vm *VM) hostForget() {
 		// storage accounting
 		x_s.AdjustNumStorageItems(-2)
 		x_s.AdjustStorageSize(-int64(AccountLookupConst + uint64(z)))
-		log.Trace(vm.logging, "FORGET OK A", "h", account_lookuphash, "z", z, "vm.Timeslot", vm.Timeslot, "X_s_l[1]", X_s_l[1], "expiry", (vm.Timeslot - types.PreimageExpiryPeriod), "types.PreimageExpiryPeriod", types.PreimageExpiryPeriod, "account_storage_key", account_storage_key)
+		log.Trace(vm.logging, "FORGET OK A", "h", account_lookuphash, "z", z, "vm.Timeslot", vm.Timeslot, "expiry", (vm.Timeslot - types.PreimageExpiryPeriod), "types.PreimageExpiryPeriod", types.PreimageExpiryPeriod, "account_storage_key", account_storage_key)
 		vm.WriteRegister(7, OK)
 		vm.SetHostResultCode(OK)
 		return
@@ -1986,7 +2006,7 @@ func (vm *VM) hostLog() {
 	if vm.IsChild {
 		serviceMetadata = fmt.Sprintf("%s-child", serviceMetadata)
 	}
-	loggingVerbose := true
+	loggingVerbose := false
 	if vm.logging == log.FirstGuarantorOrAuditor || vm.logging == log.Builder || vm.logging == log.PvmAuthoring {
 		loggingVerbose = true
 	}

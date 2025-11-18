@@ -105,6 +105,14 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 	sf_header := blk.GetHeader()
 	epochMark := blk.EpochMark()
 
+	// check if all the preimage is valid
+	for _, l := range blk.Extrinsic.Preimages {
+		_, err = s.ValidateAddPreimage(l.Requester, l.Blob)
+		if err != nil {
+			return s, fmt.Errorf("ApplyStateTransitionFromBlock: ValidateAddPreimage failed for service %d: %v", l.Requester, err)
+		}
+	}
+
 	if epochMark != nil {
 		// s.queuedTickets = make(map[common.Hash]types.Ticket)
 		s.GetJamState().ResetTallyStatistics()
@@ -222,7 +230,7 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 	var gas uint64
 	var gas_counting uint64
 	gas = types.AccumulateGasAllocation_GT
-	gas_counting = types.AccumulationGasAllocation * types.TotalCores
+	gas_counting = types.AccumulationGasAllocation * types.TotalCores // SHAWN TO CHECK
 	// get the partial state
 	o := s.JamState.newPartialState()
 	alwaysAccServiceID := o.PrivilegedState.AlwaysAccServiceID
@@ -330,7 +338,7 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 
 	// 0.6.2 4.18 - Preimages [ δ‡, τ′]
 	preimages := blk.PreimageLookups()
-	num_preimage, num_octets, err := s.ApplyStateTransitionPreimages(preimages, targetJCE)
+	num_preimage, num_octets, err := s.ApplyStateTransitionPreimages(preimages, targetJCE, o.ServiceAccounts)
 	if err != nil {
 		return s, err
 	}

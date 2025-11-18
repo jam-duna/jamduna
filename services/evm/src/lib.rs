@@ -40,8 +40,11 @@ mod tx;
 mod bmt;
 #[path = "mmr.rs"]
 pub mod mmr;
+#[path = "verkle.rs"]
+pub mod verkle;
 
 // Re-export commonly used types
 pub use block::{EvmBlockPayload};
 pub use writes::{ExecutionEffectsEnvelope, deserialize_execution_effects, serialize_execution_effects};
 pub use sharding::format_object_id;
+pub use verkle::{LogId, IndexKey, VerkleRoot, VerkleTree, SimpleVerkleTree};

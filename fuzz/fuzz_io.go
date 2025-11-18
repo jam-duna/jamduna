@@ -137,33 +137,35 @@ func ReadRefineBundles(baseDir string, pvmBackend string, stateDB *statedb.State
 		}
 	}
 
-	// Convert snapshots to multiple RefineBundleQA variants using refine package
-	bundles = make([]*RefineBundleQA, 0)
-	numVariantsPerSnapshot := 10 // Generate 10 variants per snapshot for testing
+	/*
+		// Convert snapshots to multiple RefineBundleQA variants using refine package
+		bundles = make([]*RefineBundleQA, 0)
+		numVariantsPerSnapshot := 10 // Generate 10 variants per snapshot for testing
 
-	// First, generate all variants for each snapshot
-	allVariants := make([][]*RefineBundleQA, len(bundleSnapshots))
-	for i, snapshot := range bundleSnapshots {
-		bundleVariants, err := ConvertSnapshotToMultipleRefineBundleQA(snapshot, stfs, numVariantsPerSnapshot, pvmBackend, stateDB)
-		if err != nil {
-			log.Printf("Error converting snapshot for slot %d: %v", snapshot.Slot, err)
-			continue
-		}
-		allVariants[i] = bundleVariants
-	}
+		// First, generate all variants for each snapshot
+		allVariants := make([][]*RefineBundleQA, len(bundleSnapshots))
 
-	// Interleave variants from different snapshots to ensure balanced testing
-	maxVariants := numVariantsPerSnapshot
-	for variantIndex := 0; variantIndex < maxVariants; variantIndex++ {
-		for _, variants := range allVariants {
-			if variantIndex < len(variants) {
-				bundles = append(bundles, variants[variantIndex])
+			for i, snapshot := range bundleSnapshots {
+				bundleVariants, err := ConvertSnapshotToMultipleRefineBundleQA(snapshot, stfs, numVariantsPerSnapshot, pvmBackend, stateDB)
+				if err != nil {
+					log.Printf("Error converting snapshot for slot %d: %v", snapshot.Slot, err)
+					continue
+				}
+				allVariants[i] = bundleVariants
 			}
-		}
-	}
 
-	fmt.Printf("Generated %d total RefineBundleQA test cases from %d snapshots\n", len(bundles), len(bundleSnapshots))
+			// Interleave variants from different snapshots to ensure balanced testing
+			maxVariants := numVariantsPerSnapshot
+			for variantIndex := 0; variantIndex < maxVariants; variantIndex++ {
+				for _, variants := range allVariants {
+					if variantIndex < len(variants) {
+						bundles = append(bundles, variants[variantIndex])
+					}
+				}
+			}
 
+			fmt.Printf("Generated %d total RefineBundleQA test cases from %d snapshots\n", len(bundles), len(bundleSnapshots))
+	*/
 	return bundles, stfs, nil
 }
 
@@ -195,28 +197,29 @@ func ReadEmbeddedRefineBundles(embeddedFS embed.FS, pvmBackend string, stateDB *
 	}
 
 	bundles = make([]*RefineBundleQA, 0)
-	numVariantsPerSnapshot := 10 // Generate 10 variants per snapshot for testing
+	//numVariantsPerSnapshot := 10 // Generate 10 variants per snapshot for testing
 
 	// First, generate all variants for each snapshot
-	allVariants := make([][]*RefineBundleQA, len(bundleSnapshots))
-	for i, snapshot := range bundleSnapshots {
-		bundleVariants, err := ConvertSnapshotToMultipleRefineBundleQA(snapshot, stfs, numVariantsPerSnapshot, pvmBackend, stateDB)
-		if err != nil {
-			log.Printf("Error converting snapshot for slot %d: %v", snapshot.Slot, err)
-			continue
+	//allVariants := make([][]*RefineBundleQA, len(bundleSnapshots))
+	/*
+		for i, snapshot := range bundleSnapshots {
+			bundleVariants, err := ConvertSnapshotToMultipleRefineBundleQA(snapshot, stfs, numVariantsPerSnapshot, pvmBackend, stateDB)
+			if err != nil {
+				log.Printf("Error converting snapshot for slot %d: %v", snapshot.Slot, err)
+				continue
+			}
+			allVariants[i] = bundleVariants
 		}
-		allVariants[i] = bundleVariants
-	}
 
-	maxVariants := numVariantsPerSnapshot
-	for variantIndex := 0; variantIndex < maxVariants; variantIndex++ {
-		for _, variants := range allVariants {
-			if variantIndex < len(variants) {
-				bundles = append(bundles, variants[variantIndex])
+		maxVariants := numVariantsPerSnapshot
+		for variantIndex := 0; variantIndex < maxVariants; variantIndex++ {
+			for _, variants := range allVariants {
+				if variantIndex < len(variants) {
+					bundles = append(bundles, variants[variantIndex])
+				}
 			}
 		}
-	}
-
+	*/
 	fmt.Printf("Generated %d total RefineBundleQA test cases from %d embedded snapshots\n", len(bundles), len(bundleSnapshots))
 
 	return bundles, stfs, nil
