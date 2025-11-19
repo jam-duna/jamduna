@@ -102,3 +102,4 @@ cmd/duna_fuzzer/refine/.DS_Store
 /stf
 /.gocache
 node/service_*.pvm
+/nomt_db

@@ -111,17 +111,8 @@ func TestBPTE2E(t *testing.T) {
 		numKeys := len(snapshot.PreState.KeyVals)
 		totalKeys += numKeys
 
-		// Initialize temporary levelDB
-		dbPath := "/tmp/bpt_trace_verify_test_" + filename
-		DeleteLevelDB(dbPath)
-		db, err := InitLevelDB(dbPath)
-		if err != nil {
-			t.Errorf("%s: Failed to init levelDB: %v", filename, err)
-			continue
-		}
-
 		// Phase 1: Build tree and verify state root
-		tree := NewMerkleTree(nil, db)
+		tree := NewMerkleTree(nil)
 		for _, kv := range snapshot.PreState.KeyVals {
 			key := kv.Key[:]
 			value := kv.Value
@@ -130,8 +121,6 @@ func TestBPTE2E(t *testing.T) {
 		actualRoot, _ := tree.Flush()
 		if actualRoot != expectedRoot {
 			t.Errorf("%s: State root mismatch!\n  Got:      %s\n  Expected: %s", filename, actualRoot, expectedRoot)
-			db.Close()
-			DeleteLevelDB(dbPath)
 			totalFailures += numKeys
 			continue
 		} else {
@@ -171,10 +160,6 @@ func TestBPTE2E(t *testing.T) {
 				successCount++
 			}
 		}
-
-		// Cleanup
-		db.Close()
-		DeleteLevelDB(dbPath)
 
 		if failCount > 0 {
 			t.Errorf("%s: %d/%d verifications FAILED", filename, failCount, numKeys)

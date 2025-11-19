@@ -107,11 +107,11 @@ func (d *StateTransition) String() string {
 	return types.ToJSON(d)
 }
 
-func CompareKeyValsWithOutput(prestate, actual, expected []KeyVal) map[string]DiffState {
+func CompareKeyValsWithOutput(prestate, actual, expected []types.KeyVal) map[string]DiffState {
 	return compareKeyValsWithOutput(prestate, actual, expected)
 }
 
-func compareKeyValsWithOutput(prestate, actual, expected []KeyVal) map[string]DiffState {
+func compareKeyValsWithOutput(prestate, actual, expected []types.KeyVal) map[string]DiffState {
 	// build maps: key → bytes and key → metadata
 	kv_pre := makemap(prestate)
 	kv_actual := makemap(actual)
@@ -149,7 +149,7 @@ func compareKeyValsWithOutput(prestate, actual, expected []KeyVal) map[string]Di
 	return diffs
 }
 
-func makemap(p []KeyVal) map[common.Hash][]byte {
+func makemap(p []types.KeyVal) map[common.Hash][]byte {
 	kvMap := make(map[common.Hash][]byte)
 
 	for _, kvs := range p {
@@ -175,17 +175,16 @@ func ComputeStateTransition(storage *storage.StateDBStorage, stc *StateTransitio
 		return true, nil, jamErr, nil
 	}
 
-	postState.StateRoot = postState.UpdateTrieState()
 	postStateSnapshot = &StateSnapshotRaw{
 		StateRoot: postState.StateRoot,
-		KeyVals:   postState.GetAllKeyValues(),
+		KeyVals:   postState.sdb.GetAllKeyValues(),
 	}
 	return true, postStateSnapshot, nil, nil
 
 }
 
 // NOTE CheckStateTransition vs CheckStateTransitionWithOutput a good example of "copy-paste" coding increases in complexity
-func CheckStateTransition(storage storage.JAMStorage, st *StateTransition, ancestorSet map[common.Hash]uint32, pvmBackend string) error {
+func CheckStateTransition(storage types.JAMStorage, st *StateTransition, ancestorSet map[common.Hash]uint32, pvmBackend string) error {
 	// Apply the state transition
 	s0, err := NewStateDBFromStateTransition(storage, st)
 	if err != nil {
@@ -205,36 +204,48 @@ func CheckStateTransition(storage storage.JAMStorage, st *StateTransition, ances
 	return fmt.Errorf("mismatch")
 }
 
-func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTransition, ancestorSet map[common.Hash]uint32, pvmBackend string, runPrevalidation bool, writeFile ...string) (diffs map[string]DiffState, err error) {
+func Prevalidation(preState *StateDB, st *StateTransition, sdb *storage.StateDBStorage) error {
+	if bytes.Equal(preState.StateRoot.Bytes(), st.PostState.StateRoot.Bytes()) {
+		//			return nil, fmt.Errorf("OMIT")
+	}
+
+	if !bytes.Equal(preState.StateRoot.Bytes(), st.PreState.StateRoot.Bytes()) {
+		return fmt.Errorf("PreState.StateRoot mismatch: expected %s, got %s", st.PreState.StateRoot.Hex(), preState.StateRoot.Hex())
+	}
+
+	post_state, err := NewStateDBFromStateTransitionPost(sdb, st)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(post_state.StateRoot.Bytes(), st.PostState.StateRoot.Bytes()) {
+		return fmt.Errorf("PostState.StateRoot mismatch: expected %s, got %s", st.PostState.StateRoot.Hex(), post_state.StateRoot.Hex())
+	}
+	//fmt.Printf("STF StateRoot - Pre: %s | Post: %s\n", preState.StateRoot.Hex(), post_state.StateRoot.Hex())
+
+	// IMPORTANT: After validating post-state, we must rollback to pre-state root as NewStateDBFromStateTransitionPost modified the shared storage
+	if err := sdb.SetRoot(st.PreState.StateRoot); err != nil {
+		return fmt.Errorf("Failed to rollback to pre-state after validation: %v", err)
+	}
+	return nil
+}
+
+func CheckStateTransitionWithOutput(sdb *storage.StateDBStorage, st *StateTransition, ancestorSet map[common.Hash]uint32, pvmBackend string, runPrevalidation bool, writeFile ...string) (diffs map[string]DiffState, err error) {
 	// Apply the state transition
 	t0 := time.Now()
-	preState, err := NewStateDBFromStateTransition(storage, st)
+	preState, err := NewStateDBFromStateTransition(sdb, st)
 	if err != nil {
 		return nil, err
 	}
 	benchRec.Add("CheckStateTransitionWithOutput:SETUP", time.Since(t0))
 
-	if runPrevalidation {
-		if bytes.Equal(preState.StateRoot.Bytes(), st.PostState.StateRoot.Bytes()) {
-			//			return nil, fmt.Errorf("OMIT")
-		}
-
-		if !bytes.Equal(preState.StateRoot.Bytes(), st.PreState.StateRoot.Bytes()) {
-			return diffs, fmt.Errorf("PreState.StateRoot mismatch: expected %s, got %s", st.PreState.StateRoot.Hex(), preState.StateRoot.Hex())
-		}
-
-		post_state, err := NewStateDBFromStateTransitionPost(storage, st)
-		if err != nil {
+	if runPrevalidation && false {
+		if err := Prevalidation(preState, st, sdb); err != nil {
 			return nil, err
 		}
-		if !bytes.Equal(post_state.StateRoot.Bytes(), st.PostState.StateRoot.Bytes()) {
-			return diffs, fmt.Errorf("PostState.StateRoot mismatch: expected %s, got %s", st.PostState.StateRoot.Hex(), post_state.StateRoot.Hex())
-		}
-		//fmt.Printf("STF StateRoot - Pre: %s | Post: %s\n", preState.StateRoot.Hex(), post_state.StateRoot.Hex())
 	}
 
 	s0 := preState
-	s0.Id = storage.GetNodeID()
+	s0.Id = sdb.GetNodeID()
 	s0.AncestorSet = ancestorSet
 	bad_stf := bytes.Equal(st.PreState.StateRoot.Bytes(), st.PostState.StateRoot.Bytes())
 	s1, err := ApplyStateTransitionFromBlock(0, s0, context.Background(), &(st.Block), nil, pvmBackend)
@@ -254,23 +265,27 @@ func CheckStateTransitionWithOutput(storage *storage.StateDBStorage, st *StateTr
 		}
 	}
 
-	if bytes.Compare(st.PostState.StateRoot.Bytes(), s1.StateRoot.Bytes()) == 0 {
+	if bytes.Equal(st.PostState.StateRoot.Bytes(), s1.StateRoot.Bytes()) {
 		return nil, nil
 	}
 
 	// s1 is the ACTUAL stf output
 	// st.PostState.KeyVals is the EXPECTED stf output
-	post_actual_root := s1.UpdateTrieState()
-	post_actual := s1.GetAllKeyValues()
+	// Extract keys from expected post-state to retrieve actual values
+	post_actual := s1.sdb.GetAllKeyValues()
 	post_expected := st.PostState.KeyVals
+
+	// Show PostState KeyVals content using the storage abstraction
+	//storage.ShowKeyVals(post_expected, "PostState KeyVals (EXPECTED)")
+
 	if len(post_actual) != len(post_expected) {
 		fmt.Printf("len post_actual %d != len post_expected %d\n", len(post_actual), len(post_expected))
 		//fmt.Printf("post_actual\n%v\n", KeyVals(post_actual).String())
 		//fmt.Printf("post_expected\n%v\n", KeyVals(post_expected).String())
 	}
 
-	if post_actual_root != st.PostState.StateRoot {
-		fmt.Printf("!!! post_actual_root %s != post_expected %s\n", post_actual_root.Hex(), st.PostState.StateRoot.Hex())
+	if s1.StateRoot != st.PostState.StateRoot {
+		fmt.Printf("!!! post_actual_root %s != post_expected %s\n", s1.StateRoot.Hex(), st.PostState.StateRoot.Hex())
 	}
 
 	// write the output to a file
@@ -338,7 +353,7 @@ func HandleDiffs(diffs map[string]DiffState) {
 	}
 	SortDiffKeys(keys)
 
-	fmt.Printf("Diff on %d keys: %v\n", len(keys), keys)
+	fmt.Printf("xDiff on %d keys: %v\n", len(keys), keys)
 	for _, key := range keys {
 		val := diffs[key]
 

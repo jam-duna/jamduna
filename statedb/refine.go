@@ -280,7 +280,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 		// Update payload metadata if it's PayloadTransactions format
 		if len(wp.WorkItems[index].Payload) >= 1 && bytes.Equal(wp.WorkItems[index].Payload[:1], types.PayloadTransactions) {
 			totalWitnessCount := uint16(builderWitnessCount)
-			wp.WorkItems[index].Payload = buildPayload(PayloadTypeBuilder, int(originalTxCount), int(totalWitnessCount))
+			wp.WorkItems[index].Payload = BuildPayload(PayloadTypeBuilder, int(originalTxCount), int(totalWitnessCount))
 		}
 
 		// Append exported segments (append slice directly)

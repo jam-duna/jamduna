@@ -15,8 +15,6 @@ import (
 	"github.com/colorfulnotion/jam/common"
 )
 
-const debugBPT = false
-
 // TestVector represents a test case in the JSON file
 type TestVector struct {
 	Input  map[string]string `json:"input"`
@@ -35,8 +33,7 @@ func TestEdgeCases(t *testing.T) {
 	data := [][2][]byte{
 		{hex2Bytes("0200000000000000000000000000000000000000000000000000000000000000"), hex2Bytes("0000000000000000000000000000000000000000000000000000")},
 	}
-	test_db, _ := initLevelDB()
-	tree := NewMerkleTree(nil, test_db)
+	tree := NewMerkleTree(nil)
 
 	for _, item := range data {
 		tree.Insert(item[0], item[1])
@@ -63,8 +60,8 @@ func TestTrace(t *testing.T) {
 		{hex2Bytes("7723a8383e43a1713eb920bae44880b2ae9225ea2d38c031cf3b22434b4507e7"), hex2Bytes("e46ddd41a5960807d528f5d9282568e622a023b94b72cb63f0353baff189257d")},
 		{hex2Bytes("3e7d409b9037b1fd870120de92ebb7285219ce4526c54701b888c5a13995f73c"), hex2Bytes("9bc5d0")},
 	}
-	test_db, _ := initLevelDB()
-	tree := NewMerkleTree(nil, test_db)
+
+	tree := NewMerkleTree(nil)
 
 	for _, item := range data {
 		tree.Insert(item[0], item[1])
@@ -83,12 +80,12 @@ func TestTrace(t *testing.T) {
 		t.Error("Expected a non-empty trace, got empty")
 	}
 	path, _ := tree.GetPath(hex2Bytes("5dffe0e2c9f089d30e50b04ee562445cf2c0e7e7d677580ef0ccf2c6fa3522dd"))
-	tree.Close()
+
 	if debugBPT {
 		fmt.Printf("GetPath %x\n", path)
 		t.Logf("Trace path: %x\n", trace)
 	}
-	DeleteLevelDB()
+
 }
 
 func TestMerkleTree(t *testing.T) {
@@ -117,8 +114,7 @@ func TestMerkleTree(t *testing.T) {
 		var rootHash []byte
 
 		// Create an empty Merkle Tree
-		test_db, _ := initLevelDB()
-		tree := NewMerkleTree(nil, test_db)
+		tree := NewMerkleTree(nil)
 
 		if isSerialized {
 			// Insert key-value pairs one by one
@@ -181,9 +177,9 @@ func TestMerkleTree(t *testing.T) {
 			}
 		}
 		// os.RemoveAll(dbPath) // Clean up the LevelDB folder(if needed)
-		tree.Close()
+
 	}
-	DeleteLevelDB()
+
 }
 
 func TestBPTProofSimple(t *testing.T) {
@@ -204,9 +200,7 @@ func TestBPTProofSimple(t *testing.T) {
 	exceptedRootHash := hex2Bytes("511727325a0cd23890c21cda3c6f8b1c9fbdf37ed57b9a85ca77286356183dcf")
 
 	// Create an empty Merkle Tree
-	//level_db_path := "../leveldb/BPT"
-	test_db, _ := initLevelDB()
-	tree := NewMerkleTree(nil, test_db)
+	tree := NewMerkleTree(nil)
 	if debugBPT {
 		fmt.Printf("initial rootHash: %v\n", tree.GetRoot())
 	}
@@ -277,8 +271,6 @@ func TestBPTProofSimple(t *testing.T) {
 			fmt.Printf("Proof for key [%x] with invalid value is invalid.\n", invalidValue)
 		}
 	}
-	tree.Close()
-	DeleteLevelDB()
 }
 
 func TestBPTProof(t *testing.T) {
@@ -294,8 +286,7 @@ func TestBPTProof(t *testing.T) {
 	exceptedRootHash := hex2Bytes("b9c99f66e5784879a178795b63ae178f8a49ee113652a122cd4b3b2a321418c1")
 	// Create an empty Merkle Tree
 	//level_db_path := "../leveldb/BPT"
-	test_db, _ := initLevelDB()
-	tree := NewMerkleTree(nil, test_db)
+	tree := NewMerkleTree(nil)
 	if debugBPT {
 		fmt.Printf("initial rootHash: %x\n", tree.GetRoot().Bytes())
 	}
@@ -364,8 +355,6 @@ func TestBPTProof(t *testing.T) {
 			fmt.Printf("Proof for key [%x] with invalid value is invalid.\n", invalidValue)
 		}
 	}
-	tree.Close()
-	DeleteLevelDB()
 }
 
 func TestGet(t *testing.T) {
@@ -376,8 +365,7 @@ func TestGet(t *testing.T) {
 	}
 
 	// Create an empty Merkle Tree
-	test_db, _ := initLevelDB()
-	tree := NewMerkleTree(nil, test_db)
+	tree := NewMerkleTree(nil)
 	if debugBPT {
 		fmt.Printf("initial rootHash: %x\n", tree.GetRoot().Bytes())
 	}
@@ -421,8 +409,6 @@ func TestGet(t *testing.T) {
 		}
 	}
 
-	tree.Close()
-	DeleteLevelDB()
 }
 
 func TestModifyGenesis(t *testing.T) {
@@ -470,9 +456,7 @@ func TestModifyGenesis(t *testing.T) {
 			var rootHash []byte
 
 			// Create an empty Merkle Tree
-			test_db, _ := initLevelDB()
-			tree := NewMerkleTree(nil, test_db)
-
+			tree := NewMerkleTree(nil)
 			if debugBPT {
 				fmt.Printf("initial rootHash:%x \n", tree.GetRoot().Bytes())
 			}
@@ -503,10 +487,9 @@ func TestModifyGenesis(t *testing.T) {
 				t.Logf("Test case %d in file %s: Vector OK, rootHash=%x", i, filePath, expectedHash)
 			}
 			//tree.PrintTree(tree.Root, 0)
-			tree.Close()
+
 		}
 	}
-	DeleteLevelDB()
 }
 
 func TestModify(t *testing.T) {
@@ -543,8 +526,7 @@ func TestModify(t *testing.T) {
 		var rootHash []byte
 
 		// Create an empty Merkle Tree
-		test_db, _ := initLevelDB()
-		tree := NewMerkleTree(nil, test_db)
+		tree := NewMerkleTree(nil)
 
 		if debugBPT {
 			fmt.Printf("initial rootHash:%x \n", tree.GetRoot().Bytes())
@@ -575,9 +557,9 @@ func TestModify(t *testing.T) {
 		} else {
 			t.Logf("Test case %d: Vector OK, rootHash=%x", i, expectedHash)
 		}
-		tree.Close()
+
 	}
-	DeleteLevelDB()
+
 }
 
 func truncateValue(value []byte) string {
@@ -629,8 +611,7 @@ func TestDelete(t *testing.T) {
 			}
 		}
 
-		test_db, _ := initLevelDB()
-		tree := NewMerkleTree(nil, test_db)
+		tree := NewMerkleTree(nil)
 
 		// Record root hashes after each insertion
 		var rootHashes [][]byte
@@ -678,15 +659,11 @@ func TestDelete(t *testing.T) {
 		if debugBPT && !isFailure {
 			fmt.Printf("testCase %d Success\n\n", i)
 		}
-		tree.Close()
 	}
-
-	DeleteLevelDB()
 }
 
 func TestStateKey(t *testing.T) {
-	test_db, _ := initLevelDB()
-	tree := NewMerkleTree(nil, test_db)
+	tree := NewMerkleTree(nil)
 	var rootHash common.Hash
 	var err error
 	if err != nil {
@@ -705,59 +682,14 @@ func TestStateKey(t *testing.T) {
 		}
 		//tree.printTree(tree.Root, 0)
 	}
-	tree.Close()
-	DeleteLevelDB()
-}
-
-// TestInitial tests the initialization of a Merkle tree from a root hash
-func TestInitial(t *testing.T) {
-
-	data := [][2][]byte{
-		{hex2Bytes("5dffe0e2c9f089d30e50b04ee562445cf2c0e7e7d677580ef0ccf2c6fa3522dd"), hex2Bytes("bb11c256876fe10442213dd78714793394d2016134c28a64eb27376ddc147fc6044df72bdea44d9ec66a3ea1e6d523f7de71db1d05a980e001e9fa")},
-		{hex2Bytes("df08871e8a54fde4834d83851469e635713615ab1037128df138a6cd223f1242"), hex2Bytes("b8bded4e1c")},
-		{hex2Bytes("7723a8383e43a1713eb920bae44880b2ae9225ea2d38c031cf3b22434b4507e7"), hex2Bytes("e46ddd41a5960807d528f5d9282568e622a023b94b72cb63f0353baff189257d")},
-		{hex2Bytes("3e7d409b9037b1fd870120de92ebb7285219ce4526c54701b888c5a13995f73c"), hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")},
-		{hex2Bytes("0200000000000000000000000000000000000000000000000000000000000000"), hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")},
-		{hex2Bytes("0300000000000000000000000000000000000000000000000000000000000000"), hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")},
-		{hex2Bytes("0D00000000000000000000000000000000000000000000000000000000000000"), hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")},
-		{hex2Bytes("0100000000000000000000000000000000000000000000000000000000000000"), hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")},
-	}
-
-	// Build the initial tree and insert the data
-	test_db, _ := initLevelDB()
-	tree := NewMerkleTree(nil, test_db)
-	for _, item := range data {
-		tree.Insert(item[0], item[1])
-	}
-
-	if debugBPT {
-		tree.printTree(tree.Root, 0)
-	}
-	// Get the root hash of the tree
-	rootHash := tree.GetRoot()
-
-	// Rebuild the recovered tree (rt) from the root hash
-	rt, err := InitMerkleTreeFromHash(rootHash, test_db)
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-
-	if debugBPT {
-		rt.printTree(rt.Root, 0)
-	}
-	// Compare the initial tree with the reconstructed tree
-	if !compareTrees(tree.Root, rt.Root) {
-		t.Error("The reconstructed tree does not match the initial tree")
-	}
-	DeleteLevelDB()
 }
 
 // Test service
 func TestService(t *testing.T) {
 
 	// Build the initial tree and insert the data
-	test_db, _ := initLevelDB()
-	tree := NewMerkleTree(nil, test_db)
+
+	tree := NewMerkleTree(nil)
 	value1 := PadToMultipleOfN([]byte{1}, 68)
 	value2 := PadToMultipleOfN([]byte{1, 2}, 68)
 	value3 := PadToMultipleOfN([]byte{1, 2, 3}, 68)
@@ -782,8 +714,8 @@ func TestService(t *testing.T) {
 func TestServicePreImage_lookup(t *testing.T) {
 
 	// Build the initial tree and insert the data
-	test_db, _ := initLevelDB()
-	tree := NewMerkleTree(nil, test_db)
+
+	tree := NewMerkleTree(nil)
 
 	case_a := []byte{1}
 	case_b := []byte{1, 2}
@@ -827,8 +759,8 @@ func TestServicePreImage_lookup(t *testing.T) {
 func TestServicePreImage_blob(t *testing.T) {
 	t.Skip("Skipping PreImage_blob test - not robust yet")
 	// Build the initial tree and insert the data
-	test_db, _ := initLevelDB()
-	tree := NewMerkleTree(nil, test_db)
+
+	tree := NewMerkleTree(nil)
 
 	tree.SetPreImageBlob(42, []byte{1})
 	tree.SetPreImageBlob(43, []byte{1, 2})
@@ -884,8 +816,7 @@ func TestServicePreImage_blob(t *testing.T) {
 func TestServiceStorage(t *testing.T) {
 
 	// Build the initial tree and insert the data
-	test_db, _ := initLevelDB()
-	tree := NewMerkleTree(nil, test_db)
+	tree := NewMerkleTree(nil)
 
 	k42 := common.ServiceStorageKey(42, []byte{1})
 	k43 := common.ServiceStorageKey(43, []byte{1, 2})
@@ -923,15 +854,13 @@ func TestServiceStorage(t *testing.T) {
 		fmt.Println("Storage2", Storage2)
 		fmt.Println("Storage3", Storage3)
 	}
-	tree.Close()
-	DeleteLevelDB()
+
 }
 
 // Test TestLevelDB
 func TestLevelDB(t *testing.T) {
 	// Initialize the LevelDB
-	test_db, _ := initLevelDB()
-	tree := NewMerkleTree(nil, test_db)
+	tree := NewMerkleTree(nil)
 
 	// Test data
 	data := [][2][]byte{

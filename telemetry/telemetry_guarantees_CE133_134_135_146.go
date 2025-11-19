@@ -7,6 +7,14 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+// Type aliases to use types from types package
+type WorkItemOutline = types.WorkItemOutline
+type WorkPackageOutline = types.WorkPackageOutline
+type WorkReportOutline = types.WorkReportOutline
+type GuaranteeOutline = types.GuaranteeOutline
+type IsAuthorizedCost = types.IsAuthorizedCost
+type RefineCost = types.RefineCost
+
 /*
 ## Guaranteeing events
 
@@ -20,15 +28,7 @@ These events concern the guaranteeing pipeline and guarantee pool.
 */
 
 // WorkItemOutline represents the outline of a work item
-type WorkItemOutline struct {
-	ServiceID          uint32   // Service ID
-	PayloadSize        uint32   // Payload size
-	RefineGasLimit     uint64   // Refine gas limit
-	AccumulateGasLimit uint64   // Accumulate gas limit
-	ExtrinsicsLength   uint32   // Sum of extrinsic lengths
-	ImportSpecs        [][]byte // Import specifications (encoded)
-	NumExportedSegs    uint16   // Number of exported segments
-}
+// WorkItemOutline is now aliased from types package
 
 /*
    Work-Package Outline =
@@ -40,15 +40,7 @@ type WorkItemOutline struct {
        len++[Work-Item Outline]
 */
 // WorkPackageOutline represents the outline of a work package
-type WorkPackageOutline struct {
-	SizeInBytes      uint32            // Work-package size in bytes, excluding extrinsic data
-	WorkPackageHash  common.Hash       // Work-Package Hash
-	AnchorHash       common.Hash       // Header Hash (Anchor)
-	LookupAnchorSlot uint32            // Slot (Lookup anchor slot)
-	Prerequisites    []common.Hash     // Prerequisites
-	WorkItems        []WorkItemOutline // Work items
-}
-
+// WorkPackageOutline is now aliased from types package
 // WorkReportOutline represents the outline of a work report
 /*
    Work-Report Outline =
@@ -57,13 +49,7 @@ type WorkPackageOutline struct {
        Erasure-Root ++
        Segments-Root
 */
-type WorkReportOutline struct {
-	WorkReportHash common.Hash // Work-Report Hash
-	BundleSize     uint32      // Bundle size in bytes
-	ErasureRoot    common.Hash // Erasure-Root
-	SegmentsRoot   common.Hash // Segments-Root
-}
-
+// WorkReportOutline is now aliased from types package
 // GuaranteeOutline represents the outline of a guarantee
 /*
    Guarantee Outline =
@@ -71,12 +57,7 @@ type WorkReportOutline struct {
        Slot ++
        len++[Validator Index] (Guarantors)
 */
-type GuaranteeOutline struct {
-	WorkReportHash common.Hash // Work-Report Hash
-	Slot           uint32      // Slot
-	Guarantors     []uint16    // Validator indices of guarantors
-}
-
+// GuaranteeOutline is now aliased from types package
 // encodeGuaranteeOutline encodes a GuaranteeOutline
 func encodeGuaranteeOutline(outline GuaranteeOutline) []byte {
 	var payload []byte
@@ -146,14 +127,7 @@ func encodeWorkPackageOutline(outline WorkPackageOutline) []byte {
 }
 
 // IsAuthorizedCost represents the cost of is-authorized check
-type IsAuthorizedCost struct {
-	TotalGasUsed      uint64 // Total gas used
-	TotalTimeNs       uint64 // Total elapsed wall-clock time in nanoseconds
-	LoadCompileTimeNs uint64 // Time taken to load and compile the code, in nanoseconds
-	HostCallsGasUsed  uint64 // Gas used by host calls
-	HostCallsTimeNs   uint64 // Time spent in host calls in nanoseconds
-}
-
+// IsAuthorizedCost is now aliased from types package
 /*
    Refine Cost =
        Exec Cost (Total) ++
@@ -165,22 +139,7 @@ type IsAuthorizedCost struct {
        Exec Cost (Other host calls)
 */
 // RefineCost represents the cost of refine call
-type RefineCost struct {
-	TotalGasUsed           uint64 // Total gas used
-	TotalTimeNs            uint64 // Total elapsed wall-clock time in nanoseconds
-	LoadCompileTimeNs      uint64 // Time taken to load and compile the code, in nanoseconds
-	HistoricalLookupGas    uint64 // Gas for historical_lookup calls
-	HistoricalLookupTimeNs uint64 // Time for historical_lookup calls
-	MachineExpungeGas      uint64 // Gas for machine/expunge calls
-	MachineExpungeTimeNs   uint64 // Time for machine/expunge calls
-	PeekPokeGas            uint64 // Gas for peek/poke/pages calls
-	PeekPokeTimeNs         uint64 // Time for peek/poke/pages calls
-	InvokeGas              uint64 // Gas for invoke calls
-	InvokeTimeNs           uint64 // Time for invoke calls
-	OtherGas               uint64 // Gas for other host calls
-	OtherTimeNs            uint64 // Time for other host calls
-}
-
+// RefineCost is now aliased from types package
 /*
 ### 90: Work-package submission
 

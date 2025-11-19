@@ -224,7 +224,10 @@ func (n *Node) onAuditAnnouncement(ctx context.Context, stream quic.Stream, msg 
 			}
 		}
 
-		validator := audit_statedb.JamState.SafroleState.GetCurrValidator(int(peerID))
+		validator, err := audit_statedb.JamState.SafroleState.GetCurrValidator(int(peerID))
+		if err != nil {
+			return fmt.Errorf("onAuditAnnouncement: failed to get validator: %w", err)
+		}
 		bandersnatchPub := validator.Bandersnatch
 
 		ok, err = audit_statedb.Verify_s0(bandersnatch.BanderSnatchKey(bandersnatchPub[:]), evidenceBytes)
@@ -264,7 +267,10 @@ func (n *Node) onAuditAnnouncement(ctx context.Context, stream quic.Stream, msg 
 			}
 		}
 
-		validator := audit_statedb.JamState.SafroleState.GetCurrValidator(int(peerID))
+		validator, err := audit_statedb.JamState.SafroleState.GetCurrValidator(int(peerID))
+		if err != nil {
+			return fmt.Errorf("onAuditAnnouncement: failed to get validator: %w", err)
+		}
 		bandersnatchPub := validator.Bandersnatch
 		for _, evidence := range evidenceSN {
 			signature := evidence.Signature

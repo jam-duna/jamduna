@@ -47,6 +47,12 @@ func (n *Node) generateAssurance(headerHash common.Hash, timeslot uint32) (a typ
 	n.telemetryClient.AssuranceProvided(a)
 	return
 }
+func (n *NodeContent) GetRefineContext() (types.RefineContext, error) {
+	return n.statedb.GetRefineContext(), nil
+}
+func (n *NodeContent) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
+	return n.statedb.BuildBundle(workPackage, extrinsicsBlobs, coreIndex, rawObjectIDs, n.pvmBackend)
+}
 
 // upon audit, this does CE138 AND CE139 calls to ALL Assurers
 func (n *NodeContent) FetchAllBundleAndSegmentShards(coreIdx uint16, erasureRoot common.Hash, exportedSegmentLength uint16, verify bool, eventID uint64) {

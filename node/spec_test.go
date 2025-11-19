@@ -95,7 +95,7 @@ func testAvailabilitySpec(t *testing.T, exportCount uint16) {
 		SShards:          schunks,
 		AvailabilitySpec: availabilitySpecifier,
 	}
-	fn := fmt.Sprintf("spec-exportcount-%d.json", exportCount)
+	fn := fmt.Sprintf("test/spec-exportcount-%d.json", exportCount)
 	// Save tc in a JSON file
 	jsonData, err := json.MarshalIndent(tc, "", "  ")
 	if err != nil {

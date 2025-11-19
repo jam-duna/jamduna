@@ -18,7 +18,7 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint64, network string, addresses []string) (trace *StateTransition, err error) {
+func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, network string, addresses []string) (trace *StateTransition, err error) {
 	statedb, err := newStateDB(sdb, common.Hash{})
 	if err != nil {
 		return
@@ -214,11 +214,8 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 		}
 	}
 
-	// Flush service blobs to levelDB before calling UpdateTrieState
-	log.Info(log.SDB, "Genesis: Flushing service blobs to levelDB")
-	if _, err := statedb.trie.Flush(); err != nil {
-		return nil, fmt.Errorf("failed to flush service blobs: %w", err)
-	}
+	// Flush service blobs
+	log.Info(log.SDB, "Genesis: Flush")
 
 	fmt.Printf("Bootstrap AuthorizationHash: %v\n", auth_code_hash_hash) //p_a
 	fmt.Printf("Bootstrap AuthorizationCodeHash: %v\n", auth_code_hash)  //p_u
@@ -228,7 +225,8 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 		}
 	}
 	statedb.JamState = j
-	statedb.StateRoot = statedb.UpdateTrieState()
+
+	root := statedb.Flush()
 
 	trace = &StateTransition{
 		PreState: StateSnapshotRaw{
@@ -263,8 +261,8 @@ func MakeGenesisStateTransition(sdb *storage.StateDBStorage, epochFirstSlot uint
 			},
 		},
 		PostState: StateSnapshotRaw{
-			StateRoot: statedb.StateRoot,
-			KeyVals:   statedb.GetAllKeyValues(),
+			StateRoot: root,
+			KeyVals:   statedb.sdb.GetAllKeyValues(),
 		},
 	}
 
@@ -320,7 +318,10 @@ func NewStateDBFromStateTransitionPost(sdb *storage.StateDBStorage, statetransit
 		return statedb, err
 	}
 	statedb.Block = &(statetransition.Block)
-	statedb.StateRoot = statedb.UpdateAllTrieStateRaw(statetransition.PostState) // NOTE: MK -- USE POSTSTATE
+	statedb.StateRoot, err = statedb.UpdateAllTrieStateRaw(statetransition.PostState) // NOTE: MK -- USE POSTSTATE
+	if err != nil {
+		return nil, fmt.Errorf("UpdateAllTrieStateRaw failed: %w", err)
+	}
 	statedb.JamState = NewJamState()
 	if err := statedb.InitTrieAndLoadJamState(statedb.StateRoot); err != nil {
 		return nil, err
@@ -333,7 +334,10 @@ func NewStateDBFromStateKeyVals(sdb *storage.StateDBStorage, stateKeyVals *State
 	if err != nil {
 		return statedb, err
 	}
-	statedb.StateRoot = statedb.UpdateAllTrieKeyVals(*stateKeyVals)
+	statedb.StateRoot, err = statedb.UpdateAllTrieKeyVals(*stateKeyVals)
+	if err != nil {
+		return nil, fmt.Errorf("UpdateAllTrieKeyVals failed: %w", err)
+	}
 	statedb.JamState = NewJamState()
 	if err := statedb.InitTrieAndLoadJamState(statedb.StateRoot); err != nil {
 		return nil, err
@@ -341,7 +345,7 @@ func NewStateDBFromStateKeyVals(sdb *storage.StateDBStorage, stateKeyVals *State
 	return statedb, nil
 }
 
-func NewStateDBFromStateTransition(sdb storage.JAMStorage, statetransition *StateTransition) (statedb *StateDB, err error) {
+func NewStateDBFromStateTransition(sdb types.JAMStorage, statetransition *StateTransition) (statedb *StateDB, err error) {
 	t0 := time.Now()
 
 	statedb, err = newStateDB(sdb, common.Hash{})
@@ -355,7 +359,10 @@ func NewStateDBFromStateTransition(sdb storage.JAMStorage, statetransition *Stat
 	if isGenesis && false {
 		statetransition.PreState = statetransition.PostState // Allow genesis stf to use poststate as prestate for first non-genesis block
 	}
-	statedb.StateRoot = statedb.UpdateAllTrieStateRaw(statetransition.PreState) // NOTE: MK -- USE PRESTATE
+	statedb.StateRoot, err = statedb.UpdateAllTrieStateRaw(statetransition.PreState) // NOTE: MK -- USE PRESTATE
+	if err != nil {
+		return nil, fmt.Errorf("UpdateAllTrieStateRaw failed: %w", err)
+	}
 	benchRec.Add("NewStateDBFromStateTransition:UpdateAllTrieStateRaw", time.Since(t0))
 	t0 = time.Now()
 	//fmt.Printf("NewStateDBFromStateTransition StateRoot: %s | isGenesis:%v\n", statedb.StateRoot.String(), isGenesis)

@@ -177,7 +177,7 @@ func ValidateStateTransitionFile(filename string, storageDir string, outputDir s
 		keys = append(keys, k)
 	}
 	SortDiffKeys(keys) // your helper that orders c1…cN first, then the rest
-	fmt.Printf("Diff on %d keys: %v\n", len(keys), keys)
+	fmt.Printf("yDiff on %d keys: %v\n", len(keys), keys)
 
 	// 5) walk each diff
 	for _, key := range keys {

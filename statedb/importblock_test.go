@@ -397,7 +397,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		backend = BackendGoInterpreter
 	}
-	backend = BackendGoInterpreter
+	//backend = BackendGoInterpreter
 	t.Logf("Using backend: %s", backend)
 
 	fileMap := make(map[string]string)
@@ -412,10 +412,10 @@ func TestSingleFuzzTrace(t *testing.T) {
 	fileMap["1763371379"] = "fuzz-reports/0.7.1/traces/1763371379/00000237.bin" // 9 keys, assign, transfer
 
 	// MC DOUBLE CHECK
-	// fileMap["1763371098"] = "fuzz-reports/0.7.1/traces/1763371098/00000005.bin" // Ok
-	// fileMap["1763372279"] = "fuzz-reports/0.7.1/traces/1763372279/00000034.bin" // Ok
-	// fileMap["1763370844"] = "fuzz-reports/0.7.1/traces/1763370844/00000002.bin" // Ok
-	// fileMap["1763372314"] = "fuzz-reports/0.7.1/traces/1763372314/00000092.bin" // Ok
+	fileMap["1763371098"] = "fuzz-reports/0.7.1/traces/1763371098/00000005.bin" // Ok
+	fileMap["1763372279"] = "fuzz-reports/0.7.1/traces/1763372279/00000034.bin" // Ok
+	fileMap["1763370844"] = "fuzz-reports/0.7.1/traces/1763370844/00000002.bin" // Ok
+	fileMap["1763372314"] = "fuzz-reports/0.7.1/traces/1763372314/00000092.bin" // Ok
 
 	// SN solved - hostRead memRead issue
 	fileMap["1763371865"] = "fuzz-reports/0.7.1/traces/1763371865/00000017.bin" // 2 keys (C13 ValidatorStatistics+random) checkpoints + ram access
@@ -429,6 +429,21 @@ func TestSingleFuzzTrace(t *testing.T) {
 	fileMap["1761553047"] = "fuzz-reports/0.7.1/traces/1761553047/00000006.bin"
 
 	fileMap["1761654584"] = "fuzz-reports/0.7.1/traces/1761654584/00000053.bin"
+
+	fileMap["1763488162"] = "fuzz-reports/0.7.1/traces/1763488162//00000017.bin"
+
+	fileMap["1761653246"] = "fuzz-reports/0.7.1/traces/1761653246/00006616.bin"
+	fileMap["1761653246-2"] = "fuzz-reports/0.7.1/traces/1761653246/00006617.bin"
+	fileMap["1761661586"] = "fuzz-reports/0.7.1/traces/1761661586/00003911.bin"
+	fileMap["1761661586-2"] = "fuzz-reports/0.7.1/traces/1761661586/00003912.bin"
+	fileMap["1761662449"] = "fuzz-reports/0.7.1/traces/1761662449/00002753.bin"
+	fileMap["1761662449-2"] = "fuzz-reports/0.7.1/traces/1761662449/00002754.bin"
+	fileMap["1761663151"] = "fuzz-reports/0.7.1/traces/1761663151/00003910.bin"
+	fileMap["1761663151-2"] = "fuzz-reports/0.7.1/traces/1761663151/00003911.bin"
+	fileMap["1763488465"] = "fuzz-reports/0.7.1/traces/1763488465/00001705.bin"
+
+	//TODO: C13, C16 mismatch
+	fileMap["1763489798"] = "fuzz-reports/0.7.1/traces/1763489798//00000950.bin"
 	PvmLogging = false
 	//	DebugHostFunctions = true
 	log.InitLogger("debug")
@@ -436,7 +451,11 @@ func TestSingleFuzzTrace(t *testing.T) {
 	// log.EnableModule("pvm_validator")
 	log.EnableModule(log.SDB)
 
-	tc := []string{"1763371127", "1763371379", "1763371865", "1763371341", "1763371531", "1763399245", "1763371998", "1761654584", "1761553047"}
+	//tc := []string{"1763371098", "1763372279", "1763370844", "1763372314", "1763488162"}
+	//tc := []string{"1763371127", "1763371379", "1763371865", "1763371341", "1763371531", "1763399245", "1763371998", "1761654584", "1761553047", "1763371098", "1763372279", "1763370844", "1763372314"}
+	//tc := []string{"1763489798"}
+	tc := []string{"1761653246", "1761653246-2", "1761661586", "1761661586-2", "1761662449", "1761662449-2", "1761663151", "1761663151-2", "1763488465"}
+
 	PvmLogging = false
 	for _, team := range tc {
 		filename, exists := fileMap[team]

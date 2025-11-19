@@ -1,8 +1,5 @@
 package telemetry
 
-import (
-	"github.com/colorfulnotion/jam/common"
-)
 
 // Telemetry event type discriminators as defined in JIP-3
 //
@@ -304,16 +301,4 @@ The node flags field should be treated as a bitmask. The following bits are defi
 All other bits should be set to 0.
 */
 
-// NodeInfo contains the information about the node to be sent to the telemetry server
-type NodeInfo struct {
-	JAMParameters     []byte      // JAM Parameters as returned by the fetch host call
-	GenesisHeaderHash common.Hash // Genesis header hash
-	PeerID            [32]byte    // Ed25519 public key
-	PeerAddress       [16]byte    // IPv6 address
-	PeerPort          uint16      // Port
-	NodeFlags         uint32      // Bitmask of node flags (bit 0: PVM recompiler=1, interpreter=0)
-	NodeName          string      // Name of node implementation (max 32 chars)
-	NodeVersion       string      // Version of node implementation (max 32 chars)
-	GrayPaperVersion  string      // Gray Paper version implemented (max 16 chars)
-	Note              string      // Freeform note (max 512 chars)
-}
+// NodeInfo is now aliased from types package in telemetry_client.go

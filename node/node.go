@@ -121,7 +121,7 @@ type NodeContent struct {
 
 	// Telemetry (JIP-3)
 	telemetryClient *telemetry.TelemetryClient
-	store           storage.JAMStorage
+	store           types.JAMStorage
 	// holds a map of the hash to the stateDB
 	statedbMap      map[common.Hash]*statedb.StateDB
 	statedbMapMutex sync.Mutex
@@ -1070,7 +1070,7 @@ func (n *Node) GetService(serviceIndex uint32) (sa *types.ServiceAccount, ok boo
 }
 
 func (n *Node) GetServiceStorage(serviceIndex uint32, k []byte) ([]byte, bool, error) {
-	return n.getState().GetTrie().GetServiceStorage(serviceIndex, k)
+	return n.store.GetServiceStorage(serviceIndex, k)
 }
 
 func (n *Node) ReadStateWitnessRef(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error) {
@@ -1125,13 +1125,13 @@ const (
 	maxRobustTries = 4
 )
 
-// RobustSubmitAndWaitForWorkPackages will retry SubmitAndWaitForWorkPackages up to 4 times
-func RobustSubmitAndWaitForWorkPackages(ctx context.Context, n JNode, reqs []*WorkPackageRequest) (*types.WorkReport, error) {
+// RobustSubmitAndWaitForWorkPackageBundles will retry SubmitAndWaitForWorkPackageBundles up to 4 times
+func RobustSubmitAndWaitForWorkPackageBundles(ctx context.Context, n JNode, reqs []*types.WorkPackageBundle) (*types.WorkReport, error) {
 	var lastErr error
-	log.Info(log.Node, "RobustSubmitAndWaitForWorkPackages START", "maxTries", maxRobustTries, "refineTimeout", RefineTimeout)
+	log.Info(log.Node, "RobustSubmitAndWaitForWorkPackageBundles START", "maxTries", maxRobustTries, "refineTimeout", RefineTimeout)
 
 	for attempt := 1; attempt <= maxRobustTries; attempt++ {
-		log.Info(log.Node, "RobustSubmitAndWaitForWorkPackages attempt", "attempt", attempt, "maxTries", maxRobustTries)
+		log.Info(log.Node, "RobustSubmitAndWaitForWorkPackageBundles attempt", "attempt", attempt, "maxTries", maxRobustTries)
 
 		// Use the caller's context directly, but with a reasonable per-attempt timeout
 		// If caller's timeout is long, allow longer per-attempt timeout
@@ -1150,14 +1150,14 @@ func RobustSubmitAndWaitForWorkPackages(ctx context.Context, n JNode, reqs []*Wo
 		attemptCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
 		defer cancel()
 
-		log.Info(log.Node, "RobustSubmitAndWaitForWorkPackages attempt timeout", "attempt", attempt, "timeout", attemptTimeout)
+		log.Info(log.Node, "RobustSubmitAndWaitForWorkPackageBundles attempt timeout", "attempt", attempt, "timeout", attemptTimeout)
 
 		startTime := time.Now()
-		hashes, err := n.SubmitAndWaitForWorkPackages(attemptCtx, reqs)
+		hashes, err := n.SubmitAndWaitForWorkPackageBundles(attemptCtx, reqs)
 		elapsed := time.Since(startTime)
 
 		if err == nil {
-			log.Info(log.Node, "RobustSubmitAndWaitForWorkPackages SUCCESS", "attempt", attempt, "elapsed", elapsed)
+			log.Info(log.Node, "RobustSubmitAndWaitForWorkPackageBundles SUCCESS", "attempt", attempt, "elapsed", elapsed)
 			wr, err := n.GetWorkReport(hashes[0])
 			if err != nil {
 				log.Error(log.Node, "GetWorkReport ERR", "err", err)
@@ -1166,11 +1166,11 @@ func RobustSubmitAndWaitForWorkPackages(ctx context.Context, n JNode, reqs []*Wo
 			return wr, nil
 		}
 		lastErr = err
-		log.Warn(log.Node, "RobustSubmitAndWaitForWorkPackages", "attempt", attempt, "elapsed", elapsed, "err", err)
+		log.Warn(log.Node, "RobustSubmitAndWaitForWorkPackageBundles", "attempt", attempt, "elapsed", elapsed, "err", err)
 
 		// Check if we should continue retrying
 		if attempt < maxRobustTries {
-			log.Info(log.Node, "RobustSubmitAndWaitForWorkPackages retrying", "nextAttempt", attempt+1, "backoffSeconds", 5)
+			log.Info(log.Node, "RobustSubmitAndWaitForWorkPackageBundles retrying", "nextAttempt", attempt+1, "backoffSeconds", 5)
 			// small backoff between retries
 			time.Sleep(5 * time.Second)
 		}
@@ -1178,108 +1178,53 @@ func RobustSubmitAndWaitForWorkPackages(ctx context.Context, n JNode, reqs []*Wo
 
 	return nil, fmt.Errorf("all retries failed after %d attempts: %w", maxRobustTries, lastErr)
 }
-func (n *Node) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPackageRequest) ([]common.Hash, error) {
-	log.Info(log.Node, "Node SubmitAndWaitForWorkPackages", "reqLen", len(reqs))
-	workPackageHashes := make([]common.Hash, len(reqs))
-	accumulated := make(map[common.Hash]bool)
-	identifierToIndex := make(map[string]int)
+func (n *Node) SubmitBundle(ctx context.Context, bundle *types.WorkPackageBundle) error {
+	log.Info(log.Node, "Node SubmitBundle")
 
-	// Initialize identifier map and build bundles to set RefineContext
-	for i, req := range reqs {
-		identifierToIndex[req.Identifier] = i
-	}
+	// TODO Populate prerequisite hashes
+	workPackageHash := bundle.WorkPackage.Hash()
 
-	// Populate prerequisite hashes
-	for _, req := range reqs {
-		if len(req.Prerequisites) == 0 {
-			continue
-		}
-		prereqHashes := make([]common.Hash, 0, len(req.Prerequisites))
-		for _, prereqID := range req.Prerequisites {
-			if idx, ok := identifierToIndex[prereqID]; ok {
-				prereqHashes = append(prereqHashes, reqs[idx].WorkPackage.Hash())
-			} else {
-				log.Warn(log.Node, "Unknown prerequisite identifier", "identifier", prereqID)
-			}
-		}
-		req.WorkPackage.RefineContext.Prerequisites = prereqHashes
-	}
-
-	// Compute hashes and track accumulation status
-	for i, req := range reqs {
-
-		if strings.Contains(strings.ToUpper(req.Identifier), "AUTH") || strings.Contains(strings.ToUpper(req.Identifier), "ALGO") {
-			req.WorkPackage.RefineContext = n.getRefineContext()
-			log.Info(log.Node, "SubmitAndWaitForWorkPackage RefineContext", "id", req.Identifier, "refineContext", req.WorkPackage.RefineContext.String())
-		}
-		hash := req.WorkPackage.Hash()
-		workPackageHashes[i] = hash
-		accumulated[hash] = false
-		log.Info(log.Node, "Prepared work package", "identifier", req.Identifier, "hash", hash.Hex(), "prerequisites", req.WorkPackage.RefineContext.Prerequisites)
-	}
-
-	// Submit each work package to a random peer on the assigned core
-	for _, req := range reqs {
-		//fmt.Printf("Submitting work package: %s\n", req.WorkPackage.String())
-		err := n.SubmitWPSameCore(req.WorkPackage, req.ExtrinsicsBlobs)
-		if err != nil {
-			log.Error(log.Node, "Work package submission failed", "identifier", req.Identifier, "hash", workPackageHashes[identifierToIndex[req.Identifier]].Hex(), "err", err)
-			return workPackageHashes, fmt.Errorf("work package submission failed for %s: %w", req.Identifier, err)
-		}
-		log.Info(log.Node, "Work package submitted", "identifier", req.Identifier, "hash", workPackageHashes[identifierToIndex[req.Identifier]].Hex())
+	//fmt.Printf("Submitting work package: %s\n", req.WorkPackage.String())
+	err := n.SubmitBundleSameCore(bundle)
+	if err != nil {
+		return err
 	}
 
 	// Wait for accumulation
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
-	log.Info(log.Node, "SubmitAndWaitForWorkPackages waiting for accumulation", "expectedCount", len(reqs), "hashes", func() []string {
-		var hashStrs []string
-		for _, h := range workPackageHashes {
-			hashStrs = append(hashStrs, h.Hex())
-		}
-		return hashStrs
-	}())
-
-	for accumulatedCount := 0; accumulatedCount < len(reqs); {
+	for {
 		select {
 		case <-ctx.Done():
-			log.Warn(log.Node, "SubmitAndWaitForWorkPackages context cancelled", "accumulatedCount", accumulatedCount, "expectedCount", len(reqs), "err", ctx.Err())
-			return workPackageHashes, ctx.Err()
+			log.Warn(log.Node, "SubmitAndWaitForWorkPackageBundles context cancelled", "err", ctx.Err())
+			return ctx.Err()
 		case <-ticker.C:
-			prevAccumulatedCount := accumulatedCount
 			for j := types.EpochLength - 1; j > 0; j-- {
 				history := n.statedb.JamState.AccumulationHistory[j]
 				if len(history.WorkPackageHash) > 0 {
 					log.Debug(log.Node, "Checking accumulation history slot", "n", n.id, "slot", j, "hashCount", len(history.WorkPackageHash))
 				}
 				for _, hash := range history.WorkPackageHash {
-					if seen, exists := accumulated[hash]; exists && !seen {
-						accumulated[hash] = true
-						accumulatedCount++
-						log.Info(log.Node, "Work package accumulated", "node", n.id, "hash", hash.Hex(), "slot", j, "count", accumulatedCount, "expectedCount", len(reqs))
+					if hash == workPackageHash {
+						log.Info(log.Node, "Work package accumulated", "node", n.id, "hash", hash.Hex(), "slot", j)
 					}
 				}
-			}
-			if accumulatedCount == prevAccumulatedCount {
-				log.Debug(log.Node, "No new accumulations found", "accumulatedCount", accumulatedCount, "expectedCount", len(reqs))
 			}
 		}
 	}
 
-	log.Info(log.Node, "All work packages accumulated")
-	return workPackageHashes, nil
 }
 
-func (n *Node) SubmitAndWaitForWorkPackage(ctx context.Context, wp *WorkPackageRequest) (common.Hash, error) {
-	//fmt.Printf("NODE SubmitAndWaitForWorkPackage %s\n", wp.WorkPackage.Hash())
-	err := n.SubmitWPSameCore(wp.WorkPackage, wp.ExtrinsicsBlobs)
+func (n *Node) SubmitAndWaitForWorkPackageBundle(ctx context.Context, b *types.WorkPackageBundle) (common.Hash, error) {
+	//fmt.Printf("NODE SubmitAndWaitForWorkPackageBundle %s\n", wp.WorkPackage.Hash())
+	err := n.SubmitBundleSameCore(b)
 	if err != nil {
-		log.Error(log.Node, "SubmitAndWaitForWorkPackage", "err", err, "id", wp.Identifier)
-		return common.Hash{}, fmt.Errorf("SubmitAndWaitForWorkPackage: %w", err)
+		log.Error(log.Node, "SubmitAndWaitForWorkPackageBundle", "err", err)
+		return common.Hash{}, fmt.Errorf("SubmitAndWaitForWorkPackageBundle: %w", err)
 	}
-	workPackageHash := wp.WorkPackage.Hash()
-	log.Info(log.Node, "SubmitAndWaitForWorkPackage SUBMITTED", "id", wp.Identifier, "workpackageHash", workPackageHash.Hex())
+	workPackageHash := b.WorkPackage.Hash()
+	log.Info(log.Node, "SubmitAndWaitForWorkPackageBundle SUBMITTED", "workpackageHash", workPackageHash.Hex())
 
 	jceManager, _ := n.GetJCEManager()
 	if jceManager != nil {
@@ -1323,18 +1268,31 @@ func (n *Node) SubmitAndWaitForWorkPackage(ctx context.Context, wp *WorkPackageR
 			for i := len(accumulationHistory) - 1; i >= 0; i-- {
 				for _, h := range accumulationHistory[i].WorkPackageHash {
 					if h == workPackageHash {
-						log.Info(log.Node, "SubmitAndWaitForWorkPackage ACCUMULATED", "id", wp.Identifier, "workpackageHash", workPackageHash.Hex())
+						log.Info(log.Node, "SubmitAndWaitForWorkPackageBundle ACCUMULATED", "workpackageHash", workPackageHash.Hex())
 						return workPackageHash, nil
 					}
 				}
 			}
 
 			if currJCE-initialJCE >= types.RecentHistorySize {
-				return workPackageHash, fmt.Errorf("SubmitAndWaitForWorkPackage: expired after %d JCEs", types.RecentHistorySize)
+				return workPackageHash, fmt.Errorf("SubmitAndWaitForWorkPackageBundle: expired after %d JCEs", types.RecentHistorySize)
 			}
 		}
 	}
 }
+
+func (n *Node) SubmitAndWaitForWorkPackageBundles(ctx context.Context, bundles []*types.WorkPackageBundle) ([]common.Hash, error) {
+	hashes := make([]common.Hash, len(bundles))
+	for i, bundle := range bundles {
+		hash, err := n.SubmitAndWaitForWorkPackageBundle(ctx, bundle)
+		if err != nil {
+			return hashes, err
+		}
+		hashes[i] = hash
+	}
+	return hashes, nil
+}
+
 func (n *NodeContent) SetJCEManager(jceManager *ManualJCEManager) (err error) {
 	n.jceManagerMutex.Lock()
 	defer n.jceManagerMutex.Unlock()
@@ -1413,8 +1371,8 @@ func (n *NodeContent) GetEd25519Key() types.Ed25519Key {
 	return n.nodeSelf.credential.Ed25519Pub
 }
 
-func (n *NodeContent) SubmitWPSameCore(wp types.WorkPackage, extrinsicsBlobs types.ExtrinsicsBlobs) (err error) {
-	workPackageHash := wp.Hash()
+func (n *NodeContent) SubmitBundleSameCore(b *types.WorkPackageBundle) (err error) {
+	workPackageHash := b.WorkPackage.Hash()
 	var coreIndex uint16
 
 	// Calculate slot based on JCE mode:
@@ -1443,20 +1401,20 @@ func (n *NodeContent) SubmitWPSameCore(wp types.WorkPackage, extrinsicsBlobs typ
 
 		}
 	}
-	log.Info(log.G, "SubmitWPSameCore SUBMISSION Start", "NODE", n.id, "validators", peers, "coreIndex", coreIndex, "slot", slot)
+	log.Info(log.G, "SubmitBundleSameCore SUBMISSION Start", "NODE", n.id, "validators", peers, "coreIndex", coreIndex, "slot", slot)
 
 	// if we want to process it ourselves, this should be true
 	allowSelfSubmission := false
 	if allowSelfSubmission {
 		n.workPackageQueue.Store(workPackageHash, &types.WPQueueItem{
-			WorkPackage:        wp,
+			WorkPackage:        b.WorkPackage,
 			CoreIndex:          coreIndex,
-			Extrinsics:         extrinsicsBlobs,
+			Extrinsics:         b.ExtrinsicData[0],
 			AddTS:              time.Now().Unix(),
 			NextAttemptAfterTS: time.Now().Unix(),
 			Slot:               slot, // IMPORTANT: this will be used as guarantee.Slot
 		})
-		log.Info(log.G, "SubmitWPSameCore SUBMISSION SELF", "coreIndex", coreIndex)
+		log.Info(log.G, "SubmitBundleSameCore SUBMISSION SELF", "coreIndex", coreIndex)
 		return nil
 	}
 	// now we can send to the other 2 nodes
@@ -1466,11 +1424,11 @@ func (n *NodeContent) SubmitWPSameCore(wp types.WorkPackage, extrinsicsBlobs typ
 				pubkey := assignment.Validator.Ed25519
 				peer, err := n.GetPeerInfoByEd25519(pubkey)
 				if err != nil {
-					log.Error(log.Node, "SubmitWPSameCore GetPeerInfoByEd25519", "err", err, "pubkey", pubkey)
+					log.Error(log.Node, "SubmitBundleSameCore GetPeerInfoByEd25519", "err", err, "pubkey", pubkey)
 				} else {
-					err = peer.SendWorkPackageSubmission(context.Background(), wp, extrinsicsBlobs, coreIndex)
+					err = peer.SendWorkPackageSubmission(context.Background(), b.WorkPackage, b.ExtrinsicData[0], coreIndex)
 					if err != nil {
-						log.Error(log.Node, "SubmitWPSameCore SendWorkPackageSubmission", "err", err, "pubkey", pubkey)
+						log.Error(log.Node, "SubmitBundleSameCore SendWorkPackageSubmission", "err", err, "pubkey", pubkey)
 					} else {
 						// we only want to process ONE
 						return nil
@@ -1479,7 +1437,7 @@ func (n *NodeContent) SubmitWPSameCore(wp types.WorkPackage, extrinsicsBlobs typ
 			}
 		}
 	}
-	return fmt.Errorf("SubmitWPSameCore: no peers found for coreIndex %d", coreIndex)
+	return fmt.Errorf("SubmitBundleSameCore: no peers found for coreIndex %d", coreIndex)
 }
 
 // this function will return the core workers of that core
@@ -2151,24 +2109,6 @@ func (n *Node) applyChildrenRecursively(ctx context.Context, node *types.BT_Node
 	return nil
 }
 
-func dumpStateDBKeyValues(db *statedb.StateDB, description string, nodeID uint16, slot uint32) {
-	kvList := db.GetAllKeyValues()
-	stateRoot := db.GetStateRoot()
-
-	var kvDump strings.Builder
-	kvDump.WriteString(fmt.Sprintf("\n[N%d][Slot=%d] ===== %s %d key-values (Root:%v)=====\n",
-		nodeID, slot, description, len(kvList), stateRoot))
-
-	for i, kv := range kvList {
-		valHash := common.Blake2Hash(kv.Value)
-		kvDump.WriteString(fmt.Sprintf("[N%d][Slot=%d][Key %d][ValHash] 0x%x -> %s Len=%d\n",
-			nodeID, slot, i, kv.Key, valHash.String_short(), len(kv.Value)))
-	}
-
-	kvDump.WriteString(fmt.Sprintf("[N%d][Slot=%d] ===== End of %s key-values =====\n", nodeID, slot, description))
-	//fmt.Print(kvDump.String())
-}
-
 func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) error {
 
 	nextBlock := nextBlockNode.Block
@@ -2203,7 +2143,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 		return fmt.Errorf("ApplyStateTransitionFromBlock failed: %w", err)
 	}
 	start = time.Now()
-	// newStateDB.GetAllKeyValues()
+
 	newStateDB.Block = nextBlock
 	newStateDB.SetAncestor(nextBlock.Header, recoveredStateDB)
 	n.clearQueueUsingBlock(nextBlock.Extrinsic.Guarantees)

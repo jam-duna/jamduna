@@ -944,7 +944,11 @@ func (n *Node) processAnnouncement(announcement types.Announcement) error {
 		fmt.Printf("%s [audit:processAnnouncement] auditingDB not found %v\n", n.String(), headerHash)
 		return err
 	}
-	pubkey := s.GetSafrole().GetCurrValidator(index).Ed25519
+	validator, err := s.GetSafrole().GetCurrValidator(index)
+	if err != nil {
+		return err
+	}
+	pubkey := validator.Ed25519
 	if !n.checkTrancheAnnouncement(headerHash) {
 		n.waitingAnnouncementsMutex.Lock()
 		defer n.waitingAnnouncementsMutex.Unlock()
@@ -1014,7 +1018,11 @@ func (n *Node) processJudgement(judgement types.Judgement) error {
 	}
 
 	index := int(judgement.Validator)
-	pubkey := auditing_statedb.GetSafrole().GetCurrValidator(index).Ed25519
+	validator, err := auditing_statedb.GetSafrole().GetCurrValidator(index)
+	if err != nil {
+		return err
+	}
+	pubkey := validator.Ed25519
 	err = judgement.Verify(pubkey)
 	if err != nil {
 		return err

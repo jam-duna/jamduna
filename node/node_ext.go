@@ -16,17 +16,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type WorkPackageRequest struct {
-	WorkPackage     types.WorkPackage     `json:"work_package"`
-	ExtrinsicsBlobs types.ExtrinsicsBlobs `json:"extrinsic_blobs"`
-	Prerequisites   []string              `json:"prerequisites,omitempty"`
-	Identifier      string                `json:"_"`
-}
-
-func (wpReq *WorkPackageRequest) String() string {
-	return types.ToJSON(wpReq)
-}
-
 func UpdateJCESignalUniversal(nodes []*Node, initialValue uint32) *ManualJCEManager {
 	m := NewManualJCEManager(nodes, initialValue)
 	m.Start(context.Background())

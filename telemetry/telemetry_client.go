@@ -11,6 +11,9 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+// Type aliases to use types from types package
+type NodeInfo = types.NodeInfo
+
 // TelemetryClient manages the lifecycle of the connection to the telemetry server.
 type TelemetryClient struct {
 	addr        string

@@ -12,8 +12,8 @@ type JNode interface {
 	GetFinalizedBlock() (blk *types.Block, err error)
 	SetJCEManager(jceManager *ManualJCEManager) (err error)
 	GetJCEManager() (jceManager *ManualJCEManager, err error)
-	SubmitAndWaitForWorkPackage(ctx context.Context, wpr *WorkPackageRequest) (common.Hash, error)
-	SubmitAndWaitForWorkPackages(ctx context.Context, wpr []*WorkPackageRequest) ([]common.Hash, error)
+	SubmitAndWaitForWorkPackageBundle(ctx context.Context, b *types.WorkPackageBundle) (common.Hash, error)
+	SubmitAndWaitForWorkPackageBundles(ctx context.Context, b []*types.WorkPackageBundle) ([]common.Hash, error)
 	SubmitAndWaitForPreimage(ctx context.Context, serviceID uint32, preimage []byte) error
 	GetWorkReport(requestedHash common.Hash) (*types.WorkReport, error)
 	GetService(service uint32) (sa *types.ServiceAccount, ok bool, err error)
@@ -21,6 +21,8 @@ type JNode interface {
 	ReadStateWitnessRef(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error)
 	ReadStateWitnessRaw(serviceID uint32, objectID common.Hash) (types.StateWitnessRaw, bool, common.Hash, error)
 	GetStateWitnesses(workReports []*types.WorkReport) ([]types.StateWitness, common.Hash, error)
+	GetRefineContext() (types.RefineContext, error)
+	BuildBundle(types.WorkPackage, []types.ExtrinsicsBlobs, uint16, []common.Hash) (*types.WorkPackageBundle, *types.WorkReport, error)
 
 	// Ethereum internal methods (called by Jam RPC wrappers)
 	// Network Metadata

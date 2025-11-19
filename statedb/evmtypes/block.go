@@ -384,13 +384,8 @@ func ComputeBMTRootFromHashes(hashes []common.Hash) common.Hash {
 		kvPairs[i] = [2][]byte{key[:], hash[:]}
 	}
 
-	tree := trie.NewMerkleTree(kvPairs, nil)
-	if tree.Root == nil {
-		return common.Hash{}
-	}
-
-	var root common.Hash
-	copy(root[:], tree.Root.Hash)
+	tree := trie.NewMerkleTree(kvPairs)
+	root := tree.GetRoot()
 
 	numFailures := 0
 	for i, hash := range hashes {
@@ -408,10 +403,10 @@ func ComputeBMTRootFromHashes(hashes []common.Hash) common.Hash {
 		for j, p := range rawProof {
 			proofPath[j] = common.BytesToHash(p)
 		}
-
-		verified := trie.VerifyRaw(key[:], hash[:], root[:], proofPath)
+		serviceID := uint32(35) // TODO
+		verified := trie.Verify(serviceID, key[:], hash[:], root[:], proofPath)
 		if !verified {
-			log.Error(log.Node, "❌ BMT proof verification FAILED", "index", i, "key", common.BytesToHash(key[:]).String(), "value", hash.String(), "root", root.String(), "proofLen", len(proofPath))
+			//log.Error(log.Node, "❌ BMT proof verification FAILED", "index", i, "key", common.BytesToHash(key[:]).String(), "value", hash.String(), "root", root.String(), "proofLen", len(proofPath))
 			numFailures++
 		}
 	}

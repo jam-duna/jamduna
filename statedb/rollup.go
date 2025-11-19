@@ -42,9 +42,9 @@ type Rollup struct {
 	pvmBackend         string
 }
 
-// defaultWorkPackage creates a work package with common default values
+// DefaultWorkPackage creates a work package with common default values
 // Caller should override fields as needed for their specific use case
-func defaultWorkPackage(serviceID uint32, service *types.ServiceAccount) types.WorkPackage {
+func DefaultWorkPackage(serviceID uint32, service *types.ServiceAccount) types.WorkPackage {
 	return types.WorkPackage{
 		AuthCodeHost:          0,
 		AuthorizationCodeHash: bootstrap_auth_codehash,
@@ -74,8 +74,8 @@ const (
 	PayloadTypeCall         PayloadType = 0x03
 )
 
-// buildPayload constructs a payload byte array for any payload type
-func buildPayload(payloadType PayloadType, count int, numWitnesses int) []byte {
+// BuildPayload constructs a payload byte array for any payload type
+func BuildPayload(payloadType PayloadType, count int, numWitnesses int) []byte {
 	payload := make([]byte, 7)
 	payload[0] = byte(payloadType)
 	binary.LittleEndian.PutUint32(payload[1:5], uint32(count))
@@ -620,8 +620,8 @@ func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte, startBlock ui
 		}
 
 		// Create work package
-		wp := defaultWorkPackage(b.serviceID, service)
-		wp.WorkItems[0].Payload = buildPayload(PayloadTypeTransactions, numTxExtrinsics, len(rawObjectIDs))
+		wp := DefaultWorkPackage(b.serviceID, service)
+		wp.WorkItems[0].Payload = BuildPayload(PayloadTypeTransactions, numTxExtrinsics, len(rawObjectIDs))
 		wp.WorkItems[0].Extrinsics = hashes
 
 		//  BuildBundle should return a Bundle (with ImportedSegments)
@@ -698,7 +698,7 @@ func (b *Rollup) ShowTxReceipts(evmBlock *evmtypes.EvmBlockPayload, txHashes []c
 
 // Generate and verify EVM Service proof for every position
 
-// // buildPayloadTransaction creates a conformant PayloadTransaction payload
+// // BuildPayloadTransaction creates a conformant PayloadTransaction payload
 // // Format: "T" (1 byte) + tx_count (u32 LE) + witness_count (u16 LE)
 func (b *Rollup) ExportStateWitnesses(workReports []*types.WorkReport, saveToFile bool) error {
 	witnesses, stateRoot, err := b.stateDB.GetStateWitnesses(workReports)
@@ -730,61 +730,57 @@ func (b *Rollup) ExportStateWitnesses(workReports []*types.WorkReport, saveToFil
 	return nil
 }
 
+func AppendBootstrapExtrinsic(blobs *types.ExtrinsicsBlobs, workItems *[]types.WorkItemExtrinsic, extrinsic []byte) {
+	*blobs = append(*blobs, extrinsic)
+	*workItems = append(*workItems, types.WorkItemExtrinsic{
+		Hash: common.Blake2Hash(extrinsic),
+		Len:  uint32(len(extrinsic)),
+	})
+}
+
+// Helper: build 'K' command extrinsic for storage
+func BuildKExtrinsic(address []byte, storageKey []byte, storageValue []byte) []byte {
+	extrinsic := make([]byte, 1+20+32+32)
+	extrinsic[0] = 0x4B
+	copy(extrinsic[1:21], address)
+	copy(extrinsic[21:53], storageKey)
+	copy(extrinsic[53:85], storageValue)
+	return extrinsic
+}
+
+// Helper: initialize Solidity mapping storage for the Genesis case
+func InitializeMappings(blobs *types.ExtrinsicsBlobs, workItems *[]types.WorkItemExtrinsic, contractAddr common.Address, entries []MappingEntry) {
+	for _, entry := range entries {
+		// Compute Solidity mapping storage key: keccak256(abi.encode(key, slot))
+		keyInput := make([]byte, 64)
+		copy(keyInput[12:32], entry.Key[:])
+		keyInput[63] = entry.Slot
+		storageKey := common.Keccak256(keyInput)
+
+		// Encode value as 32-byte big-endian
+		valueBytes := entry.Value.FillBytes(make([]byte, 32))
+
+		AppendBootstrapExtrinsic(blobs, workItems, BuildKExtrinsic(contractAddr[:], storageKey[:], valueBytes))
+	}
+}
+
+// MappingEntry represents a single mapping entry to initialize
+type MappingEntry struct {
+	Slot  uint8
+	Key   common.Address
+	Value *big.Int
+}
+
 func (b *Rollup) SubmitEVMGenesis() (*evmtypes.EvmBlockPayload, *evmtypes.EvmBlockMetadata, error) {
-	// MappingEntry represents a single mapping entry to initialize
-	type MappingEntry struct {
-		Slot  uint8
-		Key   common.Address
-		Value *big.Int
-	}
-
-	// Helper: append bootstrap extrinsic
-	appendBootstrapExtrinsic := func(blobs *types.ExtrinsicsBlobs, workItems *[]types.WorkItemExtrinsic, extrinsic []byte) {
-		*blobs = append(*blobs, extrinsic)
-		*workItems = append(*workItems, types.WorkItemExtrinsic{
-			Hash: common.Blake2Hash(extrinsic),
-			Len:  uint32(len(extrinsic)),
-		})
-	}
-
-	// Helper: build 'K' command extrinsic for storage
-	buildKExtrinsic := func(address []byte, storageKey []byte, storageValue []byte) []byte {
-		extrinsic := make([]byte, 1+20+32+32)
-		extrinsic[0] = 0x4B
-		copy(extrinsic[1:21], address)
-		copy(extrinsic[21:53], storageKey)
-		copy(extrinsic[53:85], storageValue)
-		return extrinsic
-	}
-
-	// Helper: initialize Solidity mapping storage for the Genesis case
-	initializeMappings := func(blobs *types.ExtrinsicsBlobs, workItems *[]types.WorkItemExtrinsic, contractAddr common.Address, entries []MappingEntry) {
-		for _, entry := range entries {
-			// Compute Solidity mapping storage key: keccak256(abi.encode(key, slot))
-			keyInput := make([]byte, 64)
-			copy(keyInput[12:32], entry.Key[:])
-			keyInput[63] = entry.Slot
-			storageKey := common.Keccak256(keyInput)
-
-			// Encode value as 32-byte big-endian
-			valueBytes := entry.Value.FillBytes(make([]byte, 32))
-
-			appendBootstrapExtrinsic(blobs, workItems, buildKExtrinsic(contractAddr[:], storageKey[:], valueBytes))
-		}
-	}
-
+	// Set USDM initial balances and nonces
 	blobs := types.ExtrinsicsBlobs{}
 	workItems := []types.WorkItemExtrinsic{}
-
-	// Set USDM initial balances and nonces
 	totalSupplyValue := new(big.Int).Mul(big.NewInt(61_000_000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
 	usdmInitialState := []MappingEntry{
 		{Slot: 0, Key: evmtypes.IssuerAddress, Value: totalSupplyValue}, // balanceOf[issuer]
 		{Slot: 1, Key: evmtypes.IssuerAddress, Value: big.NewInt(1)},    // nonces[issuer]
 	}
-	initializeMappings(&blobs, &workItems, evmtypes.UsdmAddress, usdmInitialState)
-
-	numExtrinsics := len(workItems)
+	InitializeMappings(&blobs, &workItems, evmtypes.UsdmAddress, usdmInitialState)
 
 	// Add witness for genesis block (block 0) and calculate segments needed
 	witnesses := []types.StateWitnessRaw{}
@@ -814,6 +810,7 @@ func (b *Rollup) SubmitEVMGenesis() (*evmtypes.EvmBlockPayload, *evmtypes.EvmBlo
 	}
 
 	witnessCount := len(witnesses)
+	numExtrinsics := len(workItems)
 	log.Info(log.Node, "SubmitEVMGenesis (genesis)", "numExtrinsics", numExtrinsics, "witnessCount", witnessCount)
 
 	service, ok, err := b.stateDB.GetService(b.serviceID)
@@ -822,30 +819,24 @@ func (b *Rollup) SubmitEVMGenesis() (*evmtypes.EvmBlockPayload, *evmtypes.EvmBlo
 	}
 
 	// Create work package with updated witness count and refine context
-	wp := defaultWorkPackage(b.serviceID, service)
+	wp := DefaultWorkPackage(b.serviceID, service)
 	wp.RefineContext = b.stateDB.GetRefineContext()
-	wp.WorkItems[0].Payload = buildPayload(PayloadTypeBlocks, numExtrinsics, witnessCount)
+	wp.WorkItems[0].Payload = BuildPayload(PayloadTypeBlocks, numExtrinsics, witnessCount)
 	wp.WorkItems[0].Extrinsics = workItems
 
-	// Calculate ExportCount: 2 (for StorageShard + SSRMetadata) + total segments for genesis block
 	// Genesis adds 2 exports: 1 StorageShard + 1 SSRMetadata for USDM contract
-	expectedExports := 2
-	wp.WorkItems[0].ExportCount = uint16(expectedExports)
-
-	log.Info(log.Node, "WorkPackage RefineContext", "state_root", wp.RefineContext.StateRoot.Hex(), "anchor", wp.RefineContext.Anchor.Hex(), "export_count", expectedExports)
-
+	wp.WorkItems[0].ExportCount = uint16(2)
+	log.Info(log.Node, "WorkPackage RefineContext", "state_root", wp.RefineContext.StateRoot.Hex(), "anchor", wp.RefineContext.Anchor.Hex())
 	bundle := &types.WorkPackageBundle{
 		WorkPackage:   wp,
 		ExtrinsicData: []types.ExtrinsicsBlobs{blobs},
 	}
 
-	// Process the bundle
 	err = b.processWorkPackageBundles([]*types.WorkPackageBundle{bundle})
 	if err != nil {
 		return nil, nil, fmt.Errorf("processWorkPackageBundles failed: %w", err)
 	}
 
-	// Get and return the latest block
 	block, metadata, err := b.stateDB.GetBlockByNumber(b.serviceID, "latest")
 	if err != nil {
 		return nil, nil, fmt.Errorf("GetBlockByNumber failed: %w", err)

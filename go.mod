@@ -11,6 +11,7 @@ require (
 	github.com/go-echarts/go-echarts/v2 v2.4.3
 	github.com/go-git/go-git/v5 v5.14.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/hdevalence/ed25519consensus v0.2.0
 	github.com/holiman/uint256 v1.3.2
 	github.com/nsf/jsondiff v0.0.0-20230430225905-43f6cf3098c1
 	github.com/quic-go/quic-go v0.51.0
@@ -20,9 +21,11 @@ require (
 	github.com/unicorn-engine/unicorn v0.0.0-20250410153552-f8c6db950420
 	github.com/xlab/treeprint v1.2.0
 	github.com/yudai/gojsondiff v1.0.0
+	github.com/zeebo/xxh3 v1.0.2
 	golang.org/x/arch v0.17.0
 	golang.org/x/crypto v0.36.0
 	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394
+	golang.org/x/sync v0.12.0
 	golang.org/x/sys v0.31.0
 )
 
@@ -53,10 +56,10 @@ require (
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb // indirect
 	github.com/google/pprof v0.0.0-20230821062121-407c9e7a662f // indirect
-	github.com/hdevalence/ed25519consensus v0.2.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
+	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/onsi/ginkgo/v2 v2.11.0 // indirect
 	github.com/pjbgf/sha1cd v0.3.2 // indirect
@@ -72,7 +75,6 @@ require (
 	go.uber.org/mock v0.5.0 // indirect
 	golang.org/x/mod v0.24.0 // indirect
 	golang.org/x/net v0.38.0 // indirect
-	golang.org/x/sync v0.12.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
 	golang.org/x/tools v0.31.0 // indirect
 	google.golang.org/protobuf v1.36.3 // indirect

@@ -5,15 +5,12 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"strings"
-	"time"
 
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 
-	"math"
 	"os"
 	"sort"
 
@@ -22,7 +19,6 @@ import (
 	log "github.com/colorfulnotion/jam/log"
 	storage "github.com/colorfulnotion/jam/storage"
 	telemetry "github.com/colorfulnotion/jam/telemetry"
-	trie "github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -40,8 +36,7 @@ type StateDB struct {
 	HeaderHash              common.Hash  `json:"headerHash"`
 	StateRoot               common.Hash  `json:"stateRoot"`
 	JamState                *JamState    `json:"Jamstate"`
-	sdb                     storage.JAMStorage
-	trie                    *trie.MerkleTree
+	sdb                     types.JAMStorage
 	posteriorSafroleEntropy *SafroleState // used to manage entropy, validator, and winning ticket
 
 	// used in ApplyStateRecentHistory between statedbs
@@ -104,7 +99,11 @@ func (s *StateDB) ProcessIncomingJudgement(j types.Judgement) {
 }
 
 func (s *StateDB) CheckIncomingAssurance(a *types.Assurance) (err error) {
-	cred := s.GetSafrole().GetCurrValidator(int(a.ValidatorIndex))
+	cred, err := s.GetSafrole().GetCurrValidator(int(a.ValidatorIndex))
+	if err != nil {
+		log.Error(log.SDB, "CheckIncomingAssurance: Invalid validator index", "err", err)
+		return err
+	}
 	err = a.VerifySignature(cred)
 	if err != nil {
 		log.Error(log.SDB, "CheckIncomingAssurance: Invalid Assurance", "err", err)
@@ -143,8 +142,7 @@ func (s *StateDB) ValidateAddPreimage(serviceID uint32, blob []byte) (common.Has
 	}
 	// check 157 - (1) a_p not equal to P (2) a_l is empty
 	preimageHash := common.Blake2Hash(blob)
-	t := s.GetTrie()
-	anchors, ok, err := t.GetPreImageLookup(l.Service_Index(), l.Hash(), l.BlobLength())
+	anchors, ok, err := s.sdb.GetPreImageLookup(l.Service_Index(), l.Hash(), l.BlobLength())
 	if err != nil {
 		log.Warn(log.SDB, "[ValidateAddPreimage:GetPreImageLookup] anchor not set", "err", err, "s", l.Service_Index(), "blob hash", l.Hash(), "blob length", l.BlobLength())
 		return common.Hash{}, fmt.Errorf("%s", errPreimageLookupNotSet) //TODO: differentiate key not found vs leveldb error
@@ -166,7 +164,6 @@ func (s *StateDB) ValidateAddPreimageWithUpdatedService(serviceID uint32, blob [
 	}
 	// check 157 - (1) a_p not equal to P (2) a_l is empty
 	preimageHash := common.Blake2Hash(blob)
-	t := s.GetTrie()
 	var anchors []uint32
 	var ok bool
 	var err error
@@ -187,7 +184,7 @@ func (s *StateDB) ValidateAddPreimageWithUpdatedService(serviceID uint32, blob [
 	}
 
 	if getFromTrie {
-		anchors, ok, err = t.GetPreImageLookup(l.Service_Index(), l.Hash(), l.BlobLength())
+		anchors, ok, err = s.sdb.GetPreImageLookup(l.Service_Index(), l.Hash(), l.BlobLength())
 	}
 	if err != nil {
 		log.Warn(log.SDB, "[ValidateAddPreimage:GetPreImageLookup] anchor not set", "err", err, "s", l.Service_Index(), "blob hash", l.Hash(), "blob length", l.BlobLength())
@@ -201,10 +198,9 @@ func (s *StateDB) ValidateAddPreimageWithUpdatedService(serviceID uint32, blob [
 	}
 	return preimageHash, nil
 }
-func newEmptyStateDB(sdb storage.JAMStorage) (statedb *StateDB) {
+func newEmptyStateDB(sdb types.JAMStorage) (statedb *StateDB) {
 	statedb = new(StateDB)
 	statedb.SetStorage(sdb)
-	statedb.trie = trie.NewMerkleTree(nil, sdb)
 	statedb.logChan = make(chan storage.LogMessage, 100)
 	return statedb
 }
@@ -264,20 +260,19 @@ func (s *StateDB) GetParentStateRoot() common.Hash {
 
 func (s *StateDB) GetTentativeStateRoot() common.Hash {
 	// return the trie root at the moment
-	t := s.GetTrie()
-	return t.GetRoot()
+	return s.sdb.GetRoot()
 }
 
-func (s *StateDB) GetTrie() *trie.MerkleTree {
-	return s.trie
-}
-
-func (s *StateDB) GetStorage() storage.JAMStorage {
+func (s *StateDB) GetStorage() types.JAMStorage {
 	return s.sdb
 }
 
-func (s *StateDB) SetStorage(sdb storage.JAMStorage) {
+func (s *StateDB) SetStorage(sdb types.JAMStorage) {
 	s.sdb = sdb
+}
+
+func (s *StateDB) GetAllKeyValues() []KeyVal {
+	return s.sdb.GetAllKeyValues()
 }
 
 func (s *StateDB) GetSafrole() *SafroleState {
@@ -313,13 +308,13 @@ func (s *StateDB) SetJamState(jamState *JamState) {
 
 // Reads C1.....C16 and puts it into JamState
 func (s *StateDB) InitTrieAndLoadJamState(stateRoot common.Hash) error {
-	t, err := trie.InitMerkleTreeFromHash(stateRoot, s.sdb)
+	err := s.sdb.SetRoot(stateRoot)
 	if err != nil {
 		return err
 	}
 
 	// Batch read all 16 states in a single operation
-	states, err := t.GetStates()
+	states, err := s.sdb.GetStates()
 	if err != nil {
 		log.Crit(log.SDB, "Error reading states from trie", err)
 	}
@@ -350,13 +345,9 @@ func (s *StateDB) InitTrieAndLoadJamState(stateRoot common.Hash) error {
 	d.SafroleState.TicketsOrKeys = d.SafroleBasicState.SlotSealerSeries                  // γs: Current epoch's slot-sealer series (epoch N)
 	d.SafroleState.NextValidators = types.Validators(d.SafroleBasicState.NextValidators) // γk: Next epoch's validators (epoch N+1)
 
-	// Update the trie to point to the recovered state
-	s.trie = t
-	s.StateRoot = stateRoot
 	return nil
 }
-
-func (s *StateDB) UpdateTrieState() common.Hash {
+func (s *StateDB) Flush() common.Hash {
 	//γ ≡⎩γk, γz, γs, γa⎭
 	//γk :one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
 	//γz :epoch’s root, a Bandersnatch ring root composed with the one Bandersnatch key of each of the next epoch’s validators (epoch N+1)
@@ -367,13 +358,9 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 	if sf == nil {
 		log.Crit(log.SDB, "UpdateTrieState: NO SAFROLE")
 	}
-	//benchRec.Add("- UpdateTrieState:GetSafrole", time.Since(t0))
 
-	t0 := time.Now()
 	sb := sf.GetSafroleBasicState()
-	benchRec.Add("- UpdateTrieState:GetSafroleBasicState", time.Since(t0))
 
-	t0 = time.Now()
 	d := s.GetJamState()
 	newStates := [16][]byte{
 		d.GetAuthPoolBytes(),                  // C1
@@ -393,73 +380,24 @@ func (s *StateDB) UpdateTrieState() common.Hash {
 		d.GetAccumulationHistoryBytes(),       // C15
 		d.GetAccumulationOutputsBytes(),       // C16
 	}
-	benchRec.Add("- UpdateTrieState:Codec", time.Since(t0))
 
-	t := s.GetTrie()
-	t.SetStates(newStates)
-	updated_root, err := t.Flush()
+	s.sdb.SetStates(newStates)
+	//TODO: flush shoud be split into compute overlayRoot & flush to disk to decouple the dependancies
+	updated_root, err := s.sdb.Flush()
 	if err != nil {
-		log.Error(log.SDB, "UpdateTrieState: Flush failed", "err", err)
+		log.Error(log.SDB, "Flush failed", "err", err)
 	}
-
-	// Log validator state for debugging
-	//safrole := s.GetSafroleState()
-	// log.Info(log.SDB, "ValidatorState",
-	// 	"n", s.sdb.GetNodeID(),
-	// 	"prev", len(safrole.PrevValidators),
-	// 	"curr", len(safrole.CurrValidators),
-	// 	"next", len(safrole.NextValidators),
-	// 	"designated", len(safrole.DesignatedValidators),
-	// 	"timeslot", safrole.Timeslot)
+	s.StateRoot = updated_root
 
 	return updated_root
 }
 
-// THIS DOES A FULL SCAN OF THE TRIE AND IS SLOW
-func (s *StateDB) GetAllKeyValues() []KeyVal {
-	startKey := common.Hex2Bytes("0x0000000000000000000000000000000000000000000000000000000000000000")
-	endKey := common.Hex2Bytes("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
-	maxSize := uint32(math.MaxUint32)
-	t, err := trie.InitMerkleTreeFromHash(s.StateRoot, s.sdb)
-	if err != nil {
-		log.Crit(log.SDB, "GetAllKeyValues: failed to init trie from hash", "error", err)
-		return []KeyVal{}
-	}
-	foundKeyVal, _, _ := t.GetStateByRange(startKey, endKey, maxSize)
-
-	tmpKeyVals := make([]KeyVal, 0)
-	for _, keyValue := range foundKeyVal {
-		fetchRealKey := t.GetRealKey(keyValue.Key, keyValue.Value)
-		realValue := make([]byte, len(keyValue.Value))
-		var realKey [31]byte
-		copy(realKey[:], fetchRealKey)
-		copy(realValue, keyValue.Value)
-		keyVal := KeyVal{
-			Key:   realKey,
-			Value: realValue,
-		}
-		//fmt.Printf("~~~key: %x, v: %x,\n", keyVal.Key, keyVal.Value)
-		tmpKeyVals = append(tmpKeyVals, keyVal)
-	}
-
-	sortedKeyVals := sortKeyValsByKey(tmpKeyVals)
-	return sortedKeyVals
-}
-
-func sortKeyValsByKey(tmpKeyVals []KeyVal) []KeyVal {
-	sort.Slice(tmpKeyVals, func(i, j int) bool {
-		return bytes.Compare(tmpKeyVals[i].Key[:], tmpKeyVals[j].Key[:]) < 0
-	})
-	return tmpKeyVals
-}
-
-func (s *StateDB) CompareStateRoot(genesis []KeyVal, parentStateRoot common.Hash) (bool, error) {
+func (s *StateDB) CompareStateRoot(genesis []types.KeyVal, parentStateRoot common.Hash) (bool, error) {
 	parent_root := s.StateRoot
-	newTrie := trie.NewMerkleTree(nil, s.sdb)
 	for _, kv := range genesis {
-		newTrie.SetRawKeyVal(kv.Key, kv.Value)
+		s.sdb.Insert(kv.Key[:], kv.Value)
 	}
-	new_root := newTrie.GetRoot()
+	new_root := s.sdb.GetRoot()
 	if !common.CompareBytes(parent_root[:], new_root[:]) {
 		return false, fmt.Errorf("roots are not the same")
 	}
@@ -481,12 +419,10 @@ func (s *StateDB) UpdateAllTrieState(genesis string) common.Hash {
 	snapshotRaw := StateSnapshotRaw{}
 	json.Unmarshal(snapshotBytesRaw, &snapshotRaw)
 
-	t := s.GetTrie()
-
 	for _, kv := range snapshotRaw.KeyVals {
-		t.SetRawKeyVal(kv.Key, kv.Value)
+		s.sdb.Insert(kv.Key[:], kv.Value)
 	}
-	updated_root := t.GetRoot()
+	updated_root := s.sdb.GetRoot()
 
 	sf := s.GetSafrole()
 	if sf == nil {
@@ -496,106 +432,61 @@ func (s *StateDB) UpdateAllTrieState(genesis string) common.Hash {
 	return updated_root
 }
 
-func (s *StateDB) UpdateAllTrieKeyVals(skv StateKeyVals) common.Hash {
+func (s *StateDB) UpdateAllTrieKeyVals(skv StateKeyVals) (common.Hash, error) {
 	for _, kv := range skv.KeyVals {
-		s.trie.SetRawKeyVal(kv.Key, kv.Value)
-	}
-	return s.trie.GetRoot()
-}
-
-func (s *StateDB) UpdateAllTrieStateRaw(snapshotRaw StateSnapshotRaw) common.Hash {
-	for _, kv := range snapshotRaw.KeyVals {
-		s.trie.SetRawKeyVal(kv.Key, kv.Value)
+		s.sdb.Insert(kv.Key[:], kv.Value)
 	}
 	// Flush all batched writes to levelDB and return root
-	root, err := s.trie.Flush()
+	root, err := s.sdb.Flush()
 	if err != nil {
-		log.Error(log.SDB, "UpdateAllTrieStateRaw: Flush failed", "err", err)
+		return common.Hash{}, fmt.Errorf("Flush failed: %w", err)
 	}
-	return root
+	return root, nil
+	/*
+
+		root, err := s.sdb.OverlayRoot()
+		if err != nil {
+			return common.Hash{}, fmt.Errorf("OverlayRoot failed: %w", err)
+		}
+	*/
+}
+
+func (s *StateDB) UpdateAllTrieStateRaw(snapshotRaw StateSnapshotRaw) (common.Hash, error) {
+	// Show what we're inserting using the storage abstraction
+	//storage.ShowKeyVals(snapshotRaw.KeyVals, "Inserting KeyVals")
+
+	for _, kv := range snapshotRaw.KeyVals {
+		s.sdb.Insert(kv.Key[:], kv.Value)
+	}
+
+	// Flush to commit the state and update the storage root
+	// This is necessary so GetRoot() returns the correct value for subsequent operations
+	// like ApplyStateTransitionFromBlock which checks parent state root
+	root, err := s.sdb.Flush()
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("Flush failed: %w", err)
+	}
+
+	// Make sure subsequent GetRoot() calls see this root
+	if err := s.sdb.SetRoot(root); err != nil {
+		return common.Hash{}, fmt.Errorf("SetRoot failed: %w", err)
+	}
+	return root, nil
 }
 
 func (s *StateDB) GetSafroleState() *SafroleState {
 	return s.JamState.SafroleState
 }
 
-func CheckingAllState(t *trie.MerkleTree, t2 *trie.MerkleTree) (bool, error) {
-	statesA, _ := t.GetStates()
-	statesB, _ := t2.GetStates()
-
-	stateNames := []string{"C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10", "C11", "C12", "C13", "C14", "C15", "C16"}
-
-	for i := 0; i < 16; i++ {
-		if !common.CompareBytes(statesA[i], statesB[i]) {
-			log.Error(log.SDB, "CheckingAllState: state mismatch", "state", stateNames[i])
-			return false, fmt.Errorf("%s is not the same", stateNames[i])
-		}
-	}
-	return true, nil
-}
-
 func (s *StateDB) String() string {
 	return types.ToJSON(s)
-}
-
-func DumpStateDBKeyValues(db *StateDB, description string, nodeID uint16, showDump bool) {
-	if !showDump {
-		return
-	}
-
-	kvList := db.GetAllKeyValues()
-	stateRoot := db.GetStateRoot()
-
-	var kvDump strings.Builder
-
-	var timeslot uint64 = 0
-	for _, kv := range kvList {
-		if len(kv.Key) >= 2 && kv.Key[0] == 0x0B && kv.Key[1] == 0x00 {
-			timeslot = types.DecodeE_l(kv.Value)
-			fmt.Printf("decoded timeslot: %v\n", timeslot)
-			break
-		}
-	}
-
-	kvDump.WriteString(fmt.Sprintf("\n[N%d][Slot=%d] ===== %s %d key-values (Root:%v)=====\n", nodeID, timeslot, description, len(kvList), stateRoot))
-
-	var c13Value []byte
-	for i, kv := range kvList {
-		valHash := common.Blake2Hash(kv.Value)
-		kvDump.WriteString(fmt.Sprintf("[N%d][Slot=%d][Key %d][ValHash] 0x%x -> %s Len=%d\n",
-			nodeID, timeslot, i, kv.Key, valHash.String_shortLen(4), len(kv.Value)))
-
-		// Capture C13 (ValidatorStatistics) value if found (key 0x0d00)
-		if len(kv.Key) >= 2 && kv.Key[0] == 0x0d && kv.Key[1] == 0x00 {
-			c13Value = kv.Value
-		}
-	}
-
-	kvDump.WriteString(fmt.Sprintf("[N%d][Slot=%d] ===== End of %s key-values =====\n", nodeID, timeslot, description))
-
-	// Decode and print C13 (ValidatorStatistics) if found
-	c13Debug := false
-	if len(c13Value) > 0 && c13Debug {
-		var validatorStats types.ValidatorStatistics
-		decoded, _, err := types.Decode(c13Value, reflect.TypeOf(validatorStats))
-		if err == nil && decoded != nil {
-			validatorStats = decoded.(types.ValidatorStatistics)
-			c13JSON, jsonErr := json.MarshalIndent(validatorStats, "", "  ")
-			if jsonErr == nil {
-				kvDump.WriteString(fmt.Sprintf("\n[N%d][Slot=%d] ===== C13 ValidatorStatistics JSON =====\n", nodeID, timeslot))
-				kvDump.WriteString(string(c13JSON))
-				kvDump.WriteString(fmt.Sprintf("\n[N%d][Slot=%d] ===== End C13 ValidatorStatistics JSON =====\n", nodeID, timeslot))
-			}
-		}
-	}
-	fmt.Print(kvDump.String())
 }
 
 func NewStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *StateDB, err error) {
 	return newStateDB(sdb, blockHash)
 }
 
-func NewStateDBFromStateRoot(stateRoot common.Hash, sdb storage.JAMStorage) (recoveredStateDB *StateDB, err error) {
+func NewStateDBFromStateRoot(stateRoot common.Hash, sdb types.JAMStorage) (recoveredStateDB *StateDB, err error) {
 	recoveredStateDB = newEmptyStateDB(sdb)
 	recoveredStateDB.Finalized = true // Historical state is always finalized
 	recoveredStateDB.JamState = NewJamState()
@@ -605,19 +496,14 @@ func NewStateDBFromStateRoot(stateRoot common.Hash, sdb storage.JAMStorage) (rec
 		return nil, fmt.Errorf("failed to recover state from root %s: %w", stateRoot.Hex(), err)
 	}
 
-	// Verify that recovery succeeded by checking if trie was initialized
-	if recoveredStateDB.trie == nil {
-		return nil, fmt.Errorf("failed to initialize merkle tree from state root %s", stateRoot.Hex())
-	}
-
 	return recoveredStateDB, nil
 }
 
 // newStateDB initiates the StateDB using the blockHash+bn; the bn input must refer to the epoch for which the blockHash belongs to
-func newStateDB(sdb storage.JAMStorage, blockHash common.Hash) (statedb *StateDB, err error) {
+func newStateDB(sdb types.JAMStorage, blockHash common.Hash) (statedb *StateDB, err error) {
 	statedb = newEmptyStateDB(sdb)
 	statedb.Finalized = false
-	statedb.trie = trie.NewMerkleTree(nil, sdb)
+	// trie already created in newEmptyStateDB, don't create it again
 
 	// TODO: MK this potentially need a JCE to be passed in
 	statedb.JamState = NewJamState()
@@ -655,21 +541,15 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 	tmpAvailableWorkReport := make([]types.WorkReport, len(s.AvailableWorkReport))
 	copy(tmpAvailableWorkReport, s.AvailableWorkReport)
 
-	copiedTrie, err := trie.InitMerkleTreeFromHash(s.StateRoot, s.sdb)
-	if err != nil {
-		log.Crit(log.SDB, "Copy: failed to init trie from hash", "error", err)
-		return nil
-	}
-
 	newStateDB = &StateDB{
-		Id:                  s.Id,
-		Block:               s.Block.Copy(), // You might need to deep copy the Block if it's mutable
-		ParentHeaderHash:    s.ParentHeaderHash,
-		HeaderHash:          s.HeaderHash,
-		StateRoot:           s.StateRoot,
-		JamState:            s.JamState.Copy(), // DisputesState has a Copy method
-		sdb:                 s.sdb,
-		trie:                copiedTrie,
+		Id:               s.Id,
+		Block:            s.Block.Copy(), // You might need to deep copy the Block if it's mutable
+		ParentHeaderHash: s.ParentHeaderHash,
+		HeaderHash:       s.HeaderHash,
+		StateRoot:        s.StateRoot,
+		JamState:         s.JamState.Copy(), // DisputesState has a Copy method
+		sdb:              s.sdb,
+
 		logChan:             make(chan storage.LogMessage, 100),
 		AvailableWorkReport: tmpAvailableWorkReport,
 		AncestorSet:         s.AncestorSet, // TODO: CHECK why we have this in CheckStateTransition
@@ -800,21 +680,17 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 }
 
 func (s *StateDB) WriteServiceStorage(service uint32, k []byte, v []byte) {
-	tree := s.GetTrie()
-	tree.SetServiceStorage(service, k, v)
+	s.sdb.SetServiceStorage(service, k, v)
 }
 
 func (s *StateDB) WriteServicePreimageBlob(service uint32, blob []byte) {
-	tree := s.GetTrie()
-	tree.SetPreImageBlob(service, blob)
+	s.sdb.SetPreImageBlob(service, blob)
 }
 func (s *StateDB) WriteServicePreimageLookup(service uint32, blob_hash common.Hash, blob_length uint32, time_slots []uint32) {
-	tree := s.GetTrie()
-	tree.SetPreImageLookup(service, blob_hash, blob_length, time_slots)
+	s.sdb.SetPreImageLookup(service, blob_hash, blob_length, time_slots)
 }
 func (s *StateDB) DeleteServicePreimageKey(service uint32, blob_hash common.Hash) error {
-	tree := s.GetTrie()
-	tree.DeletePreImageBlob(service, blob_hash)
+	s.sdb.DeletePreImageBlob(service, blob_hash)
 
 	return nil
 }
@@ -906,7 +782,11 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block, sf0 *SafroleState) (isValid
 	}
 
 	// author_idx is the K' so we use the sf_tmp
-	signing_validator := sf0.GetCurrValidator(int(validatorIdx))
+	signing_validator, err := sf0.GetCurrValidator(int(validatorIdx))
+	if err != nil {
+		log.Error(log.SDB, "GetCurrValidator", "err", err)
+		return false, validatorIdx, bandersnatch.BanderSnatchKey{}, fmt.Errorf("VerifyBlockHeader Failed: invalid validator index: %w", err)
+	}
 	block_author_ietf_pub := bandersnatch.BanderSnatchKey(signing_validator.GetBandersnatchKey())
 
 	// compute c within (6.15) & (6.16)

@@ -3,10 +3,10 @@ package node
 import (
 	"fmt"
 
-	storage "github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/types"
 )
 
-func (n *NodeContent) GetStorage() (storage.JAMStorage, error) {
+func (n *NodeContent) GetStorage() (types.JAMStorage, error) {
 	if n == nil {
 		return nil, fmt.Errorf("Node Not initiated")
 	}

@@ -222,12 +222,8 @@ func fuzzBlockGServiceItemTooLow(seed []byte, block *types.Block, s *statedb.Sta
 	}
 	service_id := work_result.ServiceID
 
-	v, ok, err := s.GetTrie().GetService(service_id)
+	service_acct, ok, err := s.GetService(service_id)
 	if err != nil || !ok {
-		return nil
-	}
-	service_acct, err := types.ServiceAccountFromBytes(service_id, v)
-	if err != nil {
 		return nil
 	}
 	min_item_gas := service_acct.GasLimitG
@@ -295,7 +291,7 @@ func fuzzBlockGBadBeefyMMRRoot(seed []byte, block *types.Block, s *statedb.State
 
 // Work result service identifier doesn't have any associated account in state.
 func fuzzBlockGBadServiceID(seed []byte, block *types.Block, s *statedb.StateDB) error {
-	t := s.GetTrie()
+	t := s.GetStorage()
 	if t == nil {
 		return nil
 	}

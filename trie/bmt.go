@@ -6,14 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
-	storage "github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -69,8 +67,8 @@ Regular Leaf Node (64 bytes) [K,V] -> V >= 32bytes. too long, only store Hash
 
 // MerkleTree represents the entire Merkle Tree
 type MerkleTree struct {
-	Root       *Node
-	db         storage.JAMStorage
+	Root *Node
+
 	writeMutex sync.Mutex             // Protects concurrent writes to levelDB during Flush
 	writeBatch map[common.Hash][]byte // Batched writes (key -> value) - always batched
 	batchMutex sync.Mutex             // Protects the write batch
@@ -92,37 +90,9 @@ func normalizeKey32(src []byte) common.Hash {
 	return hash
 }
 
-// NewMerkleTree creates a new Merkle Tree from the provided data
-func initLevelDB(optionalPath ...string) (*storage.StateDBStorage, error) {
-	path := "/tmp/log/leveldb/bpt"
-	if len(optionalPath) > 0 {
-		path = optionalPath[0]
-	}
-	stateDBStorage, err := storage.NewStateDBStorage(path, storage.NewMockJAMDA(), nil, 0)
-	return stateDBStorage, err
-}
-
-func InitLevelDB(optionalPath ...string) (*storage.StateDBStorage, error) {
-	return initLevelDB(optionalPath...)
-}
-
-func DeleteLevelDB(optionalPath ...string) error {
-	path := "/tmp/log/leveldb/bpt"
-	if len(optionalPath) > 0 {
-		path = optionalPath[0]
-	}
-
-	err := os.RemoveAll(path)
-	if err != nil {
-		return fmt.Errorf("failed to delete LevelDB at %s: %v", path, err)
-	}
-	return nil
-}
-
-func NewMerkleTree(data [][2][]byte, db storage.JAMStorage) *MerkleTree {
+func NewMerkleTree(data [][2][]byte) *MerkleTree {
 	t := &MerkleTree{
 		Root:          nil,
-		db:            db,
 		writeBatch:    make(map[common.Hash][]byte),
 		stagedInserts: make(map[common.Hash][]byte),
 		stagedDeletes: make(map[common.Hash]bool),
@@ -146,9 +116,7 @@ func (t *MerkleTree) buildMerkleTree(kvs [][2][]byte, i int) *Node {
 		encoded := leaf(kvs[0][0], kvs[0][1], t)
 		// Store (Hash, Value) in levelDB for future lookup
 		// computeHash(encoded) -> value mapping
-		if t.db != nil {
-			t.levelDBSetLeaf(encoded, kvs[0][1], kvs[0][0])
-		}
+		t.levelDBSetLeaf(encoded, kvs[0][1], kvs[0][0])
 		return &Node{Hash: computeHash(encoded), Key: kvs[0][0]}
 	}
 	// Recursive Case: B(M(l),M(r))
@@ -167,9 +135,9 @@ func (t *MerkleTree) buildMerkleTree(kvs [][2][]byte, i int) *Node {
 	encoded := branch(left.Hash, right.Hash)
 	branchHash := computeHash(encoded)
 	// Store branch nodes in levelDB
-	if t.db != nil {
-		t.levelDBSetBranch(branchHash, encoded)
-	}
+
+	t.levelDBSetBranch(branchHash, encoded)
+
 	return &Node{Hash: branchHash, Left: left, Right: right}
 }
 
@@ -259,13 +227,13 @@ func (t *MerkleTree) GetRoot() common.Hash {
 	return normalizeKey32(t.Root.Hash)
 }
 
-func InitMerkleTreeFromHash(root common.Hash, db storage.JAMStorage) (*MerkleTree, error) {
+func InitMerkleTreeFromHash(root common.Hash, db types.JAMStorage) (*MerkleTree, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is not initialized")
 	}
 	tree := &MerkleTree{
-		Root:          nil,
-		db:            db,
+		Root: nil,
+
 		writeBatch:    make(map[common.Hash][]byte),
 		stagedInserts: make(map[common.Hash][]byte),
 		stagedDeletes: make(map[common.Hash]bool),
@@ -335,36 +303,8 @@ func (t *MerkleTree) Flush() (common.Hash, error) {
 		t.treeMutex.Unlock()
 	}
 
-	// Step 2: Flush the write batch to LevelDB
-	t.batchMutex.Lock()
-	defer t.batchMutex.Unlock()
-
-	_, err := t.flushBatchLocked()
 	root := t.GetRoot()
-	//log.Info(log.P, "Flush", "n", t.db.GetNodeID(), "s+", root.String_short(), "batchWriteLen", batchWriteLen)
-	return root, err
-}
-
-// flushBatchLocked flushes the write batch - must be called with mutex
-func (t *MerkleTree) flushBatchLocked() (int, error) {
-	if len(t.writeBatch) == 0 {
-		return 0, nil
-	}
-
-	// Wait for exclusive access to levelDB writes -- levelDB CANNOT HANDLE CONCURRENT WRITES
-	t.writeMutex.Lock()
-	defer t.writeMutex.Unlock()
-
-	// Write all batched items (deletes don't *actually* delete in leveldb)
-	for key, value := range t.writeBatch {
-		err := t.db.WriteRawKV(key[:], value)
-		if err != nil {
-			return 0, fmt.Errorf("failed to flush key: %v", err)
-		}
-	}
-	batchWriteLen := len(t.writeBatch)
-	t.writeBatch = make(map[common.Hash][]byte)
-	return batchWriteLen, nil
+	return root, nil
 }
 
 func (t *MerkleTree) levelDBSetBranch(branchHash, value []byte) {
@@ -434,9 +374,6 @@ func (t *MerkleTree) getDBLeafValue(nodeHash []byte) ([]byte, bool, error) {
 // levelDBSet adds the key-value pair to the write batch
 // Writes are not persisted until Flush() is called
 func (t *MerkleTree) levelDBSet(k, v []byte) error {
-	if t.db == nil {
-		return fmt.Errorf("database is not initialized")
-	}
 
 	// Always add to batch
 	t.batchMutex.Lock()
@@ -450,10 +387,6 @@ func (t *MerkleTree) levelDBSet(k, v []byte) error {
 
 // levelDBGetLocked is the internal version that assumes batchMutex is already held
 func (t *MerkleTree) levelDBGetLocked(k []byte) ([]byte, bool, error) {
-	if t.db == nil {
-		return nil, false, fmt.Errorf("database is not initialized")
-	}
-
 	// Check write batch first (for reads of recently written but not yet flushed data)
 	var keyHash common.Hash
 	copy(keyHash[:], k)
@@ -461,14 +394,7 @@ func (t *MerkleTree) levelDBGetLocked(k []byte) ([]byte, bool, error) {
 		return value, true, nil
 	}
 
-	// Not in batch, read from levelDB
-	value, ok, err := t.db.ReadRawKV(k)
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to get key [%s]: %v", k, err)
-	} else if !ok {
-		return nil, false, nil
-	}
-	return value, true, nil
+	return nil, false, nil
 }
 
 // levelDBGet gets the value for the given key - checks write batch first, then levelDB
@@ -535,13 +461,6 @@ func (t *MerkleTree) levelDBGetNode(nodeHash common.Hash) (*Node, error) {
 		Left:  leftNode,
 		Right: rightNode,
 	}, nil
-}
-
-func (t *MerkleTree) Close() error {
-	if t.db == nil {
-		return fmt.Errorf("database is not initialized")
-	}
-	return t.db.Close()
 }
 
 // StateDB DEBUG: GetBatchSize returns the current number of batched writes

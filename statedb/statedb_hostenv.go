@@ -21,7 +21,6 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 	}
 
 	service_idx := sa.GetServiceIndex()
-	tree := s.GetTrie()
 
 	serviceUpdate = types.NewServiceUpdate(service_idx)
 	for _, storage := range sa.Storage {
@@ -30,7 +29,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 		if storage.Dirty {
 			if storage.Deleted {
 				log.Debug(s.Authoring, "writeAccount DELETE", "service_idx", service_idx, "key", fmt.Sprintf("%x", storage.Key), "rawkey", as_internal_key, "storage.Accessed", storage.Accessed, "storage.Deleted", storage.Deleted, "storage.source", storage.Source)
-				err = tree.DeleteServiceStorage(service_idx, storage.Key)
+				err = s.sdb.DeleteServiceStorage(service_idx, storage.Key)
 				if err != nil {
 					continue
 				}
@@ -44,7 +43,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 					Key:   common.Bytes2Hex(storage.Key),
 					Value: common.Bytes2Hex(storage.Value),
 				}
-				err = tree.SetServiceStorage(service_idx, storage.Key, storage.Value)
+				err = s.sdb.SetServiceStorage(service_idx, storage.Key, storage.Value)
 				if err != nil {
 					log.Warn(log.SDB, "SetServiceStorage Failure", "n", s.Id, "service_idx", service_idx, "k", fmt.Sprintf("%x", storage.Key), "rawkey", as_internal_key, "err", err)
 					return
@@ -58,7 +57,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 		blob_hash := common.HexToHash(blob_hash_str)
 		if v.Dirty {
 			if v.Deleted {
-				err = tree.DeletePreImageLookup(service_idx, blob_hash, v.Z)
+				err = s.sdb.DeletePreImageLookup(service_idx, blob_hash, v.Z)
 				if err != nil {
 					continue
 				}
@@ -72,7 +71,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 				}
 			} else {
 				//log.Debug(log.SDB, "writeAccount SET Lookup", "service_idx", service_idx, "blob_hash", blob_hash_str, "v.Z", v.Z, "v.Timeslots", v.Timeslots)
-				err = tree.SetPreImageLookup(service_idx, blob_hash, v.Z, v.Timeslots)
+				err = s.sdb.SetPreImageLookup(service_idx, blob_hash, v.Z, v.Timeslots)
 				if err != nil {
 					log.Warn(log.SDB, "tree.SetPreimageLookup", "blob_hash", blob_hash, "v.Z", v.Z, "v.Timeslots", v.Timeslots, "err", err)
 					return
@@ -94,14 +93,14 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 		if v.Dirty {
 			if v.Deleted {
 				if v.Source == "trie" {
-					err = tree.DeletePreImageBlob(service_idx, blobHash)
+					err = s.sdb.DeletePreImageBlob(service_idx, blobHash)
 					if err != nil {
 						continue
 					}
 					log.Trace("authoring", "DeletePreImageBlob [FORGET OK] A", "blobHash", blobHash, "v.Deleted", v.Deleted, "len(v.Preimage)", len(v.Preimage), "source", v.Source)
 				}
 			} else {
-				err = tree.SetPreImageBlob(service_idx, v.Preimage)
+				err = s.sdb.SetPreImageBlob(service_idx, v.Preimage)
 				if err != nil {
 					log.Warn(log.SDB, "SetPreImageBlob", "err", err)
 					return
@@ -117,7 +116,7 @@ func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.S
 		}
 	}
 	if sa.DeletedAccount {
-		tree.DeleteService(service_idx)
+		s.sdb.DeleteService(service_idx)
 		//log.Info(log.SDB, "tree.DeleteService SUCCESS", "service_idx", service_idx)
 	} else {
 		err = s.writeService(service_idx, sa)
@@ -196,9 +195,8 @@ func (s *StateDB) GetTimeslot() uint32 {
 
 // GetService returns a **Immutable** service object.
 func (s *StateDB) GetService(service uint32) (sa *types.ServiceAccount, ok bool, err error) {
-	tree := s.GetTrie()
 	var serviceBytes []byte
-	serviceBytes, ok, err = tree.GetService(service)
+	serviceBytes, ok, err = s.sdb.GetService(service)
 	if err != nil {
 		return
 	}
@@ -213,16 +211,14 @@ func (s *StateDB) GetService(service uint32) (sa *types.ServiceAccount, ok bool,
 }
 
 func (s *StateDB) writeService(service uint32, sa *types.ServiceAccount) (err error) {
-	tree := s.GetTrie()
 	v, _ := sa.Bytes()
 	//log.Trace(log.SDB, "writeService", "service_idx", service, "sa.NumStorageItems", sa.NumStorageItems, "sa.StorageSize", sa.StorageSize, "sa.Balance", sa.Balance, "sa.GasLimitG", sa.GasLimitG, "sa.GasLimitM", sa.GasLimitM, "sa.CreateTime", sa.CreateTime, "sa.RecentAccumulation", sa.RecentAccumulation, "sa.ParentService", sa.ParentService, "bytes", fmt.Sprintf("%x", (v)))
-	return tree.SetService(service, v)
+	return s.sdb.SetService(service, v)
 }
 
 func (s *StateDB) ReadServiceStorage(service uint32, k []byte) (storage []byte, ok bool, err error) {
 	// not init case
-	tree := s.GetTrie()
-	storage, ok, err = tree.GetServiceStorage(service, k)
+	storage, ok, err = s.sdb.GetServiceStorage(service, k)
 	if err != nil || !ok {
 		log.Trace(log.SDB, "ReadServiceStorage: Not found", "service", service, "key", fmt.Sprintf("%x", k), "err", err)
 		return storage, ok, err
@@ -232,8 +228,7 @@ func (s *StateDB) ReadServiceStorage(service uint32, k []byte) (storage []byte, 
 }
 
 func (s *StateDB) ReadServicePreimageBlob(service uint32, blob_hash common.Hash) (blob []byte, ok bool, err error) {
-	tree := s.GetTrie()
-	blob, ok, err = tree.GetPreImageBlob(service, blob_hash)
+	blob, ok, err = s.sdb.GetPreImageBlob(service, blob_hash)
 	if err != nil || !ok {
 		return
 	} else {
@@ -243,8 +238,7 @@ func (s *StateDB) ReadServicePreimageBlob(service uint32, blob_hash common.Hash)
 }
 
 func (s *StateDB) ReadServicePreimageLookup(service uint32, blob_hash common.Hash, blob_length uint32) (time_slots []uint32, ok bool, err error) {
-	tree := s.GetTrie()
-	time_slots, ok, err = tree.GetPreImageLookup(service, blob_hash, blob_length)
+	time_slots, ok, err = s.sdb.GetPreImageLookup(service, blob_hash, blob_length)
 	if err != nil || !ok {
 		return
 	}
@@ -306,9 +300,9 @@ func convertProofToHashes(proofBytes [][]byte) []common.Hash {
 }
 
 func (s *StateDB) ReadStateWitnessRaw(serviceID uint32, objectID common.Hash) (types.StateWitnessRaw, bool, common.Hash, error) {
-	tree := s.GetTrie()
+
 	// Use the low-level trie method to get value, proof, and state root
-	valueBytes, proofBytes, stateRoot, ok, err := tree.GetServiceStorageWithProof(serviceID, objectID[:])
+	valueBytes, proofBytes, stateRoot, ok, err := s.sdb.GetServiceStorageWithProof(serviceID, objectID[:])
 	if err != nil {
 		return types.StateWitnessRaw{}, false, common.Hash{}, err
 	}
@@ -367,10 +361,8 @@ func (s *StateDB) ReadStateWitnessRaw(serviceID uint32, objectID common.Hash) (t
 
 // ReadObject fetches ObjectRef and state proof for given objectID
 func (s *StateDB) ReadStateWitnessRef(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error) {
-	tree := s.GetTrie()
-
 	// Use the low-level trie method to get value, proof, and state root
-	valueBytes, proofBytes, _, ok, err := tree.GetServiceStorageWithProof(serviceID, objectID[:])
+	valueBytes, proofBytes, _, ok, err := s.sdb.GetServiceStorageWithProof(serviceID, objectID[:])
 	if err != nil {
 		return types.StateWitness{}, false, err
 	}

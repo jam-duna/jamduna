@@ -429,8 +429,11 @@ func (s *SafroleState) GetPrevValidatorIndex(key types.Ed25519Key) int {
 	return -1
 }
 
-func (s *SafroleState) GetCurrValidator(index int) types.Validator {
-	return s.CurrValidators[index]
+func (s *SafroleState) GetCurrValidator(index int) (types.Validator, error) {
+	if index < 0 || index >= len(s.CurrValidators) {
+		return types.Validator{}, fmt.Errorf("validator index %d out of range [0, %d)", index, len(s.CurrValidators))
+	}
+	return s.CurrValidators[index], nil
 }
 
 func (s *SafroleState) SetValidatorData(validatorsData []byte, phase string) error {
@@ -1701,7 +1704,10 @@ func VerifySafroleSTF(old_sf_origin *SafroleState, new_sf_origin *SafroleState, 
 	m := header.BytesWithoutSig()
 	// author_idx is the K' so we use the sf_tmp
 	validatorIdx := block.Header.AuthorIndex
-	signing_validator := new_sf.GetCurrValidator(int(validatorIdx))
+	signing_validator, err := new_sf.GetCurrValidator(int(validatorIdx))
+	if err != nil {
+		return err
+	}
 	block_author_ietf_pub := bandersnatch.BanderSnatchKey(signing_validator.GetBandersnatchKey())
 	vrfOutput, err := bandersnatch.IetfVrfVerify(block_author_ietf_pub, H_s, c, m)
 	fmt.Printf("VerifyBlockHeader: H_s Verification: block_author_ietf_pub: %s, H_s: %s, c: %s, m: %s, vrfOutput: %s\n",

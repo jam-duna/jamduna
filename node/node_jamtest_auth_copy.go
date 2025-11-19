@@ -6,7 +6,6 @@ package node
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
 
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
@@ -43,23 +42,22 @@ func reassign(n1 JNode, testServices map[string]*types.TestService, targetN int)
 			},
 		}
 
-		wpr := &WorkPackageRequest{
-			Identifier:      fmt.Sprintf("Auth_Copy(%d)", algoN),
-			WorkPackage:     wp,
-			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
+		wpr := &types.WorkPackageBundle{
+			WorkPackage:   wp,
+			ExtrinsicData: []types.ExtrinsicsBlobs{},
 		}
 
 		if !isDry {
 			ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout*maxRobustTries)
-			wr, err := RobustSubmitAndWaitForWorkPackages(ctx, n1, []*WorkPackageRequest{wpr})
+			wr, err := RobustSubmitAndWaitForWorkPackageBundles(ctx, n1, []*types.WorkPackageBundle{wpr})
 			cancel()
 			if err != nil {
 				log.Error(log.Node, "SubmitAndWaitForWorkPackages ERR", "err", err)
 				return err
 			}
-			log.Info(log.Node, wpr.Identifier, "workPackageHash", wr.AvailabilitySpec.WorkPackageHash, "exportedSegmentRoot", wr.AvailabilitySpec.ExportedSegmentRoot)
+			log.Info(log.Node, "auth_copy", "workPackageHash", wr.AvailabilitySpec.WorkPackageHash, "exportedSegmentRoot", wr.AvailabilitySpec.ExportedSegmentRoot)
 		} else {
-			log.Info(log.Node, wpr.Identifier, "workPackageHash", wp.Hash(), "wp", wp.String())
+			log.Info(log.Node, "auth_copy", "workPackageHash", wp.Hash(), "wp", wp.String())
 		}
 	}
 

@@ -14,6 +14,10 @@ import (
 
 var TestingSegmentsNum = 31
 
+const (
+	debugBPT = false
+)
+
 func generateSegment(idx int) []byte {
 	//data := []byte(fmt.Sprintf("segments%d", idx))
 	prefix, _ := hex.DecodeString("deadbeef")

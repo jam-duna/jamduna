@@ -7,6 +7,9 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+// Type aliases to use types from types package
+type SegmentShardRequest = types.SegmentShardRequest
+
 /*
 
 ## Segment recovery events
@@ -25,10 +28,7 @@ primary guarantors, hence these events reference "work-package submission" event
    Import Segment ID = u16 (Index in overall list of work-package imports, or for a proof page,
        2^15 plus index of a proven page)
 */
-type SegmentShardRequest struct {
-	ImportSegmentID uint16 // Index in overall list of work-package imports, or 2^15 plus index of a proven page
-	ShardIndex      uint16 // Shard index
-}
+// SegmentShardRequest is now aliased from types package
 
 /*
 ### 160: Work-package hash mapped

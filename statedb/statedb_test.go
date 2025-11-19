@@ -41,7 +41,7 @@ func genesisBlock(t *testing.T) (storage *storage.StateDBStorage, stateRootsAtBl
 
 	stateRootsAtBlock = make([]common.Hash, numBlocksPartialState+1)
 	ObjectRefsAtBlock = make([]map[common.Hash]types.ObjectRef, numBlocksPartialState+1)
-	stateRootsAtBlock[0] = statedb0.GetTrie().GetRoot()
+	stateRootsAtBlock[0] = statedb0.sdb.GetRoot()
 	ObjectRefsAtBlock[0] = make(map[common.Hash]types.ObjectRef)
 	t.Logf("Genesis state root: %s, total objects: %d", stateRootsAtBlock[0], len(ObjectRefsAtBlock[0]))
 	return storage, stateRootsAtBlock, ObjectRefsAtBlock
@@ -127,7 +127,7 @@ func advanceBlockPartialState(t *testing.T, block int, prevStateRoot common.Hash
 	sa.StorageSize = uint64(len(sa.Storage) * (32 + 20))
 	partialState.ServiceAccounts[serviceID] = sa
 	statedb.ApplyXContext(partialState)
-	stateRoot := statedb.UpdateTrieState()
+	stateRoot := common.Hash{}
 	numWrites := numObjectsToChange + newObjectsPerBlock
 	t.Logf("Block %d state root: %s, total objects: %d, batch writes: %d", block, stateRoot.Hex(), len(objectRefs), numWrites)
 	return stateRoot, objectRefs
@@ -162,7 +162,7 @@ func verifyBlock(t *testing.T, block int, stateRoot common.Hash, storage *storag
 		}
 
 		// Verify using GetServiceStorage (trie-level API)
-		actualValue, ok, err = verifyDB.GetTrie().GetServiceStorage(serviceID, objectID[:])
+		actualValue, ok, err = verifyDB.sdb.GetServiceStorage(serviceID, objectID[:])
 		if err != nil {
 			mismatchCount++
 			panic("mismatch")

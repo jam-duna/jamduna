@@ -12,6 +12,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -49,14 +50,13 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 			},
 		}
 
-		wpr := &WorkPackageRequest{
-			Identifier:      fmt.Sprintf("ALGO(%d)", algoN),
-			WorkPackage:     wp,
-			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
+		wpr := &types.WorkPackageBundle{
+			WorkPackage:   wp,
+			ExtrinsicData: []types.ExtrinsicsBlobs{},
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout*maxRobustTries)
-		wr, err := RobustSubmitAndWaitForWorkPackages(ctx, n1, []*WorkPackageRequest{wpr})
+		wr, err := RobustSubmitAndWaitForWorkPackageBundles(ctx, n1, []*types.WorkPackageBundle{wpr})
 		cancel()
 		if err != nil {
 			log.Error(log.Node, "SubmitAndWaitForWorkPackages ERR", "err", err)
@@ -64,8 +64,7 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 		}
 		k := common.ServiceStorageKey(algo_serviceIdx, []byte{0})
 		data, _, _ := n1.GetServiceStorage(algo_serviceIdx, k)
-		log.Info(log.Node, wpr.Identifier, "workPackageHash", wr.AvailabilitySpec.WorkPackageHash, "exportedSegmentRoot", wr.AvailabilitySpec.ExportedSegmentRoot, "result", fmt.Sprintf("%x", data))
-		//log.Info(log.Node, wpr.Identifier, "workPackageHash", wp.Hash(), "wr", wr.String())
+		log.Info(log.Node, "algo", "workPackageHash", wr.AvailabilitySpec.WorkPackageHash, "exportedSegmentRoot", wr.AvailabilitySpec.ExportedSegmentRoot, "result", fmt.Sprintf("%x", data))
 	}
 }
 
@@ -75,9 +74,72 @@ func evm(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 	evm_serviceIdx := service0.ServiceCode
 
 	log.Info(log.Node, "EVM START", "evm", evm_serviceIdx, "targetN", targetN)
+	// Set USDM initial balances and nonces
+	blobs := types.ExtrinsicsBlobs{}
+	workItems := []types.WorkItemExtrinsic{}
+	totalSupplyValue := new(big.Int).Mul(big.NewInt(61_000_000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+	usdmInitialState := []statedb.MappingEntry{
+		{Slot: 0, Key: evmtypes.IssuerAddress, Value: totalSupplyValue}, // balanceOf[issuer]
+		{Slot: 1, Key: evmtypes.IssuerAddress, Value: big.NewInt(1)},    // nonces[issuer]
+	}
+	statedb.InitializeMappings(&blobs, &workItems, evmtypes.UsdmAddress, usdmInitialState)
 
-	// Note: EVM service and USDM contract are already set up in genesis
-	// No need for a genesis workpackage here
+	// Add witness for genesis block (block 0) and calculate segments needed
+	witnesses := []types.StateWitnessRaw{}
+	objectID := evmtypes.BlockNumberToObjectID(0)
+	witness, ok, _, err := n1.ReadStateWitnessRaw(evm_serviceIdx, objectID)
+	if err != nil {
+		log.Warn(log.Node, "SubmitEVMGenesis: ReadStateWitnessRaw failed", "blockNum", 0, "objectID", objectID, "err", err)
+		panic(fmt.Sprintf("ReadStateWitnessRaw failed for genesis block: %v", err))
+	} else if ok {
+		// Calculate number of segments needed for genesis block's payload
+		//numSegments := (int(witness.PayloadLength) + types.SegmentSize - 1) / types.SegmentSize
+
+		log.Info(log.Node, "Adding witness for genesis block", "blockNum", 0, "objectID", objectID, "payload_length", witness.PayloadLength)
+		witnesses = append(witnesses, witness)
+	} else {
+		log.Warn(log.Node, "SubmitEVMGenesis: witness not found for genesis block", "objectID", objectID)
+	}
+
+	numExtrinsics := len(workItems)
+	// Append witness as extrinsic
+	for _, witness := range witnesses {
+		witnessBytes := witness.SerializeWitnessRaw()
+		blobs = append(blobs, witnessBytes)
+		workItems = append(workItems, types.WorkItemExtrinsic{
+			Hash: common.Blake2Hash(witnessBytes),
+			Len:  uint32(len(witnessBytes)),
+		})
+	}
+
+	witnessCount := len(witnesses)
+	log.Info(log.Node, "SubmitEVMGenesis (genesis)", "numExtrinsics", numExtrinsics, "witnessCount", witnessCount)
+
+	service, ok, err := n1.GetService(evm_serviceIdx)
+	if err != nil || !ok {
+		panic(fmt.Sprintf("EVM service not found: %v", err))
+	}
+
+	// Create work package with updated witness count and refine context
+	wp := statedb.DefaultWorkPackage(evm_serviceIdx, service)
+	wp.RefineContext, _ = n1.GetRefineContext()
+	wp.WorkItems[0].Payload = statedb.BuildPayload(statedb.PayloadTypeBlocks, numExtrinsics, witnessCount)
+	wp.WorkItems[0].Extrinsics = workItems
+
+	// Genesis adds 2 exports: 1 StorageShard + 1 SSRMetadata for USDM contract
+	wp.WorkItems[0].ExportCount = uint16(2)
+	log.Info(log.Node, "WorkPackage RefineContext", "state_root", wp.RefineContext.StateRoot.Hex(), "anchor", wp.RefineContext.Anchor.Hex())
+	wpr := &types.WorkPackageBundle{
+		WorkPackage:   wp,
+		ExtrinsicData: []types.ExtrinsicsBlobs{blobs},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout*maxRobustTries)
+	_, err = RobustSubmitAndWaitForWorkPackageBundles(ctx, n1, []*types.WorkPackageBundle{wpr})
+	cancel()
+	if err != nil {
+		log.Error(log.Node, "SubmitAndWaitForWorkPackages ERR", "err", err)
+		return
+	}
 
 	// Create signed transactions
 	prevBlockNumber := uint32(0)
@@ -155,10 +217,15 @@ func evm(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 			},
 		}
 
-		wpr := &WorkPackageRequest{
-			Identifier:      fmt.Sprintf("EVM(%d) - %d txs", evmN, numTxs),
-			WorkPackage:     wp,
-			ExtrinsicsBlobs: blobs,
+		rawObjectIDs := []common.Hash{} // TODO (fetch witnesses for previous block)
+		bundle2, _, err := n1.BuildBundle(wp, []types.ExtrinsicsBlobs{blobs}, uint16(0), rawObjectIDs)
+		if err != nil {
+			panic(err)
+		}
+
+		wpr := &types.WorkPackageBundle{
+			WorkPackage:   bundle2.WorkPackage,
+			ExtrinsicData: bundle2.ExtrinsicData,
 		}
 
 		log.Info(log.Node, "Submitting EVM workpackage",
@@ -169,7 +236,7 @@ func evm(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 			"prevBlock", prevBlockNumber)
 
 		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout*maxRobustTries)
-		wr, err := RobustSubmitAndWaitForWorkPackages(ctx, n1, []*WorkPackageRequest{wpr})
+		wr, err := RobustSubmitAndWaitForWorkPackageBundles(ctx, n1, []*types.WorkPackageBundle{wpr})
 		cancel()
 		if err != nil {
 			log.Error(log.Node, "SubmitAndWaitForWorkPackages ERR", "err", err)

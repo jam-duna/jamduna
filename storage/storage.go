@@ -3,110 +3,56 @@ package storage
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"reflect"
 	"sync"
 
+	"github.com/colorfulnotion/jam/bmt"
 	"github.com/colorfulnotion/jam/common"
-	telemetry "github.com/colorfulnotion/jam/telemetry"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/syndtr/goleveldb/leveldb"
 	leveldbstorage "github.com/syndtr/goleveldb/leveldb/storage"
 )
 
-type JAMStorage interface {
-	// Core KV Operations - Low-level key-value access
-	ReadRawKV(key []byte) (value []byte, found bool, err error)
-	ReadRawKVWithPrefix(prefix []byte) ([][2][]byte, error)
-	WriteRawKV(key []byte, val []byte) error
-	ReadKV(key common.Hash) ([]byte, error)
+// ShowKeyVals displays KeyVals with enhanced value information
+// - Shows value length
+// - For values > 32 bytes: shows Blake2 hash of value
+// - For values <= 32 bytes: shows actual value content
+func ShowKeyVals(keyvals []types.KeyVal, label string) {
+	fmt.Printf("\n=== %s - %d keys ===\n", label, len(keyvals))
+	for _, kv := range keyvals {
+		// Reconstruct full 32-byte key from 31-byte KeyVal.Key
+		var fullKey [32]byte
+		copy(fullKey[:31], kv.Key[:])
 
-	// Block Storage Operations
-	// These methods handle block persistence and retrieval with multiple indices
-	StoreBlock(blk *types.Block, id uint16, slotTimestamp uint64) error
-	StoreFinalizedBlock(blk *types.Block) error
-	GetFinalizedBlock() (*types.Block, error)
-	GetFinalizedBlockInternal() (*types.Block, bool, error)
-	GetBlockByHeader(headerHash common.Hash) (*types.SBlock, error)
-	GetBlockBySlot(slot uint32) (*types.SBlock, error)
-	GetChildBlocks(parentHeaderHash common.Hash) ([][2][]byte, error)
+		if len(kv.Value) > 64 {
+			fmt.Printf("  Key: 0x%x, %x (%d bytes)\n", fullKey, kv.Value[0:64], len(kv.Value))
+		} else {
+			fmt.Printf("  Key: 0x%x, %x (%d bytes)\n", fullKey, kv.Value, len(kv.Value))
+		}
 
-	// Data Availability - Guarantor Operations
-	// Guarantors create and distribute erasure-coded shards
-	StoreBundleSpecSegments(
-		erasureRoot common.Hash,
-		exportedSegmentRoot common.Hash,
-		bChunks []types.DistributeECChunk,
-		sChunks []types.DistributeECChunk,
-		bClubs []common.Hash,
-		sClubs []common.Hash,
-		bundle []byte,
-		encodedSegments []byte,
-	) error
-	GetGuarantorMetadata(erasureRoot common.Hash) (
-		bClubs []common.Hash,
-		sClubs []common.Hash,
-		bECChunks []types.DistributeECChunk,
-		sECChunksArray []types.DistributeECChunk,
-		err error,
-	)
-	GetFullShard(erasureRoot common.Hash, shardIndex uint16) (
-		bundleShard []byte,
-		segmentShards []byte,
-		justification []byte,
-		ok bool,
-		err error,
-	)
-
-	// Data Availability - Assurer Operations
-	// Assurers verify and store shards for availability
-	StoreFullShardJustification(
-		erasureRoot common.Hash,
-		shardIndex uint16,
-		bClub common.Hash,
-		sClub common.Hash,
-		encodedPath []byte,
-	) error
-	GetFullShardJustification(erasureRoot common.Hash, shardIndex uint16) (
-		bClubH common.Hash,
-		sClubH common.Hash,
-		encodedPath []byte,
-		err error,
-	)
-	StoreAuditDA(erasureRoot common.Hash, shardIndex uint16, bundleShard []byte) error
-	StoreImportDA(erasureRoot common.Hash, shardIndex uint16, concatenatedShards []byte) error
-	GetBundleShard(erasureRoot common.Hash, shardIndex uint16) (
-		bundleShard []byte,
-		sClub common.Hash,
-		justification []byte,
-		ok bool,
-		err error,
-	)
-	GetSegmentShard(erasureRoot common.Hash, shardIndex uint16) (
-		concatenatedShards []byte,
-		ok bool,
-		err error,
-	)
-
-	// Bundle and Segment Retrieval
-	GetBundleByErasureRoot(erasureRoot common.Hash) (types.WorkPackageBundle, bool)
-	GetSegmentsBySegmentRoot(segmentRoot common.Hash) ([][]byte, bool)
-	FetchJAMDASegments(workPackageHash common.Hash, indexStart uint16, indexEnd uint16, payloadLength uint32) (payload []byte, err error)
-
-	// Work Report Operations
-	StoreWorkReport(wr *types.WorkReport) error
-	WorkReportSearch(requestedHash common.Hash) (*types.WorkReport, bool)
-
-	// Node Identity and Telemetry
-	SetTelemetryClient(client *telemetry.TelemetryClient)
-	GetTelemetryClient() *telemetry.TelemetryClient
-	GetJAMDA() JAMDA
-	GetNodeID() uint16
-
-	// Lifecycle
-	Close() error
+	}
+	fmt.Printf("=== End %s ===\n\n", label)
 }
+
+func BytesToHex(b []byte) string {
+	// hex.EncodeToString is highly optimized.
+	// The "0x" is prepended in a single, efficient string allocation.
+	return "0x" + hex.EncodeToString(b)
+}
+
+// kvAlias type for davxy traces
+type kvAlias struct {
+	Key        string `json:"key"`
+	Value      string `json:"value"`
+	StructType string `json:"type,omitempty"`
+	Metadata   string `json:"metadata,omitempty"`
+}
+
+
 
 const (
 	CheckStateTransition = false
@@ -119,24 +65,36 @@ type LogMessage struct {
 	Self        bool
 }
 
-// StateDBStorage struct to hold the LevelDB instance or in-memory map
+// StateDBStorage struct to hold the BMT instance or in-memory map
 type StateDBStorage struct {
+	// BMT database instance - pure Go implementation
+	bmtDB         *bmt.Nomt              // BMT database instance (JAM Gray Paper compatible)
+	Root          common.Hash
+	stagedInserts map[common.Hash][]byte // key -> value
+	stagedDeletes map[common.Hash]bool   // key -> true
+	stagedMutex   sync.Mutex             // Protects staged operations
+	keys          map[common.Hash]bool   // Tracks all keys inserted
+
+	// Root tracking for rollback by hash
+	rootHistory   []common.Hash          // Ordered list of roots (index = seqnum)
+	rootToSeqNum  map[common.Hash]uint64 // Maps root hash -> sequence number
+	currentSeqNum uint64                 // Current commit sequence number
+
 	db      *leveldb.DB
 	memMap  map[string][]byte // In-memory storage when useMemory=true
 	mutex   sync.RWMutex      // Protects memMap for concurrent access
 	logChan chan LogMessage
 
 	// JAM Data Availability interface
-	jamda JAMDA
+	jamda types.JAMDA
 
 	WorkPackageContext       context.Context
 	BlockContext             context.Context
 	BlockAnnouncementContext context.Context
 	SendTrace                bool
 	nodeID                   uint16
-
 	// Telemetry client for emitting events
-	telemetryClient *telemetry.TelemetryClient
+	telemetryClient types.TelemetryClient
 }
 
 const (
@@ -149,7 +107,7 @@ const (
 
 // NewStateDBStorage initializes a new LevelDB store
 // Uses memory-based storage if useMemory is true, otherwise uses file-based storage
-func NewStateDBStorage(path string, jamda JAMDA, telemetryClient *telemetry.TelemetryClient, nodeID uint16) (*StateDBStorage, error) {
+func NewStateDBStorage(path string, jamda types.JAMDA, telemetryClient types.TelemetryClient, nodeID uint16) (*StateDBStorage, error) {
 	db, err := leveldb.OpenFile(path, nil)
 	if err != nil {
 		// Fallback to memory storage if file fails
@@ -160,18 +118,45 @@ func NewStateDBStorage(path string, jamda JAMDA, telemetryClient *telemetry.Tele
 		}
 	}
 
-	s := StateDBStorage{
+	// Create BMT database directory and instance
+	bmtDir := fmt.Sprintf("%s/bmt", path)
+	if err := os.MkdirAll(bmtDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create BMT directory: %v", err)
+	}
+
+	// Open BMT database with default options
+	opts := bmt.DefaultOptions(bmtDir)
+	bmtDB, err := bmt.Open(opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open BMT at %s: %v", bmtDir, err)
+	}
+
+	s := &StateDBStorage{
 		db:              db,
 		logChan:         make(chan LogMessage, 100),
 		jamda:           jamda,
 		telemetryClient: telemetryClient,
 		nodeID:          nodeID,
+		bmtDB:           bmtDB,
+		stagedInserts:   make(map[common.Hash][]byte),
+		stagedDeletes:   make(map[common.Hash]bool),
+		keys:            make(map[common.Hash]bool),
+		rootHistory:     make([]common.Hash, 0),
+		rootToSeqNum:    make(map[common.Hash]uint64),
+		currentSeqNum:   0,
 	}
-	return &s, nil
+
+	// Get initial root from BMT
+	initialRoot := bmtDB.Root()
+	s.Root = common.BytesToHash(initialRoot[:])
+	s.rootHistory = append(s.rootHistory, s.Root)
+	s.rootToSeqNum[s.Root] = 0
+
+	return s, nil
 }
 
 // GetJAMDA returns the JAMDA interface instance
-func (s *StateDBStorage) GetJAMDA() JAMDA {
+func (s *StateDBStorage) GetJAMDA() types.JAMDA {
 	return s.jamda
 }
 
@@ -181,12 +166,12 @@ func (s *StateDBStorage) GetNodeID() uint16 {
 }
 
 // GetTelemetryClient returns the telemetry client for emitting events
-func (store *StateDBStorage) GetTelemetryClient() *telemetry.TelemetryClient {
+func (store *StateDBStorage) GetTelemetryClient() types.TelemetryClient {
 	return store.telemetryClient
 }
 
 // SetTelemetryClient updates the telemetry client used for emitting events.
-func (store *StateDBStorage) SetTelemetryClient(client *telemetry.TelemetryClient) {
+func (store *StateDBStorage) SetTelemetryClient(client types.TelemetryClient) {
 	store.telemetryClient = client
 }
 
@@ -212,9 +197,8 @@ func (store *StateDBStorage) DeleteK(key common.Hash) error {
 	return store.db.Delete(key.Bytes(), nil)
 }
 
-// Close closes the storage
-func (store *StateDBStorage) Close() error {
-
+// CloseDB closes the LevelDB database
+func (store *StateDBStorage) CloseDB() error {
 	return store.db.Close()
 }
 

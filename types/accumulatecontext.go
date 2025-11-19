@@ -1,6 +1,7 @@
 package types
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -19,6 +20,13 @@ type AccumulationHistory struct {
 type AccumulationOutput struct {
 	Service uint32      `json:"s"`
 	Output  common.Hash `json:"h"`
+}
+
+func (a AccumulationOutput) Less(b AccumulationOutput) bool {
+	if a.Service != b.Service {
+		return a.Service < b.Service
+	}
+	return bytes.Compare(a.Output[:], b.Output[:]) < 0
 }
 
 type AlwaysAccumulateEntry struct {

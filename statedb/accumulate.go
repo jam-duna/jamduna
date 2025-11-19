@@ -414,12 +414,9 @@ func (s *StateDB) ParallelizedAccumulate(
 	}
 
 	const isParallel = false
-
-	// TODO: Parallel execution with go func causes RACE CONDITIONS
 	var acc_results []accRes
 
 	if isParallel {
-		// PARALLEL EXECUTION (UNSAFE - has race conditions on 'o *types.PartialState')
 		jobCh := make(chan uint32, len(services))
 		resCh := make(chan accRes, len(services))
 		var wg sync.WaitGroup
@@ -428,9 +425,8 @@ func (s *StateDB) ParallelizedAccumulate(
 			defer wg.Done()
 			for service := range jobCh {
 				t0 := time.Now()
-				// RACE: All workers access shared 'o' without synchronization!
-				fmt.Printf("ParallelizedAccumulate worker processing service %v\n", service)
-				out, gas, XY, exceptional := s.SingleAccumulate(o, transfersIn, workReports, freeAccumulation, service, pvmBackend)
+				// IMPORTANT: Parallel execution requires each worker gets a CLONE of o!!
+				out, gas, XY, exceptional := s.SingleAccumulate(o.Clone(), transfersIn, workReports, freeAccumulation, service, pvmBackend)
 				benchRec.Add("SingleAccumulate", time.Since(t0))
 
 				if XY == nil {
@@ -469,7 +465,7 @@ func (s *StateDB) ParallelizedAccumulate(
 		for r := range resCh {
 			acc_results = append(acc_results, r)
 		}
-		// Sort results by service ID to ensure deterministic merge order
+		// Sort results by service ID to ensure deterministic merge order (we do a FINAL sort on outputs at the end)
 		sort.Slice(acc_results, func(i, j int) bool { return acc_results[i].service < acc_results[j].service })
 	} else {
 		// SEQUENTIAL EXECUTION (SAFE - deterministic, no race conditions)
@@ -845,9 +841,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 		for _, t := range selectedTransfers {
 			serviceAccount.IncBalance(t.Amount)
 		}
-		// Store in o.ServiceAccounts so other workers see the updated balance
 		serviceAccount.Dirty = true
-		o.ServiceAccounts[serviceID] = serviceAccount
 	}
 
 	xContext := sd.NewXContext(o, serviceID, serviceAccount)

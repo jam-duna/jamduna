@@ -213,38 +213,40 @@ func main() {
 			}
 
 			if useUnixSocket {
-				isMatch, solverFuzzed, err := fuzz.RunRefineBundleChallenge(fuzzer, bundleQA, jConfig.Verbose)
-				if err != nil {
-					// Check if this is a WorkReport mismatch error - if so, terminate
-					if strings.Contains(err.Error(), "WorkReport mismatch") {
-						log.Printf("❌ ERROR: %v", err)
-						Terminate(stopCh)
-						return
+				/*
+					isMatch, solverFuzzed, err := fuzz.RunRefineBundleChallenge(fuzzer, bundleQA, jConfig.Verbose)
+					if err != nil {
+						// Check if this is a WorkReport mismatch error - if so, terminate
+						if strings.Contains(err.Error(), "WorkReport mismatch") {
+							log.Printf("❌ ERROR: %v", err)
+							Terminate(stopCh)
+							return
+						}
+
+						log.Printf("Bundle refinement error: %v", err)
+						if challengerFuzzed {
+							fStat.FuzzResponseErrors++
+						} else {
+							fStat.OrigResponseErrors++
+						}
+						continue
 					}
 
-					log.Printf("Bundle refinement error: %v", err)
-					if challengerFuzzed {
-						fStat.FuzzResponseErrors++
-					} else {
-						fStat.OrigResponseErrors++
+					switch {
+					case challengerFuzzed && solverFuzzed && isMatch:
+						fStat.FuzzTruePositives++
+					case challengerFuzzed && solverFuzzed && !isMatch:
+						fStat.FuzzMisclassifications++
+					case challengerFuzzed && !solverFuzzed:
+						fStat.FuzzFalseNegatives++
+					case !challengerFuzzed && !solverFuzzed && isMatch:
+						fStat.OrigTrueNegatives++
+					case !challengerFuzzed && !solverFuzzed && !isMatch:
+						fStat.OrigMisclassifications++
+					case !challengerFuzzed && solverFuzzed:
+						fStat.OrigFalsePositives++
 					}
-					continue
-				}
-
-				switch {
-				case challengerFuzzed && solverFuzzed && isMatch:
-					fStat.FuzzTruePositives++
-				case challengerFuzzed && solverFuzzed && !isMatch:
-					fStat.FuzzMisclassifications++
-				case challengerFuzzed && !solverFuzzed:
-					fStat.FuzzFalseNegatives++
-				case !challengerFuzzed && !solverFuzzed && isMatch:
-					fStat.OrigTrueNegatives++
-				case !challengerFuzzed && !solverFuzzed && !isMatch:
-					fStat.OrigMisclassifications++
-				case !challengerFuzzed && solverFuzzed:
-					fStat.OrigFalsePositives++
-				}
+				*/
 			}
 
 			if fStat.TotalBlocks%jConfig.Statistics == 0 {

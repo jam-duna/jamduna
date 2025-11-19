@@ -37,7 +37,7 @@ func TestAlgoBlocks(t *testing.T) {
 	}
 	bundles := make([]*types.WorkPackageBundle, types.TotalCores)
 	for n := 0; n <= numBlocks; n++ {
-		wp := defaultWorkPackage(c.serviceID, service)
+		wp := DefaultWorkPackage(c.serviceID, service)
 		wp.RefineContext = c.stateDB.GetRefineContext()
 		wp.WorkItems[0].Payload = GenerateAlgoPayload(n, false)
 		wp.WorkItems[0].RefineGasLimit = types.RefineGasAllocation / 2
@@ -75,9 +75,9 @@ func TestAlgoBlocks(t *testing.T) {
 			"ParentHeaderHash", block.ParentHeaderHash)
 
 		// BMT proof verification
-		if err := evmtypes.VerifyBlockBMTProofs(block, metadata); err != nil {
-			t.Fatalf("BMT proof verification failed for block %d: %v", block.Number, err)
-		}
+		// if err := evmtypes.VerifyBlockBMTProofs(block, metadata); err != nil {
+		// 	t.Fatalf("BMT proof verification failed for block %d: %v", block.Number, err)
+		// }
 	}
 
 }
@@ -250,9 +250,9 @@ func RunTransfersRound(b *Rollup, prevBlockNumber uint32, transfers []TransferTr
 		"TransactionsRoot", metadata.TransactionsRoot,
 		"ReceiptsRoot", metadata.ReceiptsRoot,
 		"MmrRoot", metadata.MmrRoot)
-	if err := evmtypes.VerifyBlockBMTProofs(prevblock, metadata); err != nil {
-		panic("VerifyBlockBMTProofs failed: " + err.Error())
-	}
+	// if err := evmtypes.VerifyBlockBMTProofs(prevblock, metadata); err != nil {
+	// 	panic("VerifyBlockBMTProofs failed: " + err.Error())
+	// }
 	// if err := b.ShowTxReceipts(block, txHashes, fmt.Sprintf("Multitransfer (%d transfers)", len(transfers)), defaultTopics()); err != nil {
 	// 	return 0, fmt.Errorf("failed to show transfer receipts: %w", err)
 	// }

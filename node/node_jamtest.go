@@ -412,13 +412,12 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), RefineAndAccumalateTimeout)
 		defer cancel()
-		wpr := &WorkPackageRequest{
-			Identifier:      fmt.Sprintf("NewServices(%s)", serviceList),
-			WorkPackage:     codeWorkPackage,
-			ExtrinsicsBlobs: types.ExtrinsicsBlobs{},
+		wpr := &types.WorkPackageBundle{
+			WorkPackage:   codeWorkPackage,
+			ExtrinsicData: []types.ExtrinsicsBlobs{},
 		}
 
-		_, err = RobustSubmitAndWaitForWorkPackages(ctx, bNode, []*WorkPackageRequest{wpr})
+		_, err = RobustSubmitAndWaitForWorkPackageBundles(ctx, bNode, []*types.WorkPackageBundle{wpr})
 		if err != nil {
 			t.Fatalf("SendWorkPackageSubmission ERR %v\n", err)
 		}

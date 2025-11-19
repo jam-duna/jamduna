@@ -171,6 +171,12 @@ func (t *Target) onPeerInfo(fuzzerInfo PeerInfo) *Message {
 
 // onInitialize processes Initialize messages (V1 protocol)
 func (t *Target) onInitialize(req *Initialize) *Message {
+	// rewind on every shared store before loading a new state snapshot
+	if err := t.store.RollbackToRoot(common.Hash{}); err != nil {
+		log.Printf("[ERROR] failed to reset storage: %v\n", err)
+		// optionally bail out here
+	}
+
 	log.Printf("%s[INCOMING REQ]%s Initialize", common.ColorBlue, common.ColorReset)
 	log.Printf("%sReceived Initialize request with %d ancestry items and %d KVs%s",
 		common.ColorGray, len(req.Ancestry), len(req.KeyVals.KeyVals), common.ColorReset)

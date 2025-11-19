@@ -430,8 +430,8 @@ func (c *NodeClient) GetRefineContext() (types.RefineContext, error) {
 }
 
 // WORK PACKAGE
-func (c *NodeClient) SubmitWorkPackage(workPackageReq *WorkPackageRequest) error {
-	// Marshal the WorkPackageRequest to JSON
+func (c *NodeClient) SubmitWorkPackage(workPackageReq *types.WorkPackageBundle) error {
+	// Marshal the WorkPackageBundle to JSON
 	reqBytes, err := json.Marshal(workPackageReq)
 	if err != nil {
 		log.Warn(log.Node, "SubmitWorkPackage", "err", err)
@@ -451,45 +451,27 @@ func (c *NodeClient) SubmitWorkPackage(workPackageReq *WorkPackageRequest) error
 	return nil
 }
 
-func (c *NodeClient) SubmitAndWaitForWorkPackage(ctx context.Context, workPackageReq *WorkPackageRequest) (workPackageHash common.Hash, err error) {
-	wphs, err := c.SubmitAndWaitForWorkPackages(ctx, []*WorkPackageRequest{workPackageReq})
+func (c *NodeClient) SubmitAndWaitForWorkPackageBundle(ctx context.Context, workPackageReq *types.WorkPackageBundle) (workPackageHash common.Hash, err error) {
+	wphs, err := c.SubmitAndWaitForWorkPackageBundles(ctx, []*types.WorkPackageBundle{workPackageReq})
 	if err != nil {
 		return workPackageHash, err
 	}
 	return wphs[0], nil
 }
 
-func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*WorkPackageRequest) ([]common.Hash, error) {
-	log.Info(log.Node, "NodeClient SubmitAndWaitForWorkPackages", "reqLen", len(reqs))
+func (c *NodeClient) SubmitAndWaitForWorkPackageBundles(ctx context.Context, reqs []*types.WorkPackageBundle) ([]common.Hash, error) {
+	log.Info(log.Node, "NodeClient SubmitAndWaitForWorkPackageBundles", "reqLen", len(reqs))
 	workPackageHashes := make([]common.Hash, len(reqs))
 	workPackageLastStatus := make(map[common.Hash]string)
 
-	identifierToIndex := make(map[string]int)
-	// Initialize refine context and identifier map
+	// Initialize refine context
 	refineCtx, err := c.GetRefineContext()
 	if err != nil {
 		return workPackageHashes, err
 	}
-	for i, req := range reqs {
-		identifierToIndex[req.Identifier] = i
+	for _, req := range reqs {
 		rc := refineCtx.Clone()
 		req.WorkPackage.RefineContext = *rc
-	}
-
-	// Populate prerequisite hashes
-	for _, req := range reqs {
-		if len(req.Prerequisites) == 0 {
-			continue
-		}
-		prereqHashes := make([]common.Hash, 0, len(req.Prerequisites))
-		for _, prereqID := range req.Prerequisites {
-			if idx, ok := identifierToIndex[prereqID]; ok {
-				prereqHashes = append(prereqHashes, reqs[idx].WorkPackage.Hash())
-			} else {
-				log.Warn(log.Node, "Unknown prerequisite identifier", "identifier", prereqID)
-			}
-		}
-		req.WorkPackage.RefineContext.Prerequisites = prereqHashes
 	}
 
 	// Compute hashes and track accumulation status
@@ -502,11 +484,11 @@ func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*W
 			"hash": hash.String(),
 		})
 		if err := c.SubmitWorkPackage(req); err != nil {
-			log.Warn(log.Node, "Failed to submit work package", "identifier", req.Identifier, "err", err)
+			log.Warn(log.Node, "Failed to submit work package", "hash", hash, "err", err)
 			return workPackageHashes, err
 		}
 		workPackageLastStatus[hash] = "submitted"
-		log.Info(log.Node, "Subscribe", "id", req.Identifier, "h", hash, "prereqids", req.Prerequisites, "h", req.WorkPackage.RefineContext.Prerequisites)
+		log.Info(log.Node, "Subscribe", "h", hash)
 	}
 
 	// Wait for accumulation
@@ -567,7 +549,7 @@ func (c *NodeClient) SubmitAndWaitForWorkPackages(ctx context.Context, reqs []*W
 
 }
 
-func (c *NodeClient) RobustSubmitWorkPackage(workpackage_req *WorkPackageRequest, maxTries int) (workPackageHash common.Hash, err error) {
+func (c *NodeClient) RobustSubmitWorkPackage(workpackage_req *types.WorkPackageBundle, maxTries int) (workPackageHash common.Hash, err error) {
 	tries := 0
 	for tries < maxTries {
 		refine_context, err := c.GetRefineContext()
@@ -578,7 +560,7 @@ func (c *NodeClient) RobustSubmitWorkPackage(workpackage_req *WorkPackageRequest
 		workPackageHash = workpackage_req.WorkPackage.Hash()
 		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 		defer cancel()
-		_, err = c.SubmitAndWaitForWorkPackage(ctx, workpackage_req)
+		_, err = c.SubmitAndWaitForWorkPackageBundle(ctx, workpackage_req)
 		if err != nil {
 			log.Error(log.Node, "SendWorkPackageSubmission", "err", err)
 			tries = tries + 1
@@ -795,16 +777,16 @@ func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName s
 		}},
 	}
 
-	var wpr WorkPackageRequest
+	var wpr types.WorkPackageBundle
 	wpr.WorkPackage = codeWP
-	wpr.ExtrinsicsBlobs = types.ExtrinsicsBlobs{}
+	wpr.ExtrinsicData = []types.ExtrinsicsBlobs{}
 	wpHash := codeWP.Hash()
 	log.Info(log.Node, "NewService: Submitting WP", "wph", wpHash)
 
 	// submits wp
 	ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()
-	_, err = c.SubmitAndWaitForWorkPackage(ctx, &wpr)
+	_, err = c.SubmitAndWaitForWorkPackageBundle(ctx, &wpr)
 	if err != nil {
 		log.Error(log.Node, "SubmitWorkPackage", "err", err)
 		return

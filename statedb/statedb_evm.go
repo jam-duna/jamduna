@@ -805,8 +805,8 @@ func (stateDB *StateDB) createSimulatedTx(serviceID uint32, tx *evmtypes.Ethereu
 	txHash := common.Blake2Hash(extrinsic)
 
 	// 4. Create work package
-	workPackage := defaultWorkPackage(serviceID, evmService)
-	workPackage.WorkItems[0].Payload = buildPayload(PayloadTypeCall, 1, 0)
+	workPackage := DefaultWorkPackage(serviceID, evmService)
+	workPackage.WorkItems[0].Payload = BuildPayload(PayloadTypeCall, 1, 0)
 	workPackage.WorkItems[0].Extrinsics = []types.WorkItemExtrinsic{
 		{
 			Hash: txHash,

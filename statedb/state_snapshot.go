@@ -1,15 +1,14 @@
 package statedb
 
 import (
-	"encoding/hex"
-	"encoding/json"
-	"fmt"
 	"reflect"
-	"strings"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 )
+
+// KeyVal is a type alias for types.KeyVal to allow usage without types prefix
+type KeyVal = types.KeyVal
 
 var orderedStateList = []string{
 	"CoreAuthPool",             // C1
@@ -48,14 +47,6 @@ type StateSnapshot struct {
 	AccumulationHistory      [types.EpochLength]types.AccumulationHistory `json:"xi"`                // c15 Accumulation History
 	StateUpdates             *types.StateUpdate                           `json:"updates,omitempty"` // service updates
 }
-
-type KeyVal struct {
-	Key   [31]byte `json:"key"`
-	Value []byte   `json:"value"`
-}
-
-type KeyValMap map[common.Hash][]byte
-
 type StateSnapshotRaw struct {
 	StateRoot common.Hash `json:"state_root"`
 	KeyVals   []KeyVal    `json:"keyvals"`
@@ -63,14 +54,6 @@ type StateSnapshotRaw struct {
 
 type StateKeyVals struct {
 	KeyVals []KeyVal `json:"keyvals"`
-}
-
-// kvAlias type for davxy traces
-type kvAlias struct {
-	Key        string `json:"key"`
-	Value      string `json:"value"`
-	StructType string `json:"type,omitempty"`
-	Metadata   string `json:"metadata,omitempty"`
 }
 
 func (sn *StateSnapshot) Raw() *StateSnapshotRaw {
@@ -140,61 +123,6 @@ func (sn *StateSnapshot) Raw() *StateSnapshotRaw {
 		KeyVals: keyValList,
 	}
 	return &snapshotRaw
-}
-
-func (kv KeyVal) MarshalJSON_OLD() ([]byte, error) {
-	aux := kvAlias{
-		Key:   common.HexString(kv.Key[0:31]), // 31 byte keys
-		Value: common.HexString(kv.Value),
-	}
-	return json.Marshal(aux)
-}
-
-func BytesToHex(b []byte) string {
-	// hex.EncodeToString is highly optimized.
-	// The "0x" is prepended in a single, efficient string allocation.
-	return "0x" + hex.EncodeToString(b)
-}
-
-func (kv KeyVal) MarshalJSON() ([]byte, error) {
-	aux := kvAlias{
-		// Call the new, fast, and type-safe function.
-		Key:   BytesToHex(kv.Key[0:31]),
-		Value: BytesToHex(kv.Value),
-	}
-	return json.Marshal(aux)
-}
-
-func (kv *KeyVal) UnmarshalJSON(data []byte) error {
-	var aux kvAlias
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-
-	// strip "0x"
-	keyHex := strings.TrimPrefix(aux.Key, "0x")
-	valHex := strings.TrimPrefix(aux.Value, "0x")
-
-	// decode
-	rawKey, err := hex.DecodeString(keyHex)
-	if err != nil {
-		return fmt.Errorf("invalid hex in key %q: %w", aux.Key, err)
-	}
-
-	switch len(rawKey) {
-	case 31:
-		copy(kv.Key[:], rawKey[:])
-	default:
-		return fmt.Errorf("invalid key length: expected 31 or 32 bytes, got %d", len(rawKey))
-	}
-
-	rawVal, err := hex.DecodeString(valHex)
-	if err != nil {
-		return fmt.Errorf("invalid hex in value %q: %w", aux.Value, err)
-	}
-	kv.Value = rawVal
-
-	return nil
 }
 
 func (snr *StateSnapshotRaw) FromStateSnapshotRaw() *StateSnapshot {
@@ -330,4 +258,28 @@ func (snr *StateSnapshotRaw) String() string {
 
 func (skv *StateKeyVals) String() string {
 	return types.ToJSON(skv)
+}
+
+// GetKeys returns all keys from StateSnapshotRaw as []common.Hash
+func (snr *StateSnapshotRaw) GetKeys() []common.Hash {
+	keys := make([]common.Hash, 0, len(snr.KeyVals))
+	for _, kv := range snr.KeyVals {
+		// Convert 31-byte key to 32-byte hash (pad with zero byte at end)
+		var key [32]byte
+		copy(key[:31], kv.Key[:])
+		keys = append(keys, common.BytesToHash(key[:]))
+	}
+	return keys
+}
+
+// GetKeys returns all keys from StateKeyVals as []common.Hash
+func (skv *StateKeyVals) GetKeys() []common.Hash {
+	keys := make([]common.Hash, 0, len(skv.KeyVals))
+	for _, kv := range skv.KeyVals {
+		// Convert 31-byte key to 32-byte hash (pad with zero byte at end)
+		var key [32]byte
+		copy(key[:31], kv.Key[:])
+		keys = append(keys, common.BytesToHash(key[:]))
+	}
+	return keys
 }

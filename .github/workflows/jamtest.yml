@@ -14,14 +14,14 @@ on:
   push:
     branches:
       - main
-  # Run both algo_node_compiler every 15 minutes
+  # Run both evm_node_compiler every 15 minutes
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:
 
 jobs:
-  run-algo-tests:
-    name: Run algo_node_compiler
+  run-evm-tests:
+    name: Run evm_node_compiler
     runs-on: self-hosted
     timeout-minutes: 15
 
@@ -36,9 +36,9 @@ jobs:
 
       - name: Prepare build environment
         run: |
-          mkdir -p /tmp/algo_target
-          mkdir -p /tmp/algo_state
-          sudo chmod -R 777 /tmp/algo_target /tmp/algo_state ${{ github.workspace }}
+          mkdir -p /tmp/evm_target
+          mkdir -p /tmp/evm_state
+          sudo chmod -R 777 /tmp/evm_target /tmp/evm_state ${{ github.workspace }}
           echo "Environment prepared for builds"
 
       - name: Set up Rust toolchain
@@ -69,13 +69,16 @@ jobs:
           echo "Listing PVM files:"
           find services -name "*.pvm" || true
 
-      - name: Run algo_node_compiler
+      - name: Run evm_node_compiler
         working-directory: ${{ github.workspace }}/node
         run: |
-          echo "Running make algo_node_compiler..."
-          make algo_node_compiler
+          echo "Running make evm_node_compiler 4 times..."
+          for i in 1 2 3 4; do
+            echo "=== Run $i ==="
+            timeout 180s make evm_node_compiler
+          done
 
       - name: Done
-        run: echo "algo_node_compiler completed successfully."
+        run: echo "evm_node_compiler completed successfully."
 
 

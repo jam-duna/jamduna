@@ -7,6 +7,11 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+// Type aliases to use types from types package
+type BlockOutline = types.BlockOutline
+type AccumulateCost = types.AccumulateCost
+type ServiceAccumulateCost = types.ServiceAccumulateCost
+
 /*
 ## Block authoring/importing events
 
@@ -19,31 +24,10 @@ to both authoring and importing, eg "block executed".
 - Execution events (46-47): `statedb/statedb.go` - in accumulation and state transition code
 */
 
-// BlockOutline represents the outline of a block
-/*
-   Block Outline =
-       u32 (Size in bytes) ++
-       Header Hash ++
-       u32 (Number of tickets) ++
-       u32 (Number of preimages) ++
-       u32 (Total size of preimages in bytes) ++
-       u32 (Number of guarantees) ++
-       u32 (Number of assurances) ++
-       u32 (Number of dispute verdicts)
-*/
-type BlockOutline struct {
-	SizeInBytes          uint32      // Size in bytes
-	HeaderHash           common.Hash // Header Hash
-	NumTickets           uint32      // Number of tickets
-	NumPreimages         uint32      // Number of preimages
-	PreimagesSizeInBytes uint32      // Total size of preimages in bytes
-	NumGuarantees        uint32      // Number of guarantees
-	NumAssurances        uint32      // Number of assurances
-	NumDisputeVerdicts   uint32      // Number of dispute verdicts
-}
+// Use BlockOutline from types package
 
 // encodeBlockOutline encodes a BlockOutline
-func encodeBlockOutline(outline BlockOutline) []byte {
+func encodeBlockOutline(outline types.BlockOutline) []byte {
 	var payload []byte
 
 	// Size in bytes (4 bytes, little-endian)
@@ -73,28 +57,7 @@ func encodeBlockOutline(outline BlockOutline) []byte {
 	return payload
 }
 
-// AccumulateCost represents the cost of accumulate calls
-type AccumulateCost struct {
-	NumAccumulateCalls    uint32 // Number of accumulate calls TODO
-	NumTransfersProcessed uint32 // Number of transfers processed TODO
-	NumItemsAccumulated   uint32 // Number of items accumulated TODO
-	TotalGasUsed          uint64 // Total gas used TODO
-	TotalTimeNs           uint64 // Total elapsed wall-clock time in nanoseconds TODO
-	LoadCompileTimeNs     uint64 // Time taken to load and compile the code, in nanoseconds
-	ReadWriteGas          uint64 // Gas for read/write calls
-	ReadWriteTimeNs       uint64 // Time for read/write calls in nanoseconds
-	LookupGas             uint64 // Gas for lookup calls
-	LookupTimeNs          uint64 // Time for lookup calls in nanoseconds
-	QueryGas              uint64 // Gas for query/solicit/forget/provide calls
-	QueryTimeNs           uint64 // Time for query/solicit/forget/provide calls in nanoseconds
-	InfoGas               uint64 // Gas for info/new/upgrade/eject calls
-	InfoTimeNs            uint64 // Time for info/new/upgrade/eject calls in nanoseconds
-	TransferGas           uint64 // Gas for transfer calls
-	TransferTimeNs        uint64 // Time for transfer calls in nanoseconds
-	TransferProcessingGas uint64 // Total gas charged for transfer processing by destination services
-	OtherGas              uint64 // Gas for other host calls
-	OtherTimeNs           uint64 // Time for other host calls in nanoseconds
-}
+// AccumulateCost is now aliased from types package
 
 // encodeAccumulateCost encodes an AccumulateCost
 /*
@@ -161,11 +124,7 @@ func encodeAccumulateCost(cost AccumulateCost) []byte {
 	return payload
 }
 
-// ServiceAccumulateCost pairs a service ID with its accumulate cost
-type ServiceAccumulateCost struct {
-	ServiceID uint32
-	Cost      AccumulateCost
-}
+// ServiceAccumulateCost is now aliased from types package
 
 /*
 ### 40: Authoring

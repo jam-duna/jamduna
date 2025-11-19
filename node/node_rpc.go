@@ -846,12 +846,12 @@ func (j *Jam) SubmitWorkPackage(req []string, res *string) error {
 		log.Info(log.Node, "SubmitWorkPackage error", "err", req)
 		return fmt.Errorf("invalid number of arguments")
 	}
-	var newReq WorkPackageRequest
+	var newReq types.WorkPackageBundle
 	if err := json.Unmarshal([]byte(req[0]), &newReq); err != nil {
 		log.Error(log.Node, "SubmitWorkPackage", "err", err)
-		return fmt.Errorf("failed to decode WorkPackageRequest: %w", err)
+		return fmt.Errorf("failed to decode WorkPackageBundle: %w", err)
 	}
-	j.NodeContent.SubmitWPSameCore(newReq.WorkPackage, newReq.ExtrinsicsBlobs)
+	j.NodeContent.SubmitBundleSameCore(&newReq)
 	*res = "OK"
 	return nil
 }

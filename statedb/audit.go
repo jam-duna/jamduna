@@ -392,7 +392,12 @@ func (s *StateDB) JudgementToCulprit(old_guarantee types.Guarantee) []types.Culp
 	//Stub: need culprit from judgment here.
 	culprits := make([]types.Culprit, 0)
 	for _, cred := range old_guarantee.Signatures {
-		key := s.GetSafrole().GetCurrValidator(int(cred.ValidatorIndex)).Ed25519
+		validator, err := s.GetSafrole().GetCurrValidator(int(cred.ValidatorIndex))
+		if err != nil {
+			log.Warn(log.SDB, "JudgementToCulprit: invalid validator index", "index", cred.ValidatorIndex, "err", err)
+			continue // Skip invalid validator indices
+		}
+		key := validator.Ed25519
 		culprits = append(culprits, types.Culprit{
 			Target:    old_guarantee.Report.Hash(),
 			Key:       key,

@@ -8,11 +8,6 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-type JAMDA interface {
-	FetchJAMDASegments(workPackageHash common.Hash, indexStart uint16, indexEnd uint16, payloadLength uint32) (payload []byte, err error)
-	StoreBundleSpecSegments(as *types.AvailabilitySpecifier, d types.AvailabilitySpecifierDerivation, b types.WorkPackageBundle, segments [][]byte)
-	BuildBundleFromWPQueueItem(wpQueueItem *types.WPQueueItem) (bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, err error)
-}
 
 type MockJAMDA struct {
 	mu       sync.RWMutex
@@ -80,7 +75,7 @@ func (m *MockJAMDA) fetchSegment(workPackageHash common.Hash, idx uint16) ([]byt
 
 	segment, exists := wpSegments[idx]
 	if !exists {
-		fmt.Printf("fetchSegment: segment %d not found for workPackageHash=%s idx=%d\n",
+		fmt.Printf("fetchSegment: segment not found for workPackageHash=%s idx=%d\n",
 			workPackageHash.Hex(), idx)
 		return []byte{}, fmt.Errorf("segment %d not found", idx)
 	}
