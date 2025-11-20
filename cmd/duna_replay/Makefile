@@ -5,12 +5,24 @@ DEFAULT_ASN_VERSION := 1
 # Use the active SDK for header/lib paths on macOS builds.
 SDK_PATH         := $(shell xcrun --show-sdk-path)
 
-.PHONY: all build asn1 asn0r clean
+.PHONY: all build asn1 asn0r clean dynamic_build dynamic_compiler
 
 all: build
 
 # Default ASN version build (follows DEFAULT_ASN_VERSION)
 build: static_replay$(DEFAULT_ASN_VERSION)_linux static_replay$(DEFAULT_ASN_VERSION)_interpreter_linux static_replay$(DEFAULT_ASN_VERSION)_mac
+
+dynamic_build:
+	@echo "Building dynamic $(BINARY_NAME) for current platform..."
+	@GOOS=$(shell go env GOOS) GOARCH=$(shell go env GOARCH) \
+	go build -tags="cgo,$(NETWORK),asn$(DEFAULT_ASN_VERSION)" -o $(BINARY_NAME)_dynamic .
+
+dynamic_compiler:
+	@echo "Building dynamic $(BINARY_NAME) with compiler backend for current platform..."
+	@GOOS=$(shell go env GOOS) GOARCH=$(shell go env GOARCH) \
+	go build -tags="cgo,$(NETWORK),asn$(DEFAULT_ASN_VERSION)" \
+	-ldflags="-X 'main.defaultBackend=compiler'" \
+	-o $(BINARY_NAME)_dynamic_compiler .
 
 # ASN.1 builds (spec-compliant) - builds both backend variants
 asn1: static_replay1_linux static_replay1_interpreter_linux static_replay1_mac

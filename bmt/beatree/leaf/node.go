@@ -382,3 +382,130 @@ func NewOverflowEntryWithPages(key beatree.Key, pages []allocator.PageNumber, ov
 		OverflowPages: pagesCopy, // All pages for direct access
 	}
 }
+
+// UpdateEntry modifies an existing entry in-place or inserts if not found.
+// Uses binary search for O(log M) lookup where M = number of entries.
+// Returns: (found bool, needsSplit bool, error)
+//   - found: true if key existed and was updated, false if inserted
+//   - needsSplit: true if node size exceeds LeafNodeSize after update
+//   - error: non-nil if operation failed
+func (n *Node) UpdateEntry(key beatree.Key, value []byte) (bool, bool, error) {
+	// Binary search for the key position
+	left, right := 0, len(n.Entries)
+	for left < right {
+		mid := (left + right) / 2
+		cmp := n.Entries[mid].Key.Compare(key)
+		if cmp == 0 {
+			// Key found - update in-place
+			// Create new entry to replace the old one
+			var newEntry Entry
+			var err error
+			if len(value) <= MaxLeafValueSize {
+				newEntry, err = NewInlineEntry(key, value)
+			} else {
+				// For overflow values, caller must use Insert with pre-allocated overflow pages
+				// UpdateEntry is designed for inline values or same-size updates
+				return false, false, fmt.Errorf("value too large for UpdateEntry: %d > %d (use Insert for overflow values)", len(value), MaxLeafValueSize)
+			}
+			if err != nil {
+				return false, false, err
+			}
+
+			n.Entries[mid] = newEntry
+			needsSplit := n.EstimateSize() >= LeafNodeSize
+			return true, needsSplit, nil
+		} else if cmp < 0 {
+			left = mid + 1
+		} else {
+			right = mid
+		}
+	}
+
+	// Key not found - insert at position 'left'
+	var newEntry Entry
+	var err error
+	if len(value) <= MaxLeafValueSize {
+		newEntry, err = NewInlineEntry(key, value)
+	} else {
+		return false, false, fmt.Errorf("value too large for UpdateEntry: %d > %d (use Insert for overflow values)", len(value), MaxLeafValueSize)
+	}
+	if err != nil {
+		return false, false, err
+	}
+
+	// Insert at position 'left' (maintains sorted order)
+	n.Entries = append(n.Entries, Entry{})
+	copy(n.Entries[left+1:], n.Entries[left:])
+	n.Entries[left] = newEntry
+
+	needsSplit := n.EstimateSize() >= LeafNodeSize
+	return false, needsSplit, nil
+}
+
+// DeleteEntry removes an entry in-place using binary search.
+// Uses O(log M) lookup where M = number of entries.
+// Returns: (found bool, error)
+//   - found: true if key was found and deleted, false if key didn't exist
+//   - error: non-nil if operation failed
+func (n *Node) DeleteEntry(key beatree.Key) (bool, error) {
+	// Binary search for the key position
+	left, right := 0, len(n.Entries)
+	for left < right {
+		mid := (left + right) / 2
+		cmp := n.Entries[mid].Key.Compare(key)
+		if cmp == 0 {
+			// Key found - delete it by shifting entries
+			copy(n.Entries[mid:], n.Entries[mid+1:])
+			n.Entries = n.Entries[:len(n.Entries)-1]
+			return true, nil
+		} else if cmp < 0 {
+			left = mid + 1
+		} else {
+			right = mid
+		}
+	}
+
+	// Key not found
+	return false, nil
+}
+
+// Clone creates a shallow copy of the node with clear ownership semantics.
+//
+// OWNERSHIP SEMANTICS:
+//   - Entries slice: COPIED (new backing array allocated)
+//   - Entry.Key: COPIED (array type, copied by value)
+//   - Entry.Value: SHARED (slice points to same backing array)
+//   - Entry.OverflowPages: SHARED (slice points to same backing array)
+//
+// RATIONALE:
+//   - Entries slice is copied so the new node can add/remove entries without affecting the original
+//   - Entry.Value is shared because values are immutable in practice (never modified in-place)
+//   - Entry.OverflowPages is shared for the same reason
+//   - This provides CoW semantics: modifications to entry list are isolated, but value data is shared
+//
+// SAFETY:
+//   - Safe for concurrent reads of the original node
+//   - NOT safe for concurrent writes (caller must ensure exclusive access during clone+modify)
+//   - Value buffers MUST NOT be modified after insertion (treat as immutable)
+//
+// PERFORMANCE:
+//   - O(M) where M = number of entries (copies entry metadata only, not value data)
+//   - Much cheaper than deep copy which would be O(M × avg_value_size)
+func (n *Node) Clone() *Node {
+	if n == nil {
+		return nil
+	}
+
+	// Allocate new entries slice with same capacity to minimize reallocations
+	newEntries := make([]Entry, len(n.Entries), cap(n.Entries))
+
+	// Copy entries (shallow copy - Value and OverflowPages slices are shared)
+	// This is safe because:
+	// 1. Entry.Key is [32]byte (copied by value)
+	// 2. Entry.Value and Entry.OverflowPages are shared (immutable in practice)
+	copy(newEntries, n.Entries)
+
+	return &Node{
+		Entries: newEntries,
+	}
+}

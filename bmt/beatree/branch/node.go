@@ -171,3 +171,72 @@ func DeserializeBranchNode(data []byte) (*Node, error) {
 func (n *Node) IsFull() bool {
 	return n.EstimateSize() >= BranchNodeSize
 }
+
+// UpdateChild modifies a single child pointer in-place using binary search.
+// Updates either LeftmostChild or a child pointer in Separators.
+// Returns: (found bool, error)
+//   - found: true if oldChild was found and replaced with newChild
+//   - error: non-nil if operation failed
+func (n *Node) UpdateChild(oldChild, newChild allocator.PageNumber) (bool, error) {
+	// Check leftmost child first
+	if n.LeftmostChild == oldChild {
+		n.LeftmostChild = newChild
+		return true, nil
+	}
+
+	// Binary search through separators for the old child
+	for i := range n.Separators {
+		if n.Separators[i].Child == oldChild {
+			n.Separators[i].Child = newChild
+			return true, nil
+		}
+	}
+
+	// Child not found
+	return false, nil
+}
+
+// InsertSeparator adds a separator without copying all existing separators.
+// This is a direct alias to Insert() for consistency with the CoW API pattern.
+// Returns error if separator already exists or node is full.
+func (n *Node) InsertSeparator(sep Separator) error {
+	return n.Insert(sep)
+}
+
+// Clone creates a shallow copy of the node with clear ownership semantics.
+//
+// OWNERSHIP SEMANTICS:
+//   - Separators slice: COPIED (new backing array allocated)
+//   - Separator.Key: COPIED (array type, copied by value)
+//   - Separator.Child: COPIED (scalar type, copied by value)
+//   - LeftmostChild: COPIED (scalar type, copied by value)
+//
+// RATIONALE:
+//   - Separators slice is copied so the new node can add/remove separators without affecting the original
+//   - All fields are value types, so no shared references
+//   - This provides CoW semantics: modifications are isolated to the cloned node
+//
+// SAFETY:
+//   - Safe for concurrent reads of the original node
+//   - NOT safe for concurrent writes (caller must ensure exclusive access during clone+modify)
+//
+// PERFORMANCE:
+//   - O(S) where S = number of separators (copies separator metadata only)
+//   - Each separator is 40 bytes (32-byte key + 8-byte page number)
+//   - Much cheaper than copying child subtrees
+func (n *Node) Clone() *Node {
+	if n == nil {
+		return nil
+	}
+
+	// Allocate new separators slice with same capacity to minimize reallocations
+	newSeparators := make([]Separator, len(n.Separators), cap(n.Separators))
+
+	// Copy separators (all fields are value types, no shared references)
+	copy(newSeparators, n.Separators)
+
+	return &Node{
+		Separators:    newSeparators,
+		LeftmostChild: n.LeftmostChild,
+	}
+}

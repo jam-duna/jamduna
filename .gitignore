@@ -103,3 +103,5 @@ cmd/duna_fuzzer/refine/.DS_Store
 /.gocache
 node/service_*.pvm
 /nomt_db
+bmt/mint_events.csv.gz
+bmt/stablecoin_transfers_with_balances-730.csv.gz

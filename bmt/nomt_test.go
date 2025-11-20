@@ -1,13 +1,37 @@
 package bmt
 
 import (
+	"bufio"
 	"bytes"
+	"compress/gzip"
 	"encoding/hex"
 	"fmt"
+	"math/big"
 	"os"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/ethereum/go-ethereum/common"
+	"golang.org/x/crypto/blake2b"
 )
+
+// Transfer represents a stablecoin transfer event
+type Transfer struct {
+	TokenAddress     common.Address `json:"token_address"`
+	FromAddress      common.Address `json:"from_address"`
+	ToAddress        common.Address `json:"to_address"`
+	Value            *big.Int       `json:"value"`
+	TransactionHash  common.Hash    `json:"transaction_hash"`
+	BlockTimestamp   uint64         `json:"block_timestamp"`
+	BlockNumber      uint32         `json:"block_number"`
+	LogIndex         uint32         `json:"log_index"`
+	Symbol           string         `json:"symbol"`
+	ValueDecimal     float64        `json:"value_decimal"`
+	FromBalanceAfter *big.Int       `json:"from_balance_after"`
+	ToBalanceAfter   *big.Int       `json:"to_balance_after"`
+}
 
 // testKey creates a 32-byte key from a string.
 func testKey(s string) [32]byte {
@@ -279,6 +303,397 @@ func TestNomtCommit(t *testing.T) {
 	}
 
 	t.Logf("Metrics: %d reads, %d writes, %d commits", metrics.Reads(), metrics.Writes(), metrics.Commits())
+}
+
+/*
+michael@Michaels-Mac-mini bmt % go test -v -run TestNomt2025
+=== RUN   TestNomt2025
+
+	nomt_test.go:386: Read 10000 mint events
+	nomt_test.go:386: Read 20000 mint events
+	nomt_test.go:386: Read 30000 mint events
+	nomt_test.go:386: Read 40000 mint events
+	nomt_test.go:386: Read 50000 mint events
+	nomt_test.go:386: Read 60000 mint events
+	nomt_test.go:386: Read 70000 mint events
+	nomt_test.go:395: Total mint events read: 71431
+	nomt_test.go:396: Step 1 (Read from file): 76.152084ms
+	nomt_test.go:408: Inserted 10000 mint events
+	nomt_test.go:408: Inserted 20000 mint events
+	nomt_test.go:408: Inserted 30000 mint events
+	nomt_test.go:408: Inserted 40000 mint events
+	nomt_test.go:408: Inserted 50000 mint events
+	nomt_test.go:408: Inserted 60000 mint events
+	nomt_test.go:408: Inserted 70000 mint events
+	nomt_test.go:413: Total mint events inserted: 71431
+	nomt_test.go:414: Step 2 (Insert into NOMT): 11.277708ms
+	nomt_test.go:424: Step 3 (Commit): 19.145954875s
+	nomt_test.go:427: State root after loading mint events: 358616512bcc9aacca7e9e6640fd8ec144276db57e131101c33233176793ef5a
+	nomt_test.go:428: Session prev root: 0000000000000000000000000000000000000000000000000000000000000000
+	nomt_test.go:448: ✓ Verified key 76f5fbafa7909bc7 = 3245580142
+	nomt_test.go:448: ✓ Verified key 7fc3f21c95304d8e = 2705000000
+	nomt_test.go:448: ✓ Verified key fc2d13fbe3a2a389 = 265000000
+	nomt_test.go:448: ✓ Verified key 90201a197608c0b9 = 182200000
+	nomt_test.go:448: ✓ Verified key facbb1a046f31165 = 180000000
+	nomt_test.go:448: ✓ Verified key 27f1cc5f211034bc = 1065019000
+	nomt_test.go:448: ✓ Verified key d98eeca7fd17d758 = 682150000
+	nomt_test.go:448: ✓ Verified key a4d13afd3bd231a7 = 51131065861
+	nomt_test.go:448: ✓ Verified key 43253b6a1cc2537d = 22700000000
+	nomt_test.go:448: ✓ Verified key 6a27c8d9981db2b1 = 13564
+	nomt_test.go:454: Successfully verified 10/10 sampled keys
+	nomt_test.go:558: Read 100000 transfers
+	nomt_test.go:558: Read 200000 transfers
+	nomt_test.go:558: Read 300000 transfers
+	nomt_test.go:558: Read 400000 transfers
+	nomt_test.go:558: Read 500000 transfers
+	nomt_test.go:558: Read 600000 transfers
+	nomt_test.go:558: Read 700000 transfers
+	nomt_test.go:558: Read 800000 transfers
+	nomt_test.go:567: Total transfers read: 864500
+	nomt_test.go:568: Block number range: 23823731 - 23829202
+	nomt_test.go:569: Unique blocks with transfers: 5468
+	nomt_test.go:570: Step 5 (Read transfers): 2.055502542s
+	nomt_test.go:634: Block 23823731: 122 transfers, 144 keys updated, insert: 143.333µs, commit: 10.725840458s, state root: 9317c19a5aa85b641555cdc99c139a7c358730245b1b20056efb6047e27d107d
+	nomt_test.go:634: Block 23823732: 88 transfers, 74 keys updated, insert: 118.959µs, commit: 10.582484208s, state root: c5acf9234f615a881a3307720f7646bb00c341dd9bfbde89969a6d29680749ef
+	nomt_test.go:634: Block 23823733: 153 transfers, 144 keys updated, insert: 177.333µs, commit: 10.583696416s, state root: 0a0e641e204eb50abfbbc3fcf2eb4d419df831abf5019e7fd2b226dd016627f0
+	nomt_test.go:634: Block 23823734: 317 transfers, 308 keys updated, insert: 282.334µs, commit: 10.638991375s, state root: 7d9243f737da0465abe852af733e0702c31cd8f4238a6cb3a269cf9a0a0b35a5
+	nomt_test.go:634: Block 23823735: 276 transfers, 290 keys updated, insert: 294.542µs, commit: 10.706624417s, state root: 70a51a4167a3250765e9fdd4167592aee7b195d2692e9126b080a1b36c38d9a3
+	nomt_test.go:634: Block 23823736: 122 transfers, 164 keys updated, insert: 120.125µs, commit: 10.722015583s, state root: 9d7a1d3ec398c9b51ea087e059834e53a16c3786822ac943a6c9ba5516dab2a1
+	nomt_test.go:634: Block 23823737: 68 transfers, 93 keys updated, insert: 59.333µs, commit: 10.751481458s, state root: f647130e84ff5b484ed0acaedbe3a27b69c62297c8869107b9723b9c4d558a6b
+	nomt_test.go:634: Block 23823738: 230 transfers, 229 keys updated, insert: 212.166µs, commit: 10.792295875s, state root: cd4ad50a3529dbe71f49506b4600e70a42c384d9dbec121ac9fc83a1871ceba6
+	nomt_test.go:634: Block 23823739: 137 transfers, 145 keys updated, insert: 119.833µs, commit: 10.829842375s, state root: 1682222ba772d8e60052bdffb42782405ac4f101feb9467cf09287e90c8d786e
+	nomt_test.go:634: Block 23823740: 190 transfers, 209 keys updated, insert: 171.166µs, commit: 10.851383875s, state root: f875d03481143ea5fd7925b617dc6461145258de8ae9aa6c05ddf3fb475cbcce
+	nomt_test.go:634: Block 23823741: 199 transfers, 182 keys updated, insert: 188.875µs, commit: 10.978931542s, state root: 50f88286fdeb8443742da63d4ce42cfcd09743be3200c0c834e1bea57c16bd36
+	nomt_test.go:634: Block 23823742: 94 transfers, 122 keys updated, insert: 100.042µs, commit: 10.88800875s, state root: 0cbaee55c942c23506e127af6595ce9b21013516d54399088cfc673af667d828
+	nomt_test.go:625: Failed to commit block 23823743: failed to sync changes: failed to update beatree: failed to update tree: failed to insert split separator: branch node full: cannot insert separator
+*/
+func TestNomt2025(t *testing.T) {
+
+	// 1. Read mint_events.csv.gz into a map of key => value, and populate the NOMT with the mint events
+	// key = hash(token_address . address) -- value = mint_amount
+
+	// Setup database
+	dir := t.TempDir()
+	opts := DefaultOptions(dir)
+	db, err := Open(opts)
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	// Read and parse mint_events.csv.gz
+	mintEventsPath := "mint_events.csv.gz"
+	file, err := os.Open(mintEventsPath)
+	if err != nil {
+		t.Fatalf("Failed to open mint_events.csv.gz: %v", err)
+	}
+	defer file.Close()
+
+	gzReader, err := gzip.NewReader(file)
+	if err != nil {
+		t.Fatalf("Failed to create gzip reader: %v", err)
+	}
+	defer gzReader.Close()
+
+	scanner := bufio.NewScanner(gzReader)
+
+	// Skip header
+	if !scanner.Scan() {
+		t.Fatal("Failed to read header")
+	}
+
+	// Store a map for verification
+	mintEvents := make(map[[32]byte][]byte)
+
+	// Step 1: Read all events from file
+	step1Start := time.Now()
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		line := scanner.Text()
+		parts := strings.Split(line, ",")
+		if len(parts) != 3 {
+			t.Fatalf("Invalid line %d: expected 3 fields, got %d", lineNum, len(parts))
+		}
+
+		tokenAddress := parts[0]
+		address := parts[1]
+		mintAmount := parts[2]
+
+		// Create key = hash(token_address . address)
+		hasher, _ := blake2b.New256(nil)
+		hasher.Write([]byte(tokenAddress))
+		hasher.Write([]byte(address))
+		keyHash := hasher.Sum(nil)
+
+		var key [32]byte
+		copy(key[:], keyHash)
+
+		// Store mint_amount as value
+		value := []byte(mintAmount)
+
+		mintEvents[key] = value
+
+		if lineNum%10000 == 0 {
+			t.Logf("Read %d mint events", lineNum)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("Error reading file: %v", err)
+	}
+	step1Duration := time.Since(step1Start)
+
+	t.Logf("Total mint events read: %d", lineNum)
+	t.Logf("Step 1 (Read from file): %v", step1Duration)
+
+	// Step 2: Insert all events into NOMT
+	step2Start := time.Now()
+	insertCount := 0
+	for key, value := range mintEvents {
+		if err := db.Insert(key, value); err != nil {
+			t.Fatalf("Failed to insert key %x: %v", key, err)
+		}
+
+		insertCount++
+		if insertCount%10000 == 0 {
+			t.Logf("Inserted %d mint events", insertCount)
+		}
+	}
+	step2Duration := time.Since(step2Start)
+
+	t.Logf("Total mint events inserted: %d", insertCount)
+	t.Logf("Step 2 (Insert into NOMT): %v", step2Duration)
+
+	// Step 3: Commit the data
+	step3Start := time.Now()
+	session, err := db.Commit()
+	step3Duration := time.Since(step3Start)
+	if err != nil {
+		t.Fatalf("Failed to commit: %v", err)
+	}
+
+	t.Logf("Step 3 (Commit): %v", step3Duration)
+
+	newRoot := db.Root()
+	t.Logf("State root after loading mint events: %x", newRoot)
+	t.Logf("Session prev root: %x", session.PrevRoot())
+
+	// Step 4: Pick a few keys with Get and verify values
+	verifyCount := 0
+	maxVerify := 10
+
+	for key, expectedValue := range mintEvents {
+		if verifyCount >= maxVerify {
+			break
+		}
+
+		actualValue, err := db.Get(key)
+		if err != nil {
+			t.Errorf("Failed to get key %x: %v", key, err)
+			continue
+		}
+
+		if !bytes.Equal(actualValue, expectedValue) {
+			t.Errorf("Value mismatch for key %x: expected %s, got %s", key, expectedValue, actualValue)
+		} else {
+			t.Logf("✓ Verified key %x = %s", key[:8], expectedValue)
+		}
+
+		verifyCount++
+	}
+
+	t.Logf("Successfully verified %d/%d sampled keys", verifyCount, maxVerify)
+
+	// Step 5: Read transfers from stablecoin_transfers_with_balances-730.csv.gz
+	step5Start := time.Now()
+	transfersPath := "stablecoin_transfers_with_balances-730.csv.gz"
+	transferFile, err := os.Open(transfersPath)
+	if err != nil {
+		t.Fatalf("Failed to open stablecoin_transfers_with_balances-730.csv.gz: %v", err)
+	}
+	defer transferFile.Close()
+
+	transferGzReader, err := gzip.NewReader(transferFile)
+	if err != nil {
+		t.Fatalf("Failed to create gzip reader for transfers: %v", err)
+	}
+	defer transferGzReader.Close()
+
+	transferScanner := bufio.NewScanner(transferGzReader)
+
+	// Skip header
+	if !transferScanner.Scan() {
+		t.Fatal("Failed to read transfers header")
+	}
+
+	transfers := make(map[uint32][]Transfer)
+	var minBlockNumber uint32 = ^uint32(0) // Max uint32
+	var maxBlockNumber uint32 = 0
+
+	transferLineNum := 0
+	for transferScanner.Scan() {
+		transferLineNum++
+		line := transferScanner.Text()
+		parts := strings.Split(line, ",")
+		if len(parts) != 12 {
+			t.Fatalf("Invalid transfer line %d: expected 12 fields, got %d", transferLineNum, len(parts))
+		}
+
+		// Parse block number
+		var blockNumber uint32
+		if n, err := fmt.Sscanf(parts[6], "%d", &blockNumber); n != 1 || err != nil {
+			t.Fatalf("Invalid block number at line %d: %s", transferLineNum, parts[6])
+		}
+
+		// Parse log index
+		var logIndex uint32
+		if n, err := fmt.Sscanf(parts[7], "%d", &logIndex); n != 1 || err != nil {
+			t.Fatalf("Invalid log index at line %d: %s", transferLineNum, parts[7])
+		}
+
+		// Parse value
+		value := new(big.Int)
+		if _, ok := value.SetString(parts[3], 10); !ok {
+			t.Fatalf("Invalid value at line %d: %s", transferLineNum, parts[3])
+		}
+
+		// Parse timestamp (format: "2025-11-18 04:48:23 UTC")
+		timestamp, err := time.Parse("2006-01-02 15:04:05 MST", parts[5])
+		if err != nil {
+			t.Fatalf("Invalid timestamp at line %d: %s, error: %v", transferLineNum, parts[5], err)
+		}
+
+		// Parse value decimal
+		valueDecimal, err := strconv.ParseFloat(parts[9], 64)
+		if err != nil {
+			t.Fatalf("Invalid value decimal at line %d: %s", transferLineNum, parts[9])
+		}
+
+		// Parse from balance after
+		fromBalanceAfter := new(big.Int)
+		if _, ok := fromBalanceAfter.SetString(parts[10], 10); !ok {
+			t.Fatalf("Invalid from balance after at line %d: %s", transferLineNum, parts[10])
+		}
+
+		// Parse to balance after
+		toBalanceAfter := new(big.Int)
+		if _, ok := toBalanceAfter.SetString(parts[11], 10); !ok {
+			t.Fatalf("Invalid to balance after at line %d: %s", transferLineNum, parts[11])
+		}
+
+		transfer := Transfer{
+			TokenAddress:     common.HexToAddress(parts[0]),
+			FromAddress:      common.HexToAddress(parts[1]),
+			ToAddress:        common.HexToAddress(parts[2]),
+			Value:            value,
+			TransactionHash:  common.HexToHash(parts[4]),
+			BlockTimestamp:   uint64(timestamp.Unix()),
+			BlockNumber:      blockNumber,
+			LogIndex:         logIndex,
+			Symbol:           parts[8],
+			ValueDecimal:     valueDecimal,
+			FromBalanceAfter: fromBalanceAfter,
+			ToBalanceAfter:   toBalanceAfter,
+		}
+
+		transfers[blockNumber] = append(transfers[blockNumber], transfer)
+
+		if blockNumber < minBlockNumber {
+			minBlockNumber = blockNumber
+		}
+		if blockNumber > maxBlockNumber {
+			maxBlockNumber = blockNumber
+		}
+
+		if transferLineNum%100000 == 0 {
+			t.Logf("Read %d transfers", transferLineNum)
+		}
+	}
+
+	if err := transferScanner.Err(); err != nil {
+		t.Fatalf("Error reading transfers file: %v", err)
+	}
+	step5Duration := time.Since(step5Start)
+
+	t.Logf("Total transfers read: %d", transferLineNum)
+	t.Logf("Block number range: %d - %d", minBlockNumber, maxBlockNumber)
+	t.Logf("Unique blocks with transfers: %d", len(transfers))
+	t.Logf("Step 5 (Read transfers): %v", step5Duration)
+
+	// Step 6: Process transfers block by block
+	step6Start := time.Now()
+	processedBlocks := 0
+	totalTransfersProcessed := 0
+	totalInsertTime := time.Duration(0)
+	totalCommitTime := time.Duration(0)
+
+	// Process blocks in order
+	for blockNum := minBlockNumber; blockNum <= maxBlockNumber; blockNum++ {
+		blockTransfers, exists := transfers[blockNum]
+		if !exists {
+			continue
+		}
+
+		// Process each transfer in the block
+		insertStart := time.Now()
+		keysUpdated := make(map[[32]byte]bool)
+		for _, transfer := range blockTransfers {
+			// Update from address balance
+			fromKey := [32]byte{}
+			hasher, _ := blake2b.New256(nil)
+			hasher.Write(transfer.TokenAddress.Bytes())
+			hasher.Write(transfer.FromAddress.Bytes())
+			copy(fromKey[:], hasher.Sum(nil))
+
+			// Store from balance after as value
+			fromBalanceBytes := transfer.FromBalanceAfter.Bytes()
+			if err := db.Insert(fromKey, fromBalanceBytes); err != nil {
+				t.Fatalf("Failed to insert from balance for block %d: %v", blockNum, err)
+			}
+			keysUpdated[fromKey] = true
+
+			// Update to address balance
+			toKey := [32]byte{}
+			hasher.Reset()
+			hasher.Write(transfer.TokenAddress.Bytes())
+			hasher.Write(transfer.ToAddress.Bytes())
+			copy(toKey[:], hasher.Sum(nil))
+
+			// Store to balance after as value
+			toBalanceBytes := transfer.ToBalanceAfter.Bytes()
+			if err := db.Insert(toKey, toBalanceBytes); err != nil {
+				t.Fatalf("Failed to insert to balance for block %d: %v", blockNum, err)
+			}
+			keysUpdated[toKey] = true
+		}
+		insertDuration := time.Since(insertStart)
+		totalInsertTime += insertDuration
+
+		// Commit the block
+		commitStart := time.Now()
+		session, err := db.Commit()
+		if err != nil {
+			t.Fatalf("Failed to commit block %d: %v", blockNum, err)
+		}
+		commitDuration := time.Since(commitStart)
+		totalCommitTime += commitDuration
+
+		stateRoot := session.Root()
+		processedBlocks++
+		totalTransfersProcessed += len(blockTransfers)
+
+		t.Logf("Block %d: %d transfers, %d keys updated, insert: %v, commit: %v, state root: %x",
+			blockNum, len(blockTransfers), len(keysUpdated), insertDuration, commitDuration, stateRoot)
+	}
+
+	step6Duration := time.Since(step6Start)
+
+	t.Logf("Step 6 (Process transfers): %v", step6Duration)
+	t.Logf("Total blocks processed: %d", processedBlocks)
+	t.Logf("Total transfers processed: %d", totalTransfersProcessed)
+	t.Logf("Total insert time: %v", totalInsertTime)
+	t.Logf("Total commit time: %v", totalCommitTime)
 }
 
 func TestNomtRollback(t *testing.T) {
@@ -651,57 +1066,57 @@ func test_nomt(t *testing.T, params TestParams) {
 				}
 			}
 
-		for i := 0; i < params.NumInserts && keysAdded < maxWitnessKeys; i += sampleRate {
-			key := make([]byte, 32)
-			copy(key, fmt.Sprintf("insert_%d_%d", iteration, i))
-			var keyArray [32]byte
-			copy(keyArray[:], key)
-			witnessKeys = append(witnessKeys, keyArray)
-			keysAdded++
-		}
-
-		// Add some updated keys if available (also sampled)
-		if iteration > 0 && keysAdded < maxWitnessKeys {
-			updateSampleRate := 1
-			if updatesPerformed > (maxWitnessKeys - keysAdded) {
-				updateSampleRate = updatesPerformed / (maxWitnessKeys - keysAdded)
-				if updateSampleRate < 1 {
-					updateSampleRate = 1
-				}
-			}
-
-			for i := 0; i < updatesPerformed && keysAdded < maxWitnessKeys; i += updateSampleRate {
+			for i := 0; i < params.NumInserts && keysAdded < maxWitnessKeys; i += sampleRate {
 				key := make([]byte, 32)
-				copy(key, fmt.Sprintf("insert_%d_%d", iteration-1, i))
+				copy(key, fmt.Sprintf("insert_%d_%d", iteration, i))
 				var keyArray [32]byte
 				copy(keyArray[:], key)
 				witnessKeys = append(witnessKeys, keyArray)
 				keysAdded++
 			}
-		}
 
-		// Generate proofs for the witness keys - simplified approach without expensive tree rebuilding
-		proofs := make([]MerkleProof, len(witnessKeys))
+			// Add some updated keys if available (also sampled)
+			if iteration > 0 && keysAdded < maxWitnessKeys {
+				updateSampleRate := 1
+				if updatesPerformed > (maxWitnessKeys - keysAdded) {
+					updateSampleRate = updatesPerformed / (maxWitnessKeys - keysAdded)
+					if updateSampleRate < 1 {
+						updateSampleRate = 1
+					}
+				}
 
-		for i, key := range witnessKeys {
-			value, err := db.Get(key)
-			if err != nil {
-				t.Logf("Warning: Could not get key %x: %v", key, err)
+				for i := 0; i < updatesPerformed && keysAdded < maxWitnessKeys; i += updateSampleRate {
+					key := make([]byte, 32)
+					copy(key, fmt.Sprintf("insert_%d_%d", iteration-1, i))
+					var keyArray [32]byte
+					copy(keyArray[:], key)
+					witnessKeys = append(witnessKeys, keyArray)
+					keysAdded++
+				}
+			}
+
+			// Generate proofs for the witness keys - simplified approach without expensive tree rebuilding
+			proofs := make([]MerkleProof, len(witnessKeys))
+
+			for i, key := range witnessKeys {
+				value, err := db.Get(key)
+				if err != nil {
+					t.Logf("Warning: Could not get key %x: %v", key, err)
+					proofs[i] = MerkleProof{
+						Key:   key,
+						Value: nil,
+						Path:  nil, // No proof path for failed keys
+					}
+					continue
+				}
+
+				// Create a simple proof with just key-value (no expensive merkle path generation)
 				proofs[i] = MerkleProof{
 					Key:   key,
-					Value: nil,
-					Path:  nil, // No proof path for failed keys
+					Value: value,
+					Path:  nil, // Skip expensive proof generation for performance
 				}
-				continue
 			}
-
-			// Create a simple proof with just key-value (no expensive merkle path generation)
-			proofs[i] = MerkleProof{
-				Key:   key,
-				Value: value,
-				Path:  nil, // Skip expensive proof generation for performance
-			}
-		}
 
 			witness = &Witness{
 				PrevRoot: prevStateRoot,
@@ -717,24 +1132,24 @@ func test_nomt(t *testing.T, params TestParams) {
 		verifiedCount := 0
 		if witness != nil {
 			for _, proof := range witness.Proofs {
-			// Basic verification: check that the key-value pair exists
-			actualValue, err := db.Get(proof.Key)
-			if err != nil {
-				t.Logf("Warning: Could not get key %x for verification: %v", proof.Key, err)
-				continue
-			}
+				// Basic verification: check that the key-value pair exists
+				actualValue, err := db.Get(proof.Key)
+				if err != nil {
+					t.Logf("Warning: Could not get key %x for verification: %v", proof.Key, err)
+					continue
+				}
 
-			if len(proof.Path) == 0 {
-				// For keys without full proof paths, just verify the value matches
-				if bytes.Equal(actualValue, proof.Value) {
-					verifiedCount++
+				if len(proof.Path) == 0 {
+					// For keys without full proof paths, just verify the value matches
+					if bytes.Equal(actualValue, proof.Value) {
+						verifiedCount++
+					}
+				} else {
+					// TODO: Add full Merkle proof verification when proof paths are available
+					if bytes.Equal(actualValue, proof.Value) {
+						verifiedCount++
+					}
 				}
-			} else {
-				// TODO: Add full Merkle proof verification when proof paths are available
-				if bytes.Equal(actualValue, proof.Value) {
-					verifiedCount++
-				}
-			}
 			}
 		}
 		verifyTime := time.Since(verifyStart)
@@ -772,16 +1187,16 @@ func test_nomt(t *testing.T, params TestParams) {
 // TestNomtBenchmarkSmall_Isolated tests NOMT with small parameters (isolated mode)
 func TestNomtBenchmarkSmall_Isolated(t *testing.T) {
 	params := TestParams{
-		MaxIterations:   5,                   // 5 isolated iterations
-		BenchmarkMode:   BenchmarkIsolated,   // Fresh DB each iteration
-		CommitLag:       0,                   // Not applicable for isolated mode
-		NumInserts:      1000,                // 1K inserts per iteration
-		NumUpdates:      500,                 // 500 updates per iteration
-		NumReads:        250,                 // 250 reads (25% of writes)
-		NumDeletes:      50,                  // 50 deletes per iteration
-		NumWitnessKeys:  0,                   // Disabled until Phase 2
-		ValueSize:       64,                  // 64-byte values
-		OptimizeWitness: false,               // Not relevant without witness
+		MaxIterations:   5,                 // 5 isolated iterations
+		BenchmarkMode:   BenchmarkIsolated, // Fresh DB each iteration
+		CommitLag:       0,                 // Not applicable for isolated mode
+		NumInserts:      1000,              // 1K inserts per iteration
+		NumUpdates:      500,               // 500 updates per iteration
+		NumReads:        250,               // 250 reads (25% of writes)
+		NumDeletes:      50,                // 50 deletes per iteration
+		NumWitnessKeys:  0,                 // Disabled until Phase 2
+		ValueSize:       64,                // 64-byte values
+		OptimizeWitness: false,             // Not relevant without witness
 	}
 	test_nomt(t, params)
 }
@@ -807,16 +1222,16 @@ func TestNomtBenchmarkSmall_Sequential(t *testing.T) {
 // Phase 1B: Matches Rust's bench_isolate - fresh DB each iteration
 func TestNomtBenchmarkMedium_Isolated(t *testing.T) {
 	params := TestParams{
-		MaxIterations:   5,                   // 5 isolated iterations
-		BenchmarkMode:   BenchmarkIsolated,   // Fresh DB each iteration (like Rust)
-		CommitLag:       0,                   // Not applicable for isolated mode
-		NumInserts:      10000,               // 10K inserts per iteration
-		NumUpdates:      10000,               // 10K updates per iteration
-		NumReads:        5000,                // 5K reads (25% of writes)
-		NumDeletes:      50,                  // 50 deletes per iteration
-		NumWitnessKeys:  0,                   // Disabled until Phase 2
-		ValueSize:       32,                  // Match Rust default
-		OptimizeWitness: false,               // Not relevant without witness
+		MaxIterations:   5,                 // 5 isolated iterations
+		BenchmarkMode:   BenchmarkIsolated, // Fresh DB each iteration (like Rust)
+		CommitLag:       0,                 // Not applicable for isolated mode
+		NumInserts:      10000,             // 10K inserts per iteration
+		NumUpdates:      10000,             // 10K updates per iteration
+		NumReads:        5000,              // 5K reads (25% of writes)
+		NumDeletes:      50,                // 50 deletes per iteration
+		NumWitnessKeys:  0,                 // Disabled until Phase 2
+		ValueSize:       32,                // Match Rust default
+		OptimizeWitness: false,             // Not relevant without witness
 	}
 	test_nomt(t, params)
 }

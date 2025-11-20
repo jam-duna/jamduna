@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/colorfulnotion/jam/bmt/beatree"
 	"github.com/colorfulnotion/jam/bmt/beatree/allocator"
@@ -22,6 +23,10 @@ type beatreeWrapper struct {
 
 	// Metadata file path for root persistence
 	metadataFile string
+
+	// Root hash caching to avoid expensive recomputation
+	cachedRoot [32]byte
+	rootDirty  bool
 }
 
 // beatreeMetadata stores persistent metadata for the beatree
@@ -71,6 +76,7 @@ func openBeatree(opts beatreeOptions) (*beatreeWrapper, error) {
 		shared:       shared,
 		store:        storeInstance,
 		metadataFile: filepath.Join(beatreeDir, "metadata.json"),
+		rootDirty:    true, // Start with dirty root (will be computed on first access)
 	}
 
 	// Try to recover existing state from the store
@@ -105,6 +111,9 @@ func (bw *beatreeWrapper) recoverBeatreeState() error {
 
 	// Restore the root page number
 	bw.shared.SetRoot(allocator.PageNumber(metadata.RootPageNumber))
+
+	// Mark root as dirty since we've changed the tree structure during recovery
+	bw.rootDirty = true
 
 	return nil
 }
@@ -172,14 +181,23 @@ func (bw *beatreeWrapper) ApplyChangeset(changeset map[beatree.Key]*beatree.Chan
 	// Commit changes to shared state (adds to primary staging)
 	bw.shared.CommitChanges(changeset)
 
+	// Mark root as dirty since we've modified the tree
+	if len(changeset) > 0 {
+		bw.rootDirty = true
+	}
+
 	return nil
 }
 
 // Root returns the current root hash from real beatree.
 func (bw *beatreeWrapper) Root() [32]byte {
+	// Return cached value if root is clean
+	if !bw.rootDirty {
+		return bw.cachedRoot
+	}
+
 	// Collect all key-value pairs using Enumerate (reads from disk + staging)
 	var kvPairs []core.KVPair
-
 
 	err := bw.Enumerate(func(key [32]byte, value []byte) error {
 		kvPair := core.KVPair{
@@ -190,20 +208,17 @@ func (bw *beatreeWrapper) Root() [32]byte {
 		return nil
 	})
 
-
 	if err != nil || len(kvPairs) == 0 {
 		// Empty tree or error - return zero root
-		return [32]byte{}
+		bw.cachedRoot = [32]byte{}
+		bw.rootDirty = false
+		return bw.cachedRoot
 	}
 
-	// Sort by key for deterministic tree construction
-	for i := 0; i < len(kvPairs)-1; i++ {
-		for j := i + 1; j < len(kvPairs); j++ {
-			if bytes.Compare(kvPairs[i].Key[:], kvPairs[j].Key[:]) > 0 {
-				kvPairs[i], kvPairs[j] = kvPairs[j], kvPairs[i]
-			}
-		}
-	}
+	// Sort by key for deterministic tree construction (use sort.Slice for O(N log N))
+	sort.Slice(kvPairs, func(i, j int) bool {
+		return bytes.Compare(kvPairs[i].Key[:], kvPairs[j].Key[:]) < 0
+	})
 
 	// Create Blake2b hasher
 	hasher := core.Blake2bBinaryHasher{}
@@ -211,8 +226,11 @@ func (bw *beatreeWrapper) Root() [32]byte {
 	// Build GP tree and get root node
 	rootNode := core.BuildGpTree(kvPairs, 0, hasher.Hash)
 
-	// Return root hash
-	return [32]byte(rootNode.Hash)
+	// Cache the computed root and mark as clean
+	bw.cachedRoot = [32]byte(rootNode.Hash)
+	bw.rootDirty = false
+
+	return bw.cachedRoot
 }
 
 // Enumerate calls fn for every key/value in the committed tree.
@@ -313,6 +331,8 @@ func (bw *beatreeWrapper) Sync() error {
 	// Update the root to the new root from the update operation
 	bw.shared.SetRoot(result.NewRoot)
 
+	// Mark root as dirty since we've changed the tree structure
+	bw.rootDirty = true
 
 	// Save metadata (root page number) to disk
 	if err := bw.saveMetadata(); err != nil {
@@ -322,11 +342,12 @@ func (bw *beatreeWrapper) Sync() error {
 	// Clear secondary staging after successful persistence
 	defer bw.shared.ClearSecondaryStaging()
 
-	// Sync the underlying store to ensure durability
-	rootHash := bw.computeRootHash()
-
-
-	return bw.store.Sync(rootHash)
+	// OPTIMIZATION: Don't compute root hash during sync
+	// The manifest just stores the root hash for verification, but doesn't use it
+	// for crash recovery (that's handled by the beatree page numbers).
+	// We use zero hash here and rely on explicit Root() calls when verification is needed.
+	// This eliminates the O(N log N) enumerate+sort+BuildGpTree from the critical path.
+	return bw.store.Sync([32]byte{})
 }
 
 // computeRootHash computes root hash using the Root() method.

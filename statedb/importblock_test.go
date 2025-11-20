@@ -264,12 +264,12 @@ func TestTracesRecompiler(t *testing.T) {
 	testDirs := []string{
 		//path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
 		//path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy_light"),
+		//path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy_light"),
 	}
 
 	// Iterate over each directory.

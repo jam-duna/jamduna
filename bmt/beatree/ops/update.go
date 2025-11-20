@@ -3,6 +3,7 @@ package ops
 import (
 	"crypto/sha256"
 	"fmt"
+	"sort"
 
 	"github.com/colorfulnotion/jam/bmt/beatree"
 	"github.com/colorfulnotion/jam/bmt/beatree/allocator"
@@ -182,25 +183,45 @@ func updateLeafNode(
 		return allocator.InvalidPageNumber, nil, nil, fmt.Errorf("failed to deserialize leaf: %w", err)
 	}
 
-	newLeaf := leaf.NewNode()
-	for _, entry := range oldLeaf.Entries {
-		if err := newLeaf.Insert(entry); err != nil {
-			return allocator.InvalidPageNumber, nil, nil, fmt.Errorf("failed to copy entry: %w", err)
-		}
-	}
+	// OPTIMIZATION: Shallow clone instead of full copy
+	// Clone copies the Entries slice but shares value buffers (immutable)
+	// This is O(M) where M = number of entries, not O(M × avg_value_size)
+	newLeaf := oldLeaf.Clone()
 
+	// Apply changes using in-place updates
 	for key, change := range changeset {
 		if change.IsDelete() {
-			newLeaf.Delete(key)
-		} else if change.IsInsert() || change.IsOverflow() {
+			// Use DeleteEntry for O(log M) deletion
+			_, err := newLeaf.DeleteEntry(key)
+			if err != nil {
+				return allocator.InvalidPageNumber, nil, nil, fmt.Errorf("failed to delete key: %w", err)
+			}
+		} else if change.IsInsert() {
+			// For inline values, use UpdateEntry for O(log M) update/insert
+			if len(change.Value) <= leaf.MaxLeafValueSize {
+				_, needsSplit, err := newLeaf.UpdateEntry(key, change.Value)
+				if err != nil {
+					return allocator.InvalidPageNumber, nil, nil, fmt.Errorf("failed to update entry: %w", err)
+				}
+				// Note: needsSplit is checked per-key, but we handle the final split below
+				_ = needsSplit
+			} else {
+				// For overflow values, fall back to insertIntoLeaf (handles overflow page allocation)
+				if err := insertIntoLeaf(newLeaf, key, change, leafStore); err != nil {
+					return allocator.InvalidPageNumber, nil, nil, fmt.Errorf("failed to insert overflow key: %w", err)
+				}
+			}
+		} else if change.IsOverflow() {
+			// Overflow values always use insertIntoLeaf
 			if err := insertIntoLeaf(newLeaf, key, change, leafStore); err != nil {
-				return allocator.InvalidPageNumber, nil, nil, fmt.Errorf("failed to insert key: %w", err)
+				return allocator.InvalidPageNumber, nil, nil, fmt.Errorf("failed to insert overflow key: %w", err)
 			}
 		} else {
 			return allocator.InvalidPageNumber, nil, nil, fmt.Errorf("unknown change type")
 		}
 	}
 
+	// Check if split is needed after all changes applied
 	if newLeaf.EstimateSize() >= leaf.LeafNodeSize {
 		rightLeaf, separator, err := newLeaf.Split()
 		if err != nil {
@@ -223,6 +244,7 @@ func updateLeafNode(
 		}, []allocator.PageNumber{leftPageNum, rightPageNum}, nil
 	}
 
+	// Single allocation for modified leaf (CoW semantics)
 	newPageNum := leafStore.Alloc()
 	leafData, err := newLeaf.Serialize()
 	if err != nil {
@@ -244,6 +266,7 @@ func updateBranchNode(
 		return allocator.InvalidPageNumber, nil, nil, fmt.Errorf("failed to deserialize branch: %w", err)
 	}
 
+	// Group changes by child
 	childChangesets := make(map[allocator.PageNumber]map[beatree.Key]*beatree.Change)
 	for key, change := range changeset {
 		childPage := oldBranch.FindChild(key)
@@ -253,15 +276,14 @@ func updateBranchNode(
 		childChangesets[childPage][key] = change
 	}
 
-	newBranch := branch.NewNode(oldBranch.LeftmostChild)
-	for _, sep := range oldBranch.Separators {
-		if err := newBranch.Insert(sep); err != nil {
-			return allocator.InvalidPageNumber, nil, nil, fmt.Errorf("failed to copy separator: %w", err)
-		}
-	}
+	// OPTIMIZATION: Shallow clone instead of full copy
+	// Clone copies the Separators slice but all values are value types
+	// This is O(S) where S = number of separators, not O(S × N) for full subtree copy
+	newBranch := oldBranch.Clone()
 
 	var allAllocatedPages []allocator.PageNumber
 
+	// Update ONLY the affected children using point updates
 	for childPage, childChanges := range childChangesets {
 		newChildPage, childSplit, childAllocated, err := updateNode(childPage, childChanges, leafStore)
 		if err != nil {
@@ -270,23 +292,22 @@ func updateBranchNode(
 
 		allAllocatedPages = append(allAllocatedPages, childAllocated...)
 
-		if childPage == oldBranch.LeftmostChild {
-			newBranch.LeftmostChild = newChildPage
-		} else {
-			for i := range newBranch.Separators {
-				if newBranch.Separators[i].Child == childPage {
-					newBranch.Separators[i].Child = newChildPage
-					break
-				}
-			}
+		// Point update - modify only this child pointer using UpdateChild
+		found, err := newBranch.UpdateChild(childPage, newChildPage)
+		if err != nil {
+			return allocator.InvalidPageNumber, nil, nil, fmt.Errorf("failed to update child pointer: %w", err)
+		}
+		if !found {
+			return allocator.InvalidPageNumber, nil, nil, fmt.Errorf("child page %v not found in branch", childPage)
 		}
 
 		if childSplit != nil {
+			// Insert separator without copying existing ones
 			newSep := branch.Separator{
 				Key:   childSplit.SeparatorKey,
 				Child: childSplit.RightPage,
 			}
-			if err := newBranch.Insert(newSep); err != nil {
+			if err := newBranch.InsertSeparator(newSep); err != nil {
 				return allocator.InvalidPageNumber, nil, nil, fmt.Errorf("failed to insert split separator: %w", err)
 			}
 		}
@@ -409,13 +430,9 @@ type sortableEntry struct {
 }
 
 func sortEntries(entries []sortableEntry) {
-	for i := 1; i < len(entries); i++ {
-		j := i
-		for j > 0 && entries[j].key.Compare(entries[j-1].key) < 0 {
-			entries[j], entries[j-1] = entries[j-1], entries[j]
-			j--
-		}
-	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].key.Compare(entries[j].key) < 0
+	})
 }
 
 func estimateEntrySize(key beatree.Key, change *beatree.Change) int {

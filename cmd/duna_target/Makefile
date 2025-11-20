@@ -19,9 +19,16 @@ asn0r: static_target0r_linux static_target0r_mac
 asn0: static_target0_linux static_target0_mac
 
 dynamic_build:
-	@echo "Building dynamic duna_fuzzer for current platform..."
+	@echo "Building dynamic $(BINARY_NAME) for current platform..."
 	@GOOS=$(shell go env GOOS) GOARCH=$(shell go env GOARCH) \
 	go build -tags="cgo,$(NETWORK),asn$(DEFAULT_ASN_VERSION)" -o $(BINARY_NAME)_dynamic .
+
+dynamic_compiler:
+	@echo "Building dynamic $(BINARY_NAME) with compiler backend for current platform..."
+	@GOOS=$(shell go env GOOS) GOARCH=$(shell go env GOARCH) \
+	go build -tags="cgo,$(NETWORK),asn$(DEFAULT_ASN_VERSION)" \
+	-ldflags="-X 'main.defaultBackend=compiler'" \
+	-o $(BINARY_NAME)_dynamic_compiler .
 
 static_target_linux:
 	@echo "Building static $(BINARY_NAME) for Linux (amd64)..."
