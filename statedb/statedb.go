@@ -313,6 +313,9 @@ func (s *StateDB) InitTrieAndLoadJamState(stateRoot common.Hash) error {
 		return err
 	}
 
+	// Set the StateRoot field so it's available for state transitions
+	s.StateRoot = stateRoot
+
 	// Batch read all 16 states in a single operation
 	states, err := s.sdb.GetStates()
 	if err != nil {

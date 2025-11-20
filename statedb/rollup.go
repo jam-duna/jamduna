@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
@@ -26,13 +27,42 @@ const (
 	verifyServiceProof = false
 )
 
-var auth_code_bytes, _ = os.ReadFile(common.GetFilePath(BootStrapNullAuthFile))
-var auth_code = AuthorizeCode{
-	PackageMetaData:   []byte("bootstrap"),
-	AuthorizationCode: auth_code_bytes,
+// Lazy initialization for bootstrap auth code hash
+var (
+	bootstrap_auth_codehash common.Hash
+	bootstrapAuthOnce       sync.Once
+)
+
+// getBootstrapAuthCodeHash computes the bootstrap auth code hash lazily
+func getBootstrapAuthCodeHash() common.Hash {
+	bootstrapAuthOnce.Do(func() {
+		// Only compute when actually needed
+		authFilePath, err := common.GetFilePath(BootStrapNullAuthFile)
+		if err != nil {
+			log.Warn(log.SDB, "Failed to get bootstrap auth file path, using zero hash", "err", err)
+			bootstrap_auth_codehash = common.Hash{}
+			return
+		}
+		auth_code_bytes, err := os.ReadFile(authFilePath)
+		if err != nil {
+			log.Warn(log.SDB, "Failed to read bootstrap null auth file, using zero hash", "err", err)
+			bootstrap_auth_codehash = common.Hash{}
+			return
+		}
+		auth_code := AuthorizeCode{
+			PackageMetaData:   []byte("bootstrap"),
+			AuthorizationCode: auth_code_bytes,
+		}
+		auth_code_encoded_bytes, err := auth_code.Encode()
+		if err != nil {
+			log.Warn(log.SDB, "Failed to encode bootstrap auth code, using zero hash", "err", err)
+			bootstrap_auth_codehash = common.Hash{}
+			return
+		}
+		bootstrap_auth_codehash = common.Blake2Hash(auth_code_encoded_bytes)
+	})
+	return bootstrap_auth_codehash
 }
-var auth_code_encoded_bytes, _ = auth_code.Encode()
-var bootstrap_auth_codehash = common.Blake2Hash(auth_code_encoded_bytes) //pu
 
 type Rollup struct {
 	stateDB            *StateDB
@@ -47,7 +77,7 @@ type Rollup struct {
 func DefaultWorkPackage(serviceID uint32, service *types.ServiceAccount) types.WorkPackage {
 	return types.WorkPackage{
 		AuthCodeHost:          0,
-		AuthorizationCodeHash: bootstrap_auth_codehash,
+		AuthorizationCodeHash: getBootstrapAuthCodeHash(),
 		AuthorizationToken:    nil,
 		ConfigurationBlob:     nil,
 		RefineContext:         types.RefineContext{}, // Caller should set this
@@ -189,7 +219,10 @@ func (c *Rollup) setupValidators() ([]types.Validator, []types.ValidatorSecret, 
 
 // getBootstrapAuthCodeHash reads and hashes the bootstrap authorization code
 func (c *Rollup) getBootstrapAuthCodeHash() (common.Hash, error) {
-	authPvm := common.GetFilePath(BootStrapNullAuthFile)
+	authPvm, err := common.GetFilePath(BootStrapNullAuthFile)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("failed to get auth file path: %w", err)
+	}
 	authCodeBytes, err := os.ReadFile(authPvm)
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("failed to read auth code: %w", err)

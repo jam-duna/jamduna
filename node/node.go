@@ -88,14 +88,42 @@ const (
 	DefaultChannelSize = 200
 )
 
-var auth_code_bytes, _ = os.ReadFile(common.GetFilePath(statedb.BootStrapNullAuthFile))
-var auth_code = statedb.AuthorizeCode{
-	PackageMetaData:   []byte("bootstrap"),
-	AuthorizationCode: auth_code_bytes,
+// Lazy initialization for bootstrap auth code hash
+var (
+	bootstrap_auth_codehash common.Hash
+	bootstrapAuthOnce       sync.Once
+)
+
+// getBootstrapAuthCodeHash computes the bootstrap auth code hash lazily
+func getBootstrapAuthCodeHash() common.Hash {
+	bootstrapAuthOnce.Do(func() {
+		// Only compute when actually needed
+		authFilePath, err := common.GetFilePath(statedb.BootStrapNullAuthFile)
+		if err != nil {
+			log.Warn(log.Node, "Failed to get bootstrap auth file path, using zero hash", "err", err)
+			bootstrap_auth_codehash = common.Hash{}
+			return
+		}
+		auth_code_bytes, err := os.ReadFile(authFilePath)
+		if err != nil {
+			log.Warn(log.Node, "Failed to read bootstrap null auth file, using zero hash", "err", err)
+			bootstrap_auth_codehash = common.Hash{}
+			return
+		}
+		auth_code := statedb.AuthorizeCode{
+			PackageMetaData:   []byte("bootstrap"),
+			AuthorizationCode: auth_code_bytes,
+		}
+		auth_code_encoded_bytes, err := auth_code.Encode()
+		if err != nil {
+			log.Warn(log.Node, "Failed to encode bootstrap auth code, using zero hash", "err", err)
+			bootstrap_auth_codehash = common.Hash{}
+			return
+		}
+		bootstrap_auth_codehash = common.Blake2Hash(auth_code_encoded_bytes)
+	})
+	return bootstrap_auth_codehash
 }
-var auth_code_encoded_bytes, _ = auth_code.Encode()
-var auth_code_hash = common.Blake2Hash(auth_code_encoded_bytes) //pu
-var bootstrap_auth_codehash = auth_code_hash
 
 type NodeContent struct {
 	id                   uint16

@@ -751,14 +751,9 @@ func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName s
 	bootstrapCodeHash := common.Blake2Hash(bootstrapCode)
 	log.Info(log.Node, "NewService: ReadCodeWithMetadata")
 	bootstrapService := uint32(statedb.BootstrapServiceCode)
-	var auth_code_bytes, _ = os.ReadFile(common.GetFilePath(statedb.BootStrapNullAuthFile))
-	var auth_code = statedb.AuthorizeCode{
-		PackageMetaData:   []byte("bootstrap"),
-		AuthorizationCode: auth_code_bytes,
-	}
 
-	var auth_code_encoded_bytes, _ = auth_code.Encode()
-	bootstrap_auth_codehash := common.Blake2Hash(auth_code_encoded_bytes) //pu
+	// Use the shared lazy-initialized bootstrap auth code hash
+	bootstrap_auth_codehash := getBootstrapAuthCodeHash()
 
 	codeWP := types.WorkPackage{
 		AuthorizationToken:    []byte(""),

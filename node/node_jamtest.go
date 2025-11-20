@@ -170,8 +170,12 @@ func getServices(serviceNames []string, getmetadata bool) (services map[string]*
 		if getmetadata {
 			code, _ = types.ReadCodeWithMetadata(fileName, serviceName)
 		} else {
-			fileName := common.GetFilePath(fileName)
-			code, _ = os.ReadFile(fileName)
+			filePath, err := common.GetFilePath(fileName)
+			if err != nil {
+				log.Error(log.Node, "Failed to get file path", "fileName", fileName, "err", err)
+				continue
+			}
+			code, _ = os.ReadFile(filePath)
 		}
 
 		tmpServiceCode := uint32(i + 1)
@@ -406,7 +410,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		codeWorkPackage := types.WorkPackage{
 			AuthorizationToken:    []byte(""),
 			AuthCodeHost:          bootstrapService,
-			AuthorizationCodeHash: bootstrap_auth_codehash,
+			AuthorizationCodeHash: getBootstrapAuthCodeHash(),
 			ConfigurationBlob:     []byte{},
 			WorkItems:             bootstrap_workItems,
 		}

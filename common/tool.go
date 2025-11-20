@@ -271,29 +271,25 @@ func DecodeJustification(compact []byte, numECPiecesPerSegment int) ([][]byte, e
 	return path, nil
 }
 
-// Stub
-func GetFilePathForNetwork(network string) string {
-	// Use environment variable JAM_PATH first (for majik fork), then JAM_PATH, but if neither is set, use default
+// GetFilePathForNetwork returns the file path for a given network, or an error if JAM_PATH is not set
+func GetFilePathForNetwork(network string) (string, error) {
 	basePath := os.Getenv("JAM_PATH")
 	if basePath == "" {
-		panic("JAM_PATH environment variable is not set")
+		return "", fmt.Errorf("JAM_PATH environment variable is not set")
 	}
-
-	// Construct the full file path using filepath package
 
 	fileName := fmt.Sprintf("%s-%08d.json", network, 0) //tiny-00000000.json
-	return filepath.Join(basePath, "chainspecs", fileName)
+	return filepath.Join(basePath, "chainspecs", fileName), nil
 }
 
-func GetFilePath(fn string) string {
-	// Use environment variable JAM_PATH first (for majik fork), then JAM_PATH, but if neither is set, use default
+// GetFilePath returns the file path for a given filename, or an error if JAM_PATH is not set
+func GetFilePath(fn string) (string, error) {
 	basePath := os.Getenv("JAM_PATH")
 	if basePath == "" {
-		panic("JAM_PATH environment variable is not set")
+		return "", fmt.Errorf("JAM_PATH environment variable is not set")
 	}
 
-	// Construct the full file path using filepath package
-	return filepath.Join(basePath, fn)
+	return filepath.Join(basePath, fn), nil
 }
 
 func Uint16Contains(slice []uint16, value uint16) bool {

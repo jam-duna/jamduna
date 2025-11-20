@@ -147,7 +147,10 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 		},
 	}
 
-	auth_pvm := common.GetFilePath(BootStrapNullAuthFile)
+	auth_pvm, err0 := common.GetFilePath(BootStrapNullAuthFile)
+	if err0 != nil {
+		return nil, err0
+	}
 	auth_code_bytes, err0 := os.ReadFile(auth_pvm)
 	if err0 != nil {
 		return nil, err0
@@ -273,10 +276,13 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 	return trace, nil
 }
 func NewBlockFromFile(blockfilename string) *types.Block {
-	fn := common.GetFilePath(blockfilename)
+	fn, err := common.GetFilePath(blockfilename)
+	if err != nil {
+		panic(fmt.Sprintf("failed to get file path for %s: %v", blockfilename, err))
+	}
 	expectedCodec, err := os.ReadFile(fn)
 	if err != nil {
-		panic(fmt.Sprintf("failed to read codec file %s", fn))
+		panic(fmt.Sprintf("failed to read codec file %s: %v", fn, err))
 	}
 	r, _, err := types.Decode(expectedCodec, reflect.TypeOf(types.Block{}))
 	if err != nil {
@@ -288,8 +294,10 @@ func NewBlockFromFile(blockfilename string) *types.Block {
 }
 
 func NewStateDBFromStateTransitionFile(sdb *storage.StateDBStorage, network string) (statedb *StateDB, err error) {
-	//fn := common.GetFilePath(statefilename) // TODO: SHWAN THIS IS NOT REAL
-	fn := common.GetFilePathForNetwork(network)
+	fn, err := common.GetFilePathForNetwork(network)
+	if err != nil {
+		return statedb, fmt.Errorf("failed to get file path for network %s: %w", network, err)
+	}
 	snapshotRawBytes, err := os.ReadFile(fn)
 	if err != nil {
 		fmt.Printf("Error reading file %s: %v\n", fn, err)

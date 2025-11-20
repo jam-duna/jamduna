@@ -35,7 +35,7 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 		wp := types.WorkPackage{
 			AuthCodeHost:          0,
 			AuthorizationToken:    nil, // null-authorizer
-			AuthorizationCodeHash: bootstrap_auth_codehash,
+			AuthorizationCodeHash: getBootstrapAuthCodeHash(),
 			ConfigurationBlob:     nil,
 			WorkItems: []types.WorkItem{
 				{
@@ -201,7 +201,7 @@ func evm(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 		wp := types.WorkPackage{
 			AuthCodeHost:          0,
 			AuthorizationToken:    nil,
-			AuthorizationCodeHash: bootstrap_auth_codehash,
+			AuthorizationCodeHash: getBootstrapAuthCodeHash(),
 			ConfigurationBlob:     nil,
 			WorkItems: []types.WorkItem{
 				{

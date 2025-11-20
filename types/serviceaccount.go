@@ -848,8 +848,11 @@ func SplitMetadataAndCode(data []byte) (service_name string, code []byte) {
 }
 
 func ReadCodeWithMetadata(fp string, metadata string) ([]byte, error) {
-	fp = common.GetFilePath(fp)
-	raw_code, err := os.ReadFile(fp)
+	filePath, err := common.GetFilePath(fp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file path: %w", err)
+	}
+	raw_code, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
 	}

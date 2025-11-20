@@ -27,7 +27,7 @@ func reassign(n1 JNode, testServices map[string]*types.TestService, targetN int)
 		wp := types.WorkPackage{
 			AuthCodeHost:          0,
 			AuthorizationToken:    auth_token,
-			AuthorizationCodeHash: bootstrap_auth_codehash,
+			AuthorizationCodeHash: getBootstrapAuthCodeHash(),
 			ConfigurationBlob:     nil,
 			WorkItems: []types.WorkItem{
 				{
