@@ -207,7 +207,6 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 
 			statedb.WriteServicePreimageBlob(service.ServiceCode, code)
 			statedb.WriteServicePreimageLookup(service.ServiceCode, codeHash, codeLen, bootStrapAnchor)
-
 			for k, v := range service.Storage {
 				statedb.WriteServiceStorage(service.ServiceCode, k.Bytes(), v)
 			}
@@ -364,10 +363,11 @@ func NewStateDBFromStateTransition(sdb types.JAMStorage, statetransition *StateT
 	t0 = time.Now()
 	statedb.Block = &(statetransition.Block)
 	isGenesis := IsGenesisSTF(statetransition)
-	if isGenesis && false {
-		statetransition.PreState = statetransition.PostState // Allow genesis stf to use poststate as prestate for first non-genesis block
+	if isGenesis {
+		statedb.StateRoot, err = statedb.UpdateAllTrieStateRaw(statetransition.PostState) // Use PostState for genesis to get the flushed state root
+	} else {
+		statedb.StateRoot, err = statedb.UpdateAllTrieStateRaw(statetransition.PreState) // NOTE: MK -- USE PRESTATE
 	}
-	statedb.StateRoot, err = statedb.UpdateAllTrieStateRaw(statetransition.PreState) // NOTE: MK -- USE PRESTATE
 	if err != nil {
 		return nil, fmt.Errorf("UpdateAllTrieStateRaw failed: %w", err)
 	}

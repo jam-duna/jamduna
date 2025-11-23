@@ -1627,7 +1627,7 @@ impl WorkItem {
     pub fn get_imported_segments_range(&self, object_ref: &crate::objects::ObjectRef) -> Option<(usize, usize)> {
         let target_hash = &object_ref.work_package_hash;
         let index_start = object_ref.index_start;
-        let index_end = object_ref.index_end;
+        let index_end = index_start + object_ref.payload_length as u16;
 
         log_debug(&format!(
             "get_imported_segments_range: looking for work_package_hash={:?}, index_start={}, index_end={}, total imported_segments={}",

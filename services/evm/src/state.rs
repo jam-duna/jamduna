@@ -24,14 +24,14 @@ use primitive_types::{H160, H256, U256};
 use utils::effects::ObjectId;
 use utils::functions::{log_error, log_info, log_debug};
 use utils::objects::ObjectRef;
-use utils::tracking::ObjectDependency;
+// ObjectDependency replaced with ObjectId
 use utils::tracking::OverlayTracker;
 
 use crate::receipt::TransactionReceiptRecord;
 use crate::sharding::{
     ObjectKind, code_object_id, shard_object_id,
 };
-use crate::sharding::{ContractStorage, SSRData, SSRHeader, ShardData, ShardId, deserialize_shard, deserialize_ssr};
+use crate::sharding::{ContractStorage, ContractShard, SSRHeader, ShardId, deserialize_shard, deserialize_ssr};
 use utils::hash_functions::keccak256;
 use utils::tracking::WriteKey;
 
@@ -104,6 +104,14 @@ pub struct EnvironmentData {
 
 // ===== MajikBackend =====
 
+/// Imported meta-shard from witness
+pub struct ImportedMetaShard {
+    pub shard_id: crate::da::ShardId,
+    pub version: u32,
+    pub digest: [u8; 32],
+    pub entries: Vec<crate::meta_sharding::ObjectRefEntry>,
+}
+
 /// Majik backend with DA-style storage (no InMemoryBackend)
 pub struct MajikBackend {
     pub code_storage: RefCell<BTreeMap<H160, Vec<u8>>>, // address -> bytecode
@@ -116,6 +124,11 @@ pub struct MajikBackend {
     pub environment: EnvironmentData,
     pub service_id: u32, // Service ID for DA imports
     pub imported_objects: RefCell<BTreeMap<ObjectId, (ObjectRef, Vec<u8>)>>, // object_id -> (ref, payload)
+
+    // Meta-shard state (JAM State object index)
+    pub meta_ssr: RefCell<crate::meta_sharding::MetaSSR>,  // Global SSR for all ObjectRefs
+    pub meta_shards: RefCell<BTreeMap<crate::da::ShardId, crate::meta_sharding::MetaShard>>,  // Cached meta-shards
+    pub imported_meta_shards: RefCell<BTreeMap<crate::da::ShardId, ImportedMetaShard>>,  // From witnesses
 }
 
 impl MajikBackend {
@@ -140,19 +153,22 @@ impl MajikBackend {
             environment,
             service_id,
             imported_objects: RefCell::new(BTreeMap::new()),
+
+            // Initialize meta-shard tracking
+            meta_ssr: RefCell::new(crate::meta_sharding::MetaSSR::new()),
+            meta_shards: RefCell::new(BTreeMap::new()),
+            imported_meta_shards: RefCell::new(BTreeMap::new()),
         };
 
         // Initialize system contract (0x01) with empty SSR for balance/nonce tracking
         let system_contract = h160_from_low_u64_be(0x01);
-        let initial_ssr = SSRData {
-            header: SSRHeader {
-                global_depth: 0,
-                entry_count: 0,
-                total_keys: 0,
-                version: 0, // Genesis version
-            },
-            entries: Vec::new(),
+        let initial_header = SSRHeader {
+            global_depth: 0,
+            entry_count: 0,
+            total_keys: 0,
+            version: 0, // Genesis version
         };
+        let initial_ssr = crate::sharding::ssr_from_parts(initial_header, Vec::new());
         backend.storage_shards.borrow_mut().insert(
             system_contract,
             ContractStorage {
@@ -171,7 +187,7 @@ impl MajikBackend {
             address_bytes.copy_from_slice(&object_id[0..20]);
             let address = H160::from(address_bytes);
 
-            match ObjectKind::from_u8(object_ref.object_kind() as u8) {
+            match ObjectKind::from_u8(object_ref.object_kind as u8) {
                 Some(ObjectKind::Code) => {
                     // Code object - load bytecode
                     backend.load_code(address, payload);
@@ -202,7 +218,89 @@ impl MajikBackend {
                         contract_storage.ssr = ssr_data;
                     }
                 }
-                Some(ObjectKind::Receipt) | Some(ObjectKind::Block) | Some(ObjectKind::BlockMetadata) => {
+                Some(ObjectKind::MetaShard) => {
+                    // CRITICAL: Import meta-shards from witnesses to populate cache
+                    // Without this, process_object_writes() creates empty shards and overwrites
+                    // existing DA data, causing catastrophic data loss
+                    use crate::meta_sharding::{
+                        deserialize_meta_shard_with_id_validated,
+                        deserialize_meta_shard,
+                        MetaShardDeserializeResult,
+                    };
+                    use crate::da::resolve_shard_id;
+
+                    // Try new format with validated header first
+                    match deserialize_meta_shard_with_id_validated(&payload, &object_id, backend.service_id) {
+                        MetaShardDeserializeResult::ValidatedHeader(shard_id, meta_shard) => {
+                            log_info(&format!(
+                                "  ✅ Imported MetaShard (validated header): shard_id={:?}, {} entries",
+                                shard_id,
+                                meta_shard.entries.len()
+                            ));
+
+                            // Insert into cache, even if empty (empty shards must be tracked!)
+                            backend.meta_shards.borrow_mut().insert(shard_id, meta_shard);
+                        }
+                        MetaShardDeserializeResult::ValidationFailed => {
+                            // CRITICAL: Header present but validation failed
+                            // This is a malicious or corrupt payload - REJECT immediately
+                            // DO NOT fall back to legacy format (security bypass)
+                            log_error(&format!(
+                                "  ❌ REJECTED MetaShard with invalid header: object_id={}",
+                                crate::sharding::format_object_id(&object_id)
+                            ));
+                        }
+                        MetaShardDeserializeResult::MaybeLegacy => {
+                            // Payload too short for header - try legacy format for backward compatibility
+                            if let Some(meta_shard) = deserialize_meta_shard(&payload) {
+                                // Legacy format has no header - derive shard_id from SSR routing
+                                // This requires MetaSsrMetadata to be loaded first (order dependency)
+                                if let Some(first_entry) = meta_shard.entries.first() {
+                                    let shard_id = resolve_shard_id(
+                                        first_entry.object_id,
+                                        &backend.meta_ssr.borrow()
+                                    );
+
+                                    log_info(&format!(
+                                        "  ✅ Imported MetaShard (legacy format): shard_id={:?}, {} entries",
+                                        shard_id,
+                                        meta_shard.entries.len()
+                                    ));
+
+                                    backend.meta_shards.borrow_mut().insert(shard_id, meta_shard);
+                                } else {
+                                    // Empty legacy shard - we can't determine shard_id without header
+                                    // Log warning but continue (may break if this shard is needed)
+                                    log_info("  ⚠️  Imported empty MetaShard (legacy format, shard_id unknown)");
+                                }
+                            } else {
+                                log_error(&format!(
+                                    "  ❌ Failed to deserialize MetaShard (legacy): object_id={}",
+                                    crate::sharding::format_object_id(&object_id)
+                                ));
+                            }
+                        }
+                    }
+                }
+                Some(ObjectKind::MetaSsrMetadata) => {
+                    // Meta-SSR metadata - global routing metadata for meta-shards
+                    // Import meta-SSR from DA to enable routing ObjectIDs to meta-shards
+                    use crate::meta_sharding::deserialize_meta_ssr;
+
+                    if let Some(ssr_data) = deserialize_meta_ssr(&payload) {
+                        log_info(&format!(
+                            "  ✅ Imported MetaSsrMetadata: {} routing entries",
+                            ssr_data.entries.len()
+                        ));
+                        *backend.meta_ssr.borrow_mut() = ssr_data;
+                    } else {
+                        log_error(&format!(
+                            "  ❌ Failed to deserialize MetaSsrMetadata: object_id={}",
+                            crate::sharding::format_object_id(&object_id)
+                        ));
+                    }
+                }
+                Some(ObjectKind::Receipt) | Some(ObjectKind::Block) => {
                     // These object kinds are not imported during constructor - skip
                 }
                 None => {
@@ -223,7 +321,7 @@ impl MajikBackend {
     }
 
     /// Import storage shard from DA using fetch_object host function
-    fn import_shard(&self, address: H160, shard_id: ShardId) -> Option<(ObjectRef, ShardData)> {
+    fn import_shard(&self, address: H160, shard_id: ShardId) -> Option<(ObjectRef, ContractShard)> {
         let object_id = shard_object_id(address, shard_id);
 
         log_debug(&format!(
@@ -283,21 +381,13 @@ impl MajikBackend {
 
                 // Create a dummy ObjectRef for the empty shard
                 let dummy_ref = ObjectRef {
-                    service_id: self.service_id,
                     work_package_hash: [0u8; 32],
                     index_start: 0,
-                    index_end: 0,
-                    version: 0,
                     payload_length: 0,
                     object_kind: 1, // StorageShard
-                    log_index: 0,
-                    tx_slot: 0,
-                    timeslot: 0,
-                    gas_used: 0,
-                    evm_block: 0,
                 };
 
-                let empty_shard = ShardData {
+                let empty_shard = ContractShard {
                     entries: Vec::new(),
                 };
 
@@ -371,45 +461,52 @@ impl MajikBackend {
     }
 
     /// Resolve storage dependency
-    pub fn object_dependency_for_storage(&self, address: H160, key: H256) -> ObjectDependency {
+    pub fn object_dependency_for_storage(&self, address: H160, key: H256) -> ObjectId {
 
         let shard_id = self.resolve_shard_id_impl(address, key);
 
-        let required_version = self
-            .storage_shards
-            .borrow()
-            .get(&address)
-            .map(|cs| cs.ssr.header.version)
-            .unwrap_or(0);
-
-        ObjectDependency {
-            object_id: shard_object_id(address, shard_id),
-            required_version,
-        }
+        shard_object_id(address, shard_id)
     }
 
     /// Resolve balance dependency (stored in 0x01 precompile shards)
-    pub fn object_dependency_for_balance(&self, address: H160) -> ObjectDependency {
+    pub fn object_dependency_for_balance(&self, address: H160) -> ObjectId {
         let system_contract = h160_from_low_u64_be(0x01);
         let balance_key = balance_storage_key(address);
         self.object_dependency_for_storage(system_contract, balance_key)
     }
 
     /// Resolve nonce dependency (stored in 0x01 precompile shards)
-    pub fn object_dependency_for_nonce(&self, address: H160) -> ObjectDependency {
+    pub fn object_dependency_for_nonce(&self, address: H160) -> ObjectId {
         let system_contract = h160_from_low_u64_be(0x01);
         let nonce_key = nonce_storage_key(address);
         self.object_dependency_for_storage(system_contract, nonce_key)
     }
 
-    /// Resolve code ObjectDependency for bytecode reads
-    pub fn object_dependency_for_code(&self, address: H160) -> ObjectDependency {
-        let object_id = code_object_id(address);
-        let required_version = self.code_versions.get(&address).copied().unwrap_or(0);
-        ObjectDependency {
-            object_id,
-            required_version,
-        }
+    /// Resolve code ObjectId for bytecode reads
+    pub fn object_dependency_for_code(&self, address: H160) -> ObjectId {
+        code_object_id(address)
+    }
+
+    // ===== Meta-shard access methods =====
+
+    /// Get mutable reference to meta-SSR for processing object writes
+    pub fn meta_ssr_mut(&self) -> core::cell::RefMut<crate::meta_sharding::MetaSSR> {
+        self.meta_ssr.borrow_mut()
+    }
+
+    /// Get mutable reference to meta-shards cache
+    pub fn meta_shards_mut(&self) -> core::cell::RefMut<BTreeMap<crate::da::ShardId, crate::meta_sharding::MetaShard>> {
+        self.meta_shards.borrow_mut()
+    }
+
+    /// Get immutable reference to meta-shards cache
+    pub fn meta_shards(&self) -> core::cell::Ref<BTreeMap<crate::da::ShardId, crate::meta_sharding::MetaShard>> {
+        self.meta_shards.borrow()
+    }
+
+    /// Get mutable reference to imported meta-shards
+    pub fn imported_meta_shards_mut(&self) -> core::cell::RefMut<BTreeMap<crate::da::ShardId, ImportedMetaShard>> {
+        self.imported_meta_shards.borrow_mut()
     }
 }
 
@@ -493,16 +590,18 @@ impl<'config> MajikOverlay<'config> {
     /// Deconstructs the overlay and converts changes to ExecutionEffects
     ///
     /// Returns ExecutionEffects for the accumulate phase by calling to_execution_effects
+    /// Also returns the backend so caller can access meta-shard state
     pub fn deconstruct(
         self,
         work_package_hash: [u8; 32],
         receipts: &[TransactionReceiptRecord],
-    ) -> utils::effects::ExecutionEffects {
+    ) -> (utils::effects::ExecutionEffects, MajikBackend) {
         let tracker = self.tracker.into_inner().into_output();
         let (backend, change_set) = self.overlay.deconstruct();
 
         // Convert to ExecutionEffects
-        backend.to_execution_effects(&change_set, &tracker, work_package_hash, receipts)
+        let effects = backend.to_execution_effects(&change_set, &tracker, work_package_hash, receipts);
+        (effects, backend)
     }
 }
 

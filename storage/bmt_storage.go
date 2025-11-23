@@ -3,13 +3,9 @@ package storage
 import (
 	"fmt"
 
-	"github.com/colorfulnotion/jam/bmt"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 )
-
-// Ensure bmt package is recognized as used
-var _ = bmt.DefaultOptions
 
 const (
 	debug        = "trie"
@@ -30,50 +26,104 @@ func (t *StateDBStorage) SetRoot(root common.Hash) error {
 		return nil
 	}
 
-	if _, exists := t.rootToSeqNum[root]; !exists {
-		t.Root = root
-		return nil
-	}
-	return t.RollbackToRoot(root)
+	return nil
 }
 
 func (t *StateDBStorage) GetRoot() common.Hash {
 	return t.Root
 }
 
-// OverlayRoot computes the current merkle root from the staged overlay WITHOUT committing to disk.
-// This mirrors Rust NOMT's Session::finish() + FinishedSession::root() workflow.
-// Use this instead of Flush() when you only need the root hash and don't want to persist yet.
-// Critical for: fuzzing, fork handling, and any scenario where multiple candidate states exist.
-// Works correctly even after commits by merging committed tree + staged overlay delta.
 func (t *StateDBStorage) OverlayRoot() (common.Hash, error) {
-	// Get current root from BMT overlay (no disk I/O)
-	// This properly merges committed tree state + staged overlay
-	currentRoot, err := t.bmtDB.CurrentRoot()
-	if err != nil {
-		return common.Hash{}, fmt.Errorf("failed to compute staged root: %w", err)
+	// Create a temporary tree clone to compute overlay root without committing
+	// Check if there are any staged operations
+	t.trieDB.stagedMutex.Lock()
+	numOps := len(t.trieDB.stagedInserts) + len(t.trieDB.stagedDeletes)
+
+	if numOps == 0 {
+		// No staged operations, return current root
+		currentRoot := t.trieDB.GetRoot()
+		t.trieDB.stagedMutex.Unlock()
+		return currentRoot, nil
 	}
-	return common.BytesToHash(currentRoot[:]), nil
+
+	// Take a snapshot of staged operations
+	deletes := make(map[common.Hash]bool)
+	inserts := make(map[common.Hash][]byte)
+	for k, v := range t.trieDB.stagedDeletes {
+		deletes[k] = v
+	}
+	for k, v := range t.trieDB.stagedInserts {
+		inserts[k] = make([]byte, len(v))
+		copy(inserts[k], v)
+	}
+	t.trieDB.stagedMutex.Unlock()
+
+	// Create a temporary tree with current state
+	tempTree := &MerkleTree{
+		Root:          t.trieDB.Root, // Start with current tree state
+		writeBatch:    make(map[common.Hash][]byte),
+		stagedInserts: make(map[common.Hash][]byte),
+		stagedDeletes: make(map[common.Hash]bool),
+	}
+
+	// Copy any existing write batch
+	t.trieDB.batchMutex.Lock()
+	for k, v := range t.trieDB.writeBatch {
+		tempTree.writeBatch[k] = make([]byte, len(v))
+		copy(tempTree.writeBatch[k], v)
+	}
+	t.trieDB.batchMutex.Unlock()
+
+	// Apply staged operations to temp tree
+	tempTree.treeMutex.Lock()
+
+	// Process deletes first
+	for key := range deletes {
+		if tempTree.Root != nil {
+			tempTree.Root = tempTree.deleteNode(tempTree.Root, key[:], 0)
+		}
+	}
+
+	// Process inserts/updates
+	for key, value := range inserts {
+		keySlice := key[:]
+
+		_, err := tempTree.findNode(tempTree.Root, keySlice, 0)
+		encodedLeaf := trieLeaf(keySlice, value, tempTree)
+		tempTree.levelDBSetLeaf(encodedLeaf, value, keySlice)
+
+		if err != nil {
+			// Insert new
+			if tempTree.Root == nil {
+				tempTree.Root = &Node{
+					Hash: trieComputeHash(encodedLeaf),
+					Key:  keySlice,
+				}
+			} else {
+				tempTree.Root = tempTree.insertNode(tempTree.Root, keySlice, value, 0)
+			}
+		} else {
+			// Update existing
+			tempTree.updateTree(tempTree.Root, keySlice, value, 0)
+		}
+	}
+	tempTree.treeMutex.Unlock()
+
+	// Return the computed root
+	return tempTree.GetRoot(), nil
 }
 
 // Flush commits all staged changes and returns the new root hash
 func (t *StateDBStorage) Flush() (common.Hash, error) {
 
-	// Commit current BMT state to get the actual root hash
-	session, err := t.bmtDB.Commit()
+	// Commit current trie state to get the actual root hash
+	newRoot, err := t.trieDB.Flush()
 	if err != nil {
-		return common.Hash{}, fmt.Errorf("BMT commit failed: %v", err)
+		return common.Hash{}, fmt.Errorf("trie commit failed: %v", err)
 	}
 
-	// Get the committed root hash
-	newRoot := session.Root()
-	t.Root = common.BytesToHash(newRoot[:])
-
-
-	// Update root history for rollback support
-	t.currentSeqNum++
-	t.rootHistory = append(t.rootHistory, t.Root)
-	t.rootToSeqNum[t.Root] = t.currentSeqNum
+	// Update the root
+	t.Root = newRoot
 
 	return t.Root, nil
 }
@@ -85,39 +135,33 @@ func (t *StateDBStorage) Commit() (common.Hash, error) {
 }
 
 func (t *StateDBStorage) Close() error {
-	// Close the BMT database
-	if t.bmtDB != nil {
-		return t.bmtDB.Close()
+	// Close the trie database (trie doesn't need explicit close)
+	if t.trieDB != nil {
+		return nil
 	}
 	return nil
 }
 
-// Insert applies the operation directly to BMT
+// Insert applies the operation directly to trie
 func (t *StateDBStorage) Insert(keyBytes []byte, value []byte) {
 	key := normalizeKey32(keyBytes)
-	var key32 [32]byte
-	copy(key32[:], key[:])
 
-	// Apply directly to BMT
-	if err := t.bmtDB.Insert(key32, value); err != nil {
-		return
-	}
+	// Apply directly to trie
+	t.trieDB.Insert(key[:], value)
 
 	t.keys[key] = true // Track key
 }
 
-// Get retrieves the value directly from BMT
+// Get retrieves the value directly from trie
 func (t *StateDBStorage) Get(keyBytes []byte) ([]byte, bool, error) {
 	key := normalizeKey32(keyBytes)
-	var key32 [32]byte
-	copy(key32[:], key[:])
 
-	value, err := t.bmtDB.Get(key32)
+	value, ok, err := t.trieDB.Get(key[:])
 	if err != nil {
-		return nil, false, fmt.Errorf("BMT get failed: %v", err)
+		return nil, false, fmt.Errorf("trie get failed: %v", err)
 	}
 
-	if value == nil {
+	if !ok {
 		// Not found
 		return nil, false, nil
 	}
@@ -126,11 +170,9 @@ func (t *StateDBStorage) Get(keyBytes []byte) ([]byte, bool, error) {
 	return value, true, nil
 }
 
-// Delete applies deletion directly to BMT
+// Delete applies deletion directly to trie
 func (t *StateDBStorage) Delete(keyBytes []byte) error {
 	key := normalizeKey32(keyBytes)
-	var key32 [32]byte
-	copy(key32[:], key[:])
 
 	// Check if the key exists before deletion
 	_, ok, err := t.Get(key[:])
@@ -141,17 +183,17 @@ func (t *StateDBStorage) Delete(keyBytes []byte) error {
 		return fmt.Errorf("key not found: cannot delete non-existent key %x", key)
 	}
 
-	// Apply deletion directly to BMT
-	if err := t.bmtDB.Delete(key32); err != nil {
-		return fmt.Errorf("BMT delete failed for key %x: %v", key, err)
+	// Apply deletion directly to trie
+	if err := t.trieDB.Delete(key[:]); err != nil {
+		return fmt.Errorf("trie delete failed for key %x: %v", key, err)
 	}
 
 	return nil
 }
 
-// GetStateByRange stub - not implemented for BMT yet
+// GetStateByRange retrieves key-value pairs within a range
 func (t *StateDBStorage) GetStateByRange(startKey []byte, endKey []byte, maximumSize uint32) ([]types.StateKeyValue, [][]byte, error) {
-	return nil, nil, fmt.Errorf("GetStateByRange not implemented for BMT yet")
+	return t.trieDB.GetStateByRange(startKey, endKey, maximumSize)
 }
 
 // GetAllKeyValues retrieves values for a list of keys from the trie
@@ -190,40 +232,4 @@ func (s *StateDBStorage) GetKeyValues(keys []common.Hash) []types.KeyVal {
 	}
 
 	return result
-}
-
-// RollbackToRoot rolls back BMT to a specific historical root by hash
-// This translates the root hash to a commit count and calls BMT rollback
-func (s *StateDBStorage) RollbackToRoot(targetRoot common.Hash) error {
-	// Look up the sequence number for this root
-	targetSeq, exists := s.rootToSeqNum[targetRoot]
-	if !exists {
-		return fmt.Errorf("root %s not found in history", targetRoot.Hex())
-	}
-
-	if targetSeq > s.currentSeqNum {
-		return fmt.Errorf("cannot rollback to future root (target seqnum %d > current %d)", targetSeq, s.currentSeqNum)
-	}
-
-	// Calculate how many commits to rollback
-	n := s.currentSeqNum - targetSeq
-	if n == 0 {
-		// Already at target root
-		return nil
-	}
-
-	// Call BMT rollback - for now, use multiple single rollbacks
-	for i := 0; i < int(n); i++ {
-		if err := s.bmtDB.Rollback(); err != nil {
-			return fmt.Errorf("BMT rollback failed at step %d/%d: %v", i+1, n, err)
-		}
-	}
-
-	// Update tracking state
-	s.currentSeqNum = targetSeq
-	s.Root = targetRoot
-	// Truncate history to remove rolled-back commits
-	s.rootHistory = s.rootHistory[:targetSeq+1]
-
-	return nil
 }

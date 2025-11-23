@@ -499,7 +499,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	default:
 	}
 
-	workReport, err := n.executeWorkPackageBundle(wpCoreIndex, *bundle, received_segmentRootLookup, n.statedb.GetTimeslot(), false, eventID)
+	workReport, err := n.executeWorkPackageBundle(wpCoreIndex, *bundle, received_segmentRootLookup, n.statedb.GetTimeslot(), log.OtherGuarantor, eventID)
 	if err != nil {
 		log.Warn(log.Node, "onWorkPackageShare: executeWorkPackageBundle", "node", n.id, "err", err)
 		// Telemetry: Work package failed (event 92)

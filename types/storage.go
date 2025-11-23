@@ -407,6 +407,8 @@ type JAMStorage interface {
 		ok bool,
 		err error,
 	)
+	GetWarpSyncFragment(setID uint32) (WarpSyncFragment, error)
+	StoreWarpSyncFragment(setID uint32, fragment WarpSyncFragment) error
 
 	// Data Availability - Assurer Operations
 	// Assurers verify and store shards for availability

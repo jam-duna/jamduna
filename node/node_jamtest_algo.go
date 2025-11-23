@@ -32,11 +32,20 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 
 		auth_payload := make([]byte, 4)
 		binary.LittleEndian.PutUint32(auth_payload, uint32(auth_serviceIdx))
+
+		// Get RefineContext and log what we get
+		refineCtx, err := n1.GetRefineContext()
+		if err != nil {
+			log.Error(log.Node, "GetRefineContext failed", "err", err)
+			return
+		}
+
 		wp := types.WorkPackage{
 			AuthCodeHost:          0,
 			AuthorizationToken:    nil, // null-authorizer
 			AuthorizationCodeHash: getBootstrapAuthCodeHash(),
 			ConfigurationBlob:     nil,
+			RefineContext:         refineCtx,
 			WorkItems: []types.WorkItem{
 				{
 					Service:            algo_serviceIdx,
@@ -122,7 +131,14 @@ func evm(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 
 	// Create work package with updated witness count and refine context
 	wp := statedb.DefaultWorkPackage(evm_serviceIdx, service)
-	wp.RefineContext, _ = n1.GetRefineContext()
+
+	// Get RefineContext and log what we get
+	refineCtx, err := n1.GetRefineContext()
+	if err != nil {
+		log.Error(log.Node, "GetRefineContext failed", "err", err)
+	}
+
+	wp.RefineContext = refineCtx
 	wp.WorkItems[0].Payload = statedb.BuildPayload(statedb.PayloadTypeBlocks, numExtrinsics, witnessCount)
 	wp.WorkItems[0].Extrinsics = workItems
 

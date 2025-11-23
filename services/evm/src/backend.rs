@@ -18,8 +18,8 @@ use crate::sharding::{
 use crate::receipt::{receipt_object_id_from_receipt, serialize_receipt, TransactionReceiptRecord};
 use crate::state::{MajikBackend, balance_storage_key, h160_from_low_u64_be, nonce_storage_key};
 use crate::sharding::{
-    serialize_shard, serialize_ssr, ContractStorage, EvmEntry, SSRData,
-    SSRHeader, ShardData, ShardId,
+    serialize_shard, serialize_ssr, ContractStorage, EvmEntry,
+    ShardData, ShardId,
 };
 use crate::writes::ObjectCandidateWrite;
 use alloc::{
@@ -31,6 +31,7 @@ use evm::backend::OverlayedChangeSet;
 use primitive_types::{H160, H256};
 use utils::effects::{WriteEffectEntry, WriteIntent};
 use utils::functions::{log_crit, log_error, log_info, log_debug};
+use utils::objects::ObjectId;
 use utils::tracking::TrackerOutput;
 
 impl MajikBackend {
@@ -206,23 +207,11 @@ impl MajikBackend {
 
             // Receipt ObjectID = transaction hash for direct RPC lookup
 
-            let mut receipt_object_ref = utils::objects::ObjectRef::new(
-                self.service_id,
+            let receipt_object_ref = utils::objects::ObjectRef::new(
                 work_package_hash,
-                0,
                 receipt_payload.len() as u32,
                 crate::sharding::ObjectKind::Receipt as u8,
-                record.tx_index as u16,
             );
-            receipt_object_ref.gas_used = record.used_gas.low_u64() as u32;
-            // Store success flag in log_index field (read by from_candidate in receipt.rs:70)
-            receipt_object_ref.log_index = if record.success { 1 } else { 0 };
-            log_info(&format!(
-                "🧾 TX # {}: receipt {}: (receipt_payload.len()={})",
-                record.tx_index,
-                format_object_id(&receipt_object_id),
-                receipt_payload.len()
-            ));
 
             write_intents.push(WriteIntent {
                 effect: WriteEffectEntry {
@@ -271,39 +260,28 @@ impl MajikBackend {
                 let ssr_object_id_val = ssr_object_id(*address);
 
                 // Create new SSR with empty entries but incremented version
-                let reset_ssr = SSRData {
-                    header: SSRHeader {
-                        global_depth: 0,
-                        entry_count: 0,
-                        total_keys: 0,
-                        version: contract_storage.ssr.header.version + 1,
-                    },
-                    entries: Vec::new(),
+                let reset_header = crate::sharding::SSRHeader {
+                    global_depth: 0,
+                    entry_count: 0,
+                    total_keys: 0,
+                    version: contract_storage.ssr.header.version + 1,
                 };
+                let reset_ssr = crate::sharding::ssr_from_parts(reset_header, Vec::new());
 
                 let ssr_payload = serialize_ssr(&reset_ssr);
 
                 let object_ref = utils::objects::ObjectRef::new(
-                    self.service_id,
                     work_package_hash,
-                    reset_ssr.header.version,
                     ssr_payload.len() as u32,
                     crate::sharding::ObjectKind::SsrMetadata as u8,
-                    0, // SSR objects don't have tx_index
                 );
 
                 // Filter out self-dependencies to prevent version conflicts
-                let dependencies: Vec<utils::effects::ObjectDependency> = tracker_output
+                let dependencies: Vec<ObjectId> = tracker_output
                     .block_reads
                     .iter()
-                    .filter(|dep| {
-                        dep.object_id == ssr_object_id_val
-                            && dep.required_version != object_ref.version
-                    })
-                    .map(|dep| utils::effects::ObjectDependency {
-                        object_id: dep.object_id,
-                        required_version: dep.required_version,
-                    })
+                    .filter(|dep| **dep == ssr_object_id_val)
+                    .cloned()
                     .collect();
 
                 log_debug(&format!(
@@ -356,26 +334,17 @@ impl MajikBackend {
             let code_object_id_val = code_object_id(*address);
 
             let object_ref = utils::objects::ObjectRef::new(
-                self.service_id,
                 work_package_hash,
-                self.code_versions.get(address).map(|v| v + 1).unwrap_or(0),
                 0, // Empty payload = deleted
                 crate::sharding::ObjectKind::Code as u8,
-                0, // Code objects don't have tx_index
             );
 
             // Filter out self-dependencies to prevent version conflicts
-            let dependencies: Vec<utils::effects::ObjectDependency> = tracker_output
+            let dependencies: Vec<ObjectId> = tracker_output
                 .block_reads
                 .iter()
-                .filter(|dep| {
-                    dep.object_id == code_object_id_val
-                        && dep.required_version != object_ref.version
-                })
-                .map(|dep| utils::effects::ObjectDependency {
-                    object_id: dep.object_id,
-                    required_version: dep.required_version,
-                })
+                .filter(|dep| **dep == code_object_id_val)
+                .cloned()
                 .collect();
 
             log_debug(&format!(
@@ -424,25 +393,17 @@ impl MajikBackend {
 
             // Create ObjectRef
             let object_ref = utils::objects::ObjectRef::new(
-                self.service_id,
                 work_package_hash,
-                self.code_versions.get(address).map(|v| v + 1).unwrap_or(0),
                 bytecode.len() as u32,
                 crate::sharding::ObjectKind::Code as u8,
-                0, // Code objects don't have tx_index
             );
 
             // Collect dependencies - filter out self-dependencies to prevent version conflicts
-            let dependencies: Vec<utils::effects::ObjectDependency> = tracker_output
+            let dependencies: Vec<ObjectId> = tracker_output
                 .block_reads
                 .iter()
-                .filter(|dep| {
-                    dep.object_id == object_id && dep.required_version != object_ref.version
-                })
-                .map(|dep| utils::effects::ObjectDependency {
-                    object_id: dep.object_id,
-                    required_version: dep.required_version,
-                })
+                .filter(|dep| **dep == object_id)
+                .cloned()
                 .collect();
 
             log_debug(&format!(
@@ -548,8 +509,8 @@ impl MajikBackend {
         &self,
         address: H160,
         original_shard_id: ShardId,
-        original_shard_data: &ShardData,
-        leaf_shards: Vec<(ShardId, ShardData)>,
+        original_shard_data: &crate::sharding::ContractShard,
+        leaf_shards: Vec<(ShardId, crate::sharding::ContractShard)>,
         ssr_entries: Vec<crate::sharding::SSREntry>,
         work_package_hash: [u8; 32],
         write_intents: &mut Vec<WriteIntent>,
@@ -614,20 +575,9 @@ impl MajikBackend {
             let object_id = shard_object_id(address, *shard_id);
 
             let object_ref = utils::objects::ObjectRef::new(
-                self.service_id,
                 work_package_hash,
-                self.storage_shards
-                    .borrow()
-                    .get(&address)
-                    .and_then(|cs| {
-                        cs.shards
-                            .get(shard_id)
-                            .map(|_| cs.ssr.header.version + 1)
-                    })
-                    .unwrap_or(0),
                 payload.len() as u32,
                 crate::sharding::ObjectKind::StorageShard as u8,
-                0,
             );
 
             write_intents.push(WriteIntent {
@@ -679,7 +629,7 @@ impl MajikBackend {
         &self,
         address: H160,
         shard_id: ShardId,
-        shard_data: ShardData,
+        shard_data: crate::sharding::ContractShard,
         work_package_hash: [u8; 32],
         tracker_output: &TrackerOutput,
         write_intents: &mut Vec<WriteIntent>,
@@ -693,31 +643,18 @@ impl MajikBackend {
 
         // Create ObjectRef for this shard
         let object_ref = utils::objects::ObjectRef::new(
-            self.service_id,
             work_package_hash,
-            self
-                .storage_shards
-                .borrow()
-                .get(&address)
-                .and_then(|cs| cs.shards.get(&shard_id).map(|_| cs.ssr.header.version + 1))
-                .unwrap_or(0),
             payload.len() as u32,
             crate::sharding::ObjectKind::StorageShard as u8,
-            0, // Storage shard objects don't have tx_index
         );
 
         // Collect dependencies - all reads from this shard
         // Filter out self-dependencies (same object_id and version) to prevent version conflicts
-        let dependencies: Vec<utils::effects::ObjectDependency> = tracker_output
+        let dependencies: Vec<ObjectId> = tracker_output
             .block_reads
             .iter()
-            .filter(|dep| {
-                dep.object_id == object_id && dep.required_version != object_ref.version
-            })
-            .map(|dep| utils::effects::ObjectDependency {
-                object_id: dep.object_id,
-                required_version: dep.required_version,
-            })
+            .filter(|dep| **dep == object_id)
+            .cloned()
             .collect();
 
         log_debug(&format!(
@@ -773,35 +710,24 @@ impl MajikBackend {
                     .map(|shard| shard.entries.len() as u32)
                     .sum();
                 contract_storage.ssr.header.total_keys = total_keys;
-                contract_storage.ssr.header.entry_count = core::cmp::min(
-                    contract_storage.ssr.entries.len(),
-                    u8::MAX as usize,
-                ) as u8;
+                contract_storage.ssr.header.entry_count = contract_storage.ssr.entries.len() as u32;
 
                 let payload = serialize_ssr(&contract_storage.ssr);
                 (payload, contract_storage.ssr.header.version, contract_storage.ssr.entries.len())
             };
 
             let object_ref = utils::objects::ObjectRef::new(
-                self.service_id,
                 work_package_hash,
-                ssr_version,
                 ssr_payload.len() as u32,
                 crate::sharding::ObjectKind::SsrMetadata as u8,
-                0,
             );
 
             // Filter out self-dependencies to prevent version conflicts
-            let dependencies: Vec<utils::effects::ObjectDependency> = tracker_output
+            let dependencies: Vec<ObjectId> = tracker_output
                 .block_reads
                 .iter()
-                .filter(|dep| {
-                    dep.object_id == ssr_object_id_val && dep.required_version != ssr_version
-                })
-                .map(|dep| utils::effects::ObjectDependency {
-                    object_id: dep.object_id,
-                    required_version: dep.required_version,
-                })
+                .filter(|dep| **dep == ssr_object_id_val)
+                .cloned()
                 .collect();
 
             log_debug(&format!(
@@ -899,7 +825,7 @@ impl MajikBackend {
     /// - `write_intents`: Vec<WriteIntent> where each WriteIntent contains:
     ///   - `object_id`: 32-byte ObjectId (shard/code/ssr/receipt)
     ///   - `payload`: Serialized DA segments
-    ///   - `dependencies`: Vec<ObjectDependency> from TrackerOutput
+    ///   - `dependencies`: Vec<ObjectId> from TrackerOutput
     pub fn to_execution_effects(
         &self,
         change_set: &OverlayedChangeSet,
@@ -970,22 +896,12 @@ impl MajikBackend {
     pub fn to_object_candidate_writes(
         effects: &utils::effects::ExecutionEffects,
     ) -> Vec<ObjectCandidateWrite> {
-        use crate::sharding::ObjectKind;
-
         effects
             .write_intents
             .iter()
             .map(|intent| {
-                // Preserve payload for receipts and block metadata - needed in accumulate
-                // Receipts: for extracting logs for block metadata (logs_bloom, receipt_hashes)
-                // BlockMetadata: for writing computed roots (transactions_root, receipts_root, mmr_root)
-                // Other objects (code, storage, SSR, blocks) already exported to DA in refine
-                let payload = if intent.effect.ref_info.object_kind == ObjectKind::Receipt as u8
-                    || intent.effect.ref_info.object_kind == ObjectKind::BlockMetadata as u8 {
-                    intent.effect.payload.clone()
-                } else {
-                    Vec::new()
-                };
+                // Payloads are exported to DA segments, not included inline
+                let payload = Vec::new();
 
                 log_debug(&format!(
                     "    📦 ObjectCandidateWrite:object_id={}  kind={}",

@@ -1,8 +1,26 @@
 # DA Storage Specification
 
-> **Implementation Status:** SSR structures and sharded storage  are implemented in `services/evm/src/state.rs`. 
+> **Implementation Status:** SSR structures and sharded storage are implemented in `services/evm/src/state.rs`.
+>
+> **Related Documentation:** See [SHARDING.md](SHARDING.md) for the meta-sharding architecture that manages ObjectRef entries at scale.
 
-This specification defines a compact, scalable layout for **Ethereum-style contract storage** in JAM's Data Availability (DA) layer, extended with a **weekly storage rent** model. It combines:
+This specification defines a compact, scalable layout for **Ethereum-style contract storage** in JAM's Data Availability (DA) layer. It uses the generic SSR (Sparse Split Registry) infrastructure from `services/evm/src/da.rs` for adaptive sharding.
+
+## Document Scope
+
+This document covers **contract-level storage sharding** (Layer 2 in the two-level architecture):
+- How individual contracts store key→value mappings in sharded DA segments
+- SSR (Sparse Split Registry) routing for contract storage
+- Storage shard ObjectID format and lifecycle
+
+For **service-level ObjectRef sharding** (Layer 1), see [SHARDING.md](SHARDING.md), which describes:
+- How the EVM service manages billions of ObjectRefs across all contracts
+- Meta-sharding architecture (1M meta-shards grouping ~1,000 ObjectRefs each)
+- Work report capacity analysis and throughput estimates
+
+## Overview
+
+The DA storage system combines:
 - 4104-byte segments (with 96-byte metadata header in first segment),
 - sharded storage with **8-byte ShardId (prefix56)**,
 - a **compact Sparse Split Registry (SSR)** (no child IDs), and
@@ -59,13 +77,14 @@ pub enum ObjectKind {
     SsrMetadata = 0x02,
     /// Receipt object (kind=0x03) - contains full transaction data
     Receipt = 0x03,
-    /// Transaction object (kind=0x04) - DEPRECATED: No longer exported separately
-    #[allow(dead_code)]
-    Transaction = 0x04,
+    /// Meta-shard object (kind=0x04) - ObjectID→ObjectRef mappings (see SHARDING.md)
+    MetaShard = 0x04,
     /// Block object (kind=0x05) - EVM block payload with tx/receipt hashes
     Block = 0x05,
     /// Block metadata object (kind=0x06) - transactions_root, receipts_root, mmr_root
     BlockMetadata = 0x06,
+    /// Meta-SSR metadata object (kind=0x07) - routing metadata for meta-shards (see SHARDING.md)
+    MetaSsrMetadata = 0x07,
 }
 pub fn code_object_id(contract: Bytes20) -> ObjectId;
 pub fn ssr_object_id(contract: Bytes20) -> ObjectId;
@@ -92,12 +111,47 @@ pub fn block_metadata_object_id(block: &EvmBlockPayload) -> ObjectId {
 - **StorageShard (0x01)**: Sharded storage entries for contracts (including 0x01 precompile for balances/nonces)
 - **SsrMetadata (0x02)**: Sparse Split Registry for contract storage routing
 - **Receipt (0x03)**: Transaction receipts with logs
+- **MetaShard (0x04)**: Meta-shard segments (ObjectID→ObjectRef mappings) - see [SHARDING.md](SHARDING.md)
 - **Block (0x05)**: Complete EVM blocks with tx/receipt hashes (accumulated)
 - **BlockMetadata (0x06)**: Block metadata roots (computed in refine from block witnesses)
+- **MetaSsrMetadata (0x07)**: Meta-SSR routing metadata - see [SHARDING.md](SHARDING.md)
 
-Every contract has a fixed object id for its code and storage (SSR). The SSR contains an index of shardIDs. 
+Every contract has a fixed object id for its code and storage (SSR). The SSR contains an index of shardIDs.
 
 All the data of a contract lives in shard segments.
+
+## Generic SSR Architecture
+
+The storage system uses a **generic Sparse Split Registry (SSR)** implementation from `services/evm/src/da.rs` that works with any entry type:
+
+```rust
+// Generic entry trait - works for both storage and meta-sharding
+pub trait SSREntry: Clone {
+    fn key_hash(&self) -> [u8; 32];      // Routing key
+    fn serialized_size() -> usize;        // Fixed entry size
+    fn serialize(&self) -> Vec<u8>;
+    fn deserialize(data: &[u8]) -> Result<Self, SerializeError>;
+}
+
+// Contract storage implements SSREntry with 64-byte entries
+impl SSREntry for EvmEntry {
+    fn key_hash(&self) -> [u8; 32] { *self.key_h.as_fixed_bytes() }
+    fn serialized_size() -> usize { 64 }  // 32-byte key + 32-byte value
+    // ...
+}
+
+pub type ContractSSR = SSRData<EvmEntry>;
+pub type ContractShard = ShardData<EvmEntry>;
+```
+
+**Key benefits:**
+- Same splitting logic works for contract storage (64-byte entries) and meta-sharding (96-byte entries)
+- Type-safe parameterization ensures consistency
+- Easy to add new shard types (e.g., account sharding, nonce sharding)
+
+For the meta-sharding use case (ObjectID→ObjectRef mappings), see [SHARDING.md](SHARDING.md).
+
+## Contract Storage Details
 
 The SSR storage segments hold the shards like this:
 

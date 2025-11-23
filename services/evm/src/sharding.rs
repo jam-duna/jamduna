@@ -5,38 +5,40 @@
 //! This module implements adaptive storage sharding using a sparse split registry (SSR)
 //! and provides DA object identification for all EVM artifacts (code, shards, receipts, blocks).
 //!
+//! This module uses the generic SSR implementation from `da.rs` with EVM-specific entry types.
+//!
 //! # Architecture
 //!
-//! - **SSR (Sparse Split Registry)**: Metadata tracking split points and shard depths
+//! - **SSR (Sparse Split Registry)**: Metadata tracking split points and shard depths (from da.rs)
 //! - **Shards**: 4KB max storage buckets containing key-value pairs
 //! - **Adaptive Splitting**: Shards split when exceeding 34 entries (~50% fill rate)
 //! - **Object-based Storage**: Each shard is a separate DA object for parallel access
 //!
 //! # Data Structures
 //!
-//! - `SSRHeader`: Global metadata (8 bytes: depth, entry count, total keys, version)
-//! - `SSREntry`: Split exception (9 bytes: d, ld, prefix56)
-//! - `ShardId`: Shard identifier (ld + 56-bit prefix)
-//! - `ShardData`: Key-value entries within a shard (max 63 entries)
+//! - `EvmEntry`: EVM key-value pair (implements da::SSREntry trait)
+//! - `ContractSSR`: Type alias for SSRData<EvmEntry>
+//! - `ContractShard`: Type alias for ShardData<EvmEntry>
 //! - `ContractStorage`: Complete storage for one contract (SSR + shards map)
 //! - `ObjectKind`: DA object type identifiers (Code, StorageShard, SsrMetadata, Receipt, Block)
 //!
 //! # Key Functions
 //!
-//! - `resolve_shard_id()`: Maps storage key → ShardId using SSR
-//! - `maybe_split_shard()`: Splits oversized shards and updates SSR
-//! - `serialize_ssr()` / `deserialize_ssr()`: DA format conversion
-//! - `serialize_shard()` / `deserialize_shard()`: DA format conversion
+//! - `resolve_shard_id()`: Maps storage key → ShardId using SSR (uses da::resolve_shard_id)
+//! - `maybe_split_shard_recursive()`: Splits oversized shards (uses da::maybe_split_shard_recursive)
+//! - `serialize_ssr()` / `deserialize_ssr()`: DA format conversion (uses da::serialize_ssr/deserialize_ssr)
+//! - `serialize_shard()` / `deserialize_shard()`: DA format conversion (uses da::serialize_shard/deserialize_shard)
 //! - `code_object_id()`, `ssr_object_id()`, `shard_object_id()`: Construct 32-byte object IDs for DA lookup
 //! - `format_object_id()`, `format_data_hex()`: Logging utilities
 
 use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
-use alloc::vec;
 use alloc::vec::Vec;
 use primitive_types::{H160, H256};
-use utils::functions::log_info;
+
+// Import generic SSR types and functions from da module
+use crate::da::{self, SerializeError};
 
 /// Read a specific bit from a 256-bit hash, indexed from the most significant bit
 #[cfg(test)]
@@ -50,151 +52,83 @@ pub fn get_bit_at(hash: &H256, index: usize) -> bool {
     (byte >> shift) & 1 == 1
 }
 
-/// SSR Header - contract storage metadata (8 bytes)
-pub struct SSRHeader {
-    pub global_depth: u8, // Default depth for all shards
-    pub entry_count: u8,  // Number of exceptions
-    pub total_keys: u32,  // Total storage entries
-    pub version: u32,
+// Re-export generic types from da module
+pub use da::{ShardId, SSRData, SSRHeader, SSREntryMeta as SSREntry, ShardData};
+
+/// EVM Entry - key-value pair in a shard (64 bytes)
+///
+/// Implements SSREntry trait from da module for generic SSR sharding.
+#[derive(Clone, PartialEq, Eq)]
+pub struct EvmEntry {
+    pub key_h: H256, // keccak256(key) - 32 bytes
+    pub value: H256, // EVM word - 32 bytes
 }
 
-/// SSR Entry - tracks a split exception (9 bytes)
-#[derive(Clone, Copy)]
-pub struct SSREntry {
-    pub d: u8,             // Split point (prefix bit position)
-    pub ld: u8,            // Local depth at this prefix
-    pub prefix56: [u8; 7], // 56-bit routing prefix
-}
-
-/// SSR Data - sparse split registry for a contract
-pub struct SSRData {
-    pub header: SSRHeader,
-    pub entries: Vec<SSREntry>, // Sorted exceptions
-}
-
-/// Shard ID - identifies a storage shard
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ShardId {
-    pub ld: u8,            // Local depth
-    pub prefix56: [u8; 7], // 56-bit prefix
-}
-
-impl PartialOrd for ShardId {
+impl PartialOrd for EvmEntry {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for ShardId {
+impl Ord for EvmEntry {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.ld
-            .cmp(&other.ld)
-            .then_with(|| self.prefix56.cmp(&other.prefix56))
+        self.key_h.cmp(&other.key_h)
     }
 }
 
-/// EVM Entry - key-value pair in a shard
-#[derive(Clone)]
-pub struct EvmEntry {
-    pub key_h: H256, // keccak256(key)
-    pub value: H256,
+impl da::SSREntry for EvmEntry {
+    fn key_hash(&self) -> [u8; 32] {
+        *self.key_h.as_fixed_bytes()
+    }
+
+    fn serialized_size() -> usize {
+        64 // 32 bytes key_h + 32 bytes value
+    }
+
+    fn serialize(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(64);
+        buf.extend_from_slice(self.key_h.as_bytes());
+        buf.extend_from_slice(self.value.as_bytes());
+        buf
+    }
+
+    fn deserialize(data: &[u8]) -> Result<Self, SerializeError> {
+        if data.len() != 64 {
+            return Err(SerializeError::InvalidSize);
+        }
+        Ok(EvmEntry {
+            key_h: H256::from_slice(&data[0..32]),
+            value: H256::from_slice(&data[32..64]),
+        })
+    }
 }
 
-/// Shard Data - storage entries in a single shard
-#[derive(Clone)]
-pub struct ShardData {
-    pub entries: Vec<EvmEntry>, // Sorted by key_h, max 63 entries
-}
+/// Type alias for contract-specific SSR (using EvmEntry)
+pub type ContractSSR = SSRData<EvmEntry>;
+
+/// Type alias for contract-specific shard (using EvmEntry)
+pub type ContractShard = da::ShardData<EvmEntry>;
 
 /// Contract Storage - SSR + shards for a contract
 pub struct ContractStorage {
-    pub ssr: SSRData,                         // Sparse Split Registry
-    pub shards: BTreeMap<ShardId, ShardData>, // ShardId -> KV entries
+    pub ssr: ContractSSR,                         // Sparse Split Registry (generic)
+    pub shards: BTreeMap<ShardId, ContractShard>, // ShardId -> KV entries
 }
 
 impl ContractStorage {
     pub fn new(_owner: H160) -> Self {
         Self {
-            ssr: SSRData {
-                header: SSRHeader {
-                    global_depth: 0,
-                    entry_count: 0,
-                    total_keys: 0,
-                    version: 1,
-                },
-                entries: Vec::new(),
-            },
+            ssr: SSRData::new(),
             shards: BTreeMap::new(),
         }
     }
 }
 
-// ===== Prefix Manipulation Utilities =====
-
-/// Extract first 56 bits (7 bytes) from hash as routing prefix
-fn take_prefix56(key: &H256) -> [u8; 7] {
-    let mut prefix = [0u8; 7];
-    prefix.copy_from_slice(&key.as_bytes()[0..7]);
-    prefix
-}
-
-/// Check if key_prefix matches entry_prefix for first 'bits' bits
-fn matches_prefix(key_prefix: [u8; 7], entry_prefix: [u8; 7], bits: u8) -> bool {
-    // Compare first 'bits' bits of both prefixes
-    let bytes_to_compare = (bits / 8) as usize;
-    let remaining_bits = bits % 8;
-
-    // Check full bytes
-    if key_prefix[0..bytes_to_compare] != entry_prefix[0..bytes_to_compare] {
-        return false;
-    }
-
-    // Check remaining bits
-    if remaining_bits > 0 {
-        let mask = 0xFF << (8 - remaining_bits);
-        if (key_prefix[bytes_to_compare] & mask) != (entry_prefix[bytes_to_compare] & mask) {
-            return false;
-        }
-    }
-
-    true
-}
-
-/// Mask prefix to first 'bits' bits, zero out the rest
-fn mask_prefix56(prefix: [u8; 7], bits: u8) -> [u8; 7] {
-    use utils::functions::log_error;
-
-    // Validate bits doesn't exceed 56 (7 bytes * 8 bits)
-    if bits > 56 {
-        log_error(&format!(
-            "⚠️  mask_prefix56: bits={} exceeds maximum 56! Clamping to 56.",
-            bits
-        ));
-        // Return full prefix (all 56 bits) when bits exceeds maximum
-        let mut masked = [0u8; 7];
-        masked.copy_from_slice(&prefix);
-        return masked;
-    }
-
-    let mut masked = [0u8; 7];
-    let full_bytes = (bits / 8) as usize;
-    let remaining_bits = bits % 8;
-
-    //Copy full bytes
-    masked[0..full_bytes].copy_from_slice(&prefix[0..full_bytes]);
-
-    // Mask remaining bits
-    if remaining_bits > 0 && full_bytes < 7 {
-        let mask = 0xFF << (8 - remaining_bits);
-        masked[full_bytes] = prefix[full_bytes] & mask;
-    }
-
-    masked
-}
-
 // ===== Shard Resolution & Splitting =====
 
 /// Resolve which shard a storage key belongs to using SSR
+///
+/// Wrapper around da::resolve_shard_id() for EVM-specific contract storage.
 ///
 /// # Algorithm
 /// 1. Start with global_depth from SSR header
@@ -205,115 +139,19 @@ fn mask_prefix56(prefix: [u8; 7], bits: u8) -> [u8; 7] {
 /// # Returns
 /// ShardId with (ld, prefix56) identifying the target shard
 pub fn resolve_shard_id(contract_storage: &ContractStorage, key: H256) -> ShardId {
-    let key_prefix56 = take_prefix56(&key);
-
-    // Start at the global depth (root shard) and walk down the split tree.
-    let mut current_ld = contract_storage.ssr.header.global_depth;
-    let mut current_prefix = mask_prefix56(key_prefix56, current_ld);
-
-    loop {
-        let mut found_split = false;
-
-        for entry in &contract_storage.ssr.entries {
-            if entry.d == current_ld && matches_prefix(key_prefix56, entry.prefix56, entry.d) {
-                // Descend one level deeper based on this split exception.
-                current_ld = entry.ld;
-                current_prefix = mask_prefix56(key_prefix56, current_ld);
-                found_split = true;
-                break;
-            }
-        }
-
-        if !found_split {
-            break;
-        }
-    }
-
-    ShardId {
-        ld: current_ld,
-        prefix56: current_prefix,
-    }
+    let key_hash = *key.as_fixed_bytes();
+    da::resolve_shard_id(key_hash, &contract_storage.ssr)
 }
 
 /// Split threshold - shards split when exceeding this many entries
 pub const SPLIT_THRESHOLD: usize = 34;
 
-/// Perform a single binary split of a shard
-///
-/// Helper function that splits a shard into left and right children based on one bit.
-/// Used by recursive splitting logic.
-///
-/// # Returns
-/// (left_shard_id, left_shard, right_shard_id, right_shard, ssr_entry)
-fn split_once(
-    shard_id: ShardId,
-    shard_data: &ShardData,
-) -> (ShardId, ShardData, ShardId, ShardData, SSREntry) {
-    assert!(shard_id.ld < 255, "Cannot split shard at maximum depth");
-    let new_depth = shard_id.ld + 1;
-    let split_bit = shard_id.ld as usize;
-
-    // Split entries based on the next bit position
-    let mut left_entries = Vec::new();
-    let mut right_entries = Vec::new();
-
-    for entry in &shard_data.entries {
-        let key_prefix = take_prefix56(&entry.key_h);
-
-        if split_bit < 56 {
-            let byte_idx = split_bit / 8;
-            let bit_idx = split_bit % 8;
-            let bit_mask = 0x80 >> bit_idx;
-
-            if byte_idx < 7 && (key_prefix[byte_idx] & bit_mask) == 0 {
-                left_entries.push(entry.clone());
-            } else {
-                right_entries.push(entry.clone());
-            }
-        } else {
-            // If depth exceeds 56 bits, put all in left shard
-            left_entries.push(entry.clone());
-        }
-    }
-
-    let left_shard = ShardData {
-        entries: left_entries,
-    };
-    let right_shard = ShardData {
-        entries: right_entries,
-    };
-
-    // Left shard keeps the same prefix (bit=0)
-    let left_shard_id = ShardId {
-        ld: new_depth,
-        prefix56: shard_id.prefix56,
-    };
-
-    // Right shard has the split bit set to 1
-    let mut right_prefix = shard_id.prefix56;
-    if split_bit < 56 {
-        let byte_idx = split_bit / 8;
-        let bit_idx = split_bit % 8;
-        if byte_idx < 7 {
-            right_prefix[byte_idx] |= 0x80 >> bit_idx;
-        }
-    }
-    let right_shard_id = ShardId {
-        ld: new_depth,
-        prefix56: right_prefix,
-    };
-
-    // Create SSR entry for the split point
-    let ssr_entry = SSREntry {
-        d: shard_id.ld,          // Split point (previous depth)
-        ld: new_depth,           // New local depth
-        prefix56: shard_id.prefix56, // Original routing prefix
-    };
-
-    (left_shard_id, left_shard, right_shard_id, right_shard, ssr_entry)
-}
+/// Maximum entries per shard (hard DA segment limit)
+pub const MAX_ENTRIES: usize = 63;
 
 /// Recursively split a shard until all result shards meet threshold
+///
+/// Wrapper around da::maybe_split_shard_recursive() for EVM-specific contract storage.
 ///
 /// # Algorithm
 /// 1. Use work queue to process shards that need splitting
@@ -323,208 +161,57 @@ fn split_once(
 ///
 /// # Returns
 /// Some((leaf_shards, ssr_entries)) where:
-/// - leaf_shards: Vec of (ShardId, ShardData) for all result leaves
+/// - leaf_shards: Vec of (ShardId, ContractShard) for all result leaves
 /// - ssr_entries: Vec of SSREntry for internal split points (N leaves → N-1 entries)
 pub fn maybe_split_shard_recursive(
     shard_id: ShardId,
-    shard_data: &ShardData,
-) -> Option<(Vec<(ShardId, ShardData)>, Vec<SSREntry>)> {
-    use utils::functions::log_info;
-
-    if shard_data.entries.len() <= SPLIT_THRESHOLD {
-        return None;
-    }
-
-    log_info(&format!(
-        "🔀 Recursive split starting: {} entries in shard ld={}",
-        shard_data.entries.len(),
-        shard_id.ld
-    ));
-
-    let mut leaf_shards = Vec::new();
-    let mut work_queue = vec![(shard_id, shard_data.clone())];
-    let mut ssr_entries = Vec::new();
-
-    while let Some((current_id, current_data)) = work_queue.pop() {
-        if current_data.entries.len() <= SPLIT_THRESHOLD {
-            // Base case: shard is acceptable size, add to leaves
-            leaf_shards.push((current_id, current_data));
-            continue;
-        }
-
-        // Check if we've reached maximum depth
-        if current_id.ld >= 255 {
-            // Cannot split further, keep as leaf even if over threshold
-            log_info(&format!(
-                "⚠️  Max depth reached: {} entries remain in shard",
-                current_data.entries.len()
-            ));
-            leaf_shards.push((current_id, current_data));
-            continue;
-        }
-
-        // Perform binary split
-        let (left_id, left_data, right_id, right_data, ssr_entry) =
-            split_once(current_id, &current_data);
-
-        log_info(&format!(
-            "  Split ld={} → ld={}: {} entries → [{}, {}]",
-            current_id.ld,
-            left_id.ld,
-            current_data.entries.len(),
-            left_data.entries.len(),
-            right_data.entries.len()
-        ));
-
-        // Record SSR entry for this internal split point
-        ssr_entries.push(ssr_entry);
-
-        // Check if children need further splitting
-        if left_data.entries.len() > SPLIT_THRESHOLD {
-            work_queue.push((left_id, left_data));
-        } else {
-            leaf_shards.push((left_id, left_data));
-        }
-
-        if right_data.entries.len() > SPLIT_THRESHOLD {
-            work_queue.push((right_id, right_data));
-        } else {
-            leaf_shards.push((right_id, right_data));
-        }
-    }
-
-    log_info(&format!(
-        "✅ Recursive split complete: {} input entries → {} leaf shards, {} SSR entries (internal splits)",
-        shard_data.entries.len(),
-        leaf_shards.len(),
-        ssr_entries.len()
-    ));
-
-    Some((leaf_shards, ssr_entries))
+    shard_data: &ContractShard,
+) -> Option<(Vec<(ShardId, ContractShard)>, Vec<SSREntry>)> {
+    da::maybe_split_shard_recursive(shard_id, shard_data.clone(), SPLIT_THRESHOLD)
 }
 
 // ===== Serialization Functions =====
 
-/// Serialize SSR metadata to DA format (8B header + 9B entries)
+/// Serialize SSR metadata to DA format (10B header + 9B entries)
+///
+/// Wrapper around da::serialize_ssr() for EVM-specific contract storage.
 ///
 /// Format: [1B global_depth][1B entry_count][4B total_keys][4B version][SSREntry...]
 /// Each SSREntry: [1B d][1B ld][7B prefix56]
-pub fn serialize_ssr(ssr: &SSRData) -> Vec<u8> {
-    let mut result = Vec::new();
-
-    // SSR Header (8 bytes)
-    result.push(ssr.header.global_depth);
-    result.push(ssr.header.entry_count);
-    result.extend_from_slice(&ssr.header.total_keys.to_le_bytes());
-    result.extend_from_slice(&ssr.header.version.to_le_bytes());
-
-    // SSR Entries (9 bytes each)
-    for entry in &ssr.entries {
-        result.push(entry.d);
-        result.push(entry.ld);
-        result.extend_from_slice(&entry.prefix56);
-    }
-
-    result
+pub fn serialize_ssr(ssr: &ContractSSR) -> Vec<u8> {
+    da::serialize_ssr(ssr)
 }
 
 /// Deserialize SSR data from DA format
-/// Used for loading SSR objects from DA during state reconstruction
-pub fn deserialize_ssr(data: &[u8]) -> Option<SSRData> {
-    if data.len() < 10 {
-        return None;
-    }
+///
+/// Wrapper around da::deserialize_ssr() for EVM-specific contract storage.
+/// Used for loading SSR objects from DA during state reconstruction.
+pub fn deserialize_ssr(data: &[u8]) -> Option<ContractSSR> {
+    da::deserialize_ssr(data).ok()
+}
 
-    // Parse header (10 bytes)
-    let global_depth = data[0];
-    let entry_count = data[1];
-    let total_keys = u32::from_le_bytes([data[2], data[3], data[4], data[5]]);
-    let version = u32::from_le_bytes([data[6], data[7], data[8], data[9]]);
-
-    // Parse entries
-    let mut entries = Vec::new();
-    let mut offset = 10;
-    for _ in 0..entry_count {
-        if offset + 9 > data.len() {
-            return None;
-        }
-        let d = data[offset];
-        let ld = data[offset + 1];
-        let mut prefix56 = [0u8; 7];
-        prefix56.copy_from_slice(&data[offset + 2..offset + 9]);
-        entries.push(SSREntry { d, ld, prefix56 });
-        offset += 9;
-    }
-
-    Some(SSRData {
-        header: SSRHeader {
-            global_depth,
-            entry_count,
-            total_keys,
-            version,
-        },
-        entries,
-    })
+/// Create SSRData from header and entries
+///
+/// Helper to construct SSRData when you have separate header and entries.
+pub fn ssr_from_parts(header: SSRHeader, entries: Vec<SSREntry>) -> ContractSSR {
+    SSRData::from_parts(header, entries)
 }
 
 /// Serialize shard data to DA format (sorted entries)
 ///
+/// Wrapper around da::serialize_shard() for EVM-specific contract storage.
+///
 /// Format: [2B count][EvmEntry...]
 /// Each EvmEntry: [32B key_h][32B value] (64 bytes total)
-pub fn serialize_shard(shard: &ShardData) -> Vec<u8> {
-    use utils::functions::log_crit;
-
-    const MAX_ENTRIES: usize = 63;
-
-    // Emergency validation: enforce hard DA segment limit
-    if shard.entries.len() > MAX_ENTRIES {
-        log_crit(&format!(
-            "❌ FATAL: Shard has {} entries, exceeds hard limit of {}! Segment will fail DA import.",
-            shard.entries.len(),
-            MAX_ENTRIES
-        ));
-        // Panic in debug builds to catch during development
-        #[cfg(debug_assertions)]
-        panic!("Shard entry count exceeds DA segment limit: {} > {}", shard.entries.len(), MAX_ENTRIES);
-    }
-
-    let mut result = Vec::new();
-
-    // Entry count (2 bytes)
-    let count = shard.entries.len() as u16;
-    result.extend_from_slice(&count.to_le_bytes());
-
-    // Entries (64 bytes each: 32 bytes key_h + 32 bytes value)
-    for entry in &shard.entries {
-        result.extend_from_slice(entry.key_h.as_bytes());
-        result.extend_from_slice(entry.value.as_bytes());
-    }
-
-    result
+pub fn serialize_shard(shard: &ContractShard) -> Vec<u8> {
+    da::serialize_shard(shard, MAX_ENTRIES)
 }
 
 /// Deserialize shard data from DA format
-pub fn deserialize_shard(data: &[u8]) -> Option<ShardData> {
-    if data.len() < 2 {
-        return None;
-    }
-
-    let count = u16::from_le_bytes([data[0], data[1]]) as usize;
-    let expected_len = 2 + (count * 64);
-    if data.len() < expected_len {
-        return None;
-    }
-
-    let mut entries = Vec::new();
-    let mut offset = 2;
-    for _ in 0..count {
-        let key_h = H256::from_slice(&data[offset..offset + 32]);
-        let value = H256::from_slice(&data[offset + 32..offset + 64]);
-        entries.push(EvmEntry { key_h, value });
-        offset += 64;
-    }
-
-    Some(ShardData { entries })
+///
+/// Wrapper around da::deserialize_shard() for EVM-specific contract storage.
+pub fn deserialize_shard(data: &[u8]) -> Option<ContractShard> {
+    da::deserialize_shard(data).ok()
 }
 
 // ===== ObjectKind =====
@@ -541,10 +228,13 @@ pub enum ObjectKind {
     SsrMetadata = 0x02,
     /// Receipt object (kind=0x03) - contains full transaction data
     Receipt = 0x03,
+    /// Meta-shard object (kind=0x04) - ObjectID→ObjectRef mappings
+    MetaShard = 0x04,
     /// Block object (kind=0x05)
     Block = 0x05,
-    /// Block metadata object (kind=0x06) - contains computed values
-    BlockMetadata = 0x06,
+    
+    /// Meta-SSR metadata object (kind=0x07) - routing metadata for meta-shards
+    MetaSsrMetadata = 0x07,
 }
 
 impl ObjectKind {
@@ -555,8 +245,9 @@ impl ObjectKind {
             0x01 => Some(Self::StorageShard),
             0x02 => Some(Self::SsrMetadata),
             0x03 => Some(Self::Receipt),
+            0x04 => Some(Self::MetaShard),
             0x05 => Some(Self::Block),
-            0x06 => Some(Self::BlockMetadata),
+            0x07 => Some(Self::MetaSsrMetadata),
             _ => None,
         }
     }
@@ -730,7 +421,7 @@ mod tests {
                 prefix56: [0u8; 7],
             },
         ];
-        contract_storage.ssr.header.entry_count = contract_storage.ssr.entries.len() as u8;
+        contract_storage.ssr.header.entry_count = contract_storage.ssr.entries.len() as u32;
 
         let key_left = H256::zero();
         let shard_left = resolve_shard_id(&contract_storage, key_left);
@@ -953,7 +644,8 @@ mod tests {
 }
 
 /// Dump all entries in a storage shard for debugging
-pub fn dump_entries(shard_data: &ShardData) {
+pub fn dump_entries(shard_data: &ContractShard) {
+    use utils::functions::log_info;
 
     for (idx, entry) in shard_data.entries.iter().enumerate() {
         log_info(&format!(

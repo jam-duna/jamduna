@@ -98,7 +98,7 @@ func (t *StateDBStorage) SetPreImageLookup(s uint32, blob_hash common.Hash, blob
 	return nil
 }
 
-func BytesToTimeSlots(vByte []byte) (time_slots []uint32) {
+func StorageBytesToTimeSlots(vByte []byte) (time_slots []uint32) {
 	if len(vByte) == 0 {
 		return make([]uint32, 0)
 	}
@@ -239,26 +239,12 @@ func (t *StateDBStorage) DeletePreImageBlob(s uint32, blobHash common.Hash) erro
 // Trace traces the path to a specific key in the Merkle Tree and returns the sibling hashes along the path
 func (t *StateDBStorage) Trace(keyBytes []byte) ([][]byte, error) {
 	key := normalizeKey32(keyBytes)
-	var key32 [32]byte
-	copy(key32[:], key[:])
 
-	// Generate merkle proof for this key using read-only proof generation
-	merkleProof, err := t.bmtDB.GenerateProof(key32)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate proof: %v", err)
-	}
-
-	// Convert MerkleProof.Path to [][]byte (sibling hashes)
-	siblingHashes := make([][]byte, len(merkleProof.Path))
-	for i, node := range merkleProof.Path {
-		// Each ProofNode contains the sibling hash
-		siblingHashes[i] = node.Hash[:]
-	}
-
-	return siblingHashes, nil
+	// Generate merkle proof for this key using trie's Trace method
+	return t.trieDB.Trace(key[:])
 }
 
-// Verify verifies the path to a specific key in the Merkle Tree
-func Verify(serviceID uint32, key []byte, value []byte, rootHash []byte, path []common.Hash) bool {
+// StorageVerify verifies the path to a specific key in the Merkle Tree
+func StorageVerify(serviceID uint32, key []byte, value []byte, rootHash []byte, path []common.Hash) bool {
 	return true
 }

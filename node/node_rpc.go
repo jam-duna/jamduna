@@ -424,6 +424,9 @@ func (j *Jam) BestBlock(req []string, res *string) error {
 func (n *NodeContent) getRefineContext(prereqs ...common.Hash) types.RefineContext {
 	// TODO: approx finality by 5 blocks
 	finalityApproxConst := 5
+	if Grandpa {
+		finalityApproxConst = 2
+	}
 	anchor := common.Hash{}
 	stateRoot := common.Hash{}
 	beefyRoot := common.Hash{}
@@ -732,9 +735,9 @@ func (j *Jam) AuditWorkPackage(req []string, res *string) error {
 		return err
 	}
 	log.RecordLogs()
-	log.EnableModule(log.FirstGuarantorOrAuditor)
+	log.EnableModule(log.Auditor)
 
-	workReport2, err := j.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, j.statedb.GetTimeslot(), true, 0)
+	workReport2, err := j.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, j.statedb.GetTimeslot(), log.Auditor, 0)
 	if err != nil {
 		return err
 	}

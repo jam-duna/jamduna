@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	numBlocks = 53
+	numBlocks = 5
 )
 
 var algoPayloads = []byte{

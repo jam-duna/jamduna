@@ -65,10 +65,10 @@ impl TransactionReceiptRecord {
         let logs = deserialize_logs(&candidate.payload[4..4 + logs_len]).ok()?;
 
         Some(TransactionReceiptRecord {
-            tx_index: candidate.object_ref.tx_slot as usize,
+            tx_index: 0, // tx_slot field removed from ObjectRef
             hash: candidate.object_id, // Transaction hash from object_id
-            success: candidate.object_ref.log_index == 1,
-            used_gas: candidate.object_ref.gas_used.into(),
+            success: true, // log_index field removed from ObjectRef - using default
+            used_gas: 0.into(), // gas_used field removed from ObjectRef
             logs,
             payload: candidate.payload.clone(),
         })

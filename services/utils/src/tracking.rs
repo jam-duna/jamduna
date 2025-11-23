@@ -3,7 +3,7 @@
 //! This module provides generic structures for tracking read/write dependencies
 //! across JAM services. Used by EVM backend to enable:
 //! - Parallel transaction execution (via tx_reads conflict detection)
-//! - Work package validation (via block_reads ObjectDependency list)
+//! - Work package validation (via block_reads ObjectId list)
 //! - Deterministic write ordering (via WriteRecord instance counters)
 
 use alloc::{
@@ -11,13 +11,9 @@ use alloc::{
     vec::Vec,
 };
 use primitive_types::{H160, H256};
+use crate::objects::ObjectId;
 
-/// Object dependency for tracking read/write dependencies
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ObjectDependency {
-    pub object_id: [u8; 32],
-    pub required_version: u32,
-}
+// ObjectDependency replaced with ObjectId
 
 /// Kind of write recorded by the overlay tracker
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -51,16 +47,16 @@ pub struct WriteRecord {
 /// Snapshot emitted when flushing the tracker at the end of the block
 #[derive(Debug, Clone, Default)]
 pub struct TrackerOutput {
-    pub block_reads: BTreeSet<ObjectDependency>,
-    pub tx_reads: Vec<BTreeSet<ObjectDependency>>,
+    pub block_reads: BTreeSet<ObjectId>,
+    pub tx_reads: Vec<BTreeSet<ObjectId>>,
     pub writes: Vec<WriteRecord>,
 }
 
 pub struct OverlayTracker {
-    block_reads: BTreeSet<ObjectDependency>,
-    frame_reads: Vec<BTreeSet<ObjectDependency>>,
-    tx_reads: Vec<BTreeSet<ObjectDependency>>,
-    pending_tx_reads: BTreeSet<ObjectDependency>,
+    block_reads: BTreeSet<ObjectId>,
+    frame_reads: Vec<BTreeSet<ObjectId>>,
+    tx_reads: Vec<BTreeSet<ObjectId>>,
+    pending_tx_reads: BTreeSet<ObjectId>,
     writes: Vec<WriteRecord>,
     write_counters: BTreeMap<WriteKey, u32>,
     current_tx: Option<usize>,
@@ -212,8 +208,8 @@ impl OverlayTracker {
 
     /// Record DA object read for dependency tracking
     /// JAM DA: Inserts into block_reads, frame_reads, pending_tx_reads
-    /// Used for: Work package ObjectDependency list, parallelism analysis
-    pub fn record_read(&mut self, dependency: ObjectDependency) {
+    /// Used for: Work package ObjectId list, parallelism analysis
+    pub fn record_read(&mut self, dependency: ObjectId) {
         self.block_reads.insert(dependency);
         if let Some(frame) = self.frame_reads.last_mut() {
             frame.insert(dependency);

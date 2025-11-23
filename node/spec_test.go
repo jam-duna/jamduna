@@ -119,7 +119,7 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 
 	log.InitLogger("trace")
 	log.EnableModule(log.PvmAuthoring)
-	log.EnableModule(log.FirstGuarantorOrAuditor)
+	log.EnableModule(log.FirstGuarantor)
 	log.EnableModule(log.GeneralAuthoring)
 	chainspec, err := chainspecs.ReadSpec("dev")
 	if err != nil {

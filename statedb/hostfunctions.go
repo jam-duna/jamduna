@@ -2007,7 +2007,7 @@ func (vm *VM) hostLog() {
 		serviceMetadata = fmt.Sprintf("%s-child", serviceMetadata)
 	}
 	loggingVerbose := false
-	if vm.logging == log.FirstGuarantorOrAuditor || vm.logging == log.Builder || vm.logging == log.PvmAuthoring {
+	if vm.logging == log.FirstGuarantor || vm.logging == log.Auditor || vm.logging == log.Builder || vm.logging == log.PvmAuthoring {
 		loggingVerbose = true
 	}
 	if !loggingVerbose {

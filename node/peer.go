@@ -37,14 +37,18 @@ const (
 	CE143_PreimageRequest              = 143
 	CE144_AuditAnnouncement            = 144
 	CE145_JudgmentPublication          = 145
-	CE146_VoteMessage                  = 146
-	CE147_BundleRequest                = 147
-	CE148_SegmentRequest               = 148
-	CE149_Catchup                      = 149
-	CE150_CommitMessage                = 150
-	CE151_NeighborMessage              = 151
-	CE152_BLSSignature                 = 152
-	CE153_BLSAggregateSignature        = 153
+
+	CE147_BundleRequest  = 147
+	CE148_SegmentRequest = 148
+
+	CE149_GrandpaVote     = 149
+	CE150_GrandpaCommit   = 150
+	CE151_GrandpaState    = 151
+	CE152_GrandpaCatchUp  = 152
+	CE153_WarpSyncRequest = 153
+
+	CE154_EpochFinalized          = 154
+	CE155_EpochAggregateSignature = 155
 
 	useQuicDeadline = false
 )
@@ -420,22 +424,25 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 			return nil
 		}
 		return n.onSegmentRequest(ctx, stream, msg, peerID)
-	case CE146_VoteMessage:
-		return n.onVoteMessage(ctx, stream, msg)
-	case CE150_CommitMessage:
-		return n.onCommitMessage(ctx, stream, msg)
-	case CE151_NeighborMessage:
-		//return n.onNeighborMessage(ctx, stream, msg)
-	case CE149_Catchup:
-		return n.onCatchUpRequest(ctx, stream, msg, peerID)
-	case CE152_BLSSignature:
-		//return n.onBLSSignature(ctx, stream, msg)
-	case CE153_BLSAggregateSignature:
-		//return n.onBLSAggregateSignature(ctx, stream, msg)
+
+	case CE149_GrandpaVote:
+		return n.onGrandpaVote(ctx, stream, msg)
+	case CE150_GrandpaCommit:
+		return n.onGrandpaCommit(ctx, stream, msg)
+	case CE151_GrandpaState:
+		return n.onGrandpaState(ctx, stream, msg)
+	case CE152_GrandpaCatchUp:
+		return n.onGrandpaCatchUp(ctx, stream, msg, peerID)
+	case CE153_WarpSyncRequest:
+		return n.onWarpSyncRequest(ctx, stream, msg, peerID)
+	case CE154_EpochFinalized:
+		return n.onEpochFinalized(ctx, stream, msg, peerID)
+	case CE155_EpochAggregateSignature:
+		return n.onEpochAggregateSignature(ctx, stream, msg, peerID)
 	default:
 		return errors.New("unknown message type")
 	}
-	return nil
+
 }
 
 func (n *Node) AbortStream(stream quic.Stream, code uint64) {

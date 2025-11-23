@@ -2,15 +2,12 @@
 
 use alloc::{format, vec::Vec};
 use utils::{
-    constants::{WHAT, FULL},
     functions::{log_error, log_debug, log_info, AccumulateInput},
+    constants::FULL,
 };
 use crate::{
-    block::{EvmBlockPayload, EvmBlockMetadata},
-    receipt::TransactionReceiptRecord,
     sharding::{ObjectKind, format_object_id},
     writes::{ExecutionEffectsEnvelope, deserialize_execution_effects},
-    mmr::MMR,
 };
 
 /// BlockAccumulator manages block storage and retrieval operations
@@ -18,82 +15,118 @@ pub struct BlockAccumulator {
     #[allow(dead_code)]
     pub service_id: u32,
     pub envelopes: Vec<ExecutionEffectsEnvelope>,
-    pub current_block: EvmBlockPayload,
-    pub log_index_start: u64,
-    pub mmr: MMR,
 }
 
 impl BlockAccumulator {
     /// Accumulate all execution effects and finalize block
     ///
-    /// Returns the accumulate root (serialized object_id + ObjectRef data) or None on failure
+    /// Returns the accumulate root - MMR super_peak committing to all blocks
+    /// Appends work_package_hashes to MMR and returns super_peak as commitment
+    /// This ensures finalization commits to entire block history, never constant zero
     pub fn accumulate(service_id: u32, timeslot: u32, accumulate_inputs: &[AccumulateInput]) -> Option<[u8; 32]> {
-        let mut accumulator = Self::new(service_id, timeslot, accumulate_inputs)?;
+        let accumulator = Self::new(service_id, timeslot, accumulate_inputs)?;
         let envelope_count = accumulator.envelopes.len();
+
         for envelope_idx in 0..envelope_count {
             let envelope = &accumulator.envelopes[envelope_idx];
             log_info(&format!("📦 Processing envelope #{} with {} candidates", envelope_idx, envelope.writes.len()));
             let writes = envelope.writes.clone();
             for candidate in &writes {
-                let mut candidate = candidate.clone();
-                match candidate.object_ref.object_kind {
-                    kind if kind == ObjectKind::Receipt as u8 => {
-                        let record = TransactionReceiptRecord::from_candidate(&candidate)?;
-                        // Write Receipt objects as ObjectRef + payload to JAM State
-                        accumulator.accumulate_receipt(&mut candidate, record)?;
-                    }
-                    kind if kind == ObjectKind::BlockMetadata as u8 => {
-                        // Deserialize block metadata from payload and write to metadata objectID
-                        if !candidate.payload.is_empty() {
-                            match EvmBlockMetadata::deserialize(&candidate.payload) {
-                                Ok(metadata) => {
-                                    log_info(&format!("📦 Writing BlockMetadata: object_id={}, transactions_root={}, receipts_root={}, mmr_root={}",
-                                        format_object_id(&candidate.object_id),
-                                        format_object_id(&metadata.transactions_root),
-                                        format_object_id(&metadata.receipts_root),
-                                        format_object_id(&metadata.mmr_root)));
+                let candidate = candidate.clone();
 
-                                    // Write metadata to the metadata objectID (computed from block header)
-                                    if metadata.write(&candidate.object_id).is_none() {
-                                        log_error(&format!("Failed to write BlockMetadata for object_id {}", format_object_id(&candidate.object_id)));
-                                        return None;
-                                    }
-                                }
-                                Err(e) => {
-                                    log_error(&format!("Failed to deserialize BlockMetadata for object_id {}: {}", format_object_id(&candidate.object_id), e));
-                                    return None;
-                                }
-                            }
-                        } else {
-                            log_error(&format!("BlockMetadata object_id {} has no payload", format_object_id(&candidate.object_id)));
-                            return None;
-                        }
+                // IMPORTANT: Accumulate ONLY writes meta-sharding infrastructure to JAM State.
+                //
+                // Meta-shard ObjectRefs (MetaShard, MetaSsrMetadata) are written to JAM State
+                // because they provide the routing table for locating all other objects.
+                //
+                // All other objects (Code, Receipts, Blocks, BlockMetadata, etc.) remain as
+                // DA-only artifacts - their payloads are already in JAM DA segments, and they
+                // do NOT need ObjectRef pointers in JAM State. These objects are accessed
+                // directly via their deterministic ObjectIDs during refine import.
+                //
+                // This design keeps JAM State minimal (only routing infrastructure) while
+                // JAM DA holds all actual data (code, receipts, blocks, storage).
+                match candidate.object_ref.object_kind {
+                    kind if kind == ObjectKind::MetaShard as u8 => {
+                        // Meta-shard objects - write ObjectRef to JAM State
+                        // Payload is stored in DA, JAM State only tracks ObjectRef pointer
+                        log_info(&format!("📝 Writing MetaShard ObjectRef for object_id: {}", format_object_id(&candidate.object_id)));
+                        candidate.object_ref.write(&candidate.object_id);
                     }
-                    kind if kind == ObjectKind::Block as u8 => {
-                        // Block objects are handled separately by EvmBlockPayload::write()
-                        // They write only EvmBlockPayload data (no ObjectRef prefix)
-                        log_info(&format!("📝 Skipping Block object_id: {} (handled by EvmBlockPayload::write)", format_object_id(&candidate.object_id)));
+                    kind if kind == ObjectKind::MetaSsrMetadata as u8 => {
+                        // Meta-SSR metadata - write ObjectRef to JAM State
+                        log_info(&format!("📝 Writing MetaSsrMetadata ObjectRef for object_id: {}", format_object_id(&candidate.object_id)));
+                        candidate.object_ref.write(&candidate.object_id);
                     }
                     _ => {
-                        // Code, SSR, shards write only their ObjectRef data
-                        log_info(&format!("📝 Writing ObjectRef for object_id: {}", format_object_id(&candidate.object_id)));
-                        candidate.object_ref.write(&candidate.object_id);
+                        // Other object kinds (Code, Receipt, Block, BlockMetadata, etc.)
+                        // are intentionally NOT written to JAM State during accumulate.
+                        // They remain DA-only artifacts, accessible via deterministic ObjectIDs.
+                        log_debug(&format!(
+                            "  Skipping ObjectKind {} (DA-only): object_id={}",
+                            candidate.object_ref.object_kind,
+                            format_object_id(&candidate.object_id)
+                        ));
                     }
                 }
             }
         }
 
-        // Update EvmBlockPayload and write to storage
-        accumulator.current_block.write(service_id)?;
+        // Build block index: collect all unique work_package_hashes from envelopes
+        let mut work_package_hashes = Vec::new();
+        for envelope in &accumulator.envelopes {
+            // Get work_package_hash from the first write intent in each envelope
+            if let Some(first_write) = envelope.writes.first() {
+                let wph = first_write.object_ref.work_package_hash;
+                // Only add if not already present (deduplicate)
+                if !work_package_hashes.contains(&wph) {
+                    work_package_hashes.push(wph);
+                }
+            }
+        }
 
-        // Write block_hash → block_number mapping AFTER block is fully written
-        // This ensures the hash is computed from the complete, finalized block
-        use crate::block::EvmBlockPayload;
-        let block_hash = accumulator.current_block.compute_block_hash();
-        EvmBlockPayload::write_blockhash_mapping_pub(&block_hash, accumulator.current_block.number as u32);
+        // Write block_number → work_package_hash mapping to JAM State
+        // This enables queries like "what work packages contributed to block N?"
+        let block_number = timeslot; // For now, use timeslot as block_number (1:1 mapping)
+        if !work_package_hashes.is_empty() {
+            Self::write_block_index(block_number, &work_package_hashes);
+        }
 
-        // Return the block hash as the accumulate root
-        Some(block_hash)
+        // Compute accumulate root using MMR (Merkle Mountain Range)
+        // Append all work_package_hashes to MMR and return super_peak as commitment
+        use crate::mmr::MMR;
+
+        // Read existing MMR from JAM State (or create new if first block)
+        let mut mmr = MMR::read_mmr(service_id).unwrap_or_else(|| {
+            log_info("📋 Creating new MMR (first block)");
+            MMR::new()
+        });
+
+        // Append each work_package_hash to the MMR
+        // This creates an incremental commitment to all blocks
+        for wph in &work_package_hashes {
+            mmr.append(*wph);
+        }
+
+        // Write updated MMR back to JAM State BEFORE computing root
+        // CRITICAL: MMR write must succeed, otherwise auditors can't reproduce the commitment
+        // If write fails (WHAT/FULL), we must return None to signal accumulate failure
+        let accumulate_root = match mmr.write_mmr() {
+            Some(root) => {
+                log_info(&format!(
+                    "✅ Accumulate complete. Appended {} work packages to MMR. Root: {}",
+                    work_package_hashes.len(),
+                    format_object_id(&root)
+                ));
+                root
+            }
+            None => {
+                log_error("❌ FATAL: Failed to write MMR to JAM State - accumulate aborted");
+                return None;
+            }
+        };
+
+        Some(accumulate_root)
     }
 
     /// Create new BlockAccumulator and determine next block number from storage
@@ -115,8 +148,6 @@ impl BlockAccumulator {
                 }
             };
 
-        // Read current block payload and parent hash
-        log_info(&format!("📖 Attempting to read EvmBlockPayload for service_id={}, timeslot={}", service_id, timeslot));
 
         // First check if we can read the block number key
         use crate::block::EvmBlockPayload;
@@ -130,33 +161,9 @@ impl BlockAccumulator {
             }
         }
 
-        let current_block = match EvmBlockPayload::read(service_id, timeslot as u64) {
-            Some(block) => {
-                log_info(&format!("✅ Successfully read current_block (number={})", block.number));
-                block
-            },
-            None => {
-                log_error(&format!("❌ EvmBlockPayload::read failed for service_id={}, timeslot={}", service_id, timeslot));
-                return None;
-            }
-        };
-
-        // Read MMR from storage
-        let mmr = MMR::read_mmr(service_id)?;
-
-        log_info(&format!(
-            "🎯 BlockAccumulator created successfully with {} envelopes, {} MMR peaks, log_index_start={}",
-            envelopes.len(),
-            mmr.peaks.len(),
-            0
-        ));
-
         Some(BlockAccumulator {
             service_id,
             envelopes,
-            current_block,
-            log_index_start: 0,
-            mmr,
         })
     }
 
@@ -205,45 +212,119 @@ impl BlockAccumulator {
         Some(envelopes)
     }
 
-    /// Write Receipt object to JAM State as ObjectRef + payload and append receipt_hash to MMR
-    fn accumulate_receipt(&mut self, candidate: &mut crate::writes::ObjectCandidateWrite, record: TransactionReceiptRecord) -> Option<()> {
-        use utils::host_functions::write;
+    // ===== Block Index Functions =====
 
-        let (receipt_hash, new_log_index_start) = self.current_block.add_receipt(candidate, record, self.log_index_start);
+    /// Compute JAM State key for block_number → work_package_hash array
+    ///
+    /// Key format: keccak256("block_index" || block_number)
+    fn block_index_key(block_number: u32) -> [u8; 32] {
+        use utils::hash_functions::keccak256;
 
-        // Append receipt hash to MMR
-        self.mmr.append(receipt_hash);
+        let mut preimage = alloc::vec::Vec::new();
+        preimage.extend_from_slice(b"block_index");
+        preimage.extend_from_slice(&block_number.to_le_bytes());
 
-        // Update receipt payload with cumulative gas and log index (Phase 2)
-        // self.current_block.gas_used now contains the cumulative gas up to and including this transaction
-        // self.log_index_start is the starting log index for this transaction's logs
-        crate::receipt::update_receipt_phase2(&mut candidate.payload, self.current_block.gas_used, self.log_index_start);
+        *keccak256(&preimage).as_fixed_bytes()
+    }
 
-        self.log_index_start = new_log_index_start;
+    /// Write block_number → Vec<work_package_hash> mapping to JAM State
+    ///
+    /// Format: [4B count][32B wph1][32B wph2]...
+    /// This enables queries like "what work packages contributed to block N?"
+    fn write_block_index(block_number: u32, work_package_hashes: &[[u8; 32]]) {
+        use utils::host_functions::write as host_write;
 
-        // Create combined buffer: ObjectRef + payload
-        let mut value_buffer = candidate.object_ref.serialize();
-        value_buffer.extend_from_slice(&candidate.payload);
+        // Serialize: count (4 bytes) + hashes (32 bytes each)
+        let mut data = alloc::vec::Vec::new();
+        data.extend_from_slice(&(work_package_hashes.len() as u32).to_le_bytes());
+        for wph in work_package_hashes {
+            data.extend_from_slice(wph);
+        }
 
-        let key_buffer = candidate.object_id;
+        let key = Self::block_index_key(block_number);
 
+        // Write to JAM State
         let result = unsafe {
-            write(
-                key_buffer.as_ptr() as u64,
-                key_buffer.len() as u64,
-                value_buffer.as_ptr() as u64,
-                value_buffer.len() as u64,
+            host_write(
+                key.as_ptr() as u64,
+                key.len() as u64,
+                data.as_ptr() as u64,
+                data.len() as u64,
             )
         };
 
         // Check for failure codes
-        if result == WHAT || result == FULL {
-            log_error(&format!("❌ Failed to write Receipt object_id: {}, error code: {}", format_object_id(&candidate.object_id), result));
+        if result == FULL {
+            log_error(&format!(
+                "❌ Failed to write block index for block {} (result={})",
+                block_number, result
+            ));
+        } else {
+            log_info(&format!(
+                "📚 Wrote block index: block {} has {} work packages ({} bytes)",
+                block_number,
+                work_package_hashes.len(),
+                data.len()
+            ));
+        }
+    }
+
+    /// Read block_number → Vec<work_package_hash> mapping from JAM State
+    #[allow(dead_code)]
+    pub fn read_block_index(service_id: u32, block_number: u32) -> Option<Vec<[u8; 32]>> {
+        use utils::host_functions::read as host_read;
+
+        let key = Self::block_index_key(block_number);
+
+        // Allocate buffer for reading block index data
+        let mut buffer = alloc::vec![0u8; 10000]; // Large enough for ~300 work package hashes
+
+        let result = unsafe {
+            host_read(
+                service_id as u64,
+                key.as_ptr() as u64,
+                key.len() as u64,
+                buffer.as_mut_ptr() as u64,
+                0 as u64,
+                buffer.len() as u64,
+            )
+        };
+
+        // Check for failure codes
+        if result == u64::MAX || result == u64::MAX - 1 {
             return None;
         }
 
-        log_info(&format!("📝 Writing Receipt object_id: {}, receipt_hash: {}", format_object_id(&candidate.object_id), format_object_id(&receipt_hash)));
-        Some(())
+        let data_len = result as usize;
+        if data_len < 4 {
+            return None;
+        }
+
+        // Parse count
+        let count = u32::from_le_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]) as usize;
+
+        // Verify size
+        let expected_size = 4 + count * 32;
+        if data_len != expected_size {
+            log_error(&format!(
+                "Block index size mismatch: expected {}, got {}",
+                expected_size,
+                data_len
+            ));
+            return None;
+        }
+
+        // Parse hashes
+        let mut hashes = Vec::new();
+        for i in 0..count {
+            let offset = 4 + i * 32;
+            let mut hash = [0u8; 32];
+            hash.copy_from_slice(&buffer[offset..offset + 32]);
+            hashes.push(hash);
+        }
+
+        Some(hashes)
     }
+
 }
 

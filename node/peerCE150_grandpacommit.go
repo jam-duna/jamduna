@@ -19,11 +19,11 @@ Validator -> Validator
 <-- FIN
 */
 
-func (p *Peer) SendCommitMessage(ctx context.Context, commit grandpa.CommitMessage) error {
-	code := uint8(CE150_CommitMessage)
+func (p *Peer) SendCommitMessage(ctx context.Context, commit grandpa.GrandpaCommit) error {
+	code := uint8(CE150_GrandpaCommit)
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
-		return fmt.Errorf("openStream[CE150_CommitMessage] failed: %w", err)
+		return fmt.Errorf("openStream[CE150_GrandpaCommit] failed: %w", err)
 	}
 	defer stream.Close()
 
@@ -34,25 +34,25 @@ func (p *Peer) SendCommitMessage(ctx context.Context, commit grandpa.CommitMessa
 	}
 
 	if err := sendQuicBytes(ctx, stream, commitBytes, p.PeerID, code); err != nil {
-		return fmt.Errorf("sendQuicBytes[CE150_CommitMessage] failed: %w", err)
+		return fmt.Errorf("sendQuicBytes[CE150_GrandpaCommit] failed: %w", err)
 	}
 
 	return nil
 }
 
-func (n *Node) onCommitMessage(ctx context.Context, stream quic.Stream, msg []byte) error {
+func (n *Node) onGrandpaCommit(ctx context.Context, stream quic.Stream, msg []byte) error {
 	defer stream.Close()
 
 	// Decode: Round Number ++ Set Id ++ Commit
-	var commit grandpa.CommitMessage
+	var commit grandpa.GrandpaCommit
 	if err := commit.FromBytes(msg); err != nil {
-		return fmt.Errorf("onCommitMessage: decode failed: %w", err)
+		return fmt.Errorf("onGrandpaCommit: decode failed: %w", err)
 	}
 
 	select {
-	case n.grandpaCommitMessageCh <- commit:
+	case n.grandpa.CommitMessageCh <- commit:
 		return nil
 	case <-ctx.Done():
-		return fmt.Errorf("onCommitMessage: context canceled before delivery")
+		return fmt.Errorf("onGrandpaCommit: context canceled before delivery")
 	}
 }

@@ -16,8 +16,12 @@ mod accumulator;
 mod backend;
 #[path = "state.rs"]
 mod state;
+#[path = "da.rs"]
+mod da;
 #[path = "sharding.rs"]
 mod sharding;
+#[path = "meta_sharding.rs"]
+mod meta_sharding;
 #[path = "jam_gas.rs"]
 mod jam_gas;
 #[path = "writes.rs"]

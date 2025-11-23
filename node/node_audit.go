@@ -246,7 +246,7 @@ func (n *Node) runAudit() {
 					log.Error(log.Audit, "Audit Failed", "err", err)
 				} else {
 					// if the block is audited, we can start grandpa
-					log.Debug(log.B, "Audit Done", "n", n.String(), "headerHash", headerHash, "audit_statedb.timeslot", audit_statedb.GetTimeslot())
+					log.Info(log.B, "Audit Done", "n", n.String(), "headerHash", headerHash, "audit_statedb.timeslot", audit_statedb.GetTimeslot())
 					// sourabh don't disable until it's stable I need this to tell if the audit is running
 					newBlock := audit_statedb.Block.Copy()
 					blockNode, ok := n.block_tree.GetBlockNode(newBlock.Header.HeaderHash())
@@ -256,6 +256,7 @@ func (n *Node) runAudit() {
 						log.Error(log.Audit, "runAudit: blockNode not found", "n", n.String(), "headerHash", headerHash)
 					}
 					if newBlock.GetParentHeaderHash() == (genesisBlockHash) && Grandpa {
+						log.Info(log.B, "Starting Grandpa after audit", "n", n.String(), "headerHash", headerHash)
 						n.StartGrandpa(newBlock.Copy())
 					}
 					time.Sleep(10 * time.Second) // remove it after audited
@@ -633,6 +634,7 @@ func (n *Node) Judge(headerHash common.Hash, workReports []types.WorkReportSelec
 			var err error
 			if !hasmade {
 				j, err = n.auditWorkReport(w.WorkReport, headerHash)
+				fmt.Printf("AUDITED %s WorkReport %s: Judge=%v\n", n.String(), w.WorkReport.Hash().String_short(), j.Judge)
 			} else {
 				j, err = judgement_bucket.GetJudgementByValidator(w.WorkReport.Hash(), uint16(n.GetCurrValidatorIndex()))
 			}
@@ -699,7 +701,7 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 		return
 	}
 
-	wr, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, n.statedb.GetTimeslot(), false, 0)
+	wr, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, n.statedb.GetTimeslot(), log.Auditor, 0)
 	if err != nil {
 		return
 	}

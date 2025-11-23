@@ -6,11 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
 	"reflect"
 	"sync"
 
-	"github.com/colorfulnotion/jam/bmt"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/syndtr/goleveldb/leveldb"
@@ -38,12 +36,6 @@ func ShowKeyVals(keyvals []types.KeyVal, label string) {
 	fmt.Printf("=== End %s ===\n\n", label)
 }
 
-func BytesToHex(b []byte) string {
-	// hex.EncodeToString is highly optimized.
-	// The "0x" is prepended in a single, efficient string allocation.
-	return "0x" + hex.EncodeToString(b)
-}
-
 // kvAlias type for davxy traces
 type kvAlias struct {
 	Key        string `json:"key"`
@@ -52,7 +44,11 @@ type kvAlias struct {
 	Metadata   string `json:"metadata,omitempty"`
 }
 
-
+func BytesToHex(b []byte) string {
+	// hex.EncodeToString is highly optimized.
+	// The "0x" is prepended in a single, efficient string allocation.
+	return "0x" + hex.EncodeToString(b)
+}
 
 const (
 	CheckStateTransition = false
@@ -65,20 +61,15 @@ type LogMessage struct {
 	Self        bool
 }
 
-// StateDBStorage struct to hold the BMT instance or in-memory map
+// StateDBStorage struct to hold the trie instance or in-memory map
 type StateDBStorage struct {
-	// BMT database instance - pure Go implementation
-	bmtDB         *bmt.Nomt              // BMT database instance (JAM Gray Paper compatible)
+	// Trie database instance - pure Go implementation
+	trieDB        *MerkleTree // Trie database instance (JAM Gray Paper compatible)
 	Root          common.Hash
 	stagedInserts map[common.Hash][]byte // key -> value
 	stagedDeletes map[common.Hash]bool   // key -> true
 	stagedMutex   sync.Mutex             // Protects staged operations
 	keys          map[common.Hash]bool   // Tracks all keys inserted
-
-	// Root tracking for rollback by hash
-	rootHistory   []common.Hash          // Ordered list of roots (index = seqnum)
-	rootToSeqNum  map[common.Hash]uint64 // Maps root hash -> sequence number
-	currentSeqNum uint64                 // Current commit sequence number
 
 	db      *leveldb.DB
 	memMap  map[string][]byte // In-memory storage when useMemory=true
@@ -118,18 +109,8 @@ func NewStateDBStorage(path string, jamda types.JAMDA, telemetryClient types.Tel
 		}
 	}
 
-	// Create BMT database directory and instance
-	bmtDir := fmt.Sprintf("%s/bmt", path)
-	if err := os.MkdirAll(bmtDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create BMT directory: %v", err)
-	}
-
-	// Open BMT database with default options
-	opts := bmt.DefaultOptions(bmtDir)
-	bmtDB, err := bmt.Open(opts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open BMT at %s: %v", bmtDir, err)
-	}
+	// Create empty trie database
+	trieDB := NewMerkleTree(nil)
 
 	s := &StateDBStorage{
 		db:              db,
@@ -137,20 +118,15 @@ func NewStateDBStorage(path string, jamda types.JAMDA, telemetryClient types.Tel
 		jamda:           jamda,
 		telemetryClient: telemetryClient,
 		nodeID:          nodeID,
-		bmtDB:           bmtDB,
+		trieDB:          trieDB,
 		stagedInserts:   make(map[common.Hash][]byte),
 		stagedDeletes:   make(map[common.Hash]bool),
 		keys:            make(map[common.Hash]bool),
-		rootHistory:     make([]common.Hash, 0),
-		rootToSeqNum:    make(map[common.Hash]uint64),
-		currentSeqNum:   0,
 	}
 
-	// Get initial root from BMT
-	initialRoot := bmtDB.Root()
-	s.Root = common.BytesToHash(initialRoot[:])
-	s.rootHistory = append(s.rootHistory, s.Root)
-	s.rootToSeqNum[s.Root] = 0
+	// Get initial root from trie
+	initialRoot := trieDB.GetRoot()
+	s.Root = initialRoot
 
 	return s, nil
 }
@@ -353,6 +329,43 @@ func (store *StateDBStorage) StoreWorkReport(wr *types.WorkReport) error {
 	}
 	if err := store.WriteRawKV([]byte(generateSpecKey(erasureRoot)), wrBytes); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+// generateWarpSyncKey generates the storage key for a warp sync fragment
+func generateWarpSyncKey(setID uint32) string {
+	return fmt.Sprintf("warpsync_%d", setID)
+}
+
+// GetWarpSyncFragment retrieves a warp sync fragment for a given set ID
+func (store *StateDBStorage) GetWarpSyncFragment(setID uint32) (types.WarpSyncFragment, error) {
+	fragmentBytes, ok, err := store.ReadRawKV([]byte(generateWarpSyncKey(setID)))
+	if err != nil {
+		return types.WarpSyncFragment{}, fmt.Errorf("GetWarpSyncFragment: ReadRawKV failed: %w", err)
+	}
+	if !ok {
+		return types.WarpSyncFragment{}, fmt.Errorf("GetWarpSyncFragment: fragment not found for setID %d", setID)
+	}
+
+	fragment, _, err := types.Decode(fragmentBytes, reflect.TypeOf(types.WarpSyncFragment{}))
+	if err != nil {
+		return types.WarpSyncFragment{}, fmt.Errorf("GetWarpSyncFragment: decode failed: %w", err)
+	}
+
+	return fragment.(types.WarpSyncFragment), nil
+}
+
+// StoreWarpSyncFragment stores a warp sync fragment for a given set ID
+func (store *StateDBStorage) StoreWarpSyncFragment(setID uint32, fragment types.WarpSyncFragment) error {
+	fragmentBytes, err := types.Encode(&fragment)
+	if err != nil {
+		return fmt.Errorf("StoreWarpSyncFragment: encode failed: %w", err)
+	}
+
+	if err := store.WriteRawKV([]byte(generateWarpSyncKey(setID)), fragmentBytes); err != nil {
+		return fmt.Errorf("StoreWarpSyncFragment: WriteRawKV failed: %w", err)
 	}
 
 	return nil

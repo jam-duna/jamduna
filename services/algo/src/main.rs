@@ -1967,18 +1967,10 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
             effect: WriteEffectEntry {
                 object_id,
                 ref_info: ObjectRef {
-                    service_id: args.wi_service_index,
                     work_package_hash: args.wphash,
                     index_start: export_count,
-                    index_end: export_count + 1,
-                    version: 1,
                     payload_length: intent_payload.len() as u32,
-                    timeslot: 0,
-                    gas_used: gas_used as u32,
-                    evm_block: 0,
                     object_kind: 3, // ObjectKind::Receipt
-                    log_index: 0,
-                    tx_slot: i as u16,
                 },
                 payload: intent_payload,
             },

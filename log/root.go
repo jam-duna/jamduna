@@ -10,11 +10,12 @@ import (
 
 const (
 	// PVM Context (vm.logging)
-	PvmAuthoring            = "pvm_authoring"   // PVM Authoring
-	PvmValidating           = "pvm_validator"   // PVM Validator
-	Builder                 = "builder"         // Builder
-	FirstGuarantorOrAuditor = "first_guarantor" // First Guarantor or Auditor
-	OtherGuarantor          = "other_guarantor" // 2nd/3rd Guarantor
+	PvmAuthoring   = "pvm_authoring"   // PVM Authoring
+	PvmValidating  = "pvm_validator"   // PVM Validator
+	Builder        = "builder"         // Builder
+	FirstGuarantor = "first_guarantor" // First Guarantor
+	Auditor        = "auditor"         // Auditor
+	OtherGuarantor = "other_guarantor" // 2nd/3rd Guarantor
 
 	GeneralAuthoring  = "authoring"  // Generic Authoring  (excluding pvm)
 	GeneralValidating = "validating" // Generic Validating (excluding pvm)
@@ -99,7 +100,7 @@ func init_module(moduleList []string, moduleEnabled []string) map[string]bool {
 	return moduleMap
 }
 
-var defaultKnownModules = []string{GeneralAuthoring, PvmAuthoring, FirstGuarantorOrAuditor, Node, SDB, Quic, B, P, G, R, DA, A, Beefy, Audit, Grandpa, Web}
+var defaultKnownModules = []string{GeneralAuthoring, PvmAuthoring, FirstGuarantor, Auditor, Node, SDB, Quic, B, P, G, R, DA, A, Beefy, Audit, Grandpa, Web}
 var defaultModuleEnabled = []string{}
 
 // --- Module management ---

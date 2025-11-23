@@ -50,7 +50,7 @@ func (statedb *StateDB) authorizeWP(workPackage types.WorkPackage, workPackageCo
 }
 
 // NOTE: the refinecontext is NOT used here
-func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, slot uint32, firstGuarantorOrAuditor bool, eventID uint64, pvmBackend string) (work_report types.WorkReport, err error) {
+func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, slot uint32, execContext string, eventID uint64, pvmBackend string) (work_report types.WorkReport, err error) {
 	importsegments := make([][][]byte, len(package_bundle.WorkPackage.WorkItems))
 	results := []types.WorkDigest{}
 
@@ -100,11 +100,7 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		}
 		vm.Timeslot = s.JamState.SafroleState.Timeslot
 
-		if firstGuarantorOrAuditor {
-			vm.SetPVMContext(log.FirstGuarantorOrAuditor)
-		} else {
-			vm.SetPVMContext(log.OtherGuarantor)
-		}
+		vm.SetPVMContext(execContext)
 		vmLogging = vm.GetVMLogging()
 
 		// 0.7.1 : core index is part of refine args
@@ -121,9 +117,8 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 
 		if segmentCountMismatch {
 			log.Info(log.Node, "executeWorkPackageBundle: ExportCount and ExportedSegments Mismatch", "ExportCount", expectedSegmentCnt, "ExportedSegments", actualSegmentCnt, "ExportedSegments", common.FormatPaddedBytesArray(exported_segments, 20))
-			// Non-first guarantors/auditors trust the first guarantor's ExportCount
-			// and use actual segment count for appending to segments slice
-			if !firstGuarantorOrAuditor {
+			// TEMPORARY: Non-first guarantors/auditors trust the first guarantor's ExportCount and use actual segment count for appending to segments slice
+			if execContext == log.OtherGuarantor || execContext == log.Auditor {
 				expectedSegmentCnt = actualSegmentCnt
 			}
 		}

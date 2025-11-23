@@ -27,18 +27,10 @@ fn load_precompile(
     ));
 
     let object_ref = ObjectRef {
-        service_id: backend.service_id,
         work_package_hash: [0u8; 32],
         index_start: 0,
-        index_end: 0,
-        version: 0,
         payload_length: bytecode.len() as u32,
-        timeslot: 0,
-        gas_used: 0,
-        evm_block: 0,
         object_kind: ObjectKind::Code as u8,
-        log_index: 0,
-        tx_slot: 0,
     };
 
     backend

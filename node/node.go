@@ -64,9 +64,9 @@ const (
 	enableInit  = false
 	numNodes    = types.TotalValidators
 	quicAddr    = "127.0.0.1:%d"
-	Grandpa     = false
-	GrandpaEasy = true
-	Audit       = false
+	Grandpa     = true
+	GrandpaEasy = false
+	Audit       = true
 	CE138_test  = false
 	CE129_test  = false // turn on for testing CE129
 	revalidate  = false // turn off for production (or publication of traces)
@@ -304,12 +304,6 @@ type Node struct {
 	announcementsCh chan types.Announcement
 	judgementsCh    chan types.Judgement
 	auditingCh      chan *statedb.StateDB // use this to trigger auditing, block hash
-
-	// grandpa input channels
-	grandpaPreVoteMessageCh   chan grandpa.VoteMessage
-	grandpaPreCommitMessageCh chan grandpa.VoteMessage
-	grandpaPrimaryMessageCh   chan grandpa.VoteMessage
-	grandpaCommitMessageCh    chan grandpa.CommitMessage
 
 	waitingAnnouncements      map[common.Hash][]types.Announcement
 	waitingAnnouncementsMutex sync.Mutex
@@ -683,11 +677,6 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 		judgementsCh:    make(chan types.Judgement, DefaultChannelSize),
 		auditingCh:      make(chan *statedb.StateDB, DefaultChannelSize),
 
-		grandpaPreVoteMessageCh:   make(chan grandpa.VoteMessage, DefaultChannelSize),
-		grandpaPreCommitMessageCh: make(chan grandpa.VoteMessage, DefaultChannelSize),
-		grandpaPrimaryMessageCh:   make(chan grandpa.VoteMessage, DefaultChannelSize),
-		grandpaCommitMessageCh:    make(chan grandpa.CommitMessage, DefaultChannelSize),
-
 		sendTickets:   false,
 		resendTickets: false, // activate this when you want to resend tickets
 
@@ -947,6 +936,11 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 		go node.runAuditAnnouncementJudgement()
 	} else {
 		node.AuditFlag = false
+	}
+	if Grandpa {
+		authorities := node.statedb.GetSafrole().CurrValidators
+		node.grandpa = grandpa.NewGrandpa(node.block_tree, node.nodeSelf.credential, authorities, block, node, node.store)
+		go node.grandpa.RunGrandpa()
 	}
 	// we need to organize the /ws usage to avoid conflicts
 	if node.id == 5 { // HACK
@@ -1454,7 +1448,11 @@ func (n *NodeContent) SubmitBundleSameCore(b *types.WorkPackageBundle) (err erro
 				if err != nil {
 					log.Error(log.Node, "SubmitBundleSameCore GetPeerInfoByEd25519", "err", err, "pubkey", pubkey)
 				} else {
-					err = peer.SendWorkPackageSubmission(context.Background(), b.WorkPackage, b.ExtrinsicData[0], coreIndex)
+					blobs := types.ExtrinsicsBlobs{}
+					if len(b.ExtrinsicData) > 0 {
+						blobs = b.ExtrinsicData[0]
+					}
+					err = peer.SendWorkPackageSubmission(context.Background(), b.WorkPackage, blobs, coreIndex)
 					if err != nil {
 						log.Error(log.Node, "SubmitBundleSameCore SendWorkPackageSubmission", "err", err, "pubkey", pubkey)
 					} else {
@@ -1834,6 +1832,11 @@ func (n *Node) getEpoch() uint32 {
 	return n.statedb.GetSafrole().GetEpoch()
 }
 
+// Broadcast sends the object to all peers (implements grandpa.Broadcaster interface)
+func (n *Node) Broadcast(msg interface{}, evID ...uint64) {
+	n.broadcast(context.Background(), msg, evID...)
+}
+
 // broadcast sends the object to all peers
 // TODO: Use worker pools to limit concurrent goroutines to like a few hundred at most
 func (n *Node) broadcast(ctxParent context.Context, obj interface{}, evID ...uint64) {
@@ -1971,18 +1974,52 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}, evID ...uin
 					log.Warn(log.Quic, "SendPreimageAnnouncement", "n", n.String(), "err", err)
 					return
 				}
-			case reflect.TypeOf(grandpa.VoteMessage{}):
-				vote := obj.(grandpa.VoteMessage)
-				if err := peer.SendVoteMessage(ctx, vote); err != nil {
-					log.Warn(log.Quic, "SendVoteMessage", "n", n.String(), "err", err)
+			case reflect.TypeOf(grandpa.GrandpaVote{}): // CE149
+				vote := obj.(grandpa.GrandpaVote)
+				if err := peer.SendGrandpaVote(ctx, vote); err != nil {
+					log.Warn(log.Quic, "SendGrandpaVote", "n", n.String(), "err", err)
 					return
 				}
-			case reflect.TypeOf(grandpa.CommitMessage{}):
-				commit := obj.(grandpa.CommitMessage)
+			case reflect.TypeOf(grandpa.GrandpaCommit{}): // CE149
+				commit := obj.(grandpa.GrandpaCommit)
 				if err := peer.SendCommitMessage(ctx, commit); err != nil {
 					log.Warn(log.Quic, "SendCommitMessage", "n", n.String(), "err", err)
 					return
 				}
+
+			case reflect.TypeOf(grandpa.GrandpaStateMessage{}): // CE150
+				state := obj.(grandpa.GrandpaStateMessage)
+				if err := peer.SendGrandpaState(ctx, state); err != nil {
+					log.Warn(log.Quic, "SendGrandpaState", "n", n.String(), "err", err)
+					return
+				}
+
+			case reflect.TypeOf(grandpa.GrandpaCatchUp{}): // CE152
+				catchup := obj.(grandpa.GrandpaCatchUp)
+				if err := peer.SendGrandpaCatchUp(ctx, catchup); err != nil {
+					log.Warn(log.Quic, "SendGrandpaCatchup", "n", n.String(), "err", err)
+					return
+				}
+
+			case reflect.TypeOf(uint32(0)): // CE153
+				warpsyncrequest := obj.(uint32)
+				response, err := peer.SendWarpSyncRequest(ctx, warpsyncrequest)
+				if err != nil {
+					log.Warn(log.Quic, "SendWarpSyncRequest", "n", n.String(), "err", err)
+					return
+				}
+				if n.grandpa != nil {
+					if err := n.grandpa.ProcessWarpSyncResponse(response); err != nil {
+						log.Warn(log.Quic, "ProcessWarpSyncResponse", "n", n.String(), "err", err)
+					}
+				}
+			case reflect.TypeOf(JAMEpochFinalized{}): // CE154
+				epochFinalized := obj.(JAMEpochFinalized)
+				if err := peer.SendEpochFinalized(ctx, epochFinalized); err != nil {
+					log.Warn(log.Quic, "SendEpochFinalized", "n", n.String(), "err", err)
+					return
+				}
+
 			}
 		}()
 	}

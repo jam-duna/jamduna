@@ -10,7 +10,7 @@ use utils::{
     hash_functions::keccak256,
 };
 use crate::{
-    sharding::{format_data_hex, ObjectKind},
+    sharding::format_data_hex,
     state::{MajikOverlay, MajikBackend},
     tx::{DecodedCallCreate, decode_call_args, decode_transact_args},
     genesis,
@@ -124,12 +124,12 @@ impl BlockRefiner {
         mut backend: MajikBackend,
         extrinsics: Vec<Vec<u8>>,
         work_package_hash: [u8; 32],
-    ) -> Result<ExecutionEffects, utils::functions::HarnessError> {
+    ) -> Result<(ExecutionEffects, MajikBackend), utils::functions::HarnessError> {
         use primitive_types::{H160, H256};
         use alloc::collections::BTreeMap;
         use crate::sharding::{
             code_object_id, shard_object_id, ssr_object_id, format_object_id,
-            EvmEntry, ShardData, ShardId, SSRData, SSRHeader,
+            EvmEntry, ShardData, ShardId, SSRHeader,
             serialize_shard, serialize_ssr, ObjectKind,
         };
 
@@ -247,18 +247,10 @@ impl BlockRefiner {
                     effect: WriteEffectEntry {
                         object_id,
                         ref_info: ObjectRef {
-                            service_id: backend.service_id,
                             work_package_hash,
                             index_start: 0,
-                            index_end: 0,
-                            version: 1,
                             payload_length: contract_data.code.len() as u32,
-                            timeslot: 0,
-                            gas_used: 0,
-                            evm_block: 0,
                             object_kind: ObjectKind::Code as u8,
-                            log_index: 0,
-                            tx_slot: 0,
                         },
                         payload: contract_data.code.clone(),
                     },
@@ -331,18 +323,10 @@ impl BlockRefiner {
                     effect: WriteEffectEntry {
                         object_id: shard_object_id,
                         ref_info: ObjectRef {
-                            service_id: backend.service_id,
                             work_package_hash,
                             index_start: 0,
-                            index_end: 0,
-                            version: 1,
                             payload_length: shard_payload.len() as u32,
-                            timeslot: 0,
-                            gas_used: 0,
-                            evm_block: 0,
                             object_kind: ObjectKind::StorageShard as u8,
-                            log_index: 0,
-                            tx_slot: 0,
                         },
                         payload: shard_payload,
                     },
@@ -357,10 +341,7 @@ impl BlockRefiner {
                     version: 1,
                 };
 
-                let ssr_data = SSRData {
-                    header: ssr_header,
-                    entries: Vec::new(), // No exceptions - all keys go to single shard at depth 0
-                };
+                let ssr_data = crate::sharding::ssr_from_parts(ssr_header, Vec::new());
 
                 let ssr_payload = serialize_ssr(&ssr_data);
                 let ssr_object_id = ssr_object_id(*address);
@@ -377,18 +358,10 @@ impl BlockRefiner {
                     effect: WriteEffectEntry {
                         object_id: ssr_object_id,
                         ref_info: ObjectRef {
-                            service_id: backend.service_id,
                             work_package_hash,
                             index_start: 0,
-                            index_end: 0,
-                            version: 1,
                             payload_length: ssr_payload.len() as u32,
-                            timeslot: 0,
-                            gas_used: 0,
-                            evm_block: 0,
                             object_kind: ObjectKind::SsrMetadata as u8,
-                            log_index: 0,
-                            tx_slot: 0,
                         },
                         payload: ssr_payload,
                     },
@@ -402,13 +375,14 @@ impl BlockRefiner {
             write_intents.len()
         ));
 
-        Ok(ExecutionEffects {
+        Ok((ExecutionEffects {
             write_intents,
-        })
+        }, backend))
     }
 
     /// Refine payload transactions - execute transactions and ingest receipts into this BlockRefiner
     /// Returns None if any transaction fails to decode or if commit/revert operations fail
+    /// Returns (ExecutionEffects, MajikBackend) to allow access to meta-shard state
     pub fn refine_payload_transactions(
         &mut self,
         mut backend: MajikBackend,
@@ -416,7 +390,7 @@ impl BlockRefiner {
         extrinsics: &[Vec<u8>],
         tx_count_expected: u32,
         refine_args: &RefineArgs,
-    ) -> Option<ExecutionEffects> {
+    ) -> Option<(ExecutionEffects, MajikBackend)> {
         use evm::interpreter::etable::DispatchEtable;
         use evm::interpreter::trap::CallCreateTrap;
         use evm::standard::{
@@ -673,7 +647,7 @@ impl BlockRefiner {
         }
 
 
-        let effects = overlay.deconstruct(refine_args.wphash, &receipts);
+        let (effects, backend) = overlay.deconstruct(refine_args.wphash, &receipts);
 
         // Note: gas_used field removed from ExecutionEffects - was: total_jam_gas_used
 
@@ -683,11 +657,11 @@ impl BlockRefiner {
                 total_jam_gas_used, receipts.len(), effects.write_intents.len()
             ),
         );
-        Some(effects)
+        Some((effects, backend))
     }
 
     /// Create default environment for a given service (chain_id)
-    fn create_environment(service_id: u32, payload_type: PayloadType) -> crate::state::EnvironmentData {
+    fn create_environment(service_id: u32, _payload_type: PayloadType) -> crate::state::EnvironmentData {
         use primitive_types::{U256, H160};
 
         // Coinbase address: 0xEaf3223589Ed19bcd171875AC1D0F99D31A5969c
@@ -726,7 +700,6 @@ impl BlockRefiner {
         refine_args: &RefineArgs,
     ) -> Option<ExecutionEffects> {
         use utils::effects::{StateWitness, WriteIntent};
-        use crate::block::{EvmBlockPayload, EvmBlockMetadata};
 
         // Parse payload metadata
         let metadata = parse_payload_metadata(&work_item.payload)?;
@@ -741,7 +714,7 @@ impl BlockRefiner {
         let witness_start_idx = metadata.payload_size as usize;
         let mut block_builder = BlockRefiner::new();
         let mut imported_objects: BTreeMap<ObjectId, (ObjectRef, Vec<u8>)> = BTreeMap::new();
-        let mut block_write_intents: Vec<WriteIntent> = Vec::new();
+        
         for (idx, extrinsic) in extrinsics.iter().enumerate() {
             // Skip transaction extrinsics
             if idx < witness_start_idx {
@@ -752,8 +725,6 @@ impl BlockRefiner {
                     idx,
                     extrinsic.len()
             ));
-
-
             if metadata.payload_type == PayloadType::Transactions || metadata.payload_type == PayloadType::Builder {
                 // Use the first byte of the extrinsic to determine witness format: 0 - RAW, 1 - REF
                 if extrinsic.is_empty() {
@@ -764,68 +735,15 @@ impl BlockRefiner {
                 let format_byte = extrinsic[0];
                 match format_byte {
                     0 => {
-                        // RAW format -- verify state witness without object refs
-                        match StateWitness::deserialize_raw_and_verify(&extrinsic[1..], refine_state_root) {
-                            Ok(state_witness) => {
-                                let object_id = state_witness.object_id;
-                                let payload = state_witness.payload.unwrap_or_default();
-
-                                // Check if this witness is a block number witness (0xFF...FF pattern)
-                                if let Some(block_number) = crate::block::is_block_number_state_witness(&object_id) {
-                                    log_info(&format!("  📦 Block witness detected: block_number={}", block_number));
-
-                                    // Deserialize block payload and compute metadata
-                                    match EvmBlockPayload::deserialize(&payload) {
-                                        Ok(block) => {
-                                                log_info(&format!(
-                                                    "  📦 Block deserialized: object_id={}, block.number={}, tx_hashes={}, receipt_hashes={}",
-                                                    format_object_id(object_id),
-                                                    block.number,
-                                                    block.tx_hashes.len(),
-                                                    block.receipt_hashes.len()
-                                                ));
-
-                                                // Compute metadata from block payload
-                                                let metadata = EvmBlockMetadata::new(&block);
-
-                                                log_info(&format!(
-                                                    "  ✅ Metadata computed: transactions_root={}, receipts_root={}, mmr_root={}",
-                                                    format_object_id(metadata.transactions_root),
-                                                    format_object_id(metadata.receipts_root),
-                                                    format_object_id(metadata.mmr_root)
-                                                ));
-
-                                                // Create write intent for block metadata
-                                                let write_intent = WriteIntent {
-                                                    effect: metadata.to_write_effect_entry(&block, refine_args.wi_service_index, refine_args.wphash),
-                                                    dependencies: Vec::new(),
-                                                };
-                                                block_write_intents.push(write_intent);
-                                            }
-                                            Err(e) => {
-                                                log_error(&format!(
-                                                    "  Failed to deserialize block {}: {}",
-                                                    format_object_id(object_id),
-                                                    e
-                                                ));
-                                                return None;
-                                            }
-                                        }
-                                   
-                                }
-                            }
-                            Err(e) => {
-                                log_error(&format!("Failed to deserialize or verify RAW witness at index {}: {:?}", idx, e));
-                                return None;
-                            }
-                        }
+                        log_error(&format!("Failed to deserialize or verify RAW witness "));
+                        return None;
+                         
                     }
                     1 => {
                         // REF format -- verify state witness with object refs
                         match StateWitness::deserialize_and_verify(&extrinsic[1..], refine_state_root) {
                             Ok(state_witness) => {
                                 let object_id = state_witness.object_id;
-                                let version = state_witness.ref_info.version;
                                 let object_ref = state_witness.ref_info.clone();
 
                                 let payload_type_str = if metadata.payload_type == PayloadType::Transactions {
@@ -837,11 +755,11 @@ impl BlockRefiner {
                                 if let Some(payload) = state_witness.fetch_object_payload(work_item, work_item_index) {
                                     let payload_len = payload.len();
                                     imported_objects.insert(object_id, (object_ref, payload));
-                                    log_info(&format!("✅ Payload{}: Verified + imported object {} (version {}, payload_length={})",
-                                        payload_type_str, format_object_id(object_id), version, payload_len));
+                                    log_info(&format!("✅ Payload{}: Verified + imported object {} (payload_length={})",
+                                        payload_type_str, format_object_id(object_id),  payload_len));
                                 } else {
-                                    log_info(&format!("⚠️  Payload{}: Verified witness but could not fetch payload for object {} (version {})",
-                                        payload_type_str, format_object_id(object_id), version));
+                                    log_info(&format!("⚠️  Payload{}: Verified witness but could not fetch payload for object {}",
+                                        payload_type_str, format_object_id(object_id)));
                                 }
                             }
                             Err(e) => {
@@ -870,7 +788,7 @@ impl BlockRefiner {
 
         let config = Config::shanghai();
         let environment = Self::create_environment(work_item.service, metadata.payload_type);
-        let backend = MajikBackend::new(environment, imported_objects.clone());
+        let mut backend = MajikBackend::new(environment, imported_objects.clone());
 
         // Populate block_builder.objects_map with imported_objects for 'B' command access
         block_builder.objects_map = imported_objects.clone();
@@ -879,7 +797,10 @@ impl BlockRefiner {
         let mut execution_effects = if metadata.payload_type == PayloadType::Blocks {
             // Bootstrap execution
             match block_builder.refine_blocks_payload(backend, extrinsics[..metadata.payload_size as usize].to_vec(), refine_args.wphash) {
-                Ok(effects) => effects,
+                Ok((effects, returned_backend)) => {
+                    backend = returned_backend;
+                    effects
+                },
                 Err(e) => {
                     log_error(&format!("Refine: Bootstrap execution failed: {:?}", e));
                     return None;
@@ -898,23 +819,30 @@ impl BlockRefiner {
                 metadata.payload_size,
                 refine_args,
             ) {
-                Some(effects) => effects,
+                Some((effects, returned_backend)) => {
+                    backend = returned_backend;
+                    effects
+                },
                 None => {
                     log_error("Refine: refine_payload_transactions failed");
                     return None;
                 }
             }
+
+
+
         } else {
             log_error(&format!("❌ Unknown payload type: {:?}", work_item.payload));
             return None;
         };
 
-        // Append block metadata write intents (from block witnesses in PayloadTransactions)
-        if !block_write_intents.is_empty() {
-            log_info(&format!("📦 Adding {} block metadata write intents", block_write_intents.len()));
-            execution_effects.write_intents.extend(block_write_intents);
-        }
+        // TODO: receipts go in a rollup block
+        /*
+        let (receipt_hash, new_log_index_start) = self.current_block.add_receipt(candidate, record, self.log_index_start);
+        crate::receipt::update_receipt_phase2(&mut candidate.payload, self.current_block.gas_used, self.log_index_start);
 
+        self.log_index_start = new_log_index_start;
+        */
         // Export payloads to DA segments
         let mut export_count: u16 = 0;
         for (idx, intent) in execution_effects.write_intents.iter_mut().enumerate() {
@@ -927,7 +855,139 @@ impl BlockRefiner {
                 }
             }
         }
-        // Note: export_count field removed from ExecutionEffects - was: export_count
+
+        // Meta-sharding: Group ObjectRef writes by meta-shard and export to DA
+        // This implements the JAM State sharding architecture to scale to billions of objects
+        log_info(&format!("📦 Meta-sharding: Processing {} object writes", execution_effects.write_intents.len()));
+
+        // Get meta-shard state from backend (persistent across refine calls)
+        // CRITICAL: These caches are populated from witnesses in state.rs constructor
+        // MetaShard imports ensure we merge into existing shards, not overwrite with empty ones
+        let mut cached_meta_shards = backend.meta_shards_mut();
+        let mut meta_ssr = backend.meta_ssr_mut();
+
+        // Track SSR entry count before processing to detect changes
+        let initial_ssr_entry_count = meta_ssr.entries.len();
+
+        // Collect all (object_id, ObjectRef) pairs from write_intents
+        let object_writes: Vec<([u8; 32], utils::objects::ObjectRef)> = execution_effects
+            .write_intents
+            .iter()
+            .map(|intent| {
+                (intent.effect.object_id, intent.effect.ref_info.clone())
+            })
+            .collect();
+
+        // Process object writes - groups by meta-shard, handles splits
+        let meta_shard_writes = crate::meta_sharding::process_object_writes(
+            object_writes,
+            &mut cached_meta_shards,
+            &mut meta_ssr,
+        );
+
+        log_info(&format!("  Generated {} meta-shard write intents", meta_shard_writes.len()));
+
+        // Export meta-shard segments to DA and create write intents
+        for meta_write in meta_shard_writes {
+            use crate::sharding::ObjectKind;
+            use crate::meta_sharding::{meta_shard_object_id, serialize_meta_shard_with_id};
+            use utils::effects::WriteEffectEntry;
+
+            // Serialize meta-shard to DA segment format with shard_id header
+            // This enables witness imports to identify the shard without SSR routing
+            let meta_shard = crate::da::ShardData {
+                entries: meta_write.entries.clone(),
+            };
+            let meta_shard_bytes = serialize_meta_shard_with_id(&meta_shard, meta_write.shard_id);
+
+            log_info(&format!(
+                "  📦 Meta-shard {:?}: {} entries, {} bytes",
+                meta_write.shard_id,
+                meta_write.entries.len(),
+                meta_shard_bytes.len()
+            ));
+
+            // Compute object_id for this meta-shard
+            let object_id = meta_shard_object_id(work_item.service, meta_write.shard_id);
+
+            // Create ObjectRef for this meta-shard (timeslot filled at accumulate time)
+            let object_ref = utils::objects::ObjectRef {
+                work_package_hash: refine_args.wphash,
+                index_start: 0, // Set by export_effect
+                payload_length: meta_shard_bytes.len() as u32,
+                object_kind: ObjectKind::MetaShard as u8,
+            };
+
+            // Create write intent for accumulator
+            let mut write_intent = WriteIntent {
+                effect: WriteEffectEntry {
+                    object_id,
+                    ref_info: object_ref,
+                    payload: meta_shard_bytes,
+                },
+                dependencies: Vec::new(),
+            };
+
+            // Export to DA and update index_start/index_end
+            match write_intent.effect.export_effect(export_count as usize) {
+                Ok(next_index) => {
+                    export_count = next_index;
+                    execution_effects.write_intents.push(write_intent);
+                }
+                Err(e) => {
+                    log_error(&format!("  ❌ Failed to export meta-shard: {:?}", e));
+                }
+            }
+        }
+
+        // Export MetaSsrMetadata if it changed (splits added new routing entries)
+        if meta_ssr.entries.len() > initial_ssr_entry_count {
+            use crate::sharding::ObjectKind;
+            use crate::meta_sharding::{meta_ssr_object_id, serialize_meta_ssr};
+            use utils::effects::WriteEffectEntry;
+
+            log_info(&format!(
+                "  🗂️  Meta-SSR changed: {} → {} entries, exporting to JAM State",
+                initial_ssr_entry_count,
+                meta_ssr.entries.len()
+            ));
+
+            // Serialize meta-SSR
+            let meta_ssr_bytes = serialize_meta_ssr(&meta_ssr);
+            let payload_len = meta_ssr_bytes.len();
+
+            // Compute object_id for meta-SSR
+            let object_id = meta_ssr_object_id(work_item.service);
+
+            // Create ObjectRef for meta-SSR
+            let object_ref = utils::objects::ObjectRef {
+                work_package_hash: refine_args.wphash,
+                index_start: 0, // Set by export_effect
+                payload_length: payload_len as u32,
+                object_kind: ObjectKind::MetaSsrMetadata as u8,
+            };
+
+            // Create write intent
+            let mut write_intent = WriteIntent {
+                effect: WriteEffectEntry {
+                    object_id,
+                    ref_info: object_ref,
+                    payload: meta_ssr_bytes,
+                },
+                dependencies: Vec::new(),
+            };
+
+            // Export to DA
+            match write_intent.effect.export_effect(export_count as usize) {
+                Ok(_next_index) => {
+                    execution_effects.write_intents.push(write_intent);
+                    log_info(&format!("  ✅ Meta-SSR exported ({} bytes)", payload_len));
+                }
+                Err(e) => {
+                    log_error(&format!("  ❌ Failed to export meta-SSR: {:?}", e));
+                }
+            }
+        }
 
         Some(execution_effects)
     }
@@ -1035,18 +1095,10 @@ impl BlockRefiner {
                     effect: WriteEffectEntry {
                         object_id: [0xCCu8; 32],
                         ref_info: ObjectRef {
-                            service_id: 0,
                             work_package_hash: [0u8; 32],
                             index_start: 0,
-                            index_end: 0,
-                            version: 0,
                             payload_length: 0,
-                            timeslot: 0,
-                            gas_used: gas_used as u32,
-                            evm_block: 0,
-                            object_kind: ObjectKind::Receipt as u8,
-                            log_index: 0,
-                            tx_slot: 0,
+                            object_kind: 0,
                         },
                         payload: output,
                     },

@@ -26,8 +26,12 @@ pub mod accumulator;
 mod backend;
 #[path = "state.rs"]
 mod state;
+#[path = "da.rs"]
+pub mod da;
 #[path = "sharding.rs"]
 mod sharding;
+#[path = "meta_sharding.rs"]
+pub mod meta_sharding;
 #[path = "jam_gas.rs"]
 mod jam_gas;
 #[path = "writes.rs"]
@@ -40,11 +44,8 @@ mod tx;
 mod bmt;
 #[path = "mmr.rs"]
 pub mod mmr;
-#[path = "verkle.rs"]
-pub mod verkle;
 
 // Re-export commonly used types
 pub use block::{EvmBlockPayload};
 pub use writes::{ExecutionEffectsEnvelope, deserialize_execution_effects, serialize_execution_effects};
 pub use sharding::format_object_id;
-pub use verkle::{LogId, IndexKey, VerkleRoot, VerkleTree, SimpleVerkleTree};

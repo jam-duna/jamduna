@@ -1,10 +1,10 @@
 //! ObjectCandidateWrite and ExecutionEffects serialization for refine → accumulate communication
 
-use crate::sharding::{format_object_id, ObjectKind};
+use crate::sharding::format_object_id;
 use alloc::{format, vec::Vec};
-use utils::effects::ObjectDependency;
+// ObjectDependency replaced with ObjectId
 use utils::functions::{log_error, log_debug, log_trace};
-use utils::objects::ObjectRef;
+use utils::objects::{ObjectRef, ObjectId};
 
 /// ObjectCandidateWrite for refine → accumulate communication
 /// Contains ObjectID, ObjectRef, and dependencies without payload
@@ -12,7 +12,7 @@ use utils::objects::ObjectRef;
 pub struct ObjectCandidateWrite {
     pub object_id: [u8; 32],
     pub object_ref: ObjectRef,
-    pub dependencies: Vec<ObjectDependency>,
+    pub dependencies: Vec<ObjectId>,
     pub payload: Vec<u8>, // only used for receipt 
 }
 
@@ -33,16 +33,12 @@ impl ObjectCandidateWrite {
         let dep_count = self.dependencies.len() as u16;
         buffer.extend_from_slice(&dep_count.to_le_bytes());
 
-        // Dependencies (12 bytes each: 32B object_id + 4B version)
+        // Dependencies (32 bytes each: 32B object_id only, no version)
         for dep in &self.dependencies {
-            buffer.extend_from_slice(&dep.object_id);
-            buffer.extend_from_slice(&dep.required_version.to_le_bytes());
+            buffer.extend_from_slice(dep);
         }
 
-        // Serialize payload for receipt and block metadata objects (other payloads are handled separately)
-        if self.object_ref.object_kind == ObjectKind::Receipt as u8 || self.object_ref.object_kind == ObjectKind::BlockMetadata as u8 {
-            buffer.extend_from_slice(&self.payload);
-        }
+        // Payloads are exported to DA segments, not serialized inline
         buffer
     }
 
@@ -80,12 +76,10 @@ impl ObjectCandidateWrite {
         ) {
             Some(r) => {
                 log_debug(&format!(
-                    "    🔬 data={} bytes, object_id={}, ObjectRef@{} → service_id={}, version={}, kind={}, payload_len={}",
+                    "    🔬 data={} bytes, object_id={}, ObjectRef@{} → kind={}, payload_len={}",
                     data.len(),
                     format_object_id(&object_id),
                     offset,
-                    r.service_id,
-                    r.version,
                     r.object_kind,
                     r.payload_length
                 ));
@@ -110,11 +104,11 @@ impl ObjectCandidateWrite {
         let dep_count = u16::from_le_bytes([data[offset], data[offset + 1]]) as usize;
         offset += 2;
 
-        // Dependencies (36 bytes each)
-        if data.len() < offset + dep_count * 36 {
+        // Dependencies (32 bytes each)
+        if data.len() < offset + dep_count * 32 {
             log_error(&format!(
-                "    ❌ Not enough data for deps (need {}={} + {}*36, have {})",
-                offset + dep_count * 36,
+                "    ❌ Not enough data for deps (need {}={} + {}*32, have {})",
+                offset + dep_count * 32,
                 offset,
                 dep_count,
                 data.len()
@@ -128,51 +122,22 @@ impl ObjectCandidateWrite {
             dep_object_id.copy_from_slice(&data[offset..offset + 32]);
             offset += 32;
 
-            let required_version = u32::from_le_bytes([
-                data[offset],
-                data[offset + 1],
-                data[offset + 2],
-                data[offset + 3],
-            ]);
-            offset += 4;
-
             log_trace(&format!(
-                "    🔗 Dep #{}: object_id={}, version={}",
+                "    🔗 Dep #{}: object_id={}",
                 i,
-                format_object_id(&dep_object_id),
-                required_version
+                format_object_id(&dep_object_id)
             ));
 
-            dependencies.push(ObjectDependency {
-                object_id: dep_object_id,
-                required_version,
-            });
+            dependencies.push(dep_object_id);
         }
 
-        // Deserialize payload for receipt and block metadata objects
-        let payload = if object_ref.object_kind == ObjectKind::Receipt as u8 || object_ref.object_kind == ObjectKind::BlockMetadata as u8 {
-            let payload_len = object_ref.payload_length as usize;
-            if data.len() < offset + payload_len {
-                log_error(&format!(
-                    "    ❌ Not enough data for object payload (kind={}, need {}, have {})",
-                    object_ref.object_kind,
-                    offset + payload_len,
-                    data.len()
-                ));
-                return None;
-            }
-            let payload_data = data[offset..offset + payload_len].to_vec();
-            offset += payload_len;
-            payload_data
-        } else {
-            Vec::new()
-        };
+        // Payloads are not serialized inline - they're in DA segments
+        let payload = Vec::new();
 
         log_debug(&format!(
-            "    📥 ObjectCandidateWrite parsed: kind={}, declared_payload_len={}, actual_payload_len={}",
+            "    📥 ObjectCandidateWrite parsed: kind={}, payload_length={}",
             object_ref.object_kind,
-            object_ref.payload_length,
-            payload.len()
+            object_ref.payload_length
         ));
 
         Some((

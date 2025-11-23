@@ -567,6 +567,12 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 
 		*/
 	}
+	// Initialize trie state with the copied state root
+	err := newStateDB.InitTrieAndLoadJamState(newStateDB.StateRoot)
+	if err != nil {
+		log.Error(log.SDB, "Copy: failed to initialize trie state", "stateRoot", newStateDB.StateRoot, "err", err)
+		// Return the newStateDB anyway, but this indicates a serious issue
+	}
 	// copy instead of recalculate
 	newStateDB.RotateGuarantors()
 	return newStateDB

@@ -1,6 +1,7 @@
 package grandpa
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"time"
@@ -22,8 +23,6 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 		Timer2Signal: make(chan bool, 1),
 		Ticker:       time.NewTicker(100 * time.Millisecond),
 	}
-	grandpa_string := fmt.Sprintf("[v%d] Playing grandpa round %d | last finalized block %v\n", g.GetSelfVoterIndex(round), round, g.block_tree.GetLastFinalizedBlock().Block.Header.Hash())
-	g.GrandpaStatusChan <- grandpa_string
 	go func() {
 		//create a timer for the round
 		if round == 1 {
@@ -59,7 +58,7 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 		}()
 		grandpa_authorities := g.GetRoundGrandpaState(round).grandpa_authorities
 		primary := DerivePrimary(round, grandpa_authorities)
-		if grandpa_authorities[int(primary)] == g.selfkey.PublicKey() {
+		if bytes.Equal(grandpa_authorities[int(primary)].Ed25519.Bytes(), g.selfkey.Ed25519Pub[:]) {
 			_, best_candidate_m1, err := g.BestFinalCandidate(round - 1)
 			if err != nil {
 				g.ErrorChan <- fmt.Errorf("[v%d] error in BestFinalCandidate: %v", g.GetSelfVoterIndex(round), err)
@@ -70,11 +69,10 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 				g.ErrorChan <- fmt.Errorf("[v%d] error primary_commit_message in NewFinalCommitMessage: %v", g.GetSelfVoterIndex(round), err)
 				return
 			}
-			g.BroadcastCommitChan <- primary_commit_message
+			g.Broadcast(primary_commit_message)
 			if g.block_tree.ChildOrBrother(best_candidate_m1, g.block_tree.GetLastFinalizedBlock()) {
 				primary_precommit_message := g.NewPrimaryVoteMessage(best_candidate_m1.Block, round)
-				g.GrandpaStatusChan <- fmt.Sprintf("[v%d] primary precommit message %v\n", g.GetSelfVoterIndex(round), primary_precommit_message.SignMessage.Message.Vote.BlockHash.String_short())
-				g.BroadcastVoteChan <- primary_precommit_message
+				g.Broadcast(primary_precommit_message)
 				err := g.ProcessPrimaryProposeMessage(primary_precommit_message)
 				if err != nil {
 					g.ErrorChan <- fmt.Errorf("[v%d] error in ProcessPrimaryProposeMessage: %v", g.GetSelfVoterIndex(round), err)
@@ -84,6 +82,7 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 			}
 		}
 		// if the timer1 is not expired, wait for the timer1 to expire
+
 	outerLoop1:
 		for {
 			select {
@@ -114,7 +113,7 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 			panic(fmt.Sprintf("N_block is nil, err: %v", err))
 		}
 		prevote := g.NewPrevoteVoteMessage(N_block.Block, round)
-		g.BroadcastVoteChan <- prevote
+		g.Broadcast(prevote)
 		err = g.ProcessPreVoteMessage(prevote)
 		if err != nil {
 			g.ErrorChan <- fmt.Errorf("[v%d] error in ProcessPreVoteMessage: %v", g.GetSelfVoterIndex(round), err)
@@ -156,7 +155,7 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 			g.ErrorChan <- fmt.Errorf("[v%d] error in GrandpaGhost: %v", g.GetSelfVoterIndex(round), err)
 		}
 		precommitmessage := g.NewPrecommitVoteMessage(ghost.Block, round)
-		g.BroadcastVoteChan <- precommitmessage
+		g.Broadcast(precommitmessage)
 		err = g.ProcessPreCommitMessage(precommitmessage)
 		if err != nil {
 			g.ErrorChan <- fmt.Errorf("[v%d] error in ProcessPreCommitMessage: %v", g.GetSelfVoterIndex(round), err)

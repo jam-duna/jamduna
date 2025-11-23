@@ -170,33 +170,58 @@ pub struct EvmBlockPayload {
 - Used as ObjectId key for block number lookups
 - Function: `block_number_to_object_id()`
 
-### accumulator.rs - Block and Receipt Storage
+### accumulator.rs - Meta-Sharding Infrastructure Storage
 
-**Purpose**: Handles block metadata and receipt storage during Phase 2B (accumulate)
+**Purpose**: Writes meta-sharding routing infrastructure to JAM State during Phase 2B (accumulate)
 
 **Core Component**:
 
 - **`BlockAccumulator` struct**:
   - `service_id: u32` - EVM service identifier
   - `envelopes: Vec<ExecutionEffectsEnvelope>` - Collected execution effects from refine
-  - `current_block: EvmBlockPayload` - Block being built (loaded from storage)
-  - `parent_hash: [u8; 32]` - Parent block hash
 
 **Key Methods**:
 
 - `BlockAccumulator::accumulate()` - Main entry point
-  1. Calls `Self::new()` to create accumulator with loaded block
+  1. Calls `Self::new()` to create accumulator
   2. Iterates through envelopes and processes each write intent
-  3. For receipts: calls `current_block.add_receipt()` to update block metadata
- 4. Writes each object (receipt, code, storage) to storage via `ObjectRef::write()`
- 5. Calls `current_block.write()` to persist the in-progress block payload
-    - Note: the block is only **finalized** (roots recomputed, sentinel updated) when the next accumulate call arrives with a **larger timestamp**. At that moment `EvmBlockPayload::read()` finalizes the old block and rolls forward to a fresh payload for the new timeslot.
- 6. Returns `parent_hash` as accumulate root
+  3. **ONLY writes meta-sharding infrastructure to JAM State:**
+     - `ObjectKind::MetaShard` - Meta-shard ObjectRefs (routing pointers)
+     - `ObjectKind::MetaSsrMetadata` - Meta-SSR routing table
+  4. **All other objects remain DA-only** (not written to JAM State):
+     - Code, Receipts, Blocks, BlockMetadata, Storage Shards, SSR Metadata
+     - These are accessed via deterministic ObjectIDs during refine import
+     - Payloads stored only in JAM DA, not JAM State
+  5. **Writes block index** to JAM State:
+     - Collects unique `work_package_hash` values from all envelopes
+     - Writes `block_number → Vec<work_package_hash>` mapping
+     - Key: `keccak256("block_index" || block_number)`
+     - Format: `[4B count][32B wph1][32B wph2]...`
+     - Enables query: "What work packages contributed to block N?"
+     - Cost: ~324 bytes per block, ~324MB for 1M blocks
+  6. Returns **accumulate root** - MMR super_peak committing to all blocks:
+     - Reads existing MMR from JAM State (or creates new if first block)
+     - Appends each `work_package_hash` to the MMR
+     - Writes updated MMR to JAM State and computes `super_peak()` as root
+     - **CRITICAL**: If MMR write fails, accumulate returns `None` (fatal error)
+       - This prevents leaking commitments that auditors can't reproduce
+       - Auditors must be able to read the same MMR from JAM State
+     - **Benefits**:
+       - Incremental commitment to all blocks (not just current block)
+       - Efficient Merkle proofs for historical blocks
+       - Never returns constant zero (even for empty blocks)
+       - Append-only structure matches blockchain growth pattern
+       - Root commits to entire block history via MMR, ensuring meaningful finalization
+
+**Design Rationale**:
+- Keeps JAM State minimal (only routing infrastructure for meta-sharding)
+- JAM DA holds all actual data (code, receipts, blocks, storage)
+- Receipts, blocks, and other objects are deterministically addressed, so they don't need ObjectRef pointers in JAM State
+- Only meta-sharding infrastructure needs JAM State persistence for routing ObjectID→MetaShard lookups
 
 - `BlockAccumulator::new()` - Constructor
   - Calls `collect_envelopes()` to deserialize execution effects
-  - Calls `EvmBlockPayload::read(service_id, timeslot)` to load or create block
-  - Returns initialized accumulator ready to process receipts
+  - Returns initialized accumulator ready to process meta-sharding infrastructure
 
 - `collect_envelopes()` - Deserializes refine outputs
   - Reads `ExecutionEffectsEnvelope` from each accumulate input
@@ -204,34 +229,58 @@ pub struct EvmBlockPayload {
   - Calls `deserialize_execution_effects()` to parse binary format
   - Returns vector of envelopes or None on failure
 
-**Block Operations** (in block.rs):
+**What Happened to Receipts, Blocks, and Other Objects?**
 
-- `EvmBlockPayload::read()` - Loads or creates the *active* block
-  - Reads the current block_number from `BLOCK_NUMBER_KEY`
-  - Reads the block payload for that number from storage
-  - **If the incoming accumulate timestamp matches** the stored block timestamp:
-    - Return the existing block so we can keep appending more receipts/tx hashes
-    - No finalization happens in this case (we are still “building” the block)
-  - **If the incoming timestamp is greater** than the stored block timestamp:
-    - Finalize the previous block (`finalize()` computes roots and hash)
-    - Update the block-number sentinel to `block_number + 1`
-    - Create and return a brand new block payload for the new timestamp
-  - **If the incoming timestamp is smaller** than the stored one:
-    - Reject accumulation (the node is too late)
+In the current architecture:
+- **Receipts, blocks, block metadata, code, and storage** are **NOT** written to JAM State during accumulate
+- These objects remain **DA-only artifacts** - their payloads are stored in JAM DA segments only
+- They are accessed during refine via **deterministic ObjectIDs**:
+  - Receipt: `keccak256(service_id || tx_hash)`
+  - Block: `0xFF...FF || block_number`
+  - Code: `keccak256(service_id || address || 0xFF || "code")`
+  - Storage shard: `keccak256(service_id || address || 0xFF || ld || prefix56 || "shard")`
 
-- `EvmBlockPayload::add_receipt()` - Adds receipt to block
-  - Updates ObjectRef metadata: timeslot, evm_block, tx_slot
-  - Adds tx_hash to block's `tx_hashes` vector (**submission order**)
-  - Accumulates gas_used
-  - Computes per-receipt logs bloom and updates block-wide logs_bloom
-  - Computes canonical receipt hash and adds to receipt_hashes
+**Why this design?**
+- **JAM State is expensive** - only store what's needed for routing
+- **Deterministic ObjectIDs** make objects locatable without ObjectRef pointers
+- **Meta-sharding provides routing** for the few objects that need it (via ObjectID→MetaShard→ObjectRef lookup)
+- **DA is cheap** - store all actual data there
 
-- `EvmBlockPayload::finalize()` - Computes Merkle roots
-  - Calls `compute_transactions_root()` - BMT over tx_hashes
-  - Calls `compute_receipts_root()` - BMT over canonical receipt RLP hashes
-  - Returns block hash computed from 476-byte header
+See [SHARDING.md](SHARDING.md) for details on the meta-sharding architecture.
 
-- `EvmBlockPayload::write()` - Persists block to storage
+**Block Query System**:
+
+The accumulator implements a minimal block index to answer the question: *"What is in this block number?"*
+
+- **Problem**: Traditional blockchains use `block_hash` as the block identifier, but JAM uses `work_package_hash`
+- **Solution**: Use `work_package_hash` as the block identifier instead of `block_hash`
+  - Multiple work packages can contribute to a single block (timeslot)
+  - The `work_package_hash` is already present in `ObjectRef.work_package_hash`
+  - The `ExecutionEffectsEnvelope` already contains all payloads from that work package
+
+- **Implementation**:
+  1. During accumulate, collect all unique `work_package_hash` values from envelopes
+  2. Write `block_number → Vec<work_package_hash>` mapping to JAM State
+  3. Query flow:
+     - User queries: "What's in block 12345?"
+     - Read block index: `[wph1, wph2, wph3]` for block 12345
+     - For each `work_package_hash`:
+       - Fetch the corresponding `ExecutionEffectsEnvelope` from JAM DA
+       - Envelope contains all payloads (receipts, code, storage) for that work package
+     - Combine results to get complete block contents
+
+- **Helper Functions**:
+  - `block_index_key(block_number)` - Computes key: `keccak256("block_index" || block_number)`
+  - `write_block_index(block_number, work_package_hashes)` - Writes index to JAM State
+  - `read_block_index(service_id, block_number)` - Reads index from JAM State (unused, marked `#[allow(dead_code)]`)
+
+- **Benefits**:
+  - No additional DA fetches needed (envelopes already contain all payloads)
+  - Minimal JAM State usage (~324 bytes per block)
+  - Elegant reuse of existing `work_package_hash` identifier
+  - Avoids storing redundant block payloads in JAM State
+
+- `EvmBlockPayload::write()` - Persists block to storage (DEPRECATED - DA-only now)
   - Serializes block payload to bytes
   - Writes to storage at key = block_number_to_object_id(block_number)
   - Block becomes available for RPC queries

@@ -209,7 +209,7 @@ func (n *Node) processWPQueueItem(wpItem *types.WPQueueItem) bool {
 
 	// Do our own execution first
 	var execErr error
-	report, execErr = n.executeWorkPackageBundle(coreIndex, bundle, segmentRootLookup, slot, true, wpItem.EventID)
+	report, execErr = n.executeWorkPackageBundle(coreIndex, bundle, segmentRootLookup, slot, log.FirstGuarantor, wpItem.EventID)
 	if execErr != nil {
 		log.Warn(log.Node, "processWPQueueItem", "err", execErr)
 		panic(111)
@@ -306,11 +306,11 @@ func (n *Node) processWPQueueItem(wpItem *types.WPQueueItem) bool {
 // executeWorkPackageBundle can be called by a guarantor OR an auditor -- the caller MUST do  VerifyBundle call prior to execution (verifying the imported segments)
 // If eventID is non-zero, telemetry events for Authorized and Refined will be emitted
 func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle,
-	segmentRootLookup types.SegmentRootLookup, slot uint32, firstGuarantorOrAuditor bool, eventID uint64) (work_report types.WorkReport, err error) {
+	segmentRootLookup types.SegmentRootLookup, slot uint32, execContext string, eventID uint64) (work_report types.WorkReport, err error) {
 	targetStateDB, err := n.getStateDBByStateRoot(package_bundle.WorkPackage.RefineContext.StateRoot)
 	if err != nil {
 		return work_report, fmt.Errorf("executeWorkPackageBundle:getStateDBByStateRoot: %v", err)
 	}
-	workReport, err := targetStateDB.ExecuteWorkPackageBundle(workPackageCoreIndex, package_bundle, segmentRootLookup, slot, firstGuarantorOrAuditor, eventID, n.pvmBackend)
+	workReport, err := targetStateDB.ExecuteWorkPackageBundle(workPackageCoreIndex, package_bundle, segmentRootLookup, slot, execContext, eventID, n.pvmBackend)
 	return workReport, err
 }

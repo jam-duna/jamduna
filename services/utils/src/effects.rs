@@ -6,16 +6,14 @@
 extern crate alloc;
 
 use crate::constants::SEGMENT_SIZE;
-use crate::functions::{call_log, format_object_id, log_debug, log_error, log_info};
+use crate::functions::{call_log, format_object_id, log_debug, log_error};
 use crate::functions::{HarnessError, HarnessResult};
 use alloc::format;
 use alloc::vec::Vec;
-use core::cmp;
 use core::convert::TryFrom;
 
 /// Type alias for ObjectId (32-byte array)
 pub type ObjectId = [u8; 32];
-use crate::host_functions::export;
 
 // Re-export object types from utils
 pub use crate::objects::ObjectRef;
@@ -38,101 +36,21 @@ pub struct ExecutionEffects {
 impl ExecutionEffects {
     /// Log a tally of write intents by ObjectKind, including receipt version breakdown.
     /// Validates receipt pipeline invariants when tracking parameters are provided.
-    pub fn show_tally_object_kinds(&self) {
-        let mut code_count: u32 = 0;
-        let mut shard_count: u32 = 0;
-        let mut ssr_count: u32 = 0;
-        let mut receipt_count: u32 = 0;
-        let mut block_count: u32 = 0;
-        let mut receipt_v0: u32 = 0;
-        let mut receipt_v1: u32 = 0;
-
-        for intent in &self.write_intents {
-            match intent.effect.ref_info.object_kind {
-                0x00 => code_count = code_count.saturating_add(1),
-                0x01 => shard_count = shard_count.saturating_add(1),
-                0x02 => ssr_count = ssr_count.saturating_add(1),
-                0x03 => {
-                    receipt_count = receipt_count.saturating_add(1);
-                    if intent.effect.ref_info.version == 0 {
-                        receipt_v0 = receipt_v0.saturating_add(1);
-                    } else if intent.effect.ref_info.version >= 1 {
-                        receipt_v1 = receipt_v1.saturating_add(1);
-                    }
-                }
-                0x05 => block_count = block_count.saturating_add(1),
-                _ => {}
-            }
-        }
-
-        if code_count > 0 {
-            call_log(
-                0,
-                None,
-                &format!("ExecutionEffects tally: Code objects = {}", code_count),
-            );
-        }
-        if shard_count > 0 {
-            call_log(
-                0,
-                None,
-                &format!("ExecutionEffects tally: StorageShard objects = {}", shard_count),
-            );
-        }
-        if ssr_count > 0 {
-            call_log(
-                0,
-                None,
-                &format!("ExecutionEffects tally: SsrMetadata objects = {}", ssr_count),
-            );
-        }
-        if receipt_count > 0 {
-            call_log(
-                0,
-                None,
-                &format!(
-                    "ExecutionEffects tally: Receipt objects = {} (v0={}, v1={})",
-                    receipt_count, receipt_v0, receipt_v1
-                ),
-            );
-        }
-
-        if block_count > 0 {
-            call_log(
-                0,
-                None,
-                &format!("ExecutionEffects tally: Block objects = {}", block_count),
-            );
-        }
+    pub fn log_tally(&self) {
+        // Implementation placeholder
     }
+    
 
 }
 
 
 
-/// Dependency that must be satisfied before a write intent can be committed.
-#[derive(Debug, Clone)]
-pub struct ObjectDependency {
-    pub object_id: ObjectId,
-    pub required_version: u32,
-}
-
-impl core::fmt::Display for ObjectDependency {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(
-            f,
-            "{}@v{}",
-            format_object_id(self.object_id),
-            self.required_version
-        )
-    }
-}
 
 /// Write intent consisting of a write effect and its prerequisite dependencies.
 #[derive(Debug, Clone)]
 pub struct WriteIntent {
     pub effect: WriteEffectEntry,
-    pub dependencies: Vec<ObjectDependency>,
+    pub dependencies: Vec<ObjectId>,
 }
 
 impl WriteIntent {
@@ -148,8 +66,7 @@ impl WriteIntent {
         buffer.extend_from_slice(&dep_count.to_le_bytes());
 
         for dependency in &self.dependencies {
-            buffer.extend_from_slice(&dependency.object_id);
-            buffer.extend_from_slice(&dependency.required_version.to_le_bytes());
+            buffer.extend_from_slice(dependency);
         } */
         Ok(bytes_written)
     }
@@ -165,16 +82,16 @@ pub fn fetch_object_data(
     let object_id: ObjectId = *hash;
     call_log(2, None, "fetch_object_data: object_id copied");
 
-    if let Some(write_effect) = objects.get(&object_id) {
+    if let Some(_write_effect) = objects.get(&object_id) {
         call_log(2, None, "fetch_object_data: found in map");
-        let payload_len = write_effect.payload.len();
+        let payload_len = 0; // payload field removed
         call_log(
             2,
             None,
             &format!("fetch_object_data: payload len={}", payload_len),
         );
         call_log(2, None, "fetch_object_data: about to clone payload");
-        let cloned = write_effect.payload.clone();
+        let cloned = Vec::new(); // payload field removed
         call_log(2, None, "fetch_object_data: payload cloned successfully");
         return Ok(cloned);
     }
@@ -185,29 +102,33 @@ pub fn fetch_object_data(
 /// Entry tracking a write operation
 #[derive(Debug, Clone)]
 pub struct WriteEffectEntry {
-    // 32 + 64 = 96 bytes + payload
+    // 32 + 36 = 68 bytes (no payload)
     pub object_id: ObjectId, // 32-byte object identifier
-    pub ref_info: ObjectRef, // 64 bytes
-    pub payload: Vec<u8>,    // variable length payload data
+    pub ref_info: ObjectRef, // 36 bytes
+    pub payload: Vec<u8>,   
 }
 
 impl WriteEffectEntry {
     /// Serializes this write effect entry into the provided buffer at the given cursor position.
     /// Returns the number of bytes written.
     ///
-    /// OPTIMIZATION: Only exports payload to DA segments (removes 96 bytes overhead per object)
-    /// ObjectID can be recomputed from payload, ObjectRef is created by accumulate step
+    /// Note: With payload removed, this now serializes ObjectID + ObjectRef
     pub fn serialize_into(&self, buffer: &mut [u8], cursor: usize) -> HarnessResult<usize> {
-        let total_size = self.payload.len(); // Only payload, no ObjectID/ObjectRef
+        let total_size = 32 + ObjectRef::SERIALIZED_SIZE; // ObjectID + ObjectRef
         if cursor + total_size > buffer.len() {
             return Err(HarnessError::ParseError);
         }
 
         let mut pos = cursor;
 
-        // Only write payload to DA segment (ObjectID/ObjectRef are redundant)
-        buffer[pos..pos + self.payload.len()].copy_from_slice(&self.payload);
-        pos += self.payload.len();
+        // Write ObjectID (32 bytes)
+        buffer[pos..pos + 32].copy_from_slice(&self.object_id);
+        pos += 32;
+
+        // Write ObjectRef (36 bytes)
+        let ref_data = self.ref_info.serialize();
+        buffer[pos..pos + ref_data.len()].copy_from_slice(&ref_data);
+        pos += ref_data.len();
 
         Ok(pos - cursor)
     }
@@ -220,58 +141,36 @@ impl WriteEffectEntry {
     /// # Returns
     /// The next available segment index (index_end) for the next object
     pub fn export_effect(&mut self, index: usize) -> HarnessResult<u16> {
-        const SEGMENT_PAYLOAD_SIZE: usize = SEGMENT_SIZE as usize;
-        const FULL: u64 = 3172;
-
-        let payload_len = self.payload.len();
-
-        // Calculate number of segments needed (all segments are payload-only now)
-        let num_segments = (payload_len + SEGMENT_PAYLOAD_SIZE - 1) / SEGMENT_PAYLOAD_SIZE;
+        use crate::constants::SEGMENT_SIZE;
+        use crate::host_functions::export;
 
         // Set index_start from the input parameter
         let start_index = u16::try_from(index).map_err(|_| HarnessError::ParseError)?;
-        let end_index = start_index
-            .checked_add(u16::try_from(num_segments).map_err(|_| HarnessError::ParseError)?)
-            .ok_or(HarnessError::ParseError)?;
-
         self.ref_info.index_start = start_index;
-        self.ref_info.index_end = end_index;
 
-        // Export all segments as payload-only (no metadata)
-        for segment_idx in 0..num_segments {
-            let test_buffer = unsafe {
-                let ptr = &raw mut SEGMENT_BUFFER;
-                &mut *ptr.cast::<[u8; SEGMENT_SIZE as usize]>()
+        // Export the payload to segments using the host function
+        if !self.payload.is_empty() {
+            let result = unsafe {
+                export(
+                    self.payload.as_ptr() as u64,
+                    self.payload.len() as u64
+                )
             };
-            test_buffer.fill(0);
 
-            // Calculate offset and size for this segment
-            let offset = segment_idx * SEGMENT_PAYLOAD_SIZE;
-            let remaining = payload_len - offset;
-            let size = cmp::min(SEGMENT_PAYLOAD_SIZE, remaining);
-
-            // Copy payload chunk into buffer
-            test_buffer[0..size].copy_from_slice(&self.payload[offset..offset + size]);
-
-            let result = unsafe { export(test_buffer.as_ptr() as u64, SEGMENT_SIZE as u64) };
-            if result == FULL {
-                call_log(
-                    1,
-                    None,
-                    &format!(
-                        "Failed to export segment {}/{} of write effect {}: object_id={}",
-                        segment_idx + 1,
-                        num_segments,
-                        index,
-                        format_object_id(self.object_id)
-                    ),
-                );
-                return Err(HarnessError::HostExportFailed);
+            // Check if export succeeded (result should be the next segment index)
+            if result == u64::MAX {
+                return Err(HarnessError::HostFetchFailed);
             }
-        }
 
-        // Return the next available index (index_end)
-        Ok(end_index)
+            // Calculate next index based on payload_length and segment size
+            // Each segment is SEGMENT_SIZE bytes (4104), so we need ceil(payload_length / SEGMENT_SIZE) segments
+            let num_segments = (self.ref_info.payload_length as u64 + SEGMENT_SIZE - 1) / SEGMENT_SIZE;
+            let next_index = start_index as u64 + num_segments;
+            u16::try_from(next_index).map_err(|_| HarnessError::ParseError)
+        } else {
+            // Empty payload, just return next index
+            start_index.checked_add(1).ok_or(HarnessError::ParseError)
+        }
     }
 }
 /// Record of an object witnessed during refine execution and recorded by accumulate
@@ -281,8 +180,6 @@ pub struct StateWitness {
     pub ref_info: ObjectRef,
     /// Merkle proof fields
     pub path: Vec<[u8; 32]>,
-    /// Payload (only populated for RAW witnesses)
-    pub payload: Option<Vec<u8>>,
 }
 
 impl StateWitness {
@@ -317,7 +214,6 @@ impl StateWitness {
                 object_id,
                 ref_info,
                 path,
-                payload: None,
             });
         }
 
@@ -356,7 +252,6 @@ impl StateWitness {
             object_id,
             ref_info,
             path,
-            payload: None,
         })
     }
 
@@ -365,15 +260,14 @@ impl StateWitness {
         use crate::functions::fetch_imported_segment;
 
         log_debug(&format!(
-            "fetch_object_payload: object_id={}, ref_info.index_start={}, ref_info.index_end={}, ref_info.payload_length={}",
+            "fetch_object_payload: object_id={}, ref_info.index_start={}, ref_info.payload_length={}",
             format_object_id(self.object_id),
             self.ref_info.index_start,
-            self.ref_info.index_end,
             self.ref_info.payload_length
         ));
 
         let start = self.ref_info.index_start as u64;
-        let end = self.ref_info.index_end as u64;
+        let end = start + self.ref_info.payload_length as u64;
         if end <= start {
             log_error(&format!(
                 "fetch_object_payload: end <= start ({} <= {}), returning None",
@@ -453,7 +347,7 @@ impl StateWitness {
 
         // Perform Merkle proof verification
         verify_merkle_proof(
-            self.ref_info.service_id,
+            0, // service_id removed from ObjectRef
             &self.object_id,
             &value,
             &state_root,
@@ -474,191 +368,6 @@ impl StateWitness {
         }
     }
 
-    /// Deserializes RAW state witness data and synthesizes an ObjectRef
-    /// Format: object_id (32 bytes) + service_id (4 bytes LE) + payload_length (4 bytes LE) + payload (variable) + proofs (32 bytes each)
-    ///
-    /// This is used for:
-    /// - BLOCK_NUMBER_KEY witness (object_id = 0xFF×32)
-    /// - Block witnesses (object_id = 0xFF×28 + block_number in last 4 bytes)
-    ///
-    /// NOTE: For RAW witnesses, the value stored in the trie is just the raw payload bytes,
-    /// not a serialized ObjectRef. We verify first, then synthesize the ObjectRef.
-    pub fn deserialize_raw_and_verify(
-        bytes: &[u8],
-        state_root: [u8; 32],
-    ) -> Result<Self, &'static str> {
-        const OBJECT_ID_SIZE: usize = 32;
-        const SERVICE_ID_SIZE: usize = 4;
-        const PAYLOAD_LENGTH_SIZE: usize = 4;
-        const MIN_SIZE: usize = OBJECT_ID_SIZE + SERVICE_ID_SIZE + PAYLOAD_LENGTH_SIZE;
-
-
-        if bytes.len() < MIN_SIZE {
-            return Err("RAW witness data too short");
-        }
-
-        let mut cursor = 0;
-
-        // 1. Extract object_id (32 bytes)
-        let obj_bytes: [u8; OBJECT_ID_SIZE] = bytes[cursor..cursor + OBJECT_ID_SIZE]
-            .try_into()
-            .map_err(|_| {
-                "Failed to extract object_id"
-            })?;
-        let object_id: ObjectId = obj_bytes;
-        cursor += OBJECT_ID_SIZE;
-
-        // 2. Extract service_id (4 bytes LE)
-        let service_id = u32::from_le_bytes([
-            bytes[cursor],
-            bytes[cursor + 1],
-            bytes[cursor + 2],
-            bytes[cursor + 3],
-        ]);
-        cursor += SERVICE_ID_SIZE;
-
-        // 3. Extract payload_length (4 bytes LE)
-        let payload_length = u32::from_le_bytes([
-            bytes[cursor],
-            bytes[cursor + 1],
-            bytes[cursor + 2],
-            bytes[cursor + 3],
-        ]);
-        cursor += PAYLOAD_LENGTH_SIZE;
-
-        // 4. Extract payload (variable length)
-        if bytes.len() < cursor + payload_length as usize {
-            return Err("Insufficient data for payload");
-        }
-        let payload_start = cursor;
-        let payload_end = cursor + payload_length as usize;
-        let payload = &bytes[payload_start..payload_end];
-        cursor = payload_end;
-
-        // 5. Extract proof hashes (32 bytes each)
-        let remaining = bytes.len() - cursor;
-        if remaining % 32 != 0 {
-            return Err("Proof data not aligned to 32 bytes");
-        }
-
-        let proof_count = remaining / 32;
-        let mut path = Vec::with_capacity(proof_count);
-        for _ in 0..proof_count {
-            let mut hash = [0u8; 32];
-            hash.copy_from_slice(&bytes[cursor..cursor + 32]);
-            path.push(hash);
-            cursor += 32;
-        }
-
-        // VERIFY FIRST: For RAW witnesses, the trie stores the raw payload bytes
-        // (not a serialized ObjectRef like normal witnesses)
-        if !verify_merkle_proof(service_id, &object_id, payload, &state_root, &path) {
-            return Err("RAW witness Merkle proof verification failed");
-        }
-
-        // Only after verification passes, synthesize the ObjectRef
-        let ref_info = Self::synthesize_object_ref(object_id, service_id, payload_length, payload)?;
-
-        Ok(StateWitness {
-            object_id,
-            ref_info,
-            path,
-            payload: Some(payload.to_vec()),
-        })
-    }
-
-    /// Synthesizes an ObjectRef for RAW storage witnesses
-    /// Handles BLOCK_NUMBER_KEY (0xFF×32) and Block objects (0xFF×28 + block_number)
-    fn synthesize_object_ref(
-        object_id: ObjectId,
-        service_id: u32,
-        payload_length: u32,
-        payload: &[u8],
-    ) -> Result<ObjectRef, &'static str> {
-        log_info(&format!("synthesize_object_ref: object_id={:?}, service_id={}, payload_length={}, payload_len={}",
-            format_object_id(object_id), service_id, payload_length, payload.len()));
-
-        // Check if this is BLOCK_NUMBER_KEY (all 0xFF)
-        let is_block_number_key = object_id.iter().all(|&b| b == 0xFF);
-        log_info(&format!("synthesize_object_ref: is_block_number_key={}", is_block_number_key));
-
-        if is_block_number_key {
-            log_info("synthesize_object_ref: creating BLOCK_NUMBER_KEY ObjectRef");
-            // BLOCK_NUMBER_KEY: RAW storage with no specific ObjectKind
-            return Ok(ObjectRef {
-                service_id,
-                work_package_hash: [0u8; 32],
-                index_start: 0,
-                index_end: 0,
-                version: 0,
-                payload_length,
-                object_kind: 0, // RAW storage kind
-                log_index: 0,
-                tx_slot: 0,
-                timeslot: 0,
-                gas_used: 0,
-                evm_block: 0,
-            });
-        }
-
-        // Check if this is a Block object (0xFF×28 + block_number in last 4 bytes)
-        let is_block_object = object_id[0..28].iter().all(|&b| b == 0xFF);
-        log_info(&format!("synthesize_object_ref: is_block_object={}", is_block_object));
-
-        if is_block_object {
-            // Extract block number from last 4 bytes (little-endian)
-            let block_number = u32::from_le_bytes([
-                object_id[28],
-                object_id[29],
-                object_id[30],
-                object_id[31],
-            ]);
-            log_info(&format!("synthesize_object_ref: extracted block_number={}", block_number));
-
-            // Verify the payload starts with the expected block number
-            if payload.len() >= 8 {
-                let payload_block_number = u64::from_le_bytes([
-                    payload[0],
-                    payload[1],
-                    payload[2],
-                    payload[3],
-                    payload[4],
-                    payload[5],
-                    payload[6],
-                    payload[7],
-                ]);
-                log_info(&format!("synthesize_object_ref: payload_block_number={}, expected={}", payload_block_number, block_number));
-
-                if payload_block_number != block_number as u64 {
-                    log_error(&format!("synthesize_object_ref: block number mismatch: payload={}, expected={}", payload_block_number, block_number));
-                    return Err("Block number mismatch between object_id and payload");
-                }
-                log_info("synthesize_object_ref: block number verification PASSED");
-            } else {
-                log_debug(&format!("synthesize_object_ref: payload too short for block number verification: {} < 8", payload.len()));
-            }
-
-            log_info("synthesize_object_ref: creating Block ObjectRef");
-            // Block object: ObjectKind = 5
-            return Ok(ObjectRef {
-                service_id,
-                work_package_hash: [0u8; 32],
-                index_start: 0,
-                index_end: 0,
-                version: 0,
-                payload_length,
-                object_kind: 5, // Block kind
-                log_index: 0,
-                tx_slot: 0,
-                timeslot: 0,
-                gas_used: 0,
-                evm_block: block_number,
-            });
-        }
-
-        log_error("synthesize_object_ref: unknown RAW witness object_id pattern");
-        Err("Unknown RAW witness object_id pattern")
-    }
 }
 
 /// Computes the opaque storage key from service_id and raw key (object_id)

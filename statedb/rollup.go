@@ -248,7 +248,7 @@ func (c *Rollup) executeAndGuarantee(bundles []*types.WorkPackageBundle, validat
 			continue
 		}
 
-		workReport, err := statedb.ExecuteWorkPackageBundle(uint16(coreIndex), *bundle, types.SegmentRootLookup{}, 0, false, 0, c.pvmBackend)
+		workReport, err := statedb.ExecuteWorkPackageBundle(uint16(coreIndex), *bundle, types.SegmentRootLookup{}, 0, log.OtherGuarantor, 0, c.pvmBackend)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed ExecuteWorkPackageBundle: %v", err)
 		}

@@ -30,6 +30,8 @@ func (root *BT_Node) Copy() (*BT_Node, map[common.Hash]*BT_Node, map[common.Hash
 		Height:                 root.Height,
 		VotesWeight:            root.VotesWeight,
 		Cumulative_VotseWeight: root.Cumulative_VotseWeight,
+		Applied:                root.Applied,
+		Audited:                root.Audited,
 		Finalized:              root.Finalized,
 	}
 	nodeMap := make(map[common.Hash]*BT_Node)
@@ -45,6 +47,8 @@ func (root *BT_Node) Copy() (*BT_Node, map[common.Hash]*BT_Node, map[common.Hash
 				Height:                 child.Height,
 				VotesWeight:            0,
 				Cumulative_VotseWeight: 0,
+				Applied:                child.Applied,
+				Audited:                child.Audited,
 				Finalized:              child.Finalized,
 			}
 			newParent.Children = append(newParent.Children, newChild)
@@ -447,6 +451,7 @@ func (bt *BlockTree) FinalizeBlock(hash common.Hash) error {
 		return fmt.Errorf("block %s already finalized", hash.String())
 	}
 	for !node.Finalized {
+		fmt.Printf("Finalizing block %s at height %d\n", node.Block.Header.Hash().String_short(), node.Height)
 		node.Finalized = true
 		node = node.Parent
 	}

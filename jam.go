@@ -285,7 +285,7 @@ func main() {
 
 			log.EnableModule(log.PvmAuthoring)
 			log.EnableModule(log.PvmValidating)
-			log.EnableModule(log.FirstGuarantorOrAuditor)
+			log.EnableModule(log.FirstGuarantor)
 			log.EnableModule(log.OtherGuarantor)
 			log.EnableModule(log.GeneralAuthoring)
 			log.EnableModule(log.GeneralValidating)

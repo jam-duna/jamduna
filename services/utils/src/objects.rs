@@ -28,92 +28,70 @@ pub type ObjectId = [u8; 32];
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectRef {
     // Refine-time fields (deterministic at work package creation)
-    pub service_id: u32,             // Service ID (4 bytes)
     pub work_package_hash: [u8; 32], // Work package hash (32 bytes)
     pub index_start: u16,            // Starting index (2 bytes)
-    pub index_end: u16,              // Ending index (2 bytes)
-    pub version: u32,                // Version (4 bytes)
     pub payload_length: u32,         // Payload length (4 bytes)
-
-    // Accumulate-time fields (finalized ordering metadata)
-    pub object_kind: u8, // ObjectKind (1 byte)
-    pub log_index: u8,   // Reserved/padding (1 byte)
-    pub tx_slot: u16,    // Transaction slot/index (2 bytes)
-    pub timeslot: u32,   // JAM block slot; maps 1:1 to canonical block hash (4 bytes)
-    pub gas_used: u32,   // Non-zero for receipt objects (4 bytes)
-    pub evm_block: u32,  // Sequential Ethereum block number (4 bytes)
+    pub object_kind: u8,             // Object kind (1 byte)
 }
 
 impl Default for ObjectRef {
     fn default() -> Self {
         Self {
-            service_id: 0,
             work_package_hash: [0u8; 32],
             index_start: 0,
-            index_end: 0,
-            version: 0,
             payload_length: 0,
             object_kind: 0,
-            log_index: 0,
-            tx_slot: 0,
-            timeslot: 0,
-            gas_used: 0,
-            evm_block: 0,
         }
     }
 }
 
 impl ObjectRef {
-    pub const SERIALIZED_SIZE: usize = 64;
+    pub const SERIALIZED_SIZE: usize = 36;
 
-    /// Creates a new ObjectRef with refine-time fields set and accumulate-time fields zeroed
+    /// Creates a new ObjectRef with refine-time fields set
     ///
-    /// Refine-time fields (deterministic):
-    /// - service_id, work_package_hash, version, payload_length, object_kind, tx_slot
-    ///
-    /// Accumulate-time fields (set to 0, filled later by runtime):
-    /// - index_start, index_end, log_index, timeslot, gas_used, evm_block
+    /// Fields:
+    /// - work_package_hash, payload_length, object_kind (provided)
+    /// - index_start (set to 0, filled later by runtime)
     pub fn new(
-        service_id: u32,
         work_package_hash: [u8; 32],
-        version: u32,
         payload_length: u32,
         object_kind: u8,
-        tx_slot: u16,
     ) -> Self {
         Self {
-            service_id,
             work_package_hash,
             index_start: 0,
-            index_end: 0,
-            version,
             payload_length,
             object_kind,
-            log_index: 0,
-            tx_slot,
-            timeslot: 0,
-            gas_used: 0,
-            evm_block: 0,
         }
     }
 
-    /// Extracts tx_index from tx_slot field
-    pub fn tx_index(&self) -> u32 {
-        self.tx_slot as u32
+    /// Helper to calculate number of segments from payload_length
+    /// Assumes 4K bytes per segment except possibly the last one
+    fn calculate_segments_and_last_bytes(payload_length: u32) -> (u16, u16) {
+        if payload_length == 0 {
+            return (0, 0);
+        }
+        let full_segments = (payload_length - 1) / 4096;
+        let last_segment_bytes = payload_length - (full_segments * 4096);
+        let num_segments = full_segments + 1;
+        (num_segments as u16, last_segment_bytes as u16)
     }
 
-    /// Extracts ObjectKind from object_kind field
-    pub fn object_kind(&self) -> u32 {
-        self.object_kind as u32
+    /// Helper to calculate payload_length from segments and last_segment_bytes
+    fn calculate_payload_length(num_segments: u16, last_segment_bytes: u16) -> u32 {
+        if num_segments == 0 {
+            return 0;
+        }
+        if num_segments == 1 {
+            return last_segment_bytes as u32;
+        }
+        ((num_segments as u32 - 1) * 4096) + last_segment_bytes as u32
     }
 
-    /// Sets the object_kind and tx_slot fields
-    pub fn set_object_kind_and_tx_index(&mut self, object_kind: u8, tx_index: u16) {
-        self.object_kind = object_kind;
-        self.tx_slot = tx_index;
-    }
 
     /// Deserializes an ObjectRef from a byte buffer - opposite of serialize
+    /// Unpacks 3 bytes into index_start (12 bits) + num_segments (12 bits) + last_segment_bytes (12 bits)
     pub fn deserialize(data: &[u8]) -> Option<Self> {
         if data.len() != Self::SERIALIZED_SIZE {
             return None;
@@ -121,67 +99,56 @@ impl ObjectRef {
 
         let mut offset = 0;
 
-        let service_id = u32::from_le_bytes(data[offset..offset + 4].try_into().ok()?);
-        offset += 4;
-
         let mut work_package_hash = [0u8; 32];
         work_package_hash.copy_from_slice(&data[offset..offset + 32]);
         offset += 32;
 
-        let index_start = u16::from_le_bytes(data[offset..offset + 2].try_into().ok()?);
-        offset += 2;
-        let index_end = u16::from_le_bytes(data[offset..offset + 2].try_into().ok()?);
-        offset += 2;
-        let version = u32::from_le_bytes(data[offset..offset + 4].try_into().ok()?);
-        offset += 4;
-        let payload_length = u32::from_le_bytes(data[offset..offset + 4].try_into().ok()?);
-        offset += 4;
+        // Unpack 3 bytes into 3 x 12-bit values
+        let packed = ((data[offset] as u32) << 16) |
+                    ((data[offset + 1] as u32) << 8) |
+                    (data[offset + 2] as u32);
+        offset += 3;
 
-        // New field order: object_kind, log_index, tx_slot, timeslot, gas_used, evm_block
+        let index_start = ((packed >> 20) & 0xFFF) as u16;
+        let num_segments = ((packed >> 8) & 0xFFF) as u16;
+        let last_segment_bytes = (packed & 0xFFF) as u16;
+
+        // Calculate payload_length from segments
+        let payload_length = Self::calculate_payload_length(num_segments, last_segment_bytes);
+
+        // Read object_kind from the last byte
         let object_kind = data[offset];
-        offset += 1;
-        let log_index = data[offset];
-        offset += 1;
-        let tx_slot = u16::from_le_bytes(data[offset..offset + 2].try_into().ok()?);
-        offset += 2;
-        let timeslot = u32::from_le_bytes(data[offset..offset + 4].try_into().ok()?);
-        offset += 4;
-        let gas_used = u32::from_le_bytes(data[offset..offset + 4].try_into().ok()?);
-        offset += 4;
-        let evm_block = u32::from_le_bytes(data[offset..offset + 4].try_into().ok()?);
 
         Some(Self {
-            service_id,
             work_package_hash,
             index_start,
-            index_end,
-            version,
             payload_length,
             object_kind,
-            log_index,
-            tx_slot,
-            timeslot,
-            gas_used,
-            evm_block,
         })
     }
 
     /// Serializes the ObjectRef to a byte vector
+    /// Packs index_start (12 bits) + num_segments (12 bits) + last_segment_bytes (12 bits) into 3 bytes
     pub fn serialize(&self) -> Vec<u8> {
         let mut buffer = Vec::with_capacity(Self::SERIALIZED_SIZE);
-        buffer.extend_from_slice(&self.service_id.to_le_bytes()); // 4 bytes
         buffer.extend_from_slice(&self.work_package_hash); // 32 bytes
-        buffer.extend_from_slice(&self.index_start.to_le_bytes()); // 2 bytes
-        buffer.extend_from_slice(&self.index_end.to_le_bytes()); // 2 bytes
-        buffer.extend_from_slice(&self.version.to_le_bytes()); // 4 bytes
-        buffer.extend_from_slice(&self.payload_length.to_le_bytes()); // 4 bytes
-                                                                      // New field order: object_kind, log_index, tx_slot, timeslot, gas_used, evm_block
+
+        // Calculate segments from payload_length
+        let (num_segments, last_segment_bytes) = Self::calculate_segments_and_last_bytes(self.payload_length);
+
+        // Pack 3 x 12-bit values into 3 bytes (36 bits total, 4 bits unused)
+        let packed = ((self.index_start as u32 & 0xFFF) << 20) |
+                    ((num_segments as u32 & 0xFFF) << 8) |
+                    (last_segment_bytes as u32 & 0xFFF);
+
+        // Store as 3 bytes (24 bits, dropping the top 8 bits which are zero)
+        buffer.push((packed >> 16) as u8);
+        buffer.push((packed >> 8) as u8);
+        buffer.push(packed as u8);
+
+        // Add object_kind as the last byte
         buffer.push(self.object_kind); // 1 byte
-        buffer.push(self.log_index); // 1 byte
-        buffer.extend_from_slice(&self.tx_slot.to_le_bytes()); // 2 bytes
-        buffer.extend_from_slice(&self.timeslot.to_le_bytes()); // 4 bytes
-        buffer.extend_from_slice(&self.gas_used.to_le_bytes()); // 4 bytes
-        buffer.extend_from_slice(&self.evm_block.to_le_bytes()); // 4 bytes
+
         buffer
     }
 
@@ -193,30 +160,24 @@ impl ObjectRef {
         }
 
         let mut offset = pos;
-        buffer[offset..offset + 4].copy_from_slice(&self.service_id.to_le_bytes());
-        offset += 4;
         buffer[offset..offset + 32].copy_from_slice(&self.work_package_hash);
         offset += 32;
-        buffer[offset..offset + 2].copy_from_slice(&self.index_start.to_le_bytes());
-        offset += 2;
-        buffer[offset..offset + 2].copy_from_slice(&self.index_end.to_le_bytes());
-        offset += 2;
-        buffer[offset..offset + 4].copy_from_slice(&self.version.to_le_bytes());
-        offset += 4;
-        buffer[offset..offset + 4].copy_from_slice(&self.payload_length.to_le_bytes());
-        offset += 4;
-        // New field order: object_kind, log_index, tx_slot, timeslot, gas_used, evm_block
+
+        // Calculate segments from payload_length
+        let (num_segments, last_segment_bytes) = Self::calculate_segments_and_last_bytes(self.payload_length);
+
+        // Pack 3 x 12-bit values into 3 bytes
+        let packed = ((self.index_start as u32 & 0xFFF) << 20) |
+                    ((num_segments as u32 & 0xFFF) << 8) |
+                    (last_segment_bytes as u32 & 0xFFF);
+
+        buffer[offset] = (packed >> 16) as u8;
+        buffer[offset + 1] = (packed >> 8) as u8;
+        buffer[offset + 2] = packed as u8;
+        offset += 3;
+
+        // Add object_kind as the last byte
         buffer[offset] = self.object_kind;
-        offset += 1;
-        buffer[offset] = self.log_index;
-        offset += 1;
-        buffer[offset..offset + 2].copy_from_slice(&self.tx_slot.to_le_bytes());
-        offset += 2;
-        buffer[offset..offset + 4].copy_from_slice(&self.timeslot.to_le_bytes());
-        offset += 4;
-        buffer[offset..offset + 4].copy_from_slice(&self.gas_used.to_le_bytes());
-        offset += 4;
-        buffer[offset..offset + 4].copy_from_slice(&self.evm_block.to_le_bytes());
 
         Ok(Self::SERIALIZED_SIZE)
     }
@@ -316,8 +277,8 @@ impl ObjectRef {
                 &result_buffer[Self::SERIALIZED_SIZE..Self::SERIALIZED_SIZE + payload_len],
             );
 
-            call_log(2, None, &format!("ObjectRef::fetch: object_id={}, service_id={}, max_payload={}, buffer={}, result_len={}, version={}, index={}..{}, payload_length={}, actual_payload={}",
-                format_object_id(*object_id), service_id, max_payload_size, total_size, result_len, object_ref.version, object_ref.index_start, object_ref.index_end, object_ref.payload_length, payload_len));
+            call_log(2, None, &format!("ObjectRef::fetch: object_id={}, service_id={}, max_payload={}, buffer={}, result_len={}, index={}, payload_length={}, actual_payload={}",
+                format_object_id(*object_id), service_id, max_payload_size, total_size, result_len, object_ref.index_start, object_ref.payload_length, payload_len));
             if payload_len != object_ref.payload_length as usize {
                 call_log(1, None, &format!("  WARNING: Payload length mismatch! Got {} bytes but ObjectRef.payload_length indicates {} bytes",
                     payload_len, object_ref.payload_length));
@@ -424,43 +385,28 @@ impl StateWitness {
     }
 
     /// Creates a write effect from this state witness and a set of imported segments.
-    /// Uses the first segment (at index_start) to extract the initial payload chunk after
-    /// metadata. Appends payload from subsequent segments up to but not including index_end.
-    /// Validates that the final payload length equals the payload_length declared in the
+    /// Uses the segment at index_start to extract the payload after metadata.
+    /// Validates that the payload length equals the payload_length declared in the
     /// witness' ObjectRef.
     pub fn create_write_effect(&self, work_item_index: u16) -> Option<WriteEffectEntry> {
         let start = self.ref_info.index_start as u64;
-        let end = self.ref_info.index_end as u64;
-        if end <= start {
+
+        // Fetch segment bytes (expected to contain [ObjectId || ObjectRef || payload])
+        let bytes = fetch_imported_segment(work_item_index, start as u32).ok()?;
+        if bytes.is_empty() {
             return None;
         }
 
-        // Fetch first segment bytes (expected to contain [ObjectId || ObjectRef || payload_part0])
-        let first_bytes = fetch_imported_segment(work_item_index, start as u32).ok()?;
-        if first_bytes.is_empty() {
-            return None;
-        }
-
-        // Skip metadata: object_id (32 bytes) + ObjectRef (68 bytes) = 100 bytes
-        let metadata_size = 32 + 64;
-        if first_bytes.len() < metadata_size {
+        // Skip metadata: object_id (32 bytes) + ObjectRef (35 bytes) = 67 bytes
+        let metadata_size = 32 + ObjectRef::SERIALIZED_SIZE;
+        if bytes.len() < metadata_size {
             return None;
         }
         let offset = metadata_size;
 
-        // Begin assembling full payload: remainder of first segment after metadata
+        // Extract payload from the remainder of the segment
         let mut payload = Vec::with_capacity(self.ref_info.payload_length as usize);
-        payload.extend_from_slice(&first_bytes[offset..]);
-
-        // Append payload from subsequent segments [start+1, end)
-        for seg_idx in (start + 1)..end {
-            let bytes = fetch_imported_segment(work_item_index, seg_idx as u32).ok()?;
-            if bytes.is_empty() {
-                return None;
-            }
-            // Subsequent segments are payload-only
-            payload.extend_from_slice(&bytes);
-        }
+        payload.extend_from_slice(&bytes[offset..]);
 
         // Validate total length matches declared payload_length in the witness' ObjectRef
         let expected_len = self.ref_info.payload_length as usize;
@@ -497,11 +443,7 @@ impl StateWitness {
                 format_object_id(self.object_id)
             ),
         );
-        call_log(
-            3,
-            None,
-            &format!("  Service ID: {}", self.ref_info.service_id),
-        );
+        // Service ID removed from ObjectRef
         call_log(
             3,
             None,
@@ -516,9 +458,9 @@ impl StateWitness {
         // Serialize ObjectRef as the value for verification
         let value = self.ref_info.serialize();
 
-        // Verify using JAM Merkle proof verification
+        // Verify using JAM Merkle proof verification (service_id=0 since removed)
         let verified = verify_merkle_proof(
-            self.ref_info.service_id,
+            0, // service_id removed from ObjectRef
             &self.object_id,
             &value,
             &state_root,
@@ -543,11 +485,7 @@ impl StateWitness {
                     format_object_id(self.object_id)
                 ),
             );
-            call_log(
-                1,
-                None,
-                &format!("  Service ID: {}", self.ref_info.service_id),
-            );
+            // Service ID removed from ObjectRef
             call_log(
                 1,
                 None,
