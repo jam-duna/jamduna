@@ -27,39 +27,33 @@ The DA storage system combines:
 - a **global-depth–based rent** system billed weekly and stored in **SSR header lease metadata**.
 
 The key idea is that:
-* JAM State holds a map from ObjectID to JAM DA via ObjectRefs, where the ObjectRefs are versioned.
-* JAM DA holds data for the latest versions for every ObjectID.
+* **JAM State only stores routing metadata**: meta-shard ObjectRefs and the bidirectional block mappings written by accumulate.【F:services/evm/src/accumulator.rs†L81-L149】
+* **JAM DA stores all payloads** (code, storage shards, receipts, blocks) addressed by deterministic ObjectIDs; these payloads are retrieved directly without State-held ObjectRefs for non–meta-shard objects.
 
-When you want your contract code or storage, you look in JAM State for the ObjectID => ObjectRef, which is provable against some state root.  Then using that ObjectRef, you find the payload in JAM DA.  
+Refine verifies state witnesses when importing objects, but the compact refine output now serializes only meta-shard updates. Accumulate consumes that compact stream to refresh the meta-shard routing and block mappings; it no longer writes non–meta-shard ObjectRefs to JAM State. The deterministically derived ObjectIDs keep the remaining artifacts discoverable in DA.【F:services/evm/src/writes.rs†L1-L69】【F:services/evm/src/accumulator.rs†L81-L149】
 
-Every Refine exports objects and *potential* ObjectID-ObjectRef writes for Accumulate to write in JAM State.  
+## Recent Updates (November 2025)
 
-Every Accumulate resolves conflicts between multiple refines and writes out the ObjectID-ObjectRef.
-
-When Refine imports state (previous contract storage + code), it takes state witnesses  (proofs of inclusion against an state root) when importing objects. Because Refine verifies these state witnesses, all the data can be trusted and you don't have to trust the builder/guarantor/auditor/validators.  This process is what makes the EVM service secure. 
-
-Summary:  **JAM State** maps `object_id → ObjectRef`. **JAM DA** stores object payload (segments).
+**ObjectRef Optimization (64 → 37 bytes)**:
+- Refine-time fields only: `work_package_hash`, `index_start`, `payload_length`, `object_kind` (no timeslot or version fields).
+- **JAM State format**: ObjectRef (37B) + timeslot (4B LE) + blocknumber (4B LE) = **45 bytes total**.
+- Packing: index_start (12 bits) | num_segments (12 bits) | last_segment_bytes (12 bits) | object_kind (4 bits).
+- **Result**: 42% size reduction, enabling up to 58 entries per meta-shard given the 69-byte entry size and 4104-byte segment cap.【F:services/utils/src/objects.rs†L13-L63】【F:services/evm/src/meta_sharding.rs†L133-L171】
 
 ```rust
 pub struct ObjectRef {
-    pub service_id: u32,
-    pub work_package_hash: [u8; 32],
-    pub index_start: u16,
-    pub index_end: u16,
-    pub version: u32,
-    pub payload_length: u32,
-    pub timeslot: Timeslot,
+    pub work_package_hash: [u8; 32],  // 32 bytes
+    pub index_start: u16,              // 12 bits packed
+    pub payload_length: u32,           // Calculated from num_segments + last_segment_bytes
+    pub object_kind: u8,               // 4 bits packed
 }
+// Total: 37 bytes (32B wph + 5B packed)
+// 5-byte packing format: index_start (12) | num_segments (12) | last_segment_bytes (12) | object_kind (4) bits
+// JAM State storage: 37 + 4 (timeslot) + 4 (blocknumber) = 45 bytes
 ```
 
-- **Refine:**
-  - `Import(ObjectRef) -> Vec<Vec<u8>>`: Fetches segments from DA
-  - `Export(Vec<Vec<u8>>) -> ObjectCandidateWrite`: Creates write intent for accumulate
-  - Verifies state witnesses against RefineContext.state_root
-- **Accumulate:**
-  - `Read(object_id) -> Option<ObjectRef>`: Looks up current version in JAM State
-  - `Write(object_id, ObjectRef)`: Writes new version (with conflict resolution)
-
+- **Refine:** Imports object payloads using `ObjectRef`, then emits write intents. Serialization now strips everything except meta-shard ObjectRefs in compact form (`ld || prefix || packed_ref`).
+- **Accumulate:** Consumes the compact meta-shard stream to update JAM State; non–meta-shard writes are reconstructed from DA payloads and accumulator logic.
 
 The scalability of JAM+EVM rests on JAM State being an index of what is held in JAM DA.  The trustlessness of JAM+EVM rests on each service verifying the imports against the Refine Context state root.
 
@@ -69,52 +63,67 @@ Each contract (20 byte addresses) has DA objects referenced by 32-byte `ObjectId
 
 ```rust
 pub enum ObjectKind {
-    /// Code object - bytecode storage (kind=0x00)
-    Code = 0x00,
-    /// Storage shard object (kind=0x01)
-    StorageShard = 0x01,
-    /// SSR metadata object (kind=0x02)
-    SsrMetadata = 0x02,
+    /// SSR metadata object (kind=0x01) - routing metadata for contract storage shards
+    SsrMetadata = 0x01,
+    /// Code object - bytecode storage (kind=0x02)
+    Code = 0x02,
     /// Receipt object (kind=0x03) - contains full transaction data
     Receipt = 0x03,
     /// Meta-shard object (kind=0x04) - ObjectID→ObjectRef mappings (see SHARDING.md)
     MetaShard = 0x04,
     /// Block object (kind=0x05) - EVM block payload with tx/receipt hashes
     Block = 0x05,
-    /// Block metadata object (kind=0x06) - transactions_root, receipts_root, mmr_root
-    BlockMetadata = 0x06,
-    /// Meta-SSR metadata object (kind=0x07) - routing metadata for meta-shards (see SHARDING.md)
-    MetaSsrMetadata = 0x07,
-}
-pub fn code_object_id(contract: Bytes20) -> ObjectId;
-pub fn ssr_object_id(contract: Bytes20) -> ObjectId;
-pub fn shard_object_id(contract: Bytes20, shard: ShardId) -> ObjectId;
-
-// Block-related object IDs
-pub fn block_number_to_object_id(block_number: u32) -> ObjectId {
-    // Pattern: 0xFF repeated 28 times + block_number (4 bytes LE)
-    let mut id = [0xFF; 32];
-    id[28..32].copy_from_slice(&block_number.to_le_bytes());
-    id
 }
 
-pub fn block_metadata_object_id(block: &EvmBlockPayload) -> ObjectId {
-    // blake2b hash of block header (first HEADER_SIZE=432 bytes)
-    blake2b_hash(&block.serialize_header()[0..HEADER_SIZE])
+pub fn ssr_object_id(contract: Bytes20) -> ObjectId {
+    // [20B contract address][11B zero padding][kind=0x01]
 }
+
+pub fn code_object_id(contract: Bytes20) -> ObjectId {
+    // [20B contract address][11B zero padding][kind=0x02]
+}
+
+pub fn tx_to_object_id(tx_hash: [u8; 32]) -> ObjectId {
+    // Raw transaction hash (ObjectKind in witness metadata)
+    tx_hash
+}
+
+pub fn shard_object_id(contract: Bytes20, shard: ShardId) -> ObjectId {
+    // [20B contract address][3B shard prefix][8B zero][kind=0x01]
+}
+
+pub fn meta_shard_object_id(service_id: u32, ld: u8, prefix56: &[u8; 7]) -> ObjectId {
+    // Meta-shard ObjectID format (service-level, not contract-level):
+    // [1B ld][0-7B prefix_bytes][padding zeros]
+    // where prefix_bytes = (ld + 7) / 8
+    //
+    // Examples:
+    // - ld=0: [0x00][31 zeros] (root shard)
+    // - ld=7: [0x07][1B prefix][30 zeros]
+    // - ld=8: [0x08][2B prefix][29 zeros]
+    // - ld=56: [0x38][7B prefix][24 zeros]
+    //
+    // NOTE: No service_id, contract address, or ObjectKind byte in the key!
+    // The ObjectKind (0x04) is stored in the ObjectRef metadata, not the ObjectID.
+}
+
+pub fn block_object_id(block_hash: [u8; 32]) -> ObjectId {
+    // Raw block hash (ObjectKind=0x05 stored in ObjectRef metadata)
+    block_hash
+}
+
+// Bidirectional block mappings (stored in JAM State, not DA):
+// blocknumber → (work_package_hash [32B] + timeslot [4B]) = 36 bytes
+// work_package_hash → (blocknumber [4B] + timeslot [4B]) = 8 bytes
 ```
-
-**Block Witness Pattern**: Block payloads use the `0xFF...FF[block_number]` pattern, which allows automatic detection during refine. When a witness with this pattern is encountered in `PayloadType::Transactions`, the refine process automatically computes block metadata (transactions_root, receipts_root, mmr_root) and exports it as a separate object.
 
 **ObjectKind Usage**:
 - **Code (0x00)**: Bytecode for smart contracts
 - **StorageShard (0x01)**: Sharded storage entries for contracts (including 0x01 precompile for balances/nonces)
 - **SsrMetadata (0x02)**: Sparse Split Registry for contract storage routing
-- **Receipt (0x03)**: Transaction receipts with logs
+- **Receipt (0x03)**: Transaction receipts with logs (ObjectID = tx_hash)
 - **MetaShard (0x04)**: Meta-shard segments (ObjectID→ObjectRef mappings) - see [SHARDING.md](SHARDING.md)
-- **Block (0x05)**: Complete EVM blocks with tx/receipt hashes (accumulated)
-- **BlockMetadata (0x06)**: Block metadata roots (computed in refine from block witnesses)
-- **MetaSsrMetadata (0x07)**: Meta-SSR routing metadata - see [SHARDING.md](SHARDING.md)
+- **Block (0x05)**: Complete EVM blocks with tx/receipt hashes (ObjectID = block_hash)
 
 Every contract has a fixed object id for its code and storage (SSR). The SSR contains an index of shardIDs.
 
@@ -140,14 +149,28 @@ impl SSREntry for EvmEntry {
     // ...
 }
 
+// Meta-sharding implements SSREntry with 69-byte ObjectRefEntry
+impl SSREntry for ObjectRefEntry {
+    fn key_hash(&self) -> [u8; 32] { self.object_id }
+    fn serialized_size() -> usize { 69 }  // 32-byte ObjectID + 37-byte ObjectRef
+    // ...
+}
+
 pub type ContractSSR = SSRData<EvmEntry>;
 pub type ContractShard = ShardData<EvmEntry>;
+pub type MetaSSR = SSRData<ObjectRefEntry>;
+pub type MetaShard = ShardData<ObjectRefEntry>;
 ```
 
 **Key benefits:**
-- Same splitting logic works for contract storage (64-byte entries) and meta-sharding (96-byte entries)
+- Same splitting logic works for contract storage (64-byte entries) and meta-sharding (69-byte entries)
 - Type-safe parameterization ensures consistency
-- Easy to add new shard types (e.g., account sharding, nonce sharding)
+- ObjectRef optimization (37B) enables 58 entries per meta-shard (up from 41 with old 64B ObjectRef)
+
+**ObjectID derivation (Rust + Go match):**
+- **Meta-shard objects**: `object_id = ld || prefix_bytes` where `prefix_bytes = ceil(ld/8)`; the prefix is embedded directly (no hashing) so Rust and Go derive the same key from the shard depth and prefix bits.【F:services/evm/src/meta_sharding.rs†L540-L566】【F:statedb/metashard_lookup.go†L1-L38】
+- **Meta-SSR object**: `keccak256(service_id || "meta_ssr")`
+- These strings and layouts are mirrored in `services/evm/src/meta_sharding.rs` and `statedb/metashard_lookup.go` to keep routing deterministic across runtimes.
 
 For the meta-sharding use case (ObjectID→ObjectRef mappings), see [SHARDING.md](SHARDING.md).
 
@@ -182,17 +205,23 @@ Balance and nonce for **all** accounts are stored as regular storage entries in 
 
 ### DA Segment Format
 
-Each object stored in JAM DA consists of one or more **4104-byte segments** (`SegmentSize = 4104`).
+Each object stored in JAM DA consists of one or more **4104-byte segments** (`SEGMENT_SIZE = 4104`).
 
-**Important**: The first segment of every object includes a 96-byte metadata header:
-```
-[ObjectID(32) || ObjectRef(64) || payload_part0]
-```
+**Segment Format** (Current Implementation):
+- **First segment**: Raw payload data (4104 bytes, no metadata header)
+- **Subsequent segments**: Raw payload data (4104 bytes each)
+- **ObjectRef metadata**: Stored separately in JAM State (45 bytes: 37B ObjectRef + 4B timeslot + 4B blocknumber)
 
-- Segments 1..N contain the remaining payload data without headers
-- Shard data structures (SSRData, ShardData) are serialized into the payload portion
-- Total payload available in first segment: 4104 - 96 = 4008 bytes
-- Subsequent segments: 4104 bytes each
+**Legacy Format** (Referenced in older docs):
+- First segment had 96-byte header: `[ObjectID(32) || ObjectRef(64) || payload_part0]`
+- Total payload in first segment: 4104 - 96 = 4008 bytes
+- **Current implementation uses raw segments without embedded metadata**
+
+**Capacity Calculations** (Current):
+- **Storage shards**: (4104 - 2) / 64 = 64.09 → **62 entries max in first segment**
+- **Practical capacity**: **63 entries** when using multiple segments
+- **Split threshold**: 34 entries (54% full, provides growth headroom)
+- **Meta-shards**: (4104 - 2) / 69 = 59.47 → **58 entries** (with 69-byte ObjectRefEntry; capped by runtime)
 
 
 Storage Entries (inside a shard) are like this:
@@ -219,8 +248,9 @@ When serialized into a DA segment payload:
 [entry_count(2 bytes LE) || EvmEntry₁(64) || EvmEntry₂(64) || ... || EvmEntryₙ(64)]
 ```
 
-- **First segment capacity:** `(4008 − 2) / 64 = 62` entries (accounting for 96-byte metadata header)
-- **Practical capacity:** 63 entries max when considering multi-segment shards
+- **First segment capacity:** `(4104 − 2) / 64 = 64.09` → **62 entries** (2-byte count + 62×64 = 3970 bytes)
+- **Practical capacity:** **63 entries** when using multiple segments
+- **Split threshold:** 34 entries (provides growth headroom before reaching capacity)
 - Entries are **sorted by `key_h`** for binary search
 - Count field (u16 LE) enables quick validation and iteration
 
@@ -316,12 +346,12 @@ struct SSRHeader {
 }
 ```
 
-**Note:** Current implementation uses a minimal 28-byte header. The full DA spec (64 bytes) adds:
+**Note:** Current implementation uses a minimal header (8-12 bytes). The full rent-enabled spec would add:
 - `last_rent_paid_epoch: u64` — epoch of last rent collection
 - `rent_balance: u64` — optional prepaid credits (tokens)
-- `reserved: [u8; 24]` — future use
+- Additional fields for rent accounting
 
-Header is kept in a single SSR segment together with the SSR entries list (first segment includes 96-byte DA metadata).
+Header is kept in a single SSR segment together with the SSR entries list.
 
 Compact SSR Entry (9 bytes as implemented)
 
@@ -341,9 +371,8 @@ struct SSREntry {
 | 0x02 |  7   | `prefix56` — first `d` bits (zeros beyond `d`)   |
 
 - **Sorted by** `(d, prefix56)` (memcmp).
-- **Capacity (with minimal header):** `(4008 − 28) / 9 = 442` entries (28 B header + 442 × 9 B = 4006 B, fits in first segment after metadata).
-
-> The SSR object uses the standard segment format with 96-byte metadata in the first segment. Remaining payload space (4008 bytes) holds the header and entries.
+- **Capacity (with minimal 12B header):** `(4104 − 12) / 9 = 454` entries (12 B header + 454 × 9 B = 4098 B, fits in first segment).
+- **Practical capacity:** Typically < 100 SSR entries per contract (most contracts don't need deep sharding)
 
 An entry `{ d, ld, prefix56 }` means: **“All keys whose first `d` bits equal `prefix56` are governed at depth `ld`.”** No child IDs are stored; children arise implicitly from `ld` and `H` during lookup.
 
@@ -1854,11 +1883,16 @@ H = keccak256(abi.encode(slot_7, slot)) = 0xE4... (binary: 11100100...)
 **Step 3: Load shard (if not cached)**
 ```
 ObjectId = shard_object_id(0x1234...ABCD, ShardId{ld=5, prefix=11100})
-ObjectRef = jamState.Read(ObjectId)
-Segments = jamDA.ImportSegments(ObjectRef.work_package_hash, ObjectRef.index_start..=index_end)
-// First segment: [ObjectID(32) || ObjectRef(64) || payload_part0]
-// Skip 96-byte metadata, then deserialize payload across all segments
-Entries = deserializeShardFromSegments(Segments)  // Handles metadata skip
+// Read ObjectRef (37B) + timeslot (4B) + blocknumber (4B) = 45 bytes from JAM State
+StateEntry = jamState.Read(ObjectId)  // 45 bytes
+ObjectRef = deserialize_object_ref(StateEntry[0..37])
+Timeslot = u32::from_le_bytes(StateEntry[37..41])
+BlockNumber = u32::from_le_bytes(StateEntry[41..45])
+
+// Fetch raw segments from DA (no embedded metadata in current implementation)
+Segments = jamDA.ImportSegments(ObjectRef.work_package_hash, ObjectRef.index_start, ObjectRef.payload_length)
+// Segments are raw payload data (4104 bytes each)
+Entries = deserializeShardFromSegments(Segments)  // Parse [2B count][entries...]
 ```
 
 **Step 4: Update in-memory**

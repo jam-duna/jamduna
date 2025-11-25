@@ -2,6 +2,35 @@
 
 This document describes the complete block construction, transaction execution, and receipt handling in the JAM EVM service, including payload formats, execution flow, and code organization.
 
+## Recent Updates (November 2025)
+
+### Key Architectural Changes
+
+1. **ObjectRef Optimization** (64 → 37 bytes):
+   - Simplified to refine-time fields only: `work_package_hash` (32B), `index_start` (12 bits), `payload_length` (calculated from segments), `object_kind` (4 bits)
+   - Serialized: 32B wph + 5B packed (index_start|num_segments|last_segment_bytes|object_kind packed as 12|12|12|4 bits)
+   - Accumulate-time metadata (timeslot, blocknumber) stored separately in JAM State (45 bytes total: 37B ObjectRef + 8B metadata)
+   - 42% size reduction improves meta-shard capacity from 41 to 58 entries per shard
+
+2. **Bidirectional Block Mappings**:
+   - One block per envelope (1:1 mapping)
+   - blocknumber → (work_package_hash, timeslot) mapping (36 bytes) written during accumulate
+   - work_package_hash → (blocknumber, timeslot) mapping (8 bytes) written during accumulate
+   - Enables efficient O(1) lookups in both directions and powers pruning of old mappings when the retention window is exceeded
+
+3. **Receipt Metadata Clarification**:
+   - Receipts track transaction hash, success flag, gas usage, cumulative gas, log index start, transaction index, logs, and the original RLP payload.
+   - No additional refine-context metadata (e.g., work package hash or timestamp) is stored in the receipt struct; lookup is performed via the transaction hash ObjectID.
+
+4. **Compact ExecutionEffects Serialization**:
+   - `serialize_execution_effects()` now emits only meta-shard ObjectRefs using the compact format `ld || prefix_bytes || packed ObjectRef`
+   - Non–meta-shard write intents (receipts, code, storage, blocks) are exported directly as DA objects rather than serialized in the compact stream
+
+5. **Compact Refine Output**:
+   - Refine now emits a compact meta-shard stream: `N × (ld | prefix_bytes | 5B ObjectRef)`
+   - Intermediate `ObjectCandidateWrite` structs have been removed
+   - Accumulate consumes the compact stream to write MetaSSR hints, meta-shard ObjectRefs, block mappings, and leaves block payloads in DA referenced by those ObjectRefs
+
 ---
 
 ## 📋 Code Organization
@@ -37,7 +66,7 @@ The EVM service is organized into modules that handle different phases of block 
 - **`PayloadType` enum** - Type-safe payload discriminator:
   - `Builder` (0x00) - Builder-submitted transactions
   - `Transactions` (0x01) - Normal transactions
-  - `Blocks` (0x02) - Bootstrap execution with RAW witnesses
+  - `Genesis` (0x02) - Genesis bootstrap with K extrinsics
   - `Call` (0x03) - Read-only call
 
 - **`PayloadMetadata` struct** - Parsed payload information:
@@ -91,12 +120,14 @@ The EVM service is organized into modules that handle different phases of block 
 
 ```rust
 pub struct TransactionReceiptRecord {
-    pub tx_index: usize,           // Transaction index in block
-    pub hash: [u8; 32],           // Transaction hash (keccak256 of RLP tx)
-    pub success: bool,            // true = success, false = revert
-    pub used_gas: U256,           // JAM gas consumed
-    pub logs: Vec<Log>,           // EVM event logs
-    pub payload: Vec<u8>,         // Full RLP-encoded signed transaction
+    pub hash: [u8; 32],          // Transaction hash (keccak256 of RLP tx)
+    pub success: bool,           // true = success, false = revert
+    pub used_gas: U256,          // JAM gas consumed
+    pub cumulative_gas: u32,     // Cumulative gas at this index
+    pub log_index_start: u32,    // First log index for this tx
+    pub tx_index: u32,           // Transaction index in block
+    pub logs: Vec<Log>,          // EVM event logs
+    pub payload: Vec<u8>,        // Full RLP-encoded signed transaction
 }
 ```
 
@@ -111,13 +142,11 @@ pub struct TransactionReceiptRecord {
   - EIP-2159 standard (2048 bits, 3-hash algorithm)
   - Includes log addresses and topics
 
-- `TransactionReceiptRecord::from_candidate()` - Receipt deserialization from ObjectCandidateWrite
-  - Extracts tx_hash from `candidate.object_id`
-  - Extracts tx_index from `candidate.object_ref.tx_slot`
-  - Extracts success flag from `candidate.object_ref.tx_slot_2`
-  - Extracts gas_used from `candidate.object_ref.gas_used`
-  - Deserializes logs from `candidate.payload`
-  - Used by accumulate phase to reconstruct receipt data
+- `TransactionReceiptRecord::from_write_intent()` - Receipt deserialization from write intents
+  - Extracts tx_hash and tx_index from the receipt object ID
+  - Extracts success flag and gas_used from serialized header fields
+  - Deserializes logs from the receipt payload recorded by refine
+  - Used by accumulate to rebuild receipts without `ObjectCandidateWrite`
 
 ### block.rs - Block Payload Structure
 
@@ -127,35 +156,29 @@ pub struct TransactionReceiptRecord {
 
 ```rust
 pub struct EvmBlockPayload {
-    // 476-byte fixed header (hashed for block ID)
-    pub number: u64,                    // Block number
-    pub parent_hash: [u8; 32],         // Previous block hash
-    pub logs_bloom: [u8; 256],         // Aggregated bloom filter
-    pub transactions_root: [u8; 32],   // BMT root of tx hashes
-    pub state_root: [u8; 32],          // JAM state root
-    pub receipts_root: [u8; 32],       // BMT root of canonical receipts
-    pub miner: [u8; 20],               // Builder address
-    pub extra_data: [u8; 32],          // JAM entropy
-    pub size: u64,                      // Block size
-    pub gas_limit: u64,                 // Gas limit
-    pub gas_used: u64,                  // Gas used
-    pub timestamp: u64,                 // JAM timeslot
+    // 116-byte fixed header 
+    pub payload_length: u32,
+    pub num_transactions: u32,
+    pub timestamp: u32,
+    pub gas_used: u64,
+    pub state_root: [u8; 32],
+    pub transactions_root: [u8; 32],
+    pub receipt_root: [u8; 32],
 
-    // Variable data (not hashed)
-    pub tx_hashes: Vec<ObjectId>,       // Transaction hashes (32 bytes each)
-    pub receipt_hashes: Vec<ObjectId>,  // Receipt hashes (32 bytes each)
+    pub tx_hashes: Vec<ObjectId>,
+    pub receipt_hashes: Vec<ObjectId>,
 }
 ```
 
+
+
 **Key Methods**:
 
-- `serialize_header()` - Serializes 476-byte fixed header
-  - Used for computing block hash: `Blake2b-256(header)`
-  - All fields in little-endian format
-  - Returns `[u8; 476]` array
+- `serialize_header()` now emits a **116-byte** header (no separate receipt count field); transaction and receipt counts are inferred from the appended hash arrays.【F:services/evm/src/block.rs†L13-L78】【F:services/evm/src/block.rs†L100-L145】
+  - All numeric fields in little-endian format
 
 - `serialize()` - Full block payload serialization
-  - Serializes 476-byte header
+  - Serializes the 116-byte header
   - Appends transaction hash count (u32 LE) + hashes
   - Appends receipt hash count (u32 LE) + hashes
   - Returns `Vec<u8>` for DA export
@@ -170,39 +193,44 @@ pub struct EvmBlockPayload {
 - Used as ObjectId key for block number lookups
 - Function: `block_number_to_object_id()`
 
-### accumulator.rs - Meta-Sharding Infrastructure Storage
+**Go/Rust interoperability**:
+  - Both Rust and Go implementations use the same 116-byte header format emitted by the accumulator.
+  - Cross-language decoding is fully compatible for blocks emitted by the accumulator and imported from DA.
+- Implementation: `services/evm/src/block.rs` and `statedb/evmtypes/block.go`.
 
-**Purpose**: Writes meta-sharding routing infrastructure to JAM State during Phase 2B (accumulate)
+### accumulator.rs - Block Finalization and State Commitment
+
+**Purpose**: Finalizes blocks and writes bidirectional mappings to JAM State during Phase 2B (accumulate)
 
 **Core Component**:
 
 - **`BlockAccumulator` struct**:
   - `service_id: u32` - EVM service identifier
   - `envelopes: Vec<ExecutionEffectsEnvelope>` - Collected execution effects from refine
+  - `block_number: u32` - Current block number (read from JAM State or defaults to 1)
+  - `mmr: MMR` - Merkle Mountain Range for block commitment
 
 **Key Methods**:
 
 - `BlockAccumulator::accumulate()` - Main entry point
-  1. Calls `Self::new()` to create accumulator
-  2. Iterates through envelopes and processes each write intent
-  3. **ONLY writes meta-sharding infrastructure to JAM State:**
-     - `ObjectKind::MetaShard` - Meta-shard ObjectRefs (routing pointers)
-     - `ObjectKind::MetaSsrMetadata` - Meta-SSR routing table
-  4. **All other objects remain DA-only** (not written to JAM State):
-     - Code, Receipts, Blocks, BlockMetadata, Storage Shards, SSR Metadata
-     - These are accessed via deterministic ObjectIDs during refine import
-     - Payloads stored only in JAM DA, not JAM State
-  5. **Writes block index** to JAM State:
-     - Collects unique `work_package_hash` values from all envelopes
-     - Writes `block_number → Vec<work_package_hash>` mapping
-     - Key: `keccak256("block_index" || block_number)`
-     - Format: `[4B count][32B wph1][32B wph2]...`
-     - Enables query: "What work packages contributed to block N?"
-     - Cost: ~324 bytes per block, ~324MB for 1M blocks
-  6. Returns **accumulate root** - MMR super_peak committing to all blocks:
-     - Reads existing MMR from JAM State (or creates new if first block)
-     - Appends each `work_package_hash` to the MMR
-     - Writes updated MMR to JAM State and computes `super_peak()` as root
+  1. Calls `Self::new()` to load `block_number`/`mmr` and initialize the accumulator
+  2. Iterates through `AccumulateInput` operands (one per work package)
+  3. Parses the compact meta-shard stream `N × (ld | prefix_bytes | 5B packed ObjectRef)`
+  4. Writes meta-shard ObjectRefs and the MetaSSR depth hint to JAM State
+  5. Writes bidirectional block mappings (`blocknumber ↔ work_package_hash`) and appends to the MMR
+  6. Deletes blocks older than the retention limit (10k) to cap state growth
+  7. Updates the stored next block number via `EvmBlockPayload::write_blocknumber_key`
+  8. Returns the MMR root committing to all processed blocks
+
+**Rollup Path (`rollup_block`)**:
+
+- Accepts the raw compact payload from refine and the work package hash
+- Derives the meta-shard object ID from each entry's `ld` and prefix bytes, then writes the packed ObjectRef to JAM State
+- Computes the maximum `ld` across entries to write the MetaSSR hint (`service_id || "SSR"` key)
+- Always writes block mappings/MMR entries, even for idle blocks with zero meta-shard updates
+     - MMR contains all `work_package_hash` values from all envelopes
+     - Writes updated MMR to JAM State via `mmr.write_mmr()`
+     - Computes `super_peak()` as the accumulate root
      - **CRITICAL**: If MMR write fails, accumulate returns `None` (fatal error)
        - This prevents leaking commitments that auditors can't reproduce
        - Auditors must be able to read the same MMR from JAM State
@@ -250,72 +278,66 @@ See [SHARDING.md](SHARDING.md) for details on the meta-sharding architecture.
 
 **Block Query System**:
 
-The accumulator implements a minimal block index to answer the question: *"What is in this block number?"*
+The accumulator implements **bidirectional block mappings** to support efficient queries in both directions:
 
-- **Problem**: Traditional blockchains use `block_hash` as the block identifier, but JAM uses `work_package_hash`
-- **Solution**: Use `work_package_hash` as the block identifier instead of `block_hash`
-  - Multiple work packages can contribute to a single block (timeslot)
-  - The `work_package_hash` is already present in `ObjectRef.work_package_hash`
-  - The `ExecutionEffectsEnvelope` already contains all payloads from that work package
+- **Design Principle**: One block per envelope (1:1 mapping)
+  - Each envelope with writes corresponds to exactly one block
+  - Simplifies block-to-work-package relationship
 
-- **Implementation**:
-  1. During accumulate, collect all unique `work_package_hash` values from envelopes
-  2. Write `block_number → Vec<work_package_hash>` mapping to JAM State
-  3. Query flow:
-     - User queries: "What's in block 12345?"
-     - Read block index: `[wph1, wph2, wph3]` for block 12345
-     - For each `work_package_hash`:
-       - Fetch the corresponding `ExecutionEffectsEnvelope` from JAM DA
-       - Envelope contains all payloads (receipts, code, storage) for that work package
-     - Combine results to get complete block contents
+- **Bidirectional Mappings**:
+  1. **blocknumber → (work_package_hash, timeslot)**
+     - Key: `block_number_to_object_id(block_number)` (32 bytes: 28×0xFF + 4B LE)
+     - Value: 36 bytes (32B work_package_hash + 4B timeslot LE)
+     - Enables: "What work package created block N?"
 
-- **Helper Functions**:
-  - `block_index_key(block_number)` - Computes key: `keccak256("block_index" || block_number)`
-  - `write_block_index(block_number, work_package_hashes)` - Writes index to JAM State
-  - `read_block_index(service_id, block_number)` - Reads index from JAM State (unused, marked `#[allow(dead_code)]`)
+  2. **work_package_hash → (blocknumber, timeslot)**
+     - Key: work_package_hash (32 bytes)
+     - Value: 8 bytes (4B blocknumber LE + 4B timeslot LE)
+     - Enables: "What block number did this work package create?"
+
+- **Query Flow**:
+  - **By block number**:
+    1. Read blocknumber→wph mapping
+    2. Get work_package_hash + timeslot
+    3. Fetch ExecutionEffectsEnvelope from DA using work_package_hash
+
+  - **By work_package_hash**:
+    1. Read wph→blocknumber mapping
+    2. Get blocknumber + timeslot
+    3. Fetch block data using blocknumber
 
 - **Benefits**:
-  - No additional DA fetches needed (envelopes already contain all payloads)
-  - Minimal JAM State usage (~324 bytes per block)
-  - Elegant reuse of existing `work_package_hash` identifier
-  - Avoids storing redundant block payloads in JAM State
+  - Minimal JAM State usage (44 bytes per block)
+  - O(1) lookup in both directions
+  - Timeslot included for temporal ordering
+  - Fail-fast error handling (returns None if writes fail)
 
-- `EvmBlockPayload::write()` - Persists block to storage (DEPRECATED - DA-only now)
-  - Serializes block payload to bytes
-  - Writes to storage at key = block_number_to_object_id(block_number)
-  - Block becomes available for RPC queries
+**State footprint reminder:** Only meta-shard ObjectRefs and the bidirectional block mappings are written to JAM State. Block payloads stay DA-only and are fetched via their deterministic ObjectIDs derived from block numbers or work package hashes.【F:services/evm/src/accumulator.rs†L81-L149】【F:services/evm/src/block.rs†L31-L78】
 
 ### writes.rs - ExecutionEffects Serialization
 
-**Purpose**: Serializes execution effects for refine → accumulate communication
+**Purpose**: Serializes only meta-shard updates for refine → accumulate communication (compact format)
 
-**Core Structure**:
-
-```rust
-pub struct ObjectCandidateWrite {
-    pub object_id: [u8; 32],              // Object ID (e.g., tx_hash for receipts)
-    pub object_ref: ObjectRef,             // 64-byte metadata
-    pub dependencies: Vec<ObjectDependency>,
-    pub payload: Vec<u8>,                  // Only used for receipts
-}
+**Compact Meta-Shard Entry (refine output):**
+```
+[N entries, each:]                    # Meta-shard ObjectRef updates only
+  - 1 byte ld                         # Local depth for THIS meta-shard
+  - prefix_bytes (0-7)                # ld-bit prefix of object_id ((ld+7)/8 bytes)
+  - 5 bytes packed ObjectRef          # index_start|index_end|last_segment_bytes|object_kind
 ```
 
 **Key Functions**:
 
 - `serialize_execution_effects()` - Main serialization function
-  - Converts `ExecutionEffects` to binary format
-  - Calls `MajikBackend::to_object_candidate_writes()` to convert write intents  
-    *(Note: as of this refactor the helper drops the payload bytes when it builds `ObjectCandidateWrite`. Accumulate currently relies on the write intents themselves for receipt reconstruction.)*
-  - Logs ObjectCandidateWrite details (object_id, segments, payload_len, etc.)
-  - Serializes: export_count (2) + gas_used (8) + write_count (2) + writes
+  - Iterates write intents and **only** emits entries where `object_kind == MetaShard`
+  - Extracts `ld` from `object_id[0]` and writes the variable-length prefix
+  - Packs ObjectRef without `work_package_hash` (filled in during accumulate)
+  - Logs the number of meta-shards serialized and a short hex preview
 
-- `ObjectCandidateWrite::serialize()` - Per-object serialization
-  - Format: object_id (32) + object_ref (64) + dep_count (2) + dependencies
-  - If object_kind == Receipt: appends payload (variable length)
-
-- `ObjectCandidateWrite::deserialize()` - Deserialization
-  - Parses object metadata
-  - For receipts: reads payload from end of buffer
+- `BlockAccumulator::rollup_block()` - Deserialization
+  - Parses variable-length entries, reconstructs meta-shard ObjectIDs, injects the current `work_package_hash`, and writes them to JAM State
+  - Tracks the maximum `ld` and writes the MetaSSR hint even for empty blocks (ensures Go lookups succeed)
+  - Always writes bidirectional block mappings and appends the work package hash to the MMR
 
 ---
 
@@ -475,13 +497,31 @@ Block builders provide receipt witnesses in work packages for block construction
 - ✅ Block payload (`EvmBlockPayload`) persisted to storage
 - ✅ Block finalization via `finalize()` method computes Merkle roots
 - ✅ Block-level queries (`eth_getBlockByNumber`) supported via stored block payloads
+- ℹ️ Block header field `num_shards` records the total meta-shards emitted during accumulate (storage shards + code shards + receipt/meta-shard segments) and is shared across Rust and Go serializers. It no longer mirrors receipt counts, so RPC decoders must read receipt counts from the variable-length section, not this header value.
 
 **Block Construction**:
 - Accumulate phase calls `EvmBlockPayload::read()` to load/create current block
 - Receipts added via `add_receipt()` which updates block metadata
 - Block finalized via `finalize()` which computes `transactions_root` and `receipts_root`
-- Block hash computed from 476-byte header via `Blake2b-256(serialize_header())`
-- BLOCK_NUMBER_KEY updated with block_number + parent_hash for next accumulate
+- Block hash computed from 120-byte header via `Blake2b-256(serialize_header())`
+- Header layout (Rust `EvmBlockPayload::serialize_header` / Go `SerializeEvmBlockPayload`):
+  1. `payload_length:u32`
+  2. `num_transactions:u32`
+  3. `num_shards:u32` (meta-shard count only)
+  4. `timestamp:u32`
+  5. `gas_used:u64`
+  6. `state_root:32`
+  7. `transactions_root:32`
+  8. `receipt_root:32`
+  Rust and Go both hash exactly these 120 bytes, so any RPC consumer must treat
+  the subsequent variable-length transaction/receipt hash lists as non-hashed
+  payload.
+- 🧭 **Rust ↔ Go parity checks:** When debugging DA reads, verify that
+  `payload_length` in the 120-byte header matches `SerializeEvmBlockPayload` in
+  `statedb/evmtypes/block.go`; the Go `readBlockByHash()` path uses this value
+  to decide how many DA segments to fetch. Any mismatch between the Rust header
+  and Go deserializer will truncate the block before receipt hashes are parsed.
+- BLOCK_NUMBER_KEY updated with block_number for next accumulate
 
 ### Receipt Versioning
 
@@ -888,11 +928,11 @@ Where:
    - Witness count: Number of transaction witnesses
    - Creates receipts for each transaction
 
-3. **Blocks (0x02)**:
-   - Handler: `refine_blocks_payload()`
-   - Purpose: Bootstrap execution with RAW witnesses
-   - Count: Number of bootstrap extrinsics ('A' add code, 'K' set storage)
-   - Witness count: Number of RAW witnesses (BLOCK_NUMBER_KEY + blocks)
+3. **Genesis (0x02)**:
+   - Handler: `refine_genesis_payload()`
+   - Purpose: Genesis bootstrap
+   - Count: Number of K extrinsics (storage initialization)
+   - Witness count: 0 (no witnesses for genesis)
 
 4. **Call (0x03)**:
    - Handler: `refine_call_payload()`
@@ -907,7 +947,7 @@ match metadata.payload_type {
     PayloadType::Builder | PayloadType::Transactions => {
         refine_payload_transactions(...)
     }
-    PayloadType::Blocks => refine_blocks_payload(...),
+    PayloadType::Genesis => refine_genesis_payload(...),
     PayloadType::Call => refine_call_payload(...),
 }
 ```
@@ -945,11 +985,11 @@ Instead of explicit 'B' commands, block metadata is computed automatically when 
      - Append to execution_effects
 5. Return ExecutionEffects containing: receipts + code + storage + **block metadata**
 
-**PayloadBlocks (Genesis Only)**:
-- Used ONLY for genesis/bootstrap (block 0)
-- No 'B' commands (removed)
-- Only 'K' commands for storage initialization
-- Includes genesis block witness (block 0)
+**Genesis Bootstrap**:
+- Uses PayloadType::Genesis (0x02)
+- Contains K extrinsics for storage initialization
+- No witnesses required
+- Creates meta-sharding infrastructure automatically
 
 **Block Metadata ObjectID**:
 - Computed as: `blake2b_hash(block.serialize_header()[0..HEADER_SIZE])`
@@ -1040,42 +1080,46 @@ func (b *Rollup) SubmitEVMPayloadBlocks(startBlock uint32, endBlock uint32) (*ev
 
 **Genesis (Timeslot 0)**:
 ```
-PayloadType::Blocks (0x02)
-- Extrinsics: ['K' storage init, 'K' storage init, ...]
-- Witnesses: [block_0_witness]
-- Refine: Initialize storage, create block 0 payload
-- Accumulate: Write block 0 to DA (object_id = 0xFF...FF00000000)
+PayloadType::Genesis (0x02)
+- Extrinsics: [K extrinsic (address + key + value), ...]
+- Witnesses: None
+- Refine:
+  1. Parse K extrinsics as storage writes
+  2. Apply via overlay.set_storage()
+  3. Deconstruct creates storage SSRs
+  4. Process meta-shards AFTER export
+  5. Return: ExecutionEffects = [storage SSRs, MetaShards, MetaSSR]
+- Accumulate:
+  1. Write MetaSSR ObjectRef to JAM State
+  2. Write MetaShard ObjectRefs to JAM State
+  3. Storage SSRs remain DA-only
 ```
 
 **Round 1 (Timeslot 2)**:
 ```
 PayloadType::Transactions (0x01)
 - Extrinsics: [tx1_bytes]
-- Witnesses: [block_0_witness]
+- Witnesses: [previous block witness if available]
 - Refine:
   1. Execute tx1 → create receipt
-  2. Detect block 0 witness
-  3. Deserialize block 0 payload
-  4. Compute metadata (transactions_root, receipts_root, mmr_root)
-  5. Create metadata write intent
-  6. Return: ExecutionEffects = [receipt, metadata]
+  2. Process any block witnesses for metadata computation
+  3. Return: ExecutionEffects = [receipt, code changes, storage changes]
 - Accumulate:
   1. Write receipt to DA
-  2. Write metadata to DA (object_id = blake2b(block_0_header))
-  3. Create block 1 payload
+  2. Create block 1 payload
+  3. Write bidirectional block mappings
 ```
 
 **Round 2 (Timeslot 4)**:
 ```
 PayloadType::Transactions (0x01)
 - Extrinsics: [tx2_bytes]
-- Witnesses: [block_1_witness]
+- Witnesses: [block 1 witness]
 - Refine:
   1. Execute tx2 → create receipt
   2. Detect block 1 witness
   3. Compute metadata for block 1
-  4. Create metadata write intent
-  5. Return: ExecutionEffects = [receipt, metadata]
+  4. Return: ExecutionEffects = [receipt, metadata]
 - Accumulate:
   1. Write receipt to DA
   2. Write metadata to DA
@@ -1109,167 +1153,259 @@ PayloadType::Transactions (0x01)
 - Issue: Accumulate creates new block before receipts are added
 - Need to debug block creation timing in accumulate phase
 
-## Genesis Bootstrap (Block 0)
+## Genesis Bootstrap
 
 ### Overview
 
-Genesis (block 0) initializes the EVM service state using bootstrap extrinsics instead of regular transactions. The genesis flow uses `PayloadType::Blocks` with RAW witnesses and follows the same refine → accumulate pattern as normal blocks.
+Genesis initializes the EVM service state and meta-sharding infrastructure using `PayloadType::Genesis` (0x02). The genesis work package contains K extrinsics (storage initialization) that are processed through the normal storage flow, ensuring meta-shard infrastructure is created properly.
+
+### Genesis Requirements with Meta-Sharding
+
+The genesis work package must create:
+
+1. **MetaSSR** - Routing table that maps object_id ranges to meta-shards
+2. **MetaShard(s)** - Contains ObjectRef entries for all genesis storage objects
+3. **Storage SSR(s)** - Contains the actual storage key-value pairs
+4. **JAM State entries** - MetaSSR and MetaShard ObjectRefs written to state
 
 ### Genesis Execution Flow
 
-**Entry Point**: `BlockRefiner::from_work_item()` with `PayloadType::Blocks`
+**Entry Point**: `BlockRefiner::from_work_item()` with `PayloadType::Genesis`
 - Located in: `refiner.rs`
-- Routes to: `refine_blocks_payload()`
+- Routes to: `refine_genesis_payload()`
 
 **Process**:
-1. **Parse Payload**: Work item payload = `0x02` (type) + extrinsics_count (u32 LE) + witness_count (u16 LE)
-2. **Load RAW Witnesses**: State witnesses in RAW format (no ObjectRef, just raw Merkle proof)
-   - BLOCK_NUMBER_KEY witness (always present)
-   - Block witnesses for each block being submitted
-3. **Verify Witnesses**: Each RAW witness Merkle proof is verified before parsing
-4. **Execute Bootstrap**: Process bootstrap extrinsics ('A' for add code, 'K' for set storage)
-5. **Return Effects**: ExecutionEffects with code/storage/SSR write intents
+1. **Parse Payload**: Work item payload = `0x02` (Genesis) + extrinsics_count (u32 LE)
+2. **Parse K Extrinsics**: Each extrinsic = [address:20][storage_key:32][value:32]
+3. **Apply as Storage Writes**: Call `overlay.set_storage(address, storage_key, value)` for each
+4. **Deconstruct to Storage SSRs**: Call `overlay.deconstruct()` which:
+   - Groups storage writes by address and shard_id
+   - Creates storage SSR objects automatically
+   - Exports SSRs to DA segments
+5. **Process Meta-Shards**: AFTER export, call `backend.process_meta_shards_after_export()`
+   - Groups storage SSR ObjectRefs by meta-shard
+   - Creates MetaShard entries (one per shard_id)
+   - Creates MetaSSR routing table
+   - Exports meta-shards to DA segments
+6. **Return Effects**: ExecutionEffects with storage SSRs + MetaShards + MetaSSR write intents
 
-### Bootstrap Extrinsics
+### K Extrinsic Format
 
-**Format**: Custom commands for genesis state initialization
+**Purpose**: Initialize contract storage during genesis
 
-**Supported Commands** (`genesis.rs`):
+**Format**: `[address:20][storage_key:32][value:32]` (84 bytes total)
+- `address` - Contract address to initialize
+- `storage_key` - Raw storage key (32 bytes, NOT Solidity mapping slot)
+- `value` - Storage value (32 bytes)
 
-1. **'A' - Deploy Contract**:
-   ```
-   Format: [0x41][address:20][code_len:4 LE][code:N]
-   ```
-   - Deploys bytecode to specified address
-   - No constructor execution (raw code deployment)
-   - Creates code object + empty SSR header
-
-2. **'K' - Set Storage**:
-   ```
-   Format: [0x4B][address:20][key:32][value:32]
-   ```
-   - Sets storage slot for contract
-   - Updates SSR and creates/updates storage shards
-   - Can set balance/nonce via precompile 0x01
-
-**Execution** (`genesis.rs:30-150`):
-- Parse all bootstrap extrinsics
-- Group by contract address
-- Create code objects for each contract
-- Build storage shards per contract
-- Generate SSR metadata
-- Return ExecutionEffects with all write intents
-
-### Genesis Block Object
-
-**Current Implementation**: Genesis does NOT emit block object
-- No `EvmBlockPayload` write intent created
-- Accumulate phase stores code/storage but no block metadata
-- `eth_getBlockByNumber(0)` may not work
-
-**Planned Enhancement**: Emit genesis block object
-```rust
-EvmBlockPayload {
-    number: 0,
-    parent_hash: [0u8; 32],
-    logs_bloom: [0u8; 256],
-    transactions_root: empty_bmt_root,
-    state_root: [0u8; 32],  // Placeholder until JAM state root available
-    receipts_root: empty_bmt_root,
-    miner: [0u8; 20],
-    extra_data: [0u8; 32],
-    size: 476,
-    gas_limit: 30_000_000,
-    gas_used: 0,
-    timestamp: 0,
-    tx_hashes: vec![],
-    receipt_hashes: vec![],
+**Example: USDM Initial State**
+```go
+usdmInitialState := []MappingEntry{
+    {Slot: 0, Key: IssuerAddress, Value: totalSupply}, // balanceOf[issuer]
+    {Slot: 1, Key: IssuerAddress, Value: big.NewInt(1)}, // nonces[issuer]
 }
+
+// InitializeMappings computes Solidity storage keys:
+for _, entry := range entries {
+    // Compute Solidity mapping storage key: keccak256(abi.encode(key, slot))
+    keyInput := make([]byte, 64)
+    copy(keyInput[12:32], entry.Key[:])
+    keyInput[63] = entry.Slot
+    storageKey := common.Keccak256(keyInput)
+
+    // Encode value as 32-byte big-endian
+    valueBytes := entry.Value.FillBytes(make([]byte, 32))
+
+    AppendBootstrapExtrinsic(blobs, workItems, BuildKExtrinsic(contractAddr[:], storageKey[:], valueBytes))
+}
+```
+
+### Meta-Shard Object Flow
+
+#### Step 1: Refine Creates Storage SSR
+
+During refine, storage changes are grouped by address and exported as SSR objects:
+
+```
+USDM Contract (0x01)
+└─> Storage SSR ObjectID: keccak256(address || 0x02 || shard_id)
+    ├─ PayloadLength: ~100 bytes
+    ├─ IndexStart: 0 (first segment in genesis WP)
+    └─ Payload: [num_entries:2][key1:32][value1:32][key2:32][value2:32]
+```
+
+**ObjectRef** (37 bytes):
+```
+[work_package_hash:32][packed:5]
+// packed = index_start (12 bits) | num_segments (12 bits) | last_segment_bytes (12 bits) | object_kind (4 bits)
+= [genesis_wph][0|1|100|0x03=SSR]
+```
+
+#### Step 2: Refine Creates MetaShard Entry
+
+The refine process groups storage SSR ObjectRefs by meta-shard:
+
+```
+MetaShard #0 (shard_id = [0x00, 0x00])
+└─> Contains 1 entry:
+    ├─ object_id: keccak256(0x01 || 0x02 || [0,0])
+    └─> ObjectRef: [genesis_wph][0][100][0x03]
+```
+
+**MetaShard Payload** (serialized):
+```
+[shard_id:2][merkle_root:32][num_entries:4][entry1_object_id:32][entry1_objectref:36]
+= 2 + 32 + 4 + (32+36)*1 = 106 bytes
+```
+
+**MetaShard ObjectRef**:
+```
+[genesis_wph][segment_after_ssr][106][0x04=MetaShard]
+```
+
+#### Step 3: Refine Creates MetaSSR
+
+The MetaSSR tracks which meta-shards exist and their ID ranges:
+
+```
+MetaSSR
+└─> entries: [
+      { prefix_bits: 0, shard_id: [0x00, 0x00] }
+    ]
+```
+
+Since we have only 1 meta-shard, all object_ids route to shard `[0,0]`.
+
+#### Step 4: Accumulate Writes to JAM State
+
+The accumulate phase receives ObjectCandidateWrite entries and writes **only** the ObjectRefs to JAM State:
+
+```
+JAM State writes:
+1. MetaShard ObjectRef:
+   key = keccak256(service_id || 0x04 || [0,0] || ...)  // MetaShard object_id
+   value = [genesis_wph][Y][106][0x04] + timeslot + blocknumber
+```
+
+**Note**: The storage SSR ObjectRef is NOT written to JAM State. It only exists in the MetaShard entry in DA.
+
+#### Step 5: Client Lookups
+
+When a client fetches `balanceOf[issuer]`:
+
+```
+1. Compute storage ObjectID:
+   object_id = keccak256(0x01 || 0x02 || shard_id)
+
+2. Read MetaSSR from JAM State:
+   metaSSR_object_id = keccak256(service_id || 0xFF || 0xFF || ...)
+   metaSSR_objectref = state.Read(metaSSR_object_id)
+   metaSSR_payload = DA.Fetch(metaSSR_objectref)
+   metaSSR = deserialize(metaSSR_payload)
+
+3. Route to MetaShard:
+   shard_id = metaSSR.route(object_id) → [0,0]
+   metaShard_object_id = keccak256(service_id || 0x04 || [0,0] || ...)
+
+4. Read MetaShard from JAM State:
+   metaShard_objectref = state.Read(metaShard_object_id)
+   metaShard_payload = DA.Fetch(metaShard_objectref)
+   metaShard = deserialize(metaShard_payload)
+
+5. Find storage SSR entry:
+   entry = metaShard.entries.find(object_id)
+   ssr_objectref = entry.objectref
+
+6. Fetch storage SSR from DA:
+   ssr_payload = DA.Fetch(ssr_objectref)
+   ssr = deserialize(ssr_payload)
+
+7. Find storage value:
+   storage_key = keccak256(issuer_address || 0)
+   value = ssr.get(storage_key)
+```
+
+### Genesis Work Package Structure
+
+The genesis WP exports segments in this order:
+
+```
+Segment 0:    Storage SSR payload (USDM storage keys/values)
+Segment 1:    MetaShard payload (contains Storage SSR ObjectRef)
+Segment 2:    MetaSSR payload (routing table)
 ```
 
 ### Accumulate Phase
 
 **Entry Point**: `BlockAccumulator::accumulate()`
-- Detects genesis via envelope analysis
-- Processes code/storage write intents
-- Exports to DA segments
-- Updates service storage
+- Processes meta-sharding write intents
+- Only writes MetaShard ObjectRefs to JAM State
+- Storage SSRs remain DA-only (not written to JAM State)
 
 **Genesis-Specific Handling** (`accumulator.rs`):
-- No block metadata storage (no block object emitted)
-- Code objects stored with ObjectKind::Code
-- Storage shards indexed by SSR
-- Balance/nonce stored in precompile 0x01 shards
-
-**Re-Bootstrap Prevention**:
-- Block number tracking prevents multiple genesis
-- Once any block is accumulated, genesis rejected
-- Validation in `accumulator.rs:79-89`
+```rust
+match candidate.object_ref.object_kind {
+    kind if kind == ObjectKind::MetaShard as u8 => {
+        candidate.object_ref.write(&candidate.object_id, timeslot, accumulator.block_number);
+    }
+    _ => {
+        // Storage SSRs, receipts, etc. stay DA-only
+    }
+}
+```
 
 ### State Initialization
 
-**Contract Deployment**:
-1. Bootstrap 'A' command specifies address + bytecode
-2. Code exported to DA as code object
-3. ObjectRef stored in service storage
-4. Empty SSR header created for storage
-
-**Storage Setup**:
-1. Bootstrap 'K' commands specify key-value pairs
-2. Grouped by contract address
-3. Shards created (up to 63 entries per 4KB shard)
-4. SSR header tracks shard mapping
+**Contract Storage Setup**:
+1. Genesis K extrinsics specify address + storage key + value
+2. Applied via `overlay.set_storage()` during refine
+3. `overlay.deconstruct()` creates storage SSR objects
+4. Meta-shard processing groups SSRs and creates MetaSSR/MetaShard
+5. Accumulate writes MetaSSR/MetaShard ObjectRefs to JAM State
 
 **Balance/Nonce Setup**:
-- Use 'K' commands targeting precompile address 0x01
+- Use K extrinsics with precompile address 0x01
 - Balance key: `keccak256(account_address)`
 - Nonce key: `keccak256(account_address || "nonce")`
 
 ### Example Bootstrap Sequence
 
 ```rust
-// Deploy contract at 0x1234...
-[0x41][0x12 0x34 ... (20 bytes)][0x64 0x00 0x00 0x00][bytecode (100 bytes)]
-
 // Set storage for contract 0x1234...
-[0x4B][0x12 0x34 ... (20 bytes)][storage_key (32)][storage_value (32)]
+[0x12 0x34 ... (20 bytes)][storage_key (32)][storage_value (32)]
 
 // Set balance for EOA 0xabcd...
-[0x4B][0x01 0x00 ... (20 bytes)][keccak256(0xabcd...)][balance (32 bytes)]
+[0x01 0x00 ... (20 bytes)][keccak256(0xabcd...)][balance (32 bytes)]
 
 // Set nonce for EOA 0xabcd...
-[0x4B][0x01 0x00 ... (20 bytes)][keccak256(0xabcd... || "nonce")][nonce (32 bytes)]
+[0x01 0x00 ... (20 bytes)][keccak256(0xabcd... || "nonce")][nonce (32 bytes)]
 ```
-
-### Security & Authorization
-
-**Current Status**: No authorization implemented
-- Any work package with `PayloadType::Genesis` triggers bootstrap
-- No signature verification on bootstrap extrinsics
-- Relies on JAM work package admission control
-
-**Planned Enhancements** (deferred):
-1. Issuer signature verification per bootstrap extrinsic
-2. Hard-coded genesis hash validation
-3. Authorized genesis issuer public key
 
 ### Determinism
 
-**Guarantee**: Bootstrap execution is deterministic
-- EVM execution deterministic (same input → same output)
+**Guarantee**: Genesis execution is deterministic
+- Storage writes applied in extrinsic order
 - SSR metadata serialization canonical
-- Storage shard ObjectIDs derived from content (deterministic)
-- All validators produce identical post-bootstrap state
+- Meta-shard ObjectIDs derived from content hash (deterministic)
+- All validators produce identical post-genesis state
 
-### Future Work
+### Implementation Status
 
-**Pending Features**:
-- [ ] Emit genesis block object for RPC compatibility
-- [ ] Compute and validate post-bootstrap state root
-- [ ] Bootstrap extrinsic signature verification
-- [ ] Hard-coded genesis hash checks
-- [ ] Constructor execution for deployed contracts
-- [ ] Native balance allocation (without storage keys)
+**Phase 1: IMPLEMENTED ✅**
+- Added `PayloadType::Genesis` (0x02) to Rust enum
+- Added `refine_genesis_payload()` function to parse K extrinsics
+- K extrinsics processed as storage writes via `overlay.set_storage()`
+- `overlay.deconstruct()` creates storage SSRs automatically
+- Meta-shard processing moved AFTER export (stale ObjectRef fix)
+- Added `PayloadTypeGenesis` to Go constants
+- Updated `SubmitEVMGenesis()` to use `PayloadTypeGenesis`
+
+**Removed**:
+- `PayloadType::Blocks` removed entirely
+- `refine_blocks_payload()` function deleted
+- Genesis now uses unified storage flow (no special 'A'/'K' commands)
+
+**Summary**: Genesis bootstrap with meta-sharding complete. Genesis work packages flow through normal refine/accumulate without special casing. The meta-shard architecture naturally handles the bootstrap case.
 
 ---
 ## Data Flow Summary
@@ -1310,20 +1446,20 @@ EvmBlockPayload {
 │ 3. Block finalization                                       │
 │    • current_block.finalize() - Compute Merkle roots        │
 │    • current_block.write() - Serialize and store block      │
-│ 4. Update BLOCK_NUMBER_KEY with parent_hash                 │
-│ 5. Return parent_hash as accumulate root                    │
+| 4. Update BLOCK_NUMBER_KEY with next block number           │
+│ 5. Return MMR root as accumulate root                       │
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ RPC Query (eth_getBlockByNumber / eth_getTransactionReceipt)│
 ├─────────────────────────────────────────────────────────────┤
 │ Block Query:                                                │
-│ 1. Compute block_key = 0xFF...FF{block_number}             │
-│ 2. Read block metadata from service storage                │
-│ 3. Extract state_root + tx_hashes                          │
-│ 4. For each tx_hash, lookup receipt ObjectRef              │
-│ 5. Fetch receipt payloads from DA                          │
-│ 6. Construct EthereumBlock response (JSON-RPC)             │
+│ 1. Compute block_key = 0xFF...FF{block_number}              │
+│ 2. Read work package hash from JAM State                    │
+│ 3. Fetch DA segments to get block including txhashes        │
+│ 4. For each tx_hash, also get ObjectRef for shard           │
+│ 5. Fetch receipt payloads from DA using wph stored         │
+│ 6. Construct EthereumBlock response (JSON-RPC)              │
 │                                                             │
 │ Receipt Query:                                              │
 │ 1. Lookup ObjectRef from service storage (key=tx_hash)     │
@@ -1382,23 +1518,26 @@ EvmBlockPayload {
 
 1. **Block Number Key** (current block):
    - Key: `BLOCK_NUMBER_KEY` = `0xFF` repeated 32 times
-   - Value: `block_number (4 bytes LE) || parent_hash (32 bytes)`
+   - Value: `block_number (4 bytes LE)` - just the next block number
    - Updated by: `EvmBlockPayload::write_blocknumber_key()`
+   - Read by: `EvmBlockPayload::read_blocknumber_key()`
 
-2. **Block Payload Key** (block by number):
+2. **Block Number → Work Package Mapping**:
    - Key: `0xFF` repeated 28 times + `block_number (4 bytes LE)`
-   - Value: Complete `EvmBlockPayload` (no ObjectRef prefix)
-   - Written during accumulate phase via `EvmBlockPayload::write()`
+   - Value: `work_package_hash (32 bytes) || timeslot (4 bytes LE)` = 36 bytes
+   - Enables: Query "What work package created block N?"
+   - Written during accumulate phase via `write_block()`
 
-3. **Block Metadata Key** (computed roots):
-   - Key: Block hash (32 bytes) computed via `Blake2b-256(432-byte header)`
-   - Value: `EvmBlockMetadata` (96 bytes): `transactions_root || receipts_root || mmr_root`
-   - Written during accumulate phase via `EvmBlockMetadata::write()`
-   - Read via `ReadServiceStorage()` in Go (NOT `ReadStateWitnessRaw`)
+3. **Work Package → Block Number Mapping**:
+   - Key: `work_package_hash` (32 bytes)
+   - Value: `blocknumber (4 bytes LE) || timeslot (4 bytes LE)` = 8 bytes
+   - Enables: Query "What block number did this work package create?"
+   - Written during accumulate phase via `write_block()`
 
-4. **Transaction Receipt Key**:
+4. **Transaction Receipt Key** (DEPRECATED - receipts stay DA-only):
    - Key: `tx_hash` (32 bytes) - keccak256 of RLP-encoded transaction
-   - Value: `ObjectRef` (64 bytes) pointing to receipt in DA
+   - Value: `ObjectRef (37 bytes) + timeslot (4 bytes) + blocknumber (4 bytes)` = 45 bytes
+   - Note: Current architecture keeps receipts in DA only, accessed via deterministic ObjectIDs
 
 ---
 

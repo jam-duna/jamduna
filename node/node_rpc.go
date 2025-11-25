@@ -20,6 +20,8 @@ import (
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	types "github.com/colorfulnotion/jam/types"
+	ethCommon "github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 type Jam struct {
@@ -1474,18 +1476,6 @@ func (n *NodeContent) GetServiceStorage(serviceID uint32, storageKey []byte) ([]
 	return n.statedb.ReadServiceStorage(serviceID, storageKey)
 }
 
-func (n *NodeContent) ReadStateWitnessRef(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error) {
-	return n.statedb.ReadStateWitnessRef(serviceID, objectID, fetchPayloadFromDA)
-}
-
-func (n *NodeContent) ReadStateWitnessRaw(serviceID uint32, objectID common.Hash) (types.StateWitnessRaw, bool, common.Hash, error) {
-	return n.statedb.ReadStateWitnessRaw(serviceID, objectID)
-}
-
-func (n *NodeContent) GetStateWitnesses(workReports []*types.WorkReport) ([]types.StateWitness, common.Hash, error) {
-	return n.statedb.GetStateWitnesses(workReports)
-}
-
 // JNode interface implementations - Basic info methods
 
 func (n *NodeContent) GetChainId() uint64 {
@@ -1552,14 +1542,93 @@ func (n *NodeContent) Call(from common.Address, to *common.Address, gas uint64, 
 
 // JNode interface implementations - Transaction Queries
 
-func (n *NodeContent) GetTransactionReceipt(txHash common.Hash) (*evmtypes.EthereumTransactionReceipt, error) {
-	serviceID := uint32(n.GetChainId())
-	return n.statedb.GetTransactionReceipt(serviceID, txHash)
+// boolToHexStatus converts a boolean success status to hex status string
+func boolToHexStatus(success bool) string {
+	if success {
+		return "0x1"
+	}
+	return "0x0"
 }
+func (n *NodeContent) GetTransactionReceipt(txHash common.Hash) (*evmtypes.EthereumTransactionReceipt, error) {
+	receipt, err := n.statedb.GetTransactionReceipt(uint32(n.GetChainId()), txHash)
+	if err != nil {
+		return nil, err
+	}
 
+	//serviceID := uint32(n.GetChainId())
+	// Parse transaction from receipt payload (RLP-encoded transaction)
+	ethTx, err := evmtypes.ConvertPayloadToEthereumTransaction(receipt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse transaction from receipt: %v", err)
+	}
+
+	// Parse logs from receipt LogsData if available
+	var logs []evmtypes.EthereumLog
+	if len(receipt.LogsData) > 0 {
+		logIndexStart := receipt.LogIndexStart
+
+		logs, err = evmtypes.ParseLogsFromReceipt(receipt.LogsData, txHash,
+			receipt.BlockNumber, receipt.BlockHash, receipt.TransactionIndex, logIndexStart)
+		if err != nil {
+			log.Warn(log.Node, "GetTransactionReceipt: Failed to parse logs", "error", err)
+			logs = []evmtypes.EthereumLog{} // Use empty logs on parse failure
+		}
+	}
+
+	// Determine contract address for contract creation
+	var contractAddress *string
+	if ethTx.To == nil {
+		senderAddr := common.HexToAddress(ethTx.From)
+
+		// Parse nonce
+		var nonce uint64
+		fmt.Sscanf(ethTx.Nonce, "0x%x", &nonce)
+
+		// Calculate CREATE contract address using go-ethereum's built-in function
+		// Convert our common.Address to go-ethereum's common.Address
+		ethSenderAddr := ethCommon.Address(senderAddr)
+		contractAddr := crypto.CreateAddress(ethSenderAddr, nonce).Hex()
+		contractAddress = &contractAddr
+
+		// Note: CREATE2 detection would require parsing input data to check for CREATE2 opcode
+		// For now, we only handle CREATE transactions (when To == nil)
+	}
+
+	txType := "0x0"
+	if payload := receipt.Payload; len(payload) > 0 && payload[0] < 0x80 {
+		txType = fmt.Sprintf("0x%x", payload[0])
+	}
+
+	// Bloom filters removed - always use zero bytes for RPC compatibility
+	logsBloom := evmtypes.ComputeLogsBloom(logs) // Returns zero bytes
+
+	cumulativeGasUsed := receipt.CumulativeGas
+	if cumulativeGasUsed == 0 {
+		cumulativeGasUsed = receipt.UsedGas
+	}
+
+	// Build Ethereum receipt with transaction details from parsed RLP transaction
+	ethReceipt := &evmtypes.EthereumTransactionReceipt{
+		TransactionHash:   txHash.String(),
+		TransactionIndex:  fmt.Sprintf("%d", receipt.TransactionIndex),
+		BlockHash:         receipt.BlockHash.String(),
+		BlockNumber:       fmt.Sprintf("%x", receipt.BlockNumber),
+		From:              ethTx.From,
+		To:                ethTx.To,
+		CumulativeGasUsed: fmt.Sprintf("0x%x", cumulativeGasUsed),
+		GasUsed:           fmt.Sprintf("0x%x", receipt.UsedGas),
+		ContractAddress:   contractAddress,
+		Logs:              logs,
+		LogsBloom:         logsBloom,
+		Status:            boolToHexStatus(receipt.Success),
+		EffectiveGasPrice: ethTx.GasPrice,
+		Type:              txType,
+	}
+	return ethReceipt, nil
+}
 func (n *NodeContent) GetTransactionByHash(txHash common.Hash) (*evmtypes.EthereumTransactionResponse, error) {
 	serviceID := uint32(n.GetChainId())
-	receipt, ref, err := n.statedb.GetTransactionByHash(serviceID, txHash)
+	receipt, err := n.statedb.GetTransactionByHash(serviceID, txHash)
 	if err != nil {
 		return nil, err
 	}
@@ -1573,34 +1642,47 @@ func (n *NodeContent) GetTransactionByHash(txHash common.Hash) (*evmtypes.Ethere
 		return nil, fmt.Errorf("failed to convert payload to Ethereum transaction: %v", err)
 	}
 
-	// Get block metadata from the receipt's Ref field
-	evmBlock, _, err := n.statedb.ReadBlockByNumber(serviceID, ref.EvmBlock)
-	if err != nil {
-		// If block can't be read, return transaction without block metadata (pending state)
-		log.Warn(log.Node, "GetTransactionByHash: Failed to read block metadata",
-			"txHash", txHash.String(), "blockNum", ref.EvmBlock, "error", err)
-		return ethTx, nil
-	}
-
 	// Populate block metadata
-	blockHash := evmBlock.ComputeHash().String()
-	blockNumber := fmt.Sprintf("0x%x", ref.EvmBlock)
-	txIndex := fmt.Sprintf("0x%x", ref.TxSlot)
-	ethTx.BlockHash = &blockHash
-	ethTx.BlockNumber = &blockNumber
-	ethTx.TransactionIndex = &txIndex
+	ethTx.BlockHash = fmt.Sprintf("0x%x", receipt.BlockHash)
+	ethTx.BlockNumber = fmt.Sprintf("0x%x", receipt.BlockNumber)
+	ethTx.TransactionIndex = fmt.Sprintf("0x%x", receipt.TransactionIndex)
 
 	return ethTx, nil
 }
 
-func (n *NodeContent) GetTransactionByBlockHashAndIndex(blockHash common.Hash, index uint32) (*evmtypes.EthereumTransactionResponse, error) {
-	serviceID := uint32(n.GetChainId())
-	return n.statedb.GetTransactionByBlockHashAndIndex(serviceID, blockHash, index)
+func (n *NodeContent) GetTransactionByBlockHashAndIndex(serviceID uint32, blockHash common.Hash, index uint32) (*evmtypes.EthereumTransactionResponse, error) {
+	//serviceID := uint32(n.GetChainId())
+	// First, get the block to retrieve transaction hashes
+	block, err := n.statedb.GetBlockByHash(serviceID, blockHash, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get block: %v", err)
+	}
+	if block == nil {
+		return nil, nil // Block not found
+	}
+
+	// Fetch the full transaction
+	return n.GetTransactionByHashFormatted(serviceID, block.TxHashes[index])
 }
 
-func (n *NodeContent) GetTransactionByBlockNumberAndIndex(blockNumber string, index uint32) (*evmtypes.EthereumTransactionResponse, error) {
-	serviceID := uint32(n.GetChainId())
-	return n.statedb.GetTransactionByBlockNumberAndIndex(serviceID, blockNumber, index)
+func (n *NodeContent) GetTransactionByBlockNumberAndIndex(serviceID uint32, blockNumber string, index uint32) (*evmtypes.EthereumTransactionResponse, error) {
+
+	// First, get the block to retrieve transaction hashes
+	block, err := n.statedb.GetBlockByNumber(serviceID, blockNumber)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get block: %v", err)
+	}
+	if block == nil {
+		return nil, nil // Block not found
+	}
+
+	// Check if index is in range
+	if index >= uint32(len(block.TxHashes)) {
+		return nil, fmt.Errorf("index out of range")
+	}
+
+	// Fetch the full transaction
+	return n.GetTransactionByHashFormatted(serviceID, block.TxHashes[index])
 }
 
 func (n *NodeContent) GetLogs(fromBlock, toBlock uint32, addresses []common.Address, topics [][]common.Hash) ([]evmtypes.EthereumLog, error) {
@@ -1617,42 +1699,63 @@ func (n *NodeContent) GetLatestBlockNumber() (uint32, error) {
 
 func (n *NodeContent) GetBlockByHash(blockHash common.Hash, fullTx bool) (*evmtypes.EthereumBlock, error) {
 	serviceID := uint32(n.GetChainId())
-	return n.statedb.GetBlockByHash(serviceID, blockHash, fullTx)
+	evmblock, err := n.statedb.GetBlockByHash(serviceID, blockHash, fullTx)
+	if err != nil {
+		return nil, err
+	}
+	ethblock := evmblock.ToEthereumBlock(evmblock.Number, fullTx)
+	return ethblock, nil
+}
+
+// GetTransactionByHashFormatted fetches a transaction and returns it in Ethereum JSON-RPC format
+func (n *NodeContent) GetTransactionByHashFormatted(serviceID uint32, txHash common.Hash) (*evmtypes.EthereumTransactionResponse, error) {
+	receipt, err := n.statedb.GetTransactionByHash(serviceID, txHash)
+	if err != nil {
+		return nil, err
+	}
+	if receipt == nil {
+		return nil, nil // Transaction not found
+	}
+
+	// Convert the original payload to Ethereum transaction format
+	ethTx, err := evmtypes.ConvertPayloadToEthereumTransaction(receipt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert payload to Ethereum transaction: %v", err)
+	}
+
+	// Populate block/tx metadata
+	ethTx.BlockHash = fmt.Sprintf("0x%x", receipt.BlockHash)
+	ethTx.BlockNumber = fmt.Sprintf("0x%d", receipt.BlockNumber)
+	ethTx.TransactionIndex = fmt.Sprintf("0x%x", receipt.TransactionIndex)
+
+	return ethTx, nil
 }
 
 func (n *NodeContent) GetBlockByNumber(blockNumber string, fullTx bool) (*evmtypes.EthereumBlock, error) {
 	serviceID := uint32(n.GetChainId())
-	evmBlock, _, err := n.statedb.GetBlockByNumber(serviceID, blockNumber)
+	evmBlock, err := n.statedb.GetBlockByNumber(serviceID, blockNumber)
 	if err != nil {
 		return nil, err
 	}
 
 	// Generate metadata and convert EvmBlockPayload to Ethereum JSON-RPC format
-	metadata := evmtypes.NewEvmBlockMetadata(evmBlock)
-	ethBlock := evmBlock.ToEthereumBlock(metadata, fullTx)
+	ethBlock := evmBlock.ToEthereumBlock(evmBlock.Number, fullTx)
 
 	// If fullTx requested, fetch full transaction objects
 	if fullTx {
-		transactions := make([]interface{}, 0, len(evmBlock.TxHashes))
-		blockHash := evmBlock.ComputeHash()
-		blockHashStr := blockHash.String()
-		blockNumberStr := fmt.Sprintf("0x%x", evmBlock.Number)
+		transactions := make([]evmtypes.EthereumTransactionResponse, 0, len(evmBlock.TxHashes))
 
 		for i, txHash := range evmBlock.TxHashes {
-			ethTx, err := n.statedb.GetTransactionByHashFormatted(serviceID, txHash)
+			ethTx, err := n.GetTransactionByHashFormatted(serviceID, txHash)
 			if err != nil {
-				log.Warn(log.Node, "GetBlockByNumber: Failed to get transaction",
-					"txHash", txHash.String(), "error", err)
+				log.Warn(log.Node, "GetBlockByNumber: Failed to get transaction", "txHash", txHash.String(), "error", err)
 				continue
 			}
 			if ethTx != nil {
-				// Set block context
-				ethTx.BlockHash = &blockHashStr
-				ethTx.BlockNumber = &blockNumberStr
-				txIndex := fmt.Sprintf("0x%x", i)
-				ethTx.TransactionIndex = &txIndex
-
-				transactions = append(transactions, ethTx)
+				ethTx.BlockHash = evmBlock.Hash.String()
+				ethTx.BlockNumber = fmt.Sprintf("0x%x", evmBlock.Number)
+				ethTx.TransactionIndex = fmt.Sprintf("0x%x", i)
+				transactions[i] = *ethTx
 			}
 		}
 

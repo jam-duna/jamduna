@@ -852,21 +852,6 @@ func (c *NodeClient) GetServiceStorage(serviceIndex uint32, storageKey []byte) (
 	return storageBytes, true, nil
 }
 
-func (c *NodeClient) ReadStateWitnessRef(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error) {
-	// Stub implementation - not supported for remote clients
-	return types.StateWitness{}, false, fmt.Errorf("ReadStateWitnessRef not supported for remote clients")
-}
-
-func (c *NodeClient) ReadStateWitnessRaw(serviceID uint32, objectID common.Hash) (types.StateWitnessRaw, bool, common.Hash, error) {
-	// Stub implementation - not supported for remote clients
-	return types.StateWitnessRaw{}, false, common.Hash{}, fmt.Errorf("ReadStateWitnessRaw not supported for remote clients")
-}
-
-func (c *NodeClient) GetStateWitnesses(workReports []*types.WorkReport) ([]types.StateWitness, common.Hash, error) {
-	// Stub implementation - not supported for remote clients
-	return nil, common.Hash{}, fmt.Errorf("GetStateWitnesses not supported for remote clients")
-}
-
 func (c *NodeClient) WaitForServiceValue(serviceIndex uint32, storageKey []byte) (service_index uint32, err error) {
 	ctxWait, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 	defer cancel()

@@ -14,8 +14,8 @@ type HostEnv interface {
 	GetTimeslot() uint32
 	GetHeader() *BlockHeader
 
-	// ReadStateWitnessRef fetches StateWitness for given objectID; If fetchPayloadFromDA=true, fetches payload via FetchJAMDASegments and populates witness.Payload
-	ReadStateWitnessRef(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (StateWitness, bool, error)
+	ReadObject(serviceID uint32, objectID common.Hash) (*StateWitness, bool, error)
+	GetWitnesses() map[common.Hash]*StateWitness
 
 	WriteServicePreimageBlob(s uint32, blob []byte)
 	WriteServicePreimageLookup(s uint32, blob_hash common.Hash, blob_length uint32, time_slots []uint32)

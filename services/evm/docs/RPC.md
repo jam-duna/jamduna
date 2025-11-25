@@ -8,8 +8,8 @@ This document summarizes the **Ethereum JSON-RPC methods** that [Blockscout](htt
 
 ## 📋 Quick Checklist
 
-- [x] Archive node configured (full state history via JAM State/DA)
-- [x] All core RPC methods implemented (11/11 core methods coded; block metadata served from canonical EvmBlockPayload)
+- [x] Archive node configured (full history reconstructed from DA payloads + meta-shard/block mappings in JAM State)
+- [x] All core RPC methods implemented (11/11 core methods coded; block metadata read from DA via deterministic ObjectIDs)
 - [ ] Tracing methods enabled for internal transactions (not implemented)
 - [x] WebSocket endpoint configured (ws://localhost:8080/ws)
 - [ ] Performance benchmarks met (not yet tested)
@@ -355,28 +355,114 @@ The JAM node implements Ethereum JSON-RPC methods through integration with JAM's
 
 ### JAM State/DA Integration
 
+#### Recent Updates (November 2025)
+- **ObjectRef Optimization**: 64 → 36 bytes (44% reduction)
+  - Core fields: WorkPackageHash (32B), IndexStart (12 bits), PayloadLength (4B via segment packing), ObjectKind (1B)
+  - Accumulate-time metadata stored separately: +timeslot (4B) +blocknumber (4B) = 44 bytes total in JAM State
+- **Bidirectional Block Mappings**: O(1) lookups for blocknumber ↔ work_package_hash
+- **Meta-Sharding**: 68-byte ObjectRefEntry (32B ObjectID + 36B ObjectRef), 58 entries per meta-shard
+- **Simplified Dependencies**: Vec<ObjectId> only (no version tracking)
+
 #### Object Types (DA Storage)
-- **Receipt Objects** (kind=0x03): Transaction receipts with gas usage, logs, and contract addresses
-  - ObjectID: `tx_to_objectID(txHash)` → raw transaction hash (ObjectKind encoded in witness metadata)
-  - Format: `[1B success] [8B gas] [4B payload_len] [payload] [4B logs_len] [logs]`
 
-- **SSR (Shard State Reference) Objects** (kind=0x01): Contract storage shards
-  - ObjectID: `ssr_to_objectID(contractAddress)` → `[20B address][11B zero padding][kind=0x02]`
-  - Format: `[2B count] + [entries: 32B key_hash + 32B value] * count`
+##### Receipt Objects (kind=0x03)
+- **ObjectID**: `tx_to_objectID(txHash)` → raw transaction hash (ObjectKind in witness)
+- **Format**: `[1B success] [8B gas] [4B payload_len] [payload] [4B logs_len] [logs]`
+- **JAM State**: ObjectID → ObjectRef (36B) + timeslot (4B) + blocknumber (4B) = 44 bytes
 
-- **ObjectRef Metadata**: Maps ObjectID → DA location
-  - Stored in service storage with ObjectID as key
-  - Contains: WorkPackageHash, IndexStart, IndexEnd, PayloadLength
+##### Contract Storage Shards (kind=0x04)
+- **Two-level sharding**: Per-contract SSR + storage shards
+- **SSR ObjectID**: `ssr_to_objectID(contractAddress)` → `[20B address][11B zero][kind=0x01]`
+- **SSR Format**: `[2B count] [8B version] [8B size] [entries: 8B shard_id + 32B shard_object_id] * count`
+- **Storage Shard ObjectID**: `shard_object_id(contractAddress, shard_id)` → `[20B][3B shard][8B zero][kind=0x04]`
+- **Storage Shard Format**: `[2B count] [entries: 32B key_hash + 32B value] * count`
+- **Capacity**: 62 entries per shard, split at 34 entries
+
+##### Code Objects (kind=0x02)
+- **ObjectID**: `code_object_id(contractAddress)` → `[20B address][11B zero][kind=0x02]`
+- **Payload**: Raw contract bytecode
+
+##### Meta-Shards (kind=0x04)
+- **Purpose**: Service-level index for all ObjectID → ObjectRef mappings across all contracts
+- **Meta-Shard ObjectID**: `meta_shard_object_id(service_id, ld, prefix56)` → `[1B ld][0-7B prefix][padding]`
+  - Examples: ld=0 → `[0x00][31 zeros]`, ld=8 → `[0x08][2B prefix][29 zeros]`
+  - NO contract address or ObjectKind byte in the key (ObjectKind=0x04 stored in ObjectRef metadata)
+- **DA Storage Format**: `[1B ld][8B shard_id][32B merkle_root][2B count][entries: 32B object_id + 37B object_ref]*`
+- **Compact Refine Format**: `1B ld + N × (0-7B prefix + 5B packed ObjectRef)` - variable length per entry
+- **Capacity**: 58 entries per meta-shard (69 bytes each in DA format)
+
 
 #### Storage Layout (USDM Contract at 0x01)
 - **Balances**: `keccak256(abi.encode(address, 0))` → balance (uint256)
 - **Nonces**: `keccak256(abi.encode(address, 1))` → nonce (uint256)
-- **Contract Storage**: Storage keys are hashed and stored in SSR shards
+- **Contract Storage**: Storage keys are hashed, shard_id computed via `key_hash % NUM_SHARDS`
 
 #### Read Path
-1. **ReadStateWitness**: Lookup ObjectRef metadata and payload from service storage via `ReadStateWitness`
-2. **FetchJAMDASegments**: Fetch payload from DA using the embedded ObjectRef indices (handled inside `ReadStateWitness`)
-3. **Parse Payload**: Deserialize object-specific format to extract data
+1. **JAM State Lookup**: Read ObjectRef (36B) + timeslot (4B) + blocknumber (4B) using ObjectID as key
+2. **DA Fetch**: Use WorkPackageHash + IndexStart + PayloadLength to fetch segments from DA
+3. **Parse Payload**: Deserialize object-specific format
+4. **Sharding Resolution** (for storage):
+   - Read SSR → find shard_id for key → read storage shard → extract value
+   - Meta-sharding: Read meta-SSR → find meta-shard → read ObjectRef → read storage shard
+
+#### Query Workflows
+
+##### eth_getBalance / eth_getTransactionCount
+1. Compute storage key: `balance_key = keccak256(abi.encode(address, 0))` (or slot 1 for nonce)
+2. Read SSR for USDM contract (0x01) from JAM State
+3. Parse SSR to find shard_id for `key_hash = keccak256(balance_key)`
+4. Read storage shard ObjectRef from JAM State
+5. Fetch storage shard payload from DA
+6. Parse shard to extract value
+
+##### eth_getStorageAt
+1. Compute storage key: `storage_key = keccak256(abi.encode(address, slot))`
+2. Read SSR for contract from JAM State
+3. Parse SSR to find shard_id for `key_hash = keccak256(storage_key)`
+4. Read storage shard ObjectRef from JAM State
+5. Fetch storage shard payload from DA
+6. Parse shard to extract value
+
+##### eth_getCode
+1. Compute code ObjectID: `code_object_id(contractAddress)`
+2. Read ObjectRef from JAM State (44 bytes)
+3. Fetch code payload from DA using WorkPackageHash + IndexStart + PayloadLength
+4. Return raw bytecode
+
+##### eth_getTransactionReceipt
+1. Compute receipt ObjectID: `tx_to_objectID(txHash)`
+2. Read ObjectRef from JAM State (44 bytes, includes blocknumber)
+3. Fetch receipt payload from DA
+4. Parse receipt format: success + gas + payload + logs
+5. If blocknumber missing, search up to 20 recent blocks for block context
+
+##### eth_getBlockByNumber
+1. Read blocknumber → work_package_hash mapping from JAM State (36 bytes)
+2. Compute block ObjectID: `block_object_id(work_package_hash)`
+3. Read ObjectRef from JAM State
+4. Fetch EvmBlockPayload from DA
+5. Parse block metadata (parent hash, state root, receipts root, logs bloom, timestamp, gas used, tx hashes)
+6. If fullTx=true, fetch each transaction receipt from DA
+
+##### eth_getBlockByHash
+1. Compute block ObjectID: `block_object_id(blockHash)`
+2. Read ObjectRef from JAM State (44 bytes, includes blocknumber)
+3. Fetch EvmBlockPayload from DA
+4. Parse block metadata
+5. If fullTx=true, fetch each transaction receipt from DA
+
+##### eth_getLogs
+1. Parse filter: fromBlock, toBlock, addresses, topics
+2. For each block in range:
+   - Read block ObjectRef from JAM State
+   - Fetch EvmBlockPayload from DA
+   - Extract tx_hashes from block
+   - For each tx_hash:
+     - Fetch receipt from DA
+     - Parse logs
+     - Apply address/topic filters
+     - Add matching logs to result set
+3. Return filtered logs with block context
 
 ### Code Organization
 
@@ -735,6 +821,16 @@ The EVM RPC implementation is organized across multiple files:
   - Resolves block via number index to canonical payload
   - Supports full transaction details or just transaction hashes
 
+  **Meta-shard notes**:
+  - The block header field `numShards` tracks how many meta-shards the Rust
+    accumulator emitted (code, storage, and receipt shards). It does **not**
+    equal the number of receipts; use the length of the variable receipt list
+    when iterating receipts from the payload.
+  - Receipt proofs now follow the two-level chain documented in
+    [`PROOFS.md`](PROOFS.md): receipt → receipt shard/meta-shard → block. RPC
+    clients that validate proofs must fetch the meta-shard payload referenced by
+    `metaShardKey` inside the `StateWitness` response.
+
   **Example Request**:
   ```bash
   curl -X POST http://localhost:8545 \
@@ -856,7 +952,37 @@ The EVM RPC implementation is organized across multiple files:
 
 ## 🔄 Recent Updates
 
-### Receipt Processing Centralization (Oct 30, 2025)
+### ObjectRef Optimization & Sharding (November 2025)
+
+**ObjectRef Size Reduction (64 → 36 bytes)**:
+- Removed accumulate-time fields: ServiceID, IndexEnd, Version, LogIndex, TxSlot, Timeslot, GasUsed, EvmBlock
+- Core fields: WorkPackageHash (32B), IndexStart (12 bits), PayloadLength (4B), ObjectKind (1B)
+- Accumulate-time metadata stored separately: +timeslot (4B) +blocknumber (4B) = 44 bytes in JAM State
+- 3-byte packing: index_start (12 bits) | num_segments (12 bits) | last_segment_bytes (12 bits)
+- **Result**: 44% size reduction, 41% more entries per meta-shard (41 → 58)
+
+**Bidirectional Block Mappings**:
+- blocknumber → (work_package_hash [32B] + timeslot [4B]) = 36 bytes
+- work_package_hash → (blocknumber [4B] + timeslot [4B]) = 8 bytes
+- O(1) lookups in both directions for RPC queries
+
+**Meta-Sharding Architecture**:
+- ObjectRefEntry: 68 bytes (32B ObjectID + 36B ObjectRef), down from 96 bytes
+- Capacity: 58 entries per meta-shard (up from 41)
+- Used for contracts with many storage shards (> 62 shards)
+
+**Simplified Dependencies**:
+- Removed ObjectDependency struct with version tracking
+- Changed from Vec<ObjectDependency> to Vec<ObjectId>
+- Dependencies not currently serialized (commented out in effects.rs)
+
+**Impact on RPC Methods**:
+- All storage queries now use sharding resolution path
+- Block queries benefit from bidirectional mappings
+- Receipt queries include blocknumber in 44-byte JAM State entry
+- Historical state queries work through storage shard reconstruction
+
+### Receipt Processing Centralization (October 2024)
 **Receipt processing has been centralized in `BlockRefiner::finalize_receipts()` for improved maintainability**
 
 - **Centralized Flow**: All receipt processing now happens in a single method ([services/evm/src/block.rs:82-176](../services/evm/src/block.rs#L82))

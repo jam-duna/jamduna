@@ -61,14 +61,19 @@ func (m *MockHostEnv) GetHeader() *types.BlockHeader {
 	return &types.BlockHeader{}
 }
 
-// ReadStateWitnessRef returns a stub state witness
-func (m *MockHostEnv) ReadStateWitnessRef(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error) {
-	return types.StateWitness{}, false, nil
-}
-
 // WriteServicePreimageBlob is a stub write method
 func (m *MockHostEnv) WriteServicePreimageBlob(s uint32, blob []byte) {
 	// Stub - does nothing
+}
+
+// ReadObject returns a stub state witness for object lookup
+func (m *MockHostEnv) ReadObject(serviceID uint32, objectID common.Hash) (*types.StateWitness, bool, error) {
+	return &types.StateWitness{}, false, nil
+}
+
+// GetWitnesses returns an empty map of witnesses for testing
+func (m *MockHostEnv) GetWitnesses() map[common.Hash]*types.StateWitness {
+	return make(map[common.Hash]*types.StateWitness)
 }
 
 // WriteServicePreimageLookup is a stub write method

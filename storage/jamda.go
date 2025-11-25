@@ -8,7 +8,6 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-
 type MockJAMDA struct {
 	mu       sync.RWMutex
 	segments map[common.Hash]map[uint16][]byte // workPackageHash -> segmentIndex -> segmentData
@@ -30,13 +29,16 @@ func (m *MockJAMDA) FetchJAMDASegments(workPackageHash common.Hash, indexStart u
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	// fmt.Printf("MockJAMDA.FetchJAMDASegments: requested workPackageHash=%s, indexStart=%d, indexEnd=%d\n",
+	// 	workPackageHash.Hex(), indexStart, indexEnd)
+
 	wpSegments, ok := m.segments[workPackageHash]
 	if !ok {
-		fmt.Printf("MockJAMDA.FetchJAMDASegments: no segments found for workPackageHash=%s (available: ", workPackageHash.Hex())
-		for wph := range m.segments {
-			fmt.Printf("%s ", wph.Hex())
-		}
-		fmt.Printf(")\n")
+		// fmt.Printf("  ❌ NO SEGMENTS FOUND for workPackageHash=%s\n", workPackageHash.Hex())
+		// fmt.Printf("  Available work package hashes:\n")
+		// for wph := range m.segments {
+		// 	fmt.Printf("    - %s\n", wph.Hex())
+		// }
 		return []byte{}, nil
 	}
 
@@ -44,9 +46,8 @@ func (m *MockJAMDA) FetchJAMDASegments(workPackageHash common.Hash, indexStart u
 	for i := indexStart; i < indexEnd; i++ {
 		segment, exists := wpSegments[i]
 		if !exists {
-			fmt.Printf("MockJAMDA.FetchJAMDASegments: segment %d not found for workPackageHash=%s\n",
-				i, workPackageHash.Hex())
-			return []byte{}, fmt.Errorf("segment %d not found", i)
+			fmt.Printf("  ❌ !!! Segment %d NOT FOUND for workPackageHash=%s\n", i, workPackageHash.Hex())
+			return []byte{}, fmt.Errorf("MockJAMDA !!! segment %d not found", i)
 		}
 		payload = append(payload, segment...)
 	}
@@ -56,6 +57,7 @@ func (m *MockJAMDA) FetchJAMDASegments(workPackageHash common.Hash, indexStart u
 		payload = payload[:payloadLength]
 	}
 
+	// fmt.Printf("  ✅ Fetched %d bytes (payload_len=%d)\n", len(payload), payloadLength)
 	return payload, nil
 }
 
@@ -87,12 +89,16 @@ func (m *MockJAMDA) StoreBundleSpecSegments(as *types.AvailabilitySpecifier, d t
 	defer m.mu.Unlock()
 
 	workPackageHash := as.WorkPackageHash
+	// fmt.Printf("MockJAMDA.StoreBundleSpecSegments: workPackageHash=%s, %d segments\n",
+	// 	workPackageHash.Hex(), len(segments))
+
 	// Store each exported segment by index
 	for segmentIdx, segmentData := range segments {
 		if m.segments[workPackageHash] == nil {
 			m.segments[workPackageHash] = make(map[uint16][]byte)
 		}
 		m.segments[workPackageHash][uint16(segmentIdx)] = segmentData
+		// fmt.Printf("====> StoreBundleSpecSegments. Stored segment[%s][%d]: %d bytes\n", workPackageHash.Hex(), segmentIdx, len(segmentData))
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -1790,7 +1791,7 @@ func (vm *VM) hostExport() {
 		return
 	} else {
 		vm.WriteRegister(7, uint64(vm.ExportSegmentIndex)+uint64(len(vm.Exports)))
-		log.Trace(vm.logging, fmt.Sprintf("%s EXPORT#%d OK", vm.ServiceMetadata, uint64(len(vm.Exports))),
+		log.Info(vm.logging, fmt.Sprintf("%s EXPORT#%d OK", vm.ServiceMetadata, uint64(len(vm.Exports))),
 			"p", p, "z", z, "vm.ExportSegmentIndex", vm.ExportSegmentIndex,
 			"segmenthash", fmt.Sprintf("%v", common.Blake2Hash(x)),
 			"segment20", fmt.Sprintf("%x", x[0:20]),
@@ -2006,7 +2007,7 @@ func (vm *VM) hostLog() {
 	if vm.IsChild {
 		serviceMetadata = fmt.Sprintf("%s-child", serviceMetadata)
 	}
-	loggingVerbose := false
+	loggingVerbose := true
 	if vm.logging == log.FirstGuarantor || vm.logging == log.Auditor || vm.logging == log.Builder || vm.logging == log.PvmAuthoring {
 		loggingVerbose = true
 	}
@@ -2121,9 +2122,10 @@ func (vm *VM) HostFetchWitness() error {
 	// Witness path: use ReadStateWitness which returns complete witness with proof
 	// Pass FetchJAMDASegments=true to fetch payload and populate witness.Payload
 	// Use the service_id from register a0 instead of vm.Service_index to support cross-service imports
-	witness, found, err := vm.hostenv.ReadStateWitnessRef(service_id, object_id, true)
+	witness, found, err := vm.hostenv.ReadObject(service_id, object_id)
 	if err != nil {
-		log.Error(vm.logging, funcName+":ReadStateWitness object_id NOT FOUND", "object_id", object_id, "err", err)
+		// Object not found in meta-shard is normal (e.g., EOA has no code, uninitialized storage)
+		log.Trace(vm.logging, funcName+": object not found", "object_id", object_id, "err", err)
 		vm.WriteRegister(7, 0) // Return 0 = not found
 		return nil
 	} else if !found {
@@ -2131,15 +2133,21 @@ func (vm *VM) HostFetchWitness() error {
 		return nil
 	}
 
-	vm.Witnesses[object_id] = witness
+	stateRoot := vm.hostenv.GetParentStateRoot()
+	if !trie.Verify(witness.ServiceID, witness.ObjectID.Bytes(), witness.Value, stateRoot.Bytes(), witness.Path) {
+		log.Error(log.SDB, "BMT Proof verification failed", "object_id", object_id)
+		return fmt.Errorf("BMT Proof verification failed for object %s", object_id)
+	}
+	log.Info(log.SDB, "HostFetchWitness: BMT Proof verified", "object_id", object_id, "serviceID", witness.ServiceID,
+		"MetaShardKey", witness.ObjectID, "value", fmt.Sprintf("%x", witness.Value), "path", witness.Path, "stateRoot", stateRoot)
 
 	objRef := witness.Ref
 	payload := witness.Payload
 
-	// Serialize ObjectRef (64 bytes)
+	// Serialize ObjectRef (37 bytes compact format: 32B work_package_hash + 5B packed fields)
 	serialized := objRef.Serialize()
-	if len(serialized) != 64 {
-		fmt.Printf("%s: invalid ObjectRef serialization size %d (expected 64)\n", funcName, len(serialized))
+	if len(serialized) != types.ObjectRefSerializedSize {
+		fmt.Printf("%s: invalid ObjectRef serialization size %d (expected %d)\n", funcName, len(serialized), types.ObjectRefSerializedSize)
 		vm.WriteRegister(7, 0)
 		return nil
 	}
@@ -2162,7 +2170,7 @@ func (vm *VM) HostFetchWitness() error {
 
 	// Write payload after ObjectRef (if any)
 	if len(payload) > 0 {
-		errCode = vm.WriteRAMBytes(output_ptr+64, payload)
+		errCode = vm.WriteRAMBytes(output_ptr+uint32(types.ObjectRefSerializedSize), payload)
 		if errCode != OK {
 			fmt.Printf("%s: failed to write payload to memory, errCode=%d\n", funcName, errCode)
 			vm.WriteRegister(7, 0)
@@ -2170,48 +2178,96 @@ func (vm *VM) HostFetchWitness() error {
 		}
 	}
 
-	// Log appropriately
-	log.Trace(vm.logging, funcName, "objectID", object_id, "wph", &objRef.WorkPackageHash, "ver", objRef.Version, "len(payload)", objRef.PayloadLength)
-
 	vm.WriteRegister(7, total_size) // Return total bytes written
 	return nil
 }
 
 func (vm *VM) GetBuilderWitnesses() ([]types.ImportSegment, []types.StateWitness, error) {
-	// Get all witnesses
+	// Build per-object witnesses from meta-shard cache
 	type sortableWitness struct {
 		objectID common.Hash
 		witness  types.StateWitness
 	}
 
-	// Collect all witnesses into a slice for sorting
-	sortableRefs := make([]sortableWitness, 0, len(vm.Witnesses))
-	for objectID, witness := range vm.Witnesses {
-		sortableRefs = append(sortableRefs, sortableWitness{objectID, witness})
-	}
-
-	// Sort by WorkPackageHash first (lexicographically), then by IndexStart (ascending)
-	sort.Slice(sortableRefs, func(i, j int) bool {
-		// Compare WorkPackageHash first
-		hashCmp := bytes.Compare(sortableRefs[i].witness.Ref.WorkPackageHash[:], sortableRefs[j].witness.Ref.WorkPackageHash[:])
-		if hashCmp != 0 {
-			return hashCmp < 0
-		}
-		// If WorkPackageHash is equal, compare IndexStart
-		return sortableRefs[i].witness.Ref.IndexStart < sortableRefs[j].witness.Ref.IndexStart
-	})
-
-	// Build ImportSegment list from sorted witnesses
+	msWitnesses := vm.hostenv.GetWitnesses()
+	sortableRefs := make([]sortableWitness, 0)
 	importedSegments := make([]types.ImportSegment, 0)
-	for _, sortable := range sortableRefs {
-		objRef := sortable.witness.Ref
-		for idx := objRef.IndexStart; idx < objRef.IndexEnd; idx++ {
-			segment := types.ImportSegment{
-				RequestedHash: objRef.WorkPackageHash,
-				Index:         idx,
-			}
-			importedSegments = append(importedSegments, segment)
+
+	for msobjectID, ms := range msWitnesses {
+		log.Info(log.SDB, "Processing meta-shard witness", "metaShardObjectID", msobjectID)
+		if ms.ObjectProofs == nil {
+			ms.ObjectProofs = make(map[common.Hash][]common.Hash)
 		}
+
+		// Add a witness for the meta-shard object itself
+		msWitness := types.StateWitness{
+			ServiceID:           ms.ServiceID,
+			ObjectID:            ms.ObjectID,
+			Ref:                 ms.Ref,
+			Path:                ms.Path,
+			Value:               ms.Value,
+			Payload:             ms.MetaShardPayload,
+			MetaShardMerkleRoot: ms.MetaShardMerkleRoot,
+			MetaShardPayload:    ms.MetaShardPayload,
+			BlockNumber:         ms.BlockNumber,
+			Timeslot:            ms.Timeslot,
+			ObjectRefs:          ms.ObjectRefs,
+			Payloads:            ms.Payloads,
+			ObjectProofs:        ms.ObjectProofs,
+		}
+		sortableRefs = append(sortableRefs, sortableWitness{objectID: ms.ObjectID, witness: msWitness})
+
+		for objectID, ref := range ms.ObjectRefs {
+			if ref.WorkPackageHash == (common.Hash{}) {
+				return nil, nil, fmt.Errorf("invalid witness for object %s: empty work_package_hash", objectID.Hex())
+			}
+			// if ref.PayloadLength == 0 {
+			// 	return nil, nil, fmt.Errorf("invalid witness for object %s: zero payload_length", objectID.Hex())
+			// }
+
+			// Generate proof if missing
+			proof := ms.ObjectProofs[objectID]
+			if len(proof) == 0 && len(ms.MetaShardPayload) > 0 {
+				entries, err := parseMetaShardEntries(ms.MetaShardPayload)
+				if err == nil {
+					proof, err = generateMetaShardInclusionProof(ms.MetaShardMerkleRoot, objectID, entries)
+					if err == nil {
+						ms.ObjectProofs[objectID] = proof
+					} else {
+						log.Warn(vm.logging, "Failed to generate meta-shard inclusion proof (builder path)",
+							"objectID", objectID.Hex(), "error", err)
+					}
+				} else {
+					log.Warn(vm.logging, "Failed to parse meta-shard payload for proof generation",
+						"objectID", objectID.Hex(), "error", err)
+				}
+				// TODO: supply objectID, ref + proof in the big extrinsic of proof data
+			}
+
+			// Add import segments for this object
+			numSegments, _ := types.CalculateSegmentsAndLastBytes(ref.PayloadLength)
+			log.Info(log.SDB, "Adding import segment PART1", "objectID", objectID, "workPackageHash", ref.WorkPackageHash,
+				"start", ref.IndexStart, "numSegments", numSegments, "end", ref.IndexStart+numSegments)
+			for idx := ref.IndexStart; idx < ref.IndexStart+numSegments; idx++ {
+				importedSegments = append(importedSegments, types.ImportSegment{
+					RequestedHash: ref.WorkPackageHash,
+					Index:         idx,
+				})
+			}
+		}
+		ref := ms.Ref
+		numSegments, _ := types.CalculateSegmentsAndLastBytes(ref.PayloadLength)
+		log.Info(log.SDB, "Adding import segment PART2", "objectID", msobjectID, "workPackageHash", ref.WorkPackageHash,
+			"start", ref.IndexStart, "numSegments", numSegments, "end", ref.IndexStart+numSegments,
+			"payloadLength", ref.PayloadLength)
+		for idx := ref.IndexStart; idx < ref.IndexStart+numSegments; idx++ {
+			importedSegments = append(importedSegments, types.ImportSegment{
+				RequestedHash: ref.WorkPackageHash,
+				Index:         idx,
+			})
+		}
+
+		sortableRefs = append(sortableRefs, sortableWitness{objectID: msobjectID, witness: *ms})
 	}
 
 	// Sort witnesses by objectID for deterministic ordering
@@ -2219,11 +2275,113 @@ func (vm *VM) GetBuilderWitnesses() ([]types.ImportSegment, []types.StateWitness
 		return bytes.Compare(sortableRefs[i].objectID[:], sortableRefs[j].objectID[:]) < 0
 	})
 
-	// Extract witnesses in objectID order
-	witnesses := make([]types.StateWitness, 0, len(sortableRefs))
+	witnessSlice := make([]types.StateWitness, 0, len(sortableRefs))
 	for _, sortable := range sortableRefs {
-		witnesses = append(witnesses, sortable.witness)
+		witnessSlice = append(witnessSlice, sortable.witness)
+	}
+	log.Info(log.SDB, "Compiled builder witnesses", "numWitnesses", len(witnessSlice), "numImportSegments", len(importedSegments))
+	return importedSegments, witnessSlice, nil
+}
+
+// parseMetaShardEntries extracts ObjectRefEntry list from meta-shard payload
+// The payload format matches metashard_lookup.go DeserializeMetaShard:
+// [8B shard_id][32B merkle_root][2B count][entries...]
+// Each entry: [32B object_id][37B object_ref]
+func parseMetaShardEntries(payload []byte) ([]ObjectRefEntry, error) {
+	if len(payload) < 42 { // 8 + 32 + 2 = minimum header size
+		return nil, fmt.Errorf("meta-shard payload too short")
 	}
 
-	return importedSegments, witnesses, nil
+	// Skip shard_id (8 bytes) and merkle_root (32 bytes)
+	offset := 40
+
+	// Parse entry count (2 bytes)
+	count := binary.LittleEndian.Uint16(payload[offset : offset+2])
+	offset += 2
+
+	entries := make([]ObjectRefEntry, 0, count)
+	for i := uint16(0); i < count; i++ {
+		if offset+69 > len(payload) { // 32 (object_id) + 37 (object_ref)
+			return nil, fmt.Errorf("meta-shard entry %d truncated", i)
+		}
+
+		var entry ObjectRefEntry
+		copy(entry.ObjectID[:], payload[offset:offset+32])
+		offset += 32
+
+		// Deserialize ObjectRef (37 bytes)
+		objRef, err := types.DeserializeObjectRef(payload, &offset)
+		if err != nil {
+			return nil, fmt.Errorf("failed to deserialize ObjectRef at entry %d: %v", i, err)
+		}
+		entry.ObjectRef = objRef
+		entries = append(entries, entry)
+	}
+
+	return entries, nil
+}
+
+// generateMetaShardInclusionProof generates a BMT inclusion proof for an objectID in meta-shard entries
+func generateMetaShardInclusionProof(merkleRoot [32]byte, objectID common.Hash, entries []ObjectRefEntry) ([]common.Hash, error) {
+	// Find the entry for this objectID
+	entryIndex := -1
+	for i, entry := range entries {
+		if entry.ObjectID == objectID {
+			entryIndex = i
+			break
+		}
+	}
+
+	if entryIndex == -1 {
+		return nil, fmt.Errorf("objectID %s not found in meta-shard entries", objectID.Hex())
+	}
+
+	// Convert entries to BMT key-value pairs format
+	kvPairs := make([][2][]byte, 0, len(entries))
+	for _, entry := range entries {
+		// Serialize the ObjectRef for the value
+		objectRefBytes := entry.ObjectRef.Serialize()
+
+		// Use ObjectID as key, serialized ObjectRef as value
+		kvPairs = append(kvPairs, [2][]byte{
+			entry.ObjectID.Bytes(), // key: 32-byte ObjectID
+			objectRefBytes,         // value: 37-byte serialized ObjectRef
+		})
+	}
+
+	// Create BMT tree from the entries (matching Rust compute_entries_bmt_root approach)
+	metaShardTree := trie.NewMerkleTree(kvPairs)
+
+	// Verify the tree root matches the expected merkle root from meta-shard header
+	// This is critical security validation - ensures the meta-shard payload hasn't been tampered with
+	computedRoot := metaShardTree.GetRoot()
+	if computedRoot != common.BytesToHash(merkleRoot[:]) {
+		return nil, fmt.Errorf("meta-shard BMT root mismatch: expected %x, computed %x",
+			merkleRoot, computedRoot)
+	}
+
+	// Generate BMT inclusion proof for the target objectID
+	// This proves that the ObjectRef for this objectID is included in the meta-shard
+	proofBytes, err := metaShardTree.GetPath(objectID.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate BMT proof for objectID %s: %v", objectID.Hex(), err)
+	}
+
+	// Convert [][]byte to []common.Hash format expected by StateWitness.ObjectProofs
+	proof := make([]common.Hash, len(proofBytes))
+	for i, proofByte := range proofBytes {
+		if len(proofByte) != 32 {
+			return nil, fmt.Errorf("invalid proof hash length: expected 32, got %d", len(proofByte))
+		}
+		copy(proof[i][:], proofByte)
+	}
+
+	log.Debug(log.SDB, "Generated meta-shard BMT inclusion proof",
+		"objectID", objectID.Hex(),
+		"entryIndex", entryIndex,
+		"totalEntries", len(entries),
+		"proofLength", len(proof),
+		"merkleRoot", fmt.Sprintf("%x", merkleRoot))
+
+	return proof, nil
 }

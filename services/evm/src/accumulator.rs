@@ -2,120 +2,60 @@
 
 use alloc::{format, vec::Vec};
 use utils::{
-    functions::{log_error, log_debug, log_info, AccumulateInput},
+    functions::{log_error, log_info, format_segment, AccumulateInput},
     constants::FULL,
 };
 use crate::{
-    sharding::{ObjectKind, format_object_id},
-    writes::{ExecutionEffectsEnvelope, deserialize_execution_effects},
+    sharding::format_object_id,
+    block::{block_number_to_object_id, EvmBlockPayload},
 };
+use crate::mmr::MMR;
 
 /// BlockAccumulator manages block storage and retrieval operations
 pub struct BlockAccumulator {
     #[allow(dead_code)]
     pub service_id: u32,
-    pub envelopes: Vec<ExecutionEffectsEnvelope>,
+    pub timeslot: u32,
+    pub block_number: u32,
+    pub mmr: MMR,
 }
 
 impl BlockAccumulator {
-    /// Accumulate all execution effects and finalize block
+    /// Accumulate all rollup blocks and finalize
     ///
-    /// Returns the accumulate root - MMR super_peak committing to all blocks
-    /// Appends work_package_hashes to MMR and returns super_peak as commitment
-    /// This ensures finalization commits to entire block history, never constant zero
+    /// Processes each work package by:
+    /// 1. Deserializing compact meta-shard format from refine output
+    /// 2. Writing MetaSSR (ld byte) to special key
+    /// 3. Writing MetaShard ObjectRefs to JAM State
+    /// 4. Writing block mappings (blocknumber ↔ work_package_hash)
+    /// 5. Appending work_package_hash to MMR
+    ///
+    /// Returns the MMR root committing to all blocks processed so far
     pub fn accumulate(service_id: u32, timeslot: u32, accumulate_inputs: &[AccumulateInput]) -> Option<[u8; 32]> {
-        let accumulator = Self::new(service_id, timeslot, accumulate_inputs)?;
-        let envelope_count = accumulator.envelopes.len();
+        let mut accumulator = Self::new(service_id, timeslot)?;
 
-        for envelope_idx in 0..envelope_count {
-            let envelope = &accumulator.envelopes[envelope_idx];
-            log_info(&format!("📦 Processing envelope #{} with {} candidates", envelope_idx, envelope.writes.len()));
-            let writes = envelope.writes.clone();
-            for candidate in &writes {
-                let candidate = candidate.clone();
+        for (idx, input) in accumulate_inputs.iter().enumerate() {
+            let AccumulateInput::OperandElements(operand) = input else {
+                log_error(&format!("  Input #{}: Not OperandElements, skipping", idx));
+                continue;
+            };
 
-                // IMPORTANT: Accumulate ONLY writes meta-sharding infrastructure to JAM State.
-                //
-                // Meta-shard ObjectRefs (MetaShard, MetaSsrMetadata) are written to JAM State
-                // because they provide the routing table for locating all other objects.
-                //
-                // All other objects (Code, Receipts, Blocks, BlockMetadata, etc.) remain as
-                // DA-only artifacts - their payloads are already in JAM DA segments, and they
-                // do NOT need ObjectRef pointers in JAM State. These objects are accessed
-                // directly via their deterministic ObjectIDs during refine import.
-                //
-                // This design keeps JAM State minimal (only routing infrastructure) while
-                // JAM DA holds all actual data (code, receipts, blocks, storage).
-                match candidate.object_ref.object_kind {
-                    kind if kind == ObjectKind::MetaShard as u8 => {
-                        // Meta-shard objects - write ObjectRef to JAM State
-                        // Payload is stored in DA, JAM State only tracks ObjectRef pointer
-                        log_info(&format!("📝 Writing MetaShard ObjectRef for object_id: {}", format_object_id(&candidate.object_id)));
-                        candidate.object_ref.write(&candidate.object_id);
-                    }
-                    kind if kind == ObjectKind::MetaSsrMetadata as u8 => {
-                        // Meta-SSR metadata - write ObjectRef to JAM State
-                        log_info(&format!("📝 Writing MetaSsrMetadata ObjectRef for object_id: {}", format_object_id(&candidate.object_id)));
-                        candidate.object_ref.write(&candidate.object_id);
-                    }
-                    _ => {
-                        // Other object kinds (Code, Receipt, Block, BlockMetadata, etc.)
-                        // are intentionally NOT written to JAM State during accumulate.
-                        // They remain DA-only artifacts, accessible via deterministic ObjectIDs.
-                        log_debug(&format!(
-                            "  Skipping ObjectKind {} (DA-only): object_id={}",
-                            candidate.object_ref.object_kind,
-                            format_object_id(&candidate.object_id)
-                        ));
-                    }
-                }
+            // Process this work package's rollup block
+            accumulator.rollup_block(operand)?;
+
+            // Delete old blocks to prevent unbounded state growth
+            const BLOCK_RETENTION_LIMIT: u32 = 10000;
+            if accumulator.block_number > BLOCK_RETENTION_LIMIT {
+                let old_block_number = accumulator.block_number - BLOCK_RETENTION_LIMIT;
+                crate::block::EvmBlockPayload::delete_block(service_id, old_block_number);
             }
         }
-
-        // Build block index: collect all unique work_package_hashes from envelopes
-        let mut work_package_hashes = Vec::new();
-        for envelope in &accumulator.envelopes {
-            // Get work_package_hash from the first write intent in each envelope
-            if let Some(first_write) = envelope.writes.first() {
-                let wph = first_write.object_ref.work_package_hash;
-                // Only add if not already present (deduplicate)
-                if !work_package_hashes.contains(&wph) {
-                    work_package_hashes.push(wph);
-                }
-            }
-        }
-
-        // Write block_number → work_package_hash mapping to JAM State
-        // This enables queries like "what work packages contributed to block N?"
-        let block_number = timeslot; // For now, use timeslot as block_number (1:1 mapping)
-        if !work_package_hashes.is_empty() {
-            Self::write_block_index(block_number, &work_package_hashes);
-        }
-
-        // Compute accumulate root using MMR (Merkle Mountain Range)
-        // Append all work_package_hashes to MMR and return super_peak as commitment
-        use crate::mmr::MMR;
-
-        // Read existing MMR from JAM State (or create new if first block)
-        let mut mmr = MMR::read_mmr(service_id).unwrap_or_else(|| {
-            log_info("📋 Creating new MMR (first block)");
-            MMR::new()
-        });
-
-        // Append each work_package_hash to the MMR
-        // This creates an incremental commitment to all blocks
-        for wph in &work_package_hashes {
-            mmr.append(*wph);
-        }
-
-        // Write updated MMR back to JAM State BEFORE computing root
-        // CRITICAL: MMR write must succeed, otherwise auditors can't reproduce the commitment
-        // If write fails (WHAT/FULL), we must return None to signal accumulate failure
-        let accumulate_root = match mmr.write_mmr() {
+        EvmBlockPayload::write_blocknumber_key(accumulator.block_number);
+        let accumulate_root = match accumulator.mmr.write_mmr() {
             Some(root) => {
                 log_info(&format!(
-                    "✅ Accumulate complete. Appended {} work packages to MMR. Root: {}",
-                    work_package_hashes.len(),
+                    "✅ Accumulate complete. Next BN {}. Root: {}",
+                    accumulator.block_number,
                     format_object_id(&root)
                 ));
                 root
@@ -125,206 +65,429 @@ impl BlockAccumulator {
                 return None;
             }
         };
-
         Some(accumulate_root)
     }
 
-    /// Create new BlockAccumulator and determine next block number from storage
-    fn new(service_id: u32, timeslot: u32, accumulate_inputs: &[AccumulateInput]) -> Option<Self> {
-        log_info(&format!("🏭 Creating BlockAccumulator for service_id={}, timeslot={}, inputs={}", service_id, timeslot, accumulate_inputs.len()));
-        
-        // Read storage and validate block sequence BEFORE processing any inputs.
-        // This ensures we fail fast if the inputs are for the wrong block number,
-        // preventing any storage corruption.
-        let envelopes =
-            match Self::collect_envelopes(accumulate_inputs) {
-                Some(result) => {
-                    log_info(&format!("✅ Collected {} envelopes from {} inputs", result.len(), accumulate_inputs.len()));
-                    result
-                },
-                None => {
-                    log_error("❌ Failed to collect envelopes from accumulate inputs");
+    /// Process a single rollup block from refine output
+    ///
+    /// Deserializes compact meta-shard format and writes to JAM State:
+    /// - MetaSSR (ld byte) → special key service_id || "SSR"
+    /// - MetaShard ObjectRefs → indexed by meta-shard object_id
+    /// - Block mapping → bidirectional (blocknumber ↔ work_package_hash)
+    fn rollup_block(
+        &mut self,
+        operand: &utils::functions::AccumulateOperandElements,
+    ) -> Option<()> {
+        let data = operand.result.ok.as_ref()?;
+        let wph = operand.work_package_hash;
+
+        // Parse compact format: N entries × (1B ld + prefix_bytes + 5B packed ObjectRef)
+        // Note: Each entry has its own ld value (meta-shards can have different depths after splits)
+        //
+        // CRITICAL: Even if data.is_empty() (no meta-shard updates), we MUST still write
+        // the block mapping and update the MMR. Otherwise "idle" blocks (empty or no splits)
+        // vanish from the block history, breaking bidirectional lookups and finalization.
+
+        let global_ld = if data.is_empty() {
+            log_info("📥 Empty compact format, no meta-shard entries (idle block)");
+            0u8 // No meta-shard updates, use ld=0
+        } else {
+            log_info(&format!("📥 Deserializing compact format: {} bytes total", data.len()));
+
+            // Parse variable-length entries
+            let mut offset = 0;
+            let mut num_entries = 0;
+            let mut max_ld = 0u8; // Track maximum ld for MetaSSR
+
+            while offset < data.len() {
+                if offset + 1 > data.len() {
+                    log_error(&format!("❌ Invalid compact format: truncated ld at offset {}", offset));
                     return None;
                 }
-            };
 
+                let ld = data[offset];
+                max_ld = max_ld.max(ld);
+                offset += 1;
 
-        // First check if we can read the block number key
-        use crate::block::EvmBlockPayload;
-        match EvmBlockPayload::read_blocknumber_key(service_id) {
-            Some(block_num) => {
-                log_info(&format!("📊 Successfully read block_number={} from BLOCK_NUMBER_KEY", block_num));
-            },
+                let prefix_bytes = ((ld + 7) / 8) as usize;
+                let entry_size = prefix_bytes + 5; // prefix + 5-byte packed ObjectRef
+
+                if offset + entry_size > data.len() {
+                    log_error(&format!(
+                        "❌ Invalid compact format: truncated entry at offset {} (need {} more bytes)",
+                        offset, entry_size
+                    ));
+                    return None;
+                }
+
+                let entry_bytes = &data[offset..offset + entry_size];
+                self.write_metashard(entry_bytes, ld, prefix_bytes, wph, num_entries)?;
+
+                offset += entry_size;
+                num_entries += 1;
+            }
+
+            log_info(&format!("📥 Deserialized {} meta-shard entries, max ld={}", num_entries, max_ld));
+            max_ld
+        };
+
+        // ALWAYS write MetaSSR hint, even for idle blocks (ensures SSR key exists for Go lookups)
+        self.write_metassr(global_ld);
+
+        // ALWAYS write block mapping, even for idle blocks
+        // This ensures every block appears in the bidirectional mapping and MMR
+        self.write_block(wph, self.timeslot)?;
+
+        Some(())
+    }
+
+    /// Write MetaSSR global_depth hint to JAM State special key (monotonic increase only)
+    ///
+    /// Key format: service_id (4 bytes) || "SSR" (3 bytes) || padding
+    /// Value: single ld byte indicating maximum meta-sharding tree depth
+    ///
+    /// The global_depth is monotonically increasing - we only write if the new value
+    /// is greater than the existing value. This ensures the hint is always valid.
+    ///
+    /// CRITICAL: We must detect NONE/WHAT sentinels properly. If the key is missing,
+    /// we MUST write it (even if new_ld=0) so that Go's metashard_lookup.go can read it.
+    fn write_metassr(&self, new_ld: u8) {
+        use utils::host_functions::{read, write};
+        use utils::constants::{NONE, WHAT};
+
+        let mut ssr_key = [0u8; 32];
+        ssr_key[0..4].copy_from_slice(&self.service_id.to_le_bytes());
+        ssr_key[4..7].copy_from_slice(b"SSR");
+
+        // Read current global_depth
+        // read(s: service_id, ko: key_offset, kz: key_size, o: out_offset, f: out_offset_within, l: length)
+        let mut buffer = [0u8; 1];
+        let result = unsafe {
+            read(
+                self.service_id as u64,       // s: service_id
+                ssr_key.as_ptr() as u64,       // ko: key offset
+                ssr_key.len() as u64,          // kz: key size
+                buffer.as_mut_ptr() as u64,    // o: output offset
+                0,                              // f: offset within (0 = start)
+                buffer.len() as u64,           // l: length to read
+            )
+        };
+
+        // Check for sentinel values
+        let current_ld_opt = if result == NONE {
+            None // Key doesn't exist yet
+        } else if result == WHAT {
+            log_error("❌ write_metassr: WHAT error (wrong mode)");
+            return; // Shouldn't happen, but bail out
+        } else if result > 0 {
+            Some(buffer[0]) // Key exists, return the value
+        } else {
+            None // Zero bytes read = empty value, treat as missing
+        };
+
+        // Determine if we should write
+        let should_write = match current_ld_opt {
             None => {
-                log_error(&format!("❌ Failed to read BLOCK_NUMBER_KEY for service_id={}", service_id));
-                return None;
+                // Key doesn't exist - MUST write even if new_ld=0
+                // Otherwise Go's metashard_lookup.go will error out
+                log_info(&format!(
+                    "📝 Initializing MetaSSR global_depth: {} (first write)",
+                    new_ld
+                ));
+                true
+            }
+            Some(current_ld) => {
+                // Key exists - only write if monotonically increasing
+                if new_ld > current_ld {
+                    log_info(&format!(
+                        "📝 Updating MetaSSR global_depth: {} → {} (monotonic increase)",
+                        current_ld, new_ld
+                    ));
+                    true
+                } else {
+                    false
+                }
+            }
+        };
+
+        if should_write {
+            unsafe {
+                write(
+                    ssr_key.as_ptr() as u64,
+                    ssr_key.len() as u64,
+                    [new_ld].as_ptr() as u64,
+                    1,
+                );
             }
         }
+    }
+
+    /// Deserialize and write a single MetaShard ObjectRef to JAM State
+    ///
+    /// Compact entry format: ld_prefix (variable) + 5-byte packed ObjectRef
+    /// Packed ObjectRef: index_start (12 bits) | index_end (12 bits) | last_segment_size (12 bits) | object_kind (4 bits)
+    ///
+    /// Validates object_kind is MetaShard, then writes ObjectRef indexed by meta-shard object_id
+    fn write_metashard(
+        &self,
+        entry_bytes: &[u8],
+        ld: u8,
+        prefix_bytes: usize,
+        work_package_hash: [u8; 32],
+        entry_index: usize,
+    ) -> Option<()> {
+        use utils::objects::ObjectRef;
+        use crate::sharding::ObjectKind;
+        use crate::meta_sharding::meta_shard_object_id;
+
+        // Reconstruct meta-shard object_id from ld and prefix
+        let mut prefix56 = [0u8; 7];
+        if prefix_bytes > 0 {
+            prefix56[..prefix_bytes].copy_from_slice(&entry_bytes[0..prefix_bytes]);
+        }
+        let object_id = meta_shard_object_id(self.service_id, ld, &prefix56);
+
+        // Unpack 5-byte ObjectRef from compact format
+        let packed_bytes = &entry_bytes[prefix_bytes..prefix_bytes + 5];
+        let packed: u64 = ((packed_bytes[0] as u64) << 32) |
+                         ((packed_bytes[1] as u64) << 24) |
+                         ((packed_bytes[2] as u64) << 16) |
+                         ((packed_bytes[3] as u64) << 8) |
+                         (packed_bytes[4] as u64);
+
+        let index_start = ((packed >> 28) & 0xFFF) as u16; // Bits 28-39: DA segment start
+        let index_end = ((packed >> 16) & 0xFFF) as u16;   // Bits 16-27: DA segment end
+        let last_segment_size = ((packed >> 4) & 0xFFF) as u16; // Bits 4-15: bytes in last segment
+        let object_kind = (packed & 0xF) as u8;            // Bits 0-3: object kind
+
+        // Validate object_kind is MetaShard
+        if object_kind != ObjectKind::MetaShard as u8 {
+            log_error(&format!(
+                "❌ Entry {}: Expected MetaShard (kind={}), got kind={}",
+                entry_index, ObjectKind::MetaShard as u8, object_kind
+            ));
+            return None;
+        }
+
+        // Reconstruct total payload_length from DA segment info
+        use utils::constants::SEGMENT_SIZE;
+        let num_segments = index_end.saturating_sub(index_start);
+        let payload_length = if num_segments == 0 {
+            0 // Empty payload
+        } else if num_segments == 1 {
+            last_segment_size as u32 // Single segment
+        } else {
+            // Multiple segments: (n-1) full segments + last partial segment
+            ((num_segments - 1) as u32 * SEGMENT_SIZE as u32) + last_segment_size as u32
+        };
+
+        log_info(&format!(
+            "📝 Entry {}: Writing MetaShard ld={}, object_id={}, index_start={}, payload_len={}, bytes={}",
+            entry_index, ld, format_object_id(&object_id), index_start, payload_length, format_segment(entry_bytes)
+        ));
+
+        // Create full ObjectRef with work_package_hash and write to JAM State
+        let object_ref = ObjectRef {
+            work_package_hash,
+            index_start,
+            payload_length,
+            object_kind,
+        };
+
+        let result = object_ref.write(&object_id, self.timeslot, self.block_number);
+        if result == FULL as u64 {
+            log_error("❌ MetaShard ObjectRef write failed: JAM State FULL");
+            return None;
+        }
+
+        // If write returned NONE, this meta-shard is new (first write)
+        // This happens in two cases:
+        // 1. Genesis: first time writing any meta-shard
+        // 2. Split: child shards are being written for the first time
+        //
+        // In case 2, we MUST delete all ancestor shards at lower depths to avoid
+        // ambiguity during probe-backwards lookup. Otherwise lookup would find the
+        // stale parent shard instead of the correct child shard!
+        use utils::constants::NONE;
+        if result == NONE {
+            log_info(&format!("🆕 First write for meta-shard ld={} - deleting ancestor shards", ld));
+            self.delete_ancestor_shards(&object_id, ld)?;
+        }
+
+        log_info(&format!("✅ MetaShard ObjectRef written successfully, result={}", result));
+
+        Some(())
+    }
+
+    /// Delete all ancestor meta-shards at lower depths to prevent stale lookups
+    ///
+    /// When a meta-shard splits, we must delete the parent shard at `ld-1`, `ld-2`, ... 0
+    /// that could match this object_id's prefix. Otherwise probe-backwards lookup would
+    /// find the stale parent instead of the correct child shard.
+    ///
+    /// Algorithm:
+    /// - Start at `ld-1` and work down to 0
+    /// - For each depth, compute the ancestor object_id by masking the prefix
+    /// - Delete that key from JAM State
+    fn delete_ancestor_shards(&self, object_id: &[u8; 32], current_ld: u8) -> Option<()> {
+        use utils::host_functions::write;
+        use crate::meta_sharding::meta_shard_object_id;
+
+        if current_ld == 0 {
+            // No ancestors to delete
+            return Some(());
+        }
+
+        let mut prefix56 = [0u8; 7];
+        prefix56.copy_from_slice(&object_id[1..8]);
+
+        for ancestor_ld in (0..current_ld).rev() {
+            // Compute ancestor prefix by masking to ancestor_ld bits
+            let prefix_bytes = ((ancestor_ld + 7) / 8) as usize;
+            let mut masked_prefix = [0u8; 7];
+
+            if prefix_bytes > 0 {
+                masked_prefix[..prefix_bytes].copy_from_slice(&prefix56[..prefix_bytes]);
+
+                // Mask the last byte to clear unused bits
+                let remaining_bits = ancestor_ld % 8;
+                if remaining_bits > 0 && prefix_bytes > 0 {
+                    let mask = 0xFF << (8 - remaining_bits);
+                    masked_prefix[prefix_bytes - 1] &= mask;
+                }
+            }
+
+            let ancestor_object_id = meta_shard_object_id(self.service_id, ancestor_ld, &masked_prefix);
+
+            log_info(&format!(
+                "🗑️  Deleting ancestor meta-shard: ld={}, object_id={}",
+                ancestor_ld,
+                format_object_id(&ancestor_object_id)
+            ));
+
+            // Delete by writing empty value (JAM State semantics)
+            unsafe {
+                write(
+                    ancestor_object_id.as_ptr() as u64,
+                    ancestor_object_id.len() as u64,
+                    0, // NULL pointer = delete
+                    0, // 0 length = delete
+                );
+            }
+        }
+
+        Some(())
+    }
+
+    /// Initialize BlockAccumulator by reading state from JAM State
+    ///
+    /// Reads:
+    /// - block_number: Next block number to write (defaults to 1 if not found)
+    /// - MMR: Merkle Mountain Range of all previous blocks (creates new if genesis)
+    fn new(service_id: u32, timeslot: u32) -> Option<Self> {
+        log_info(&format!("🏭 Creating BlockAccumulator for service_id={}, timeslot={}", service_id, timeslot));
+
+        // Read current block number from JAM State
+        let block_number = match EvmBlockPayload::read_blocknumber_key(service_id) {
+            Some(block_num) => {
+                log_info(&format!("📊 Read block_number={} from JAM State", block_num));
+                block_num
+            },
+            None => {
+                log_error(&format!("❌ Failed to read block_number for service_id={}, defaulting to 1", service_id));
+                1
+            }
+        };
+
+        // Read MMR from JAM State (or create new if genesis)
+        let mmr = MMR::read_mmr(service_id).unwrap_or_else(|| {
+            log_info("📋 Creating new MMR (genesis)");
+            MMR::new()
+        });
 
         Some(BlockAccumulator {
             service_id,
-            envelopes,
+            timeslot,
+            block_number,
+            mmr,
         })
     }
 
-    /// Deserialize accumulate inputs into envelopes
-    fn collect_envelopes(
-        accumulate_inputs: &[AccumulateInput],
-    ) -> Option<Vec<ExecutionEffectsEnvelope>> {
-        let mut envelopes: Vec<ExecutionEffectsEnvelope> = Vec::new();
-        let mut envelope_idx: usize = 0;
-
-        for (idx, input) in accumulate_inputs.iter().enumerate() {
-            let AccumulateInput::OperandElements(operand) = input else {
-                log_error(&format!("  Input #{}: Not OperandElements, skipping", idx));
-                continue;
-            };
-
-            let Some(ok_data) = operand.result.ok.as_ref() else {
-                log_error("    ❌ No ok_data (result failed)");
-                continue;
-            };
-
-            match deserialize_execution_effects(ok_data) {
-                Some(envelope) => {
-                    log_debug(&format!(
-                        "  Deserialized input #{}: {} candidate writes, export_count={}, gas_used={}",
-                        envelope_idx,
-                        envelope.writes.len(),
-                        envelope.export_count,
-                        envelope.gas_used,
-                    ));
-
-                    envelopes.push(envelope);
-                    envelope_idx += 1;
-                }
-                None => {
-                    log_error(&format!("  ❌ Failed to deserialize input #{}", idx));
-                }
-            }
-        }
-
-        if envelopes.is_empty() {
-            log_error("Accumulate: no envelopes deserialized from inputs");
-            return None;
-        }
-
-        Some(envelopes)
-    }
-
-    // ===== Block Index Functions =====
-
-    /// Compute JAM State key for block_number → work_package_hash array
+    /// Write bidirectional block mappings to JAM State and update MMR
     ///
-    /// Key format: keccak256("block_index" || block_number)
-    fn block_index_key(block_number: u32) -> [u8; 32] {
-        use utils::hash_functions::keccak256;
-
-        let mut preimage = alloc::vec::Vec::new();
-        preimage.extend_from_slice(b"block_index");
-        preimage.extend_from_slice(&block_number.to_le_bytes());
-
-        *keccak256(&preimage).as_fixed_bytes()
-    }
-
-    /// Write block_number → Vec<work_package_hash> mapping to JAM State
+    /// Writes:
+    /// - blocknumber → (work_package_hash, timeslot)
+    /// - work_package_hash → (blocknumber, timeslot)
     ///
-    /// Format: [4B count][32B wph1][32B wph2]...
-    /// This enables queries like "what work packages contributed to block N?"
-    fn write_block_index(block_number: u32, work_package_hashes: &[[u8; 32]]) {
+    /// Then appends work_package_hash to MMR and increments block_number
+    ///
+    /// Returns None if any write fails (FULL), Some(()) on success
+    fn write_block(&mut self, work_package_hash: [u8; 32], timeslot: u32) -> Option<()> {
         use utils::host_functions::write as host_write;
 
-        // Serialize: count (4 bytes) + hashes (32 bytes each)
-        let mut data = alloc::vec::Vec::new();
-        data.extend_from_slice(&(work_package_hashes.len() as u32).to_le_bytes());
-        for wph in work_package_hashes {
-            data.extend_from_slice(wph);
-        }
+        // Write blocknumber → work_package_hash (32 bytes) + timeslot (4 bytes)
+        let bn_key = block_number_to_object_id(self.block_number);
+        let mut bn_data = Vec::with_capacity(36);
+        bn_data.extend_from_slice(&work_package_hash);
+        bn_data.extend_from_slice(&timeslot.to_le_bytes());
 
-        let key = Self::block_index_key(block_number);
-
-        // Write to JAM State
-        let result = unsafe {
+        let result1 = unsafe {
             host_write(
-                key.as_ptr() as u64,
-                key.len() as u64,
-                data.as_ptr() as u64,
-                data.len() as u64,
+                bn_key.as_ptr() as u64,
+                bn_key.len() as u64,
+                bn_data.as_ptr() as u64,
+                bn_data.len() as u64,
             )
         };
 
-        // Check for failure codes
-        if result == FULL {
+        // Validate first write succeeded
+        if result1 == FULL {
             log_error(&format!(
-                "❌ Failed to write block index for block {} (result={})",
-                block_number, result
+                "❌ Failed to write blocknumber→wph mapping for block {}: JAM State FULL",
+                self.block_number
             ));
-        } else {
-            log_info(&format!(
-                "📚 Wrote block index: block {} has {} work packages ({} bytes)",
-                block_number,
-                work_package_hashes.len(),
-                data.len()
-            ));
+            return None;
         }
-    }
 
-    /// Read block_number → Vec<work_package_hash> mapping from JAM State
-    #[allow(dead_code)]
-    pub fn read_block_index(service_id: u32, block_number: u32) -> Option<Vec<[u8; 32]>> {
-        use utils::host_functions::read as host_read;
+        // Write reverse mapping: work_package_hash → blocknumber (4 bytes) + timeslot (4 bytes)
+        let wph_key = work_package_hash;
+        let mut wph_data = Vec::with_capacity(8);
+        wph_data.extend_from_slice(&self.block_number.to_le_bytes());
+        wph_data.extend_from_slice(&timeslot.to_le_bytes());
 
-        let key = Self::block_index_key(block_number);
-
-        // Allocate buffer for reading block index data
-        let mut buffer = alloc::vec![0u8; 10000]; // Large enough for ~300 work package hashes
-
-        let result = unsafe {
-            host_read(
-                service_id as u64,
-                key.as_ptr() as u64,
-                key.len() as u64,
-                buffer.as_mut_ptr() as u64,
-                0 as u64,
-                buffer.len() as u64,
+        let result2 = unsafe {
+            host_write(
+                wph_key.as_ptr() as u64,
+                wph_key.len() as u64,
+                wph_data.as_ptr() as u64,
+                wph_data.len() as u64,
             )
         };
 
-        // Check for failure codes
-        if result == u64::MAX || result == u64::MAX - 1 {
-            return None;
-        }
-
-        let data_len = result as usize;
-        if data_len < 4 {
-            return None;
-        }
-
-        // Parse count
-        let count = u32::from_le_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]) as usize;
-
-        // Verify size
-        let expected_size = 4 + count * 32;
-        if data_len != expected_size {
+        // Validate second write succeeded
+        if result2 == FULL {
             log_error(&format!(
-                "Block index size mismatch: expected {}, got {}",
-                expected_size,
-                data_len
+                "❌ Failed to write wph→blocknumber mapping for block {}: JAM State FULL",
+                self.block_number
             ));
             return None;
         }
 
-        // Parse hashes
-        let mut hashes = Vec::new();
-        for i in 0..count {
-            let offset = 4 + i * 32;
-            let mut hash = [0u8; 32];
-            hash.copy_from_slice(&buffer[offset..offset + 32]);
-            hashes.push(hash);
-        }
+        // Both writes succeeded - log and update internal state
+        log_info(&format!(
+            "📚 Wrote block mappings: {} ↔ {} (@ timeslot {})",
+            self.block_number,
+            format_object_id(&work_package_hash),
+            timeslot
+        ));
 
-        Some(hashes)
-    }
+        // Update MMR with this block's work_package_hash
+        self.mmr.append(work_package_hash);
 
+        // Increment block_number for next block
+        self.block_number += 1;
+
+        Some(())
+    }    
 }
 

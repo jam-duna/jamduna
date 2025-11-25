@@ -1095,18 +1095,6 @@ func (n *Node) GetServiceStorage(serviceIndex uint32, k []byte) ([]byte, bool, e
 	return n.store.GetServiceStorage(serviceIndex, k)
 }
 
-func (n *Node) ReadStateWitnessRef(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error) {
-	return n.getState().ReadStateWitnessRef(serviceID, objectID, fetchPayloadFromDA)
-}
-
-func (n *Node) ReadStateWitnessRaw(serviceID uint32, objectID common.Hash) (types.StateWitnessRaw, bool, common.Hash, error) {
-	return n.getState().ReadStateWitnessRaw(serviceID, objectID)
-}
-
-func (n *Node) GetStateWitnesses(workReports []*types.WorkReport) ([]types.StateWitness, common.Hash, error) {
-	return n.getState().GetStateWitnesses(workReports)
-}
-
 func (n *Node) SubmitAndWaitForPreimage(ctx context.Context, serviceIndex uint32, preimage []byte) (err error) {
 	errCh := make(chan error, 1)
 	preimageHash := common.Blake2Hash(preimage)
@@ -2755,7 +2743,7 @@ func (n *NodeContent) getTargetStateDB(blockNumber string) (*statedb.StateDB, er
 
 	// Fetch the block to get its stateRoot
 	// Use EVMServiceCode for now - could be parameterized if needed
-	block, _, err := n.statedb.ReadBlockByNumber(statedb.EVMServiceCode, uint32(blockNum))
+	block, err := n.statedb.ReadBlockByNumber(statedb.EVMServiceCode, uint32(blockNum))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read block %d: %v", blockNum, err)
 	}

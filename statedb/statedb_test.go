@@ -88,10 +88,9 @@ func advanceBlockPartialState(t *testing.T, block int, prevStateRoot common.Hash
 			break
 		}
 		updatedRef := prevRef
-		updatedRef.Version = uint32(block + 1)
-		updatedRef.GasUsed = uint32(100 + block*10 + i)
-		updatedRef.Timeslot = uint32(block)
-		updatedRef.TxSlot = uint16(i)
+		// Update only the valid fields
+		updatedRef.PayloadLength = prevRef.PayloadLength + uint32(i)
+		updatedRef.IndexStart = prevRef.IndexStart + uint16(i)
 		writeObjectRef(objectID, updatedRef)
 		i++
 	}
@@ -107,18 +106,10 @@ func advanceBlockPartialState(t *testing.T, block int, prevStateRoot common.Hash
 		*nextObjectIdx++
 
 		newRef := types.ObjectRef{
-			ServiceID:       serviceID,
 			WorkPackageHash: common.Hash{},
 			IndexStart:      uint16(*nextObjectIdx),
-			IndexEnd:        uint16(*nextObjectIdx + 1),
-			Version:         1,
 			PayloadLength:   uint32(payloadSize),
-			Timeslot:        uint32(block),
-			GasUsed:         uint32(100 + i),
-			EvmBlock:        uint32(block),
-			ObjKind:         0,
-			LogIndex:        0,
-			TxSlot:          uint16(i),
+			ObjectKind:      0,
 		}
 		writeObjectRef(objectID, newRef)
 	}
@@ -144,34 +135,27 @@ func verifyBlock(t *testing.T, block int, stateRoot common.Hash, storage *storag
 		t.Fatalf("Verification block %d: Failed to create StateDB: %v", block, err)
 	}
 	verifications := uint64(0)
-	mismatchCount := 0
 	for objectID, expectedRef := range expectedRefs {
 		expectedValue := expectedRef.Serialize()
 
 		// Verify using ReadServiceStorage (high-level API)
 		actualValue, ok, err := verifyDB.ReadServiceStorage(serviceID, objectID[:])
 		if err != nil {
-			mismatchCount++
-			panic("mismatch")
+			t.Fatalf("Block %d: ReadServiceStorage error for object %x: %v", block, objectID, err)
 		} else if !ok {
-			mismatchCount++
-			panic("mismatch")
+			t.Fatalf("Block %d: ReadServiceStorage object %x not found", block, objectID)
 		} else if string(actualValue) != string(expectedValue) {
-			mismatchCount++
-			panic("mismatch")
+			t.Fatalf("Block %d: ReadServiceStorage value mismatch for object %x", block, objectID)
 		}
 
 		// Verify using GetServiceStorage (trie-level API)
 		actualValue, ok, err = verifyDB.sdb.GetServiceStorage(serviceID, objectID[:])
 		if err != nil {
-			mismatchCount++
-			panic("mismatch")
+			t.Fatalf("Block %d: GetServiceStorage error for object %x: %v", block, objectID, err)
 		} else if !ok {
-			mismatchCount++
-			panic("mismatch")
+			t.Fatalf("Block %d: GetServiceStorage object %x not found", block, objectID)
 		} else if string(actualValue) != string(expectedValue) {
-			mismatchCount++
-			panic("mismatch")
+			t.Fatalf("Block %d: GetServiceStorage value mismatch for object %x", block, objectID)
 		}
 
 		// Deserialize and verify ObjectRef metadata
@@ -180,10 +164,10 @@ func verifyBlock(t *testing.T, block int, stateRoot common.Hash, storage *storag
 		if err != nil {
 			t.Fatalf("Block %d: Failed to deserialize ObjectRef: %v", block, err)
 		}
-		if actualRef.ServiceID != expectedRef.ServiceID ||
-			actualRef.Version != expectedRef.Version ||
-			actualRef.GasUsed != expectedRef.GasUsed ||
-			actualRef.Timeslot != expectedRef.Timeslot {
+		if actualRef.WorkPackageHash != expectedRef.WorkPackageHash ||
+			actualRef.IndexStart != expectedRef.IndexStart ||
+			actualRef.PayloadLength != expectedRef.PayloadLength ||
+			actualRef.ObjectKind != expectedRef.ObjectKind {
 			t.Fatalf("Block %d: ObjectRef metadata mismatch for object %x", block, objectID)
 		}
 

@@ -46,18 +46,14 @@ impl Default for ObjectRef {
 }
 
 impl ObjectRef {
-    pub const SERIALIZED_SIZE: usize = 36;
+    pub const SERIALIZED_SIZE: usize = 37; // 32 (wph) + 5 (packed 40 bits)
 
     /// Creates a new ObjectRef with refine-time fields set
     ///
     /// Fields:
     /// - work_package_hash, payload_length, object_kind (provided)
     /// - index_start (set to 0, filled later by runtime)
-    pub fn new(
-        work_package_hash: [u8; 32],
-        payload_length: u32,
-        object_kind: u8,
-    ) -> Self {
+    pub fn new(work_package_hash: [u8; 32], payload_length: u32, object_kind: u8) -> Self {
         Self {
             work_package_hash,
             index_start: 0,
@@ -67,31 +63,34 @@ impl ObjectRef {
     }
 
     /// Helper to calculate number of segments from payload_length
-    /// Assumes 4K bytes per segment except possibly the last one
+    /// Uses SEGMENT_SIZE (4104 bytes) per segment except possibly the last one
     fn calculate_segments_and_last_bytes(payload_length: u32) -> (u16, u16) {
+        use crate::constants::SEGMENT_SIZE;
         if payload_length == 0 {
             return (0, 0);
         }
-        let full_segments = (payload_length - 1) / 4096;
-        let last_segment_bytes = payload_length - (full_segments * 4096);
+        let segment_size = SEGMENT_SIZE as u32;
+        let full_segments = (payload_length - 1) / segment_size;
+        let last_segment_bytes = payload_length - (full_segments * segment_size);
         let num_segments = full_segments + 1;
         (num_segments as u16, last_segment_bytes as u16)
     }
 
     /// Helper to calculate payload_length from segments and last_segment_bytes
     fn calculate_payload_length(num_segments: u16, last_segment_bytes: u16) -> u32 {
+        use crate::constants::SEGMENT_SIZE;
         if num_segments == 0 {
             return 0;
         }
         if num_segments == 1 {
             return last_segment_bytes as u32;
         }
-        ((num_segments as u32 - 1) * 4096) + last_segment_bytes as u32
+        let segment_size = SEGMENT_SIZE as u32;
+        ((num_segments as u32 - 1) * segment_size) + last_segment_bytes as u32
     }
 
-
     /// Deserializes an ObjectRef from a byte buffer - opposite of serialize
-    /// Unpacks 3 bytes into index_start (12 bits) + num_segments (12 bits) + last_segment_bytes (12 bits)
+    /// Unpacks 5 bytes (40 bits) into: index_start (12) + index_end (12) + last_segment_size (12) + object_kind (4)
     pub fn deserialize(data: &[u8]) -> Option<Self> {
         if data.len() != Self::SERIALIZED_SIZE {
             return None;
@@ -103,21 +102,29 @@ impl ObjectRef {
         work_package_hash.copy_from_slice(&data[offset..offset + 32]);
         offset += 32;
 
-        // Unpack 3 bytes into 3 x 12-bit values
-        let packed = ((data[offset] as u32) << 16) |
-                    ((data[offset + 1] as u32) << 8) |
-                    (data[offset + 2] as u32);
-        offset += 3;
+        // Unpack 5 bytes (40 bits) into fields
+        let packed: u64 = ((data[offset] as u64) << 32)
+            | ((data[offset + 1] as u64) << 24)
+            | ((data[offset + 2] as u64) << 16)
+            | ((data[offset + 3] as u64) << 8)
+            | (data[offset + 4] as u64);
 
-        let index_start = ((packed >> 20) & 0xFFF) as u16;
-        let num_segments = ((packed >> 8) & 0xFFF) as u16;
-        let last_segment_bytes = (packed & 0xFFF) as u16;
+        // Extract fields: index_start (12) | index_end (12) | last_segment_size (12) | object_kind (4)
+        let index_start = ((packed >> 28) & 0xFFF) as u16; // Bits 28-39 (12 bits)
+        let index_end = ((packed >> 16) & 0xFFF) as u16; // Bits 16-27 (12 bits)
+        let mut last_segment_size = ((packed >> 4) & 0xFFF) as u16; // Bits 4-15 (12 bits)
+        let object_kind = (packed & 0xF) as u8; // Bits 0-3 (4 bits)
 
         // Calculate payload_length from segments
-        let payload_length = Self::calculate_payload_length(num_segments, last_segment_bytes);
-
-        // Read object_kind from the last byte
-        let object_kind = data[offset];
+        let num_segments = if index_end > index_start {
+            index_end - index_start
+        } else {
+            0
+        };
+        if num_segments > 0 && last_segment_size == 0 {
+            last_segment_size = crate::constants::SEGMENT_SIZE as u16; // encoded full segment
+        }
+        let payload_length = Self::calculate_payload_length(num_segments, last_segment_size);
 
         Some(Self {
             work_package_hash,
@@ -128,26 +135,33 @@ impl ObjectRef {
     }
 
     /// Serializes the ObjectRef to a byte vector
-    /// Packs index_start (12 bits) + num_segments (12 bits) + last_segment_bytes (12 bits) into 3 bytes
+    /// Packs 40 bits: index_start (12) + index_end (12) + last_segment_size (12) + object_kind (4) into 5 bytes
     pub fn serialize(&self) -> Vec<u8> {
         let mut buffer = Vec::with_capacity(Self::SERIALIZED_SIZE);
         buffer.extend_from_slice(&self.work_package_hash); // 32 bytes
 
         // Calculate segments from payload_length
-        let (num_segments, last_segment_bytes) = Self::calculate_segments_and_last_bytes(self.payload_length);
+        let (num_segments, last_segment_size) =
+            Self::calculate_segments_and_last_bytes(self.payload_length);
+        let encoded_last_segment = if last_segment_size == crate::constants::SEGMENT_SIZE as u16 {
+            0u16 // 0 encodes a full 4104-byte last segment to fit into 12 bits
+        } else {
+            last_segment_size
+        };
+        let index_end = self.index_start + num_segments;
 
-        // Pack 3 x 12-bit values into 3 bytes (36 bits total, 4 bits unused)
-        let packed = ((self.index_start as u32 & 0xFFF) << 20) |
-                    ((num_segments as u32 & 0xFFF) << 8) |
-                    (last_segment_bytes as u32 & 0xFFF);
+        // Pack 40 bits: index_start (12) | index_end (12) | last_segment_size (12) | object_kind (4)
+        let packed: u64 = ((self.index_start as u64 & 0xFFF) << 28) |   // Bits 28-39
+                         ((index_end as u64 & 0xFFF) << 16) |           // Bits 16-27
+                         ((encoded_last_segment as u64 & 0xFFF) << 4) | // Bits 4-15 (0 encodes full last segment)
+                         (self.object_kind as u64 & 0xF); // Bits 0-3
 
-        // Store as 3 bytes (24 bits, dropping the top 8 bits which are zero)
+        // Store as 5 bytes (40 bits)
+        buffer.push((packed >> 32) as u8);
+        buffer.push((packed >> 24) as u8);
         buffer.push((packed >> 16) as u8);
         buffer.push((packed >> 8) as u8);
         buffer.push(packed as u8);
-
-        // Add object_kind as the last byte
-        buffer.push(self.object_kind); // 1 byte
 
         buffer
     }
@@ -164,20 +178,26 @@ impl ObjectRef {
         offset += 32;
 
         // Calculate segments from payload_length
-        let (num_segments, last_segment_bytes) = Self::calculate_segments_and_last_bytes(self.payload_length);
+        let (num_segments, last_segment_size) =
+            Self::calculate_segments_and_last_bytes(self.payload_length);
+        let encoded_last_segment = if last_segment_size == crate::constants::SEGMENT_SIZE as u16 {
+            0u16 // 0 encodes a full 4104-byte last segment to fit into 12 bits
+        } else {
+            last_segment_size
+        };
+        let index_end = self.index_start + num_segments;
 
-        // Pack 3 x 12-bit values into 3 bytes
-        let packed = ((self.index_start as u32 & 0xFFF) << 20) |
-                    ((num_segments as u32 & 0xFFF) << 8) |
-                    (last_segment_bytes as u32 & 0xFFF);
+        // Pack 40 bits: index_start (12) | index_end (12) | last_segment_size (12) | object_kind (4)
+        let packed: u64 = ((self.index_start as u64 & 0xFFF) << 28)
+            | ((index_end as u64 & 0xFFF) << 16)
+            | ((encoded_last_segment as u64 & 0xFFF) << 4)
+            | (self.object_kind as u64 & 0xF);
 
-        buffer[offset] = (packed >> 16) as u8;
-        buffer[offset + 1] = (packed >> 8) as u8;
-        buffer[offset + 2] = packed as u8;
-        offset += 3;
-
-        // Add object_kind as the last byte
-        buffer[offset] = self.object_kind;
+        buffer[offset] = (packed >> 32) as u8;
+        buffer[offset + 1] = (packed >> 24) as u8;
+        buffer[offset + 2] = (packed >> 16) as u8;
+        buffer[offset + 3] = (packed >> 8) as u8;
+        buffer[offset + 4] = packed as u8;
 
         Ok(Self::SERIALIZED_SIZE)
     }
@@ -289,14 +309,19 @@ impl ObjectRef {
     }
 
     /// Writes this ObjectRef state for the given object_id
-    pub fn write(&self, object_id: &ObjectId) -> u64 {
+    pub fn write(&self, object_id: &ObjectId, timeslot: u32, blocknumber: u32) -> u64 {
         use crate::host_functions::write;
 
         // Use object_id directly as key for the write operation
         let key_buffer = *object_id;
 
         // Serialize this ObjectRef to get the value buffer
-        let value_buffer = self.serialize();
+        let mut value_buffer = self.serialize();
+
+        // Add timeslot at the end (4 bytes, little-endian)
+        value_buffer.extend_from_slice(&timeslot.to_le_bytes());
+        // Add blocknumber at the end (4 bytes, little-endian)
+        value_buffer.extend_from_slice(&blocknumber.to_le_bytes());
 
         unsafe {
             write(

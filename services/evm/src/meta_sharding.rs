@@ -20,13 +20,13 @@
 //! - Total JAM State: 1M × 72 bytes = 72MB (bounded!)
 //!
 //! **Layer 2 (JAM DA):** Store ObjectID→ObjectRef mappings in meta-shard segments
-//! - Each meta-shard segment: 4104 bytes with 96-byte entries
-//! - Max 41 ObjectRefEntry per meta-shard (splits at 21 entries)
+//! - Each meta-shard segment: 4104 bytes with 68-byte entries
+//! - Max 58 ObjectRefEntry per meta-shard (splits at 29 entries)
 //! - Reuses SSR splitting logic from `da.rs`
 //!
 //! # Data Structures
 //!
-//! - `ObjectRefEntry`: ObjectID (32 bytes) + ObjectRef (64 bytes) = 96 bytes
+//! - `ObjectRefEntry`: ObjectID (32 bytes) + ObjectRef (37 bytes) = 69 bytes
 //! - `MetaSSR`: Type alias for SSRData<ObjectRefEntry>
 //! - `MetaShard`: Type alias for ShardData<ObjectRefEntry>
 //!
@@ -51,14 +51,16 @@ use utils::objects::ObjectRef;
 // Import generic SSR types and functions from da module
 use crate::da::{self, SSREntry, SerializeError, ShardId, SSRData, ShardData};
 
-/// ObjectRefEntry - ObjectID mapped to ObjectRef (32 + 64 = 96 bytes)
+/// ObjectRefEntry - ObjectID mapped to ObjectRef
 ///
-/// Stored in meta-shards in JAM DA. Each entry maps a 32-byte ObjectID
-/// to its corresponding ObjectRef (64 bytes total).
+/// Stored in meta-shards in JAM DA. Full DA serialization format:
+/// - object_id: 32 bytes (full ObjectID)
+/// - object_ref: 37 bytes (32B wph + 5B packed)
+/// Total: 69 bytes per entry (fixed size for DA storage)
 #[derive(Clone, PartialEq)]
 pub struct ObjectRefEntry {
-    pub object_id: [u8; 32],  // 32 bytes - ObjectID for routing and lookup
-    pub object_ref: ObjectRef, // 64 bytes - see utils::objects::ObjectRef
+    pub object_id: [u8; 32],  // 32 bytes internally for compatibility
+    pub object_ref: ObjectRef, // Full ObjectRef internally
 }
 
 impl Eq for ObjectRefEntry {}
@@ -81,26 +83,36 @@ impl SSREntry for ObjectRefEntry {
     }
 
     fn serialized_size() -> usize {
-        96 // 32 (object_id) + 64 (ObjectRef::SERIALIZED_SIZE)
+        // Full DA format: 32 bytes object_id + 37 bytes ObjectRef
+        69
     }
 
     fn serialize(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(96);
+        // Full DA format: object_id (32B) + ObjectRef (37B)
+        // This is what gets stored in JAM DA for witness proofs
+        let mut buf = Vec::with_capacity(69);
+
+        // Write full 32-byte object_id
         buf.extend_from_slice(&self.object_id);
+
+        // Write full 37-byte serialized ObjectRef
         buf.extend_from_slice(&self.object_ref.serialize());
+
         buf
     }
 
     fn deserialize(data: &[u8]) -> Result<Self, SerializeError> {
-        if data.len() != 96 {
+        if data.len() != 69 {
             return Err(SerializeError::InvalidSize);
         }
 
+        // Parse 32-byte object_id
         let mut object_id = [0u8; 32];
         object_id.copy_from_slice(&data[0..32]);
 
-        let object_ref = ObjectRef::deserialize(&data[32..96])
-            .ok_or(SerializeError::InvalidFormat)?;
+        // Parse 37-byte ObjectRef
+        let object_ref = ObjectRef::deserialize(&data[32..69])
+            .ok_or(SerializeError::InvalidObjectRef)?;
 
         Ok(ObjectRefEntry {
             object_id,
@@ -116,11 +128,32 @@ pub type MetaSSR = SSRData<ObjectRefEntry>;
 pub type MetaShard = ShardData<ObjectRefEntry>;
 
 /// Meta-shard split threshold - split when exceeding this many entries (~50% of max)
-pub const META_SHARD_SPLIT_THRESHOLD: usize = 21;
+pub const META_SHARD_SPLIT_THRESHOLD: usize = 29;
+
+/// Compute BMT root over meta-shard entries for Merkle proof generation
+///
+/// Each entry is hashed as: object_id (32 bytes) || object_ref (37 bytes) = 69 bytes
+/// The BMT provides cryptographic proof that an object exists in the meta-shard
+pub fn compute_entries_bmt_root(entries: &[ObjectRefEntry]) -> [u8; 32] {
+    if entries.is_empty() {
+        return [0u8; 32]; // Empty root
+    }
+
+    // Convert entries to (key, value) pairs for BMT
+    // Key = object_id, Value = serialized object_ref
+    let kvs: Vec<([u8; 32], Vec<u8>)> = entries
+        .iter()
+        .map(|entry| {
+            (entry.object_id, entry.object_ref.serialize().to_vec())
+        })
+        .collect();
+
+    crate::bmt::compute_bmt_root(&kvs)
+}
 
 /// Maximum entries per meta-shard (hard DA segment limit)
-/// Calculation: (4008 - 2) / 96 = 41.729... → 41 max entries
-pub const META_SHARD_MAX_ENTRIES: usize = 41;
+/// Calculation: (4104 - 34) / 69 ≈ 59 max entries → capped at 58 for headroom
+pub const META_SHARD_MAX_ENTRIES: usize = 58;
 
 /// Meta-shard write intent - output from process_object_writes()
 #[derive(Clone)]
@@ -185,7 +218,10 @@ pub fn process_object_writes(
         let mut shard_data = cached_meta_shards
             .get(&shard_id)
             .cloned()
-            .unwrap_or_else(|| MetaShard { entries: Vec::new() });
+            .unwrap_or_else(|| MetaShard {
+                merkle_root: [0u8; 32],
+                entries: Vec::new(),
+            });
 
         log_info(&format!(
             "  Meta-shard {:?}: {} existing + {} new entries",
@@ -207,6 +243,9 @@ pub fn process_object_writes(
             }
         }
         shard_data.entries.sort();
+
+        // Compute BMT root over entries for Merkle proofs
+        shard_data.merkle_root = compute_entries_bmt_root(&shard_data.entries);
 
         // Check if split needed
         if shard_data.entries.len() > META_SHARD_SPLIT_THRESHOLD {
@@ -246,7 +285,10 @@ pub fn process_object_writes(
                     }
 
                     // Create write intents for all leaf shards
-                    for (leaf_id, leaf_data) in leaf_shards {
+                    for (leaf_id, mut leaf_data) in leaf_shards {
+                        // Compute BMT root for each leaf shard
+                        leaf_data.merkle_root = compute_entries_bmt_root(&leaf_data.entries);
+
                         cached_meta_shards.insert(leaf_id, leaf_data.clone());
                         write_intents.push(MetaShardWriteIntent {
                             shard_id: leaf_id,
@@ -290,8 +332,6 @@ pub fn process_object_writes(
 pub enum MetaShardDeserializeResult {
     /// Successfully deserialized with validated header
     ValidatedHeader(ShardId, MetaShard),
-    /// Payload is too short to contain header - likely legacy format
-    MaybeLegacy,
     /// Header present but validation failed - malicious or corrupt payload
     ValidationFailed,
 }
@@ -301,10 +341,39 @@ pub enum MetaShardDeserializeResult {
 /// Format: [1B ld][7B prefix56][...shard entries]
 /// The shard_id header enables witness imports to identify the shard without SSR routing
 pub fn serialize_meta_shard_with_id(shard: &MetaShard, shard_id: ShardId) -> Vec<u8> {
+    use utils::functions::log_info;
+
     let mut data = Vec::new();
     data.push(shard_id.ld);
     data.extend_from_slice(&shard_id.prefix56);
-    data.extend_from_slice(&da::serialize_shard(shard, META_SHARD_MAX_ENTRIES));
+    // Log detailed meta-shard entries before serialization
+    for (i, entry) in shard.entries.iter().enumerate() {
+        use utils::functions::{log_debug, format_object_id};
+        log_debug(&format!(
+            "  Entry {}: object_id={}, wph={}, idx_start={}, payload_len={}, kind={}",
+            i,
+            format_object_id(entry.object_id),
+            format_object_id(entry.object_ref.work_package_hash),
+            entry.object_ref.index_start,
+            entry.object_ref.payload_length,
+            entry.object_ref.object_kind
+        ));
+    }
+
+    let shard_data = da::serialize_shard(shard, META_SHARD_MAX_ENTRIES);
+
+    log_info(&format!(
+        "📦 serialize_meta_shard_with_id: ld={}, shard_data_len={}, total_with_header={}",
+        shard_id.ld,
+        shard_data.len(),
+        8 + shard_data.len()
+    ));
+    log_info(&format!(
+        "  First 50 bytes after header: {:02x?}",
+        &shard_data[..50.min(shard_data.len())]
+    ));
+
+    data.extend_from_slice(&shard_data);
     data
 }
 
@@ -315,7 +384,6 @@ pub fn serialize_meta_shard_with_id(shard: &MetaShard, shard_id: ShardId) -> Vec
 ///
 /// **Tri-state return**:
 /// - `ValidatedHeader(shard_id, shard)`: Header validated successfully
-/// - `MaybeLegacy`: Payload too short for header, try legacy deserialization
 /// - `ValidationFailed`: Header present but invalid - REJECT, do NOT fall back to legacy
 ///
 /// **CRITICAL**: Caller must treat `ValidationFailed` as fatal, not fall back to legacy.
@@ -329,7 +397,8 @@ pub fn deserialize_meta_shard_with_id_validated(
 
     // Check minimum size for header
     if data.len() < 8 {
-        return MetaShardDeserializeResult::MaybeLegacy;
+        log_error("❌ Meta-shard payload too short for header");
+        return MetaShardDeserializeResult::ValidationFailed;
     }
 
     // Extract shard_id from header
@@ -340,7 +409,7 @@ pub fn deserialize_meta_shard_with_id_validated(
 
     // CRITICAL: Validate header against object_id
     // Recompute object_id from header and verify it matches
-    let computed_object_id = meta_shard_object_id(service_id, shard_id);
+    let computed_object_id = meta_shard_object_id(service_id, ld, &prefix56);
     if &computed_object_id != expected_object_id {
         // Header claims shard_id A but object_id corresponds to shard_id B
         // This is either corruption or a malicious witness
@@ -360,97 +429,143 @@ pub fn deserialize_meta_shard_with_id_validated(
     }
 }
 
-/// Deserialize meta-shard from DA format with shard_id header (unvalidated, legacy)
+
+
+/// Rebuild MetaSSR routing table from imported meta-shard ShardIds
 ///
-/// Returns (shard_id, meta_shard) tuple
+/// After importing meta-shards from witnesses, we need to reconstruct the SSR
+/// routing table so that object writes route to the correct split shards.
 ///
-/// **DEPRECATED**: Use `deserialize_meta_shard_with_id_validated()` instead
-/// This version does not validate the header and is unsafe for untrusted witnesses
-pub fn deserialize_meta_shard_with_id(data: &[u8]) -> Option<(ShardId, MetaShard)> {
-    if data.len() < 8 {
-        return None;
+/// # Critical Fix
+/// We must build the COMPLETE chain from global_depth to each leaf, not just
+/// the last step. If intermediate shards have been split away, we need entries
+/// at every depth where a split occurred.
+///
+/// # Algorithm
+/// 1. Find minimum ld across all shards → global_depth
+/// 2. For each leaf shard, trace the full path from global_depth to leaf
+/// 3. At each depth transition, check if BOTH children exist (indicating a split)
+/// 4. Record each split point as an SSREntryMeta
+///
+/// # Example (all intermediates split away)
+/// Imported shards: {ld=3, prefix=0x00...}, {ld=3, prefix=0x20...}, ...
+/// → global_depth = 3
+/// → Must create entries for EVERY step in the chain:
+///    {d: 0, ld: 1, prefix: 0x00...} (split at depth 0)
+///    {d: 1, ld: 2, prefix: 0x00...} (split at depth 1)
+///    {d: 2, ld: 3, prefix: 0x00...} (split at depth 2)
+///
+/// Without the full chain, resolve_shard_id() stops at global_depth and produces
+/// an object_id that doesn't exist, causing all writes to pile into obsolete shards.
+pub fn rebuild_meta_ssr_from_shards(shard_ids: &[da::ShardId]) -> MetaSSR {
+    use alloc::collections::BTreeSet;
+
+    if shard_ids.is_empty() {
+        return MetaSSR::new();
     }
 
-    let ld = data[0];
-    let mut prefix56 = [0u8; 7];
-    prefix56.copy_from_slice(&data[1..8]);
-    let shard_id = ShardId { ld, prefix56 };
+    // Find global_depth (minimum ld) - this is the deepest level with a shard
+    let global_depth = shard_ids.iter().map(|s| s.ld).min().unwrap_or(0);
 
-    let shard = da::deserialize_shard(&data[8..]).ok()?;
-    Some((shard_id, shard))
-}
-
-/// Serialize meta-shard to DA format (legacy, no shard_id header)
-///
-/// Wrapper around da::serialize_shard() for ObjectRefEntry type.
-pub fn serialize_meta_shard(shard: &MetaShard) -> Vec<u8> {
-    da::serialize_shard(shard, META_SHARD_MAX_ENTRIES)
-}
-
-/// Deserialize meta-shard from DA format (legacy, no shard_id header)
-///
-/// Wrapper around da::deserialize_shard() for ObjectRefEntry type.
-pub fn deserialize_meta_shard(data: &[u8]) -> Option<MetaShard> {
-    da::deserialize_shard(data).ok()
-}
-
-/// Serialize MetaSSR to DA format
-///
-/// Wrapper around da::serialize_ssr() for ObjectRefEntry type.
-pub fn serialize_meta_ssr(ssr: &MetaSSR) -> Vec<u8> {
-    da::serialize_ssr(ssr)
-}
-
-/// Deserialize MetaSSR from DA format
-///
-/// Wrapper around da::deserialize_ssr() for ObjectRefEntry type.
-pub fn deserialize_meta_ssr(data: &[u8]) -> Option<MetaSSR> {
-    da::deserialize_ssr(data).ok()
-}
-
-/// Compute digest of meta-shard entries
-///
-/// Used for conflict detection in accumulate phase.
-/// Returns keccak256 hash of all serialized entries.
-pub fn compute_meta_shard_digest(entries: &[ObjectRefEntry]) -> [u8; 32] {
-    use utils::hash_functions::keccak256;
-
-    let mut data = Vec::new();
-    for entry in entries {
-        data.extend_from_slice(&entry.serialize());
+    // Build set of all unique (ld, prefix) pairs for EXISTING shards
+    let mut existing_shards: BTreeSet<(u8, [u8; 7])> = BTreeSet::new();
+    for shard_id in shard_ids {
+        let masked_prefix = da::mask_prefix56(shard_id.prefix56, shard_id.ld);
+        existing_shards.insert((shard_id.ld, masked_prefix));
     }
 
-    *keccak256(&data).as_fixed_bytes()
+    // Build set of ALL nodes (existing + inferred ancestors) in the tree
+    // We need this to identify where splits occurred
+    let mut all_nodes: BTreeSet<(u8, [u8; 7])> = existing_shards.clone();
+
+    // For each existing shard, add all ancestors from global_depth up to parent
+    for &(leaf_ld, leaf_prefix) in &existing_shards {
+        let mut current_ld = leaf_ld;
+        while current_ld > global_depth {
+            current_ld -= 1;
+            let ancestor_prefix = da::mask_prefix56(leaf_prefix, current_ld);
+            all_nodes.insert((current_ld, ancestor_prefix));
+        }
+    }
+
+    // Now identify split points: a node at depth d split if BOTH children exist
+    let mut ssr_entries = Vec::new();
+
+    for &(parent_ld, parent_prefix) in &all_nodes {
+        // Skip if we're at maximum depth
+        if parent_ld >= 255 {
+            continue;
+        }
+
+        let child_ld = parent_ld + 1;
+
+        // Compute both children's prefixes
+        let left_prefix = parent_prefix; // Left child keeps same prefix (bit=0)
+
+        let mut right_prefix = parent_prefix;
+        let split_bit = parent_ld as usize;
+        if split_bit < 56 {
+            let byte_idx = split_bit / 8;
+            let bit_idx = split_bit % 8;
+            if byte_idx < 7 {
+                right_prefix[byte_idx] |= 0x80 >> bit_idx; // Right child sets bit=1
+            }
+        }
+
+        // Check if both children exist in the tree
+        let left_masked = da::mask_prefix56(left_prefix, child_ld);
+        let right_masked = da::mask_prefix56(right_prefix, child_ld);
+
+        let left_exists = all_nodes.contains(&(child_ld, left_masked));
+        let right_exists = all_nodes.contains(&(child_ld, right_masked));
+
+        // If both children exist, this parent split
+        if left_exists && right_exists {
+            // Add SSR entry: "at depth parent_ld with prefix parent_prefix, split to child_ld"
+            ssr_entries.push(da::SSREntryMeta {
+                d: parent_ld,
+                ld: child_ld,
+                prefix56: parent_prefix,
+            });
+        }
+    }
+
+    // Sort SSR entries by depth for cleaner debug output
+    ssr_entries.sort_by_key(|e| (e.d, e.prefix56));
+
+    let header = da::SSRHeader {
+        global_depth,
+        entry_count: ssr_entries.len() as u32,
+        total_keys: 0, // Unknown without loading shard data
+        version: 1,
+    };
+
+    log_info(&format!(
+        "🔄 Rebuilt MetaSSR: global_depth={}, {} existing shards, {} split entries",
+        global_depth,
+        existing_shards.len(),
+        ssr_entries.len()
+    ));
+
+    MetaSSR::from_parts(header, ssr_entries)
 }
 
 // ===== ObjectID Construction for Meta-Shards =====
 
-/// Compute ObjectID for a meta-shard
+/// Compute ObjectID for a meta-shard from ld and prefix bytes
 ///
-/// ObjectID = keccak256(service_id || "meta_shard" || ld || prefix56)
-pub fn meta_shard_object_id(service_id: u32, shard_id: ShardId) -> [u8; 32] {
-    use utils::hash_functions::keccak256;
+/// ObjectID = ld || prefix (where prefix length = (ld+7)/8 bytes)
+/// No padding - returns only the necessary bytes
+pub fn meta_shard_object_id(_service_id: u32, ld: u8, prefix56: &[u8; 7]) -> [u8; 32] {
+    let mut object_id = [0u8; 32];
+    object_id[0] = ld;
 
-    let mut data = Vec::new();
-    data.extend_from_slice(&service_id.to_le_bytes());
-    data.extend_from_slice(b"meta_shard");
-    data.push(shard_id.ld);
-    data.extend_from_slice(&shard_id.prefix56);
+    let prefix_bytes = ((ld + 7) / 8) as usize;
+    if prefix_bytes > 0 {
+        object_id[1..1 + prefix_bytes].copy_from_slice(&prefix56[..prefix_bytes]);
+    }
 
-    *keccak256(&data).as_fixed_bytes()
-}
-
-/// Compute ObjectID for the meta-SSR metadata object
-///
-/// ObjectID = keccak256(service_id || "meta_ssr")
-pub fn meta_ssr_object_id(service_id: u32) -> [u8; 32] {
-    use utils::hash_functions::keccak256;
-
-    let mut data = Vec::new();
-    data.extend_from_slice(&service_id.to_le_bytes());
-    data.extend_from_slice(b"meta_ssr");
-
-    *keccak256(&data).as_fixed_bytes()
+    object_id
 }
 
 #[cfg(test)]
@@ -462,27 +577,18 @@ mod tests {
         let entry = ObjectRefEntry {
             object_id: [0x42; 32],
             object_ref: ObjectRef {
-                service_id: 1,
                 work_package_hash: [0xBB; 32],
                 index_start: 10,
-                index_end: 15,
-                version: 1,
                 payload_length: 100,
                 object_kind: 1,
-                log_index: 0,
-                tx_slot: 5,
-                timeslot: 100,
-                gas_used: 21000,
-                evm_block: 42,
             },
         };
 
         let serialized = entry.serialize();
-        assert_eq!(serialized.len(), 96);
+        assert_eq!(serialized.len(), 69);
 
         let deserialized = ObjectRefEntry::deserialize(&serialized).unwrap();
         assert_eq!(deserialized.object_id, entry.object_id);
-        assert_eq!(deserialized.object_ref.version, entry.object_ref.version);
         assert_eq!(
             deserialized.object_ref.work_package_hash,
             entry.object_ref.work_package_hash
@@ -491,24 +597,20 @@ mod tests {
             deserialized.object_ref.index_start,
             entry.object_ref.index_start
         );
-        assert_eq!(
-            deserialized.object_ref.index_end,
-            entry.object_ref.index_end
-        );
     }
 
     #[test]
     fn test_meta_shard_capacity() {
         // Verify our capacity calculations
         let entry_size = ObjectRefEntry::serialized_size();
-        assert_eq!(entry_size, 96);
+        assert_eq!(entry_size, 69);
 
-        // DA segment: 4104 bytes total, 2 bytes for count header
-        let available = 4104 - 2;
+        // DA segment: 4104 bytes total, 34 bytes for merkle_root + count header
+        let available = 4104 - 34;
         let max_entries = available / entry_size;
-        assert_eq!(max_entries, 42); // (4102 / 96 = 42.729...)
+        assert_eq!(max_entries, 59); // (4070 / 69 ≈ 59.0)
 
-        // We use 41 to have some buffer
+        // We use 58 to have some buffer
         assert!(META_SHARD_MAX_ENTRIES <= max_entries);
     }
 

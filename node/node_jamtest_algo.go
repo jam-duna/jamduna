@@ -93,36 +93,9 @@ func evm(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 	}
 	statedb.InitializeMappings(&blobs, &workItems, evmtypes.UsdmAddress, usdmInitialState)
 
-	// Add witness for genesis block (block 0) and calculate segments needed
-	witnesses := []types.StateWitnessRaw{}
-	objectID := evmtypes.BlockNumberToObjectID(0)
-	witness, ok, _, err := n1.ReadStateWitnessRaw(evm_serviceIdx, objectID)
-	if err != nil {
-		log.Warn(log.Node, "SubmitEVMGenesis: ReadStateWitnessRaw failed", "blockNum", 0, "objectID", objectID, "err", err)
-		panic(fmt.Sprintf("ReadStateWitnessRaw failed for genesis block: %v", err))
-	} else if ok {
-		// Calculate number of segments needed for genesis block's payload
-		//numSegments := (int(witness.PayloadLength) + types.SegmentSize - 1) / types.SegmentSize
-
-		log.Info(log.Node, "Adding witness for genesis block", "blockNum", 0, "objectID", objectID, "payload_length", witness.PayloadLength)
-		witnesses = append(witnesses, witness)
-	} else {
-		log.Warn(log.Node, "SubmitEVMGenesis: witness not found for genesis block", "objectID", objectID)
-	}
-
 	numExtrinsics := len(workItems)
-	// Append witness as extrinsic
-	for _, witness := range witnesses {
-		witnessBytes := witness.SerializeWitnessRaw()
-		blobs = append(blobs, witnessBytes)
-		workItems = append(workItems, types.WorkItemExtrinsic{
-			Hash: common.Blake2Hash(witnessBytes),
-			Len:  uint32(len(witnessBytes)),
-		})
-	}
 
-	witnessCount := len(witnesses)
-	log.Info(log.Node, "SubmitEVMGenesis (genesis)", "numExtrinsics", numExtrinsics, "witnessCount", witnessCount)
+	log.Info(log.Node, "SubmitEVMGenesis (genesis)", "numExtrinsics", numExtrinsics)
 
 	service, ok, err := n1.GetService(evm_serviceIdx)
 	if err != nil || !ok {
@@ -139,7 +112,7 @@ func evm(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 	}
 
 	wp.RefineContext = refineCtx
-	wp.WorkItems[0].Payload = statedb.BuildPayload(statedb.PayloadTypeBlocks, numExtrinsics, witnessCount)
+	wp.WorkItems[0].Payload = statedb.BuildPayload(statedb.PayloadTypeGenesis, numExtrinsics, 0)
 	wp.WorkItems[0].Extrinsics = workItems
 
 	// Genesis adds 2 exports: 1 StorageShard + 1 SSRMetadata for USDM contract

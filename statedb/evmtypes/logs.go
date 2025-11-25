@@ -38,7 +38,7 @@ type LogFilter struct {
 //
 // logIndexStart is the starting index for Ethereum-compliant log indices.
 // Each log increments the counter so logIndex is unique across the entire block, not per-transaction.
-func ParseLogsFromReceipt(logsData []byte, txHash common.Hash, blockNumber, blockHash, txIndex string, logIndexStart uint64) ([]EthereumLog, error) {
+func ParseLogsFromReceipt(logsData []byte, txHash common.Hash, blockNumber uint32, blockHash common.Hash, txIndex uint32, logIndexStart uint64) ([]EthereumLog, error) {
 	if len(logsData) < 2 {
 		// No logs or insufficient data
 		return []EthereumLog{}, nil
@@ -98,10 +98,10 @@ func ParseLogsFromReceipt(logsData []byte, txHash common.Hash, blockNumber, bloc
 			Address:          address.String(),
 			Topics:           topics,
 			Data:             data,
-			BlockNumber:      blockNumber,
+			BlockNumber:      fmt.Sprintf("%x", blockNumber),
 			TransactionHash:  txHash.String(),
-			TransactionIndex: txIndex,
-			BlockHash:        blockHash,
+			TransactionIndex: fmt.Sprintf("%d", txIndex),
+			BlockHash:        blockHash.String(),
 			LogIndex:         fmt.Sprintf("0x%x", logIndexStart+uint64(i)),
 			Removed:          false,
 		})

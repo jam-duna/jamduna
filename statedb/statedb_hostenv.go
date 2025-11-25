@@ -1,11 +1,11 @@
 package statedb
 
 import (
+	"encoding/binary"
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	trie "github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -299,68 +299,277 @@ func convertProofToHashes(proofBytes [][]byte) []common.Hash {
 	return path
 }
 
-func (s *StateDB) ReadStateWitnessRaw(serviceID uint32, objectID common.Hash) (types.StateWitnessRaw, bool, common.Hash, error) {
+// ReadObject fetches ObjectRef and state proof for given objectID using meta-shard routing
+func (s *StateDB) ReadObject(serviceID uint32, objectID common.Hash) (*types.StateWitness, bool, error) {
+	// Step 1: Read global_depth hint from special SSR key in JAM State
+	var ssrKey [32]byte
+	binary.LittleEndian.PutUint32(ssrKey[0:4], serviceID)
+	copy(ssrKey[4:7], []byte("SSR"))
 
-	// Use the low-level trie method to get value, proof, and state root
-	valueBytes, proofBytes, stateRoot, ok, err := s.sdb.GetServiceStorageWithProof(serviceID, objectID[:])
+	ldBytes, found, err := s.ReadServiceStorage(serviceID, ssrKey[:])
 	if err != nil {
-		return types.StateWitnessRaw{}, false, common.Hash{}, err
+		return nil, false, fmt.Errorf("failed to read global_depth hint: %v", err)
 	}
-	if !ok {
-		return types.StateWitnessRaw{}, false, common.Hash{}, nil
+	if !found {
+		return nil, false, fmt.Errorf("global_depth hint not found for service %d", serviceID)
 	}
-	path := convertProofToHashes(proofBytes)
-	// ObjectKindRaw cases
-	if objectID == evmtypes.GetBlockNumberKey() {
-		// BLOCK_NUMBER_KEY: RAW storage (no ObjectRef, just raw value)
-		// Value format: block_number (4 bytes LE) + parent_hash (32 bytes) = 36 bytes
-		witness := types.StateWitnessRaw{
-			ObjectID:      objectID,
-			ServiceID:     serviceID,
-			Path:          path,
-			PayloadLength: uint32(len(valueBytes)),
-			Payload:       valueBytes, // RAW value from JAM State
-		}
-		return witness, true, stateRoot, nil
+	if len(ldBytes) < 1 {
+		return nil, false, fmt.Errorf("global_depth hint invalid length: %d", len(ldBytes))
 	}
 
-	isBlockObject, blockNumber := evmtypes.IsBlockObjectID(objectID)
-	if isBlockObject {
-		// Block objects: JAM State contains only EvmBlockPayload (no ObjectRef)
-		// We need to reconstruct ObjectRef from the block data and objectID
-		if len(valueBytes) < 4 {
-			return types.StateWitnessRaw{}, true, common.Hash{}, fmt.Errorf("invalid Block object value length: expected at least 4, got %d", len(valueBytes))
+	globalDepth := ldBytes[0]
+
+	// Step 2: Probe backwards from global_depth to find the actual meta-shard
+	var metaShardObjectID common.Hash
+	var shardID ShardId
+	found = false
+
+	keyPrefix := TakePrefix56(objectID)
+
+	for ld := globalDepth; ; ld-- {
+		// Compute meta-shard key at this depth
+		maskedPrefix := MaskPrefix56(keyPrefix, ld)
+		candidateShardID := ShardId{
+			Ld:       ld,
+			Prefix56: maskedPrefix,
+		}
+		candidateObjectID := ComputeMetaShardObjectID(serviceID, candidateShardID)
+
+		// Check if this meta-shard exists in JAM State
+		_, exists, checkErr := s.ReadServiceStorage(serviceID, candidateObjectID[:])
+		if checkErr != nil {
+			return nil, false, fmt.Errorf("failed to probe meta-shard at ld=%d: %v", ld, checkErr)
 		}
 
-		// Deserialize EvmBlockPayload to extract block details
-		evmBlock, err := evmtypes.DeserializeEvmBlockPayload(valueBytes)
-		if err != nil {
-			log.Error(log.SDB, "ReadStateWitness:DeserializeEvmBlockPayload", "objectID", objectID, "expected", blockNumber)
-			return types.StateWitnessRaw{}, true, common.Hash{}, fmt.Errorf("failed to deserialize EvmBlockPayload: %w", err)
+		if exists {
+			// Found the meta-shard!
+			metaShardObjectID = candidateObjectID
+			shardID = candidateShardID
+			found = true
+			break
 		}
 
-		// Verify block number matches
-		if evmBlock.Number != uint64(blockNumber) {
-			log.Error(log.SDB, "ReadStateWitness:Block number mismatch", "objectID", objectID, "expected", blockNumber, "got", evmBlock.Number)
-			return types.StateWitnessRaw{}, true, common.Hash{}, fmt.Errorf("block number mismatch: objectID has %d, payload has %d", blockNumber, evmBlock.Number)
+		// Stop at ld=0 to avoid underflow
+		if ld == 0 {
+			break
 		}
-
-		// For Block objects, JAM State contains the complete EvmBlockPayload
-		witness := types.StateWitnessRaw{
-			ObjectID:      objectID,
-			ServiceID:     serviceID,
-			Path:          path,
-			PayloadLength: uint32(len(valueBytes)),
-			Payload:       valueBytes, // Complete EvmBlockPayload from JAM State
-		}
-
-		return witness, true, stateRoot, nil
 	}
-	return types.StateWitnessRaw{}, false, common.Hash{}, fmt.Errorf("ReadStateWitnessRaw: unsupported ObjectID: %v", objectID)
+
+	if !found {
+		return nil, false, fmt.Errorf("meta-shard not found for object_id %s (probed ld 0-%d)", objectID.Hex(), globalDepth)
+	}
+
+	// Step 3: Check if we have a cached witness for this meta-shard
+	metaShardObjectID = ComputeMetaShardObjectID(serviceID, shardID)
+	log.Trace(log.SDB, "ReadObject: meta-shard found", "objectID", objectID, "metaShardObjectID", metaShardObjectID, "shardID", shardID)
+
+	// Check cache first
+	if witness, cached := s.metashardWitnesses[metaShardObjectID]; cached {
+		// Cache hit! Check if we have the ObjectRef for this objectID
+		if cachedRef, hasRef := witness.ObjectRefs[objectID]; hasRef {
+			// Ensure we have (or can build) the per-object BMT proof
+			proof, ok := witness.ObjectProofs[objectID]
+			if !ok && len(witness.MetaShardPayload) > 0 {
+				entries, err := parseMetaShardEntries(witness.MetaShardPayload)
+				if err == nil {
+					proof, err = generateMetaShardInclusionProof(witness.MetaShardMerkleRoot, objectID, entries)
+					if err == nil {
+						witness.ObjectProofs[objectID] = proof
+					}
+				}
+			}
+
+			// Check if we also have the payload cached
+			if cachedPayload, hasPayload := witness.Payloads[objectID]; hasPayload {
+				// Full cache hit - return complete witness
+				resultWitness := &types.StateWitness{
+					ServiceID:           serviceID,
+					ObjectID:            witness.ObjectID,
+					Ref:                 cachedRef,
+					Path:                witness.Path,
+					Value:               witness.Value,
+					Payload:             cachedPayload,
+					MetaShardMerkleRoot: witness.MetaShardMerkleRoot,
+					MetaShardPayload:    witness.MetaShardPayload,
+					BlockNumber:         witness.BlockNumber,
+					Timeslot:            witness.Timeslot,
+					ObjectRefs:          witness.ObjectRefs,
+					Payloads:            witness.Payloads,
+					ObjectProofs:        witness.ObjectProofs,
+				}
+				return resultWitness, true, nil
+			}
+			// Have ObjectRef but not payload - fetch payload only
+			numSegments, _ := types.CalculateSegmentsAndLastBytes(cachedRef.PayloadLength)
+			objectPayload, err := s.sdb.FetchJAMDASegments(
+				cachedRef.WorkPackageHash,
+				cachedRef.IndexStart,
+				cachedRef.IndexStart+numSegments,
+				cachedRef.PayloadLength,
+			)
+			if err != nil {
+				return nil, false, fmt.Errorf("failed to fetch object payload from DA: %v", err)
+			}
+			// Cache the payload for next time
+			witness.Payloads[objectID] = objectPayload
+
+			// Return complete witness with newly fetched payload
+			resultWitness := &types.StateWitness{
+				ServiceID:           serviceID,
+				ObjectID:            witness.ObjectID,
+				Ref:                 cachedRef,
+				Path:                witness.Path,
+				Value:               witness.Value,
+				Payload:             objectPayload,
+				MetaShardMerkleRoot: witness.MetaShardMerkleRoot,
+				MetaShardPayload:    witness.MetaShardPayload,
+				BlockNumber:         witness.BlockNumber,
+				Timeslot:            witness.Timeslot,
+				ObjectRefs:          witness.ObjectRefs,
+				Payloads:            witness.Payloads,
+				ObjectProofs:        witness.ObjectProofs,
+			}
+			return resultWitness, true, nil
+		}
+		// Have meta-shard cached but not this specific objectID - this shouldn't happen
+		// (ObjectRefs map should contain all entries from meta-shard)
+		// Fall through to normal lookup
+	}
+
+	// Cache miss - perform full lookup with state proof
+	metaShardRefBytes, proofBytes, _, found, err := s.sdb.GetServiceStorageWithProof(serviceID, metaShardObjectID[:])
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to read meta-shard ObjectRef: %v", err)
+	}
+	if !found {
+		return nil, false, fmt.Errorf("meta-shard ObjectRef not found for shard %+v", shardID)
+	}
+
+	// Deserialize meta-shard ObjectRef (37 bytes) + extract block metadata (8 bytes)
+	offset := 0
+	metaShardRef, err := types.DeserializeObjectRef(metaShardRefBytes, &offset)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to deserialize meta-shard ObjectRef: %v", err)
+	}
+
+	// Extract block metadata from the additional 8 bytes (timeslot + blocknumber)
+	var timeslot, blockNumber uint32
+	if len(metaShardRefBytes) >= 45 { // 37 + 8 = 45 bytes total
+		timeslot = binary.LittleEndian.Uint32(metaShardRefBytes[37:41])
+		blockNumber = binary.LittleEndian.Uint32(metaShardRefBytes[41:45])
+	}
+
+	// Step 4: Fetch meta-shard payload from JAM DA
+	numSegments, _ := types.CalculateSegmentsAndLastBytes(metaShardRef.PayloadLength)
+	metaShardPayload, err := s.sdb.FetchJAMDASegments(
+		metaShardRef.WorkPackageHash,
+		metaShardRef.IndexStart,
+		metaShardRef.IndexStart+numSegments,
+		metaShardRef.PayloadLength,
+	)
+	if err != nil {
+		log.Error(log.SDB, "ReadObject: FetchJAMDASegments failed",
+			"metaShardObjectID", metaShardObjectID,
+			"workPackageHash", metaShardRef.WorkPackageHash,
+			"indexStart", metaShardRef.IndexStart,
+			"numSegments", numSegments,
+			"payloadLength", metaShardRef.PayloadLength,
+			"err", err,
+		)
+		return nil, false, fmt.Errorf("failed to fetch meta-shard payload from DA: %v", err)
+	}
+
+	// Step 5: Deserialize meta-shard and search for object_id
+	_, metaShard, err := DeserializeMetaShard(metaShardPayload, metaShardObjectID, serviceID)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to deserialize meta-shard: %v", err)
+	}
+
+	// Create a witness entry for this meta-shard and populate ObjectRefs cache
+	witness := &types.StateWitness{
+		ServiceID:           serviceID,
+		Ref:                 metaShardRef,
+		ObjectID:            metaShardObjectID,
+		MetaShardMerkleRoot: metaShard.MerkleRoot,
+		MetaShardPayload:    metaShardPayload,
+		Path:                convertProofToHashes(proofBytes),
+		Value:               metaShardRefBytes,
+		BlockNumber:         blockNumber,
+		Timeslot:            timeslot,
+		ObjectRefs:          make(map[common.Hash]types.ObjectRef),
+		Payloads:            make(map[common.Hash][]byte),
+		ObjectProofs:        make(map[common.Hash][]common.Hash),
+	}
+
+	// Populate ObjectRefs map with all entries from the meta-shard
+	for i := range metaShard.Entries {
+		witness.ObjectRefs[metaShard.Entries[i].ObjectID] = metaShard.Entries[i].ObjectRef
+	}
+
+	// Cache this witness for future lookups
+	s.metashardWitnesses[metaShardObjectID] = witness
+
+	// Look up the requested objectID in the cached map
+	foundRef, hasRef := witness.ObjectRefs[objectID]
+	if !hasRef {
+		return nil, false, fmt.Errorf("object_id %s not found in meta-shard", objectID.Hex())
+	}
+
+	// Step 6: Fetch actual object payload from JAM DA
+	numSegments, _ = types.CalculateSegmentsAndLastBytes(foundRef.PayloadLength)
+	objectPayload, err := s.sdb.FetchJAMDASegments(
+		foundRef.WorkPackageHash,
+		foundRef.IndexStart,
+		foundRef.IndexStart+numSegments,
+		foundRef.PayloadLength,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to fetch object payload from DA: %v", err)
+	}
+
+	// Cache the payload for future lookups
+	witness.Payloads[objectID] = objectPayload
+
+	// Generate BMT inclusion proof for this object within the meta-shard
+	proof, proofErr := generateMetaShardInclusionProof(witness.MetaShardMerkleRoot, objectID, metaShard.Entries)
+	if proofErr != nil {
+		return nil, false, fmt.Errorf("failed to generate meta-shard proof for object %s: %v", objectID.Hex(), proofErr)
+	}
+	witness.ObjectProofs[objectID] = proof
+
+	// Verify witness against stateRoot
+	if !trie.Verify(serviceID, witness.ObjectID.Bytes(), witness.Value, s.StateRoot.Bytes(), witness.Path) {
+		log.Error(log.SDB, "BMT Proof verification failed", "object_id", objectID.Hex())
+		return nil, false, fmt.Errorf("BMT Proof verification failed for object %s", objectID.Hex())
+	}
+
+	// Return complete StateWitness with all verification data populated
+	resultWitness := &types.StateWitness{
+		ServiceID:           serviceID,
+		ObjectID:            witness.ObjectID,
+		Ref:                 metaShardRef,
+		Path:                witness.Path,
+		Value:               witness.Value,
+		Payload:             objectPayload,
+		MetaShardMerkleRoot: witness.MetaShardMerkleRoot,
+		MetaShardPayload:    witness.MetaShardPayload,
+		BlockNumber:         witness.BlockNumber,
+		Timeslot:            witness.Timeslot,
+		ObjectRefs:          witness.ObjectRefs,
+		Payloads:            witness.Payloads,
+		ObjectProofs:        witness.ObjectProofs,
+	}
+	return resultWitness, true, nil
 }
 
-// ReadObject fetches ObjectRef and state proof for given objectID
-func (s *StateDB) ReadStateWitnessRef(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error) {
+// GetWitnesses returns the meta-shard witnesses cache containing all cached StateWitness data
+// This includes both the ObjectRefs and Payloads maps built up during ReadObject calls
+func (s *StateDB) GetWitnesses() map[common.Hash]*types.StateWitness {
+	return s.metashardWitnesses
+}
+
+// FetchBlock is the special path for blocks
+func (s *StateDB) FetchBlock(serviceID uint32, objectID common.Hash) (types.StateWitness, bool, error) {
 	// Use the low-level trie method to get value, proof, and state root
 	valueBytes, proofBytes, _, ok, err := s.sdb.GetServiceStorageWithProof(serviceID, objectID[:])
 	if err != nil {
@@ -371,39 +580,45 @@ func (s *StateDB) ReadStateWitnessRef(serviceID uint32, objectID common.Hash, fe
 	}
 	path := convertProofToHashes(proofBytes)
 
-	// Receipt and other objects: JAM State starts with ObjectRef
-	if len(valueBytes) < 64 {
-		return types.StateWitness{}, true, fmt.Errorf("invalid value length: expected at least 64, got %d", len(valueBytes))
+	// Receipt and other objects: JAM State starts with ObjectRef + timeslot + blocknumber
+	if len(valueBytes) < 45 {
+		return types.StateWitness{}, true, fmt.Errorf("invalid value length: expected at least 45 (ObjectRef + timeslot + blocknumber), got %d", len(valueBytes))
 	}
 	// Deserialize ObjectRef from storage
 	offset := 0
-	objRef, deserErr := types.DeserializeObjectRef(valueBytes[0:64], &offset)
+	objRef, deserErr := types.DeserializeObjectRef(valueBytes, &offset)
 	if deserErr != nil {
 		return types.StateWitness{}, true, fmt.Errorf("failed to deserialize ObjectRef: %w", deserErr)
 	}
 
-	witness := types.StateWitness{
-		ObjectID: objectID,
-		Ref:      objRef,
-		Path:     path,
+	// Extract timeslot and blocknumber from valueBytes[37:45]
+	// Format: ObjectRef (37 bytes) + timeslot (4 bytes LE) + blocknumber (4 bytes LE) = 45 bytes total
+	var extractedTimeslot, extractedBlockNumber uint32
+	if len(valueBytes) >= 45 {
+		extractedTimeslot = binary.LittleEndian.Uint32(valueBytes[37:41])
+		extractedBlockNumber = binary.LittleEndian.Uint32(valueBytes[41:45])
 	}
 
-	// Handle payload based on object type
-	if objRef.ObjKind == uint8(common.ObjectKindReceipt) {
-		// Receipt objects: JAM State = ObjectRef + receipt_payload
-		// Extract the receipt payload from the remaining bytes after ObjectRef
-		if len(valueBytes) > 64 {
-			witness.Payload = valueBytes[64:] // Receipt payload starts after ObjectRef
-		}
-	} else if fetchPayloadFromDA {
-		// For other objects, optionally fetch payload via FetchJAMDASegments
-		payload, err := s.sdb.FetchJAMDASegments(objRef.WorkPackageHash, objRef.IndexStart, objRef.IndexEnd, objRef.PayloadLength)
-		if err != nil {
-			// Don't fail if CE139 read fails, just leave payload empty
-			witness.Payload = []byte{}
-		} else {
-			witness.Payload = payload
-		}
+	witness := types.StateWitness{
+		ServiceID:   serviceID,
+		ObjectID:    objectID,
+		Ref:         objRef,
+		BlockNumber: extractedBlockNumber,
+		Timeslot:    extractedTimeslot,
+		Path:        path,
+		Value:       valueBytes,
+	}
+
+	// fetch block with FetchJAMDASegments
+	// Calculate number of segments needed
+	numSegments, _ := types.CalculateSegmentsAndLastBytes(objRef.PayloadLength)
+	indexEnd := objRef.IndexStart + numSegments
+	payload, err := s.sdb.FetchJAMDASegments(objRef.WorkPackageHash, objRef.IndexStart, indexEnd, objRef.PayloadLength)
+	if err != nil {
+		// Don't fail if CE139 read fails, just leave payload empty
+		witness.Payload = []byte{}
+	} else {
+		witness.Payload = payload
 	}
 
 	return witness, true, nil
@@ -412,57 +627,26 @@ func (s *StateDB) ReadStateWitnessRef(serviceID uint32, objectID common.Hash, fe
 // VerifyStateWitnessRef verifies a StateWitness proof against a state root
 //
 //	every imported object must undergo same verification against refine context state root
+//	Note: service_id has been removed from ObjectRef, using 0 for verification
 func VerifyStateWitnessRef(witness types.StateWitness, stateRoot common.Hash) bool {
-	return trie.Verify(witness.Ref.ServiceID, witness.ObjectID[:], witness.Ref.Serialize(), stateRoot[:], witness.Path)
-}
-
-// VerifyStateWitnessRaw verifies a StateWitnessRaw proof against a state root
-func VerifyStateWitnessRaw(witness types.StateWitnessRaw, stateRoot common.Hash) bool {
-	return trie.Verify(witness.ServiceID, witness.ObjectID[:], witness.Payload, stateRoot[:], witness.Path)
-}
-
-// GetStateWitnesses extracts state witnesses for all objects referenced in the work report (for all work items)
-func (s *StateDB) GetStateWitnesses(workReports []*types.WorkReport) (witnesses []types.StateWitness, stateRoot common.Hash, err error) {
-	stateRoot = s.GetStateRoot()
-	witnesses = make([]types.StateWitness, 0)
-
-	// for all work items in the work report, extract witnesses for every objectID in the write intent
-	for _, workReport := range workReports {
-		for _, r := range workReport.Results {
-			if len(r.Result.Ok) > 0 {
-				effects, err := types.DeserializeExecutionEffects(r.Result.Ok)
-				if err != nil {
-					return nil, common.Hash{}, fmt.Errorf("DeserializeExecutionEffects failed: %v", err)
-				}
-				// Use ReadStateWitnessRef to get proof with built-in verification
-				for _, intent := range effects.WriteIntents {
-					objectID := intent.Effect.ObjectID
-
-					// Skip Block objects - they don't have ObjectRef entries in JAM state
-					if intent.Effect.RefInfo.ObjKind == uint8(common.ObjectKindBlock) || intent.Effect.RefInfo.ObjKind == uint8(common.ObjectKindReceipt) {
-						continue
-					}
-
-					w, ok, err := s.ReadStateWitnessRef(r.ServiceID, objectID, false)
-					if err != nil {
-						return nil, common.Hash{}, fmt.Errorf("ReadStateWitnessRef failed: %v", err)
-					} else if !ok {
-						// It is important to recognize that when conflicts arise, a write intent may
-						// reference an object that was not actually written.
-						return nil, common.Hash{}, fmt.Errorf("ReadStateWitnessRef NOT FOUND: %v", objectID)
-					}
-					witnesses = append(witnesses, w)
-				}
-			}
+	value := witness.Value
+	if len(value) == 0 {
+		serializedRef := witness.Ref.Serialize()
+		value = serializedRef
+		// Preserve accumulated metadata when available
+		if witness.Timeslot != 0 || witness.BlockNumber != 0 {
+			buf := make([]byte, 0, len(serializedRef)+8)
+			buf = append(buf, serializedRef...)
+			buf = append(buf, common.Uint32ToBytes(witness.Timeslot)...)
+			buf = append(buf, common.Uint32ToBytes(witness.BlockNumber)...)
+			value = buf
 		}
 	}
-	// Verify the witness (for paranoia)
-	for _, w := range witnesses {
-		if !VerifyStateWitnessRef(w, stateRoot) {
-			return nil, common.Hash{}, fmt.Errorf("ReadStateWitnessRef NOT VERIFIED: %v", w.ObjectID)
-		}
-	}
-	return witnesses, stateRoot, nil
+
+	// For meta-sharded objects, proof is for MetaShard Key
+	proofKey := witness.ObjectID[:]
+
+	return trie.Verify(witness.ServiceID, proofKey, value, stateRoot[:], witness.Path)
 }
 
 func (s *StateDB) GetForgets() []*types.SubServiceRequestResult {

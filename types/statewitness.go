@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 )
 
 const (
@@ -12,214 +13,155 @@ const (
 )
 
 type StateWitness struct {
-	ObjectID common.Hash   `json:"objectId"`
-	Ref      ObjectRef     `json:"ref"`
-	Path     []common.Hash `json:"path,omitempty"`
-	Payload  []byte        `json:"-"` // Not serialized, populated when FetchJAMDASegments=true
-}
+	ServiceID   uint32        `json:"serviceId,omitempty"`
+	ObjectID    common.Hash   `json:"objectId"`
+	Ref         ObjectRef     `json:"ref"`
+	BlockNumber uint32        `json:"blockNumber,omitempty"`
+	Timeslot    uint32        `json:"timeslot,omitempty"`
+	Path        []common.Hash `json:"path,omitempty"`
+	Payload     []byte        `json:"-"` // Not serialized, populated when FetchJAMDASegments=true
+	Value       []byte        `json:"-"` // Not serialized, populated when FetchJAMDASegments=true
 
-type StateWitnessRaw struct {
-	ObjectID      common.Hash   `json:"objectId"`
-	ServiceID     uint32        `json:"serviceId"`
-	Path          []common.Hash `json:"path,omitempty"`
-	PayloadLength uint32        `json:"payloadLength"`
-	Payload       []byte        `json:"-"` // Not serialized, populated when FetchJAMDASegments=true
-}
+	// Meta-shard proof chain (for objects stored in meta-shards)
+	MetaShardMerkleRoot [32]byte                      `json:"metaShardMerkleRoot,omitempty"` // BMT root from meta-shard payload
+	MetaShardPayload    []byte                        `json:"-"`                             // Meta-shard payload from DA (for verification)
+	ObjectProofs        map[common.Hash][]common.Hash `json:"-"`                             // cache of per-object proofs in the meta-shard
 
-// SerializeWitnessRaw serializes a StateWitnessRaw to binary format
-// Format: format_byte (0) + object_id (32 bytes) + service_id (4 bytes LE) + payload_length (4 bytes LE) + payload (variable) + proofs (32 bytes each)
-func (w StateWitnessRaw) SerializeWitnessRaw() []byte {
-	// Calculate total size: 1 (format) + 32 (object_id) + 4 (service_id) + 4 (payload_length) + payload + proofs
-	size := 1 + 32 + 4 + 4 + len(w.Payload) + (len(w.Path) * 32)
-	buf := make([]byte, 0, size)
-
-	// 0. Format byte (0 = RAW)
-	buf = append(buf, 0)
-
-	// 1. ObjectID (32 bytes)
-	buf = append(buf, w.ObjectID[:]...)
-
-	// 2. ServiceID (4 bytes LE)
-	serviceIDBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(serviceIDBytes, w.ServiceID)
-	buf = append(buf, serviceIDBytes...)
-
-	// 3. PayloadLength (4 bytes LE)
-	lengthBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(lengthBytes, w.PayloadLength)
-	buf = append(buf, lengthBytes...)
-
-	// 4. Payload (variable length)
-	buf = append(buf, w.Payload...)
-
-	// 5. Proof hashes (32 bytes each)
-	for _, hash := range w.Path {
-		buf = append(buf, hash[:]...)
-	}
-
-	return buf
-}
-
-// DeserializeStateWitnessRaw deserializes a StateWitnessRaw from binary format
-// Format: format_byte (0) + object_id (32 bytes) + service_id (4 bytes LE) + payload_length (4 bytes LE) + payload (variable) + proofs (32 bytes each)
-func DeserializeStateWitnessRaw(data []byte) (StateWitnessRaw, error) {
-	const minSize = 1 + 32 + 4 + 4 // format_byte + object_id + service_id + payload_length
-	if len(data) < minSize {
-		return StateWitnessRaw{}, fmt.Errorf("DeserializeStateWitnessRaw: need at least %d bytes, got %d", minSize, len(data))
-	}
-
-	offset := 0
-
-	// 0. Format byte (must be 0 for RAW)
-	formatByte := data[offset]
-	offset++
-	if formatByte != 0 {
-		return StateWitnessRaw{}, fmt.Errorf("DeserializeStateWitnessRaw: expected format byte 0, got %d", formatByte)
-	}
-
-	// 1. ObjectID (32 bytes)
-	var objectID common.Hash
-	copy(objectID[:], data[offset:offset+32])
-	offset += 32
-
-	// 2. ServiceID (4 bytes LE)
-	serviceID := binary.LittleEndian.Uint32(data[offset : offset+4])
-	offset += 4
-
-	// 3. PayloadLength (4 bytes LE)
-	payloadLength := binary.LittleEndian.Uint32(data[offset : offset+4])
-	offset += 4
-
-	// 4. Payload (variable length)
-	if len(data) < offset+int(payloadLength) {
-		return StateWitnessRaw{}, fmt.Errorf("DeserializeStateWitnessRaw: need %d bytes for payload at offset %d, got %d", payloadLength, offset, len(data)-offset)
-	}
-	payload := make([]byte, payloadLength)
-	copy(payload, data[offset:offset+int(payloadLength)])
-	offset += int(payloadLength)
-
-	// 5. Proof hashes (32 bytes each)
-	remaining := len(data) - offset
-	if remaining%32 != 0 {
-		return StateWitnessRaw{}, fmt.Errorf("DeserializeStateWitnessRaw: proof data not aligned to 32 bytes (remaining=%d)", remaining)
-	}
-	proofCount := remaining / 32
-	path := make([]common.Hash, proofCount)
-	for i := 0; i < proofCount; i++ {
-		copy(path[i][:], data[offset:offset+32])
-		offset += 32
-	}
-
-	return StateWitnessRaw{
-		ObjectID:      objectID,
-		ServiceID:     serviceID,
-		Path:          path,
-		PayloadLength: payloadLength,
-		Payload:       payload,
-	}, nil
+	// Optimization: Cache of objects found in this meta-shard (populated on first access)
+	ObjectRefs map[common.Hash]ObjectRef `json:"-"` // objectID => ObjectRef (parsed from MetaShardPayload)
+	Payloads   map[common.Hash][]byte    `json:"-"` // objectID => object payload bytes (fetched from DA)
 }
 
 // ObjectRef contains metadata for a JAM service object
 //
 // Fields filled at REFINE time (deterministic):
-// - ServiceID, WorkPackageHash, IndexStart, IndexEnd, Version, PayloadLength
+// - work_package_hash, index_start, payload_length, object_kind
 //
-// Fields filled at ACCUMULATE time (ordering-dependent):
-// - Timeslot: JAM block slot (maps 1:1 to canonical block hash)
-// - GasUsed: Gas consumed (non-zero for receipts)
-// - EvmBlock: Sequential Ethereum block number
-// - TxIndex: Position within block (lower 24 bits)
-// - ObjectKind: ObjectKind enum discriminant (replaces HashSuffix hack)
+// This matches the Rust implementation in services/utils/src/objects.rs
+// Serialized size: 37 bytes (32 + 5 packed 40 bits)
+// Packed format: index_start (12 bits) | index_end (12 bits) | last_segment_size (12 bits) | object_kind (4 bits)
 type ObjectRef struct {
-	// Refine-time fields (deterministic at work package creation)
-	ServiceID       uint32      `json:"serviceId"`
-	WorkPackageHash common.Hash `json:"workPackageHash"`
-	IndexStart      uint16      `json:"indexStart"`
-	IndexEnd        uint16      `json:"indexEnd"`
-	Version         uint32      `json:"version"`
-	PayloadLength   uint32      `json:"payloadLength"`
-	ObjKind         uint8       `json:"objectKind"` // ObjectKind (1 byte)
-
-	// Accumulate-time fields (finalized ordering metadata)
-	LogIndex uint8  `json:"logIndex"` // Reserved/padding (1 byte)
-	TxSlot   uint16 `json:"txSlot"`   // Transaction slot/index (2 bytes)
-	Timeslot uint32 `json:"timeslot"` // JAM block slot; maps 1:1 to canonical block hash
-	GasUsed  uint32 `json:"gasUsed"`  // Non-zero for receipt objects
-	EvmBlock uint32 `json:"evmBlock"` // Sequential Ethereum block number
+	WorkPackageHash common.Hash `json:"workPackageHash"` // 32 bytes
+	IndexStart      uint16      `json:"indexStart"`      // 2 bytes (packed into 12 bits)
+	PayloadLength   uint32      `json:"payloadLength"`   // 4 bytes (calculated from num_segments + last_segment_size)
+	ObjectKind      uint8       `json:"objectKind"`      // 1 byte (packed into 4 bits)
 }
 
-// TxIndex extracts tx_index from TxSlot field
-func (o ObjectRef) TxIndex() uint32 {
-	return uint32(o.TxSlot)
+const (
+	ObjectRefSerializedSize = 37
+	// Note: SegmentSize is defined in const.go as 4104
+	// Both Go and Rust now use SEGMENT_SIZE = 4104
+)
+
+// CalculateSegmentsAndLastBytes calculates num_segments and last_segment_bytes from payload_length
+// Matches Rust implementation in services/utils/src/objects.rs
+func CalculateSegmentsAndLastBytes(payloadLength uint32) (numSegments uint16, lastSegmentBytes uint16) {
+	if payloadLength == 0 {
+		return 0, 0
+	}
+	fullSegments := (payloadLength - 1) / SegmentSize
+	lastSegmentBytes = uint16(payloadLength - (fullSegments * SegmentSize))
+	numSegments = uint16(fullSegments + 1)
+	return
 }
 
-// ObjectKind extracts ObjectKind from ObjKind field
-func (o ObjectRef) ObjectKind() uint32 {
-	return uint32(o.ObjKind)
+// CalculatePayloadLength calculates payload_length from num_segments and last_segment_bytes
+// Matches Rust implementation in services/utils/src/objects.rs
+func CalculatePayloadLength(numSegments, lastSegmentBytes uint16) uint32 {
+	if numSegments == 0 {
+		return 0
+	}
+	if numSegments == 1 {
+		return uint32(lastSegmentBytes)
+	}
+	return (uint32(numSegments)-1)*SegmentSize + uint32(lastSegmentBytes)
 }
 
+// Serialize serializes ObjectRef to 37 bytes matching Rust format:
+// - work_package_hash (32 bytes)
+// - packed 5 bytes (40 bits): index_start (12) | index_end (12) | last_segment_size (12) | object_kind (4)
 func (o ObjectRef) Serialize() []byte {
-	buf := make([]byte, 0, 64)
+	buf := make([]byte, ObjectRefSerializedSize)
 
-	four := make([]byte, 4)
-	binary.LittleEndian.PutUint32(four, o.ServiceID)
-	buf = append(buf, four...)
+	// Work package hash (32 bytes)
+	copy(buf[0:32], o.WorkPackageHash[:])
 
-	buf = append(buf, o.WorkPackageHash[:]...)
+	// Calculate segments from payload_length
+	numSegments, lastSegmentSize := CalculateSegmentsAndLastBytes(o.PayloadLength)
+	// A full last segment (4104 bytes) cannot fit in the 12-bit last_segment_size field.
+	// Encode this case as 0 and expand back to SegmentSize during deserialization.
+	encodedLastSegment := lastSegmentSize
+	if lastSegmentSize == SegmentSize {
+		encodedLastSegment = 0
+	}
+	indexEnd := o.IndexStart + numSegments
 
-	tmp := make([]byte, 2)
-	binary.LittleEndian.PutUint16(tmp, o.IndexStart)
-	buf = append(buf, tmp...)
+	// Pack 40 bits: index_start (12) | index_end (12) | last_segment_size (12) | object_kind (4)
+	packed := (uint64(o.IndexStart&0xFFF) << 28) | // Bits 28-39
+		(uint64(indexEnd&0xFFF) << 16) | // Bits 16-27
+		(uint64(encodedLastSegment&0xFFF) << 4) | // Bits 4-15 (0 encodes a full last segment)
+		uint64(o.ObjectKind&0xF) // Bits 0-3
 
-	binary.LittleEndian.PutUint16(tmp, o.IndexEnd)
-	buf = append(buf, tmp...)
-
-	binary.LittleEndian.PutUint32(four, o.Version)
-	buf = append(buf, four...)
-
-	binary.LittleEndian.PutUint32(four, o.PayloadLength)
-	buf = append(buf, four...)
-
-	buf = append(buf, o.ObjKind)                 // 1 byte
-	buf = append(buf, o.LogIndex)                // 1 byte
-	binary.LittleEndian.PutUint16(tmp, o.TxSlot) // 2 bytes
-	buf = append(buf, tmp...)
-
-	binary.LittleEndian.PutUint32(four, o.Timeslot)
-	buf = append(buf, four...)
-
-	binary.LittleEndian.PutUint32(four, o.GasUsed)
-	buf = append(buf, four...)
-
-	binary.LittleEndian.PutUint32(four, o.EvmBlock)
-	buf = append(buf, four...)
+	// Store as 5 bytes (40 bits)
+	buf[32] = byte(packed >> 32)
+	buf[33] = byte(packed >> 24)
+	buf[34] = byte(packed >> 16)
+	buf[35] = byte(packed >> 8)
+	buf[36] = byte(packed)
 
 	return buf
 }
 
+// DeserializeObjectRef deserializes ObjectRef from 37 bytes matching Rust format:
+// - work_package_hash (32 bytes)
+// - packed 5 bytes (40 bits): index_start (12) | index_end (12) | last_segment_size (12) | object_kind (4)
+// could also return block number + timeslot (8 bytes)
 func DeserializeObjectRef(data []byte, offset *int) (ObjectRef, error) {
-	if len(data) < *offset+64 {
-		return ObjectRef{}, fmt.Errorf("DeserializeObjectRef: truncated input at offset %d", *offset)
+	if len(data) < *offset+ObjectRefSerializedSize {
+		return ObjectRef{}, fmt.Errorf("DeserializeObjectRef: need %d bytes at offset %d, have %d",
+			ObjectRefSerializedSize, *offset, len(data)-*offset)
 	}
-	// Layout: service_id(4) + work_package_hash(32) + index_start(2) + index_end(2) +
-	//         version(4) + payload_length(4) + obj_kind(1) + tx_slot_2(1) + tx_slot(2) +
-	//         timeslot(4) + gas_used(4) + evm_block(4) = 64 bytes
-	ref := ObjectRef{
-		ServiceID:     binary.LittleEndian.Uint32(data[*offset : *offset+4]),
-		IndexStart:    binary.LittleEndian.Uint16(data[*offset+36 : *offset+38]),
-		IndexEnd:      binary.LittleEndian.Uint16(data[*offset+38 : *offset+40]),
-		Version:       binary.LittleEndian.Uint32(data[*offset+40 : *offset+44]),
-		PayloadLength: binary.LittleEndian.Uint32(data[*offset+44 : *offset+48]),
-		// New field order: ObjKind, LogIndex, TxSlot, Timeslot, GasUsed, EvmBlock
-		ObjKind:  data[*offset+48],
-		LogIndex: data[*offset+49],
-		TxSlot:   binary.LittleEndian.Uint16(data[*offset+50 : *offset+52]),
-		Timeslot: binary.LittleEndian.Uint32(data[*offset+52 : *offset+56]),
-		GasUsed:  binary.LittleEndian.Uint32(data[*offset+56 : *offset+60]),
-		EvmBlock: binary.LittleEndian.Uint32(data[*offset+60 : *offset+64]),
+
+	var ref ObjectRef
+
+	// Work package hash (32 bytes)
+	copy(ref.WorkPackageHash[:], data[*offset:*offset+32])
+
+	// Unpack 5 bytes (40 bits): index_start (12) | index_end (12) | last_segment_size (12) | object_kind (4)
+	packed := (uint64(data[*offset+32]) << 32) |
+		(uint64(data[*offset+33]) << 24) |
+		(uint64(data[*offset+34]) << 16) |
+		(uint64(data[*offset+35]) << 8) |
+		uint64(data[*offset+36])
+
+	indexStart := uint16((packed >> 28) & 0xFFF)     // Bits 28-39 (12 bits)
+	indexEnd := uint16((packed >> 16) & 0xFFF)       // Bits 16-27 (12 bits)
+	lastSegmentSize := uint16((packed >> 4) & 0xFFF) // Bits 4-15 (12 bits)
+	objectKind := uint8(packed & 0xF)                // Bits 0-3 (4 bits)
+
+	// Calculate payload_length from segments
+	var numSegments uint16
+	if indexEnd > indexStart {
+		numSegments = indexEnd - indexStart
+	} else {
+		numSegments = 0
 	}
-	copy(ref.WorkPackageHash[:], data[*offset+4:*offset+36])
-	*offset += 64
+
+	// 0 encodes a full 4104-byte last segment; disambiguate from empty payload (numSegments==0)
+	if numSegments > 0 && lastSegmentSize == 0 {
+		lastSegmentSize = SegmentSize
+	}
+
+	ref.IndexStart = indexStart
+	ref.PayloadLength = CalculatePayloadLength(numSegments, lastSegmentSize)
+	ref.ObjectKind = objectKind
+	log.Trace(log.SDB, "---- Deserialized ObjectRef", "workPackageHash", ref.WorkPackageHash,
+		"packed", fmt.Sprintf("%x", packed),
+		"indexStart", ref.IndexStart, "indexEnd", indexEnd,
+		"lastSegmentSize", lastSegmentSize,
+		"payloadLength", ref.PayloadLength,
+		"objectKind", ref.ObjectKind)
+	*offset += ObjectRefSerializedSize
 	return ref, nil
 }
 
@@ -232,13 +174,8 @@ type WriteEffectEntry struct {
 }
 
 type WriteIntent struct {
-	Effect       WriteEffectEntry   `json:"effect"`
-	Dependencies []ObjectDependency `json:"dependencies,omitempty"`
-}
-
-type ObjectDependency struct {
-	ObjectID        common.Hash `json:"objectId"`
-	RequiredVersion uint32      `json:"requiredVersion"`
+	Effect       WriteEffectEntry `json:"effect"`
+	Dependencies []common.Hash    `json:"dependencies,omitempty"`
 }
 
 type ExecutionEffects struct {
@@ -276,7 +213,7 @@ func DeserializeExecutionEffects(data []byte) (ExecutionEffects, error) {
 		// Retain inline payload for receipt and block metadata objects (used by accumulate).
 		// All other object kinds should not carry inline payload in ExecutionEffects.
 		payload := candidate.Payload
-		if candidate.RefInfo.ObjKind != uint8(common.ObjectKindReceipt) && candidate.RefInfo.ObjKind != uint8(common.ObjectKindBlockMetadata) {
+		if candidate.RefInfo.ObjectKind != uint8(common.ObjectKindReceipt) && candidate.RefInfo.ObjectKind != uint8(common.ObjectKindBlockMetadata) {
 			payload = nil
 		}
 
@@ -303,9 +240,10 @@ type ObjectCandidateWrite struct {
 }
 
 // DeserializeObjectCandidateWrite deserializes a single ObjectCandidateWrite entry
-// Format: ObjectID (32B) + ObjectRef (64B) + dep_count (2B) + dependencies (36B each)
-// Returns: candidate, dependencies, bytes_consumed, error
-func DeserializeObjectCandidateWrite(data []byte, offset *int) (ObjectCandidateWrite, []ObjectDependency, int, error) {
+// Format: ObjectID (32B) + ObjectRef (36B) + [optional payload for Receipt/BlockMetadata]
+// Note: Dependencies are no longer serialized (matching Rust implementation)
+// Returns: candidate, dependencies (empty), bytes_consumed, error
+func DeserializeObjectCandidateWrite(data []byte, offset *int) (ObjectCandidateWrite, []common.Hash, int, error) {
 	startOffset := *offset
 
 	// ObjectID (32 bytes)
@@ -316,48 +254,23 @@ func DeserializeObjectCandidateWrite(data []byte, offset *int) (ObjectCandidateW
 	copy(objectID[:], data[*offset:*offset+32])
 	*offset += 32
 
-	// ObjectRef (64 bytes)
+	// ObjectRef (37 bytes)
 	refInfo, err := DeserializeObjectRef(data, offset)
 	if err != nil {
 		return ObjectCandidateWrite{}, nil, 0, fmt.Errorf("DeserializeObjectCandidateWrite: ObjectRef: %w", err)
 	}
 
-	// Dependencies count (2 bytes)
-	if len(data) < *offset+2 {
-		return ObjectCandidateWrite{}, nil, 0, fmt.Errorf("DeserializeObjectCandidateWrite: need 2 bytes for dep_count at offset %d, have %d", *offset, len(data)-*offset)
-	}
-	depCount := binary.LittleEndian.Uint16(data[*offset : *offset+2])
-	*offset += 2
-
-	// Dependencies (36 bytes each: 32B object_id + 4B version)
-	if len(data) < *offset+int(depCount)*36 {
-		return ObjectCandidateWrite{}, nil, 0, fmt.Errorf("DeserializeObjectCandidateWrite: need %d bytes for %d deps at offset %d, have %d",
-			int(depCount)*36, depCount, *offset, len(data)-*offset)
-	}
-
-	dependencies := make([]ObjectDependency, depCount)
-	for i := uint16(0); i < depCount; i++ {
-		var depObjectID common.Hash
-		copy(depObjectID[:], data[*offset:*offset+32])
-		*offset += 32
-
-		requiredVersion := binary.LittleEndian.Uint32(data[*offset : *offset+4])
-		*offset += 4
-
-		dependencies[i] = ObjectDependency{
-			ObjectID:        depObjectID,
-			RequiredVersion: requiredVersion,
-		}
-	}
+	// Dependencies are no longer serialized (matching Rust implementation)
+	var dependencies []common.Hash
 
 	// Read payload if present for Receipt and BlockMetadata objects (payload serialized inline after dependencies)
 	var payload []byte
-	if refInfo.ObjKind == uint8(common.ObjectKindReceipt) || refInfo.ObjKind == uint8(common.ObjectKindBlockMetadata) {
+	if refInfo.ObjectKind == uint8(common.ObjectKindReceipt) || refInfo.ObjectKind == uint8(common.ObjectKindBlockMetadata) {
 		payloadLen := int(refInfo.PayloadLength)
 		if len(data) < *offset+payloadLen {
 			return ObjectCandidateWrite{}, nil, 0, fmt.Errorf(
 				"DeserializeObjectCandidateWrite: need %d bytes for object payload (kind=%d) at offset %d, have %d",
-				payloadLen, refInfo.ObjKind, *offset, len(data)-*offset,
+				payloadLen, refInfo.ObjectKind, *offset, len(data)-*offset,
 			)
 		}
 		payload = make([]byte, payloadLen)
@@ -379,12 +292,11 @@ func CreateImportSegmentsAndWitness(
 	objectID common.Hash,
 	workPackageHash common.Hash,
 	payload []byte,
-	serviceID uint32,
+	objectKind uint8,
 	startIndex uint16,
-	version uint32,
 ) (StateWitness, [][]byte) {
-	// First segment includes metadata: ObjectID (32) + ObjectRef (64) = 96 bytes
-	const metadataSize = 96
+	// First segment includes metadata: ObjectID (32) + ObjectRef (37) = 69 bytes
+	const metadataSize = 69
 	firstPayloadCapacity := jamSegmentSize - metadataSize
 	if firstPayloadCapacity < 0 {
 		firstPayloadCapacity = 0
@@ -392,12 +304,10 @@ func CreateImportSegmentsAndWitness(
 
 	// Build ObjectRef first to include in first segment
 	ref := ObjectRef{
-		ServiceID:       serviceID,
 		WorkPackageHash: workPackageHash,
 		IndexStart:      startIndex,
-		IndexEnd:        0, // Will be updated after counting segments
-		Version:         version,
 		PayloadLength:   uint32(len(payload)),
+		ObjectKind:      objectKind,
 	}
 
 	var segments [][]byte
@@ -410,8 +320,8 @@ func CreateImportSegmentsAndWitness(
 	}
 	firstSegment := make([]byte, metadataSize+firstChunk)
 	copy(firstSegment[0:32], objectID[:])
-	copy(firstSegment[32:96], ref.Serialize())
-	copy(firstSegment[96:], remaining[:firstChunk])
+	copy(firstSegment[32:69], ref.Serialize())
+	copy(firstSegment[69:], remaining[:firstChunk])
 	segments = append(segments, firstSegment)
 	remaining = remaining[firstChunk:]
 
@@ -427,9 +337,6 @@ func CreateImportSegmentsAndWitness(
 		remaining = remaining[chunk:]
 	}
 
-	// Update IndexEnd now that we know segment count
-	ref.IndexEnd = startIndex + uint16(len(segments))
-
 	witness := StateWitness{
 		ObjectID: objectID,
 		Ref:      ref,
@@ -439,20 +346,17 @@ func CreateImportSegmentsAndWitness(
 }
 
 // SerializeWitness serializes a StateWitness to the fixed binary format expected by Rust
-// Format: format_byte (1) + object_id (32 bytes) + object_ref (64 bytes) + proofs (32 bytes each, no length prefix)
+// Format: object_id (32 bytes) + value (meta-shard ObjectRef from JAM State) + proofs (32 bytes each)
 func (w StateWitness) SerializeWitness() []byte {
-	// Calculate total size
-	size := 1 + 32 + 64 + (len(w.Path) * 32)
+	// Calculate total size: 32 + len(Value) + N*32
+	size := 32 + len(w.Value) + (len(w.Path) * 32)
 	buf := make([]byte, 0, size)
-
-	// 0. Format byte (1 = REF)
-	buf = append(buf, 1)
 
 	// 1. ObjectID (32 bytes)
 	buf = append(buf, w.ObjectID[:]...)
 
-	// 2. ObjectRef (64 bytes) - use existing Serialize method
-	buf = append(buf, w.Ref.Serialize()...)
+	// 2. Value (meta-shard ObjectRef bytes from JAM State - typically 45 bytes)
+	buf = append(buf, w.Value...)
 
 	// 3. Proof hashes (32 bytes each)
 	for _, hash := range w.Path {

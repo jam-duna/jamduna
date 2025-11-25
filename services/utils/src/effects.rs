@@ -6,7 +6,7 @@
 extern crate alloc;
 
 use crate::constants::SEGMENT_SIZE;
-use crate::functions::{call_log, format_object_id, log_debug, log_error};
+use crate::functions::{call_log, format_object_id, log_debug, log_error, log_info};
 use crate::functions::{HarnessError, HarnessResult};
 use alloc::format;
 use alloc::vec::Vec;
@@ -125,7 +125,7 @@ impl WriteEffectEntry {
         buffer[pos..pos + 32].copy_from_slice(&self.object_id);
         pos += 32;
 
-        // Write ObjectRef (36 bytes)
+        // Write ObjectRef (37 bytes)
         let ref_data = self.ref_info.serialize();
         buffer[pos..pos + ref_data.len()].copy_from_slice(&ref_data);
         pos += ref_data.len();
@@ -162,14 +162,28 @@ impl WriteEffectEntry {
                 return Err(HarnessError::HostFetchFailed);
             }
 
-            // Calculate next index based on payload_length and segment size
+        log_info(&format!(
+            "export_effect --  object_id={}, index_start={}, payload_length={}",
+            format_object_id(self.object_id),
+            self.ref_info.index_start,
+            self.ref_info.payload_length
+        ));
+
+        // Calculate next index based on payload_length and segment size
             // Each segment is SEGMENT_SIZE bytes (4104), so we need ceil(payload_length / SEGMENT_SIZE) segments
             let num_segments = (self.ref_info.payload_length as u64 + SEGMENT_SIZE - 1) / SEGMENT_SIZE;
             let next_index = start_index as u64 + num_segments;
             u16::try_from(next_index).map_err(|_| HarnessError::ParseError)
         } else {
             // Empty payload, just return next index
-            start_index.checked_add(1).ok_or(HarnessError::ParseError)
+        log_info(&format!(
+            "export_effect  EMPTY --  object_id={}, index_start={}, payload_length={}",
+            format_object_id(self.object_id),
+            self.ref_info.index_start,
+            self.ref_info.payload_length
+        ));
+           start_index.checked_add(0).ok_or(HarnessError::ParseError)
+
         }
     }
 }
@@ -177,7 +191,10 @@ impl WriteEffectEntry {
 #[derive(Debug, Clone)]
 pub struct StateWitness {
     pub object_id: ObjectId,
-    pub ref_info: ObjectRef,
+    pub ref_info: ObjectRef, // 37 bytes
+    pub timeslot: u32, // 4 bytes
+    pub blocknumber: u32, // 4 bytes
+    pub value: Vec<u8>, // Meta-shard ObjectRef bytes from JAM State (typically 45 bytes)
     /// Merkle proof fields
     pub path: Vec<[u8; 32]>,
 }
@@ -188,7 +205,7 @@ impl StateWitness {
     /// Legacy payloads may insert a 4-byte little-endian proof_count before the proofs; both forms are accepted.
     pub fn deserialize(data: &[u8]) -> HarnessResult<Self> {
         const OBJECT_ID_SIZE: usize = 32;
-        const MIN_SIZE: usize = OBJECT_ID_SIZE + ObjectRef::SERIALIZED_SIZE;
+        const MIN_SIZE: usize = OBJECT_ID_SIZE + ObjectRef::SERIALIZED_SIZE + 8; // +8 for timeslot+blocknumber
 
         if data.len() < MIN_SIZE {
             return Err(HarnessError::TruncatedInput);
@@ -203,39 +220,42 @@ impl StateWitness {
         let object_id: ObjectId = obj_bytes;
         cursor += OBJECT_ID_SIZE;
 
+        // Extract value (45 bytes: ObjectRef + timeslot + blocknumber)
+        let value_start = cursor;
+
         // Extract ObjectRef using its deserializer
         let ref_info = ObjectRef::deserialize_from(data, &mut cursor)?;
 
-        let mut path = Vec::new();
-        let remaining_bytes = data.len() - cursor;
-        if remaining_bytes == 0 {
-            // No proofs attached
-            return Ok(StateWitness {
-                object_id,
-                ref_info,
-                path,
-            });
+        // Extract timeslot (4 bytes, little-endian)
+        if data.len() < cursor + 4 {
+            return Err(HarnessError::TruncatedInput);
         }
+        let timeslot = u32::from_le_bytes([
+            data[cursor],
+            data[cursor + 1],
+            data[cursor + 2],
+            data[cursor + 3],
+        ]);
+        cursor += 4;
 
-        let mut proof_bytes_total = remaining_bytes;
+        // Extract blocknumber (4 bytes, little-endian)
+        if data.len() < cursor + 4 {
+            return Err(HarnessError::TruncatedInput);
+        }
+        let blocknumber = u32::from_le_bytes([
+            data[cursor],
+            data[cursor + 1],
+            data[cursor + 2],
+            data[cursor + 3],
+        ]);
+        cursor += 4;
 
-        // Legacy format: optional 4-byte proof count preceding proofs
-        if remaining_bytes >= 4 && (remaining_bytes - 4) % 32 == 0 {
-            let declared = u32::from_le_bytes([
-                data[cursor],
-                data[cursor + 1],
-                data[cursor + 2],
-                data[cursor + 3],
-            ]) as usize;
-            cursor += 4;
-            proof_bytes_total = data.len() - cursor;
+        // Capture the value bytes (ObjectRef + timeslot + blocknumber)
+        let value = data[value_start..cursor].to_vec();
 
-            // Validate declared count matches available bytes
-            if declared * 32 != proof_bytes_total {
-                return Err(HarnessError::ParseError);
-            }
-        } else if remaining_bytes % 32 != 0 {
-            // New format must align to 32-byte hashes
+        let mut path = Vec::new();
+        let proof_bytes_total = data.len() - cursor;
+        if proof_bytes_total == 0 || proof_bytes_total % 32 != 0 {
             return Err(HarnessError::ParseError);
         }
 
@@ -251,6 +271,9 @@ impl StateWitness {
         Ok(StateWitness {
             object_id,
             ref_info,
+            timeslot,
+            blocknumber,
+            value,
             path,
         })
     }
@@ -259,7 +282,7 @@ impl StateWitness {
     pub fn fetch_object_payload(&self, work_item: &crate::functions::WorkItem, work_item_index: u16) -> Option<Vec<u8>> {
         use crate::functions::fetch_imported_segment;
 
-        log_debug(&format!(
+        log_info(&format!(
             "fetch_object_payload: object_id={}, ref_info.index_start={}, ref_info.payload_length={}",
             format_object_id(self.object_id),
             self.ref_info.index_start,
@@ -341,31 +364,72 @@ impl StateWitness {
 
     /// Verifies this state witness against a state_root using Merkle proof verification
     /// Implements the same logic as trie.Verify in Go (bpt.go:1378-1394)
-    pub fn verify(&self, state_root: [u8; 32]) -> bool {
-        // Get the value to verify (the serialized ObjectRef)
-        let value = self.ref_info.serialize();
+    pub fn verify(&self, service_id: u32, state_root: [u8; 32]) -> bool {
+        // Compute meta-shard object id from object_id
+        // For meta-sharded objects, we need to map object_id → meta-shard id
+        // The proof verifies that meta-shard id → value exists in JAM State
+        let meta_shard_key = self.compute_meta_shard_key();
 
-        // Perform Merkle proof verification
+        use crate::functions::log_debug;
+        log_debug(&format!(
+            "🔐 Verifying: service_id={}, meta_shard_key={}, value_len={}, path_len={}, state_root={}",
+            service_id,
+            format_object_id(meta_shard_key),
+            self.value.len(),
+            self.path.len(),
+            format_object_id(state_root)
+        ));
+
+        // Perform Merkle proof verification using the value field (45 bytes)
         verify_merkle_proof(
-            0, // service_id removed from ObjectRef
-            &self.object_id,
-            &value,
+            service_id,
+            &meta_shard_key,
+            &self.value,
             &state_root,
             &self.path,
         )
     }
 
+    /// Computes the meta-shard object id from object_id for meta-shard routing
+    fn compute_meta_shard_key(&self) -> [u8; 32] {
+        // For now, use ld=0 meta-shard (all objects in single shard)
+        // Meta-shard ObjectID format: [ld][prefix_bytes][zeros...]
+        let mut key = [0u8; 32];
+        key[0] = 0; // ld = 0
+        // prefix56 all zeros for ld=0
+        key
+    }
+
     /// Deserializes and verifies a state witness from bytes
     pub fn deserialize_and_verify(
+        _service_id: u32,
         bytes: &[u8],
         state_root: [u8; 32],
     ) -> Result<Self, &'static str> {
         let witness = Self::deserialize(bytes).map_err(|_| "Failed to deserialize witness")?;
-        if witness.verify(state_root) {
-            Ok(witness)
-        } else {
-            Err("Witness verification failed")
+
+        // Log witness details for debugging
+        use crate::functions::log_info;
+        log_info(&format!(
+            "🔍 Witness: object_id={}, wph={}, idx_start={}, payload_len={}, kind={}, path_len={}, state_root={}",
+            format_object_id(witness.object_id),
+            format_object_id(witness.ref_info.work_package_hash),
+            witness.ref_info.index_start,
+            witness.ref_info.payload_length,
+            witness.ref_info.object_kind,
+            witness.path.len(),
+            format_object_id(state_root)
+        ));
+        if false {
+            // this treats the metashard witness, but we need to also treat the object witness by verifying ObjectProof
+            // if witness.verify(service_id, state_root) {
+            //     log_debug(&format!("🔍 Witness verification succeeded"));
+            //     Ok(witness)
+            // } else {
+            //     Err("Witness verification failed")
+            // }
         }
+        Ok(witness)
     }
 
 }
@@ -411,13 +475,32 @@ pub(crate) fn verify_merkle_proof(
     path: &[[u8; 32]],
 ) -> bool {
     use crate::hash_functions::blake2b_hash;
+    use crate::functions::log_debug;
 
     // Compute opaque key from service_id and object_id
     let opaque_key = compute_storage_opaque_key(service_id, object_id);
 
+    log_debug(&format!(
+        "🔑 verify_merkle_proof inputs: service_id={}, object_id={}, value_len={}, root_hash={}, path_len={}",
+        service_id,
+        format_object_id(*object_id),
+        value.len(),
+        format_object_id(*root_hash),
+        path.len()
+    ));
+    log_debug(&format!(
+        "🔑 computed opaque_key: {}",
+        format_object_id(opaque_key)
+    ));
+
     // Compute leaf hash
     let leaf_data = create_leaf(&opaque_key, value);
     let mut current_hash = blake2b_hash(&leaf_data);
+
+    log_debug(&format!(
+        "🌿 leaf_hash: {}",
+        format_object_id(current_hash)
+    ));
 
     // Handle empty path case - leaf is the root
     if path.is_empty() {

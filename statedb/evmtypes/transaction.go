@@ -42,9 +42,9 @@ type EthereumTransaction struct {
 type EthereumTransactionResponse struct {
 	Hash             string  `json:"hash"`
 	Nonce            string  `json:"nonce"`
-	BlockHash        *string `json:"blockHash"`
-	BlockNumber      *string `json:"blockNumber"`
-	TransactionIndex *string `json:"transactionIndex"`
+	BlockHash        string  `json:"blockHash"`
+	BlockNumber      string  `json:"blockNumber"`
+	TransactionIndex string  `json:"transactionIndex"`
 	From             string  `json:"from"`
 	To               *string `json:"to"`
 	Value            string  `json:"value"`
@@ -93,11 +93,11 @@ func ConvertPayloadToEthereumTransaction(receipt *TransactionReceipt) (*Ethereum
 	v, r, s := tx.RawSignatureValues()
 
 	return &EthereumTransactionResponse{
-		Hash:             receipt.Hash.String(),
+		Hash:             receipt.TransactionHash.String(),
 		Nonce:            fmt.Sprintf("0x%x", tx.Nonce()),
-		BlockHash:        nil, // Will be set by caller
-		BlockNumber:      nil, // Will be set by caller
-		TransactionIndex: nil, // Will be set by caller
+		BlockHash:        receipt.BlockHash.String(),
+		BlockNumber:      fmt.Sprintf("0x%x", receipt.BlockNumber),
+		TransactionIndex: fmt.Sprintf("%d", receipt.TransactionIndex),
 		From:             from.Hex(),
 		To:               to,
 		Value:            fmt.Sprintf("0x%x", tx.Value()),

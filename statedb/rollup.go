@@ -100,7 +100,7 @@ type PayloadType byte
 const (
 	PayloadTypeBuilder      PayloadType = 0x00
 	PayloadTypeTransactions PayloadType = 0x01
-	PayloadTypeBlocks       PayloadType = 0x02
+	PayloadTypeGenesis      PayloadType = 0x02
 	PayloadTypeCall         PayloadType = 0x03
 )
 
@@ -615,22 +615,13 @@ func (c *Rollup) CallMath(mathAddress common.Address, callStrings []string) (txB
 }
 
 // SubmitEVMTransactions creates and submits a work package with raw transactions, processes it, and returns the resulting block
-func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte, startBlock uint32, endBlock uint32) (*evmtypes.EvmBlockPayload, error) {
+func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte) ([]*types.WorkPackageBundle, error) {
 	bundles := make([]*types.WorkPackageBundle, len(evmTxsMulticore))
 
 	for coreIndex, evmTxs := range evmTxsMulticore {
 		if len(evmTxs) == 0 {
 			bundles[coreIndex] = nil
 			continue
-		}
-
-		// Collect block objectIDs if block range specified
-		var rawObjectIDs []common.Hash
-		if endBlock > startBlock {
-			for blockNum := startBlock; blockNum < endBlock; blockNum++ {
-				objectID := evmtypes.BlockNumberToObjectID(blockNum)
-				rawObjectIDs = append(rawObjectIDs, objectID)
-			}
 		}
 
 		// Create extrinsics blobs with transaction extrinsics only
@@ -654,11 +645,11 @@ func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte, startBlock ui
 
 		// Create work package
 		wp := DefaultWorkPackage(b.serviceID, service)
-		wp.WorkItems[0].Payload = BuildPayload(PayloadTypeTransactions, numTxExtrinsics, len(rawObjectIDs))
+		wp.WorkItems[0].Payload = BuildPayload(PayloadTypeTransactions, numTxExtrinsics, 0)
 		wp.WorkItems[0].Extrinsics = hashes
 
 		//  BuildBundle should return a Bundle (with ImportedSegments)
-		bundle2, _, err := b.stateDB.BuildBundle(wp, []types.ExtrinsicsBlobs{blobs}, uint16(coreIndex), rawObjectIDs, b.pvmBackend)
+		bundle2, _, err := b.stateDB.BuildBundle(wp, []types.ExtrinsicsBlobs{blobs}, uint16(coreIndex), nil, b.pvmBackend)
 		if err != nil {
 			return nil, fmt.Errorf("BuildBundle failed: %v", err)
 		}
@@ -671,13 +662,7 @@ func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte, startBlock ui
 		return nil, fmt.Errorf("processWorkPackageBundles failed: %w", err)
 	}
 
-	// Get and return the latest block
-	block, _, err := b.stateDB.GetBlockByNumber(b.serviceID, "tentative")
-	if err != nil {
-		return nil, fmt.Errorf("GetBlockByNumber failed: %w", err)
-	}
-
-	return block, nil
+	return bundles, nil
 }
 
 // ShowTxReceipts displays transaction receipts for the given transaction hashes
@@ -698,20 +683,11 @@ func (b *Rollup) ShowTxReceipts(evmBlock *evmtypes.EvmBlockPayload, txHashes []c
 			return fmt.Errorf("failed to get transaction receipt for %s: %w", txHash.String(), err)
 		}
 
-		gasUsedInt := new(big.Int)
-		gasUsedInt.SetString(strings.TrimPrefix(receipt.GasUsed, "0x"), 16)
-		gasUsedTotal.Add(gasUsedTotal, gasUsedInt)
-		txIndexString := receipt.TransactionIndex
-		txIndex, err := strconv.ParseUint(txIndexString[2:], 10, 64)
-		if err != nil {
-			return fmt.Errorf("failed to convert txIndexString to uint64: %w", err)
-		}
 		log.Info(log.Node, "✅ Transaction succeeded",
 			"txHash", txHash.String(),
-			"index", txIndex,
-			"len(logs)", len(receipt.Logs),
-			"gasUsed", gasUsedInt.String())
-		evmtypes.ShowEthereumLogs(txHash, receipt.Logs, allTopics)
+			"index", receipt.TransactionIndex,
+			"gasUsed", receipt.UsedGas)
+		//evmtypes.ShowEthereumLogs(txHash, receipt.Logs, allTopics)
 		// if verifyServiceProof {
 		// 	position := evmBlock.LogIndexStart + txIndex
 		// 	proof, err := b.stateDB.GenerateServiceProof(b.serviceID, b.stateDB.GetMMRStorageKey(), position, evmBlock.LogIndexStart, evmBlock.ReceiptHashes)
@@ -729,40 +705,6 @@ func (b *Rollup) ShowTxReceipts(evmBlock *evmtypes.EvmBlockPayload, txHashes []c
 	return nil
 }
 
-// Generate and verify EVM Service proof for every position
-
-// // BuildPayloadTransaction creates a conformant PayloadTransaction payload
-// // Format: "T" (1 byte) + tx_count (u32 LE) + witness_count (u16 LE)
-func (b *Rollup) ExportStateWitnesses(workReports []*types.WorkReport, saveToFile bool) error {
-	witnesses, stateRoot, err := b.stateDB.GetStateWitnesses(workReports)
-	if err != nil {
-		return err
-	}
-
-	if saveToFile {
-		// Create witness files using fixed binary format
-		for _, witness := range witnesses {
-			// Use fixed binary format (not SCALE encoding) for Rust compatibility
-			witnessBytes := witness.SerializeWitness()
-
-			// Filename format: objectid-version-stateroot.bin
-			// This allows Rust to parse the filename to get the state root for verification
-			filename := fmt.Sprintf("%s-%d-%s.bin",
-				witness.ObjectID.Hex()[2:], // Remove 0x prefix
-				witness.Ref.Version,
-				stateRoot.Hex()[2:]) // Remove 0x prefix
-
-			if err := os.WriteFile(filename, witnessBytes, 0644); err != nil {
-				return fmt.Errorf("ExportStateWitnesses: write file %s err %v", filename, err)
-			}
-		}
-
-		log.Info(log.Node, "ExportStateWitnesses", "count", len(witnesses), "state_root", stateRoot.Hex())
-
-	}
-	return nil
-}
-
 func AppendBootstrapExtrinsic(blobs *types.ExtrinsicsBlobs, workItems *[]types.WorkItemExtrinsic, extrinsic []byte) {
 	*blobs = append(*blobs, extrinsic)
 	*workItems = append(*workItems, types.WorkItemExtrinsic{
@@ -771,13 +713,13 @@ func AppendBootstrapExtrinsic(blobs *types.ExtrinsicsBlobs, workItems *[]types.W
 	})
 }
 
-// Helper: build 'K' command extrinsic for storage
+// Helper: build K extrinsic for genesis storage initialization
+// Format: [address:20][storage_key:32][value:32] = 84 bytes (no command byte)
 func BuildKExtrinsic(address []byte, storageKey []byte, storageValue []byte) []byte {
-	extrinsic := make([]byte, 1+20+32+32)
-	extrinsic[0] = 0x4B
-	copy(extrinsic[1:21], address)
-	copy(extrinsic[21:53], storageKey)
-	copy(extrinsic[53:85], storageValue)
+	extrinsic := make([]byte, 20+32+32)
+	copy(extrinsic[0:20], address)
+	copy(extrinsic[20:52], storageKey)
+	copy(extrinsic[52:84], storageValue)
 	return extrinsic
 }
 
@@ -804,61 +746,40 @@ type MappingEntry struct {
 	Value *big.Int
 }
 
-func (b *Rollup) SubmitEVMGenesis() (*evmtypes.EvmBlockPayload, *evmtypes.EvmBlockMetadata, error) {
+func (b *Rollup) SubmitEVMGenesis(startBalance int64) (*evmtypes.EvmBlockPayload, error) {
 	// Set USDM initial balances and nonces
 	blobs := types.ExtrinsicsBlobs{}
 	workItems := []types.WorkItemExtrinsic{}
-	totalSupplyValue := new(big.Int).Mul(big.NewInt(61_000_000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+	totalSupplyValue := new(big.Int).Mul(big.NewInt(startBalance), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
 	usdmInitialState := []MappingEntry{
 		{Slot: 0, Key: evmtypes.IssuerAddress, Value: totalSupplyValue}, // balanceOf[issuer]
 		{Slot: 1, Key: evmtypes.IssuerAddress, Value: big.NewInt(1)},    // nonces[issuer]
 	}
 	InitializeMappings(&blobs, &workItems, evmtypes.UsdmAddress, usdmInitialState)
 
-	// Add witness for genesis block (block 0) and calculate segments needed
-	witnesses := []types.StateWitnessRaw{}
-	objectID := evmtypes.BlockNumberToObjectID(0)
-	witness, ok, _, err := b.stateDB.ReadStateWitnessRaw(b.serviceID, objectID)
-	if err != nil {
-		log.Warn(log.Node, "SubmitEVMGenesis: ReadStateWitnessRaw failed", "blockNum", 0, "objectID", objectID, "err", err)
-		return nil, nil, fmt.Errorf("ReadStateWitnessRaw failed for genesis block: %w", err)
-	} else if ok {
-		// Calculate number of segments needed for genesis block's payload
-		//numSegments := (int(witness.PayloadLength) + types.SegmentSize - 1) / types.SegmentSize
-
-		log.Info(log.Node, "Adding witness for genesis block", "blockNum", 0, "objectID", objectID, "payload_length", witness.PayloadLength)
-		witnesses = append(witnesses, witness)
-	} else {
-		log.Warn(log.Node, "SubmitEVMGenesis: witness not found for genesis block", "objectID", objectID)
-	}
-
-	// Append witness as extrinsic
-	for _, witness := range witnesses {
-		witnessBytes := witness.SerializeWitnessRaw()
-		blobs = append(blobs, witnessBytes)
-		workItems = append(workItems, types.WorkItemExtrinsic{
-			Hash: common.Blake2Hash(witnessBytes),
-			Len:  uint32(len(witnessBytes)),
-		})
-	}
-
-	witnessCount := len(witnesses)
 	numExtrinsics := len(workItems)
-	log.Info(log.Node, "SubmitEVMGenesis (genesis)", "numExtrinsics", numExtrinsics, "witnessCount", witnessCount)
+	log.Info(log.Node, "SubmitEVMGenesis (genesis)", "numExtrinsics", numExtrinsics)
 
 	service, ok, err := b.stateDB.GetService(b.serviceID)
 	if err != nil || !ok {
-		return nil, nil, fmt.Errorf("EVM service not found: %v", err)
+		return nil, fmt.Errorf("EVM service not found: %v", err)
 	}
 
 	// Create work package with updated witness count and refine context
 	wp := DefaultWorkPackage(b.serviceID, service)
 	wp.RefineContext = b.stateDB.GetRefineContext()
-	wp.WorkItems[0].Payload = BuildPayload(PayloadTypeBlocks, numExtrinsics, witnessCount)
+	wp.WorkItems[0].Payload = BuildPayload(PayloadTypeGenesis, numExtrinsics, 0)
 	wp.WorkItems[0].Extrinsics = workItems
 
-	// Genesis adds 2 exports: 1 StorageShard + 1 SSRMetadata for USDM contract
-	wp.WorkItems[0].ExportCount = uint16(2)
+	// Genesis exports: Storage SSRs + MetaShard + MetaSSR + Block
+	// The exact count depends on how many storage shards are created
+	wp.WorkItems[0].ExportCount = uint16(4)
+	/*
+		1 SSR metadata object (13 bytes)
+		1 Storage shard (162 bytes: 2 entries × 64 bytes + overhead)
+		1 Block object (124 bytes)
+		1 Meta-shard (249 bytes: 3 entries × 69 bytes + overhead)
+	*/
 	log.Info(log.Node, "WorkPackage RefineContext", "state_root", wp.RefineContext.StateRoot.Hex(), "anchor", wp.RefineContext.Anchor.Hex())
 	bundle := &types.WorkPackageBundle{
 		WorkPackage:   wp,
@@ -867,15 +788,11 @@ func (b *Rollup) SubmitEVMGenesis() (*evmtypes.EvmBlockPayload, *evmtypes.EvmBlo
 
 	err = b.processWorkPackageBundles([]*types.WorkPackageBundle{bundle})
 	if err != nil {
-		return nil, nil, fmt.Errorf("processWorkPackageBundles failed: %w", err)
+		return nil, fmt.Errorf("processWorkPackageBundles failed: %w", err)
 	}
 
-	block, metadata, err := b.stateDB.GetBlockByNumber(b.serviceID, "latest")
-	if err != nil {
-		return nil, nil, fmt.Errorf("GetBlockByNumber failed: %w", err)
-	}
-
-	return block, metadata, nil
+	// Genesis bootstrap complete - return nil block (genesis doesn't produce transactions)
+	return nil, nil
 }
 
 type TransferTriple struct {
@@ -968,24 +885,24 @@ func (b *Rollup) createTransferTriplesForRound(roundNum int, txnsPerRound int, i
 }
 
 // DeployContract deploys a contract and returns its address
-func (b *Rollup) DeployContract(contractFile string) (*evmtypes.EvmBlockPayload, common.Address, error) {
+func (b *Rollup) DeployContract(contractFile string) (common.Address, error) {
 	// Load contract bytecode from file
 	contractBytecode, err := os.ReadFile(contractFile)
 	if err != nil {
-		return nil, common.Address{}, fmt.Errorf("failed to load contract bytecode from %s: %w", contractFile, err)
+		return common.Address{}, fmt.Errorf("failed to load contract bytecode from %s: %w", contractFile, err)
 	}
 
 	// Get deployer account (using issuer account)
 	deployerAddress, deployerPrivKeyHex := common.GetEVMDevAccount(0)
 	deployerPrivKey, err := crypto.HexToECDSA(deployerPrivKeyHex)
 	if err != nil {
-		return nil, common.Address{}, fmt.Errorf("failed to parse deployer private key: %w", err)
+		return common.Address{}, fmt.Errorf("failed to parse deployer private key: %w", err)
 	}
 
 	// Get current nonce for the deployer
 	nonce, err := b.stateDB.GetTransactionCount(b.serviceID, deployerAddress)
 	if err != nil {
-		return nil, common.Address{}, fmt.Errorf("failed to get transaction count: %w", err)
+		return common.Address{}, fmt.Errorf("failed to get transaction count: %w", err)
 	}
 
 	// Calculate contract address using CREATE opcode logic: keccak256(rlp([sender, nonce]))[12:]
@@ -1006,23 +923,23 @@ func (b *Rollup) DeployContract(contractFile string) (*evmtypes.EvmBlockPayload,
 	signer := ethereumTypes.NewEIP155Signer(big.NewInt(int64(b.serviceID)))
 	signedTx, err := ethereumTypes.SignTx(ethTx, signer, deployerPrivKey)
 	if err != nil {
-		return nil, common.Address{}, fmt.Errorf("failed to sign contract deployment transaction: %w", err)
+		return common.Address{}, fmt.Errorf("failed to sign contract deployment transaction: %w", err)
 	}
 
 	// Encode to RLP
 	txBytes, err := signedTx.MarshalBinary()
 	if err != nil {
-		return nil, common.Address{}, fmt.Errorf("failed to encode contract deployment transaction: %w", err)
+		return common.Address{}, fmt.Errorf("failed to encode contract deployment transaction: %w", err)
 	}
 	multiCoreTxBytes := make([][][]byte, 1)
 	multiCoreTxBytes[0] = [][]byte{txBytes}
 	// Submit contract deployment as work package
-	block, err := b.SubmitEVMTransactions(multiCoreTxBytes, 0, 0)
+	_, err = b.SubmitEVMTransactions(multiCoreTxBytes)
 	if err != nil {
-		return nil, common.Address{}, fmt.Errorf("contract deployment failed: %w", err)
+		return common.Address{}, fmt.Errorf("contract deployment failed: %w", err)
 	}
 
-	return block, contractAddress, nil
+	return contractAddress, nil
 }
 
 // BalanceOf calls the balanceOf(address) function on the USDM contract and validates the result

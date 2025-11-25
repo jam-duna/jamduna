@@ -47,5 +47,5 @@ pub mod mmr;
 
 // Re-export commonly used types
 pub use block::{EvmBlockPayload};
-pub use writes::{ExecutionEffectsEnvelope, deserialize_execution_effects, serialize_execution_effects};
+pub use writes::serialize_execution_effects;
 pub use sharding::format_object_id;

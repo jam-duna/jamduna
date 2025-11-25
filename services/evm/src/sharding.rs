@@ -232,9 +232,6 @@ pub enum ObjectKind {
     MetaShard = 0x04,
     /// Block object (kind=0x05)
     Block = 0x05,
-    
-    /// Meta-SSR metadata object (kind=0x07) - routing metadata for meta-shards
-    MetaSsrMetadata = 0x07,
 }
 
 impl ObjectKind {
@@ -247,7 +244,6 @@ impl ObjectKind {
             0x03 => Some(Self::Receipt),
             0x04 => Some(Self::MetaShard),
             0x05 => Some(Self::Block),
-            0x07 => Some(Self::MetaSsrMetadata),
             _ => None,
         }
     }

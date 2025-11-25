@@ -1,226 +1,89 @@
-//! ObjectCandidateWrite and ExecutionEffects serialization for refine → accumulate communication
+//! ExecutionEffects serialization for refine → accumulate communication
 
-use crate::sharding::format_object_id;
 use alloc::{format, vec::Vec};
-// ObjectDependency replaced with ObjectId
-use utils::functions::{log_error, log_debug, log_trace};
-use utils::objects::{ObjectRef, ObjectId};
 
-/// ObjectCandidateWrite for refine → accumulate communication
-/// Contains ObjectID, ObjectRef, and dependencies without payload
-#[derive(Debug, Clone)]
-pub struct ObjectCandidateWrite {
-    pub object_id: [u8; 32],
-    pub object_ref: ObjectRef,
-    pub dependencies: Vec<ObjectId>,
-    pub payload: Vec<u8>, // only used for receipt 
-}
-
-impl ObjectCandidateWrite {
-    /// Serialize ObjectCandidateWrite to bytes
-    /// Format: object_id (32B) + object_ref (variable) + dep_count (2B) + dependencies
-    pub fn serialize(&self) -> Vec<u8> {
-        let mut buffer = Vec::new();
-
-        // Object ID (32 bytes)
-        buffer.extend_from_slice(&self.object_id);
-
-        // Object ref (variable length)
-        let ref_bytes = self.object_ref.serialize();
-        buffer.extend_from_slice(&ref_bytes);
-
-        // Dependencies count (2 bytes)
-        let dep_count = self.dependencies.len() as u16;
-        buffer.extend_from_slice(&dep_count.to_le_bytes());
-
-        // Dependencies (32 bytes each: 32B object_id only, no version)
-        for dep in &self.dependencies {
-            buffer.extend_from_slice(dep);
-        }
-
-        // Payloads are exported to DA segments, not serialized inline
-        buffer
-    }
-
-    /// Deserialize ObjectCandidateWrite from bytes
-    pub fn deserialize(data: &[u8]) -> Option<(Self, usize)> {
-        if data.len() < 32 {
-            log_error(&format!(
-                "    ❌ ObjectCandidateWrite::deserialize: data too short for object_id (need >= 32, have {})",
-                data.len()
-            ));
-            return None;
-        }
-
-        let mut offset = 0;
-
-        // Object ID (32 bytes)
-        let mut object_id = [0u8; 32];
-        object_id.copy_from_slice(&data[offset..offset + 32]);
-        offset += 32;
-
-        // Object ref (fixed 64 bytes)
-
-        // ObjectRef::deserialize requires exactly 64 bytes
-        if data.len() < offset + ObjectRef::SERIALIZED_SIZE {
-            log_error(&format!(
-                "    ❌ Not enough data for ObjectRef (need offset+64={}, have {})",
-                offset + 64,
-                data.len()
-            ));
-            return None;
-        }
-
-        let object_ref = match ObjectRef::deserialize(
-            &data[offset..offset + ObjectRef::SERIALIZED_SIZE],
-        ) {
-            Some(r) => {
-                log_debug(&format!(
-                    "    🔬 data={} bytes, object_id={}, ObjectRef@{} → kind={}, payload_len={}",
-                    data.len(),
-                    format_object_id(&object_id),
-                    offset,
-                    r.object_kind,
-                    r.payload_length
-                ));
-                r
-            }
-            None => {
-                log_error(&format!("    ❌ ObjectRef::deserialize failed at offset {}", offset));
-                return None;
-            }
-        };
-        offset += ObjectRef::SERIALIZED_SIZE;
-
-        // Dependencies count (2 bytes)
-        if data.len() < offset + 2 {
-            log_error(&format!(
-                "    ❌ Not enough data for dep_count (need offset+2={}, have {})",
-                offset + 2,
-                data.len()
-            ));
-            return None;
-        }
-        let dep_count = u16::from_le_bytes([data[offset], data[offset + 1]]) as usize;
-        offset += 2;
-
-        // Dependencies (32 bytes each)
-        if data.len() < offset + dep_count * 32 {
-            log_error(&format!(
-                "    ❌ Not enough data for deps (need {}={} + {}*32, have {})",
-                offset + dep_count * 32,
-                offset,
-                dep_count,
-                data.len()
-            ));
-            return None;
-        }
-
-        let mut dependencies = Vec::with_capacity(dep_count);
-        for i in 0..dep_count {
-            let mut dep_object_id = [0u8; 32];
-            dep_object_id.copy_from_slice(&data[offset..offset + 32]);
-            offset += 32;
-
-            log_trace(&format!(
-                "    🔗 Dep #{}: object_id={}",
-                i,
-                format_object_id(&dep_object_id)
-            ));
-
-            dependencies.push(dep_object_id);
-        }
-
-        // Payloads are not serialized inline - they're in DA segments
-        let payload = Vec::new();
-
-        log_debug(&format!(
-            "    📥 ObjectCandidateWrite parsed: kind={}, payload_length={}",
-            object_ref.object_kind,
-            object_ref.payload_length
-        ));
-
-        Some((
-            ObjectCandidateWrite {
-                object_id,
-                object_ref,
-                dependencies,
-                payload,
-            },
-            offset,
-        ))
-    }
-}
-
-/// Compact representation of ExecutionEffects exchanged between refine and accumulate.
-pub struct ExecutionEffectsEnvelope {
-    pub export_count: u16,
-    pub gas_used: u64,
-    pub writes: Vec<ObjectCandidateWrite>,
-}
-
-/// Serialize ExecutionEffects metadata and candidate writes.
-/// Format: count (2B) | ObjectCandidateWrite entries
+/// Serialize ExecutionEffects to compact meta-shard format.
+///
+/// Format: N entries × (1B ld + prefix_bytes + 5B packed ObjectRef)
+/// - Each entry has its own ld value (meta-shards can have different depths after splits)
+/// - Only ObjectKind::MetaShard objects are serialized
+///
+/// For genesis with ld=0: N × 6 bytes (1B ld + 0B prefix + 5B ObjectRef)
 pub fn serialize_execution_effects(
     effects: &utils::effects::ExecutionEffects,
 ) -> Vec<u8> {
-
-    use crate::state::MajikBackend;
-
-    // Convert ExecutionEffects to ObjectCandidateWrite array (without payloads)
-    let writes = MajikBackend::to_object_candidate_writes(effects);
-
+    use crate::sharding::ObjectKind;
+    use utils::functions::log_info;
 
     let mut buffer = Vec::new();
 
-    let count = writes.len() as u16;
-    buffer.extend_from_slice(&count.to_le_bytes());
+    // Serialize meta-shards with per-entry ld values
+    // Format: N entries × (1B ld + prefix_bytes + 5B packed ObjectRef)
+    // Note: After splits, different meta-shards can have different ld values!
+    let mut meta_shard_count = 0;
+    for intent in &effects.write_intents {
+        if intent.effect.ref_info.object_kind == ObjectKind::MetaShard as u8 {
+            // Extract ld from this specific meta-shard's object_id
+            let ld = intent.effect.object_id[0];
+            let prefix_bytes = ((ld + 7) / 8) as usize;
 
-    for write in writes {
-        let serialized = write.serialize();
-        buffer.extend_from_slice(&serialized);
+            // Write ld for this entry
+            buffer.push(ld);
+
+            // Write prefix bytes from meta-shard object_id (skip ld at position 0)
+            if prefix_bytes > 0 {
+                buffer.extend_from_slice(&intent.effect.object_id[1..1 + prefix_bytes]);
+            }
+
+            // Write 5-byte packed ObjectRef (no work_package_hash)
+            let obj_ref = &intent.effect.ref_info;
+            let (num_segments, last_segment_size) = {
+                use utils::constants::SEGMENT_SIZE;
+                let payload_length = obj_ref.payload_length;
+                if payload_length == 0 {
+                    (0u16, 0u16)
+                } else {
+                    let segment_size = SEGMENT_SIZE as u32;
+                    let full_segments = (payload_length - 1) / segment_size;
+                    let last_bytes = payload_length - (full_segments * segment_size);
+                    let num_seg = full_segments + 1;
+                    (num_seg as u16, last_bytes as u16)
+                }
+            };
+
+            let index_end = obj_ref.index_start + num_segments;
+            let packed: u64 = ((obj_ref.index_start as u64 & 0xFFF) << 28) |
+                             ((index_end as u64 & 0xFFF) << 16) |
+                             ((last_segment_size as u64 & 0xFFF) << 4) |
+                             (obj_ref.object_kind as u64 & 0xF);
+
+            buffer.push((packed >> 32) as u8);
+            buffer.push((packed >> 24) as u8);
+            buffer.push((packed >> 16) as u8);
+            buffer.push((packed >> 8) as u8);
+            buffer.push(packed as u8);
+
+            meta_shard_count += 1;
+        }
+    }
+
+    log_info(&format!(
+        "📤 Serialized compact: {} meta-shards, {} bytes total",
+        meta_shard_count,
+        buffer.len()
+    ));
+
+    // Debug: log first 50 bytes
+    if buffer.len() > 0 {
+        let preview_len = buffer.len().min(50);
+        let hex: alloc::string::String = buffer[..preview_len]
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<alloc::vec::Vec<_>>()
+            .join("");
+        log_info(&format!("📤 Buffer preview (first {} bytes): {}", preview_len, hex));
     }
 
     buffer
 }
 
-/// Deserialize ExecutionEffects envelope from refine output buffer.
-pub fn deserialize_execution_effects(data: &[u8]) -> Option<ExecutionEffectsEnvelope> {
-    if data.is_empty() {
-        return Some(ExecutionEffectsEnvelope {
-            export_count: 0,
-            gas_used: 0,
-            writes: Vec::new(),
-        });
-    }
-
-    // Write count (2 bytes) – mandatory
-    if data.len() < 2 {
-        log_error("❌ deserialize_execution_effects: data too short for count");
-        return None;
-    }
-    let count = u16::from_le_bytes([data[0], data[1]]) as usize;
-    let mut offset = 2;
-
-    let mut writes = Vec::with_capacity(count);
-    for i in 0..count {
-        if let Some((write, size)) = ObjectCandidateWrite::deserialize(&data[offset..]) {
-            writes.push(write);
-            offset += size;
-        } else {
-            log_error(&format!(
-                "❌ deserialize_execution_effects: failed at candidate #{}, offset {}, remaining {} bytes",
-                i,
-                offset,
-                data.len().saturating_sub(offset)
-            ));
-            return None;
-        }
-    }
-
-    Some(ExecutionEffectsEnvelope {
-        export_count: 0,
-        gas_used: 0,
-        writes,
-    })
-}

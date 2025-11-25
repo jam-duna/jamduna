@@ -54,6 +54,11 @@ type StateDB struct {
 
 	AncestorSet       map[common.Hash]uint32               `json:"ancestorSet"` // AncestorSet is a set of block headers which include the recent 24 hrs of blocks
 	BlockServicesCost map[uint32]*telemetry.AccumulateCost `json:"blockServicesCost"`
+
+	// Meta-shard witness cache: Avoids redundant DA fetches for objects in the same meta-shard
+	// Key: metaShardObjectID (computed via ComputeMetaShardObjectID)
+	// Value: StateWitness containing meta-shard payload and cached ObjectRefs/Payloads
+	metashardWitnesses map[common.Hash]*types.StateWitness
 }
 
 func (s *StateDB) MarshalJSON() ([]byte, error) {
@@ -202,6 +207,7 @@ func newEmptyStateDB(sdb types.JAMStorage) (statedb *StateDB) {
 	statedb = new(StateDB)
 	statedb.SetStorage(sdb)
 	statedb.logChan = make(chan storage.LogMessage, 100)
+	statedb.metashardWitnesses = make(map[common.Hash]*types.StateWitness)
 	return statedb
 }
 
@@ -553,10 +559,11 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		JamState:         s.JamState.Copy(), // DisputesState has a Copy method
 		sdb:              s.sdb,
 
-		logChan:             make(chan storage.LogMessage, 100),
-		AvailableWorkReport: tmpAvailableWorkReport,
-		AncestorSet:         s.AncestorSet, // TODO: CHECK why we have this in CheckStateTransition
-		Authoring:           s.Authoring,
+		logChan:               make(chan storage.LogMessage, 100),
+		metashardWitnesses:    make(map[common.Hash]*types.StateWitness),
+		AvailableWorkReport:   tmpAvailableWorkReport,
+		AncestorSet:           s.AncestorSet, // TODO: CHECK why we have this in CheckStateTransition
+		Authoring:             s.Authoring,
 		/*
 			Following flds are not copied over..?
 

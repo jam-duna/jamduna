@@ -276,7 +276,7 @@ func (c *NodeClient) GetLatestBlockNumber() (uint32, error) {
 }
 
 // GetTransactionByBlockHashAndIndex fetches a transaction by block hash and index from remote node
-func (c *NodeClient) GetTransactionByBlockHashAndIndex(blockHash common.Hash, index uint32) (*evmtypes.EthereumTransactionResponse, error) {
+func (c *NodeClient) GetTransactionByBlockHashAndIndex(serviceID uint32, blockHash common.Hash, index uint32) (*evmtypes.EthereumTransactionResponse, error) {
 	indexHex := fmt.Sprintf("0x%x", index)
 	var tx evmtypes.EthereumTransactionResponse
 	err := c.client.Call("eth_getTransactionByBlockHashAndIndex", []interface{}{blockHash.String(), indexHex}, &tx)
@@ -288,7 +288,7 @@ func (c *NodeClient) GetTransactionByBlockHashAndIndex(blockHash common.Hash, in
 }
 
 // GetTransactionByBlockNumberAndIndex fetches a transaction by block number and index from remote node
-func (c *NodeClient) GetTransactionByBlockNumberAndIndex(blockNumber string, index uint32) (*evmtypes.EthereumTransactionResponse, error) {
+func (c *NodeClient) GetTransactionByBlockNumberAndIndex(serviceID uint32, blockNumber string, index uint32) (*evmtypes.EthereumTransactionResponse, error) {
 	indexHex := fmt.Sprintf("0x%x", index)
 	var tx evmtypes.EthereumTransactionResponse
 	err := c.client.Call("eth_getTransactionByBlockNumberAndIndex", []interface{}{blockNumber, indexHex}, &tx)

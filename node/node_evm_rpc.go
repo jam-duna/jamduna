@@ -476,7 +476,7 @@ func (j *Jam) GetTransactionByBlockHashAndIndex(req []string, res *string) error
 	}
 
 	// Get transaction using internal method
-	ethTx, err := j.node.GetTransactionByBlockHashAndIndex(blockHash, uint32(index))
+	ethTx, err := j.node.GetTransactionByBlockHashAndIndex(uint32(j.GetChainId()), blockHash, uint32(index))
 	if err != nil {
 		log.Warn(log.Node, "GetTransactionByBlockHashAndIndex: Failed", "error", err)
 		*res = "null"
@@ -529,7 +529,7 @@ func (j *Jam) GetTransactionByBlockNumberAndIndex(req []string, res *string) err
 	}
 
 	// Get transaction using internal method
-	ethTx, err := j.node.GetTransactionByBlockNumberAndIndex(blockNumberStr, uint32(index))
+	ethTx, err := j.node.GetTransactionByBlockNumberAndIndex(uint32(j.GetChainId()), blockNumberStr, uint32(index))
 	if err != nil {
 		log.Warn(log.Node, "GetTransactionByBlockNumberAndIndex: Failed", "error", err)
 		*res = "null"
@@ -1076,7 +1076,7 @@ func (n *NodeContent) resolveBlockNumberToState(blockNumberStr string) (*statedb
 func (n *NodeContent) getHistoricalState(blockNumber uint32) (*statedb.StateDB, error) {
 	// Read block metadata to get state root
 	serviceID := uint32(n.GetChainId())
-	evmBlock, _, err := n.statedb.ReadBlockByNumber(serviceID, blockNumber)
+	evmBlock, err := n.statedb.ReadBlockByNumber(serviceID, blockNumber)
 	if err != nil {
 		log.Warn(log.Node, "Failed to read block metadata, using current state",
 			"blockNumber", blockNumber, "error", err)

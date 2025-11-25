@@ -8,91 +8,36 @@ import (
 	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
-	ethereumTypes "github.com/ethereum/go-ethereum/core/types"
-	"golang.org/x/crypto/blake2b"
 )
 
 const (
-	// HEADER_SIZE is the size of the block header in bytes
-	// 8 (number) + 32 (parent_hash) + 32 (state_root) + 8 (log_index_start) +
-	// 32 (extrinsics_hash) + 32 (parent_header_hash) + 8 (size) + 8 (gas_limit) +
-	// 8 (gas_used) + 8 (timestamp) + 256 (logs_bloom) = 432 bytes
-	HEADER_SIZE = 432
+	// HEADER_SIZE is the size of the block header in bytes (matching Rust implementation)
+	// 4 (payload_length) + 4 (num_transactions) + 4 (timestamp) +
+	// 8 (gas_used) + 32 (state_root) + 32 (transactions_root) + 32 (receipt_root) = 116 bytes
+	HEADER_SIZE = 116
 )
 
-// EvmBlockMetadata represents computed block metadata fields
-// This structure is exported to DA as ObjectKind BlockMetadata (0x06)
-type EvmBlockMetadata struct {
-	TransactionsRoot common.Hash // BMT root of tx hashes
-	ReceiptsRoot     common.Hash // BMT root of receipts
-	MmrRoot          common.Hash // MMR root
-}
-
-// NewEvmBlockMetadata creates metadata from EvmBlockPayload by computing all roots
-func NewEvmBlockMetadata(payload *EvmBlockPayload) *EvmBlockMetadata {
-	return &EvmBlockMetadata{
-		TransactionsRoot: ComputeBMTRootFromHashes(payload.TxHashes),
-		ReceiptsRoot:     ComputeBMTRootFromHashes(payload.ReceiptHashes),
-		MmrRoot:          common.Hash{},
-	}
-}
-
-// SerializeEvmBlockMetadata serializes EvmBlockMetadata to bytes (96 bytes total)
-func SerializeEvmBlockMetadata(metadata *EvmBlockMetadata) []byte {
-	data := make([]byte, 96) // 32 + 32 + 32
-	offset := 0
-
-	copy(data[offset:offset+32], metadata.TransactionsRoot[:])
-	offset += 32
-
-	copy(data[offset:offset+32], metadata.ReceiptsRoot[:])
-	offset += 32
-
-	copy(data[offset:offset+32], metadata.MmrRoot[:])
-
-	return data
-}
-
-// DeserializeEvmBlockMetadata deserializes EvmBlockMetadata from bytes
-func DeserializeEvmBlockMetadata(data []byte) (*EvmBlockMetadata, error) {
-	if len(data) < 96 {
-		return nil, fmt.Errorf("metadata payload too short: got %d bytes, need 96", len(data))
-	}
-
-	metadata := &EvmBlockMetadata{}
-	offset := 0
-
-	copy(metadata.TransactionsRoot[:], data[offset:offset+32])
-	offset += 32
-
-	copy(metadata.ReceiptsRoot[:], data[offset:offset+32])
-	offset += 32
-
-	copy(metadata.MmrRoot[:], data[offset:offset+32])
-
-	return metadata, nil
-}
-
 // EvmBlockPayload represents the unified EVM block structure exported to JAM DA
-// This structure matches the Rust EvmBlockPayload exactly (with logs_bloom added back)
+// This structure matches the Rust EvmBlockPayload exactly
 type EvmBlockPayload struct {
-	// Fixed fields - used for block hash computation
-	Number           uint64      // Offset 0, 8 bytes
-	ParentHash       common.Hash // Offset 8, 32 bytes
-	StateRoot        common.Hash // Offset 40, 32 bytes
-	LogIndexStart    uint64      // Offset 72, 8 bytes
-	ExtrinsicsHash   common.Hash // Offset 80, 32 bytes
-	ParentHeaderHash common.Hash // Offset 112, 32 bytes
-	Size             uint64      // Offset 144, 8 bytes
-	GasLimit         uint64      // Offset 152, 8 bytes
-	GasUsed          uint64      // Offset 160, 8 bytes
-	Timestamp        uint64      // Offset 168, 8 bytes
-	LogsBloom        [256]byte   // Offset 176, 256 bytes
-	// Total fixed: 432 bytes
+	// Non-serialized fields (filled by host when reading from DA)
+	Number uint32      // Block number read from blocknumber↔hash mapping
+	Hash   common.Hash // Block Hash is the workpackagehash
+
+	// Fixed fields - used for block hash computation (116 bytes)
+	PayloadLength    uint32      // Offset 0, 4 bytes - raw payload size
+	NumTransactions  uint32      // Offset 4, 4 bytes - transaction count
+	Timestamp        uint32      // Offset 8, 4 bytes - JAM timeslot
+	GasUsed          uint64      // Offset 12, 8 bytes - gas used
+	StateRoot        common.Hash // Offset 20, 32 bytes - JAM state root
+	TransactionsRoot common.Hash // Offset 52, 32 bytes - BMT root of tx hashes
+	ReceiptRoot      common.Hash // Offset 84, 32 bytes - BMT root of canonical receipts
+	// Total fixed: 116 bytes
 
 	// Variable-length fields (not part of hash computation)
-	TxHashes      []common.Hash // Transaction hashes (for transactions_root BMT and tx lookup)
-	ReceiptHashes []common.Hash // Receipt hashes (for receipts_root BMT verification)
+	TxHashes      []common.Hash        // Transaction hashes (32 bytes each)
+	ReceiptHashes []common.Hash        // Receipt hashes (32 bytes each)
+	Transactions  []TransactionReceipt `json:"-"`
 }
 
 // EthereumBlock represents an Ethereum block for JSON-RPC responses (hex-encoded strings)
@@ -119,37 +64,35 @@ type EthereumBlock struct {
 	BaseFeePerGas    *string     `json:"baseFeePerGas,omitempty"` // EIP-1559
 }
 
-// ToEthereumBlock converts EvmBlockPayload and metadata to JSON-RPC EthereumBlock format
-func (p *EvmBlockPayload) ToEthereumBlock(metadata *EvmBlockMetadata, fullTx bool) *EthereumBlock {
-	blockHash := p.ComputeHash()
+// ToEthereumBlock converts EvmBlockPayload to JSON-RPC EthereumBlock format
+// Requires the canonical blockNumber resolved from BLOCK_NUMBER_KEY / DA mapping
+func (p *EvmBlockPayload) ToEthereumBlock(blockNumber uint32, fullTx bool) *EthereumBlock {
 
 	ethBlock := &EthereumBlock{
-		Number:           fmt.Sprintf("0x%x", p.Number),
-		Hash:             blockHash.String(),
-		ParentHash:       p.ParentHash.String(),
+		Number:           fmt.Sprintf("0x%x", blockNumber),
+		Hash:             p.Hash.String(),
+		ParentHash:       "0x0000000000000000000000000000000000000000000000000000000000000000", // No parent hash in new format
 		Nonce:            "0x0000000000000000",
 		Sha3Uncles:       "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
-		LogsBloom:        common.Bytes2Hex(p.LogsBloom[:]),
-		TransactionsRoot: metadata.TransactionsRoot.String(),
+		LogsBloom:        common.Bytes2Hex(make([]byte, 256)), // Zero bloom
+		TransactionsRoot: p.TransactionsRoot.String(),
 		StateRoot:        p.StateRoot.String(),
-		ReceiptsRoot:     metadata.ReceiptsRoot.String(),
-		Miner:            "0x0000000000000000000000000000000000000000", // No longer stored
+		ReceiptsRoot:     p.ReceiptRoot.String(),
+		Miner:            "0x0000000000000000000000000000000000000000",
 		Difficulty:       "0x0",
 		TotalDifficulty:  "0x0",
-		ExtraData:        "0x", // No longer stored
-		Size:             fmt.Sprintf("0x%x", p.Size),
-		GasLimit:         fmt.Sprintf("0x%x", p.GasLimit),
+		ExtraData:        "0x",
+		Size:             fmt.Sprintf("0x%x", p.PayloadLength),
+		GasLimit:         "0x0", // No gas limit in new format
 		GasUsed:          fmt.Sprintf("0x%x", p.GasUsed),
 		Timestamp:        fmt.Sprintf("0x%x", p.Timestamp),
 		Uncles:           []string{},
 	}
 
-	// Convert transaction hashes to strings (TxHashes = transaction hashes in submission order)
+	// Convert transaction hashes to strings
 	if !fullTx {
 		txHashes := make([]string, len(p.TxHashes))
 		for i, txHash := range p.TxHashes {
-			// Rust guarantees TxHashes are emitted in submission order (extrinsic index order),
-			// so we preserve that ordering here for RPC compatibility.
 			txHashes[i] = txHash.String()
 		}
 		ethBlock.Transactions = txHashes
@@ -162,46 +105,34 @@ func (p *EvmBlockPayload) ToEthereumBlock(metadata *EvmBlockMetadata, fullTx boo
 }
 
 // SerializeEvmBlockPayload serializes an EvmBlockPayload to bytes
-// Matches the Rust serialize() format exactly (with logs_bloom field)
+// Matches the Rust serialize() format exactly
 func SerializeEvmBlockPayload(payload *EvmBlockPayload) []byte {
-	// Calculate total size: 432 (fixed) + 4 (tx_count) + len(TxHashes)*32 + 4 (receipt_count) + len(ReceiptHashes)*32
-	size := 432 + 4 + len(payload.TxHashes)*32 + 4 + len(payload.ReceiptHashes)*32
+	// Calculate total size: 120 (fixed) + 4 (tx_count) + len(TxHashes)*32 + 4 (receipt_count) + len(ReceiptHashes)*32
+	size := 116 + 4 + len(payload.TxHashes)*32 + 4 + len(payload.ReceiptHashes)*32
 	data := make([]byte, size)
 	offset := 0
 
-	// Serialize fixed fields (432 bytes total)
-	binary.LittleEndian.PutUint64(data[offset:offset+8], payload.Number)
-	offset += 8
+	// Serialize fixed header (116 bytes total)
+	binary.LittleEndian.PutUint32(data[offset:offset+4], payload.PayloadLength)
+	offset += 4
 
-	copy(data[offset:offset+32], payload.ParentHash[:])
-	offset += 32
+	binary.LittleEndian.PutUint32(data[offset:offset+4], payload.NumTransactions)
+	offset += 4
 
-	copy(data[offset:offset+32], payload.StateRoot[:])
-	offset += 32
-
-	binary.LittleEndian.PutUint64(data[offset:offset+8], payload.LogIndexStart)
-	offset += 8
-
-	copy(data[offset:offset+32], payload.ExtrinsicsHash[:])
-	offset += 32
-
-	copy(data[offset:offset+32], payload.ParentHeaderHash[:])
-	offset += 32
-
-	binary.LittleEndian.PutUint64(data[offset:offset+8], payload.Size)
-	offset += 8
-
-	binary.LittleEndian.PutUint64(data[offset:offset+8], payload.GasLimit)
-	offset += 8
+	binary.LittleEndian.PutUint32(data[offset:offset+4], payload.Timestamp)
+	offset += 4
 
 	binary.LittleEndian.PutUint64(data[offset:offset+8], payload.GasUsed)
 	offset += 8
 
-	binary.LittleEndian.PutUint64(data[offset:offset+8], payload.Timestamp)
-	offset += 8
+	copy(data[offset:offset+32], payload.StateRoot[:])
+	offset += 32
 
-	copy(data[offset:offset+256], payload.LogsBloom[:])
-	offset += 256
+	copy(data[offset:offset+32], payload.TransactionsRoot[:])
+	offset += 32
+
+	copy(data[offset:offset+32], payload.ReceiptRoot[:])
+	offset += 32
 
 	// Serialize tx_hashes (transaction hashes for transactions_root BMT)
 	binary.LittleEndian.PutUint32(data[offset:offset+4], uint32(len(payload.TxHashes)))
@@ -225,50 +156,42 @@ func SerializeEvmBlockPayload(payload *EvmBlockPayload) []byte {
 }
 
 // DeserializeEvmBlockPayload deserializes an EvmBlockPayload from bytes
-// Matches the Rust serialize() format exactly (with logs_bloom field)
-func DeserializeEvmBlockPayload(data []byte) (*EvmBlockPayload, error) {
-	// Minimum size: 432 + 4 + 4 = 440 bytes (fixed fields + tx_count + receipt_count)
-	if len(data) < 440 {
-		return nil, fmt.Errorf("block payload too short: got %d bytes, need at least 440", len(data))
+// Matches the Rust serialize() format exactly
+func DeserializeEvmBlockPayload(data []byte, headerOnly bool) (*EvmBlockPayload, error) {
+	// Minimum size: 116 + 4 + 4 = 124 bytes (fixed fields + tx_count + receipt_count)
+	if len(data) < 124 {
+		return nil, fmt.Errorf("block payload too short: got %d bytes, need at least 124", len(data))
 	}
 
 	offset := 0
 	payload := &EvmBlockPayload{}
 
-	// Parse fixed fields (432 bytes total)
-	payload.Number = binary.LittleEndian.Uint64(data[offset : offset+8])
-	offset += 8
+	// Parse fixed header (116 bytes total)
+	payload.PayloadLength = binary.LittleEndian.Uint32(data[offset : offset+4])
+	offset += 4
 
-	copy(payload.ParentHash[:], data[offset:offset+32])
-	offset += 32
+	payload.NumTransactions = binary.LittleEndian.Uint32(data[offset : offset+4])
+	offset += 4
 
-	copy(payload.StateRoot[:], data[offset:offset+32])
-	offset += 32
-
-	payload.LogIndexStart = binary.LittleEndian.Uint64(data[offset : offset+8])
-	offset += 8
-
-	copy(payload.ExtrinsicsHash[:], data[offset:offset+32])
-	offset += 32
-
-	copy(payload.ParentHeaderHash[:], data[offset:offset+32])
-	offset += 32
-
-	payload.Size = binary.LittleEndian.Uint64(data[offset : offset+8])
-	offset += 8
-
-	payload.GasLimit = binary.LittleEndian.Uint64(data[offset : offset+8])
-	offset += 8
+	payload.Timestamp = binary.LittleEndian.Uint32(data[offset : offset+4])
+	offset += 4
 
 	payload.GasUsed = binary.LittleEndian.Uint64(data[offset : offset+8])
 	offset += 8
 
-	payload.Timestamp = binary.LittleEndian.Uint64(data[offset : offset+8])
-	offset += 8
+	copy(payload.StateRoot[:], data[offset:offset+32])
+	offset += 32
 
-	copy(payload.LogsBloom[:], data[offset:offset+256])
-	offset += 256
+	copy(payload.TransactionsRoot[:], data[offset:offset+32])
+	offset += 32
 
+	copy(payload.ReceiptRoot[:], data[offset:offset+32])
+	offset += 32
+
+	if headerOnly {
+		// Skip variable-length fields
+		return payload, nil
+	}
 	// Parse tx_hashes (transaction hashes for transactions_root BMT)
 	txCount := binary.LittleEndian.Uint32(data[offset : offset+4])
 	offset += 4
@@ -298,70 +221,31 @@ func DeserializeEvmBlockPayload(data []byte) (*EvmBlockPayload, error) {
 	return payload, nil
 }
 
-// ComputeHash computes the Blake2b-256 hash of the fixed header fields (432 bytes)
-// This hash becomes the block's Object ID in JAM DA
-// Matches the Rust compute_hash() implementation exactly
-func (p *EvmBlockPayload) ComputeHash() common.Hash {
-	// Serialize the header to get exact bytes
-	headerBytes := make([]byte, 432)
-	offset := 0
-
-	binary.LittleEndian.PutUint64(headerBytes[offset:offset+8], p.Number)
-	offset += 8
-	copy(headerBytes[offset:offset+32], p.ParentHash[:])
-	offset += 32
-	copy(headerBytes[offset:offset+32], p.StateRoot[:])
-	offset += 32
-	binary.LittleEndian.PutUint64(headerBytes[offset:offset+8], p.LogIndexStart)
-	offset += 8
-	copy(headerBytes[offset:offset+32], p.ExtrinsicsHash[:])
-	offset += 32
-	copy(headerBytes[offset:offset+32], p.ParentHeaderHash[:])
-	offset += 32
-	binary.LittleEndian.PutUint64(headerBytes[offset:offset+8], p.Size)
-	offset += 8
-	binary.LittleEndian.PutUint64(headerBytes[offset:offset+8], p.GasLimit)
-	offset += 8
-	binary.LittleEndian.PutUint64(headerBytes[offset:offset+8], p.GasUsed)
-	offset += 8
-	binary.LittleEndian.PutUint64(headerBytes[offset:offset+8], p.Timestamp)
-	offset += 8
-	copy(headerBytes[offset:offset+256], p.LogsBloom[:])
-
-	hasher, _ := blake2b.New256(nil)
-	hasher.Write(headerBytes)
-
-	var hash common.Hash
-	copy(hash[:], hasher.Sum(nil))
-
-	return hash
-}
-
 // String returns a JSON representation of the EvmBlockPayload
 func (p *EvmBlockPayload) String() string {
 	return types.ToJSON(p)
 }
 
 // VerifyBlockBMTProofs verifies that the BMT roots in block metadata are correctly computed
-func VerifyBlockBMTProofs(block *EvmBlockPayload, metadata *EvmBlockMetadata) error {
+func VerifyBlockBMTProofs(block *EvmBlockPayload) error {
 	// Verify Transactions Root
 	if len(block.TxHashes) > 0 {
 		computedTxRoot := ComputeBMTRootFromHashes(block.TxHashes)
-		if computedTxRoot != metadata.TransactionsRoot {
+		if computedTxRoot != block.TransactionsRoot {
 			return fmt.Errorf("TransactionsRoot mismatch: computed=%s, stored=%s",
-				computedTxRoot.String(), metadata.TransactionsRoot.String())
+				computedTxRoot.String(), block.TransactionsRoot.String())
 		}
-		log.Info(log.Node, "✅ TransactionsRoot verified", "block_number", block.Number, "transactions_root", metadata.TransactionsRoot.String())
+		log.Info(log.Node, "✅ TransactionsRoot verified", "transactions_root", block.TransactionsRoot.String())
 	}
 
 	// Verify Receipts Root
 	if len(block.ReceiptHashes) > 0 {
 		computedReceiptRoot := ComputeBMTRootFromHashes(block.ReceiptHashes)
-		if computedReceiptRoot != metadata.ReceiptsRoot {
+		if computedReceiptRoot != block.ReceiptRoot {
 			return fmt.Errorf("ReceiptsRoot mismatch: computed=%s, stored=%s",
-				computedReceiptRoot.String(), metadata.ReceiptsRoot.String())
+				computedReceiptRoot.String(), block.ReceiptRoot.String())
 		}
-		log.Info(log.Node, "✅ ReceiptsRoot verified", "block_number", block.Number, "receipts_root", metadata.ReceiptsRoot.String())
+		log.Info(log.Node, "✅ ReceiptsRoot verified", "receipts_root", block.ReceiptRoot.String())
 	}
 
 	return nil
@@ -425,12 +309,11 @@ func BlockNumberToObjectID(blockNumber uint32) common.Hash {
 	return common.BytesToHash(key[:])
 }
 
-// SerializeBlockNumber serializes block number and parent hash for BLOCK_NUMBER_KEY storage
-// BLOCK_NUMBER_KEY = 0xFF..FF => block_number (4 bytes LE) || parent_hash (32 bytes)
-func SerializeBlockNumber(blockNumber uint32, parentHash common.Hash) []byte {
-	value := make([]byte, 36)
-	binary.LittleEndian.PutUint32(value[0:4], blockNumber)
-	copy(value[4:36], parentHash[:])
+// SerializeBlockNumber serializes block number for BLOCK_NUMBER_KEY storage
+// BLOCK_NUMBER_KEY = 0xFF..FF => block_number (4 bytes LE)
+func SerializeBlockNumber(blockNumber uint32) []byte {
+	value := make([]byte, 4)
+	binary.LittleEndian.PutUint32(value, blockNumber)
 	return value
 }
 
@@ -469,28 +352,9 @@ func IsBlockObjectID(objectID common.Hash) (bool, uint32) {
 	return true, blockNumber
 }
 
-// ComputeLogsBloom creates a bloom filter from logs
+// ComputeLogsBloom removed - bloom filters eliminated from JAM DA architecture
+// Returns zero bytes (512 hex chars) for Ethereum RPC compatibility
 func ComputeLogsBloom(logs []EthereumLog) string {
-	if len(logs) == 0 {
-		// Return 256 bytes (512 hex chars) of zeros
-		return common.Bytes2Hex(make([]byte, 256))
-	}
-
-	// Create a bloom filter (256 bytes = 2048 bits)
-	var bloom ethereumTypes.Bloom
-
-	// Add each log's address and topics to the bloom filter
-	for _, log := range logs {
-		// Add address to bloom
-		address := common.HexToAddress(log.Address)
-		bloom.Add(address.Bytes())
-
-		// Add each topic to bloom
-		for _, topic := range log.Topics {
-			topicHash := common.HexToHash(topic)
-			bloom.Add(topicHash.Bytes())
-		}
-	}
-
-	return common.Bytes2Hex(bloom[:])
+	// Return 256 bytes (512 hex chars) of zeros
+	return common.Bytes2Hex(make([]byte, 256))
 }

@@ -96,8 +96,6 @@ type VM struct {
 	X        *types.XContext
 	Y        types.XContext
 	Timeslot uint32
-
-	Witnesses map[common.Hash]types.StateWitness // Track fetched objects with proofs by object_id
 }
 
 type Program program.Program
@@ -254,7 +252,6 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		Service_index:   service_index,
 		ServiceMetadata: Metadata,
 		Backend:         pvmBackend,
-		Witnesses:       make(map[common.Hash]types.StateWitness),
 	}
 
 	requiredMemory := uint64(uint64(5*Z_Z) + uint64(Z_func(o_size)) + uint64(Z_func(w_size+z*Z_P)) + uint64(Z_func(s)) + uint64(Z_I))

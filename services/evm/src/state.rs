@@ -104,18 +104,9 @@ pub struct EnvironmentData {
 
 // ===== MajikBackend =====
 
-/// Imported meta-shard from witness
-pub struct ImportedMetaShard {
-    pub shard_id: crate::da::ShardId,
-    pub version: u32,
-    pub digest: [u8; 32],
-    pub entries: Vec<crate::meta_sharding::ObjectRefEntry>,
-}
-
 /// Majik backend with DA-style storage (no InMemoryBackend)
 pub struct MajikBackend {
     pub code_storage: RefCell<BTreeMap<H160, Vec<u8>>>, // address -> bytecode
-    pub code_versions: BTreeMap<H160, u32>,             // address -> version counter
     pub code_hashes: RefCell<BTreeMap<H160, H256>>,     // address -> keccak256(code) cache
     pub negative_code_cache: RefCell<BTreeMap<H160, ()>>, // address -> () for EOAs with no code
     pub storage_shards: RefCell<BTreeMap<H160, ContractStorage>>, // address -> SSR + shards
@@ -128,7 +119,6 @@ pub struct MajikBackend {
     // Meta-shard state (JAM State object index)
     pub meta_ssr: RefCell<crate::meta_sharding::MetaSSR>,  // Global SSR for all ObjectRefs
     pub meta_shards: RefCell<BTreeMap<crate::da::ShardId, crate::meta_sharding::MetaShard>>,  // Cached meta-shards
-    pub imported_meta_shards: RefCell<BTreeMap<crate::da::ShardId, ImportedMetaShard>>,  // From witnesses
 }
 
 impl MajikBackend {
@@ -144,7 +134,6 @@ impl MajikBackend {
 
         let mut backend = Self {
             code_storage: RefCell::new(BTreeMap::new()),
-            code_versions: BTreeMap::new(),
             code_hashes: RefCell::new(BTreeMap::new()),
             negative_code_cache: RefCell::new(BTreeMap::new()),
             storage_shards: RefCell::new(BTreeMap::new()),
@@ -157,7 +146,6 @@ impl MajikBackend {
             // Initialize meta-shard tracking
             meta_ssr: RefCell::new(crate::meta_sharding::MetaSSR::new()),
             meta_shards: RefCell::new(BTreeMap::new()),
-            imported_meta_shards: RefCell::new(BTreeMap::new()),
         };
 
         // Initialize system contract (0x01) with empty SSR for balance/nonce tracking
@@ -224,16 +212,14 @@ impl MajikBackend {
                     // existing DA data, causing catastrophic data loss
                     use crate::meta_sharding::{
                         deserialize_meta_shard_with_id_validated,
-                        deserialize_meta_shard,
                         MetaShardDeserializeResult,
                     };
-                    use crate::da::resolve_shard_id;
 
-                    // Try new format with validated header first
+                    // Deserialize with validated header
                     match deserialize_meta_shard_with_id_validated(&payload, &object_id, backend.service_id) {
                         MetaShardDeserializeResult::ValidatedHeader(shard_id, meta_shard) => {
                             log_info(&format!(
-                                "  ✅ Imported MetaShard (validated header): shard_id={:?}, {} entries",
+                                "  ✅ Imported MetaShard: shard_id={:?}, {} entries",
                                 shard_id,
                                 meta_shard.entries.len()
                             ));
@@ -242,62 +228,12 @@ impl MajikBackend {
                             backend.meta_shards.borrow_mut().insert(shard_id, meta_shard);
                         }
                         MetaShardDeserializeResult::ValidationFailed => {
-                            // CRITICAL: Header present but validation failed
-                            // This is a malicious or corrupt payload - REJECT immediately
-                            // DO NOT fall back to legacy format (security bypass)
+                            // Header present but validation failed - REJECT
                             log_error(&format!(
                                 "  ❌ REJECTED MetaShard with invalid header: object_id={}",
                                 crate::sharding::format_object_id(&object_id)
                             ));
                         }
-                        MetaShardDeserializeResult::MaybeLegacy => {
-                            // Payload too short for header - try legacy format for backward compatibility
-                            if let Some(meta_shard) = deserialize_meta_shard(&payload) {
-                                // Legacy format has no header - derive shard_id from SSR routing
-                                // This requires MetaSsrMetadata to be loaded first (order dependency)
-                                if let Some(first_entry) = meta_shard.entries.first() {
-                                    let shard_id = resolve_shard_id(
-                                        first_entry.object_id,
-                                        &backend.meta_ssr.borrow()
-                                    );
-
-                                    log_info(&format!(
-                                        "  ✅ Imported MetaShard (legacy format): shard_id={:?}, {} entries",
-                                        shard_id,
-                                        meta_shard.entries.len()
-                                    ));
-
-                                    backend.meta_shards.borrow_mut().insert(shard_id, meta_shard);
-                                } else {
-                                    // Empty legacy shard - we can't determine shard_id without header
-                                    // Log warning but continue (may break if this shard is needed)
-                                    log_info("  ⚠️  Imported empty MetaShard (legacy format, shard_id unknown)");
-                                }
-                            } else {
-                                log_error(&format!(
-                                    "  ❌ Failed to deserialize MetaShard (legacy): object_id={}",
-                                    crate::sharding::format_object_id(&object_id)
-                                ));
-                            }
-                        }
-                    }
-                }
-                Some(ObjectKind::MetaSsrMetadata) => {
-                    // Meta-SSR metadata - global routing metadata for meta-shards
-                    // Import meta-SSR from DA to enable routing ObjectIDs to meta-shards
-                    use crate::meta_sharding::deserialize_meta_ssr;
-
-                    if let Some(ssr_data) = deserialize_meta_ssr(&payload) {
-                        log_info(&format!(
-                            "  ✅ Imported MetaSsrMetadata: {} routing entries",
-                            ssr_data.entries.len()
-                        ));
-                        *backend.meta_ssr.borrow_mut() = ssr_data;
-                    } else {
-                        log_error(&format!(
-                            "  ❌ Failed to deserialize MetaSsrMetadata: object_id={}",
-                            crate::sharding::format_object_id(&object_id)
-                        ));
                     }
                 }
                 Some(ObjectKind::Receipt) | Some(ObjectKind::Block) => {
@@ -306,6 +242,19 @@ impl MajikBackend {
                 None => {
                     // Unknown object kind - skip
                 }
+            }
+        }
+
+        // CRITICAL: Rebuild meta_ssr routing table from imported meta-shards
+        // Without this, resolve_shard_id() routes all objects to root shard (ld=0)
+        // because meta_ssr starts empty. This corrupts the split tree immediately.
+        {
+            let meta_shards = backend.meta_shards.borrow();
+            let shard_ids: Vec<crate::da::ShardId> = meta_shards.keys().cloned().collect();
+
+            if !shard_ids.is_empty() {
+                let rebuilt_ssr = crate::meta_sharding::rebuild_meta_ssr_from_shards(&shard_ids);
+                *backend.meta_ssr.borrow_mut() = rebuilt_ssr;
             }
         }
 
@@ -388,6 +337,7 @@ impl MajikBackend {
                 };
 
                 let empty_shard = ContractShard {
+                    merkle_root: [0u8; 32],
                     entries: Vec::new(),
                 };
 
@@ -490,24 +440,15 @@ impl MajikBackend {
     // ===== Meta-shard access methods =====
 
     /// Get mutable reference to meta-SSR for processing object writes
-    pub fn meta_ssr_mut(&self) -> core::cell::RefMut<crate::meta_sharding::MetaSSR> {
+    pub fn meta_ssr_mut(&self) -> core::cell::RefMut<'_, crate::meta_sharding::MetaSSR> {
         self.meta_ssr.borrow_mut()
     }
 
     /// Get mutable reference to meta-shards cache
-    pub fn meta_shards_mut(&self) -> core::cell::RefMut<BTreeMap<crate::da::ShardId, crate::meta_sharding::MetaShard>> {
+    pub fn meta_shards_mut(&self) -> core::cell::RefMut<'_, BTreeMap<crate::da::ShardId, crate::meta_sharding::MetaShard>> {
         self.meta_shards.borrow_mut()
     }
 
-    /// Get immutable reference to meta-shards cache
-    pub fn meta_shards(&self) -> core::cell::Ref<BTreeMap<crate::da::ShardId, crate::meta_sharding::MetaShard>> {
-        self.meta_shards.borrow()
-    }
-
-    /// Get mutable reference to imported meta-shards
-    pub fn imported_meta_shards_mut(&self) -> core::cell::RefMut<BTreeMap<crate::da::ShardId, ImportedMetaShard>> {
-        self.imported_meta_shards.borrow_mut()
-    }
 }
 
 // ===== MajikOverlay struct and coordination =====
@@ -595,12 +536,25 @@ impl<'config> MajikOverlay<'config> {
         self,
         work_package_hash: [u8; 32],
         receipts: &[TransactionReceiptRecord],
+        state_root: [u8; 32],
+        timeslot: u32,
+        total_gas_used: u64,
+        _service_id: u32,
     ) -> (utils::effects::ExecutionEffects, MajikBackend) {
         let tracker = self.tracker.into_inner().into_output();
         let (backend, change_set) = self.overlay.deconstruct();
 
-        // Convert to ExecutionEffects
-        let effects = backend.to_execution_effects(&change_set, &tracker, work_package_hash, receipts);
+        // Convert to ExecutionEffects and assemble block (block logged but not returned)
+        let effects = backend.to_execution_effects(
+            &change_set,
+            &tracker,
+            work_package_hash,
+            receipts,
+            state_root,
+            timeslot,
+            total_gas_used,
+        );
+
         (effects, backend)
     }
 }

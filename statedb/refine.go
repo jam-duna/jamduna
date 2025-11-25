@@ -1,7 +1,6 @@
 package statedb
 
 import (
-	"bytes"
 	"fmt"
 	"reflect"
 	"time"
@@ -17,14 +16,6 @@ import (
 const (
 	debugSpec = false
 )
-
-// boolToHexStatus converts a boolean success status to hex status string
-func boolToHexStatus(success bool) string {
-	if success {
-		return "0x1"
-	}
-	return "0x0"
-}
 
 // authorizeWP executes the authorization step for a work package
 func (statedb *StateDB) authorizeWP(workPackage types.WorkPackage, workPackageCoreIndex uint16, pvmBackend string) (r types.Result, p_a common.Hash, authGasUsed int64, err error) {
@@ -192,7 +183,7 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		Results:           results,
 		AuthGasUsed:       uint(authGasUsed),
 	}
-	log.Trace(log.Node, "executeWorkPackageBundle", "role", vmLogging, "reportHash", workReport.Hash())
+	log.Trace(log.Node, "executeWorkPackageBundle", "role", vmLogging, "numSegments", len(segments))
 
 	s.GetStorage().GetJAMDA().StoreBundleSpecSegments(spec, d, package_bundle, segments)
 
@@ -236,21 +227,6 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 		// Capture original transaction count BEFORE any witnesses are appended
 		originalTxCount := uint32(len(wp.WorkItems[index].Extrinsics))
 
-		// Add all objectWitnesses of type receipt as extrinsics
-		if len(rawObjectIDs) != 0 {
-			witnesses := []types.StateWitnessRaw{}
-			for _, objectID := range rawObjectIDs {
-				witness, ok, _, err := s.ReadStateWitnessRaw(workItem.Service, objectID)
-				if err != nil {
-					log.Warn(log.DA, "BuildBundle: ReadStateWitnessRaw failed", "objectID", objectID, "err", err)
-					return nil, nil, err
-				} else if ok {
-					witnesses = append(witnesses, witness)
-				}
-			}
-			appendExtrinsicWitnessesRawToWorkItem(&wp.WorkItems[index], &extrinsicsBlobs, index, witnesses)
-		}
-
 		vm := NewVMFromCode(workItem.Service, code, 0, 0, s, pvmBackend, workItem.RefineGasLimit)
 		if vm == nil {
 			return nil, nil, fmt.Errorf("BuildBundle:NewVMFromCode:s_id %v, codehash %v, err %v, ok=%v", workItem.Service, workItem.CodeHash, err0, ok)
@@ -268,12 +244,11 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 		wp.WorkItems[index].ExportCount = uint16(len(exported_segments))
 		wp.WorkItems[index].ImportedSegments = importedSegments
 
-		// Append builder witnesses to extrinsicsBlobs
-		builderWitnessCount := len(witnesses)
-		appendExtrinsicWitnessesToWorkItem(&wp.WorkItems[index], &extrinsicsBlobs, index, witnesses)
-
-		// Update payload metadata if it's PayloadTransactions format
-		if len(wp.WorkItems[index].Payload) >= 1 && bytes.Equal(wp.WorkItems[index].Payload[:1], types.PayloadTransactions) {
+		// Append builder witnesses to extrinsicsBlobs -- this will be the metashards + the object proofs
+		builderWitnessCount := appendExtrinsicWitnessesToWorkItem(&wp.WorkItems[index], &extrinsicsBlobs, index, witnesses)
+		log.Info(log.DA, "**** BuildBundle: Appended builder witnesses", "workItemIndex", index, "builderWitnessCount", builderWitnessCount, "totalExtrinsics", len(extrinsicsBlobs[index]))
+		// Update payload metadata with builder witness count
+		if len(wp.WorkItems[index].Payload) >= 7 && builderWitnessCount > 0 {
 			totalWitnessCount := uint16(builderWitnessCount)
 			wp.WorkItems[index].Payload = BuildPayload(PayloadTypeBuilder, int(originalTxCount), int(totalWitnessCount))
 		}
@@ -332,7 +307,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 	workReport := &types.WorkReport{
 		Results: results,
 	}
-
+	log.Info(log.Node, "BuildBundle: Built", "payload", fmt.Sprintf("%x", bundle.WorkPackage.WorkItems[0].Payload))
 	return &bundle, workReport, nil
 }
 
@@ -352,28 +327,42 @@ func (s *StateDB) getBeefyRootForAnchor(anchor common.Hash) common.Hash {
 	return recent[len(recent)-1].B
 }
 
-func appendExtrinsicWitnessesToWorkItem(workItem *types.WorkItem, extrinsicsBlobs *[]types.ExtrinsicsBlobs, index int, witnesses []types.StateWitness) {
+func appendExtrinsicWitnessesToWorkItem(workItem *types.WorkItem, extrinsicsBlobs *[]types.ExtrinsicsBlobs, index int, witnesses []types.StateWitness) int {
+	i := 0
 	for _, witness := range witnesses {
 		witnessBytes := witness.SerializeWitness()
 		(*extrinsicsBlobs)[index] = append((*extrinsicsBlobs)[index], witnessBytes)
+		i++
 		witnessExtrinsic := types.WorkItemExtrinsic{
 			Hash: common.Blake2Hash(witnessBytes),
 			Len:  uint32(len(witnessBytes)),
 		}
 		workItem.Extrinsics = append(workItem.Extrinsics, witnessExtrinsic)
-	}
-}
+		for objectID, bmtProof := range witness.ObjectProofs {
+			ref := witness.ObjectRefs[objectID]
 
-func appendExtrinsicWitnessesRawToWorkItem(workItem *types.WorkItem, extrinsicsBlobs *[]types.ExtrinsicsBlobs, index int, witnesses []types.StateWitnessRaw) {
-	for _, witness := range witnesses {
-		witnessBytes := witness.SerializeWitnessRaw()
-		(*extrinsicsBlobs)[index] = append((*extrinsicsBlobs)[index], witnessBytes)
-		witnessExtrinsic := types.WorkItemExtrinsic{
-			Hash: common.Blake2Hash(witnessBytes),
-			Len:  uint32(len(witnessBytes)),
+			refBytes := ref.Serialize()
+			witnessBytes = append(objectID.Bytes(), refBytes...) // proofBytes...
+
+			// temporary
+			extra := make([]byte, 8)
+			witnessBytes = append(witnessBytes, extra...)
+
+			proofBytes := []byte{}
+			for _, p := range bmtProof {
+				proofBytes = append(proofBytes, p.Bytes()...)
+			}
+			witnessBytes = append(witnessBytes, proofBytes...)
+			(*extrinsicsBlobs)[index] = append((*extrinsicsBlobs)[index], witnessBytes)
+			i++
+			witnessExtrinsic = types.WorkItemExtrinsic{
+				Hash: common.Blake2Hash(witnessBytes),
+				Len:  uint32(len(witnessBytes)),
+			}
+			workItem.Extrinsics = append(workItem.Extrinsics, witnessExtrinsic)
 		}
-		workItem.Extrinsics = append(workItem.Extrinsics, witnessExtrinsic)
 	}
+	return i
 }
 
 func NewAvailabilitySpecifier(package_bundle types.WorkPackageBundle, export_segments [][]byte) (availabilityspecifier *types.AvailabilitySpecifier, d types.AvailabilitySpecifierDerivation) {

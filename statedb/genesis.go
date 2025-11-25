@@ -104,22 +104,10 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 	}
 	storage := make(map[common.Hash][]byte)
 
-	// Set up EVM block 0 in genesis, Initialize BLOCK_NUMBER_KEY with 0
-	//   BLOCK_NUMBER_KEY =  block_number (LE) || parent_hash.
 	// Refine only allows authorized builders
 	// Accumulate only allows increments on BLOCK_NUMBER_KEY when there is a timestamp greater than this
 	// SubmitGenesisWorkPackage uses ReadStateWitness must submit extrinsics that match these storage entries
-	storage[evmtypes.GetBlockNumberKey()] = evmtypes.SerializeBlockNumber(0, common.Hash{})
-	// this is the genesis block
-	storage[evmtypes.BlockNumberToObjectID(0)] = evmtypes.SerializeEvmBlockPayload(&evmtypes.EvmBlockPayload{
-		Number:        0,
-		ParentHash:    common.Hash{},
-		LogsBloom:     [256]byte{},
-		GasLimit:      30000000,
-		Timestamp:     0,
-		TxHashes:      []common.Hash{},
-		ReceiptHashes: []common.Hash{},
-	})
+	storage[evmtypes.GetBlockNumberKey()] = evmtypes.SerializeBlockNumber(0)
 
 	// Load services into genesis state
 	services := []types.TestService{

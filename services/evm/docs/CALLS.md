@@ -7,7 +7,7 @@ This document explains how the EVM service handles unsigned call data for `eth_c
 The EVM service supports four payload types:
 - **PayloadType::Builder (0x00)**: Builder-submitted transaction bundles
 - **PayloadType::Transactions (0x01)**: Normal transaction execution with signed RLP-encoded transactions + optional block witnesses
-- **PayloadType::Blocks (0x02)**: Genesis bootstrap mode for initializing state with 'K' commands (genesis-only)
+- **PayloadType::Genesis (0x02)**: Genesis bootstrap mode for initializing state/DA  (genesis-only)
 - **PayloadType::Call (0x03)**: EstimateGas/Call mode for unsigned transaction simulation (read-only)
 
 `PayloadType::Call` enables static calls and gas estimation without requiring transaction signatures, which is essential for read-only operations like `balanceOf()` queries.
@@ -54,17 +54,13 @@ ExecutionEffects Serialization + Call Output
 ```
 
 **ExecutionEffects Structure:**
-- `export_count`: 2 bytes (little-endian u16) - always 0 for payload "B"
-- `gas_used`: 8 bytes (little-endian u64)
-- `write_intents_count`: 2 bytes (little-endian u16) - always 0 for payload "B"
-- `write_intents`: Empty for payload "B"
+- ExecutionEffects now holds only `write_intents`; there is no gas or export counter in the struct.【F:services/utils/src/effects.rs†L15-L41】
+- The serializer emits **only meta-shard write intents** using the compact format described in `writes.rs` (ld byte + prefix + packed ObjectRef).【F:services/evm/src/writes.rs†L1-L69】
+- Because call mode produces a single non–meta-shard `WriteIntent`, the serialized refine output is currently **empty**.
 
 **Call Output:**
-- Appended after ExecutionEffects
-- Variable length bytes returned by the EVM execution
-- For `balanceOf()`: 32-byte uint256 balance value
-
-Total size: 12 bytes (ExecutionEffects header) + output length
+- The call result bytes live inside the `payload` of the placeholder `WriteIntent` created by `refine_call_payload`, but they are dropped by serialization because the intent is not a meta-shard entry.【F:services/evm/src/refiner.rs†L676-L814】
+- RPC clients therefore receive an empty refine response for `PayloadType::Call` in the current codebase; surfacing the call output will require extending the serializer to carry non–meta-shard data.
 
 ## Implementation Details
 

@@ -12,7 +12,7 @@
 //! - Logs → Receipt objects
 
 use crate::sharding::{
-    code_object_id, format_object_id,
+    code_object_id,
     shard_object_id, ssr_object_id,
 };
 use crate::receipt::{receipt_object_id_from_receipt, serialize_receipt, TransactionReceiptRecord};
@@ -21,7 +21,6 @@ use crate::sharding::{
     serialize_shard, serialize_ssr, ContractStorage, EvmEntry,
     ShardData, ShardId,
 };
-use crate::writes::ObjectCandidateWrite;
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     format,
@@ -182,30 +181,148 @@ impl MajikBackend {
         (storage_by_address, ssr_addresses)
     }
 
+    /// Process meta-shards AFTER export: group ObjectRef writes by meta-shard and export to DA
+    /// This must be called AFTER write_intents have been exported so ObjectRefs have correct index_start
+    /// Returns the number of meta-shard write intents added
+    pub fn process_meta_shards_after_export(
+        &self,
+        work_package_hash: [u8; 32],
+        write_intents: &mut Vec<WriteIntent>,
+        service_id: u32,
+    ) -> usize {
+        use utils::functions::log_info;
+        use crate::sharding::ObjectKind;
+        use crate::meta_sharding::{meta_shard_object_id, serialize_meta_shard_with_id};
+        use utils::effects::WriteEffectEntry;
+
+        log_info(&format!("📦 Meta-sharding: Processing {} object writes", write_intents.len()));
+
+        // Collect all (object_id, ObjectRef) pairs from write_intents
+        // NOTE: At this point ref_info.index_start has correct values since exports have already happened.
+        let object_writes: Vec<([u8; 32], utils::objects::ObjectRef)> = write_intents
+            .iter()
+            .map(|intent| {
+                (intent.effect.object_id, intent.effect.ref_info.clone())
+            })
+            .collect();
+
+        // Get meta-shard state from backend (persistent across refine calls)
+        let mut cached_meta_shards = self.meta_shards_mut();
+        let mut meta_ssr = self.meta_ssr_mut();
+
+        // Track SSR entry count before processing to detect changes
+        let initial_ssr_entry_count = meta_ssr.entries.len();
+        log_info(&format!("📦 Meta-sharding: Current MetaSSR has {} routing entries", initial_ssr_entry_count));
+
+        // Process object writes - groups by meta-shard, handles splits
+        let meta_shard_writes = crate::meta_sharding::process_object_writes(
+            object_writes,
+            &mut cached_meta_shards,
+            &mut meta_ssr,
+        );
+
+        let meta_shard_count = meta_shard_writes.len();
+        log_info(&format!("📦 Meta-sharding: Generated {} meta-shard write intents", meta_shard_count));
+
+        // Export meta-shard segments to DA and create write intents
+        for meta_write in meta_shard_writes {
+            // Serialize meta-shard to DA segment format with shard_id header
+            // Note: merkle_root was already computed in process_meta_shards
+            let merkle_root = crate::meta_sharding::compute_entries_bmt_root(&meta_write.entries);
+            let meta_shard = crate::da::ShardData {
+                merkle_root,
+                entries: meta_write.entries.clone(),
+            };
+            let meta_shard_bytes = serialize_meta_shard_with_id(&meta_shard, meta_write.shard_id);
+
+            log_info(&format!(
+                "  📦 Meta-shard {:?}: {} entries, {} bytes",
+                meta_write.shard_id,
+                meta_write.entries.len(),
+                meta_shard_bytes.len()
+            ));
+
+            // Compute object_id for this meta-shard
+            let object_id = meta_shard_object_id(service_id, meta_write.shard_id.ld, &meta_write.shard_id.prefix56);
+
+            // Create ObjectRef for this meta-shard
+            let object_ref = utils::objects::ObjectRef::new(
+                work_package_hash,
+                meta_shard_bytes.len() as u32,
+                ObjectKind::MetaShard as u8,
+            );
+
+            log_info(&format!(
+                "  Created ObjectRef: payload_length={}, actual_payload_len={}",
+                object_ref.payload_length,
+                meta_shard_bytes.len()
+            ));
+
+            // Create write intent
+            write_intents.push(WriteIntent {
+                effect: WriteEffectEntry {
+                    object_id,
+                    ref_info: object_ref,
+                    payload: meta_shard_bytes,
+                },
+                dependencies: Vec::new(),
+            });
+        }
+
+        // Note: MetaSSR (global_depth routing table) is NOT exported to DA.
+        // Accumulate writes global_depth hint directly to JAM State SSR key.
+        // The backend tracks meta_ssr internally for split detection only.
+        log_info(&format!(
+            "📝 Meta-SSR state: {} routing entries (tracked internally for splits)",
+            meta_ssr.entries.len()
+        ));
+
+        meta_shard_count
+    }
+
     /// Emit placeholder (v0) receipts as write intents.
     ///
     /// This is the Phase 1 path: it emits version 0 receipts (placeholders)
     /// so refine can ship transaction data before canonical fields are known.
     /// Phase 2 will later replace these with version 1 receipts.
-    /// Returns the number of write intents added
-    fn emit_receipts(
+    fn emit_receipts_and_block(
         &self,
         receipts: &[TransactionReceiptRecord],
         work_package_hash: [u8; 32],
         write_intents: &mut Vec<WriteIntent>,
-    ) -> usize {
+        state_root: [u8; 32],
+        timeslot: u32,
+        total_gas_used: u64,
+    ) {
+        use utils::hash_functions::keccak256;
+        use utils::functions::log_info;
+        use crate::receipt::encode_canonical_receipt_rlp;
 
         let initial_count = write_intents.len();
         let receipts_count = receipts.len();
 
-        // Phase 1: Export receipt payloads to DA
+        // Collect transaction hashes and receipt hashes for block assembly
+        let mut tx_hashes = Vec::with_capacity(receipts.len());
+        let mut receipt_hashes = Vec::with_capacity(receipts.len());
+        let mut cumulative_gas = 0u64;
+
+        // Phase 1: Export receipt payloads to DA and collect hashes
         // Receipt ObjectID is the transaction hash (no modification)
         // The receipt payload contains all transaction data, so we don't export transactions separately
         for record in receipts {
+            // Collect transaction hash
+            tx_hashes.push(record.hash);
+
+            cumulative_gas += record.used_gas.low_u64();
+
+            // Compute canonical receipt RLP hash for block
+            let receipt_rlp = encode_canonical_receipt_rlp(record, cumulative_gas);
+            let receipt_hash = keccak256(&receipt_rlp).0;
+            receipt_hashes.push(receipt_hash);
+
+            // Export receipt to DA
             let receipt_object_id = receipt_object_id_from_receipt(record);
             let receipt_payload = serialize_receipt(record);
-
-            // Receipt ObjectID = transaction hash for direct RPC lookup
 
             let receipt_object_ref = utils::objects::ObjectRef::new(
                 work_package_hash,
@@ -237,7 +354,52 @@ impl MajikBackend {
             ));
         }
 
-        added_count
+        // Assemble EvmBlockPayload
+        let mut block_payload = crate::block::EvmBlockPayload {
+            payload_length: 0, // Will be computed after serialization
+            num_transactions: receipts.len() as u32,
+            timestamp: timeslot,
+            gas_used: total_gas_used,
+            state_root,
+            transactions_root: [0u8; 32], // Will be computed by prepare_for_da_export
+            receipt_root: [0u8; 32],      // Will be computed by prepare_for_da_export
+            tx_hashes,
+            receipt_hashes,
+        };
+
+        // Compute roots and finalize block
+        block_payload.prepare_for_da_export();
+
+        // Compute actual payload length from serialization.
+        // Note: The first serialization uses payload_length=0, so we must
+        // re-serialize after setting the correct length to keep the header
+        // consistent with the ObjectRef payload_length written to JAM State.
+        let mut serialized = block_payload.serialize();
+        block_payload.payload_length = serialized.len() as u32;
+        serialized = block_payload.serialize();
+
+        log_info(&format!(
+            "📦 Block assembled: {} txs, {} gas, {} bytes",
+            block_payload.num_transactions,
+            block_payload.gas_used,
+            block_payload.payload_length
+        ));
+
+        // Export block to DA
+        let block_object_ref = utils::objects::ObjectRef::new(
+            work_package_hash,
+            block_payload.payload_length,
+            crate::sharding::ObjectKind::Block as u8,
+        );
+
+        write_intents.push(WriteIntent {
+            effect: WriteEffectEntry {
+                    object_id: work_package_hash,
+                    ref_info: block_object_ref,
+                    payload: serialized,
+            },
+            dependencies: Vec::new(),
+        });
     }
 
     /// Process storage resets (SELFDESTRUCT or full contract storage clear) and generate write intents
@@ -280,7 +442,7 @@ impl MajikBackend {
                 let dependencies: Vec<ObjectId> = tracker_output
                     .block_reads
                     .iter()
-                    .filter(|dep| **dep == ssr_object_id_val)
+                    .filter(|dep| **dep != ssr_object_id_val)
                     .cloned()
                     .collect();
 
@@ -343,7 +505,7 @@ impl MajikBackend {
             let dependencies: Vec<ObjectId> = tracker_output
                 .block_reads
                 .iter()
-                .filter(|dep| **dep == code_object_id_val)
+                .filter(|dep| **dep != code_object_id_val)
                 .cloned()
                 .collect();
 
@@ -402,7 +564,7 @@ impl MajikBackend {
             let dependencies: Vec<ObjectId> = tracker_output
                 .block_reads
                 .iter()
-                .filter(|dep| **dep == object_id)
+                .filter(|dep| **dep != object_id)
                 .cloned()
                 .collect();
 
@@ -472,6 +634,7 @@ impl MajikBackend {
         shard_entries.sort_by_key(|entry| entry.key_h);
 
         let shard_data = ShardData {
+            merkle_root: [0u8; 32], // TODO: Compute BMT root for contract shards
             entries: shard_entries,
         };
 
@@ -653,7 +816,7 @@ impl MajikBackend {
         let dependencies: Vec<ObjectId> = tracker_output
             .block_reads
             .iter()
-            .filter(|dep| **dep == object_id)
+            .filter(|dep| **dep != object_id)
             .cloned()
             .collect();
 
@@ -726,7 +889,7 @@ impl MajikBackend {
             let dependencies: Vec<ObjectId> = tracker_output
                 .block_reads
                 .iter()
-                .filter(|dep| **dep == ssr_object_id_val)
+                .filter(|dep| **dep != ssr_object_id_val)
                 .cloned()
                 .collect();
 
@@ -832,6 +995,9 @@ impl MajikBackend {
         tracker_output: &TrackerOutput,
         work_package_hash: [u8; 32],
         receipts: &[TransactionReceiptRecord],
+        state_root: [u8; 32],
+        timeslot: u32,
+        total_gas_used: u64,
     ) -> utils::effects::ExecutionEffects {
 
         {
@@ -882,40 +1048,23 @@ impl MajikBackend {
             &mut write_intents,
         );
 
-        // 5. Handle receipts
-        self.emit_receipts(receipts, work_package_hash, &mut write_intents);
+        // 5. Handle receipts and assemble block
+        self.emit_receipts_and_block(
+            receipts,
+            work_package_hash,
+            &mut write_intents,
+            state_root,
+            timeslot,
+            total_gas_used,
+        );
+
+        // NOTE: Meta-shard processing now happens AFTER export in refiner.rs
+        // This ensures ObjectRefs have correct index_start values before being
+        // embedded in meta-shard entries.
 
         utils::effects::ExecutionEffects {
             write_intents,
         }
     }
 
-    /// Convert ExecutionEffects to ObjectCandidateWrite array
-    /// Preserves receipt payloads ONLY for accumulate block construction
-    /// Other object kinds (code, storage, SSR) have payloads stripped
-    pub fn to_object_candidate_writes(
-        effects: &utils::effects::ExecutionEffects,
-    ) -> Vec<ObjectCandidateWrite> {
-        effects
-            .write_intents
-            .iter()
-            .map(|intent| {
-                // Payloads are exported to DA segments, not included inline
-                let payload = Vec::new();
-
-                log_debug(&format!(
-                    "    📦 ObjectCandidateWrite:object_id={}  kind={}",
-                    format_object_id(&intent.effect.object_id),
-                    intent.effect.ref_info.object_kind,
-                ));
-
-                ObjectCandidateWrite {
-                    object_id: intent.effect.object_id,
-                    object_ref: intent.effect.ref_info.clone(),
-                    dependencies: intent.dependencies.clone(),
-                    payload,
-                }
-            })
-            .collect()
-    }
 }

@@ -14,53 +14,76 @@ We want light clients (and bridges) to convince themselves that a transaction, r
 
 | Commitment            | Location                               | What it covers                                              |
 |-----------------------|----------------------------------------|-------------------------------------------------------------|
-| `stateRoot`           | JAM block header                       | `ObjectRef`s, contract shards, SSR metadata                 |
-| `transactionRoot`     | Block metadata in service storage      | BMT root of transaction hashes                              |
-| `receiptRoot`         | Block metadata in service storage      | BMT root of canonical receipt hashes                        |
+| `stateRoot`           | JAM block header                       | Meta-shard ObjectRefs + block number/work package mappings  |
+| `transactionRoot`     | Block payload in DA                    | BMT root of transaction hashes                              |
+| `receiptRoot`         | Block payload in DA                    | BMT root of canonical receipt hashes                        |
 | Transaction payloads  | DA exported by refine                  | RLP/typed transaction bodies                                |
 | Receipt payloads      | DA exported by refine                  | Receipt fields: status, cumulative gas, logs, bloom inputs  |
-| Block number index    | JAM service storage (accumulate)       | `block_number (4 LE) || parent_hash (32)`                   |
-| Block payload         | JAM service storage (accumulate)       | EvmBlockPayload: header + tx/receipt hashes                 |
-| Block metadata        | JAM service storage (accumulate)       | EvmBlockMetadata: transactions_root + receipts_root + mmr_root (96 bytes) |
+| Block number index    | JAM State (accumulate)                 | blocknumber → work_package_hash + timeslot                  |
+| Block payload         | DA exported by accumulate              | EvmBlockPayload: header + tx/receipt hashes                 |
+| Block metadata        | DA exported by accumulate              | MMR commitments and bidirectional mappings reconstructed via DA |
 
-Only `stateRoot` is consensus-anchored. Everything else either expires with the DA window (unless pinned) or lives in service storage that accumulate writes.
+Only `stateRoot` is consensus-anchored. Everything else either expires with the DA window (unless pinned) or is recovered from the DA artifacts that accumulate writes; JAM State now holds only the routing metadata listed above.【F:services/evm/src/accumulator.rs†L81-L149】【F:services/evm/src/block.rs†L31-L78】
 
-## 3. ObjectRef Anatomy
+### Meta-shard inclusion (ObjectID → ObjectRef)
 
+Meta-sharding adds a two-step proof chain that matches both the Rust backend and the Go `StateWitness` shape:
+
+1. **Route to meta-shard.** The `meta_shard_object_id(ld, prefix56)` function builds the ObjectID directly as `[ld][prefix_bytes][zero padding]` without hashing. Routing still masks the first `ld` bits of the 56-bit prefix derived from the object hash.
+2. **State proof for meta-shard ObjectRef.** The JAM state proof targets that `[ld][prefix]` ObjectID, whose stored value is the 37-byte `ObjectRef` pointing to the meta-shard payload in DA. Rust writes this ObjectID verbatim, and Go uses the same layout when resolving witnesses.
+3. **Header binding check.** The meta-shard payload repeats `[ld][prefix56]` in its header. Both Rust and Go recompute the ObjectID from that header and require it to match the state proof key before trusting the payload.
+4. **DA fetch + BMT proof.** Fetch the meta-shard payload from DA using that `ObjectRef`, then verify the binary Merkle tree proof that the target object entry lives in the payload. Both Rust and Go treat each entry as the 69-byte tuple `(object_id || object_ref)` when hashing the BMT.
+5. **Object payload proof (optional).** If the DA payload for the object is still available, fetch it via the `ObjectRef` stored inside the meta-shard entry. Otherwise only the `ObjectRef` is proven.
+
+## 3. ObjectRef Anatomy (Updated November 2025)
+
+**ObjectRef - Serialized Format (37 bytes)**:
 ```rust
 pub struct ObjectRef {
-    // Deterministic at refine time
-    pub service_id: u32,
-    pub work_package_hash: [u8; 32],
-    pub index_start: u16,
-    pub index_end: u16,
-    pub version: u32,
-    pub payload_length: u32,
-
-    // Accumulate-time (finalized ordering)
-    pub object_kind: u8,
-    pub log_index: u8,     // Reserved/padding
-    pub tx_slot: u16,
-    pub timeslot: u32,     // JAM block slot; maps 1:1 to canonical block hash
-    pub gas_used: u32,     // Non-zero for receipt objects
-    pub evm_block: u32,    // Sequential Ethereum block number
+    pub work_package_hash: [u8; 32],  // 32 bytes
+    pub index_start: u16,             // 12 packed bits
+    pub payload_length: u32,          // Derived from segments on deserialize
+    pub object_kind: u8,              // 4 packed bits
 }
+// Serialization: work_package_hash (32B) + packed 5 bytes
+// Packing: index_start (12 bits) | num_segments (12 bits) | last_segment_bytes (12 bits) | object_kind (4 bits)
 ```
+
+**JAM State Storage Format (45 bytes total)**:
+When written to JAM State, ObjectRef is extended with accumulate-time metadata:
+```
+ObjectRef (37 bytes) + timeslot (4 bytes LE) + blocknumber (4 bytes LE)
+```
+
+This separation enables:
+- **Refine-time fields** (in ObjectRef): Deterministic DA pointers
+- **Accumulate-time metadata** (separate): Block ordering, timeslot, block number
 
 ```rust
 #[repr(u8)]
 pub enum ObjectKind {
-    Code           = 0x00, // Contract bytecode
-    StorageShard   = 0x01, // Storage shard object
-    SsrMetadata    = 0x02, // SSR metadata
-    Receipt        = 0x03, // Receipt payload (embeds full transaction)
-    Block          = 0x05, // Block payload
+    Code             = 0x00, // Contract bytecode
+    StorageShard     = 0x01, // Storage shard object
+    SsrMetadata      = 0x02, // Contract SSR metadata
+    Receipt          = 0x03, // Receipt payload (embeds full transaction)
+    MetaShard        = 0x04, // Meta-shard (ObjectID→ObjectRef mappings)
+    Block            = 0x05, // Block payload
 }
 ```
 
-Receipts write their payload to DA during refine (Phase 1) and populate only the deterministic fields. Accumulate stamps the final ordering metadata: `timeslot`, `gas_used`, `evm_block`, and `tx_slot`. This record becomes the single source of truth for RPC responses.
+**Key Changes (November 2025)**:
+- ObjectRef reduced from 64 → 37 bytes (42% smaller)
+- Accumulate metadata (timeslot, blocknumber) stored separately in JAM State
+- Added ObjectKind::MetaShard for meta-sharding
 
-> **Object IDs.** Receipts use the canonical Keccak hash of the transaction as the `ObjectId`. The `object_kind` field is the authoritative discriminator. Code, shard, and SSR objects keep their existing structured IDs.
+> **Object IDs.**
+> - Receipts: `keccak256(RLP(signed_tx))` (transaction hash)
+> - Code: `keccak256(service_id || address || 0xFF || "code")`
+> - Storage shard: `keccak256(service_id || address || 0xFF || ld || prefix56 || "shard")`
+> - Meta-shard: `[ld][prefix_bytes][zero padding]` (no hashing)
+> - Block: `0xFF` repeated 28 times + block_number (4 bytes LE)
+>
+> The `object_kind` field is the authoritative discriminator.
 
 ### 3.1 Payload discriminators (`work_item.payload`)
 
@@ -70,7 +93,7 @@ The service routes different payload types to different handlers using numeric t
 |--------------|-----|--------|------------------------|---------|
 | `Builder`    | `0x00` | `type_byte (1) + count (4 LE) + [witness_count (2 LE)]` | Builder-submitted txs  | `refine_payload_transactions()` |
 | `Transactions` | `0x01` | `type_byte (1) + count (4 LE) + [witness_count (2 LE)]` | Transaction execution + block metadata | `refine_payload_transactions()` |
-| `Blocks`     | `0x02` | `type_byte (1) + extrinsics_count (4 LE) + [witness_count (2 LE)]` | Genesis bootstrap (K commands only) | `refine_blocks_payload()` |
+| `Genesis`    | `0x02` | `type_byte (1) + extrinsics_count (4 LE) + [witness_count (2 LE)]` | Genesis bootstrap (K commands only) | `refine_genesis_payload()` |
 | `Call`       | `0x03` | `type_byte (1) + count (4 LE) + [witness_count (2 LE)]` | eth_call / eth_estimateGas | `refine_call_payload()` |
 
 **Format Notes**:
@@ -156,7 +179,7 @@ When `PayloadTransactions` includes block witnesses, the refiner automatically c
    **Witness Format** (serialized in extrinsic):
    ```
    object_id (32 bytes) +
-   object_ref (64 bytes) +
+   object_ref (37 bytes) +
    proof_hashes (32 bytes each, zero or more entries)
    ```
 
@@ -207,7 +230,7 @@ When `PayloadTransactions` includes block witnesses, the refiner automatically c
                ObjectKind::Receipt => {
                    // Receipt objects: Write ObjectRef + payload to storage
                    // Key: tx_hash (32 bytes)
-                   // Value: ObjectRef (64 bytes) + receipt_payload (variable)
+                   // Value: ObjectRef (37 bytes) + receipt_payload (variable)
                    let record = TransactionReceiptRecord::from_candidate(&candidate)?;
                    accumulate_receipt(&mut candidate, record)?;
 
@@ -282,11 +305,203 @@ See [MMR.md](MMR.md#logevent-proofs-via-mmr-receipt-hash-inclusion) for:
 3. Provide the DA payload inclusion proof (chunk index + erasure coding witness) alongside the state proof.
 4. Consumers recompute the log hash and check it against the `receipts_root` in the block object (when available).
 
-### 5.4 Contract Storage Proofs
+### 5.4 Contract Storage Proofs (Sharded Architecture)
 
-Contract storage follows the same pattern: storage shards and SSR metadata are entries in JAM State. Use `GetServiceStorageWithProof` with the shard key `[address || shard_prefix]` to obtain the BMT proof, and decode the shard locally.
+Contract storage uses a **two-level sharding architecture** for scalability:
 
-### 5.5 Bridging Beyond 28 Days
+**Layer 1: Per-Contract SSR (Sparse Split Registry)**
+- Each contract has an SSR that routes storage keys to shard IDs
+- SSR stored in JAM State with ObjectKind::SsrMetadata
+- ObjectID: `keccak256(service_id || address || 0xFF || "ssr")`
+- Contains routing metadata for up to 62 entries per shard
+
+**Layer 2: Storage Shards**
+- Storage keys grouped into shards (up to 62 key-value pairs per 4104-byte shard)
+- Each shard stored in DA, with ObjectRef in JAM State
+- ObjectID: `keccak256(service_id || address || 0xFF || ld || prefix56 || "shard")`
+- Shard splits automatically when reaching 34 entries (~55% capacity)
+
+**Proof Workflow**:
+1. **Fetch SSR**: `GetServiceStorageWithProof(EVMServiceID, ssr_object_id)`
+2. **Resolve shard**: Use SSR routing to determine which shard contains the key
+3. **Fetch shard ObjectRef**: `GetServiceStorageWithProof(EVMServiceID, shard_object_id)`
+4. **Fetch shard payload**: Use ObjectRef DA pointers (index_start, payload_length)
+5. **Extract value**: Decode shard payload and lookup key-value pair
+6. **Verify**: All steps use BMT proofs against `stateRoot`
+
+**Benefits**:
+- Bounded JAM State usage per contract (SSR + ObjectRefs)
+- Logarithmic proof size O(log N) for N storage slots
+- Automatic rebalancing via adaptive splitting
+- Conflict-free parallel execution (different shards = no conflicts)
+
+See [DA-STORAGE.md](DA-STORAGE.md) for complete sharding architecture details.
+
+### 5.5 Meta-Sharding Proofs (ObjectID→ObjectRef Lookups)
+
+For objects that don't use deterministic ObjectIDs, the **meta-sharding layer** provides ObjectID→ObjectRef mappings with a **two-level cryptographic proof chain**:
+
+**Architecture**:
+- **Global meta-SSR**: Routes ObjectIDs to meta-shard IDs (stored in JAM State)
+- **Meta-shards**: Contain ObjectRefEntry mappings (stored in DA, ObjectRef in JAM State)
+- **Capacity**: 58 entries per meta-shard (69-byte entries in 4104-byte segments)
+- **Split threshold**: 30 entries (~50% capacity)
+
+**ObjectRefEntry Format (69 bytes)**:
+```
+ObjectID (32 bytes) + ObjectRef (37 bytes)
+```
+
+**Meta-Shard Payload Format**:
+```
+shard_id (8 bytes LE) +
+merkle_root (32 bytes) +        // BMT root over entries for inclusion proofs
+entry_count (2 bytes LE) +
+[entries (69 bytes each)]
+```
+
+**Two-Level Proof Chain**:
+
+The witness system provides cryptographic guarantees through two complementary proofs:
+
+1. **JAM State Proof** (Level 1): Proves meta-shard exists in consensus state
+   - Verify `GetServiceStorageWithProof(serviceID, metaShardKey)` against `stateRoot`
+   - Authenticates meta-shard's ObjectRef (DA pointer to meta-shard payload)
+   - Uses JAM's Binary Merkle Trie (BMT) over state storage
+
+2. **Meta-Shard Membership Proof** (Level 2): Proves object is in meta-shard
+   - Deserialize meta-shard payload from DA
+   - Verify requested `ObjectID` exists in entries
+   - Compute BMT root over entries: `compute_bmt_root([(object_id, object_ref.serialize())])`
+   - Verify computed root matches `merkle_root` from payload header
+   - Ensures cryptographic binding between returned object and authenticated meta-shard
+
+**StateWitness Structure**:
+```go
+type StateWitness struct {
+    ServiceID   uint32      // EVM service ID
+    ObjectID    common.Hash // Requested object ID (NOT meta-shard key)
+    Ref         ObjectRef   // Object's DA pointer (from meta-shard entry)
+
+    // JAM State proof (Level 1)
+    Path        []common.Hash // BMT proof path
+    Value       []byte        // Meta-shard ObjectRef (what proof authenticates)
+
+    // Meta-shard membership proof (Level 2)
+    MetaShardMerkleRoot [32]byte    // BMT root from meta-shard payload
+    MetaShardPayload    []byte      // Complete meta-shard payload from DA
+
+    Payload     []byte // Actual object payload (fetched via Ref)
+}
+```
+
+**Verification Workflow** (Client-Side):
+
+1. **Verify JAM State Proof**:
+   ```
+  // Use meta-shard objectID as the trie key (NOT the child objectID)
+  proofKey = witness.ObjectID  // meta-shard's key in JAM State
+   VerifyBMTProof(stateRoot, proofKey, Value, Path)
+   ```
+   - Confirms meta-shard exists in consensus state
+   - Authenticates meta-shard's ObjectRef
+  - **Critical**: Proof is for the meta-shard objectID, not the child objectID
+
+2. **Verify Meta-Shard Membership (with header validation)**:
+   ```
+  entries = DeserializeMetaShard(MetaShardPayload, metaShardObjectID, serviceID)
+   // DeserializeMetaShard internally validates:
+  // assert(ComputeMetaShardObjectID(serviceID, entries.shard_id) == metaShardObjectID)
+   foundEntry = entries.find(e => e.object_id == ObjectID)
+   computedRoot = ComputeBMTRoot(entries)
+   assert(computedRoot == MetaShardMerkleRoot)
+   assert(foundEntry != null)
+   assert(foundEntry.object_ref == Ref)
+   ```
+   - Confirms object is actually in the meta-shard **and** that the payload matches the state entry
+   - Validates meta-shard header (ld/prefix) matches the authenticated meta-shard key
+   - Prevents fabricated payloads (untrusted refiner cannot forge BMT root or swap shard headers)
+
+**Meta-Shard ObjectID Computation**:
+```
+Rust:  keccak256(service_id || "meta_shard" || ld || prefix56)
+Go:    keccak256(service_id || "meta_shard" || ld || prefix56)
+
+Meta-SSR: keccak256(service_id || "meta_ssr")
+```
+
+The `"meta_shard"` domain separator ensures meta-shard ObjectIDs don't collide with other object types.
+
+**Proof Workflow** (Server-Side - `ReadObject`):
+
+Located in: `statedb/statedb_hostenv.go:302-533`
+
+1. **Probe-backwards lookup**:
+   - Fetch global depth hint from MetaSSR key
+   - Probe backwards from global depth to find meta-shard containing object
+   - Check cache (`GetWitnesses()`) for existing witness
+   - If cache miss, fetch meta-shard with proof and populate cache
+
+2. **Meta-shard processing**:
+   - Fetch meta-shard payload from DA using meta-shard ObjectRef
+   - Deserialize meta-shard and validate header against expected ObjectID
+   - Extract ObjectRef for requested objectID from meta-shard entries
+   - Generate BMT inclusion proof for objectID within meta-shard
+
+3. **Construct StateWitness** (returns `*StateWitness`):
+   ```go
+   witness := &types.StateWitness{
+       ServiceID:           serviceID,           // Service ID for verification
+       ObjectID:            objectID,            // Requested object
+       Ref:                 foundRef,            // Object's DA pointer
+       Path:                proofHashes,         // JAM State BMT proof
+       Value:               valueBytes,          // Meta-shard ObjectRef (proof authenticates this)
+      ObjectID:            metaShardObjectID,   // Meta-shard's JAM State key
+       MetaShardMerkleRoot: metaShard.MerkleRoot,// BMT root from meta-shard
+       MetaShardPayload:    metaShardPayload,    // Complete meta-shard for verification
+       ObjectRefs:          make(map[common.Hash]types.ObjectRef), // Additional refs
+       Payloads:            make(map[common.Hash][]byte),          // Cached payloads
+      ObjectProofs:        map[common.Hash][]common.Hash{objectID: inclusionProof}, // BMT proof for object in meta-shard
+   }
+   ```
+
+**Security Properties**:
+
+- **Consensus binding**: JAM State proof anchors meta-shard to `stateRoot`
+- **Payload integrity**: BMT merkle_root prevents payload fabrication
+- **Object authenticity**: Two-level proof chain ties returned object to consensus state
+  - ObjectID derivation is identical in Rust and Go: `keccak256(service_id_le || "meta_shard" || ld || prefix56)`
+- **Fail-closed**: Invalid proof at either level → verification fails
+
+**When to Use Meta-Sharding**:
+- Objects without deterministic ObjectIDs
+- Objects requiring version tracking
+- Objects needing conflict detection
+
+**When NOT to Use**:
+- Receipts (deterministic ObjectID = tx_hash)
+- Blocks (deterministic ObjectID = 0xFF...FF + block_number)
+- Code (deterministic ObjectID = keccak256(service_id || address || "code"))
+
+**Benefits**:
+- Scales to billions of ObjectRefs across all services
+- JAM State bounded at ~72MB for 1M meta-shards
+- Logarithmic proof size O(log N)
+- Conflict-free parallel execution
+- Cryptographically sound proofs (two-level verification)
+
+**Implementation**:
+- Rust: `services/evm/src/meta_sharding.rs:125-140` - BMT root computation
+- Rust: `services/evm/src/da.rs:196-608` - Meta-shard serialization
+- Go: `statedb/metashard_lookup.go` - Meta-shard routing and data structures
+- Go: `statedb/statedb_hostenv.go:302-533` - ReadObject with probe-backwards lookup
+- Go: `statedb/statedb_hostenv.go:535-539` - GetWitnesses cache access
+- Go: `statedb/hostfunctions.go:2333-2397` - BMT inclusion proof generation
+- Go: `types/statewitness.go:24-35` - StateWitness structure
+
+See [SHARDING.md](SHARDING.md) for complete meta-sharding architecture.
+
+### 5.6 Bridging Beyond 28 Days
 
 After DA garbage collection, bridges need archival helpers:
 
@@ -294,24 +509,39 @@ After DA garbage collection, bridges need archival helpers:
 - The `stateRoot` proof remains valid forever; only the DA payload fetch requires the short-lived window.
 - Bridging protocols should checkpoint proofs within 28 days or rely on archival peers who pin the payloads.
 
-## 6. Mapping Transactions to Blocks
+## 6. Mapping Transactions to Blocks (Updated January 2025)
 
-**Current Implementation**:
+**Current Implementation - Bidirectional Block Mappings**:
 
-1. **Read the ObjectRef** via `GetServiceStorageWithProof` using `tx_hash` as key.
-   - Storage value format: `ObjectRef (64 bytes) || receipt_payload (variable)`
-2. **Use the accumulate metadata** from ObjectRef:
-   - `object_kind` = `ObjectKind::Receipt` (0x03)
-   - `evm_block` = canonical Ethereum block number
-   - `tx_slot` = transaction index within block
-   - `timeslot` = JAM timeslot
-   - `gas_used` = gas consumed
-3. **Read block number index** from service storage:
-   - Key: `0xFF...FF` (28 × 0xFF + 4 bytes padding)
-   - Value: `block_number (4 LE) || parent_hash (32)`
-4. **Pending transactions** simply lack a committed `ObjectRef`; clients treat them as mempool entries.
+The accumulator maintains **bidirectional mappings** between block numbers and work package hashes (1 block = 1 envelope):
 
-**Future**: Once block payload construction is implemented (`PayloadType::Block`), the system will also store a pointer to the block object in DA.
+**Query by Block Number**:
+1. **Read blocknumber→wph mapping**:
+   - Key: `0xFF` repeated 28 times + block_number (4 bytes LE)
+   - Value: `work_package_hash (32 bytes) || timeslot (4 bytes LE)` = 36 bytes
+2. **Use work_package_hash** to fetch ExecutionEffectsEnvelope from DA
+3. Extract receipts, transactions, and metadata from envelope
+
+**Query by Work Package Hash**:
+1. **Read wph→blocknumber mapping**:
+   - Key: work_package_hash (32 bytes)
+   - Value: `blocknumber (4 bytes LE) || timeslot (4 bytes LE)` = 8 bytes
+2. **Use blocknumber** to fetch block data
+3. Timeslot provides temporal ordering
+
+**Receipt-to-Block Mapping**:
+- Receipts stored in **DA only** (not in JAM State)
+- Receipt ObjectID = `keccak256(RLP(signed_tx))` (transaction hash)
+- To find which block a receipt is in:
+  1. Extract work_package_hash from ObjectRef
+  2. Query wph→blocknumber mapping
+  3. Get block number and timeslot
+
+**Benefits**:
+- Minimal JAM State (44 bytes per block)
+- O(1) lookups in both directions
+- Timeslot included for temporal queries
+- Fail-fast accumulator (returns None if writes fail)
 
 ## 7. Block Payload Layout (Future)
 
@@ -451,11 +681,13 @@ Defense mechanisms:
 
 **Rust (services/utils/src/)**:
 - `effects.rs` - StateWitness deserialization and verification
-- `objects.rs` - ObjectRef structure (64 bytes)
+- `objects.rs` - ObjectRef structure (37 bytes)
 
 **Go (implementation reference)**:
 - `statedb/hostfunctions.go:1931-2017` - HostFetchWitness (builder path)
-- `statedb/hostfunctions.go:2019-2068` - GetBuilderWitnesses
+- `statedb/hostfunctions.go:2188-2284` - GetBuilderWitnesses with BMT proof generation
+- `statedb/statedb_hostenv.go:302-533` - ReadObject (witness generation with cache)
+- `statedb/statedb_hostenv.go:535-539` - GetWitnesses (cache access)
 - `node/node_da.go:379-405` - Witness serialization
 - `types/statewitness.go:317-341` - SerializeWitness
 

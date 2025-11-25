@@ -264,22 +264,22 @@ func ResolveShardID(ssr *SSRData, key common.Hash) ShardID {
 
 // ParseSSRPayloadForStorageKey parses the SSR payload (shard data) to find the value for a given storage key
 func ParseSSRPayloadForStorageKey(ssrPayload []byte, storageKey common.Hash) (common.Hash, error) {
-	// Parse SSR shard data format based on services/evm/src/sharding.rs
-	// Format: [2B count] + [entries: 32B key_h + 32B value] * count
+	// Parse SSR shard data format based on services/evm/src/da.rs:serialize_shard
+	// Format: [32B merkle_root] + [2B count] + [entries: 32B key_h + 32B value] * count
 
 	log.Debug(log.Node, "ParseSSRPayloadForStorageKey",
 		"payloadLen", len(ssrPayload),
 		"storageKey", common.Bytes2Hex(storageKey.Bytes()))
 
-	// Check minimum size (2 bytes for count)
-	if len(ssrPayload) < 2 {
+	// Check minimum size (32 bytes merkle root + 2 bytes count)
+	if len(ssrPayload) < 34 {
 		log.Warn(log.Node, "ParseSSRPayloadForStorageKey: Payload too small", "size", len(ssrPayload))
 		return common.Hash{}, nil // Return zero value
 	}
 
-	// Parse entry count (2 bytes little-endian)
-	entryCount := binary.LittleEndian.Uint16(ssrPayload[0:2])
-	expectedLen := 2 + (int(entryCount) * 64) // 2 + count * (32+32)
+	// Skip merkle root (32 bytes), parse entry count (2 bytes little-endian)
+	entryCount := binary.LittleEndian.Uint16(ssrPayload[32:34])
+	expectedLen := 34 + (int(entryCount) * 64) // 32 + 2 + count * (32+32)
 
 	if len(ssrPayload) < expectedLen {
 		log.Warn(log.Node, "ParseSSRPayloadForStorageKey: Payload truncated",
@@ -294,8 +294,8 @@ func ParseSSRPayloadForStorageKey(ssrPayload []byte, storageKey common.Hash) (co
 	// Bootstrap and effects.rs store this hash as key_h, not keccak256(key_h)
 	storageKeyHash := storageKey.Bytes()
 
-	// Search through entries
-	offset := 2
+	// Search through entries (starting after merkle_root + count)
+	offset := 34
 	for i := uint16(0); i < entryCount; i++ {
 		// Extract key hash (32 bytes) and value (32 bytes)
 		keyHash := ssrPayload[offset : offset+32]

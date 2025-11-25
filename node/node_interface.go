@@ -18,9 +18,7 @@ type JNode interface {
 	GetWorkReport(requestedHash common.Hash) (*types.WorkReport, error)
 	GetService(service uint32) (sa *types.ServiceAccount, ok bool, err error)
 	GetServiceStorage(serviceID uint32, storageKey []byte) ([]byte, bool, error)
-	ReadStateWitnessRef(serviceID uint32, objectID common.Hash, fetchPayloadFromDA bool) (types.StateWitness, bool, error)
-	ReadStateWitnessRaw(serviceID uint32, objectID common.Hash) (types.StateWitnessRaw, bool, common.Hash, error)
-	GetStateWitnesses(workReports []*types.WorkReport) ([]types.StateWitness, common.Hash, error)
+
 	GetRefineContext() (types.RefineContext, error)
 	BuildBundle(types.WorkPackage, []types.ExtrinsicsBlobs, uint16, []common.Hash) (*types.WorkPackageBundle, *types.WorkReport, error)
 
@@ -44,8 +42,8 @@ type JNode interface {
 	// Transaction Queries
 	GetTransactionReceipt(txHash common.Hash) (*evmtypes.EthereumTransactionReceipt, error)
 	GetTransactionByHash(txHash common.Hash) (*evmtypes.EthereumTransactionResponse, error)
-	GetTransactionByBlockHashAndIndex(blockHash common.Hash, index uint32) (*evmtypes.EthereumTransactionResponse, error)
-	GetTransactionByBlockNumberAndIndex(blockNumber string, index uint32) (*evmtypes.EthereumTransactionResponse, error)
+	GetTransactionByBlockHashAndIndex(serviceID uint32, blockHash common.Hash, index uint32) (*evmtypes.EthereumTransactionResponse, error)
+	GetTransactionByBlockNumberAndIndex(serviceID uint32, blockNumber string, index uint32) (*evmtypes.EthereumTransactionResponse, error)
 	GetLogs(fromBlock, toBlock uint32, addresses []common.Address, topics [][]common.Hash) ([]evmtypes.EthereumLog, error)
 
 	// Block Queries

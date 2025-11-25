@@ -99,8 +99,6 @@ const PRECOMPILES: &[(u8, &[u8], &str)] = &[
 ];
 
 
-
-
 #[polkavm_derive::polkavm_export]
 extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
     polkavm_sbrk(4096 * 4096);
@@ -109,15 +107,15 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
         return empty_output();
     };
 
-    // Fetch refine context state_root once for the entire function
-    let refine_state_root = match fetch_refine_context() {
+    // Fetch refine context once for the entire function
+    let refine_context = match fetch_refine_context() {
         Some(context) => {
             log_info( &format!("📍 Refine context state_root: {}", format_object_id(&context.state_root)));
-            context.state_root
+            context
         }
         None => {
             log_error( "Failed to fetch refine context");
-            [0u8; 32]
+            return empty_output();
         }
     };
 
@@ -141,7 +139,7 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
     log_info(&format!("📦 Refine: Fetched {} extrinsics", extrinsics.len()));
 
     // Process work item and execute transactions
-    let execution_effects = match BlockRefiner::from_work_item(refine_args.wi_index, &work_item, &extrinsics, refine_state_root, &refine_args) {
+    let execution_effects = match BlockRefiner::from_work_item(refine_args.wi_index, &work_item, &extrinsics, &refine_context, &refine_args) {
         Some(effects) => effects,
         None => {
             log_error("Refine: from_work_item failed");

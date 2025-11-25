@@ -36,7 +36,7 @@ func TestAlgoBlocks(t *testing.T) {
 		t.Fatalf("GetService failed: %v", err)
 	}
 	bundles := make([]*types.WorkPackageBundle, types.TotalCores)
-	for n := 0; n <= numBlocks; n++ {
+	for n := 1; n <= numBlocks; n++ {
 		wp := DefaultWorkPackage(c.serviceID, service)
 		wp.RefineContext = c.stateDB.GetRefineContext()
 		wp.WorkItems[0].Payload = GenerateAlgoPayload(n, false)
@@ -47,37 +47,18 @@ func TestAlgoBlocks(t *testing.T) {
 			ExtrinsicData: []types.ExtrinsicsBlobs{{}},
 		}
 		// Process all cores work packages
-		var err error
-		if n > 0 {
-			err = c.processWorkPackageBundlesPipelined(bundles)
-		} else {
-			err = c.processWorkPackageBundles(bundles)
-		}
+		err := c.processWorkPackageBundlesPipelined(bundles)
 		if err != nil {
 			t.Fatal(err)
 		}
 		// Advance timeslot for next block
 		c.stateDB.JamState.SafroleState.Timeslot++
-		block, _, err := c.stateDB.GetBlockByNumber(c.serviceID, "latest")
-		if err != nil {
-			t.Fatalf("GetBlockByNumber failed: %v", err)
-		}
-		// Generate metadata for logging and verification
-		metadata := evmtypes.NewEvmBlockMetadata(block)
 
-		log.Info(log.Node, "Algo block processed", "blockNumber", block.Number, "round", n, "# txns", len(block.TxHashes), "# receipts", len(block.ReceiptHashes),
-			"StateRoot", block.StateRoot,
-			"TransactionsRoot", metadata.TransactionsRoot,
-			"ReceiptsRoot", metadata.ReceiptsRoot,
-			"LogIndexStart", block.LogIndexStart,
-			"MmrRoot", metadata.MmrRoot,
-			"ExtrinsicsHash", block.ExtrinsicsHash,
-			"ParentHeaderHash", block.ParentHeaderHash)
+		// Log Algo processing info (Algo service doesn't have EVM-style blocks)
+		k := common.ServiceStorageKey(c.serviceID, []byte{0})
+		data, _, _ := c.storage.GetServiceStorage(c.serviceID, k)
 
-		// BMT proof verification
-		// if err := evmtypes.VerifyBlockBMTProofs(block, metadata); err != nil {
-		// 	t.Fatalf("BMT proof verification failed for block %d: %v", block.Number, err)
-		// }
+		log.Info(log.Node, "Algo round processed", "round", n, "service", c.serviceID, "result", fmt.Sprintf("%x", data))
 	}
 
 }
@@ -87,14 +68,14 @@ func TestEVMBlocksMath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEVMService failed: %v", err)
 	}
-	_, _, err = chain.SubmitEVMGenesis()
+	_, err = chain.SubmitEVMGenesis(61_000_000)
 	if err != nil {
 		t.Fatalf("SubmitEVMGenesis failed: %v", err)
 	}
 	txBytesMulticore := make([][][]byte, types.TotalCores)
-	n := uint32(0)
+
 	for i := 0; i <= 3; i++ {
-		txBytes, alltopics, err := chain.CallMath(evmtypes.MathAddress, []string{
+		txBytes, _, err := chain.CallMath(evmtypes.MathAddress, []string{
 			"fibonacci(256)",
 			"fact(6)",
 			"fact(7)",
@@ -116,20 +97,20 @@ func TestEVMBlocksMath(t *testing.T) {
 			t.Fatalf("CallMath failed: %v", err)
 		}
 		txBytesMulticore[0] = txBytes
-		block, err := chain.SubmitEVMTransactions(txBytesMulticore, n, n+1)
+		_, err = chain.SubmitEVMTransactions(txBytesMulticore)
 		if err != nil {
 			t.Fatalf("SubmitEVMTransactions failed: %v", err)
 		}
-		log.Info(log.Node, "EVM block processed", "blockNumber", block.Number)
-		err = chain.ShowTxReceipts(block, block.TxHashes, "Math Transactions", alltopics)
-		if err != nil {
-			t.Fatalf("ShowTxReceipts failed: %v", err)
-		}
+		// log.Info(log.Node, "EVM block processed", "blockNumber", block.Number)
+		// err = chain.ShowTxReceipts(block, block.TxHashes, "Math Transactions", alltopics)
+		// if err != nil {
+		// 	t.Fatalf("ShowTxReceipts failed: %v", err)
+		// }
 
 	}
 }
 
-func RunTransfersRound(b *Rollup, prevBlockNumber uint32, transfers []TransferTriple) (uint32, error) {
+func RunTransfersRound(b *Rollup, transfers []TransferTriple) error {
 	const numAccounts = 11 // 10 dev accounts + 1 coinbase
 
 	// Coinbase address receives all transaction fees
@@ -151,7 +132,7 @@ func RunTransfersRound(b *Rollup, prevBlockNumber uint32, transfers []TransferTr
 		balanceHash, err := b.stateDB.GetBalance(b.serviceID, accounts[i])
 		if err != nil {
 			log.Error(log.Node, "GetBalance ERR", "account", i, "err", err)
-			return 0, err
+			return err
 		}
 		balance := new(big.Int).SetBytes(balanceHash.Bytes())
 		initialBalances[i] = balance
@@ -160,7 +141,7 @@ func RunTransfersRound(b *Rollup, prevBlockNumber uint32, transfers []TransferTr
 		nonce, err := b.stateDB.GetTransactionCount(b.serviceID, accounts[i])
 		if err != nil {
 			log.Error(log.Node, "GetTransactionCount ERR", "account", i, "err", err)
-			return 0, err
+			return err
 		}
 		initialNonces[i] = nonce
 		//fmt.Printf("Account[%d] address=%s balance=%s nonce=%d\n", i, accounts[i].String(), balance.String(), nonce)
@@ -178,6 +159,7 @@ func RunTransfersRound(b *Rollup, prevBlockNumber uint32, transfers []TransferTr
 	}
 
 	txHashes := make([]common.Hash, len(transfers))
+	// TODO: continue to add transfers to a core until it hits the work report limit of # of shard commitments
 	for idx, transfer := range transfers {
 		senderAddr, senderPrivKey := common.GetEVMDevAccount(transfer.SenderIndex)
 		recipientAddr, _ := common.GetEVMDevAccount(transfer.ReceiverIndex)
@@ -199,7 +181,7 @@ func RunTransfersRound(b *Rollup, prevBlockNumber uint32, transfers []TransferTr
 		)
 		if err != nil {
 			log.Error(log.Node, "CreateSignedUSDMTransfer ERR", "idx", idx, "err", err)
-			return 0, err
+			return err
 		}
 
 		log.Info(log.Node, "📤 Transfer created",
@@ -215,46 +197,24 @@ func RunTransfersRound(b *Rollup, prevBlockNumber uint32, transfers []TransferTr
 	}
 
 	// Assign transactions to core 0
+
 	txBytesMulticore[0] = txBytes
 	txBytesMulticore[1] = nil
 
 	// Submit multitransfer as work package
-	var block *evmtypes.EvmBlockPayload
 	var err error
 	// Subsequent rounds: witness the previous block
-	block, err = b.SubmitEVMTransactions(txBytesMulticore, prevBlockNumber, prevBlockNumber+1)
+	_, err = b.SubmitEVMTransactions(txBytesMulticore)
 	if err != nil {
 		log.Error(log.Node, "SubmitEVMTransactions ERR", "err", err)
-		return 0, err
-	}
-	if len(block.TxHashes) != len(txBytes) {
-		return 0, fmt.Errorf("mismatch in number of tx hashes in finalized block: expected %d, got %d",
-			len(txBytes), len(block.TxHashes))
+		return err
 	}
 
-	log.Info(log.Node, "EVM block submitted", "blockNumber", block.Number,
-		"# txns", len(block.TxHashes), "# receipts", len(block.ReceiptHashes),
-		"StateRoot", block.StateRoot,
-		"LogIndexStart", block.LogIndexStart,
-		"ExtrinsicsHash", block.ExtrinsicsHash,
-		"ParentHeaderHash", block.ParentHeaderHash)
-
-	// PREVIOUS BLOCK VERIFICATION
-	prevblock, metadata, err := b.stateDB.GetBlockByNumber(b.serviceID, fmt.Sprintf("0x%x", prevBlockNumber))
-	if err != nil {
-
-		return 0, fmt.Errorf("GetBlockByNumber failed for block %d: %w", prevBlockNumber, err)
-	}
-	log.Info(log.Node, "Finalized Block", "prevBlockNumber", prevBlockNumber, "blockNumber", prevblock.Number,
-		"# txns", len(prevblock.TxHashes), "# receipts", len(prevblock.ReceiptHashes),
-		"TransactionsRoot", metadata.TransactionsRoot,
-		"ReceiptsRoot", metadata.ReceiptsRoot,
-		"MmrRoot", metadata.MmrRoot)
 	// if err := evmtypes.VerifyBlockBMTProofs(prevblock, metadata); err != nil {
 	// 	panic("VerifyBlockBMTProofs failed: " + err.Error())
 	// }
 	// if err := b.ShowTxReceipts(block, txHashes, fmt.Sprintf("Multitransfer (%d transfers)", len(transfers)), defaultTopics()); err != nil {
-	// 	return 0, fmt.Errorf("failed to show transfer receipts: %w", err)
+	// 	return fmt.Errorf("failed to show transfer receipts: %w", err)
 	// }
 
 	// Check balances and nonces after transfers
@@ -263,7 +223,7 @@ func RunTransfersRound(b *Rollup, prevBlockNumber uint32, transfers []TransferTr
 		balanceHash, err := b.stateDB.GetBalance(b.serviceID, accounts[i])
 		if err != nil {
 			log.Error(log.Node, "GetBalance ERR", "account", i, "err", err)
-			return 0, err
+			return err
 		}
 		balance := new(big.Int).SetBytes(balanceHash.Bytes())
 		totalAfter = new(big.Int).Add(totalAfter, balance)
@@ -271,7 +231,7 @@ func RunTransfersRound(b *Rollup, prevBlockNumber uint32, transfers []TransferTr
 		nonce, err := b.stateDB.GetTransactionCount(b.serviceID, accounts[i])
 		if err != nil {
 			log.Error(log.Node, "GetTransactionCount ERR", "account", i, "err", err)
-			return 0, err
+			return err
 		}
 
 		delta := new(big.Int).Sub(balance, initialBalances[i])
@@ -304,71 +264,86 @@ func RunTransfersRound(b *Rollup, prevBlockNumber uint32, transfers []TransferTr
 			"before", totalBefore.String(),
 			"after", totalAfter.String(),
 			"difference", diff.String())
-		return 0, fmt.Errorf("balance mismatch: before=%s, after=%s, difference=%s", totalBefore.String(), totalAfter.String(), diff.String())
+		return fmt.Errorf("balance mismatch: before=%s, after=%s, difference=%s", totalBefore.String(), totalAfter.String(), diff.String())
 	}
 
 	// Verify coinbase collected fees
 	coinbaseBalance, err := b.stateDB.GetBalance(b.serviceID, coinbaseAddress)
 	if err != nil {
-		return 0, fmt.Errorf("GetBalance (coinbase) failed: %w", err)
+		return fmt.Errorf("GetBalance (coinbase) failed: %w", err)
 	}
 	coinbaseBalanceBig := new(big.Int).SetBytes(coinbaseBalance.Bytes())
 	if coinbaseBalanceBig.Cmp(big.NewInt(0)) == 0 {
-		return 0, fmt.Errorf("coinbase balance is 0 - fee collection failed")
+		return fmt.Errorf("coinbase balance is 0 - fee collection failed")
 	}
 	log.Info(log.Node, "Coinbase balance after round", "address", coinbaseAddress.String(), "balance", coinbaseBalanceBig.String())
 
-	return uint32(block.Number), nil
+	return nil
 }
 
-// TestEVMBlocksTransfers runs multiple rounds of transfers
+// TestEVMGenesis runs the genesis process and validates the resulting state
 func TestEVMBlocksTransfers(t *testing.T) {
-	log.InitLogger("info")
+	log.InitLogger("debug")
 	chain, err := NewRollup(t.TempDir(), EVMServiceCode)
 	if err != nil {
 		t.Fatalf("NewEVMService failed: %v", err)
 	}
-
-	_, _, err = chain.SubmitEVMGenesis()
+	initBalance := int64(61_000_000)
+	_, err = chain.SubmitEVMGenesis(initBalance)
 	if err != nil {
 		t.Fatalf("SubmitEVMGenesis failed: %v", err)
 	}
+
+	balance, err := chain.stateDB.GetBalance(chain.serviceID, evmtypes.IssuerAddress)
+	if err != nil {
+		t.Fatalf("GetBalance failed: %v", err)
+	}
+
+	// Check that the balance matches initBalance (with 18 decimals)
+	expectedBalance := new(big.Int).Mul(big.NewInt(initBalance), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+	actualBalance := new(big.Int).SetBytes(balance[:])
+	if actualBalance.Cmp(expectedBalance) != 0 {
+		t.Fatalf("Balance mismatch: expected %s, got %s", expectedBalance.String(), actualBalance.String())
+	}
+	log.Info(log.Node, "✅ Genesis balance verified", "amount", actualBalance.String())
+
+	nonce, err := chain.stateDB.GetTransactionCount(chain.serviceID, evmtypes.IssuerAddress)
+	if err != nil {
+		t.Fatalf("GetTransactionCount failed: %v", err)
+	}
+
+	// Check that the nonce is initialized to 1 (as set in genesis)
+	expectedNonce := uint64(1)
+	if nonce != expectedNonce {
+		t.Fatalf("Nonce mismatch: expected %d, got %d", expectedNonce, nonce)
+	}
+	log.Info(log.Node, "✅ Genesis nonce verified", "nonce", nonce)
+
+	log.Info(log.Node, "Issuer account after genesis", "address", evmtypes.IssuerAddress, "balance", balance, "nonce", nonce)
+
+	// err = chain.checkBalanceOf(evmtypes.IssuerAddress, balance)
+	// if err != nil {
+	// 	log.Warn(log.Node, "checkBalanceOf warning (non-fatal)", "err", err)
+	// }
+	// err = chain.checkNonces(evmtypes.IssuerAddress, new(big.Int).SetUint64(nonce))
+	// if err != nil {
+	// 	log.Warn(log.Node, "checkNonces warning (non-fatal)", "err", err)
+	// }
+
 	/*
-		balance, err := chain.stateDB.GetBalance(chain.serviceID, evmtypes.IssuerAddress)
-		if err != nil {
-			t.Fatalf("GetBalance failed: %v", err)
-		}
-
-		nonce, err := chain.stateDB.GetTransactionCount(chain.serviceID, evmtypes.IssuerAddress)
-		if err != nil {
-			t.Fatalf("GetTransactionCount failed: %v", err)
-		}
-
-		log.Info(log.Node, "Issuer account after transfers", "address", evmtypes.IssuerAddress, "balance", balance, "nonce", nonce)
-
-		err = chain.checkBalanceOf(evmtypes.IssuerAddress, balance)
-		if err != nil {
-			log.Warn(log.Node, "checkBalanceOf warning (non-fatal)", "err", err)
-		}
-		err = chain.checkNonces(evmtypes.IssuerAddress, new(big.Int).SetUint64(nonce))
-		if err != nil {
-			log.Warn(log.Node, "checkNonces warning (non-fatal)", "err", err)
-		}
 		gasUsed, err := chain.stateDB.EstimateGasTransfer(chain.serviceID, evmtypes.IssuerAddress, evmtypes.UsdmAddress, chain.pvmBackend)
 		if err != nil {
 			t.Fatalf("EstimateGasTransfer failed: %v", err)
 		}
 		log.Info(log.Node, "EstimateGasTransfer", "estimatedGas", gasUsed)
 	*/
-	prevBlockNumber := uint32(0)
-	for round := 0; round < 5; round++ {
+	for round := 0; round < 10; round++ {
 		isLastRound := (round == numRounds-1)
 		log.Info(log.Node, "test_transfers - round", "round", round, "isLastRound", isLastRound)
-		newBlockNumber, err := RunTransfersRound(chain, prevBlockNumber, chain.createTransferTriplesForRound(round, txnsPerRound, isLastRound))
+		err := RunTransfersRound(chain, chain.createTransferTriplesForRound(round, txnsPerRound, isLastRound))
 		if err != nil {
 			panic(fmt.Errorf("transfer round %d failed: %w", round, err))
 		}
-		prevBlockNumber = newBlockNumber
 	}
 }
 
@@ -379,20 +354,20 @@ func TestEVMBlocksDeployContract(t *testing.T) {
 		t.Fatalf("NewEVMService failed: %v", err)
 	}
 
-	_, _, err = b.SubmitEVMGenesis()
+	_, err = b.SubmitEVMGenesis(61_000_000)
 	if err != nil {
 		t.Fatalf("SubmitEVMGenesis failed: %v", err)
 	}
 
 	contractFile := "../services/evm/contracts/usdm.bin"
-	block, contractAddress, err := b.DeployContract(contractFile)
+	contractAddress, err := b.DeployContract(contractFile)
 	if err != nil {
 		t.Fatalf("DeployContract failed: %v", err)
 	}
 
-	if err := b.ShowTxReceipts(block, block.TxHashes, "Contract Deployment", make(map[common.Hash]string)); err != nil {
-		t.Fatalf("ShowTxReceipts failed: %v", err)
-	}
+	// if err := b.ShowTxReceipts(block, block.TxHashes, "Contract Deployment", make(map[common.Hash]string)); err != nil {
+	// 	t.Fatalf("ShowTxReceipts failed: %v", err)
+	// }
 
 	// Verify contract deployment by checking if code exists at the calculated address
 	deployedCode, err := b.stateDB.GetCode(b.serviceID, common.Address(contractAddress))

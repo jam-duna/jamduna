@@ -34,7 +34,7 @@ use alloc::format;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
-use utils::functions::{log_crit, log_info};
+use utils::functions::{log_crit, log_debug, log_info};
 
 // ===== Error Types =====
 
@@ -42,7 +42,7 @@ use utils::functions::{log_crit, log_info};
 pub enum SerializeError {
     InvalidSize,
     InvalidFormat,
-    InvalidDepth,
+    InvalidObjectRef,
 }
 
 // ===== SSR Entry Trait =====
@@ -164,24 +164,23 @@ impl Ord for ShardId {
 }
 
 impl ShardId {
-    /// Create root shard (depth 0, all zeros)
-    pub fn root() -> Self {
-        Self {
-            ld: 0,
-            prefix56: [0u8; 7],
-        }
-    }
-
-    /// Encode ShardId as u32 for routing (top 20 bits for meta-sharding)
+    /// Encode ShardId as u32 for compact routing (top 20 bits)
+    ///
+    /// Used in tests for ShardId serialization roundtrip validation.
+    /// Format: [8 bits ld][12 bits from prefix56[0..2]]
+    #[cfg(test)]
     pub fn to_u32(&self) -> u32 {
-        // Use first 20 bits: 8 bits from ld + 12 bits from prefix56[0..2]
         let b0 = self.ld as u32;
         let b1 = self.prefix56[0] as u32;
         let b2 = (self.prefix56[1] >> 4) as u32; // Top 4 bits of second byte
         (b0 << 12) | (b1 << 4) | b2
     }
 
-    /// Decode ShardId from u32 routing key
+    /// Decode ShardId from u32 routing key (top 20 bits)
+    ///
+    /// Used in tests for ShardId serialization roundtrip validation.
+    /// Reconstructs ld and first 12 bits of prefix56.
+    #[cfg(test)]
     pub fn from_u32(val: u32) -> Self {
         let ld = ((val >> 12) & 0xFF) as u8;
         let mut prefix56 = [0u8; 7];
@@ -194,16 +193,11 @@ impl ShardId {
 /// Shard Data - sorted entries of type E
 #[derive(Clone)]
 pub struct ShardData<E: SSREntry> {
-    pub entries: Vec<E>, // Sorted by key_hash
+    pub merkle_root: [u8; 32], // BMT root over entries for inclusion proofs
+    pub entries: Vec<E>,        // Sorted by key_hash
 }
 
-impl<E: SSREntry> ShardData<E> {
-    pub fn new() -> Self {
-        Self {
-            entries: Vec::new(),
-        }
-    }
-}
+
 
 // ===== Prefix Manipulation Utilities =====
 
@@ -237,7 +231,7 @@ fn matches_prefix(key_prefix: [u8; 7], entry_prefix: [u8; 7], bits: u8) -> bool 
 }
 
 /// Mask prefix to first 'bits' bits, zero out the rest
-fn mask_prefix56(prefix: [u8; 7], bits: u8) -> [u8; 7] {
+pub fn mask_prefix56(prefix: [u8; 7], bits: u8) -> [u8; 7] {
     if bits > 56 {
         // Clamp to 56 bits max
         return prefix;
@@ -350,9 +344,11 @@ fn split_once<E: SSREntry>(
     }
 
     let left_shard = ShardData {
+        merkle_root: [0u8; 32], // Will be computed by caller (type-specific BMT)
         entries: left_entries,
     };
     let right_shard = ShardData {
+        merkle_root: [0u8; 32], // Will be computed by caller (type-specific BMT)
         entries: right_entries,
     };
 
@@ -569,41 +565,71 @@ pub fn serialize_shard<E: SSREntry>(shard: &ShardData<E>, max_entries: usize) ->
 
     let mut result = Vec::new();
 
+    // Merkle root (32 bytes)
+    result.extend_from_slice(&shard.merkle_root);
+
     // Entry count (2 bytes)
     let count = shard.entries.len() as u16;
-    result.extend_from_slice(&count.to_le_bytes());
+    let count_bytes = count.to_le_bytes();
+    result.extend_from_slice(&count_bytes);
+
+    log_info(&format!(
+        "📦 serialize_shard: count={}, entry_size={}, count_bytes=[{:02x} {:02x}]",
+        count,
+        E::serialized_size(),
+        count_bytes[0],
+        count_bytes[1]
+    ));
 
     // Entries (E::serialized_size() bytes each)
-    for entry in &shard.entries {
-        result.extend_from_slice(&entry.serialize());
+    for (i, entry) in shard.entries.iter().enumerate() {
+        let serialized = entry.serialize();
+        log_debug(&format!(
+            "  Entry {}: {} bytes, serialized=[{:02x?}]",
+            i,
+            serialized.len(),
+            &serialized[..128.min(serialized.len())]
+        ));
+        result.extend_from_slice(&serialized);
     }
+
+    log_info(&format!(
+        "📦 serialize_shard: total_size={} (32 merkle + 2 count + {}*{} entries)",
+        result.len(),
+        count,
+        E::serialized_size()
+    ));
 
     result
 }
 
 /// Deserialize shard data from DA format
 pub fn deserialize_shard<E: SSREntry>(data: &[u8]) -> Result<ShardData<E>, SerializeError> {
-    if data.len() < 2 {
+    if data.len() < 34 {  // 32 (merkle_root) + 2 (count)
         return Err(SerializeError::InvalidSize);
     }
 
-    let count = u16::from_le_bytes([data[0], data[1]]) as usize;
+    // Parse merkle_root (32 bytes)
+    let mut merkle_root = [0u8; 32];
+    merkle_root.copy_from_slice(&data[0..32]);
+
+    let count = u16::from_le_bytes([data[32], data[33]]) as usize;
     let entry_size = E::serialized_size();
-    let expected_len = 2 + (count * entry_size);
+    let expected_len = 34 + (count * entry_size);
 
     if data.len() < expected_len {
         return Err(SerializeError::InvalidSize);
     }
 
     let mut entries = Vec::new();
-    let mut offset = 2;
+    let mut offset = 34;
     for _ in 0..count {
         let entry = E::deserialize(&data[offset..offset + entry_size])?;
         entries.push(entry);
         offset += entry_size;
     }
 
-    Ok(ShardData { entries })
+    Ok(ShardData { merkle_root, entries })
 }
 
 #[cfg(test)]
