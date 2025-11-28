@@ -1,6 +1,8 @@
 package grandpa
 
 import (
+	"encoding/binary"
+	"math/big"
 	"math/rand"
 	"sync"
 
@@ -28,6 +30,23 @@ func (m *MockGrandpaNode) FinalizedBlockHeader(headerHash common.Hash) {
 func (m *MockGrandpaNode) FinalizedEpoch(epoch uint32, beefyHash common.Hash, aggregatedSignature bls.Signature) {
 	// For testing purposes, we can just log the finalized epoch
 	log.Info("G", "Mock node finalized epoch", "epoch", epoch, "beefyHash", beefyHash.Hex())
+}
+
+func (m *MockGrandpaNode) ReadContractStorageValue(serviceID uint32, contractAddress common.Address, storageKey common.Hash) (common.Hash, error) {
+	// For testing purposes, return hardcoded staking balances of 100 USDM for all validators
+	// This is only used in unit tests, not in production with real JAM DA
+	stakingBalance := new(big.Int).Mul(big.NewInt(100), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+	stakingBalanceBytes := stakingBalance.FillBytes(make([]byte, 32))
+	return common.BytesToHash(stakingBalanceBytes), nil
+}
+
+func (m *MockGrandpaNode) GetServiceStorage(serviceID uint32, key []byte) ([]byte, bool, error) {
+	// For testing purposes, return hardcoded staking balance of 100 for all validators
+	// This is only used in unit tests, not in production
+	stakingBalance := uint64(100)
+	stakingBalanceBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(stakingBalanceBytes, stakingBalance)
+	return stakingBalanceBytes, true, nil
 }
 
 func (m *MockGrandpaNode) Broadcast(msg interface{}, evID ...uint64) {

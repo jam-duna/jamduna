@@ -341,18 +341,16 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	// log.EnableModule(log.PvmAuthoring)
 	log.EnableModule(log.GeneralAuthoring)
 
-	bootstrapCode, err := types.ReadCodeWithMetadata(statedb.BootstrapServiceFile, "bootstrap")
-	if err != nil {
-		log.Error(log.Node, "ReadCodeWithMetadata", "err", err)
-		return
-	}
-	bootstrapService := uint32(statedb.BootstrapServiceCode)
-	bootstrapCodeHash := common.Blake2Hash(bootstrapCode)
-
 	testServices, err := getServices(serviceNames, true)
 	if err != nil {
 		t.Fatalf("GetServices %v", err)
 	}
+	evmCode, err := types.ReadCodeWithMetadata(statedb.EVMServiceFile, "evm")
+	if err != nil {
+		log.Error(log.Node, "ReadCodeWithMetadata", "err", err)
+		return
+	}
+	evmCodeHash := common.Blake2Hash(evmCode)
 
 	log.Info(log.Node, "Waiting for the first block to be ready...")
 	isReady := false
@@ -390,8 +388,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 			service.ServiceCode = statedb.EVMServiceCode
 		}
 		workItem := types.WorkItem{
-			Service:            bootstrapService,
-			CodeHash:           bootstrapCodeHash,
+			Service:            statedb.EVMServiceCode,
+			CodeHash:           evmCodeHash,
 			Payload:            append(service.CodeHash.Bytes(), binary.LittleEndian.AppendUint32(nil, uint32(len(service.Code)))...),
 			RefineGasLimit:     DefaultRefineGasLimit,
 			AccumulateGasLimit: DefaultAccumulateGasLimit,
@@ -409,7 +407,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		// set up service using the Bootstrap service
 		codeWorkPackage := types.WorkPackage{
 			AuthorizationToken:    []byte(""),
-			AuthCodeHost:          bootstrapService,
+			AuthCodeHost:          statedb.EVMServiceCode,
 			AuthorizationCodeHash: getBootstrapAuthCodeHash(),
 			ConfigurationBlob:     []byte{},
 			WorkItems:             bootstrap_workItems,
@@ -430,7 +428,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		serviceIDList := make([]uint32, len(serviceList))
 		for workItemIdx, serverName := range serviceList {
 			workItemKey, _ := types.Encode(uint32(workItemIdx))
-			k := common.ServiceStorageKey(bootstrapService, workItemKey)
+			k := common.ServiceStorageKey(statedb.EVMServiceCode, workItemKey)
 			k_service_account_byte, ok, err := bNode.GetServiceStorage(0, k)
 			if err != nil {
 				t.Fatalf("SendWorkPackageSubmission ERR %v", err)

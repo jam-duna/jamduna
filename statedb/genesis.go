@@ -79,16 +79,16 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 	j.SafroleState.TicketsOrKeys.Keys, _ = j.SafroleState.ChooseFallBackValidator()
 	j.DisputesState = DisputeState{}
 
-	// Setup Bootstrap Service for all 3 privileges
+	// Setup EVM Service for all 3 privileges
 	authQueueServiceID := [types.TotalCores]uint32{}
 	for i := 0; i < types.TotalCores; i++ {
 		authQueueServiceID[i] = AuthCopyServiceCode
 	}
 	j.PrivilegedServiceIndices.AuthQueueServiceID = authQueueServiceID
-	j.PrivilegedServiceIndices.UpcomingValidatorsServiceID = BootstrapServiceCode
-	j.PrivilegedServiceIndices.ManagerServiceID = BootstrapServiceCode
+	j.PrivilegedServiceIndices.UpcomingValidatorsServiceID = EVMServiceCode // 0 - EVM service can call designate()
+	j.PrivilegedServiceIndices.ManagerServiceID = EVMServiceCode
 	// 0.7.1 introduces RegistrarServiceID
-	j.PrivilegedServiceIndices.RegistrarServiceID = BootstrapServiceCode
+	j.PrivilegedServiceIndices.RegistrarServiceID = EVMServiceCode
 	for i := 0; i < types.TotalCores; i++ {
 		j.AuthorizationsPool[i] = make([]common.Hash, types.MaxAuthorizationPoolItems)
 		var temp [types.MaxAuthorizationQueueItems]common.Hash
@@ -109,23 +109,33 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 	// SubmitGenesisWorkPackage uses ReadStateWitness must submit extrinsics that match these storage entries
 	storage[evmtypes.GetBlockNumberKey()] = evmtypes.SerializeBlockNumber(0)
 
+	// Initialize staking balances for genesis validators in Bootstrap service (service 0)
+	// Key: Ed25519 public key (32 bytes)
+	// Value: Staking balance (uint64, little-endian, 8 bytes)
+	// Balances: 100, 200, 300, 400, 500, 600
+	for i := 0; i < types.TotalValidators; i++ {
+		ed25519Key := validators[i].Ed25519
+		stakingBalance := uint64((i + 1) * 100) // 100, 200, 300, 400, 500, 600
+		stakingBalanceBytes := make([]byte, 8)
+		binary.LittleEndian.PutUint64(stakingBalanceBytes, stakingBalance)
+
+		// Use Ed25519 key as storage key
+		storageKey := common.BytesToHash(ed25519Key[:])
+		storage[storageKey] = stakingBalanceBytes
+	}
+
 	// Load services into genesis state
 	services := []types.TestService{
 		{
-			ServiceCode: BootstrapServiceCode,
-			FileName:    BootstrapServiceFile,
-			ServiceName: "bootstrap",
+			ServiceCode: EVMServiceCode,
+			FileName:    EVMServiceFile,
+			ServiceName: "evm",
+			Storage:     storage,
 		},
 		{
 			ServiceCode: AlgoServiceCode,
 			FileName:    AlgoServiceFile,
 			ServiceName: "algo",
-			Storage:     storage,
-		},
-		{
-			ServiceCode: EVMServiceCode,
-			FileName:    EVMServiceFile,
-			ServiceName: "evm",
 			Storage:     storage,
 		},
 		{
@@ -165,14 +175,18 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 		codeHash := common.Blake2Hash(code)
 		codeLen := uint32(len(code)) // z
 		bootStrapAnchor := []uint32{0}
-		if service.ServiceCode == BootstrapServiceCode {
+		if service.ServiceCode == EVMServiceCode {
+			// Calculate storage size including staking balances
+			// Each staking entry: 32 bytes (key) + 8 bytes (value) = 40 bytes
+			stakingStorageSize := uint64(len(service.Storage) * (32 + 8))
+
 			bootstrapServiceAccount := types.ServiceAccount{
 				CodeHash:        codeHash,
 				Balance:         balance,
 				GasLimitG:       100,
 				GasLimitM:       100,
-				StorageSize:     uint64(81*2 + codeLen + auth_code_len), // a_l = ∑ 81+z per (h,z) + ∑ 32+s https://graypaper.fluffylabs.dev/#/5f542d7/116e01116e01
-				NumStorageItems: 2*2 + 0,                                //a_i = 2⋅∣al∣+∣as∣
+				StorageSize:     uint64(81*2+codeLen+auth_code_len) + stakingStorageSize, // a_l = ∑ 81+z per (h,z) + ∑ 32+s https://graypaper.fluffylabs.dev/#/5f542d7/116e01116e01
+				NumStorageItems: 2*2 + uint32(len(service.Storage)),                      //a_i = 2⋅∣al∣+∣as∣
 			}
 
 			statedb.WriteServicePreimageBlob(service.ServiceCode, code)
@@ -181,8 +195,14 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 			statedb.WriteServicePreimageBlob(service.ServiceCode, auth_code_encoded_bytes)
 			statedb.WriteServicePreimageLookup(service.ServiceCode, auth_code_hash, auth_code_len, bootStrapAnchor)
 
+			// Write staking balances to Bootstrap service storage
+			for k, v := range service.Storage {
+				statedb.WriteServiceStorage(service.ServiceCode, k.Bytes(), v)
+			}
+
 			statedb.writeService(service.ServiceCode, &bootstrapServiceAccount)
-			fmt.Printf("Bootstrap Service %s (fn:%s), codeHash %s, codeLen=%d, anchor %v\n", service.ServiceName, service.FileName, codeHash.String(), codeLen, bootStrapAnchor)
+			fmt.Printf("Bootstrap Service %s (fn:%s), codeHash %s, codeLen=%d, anchor %v, staking entries=%d\n",
+				service.ServiceName, service.FileName, codeHash.String(), codeLen, bootStrapAnchor, len(service.Storage))
 		} else {
 			sa := types.ServiceAccount{
 				CodeHash:        codeHash,

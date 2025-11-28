@@ -2,7 +2,7 @@
 # Compiles Solidity contracts to binary format
 
 SOLC = solc
-SOLC_FLAGS = --bin --abi --optimize --overwrite
+SOLC_FLAGS = --bin --abi --optimize --overwrite --via-ir
 
 # Default target
 .PHONY: all

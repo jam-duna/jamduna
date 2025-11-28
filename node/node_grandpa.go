@@ -90,3 +90,15 @@ func (n *Node) FinalizedEpoch(epoch uint32, beefyHash common.Hash, aggregatedSig
 
 	n.Broadcast(epochFinalized)
 }
+
+// ReadContractStorageValue implements the Broadcaster interface for reading EVM contract storage from JAM DA
+func (n *Node) ReadContractStorageValue(serviceID uint32, contractAddress common.Address, storageKey common.Hash) (common.Hash, error) {
+	n.statedbMutex.Lock()
+	defer n.statedbMutex.Unlock()
+
+	if n.statedb == nil {
+		return common.Hash{}, fmt.Errorf("statedb is nil")
+	}
+
+	return n.statedb.ReadContractStorageValue(serviceID, contractAddress, storageKey)
+}

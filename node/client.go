@@ -3,7 +3,6 @@ package node
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -738,103 +737,6 @@ func (c *NodeClient) GetWorkReport(requestedHash common.Hash) (wr *types.WorkRep
 		return nil, fmt.Errorf("failed to unmarshal work report: %w", err)
 	}
 	return &workReport, nil
-}
-
-func (c *NodeClient) NewService(refineContext types.RefineContext, serviceName string, serviceCode []byte, serviceIDs []uint32) (newServiceIdx uint32, err error) {
-	serviceCodeHash := common.Blake2Hash(serviceCode)
-	fmt.Printf("**** NewService: serviceCodeHash: %s\n", serviceCodeHash.Hex())
-	bootstrapCode, err := types.ReadCodeWithMetadata(statedb.BootstrapServiceFile, "bootstrap")
-	if err != nil {
-		log.Error(log.Node, "NewService: ReadCodeWithMetadata", "err", err)
-		return
-	}
-	bootstrapCodeHash := common.Blake2Hash(bootstrapCode)
-	log.Info(log.Node, "NewService: ReadCodeWithMetadata")
-	bootstrapService := uint32(statedb.BootstrapServiceCode)
-
-	// Use the shared lazy-initialized bootstrap auth code hash
-	bootstrap_auth_codehash := getBootstrapAuthCodeHash()
-
-	codeWP := types.WorkPackage{
-		AuthorizationToken:    []byte(""),
-		AuthCodeHost:          bootstrapService,
-		AuthorizationCodeHash: bootstrap_auth_codehash,
-		ConfigurationBlob:     []byte{},
-		RefineContext:         refineContext,
-		WorkItems: []types.WorkItem{{
-			Service:            bootstrapService,
-			CodeHash:           bootstrapCodeHash,
-			Payload:            append(serviceCodeHash.Bytes(), binary.LittleEndian.AppendUint32(nil, uint32(len(serviceCode)))...),
-			RefineGasLimit:     1000,
-			AccumulateGasLimit: 1000,
-			ImportedSegments:   nil,
-			ExportCount:        0,
-		}},
-	}
-
-	var wpr types.WorkPackageBundle
-	wpr.WorkPackage = codeWP
-	wpr.ExtrinsicData = []types.ExtrinsicsBlobs{}
-	wpHash := codeWP.Hash()
-	log.Info(log.Node, "NewService: Submitting WP", "wph", wpHash)
-
-	// submits wp
-	ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
-	defer cancel()
-	_, err = c.SubmitAndWaitForWorkPackageBundle(ctx, &wpr)
-	if err != nil {
-		log.Error(log.Node, "SubmitWorkPackage", "err", err)
-		return
-	}
-
-	storageKey := common.ServiceStorageKey(0, []byte{0, 0, 0, 0})
-	value, _, err := c.GetServiceStorage(0, storageKey)
-	if err != nil {
-		log.Error(log.Node, "GetServiceStorage", "err", err)
-		return
-	}
-	newServiceIdx = uint32(types.DecodeE_l(value))
-
-	// submits preimage of service code
-	ctx, cancel = context.WithTimeout(context.Background(), RefineTimeout)
-	defer cancel()
-	if err = c.SubmitAndWaitForPreimage(ctx, newServiceIdx, serviceCode); err != nil {
-		log.Error(log.Node, "SubmitAndWaitForPreimage", "err", err)
-		return
-	}
-
-	log.Info(log.Node, "----- NewService", "name", serviceName, "serviceID", newServiceIdx)
-	return
-}
-
-func (c *NodeClient) LoadServices(services []string) (new_service_map map[string]types.ServiceInfo, err error) {
-	new_service_map = make(map[string]types.ServiceInfo)
-	serviceIDs := make([]uint32, 0)
-	for _, service_name := range services {
-		refineContext, err := c.GetRefineContext()
-		if err != nil {
-			log.Error(log.Node, "LoadServices: GetRefineContext", "service_name", service_name, "err", err)
-			return new_service_map, err
-		}
-		service_path := fmt.Sprintf("/services/%s.pvm", service_name)
-		serviceCode, err := types.ReadCodeWithMetadata(service_path, service_name)
-		if err != nil {
-			log.Error(log.Node, "LoadServices: ReadCodeWithMetadata", "service_name", service_name, "err", err)
-			return nil, err
-		}
-		codeHash := common.Blake2Hash(serviceCode)
-		new_serviceIdx, err := c.NewService(refineContext, service_name, serviceCode, serviceIDs)
-		if err != nil {
-			log.Error(log.Node, "LoadServices: NewService", "service_name", service_name, "err", err)
-			return nil, err
-		}
-		new_service_map[service_name] = types.ServiceInfo{
-			ServiceIndex:    new_serviceIdx,
-			ServiceCodeHash: codeHash,
-		}
-		serviceIDs = append(serviceIDs, new_serviceIdx)
-	}
-	return new_service_map, nil
 }
 
 // SERVICE STORAGE

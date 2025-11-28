@@ -26,7 +26,6 @@ func TestClient(t *testing.T) {
 	}
 	fmt.Printf("Connected to %s\n", wsUrl)
 
-	client.LoadServices([]string{"fib"})
 	for {
 		time.Sleep(100 * time.Millisecond)
 	}

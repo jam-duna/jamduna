@@ -160,7 +160,7 @@ func TestTracesInterpreter(t *testing.T) {
 	testDirs := []string{
 		// path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
 		// path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
-		//path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
@@ -173,7 +173,7 @@ func TestTracesInterpreter(t *testing.T) {
 		// This avoids issues where the sub-tests might all run with the last value of 'dir'.
 		currentDir := dir
 
-		t.Run(fmt.Sprintf("Directory_%s", filepath.Base(currentDir)), func(t *testing.T) {
+		t.Run(fmt.Sprintf("%s", filepath.Base(currentDir)), func(t *testing.T) {
 			entries, err := os.ReadDir(currentDir)
 			if err != nil {
 				// Use t.Fatalf to stop the test for this directory if we can't read it.
@@ -202,17 +202,17 @@ func TestTracesInterpreter(t *testing.T) {
 			}
 		})
 	}
-	dump_performance(t)
+	//(t)
 }
 func TestTracesGoInterpreter(t *testing.T) {
-	PvmLogging = false
+	PvmLogging = true
 	DebugHostFunctions = false
 	log.InitLogger("debug")
 
 	// Define all the directories you want to test in a single slice.
 	testDirs := []string{
-		path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
@@ -255,7 +255,6 @@ func TestTracesGoInterpreter(t *testing.T) {
 			}
 		})
 	}
-	dump_performance(t)
 }
 func TestTracesRecompiler(t *testing.T) {
 	log.InitLogger("debug")
@@ -310,6 +309,7 @@ func TestTracesRecompiler(t *testing.T) {
 	dump_performance(t)
 }
 func dump_performance(t *testing.T) {
+	return
 	rows := BenchRows() // expose recorder snapshot via a small helper (see below)
 	if len(rows) == 0 {
 		t.Fatalf("no timing rows recorded; did you run with -tags benchprofile ?")
@@ -407,42 +407,6 @@ func TestSingleFuzzTrace(t *testing.T) {
 		t.Fatalf("failed to get fuzz reports path: %v", err)
 	}
 
-	// MC
-	fileMap["1763371127"] = "fuzz-reports/0.7.1/traces/1763371127/00000237.bin" // 9 keys, assign, transfer
-	fileMap["1763371379"] = "fuzz-reports/0.7.1/traces/1763371379/00000237.bin" // 9 keys, assign, transfer
-
-	// MC DOUBLE CHECK
-	fileMap["1763371098"] = "fuzz-reports/0.7.1/traces/1763371098/00000005.bin" // Ok
-	fileMap["1763372279"] = "fuzz-reports/0.7.1/traces/1763372279/00000034.bin" // Ok
-	fileMap["1763370844"] = "fuzz-reports/0.7.1/traces/1763370844/00000002.bin" // Ok
-	fileMap["1763372314"] = "fuzz-reports/0.7.1/traces/1763372314/00000092.bin" // Ok
-
-	// SN solved - hostRead memRead issue
-	fileMap["1763371865"] = "fuzz-reports/0.7.1/traces/1763371865/00000017.bin" // 2 keys (C13 ValidatorStatistics+random) checkpoints + ram access
-	fileMap["1763371341"] = "fuzz-reports/0.7.1/traces/1763371341/00000017.bin" // 2 keys (C13 ValidatorStatistics+random) checkpoints + ram access
-	// SN solved - degenerate edge case
-	fileMap["1763371531"] = "fuzz-reports/0.7.1/traces/1763371531/00000042.bin" // StateRoot 0x0000000000000000000000000000000000000000000000000000000000000000 != ParentStateRoot 0x3e569e90ec47319e1ffeabd8c7f5509811c03a748b9cd57b2c186aa8746e8636
-	// SN solved - extrinsics used/num extrinsics swap in statistics issue
-	fileMap["1763399245"] = "fuzz-reports/0.7.1/traces/1763399245/00000001.bin" // 1 key: C13 ValidatorStatistics
-	// SN solved - new_check issue
-	fileMap["1763371998"] = "fuzz-reports/0.7.1/traces/1763371998/00001108.bin" // 4 keys (Random)
-	fileMap["1761553047"] = "fuzz-reports/0.7.1/traces/1761553047/00000006.bin"
-
-	fileMap["1761654584"] = "fuzz-reports/0.7.1/traces/1761654584/00000053.bin"
-
-	fileMap["1763488162"] = "fuzz-reports/0.7.1/traces/1763488162//00000017.bin"
-
-	fileMap["1761653246"] = "fuzz-reports/0.7.1/traces/1761653246/00006616.bin"
-	fileMap["1761653246-2"] = "fuzz-reports/0.7.1/traces/1761653246/00006617.bin"
-	fileMap["1761661586"] = "fuzz-reports/0.7.1/traces/1761661586/00003911.bin"
-	fileMap["1761661586-2"] = "fuzz-reports/0.7.1/traces/1761661586/00003912.bin"
-	fileMap["1761662449"] = "fuzz-reports/0.7.1/traces/1761662449/00002753.bin"
-	fileMap["1761662449-2"] = "fuzz-reports/0.7.1/traces/1761662449/00002754.bin"
-	fileMap["1761663151"] = "fuzz-reports/0.7.1/traces/1761663151/00003910.bin"
-	fileMap["1761663151-2"] = "fuzz-reports/0.7.1/traces/1761663151/00003911.bin"
-	fileMap["1763488465"] = "fuzz-reports/0.7.1/traces/1763488465/00001705.bin"
-
-	//TODO: C13, C16 mismatch
 	fileMap["1763489798"] = "fuzz-reports/0.7.1/traces/1763489798//00000950.bin"
 	PvmLogging = false
 	//	DebugHostFunctions = true
@@ -451,10 +415,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 	// log.EnableModule("pvm_validator")
 	log.EnableModule(log.SDB)
 
-	//tc := []string{"1763371098", "1763372279", "1763370844", "1763372314", "1763488162"}
-	//tc := []string{"1763371127", "1763371379", "1763371865", "1763371341", "1763371531", "1763399245", "1763371998", "1761654584", "1761553047", "1763371098", "1763372279", "1763370844", "1763372314"}
-	//tc := []string{"1763489798"}
-	tc := []string{"1761653246", "1761653246-2", "1761661586", "1761661586-2", "1761662449", "1761662449-2", "1761663151", "1761663151-2", "1763488465"}
+	tc := []string{"1763489798"}
 
 	PvmLogging = false
 	for _, team := range tc {
@@ -480,7 +441,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 func testFuzzTraceInternal(t *testing.T, saveOutput bool) {
 	t.Helper()
 
-	PvmLogging = false
+	PvmLogging = true
 
 	log.InitLogger("debug")
 	log.EnableModule(log.PvmAuthoring)

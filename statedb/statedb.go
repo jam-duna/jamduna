@@ -233,8 +233,9 @@ const (
 
 // Initial services
 const (
-	BootstrapServiceCode  = 0
-	BootstrapServiceFile  = "/services/bootstrap/bootstrap.pvm"
+	EVMServiceCode = 0
+	EVMServiceFile = "/services/evm/evm.pvm"
+
 	BootStrapNullAuthFile = "/services/null_authorizer/null_authorizer.pvm"
 
 	AlgoServiceCode = 10
@@ -242,9 +243,6 @@ const (
 
 	AuthCopyServiceCode = 20
 	AuthCopyServiceFile = "/services/auth_copy/auth_copy.pvm"
-
-	EVMServiceCode = 35
-	EVMServiceFile = "/services/evm/evm.pvm"
 )
 
 func RequiresBackendGo(s uint32) bool {
@@ -559,11 +557,11 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		JamState:         s.JamState.Copy(), // DisputesState has a Copy method
 		sdb:              s.sdb,
 
-		logChan:               make(chan storage.LogMessage, 100),
-		metashardWitnesses:    make(map[common.Hash]*types.StateWitness),
-		AvailableWorkReport:   tmpAvailableWorkReport,
-		AncestorSet:           s.AncestorSet, // TODO: CHECK why we have this in CheckStateTransition
-		Authoring:             s.Authoring,
+		logChan:             make(chan storage.LogMessage, 100),
+		metashardWitnesses:  make(map[common.Hash]*types.StateWitness),
+		AvailableWorkReport: tmpAvailableWorkReport,
+		AncestorSet:         s.AncestorSet, // TODO: CHECK why we have this in CheckStateTransition
+		Authoring:           s.Authoring,
 		/*
 			Following flds are not copied over..?
 

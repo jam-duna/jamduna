@@ -351,6 +351,11 @@ func (stateDB *StateDB) GetTransactionCount(serviceID uint32, address common.Add
 	return nonce.Uint64(), nil
 }
 
+// ReadContractStorageValue is the public method for reading EVM contract storage from JAM DA
+func (stateDB *StateDB) ReadContractStorageValue(serviceID uint32, contractAddress common.Address, storageKey common.Hash) (common.Hash, error) {
+	return stateDB.readContractStorageValue(serviceID, contractAddress, storageKey)
+}
+
 // readContractStorageValue reads a storage value from any contract at a specific storage key
 func (stateDB *StateDB) readContractStorageValue(serviceID uint32, contractAddress common.Address, storageKey common.Hash) (common.Hash, error) {
 	// 1. Read SSR metadata to resolve shard ID

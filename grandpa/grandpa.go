@@ -2,6 +2,7 @@ package grandpa
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"sync"
 	"time"
@@ -21,6 +22,8 @@ type Broadcaster interface {
 	Broadcast(msg interface{}, evID ...uint64)
 	FinalizedBlockHeader(headerHash common.Hash)
 	FinalizedEpoch(epoch uint32, beefyHash common.Hash, aggregatedSignature bls.Signature)
+	ReadContractStorageValue(serviceID uint32, contractAddress common.Address, storageKey common.Hash) (common.Hash, error)
+	GetServiceStorage(serviceID uint32, key []byte) ([]byte, bool, error)
 }
 
 type Syncer interface {
@@ -622,8 +625,41 @@ func (g *Grandpa) GetCJF(round uint64) (*GrandpaCJF, bool) {
 func NewGrandpa(block_tree *types.BlockTree, selfkey types.ValidatorSecret, authSet0 []types.Validator, genesis_blk *types.Block, broadcaster Broadcaster, stor types.JAMStorage, authority_set_id uint32) *Grandpa {
 
 	staked := make(map[types.Ed25519Key]uint64)
-	for _, validator := range authSet0 {
-		staked[validator.Ed25519] = 100
+	const BootstrapServiceID = 0
+
+	for i, validator := range authSet0 {
+		// Read staking balance from Bootstrap service (service 0) using Ed25519 key
+		ed25519Key := validator.Ed25519
+
+		// Read from service 0 storage where key = ed25519 pubkey, value = staking balance (uint64)
+		stakingBalanceBytes, found, err := broadcaster.GetServiceStorage(BootstrapServiceID, ed25519Key[:])
+		if err != nil {
+			panic(fmt.Sprintf("NewGrandpa: failed to read staking balance from service 0 for validator %d (%s): %v",
+				i, common.Bytes2Hex(ed25519Key[:8]), err))
+		}
+
+		if !found || len(stakingBalanceBytes) == 0 {
+			panic(fmt.Sprintf("NewGrandpa: staking balance not found in service 0 for validator %d (%s)",
+				i, common.Bytes2Hex(ed25519Key[:8])))
+		}
+
+		// Parse as uint64 (8 bytes, little-endian)
+		if len(stakingBalanceBytes) != 8 {
+			panic(fmt.Sprintf("NewGrandpa: invalid staking balance length for validator %d (%s): got %d bytes, expected 8",
+				i, common.Bytes2Hex(ed25519Key[:8]), len(stakingBalanceBytes)))
+		}
+
+		stakingBalance := binary.LittleEndian.Uint64(stakingBalanceBytes)
+		if stakingBalance == 0 {
+			panic(fmt.Sprintf("NewGrandpa: zero staking balance in service 0 for validator %d (%s)",
+				i, common.Bytes2Hex(ed25519Key[:8])))
+		}
+
+		staked[validator.Ed25519] = stakingBalance
+		log.Info(log.Node, "Read staking balance from service 0",
+			"validatorIndex", i,
+			"ed25519", common.Bytes2Hex(ed25519Key[:8]),
+			"stakingBalance", stakingBalance)
 	}
 	g := &Grandpa{
 		block_tree:           block_tree,

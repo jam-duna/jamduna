@@ -726,11 +726,18 @@ func BuildKExtrinsic(address []byte, storageKey []byte, storageValue []byte) []b
 // Helper: initialize Solidity mapping storage for the Genesis case
 func InitializeMappings(blobs *types.ExtrinsicsBlobs, workItems *[]types.WorkItemExtrinsic, contractAddr common.Address, entries []MappingEntry) {
 	for _, entry := range entries {
-		// Compute Solidity mapping storage key: keccak256(abi.encode(key, slot))
-		keyInput := make([]byte, 64)
-		copy(keyInput[12:32], entry.Key[:])
-		keyInput[63] = entry.Slot
-		storageKey := common.Keccak256(keyInput)
+		var storageKey []byte
+
+		if entry.Slot == 255 { // Special marker for direct slot write (Key is the actual slot hash)
+			// Direct storage slot write - Key is interpreted as the storage slot address
+			storageKey = entry.Key[:]
+		} else {
+			// Compute Solidity mapping storage key: keccak256(abi.encode(key, slot))
+			keyInput := make([]byte, 64)
+			copy(keyInput[12:32], entry.Key[:])
+			keyInput[63] = entry.Slot
+			storageKey = crypto.Keccak256(keyInput)
+		}
 
 		// Encode value as 32-byte big-endian
 		valueBytes := entry.Value.FillBytes(make([]byte, 32))
@@ -741,9 +748,9 @@ func InitializeMappings(blobs *types.ExtrinsicsBlobs, workItems *[]types.WorkIte
 
 // MappingEntry represents a single mapping entry to initialize
 type MappingEntry struct {
-	Slot  uint8
-	Key   common.Address
-	Value *big.Int
+	Slot  uint8          // Mapping slot number, or 255 for direct slot write
+	Key   common.Address // Mapping key (address), or direct storage slot if Slot==255
+	Value *big.Int       // Value to write
 }
 
 func (b *Rollup) SubmitEVMGenesis(startBalance int64) (*evmtypes.EvmBlockPayload, error) {
@@ -751,10 +758,88 @@ func (b *Rollup) SubmitEVMGenesis(startBalance int64) (*evmtypes.EvmBlockPayload
 	blobs := types.ExtrinsicsBlobs{}
 	workItems := []types.WorkItemExtrinsic{}
 	totalSupplyValue := new(big.Int).Mul(big.NewInt(startBalance), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+
 	usdmInitialState := []MappingEntry{
 		{Slot: 0, Key: evmtypes.IssuerAddress, Value: totalSupplyValue}, // balanceOf[issuer]
 		{Slot: 1, Key: evmtypes.IssuerAddress, Value: big.NewInt(1)},    // nonces[issuer]
 	}
+
+	// Initialize staking state for genesis validators
+	// Map ECDSA addresses (EVMDevAccount 0-5) to Ed25519 validator public keys
+	// and set up bonded/ledger mappings with staking balances 100-600
+	j := b.stateDB.JamState
+	validators := j.SafroleState.CurrValidators
+
+	for i := 0; i < types.TotalValidators && i < len(validators); i++ {
+		ecdsaAddr, _ := common.GetEVMDevAccount(i)
+		ed25519Key := validators[i].Ed25519
+
+		// Slot 7: ecdsaToEd25519[ecdsaAddr] = ed25519Key (bytes32)
+		usdmInitialState = append(usdmInitialState, MappingEntry{
+			Slot:  7,
+			Key:   ecdsaAddr,
+			Value: new(big.Int).SetBytes(ed25519Key[:]),
+		})
+
+		// Staking balance: (i+1)*100 USDM (100, 200, 300, 400, 500, 600)
+		stakingBalance := new(big.Int).Mul(
+			big.NewInt(int64((i+1)*100)),
+			new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil),
+		)
+
+		// Slot 2: bonded[ecdsaAddr] = ecdsaAddr (self-controller)
+		// Each validator uses itself as the controller
+		usdmInitialState = append(usdmInitialState, MappingEntry{
+			Slot:  2,
+			Key:   ecdsaAddr,
+			Value: new(big.Int).SetBytes(ecdsaAddr[:]),
+		})
+
+		// Slot 3: ledger[ecdsaAddr] is a struct StakingLedger
+		// Fields: stash (address), total (uint256), active (uint256), unlocking (array)
+		// For genesis init via simple mapping writes, we write the active field directly
+		// Storage layout: keccak256(controller . slot) + offset
+		// We'll initialize: ledger[ecdsaAddr].active = stakingBalance (field offset 2)
+		keyInput := make([]byte, 64)
+		copy(keyInput[12:32], ecdsaAddr[:])
+		keyInput[63] = 3 // slot 3 = ledger
+		ledgerBaseSlot := crypto.Keccak256Hash(keyInput)
+
+		// Field 0: stash = ecdsaAddr
+		usdmInitialState = append(usdmInitialState, MappingEntry{
+			Slot:  255,
+			Key:   common.BytesToAddress(ledgerBaseSlot[:]),
+			Value: new(big.Int).SetBytes(ecdsaAddr[:]),
+		})
+
+		// Field 1: total = stakingBalance
+		totalSlot := new(big.Int).Add(ledgerBaseSlot.Big(), big.NewInt(1))
+		totalSlotBytes := totalSlot.FillBytes(make([]byte, 32))
+		usdmInitialState = append(usdmInitialState, MappingEntry{
+			Slot:  255,
+			Key:   common.BytesToAddress(totalSlotBytes[12:]),
+			Value: stakingBalance,
+		})
+
+		// Field 2: active = stakingBalance
+		activeSlot := new(big.Int).Add(ledgerBaseSlot.Big(), big.NewInt(2))
+		activeSlotBytes := activeSlot.FillBytes(make([]byte, 32))
+		usdmInitialState = append(usdmInitialState, MappingEntry{
+			Slot:  255,
+			Key:   common.BytesToAddress(activeSlotBytes[12:]),
+			Value: stakingBalance,
+		})
+
+		// Field 3: unlocking (dynamic array) - length = 0
+		unlockingSlot := new(big.Int).Add(ledgerBaseSlot.Big(), big.NewInt(3))
+		unlockingSlotBytes := unlockingSlot.FillBytes(make([]byte, 32))
+		usdmInitialState = append(usdmInitialState, MappingEntry{
+			Slot:  255,
+			Key:   common.BytesToAddress(unlockingSlotBytes[12:]),
+			Value: big.NewInt(0),
+		})
+	}
+
 	InitializeMappings(&blobs, &workItems, evmtypes.UsdmAddress, usdmInitialState)
 
 	numExtrinsics := len(workItems)
