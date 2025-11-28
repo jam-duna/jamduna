@@ -24,6 +24,10 @@ type GrandpaStateMessage struct {
 	Slot  uint32
 }
 
+func (s *GrandpaStateMessage) String() string {
+	return types.ToJSON(s)
+}
+
 func (s *GrandpaStateMessage) ToBytes() ([]byte, error) {
 	bytes, err := types.Encode(s)
 	if err != nil {

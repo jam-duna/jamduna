@@ -19,7 +19,7 @@ Validator -> Validator
 <-- FIN
 */
 
-func (p *Peer) SendCommitMessage(ctx context.Context, commit grandpa.GrandpaCommit) error {
+func (p *Peer) SendCommitMessage(ctx context.Context, commit grandpa.GrandpaCommitMessage) error {
 	code := uint8(CE150_GrandpaCommit)
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
@@ -44,7 +44,7 @@ func (n *Node) onGrandpaCommit(ctx context.Context, stream quic.Stream, msg []by
 	defer stream.Close()
 
 	// Decode: Round Number ++ Set Id ++ Commit
-	var commit grandpa.GrandpaCommit
+	var commit grandpa.GrandpaCommitMessage
 	if err := commit.FromBytes(msg); err != nil {
 		return fmt.Errorf("onGrandpaCommit: decode failed: %w", err)
 	}

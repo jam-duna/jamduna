@@ -5,6 +5,9 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 )
 
 // wait_timeout is used to determine whether to wait for the timeout, currently set to true because it's too easy to hit the complete condition
@@ -17,6 +20,11 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 		g.InitRoundState(round, g.block_tree.Copy())
 		g.InitTrackers(round)
 	}
+
+	if !g.tryStartRound(round) {
+		return
+	}
+
 	grandpaRound := &GrandpaRound{
 		Round:        round,
 		Timer1Signal: make(chan bool, 1),
@@ -24,14 +32,7 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 		Ticker:       time.NewTicker(100 * time.Millisecond),
 	}
 	go func() {
-		//create a timer for the round
-		if round == 1 {
-			select {
-			case <-time.After(8 * time.Second):
-			case <-ctx.Done():
-				return
-			}
-		}
+		defer g.finishRound(round)
 		defer grandpaRound.Ticker.Stop()
 
 		// use another goroutine to calculate the timer
@@ -58,15 +59,16 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 		}()
 		grandpa_authorities := g.GetRoundGrandpaState(round).grandpa_authorities
 		primary := DerivePrimary(round, grandpa_authorities)
-		if bytes.Equal(grandpa_authorities[int(primary)].Ed25519.Bytes(), g.selfkey.Ed25519Pub[:]) {
+		// Only send primary proposal if round > 0 (need round-1 to exist)
+		if round > 0 && bytes.Equal(grandpa_authorities[int(primary)].Ed25519.Bytes(), g.selfkey.Ed25519Pub[:]) {
 			_, best_candidate_m1, err := g.BestFinalCandidate(round - 1)
 			if err != nil {
-				g.ErrorChan <- fmt.Errorf("[v%d] error in BestFinalCandidate: %v", g.GetSelfVoterIndex(round), err)
+				log.Error(log.Grandpa, "BestFinalCandidate failed", "voter", g.GetSelfVoterIndex(round), "err", err)
 				return
 			}
 			primary_commit_message, err := g.NewFinalCommitMessage(best_candidate_m1.Block, round-1)
 			if err != nil {
-				g.ErrorChan <- fmt.Errorf("[v%d] error primary_commit_message in NewFinalCommitMessage: %v", g.GetSelfVoterIndex(round), err)
+				log.Error(log.Grandpa, "NewFinalCommitMessage failed", "voter", g.GetSelfVoterIndex(round), "err", err)
 				return
 			}
 			g.Broadcast(primary_commit_message)
@@ -75,10 +77,10 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 				g.Broadcast(primary_precommit_message)
 				err := g.ProcessPrimaryProposeMessage(primary_precommit_message)
 				if err != nil {
-					g.ErrorChan <- fmt.Errorf("[v%d] error in ProcessPrimaryProposeMessage: %v", g.GetSelfVoterIndex(round), err)
+					log.Warn(log.Grandpa, "ProcessPrimaryProposeMessage failed", "voter", g.GetSelfVoterIndex(round), "err", err)
 				}
 			} else {
-				fmt.Printf("[v%d] primary precommit message not sent\n", g.GetSelfVoterIndex(round))
+				log.Debug(log.Grandpa, "Primary precommit message not sent", "voter", g.GetSelfVoterIndex(round))
 			}
 		}
 		// if the timer1 is not expired, wait for the timer1 to expire
@@ -101,22 +103,37 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 
 			}
 		}
-		_, L_block, err := g.BestFinalCandidate(round - 1)
-		if err != nil {
-			g.ErrorChan <- fmt.Errorf("[v%d] error in BestFinalCandidate: %v", g.GetSelfVoterIndex(round), err)
+
+		// Get L (best final candidate from previous round, or last finalized for round 0)
+		var L_block, N_block = g.block_tree.GetLastFinalizedBlock(), g.block_tree.GetLastFinalizedBlock()
+		var err error
+
+		if round == 0 {
+			L_block = g.block_tree.GetLastFinalizedBlock()
+		} else {
+			_, L_block, err = g.BestFinalCandidate(round - 1)
+			if err != nil || L_block == nil {
+				// Use last finalized block as fallback if we can't determine best final candidate
+				L_block = g.block_tree.GetLastFinalizedBlock()
+				if err != nil {
+					log.Warn(log.Grandpa, "BestFinalCandidate failed, using fallback", "voter", g.GetSelfVoterIndex(round), "err", err)
+				}
+			}
 		}
-		_, N_block, err := g.BestPreVoteCandidate(round)
-		if err != nil {
-			g.ErrorChan <- fmt.Errorf("[v%d] error in BestPreVoteCandidate: %v", g.GetSelfVoterIndex(round), err)
-		}
-		if N_block == nil {
-			panic(fmt.Sprintf("N_block is nil, err: %v", err))
+
+		_, N_block, err = g.BestPreVoteCandidate(round)
+		if err != nil || N_block == nil {
+			// Use L_block as fallback for prevote candidate
+			N_block = L_block
+			if err != nil {
+				log.Warn(log.Grandpa, "BestPreVoteCandidate failed, using fallback", "voter", g.GetSelfVoterIndex(round), "err", err)
+			}
 		}
 		prevote := g.NewPrevoteVoteMessage(N_block.Block, round)
 		g.Broadcast(prevote)
 		err = g.ProcessPreVoteMessage(prevote)
 		if err != nil {
-			g.ErrorChan <- fmt.Errorf("[v%d] error in ProcessPreVoteMessage: %v", g.GetSelfVoterIndex(round), err)
+			log.Warn(log.Grandpa, "ProcessPreVoteMessage failed", "voter", g.GetSelfVoterIndex(round), "err", err)
 		}
 		timerExpired := false
 	outerLoop2:
@@ -148,17 +165,18 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 
 		}
 		_, ghost, err := g.GrandpaGhost(round)
-		if ghost == nil {
-			panic(fmt.Sprintf("ghost is nil, err: %v", err))
-		}
-		if err != nil {
-			g.ErrorChan <- fmt.Errorf("[v%d] error in GrandpaGhost: %v", g.GetSelfVoterIndex(round), err)
+		if err != nil || ghost == nil {
+			// Use last finalized block as fallback
+			ghost = g.block_tree.GetLastFinalizedBlock()
+			if err != nil {
+				log.Warn(log.Grandpa, "GrandpaGhost failed, using fallback", "voter", g.GetSelfVoterIndex(round), "err", err)
+			}
 		}
 		precommitmessage := g.NewPrecommitVoteMessage(ghost.Block, round)
 		g.Broadcast(precommitmessage)
 		err = g.ProcessPreCommitMessage(precommitmessage)
 		if err != nil {
-			g.ErrorChan <- fmt.Errorf("[v%d] error in ProcessPreCommitMessage: %v", g.GetSelfVoterIndex(round), err)
+			log.Warn(log.Grandpa, "ProcessPreCommitMessage failed", "voter", g.GetSelfVoterIndex(round), "err", err)
 		}
 	outerLoop3:
 		for {
@@ -166,12 +184,12 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 			case <-grandpaRound.Ticker.C:
 				err := g.AttemptToFinalizeAtRound(round)
 				if err != nil {
-					g.ErrorChan <- fmt.Errorf("[v%d] error in AttemptToFinalizeAtRound: %v", g.GetSelfVoterIndex(round), err)
+					log.Warn(log.Grandpa, "AttemptToFinalizeAtRound failed", "voter", g.GetSelfVoterIndex(round), "err", err)
 				}
 				childorbro := g.block_tree.ChildOrBrother(g.block_tree.GetLastFinalizedBlock(), L_block)
 				finalizable, err := g.Finalizable(round)
 				if err != nil {
-					g.ErrorChan <- fmt.Errorf("[v%d] error in Finalizable: %v", g.GetSelfVoterIndex(round), err)
+					log.Warn(log.Grandpa, "Finalizable failed", "voter", g.GetSelfVoterIndex(round), "err", err)
 				}
 				if childorbro && finalizable {
 					break outerLoop3
@@ -180,22 +198,51 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 				return
 			}
 		}
-		g.PlayGrandpaRound(ctx, round+1)
+		// Send NewRoundEvent if EventChan is available
+		// store the catch-up message for this round (if storage is available)
+		if g.storage != nil {
+			catchupResponse, err := g.GetCatchUpResponse(round)
+			if err == nil {
+				catchupBytes, err := catchupResponse.ToBytes()
+				if err == nil {
+					g.storage.StoreCatchupMassage(round, uint32(g.authority_set_id), catchupBytes)
+				}
+			}
+		}
+		if g.EventChan != nil {
+			nextRound := round + 1
+			event := GrandpaEvent{
+				Kind:  NewRoundEvent,
+				SetID: g.authority_set_id,
+				Round: nextRound,
+			}
+			select {
+			case g.EventChan <- event:
+			default:
+				// Channel full, skip sending event
+			}
+		} else {
+			// No event channel, start next round directly
+			g.PlayGrandpaRound(ctx, round+1)
+		}
+
 	outerLoop4:
 		for {
 			select {
 			case <-grandpaRound.Ticker.C:
 				err := g.AttemptToFinalizeAtRound(round)
 				if err != nil {
-					g.ErrorChan <- fmt.Errorf("[v%d] error in BestFinalCandidate: %v", g.GetSelfVoterIndex(round), err)
+					log.Warn(log.Grandpa, "AttemptToFinalizeAtRound failed", "voter", g.GetSelfVoterIndex(round), "err", err)
 				}
 				last_finalized_block := g.block_tree.GetLastFinalizedBlock()
 				_, best_candidate, err := g.BestFinalCandidate(round)
 				if err != nil {
-					g.ErrorChan <- fmt.Errorf("[v%d] error in BestFinalCandidate: %v", g.GetSelfVoterIndex(round), err)
+					log.Warn(log.Grandpa, "BestFinalCandidate failed", "voter", g.GetSelfVoterIndex(round), "err", err)
+					continue
 				}
 				if best_candidate == nil {
-					panic(fmt.Sprintf("best_candidate is nil, err: %v", err))
+					log.Debug(log.Grandpa, "best_candidate is nil", "voter", g.GetSelfVoterIndex(round))
+					continue
 				}
 				if g.block_tree.ChildOrBrother(last_finalized_block, best_candidate) {
 					break outerLoop4
@@ -210,4 +257,135 @@ func (g *Grandpa) PlayGrandpaRound(ctx context.Context, round uint64) {
 		}
 
 	}()
+}
+
+func (g *Grandpa) GetAllResults(round uint64) (prevotes, precommits []SignedMessage) {
+	round_state, err := g.GetRoundState(round)
+	if err != nil || round_state == nil {
+		return nil, nil
+	}
+
+	// Get prevotes from the PrevoteStage tracker
+	prevoteTracker := round_state.GetVoteTracker(PrevoteStage)
+	if prevoteTracker != nil {
+		prevoteTracker.VoteMutex.RLock()
+		votes := prevoteTracker.GetAllVotes()
+		for _, voterVotes := range votes {
+			for _, vote := range voterVotes {
+				if vote != nil {
+					prevotes = append(prevotes, *vote)
+				}
+			}
+		}
+		prevoteTracker.VoteMutex.RUnlock()
+	}
+
+	// Get precommits from the PrecommitStage tracker
+	precommitTracker := round_state.GetVoteTracker(PrecommitStage)
+	if precommitTracker != nil {
+		precommitTracker.VoteMutex.RLock()
+		votes := precommitTracker.GetAllVotes()
+		for _, voterVotes := range votes {
+			for _, vote := range voterVotes {
+				if vote != nil {
+					precommits = append(precommits, *vote)
+				}
+			}
+		}
+		precommitTracker.VoteMutex.RUnlock()
+	}
+
+	return prevotes, precommits
+}
+
+func GetBlockHashesFromVotes(votes []SignedMessage, precommits []SignedMessage) []common.Hash {
+	hashMap := make(map[common.Hash]struct{})
+	for _, vote := range votes {
+		hash := vote.Message.Vote.HeaderHash
+		hashMap[hash] = struct{}{}
+	}
+	for _, vote := range precommits {
+		hash := vote.Message.Vote.HeaderHash
+		hashMap[hash] = struct{}{}
+	}
+	var hashes []common.Hash
+	for hash := range hashMap {
+		hashes = append(hashes, hash)
+	}
+	return hashes
+}
+
+func (g *Grandpa) GetCatchUpResponse(round uint64) (CatchUpResponse, error) {
+	catchUpResponse := CatchUpResponse{}
+	catchUpResponse.Round = round
+	round_state, err := g.GetRoundState(round)
+	if err != nil || round_state == nil {
+		return catchUpResponse, fmt.Errorf("GetCatchUpResponse: no grandpa round state found for round %d", round)
+	}
+	prevotes, precommits := g.GetAllResults(round)
+	catchUpResponse.SignedPrevotes = prevotes
+	catchUpResponse.SignedPrecommits = precommits
+	blockHashes := GetBlockHashesFromVotes(prevotes, precommits)
+	baseBlock, err := g.block_tree.GetCommonAncestorByGroups(blockHashes)
+	if err != nil {
+		return catchUpResponse, fmt.Errorf("GetCatchUpResponse: error getting common ancestor: %v", err)
+	}
+	catchUpResponse.BaseHash = baseBlock.Block.Header.Hash()
+	catchUpResponse.BaseNumber = baseBlock.Block.Header.Slot
+	return catchUpResponse, nil
+}
+
+// PlayRoundWithCatchUp processes a round using catch-up data when we're behind.
+// Unlike PlayGrandpaRound which participates in voting, this replays votes from
+// a completed round to reach the same finalized state.
+func (g *Grandpa) PlayRoundWithCatchUp(ctx context.Context, round uint64, catchup CatchUpResponse) error {
+	// Validate catch-up round matches
+	if catchup.Round != round {
+		return fmt.Errorf("PlayRoundWithCatchUp: round mismatch, expected %d got %d", round, catchup.Round)
+	}
+
+	// Initialize round state if needed
+	round_state, _ := g.GetRoundState(round)
+	if round_state == nil {
+		g.InitRoundState(round, g.block_tree.Copy())
+		g.InitTrackers(round)
+	}
+
+	// Process all prevotes from catch-up response
+	for _, prevote := range catchup.SignedPrevotes {
+		vote := GrandpaVote{
+			Round:         round,
+			SetId:         g.authority_set_id,
+			SignedMessage: prevote,
+		}
+		if err := g.ProcessPreVoteMessage(vote); err != nil {
+			// Log but continue - some votes may be duplicates or invalid
+			log.Debug(log.Grandpa, "PlayRoundWithCatchUp: failed to process prevote", "round", round, "err", err)
+		}
+	}
+
+	// Process all precommits from catch-up response
+	for _, precommit := range catchup.SignedPrecommits {
+		vote := GrandpaVote{
+			Round:         round,
+			SetId:         g.authority_set_id,
+			SignedMessage: precommit,
+		}
+		if err := g.ProcessPreCommitMessage(vote); err != nil {
+			// Log but continue - some votes may be duplicates or invalid
+			log.Debug(log.Grandpa, "PlayRoundWithCatchUp: failed to process precommit", "round", round, "err", err)
+		}
+	}
+
+	// Attempt finalization with the imported votes
+	if err := g.AttemptToFinalizeAtRound(round); err != nil {
+		return fmt.Errorf("PlayRoundWithCatchUp: finalization failed: %w", err)
+	}
+
+	// Update last completed round
+	if round > g.Last_Completed_Round {
+		g.Last_Completed_Round = round
+	}
+
+	return nil
 }

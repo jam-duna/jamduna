@@ -13,6 +13,12 @@ func ComputeHash(data []byte) []byte {
 	return hash[:]
 }
 
+func Uint64ToBytes(val uint64) []byte {
+	bytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(bytes, val)
+	return bytes
+}
+
 func Uint32ToBytes(val uint32) []byte {
 	bytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(bytes, val)

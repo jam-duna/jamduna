@@ -430,7 +430,7 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 	case CE150_GrandpaCommit:
 		return n.onGrandpaCommit(ctx, stream, msg)
 	case CE151_GrandpaState:
-		return n.onGrandpaState(ctx, stream, msg)
+		return n.onGrandpaState(ctx, stream, msg, peerID)
 	case CE152_GrandpaCatchUp:
 		return n.onGrandpaCatchUp(ctx, stream, msg, peerID)
 	case CE153_WarpSyncRequest:

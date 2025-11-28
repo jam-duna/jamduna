@@ -81,15 +81,129 @@ func (g *Grandpa) ProcessWarpSyncResponse(response types.WarpSyncResponse) error
 
 	// Process each fragment sequentially
 	for _, fragment := range response.Fragments {
-		// TODO: Verify the fragment's justification against the current authority set
-		// TODO: Extract the set ID from the fragment header
-		// TODO: Update the authority set if the fragment indicates a set change
-		// TODO: Store the fragment for future use
-		_ = fragment // Suppress unused variable warning
+		if err := g.ProcessWarpSyncFragment(fragment); err != nil {
+			return fmt.Errorf("ProcessWarpSyncResponse: failed to process fragment: %w", err)
+		}
 	}
 
-	// TODO: Update g.authority_set_id to the latest set ID from fragments
-	// TODO: Store fragments in storage using StoreWarpSyncFragment
+	return nil
+}
+
+// ProcessWarpSyncFragment processes a single warp sync fragment to update authority set
+// This verifies the justification and extracts the new authority set from the header
+func (g *Grandpa) ProcessWarpSyncFragment(fragment types.WarpSyncFragment) error {
+	setID := fragment.Justification.SetId
+
+	// Verify the fragment's justification against the current authority set
+	if err := g.VerifyWarpSyncJustification(fragment); err != nil {
+		return fmt.Errorf("justification verification failed for setID %d: %w", setID, err)
+	}
+
+	// Extract the new authority set from the header's EpochMark
+	if fragment.Header.EpochMark != nil {
+		newValidators := make([]types.Validator, len(fragment.Header.EpochMark.Validators))
+		for i, validatorKeyTuple := range fragment.Header.EpochMark.Validators {
+			newValidators[i] = types.Validator{
+				Ed25519:      types.Ed25519Key(validatorKeyTuple.Ed25519Key),
+				Bandersnatch: types.BandersnatchKey(validatorKeyTuple.BandersnatchKey),
+			}
+		}
+		// Update the scheduled authority set for the next epoch
+		g.SetScheduledAuthoritySet(newValidators)
+	}
+
+	// Store the fragment for future use
+	if g.storage != nil {
+		if err := g.storage.StoreWarpSyncFragment(setID, fragment); err != nil {
+			return fmt.Errorf("failed to store warp sync fragment: %w", err)
+		}
+	}
+
+	// Update authority set ID to reflect we've processed this fragment
+	g.authority_set_id = setID + 1
 
 	return nil
+}
+
+// VerifyWarpSyncJustification verifies a warp sync fragment's justification
+// against the current authority set
+func (g *Grandpa) VerifyWarpSyncJustification(fragment types.WarpSyncFragment) error {
+	justification := fragment.Justification
+	commit := justification.Commit
+
+	// Verify we have enough precommits (need >2/3 of authority set weight)
+	totalWeight := uint64(0)
+	signedWeight := uint64(0)
+
+	authorities := g.GetCurrentScheduledAuthoritySet(justification.Round)
+	for _, validator := range authorities {
+		weight := g.Voter_Staked[validator.Ed25519]
+		totalWeight += weight
+	}
+
+	// Verify each precommit signature
+	for _, signedPrecommit := range commit.Precommits {
+		validatorKey := signedPrecommit.Ed25519Pub
+
+		// Find the validator in the authority set
+		validatorIdx := -1
+		for i, validator := range authorities {
+			if validator.Ed25519 == validatorKey {
+				validatorIdx = i
+				break
+			}
+		}
+
+		if validatorIdx == -1 {
+			continue // Skip precommits from non-authorities
+		}
+
+		// Verify Ed25519 signature
+		if !VerifyPrecommitSignature(signedPrecommit, justification.Round, justification.SetId) {
+			continue // Skip invalid signatures
+		}
+
+		weight := g.Voter_Staked[validatorKey]
+		signedWeight += weight
+	}
+
+	// Check if we have >2/3 weight (using ceiling to be safe with integer division)
+	threshold := (totalWeight*2 + 2) / 3
+	if signedWeight < threshold {
+		return fmt.Errorf("insufficient precommit weight: got %d, need >=%d", signedWeight, threshold)
+	}
+
+	// Verify the target block hash matches the header
+	targetHash := fragment.Header.Hash()
+	if commit.HeaderHash != targetHash {
+		return fmt.Errorf("target hash mismatch: commit has %s, header is %s",
+			commit.HeaderHash.Hex(), targetHash.Hex())
+	}
+
+	return nil
+}
+
+// VerifyPrecommitSignature verifies the Ed25519 signature of a GrandpaSignedPrecommit
+func VerifyPrecommitSignature(precommit types.GrandpaSignedPrecommit, round uint64, setId uint32) bool {
+	// Construct the unsigned data that was signed
+	unsignedData := GrandpaVoteUnsignedData{
+		Message: Message{
+			Stage: PrecommitStage,
+			Vote: Vote{
+				HeaderHash: precommit.Vote.HeaderHash,
+				Slot:       precommit.Vote.Slot,
+			},
+		},
+		Round:           round,
+		Authorities_set: uint64(setId),
+	}
+
+	// Get the bytes that were signed (with "jam_grandpa_vote" prefix)
+	unsignedBytes := getGrandpaVoteUnsignedBytes(unsignedData)
+	if unsignedBytes == nil {
+		return false
+	}
+
+	// Verify the signature
+	return types.Ed25519Verify(precommit.Ed25519Pub, unsignedBytes, precommit.MessageSignature)
 }

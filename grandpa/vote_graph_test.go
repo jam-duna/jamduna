@@ -37,7 +37,8 @@ func case_fork(t *testing.T) {
 	new_block := fakeblock(genesis_blk)
 	addBlock(nodes, new_block)
 	for _, node := range nodes {
-		go node.grandpa.round_finalized_cheat(1, new_block)
+		grandpa, _ := node.grandpa.GetGrandpa(0)
+		go grandpa.round_finalized_cheat(1, new_block)
 	}
 	time.Sleep(1 * time.Second)
 	new_block = fakeblock(*new_block)
@@ -48,51 +49,54 @@ func case_fork(t *testing.T) {
 	addBlock(nodes, new_block3)
 	time.Sleep(2 * time.Second)
 	for _, node := range nodes {
-		node.grandpa.InitRoundState(2, node.grandpa.block_tree.Copy())
+		grandpa, _ := node.grandpa.GetGrandpa(0)
+		grandpa.InitRoundState(2, node.blockTree.Copy())
 	}
 	for i, node := range nodes {
-
+		grandpa, _ := node.grandpa.GetGrandpa(0)
 		if i >= 5 {
-			node.grandpa.sendDummyVote(2, PrevoteStage, new_block2)
+			grandpa.sendDummyVote(2, PrevoteStage, new_block2)
 
 		} else {
-			node.grandpa.sendDummyVote(2, PrevoteStage, new_block3)
+			grandpa.sendDummyVote(2, PrevoteStage, new_block3)
 		}
 
 	}
 	time.Sleep(500 * time.Millisecond)
 	for _, node := range nodes {
-		ghost, _, err := node.grandpa.GrandpaGhost(2)
+		grandpa, _ := node.grandpa.GetGrandpa(0)
+		ghost, _, err := grandpa.GrandpaGhost(2)
 		if err != nil {
 			t.Fatal(err)
 		}
 		assert.Equal(t, ghost, new_block.Header.Hash())
-		node.grandpa.sendDummyVote(2, PrecommitStage, new_block2)
+		grandpa.sendDummyVote(2, PrecommitStage, new_block2)
 	}
 
 	time.Sleep(1 * time.Second)
 	for _, node := range nodes {
-		Finalizable, err := node.grandpa.Finalizable(2)
+		grandpa, _ := node.grandpa.GetGrandpa(0)
+		Finalizable, err := grandpa.Finalizable(2)
 		if err != nil {
 			fmt.Println(err)
 		}
 		if !Finalizable {
-			round_state, err := node.grandpa.GetRoundState(2)
+			round_state, err := grandpa.GetRoundState(2)
 			if err != nil {
 				fmt.Println(err)
 
 			}
 			round_state.PreVoteGraph.Print()
-			round_state, err = node.grandpa.GetRoundState(1)
+			round_state, err = grandpa.GetRoundState(1)
 			if err != nil {
 				fmt.Println(err)
 
 			}
 			round_state.PreCommitGraph.Print()
 
-			ghost, ghost_node, _ := node.grandpa.GrandpaGhost(2)
-			best_final_candidate, best_final_candidate_node, _ := node.grandpa.BestFinalCandidate(2)
-			best_final_candidate_m1, best_final_candidate_m1_node, _ := node.grandpa.BestFinalCandidate(1)
+			ghost, ghost_node, _ := grandpa.GrandpaGhost(2)
+			best_final_candidate, best_final_candidate_node, _ := grandpa.BestFinalCandidate(2)
+			best_final_candidate_m1, best_final_candidate_m1_node, _ := grandpa.BestFinalCandidate(1)
 			fmt.Printf("ghost = %s\n", ghost.String())
 			fmt.Printf("best_final_candidate = %s\n", best_final_candidate.String())
 			fmt.Printf("best_final_candidate_m1 = %s\n", best_final_candidate_m1.String())
@@ -103,17 +107,17 @@ func case_fork(t *testing.T) {
 				fmt.Println("ghost is not ancestor of best_final_candidate")
 			}
 
-			t.Fatalf("node %d is not completable", node.grandpa.GetSelfVoterIndex(2))
+			t.Fatalf("node %d is not completable", grandpa.GetSelfVoterIndex(2))
 		}
-		err = node.grandpa.AttemptToFinalizeAtRound(2)
+		err = grandpa.AttemptToFinalizeAtRound(2)
 		if err != nil {
 			fmt.Println(err)
 		}
 
 	}
 	time.Sleep(2 * time.Second)
-	nodes[0].grandpa.block_tree.Print()
-	assert.Equal(t, nodes[0].grandpa.block_tree.GetLastFinalizedBlock().Block.Header.Hash(), new_block.Header.Hash())
+	nodes[0].blockTree.Print()
+	assert.Equal(t, nodes[0].blockTree.GetLastFinalizedBlock().Block.Header.Hash(), new_block.Header.Hash())
 }
 
 /*
@@ -140,7 +144,8 @@ func case_fork_unvoted(t *testing.T) {
 	// nodes already running
 	addBlock(nodes, new_block)
 	for _, node := range nodes {
-		go node.grandpa.round_finalized_cheat(1, new_block)
+		grandpa, _ := node.grandpa.GetGrandpa(0)
+		go grandpa.round_finalized_cheat(1, new_block)
 	}
 	time.Sleep(1 * time.Second)
 	new_block = fakeblock(*new_block)
@@ -153,50 +158,53 @@ func case_fork_unvoted(t *testing.T) {
 	addBlock(nodes, new_block_2_1)
 	time.Sleep(2 * time.Second)
 	for _, node := range nodes {
-		node.grandpa.InitRoundState(2, node.grandpa.block_tree.Copy())
+		grandpa, _ := node.grandpa.GetGrandpa(0)
+		grandpa.InitRoundState(2, node.blockTree.Copy())
 	}
 	for i, node := range nodes {
-
+		grandpa, _ := node.grandpa.GetGrandpa(0)
 		if i >= 6 && i < 9 {
-			node.grandpa.sendDummyVote(2, PrevoteStage, new_block2)
+			grandpa.sendDummyVote(2, PrevoteStage, new_block2)
 
 		} else if i >= 2 && i < 6 {
-			node.grandpa.sendDummyVote(2, PrevoteStage, new_block_2_1)
+			grandpa.sendDummyVote(2, PrevoteStage, new_block_2_1)
 		}
 
 	}
 	time.Sleep(500 * time.Millisecond)
 	for _, node := range nodes {
-		_, ghost_block, err := node.grandpa.GrandpaGhost(2)
+		grandpa, _ := node.grandpa.GetGrandpa(0)
+		_, ghost_block, err := grandpa.GrandpaGhost(2)
 		if err != nil {
 			t.Fatal(err)
 		}
-		node.grandpa.sendDummyVote(2, PrecommitStage, ghost_block.Block)
+		grandpa.sendDummyVote(2, PrecommitStage, ghost_block.Block)
 	}
 
 	time.Sleep(1 * time.Second)
 	for _, node := range nodes {
-		Finalizable, err := node.grandpa.Finalizable(2)
+		grandpa, _ := node.grandpa.GetGrandpa(0)
+		Finalizable, err := grandpa.Finalizable(2)
 		if err != nil {
 			fmt.Println(err)
 		}
 		if !Finalizable {
-			round_state, err := node.grandpa.GetRoundState(2)
+			round_state, err := grandpa.GetRoundState(2)
 			if err != nil {
 				fmt.Println(err)
 
 			}
 			round_state.PreVoteGraph.Print()
-			round_state, err = node.grandpa.GetRoundState(1)
+			round_state, err = grandpa.GetRoundState(1)
 			if err != nil {
 				fmt.Println(err)
 
 			}
 			round_state.PreCommitGraph.Print()
 
-			ghost, ghost_node, _ := node.grandpa.GrandpaGhost(2)
-			best_final_candidate, best_final_candidate_node, _ := node.grandpa.BestFinalCandidate(2)
-			best_final_candidate_m1, best_final_candidate_m1_node, _ := node.grandpa.BestFinalCandidate(1)
+			ghost, ghost_node, _ := grandpa.GrandpaGhost(2)
+			best_final_candidate, best_final_candidate_node, _ := grandpa.BestFinalCandidate(2)
+			best_final_candidate_m1, best_final_candidate_m1_node, _ := grandpa.BestFinalCandidate(1)
 			fmt.Printf("ghost = %s\n", ghost.String())
 			fmt.Printf("best_final_candidate = %s\n", best_final_candidate.String())
 			fmt.Printf("best_final_candidate_m1 = %s\n", best_final_candidate_m1.String())
@@ -207,17 +215,17 @@ func case_fork_unvoted(t *testing.T) {
 				fmt.Println("ghost is not ancestor of best_final_candidate")
 			}
 
-			t.Fatalf("node %d is not completable", node.grandpa.GetSelfVoterIndex(2))
+			t.Fatalf("node %d is not completable", grandpa.GetSelfVoterIndex(2))
 		}
-		err = node.grandpa.AttemptToFinalizeAtRound(2)
+		err = grandpa.AttemptToFinalizeAtRound(2)
 		if err != nil {
 			fmt.Println(err)
 		}
 
 	}
 	time.Sleep(2 * time.Second)
-	nodes[0].grandpa.block_tree.Print()
-	assert.Equal(t, nodes[0].grandpa.block_tree.GetLastFinalizedBlock().Block.Header.Hash(), new_block2.Header.Hash())
+	nodes[0].blockTree.Print()
+	assert.Equal(t, nodes[0].blockTree.GetLastFinalizedBlock().Block.Header.Hash(), new_block2.Header.Hash())
 }
 
 /*case 2
@@ -238,7 +246,8 @@ func case_tri_fork(t *testing.T) {
 	// nodes already running
 	addBlock(nodes, new_block)
 	for _, node := range nodes {
-		go node.grandpa.round_finalized_cheat(1, new_block)
+		grandpa, _ := node.grandpa.GetGrandpa(0)
+		go grandpa.round_finalized_cheat(1, new_block)
 	}
 	time.Sleep(1 * time.Second)
 	new_block = fakeblock(*new_block)
@@ -251,53 +260,56 @@ func case_tri_fork(t *testing.T) {
 	addBlock(nodes, new_block4)
 	time.Sleep(2 * time.Second)
 	for _, node := range nodes {
-		node.grandpa.InitRoundState(2, node.grandpa.block_tree.Copy())
+		grandpa, _ := node.grandpa.GetGrandpa(0)
+		grandpa.InitRoundState(2, node.blockTree.Copy())
 	}
 	for i, node := range nodes {
-
+		grandpa, _ := node.grandpa.GetGrandpa(0)
 		if i >= 3 && i < 6 {
-			node.grandpa.sendDummyVote(2, PrevoteStage, new_block2)
+			grandpa.sendDummyVote(2, PrevoteStage, new_block2)
 		} else if i >= 6 && i < 9 {
-			node.grandpa.sendDummyVote(2, PrevoteStage, new_block3)
+			grandpa.sendDummyVote(2, PrevoteStage, new_block3)
 		} else {
-			node.grandpa.sendDummyVote(2, PrevoteStage, new_block4)
+			grandpa.sendDummyVote(2, PrevoteStage, new_block4)
 		}
 
 	}
 
 	time.Sleep(500 * time.Millisecond)
 	for _, node := range nodes {
-		ghost, _, err := node.grandpa.GrandpaGhost(2)
+		grandpa, _ := node.grandpa.GetGrandpa(0)
+		ghost, _, err := grandpa.GrandpaGhost(2)
 		if err != nil {
 			t.Fatal(err)
 		}
 		assert.Equal(t, ghost, new_block.Header.Hash())
-		node.grandpa.sendDummyVote(2, PrecommitStage, new_block2)
+		grandpa.sendDummyVote(2, PrecommitStage, new_block2)
 	}
 
 	time.Sleep(1 * time.Second)
 	for _, node := range nodes {
-		completable, err := node.grandpa.Finalizable(2)
+		grandpa, _ := node.grandpa.GetGrandpa(0)
+		completable, err := grandpa.Finalizable(2)
 		if err != nil {
 			fmt.Println(err)
 		}
-		fmt.Printf("[v%d] completable = %v\n", node.grandpa.GetSelfVoterIndex(2), completable)
+		fmt.Printf("[v%d] completable = %v\n", grandpa.GetSelfVoterIndex(2), completable)
 		if !completable {
-			round_state, err := node.grandpa.GetRoundState(2)
+			round_state, err := grandpa.GetRoundState(2)
 			if err != nil {
 				fmt.Println(err)
 			}
 			round_state.PreVoteGraph.Print()
 		}
-		err = node.grandpa.AttemptToFinalizeAtRound(2)
+		err = grandpa.AttemptToFinalizeAtRound(2)
 		if err != nil {
 			fmt.Println(err)
 		}
 
 	}
 	time.Sleep(2 * time.Second)
-	nodes[0].grandpa.block_tree.Print()
-	assert.Equal(t, nodes[0].grandpa.block_tree.GetLastFinalizedBlock().Block.Header.Hash(), new_block.Header.Hash())
+	nodes[0].blockTree.Print()
+	assert.Equal(t, nodes[0].blockTree.GetLastFinalizedBlock().Block.Header.Hash(), new_block.Header.Hash())
 }
 
 /*
@@ -320,7 +332,8 @@ func case_equvocation(t *testing.T) {
 	// nodes already running
 	addBlock(nodes, new_block)
 	for _, node := range nodes {
-		go node.grandpa.round_finalized_cheat(1, new_block)
+		grandpa, _ := node.grandpa.GetGrandpa(0)
+		go grandpa.round_finalized_cheat(1, new_block)
 	}
 	time.Sleep(1 * time.Second)
 	new_block = fakeblock(*new_block)
@@ -333,49 +346,51 @@ func case_equvocation(t *testing.T) {
 	addBlock(nodes, new_block4)
 	time.Sleep(2 * time.Second)
 	for _, node := range nodes {
-		node.grandpa.InitRoundState(2, node.grandpa.block_tree.Copy())
+		grandpa, _ := node.grandpa.GetGrandpa(0)
+		grandpa.InitRoundState(2, node.blockTree.Copy())
 	}
 	fmt.Printf("nodes length = %d\n", len(nodes))
 	for i, node := range nodes {
-
+		grandpa, _ := node.grandpa.GetGrandpa(0)
 		if i >= 3 && i < 6 {
-			node.grandpa.sendDummyVote(2, PrevoteStage, new_block2)
-			node.grandpa.sendDummyVote(2, PrecommitStage, new_block2)
+			grandpa.sendDummyVote(2, PrevoteStage, new_block2)
+			grandpa.sendDummyVote(2, PrecommitStage, new_block2)
 		} else if i >= 6 && i < 9 {
-			node.grandpa.sendDummyVote(2, PrevoteStage, new_block3)
-			node.grandpa.sendDummyVote(2, PrecommitStage, new_block3)
+			grandpa.sendDummyVote(2, PrevoteStage, new_block3)
+			grandpa.sendDummyVote(2, PrecommitStage, new_block3)
 		} else {
-			node.grandpa.sendDummyVote(2, PrevoteStage, new_block4)
-			node.grandpa.sendDummyVote(2, PrecommitStage, new_block4)
-			node.grandpa.sendDummyVote(2, PrevoteStage, new_block3)
-			node.grandpa.sendDummyVote(2, PrecommitStage, new_block3)
+			grandpa.sendDummyVote(2, PrevoteStage, new_block4)
+			grandpa.sendDummyVote(2, PrecommitStage, new_block4)
+			grandpa.sendDummyVote(2, PrevoteStage, new_block3)
+			grandpa.sendDummyVote(2, PrecommitStage, new_block3)
 		}
 
 	}
 	fmt.Printf("equvocation on block %s\n", new_block3.Header.Hash().String())
 	time.Sleep(1 * time.Second)
 	for _, node := range nodes {
-		completable, err := node.grandpa.Finalizable(2)
+		grandpa, _ := node.grandpa.GetGrandpa(0)
+		completable, err := grandpa.Finalizable(2)
 		if err != nil {
 			fmt.Println(err)
 		}
-		fmt.Printf("[v%d] completable = %v\n", node.grandpa.GetSelfVoterIndex(2), completable)
+		fmt.Printf("[v%d] completable = %v\n", grandpa.GetSelfVoterIndex(2), completable)
 		if completable {
-			round_state, err := node.grandpa.GetRoundState(2)
+			round_state, err := grandpa.GetRoundState(2)
 			if err != nil {
 				fmt.Println(err)
 			}
 			round_state.PreVoteGraph.Print()
 		}
-		err = node.grandpa.AttemptToFinalizeAtRound(2)
+		err = grandpa.AttemptToFinalizeAtRound(2)
 		if err != nil {
 			fmt.Println(err)
 		}
 
 	}
 	time.Sleep(2 * time.Second)
-	nodes[0].grandpa.block_tree.Print()
-	assert.Equal(t, nodes[0].grandpa.block_tree.GetLastFinalizedBlock().Block.Header.Hash(), new_block.Header.Hash())
+	nodes[0].blockTree.Print()
+	assert.Equal(t, nodes[0].blockTree.GetLastFinalizedBlock().Block.Header.Hash(), new_block.Header.Hash())
 }
 
 /*
@@ -401,7 +416,8 @@ func case_multi_equvocation(t *testing.T) {
 	// nodes already running
 	addBlock(nodes, new_block)
 	for _, node := range nodes {
-		go node.grandpa.round_finalized_cheat(1, new_block)
+		grandpa, _ := node.grandpa.GetGrandpa(0)
+		go grandpa.round_finalized_cheat(1, new_block)
 	}
 	time.Sleep(1 * time.Second)
 	new_block = fakeblock(*new_block)
@@ -421,51 +437,53 @@ func case_multi_equvocation(t *testing.T) {
 	voting_set := []*types.Block{new_block2, new_block3, new_block4, new_block5, new_block6, new_block7}
 	time.Sleep(2 * time.Second)
 	for _, node := range nodes {
-		node.grandpa.InitRoundState(2, node.grandpa.block_tree.Copy())
+		grandpa, _ := node.grandpa.GetGrandpa(0)
+		grandpa.InitRoundState(2, node.blockTree.Copy())
 	}
 	fmt.Printf("nodes length = %d\n", len(nodes))
 	for i, node := range nodes {
-
+		grandpa, _ := node.grandpa.GetGrandpa(0)
 		if i <= 1 {
-			node.grandpa.sendDummyVote(2, PrevoteStage, new_block7)
-			node.grandpa.sendDummyVote(2, PrecommitStage, new_block7)
+			grandpa.sendDummyVote(2, PrevoteStage, new_block7)
+			grandpa.sendDummyVote(2, PrecommitStage, new_block7)
 		} else if i >= 2 && i < 4 {
-			node.grandpa.sendDummyVote(2, PrevoteStage, new_block3)
-			node.grandpa.sendDummyVote(2, PrecommitStage, new_block3)
+			grandpa.sendDummyVote(2, PrevoteStage, new_block3)
+			grandpa.sendDummyVote(2, PrecommitStage, new_block3)
 		} else if i >= 4 && i < 6 {
-			node.grandpa.sendDummyVote(2, PrevoteStage, new_block4)
-			node.grandpa.sendDummyVote(2, PrecommitStage, new_block4)
+			grandpa.sendDummyVote(2, PrevoteStage, new_block4)
+			grandpa.sendDummyVote(2, PrecommitStage, new_block4)
 		} else if i >= 6 && i < 8 {
-			node.grandpa.sendDummyVote(2, PrevoteStage, new_block5)
-			node.grandpa.sendDummyVote(2, PrecommitStage, new_block5)
+			grandpa.sendDummyVote(2, PrevoteStage, new_block5)
+			grandpa.sendDummyVote(2, PrecommitStage, new_block5)
 		} else if i >= 8 && i < 10 {
-			node.grandpa.sendDummyVote(2, PrevoteStage, new_block6)
-			node.grandpa.sendDummyVote(2, PrecommitStage, new_block6)
+			grandpa.sendDummyVote(2, PrevoteStage, new_block6)
+			grandpa.sendDummyVote(2, PrecommitStage, new_block6)
 		}
 
 		rand_num := rand.Intn(10)
 		if rand_num <= 5 {
-			node.grandpa.sendDummyVote(2, PrevoteStage, voting_set[rand_num])
-			node.grandpa.sendDummyVote(2, PrecommitStage, voting_set[rand_num])
+			grandpa.sendDummyVote(2, PrevoteStage, voting_set[rand_num])
+			grandpa.sendDummyVote(2, PrecommitStage, voting_set[rand_num])
 		}
 
 	}
 	fmt.Printf("equvocation on block %s\n", new_block3.Header.Hash().String())
 	time.Sleep(1 * time.Second)
 	for _, node := range nodes {
-		completable, err := node.grandpa.Finalizable(2)
+		grandpa, _ := node.grandpa.GetGrandpa(0)
+		completable, err := grandpa.Finalizable(2)
 		if err != nil {
 			fmt.Println(err)
 		}
-		fmt.Printf("[v%d] completable = %v\n", node.grandpa.GetSelfVoterIndex(2), completable)
+		fmt.Printf("[v%d] completable = %v\n", grandpa.GetSelfVoterIndex(2), completable)
 		if completable {
-			round_state, err := node.grandpa.GetRoundState(2)
+			round_state, err := grandpa.GetRoundState(2)
 			if err != nil {
 				fmt.Println(err)
 			}
 			round_state.PreVoteGraph.Print()
 		}
-		err = node.grandpa.AttemptToFinalizeAtRound(2)
+		err = grandpa.AttemptToFinalizeAtRound(2)
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -475,7 +493,8 @@ func case_multi_equvocation(t *testing.T) {
 
 	// we can't predict the final block hash
 	// so I'll print the tree and check if the last finalized block is correct
-	roundstate, err := nodes[0].grandpa.GetRoundState(2)
+	grandpa, _ := nodes[0].grandpa.GetGrandpa(0)
+	roundstate, err := grandpa.GetRoundState(2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,7 +503,7 @@ func case_multi_equvocation(t *testing.T) {
 	fmt.Printf("\nPreCommitGraph\n")
 	roundstate.PreCommitGraph.Print()
 	fmt.Printf("result\n")
-	nodes[0].grandpa.block_tree.Print()
+	nodes[0].blockTree.Print()
 }
 
 func (g *Grandpa) sendDummyVote(round uint64, stage GrandpaStage, block *types.Block) {

@@ -315,13 +315,13 @@ run_localclient_jam_dead: kill jam jam_clean run_parallel_jam_with_deadnode
 
 run_single_node:jam_clean
 	@echo "Starting single node JAM instance..."
-	@echo "Starting $(OUTPUT_DIR)/$(BINARY)... with network $(NETWORK) port $(SINGLE_NODE_PORT) start-time $(JAM_START_TIME)"
-	@$(OUTPUT_DIR)/$(BINARY) run --chain $(CHAINSPEC) --port $(SINGLE_NODE_PORT) --start-time "$(JAM_START_TIME)" --dev-validator 5
+	@echo "Starting $(OUTPUT_DIR)/$(ARCH)/$(BINARY)... with network $(NETWORK) port $(SINGLE_NODE_PORT) start-time $(JAM_START_TIME)"
+	@$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --chain $(CHAINSPEC) --port $(SINGLE_NODE_PORT) --start-time "$(JAM_START_TIME)" --dev-validator 5
 	@echo "Instance started."
 run_parallel_jam_with_deadnode:
 	@mkdir -p logs
-	@echo "Starting $(NUM_NODES) instances of $(OUTPUT_DIR)/$(BINARY)..."
-	@seq 0 $(shell echo $$(($(NUM_NODES) - 2))) | xargs -I{} -P $(NUM_NODES) sh -c 'PORT=$$(($(DEFAULT_PORT) + {})); $(OUTPUT_DIR)/$(BINARY) run  --chain $(CHAINSPEC) --dev-validator {}; echo "Instance {} finished with port $$PORT"' sh
+	@echo "Starting $(NUM_NODES) instances of $(OUTPUT_DIR)/$(ARCH)/$(BINARY)..."
+	@seq 0 $(shell echo $$(($(NUM_NODES) - 2))) | xargs -I{} -P $(NUM_NODES) sh -c 'PORT=$$(($(DEFAULT_PORT) + {})); $(OUTPUT_DIR)/$(ARCH)/$(BINARY) run  --chain $(CHAINSPEC) --dev-validator {}; echo "Instance {} finished with port $$PORT"' sh
 	@echo "All instances started."
 kill_parallel_jam:
 	@echo "Killing all instances of $(OUTPUT_DIR)/$(BINARY)..."

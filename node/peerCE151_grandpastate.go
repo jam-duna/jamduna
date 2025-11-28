@@ -40,7 +40,7 @@ func (p *Peer) SendGrandpaState(ctx context.Context, state grandpa.GrandpaStateM
 	return nil
 }
 
-func (n *Node) onGrandpaState(ctx context.Context, stream quic.Stream, msg []byte) error {
+func (n *Node) onGrandpaState(ctx context.Context, stream quic.Stream, msg []byte, peerId uint16) error {
 	defer stream.Close()
 
 	// Decode: Round Number ++ Set Id ++ Slot
@@ -48,7 +48,7 @@ func (n *Node) onGrandpaState(ctx context.Context, stream quic.Stream, msg []byt
 	if err := state.FromBytes(msg); err != nil {
 		return fmt.Errorf("onGrandpaState: decode failed: %w", err)
 	}
-
+	n.grandpa.SetWhoRoundReady(state.SetId, state.Round, peerId)
 	select {
 	case n.grandpa.StateMessageCh <- state:
 		return nil

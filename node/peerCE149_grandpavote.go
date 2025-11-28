@@ -41,13 +41,13 @@ func (p *Peer) SendGrandpaVote(ctx context.Context, req grandpa.GrandpaVote) err
 
 func (n *Node) onGrandpaVote(ctx context.Context, stream quic.Stream, msg []byte) error {
 	defer stream.Close()
-
 	var vote grandpa.GrandpaVote
 	if err := vote.FromBytes(msg); err != nil {
 		return fmt.Errorf("onGrandpaVote: failed to decode vote: %w", err)
 	}
 
 	stage := vote.SignedMessage.Message.Stage
+	// log.Info(log.Node, fmt.Sprintf("onGrandpaVote: received %v from peer", vote.GetVoteType()), "n", n.String(), "stage", stage, "vote", vote.String())
 	switch stage {
 	case grandpa.PrecommitStage:
 		select {

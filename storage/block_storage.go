@@ -60,6 +60,28 @@ func (s *StateDBStorage) StoreBlock(blk *types.Block, id uint16, slotTimestamp u
 	return nil
 }
 
+func (s *StateDBStorage) StoreCatchupMassage(round uint64, setId uint32, data []byte) error {
+	storeKey := append([]byte("catchup_"), common.Uint64ToBytes(round)...)
+	storeKey = append(storeKey, common.Uint32ToBytes(setId)...)
+	if err := s.WriteRawKV(storeKey, data); err != nil {
+		return fmt.Errorf("failed to store catchup message: %w", err)
+	}
+	return nil
+}
+
+func (s *StateDBStorage) GetCatchupMassage(round uint64, setId uint32) ([]byte, bool, error) {
+	storeKey := append([]byte("catchup_"), common.Uint64ToBytes(round)...)
+	storeKey = append(storeKey, common.Uint32ToBytes(setId)...)
+	data, ok, err := s.ReadRawKV(storeKey)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to read catchup message: %w", err)
+	}
+	if !ok {
+		return nil, false, nil
+	}
+	return data, true, nil
+}
+
 // StoreFinalizedBlock stores the finalized block at a well-known key
 func (s *StateDBStorage) StoreFinalizedBlock(blk *types.Block) error {
 	return s.WriteRawKV([]byte(blockFinalizedKey), blk.Bytes())

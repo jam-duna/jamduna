@@ -1,12 +1,14 @@
 package grandpa
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/colorfulnotion/jam/bls"
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -21,21 +23,47 @@ type Broadcaster interface {
 	FinalizedEpoch(epoch uint32, beefyHash common.Hash, aggregatedSignature bls.Signature)
 }
 
-type Grandpa struct {
-	block_tree           *types.BlockTree // hold the same block tree as the node itself
-	RoundStateMutex      sync.RWMutex
-	RoundState           map[uint64]*RoundState
-	selfkey              types.ValidatorSecret
-	Last_Completed_Round uint64
+type Syncer interface {
+	CatchUp(round uint64, setId uint32) (CatchUpResponse, error)
+	WarpSync(fromSetID uint32) (types.WarpSyncResponse, error)
+}
 
-	ScheduledAuthoritySet map[uint32][]types.Validator
-	authority_set_id      uint32
+type GrandpaEventKind string
 
-	Voter_Staked map[types.Ed25519Key]uint64
-	ErrorChan    chan error
+const (
+	NewEpochEvent GrandpaEventKind = "NewEpoch"
+	NewRoundEvent GrandpaEventKind = "NewRound"
+)
 
-	broadcaster Broadcaster
-	storage     types.JAMStorage
+type GrandpaEvent struct {
+	Kind  GrandpaEventKind
+	SetID uint32
+	Round uint64
+}
+
+type GrandpaManager struct {
+	Id            uint32
+	blockTree     *types.BlockTree
+	selfKey       types.ValidatorSecret
+	AuthoritySet  []types.Validator
+	Broadcaster   Broadcaster
+	WhoRoundReady map[uint32]map[uint64]uint16
+	WhoMutex      sync.Mutex
+	Syncer        Syncer
+	SyncChecker   map[uint32]map[uint64]struct{}
+	Sync          bool
+	SyncMutex     sync.Mutex
+	FarBehind     bool
+
+	Storage types.JAMStorage
+
+	Grandpa      map[uint32]*Grandpa
+	mutex        sync.Mutex
+	EventChan    chan GrandpaEvent
+	CurrentSetID uint32
+	CurrentRound uint64
+	ctx          context.Context
+	cancel       context.CancelFunc
 
 	// CE149
 	PreVoteMessageCh   chan GrandpaVote
@@ -43,7 +71,7 @@ type Grandpa struct {
 	PrimaryMessageCh   chan GrandpaVote
 
 	// CE150
-	CommitMessageCh chan GrandpaCommit
+	CommitMessageCh chan GrandpaCommitMessage
 
 	// CE151
 	StateMessageCh chan GrandpaStateMessage
@@ -53,8 +81,404 @@ type Grandpa struct {
 
 	// CE153
 	WarpSyncRequestCh chan uint32
+}
 
-	NewValidatorsCh chan []types.Validator
+func (gm *GrandpaManager) SetWhoRoundReady(setID uint32, round uint64, peerID uint16) {
+	gm.WhoMutex.Lock()
+	defer gm.WhoMutex.Unlock()
+	if _, ok := gm.WhoRoundReady[setID]; !ok {
+		gm.WhoRoundReady[setID] = make(map[uint64]uint16)
+	}
+	if _, ok := gm.WhoRoundReady[setID][round]; ok {
+		return
+	}
+	gm.WhoRoundReady[setID][round-1] = peerID
+}
+
+func (gm *GrandpaManager) GetWhoRoundReady(setID uint32, round uint64) (uint16, bool) {
+	gm.WhoMutex.Lock()
+	defer gm.WhoMutex.Unlock()
+	if rounds, ok := gm.WhoRoundReady[setID]; ok {
+		if peerID, ok := rounds[round]; ok {
+			return peerID, true
+		}
+	}
+	return 0, false
+}
+
+func (gm *GrandpaManager) IsSyncing() bool {
+	gm.SyncMutex.Lock()
+	defer gm.SyncMutex.Unlock()
+	return gm.Sync
+}
+
+func (gm *GrandpaManager) SetSyncing(syncing bool) {
+	gm.SyncMutex.Lock()
+	defer gm.SyncMutex.Unlock()
+	gm.Sync = syncing
+}
+
+func NewGrandpaManager(blockTree *types.BlockTree, selfKey types.ValidatorSecret) *GrandpaManager {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &GrandpaManager{
+		blockTree:          blockTree,
+		selfKey:            selfKey,
+		Grandpa:            make(map[uint32]*Grandpa),
+		EventChan:          make(chan GrandpaEvent, DefaultChannelSize),
+		ctx:                ctx,
+		cancel:             cancel,
+		PreVoteMessageCh:   make(chan GrandpaVote, DefaultChannelSize),
+		PreCommitMessageCh: make(chan GrandpaVote, DefaultChannelSize),
+		PrimaryMessageCh:   make(chan GrandpaVote, DefaultChannelSize),
+		CommitMessageCh:    make(chan GrandpaCommitMessage, DefaultChannelSize),
+		StateMessageCh:     make(chan GrandpaStateMessage, DefaultChannelSize),
+		CatchUpMessageCh:   make(chan GrandpaCatchUp, DefaultChannelSize),
+		WarpSyncRequestCh:  make(chan uint32, DefaultChannelSize),
+		SyncChecker:        make(map[uint32]map[uint64]struct{}),
+		WhoRoundReady:      make(map[uint32]map[uint64]uint16),
+	}
+}
+
+func (gm *GrandpaManager) SetGrandpa(setID uint32, grandpa *Grandpa) {
+	gm.mutex.Lock()
+	defer gm.mutex.Unlock()
+	grandpa.EventChan = gm.EventChan
+	gm.Grandpa[setID] = grandpa
+}
+
+func (gm *GrandpaManager) GetGrandpa(setID uint32) (*Grandpa, bool) {
+	gm.mutex.Lock()
+	defer gm.mutex.Unlock()
+	grandpa, exists := gm.Grandpa[setID]
+	return grandpa, exists
+}
+
+func (gm *GrandpaManager) GetOrInitializeGrandpa(setID uint32) *Grandpa {
+	gm.mutex.Lock()
+	grandpa, exists := gm.Grandpa[setID]
+	gm.mutex.Unlock()
+	if !exists {
+		// Share the live block tree so the new authority set keeps seeing imported blocks.
+		grandpa = NewGrandpa(gm.blockTree, gm.selfKey, gm.AuthoritySet, nil, gm.Broadcaster, gm.Storage, setID)
+		gm.SetGrandpa(setID, grandpa)
+	}
+	return grandpa
+}
+
+// isBehind checks if we are behind the given set ID and round
+func (gm *GrandpaManager) isBehind(targetSetID uint32, targetRound uint64) bool {
+	if targetSetID > gm.CurrentSetID {
+		return true
+	}
+	if targetSetID == gm.CurrentSetID && targetRound > gm.CurrentRound+1 {
+		return true
+	}
+	return false
+}
+
+// isNextRound checks if the state message represents the next expected round
+func (gm *GrandpaManager) isNextRound(targetSetID uint32, targetRound uint64) bool {
+	return targetSetID == gm.CurrentSetID && targetRound == gm.CurrentRound+1
+}
+
+// handleStateMessage processes incoming state messages and triggers catch-up if needed
+func (gm *GrandpaManager) handleStateMessage(state GrandpaStateMessage) {
+	targetSetID := state.SetId
+	targetRound := state.Round
+
+	// Dedup: check if we've already processed this state
+	if _, ok := gm.SyncChecker[targetSetID]; !ok {
+		gm.SyncChecker[targetSetID] = make(map[uint64]struct{})
+	}
+	if _, ok := gm.SyncChecker[targetSetID][targetRound]; ok {
+		return // already processing
+	}
+	gm.SyncChecker[targetSetID][targetRound] = struct{}{}
+
+	log.Trace(log.Grandpa, "StateMessage received",
+		"node", gm.Id, "targetSet", targetSetID, "targetRound", targetRound,
+		"currentSet", gm.CurrentSetID, "currentRound", gm.CurrentRound, "syncing", gm.IsSyncing())
+
+	// Case 1: We're synced and this is the next round - advance normally
+	if gm.IsSyncing() && gm.isNextRound(targetSetID, targetRound) {
+		gm.EventChan <- GrandpaEvent{
+			Kind:  NewRoundEvent,
+			SetID: targetSetID,
+			Round: targetRound,
+		}
+		return
+	}
+
+	// Case 2: We're behind - need to catch up
+	if gm.isBehind(targetSetID, targetRound) {
+		gm.SetSyncing(false)
+		go gm.catchUpTo(targetSetID, targetRound)
+		return
+	}
+
+	// Case 3: We're syncing but received a future state - set a timeout to detect if we fall behind
+	if gm.IsSyncing() && (targetSetID != gm.CurrentSetID || targetRound > gm.CurrentRound+1) {
+		go gm.monitorSyncProgress(targetSetID, targetRound)
+	}
+}
+
+// catchUpTo catches up from current position to target set ID and round
+func (gm *GrandpaManager) catchUpTo(targetSetID uint32, targetRound uint64) {
+	log.Info(log.Grandpa, "Starting catch-up",
+		"node", gm.Id, "fromSet", gm.CurrentSetID, "fromRound", gm.CurrentRound,
+		"toSet", targetSetID, "toRound", targetRound)
+
+	// If we're behind on authority sets, use warp sync first to quickly update
+	if targetSetID > gm.CurrentSetID {
+		if err := gm.warpSyncToSet(targetSetID); err != nil {
+			log.Warn(log.Grandpa, "Warp sync failed, falling back to round-by-round catch-up",
+				"node", gm.Id, "err", err)
+			// Fall through to round-by-round catch-up
+		}
+	}
+
+	// After warp sync (or if it failed), catch up remaining rounds in target set
+	gm.catchUpRoundsInSet(targetSetID, targetRound)
+
+	// Now we should be caught up - join the target round live
+	gm.SetSyncing(true)
+	gm.EventChan <- GrandpaEvent{
+		Kind:  NewRoundEvent,
+		SetID: targetSetID,
+		Round: targetRound,
+	}
+}
+
+// warpSyncToSet uses warp sync to quickly update authority sets from current to target
+func (gm *GrandpaManager) warpSyncToSet(targetSetID uint32) error {
+	if gm.Syncer == nil {
+		return fmt.Errorf("syncer not configured")
+	}
+
+	log.Info(log.Grandpa, "Starting warp sync for authority sets",
+		"node", gm.Id, "fromSet", gm.CurrentSetID, "toSet", targetSetID)
+
+	// Request warp sync fragments from peers
+	response, err := gm.Syncer.WarpSync(gm.CurrentSetID)
+	if err != nil {
+		return fmt.Errorf("warp sync request failed: %w", err)
+	}
+
+	if len(response.Fragments) == 0 {
+		return fmt.Errorf("no warp sync fragments received")
+	}
+
+	log.Info(log.Grandpa, "Received warp sync fragments",
+		"node", gm.Id, "count", len(response.Fragments))
+
+	// Process each fragment to update authority sets
+	for _, fragment := range response.Fragments {
+		setID := fragment.Justification.SetId
+
+		// Skip fragments we've already processed
+		if setID < gm.CurrentSetID {
+			continue
+		}
+
+		// Stop if we've reached target
+		if setID >= targetSetID {
+			break
+		}
+
+		// Initialize grandpa for this set if needed
+		grandpa := gm.GetOrInitializeGrandpa(setID)
+
+		// Verify and process the warp sync fragment
+		if err := grandpa.ProcessWarpSyncFragment(fragment); err != nil {
+			log.Error(log.Grandpa, "Failed to process warp sync fragment",
+				"node", gm.Id, "setID", setID, "err", err)
+			return err
+		}
+
+		// Update current set ID after successful processing
+		gm.CurrentSetID = setID + 1
+		gm.CurrentRound = 0
+
+		log.Info(log.Grandpa, "Warp sync: updated authority set",
+			"node", gm.Id, "setID", setID, "newCurrentSet", gm.CurrentSetID)
+	}
+
+	return nil
+}
+
+// catchUpRoundsInSet catches up rounds within a single authority set
+func (gm *GrandpaManager) catchUpRoundsInSet(setID uint32, targetRound uint64) {
+	grandpa := gm.GetOrInitializeGrandpa(setID)
+
+	// Determine starting round
+	startRound := uint64(0)
+	if setID == gm.CurrentSetID {
+		startRound = gm.CurrentRound + 1
+	}
+
+	// Target round - catch up to one before target so we can join live
+	var endRound uint64
+	if targetRound > 0 {
+		endRound = targetRound - 1
+	} else {
+		endRound = 0
+	}
+
+	if startRound > endRound {
+		return // Nothing to catch up
+	}
+
+	log.Debug(log.Grandpa, "Catching up rounds in set",
+		"node", gm.Id, "setID", setID, "startRound", startRound, "endRound", endRound)
+
+	for round := startRound; round <= endRound; round++ {
+		select {
+		case <-gm.ctx.Done():
+			return
+		default:
+		}
+
+		catchUpRes, err := gm.Syncer.CatchUp(round, setID)
+		if err != nil {
+			log.Error(log.Grandpa, "CatchUp failed", "node", gm.Id, "setID", setID, "round", round, "err", err)
+			continue
+		}
+
+		err = grandpa.PlayRoundWithCatchUp(gm.ctx, round, catchUpRes)
+		if err != nil {
+			log.Error(log.Grandpa, "PlayRoundWithCatchUp failed", "node", gm.Id, "setID", setID, "round", round, "err", err)
+			continue
+		}
+
+		gm.CurrentSetID = setID
+		gm.CurrentRound = round
+		log.Info(log.Grandpa, "Caught up", "node", gm.Id, "setID", setID, "round", round)
+	}
+}
+
+// getLastRoundForSet returns the last completed round for a given set ID
+// This queries storage for stored catch-up messages to find the highest round
+func (gm *GrandpaManager) getLastRoundForSet(setID uint32) uint64 {
+	if gm.Storage == nil {
+		return 0
+	}
+	// Search for the highest round that has a stored catch-up message
+	// Start from a reasonable upper bound and work backwards
+	for round := uint64(1000); round > 0; round-- {
+		_, exists, err := gm.Storage.GetCatchupMassage(round, setID)
+		if err == nil && exists {
+			return round
+		}
+	}
+	return 0
+}
+
+// monitorSyncProgress monitors if we're making progress and triggers catch-up if not
+func (gm *GrandpaManager) monitorSyncProgress(expectedSetID uint32, expectedRound uint64) {
+	select {
+	case <-time.After(6 * time.Second):
+		// Check if we've caught up
+		if gm.isBehind(expectedSetID, expectedRound) {
+			log.Warn(log.Grandpa, "Still behind after timeout",
+				"node", gm.Id, "expectedSet", expectedSetID, "expectedRound", expectedRound,
+				"currentSet", gm.CurrentSetID, "currentRound", gm.CurrentRound)
+			gm.SetSyncing(false)
+			go gm.catchUpTo(expectedSetID, expectedRound)
+		}
+	case <-gm.ctx.Done():
+		return
+	}
+}
+
+func (gm *GrandpaManager) RunManager() {
+	gm.SetSyncing(true)
+	for {
+		select {
+		case state := <-gm.StateMessageCh:
+			gm.handleStateMessage(state)
+		case event := <-gm.EventChan:
+			switch event.Kind {
+			case NewEpochEvent:
+				if event.SetID <= gm.CurrentSetID {
+					// Ignore stale epoch events
+					continue
+				}
+				log.Info(log.Grandpa, "Manager event", "node", gm.Id, "kind", event.Kind, "setID", event.SetID, "round", event.Round)
+				gm.CurrentSetID = event.SetID
+				gm.CurrentRound = event.Round // typically 0 for a new epoch
+				grandpa := gm.GetOrInitializeGrandpa(gm.CurrentSetID)
+				grandpaState := GrandpaStateMessage{
+					Round: gm.CurrentRound,
+					SetId: gm.CurrentSetID,
+					Slot:  uint32(gm.blockTree.GetLastFinalizedBlock().Block.Header.Slot),
+				}
+				grandpa.broadcaster.Broadcast(grandpaState)
+				go func() {
+					grandpa.PlayGrandpaRound(gm.ctx, gm.CurrentRound)
+					// after play grandpa round, we should store the catup massage
+
+				}()
+
+			case NewRoundEvent:
+				if event.SetID != gm.CurrentSetID {
+					// Stale event from a previous authority set
+					continue
+				}
+				if event.Round <= gm.CurrentRound {
+					// Already running or completed this round
+					continue
+				}
+				if event.Round == 4 && gm.Id == 5 {
+					continue
+				}
+				log.Info(log.Grandpa, "Manager event", "node", gm.Id, "kind", event.Kind, "setID", event.SetID, "round", event.Round)
+				gm.CurrentRound = event.Round
+				if grandpa, exists := gm.GetGrandpa(gm.CurrentSetID); exists {
+					grandpaState := GrandpaStateMessage{
+						Round: gm.CurrentRound,
+						SetId: gm.CurrentSetID,
+						Slot:  uint32(gm.blockTree.GetLastFinalizedBlock().Block.Header.Slot),
+					}
+					grandpa.broadcaster.Broadcast(grandpaState)
+					go func() {
+						grandpa.PlayGrandpaRound(gm.ctx, gm.CurrentRound)
+					}()
+				}
+			}
+		case <-gm.ctx.Done():
+			return
+		}
+	}
+}
+
+func (gm *GrandpaManager) Stop() {
+	if gm.cancel != nil {
+		gm.cancel()
+	}
+}
+
+type Grandpa struct {
+	block_tree           *types.BlockTree // hold the same block tree as the node itself
+	RoundStateMutex      sync.RWMutex
+	RoundState           map[uint64]*RoundState
+	selfkey              types.ValidatorSecret
+	Last_Completed_Round uint64
+
+	LastFinalizedSlot     uint32
+	ScheduledAuthoritySet []types.Validator
+	UpcomingAuthoritySet  []types.Validator
+	authority_set_id      uint32
+
+	Voter_Staked map[types.Ed25519Key]uint64
+
+	broadcaster Broadcaster
+	storage     types.JAMStorage
+
+	// event channel
+	EventChan chan GrandpaEvent
+
+	roundMu      sync.Mutex
+	activeRounds map[uint64]struct{}
 
 	// BLS signature tracking: map[epoch_beefyHash]map[validatorIndex]signature
 	singleBLSSignatures      map[string]map[uint16]bls.Signature
@@ -65,50 +489,58 @@ type Grandpa struct {
 	finalizedSignaturesMutex sync.RWMutex
 }
 
-// this function will be used in receiving the grandpa message and be the bridge between grandpa and network
-func (g *Grandpa) RunGrandpa() {
+// RunGrandpa receives grandpa messages and routes them to the appropriate Grandpa instance
+func (gm *GrandpaManager) RunGrandpa() {
 	for {
 		select {
+		case vote := <-gm.PreVoteMessageCh: // CE149
+			auth_set_id := vote.SetId
+			grandpa := gm.GetOrInitializeGrandpa(auth_set_id)
+			err := grandpa.ProcessPreVoteMessage(vote)
+			if err != nil {
+				fmt.Println(err)
+			}
+		case vote := <-gm.PreCommitMessageCh: // CE149
+			auth_set_id := vote.SetId
+			grandpa := gm.GetOrInitializeGrandpa(auth_set_id)
+			err := grandpa.ProcessPreCommitMessage(vote)
+			if err != nil {
+				fmt.Println(err)
+			}
 
-		case vote := <-g.PreVoteMessageCh: // CE149
-			err := g.ProcessPreVoteMessage(vote)
+		case vote := <-gm.PrimaryMessageCh: // CE149
+			auth_set_id := vote.SetId
+			grandpa := gm.GetOrInitializeGrandpa(auth_set_id)
+			err := grandpa.ProcessPrimaryProposeMessage(vote)
 			if err != nil {
 				fmt.Println(err)
 			}
-		case vote := <-g.PreCommitMessageCh: // CE149
-			err := g.ProcessPreCommitMessage(vote)
-			if err != nil {
-				fmt.Println(err)
-			}
-		case vote := <-g.PrimaryMessageCh: // CE149
-			err := g.ProcessPrimaryProposeMessage(vote)
-			if err != nil {
-				fmt.Println(err)
-			}
-		case commit := <-g.CommitMessageCh: // C150
-			g.ProcessCommitMessage(commit)
-		case state := <-g.StateMessageCh: // CE151
-			err := g.ProcessStateMessage(state)
-			if err != nil {
-				fmt.Println(err)
-			}
-		case catchup := <-g.CatchUpMessageCh: // CE152
-			response, err := g.ProcessCatchUpMessage(catchup)
-			if err != nil {
-				fmt.Println(err)
-			}
-			g.ProcessCatchUpResponse(response)
-		case warpReq := <-g.WarpSyncRequestCh: // CE153
-			response, err := g.ProcessWarpSyncRequest(warpReq)
-			if err != nil {
-				fmt.Println(err)
-			}
-			g.ProcessWarpSyncResponse(response)
-		case validators := <-g.NewValidatorsCh:
-			g.ProcessNewValidators(validators)
 
-		case <-g.ErrorChan:
-			// fmt.Println("Grandpa error:", err)
+		case commit := <-gm.CommitMessageCh: // CE150
+			auth_set_id := commit.SetId
+			grandpa := gm.GetOrInitializeGrandpa(auth_set_id)
+			grandpa.ProcessCommitMessage(commit)
+
+		case catchup := <-gm.CatchUpMessageCh: // CE152
+			auth_set_id := catchup.SetId
+			grandpa := gm.GetOrInitializeGrandpa(auth_set_id)
+			response, err := grandpa.ProcessCatchUpMessage(catchup)
+			if err != nil {
+				fmt.Println(err)
+			}
+			grandpa.ProcessCatchUpResponse(response, auth_set_id)
+		case warpReq := <-gm.WarpSyncRequestCh: // CE153
+			// Warp sync requests don't have a SetId, use current set
+			grandpa, exist := gm.GetGrandpa(gm.CurrentSetID)
+			if exist {
+				response, err := grandpa.ProcessWarpSyncRequest(warpReq)
+				if err != nil {
+					fmt.Println(err)
+				}
+				grandpa.ProcessWarpSyncResponse(response)
+			}
+		case <-gm.ctx.Done():
+			return
 		}
 	}
 }
@@ -118,6 +550,25 @@ type GrandpaRound struct {
 	Timer1Signal chan bool
 	Timer2Signal chan bool
 	Ticker       *time.Ticker
+}
+
+func (g *Grandpa) tryStartRound(round uint64) bool {
+	g.roundMu.Lock()
+	defer g.roundMu.Unlock()
+	if g.activeRounds == nil {
+		g.activeRounds = make(map[uint64]struct{})
+	}
+	if _, exists := g.activeRounds[round]; exists {
+		return false
+	}
+	g.activeRounds[round] = struct{}{}
+	return true
+}
+
+func (g *Grandpa) finishRound(round uint64) {
+	g.roundMu.Lock()
+	delete(g.activeRounds, round)
+	g.roundMu.Unlock()
 }
 
 func (g *Grandpa) InitRoundState(round uint64, block_tree *types.BlockTree) {
@@ -168,42 +619,34 @@ func (g *Grandpa) GetCJF(round uint64) (*GrandpaCJF, bool) {
 	}
 }
 
-func NewGrandpa(block_tree *types.BlockTree, selfkey types.ValidatorSecret, authSet0 []types.Validator, genesis_blk *types.Block, broadcaster Broadcaster, stor types.JAMStorage) *Grandpa {
+func NewGrandpa(block_tree *types.BlockTree, selfkey types.ValidatorSecret, authSet0 []types.Validator, genesis_blk *types.Block, broadcaster Broadcaster, stor types.JAMStorage, authority_set_id uint32) *Grandpa {
 
 	staked := make(map[types.Ed25519Key]uint64)
 	for _, validator := range authSet0 {
 		staked[validator.Ed25519] = 100
 	}
 	g := &Grandpa{
-		block_tree:            block_tree,
-		RoundState:            make(map[uint64]*RoundState),
-		selfkey:               selfkey,
-		Last_Completed_Round:  0,
-		ScheduledAuthoritySet: make(map[uint32][]types.Validator),
-		Voter_Staked:          staked,
-		broadcaster:           broadcaster,
-		storage:               stor,
-		authority_set_id:      0,
-		singleBLSSignatures:   make(map[string]map[uint16]bls.Signature),
-		finalizedSignatures:   make(map[string]bls.Signature),
+		block_tree:           block_tree,
+		RoundState:           make(map[uint64]*RoundState),
+		selfkey:              selfkey,
+		Last_Completed_Round: 0,
+		Voter_Staked:         staked,
+		broadcaster:          broadcaster,
+		storage:              stor,
+		authority_set_id:     authority_set_id,
+		singleBLSSignatures:  make(map[string]map[uint16]bls.Signature),
+		finalizedSignatures:  make(map[string]bls.Signature),
+		activeRounds:         make(map[uint64]struct{}),
 	}
-	g.ScheduledAuthoritySet[0] = authSet0
+	g.ScheduledAuthoritySet = authSet0
+	g.UpcomingAuthoritySet = authSet0
 	g.InitRoundState(0, block_tree.Copy())
 	g.InitTrackers(0)
 
-	// Initialize input channels
-	g.PreVoteMessageCh = make(chan GrandpaVote, DefaultChannelSize)
-	g.PreCommitMessageCh = make(chan GrandpaVote, DefaultChannelSize)
-	g.PrimaryMessageCh = make(chan GrandpaVote, DefaultChannelSize)
-	g.CommitMessageCh = make(chan GrandpaCommit, DefaultChannelSize)
-	g.StateMessageCh = make(chan GrandpaStateMessage, DefaultChannelSize)
-	g.CatchUpMessageCh = make(chan GrandpaCatchUp, DefaultChannelSize)
-	g.WarpSyncRequestCh = make(chan uint32, DefaultChannelSize)
-	g.NewValidatorsCh = make(chan []types.Validator, DefaultChannelSize)
-	g.ErrorChan = make(chan error, DefaultChannelSize)
-
 	// This is sufficient to get everyone to broadcast finalization of genesis
-	g.Broadcast(g.NewPrecommitVoteMessage(genesis_blk, 0))
+	if genesis_blk != nil {
+		g.Broadcast(g.NewPrecommitVoteMessage(genesis_blk, 0))
+	}
 	// commit, _ := g.NewFinalCommitMessage(genesis_blk, 0)
 	// g.Broadcast(g.NewPrevoteVoteMessage(genesis_blk, 0))
 	// g.Broadcast(commit)
@@ -215,7 +658,7 @@ func (g *Grandpa) Broadcast(msg interface{}) {
 }
 
 func (g *Grandpa) GetCurrentScheduledAuthoritySet(round uint64) []types.Validator {
-	return g.ScheduledAuthoritySet[0] // TODO: need to change to round
+	return g.ScheduledAuthoritySet // TODO: need to change to round
 }
 
 func (g *Grandpa) GetCurrentAuthoritySetIndex(round uint64, ed25519 types.Ed25519Key) int {
@@ -257,8 +700,8 @@ func (g *Grandpa) GetSupermajorityThreshold(round uint64) int {
 	return weight*2/3 + 1
 }
 
-func (g *Grandpa) SetScheduledAuthoritySet(setID uint32, authorities []types.Validator) {
-	g.ScheduledAuthoritySet[setID] = authorities
+func (g *Grandpa) SetScheduledAuthoritySet(authorities []types.Validator) {
+	g.ScheduledAuthoritySet = authorities
 }
 
 func (g *Grandpa) InitTrackers(round uint64) {
@@ -302,40 +745,43 @@ func DerivePrimary(r uint64, V []types.Validator) uint64 {
 
 // Algorithm 16. Best Final Candidate
 func (g *Grandpa) BestFinalCandidate(round uint64) (common.Hash, *types.BT_Node, error) {
+	// For round 0, return the last finalized block
+	if round == 0 {
+		last_finalized := g.block_tree.GetLastFinalizedBlock()
+		return last_finalized.Block.Header.Hash(), last_finalized, nil
+	}
+
+	// Get GHOST for current round
 	ghost_hash, ghost, err := g.GrandpaGhost(round)
 	if err != nil {
 		return common.Hash{}, nil, err
 	}
-	if round == 0 {
+
+	// get the young blocks from the tree
+	round_state, err := g.GetRoundState(round)
+	//if can't get the round state, return the ghost block
+	if err != nil {
+		return ghost_hash, ghost, nil
+	}
+	round_state.UpdatePreCommitGraph(true)
+	precommit_graph := round_state.PreCommitGraph
+	// root_hash := precommit_graph.Root.Block.Header.Hash()。
+	old_ghost, err := precommit_graph.FindGhost(ghost_hash, uint64(g.GetSupermajorityThreshold(round)))
+	if err != nil {
+		return ghost_hash, ghost, nil
+	}
+	old_ghost_block, ok := g.block_tree.GetBlockNode(old_ghost.Block.Header.Hash())
+	if !ok {
+		return ghost_hash, ghost, nil
+	}
+	older := g.block_tree.ChildOrBrother(ghost, old_ghost_block)
+	if !older {
+		return ghost_hash, ghost, nil
+	}
+	if old_ghost_block.Block.GetParentHeaderHash() == ghost.Block.GetParentHeaderHash() {
 		return ghost_hash, ghost, nil
 	} else {
-		// get the young blocks from the tree
-		round_state, err := g.GetRoundState(round)
-		//if can't get the round state, return the ghost block
-		if err != nil {
-			return ghost_hash, ghost, nil
-		}
-		round_state.UpdatePreCommitGraph(true)
-		precommit_graph := round_state.PreCommitGraph
-		// root_hash := precommit_graph.Root.Block.Header.Hash()。
-		old_ghost, err := precommit_graph.FindGhost(ghost_hash, uint64(g.GetSupermajorityThreshold(round)))
-		if err != nil {
-			return ghost_hash, ghost, nil
-		}
-		old_ghost, ok := g.block_tree.GetBlockNode(old_ghost.Block.Header.Hash())
-		older := g.block_tree.ChildOrBrother(ghost, old_ghost)
-		if !older {
-			return ghost_hash, ghost, nil
-		}
-		if err != nil || !ok {
-			return ghost_hash, ghost, nil
-		}
-		if old_ghost.Block.GetParentHeaderHash() == ghost.Block.GetParentHeaderHash() {
-			return ghost_hash, ghost, nil
-		} else {
-			return old_ghost.Block.Header.Hash(), old_ghost, nil
-		}
-
+		return old_ghost_block.Block.Header.Hash(), old_ghost_block, nil
 	}
 }
 
@@ -382,14 +828,32 @@ func (g *Grandpa) GrandpaGhost(round uint64) (common.Hash, *types.BT_Node, error
 
 // Algorithm 18. Best PreVote Candidate
 func (g *Grandpa) BestPreVoteCandidate(round uint64) (common.Hash, *types.BT_Node, error) {
+	// For round 0, return last finalized block
+	if round == 0 {
+		last_finalized := g.block_tree.GetLastFinalizedBlock()
+		return last_finalized.Block.Header.Hash(), last_finalized, nil
+	}
+
 	round_state, err := g.GetRoundState(round)
 	if err != nil {
 		return common.Hash{}, nil, err
 	}
 	// get the ghost block
-	L_Hash, L_block, err := g.BestFinalCandidate(round - 1)
-	if err != nil {
-		return common.Hash{}, nil, err
+	var (
+		L_Hash  common.Hash
+		L_block *types.BT_Node
+	)
+	if round == 0 {
+		L_block = g.block_tree.GetLastFinalizedBlock()
+		if L_block == nil {
+			return common.Hash{}, nil, fmt.Errorf("last finalized block not found")
+		}
+		L_Hash = L_block.Block.Header.Hash()
+	} else {
+		L_Hash, L_block, err = g.BestFinalCandidate(round - 1)
+		if err != nil {
+			return common.Hash{}, nil, err
+		}
 	}
 	err = round_state.UpdatePreVoteGraph(true)
 	if err != nil {
@@ -458,11 +922,38 @@ func (g *Grandpa) AttemptToFinalizeAtRound(round uint64) error {
 
 	if e_bigger_than_l && e_enough_votes {
 		g.block_tree.FinalizeBlock(best_final_candidate_hash)
+		EpochChanged := false
+		if best_final_candidate.Block.Header.Slot/types.EpochLength > last_finalized_block.Block.Header.Slot/types.EpochLength {
+			EpochChanged = true
+		}
+		g.LastFinalizedSlot = best_final_candidate.Block.Header.Slot
+		if EpochChanged && g.EventChan != nil {
+			newSetEvent := GrandpaEvent{
+				Kind:  NewEpochEvent,
+				SetID: g.authority_set_id + 1,
+				Round: 0,
+			}
+			g.EventChan <- newSetEvent
+		}
 		commit, err := g.NewFinalCommitMessage(best_final_candidate.Block, round)
 		if err != nil {
 			return err
 		}
 		g.Broadcast(commit)
+		if EpochChanged {
+			// store the grandpa warp sync info
+			var warpInfo types.WarpSyncFragment
+			warpInfo.Header = best_final_candidate.Block.Header
+			warpInfo.Justification.Commit = commit.Commit
+			warpInfo.Justification.Round = round
+			warpInfo.Justification.SetId = g.authority_set_id
+			warpInfo.Justification.VotesAncestries = g.GetVotesAncestries(commit.Commit, best_final_candidate.Block.Header.Hash())
+			err = g.storage.StoreWarpSyncFragment(g.authority_set_id, warpInfo)
+			if err != nil {
+				return err
+			}
+		}
+
 	}
 	return nil
 }
@@ -484,9 +975,17 @@ func (g *Grandpa) Finalizable(round uint64) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	_, best_candidate_m1_block, err := g.BestFinalCandidate(round - 1)
-	if err != nil {
-		return false, err
+	var best_candidate_m1_block *types.BT_Node
+	if round == 0 {
+		best_candidate_m1_block = g.block_tree.GetLastFinalizedBlock()
+		if best_candidate_m1_block == nil {
+			return false, fmt.Errorf("last finalized block not found")
+		}
+	} else {
+		_, best_candidate_m1_block, err = g.BestFinalCandidate(round - 1)
+		if err != nil {
+			return false, err
+		}
 	}
 	first := g.block_tree.ChildOrBrother(best_candidate_block, best_candidate_m1_block)
 	second := g.block_tree.ChildOrBrother(ghost_block, best_candidate_block)
@@ -544,15 +1043,11 @@ func (g *Grandpa) GetSelfVoterIndex(round uint64) uint64 {
 }
 
 func (g *Grandpa) ProcessNewValidators(validators []types.Validator) {
-	g.ScheduledAuthoritySet[g.authority_set_id] = validators
+	g.ScheduledAuthoritySet = validators
 }
 
-func (g *Grandpa) GetAuthoritySet(setID uint32) ([]types.Validator, bool) {
-	authSet, exists := g.ScheduledAuthoritySet[setID]
-	if !exists {
-		return nil, false
-	}
-	return authSet, true
+func (g *Grandpa) GetAuthoritySet() []types.Validator {
+	return g.ScheduledAuthoritySet
 }
 
 func (g *Grandpa) GetQuorumSize(round uint64) int {
@@ -670,4 +1165,25 @@ func (g *Grandpa) ProcessBLSSignature(epoch uint32, beefyHash common.Hash, signa
 	}
 
 	return nil
+}
+
+func (g *Grandpa) GetVotesAncestries(commit types.GrandpaCommit, excludeHeader common.Hash) []types.BlockHeader {
+	blockHeaders := make(map[common.Hash]types.BlockHeader)
+	for _, precommit := range commit.Precommits {
+		blockHash := precommit.Vote.HeaderHash
+		if blockHash == excludeHeader {
+			continue
+		}
+		if _, exists := blockHeaders[blockHash]; !exists {
+			blockNode, ok := g.block_tree.GetBlockNode(blockHash)
+			if ok {
+				blockHeaders[blockHash] = blockNode.Block.Header
+			}
+		}
+	}
+	headers := make([]types.BlockHeader, 0, len(blockHeaders))
+	for _, header := range blockHeaders {
+		headers = append(headers, header)
+	}
+	return headers
 }

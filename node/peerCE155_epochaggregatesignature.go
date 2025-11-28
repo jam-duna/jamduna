@@ -74,9 +74,9 @@ func (n *Node) onEpochAggregateSignature(ctx context.Context, stream quic.Stream
 
 	// Process the BLS signature
 	if n.grandpa != nil {
-		if err := n.grandpa.ProcessAggregateBLSSignature(epochFinalized.Epoch, epochFinalized.BeefyHash, epochFinalized.Signature, epochFinalized.ValidatorIndex); err != nil {
-			return fmt.Errorf("ProcessAggregateBLSSignature failed: %w", err)
-		}
+		// if err := n.grandpa.ProcessAggregateBLSSignature(epochFinalized.Epoch, epochFinalized.BeefyHash, epochFinalized.Signature, epochFinalized.ValidatorIndex); err != nil {
+		// 	return fmt.Errorf("ProcessAggregateBLSSignature failed: %w", err)
+		// }
 	}
 
 	return nil

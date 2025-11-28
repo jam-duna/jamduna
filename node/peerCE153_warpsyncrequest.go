@@ -62,12 +62,14 @@ func (n *Node) onWarpSyncRequest(ctx context.Context, stream quic.Stream, msg []
 	req := binary.LittleEndian.Uint32(msg[:4])
 
 	// Build the WarpSyncResponse using the node's GRANDPA state
-	response, err := n.grandpa.GetWarpSyncResponse(req)
+	grandpa := n.grandpa.GetOrInitializeGrandpa(n.grandpa.CurrentSetID)
+	response, err := grandpa.GetWarpSyncResponse(req)
 	if err != nil {
-		return fmt.Errorf("onWarpSyncRequest: GetWarpSyncResponse failed: %w", err)
+		// If we can't get fragments, return empty response instead of error
+		response = types.WarpSyncResponse{Fragments: []types.WarpSyncFragment{}}
 	}
 
-	// Send response: Catchup
+	// Send response
 	respBytes, err := response.ToBytes()
 	if err != nil {
 		return fmt.Errorf("onWarpSyncRequest: response.ToBytes failed: %w", err)

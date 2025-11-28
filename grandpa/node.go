@@ -12,8 +12,10 @@ import (
 )
 
 type MockGrandpaNode struct {
-	grandpa  *Grandpa
-	allNodes []*MockGrandpaNode
+	grandpa   *GrandpaManager
+	blockTree *types.BlockTree
+	selfKey   types.ValidatorSecret
+	allNodes  []*MockGrandpaNode
 
 	mutex sync.Mutex
 }
@@ -61,7 +63,7 @@ func (m *MockGrandpaNode) Broadcast(msg interface{}, evID ...uint64) {
 				}
 			}
 		}
-	case GrandpaCommit: // CE150
+	case GrandpaCommitMessage: // CE150
 		for _, n := range nodes {
 			if n == m {
 				continue
@@ -122,18 +124,22 @@ func SetupGrandpaNodes(numNodes int, genesis_blk types.Block) []*MockGrandpaNode
 			Finalized: true,
 		})
 		mockNode := &MockGrandpaNode{}
-		mockNode.grandpa = NewGrandpa(block_tree, secrets[i], validators, genesis_blk.Copy(), mockNode, nil)
+		mockNode.blockTree = block_tree
+		mockNode.selfKey = secrets[i]
+		mockNode.grandpa = NewGrandpaManager(block_tree, secrets[i])
+		mockNode.grandpa.Broadcaster = mockNode
+		mockNode.grandpa.Storage = nil
+		mockNode.grandpa.AuthoritySet = validators
+		grandpa := NewGrandpa(block_tree, secrets[i], validators, genesis_blk.Copy(), mockNode, nil, 0)
+		mockNode.grandpa.SetGrandpa(0, grandpa)
+		go mockNode.grandpa.RunGrandpa()
+		go mockNode.grandpa.RunManager()
 		mockNodes[i] = mockNode
 	}
 
 	// Set allNodes for each mock node
 	for _, mockNode := range mockNodes {
 		mockNode.allNodes = mockNodes
-	}
-
-	// Start runNode goroutine for each mock node
-	for _, node := range mockNodes {
-		go node.grandpa.RunGrandpa()
 	}
 
 	return mockNodes
@@ -158,9 +164,9 @@ func fakeblock(block types.Block) *types.Block {
 
 func addBlock(nodes []*MockGrandpaNode, block *types.Block) {
 	for _, node := range nodes {
-		node.grandpa.block_tree.AddBlock(block)
+		node.blockTree.AddBlock(block)
 		// Mark blocks as Applied and Audited for testing purposes
-		if blockNode, ok := node.grandpa.block_tree.GetBlockNode(block.Header.Hash()); ok {
+		if blockNode, ok := node.blockTree.GetBlockNode(block.Header.Hash()); ok {
 			blockNode.Applied = true
 			blockNode.Audited = true
 		}

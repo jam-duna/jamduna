@@ -45,7 +45,13 @@ func (r *RoundState) GetUnvotedWeight(stage GrandpaStage) uint64 {
 func (r *RoundState) UpdatePreVoteGraph(with_unvoted bool) error {
 	stage := PrevoteStage
 	tracker := r.GetVoteTracker(stage)
-	eq_staked := tracker.GetEquivocationWeight()
+
+	// Get equivocation weight (0 if tracker is nil)
+	eq_staked := uint64(0)
+	if tracker != nil {
+		eq_staked = tracker.GetEquivocationWeight()
+	}
+
 	block_hashes := r.PreVoteGraph.GetBlockHashes()
 	for _, block_hash := range block_hashes {
 		weight := uint64(0)
@@ -71,7 +77,13 @@ func (r *RoundState) UpdatePreVoteGraph(with_unvoted bool) error {
 func (r *RoundState) UpdatePreCommitGraph(with_unvoted bool) error {
 	stage := PrecommitStage
 	tracker := r.GetVoteTracker(stage)
-	eq_staked := tracker.GetEquivocationWeight()
+
+	// Get equivocation weight (0 if tracker is nil)
+	eq_staked := uint64(0)
+	if tracker != nil {
+		eq_staked = tracker.GetEquivocationWeight()
+	}
+
 	block_hashes := r.PreCommitGraph.GetBlockHashes()
 	for _, block_hash := range block_hashes {
 		weight := uint64(0)

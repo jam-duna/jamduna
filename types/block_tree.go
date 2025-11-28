@@ -407,6 +407,12 @@ func (node *BT_Node) UpdateNodeCumulativeVotesWeight() {
 func (bt *BlockTree) GetCommonAncestor(node1, node2 *BT_Node) *BT_Node {
 	bt.Mutex.RLock()
 	defer bt.Mutex.RUnlock()
+	return bt.getCommonAncestorUnlocked(node1, node2)
+}
+
+// getCommonAncestorUnlocked is the internal implementation without locking
+// Caller must hold bt.Mutex (read or write)
+func (bt *BlockTree) getCommonAncestorUnlocked(node1, node2 *BT_Node) *BT_Node {
 	visited := make(map[*BT_Node]bool)
 	for node1 != nil {
 		visited[node1] = true
@@ -633,4 +639,28 @@ func (bt *BlockTree) EasyFinalization() {
 		return count
 	}
 	countDescendants(bt.Root)
+}
+
+func (bt *BlockTree) GetCommonAncestorByGroups(hashes []common.Hash) (*BT_Node, error) {
+	bt.Mutex.RLock()
+	defer bt.Mutex.RUnlock()
+	if len(hashes) == 0 {
+		return nil, fmt.Errorf("no hashes provided")
+	}
+	firstNode, ok := bt.TreeMap[hashes[0]]
+	if !ok {
+		return nil, fmt.Errorf("block %s not found", hashes[0].String())
+	}
+	commonAncestor := firstNode
+	for _, hash := range hashes[1:] {
+		node, ok := bt.TreeMap[hash]
+		if !ok {
+			return nil, fmt.Errorf("block %s not found", hash.String())
+		}
+		commonAncestor = bt.getCommonAncestorUnlocked(commonAncestor, node)
+		if commonAncestor == nil {
+			return nil, fmt.Errorf("no common ancestor found")
+		}
+	}
+	return commonAncestor, nil
 }

@@ -55,6 +55,19 @@ type GrandpaVote struct {
 	SignedMessage SignedMessage `json:"sign_message"`
 }
 
+func (v *GrandpaVote) GetVoteType() string {
+	stage := v.SignedMessage.Message.Stage
+	switch stage {
+	case PrevoteStage:
+		return "Prevote"
+	case PrecommitStage:
+		return "Precommit"
+	case PrimaryProposeStage:
+		return "Primary"
+	}
+	return "Unknown"
+}
+
 func (v *GrandpaVote) ToBytes() ([]byte, error) {
 	bytes, err := types.Encode(v)
 	if err != nil {
@@ -136,13 +149,15 @@ func (g *Grandpa) ProcessPreVoteMessage(prevote GrandpaVote) error {
 		return fmt.Errorf("message stage error")
 	}
 	if !grandpa_state.VerifyVoteMessage(prevote) {
-		return fmt.Errorf("message signature error")
+		return fmt.Errorf("message signature error %v", prevote.String())
 	} else {
 		// add the vote to the tracker
 		vote_info := prevote.SignedMessage
 		stage := prevote.SignedMessage.Message.Stage
 		tracker := g.GetVoteTracker(round, stage)
-		tracker.AddVote(vote_info, stage)
+		if tracker != nil {
+			tracker.AddVote(vote_info, stage)
+		}
 		return nil
 	}
 }
@@ -171,7 +186,9 @@ func (g *Grandpa) ProcessPreCommitMessage(precommit GrandpaVote) error {
 	vote := precommit.SignedMessage
 	stage := precommit.SignedMessage.Message.Stage
 	tracker := g.GetVoteTracker(round, stage)
-	tracker.AddVote(vote, stage)
+	if tracker != nil {
+		tracker.AddVote(vote, stage)
+	}
 	return nil
 }
 
@@ -194,9 +211,11 @@ func (g *Grandpa) ProcessPrimaryProposeMessage(primary_propose GrandpaVote) erro
 	vote := primary_propose.SignedMessage
 	stage := primary_propose.SignedMessage.Message.Stage
 	tracker := g.GetVoteTracker(round, stage)
-	err := tracker.AddVote(vote, stage)
-	if err != nil {
-		return err
+	if tracker != nil {
+		err := tracker.AddVote(vote, stage)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 

@@ -270,7 +270,7 @@ type Node struct {
 	latest_block_mutex sync.Mutex
 	latest_block       *JAMSNP_BlockInfo
 
-	grandpa *grandpa.Grandpa
+	grandpa *grandpa.GrandpaManager
 	// holds a map of epoch (use entropy to control it) to at most 2 tickets
 	selfTickets   map[common.Hash][]types.TicketBucket
 	ticketsMutex  sync.Mutex
@@ -939,8 +939,17 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 	}
 	if Grandpa {
 		authorities := node.statedb.GetSafrole().CurrValidators
-		node.grandpa = grandpa.NewGrandpa(node.block_tree, node.nodeSelf.credential, authorities, block, node, node.store)
+		node.grandpa = grandpa.NewGrandpaManager(node.block_tree, node.nodeSelf.credential)
+		node.grandpa.Broadcaster = node
+		node.grandpa.Syncer = node
+		node.grandpa.Id = uint32(node.id)
+		node.grandpa.Storage = node.store
+		node.grandpa.AuthoritySet = authorities
+		grandpa := grandpa.NewGrandpa(node.block_tree, node.nodeSelf.credential, authorities, block, node, node.store, 0)
+
+		node.grandpa.SetGrandpa(0, grandpa)
 		go node.grandpa.RunGrandpa()
+		go node.grandpa.RunManager()
 	}
 	// we need to organize the /ws usage to avoid conflicts
 	if node.id == 5 { // HACK
@@ -1964,45 +1973,45 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}, evID ...uin
 				}
 			case reflect.TypeOf(grandpa.GrandpaVote{}): // CE149
 				vote := obj.(grandpa.GrandpaVote)
+				// log.Info(log.Node, fmt.Sprintf("CE149 SendGrandpaVote: sending %v to peer %v", vote.GetVoteType(), p.PeerID), "n", n.String(), "req", vote.String())
 				if err := peer.SendGrandpaVote(ctx, vote); err != nil {
 					log.Warn(log.Quic, "SendGrandpaVote", "n", n.String(), "err", err)
 					return
 				}
-			case reflect.TypeOf(grandpa.GrandpaCommit{}): // CE149
-				commit := obj.(grandpa.GrandpaCommit)
+			case reflect.TypeOf(grandpa.GrandpaCommitMessage{}): // CE150
+				commit := obj.(grandpa.GrandpaCommitMessage)
+				// log.Info(log.Node, fmt.Sprintf("CE150 SendCommitMessage: sending commit to peer %v", p.PeerID), "n", n.String(), "req", commit.String())
 				if err := peer.SendCommitMessage(ctx, commit); err != nil {
 					log.Warn(log.Quic, "SendCommitMessage", "n", n.String(), "err", err)
 					return
 				}
 
-			case reflect.TypeOf(grandpa.GrandpaStateMessage{}): // CE150
+			case reflect.TypeOf(grandpa.GrandpaStateMessage{}): // CE151
 				state := obj.(grandpa.GrandpaStateMessage)
+				// log.Info(log.Node, fmt.Sprintf("CE151 SendGrandpaState: sending state to peer %v", p.PeerID), "n", n.String(), "req", state.String())
 				if err := peer.SendGrandpaState(ctx, state); err != nil {
 					log.Warn(log.Quic, "SendGrandpaState", "n", n.String(), "err", err)
 					return
 				}
 
-			case reflect.TypeOf(grandpa.GrandpaCatchUp{}): // CE152
-				catchup := obj.(grandpa.GrandpaCatchUp)
-				if err := peer.SendGrandpaCatchUp(ctx, catchup); err != nil {
-					log.Warn(log.Quic, "SendGrandpaCatchup", "n", n.String(), "err", err)
-					return
-				}
-
 			case reflect.TypeOf(uint32(0)): // CE153
 				warpsyncrequest := obj.(uint32)
+				// log.Info(log.Node, fmt.Sprintf("CE153 SendWarpSyncRequest: sending warpsync request to peer %v", p.PeerID), "n", n.String(), "req", warpsyncrequest)
 				response, err := peer.SendWarpSyncRequest(ctx, warpsyncrequest)
 				if err != nil {
 					log.Warn(log.Quic, "SendWarpSyncRequest", "n", n.String(), "err", err)
 					return
 				}
+				log.Info(log.Node, fmt.Sprintf("CE153 SendWarpSyncRequest: received warpsync response from peer %v", p.PeerID), "n", n.String(), "resp", response.String())
 				if n.grandpa != nil {
-					if err := n.grandpa.ProcessWarpSyncResponse(response); err != nil {
-						log.Warn(log.Quic, "ProcessWarpSyncResponse", "n", n.String(), "err", err)
-					}
+					// if err := n.grandpa.ProcessWarpSyncResponse(response); err != nil {
+					// 	log.Warn(log.Quic, "ProcessWarpSyncResponse", "n", n.String(), "err", err)
+					// }
 				}
+
 			case reflect.TypeOf(JAMEpochFinalized{}): // CE154
 				epochFinalized := obj.(JAMEpochFinalized)
+				log.Info(log.Node, fmt.Sprintf("???? CE154 SendEpochFinalized: sending epoch finalized to peer %v", p.PeerID), "n", n.String(), "req", epochFinalized.String())
 				if err := peer.SendEpochFinalized(ctx, epochFinalized); err != nil {
 					log.Warn(log.Quic, "SendEpochFinalized", "n", n.String(), "err", err)
 					return

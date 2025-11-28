@@ -1,7 +1,6 @@
 package grandpa
 
 import (
-	"fmt"
 	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
@@ -30,12 +29,20 @@ type GrandpaCatchUp struct {
 	SetId uint32
 }
 
+func (c *GrandpaCatchUp) String() string {
+	return types.ToJSON(c)
+}
+
 type CatchUpResponse struct {
 	Round            uint64
 	SignedPrevotes   []SignedMessage
 	SignedPrecommits []SignedMessage
 	BaseHash         common.Hash
 	BaseNumber       uint32
+}
+
+func (c *CatchUpResponse) String() string {
+	return types.ToJSON(c)
 }
 
 func (c *GrandpaCatchUp) ToBytes() ([]byte, error) {
@@ -78,78 +85,9 @@ func (c *CatchUpResponse) FromBytes(data []byte) error {
 	return nil
 }
 
-// GetCatchUpResponse creates a CatchUpResponse for a given round and set ID
-// This collects the necessary GRANDPA catch-up data to help a peer sync
-func (g *Grandpa) GetCatchUpResponse(round uint64, setId uint32) (CatchUpResponse, error) {
-
-	// Get the round state for the requested round
-	roundState, err := g.GetRoundState(round)
-	if err != nil {
-		return CatchUpResponse{}, fmt.Errorf("GetCatchUpResponse: %w", err)
-	}
-
-	// Get the prevote and precommit trackers
-	prevoteTracker := g.GetVoteTracker(round, PrevoteStage)
-	precommitTracker := g.GetVoteTracker(round, PrecommitStage)
-
-	// Collect signed prevotes
-	signedPrevotes := []SignedMessage{}
-	if prevoteTracker != nil {
-		prevoteTracker.VoteMutex.RLock()
-		for _, voterVotes := range prevoteTracker.GetAllVotes() {
-			for _, vote := range voterVotes {
-				if vote != nil {
-					signedPrevotes = append(signedPrevotes, *vote)
-				}
-			}
-		}
-		prevoteTracker.VoteMutex.RUnlock()
-	}
-
-	// Collect signed precommits
-	signedPrecommits := []SignedMessage{}
-	if precommitTracker != nil {
-		precommitTracker.VoteMutex.RLock()
-		for _, voterVotes := range precommitTracker.GetAllVotes() {
-			for _, vote := range voterVotes {
-				if vote != nil {
-					signedPrecommits = append(signedPrecommits, *vote)
-				}
-			}
-		}
-		precommitTracker.VoteMutex.RUnlock()
-	}
-
-	// Get the base block (the finalized block for this round)
-	// BaseHash = Header Hash, BaseNumber = Slot
-	var baseHash common.Hash
-	var baseNumber uint32
-
-	// Get the last finalized block as the base
-	lastFinalized := g.block_tree.GetLastFinalizedBlock()
-	if lastFinalized != nil && lastFinalized.Block != nil {
-		baseHash = lastFinalized.Block.Header.Hash()
-		baseNumber = lastFinalized.Block.Header.Slot
-	}
-
-	// Unused for now, but could be used for more specific round-based finalization
-	_ = roundState
-	_ = setId
-
-	response := CatchUpResponse{
-		Round:            round,
-		SignedPrevotes:   signedPrevotes,
-		SignedPrecommits: signedPrecommits,
-		BaseHash:         baseHash,
-		BaseNumber:       baseNumber,
-	}
-
-	return response, nil
-}
-
 func (g *Grandpa) ProcessCatchUpMessage(catchup GrandpaCatchUp) (CatchUpResponse, error) {
 
-	response, err := g.GetCatchUpResponse(catchup.Round, catchup.SetId)
+	response, err := g.GetCatchUpResponse(catchup.Round)
 	if err != nil {
 		return CatchUpResponse{}, err
 	}
@@ -159,12 +97,13 @@ func (g *Grandpa) ProcessCatchUpMessage(catchup GrandpaCatchUp) (CatchUpResponse
 
 // ProcessCatchUpResponse processes a received catch-up response
 // This updates the node's GRANDPA state with the catch-up data
-func (g *Grandpa) ProcessCatchUpResponse(response CatchUpResponse) error {
+func (g *Grandpa) ProcessCatchUpResponse(response CatchUpResponse, setId uint32) error {
 
 	// Process each prevote in the catch-up response
 	for _, prevote := range response.SignedPrevotes {
 		vote := GrandpaVote{
 			Round:         response.Round,
+			SetId:         setId,
 			SignedMessage: prevote,
 			// SetId would need to be included in the response or tracked separately
 		}
@@ -179,6 +118,7 @@ func (g *Grandpa) ProcessCatchUpResponse(response CatchUpResponse) error {
 		vote := GrandpaVote{
 			Round:         response.Round,
 			SignedMessage: precommit,
+			SetId:         setId,
 			// SetId would need to be included in the response or tracked separately
 		}
 		if err := g.ProcessPreCommitMessage(vote); err != nil {

@@ -32,43 +32,42 @@ Validator -> Validator
 
 */
 
-func (p *Peer) SendGrandpaCatchUp(ctx context.Context, catchup grandpa.GrandpaCatchUp) error {
+func (p *Peer) SendGrandpaCatchUp(ctx context.Context, catchup grandpa.GrandpaCatchUp) (*grandpa.CatchUpResponse, error) {
 	code := uint8(CE152_GrandpaCatchUp)
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
-		return fmt.Errorf("openStream[CE152_GrandpaCatchUp] failed: %w", err)
+		return nil, fmt.Errorf("openStream[CE152_GrandpaCatchUp] failed: %w", err)
 	}
 	defer stream.Close()
 
 	// Send: Round Number ++ Set Id ++ Slot
 	requestBytes, err := catchup.ToBytes()
 	if err != nil {
-		return fmt.Errorf("GrandpaCatchUp.ToBytes failed: %w", err)
+		return nil, fmt.Errorf("GrandpaCatchUp.ToBytes failed: %w", err)
 	}
 
 	// Send request
 	if err := sendQuicBytes(ctx, stream, requestBytes, p.PeerID, code); err != nil {
-		return fmt.Errorf("sendQuicBytes[CE152_GrandpaCatchUp] request failed: %w", err)
+		return nil, fmt.Errorf("sendQuicBytes[CE152_GrandpaCatchUp] request failed: %w", err)
 	}
 
 	// Receive response: Catchup
 	responseBytes, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
 	if err != nil {
-		return fmt.Errorf("receiveQuicBytes[CE152_GrandpaCatchUp] response failed: %w", err)
+		return nil, fmt.Errorf("receiveQuicBytes[CE152_GrandpaCatchUp] response failed: %w", err)
 	}
 
 	// Decode response
 	var response grandpa.CatchUpResponse
 	if err := response.FromBytes(responseBytes); err != nil {
-		return fmt.Errorf("failed to decode catchup response: %w", err)
+		return nil, fmt.Errorf("failed to decode catchup response: %w", err)
 	}
 
 	// TODO: Process the catch-up response
 	// The Peer struct doesn't have direct access to the node
 	// This should be handled at a higher level
 	_ = response
-	return nil
-
+	return &response, nil
 }
 
 func (n *Node) onGrandpaCatchUp(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
@@ -81,18 +80,13 @@ func (n *Node) onGrandpaCatchUp(ctx context.Context, stream quic.Stream, msg []b
 	}
 
 	// Get catchup data from GRANDPA state
-	response, err := n.grandpa.GetCatchUpResponse(catchup.Round, catchup.SetId)
+	responseBytes, ok, err := n.store.GetCatchupMassage(catchup.Round, catchup.SetId)
 	if err != nil {
-		// If unable to send response, stop the stream (as per spec)
 		return fmt.Errorf("failed to get catchup data: %w", err)
 	}
-
-	// Encode response
-	responseBytes, err := response.ToBytes()
-	if err != nil {
-		return fmt.Errorf("failed to encode catchup response: %w", err)
+	if !ok {
+		return fmt.Errorf("no catchup data found for round %d, set %d", catchup.Round, catchup.SetId)
 	}
-
 	// Send response: Catchup
 	if err := sendQuicBytes(ctx, stream, responseBytes, peerID, uint8(CE152_GrandpaCatchUp)); err != nil {
 		return fmt.Errorf("sendQuicBytes[CE152_GrandpaCatchUp] response failed: %w", err)

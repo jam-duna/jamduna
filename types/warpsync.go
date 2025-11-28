@@ -2,8 +2,6 @@ package types
 
 import (
 	"reflect"
-
-	"github.com/colorfulnotion/jam/bls"
 )
 
 type WarpSyncResponse struct {
@@ -12,7 +10,19 @@ type WarpSyncResponse struct {
 
 type WarpSyncFragment struct {
 	Header        BlockHeader
-	Justification bls.Signature
+	Justification GrandpaJustification // SHAWN CHWCK HERE
+}
+
+func (w *WarpSyncFragment) ToBytes() ([]byte, error) {
+	bytes, err := Encode(w)
+	if err != nil {
+		return nil, nil
+	}
+	return bytes, nil
+}
+
+func (w *WarpSyncResponse) String() string {
+	return ToJSON(w)
 }
 
 func (w *WarpSyncResponse) ToBytes() ([]byte, error) {

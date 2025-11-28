@@ -381,6 +381,9 @@ type JAMStorage interface {
 	GetBlockBySlot(slot uint32) (*SBlock, error)
 	GetChildBlocks(parentHeaderHash common.Hash) ([][2][]byte, error)
 
+	StoreCatchupMassage(round uint64, setId uint32, data []byte) error
+	GetCatchupMassage(round uint64, setId uint32) ([]byte, bool, error)
+
 	// Data Availability - Guarantor Operations
 	// Guarantors create and distribute erasure-coded shards
 	StoreBundleSpecSegments(

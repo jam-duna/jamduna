@@ -33,6 +33,10 @@ func (j *JAMEpochFinalized) ToBytes() ([]byte, error) {
 	return types.Encode(j)
 }
 
+func (j *JAMEpochFinalized) String() string {
+	return types.ToJSON(j)
+}
+
 func (j *JAMEpochFinalized) FromBytes(data []byte) error {
 	decoded, _, err := types.Decode(data, reflect.TypeOf(JAMEpochFinalized{}))
 	if err != nil {
@@ -75,9 +79,9 @@ func (n *Node) onEpochFinalized(ctx context.Context, stream quic.Stream, msg []b
 	// Process the BLS signature
 	if n.grandpa != nil {
 
-		if err := n.grandpa.ProcessBLSSignature(epochFinalized.Epoch, epochFinalized.BeefyHash, epochFinalized.Signature, epochFinalized.ValidatorIndex); err != nil {
-			return fmt.Errorf("ProcessBLSSignature failed: %w", err)
-		}
+		// if err := n.grandpa.ProcessBLSSignature(epochFinalized.Epoch, epochFinalized.BeefyHash, epochFinalized.Signature, epochFinalized.ValidatorIndex); err != nil {
+		// 	return fmt.Errorf("ProcessBLSSignature failed: %w", err)
+		// }
 	}
 
 	return nil
