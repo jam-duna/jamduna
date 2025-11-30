@@ -50,8 +50,6 @@ func (vm *X86Compiler) chargeGas(host_fn int) uint64 {
 	chargedGas := uint64(10) // We deduct 10 here
 
 	switch host_fn {
-	case LOG:
-		chargedGas = 0
 	}
 	return chargedGas
 }
@@ -175,7 +173,19 @@ func (vm *RecompilerVM) HandleEcalli() error {
 		return fmt.Errorf("not in host call state")
 	}
 
-	if vm.host_func_id == TRANSFER {
+	ok, err := vm.InvokeHostCall(vm.host_func_id)
+	if err != nil || !ok {
+		return fmt.Errorf("InvokeHostCall failed: %w", err)
+	}
+	if ok {
+		// if the host call handled the state change, we reset it to normal
+		if vm.MachineState == PANIC {
+			vm.ResultCode = PANIC
+			fmt.Printf("PANIC in host call\n")
+			return fmt.Errorf("PANIC in host call")
+		}
+	}
+	if vm.host_func_id == TRANSFER && vm.ReadRegister(7) == OK {
 		gas, err := vm.ReadContextSlot(gasSlotIndex)
 		if err != nil {
 			return fmt.Errorf("failed to read gas slot: %w", err)
@@ -192,20 +202,8 @@ func (vm *RecompilerVM) HandleEcalli() error {
 		if gas > before_gas {
 			vm.MachineState = PANIC
 			vm.ResultCode = types.WORKDIGEST_OOG
+			vm.WriteContextSlot(vmStateSlotIndex, uint64(types.WORKDIGEST_OOG), 8)
 			return fmt.Errorf("out of gas in transfer")
-		}
-	}
-
-	ok, err := vm.InvokeHostCall(vm.host_func_id)
-	if err != nil || !ok {
-		return fmt.Errorf("InvokeHostCall failed: %w", err)
-	}
-	if ok {
-		// if the host call handled the state change, we reset it to normal
-		if vm.MachineState == PANIC {
-			vm.ResultCode = PANIC
-			fmt.Printf("PANIC in host call\n")
-			return fmt.Errorf("PANIC in host call")
 		}
 	}
 	vm.hostCall = false

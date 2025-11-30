@@ -261,14 +261,14 @@ func TestTracesRecompiler(t *testing.T) {
 
 	// Define all the directories you want to test in a single slice.
 	testDirs := []string{
-		//path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
-		//path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
 		// path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
 		// path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
 		// path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
 		// path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy"),
-		//path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy_light"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy_light"),
 	}
 
 	// Iterate over each directory.
@@ -330,7 +330,7 @@ func TestSingleCompare(t *testing.T) {
 	log.InitLogger("debug")
 	PvmLogging = false
 
-	filename := path.Join(common.GetJAMTestVectorPath("traces"), "storage_light/00000001.bin")
+	filename := path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy/00000174.bin")
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)

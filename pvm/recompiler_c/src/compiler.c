@@ -406,8 +406,6 @@ static uint32_t decode_e_l(const uint8_t* operands, uint32_t operand_len) {
 // Mirror Go's chargeGas helper for host calls
 static uint64_t compiler_charge_gas(int host_fn) {
     switch (host_fn) {
-        case HOST_LOG:
-            return 0;
         default:
             return 10;
     }

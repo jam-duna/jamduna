@@ -286,7 +286,7 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 				}
 			}
 
-			if stats.numWorkReports > 0 {
+			if stats.numWorkReports > 0 || stats.gasUsed > 0 {
 				accumulateStats[service] = stats
 			} else {
 				continue

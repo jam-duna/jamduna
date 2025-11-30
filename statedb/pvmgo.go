@@ -677,11 +677,8 @@ func (vm *VMGo) step(stepn int) error {
 		// 	return childHostCall
 		// }
 		if vm.hostCall {
-			if vm.host_func_id == LOG {
-
-			} else if vm.host_func_id == TRANSFER {
+			if vm.host_func_id == TRANSFER {
 				vm.Gas -= 10
-				vm.Gas -= int64(vm.ReadRegister(9))
 			} else {
 				vm.Gas -= 10
 			}
@@ -701,6 +698,9 @@ func (vm *VMGo) step(stepn int) error {
 					fmt.Printf("HostCall %s (%d) ERROR: %v\n", HostFnToName(vm.host_func_id), vm.host_func_id, err)
 					vm.terminated = true
 					return nil
+				}
+				if vm.host_func_id == TRANSFER && vm.ReadRegister(7) == OK {
+					vm.Gas -= int64(vm.ReadRegister(9))
 				}
 				// Check if host function caused panic
 				if vm.MachineState == PANIC {

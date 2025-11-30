@@ -17,6 +17,7 @@ LDFLAGS_ASAN = -fsanitize=address
 SRC_DIR = src
 INCLUDE_DIR = include
 LIB_DIR = lib
+FFI_DIR = ../../ffi
 
 # Output
 LIBRARY_NAME = libcompiler
@@ -38,9 +39,14 @@ OBJECTS_ASAN = $(SOURCES:$(SRC_DIR)/%.c=$(LIB_DIR)/%-asan.o)
 HEADERS = $(wildcard $(INCLUDE_DIR)/*.h)
 
 # Default target
-.PHONY: all clean debug release asan help
+.PHONY: all clean debug release asan help install
 
 all: release
+
+# Install to ffi directory for cgo linking
+install: release
+	cp $(STATIC_LIB) $(FFI_DIR)/$(LIBRARY_NAME).linux_amd64.a
+	@echo "Installed to $(FFI_DIR)/$(LIBRARY_NAME).linux_amd64.a"
 
 # Release build
 release: CFLAGS := $(CFLAGS_RELEASE)
@@ -120,6 +126,7 @@ help:
 	@echo "  all              - Build release version (default)"
 	@echo "  release          - Build optimized release version"
 	@echo "  debug            - Build debug version"
+	@echo "  install          - Build release and copy to ffi directory"
 	@echo "  clean            - Remove all build artifacts"
 	@echo ""
 	@echo "Development:"
@@ -128,6 +135,7 @@ help:
 	@echo ""
 	@echo "Usage Examples:"
 	@echo "  make                    # Build release"
+	@echo "  make install            # Build and install to ffi/"
 	@echo "  make debug              # Build debug version"
 	@echo "  make clean && make      # Clean rebuild"
 	@echo ""

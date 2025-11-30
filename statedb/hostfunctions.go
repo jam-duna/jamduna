@@ -79,7 +79,7 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 	}
 
 	// Log after host function call to match javajam format
-	if PvmLogging {
+	if PvmLogging || true {
 		fmt.Printf("Calling host function: %s %d [gas used: %d, gas remaining: %d] [service: %d]\n", HostFnToName(host_fn), host_fn, gasUsed, currentGas, vm.Service_index)
 	}
 
@@ -623,6 +623,7 @@ func (vm *VM) hostUpgrade() {
 	if vm.Mode != ModeAccumulate {
 		vm.WriteRegister(7, WHAT)
 		vm.SetHostResultCode(WHAT)
+		log.Info(vm.logging, "UPGRADE WHAT mode", "mode", vm.Mode)
 		return
 	}
 
@@ -637,6 +638,7 @@ func (vm *VM) hostUpgrade() {
 		vm.terminated = true
 		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
+		log.Info(vm.logging, "UPGRADE PANIC", "mode", vm.Mode)
 		return
 	}
 
@@ -646,7 +648,7 @@ func (vm *VM) hostUpgrade() {
 	xs.GasLimitM = m
 	vm.WriteRegister(7, OK)
 	// xContext.D[s] = xs // not sure if this is needed
-	log.Trace(vm.logging, "UPGRADE OK", "code_hash", fmt.Sprintf("%x", o), "code_hash_ptr", fmt.Sprintf("%x", c), "min_item_gas", g, "min_memo_gas", m)
+	log.Info(vm.logging, "UPGRADE OK", "code_hash", fmt.Sprintf("%x", o), "code_hash_ptr", fmt.Sprintf("%x", c), "min_item_gas", g, "min_memo_gas", m)
 	vm.SetHostResultCode(OK)
 }
 
@@ -806,7 +808,6 @@ func (vm *VM) hostFetch() {
 		WORK_ITEM_PAYLOAD_13                          = 13 // 13: Specific Work Item Payload (pw[φ11]y)
 		ALL_ACCUMULATION_OPERANDS_14                  = 14 // 14: All Accumulation Operands (E(↕o))
 		SPECIFIC_ACCUMULATION_OPERAND_15              = 15 // 15: Specific Accumulation Operand (E(o[φ11]))
-		HEADER_16                                     = 16 // 16: Header
 	)
 
 	//CUSTOM hostfetch:
@@ -836,7 +837,7 @@ func (vm *VM) hostFetch() {
 	case ModeAccumulate:
 		switch datatype {
 		//0, 1, 14, 15, 250
-		case PARAMETER_BYTE_0, ENTROPY_1, ALL_ACCUMULATION_OPERANDS_14, SPECIFIC_ACCUMULATION_OPERAND_15, HEADER_16, CUSTOM_STATE_ROOT_FETCH:
+		case PARAMETER_BYTE_0, ENTROPY_1, ALL_ACCUMULATION_OPERANDS_14, SPECIFIC_ACCUMULATION_OPERAND_15, HEADER_200, CUSTOM_STATE_ROOT_FETCH:
 			allowed = true
 		default:
 			allowed = false
@@ -900,17 +901,8 @@ func (vm *VM) hostFetch() {
 			v_Bytes, _ = types.Encode(vm.WorkPackage)
 			//log.Trace(vm.logging, "FETCH wp", "len(v_Bytes)", len(v_Bytes))
 
-		case AUTH_CODE_AND_CONFIG_BLOB_8: // p_u + | p_p
-			type pp struct {
-				PHash common.Hash `json:"hash"`
-				PBlob []byte      `json:"blob"`
-			}
-
-			p := pp{
-				PHash: vm.WorkPackage.AuthorizationCodeHash,
-				PBlob: vm.WorkPackage.ConfigurationBlob,
-			}
-			v_Bytes, _ = types.Encode(p)
+		case AUTH_CODE_AND_CONFIG_BLOB_8: // p_f
+			v_Bytes = vm.WorkPackage.ConfigurationBlob
 			//log.Trace(vm.logging, "FETCH p_u + | p_p", "p_u", vm.WorkPackage.AuthorizationCodeHash, "p_p", vm.WorkPackage.ConfigurationBlob, "len", len(v_Bytes))
 
 		case AUTHORIZATION_TOKEN_9: // p_j
@@ -956,16 +948,6 @@ func (vm *VM) hostFetch() {
 				v_Bytes, _ = types.Encode(vm.AccumulateInputs[omega_11])
 				log.Trace(vm.logging, "FETCH E(o[w_11])", "w_11", omega_11, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "len", len(v_Bytes))
 			}
-		case HEADER_16:
-			// Return the current block header
-			if header := vm.hostenv.GetHeader(); header != nil {
-				v_Bytes, _ = types.Encode(header)
-				log.Trace(vm.logging, "FETCH current header", "header", fmt.Sprintf("%x", v_Bytes), "len", len(v_Bytes))
-			} else {
-				log.Warn(vm.logging, "FETCH current header", "warning", "GetHeader() returned nil")
-				v_Bytes = []byte{} // Set empty bytes when no header available
-			}
-
 		case CUSTOM_STATE_ROOT_FETCH:
 			// Return the parent state root (state before current block execution)
 			v_Bytes, _ = types.Encode(vm.hostenv.GetParentStateRoot())
@@ -1484,7 +1466,7 @@ func (vm *VM) hostWrite() {
 		vm.terminated = true
 		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
-		log.Trace(vm.logging, "WRITE RAM ERROR", "err", err_k)
+		log.Info(vm.logging, "WRITE RAM ERROR", "err", err_k)
 		return
 	}
 	key_len := uint64(len(mu_k)) // x in a_s(x,y) |y|
@@ -1501,7 +1483,7 @@ func (vm *VM) hostWrite() {
 			vm.terminated = true
 			vm.ResultCode = types.WORKDIGEST_PANIC
 			vm.MachineState = PANIC
-			log.Trace(vm.logging, "WRITE RAM ERROR", "err", err)
+			log.Info(vm.logging, "WRITE RAM ERROR", "err", err)
 			return
 		}
 		val_len = uint64(len(v))
@@ -1556,7 +1538,7 @@ func (vm *VM) hostWrite() {
 	as_internal_key_str := common.Bytes2Hex(as_internal_key[:])
 	account_storage_key := fmt.Sprintf("0x%x", common.ComputeC_sh(a.ServiceIndex, as_internal_key).Bytes()[:31])
 
-	log.Trace(vm.logging, "WRITE storage",
+	log.Info(vm.logging, "WRITE storage",
 		"mu_k", fmt.Sprintf("%x", mu_k),
 		"opaque_key", as_internal_key_str,
 		"as_key", account_storage_key,
@@ -2026,6 +2008,7 @@ func (vm *VM) hostLog() {
 	case 4: // 4: User agent displays as pedantic information
 		fmt.Printf("\x1b[37m[TRACE-%s] %s\x1b[0m\n", vm.logging, string(messageBytes))
 	}
+	vm.WriteRegister(7, WHAT)
 }
 
 func (vm *VM) PutGasAndRegistersToMemory(input_address uint32, gas uint64, regs []uint64) {

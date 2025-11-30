@@ -756,7 +756,6 @@ invokes pvm execution
 */
 func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.DeferredTransfer, workReports []types.WorkReport, freeAccumulation map[uint32]uint64, serviceID uint32, pvmBackend string) (accumulation_output common.Hash, gasUsed uint64, xy *types.XContext, exceptional bool) {
 	t0 := time.Now()
-
 	// gas https://graypaper.fluffylabs.dev/#/1c979cb/181901181901?v=0.7.1
 	// 1. gas from free accumulation of this service (if any)
 	gas := uint64(0)
@@ -778,12 +777,10 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 	}
 	// 3. gas from selected transfers with this service as the destination
 	var selectedTransfers []types.DeferredTransfer
-	gasTransfers := uint64(0)
 	for _, transfer := range transfersIn {
 		if transfer.ReceiverIndex == serviceID {
 			selectedTransfers = append(selectedTransfers, transfer)
 			gas += uint64(transfer.GasLimit)
-			gasTransfers += uint64(transfer.GasLimit)
 		}
 	}
 
@@ -883,7 +880,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 		exceptional = true
 		accumulation_output = vm.Y.Yield
 		xy = &(vm.Y)
-
+		log.Warn(log.SDB, "SingleAccumulate exceptional return", "s", fmt.Sprintf("%d", serviceID), "error", r.Err, "gasUsed", gasUsed, "accumulation_output", accumulation_output, "x_s", x_s)
 		if r.Err == types.WORKDIGEST_OOG {
 			log.Trace(sd.Authoring, "BEEFY OOG   @SINGLE ACCUMULATE", "s", fmt.Sprintf("%d", serviceID), "accumulation_output", accumulation_output, "x_s", x_s)
 		} else {

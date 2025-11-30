@@ -83,7 +83,7 @@ const (
 	UnavailableWorkReplacementPeriod = 5              // U = 5: The period in timeslots after which reported but unavailable work may be replaced.
 	TotalValidators                  = 6              // V: The total number of validators.
 	MaxIsAuthorizedCodeBytes         = 64000          // W_A: Max Is Auth Code in octets.
-	MaxEncodedWorkPackageSize        = 13794305       // W_B = 12 * 2^20: The maximum size of an encoded work-package together with its extrinsic data and import implications, in octets.
+	MaxEncodedWorkPackageSize        = 13794360       // W_B = 12 * 2^20: The maximum size of an encoded work-package together with its extrinsic data and import implications, in octets.
 	MaxServiceCodeSize               = 4_000_000      // W_C - Maximum size of a service code in octets.
 	ECPieceSize                      = 4              // W_E
 	MaxImports                       = 3072           // W_M = 2^11: The maximum number of imports in a work-package. 0.6.5
@@ -94,6 +94,7 @@ const (
 	TicketSubmissionEndSlot          = 10             // Y: The number of slots into an epoch at which ticket-submission ends.
 
 	SegmentSize                      = 4104 // W_A: The size of a segment in octets.
+	Segmentfootprint                 = 4488
 	ContestDuration                  = 60 * 60 * 24
 	PeriodSecond                     = 4       // A = 8 represents the period, in seconds, between audit tranches.
 	AuditBiasFactor                  = 2       // F = 2: The audit bias factor, the expected number of additional validators who will audit a work-report in the following tranche for each no-show in the previous.

@@ -19,7 +19,6 @@ import (
 	jamerrors "github.com/colorfulnotion/jam/jamerrors"
 	log "github.com/colorfulnotion/jam/log"
 	storage "github.com/colorfulnotion/jam/storage"
-	trie "github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -278,8 +277,6 @@ func ReportVerify(jsonFile string, exceptErr error) error {
 		}
 	}
 
-	db.trie.Close()
-	trie.DeleteLevelDB()
 	return nil
 }
 
