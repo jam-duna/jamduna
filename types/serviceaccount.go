@@ -70,10 +70,13 @@ func NewEmptyServiceAccount(serviceIndex uint32, c []byte, g uint64, m uint64, s
 		CreateTime:         createdSlot,   //a_r = t // check pre vs post?
 		RecentAccumulation: 0,             //a_a = 0
 		ParentService:      parentService, //a_p = x_s
-		Storage:    make(map[string]*StorageObject),
-		Lookup:     make(map[string]*LookupObject),
-		Preimage:   make(map[string]*PreimageObject),
-		NewAccount: true, // with this flag, if an account is Dirty OR NewAccount then it is written
+		Storage:            make(map[string]*StorageObject),
+		Lookup:             make(map[string]*LookupObject),
+		Preimage:           make(map[string]*PreimageObject),
+		NewAccount:         true, // with this flag, if an account is Dirty OR NewAccount then it is written
+
+		StorageSizeDirty:     true,
+		NumStorageItemsDirty: true,
 	}
 	return a
 }
@@ -94,10 +97,10 @@ func (s *ServiceAccount) Clone() *ServiceAccount {
 		CreateTime:           s.CreateTime,
 		RecentAccumulation:   s.RecentAccumulation,
 		ParentService:        s.ParentService,
-		Dirty:          s.Dirty,
-		NewAccount:     s.NewAccount,
-		DeletedAccount: s.DeletedAccount,
-		Mutable:        s.Mutable, // should ALLOW_MUTABLE explicitly... check??
+		Dirty:                s.Dirty,
+		NewAccount:           s.NewAccount,
+		DeletedAccount:       s.DeletedAccount,
+		Mutable:              s.Mutable, // should ALLOW_MUTABLE explicitly... check??
 	}
 
 	clone.Storage = make(map[string]*StorageObject, len(s.Storage))
@@ -694,6 +697,8 @@ func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots 
 		o.Source = source
 		return
 	}
+	s.NumStorageItemsDirty = true
+	s.StorageSizeDirty = true
 	s.Lookup[blobHashStr] = &LookupObject{
 		Accessed:  false,
 		Dirty:     true,
@@ -705,22 +710,27 @@ func (s *ServiceAccount) WriteLookup(blobHash common.Hash, z uint32, time_slots 
 }
 
 func (s *ServiceAccount) UpdateRecentAccumulation(timeslot uint32) {
-	if s.Mutable == false {
-		//log.Crit(module, "UpdateRecentAccumulation")
-	}
 	s.Dirty = true
 	s.RecentAccumulation = timeslot
 }
 
 func (s *ServiceAccount) MergeUpdates(updates *ServiceAccount) {
+	// Only merge if dirty in updates OR if entry doesn't exist yet
+	// If entry exists and update is not dirty, keep existing (preserves Dirty=true)
 	for k, v := range updates.Storage {
-		s.Storage[k] = v
+		if _, exists := s.Storage[k]; !exists || v.Dirty {
+			s.Storage[k] = v
+		}
 	}
 	for k, v := range updates.Lookup {
-		s.Lookup[k] = v
+		if _, exists := s.Lookup[k]; !exists || v.Dirty {
+			s.Lookup[k] = v
+		}
 	}
 	for k, v := range updates.Preimage {
-		s.Preimage[k] = v
+		if _, exists := s.Preimage[k]; !exists || v.Dirty {
+			s.Preimage[k] = v
+		}
 	}
 	if updates.NumStorageItemsDirty {
 		s.NumStorageItems = updates.NumStorageItems
@@ -729,6 +739,9 @@ func (s *ServiceAccount) MergeUpdates(updates *ServiceAccount) {
 	if updates.StorageSizeDirty {
 		s.StorageSize = updates.StorageSize
 		s.StorageSizeDirty = true
+	}
+	if updates.RecentAccumulation > s.RecentAccumulation {
+		s.RecentAccumulation = updates.RecentAccumulation
 	}
 }
 

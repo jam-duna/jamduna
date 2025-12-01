@@ -132,14 +132,9 @@ func (g *Grandpa) VerifyWarpSyncJustification(fragment types.WarpSyncFragment) e
 	commit := justification.Commit
 
 	// Verify we have enough precommits (need >2/3 of authority set weight)
-	totalWeight := uint64(0)
 	signedWeight := uint64(0)
-
 	authorities := g.GetCurrentScheduledAuthoritySet(justification.Round)
-	for _, validator := range authorities {
-		weight := g.Voter_Staked[validator.Ed25519]
-		totalWeight += weight
-	}
+	totalWeight := uint64(len(authorities))
 
 	// Verify each precommit signature
 	for _, signedPrecommit := range commit.Precommits {
@@ -163,8 +158,7 @@ func (g *Grandpa) VerifyWarpSyncJustification(fragment types.WarpSyncFragment) e
 			continue // Skip invalid signatures
 		}
 
-		weight := g.Voter_Staked[validatorKey]
-		signedWeight += weight
+		signedWeight += 1
 	}
 
 	// Check if we have >2/3 weight (using ceiling to be safe with integer division)

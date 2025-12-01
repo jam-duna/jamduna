@@ -261,7 +261,7 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 		log.Trace(log.SDB, "ApplyStateTransition - OuterAccumulate", "n", s.Id, "blk", targetJCE, "s-", s.StateRoot.String_short(), "h.s-", blk.Header.ParentStateRoot.String_short(), "num_accumulations", num_accumulations, "gasUsage", gasUsage, "accumulation_output", accumulation_output)
 	}
 	benchRec.Add("OuterAccumulate", time.Since(t0))
-	// s.updateRecentAccumulation(o, accumulated_partial)
+
 	// (χ′, δ†, ι′, φ′)
 	for _, sa := range o.ServiceAccounts {
 		sa.ALLOW_MUTABLE() // make sure all service accounts can be written
@@ -281,8 +281,15 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 				sa, ok3 := part.U.ServiceAccounts[service]
 				if ok3 {
 					sa.UpdateRecentAccumulation(s.GetTimeslot())
-					o.ServiceAccounts[service] = sa
-					sa.Dirty = true
+					// Merge updates instead of overwriting to preserve Dirty flags on Lookup entries
+					if existing, exists := o.ServiceAccounts[service]; exists {
+						existing.MergeUpdates(sa)
+						existing.Dirty = true
+						o.ServiceAccounts[service] = existing
+					} else {
+						o.ServiceAccounts[service] = sa
+						sa.Dirty = true
+					}
 				}
 			}
 

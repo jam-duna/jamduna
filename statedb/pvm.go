@@ -464,7 +464,7 @@ func (vm *VM) executeWithBackend(argumentData []byte, entryPoint uint32) {
 	vm.IsChild = false
 	err := vm.ExecutionVM.Execute(vm, entryPoint)
 	if err != nil {
-		log.Error(vm.logging, "C VM execution failed", "error", err)
+		log.Error(vm.logging, "VM execution failed", "error", err)
 	}
 	vm.ResultCode = vm.GetResultCode()
 }

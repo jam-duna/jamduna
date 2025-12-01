@@ -7,7 +7,8 @@ AR ?= ar
 CFLAGS ?= -Wall -Wextra -std=c99 -fPIC
 CFLAGS_DEBUG = $(CFLAGS) -g -O0 -DDEBUG
 CFLAGS_ASAN = $(CFLAGS) -g -O0 -DDEBUG -fsanitize=address -fno-omit-frame-pointer
-CFLAGS_RELEASE = $(CFLAGS) -O3 -DNDEBUG -march=native -g
+CFLAGS_RELEASE = $(CFLAGS) -O3 -DNDEBUG -march=native -g -D_FORTIFY_SOURCE=0
+CFLAGS_RELEASE_LINUX = $(CFLAGS) -O3 -DNDEBUG -g -D_FORTIFY_SOURCE=0
 
 # No external library dependencies (removed unicorn, capstone)
 LDFLAGS =
@@ -39,7 +40,7 @@ OBJECTS_ASAN = $(SOURCES:$(SRC_DIR)/%.c=$(LIB_DIR)/%-asan.o)
 HEADERS = $(wildcard $(INCLUDE_DIR)/*.h)
 
 # Default target
-.PHONY: all clean debug release asan help install
+.PHONY: all clean debug release release-linux asan help install install-linux
 
 all: release
 
@@ -47,6 +48,17 @@ all: release
 install: release
 	cp $(STATIC_LIB) $(FFI_DIR)/$(LIBRARY_NAME).linux_amd64.a
 	@echo "Installed to $(FFI_DIR)/$(LIBRARY_NAME).linux_amd64.a"
+
+# Install Linux musl-compatible version
+install-linux: clean release-linux
+	cp $(STATIC_LIB) $(FFI_DIR)/$(LIBRARY_NAME).linux_amd64.a
+	@echo "Installed musl-compatible library to $(FFI_DIR)/$(LIBRARY_NAME).linux_amd64.a"
+
+# Release build for Linux (no -march=native, musl-compatible)
+release-linux: CC := x86_64-linux-musl-gcc
+release-linux: AR := x86_64-linux-musl-ar
+release-linux: CFLAGS := $(CFLAGS_RELEASE_LINUX)
+release-linux: $(SHARED_LIB) $(STATIC_LIB)
 
 # Release build
 release: CFLAGS := $(CFLAGS_RELEASE)

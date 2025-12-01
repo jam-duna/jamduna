@@ -335,7 +335,7 @@ func TestSingleCompare(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
 	}
-	runSingleSTFTest(t, filename, string(content), BackendGoInterpreter, false)
+	runSingleSTFTest(t, filename, string(content), BackendCompiler, false)
 }
 
 func GetFuzzReportsPath(subDir ...string) (string, error) {

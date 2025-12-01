@@ -119,7 +119,7 @@ func (g *Grandpa) ProcessCommitMessage(grandpaCommit GrandpaCommitMessage) error
 			continue
 		}
 
-		weight += int(g.Voter_Staked[precommit.Ed25519Pub])
+		weight += int(1)
 	}
 
 	if weight < g.GetSupermajorityThreshold(round) {
