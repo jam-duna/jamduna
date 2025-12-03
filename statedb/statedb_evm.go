@@ -19,7 +19,7 @@ func CreateSignedUSDMTransfer(privateKeyHex string, nonce uint64, to common.Addr
 
 // GetChainId returns the chain ID for the current network
 func (n *StateDB) GetChainId() uint64 {
-	return uint64(EVMServiceCode)
+	return uint64(DefaultJAMChainID)
 }
 
 // GetAccounts returns the list of addresses owned by the client

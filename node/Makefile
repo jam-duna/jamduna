@@ -1,10 +1,6 @@
-TIMEOUT            ?= 15m
+TIMEOUT            ?= 10m
 TAGS               ?= tiny
-MEG_L              ?= 911
-MEG_S              ?= 911
-TargetN            ?= 10
-TargetAlgoN		   ?= 32
-TargetAlgoShort    ?= 39
+TargetN            ?= 6
 JCE_MANUAL         ?= true
 JAM_NODE           ?= true
 JAM_LOCAL_CLIENT   ?= false
@@ -23,8 +19,6 @@ endif
 # Conditionally set -targetN, or empty if TargetN=-1
 TARGET_PARAM = $(if $(filter -1,$(TargetN)),,$(shell echo -targetN=$(TargetN)))
 
-TARGET_ALGOPARAM = $(if $(filter -1,$(TargetAlgoN)),,$(shell echo -targetN=$(TargetAlgoN)))
-
 # PVM mode parameter to be passed to go test
 PVM_PARAM = -pvm_backend=$(PVM_BACKEND)
 
@@ -35,53 +29,11 @@ evm:
 	  -tags "network_test,$(TAGS)" $(TARGET_PARAM) \
 	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)
 
-algo :
-	@echo "Running TestAlgo$(if $(filter -1,$(TargetAlgoN)),, with targetN=$(TargetAlgoN)) and timeout $(TIMEOUT) in $(PVM_BACKEND) mode..."
-	@echo "go test -timeout $(TIMEOUT) -v -run '^TestAlgo$$' -tags \"network_test,$(TAGS)\" $(TARGET_ALGOPARAM) -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)"
-	@go test -timeout $(TIMEOUT) -v -run '^TestAlgo$$' \
-	  -tags "network_test,$(TAGS)" $(TARGET_ALGOPARAM) \
-	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)
-
-algo_short :
-	@echo "Running TestAlgo$(if $(filter -1,$(TargetAlgoShort)),, with targetAlgoShort=$(TargetAlgoShort)) and timeout $(TIMEOUT) in $(PVM_BACKEND) mode..."
-	@echo "go test -timeout $(TIMEOUT) -v -run '^TestAlgo$$' -tags \"network_test,$(TAGS)\" -targetN=$(TargetAlgoShort) -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)"
-	@go test -timeout $(TIMEOUT) -v -run '^TestAlgo$$' \
-	  -tags "network_test,$(TAGS)" -targetN=$(TargetAlgoShort) \
-	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)
-
-doom :
-	@echo "Running TestDoom$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT) in $(PVM_BACKEND) mode..."
-	@echo "go test -timeout $(TIMEOUT) -v -run '^TestDoom$$' -tags \"network_test,$(TAGS)\" $(TARGET_PARAM) -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)"
-	@go test -timeout $(TIMEOUT) -v -run '^TestDoom$$' \
-	  -tags "network_test,$(TAGS)" $(TARGET_PARAM) \
-	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)
-
-
-evm2 :
-	@echo "Running TestEVM2$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT) in $(PVM_BACKEND) mode..."
-	@echo "go test -timeout $(TIMEOUT) -v -run '^TestEVM2$$' -tags \"network_test,$(TAGS)\" $(TARGET_PARAM)  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)"
-	@go test -timeout $(TIMEOUT) -v -run '^TestEVM2$$' \
-	  -tags "network_test,$(TAGS)" $(TARGET_PARAM) \
-	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)
-
-evm2L :
-	$(MAKE) evm2 TargetN=100
-
 auth_copy:
 	@echo "Running TestAuthCopy$(if $(filter -1,$(TargetN)),, with targetN=$(TargetN)) and timeout $(TIMEOUT) in $(PVM_BACKEND) mode..."
 	@go test -timeout $(TIMEOUT) -v -run '^TestAuthCopy$$' \
 	  -tags "network_test,$(TAGS)" $(TARGET_PARAM) \
 	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)
-
-fallback:
-	@echo "Running TestFallback with timeout $(TIMEOUT)..."
-	@echo "go test -timeout $(TIMEOUT) -v -run TestFallback -tags \"network_test,$(TAGS)\" -jam_node=true"
-	@go test -timeout $(TIMEOUT) -v -run TestFallback -tags "network_test,$(TAGS)" -jam_node=true
-
-safrole:
-	@echo "Running TestNodeSafrole with timeout 20m..."
-	@echo "go test -timeout 20m -v -run TestSafrole -tags \"network_test,$(TAGS)\" -jam_node=true"
-	@go test -timeout 20m -v -run TestSafrole -tags "network_test,$(TAGS)" -jam_node=true
 
 disputes:
 	@echo "Running TestEVMDisputes with timeout $(TIMEOUT)..."

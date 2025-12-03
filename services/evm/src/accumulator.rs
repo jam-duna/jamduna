@@ -1,15 +1,15 @@
 //! Block Accumulator - manages block finalization and storage operations
 
+use crate::mmr::MMR;
+use crate::{
+    block::{EvmBlockPayload, block_number_to_object_id},
+    sharding::format_object_id,
+};
 use alloc::{format, vec::Vec};
 use utils::{
-    functions::{log_error, log_info, format_segment, AccumulateInput},
     constants::FULL,
+    functions::{AccumulateInput, format_segment, log_error, log_info},
 };
-use crate::{
-    sharding::format_object_id,
-    block::{block_number_to_object_id, EvmBlockPayload},
-};
-use crate::mmr::MMR;
 
 /// BlockAccumulator manages block storage and retrieval operations
 pub struct BlockAccumulator {
@@ -31,7 +31,11 @@ impl BlockAccumulator {
     /// 5. Appending work_package_hash to MMR
     ///
     /// Returns the MMR root committing to all blocks processed so far
-    pub fn accumulate(service_id: u32, timeslot: u32, accumulate_inputs: &[AccumulateInput]) -> Option<[u8; 32]> {
+    pub fn accumulate(
+        service_id: u32,
+        timeslot: u32,
+        accumulate_inputs: &[AccumulateInput],
+    ) -> Option<[u8; 32]> {
         let mut accumulator = Self::new(service_id, timeslot)?;
 
         for (idx, input) in accumulate_inputs.iter().enumerate() {
@@ -92,7 +96,10 @@ impl BlockAccumulator {
             log_info("📥 Empty compact format, no meta-shard entries (idle block)");
             0u8 // No meta-shard updates, use ld=0
         } else {
-            log_info(&format!("📥 Deserializing compact format: {} bytes total", data.len()));
+            // log_info(&format!(
+            //     "📥 Deserializing compact format: {} bytes total",
+            //     data.len()
+            // ));
 
             // Parse variable-length entries
             let mut offset = 0;
@@ -101,7 +108,10 @@ impl BlockAccumulator {
 
             while offset < data.len() {
                 if offset + 1 > data.len() {
-                    log_error(&format!("❌ Invalid compact format: truncated ld at offset {}", offset));
+                    log_error(&format!(
+                        "❌ Invalid compact format: truncated ld at offset {}",
+                        offset
+                    ));
                     return None;
                 }
 
@@ -127,7 +137,10 @@ impl BlockAccumulator {
                 num_entries += 1;
             }
 
-            log_info(&format!("📥 Deserialized {} meta-shard entries, max ld={}", num_entries, max_ld));
+            // log_info(&format!(
+            //     "📥 Deserialized {} meta-shard entries, max ld={}",
+            //     num_entries, max_ld
+            // ));
             max_ld
         };
 
@@ -152,8 +165,8 @@ impl BlockAccumulator {
     /// CRITICAL: We must detect NONE/WHAT sentinels properly. If the key is missing,
     /// we MUST write it (even if new_ld=0) so that Go's metashard_lookup.go can read it.
     fn write_metassr(&self, new_ld: u8) {
-        use utils::host_functions::{read, write};
         use utils::constants::{NONE, WHAT};
+        use utils::host_functions::{read, write};
 
         let mut ssr_key = [0u8; 32];
         ssr_key[0..4].copy_from_slice(&self.service_id.to_le_bytes());
@@ -164,12 +177,12 @@ impl BlockAccumulator {
         let mut buffer = [0u8; 1];
         let result = unsafe {
             read(
-                self.service_id as u64,       // s: service_id
-                ssr_key.as_ptr() as u64,       // ko: key offset
-                ssr_key.len() as u64,          // kz: key size
-                buffer.as_mut_ptr() as u64,    // o: output offset
-                0,                              // f: offset within (0 = start)
-                buffer.len() as u64,           // l: length to read
+                self.service_id as u64,     // s: service_id
+                ssr_key.as_ptr() as u64,    // ko: key offset
+                ssr_key.len() as u64,       // kz: key size
+                buffer.as_mut_ptr() as u64, // o: output offset
+                0,                          // f: offset within (0 = start)
+                buffer.len() as u64,        // l: length to read
             )
         };
 
@@ -236,9 +249,9 @@ impl BlockAccumulator {
         work_package_hash: [u8; 32],
         entry_index: usize,
     ) -> Option<()> {
-        use utils::objects::ObjectRef;
-        use crate::sharding::ObjectKind;
         use crate::meta_sharding::meta_shard_object_id;
+        use crate::sharding::ObjectKind;
+        use utils::objects::ObjectRef;
 
         // Reconstruct meta-shard object_id from ld and prefix
         let mut prefix56 = [0u8; 7];
@@ -249,22 +262,24 @@ impl BlockAccumulator {
 
         // Unpack 5-byte ObjectRef from compact format
         let packed_bytes = &entry_bytes[prefix_bytes..prefix_bytes + 5];
-        let packed: u64 = ((packed_bytes[0] as u64) << 32) |
-                         ((packed_bytes[1] as u64) << 24) |
-                         ((packed_bytes[2] as u64) << 16) |
-                         ((packed_bytes[3] as u64) << 8) |
-                         (packed_bytes[4] as u64);
+        let packed: u64 = ((packed_bytes[0] as u64) << 32)
+            | ((packed_bytes[1] as u64) << 24)
+            | ((packed_bytes[2] as u64) << 16)
+            | ((packed_bytes[3] as u64) << 8)
+            | (packed_bytes[4] as u64);
 
         let index_start = ((packed >> 28) & 0xFFF) as u16; // Bits 28-39: DA segment start
-        let index_end = ((packed >> 16) & 0xFFF) as u16;   // Bits 16-27: DA segment end
+        let index_end = ((packed >> 16) & 0xFFF) as u16; // Bits 16-27: DA segment end
         let last_segment_size = ((packed >> 4) & 0xFFF) as u16; // Bits 4-15: bytes in last segment
-        let object_kind = (packed & 0xF) as u8;            // Bits 0-3: object kind
+        let object_kind = (packed & 0xF) as u8; // Bits 0-3: object kind
 
         // Validate object_kind is MetaShard
         if object_kind != ObjectKind::MetaShard as u8 {
             log_error(&format!(
                 "❌ Entry {}: Expected MetaShard (kind={}), got kind={}",
-                entry_index, ObjectKind::MetaShard as u8, object_kind
+                entry_index,
+                ObjectKind::MetaShard as u8,
+                object_kind
             ));
             return None;
         }
@@ -283,7 +298,12 @@ impl BlockAccumulator {
 
         log_info(&format!(
             "📝 Entry {}: Writing MetaShard ld={}, object_id={}, index_start={}, payload_len={}, bytes={}",
-            entry_index, ld, format_object_id(&object_id), index_start, payload_length, format_segment(entry_bytes)
+            entry_index,
+            ld,
+            format_object_id(&object_id),
+            index_start,
+            payload_length,
+            format_segment(entry_bytes)
         ));
 
         // Create full ObjectRef with work_package_hash and write to JAM State
@@ -310,11 +330,17 @@ impl BlockAccumulator {
         // stale parent shard instead of the correct child shard!
         use utils::constants::NONE;
         if result == NONE {
-            log_info(&format!("🆕 First write for meta-shard ld={} - deleting ancestor shards", ld));
+            log_info(&format!(
+                "🆕 First write for meta-shard ld={} - deleting ancestor shards",
+                ld
+            ));
             self.delete_ancestor_shards(&object_id, ld)?;
         }
 
-        log_info(&format!("✅ MetaShard ObjectRef written successfully, result={}", result));
+        // log_info(&format!(
+        //     "✅ MetaShard ObjectRef written successfully, result={}",
+        //     result
+        // ));
 
         Some(())
     }
@@ -330,8 +356,8 @@ impl BlockAccumulator {
     /// - For each depth, compute the ancestor object_id by masking the prefix
     /// - Delete that key from JAM State
     fn delete_ancestor_shards(&self, object_id: &[u8; 32], current_ld: u8) -> Option<()> {
-        use utils::host_functions::write;
         use crate::meta_sharding::meta_shard_object_id;
+        use utils::host_functions::write;
 
         if current_ld == 0 {
             // No ancestors to delete
@@ -357,7 +383,8 @@ impl BlockAccumulator {
                 }
             }
 
-            let ancestor_object_id = meta_shard_object_id(self.service_id, ancestor_ld, &masked_prefix);
+            let ancestor_object_id =
+                meta_shard_object_id(self.service_id, ancestor_ld, &masked_prefix);
 
             log_info(&format!(
                 "🗑️  Deleting ancestor meta-shard: ld={}, object_id={}",
@@ -385,16 +412,25 @@ impl BlockAccumulator {
     /// - block_number: Next block number to write (defaults to 1 if not found)
     /// - MMR: Merkle Mountain Range of all previous blocks (creates new if genesis)
     fn new(service_id: u32, timeslot: u32) -> Option<Self> {
-        log_info(&format!("🏭 Creating BlockAccumulator for service_id={}, timeslot={}", service_id, timeslot));
+        log_info(&format!(
+            "🏭 Creating BlockAccumulator for service_id={}, timeslot={}",
+            service_id, timeslot
+        ));
 
         // Read current block number from JAM State
         let block_number = match EvmBlockPayload::read_blocknumber_key(service_id) {
             Some(block_num) => {
-                log_info(&format!("📊 Read block_number={} from JAM State", block_num));
+                log_info(&format!(
+                    "📊 Read block_number={} from JAM State",
+                    block_num
+                ));
                 block_num
-            },
+            }
             None => {
-                log_error(&format!("❌ Failed to read block_number for service_id={}, defaulting to 1", service_id));
+                log_error(&format!(
+                    "❌ Failed to read block_number for service_id={}, defaulting to 1",
+                    service_id
+                ));
                 1
             }
         };
@@ -488,6 +524,5 @@ impl BlockAccumulator {
         self.block_number += 1;
 
         Some(())
-    }    
+    }
 }
-

@@ -6,7 +6,7 @@
 extern crate alloc;
 
 use crate::constants::SEGMENT_SIZE;
-use crate::functions::{call_log, format_object_id, log_debug, log_error, log_info};
+use crate::functions::{call_log, format_object_id, log_error};
 use crate::functions::{HarnessError, HarnessResult};
 use alloc::format;
 use alloc::vec::Vec;
@@ -150,10 +150,22 @@ impl WriteEffectEntry {
 
         // Export the payload to segments using the host function
         if !self.payload.is_empty() {
+            // log_info(&format!(
+            //     "export_effect pre-call -- object_id={}, payload_len_declared={}, payload_vec_len={}",
+            //     format_object_id(self.object_id),
+            //     self.ref_info.payload_length,
+            //     self.payload.len()
+            // ));
+            // IMPORTANT: Create a copy of the payload to pass to the FFI.
+            // The export() FFI function can corrupt nearby memory, so we MUST NOT
+            // pass a pointer to self.payload directly. Instead, we copy it to a
+            // temporary location and export from there.
+            let payload_copy = self.payload.clone();
+
             let result = unsafe {
                 export(
-                    self.payload.as_ptr() as u64,
-                    self.payload.len() as u64
+                    payload_copy.as_ptr() as u64,
+                    payload_copy.len() as u64
                 )
             };
 
@@ -162,12 +174,16 @@ impl WriteEffectEntry {
                 return Err(HarnessError::HostFetchFailed);
             }
 
-        log_info(&format!(
-            "export_effect --  object_id={}, index_start={}, payload_length={}",
-            format_object_id(self.object_id),
-            self.ref_info.index_start,
-            self.ref_info.payload_length
-        ));
+            // IMPORTANT: The FFI corrupts payload_copy's memory. We must NOT let Rust
+            // try to drop it, as that will TRAP. Use mem::forget to leak it instead.
+            core::mem::forget(payload_copy);
+
+        // log_info(&format!(
+        //     "export_effect --  object_id={}, index_start={}, payload_length={}",
+        //     format_object_id(self.object_id),
+        //     self.ref_info.index_start,
+        //     self.ref_info.payload_length
+        // ));
 
         // Calculate next index based on payload_length and segment size
             // Each segment is SEGMENT_SIZE bytes (4104), so we need ceil(payload_length / SEGMENT_SIZE) segments
@@ -176,12 +192,12 @@ impl WriteEffectEntry {
             u16::try_from(next_index).map_err(|_| HarnessError::ParseError)
         } else {
             // Empty payload, just return next index
-        log_info(&format!(
-            "export_effect  EMPTY --  object_id={}, index_start={}, payload_length={}",
-            format_object_id(self.object_id),
-            self.ref_info.index_start,
-            self.ref_info.payload_length
-        ));
+            // log_info(&format!(
+            //     "export_effect  EMPTY --  object_id={}, index_start={}, payload_length={}",
+            //     format_object_id(self.object_id),
+            //     self.ref_info.index_start,
+            //     self.ref_info.payload_length
+            // ));
            start_index.checked_add(0).ok_or(HarnessError::ParseError)
 
         }
@@ -282,29 +298,20 @@ impl StateWitness {
     pub fn fetch_object_payload(&self, work_item: &crate::functions::WorkItem, work_item_index: u16) -> Option<Vec<u8>> {
         use crate::functions::fetch_imported_segment;
 
-        log_info(&format!(
-            "fetch_object_payload: object_id={}, ref_info.index_start={}, ref_info.payload_length={}",
-            format_object_id(self.object_id),
-            self.ref_info.index_start,
-            self.ref_info.payload_length
-        ));
 
         let start = self.ref_info.index_start as u64;
         let end = start + self.ref_info.payload_length as u64;
         if end <= start {
-            log_error(&format!(
-                "fetch_object_payload: end <= start ({} <= {}), returning None",
-                end, start
-            ));
+            // log_error(&format!(
+            //     "fetch_object_payload: end <= start ({} <= {}), returning None",
+            //     end, start
+            // ));
             return None;
         }
 
         let (start, end) = match work_item.get_imported_segments_range(&self.ref_info) {
             Some(range) => {
-                log_debug(&format!(
-                    "fetch_object_payload: found imported_segments range: start={}, end={}",
-                    range.0, range.1
-                ));
+
                 range
             }
             None => {
@@ -318,10 +325,7 @@ impl StateWitness {
 
         let mut payload: Vec<u8> = Vec::new();
         for seg_idx in start..end {
-            log_debug(&format!(
-                "fetch_object_payload: fetching segment {} for work_item_index={}",
-                seg_idx, work_item_index
-            ));
+
             let bytes = match fetch_imported_segment(work_item_index, seg_idx as u32) {
                 Ok(b) => b,
                 Err(e) => {
@@ -333,31 +337,23 @@ impl StateWitness {
                 }
             };
             if bytes.is_empty() {
-                log_error(&format!(
-                    "fetch_object_payload: segment {} is empty, returning None",
-                    seg_idx
-                ));
+                // log_error(&format!(
+                //     "fetch_object_payload: segment {} is empty, returning None",
+                //     seg_idx
+                // ));
                 return None;
             }
-            log_debug(&format!(
-                "fetch_object_payload: segment {} fetched {} bytes",
-                seg_idx, bytes.len()
-            ));
+
             payload.extend_from_slice(&bytes);
         }
 
-        log_debug(&format!(
-            "fetch_object_payload: assembled payload length={}, expected={}",
-            payload.len(),
-            self.ref_info.payload_length
-        ));
 
         payload.truncate(self.ref_info.payload_length as usize);
 
-        log_debug(&format!(
-            "fetch_object_payload: success, returning payload of length={}",
-            payload.len()
-        ));
+        // log_debug(&format!(
+        //     "fetch_object_payload: success, returning payload of length={}",
+        //     payload.len()
+        // ));
 
         Some(payload)
     }
@@ -404,22 +400,22 @@ impl StateWitness {
     pub fn deserialize_and_verify(
         _service_id: u32,
         bytes: &[u8],
-        state_root: [u8; 32],
+        _state_root: [u8; 32],
     ) -> Result<Self, &'static str> {
         let witness = Self::deserialize(bytes).map_err(|_| "Failed to deserialize witness")?;
 
         // Log witness details for debugging
-        use crate::functions::log_info;
-        log_info(&format!(
-            "🔍 Witness: object_id={}, wph={}, idx_start={}, payload_len={}, kind={}, path_len={}, state_root={}",
-            format_object_id(witness.object_id),
-            format_object_id(witness.ref_info.work_package_hash),
-            witness.ref_info.index_start,
-            witness.ref_info.payload_length,
-            witness.ref_info.object_kind,
-            witness.path.len(),
-            format_object_id(state_root)
-        ));
+        //use crate::functions::log_info;
+        // log_info(&format!(
+        //     "🔍 Witness: object_id={}, wph={}, idx_start={}, payload_len={}, kind={}, path_len={}, state_root={}",
+        //     format_object_id(witness.object_id),
+        //     format_object_id(witness.ref_info.work_package_hash),
+        //     witness.ref_info.index_start,
+        //     witness.ref_info.payload_length,
+        //     witness.ref_info.object_kind,
+        //     witness.path.len(),
+        //     format_object_id(state_root)
+        // ));
         if false {
             // this treats the metashard witness, but we need to also treat the object witness by verifying ObjectProof
             // if witness.verify(service_id, state_root) {

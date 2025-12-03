@@ -402,6 +402,9 @@ func (tx *EthereumTransaction) ToJSON() string {
 // CreateSignedUSDMTransfer creates a signed transaction that transfers USDM tokens
 // Returns the parsed EthereumTransaction, RLP-encoded bytes, transaction hash, and error
 func CreateSignedUSDMTransfer(usdmAddress common.Address, privateKeyHex string, nonce uint64, to common.Address, amount *big.Int, gasPrice *big.Int, gasLimit uint64, chainID uint64) (*EthereumTransaction, []byte, common.Hash, error) {
+	if chainID == 0 {
+		panic(222)
+	}
 	// Parse private key
 	privateKey, err := crypto.HexToECDSA(privateKeyHex)
 	if err != nil {
@@ -413,8 +416,14 @@ func CreateSignedUSDMTransfer(usdmAddress common.Address, privateKeyHex string, 
 	calldata := make([]byte, 68)
 	copy(calldata[0:4], []byte{0xa9, 0x05, 0x9c, 0xbb}) // transfer(address,uint256) selector
 
-	// Encode recipient address (32 bytes, left-padded)
-	copy(calldata[16:36], to.Bytes())
+	// Encode recipient address (32 bytes, left-padded with zeros)
+	// Address is 20 bytes, so it goes in bytes 16-35 of the 32-byte word (bytes 4-35 of calldata)
+	toBytes := to.Bytes()
+	copy(calldata[16:36], toBytes)
+
+	// Debug: verify calldata encoding
+	fmt.Printf("DEBUG CreateSignedUSDMTransfer: to=%s, to.Bytes()=%x (len=%d)\n", to.Hex(), toBytes, len(toBytes))
+	fmt.Printf("DEBUG calldata[4:36]=%x\n", calldata[4:36])
 
 	// Encode amount (32 bytes)
 	amountBytes := amount.FillBytes(make([]byte, 32))

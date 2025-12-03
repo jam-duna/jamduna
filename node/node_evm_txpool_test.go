@@ -38,7 +38,7 @@ func TestTxPoolBasicOperations(t *testing.T) {
 	gasLimit := uint64(100_000)
 
 	targetAddr := common.HexToAddress(targetAddressHex)
-	tx, _, _, err := statedb.CreateSignedUSDMTransfer(issuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, uint64(1337))
+	tx, _, _, err := statedb.CreateSignedUSDMTransfer(issuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, uint64(statedb.DefaultJAMChainID))
 	if err != nil {
 		t.Fatalf("Failed to create signed transaction: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestTxPoolValidation(t *testing.T) {
 	gasLimit := uint64(100_000)
 
 	targetAddr := common.HexToAddress(targetAddressHex)
-	tx, _, _, err := statedb.CreateSignedUSDMTransfer(issuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, uint64(1337))
+	tx, _, _, err := statedb.CreateSignedUSDMTransfer(issuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, uint64(statedb.DefaultJAMChainID))
 	if err != nil {
 		t.Fatalf("Failed to create signed transaction: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestParseRawTransaction(t *testing.T) {
 	gasLimit := uint64(100_000)
 
 	targetAddr := common.HexToAddress(targetAddressHex)
-	tx, rawTxBytes, _, err := statedb.CreateSignedUSDMTransfer(issuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, uint64(1337))
+	tx, rawTxBytes, _, err := statedb.CreateSignedUSDMTransfer(issuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, uint64(statedb.DefaultJAMChainID))
 	if err != nil {
 		t.Fatalf("Failed to create signed transaction: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestTxPoolCleanup(t *testing.T) {
 	gasLimit := uint64(100_000)
 
 	targetAddr := common.HexToAddress(targetAddressHex)
-	tx, _, _, err := statedb.CreateSignedUSDMTransfer(issuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, uint64(1337))
+	tx, _, _, err := statedb.CreateSignedUSDMTransfer(issuerPrivateKeyHex, 0, targetAddr, amount, gasPrice, gasLimit, uint64(statedb.DefaultJAMChainID))
 	if err != nil {
 		t.Fatalf("Failed to create signed transaction: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestEIP1559Transaction(t *testing.T) {
 	copy(calldata[36:68], amountBytes)
 
 	// Create EIP-1559 transaction (type 2)
-	chainID := big.NewInt(int64(uint64(1337)))
+	chainID := big.NewInt(int64(uint64(statedb.DefaultJAMChainID)))
 	gasTipCap := big.NewInt(2_000_000_000)  // 2 Gwei
 	gasFeeCap := big.NewInt(10_000_000_000) // 10 Gwei
 
@@ -304,7 +304,7 @@ func TestEIP2930Transaction(t *testing.T) {
 	copy(calldata[36:68], amountBytes)
 
 	// Create EIP-2930 transaction (type 1) with access list
-	chainID := big.NewInt(int64(uint64(1337)))
+	chainID := big.NewInt(int64(uint64(statedb.DefaultJAMChainID)))
 	gasPrice := big.NewInt(5_000_000_000) // 5 Gwei
 
 	ethTx := ethereumTypes.NewTx(&ethereumTypes.AccessListTx{

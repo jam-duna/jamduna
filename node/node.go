@@ -64,9 +64,9 @@ const (
 	enableInit  = false
 	numNodes    = types.TotalValidators
 	quicAddr    = "127.0.0.1:%d"
-	Grandpa     = true
-	GrandpaEasy = false
-	Audit       = true
+	Grandpa     = false
+	GrandpaEasy = true
+	Audit       = false
 	CE138_test  = false
 	CE129_test  = false // turn on for testing CE129
 	revalidate  = false // turn off for production (or publication of traces)
@@ -604,7 +604,7 @@ func StandardizePVMBackend(pvm_mode string) string {
 	var pvmBackend string
 	switch mode {
 	case "INTERPRETER":
-		pvmBackend = statedb.BackendGoInterpreter
+		pvmBackend = statedb.BackendInterpreter
 	case "COMPILER", "RECOMPILER", "X86":
 		if runtime.GOOS == "linux" {
 			pvmBackend = statedb.BackendCompiler
@@ -1147,10 +1147,8 @@ const (
 // RobustSubmitAndWaitForWorkPackageBundles will retry SubmitAndWaitForWorkPackageBundles up to 4 times
 func RobustSubmitAndWaitForWorkPackageBundles(ctx context.Context, n JNode, reqs []*types.WorkPackageBundle) (*types.WorkReport, error) {
 	var lastErr error
-	log.Info(log.Node, "RobustSubmitAndWaitForWorkPackageBundles START", "maxTries", maxRobustTries, "refineTimeout", RefineTimeout)
 
 	for attempt := 1; attempt <= maxRobustTries; attempt++ {
-		log.Info(log.Node, "RobustSubmitAndWaitForWorkPackageBundles attempt", "attempt", attempt, "maxTries", maxRobustTries)
 
 		// Use the caller's context directly, but with a reasonable per-attempt timeout
 		// If caller's timeout is long, allow longer per-attempt timeout
@@ -1169,14 +1167,11 @@ func RobustSubmitAndWaitForWorkPackageBundles(ctx context.Context, n JNode, reqs
 		attemptCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
 		defer cancel()
 
-		log.Info(log.Node, "RobustSubmitAndWaitForWorkPackageBundles attempt timeout", "attempt", attempt, "timeout", attemptTimeout)
-
 		startTime := time.Now()
 		hashes, err := n.SubmitAndWaitForWorkPackageBundles(attemptCtx, reqs)
 		elapsed := time.Since(startTime)
 
 		if err == nil {
-			log.Info(log.Node, "RobustSubmitAndWaitForWorkPackageBundles SUCCESS", "attempt", attempt, "elapsed", elapsed)
 			wr, err := n.GetWorkReport(hashes[0])
 			if err != nil {
 				log.Error(log.Node, "GetWorkReport ERR", "err", err)

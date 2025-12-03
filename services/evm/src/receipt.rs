@@ -143,7 +143,6 @@ pub fn serialize_receipt(record: &TransactionReceiptRecord) -> Vec<u8> {
     result
 }
 
-
 /// Detects transaction type from raw payload (EIP-2718 typed envelopes)
 pub fn detect_tx_type_from_payload(payload: &[u8]) -> u8 {
     if payload.is_empty() {

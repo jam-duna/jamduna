@@ -11,16 +11,12 @@
 //! - Account deletions → Code tombstones (empty payload)
 //! - Logs → Receipt objects
 
+use crate::receipt::{TransactionReceiptRecord, receipt_object_id_from_receipt, serialize_receipt};
 use crate::sharding::{
-    code_object_id,
-    shard_object_id, ssr_object_id,
+    ContractStorage, EvmEntry, ShardData, ShardId, serialize_shard, serialize_ssr,
 };
-use crate::receipt::{receipt_object_id_from_receipt, serialize_receipt, TransactionReceiptRecord};
+use crate::sharding::{code_object_id, shard_object_id, ssr_object_id};
 use crate::state::{MajikBackend, balance_storage_key, h160_from_low_u64_be, nonce_storage_key};
-use crate::sharding::{
-    serialize_shard, serialize_ssr, ContractStorage, EvmEntry,
-    ShardData, ShardId,
-};
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     format,
@@ -29,8 +25,8 @@ use alloc::{
 use evm::backend::OverlayedChangeSet;
 use primitive_types::{H160, H256};
 use utils::effects::{WriteEffectEntry, WriteIntent};
-use utils::functions::{log_crit, log_error, log_info, log_debug};
-use utils::objects::ObjectId;
+use utils::functions::{log_crit, log_debug, log_error, log_info};
+use utils::objects::{ObjectId, ObjectRef};
 use utils::tracking::TrackerOutput;
 
 impl MajikBackend {
@@ -43,7 +39,6 @@ impl MajikBackend {
         &self,
         tracker_output: &TrackerOutput,
     ) -> BTreeMap<[u8; 32], BTreeSet<usize>> {
-
         let mut object_tx_map: BTreeMap<[u8; 32], BTreeSet<usize>> = BTreeMap::new();
         for write in &tracker_output.writes {
             let tx_index = write.tx_index;
@@ -110,8 +105,10 @@ impl MajikBackend {
         _work_package_hash: [u8; 32],
         _tracker_output: &TrackerOutput,
         _write_intents: &mut Vec<WriteIntent>,
-    ) -> (BTreeMap<H160, BTreeMap<ShardId, Vec<(H256, H256)>>>, BTreeSet<H160>) {
-
+    ) -> (
+        BTreeMap<H160, BTreeMap<ShardId, Vec<(H256, H256)>>>,
+        BTreeSet<H160>,
+    ) {
         // 2. Handle storage changes - group by address and shard
         let mut storage_by_address: BTreeMap<H160, BTreeMap<ShardId, Vec<(H256, H256)>>> =
             BTreeMap::new();
@@ -182,37 +179,42 @@ impl MajikBackend {
     }
 
     /// Process meta-shards AFTER export: group ObjectRef writes by meta-shard and export to DA
-    /// This must be called AFTER write_intents have been exported so ObjectRefs have correct index_start
+    /// `object_refs` contains the ObjectId/ObjectRef pairs for the exported writes with correct index_start values.
     /// Returns the number of meta-shard write intents added
     pub fn process_meta_shards_after_export(
         &self,
         work_package_hash: [u8; 32],
-        write_intents: &mut Vec<WriteIntent>,
+        object_refs: &[(ObjectId, ObjectRef)],
         service_id: u32,
-    ) -> usize {
-        use utils::functions::log_info;
-        use crate::sharding::ObjectKind;
+    ) -> Vec<WriteIntent> {
         use crate::meta_sharding::{meta_shard_object_id, serialize_meta_shard_with_id};
+        use crate::sharding::ObjectKind;
         use utils::effects::WriteEffectEntry;
-
-        log_info(&format!("📦 Meta-sharding: Processing {} object writes", write_intents.len()));
-
+/*
+        use utils::functions::log_info;
+        for (idx, (object_id, object_ref)) in object_refs.iter().enumerate() {
+            log_info(&format!(
+                "  [{}] object_id={:?}, ref_info={{wph: {:?}, idx_start: {}, payload_len: {}, kind: {}}}",
+                idx,
+                object_id,
+                object_ref.work_package_hash,
+                object_ref.index_start,
+                object_ref.payload_length,
+                object_ref.object_kind
+            ));
+        }
+ */
         // Collect all (object_id, ObjectRef) pairs from write_intents
         // NOTE: At this point ref_info.index_start has correct values since exports have already happened.
-        let object_writes: Vec<([u8; 32], utils::objects::ObjectRef)> = write_intents
+        let object_writes: Vec<([u8; 32], utils::objects::ObjectRef)> = object_refs
             .iter()
-            .map(|intent| {
-                (intent.effect.object_id, intent.effect.ref_info.clone())
-            })
+            .map(|(object_id, object_ref)| (*object_id, object_ref.clone()))
             .collect();
 
         // Get meta-shard state from backend (persistent across refine calls)
         let mut cached_meta_shards = self.meta_shards_mut();
         let mut meta_ssr = self.meta_ssr_mut();
 
-        // Track SSR entry count before processing to detect changes
-        let initial_ssr_entry_count = meta_ssr.entries.len();
-        log_info(&format!("📦 Meta-sharding: Current MetaSSR has {} routing entries", initial_ssr_entry_count));
 
         // Process object writes - groups by meta-shard, handles splits
         let meta_shard_writes = crate::meta_sharding::process_object_writes(
@@ -220,9 +222,7 @@ impl MajikBackend {
             &mut cached_meta_shards,
             &mut meta_ssr,
         );
-
-        let meta_shard_count = meta_shard_writes.len();
-        log_info(&format!("📦 Meta-sharding: Generated {} meta-shard write intents", meta_shard_count));
+        let mut meta_write_intents = Vec::with_capacity(meta_shard_writes.len());
 
         // Export meta-shard segments to DA and create write intents
         for meta_write in meta_shard_writes {
@@ -235,15 +235,12 @@ impl MajikBackend {
             };
             let meta_shard_bytes = serialize_meta_shard_with_id(&meta_shard, meta_write.shard_id);
 
-            log_info(&format!(
-                "  📦 Meta-shard {:?}: {} entries, {} bytes",
-                meta_write.shard_id,
-                meta_write.entries.len(),
-                meta_shard_bytes.len()
-            ));
-
             // Compute object_id for this meta-shard
-            let object_id = meta_shard_object_id(service_id, meta_write.shard_id.ld, &meta_write.shard_id.prefix56);
+            let object_id = meta_shard_object_id(
+                service_id,
+                meta_write.shard_id.ld,
+                &meta_write.shard_id.prefix56,
+            );
 
             // Create ObjectRef for this meta-shard
             let object_ref = utils::objects::ObjectRef::new(
@@ -252,14 +249,9 @@ impl MajikBackend {
                 ObjectKind::MetaShard as u8,
             );
 
-            log_info(&format!(
-                "  Created ObjectRef: payload_length={}, actual_payload_len={}",
-                object_ref.payload_length,
-                meta_shard_bytes.len()
-            ));
 
             // Create write intent
-            write_intents.push(WriteIntent {
+            meta_write_intents.push(WriteIntent {
                 effect: WriteEffectEntry {
                     object_id,
                     ref_info: object_ref,
@@ -272,12 +264,12 @@ impl MajikBackend {
         // Note: MetaSSR (global_depth routing table) is NOT exported to DA.
         // Accumulate writes global_depth hint directly to JAM State SSR key.
         // The backend tracks meta_ssr internally for split detection only.
-        log_info(&format!(
-            "📝 Meta-SSR state: {} routing entries (tracked internally for splits)",
-            meta_ssr.entries.len()
-        ));
+        // log_info(&format!(
+        //     "📝 Meta-SSR state: {} routing entries (tracked internally for splits)",
+        //     meta_ssr.entries.len()
+        // ));
 
-        meta_shard_count
+        meta_write_intents
     }
 
     /// Emit placeholder (v0) receipts as write intents.
@@ -294,9 +286,9 @@ impl MajikBackend {
         timeslot: u32,
         total_gas_used: u64,
     ) {
-        use utils::hash_functions::keccak256;
-        use utils::functions::log_info;
         use crate::receipt::encode_canonical_receipt_rlp;
+        use utils::functions::log_info;
+        use utils::hash_functions::keccak256;
 
         let initial_count = write_intents.len();
         let receipts_count = receipts.len();
@@ -344,8 +336,7 @@ impl MajikBackend {
         if receipts_count != added_count {
             log_error(&format!(
                 "ERROR: Receipts mismatch: {} receipts → {} write intents",
-                receipts_count,
-                added_count
+                receipts_count, added_count
             ));
         } else if receipts_count > 0 {
             log_debug(&format!(
@@ -380,9 +371,7 @@ impl MajikBackend {
 
         log_info(&format!(
             "📦 Block assembled: {} txs, {} gas, {} bytes",
-            block_payload.num_transactions,
-            block_payload.gas_used,
-            block_payload.payload_length
+            block_payload.num_transactions, block_payload.gas_used, block_payload.payload_length
         ));
 
         // Export block to DA
@@ -394,9 +383,9 @@ impl MajikBackend {
 
         write_intents.push(WriteIntent {
             effect: WriteEffectEntry {
-                    object_id: work_package_hash,
-                    ref_info: block_object_ref,
-                    payload: serialized,
+                object_id: work_package_hash,
+                ref_info: block_object_ref,
+                payload: serialized,
             },
             dependencies: Vec::new(),
         });
@@ -411,7 +400,6 @@ impl MajikBackend {
         tracker_output: &TrackerOutput,
         write_intents: &mut Vec<WriteIntent>,
     ) -> usize {
-
         let initial_count = write_intents.len();
         let changes_count = storage_resets.len();
 
@@ -468,8 +456,7 @@ impl MajikBackend {
         if changes_count > 0 || added_count > 0 {
             log_debug(&format!(
                 "Storage resets: {} changes → {} write intents",
-                changes_count,
-                added_count
+                changes_count, added_count
             ));
         }
 
@@ -485,7 +472,6 @@ impl MajikBackend {
         tracker_output: &TrackerOutput,
         write_intents: &mut Vec<WriteIntent>,
     ) -> usize {
-
         let initial_count = write_intents.len();
         let deletes_count = deletes.len();
 
@@ -529,8 +515,7 @@ impl MajikBackend {
         if deletes_count > 0 || added_count > 0 {
             log_debug(&format!(
                 "Account deletions: {} changes → {} write intents",
-                deletes_count,
-                added_count
+                deletes_count, added_count
             ));
         }
 
@@ -546,7 +531,6 @@ impl MajikBackend {
         tracker_output: &TrackerOutput,
         write_intents: &mut Vec<WriteIntent>,
     ) -> usize {
-
         let initial_count = write_intents.len();
         let codes_count = codes.len();
 
@@ -589,8 +573,7 @@ impl MajikBackend {
         if codes_count > 0 || added_count > 0 {
             log_debug(&format!(
                 "Code changes: {} changes → {} write intents",
-                codes_count,
-                added_count
+                codes_count, added_count
             ));
         }
 
@@ -691,11 +674,7 @@ impl MajikBackend {
         let delta_entries = new_entry_count.saturating_sub(previous_entry_count);
         log_info(&format!(
             "Recursive split triggered - threshold exceeded (prev_entries={}, total_after_updates={}, delta={}) → {} leaf shards, {} SSR entries",
-            previous_entry_count,
-            new_entry_count,
-            delta_entries,
-            num_leaf_shards,
-            num_ssr_entries
+            previous_entry_count, new_entry_count, delta_entries, num_leaf_shards, num_ssr_entries
         ));
 
         // Verify all leaf shards meet constraints
@@ -758,7 +737,9 @@ impl MajikBackend {
                 let contract_storage = storage_shards_mut
                     .entry(address)
                     .or_insert_with(|| ContractStorage::new(address));
-                contract_storage.shards.insert(*shard_id, shard_data.clone());
+                contract_storage
+                    .shards
+                    .insert(*shard_id, shard_data.clone());
             }
         }
 
@@ -800,7 +781,7 @@ impl MajikBackend {
         let object_id = shard_object_id(address, shard_id);
 
         // Dump entries for debugging
-        crate::sharding::dump_entries(&shard_data);
+        // crate::sharding::dump_entries(&shard_data);
 
         let payload = serialize_shard(&shard_data);
 
@@ -876,7 +857,11 @@ impl MajikBackend {
                 contract_storage.ssr.header.entry_count = contract_storage.ssr.entries.len() as u32;
 
                 let payload = serialize_ssr(&contract_storage.ssr);
-                (payload, contract_storage.ssr.header.version, contract_storage.ssr.entries.len())
+                (
+                    payload,
+                    contract_storage.ssr.header.version,
+                    contract_storage.ssr.entries.len(),
+                )
             };
 
             let object_ref = utils::objects::ObjectRef::new(
@@ -922,7 +907,6 @@ impl MajikBackend {
         tracker_output: &TrackerOutput,
         write_intents: &mut Vec<WriteIntent>,
     ) -> usize {
-
         let initial_count = write_intents.len();
         let storage_changes_count = change_set.storages.len();
         let balance_changes_count = change_set.balances.len();
@@ -963,10 +947,7 @@ impl MajikBackend {
         if total_changes > 0 || added_count > 0 {
             log_debug(&format!(
                 "Storage/balance/nonce changes: {} storage, {} balance, {} nonce → {} write intents",
-                storage_changes_count,
-                balance_changes_count,
-                nonce_changes_count,
-                added_count
+                storage_changes_count, balance_changes_count, nonce_changes_count, added_count
             ));
         }
 
@@ -999,7 +980,6 @@ impl MajikBackend {
         timeslot: u32,
         total_gas_used: u64,
     ) -> utils::effects::ExecutionEffects {
-
         {
             let mut balance_cache = self.balances.borrow_mut();
             for (address, balance) in &change_set.balances {
@@ -1049,22 +1029,20 @@ impl MajikBackend {
         );
 
         // 5. Handle receipts and assemble block
-        self.emit_receipts_and_block(
-            receipts,
-            work_package_hash,
-            &mut write_intents,
-            state_root,
-            timeslot,
-            total_gas_used,
-        );
-
+        if total_gas_used > 0 {
+            self.emit_receipts_and_block(
+                receipts,
+                work_package_hash,
+                &mut write_intents,
+                state_root,
+                timeslot,
+                total_gas_used,
+            );
+        }
         // NOTE: Meta-shard processing now happens AFTER export in refiner.rs
         // This ensures ObjectRefs have correct index_start values before being
         // embedded in meta-shard entries.
 
-        utils::effects::ExecutionEffects {
-            write_intents,
-        }
+        utils::effects::ExecutionEffects { write_intents }
     }
-
 }

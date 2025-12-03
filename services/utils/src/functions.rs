@@ -1419,8 +1419,6 @@ pub fn fetch_data(
 pub fn fetch_imported_segment(work_item_index: u16, index: u32) -> HarnessResult<Vec<u8>> {
     const FETCH_DATATYPE_IMPORTED_SEGMENT: u64 = 5;
 
-    log_info(&format!("fetch_imported_segment: work_item_index={}, index={}", work_item_index, index));
-
     let mut buffer = vec![0u8; SEGMENT_SIZE as usize];
 
     unsafe {
@@ -1433,8 +1431,6 @@ pub fn fetch_imported_segment(work_item_index: u16, index: u32) -> HarnessResult
             index as u64,
         );
 
-        log_info(&format!("fetch_imported_segment: result_len={}", result_len));
-
         if result_len == 0 {
             log_info("fetch_imported_segment: returning empty vector");
             return Ok(Vec::new());
@@ -1446,7 +1442,6 @@ pub fn fetch_imported_segment(work_item_index: u16, index: u32) -> HarnessResult
         }
 
         buffer.truncate(result_len as usize);
-        log_info(&format!("fetch_imported_segment: success - returning {} bytes", result_len));
         Ok(buffer)
     }
 }
@@ -1629,46 +1624,28 @@ impl WorkItem {
         let index_start = object_ref.index_start;
         let index_end = index_start + ((object_ref.payload_length as u64 + SEGMENT_SIZE - 1) / SEGMENT_SIZE) as u16;
 
-        log_debug(&format!(
-            "get_imported_segments_range: looking for work_package_hash={:?}, index_start={}, index_end={}, total imported_segments={}",
-            target_hash,
-            index_start,
-            index_end,
-            self.imported_segments.len()
-        ));
+
 
         let mut start_pos: Option<usize> = None;
         let mut end_pos: Option<usize> = None;
 
         for (i, segment) in self.imported_segments.iter().enumerate() {
             if segment.work_package_hash == *target_hash {
-                log_debug(&format!(
-                    "get_imported_segments_range: segment[{}] matches hash, segment.index={}",
-                    i, segment.index
-                ));
+
                 if segment.index >= index_start && segment.index < index_end {
                     if start_pos.is_none() {
                         start_pos = Some(i);
-                        log_debug(&format!(
-                            "get_imported_segments_range: set start_pos={}",
-                            i
-                        ));
+
                     }
                     end_pos = Some(i + 1);
-                    log_debug(&format!(
-                        "get_imported_segments_range: updated end_pos={}",
-                        i + 1
-                    ));
+
                 }
             }
         }
 
         match (start_pos, end_pos) {
             (Some(start), Some(end)) => {
-                log_debug(&format!(
-                    "get_imported_segments_range: success, returning range ({}, {})",
-                    start, end
-                ));
+
                 Some((start, end))
             }
             _ => {

@@ -79,7 +79,7 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 	}
 
 	// Log after host function call to match javajam format
-	if PvmLogging || true {
+	if PvmLogging {
 		fmt.Printf("Calling host function: %s %d [gas used: %d, gas remaining: %d] [service: %d]\n", HostFnToName(host_fn), host_fn, gasUsed, currentGas, vm.Service_index)
 	}
 
@@ -1538,7 +1538,7 @@ func (vm *VM) hostWrite() {
 	as_internal_key_str := common.Bytes2Hex(as_internal_key[:])
 	account_storage_key := fmt.Sprintf("0x%x", common.ComputeC_sh(a.ServiceIndex, as_internal_key).Bytes()[:31])
 
-	log.Info(vm.logging, "WRITE storage",
+	log.Trace(vm.logging, "WRITE storage",
 		"mu_k", fmt.Sprintf("%x", mu_k),
 		"opaque_key", as_internal_key_str,
 		"as_key", account_storage_key,
@@ -1773,7 +1773,7 @@ func (vm *VM) hostExport() {
 		return
 	} else {
 		vm.WriteRegister(7, uint64(vm.ExportSegmentIndex)+uint64(len(vm.Exports)))
-		log.Info(vm.logging, fmt.Sprintf("%s EXPORT#%d OK", vm.ServiceMetadata, uint64(len(vm.Exports))),
+		log.Trace(vm.logging, fmt.Sprintf("%s EXPORT#%d OK", vm.ServiceMetadata, uint64(len(vm.Exports))),
 			"p", p, "z", z, "vm.ExportSegmentIndex", vm.ExportSegmentIndex,
 			"segmenthash", fmt.Sprintf("%v", common.Blake2Hash(x)),
 			"segment20", fmt.Sprintf("%x", x[0:20]),
@@ -1989,8 +1989,8 @@ func (vm *VM) hostLog() {
 	if vm.IsChild {
 		serviceMetadata = fmt.Sprintf("%s-child", serviceMetadata)
 	}
-	loggingVerbose := true
-	if vm.logging == log.FirstGuarantor || vm.logging == log.Auditor || vm.logging == log.Builder || vm.logging == log.PvmAuthoring {
+	loggingVerbose := false
+	if vm.logging == log.FirstGuarantor || vm.logging == log.Auditor || vm.logging == log.Builder || vm.logging == log.PvmAuthoring || vm.logging == log.OtherGuarantor {
 		loggingVerbose = true
 	}
 	if !loggingVerbose {
@@ -2081,7 +2081,7 @@ func (vm *VM) HostFetchWitness() error {
 	funcName := "HostFetchWitness"
 	// Validate object_id length
 	if object_id_len != 32 {
-		log.Trace(vm.logging, funcName+": invalid object_id length", "object_id_len", object_id_len)
+		log.Info(vm.logging, funcName+": invalid object_id length", "object_id_len", object_id_len)
 
 		vm.WriteRegister(7, 0) // Return 0 = not found
 		return nil
@@ -2090,16 +2090,18 @@ func (vm *VM) HostFetchWitness() error {
 	// Read object_id from memory
 	object_id_bytes, errCode := vm.ReadRAMBytes(object_id_ptr, object_id_len)
 	if errCode != OK {
-		log.Trace(vm.logging, funcName+": failed to read object_id from memory", "object_id_ptr", fmt.Sprintf("0x%x", object_id_ptr), "object_id_len", object_id_len, "error", errCode)
+		log.Info(vm.logging, funcName+": failed to read object_id from memory", "object_id_ptr", fmt.Sprintf("0x%x", object_id_ptr), "object_id_len", object_id_len, "error", errCode)
 		vm.WriteRegister(7, 0)
 		return nil
 	}
 	// Convert object_id bytes to common.Hash
 	object_id := common.BytesToHash(object_id_bytes)
+
 	if vm.logging != log.Builder {
-		log.Trace(vm.logging, "HostFetchWitness returning empty", "role", vm.logging, "object_id", object_id)
+		// TODO: avoid the host function
+		log.Trace(vm.logging, "HostFetchWitness returning empty (not builder)", "role", vm.logging, "object_id", object_id)
 		vm.WriteRegister(7, 0)
-		return nil
+		// return nil
 	}
 
 	// Witness path: use ReadStateWitness which returns complete witness with proof
@@ -2108,7 +2110,7 @@ func (vm *VM) HostFetchWitness() error {
 	witness, found, err := vm.hostenv.ReadObject(service_id, object_id)
 	if err != nil {
 		// Object not found in meta-shard is normal (e.g., EOA has no code, uninitialized storage)
-		log.Trace(vm.logging, funcName+": object not found", "object_id", object_id, "err", err)
+		log.Debug(vm.logging, funcName+": ❌ object not found", "object_id", object_id, "err", err)
 		vm.WriteRegister(7, 0) // Return 0 = not found
 		return nil
 	} else if !found {
@@ -2121,7 +2123,7 @@ func (vm *VM) HostFetchWitness() error {
 		log.Error(log.SDB, "BMT Proof verification failed", "object_id", object_id)
 		return fmt.Errorf("BMT Proof verification failed for object %s", object_id)
 	}
-	log.Info(log.SDB, "HostFetchWitness: BMT Proof verified", "object_id", object_id, "serviceID", witness.ServiceID,
+	log.Debug(log.SDB, "HostFetchWitness: BMT Proof verified", "object_id", object_id, "serviceID", witness.ServiceID,
 		"MetaShardKey", witness.ObjectID, "value", fmt.Sprintf("%x", witness.Value), "path", witness.Path, "stateRoot", stateRoot)
 
 	objRef := witness.Ref
@@ -2177,7 +2179,7 @@ func (vm *VM) GetBuilderWitnesses() ([]types.ImportSegment, []types.StateWitness
 	importedSegments := make([]types.ImportSegment, 0)
 
 	for msobjectID, ms := range msWitnesses {
-		log.Info(log.SDB, "Processing meta-shard witness", "metaShardObjectID", msobjectID)
+		log.Trace(log.SDB, "Processing meta-shard witness", "metaShardObjectID", msobjectID)
 		if ms.ObjectProofs == nil {
 			ms.ObjectProofs = make(map[common.Hash][]common.Hash)
 		}
@@ -2229,7 +2231,7 @@ func (vm *VM) GetBuilderWitnesses() ([]types.ImportSegment, []types.StateWitness
 
 			// Add import segments for this object
 			numSegments, _ := types.CalculateSegmentsAndLastBytes(ref.PayloadLength)
-			log.Info(log.SDB, "Adding import segment PART1", "objectID", objectID, "workPackageHash", ref.WorkPackageHash,
+			log.Trace(log.SDB, "Adding import segments - object", "objectID", objectID, "workPackageHash", ref.WorkPackageHash,
 				"start", ref.IndexStart, "numSegments", numSegments, "end", ref.IndexStart+numSegments)
 			for idx := ref.IndexStart; idx < ref.IndexStart+numSegments; idx++ {
 				importedSegments = append(importedSegments, types.ImportSegment{
@@ -2240,7 +2242,7 @@ func (vm *VM) GetBuilderWitnesses() ([]types.ImportSegment, []types.StateWitness
 		}
 		ref := ms.Ref
 		numSegments, _ := types.CalculateSegmentsAndLastBytes(ref.PayloadLength)
-		log.Info(log.SDB, "Adding import segment PART2", "objectID", msobjectID, "workPackageHash", ref.WorkPackageHash,
+		log.Trace(log.SDB, "Adding import segment - metashard", "objectID", msobjectID, "workPackageHash", ref.WorkPackageHash,
 			"start", ref.IndexStart, "numSegments", numSegments, "end", ref.IndexStart+numSegments,
 			"payloadLength", ref.PayloadLength)
 		for idx := ref.IndexStart; idx < ref.IndexStart+numSegments; idx++ {

@@ -1,8 +1,8 @@
-use crate::sharding::{code_object_id, format_object_id, ObjectKind};
+use crate::sharding::{ObjectKind, code_object_id, format_object_id};
 use crate::state::MajikBackend;
 use alloc::format;
 use primitive_types::H160;
-use utils::functions::{log_debug, log_info};
+use utils::functions::{log_info};
 use utils::objects::ObjectRef;
 
 #[allow(dead_code)]
@@ -12,19 +12,14 @@ pub const ISSUER_EOA_BYTES: [u8; 20] = [
 ];
 
 /// Load a single precompile contract directly from embedded bytecode
-fn load_precompile(
-    backend: &mut MajikBackend,
-    address: H160,
-    bytecode: &[u8],
-    name: &str,
-) {
+fn load_precompile(backend: &mut MajikBackend, address: H160, bytecode: &[u8], name: &str) {
     let code_object_id = code_object_id(address);
 
-    log_debug(&format!(
-        "EVM Service: Loading precompile {}: {} bytes",
-        name,
-        bytecode.len()
-    ));
+    // log_debug(&format!(
+    //     "EVM Service: Loading precompile {}: {} bytes",
+    //     name,
+    //     bytecode.len()
+    // ));
 
     let object_ref = ObjectRef {
         work_package_hash: [0u8; 32],
@@ -55,4 +50,3 @@ pub fn load_precompiles(backend: &mut MajikBackend) {
         load_precompile(backend, address, bytecode, name);
     }
 }
-

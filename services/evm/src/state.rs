@@ -16,22 +16,23 @@ use evm::MergeStrategy;
 use evm::backend::{
     OverlayedBackend, RuntimeBackend as EvmRuntimeBackend, RuntimeEnvironment, TransactionalBackend,
 };
-use evm::interpreter::{ExitError, ExitException};
 use evm::interpreter::runtime::{
     Log, RuntimeBaseBackend, RuntimeConfig, SetCodeOrigin, TouchKind, Transfer,
 };
+use evm::interpreter::{ExitError, ExitException};
 use primitive_types::{H160, H256, U256};
 use utils::effects::ObjectId;
-use utils::functions::{log_error, log_info, log_debug};
+use utils::functions::{log_debug, log_error, log_info};
 use utils::objects::ObjectRef;
 // ObjectDependency replaced with ObjectId
 use utils::tracking::OverlayTracker;
 
 use crate::receipt::TransactionReceiptRecord;
+use crate::refiner::PayloadType;
 use crate::sharding::{
-    ObjectKind, code_object_id, shard_object_id,
+    ContractShard, ContractStorage, SSRHeader, ShardId, deserialize_shard, deserialize_ssr,
 };
-use crate::sharding::{ContractStorage, ContractShard, SSRHeader, ShardId, deserialize_shard, deserialize_ssr};
+use crate::sharding::{ObjectKind, code_object_id, shard_object_id};
 use utils::hash_functions::keccak256;
 use utils::tracking::WriteKey;
 
@@ -61,11 +62,11 @@ pub fn balance_storage_key(address: H160) -> H256 {
     input[12..32].copy_from_slice(address.as_bytes());
     // Slot 0 for balances mapping (already zeroed)
     let key = keccak256(&input);
-    log_info(&format!(
-        "🔑 balance_storage_key({:?}) -> {} (Solidity mapping hash)",
-        address,
-        crate::sharding::format_object_id(&key.0)
-    ));
+    // log_info(&format!(
+    //     "🔑 balance_storage_key({:?}) -> {} (Solidity mapping hash)",
+    //     address,
+    //     crate::sharding::format_object_id(&key.0)
+    // ));
     key
 }
 
@@ -79,11 +80,11 @@ pub fn nonce_storage_key(address: H160) -> H256 {
     // Slot 1 for nonces mapping
     input[63] = 0x01;
     let key = keccak256(&input);
-    log_info(&format!(
-        "🔑 nonce_storage_key({:?}) -> {} (Solidity mapping hash)",
-        address,
-        crate::sharding::format_object_id(&key.0)
-    ));
+    // log_info(&format!(
+    //     "🔑 nonce_storage_key({:?}) -> {} (Solidity mapping hash)",
+    //     address,
+    //     crate::sharding::format_object_id(&key.0)
+    // ));
     key
 }
 
@@ -99,7 +100,7 @@ pub struct EnvironmentData {
     pub chain_id: U256,
     pub block_difficulty: U256,
     pub block_randomness: Option<H256>,
-
+    pub service_id: u32, // Service ID for DA imports
 }
 
 // ===== MajikBackend =====
@@ -114,23 +115,22 @@ pub struct MajikBackend {
     pub nonces: RefCell<BTreeMap<H160, U256>>,          // address -> nonce
     pub environment: EnvironmentData,
     pub service_id: u32, // Service ID for DA imports
+    pub payload_type: PayloadType, // Payload type for witness fetching
     pub imported_objects: RefCell<BTreeMap<ObjectId, (ObjectRef, Vec<u8>)>>, // object_id -> (ref, payload)
 
     // Meta-shard state (JAM State object index)
-    pub meta_ssr: RefCell<crate::meta_sharding::MetaSSR>,  // Global SSR for all ObjectRefs
-    pub meta_shards: RefCell<BTreeMap<crate::da::ShardId, crate::meta_sharding::MetaShard>>,  // Cached meta-shards
+    pub meta_ssr: RefCell<crate::meta_sharding::MetaSSR>, // Global SSR for all ObjectRefs
+    pub meta_shards: RefCell<BTreeMap<crate::da::ShardId, crate::meta_sharding::MetaShard>>, // Cached meta-shards
 }
 
 impl MajikBackend {
     pub fn new(
         environment: EnvironmentData,
         imported_objects: BTreeMap<ObjectId, (ObjectRef, Vec<u8>)>,
+        payload_type: PayloadType,
     ) -> Self {
         // Load imported DA objects into backend state
-
-        // Extract service_id from environment.chain_id
-        // The service ID is passed via chain_id in the environment and used for DA operations
-        let service_id = environment.chain_id.as_u32();
+        let service_id = environment.service_id;
 
         let mut backend = Self {
             code_storage: RefCell::new(BTreeMap::new()),
@@ -141,6 +141,7 @@ impl MajikBackend {
             nonces: RefCell::new(BTreeMap::new()),
             environment,
             service_id,
+            payload_type,
             imported_objects: RefCell::new(BTreeMap::new()),
 
             // Initialize meta-shard tracking
@@ -157,6 +158,7 @@ impl MajikBackend {
             version: 0, // Genesis version
         };
         let initial_ssr = crate::sharding::ssr_from_parts(initial_header, Vec::new());
+
         backend.storage_shards.borrow_mut().insert(
             system_contract,
             ContractStorage {
@@ -167,7 +169,10 @@ impl MajikBackend {
 
         for (object_id, (object_ref, payload)) in imported_objects.into_iter() {
             // Store in imported_objects cache for reuse
-            backend.imported_objects.borrow_mut().insert(object_id, (object_ref.clone(), payload.clone()));
+            backend
+                .imported_objects
+                .borrow_mut()
+                .insert(object_id, (object_ref.clone(), payload.clone()));
 
             // Determine object type from ObjectRef.object_kind() instead of object_id[31]
             // since object IDs no longer reliably encode kind in the last byte
@@ -211,12 +216,15 @@ impl MajikBackend {
                     // Without this, process_object_writes() creates empty shards and overwrites
                     // existing DA data, causing catastrophic data loss
                     use crate::meta_sharding::{
-                        deserialize_meta_shard_with_id_validated,
-                        MetaShardDeserializeResult,
+                        MetaShardDeserializeResult, deserialize_meta_shard_with_id_validated,
                     };
 
                     // Deserialize with validated header
-                    match deserialize_meta_shard_with_id_validated(&payload, &object_id, backend.service_id) {
+                    match deserialize_meta_shard_with_id_validated(
+                        &payload,
+                        &object_id,
+                        backend.service_id,
+                    ) {
                         MetaShardDeserializeResult::ValidatedHeader(shard_id, meta_shard) => {
                             log_info(&format!(
                                 "  ✅ Imported MetaShard: shard_id={:?}, {} entries",
@@ -225,7 +233,10 @@ impl MajikBackend {
                             ));
 
                             // Insert into cache, even if empty (empty shards must be tracked!)
-                            backend.meta_shards.borrow_mut().insert(shard_id, meta_shard);
+                            backend
+                                .meta_shards
+                                .borrow_mut()
+                                .insert(shard_id, meta_shard);
                         }
                         MetaShardDeserializeResult::ValidationFailed => {
                             // Header present but validation failed - REJECT
@@ -270,49 +281,37 @@ impl MajikBackend {
     }
 
     /// Import storage shard from DA using fetch_object host function
-    fn import_shard(&self, address: H160, shard_id: ShardId) -> Option<(ObjectRef, ContractShard)> {
+    fn import_shard(&self, address: H160, shard_id: ShardId, payload_type: PayloadType) -> Option<(ObjectRef, ContractShard)> {
         let object_id = shard_object_id(address, shard_id);
-
-        log_debug(&format!(
-            "  import_shard: address={:?}, shard_id (ld={}, prefix={:02x}{:02x}...), object_id={}",
-            address,
-            shard_id.ld,
-            shard_id.prefix56[0],
-            shard_id.prefix56[1],
-            crate::sharding::format_object_id(&object_id)
-        ));
 
         // Check if already in imported_objects cache
         {
             let imported = self.imported_objects.borrow();
             if let Some((object_ref, payload)) = imported.get(&object_id) {
                 log_debug(&format!(
-                    "  Found in imported_cache: address={:?}, shard_id (ld={}, prefix={:02x}{:02x}...), object_id={}",
+                    "  Found in imported_cache: address={:?}, shard_id (ld={}, prefix={:02x}{:02x}...), object_id={}, payload_length={}",
                     address,
                     shard_id.ld,
                     shard_id.prefix56[0],
                     shard_id.prefix56[1],
-                    crate::sharding::format_object_id(&object_id)
+                    crate::sharding::format_object_id(&object_id),
+                    payload.len()
                 ));
                 let shard_data = deserialize_shard(payload)?;
                 return Some((object_ref.clone(), shard_data));
             }
         }
 
-        log_debug(&format!(
-            "  Not in imported_cache, fetching from DA: address={:?}, shard_id (ld={}, prefix={:02x}{:02x}...), object_id={}",
-            address,
-            shard_id.ld,
-            shard_id.prefix56[0],
-            shard_id.prefix56[1],
-            crate::sharding::format_object_id(&object_id)
-        ));
-
         // Use fetch_object host function (254) to get both ObjectRef and payload
         const MAX_SHARD_SIZE: usize = 64 * 1024; // 64KB max shard size
 
         // For storage shards, missing from DA means empty (never written) - this is normal
-        let (object_ref, shard_data) = match ObjectRef::fetch(self.service_id, &object_id, MAX_SHARD_SIZE) {
+        let (object_ref, shard_data) = match ObjectRef::fetch(
+            self.service_id,
+            &object_id,
+            MAX_SHARD_SIZE,
+            payload_type as u8,
+        ) {
             Some((object_ref, payload)) => {
                 // Shard exists in DA - deserialize it
                 let shard_data = deserialize_shard(&payload)?;
@@ -322,10 +321,7 @@ impl MajikBackend {
                 // Shard doesn't exist in DA - return empty shard (normal for uninitialized storage)
                 log_debug(&format!(
                     "  Shard not in DA (empty): address={:?}, shard_id (ld={}, prefix={:02x}{:02x}...) - returning empty shard",
-                    address,
-                    shard_id.ld,
-                    shard_id.prefix56[0],
-                    shard_id.prefix56[1]
+                    address, shard_id.ld, shard_id.prefix56[0], shard_id.prefix56[1]
                 ));
 
                 // Create a dummy ObjectRef for the empty shard
@@ -358,7 +354,7 @@ impl MajikBackend {
     }
 
     /// Import code from DA using fetch_object host function
-    fn import_code(&self, address: H160) -> Option<(ObjectRef, Vec<u8>)> {
+    fn import_code(&self, address: H160, payload_type: PayloadType) -> Option<(ObjectRef, Vec<u8>)> {
         let object_id = code_object_id(address);
 
         log_debug(&format!(
@@ -388,7 +384,7 @@ impl MajikBackend {
 
         // Use fetch_object host function (254)
         const MAX_CODE_SIZE: usize = 24576; // 24KB max contract size (EIP-170)
-        let (object_ref, payload) = ObjectRef::fetch(self.service_id, &object_id, MAX_CODE_SIZE)?;
+        let (object_ref, payload) = ObjectRef::fetch(self.service_id, &object_id, MAX_CODE_SIZE, payload_type as u8)?;
 
         self.imported_objects
             .borrow_mut()
@@ -412,7 +408,6 @@ impl MajikBackend {
 
     /// Resolve storage dependency
     pub fn object_dependency_for_storage(&self, address: H160, key: H256) -> ObjectId {
-
         let shard_id = self.resolve_shard_id_impl(address, key);
 
         shard_object_id(address, shard_id)
@@ -445,10 +440,11 @@ impl MajikBackend {
     }
 
     /// Get mutable reference to meta-shards cache
-    pub fn meta_shards_mut(&self) -> core::cell::RefMut<'_, BTreeMap<crate::da::ShardId, crate::meta_sharding::MetaShard>> {
+    pub fn meta_shards_mut(
+        &self,
+    ) -> core::cell::RefMut<'_, BTreeMap<crate::da::ShardId, crate::meta_sharding::MetaShard>> {
         self.meta_shards.borrow_mut()
     }
-
 }
 
 // ===== MajikOverlay struct and coordination =====
@@ -667,7 +663,6 @@ impl EvmRuntimeBackend for MajikOverlay<'_> {
     /// Implementation: Overlay calls backend.storage() on first access, caches as "original"
     /// Note: OverlayedBackend handles caching automatically, MajikBackend just provides storage reads
     fn original_storage(&self, address: H160, index: H256) -> H256 {
-
         self.overlay.original_storage(address, index)
     }
 
@@ -715,6 +710,14 @@ impl EvmRuntimeBackend for MajikOverlay<'_> {
     /// JAM DA: Cached in overlay, exported to DA at accumulate with COW
     /// Write tracking: Records transaction index and instance counter
     fn set_storage(&mut self, address: H160, key: H256, value: H256) -> Result<(), ExitError> {
+        // Log entry being added/updated
+        log_info(&format!(
+            "set_storage Entry: address={:?}, key_h=0x{}, value=0x{}",
+            address,
+            hex::encode(key.as_bytes()),
+            hex::encode(value.as_bytes())
+        ));
+
         self.overlay.set_storage(address, key, value)?;
         self.tracker
             .borrow_mut()
@@ -821,7 +824,9 @@ impl EvmRuntimeBackend for MajikOverlay<'_> {
         let new_storage_value = H256::from(encoded);
 
         // Write new balance to storage
-        self.overlay.set_storage(system_contract, storage_key, new_storage_value).unwrap();
+        self.overlay
+            .set_storage(system_contract, storage_key, new_storage_value)
+            .unwrap();
         self.tracker
             .borrow_mut()
             .record_write(WriteKey::storage(system_contract, storage_key));
@@ -852,7 +857,9 @@ impl EvmRuntimeBackend for MajikOverlay<'_> {
         let new_storage_value = H256::from(encoded);
 
         // Write new balance to storage
-        self.overlay.set_storage(system_contract, storage_key, new_storage_value).unwrap();
+        self.overlay
+            .set_storage(system_contract, storage_key, new_storage_value)
+            .unwrap();
         self.tracker
             .borrow_mut()
             .record_write(WriteKey::storage(system_contract, storage_key));
@@ -894,18 +901,38 @@ impl RuntimeBaseBackend for MajikBackend {
     /// Accounts are backed by the 0x01 system contract storage just like any other contract.
     /// On cache miss we read the corresponding storage slot (keccak256(address)) via storage().
     fn balance(&self, address: H160) -> U256 {
+        // log_info(&format!("🔍 balance() called for address={:?}", address));
+
         // Check cache first
         {
             let balances = self.balances.borrow();
             if let Some(balance) = balances.get(&address) {
+                //log_info(&format!("  ✅ Found in cache: balance={}", balance));
                 return *balance;
             }
         }
 
+        // log_info(&format!(
+        //     "  ⚠️  Not in cache, fetching from storage for address={:?}",
+        //     address
+        // ));
+
         let system_contract = h160_from_low_u64_be(0x01);
         let storage_key = balance_storage_key(address);
+        // log_info(&format!(
+        //     "  📍 Calling storage() with address={:?}, system_contract={:?}, storage_key=0x{}",
+        //     address,
+        //     system_contract,
+        //     hex::encode(storage_key.as_bytes())
+        // ));
+
         let value_h256 = self.storage(system_contract, storage_key);
         let balance = U256::from_big_endian(value_h256.as_bytes());
+
+        // log_info(&format!(
+        //     "  💰 Read balance={} for address={:?}",
+        //     balance, address
+        // ));
 
         // Cache the balance (including zero) to prevent infinite DA fetches
         self.balances.borrow_mut().insert(address, balance);
@@ -934,7 +961,7 @@ impl RuntimeBaseBackend for MajikBackend {
         }
 
         // Cache miss - attempt DA import via import_code()
-        if let Some((_object_ref, bytecode)) = self.import_code(address) {
+        if let Some((_object_ref, bytecode)) = self.import_code(address, self.payload_type) {
             // Cache the imported code and its hash
             let code_hash = keccak256(&bytecode);
             self.code_storage
@@ -981,28 +1008,85 @@ impl RuntimeBaseBackend for MajikBackend {
     /// Current: Calls import_shard() which fetches and deserializes from DA
     /// Note: Caching requires mut access - handled by caller or RefCell wrapper
     fn storage(&self, address: H160, key: H256) -> H256 {
+        // log_info(&format!("📦 storage() called: address={:?}, key=0x{}", address, hex::encode(key.as_bytes())));
+
         let shard_id = self.resolve_shard_id_impl(address, key);
+        // log_info(&format!("  🗂️  Resolved shard_id: ld={}, prefix56={:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        //     shard_id.ld,
+        //     shard_id.prefix56[0],
+        //     shard_id.prefix56[1],
+        //     shard_id.prefix56[2],
+        //     shard_id.prefix56[3],
+        //     shard_id.prefix56[4],
+        //     shard_id.prefix56[5],
+        //     shard_id.prefix56[6]
+        // ));
+
         // Check cache first
         {
             let storage_shards = self.storage_shards.borrow();
             if let Some(contract_storage) = storage_shards.get(&address) {
+                // log_info(&format!(
+                //     "  ✅ Found contract_storage for address={:?}",
+                //     address
+                // ));
                 if let Some(shard_data) = contract_storage.shards.get(&shard_id) {
+                    // log_info(&format!("  ✅ Found shard in cache with {} entries", shard_data.entries.len()));
+                    // for (idx, entry) in shard_data.entries.iter().enumerate() {
+                    //     log_info(&format!("    Entry[{}]: key_h=0x{}, value=0x{}",
+                    //         idx,
+                    //         hex::encode(entry.key_h.as_bytes()),
+                    //         hex::encode(entry.value.as_bytes())
+                    //     ));
+                    // }
+
                     match shard_data
                         .entries
                         .binary_search_by_key(&key, |entry| entry.key_h)
                     {
-                        Ok(idx) => return shard_data.entries[idx].value,
-                        Err(_) => return H256::zero(),
+                        Ok(idx) => {
+                            let value = shard_data.entries[idx].value;
+                            // log_info(&format!(
+                            //     "  ✅ Found key in cache: value=0x{}",
+                            //     hex::encode(value.as_bytes())
+                            // ));
+                            return value;
+                        }
+                        Err(_) => {
+                            // log_info(&format!(
+                            //     "  ❌ Key not found in cached shard, returning zero: key=0x{}",
+                            //     hex::encode(key.as_bytes())
+                            // ));
+                            return H256::zero();
+                        }
                     }
+                } else {
+                    log_info(&format!("  ⚠️  Shard not in cache"));
                 }
+            } else {
+                log_info(&format!(
+                    "  ⚠️  No contract_storage for address={:?}",
+                    address
+                ));
             }
         }
-        // TODO: Re-enable this check once we properly handle DA imports for different payload types
-        // if self.environment.payload_type != crate::refiner::PayloadType::Builder {
-        //     return H256::zero();
-        // }
+
         // Cache miss - attempt DA import via import_shard()
-        if let Some((_object_ref, shard_data)) = self.import_shard(address, shard_id) {
+        log_info(&format!("  📥 Attempting to import shard from DA..."));
+        if let Some((_object_ref, shard_data)) = self.import_shard(address, shard_id, self.payload_type) {
+            log_info(&format!(
+                "  ✅ Imported shard with {} entries",
+                shard_data.entries.len()
+            ));
+            for (idx, entry) in shard_data.entries.iter().enumerate() {
+                log_info(&format!(
+                    "    Imported Entry[{}]: key_h=0x{}, value=0x{}",
+                    idx,
+                    hex::encode(entry.key_h.as_bytes()),
+                    hex::encode(entry.value.as_bytes())
+                ));
+            }
+
             // Search in the freshly imported shard
             match shard_data
                 .entries
@@ -1010,25 +1094,24 @@ impl RuntimeBaseBackend for MajikBackend {
             {
                 Ok(idx) => {
                     let value = shard_data.entries[idx].value;
-                    // Note: Can't cache here due to &self, caller must handle caching
+                    log_info(&format!(
+                        "  ✅ Found key in imported shard: value=0x{}",
+                        hex::encode(value.as_bytes())
+                    ));
                     return value;
                 }
                 Err(_) => {
-                    log_debug(&format!(
-                        "  Key not found in imported shard: address={:?}, key={:?}, shard_id (ld={}, prefix={:02x}{:02x}...)",
-                        address,
-                        crate::sharding::format_object_id(&key.0),
-                        shard_id.ld,
-                        shard_id.prefix56[0],
-                        shard_id.prefix56[1]
+                    log_info(&format!(
+                        "  ❌ Key not found in imported shard, returning zero: key=0x{}",
+                        hex::encode(key.as_bytes())
                     ));
                 }
             }
         } else {
             log_error(&format!(
-                "  Failed to import shard from DA: address={:?}, key={:?}, shard_id (ld={}, prefix={:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x})",
+                "  ❌ Failed to import shard from DA: address={:?}, key=0x{}, shard_id (ld={}, prefix={:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x})",
                 address,
-                crate::sharding::format_object_id(&key.0),
+                hex::encode(key.as_bytes()),
                 shard_id.ld,
                 shard_id.prefix56[0],
                 shard_id.prefix56[1],
@@ -1040,6 +1123,10 @@ impl RuntimeBaseBackend for MajikBackend {
             ));
         }
 
+        log_info(&format!(
+            "  ⚠️  Returning H256::zero() for key=0x{}",
+            hex::encode(key.as_bytes())
+        ));
         H256::zero()
     }
 
@@ -1159,7 +1246,6 @@ impl EvmRuntimeBackend for MajikBackend {
     // ===== Required by trait (cannot remove) =====
 
     fn original_storage(&self, address: H160, key: H256) -> H256 {
-
         self.storage(address, key)
     }
 

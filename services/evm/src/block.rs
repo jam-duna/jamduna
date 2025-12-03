@@ -1,13 +1,13 @@
 //! Block Payload Structure
 
-use alloc::{vec::Vec, format};
+use alloc::{format, vec::Vec};
 use core::convert::TryInto;
 use utils::{
     constants::{BLOCK_NUMBER_KEY, NONE},
     effects::ObjectId,
-    functions::{log_info, log_error},
-    host_functions::{read as host_read, write as host_write},
+    functions::{log_error, log_info},
     hash_functions::blake2b_hash,
+    host_functions::{read as host_read, write as host_write},
 };
 
 const BLOCK_HEADER_SIZE: usize = 116; // 4+4+4+8+32+32+32 = 116 bytes 
@@ -101,39 +101,54 @@ impl EvmBlockPayload {
         let mut offset = 0;
 
         // Parse fixed header: payload_length, numeric fields, then hash fields
-        let payload_length = u32::from_le_bytes(data[offset..offset + 4].try_into().map_err(|_| "Invalid payload_length")?);
+        let payload_length = u32::from_le_bytes(
+            data[offset..offset + 4]
+                .try_into()
+                .map_err(|_| "Invalid payload_length")?,
+        );
         offset += 4;
 
         let num_transactions = u32::from_le_bytes(
-            data[offset..offset + 4].try_into().map_err(|_| "Invalid num_transactions")?
+            data[offset..offset + 4]
+                .try_into()
+                .map_err(|_| "Invalid num_transactions")?,
         );
         offset += 4;
 
         let timestamp = u32::from_le_bytes(
-            data[offset..offset + 4].try_into().map_err(|_| "Invalid timestamp")?
+            data[offset..offset + 4]
+                .try_into()
+                .map_err(|_| "Invalid timestamp")?,
         );
         offset += 4;
 
         let gas_used = u64::from_le_bytes(
-            data[offset..offset + 8].try_into().map_err(|_| "Invalid gas_used")?
+            data[offset..offset + 8]
+                .try_into()
+                .map_err(|_| "Invalid gas_used")?,
         );
         offset += 8;
 
         let state_root: [u8; HASH_SIZE] = data[offset..offset + HASH_SIZE]
-            .try_into().map_err(|_| "Invalid state_root")?;
+            .try_into()
+            .map_err(|_| "Invalid state_root")?;
         offset += HASH_SIZE;
 
         let transactions_root: [u8; HASH_SIZE] = data[offset..offset + HASH_SIZE]
-            .try_into().map_err(|_| "Invalid transactions_root")?;
+            .try_into()
+            .map_err(|_| "Invalid transactions_root")?;
         offset += HASH_SIZE;
 
         let receipt_root: [u8; HASH_SIZE] = data[offset..offset + HASH_SIZE]
-            .try_into().map_err(|_| "Invalid receipt_root")?;
+            .try_into()
+            .map_err(|_| "Invalid receipt_root")?;
         offset += HASH_SIZE;
 
         // Parse variable data: transaction hashes
         let tx_count = u32::from_le_bytes(
-            data[offset..offset + 4].try_into().map_err(|_| "Invalid tx_count")?
+            data[offset..offset + 4]
+                .try_into()
+                .map_err(|_| "Invalid tx_count")?,
         ) as usize;
         offset += 4;
 
@@ -143,7 +158,8 @@ impl EvmBlockPayload {
                 return Err("Insufficient data for tx_hashes");
             }
             let tx_hash: [u8; 32] = data[offset..offset + 32]
-                .try_into().map_err(|_| "Invalid tx_hash")?;
+                .try_into()
+                .map_err(|_| "Invalid tx_hash")?;
             tx_hashes.push(tx_hash);
             offset += 32;
         }
@@ -154,14 +170,17 @@ impl EvmBlockPayload {
         }
 
         let receipt_count = u32::from_le_bytes(
-            data[offset..offset + 4].try_into().map_err(|_| "Invalid receipt_count")?
+            data[offset..offset + 4]
+                .try_into()
+                .map_err(|_| "Invalid receipt_count")?,
         ) as usize;
         offset += 4;
 
         let mut receipt_hashes = Vec::with_capacity(receipt_count);
         for _ in 0..receipt_count {
             let receipt_hash: [u8; 32] = data[offset..offset + 32]
-                .try_into().map_err(|_| "Invalid receipt_hash")?;
+                .try_into()
+                .map_err(|_| "Invalid receipt_hash")?;
             receipt_hashes.push(receipt_hash);
             offset += 32;
         }
@@ -178,7 +197,6 @@ impl EvmBlockPayload {
             receipt_hashes,
         })
     }
-
 
     /// Prepare EvmBlockPayload for DA export with computed roots
     /// This replaces the old write() method since blocks are now exported to DA
@@ -202,7 +220,6 @@ impl EvmBlockPayload {
         ));
     }
 
-
     /// Compute transaction root using JAM BMT from this block's transaction hashes
     ///
     /// The transaction root is computed from transaction hashes indexed by their
@@ -214,7 +231,8 @@ impl EvmBlockPayload {
         }
 
         // Convert tx_hashes to key-value pairs for proper JAM BMT computation
-        let kvs: Vec<([u8; 32], Vec<u8>)> = self.tx_hashes
+        let kvs: Vec<([u8; 32], Vec<u8>)> = self
+            .tx_hashes
             .iter()
             .enumerate()
             .map(|(index, hash)| {
@@ -240,7 +258,8 @@ impl EvmBlockPayload {
         }
 
         // Convert receipt_hashes to key-value pairs for proper JAM BMT computation
-        let kvs: Vec<([u8; 32], Vec<u8>)> = self.receipt_hashes
+        let kvs: Vec<([u8; 32], Vec<u8>)> = self
+            .receipt_hashes
             .iter()
             .enumerate()
             .map(|(index, hash)| {
@@ -278,7 +297,9 @@ impl EvmBlockPayload {
             return None; // Insufficient data
         }
 
-        Some(u32::from_le_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]))
+        Some(u32::from_le_bytes([
+            buffer[0], buffer[1], buffer[2], buffer[3],
+        ]))
     }
 
     /// Write BLOCK_NUMBER_KEY with current block_number
@@ -305,17 +326,20 @@ impl EvmBlockPayload {
         let mut buffer = [0u8; 36]; // 32 bytes wph + 4 bytes timeslot
         let len = unsafe {
             host_read(
-                service_id as u64, // service_id (s)
-                bn_key.as_ptr() as u64, // key_offset (ko)
-                bn_key.len() as u64, // key_size (kz)
+                service_id as u64,          // service_id (s)
+                bn_key.as_ptr() as u64,     // key_offset (ko)
+                bn_key.len() as u64,        // key_size (kz)
                 buffer.as_mut_ptr() as u64, // value_offset (o)
-                0, // offset into buffer (f)
-                buffer.len() as u64, // buffer length (l)
+                0,                          // offset into buffer (f)
+                buffer.len() as u64,        // buffer length (l)
             )
         };
 
         if len < 32 {
-            log_error(&format!("❌ Failed to resolve block {} mapping for deletion (len={})", block_number, len));
+            log_error(&format!(
+                "❌ Failed to resolve block {} mapping for deletion (len={})",
+                block_number, len
+            ));
             return None;
         }
 
@@ -325,23 +349,36 @@ impl EvmBlockPayload {
         // 2) Delete blocknumber → wph mapping
         let result_bn = unsafe { host_write(bn_key.as_ptr() as u64, bn_key.len() as u64, 0, 0) };
         if result_bn == WHAT || result_bn == FULL {
-            log_error(&format!("❌ Failed to delete blocknumber mapping for {} (code={})", block_number, result_bn));
+            log_error(&format!(
+                "❌ Failed to delete blocknumber mapping for {} (code={})",
+                block_number, result_bn
+            ));
             return None;
         }
 
         // 3) Delete work_package_hash → (block_number, timeslot) mapping
-        let result_wph = unsafe { host_write(work_package_hash.as_ptr() as u64, work_package_hash.len() as u64, 0, 0) };
+        let result_wph = unsafe {
+            host_write(
+                work_package_hash.as_ptr() as u64,
+                work_package_hash.len() as u64,
+                0,
+                0,
+            )
+        };
         if result_wph == WHAT || result_wph == FULL {
-            log_error(&format!("❌ Failed to delete work_package_hash mapping for block {} (code={})", block_number, result_wph));
+            log_error(&format!(
+                "❌ Failed to delete work_package_hash mapping for block {} (code={})",
+                block_number, result_wph
+            ));
             return None;
         }
 
         // Note: block payload itself lives in DA and is pruned by retention policies outside host storage
 
-        log_info(&format!("✅ Successfully deleted block {}, its metadata, and hash mapping", block_number));
+        log_info(&format!(
+            "✅ Successfully deleted block {}, its metadata, and hash mapping",
+            block_number
+        ));
         Some(())
     }
-
-
 }
-

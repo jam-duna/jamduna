@@ -1,21 +1,23 @@
 //! Block Refiner - manages block construction and imported objects during refine
 
+use crate::{
+    genesis,
+    sharding::format_data_hex,
+    state::{MajikBackend, MajikOverlay},
+    tx::{DecodedCallCreate, decode_call_args, decode_transact_args},
+};
 use alloc::{collections::BTreeMap, format, string::ToString, vec, vec::Vec};
-use primitive_types::{H160, U256};
-use evm::interpreter::ExitError;
 use evm::backend::{RuntimeBackend, RuntimeEnvironment};
+use evm::interpreter::ExitError;
+use primitive_types::{H160, U256};
+use utils::effects::WriteEffectEntry;
 use utils::{
-    effects::{ObjectRef, ObjectId, ExecutionEffects, WriteIntent},
-    functions::{log_error, log_info, log_debug, format_object_id, format_segment, RefineArgs, WorkItem},
+    effects::{ExecutionEffects, ObjectId, ObjectRef, WriteIntent},
+    functions::{
+        RefineArgs, WorkItem, format_object_id, format_segment, log_debug, log_error, log_info,
+    },
     hash_functions::keccak256,
 };
-use crate::{
-    sharding::format_data_hex,
-    state::{MajikOverlay, MajikBackend},
-    tx::{DecodedCallCreate, decode_call_args, decode_transact_args},
-    genesis,
-};
-use utils::effects::WriteEffectEntry;
 
 /// Payload type discriminator
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,7 +67,11 @@ pub fn parse_payload_metadata(payload: &[u8]) -> Option<PayloadMetadata> {
 
     // All payloads: type_byte (1) + count (4 LE) + [witness_count (2 LE)]
     if payload.len() < 5 {
-        log_error(&format!("Payload too short for {:?}: len={}, expected >=5", payload_type, payload.len()));
+        log_error(&format!(
+            "Payload too short for {:?}: len={}, expected >=5",
+            payload_type,
+            payload.len()
+        ));
         return None;
     }
 
@@ -130,15 +136,14 @@ impl BlockRefiner {
         refine_context: &utils::functions::RefineContext,
         service_id: u32,
     ) -> Option<(ExecutionEffects, MajikBackend)> {
-        use evm::interpreter::etable::DispatchEtable;
-        use evm::interpreter::trap::CallCreateTrap;
-        use evm::standard::{
-            EtableResolver, Invoker, TransactArgs, TransactArgsCallCreate,
-            TransactGasPrice,
-        };
         use crate::jam_gas::JAMGasState;
         use crate::receipt::TransactionReceiptRecord;
         use crate::state::MajikOverlay;
+        use evm::interpreter::etable::DispatchEtable;
+        use evm::interpreter::trap::CallCreateTrap;
+        use evm::standard::{
+            EtableResolver, Invoker, TransactArgs, TransactArgsCallCreate, TransactGasPrice,
+        };
 
         genesis::load_precompiles(&mut backend);
         let mut receipts: Vec<TransactionReceiptRecord> = Vec::new();
@@ -154,14 +159,12 @@ impl BlockRefiner {
             let mut tx_hash = [0u8; 32];
             tx_hash.copy_from_slice(tx_hash_bytes.as_bytes());
 
-            log_debug(
-                &format!(
-                    "  Processing extrinsic {}: {} bytes, tx_hash={}",
-                    tx_index,
-                    extrinsic.len(),
-                    format_object_id(tx_hash_bytes.0)
-                ),
-            );
+            log_debug(&format!(
+                "  Processing extrinsic {}: {} bytes, tx_hash={}",
+                tx_index,
+                extrinsic.len(),
+                format_object_id(tx_hash_bytes.0)
+            ));
 
             // Decode extrinsic into transaction format
             const ARG_HEADER_LEN: usize = 148; // caller(20) + target(20) + gas_limit(32) + gas_price(32) + value(32) + call_kind(4) + data_len(8)
@@ -177,7 +180,10 @@ impl BlockRefiner {
                 }
             };
 
-            log_info( &format!("  Decoded: caller={:?}, gas_limit={}, value={}", decoded.caller, decoded.gas_limit, decoded.value));
+            log_info(&format!(
+                "  Decoded: caller={:?}, gas_limit={}, value={}",
+                decoded.caller, decoded.gas_limit, decoded.value
+            ));
             overlay.begin_transaction(tx_index);
             let mut _committed = false;
             let etable: DispatchEtable<JAMGasState<'_>, MajikOverlay<'_>, CallCreateTrap> =
@@ -185,7 +191,7 @@ impl BlockRefiner {
             let resolver = EtableResolver::new(&(), &etable);
             let invoker = Invoker::new(&resolver);
 
-            log_info( "  🔨 Matching call_create...");
+            log_info("  🔨 Matching call_create...");
             let call_create = match decoded.call_create {
                 DecodedCallCreate::Call { address, ref data } => {
                     if data.len() >= 4 {
@@ -194,8 +200,8 @@ impl BlockRefiner {
 
                         let mut log_parts = vec![
                             format!("CALL {:?}→{:?}", decoded.caller, address),
-                            format!("calldata={}", format_data_hex(&data)),
-                            format!("sel={}", format_data_hex(&selector)),
+                            format!("calldata=0x{}", hex::encode(&data)),
+                            format!("sel=0x{}", hex::encode(&selector)),
                         ];
 
                         if data.len() >= 4 + 32 {
@@ -209,21 +215,25 @@ impl BlockRefiner {
                             log_parts.push(format!("arg1={}", amount));
                         }
 
-                        log_debug( &format!("  {}", log_parts.join(", ")));
+                        log_debug(&format!("  {}", log_parts.join(", ")));
                     } else {
-                        log_debug(
-                            &format!(
-                                "  CALL {:?}→{:?}, calldata={}",
-                                decoded.caller,
-                                address,
-                                format_data_hex(&data)
-                            ),
-                        );
+                        log_debug(&format!(
+                            "  CALL {:?}→{:?}, calldata={}",
+                            decoded.caller,
+                            address,
+                            format_data_hex(&data)
+                        ));
                     }
-                    TransactArgsCallCreate::Call { address, data: data.clone() }
+                    TransactArgsCallCreate::Call {
+                        address,
+                        data: data.clone(),
+                    }
                 }
                 DecodedCallCreate::Create { ref init_code } => {
-                    log_debug(&format!("  CREATE with {} bytes init_code", init_code.len()));
+                    log_debug(&format!(
+                        "  CREATE with {} bytes init_code",
+                        init_code.len()
+                    ));
                     TransactArgsCallCreate::Create {
                         init_code: init_code.clone(),
                         salt: None,
@@ -243,13 +253,56 @@ impl BlockRefiner {
 
             // Execute transaction with JAM gas model (zero-cost opcodes + JAM host measurement)
             let result = evm::transact(args, None, &mut overlay, &invoker);
-            log_info( &format!("  ✅ Transaction {} completed", tx_index));
+
+            // Log transaction result details
+            match &result {
+                Ok(tx_result) => {
+                    log_info(&format!(
+                        "  ✅ Transaction {} completed successfully Used gas: {}",
+                        tx_index, tx_result.used_gas
+                    ));
+
+                    use evm::standard::TransactValueCallCreate;
+                    match &tx_result.call_create {
+                        TransactValueCallCreate::Call { succeed, retval } => {
+                            log_info(&format!("    Call result: {:?} Return data length: {} bytes", succeed, retval.len()));
+                            if !retval.is_empty() {
+                                if retval.len() <= 64 {
+                                    log_info(&format!(
+                                        "    Return data: 0x{}",
+                                        hex::encode(retval)
+                                    ));
+                                } else {
+                                    log_info(&format!(
+                                        "    Return data (first 64 bytes): 0x{}",
+                                        hex::encode(&retval[..64])
+                                    ));
+                                    log_info(&format!(
+                                        "    Return data (last 32 bytes): 0x{}",
+                                        hex::encode(&retval[retval.len() - 32..])
+                                    ));
+                                }
+                            }
+                        }
+                        TransactValueCallCreate::Create { succeed, address } => {
+                            log_info(&format!("    Create result: {:?} Contract address: {:?}", succeed, address));
+
+                        }
+                    }
+                }
+                Err(e) => {
+                    log_error(&format!("  ❌ Transaction {} failed: {:?}", tx_index, e));
+                }
+            }
+
+            // Log shard entries after transaction completion
+            //log_cached_shard_entries(&overlay);
 
             match result {
                 Ok(tx_result) => {
                     match overlay.commit_transaction() {
                         Ok(_) => {
-                            log_info( &format!("  Transaction {} committed", tx_index));
+                            log_info(&format!("  Transaction {} committed", tx_index));
                             _committed = true;
                             let logs = overlay.take_transaction_logs(tx_index);
                             let log_count = logs.len() as u32;
@@ -259,7 +312,8 @@ impl BlockRefiner {
                             let _vendor_gas_reported = tx_result.used_gas; // Same value since vendor opcodes cost 0
 
                             // Accumulate JAM gas across all successful transactions
-                            total_jam_gas_used = total_jam_gas_used.saturating_add(jam_gas_used.as_u64());
+                            total_jam_gas_used =
+                                total_jam_gas_used.saturating_add(jam_gas_used.as_u64());
 
                             log_info(&format!(
                                 "  ⛽ JAM Gas: used={} total_so_far={} (zero-cost opcodes + host measurement)",
@@ -301,7 +355,6 @@ impl BlockRefiner {
 
                             // Update total log count for next transaction
                             total_log_count = total_log_count.saturating_add(log_count);
-                           
                         }
                         Err(_) => {
                             log_error(&format!("  Transaction {} commit failed", tx_index));
@@ -318,7 +371,10 @@ impl BlockRefiner {
                     };
 
                     // Log detailed transaction context on failure
-                    log_error(&format!("  ❌ Transaction {} failed: {} ({:?})", tx_index, error_detail, error));
+                    log_error(&format!(
+                        "  ❌ Transaction {} failed: {} ({:?})",
+                        tx_index, error_detail, error
+                    ));
                     log_error(&format!("     Caller: {:?}", decoded.caller));
                     log_error(&format!("     Gas limit: {}", decoded.gas_limit));
                     log_error(&format!("     Gas price: {}", decoded.gas_price));
@@ -328,12 +384,17 @@ impl BlockRefiner {
                             log_error(&format!("     Call to: {:?}", address));
                             log_error(&format!("     Calldata: {} bytes", data.len()));
                             if data.len() >= 4 {
-                                log_error(&format!("     Selector: 0x{:02x}{:02x}{:02x}{:02x}",
-                                    data[0], data[1], data[2], data[3]));
+                                log_error(&format!(
+                                    "     Selector: 0x{:02x}{:02x}{:02x}{:02x}",
+                                    data[0], data[1], data[2], data[3]
+                                ));
                             }
                         }
                         DecodedCallCreate::Create { init_code } => {
-                            log_error(&format!("     Create with {} bytes init_code", init_code.len()));
+                            log_error(&format!(
+                                "     Create with {} bytes init_code",
+                                init_code.len()
+                            ));
                         }
                     };
                     match overlay.revert_transaction() {
@@ -352,12 +413,10 @@ impl BlockRefiner {
                     // Accumulate JAM gas across all transactions (including failed ones)
                     total_jam_gas_used = total_jam_gas_used.saturating_add(jam_gas_used.as_u64());
 
-                    log_info(
-                        &format!(
-                            "  ⛽ JAM Gas (reverted): used={} total_so_far={} (conservative charging)",
-                            jam_gas_used, total_jam_gas_used
-                        ),
-                    );
+                    log_info(&format!(
+                        "  ⛽ JAM Gas (reverted): used={} total_so_far={} (conservative charging)",
+                        jam_gas_used, total_jam_gas_used
+                    ));
 
                     let gas_price = decoded.gas_price;
                     let gas_fee = jam_gas_used.saturating_mul(gas_price);
@@ -395,7 +454,6 @@ impl BlockRefiner {
             }
         }
 
-
         let (effects, backend) = overlay.deconstruct(
             refine_args.wphash,
             &receipts,
@@ -405,24 +463,27 @@ impl BlockRefiner {
             service_id,
         );
 
-        log_info(
-            &format!(
-                "🎯 JAM Gas Summary: total_consumed={} transactions={} total_writes={}",
-                total_jam_gas_used, receipts.len(), effects.write_intents.len()
-            ),
-        );
+        log_info(&format!(
+            "🎯 JAM Gas Summary: total_consumed={} transactions={} total_writes={}",
+            total_jam_gas_used,
+            receipts.len(),
+            effects.write_intents.len()
+        ));
 
         Some((effects, backend))
     }
 
     /// Create default environment for a given service (chain_id)
-    fn create_environment(service_id: u32, _payload_type: PayloadType) -> crate::state::EnvironmentData {
-        use primitive_types::{U256, H160};
+    fn create_environment(
+        service_id: u32,
+        _payload_type: PayloadType,
+    ) -> crate::state::EnvironmentData {
+        use primitive_types::{H160, U256};
 
         // Coinbase address: 0xEaf3223589Ed19bcd171875AC1D0F99D31A5969c
         const COINBASE_ADDRESS: H160 = H160([
-            0xEa, 0xf3, 0x22, 0x35, 0x89, 0xEd, 0x19, 0xbc, 0xd1, 0x71,
-            0x87, 0x5A, 0xC1, 0xD0, 0xF9, 0x9D, 0x31, 0xA5, 0x96, 0x9c,
+            0xEa, 0xf3, 0x22, 0x35, 0x89, 0xEd, 0x19, 0xbc, 0xd1, 0x71, 0x87, 0x5A, 0xC1, 0xD0,
+            0xF9, 0x9D, 0x31, 0xA5, 0x96, 0x9c,
         ]);
 
         crate::state::EnvironmentData {
@@ -431,10 +492,10 @@ impl BlockRefiner {
             block_coinbase: COINBASE_ADDRESS,
             block_gas_limit: U256::from(30_000_000u64),
             block_base_fee_per_gas: U256::zero(),
-            chain_id: U256::from(service_id),
+            chain_id: U256::from(0x1107),
             block_difficulty: U256::zero(),
             block_randomness: None,
-
+            service_id,
         }
     }
 
@@ -469,18 +530,20 @@ impl BlockRefiner {
         let witness_start_idx = metadata.payload_size as usize;
         let mut block_builder = BlockRefiner::new();
         let mut imported_objects: BTreeMap<ObjectId, (ObjectRef, Vec<u8>)> = BTreeMap::new();
-        
+
         for (idx, extrinsic) in extrinsics.iter().enumerate() {
             // Skip transaction extrinsics
             if idx < witness_start_idx {
-                    continue;
+                continue;
             }
-            log_debug(&format!(
-                    "🔍 Attempting to decode witness extrinsic idx={} len={}",
-                    idx,
-                    extrinsic.len()
-            ));
-            if metadata.payload_type == PayloadType::Transactions || metadata.payload_type == PayloadType::Builder {
+            // log_debug(&format!(
+            //         "🔍 Attempting to decode witness extrinsic idx={} len={}",
+            //         idx,
+            //         extrinsic.len()
+            // ));
+            if metadata.payload_type == PayloadType::Transactions
+                || metadata.payload_type == PayloadType::Builder
+            {
                 // Witness extrinsics are serialized directly without format byte prefix
                 if extrinsic.is_empty() {
                     log_error(&format!("Empty extrinsic at index {}", idx));
@@ -488,48 +551,67 @@ impl BlockRefiner {
                 }
 
                 // Deserialize and verify state witness (no format byte prefix)
-                match StateWitness::deserialize_and_verify(work_item.service, extrinsic, refine_context.state_root) {
+                match StateWitness::deserialize_and_verify(
+                    work_item.service,
+                    extrinsic,
+                    refine_context.state_root,
+                ) {
                     Ok(state_witness) => {
                         let object_id = state_witness.object_id;
                         let object_ref = state_witness.ref_info.clone();
 
-                        let payload_type_str = if metadata.payload_type == PayloadType::Transactions {
+                        let payload_type_str = if metadata.payload_type == PayloadType::Transactions
+                        {
                             "Transactions"
                         } else {
                             "Builder"
                         };
 
-                        if let Some(payload) = state_witness.fetch_object_payload(work_item, work_item_index) {
-                            let payload_len = payload.len();
+                        if let Some(payload) =
+                            state_witness.fetch_object_payload(work_item, work_item_index)
+                        {
                             imported_objects.insert(object_id, (object_ref, payload));
-                            log_info(&format!("✅ Payload{}: Verified + imported object {} (payload_length={})",
-                                payload_type_str, format_object_id(object_id),  payload_len));
+                            // let payload_len = payload.len();
+                            // log_info(&format!(
+                            //     "✅ Payload{}: Verified + imported object {} (payload_length={})",
+                            //     payload_type_str,
+                            //     format_object_id(object_id),
+                            //     payload_len
+                            // ));
                         } else {
-                            log_info(&format!("⚠️  Payload{}: Verified witness but could not fetch payload for object {}",
-                                payload_type_str, format_object_id(object_id)));
+                            log_info(&format!(
+                                "⚠️  Payload{}: Verified witness but could not fetch payload for object {}",
+                                payload_type_str,
+                                format_object_id(object_id)
+                            ));
                         }
                     }
                     Err(e) => {
-                        log_error(&format!("Failed to deserialize or verify witness at index {}: {:?}", idx, e));
+                        log_error(&format!(
+                            "Failed to deserialize or verify witness at index {}: {:?}",
+                            idx, e
+                        ));
                         return None;
                     }
                 }
-
-            } else  if metadata.payload_type == PayloadType::Call {
+            } else if metadata.payload_type == PayloadType::Call {
                 // Handle Call payload - early exit handled below
                 // No witness processing needed for Call payloads
             }
         }
 
-        log_info(&format!("📥 Refine: Set up block builder for {} objects", imported_objects.len()));
+        log_info(&format!(
+            "📥 Refine: Set up block builder for {} objects",
+            imported_objects.len()
+        ));
 
         // Create environment/backend from work item context
-        use crate::state::{MajikBackend};
+        use crate::state::MajikBackend;
         use evm::standard::Config;
 
         let config = Config::shanghai();
         let environment = Self::create_environment(work_item.service, metadata.payload_type);
-        let mut backend = MajikBackend::new(environment, imported_objects.clone());
+        let mut backend = MajikBackend::new(environment, imported_objects.clone(), metadata.payload_type);
 
         // Populate block_builder.objects_map with imported_objects for 'B' command access
         block_builder.objects_map = imported_objects.clone();
@@ -540,17 +622,25 @@ impl BlockRefiner {
             return Self::refine_call_payload(backend, &config, extrinsics);
         } else if metadata.payload_type == PayloadType::Genesis {
             // Genesis mode - process K extrinsics as storage writes
-            match Self::refine_genesis_payload(backend, extrinsics, refine_args, refine_context, work_item.service) {
+            match Self::refine_genesis_payload(
+                backend,
+                extrinsics,
+                refine_args,
+                refine_context,
+                work_item.service,
+            ) {
                 Some((effects, returned_backend)) => {
                     backend = returned_backend;
                     effects
-                },
+                }
                 None => {
                     log_error("Refine: refine_genesis_payload failed");
                     return None;
                 }
             }
-        } else if metadata.payload_type == PayloadType::Transactions || metadata.payload_type == PayloadType::Builder {
+        } else if metadata.payload_type == PayloadType::Transactions
+            || metadata.payload_type == PayloadType::Builder
+        {
             // Execute transactions
             let mut block_builder = block_builder;
             match block_builder.refine_payload_transactions(
@@ -565,7 +655,7 @@ impl BlockRefiner {
                 Some((effects, returned_backend)) => {
                     backend = returned_backend;
                     effects
-                },
+                }
                 None => {
                     log_error("Refine: refine_payload_transactions failed");
                     return None;
@@ -576,60 +666,119 @@ impl BlockRefiner {
             return None;
         };
 
+        // Capture the ObjectId/ObjectRef pairs we need for meta-sharding before exports run.
+        // This avoids relying on the original write intents staying intact if the host FFI mutates them.
+        let mut meta_object_refs: Vec<(ObjectId, ObjectRef)> = execution_effects
+            .write_intents
+            .iter()
+            .map(|intent| (intent.effect.object_id, intent.effect.ref_info.clone()))
+            .collect();
+
+        // Debug log the write intents we are about to export so we can catch corruption early.
+        // log_info(&format!(
+        //     "📦 Pre-export write intents: {} entries",
+        //     execution_effects.write_intents.len()
+        // ));
+        // for (idx, intent) in execution_effects.write_intents.iter().enumerate() {
+        //     log_info(&format!(
+        //         "  intent[{}]: object_id={}, payload_len={}, kind={}",
+        //         idx,
+        //         utils::functions::format_object_id(intent.effect.object_id),
+        //         intent.effect.ref_info.payload_length,
+        //         intent.effect.ref_info.object_kind
+        //     ));
+        // }
+
         // Export payloads to DA segments (receipts, code, storage, block, etc.)
         let mut export_count: u16 = 0;
         for (idx, intent) in execution_effects.write_intents.iter_mut().enumerate() {
-            match intent.effect.export_effect(export_count as usize) {
+            // Export using a cloned WriteEffectEntry so that any host-side memory
+            // corruption (export_effect mutates payload buffers) does not clobber
+            // the original intent metadata we still need later for meta-shards.
+            let mut export_entry = WriteEffectEntry {
+                object_id: intent.effect.object_id,
+                ref_info: intent.effect.ref_info.clone(),
+                payload: intent.effect.payload.clone(),
+            };
+
+            match export_entry.export_effect(export_count as usize) {
                 Ok(next_index) => {
-                    let num_segments = (intent.effect.ref_info.payload_length as u64 + utils::constants::SEGMENT_SIZE - 1) / utils::constants::SEGMENT_SIZE;
-                    log_info(&format!(
-                        "📤 Export: object_id={} start_index={} num_segments={} payload_length={}",
-                        utils::functions::format_object_id(intent.effect.object_id),
-                        export_count,
-                        num_segments,
-                        intent.effect.ref_info.payload_length
-                    ));
+                    // let num_segments = (export_entry.ref_info.payload_length as u64
+                    //     + utils::constants::SEGMENT_SIZE
+                    //     - 1)
+                    //     / utils::constants::SEGMENT_SIZE;
+                    // log_info(&format!(
+                    //     "📤 Export: object_id={} start_index={} num_segments={} payload_length={}",
+                    //     utils::functions::format_object_id(export_entry.object_id),
+                    //     export_count,
+                    //     num_segments,
+                    //     export_entry.ref_info.payload_length
+                    // ));
+                    // log_info(&format!(
+                    //     "  ↪ export_result[{}]: next_index={}",
+                    //     idx, next_index
+                    // ));
                     export_count = next_index;
+
+                    // Update the snapshot ObjectRef with the index assigned during export
+                    if let Some((_, object_ref)) = meta_object_refs.get_mut(idx) {
+                        object_ref.index_start = export_entry.ref_info.index_start;
+                    }
+
+                    // Also update the actual intent's ObjectRef with the new index_start
+                    intent.effect.ref_info.index_start = export_entry.ref_info.index_start;
                 }
                 Err(e) => {
-                    log_error(&format!("  ❌ Failed to export write intent {}: {:?}", idx, e));
+                    log_error(&format!(
+                        "  ❌ Failed to export write intent {}: {:?}",
+                        idx, e
+                    ));
                     return None;
                 }
             }
         }
 
         // Process meta-shards AFTER export so ObjectRefs have correct index_start values
-        let meta_shard_count = backend.process_meta_shards_after_export(
+        let mut meta_write_intents = backend.process_meta_shards_after_export(
             refine_args.wphash,
-            &mut execution_effects.write_intents,
+            &meta_object_refs,
             work_item.service,
         );
-        log_info(&format!("📦 Generated {} meta-shard write intents", meta_shard_count));
+        // log_info(&format!(
+        //     "📦 Generated {} meta-shard write intents",
+        //     meta_write_intents.len()
+        // ));
 
-        // Export the meta-shard write intents (they were appended to write_intents)
-        // We need to export only the newly added meta-shard intents
-        if meta_shard_count > execution_effects.write_intents.len() {
-            log_error(&format!("  ❌ Meta-shard count {} exceeds total write intents {}",
-                meta_shard_count, execution_effects.write_intents.len()));
-            return None;
-        }
+        // Clone meta_write_intents BEFORE export since export_effect may corrupt memory via FFI
+        let mut meta_intents_for_output = meta_write_intents.clone();
 
-        let regular_intent_count = execution_effects.write_intents.len() - meta_shard_count;
-        log_info(&format!("📤 ******* meta_shard_count {} regular_intent_count {} === {}",
-            meta_shard_count, regular_intent_count, execution_effects.write_intents.len()));
-        for (idx, intent) in execution_effects.write_intents.iter_mut().enumerate().skip(regular_intent_count) {
-            log_info(&format!("📤 Exporting meta-shard intent {} {}:", idx, export_count));
-            match intent.effect.export_effect(export_count as usize) {
+        // Export meta-shard payloads to DA segments
+        for (idx, intent) in meta_write_intents.iter_mut().enumerate() {
+            let start_index = export_count;
+
+            match intent.effect.export_effect(start_index as usize) {
                 Ok(next_index) => {
-                    log_info(&format!("📤 wE Exporting meta-shard intent {}:", idx));
                     export_count = next_index;
+
+                    // Update the cloned version with the index_start value that was set during export
+                    // We use start_index (captured before the FFI call) because intent.effect is corrupted after export
+                    meta_intents_for_output[idx].effect.ref_info.index_start = start_index;
                 }
                 Err(e) => {
-                    log_error(&format!("  ❌ Failed to export meta-shard intent {}: {:?}", idx, e));
+                    log_error(&format!(
+                        "  ❌ Failed to export meta-shard intent {}: {:?}",
+                        idx, e
+                    ));
                     return None;
                 }
             }
         }
+
+        // Note: meta_write_intents is safe to drop now because export_effect()
+        // creates a copy of the payload before passing it to the FFI, so the
+        // original struct is never corrupted.
+
+        execution_effects.write_intents = meta_intents_for_output;
         Some(execution_effects)
     }
 
@@ -641,21 +790,21 @@ impl BlockRefiner {
         config: &evm::standard::Config,
         extrinsics: &[Vec<u8>],
     ) -> Option<ExecutionEffects> {
+        use crate::jam_gas::JAMGasState;
         use evm::interpreter::etable::DispatchEtable;
         use evm::interpreter::trap::CallCreateTrap;
         use evm::standard::{
-            EtableResolver, Invoker, TransactArgs, TransactArgsCallCreate,
-            TransactGasPrice,
+            EtableResolver, Invoker, TransactArgs, TransactArgsCallCreate, TransactGasPrice,
         };
-        use crate::jam_gas::JAMGasState;
-    
+
         genesis::load_precompiles(&mut backend);
         let mut overlay = MajikOverlay::new(backend, &config.runtime);
 
         if extrinsics.len() != 1 {
-            log_error(
-                &format!("❌ Payload Call expects exactly 1 extrinsic, got {}", extrinsics.len()),
-            );
+            log_error(&format!(
+                "❌ Payload Call expects exactly 1 extrinsic, got {}",
+                extrinsics.len()
+            ));
             return None;
         }
 
@@ -665,17 +814,15 @@ impl BlockRefiner {
         let decoded = match decode_call_args(extrinsic.as_ptr() as u64, extrinsic.len() as u64) {
             Some(d) => d,
             None => {
-                log_error( "❌ Payload Call: Failed to decode call args");
+                log_error("❌ Payload Call: Failed to decode call args");
                 return None;
             }
         };
 
-        log_info(
-            &format!(
-                "📞 PayloadCall from={:?}, gas_limit={}, value={}",
-                decoded.caller, decoded.gas_limit, decoded.value
-            ),
-        );
+        log_info(&format!(
+            "📞 PayloadCall from={:?}, gas_limit={}, value={}",
+            decoded.caller, decoded.gas_limit, decoded.value
+        ));
 
         let etable: DispatchEtable<JAMGasState<'_>, MajikOverlay<'_>, CallCreateTrap> =
             DispatchEtable::runtime();
@@ -684,15 +831,19 @@ impl BlockRefiner {
 
         let call_create = match decoded.call_create {
             DecodedCallCreate::Call { address, data } => {
-                log_info(
-                    &format!("  CALL {:?}→{:?}, data_len={}", decoded.caller, address, data.len()),
-                );
+                log_info(&format!(
+                    "  CALL {:?}→{:?}, data_len={}",
+                    decoded.caller,
+                    address,
+                    data.len()
+                ));
                 TransactArgsCallCreate::Call { address, data }
             }
             DecodedCallCreate::Create { init_code } => {
-                log_info(
-                    &format!("  CREATE with {} bytes init_code", init_code.len()),
-                );
+                log_info(&format!(
+                    "  CREATE with {} bytes init_code",
+                    init_code.len()
+                ));
                 TransactArgsCallCreate::Create {
                     init_code,
                     salt: None,
@@ -722,14 +873,12 @@ impl BlockRefiner {
                     evm::standard::TransactValueCallCreate::Create { .. } => Vec::new(),
                 };
 
-                log_info(
-                    &format!(
-                        "✅ Payload Call: Success, gas_used={}, output_len={}, output={}",
-                        gas_used,
-                        output.len(),
-                        format_segment(&output)
-                    ),
-                );
+                log_info(&format!(
+                    "✅ Payload Call: Success, gas_used={}, output_len={}, output={}",
+                    gas_used,
+                    output.len(),
+                    format_segment(&output)
+                ));
 
                 // create WriteIntent
                 let write_intent = WriteIntent {
@@ -753,9 +902,7 @@ impl BlockRefiner {
                 Some(effects)
             }
             Err(error) => {
-                log_error(
-                    &format!("❌ PayloadCall failed: {:?}", error),
-                );
+                log_error(&format!("❌ PayloadCall failed: {:?}", error));
                 None
             }
         }
@@ -774,7 +921,10 @@ impl BlockRefiner {
     ) -> Option<(ExecutionEffects, MajikBackend)> {
         use evm::standard::Config;
 
-        log_info(&format!("🌱 Genesis: Processing {} K extrinsics", extrinsics.len()));
+        log_info(&format!(
+            "🌱 Genesis: Processing {} K extrinsics",
+            extrinsics.len()
+        ));
 
         genesis::load_precompiles(&mut backend);
         let config = Config::shanghai();
@@ -784,8 +934,11 @@ impl BlockRefiner {
         for (idx, extrinsic) in extrinsics.iter().enumerate() {
             // K extrinsic format: [address:20][storage_key:32][value:32] = 84 bytes
             if extrinsic.len() != 84 {
-                log_error(&format!("Genesis: K extrinsic {} has invalid length: {} (expected 84)",
-                    idx, extrinsic.len()));
+                log_error(&format!(
+                    "Genesis: K extrinsic {} has invalid length: {} (expected 84)",
+                    idx,
+                    extrinsic.len()
+                ));
                 return None;
             }
 
@@ -802,14 +955,19 @@ impl BlockRefiner {
             let mut value = [0u8; 32];
             value.copy_from_slice(&extrinsic[52..84]);
 
-            log_debug(&format!("Genesis: K extrinsic {}: address={:?} key={:?} value={:?}",
-                idx, address, key, value));
+            log_debug(&format!(
+                "Genesis: K extrinsic {}: address={:?} key={:?} value={:?}",
+                idx, address, key, value
+            ));
 
             // Apply storage write directly to overlay
             let _ = overlay.set_storage(address, key.into(), value.into());
         }
 
-        log_info(&format!("🌱 Genesis: Applied {} storage writes", extrinsics.len()));
+        log_info(&format!(
+            "🌱 Genesis: Applied {} storage writes",
+            extrinsics.len()
+        ));
 
         // Deconstruct overlay to create storage SSR objects
         let (effects, backend) = overlay.deconstruct(
@@ -822,29 +980,44 @@ impl BlockRefiner {
         );
 
         // Count different object types
-        let mut storage_ssr_count = 0;
-        let mut storage_shard_count = 0;
         let mut code_count = 0;
-        let mut other_count = 0;
+        let mut storage_shard_count = 0;
+        let mut storage_ssr_count = 0;
+        let mut receipt_count = 0;
+        let mut meta_shard_count = 0;
+        let mut block_count = 0;
+        let mut unknown_count = 0;
 
         for intent in &effects.write_intents {
             match intent.effect.ref_info.object_kind {
-                kind if kind == crate::sharding::ObjectKind::SsrMetadata as u8 => storage_ssr_count += 1,
-                kind if kind == crate::sharding::ObjectKind::StorageShard as u8 => storage_shard_count += 1,
                 kind if kind == crate::sharding::ObjectKind::Code as u8 => code_count += 1,
-                _ => other_count += 1,
+                kind if kind == crate::sharding::ObjectKind::StorageShard as u8 => {
+                    storage_shard_count += 1
+                }
+                kind if kind == crate::sharding::ObjectKind::SsrMetadata as u8 => {
+                    storage_ssr_count += 1
+                }
+                kind if kind == crate::sharding::ObjectKind::Receipt as u8 => receipt_count += 1,
+                kind if kind == crate::sharding::ObjectKind::MetaShard as u8 => {
+                    meta_shard_count += 1
+                }
+                kind if kind == crate::sharding::ObjectKind::Block as u8 => block_count += 1,
+                _ => unknown_count += 1,
             }
         }
 
-        log_info(&format!("🌱 Genesis: Created {} write intents:", effects.write_intents.len()));
-        log_info(&format!("  - SSR metadata: {}", storage_ssr_count));
-        log_info(&format!("  - Storage shards: {}", storage_shard_count));
-        log_info(&format!("  - Code objects: {}", code_count));
-        log_info(&format!("  - Other objects: {}", other_count));
-        log_info("🌱 Genesis: Refine complete. Meta-shard processing will occur after export.");
+        log_info(&format!(
+            "🌱 Genesis: Created {} write intents (Code: {}, Shards: {}, SSR: {}, Receipts: {}, Meta: {}, Block: {}, Unknown: {}) - Meta-shard processing will occur after export.",
+            effects.write_intents.len(),
+            code_count,
+            storage_shard_count,
+            storage_ssr_count,
+            receipt_count,
+            meta_shard_count,
+            block_count,
+            unknown_count
+        ));
 
         Some((effects, backend))
     }
-
 }
-

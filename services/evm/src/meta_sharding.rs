@@ -49,7 +49,7 @@ use utils::functions::log_info;
 use utils::objects::ObjectRef;
 
 // Import generic SSR types and functions from da module
-use crate::da::{self, SSREntry, SerializeError, ShardId, SSRData, ShardData};
+use crate::da::{self, SSRData, SSREntry, SerializeError, ShardData, ShardId};
 
 /// ObjectRefEntry - ObjectID mapped to ObjectRef
 ///
@@ -59,7 +59,7 @@ use crate::da::{self, SSREntry, SerializeError, ShardId, SSRData, ShardData};
 /// Total: 69 bytes per entry (fixed size for DA storage)
 #[derive(Clone, PartialEq)]
 pub struct ObjectRefEntry {
-    pub object_id: [u8; 32],  // 32 bytes internally for compatibility
+    pub object_id: [u8; 32],   // 32 bytes internally for compatibility
     pub object_ref: ObjectRef, // Full ObjectRef internally
 }
 
@@ -111,8 +111,8 @@ impl SSREntry for ObjectRefEntry {
         object_id.copy_from_slice(&data[0..32]);
 
         // Parse 37-byte ObjectRef
-        let object_ref = ObjectRef::deserialize(&data[32..69])
-            .ok_or(SerializeError::InvalidObjectRef)?;
+        let object_ref =
+            ObjectRef::deserialize(&data[32..69]).ok_or(SerializeError::InvalidObjectRef)?;
 
         Ok(ObjectRefEntry {
             object_id,
@@ -143,9 +143,7 @@ pub fn compute_entries_bmt_root(entries: &[ObjectRefEntry]) -> [u8; 32] {
     // Key = object_id, Value = serialized object_ref
     let kvs: Vec<([u8; 32], Vec<u8>)> = entries
         .iter()
-        .map(|entry| {
-            (entry.object_id, entry.object_ref.serialize().to_vec())
-        })
+        .map(|entry| (entry.object_id, entry.object_ref.serialize().to_vec()))
         .collect();
 
     crate::bmt::compute_bmt_root(&kvs)
@@ -186,10 +184,44 @@ pub fn process_object_writes(
         return Vec::new();
     }
 
-    log_info(&format!(
-        "📦 Processing {} object writes for meta-sharding",
-        object_writes.len()
-    ));
+    // log_info(&format!(
+    //     "📦 Processing {} object writes for meta-sharding",
+    //     object_writes.len()
+    // ));
+
+    // Log all object_writes contents
+    // log_info(&format!(
+    //     "📦 Object writes full dump ({} writes):",
+    //     object_writes.len()
+    // ));
+    // for (idx, (object_id, object_ref)) in object_writes.iter().enumerate() {
+    //     log_info(&format!(
+    //         "  [{}] object_id={:?}, object_ref={{wph: {:?}, idx_start: {}, payload_len: {}, kind: {}}}",
+    //         idx,
+    //         object_id,
+    //         object_ref.work_package_hash,
+    //         object_ref.index_start,
+    //         object_ref.payload_length,
+    //         object_ref.object_kind
+    //     ));
+    // }
+
+    // Log meta_ssr state
+    // log_info(&format!(
+    //     "📦 MetaSSR state: global_depth={}, {} entries, total_keys={}",
+    //     meta_ssr.header.global_depth,
+    //     meta_ssr.entries.len(),
+    //     meta_ssr.header.total_keys
+    // ));
+    // for (idx, entry) in meta_ssr.entries.iter().enumerate() {
+    //     log_info(&format!(
+    //         "  SSR Entry [{}]: d={}, ld={}, prefix56={:?}",
+    //         idx,
+    //         entry.d,
+    //         entry.ld,
+    //         &entry.prefix56[..]
+    //     ));
+    // }
 
     // 1. Group object writes by meta-shard
     let mut shard_updates: BTreeMap<ShardId, Vec<ObjectRefEntry>> = BTreeMap::new();
@@ -206,10 +238,10 @@ pub fn process_object_writes(
             });
     }
 
-    log_info(&format!(
-        "  Grouped into {} meta-shards",
-        shard_updates.len()
-    ));
+    // log_info(&format!(
+    //     "  Grouped into {} meta-shards",
+    //     shard_updates.len()
+    // ));
 
     let mut write_intents = Vec::new();
 
@@ -223,12 +255,12 @@ pub fn process_object_writes(
                 entries: Vec::new(),
             });
 
-        log_info(&format!(
-            "  Meta-shard {:?}: {} existing + {} new entries",
-            shard_id,
-            shard_data.entries.len(),
-            new_entries.len()
-        ));
+        // log_info(&format!(
+        //     "  Meta-shard {:?}: {} existing + {} new entries",
+        //     shard_id,
+        //     shard_data.entries.len(),
+        //     new_entries.len()
+        // ));
 
         // Merge new entries (update or insert)
         for new_entry in new_entries {
@@ -303,27 +335,21 @@ pub fn process_object_writes(
                     // No split needed, just write updated shard
                     let entries = shard_data.entries.clone();
                     cached_meta_shards.insert(shard_id, shard_data);
-                    write_intents.push(MetaShardWriteIntent {
-                        shard_id,
-                        entries,
-                    });
+                    write_intents.push(MetaShardWriteIntent { shard_id, entries });
                 }
             }
         } else {
             // Under threshold, just write updated shard
             let entries = shard_data.entries.clone();
             cached_meta_shards.insert(shard_id, shard_data);
-            write_intents.push(MetaShardWriteIntent {
-                shard_id,
-                entries,
-            });
+            write_intents.push(MetaShardWriteIntent { shard_id, entries });
         }
     }
 
-    log_info(&format!(
-        "✅ Generated {} meta-shard write intents",
-        write_intents.len()
-    ));
+    // log_info(&format!(
+    //     "✅ Generated {} meta-shard write intents",
+    //     write_intents.len()
+    // ));
 
     write_intents
 }
@@ -341,14 +367,15 @@ pub enum MetaShardDeserializeResult {
 /// Format: [1B ld][7B prefix56][...shard entries]
 /// The shard_id header enables witness imports to identify the shard without SSR routing
 pub fn serialize_meta_shard_with_id(shard: &MetaShard, shard_id: ShardId) -> Vec<u8> {
-    use utils::functions::log_info;
 
     let mut data = Vec::new();
     data.push(shard_id.ld);
     data.extend_from_slice(&shard_id.prefix56);
+    /*
+    use utils::functions::log_info;
     // Log detailed meta-shard entries before serialization
     for (i, entry) in shard.entries.iter().enumerate() {
-        use utils::functions::{log_debug, format_object_id};
+        use utils::functions::{format_object_id, log_debug};
         log_debug(&format!(
             "  Entry {}: object_id={}, wph={}, idx_start={}, payload_len={}, kind={}",
             i,
@@ -359,19 +386,15 @@ pub fn serialize_meta_shard_with_id(shard: &MetaShard, shard_id: ShardId) -> Vec
             entry.object_ref.object_kind
         ));
     }
-
+    */
     let shard_data = da::serialize_shard(shard, META_SHARD_MAX_ENTRIES);
 
-    log_info(&format!(
-        "📦 serialize_meta_shard_with_id: ld={}, shard_data_len={}, total_with_header={}",
-        shard_id.ld,
-        shard_data.len(),
-        8 + shard_data.len()
-    ));
-    log_info(&format!(
-        "  First 50 bytes after header: {:02x?}",
-        &shard_data[..50.min(shard_data.len())]
-    ));
+    // log_info(&format!(
+    //     "📦 serialize_meta_shard_with_id: ld={}, shard_data_len={}, total_with_header={}",
+    //     shard_id.ld,
+    //     shard_data.len(),
+    //     8 + shard_data.len()
+    // ));
 
     data.extend_from_slice(&shard_data);
     data
@@ -428,8 +451,6 @@ pub fn deserialize_meta_shard_with_id_validated(
         }
     }
 }
-
-
 
 /// Rebuild MetaSSR routing table from imported meta-shard ShardIds
 ///

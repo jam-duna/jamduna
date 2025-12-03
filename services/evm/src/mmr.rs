@@ -1,4 +1,3 @@
-
 //! Merkle Mountain Range (MMR) implementation
 //!
 //! This module implements the MMR data structure as described in the Graypaper
@@ -6,8 +5,7 @@
 //!
 //! NOTE: Uses keccak256 for hashing to match receipt hash computation in accumulator
 
-use crate::sharding::format_object_id;
-use alloc::{format, vec, vec::Vec};
+use alloc::{vec, vec::Vec, format};
 use utils::hash_functions::keccak256;
 
 /// MMR structure holding peaks
@@ -269,14 +267,14 @@ impl MMR {
     pub fn write_mmr(&self) -> Option<[u8; 32]> {
         use utils::{
             constants::{FULL, MMR_KEY, WHAT},
-            functions::{log_error, log_info},
+            functions::{log_error},
             host_functions::write as host_write,
         };
 
-        log_info(&format!(
-            "🌲 Writing MMR with {} peaks to storage",
-            self.peaks.len()
-        ));
+        // log_info(&format!(
+        //     "🌲 Writing MMR with {} peaks to storage",
+        //     self.peaks.len()
+        // ));
 
         let buffer = self.serialize();
         let result = unsafe {
@@ -299,10 +297,6 @@ impl MMR {
 
         // Compute and return MMR root
         let mmr_root = self.super_peak();
-        log_info(&format!(
-            "🔗 Returning MMR root: {}",
-            format_object_id(&mmr_root)
-        ));
         Some(mmr_root)
     }
 }

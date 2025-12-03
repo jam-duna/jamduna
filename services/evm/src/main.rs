@@ -4,42 +4,38 @@
 extern crate alloc;
 
 // Backend modules
-#[path = "genesis.rs"]
-mod genesis;
-#[path = "block.rs"]
-mod block;
-#[path = "refiner.rs"]
-mod refiner;
 #[path = "accumulator.rs"]
 mod accumulator;
 #[path = "backend.rs"]
 mod backend;
-#[path = "state.rs"]
-mod state;
-#[path = "da.rs"]
-mod da;
-#[path = "sharding.rs"]
-mod sharding;
-#[path = "meta_sharding.rs"]
-mod meta_sharding;
-#[path = "jam_gas.rs"]
-mod jam_gas;
-#[path = "writes.rs"]
-mod writes;
-#[path = "receipt.rs"]
-mod receipt;
-#[path = "tx.rs"]
-mod tx;
+#[path = "block.rs"]
+mod block;
 #[path = "bmt.rs"]
 mod bmt;
+#[path = "da.rs"]
+mod da;
+#[path = "genesis.rs"]
+mod genesis;
+#[path = "jam_gas.rs"]
+mod jam_gas;
+#[path = "meta_sharding.rs"]
+mod meta_sharding;
 #[path = "mmr.rs"]
 mod mmr;
-
+#[path = "receipt.rs"]
+mod receipt;
+#[path = "refiner.rs"]
+mod refiner;
+#[path = "sharding.rs"]
+mod sharding;
+#[path = "state.rs"]
+mod state;
+#[path = "tx.rs"]
+mod tx;
+#[path = "writes.rs"]
+mod writes;
 
 use alloc::{format, vec::Vec};
-use writes::serialize_execution_effects;
-use refiner::BlockRefiner;
-use sharding::format_object_id;
 #[cfg(any(
     all(
         any(target_arch = "riscv32", target_arch = "riscv64"),
@@ -48,6 +44,9 @@ use sharding::format_object_id;
     doc
 ))]
 use polkavm_derive::min_stack_size;
+use refiner::BlockRefiner;
+use sharding::format_object_id;
+use writes::serialize_execution_effects;
 #[cfg(not(any(
     all(
         any(target_arch = "riscv32", target_arch = "riscv64"),
@@ -80,9 +79,8 @@ use simplealloc::SimpleAlloc;
 use utils::{
     constants::FIRST_READABLE_ADDRESS,
     functions::{
-        log_error, log_info,
-        fetch_extrinsics, fetch_refine_context, fetch_work_item,
-        parse_accumulate_args, parse_refine_args, fetch_accumulate_inputs,
+        fetch_accumulate_inputs, fetch_extrinsics, fetch_refine_context, fetch_work_item,
+        log_error, log_info, parse_accumulate_args, parse_refine_args,
     },
 };
 const SIZE0: usize = 0x200000;
@@ -94,27 +92,37 @@ static ALLOCATOR: SimpleAlloc<SIZE1> = SimpleAlloc::new();
 
 // Precompile contracts: (address_byte, bytecode, name)
 const PRECOMPILES: &[(u8, &[u8], &str)] = &[
-    (0x01, include_bytes!("../contracts/usdm-runtime.bin"), "usdm-runtime.bin"),
-    (0xFF, include_bytes!("../contracts/math-runtime.bin"), "math-runtime.bin"),
+    (
+        0x01,
+        include_bytes!("../contracts/usdm-runtime.bin"),
+        "usdm-runtime.bin",
+    ),
+    (
+        0xFF,
+        include_bytes!("../contracts/math-runtime.bin"),
+        "math-runtime.bin",
+    ),
 ];
-
 
 #[polkavm_derive::polkavm_export]
 extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
     polkavm_sbrk(4096 * 4096);
     let Some(refine_args) = parse_refine_args(start_address, length) else {
-        log_error( "Refine: parse_refine_args failed");
+        log_error("Refine: parse_refine_args failed");
         return empty_output();
     };
 
     // Fetch refine context once for the entire function
     let refine_context = match fetch_refine_context() {
         Some(context) => {
-            log_info( &format!("📍 Refine context state_root: {}", format_object_id(&context.state_root)));
+            log_info(&format!(
+                "📍 Refine context state_root: {}",
+                format_object_id(&context.state_root)
+            ));
             context
         }
         None => {
-            log_error( "Failed to fetch refine context");
+            log_error("Failed to fetch refine context");
             return empty_output();
         }
     };
@@ -136,10 +144,19 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
         }
     };
 
-    log_info(&format!("📦 Refine: Fetched {} extrinsics", extrinsics.len()));
+    log_info(&format!(
+        "📦 Refine: Fetched {} extrinsics",
+        extrinsics.len()
+    ));
 
     // Process work item and execute transactions
-    let execution_effects = match BlockRefiner::from_work_item(refine_args.wi_index, &work_item, &extrinsics, &refine_context, &refine_args) {
+    let execution_effects = match BlockRefiner::from_work_item(
+        refine_args.wi_index,
+        &work_item,
+        &extrinsics,
+        &refine_context,
+        &refine_args,
+    ) {
         Some(effects) => effects,
         None => {
             log_error("Refine: from_work_item failed");
@@ -152,8 +169,6 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
     leak_output(buffer)
 }
 
-
-
 fn empty_output() -> (u64, u64) {
     (FIRST_READABLE_ADDRESS as u64, 0)
 }
@@ -161,35 +176,39 @@ fn empty_output() -> (u64, u64) {
 fn leak_output(mut buffer: Vec<u8>) -> (u64, u64) {
     let ptr = buffer.as_mut_ptr() as u64;
     let len = buffer.len() as u64;
-    log_info( &format!("leak_output ptr=0x{:x} len={}", ptr, len));
+    log_info(&format!("leak_output ptr=0x{:x} len={}", ptr, len));
     core::mem::forget(buffer);
     (ptr, len)
 }
-
 
 /// Accumulate orders all ExecutionEffects from refine calls and produces a final commitment across objects
 #[polkavm_derive::polkavm_export]
 pub extern "C" fn accumulate(start_address: u64, length: u64) -> (u64, u64) {
     let Some(args) = parse_accumulate_args(start_address, length) else {
-        log_error( "Accumulate: parse_accumulate_args failed");
+        log_error("Accumulate: parse_accumulate_args failed");
         return empty_output();
     };
 
     if args.num_accumulate_inputs == 0 {
-        log_error( "Accumulate: num_accumulate_inputs is zero, returning empty");
+        log_error("Accumulate: num_accumulate_inputs is zero, returning empty");
         return empty_output();
     }
 
     let accumulate_inputs = match fetch_accumulate_inputs(args.num_accumulate_inputs as u64) {
         Ok(inputs) => inputs,
         Err(e) => {
-            log_error(&format!("Accumulate: fetch_accumulate_inputs failed: {:?}", e));
+            log_error(&format!(
+                "Accumulate: fetch_accumulate_inputs failed: {:?}",
+                e
+            ));
             return empty_output();
         }
     };
 
     // Accumulate execution effects from any payloads (Transactions, Blocks)
-    let Some(accumulate_root) = accumulator::BlockAccumulator::accumulate(args.s, args.t, &accumulate_inputs) else {
+    let Some(accumulate_root) =
+        accumulator::BlockAccumulator::accumulate(args.s, args.t, &accumulate_inputs)
+    else {
         return empty_output();
     };
 
@@ -212,7 +231,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         None => format!("panic: {}", info),
     };
 
-    log_crit( &message);
+    log_crit(&message);
 
     unsafe {
         core::arch::asm!("unimp", options(noreturn));

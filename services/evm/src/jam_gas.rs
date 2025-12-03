@@ -5,12 +5,12 @@
 //! resource accounting.
 
 use alloc::{format, vec::Vec};
-use evm::standard::{State, Config};
 use evm::GasMutState;
 use evm::interpreter::{ExitError, ExitException, runtime::GasState};
-use primitive_types::{U256, H160, H256};
+use evm::standard::{Config, State};
+use primitive_types::{H160, H256, U256};
+use utils::functions::{log_debug, log_error};
 use utils::host_functions::gas;
-use utils::functions::{log_error, log_debug};
 
 /// JAM-native gas state that completely bypasses vendor gasometer
 ///
@@ -68,7 +68,6 @@ impl<'config> JAMGasState<'config> {
 
         consumed
     }
-
 }
 
 // Implement GasState trait - returns JAM gas, not vendor gas
@@ -171,9 +170,15 @@ impl<'config> evm::standard::InvokerState for JAMGasState<'config> {
         is_static: bool,
         call_has_value: bool,
     ) -> Result<Self, ExitError> {
-        let inner_substate = self.inner.substate(runtime, gas_limit, is_static, call_has_value)?;
+        let inner_substate = self
+            .inner
+            .substate(runtime, gas_limit, is_static, call_has_value)?;
         let jam_gas_limit = gas_limit.min(U256::from(u64::MAX)).as_u64();
-        Ok(JAMGasState::new(inner_substate, jam_gas_limit, self.debug_enabled))
+        Ok(JAMGasState::new(
+            inner_substate,
+            jam_gas_limit,
+            self.debug_enabled,
+        ))
     }
 
     fn merge(&mut self, substate: Self, strategy: evm::MergeStrategy) {

@@ -1,5 +1,6 @@
-//go:build network_test
+//go:build network_test && (tiny || !tiny)
 // +build network_test
+// +build tiny !tiny
 
 package node
 
@@ -9,23 +10,22 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"runtime"
-	"strings"
-
-	"testing"
-
-	chainspecs "github.com/colorfulnotion/jam/chainspecs"
-	"github.com/colorfulnotion/jam/common"
-	log "github.com/colorfulnotion/jam/log"
-
-	"github.com/colorfulnotion/jam/statedb"
-	types "github.com/colorfulnotion/jam/types"
-	"golang.org/x/exp/rand"
-
+	"math/big"
 	_ "net/http/pprof"
 	"os"
 	"os/user"
+	"runtime"
+	"strings"
+	"testing"
 	"time"
+
+	chainspecs "github.com/colorfulnotion/jam/chainspecs"
+	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/statedb/evmtypes"
+	"github.com/colorfulnotion/jam/types"
+	"golang.org/x/exp/rand"
 )
 
 const (
@@ -345,12 +345,6 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	if err != nil {
 		t.Fatalf("GetServices %v", err)
 	}
-	evmCode, err := types.ReadCodeWithMetadata(statedb.EVMServiceFile, "evm")
-	if err != nil {
-		log.Error(log.Node, "ReadCodeWithMetadata", "err", err)
-		return
-	}
-	evmCodeHash := common.Blake2Hash(evmCode)
 
 	log.Info(log.Node, "Waiting for the first block to be ready...")
 	isReady := false
@@ -368,97 +362,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 
 	var jceManager *ManualJCEManager
 	jceManager = nil
-	var previous_service_idx uint32
-	requireNew := false
-	if strings.Compare(jam, "algo") == 0 || strings.Compare(jam, "evm") == 0 || strings.Compare(jam, "safrole") == 0 {
-		requireNew = false
-	}
-
-	var bootstrap_workItems []types.WorkItem
-	log.Info(log.Node, "JAMTEST", "jam", jam, "targetN", targetN, "requireNew", requireNew)
-
-	serviceList := []string{}
-	serviceCodeList := make([][]byte, 0)
-	serviceCodeHashList := []string{}
-	for serviceName, service := range testServices {
-		if serviceName == "algo" {
-			service.ServiceCode = statedb.AlgoServiceCode
-		}
-		if serviceName == "evm" {
-			service.ServiceCode = statedb.EVMServiceCode
-		}
-		workItem := types.WorkItem{
-			Service:            statedb.EVMServiceCode,
-			CodeHash:           evmCodeHash,
-			Payload:            append(service.CodeHash.Bytes(), binary.LittleEndian.AppendUint32(nil, uint32(len(service.Code)))...),
-			RefineGasLimit:     DefaultRefineGasLimit,
-			AccumulateGasLimit: DefaultAccumulateGasLimit,
-			ImportedSegments:   make([]types.ImportSegment, 0),
-			ExportCount:        0,
-		}
-		bootstrap_workItems = append(bootstrap_workItems, workItem)
-		serviceList = append(serviceList, serviceName)
-		serviceCodeList = append(serviceCodeList, service.Code)
-		serviceCodeHashList = append(serviceCodeHashList, fmt.Sprintf("%s:%s", serviceName, common.Str(service.CodeHash)))
-	}
-	fmt.Printf("Services to be loaded: %s\n", serviceCodeHashList)
-
-	if requireNew {
-		// set up service using the Bootstrap service
-		codeWorkPackage := types.WorkPackage{
-			AuthorizationToken:    []byte(""),
-			AuthCodeHost:          statedb.EVMServiceCode,
-			AuthorizationCodeHash: getBootstrapAuthCodeHash(),
-			ConfigurationBlob:     []byte{},
-			WorkItems:             bootstrap_workItems,
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), RefineAndAccumalateTimeout)
-		defer cancel()
-		wpr := &types.WorkPackageBundle{
-			WorkPackage:   codeWorkPackage,
-			ExtrinsicData: []types.ExtrinsicsBlobs{},
-		}
-
-		_, err = RobustSubmitAndWaitForWorkPackageBundles(ctx, bNode, []*types.WorkPackageBundle{wpr})
-		if err != nil {
-			t.Fatalf("SendWorkPackageSubmission ERR %v\n", err)
-		}
-
-		// batch service submission done, now check if the service was set up correctly
-		serviceIDList := make([]uint32, len(serviceList))
-		for workItemIdx, serverName := range serviceList {
-			workItemKey, _ := types.Encode(uint32(workItemIdx))
-			k := common.ServiceStorageKey(statedb.EVMServiceCode, workItemKey)
-			k_service_account_byte, ok, err := bNode.GetServiceStorage(0, k)
-			if err != nil {
-				t.Fatalf("SendWorkPackageSubmission ERR %v", err)
-			}
-			if !ok {
-				t.Fatalf("SendWorkPackageSubmission NOT OK %v", err)
-			}
-			decoded_new_service_idx := uint32(types.DecodeE_l(k_service_account_byte))
-			if decoded_new_service_idx != 0 && (decoded_new_service_idx != previous_service_idx) {
-				testServices[serverName].ServiceCode = decoded_new_service_idx
-				serviceIDList[workItemIdx] = decoded_new_service_idx
-				fmt.Printf("Service %s created=%d\n", serverName, decoded_new_service_idx)
-			}
-		}
-
-		for workItemIdx, serviceID := range serviceIDList {
-			serviceName := serviceList[workItemIdx]
-			preimageBlob := serviceCodeList[workItemIdx]
-			codeHash := common.Blake2Hash(preimageBlob)
-			err = bNode.SubmitAndWaitForPreimage(ctx, serviceID, preimageBlob)
-			if err != nil {
-				log.Error(log.Node, "SubmitAndWaitForPreimage", "err", err)
-			}
-			log.Info(log.Node, "----- NEW SERVICE", "service", serviceName, "service_idx", serviceID, "codeHash", codeHash, "codeLen", len(preimageBlob))
-		}
-	}
-
-	if len(testServices) > 0 {
-		log.Info(log.Node, "testServices Loaded", "jam", jam, "testServices", testServices, "targetN", targetN)
-	}
+	log.Info(log.Node, "JAMTEST", "jam", jam, "targetN", targetN)
 
 	if isDisputeMode {
 		targetTimeslotLength := (12 * types.EpochLength)
@@ -480,13 +384,212 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		FallbackBufferTime := 10
 		safrole(jceManager)
 		waitForTermination(tNode, "fallback", FallbackEpochLen, FallbackBufferTime, t)
-	case "algo":
-		algo(bNode, testServices, targetN)
-	case "auth_copy":
-		reassign(bNode, testServices, targetN)
 	case "evm":
-		evm(bNode, testServices, targetN)
+		evm(bNode, testServices, 5)
 	default:
 		t.Fatalf("Unknown jam test: %s\n", jam)
 	}
+}
+
+func safrole(jceManager *ManualJCEManager) {
+	if jceManager != nil {
+		// replenish the JCE
+		go jceManager.Replenish()
+	}
+}
+
+// Monitor the Timeslot & Epoch Progression & Kill as Necessary
+func (n *Node) TerminateAt(offsetTimeSlot uint32, maxTimeAllowed uint32) (bool, error) {
+	initialTimeSlot := uint32(0)
+	startTime := time.Now()
+
+	// Terminate it at epoch N
+	statusTicker := time.NewTicker(3 * time.Second)
+	defer statusTicker.Stop()
+
+	for done := false; !done; {
+		<-statusTicker.C
+		currTimeSlot := n.statedb.GetSafrole().Timeslot
+		if initialTimeSlot == 0 && currTimeSlot > 0 {
+			currEpoch, _ := n.statedb.GetSafrole().EpochAndPhase(currTimeSlot)
+			initialTimeSlot = uint32(currEpoch) * types.EpochLength
+		}
+		currEpoch, currPhase := n.statedb.GetSafrole().EpochAndPhase(currTimeSlot)
+		if currTimeSlot-initialTimeSlot >= offsetTimeSlot {
+			done = true
+			continue
+		}
+		if time.Since(startTime).Seconds() >= float64(maxTimeAllowed) {
+			return false, fmt.Errorf("[TIMEOUT] H_t=%v e'=%v,m'=%v | missing %v Slot!",
+				currTimeSlot, currEpoch, currPhase, currTimeSlot-initialTimeSlot)
+		}
+	}
+	return true, nil
+}
+
+func waitForTermination(watchNode *Node, caseType string, targetedEpochLen int, bufferTime int, t *testing.T) {
+	targetTimeslotLength := uint32(targetedEpochLen * types.EpochLength)
+	maxTimeAllowed := (targetTimeslotLength+1)*types.SecondsPerSlot + uint32(bufferTime)
+
+	done := make(chan bool, 1)
+	errChan := make(chan error, 1)
+
+	go func() {
+		ok, err := watchNode.TerminateAt(targetTimeslotLength, maxTimeAllowed)
+		if err != nil {
+			errChan <- err
+		} else if ok {
+			done <- true
+		}
+	}()
+
+	select {
+	case <-done:
+		log.Info(log.Node, "Completed")
+	case err := <-errChan:
+		t.Fatalf("[%v] Failed: %v", caseType, err)
+	}
+}
+
+func evm(n1 JNode, testServices map[string]*types.TestService, targetN int) {
+
+	evm_serviceIdx := uint32(statedb.EVMServiceCode)
+
+	// Set USDM initial balances and nonces
+	blobs := types.ExtrinsicsBlobs{}
+	workItems := []types.WorkItemExtrinsic{}
+	totalSupplyValue := new(big.Int).Mul(big.NewInt(61_000_000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+	usdmInitialState := []statedb.MappingEntry{
+		{Slot: 0, Key: evmtypes.IssuerAddress, Value: totalSupplyValue}, // balanceOf[issuer]
+		{Slot: 1, Key: evmtypes.IssuerAddress, Value: big.NewInt(1)},    // nonces[issuer]
+	}
+	statedb.InitializeMappings(&blobs, &workItems, evmtypes.UsdmAddress, usdmInitialState)
+
+	numExtrinsics := len(workItems)
+
+	log.Info(log.Node, "EVM START (genesis)", "evm", evm_serviceIdx, "numExtrinsics", numExtrinsics, "targetN", targetN)
+
+	service, ok, err := n1.GetService(evm_serviceIdx)
+	if err != nil || !ok {
+		panic(fmt.Sprintf("EVM service not found: %d %v", evm_serviceIdx, err))
+	}
+
+	// Create work package with updated witness count and refine context
+	wp := statedb.DefaultWorkPackage(evm_serviceIdx, service)
+
+	// Get RefineContext and log what we get
+	refineCtx, err := n1.GetRefineContext()
+	if err != nil {
+		log.Error(log.Node, "GetRefineContext failed", "err", err)
+	}
+
+	wp.RefineContext = refineCtx
+	wp.WorkItems[0].Payload = statedb.BuildPayload(statedb.PayloadTypeGenesis, numExtrinsics, 0)
+	wp.WorkItems[0].Extrinsics = workItems
+
+	// Genesis adds 3 exports: 1 StorageShard + 1 SSRMetadata + 1 meta for USDM contract
+	wp.WorkItems[0].ExportCount = uint16(3)
+	wpr := &types.WorkPackageBundle{
+		WorkPackage:   wp,
+		ExtrinsicData: []types.ExtrinsicsBlobs{blobs},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout*maxRobustTries)
+	_, err = RobustSubmitAndWaitForWorkPackageBundles(ctx, n1, []*types.WorkPackageBundle{wpr})
+	cancel()
+	if err != nil {
+		log.Error(log.Node, "SubmitAndWaitForWorkPackages ERR", "err", err)
+		return
+	}
+
+	// Create signed transactions
+
+	for evmN := 0; evmN < targetN; evmN++ {
+		nonce, _ := n1.GetTransactionCount(evmtypes.IssuerAddress, "latest")
+		log.Info(log.Node, "GetTransactionCount", "nonce", nonce)
+
+		// Build transaction extrinsics
+		numTxs := 3
+		txBytes := make([][]byte, numTxs)
+		txHashes := make([]common.Hash, numTxs)
+
+		// Create simple transfers from account 0 to account 1
+		_, senderPrivKey := common.GetEVMDevAccount(0)
+
+		for i := 0; i < numTxs; i++ {
+			recipientIndex := (evmN*numTxs + i + 1) % 10
+			if recipientIndex == 0 {
+				recipientIndex = 1
+			}
+			recipientAddr, _ := common.GetEVMDevAccount(recipientIndex)
+			gasPrice := big.NewInt(1) // 1 wei
+			gasLimit := uint64(2_000_000)
+			amount := big.NewInt(int64(1000*i + 20000)) // 1 wei transfer
+
+			_, tx, txHash, err := statedb.CreateSignedUSDMTransfer(
+				senderPrivKey,
+				nonce+uint64(i),
+				recipientAddr,
+				amount,
+				gasPrice,
+				gasLimit,
+				uint64(statedb.DefaultJAMChainID),
+			)
+			if err != nil {
+				log.Error(log.Node, "CreateSignedUSDMTransfer ERR", "err", err)
+				return
+			}
+
+			txBytes[i] = tx
+			txHashes[i] = txHash
+		}
+
+		// Build extrinsics blobs and hashes
+		blobs := make(types.ExtrinsicsBlobs, numTxs)
+		extrinsics := make([]types.WorkItemExtrinsic, numTxs)
+		for i, tx := range txBytes {
+			blobs[i] = tx
+			extrinsics[i] = types.WorkItemExtrinsic{
+				Hash: common.Blake2Hash(tx),
+				Len:  uint32(len(tx)),
+			}
+		}
+
+		wp := statedb.DefaultWorkPackage(evm_serviceIdx, service)
+		wp.WorkItems[0].Payload = statedb.BuildPayload(statedb.PayloadTypeTransactions, numTxs, 0)
+		wp.WorkItems[0].Extrinsics = extrinsics
+
+		//  BuildBundle should return a Bundle (with ImportedSegments)
+		bundle, _, err := n1.BuildBundle(wp, []types.ExtrinsicsBlobs{blobs}, uint16(0), []common.Hash{})
+		if err != nil {
+			panic(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		n1.SubmitAndWaitForWorkPackageBundle(ctx, bundle)
+
+	}
+}
+
+func TestFallback(t *testing.T) {
+	jamtest(t, "fallback", 0)
+}
+
+func TestSafrole(t *testing.T) {
+	jamtest(t, "safrole", 0)
+}
+
+func TestEVM(t *testing.T) {
+	targetN := TargetedN_EVM
+	if *targetNum > 0 {
+		targetN = *targetNum
+	}
+	jamtest(t, "evm", targetN)
+}
+
+func TestAuthCopy(t *testing.T) {
+	targetN := TargetedN_EVM
+	if *targetNum > 0 {
+		targetN = *targetNum
+	}
+	jamtest(t, "auth_copy", targetN)
 }

@@ -63,7 +63,7 @@ fn encode_jam_leaf(key: &[u8; 32], value: &[u8]) -> [u8; 64] {
         result[0] = 0b10000000 | (value.len() as u8);
         // Copy first 31 bytes of key (matching Go: k[:31])
         result[1..32].copy_from_slice(&key[0..31]);
-        result[32..32+value.len()].copy_from_slice(value);
+        result[32..32 + value.len()].copy_from_slice(value);
     } else {
         // Regular leaf node with hash reference
         result[0] = 0b11000000;

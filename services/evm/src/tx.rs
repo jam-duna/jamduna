@@ -10,8 +10,8 @@
 
 use alloc::{format, vec::Vec};
 use primitive_types::{H160, H256, U256};
-use utils::hash_functions::keccak256;
 use utils::functions::{log_error, log_info};
+use utils::hash_functions::keccak256;
 
 /// Decoded transaction arguments from host function call
 pub struct DecodedTransactArgs {
@@ -39,7 +39,8 @@ pub fn decode_transact_args(
         return None;
     }
 
-    let rlp_bytes = unsafe { core::slice::from_raw_parts(args_addr as *const u8, args_len as usize) };
+    let rlp_bytes =
+        unsafe { core::slice::from_raw_parts(args_addr as *const u8, args_len as usize) };
 
     // Check for typed transaction (EIP-2718)
     // Typed transactions start with a single byte < 0xc0 (not an RLP list marker)
@@ -51,7 +52,10 @@ pub fn decode_transact_args(
             0x01 => decode_eip2930_transaction(payload),
             0x02 => decode_eip1559_transaction(payload),
             _ => {
-                log_error(&format!("❌ Unsupported transaction type: 0x{:02x}", tx_type));
+                log_error(&format!(
+                    "❌ Unsupported transaction type: 0x{:02x}",
+                    tx_type
+                ));
                 None
             }
         }
@@ -81,7 +85,8 @@ fn decode_legacy_transaction(rlp_bytes: &[u8]) -> Option<DecodedTransactArgs> {
     let s = rlp.at(8).ok()?.as_val::<U256>().ok()?;
 
     // Recover sender address from signature
-    let caller = recover_sender_legacy(nonce, gas_price, gas_limit, to_bytes, value, &data, v, r, s)?;
+    let caller =
+        recover_sender_legacy(nonce, gas_price, gas_limit, to_bytes, value, &data, v, r, s)?;
 
     // Determine if this is a contract creation (empty 'to' field) or call
     let call_create = if to_bytes.is_empty() {
@@ -127,7 +132,9 @@ fn decode_eip2930_transaction(payload: &[u8]) -> Option<DecodedTransactArgs> {
     let s = rlp.at(10).ok()?.as_val::<U256>().ok()?;
 
     // Recover sender for EIP-2930
-    let caller = recover_sender_eip2930(chain_id, nonce, gas_price, gas_limit, to_bytes, value, &data, payload, v, r, s)?;
+    let caller = recover_sender_eip2930(
+        chain_id, nonce, gas_price, gas_limit, to_bytes, value, &data, payload, v, r, s,
+    )?;
 
     let call_create = if to_bytes.is_empty() {
         DecodedCallCreate::Create { init_code: data }
@@ -173,7 +180,20 @@ fn decode_eip1559_transaction(payload: &[u8]) -> Option<DecodedTransactArgs> {
     let s = rlp.at(11).ok()?.as_val::<U256>().ok()?;
 
     // Recover sender for EIP-1559
-    let caller = recover_sender_eip1559(chain_id, nonce, max_priority_fee, max_fee_per_gas, gas_limit, to_bytes, value, &data, payload, v, r, s)?;
+    let caller = recover_sender_eip1559(
+        chain_id,
+        nonce,
+        max_priority_fee,
+        max_fee_per_gas,
+        gas_limit,
+        to_bytes,
+        value,
+        &data,
+        payload,
+        v,
+        r,
+        s,
+    )?;
 
     let call_create = if to_bytes.is_empty() {
         DecodedCallCreate::Create { init_code: data }
@@ -210,11 +230,7 @@ fn recover_sender_legacy(
     s: U256,
 ) -> Option<H160> {
     // Extract chain ID from v (EIP-155: v = CHAIN_ID * 2 + 35 + recovery_id)
-    let chain_id = if v >= 35 {
-        Some((v - 35) / 2)
-    } else {
-        None
-    };
+    let chain_id = if v >= 35 { Some((v - 35) / 2) } else { None };
 
     let recovery_id = if let Some(_chain_id) = chain_id {
         ((v - 35) % 2) as u8
@@ -262,7 +278,10 @@ fn recover_sender_legacy(
     let pub_key_hash = keccak256(&pub_key_bytes[1..65]); // Skip first byte (0x04 prefix)
     let address = H160::from_slice(&pub_key_hash.0[12..32]);
 
-    log_info(&format!("🔐 Recovered sender: {:?} (v={}, chain_id={:?})", address, v, chain_id));
+    log_info(&format!(
+        "🔐 Recovered sender: {:?} (v={}, chain_id={:?})",
+        address, v, chain_id
+    ));
 
     Some(address)
 }
@@ -387,13 +406,13 @@ fn recover_from_signature(r: U256, s: U256, recovery_id: u8, signing_hash: &H256
 
 /// Decode call arguments for unsigned transactions (EstimateGas/Call RPCs)
 /// Format: caller(20) + target(20) + gas_limit(32) + gas_price(32) + value(32) + call_kind(4) + data_len(8) + data
-pub fn decode_call_args(
-    args_addr: u64,
-    args_len: u64,
-) -> Option<DecodedTransactArgs> {
+pub fn decode_call_args(args_addr: u64, args_len: u64) -> Option<DecodedTransactArgs> {
     const MIN_LEN: usize = 148; // 20+20+32+32+32+4+8
     if args_len < MIN_LEN as u64 {
-        log_error(&format!("❌ decode_call_args: buffer too short ({} bytes, expected at least {})", args_len, MIN_LEN));
+        log_error(&format!(
+            "❌ decode_call_args: buffer too short ({} bytes, expected at least {})",
+            args_len, MIN_LEN
+        ));
         return None;
     }
 
@@ -422,7 +441,12 @@ pub fn decode_call_args(
     offset += 32;
 
     // Parse call_kind (4 bytes, little-endian)
-    let call_kind = u32::from_le_bytes([buffer[offset], buffer[offset + 1], buffer[offset + 2], buffer[offset + 3]]);
+    let call_kind = u32::from_le_bytes([
+        buffer[offset],
+        buffer[offset + 1],
+        buffer[offset + 2],
+        buffer[offset + 3],
+    ]);
     offset += 4;
 
     // Parse data_len (8 bytes, little-endian)
@@ -444,7 +468,11 @@ pub fn decode_call_args(
     } else if data_len == 0 {
         Vec::new()
     } else {
-        log_error(&format!("❌ decode_call_args: data length {} exceeds buffer size {}", data_len, buffer.len() - offset));
+        log_error(&format!(
+            "❌ decode_call_args: data length {} exceeds buffer size {}",
+            data_len,
+            buffer.len() - offset
+        ));
         return None;
     };
 

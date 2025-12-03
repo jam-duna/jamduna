@@ -53,7 +53,7 @@ pub fn get_bit_at(hash: &H256, index: usize) -> bool {
 }
 
 // Re-export generic types from da module
-pub use da::{ShardId, SSRData, SSRHeader, SSREntryMeta as SSREntry, ShardData};
+pub use da::{SSRData, SSREntryMeta as SSREntry, SSRHeader, ShardData, ShardId};
 
 /// EVM Entry - key-value pair in a shard (64 bytes)
 ///
@@ -432,7 +432,10 @@ mod tests {
         key_right_bytes[0] = 0x80; // Set highest bit
         let key_right = H256::from(key_right_bytes);
         let shard_right = resolve_shard_id(&contract_storage, key_right);
-        assert_eq!(shard_right.ld, 1, "Only the root split should apply to this key");
+        assert_eq!(
+            shard_right.ld, 1,
+            "Only the root split should apply to this key"
+        );
         assert_eq!(
             shard_right.prefix56,
             mask_prefix56(take_prefix56(&key_right), shard_right.ld)
@@ -527,8 +530,8 @@ mod tests {
             // Spread the counter across multiple bytes to ensure prefix variation
             // Put i in the first byte to maximize prefix diversity for first 256 entries
             let mut key_bytes = [0u8; 32];
-            key_bytes[0] = i as u8;  // Byte 0 gets full range 0-255
-            key_bytes[1] = (i >> 8) as u8;  // Higher bytes for larger numbers
+            key_bytes[0] = i as u8; // Byte 0 gets full range 0-255
+            key_bytes[1] = (i >> 8) as u8; // Higher bytes for larger numbers
             entries.push(EvmEntry {
                 key_h: H256::from(key_bytes),
                 value: crate::state::h256_from_low_u64_be(i * 100),
@@ -542,13 +545,17 @@ mod tests {
         };
 
         // Should produce 7-8 shards, all with ≤34 entries
-        let (leaf_shards, ssr_entries) = maybe_split_shard_recursive(shard_id, &shard_data).unwrap();
+        let (leaf_shards, ssr_entries) =
+            maybe_split_shard_recursive(shard_id, &shard_data).unwrap();
 
         assert!(
             leaf_shards.len() >= 7,
             "Should create at least 7 shards for 256 entries, got {} shards with sizes: {:?}",
             leaf_shards.len(),
-            leaf_shards.iter().map(|(_, s)| s.entries.len()).collect::<Vec<_>>()
+            leaf_shards
+                .iter()
+                .map(|(_, s)| s.entries.len())
+                .collect::<Vec<_>>()
         );
 
         // Verify binary tree invariant: N leaves → N-1 internal nodes
@@ -565,7 +572,10 @@ mod tests {
                 SPLIT_THRESHOLD,
                 i,
                 shard.entries.len(),
-                leaf_shards.iter().map(|(_, s)| s.entries.len()).collect::<Vec<_>>()
+                leaf_shards
+                    .iter()
+                    .map(|(_, s)| s.entries.len())
+                    .collect::<Vec<_>>()
             );
             assert!(
                 shard.entries.len() <= 63,
@@ -607,7 +617,8 @@ mod tests {
         };
 
         // Should recursively split until all shards ≤34 entries
-        let (leaf_shards, ssr_entries) = maybe_split_shard_recursive(shard_id, &shard_data).unwrap();
+        let (leaf_shards, ssr_entries) =
+            maybe_split_shard_recursive(shard_id, &shard_data).unwrap();
 
         // Verify binary tree invariant: N leaves → N-1 internal nodes
         assert_eq!(
@@ -639,6 +650,7 @@ mod tests {
     }
 }
 
+/*
 /// Dump all entries in a storage shard for debugging
 pub fn dump_entries(shard_data: &ContractShard) {
     use utils::functions::log_info;
@@ -653,3 +665,5 @@ pub fn dump_entries(shard_data: &ContractShard) {
         ));
     }
 }
+
+ */

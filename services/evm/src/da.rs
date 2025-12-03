@@ -34,7 +34,7 @@ use alloc::format;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
-use utils::functions::{log_crit, log_debug, log_info};
+use utils::functions::{log_crit, log_info};
 
 // ===== Error Types =====
 
@@ -194,10 +194,8 @@ impl ShardId {
 #[derive(Clone)]
 pub struct ShardData<E: SSREntry> {
     pub merkle_root: [u8; 32], // BMT root over entries for inclusion proofs
-    pub entries: Vec<E>,        // Sorted by key_hash
+    pub entries: Vec<E>,       // Sorted by key_hash
 }
-
-
 
 // ===== Prefix Manipulation Utilities =====
 
@@ -308,13 +306,7 @@ pub fn resolve_shard_id<E: SSREntry>(key_hash: [u8; 32], ssr: &SSRData<E>) -> Sh
 fn split_once<E: SSREntry>(
     shard_id: ShardId,
     shard_data: &ShardData<E>,
-) -> (
-    ShardId,
-    ShardData<E>,
-    ShardId,
-    ShardData<E>,
-    SSREntryMeta,
-) {
+) -> (ShardId, ShardData<E>, ShardId, ShardData<E>, SSREntryMeta) {
     assert!(shard_id.ld < 255, "Cannot split shard at maximum depth");
     let new_depth = shard_id.ld + 1;
     let split_bit = shard_id.ld as usize;
@@ -374,8 +366,8 @@ fn split_once<E: SSREntry>(
 
     // Create SSR entry metadata for the split point
     let ssr_entry_meta = SSREntryMeta {
-        d: shard_id.ld,          // Split point (previous depth)
-        ld: new_depth,           // New local depth
+        d: shard_id.ld,              // Split point (previous depth)
+        ld: new_depth,               // New local depth
         prefix56: shard_id.prefix56, // Original routing prefix
     };
 
@@ -486,10 +478,10 @@ pub fn serialize_ssr<E: SSREntry>(ssr: &SSRData<E>) -> Vec<u8> {
     let mut result = Vec::new();
 
     // SSR Header (13 bytes)
-    result.push(ssr.header.global_depth);                          // 1 byte
+    result.push(ssr.header.global_depth); // 1 byte
     result.extend_from_slice(&ssr.header.entry_count.to_le_bytes()); // 4 bytes
-    result.extend_from_slice(&ssr.header.total_keys.to_le_bytes());  // 4 bytes
-    result.extend_from_slice(&ssr.header.version.to_le_bytes());     // 4 bytes
+    result.extend_from_slice(&ssr.header.total_keys.to_le_bytes()); // 4 bytes
+    result.extend_from_slice(&ssr.header.version.to_le_bytes()); // 4 bytes
 
     // SSR Entries (9 bytes each)
     for entry in &ssr.entries {
@@ -573,39 +565,26 @@ pub fn serialize_shard<E: SSREntry>(shard: &ShardData<E>, max_entries: usize) ->
     let count_bytes = count.to_le_bytes();
     result.extend_from_slice(&count_bytes);
 
-    log_info(&format!(
-        "📦 serialize_shard: count={}, entry_size={}, count_bytes=[{:02x} {:02x}]",
-        count,
-        E::serialized_size(),
-        count_bytes[0],
-        count_bytes[1]
-    ));
-
     // Entries (E::serialized_size() bytes each)
-    for (i, entry) in shard.entries.iter().enumerate() {
+    for (_i, entry) in shard.entries.iter().enumerate() {
         let serialized = entry.serialize();
-        log_debug(&format!(
-            "  Entry {}: {} bytes, serialized=[{:02x?}]",
-            i,
-            serialized.len(),
-            &serialized[..128.min(serialized.len())]
-        ));
         result.extend_from_slice(&serialized);
     }
 
-    log_info(&format!(
-        "📦 serialize_shard: total_size={} (32 merkle + 2 count + {}*{} entries)",
-        result.len(),
-        count,
-        E::serialized_size()
-    ));
+    // log_info(&format!(
+    //     "📦 serialize_shard: total_size={} (32 merkle + 2 count + {}*{} entries)",
+    //     result.len(),
+    //     count,
+    //     E::serialized_size()
+    // ));
 
     result
 }
 
 /// Deserialize shard data from DA format
 pub fn deserialize_shard<E: SSREntry>(data: &[u8]) -> Result<ShardData<E>, SerializeError> {
-    if data.len() < 34 {  // 32 (merkle_root) + 2 (count)
+    if data.len() < 34 {
+        // 32 (merkle_root) + 2 (count)
         return Err(SerializeError::InvalidSize);
     }
 
@@ -629,7 +608,10 @@ pub fn deserialize_shard<E: SSREntry>(data: &[u8]) -> Result<ShardData<E>, Seria
         offset += entry_size;
     }
 
-    Ok(ShardData { merkle_root, entries })
+    Ok(ShardData {
+        merkle_root,
+        entries,
+    })
 }
 
 #[cfg(test)]

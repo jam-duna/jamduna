@@ -183,7 +183,7 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		Results:           results,
 		AuthGasUsed:       uint(authGasUsed),
 	}
-	log.Trace(log.Node, "executeWorkPackageBundle", "role", vmLogging, "numSegments", len(segments))
+	log.Info(log.Node, "executeWorkPackageBundle", "n", s.Id, "role", vmLogging, "workreport", workReport.String())
 
 	s.GetStorage().GetJAMDA().StoreBundleSpecSegments(spec, d, package_bundle, segments)
 
@@ -246,7 +246,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 
 		// Append builder witnesses to extrinsicsBlobs -- this will be the metashards + the object proofs
 		builderWitnessCount := appendExtrinsicWitnessesToWorkItem(&wp.WorkItems[index], &extrinsicsBlobs, index, witnesses)
-		log.Info(log.DA, "**** BuildBundle: Appended builder witnesses", "workItemIndex", index, "builderWitnessCount", builderWitnessCount, "totalExtrinsics", len(extrinsicsBlobs[index]))
+		log.Info(log.DA, "BuildBundle: Appended builder witnesses", "workItemIndex", index, "builderWitnessCount", builderWitnessCount, "totalExtrinsics", len(extrinsicsBlobs[index]))
 		// Update payload metadata with builder witness count
 		if len(wp.WorkItems[index].Payload) >= 7 && builderWitnessCount > 0 {
 			totalWitnessCount := uint16(builderWitnessCount)
@@ -307,7 +307,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 	workReport := &types.WorkReport{
 		Results: results,
 	}
-	log.Info(log.Node, "BuildBundle: Built", "payload", fmt.Sprintf("%x", bundle.WorkPackage.WorkItems[0].Payload))
+	log.Trace(log.Node, "BuildBundle: Built", "payload", fmt.Sprintf("%x", bundle.WorkPackage.WorkItems[0].Payload))
 	return &bundle, workReport, nil
 }
 

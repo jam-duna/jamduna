@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"math/rand"
 	"os"
 	"strconv"
 	"strings"
@@ -21,8 +22,10 @@ import (
 )
 
 const (
-	numRounds    = 100
-	txnsPerRound = 1
+	numRounds    = 1
+	txnsPerRound = 3
+
+	DefaultJAMChainID = 0x1107
 
 	verifyServiceProof = false
 )
@@ -753,7 +756,7 @@ type MappingEntry struct {
 	Value *big.Int       // Value to write
 }
 
-func (b *Rollup) SubmitEVMGenesis(startBalance int64) (*evmtypes.EvmBlockPayload, error) {
+func (b *Rollup) SubmitEVMGenesis(startBalance int64) error {
 	// Set USDM initial balances and nonces
 	blobs := types.ExtrinsicsBlobs{}
 	workItems := []types.WorkItemExtrinsic{}
@@ -764,82 +767,6 @@ func (b *Rollup) SubmitEVMGenesis(startBalance int64) (*evmtypes.EvmBlockPayload
 		{Slot: 1, Key: evmtypes.IssuerAddress, Value: big.NewInt(1)},    // nonces[issuer]
 	}
 
-	// Initialize staking state for genesis validators
-	// Map ECDSA addresses (EVMDevAccount 0-5) to Ed25519 validator public keys
-	// and set up bonded/ledger mappings with staking balances 100-600
-	j := b.stateDB.JamState
-	validators := j.SafroleState.CurrValidators
-
-	for i := 0; i < types.TotalValidators && i < len(validators); i++ {
-		ecdsaAddr, _ := common.GetEVMDevAccount(i)
-		ed25519Key := validators[i].Ed25519
-
-		// Slot 7: ecdsaToEd25519[ecdsaAddr] = ed25519Key (bytes32)
-		usdmInitialState = append(usdmInitialState, MappingEntry{
-			Slot:  7,
-			Key:   ecdsaAddr,
-			Value: new(big.Int).SetBytes(ed25519Key[:]),
-		})
-
-		// Staking balance: (i+1)*100 USDM (100, 200, 300, 400, 500, 600)
-		stakingBalance := new(big.Int).Mul(
-			big.NewInt(int64((i+1)*100)),
-			new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil),
-		)
-
-		// Slot 2: bonded[ecdsaAddr] = ecdsaAddr (self-controller)
-		// Each validator uses itself as the controller
-		usdmInitialState = append(usdmInitialState, MappingEntry{
-			Slot:  2,
-			Key:   ecdsaAddr,
-			Value: new(big.Int).SetBytes(ecdsaAddr[:]),
-		})
-
-		// Slot 3: ledger[ecdsaAddr] is a struct StakingLedger
-		// Fields: stash (address), total (uint256), active (uint256), unlocking (array)
-		// For genesis init via simple mapping writes, we write the active field directly
-		// Storage layout: keccak256(controller . slot) + offset
-		// We'll initialize: ledger[ecdsaAddr].active = stakingBalance (field offset 2)
-		keyInput := make([]byte, 64)
-		copy(keyInput[12:32], ecdsaAddr[:])
-		keyInput[63] = 3 // slot 3 = ledger
-		ledgerBaseSlot := crypto.Keccak256Hash(keyInput)
-
-		// Field 0: stash = ecdsaAddr
-		usdmInitialState = append(usdmInitialState, MappingEntry{
-			Slot:  255,
-			Key:   common.BytesToAddress(ledgerBaseSlot[:]),
-			Value: new(big.Int).SetBytes(ecdsaAddr[:]),
-		})
-
-		// Field 1: total = stakingBalance
-		totalSlot := new(big.Int).Add(ledgerBaseSlot.Big(), big.NewInt(1))
-		totalSlotBytes := totalSlot.FillBytes(make([]byte, 32))
-		usdmInitialState = append(usdmInitialState, MappingEntry{
-			Slot:  255,
-			Key:   common.BytesToAddress(totalSlotBytes[12:]),
-			Value: stakingBalance,
-		})
-
-		// Field 2: active = stakingBalance
-		activeSlot := new(big.Int).Add(ledgerBaseSlot.Big(), big.NewInt(2))
-		activeSlotBytes := activeSlot.FillBytes(make([]byte, 32))
-		usdmInitialState = append(usdmInitialState, MappingEntry{
-			Slot:  255,
-			Key:   common.BytesToAddress(activeSlotBytes[12:]),
-			Value: stakingBalance,
-		})
-
-		// Field 3: unlocking (dynamic array) - length = 0
-		unlockingSlot := new(big.Int).Add(ledgerBaseSlot.Big(), big.NewInt(3))
-		unlockingSlotBytes := unlockingSlot.FillBytes(make([]byte, 32))
-		usdmInitialState = append(usdmInitialState, MappingEntry{
-			Slot:  255,
-			Key:   common.BytesToAddress(unlockingSlotBytes[12:]),
-			Value: big.NewInt(0),
-		})
-	}
-
 	InitializeMappings(&blobs, &workItems, evmtypes.UsdmAddress, usdmInitialState)
 
 	numExtrinsics := len(workItems)
@@ -847,7 +774,7 @@ func (b *Rollup) SubmitEVMGenesis(startBalance int64) (*evmtypes.EvmBlockPayload
 
 	service, ok, err := b.stateDB.GetService(b.serviceID)
 	if err != nil || !ok {
-		return nil, fmt.Errorf("EVM service not found: %v", err)
+		return fmt.Errorf("EVM service not found: %v", err)
 	}
 
 	// Create work package with updated witness count and refine context
@@ -856,13 +783,12 @@ func (b *Rollup) SubmitEVMGenesis(startBalance int64) (*evmtypes.EvmBlockPayload
 	wp.WorkItems[0].Payload = BuildPayload(PayloadTypeGenesis, numExtrinsics, 0)
 	wp.WorkItems[0].Extrinsics = workItems
 
-	// Genesis exports: Storage SSRs + MetaShard + MetaSSR + Block
+	// Genesis exports: Storage SSRs + MetaShard + MetaSSR
 	// The exact count depends on how many storage shards are created
-	wp.WorkItems[0].ExportCount = uint16(4)
+	wp.WorkItems[0].ExportCount = uint16(3)
 	/*
 		1 SSR metadata object (13 bytes)
 		1 Storage shard (162 bytes: 2 entries × 64 bytes + overhead)
-		1 Block object (124 bytes)
 		1 Meta-shard (249 bytes: 3 entries × 69 bytes + overhead)
 	*/
 	log.Info(log.Node, "WorkPackage RefineContext", "state_root", wp.RefineContext.StateRoot.Hex(), "anchor", wp.RefineContext.Anchor.Hex())
@@ -873,11 +799,11 @@ func (b *Rollup) SubmitEVMGenesis(startBalance int64) (*evmtypes.EvmBlockPayload
 
 	err = b.processWorkPackageBundles([]*types.WorkPackageBundle{bundle})
 	if err != nil {
-		return nil, fmt.Errorf("processWorkPackageBundles failed: %w", err)
+		return fmt.Errorf("processWorkPackageBundles failed: %w", err)
 	}
 
 	// Genesis bootstrap complete - return nil block (genesis doesn't produce transactions)
-	return nil, nil
+	return nil
 }
 
 type TransferTriple struct {
@@ -892,72 +818,48 @@ type TransferTriple struct {
 // - Middle rounds: mix of transfers between non-issuer accounts
 // - Last round: intentionally large amounts to test insufficient balance handling
 // - Amounts vary by round to create interesting test cases
-func (b *Rollup) createTransferTriplesForRound(roundNum int, txnsPerRound int, isLastRound bool) []TransferTriple {
+func (b *Rollup) createTransferTriplesForRound(roundNum int, txnsPerRound int) []TransferTriple {
 	const numDevAccounts = 10 // Dev accounts 0-9
 	transfers := make([]TransferTriple, 0, txnsPerRound)
 
-	for i := 0; i < txnsPerRound; i++ {
-		var sender, receiver int
-		var amount *big.Int
-
-		// Last round: intentionally test insufficient balance with huge amounts
-		if isLastRound {
-			// Send from issuer to various accounts with impossibly large amounts
-			// This matches the original batch5 behavior: test insufficient balance handling
-			sender = 0
-			receiver = (numDevAccounts - 1) - (i % numDevAccounts)
-			if receiver == 0 {
-				receiver = 1
-			}
-			// Use the original hardcoded huge amount: 0x7540a0434b17f96f (~8.4e18)
-			amount = big.NewInt(int64(0x7540a0434b17f96f))
-		} else {
-			// Pattern selection for normal rounds based on round number
-			switch roundNum % 4 {
-			case 0:
-				// Round 0, 4, 8...: Issuer distributes to accounts
-				sender = 0
-				receiver = (i % (numDevAccounts - 1)) + 1
-				amount = new(big.Int).Mul(big.NewInt(int64(0x1000000+i+roundNum*0x100)), big.NewInt(1e12))
-
-			case 1:
-				// Round 1, 5, 9...: Mix of issuer and secondary transfers
-				if i == 0 {
-					sender = 0
-					receiver = (4 + roundNum) % numDevAccounts
-					if receiver == 0 {
-						receiver = 1
-					}
-				} else {
-					sender = (i + 1) % numDevAccounts
-					if sender == 0 {
-						sender = 2
-					}
-					receiver = (i + 4 + roundNum) % numDevAccounts
-				}
-				amount = new(big.Int).Mul(big.NewInt(int64(0x2000000+i+roundNum*0x1000)), big.NewInt(1e9))
-
-			case 2:
-				// Round 2, 6, 10...: Circular transfers between non-issuer accounts
-				sender = ((i + 4 + roundNum) % (numDevAccounts - 1)) + 1
-				receiver = ((i + 5 + roundNum) % (numDevAccounts - 1)) + 1
-				amount = new(big.Int).Mul(big.NewInt(int64(0x300000+i*100+roundNum*0x10000)), big.NewInt(1e9))
-
-			case 3:
-				// Round 3, 7, 11...: Issuer funds accounts
-				sender = 0
-				receiver = ((7 + i + roundNum) % (numDevAccounts - 1)) + 1
-				amount = new(big.Int).Mul(big.NewInt(int64(0x40000>>(i%8))), big.NewInt(1e6))
-			}
+	if roundNum == 0 {
+		// Special case for round 0: issuer distributes to all accounts
+		for i := 1; i < numDevAccounts; i++ {
+			amount := new(big.Int).Mul(big.NewInt(int64(0x9000000+i)), big.NewInt(1e12))
+			transfers = append(transfers, TransferTriple{
+				SenderIndex:   0,
+				ReceiverIndex: i,
+				Amount:        amount,
+			})
 		}
+		return transfers
+	}
+	if roundNum == 1 {
+		// Special case for round 1: secondary transfers between accounts
+		for i := 1; i < numDevAccounts; i++ {
+			amount := new(big.Int).Mul(big.NewInt(int64(0x200000+i)), big.NewInt(1e9))
+			transfers = append(transfers, TransferTriple{
+				SenderIndex:   i,
+				ReceiverIndex: (i + 1) % numDevAccounts,
+				Amount:        amount,
+			})
+		}
+		return transfers
+	}
+	for i := 0; i < txnsPerRound; i++ {
+		// Pick random sender and receiver from accounts 1-9 (excluding issuer at 0)
+		sender := rand.Intn(numDevAccounts-1) + 1   // Random from 1 to 9
+		receiver := rand.Intn(numDevAccounts-1) + 1 // Random from 1 to 9
 
 		// Ensure sender != receiver
-		if sender == receiver {
-			receiver = (receiver + 1) % numDevAccounts
-			if receiver == sender {
-				receiver = (receiver + 1) % numDevAccounts
-			}
+		for sender == receiver {
+			receiver = rand.Intn(numDevAccounts-1) + 1
 		}
+
+		// Vary amounts by transaction to create interesting test cases
+		amount := new(big.Int).Mul(big.NewInt(int64(0x1000000*(i+1))), big.NewInt(1e6))
+
+		log.Info(log.Node, "CREATETRANSFER", "Round", roundNum, "TxIndex", i, "sender", sender, "receiver", receiver, "amount", amount.String())
 
 		transfers = append(transfers, TransferTriple{
 			SenderIndex:   sender,

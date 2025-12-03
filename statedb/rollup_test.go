@@ -17,16 +17,11 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-const (
-	numBlocks = 5
-)
-
-var algoPayloads = []byte{
-	0xc2, 0xb8, 0xb4, 0xbb, 0xcb, 0xaa, 0x47, 0xd4, 0xe9, 0xdc, 0x39, 0xce, 0xb8, 0xbc, 0x75, 0x2b, 0x2b, 0x6b, 0x8c, 0x98, 0x88, 0xab, 0xb4, 0xc4, 0x9c, 0x59, 0xc2, 0xcb, 0xbd, 0xa2, 0x96, 0x94, 0xb1, 0x4d, 0xb6, 0xb7, 0xbc, 0x78, 0x72, 0x96, 0x85, 0x0a, 0xa7, 0x0d, 0x77, 0xb6, 0x02, 0xb1, 0xb3, 0xb4, 0xbd, 0xb7, 0xcc, 0xf5,
-}
-
 // TestAlgoBlocks generates a sequence of blocks with Algo service guarantees+assurances without any jamnp
 func TestAlgoBlocks(t *testing.T) {
+	const (
+		numBlocks = 5
+	)
 	log.InitLogger("info")
 	log.EnableModule(log.Node)
 	c, err := NewRollup(t.TempDir(), AlgoServiceCode)
@@ -73,7 +68,7 @@ func TestEVMBlocksMath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEVMService failed: %v", err)
 	}
-	_, err = chain.SubmitEVMGenesis(61_000_000)
+	err = chain.SubmitEVMGenesis(61_000_000)
 	if err != nil {
 		t.Fatalf("SubmitEVMGenesis failed: %v", err)
 	}
@@ -170,7 +165,7 @@ func RunTransfersRound(b *Rollup, transfers []TransferTriple) error {
 		recipientAddr, _ := common.GetEVMDevAccount(transfer.ReceiverIndex)
 
 		gasPrice := big.NewInt(1) // 1 wei
-		gasLimit := uint64(2_000_000)
+		gasLimit := uint64(10_000_000)
 
 		currentNonce := senderNonces[transfer.SenderIndex]
 		senderNonces[transfer.SenderIndex]++
@@ -182,7 +177,7 @@ func RunTransfersRound(b *Rollup, transfers []TransferTriple) error {
 			transfer.Amount,
 			gasPrice,
 			gasLimit,
-			uint64(b.serviceID),
+			DefaultJAMChainID,
 		)
 		if err != nil {
 			log.Error(log.Node, "CreateSignedUSDMTransfer ERR", "idx", idx, "err", err)
@@ -213,6 +208,18 @@ func RunTransfersRound(b *Rollup, transfers []TransferTriple) error {
 	if err != nil {
 		log.Error(log.Node, "SubmitEVMTransactions ERR", "err", err)
 		return err
+	}
+	for idx, txHash := range txHashes {
+		receipt, recErr := b.stateDB.GetTransactionReceipt(b.serviceID, txHash)
+		if recErr != nil {
+			log.Error(log.Node, "GetTransactionReceipt ERR", "idx", idx, "txHash", txHash, "err", recErr)
+			continue
+		}
+		log.Info(log.Node, "Transaction receipt",
+			"idx", idx,
+			"txHash", txHash.String(),
+			"success", receipt.Success,
+			"gasUsed", receipt.UsedGas)
 	}
 
 	// if err := evmtypes.VerifyBlockBMTProofs(prevblock, metadata); err != nil {
@@ -271,7 +278,6 @@ func RunTransfersRound(b *Rollup, transfers []TransferTriple) error {
 			"difference", diff.String())
 		return fmt.Errorf("balance mismatch: before=%s, after=%s, difference=%s", totalBefore.String(), totalAfter.String(), diff.String())
 	}
-
 	// Verify coinbase collected fees
 	coinbaseBalance, err := b.stateDB.GetBalance(b.serviceID, coinbaseAddress)
 	if err != nil {
@@ -287,16 +293,16 @@ func RunTransfersRound(b *Rollup, transfers []TransferTriple) error {
 }
 
 type SimulatedTransfer struct {
-	TokenAddress     common.Address
-	FromAddress      common.Address
-	ToAddress        common.Address
-	Value            *big.Int
-	TransactionHash  common.Hash
-	BlockTimestamp   string
-	BlockNumber      uint64
-	LogIndex         uint64
-	Symbol           string
-	ValueDecimal     string
+	TokenAddress    common.Address
+	FromAddress     common.Address
+	ToAddress       common.Address
+	Value           *big.Int
+	TransactionHash common.Hash
+	BlockTimestamp  string
+	BlockNumber     uint64
+	LogIndex        uint64
+	Symbol          string
+	ValueDecimal    string
 }
 
 // mapAddressToShard maps an address to a shard ID using first 56 bits (7 bytes) of keccak256 hash
@@ -415,7 +421,8 @@ func TestEVMBlocksShardedByHour(t *testing.T) {
 // - Results show the distribution across cores and shard utilization
 //
 // To use real stablecoin data from GCS:
-//   gsutil cat gs://wolk/stablecoin_transfers_sorted_000000000731.csv.gz | zcat > statedb/testdata/stablecoin_transfers_sample.csv
+//
+//	gsutil cat gs://wolk/stablecoin_transfers_sorted_000000000731.csv.gz | zcat > statedb/testdata/stablecoin_transfers_sample.csv
 func TestEVMBlocksSharded(t *testing.T) {
 	log.InitLogger("info")
 
@@ -883,7 +890,7 @@ func TestEVMBlocksTransfers(t *testing.T) {
 		t.Fatalf("NewEVMService failed: %v", err)
 	}
 	initBalance := int64(61_000_000)
-	_, err = chain.SubmitEVMGenesis(initBalance)
+	err = chain.SubmitEVMGenesis(initBalance)
 	if err != nil {
 		t.Fatalf("SubmitEVMGenesis failed: %v", err)
 	}
@@ -931,12 +938,11 @@ func TestEVMBlocksTransfers(t *testing.T) {
 		}
 		log.Info(log.Node, "EstimateGasTransfer", "estimatedGas", gasUsed)
 	*/
-	for round := 0; round < 10; round++ {
-		isLastRound := (round == numRounds-1)
-		log.Info(log.Node, "test_transfers - round", "round", round, "isLastRound", isLastRound)
-		err := RunTransfersRound(chain, chain.createTransferTriplesForRound(round, txnsPerRound, isLastRound))
+	for round := 0; round < numRounds; round++ {
+		log.Info(log.Node, "test_transfers - round", "round", round)
+		err := RunTransfersRound(chain, chain.createTransferTriplesForRound(round, txnsPerRound))
 		if err != nil {
-			panic(fmt.Errorf("transfer round %d failed: %w", round, err))
+			t.Fatalf("transfer round %d failed: %v", round, err)
 		}
 	}
 }
@@ -948,7 +954,7 @@ func TestEVMBlocksDeployContract(t *testing.T) {
 		t.Fatalf("NewEVMService failed: %v", err)
 	}
 
-	_, err = b.SubmitEVMGenesis(61_000_000)
+	err = b.SubmitEVMGenesis(61_000_000)
 	if err != nil {
 		t.Fatalf("SubmitEVMGenesis failed: %v", err)
 	}
@@ -1050,14 +1056,15 @@ func TestRewards(t *testing.T) {
 
 // GenerateRewardsPayload creates a SCALE-encoded SignedApprovalsTallyMessage
 // SCALE encoding format (struct field order from types.rs):
-// SignedApprovalsTallyMessage {
-//   message: ApprovalsTallyMessage {
-//     epoch: u64 (8 bytes LE)
-//     lines: Vec<ApprovalTallyMessageLine> (compact length prefix + elements)
-//   }
-//   signature: [u8; 64] (64 bytes)
-//   validator_index: u16 (2 bytes LE)
-// }
+//
+//	SignedApprovalsTallyMessage {
+//	  message: ApprovalsTallyMessage {
+//	    epoch: u64 (8 bytes LE)
+//	    lines: Vec<ApprovalTallyMessageLine> (compact length prefix + elements)
+//	  }
+//	  signature: [u8; 64] (64 bytes)
+//	  validator_index: u16 (2 bytes LE)
+//	}
 func GenerateRewardsPayload(epoch int, validatorIndex uint16) []byte {
 	const NUM_VALIDATORS = 1024
 

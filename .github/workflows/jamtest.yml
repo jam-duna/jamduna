@@ -1,4 +1,4 @@
-name: Run Algo Node Jobs
+name: Run EVM Testing Jobs
 
 env:
   GOFLAGS: "-tags=tiny -buildvcs=false"
@@ -7,21 +7,21 @@ env:
   CARGO_MANIFEST_DIR: ${{ github.workspace }}
 
 #concurrency:
-#  group: algonode
+#  group: evmnode
 #  cancel-in-progress: true
 
 on:
   push:
     branches:
       - main
-  # Run both evm_node_compiler every 15 minutes
+  # Run both evm_node_interpreter every 20 minutes
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/20 * * * *"
   workflow_dispatch:
 
 jobs:
   run-evm-tests:
-    name: Run evm_node_compiler
+    name: Run evm_node_interpreter
     runs-on: self-hosted
     timeout-minutes: 15
 
@@ -69,16 +69,16 @@ jobs:
           echo "Listing PVM files:"
           find services -name "*.pvm" || true
 
-      - name: Run evm_node_compiler
+      - name: Run evm_node_interpreter
         working-directory: ${{ github.workspace }}/node
         run: |
-          echo "Running make evm_node_compiler 4 times..."
+          echo "Running make evm_node_interpreter 4 times..."
           for i in 1 2 3 4; do
             echo "=== Run $i ==="
-            timeout 180s make evm_node_compiler
+            timeout 180s make evm_node_interpreter
           done
 
       - name: Done
-        run: echo "evm_node_compiler completed successfully."
+        run: echo "evm_node_interpreter completed successfully."
 
 
