@@ -79,22 +79,45 @@ func (rvm *RecompilerRam) Close() error {
 	return err
 }
 
-// GetMemAccess checks access rights for a memory range using mprotect probe.
-// DANGER: This function uses unsafe operations and can cause SIGSEGV if the address is invalid or inaccessible.
+// GetMemAccess checks access rights for a memory range.
+// Returns the most restrictive access level across all pages spanned by the range.
+// If any page in the range is inaccessible, returns PageInaccessible.
+// If all pages are at least readable but any is immutable, returns PageImmutable.
+// Only returns PageMutable if ALL pages in the range are mutable.
 func (rvm *RecompilerRam) GetMemAccess(address uint32, length uint32) (int, error) {
-	pageIndex := int(address / PageSize)
-	if pageIndex < 0 || pageIndex >= TotalPages {
-		return PageInaccessible, fmt.Errorf("invalid address")
+	if length == 0 {
+		return PageInaccessible, fmt.Errorf("zero length")
 	}
-	// Map lookup with default value of PageInaccessible (0)
-	access, ok := rvm.memAccess[pageIndex]
-	if !ok {
-		access = PageInaccessible
+
+	// Check for overflow
+	if address > ^uint32(0)-(length-1) {
+		return PageInaccessible, fmt.Errorf("address range overflow: addr=0x%x len=0x%x", address, length)
 	}
-	if pageIndex == 0 {
-		fmt.Printf("Page 0 Access = %d\n", access)
+
+	startPage := int(address / PageSize)
+	endAddress := address + length - 1
+	endPage := int(endAddress / PageSize)
+
+	if startPage < 0 || startPage >= TotalPages || endPage < 0 || endPage >= TotalPages {
+		return PageInaccessible, fmt.Errorf("invalid address range: pages %d~%d out of bounds", startPage, endPage)
 	}
-	return access, nil
+
+	// Check all pages in the range and return the most restrictive access
+	// PageInaccessible (0) < PageImmutable (PROT_READ) < PageMutable (PROT_READ|PROT_WRITE)
+	mostRestrictive := PageMutable
+	for pageIdx := startPage; pageIdx <= endPage; pageIdx++ {
+		access, ok := rvm.memAccess[pageIdx]
+		if !ok {
+			access = PageInaccessible
+		}
+		if access == PageInaccessible {
+			return PageInaccessible, nil // Early return - can't get more restrictive
+		}
+		if access < mostRestrictive {
+			mostRestrictive = access
+		}
+	}
+	return mostRestrictive, nil
 }
 
 // ReadMemory reads data from a specific address in the memory if it's readable.
@@ -121,23 +144,30 @@ func (rvm *RecompilerRam) ReadMemory(address uint32, length uint32) (data []byte
 }
 
 // WriteMemory writes data to a specific address in the memory if it's writable.
+// Validates that all pages spanned by the write are mutable before writing.
 func (rvm *RecompilerRam) WriteMemory(address uint32, data []byte) error {
-	pageIndex := int(address / PageSize)
-	if pageIndex < 0 || pageIndex >= TotalPages {
-		return fmt.Errorf("invalid address %x for page index %d", address, pageIndex)
+	if len(data) == 0 {
+		return nil
 	}
 
+	// Check for overflow
+	endAddr := uint64(address) + uint64(len(data))
+	if endAddr > uint64(len(rvm.realMemory)) {
+		return fmt.Errorf("out of bounds: write at 0x%x with len %d exceeds memory size %d",
+			address, len(data), len(rvm.realMemory))
+	}
+
+	// Check that all pages in the range are writable
 	access, err := rvm.GetMemAccess(address, uint32(len(data)))
 	if err != nil {
 		return fmt.Errorf("failed to get memory access: %w", err)
 	}
 	if access != PageMutable {
-		return fmt.Errorf("memory at address %x is not writable", address)
+		return fmt.Errorf("memory at address 0x%x is not writable (access=%d)", address, access)
 	}
 
-	start := pageIndex * PageSize
-	offset := int(address % PageSize)
-	copy(rvm.realMemory[start+offset:start+offset+len(data)], data)
+	// Direct copy using the address - no page-based offset calculation needed
+	copy(rvm.realMemory[address:uint32(endAddr)], data)
 	return nil
 }
 

@@ -1,4 +1,4 @@
-name: Run EVM Testing Jobs
+name: Run EVM Transfers with Interpreter and Compiler
 
 env:
   GOFLAGS: "-tags=tiny -buildvcs=false"
@@ -14,16 +14,16 @@ on:
   push:
     branches:
       - main
-  # Run both evm_node_interpreter every 30 minutes
+  # Run both evm_node_interpreter_and_compiler every 15 minutes
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch:
 
 jobs:
   run-evm-tests:
-    name: Run evm_node_interpreter
+    name: Run evm_node_interpreter_and_compiler
     runs-on: self-hosted
-    timeout-minutes: 30
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
@@ -74,13 +74,22 @@ jobs:
       - name: Run evm_node_interpreter
         working-directory: ${{ github.workspace }}/node
         run: |
-          echo "Running make evm_node_interpreter 4 times..."
-          for i in 1 2 3 4; do
+          echo "Running make evm_node_interpreter 3 times..."
+          for i in 1 2 3; do
             echo "=== Run $i ==="
             timeout 180s make evm_node_interpreter
           done
 
+      - name: Run evm_node_compiler
+        working-directory: ${{ github.workspace }}/node
+        run: |
+          echo "Running make evm_node_compiler 3 times..."
+          for i in 1 2 3; do
+            echo "=== Run $i ==="
+            timeout 180s make evm_node_compiler
+          done
+
       - name: Done
-        run: echo "evm_node_interpreter completed successfully."
+        run: echo "evm_node_interpreter_and_compiler completed successfully."
 
 

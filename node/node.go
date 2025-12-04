@@ -53,7 +53,7 @@ const (
 )
 
 const (
-	isWriteSnapshot        = false
+	isWriteSnapshot        = true
 	isWriteTransition      = true
 	isWriteBundleFollower  = true
 	isWriteBundleGuarantor = true
@@ -604,7 +604,7 @@ func StandardizePVMBackend(pvm_mode string) string {
 	var pvmBackend string
 	switch mode {
 	case "INTERPRETER":
-		pvmBackend = statedb.BackendInterpreter
+		pvmBackend = statedb.BackendGoInterpreter
 	case "COMPILER", "RECOMPILER", "X86":
 		if runtime.GOOS == "linux" {
 			pvmBackend = statedb.BackendCompiler

@@ -12,3 +12,7 @@ type WorkPackageBundleSnapshot struct {
 	Slot              uint32            `json:"slot"`
 	Report            WorkReport        `json:"report"`
 }
+
+func (wps *WorkPackageBundleSnapshot) String() string {
+	return ToJSONHex(wps)
+}

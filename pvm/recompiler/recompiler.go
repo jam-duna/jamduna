@@ -22,7 +22,7 @@ import (
 )
 
 var ALWAYS_COMPILE = false
-var compiler_usage = compiler_c
+var compiler_usage = compiler_go
 
 const (
 	GasModeBasicBlock  = iota
@@ -904,10 +904,14 @@ func (vm *RecompilerVM) Init(argument_data_a []byte) (err error) {
 		return fmt.Errorf("SetMemAccess2 failed (o_byte): %w", err)
 	}
 	//2)
-	//p|o|
+	// Padding after o_byte: the gap between o_len and its page-aligned size
+	// This padding should be immutable (read-only zeros)
 	p_o_len := P_func(uint32(o_len))
-	if err = vm.SetMemAccess(Z_Z+uint32(o_len), p_o_len, PageImmutable); err != nil {
-		return fmt.Errorf("SetMemAccess failed (p_o_byte): %w", err)
+	padding_after_o := p_o_len - uint32(o_len)
+	if padding_after_o > 0 {
+		if err = vm.SetMemAccess(Z_Z+uint32(o_len), padding_after_o, PageImmutable); err != nil {
+			return fmt.Errorf("SetMemAccess failed (o_byte padding): %w", err)
+		}
 	}
 
 	z_o := Z_func(vm.o_size)
