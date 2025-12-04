@@ -264,7 +264,7 @@ impl ObjectRef {
         max_payload_size: usize,
         _payload_type: u8,
     ) -> Option<(Self, Vec<u8>)> {
-        use crate::functions::{format_object_id};
+        use crate::functions::{format_object_id, log_info};
         use crate::host_functions::fetch_object;
 
         // Only fetch from witnesses if payload_type is Builder (0)
@@ -274,12 +274,12 @@ impl ObjectRef {
 
         let key_buffer = *object_id;
 
-        // log_info(&alloc::format!(
-        //     "📡 fetch_object HOST CALL: service_id={}, object_id={}, max_size={}",
-        //     service_id,
-        //     format_object_id(*object_id),
-        //     max_payload_size
-        // ));
+        log_info(&alloc::format!(
+            "📡 fetch_object HOST CALL: service_id={}, object_id={:02x}{:02x}{:02x}{:02x}..., max_size={}",
+            service_id,
+            object_id[0], object_id[1], object_id[2], object_id[3],
+            max_payload_size
+        ));
 
         // Allocate buffer: ObjectRef (64 bytes) + payload
         let total_size = Self::SERIALIZED_SIZE + max_payload_size;
@@ -295,10 +295,10 @@ impl ObjectRef {
                 result_buffer.len() as u64,
             );
 
-            // log_info(&alloc::format!(
-            //     "📡 fetch_object RETURNED: result_len={} (0=not found)",
-            //     result_len
-            // ));
+            log_info(&alloc::format!(
+                "📡 fetch_object RETURNED: result_len={} (0=not found)",
+                result_len
+            ));
 
             if result_len == 0 {
                 // Object not found -- this is normal eg for EOA accounts you wont find code!

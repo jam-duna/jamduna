@@ -2,7 +2,7 @@
 # This Makefile can build all JAM services independently of the main repository
 
 # Available services
-SERVICES = bootstrap evm auth_copy null_authorizer algo doom algo_classic
+SERVICES = evm auth_copy null_authorizer 
 
 # Build configuration
 TARGET_DIR = riscv64emac-unknown-none-polkavm/release

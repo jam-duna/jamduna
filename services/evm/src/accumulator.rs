@@ -36,14 +36,17 @@ impl BlockAccumulator {
         timeslot: u32,
         accumulate_inputs: &[AccumulateInput],
     ) -> Option<[u8; 32]> {
+        log_info(&format!("📥 Accumulate: Processing {} inputs", accumulate_inputs.len()));
         let mut accumulator = Self::new(service_id, timeslot)?;
 
         for (idx, input) in accumulate_inputs.iter().enumerate() {
+            log_info(&format!("📥 Processing input #{}", idx));
             let AccumulateInput::OperandElements(operand) = input else {
                 log_error(&format!("  Input #{}: Not OperandElements, skipping", idx));
                 continue;
             };
 
+            log_info(&format!("  Input #{}: OperandElements, calling rollup_block", idx));
             // Process this work package's rollup block
             accumulator.rollup_block(operand)?;
 
@@ -82,6 +85,17 @@ impl BlockAccumulator {
         &mut self,
         operand: &utils::functions::AccumulateOperandElements,
     ) -> Option<()> {
+        use utils::functions::log_info;
+
+        // Debug: check if result.ok is None
+        if operand.result.ok.is_none() {
+            log_info("❌ rollup_block: operand.result.ok is None!");
+            if operand.result.err.is_some() {
+                log_info(&format!("  Error code: {}", operand.result.err.unwrap()));
+            }
+            return None;
+        }
+
         let data = operand.result.ok.as_ref()?;
         let wph = operand.work_package_hash;
 
@@ -364,8 +378,9 @@ impl BlockAccumulator {
             return Some(());
         }
 
-        let mut prefix56 = [0u8; 7];
-        prefix56.copy_from_slice(&object_id[1..8]);
+        // Extract ld and prefix56 from new 0xAA-prefixed object_id format
+        let (current_ld_parsed, prefix56) = crate::meta_sharding::parse_meta_shard_object_id(&object_id);
+        debug_assert_eq!(current_ld_parsed, current_ld, "ld mismatch in delete_ancestor_shards");
 
         for ancestor_ld in (0..current_ld).rev() {
             // Compute ancestor prefix by masking to ancestor_ld bits

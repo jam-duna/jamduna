@@ -107,7 +107,7 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		segmentCountMismatch := (expectedSegmentCnt != actualSegmentCnt)
 
 		if segmentCountMismatch {
-			log.Info(log.Node, "executeWorkPackageBundle: ExportCount and ExportedSegments Mismatch", "ExportCount", expectedSegmentCnt, "ExportedSegments", actualSegmentCnt, "ExportedSegments", common.FormatPaddedBytesArray(exported_segments, 20))
+			log.Trace(log.Node, "executeWorkPackageBundle: ExportCount and ExportedSegments Mismatch", "ExportCount", expectedSegmentCnt, "ExportedSegments", actualSegmentCnt, "ExportedSegments", common.FormatPaddedBytesArray(exported_segments, 20))
 			// TEMPORARY: Non-first guarantors/auditors trust the first guarantor's ExportCount and use actual segment count for appending to segments slice
 			if execContext == log.OtherGuarantor || execContext == log.Auditor {
 				expectedSegmentCnt = actualSegmentCnt
@@ -183,7 +183,7 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		Results:           results,
 		AuthGasUsed:       uint(authGasUsed),
 	}
-	log.Info(log.Node, "executeWorkPackageBundle", "n", s.Id, "role", vmLogging, "workreport", workReport.String())
+	log.Info(log.Node, "executeWorkPackageBundle", "backend", pvmBackend, "role", vmLogging, "workreport", workReport.String())
 
 	s.GetStorage().GetJAMDA().StoreBundleSpecSegments(spec, d, package_bundle, segments)
 
@@ -243,7 +243,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 		}
 		wp.WorkItems[index].ExportCount = uint16(len(exported_segments))
 		wp.WorkItems[index].ImportedSegments = importedSegments
-
+		fmt.Printf("BuildBundle. PART 1  ExportCount: %d\n", wp.WorkItems[index].ExportCount)
 		// Append builder witnesses to extrinsicsBlobs -- this will be the metashards + the object proofs
 		builderWitnessCount := appendExtrinsicWitnessesToWorkItem(&wp.WorkItems[index], &extrinsicsBlobs, index, witnesses)
 		log.Info(log.DA, "BuildBundle: Appended builder witnesses", "workItemIndex", index, "builderWitnessCount", builderWitnessCount, "totalExtrinsics", len(extrinsicsBlobs[index]))
@@ -302,6 +302,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 	bundle.WorkPackage.AuthorizationToken = wp.AuthorizationToken
 	bundle.WorkPackage.ConfigurationBlob = wp.ConfigurationBlob
 	bundle.WorkPackage.RefineContext = originalRefineContext
+	fmt.Printf("BuildBundle. PART 2  ExportCount: %d\n", bundle.WorkPackage.WorkItems[0].ExportCount)
 
 	// Create work report from results -- note that this does not have availability spec
 	workReport := &types.WorkReport{

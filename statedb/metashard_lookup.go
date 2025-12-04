@@ -6,7 +6,6 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
-	"golang.org/x/crypto/sha3"
 )
 
 // ShardId identifies a meta-shard (8 bytes: 1 byte ld + 7 bytes prefix56)
@@ -45,8 +44,8 @@ type MetaShard struct {
 
 // ComputeMetaShardObjectID computes the ObjectID for a meta-shard.
 // ObjectID format matches Rust `meta_shard_object_id`:
-//   ld || prefix (ceil(ld/8) bytes) || zero padding to 32 bytes
-// No hashing is applied here; the routing prefix is embedded directly.
+//
+//	ld || prefix (ceil(ld/8) bytes) || zero padding to 32 bytes
 func ComputeMetaShardObjectID(serviceID uint32, shardID ShardId) common.Hash {
 	var result common.Hash
 	result[0] = shardID.Ld
@@ -59,18 +58,28 @@ func ComputeMetaShardObjectID(serviceID uint32, shardID ShardId) common.Hash {
 	return result
 }
 
-// ComputeMetaSSRObjectID computes the ObjectID for the MetaSSR
-// Matches Rust: keccak256(service_id || "meta_ssr")
-func ComputeMetaSSRObjectID(serviceID uint32) common.Hash {
-	var data []byte
-	data = append(data, uint32ToLE(serviceID)...)
-	data = append(data, []byte("meta_ssr")...)
+// ParseMetaShardObjectID decodes the ld||prefix||zero format into a ShardId descriptor.
+func ParseMetaShardObjectID(objectID common.Hash) (ShardId, bool) {
+	ld := objectID[0]
+	if ld > 56 {
+		return ShardId{}, false
+	}
+	prefixBytes := int((ld + 7) / 8)
+	if 1+prefixBytes > len(objectID) {
+		return ShardId{}, false
+	}
 
-	hash := sha3.NewLegacyKeccak256()
-	hash.Write(data)
-	var result common.Hash
-	copy(result[:], hash.Sum(nil))
-	return result
+	var shardID ShardId
+	shardID.Ld = ld
+	if prefixBytes > 0 {
+		copy(shardID.Prefix56[:], objectID[1:1+prefixBytes])
+	}
+	for _, b := range objectID[1+prefixBytes:] {
+		if b != 0 {
+			return ShardId{}, false
+		}
+	}
+	return shardID, true
 }
 
 // TakePrefix56 extracts first 56 bits (7 bytes) from 32-byte hash
@@ -271,7 +280,6 @@ func DeserializeMetaShard(data []byte, expectedObjectID common.Hash, serviceID u
 		Entries:    entries,
 	}, nil
 }
-
 
 // Helper function to convert uint32 to little-endian bytes
 func uint32ToLE(val uint32) []byte {

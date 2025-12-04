@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	numRounds    = 1
+	numRounds    = 5
 	txnsPerRound = 3
 
 	DefaultJAMChainID = 0x1107
@@ -846,14 +846,17 @@ func (b *Rollup) createTransferTriplesForRound(roundNum int, txnsPerRound int) [
 		}
 		return transfers
 	}
+	// Use deterministic seeded random number generator for reproducibility
+	rng := rand.New(rand.NewSource(int64(roundNum)))
+
 	for i := 0; i < txnsPerRound; i++ {
 		// Pick random sender and receiver from accounts 1-9 (excluding issuer at 0)
-		sender := rand.Intn(numDevAccounts-1) + 1   // Random from 1 to 9
-		receiver := rand.Intn(numDevAccounts-1) + 1 // Random from 1 to 9
+		sender := rng.Intn(numDevAccounts-1) + 1   // Random from 1 to 9
+		receiver := rng.Intn(numDevAccounts-1) + 1 // Random from 1 to 9
 
 		// Ensure sender != receiver
 		for sender == receiver {
-			receiver = rand.Intn(numDevAccounts-1) + 1
+			receiver = rng.Intn(numDevAccounts-1) + 1
 		}
 
 		// Vary amounts by transaction to create interesting test cases
@@ -984,4 +987,10 @@ func (b *Rollup) checkNonces(account common.Address, expectedNonce *big.Int) err
 		return fmt.Errorf("Call nonces MISMATCH: expected %s, actual %s", expectedNonce.String(), actualNonce.String())
 	}
 	return nil
+}
+
+// SaveWorkPackageBundle saves a WorkPackageBundle to disk using Encode
+func (b *Rollup) SaveWorkPackageBundle(bundle *types.WorkPackageBundle, filename string) error {
+	encoded := bundle.Encode()
+	return os.WriteFile(filename, encoded, 0644)
 }

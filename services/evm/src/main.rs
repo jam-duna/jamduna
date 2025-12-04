@@ -184,18 +184,26 @@ fn leak_output(mut buffer: Vec<u8>) -> (u64, u64) {
 /// Accumulate orders all ExecutionEffects from refine calls and produces a final commitment across objects
 #[polkavm_derive::polkavm_export]
 pub extern "C" fn accumulate(start_address: u64, length: u64) -> (u64, u64) {
+    log_info("🔧 accumulate() ENTRY POINT");
+
     let Some(args) = parse_accumulate_args(start_address, length) else {
         log_error("Accumulate: parse_accumulate_args failed");
         return empty_output();
     };
+
+    log_info(&format!("🔧 num_accumulate_inputs={}, s={}, t={}", args.num_accumulate_inputs, args.s, args.t));
 
     if args.num_accumulate_inputs == 0 {
         log_error("Accumulate: num_accumulate_inputs is zero, returning empty");
         return empty_output();
     }
 
+    log_info("🔧 Calling fetch_accumulate_inputs...");
     let accumulate_inputs = match fetch_accumulate_inputs(args.num_accumulate_inputs as u64) {
-        Ok(inputs) => inputs,
+        Ok(inputs) => {
+            log_info(&format!("🔧 fetch_accumulate_inputs OK: {} inputs", inputs.len()));
+            inputs
+        }
         Err(e) => {
             log_error(&format!(
                 "Accumulate: fetch_accumulate_inputs failed: {:?}",
@@ -209,6 +217,7 @@ pub extern "C" fn accumulate(start_address: u64, length: u64) -> (u64, u64) {
     let Some(accumulate_root) =
         accumulator::BlockAccumulator::accumulate(args.s, args.t, &accumulate_inputs)
     else {
+        log_error("❌ Accumulate: BlockAccumulator::accumulate returned None");
         return empty_output();
     };
 

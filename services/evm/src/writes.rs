@@ -21,15 +21,16 @@ pub fn serialize_execution_effects(effects: &utils::effects::ExecutionEffects) -
     for intent in &effects.write_intents {
         if intent.effect.ref_info.object_kind == ObjectKind::MetaShard as u8 {
             // Extract ld from this specific meta-shard's object_id
-            let ld = intent.effect.object_id[0];
+            // Extract ld and prefix56 from new 0xAA-prefixed object_id format
+            let (ld, prefix56) = crate::meta_sharding::parse_meta_shard_object_id(&intent.effect.object_id);
             let prefix_bytes = ((ld + 7) / 8) as usize;
 
             // Write ld for this entry
             buffer.push(ld);
 
-            // Write prefix bytes from meta-shard object_id (skip ld at position 0)
+            // Write prefix bytes from prefix56
             if prefix_bytes > 0 {
-                buffer.extend_from_slice(&intent.effect.object_id[1..1 + prefix_bytes]);
+                buffer.extend_from_slice(&prefix56[..prefix_bytes]);
             }
 
             // Write 5-byte packed ObjectRef (no work_package_hash)

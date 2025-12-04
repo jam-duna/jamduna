@@ -8,6 +8,7 @@ import (
 	"io"
 	"math/big"
 	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 
@@ -15,6 +16,10 @@ import (
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	"github.com/colorfulnotion/jam/types"
+)
+
+const (
+	saveBundles = false // set to true to save work package bundles to disk (and revalidate)
 )
 
 // TestAlgoBlocks generates a sequence of blocks with Algo service guarantees+assurances without any jamnp
@@ -110,7 +115,7 @@ func TestEVMBlocksMath(t *testing.T) {
 	}
 }
 
-func RunTransfersRound(b *Rollup, transfers []TransferTriple) error {
+func RunTransfersRound(b *Rollup, transfers []TransferTriple, round int) error {
 	const numAccounts = 11 // 10 dev accounts + 1 coinbase
 
 	// Coinbase address receives all transaction fees
@@ -204,10 +209,36 @@ func RunTransfersRound(b *Rollup, transfers []TransferTriple) error {
 	// Submit multitransfer as work package
 	var err error
 	// Subsequent rounds: witness the previous block
-	_, err = b.SubmitEVMTransactions(txBytesMulticore)
+	bundles, err := b.SubmitEVMTransactions(txBytesMulticore)
 	if err != nil {
 		log.Error(log.Node, "SubmitEVMTransactions ERR", "err", err)
 		return err
+	}
+	bundle := bundles[0]
+	if saveBundles {
+		wph := bundle.WorkPackage.Hash()
+		bundleFilename := fmt.Sprintf("bundle-transfers-%d-%s.bin", round, wph)
+		err = b.SaveWorkPackageBundle(bundle, bundleFilename)
+		if err != nil {
+			log.Error(log.Node, "SaveWorkPackageBundle ERR", "err", err)
+			return err
+		}
+
+		// Load bundle back and validate with both backends
+		data, err := os.ReadFile(bundleFilename)
+		if err != nil {
+			panic(fmt.Sprintf("Failed to read saved bundle %s: %v", bundleFilename, err))
+		}
+		bundle, _, err = types.DecodeBundle(data)
+		if err != nil {
+			panic(fmt.Sprintf("Failed to decode saved bundle %s: %v", bundleFilename, err))
+		}
+	}
+
+	// Validate with both backends
+	backends := []string{BackendGoInterpreter}
+	if err := validateBundleWithBackends(b.stateDB, bundle, backends); err != nil {
+		panic(err.Error())
 	}
 	for idx, txHash := range txHashes {
 		receipt, recErr := b.stateDB.GetTransactionReceipt(b.serviceID, txHash)
@@ -940,7 +971,7 @@ func TestEVMBlocksTransfers(t *testing.T) {
 	*/
 	for round := 0; round < numRounds; round++ {
 		log.Info(log.Node, "test_transfers - round", "round", round)
-		err := RunTransfersRound(chain, chain.createTransferTriplesForRound(round, txnsPerRound))
+		err := RunTransfersRound(chain, chain.createTransferTriplesForRound(round, txnsPerRound), round)
 		if err != nil {
 			t.Fatalf("transfer round %d failed: %v", round, err)
 		}
@@ -1122,4 +1153,130 @@ func GenerateRewardsPayload(epoch int, validatorIndex uint16) []byte {
 	payload = append(payload, validatorIndexBytes...)
 
 	return payload
+}
+
+// validateBundleWithBackends runs a bundle through all backends and validates results
+func validateBundleWithBackends(statedb *StateDB, bundle *types.WorkPackageBundle, backends []string) error {
+	wph := bundle.WorkPackage.Hash()
+	var workReportHashes []common.Hash
+
+	for _, backend := range backends {
+		wr, err := statedb.ExecuteWorkPackageBundle(0, *bundle, types.SegmentRootLookup{}, 0, log.OtherGuarantor, 0, backend)
+		if err != nil {
+			return fmt.Errorf("failed to execute work package bundle with backend %s: %w", backend, err)
+		}
+
+		// Check that ExportCount matches NumExportedSegments
+		exportCount := uint(bundle.WorkPackage.WorkItems[0].ExportCount)
+		numExported := wr.Results[0].NumExportedSegments
+		if exportCount != numExported {
+			return fmt.Errorf("ExportCount != NumExportedSegments with backend %s: ExportCount=%d, NumExportedSegments=%d",
+				backend, exportCount, numExported)
+		}
+
+		wrHash := wr.Hash()
+		workReportHashes = append(workReportHashes, wrHash)
+
+		log.Info(log.SDB, "Executed bundle", "wph", common.Str(wph), "backend", backend, "workReportHash", common.Str(wrHash),
+			"ExportCount", exportCount, "NumExportedSegments", numExported)
+	}
+
+	// Compare work report hashes between backends
+	if len(workReportHashes) > 1 {
+		firstHash := workReportHashes[0]
+		for i := 1; i < len(workReportHashes); i++ {
+			if workReportHashes[i] != firstHash {
+				return fmt.Errorf("work report hashes differ between backends:\n  %s: %s\n  %s: %s",
+					backends[0], firstHash.String(), backends[i], workReportHashes[i].String())
+			}
+		}
+	}
+
+	return nil
+}
+
+// TestBackends tests multiple backends against WorkPackageBundle files saved with saveBundles = true
+func TestBackends(t *testing.T) {
+	log.InitLogger("info")
+	log.EnableModule(log.Node)
+	backends := []string{BackendInterpreter, BackendGoInterpreter} // BackendCompiler, BackendCompilerSandbox
+	// Read all bundle*.bin files in the current directory using glob
+	matches, err := filepath.Glob("bundle*.bin")
+	if err != nil {
+		t.Fatalf("Failed to glob bundle*.bin: %v", err)
+	}
+
+	// Initialize storage and StateDB for execution
+	storage, err := initStorage(t.TempDir())
+	if err != nil {
+		t.Fatalf("Failed to initialize storage: %v", err)
+	}
+
+	// Create genesis state
+	genesisTrace, err := MakeGenesisStateTransition(storage, 0, "jam", nil)
+	if err != nil {
+		t.Fatalf("Failed to create genesis state: %v", err)
+	}
+
+	statedb, err := NewStateDBFromStateTransitionPost(storage, genesisTrace)
+	if err != nil {
+		t.Fatalf("Failed to create StateDB from genesis: %v", err)
+	}
+
+	for _, name := range matches {
+		// read the bundle, compute actual wph
+		data, err := os.ReadFile(name)
+		if err != nil {
+			t.Errorf("Failed to read file %s: %v", name, err)
+			continue
+		}
+		bundle, _, err := types.DecodeBundle(data)
+		if err != nil {
+			t.Fatalf("Failed to decode bundle %s: %v", name, err)
+		}
+
+		if err := validateBundleWithBackends(statedb, bundle, backends); err != nil {
+			t.Fatalf("%v", err)
+		}
+	}
+}
+
+// TestSingleBundle tests a specific bundle file with PvmLogging enabled
+func TestSingleBundle(t *testing.T) {
+	log.InitLogger("info")
+	log.EnableModule(log.Node)
+	PvmLogging = false
+	defer func() { PvmLogging = false }()
+
+	backends := []string{BackendInterpreter, BackendGoInterpreter, BackendCompiler} //, BackendCompilerSandbox
+	bundleFile := "bundle-transfers-3-0x0c81146bcf33b8c31648b6181817cc1c7c2209725182a9a24b86ce34c03a3d4b.bin"
+
+	storage, err := initStorage(t.TempDir())
+	if err != nil {
+		t.Fatalf("Failed to initialize storage: %v", err)
+	}
+
+	genesisTrace, err := MakeGenesisStateTransition(storage, 0, "jam", nil)
+	if err != nil {
+		t.Fatalf("Failed to create genesis state: %v", err)
+	}
+
+	statedb, err := NewStateDBFromStateTransitionPost(storage, genesisTrace)
+	if err != nil {
+		t.Fatalf("Failed to create StateDB from genesis: %v", err)
+	}
+
+	data, err := os.ReadFile(bundleFile)
+	if err != nil {
+		t.Fatalf("Failed to read file %s: %v", bundleFile, err)
+	}
+
+	bundle, _, err := types.DecodeBundle(data)
+	if err != nil {
+		t.Fatalf("Failed to decode bundle %s: %v", bundleFile, err)
+	}
+
+	if err := validateBundleWithBackends(statedb, bundle, backends); err != nil {
+		t.Fatalf("%v", err)
+	}
 }

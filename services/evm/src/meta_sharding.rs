@@ -128,7 +128,7 @@ pub type MetaSSR = SSRData<ObjectRefEntry>;
 pub type MetaShard = ShardData<ObjectRefEntry>;
 
 /// Meta-shard split threshold - split when exceeding this many entries (~50% of max)
-pub const META_SHARD_SPLIT_THRESHOLD: usize = 29;
+pub const META_SHARD_SPLIT_THRESHOLD: usize = 50;
 
 /// Compute BMT root over meta-shard entries for Merkle proof generation
 ///
@@ -179,49 +179,50 @@ pub fn process_object_writes(
     object_writes: Vec<([u8; 32], ObjectRef)>,
     cached_meta_shards: &mut BTreeMap<ShardId, MetaShard>,
     meta_ssr: &mut MetaSSR,
+    service_id: u32,
 ) -> Vec<MetaShardWriteIntent> {
     if object_writes.is_empty() {
         return Vec::new();
     }
 
-    // log_info(&format!(
-    //     "📦 Processing {} object writes for meta-sharding",
-    //     object_writes.len()
-    // ));
+    log_info(&format!(
+        "📦 Processing {} object writes for meta-sharding",
+        object_writes.len()
+    ));
 
     // Log all object_writes contents
-    // log_info(&format!(
-    //     "📦 Object writes full dump ({} writes):",
-    //     object_writes.len()
-    // ));
-    // for (idx, (object_id, object_ref)) in object_writes.iter().enumerate() {
-    //     log_info(&format!(
-    //         "  [{}] object_id={:?}, object_ref={{wph: {:?}, idx_start: {}, payload_len: {}, kind: {}}}",
-    //         idx,
-    //         object_id,
-    //         object_ref.work_package_hash,
-    //         object_ref.index_start,
-    //         object_ref.payload_length,
-    //         object_ref.object_kind
-    //     ));
-    // }
+    log_info(&format!(
+        "📦 Object writes full dump ({} writes):",
+        object_writes.len()
+    ));
+    for (idx, (object_id, object_ref)) in object_writes.iter().enumerate() {
+        log_info(&format!(
+            "  [{}] object_id={:?}, object_ref={{wph: {:?}, idx_start: {}, payload_len: {}, kind: {}}}",
+            idx,
+            object_id,
+            object_ref.work_package_hash,
+            object_ref.index_start,
+            object_ref.payload_length,
+            object_ref.object_kind
+        ));
+    }
 
     // Log meta_ssr state
-    // log_info(&format!(
-    //     "📦 MetaSSR state: global_depth={}, {} entries, total_keys={}",
-    //     meta_ssr.header.global_depth,
-    //     meta_ssr.entries.len(),
-    //     meta_ssr.header.total_keys
-    // ));
-    // for (idx, entry) in meta_ssr.entries.iter().enumerate() {
-    //     log_info(&format!(
-    //         "  SSR Entry [{}]: d={}, ld={}, prefix56={:?}",
-    //         idx,
-    //         entry.d,
-    //         entry.ld,
-    //         &entry.prefix56[..]
-    //     ));
-    // }
+    log_info(&format!(
+        "📦 MetaSSR state: global_depth={}, {} entries, total_keys={}",
+        meta_ssr.header.global_depth,
+        meta_ssr.entries.len(),
+        meta_ssr.header.total_keys
+    ));
+    for (idx, entry) in meta_ssr.entries.iter().enumerate() {
+        log_info(&format!(
+            "  SSR Entry [{}]: d={}, ld={}, prefix56={:?}",
+            idx,
+            entry.d,
+            entry.ld,
+            &entry.prefix56[..]
+        ));
+    }
 
     // 1. Group object writes by meta-shard
     let mut shard_updates: BTreeMap<ShardId, Vec<ObjectRefEntry>> = BTreeMap::new();
@@ -238,29 +239,100 @@ pub fn process_object_writes(
             });
     }
 
-    // log_info(&format!(
-    //     "  Grouped into {} meta-shards",
-    //     shard_updates.len()
-    // ));
+    log_info(&format!(
+        "  Grouped into {} meta-shards",
+        shard_updates.len()
+    ));
 
     let mut write_intents = Vec::new();
 
     // 2. For each touched meta-shard, merge updates and check for splits
     for (shard_id, new_entries) in shard_updates {
-        let mut shard_data = cached_meta_shards
-            .get(&shard_id)
-            .cloned()
-            .unwrap_or_else(|| MetaShard {
-                merkle_root: [0u8; 32],
-                entries: Vec::new(),
-            });
+        // For BUILD path: Try fetching from DA first, then fall back to cache
+        // This ensures we get accumulated state from previous rounds
+        let mut shard_data = if let Some(cached) = cached_meta_shards.get(&shard_id) {
+            // Check if cached shard is empty - if so, try fetching from DA anyway
+            // Empty cached shards might be stale (from previous rounds that didn't persist to DA yet)
+            if cached.entries.is_empty() {
+                // Try DA fetch for potentially accumulated state
+                let object_id = meta_shard_object_id(service_id, shard_id.ld, &shard_id.prefix56);
 
-        // log_info(&format!(
-        //     "  Meta-shard {:?}: {} existing + {} new entries",
-        //     shard_id,
-        //     shard_data.entries.len(),
-        //     new_entries.len()
-        // ));
+                log_info(&format!(
+                    "🔍 Cached shard empty, fetching from DA: object_id={}",
+                    crate::sharding::format_object_id(&object_id)
+                ));
+
+                const MAX_META_SHARD_SIZE: usize = 16 * 1024;
+                match ObjectRef::fetch(service_id, &object_id, MAX_META_SHARD_SIZE, 3) {
+                    Some((_object_ref, payload)) => {
+                        // Payload includes 8-byte header: [ld (1B)][prefix56 (7B)][merkle_root + entries...]
+                        match deserialize_meta_shard_with_id_validated(&payload, &object_id, service_id) {
+                            MetaShardDeserializeResult::ValidatedHeader(_shard_id, shard) => {
+                                log_info(&format!(
+                                    "  ✅ Fetched {} entries from DA (was cached as empty)",
+                                    shard.entries.len()
+                                ));
+                                shard
+                            }
+                            MetaShardDeserializeResult::ValidationFailed => {
+                                log_info("  ⚠️  Deserialization/validation failed, using empty cache");
+                                cached.clone()
+                            }
+                        }
+                    }
+                    None => {
+                        log_info("  Meta-shard not in DA (using empty cache)");
+                        cached.clone()
+                    }
+                }
+            } else {
+                // Non-empty cached shard is valid
+                cached.clone()
+            }
+        } else {
+            // Not in cache - fetch from DA
+            let object_id = meta_shard_object_id(service_id, shard_id.ld, &shard_id.prefix56);
+
+            log_info(&format!(
+                "🔍 Shard not cached, fetching from DA: object_id={}",
+                crate::sharding::format_object_id(&object_id)
+            ));
+
+            const MAX_META_SHARD_SIZE: usize = 16 * 1024;
+            match ObjectRef::fetch(service_id, &object_id, MAX_META_SHARD_SIZE, 3) {
+                Some((_object_ref, payload)) => {
+                    // Payload includes 8-byte header: [ld (1B)][prefix56 (7B)][merkle_root + entries...]
+                    // Use deserialize_meta_shard_with_id_validated to strip header and validate
+                    match deserialize_meta_shard_with_id_validated(&payload, &object_id, service_id) {
+                        MetaShardDeserializeResult::ValidatedHeader(_shard_id, shard) => {
+                            log_info(&format!("  ✅ Fetched {} entries from DA", shard.entries.len()));
+                            shard
+                        }
+                        MetaShardDeserializeResult::ValidationFailed => {
+                            log_info("  ⚠️  Deserialization/validation failed, using empty");
+                            MetaShard {
+                                merkle_root: [0u8; 32],
+                                entries: Vec::new(),
+                            }
+                        }
+                    }
+                }
+                None => {
+                    log_info("  Meta-shard not in DA (new)");
+                    MetaShard {
+                        merkle_root: [0u8; 32],
+                        entries: Vec::new(),
+                    }
+                }
+            }
+        };
+
+        log_info(&format!(
+            "  Meta-shard {:?}: {} existing + {} new entries",
+            shard_id,
+            shard_data.entries.len(),
+            new_entries.len()
+        ));
 
         // Merge new entries (update or insert)
         for new_entry in new_entries {
@@ -575,9 +647,9 @@ pub fn rebuild_meta_ssr_from_shards(shard_ids: &[da::ShardId]) -> MetaSSR {
 
 /// Compute ObjectID for a meta-shard from ld and prefix bytes
 ///
-/// ObjectID = ld || prefix (where prefix length = (ld+7)/8 bytes)
-/// No padding - returns only the necessary bytes
 pub fn meta_shard_object_id(_service_id: u32, ld: u8, prefix56: &[u8; 7]) -> [u8; 32] {
+    // Object ID format used in JAM State:
+    // [ld (1B)] || [prefix bytes ((ld+7)/8)] || zero padding
     let mut object_id = [0u8; 32];
     object_id[0] = ld;
 
@@ -587,6 +659,17 @@ pub fn meta_shard_object_id(_service_id: u32, ld: u8, prefix56: &[u8; 7]) -> [u8
     }
 
     object_id
+}
+
+/// Extract ld and prefix56 from a meta-shard object_id
+pub fn parse_meta_shard_object_id(object_id: &[u8; 32]) -> (u8, [u8; 7]) {
+    let ld = object_id[0];
+    let prefix_bytes = ((ld + 7) / 8) as usize;
+    let mut prefix56 = [0u8; 7];
+    if prefix_bytes > 0 {
+        prefix56[..prefix_bytes].copy_from_slice(&object_id[1..1 + prefix_bytes]);
+    }
+    (ld, prefix56)
 }
 
 #[cfg(test)]
@@ -650,7 +733,7 @@ mod tests {
             },
         )];
 
-        let intents = process_object_writes(writes, &mut cached_shards, &mut meta_ssr);
+        let intents = process_object_writes(writes, &mut cached_shards, &mut meta_ssr, 0);
 
         assert_eq!(intents.len(), 1);
         assert_eq!(intents[0].entries.len(), 1);

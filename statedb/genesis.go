@@ -109,33 +109,12 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 	// SubmitGenesisWorkPackage uses ReadStateWitness must submit extrinsics that match these storage entries
 	storage[evmtypes.GetBlockNumberKey()] = evmtypes.SerializeBlockNumber(0)
 
-	// Initialize staking balances for genesis validators in Bootstrap service (service 0)
-	// Key: Ed25519 public key (32 bytes)
-	// Value: Staking balance (uint64, little-endian, 8 bytes)
-	// Balances: 100, 200, 300, 400, 500, 600
-	for i := 0; i < types.TotalValidators; i++ {
-		ed25519Key := validators[i].Ed25519
-		stakingBalance := uint64((i + 1) * 100) // 100, 200, 300, 400, 500, 600
-		stakingBalanceBytes := make([]byte, 8)
-		binary.LittleEndian.PutUint64(stakingBalanceBytes, stakingBalance)
-
-		// Use Ed25519 key as storage key
-		storageKey := common.BytesToHash(ed25519Key[:])
-		storage[storageKey] = stakingBalanceBytes
-	}
-
 	// Load services into genesis state
 	services := []types.TestService{
 		{
 			ServiceCode: EVMServiceCode,
 			FileName:    EVMServiceFile,
 			ServiceName: "evm",
-			Storage:     storage,
-		},
-		{
-			ServiceCode: AlgoServiceCode,
-			FileName:    AlgoServiceFile,
-			ServiceName: "algo",
 			Storage:     storage,
 		},
 		{
@@ -201,7 +180,7 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 			}
 
 			statedb.writeService(service.ServiceCode, &bootstrapServiceAccount)
-			fmt.Printf("Bootstrap Service %s (fn:%s), codeHash %s, codeLen=%d, anchor %v, staking entries=%d\n",
+			fmt.Printf("Service %s (fn:%s), codeHash %s, codeLen=%d, anchor %v, staking entries=%d\n",
 				service.ServiceName, service.FileName, codeHash.String(), codeLen, bootStrapAnchor, len(service.Storage))
 		} else {
 			sa := types.ServiceAccount{
@@ -225,10 +204,9 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 	}
 
 	// Flush service blobs
-	log.Info(log.SDB, "Genesis: Flush")
 
-	fmt.Printf("Bootstrap AuthorizationHash: %v\n", auth_code_hash_hash) //p_a
-	fmt.Printf("Bootstrap AuthorizationCodeHash: %v\n", auth_code_hash)  //p_u
+	// fmt.Printf("Bootstrap AuthorizationHash: %v\n", auth_code_hash_hash) //p_a
+	// fmt.Printf("Bootstrap AuthorizationCodeHash: %v\n", auth_code_hash)  //p_u
 	for idx := range j.AuthorizationQueue {
 		for i := range j.AuthorizationQueue[idx] {
 			j.AuthorizationQueue[idx][i] = auth_code_hash_hash
@@ -279,7 +257,7 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 	b := trace.Block
 	statedb.Block = &b
 
-	fmt.Printf("Genesis Header Hash: %s\n", b.Header.Hash().String())
+	//fmt.Printf("Genesis Header Hash: %s\n", b.Header.Hash().String())
 	return trace, nil
 }
 func NewBlockFromFile(blockfilename string) *types.Block {

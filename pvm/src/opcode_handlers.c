@@ -3,6 +3,25 @@
 // Global dispatch table, tracing flags
 void (*dispatch_table[256])(VM*, uint8_t*, size_t) = {0};
 
+// Memory operation logging - buffer for appending to main log line
+char mem_op_buffer[256] = "";
+
+#define LOG_MEM_LOAD(vm, addr, value, num_bytes) \
+    if ((vm)->pvm_logging) { \
+        int pos = snprintf(mem_op_buffer, sizeof(mem_op_buffer), " MEM_LOAD Mem[0x%x..0x%x]->", (addr), (addr) + (num_bytes) - 1); \
+        for (int i = (num_bytes) - 1; i >= 0; i--) { \
+            pos += snprintf(mem_op_buffer + pos, sizeof(mem_op_buffer) - pos, "%02x", ((value) >> (i * 8)) & 0xFF); \
+        } \
+    }
+
+#define LOG_MEM_STORE(vm, addr, value, num_bytes) \
+    if ((vm)->pvm_logging) { \
+        int pos = snprintf(mem_op_buffer, sizeof(mem_op_buffer), " MEM_STORE Mem[0x%x..0x%x]<-", (addr), (addr) + (num_bytes) - 1); \
+        for (int i = (num_bytes) - 1; i >= 0; i--) { \
+            pos += snprintf(mem_op_buffer + pos, sizeof(mem_op_buffer) - pos, "%02x", ((value) >> (i * 8)) & 0xFF); \
+        } \
+    }
+
 
 // Opcode Constants
 
@@ -191,16 +210,11 @@ void handle_ECALLI(VM* vm, uint8_t* operands, size_t operand_len) {
     // Charge gas before host call - inlined logic
     const int LOG_HOST_FN = 100;
     const int TRANSFER_HOST_FN = 20; // NOTE: this could change in future!!
-    uint64_t gas_charge;
+    uint64_t gas_charge = 10;  // All host calls charge 10 gas, including LOG
     uint64_t additional_charge = 0;
-    if (vm->host_func_id == LOG_HOST_FN) {
-        gas_charge = 0;
-    } else {
-        gas_charge = 10;
-        // TRANSFER from ACCUMULATE entrypoint (start_pc == 5) has additional gas from register 9
-        if (vm->host_func_id == TRANSFER_HOST_FN && (vm->start_pc == 5)) {
-            additional_charge = vm->registers[9];  // Transfer gas limit
-        }
+    // TRANSFER from ACCUMULATE entrypoint (start_pc == 5) has additional gas from register 9
+    if (vm->host_func_id == TRANSFER_HOST_FN && (vm->start_pc == 5)) {
+        additional_charge = vm->registers[9];  // Transfer gas limit
     }
     if (vm->gas < (uint64_t)(gas_charge + additional_charge)) {
         // Not enough gas for host call
@@ -518,8 +532,9 @@ void handle_LOAD_U8(VM* vm, uint8_t* operands, size_t operand_len) {
         pvm_panic(vm, err_code);
         return;
     }
-    
+
     uint64_t result = (uint64_t)value;
+    LOG_MEM_LOAD(vm, addr, result, 1);
     vm->registers[register_index_a] = result;
     
     vm->pc += 1 + operand_len;
@@ -551,7 +566,7 @@ void handle_LOAD_U16(VM* vm, uint8_t* operands, size_t operand_len) {
     int register_index_a;
     uint64_t addr_64;
     parse_reg_imm(operands, operand_len, &register_index_a, &addr_64);
-    
+
     uint32_t addr = (uint32_t)addr_64;
     int err_code;
     uint16_t value = pvm_read_ram_bytes_16(vm, addr, &err_code);
@@ -559,10 +574,11 @@ void handle_LOAD_U16(VM* vm, uint8_t* operands, size_t operand_len) {
         pvm_panic(vm, err_code);
         return;
     }
-    
+
     uint64_t result = (uint64_t)value;
+    LOG_MEM_LOAD(vm, addr, result, 2);
     vm->registers[register_index_a] = result;
-    
+
     vm->pc += 1 + operand_len;
 }
 
@@ -613,8 +629,9 @@ void handle_LOAD_U32(VM* vm, uint8_t* operands, size_t operand_len) {
         pvm_panic(vm, err_code);
         return;
     }
-    
+
     uint64_t result = (uint64_t)value;
+    LOG_MEM_LOAD(vm, addr, result, 4);
     vm->registers[register_index_a] = result;
     
     
@@ -647,7 +664,7 @@ void handle_LOAD_U64(VM* vm, uint8_t* operands, size_t operand_len) {
     int register_index_a;
     uint64_t addr_64;
     parse_reg_imm(operands, operand_len, &register_index_a, &addr_64);
-    
+
     uint32_t addr = (uint32_t)addr_64;
     int err_code;
     uint64_t value = pvm_read_ram_bytes_64(vm, addr, &err_code);
@@ -655,9 +672,10 @@ void handle_LOAD_U64(VM* vm, uint8_t* operands, size_t operand_len) {
         pvm_panic(vm, err_code);
         return;
     }
-    
+
+    LOG_MEM_LOAD(vm, addr, value, 8);
     vm->registers[register_index_a] = value;
-    
+
     vm->pc += 1 + operand_len;
 }
 
@@ -665,15 +683,16 @@ void handle_STORE_U8(VM* vm, uint8_t* operands, size_t operand_len) {
     int register_index_a;
     uint64_t addr_64;
     parse_reg_imm(operands, operand_len, &register_index_a, &addr_64);
-    
+
     uint32_t addr = (uint32_t)addr_64;
     uint64_t value_a = vm->registers[register_index_a];
+    LOG_MEM_STORE(vm, addr, value_a, 1);
     uint64_t err_code = pvm_write_ram_bytes_8(vm, addr, (uint8_t)value_a);
     if (err_code != OK) {
         pvm_panic(vm, err_code);
         return;
     }
-    
+
     vm->pc += 1 + operand_len;
 }
 
@@ -681,17 +700,18 @@ void handle_STORE_U16(VM* vm, uint8_t* operands, size_t operand_len) {
     int register_index_a;
     uint64_t addr_64;
     parse_reg_imm(operands, operand_len, &register_index_a, &addr_64);
-    
+
     uint32_t addr = (uint32_t)addr_64;
     uint64_t value_a = vm->registers[register_index_a];
     uint16_t value = (uint16_t)value_a;
+    LOG_MEM_STORE(vm, addr, value, 2);
     uint64_t err_code = pvm_write_ram_bytes_16(vm, addr, value);
     if (err_code != OK) {
         pvm_panic(vm, err_code);
         return;
     }
-    
-    
+
+
     vm->pc += 1 + operand_len;
 }
 
@@ -699,17 +719,18 @@ void handle_STORE_U32(VM* vm, uint8_t* operands, size_t operand_len) {
     int register_index_a;
     uint64_t addr_64;
     parse_reg_imm(operands, operand_len, &register_index_a, &addr_64);
-    
+
     uint32_t addr = (uint32_t)addr_64;
     uint64_t value_a = vm->registers[register_index_a];
     uint32_t value = (uint32_t)value_a;
+    LOG_MEM_STORE(vm, addr, value, 4);
     uint64_t err_code = pvm_write_ram_bytes_32(vm, addr, value);
     if (err_code != OK) {
         pvm_panic(vm, err_code);
         return;
     }
-    
-    
+
+
     vm->pc += 1 + operand_len;
 }
 
@@ -717,9 +738,10 @@ void handle_STORE_U64(VM* vm, uint8_t* operands, size_t operand_len) {
     int register_index_a;
     uint64_t addr_64;
     parse_reg_imm(operands, operand_len, &register_index_a, &addr_64);
-    
+
     uint32_t addr = (uint32_t)addr_64;
     uint64_t value_a = vm->registers[register_index_a];
+    LOG_MEM_STORE(vm, addr, value_a, 8);
     uint64_t err_code = pvm_write_ram_bytes_64(vm, addr, value_a);
     if (err_code != OK) {
         pvm_panic(vm, err_code);
@@ -789,16 +811,17 @@ void handle_STORE_IMM_IND_U8(VM* vm, uint8_t* operands, size_t operand_len) {
     int register_index_a;
     uint64_t vx, vy;
     parse_reg_two_imm(operands, operand_len, &register_index_a, &vx, &vy);
-    
+
     uint64_t value_a = vm->registers[register_index_a];
     uint32_t addr = (uint32_t)value_a + (uint32_t)vx;
     uint8_t value = (uint8_t)vy;
+    LOG_MEM_STORE(vm, addr, value, 1);
     uint64_t err_code = pvm_write_ram_bytes_8(vm, addr, value);
     if (err_code != OK) {
         pvm_panic(vm, err_code);
         return;
     }
-    
+
     vm->pc += 1 + operand_len;
 }
 
@@ -806,17 +829,18 @@ void handle_STORE_IMM_IND_U16(VM* vm, uint8_t* operands, size_t operand_len) {
     int register_index_a;
     uint64_t vx, vy;
     parse_reg_two_imm(operands, operand_len, &register_index_a, &vx, &vy);
-    
+
     uint64_t value_a = vm->registers[register_index_a];
     uint32_t addr = (uint32_t)value_a + (uint32_t)vx;
     uint16_t value = (uint16_t)vy;
+    LOG_MEM_STORE(vm, addr, value, 2);
     uint64_t err_code = pvm_write_ram_bytes_16(vm, addr, value);
     if (err_code != OK) {
         pvm_panic(vm, err_code);
         return;
     }
-    
-    
+
+
     vm->pc += 1 + operand_len;
 }
 
@@ -824,17 +848,18 @@ void handle_STORE_IMM_IND_U32(VM* vm, uint8_t* operands, size_t operand_len) {
     int register_index_a;
     uint64_t vx, vy;
     parse_reg_two_imm(operands, operand_len, &register_index_a, &vx, &vy);
-    
+
     uint64_t value_a = vm->registers[register_index_a];
     uint32_t addr = (uint32_t)value_a + (uint32_t)vx;
     uint32_t value = (uint32_t)vy;
+    LOG_MEM_STORE(vm, addr, value, 4);
     uint64_t err_code = pvm_write_ram_bytes_32(vm, addr, value);
     if (err_code != OK) {
         pvm_panic(vm, err_code);
         return;
     }
-    
-    
+
+
     vm->pc += 1 + operand_len;
 }
 
@@ -842,16 +867,17 @@ void handle_STORE_IMM_IND_U64(VM* vm, uint8_t* operands, size_t operand_len) {
     int register_index_a;
     uint64_t vx, vy;
     parse_reg_two_imm(operands, operand_len, &register_index_a, &vx, &vy);
-    
+
     uint64_t value_a = vm->registers[register_index_a];
     uint32_t addr = (uint32_t)value_a + (uint32_t)vx;
+    LOG_MEM_STORE(vm, addr, vy, 8);
     uint64_t err_code = pvm_write_ram_bytes_64(vm, addr, vy);
     if (err_code != OK) {
         pvm_panic(vm, err_code);
         return;
     }
-    
-    
+
+
     vm->pc += 1 + operand_len;
 }
 
@@ -1395,14 +1421,15 @@ void handle_STORE_IND_U8(VM* vm, uint8_t* operands, size_t operand_len) {
     uint64_t value_b = vm->registers[register_index_b];
     uint32_t addr = (uint32_t)(value_b + vx);
     uint8_t value = (uint8_t)value_a;
-    
+
+    LOG_MEM_STORE(vm, addr, (uint64_t)value, 1);
     int err_code = pvm_write_ram_bytes_8(vm, addr, value);
     if (err_code != OK) {
         pvm_panic(vm, err_code);
         return;
     }
-    
-    
+
+
     vm->pc += 1 + operand_len;
 }
 
@@ -1410,17 +1437,17 @@ void handle_STORE_IND_U16(VM* vm, uint8_t* operands, size_t operand_len) {
     (void)operands; // Suppress unused parameter warning
     int register_index_a = 0, register_index_b = 0;
     uint64_t vx = 0;
-    
+
     if (vm->pc + 1 < vm->code_len) {
         uint8_t first_byte = vm->code[vm->pc + 1];
         register_index_a = MIN(12, (int)(first_byte & 0x0F));
         register_index_b = MIN(12, (int)(first_byte >> 4));
-        
+
         int lx = MIN(4, MAX(0, (int)operand_len - 1));
         if (lx > 0 && vm->pc + 2 + lx <= vm->code_len) {
             uint8_t* slice = vm->code + vm->pc + 2;
             uint64_t decoded = 0;
-            
+
             switch (lx) {
             case 1: decoded = (uint64_t)slice[0]; break;
             case 2: decoded = (uint64_t)slice[0] | ((uint64_t)slice[1] << 8); break;
@@ -1428,23 +1455,24 @@ void handle_STORE_IND_U16(VM* vm, uint8_t* operands, size_t operand_len) {
             case 4: decoded = (uint64_t)slice[0] | ((uint64_t)slice[1] << 8) | ((uint64_t)slice[2] << 16) | ((uint64_t)slice[3] << 24); break;
             default: for (int i = 0; i < lx && i < 4; i++) decoded |= (uint64_t)slice[i] << (8 * i); break;
             }
-            
+
             uint32_t shift = 64 - 8 * lx;
             vx = (uint64_t)((int64_t)(decoded << shift) >> shift);
         }
     }
-    
+
     uint64_t value_a = vm->registers[register_index_a];
     uint64_t value_b = vm->registers[register_index_b];
     uint32_t addr = (uint32_t)(value_b + vx);
     uint16_t value = (uint16_t)value_a;
-    
+
+    LOG_MEM_STORE(vm, addr, (uint64_t)value, 2);
     int err_code = pvm_write_ram_bytes_16(vm, addr, value);
     if (err_code != OK) {
         pvm_panic(vm, err_code);
         return;
     }
-    
+
     vm->pc += 1 + operand_len;
 }
 
@@ -1452,17 +1480,17 @@ void handle_STORE_IND_U32(VM* vm, uint8_t* operands, size_t operand_len) {
     (void)operands; // Suppress unused parameter warning
     int register_index_a = 0, register_index_b = 0;
     uint64_t vx = 0;
-    
+
     if (vm->pc + 1 < vm->code_len) {
         uint8_t first_byte = vm->code[vm->pc + 1];
         register_index_a = MIN(12, (int)(first_byte & 0x0F));
         register_index_b = MIN(12, (int)(first_byte >> 4));
-        
+
         int lx = MIN(4, MAX(0, (int)operand_len - 1));
         if (lx > 0 && vm->pc + 2 + lx <= vm->code_len) {
             uint8_t* slice = vm->code + vm->pc + 2;
             uint64_t decoded = 0;
-            
+
             switch (lx) {
             case 1: decoded = (uint64_t)slice[0]; break;
             case 2: decoded = (uint64_t)slice[0] | ((uint64_t)slice[1] << 8); break;
@@ -1470,24 +1498,25 @@ void handle_STORE_IND_U32(VM* vm, uint8_t* operands, size_t operand_len) {
             case 4: decoded = (uint64_t)slice[0] | ((uint64_t)slice[1] << 8) | ((uint64_t)slice[2] << 16) | ((uint64_t)slice[3] << 24); break;
             default: for (int i = 0; i < lx && i < 4; i++) decoded |= (uint64_t)slice[i] << (8 * i); break;
             }
-            
+
             uint32_t shift = 64 - 8 * lx;
             vx = (uint64_t)((int64_t)(decoded << shift) >> shift);
         }
     }
-    
+
     uint64_t value_a = vm->registers[register_index_a];
     uint64_t value_b = vm->registers[register_index_b];
     uint32_t addr = (uint32_t)(value_b + vx);
     uint32_t value = (uint32_t)value_a;
-    
+
+    LOG_MEM_STORE(vm, addr, (uint64_t)value, 4);
     int err_code = pvm_write_ram_bytes_32(vm, addr, value);
     if (err_code != OK) {
         pvm_panic(vm, err_code);
         return;
     }
-    
-    
+
+
     vm->pc += 1 + operand_len;
 }
 
@@ -1521,13 +1550,14 @@ void handle_STORE_IND_U64(VM* vm, uint8_t* operands, size_t operand_len) {
     
     uint64_t value_a = vm->registers[register_index_a];
     uint32_t addr = (uint32_t)(vm->registers[register_index_b] + vx);
-    
+
+    LOG_MEM_STORE(vm, addr, value_a, 8);
     int err_code = pvm_write_ram_bytes_64(vm, addr, value_a);
     if (err_code != OK) {
         pvm_panic(vm, err_code);
         return;
     }
-    
+
     vm->pc += 1 + operand_len;
 }
 
@@ -1536,18 +1566,19 @@ void handle_LOAD_IND_U8(VM* vm, uint8_t* operands, size_t operand_len) {
     int register_index_a, register_index_b;
     uint64_t vx;
     parse_two_reg_one_imm(operands, operand_len, &register_index_a, &register_index_b, &vx);
-    
+
     uint64_t value_b = vm->registers[register_index_b];
     uint32_t addr = (uint32_t)(value_b + vx);
-    
+
     int err_code;
     uint8_t value = pvm_read_ram_bytes_8(vm, addr, &err_code);
     if (err_code != OK) {
         pvm_panic(vm, err_code);
         return;
     }
-    
+
     uint64_t result = (uint64_t)value;
+    LOG_MEM_LOAD(vm, addr, result, 1);
     vm->registers[register_index_a] = result;
     vm->pc += 1 + operand_len;
 }
@@ -1568,6 +1599,7 @@ void handle_LOAD_IND_I8(VM* vm, uint8_t* operands, size_t operand_len) {
     }
     
     uint64_t result = (uint64_t)(int8_t)value;
+    LOG_MEM_LOAD(vm, addr, result, 1);
     vm->registers[register_index_a] = result;
     vm->pc += 1 + operand_len;
 }
@@ -1576,18 +1608,19 @@ void handle_LOAD_IND_U16(VM* vm, uint8_t* operands, size_t operand_len) {
     int register_index_a, register_index_b;
     uint64_t vx;
     parse_two_reg_one_imm(operands, operand_len, &register_index_a, &register_index_b, &vx);
-    
+
     uint64_t value_b = vm->registers[register_index_b];
     uint32_t addr = (uint32_t)(value_b + vx);
-    
+
     int err_code;
     uint16_t value = pvm_read_ram_bytes_16(vm, addr, &err_code);
     if (err_code != OK) {
         pvm_panic(vm, err_code);
         return;
     }
-    
+
     uint64_t result = (uint64_t)value;
+    LOG_MEM_LOAD(vm, addr, result, 2);
     vm->registers[register_index_a] = result;
     vm->pc += 1 + operand_len;
 }
@@ -1596,20 +1629,21 @@ void handle_LOAD_IND_I16(VM* vm, uint8_t* operands, size_t operand_len) {
     int register_index_a, register_index_b;
     uint64_t vx;
     parse_two_reg_one_imm(operands, operand_len, &register_index_a, &register_index_b, &vx);
-    
+
     uint64_t value_b = vm->registers[register_index_b];
     uint32_t addr = (uint32_t)(value_b + vx);
-    
+
     int err_code;
     uint16_t value = pvm_read_ram_bytes_16(vm, addr, &err_code);
     if (err_code != OK) {
         pvm_panic(vm, err_code);
         return;
     }
-    
+
     uint64_t result = (uint64_t)(int16_t)value;
+    LOG_MEM_LOAD(vm, addr, result, 2);
     vm->registers[register_index_a] = result;
-    
+
     vm->pc += 1 + operand_len;
 }
 
@@ -1617,18 +1651,19 @@ void handle_LOAD_IND_U32(VM* vm, uint8_t* operands, size_t operand_len) {
     int register_index_a, register_index_b;
     uint64_t vx;
     parse_two_reg_one_imm(operands, operand_len, &register_index_a, &register_index_b, &vx);
-    
+
     uint64_t value_b = vm->registers[register_index_b];
     uint32_t addr = (uint32_t)(value_b + vx);
-    
+
     int err_code;
     uint32_t value = pvm_read_ram_bytes_32(vm, addr, &err_code);
     if (err_code != OK) {
         pvm_panic(vm, err_code);
         return;
     }
-    
+
     uint64_t result = (uint64_t)value;
+    LOG_MEM_LOAD(vm, addr, result, 4);
     vm->registers[register_index_a] = result;
     vm->pc += 1 + operand_len;
 }
@@ -1637,10 +1672,10 @@ void handle_LOAD_IND_I32(VM* vm, uint8_t* operands, size_t operand_len) {
     int register_index_a, register_index_b;
     uint64_t vx;
     parse_two_reg_one_imm(operands, operand_len, &register_index_a, &register_index_b, &vx);
-    
+
     uint64_t value_b = vm->registers[register_index_b];
     uint32_t addr = (uint32_t)(value_b + vx);
-    
+
     int err_code;
     uint32_t value = pvm_read_ram_bytes_32(vm, addr, &err_code);
     if (err_code != OK) {
@@ -1648,6 +1683,7 @@ void handle_LOAD_IND_I32(VM* vm, uint8_t* operands, size_t operand_len) {
         return;
     }
     uint64_t result = (uint64_t)(int32_t)value;
+    LOG_MEM_LOAD(vm, addr, result, 4);
     vm->registers[register_index_a] = result;
     vm->pc += 1 + operand_len;
 }
@@ -1681,14 +1717,15 @@ void handle_LOAD_IND_U64(VM* vm, uint8_t* operands, size_t operand_len) {
     }
     
     uint32_t memory_address = (uint32_t)(vm->registers[register_index_b] + offset);
-    
+
     int err_code;
     uint64_t loaded_value = pvm_read_ram_bytes_64(vm, memory_address, &err_code);
     if (err_code != OK) {
         pvm_panic(vm, err_code);
         return;
     }
-    
+
+    LOG_MEM_LOAD(vm, memory_address, loaded_value, 8);
     vm->registers[register_index_a] = loaded_value;
     vm->pc += 1 + operand_len;
 }

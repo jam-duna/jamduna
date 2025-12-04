@@ -301,6 +301,59 @@ func convertProofToHashes(proofBytes [][]byte) []common.Hash {
 
 // ReadObject fetches ObjectRef and state proof for given objectID using meta-shard routing
 func (s *StateDB) ReadObject(serviceID uint32, objectID common.Hash) (*types.StateWitness, bool, error) {
+	// Special case: Meta-shards are stored as ObjectRefs in JAM State that point to DA segments
+	// We must read the ObjectRef with proof, then fetch the payload from DA segments
+	if shardID, ok := ParseMetaShardObjectID(objectID); ok {
+		log.Info(log.SDB, "ReadObject: Detected meta-shard object_id, reading ObjectRef", "objectID", objectID, "serviceID", serviceID, "shardID", shardID)
+
+		objRefBytes, proofBytes, _, found, err := s.sdb.GetServiceStorageWithProof(serviceID, objectID[:])
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to read meta-shard ObjectRef: %v", err)
+		}
+		if !found {
+			log.Info(log.SDB, "ReadObject: Meta-shard ObjectRef not found in state", "objectID", objectID, "shardID", shardID)
+			return nil, false, nil // Not an error - meta-shard just doesn't exist yet
+		}
+
+		// Convert proof bytes to common.Hash slice
+		proof := make([]common.Hash, len(proofBytes))
+		for i, p := range proofBytes {
+			proof[i] = common.BytesToHash(p)
+		}
+
+		// Deserialize the ObjectRef
+		offset := 0
+		objRef, err := types.DeserializeObjectRef(objRefBytes, &offset)
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to deserialize meta-shard ObjectRef: %v", err)
+		}
+
+		// Fetch the payload from DA segments using the ObjectRef
+		numSegments, _ := types.CalculateSegmentsAndLastBytes(objRef.PayloadLength)
+		payload, err := s.sdb.FetchJAMDASegments(
+			objRef.WorkPackageHash,
+			objRef.IndexStart,
+			objRef.IndexStart+numSegments,
+			objRef.PayloadLength,
+		)
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to fetch meta-shard payload from DA: %v", err)
+		}
+
+		// Return the witness with ObjectRef and payload
+		witness := &types.StateWitness{
+			ServiceID: serviceID,
+			ObjectID:  objectID,
+			Value:     objRefBytes, // The ObjectRef bytes (what's stored in JAM State)
+			Ref:       objRef,
+			Payload:   payload,
+			Path:      proof,
+		}
+
+		log.Info(log.SDB, "ReadObject: Successfully fetched meta-shard", "objectID", objectID, "payloadSize", len(payload), "proofLen", len(proof))
+		return witness, true, nil
+	}
+
 	// Step 1: Read global_depth hint from special SSR key in JAM State
 	var ssrKey [32]byte
 	binary.LittleEndian.PutUint32(ssrKey[0:4], serviceID)
@@ -360,7 +413,6 @@ func (s *StateDB) ReadObject(serviceID uint32, objectID common.Hash) (*types.Sta
 	}
 
 	// Step 3: Check if we have a cached witness for this meta-shard
-	metaShardObjectID = ComputeMetaShardObjectID(serviceID, shardID)
 	log.Trace(log.SDB, "ReadObject: meta-shard found", "objectID", objectID, "metaShardObjectID", metaShardObjectID, "shardID", shardID)
 
 	// Check cache first

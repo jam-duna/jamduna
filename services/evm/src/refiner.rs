@@ -744,10 +744,10 @@ impl BlockRefiner {
             &meta_object_refs,
             work_item.service,
         );
-        // log_info(&format!(
-        //     "📦 Generated {} meta-shard write intents",
-        //     meta_write_intents.len()
-        // ));
+        log_info(&format!(
+            "📦 Generated {} meta-shard write intents",
+            meta_write_intents.len()
+        ));
 
         // Clone meta_write_intents BEFORE export since export_effect may corrupt memory via FFI
         let mut meta_intents_for_output = meta_write_intents.clone();

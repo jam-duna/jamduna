@@ -232,7 +232,17 @@ func branchCondSymbol(name string) string {
 
 var PvmInterpretation = false
 
+// Global variable to track memory operation for current instruction
+var lastMemOp string
+
 func dumpStoreGeneric(_ string, addr uint64, regOrSrc string, value uint64, bits int) {
+	// Memory operation logging for PvmLogging - MUST come before PvmTrace check
+	if PvmLogging {
+		numBytes := bits / 8
+		valueHex := fmt.Sprintf("%0*x", numBytes*2, value)
+		lastMemOp = fmt.Sprintf(" MEM_STORE Mem[0x%x..0x%x]<-%s", addr, addr+uint64(numBytes)-1, valueHex)
+	}
+
 	if !PvmTrace {
 		return
 	}
@@ -252,6 +262,13 @@ func dumpLoadImmJump(_ string, registerIndexA int, vx uint64) {
 }
 
 func dumpLoadGeneric(_ string, regA int, addrOrVx uint64, value uint64, bits int, signed bool) {
+	// Memory operation logging for PvmLogging - MUST come before PvmTrace check
+	if PvmLogging {
+		numBytes := bits / 8
+		valueHex := fmt.Sprintf("%0*x", numBytes*2, value)
+		lastMemOp = fmt.Sprintf(" MEM_LOAD Mem[0x%x..0x%x]->%s", addrOrVx, addrOrVx+uint64(numBytes)-1, valueHex)
+	}
+
 	if !PvmTrace {
 		return
 	}

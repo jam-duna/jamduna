@@ -765,7 +765,9 @@ func (vm *VMGo) step(stepn int) error {
 	}
 
 	// avoid this: this is expensive
-	if PvmLogging { //  || opcode == ECALLI || opcode == SBRK {
+	// Show every 1000 gas, plus every instruction in high-res window
+	showThisGas := (vm.Gas%1000 == 0) || (vm.Gas > 972100000 && vm.Gas <= 972300000)
+	if PvmLogging && showThisGas {
 		registers := vm.Ram.ReadRegisters()
 		prettyHex := "["
 		for i := 0; i < 13; i++ {
@@ -775,7 +777,15 @@ func (vm *VMGo) step(stepn int) error {
 			prettyHex = prettyHex + fmt.Sprintf("%d", registers[i])
 		}
 		prettyHex = prettyHex + "]"
-		fmt.Printf("%s %d %d Gas: %d Registers:%s\n", opcode_str(opcode), stepn, prevpc, vm.Gas, prettyHex)
+
+		// Read 16 bytes at 0x2d01e0 to track the memory region containing 0x2d01e8
+		debugMemAddr := uint32(0x2d01e0)
+		debugMemBytes, _ := vm.Ram.ReadRAMBytes(debugMemAddr, 16)
+		debugMemHex := fmt.Sprintf("%032x", debugMemBytes)
+
+		fmt.Printf("%s %d %d Gas: %d Registers:%s Mem[0x%x..0x%x]:%s%s\n",
+			opcode_str(opcode), stepn, prevpc, vm.Gas, prettyHex, debugMemAddr, debugMemAddr+15, debugMemHex, lastMemOp)
+		lastMemOp = "" // Clear for next instruction
 	}
 	if label, ok := vm.label_pc[int(vm.pc)]; ok {
 		fmt.Printf("[%s%s%s FINISH]\n", ColorBlue, lastLabel, ColorReset)

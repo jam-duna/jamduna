@@ -79,7 +79,7 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 	}
 
 	// Log after host function call to match javajam format
-	if PvmLogging {
+	if PvmLogging && false {
 		fmt.Printf("Calling host function: %s %d [gas used: %d, gas remaining: %d] [service: %d]\n", HostFnToName(host_fn), host_fn, gasUsed, currentGas, vm.Service_index)
 	}
 
@@ -1764,8 +1764,8 @@ func (vm *VM) hostExport() {
 	vm.WriteRegister(7, OK)
 	vm.SetHostResultCode(OK)
 
-	x = common.PadToMultipleOfN(x, types.SegmentSize)
-	x = slices.Clone(x)
+	y := slices.Clone(x)
+	y = common.PadToMultipleOfN(y, types.SegmentSize)
 
 	if vm.ExportSegmentIndex+uint32(len(vm.Exports)) >= W_X { // W_X
 		vm.WriteRegister(7, FULL)
@@ -1773,13 +1773,10 @@ func (vm *VM) hostExport() {
 		return
 	} else {
 		vm.WriteRegister(7, uint64(vm.ExportSegmentIndex)+uint64(len(vm.Exports)))
-		log.Trace(vm.logging, fmt.Sprintf("%s EXPORT#%d OK", vm.ServiceMetadata, uint64(len(vm.Exports))),
-			"p", p, "z", z, "vm.ExportSegmentIndex", vm.ExportSegmentIndex,
-			"segmenthash", fmt.Sprintf("%v", common.Blake2Hash(x)),
-			"segment20", fmt.Sprintf("%x", x[0:20]),
-			"len", fmt.Sprintf("%d", len(x)))
+		// fmt.Printf("[%s] EXPORT#%d OK p=%x z=%d vm.ExportSegmentIndex=%d len=%d\n",
+		// 	vm.ServiceMetadata, len(vm.Exports), p, z, vm.ExportSegmentIndex, len(y))
 		// vm.ExportSegmentIndex += 1
-		vm.Exports = append(vm.Exports, x)
+		vm.Exports = append(vm.Exports, y)
 		vm.SetHostResultCode(OK)
 		return
 	}
@@ -2097,9 +2094,12 @@ func (vm *VM) HostFetchWitness() error {
 	// Convert object_id bytes to common.Hash
 	object_id := common.BytesToHash(object_id_bytes)
 
+	// Log all fetch_object calls to track meta-shard fetches
+	log.Info(vm.logging, "🔍 HostFetchWitness called", "role", vm.logging, "object_id", object_id, "service_id", service_id)
+
 	if vm.logging != log.Builder {
 		// TODO: avoid the host function
-		log.Trace(vm.logging, "HostFetchWitness returning empty (not builder)", "role", vm.logging, "object_id", object_id)
+		log.Info(vm.logging, "HostFetchWitness returning empty (not builder)", "role", vm.logging, "object_id", object_id)
 		vm.WriteRegister(7, 0)
 		// return nil
 	}
@@ -2110,20 +2110,22 @@ func (vm *VM) HostFetchWitness() error {
 	witness, found, err := vm.hostenv.ReadObject(service_id, object_id)
 	if err != nil {
 		// Object not found in meta-shard is normal (e.g., EOA has no code, uninitialized storage)
-		log.Debug(vm.logging, funcName+": ❌ object not found", "object_id", object_id, "err", err)
+		log.Info(vm.logging, funcName+": ❌ ReadObject returned error", "object_id", object_id, "err", err)
 		vm.WriteRegister(7, 0) // Return 0 = not found
 		return nil
 	} else if !found {
+		log.Info(vm.logging, funcName+": ❌ ReadObject returned found=false", "object_id", object_id)
 		vm.WriteRegister(7, 0)
 		return nil
 	}
 
+	// Verify BMT proof for all objects including meta-shards
 	stateRoot := vm.hostenv.GetParentStateRoot()
 	if !trie.Verify(witness.ServiceID, witness.ObjectID.Bytes(), witness.Value, stateRoot.Bytes(), witness.Path) {
 		log.Error(log.SDB, "BMT Proof verification failed", "object_id", object_id)
 		return fmt.Errorf("BMT Proof verification failed for object %s", object_id)
 	}
-	log.Debug(log.SDB, "HostFetchWitness: BMT Proof verified", "object_id", object_id, "serviceID", witness.ServiceID,
+	log.Info(log.SDB, "HostFetchWitness: BMT Proof verified", "object_id", object_id, "serviceID", witness.ServiceID,
 		"MetaShardKey", witness.ObjectID, "value", fmt.Sprintf("%x", witness.Value), "path", witness.Path, "stateRoot", stateRoot)
 
 	objRef := witness.Ref

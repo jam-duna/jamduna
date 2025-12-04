@@ -244,16 +244,34 @@ pvm_result_t pvm_execute(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child) 
             continue;
         }
 
-        if (vm->pvm_logging) {
-            printf("%s %d %llu Gas: %lld Registers:[%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu]\n", 
+        // Show every 1K gas, plus every instruction in high-res windows
+        int show_this_gas = (vm->gas % 1000 == 0) || (vm->gas > 972100000 && vm->gas <= 972300000);
+        if (vm->pvm_logging && show_this_gas) {
+            // Read 16 bytes at 0x2d01e0 to track the memory region containing 0x2d01e8
+            uint32_t mem_addr = 0x2d01e0;
+            unsigned char mem_bytes[16];
+            int err;
+            pvm_read_ram_bytes(vm, mem_addr, mem_bytes, 16, &err);
+
+            // Extern declaration for mem_op_buffer from opcode_handlers.c
+            extern char mem_op_buffer[256];
+
+            printf("%s %d %llu Gas: %lld Registers:[%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu] Mem[0x%x..0x%x]:%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%s\n",
                    get_opcode_name(opcode), step+1, (unsigned long long)prevpc,  (long long)vm->gas,
-                    (unsigned long long)vm->registers[0], (unsigned long long)vm->registers[1], 
+                    (unsigned long long)vm->registers[0], (unsigned long long)vm->registers[1],
                     (unsigned long long)vm->registers[2], (unsigned long long)vm->registers[3],
-                    (unsigned long long)vm->registers[4], (unsigned long long)vm->registers[5], 
+                    (unsigned long long)vm->registers[4], (unsigned long long)vm->registers[5],
                     (unsigned long long)vm->registers[6], (unsigned long long)vm->registers[7],
-                    (unsigned long long)vm->registers[8], (unsigned long long)vm->registers[9], 
+                    (unsigned long long)vm->registers[8], (unsigned long long)vm->registers[9],
                     (unsigned long long)vm->registers[10], (unsigned long long)vm->registers[11],
-                    (unsigned long long)vm->registers[12]);
+                    (unsigned long long)vm->registers[12],
+                    mem_addr, mem_addr + 15,
+                    mem_bytes[0], mem_bytes[1], mem_bytes[2], mem_bytes[3],
+                    mem_bytes[4], mem_bytes[5], mem_bytes[6], mem_bytes[7],
+                    mem_bytes[8], mem_bytes[9], mem_bytes[10], mem_bytes[11],
+                    mem_bytes[12], mem_bytes[13], mem_bytes[14], mem_bytes[15],
+                    mem_op_buffer);
+            mem_op_buffer[0] = '\0'; // Clear for next instruction
             fflush(stdout);
         }
         step++;

@@ -221,6 +221,7 @@ impl MajikBackend {
             object_writes,
             &mut cached_meta_shards,
             &mut meta_ssr,
+            service_id,
         );
         let mut meta_write_intents = Vec::with_capacity(meta_shard_writes.len());
 
@@ -241,6 +242,16 @@ impl MajikBackend {
                 meta_write.shard_id.ld,
                 &meta_write.shard_id.prefix56,
             );
+
+            log_info(&format!(
+                "📤 EXPORTING MetaShard: object_id={}, shard_id=(ld={}, prefix={:02x}{:02x}...), {} entries, payload_len={}, object_kind={}",
+                crate::sharding::format_object_id(&object_id),
+                meta_write.shard_id.ld,
+                meta_write.shard_id.prefix56[0], meta_write.shard_id.prefix56[1],
+                meta_write.entries.len(),
+                meta_shard_bytes.len(),
+                ObjectKind::MetaShard as u8
+            ));
 
             // Create ObjectRef for this meta-shard
             let object_ref = utils::objects::ObjectRef::new(
