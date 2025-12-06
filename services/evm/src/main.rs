@@ -16,8 +16,6 @@ mod bmt;
 mod da;
 #[path = "genesis.rs"]
 mod genesis;
-#[path = "jam_gas.rs"]
-mod jam_gas;
 #[path = "meta_sharding.rs"]
 mod meta_sharding;
 #[path = "mmr.rs"]
@@ -26,14 +24,20 @@ mod mmr;
 mod receipt;
 #[path = "refiner.rs"]
 mod refiner;
-#[path = "sharding.rs"]
-mod sharding;
+#[path = "contractsharding.rs"]
+mod contractsharding;
 #[path = "state.rs"]
 mod state;
 #[path = "tx.rs"]
 mod tx;
+#[path = "verkle.rs"]
+mod verkle;
+#[path = "verkle_constants.rs"]
+mod verkle_constants;
 #[path = "writes.rs"]
 mod writes;
+#[path = "witness_events.rs"]
+mod witness_events;
 
 use alloc::{format, vec::Vec};
 #[cfg(any(
@@ -45,7 +49,7 @@ use alloc::{format, vec::Vec};
 ))]
 use polkavm_derive::min_stack_size;
 use refiner::BlockRefiner;
-use sharding::format_object_id;
+use contractsharding::format_object_id;
 use writes::serialize_execution_effects;
 #[cfg(not(any(
     all(
@@ -83,6 +87,11 @@ use utils::{
         log_error, log_info, parse_accumulate_args, parse_refine_args,
     },
 };
+
+// Import log_crit only for RISC-V target (used in panic handler)
+#[cfg(all(not(test), target_arch = "riscv32", target_feature = "e"))]
+use utils::functions::log_crit;
+
 const SIZE0: usize = 0x200000;
 min_stack_size!(SIZE0);
 
@@ -90,7 +99,7 @@ const SIZE1: usize = 0x200000;
 #[global_allocator]
 static ALLOCATOR: SimpleAlloc<SIZE1> = SimpleAlloc::new();
 
-// Precompile contracts: (address_byte, bytecode, name)
+// Precompile contracts: (address_byte, bytecode, name) - matches lib.rs
 const PRECOMPILES: &[(u8, &[u8], &str)] = &[
     (
         0x01,
@@ -98,11 +107,17 @@ const PRECOMPILES: &[(u8, &[u8], &str)] = &[
         "usdm-runtime.bin",
     ),
     (
-        0xFF,
+        0x02,
+        include_bytes!("../contracts/gov-runtime.bin"),
+        "gov-runtime.bin",
+    ),
+    (
+        0x03,
         include_bytes!("../contracts/math-runtime.bin"),
         "math-runtime.bin",
     ),
 ];
+
 
 #[polkavm_derive::polkavm_export]
 extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
@@ -150,14 +165,14 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
     ));
 
     // Process work item and execute transactions
-    let execution_effects = match BlockRefiner::from_work_item(
+    let (execution_effects, accumulate_instructions, contract_witness_index_start, contract_witness_payload_length) = match BlockRefiner::from_work_item(
         refine_args.wi_index,
         &work_item,
         &extrinsics,
         &refine_context,
         &refine_args,
     ) {
-        Some(effects) => effects,
+        Some((effects, instructions, idx_start, payload_len)) => (effects, instructions, idx_start, payload_len),
         None => {
             log_error("Refine: from_work_item failed");
             return empty_output();
@@ -165,7 +180,51 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
     };
 
     // Serialize ExecutionEffects (includes conversion to ObjectCandidateWrite and logging)
-    let buffer = serialize_execution_effects(&execution_effects);
+    let mut buffer = serialize_execution_effects(&execution_effects, contract_witness_index_start, contract_witness_payload_length);
+
+    log_info(&format!(
+        "📝 Refine: ExecutionEffects serialized to {} bytes",
+        buffer.len()
+    ));
+
+    // DEBUG: Show first few bytes of execution effects buffer
+    if !buffer.is_empty() {
+        let preview_len = core::cmp::min(20, buffer.len());
+        let preview_bytes = &buffer[0..preview_len];
+        log_info(&format!(
+            "📝 ExecutionEffects buffer preview: {:02x?}",
+            preview_bytes
+        ));
+    }
+
+    // Append serialized accumulate instructions to the output
+    if !accumulate_instructions.is_empty() {
+        use utils::host_functions::AccumulateInstruction;
+        let accumulate_bytes = AccumulateInstruction::serialize_all(&accumulate_instructions);
+        log_info(&format!(
+            "📝 Appending {} accumulate instructions ({} bytes) to refine output",
+            accumulate_instructions.len(),
+            accumulate_bytes.len()
+        ));
+
+        // DEBUG: Show first few bytes of accumulate instructions
+        if !accumulate_bytes.is_empty() {
+            let preview_len = core::cmp::min(20, accumulate_bytes.len());
+            let preview_bytes = &accumulate_bytes[0..preview_len];
+            log_info(&format!(
+                "📝 AccumulateInstructions buffer preview: {:02x?}",
+                preview_bytes
+            ));
+        }
+
+        buffer.extend_from_slice(&accumulate_bytes);
+    }
+
+    log_info(&format!(
+        "📝 Refine: Total output buffer size: {} bytes",
+        buffer.len()
+    ));
+
     leak_output(buffer)
 }
 
@@ -184,24 +243,19 @@ fn leak_output(mut buffer: Vec<u8>) -> (u64, u64) {
 /// Accumulate orders all ExecutionEffects from refine calls and produces a final commitment across objects
 #[polkavm_derive::polkavm_export]
 pub extern "C" fn accumulate(start_address: u64, length: u64) -> (u64, u64) {
-    log_info("🔧 accumulate() ENTRY POINT");
 
     let Some(args) = parse_accumulate_args(start_address, length) else {
         log_error("Accumulate: parse_accumulate_args failed");
         return empty_output();
     };
 
-    log_info(&format!("🔧 num_accumulate_inputs={}, s={}, t={}", args.num_accumulate_inputs, args.s, args.t));
 
     if args.num_accumulate_inputs == 0 {
         log_error("Accumulate: num_accumulate_inputs is zero, returning empty");
         return empty_output();
     }
-
-    log_info("🔧 Calling fetch_accumulate_inputs...");
     let accumulate_inputs = match fetch_accumulate_inputs(args.num_accumulate_inputs as u64) {
         Ok(inputs) => {
-            log_info(&format!("🔧 fetch_accumulate_inputs OK: {} inputs", inputs.len()));
             inputs
         }
         Err(e) => {

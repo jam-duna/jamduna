@@ -1,4 +1,6 @@
+//go:build ignore
 // +build ignore
+
 // Live RPC testing against running node
 // Run with: go run examples/rpc_live.go
 // Add any argument to run once: go run examples/rpc_live.go once
@@ -24,7 +26,7 @@ import (
 
 const (
 	DefaultTCPPort = 11100
-	RefreshSeconds = 10 // Refresh every 10 seconds (comprehensive tests take longer)
+	RefreshSeconds = 10                                           // Refresh every 10 seconds (comprehensive tests take longer)
 	IssuerAddress  = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266" // Alice from Hardhat
 	USDMAddress    = "0x0000000000000000000000000000000000000001"
 	HTTPPort       = 8545 // Ethereum JSON-RPC HTTP port
@@ -277,7 +279,7 @@ func testGetBalanceHistorical(client *rpc.Client) TestResult {
 	balanceDec.SetString(balance[2:], 16)
 	fmt.Printf(" Balance (decimal): %s wei\n", balanceDec.String())
 
-	fmt.Printf("✅ Successfully queried historical state (tests GetParentStateRoot path)\n")
+	fmt.Printf("✅ Successfully queried historical state\n")
 	fmt.Println()
 
 	return TestResult{Name: "GetBalance(Historical)", Success: true, Output: balance}

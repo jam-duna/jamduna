@@ -238,7 +238,7 @@ func (n *Node) onSegmentShardRequest(ctx context.Context, stream quic.Stream, ms
 	}
 	if !ok {
 		stream.CancelWrite(ErrKeyNotFound)
-		log.Warn(log.DA, "onSegmentShardRequest:GetSegmentShard_Assurer", n.String(), req.ErasureRoot, req.ShardIndex, req.SegmentIndex)
+		log.Warn(log.DA, "onSegmentShardRequest:GetSegmentShard_Assurer", "n", n.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex, "segmentIndex", req.SegmentIndex)
 		// Telemetry: Segment shard request failed (event 164)
 		n.telemetryClient.SegmentShardRequestFailed(eventID, "segment shard not found")
 		return fmt.Errorf("onSegmentShardRequest: segment shard not found")

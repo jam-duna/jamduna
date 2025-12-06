@@ -9,6 +9,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/statedb"
 	storage "github.com/colorfulnotion/jam/storage"
 	trie "github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
@@ -47,6 +48,11 @@ func (n *Node) generateAssurance(headerHash common.Hash, timeslot uint32) (a typ
 	n.telemetryClient.AssuranceProvided(a)
 	return
 }
+
+func (n *NodeContent) ReadGlobalDepth(serviceID uint32) (uint8, error) {
+	return n.statedb.ReadGlobalDepth(serviceID)
+}
+
 func (n *NodeContent) GetRefineContext() (types.RefineContext, error) {
 	return n.statedb.GetRefineContext(), nil
 }
@@ -196,7 +202,7 @@ const attemptReconstruction = false
 
 // assureData, given a Guarantee with an AvailabilitySpec within a WorkReport,
 // fetches the bundleShard and segmentShards and stores in ImportDA + AuditDA.
-func (n *Node) assureData(ctx context.Context, g types.Guarantee) error {
+func (n *Node) assureData(ctx context.Context, g types.Guarantee, sdb *statedb.StateDB) error {
 	spec := g.Report.AvailabilitySpec
 	coredIdx := g.Report.CoreIndex
 	vIdx := n.id

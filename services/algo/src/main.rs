@@ -1974,7 +1974,6 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
                 },
                 payload: intent_payload,
             },
-            dependencies: Vec::new(),
         };
         // Export payloads to DA segments
         match write_intent.effect.export_effect(export_count as usize) {
@@ -1994,8 +1993,9 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
     log_info(&format!("✅ refine: creating ExecutionEffects with {} write_intents, total_gas_used={}", write_intents.len(), total_gas_used));
     let execution_effects = ExecutionEffects {
         write_intents,
+        contract_intents: Vec::new(),
     };
-    let buffer = serialize_execution_effects(&execution_effects);
+    let buffer = serialize_execution_effects(&execution_effects, 0, 0);
     log_info(&format!("🎯 refine returning buffer length={}", buffer.len()));
     leak_output(buffer)
 }

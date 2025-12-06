@@ -20,9 +20,6 @@ pub use crate::objects::ObjectRef;
 
 
 
-/// Serialized size (in bytes) of a single dependency entry.
-const _DEPENDENCY_ENTRY_SIZE: usize = 32 + core::mem::size_of::<u32>();
-
 /// Global buffer for segment serialization
 #[unsafe(no_mangle)]
 static mut SEGMENT_BUFFER: [u8; SEGMENT_SIZE as usize] = [0u8; SEGMENT_SIZE as usize];
@@ -30,27 +27,14 @@ static mut SEGMENT_BUFFER: [u8; SEGMENT_SIZE as usize] = [0u8; SEGMENT_SIZE as u
 /// Complete effects of execution
 #[derive(Debug, Clone)]
 pub struct ExecutionEffects {
-    pub write_intents: Vec<WriteIntent>,
+    pub write_intents: Vec<WriteIntent>, // txns/receipts
+    pub contract_intents: Vec<WriteIntent>,  // contract code and storage
 }
 
-impl ExecutionEffects {
-    /// Log a tally of write intents by ObjectKind, including receipt version breakdown.
-    /// Validates receipt pipeline invariants when tracking parameters are provided.
-    pub fn log_tally(&self) {
-        // Implementation placeholder
-    }
-    
-
-}
-
-
-
-
-/// Write intent consisting of a write effect and its prerequisite dependencies.
+/// Write intent consisting of a write effect
 #[derive(Debug, Clone)]
 pub struct WriteIntent {
     pub effect: WriteEffectEntry,
-    pub dependencies: Vec<ObjectId>,
 }
 
 impl WriteIntent {
@@ -58,16 +42,7 @@ impl WriteIntent {
     /// Returns the number of bytes written.
     pub fn serialize_into(&self, buffer: &mut [u8], cursor: usize) -> HarnessResult<usize> {
         let bytes_written = self.effect.serialize_into(buffer, cursor)?;
-        /*        let dep_count: u16 = self
-            .dependencies
-            .len()
-            .try_into()
-            .map_err(|_| HarnessError::ParseError)?;
-        buffer.extend_from_slice(&dep_count.to_le_bytes());
 
-        for dependency in &self.dependencies {
-            buffer.extend_from_slice(dependency);
-        } */
         Ok(bytes_written)
     }
 }
@@ -105,7 +80,8 @@ pub struct WriteEffectEntry {
     // 32 + 36 = 68 bytes (no payload)
     pub object_id: ObjectId, // 32-byte object identifier
     pub ref_info: ObjectRef, // 36 bytes
-    pub payload: Vec<u8>,   
+    pub payload: Vec<u8>,
+    pub tx_index: u32,  // Transaction index that caused this write (for BAL construction)
 }
 
 impl WriteEffectEntry {
@@ -211,6 +187,7 @@ pub struct StateWitness {
     pub timeslot: u32, // 4 bytes
     pub blocknumber: u32, // 4 bytes
     pub value: Vec<u8>, // Meta-shard ObjectRef bytes from JAM State (typically 45 bytes)
+    pub payload: Vec<u8>, // Optional: inline payload provided by builder (bypasses import segments)
     /// Merkle proof fields
     pub path: Vec<[u8; 32]>,
 }
@@ -269,20 +246,9 @@ impl StateWitness {
         // Capture the value bytes (ObjectRef + timeslot + blocknumber)
         let value = data[value_start..cursor].to_vec();
 
-        let mut path = Vec::new();
-        let proof_bytes_total = data.len() - cursor;
-        if proof_bytes_total == 0 || proof_bytes_total % 32 != 0 {
-            return Err(HarnessError::ParseError);
-        }
-
-        let proof_count = proof_bytes_total / 32;
-        path.reserve(proof_count);
-        for _ in 0..proof_count {
-            let mut hash = [0u8; 32];
-            hash.copy_from_slice(&data[cursor..cursor + 32]);
-            path.push(hash);
-            cursor += 32;
-        }
+        // Remaining bytes are treated as payload; proofs are optional/unused in this path.
+        let payload = data[cursor..].to_vec();
+        let path = Vec::new();
 
         Ok(StateWitness {
             object_id,
@@ -290,6 +256,7 @@ impl StateWitness {
             timeslot,
             blocknumber,
             value,
+            payload,
             path,
         })
     }
@@ -297,6 +264,11 @@ impl StateWitness {
     /// Fetches the payload from this state witness and a set of imported segments.
     pub fn fetch_object_payload(&self, work_item: &crate::functions::WorkItem, work_item_index: u16) -> Option<Vec<u8>> {
         use crate::functions::fetch_imported_segment;
+
+        // Inline payload provided by builder: use directly, skip DA lookup
+        if !self.payload.is_empty() {
+            return Some(self.payload.clone());
+        }
 
 
         let start = self.ref_info.index_start as u64;

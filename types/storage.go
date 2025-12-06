@@ -139,6 +139,17 @@ type KeyVal struct {
 	Value []byte   `json:"value"`
 }
 
+// VerkleRead tracks a single Verkle tree read operation
+// Used to build witnesses for EVM execution validation
+type VerkleRead struct {
+	VerkleKey  common.Hash    // Full 32-byte verkle key (31-byte stem + 1-byte suffix)
+	Address    common.Address // Address being read (for metadata extraction)
+	KeyType    uint8          // 0=BasicData, 1=CodeHash, 2=CodeChunk, 3=Storage
+	Extra      uint64         // ChunkID for code chunks
+	StorageKey common.Hash    // Full storage key for storage reads
+	TxIndex    uint32         // Transaction index within work package (0=pre-exec, 1..n=txs)
+}
+
 func (kv *KeyVal) UnmarshalJSON(data []byte) error {
 	var raw struct {
 		Key   string `json:"key"`
@@ -457,6 +468,49 @@ type JAMStorage interface {
 	GetTelemetryClient() TelemetryClient
 	GetJAMDA() JAMDA
 	GetNodeID() uint16
+
+	// Witness Cache Operations (Phase 4+)
+	// These methods manage the witness cache for EVM execution
+	InitWitnessCache()
+	SetContractStorage(address common.Address, storage interface{})
+	GetContractStorage(address common.Address) (interface{}, bool)
+	SetCode(address common.Address, code []byte)
+	GetCode(address common.Address) ([]byte, bool)
+	ReadStorageFromCache(contractAddress common.Address, storageKey common.Hash) (common.Hash, bool)
+	ClearWitnessCache()
+
+	// EVM State Access Methods (Verkle-based)
+	// These methods provide clean interface for EVM state reads without exposing verkle internals
+	// All verkle key computation and tree access is encapsulated in the implementation
+	// txIndex parameter tracks which transaction in work package caused this access (for BAL construction)
+	FetchBalance(address common.Address, txIndex uint32) ([32]byte, error)
+	FetchNonce(address common.Address, txIndex uint32) ([32]byte, error)
+	FetchCode(address common.Address, txIndex uint32) ([]byte, uint32, error) // returns (code, codeSize, error)
+	FetchCodeHash(address common.Address, txIndex uint32) ([32]byte, error)
+	FetchStorage(address common.Address, storageKey [32]byte, txIndex uint32) ([32]byte, bool, error)
+
+	// Verkle Read Log Management
+	// These methods manage the read log that tracks all verkle reads during execution
+	AppendVerkleRead(read VerkleRead)
+	GetVerkleReadLog() []VerkleRead
+	ClearVerkleReadLog()
+
+	// Verkle Witness Building
+	// BuildVerkleWitness builds a dual-proof verkle witness and stores the post-state tree
+	// All verkle tree access is encapsulated in the implementation
+	// Returns: witnessBytes, error
+	BuildVerkleWitness(contractWitnessBlob []byte) (witnessBytes []byte, err error)
+
+	// Contract Write Application
+	// ApplyContractWrites applies contract writes (code, storage, balance, nonce) to the current Verkle tree
+	// This is called after work items are processed to update the state
+	ApplyContractWrites(blob []byte) error
+
+	// Block Access List (BAL) Computation
+	// ComputeBlockAccessListHash builds BAL from verkle witness and returns hash + statistics
+	// Used by both builder (to compute hash for payload) and guarantor (to verify builder's hash)
+	// Returns: hash, accountCount, totalChanges, error
+	ComputeBlockAccessListHash(verkleWitness []byte) (common.Hash, uint32, uint32, error)
 
 	// Lifecycle
 	Close() error

@@ -413,6 +413,11 @@ func (c *NodeClient) GetCurrJCE() (result uint32, err error) {
 	return result, err
 }
 
+func (c *NodeClient) ReadGlobalDepth(serviceID uint32) (result uint8, err error) {
+	err = c.CallWithRetry("jam.ReadGlobalDepth", []string{fmt.Sprintf("%d", serviceID)}, &result)
+	return result, err
+}
+
 func (c *NodeClient) GetRefineContext() (types.RefineContext, error) {
 	var jsonStr string
 	err := c.baseClient.Call("jam.GetRefineContext", []string{}, &jsonStr)

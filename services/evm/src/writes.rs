@@ -1,28 +1,56 @@
 //! ExecutionEffects serialization for refine → accumulate communication
 
-use alloc::{vec::Vec};
+use alloc::{vec::Vec, format};
 
-/// Serialize ExecutionEffects to compact meta-shard format.
+/// Serialize ExecutionEffects to refine output.
 ///
-/// Format: N entries × (1B ld + prefix_bytes + 5B packed ObjectRef)
-/// - Each entry has its own ld value (meta-shards can have different depths after splits)
-/// - Only ObjectKind::MetaShard objects are serialized
+/// Format:
+/// 1. Meta-shards (OLD compact format): N entries × (1B ld + prefix_bytes + 5B packed ObjectRef)
+/// 2. Contract witness metadata: [2B index_start][4B total_payload_length]
+///    - Points to segment range containing serialized contract storage/code blobs
+///    - Each blob in segments: [20B address][1B kind][4B payload_length][...payload...]
+/// 3. AccumulateInstructions (appended in main.rs)
 ///
-/// For genesis with ld=0: N × 6 bytes (1B ld + 0B prefix + 5B ObjectRef)
-pub fn serialize_execution_effects(effects: &utils::effects::ExecutionEffects) -> Vec<u8> {
-    use crate::sharding::ObjectKind;
-    
+/// This allows:
+/// - Accumulate to parse meta-shards (section 1)
+/// - Go side to read contract storage/code from segments (section 2)
+pub fn serialize_execution_effects(
+    effects: &utils::effects::ExecutionEffects,
+    contract_witness_index_start: u16,
+    contract_witness_payload_length: u32,
+) -> Vec<u8> {
+    use crate::contractsharding::ObjectKind;
+    use crate::meta_sharding::parse_meta_shard_object_id;
+    use utils::functions::log_info;
+
+    log_info(&format!(
+        "📤 serialize_execution_effects: Processing {} write intents",
+        effects.write_intents.len()
+    ));
 
     let mut buffer = Vec::new();
 
-    // Serialize meta-shards with per-entry ld values
-    // Format: N entries × (1B ld + prefix_bytes + 5B packed ObjectRef)
-    // Note: After splits, different meta-shards can have different ld values!
+    // Start with number of meta-shard entries (2 bytes)
+    let metashard_count: u16 = effects.write_intents
+        .iter()
+        .filter(|intent| intent.effect.ref_info.object_kind == ObjectKind::MetaShard as u8)
+        .count() as u16;
+
+    buffer.extend_from_slice(&metashard_count.to_le_bytes());
+
+    log_info(&format!(
+        "📤 Refine: Writing {} meta-shard entries to compact format",
+        metashard_count
+    ));
+
+    // Section 1: Serialize meta-shards in OLD compact format for accumulate
+    let mut actual_metashard_count = 0;
     for intent in &effects.write_intents {
         if intent.effect.ref_info.object_kind == ObjectKind::MetaShard as u8 {
-            // Extract ld from this specific meta-shard's object_id
-            // Extract ld and prefix56 from new 0xAA-prefixed object_id format
-            let (ld, prefix56) = crate::meta_sharding::parse_meta_shard_object_id(&intent.effect.object_id);
+            actual_metashard_count += 1;
+
+            // Extract ld and prefix56 from meta-shard object_id
+            let (ld, prefix56) = parse_meta_shard_object_id(&intent.effect.object_id);
             let prefix_bytes = ((ld + 7) / 8) as usize;
 
             // Write ld for this entry
@@ -60,26 +88,32 @@ pub fn serialize_execution_effects(effects: &utils::effects::ExecutionEffects) -
             buffer.push((packed >> 16) as u8);
             buffer.push((packed >> 8) as u8);
             buffer.push(packed as u8);
-
-            
         }
     }
 
-    /* 
-    use utils::functions::log_info;
-    // Debug: log first 50 bytes
-    if buffer.len() > 0 {
-        let preview_len = buffer.len().min(50);
-        let hex: alloc::string::String = buffer[..preview_len]
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<alloc::vec::Vec<_>>()
-            .join("");
+    log_info(&format!(
+        "📤 Section 1: Serialized {} meta-shards in compact format",
+        actual_metashard_count
+    ));
+
+    // Section 2: Contract witness metadata (ONE pair for ALL contract storage/code)
+    // Write [2B index_start][4B total_payload_length]
+    buffer.extend_from_slice(&contract_witness_index_start.to_le_bytes());
+    buffer.extend_from_slice(&contract_witness_payload_length.to_le_bytes());
+
+    if contract_witness_payload_length > 0 {
         log_info(&format!(
-            "📤 Buffer preview (first {} bytes): {}",
-            preview_len, hex
+            "📤 Section 2: Contract witness metadata - index_start={}, total_length={} bytes",
+            contract_witness_index_start, contract_witness_payload_length
         ));
+    } else {
+        log_info("📤 Section 2: No contract storage/code objects");
     }
-    */
+
+    log_info(&format!(
+        "📤 serialize_execution_effects: Total buffer size: {} bytes",
+        buffer.len()
+    ));
+
     buffer
 }

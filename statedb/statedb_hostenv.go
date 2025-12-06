@@ -304,8 +304,7 @@ func (s *StateDB) ReadObject(serviceID uint32, objectID common.Hash) (*types.Sta
 	// Special case: Meta-shards are stored as ObjectRefs in JAM State that point to DA segments
 	// We must read the ObjectRef with proof, then fetch the payload from DA segments
 	if shardID, ok := ParseMetaShardObjectID(objectID); ok {
-		log.Info(log.SDB, "ReadObject: Detected meta-shard object_id, reading ObjectRef", "objectID", objectID, "serviceID", serviceID, "shardID", shardID)
-
+		log.Trace(log.SDB, "ReadObject: Detected meta-shard object_id, reading ObjectRef", "objectID", objectID, "serviceID", serviceID, "shardID", shardID)
 		objRefBytes, proofBytes, _, found, err := s.sdb.GetServiceStorageWithProof(serviceID, objectID[:])
 		if err != nil {
 			return nil, false, fmt.Errorf("failed to read meta-shard ObjectRef: %v", err)
@@ -350,15 +349,12 @@ func (s *StateDB) ReadObject(serviceID uint32, objectID common.Hash) (*types.Sta
 			Path:      proof,
 		}
 
-		log.Info(log.SDB, "ReadObject: Successfully fetched meta-shard", "objectID", objectID, "payloadSize", len(payload), "proofLen", len(proof))
+		log.Trace(log.SDB, "ReadObject: Successfully fetched meta-shard", "objectID", objectID, "payloadSize", len(payload), "proofLen", len(proof))
 		return witness, true, nil
 	}
 
 	// Step 1: Read global_depth hint from special SSR key in JAM State
-	var ssrKey [32]byte
-	binary.LittleEndian.PutUint32(ssrKey[0:4], serviceID)
-	copy(ssrKey[4:7], []byte("SSR"))
-
+	ssrKey := buildSSRKey()
 	ldBytes, found, err := s.ReadServiceStorage(serviceID, ssrKey[:])
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to read global_depth hint: %v", err)
@@ -371,7 +367,7 @@ func (s *StateDB) ReadObject(serviceID uint32, objectID common.Hash) (*types.Sta
 	}
 
 	globalDepth := ldBytes[0]
-
+	log.Trace(log.SDB, "ReadObject: global_depth hint", "serviceID", serviceID, "objectID", objectID, "globalDepth", globalDepth)
 	// Step 2: Probe backwards from global_depth to find the actual meta-shard
 	var metaShardObjectID common.Hash
 	var shardID ShardId
@@ -399,11 +395,13 @@ func (s *StateDB) ReadObject(serviceID uint32, objectID common.Hash) (*types.Sta
 			metaShardObjectID = candidateObjectID
 			shardID = candidateShardID
 			found = true
+			log.Trace(log.SDB, "ReadObject: stopped at...", "ld", ld, "metaShardObjectID", metaShardObjectID, "shardID", shardID)
 			break
 		}
 
 		// Stop at ld=0 to avoid underflow
 		if ld == 0 {
+			log.Trace(log.SDB, "ReadObject: stopped at ld=0")
 			break
 		}
 	}
@@ -536,6 +534,7 @@ func (s *StateDB) ReadObject(serviceID uint32, objectID common.Hash) (*types.Sta
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to deserialize meta-shard: %v", err)
 	}
+	log.Trace(log.SDB, "ReadObject: meta-shard deserialized", "numEntries", len(metaShard.Entries))
 
 	// Create a witness entry for this meta-shard and populate ObjectRefs cache
 	witness := &types.StateWitness{
@@ -556,6 +555,7 @@ func (s *StateDB) ReadObject(serviceID uint32, objectID common.Hash) (*types.Sta
 	// Populate ObjectRefs map with all entries from the meta-shard
 	for i := range metaShard.Entries {
 		witness.ObjectRefs[metaShard.Entries[i].ObjectID] = metaShard.Entries[i].ObjectRef
+		log.Trace(log.SDB, "ReadObject: meta-shard entry", "index", i, "objectID", metaShard.Entries[i].ObjectID, "objectRef", metaShard.Entries[i].ObjectRef.WorkPackageHash)
 	}
 
 	// Cache this witness for future lookups

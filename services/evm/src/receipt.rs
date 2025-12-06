@@ -8,6 +8,7 @@
 //! for separate transaction objects in DA storage.
 
 use alloc::vec::Vec;
+use alloc::format;
 use evm::interpreter::runtime::Log;
 use primitive_types::U256;
 use rlp::RlpStream;
@@ -45,10 +46,19 @@ pub fn receipt_object_id_from_receipt(record: &TransactionReceiptRecord) -> [u8;
 /// Format: [log_count:u16][Log...][Log...]
 /// Each Log: [address:20B][topic_count:u8][topics:32B*N][data_len:u32][data:bytes]
 fn serialize_logs(logs: &[Log]) -> Vec<u8> {
+    use utils::functions::log_info;
+
     let mut result = Vec::new();
 
     // Log count (2 bytes)
     let count = logs.len() as u16;
+    log_info(&format!("📝 Serializing {} logs to receipt", count));
+
+    for (i, log) in logs.iter().enumerate() {
+        log_info(&format!("  Log {}: address={:?}, topics={}, data_len={}",
+            i, log.address, log.topics.len(), log.data.len()));
+    }
+
     result.extend_from_slice(&count.to_le_bytes());
 
     // Serialize each log

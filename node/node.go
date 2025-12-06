@@ -53,11 +53,11 @@ const (
 )
 
 const (
-	isWriteSnapshot        = true
-	isWriteTransition      = true
-	isWriteBundleFollower  = true
-	isWriteBundleGuarantor = true
-	isWriteBundleAuditor   = true
+	isWriteSnapshot        = false
+	isWriteTransition      = false
+	isWriteBundleFollower  = false
+	isWriteBundleGuarantor = false
+	isWriteBundleAuditor   = false
 )
 
 const (
@@ -634,29 +634,16 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 	fmt.Printf("[N%v] addr=%v, dataDir=%v\n", id, addr, dataDir) //REQUIRED FOR CAPTURING JOBID. DO NOT DELETE THIS LINE!!
 	//REQUIRED FOR CAPTURING JOBID. DO NOT DELETE THIS LINE!!
 
-	// Create NodeContent with a placeholder store for JAMDA interface
-	nodeContent := NewNodeContent(id, nil, StandardizePVMBackend(pvmBackend))
-
-	levelDBPath := fmt.Sprintf("%v/leveldb/%d/", dataDir, port)
-	// Create a temporary no-op telemetry client for storage initialization
-	tempTelemetryClient := telemetry.NewNoOpTelemetryClient()
-	store, err := storage.NewStateDBStorage(levelDBPath, &nodeContent, tempTelemetryClient, id)
-	if err != nil {
-		return nil, fmt.Errorf("NewStateDBStorage[port:%d] Err %v", port, err)
-	}
-	// Now set the store field on nodeContent
-	nodeContent.store = store
-
 	var cert tls.Certificate
 	ed25519_priv := ed25519.PrivateKey(credential.Ed25519Secret[:])
 	ed25519_pub := ed25519_priv.Public().(ed25519.PublicKey)
 
-	cert, err = generateSelfSignedCert(ed25519_pub, ed25519_priv)
+	cert, err := generateSelfSignedCert(ed25519_pub, ed25519_priv)
 	if err != nil {
 		return nil, fmt.Errorf("error generating self-signed certificate: %v", err)
 	}
 	node := &Node{
-		NodeContent: nodeContent,
+		NodeContent: NewNodeContent(id, nil, StandardizePVMBackend(pvmBackend)),
 		IsSync:      true,
 		peers:       peers,
 		clients:     make(map[string]string),
@@ -686,6 +673,14 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 		WriteDebugFlag: true,
 	}
 	node.NodeContent.nodeSelf = node
+	// Now create storage with pointer to node.NodeContent (not a copy)
+	levelDBPath := fmt.Sprintf("%v/leveldb/%d/", dataDir, port)
+	tempTelemetryClient := telemetry.NewNoOpTelemetryClient()
+	store, err := storage.NewStateDBStorage(levelDBPath, &node.NodeContent, tempTelemetryClient, id)
+	if err != nil {
+		return nil, fmt.Errorf("NewStateDBStorage[port:%d] Err %v", port, err)
+	}
+	node.NodeContent.store = store
 	node.extrinsic_pool.SetGuaranteeDiscardCallback(node.handleGuaranteeDiscarded)
 	node.extrinsic_pool.SetPreimagesDiscardCallback(node.handlePreimageDiscarded)
 	// Initialize with a no-op telemetry client by default (can be replaced with InitTelemetry)
@@ -2364,7 +2359,7 @@ func (n *Node) assureNewBlock(ctx context.Context, b *types.Block, sdb *statedb.
 					return
 				}
 
-				if err := n.assureData(ctx, g); err != nil {
+				if err := n.assureData(ctx, g, sdb); err != nil {
 					log.Error(log.DA, "assureNewBlock: assureData failed", "n", n.String(), "err", err)
 					errCh <- err
 				}
@@ -2713,9 +2708,21 @@ func NewJamState() *statedb.JamState {
 }
 
 func (n *NodeContent) getTargetStateDB(blockNumber string) (*statedb.StateDB, error) {
-	// Handle "latest" - return current stateDB
+	_, sdb, err := n.getTargetStateDBWithRoot(blockNumber)
+	return sdb, err
+}
+
+// getTargetStateDBWithRoot returns both the StateDB and the verkleRoot for a given block number
+func (n *NodeContent) getTargetStateDBWithRoot(blockNumber string) (common.Hash, *statedb.StateDB, error) {
+	// Handle "latest" - return current stateDB with current verkle root
 	if blockNumber == "latest" || blockNumber == "" {
-		return n.statedb, nil
+		sdb, ok := n.store.(*storage.StateDBStorage)
+		if !ok {
+			return common.Hash{}, nil, fmt.Errorf("storage is not StateDBStorage")
+		}
+		verkleRootBytes := sdb.CurrentVerkleTree.Commit().Bytes()
+		currentVerkleRoot := common.BytesToHash(verkleRootBytes[:])
+		return currentVerkleRoot, n.statedb, nil
 	}
 
 	// Handle "earliest" - block 0
@@ -2725,35 +2732,43 @@ func (n *NodeContent) getTargetStateDB(blockNumber string) (*statedb.StateDB, er
 
 	// Handle "pending" - treat as latest for now
 	if blockNumber == "pending" {
-		return n.statedb, nil
+		sdb, ok := n.store.(*storage.StateDBStorage)
+		if !ok {
+			return common.Hash{}, nil, fmt.Errorf("storage is not StateDBStorage")
+		}
+		verkleRootBytes := sdb.CurrentVerkleTree.Commit().Bytes()
+		currentVerkleRoot := common.BytesToHash(verkleRootBytes[:])
+		return currentVerkleRoot, n.statedb, nil
 	}
 
 	// Parse hex string
 	if !strings.HasPrefix(blockNumber, "0x") {
-		return nil, fmt.Errorf("invalid block number format: %s", blockNumber)
+		return common.Hash{}, nil, fmt.Errorf("invalid block number format: %s", blockNumber)
 	}
 
-	// Check if this is a 32-byte hash (66 chars: "0x" + 64 hex chars) - treat as stateRoot
+	// Check if this is a 32-byte hash (66 chars: "0x" + 64 hex chars) - treat as verkleRoot
 	if len(blockNumber) == 66 {
-		stateRoot := common.HexToHash(blockNumber)
-		return n.getStateDBByStateRoot(stateRoot)
+		verkleRoot := common.HexToHash(blockNumber)
+		sdb, err := n.getStateDBByStateRoot(verkleRoot)
+		return verkleRoot, sdb, err
 	}
 
 	// Parse as block number (shorter hex string)
 	blockNum, err := strconv.ParseUint(blockNumber[2:], 16, 32)
 	if err != nil {
-		return nil, fmt.Errorf("invalid block number: %s", blockNumber)
+		return common.Hash{}, nil, fmt.Errorf("invalid block number: %s", blockNumber)
 	}
 
-	// Fetch the block to get its stateRoot
+	// Fetch the block to get its verkleRoot
 	// Use EVMServiceCode for now - could be parameterized if needed
 	block, err := n.statedb.ReadBlockByNumber(statedb.EVMServiceCode, uint32(blockNum))
 	if err != nil {
-		return nil, fmt.Errorf("failed to read block %d: %v", blockNum, err)
+		return common.Hash{}, nil, fmt.Errorf("failed to read block %d: %v", blockNum, err)
 	}
 
-	// Look up stateDB by stateRoot
-	return n.getStateDBByStateRoot(block.StateRoot)
+	// Look up stateDB by verkleRoot
+	sdb, err := n.getStateDBByStateRoot(block.VerkleRoot)
+	return block.VerkleRoot, sdb, err
 }
 
 // getStateDBByStateRoot looks up a StateDB by its stateRoot in the statedbMap

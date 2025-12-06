@@ -12,23 +12,23 @@
 //! - Logs → Receipt objects
 
 use crate::receipt::{TransactionReceiptRecord, receipt_object_id_from_receipt, serialize_receipt};
-use crate::sharding::{
-    ContractStorage, EvmEntry, ShardData, ShardId, serialize_shard, serialize_ssr,
+use crate::contractsharding::{
+    ContractShard, ContractStorage, EvmEntry, ShardId,
 };
-use crate::sharding::{code_object_id, shard_object_id, ssr_object_id};
-use crate::state::{MajikBackend, balance_storage_key, h160_from_low_u64_be, nonce_storage_key};
+use crate::contractsharding::{code_object_id, contract_shard_object_id};
+use crate::state::MajikBackend;
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     format,
     vec::Vec,
 };
+use primitive_types::U256;
 use evm::backend::OverlayedChangeSet;
 use primitive_types::{H160, H256};
 use utils::effects::{WriteEffectEntry, WriteIntent};
-use utils::functions::{log_crit, log_debug, log_error, log_info};
+use utils::functions::{log_debug, log_info};
 use utils::objects::{ObjectId, ObjectRef};
-use utils::tracking::TrackerOutput;
-
+use crate::format_object_id;
 impl MajikBackend {
     /// Build a mapping from object IDs to transaction indices that wrote to them
     /// This tracking (of which transactions modified which objects) is critical for
@@ -37,30 +37,25 @@ impl MajikBackend {
     #[allow(dead_code)]
     fn build_object_tx_map(
         &self,
-        tracker_output: &TrackerOutput,
     ) -> BTreeMap<[u8; 32], BTreeSet<usize>> {
-        let mut object_tx_map: BTreeMap<[u8; 32], BTreeSet<usize>> = BTreeMap::new();
-        for write in &tracker_output.writes {
+        let object_tx_map: BTreeMap<[u8; 32], BTreeSet<usize>> = BTreeMap::new();
+        // Note: tracker_output no longer available - function is unused anyway
+        /*for write in &tracker_output.writes {
             let tx_index = write.tx_index;
             match &write.key.kind {
-                utils::tracking::WriteKind::Storage(key) => {
-                    let shard_id = self.resolve_shard_id_impl(write.key.address, *key);
-                    let object_id = shard_object_id(write.key.address, shard_id);
+                utils::tracking::WriteKind::Storage(_key) => {
+                    let object_id = contract_shard_object_id(write.key.address);
                     object_tx_map.entry(object_id).or_default().insert(tx_index);
                 }
                 utils::tracking::WriteKind::TransientStorage(_) => {}
                 utils::tracking::WriteKind::Balance => {
                     let system_contract = h160_from_low_u64_be(0x01);
-                    let storage_key = balance_storage_key(write.key.address);
-                    let shard_id = self.resolve_shard_id_impl(system_contract, storage_key);
-                    let object_id = shard_object_id(system_contract, shard_id);
+                    let object_id = contract_shard_object_id(system_contract);
                     object_tx_map.entry(object_id).or_default().insert(tx_index);
                 }
                 utils::tracking::WriteKind::Nonce => {
                     let system_contract = h160_from_low_u64_be(0x01);
-                    let storage_key = nonce_storage_key(write.key.address);
-                    let shard_id = self.resolve_shard_id_impl(system_contract, storage_key);
-                    let object_id = shard_object_id(system_contract, shard_id);
+                    let object_id = contract_shard_object_id(system_contract);
                     object_tx_map.entry(object_id).or_default().insert(tx_index);
                 }
                 utils::tracking::WriteKind::Code => {
@@ -68,8 +63,7 @@ impl MajikBackend {
                     object_tx_map.entry(object_id).or_default().insert(tx_index);
                 }
                 utils::tracking::WriteKind::StorageReset => {
-                    let object_id = ssr_object_id(write.key.address);
-                    object_tx_map.entry(object_id).or_default().insert(tx_index);
+                    // Post-SSR: No SSR metadata to track
                 }
                 utils::tracking::WriteKind::Delete => {
                     let code_object = code_object_id(write.key.address);
@@ -77,22 +71,14 @@ impl MajikBackend {
                         .entry(code_object)
                         .or_default()
                         .insert(tx_index);
-                    let ssr_object = ssr_object_id(write.key.address);
-                    object_tx_map
-                        .entry(ssr_object)
-                        .or_default()
-                        .insert(tx_index);
+                    // Post-SSR: No SSR metadata to track
                 }
                 utils::tracking::WriteKind::Create => {
-                    let ssr_object = ssr_object_id(write.key.address);
-                    object_tx_map
-                        .entry(ssr_object)
-                        .or_default()
-                        .insert(tx_index);
+                    // Post-SSR: No SSR metadata to track
                 }
                 utils::tracking::WriteKind::Log => {}
             }
-        }
+        }*/
 
         object_tx_map
     }
@@ -102,80 +88,38 @@ impl MajikBackend {
     fn prepare_storage_changes(
         &self,
         change_set: &OverlayedChangeSet,
+        _write_tx_index: &BTreeMap<crate::state::WriteKey, u32>,
         _work_package_hash: [u8; 32],
-        _tracker_output: &TrackerOutput,
+
         _write_intents: &mut Vec<WriteIntent>,
     ) -> (
-        BTreeMap<H160, BTreeMap<ShardId, Vec<(H256, H256)>>>,
+        BTreeMap<H160, Vec<(H256, H256)>>,  // Post-SSR: Single shard per address
         BTreeSet<H160>,
     ) {
-        // 2. Handle storage changes - group by address and shard
-        let mut storage_by_address: BTreeMap<H160, BTreeMap<ShardId, Vec<(H256, H256)>>> =
-            BTreeMap::new();
+        // Post-SSR: Group by address only (single root shard per contract)
+        let mut storage_by_address: BTreeMap<H160, Vec<(H256, H256)>> = BTreeMap::new();
         for ((address, key), value) in &change_set.storages {
-            let shard_id = self.resolve_shard_id_impl(*address, *key);
             storage_by_address
                 .entry(*address)
-                .or_insert_with(BTreeMap::new)
-                .entry(shard_id)
                 .or_insert_with(Vec::new)
                 .push((*key, *value));
         }
 
-        if !change_set.balances.is_empty() || !change_set.nonces.is_empty() {
-            let system_contract = h160_from_low_u64_be(0x01);
-            let mut system_shards: BTreeMap<ShardId, Vec<(H256, H256)>> = BTreeMap::new();
+        // NOTE: In Verkle mode, balance/nonce changes are written directly to the Verkle tree
+        // as BasicData leaf values by the Go overlay commit, NOT as contract storage to 0x01.
+        // This legacy USDM-based mirroring is disabled in Verkle mode.
+        // The balance/nonce caches are still updated in to_execution_effects (lines 629-640)
+        // to maintain consistency for subsequent reads within the same block.
 
-            for (address, balance) in &change_set.balances {
-                let storage_key = balance_storage_key(*address);
-                let mut encoded = [0u8; 32];
-                balance.to_big_endian(&mut encoded);
-                let value = H256::from(encoded);
-                let shard_id = self.resolve_shard_id_impl(system_contract, storage_key);
-                system_shards
-                    .entry(shard_id)
-                    .or_insert_with(Vec::new)
-                    .push((storage_key, value));
-            }
+        // VERKLE MODE: Skip contract 0x01 storage writes (handled by Verkle tree directly)
+        // if !change_set.balances.is_empty() || !change_set.nonces.is_empty() {
+        //     let system_contract = h160_from_low_u64_be(0x01);
+        //     ... (commented out for Verkle mode)
+        // }
 
-            for (address, nonce) in &change_set.nonces {
-                let storage_key = nonce_storage_key(*address);
-                let mut encoded = [0u8; 32];
-                nonce.to_big_endian(&mut encoded);
-                let value = H256::from(encoded);
-                let shard_id = self.resolve_shard_id_impl(system_contract, storage_key);
-                system_shards
-                    .entry(shard_id)
-                    .or_insert_with(Vec::new)
-                    .push((storage_key, value));
-            }
+        let contract_addresses = storage_by_address.keys().copied().collect::<BTreeSet<_>>();
 
-            if !system_shards.is_empty() {
-                let entry = storage_by_address
-                    .entry(system_contract)
-                    .or_insert_with(BTreeMap::new);
-                for (shard_id, entries) in system_shards {
-                    let shard_entries = entry.entry(shard_id).or_insert_with(Vec::new);
-
-                    for (key, value) in entries {
-                        // Keep existing shard value if contract storage already recorded it.
-                        // This prevents mirrored balance writes (used for native token bookkeeping)
-                        // from overwriting ERC-20 storage updates that already deducted transfers.
-                        if shard_entries
-                            .iter()
-                            .any(|(existing_key, _)| *existing_key == key)
-                        {
-                            continue;
-                        }
-                        shard_entries.push((key, value));
-                    }
-                }
-            }
-        }
-
-        let ssr_addresses = storage_by_address.keys().copied().collect::<BTreeSet<_>>();
-
-        (storage_by_address, ssr_addresses)
+        (storage_by_address, contract_addresses)
     }
 
     /// Process meta-shards AFTER export: group ObjectRef writes by meta-shard and export to DA
@@ -186,24 +130,12 @@ impl MajikBackend {
         work_package_hash: [u8; 32],
         object_refs: &[(ObjectId, ObjectRef)],
         service_id: u32,
+        payload_type: u8,
     ) -> Vec<WriteIntent> {
-        use crate::meta_sharding::{meta_shard_object_id, serialize_meta_shard_with_id};
-        use crate::sharding::ObjectKind;
+        use crate::meta_sharding::meta_shard_object_id;
+        use crate::contractsharding::ObjectKind;
         use utils::effects::WriteEffectEntry;
-/*
-        use utils::functions::log_info;
-        for (idx, (object_id, object_ref)) in object_refs.iter().enumerate() {
-            log_info(&format!(
-                "  [{}] object_id={:?}, ref_info={{wph: {:?}, idx_start: {}, payload_len: {}, kind: {}}}",
-                idx,
-                object_id,
-                object_ref.work_package_hash,
-                object_ref.index_start,
-                object_ref.payload_length,
-                object_ref.object_kind
-            ));
-        }
- */
+
         // Collect all (object_id, ObjectRef) pairs from write_intents
         // NOTE: At this point ref_info.index_start has correct values since exports have already happened.
         let object_writes: Vec<([u8; 32], utils::objects::ObjectRef)> = object_refs
@@ -222,6 +154,7 @@ impl MajikBackend {
             &mut cached_meta_shards,
             &mut meta_ssr,
             service_id,
+            payload_type,
         );
         let mut meta_write_intents = Vec::with_capacity(meta_shard_writes.len());
 
@@ -230,11 +163,11 @@ impl MajikBackend {
             // Serialize meta-shard to DA segment format with shard_id header
             // Note: merkle_root was already computed in process_meta_shards
             let merkle_root = crate::meta_sharding::compute_entries_bmt_root(&meta_write.entries);
-            let meta_shard = crate::da::ShardData {
+            let meta_shard = crate::meta_sharding::MetaShard {
                 merkle_root,
                 entries: meta_write.entries.clone(),
             };
-            let meta_shard_bytes = serialize_meta_shard_with_id(&meta_shard, meta_write.shard_id);
+            let meta_shard_bytes = meta_shard.serialize_with_id(meta_write.shard_id, crate::meta_sharding::META_SHARD_MAX_ENTRIES);
 
             // Compute object_id for this meta-shard
             let object_id = meta_shard_object_id(
@@ -243,15 +176,15 @@ impl MajikBackend {
                 &meta_write.shard_id.prefix56,
             );
 
-            log_info(&format!(
-                "📤 EXPORTING MetaShard: object_id={}, shard_id=(ld={}, prefix={:02x}{:02x}...), {} entries, payload_len={}, object_kind={}",
-                crate::sharding::format_object_id(&object_id),
-                meta_write.shard_id.ld,
-                meta_write.shard_id.prefix56[0], meta_write.shard_id.prefix56[1],
-                meta_write.entries.len(),
-                meta_shard_bytes.len(),
-                ObjectKind::MetaShard as u8
-            ));
+            // log_info(&format!(
+            //     "📤 EXPORTING MetaShard: object_id={}, shard_id=(ld={}, prefix={:02x}{:02x}...), {} entries, payload_len={}, object_kind={}",
+            //     crate::contractsharding::format_object_id(&object_id),
+            //     meta_write.shard_id.ld,
+            //     meta_write.shard_id.prefix56[0], meta_write.shard_id.prefix56[1],
+            //     meta_write.entries.len(),
+            //     meta_shard_bytes.len(),
+            //     ObjectKind::MetaShard as u8
+            // ));
 
             // Create ObjectRef for this meta-shard
             let object_ref = utils::objects::ObjectRef::new(
@@ -267,8 +200,8 @@ impl MajikBackend {
                     object_id,
                     ref_info: object_ref,
                     payload: meta_shard_bytes,
+                    tx_index: 0,  // TODO: Track per-transaction writes to attribute correctly
                 },
-                dependencies: Vec::new(),
             });
         }
 
@@ -283,17 +216,13 @@ impl MajikBackend {
         meta_write_intents
     }
 
-    /// Emit placeholder (v0) receipts as write intents.
-    ///
-    /// This is the Phase 1 path: it emits version 0 receipts (placeholders)
-    /// so refine can ship transaction data before canonical fields are known.
-    /// Phase 2 will later replace these with version 1 receipts.
+
     fn emit_receipts_and_block(
         &self,
         receipts: &[TransactionReceiptRecord],
         work_package_hash: [u8; 32],
         write_intents: &mut Vec<WriteIntent>,
-        state_root: [u8; 32],
+        verkle_root: [u8; 32],
         timeslot: u32,
         total_gas_used: u64,
     ) {
@@ -301,8 +230,6 @@ impl MajikBackend {
         use utils::functions::log_info;
         use utils::hash_functions::keccak256;
 
-        let initial_count = write_intents.len();
-        let receipts_count = receipts.len();
 
         // Collect transaction hashes and receipt hashes for block assembly
         let mut tx_hashes = Vec::with_capacity(receipts.len());
@@ -330,7 +257,7 @@ impl MajikBackend {
             let receipt_object_ref = utils::objects::ObjectRef::new(
                 work_package_hash,
                 receipt_payload.len() as u32,
-                crate::sharding::ObjectKind::Receipt as u8,
+                crate::contractsharding::ObjectKind::Receipt as u8,
             );
 
             write_intents.push(WriteIntent {
@@ -338,22 +265,26 @@ impl MajikBackend {
                     object_id: receipt_object_id,
                     ref_info: receipt_object_ref,
                     payload: receipt_payload,
+                    tx_index: 0,  // TODO: Track per-transaction writes to attribute correctly
                 },
-                dependencies: Vec::new(),
             });
         }
 
-        let added_count = write_intents.len() - initial_count;
-        if receipts_count != added_count {
-            log_error(&format!(
-                "ERROR: Receipts mismatch: {} receipts → {} write intents",
-                receipts_count, added_count
-            ));
-        } else if receipts_count > 0 {
-            log_debug(&format!(
-                "Receipts: {} receipts → write intents",
-                receipts_count
-            ));
+
+        log_info(&format!(
+            "DRAFT BLOCK: {} txns, verkleroot={}, timestamp={}, total_gas_used={}",
+            receipts.len(),
+            format_object_id(&verkle_root),
+            timeslot,
+            total_gas_used
+        ));
+
+        // Log tx_hashes and receipt_hashes
+        for (i, tx_hash) in tx_hashes.iter().enumerate() {
+            log_info(&format!("  tx_hash[{}]: {}", i, hex::encode(tx_hash)));
+        }
+        for (i, receipt_hash) in receipt_hashes.iter().enumerate() {
+            log_info(&format!("  receipt_hash[{}]: {}", i, hex::encode(receipt_hash)));
         }
 
         // Assemble EvmBlockPayload
@@ -362,9 +293,10 @@ impl MajikBackend {
             num_transactions: receipts.len() as u32,
             timestamp: timeslot,
             gas_used: total_gas_used,
-            state_root,
+            verkle_root,
             transactions_root: [0u8; 32], // Will be computed by prepare_for_da_export
             receipt_root: [0u8; 32],      // Will be computed by prepare_for_da_export
+            block_access_list_hash: [0u8; 32], // TODO: Compute from BAL in refine
             tx_hashes,
             receipt_hashes,
         };
@@ -380,16 +312,16 @@ impl MajikBackend {
         block_payload.payload_length = serialized.len() as u32;
         serialized = block_payload.serialize();
 
-        log_info(&format!(
-            "📦 Block assembled: {} txs, {} gas, {} bytes",
-            block_payload.num_transactions, block_payload.gas_used, block_payload.payload_length
-        ));
+        // log_info(&format!(
+        //     "📦 Block assembled: {} txs, {} gas, {} bytes",
+        //     block_payload.num_transactions, block_payload.gas_used, block_payload.payload_length
+        // ));
 
         // Export block to DA
         let block_object_ref = utils::objects::ObjectRef::new(
             work_package_hash,
             block_payload.payload_length,
-            crate::sharding::ObjectKind::Block as u8,
+            crate::contractsharding::ObjectKind::Block as u8,
         );
 
         write_intents.push(WriteIntent {
@@ -397,81 +329,9 @@ impl MajikBackend {
                 object_id: work_package_hash,
                 ref_info: block_object_ref,
                 payload: serialized,
+                tx_index: 0,  // TODO: Track per-transaction writes to attribute correctly
             },
-            dependencies: Vec::new(),
         });
-    }
-
-    /// Process storage resets (SELFDESTRUCT or full contract storage clear) and generate write intents
-    /// Returns the number of write intents added
-    fn process_storage_resets(
-        &self,
-        storage_resets: &BTreeSet<H160>,
-        work_package_hash: [u8; 32],
-        tracker_output: &TrackerOutput,
-        write_intents: &mut Vec<WriteIntent>,
-    ) -> usize {
-        let initial_count = write_intents.len();
-        let changes_count = storage_resets.len();
-
-        for address in storage_resets {
-            log_info(&format!("  Storage reset for contract {:?}", address));
-            // Reset creates new empty SSR with incremented version
-            if let Some(contract_storage) = self.storage_shards.borrow().get(address) {
-                let ssr_object_id_val = ssr_object_id(*address);
-
-                // Create new SSR with empty entries but incremented version
-                let reset_header = crate::sharding::SSRHeader {
-                    global_depth: 0,
-                    entry_count: 0,
-                    total_keys: 0,
-                    version: contract_storage.ssr.header.version + 1,
-                };
-                let reset_ssr = crate::sharding::ssr_from_parts(reset_header, Vec::new());
-
-                let ssr_payload = serialize_ssr(&reset_ssr);
-
-                let object_ref = utils::objects::ObjectRef::new(
-                    work_package_hash,
-                    ssr_payload.len() as u32,
-                    crate::sharding::ObjectKind::SsrMetadata as u8,
-                );
-
-                // Filter out self-dependencies to prevent version conflicts
-                let dependencies: Vec<ObjectId> = tracker_output
-                    .block_reads
-                    .iter()
-                    .filter(|dep| **dep != ssr_object_id_val)
-                    .cloned()
-                    .collect();
-
-                log_debug(&format!(
-                    "  SSR reset: {:?} (version={}, {} deps)",
-                    address,
-                    reset_ssr.header.version,
-                    dependencies.len()
-                ));
-
-                write_intents.push(WriteIntent {
-                    effect: WriteEffectEntry {
-                        object_id: ssr_object_id_val,
-                        ref_info: object_ref,
-                        payload: ssr_payload,
-                    },
-                    dependencies,
-                });
-            }
-        }
-
-        let added_count = write_intents.len() - initial_count;
-        if changes_count > 0 || added_count > 0 {
-            log_debug(&format!(
-                "Storage resets: {} changes → {} write intents",
-                changes_count, added_count
-            ));
-        }
-
-        added_count
     }
 
     /// Process account deletions (SELFDESTRUCT) and generate write intents
@@ -480,7 +340,7 @@ impl MajikBackend {
         &self,
         deletes: &BTreeSet<H160>,
         work_package_hash: [u8; 32],
-        tracker_output: &TrackerOutput,
+        
         write_intents: &mut Vec<WriteIntent>,
     ) -> usize {
         let initial_count = write_intents.len();
@@ -495,21 +355,12 @@ impl MajikBackend {
             let object_ref = utils::objects::ObjectRef::new(
                 work_package_hash,
                 0, // Empty payload = deleted
-                crate::sharding::ObjectKind::Code as u8,
+                crate::contractsharding::ObjectKind::Code as u8,
             );
 
-            // Filter out self-dependencies to prevent version conflicts
-            let dependencies: Vec<ObjectId> = tracker_output
-                .block_reads
-                .iter()
-                .filter(|dep| **dep != code_object_id_val)
-                .cloned()
-                .collect();
-
             log_debug(&format!(
-                "  Code deletion: {:?} ({} deps)",
+                "  Code deletion: {:?}",
                 address,
-                dependencies.len()
             ));
 
             write_intents.push(WriteIntent {
@@ -517,8 +368,8 @@ impl MajikBackend {
                     object_id: code_object_id_val,
                     ref_info: object_ref,
                     payload: Vec::new(), // Empty payload for deletion
+                    tx_index: 0,  // TODO: Track per-transaction writes to attribute correctly
                 },
-                dependencies,
             });
         }
 
@@ -538,8 +389,9 @@ impl MajikBackend {
     fn process_code_changes(
         &self,
         codes: &BTreeMap<H160, Vec<u8>>,
+        write_tx_index: &BTreeMap<crate::state::WriteKey, u32>,
         work_package_hash: [u8; 32],
-        tracker_output: &TrackerOutput,
+
         write_intents: &mut Vec<WriteIntent>,
     ) -> usize {
         let initial_count = write_intents.len();
@@ -552,22 +404,20 @@ impl MajikBackend {
             let object_ref = utils::objects::ObjectRef::new(
                 work_package_hash,
                 bytecode.len() as u32,
-                crate::sharding::ObjectKind::Code as u8,
+                crate::contractsharding::ObjectKind::Code as u8,
             );
 
-            // Collect dependencies - filter out self-dependencies to prevent version conflicts
-            let dependencies: Vec<ObjectId> = tracker_output
-                .block_reads
-                .iter()
-                .filter(|dep| **dep != object_id)
-                .cloned()
-                .collect();
+            // Lookup tx_index for this code write
+            let tx_index = write_tx_index
+                .get(&crate::state::WriteKey::Code(*address))
+                .copied()
+                .unwrap_or(0);
 
             log_debug(&format!(
-                "  Code write: {:?} ({} bytes, {} deps)",
+                "  Code write: {:?} ({} bytes) tx_index={}",
                 address,
                 bytecode.len(),
-                dependencies.len()
+                tx_index
             ));
 
             write_intents.push(WriteIntent {
@@ -575,8 +425,8 @@ impl MajikBackend {
                     object_id,
                     ref_info: object_ref,
                     payload: bytecode.clone(),
+                    tx_index,
                 },
-                dependencies,
             });
         }
 
@@ -591,28 +441,152 @@ impl MajikBackend {
         added_count
     }
 
-    /// Process a single shard - merges existing + new entries, checks for split
-    /// Returns the number of write intents added (1 for normal, 2 for split)
+    fn process_balance_changes(
+        &self,
+        balances: &BTreeMap<H160, U256>,
+        write_tx_index: &BTreeMap<crate::state::WriteKey, u32>,
+        work_package_hash: [u8; 32],
+        write_intents: &mut Vec<WriteIntent>,
+    ) -> usize {
+        let initial_count = write_intents.len();
+        let balances_count = balances.len();
+
+        for (address, balance) in balances {
+            // Serialize balance: U256 → 32 bytes, then take rightmost 16 bytes
+            let mut balance_bytes_full = [0u8; 32];
+            balance.to_big_endian(&mut balance_bytes_full);
+            let balance_bytes = &balance_bytes_full[16..32]; // Take rightmost 16 bytes
+
+            // Create object_id: [20B address][11B zero][1B kind=0x02]
+            let mut object_id = [0u8; 32];
+            object_id[0..20].copy_from_slice(address.as_bytes());
+            object_id[31] = crate::contractsharding::ObjectKind::Balance as u8;
+
+            // Create ObjectRef
+            let object_ref = utils::objects::ObjectRef::new(
+                work_package_hash,
+                16, // balance is 16 bytes
+                crate::contractsharding::ObjectKind::Balance as u8,
+            );
+
+            // Lookup tx_index for this balance write
+            let tx_index = write_tx_index
+                .get(&crate::state::WriteKey::Balance(*address))
+                .copied()
+                .unwrap_or(0);
+
+            log_debug(&format!(
+                "  Balance write: {:?} ({}) tx_index={}",
+                address,
+                balance,
+                tx_index
+            ));
+
+            write_intents.push(WriteIntent {
+                effect: WriteEffectEntry {
+                    object_id,
+                    ref_info: object_ref,
+                    payload: balance_bytes.to_vec(),
+                    tx_index,
+                },
+            });
+        }
+
+        let added_count = write_intents.len() - initial_count;
+        if balances_count > 0 || added_count > 0 {
+            log_debug(&format!(
+                "Balance changes: {} changes → {} write intents",
+                balances_count, added_count
+            ));
+        }
+
+        added_count
+    }
+
+    fn process_nonce_changes(
+        &self,
+        nonces: &BTreeMap<H160, U256>,
+        write_tx_index: &BTreeMap<crate::state::WriteKey, u32>,
+        work_package_hash: [u8; 32],
+        write_intents: &mut Vec<WriteIntent>,
+    ) -> usize {
+        let initial_count = write_intents.len();
+        let nonces_count = nonces.len();
+
+        for (address, nonce) in nonces {
+            // Serialize nonce as 8 bytes (big-endian)
+            let mut nonce_bytes = [0u8; 8];
+            let nonce_u64 = nonce.low_u64();
+            nonce_bytes.copy_from_slice(&nonce_u64.to_be_bytes());
+
+            // Create object_id: [20B address][11B zero][1B kind=0x06]
+            let mut object_id = [0u8; 32];
+            object_id[0..20].copy_from_slice(address.as_bytes());
+            object_id[31] = crate::contractsharding::ObjectKind::Nonce as u8;
+
+            // Create ObjectRef
+            let object_ref = utils::objects::ObjectRef::new(
+                work_package_hash,
+                8, // nonce is 8 bytes
+                crate::contractsharding::ObjectKind::Nonce as u8,
+            );
+
+            // Lookup tx_index for this nonce write
+            let tx_index = write_tx_index
+                .get(&crate::state::WriteKey::Nonce(*address))
+                .copied()
+                .unwrap_or(0);
+
+            log_debug(&format!(
+                "  Nonce write: {:?} ({}) tx_index={}",
+                address,
+                nonce,
+                tx_index
+            ));
+
+            write_intents.push(WriteIntent {
+                effect: WriteEffectEntry {
+                    object_id,
+                    ref_info: object_ref,
+                    payload: nonce_bytes.to_vec(),
+                    tx_index,
+                },
+            });
+        }
+
+        let added_count = write_intents.len() - initial_count;
+        if nonces_count > 0 || added_count > 0 {
+            log_debug(&format!(
+                "Nonce changes: {} changes → {} write intents",
+                nonces_count, added_count
+            ));
+        }
+
+        added_count
+    }
+
+    /// Process a single shard - merges existing + new entries and creates write intent
+    /// Post-SSR: No shard splitting, always creates exactly 1 write intent
+    /// Returns the number of write intents added (always 1)
     fn process_single_shard(
         &self,
         address: H160,
         shard_id: ShardId,
         entries: Vec<(H256, H256)>,
         work_package_hash: [u8; 32],
-        tracker_output: &TrackerOutput,
+        
         write_intents: &mut Vec<WriteIntent>,
     ) -> usize {
         // Build ShardData - merge with existing shard entries
         let mut entries_map: BTreeMap<H256, H256> = BTreeMap::new();
-        let mut previous_entry_count = 0usize;
 
         // First, add all existing entries from the shard (if it exists)
         if let Some(contract_storage) = self.storage_shards.borrow().get(&address) {
-            if let Some(existing_shard) = contract_storage.shards.get(&shard_id) {
-                previous_entry_count = existing_shard.entries.len();
-                for entry in &existing_shard.entries {
-                    entries_map.insert(entry.key_h, entry.value);
-                }
+            // Post-SSR: Single shard per contract, no shard_id lookup needed
+            let existing_shard = &contract_storage.shard;
+
+            for entry in &existing_shard.entries {
+                entries_map.insert(entry.key_h, entry.value);
             }
         }
 
@@ -627,197 +601,28 @@ impl MajikBackend {
         }
         shard_entries.sort_by_key(|entry| entry.key_h);
 
-        let shard_data = ShardData {
-            merkle_root: [0u8; 32], // TODO: Compute BMT root for contract shards
+        let shard_data = ContractShard {
             entries: shard_entries,
         };
 
-        // Check if shard needs to be split due to exceeding threshold
-        // Use recursive splitter to handle cascading splits
-        if let Some((leaf_shards, ssr_entries)) =
-            crate::sharding::maybe_split_shard_recursive(shard_id, &shard_data)
-        {
-            self.handle_shard_split_recursive(
-                address,
-                shard_id,
-                &shard_data,
-                leaf_shards,
-                ssr_entries,
-                work_package_hash,
-                write_intents,
-                previous_entry_count,
-            )
-        } else {
-            self.handle_normal_shard_write(
-                address,
-                shard_id,
-                shard_data,
-                work_package_hash,
-                tracker_output,
-                write_intents,
-            )
-        }
-    }
+        // Post-SSR: contract_shard_object_id() always uses ld=0 (no shard_id param)
+        let object_id = contract_shard_object_id(address);
 
-    /// Handle recursive shard split - creates write intents for all leaf shards
-    /// and updates SSR with internal split entries
-    /// Returns the number of write intents added
-    fn handle_shard_split_recursive(
-        &self,
-        address: H160,
-        original_shard_id: ShardId,
-        original_shard_data: &crate::sharding::ContractShard,
-        leaf_shards: Vec<(ShardId, crate::sharding::ContractShard)>,
-        ssr_entries: Vec<crate::sharding::SSREntry>,
-        work_package_hash: [u8; 32],
-        write_intents: &mut Vec<WriteIntent>,
-        previous_entry_count: usize,
-    ) -> usize {
-        let new_entry_count = original_shard_data.entries.len();
-        let num_leaf_shards = leaf_shards.len();
-        let num_ssr_entries = ssr_entries.len();
-
-        log_info(&format!(
-            "Pre-split shard snapshot: shard_id={:?} entries={}",
-            original_shard_id, new_entry_count
-        ));
-
-        let delta_entries = new_entry_count.saturating_sub(previous_entry_count);
-        log_info(&format!(
-            "Recursive split triggered - threshold exceeded (prev_entries={}, total_after_updates={}, delta={}) → {} leaf shards, {} SSR entries",
-            previous_entry_count, new_entry_count, delta_entries, num_leaf_shards, num_ssr_entries
-        ));
-
-        // Verify all leaf shards meet constraints
-        const MAX_ENTRIES: usize = 63;
-        for (i, (_shard_id, shard_data)) in leaf_shards.iter().enumerate() {
-            if shard_data.entries.len() > MAX_ENTRIES {
-                log_crit(&format!(
-                    "❌ FATAL: Leaf shard {} has {} entries, exceeds hard limit of {}!",
-                    i,
-                    shard_data.entries.len(),
-                    MAX_ENTRIES
-                ));
-                #[cfg(debug_assertions)]
-                panic!("Leaf shard exceeds DA segment limit after recursive split");
-            }
-        }
-
-        // Remove the original unsplit parent shard to avoid stale data
-        {
-            let mut storage_shards_mut = self.storage_shards.borrow_mut();
-            if let Some(contract_storage) = storage_shards_mut.get_mut(&address) {
-                contract_storage.shards.remove(&original_shard_id);
-            }
-        }
-
-        // Process each leaf shard
-        for (i, (shard_id, shard_data)) in leaf_shards.iter().enumerate() {
-            let entry_count = shard_data.entries.len();
-
-            log_info(&format!(
-                "  Leaf shard {}/{}: ld={}, entries={}",
-                i + 1,
-                num_leaf_shards,
-                shard_id.ld,
-                entry_count
-            ));
-
-            // Serialize and create write intent for this shard
-            let payload = serialize_shard(shard_data);
-            let object_id = shard_object_id(address, *shard_id);
-
-            let object_ref = utils::objects::ObjectRef::new(
-                work_package_hash,
-                payload.len() as u32,
-                crate::sharding::ObjectKind::StorageShard as u8,
-            );
-
-            write_intents.push(WriteIntent {
-                effect: WriteEffectEntry {
-                    object_id,
-                    ref_info: object_ref,
-                    payload,
-                },
-                dependencies: Vec::new(), // TODO: Add proper dependencies
-            });
-
-            // Store shard in local cache
-            {
-                let mut storage_shards_mut = self.storage_shards.borrow_mut();
-                let contract_storage = storage_shards_mut
-                    .entry(address)
-                    .or_insert_with(|| ContractStorage::new(address));
-                contract_storage
-                    .shards
-                    .insert(*shard_id, shard_data.clone());
-            }
-        }
-
-        // Update SSR metadata with internal split entries
-        // Key insight: binary tree with N leaves has N-1 internal nodes (splits)
-        // We only add SSR entries for the internal splits, not for the leaves
-        {
-            let mut storage_shards_mut = self.storage_shards.borrow_mut();
-            let contract_storage = storage_shards_mut
-                .entry(address)
-                .or_insert_with(|| ContractStorage::new(address));
-
-            for ssr_entry in ssr_entries {
-                contract_storage.ssr.entries.push(ssr_entry);
-                contract_storage.ssr.header.entry_count += 1;
-            }
-            contract_storage.ssr.header.version += 1;
-        }
-
-        log_info(&format!(
-            "✅ Recursive split complete: {} entries → {} leaf shards, {} SSR entries, {} write intents created",
-            new_entry_count, num_leaf_shards, num_ssr_entries, num_leaf_shards
-        ));
-
-        num_leaf_shards
-    }
-
-    /// Handle normal (non-split) shard write
-    /// Returns the number of write intents added (always 1)
-    fn handle_normal_shard_write(
-        &self,
-        address: H160,
-        shard_id: ShardId,
-        shard_data: crate::sharding::ContractShard,
-        work_package_hash: [u8; 32],
-        tracker_output: &TrackerOutput,
-        write_intents: &mut Vec<WriteIntent>,
-    ) -> usize {
-        let object_id = shard_object_id(address, shard_id);
-
-        // Dump entries for debugging
-        // crate::sharding::dump_entries(&shard_data);
-
-        let payload = serialize_shard(&shard_data);
+        let payload = shard_data.serialize();
 
         // Create ObjectRef for this shard
         let object_ref = utils::objects::ObjectRef::new(
             work_package_hash,
             payload.len() as u32,
-            crate::sharding::ObjectKind::StorageShard as u8,
+            crate::contractsharding::ObjectKind::StorageShard as u8,
         );
 
-        // Collect dependencies - all reads from this shard
-        // Filter out self-dependencies (same object_id and version) to prevent version conflicts
-        let dependencies: Vec<ObjectId> = tracker_output
-            .block_reads
-            .iter()
-            .filter(|dep| **dep != object_id)
-            .cloned()
-            .collect();
 
         log_debug(&format!(
-            "  Shard write: {:?} shard_id={:?} ({} entries, {} deps)",
+            "  Shard write: {:?} shard_id={:?} ({} entries)",
             address,
             shard_id,
             shard_data.entries.len(),
-            dependencies.len()
         ));
 
         write_intents.push(WriteIntent {
@@ -825,8 +630,8 @@ impl MajikBackend {
                 object_id,
                 ref_info: object_ref,
                 payload,
+                tx_index: 0,  // TODO: Track per-transaction writes to attribute correctly
             },
-            dependencies,
         });
 
         // Update storage_shards with the new shard data so subsequent reads see updated values
@@ -835,78 +640,11 @@ impl MajikBackend {
             let contract_storage = storage_shards_mut
                 .entry(address)
                 .or_insert_with(|| ContractStorage::new(address));
-            contract_storage.shards.insert(shard_id, shard_data);
+            // Post-SSR: Single shard per contract, directly assign
+            contract_storage.shard = shard_data;
         }
 
         1
-    }
-
-    /// Export SSR metadata for the provided addresses after shard updates have been applied.
-    fn export_updated_ssr_metadata(
-        &self,
-        addresses: &BTreeSet<H160>,
-        work_package_hash: [u8; 32],
-        tracker_output: &TrackerOutput,
-        write_intents: &mut Vec<WriteIntent>,
-    ) {
-        for address in addresses {
-            let ssr_object_id_val = ssr_object_id(*address);
-
-            let (ssr_payload, ssr_version, ssr_entry_count) = {
-                let mut storage_shards = self.storage_shards.borrow_mut();
-                let Some(contract_storage) = storage_shards.get_mut(address) else {
-                    continue;
-                };
-
-                // Update metadata counts based on latest shard contents
-                let total_keys: u32 = contract_storage
-                    .shards
-                    .values()
-                    .map(|shard| shard.entries.len() as u32)
-                    .sum();
-                contract_storage.ssr.header.total_keys = total_keys;
-                contract_storage.ssr.header.entry_count = contract_storage.ssr.entries.len() as u32;
-
-                let payload = serialize_ssr(&contract_storage.ssr);
-                (
-                    payload,
-                    contract_storage.ssr.header.version,
-                    contract_storage.ssr.entries.len(),
-                )
-            };
-
-            let object_ref = utils::objects::ObjectRef::new(
-                work_package_hash,
-                ssr_payload.len() as u32,
-                crate::sharding::ObjectKind::SsrMetadata as u8,
-            );
-
-            // Filter out self-dependencies to prevent version conflicts
-            let dependencies: Vec<ObjectId> = tracker_output
-                .block_reads
-                .iter()
-                .filter(|dep| **dep != ssr_object_id_val)
-                .cloned()
-                .collect();
-
-            log_debug(&format!(
-                "  SSR write: {:?} (version={}, {} entries, {} bytes, {} deps)",
-                address,
-                ssr_version,
-                ssr_entry_count,
-                ssr_payload.len(),
-                dependencies.len()
-            ));
-
-            write_intents.push(WriteIntent {
-                effect: WriteEffectEntry {
-                    object_id: ssr_object_id_val,
-                    ref_info: object_ref,
-                    payload: ssr_payload,
-                },
-                dependencies,
-            });
-        }
     }
 
     /// Process storage shard changes and generate write intents
@@ -914,8 +652,9 @@ impl MajikBackend {
     fn process_storage_shards(
         &self,
         change_set: &OverlayedChangeSet,
+        write_tx_index: &BTreeMap<crate::state::WriteKey, u32>,
         work_package_hash: [u8; 32],
-        tracker_output: &TrackerOutput,
+
         write_intents: &mut Vec<WriteIntent>,
     ) -> usize {
         let initial_count = write_intents.len();
@@ -924,34 +663,27 @@ impl MajikBackend {
         let nonce_changes_count = change_set.nonces.len();
 
         // Gather storage changes and track which contracts require SSR metadata updates
-        let (storage_by_address, ssr_addresses) = self.prepare_storage_changes(
+        // Phase 4: ssr_addresses no longer used since SSR export is disabled
+        let (storage_by_address, _ssr_addresses) = self.prepare_storage_changes(
             change_set,
+            write_tx_index,
             work_package_hash,
-            tracker_output,
+
             write_intents,
         );
 
-        // Serialize each modified shard
-        for (address, shards) in storage_by_address {
-            for (shard_id, entries) in shards {
-                self.process_single_shard(
-                    address,
-                    shard_id,
-                    entries,
-                    work_package_hash,
-                    tracker_output,
-                    write_intents,
-                );
-            }
+        // Post-SSR: Serialize single shard per contract
+        let root_shard_id = ShardId::root();
+        for (address, entries) in storage_by_address {
+            self.process_single_shard(
+                address,
+                root_shard_id,
+                entries,
+                work_package_hash,
+
+                write_intents,
+            );
         }
-
-        // Export SSR metadata after shards reflect the latest mutations
-        self.export_updated_ssr_metadata(
-            &ssr_addresses,
-            work_package_hash,
-            tracker_output,
-            write_intents,
-        );
 
         let added_count = write_intents.len() - initial_count;
         let total_changes = storage_changes_count + balance_changes_count + nonce_changes_count;
@@ -980,17 +712,35 @@ impl MajikBackend {
     /// - `write_intents`: Vec<WriteIntent> where each WriteIntent contains:
     ///   - `object_id`: 32-byte ObjectId (shard/code/ssr/receipt)
     ///   - `payload`: Serialized DA segments
-    ///   - `dependencies`: Vec<ObjectId> from TrackerOutput
     pub fn to_execution_effects(
         &self,
         change_set: &OverlayedChangeSet,
-        tracker_output: &TrackerOutput,
+        write_tx_index: &BTreeMap<crate::state::WriteKey, u32>,
         work_package_hash: [u8; 32],
         receipts: &[TransactionReceiptRecord],
-        state_root: [u8; 32],
+        verkle_root: [u8; 32],
         timeslot: u32,
         total_gas_used: u64,
     ) -> utils::effects::ExecutionEffects {
+        let balance_count = change_set.balances.len();
+        let nonce_count = change_set.nonces.len();
+        if let Some((addr, bal)) = change_set.balances.iter().next() {
+            log_info(&format!(
+                "to_execution_effects: balances={} (first {:?}={})",
+                balance_count, addr, bal
+            ));
+        } else {
+            log_info("to_execution_effects: balances=0");
+        }
+        if let Some((addr, nonce)) = change_set.nonces.iter().next() {
+            log_info(&format!(
+                "to_execution_effects: nonces={} (first {:?}={})",
+                nonce_count, addr, nonce
+            ));
+        } else {
+            log_info("to_execution_effects: nonces=0");
+        }
+
         {
             let mut balance_cache = self.balances.borrow_mut();
             for (address, balance) in &change_set.balances {
@@ -1005,47 +755,68 @@ impl MajikBackend {
             }
         }
 
-        let mut write_intents = Vec::new();
+        let mut write_intents: Vec<WriteIntent> = Vec::new();
+        let mut contract_intents: Vec<WriteIntent> = Vec::new();
 
         // 1. Handle storage resets (SELFDESTRUCT or full contract storage clear)
-        self.process_storage_resets(
-            &change_set.storage_resets,
-            work_package_hash,
-            &tracker_output,
-            &mut write_intents,
-        );
+        // TODO:  export storage shard tombstones if needed
+
 
         // 2. Handle storage changes - group by address and shard, export SSR, and process shards
         self.process_storage_shards(
             change_set,
+            write_tx_index,
             work_package_hash,
-            &tracker_output,
-            &mut write_intents,
+
+            &mut contract_intents,
         );
 
         // 3. Handle code changes
         self.process_code_changes(
             &change_set.codes,
+            write_tx_index,
             work_package_hash,
-            &tracker_output,
-            &mut write_intents,
+
+            &mut contract_intents,
+        );
+
+        // 3a. Handle balance changes
+        log_info(&format!("🔧 Processing {} balance changes", change_set.balances.len()));
+        self.process_balance_changes(
+            &change_set.balances,
+            write_tx_index,
+            work_package_hash,
+            &mut contract_intents,
+        );
+
+        // 3b. Handle nonce changes
+        log_info(&format!("🔧 Processing {} nonce changes", change_set.nonces.len()));
+        self.process_nonce_changes(
+            &change_set.nonces,
+            write_tx_index,
+            work_package_hash,
+            &mut contract_intents,
         );
 
         // 4. Handle account deletions (SELFDESTRUCT)
         self.process_account_deletions(
             &change_set.deletes,
             work_package_hash,
-            &tracker_output,
+            
             &mut write_intents,
         );
 
         // 5. Handle receipts and assemble block
         if total_gas_used > 0 {
+            log_info(&format!(
+                "📝 Emitting block with verkle_root (POST-state root): {}",
+                format_object_id(&verkle_root)
+            ));
             self.emit_receipts_and_block(
                 receipts,
                 work_package_hash,
                 &mut write_intents,
-                state_root,
+                verkle_root,
                 timeslot,
                 total_gas_used,
             );
@@ -1054,6 +825,6 @@ impl MajikBackend {
         // This ensures ObjectRefs have correct index_start values before being
         // embedded in meta-shard entries.
 
-        utils::effects::ExecutionEffects { write_intents }
+        utils::effects::ExecutionEffects { write_intents, contract_intents }
     }
 }

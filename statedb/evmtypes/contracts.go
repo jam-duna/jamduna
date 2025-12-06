@@ -17,10 +17,12 @@ type Precompile struct {
 
 var PRECOMPILES = []Precompile{
 	{common.HexToAddress("0x01"), "../services/evm/contracts/usdm-runtime.bin"},
-	{common.HexToAddress("0xFF"), "../services/evm/contracts/math-runtime.bin"},
+	{common.HexToAddress("0x02"), "../services/evm/contracts/gov-runtime.bin"},
+	{common.HexToAddress("0x03"), "../services/evm/contracts/math-runtime.bin"},
 }
 var UsdmAddress = PRECOMPILES[0].Address
-var MathAddress = PRECOMPILES[1].Address
+var GovAddress = PRECOMPILES[1].Address
+var MathAddress = PRECOMPILES[2].Address
 var IssuerAddress = common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266")
 
 // ObjectKind represents the type of DA object, matching the Rust enum
@@ -262,6 +264,41 @@ func ResolveShardID(ssr *SSRData, key common.Hash) ShardID {
 	}
 }
 
+// ParseShardPayload parses a storage shard payload into a list of EvmEntry items
+// Post-SSR Format: [2B count] + [entries: 32B key_h + 32B value] * count
+// No merkle_root field after witness transition
+func ParseShardPayload(shardPayload []byte) ([]EvmEntry, error) {
+	// Check minimum size (2 bytes count)
+	if len(shardPayload) < 2 {
+		return nil, fmt.Errorf("shard payload too small: %d bytes", len(shardPayload))
+	}
+
+	// Parse entry count (2 bytes little-endian)
+	entryCount := binary.LittleEndian.Uint16(shardPayload[0:2])
+	expectedLen := 2 + (int(entryCount) * 64)
+
+	if len(shardPayload) < expectedLen {
+		return nil, fmt.Errorf("shard payload truncated: expected %d bytes, got %d", expectedLen, len(shardPayload))
+	}
+
+	// Parse all entries
+	entries := make([]EvmEntry, entryCount)
+	offset := 2
+	for i := uint16(0); i < entryCount; i++ {
+		keyHash := shardPayload[offset : offset+32]
+		value := shardPayload[offset+32 : offset+64]
+
+		entries[i] = EvmEntry{
+			KeyH:  common.BytesToHash(keyHash),
+			Value: common.BytesToHash(value),
+		}
+
+		offset += 64
+	}
+
+	return entries, nil
+}
+
 // ParseSSRPayloadForStorageKey parses the SSR payload (shard data) to find the value for a given storage key
 func ParseSSRPayloadForStorageKey(ssrPayload []byte, storageKey common.Hash) (common.Hash, error) {
 	// Parse SSR shard data format based on services/evm/src/da.rs:serialize_shard
@@ -327,4 +364,78 @@ func ParseSSRPayloadForStorageKey(ssrPayload []byte, storageKey common.Hash) (co
 		"searchedEntries", entryCount)
 
 	return common.Hash{}, nil
+}
+
+// EvmEntry represents a storage key-value pair (64 bytes total)
+// Mirrors Rust EvmEntry from contractsharding.rs
+type EvmEntry struct {
+	KeyH  common.Hash // Storage key hash (32 bytes)
+	Value common.Hash // Storage value (32 bytes)
+}
+
+// ContractShard represents a single storage shard for a contract
+// Mirrors Rust ContractShard from contractsharding.rs
+// Post-SSR: No merkle_root field after witness transition
+type ContractShard struct {
+	ShardID ShardID    // Shard identifier (ld + prefix56)
+	Entries []EvmEntry // Sorted by KeyH
+}
+
+// Serialize serializes ContractShard to DA format
+// Post-SSR Format: [2B count][entries: 32B key_h + 32B value]
+func (cs *ContractShard) Serialize() []byte {
+	result := make([]byte, 2+len(cs.Entries)*64)
+	binary.LittleEndian.PutUint16(result[0:2], uint16(len(cs.Entries)))
+
+	offset := 2
+	for _, entry := range cs.Entries {
+		copy(result[offset:offset+32], entry.KeyH[:])
+		copy(result[offset+32:offset+64], entry.Value[:])
+		offset += 64
+	}
+	return result
+}
+
+// DeserializeContractShard deserializes ContractShard from DA format
+// Post-SSR Format: [2B count][entries]
+func DeserializeContractShard(data []byte) (*ContractShard, error) {
+	if len(data) < 2 {
+		return nil, fmt.Errorf("ContractShard payload too small: %d bytes", len(data))
+	}
+
+	cs := &ContractShard{
+		Entries: make([]EvmEntry, 0),
+	}
+
+	entryCount := binary.LittleEndian.Uint16(data[0:2])
+	expectedLen := 2 + int(entryCount)*64
+	if len(data) < expectedLen {
+		return nil, fmt.Errorf("ContractShard payload truncated: expected %d, got %d", expectedLen, len(data))
+	}
+
+	offset := 2
+	for i := uint16(0); i < entryCount; i++ {
+		entry := EvmEntry{
+			KeyH:  common.BytesToHash(data[offset : offset+32]),
+			Value: common.BytesToHash(data[offset+32 : offset+64]),
+		}
+		cs.Entries = append(cs.Entries, entry)
+		offset += 64
+	}
+
+	return cs, nil
+}
+
+// ContractStorage represents complete storage for a contract
+// Mirrors Rust ContractStorage from contractsharding.rs
+// Post-SSR: Single flat shard per contract, SSR removed
+type ContractStorage struct {
+	Shard ContractShard // Single shard containing all contract storage
+}
+
+// VerkleMultiproof represents a verkle tree multiproof for state validation
+// Phase 2: Stub implementation - to be replaced with actual verkle proof library
+type VerkleMultiproof struct {
+	// Map of storage key hash to proof path
+	Proofs map[common.Hash][]common.Hash
 }

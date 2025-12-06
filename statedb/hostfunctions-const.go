@@ -80,6 +80,7 @@ var hostFnNames = map[int]string{
 
 	// Custom Host Functions
 	FETCH_WITNESS: "FETCH_WITNESS",
+	FETCH_VERKLE:  "FETCH_VERKLE",
 }
 
 // HostFnToName returns the human-readable name for a host function ID
@@ -121,8 +122,11 @@ const (
 	QUERY             = 22  // Query service
 	SOLICIT           = 23  // Solicit service
 	FORGET            = 24  // Forget service
-	YIELD             = 25  // Yield control
-	PROVIDE           = 26  // Provide data
-	LOG               = 100 // Debug logging
-	FETCH_WITNESS     = 254 // Majik CE139 fetch/cache
+	YIELD               = 25  // Yield control
+	PROVIDE             = 26  // Provide data
+	LOG                 = 100 // Debug logging
+	VERIFY_VERKLE_PROOF = 253 // Majik Verkle proof verification
+	FETCH_WITNESS       = 254 // Majik CE139 fetch/cache
+	FETCH_VERKLE        = 255 // Majik Verkle fetch (unified balance/nonce/code/storage)
+	COMPUTE_BAL_HASH    = 256 // Compute Block Access List hash from Verkle witness
 )

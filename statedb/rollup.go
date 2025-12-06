@@ -1,6 +1,7 @@
 package statedb
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -19,15 +20,11 @@ import (
 	ethereumCommon "github.com/ethereum/go-ethereum/common"
 	ethereumTypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-verkle"
 )
 
 const (
-	numRounds    = 5
-	txnsPerRound = 3
-
 	DefaultJAMChainID = 0x1107
-
-	verifyServiceProof = false
 )
 
 // Lazy initialization for bootstrap auth code hash
@@ -108,11 +105,13 @@ const (
 )
 
 // BuildPayload constructs a payload byte array for any payload type
-func BuildPayload(payloadType PayloadType, count int, numWitnesses int) []byte {
-	payload := make([]byte, 7)
+func BuildPayload(payloadType PayloadType, count int, globalDepth uint8, numWitnesses int, blockAccessListHash common.Hash) []byte {
+	payload := make([]byte, 40) // 1 + 4 + 1 + 2 + 32 = 40 bytes
 	payload[0] = byte(payloadType)
 	binary.LittleEndian.PutUint32(payload[1:5], uint32(count))
-	binary.LittleEndian.PutUint16(payload[5:7], uint16(numWitnesses))
+	payload[5] = globalDepth
+	binary.LittleEndian.PutUint16(payload[6:8], uint16(numWitnesses))
+	copy(payload[8:40], blockAccessListHash[:])
 	return payload
 }
 
@@ -572,8 +571,12 @@ func (c *Rollup) CallMath(mathAddress common.Address, callStrings []string) (txB
 	// Get caller account (using issuer account)
 	callerAddress, callerPrivKeyHex := common.GetEVMDevAccount(0)
 
+	// Get current verkle root for state queries
+	verkleRootBytes := c.storage.CurrentVerkleTree.Commit().Bytes()
+	currentVerkleRoot := common.BytesToHash(verkleRootBytes[:])
+
 	// Get initial nonce for the caller from current state
-	initialNonce, err := c.stateDB.GetTransactionCount(c.serviceID, callerAddress)
+	initialNonce, err := c.stateDB.GetTransactionCount(c.serviceID, callerAddress, currentVerkleRoot)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get transaction count for caller %s: %w", callerAddress.String(), err)
 	}
@@ -620,7 +623,10 @@ func (c *Rollup) CallMath(mathAddress common.Address, callStrings []string) (txB
 // SubmitEVMTransactions creates and submits a work package with raw transactions, processes it, and returns the resulting block
 func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte) ([]*types.WorkPackageBundle, error) {
 	bundles := make([]*types.WorkPackageBundle, len(evmTxsMulticore))
-
+	globalDepth, err := b.stateDB.ReadGlobalDepth(b.serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("ReadGlobalDepth failed: %v", err)
+	}
 	for coreIndex, evmTxs := range evmTxsMulticore {
 		if len(evmTxs) == 0 {
 			bundles[coreIndex] = nil
@@ -648,7 +654,7 @@ func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte) ([]*types.Wor
 
 		// Create work package
 		wp := DefaultWorkPackage(b.serviceID, service)
-		wp.WorkItems[0].Payload = BuildPayload(PayloadTypeTransactions, numTxExtrinsics, 0)
+		wp.WorkItems[0].Payload = BuildPayload(PayloadTypeBuilder, numTxExtrinsics, globalDepth, 0, common.Hash{})
 		wp.WorkItems[0].Extrinsics = hashes
 
 		//  BuildBundle should return a Bundle (with ImportedSegments)
@@ -660,7 +666,7 @@ func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte) ([]*types.Wor
 	}
 
 	// Process the bundles
-	err := b.processWorkPackageBundles(bundles)
+	err = b.processWorkPackageBundles(bundles)
 	if err != nil {
 		return nil, fmt.Errorf("processWorkPackageBundles failed: %w", err)
 	}
@@ -676,9 +682,7 @@ func (b *Rollup) ShowTxReceipts(evmBlock *evmtypes.EvmBlockPayload, txHashes []c
 	txIndexByHash := make(map[common.Hash]int, len(evmBlock.TxHashes))
 	for idx, hash := range evmBlock.TxHashes {
 		txIndexByHash[hash] = idx
-		fmt.Printf("ADDED txIndexByHash: %s -> %d\n", hash.String(), idx)
 	}
-	//	receiptCount := len(evmBlock.ReceiptHashes)
 
 	for _, txHash := range txHashes {
 		receipt, err := b.stateDB.GetTransactionReceipt(b.serviceID, txHash)
@@ -690,19 +694,12 @@ func (b *Rollup) ShowTxReceipts(evmBlock *evmtypes.EvmBlockPayload, txHashes []c
 			"txHash", txHash.String(),
 			"index", receipt.TransactionIndex,
 			"gasUsed", receipt.UsedGas)
-		//evmtypes.ShowEthereumLogs(txHash, receipt.Logs, allTopics)
-		// if verifyServiceProof {
-		// 	position := evmBlock.LogIndexStart + txIndex
-		// 	proof, err := b.stateDB.GenerateServiceProof(b.serviceID, b.stateDB.GetMMRStorageKey(), position, evmBlock.LogIndexStart, evmBlock.ReceiptHashes)
-		// 	if err != nil {
-		// 		log.Info(log.Node, "No receipt inclusion proof available", "position", position, "txHash", common.Str(txHash), "err", err)
-		// 	} else if proof.Verify() {
-		// 		log.Info(log.Node, "✓ Receipt inclusion proven via MMR", "position", position, "txHash", common.Str(txHash))
-		// 	} else {
-		// 		log.Warn(log.Node, "✗ Receipt inclusion proof verification failed", "position", position, "txHash", common.Str(txHash))
-		// 	}
-		// }
 
+		logs, err := evmtypes.ParseLogsFromReceipt(receipt.LogsData, receipt.TransactionHash, receipt.BlockNumber, receipt.BlockHash, receipt.TransactionIndex, receipt.LogIndexStart)
+		if err != nil {
+			return fmt.Errorf("failed to parse logs from receipt for %s: %w", txHash.String(), err)
+		}
+		evmtypes.ShowEthereumLogs(txHash, logs, allTopics)
 	}
 	log.Info(log.Node, description, "txCount", len(txHashes), "gasUsedTotal", gasUsedTotal.String())
 	return nil
@@ -757,52 +754,125 @@ type MappingEntry struct {
 }
 
 func (b *Rollup) SubmitEVMGenesis(startBalance int64) error {
-	// Set USDM initial balances and nonces
-	blobs := types.ExtrinsicsBlobs{}
-	workItems := []types.WorkItemExtrinsic{}
-	totalSupplyValue := new(big.Int).Mul(big.NewInt(startBalance), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+	log.Info(log.Node, "SubmitEVMGenesis - Initializing Verkle tree", "startBalance", startBalance)
 
-	usdmInitialState := []MappingEntry{
-		{Slot: 0, Key: evmtypes.IssuerAddress, Value: totalSupplyValue}, // balanceOf[issuer]
-		{Slot: 1, Key: evmtypes.IssuerAddress, Value: big.NewInt(1)},    // nonces[issuer]
+	// Get StateDBStorage to access Verkle tree
+	sdb, ok := b.stateDB.sdb.(*storage.StateDBStorage)
+	if !ok {
+		return fmt.Errorf("StateDB storage is not StateDBStorage")
 	}
 
-	InitializeMappings(&blobs, &workItems, evmtypes.UsdmAddress, usdmInitialState)
+	// Initialize empty Verkle tree
+	sdb.CurrentVerkleTree = verkle.New()
 
-	numExtrinsics := len(workItems)
-	log.Info(log.Node, "SubmitEVMGenesis (genesis)", "numExtrinsics", numExtrinsics)
+	// Convert startBalance to Wei (18 decimals)
+	balanceWei := new(big.Int).Mul(big.NewInt(startBalance), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
 
-	service, ok, err := b.stateDB.GetService(b.serviceID)
-	if err != nil || !ok {
-		return fmt.Errorf("EVM service not found: %v", err)
+	// Get issuer account address
+	issuerAddress, _ := common.GetEVMDevAccount(0)
+
+	log.Info(log.Node, "Initializing genesis account", "address", issuerAddress.Hex(), "balance", balanceWei.String())
+
+	// 1. Insert account BasicData (balance + nonce)
+	// BasicData format: [version(1) | reserved(4) | code_size(3) | nonce(8) | balance(16)] = 32 bytes
+	var basicData [32]byte
+	basicData[0] = 0 // version = 0
+
+	// code_size = 0 (EOA, no code)
+	basicData[5] = 0
+	basicData[6] = 0
+	basicData[7] = 0
+
+	// nonce = 1 (8 bytes at offset 8-15, big-endian per EIP-6800)
+	nonce := uint64(1)
+	binary.BigEndian.PutUint64(basicData[8:16], nonce)
+
+	// balance = balanceWei (16 bytes at offset 16-31, big-endian per EIP-6800)
+	balanceBytes := balanceWei.Bytes()
+	if len(balanceBytes) > 16 {
+		return fmt.Errorf("balance too large: %d bytes", len(balanceBytes))
+	}
+	// big.Int.Bytes() returns big-endian, which is correct for EIP-6800
+	// Copy to offset 16, right-aligned (pad left with zeros if needed)
+	copy(basicData[32-len(balanceBytes):32], balanceBytes)
+
+	// Insert BasicData into Verkle tree
+	basicDataKey := evmtypes.BasicDataKey(issuerAddress[:])
+	if err := sdb.CurrentVerkleTree.Insert(basicDataKey, basicData[:], nil); err != nil {
+		return fmt.Errorf("failed to insert BasicData: %w", err)
 	}
 
-	// Create work package with updated witness count and refine context
-	wp := DefaultWorkPackage(b.serviceID, service)
-	wp.RefineContext = b.stateDB.GetRefineContext()
-	wp.WorkItems[0].Payload = BuildPayload(PayloadTypeGenesis, numExtrinsics, 0)
-	wp.WorkItems[0].Extrinsics = workItems
+	log.Info(log.Node, "Inserted BasicData", "key", common.Bytes2Hex(basicDataKey), "balance", balanceWei.String(), "nonce", nonce)
 
-	// Genesis exports: Storage SSRs + MetaShard + MetaSSR
-	// The exact count depends on how many storage shards are created
-	wp.WorkItems[0].ExportCount = uint16(3)
-	/*
-		1 SSR metadata object (13 bytes)
-		1 Storage shard (162 bytes: 2 entries × 64 bytes + overhead)
-		1 Meta-shard (249 bytes: 3 entries × 69 bytes + overhead)
-	*/
-	log.Info(log.Node, "WorkPackage RefineContext", "state_root", wp.RefineContext.StateRoot.Hex(), "anchor", wp.RefineContext.Anchor.Hex())
-	bundle := &types.WorkPackageBundle{
-		WorkPackage:   wp,
-		ExtrinsicData: []types.ExtrinsicsBlobs{blobs},
+	// 2. Insert system contracts 0x01 and 0x02 code
+	systemContracts := []struct {
+		address common.Address
+		code    []byte
+	}{
+		{
+			address: common.HexToAddress("0x0000000000000000000000000000000000000001"),
+			code:    []byte{0x60, 0x00, 0x60, 0x00, 0xf3}, // Minimal contract: PUSH1 0 PUSH1 0 RETURN
+		},
+		{
+			address: common.HexToAddress("0x0000000000000000000000000000000000000002"),
+			code:    []byte{0x60, 0x00, 0x60, 0x00, 0xf3}, // Minimal contract: PUSH1 0 PUSH1 0 RETURN
+		},
 	}
 
-	err = b.processWorkPackageBundles([]*types.WorkPackageBundle{bundle})
+	for _, sc := range systemContracts {
+		codeHash := crypto.Keccak256Hash(sc.code)
+
+		// Insert code via InsertCode (handles chunking, code hash, and BasicData update)
+		if err := evmtypes.InsertCode(sdb.CurrentVerkleTree, sc.address[:], sc.code, codeHash[:]); err != nil {
+			return fmt.Errorf("failed to insert code for %s: %w", sc.address.Hex(), err)
+		}
+
+		log.Info(log.Node, "Inserted system contract", "address", sc.address.Hex(), "codeSize", len(sc.code), "codeHash", codeHash.Hex())
+	}
+
+	// 3. Compute and log Verkle root
+	verkleRoot := sdb.CurrentVerkleTree.Commit()
+	verkleRootBytes := verkleRoot.Bytes()
+	verkleRootHash := common.BytesToHash(verkleRootBytes[:])
+
+	// Store the verkle tree at this root for future queries
+	if err := sdb.StoreVerkleTransition(verkleRootHash, sdb.CurrentVerkleTree); err != nil {
+		return fmt.Errorf("failed to store verkle transition: %w", err)
+	}
+
+	log.Info(log.Node, "✅ SubmitEVMGenesis complete", "verkleRoot", verkleRootHash.Hex())
+
+	// 4. Verify reads work
+	balanceHash, err := b.stateDB.GetBalance(b.serviceID, issuerAddress, verkleRootHash)
 	if err != nil {
-		return fmt.Errorf("processWorkPackageBundles failed: %w", err)
+		return fmt.Errorf("GetBalance failed: %w", err)
+	}
+	// Convert Hash to big.Int for comparison
+	balanceRead := new(big.Int).SetBytes(balanceHash[:])
+	if balanceRead.Cmp(balanceWei) != 0 {
+		return fmt.Errorf("balance mismatch: expected %s, got %s", balanceWei.String(), balanceRead.String())
 	}
 
-	// Genesis bootstrap complete - return nil block (genesis doesn't produce transactions)
+	nonceRead, err := b.stateDB.GetTransactionCount(b.serviceID, issuerAddress, verkleRootHash)
+	if err != nil {
+		return fmt.Errorf("GetTransactionCount failed: %w", err)
+	}
+	if nonceRead != nonce {
+		return fmt.Errorf("nonce mismatch: expected %d, got %d", nonce, nonceRead)
+	}
+
+	for _, sc := range systemContracts {
+		code, err := b.stateDB.GetCode(b.serviceID, sc.address)
+		if err != nil {
+			return fmt.Errorf("GetCode failed for %s: %w", sc.address.Hex(), err)
+		}
+		if !bytes.Equal(code, sc.code) {
+			return fmt.Errorf("code mismatch for %s", sc.address.Hex())
+		}
+	}
+
+	log.Info(log.Node, "✅ Verified genesis state reads", "balance", balanceRead.String(), "nonce", nonceRead)
+
 	return nil
 }
 
@@ -819,13 +889,14 @@ type TransferTriple struct {
 // - Last round: intentionally large amounts to test insufficient balance handling
 // - Amounts vary by round to create interesting test cases
 func (b *Rollup) createTransferTriplesForRound(roundNum int, txnsPerRound int) []TransferTriple {
-	const numDevAccounts = 10 // Dev accounts 0-9
+	const numDevAccounts = 10
 	transfers := make([]TransferTriple, 0, txnsPerRound)
 
 	if roundNum == 0 {
 		// Special case for round 0: issuer distributes to all accounts
+		// Give each account 100 million wei (gasLimit=10M * gasPrice=1 + transfer amounts)
 		for i := 1; i < numDevAccounts; i++ {
-			amount := new(big.Int).Mul(big.NewInt(int64(0x9000000+i)), big.NewInt(1e12))
+			amount := big.NewInt(100_000_000)
 			transfers = append(transfers, TransferTriple{
 				SenderIndex:   0,
 				ReceiverIndex: i,
@@ -836,8 +907,9 @@ func (b *Rollup) createTransferTriplesForRound(roundNum int, txnsPerRound int) [
 	}
 	if roundNum == 1 {
 		// Special case for round 1: secondary transfers between accounts
+		// Each account sends 10000 wei to the next account (cycle: 1→2, 2→3, ..., 9→0)
 		for i := 1; i < numDevAccounts; i++ {
-			amount := new(big.Int).Mul(big.NewInt(int64(0x200000+i)), big.NewInt(1e9))
+			amount := big.NewInt(10_000)
 			transfers = append(transfers, TransferTriple{
 				SenderIndex:   i,
 				ReceiverIndex: (i + 1) % numDevAccounts,
@@ -859,8 +931,9 @@ func (b *Rollup) createTransferTriplesForRound(roundNum int, txnsPerRound int) [
 			receiver = rng.Intn(numDevAccounts-1) + 1
 		}
 
-		// Vary amounts by transaction to create interesting test cases
-		amount := new(big.Int).Mul(big.NewInt(int64(0x1000000*(i+1))), big.NewInt(1e6))
+		// Use much smaller amounts to avoid OutOfFund errors
+		// Amounts: 1000, 2000, 3000 wei (tiny amounts for testing)
+		amount := big.NewInt(int64((i + 1) * 1000))
 
 		log.Info(log.Node, "CREATETRANSFER", "Round", roundNum, "TxIndex", i, "sender", sender, "receiver", receiver, "amount", amount.String())
 
@@ -889,8 +962,12 @@ func (b *Rollup) DeployContract(contractFile string) (common.Address, error) {
 		return common.Address{}, fmt.Errorf("failed to parse deployer private key: %w", err)
 	}
 
+	// Get current verkle root for state queries
+	verkleRootBytes := b.storage.CurrentVerkleTree.Commit().Bytes()
+	currentVerkleRoot := common.BytesToHash(verkleRootBytes[:])
+
 	// Get current nonce for the deployer
-	nonce, err := b.stateDB.GetTransactionCount(b.serviceID, deployerAddress)
+	nonce, err := b.stateDB.GetTransactionCount(b.serviceID, deployerAddress, currentVerkleRoot)
 	if err != nil {
 		return common.Address{}, fmt.Errorf("failed to get transaction count: %w", err)
 	}
@@ -930,63 +1007,6 @@ func (b *Rollup) DeployContract(contractFile string) (common.Address, error) {
 	}
 
 	return contractAddress, nil
-}
-
-// BalanceOf calls the balanceOf(address) function on the USDM contract and validates the result
-func (b *Rollup) checkBalanceOf(account common.Address, expectedBalance common.Hash) error {
-	usdmAddress := common.HexToAddress("0x01")
-
-	calldataBalanceOf := make([]byte, 36)
-	balanceOfSelector, _ := getFunctionSelector("balanceOf(address)", []string{})
-	copy(calldataBalanceOf[0:4], balanceOfSelector[:])
-	// Encode address parameter (32 bytes, left-padded)
-	copy(calldataBalanceOf[16:36], account[:])
-
-	callResult, err := b.stateDB.Call(b.serviceID, account, &usdmAddress, 100000, 1000000000, 0, calldataBalanceOf, "latest", b.pvmBackend)
-	if err != nil {
-		return fmt.Errorf("Call balanceOf ERR: %v", err)
-	}
-
-	// Parse the result - should be a 32-byte uint256
-	if len(callResult) < 32 {
-		fmt.Printf("warn: Call balanceOf result too short: %d\n", len(callResult))
-		return fmt.Errorf("Call balanceOf result too short: %d", len(callResult))
-	}
-
-	actualBalance := new(big.Int).SetBytes(callResult[len(callResult)-32:])
-	expectedBalanceBig := new(big.Int).SetBytes(expectedBalance[:])
-	log.Trace(log.Node, "Call balanceOf result", "address", account.String(), "balance", actualBalance.String(), "expected", expectedBalanceBig.String())
-	if actualBalance.Cmp(expectedBalanceBig) != 0 {
-		return fmt.Errorf("Call balanceOf MISMATCH: expected %s, actual %s", expectedBalanceBig.String(), actualBalance.String())
-	}
-	return nil
-}
-
-// Nonces calls the nonces(address) function on the USDM contract and validates the result
-func (b *Rollup) checkNonces(account common.Address, expectedNonce *big.Int) error {
-	usdmAddress := common.HexToAddress("0x01")
-
-	calldataNonces := make([]byte, 36)
-	noncesSelector, _ := getFunctionSelector("nonces(address)", []string{})
-	copy(calldataNonces[0:4], noncesSelector[:])
-	// Encode address parameter (32 bytes, left-padded)
-	copy(calldataNonces[16:36], account[:])
-
-	nonceResult, err := b.stateDB.Call(b.serviceID, account, &usdmAddress, 100000, 1000000000, 0, calldataNonces, "latest", b.pvmBackend)
-	if err != nil {
-		return fmt.Errorf("Call nonces ERR: %v", err)
-	}
-
-	// Parse the result - should be a 32-byte uint256
-	if len(nonceResult) < 32 {
-		return fmt.Errorf("Call nonces result too short: %d", len(nonceResult))
-	}
-
-	actualNonce := new(big.Int).SetBytes(nonceResult[len(nonceResult)-32:])
-	if actualNonce.Cmp(expectedNonce) != 0 {
-		return fmt.Errorf("Call nonces MISMATCH: expected %s, actual %s", expectedNonce.String(), actualNonce.String())
-	}
-	return nil
 }
 
 // SaveWorkPackageBundle saves a WorkPackageBundle to disk using Encode

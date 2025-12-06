@@ -11,6 +11,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -203,9 +204,22 @@ func (vm *VM) hostFunction(host_fn int) (bool, error) {
 		vm.hostLog()
 		return true, nil
 
+	case VERIFY_VERKLE_PROOF: // 253
+		vm.hostVerifyVerkleProof()
+		return true, nil
+
 	case FETCH_WITNESS: // 254
 		vm.HostFetchWitness()
 		return true, nil
+
+	case FETCH_VERKLE: // 255
+		vm.hostFetchVerkle()
+		return true, nil
+
+	case COMPUTE_BAL_HASH: // 256
+		vm.hostComputeBALHash()
+		return true, nil
+
 	default:
 		vm.WriteRegister(7, WHAT)
 		return true, nil
@@ -810,11 +824,6 @@ func (vm *VM) hostFetch() {
 		SPECIFIC_ACCUMULATION_OPERAND_15              = 15 // 15: Specific Accumulation Operand (E(o[φ11]))
 	)
 
-	//CUSTOM hostfetch:
-	const (
-		CUSTOM_STATE_ROOT_FETCH = 250
-	)
-
 	// determine if allowed
 	// datatype:
 	switch mode {
@@ -837,7 +846,7 @@ func (vm *VM) hostFetch() {
 	case ModeAccumulate:
 		switch datatype {
 		//0, 1, 14, 15, 250
-		case PARAMETER_BYTE_0, ENTROPY_1, ALL_ACCUMULATION_OPERANDS_14, SPECIFIC_ACCUMULATION_OPERAND_15, CUSTOM_STATE_ROOT_FETCH:
+		case PARAMETER_BYTE_0, ENTROPY_1, ALL_ACCUMULATION_OPERANDS_14, SPECIFIC_ACCUMULATION_OPERAND_15:
 			allowed = true
 		default:
 			allowed = false
@@ -948,10 +957,6 @@ func (vm *VM) hostFetch() {
 				v_Bytes, _ = types.Encode(vm.AccumulateInputs[omega_11])
 				log.Trace(vm.logging, "FETCH E(o[w_11])", "w_11", omega_11, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "len", len(v_Bytes))
 			}
-		case CUSTOM_STATE_ROOT_FETCH:
-			// Return the parent state root (state before current block execution)
-			v_Bytes, _ = types.Encode(vm.hostenv.GetParentStateRoot())
-			log.Trace(vm.logging, "FETCH parent stateroot", "w_11", omega_11, "stateroot", fmt.Sprintf("%x", v_Bytes), "len", len(v_Bytes))
 
 		}
 	} else {
@@ -1019,6 +1024,7 @@ func (vm *VM) hostProvide() {
 
 		return
 	}
+	i = slices.Clone(i)
 	if omega_7 == NONE {
 		omega_7 = uint64(vm.Service_index)
 	}
@@ -1469,6 +1475,7 @@ func (vm *VM) hostWrite() {
 		log.Info(vm.logging, "WRITE RAM ERROR", "err", err_k)
 		return
 	}
+	mu_k = slices.Clone(mu_k)
 	key_len := uint64(len(mu_k)) // x in a_s(x,y) |y|
 	exists, oldValue, storage_source := a.ReadStorage(mu_k, vm.hostenv)
 	prevLen := uint64(len(oldValue))
@@ -1486,6 +1493,7 @@ func (vm *VM) hostWrite() {
 			log.Info(vm.logging, "WRITE RAM ERROR", "err", err)
 			return
 		}
+		v = slices.Clone(v)
 		val_len = uint64(len(v))
 	}
 	vm.DebugHostFunction(WRITE, "writing val 0x%x from address 0x%x, length %d", v, vo, vz)
@@ -1773,8 +1781,7 @@ func (vm *VM) hostExport() {
 		return
 	} else {
 		vm.WriteRegister(7, uint64(vm.ExportSegmentIndex)+uint64(len(vm.Exports)))
-		// fmt.Printf("[%s] EXPORT#%d OK p=%x z=%d vm.ExportSegmentIndex=%d len=%d\n",
-		// 	vm.ServiceMetadata, len(vm.Exports), p, z, vm.ExportSegmentIndex, len(y))
+		//fmt.Printf("[%s] EXPORT#%d OK %x (%d bytes)\n", vm.ServiceMetadata, len(vm.Exports), y[:z], z)
 		// vm.ExportSegmentIndex += 1
 		vm.Exports = append(vm.Exports, y)
 		vm.SetHostResultCode(OK)
@@ -1796,6 +1803,8 @@ func (vm *VM) hostMachine() {
 		vm.Panic(errCode)
 		return
 	}
+
+	p = slices.Clone(p)
 
 	if vm.RefineM_map == nil {
 		vm.RefineM_map = make(map[uint32]*RefineM)
@@ -1987,7 +1996,8 @@ func (vm *VM) hostLog() {
 		serviceMetadata = fmt.Sprintf("%s-child", serviceMetadata)
 	}
 	loggingVerbose := false
-	if vm.logging == log.FirstGuarantor || vm.logging == log.Auditor || vm.logging == log.Builder || vm.logging == log.PvmAuthoring || vm.logging == log.OtherGuarantor {
+	if vm.logging == log.FirstGuarantor || vm.logging == log.PvmAuthoring || vm.logging == log.Builder || vm.logging == log.OtherGuarantor {
+		// || vm.logging == log.Auditor
 		loggingVerbose = true
 	}
 	if !loggingVerbose {
@@ -2096,9 +2106,9 @@ func (vm *VM) HostFetchWitness() error {
 
 	// Log all fetch_object calls to track meta-shard fetches
 	log.Info(vm.logging, "🔍 HostFetchWitness called", "role", vm.logging, "object_id", object_id, "service_id", service_id)
+	fmt.Printf("🔍 HostFetchWitness called: role=%s, object_id=%s, service_id=%d\n", vm.logging, object_id.Hex(), service_id)
 
 	if vm.logging != log.Builder {
-		// TODO: avoid the host function
 		log.Info(vm.logging, "HostFetchWitness returning empty (not builder)", "role", vm.logging, "object_id", object_id)
 		vm.WriteRegister(7, 0)
 		// return nil
@@ -2119,17 +2129,134 @@ func (vm *VM) HostFetchWitness() error {
 		return nil
 	}
 
-	// Verify BMT proof for all objects including meta-shards
-	stateRoot := vm.hostenv.GetParentStateRoot()
-	if !trie.Verify(witness.ServiceID, witness.ObjectID.Bytes(), witness.Value, stateRoot.Bytes(), witness.Path) {
-		log.Error(log.SDB, "BMT Proof verification failed", "object_id", object_id)
-		return fmt.Errorf("BMT Proof verification failed for object %s", object_id)
+	// Phase 1: Check witness caches first (verkle tree witness transition)
+	// Extract address from objectID (first 20 bytes)
+	var address common.Address
+	copy(address[:], object_id[:20])
+
+	// Determine object kind from objectID byte 31
+	objectKind := evmtypes.ObjectKind(object_id[31])
+	fmt.Printf("🔍 HostFetchWitness: address=%s, objectKind=%d\n", address.Hex(), objectKind)
+
+	var payload []byte
+
+	// Get StateDB from hostenv
+	stateDB, ok := vm.hostenv.(*StateDB)
+	if ok {
+		switch objectKind {
+		case evmtypes.ObjectKindCode:
+			// Look up code from witness cache
+			if code, exists := stateDB.sdb.GetCode(address); exists {
+				payload = code
+				found = true
+				// Record as read dependency for witness export
+				if vm.codeWitness == nil {
+					vm.codeWitness = make(map[common.Address][]byte)
+				}
+				vm.codeWitness[address] = code
+				log.Trace(vm.logging, funcName+": ✅ Found code in witness cache", "address", address.Hex(), "codeSize", len(code))
+				fmt.Printf("✅ HostFetchWitness: Found code in witness cache: address=%s, codeSize=%d\n", address.Hex(), len(code))
+
+				// Create minimal witness for code
+				witness = &types.StateWitness{
+					ServiceID: service_id,
+					ObjectID:  object_id,
+					Payload:   payload,
+					Ref: types.ObjectRef{
+						WorkPackageHash: common.Hash{}, // Will be filled during export
+						PayloadLength:   uint32(len(payload)),
+						ObjectKind:      uint8(objectKind),
+					},
+				}
+			}
+
+		case evmtypes.ObjectKindStorageShard:
+			// Post-SSR: Always use root shard (ld=0)
+			shardID := evmtypes.ShardID{Ld: 0, Prefix56: [7]byte{}}
+
+			// Look up from witness cache
+			fmt.Printf("🔍 HostFetchWitness: Looking for storage in witness cache: address=%s\n", address.Hex())
+			if storageData, exists := stateDB.sdb.GetContractStorage(address); exists {
+				if contractStorage, ok := storageData.(evmtypes.ContractStorage); ok {
+					shard := contractStorage.Shard
+					payload = shard.Serialize()
+					found = true
+					// Record as read dependency for witness export
+					if vm.storageWitness == nil {
+						vm.storageWitness = make(map[common.Address]evmtypes.ContractStorage)
+					}
+					// Post-SSR: Store single shard
+					storage := evmtypes.ContractStorage{
+						Shard: shard,
+					}
+					vm.storageWitness[address] = storage
+					log.Trace(vm.logging, funcName+": ✅ Found storage shard in witness cache", "address", address.Hex(), "shardLD", shardID.Ld, "entryCount", len(shard.Entries))
+					fmt.Printf("✅ HostFetchWitness: Found storage shard in witness cache: address=%s, entries=%d\n", address.Hex(), len(shard.Entries))
+
+					// Create minimal witness for storage shard
+					witness = &types.StateWitness{
+						ServiceID: service_id,
+						ObjectID:  object_id,
+						Payload:   payload,
+						Ref: types.ObjectRef{
+							WorkPackageHash: common.Hash{}, // Will be filled during export
+							PayloadLength:   uint32(len(payload)),
+							ObjectKind:      uint8(objectKind),
+						},
+					}
+				} else {
+					log.Trace(vm.logging, funcName+": ❌ ContractStorage type assertion failed from witness cache", "address", address.Hex())
+				}
+			} else {
+				fmt.Printf("❌ HostFetchWitness: No storage found in witness cache for address=%s\n", address.Hex())
+
+				// Create minimal witness for storage shard
+				witness = &types.StateWitness{
+					ServiceID: service_id,
+					ObjectID:  object_id,
+					Payload:   payload,
+					Ref: types.ObjectRef{
+						WorkPackageHash: common.Hash{}, // Will be filled during export
+						PayloadLength:   uint32(len(payload)),
+						ObjectKind:      uint8(objectKind),
+					},
+				}
+			}
+		}
 	}
-	log.Info(log.SDB, "HostFetchWitness: BMT Proof verified", "object_id", object_id, "serviceID", witness.ServiceID,
-		"MetaShardKey", witness.ObjectID, "value", fmt.Sprintf("%x", witness.Value), "path", witness.Path, "stateRoot", stateRoot)
+
+	// If not found in cache, fall back to ReadObject (fetch from DA)
+	if !found {
+		// Witness path: use ReadStateWitness which returns complete witness with proof
+		// Pass FetchJAMDASegments=true to fetch payload and populate witness.Payload
+		// Use the service_id from register a0 instead of vm.Service_index to support cross-service imports
+		var err error
+		witness, found, err = vm.hostenv.ReadObject(service_id, object_id)
+		if err != nil {
+			// Object not found in meta-shard is normal (e.g., EOA has no code, uninitialized storage)
+			log.Trace(vm.logging, funcName+": ❌ ReadObject returned error", "object_id", object_id, "err", err)
+			vm.WriteRegister(7, 0) // Return 0 = not found
+			return nil
+		} else if !found {
+			log.Trace(vm.logging, funcName+": ❌ ReadObject returned found=false", "object_id", object_id)
+			vm.WriteRegister(7, 0)
+			return nil
+		}
+
+		// Verify BMT proof for all objects including meta-shards
+		stateRoot := vm.hostenv.GetStateRoot()
+		if !trie.Verify(witness.ServiceID, witness.ObjectID.Bytes(), witness.Value, stateRoot.Bytes(), witness.Path) {
+			log.Trace(log.SDB, "BMT Proof verification failed", "object_id", object_id, "serviceID", witness.ServiceID, "stateRoot", stateRoot)
+			// return fmt.Errorf("BMT Proof verification failed for object %s [stateRoot: %s]", object_id, stateRoot)
+		} else {
+			log.Trace(log.SDB, "HostFetchWitness: BMT Proof verified", "object_id", object_id, "serviceID", witness.ServiceID,
+				"MetaShardKey", witness.ObjectID, "value", fmt.Sprintf("%x", witness.Value), "path", witness.Path, "stateRoot", stateRoot)
+		}
+
+		payload = witness.Payload
+	}
 
 	objRef := witness.Ref
-	payload := witness.Payload
 
 	// Serialize ObjectRef (37 bytes compact format: 32B work_package_hash + 5B packed fields)
 	serialized := objRef.Serialize()
@@ -2176,9 +2303,47 @@ func (vm *VM) GetBuilderWitnesses() ([]types.ImportSegment, []types.StateWitness
 		witness  types.StateWitness
 	}
 
-	msWitnesses := vm.hostenv.GetWitnesses()
 	sortableRefs := make([]sortableWitness, 0)
 	importedSegments := make([]types.ImportSegment, 0)
+
+	// Phase 1: Export code witnesses (verkle tree witness transition)
+	for address, code := range vm.codeWitness {
+		objectID := evmtypes.CodeToObjectID(address)
+		witness := types.StateWitness{
+			ServiceID: vm.Service_index,
+			ObjectID:  objectID,
+			Ref: types.ObjectRef{
+				WorkPackageHash: common.Hash{}, // Will be filled by caller
+				PayloadLength:   uint32(len(code)),
+				ObjectKind:      uint8(evmtypes.ObjectKindCode),
+			},
+			Payload: code,
+		}
+		sortableRefs = append(sortableRefs, sortableWitness{objectID: objectID, witness: witness})
+		log.Trace(vm.logging, "GetBuilderWitnesses: exporting code witness", "address", address.Hex(), "codeSize", len(code))
+	}
+
+	// Post-SSR: Export single storage shard per contract
+	for address, contractStorage := range vm.storageWitness {
+		shardID := evmtypes.ShardID{Ld: 0, Prefix56: [7]byte{}}
+		shard := contractStorage.Shard
+		objectID := evmtypes.ShardToObjectID(address, shardID.ToBytes())
+		payload := shard.Serialize()
+		witness := types.StateWitness{
+			ServiceID: vm.Service_index,
+			ObjectID:  objectID,
+			Ref: types.ObjectRef{
+				WorkPackageHash: common.Hash{}, // Will be filled by caller
+				PayloadLength:   uint32(len(payload)),
+				ObjectKind:      uint8(evmtypes.ObjectKindStorageShard),
+			},
+			Payload: payload,
+		}
+		sortableRefs = append(sortableRefs, sortableWitness{objectID: objectID, witness: witness})
+		log.Trace(vm.logging, "GetBuilderWitnesses: exporting storage witness", "address", address.Hex(), "shardLD", shardID.Ld, "entryCount", len(shard.Entries))
+	}
+
+	msWitnesses := vm.hostenv.GetWitnesses()
 
 	for msobjectID, ms := range msWitnesses {
 		log.Trace(log.SDB, "Processing meta-shard witness", "metaShardObjectID", msobjectID)
@@ -2371,4 +2536,580 @@ func generateMetaShardInclusionProof(merkleRoot [32]byte, objectID common.Hash, 
 		"merkleRoot", fmt.Sprintf("%x", merkleRoot))
 
 	return proof, nil
+}
+
+// hostFetchVerkle implements the unified Verkle fetch host function
+// This is called by the EVM service (Rust) to fetch state from the Verkle tree
+//
+// Register layout:
+//
+//	r7: fetch_type (0=Balance, 1=Nonce, 2=Code, 3=CodeHash, 4=Storage)
+//	r8: address_ptr (pointer to 20-byte address)
+//	r9: key_ptr (pointer to 32-byte storage key, only for Storage)
+//	r10: output_ptr (pointer to output buffer)
+//	r11: output_max_len (0 = query size, >0 = fetch data)
+//
+// Returns (via r7):
+//
+//	Step 1 (output_max_len=0): actual size needed
+//	Step 2 (output_max_len>0): bytes written (0 = insufficient buffer or not found)
+func (vm *VM) hostFetchVerkle() {
+	fetchType := uint8(vm.ReadRegister(7))
+	addressPtr := uint32(vm.ReadRegister(8))
+	keyPtr := uint32(vm.ReadRegister(9))
+	outputPtr := uint32(vm.ReadRegister(10))
+	outputMaxLen := uint32(vm.ReadRegister(11))
+	txIndex := uint32(vm.ReadRegister(12))
+
+	// Get StateDB from hostenv
+	stateDB, ok := vm.hostenv.(*StateDB)
+	if !ok {
+		vm.WriteRegister(7, 0)
+		return
+	}
+
+	// Read address (20 bytes)
+	var address common.Address
+	addrBytes, errCode := vm.ReadRAMBytes(addressPtr, 20)
+	if errCode != OK {
+		vm.WriteRegister(7, 0)
+		return
+	}
+	copy(address[:], addrBytes)
+
+	vm.DebugHostFunction(FETCH_VERKLE, "fetchType=%d address=%s outputMaxLen=%d txIndex=%d",
+		fetchType, address.Hex(), outputMaxLen, txIndex)
+
+	switch fetchType {
+	case evmtypes.FETCH_BALANCE:
+		vm.fetchBalance(stateDB, address, outputPtr, outputMaxLen, txIndex)
+	case evmtypes.FETCH_NONCE:
+		vm.fetchNonce(stateDB, address, outputPtr, outputMaxLen, txIndex)
+	case evmtypes.FETCH_CODE:
+		vm.fetchCode(stateDB, address, outputPtr, outputMaxLen, txIndex)
+	case evmtypes.FETCH_CODE_HASH:
+		vm.fetchCodeHash(stateDB, address, outputPtr, outputMaxLen, txIndex)
+	case evmtypes.FETCH_STORAGE:
+		// Read storage key (32 bytes)
+		var storageKey [32]byte
+		keyBytes, errCode2 := vm.ReadRAMBytes(keyPtr, 32)
+		if errCode2 != OK {
+			vm.WriteRegister(7, 0)
+			return
+		}
+		copy(storageKey[:], keyBytes)
+		vm.fetchStorage(stateDB, address, storageKey, outputPtr, outputMaxLen, txIndex)
+	default:
+		// Unknown fetch type - return 0
+		vm.WriteRegister(7, 0)
+	}
+}
+
+// fetchBalance fetches balance from Verkle tree
+func (vm *VM) fetchBalance(stateDB *StateDB, address common.Address, outputPtr uint32, outputMaxLen uint32, txIndex uint32) {
+	// Step 1: Query size
+	if outputMaxLen == 0 {
+		vm.WriteRegister(7, 32) // Balance is always 32 bytes
+		return
+	}
+
+	// Step 2: Fetch data
+	if outputMaxLen < 32 {
+		vm.WriteRegister(7, 0) // Insufficient buffer
+		return
+	}
+
+	// Fetch balance via clean interface (no type casting, verkle logic in StateDBStorage)
+	balance, err := stateDB.sdb.FetchBalance(address, txIndex)
+	if err != nil {
+		log.Info(vm.logging, "fetchBalance error", "address", address.Hex(), "txIndex", txIndex, "err", err)
+		vm.WriteRegister(7, 0)
+		return
+	}
+
+	log.Info(vm.logging, "fetchBalance", "address", address.Hex(), "balanceBE", fmt.Sprintf("%x", balance[:]), "txIndex", txIndex)
+
+	// Write to output
+	if errCode := vm.WriteRAMBytes(outputPtr, balance[:]); errCode != OK {
+		vm.WriteRegister(7, 0)
+		return
+	}
+	vm.WriteRegister(7, 32)
+}
+
+// fetchNonce fetches nonce from Verkle tree
+func (vm *VM) fetchNonce(stateDB *StateDB, address common.Address, outputPtr uint32, outputMaxLen uint32, txIndex uint32) {
+	// Step 1: Query size
+	if outputMaxLen == 0 {
+		vm.WriteRegister(7, 32) // Nonce is always 32 bytes
+		return
+	}
+
+	// Step 2: Fetch data
+	if outputMaxLen < 32 {
+		vm.WriteRegister(7, 0) // Insufficient buffer
+		return
+	}
+
+	// Fetch nonce via clean interface (no type casting, verkle logic in StateDBStorage)
+	nonce, err := stateDB.sdb.FetchNonce(address, txIndex)
+	if err != nil {
+		log.Info(vm.logging, "fetchNonce error", "address", address.Hex(), "txIndex", txIndex, "err", err)
+		vm.WriteRegister(7, 0)
+		return
+	}
+
+	log.Info(vm.logging, "fetchNonce", "address", address.Hex(), "nonceBE", fmt.Sprintf("%x", nonce[:]), "txIndex", txIndex)
+
+	// Write to output
+	if errCode := vm.WriteRAMBytes(outputPtr, nonce[:]); errCode != OK {
+		vm.WriteRegister(7, 0)
+		return
+	}
+	vm.WriteRegister(7, 32)
+}
+
+// fetchCode fetches code from Verkle tree (two-step pattern)
+func (vm *VM) fetchCode(stateDB *StateDB, address common.Address, outputPtr uint32, outputMaxLen uint32, txIndex uint32) {
+	// Fetch code via clean interface (no type casting, verkle logic in StateDBStorage)
+	code, codeSize, err := stateDB.sdb.FetchCode(address, txIndex)
+	if err != nil {
+		log.Info(vm.logging, "fetchCode error", "address", address.Hex(), "err", err)
+		vm.WriteRegister(7, 0)
+		return
+	}
+
+	// Step 1: Query size
+	if outputMaxLen == 0 {
+		vm.WriteRegister(7, uint64(codeSize))
+		return
+	}
+
+	// Step 2: Fetch data
+	if outputMaxLen < codeSize {
+		vm.WriteRegister(7, 0) // Insufficient buffer
+		return
+	}
+
+	if codeSize == 0 {
+		vm.WriteRegister(7, 0) // No code
+		return
+	}
+
+	// Write code to output
+	if errCode := vm.WriteRAMBytes(outputPtr, code); errCode != OK {
+		vm.WriteRegister(7, 0)
+		return
+	}
+	vm.WriteRegister(7, uint64(len(code)))
+}
+
+// fetchCodeHash fetches code hash from Verkle tree
+func (vm *VM) fetchCodeHash(stateDB *StateDB, address common.Address, outputPtr uint32, outputMaxLen uint32, txIndex uint32) {
+	// Step 1: Query size
+	if outputMaxLen == 0 {
+		vm.WriteRegister(7, 32) // Code hash is always 32 bytes
+		return
+	}
+
+	// Step 2: Fetch data
+	if outputMaxLen < 32 {
+		vm.WriteRegister(7, 0) // Insufficient buffer
+		return
+	}
+
+	// Fetch code hash via clean interface (no type casting, verkle logic in StateDBStorage)
+	codeHash, err := stateDB.sdb.FetchCodeHash(address, txIndex)
+	if err != nil {
+		log.Info(vm.logging, "fetchCodeHash error", "address", address.Hex(), "txIndex", txIndex, "err", err)
+		vm.WriteRegister(7, 0)
+		return
+	}
+
+	// Write to output
+	if errCode := vm.WriteRAMBytes(outputPtr, codeHash[:]); errCode != OK {
+		vm.WriteRegister(7, 0)
+		return
+	}
+	vm.WriteRegister(7, 32)
+}
+
+// fetchStorage fetches storage value from Verkle tree
+func (vm *VM) fetchStorage(stateDB *StateDB, address common.Address, storageKey [32]byte, outputPtr uint32, outputMaxLen uint32, txIndex uint32) {
+	// Step 1: Query size
+	if outputMaxLen == 0 {
+		vm.WriteRegister(7, 32) // Storage values are always 32 bytes
+		return
+	}
+
+	// Step 2: Fetch data
+	if outputMaxLen < 32 {
+		vm.WriteRegister(7, 0) // Insufficient buffer
+		return
+	}
+
+	// Fetch storage via clean interface (no type casting, verkle logic in StateDBStorage)
+	value, found, err := stateDB.sdb.FetchStorage(address, storageKey, txIndex)
+	if err != nil || !found {
+		log.Info(vm.logging, "fetchStorage miss", "address", address.Hex(), "err", err)
+		vm.WriteRegister(7, 0)
+		return
+	}
+
+	// Write to output
+	if errCode := vm.WriteRAMBytes(outputPtr, value[:]); errCode != OK {
+		vm.WriteRegister(7, 0)
+		return
+	}
+	vm.WriteRegister(7, 32)
+}
+
+// hostVerifyVerkleProof verifies a dual-proof Verkle witness
+//
+// Input (register 7): witness_ptr - pointer to witness data
+// Input (register 8): witness_len - length of witness data
+// Output (register 7): 1 if proof is valid, 0 if invalid
+//
+// Dual-proof witness format (augmented with tx_index to support BAL):
+// PRE-STATE SECTION:
+// - 32B pre_state_root
+// - 4B read_count (big-endian u32)
+// - For each read entry (161 bytes):
+//   - 32B verkle_key
+//   - 61B metadata (1B type + 20B address + 8B extra + 32B storage_key)
+//   - 32B pre_value
+//   - 32B post_value (unused in pre-section)
+//   - 4B tx_index (big-endian)
+//
+// - 4B pre_proof_len (big-endian u32)
+// - pre_proof_len bytes of pre-proof data
+// POST-STATE SECTION:
+// - 32B post_state_root
+// - 4B write_count (big-endian u32)
+// - For each write entry (161 bytes):
+//   - 32B verkle_key
+//   - 61B metadata
+//   - 32B pre_value (unused in post-section)
+//   - 32B post_value
+//   - 4B tx_index (big-endian)
+//
+// - 4B post_proof_len (big-endian u32)
+// - post_proof_len bytes of post-proof data
+func (vm *VM) hostVerifyVerkleProof() {
+	witnessPtr := uint32(vm.ReadRegister(7))
+	witnessLen := uint32(vm.ReadRegister(8))
+
+	log.Info(log.SDB, "hostVerifyVerkleProof called", "ptr", witnessPtr, "len", witnessLen)
+
+	// Get StateDB from hostenv
+	stateDB, ok := vm.hostenv.(*StateDB)
+	if !ok || stateDB.sdb == nil {
+		log.Warn(log.SDB, "hostVerifyVerkleProof: no StateDB")
+		vm.WriteRegister(7, 0) // Invalid: no StateDB
+		return
+	}
+
+	// Read witness data from memory
+	witnessData, errCode := vm.ReadRAMBytes(witnessPtr, witnessLen)
+	if errCode != OK {
+		log.Warn(log.SDB, "hostVerifyVerkleProof: ReadRAMBytes failed", "errCode", errCode)
+		vm.WriteRegister(7, 0) // Invalid: failed to read witness
+		return
+	}
+
+	log.Info(log.SDB, "hostVerifyVerkleProof: Read witness from RAM", "dataLen", len(witnessData))
+
+	// Parse witness
+	if len(witnessData) < 68 {
+		vm.WriteRegister(7, 0) // Invalid: witness too small
+		return
+	}
+
+	offset := 0
+
+	// ===== PHASE 1: Parse and Verify Pre-State Section (Reads) =====
+
+	// Parse pre_state_root (32 bytes)
+	var preStateRoot [32]byte
+	copy(preStateRoot[:], witnessData[offset:offset+32])
+	offset += 32
+
+	// Parse read_count (4 bytes, big-endian)
+	if len(witnessData)-offset < 4 {
+		log.Warn(log.SDB, "hostVerifyVerkleProof: insufficient data for read_count")
+		vm.WriteRegister(7, 0)
+		return
+	}
+	readCount := uint32(witnessData[offset])<<24 | uint32(witnessData[offset+1])<<16 |
+		uint32(witnessData[offset+2])<<8 | uint32(witnessData[offset+3])
+	offset += 4
+
+	// Parse read entries (161 bytes each: 32 key + 61 metadata + 32 pre + 32 post + 4 txIndex)
+	readKeys := make([][]byte, readCount)
+	readPreValues := make([][]byte, readCount)
+
+	for i := uint32(0); i < readCount; i++ {
+		if len(witnessData)-offset < 161 {
+			log.Warn(log.SDB, "hostVerifyVerkleProof: insufficient data for read entry", "index", i)
+			vm.WriteRegister(7, 0)
+			return
+		}
+
+		// Read key (32 bytes)
+		key := make([]byte, 32)
+		copy(key, witnessData[offset:offset+32])
+		readKeys[i] = key
+		offset += 32
+
+		// Skip metadata (61 bytes: 1 type + 20 address + 8 extra + 32 storage_key)
+		offset += 61
+
+		// Read pre_value (32 bytes)
+		preValue := make([]byte, 32)
+		copy(preValue, witnessData[offset:offset+32])
+		readPreValues[i] = preValue
+		offset += 32
+
+		// Skip post_value (32 bytes)
+		offset += 32
+
+		// Skip txIndex (4 bytes)
+		offset += 4
+	}
+
+	// Parse pre_proof_len (4 bytes, big-endian)
+	if len(witnessData)-offset < 4 {
+		log.Warn(log.SDB, "hostVerifyVerkleProof: insufficient data for pre_proof_len")
+		vm.WriteRegister(7, 0)
+		return
+	}
+	preProofLen := uint32(witnessData[offset])<<24 | uint32(witnessData[offset+1])<<16 |
+		uint32(witnessData[offset+2])<<8 | uint32(witnessData[offset+3])
+	offset += 4
+
+	// Parse pre_proof_data
+	if len(witnessData)-offset < int(preProofLen) {
+		log.Warn(log.SDB, "hostVerifyVerkleProof: insufficient data for pre_proof", "expected", preProofLen, "have", len(witnessData)-offset)
+		vm.WriteRegister(7, 0)
+		return
+	}
+	preProofData := witnessData[offset : offset+int(preProofLen)]
+	offset += int(preProofLen)
+
+	log.Info(log.SDB, "hostVerifyVerkleProof: Parsed pre-state", "readCount", readCount, "preProofLen", preProofLen, "preRoot", fmt.Sprintf("%x", preStateRoot[:8]))
+
+	// Filter out absent keys (zero values) for proof verification
+	// The proof only contains present keys, but the witness includes all keys for cache population
+	presentReadKeys := make([][]byte, 0, readCount)
+	presentReadValues := make([][]byte, 0, readCount)
+	for i := uint32(0); i < readCount; i++ {
+		isZero := true
+		for j := 0; j < 32; j++ {
+			if readPreValues[i][j] != 0 {
+				isZero = false
+				break
+			}
+		}
+		if !isZero {
+			presentReadKeys = append(presentReadKeys, readKeys[i])
+			presentReadValues = append(presentReadValues, readPreValues[i])
+		}
+	}
+
+	log.Info(log.SDB, "hostVerifyVerkleProof: Filtered for verification", "totalKeys", readCount, "presentKeys", len(presentReadKeys))
+
+	if len(presentReadKeys) == 0 {
+		log.Info(log.SDB, "hostVerifyVerkleProof: no present read keys, skipping pre-state verification")
+	} else {
+		// Verify pre-state proof (only for present keys)
+		valid, err := evmtypes.VerifyVerkleProof(preProofData, preStateRoot[:], presentReadKeys, presentReadValues)
+		if err != nil {
+			log.Warn(log.SDB, "hostVerifyVerkleProof: pre-state verification error", "err", err)
+			vm.WriteRegister(7, 0)
+			return
+		}
+		if !valid {
+			log.Warn(log.SDB, "hostVerifyVerkleProof: pre-state proof invalid")
+			vm.WriteRegister(7, 0)
+			return
+		}
+
+		log.Info(log.SDB, "hostVerifyVerkleProof: ✅ pre-state proof valid")
+	}
+
+	// ===== PHASE 2: Parse and Verify Post-State Section (Writes) =====
+
+	// Parse post_state_root (32 bytes)
+	if len(witnessData)-offset < 32 {
+		log.Warn(log.SDB, "hostVerifyVerkleProof: insufficient data for post_state_root")
+		vm.WriteRegister(7, 0)
+		return
+	}
+	var postStateRoot [32]byte
+	copy(postStateRoot[:], witnessData[offset:offset+32])
+	offset += 32
+
+	// Parse write_count (4 bytes, big-endian)
+	if len(witnessData)-offset < 4 {
+		log.Warn(log.SDB, "hostVerifyVerkleProof: insufficient data for write_count")
+		vm.WriteRegister(7, 0)
+		return
+	}
+	writeCount := uint32(witnessData[offset])<<24 | uint32(witnessData[offset+1])<<16 |
+		uint32(witnessData[offset+2])<<8 | uint32(witnessData[offset+3])
+	offset += 4
+
+	// Parse write entries (161 bytes each: 32 key + 61 metadata + 32 pre + 32 post + 4 txIndex)
+	writeKeys := make([][]byte, writeCount)
+	writePreValues := make([][]byte, writeCount)
+	writePostValues := make([][]byte, writeCount)
+
+	for i := uint32(0); i < writeCount; i++ {
+		if len(witnessData)-offset < 161 {
+			log.Warn(log.SDB, "hostVerifyVerkleProof: insufficient data for write entry", "index", i)
+			vm.WriteRegister(7, 0)
+			return
+		}
+
+		// Read key (32 bytes)
+		key := make([]byte, 32)
+		copy(key, witnessData[offset:offset+32])
+		writeKeys[i] = key
+		offset += 32
+
+		// Skip metadata (61 bytes)
+		offset += 61
+
+		// Read pre_value (32 bytes)
+		preValue := make([]byte, 32)
+		copy(preValue, witnessData[offset:offset+32])
+		// Check if pre-value is all zeros (absent key)
+		isZero := true
+		for j := 0; j < 32; j++ {
+			if preValue[j] != 0 {
+				isZero = false
+				break
+			}
+		}
+		if isZero {
+			writePreValues[i] = nil // Absent key
+		} else {
+			writePreValues[i] = preValue
+		}
+		offset += 32
+
+		// Read post_value (32 bytes)
+		postValue := make([]byte, 32)
+		copy(postValue, witnessData[offset:offset+32])
+		writePostValues[i] = postValue
+		offset += 32
+
+		// Skip txIndex (4 bytes)
+		offset += 4
+	}
+
+	// Parse post_proof_len (4 bytes, big-endian)
+	if len(witnessData)-offset < 4 {
+		log.Warn(log.SDB, "hostVerifyVerkleProof: insufficient data for post_proof_len")
+		vm.WriteRegister(7, 0)
+		return
+	}
+	postProofLen := uint32(witnessData[offset])<<24 | uint32(witnessData[offset+1])<<16 |
+		uint32(witnessData[offset+2])<<8 | uint32(witnessData[offset+3])
+	offset += 4
+
+	// Parse post_proof_data
+	if len(witnessData)-offset < int(postProofLen) {
+		log.Warn(log.SDB, "hostVerifyVerkleProof: insufficient data for post_proof", "expected", postProofLen, "have", len(witnessData)-offset)
+		vm.WriteRegister(7, 0)
+		return
+	}
+	postProofData := witnessData[offset : offset+int(postProofLen)]
+
+	log.Info(log.SDB, "hostVerifyVerkleProof: Parsed post-state", "writeCount", writeCount, "postProofLen", postProofLen, "postRoot", fmt.Sprintf("%x", postStateRoot[:8]))
+
+	if writeCount == 0 {
+		if !bytes.Equal(postStateRoot[:], preStateRoot[:]) {
+			log.Warn(log.SDB, "hostVerifyVerkleProof: no writes but roots differ", "preRoot", fmt.Sprintf("%x", preStateRoot[:8]), "postRoot", fmt.Sprintf("%x", postStateRoot[:8]))
+			vm.WriteRegister(7, 0)
+			return
+		}
+		log.Info(log.SDB, "hostVerifyVerkleProof: no write entries, skipping post-state verification")
+	} else {
+		// Verify post-state proof with state transition (PRE-root -> POST-root)
+		valid, err := evmtypes.VerifyVerkleProofWithTransition(postProofData, preStateRoot[:], postStateRoot[:], writeKeys, writePreValues, writePostValues)
+		if err != nil {
+			log.Warn(log.SDB, "hostVerifyVerkleProof: post-state verification error", "err", err)
+			vm.WriteRegister(7, 0)
+			return
+		}
+		if !valid {
+			log.Warn(log.SDB, "hostVerifyVerkleProof: post-state proof invalid")
+			vm.WriteRegister(7, 0)
+			return
+		}
+
+		log.Info(log.SDB, "hostVerifyVerkleProof: ✅ post-state proof valid (state transition verified)")
+	}
+
+	// Both pre-state and post-state proofs are valid
+	// No need to check local tree - witness is self-validating
+	log.Info(log.SDB, "hostVerifyVerkleProof: ✅ dual-proof witness valid")
+
+	// Proof is valid
+	vm.WriteRegister(7, 1)
+}
+
+// hostComputeBALHash computes Block Access List hash from Verkle witness
+// Host function index: 256
+// Parameters (via PVM registers):
+// - r7: witness_ptr (pointer to serialized Verkle witness)
+// - r8: witness_len (length of witness)
+// - r9: output_ptr (32-byte buffer for Blake2b hash)
+// Returns (via r7):
+// - 1 if successful
+// - 0 if failed
+func (vm *VM) hostComputeBALHash() {
+	witnessPtr := uint32(vm.ReadRegister(7))
+	witnessLen := uint32(vm.ReadRegister(8))
+	outputPtr := uint32(vm.ReadRegister(9))
+
+	log.Info(log.SDB, "hostComputeBALHash called", "witnessPtr", witnessPtr, "witnessLen", witnessLen, "outputPtr", outputPtr)
+
+	// Get StateDB from hostenv
+	stateDB, ok := vm.hostenv.(*StateDB)
+	if !ok || stateDB.sdb == nil {
+		log.Warn(log.SDB, "hostComputeBALHash: no StateDB")
+		vm.WriteRegister(7, 0)
+		return
+	}
+
+	// Read witness data from memory
+	witnessData, errCode := vm.ReadRAMBytes(witnessPtr, witnessLen)
+	if errCode != OK {
+		log.Warn(log.SDB, "hostComputeBALHash: ReadRAMBytes failed", "errCode", errCode)
+		vm.WriteRegister(7, 0)
+		return
+	}
+
+	// Compute BAL hash using storage layer
+	balHash, accountCount, totalChanges, err := stateDB.sdb.ComputeBlockAccessListHash(witnessData)
+	if err != nil {
+		log.Warn(log.SDB, "hostComputeBALHash: computation failed", "err", err)
+		vm.WriteRegister(7, 0)
+		return
+	}
+
+	log.Info(log.SDB, "hostComputeBALHash: computed", "hash", balHash.Hex(), "accounts", accountCount, "changes", totalChanges)
+
+	// Write hash to output buffer
+	errCode = vm.WriteRAMBytes(outputPtr, balHash[:])
+	if errCode != OK {
+		log.Warn(log.SDB, "hostComputeBALHash: WriteRAMBytes failed", "errCode", errCode)
+		vm.WriteRegister(7, 0)
+		return
+	}
+
+	// Success
+	vm.WriteRegister(7, 1)
 }

@@ -31,6 +31,8 @@ func (r *RoundState) GetUnvotedWeight(stage GrandpaStage) uint64 {
 	if tracker == nil {
 		return 0
 	}
+	tracker.VoteMutex.RLock()
+	defer tracker.VoteMutex.RUnlock()
 	weight := uint64(0)
 	for _, voter_state := range tracker.voter_state {
 		if voter_state.State == NotParticipate {

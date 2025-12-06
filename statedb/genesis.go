@@ -107,7 +107,7 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 	// Refine only allows authorized builders
 	// Accumulate only allows increments on BLOCK_NUMBER_KEY when there is a timestamp greater than this
 	// SubmitGenesisWorkPackage uses ReadStateWitness must submit extrinsics that match these storage entries
-	storage[evmtypes.GetBlockNumberKey()] = evmtypes.SerializeBlockNumber(0)
+	storage[evmtypes.GetBlockNumberKey()] = evmtypes.SerializeBlockNumber(1)
 
 	// Load services into genesis state
 	services := []types.TestService{

@@ -257,16 +257,6 @@ func (s *StateDB) GetStateRoot() common.Hash {
 	return s.StateRoot
 }
 
-func (s *StateDB) GetParentStateRoot() common.Hash {
-	// this is "root" before trie gets flushed
-	return s.StateRoot
-}
-
-func (s *StateDB) GetTentativeStateRoot() common.Hash {
-	// return the trie root at the moment
-	return s.sdb.GetRoot()
-}
-
 func (s *StateDB) GetStorage() types.JAMStorage {
 	return s.sdb
 }

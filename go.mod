@@ -8,6 +8,7 @@ require (
 	github.com/chzyer/readline v1.5.1
 	github.com/dop251/goja v0.0.0-20250309171923-bcd7cc6bf64c
 	github.com/ethereum/go-ethereum v1.16.1
+	github.com/ethereum/go-verkle v0.2.2
 	github.com/go-echarts/go-echarts/v2 v2.4.3
 	github.com/go-git/go-git/v5 v5.14.0
 	github.com/gorilla/websocket v1.5.3
@@ -45,7 +46,6 @@ require (
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/ethereum/c-kzg-4844/v2 v2.1.0 // indirect
-	github.com/ethereum/go-verkle v0.2.2 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect

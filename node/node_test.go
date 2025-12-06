@@ -483,8 +483,10 @@ func evm(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 		log.Error(log.Node, "GetRefineContext failed", "err", err)
 	}
 
+	globalDepth := uint8(0)
+
 	wp.RefineContext = refineCtx
-	wp.WorkItems[0].Payload = statedb.BuildPayload(statedb.PayloadTypeGenesis, numExtrinsics, 0)
+	wp.WorkItems[0].Payload = statedb.BuildPayload(statedb.PayloadTypeGenesis, numExtrinsics, globalDepth, 0, common.Hash{})
 	wp.WorkItems[0].Extrinsics = workItems
 
 	// Genesis adds 3 exports: 1 StorageShard + 1 SSRMetadata + 1 meta for USDM contract
@@ -503,9 +505,14 @@ func evm(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 
 	// Create signed transactions
 
-	for evmN := 0; evmN < targetN; evmN++ {
+	for evmN := 0; evmN < 30; evmN++ {
 		nonce, _ := n1.GetTransactionCount(evmtypes.IssuerAddress, "latest")
 		log.Info(log.Node, "GetTransactionCount", "nonce", nonce)
+
+		globalDepth, err := n1.ReadGlobalDepth(evm_serviceIdx)
+		if err != nil {
+			globalDepth = 0
+		}
 
 		// Build transaction extrinsics
 		numTxs := 3
@@ -513,7 +520,7 @@ func evm(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 		txHashes := make([]common.Hash, numTxs)
 
 		// Create simple transfers from account 0 to account 1
-		_, senderPrivKey := common.GetEVMDevAccount(0)
+		senderAddress, senderPrivKey := common.GetEVMDevAccount(0)
 
 		for i := 0; i < numTxs; i++ {
 			recipientIndex := (evmN*numTxs + i + 1) % 10
@@ -555,18 +562,42 @@ func evm(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 		}
 
 		wp := statedb.DefaultWorkPackage(evm_serviceIdx, service)
-		wp.WorkItems[0].Payload = statedb.BuildPayload(statedb.PayloadTypeTransactions, numTxs, 0)
+		wp.WorkItems[0].Payload = statedb.BuildPayload(statedb.PayloadTypeBuilder, numTxs, globalDepth, 0, common.Hash{})
 		wp.WorkItems[0].Extrinsics = extrinsics
 
 		//  BuildBundle should return a Bundle (with ImportedSegments)
 		bundle, _, err := n1.BuildBundle(wp, []types.ExtrinsicsBlobs{blobs}, uint16(0), []common.Hash{})
 		if err != nil {
-			panic(err)
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		n1.SubmitAndWaitForWorkPackageBundle(ctx, bundle)
+			log.Error(log.Node, "BuildBundle ERR", "err", err)
 
+		} else {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			n1.SubmitAndWaitForWorkPackageBundle(ctx, bundle)
+			block, err := n1.GetBlockByNumber("latest", true)
+			if err != nil {
+				log.Error(log.Node, "GetBlockByNumber ERR", "err", err)
+			} else {
+				log.Info(log.Node, "EVM Block", "number", types.ToJSON(block))
+			}
+			balance, err := n1.GetBalance(senderAddress, "latest")
+			if err != nil {
+				log.Error(log.Node, "GetBalance ERR", "err", err)
+			} else {
+				log.Info(log.Node, "Sender Balance", "address", senderAddress.Hex(), "balance", balance)
+			}
+			// if txHashes, ok := block.Transactions.([]string); ok {
+			// 	for _, txHashStr := range txHashes {
+			// 		txHash := common.HexToHash(txHashStr)
+			// 		receipt, err := n1.GetTransactionReceipt(txHash)
+			// 		if err != nil {
+			// 			log.Error(log.Node, "GetTransactionReceipt ERR", "err", err)
+			// 		} else {
+			// 			log.Info(log.Node, "EVM Tx Receipt", "txHash", txHash.Hex(), "receipt", types.ToJSON(receipt))
+			// 		}
+			// 	}
+			// }
+		}
 	}
 }
 

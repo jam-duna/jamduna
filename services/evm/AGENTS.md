@@ -7,13 +7,10 @@ A JAM service providing Ethereum Virtual Machine (EVM) execution capabilities wi
 For detailed information on specific components and concepts, see:
 
 - **[Backend Architecture](docs/BACKEND.md)** - MajikBackend implementation and storage architecture
-- **[DA Storage](docs/DA-STORAGE.md)** - Data Availability storage specification and sharding
-- **[Dependency Tracking](docs/DEPENDENCY-TRACKING.md)** - Object dependency resolution and versioning
-- **[Ethereum Compatibility](docs/ETHEREUM.md)** - EVM execution details and Ethereum feature support
-- **[Gateway API](docs/GATEWAY.md)** - External API and service interfaces
-- **[Hot Keys](docs/HOT-KEYS.md)** - Key management and cryptographic operations
-- **[RefCell Usage](docs/REFCELL.md)** - Memory management and borrow checking patterns
+- **[Blocks and Payloads](docs/BLOCKS.md)** - Payload types, witness handling, and execution flow
 - **[RPC Interface](docs/RPC.md)** - JSON-RPC API specification and endpoints
+- **[Stablecoins & Cores](docs/STABLECOINS-CORES.md)** - System contract responsibilities and token accounting
+- **[Verkle Integration](docs/VERKLE.md)** - Witness formats, verification, and ExecutionMode usage
 
 ## Overview
 
@@ -29,9 +26,9 @@ The EVM service implements a full Ethereum-compatible runtime within the JAM pro
 ### Core Components
 
 - **`MajikBackend`**: DA-style storage backend with object versioning and caching (see [Backend Architecture](docs/BACKEND.md))
-- **`MajikOverlay`**: Transaction isolation and dependency tracking (see [Dependency Tracking](docs/DEPENDENCY-TRACKING.md))
+- **`MajikOverlay`**: Transaction isolation and dependency tracking (see [Backend Architecture](docs/BACKEND.md))
 - **Bootstrap Interpreter**: Genesis state initialization from extrinsics
-- **Sharded Storage**: SSR-based storage with automatic sharding and caching (see [DA Storage](docs/DA-STORAGE.md))
+- **Sharded Storage**: SSR-based storage with automatic sharding and caching (see [Verkle Integration](docs/VERKLE.md))
 
 ### Service Accord
 
@@ -94,9 +91,9 @@ After bootstrap, the service processes standard EVM transactions:
 
 ### Caching Optimizations
 
-- **Balance Caching**: Prevents infinite DA fetches for cross-instance access (see [RefCell Usage](docs/REFCELL.md))
+- **Balance Caching**: Prevents infinite DA fetches for cross-instance access (see [Backend Architecture](docs/BACKEND.md))
 - **Negative Code Caching**: Avoids repeated DA lookups for EOAs (Externally Owned Accounts)
-- **Storage Sharding**: Efficient access to contract storage via SSR resolution (see [DA Storage](docs/DA-STORAGE.md))
+- **Storage Sharding**: Efficient access to contract storage via SSR resolution (see [Verkle Integration](docs/VERKLE.md))
 
 ## Building
 
@@ -111,8 +108,8 @@ This produces `services/evm/evm.pvm` ready for JAM runtime deployment.
 The service includes comprehensive testing for:
 
 - Bootstrap protocol execution
-- EVM transaction processing (see [Ethereum Compatibility](docs/ETHEREUM.md))
-- DA object import/export (see [DA Storage](docs/DA-STORAGE.md))
+- EVM transaction processing
+- DA object import/export
 - Storage sharding and caching
 - Gas metering and limits
 
@@ -145,17 +142,17 @@ make evm
 
 ### Storage Layout
 
-Contract storage uses JAM's sharded approach (see [DA Storage](docs/DA-STORAGE.md) for details):
+Contract storage uses JAM's sharded approach (see [Verkle Integration](docs/VERKLE.md) for details):
 - SSR metadata tracks storage structure
 - Individual shards contain key-value pairs
 - Automatic sharding based on storage access patterns
 - Negative caching for non-existent accounts
 
-This design provides Ethereum compatibility (see [Ethereum Compatibility](docs/ETHEREUM.md)) while leveraging JAM's DA layer for scalable, verifiable state storage.
+This design provides Ethereum compatibility while leveraging JAM's DA layer for scalable, verifiable state storage.
 
 ## See Also
 
-- **[Backend Architecture](docs/BACKEND.md)** - Detailed implementation of storage backends
-- **[Dependency Tracking](docs/DEPENDENCY-TRACKING.md)** - Object versioning and dependency resolution
-- **[Hot Keys](docs/HOT-KEYS.md)** - Cryptographic key management for secure operations
-- **[Gateway API](docs/GATEWAY.md)** - External interfaces and service integration
+- **[Backend Architecture](docs/BACKEND.md)** - Detailed implementation of storage backends and overlay coordination
+- **[Blocks and Payloads](docs/BLOCKS.md)** - Payload handling, witness placement, and block assembly
+- **[RPC Interface](docs/RPC.md)** - External interfaces and service integration
+- **[Verkle Integration](docs/VERKLE.md)** - State commitments, proofs, and execution modes

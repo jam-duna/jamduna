@@ -1,6 +1,8 @@
 package statedb
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"reflect"
 	"time"
@@ -8,14 +10,375 @@ import (
 	bls "github.com/colorfulnotion/jam/bls"
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/statedb/evmtypes"
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/telemetry"
 	"github.com/colorfulnotion/jam/trie"
 	types "github.com/colorfulnotion/jam/types"
+	"github.com/ethereum/go-verkle"
 )
 
 const (
 	debugSpec = false
 )
+
+// extractContractWitnessBlob extracts the contract witness payload from refine output
+// Returns the raw contract witness blob (balance/nonce/code/storage writes)
+func (s *StateDB) extractContractWitnessBlob(output []byte, segments [][]byte) ([]byte, error) {
+	if len(output) < 2 {
+		return []byte{}, nil
+	}
+
+	// Parse metashard count
+	metashardCount := binary.LittleEndian.Uint16(output[0:2])
+
+	if metashardCount > 0 {
+		// Skip metashard entries to find contract witness metadata
+		offset := 2
+		for i := uint16(0); i < metashardCount; i++ {
+			if offset >= len(output) {
+				return nil, fmt.Errorf("truncated metashard data")
+			}
+			ld := output[offset]
+			offset += 1
+			prefixBytes := ((ld + 7) / 8)
+			entrySize := int(prefixBytes) + 5
+			if offset+entrySize > len(output) {
+				return nil, fmt.Errorf("truncated metashard entry")
+			}
+			offset += entrySize
+		}
+
+		// Contract witness metadata at end: [2B index_start][4B payload_length]
+		if offset+6 <= len(output) {
+			contractOffset := len(output) - 6
+			indexStart := binary.LittleEndian.Uint16(output[contractOffset : contractOffset+2])
+			payloadLength := binary.LittleEndian.Uint32(output[contractOffset+2 : contractOffset+6])
+
+			if payloadLength > 0 {
+				return s.readPayloadFromSegments(segments, uint32(indexStart), payloadLength)
+			}
+		}
+		return []byte{}, nil
+	}
+
+	// New format with metashardCount=0: [00, 00][2B contract_index_start][4B contract_payload_length]
+	if len(output) >= 8 {
+		indexStart := binary.LittleEndian.Uint16(output[2:4])
+		payloadLength := binary.LittleEndian.Uint32(output[4:8])
+
+		if payloadLength > 0 {
+			return s.readPayloadFromSegments(segments, uint32(indexStart), payloadLength)
+		}
+	}
+
+	return []byte{}, nil
+}
+
+type builderPostStateProof struct {
+	postRoot   [32]byte
+	writeKeys  [][32]byte
+	postValues [][32]byte
+	postProof  []byte
+}
+
+func parseBuilderPostStateSection(postState []byte) (*builderPostStateProof, error) {
+	if len(postState) < 36 {
+		return nil, fmt.Errorf("post-state section too short: %d bytes", len(postState))
+	}
+
+	offset := 0
+	var proof builderPostStateProof
+
+	copy(proof.postRoot[:], postState[offset:offset+32])
+	offset += 32
+
+	writeCount := binary.BigEndian.Uint32(postState[offset : offset+4])
+	offset += 4
+
+	entryBytes := int(writeCount) * 161
+	if len(postState) < offset+entryBytes+4 {
+		return nil, fmt.Errorf("post-state section truncated: writeCount=%d", writeCount)
+	}
+
+	proof.writeKeys = make([][32]byte, writeCount)
+	proof.postValues = make([][32]byte, writeCount)
+
+	for i := 0; i < int(writeCount); i++ {
+		// 32B VerkleKey
+		copy(proof.writeKeys[i][:], postState[offset:offset+32])
+		offset += 32
+
+		// Skip metadata and pre-value: 1B key_type + 20B address + 8B extra + 32B storage_key + 32B pre_value
+		offset += 1 + 20 + 8 + 32 + 32
+
+		// 32B PostValue
+		copy(proof.postValues[i][:], postState[offset:offset+32])
+		offset += 32
+
+		// Skip tx_index (4 bytes)
+		offset += 4
+	}
+
+	proofLen := binary.BigEndian.Uint32(postState[offset : offset+4])
+	offset += 4
+
+	if len(postState) < offset+int(proofLen) {
+		return nil, fmt.Errorf("post-state proof truncated: need %d bytes, have %d", proofLen, len(postState)-offset)
+	}
+
+	proof.postProof = postState[offset : offset+int(proofLen)]
+	return &proof, nil
+}
+
+func (s *StateDB) verifyPostStateAgainstExecution(workItem types.WorkItem, extrinsicData [][]byte, contractWitnessBlob []byte) error {
+	if len(extrinsicData) == 0 || len(workItem.Extrinsics) == 0 {
+		return fmt.Errorf("missing extrinsic data for post-state verification")
+	}
+
+	verkleWitness := extrinsicData[0]
+	if uint32(len(verkleWitness)) != workItem.Extrinsics[0].Len {
+		return fmt.Errorf("verkle witness length mismatch: expected %d, got %d", workItem.Extrinsics[0].Len, len(verkleWitness))
+	}
+
+	stateStorage, ok := s.sdb.(*storage.StateDBStorage)
+	if !ok {
+		return fmt.Errorf("unexpected storage type %T (need StateDBStorage)", s.sdb)
+	}
+
+	if stateStorage.CurrentVerkleTree == nil {
+		return fmt.Errorf("no verkle tree available for post-state verification")
+	}
+
+	_, postState, err := storage.SplitWitnessSections(verkleWitness)
+	if err != nil {
+		return fmt.Errorf("failed to split dual-proof witness: %w", err)
+	}
+
+	builderProof, err := parseBuilderPostStateSection(postState)
+	if err != nil {
+		return fmt.Errorf("failed to parse builder post-state section: %w", err)
+	}
+
+	guarantorWrites, err := storage.ExtractWriteMapFromContractWitness(stateStorage.CurrentVerkleTree, contractWitnessBlob)
+	if err != nil {
+		return fmt.Errorf("failed to derive guarantor write set: %w", err)
+	}
+
+	if err := storage.CompareWriteKeySets(builderProof.writeKeys, guarantorWrites); err != nil {
+		return err
+	}
+
+	// Non-fatal: surface value mismatches for observability.
+	for i, key := range builderProof.writeKeys {
+		builderVal := builderProof.postValues[i]
+		if guarantorVal, ok := guarantorWrites[key]; ok {
+			if !bytes.Equal(builderVal[:], guarantorVal[:]) {
+				log.Warn(log.SDB, "verifyPostStateAgainstExecution: value mismatch (non-fatal)",
+					"key", fmt.Sprintf("%x", key[:]),
+					"builder", fmt.Sprintf("%x", builderVal[:]),
+					"guarantor", fmt.Sprintf("%x", guarantorVal[:]))
+			}
+		}
+	}
+
+	log.Info(log.SDB, "Post-state key-set cross-check passed",
+		"writeKeys", len(builderProof.writeKeys),
+		"postRoot", fmt.Sprintf("%x", builderProof.postRoot[:8]))
+
+	return nil
+}
+
+// populateWitnessCacheFromRefineOutput parses the refine output and loads storage shards into witness cache
+// New format: [2B metashard_count][metashard entries...][2B contract_index_start][4B contract_payload_length]
+// Old format: [2B count] + count × [32B object_id + 2B index_start + 4B payload_length + 1B object_kind]
+func (s *StateDB) populateWitnessCacheFromRefineOutput(serviceID uint32, output []byte, segments [][]byte) error {
+	if len(output) < 2 {
+		// Empty output or too small - skip
+		return nil
+	}
+
+	// Parse metashard count
+	metashardCount := binary.LittleEndian.Uint16(output[0:2])
+	log.Info(log.SDB, "populateWitnessCacheFromRefineOutput", "metashardCount", metashardCount, "segments", len(segments), "outputLen", len(output))
+
+	if metashardCount > 0 {
+		// Handle metashard entries in the new format
+		log.Info(log.SDB, "Processing metashard entries", "count", metashardCount)
+
+		// Skip metashard entries for now - they're handled by the accumulate process
+		// The metashard entries are variable length, so we need to parse them to find where contract witness data starts
+		offset := 2 // Start after metashard count
+
+		for i := uint16(0); i < metashardCount; i++ {
+			if offset >= len(output) {
+				return fmt.Errorf("truncated metashard data at entry %d", i)
+			}
+
+			// Each metashard entry starts with 'ld' byte
+			ld := output[offset]
+			offset += 1
+
+			// Calculate entry size: prefix + 5-byte packed ObjectRef
+			prefixBytes := ((ld + 7) / 8)
+			entrySize := int(prefixBytes) + 5
+
+			if offset+entrySize > len(output) {
+				return fmt.Errorf("truncated metashard entry %d", i)
+			}
+
+			offset += entrySize
+			log.Debug(log.SDB, "Skipped metashard entry", "i", i, "ld", ld, "entrySize", entrySize)
+		}
+
+		// After metashard entries, check if there's contract witness data
+		if offset+6 <= len(output) {
+			// Contract witness metadata should be at the end: [2B index_start][4B payload_length]
+			contractOffset := len(output) - 6
+			indexStart := binary.LittleEndian.Uint16(output[contractOffset : contractOffset+2])
+			payloadLength := binary.LittleEndian.Uint32(output[contractOffset+2 : contractOffset+6])
+
+			log.Info(log.SDB, "Found contract witness after metashards", "indexStart", indexStart, "payloadLength", payloadLength)
+
+			if payloadLength > 0 {
+				// Read and load contract witness data
+				payload, err := s.readPayloadFromSegments(segments, uint32(indexStart), payloadLength)
+				if err != nil {
+					return fmt.Errorf("failed to read contract witness payload: %v", err)
+				}
+				return s.parseAndLoadContractStorage(serviceID, payload)
+			}
+		}
+
+		return nil
+	}
+
+	// New format with metashardCount=0: [00, 00][2B contract_index_start][4B contract_payload_length]
+	if len(output) >= 8 {
+		return s.loadContractWitnessFromNewFormat(serviceID, output, segments)
+	}
+
+	return nil
+}
+
+// loadContractWitnessFromNewFormat handles the new contract witness format
+func (s *StateDB) loadContractWitnessFromNewFormat(serviceID uint32, output []byte, segments [][]byte) error {
+	// Parse contract witness metadata from bytes 2-8
+	indexStart := binary.LittleEndian.Uint16(output[2:4])
+	payloadLength := binary.LittleEndian.Uint32(output[4:8])
+
+	log.Info(log.SDB, "loadContractWitnessFromNewFormat", "indexStart", indexStart, "payloadLength", payloadLength)
+
+	if payloadLength == 0 {
+		log.Info(log.SDB, "No contract witness data to load")
+		return nil
+	}
+
+	// Read the contract witness payload from segments
+	payload, err := s.readPayloadFromSegments(segments, uint32(indexStart), payloadLength)
+	if err != nil {
+		return fmt.Errorf("failed to read contract witness payload: %v", err)
+	}
+
+	// The payload contains serialized contract storage data
+	// Parse and load into witness cache
+	return s.parseAndLoadContractStorage(serviceID, payload)
+}
+
+// parseAndLoadContractStorage parses contract witness blob and loads into witness cache
+// The payload contains multiple entries: [20B address][1B kind][4B payload_length][4B tx_index][...payload...]
+func (s *StateDB) parseAndLoadContractStorage(serviceID uint32, payload []byte) error {
+	log.Info(log.SDB, "parseAndLoadContractStorage", "serviceID", serviceID, "payloadLen", len(payload))
+
+	s.sdb.InitWitnessCache()
+
+	offset := 0
+	for offset < len(payload) {
+		// Header: 20B address + 1B kind + 4B payload_len + 4B tx_index
+		if len(payload)-offset < 29 {
+			return fmt.Errorf("contract witness payload too short at offset %d: %d bytes remaining", offset, len(payload)-offset)
+		}
+
+		address := common.BytesToAddress(payload[offset : offset+20])
+		kind := payload[offset+20]
+		payloadLength := binary.LittleEndian.Uint32(payload[offset+21 : offset+25])
+		// Skip tx_index (offset 25-29)
+
+		if len(payload)-offset-29 < int(payloadLength) {
+			return fmt.Errorf("insufficient payload data at offset %d", offset)
+		}
+
+		entryData := payload[offset+29 : offset+29+int(payloadLength)]
+		offset += 29 + int(payloadLength)
+
+		log.Info(log.SDB, "parseAndLoadContractStorage parsed entry", "address", address.Hex(), "kind", kind, "payloadLength", payloadLength)
+
+		// Only load storage shards (kind=1) into witness cache
+		// Other kinds (balance=2, nonce=6, code=0) are handled during witness generation
+		if kind == 1 {
+			// Parse the contract shard data
+			contractStorage, err := evmtypes.DeserializeContractShard(entryData)
+			if err != nil {
+				return fmt.Errorf("failed to deserialize contract shard: %v", err)
+			}
+
+			// Compute verkle root for the contract storage
+			verkleRoot, err := computeVerkleRoot(address, contractStorage)
+			if err != nil {
+				log.Warn(log.SDB, "Failed to compute verkle root", "address", address.Hex(), "error", err)
+				// Continue without verkle root - this is not a fatal error
+			} else {
+				log.Info(log.SDB, "Computed verkle root", "address", address.Hex(), "verkleRoot", verkleRoot.Hex())
+			}
+
+			// Load into witness cache
+			s.sdb.SetContractStorage(address, evmtypes.ContractStorage{Shard: *contractStorage})
+
+			log.Info(log.SDB, "parseAndLoadContractStorage complete", "address", address.Hex(), "entries", len(contractStorage.Entries), "verkleRoot", verkleRoot.Hex())
+		}
+	}
+
+	return nil
+}
+
+// readPayloadFromSegments reads a payload from the segments array given index_start and payload_length
+func (s *StateDB) readPayloadFromSegments(segments [][]byte, indexStart uint32, payloadLength uint32) ([]byte, error) {
+	if payloadLength == 0 {
+		return []byte{}, nil
+	}
+
+	segmentSize := uint32(types.SegmentSize)
+	numSegments := (payloadLength + segmentSize - 1) / segmentSize
+
+	payload := make([]byte, 0, payloadLength)
+
+	for i := uint32(0); i < numSegments; i++ {
+		segmentIndex := indexStart + i
+		if int(segmentIndex) >= len(segments) {
+			return nil, fmt.Errorf("segment index %d out of range (have %d segments)", segmentIndex, len(segments))
+		}
+
+		segment := segments[segmentIndex]
+		bytesToRead := segmentSize
+		if i == numSegments-1 {
+			// Last segment - only read remaining bytes
+			bytesToRead = payloadLength - (i * segmentSize)
+		}
+
+		if uint32(len(segment)) < bytesToRead {
+			return nil, fmt.Errorf("segment %d too small: have %d bytes, need %d", segmentIndex, len(segment), bytesToRead)
+		}
+
+		payload = append(payload, segment[0:bytesToRead]...)
+	}
+
+	return payload, nil
+}
+
+// buildSSRKey returns SSR storage key
+func buildSSRKey() []byte {
+	return []byte("SSR")
+}
 
 // authorizeWP executes the authorization step for a work package
 func (statedb *StateDB) authorizeWP(workPackage types.WorkPackage, workPackageCoreIndex uint16, pvmBackend string) (r types.Result, p_a common.Hash, authGasUsed int64, err error) {
@@ -74,6 +437,13 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 	var segments [][]byte
 	refineCosts := make([]telemetry.RefineCost, 0, len(workPackage.WorkItems))
 	vmLogging := "unknown"
+
+	// Post-SSR: PrepareBuilderWitnesses removed
+	// Storage shards are NOT indexed in meta-shards, so there's no way to enumerate/load them
+	// Builder: Witnesses should be provided via work package (not loaded from DA)
+	// Guarantor: Witnesses pre-loaded in PVM from work package
+	// State reads will return zero if not in witness cache (expected behavior)
+
 	for index, workItem := range workPackage.WorkItems {
 		// map workItem.ImportedSegments into segment
 		service_index := workItem.Service
@@ -97,6 +467,29 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		// 0.7.1 : core index is part of refine args
 		execStart := time.Now()
 		output, _, exported_segments := vm.ExecuteRefine(workPackageCoreIndex, uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData[index], workPackage.AuthorizationCodeHash, common.BytesToHash(trie.H0))
+
+		// Post-SSR: Parse refine output to populate witness cache from exported segments
+		// Output format: [2B count] + count × [32B object_id + 2B index_start + 4B payload_length + 1B object_kind]
+		// Use exported_segments (just from this work item) not segments (accumulated across all work items)
+		if err := s.populateWitnessCacheFromRefineOutput(workItem.Service, output.Ok, exported_segments); err != nil {
+			log.Warn(log.SDB, "Failed to populate witness cache from refine output", "error", err)
+		}
+
+		contractWitnessBlob, err := s.extractContractWitnessBlob(output.Ok, exported_segments)
+		if err != nil {
+			return work_report, fmt.Errorf("failed to extract contract witness blob: %w", err)
+		}
+
+		if err := s.verifyPostStateAgainstExecution(workItem, package_bundle.ExtrinsicData[index], contractWitnessBlob); err != nil {
+			return work_report, fmt.Errorf("post-state verification failed: %w", err)
+		}
+
+		// Note: Guarantor BAL verification happens entirely in Rust (refiner.rs)
+		// - Primary verification: Compare verkle witness-derived BAL hash with payload metadata
+		// - Guarantor's exported_segments contains their own re-executed block (BAL hash = zeros from Rust)
+		// - Cannot verify builder's block segment here; it's only available from DA during accumulate phase
+		// - The Rust verification is sufficient for fraud detection (fail-closed)
+
 		execElapsed := time.Since(execStart)
 		compileElapsed := time.Since(compileStart)
 		if pvmBackend == BackendCompiler {
@@ -105,6 +498,13 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		expectedSegmentCnt := int(workItem.ExportCount)
 		actualSegmentCnt := len(exported_segments)
 		segmentCountMismatch := (expectedSegmentCnt != actualSegmentCnt)
+
+		log.Debug(log.Node, "executeWorkPackageBundle exports",
+			"backend", pvmBackend,
+			"context", execContext,
+			"expected", expectedSegmentCnt,
+			"actual", actualSegmentCnt,
+			"resultErr", output.Err)
 
 		if segmentCountMismatch {
 			log.Trace(log.Node, "executeWorkPackageBundle: ExportCount and ExportedSegments Mismatch", "ExportCount", expectedSegmentCnt, "ExportedSegments", actualSegmentCnt, "ExportedSegments", common.FormatPaddedBytesArray(exported_segments, 20))
@@ -132,7 +532,7 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 			Gas:                 workItem.AccumulateGasLimit,
 			GasUsed:             uint(workItem.RefineGasLimit - uint64(vm.GetGas())),
 			NumImportedSegments: uint(len(workItem.ImportedSegments)),
-			NumExportedSegments: uint(expectedSegmentCnt),
+			NumExportedSegments: uint(actualSegmentCnt),
 			NumExtrinsics: uint(func() int {
 				total := 0
 				for _, extrinsicBlobs := range package_bundle.ExtrinsicData {
@@ -183,7 +583,7 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		Results:           results,
 		AuthGasUsed:       uint(authGasUsed),
 	}
-	log.Info(log.Node, "executeWorkPackageBundle", "backend", pvmBackend, "role", vmLogging, "workreport", workReport.String())
+	log.Trace(log.Node, "executeWorkPackageBundle", "backend", pvmBackend, "role", vmLogging, "workreport", workReport.String())
 
 	s.GetStorage().GetJAMDA().StoreBundleSpecSegments(spec, d, package_bundle, segments)
 
@@ -201,6 +601,21 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 	return workReport, nil
 }
 
+func (s *StateDB) ReadGlobalDepth(serviceID uint32) (depth uint8, err error) {
+	ldBytes, found, readErr := s.ReadServiceStorage(uint32(serviceID), buildSSRKey())
+	if readErr != nil {
+		return 0, fmt.Errorf("failed to read global_depth hint: %v", readErr)
+	}
+	if !found {
+		return 0, nil
+	}
+	if len(ldBytes) < 1 {
+		return 0, fmt.Errorf("global_depth hint invalid length: %d", len(ldBytes))
+	}
+
+	return ldBytes[0], nil
+}
+
 // BuildBundle maps a work package into a WorkPackageBundle using JAMDA interface
 // It updates the workpackage work items: (1)  ExportCount ImportedSegments with a special HostFetchWitness call
 func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash, pvmBackend string) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
@@ -210,13 +625,14 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 	// The state root here matches the root used when witnesses were fetched
 	originalRefineContext := s.GetRefineContext()
 	wp.RefineContext = originalRefineContext
+	log.Trace(log.SDB, "BuildBundle:", "STATEROOT", wp.RefineContext.StateRoot)
 	authorization, p_a, _, err := s.authorizeWP(wp, coreIndex, pvmBackend)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	results := []types.WorkDigest{}
-	var segments [][]byte
+	contractWitnessBlobs := make([][]byte, len(wp.WorkItems)) // Store contract witness blobs for later application
 
 	for index, workItem := range wp.WorkItems {
 		code, ok, err0 := s.ReadServicePreimageBlob(workItem.Service, workItem.CodeHash)
@@ -241,20 +657,77 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 			log.Warn(log.DA, "BuildBundle: GetBuilderWitnesses failed", "err", err)
 			return nil, nil, err
 		}
+
+		// Generate Verkle witness for builder mode (Step 2: Builder Refine)
+		// Extract contract witness blob from refine result output
+		contractWitnessBlob, err := s.extractContractWitnessBlob(result.Ok, exported_segments)
+		if err != nil {
+			log.Warn(log.SDB, "Failed to extract contract witness blob", "err", err)
+			return nil, nil, err
+		}
+		contractWitnessBlobs[index] = contractWitnessBlob // Store for later application to main tree
+
+		// Build verkle witness - all verkle logic handled in storage
+		verkleWitnessBytes, err := s.sdb.BuildVerkleWitness(contractWitnessBlob)
+		if err != nil {
+			log.Warn(log.SDB, "BuildVerkleWitness failed", "err", err)
+			return nil, nil, err
+		}
+
+		// Build Block Access List from witness (Phase 4)
+		// This computes the BAL hash that will be embedded in the block payload
+		blockAccessListHash, accountCount, totalChanges, err := s.sdb.ComputeBlockAccessListHash(verkleWitnessBytes)
+		if err != nil {
+			log.Warn(log.SDB, "ComputeBlockAccessListHash failed", "err", err)
+			// Non-fatal: continue without BAL hash (will be zeros)
+			blockAccessListHash = common.Hash{}
+		} else {
+			log.Info(log.SDB, "Block Access List computed", "hash", blockAccessListHash.Hex(), "accounts", accountCount, "changes", totalChanges)
+		}
+
+		// Extract post-state Verkle root from witness to update block payload
+		postStateRoot, err := extractPostStateRootFromWitness(verkleWitnessBytes)
+		if err != nil {
+			log.Warn(log.SDB, "Failed to extract post-state root from witness", "err", err)
+			postStateRoot = common.Hash{} // leave unchanged if extraction fails
+		}
+
+		// Update block payload with BAL hash and post-state root (Phase 4)
+		// The block was already exported during ExecuteRefine, so we need to update it in exported_segments
+		err = s.updateBlockPayload(exported_segments, blockAccessListHash, postStateRoot)
+		if err != nil {
+			log.Warn(log.SDB, "Failed to update block payload", "err", err)
+			// Non-fatal: continue with original block payload (BAL hash/root may be zeros)
+		}
+
+		// Prepend Verkle witness as FIRST extrinsic
+		extrinsicsBlobs[index] = append([][]byte{verkleWitnessBytes}, extrinsicsBlobs[index]...)
+
+		// Update work item extrinsics to include Verkle witness
+		verkleWitnessExtrinsic := types.WorkItemExtrinsic{
+			Hash: common.Blake2Hash(verkleWitnessBytes),
+			Len:  uint32(len(verkleWitnessBytes)),
+		}
+		// Prepend to extrinsics list
+		wp.WorkItems[index].Extrinsics = append([]types.WorkItemExtrinsic{verkleWitnessExtrinsic}, wp.WorkItems[index].Extrinsics...)
+
+		// Clear verkleReadLog for next execution via clean interface
+		s.sdb.ClearVerkleReadLog()
+
 		wp.WorkItems[index].ExportCount = uint16(len(exported_segments))
 		wp.WorkItems[index].ImportedSegments = importedSegments
-		fmt.Printf("BuildBundle. PART 1  ExportCount: %d\n", wp.WorkItems[index].ExportCount)
 		// Append builder witnesses to extrinsicsBlobs -- this will be the metashards + the object proofs
 		builderWitnessCount := appendExtrinsicWitnessesToWorkItem(&wp.WorkItems[index], &extrinsicsBlobs, index, witnesses)
-		log.Info(log.DA, "BuildBundle: Appended builder witnesses", "workItemIndex", index, "builderWitnessCount", builderWitnessCount, "totalExtrinsics", len(extrinsicsBlobs[index]))
-		// Update payload metadata with builder witness count
-		if len(wp.WorkItems[index].Payload) >= 7 && builderWitnessCount > 0 {
+		log.Trace(log.DA, "BuildBundle: Appended builder witnesses", "workItemIndex", index, "builderWitnessCount", builderWitnessCount, "totalExtrinsics", len(extrinsicsBlobs[index]))
+		// Update payload metadata with builder witness count and BAL hash
+		// ALWAYS update if payload exists (even if builderWitnessCount=0) to ensure BAL hash is included
+		if len(wp.WorkItems[index].Payload) >= 7 {
 			totalWitnessCount := uint16(builderWitnessCount)
-			wp.WorkItems[index].Payload = BuildPayload(PayloadTypeBuilder, int(originalTxCount), int(totalWitnessCount))
+			wp.WorkItems[index].Payload = BuildPayload(PayloadTypeTransactions, int(originalTxCount), 0, int(totalWitnessCount), blockAccessListHash)
 		}
 
 		// Append exported segments (append slice directly)
-		segments = append(segments, exported_segments...)
+		//segments = append(segments, exported_segments...)
 
 		// Calculate total extrinsic bytes
 		totalExtrinsicBytes := 0
@@ -290,25 +763,29 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 		return nil, nil, err
 	}
 
-	// // Update ExtrinsicData with all work items (buildBundle only handles first work item)
+	// Update ExtrinsicData with all work items (buildBundle only handles first work item)
 	bundle.ExtrinsicData = extrinsicsBlobs
-
-	// CRITICAL: Restore ORIGINAL RefineContext (before execution) for witness verification
-	// ExecuteRefine mutated the state, so s.GetRefineContext() would return the wrong root.
-	// Witnesses were fetched using originalRefineContext.StateRoot, so proofs must verify against it.
-	// Also restore authorization fields that were lost in BuildBundleFromWPQueueItem
 	bundle.WorkPackage.AuthCodeHost = wp.AuthCodeHost
 	bundle.WorkPackage.AuthorizationCodeHash = wp.AuthorizationCodeHash
 	bundle.WorkPackage.AuthorizationToken = wp.AuthorizationToken
 	bundle.WorkPackage.ConfigurationBlob = wp.ConfigurationBlob
 	bundle.WorkPackage.RefineContext = originalRefineContext
-	fmt.Printf("BuildBundle. PART 2  ExportCount: %d\n", bundle.WorkPackage.WorkItems[0].ExportCount)
 
 	// Create work report from results -- note that this does not have availability spec
 	workReport := &types.WorkReport{
 		Results: results,
 	}
 	log.Trace(log.Node, "BuildBundle: Built", "payload", fmt.Sprintf("%x", bundle.WorkPackage.WorkItems[0].Payload))
+
+	for i, blob := range contractWitnessBlobs {
+		if len(blob) > 0 {
+			if err := s.sdb.ApplyContractWrites(blob); err != nil {
+				return &bundle, workReport, fmt.Errorf("failed to apply contract writes for work item %d: %v", i, err)
+			}
+			log.Info(log.SDB, "Applied contract writes to state", "workItemIndex", i, "blobSize", len(blob))
+		}
+	}
+
 	return &bundle, workReport, nil
 }
 
@@ -626,4 +1103,126 @@ func (n *StateDB) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup typ
 	}
 
 	return true, nil
+}
+
+// computeVerkleRoot creates a verkle tree from contract storage entries and computes its root
+func computeVerkleRoot(address common.Address, contractStorage *evmtypes.ContractShard) (common.Hash, error) {
+	log.Debug(log.SDB, "computeVerkleRoot", "address", address.Hex(), "entries", len(contractStorage.Entries))
+
+	// Create a new verkle tree
+	tree := verkle.New()
+
+	// Insert each storage entry into the verkle tree
+	for _, entry := range contractStorage.Entries {
+		// Use the storage key hash as the verkle key
+		key := entry.KeyH[:]
+		value := entry.Value[:]
+
+		err := tree.Insert(key, value, nil)
+		if err != nil {
+			return common.Hash{}, fmt.Errorf("failed to insert key %x into verkle tree: %v", key, err)
+		}
+
+		log.Info(log.SDB, "computeVerkleRoot: inserted entry", "key", fmt.Sprintf("%x", key), "value", fmt.Sprintf("%x", value))
+	}
+
+	// Compute the commitment (verkle root)
+	commitment := tree.Commit()
+	if commitment == nil {
+		return common.Hash{}, fmt.Errorf("failed to compute verkle commitment")
+	}
+
+	// Get the hash representation of the commitment
+	hashFr := tree.Hash()
+	if hashFr == nil {
+		return common.Hash{}, fmt.Errorf("failed to get verkle hash")
+	}
+
+	// Convert the field element to bytes and then to Hash
+	// Note: This conversion may need adjustment based on the actual field element representation
+	hashBytes := hashFr.Bytes()
+	verkleRoot := common.BytesToHash(hashBytes[:])
+
+	log.Info(log.SDB, "computeVerkleRoot complete", "address", address.Hex(), "verkleRoot", verkleRoot.Hex(), "entries", len(contractStorage.Entries))
+
+	return verkleRoot, nil
+}
+
+// updateBlockPayload updates the block payload in exported segments with the computed BAL hash
+// and optionally the post-state Verkle root (if provided).
+// The block is the first exported segment (ObjectKind::Block is exported first in refiner.rs)
+func (s *StateDB) updateBlockPayload(exportedSegments [][]byte, balHash common.Hash, postStateRoot common.Hash) error {
+	if len(exportedSegments) == 0 {
+		return fmt.Errorf("no exported segments")
+	}
+
+	// The block payload is the first exported segment
+	blockSegment := exportedSegments[0]
+
+	// Deserialize the block payload
+	blockPayload, err := evmtypes.DeserializeEvmBlockPayload(blockSegment, false) // headerOnly=false, need full payload
+	if err != nil {
+		return fmt.Errorf("failed to deserialize block payload: %w", err)
+	}
+
+	// Update the BAL hash
+	blockPayload.BlockAccessListHash = balHash
+
+	// Update Verkle root if provided (non-zero)
+	if postStateRoot != (common.Hash{}) {
+		blockPayload.VerkleRoot = postStateRoot
+	}
+
+	// Re-serialize the block payload
+	updatedSegment := evmtypes.SerializeEvmBlockPayload(blockPayload)
+
+	// Replace the first segment with the updated one
+	exportedSegments[0] = updatedSegment
+
+	log.Debug(log.SDB, "Updated block payload with BAL hash", "hash", balHash.Hex(), "segment_size", len(updatedSegment))
+
+	return nil
+}
+
+// extractPostStateRootFromWitness extracts the post-state Verkle root from a serialized witness
+// Witness format: 32B pre_root + 4B read_count + (161B * reads) + 4B pre_proof_len + pre_proof +
+//
+//	32B post_root + ...
+func extractPostStateRootFromWitness(witness []byte) (common.Hash, error) {
+	if len(witness) < 68 {
+		return common.Hash{}, fmt.Errorf("witness too short")
+	}
+
+	offset := 32 // skip pre_root
+
+	if len(witness)-offset < 4 {
+		return common.Hash{}, fmt.Errorf("witness missing read_count")
+	}
+	readCount := binary.BigEndian.Uint32(witness[offset : offset+4])
+	offset += 4
+
+	entryLen := 161
+	need := int(readCount) * entryLen
+	if len(witness)-offset < need {
+		return common.Hash{}, fmt.Errorf("witness truncated in read entries: need %d", need)
+	}
+	offset += need
+
+	if len(witness)-offset < 4 {
+		return common.Hash{}, fmt.Errorf("witness missing pre_proof_len")
+	}
+	preProofLen := binary.BigEndian.Uint32(witness[offset : offset+4])
+	offset += 4
+
+	if len(witness)-offset < int(preProofLen) {
+		return common.Hash{}, fmt.Errorf("witness truncated in pre_proof: need %d", preProofLen)
+	}
+	offset += int(preProofLen)
+
+	if len(witness)-offset < 32 {
+		return common.Hash{}, fmt.Errorf("witness missing post_root")
+	}
+	var postRoot common.Hash
+	copy(postRoot[:], witness[offset:offset+32])
+	return postRoot, nil
 }

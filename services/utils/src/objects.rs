@@ -258,19 +258,20 @@ impl ObjectRef {
     /// - max_payload_size: Maximum expected payload size
     ///
     /// Returns: Some((ObjectRef, payload)) on success, None on failure
+    #[cfg(not(test))]
     pub fn fetch(
         service_id: u32,
         object_id: &ObjectId,
         max_payload_size: usize,
-        _payload_type: u8,
+        payload_type: u8,
     ) -> Option<(Self, Vec<u8>)> {
         use crate::functions::{format_object_id, log_info};
         use crate::host_functions::fetch_object;
 
-        // Only fetch from witnesses if payload_type is Builder (0)
-        // if payload_type != 0 {
-        //     return None;
-        // }
+        // Do not fetch anything for Transactions
+        if payload_type == 1 {
+            return None;
+        }
 
         let key_buffer = *object_id;
 
@@ -281,7 +282,7 @@ impl ObjectRef {
             max_payload_size
         ));
 
-        // Allocate buffer: ObjectRef (64 bytes) + payload
+        // Allocate buffer: ObjectRef (37 bytes) + payload
         let total_size = Self::SERIALIZED_SIZE + max_payload_size;
         let mut result_buffer = vec![0u8; total_size];
 
@@ -296,20 +297,16 @@ impl ObjectRef {
             );
 
             log_info(&alloc::format!(
-                "📡 fetch_object RETURNED: result_len={} (0=not found)",
+                "📡 fetch_object RETURNED: payload_type={} result_len={} (0=not found)",
+                payload_type,
                 result_len
             ));
 
             if result_len == 0 {
-                // Object not found -- this is normal eg for EOA accounts you wont find code!
-                // log_info(&alloc::format!(
-                //     "❌ fetch_object: Object not found in witnesses: {}",
-                //     format_object_id(*object_id)
-                // ));
                 return None;
             }
 
-            // Parse ObjectRef from first 64 bytes
+            // Parse ObjectRef from first 37 bytes
             let object_ref = Self::deserialize(&result_buffer[0..Self::SERIALIZED_SIZE])?;
 
             // Extract payload (remaining bytes)
@@ -474,6 +471,7 @@ impl StateWitness {
             object_id: self.object_id,
             ref_info: self.ref_info.clone(),
             payload,
+            tx_index: 0,  // TODO: Track tx_index properly
         })
     }
 

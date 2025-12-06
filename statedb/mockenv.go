@@ -31,8 +31,8 @@ func (m *MockHostEnv) ReadServiceStorage(s uint32, k []byte) ([]byte, bool, erro
 	return nil, false, nil
 }
 
-// GetParentStateRoot returns a stub state root
-func (m *MockHostEnv) GetParentStateRoot() common.Hash {
+// GetStateRoot returns a stub state root
+func (m *MockHostEnv) GetStateRoot() common.Hash {
 	return common.Hash{}
 }
 

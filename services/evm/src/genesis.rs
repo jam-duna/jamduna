@@ -1,4 +1,4 @@
-use crate::sharding::{ObjectKind, code_object_id, format_object_id};
+use crate::contractsharding::{ObjectKind, code_object_id, format_object_id};
 use crate::state::MajikBackend;
 use alloc::format;
 use primitive_types::H160;

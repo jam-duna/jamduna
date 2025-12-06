@@ -73,25 +73,24 @@ Taken together the type simply means **"a cache keyed by `H160` that we can muta
 ```rust
 pub struct MajikBackend {
     pub code_storage: RefCell<BTreeMap<H160, Vec<u8>>>,   // address -> bytecode
-    pub code_versions: BTreeMap<H160, u32>,               // address -> version counter
     pub code_hashes: RefCell<BTreeMap<H160, H256>>,       // address -> keccak(code)
     pub storage_shards: RefCell<BTreeMap<H160, ContractStorage>>, // address -> SSR + shards
     pub balances: RefCell<BTreeMap<H160, U256>>,          // address -> balance
     pub nonces: RefCell<BTreeMap<H160, U256>>,            // address -> nonce
-    pub imported_objects: RefCell<BTreeMap<[u8; 32], (ObjectRef, Vec<u8>)>>, // object_id cache
+    pub imported_objects: RefCell<BTreeMap<ObjectId, (ObjectRef, Vec<u8>)>>, // object_id cache
+    pub execution_mode: ExecutionMode,                    // Builder vs Guarantor mode
     // ...
 }
 ```
 
 | Field | Backing Data | Why `RefCell`? | Notes |
 |-------|--------------|----------------|-------|
-| `code_storage` | Bytecode blobs | Lazy-import bytecode, then cache for future calls | Populated by `import_code` |
+| `code_storage` | Bytecode blobs | Lazy-import bytecode, then cache for future calls | Populated by Verkle fetch or DA import |
 | `code_hashes` | Keccak of bytecode | Provide `EXTCODEHASH` without recomputing | Updated alongside bytecode |
 | `storage_shards` | SSR header + shard map | Need to import or mutate shards inside read paths | Wraps `ContractStorage` |
 | `balances` / `nonces` | System-contract slots | `balance()` or `nonce()` run with `&self` | Cache zeroes to avoid TRAPs |
 | `imported_objects` | `(ObjectRef, payload)` | Reuse DA payloads across shard or code calls | Keyed by 32-byte object id |
-
-`code_versions` is the outlier: it only changes while we already hold `&mut self`, so no `RefCell` required.
+| `execution_mode` | Builder vs Guarantor | N/A (not `RefCell`) | Set at construction, immutable during execution |
 
 ### Read / Write Flow in Practice
 
@@ -104,6 +103,7 @@ pub struct MajikBackend {
 
 ```rust
 fn balance(&self, address: H160) -> U256 {
+    // Check cache first
     {
         let balances = self.balances.borrow();
         if let Some(balance) = balances.get(&address) {
@@ -111,13 +111,19 @@ fn balance(&self, address: H160) -> U256 {
         }
     }
 
-    let system_contract = h160_from_low_u64_be(0x01);
-    let slot = balance_storage_key(address);
-    let value = self.storage(system_contract, slot);
-    let balance = U256::from_big_endian(value.as_bytes());
-
-    self.balances.borrow_mut().insert(address, balance);
-    balance
+    // Cache miss - fetch based on execution mode
+    match self.execution_mode {
+        ExecutionMode::Builder => {
+            // Builder mode: Use Verkle host function
+            let balance = crate::verkle::fetch_balance_verkle(address);
+            self.balances.borrow_mut().insert(address, balance);
+            balance
+        }
+        ExecutionMode::Guarantor => {
+            // Guarantor mode: Cache miss is fatal
+            panic!("GUARANTOR: Balance cache miss for address={:?}", address);
+        }
+    }
 }
 ```
 
@@ -155,16 +161,110 @@ Following this recipe keeps the JAM EVM runtime fast, deterministic, and safe ev
 
 ---
 
+## Verkle Tree Integration (EIP-6800)
+
+### Execution Modes
+
+The backend supports two execution modes for Verkle state access:
+
+| Mode | Description | State Access | Witness |
+|------|-------------|--------------|---------|
+| **Builder** | Generates Verkle witness during execution | Calls `host_fetch_verkle()` for cache misses | Constructed after execution via `storage.BuildVerkleWitness()` |
+| **Guarantor** | Verifies execution using provided witness | Reads from pre-populated caches only | Parsed and verified before execution |
+
+**Mode Detection** (`refiner.rs:867-920`):
+- **Guarantor mode**: Detected when first extrinsic is a VerkleWitness (size >= 197 bytes)
+  - VerkleWitness deserialized and verified via `host_verify_verkle_proof()`
+  - Caches populated from witness pre-state values
+  - Backend created via `MajikBackend::from_verkle_witness()`
+- **Builder mode**: Default when no Verkle witness present
+  - Backend created via `MajikBackend::new()` with `ExecutionMode::Builder`
+  - Verkle witness generated after execution in Go storage layer
+
+### Verkle Tree Structure (EIP-6800)
+
+**Account State Keys**:
+```
+GetTreeKey(address, subIndex):
+  stem = Pedersen(address || le64(subIndex >> 8))
+  suffix = subIndex & 0xFF
+
+BasicData (suffix 0):  [version(1) | reserved(4) | code_size(3) | nonce(8) | balance(16)] = 32B
+  Offset 0:      Version (1 byte)
+  Offset 5-7:    Code size (3 bytes, big-endian)
+  Offset 8-15:   Nonce (8 bytes, big-endian)
+  Offset 16-31:  Balance (16 bytes, big-endian uint128)
+CodeHash (suffix 1):   [code_hash:32]
+CodeChunk(N) (suffix 128+N): [push_offset(1) | code_chunk(31)]
+Storage(slot) (suffix 64+): Verkle key for storage slot
+```
+
+**Host Functions** (`statedb/hostfunctions.go:2095-2850`):
+- `host_fetch_verkle(FETCH_BALANCE, address, ...) -> balance` (reads BasicData offset 16-31)
+- `host_fetch_verkle(FETCH_NONCE, address, ...) -> nonce` (reads BasicData offset 8-15)
+- `host_fetch_verkle(FETCH_CODE, address, ...) -> code` (reads code chunks)
+- `host_fetch_verkle(FETCH_CODE_HASH, address, ...) -> code_hash` (reads CodeHash key)
+- `host_fetch_verkle(FETCH_STORAGE, address, key, ...) -> value` (reads storage slot)
+- `host_verify_verkle_proof(witness_ptr, witness_len) -> valid`
+
+**Witness Construction** (`storage/witness.go`):
+- Dual-proof format: pre-state proof (reads) + post-state proof (writes)
+- `BuildVerkleWitness()` generates both proofs after execution
+- `ApplyContractWrites()` applies contract writes to Verkle tree
+- Read log tracked via `StateDBStorage.verkleReadLog`
+
+### Cache-First Pattern
+
+All `RuntimeBaseBackend` methods follow this pattern:
+
+```rust
+fn state_read(&self, address: H160) -> Value {
+    // 1. Check cache
+    {
+        let cache = self.cache.borrow();
+        if let Some(value) = cache.get(&address) {
+            return *value;
+        }
+    }
+
+    // 2. Handle cache miss based on mode
+    match self.execution_mode {
+        ExecutionMode::Builder => {
+            // Fetch from Verkle tree via host function
+            let value = crate::verkle::fetch_value_verkle(address);
+            self.cache.borrow_mut().insert(address, value);
+            value
+        }
+        ExecutionMode::Guarantor => {
+            // Cache miss is fatal - witness incomplete
+            panic!("GUARANTOR: Cache miss for {:?}", address);
+        }
+    }
+}
+```
+
+**Design Rationale**:
+- **Builder**: Verkle reads logged to `StateDBStorage.verkleReadLog` (storage layer maintains authoritative log)
+- **Guarantor**: All accessed state must be in witness (deterministic verification)
+- **Two-step API**: Query size first (`output_max_len=0`), then fetch data
+- **Witness ownership**: Storage package owns witness construction and tree operations
+- **Clean separation**: statedb = EVM operations, storage = Verkle tree + witness
+
+---
+
 ## `RuntimeBaseBackend`
 
 ### `balance`
 **Interface:** `fn balance(&self, address: H160) -> U256`
 **Description:** Gets the balance associated with an address.
 **JAM DA/State Handling:**
-- Balance stored in DA shards via precompile contract at address 0x01, treating balance as a storage slot.
-- Resolve shard for 0x01 via SSR: storage key = `keccak256(address)`, lookup ShardId from 0x01's SSR.
-- Import shard from DA using `shard_object_id(0x01, ShardId)`, binary search for balance entry.
-- JAM State holds ObjectRefs for 0x01's shards; balance reads are storage operations (~200-300 gas).
+- **Builder Mode**: Uses Verkle host function `host_fetch_verkle(FETCH_BALANCE)` to read from Verkle tree
+  - Go reads BasicData key (suffix 0) from Verkle tree
+  - Extracts balance from bytes [16:31] of BasicData (16 bytes, big-endian uint128)
+  - Logs read to `StateDBStorage.verkleReadLog` for witness construction
+- **Guarantor Mode**: Reads from pre-populated cache (populated from VerkleWitness)
+  - Cache miss causes panic (witness must contain all accessed state)
+- Verkle tree structure per EIP-6800: balance stored at BasicData offset 16-31
 
 **Call Sites:**
 1. **BALANCE opcode** ([eval/system.rs:53](../services/vendor/evm-interpreter/src/eval/system.rs#L53)) – Pops an address off the stack and pushes the result of `handler.balance`.
@@ -245,9 +345,13 @@ Following this recipe keeps the JAM EVM runtime fast, deterministic, and safe ev
 **Interface:** `fn nonce(&self, address: H160) -> U256`
 **Description:** Returns the current nonce used for replay protection and CREATE address derivation.
 **JAM DA/State Handling:**
-- Nonce stored in DA shards via precompile contract at address 0x01, as a separate storage slot per account.
-- Resolve shard for 0x01 via SSR: storage key = `keccak256(address || "nonce")`, lookup ShardId.
-- Import shard from DA using `shard_object_id(0x01, ShardId)`, binary search for nonce entry.
+- **Builder Mode**: Uses Verkle host function `host_fetch_verkle(FETCH_NONCE)` to read from Verkle tree
+  - Go reads BasicData key (suffix 0) from Verkle tree
+  - Extracts nonce from bytes [8:15] of BasicData (8 bytes, big-endian uint64)
+  - Logs read to `StateDBStorage.verkleReadLog` for witness construction
+- **Guarantor Mode**: Reads from pre-populated cache (populated from VerkleWitness)
+  - Cache miss causes panic (witness must contain all accessed state)
+- Verkle tree structure per EIP-6800: nonce stored at BasicData offset 8-15
 - Used for CREATE address derivation: `keccak256(rlp([sender, nonce]))[12:]`; nonce=0 required for `can_create`.
 
 **Call Sites:**

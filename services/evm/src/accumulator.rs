@@ -3,12 +3,13 @@
 use crate::mmr::MMR;
 use crate::{
     block::{EvmBlockPayload, block_number_to_object_id},
-    sharding::format_object_id,
+    contractsharding::format_object_id,
 };
 use alloc::{format, vec::Vec};
 use utils::{
     constants::FULL,
     functions::{AccumulateInput, format_segment, log_error, log_info},
+    host_functions::AccumulateInstruction,
 };
 
 /// BlockAccumulator manages block storage and retrieval operations
@@ -36,7 +37,10 @@ impl BlockAccumulator {
         timeslot: u32,
         accumulate_inputs: &[AccumulateInput],
     ) -> Option<[u8; 32]> {
-        log_info(&format!("📥 Accumulate: Processing {} inputs", accumulate_inputs.len()));
+        log_info(&format!(
+            "📥 Accumulate: Processing {} inputs",
+            accumulate_inputs.len()
+        ));
         let mut accumulator = Self::new(service_id, timeslot)?;
 
         for (idx, input) in accumulate_inputs.iter().enumerate() {
@@ -46,7 +50,10 @@ impl BlockAccumulator {
                 continue;
             };
 
-            log_info(&format!("  Input #{}: OperandElements, calling rollup_block", idx));
+            log_info(&format!(
+                "  Input #{}: OperandElements, calling rollup_block",
+                idx
+            ));
             // Process this work package's rollup block
             accumulator.rollup_block(operand)?;
 
@@ -98,6 +105,22 @@ impl BlockAccumulator {
 
         let data = operand.result.ok.as_ref()?;
         let wph = operand.work_package_hash;
+        let segment_root = operand.exported_segment_root;
+
+        log_info(&format!(
+            "📥 Accumulate: Received {} bytes of input data",
+            data.len()
+        ));
+
+        // DEBUG: Show first few bytes of input data
+        if !data.is_empty() {
+            let preview_len = core::cmp::min(20, data.len());
+            let preview_bytes = &data[0..preview_len];
+            log_info(&format!(
+                "📥 Input data preview: {:02x?}",
+                preview_bytes
+            ));
+        }
 
         // Parse compact format: N entries × (1B ld + prefix_bytes + 5B packed ObjectRef)
         // Note: Each entry has its own ld value (meta-shards can have different depths after splits)
@@ -109,53 +132,68 @@ impl BlockAccumulator {
         let global_ld = if data.is_empty() {
             log_info("📥 Empty compact format, no meta-shard entries (idle block)");
             0u8 // No meta-shard updates, use ld=0
+        } else if data.len() < 2 {
+            log_error("❌ Invalid compact format: too short for metashard count");
+            return None;
         } else {
+            // Read metashard count from first 2 bytes
+            let metashard_count = u16::from_le_bytes([data[0], data[1]]);
+            log_info(&format!(
+                "📥 Accumulate: Received {} meta-shard entries, {} bytes total",
+                metashard_count, data.len()
+            ));
+
+            if metashard_count == 0 {
+                log_info("📥 Empty compact format, no meta-shard entries (idle block)");
+                0u8 // No meta-shard updates, use ld=0
+            } else {
             // log_info(&format!(
             //     "📥 Deserializing compact format: {} bytes total",
             //     data.len()
             // ));
 
-            // Parse variable-length entries
-            let mut offset = 0;
-            let mut num_entries = 0;
-            let mut max_ld = 0u8; // Track maximum ld for MetaSSR
+                // Parse variable-length entries starting after metashard count (offset 2)
+                let mut offset = 2;
+                let mut num_entries = 0;
+                let mut max_ld = 0u8; // Track maximum ld for MetaSSR
 
-            while offset < data.len() {
-                if offset + 1 > data.len() {
-                    log_error(&format!(
-                        "❌ Invalid compact format: truncated ld at offset {}",
-                        offset
+                while num_entries < metashard_count && offset < data.len() {
+                    if offset + 1 > data.len() {
+                        log_error(&format!(
+                            "❌ Invalid compact format: truncated ld at offset {}",
+                            offset
+                        ));
+                        return None;
+                    }
+
+                    let ld = data[offset];
+                    max_ld = max_ld.max(ld);
+                    offset += 1;
+
+                    log_info(&format!(
+                        "📥 Parsing entry {}: ld={}, offset={}, remaining_bytes={}",
+                        num_entries, ld, offset, data.len() - offset
                     ));
-                    return None;
+
+                    let prefix_bytes = ((ld + 7) / 8) as usize;
+                    let entry_size = prefix_bytes + 5; // prefix + 5-byte packed ObjectRef
+
+                    if offset + entry_size > data.len() {
+                        log_error(&format!(
+                            "❌ Invalid compact format: truncated entry at offset {} (need {} more bytes)",
+                            offset, entry_size
+                        ));
+                        return None;
+                    }
+
+                    let entry_bytes = &data[offset..offset + entry_size];
+                    self.write_metashard(entry_bytes, ld, prefix_bytes, wph, num_entries as usize)?;
+
+                    offset += entry_size;
+                    num_entries += 1;
                 }
-
-                let ld = data[offset];
-                max_ld = max_ld.max(ld);
-                offset += 1;
-
-                let prefix_bytes = ((ld + 7) / 8) as usize;
-                let entry_size = prefix_bytes + 5; // prefix + 5-byte packed ObjectRef
-
-                if offset + entry_size > data.len() {
-                    log_error(&format!(
-                        "❌ Invalid compact format: truncated entry at offset {} (need {} more bytes)",
-                        offset, entry_size
-                    ));
-                    return None;
-                }
-
-                let entry_bytes = &data[offset..offset + entry_size];
-                self.write_metashard(entry_bytes, ld, prefix_bytes, wph, num_entries)?;
-
-                offset += entry_size;
-                num_entries += 1;
+                max_ld
             }
-
-            // log_info(&format!(
-            //     "📥 Deserialized {} meta-shard entries, max ld={}",
-            //     num_entries, max_ld
-            // ));
-            max_ld
         };
 
         // ALWAYS write MetaSSR hint, even for idle blocks (ensures SSR key exists for Go lookups)
@@ -163,7 +201,52 @@ impl BlockAccumulator {
 
         // ALWAYS write block mapping, even for idle blocks
         // This ensures every block appears in the bidirectional mapping and MMR
-        self.write_block(wph, self.timeslot)?;
+        self.write_block(wph, segment_root, self.timeslot)?;
+
+        // After processing meta-shards, check for and execute accumulate instructions
+        // The format is: [2B metashard_count][metashard entries...][2B contract witness][4B contract witness][accumulate instructions...]
+        // We need to skip past metashard data + contract witness metadata (6 bytes) to find accumulate instructions
+
+        // Calculate where metashard data ends
+        let metashard_count = if data.len() >= 2 {
+            u16::from_le_bytes([data[0], data[1]])
+        } else {
+            0
+        };
+
+        let mut meta_end_offset = 2; // Start after metashard count
+        for _i in 0..metashard_count {
+            if meta_end_offset >= data.len() {
+                break;
+            }
+            let ld = data[meta_end_offset];
+            meta_end_offset += 1;
+            let prefix_bytes = ((ld + 7) / 8) as usize;
+            let entry_size = prefix_bytes + 5;
+            meta_end_offset += entry_size;
+        }
+
+        // Skip contract witness metadata (6 bytes)
+        let accumulate_start_offset = meta_end_offset + 6;
+
+        // Check if there are remaining bytes (accumulate instructions)
+        if accumulate_start_offset < data.len() {
+            let accumulate_bytes = &data[accumulate_start_offset..];
+            log_info(&format!(
+                "📥 Found {} bytes of accumulate instructions at offset {}",
+                accumulate_bytes.len(), accumulate_start_offset
+            ));
+
+            // Deserialize and execute accumulate instructions
+            let instructions = AccumulateInstruction::deserialize_all(accumulate_bytes);
+            if !instructions.is_empty() {
+                log_info(&format!(
+                    "🔧 Executing {} accumulate instructions",
+                    instructions.len()
+                ));
+                self.execute_accumulate_instructions(&instructions)?;
+            }
+        }
 
         Some(())
     }
@@ -182,12 +265,9 @@ impl BlockAccumulator {
         use utils::constants::{NONE, WHAT};
         use utils::host_functions::{read, write};
 
-        let mut ssr_key = [0u8; 32];
-        ssr_key[0..4].copy_from_slice(&self.service_id.to_le_bytes());
-        ssr_key[4..7].copy_from_slice(b"SSR");
-
         // Read current global_depth
         // read(s: service_id, ko: key_offset, kz: key_size, o: out_offset, f: out_offset_within, l: length)
+        let ssr_key = b"SSR";
         let mut buffer = [0u8; 1];
         let result = unsafe {
             read(
@@ -263,8 +343,8 @@ impl BlockAccumulator {
         work_package_hash: [u8; 32],
         entry_index: usize,
     ) -> Option<()> {
+        use crate::contractsharding::ObjectKind;
         use crate::meta_sharding::meta_shard_object_id;
-        use crate::sharding::ObjectKind;
         use utils::objects::ObjectRef;
 
         // Reconstruct meta-shard object_id from ld and prefix
@@ -379,8 +459,12 @@ impl BlockAccumulator {
         }
 
         // Extract ld and prefix56 from new 0xAA-prefixed object_id format
-        let (current_ld_parsed, prefix56) = crate::meta_sharding::parse_meta_shard_object_id(&object_id);
-        debug_assert_eq!(current_ld_parsed, current_ld, "ld mismatch in delete_ancestor_shards");
+        let (current_ld_parsed, prefix56) =
+            crate::meta_sharding::parse_meta_shard_object_id(&object_id);
+        debug_assert_eq!(
+            current_ld_parsed, current_ld,
+            "ld mismatch in delete_ancestor_shards"
+        );
 
         for ancestor_ld in (0..current_ld).rev() {
             // Compute ancestor prefix by masking to ancestor_ld bits
@@ -473,14 +557,20 @@ impl BlockAccumulator {
     /// Then appends work_package_hash to MMR and increments block_number
     ///
     /// Returns None if any write fails (FULL), Some(()) on success
-    fn write_block(&mut self, work_package_hash: [u8; 32], timeslot: u32) -> Option<()> {
+    fn write_block(
+        &mut self,
+        work_package_hash: [u8; 32],
+        segment_root: [u8; 32],
+        timeslot: u32,
+    ) -> Option<()> {
         use utils::host_functions::write as host_write;
 
-        // Write blocknumber → work_package_hash (32 bytes) + timeslot (4 bytes)
+        // Write blocknumber → work_package_hash (32 bytes) + timeslot (4 bytes) + segment_root (32 bytes)
         let bn_key = block_number_to_object_id(self.block_number);
-        let mut bn_data = Vec::with_capacity(36);
+        let mut bn_data = Vec::with_capacity(68);
         bn_data.extend_from_slice(&work_package_hash);
         bn_data.extend_from_slice(&timeslot.to_le_bytes());
+        bn_data.extend_from_slice(&segment_root);
 
         let result1 = unsafe {
             host_write(
@@ -499,12 +589,12 @@ impl BlockAccumulator {
             ));
             return None;
         }
-
-        // Write reverse mapping: work_package_hash → blocknumber (4 bytes) + timeslot (4 bytes)
+        // Write reverse mapping: work_package_hash → blocknumber (4 bytes) + timeslot (4 bytes) + segment_root (32 bytes)
         let wph_key = work_package_hash;
-        let mut wph_data = Vec::with_capacity(8);
+        let mut wph_data = Vec::with_capacity(40);
         wph_data.extend_from_slice(&self.block_number.to_le_bytes());
         wph_data.extend_from_slice(&timeslot.to_le_bytes());
+        wph_data.extend_from_slice(&segment_root);
 
         let result2 = unsafe {
             host_write(
@@ -526,8 +616,9 @@ impl BlockAccumulator {
 
         // Both writes succeeded - log and update internal state
         log_info(&format!(
-            "📚 Wrote block mappings: {} ↔ {} (@ timeslot {})",
+            "📚 Wrote block # {} : BNOBJ {} ↔ WPH {}=timeslot={}",
             self.block_number,
+            format_object_id(&bn_key),
             format_object_id(&work_package_hash),
             timeslot
         ));
@@ -538,6 +629,316 @@ impl BlockAccumulator {
         // Increment block_number for next block
         self.block_number += 1;
 
+        Some(())
+    }
+
+    /// Execute accumulate instructions by calling the appropriate host functions
+    fn execute_accumulate_instructions(
+        &self,
+        instructions: &[AccumulateInstruction],
+    ) -> Option<()> {
+        use utils::host_functions as hf;
+
+        for (idx, instruction) in instructions.iter().enumerate() {
+            log_info(&format!(
+                "  Executing instruction {}: opcode={}",
+                idx, instruction.opcode
+            ));
+
+            // Call the appropriate host function based on opcode
+            match instruction.opcode {
+                AccumulateInstruction::BLESS => {
+                    // bless(m, a_ptr, v, r, o_ptr, n)
+                    if instruction.params.len() != 4 {
+                        log_error(&format!(
+                            "Invalid BLESS params count: {}",
+                            instruction.params.len()
+                        ));
+                        return None;
+                    }
+
+                    let m = instruction.params[0];
+                    let v = instruction.params[1];
+                    let r = instruction.params[2];
+                    let n = instruction.params[3];
+
+                    const TOTAL_CORES: usize = 2;
+
+                    let bold_z_len = n.checked_mul(12).map(|v| v as usize).unwrap_or(usize::MAX);
+                    if bold_z_len == usize::MAX || instruction.data.len() < bold_z_len {
+                        log_error(&format!(
+                            "Invalid BLESS data lengths: data_len={}, expected_bold_z_len={}",
+                            instruction.data.len(),
+                            bold_z_len
+                        ));
+                        return None;
+                    }
+
+                    let bold_a_len = instruction.data.len() - bold_z_len;
+                    if bold_a_len != TOTAL_CORES * 4 {
+                        log_error(&format!(
+                            "Invalid BLESS bold_a length: bold_a_len={}, bold_z_len={}",
+                            bold_a_len, bold_z_len
+                        ));
+                        return None;
+                    }
+
+                    let bold_a_ptr = instruction.data.as_ptr() as u64;
+                    let bold_z_ptr = bold_a_ptr + bold_a_len as u64;
+
+                    unsafe {
+                        hf::bless(m, bold_a_ptr, v, r, bold_z_ptr, n);
+                    }
+                }
+                AccumulateInstruction::ASSIGN => {
+                    // assign(c, o, a) where o points to queue work report bytes
+                    if instruction.params.len() != 2 {
+                        log_error(&format!(
+                            "Invalid ASSIGN params count: {}",
+                            instruction.params.len()
+                        ));
+                        return None;
+                    }
+
+                    const MAX_AUTHORIZATION_QUEUE_ITEMS: usize = 80;
+                    const QUEUE_BYTES: usize = MAX_AUTHORIZATION_QUEUE_ITEMS * 32;
+
+                    if instruction.data.len() != QUEUE_BYTES {
+                        log_error(&format!(
+                            "Invalid ASSIGN queue length: got {}, expected {}",
+                            instruction.data.len(),
+                            QUEUE_BYTES
+                        ));
+                        return None;
+                    }
+
+                    unsafe {
+                        hf::assign(
+                            instruction.params[0],            // c
+                            instruction.data.as_ptr() as u64, // o: queue work report
+                            instruction.params[1],            // a
+                        );
+                    }
+                }
+                AccumulateInstruction::DESIGNATE => {
+                    // designate(o) - no params, validators bytes in data
+                    if instruction.params.len() != 0 {
+                        log_error(&format!(
+                            "Invalid DESIGNATE params count: {}",
+                            instruction.params.len()
+                        ));
+                        return None;
+                    }
+
+                    const VALIDATOR_BYTES: usize = 336;
+                    const TOTAL_VALIDATORS: usize = 6;
+                    let expected_len = VALIDATOR_BYTES * TOTAL_VALIDATORS;
+
+                    if instruction.data.len() != expected_len {
+                        log_error(&format!(
+                            "Invalid DESIGNATE data length: got {}, expected {}",
+                            instruction.data.len(),
+                            expected_len
+                        ));
+                        return None;
+                    }
+
+                    unsafe {
+                        hf::designate(instruction.data.as_ptr() as u64);
+                    }
+                }
+                AccumulateInstruction::NEW => {
+                    // new(o, l, g, m, f, i) where o points to code_hash bytes
+                    if instruction.params.len() != 5 || instruction.data.len() != 32 {
+                        log_error(&format!(
+                            "Invalid NEW params: {} params, {} data bytes",
+                            instruction.params.len(),
+                            instruction.data.len()
+                        ));
+                        return None;
+                    }
+                    unsafe {
+                        hf::new(
+                            instruction.data.as_ptr() as u64, // o: offset to code hash
+                            instruction.params[0],            // l
+                            instruction.params[1],            // g
+                            instruction.params[2],            // m
+                            instruction.params[3],            // f
+                            instruction.params[4],            // i
+                        );
+                    }
+                }
+                AccumulateInstruction::UPGRADE => {
+                    // upgrade(o, g, m) where o points to code_hash bytes
+                    if instruction.params.len() != 2 || instruction.data.len() != 32 {
+                        log_error(&format!(
+                            "Invalid UPGRADE params: {} params, {} data bytes",
+                            instruction.params.len(),
+                            instruction.data.len()
+                        ));
+                        return None;
+                    }
+                    unsafe {
+                        hf::upgrade(
+                            instruction.data.as_ptr() as u64, // o: offset to code hash
+                            instruction.params[0],            // g
+                            instruction.params[1],            // m
+                        );
+                    }
+                }
+                AccumulateInstruction::TRANSFER => {
+                    // transfer(d, a, g, o) where o points to memo bytes
+                    if instruction.params.len() != 3 {
+                        log_error(&format!(
+                            "Invalid TRANSFER params count: {}",
+                            instruction.params.len()
+                        ));
+                        return None;
+                    }
+
+                    const MEMO_SIZE: usize = 128;
+                    if instruction.data.len() != MEMO_SIZE {
+                        log_error(&format!(
+                            "Invalid TRANSFER memo size: got {}, expected {}",
+                            instruction.data.len(),
+                            MEMO_SIZE
+                        ));
+                        return None;
+                    }
+
+                    unsafe {
+                        hf::transfer(
+                            instruction.params[0],            // d
+                            instruction.params[1],            // a
+                            instruction.params[2],            // g
+                            instruction.data.as_ptr() as u64, // o: offset to memo
+                        );
+                    }
+                }
+                AccumulateInstruction::EJECT => {
+                    // eject(d, o) where o points to hash bytes
+                    if instruction.params.len() != 1 || instruction.data.len() != 32 {
+                        log_error(&format!(
+                            "Invalid EJECT params: {} params, {} data bytes",
+                            instruction.params.len(),
+                            instruction.data.len()
+                        ));
+                        return None;
+                    }
+                    unsafe {
+                        hf::eject(
+                            instruction.params[0],            // d
+                            instruction.data.as_ptr() as u64, // o: offset to hash
+                        );
+                    }
+                }
+                AccumulateInstruction::WRITE => {
+                    // write(ko, kz, vo, vz) - key and value from instruction.data
+                    if instruction.params.len() != 2 {
+                        log_error(&format!(
+                            "Invalid WRITE params: {} params (expected key/value lengths)",
+                            instruction.params.len()
+                        ));
+                        return None;
+                    }
+
+                    let key_len = instruction.params[0] as usize;
+                    let value_len = instruction.params[1] as usize;
+                    let expected_len = key_len + value_len;
+
+                    if instruction.data.len() != expected_len {
+                        log_error(&format!(
+                            "Invalid WRITE data length: got {}, expected {} (key_len={}, value_len={})",
+                            instruction.data.len(),
+                            expected_len,
+                            key_len,
+                            value_len
+                        ));
+                        return None;
+                    }
+
+                    let key_ptr = instruction.data.as_ptr() as u64;
+                    let value_ptr = (instruction.data.as_ptr() as u64) + key_len as u64;
+                    unsafe {
+                        hf::write(
+                            key_ptr,          // ko: key offset
+                            key_len as u64,   // kz: key size
+                            value_ptr,        // vo: value offset
+                            value_len as u64, // vz: value size
+                        );
+                    }
+                }
+                AccumulateInstruction::SOLICIT => {
+                    // solicit(o, z) where o points to hash bytes
+                    if instruction.params.len() != 1 || instruction.data.len() != 32 {
+                        log_error(&format!(
+                            "Invalid SOLICIT params: {} params, {} data bytes",
+                            instruction.params.len(),
+                            instruction.data.len()
+                        ));
+                        return None;
+                    }
+                    unsafe {
+                        hf::solicit(
+                            instruction.data.as_ptr() as u64, // o: offset to hash
+                            instruction.params[0],            // z
+                        );
+                    }
+                }
+                AccumulateInstruction::FORGET => {
+                    // forget(o, z) where o points to hash bytes
+                    if instruction.params.len() != 1 || instruction.data.len() != 32 {
+                        log_error(&format!(
+                            "Invalid FORGET params: {} params, {} data bytes",
+                            instruction.params.len(),
+                            instruction.data.len()
+                        ));
+                        return None;
+                    }
+                    unsafe {
+                        hf::forget(
+                            instruction.data.as_ptr() as u64, // o: offset to hash
+                            instruction.params[0],            // z
+                        );
+                    }
+                }
+                AccumulateInstruction::PROVIDE => {
+                    // provide(s, o, z) where o points to raw data
+                    if instruction.params.len() != 2 {
+                        log_error(&format!(
+                            "Invalid PROVIDE params count: {}",
+                            instruction.params.len()
+                        ));
+                        return None;
+                    }
+
+                    let s = instruction.params[0];
+                    let z = instruction.params[1] as usize;
+
+                    if instruction.data.len() != z {
+                        log_error(&format!(
+                            "Invalid PROVIDE data length: got {}, expected {}",
+                            instruction.data.len(),
+                            z
+                        ));
+                        return None;
+                    }
+
+                    unsafe {
+                        hf::provide(s, instruction.data.as_ptr() as u64, z as u64);
+                    }
+                }
+                _ => {
+                    log_error(&format!(
+                        "Unknown accumulate opcode: {}",
+                        instruction.opcode
+                    ));
+                    return None;
+                }
+            }
+        }
+
+        log_info("✅ All accumulate instructions executed successfully");
         Some(())
     }
 }

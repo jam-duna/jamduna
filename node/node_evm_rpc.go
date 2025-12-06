@@ -845,6 +845,7 @@ func (j *Jam) GetBlockByHash(req []string, res *string) error {
 // Example curl call:
 // curl -X POST http://localhost:8545 -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["latest",true],"id":1}'
 func (j *Jam) GetBlockByNumber(req []string, res *string) error {
+	log.Info(log.Node, "GetBlockByNumber", "req", req)
 	if len(req) != 2 {
 		return fmt.Errorf("invalid number of arguments: expected 2, got %d", len(req))
 	}
@@ -853,15 +854,16 @@ func (j *Jam) GetBlockByNumber(req []string, res *string) error {
 
 	fullTx, err := strconv.ParseBool(fullTxStr)
 	if err != nil {
+		log.Warn(log.Node, "GetBlockByNumber: Failed to get block", "error", err)
 		return fmt.Errorf("invalid fullTx parameter: %v", err)
 	}
 
-	log.Debug(log.Node, "GetBlockByNumber", "blockNumber", blockNumber, "fullTx", fullTx)
+	log.Info(log.Node, "GetBlockByNumber", "blockNumber", blockNumber, "fullTx", fullTx)
 
 	// Call internal method
 	ethBlock, err := j.node.GetBlockByNumber(blockNumber, fullTx)
 	if err != nil {
-		//log.Warn(log.Node, "GetBlockByNumber: Failed to get block", "error", err)
+		log.Warn(log.Node, "GetBlockByNumber: Failed to get block", "error", err)
 		*res = "null"
 		return nil
 	}
@@ -1089,12 +1091,12 @@ func (n *NodeContent) getHistoricalState(blockNumber uint32) (*statedb.StateDB, 
 			"blockNumber", blockNumber, "error", err)
 		return n.statedb, nil
 	}
-	// Reconstruct StateDB from the block's state root
-	fmt.Printf("Reconstructing historical state for block %d with state root %s\n", blockNumber, evmBlock.StateRoot.Hex())
-	historicalState, err := statedb.NewStateDBFromStateRoot(evmBlock.StateRoot, storage)
+	// Reconstruct StateDB from the block's verkle root
+	fmt.Printf("Reconstructing historical state for block %d with verkle root %s\n", blockNumber, evmBlock.VerkleRoot.Hex())
+	historicalState, err := statedb.NewStateDBFromStateRoot(evmBlock.VerkleRoot, storage)
 	if err != nil {
 		log.Warn(log.Node, "Failed to reconstruct historical state, using current state",
-			"blockNumber", blockNumber, "stateRoot", evmBlock.StateRoot.Hex(), "error", err)
+			"blockNumber", blockNumber, "verkleRoot", evmBlock.VerkleRoot.Hex(), "error", err)
 		return n.statedb, nil
 	}
 

@@ -13,26 +13,28 @@ import (
 const (
 	// HEADER_SIZE is the size of the block header in bytes (matching Rust implementation)
 	// 4 (payload_length) + 4 (num_transactions) + 4 (timestamp) +
-	// 8 (gas_used) + 32 (state_root) + 32 (transactions_root) + 32 (receipt_root) = 116 bytes
-	HEADER_SIZE = 116
+	// 8 (gas_used) + 32 (state_root) + 32 (transactions_root) + 32 (receipt_root) + 32 (block_access_list_hash) = 148 bytes
+	HEADER_SIZE = 148
 )
 
 // EvmBlockPayload represents the unified EVM block structure exported to JAM DA
 // This structure matches the Rust EvmBlockPayload exactly
 type EvmBlockPayload struct {
 	// Non-serialized fields (filled by host when reading from DA)
-	Number uint32      // Block number read from blocknumber↔hash mapping
-	Hash   common.Hash // Block Hash is the workpackagehash
+	Number          uint32      // Block number read from blocknumber↔hash mapping
+	WorkPackageHash common.Hash // Block Hash is the workpackagehash
+	SegmentRoot     common.Hash
 
-	// Fixed fields - used for block hash computation (116 bytes)
-	PayloadLength    uint32      // Offset 0, 4 bytes - raw payload size
-	NumTransactions  uint32      // Offset 4, 4 bytes - transaction count
-	Timestamp        uint32      // Offset 8, 4 bytes - JAM timeslot
-	GasUsed          uint64      // Offset 12, 8 bytes - gas used
-	StateRoot        common.Hash // Offset 20, 32 bytes - JAM state root
-	TransactionsRoot common.Hash // Offset 52, 32 bytes - BMT root of tx hashes
-	ReceiptRoot      common.Hash // Offset 84, 32 bytes - BMT root of canonical receipts
-	// Total fixed: 116 bytes
+	// Fixed fields - used for block hash computation (148 bytes)
+	PayloadLength       uint32      // Offset 0, 4 bytes - raw payload size
+	NumTransactions     uint32      // Offset 4, 4 bytes - transaction count
+	Timestamp           uint32      // Offset 8, 4 bytes - JAM timeslot
+	GasUsed             uint64      // Offset 12, 8 bytes - gas used
+	VerkleRoot          common.Hash // Offset 20, 32 bytes - Verkle tree root (state commitment)
+	TransactionsRoot    common.Hash // Offset 52, 32 bytes - BMT root of tx hashes
+	ReceiptRoot         common.Hash // Offset 84, 32 bytes - BMT root of canonical receipts
+	BlockAccessListHash common.Hash // Offset 116, 32 bytes - Blake2b hash of BlockAccessList
+	// Total fixed: 148 bytes
 
 	// Variable-length fields (not part of hash computation)
 	TxHashes      []common.Hash        // Transaction hashes (32 bytes each)
@@ -70,13 +72,13 @@ func (p *EvmBlockPayload) ToEthereumBlock(blockNumber uint32, fullTx bool) *Ethe
 
 	ethBlock := &EthereumBlock{
 		Number:           fmt.Sprintf("0x%x", blockNumber),
-		Hash:             p.Hash.String(),
+		Hash:             p.WorkPackageHash.String(),
 		ParentHash:       "0x0000000000000000000000000000000000000000000000000000000000000000", // No parent hash in new format
 		Nonce:            "0x0000000000000000",
-		Sha3Uncles:       "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+		Sha3Uncles:       p.SegmentRoot.String(),
 		LogsBloom:        common.Bytes2Hex(make([]byte, 256)), // Zero bloom
 		TransactionsRoot: p.TransactionsRoot.String(),
-		StateRoot:        p.StateRoot.String(),
+		StateRoot:        p.VerkleRoot.String(),
 		ReceiptsRoot:     p.ReceiptRoot.String(),
 		Miner:            "0x0000000000000000000000000000000000000000",
 		Difficulty:       "0x0",
@@ -97,8 +99,16 @@ func (p *EvmBlockPayload) ToEthereumBlock(blockNumber uint32, fullTx bool) *Ethe
 		}
 		ethBlock.Transactions = txHashes
 	} else {
-		// TODO: Fetch full transaction objects
-		ethBlock.Transactions = []interface{}{}
+		txns := make([]EthereumTransactionResponse, len(p.TxHashes))
+		for i, txn := range p.Transactions {
+			resp, err := ConvertPayloadToEthereumTransaction(&txn)
+			if err != nil {
+				log.Error(log.Node, "Failed to convert transaction", "err", err)
+				continue
+			}
+			txns[i] = *resp
+		}
+		ethBlock.Transactions = txns
 	}
 
 	return ethBlock
@@ -107,12 +117,12 @@ func (p *EvmBlockPayload) ToEthereumBlock(blockNumber uint32, fullTx bool) *Ethe
 // SerializeEvmBlockPayload serializes an EvmBlockPayload to bytes
 // Matches the Rust serialize() format exactly
 func SerializeEvmBlockPayload(payload *EvmBlockPayload) []byte {
-	// Calculate total size: 120 (fixed) + 4 (tx_count) + len(TxHashes)*32 + 4 (receipt_count) + len(ReceiptHashes)*32
-	size := 116 + 4 + len(payload.TxHashes)*32 + 4 + len(payload.ReceiptHashes)*32
+	// Calculate total size: 148 (fixed) + len(TxHashes)*32 + len(ReceiptHashes)*32
+	size := 148 + len(payload.TxHashes)*32 + len(payload.ReceiptHashes)*32
 	data := make([]byte, size)
 	offset := 0
 
-	// Serialize fixed header (116 bytes total)
+	// Serialize fixed header (148 bytes total)
 	binary.LittleEndian.PutUint32(data[offset:offset+4], payload.PayloadLength)
 	offset += 4
 
@@ -125,7 +135,7 @@ func SerializeEvmBlockPayload(payload *EvmBlockPayload) []byte {
 	binary.LittleEndian.PutUint64(data[offset:offset+8], payload.GasUsed)
 	offset += 8
 
-	copy(data[offset:offset+32], payload.StateRoot[:])
+	copy(data[offset:offset+32], payload.VerkleRoot[:])
 	offset += 32
 
 	copy(data[offset:offset+32], payload.TransactionsRoot[:])
@@ -134,19 +144,16 @@ func SerializeEvmBlockPayload(payload *EvmBlockPayload) []byte {
 	copy(data[offset:offset+32], payload.ReceiptRoot[:])
 	offset += 32
 
-	// Serialize tx_hashes (transaction hashes for transactions_root BMT)
-	binary.LittleEndian.PutUint32(data[offset:offset+4], uint32(len(payload.TxHashes)))
-	offset += 4
+	copy(data[offset:offset+32], payload.BlockAccessListHash[:])
+	offset += 32
 
+	// Serialize tx_hashes (no count field - use num_transactions from header)
 	for _, txHash := range payload.TxHashes {
 		copy(data[offset:offset+32], txHash[:])
 		offset += 32
 	}
 
-	// Serialize receipt_hashes (canonical receipt RLP hashes for receipts_root BMT)
-	binary.LittleEndian.PutUint32(data[offset:offset+4], uint32(len(payload.ReceiptHashes)))
-	offset += 4
-
+	// Serialize receipt_hashes (no count field - use num_transactions from header)
 	for _, receiptHash := range payload.ReceiptHashes {
 		copy(data[offset:offset+32], receiptHash[:])
 		offset += 32
@@ -158,15 +165,15 @@ func SerializeEvmBlockPayload(payload *EvmBlockPayload) []byte {
 // DeserializeEvmBlockPayload deserializes an EvmBlockPayload from bytes
 // Matches the Rust serialize() format exactly
 func DeserializeEvmBlockPayload(data []byte, headerOnly bool) (*EvmBlockPayload, error) {
-	// Minimum size: 116 + 4 + 4 = 124 bytes (fixed fields + tx_count + receipt_count)
-	if len(data) < 124 {
-		return nil, fmt.Errorf("block payload too short: got %d bytes, need at least 124", len(data))
+	// Minimum size: 148 bytes (fixed header)
+	if len(data) < 148 {
+		return nil, fmt.Errorf("block payload too short: got %d bytes, need at least 148", len(data))
 	}
 
 	offset := 0
 	payload := &EvmBlockPayload{}
 
-	// Parse fixed header (116 bytes total)
+	// Parse fixed header (148 bytes total)
 	payload.PayloadLength = binary.LittleEndian.Uint32(data[offset : offset+4])
 	offset += 4
 
@@ -179,7 +186,7 @@ func DeserializeEvmBlockPayload(data []byte, headerOnly bool) (*EvmBlockPayload,
 	payload.GasUsed = binary.LittleEndian.Uint64(data[offset : offset+8])
 	offset += 8
 
-	copy(payload.StateRoot[:], data[offset:offset+32])
+	copy(payload.VerkleRoot[:], data[offset:offset+32])
 	offset += 32
 
 	copy(payload.TransactionsRoot[:], data[offset:offset+32])
@@ -188,14 +195,16 @@ func DeserializeEvmBlockPayload(data []byte, headerOnly bool) (*EvmBlockPayload,
 	copy(payload.ReceiptRoot[:], data[offset:offset+32])
 	offset += 32
 
+	copy(payload.BlockAccessListHash[:], data[offset:offset+32])
+	offset += 32
+
 	if headerOnly {
 		// Skip variable-length fields
 		return payload, nil
 	}
 	// Parse tx_hashes (transaction hashes for transactions_root BMT)
-	txCount := binary.LittleEndian.Uint32(data[offset : offset+4])
-	offset += 4
-
+	// Use num_transactions from header (no separate count field)
+	txCount := payload.NumTransactions
 	payload.TxHashes = make([]common.Hash, txCount)
 	for i := uint32(0); i < txCount; i++ {
 		if offset+32 > len(data) {
@@ -206,9 +215,8 @@ func DeserializeEvmBlockPayload(data []byte, headerOnly bool) (*EvmBlockPayload,
 	}
 
 	// Parse receipt_hashes (canonical receipt RLP hashes for receipts_root BMT)
-	receiptCount := binary.LittleEndian.Uint32(data[offset : offset+4])
-	offset += 4
-
+	// Use num_transactions from header (no separate count field)
+	receiptCount := payload.NumTransactions
 	payload.ReceiptHashes = make([]common.Hash, receiptCount)
 	for i := uint32(0); i < receiptCount; i++ {
 		if offset+32 > len(data) {

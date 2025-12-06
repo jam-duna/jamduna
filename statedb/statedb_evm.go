@@ -9,8 +9,14 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb/evmtypes"
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 )
+
+// CreateSignedNativeTransfer wraps evmtypes.CreateSignedNativeTransfer for native ETH transfers
+func CreateSignedNativeTransfer(privateKeyHex string, nonce uint64, to common.Address, amount *big.Int, gasPrice *big.Int, gasLimit uint64, chainID uint64) (*evmtypes.EthereumTransaction, []byte, common.Hash, error) {
+	return evmtypes.CreateSignedNativeTransfer(privateKeyHex, nonce, to, amount, gasPrice, gasLimit, chainID)
+}
 
 // CreateSignedUSDMTransfer wraps evmtypes.CreateSignedUSDMTransfer with UsdmAddress
 func CreateSignedUSDMTransfer(privateKeyHex string, nonce uint64, to common.Address, amount *big.Int, gasPrice *big.Int, gasLimit uint64, chainID uint64) (*evmtypes.EthereumTransaction, []byte, common.Hash, error) {
@@ -61,16 +67,17 @@ func (n *StateDB) GetLatestBlockNumber(serviceID uint32) (uint32, error) {
 func (n *StateDB) ReadBlockByNumber(serviceID uint32, blockNumber uint32) (*evmtypes.EvmBlockPayload, error) {
 	objectID := evmtypes.BlockNumberToObjectID(blockNumber)
 
-	// Read objectID key to get blockNumber => wph (32 bytes) + timestamp (4 bytes) mapping
+	// Read objectID key to get blockNumber => wph (32 bytes) + timestamp (4 bytes) + segment_root (32 bytes) mapping
 	valueBytes, found, err := n.ReadServiceStorage(serviceID, objectID.Bytes())
 	if err != nil {
 		return nil, fmt.Errorf("failed to read block number mapping: %v", err)
 	}
-	if !found || len(valueBytes) < 37 {
-		return nil, fmt.Errorf("block %d not found or invalid mapping", blockNumber)
+
+	if !found || len(valueBytes) < 68 {
+		return nil, fmt.Errorf("block %d [%s] not found %d", blockNumber, objectID, len(valueBytes))
 	}
 
-	// Parse work_package_hash (32 bytes) + timeslot (4 bytes, little-endian)
+	// Parse work_package_hash (32 bytes) + timeslot (4 bytes, little-endian) + segment_root (32 bytes)
 	var workPackageHash common.Hash
 	copy(workPackageHash[:], valueBytes[:32])
 
@@ -82,6 +89,7 @@ func (n *StateDB) readBlockByHash(serviceID uint32, workPackageHash common.Hash)
 	// read the block number + timestamp from the blockHash key
 	var blockNumber uint32
 	var blockTimestamp uint32
+	var segmentRoot common.Hash
 	valueBytes, found, err := n.ReadServiceStorage(serviceID, workPackageHash.Bytes())
 	if err != nil {
 		return nil, fmt.Errorf("failed to read block hash mapping: %v", err)
@@ -90,6 +98,7 @@ func (n *StateDB) readBlockByHash(serviceID uint32, workPackageHash common.Hash)
 		// Parse block number (4 bytes, little-endian)
 		blockNumber = binary.LittleEndian.Uint32(valueBytes[:4])
 		blockTimestamp = binary.LittleEndian.Uint32(valueBytes[4:8])
+		segmentRoot = common.BytesToHash(valueBytes[8:40])
 	}
 
 	payload, err := n.sdb.FetchJAMDASegments(workPackageHash, 0, 1, types.SegmentSize)
@@ -101,8 +110,6 @@ func (n *StateDB) readBlockByHash(serviceID uint32, workPackageHash common.Hash)
 	if err != nil {
 		return nil, fmt.Errorf("failed to deserialize block payload: %v", err)
 	}
-	block.Timestamp = blockTimestamp
-	block.Number = blockNumber
 	// using block.PayloadLength figure out how many segments to read for full block
 	segments := (block.PayloadLength + types.SegmentSize - 1) / types.SegmentSize
 	if segments > 1 {
@@ -117,6 +124,10 @@ func (n *StateDB) readBlockByHash(serviceID uint32, workPackageHash common.Hash)
 	if err != nil {
 		return nil, fmt.Errorf("failed to deserialize full block payload: %v", err)
 	}
+	block.WorkPackageHash = workPackageHash
+	block.SegmentRoot = segmentRoot
+	block.Timestamp = blockTimestamp
+	block.Number = blockNumber
 	return block, nil
 }
 
@@ -157,7 +168,9 @@ func (n *StateDB) GetBlockByNumber(serviceID uint32, blockNumberStr string) (*ev
 		if err != nil {
 			return nil, fmt.Errorf("failed to get latest block number: %v", err)
 		}
-		targetBlockNumber--
+		if targetBlockNumber < 1 {
+			return nil, fmt.Errorf("block 1 not ready yet")
+		}
 	case "earliest":
 		targetBlockNumber = 1 // Genesis block
 	default:
@@ -174,7 +187,6 @@ func (n *StateDB) GetBlockByNumber(serviceID uint32, blockNumberStr string) (*ev
 	}
 
 	// 2. Read canonical block metadata from storage
-
 	return n.ReadBlockByNumber(serviceID, targetBlockNumber)
 }
 
@@ -307,26 +319,64 @@ func (stateDB *StateDB) ReadObjectRef(serviceCode uint32, objectID common.Hash) 
 	return &objRef, true, nil
 }
 
-// GetBalance fetches the balance of an address from JAM State/DA
-func (b *StateDB) GetBalance(serviceID uint32, address common.Address) (common.Hash, error) {
+// GetBalance fetches the balance of an address at a specific verkleRoot
+// verkleRoot: The Verkle tree root hash (typically from a block's stateRoot field)
+func (b *StateDB) GetBalance(serviceID uint32, address common.Address, verkleRoot common.Hash) (common.Hash, error) {
 
-	// Compute storage key for balance in USDM contract
-	storageKey := evmtypes.ComputeBalanceStorageKey(address)
-	log.Debug(log.Node, "GetBalance", "address", address.String(), "storageKey", storageKey.String(), "UsdmAddress", evmtypes.UsdmAddress.String())
+	// Get the Verkle tree at the specified root
+	if sdb, ok := b.sdb.(*storage.StateDBStorage); ok {
+		tree, found := sdb.GetVerkleTreeAtRoot(verkleRoot)
+		if !found {
+			log.Warn(log.Node, "❌ GetBalance: Verkle tree NOT FOUND",
+				"verkleRoot", verkleRoot.Hex())
+			return common.Hash{}, fmt.Errorf("verkle tree not found for root %x", verkleRoot)
+		}
 
-	// Read from SSR-sharded storage
-	value, err := b.readContractStorageValue(serviceID, evmtypes.UsdmAddress, storageKey)
-	if err != nil {
-		return common.Hash{}, fmt.Errorf("failed to read balance: %v", err)
+		// Read from Verkle tree BasicData
+		basicDataKey := evmtypes.BasicDataKey(address[:])
+		basicData, err := tree.Get(basicDataKey[:], nil)
+		if err != nil {
+			log.Warn(log.Node, "❌ GetBalance: Tree.Get returned error",
+				"address", address.String(),
+				"verkleRoot", fmt.Sprintf("0x%x", verkleRoot[:]),
+				"error", err)
+			return common.Hash{}, nil
+		}
+
+		if len(basicData) < 32 {
+			return common.Hash{}, nil
+		}
+
+		// Extract balance from BasicData (offset 16-31, 16 bytes, big-endian per EIP-6800)
+		// Copy directly to Hash (already big-endian), right-aligned
+		var balanceHash common.Hash
+		copy(balanceHash[16:32], basicData[16:32])
+		balanceValue := new(big.Int).SetBytes(balanceHash[:])
+
+		log.Info(log.Node, "✅ GetBalance: Successfully read balance from Verkle tree",
+			"address", address.String(),
+			"verkleRoot", fmt.Sprintf("0x%x", verkleRoot[:]),
+			"basicDataKey", fmt.Sprintf("0x%x", basicDataKey[:8]),
+			"balance", balanceValue.String(),
+			"balanceHex", fmt.Sprintf("0x%x", balanceHash[:]))
+
+		return balanceHash, nil
 	}
 
-	log.Debug(log.Node, "GetBalance result", "address", address.String(), "value", value.String())
-	return value, nil
+	log.Warn(log.Node, "❌ GetBalance: StateDBStorage not available")
+	return common.Hash{}, fmt.Errorf("StateDBStorage not available")
 }
 
 // GetStorageAt reads contract storage at a specific position
 func (stateDB *StateDB) GetStorageAt(serviceID uint32, address common.Address, position common.Hash) (common.Hash, error) {
-	// Read from SSR-sharded storage
+	// Phase 4+: Read from witness cache first (populated during PrepareBuilderWitnesses or import)
+	value, found := stateDB.readFromWitnessCache(address, position)
+	if found {
+		log.Debug(log.Node, "GetStorageAt: found in witness cache", "address", address.String(), "position", position.String())
+		return value, nil
+	}
+
+	// Fallback: Read from DA via meta-shard lookup (for queries outside refine context)
 	value, err := stateDB.readContractStorageValue(serviceID, address, position)
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("failed to read storage: %v", err)
@@ -335,15 +385,51 @@ func (stateDB *StateDB) GetStorageAt(serviceID uint32, address common.Address, p
 	return value, nil
 }
 
-// GetTransactionCount fetches the nonce (transaction count) of an address
-func (stateDB *StateDB) GetTransactionCount(serviceID uint32, address common.Address) (uint64, error) {
+// GetTransactionCount fetches the nonce (transaction count) of an address at a specific verkleRoot
+// verkleRoot: The Verkle tree root hash (typically from a block's stateRoot field)
+func (stateDB *StateDB) GetTransactionCount(serviceID uint32, address common.Address, verkleRoot common.Hash) (uint64, error) {
+	// Get the Verkle tree at the specified root
+	if sdb, ok := stateDB.sdb.(*storage.StateDBStorage); ok {
+		tree, found := sdb.GetVerkleTreeAtRoot(verkleRoot)
+		if !found {
+			log.Warn(log.Node, "❌ GetTransactionCount: Verkle tree NOT FOUND",
+				"verkleRoot", verkleRoot.Hex())
+			return 0, fmt.Errorf("verkle tree not found for root %x", verkleRoot)
+		}
+
+		// Read from Verkle tree BasicData
+		basicDataKey := evmtypes.BasicDataKey(address[:])
+		basicData, err := tree.Get(basicDataKey[:], nil)
+		if err != nil {
+			log.Warn(log.Node, "❌ GetTransactionCount: Tree.Get returned error",
+				"address", address.String(),
+				"verkleRoot", fmt.Sprintf("0x%x", verkleRoot[:]),
+				"error", err)
+			return 0, nil
+		}
+
+		if len(basicData) < 32 {
+			return 0, nil
+		}
+
+		// Extract nonce from BasicData (offset 8-15, 8 bytes, big-endian per EIP-6800)
+		nonce := binary.BigEndian.Uint64(basicData[8:16])
+		return nonce, nil
+	}
+
+	// Old path: USDM contract storage
 	// Compute storage key for nonce in USDM contract
 	storageKey := evmtypes.ComputeNonceStorageKey(address)
 
-	// Read from SSR-sharded storage
-	nonceHash, err := stateDB.readContractStorageValue(serviceID, evmtypes.UsdmAddress, storageKey)
-	if err != nil {
-		return 0, fmt.Errorf("failed to read nonce: %v", err)
+	// Phase 4+: Read from witness cache first (populated during PrepareBuilderWitnesses or import)
+	nonceHash, found := stateDB.readFromWitnessCache(evmtypes.UsdmAddress, storageKey)
+	if !found {
+		// Fallback: Read from DA via meta-shard lookup (for queries outside refine context)
+		var err error
+		nonceHash, err = stateDB.readContractStorageValue(serviceID, evmtypes.UsdmAddress, storageKey)
+		if err != nil {
+			return 0, fmt.Errorf("failed to read nonce: %v", err)
+		}
 	}
 
 	// Convert hash to uint64
@@ -356,73 +442,61 @@ func (stateDB *StateDB) ReadContractStorageValue(serviceID uint32, contractAddre
 	return stateDB.readContractStorageValue(serviceID, contractAddress, storageKey)
 }
 
+// readFromWitnessCache reads a storage value from the witness cache (Phase 4+)
+// Returns (value, found) where found=true if the value was in the cache
+func (stateDB *StateDB) readFromWitnessCache(contractAddress common.Address, storageKey common.Hash) (common.Hash, bool) {
+	// Read from StateDBStorage witness cache
+	value, found := stateDB.sdb.ReadStorageFromCache(contractAddress, storageKey)
+	if found {
+		log.Trace(log.Node, "readFromWitnessCache: found in StateDBStorage",
+			"address", contractAddress.Hex(),
+			"storageKey", storageKey.Hex(),
+			"value", value.Hex())
+	}
+	return value, found
+}
+
 // readContractStorageValue reads a storage value from any contract at a specific storage key
+// Post-SSR: Reads from witness cache (StateDBStorage), no DA fetches, no SSR routing
 func (stateDB *StateDB) readContractStorageValue(serviceID uint32, contractAddress common.Address, storageKey common.Hash) (common.Hash, error) {
-	// 1. Read SSR metadata to resolve shard ID
-	ssrObjectID := evmtypes.SsrToObjectID(contractAddress)
-	// fmt.Printf("🔍 readContractStorageValue: contractAddress=%s, storageKey=%s, ssrObjectID=%s\n",
-	// 	contractAddress.Hex(), storageKey.Hex(), ssrObjectID.Hex())
-
-	witness, found, err := stateDB.ReadObject(serviceID, ssrObjectID)
-	if err != nil {
-		// fmt.Printf("  ❌ ReadObject error: %v\n", err)
-		return common.Hash{}, fmt.Errorf("failed to read SSR metadata for %s: %v", contractAddress.String(), err)
-	}
-	if !found {
-		// fmt.Printf("  ❌ SSR metadata not found\n")
-		log.Trace(log.Node, "readContractStorageValue: SSR metadata not found, returning zero",
-			"contractAddress", contractAddress.String(), "storageKey", common.Bytes2Hex(storageKey.Bytes()))
-		return common.Hash{}, nil // Contract doesn't exist yet
-	}
-	// fmt.Printf("  ✅ SSR metadata found, payload size=%d\n", len(witness.Payload))
-
-	// 2. Parse SSR metadata to get global_depth and entries
-	ssrData, err := evmtypes.ParseSSRMetadata(witness.Payload)
-	if err != nil {
-		return common.Hash{}, fmt.Errorf("failed to parse SSR metadata: %v", err)
+	// Post-SSR: Read directly from witness cache (no DA, no meta-shards)
+	value, found := stateDB.sdb.ReadStorageFromCache(contractAddress, storageKey)
+	if found {
+		log.Debug(log.Node, "readContractStorageValue: Found in cache",
+			"contractAddress", contractAddress.Hex(),
+			"storageKey", storageKey.Hex(),
+			"value", value.Hex())
+		return value, nil
 	}
 
-	// 3. Resolve shard ID for the storage key
-	shardID := evmtypes.ResolveShardID(ssrData, storageKey)
-
-	log.Debug(log.Node, "readContractStorageValue: Resolved shard",
-		"storageKey", common.Bytes2Hex(storageKey.Bytes()),
-		"shardLD", shardID.Ld,
-		"shardPrefix", common.Bytes2Hex(shardID.Prefix56[:]))
-
-	// 4. Read the shard from DA
-	shardObjectID := evmtypes.ShardToObjectID(contractAddress, shardID.ToBytes())
-	// fmt.Printf("  🔍 Reading storage shard: shardObjectID=%s\n", shardObjectID.Hex())
-
-	witness, found, err = stateDB.ReadObject(serviceID, shardObjectID)
-	if err != nil {
-		// fmt.Printf("  ❌ ReadObject error: %v\n", err)
-		return common.Hash{}, fmt.Errorf("failed to read shard: %v", err)
-	}
-	if !found {
-		// fmt.Printf("  ❌ Shard not found\n")
-		log.Debug(log.Node, "readContractStorageValue: Shard not found, returning zero",
-			"shardObjectID", common.Bytes2Hex(shardObjectID.Bytes()))
-		return common.Hash{}, nil // Shard doesn't exist yet
-	}
-	// fmt.Printf("  ✅ Shard found, payload size=%d\n", len(witness.Payload))
-	shardPayload := witness.Payload
-	// 5. Parse the shard payload to extract the storage value
-	value, err := evmtypes.ParseSSRPayloadForStorageKey(shardPayload, storageKey)
-	if err != nil {
-		// fmt.Printf("  ❌ Failed to parse shard payload: %v\n", err)
-		return common.Hash{}, fmt.Errorf("failed to parse shard payload: %v", err)
-	}
-
-	// fmt.Printf("  ✅ Parsed storage value: %s\n", value.Hex())
-	return value, nil
+	// Not in cache - return zero (storage slot is empty)
+	log.Debug(log.Node, "readContractStorageValue: Not in cache, returning zero",
+		"contractAddress", contractAddress.Hex(),
+		"storageKey", storageKey.Hex())
+	return common.Hash{}, nil
 }
 
 // GetCode returns the bytecode at a given address
 func (stateDB *StateDB) GetCode(serviceID uint32, address common.Address) ([]byte, error) {
-	// Resolve block number to state
+	// Check if Verkle tree is available (new Verkle path)
+	if sdb, ok := stateDB.sdb.(*storage.StateDBStorage); ok && sdb.CurrentVerkleTree != nil {
+		// Read from Verkle tree
+		code, err := evmtypes.ReadCode(sdb.CurrentVerkleTree, address[:])
+		if err != nil {
+			return nil, fmt.Errorf("failed to read code from Verkle tree: %w", err)
+		}
+		log.Debug(log.Node, "GetCode from Verkle", "address", address.String(), "codeSize", len(code))
+		return code, nil
+	}
 
-	// Read contract code from DA
+	// Old path: witness cache + DA
+	// Phase 4+: Read from StateDBStorage witness cache first
+	if code, found := stateDB.sdb.GetCode(address); found {
+		log.Debug(log.Node, "GetCode: found in StateDBStorage witness cache", "address", address.String(), "codeSize", len(code))
+		return code, nil
+	}
+
+	// Fallback: Read contract code from DA via meta-shard lookup (for queries outside refine context)
 	codeObjectID := evmtypes.CodeToObjectID(address)
 	witness, found, err := stateDB.ReadObject(serviceID, codeObjectID)
 	if err != nil {
@@ -601,7 +675,11 @@ func (stateDB *StateDB) createSimulatedTx(serviceID uint32, tx *evmtypes.Ethereu
 
 	// 4. Create work package
 	workPackage := DefaultWorkPackage(serviceID, evmService)
-	workPackage.WorkItems[0].Payload = BuildPayload(PayloadTypeCall, 1, 0)
+	globalDepth, err := stateDB.ReadGlobalDepth(evmService.ServiceIndex)
+	if err != nil {
+		return nil, fmt.Errorf("ReadGlobalDepth failed: %v", err)
+	}
+	workPackage.WorkItems[0].Payload = BuildPayload(PayloadTypeCall, 1, globalDepth, 0, common.Hash{})
 	workPackage.WorkItems[0].Extrinsics = []types.WorkItemExtrinsic{
 		{
 			Hash: txHash,

@@ -14,8 +14,8 @@ type ShardId struct {
 	Prefix56 [7]byte // 56-bit routing prefix
 }
 
-// SSREntryMeta represents a routing entry in the MetaSSR
-type SSREntryMeta struct {
+// SplitPoint represents a routing entry in the MetaSSR
+type SplitPoint struct {
 	D        uint8   // Global depth at time of entry creation
 	Ld       uint8   // Local depth for this shard
 	Prefix56 [7]byte // 56-bit prefix for routing
@@ -24,10 +24,7 @@ type SSREntryMeta struct {
 // MetaSSR is the Sparse Split Registry for meta-shards
 type MetaSSR struct {
 	GlobalDepth uint8          // Current global depth
-	EntryCount  uint32         // Number of routing entries
-	TotalKeys   uint32         // Total number of keys across all shards
-	Version     uint32         // SSR version for conflict detection
-	Entries     []SSREntryMeta // Routing entries
+	Entries     []SplitPoint // Routing entries
 }
 
 // ObjectRefEntry represents an ObjectID → ObjectRef mapping (69 bytes)
@@ -169,39 +166,30 @@ func RouteKey(keyHash common.Hash, metaSSR *MetaSSR) (ShardId, error) {
 }
 
 // DeserializeMetaSSR deserializes MetaSSR from DA format
-// Format: [1B global_depth][4B entry_count][4B total_keys][4B version][entries...]
+// Format: [1B global_depth][entries...]
 // Each entry: [1B d][1B ld][7B prefix56]
 func DeserializeMetaSSR(data []byte) (*MetaSSR, error) {
-	// Handle simple genesis case: just 1 byte (ld)
-	if len(data) == 1 {
-		return &MetaSSR{
-			GlobalDepth: data[0],
-			Entries:     []SSREntryMeta{},
-			EntryCount:  0,
-			TotalKeys:   0,
-			Version:     0,
-		}, nil
-	}
-
-	// Full format: 13 byte header + entries
-	if len(data) < 13 {
-		return nil, fmt.Errorf("MetaSSR data too short: need 13 bytes header or 1 byte ld, got %d", len(data))
+	if len(data) == 0 {
+		return nil, fmt.Errorf("MetaSSR data empty")
 	}
 
 	globalDepth := data[0]
-	entryCount := binary.LittleEndian.Uint32(data[1:5])
-	totalKeys := binary.LittleEndian.Uint32(data[5:9])
-	version := binary.LittleEndian.Uint32(data[9:13])
 
-	entries := make([]SSREntryMeta, 0, entryCount)
-	offset := 13
+	// Calculate number of entries from remaining data
+	if (len(data)-1)%9 != 0 {
+		return nil, fmt.Errorf("MetaSSR data invalid: %d bytes after global_depth, expected multiple of 9", len(data)-1)
+	}
 
-	for i := uint32(0); i < entryCount; i++ {
+	entryCount := (len(data) - 1) / 9
+	entries := make([]SplitPoint, 0, entryCount)
+	offset := 1
+
+	for i := 0; i < entryCount; i++ {
 		if offset+9 > len(data) {
 			return nil, fmt.Errorf("MetaSSR entry %d truncated", i)
 		}
 
-		entry := SSREntryMeta{
+		entry := SplitPoint{
 			D:  data[offset],
 			Ld: data[offset+1],
 		}
@@ -212,9 +200,6 @@ func DeserializeMetaSSR(data []byte) (*MetaSSR, error) {
 
 	return &MetaSSR{
 		GlobalDepth: globalDepth,
-		EntryCount:  entryCount,
-		TotalKeys:   totalKeys,
-		Version:     version,
 		Entries:     entries,
 	}, nil
 }

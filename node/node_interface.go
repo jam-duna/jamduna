@@ -33,6 +33,7 @@ type JNode interface {
 	GetStorageAt(address common.Address, position common.Hash, blockNumber string) (common.Hash, error)
 	GetTransactionCount(address common.Address, blockNumber string) (uint64, error)
 	GetCode(address common.Address, blockNumber string) ([]byte, error)
+	ReadGlobalDepth(serviceID uint32) (uint8, error)
 
 	// Transaction Operations
 	EstimateGas(from common.Address, to *common.Address, gas uint64, gasPrice uint64, value uint64, data []byte) (uint64, error)

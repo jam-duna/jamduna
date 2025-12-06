@@ -10,31 +10,30 @@
 //! - RuntimeBaseBackend - Read operations (for both MajikBackend and MajikOverlay)
 //! - RuntimeBackend - Write operations (for both MajikBackend and MajikOverlay)
 
-use alloc::{collections::BTreeMap, format, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    format,
+    vec::Vec,
+};
 use core::cell::RefCell;
 use evm::MergeStrategy;
 use evm::backend::{
     OverlayedBackend, RuntimeBackend as EvmRuntimeBackend, RuntimeEnvironment, TransactionalBackend,
 };
+use evm::interpreter::ExitError;
 use evm::interpreter::runtime::{
     Log, RuntimeBaseBackend, RuntimeConfig, SetCodeOrigin, TouchKind, Transfer,
 };
-use evm::interpreter::{ExitError, ExitException};
 use primitive_types::{H160, H256, U256};
 use utils::effects::ObjectId;
-use utils::functions::{log_debug, log_error, log_info};
+use utils::functions::{log_error, log_info};
 use utils::objects::ObjectRef;
-// ObjectDependency replaced with ObjectId
-use utils::tracking::OverlayTracker;
 
+use crate::contractsharding::{ContractShard, ContractStorage};
+use crate::contractsharding::{ObjectKind, code_object_id, contract_shard_object_id};
 use crate::receipt::TransactionReceiptRecord;
-use crate::refiner::PayloadType;
-use crate::sharding::{
-    ContractShard, ContractStorage, SSRHeader, ShardId, deserialize_shard, deserialize_ssr,
-};
-use crate::sharding::{ObjectKind, code_object_id, shard_object_id};
+use crate::witness_events::{VerkleEventTracker, is_precompile, is_system_contract};
 use utils::hash_functions::keccak256;
-use utils::tracking::WriteKey;
 
 // ===== Type Conversions =====
 
@@ -65,7 +64,7 @@ pub fn balance_storage_key(address: H160) -> H256 {
     // log_info(&format!(
     //     "🔑 balance_storage_key({:?}) -> {} (Solidity mapping hash)",
     //     address,
-    //     crate::sharding::format_object_id(&key.0)
+    //     crate::contractsharding::format_object_id(&key.0)
     // ));
     key
 }
@@ -83,9 +82,26 @@ pub fn nonce_storage_key(address: H160) -> H256 {
     // log_info(&format!(
     //     "🔑 nonce_storage_key({:?}) -> {} (Solidity mapping hash)",
     //     address,
-    //     crate::sharding::format_object_id(&key.0)
+    //     crate::contractsharding::format_object_id(&key.0)
     // ));
     key
+}
+
+/// Track storage presence (present vs absent) for witness fill detection
+pub fn mark_storage_presence(
+    present_set: &mut BTreeSet<(H160, H256)>,
+    absent_set: &mut BTreeSet<(H160, H256)>,
+    address: H160,
+    key: H256,
+    present: bool,
+) {
+    if present {
+        present_set.insert((address, key));
+        absent_set.remove(&(address, key));
+    } else {
+        absent_set.insert((address, key));
+        present_set.remove(&(address, key));
+    }
 }
 
 // ===== EnvironmentData =====
@@ -105,29 +121,46 @@ pub struct EnvironmentData {
 
 // ===== MajikBackend =====
 
+/// Execution mode for MajikBackend
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExecutionMode {
+    /// Builder mode: uses Verkle host functions for reads (Go maintains verkleReadLog)
+    Builder,
+    /// Guarantor mode: uses cache-only reads (panics on miss)
+    Guarantor,
+}
+
 /// Majik backend with DA-style storage (no InMemoryBackend)
 pub struct MajikBackend {
     pub code_storage: RefCell<BTreeMap<H160, Vec<u8>>>, // address -> bytecode
     pub code_hashes: RefCell<BTreeMap<H160, H256>>,     // address -> keccak256(code) cache
     pub negative_code_cache: RefCell<BTreeMap<H160, ()>>, // address -> () for EOAs with no code
     pub storage_shards: RefCell<BTreeMap<H160, ContractStorage>>, // address -> SSR + shards
+    pub storage_present: RefCell<BTreeSet<(H160, H256)>>, // Tracks slots proven present
+    pub storage_absent: RefCell<BTreeSet<(H160, H256)>>, // Tracks slots proven absent
     pub balances: RefCell<BTreeMap<H160, U256>>,        // address -> balance
     pub nonces: RefCell<BTreeMap<H160, U256>>,          // address -> nonce
     pub environment: EnvironmentData,
     pub service_id: u32, // Service ID for DA imports
-    pub payload_type: PayloadType, // Payload type for witness fetching
     pub imported_objects: RefCell<BTreeMap<ObjectId, (ObjectRef, Vec<u8>)>>, // object_id -> (ref, payload)
 
     // Meta-shard state (JAM State object index)
     pub meta_ssr: RefCell<crate::meta_sharding::MetaSSR>, // Global SSR for all ObjectRefs
     pub meta_shards: RefCell<BTreeMap<crate::da::ShardId, crate::meta_sharding::MetaShard>>, // Cached meta-shards
+
+    // Verkle mode (builder vs guarantor)
+    pub execution_mode: ExecutionMode,
+
+    // Current transaction index (set by MajikOverlay for BAL tracking)
+    pub current_tx_index: RefCell<Option<usize>>,
 }
 
 impl MajikBackend {
     pub fn new(
         environment: EnvironmentData,
         imported_objects: BTreeMap<ObjectId, (ObjectRef, Vec<u8>)>,
-        payload_type: PayloadType,
+        global_depth: u8,
+        execution_mode: ExecutionMode,
     ) -> Self {
         // Load imported DA objects into backend state
         let service_id = environment.service_id;
@@ -137,35 +170,35 @@ impl MajikBackend {
             code_hashes: RefCell::new(BTreeMap::new()),
             negative_code_cache: RefCell::new(BTreeMap::new()),
             storage_shards: RefCell::new(BTreeMap::new()),
+            storage_present: RefCell::new(BTreeSet::new()),
+            storage_absent: RefCell::new(BTreeSet::new()),
             balances: RefCell::new(BTreeMap::new()),
             nonces: RefCell::new(BTreeMap::new()),
             environment,
             service_id,
-            payload_type,
             imported_objects: RefCell::new(BTreeMap::new()),
 
-            // Initialize meta-shard tracking
-            meta_ssr: RefCell::new(crate::meta_sharding::MetaSSR::new()),
+            // Initialize meta-shard tracking with global_depth from JAM State
+            // This ensures builder and guarantor use the same MetaSSR routing structure
+            meta_ssr: RefCell::new(crate::meta_sharding::MetaSSR::from_parts(
+                global_depth,
+                Vec::new(),
+            )),
             meta_shards: RefCell::new(BTreeMap::new()),
+
+            execution_mode,
+            current_tx_index: RefCell::new(None),
         };
 
         // Initialize system contract (0x01) with empty SSR for balance/nonce tracking
+        // NOTE: System contract uses its own global_depth=0, NOT the meta-shard global_depth!
         let system_contract = h160_from_low_u64_be(0x01);
-        let initial_header = SSRHeader {
-            global_depth: 0,
-            entry_count: 0,
-            total_keys: 0,
-            version: 0, // Genesis version
-        };
-        let initial_ssr = crate::sharding::ssr_from_parts(initial_header, Vec::new());
 
-        backend.storage_shards.borrow_mut().insert(
-            system_contract,
-            ContractStorage {
-                ssr: initial_ssr,
-                shards: BTreeMap::new(),
-            },
-        );
+        // Post-SSR: No need for initial SSR metadata, ContractStorage has single empty shard
+        backend
+            .storage_shards
+            .borrow_mut()
+            .insert(system_contract, ContractStorage::new(system_contract));
 
         for (object_id, (object_ref, payload)) in imported_objects.into_iter() {
             // Store in imported_objects cache for reuse
@@ -180,47 +213,41 @@ impl MajikBackend {
             address_bytes.copy_from_slice(&object_id[0..20]);
             let address = H160::from(address_bytes);
 
+            log_info(&format!(
+                "Processing imported object: address={:?}, object_id={}, object_kind={}",
+                address,
+                crate::contractsharding::format_object_id(&object_id),
+                object_ref.object_kind
+            ));
             match ObjectKind::from_u8(object_ref.object_kind as u8) {
                 Some(ObjectKind::Code) => {
-                    // Code object - load bytecode
+                    // Code object - load bytecode directly from witness
                     backend.load_code(address, payload);
                 }
                 Some(ObjectKind::StorageShard) => {
-                    // Storage shard object
+                    // Storage shard object - load directly from witness
                     // Layout: [20B address][0xFF][ld][prefix56 (7B)][padding (2B)][kind]
-                    let ld = object_id[21];
+
                     let mut prefix56 = [0u8; 7];
                     prefix56.copy_from_slice(&object_id[22..29]);
-                    let shard_id = ShardId { ld, prefix56 };
 
-                    if let Some(shard_data) = deserialize_shard(&payload) {
+                    if let Some(shard_data) = ContractShard::deserialize(&payload) {
                         let mut storage_shards = backend.storage_shards.borrow_mut();
                         let contract_storage = storage_shards
                             .entry(address)
                             .or_insert_with(|| ContractStorage::new(address));
-                        contract_storage.shards.insert(shard_id, shard_data);
-                    }
-                }
-                Some(ObjectKind::SsrMetadata) => {
-                    // SSR metadata object
-                    if let Some(ssr_data) = deserialize_ssr(&payload) {
-                        let mut storage_shards = backend.storage_shards.borrow_mut();
-                        let contract_storage = storage_shards
-                            .entry(address)
-                            .or_insert_with(|| ContractStorage::new(address));
-                        contract_storage.ssr = ssr_data;
+                        // Post-SSR: Single shard per contract, directly assign
+                        contract_storage.shard = shard_data;
                     }
                 }
                 Some(ObjectKind::MetaShard) => {
                     // CRITICAL: Import meta-shards from witnesses to populate cache
                     // Without this, process_object_writes() creates empty shards and overwrites
                     // existing DA data, causing catastrophic data loss
-                    use crate::meta_sharding::{
-                        MetaShardDeserializeResult, deserialize_meta_shard_with_id_validated,
-                    };
+                    use crate::meta_sharding::{MetaShard, MetaShardDeserializeResult};
 
                     // Deserialize with validated header
-                    match deserialize_meta_shard_with_id_validated(
+                    match MetaShard::deserialize_with_id_validated(
                         &payload,
                         &object_id,
                         backend.service_id,
@@ -242,13 +269,17 @@ impl MajikBackend {
                             // Header present but validation failed - REJECT
                             log_error(&format!(
                                 "  ❌ REJECTED MetaShard with invalid header: object_id={}",
-                                crate::sharding::format_object_id(&object_id)
+                                crate::contractsharding::format_object_id(&object_id)
                             ));
                         }
                     }
                 }
                 Some(ObjectKind::Receipt) | Some(ObjectKind::Block) => {
                     // These object kinds are not imported during constructor - skip
+                }
+                Some(ObjectKind::Balance) | Some(ObjectKind::Nonce) => {
+                    // Balance/Nonce updates are applied to Verkle tree post-execution, not during constructor
+                    // Skip during witness import
                 }
                 None => {
                     // Unknown object kind - skip
@@ -269,7 +300,116 @@ impl MajikBackend {
             }
         }
 
+        // Seed storage presence map from imported storage shards
+        {
+            let storage_shards = backend.storage_shards.borrow();
+            let mut present = backend.storage_present.borrow_mut();
+            for (address, contract_storage) in storage_shards.iter() {
+                for entry in &contract_storage.shard.entries {
+                    present.insert((*address, entry.key_h));
+                }
+            }
+        }
+
         backend
+    }
+
+    /// Create a MajikBackend from a Verkle witness (Guarantor mode)
+    ///
+    /// This verifies the Verkle proof and populates the backend caches
+    /// with the pre-state values from the witness.
+    ///
+    /// Returns None if the witness is invalid or verification fails.
+    pub fn from_verkle_witness(
+        environment: EnvironmentData,
+        witness_data: &[u8],
+        global_depth: u8,
+    ) -> Option<Self> {
+        // Verify the proof using raw witness data (avoids re-serialization)
+        if !crate::verkle::VerkleWitness::verify_raw(witness_data) {
+            return None;
+        }
+
+        // Deserialize the witness after verification
+        let witness = crate::verkle::VerkleWitness::deserialize(witness_data)?;
+
+        // Parse witness to extract caches
+        let (balances, nonces, code, code_hashes, storage) = witness.parse_to_caches();
+        log_info(&format!(
+            "from_verkle_witness: caches loaded balances={} nonces={} code={} storage={}",
+            balances.len(),
+            nonces.len(),
+            code.len(),
+            storage.len()
+        ));
+
+        // Extract service_id before moving environment
+        let service_id = environment.service_id;
+
+        // Convert flat storage map to ContractStorage with shards
+        let mut storage_shards_map = BTreeMap::new();
+        for ((address, key), value) in storage {
+            let contract_storage =
+                storage_shards_map
+                    .entry(address)
+                    .or_insert_with(|| ContractStorage {
+                        shard: ContractShard {
+                            entries: Vec::new(),
+                        },
+                    });
+
+            // Insert in sorted order
+            let shard = &mut contract_storage.shard;
+            match shard
+                .entries
+                .binary_search_by_key(&key, |entry| entry.key_h)
+            {
+                Ok(idx) => {
+                    // Update existing entry
+                    shard.entries[idx].value = value;
+                }
+                Err(idx) => {
+                    // Insert new entry
+                    shard
+                        .entries
+                        .insert(idx, crate::contractsharding::EvmEntry { key_h: key, value });
+                }
+            }
+        }
+
+        // Create backend in Guarantor mode with populated caches
+        let backend = Self {
+            code_storage: RefCell::new(code),
+            code_hashes: RefCell::new(code_hashes),
+            negative_code_cache: RefCell::new(BTreeMap::new()),
+            storage_shards: RefCell::new(storage_shards_map),
+            storage_present: RefCell::new(BTreeSet::new()),
+            storage_absent: RefCell::new(BTreeSet::new()),
+            balances: RefCell::new(balances),
+            nonces: RefCell::new(nonces),
+            environment,
+            service_id,
+            imported_objects: RefCell::new(BTreeMap::new()),
+            meta_ssr: RefCell::new(crate::meta_sharding::MetaSSR::from_parts(
+                global_depth,
+                Vec::new(),
+            )),
+            meta_shards: RefCell::new(BTreeMap::new()),
+            execution_mode: ExecutionMode::Guarantor,
+            current_tx_index: RefCell::new(None),
+        };
+
+        {
+            let storage_shards = backend.storage_shards.borrow();
+            let mut present = backend.storage_present.borrow_mut();
+            for (address, contract_storage) in storage_shards.iter() {
+                for entry in &contract_storage.shard.entries {
+                    present.insert((*address, entry.key_h));
+                }
+            }
+        }
+
+        Some(backend)
     }
 
     /// Load code into backend (helper for constructor)
@@ -281,139 +421,15 @@ impl MajikBackend {
     }
 
     /// Import storage shard from DA using fetch_object host function
-    fn import_shard(&self, address: H160, shard_id: ShardId, payload_type: PayloadType) -> Option<(ObjectRef, ContractShard)> {
-        let object_id = shard_object_id(address, shard_id);
-
-        // Check if already in imported_objects cache
-        {
-            let imported = self.imported_objects.borrow();
-            if let Some((object_ref, payload)) = imported.get(&object_id) {
-                log_debug(&format!(
-                    "  Found in imported_cache: address={:?}, shard_id (ld={}, prefix={:02x}{:02x}...), object_id={}, payload_length={}",
-                    address,
-                    shard_id.ld,
-                    shard_id.prefix56[0],
-                    shard_id.prefix56[1],
-                    crate::sharding::format_object_id(&object_id),
-                    payload.len()
-                ));
-                let shard_data = deserialize_shard(payload)?;
-                return Some((object_ref.clone(), shard_data));
-            }
-        }
-
-        // Use fetch_object host function (254) to get both ObjectRef and payload
-        const MAX_SHARD_SIZE: usize = 64 * 1024; // 64KB max shard size
-
-        // For storage shards, missing from DA means empty (never written) - this is normal
-        let (object_ref, shard_data) = match ObjectRef::fetch(
-            self.service_id,
-            &object_id,
-            MAX_SHARD_SIZE,
-            payload_type as u8,
-        ) {
-            Some((object_ref, payload)) => {
-                // Shard exists in DA - deserialize it
-                let shard_data = deserialize_shard(&payload)?;
-                (object_ref, shard_data)
-            }
-            None => {
-                // Shard doesn't exist in DA - return empty shard (normal for uninitialized storage)
-                log_debug(&format!(
-                    "  Shard not in DA (empty): address={:?}, shard_id (ld={}, prefix={:02x}{:02x}...) - returning empty shard",
-                    address, shard_id.ld, shard_id.prefix56[0], shard_id.prefix56[1]
-                ));
-
-                // Create a dummy ObjectRef for the empty shard
-                let dummy_ref = ObjectRef {
-                    work_package_hash: [0u8; 32],
-                    index_start: 0,
-                    payload_length: 0,
-                    object_kind: 1, // StorageShard
-                };
-
-                let empty_shard = ContractShard {
-                    merkle_root: [0u8; 32],
-                    entries: Vec::new(),
-                };
-
-                (dummy_ref, empty_shard)
-            }
-        };
-
-        // Cache imported shard for future lookups to avoid repeated DA fetches
-        {
-            let mut storage_shards = self.storage_shards.borrow_mut();
-            let contract_storage = storage_shards
-                .entry(address)
-                .or_insert_with(|| ContractStorage::new(address));
-            contract_storage.shards.insert(shard_id, shard_data.clone());
-        }
-
-        Some((object_ref, shard_data))
-    }
-
-    /// Import code from DA using fetch_object host function
-    fn import_code(&self, address: H160, payload_type: PayloadType) -> Option<(ObjectRef, Vec<u8>)> {
-        let object_id = code_object_id(address);
-
-        log_debug(&format!(
-            "  import_code: address={:?}, object_id={}",
-            address,
-            crate::sharding::format_object_id(&object_id)
-        ));
-
-        // Check imported_objects cache first
-        {
-            let imported = self.imported_objects.borrow();
-            if let Some((object_ref, payload)) = imported.get(&object_id) {
-                log_debug(&format!(
-                    "  Found in imported_cache: address={:?}, object_id={}",
-                    address,
-                    crate::sharding::format_object_id(&object_id)
-                ));
-                return Some((object_ref.clone(), payload.clone()));
-            }
-        }
-
-        log_debug(&format!(
-            "  Not in imported_cache, fetching from DA: address={:?}, object_id={}",
-            address,
-            crate::sharding::format_object_id(&object_id)
-        ));
-
-        // Use fetch_object host function (254)
-        const MAX_CODE_SIZE: usize = 24576; // 24KB max contract size (EIP-170)
-        let (object_ref, payload) = ObjectRef::fetch(self.service_id, &object_id, MAX_CODE_SIZE, payload_type as u8)?;
-
-        self.imported_objects
-            .borrow_mut()
-            .insert(object_id, (object_ref.clone(), payload.clone()));
-
-        Some((object_ref, payload))
-    }
-
-    /// Resolve shard ID for a given contract address and storage key hash
-    pub(crate) fn resolve_shard_id_impl(&self, address: H160, storage_key: H256) -> ShardId {
-        use crate::sharding::resolve_shard_id;
-        self.storage_shards
-            .borrow()
-            .get(&address)
-            .map(|cs| resolve_shard_id(cs, storage_key))
-            .unwrap_or(ShardId {
-                ld: 0,
-                prefix56: [0u8; 7],
-            })
-    }
-
+    /// Phase 5: Guarantor checks imported_objects cache first (witnesses pre-loaded)
     /// Resolve storage dependency
-    pub fn object_dependency_for_storage(&self, address: H160, key: H256) -> ObjectId {
-        let shard_id = self.resolve_shard_id_impl(address, key);
-
-        shard_object_id(address, shard_id)
+    #[allow(dead_code)]
+    pub fn object_dependency_for_storage(&self, address: H160, _key: H256) -> ObjectId {
+        contract_shard_object_id(address)
     }
 
     /// Resolve balance dependency (stored in 0x01 precompile shards)
+    #[allow(dead_code)]
     pub fn object_dependency_for_balance(&self, address: H160) -> ObjectId {
         let system_contract = h160_from_low_u64_be(0x01);
         let balance_key = balance_storage_key(address);
@@ -421,6 +437,7 @@ impl MajikBackend {
     }
 
     /// Resolve nonce dependency (stored in 0x01 precompile shards)
+    #[allow(dead_code)]
     pub fn object_dependency_for_nonce(&self, address: H160) -> ObjectId {
         let system_contract = h160_from_low_u64_be(0x01);
         let nonce_key = nonce_storage_key(address);
@@ -428,8 +445,34 @@ impl MajikBackend {
     }
 
     /// Resolve code ObjectId for bytecode reads
+    #[allow(dead_code)]
     pub fn object_dependency_for_code(&self, address: H160) -> ObjectId {
         code_object_id(address)
+    }
+
+    /// Update presence tracking for a storage slot (present vs absent)
+    pub fn update_storage_presence(&self, address: H160, key: H256, present: bool) {
+        let mut present_set = self.storage_present.borrow_mut();
+        let mut absent_set = self.storage_absent.borrow_mut();
+        mark_storage_presence(&mut present_set, &mut absent_set, address, key, present);
+    }
+
+    /// Return known presence information for a storage slot, if any.
+    /// Some(true) → observed in witness/cache, Some(false) → confirmed absent, None → unknown.
+    pub fn storage_presence(&self, address: H160, key: H256) -> Option<bool> {
+        {
+            let present_set = self.storage_present.borrow();
+            if present_set.contains(&(address, key)) {
+                return Some(true);
+            }
+        }
+        {
+            let absent_set = self.storage_absent.borrow();
+            if absent_set.contains(&(address, key)) {
+                return Some(false);
+            }
+        }
+        None
     }
 
     // ===== Meta-shard access methods =====
@@ -453,11 +496,9 @@ impl MajikBackend {
 ///
 /// Primary runtime entry point that coordinates:
 /// - Vendor OverlayedBackend for change buffering
-/// - OverlayTracker for read/write dependency tracking
 /// - Transaction isolation and frame management
 pub struct MajikOverlay<'config> {
     pub(crate) overlay: OverlayedBackend<'config, MajikBackend>,
-    pub(crate) tracker: RefCell<OverlayTracker>,
     /// Index of the transaction currently executing.
     /// Initialized to `None` in `new`, set in `begin_transaction`, and cleared in `commit_transaction`/`revert_transaction`.
     current_tx_index: Option<usize>,
@@ -467,6 +508,20 @@ pub struct MajikOverlay<'config> {
     /// Per-transaction log storage retained after commits so refine can fetch logs later.
     /// Resized in `begin_transaction`, populated in `commit_transaction`, and drained via `take_transaction_logs`.
     tx_logs: Vec<Vec<Log>>,
+    /// Track which transaction modified which state keys (for BAL tx_index attribution)
+    /// Maps state key → tx_index that last modified it
+    write_tx_index: BTreeMap<WriteKey, u32>,
+    /// Verkle witness event tracker (Phase A: tracking only, no gas charging yet)
+    witness_events: RefCell<VerkleEventTracker>,
+}
+
+/// Identifies a unique state write location
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum WriteKey {
+    Balance(H160),
+    Nonce(H160),
+    Code(H160),
+    Storage(H160, U256),
 }
 
 impl<'config> MajikOverlay<'config> {
@@ -474,18 +529,25 @@ impl<'config> MajikOverlay<'config> {
     pub fn new(backend: MajikBackend, config: &'config RuntimeConfig) -> Self {
         Self {
             overlay: OverlayedBackend::new(backend, config),
-            tracker: RefCell::new(OverlayTracker::new()),
             current_tx_index: None,
             current_tx_logs: Vec::new(),
             tx_logs: Vec::new(),
+            write_tx_index: BTreeMap::new(),
+            witness_events: RefCell::new(VerkleEventTracker::new()),
         }
     }
 
-    /// Begin new transaction with isolated read tracking
+    /// Begin new transaction with isolated state
     pub fn begin_transaction(&mut self, tx_index: usize) {
         self.overlay.push_substate();
-        self.tracker.borrow_mut().begin_transaction(tx_index);
         self.current_tx_index = Some(tx_index);
+        // Also update backend's current_tx_index for verkle fetches
+        *self.overlay.backend().current_tx_index.borrow_mut() = Some(tx_index);
+        // Reset witness tracking so each transaction accounts for its own events
+        self.witness_events.borrow_mut().clear();
+        // Reset witness event tracking for this transaction to avoid
+        // carrying over access/write events (and gas) from previous transactions.
+        //*self.witness_events.borrow_mut() = VerkleEventTracker::new();
         self.current_tx_logs.clear();
         if self.tx_logs.len() <= tx_index {
             self.tx_logs.resize(tx_index + 1, Vec::new());
@@ -493,10 +555,9 @@ impl<'config> MajikOverlay<'config> {
         self.tx_logs[tx_index].clear();
     }
 
-    /// Commit transaction and snapshot reads
+    /// Commit transaction
     pub fn commit_transaction(&mut self) -> Result<(), ExitError> {
         self.overlay.pop_substate(MergeStrategy::Commit)?;
-        self.tracker.borrow_mut().commit_transaction();
         if let Some(tx_index) = self.current_tx_index.take() {
             if self.tx_logs.len() <= tx_index {
                 self.tx_logs.resize(tx_index + 1, Vec::new());
@@ -509,7 +570,6 @@ impl<'config> MajikOverlay<'config> {
     /// Revert transaction and discard changes
     pub fn revert_transaction(&mut self) -> Result<(), ExitError> {
         self.overlay.pop_substate(MergeStrategy::Revert)?;
-        self.tracker.borrow_mut().revert_transaction();
         self.current_tx_index = None;
         self.current_tx_logs.clear();
         Ok(())
@@ -524,6 +584,74 @@ impl<'config> MajikOverlay<'config> {
         }
     }
 
+    /// Record transaction origin witness events (Phase A: EIP-4762)
+    ///
+    /// Per EIP-4762: tx.origin always generates access/write events
+    /// that do NOT incur edit/fill charges (tx-level events are special)
+    pub fn record_tx_origin_witness(&mut self, caller: H160) {
+        // Skip precompile/system contract headers from witness tracking
+        if is_precompile(caller) || is_system_contract(caller) {
+            return;
+        }
+        let mut witness = self.witness_events.borrow_mut();
+        witness.record_tx_origin_access(caller);
+        witness.record_tx_origin_write(caller);
+    }
+
+    /// Record transaction target access (Phase A: EIP-4762)
+    ///
+    /// Per EIP-4762: tx.target access happens regardless of value
+    /// FIX Issue 5: Separated from write (which only happens if value > 0)
+    pub fn record_tx_target_access(&mut self, target: H160) {
+        // Skip precompile/system contract header accesses (writes still tracked separately)
+        if is_precompile(target) || is_system_contract(target) {
+            return;
+        }
+        let mut witness = self.witness_events.borrow_mut();
+        witness.record_tx_target_access(target);
+    }
+
+    /// Record transaction target write (Phase A: EIP-4762)
+    ///
+    /// Per EIP-4762: tx.target write only happens if value > 0
+    /// FIX Issue 5: Separated from access (which always happens)
+    pub fn record_tx_target_write(&mut self, target: H160) {
+        let mut witness = self.witness_events.borrow_mut();
+        witness.record_tx_target_write(target);
+    }
+
+    /// Get witness gas cost for transaction (Phase B Option C)
+    ///
+    /// Returns the total witness gas cost calculated from all tracked events.
+    /// This should be added to the EVM gas_used after transaction execution completes.
+    ///
+    /// NOTE: Currently unused - use `take_witness_gas()` instead for automatic reset
+    #[allow(dead_code)]
+    pub fn get_witness_gas(&self) -> u64 {
+        self.witness_events.borrow().calculate_total_witness_gas()
+    }
+
+    /// Take witness gas and reset tracker for next transaction (Phase B Option C)
+    ///
+    /// Returns the total witness gas cost and clears all tracked events.
+    /// This ensures each transaction has its own isolated witness gas accounting.
+    pub fn take_witness_gas(&mut self) -> u64 {
+        let mut witness = self.witness_events.borrow_mut();
+        let gas = witness.calculate_total_witness_gas();
+        witness.clear();
+        gas
+    }
+
+    /// Log current witness tracking statistics for debugging/visibility
+    pub fn log_witness_stats(&self) {
+        let (branches, leaves, edited_subtrees, edited_leaves, fills) =
+            self.witness_events.borrow().stats();
+        log_info(&format!(
+            "Verkle witness stats: branches={} leaves={} edited_subtrees={} edited_leaves={} fills={}",
+            branches, leaves, edited_subtrees, edited_leaves, fills
+        ));
+    }
+
     /// Deconstructs the overlay and converts changes to ExecutionEffects
     ///
     /// Returns ExecutionEffects for the accumulate phase by calling to_execution_effects
@@ -532,21 +660,21 @@ impl<'config> MajikOverlay<'config> {
         self,
         work_package_hash: [u8; 32],
         receipts: &[TransactionReceiptRecord],
-        state_root: [u8; 32],
+        verkle_root: [u8; 32],
         timeslot: u32,
         total_gas_used: u64,
         _service_id: u32,
     ) -> (utils::effects::ExecutionEffects, MajikBackend) {
-        let tracker = self.tracker.into_inner().into_output();
         let (backend, change_set) = self.overlay.deconstruct();
 
         // Convert to ExecutionEffects and assemble block (block logged but not returned)
+        // Pass write_tx_index map for correct tx attribution
         let effects = backend.to_execution_effects(
             &change_set,
-            &tracker,
+            &self.write_tx_index,
             work_package_hash,
             receipts,
-            state_root,
+            verkle_root,
             timeslot,
             total_gas_used,
         );
@@ -560,95 +688,74 @@ impl<'config> MajikOverlay<'config> {
 impl TransactionalBackend for MajikOverlay<'_> {
     fn push_substate(&mut self) {
         self.overlay.push_substate();
-        self.tracker.borrow_mut().enter_frame();
     }
 
     fn pop_substate(&mut self, strategy: MergeStrategy) -> Result<(), ExitError> {
         self.overlay.pop_substate(strategy)?;
-        let mut tracker = self.tracker.borrow_mut();
-        match strategy {
-            MergeStrategy::Commit => tracker.commit_frame(),
-            MergeStrategy::Revert | MergeStrategy::Discard => tracker.revert_frame(),
-        }
         Ok(())
     }
 }
 
 impl RuntimeBaseBackend for MajikOverlay<'_> {
-    /// Balance read via system-contract storage with TRAP prevention
-    /// JAM DA: Balance stored as storage slot in 0x01 contract, key = keccak256(address)
-    /// Dependency tracking: Records shard ObjectID and version for work package
+    /// Balance read - delegates to overlay which supports Verkle
     fn balance(&self, address: H160) -> U256 {
-        // Cache miss - call through to OverlayedBackend
-        let value = self.overlay.balance(address);
-        let dependency = self
-            .overlay
-            .backend()
-            .object_dependency_for_balance(address);
-        self.tracker.borrow_mut().record_read(dependency);
-        value
+        // Track account header access for witness (Phase A: no gas charging yet)
+        self.witness_events
+            .borrow_mut()
+            .record_account_header_access(address);
+        self.overlay.balance(address)
     }
 
-    /// Code ObjectID resolution and DA import
-    /// JAM DA: Code stored as [20B address][1B kind=0x00][11B zero] in 4KB segments
-    /// Dependency tracking: Records code object version
+    /// Code read - delegates to overlay which supports Verkle
     fn code(&self, address: H160) -> Vec<u8> {
-        let bytes = self.overlay.code(address);
-        let dependency = self.overlay.backend().object_dependency_for_code(address);
-        self.tracker.borrow_mut().record_read(dependency);
-        bytes
+        let code = self.overlay.code(address);
+
+        // LIMITATION (Issue 3): This tracks ALL code chunks on any code() call
+        // EIP-4762 requires per-PC execution tracking (chunk accessed per instruction)
+        // Alternative chosen: Keep bulk tracking for Phase A, fix in Phase B with VM hooks
+        // Rationale: Proper fix requires EVM step hooks; bulk logging is safe (over-tracks)
+        // Impact: Witness will include all code chunks, not just executed ones
+        // TODO Phase B: Implement per-PC chunk tracking via EVM step hook
+        let num_chunks = (code.len() + 30) / 31;
+        let mut witness = self.witness_events.borrow_mut();
+        for chunk_index in 0..num_chunks {
+            witness.record_code_chunk_access(address, chunk_index);
+        }
+        code
     }
 
-    /// Code hash with caching
-    /// JAM DA: Code hash computed on load and cached in code_hashes BTreeMap
-    /// Optimization: EXTCODEHASH can use cached value, avoiding keccak256 recomputation
-    /// Dependency tracking: Records code object read for JAM work package validation
+    /// Code hash - delegates to overlay which supports Verkle
     fn code_hash(&self, address: H160) -> H256 {
-        // Overlay handles the actual lookup (checks cache, then calls backend)
-        let hash = self.overlay.code_hash(address);
-        let dependency = self.overlay.backend().object_dependency_for_code(address);
-        self.tracker.borrow_mut().record_read(dependency);
-        hash
+        // Track code hash access for witness (Phase A: no gas charging yet)
+        self.witness_events
+            .borrow_mut()
+            .record_codehash_access(address);
+        self.overlay.code_hash(address)
     }
 
-    /// Storage read via SSR shard resolution
-    /// JAM DA: Resolves ShardId via SSR, binary search within shard, tracks dependency
-    /// Dependency tracking: Records shard ObjectID and version
+    /// Storage read - delegates to overlay
     fn storage(&self, address: H160, index: H256) -> H256 {
-        let value = self.overlay.storage(address, index);
-        let dependency = self
-            .overlay
-            .backend()
-            .object_dependency_for_storage(address, index);
-        self.tracker.borrow_mut().record_read(dependency);
-        value
+        // Track storage slot access for witness (Phase A: no gas charging yet)
+        let slot = U256::from_big_endian(index.as_bytes());
+        self.witness_events
+            .borrow_mut()
+            .record_storage_access(address, slot);
+        self.overlay.storage(address, index)
     }
 
-    /// Transient storage (EIP-1153) handled by overlay
-    /// JAM DA: NOT persisted to DA, purely in-memory, cleared at transaction boundaries
-    /// Implementation: Vendor OverlayedBackend maintains in-memory BTreeMap, cleared on transaction commit/revert
-    /// No dependency tracking needed - ephemeral scratch space
+    /// Transient storage (EIP-1153) - ephemeral, not persisted
     fn transient_storage(&self, address: H160, index: H256) -> H256 {
         self.overlay.transient_storage(address, index)
     }
 
-    /// EIP-161 exists check handled by overlay
-    /// JAM DA: Returns true if (balance > 0) OR (nonce > 0) OR (code_size > 0)
-    /// Implementation: Overlay checks eip161_empty_check config, then calls balance/nonce/code_size
-    /// Backend provides: Balance/nonce from system-contract storage, code_size from code objects
-    /// Empty account: All three values are zero (account does not exist per EIP-161)
+    /// EIP-161 exists check
     fn exists(&self, address: H160) -> bool {
         self.overlay.exists(address)
     }
 
-    /// Nonce read via system-contract storage
-    /// JAM DA: Storage key = keccak256(address || "nonce") in 0x01 contract
-    /// Dependency tracking: Records shard ObjectID and version
+    /// Nonce read - delegates to overlay which supports Verkle
     fn nonce(&self, address: H160) -> U256 {
-        let value = self.overlay.nonce(address);
-        let dependency = self.overlay.backend().object_dependency_for_nonce(address);
-        self.tracker.borrow_mut().record_read(dependency);
-        value
+        self.overlay.nonce(address)
     }
 }
 
@@ -706,29 +813,50 @@ impl EvmRuntimeBackend for MajikOverlay<'_> {
         self.overlay.mark_storage_hot(address, index);
     }
 
-    /// Storage write with copy-on-write shard export
-    /// JAM DA: Cached in overlay, exported to DA at accumulate with COW
-    /// Write tracking: Records transaction index and instance counter
+    /// Storage write
     fn set_storage(&mut self, address: H160, key: H256, value: H256) -> Result<(), ExitError> {
-        // Log entry being added/updated
-        log_info(&format!(
-            "set_storage Entry: address={:?}, key_h=0x{}, value=0x{}",
-            address,
-            hex::encode(key.as_bytes()),
-            hex::encode(value.as_bytes())
-        ));
+        // Track storage write for witness (Phase A: no gas charging yet)
+        let slot = U256::from_big_endian(key.as_bytes());
+        let original_value = self.overlay.original_storage(address, key);
+
+        // Determine presence vs absence using explicit tracking from backend fetches
+        let presence = {
+            let backend = self.overlay.backend();
+            backend.storage_presence(address, key)
+        };
+        let original = match presence {
+            Some(true) => Some(U256::from_big_endian(original_value.as_bytes())),
+            Some(false) => None,
+            None => {
+                // Fallback: use prior heuristic when presence is unknown
+                let is_first_access = self.overlay.is_cold(address, Some(key));
+                if is_first_access && original_value == H256::zero() {
+                    None
+                } else {
+                    Some(U256::from_big_endian(original_value.as_bytes()))
+                }
+            }
+        };
+
+        let new_value = U256::from_big_endian(value.as_bytes());
+        self.witness_events
+            .borrow_mut()
+            .record_storage_write(address, slot, original, new_value);
 
         self.overlay.set_storage(address, key, value)?;
-        self.tracker
-            .borrow_mut()
-            .record_write(WriteKey::storage(address, key));
+        // After a write, the slot is known-present
+        self.overlay
+            .backend_mut()
+            .update_storage_presence(address, key, true);
+        // Track which tx modified this storage slot
+        if let Some(tx_index) = self.current_tx_index {
+            self.write_tx_index
+                .insert(WriteKey::Storage(address, slot), tx_index as u32);
+        }
         Ok(())
     }
 
-    /// Set transient storage (EIP-1153) handled by overlay
-    /// JAM DA: In-memory only, cleared at transaction boundaries, no DA export
-    /// Implementation: Vendor OverlayedBackend inserts into transient_storage BTreeMap
-    /// Write tracking: Records writes for deterministic ordering, but not persisted beyond transaction
+    /// Set transient storage (EIP-1153)
     fn set_transient_storage(
         &mut self,
         address: H160,
@@ -736,160 +864,129 @@ impl EvmRuntimeBackend for MajikOverlay<'_> {
         value: H256,
     ) -> Result<(), ExitError> {
         self.overlay.set_transient_storage(address, key, value)?;
-        self.tracker
-            .borrow_mut()
-            .record_write(WriteKey::transient_storage(address, key));
         Ok(())
     }
 
-    /// Accumulate logs for DA receipt export
-    /// JAM DA: Logs collected in overlay and exported to Receipt objects (kind=0x03) in to_execution_effects
-    /// Serialization: serialize_logs() packs all logs into binary format for DA
-    /// Write tracking: Records log emission for deterministic ordering
+    /// Accumulate logs
     fn log(&mut self, log: Log) -> Result<(), ExitError> {
         self.overlay.log(log.clone())?;
-        self.tracker
-            .borrow_mut()
-            .record_write(WriteKey::log(log.address));
         self.current_tx_logs.push(log);
         Ok(())
     }
 
     /// Account deletion with EIP-6780 restrictions
-    /// JAM DA: Deletion handled via change_set.deletes - exports code tombstones (empty payload)
-    /// Export: to_execution_effects() exports empty code objects and storage_resets for deleted accounts
-    /// Storage reset: SSR reset to empty state with incremented version, all shards cleared
-    /// Gas refund: 24000 gas refund handled by EVM execution layer (not in DA export)
     fn mark_delete_reset(&mut self, address: H160) {
-        self.overlay.mark_delete_reset(address);
-        self.tracker
+        // FIX Issue 6: Track account write for SELFDESTRUCT
+        self.witness_events
             .borrow_mut()
-            .record_write(WriteKey::delete(address));
+            .record_account_write(address);
+
+        self.overlay.mark_delete_reset(address);
     }
 
     /// Mark account as created for EIP-6780 checks
-    /// JAM DA: Tracked in overlay, enables same-transaction SELFDESTRUCT
-    /// Write tracking: Records creation event with transaction index
     fn mark_create(&mut self, address: H160) {
-        self.overlay.mark_create(address);
-        self.tracker
+        // FIX Issue 6: Track account write for account creation
+        self.witness_events
             .borrow_mut()
-            .record_write(WriteKey::create(address));
+            .record_account_write(address);
+
+        self.overlay.mark_create(address);
     }
 
-    /// Clear storage SSR and all shards before CREATE deployment
-    /// JAM DA: Removes SSR header and all shard ObjectRefs, creates fresh SSR
-    /// EIP-7610: Should only occur for empty targets (collision detection)
+    /// Clear storage before CREATE deployment
     fn reset_storage(&mut self, address: H160) {
         self.overlay.reset_storage(address);
-        self.tracker
-            .borrow_mut()
-            .record_write(WriteKey::storage_reset(address));
     }
 
-    /// Export bytecode to DA as code objects
-    /// JAM DA: Code stored as [20B address][1B kind=0x00][11B zero] in DA
-    /// Export: to_execution_effects() exports code changes to code objects with version tracking
-    /// Write tracking: Records code installation, version bumped on change
+    /// Export bytecode
     fn set_code(
         &mut self,
         address: H160,
         code: Vec<u8>,
         origin: SetCodeOrigin,
     ) -> Result<(), ExitError> {
+        // Track code write for witness (Phase A: no gas charging yet)
+        self.witness_events
+            .borrow_mut()
+            .record_code_write(address, code.len());
+
         self.overlay.set_code(address, code, origin)?;
-        self.tracker
-            .borrow_mut()
-            .record_write(WriteKey::code(address));
+        // Track which tx modified this code
+        if let Some(tx_index) = self.current_tx_index {
+            self.write_tx_index
+                .insert(WriteKey::Code(address), tx_index as u32);
+        }
         Ok(())
     }
 
-    /// Balance deposits tracked via standard storage shards
-    /// JAM DA: Balance updates go through storage system (contract 0x01) to avoid conflicts with USDM transfers
-    /// Export: to_execution_effects() persists balance changes through regular shard objects
-    /// Write tracking: Records storage write for balance
+    /// Balance deposits for native ETH transfers
+    /// Delegates to overlay which updates both cache and changeset
     fn deposit(&mut self, target: H160, value: U256) {
-        // Use storage operations instead of balance operations to avoid conflicts with USDM
-        let system_contract = h160_from_low_u64_be(0x01);
-        let storage_key = balance_storage_key(target);
-
-        // Read current balance from storage
-        let current_balance = self.overlay.storage(system_contract, storage_key);
-        let current_value = U256::from_big_endian(current_balance.as_bytes());
-
-        // Add deposit amount
-        let new_value = current_value.saturating_add(value);
-        let mut encoded = [0u8; 32];
-        new_value.to_big_endian(&mut encoded);
-        let new_storage_value = H256::from(encoded);
-
-        // Write new balance to storage
-        self.overlay
-            .set_storage(system_contract, storage_key, new_storage_value)
-            .unwrap();
-        self.tracker
+        // Track account write for witness (Phase A: no gas charging yet)
+        self.witness_events
             .borrow_mut()
-            .record_write(WriteKey::storage(system_contract, storage_key));
+            .record_account_write(target);
+
+        self.overlay.deposit(target, value);
+        // Track which tx modified this balance
+        if let Some(tx_index) = self.current_tx_index {
+            self.write_tx_index
+                .insert(WriteKey::Balance(target), tx_index as u32);
+        }
     }
 
-    /// Balance withdrawals tracked via standard storage shards
-    /// JAM DA: Balance updates go through storage system (contract 0x01) to avoid conflicts with USDM transfers
-    /// Export: to_execution_effects() persists balance changes through regular shard objects
-    /// Write tracking: Records storage write for balance
+    /// Balance withdrawals for native ETH transfers
+    /// Delegates to overlay which updates both cache and changeset
     fn withdrawal(&mut self, source: H160, value: U256) -> Result<(), ExitError> {
-        // Use storage operations instead of balance operations to avoid conflicts with USDM
-        let system_contract = h160_from_low_u64_be(0x01);
-        let storage_key = balance_storage_key(source);
-
-        // Read current balance from storage
-        let current_balance = self.overlay.storage(system_contract, storage_key);
-        let current_value = U256::from_big_endian(current_balance.as_bytes());
-
-        // Check sufficient balance
-        if current_value < value {
-            return Err(ExitException::OutOfFund.into());
-        }
-
-        // Subtract withdrawal amount
-        let new_value = current_value - value;
-        let mut encoded = [0u8; 32];
-        new_value.to_big_endian(&mut encoded);
-        let new_storage_value = H256::from(encoded);
-
-        // Write new balance to storage
-        self.overlay
-            .set_storage(system_contract, storage_key, new_storage_value)
-            .unwrap();
-        self.tracker
+        // Track account write for witness (Phase A: no gas charging yet)
+        self.witness_events
             .borrow_mut()
-            .record_write(WriteKey::storage(system_contract, storage_key));
+            .record_account_write(source);
 
+        self.overlay.withdrawal(source, value)?;
+        // Track which tx modified this balance
+        if let Some(tx_index) = self.current_tx_index {
+            self.write_tx_index
+                .insert(WriteKey::Balance(source), tx_index as u32);
+        }
         Ok(())
     }
 
-    /// Atomic transfers mirrored into standard storage shards
-    /// JAM DA: May touch two separate shard objects for source/target balances
-    /// Export: to_execution_effects() records both balance changes through shard writes
-    /// Write tracking: Records both balance changes, depends on both shard versions
+    /// Atomic transfers
     fn transfer(&mut self, transfer: Transfer) -> Result<(), ExitError> {
-        let result = self.overlay.transfer(transfer.clone());
-        if result.is_ok() {
-            let mut tracker = self.tracker.borrow_mut();
-            tracker.record_write(WriteKey::balance(transfer.source));
-            tracker.record_write(WriteKey::balance(transfer.target));
+        // Track account writes for witness (Phase A: no gas charging yet)
+        self.witness_events
+            .borrow_mut()
+            .record_account_write(transfer.source);
+        self.witness_events
+            .borrow_mut()
+            .record_account_write(transfer.target);
+
+        // Track which tx modified these balances (before transfer consumes the value)
+        if let Some(tx_index) = self.current_tx_index {
+            self.write_tx_index
+                .insert(WriteKey::Balance(transfer.source), tx_index as u32);
+            self.write_tx_index
+                .insert(WriteKey::Balance(transfer.target), tx_index as u32);
         }
-        result
+        self.overlay.transfer(transfer)?;
+        Ok(())
     }
 
-    /// Nonce increments mirrored into system-contract storage
-    /// JAM DA: Nonce shares the same shard keys as balances (0x01 contract)
-    /// Export: to_execution_effects() persists updates via standard shard objects
-    /// Write tracking: Records nonce increment for replay protection
+    /// Nonce increments
     fn inc_nonce(&mut self, address: H160) -> Result<(), ExitError> {
-        self.overlay.inc_nonce(address)?;
-        self.tracker
+        // FIX Issue 6: Track account write for nonce change
+        self.witness_events
             .borrow_mut()
-            .record_write(WriteKey::nonce(address));
+            .record_account_write(address);
+
+        self.overlay.inc_nonce(address)?;
+        // Track which tx modified this nonce
+        if let Some(tx_index) = self.current_tx_index {
+            self.write_tx_index
+                .insert(WriteKey::Nonce(address), tx_index as u32);
+        }
         Ok(())
     }
 }
@@ -898,56 +995,56 @@ impl EvmRuntimeBackend for MajikOverlay<'_> {
 
 impl RuntimeBaseBackend for MajikBackend {
     /// Balance with DA import on cache miss
-    /// Accounts are backed by the 0x01 system contract storage just like any other contract.
-    /// On cache miss we read the corresponding storage slot (keccak256(address)) via storage().
+    /// Builder mode: uses Verkle host function (Go maintains verkleReadLog)
+    /// Guarantor mode: uses cache-only (panics on miss)
     fn balance(&self, address: H160) -> U256 {
-        // log_info(&format!("🔍 balance() called for address={:?}", address));
-
+        log_info(&format!(
+            "balance() called addr={:?} mode={:?}",
+            address, self.execution_mode
+        ));
         // Check cache first
         {
             let balances = self.balances.borrow();
             if let Some(balance) = balances.get(&address) {
-                //log_info(&format!("  ✅ Found in cache: balance={}", balance));
+                log_info(&format!("balance HIT {:?}={}", address, balance));
                 return *balance;
             }
         }
+        log_info(&format!("balance MISS {:?}", address));
 
-        // log_info(&format!(
-        //     "  ⚠️  Not in cache, fetching from storage for address={:?}",
-        //     address
-        // ));
-
-        let system_contract = h160_from_low_u64_be(0x01);
-        let storage_key = balance_storage_key(address);
-        // log_info(&format!(
-        //     "  📍 Calling storage() with address={:?}, system_contract={:?}, storage_key=0x{}",
-        //     address,
-        //     system_contract,
-        //     hex::encode(storage_key.as_bytes())
-        // ));
-
-        let value_h256 = self.storage(system_contract, storage_key);
-        let balance = U256::from_big_endian(value_h256.as_bytes());
-
-        // log_info(&format!(
-        //     "  💰 Read balance={} for address={:?}",
-        //     balance, address
-        // ));
-
-        // Cache the balance (including zero) to prevent infinite DA fetches
-        self.balances.borrow_mut().insert(address, balance);
-        balance
+        match self.execution_mode {
+            ExecutionMode::Builder => {
+                // Builder: fetch from Verkle tree via host function
+                let tx_index = self.current_tx_index.borrow().unwrap_or(0) as u32;
+                let balance = crate::verkle::fetch_balance_verkle(address, tx_index);
+                self.balances.borrow_mut().insert(address, balance);
+                log_info(&format!(
+                    "balance fetched via verkle ({:?}) value={} tx_index={}",
+                    address, balance, tx_index
+                ));
+                balance
+            }
+            ExecutionMode::Guarantor => {
+                // Guarantor: cache-only, panic on miss
+                log_error(&format!("GUARANTOR BALANCE MISS {:?}", address));
+                panic!("GUARANTOR BALANCE MISS");
+            }
+        }
     }
 
     /// Code from cache with DA import on miss
-    /// DA-STORAGE.md §10: On miss, Read(code_object_id) → Import 4KB segments → reassemble
-    /// Current: Calls import_code() which fetches and reassembles from DA
-    /// Note: Caching requires mut access - handled by caller or RefCell wrapper
+    /// Builder mode: uses Verkle host function (Go maintains verkleReadLog)
+    /// Guarantor mode: uses cache-only (panics on miss)
     fn code(&self, address: H160) -> Vec<u8> {
+        log_info(&format!(
+            "code() called addr={:?} mode={:?}",
+            address, self.execution_mode
+        ));
         // Check positive cache first
         {
             let code_storage = self.code_storage.borrow();
             if let Some(code) = code_storage.get(&address) {
+                log_info(&format!("code HIT {:?} len={}", address, code.len()));
                 return code.clone();
             }
         }
@@ -956,31 +1053,65 @@ impl RuntimeBaseBackend for MajikBackend {
         {
             let negative_cache = self.negative_code_cache.borrow();
             if negative_cache.contains_key(&address) {
+                log_info(&format!("code HIT (negative) {:?}", address));
                 return Vec::new();
             }
         }
+        log_info(&format!("code MISS {:?}", address));
 
-        // Cache miss - attempt DA import via import_code()
-        if let Some((_object_ref, bytecode)) = self.import_code(address, self.payload_type) {
-            // Cache the imported code and its hash
-            let code_hash = keccak256(&bytecode);
-            self.code_storage
-                .borrow_mut()
-                .insert(address, bytecode.clone());
-            self.code_hashes.borrow_mut().insert(address, code_hash);
-            return bytecode;
+        match self.execution_mode {
+            ExecutionMode::Builder => {
+                // Builder: fetch from Verkle tree via host function
+                let tx_index = self.current_tx_index.borrow().unwrap_or(0) as u32;
+                let bytecode = crate::verkle::fetch_code_verkle(address, tx_index);
+
+                if bytecode.is_empty() {
+                    // Negative caching: remember EOAs with no bytecode
+                    self.negative_code_cache.borrow_mut().insert(address, ());
+                } else {
+                    // Cache the imported code and its hash
+                    let code_hash = keccak256(&bytecode);
+                    self.code_storage
+                        .borrow_mut()
+                        .insert(address, bytecode.clone());
+                    self.code_hashes.borrow_mut().insert(address, code_hash);
+                }
+
+                bytecode
+            }
+            ExecutionMode::Guarantor => {
+                // Guarantor: Check code_hashes cache to determine if account is EOA
+                // If code_hash is empty code hash (or not in cache), account is EOA
+                let code_hashes = self.code_hashes.borrow();
+                if let Some(code_hash) = code_hashes.get(&address) {
+                    // Code hash is in witness
+                    let empty_code_hash = keccak256(&[]);
+                    if code_hash.as_bytes() == empty_code_hash.as_bytes() {
+                        // Empty code hash = EOA (no code)
+                        log_info(&format!("code() EOA (empty hash) {:?}", address));
+                        self.negative_code_cache.borrow_mut().insert(address, ());
+                        return Vec::new();
+                    } else {
+                        // Non-empty code hash but code not in cache = missing witness data
+                        log_error(&format!(
+                            "GUARANTOR: CodeHash present but code missing for {:?}",
+                            address
+                        ));
+                        panic!("GUARANTOR: CodeHash present but code missing");
+                    }
+                } else {
+                    // No code hash in witness = assume EOA (conservative default)
+                    log_info(&format!("code() EOA (no hash in witness) {:?}", address));
+                    self.negative_code_cache.borrow_mut().insert(address, ());
+                    return Vec::new();
+                }
+            }
         }
-
-        // Negative caching: remember EOAs with no bytecode so we do not keep hitting DA
-        self.negative_code_cache.borrow_mut().insert(address, ());
-
-        Vec::new()
     }
 
     /// Code hash with caching optimization
-    /// JAM DA: Code hash cached in code_hashes BTreeMap on code load
-    /// Optimization: EXTCODEHASH opcode uses cached hash, avoiding expensive recomputation
-    /// Fallback: If not cached, computes hash from code (for imported-but-not-cached scenario)
+    /// Builder mode: uses Verkle host function (Go maintains verkleReadLog)
+    /// Guarantor mode: uses cache-only (panics on miss)
     fn code_hash(&self, address: H160) -> H256 {
         // Check cache first
         {
@@ -990,144 +1121,94 @@ impl RuntimeBaseBackend for MajikBackend {
             }
         }
 
-        // Cache miss - compute from code if exists
-        if self.exists(address) {
-            let code = self.code(address);
-            let hash = keccak256(&code[..]);
-
-            // Cache the computed hash
-            self.code_hashes.borrow_mut().insert(address, hash);
-            hash
-        } else {
-            H256::zero()
+        match self.execution_mode {
+            ExecutionMode::Builder => {
+                // Builder: fetch from Verkle tree via host function
+                let tx_index = self.current_tx_index.borrow().unwrap_or(0) as u32;
+                let hash = crate::verkle::fetch_code_hash_verkle(address, tx_index);
+                self.code_hashes.borrow_mut().insert(address, hash);
+                hash
+            }
+            ExecutionMode::Guarantor => {
+                // Guarantor: cache-only, panic on miss
+                panic!("GUARANTOR: Code hash cache miss for address={:?}", address);
+            }
         }
     }
 
-    /// Storage via SSR shard resolution with DA import on miss
-    /// DA-STORAGE.md §10: On miss, Read(shard_object_id) → Import 4KB shard → deserialize entries
-    /// Current: Calls import_shard() which fetches and deserializes from DA
-    /// Note: Caching requires mut access - handled by caller or RefCell wrapper
+    /// Storage via Verkle tree
+    /// Builder mode: uses Verkle host function (Go maintains verkleReadLog)
+    /// Guarantor mode: uses cache-only (panics on miss)
     fn storage(&self, address: H160, key: H256) -> H256 {
-        // log_info(&format!("📦 storage() called: address={:?}, key=0x{}", address, hex::encode(key.as_bytes())));
-
-        let shard_id = self.resolve_shard_id_impl(address, key);
-        // log_info(&format!("  🗂️  Resolved shard_id: ld={}, prefix56={:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        //     shard_id.ld,
-        //     shard_id.prefix56[0],
-        //     shard_id.prefix56[1],
-        //     shard_id.prefix56[2],
-        //     shard_id.prefix56[3],
-        //     shard_id.prefix56[4],
-        //     shard_id.prefix56[5],
-        //     shard_id.prefix56[6]
-        // ));
-
-        // Check cache first
+        // Check cache first (for within-transaction reads)
         {
             let storage_shards = self.storage_shards.borrow();
             if let Some(contract_storage) = storage_shards.get(&address) {
-                // log_info(&format!(
-                //     "  ✅ Found contract_storage for address={:?}",
-                //     address
-                // ));
-                if let Some(shard_data) = contract_storage.shards.get(&shard_id) {
-                    // log_info(&format!("  ✅ Found shard in cache with {} entries", shard_data.entries.len()));
-                    // for (idx, entry) in shard_data.entries.iter().enumerate() {
-                    //     log_info(&format!("    Entry[{}]: key_h=0x{}, value=0x{}",
-                    //         idx,
-                    //         hex::encode(entry.key_h.as_bytes()),
-                    //         hex::encode(entry.value.as_bytes())
-                    //     ));
-                    // }
+                // Post-SSR: Single shard per contract, access directly
+                let shard_data = &contract_storage.shard;
 
-                    match shard_data
-                        .entries
-                        .binary_search_by_key(&key, |entry| entry.key_h)
-                    {
-                        Ok(idx) => {
-                            let value = shard_data.entries[idx].value;
-                            // log_info(&format!(
-                            //     "  ✅ Found key in cache: value=0x{}",
-                            //     hex::encode(value.as_bytes())
-                            // ));
-                            return value;
-                        }
-                        Err(_) => {
-                            // log_info(&format!(
-                            //     "  ❌ Key not found in cached shard, returning zero: key=0x{}",
-                            //     hex::encode(key.as_bytes())
-                            // ));
-                            return H256::zero();
-                        }
+                match shard_data
+                    .entries
+                    .binary_search_by_key(&key, |entry| entry.key_h)
+                {
+                    Ok(idx) => {
+                        let value = shard_data.entries[idx].value;
+                        self.update_storage_presence(address, key, true);
+                        return value;
                     }
-                } else {
-                    log_info(&format!("  ⚠️  Shard not in cache"));
+                    Err(_) => {
+                        // Key not in cache - continue to fetch
+                    }
                 }
-            } else {
-                log_info(&format!(
-                    "  ⚠️  No contract_storage for address={:?}",
-                    address
-                ));
             }
         }
 
-        // Cache miss - attempt DA import via import_shard()
-        log_info(&format!("  📥 Attempting to import shard from DA..."));
-        if let Some((_object_ref, shard_data)) = self.import_shard(address, shard_id, self.payload_type) {
-            log_info(&format!(
-                "  ✅ Imported shard with {} entries",
-                shard_data.entries.len()
-            ));
-            for (idx, entry) in shard_data.entries.iter().enumerate() {
-                log_info(&format!(
-                    "    Imported Entry[{}]: key_h=0x{}, value=0x{}",
-                    idx,
-                    hex::encode(entry.key_h.as_bytes()),
-                    hex::encode(entry.value.as_bytes())
-                ));
-            }
+        match self.execution_mode {
+            ExecutionMode::Builder => {
+                // Builder: fetch from Verkle tree via host function
+                let tx_index = self.current_tx_index.borrow().unwrap_or(0) as u32;
+                let (value, found) =
+                    crate::verkle::fetch_storage_verkle_with_presence(address, key, tx_index);
 
-            // Search in the freshly imported shard
-            match shard_data
-                .entries
-                .binary_search_by_key(&key, |entry| entry.key_h)
-            {
-                Ok(idx) => {
-                    let value = shard_data.entries[idx].value;
-                    log_info(&format!(
-                        "  ✅ Found key in imported shard: value=0x{}",
-                        hex::encode(value.as_bytes())
-                    ));
-                    return value;
+                // Cache the value for within-transaction reads
+                let mut storage_shards = self.storage_shards.borrow_mut();
+                let contract_storage =
+                    storage_shards
+                        .entry(address)
+                        .or_insert_with(|| ContractStorage {
+                            shard: ContractShard {
+                                entries: Vec::new(),
+                            },
+                        });
+
+                // Insert in sorted order
+                let shard = &mut contract_storage.shard;
+                match shard
+                    .entries
+                    .binary_search_by_key(&key, |entry| entry.key_h)
+                {
+                    Ok(_) => {
+                        // Already exists (shouldn't happen, but handle gracefully)
+                    }
+                    Err(idx) => {
+                        shard
+                            .entries
+                            .insert(idx, crate::contractsharding::EvmEntry { key_h: key, value });
+                    }
                 }
-                Err(_) => {
-                    log_info(&format!(
-                        "  ❌ Key not found in imported shard, returning zero: key=0x{}",
-                        hex::encode(key.as_bytes())
-                    ));
-                }
+
+                self.update_storage_presence(address, key, found);
+
+                value
             }
-        } else {
-            log_error(&format!(
-                "  ❌ Failed to import shard from DA: address={:?}, key=0x{}, shard_id (ld={}, prefix={:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x})",
-                address,
-                hex::encode(key.as_bytes()),
-                shard_id.ld,
-                shard_id.prefix56[0],
-                shard_id.prefix56[1],
-                shard_id.prefix56[2],
-                shard_id.prefix56[3],
-                shard_id.prefix56[4],
-                shard_id.prefix56[5],
-                shard_id.prefix56[6]
-            ));
+            ExecutionMode::Guarantor => {
+                // Guarantor: cache-only, panic on miss
+                panic!(
+                    "GUARANTOR: Storage cache miss for address={:?}, key={:?}",
+                    address, key
+                );
+            }
         }
-
-        log_info(&format!(
-            "  ⚠️  Returning H256::zero() for key=0x{}",
-            hex::encode(key.as_bytes())
-        ));
-        H256::zero()
     }
 
     /// Transient storage backend (EIP-1153) - unused, overlay handles it
@@ -1155,24 +1236,44 @@ impl RuntimeBaseBackend for MajikBackend {
     }
 
     /// Nonce with DA import on cache miss
-    /// Nonces are stored alongside balances inside the 0x01 system contract.
+    /// Builder mode: uses Verkle host function (Go maintains verkleReadLog)
+    /// Guarantor mode: uses cache-only (panics on miss)
     fn nonce(&self, address: H160) -> U256 {
+        log_info(&format!(
+            "nonce() called addr={:?} mode={:?}",
+            address, self.execution_mode
+        ));
         // Check cache first
         {
             let nonces = self.nonces.borrow();
             if let Some(nonce) = nonces.get(&address) {
+                log_info(&format!("nonce HIT {:?}={}", address, nonce));
                 return *nonce;
             }
         }
+        log_info(&format!("nonce MISS {:?}", address));
 
-        let system_contract = h160_from_low_u64_be(0x01);
-        let storage_key = nonce_storage_key(address);
-        let value_h256 = self.storage(system_contract, storage_key);
-        let nonce = U256::from_big_endian(value_h256.as_bytes());
-
-        // Cache the nonce (including zero) to prevent infinite DA fetches
-        self.nonces.borrow_mut().insert(address, nonce);
-        nonce
+        match self.execution_mode {
+            ExecutionMode::Builder => {
+                // Builder: fetch from Verkle tree via host function
+                let tx_index = self.current_tx_index.borrow().unwrap_or(0) as u32;
+                let nonce = crate::verkle::fetch_nonce_verkle(address, tx_index);
+                self.nonces.borrow_mut().insert(address, nonce);
+                log_info(&format!(
+                    "nonce fetched via verkle ({:?}) value={} tx_index={}",
+                    address, nonce, tx_index
+                ));
+                nonce
+            }
+            ExecutionMode::Guarantor => {
+                // Guarantor: cache-only, panic on miss
+                log_error(&format!(
+                    "GUARANTOR: Nonce cache miss for address={:?}",
+                    address
+                ));
+                panic!("GUARANTOR: Nonce cache miss for address={:?}", address);
+            }
+        }
     }
 }
 

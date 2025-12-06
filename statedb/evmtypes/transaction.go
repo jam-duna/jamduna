@@ -399,6 +399,60 @@ func (tx *EthereumTransaction) ToJSON() string {
 	return string(jsonBytes)
 }
 
+// CreateSignedNativeTransfer creates a signed transaction that transfers native ETH
+// Returns the parsed EthereumTransaction, RLP-encoded bytes, transaction hash, and error
+func CreateSignedNativeTransfer(privateKeyHex string, nonce uint64, to common.Address, amount *big.Int, gasPrice *big.Int, gasLimit uint64, chainID uint64) (*EthereumTransaction, []byte, common.Hash, error) {
+	if chainID == 0 {
+		panic(222)
+	}
+	// Parse private key
+	privateKey, err := crypto.HexToECDSA(privateKeyHex)
+	if err != nil {
+		return nil, nil, common.Hash{}, err
+	}
+
+	// Create native ETH transfer transaction (no data, just value transfer)
+	ethTx := ethereumTypes.NewTransaction(
+		nonce,
+		ethereumCommon.Address(to),
+		amount,   // value = amount (native ETH transfer)
+		gasLimit,
+		gasPrice,
+		nil, // empty data for native transfer
+	)
+
+	// Sign transaction
+	signer := ethereumTypes.NewEIP155Signer(big.NewInt(int64(chainID)))
+	signedTx, err := ethereumTypes.SignTx(ethTx, signer, privateKey)
+	if err != nil {
+		return nil, nil, common.Hash{}, err
+	}
+
+	// Encode to RLP
+	rlpBytes, err := signedTx.MarshalBinary()
+	if err != nil {
+		return nil, nil, common.Hash{}, err
+	}
+
+	// Calculate transaction hash (Ethereum uses Keccak256)
+	txHash := common.Keccak256(rlpBytes)
+
+	// Parse into EthereumTransaction
+	tx, err := ParseRawTransactionBytes(rlpBytes)
+	if err != nil {
+		return nil, nil, common.Hash{}, err
+	}
+
+	// Recover sender from signature
+	sender, err := tx.RecoverSender()
+	if err != nil {
+		return nil, nil, common.Hash{}, err
+	}
+	tx.From = sender
+
+	return tx, rlpBytes, txHash, nil
+}
+
 // CreateSignedUSDMTransfer creates a signed transaction that transfers USDM tokens
 // Returns the parsed EthereumTransaction, RLP-encoded bytes, transaction hash, and error
 func CreateSignedUSDMTransfer(usdmAddress common.Address, privateKeyHex string, nonce uint64, to common.Address, amount *big.Int, gasPrice *big.Int, gasLimit uint64, chainID uint64) (*EthereumTransaction, []byte, common.Hash, error) {
@@ -420,10 +474,6 @@ func CreateSignedUSDMTransfer(usdmAddress common.Address, privateKeyHex string, 
 	// Address is 20 bytes, so it goes in bytes 16-35 of the 32-byte word (bytes 4-35 of calldata)
 	toBytes := to.Bytes()
 	copy(calldata[16:36], toBytes)
-
-	// Debug: verify calldata encoding
-	fmt.Printf("DEBUG CreateSignedUSDMTransfer: to=%s, to.Bytes()=%x (len=%d)\n", to.Hex(), toBytes, len(toBytes))
-	fmt.Printf("DEBUG calldata[4:36]=%x\n", calldata[4:36])
 
 	// Encode amount (32 bytes)
 	amountBytes := amount.FillBytes(make([]byte, 32))
@@ -488,4 +538,74 @@ func GetFunctionSelector(funcSig string, eventSigs []string) ([4]byte, map[commo
 	}
 
 	return selector, topics
+}
+
+// EncodeCalldata encodes function selector and parameters into contract calldata
+// Supports uint64, []byte, and basic parameter types used in the accumulate host functions
+func EncodeCalldata(selector [4]byte, params []interface{}) ([]byte, error) {
+	calldata := make([]byte, 0)
+	calldata = append(calldata, selector[:]...)
+
+	// First, collect all dynamic data and calculate their sizes
+	var dynamicData [][]byte
+	var dynamicDataSizes []int
+
+	for _, param := range params {
+		if v, ok := param.([]byte); ok {
+			paddedData := make([]byte, ((len(v)+31)/32)*32) // Round up to 32-byte boundary
+			copy(paddedData, v)
+			dynamicData = append(dynamicData, v)
+			dynamicDataSizes = append(dynamicDataSizes, 32 + len(paddedData)) // 32 bytes for length + padded data
+		}
+	}
+
+	// Calculate base offset (after all parameter slots)
+	baseOffset := len(params) * 32
+	currentOffset := baseOffset
+
+	// Encode parameters with correct offsets for dynamic types
+	dynamicIndex := 0
+	for _, param := range params {
+		switch v := param.(type) {
+		case uint64:
+			// Encode uint64 as 32-byte big-endian
+			paramBytes := big.NewInt(int64(v)).FillBytes(make([]byte, 32))
+			calldata = append(calldata, paramBytes[:]...)
+		case int:
+			// Encode int as 32-byte big-endian
+			paramBytes := big.NewInt(int64(v)).FillBytes(make([]byte, 32))
+			calldata = append(calldata, paramBytes[:]...)
+		case common.Hash:
+			// Encode hash as 32-byte value (already correct size)
+			calldata = append(calldata, v[:]...)
+		case []byte:
+			// For dynamic types, encode the offset to where the data will be
+			offsetBytes := big.NewInt(int64(currentOffset)).FillBytes(make([]byte, 32))
+			calldata = append(calldata, offsetBytes[:]...)
+
+			// Update offset for next dynamic parameter
+			if dynamicIndex < len(dynamicDataSizes) {
+				currentOffset += dynamicDataSizes[dynamicIndex]
+				dynamicIndex++
+			}
+
+		default:
+			return nil, fmt.Errorf("unsupported parameter type: %T", v)
+		}
+	}
+
+	// Append dynamic data at the end
+	for _, data := range dynamicData {
+		// Length of bytes (32 bytes)
+		length := big.NewInt(int64(len(data)))
+		lengthBytes := length.FillBytes(make([]byte, 32))
+		calldata = append(calldata, lengthBytes[:]...)
+
+		// Actual bytes data (padded to 32-byte boundary)
+		paddedData := make([]byte, ((len(data)+31)/32)*32) // Round up to 32-byte boundary
+		copy(paddedData, data)
+		calldata = append(calldata, paddedData[:]...)
+	}
+
+	return calldata, nil
 }

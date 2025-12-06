@@ -10,7 +10,9 @@ import (
 	"sync"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	"github.com/colorfulnotion/jam/types"
+	"github.com/ethereum/go-verkle"
 	"github.com/syndtr/goleveldb/leveldb"
 	leveldbstorage "github.com/syndtr/goleveldb/leveldb/storage"
 )
@@ -86,6 +88,30 @@ type StateDBStorage struct {
 	nodeID                   uint16
 	// Telemetry client for emitting events
 	telemetryClient types.TelemetryClient
+
+	// Witness cache (Phase 4+): Direct witness provision for EVM execution
+	// These caches are populated after refine execution and persist across queries
+	// Maps are protected by witnessMutex for thread-safe access
+	Storageshard map[common.Address]evmtypes.ContractStorage  // address → complete storage
+	Code         map[common.Address][]byte                    // address → bytecode
+	witnessMutex sync.RWMutex                                 // Protects witness caches
+	VerkleProofs map[common.Address]evmtypes.VerkleMultiproof // address → verkle multiproof (Phase 2, future)
+
+	// Verkle tree storage: verkleRoot → VerkleNode
+	// Stores historical Verkle tree states by their root hash
+	// Allows querying state at any specific verkleRoot (e.g., at a specific block)
+	verkleRoots      map[common.Hash]verkle.VerkleNode
+	verkleRootsMutex sync.RWMutex // Protects verkleRoots map
+
+	// CurrentVerkleTree is the active working tree for the current execution
+	// This is used during transaction execution and witness generation
+	// After execution completes, the post-state tree is stored in verkleRoots
+	CurrentVerkleTree verkle.VerkleNode
+
+	// Verkle read log: Tracks all Verkle tree reads during EVM execution
+	// This is the authoritative source for BuildVerkleWitness
+	verkleReadLog      []types.VerkleRead
+	verkleReadLogMutex sync.Mutex // Protects verkleReadLog
 }
 
 const (
@@ -113,15 +139,17 @@ func NewStateDBStorage(path string, jamda types.JAMDA, telemetryClient types.Tel
 	trieDB := NewMerkleTree(nil)
 
 	s := &StateDBStorage{
-		db:              db,
-		logChan:         make(chan LogMessage, 100),
-		jamda:           jamda,
-		telemetryClient: telemetryClient,
-		nodeID:          nodeID,
-		trieDB:          trieDB,
-		stagedInserts:   make(map[common.Hash][]byte),
-		stagedDeletes:   make(map[common.Hash]bool),
-		keys:            make(map[common.Hash]bool),
+		db:                db,
+		logChan:           make(chan LogMessage, 100),
+		jamda:             jamda,
+		telemetryClient:   telemetryClient,
+		nodeID:            nodeID,
+		trieDB:            trieDB,
+		stagedInserts:     make(map[common.Hash][]byte),
+		stagedDeletes:     make(map[common.Hash]bool),
+		keys:              make(map[common.Hash]bool),
+		verkleRoots:       make(map[common.Hash]verkle.VerkleNode),
+		CurrentVerkleTree: verkle.New(),
 	}
 
 	// Get initial root from trie
@@ -176,6 +204,30 @@ func (store *StateDBStorage) DeleteK(key common.Hash) error {
 // CloseDB closes the LevelDB database
 func (store *StateDBStorage) CloseDB() error {
 	return store.db.Close()
+}
+
+// StoreVerkleTransition stores a Verkle tree state by its root hash
+// This allows later retrieval of the exact tree state at a specific verkleRoot
+func (store *StateDBStorage) StoreVerkleTransition(verkleRoot common.Hash, tree verkle.VerkleNode) error {
+	store.verkleRootsMutex.Lock()
+	defer store.verkleRootsMutex.Unlock()
+
+	if tree == nil {
+		return fmt.Errorf("cannot store nil VerkleNode")
+	}
+
+	store.verkleRoots[verkleRoot] = tree
+	return nil
+}
+
+// GetVerkleTreeAtRoot retrieves a Verkle tree state by its root hash
+// Returns the tree and a boolean indicating if it was found
+func (store *StateDBStorage) GetVerkleTreeAtRoot(verkleRoot common.Hash) (verkle.VerkleNode, bool) {
+	store.verkleRootsMutex.RLock()
+	defer store.verkleRootsMutex.RUnlock()
+
+	tree, found := store.verkleRoots[verkleRoot]
+	return tree, found
 }
 
 func (store *StateDBStorage) ReadRawKV(key []byte) ([]byte, bool, error) {
@@ -369,4 +421,298 @@ func (store *StateDBStorage) StoreWarpSyncFragment(setID uint32, fragment types.
 	}
 
 	return nil
+}
+
+// ===== EVM State Access Methods (Verkle-based) =====
+
+// FetchBalance fetches balance from Verkle tree
+func (store *StateDBStorage) FetchBalance(address common.Address, txIndex uint32) ([32]byte, error) {
+	var balance [32]byte
+
+	if store.CurrentVerkleTree == nil {
+		return balance, nil // Return zero balance if no tree
+	}
+
+	// Compute Verkle key for balance
+	verkleKey := evmtypes.BasicDataKey(address[:])
+
+	// Track the read in verkleReadLog
+	store.AppendVerkleRead(types.VerkleRead{
+		VerkleKey: common.BytesToHash(verkleKey),
+		Address:   address,
+		KeyType:   0, // BasicData
+		Extra:     0,
+		TxIndex:   txIndex,
+	})
+
+	// Read BasicData from Verkle tree
+	basicData, err := store.CurrentVerkleTree.Get(verkleKey, nil)
+	if err == nil && len(basicData) >= 32 {
+		// Balance is at offset 16-31 in BasicData (16 bytes)
+		copy(balance[16:32], basicData[16:32])
+	}
+
+	return balance, nil
+}
+
+// FetchNonce fetches nonce from Verkle tree
+func (store *StateDBStorage) FetchNonce(address common.Address, txIndex uint32) ([32]byte, error) {
+	var nonce [32]byte
+
+	if store.CurrentVerkleTree == nil {
+		return nonce, nil // Return zero nonce if no tree
+	}
+
+	// Compute Verkle key for nonce
+	verkleKey := evmtypes.BasicDataKey(address[:])
+
+	// Track the read in verkleReadLog
+	store.AppendVerkleRead(types.VerkleRead{
+		VerkleKey: common.BytesToHash(verkleKey),
+		Address:   address,
+		KeyType:   0, // BasicData
+		Extra:     0,
+		TxIndex:   txIndex,
+	})
+
+	// Read BasicData from Verkle tree
+	basicData, err := store.CurrentVerkleTree.Get(verkleKey, nil)
+	if err == nil && len(basicData) >= 32 {
+		// Nonce is at offset 8-15 in BasicData (8 bytes)
+		copy(nonce[24:32], basicData[8:16])
+	}
+
+	return nonce, nil
+}
+
+// FetchCode fetches code from Verkle tree
+func (store *StateDBStorage) FetchCode(address common.Address, txIndex uint32) ([]byte, uint32, error) {
+	if store.CurrentVerkleTree == nil {
+		return nil, 0, nil
+	}
+
+	// Read code size from BasicData first
+	var codeSize uint32
+
+	basicDataKey := evmtypes.BasicDataKey(address[:])
+
+	// Track BasicData read for Verkle witness
+	store.AppendVerkleRead(types.VerkleRead{
+		VerkleKey: common.BytesToHash(basicDataKey),
+		Address:   address,
+		KeyType:   0, // BasicData
+		Extra:     0,
+		TxIndex:   txIndex,
+	})
+
+	basicData, err := store.CurrentVerkleTree.Get(basicDataKey, nil)
+	if err == nil && len(basicData) >= 32 {
+		// Extract code_size from offset 5-7 (3 bytes, big-endian uint24)
+		codeSize = uint32(basicData[5])<<16 | uint32(basicData[6])<<8 | uint32(basicData[7])
+	}
+
+	if codeSize == 0 {
+		// Track CodeHash read even for EOAs for witness completeness
+		codeHashKey := evmtypes.CodeHashKey(address[:])
+		store.AppendVerkleRead(types.VerkleRead{
+			VerkleKey: common.BytesToHash(codeHashKey),
+			Address:   address,
+			KeyType:   1, // CodeHash
+			Extra:     0,
+			TxIndex:   txIndex,
+		})
+		return nil, 0, nil
+	}
+
+	// Calculate number of chunks needed
+	numChunks := (codeSize + 30) / 31 // Round up
+
+	// Allocate buffer for reconstructed code
+	code := make([]byte, 0, codeSize)
+
+	// Read each chunk
+	for chunkID := uint64(0); chunkID < uint64(numChunks); chunkID++ {
+		chunkKey := evmtypes.CodeChunkKey(address[:], chunkID)
+
+		// Track the read in verkleReadLog
+		store.AppendVerkleRead(types.VerkleRead{
+			VerkleKey: common.BytesToHash(chunkKey),
+			Address:   address,
+			KeyType:   2, // CodeChunk
+			Extra:     chunkID,
+			TxIndex:   txIndex,
+		})
+
+		// Read chunk from tree
+		chunkData, err := store.CurrentVerkleTree.Get(chunkKey, nil)
+		if err != nil || len(chunkData) < 32 {
+			return nil, 0, fmt.Errorf("chunk %d not found", chunkID)
+		}
+
+		// Extract code bytes (skip first byte which is push offset metadata)
+		codeBytes := chunkData[1:32]
+
+		// For the last chunk, only take the remaining bytes needed
+		remainingBytes := int(codeSize) - len(code)
+		if remainingBytes < 31 {
+			codeBytes = codeBytes[:remainingBytes]
+		}
+
+		code = append(code, codeBytes...)
+
+		if len(code) >= int(codeSize) {
+			break
+		}
+	}
+
+	return code, codeSize, nil
+}
+
+// FetchCodeHash fetches code hash from Verkle tree
+func (store *StateDBStorage) FetchCodeHash(address common.Address, txIndex uint32) ([32]byte, error) {
+	var codeHash [32]byte
+
+	if store.CurrentVerkleTree == nil {
+		copy(codeHash[:], evmtypes.GetEmptyCodeHash())
+		return codeHash, nil
+	}
+
+	// Compute Verkle key for code hash
+	verkleKey := evmtypes.CodeHashKey(address[:])
+
+	// Track the read in verkleReadLog
+	store.AppendVerkleRead(types.VerkleRead{
+		VerkleKey: common.BytesToHash(verkleKey),
+		Address:   address,
+		KeyType:   1, // CodeHash
+		Extra:     0,
+		TxIndex:   txIndex,
+	})
+
+	// Read code hash from Verkle tree
+	codeHashData, err := store.CurrentVerkleTree.Get(verkleKey, nil)
+	if err == nil && len(codeHashData) >= 32 {
+		copy(codeHash[:], codeHashData[:32])
+	} else {
+		// Code hash not found - return empty code hash
+		copy(codeHash[:], evmtypes.GetEmptyCodeHash())
+	}
+
+	return codeHash, nil
+}
+
+// FetchStorage fetches storage value from Verkle tree
+// Returns (value, found, error) where found=false indicates the slot was absent.
+func (store *StateDBStorage) FetchStorage(address common.Address, storageKey [32]byte, txIndex uint32) ([32]byte, bool, error) {
+	var value [32]byte
+	found := false
+
+	if store.CurrentVerkleTree == nil {
+		return value, found, nil
+	}
+
+	// Compute Verkle key for storage slot
+	verkleKey := evmtypes.StorageSlotKey(address[:], storageKey[:])
+
+	// Track the read in verkleReadLog
+	store.AppendVerkleRead(types.VerkleRead{
+		VerkleKey:  common.BytesToHash(verkleKey),
+		Address:    address,
+		KeyType:    3, // Storage
+		Extra:      0,
+		StorageKey: storageKey,
+		TxIndex:    txIndex,
+	})
+
+	// Read storage value from Verkle tree
+	storageData, err := store.CurrentVerkleTree.Get(verkleKey, nil)
+	if err == nil && len(storageData) >= 32 {
+		copy(value[:], storageData[:32])
+		found = true
+	}
+
+	return value, found, nil
+}
+
+// ===== Verkle Read Log Management =====
+
+// AppendVerkleRead appends a verkle read to the log
+func (store *StateDBStorage) AppendVerkleRead(read types.VerkleRead) {
+	store.verkleReadLogMutex.Lock()
+	defer store.verkleReadLogMutex.Unlock()
+	store.verkleReadLog = append(store.verkleReadLog, read)
+}
+
+// GetVerkleReadLog returns a copy of the verkle read log
+func (store *StateDBStorage) GetVerkleReadLog() []types.VerkleRead {
+	store.verkleReadLogMutex.Lock()
+	defer store.verkleReadLogMutex.Unlock()
+	// Return a copy to prevent external modification
+	logCopy := make([]types.VerkleRead, len(store.verkleReadLog))
+	copy(logCopy, store.verkleReadLog)
+	return logCopy
+}
+
+// ClearVerkleReadLog clears the verkle read log
+func (store *StateDBStorage) ClearVerkleReadLog() {
+	store.verkleReadLogMutex.Lock()
+	defer store.verkleReadLogMutex.Unlock()
+	store.verkleReadLog = nil
+}
+
+// BuildVerkleWitness builds a dual-proof verkle witness and stores the post-state tree
+func (store *StateDBStorage) BuildVerkleWitness(contractWitnessBlob []byte) ([]byte, error) {
+	if store.CurrentVerkleTree == nil {
+		return nil, fmt.Errorf("no verkle tree available")
+	}
+
+	// Get the verkle read log
+	verkleReadLog := store.GetVerkleReadLog()
+
+	// Build witness using the function from witness.go
+	witnessBytes, postVerkleRoot, postTree, err := BuildVerkleWitness(verkleReadLog, contractWitnessBlob, store.CurrentVerkleTree)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build witness: %w", err)
+	}
+
+	// Store the post-state tree
+	if err := store.StoreVerkleTransition(postVerkleRoot, postTree); err != nil {
+		return nil, fmt.Errorf("failed to store verkle transition: %w", err)
+	}
+
+	return witnessBytes, nil
+}
+
+// ComputeBlockAccessListHash builds BAL from verkle witness and returns hash + statistics
+// Used by both builder (to compute hash for payload) and guarantor (to verify builder's hash)
+func (store *StateDBStorage) ComputeBlockAccessListHash(verkleWitness []byte) (common.Hash, uint32, uint32, error) {
+	// Split witness into pre-state and post-state sections
+	preState, postState, err := SplitWitnessSections(verkleWitness)
+	if err != nil {
+		return common.Hash{}, 0, 0, fmt.Errorf("failed to split witness: %w", err)
+	}
+
+	// Build Block Access List from witness
+	bal, err := BuildBlockAccessList(preState, postState)
+	if err != nil {
+		return common.Hash{}, 0, 0, fmt.Errorf("failed to build BAL: %w", err)
+	}
+
+	// Count statistics
+	accountCount := uint32(len(bal.Accounts))
+	totalChanges := uint32(0)
+	for _, account := range bal.Accounts {
+		totalChanges += uint32(len(account.StorageReads))
+		for _, slotChange := range account.StorageChanges {
+			totalChanges += uint32(len(slotChange.Writes))
+		}
+		totalChanges += uint32(len(account.BalanceChanges))
+		totalChanges += uint32(len(account.NonceChanges))
+		totalChanges += uint32(len(account.CodeChanges))
+	}
+
+	// Compute Blake2b hash of RLP-encoded BAL
+	hash := bal.Hash()
+
+	return hash, accountCount, totalChanges, nil
 }

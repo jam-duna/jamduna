@@ -10,7 +10,7 @@ use utils::{
     host_functions::{read as host_read, write as host_write},
 };
 
-const BLOCK_HEADER_SIZE: usize = 116; // 4+4+4+8+32+32+32 = 116 bytes 
+const BLOCK_HEADER_SIZE: usize = 148; // 4+4+4+8+32+32+32+32 = 148 bytes 
 const HASH_SIZE: usize = 32;
 
 /// EVM block payload structure
@@ -26,12 +26,14 @@ pub struct EvmBlockPayload {
     pub timestamp: u32,
     /// Gas used
     pub gas_used: u64,
-    /// JAM state root
-    pub state_root: [u8; 32],
+    /// Verkle tree root (state commitment)
+    pub verkle_root: [u8; 32],
     /// Transactions root
     pub transactions_root: [u8; 32],
     /// Receipt root
     pub receipt_root: [u8; 32],
+    /// Block Access List hash (Blake2b)
+    pub block_access_list_hash: [u8; 32],
 
     pub tx_hashes: Vec<ObjectId>,
     pub receipt_hashes: Vec<ObjectId>,
@@ -59,11 +61,13 @@ impl EvmBlockPayload {
         offset += 4;
         buffer[offset..offset + 8].copy_from_slice(&self.gas_used.to_le_bytes());
         offset += 8;
-        buffer[offset..offset + HASH_SIZE].copy_from_slice(&self.state_root);
+        buffer[offset..offset + HASH_SIZE].copy_from_slice(&self.verkle_root);
         offset += HASH_SIZE;
         buffer[offset..offset + HASH_SIZE].copy_from_slice(&self.transactions_root);
         offset += HASH_SIZE;
         buffer[offset..offset + HASH_SIZE].copy_from_slice(&self.receipt_root);
+        offset += HASH_SIZE;
+        buffer[offset..offset + HASH_SIZE].copy_from_slice(&self.block_access_list_hash);
 
         buffer
     }
@@ -75,14 +79,12 @@ impl EvmBlockPayload {
         // Add the reduced-size fixed header
         buffer.extend_from_slice(&self.serialize_header());
 
-        // Transaction hashes with length prefix
-        buffer.extend_from_slice(&(self.tx_hashes.len() as u32).to_le_bytes());
+        // Transaction hashes (no length prefix - use num_transactions from header)
         for tx_hash in &self.tx_hashes {
             buffer.extend_from_slice(tx_hash);
         }
 
-        // Receipt hashes with length prefix (its the same as the above length prefix)
-        buffer.extend_from_slice(&(self.receipt_hashes.len() as u32).to_le_bytes());
+        // Receipt hashes (no length prefix - use num_transactions from header)
         for receipt_hash in &self.receipt_hashes {
             buffer.extend_from_slice(receipt_hash);
         }
@@ -93,8 +95,8 @@ impl EvmBlockPayload {
     /// Deserialize block payload from bytes
     #[allow(dead_code)]
     pub fn deserialize(data: &[u8]) -> Result<Self, &'static str> {
-        // Minimum size: fixed header (116) + tx_count (4) + receipt_count (4)
-        if data.len() < BLOCK_HEADER_SIZE + 8 {
+        // Minimum size: fixed header (116)
+        if data.len() < BLOCK_HEADER_SIZE {
             return Err("Block payload too short");
         }
 
@@ -129,9 +131,9 @@ impl EvmBlockPayload {
         );
         offset += 8;
 
-        let state_root: [u8; HASH_SIZE] = data[offset..offset + HASH_SIZE]
+        let verkle_root: [u8; HASH_SIZE] = data[offset..offset + HASH_SIZE]
             .try_into()
-            .map_err(|_| "Invalid state_root")?;
+            .map_err(|_| "Invalid verkle_root")?;
         offset += HASH_SIZE;
 
         let transactions_root: [u8; HASH_SIZE] = data[offset..offset + HASH_SIZE]
@@ -144,14 +146,13 @@ impl EvmBlockPayload {
             .map_err(|_| "Invalid receipt_root")?;
         offset += HASH_SIZE;
 
-        // Parse variable data: transaction hashes
-        let tx_count = u32::from_le_bytes(
-            data[offset..offset + 4]
-                .try_into()
-                .map_err(|_| "Invalid tx_count")?,
-        ) as usize;
-        offset += 4;
+        let block_access_list_hash: [u8; HASH_SIZE] = data[offset..offset + HASH_SIZE]
+            .try_into()
+            .map_err(|_| "Invalid block_access_list_hash")?;
+        offset += HASH_SIZE;
 
+        // Parse variable data: transaction hashes (use num_transactions from header)
+        let tx_count = num_transactions as usize;
         let mut tx_hashes = Vec::with_capacity(tx_count);
         for _ in 0..tx_count {
             if offset + 32 > data.len() {
@@ -164,20 +165,13 @@ impl EvmBlockPayload {
             offset += 32;
         }
 
-        // Parse variable data: receipt_hashes (full ObjectRef structures)
-        if offset + 4 > data.len() {
-            return Err("Insufficient data for receipt_count");
-        }
-
-        let receipt_count = u32::from_le_bytes(
-            data[offset..offset + 4]
-                .try_into()
-                .map_err(|_| "Invalid receipt_count")?,
-        ) as usize;
-        offset += 4;
-
+        // Parse variable data: receipt_hashes (use num_transactions from header)
+        let receipt_count = num_transactions as usize;
         let mut receipt_hashes = Vec::with_capacity(receipt_count);
         for _ in 0..receipt_count {
+            if offset + 32 > data.len() {
+                return Err("Insufficient data for receipt_hashes");
+            }
             let receipt_hash: [u8; 32] = data[offset..offset + 32]
                 .try_into()
                 .map_err(|_| "Invalid receipt_hash")?;
@@ -187,9 +181,10 @@ impl EvmBlockPayload {
 
         Ok(EvmBlockPayload {
             payload_length,
-            state_root,
+            verkle_root,
             transactions_root,
             receipt_root,
+            block_access_list_hash,
             num_transactions,
             gas_used,
             timestamp,
@@ -201,8 +196,6 @@ impl EvmBlockPayload {
     /// Prepare EvmBlockPayload for DA export with computed roots
     /// This replaces the old write() method since blocks are now exported to DA
     pub fn prepare_for_da_export(&mut self) {
-        use utils::functions::log_info;
-
         // Compute transaction_root from tx_hashes
         self.transactions_root = self.compute_transactions_root();
 
@@ -211,13 +204,6 @@ impl EvmBlockPayload {
 
         // Update transaction count
         self.num_transactions = self.tx_hashes.len() as u32;
-
-        log_info(&format!(
-            "✅ Prepared block for DA export: payload_length={}, {} transactions, {} receipts",
-            self.payload_length,
-            self.num_transactions,
-            self.receipt_hashes.len()
-        ));
     }
 
     /// Compute transaction root using JAM BMT from this block's transaction hashes

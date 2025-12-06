@@ -250,10 +250,10 @@ impl MMR {
         // Try to deserialize, fail if deserialization fails
         match MMR::deserialize(&buffer) {
             Some(mmr) => {
-                log_debug(&format!(
-                    "read_mmr: Successfully read MMR with {} peaks",
-                    mmr.peaks.len()
-                ));
+                // log_debug(&format!(
+                //     "read_mmr: Successfully read MMR with {} peaks",
+                //     mmr.peaks.len()
+                // ));
                 Some(mmr)
             }
             None => {

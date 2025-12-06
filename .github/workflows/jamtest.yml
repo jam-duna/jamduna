@@ -6,24 +6,20 @@ env:
   LD_LIBRARY_PATH: ./bls/target/release:./bandersnatch/target/release
   CARGO_MANIFEST_DIR: ${{ github.workspace }}
 
-#concurrency:
-#  group: evmnode
-#  cancel-in-progress: true
-
 on:
   push:
     branches:
       - main
-  # Run both evm_node_interpreter_and_compiler every 15 minutes
+  # Run both algo_node every 15 minutes
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "0 * * * *"
   workflow_dispatch:
 
 jobs:
   run-evm-tests:
-    name: Run evm_node_interpreter_and_compiler
+    name: Run algo_node
     runs-on: self-hosted
-    timeout-minutes: 15
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
@@ -53,6 +49,16 @@ jobs:
         with:
           go-version: '1.23'
 
+      - name: Clean Go module cache
+        run: |
+          echo "Cleaning Go module cache..."
+          go clean -modcache
+          rm -rf ~/go/pkg/mod
+          mkdir -p ~/go/pkg/mod
+
+      - name: Fix Go cache permissions
+        run: sudo chown -R gh-actions:gh-actions ~/go
+
       - name: Build Services
         working-directory: ${{ github.workspace }}/services
         run: |
@@ -60,6 +66,7 @@ jobs:
           make evm
           make null_authorizer
           make auth_copy
+          make algo
           echo "Listing PVM files:"
           find services -name "*.pvm" || true
 
@@ -71,25 +78,17 @@ jobs:
           echo "Listing PVM files:"
           find services -name "*.pvm" || true
 
-      - name: Run evm_node_interpreter
+      - name: Run algo_node
         working-directory: ${{ github.workspace }}/node
         run: |
-          echo "Running make evm_node_interpreter 3 times..."
-          for i in 1 2 3; do
+          echo "Running make algo_node 3 times..."
+          for i in {1..10}; do
             echo "=== Run $i ==="
-            timeout 180s make evm_node_interpreter
+            make algo_node
           done
 
-      - name: Run evm_node_compiler
-        working-directory: ${{ github.workspace }}/node
-        run: |
-          echo "Running make evm_node_compiler 3 times..."
-          for i in 1 2 3; do
-            echo "=== Run $i ==="
-            timeout 180s make evm_node_compiler
-          done
 
       - name: Done
-        run: echo "evm_node_interpreter_and_compiler completed successfully."
+        run: echo "algo_node completed successfully."
 
 

@@ -2,7 +2,28 @@
 
 This document describes the complete block construction, transaction execution, and receipt handling in the JAM EVM service, including payload formats, execution flow, and code organization.
 
-## Recent Updates (November 2025)
+## Recent Updates (December 2025)
+
+### Verkle Tree Integration (EIP-6800)
+
+The EVM service now supports Verkle tree state access via two execution modes:
+
+- **Builder Mode** (default): Uses `host_fetch_verkle()` to read state from Verkle tree during execution
+  - Balance/nonce/code/storage fetched via Verkle host functions
+  - Verkle reads logged to `StateDBStorage.verkleReadLog` in storage layer
+  - Witness construction implemented in storage package (`storage.BuildVerkleWitness()`)
+  - Dual-proof format: pre-state proof (reads) + post-state proof (writes)
+
+- **Guarantor Mode**: Verifies execution using VerkleWitness provided in first extrinsic
+  - Witness deserialized and verified before execution via `host_verify_verkle_proof()`
+  - All state reads from pre-populated caches (panic on cache miss)
+  - Backend created via `MajikBackend::from_verkle_witness()`
+
+**Detection**: Guarantor mode triggered when first extrinsic is VerkleWitness (size >= 197 bytes)
+
+**Architecture**: Storage package owns Verkle tree and witness construction; statedb package handles EVM operations and host functions. See [VERKLE.md](VERKLE.md) for complete details on dual-proof witness format, BasicData layout (balance at offset 16-31, nonce at offset 8-15), and ApplyContractWrites implementation.
+
+---
 
 ### Key Architectural Changes
 
@@ -928,13 +949,7 @@ Where:
    - Witness count: Number of transaction witnesses
    - Creates receipts for each transaction
 
-3. **Genesis (0x02)**:
-   - Handler: `refine_genesis_payload()`
-   - Purpose: Genesis bootstrap
-   - Count: Number of K extrinsics (storage initialization)
-   - Witness count: 0 (no witnesses for genesis)
-
-4. **Call (0x03)**:
+3. **Call (0x03)**:
    - Handler: `refine_call_payload()`
    - Purpose: Read-only eth_call / eth_estimateGas
    - Count: Always 1 (single call extrinsic)
