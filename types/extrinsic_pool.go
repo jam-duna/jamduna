@@ -409,15 +409,16 @@ func (ep *ExtrinsicPool) RemoveOldPreimages(block_EPs []Preimages, timeslot uint
 		if ts < timeslot-2*EpochLength {
 			delete(ep.knownPreimages, account_preimage_hash)
 			cb := ep.preimageDiscardCallback
+			/*
+				PreimageDiscardReasonOnChain      byte = 0 // (Provided on-chain)
+				PreimageDiscardReasonNotRequested byte = 1 // (Not requested on-chain)
+				PreimageDiscardReasonTooMany      byte = 2 // (Too many preimages)
+				PreimageDiscardReasonOther        byte = 3 // (Other)
+			*/
 			if cb != nil {
-				cb(*ep.queuedPreimages[account_preimage_hash], PreimageDiscardReasonOther)
-				/*
-					PreimageDiscardReasonOnChain      byte = 0 // (Provided on-chain)
-					PreimageDiscardReasonNotRequested byte = 1 // (Not requested on-chain)
-					PreimageDiscardReasonTooMany      byte = 2 // (Too many preimages)
-					PreimageDiscardReasonOther        byte = 3 // (Other)
-				*/
-
+				if preimage, exists := ep.queuedPreimages[account_preimage_hash]; exists {
+					cb(*preimage, PreimageDiscardReasonOther)
+				}
 			}
 		}
 	}

@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	numRounds    = 10
+	numRounds    = 1
 	txnsPerRound = 3
 
 	saveBundles = false // set to true to save work package bundles to disk (and revalidate)

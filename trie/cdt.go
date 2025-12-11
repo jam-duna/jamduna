@@ -66,16 +66,20 @@ func NewCDMerkleTree(values [][]byte) *CDMerkleTree {
 }
 
 // padLeaves pads the leaves to the next power of 2
+// Makes a copy to avoid modifying the original slice's backing array
 func padLeaves(values [][]byte) [][]byte {
 	n := len(values)
 	nextPowerOfTwo := 1
 	for nextPowerOfTwo < n {
 		nextPowerOfTwo <<= 1
 	}
-	for len(values) < nextPowerOfTwo {
-		values = append(values, H0)
+	// Make a copy to avoid corrupting the original slice
+	result := make([][]byte, n, nextPowerOfTwo)
+	copy(result, values)
+	for len(result) < nextPowerOfTwo {
+		result = append(result, H0)
 	}
-	return values
+	return result
 }
 
 func ComputePageIdx(exportedSegmentCnt int, index int) (pgIdx int, isFixedPadding bool) {

@@ -574,14 +574,12 @@ func StartRuntimeMonitor(interval time.Duration) {
 			if allocMB > 4096 {
 				fmt.Printf("❗ Memory usage is too high: %dMB\n", allocMB)
 				// print stack trace
-				buf := make([]byte, 1<<20)
-				stackSize := runtime.Stack(buf, true)
-				fmt.Printf("Stack trace:\n%s\n", buf[:stackSize])
+				// buf := make([]byte, 1<<20)
+				// stackSize := runtime.Stack(buf, true)
+				// fmt.Printf("Stack trace:\n%s\n", buf[:stackSize])
 				// exit with error code
-				fmt.Println("OOM: Out of memory")
 				// os.Exit(1)
 				dumpHeapProfile(fmt.Sprintf("/tmp/heap_dump_%d.pprof", time.Now().Unix()))
-				os.Exit(1)
 			}
 			label := "[MONITOR]"
 			if count > highest {

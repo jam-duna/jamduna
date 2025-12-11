@@ -1,6 +1,10 @@
 package statedb
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/colorfulnotion/jam/pvm/trace"
+)
 
 // Appendix A - Instuctions
 
@@ -622,6 +626,7 @@ func opcode_str(opcode byte) string {
 		228: "MAX_U",
 		229: "MIN",
 		230: "MIN_U",
+		255: "Host Function Writing",
 	}
 
 	if name, exists := opcodeMap[opcode]; exists {
@@ -632,4 +637,318 @@ func opcode_str(opcode byte) string {
 
 func (vm *VM) Str(logStr string) string {
 	return fmt.Sprintf("%s_%s: %s", vm.ServiceMetadata, vm.Mode, logStr)
+}
+
+// Instruction represents a decoded PVM instruction with source/dest register tracking
+type Instruction struct {
+	Opcode byte
+	Args   []byte
+	Step   int
+	Pc     uint64
+
+	SourceRegs []int
+	DestRegs   []int
+	Offset1    int64
+	Offset2    int64
+	Imm1       uint64
+	Imm2       uint64
+	ImmS       int64
+
+	GasUsage int64
+}
+
+func NewInstruction(opcode byte, args []byte, pc uint64) *Instruction {
+	inst := &Instruction{
+		Opcode: opcode,
+		Args:   args,
+		Pc:     pc,
+	}
+	inst.Decode()
+	return inst
+}
+
+func (i *Instruction) String() string {
+	return fmt.Sprintf("PC=%d %s src=%v dst=%v imm1=%d imm2=%d off1=%d",
+		i.Pc, opcode_str(i.Opcode), i.SourceRegs, i.DestRegs, i.Imm1, i.Imm2, i.Offset1)
+}
+
+// ToSimpleInstruction converts the Instruction to a SimpleInstruction for tracing
+func (i *Instruction) ToSimpleInstruction() trace.SimpleInstruction {
+	si := trace.SimpleInstruction{
+		Opcode: i.Opcode,
+	}
+	if len(i.SourceRegs) > 0 {
+		si.SrcRegs = make([]int, len(i.SourceRegs))
+		copy(si.SrcRegs, i.SourceRegs)
+	}
+	if len(i.DestRegs) > 0 {
+		si.DstRegs = make([]int, len(i.DestRegs))
+		copy(si.DstRegs, i.DestRegs)
+	}
+	// Collect all immediates (including offsets as uint64)
+	var imms []uint64
+	if i.Imm1 != 0 {
+		imms = append(imms, i.Imm1)
+	}
+	if i.Imm2 != 0 {
+		imms = append(imms, i.Imm2)
+	}
+	if i.Offset1 != 0 {
+		imms = append(imms, uint64(i.Offset1))
+	}
+	if i.ImmS != 0 {
+		imms = append(imms, uint64(i.ImmS))
+	}
+	if len(imms) > 0 {
+		si.Imm = imms
+	}
+	return si
+}
+
+// Decode extracts source/dest registers and immediates based on opcode type
+func (i *Instruction) Decode() {
+	opcode := i.Opcode
+	switch {
+	case opcode <= 1: // A.5.1 No arguments
+		i.decodeNoArgs()
+	case opcode == ECALLI: // A.5.2 One immediate
+		i.decodeOneImm()
+	case opcode == LOAD_IMM_64: // A.5.3 One Register and One Extended Width Immediate
+		i.decodeOneRegOneEWImm()
+	case 30 <= opcode && opcode <= 33: // A.5.4 Two Immediates
+		i.decodeTwoImms()
+	case opcode == JUMP: // A.5.5 One offset
+		i.decodeOneOffset()
+	case 50 <= opcode && opcode <= 62: // A.5.6 One Register and One Immediate
+		i.decodeOneRegOneImm()
+	case 70 <= opcode && opcode <= 73: // A.5.7 One Register and Two Immediates
+		i.decodeOneRegTwoImm()
+	case 80 <= opcode && opcode <= 90: // A.5.8 One Register, One Immediate and One Offset
+		i.decodeOneRegOneImmOneOffset()
+	case 100 <= opcode && opcode <= 111: // A.5.9 Two Registers
+		i.decodeTwoRegs()
+	case 120 <= opcode && opcode <= 161: // A.5.10 Two Registers and One Immediate
+		i.decodeTwoRegsOneImm()
+	case 170 <= opcode && opcode <= 175: // A.5.11 Two Registers and One Offset
+		i.decodeTwoRegsOneOffset()
+	case opcode == LOAD_IMM_JUMP_IND: // A.5.12 Two Registers and Two Immediates
+		i.decodeTwoRegsTwoImms()
+	case 190 <= opcode && opcode <= 230: // A.5.13 Three Registers
+		i.decodeThreeRegs()
+	}
+}
+
+func (i *Instruction) decodeNoArgs() {
+	// No arguments
+}
+
+func (i *Instruction) decodeOneImm() {
+	if len(i.Args) > 0 {
+		i.Imm1 = decodeE_l(i.Args)
+	}
+}
+
+func (i *Instruction) decodeOneRegOneEWImm() {
+	if len(i.Args) == 0 {
+		return
+	}
+	reg := min(12, int(i.Args[0])%16)
+	lx := min(8, max(0, len(i.Args)-1))
+	i.DestRegs = []int{reg}
+	if lx > 0 {
+		i.Imm1 = decodeE_l(i.Args[1 : 1+lx])
+	}
+}
+
+func (i *Instruction) decodeTwoImms() {
+	if len(i.Args) == 0 {
+		return
+	}
+	lx := min(4, int(i.Args[0])%8)
+	ly := min(4, max(0, len(i.Args)-lx-1))
+	if lx > 0 && len(i.Args) > 1 {
+		i.Imm1 = decodeE_l(i.Args[1 : 1+lx])
+	}
+	if ly > 0 && len(i.Args) > 1+lx {
+		i.Imm2 = decodeE_l(i.Args[1+lx : 1+lx+ly])
+	}
+}
+
+func (i *Instruction) decodeOneOffset() {
+	if len(i.Args) > 0 {
+		i.Offset1 = decodeSignedOffset(i.Args)
+	}
+}
+
+func (i *Instruction) decodeOneRegOneImm() {
+	if len(i.Args) == 0 {
+		return
+	}
+	reg := min(12, int(i.Args[0])%16)
+	lx := min(4, (int(i.Args[0])/16)%8)
+	if lx > 0 && len(i.Args) > 1 {
+		i.Imm1 = decodeE_l(i.Args[1 : 1+lx])
+	}
+
+	// Determine source/dest based on opcode
+	switch i.Opcode {
+	case JUMP_IND:
+		i.SourceRegs = []int{reg}
+	case LOAD_IMM, LOAD_U8, LOAD_I8, LOAD_U16, LOAD_I16, LOAD_U32, LOAD_I32, LOAD_U64:
+		i.DestRegs = []int{reg}
+	case STORE_U8, STORE_U16, STORE_U32, STORE_U64:
+		i.SourceRegs = []int{reg}
+	default:
+		i.DestRegs = []int{reg}
+	}
+}
+
+func (i *Instruction) decodeOneRegTwoImm() {
+	if len(i.Args) == 0 {
+		return
+	}
+	reg := min(12, int(i.Args[0])%16)
+	lx := min(4, (int(i.Args[0])/16)%8)
+	ly := min(4, max(0, len(i.Args)-lx-1))
+	if lx > 0 && len(i.Args) > 1 {
+		i.Imm1 = decodeE_l(i.Args[1 : 1+lx])
+	}
+	if ly > 0 && len(i.Args) > 1+lx {
+		i.Imm2 = decodeE_l(i.Args[1+lx : 1+lx+ly])
+	}
+	i.SourceRegs = []int{reg}
+}
+
+func (i *Instruction) decodeOneRegOneImmOneOffset() {
+	if len(i.Args) == 0 {
+		return
+	}
+	reg := min(12, int(i.Args[0])%16)
+	lx := min(4, (int(i.Args[0])/16)%8)
+	ly := min(3, max(0, len(i.Args)-lx-1))
+	if lx > 0 && len(i.Args) > 1 {
+		i.Imm1 = decodeE_l(i.Args[1 : 1+lx])
+	}
+	if ly > 0 && len(i.Args) > 1+lx {
+		i.Offset1 = decodeSignedOffsetN(i.Args[1+lx:1+lx+ly], ly)
+	}
+
+	if i.Opcode == LOAD_IMM_JUMP {
+		i.DestRegs = []int{reg}
+	} else {
+		i.SourceRegs = []int{reg}
+	}
+}
+
+func (i *Instruction) decodeTwoRegs() {
+	if len(i.Args) == 0 {
+		return
+	}
+	regD := min(12, int(i.Args[0])%16)
+	regA := min(12, int(i.Args[0])/16)
+	i.DestRegs = []int{regD}
+	i.SourceRegs = []int{regA}
+}
+
+func (i *Instruction) decodeTwoRegsOneImm() {
+	if len(i.Args) == 0 {
+		return
+	}
+	reg1 := min(12, int(i.Args[0])%16)
+	reg2 := min(12, int(i.Args[0])/16)
+	lx := min(4, max(0, len(i.Args)-1))
+	if lx > 0 && len(i.Args) > 1 {
+		i.Imm1 = decodeE_l(i.Args[1 : 1+lx])
+	}
+
+	// Store instructions: reg1 is dest address source, reg2 is value source
+	// Load instructions: reg1 is dest, reg2 is address source
+	switch i.Opcode {
+	case STORE_IND_U8, STORE_IND_U16, STORE_IND_U32, STORE_IND_U64:
+		i.SourceRegs = []int{reg1, reg2}
+	case LOAD_IND_U8, LOAD_IND_I8, LOAD_IND_U16, LOAD_IND_I16, LOAD_IND_U32, LOAD_IND_I32, LOAD_IND_U64:
+		i.DestRegs = []int{reg1}
+		i.SourceRegs = []int{reg2}
+	default:
+		// ALU operations: reg1 is dest, reg2 is source
+		i.DestRegs = []int{reg1}
+		i.SourceRegs = []int{reg2}
+	}
+}
+
+func (i *Instruction) decodeTwoRegsOneOffset() {
+	if len(i.Args) == 0 {
+		return
+	}
+	regA := min(12, int(i.Args[0])%16)
+	regB := min(12, int(i.Args[0])/16)
+	ly := max(0, len(i.Args)-1)
+	if ly > 0 {
+		i.Offset1 = decodeSignedOffsetN(i.Args[1:], ly)
+	}
+	i.SourceRegs = []int{regA, regB}
+}
+
+func (i *Instruction) decodeTwoRegsTwoImms() {
+	if len(i.Args) < 2 {
+		return
+	}
+	regA := min(12, int(i.Args[0])%16)
+	regB := min(12, int(i.Args[0])/16)
+	lx := min(4, int(i.Args[1])%8)
+	ly := min(4, max(0, len(i.Args)-lx-2))
+	if lx > 0 && len(i.Args) > 2 {
+		i.Imm1 = decodeE_l(i.Args[2 : 2+lx])
+	}
+	if ly > 0 && len(i.Args) > 2+lx {
+		i.Imm2 = decodeE_l(i.Args[2+lx : 2+lx+ly])
+	}
+
+	if i.Opcode == LOAD_IMM_JUMP_IND {
+		i.DestRegs = []int{regA}
+		i.SourceRegs = []int{regB}
+	} else {
+		i.SourceRegs = []int{regA, regB}
+	}
+}
+
+func (i *Instruction) decodeThreeRegs() {
+	if len(i.Args) < 2 {
+		return
+	}
+	reg1 := min(12, int(i.Args[0])%16)
+	reg2 := min(12, int(i.Args[0])/16)
+	dst := min(12, int(i.Args[1])%16)
+	i.SourceRegs = []int{reg1, reg2}
+	i.DestRegs = []int{dst}
+}
+
+// Helper functions for decoding
+func decodeE_l(data []byte) uint64 {
+	if len(data) == 0 {
+		return 0
+	}
+	var result uint64
+	for i := 0; i < len(data); i++ {
+		result |= uint64(data[i]) << (8 * i)
+	}
+	return result
+}
+
+func decodeSignedOffset(data []byte) int64 {
+	if len(data) == 0 {
+		return 0
+	}
+	return decodeSignedOffsetN(data, len(data))
+}
+
+func decodeSignedOffsetN(data []byte, n int) int64 {
+	if n == 0 || len(data) == 0 {
+		return 0
+	}
+	n = min(n, len(data))
+	val := decodeE_l(data[:n])
+	// Sign extend
+	shift := uint(64 - 8*n)
+	return int64(val<<shift) >> shift
 }

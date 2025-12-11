@@ -66,6 +66,27 @@ func NewInterpreter(Service_index uint32, p *Program, initialRegs []uint64, init
 		code: p.Code,
 	}
 }
+
+func (vm *Interpreter) GetFaultAddress() uint64 {
+	return 0 //TODO
+}
+
+func (vm *Interpreter) SetPagesAccessRange(startPage, pageCount int, access int) error {
+	return nil //TODO
+}
+
+func ExecuteAsChild(entryPoint uint32) error {
+	return nil
+}
+
+func (vm *Interpreter) GetPC() uint64 {
+	// if vm.cVM == nil {
+	// 	return 0
+	// }
+	// return uint64(C.pvm_get_pc(vm.cVM))
+	return 0 //TODO
+}
+
 func (vm *Interpreter) SetMemoryBounds(rwAddr, rwEnd, roAddr, roEnd, outputAddr, outputEnd, stackAddr, stackEnd uint32) {
 	C.pvm_set_memory_bounds(vm.cVM,
 		C.uint32_t(rwAddr), C.uint32_t(rwEnd),
@@ -113,18 +134,18 @@ func (vm *Interpreter) SetHostResultCode(c uint64) {
 func (vm *Interpreter) Panic(errCode uint64) {
 	C.pvm_panic(vm.cVM, C.uint64_t(errCode))
 }
-func (vm *Interpreter) GetGas() int64 {
+func (vm *Interpreter) GetGas() uint64 {
 	// not sure why the oog state is corrected be set but can't get the gas correctly
 	if vm.cVM == nil {
 		return 0
 	}
 	// If the machine is out-of-gas, normalize to 0 to match expected semantics
-	// even if the native side didn’t explicitly zero the counter.
+	// even if the native side didn't explicitly zero the counter.
 	ms := C.pvm_get_machine_state(vm.cVM)
 	if uint8(ms) == OOG {
 		return 0
 	}
-	return int64(C.pvm_get_gas(vm.cVM))
+	return uint64(C.pvm_get_gas(vm.cVM))
 }
 
 // ReadRegister reads a register value from the C VM
@@ -292,4 +313,49 @@ func (vm *Interpreter) Init(argumentData []byte) (err error) {
 	vm.WriteRAMBytes(argAddr, argumentData)
 
 	return nil
+}
+
+func (vm *Interpreter) SetGas(gas uint64) {
+	// STUB
+}
+
+func (vm *Interpreter) SetPC(pc uint64) {
+	// STUB
+}
+
+func (vm *Interpreter) ExecuteAsChild(entryPoint uint32) error {
+	// STUB
+	return nil
+}
+
+func (vm *Interpreter) GetHostID() uint64 {
+	// STUB
+	return 0
+}
+
+func (vm *Interpreter) InitStepwise(pvm *VM, entryPoint uint32) error {
+	// Call C pvm_init_stepwise to initialize VM for stepping
+	result := C.pvm_init_stepwise(vm.cVM, C.uint32_t(entryPoint), 0)
+
+	if result != C.PVM_RESULT_OK {
+		return fmt.Errorf("pvm_init_stepwise failed with result %d", result)
+	}
+
+	return nil
+}
+
+func (vm *Interpreter) ExecuteStep(pvm *VM) []byte {
+	// Allocate log buffer (369 bytes):
+	// 1 byte opcode + 4 bytes pc + 8 bytes gas + 104 bytes registers + 256 bytes mem_op
+	logBuf := make([]byte, 369)
+
+	// Call C pvm_step function
+	C.pvm_step(vm.cVM, (*C.uint8_t)(unsafe.Pointer(&logBuf[0])))
+
+	// Update VM state from C
+	pvm.ResultCode = vm.GetResultCode()
+	pvm.MachineState = vm.GetMachineState()
+	pvm.terminated = vm.IsTerminated()
+
+	return logBuf
 }

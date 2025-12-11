@@ -1,6 +1,9 @@
 TIMEOUT            ?= 10m
+FIBTIMEOUT         ?= 30m
 TAGS               ?= tiny
 TargetN            ?= 6
+TargetAlgoN		   ?= 20
+TargetFibN		   ?= 10
 JCE_MANUAL         ?= true
 JAM_NODE           ?= true
 JAM_LOCAL_CLIENT   ?= false
@@ -19,6 +22,11 @@ endif
 # Conditionally set -targetN, or empty if TargetN=-1
 TARGET_PARAM = $(if $(filter -1,$(TargetN)),,$(shell echo -targetN=$(TargetN)))
 
+TARGET_ALGOPARAM = $(if $(filter -1,$(TargetAlgoN)),,$(shell echo -targetN=$(TargetAlgoN)))
+
+TARGET_FIBPARAM = $(if $(filter -1,$(TargetFibN)),,$(shell echo -targetN=$(TargetFibN)))
+
+
 # PVM mode parameter to be passed to go test
 PVM_PARAM = -pvm_backend=$(PVM_BACKEND)
 
@@ -27,6 +35,20 @@ evm:
 	@echo "go test -timeout $(TIMEOUT) -v -run '^TestEVM$$' -tags \"network_test,$(TAGS)\" $(TARGET_PARAM) -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)"
 	@go test -timeout $(TIMEOUT) -v -run '^TestEVM$$' \
 	  -tags "network_test,$(TAGS)" $(TARGET_PARAM) \
+	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)
+
+algo :
+	@echo "Running TestAlgo$(if $(filter -1,$(TargetAlgoN)),, with targetN=$(TargetAlgoN)) and timeout $(TIMEOUT) in $(PVM_BACKEND) mode..."
+	@echo "go test -timeout $(TIMEOUT) -v -run '^TestAlgo$$' -tags \"network_test,$(TAGS)\" $(TARGET_ALGOPARAM) -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)"
+	@go test -timeout $(TIMEOUT) -v -run '^TestAlgo$$' \
+	  -tags "network_test,$(TAGS)" $(TARGET_ALGOPARAM) \
+	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)
+
+fib:
+	@echo "Running TestFib$(if $(filter -1,$(TargetFibN)),, with targetN=$(TargetFibN)) and timeout $(FIBTIMEOUT) in $(PVM_BACKEND) mode..."
+	@echo "go test -timeout $(FIBTIMEOUT) -v -run '^TestFib$$' -tags \"network_test,$(TAGS)\" $(TARGET_FIBPARAM) -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)"
+	@go test -timeout $(FIBTIMEOUT) -v -run '^TestFib$$' \
+	  -tags "network_test,$(TAGS)" $(TARGET_FIBPARAM) \
 	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)
 
 auth_copy:
@@ -41,6 +63,7 @@ disputes:
 	@go test -timeout $(TIMEOUT) -v -run TestEVMDisputes \
 	  -tags "network_test,$(TAGS)" \
 	  -jce_manual=$(JCE_MANUAL) -jam_node=true
+
 
 # For execution mode
 %_node:

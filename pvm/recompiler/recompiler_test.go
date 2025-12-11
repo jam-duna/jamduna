@@ -401,7 +401,7 @@ func equalIntSlices(a, b []uint64) bool {
 
 func TestSinglePVM(t *testing.T) {
 	log.InitLogger("debug")
-	filename := "../../statedb/programs/inst_add_32.json"
+	filename := "../../statedb/programs/inst_load_u8_nok.json"
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("Failed to read test file %s: %v", filename, err)

@@ -2,7 +2,7 @@
 # This Makefile can build all JAM services independently of the main repository
 
 # Available services
-SERVICES = evm auth_copy null_authorizer 
+SERVICES = evm auth_copy null_authorizer algo fib
 
 # Build configuration
 TARGET_DIR = riscv64emac-unknown-none-polkavm/release

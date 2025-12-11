@@ -227,6 +227,8 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		sendTickets = (jam == "safrole")
 	case "algo":
 		serviceNames = []string{"algo", "auth_copy"}
+	case "fib":
+		serviceNames = []string{"fib", "auth_copy"}
 	default:
 		serviceNames = []string{"evm", "auth_copy"}
 	}
@@ -386,6 +388,10 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		waitForTermination(tNode, "fallback", FallbackEpochLen, FallbackBufferTime, t)
 	case "evm":
 		evm(bNode, testServices, 5)
+	case "algo":
+		algo(bNode, testServices, targetN)
+	case "fib":
+		fib(bNode, testServices, targetN)
 	default:
 		t.Fatalf("Unknown jam test: %s\n", jam)
 	}
@@ -623,4 +629,20 @@ func TestAuthCopy(t *testing.T) {
 		targetN = *targetNum
 	}
 	jamtest(t, "auth_copy", targetN)
+}
+
+func TestAlgo(t *testing.T) {
+	targetN := TargetedN_EVM
+	if *targetNum > 0 {
+		targetN = *targetNum
+	}
+	jamtest(t, "algo", targetN)
+}
+
+func TestFib(t *testing.T) {
+	targetN := TargetedN_EVM
+	if *targetNum > 0 {
+		targetN = *targetNum
+	}
+	jamtest(t, "fib", targetN)
 }

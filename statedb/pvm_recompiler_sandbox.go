@@ -78,3 +78,11 @@ func (rvm *RecompilerSandbox) ReadRegisters() [13]uint64 {
 	}
 	return regs
 }
+
+func (rvm *RecompilerSandbox) InitStepwise(vm *VM, entryPoint uint32) error {
+	panic("InitStepwise not implemented for RecompilerSandbox backend")
+}
+
+func (rvm *RecompilerSandbox) ExecuteStep(vm *VM) []byte {
+	panic("ExecuteStep not implemented for RecompilerSandbox backend")
+}

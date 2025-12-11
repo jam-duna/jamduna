@@ -5,6 +5,8 @@ import (
 	"fmt"
 	rand0 "math/rand"
 	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 
 	"github.com/colorfulnotion/jam/common"
@@ -186,10 +188,15 @@ func (n *Node) FetchAllFullShards(g types.Guarantee, verify bool) {
 			}
 		}
 	}
-	// save resps to fn in JSON
-	fnDir := "trie/test"
+	// Get the directory of this source file and save to trie/test/
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		fmt.Printf("FetchAllFullShards: Failed to get current file path\n")
+		return
+	}
+	fnDir := filepath.Join(filepath.Dir(filename), "..", "trie", "test")
 	fnName := fmt.Sprintf("full137resp_%d.json", spec.ExportedSegmentLength)
-	fn := fmt.Sprintf("%v/%v", fnDir, fnName)
+	fn := filepath.Join(fnDir, fnName)
 	fmt.Printf("FetchAllFullShards: Saving responses to %s\n", fn)
 	os.WriteFile(fn, []byte(types.ToJSON(resps)), 0644)
 }

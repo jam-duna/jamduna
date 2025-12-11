@@ -23,7 +23,7 @@ type SplitPoint struct {
 
 // MetaSSR is the Sparse Split Registry for meta-shards
 type MetaSSR struct {
-	GlobalDepth uint8          // Current global depth
+	GlobalDepth uint8        // Current global depth
 	Entries     []SplitPoint // Routing entries
 }
 

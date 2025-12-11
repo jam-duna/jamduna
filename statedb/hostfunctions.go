@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"slices"
 	"sort"
 	"time"
@@ -24,6 +25,10 @@ const (
 
 const (
 	g = 10
+)
+
+var (
+	debugPeek = os.Getenv("PVM_DEBUG_PEEK") == "1"
 )
 
 const (
@@ -80,9 +85,7 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 	}
 
 	// Log after host function call to match javajam format
-	if PvmLogging && false {
-		fmt.Printf("Calling host function: %s %d [gas used: %d, gas remaining: %d] [service: %d]\n", HostFnToName(host_fn), host_fn, gasUsed, currentGas, vm.Service_index)
-	}
+	vm.DebugHostFunction(host_fn, "Gas Used: %d, Gas Left: %d", gasUsed, currentGas)
 
 	benchRec.Add("InvokeHostCall", time.Since(t0))
 	return ok, err
@@ -732,8 +735,8 @@ func (vm *VM) hostTransfer() {
 
 // Gas Service
 func (vm *VM) hostGas() {
-	gasCost := int64(0)                              // Define gas cost.TODO: check 0 vs 10 here
-	vm.WriteRegister(7, uint64(vm.GetGas()-gasCost)) // its gas remaining AFTER the host call
+	gasCost := uint64(0)                     // Define gas cost.TODO: check 0 vs 10 here
+	vm.WriteRegister(7, vm.GetGas()-gasCost) // its gas remaining AFTER the host call
 	//vm.register[7] = uint64(1234567) // TEMPORARY
 	vm.SetHostResultCode(OK)
 }
@@ -1182,72 +1185,36 @@ func (vm *VM) hostInvoke() {
 
 	g := types.DecodeE_l(gasBytes)
 	log.Trace(vm.logging, "INVOKE", "n", n, "o", o, "g", g)
-	m_n, ok := vm.RefineM_map[uint32(n)]
-	for i := 1; i < 14; i++ {
-		reg_bytes, errCodeReg := vm.ReadRAMBytes(uint32(o)+8*uint32(i), 8)
-		if errCodeReg != OK {
-			vm.Panic(errCodeReg)
-			return
-		}
-		fmt.Printf("%x\n", reg_bytes)
-		//		m_n.U.WriteRegister(i-1, types.DecodeE_l(reg_bytes))
-	}
-
+	m_n, ok := vm.VMs[uint32(n)]
 	if !ok {
 		vm.WriteRegister(7, WHO)
 		log.Trace(vm.logging, "INVOKE WHO", "n", n)
 		vm.SetHostResultCode(WHO)
 		return
 	}
-
-	//program := DecodeProgram_pure_pvm_blob(m_n.P)
-	new_machine := &VM{
-		//pc:  m_n.I,
-		// TODO: ***** register: m_n_reg,
-		// Ram: m_n.U, // m_n.U,
-
-		Backend: vm.Backend,
-	}
-	initGas := vm.GetGas()
-	//TODO: review here
-	new_machine.logging = vm.logging
-	new_machine.IsChild = true
-	// Set gas for the new machine
-	//new_machine.SetGas(int64(g))
-	switch vm.Backend {
-	case BackendInterpreter:
-		// new_machine.Execute(new_machine.pc)
-	case BackendCompiler:
-		// if recRam, ok := m_n.U.(*CompilerRam); ok {
-		// 	log.Trace(vm.logging, "INVOKE: Compiler", "n", n, "o", o, "g", int64(g))
-		// 	new_rvm, err := NewCompilerVMFromRam(new_machine, recRam)
-		// 	if err != nil {
-		// 		log.Error(vm.logging, "INVOKE: NewCompilerVMFromRam failed", "n", n, "o", o, "g", int64(g), "err", err)
-		// 		vm.terminated = true
-		// 		vm.ResultCode = types.WORKDIGEST_PANIC
-		// 		vm.MachineState = PANIC
-		// 		return
-		// 	}
-		// 	new_rvm.Execute(uint32(new_rvm.pc))
-		// 	new_rvm.Close()
-		// } else {
-		// 	log.Error(vm.logging, "INVOKE: m_n.U is not *CompilerRam")
-		// 	vm.terminated = true
-		// 	vm.ResultCode = types.WORKDIGEST_PANIC
-		// 	vm.MachineState = PANIC
-		// 	return
-		// }
-
+	new_machine := *m_n
+	for i := 1; i < 14; i++ {
+		reg_bytes, errCodeReg := vm.ReadRAMBytes(uint32(o)+8*uint32(i), 8)
+		if errCodeReg != OK {
+			vm.Panic(errCodeReg)
+			return
+		}
+		// set the register
+		regVal := types.DecodeE_l(reg_bytes)
+		new_machine.WriteRegister(i-1, regVal)
 	}
 
-	//m_n.I = new_machine.pc
-	// TODO: m_n.U = new_machine.ram
-	vm.RefineM_map[uint32(n)] = m_n
-	// Result after execution
+	initGas := g
+	int64_g := int64(g)
+	g = uint64(int64_g)
+	new_machine.SetGas(g)
+	pc := new_machine.GetPC()
+	new_machine.ExecuteAsChild(uint32(pc))
 	postGas := new_machine.GetGas()
 	gasUsed := initGas - postGas
-	log.Trace(vm.logging, "INVOKE: gas used", "n", n, "o", o, "g", int64(g), "gasUsed", gasUsed, "new_machine.MachineState", new_machine.MachineState)
-	gasBytes = types.E_l(uint64(new_machine.GetGas()), 8)
+	log.Info(vm.logging, "INVOKE: gas used", "n", n, "o", o, "g", g, "postGas", postGas, "gasUsed", gasUsed, "pc", pc)
+	gasVal := new_machine.GetGas()
+	gasBytes = types.E_l(gasVal, 8)
 	errCodeGas = vm.WriteRAMBytes(uint32(o), gasBytes)
 	if errCodeGas != OK {
 		vm.Panic(errCodeGas)
@@ -1272,29 +1239,33 @@ func (vm *VM) hostInvoke() {
 	// m_n.I = new_machine.pc + 1
 	//	return
 	//}
-
-	if new_machine.MachineState == FAULT {
+	// 786
+	status := new_machine.GetMachineState()
+	resultMap[uint64(status)]++
+	switch status {
+	case FAULT:
+		log.Info(vm.logging, "INVOKE FAULT", "n", n, "new_machine.GetFaultAddress()", new_machine.GetFaultAddress())
 		vm.WriteRegister(7, FAULT)
-		vm.WriteRegister(8, uint64(new_machine.Fault_address))
-		return
-	}
+		vm.WriteRegister(8, new_machine.GetFaultAddress())
+	case HOST:
+		log.Info(vm.logging, "INVOKE HOST", "n", n, "new_machine.host_func_id", new_machine.GetHostID())
+		vm.WriteRegister(7, HOST)
+		vm.WriteRegister(8, new_machine.GetHostID())
+		if vm.Backend == BackendCompiler {
+			new_machine.SetPC(new_machine.GetPC() + 1)
+		}
+	default:
+		state := new_machine.GetMachineState()
+		log.Info(vm.logging, "INVOKE returning to parent", "n", n, "child.MachineState", state, "gasRemaining", new_machine.GetGas())
+		vm.WriteRegister(7, uint64(state))
+		vm.SetPC(0)
 
-	if new_machine.MachineState == OOG {
-		vm.WriteRegister(7, OOG)
-		return
 	}
-
-	if new_machine.MachineState == PANIC {
-		vm.WriteRegister(7, PANIC)
-		return
-	}
-
-	if new_machine.MachineState == HALT {
-		vm.WriteRegister(7, HALT)
-		return
-	}
-
+	log.Info(vm.logging, "INVOKE OK", "n", n, "new_machine.MachineState", new_machine.GetMachineState(), "gasRemaining", new_machine.GetGas(), "pc", new_machine.GetPC())
+	vm.VMs[uint32(n)] = &new_machine
 }
+
+var resultMap = map[uint64]int{}
 
 // Lookup preimage
 func (vm *VM) hostLookup() {
@@ -1708,22 +1679,29 @@ func (vm *VM) hostHistoricalLookup() {
 	}
 
 	var a = &types.ServiceAccount{}
-	delta := vm.Delta
 	s := vm.Service_index
 	omega_7 := vm.ReadRegister(7)
 	h := vm.ReadRegister(8)
 	o := vm.ReadRegister(9)
 	omega_10 := vm.ReadRegister(10)
 	omega_11 := vm.ReadRegister(11)
-
+	var ok bool
+	var err error
 	if omega_7 == NONE {
-		a = delta[s]
-	} else {
-		a = delta[uint32(omega_7)]
-	}
+		a, ok, err = vm.hostenv.GetService(s)
+		if err != nil || !ok {
+			vm.WriteRegister(7, NONE)
+			vm.SetHostResultCode(NONE)
+			return
+		}
 
-	if a == nil {
-		a, _, _ = vm.hostenv.GetService(uint32(omega_7))
+	} else {
+		a, ok, err = vm.hostenv.GetService(uint32(omega_7))
+		if err != nil || !ok {
+			vm.WriteRegister(7, NONE)
+			vm.SetHostResultCode(NONE)
+			return
+		}
 	}
 
 	hBytes, errCode := vm.ReadRAMBytes(uint32(h), 32)
@@ -1734,21 +1712,20 @@ func (vm *VM) hostHistoricalLookup() {
 	// h := common.Hash(hBytes) not sure whether this is needed
 	v := vm.hostenv.HistoricalLookup(a, vm.Timeslot, common.BytesToHash(hBytes))
 	vLength := uint64(len(v))
-	if vLength == 0 {
-		vm.WriteRegister(7, NONE)
-		vm.SetHostResultCode(NONE)
+
+	f := min(omega_10, vLength)
+	l := min(omega_11, vLength-f)
+	errCode = vm.WriteRAMBytes(uint32(o), v[f:f+l])
+	if errCode != OK {
+		vm.Panic(errCode)
 		return
-	} else {
-		f := min(omega_10, vLength)
-		l := min(omega_11, vLength-f)
-		err := vm.WriteRAMBytes(uint32(o), v[f:l])
-		if err != OK {
-			vm.Panic(err)
-			return
-		}
-		vm.WriteRegister(7, vLength)
 	}
+	vm.WriteRegister(7, vLength)
+	vm.DebugHostFunction(HISTORICAL_LOOKUP, "s=%d, h=0x%x, o=0x%x, f=%d, l=%d, valvLength=%d", a.ServiceIndex, hBytes, o, f, l, vLength)
+
 }
+
+var CheckSegments [][]byte
 
 // Export segment host-call
 func (vm *VM) hostExport() {
@@ -1775,16 +1752,23 @@ func (vm *VM) hostExport() {
 	y := slices.Clone(x)
 	y = common.PadToMultipleOfN(y, types.SegmentSize)
 
-	if vm.ExportSegmentIndex+uint32(len(vm.Exports)) >= W_X { // W_X
+	if vm.TotalExported+uint64(len(vm.Exports)) > types.MaxExports {
+		vm.DebugHostFunction(EXPORT, "p=0x%x, z=%d, total_exports=%d, l=%d -- FULL", p, z, len(vm.Exports), vm.TotalExported)
 		vm.WriteRegister(7, FULL)
 		vm.SetHostResultCode(FULL)
 		return
 	} else {
-		vm.WriteRegister(7, uint64(vm.ExportSegmentIndex)+uint64(len(vm.Exports)))
-		//fmt.Printf("[%s] EXPORT#%d OK %x (%d bytes)\n", vm.ServiceMetadata, len(vm.Exports), y[:z], z)
-		// vm.ExportSegmentIndex += 1
+		vm.WriteRegister(7, uint64(vm.TotalExported)+uint64(len(vm.Exports)))
 		vm.Exports = append(vm.Exports, y)
 		vm.SetHostResultCode(OK)
+		//		vm.DebugHostFunction(EXPORT, "p=0x%x, z=%d, total_exports=%d, l=%d", p, z, len(vm.Exports), vm.TotalExported)
+		log.Info(vm.logging, "EXPORT", "p", fmt.Sprintf("0x%x", p), "z", z, "total_exports", len(vm.Exports), "l", len(y))
+		if vm.pushFrame != nil {
+			// Stream the latest segment to any attached frame server without clearing exports
+			// so exports remain available to the caller.
+			vm.pushFrame(y)
+		}
+
 		return
 	}
 }
@@ -1804,25 +1788,23 @@ func (vm *VM) hostMachine() {
 		return
 	}
 
-	p = slices.Clone(p)
-
-	if vm.RefineM_map == nil {
-		vm.RefineM_map = make(map[uint32]*RefineM)
-	}
 	min_n := uint32(16)
 	for n := uint32(0); n < min_n; n++ {
-		_, ok := vm.RefineM_map[n]
+		_, ok := vm.VMs[n]
 		if !ok {
 			min_n = n
 			break
 		}
 	}
 	// todo: check if deblob sucess
-	vm.RefineM_map[min_n] = &RefineM{
-		P: p,
-		//: NewRawRAM(),
-		I: i,
+	log.Info(vm.logging, "hostMachine", "po", po, "pz", pz, "i", i, "n", min_n, "program_size", len(p))
+	program := DecodeProgram_pure_pvm_blob(p)
+	execMachine := vm.NewEmptyExecutionVM(vm.Service_index, program, make([]uint64, 13), i, 0, vm.hostenv, uint32(min_n))
+	if vm.VMs == nil {
+		vm.VMs = make(map[uint32]*ExecutionVM)
 	}
+	// recompiler.SetShowDisassembly(true)
+	vm.VMs[min_n] = execMachine
 
 	vm.WriteRegister(7, uint64(min_n))
 }
@@ -1838,23 +1820,29 @@ func (vm *VM) hostPeek() {
 	o := vm.ReadRegister(8)
 	s := vm.ReadRegister(9)
 	z := vm.ReadRegister(10)
-	m_n, ok := vm.RefineM_map[uint32(n)]
+	m_n, ok := vm.VMs[uint32(n)]
 	if !ok {
 		vm.WriteRegister(7, WHO)
 		vm.SetHostResultCode(WHO)
 		return
 	}
-	fmt.Printf("PEEK n=%d o=%d s=%d z=%d m_n=%d\n", n, o, s, z, m_n)
+	log.Info(vm.logging, "hostPeek", "mn", m_n, "n", n, "o", o, "s", s, "z", z)
 	// read l bytes from m
-	//s_data, errCode := m_n.U.ReadRAMBytes(uint32(s), uint32(z))
+
 	var errCode uint64
 	var s_data []byte
+	s_data, errCode = (*m_n).ReadRAMBytes(uint32(s), uint32(z))
 	if errCode != OK {
 		vm.WriteRegister(7, OOB)
 		vm.SetHostResultCode(OOB)
 		return
 	}
-	// write l bytes to vm
+	// write l bytes to vm || TODO check order
+	if debugPeek && len(s_data) >= 2 {
+		fmt.Printf("[PEEK DEBUG] child src=0x%x -> parent dst=0x%x len=%d first bytes: 0x%02x 0x%02x\n",
+			s, o, len(s_data), s_data[0], s_data[1])
+	}
+	// Debug: ALWAYS show first bytes for PEEK to trace result corruption
 	errCode = vm.WriteRAMBytes(uint32(o), s_data[:])
 	if errCode != OK {
 		vm.Panic(errCode)
@@ -1874,26 +1862,30 @@ func (vm *VM) hostPoke() {
 	s := vm.ReadRegister(8) // source
 	o := vm.ReadRegister(9) // dest
 	z := vm.ReadRegister(10)
-	m_n, ok := vm.RefineM_map[uint32(n)]
-	if !ok {
-		vm.WriteRegister(7, WHO)
-		vm.SetHostResultCode(WHO)
-		return
-	}
 	// read data from original vm
 	s_data, errCode := vm.ReadRAMBytes(uint32(s), uint32(z))
 	if errCode != OK {
 		vm.Panic(errCode)
 		return
 	}
-	// write data to m_n
-	fmt.Printf("POKE n=%d o=%d s=%d z=%d m_n=%d %x\n", n, o, s, z, m_n, s_data)
+	m_n, ok := vm.VMs[uint32(n)]
+	if !ok {
+		vm.WriteRegister(7, WHO)
+		vm.SetHostResultCode(WHO)
+		return
+	}
 
-	//errCode = m_n.U.WriteRAMBytes(uint32(o), s_data[:])
+	// write data to m_n
+	log.Info(vm.logging, "hostPoke", "mn", m_n, "n", n, "o", o, "s", s, "z", z)
+	errCode = (*m_n).WriteRAMBytes(uint32(o), s_data[:])
 	if errCode != OK {
 		vm.WriteRegister(7, OOB)
 		vm.SetHostResultCode(OOB)
 		return
+	}
+	// Record taint for external write to child VM
+	if vmgo, ok := (*m_n).(*VMGo); ok {
+		vmgo.TaintRecordExternalWrite(o, z)
 	}
 	vm.WriteRegister(7, OK)
 	vm.SetHostResultCode(OK)
@@ -1906,18 +1898,19 @@ func (vm *VM) hostExpunge() {
 		return
 	}
 	n := vm.ReadRegister(7)
-	m, ok := vm.RefineM_map[uint32(n)]
+	m, ok := vm.VMs[uint32(n)]
 	if !ok {
 		vm.SetHostResultCode(WHO)
 		vm.WriteRegister(7, WHO)
 		return
 	}
 
-	i := m.I
-	delete(vm.RefineM_map, uint32(n))
-
+	i := (*m).GetPC()
+	(*m).Destroy()
+	delete(vm.VMs, uint32(n))
 	vm.WriteRegister(7, i)
 	vm.SetHostResultCode(OK)
+	log.Info(vm.logging, "hostExpunge", "n", n, "pc", i)
 }
 
 func (vm *VM) hostPages() {
@@ -1930,7 +1923,7 @@ func (vm *VM) hostPages() {
 	p := vm.ReadRegister(8)  // p: page number
 	c := vm.ReadRegister(9)  // c: number of pages to change
 	r := vm.ReadRegister(10) // r: access characteristics
-	m, ok := vm.RefineM_map[uint32(n)]
+	m, ok := vm.VMs[uint32(n)]
 	if !ok {
 		vm.WriteRegister(7, WHO)
 		vm.SetHostResultCode(WHO)
@@ -1951,23 +1944,50 @@ func (vm *VM) hostPages() {
 		log.Trace(vm.logging, "hostPages HUH", "n", n, "p", p, "c", c, "r", r)
 		return
 	}
-	if p+c >= (1<<32)/Z_P && r > 2 {
-		vm.WriteRegister(7, HUH)
-		vm.SetHostResultCode(HUH)
-		log.Trace(vm.logging, "hostPages HUH", "n", n, "p", p, "c", c, "r", r)
-		return
-	}
-	page := uint32(p)
-	fmt.Printf("PAGES %d n=%d p=%d c=%d r=%d m_n=%d\n", page, n, p, c, r, m)
-	// switch {
-	// case r == 0: // To deallocate a page (previously void)
-	// 	m.U.allocatePages(page, uint32(c))
-	// case r == 1 || r == 3: // read-only
-	// 	m.U.allocatePages(page, uint32(c))
-	// case r == 2 || r == 4: // read-write
-	// 	m.U.allocatePages(page, uint32(c))
-	// }
+	page := int(p)
+	count := int(c)
+	// get the page address
+	var toWrite []byte
+	pageAddress := page * Z_P
+	countLength := count * Z_P
+	if r > 2 {
+		var errCode uint64
+		toWrite, errCode = vm.ReadRAMBytes(uint32(pageAddress), uint32(countLength))
+		if errCode != OK {
+			vm.WriteRegister(7, HUH)
+			vm.SetHostResultCode(HUH)
 
+			log.Trace(vm.logging, "hostPages HUH", "n", n, "p", p, "c", c, "r", r)
+			return
+		}
+		(*m).SetPagesAccessRange(page, count, PageMutable)
+		(*m).WriteRAMBytes(uint32(pageAddress), toWrite)
+		// Record taint for external write to child VM
+		if vmgo, ok := (*m).(*VMGo); ok {
+			vmgo.TaintRecordExternalWrite(uint64(pageAddress), uint64(countLength))
+		}
+	} else {
+		(*m).SetPagesAccessRange(page, count, PageMutable)
+		toWrite = make([]byte, countLength)
+		(*m).WriteRAMBytes(uint32(pageAddress), toWrite)
+		// Record taint for external write to child VM
+		if vmgo, ok := (*m).(*VMGo); ok {
+			vmgo.TaintRecordExternalWrite(uint64(pageAddress), uint64(countLength))
+		}
+	}
+	switch {
+	case r == 0: // To deallocate a page (previously void)
+		(*m).SetPagesAccessRange(page, count, PageInaccessible)
+	case r == 1 || r == 3: // read-only
+		(*m).SetPagesAccessRange(page, count, PageImmutable)
+	case r == 2 || r == 4: // read-write
+		(*m).SetPagesAccessRange(page, count, PageMutable)
+	}
+	if r > 2 {
+		vm.DebugHostFunction(PAGES, "PAGES WRITE n=%d, p=%d, c=%d, r=%d -- wrote data", n, p, c, r)
+	} else {
+		vm.DebugHostFunction(PAGES, "PAGES n=%d, p=%d, c=%d, r=%d", n, p, c, r)
+	}
 	vm.WriteRegister(7, OK)
 	vm.SetHostResultCode(OK)
 }
@@ -1995,9 +2015,8 @@ func (vm *VM) hostLog() {
 	if vm.IsChild {
 		serviceMetadata = fmt.Sprintf("%s-child", serviceMetadata)
 	}
-	loggingVerbose := false
-	if vm.logging == log.FirstGuarantor || vm.logging == log.PvmAuthoring || vm.logging == log.Builder || vm.logging == log.OtherGuarantor {
-		// || vm.logging == log.Auditor
+	loggingVerbose := true
+	if vm.logging == log.FirstGuarantor || vm.logging == log.Auditor || vm.logging == log.Builder || vm.logging == log.PvmAuthoring || vm.logging == log.OtherGuarantor {
 		loggingVerbose = true
 	}
 	if !loggingVerbose {

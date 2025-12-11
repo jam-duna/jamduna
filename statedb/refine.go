@@ -380,8 +380,97 @@ func buildSSRKey() []byte {
 	return []byte("SSR")
 }
 
+// pvmlog decodes a 369-byte binary execution log into a human-readable string
+// Log format: 1 byte opcode + 4 bytes prevpc + 8 bytes gas + 104 bytes registers + 256 bytes mem_op
+func pvmlog(logBytes []byte) string {
+	if len(logBytes) != 369 {
+		return fmt.Sprintf("Invalid log length: %d (expected 369)", len(logBytes))
+	}
+
+	offset := 0
+
+	// 1 byte: opcode
+	opcode := logBytes[offset]
+	offset++
+
+	// 4 bytes: previous PC (little-endian uint32)
+	prevpc := uint32(logBytes[offset]) |
+		uint32(logBytes[offset+1])<<8 |
+		uint32(logBytes[offset+2])<<16 |
+		uint32(logBytes[offset+3])<<24
+	offset += 4
+
+	// 8 bytes: gas (little-endian int64)
+	gas := uint64(logBytes[offset]) |
+		uint64(logBytes[offset+1])<<8 |
+		uint64(logBytes[offset+2])<<16 |
+		uint64(logBytes[offset+3])<<24 |
+		uint64(logBytes[offset+4])<<32 |
+		uint64(logBytes[offset+5])<<40 |
+		uint64(logBytes[offset+6])<<48 |
+		uint64(logBytes[offset+7])<<56
+	offset += 8
+
+	// 13*8 bytes: registers (little-endian uint64)
+	registers := make([]uint64, 13)
+	for i := 0; i < 13; i++ {
+		registers[i] = uint64(logBytes[offset]) |
+			uint64(logBytes[offset+1])<<8 |
+			uint64(logBytes[offset+2])<<16 |
+			uint64(logBytes[offset+3])<<24 |
+			uint64(logBytes[offset+4])<<32 |
+			uint64(logBytes[offset+5])<<40 |
+			uint64(logBytes[offset+6])<<48 |
+			uint64(logBytes[offset+7])<<56
+		offset += 8
+	}
+
+	// Remaining bytes: memory operation buffer (ASCII string, null-terminated)
+	// Note: Should be 256 bytes but we handle variable length gracefully
+	memOpBytes := logBytes[offset:]
+
+	// Find null terminator
+	memOpLen := 0
+	for i, b := range memOpBytes {
+		if b == 0 {
+			memOpLen = i
+			break
+		}
+	}
+	if memOpLen == 0 && len(memOpBytes) > 0 && memOpBytes[0] != 0 {
+		// No null terminator found, use all remaining bytes
+		memOpLen = len(memOpBytes)
+	}
+	memOp := ""
+	if memOpLen > 0 {
+		memOp = string(memOpBytes[:memOpLen])
+	}
+
+	// Format output similar to C printf format
+	regStr := fmt.Sprintf("[%d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d]",
+		registers[0], registers[1], registers[2], registers[3],
+		registers[4], registers[5], registers[6], registers[7],
+		registers[8], registers[9], registers[10], registers[11], registers[12])
+
+	// Decode memory operations based on opcode
+	memOpStr := decodeMemoryOp(opcode, registers, memOp)
+
+	return fmt.Sprintf("%s PC:%d Gas:%d Registers:%s %s",
+		opcode_str(opcode), prevpc, int64(gas), regStr, memOpStr)
+}
+
+// decodeMemoryOp returns the memory operation string captured during execution
+// The buffer contains strings like " MEM_LOAD Mem[0x12345..0x12348]->0xabcd"
+// from pvmgo-instructions.go's lastMemOp variable
+func decodeMemoryOp(opcode byte, registers []uint64, memOpBuffer string) string {
+	// Simply return the memory operation buffer
+	// This matches the format from pvmgo-instructions.go:
+	// lastMemOp = fmt.Sprintf(" MEM_LOAD Mem[0x%x..0x%x]->%s", addr, addr+numBytes-1, valueHex)
+	return memOpBuffer
+}
+
 // authorizeWP executes the authorization step for a work package
-func (statedb *StateDB) authorizeWP(workPackage types.WorkPackage, workPackageCoreIndex uint16, pvmBackend string) (r types.Result, p_a common.Hash, authGasUsed int64, err error) {
+func (statedb *StateDB) authorizeWP(workPackage types.WorkPackage, workPackageCoreIndex uint16, pvmBackend string) (r types.Result, p_a common.Hash, authGasUsed uint64, err error) {
 	log.Trace(log.Node, "authorizeWP", "NODE", statedb.Id, "workPackage", workPackage.Hash(), "workPackageCoreIndex", workPackageCoreIndex)
 	authcode, _, authindex, err := statedb.GetAuthorizeCode(workPackage)
 	if err != nil {
@@ -398,7 +487,7 @@ func (statedb *StateDB) authorizeWP(workPackage types.WorkPackage, workPackageCo
 	p_u := workPackage.AuthorizationCodeHash
 	p_p := workPackage.ConfigurationBlob
 	p_a = common.Blake2Hash(append(p_u.Bytes(), p_p...))
-	authGasUsed = int64(types.IsAuthorizedGasAllocation) - vm_auth.GetGas()
+	authGasUsed = types.IsAuthorizedGasAllocation - vm_auth.GetGas()
 
 	return
 }
@@ -417,14 +506,15 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 	authStart := time.Now()
 	r, p_a, authGasUsed, err := s.authorizeWP(workPackage, workPackageCoreIndex, pvmBackend)
 	authElapsed := time.Since(authStart)
-	if authGasUsed < 0 {
+	// Check for underflow (gas wrapped around to very large number)
+	if authGasUsed > (1 << 63) {
 		authGasUsed = 0
 	}
 	telemetryClient := s.GetStorage().GetTelemetryClient()
 	// Telemetry: Authorized (event 93)
 	if telemetryClient != nil {
 		authCost := telemetry.IsAuthorizedCost{
-			TotalGasUsed: uint64(authGasUsed),
+			TotalGasUsed: authGasUsed,
 			TotalTimeNs:  uint64(authElapsed.Nanoseconds()),
 		}
 		telemetryClient.Authorized(eventID, authCost)
@@ -433,16 +523,9 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 	if err != nil {
 		return work_report, err
 	}
-
 	var segments [][]byte
 	refineCosts := make([]telemetry.RefineCost, 0, len(workPackage.WorkItems))
 	vmLogging := "unknown"
-
-	// Post-SSR: PrepareBuilderWitnesses removed
-	// Storage shards are NOT indexed in meta-shards, so there's no way to enumerate/load them
-	// Builder: Witnesses should be provided via work package (not loaded from DA)
-	// Guarantor: Witnesses pre-loaded in PVM from work package
-	// State reads will return zero if not in witness cache (expected behavior)
 
 	for index, workItem := range workPackage.WorkItems {
 		// map workItem.ImportedSegments into segment
@@ -459,6 +542,9 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		if vm == nil {
 			return work_report, fmt.Errorf("executeWorkPackageBundle: failed to create VM for service %d (corrupted bytecode?)", service_index)
 		}
+		if index == 0 {
+			vm.attachFrameServer("0.0.0.0:8080", "./index.html")
+		}
 		vm.Timeslot = s.JamState.SafroleState.Timeslot
 
 		vm.SetPVMContext(execContext)
@@ -466,61 +552,18 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 
 		// 0.7.1 : core index is part of refine args
 		execStart := time.Now()
+		vm.hostenv = s
 		output, _, exported_segments := vm.ExecuteRefine(workPackageCoreIndex, uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData[index], workPackage.AuthorizationCodeHash, common.BytesToHash(trie.H0))
-
-		// Post-SSR: Parse refine output to populate witness cache from exported segments
-		// Output format: [2B count] + count × [32B object_id + 2B index_start + 4B payload_length + 1B object_kind]
-		// Use exported_segments (just from this work item) not segments (accumulated across all work items)
-		if err := s.populateWitnessCacheFromRefineOutput(workItem.Service, output.Ok, exported_segments); err != nil {
-			log.Warn(log.SDB, "Failed to populate witness cache from refine output", "error", err)
-		}
-
-		contractWitnessBlob, err := s.extractContractWitnessBlob(output.Ok, exported_segments)
-		if err != nil {
-			return work_report, fmt.Errorf("failed to extract contract witness blob: %w", err)
-		}
-
-		if err := s.verifyPostStateAgainstExecution(workItem, package_bundle.ExtrinsicData[index], contractWitnessBlob); err != nil {
-			return work_report, fmt.Errorf("post-state verification failed: %w", err)
-		}
-
-		// Note: Guarantor BAL verification happens entirely in Rust (refiner.rs)
-		// - Primary verification: Compare verkle witness-derived BAL hash with payload metadata
-		// - Guarantor's exported_segments contains their own re-executed block (BAL hash = zeros from Rust)
-		// - Cannot verify builder's block segment here; it's only available from DA during accumulate phase
-		// - The Rust verification is sufficient for fraud detection (fail-closed)
+		segments = append(segments, exported_segments...)
 
 		execElapsed := time.Since(execStart)
 		compileElapsed := time.Since(compileStart)
 		if pvmBackend == BackendCompiler {
 			fmt.Printf("*** %s compile and execute time %v\n", pvmBackend, compileElapsed)
 		}
-		expectedSegmentCnt := int(workItem.ExportCount)
-		actualSegmentCnt := len(exported_segments)
-		segmentCountMismatch := (expectedSegmentCnt != actualSegmentCnt)
 
-		log.Debug(log.Node, "executeWorkPackageBundle exports",
-			"backend", pvmBackend,
-			"context", execContext,
-			"expected", expectedSegmentCnt,
-			"actual", actualSegmentCnt,
-			"resultErr", output.Err)
-
-		if segmentCountMismatch {
-			log.Trace(log.Node, "executeWorkPackageBundle: ExportCount and ExportedSegments Mismatch", "ExportCount", expectedSegmentCnt, "ExportedSegments", actualSegmentCnt, "ExportedSegments", common.FormatPaddedBytesArray(exported_segments, 20))
-			// TEMPORARY: Non-first guarantors/auditors trust the first guarantor's ExportCount and use actual segment count for appending to segments slice
-			if execContext == log.OtherGuarantor || execContext == log.Auditor {
-				expectedSegmentCnt = actualSegmentCnt
-			}
-		}
-
-		// Append exported segments (use actualSegmentCnt for iteration)
-		if actualSegmentCnt != 0 {
-			for i := 0; i < actualSegmentCnt; i++ {
-				segment := common.PadToMultipleOfN(exported_segments[i], types.SegmentSize)
-				segments = append(segments, segment)
-			}
-		}
+		log.Info(log.Node, "ExecuteRefine exports", "expected", int(workItem.ExportCount), "actual", len(exported_segments))
+		// Segments already appended earlier (before parsing refine output)
 		z := 0
 		for _, extrinsic := range workItem.Extrinsics {
 			z += int(extrinsic.Len)
@@ -532,7 +575,7 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 			Gas:                 workItem.AccumulateGasLimit,
 			GasUsed:             uint(workItem.RefineGasLimit - uint64(vm.GetGas())),
 			NumImportedSegments: uint(len(workItem.ImportedSegments)),
-			NumExportedSegments: uint(actualSegmentCnt),
+			NumExportedSegments: uint(len(exported_segments)),
 			NumExtrinsics: uint(func() int {
 				total := 0
 				for _, extrinsicBlobs := range package_bundle.ExtrinsicData {
@@ -616,6 +659,74 @@ func (s *StateDB) ReadGlobalDepth(serviceID uint32) (depth uint8, err error) {
 	return ldBytes[0], nil
 }
 
+func (s *StateDB) ExecuteWorkPackageBundleSteps(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, slot uint32, execContext string, eventID uint64, pvmBackends []string) (err error) {
+	// Enable memory operation logging for step-by-step execution
+	oldPvmLogging := PvmLogging
+	PvmLogging = true
+	defer func() {
+		PvmLogging = oldPvmLogging
+	}()
+
+	importsegments := make([][][]byte, len(package_bundle.WorkPackage.WorkItems))
+	workPackage := package_bundle.WorkPackage
+	copy(importsegments, package_bundle.ImportSegmentData)
+
+	// Authorization
+	r, _, authGasUsed, err := s.authorizeWP(workPackage, workPackageCoreIndex, pvmBackends[0])
+	if err != nil {
+		return err
+	}
+	if authGasUsed < 0 {
+		authGasUsed = 0
+	}
+
+	for index, workItem := range workPackage.WorkItems {
+		vms := make([]*VM, len(pvmBackends))
+		vmLog := make([][]byte, len(pvmBackends))
+		for backend, pvmBackend := range pvmBackends {
+			service_index := workItem.Service
+			code, ok, err0 := s.ReadServicePreimageBlob(service_index, workItem.CodeHash)
+			if err0 != nil || !ok || len(code) == 0 {
+				return fmt.Errorf("executeWorkPackageBundle(ReadServicePreimageBlob):s_id %v, codehash %v, err %v, ok=%v", service_index, workItem.CodeHash, err0, ok)
+			}
+			vms[backend] = NewVMFromCode(service_index, code, 0, 0, s, pvmBackend, workItem.RefineGasLimit)
+			if vms[backend] == nil {
+				return fmt.Errorf("executeWorkPackageBundle: failed to create VM for service %d (corrupted bytecode?)", service_index)
+			}
+			vms[backend].Timeslot = s.JamState.SafroleState.Timeslot
+			vms[backend].SetPVMContext(execContext)
+			vms[backend].hostenv = s
+			vms[backend].SetupRefine(workPackageCoreIndex, uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData[index], workPackage.AuthorizationCodeHash, common.BytesToHash(trie.H0))
+			fmt.Printf("Backend %s setup!\n", pvmBackend)
+		}
+		fmt.Printf("EXECUTING STEP BY STEP\n")
+		step := 0
+		terminated := false
+		for !terminated {
+			for backend, vm := range vms {
+				vmLog[backend] = vm.ExecuteStep(vm)
+				if backend > 0 {
+					if !bytes.Equal(vmLog[backend-1], vmLog[backend]) {
+						fmt.Printf("Backend[%s] %s\n", pvmBackends[backend-1], pvmlog(vmLog[backend-1]))
+						fmt.Printf("Backend[%s] %s\n", pvmBackends[backend], pvmlog(vmLog[backend]))
+						panic("VM step logs do not match between backends")
+					} else {
+						step++
+						if step <= 10 || step%100000 == 0 {
+							fmt.Printf("Step %d: %s\n", step, pvmlog(vmLog[backend]))
+						}
+					}
+				}
+				if vm.terminated == true {
+					terminated = true
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
 // BuildBundle maps a work package into a WorkPackageBundle using JAMDA interface
 // It updates the workpackage work items: (1)  ExportCount ImportedSegments with a special HostFetchWitness call
 func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash, pvmBackend string) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
@@ -651,6 +762,12 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 		vm.SetPVMContext(log.Builder)
 		importsegments := make([][][]byte, len(wp.WorkItems))
 		result, _, exported_segments := vm.ExecuteRefine(coreIndex, uint32(index), wp, authorization, importsegments, 0, extrinsicsBlobs[index], p_a, common.BytesToHash(trie.H0))
+
+		// Post-SSR: Parse refine output to populate witness cache from exported segments
+		// Output format: [2B count] + count × [32B object_id + 2B index_start + 4B payload_length + 1B object_kind]
+		if err := s.populateWitnessCacheFromRefineOutput(workItem.Service, result.Ok, exported_segments); err != nil {
+			log.Warn(log.SDB, "Failed to populate witness cache from refine output", "error", err)
+		}
 
 		importedSegments, witnesses, err := vm.GetBuilderWitnesses()
 		if err != nil {
@@ -710,6 +827,12 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 		}
 		// Prepend to extrinsics list
 		wp.WorkItems[index].Extrinsics = append([]types.WorkItemExtrinsic{verkleWitnessExtrinsic}, wp.WorkItems[index].Extrinsics...)
+
+		// Verify post-state against execution
+		if err := s.verifyPostStateAgainstExecution(wp.WorkItems[index], extrinsicsBlobs[index], contractWitnessBlob); err != nil {
+			log.Warn(log.SDB, "Post-state verification failed", "err", err)
+			return nil, nil, fmt.Errorf("post-state verification failed: %w", err)
+		}
 
 		// Clear verkleReadLog for next execution via clean interface
 		s.sdb.ClearVerkleReadLog()

@@ -29,8 +29,31 @@ func NewRecompilerVM(service_index uint32, initialRegs []uint64, initialPC uint6
 	rvm.SetHeapPointer(current_heap_pointer)
 	rvm.SetBitMask(p.K)
 	rvm.SetJumpTable(p.J)
-	rvm.SetGas(int64(initialGas)) // Gas will be set later by specific execution methods
+	rvm.SetGas(initialGas) // Gas will be set later by specific execution methods
 	rvm.ServiceMetadata = Metadata
+
+	recompiler := &Recompiler{
+		RecompilerVM: rvm,
+	}
+	return recompiler
+}
+
+func NewRecompilerVMWithoutSetup(service_index uint32, initialRegs []uint64, initialPC uint64, hostENV types.HostEnv, jam_ready_blob bool, Metadata []byte, initialGas uint64, p *Program) *Recompiler {
+	code := p.Code
+	if len(code) == 0 {
+		return nil
+	}
+	rvm, err := recompiler.NewRecompilerVM(service_index, p.Code, initialRegs, initialPC)
+	if err != nil {
+		log.Error("", "RecompilerVM creation failed", "error", err)
+		return nil
+	}
+	rvm.SetMemoryBounds(0, 0, 0, 0, nil, nil)
+	rvm.SetGas(initialGas) // Gas will be set later by specific execution methods
+	rvm.ServiceMetadata = Metadata
+	rvm.SetHeapPointer(0)
+	rvm.SetBitMask(p.K)
+	rvm.SetJumpTable(p.J)
 
 	recompiler := &Recompiler{
 		RecompilerVM: rvm,
@@ -45,10 +68,22 @@ func (rvm *Recompiler) Execute(VM *VM, entry uint32) error {
 	return nil
 }
 
+func (rvm *Recompiler) GetFaultAddress() uint64 {
+	return uint64(rvm.RecompilerVM.FaultAddr)
+}
+
 func (rvm *Recompiler) Destroy() {
 	rvm.RecompilerVM.Close()
 }
 
 func (rvm *Recompiler) SetPage(uint32, uint32, uint8) {
 
+}
+
+func (rvm *Recompiler) InitStepwise(vm *VM, entryPoint uint32) error {
+	panic("InitStepwise not implemented for Recompiler backend")
+}
+
+func (rvm *Recompiler) ExecuteStep(vm *VM) []byte {
+	panic("ExecuteStep not implemented for Recompiler backend")
 }

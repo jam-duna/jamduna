@@ -122,6 +122,16 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 			FileName:    AuthCopyServiceFile,
 			ServiceName: "auth_copy",
 		},
+		{
+			ServiceCode: AlgoServiceCode,
+			FileName:    AlgoServiceFile,
+			ServiceName: "algo",
+		},
+		{
+			ServiceCode: FibServiceCode,
+			FileName:    FibServiceFile,
+			ServiceName: "fib",
+		},
 	}
 
 	auth_pvm, err0 := common.GetFilePath(BootStrapNullAuthFile)

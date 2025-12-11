@@ -7,20 +7,20 @@ void (*dispatch_table[256])(VM*, uint8_t*, size_t) = {0};
 char mem_op_buffer[256] = "";
 
 #define LOG_MEM_LOAD(vm, addr, value, num_bytes) \
-    if ((vm)->pvm_logging) { \
+    do { \
         int pos = snprintf(mem_op_buffer, sizeof(mem_op_buffer), " MEM_LOAD Mem[0x%x..0x%x]->", (addr), (addr) + (num_bytes) - 1); \
         for (int i = (num_bytes) - 1; i >= 0; i--) { \
             pos += snprintf(mem_op_buffer + pos, sizeof(mem_op_buffer) - pos, "%02x", ((value) >> (i * 8)) & 0xFF); \
         } \
-    }
+    } while(0)
 
 #define LOG_MEM_STORE(vm, addr, value, num_bytes) \
-    if ((vm)->pvm_logging) { \
+    do { \
         int pos = snprintf(mem_op_buffer, sizeof(mem_op_buffer), " MEM_STORE Mem[0x%x..0x%x]<-", (addr), (addr) + (num_bytes) - 1); \
         for (int i = (num_bytes) - 1; i >= 0; i--) { \
             pos += snprintf(mem_op_buffer + pos, sizeof(mem_op_buffer) - pos, "%02x", ((value) >> (i * 8)) & 0xFF); \
         } \
-    }
+    } while(0)
 
 
 // Opcode Constants
@@ -544,7 +544,7 @@ void handle_LOAD_I8(VM* vm, uint8_t* operands, size_t operand_len) {
     int register_index_a;
     uint64_t addr_64;
     parse_reg_imm(operands, operand_len, &register_index_a, &addr_64);
-    
+
     uint32_t addr = (uint32_t)addr_64;
     int err_code;
     uint8_t value = pvm_read_ram_bytes_8(vm, addr, &err_code);
@@ -552,13 +552,15 @@ void handle_LOAD_I8(VM* vm, uint8_t* operands, size_t operand_len) {
         pvm_panic(vm, err_code);
         return;
     }
-    
+
     uint64_t result = (uint64_t)value;
     if (value & 0x80) {
         result |= 0xFFFFFFFFFFFFFF00ULL;
     }
+
+    LOG_MEM_LOAD(vm, addr, value, 1);
     vm->registers[register_index_a] = result;
-    
+
     vm->pc += 1 + operand_len;
 }
 
@@ -586,7 +588,7 @@ void handle_LOAD_I16(VM* vm, uint8_t* operands, size_t operand_len) {
     int register_index_a;
     uint64_t addr_64;
     parse_reg_imm(operands, operand_len, &register_index_a, &addr_64);
-    
+
     uint32_t addr = (uint32_t)addr_64;
     int err_code;
     uint16_t value = pvm_read_ram_bytes_16(vm, addr, &err_code);
@@ -594,13 +596,15 @@ void handle_LOAD_I16(VM* vm, uint8_t* operands, size_t operand_len) {
         pvm_panic(vm, err_code);
         return;
     }
-    
+
     uint64_t result = (uint64_t)value;
     if (value & 0x8000) {
         result |= 0xFFFFFFFFFFFF0000ULL;
     }
+
+    LOG_MEM_LOAD(vm, addr, value, 2);
     vm->registers[register_index_a] = result;
-    
+
     vm->pc += 1 + operand_len;
 }
 
@@ -642,7 +646,7 @@ void handle_LOAD_I32(VM* vm, uint8_t* operands, size_t operand_len) {
     int register_index_a;
     uint64_t addr_64;
     parse_reg_imm(operands, operand_len, &register_index_a, &addr_64);
-    
+
     uint32_t addr = (uint32_t)addr_64;
     int err_code;
     uint32_t value = pvm_read_ram_bytes_32(vm, addr, &err_code);
@@ -650,13 +654,16 @@ void handle_LOAD_I32(VM* vm, uint8_t* operands, size_t operand_len) {
         pvm_panic(vm, err_code);
         return;
     }
-    
+
     uint64_t result = (uint64_t)value;
     if (value & 0x80000000) {
         result |= 0xFFFFFFFF00000000ULL;
     }
+
+    LOG_MEM_LOAD(vm, addr, value, 4);
+
     vm->registers[register_index_a] = result;
-    
+
     vm->pc += 1 + operand_len;
 }
 

@@ -6,10 +6,15 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"os"
+	"runtime"
 	"sort"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/pvm/program"
+	"github.com/colorfulnotion/jam/pvm/recompiler"
+	"github.com/colorfulnotion/jam/pvm/trace"
 	"github.com/colorfulnotion/jam/types" // go get golang.org/x/example/hello/reverse
 	"golang.org/x/exp/slices"
 	"golang.org/x/sys/unix"
@@ -39,7 +44,16 @@ var (
 	PvmTrace  = false // Temporarily enabled to demonstrate context tracking
 	PvmTrace2 = false
 
+	// Trace mode flags - can be combined with bitwise OR
+	PvmTraceMode      = false // When true, writes trace to .jsonl file
+	PvmTracePrintMode = false // When true, prints trace to stdout
+	// Both can be enabled simultaneously for dual output
+
 	UseTally = false
+
+	// Optional debugging flags
+	debugResultStore = os.Getenv("PVM_DEBUG_RESULT_STORE") == "1"
+	breakResultStore = os.Getenv("PVM_BREAK_RESULT_STORE") == "1"
 )
 
 type VMGo struct {
@@ -60,10 +74,14 @@ type VMGo struct {
 	host_func_id   int  // h in GP
 	hostVM         *VM  // Reference to host VM for host function calls
 	Ram            *RawRam
-	Gas            int64
+	Gas            uint64
 	hostenv        types.HostEnv
 
 	VMs map[uint32]*VMGo
+
+	TrackingMemAddr uint32
+	LastMemAddr     uint32
+	LastValue       byte
 
 	// Execution Context Tracking (for multi-contract debugging)
 	ContextStack   []ExecutionContext // Stack of nested execution contexts
@@ -121,6 +139,10 @@ type VMGo struct {
 	pushFrame       func([]byte)
 	stopFrameServer func()
 
+	CurrentStep           *trace.TraceStep
+	JSONLTraceWriter      *trace.JSONLTraceWriter // File-based trace writer (when PvmTraceMode is true)
+	JSONLTraceWriterPrint *trace.JSONLTraceWriter // Stdout trace writer (when PvmTracePrintMode is true)
+
 	Logs VMLogs
 
 	basicBlockExecutionCounter map[uint64]int // PVM PC to execution count
@@ -161,6 +183,17 @@ type VMGo struct {
 	// MoveVM stack state for test comparison
 	MoveStackVal     []uint64
 	MoveStackTypeVal []uint64
+
+	// Instruction cache: PC -> decoded instruction (avoids re-decoding)
+	instructionCache map[uint64]*Instruction
+
+	// Taint Flow Graph for security analysis (SSA-style)
+	TaintGraph  *TaintGraph
+	TaintConfig *TaintConfig // Per-VM taint configuration
+
+	// Current execution state for taint tracking
+	currentStep int
+	currentPC   uint64
 }
 
 // registerChildVM stores a reference to a child VM created via hostMachine/hostInvoke.
@@ -388,7 +421,7 @@ func (vm *VMGo) SetMemoryBounds(o_size uint32,
 func NewVMGo(service_index uint32, p *Program, initialRegs []uint64, initialPC uint64, initialGas uint64, hostENV types.HostEnv) (vm *VMGo) {
 
 	vm = &VMGo{
-		Gas:           int64(initialGas),
+		Gas:           initialGas,
 		JSize:         p.JSize,
 		Z:             p.Z,
 		J:             p.J,
@@ -421,11 +454,189 @@ func NewVMGo(service_index uint32, p *Program, initialRegs []uint64, initialPC u
 		vm.VMs = nil
 	}
 
+	// Pre-decode all instructions
+	vm.PreDecodeInstructions()
+
+	// Note: Taint tracking is initialized via EnableTaint() method
+	// Note: Trace writers are now initialized lazily when first needed
+	// This allows enabling trace modes dynamically during execution
+
 	return vm
 }
 
+// EnableTaint enables taint tracking for this VM with a specific target memory address
+// targetAddr: the memory address to track (use 0 to track all memory)
+// targetSize: the size of the memory region to track
+// trackAllEdges: if true, track all edges; if false, only track edges related to target
+// EnableTaintForStep enables taint tracking focused on a specific step
+// Only tracks nodes within [targetStep-stepWindow, targetStep]
+// This is efficient for debugging: first find the problematic step, then trace back from it
+func (vm *VMGo) EnableTaintForStep(targetStep int, stepWindow int) {
+	vm.TaintConfig = &TaintConfig{
+		Enabled:    true,
+		TargetStep: targetStep,
+		StepWindow: stepWindow,
+		MaxNodes:   100000, // Max 100k nodes
+	}
+	vm.TaintGraph = NewTaintGraph()
+}
+
+// DisableTaint disables taint tracking for this VM
+func (vm *VMGo) DisableTaint() {
+	if vm.TaintConfig != nil {
+		vm.TaintConfig.Enabled = false
+	}
+}
+
+// PreDecodeInstructions decodes all instructions and caches them by PC
+// This avoids re-decoding during execution
+func (vm *VMGo) PreDecodeInstructions() {
+	vm.instructionCache = make(map[uint64]*Instruction)
+	if len(vm.code) == 0 || len(vm.bitmask) == 0 {
+		return
+	}
+
+	step := 0
+	for pc := uint64(0); pc < uint64(len(vm.code)); pc++ {
+		// Check if this PC is a valid instruction start
+		if pc < uint64(len(vm.bitmask)) && vm.bitmask[pc] != 0 {
+			opcode := vm.code[pc]
+			lenOperands := vm.skip(pc)
+			var operands []byte
+			if pc+1+lenOperands <= uint64(len(vm.code)) {
+				operands = vm.code[pc+1 : pc+1+lenOperands]
+			}
+			inst := NewInstruction(opcode, operands, pc)
+			inst.Step = step
+			vm.instructionCache[pc] = inst
+			step++
+		}
+	}
+}
+
+func (vm *VMGo) GetPC() uint64 {
+	return vm.pc
+}
+
+func (vm *VMGo) GetFaultAddress() uint64 {
+	return uint64(vm.Fault_address)
+}
+
+func (vm *VMGo) SetPagesAccessRange(startPage, pageCount int, access int) error {
+	return vm.Ram.SetPagesAccessRange(startPage, pageCount, access)
+}
+
 func (vm *VMGo) Destroy() {
-	// TODO: implement if needed
+	vm.Ram.Close()
+
+	// Close trace writers if they were set up
+	if PvmTraceMode && vm.JSONLTraceWriter != nil {
+		defer vm.JSONLTraceWriter.Close()
+	}
+	if PvmTracePrintMode && vm.JSONLTraceWriterPrint != nil {
+		defer vm.JSONLTraceWriterPrint.Close()
+	}
+
+	runtime.GC()
+}
+
+// ensureTraceWriters initializes trace writers if they are enabled but not yet created.
+// This allows dynamic enabling of trace modes during execution.
+func (vm *VMGo) ensureTraceWriters() {
+	if PvmTraceMode && vm.JSONLTraceWriter == nil {
+		vm.JSONLTraceWriter, _ = trace.NewJSONLTraceWriterFile(fmt.Sprintf("pvm_trace_vmgo_%d.jsonl", vm.Service_index))
+	}
+	if PvmTracePrintMode && vm.JSONLTraceWriterPrint == nil {
+		vm.JSONLTraceWriterPrint = trace.NewJSONLTraceWriterStdout()
+	}
+}
+
+func (vm *VMGo) GetMachineState() uint8 {
+	return vm.MachineState
+}
+
+func (vm *VMGo) ExecuteAsChild(entryPoint uint32) error {
+	vm.terminated = false
+	vm.IsChild = true
+	vm.EntryPoint = entryPoint // Store entry point for gas accounting
+	vm.MachineState = HALT
+	// Ensure trace writers are initialized if tracing is enabled
+	vm.ensureTraceWriters()
+
+	// Defer closing trace writers to ensure they're flushed on any exit path
+	defer func() {
+		if vm.JSONLTraceWriter != nil {
+			vm.JSONLTraceWriter.Flush()
+		}
+		if vm.JSONLTraceWriterPrint != nil {
+			vm.JSONLTraceWriterPrint.Flush()
+		}
+	}()
+
+	// Pre-decode all instructions
+	vm.PreDecodeInstructions()
+
+	// A.2 deblob
+	if vm.code == nil {
+		vm.ResultCode = types.WORKRESULT_PANIC
+		vm.MachineState = PANIC
+		vm.terminated = true
+		return errors.New("no code to execute1")
+	}
+
+	if len(vm.code) == 0 {
+		vm.ResultCode = types.WORKRESULT_PANIC
+		vm.MachineState = PANIC
+		vm.terminated = true
+		return errors.New("no code to execute2")
+	}
+
+	if len(vm.bitmask) == 0 {
+		vm.ResultCode = types.WORKRESULT_PANIC
+		vm.MachineState = PANIC
+		vm.terminated = true
+		return errors.New("failed to decode bitmask")
+	}
+
+	vm.pc = uint64(entryPoint)
+	stepn := 1
+	for !vm.terminated {
+		for i := 0; !vm.terminated; i++ {
+			if err := vm.step(stepn); err != nil {
+				if err == errChildHostCall {
+					// This is expected - child VM hit a host call
+					// MachineState and host_func_id are already set
+					if vm.Gas > (1 << 63) { // Check for underflow (gas wrapped around to very large number)
+						vm.ResultCode = types.WORKRESULT_OOG
+						vm.MachineState = OOG
+						vm.terminated = true
+						return fmt.Errorf("out of gas , gas = %d", vm.Gas)
+					}
+					return nil
+				}
+				return err
+			}
+			stepn++
+			if vm.Gas > (1 << 63) { // Check for underflow (gas wrapped around to very large number)
+				vm.ResultCode = types.WORKRESULT_OOG
+				vm.MachineState = OOG
+				vm.terminated = true
+				return fmt.Errorf("out of gas , gas = %d", vm.Gas)
+			}
+		}
+	}
+	currentCode := vm.code[vm.pc]
+	fmt.Printf("VMGo ExecuteAsChild terminated at PC %d, opcode 0x%x (%s)\n", vm.pc, currentCode, recompiler.GetOpcodeStr(currentCode))
+
+	// if vm finished without error, set result code to OK
+	if !vm.terminated {
+		vm.ResultCode = types.WORKRESULT_OK
+	}
+	if vm.MachineState == FAULT {
+		vm.Gas++
+	}
+
+	return nil
 }
 
 func (vm *VMGo) Execute(host *VM, entryPoint uint32) error {
@@ -433,6 +644,15 @@ func (vm *VMGo) Execute(host *VM, entryPoint uint32) error {
 	vm.IsChild = false
 	vm.hostVM = host           // Store host VM reference for host function calls
 	vm.EntryPoint = entryPoint // Store entry point for gas accounting
+
+	// Defer closing trace writers to ensure they're closed on any exit path
+	if PvmTraceMode && vm.JSONLTraceWriter != nil {
+		defer vm.JSONLTraceWriter.Close()
+	}
+	if PvmTracePrintMode && vm.JSONLTraceWriterPrint != nil {
+		defer vm.JSONLTraceWriterPrint.Close()
+	}
+
 	// A.2 deblob
 	if vm.code == nil {
 		vm.ResultCode = types.WORKRESULT_PANIC
@@ -472,7 +692,7 @@ func (vm *VMGo) Execute(host *VM, entryPoint uint32) error {
 				return err
 			}
 			stepn++
-			if vm.Gas < 0 {
+			if vm.Gas > (1 << 63) { // Check for underflow (gas wrapped around to very large number)
 				vm.ResultCode = types.WORKRESULT_OOG
 				vm.MachineState = OOG
 				vm.hostVM.ResultCode = types.WORKRESULT_OOG
@@ -482,6 +702,18 @@ func (vm *VMGo) Execute(host *VM, entryPoint uint32) error {
 		}
 	}
 
+	if DebugHostFunctions {
+		fmt.Printf("Host functions called in this execution: ")
+		for hostFn, count := range DebugHostFunctionMap {
+			fmt.Printf("%s(%d) \n", HostFnToName(hostFn), count)
+			if hostFn == INVOKE {
+				for resultCode, rcCount := range resultMap {
+					fmt.Printf("   Result code %s: %d times\n", machineStateToString(uint8(resultCode)), rcCount)
+				}
+			}
+		}
+		fmt.Printf("\n")
+	}
 	// if vm finished without error, set result code to OK
 	if !vm.terminated {
 		vm.ResultCode = types.WORKRESULT_OK
@@ -489,15 +721,43 @@ func (vm *VMGo) Execute(host *VM, entryPoint uint32) error {
 		vm.hostVM.ResultCode = vm.ResultCode
 		fmt.Printf("VM terminated with error code %d at PC %d (%v, %s, %s) Gas:%v\n", vm.ResultCode, vm.pc, vm.Service_index, vm.Mode, string(vm.ServiceMetadata), vm.Gas)
 	}
+
 	return nil
 }
 
 func (vm *VMGo) ReadRAMBytes(addr uint32, length uint32) ([]byte, uint64) {
 	o, res := vm.Ram.ReadRAMBytes(addr, length)
+	if res != OK {
+		vm.MachineState = FAULT
+		// Find the first inaccessible page in the range
+		vm.Fault_address = vm.Ram.FindFaultPage(addr, length, false)
+	}
 	return o, res
 }
 func (vm *VMGo) WriteRAMBytes(addr uint32, data []byte) uint64 {
-	return vm.Ram.WriteRAMBytes(addr, data)
+	result := vm.Ram.WriteRAMBytes(addr, data)
+	if result != OK {
+		vm.MachineState = FAULT
+		// Find the first inaccessible page in the range
+		vm.Fault_address = vm.Ram.FindFaultPage(addr, uint32(len(data)), true)
+	} else if PvmTraceMode || PvmTracePrintMode {
+		if vm.CurrentStep != nil && vm.TrackingMemAddr != 0 {
+			for i := uint32(0); i < uint32(len(data)); i++ {
+				if addr+i == vm.TrackingMemAddr {
+					vm.CurrentStep.SetChangedMemory(uint64(addr+i), 1, data[i:i+1])
+					break
+				}
+			}
+		} else if vm.CurrentStep != nil {
+			vm.CurrentStep.SetChangedMemory(uint64(addr), uint64(len(data)), data)
+		}
+	}
+	// (addr == 0x3ad40 || addr == 0x3ad41)
+	// Note: Taint tracking for regular instructions is handled in the instruction handlers
+	// (RecordRegToMem). External writes from host functions (hostPoke) need to call
+	// RecordExternalWrite directly after WriteRAMBytes.
+
+	return result
 }
 func (vm *VMGo) ReadRegister(index int) uint64 {
 	return vm.Ram.ReadRegister(index)
@@ -633,7 +893,7 @@ func (vm *VMGo) getArgumentOutputs() (r types.Result, res uint64) {
 	}
 	o := vm.Ram.ReadRegister(7)
 	l := vm.Ram.ReadRegister(8)
-	output, res := vm.Ram.ReadRAMBytes(uint32(o), uint32(l))
+	output, res := vm.ReadRAMBytes(uint32(o), uint32(l))
 	if vm.ResultCode == types.WORKRESULT_OK && res == 0 {
 		r.Ok = output
 		return r, res
@@ -658,24 +918,73 @@ var errChildHostCall = errors.New("host call not allowed in child VM")
 
 // step performs a single step in the PVM
 func (vm *VMGo) step(stepn int) error {
+	// Check if PC is out of bounds
 	if vm.pc >= uint64(len(vm.code)) {
+		vm.ResultCode = types.WORKRESULT_PANIC
+		vm.MachineState = PANIC
+		vm.terminated = true
+		vm.Gas -= 1
 		return errors.New("program counter out of bounds")
 	}
+
+	// Try to get instruction from cache first
+	inst, cached := vm.instructionCache[vm.pc]
+	if !cached {
+		// Check bitmask to ensure PC points to a valid instruction start
+		// In PVM, bitmask bit is 1 if the byte is the start of an instruction
+		if len(vm.bitmask) > 0 {
+			if vm.bitmask[vm.pc] == 0 {
+				vm.ResultCode = types.WORKRESULT_PANIC
+				vm.MachineState = PANIC
+				vm.terminated = true
+				return fmt.Errorf("program counter %d does not point to a valid instruction start", vm.pc)
+			}
+		}
+		// Fallback: decode on the fly (should rarely happen)
+		opcode := vm.code[vm.pc]
+		len_operands := vm.skip(vm.pc)
+		operands := vm.code[vm.pc+1 : vm.pc+1+len_operands]
+		inst = NewInstruction(opcode, operands, vm.pc)
+	}
+
 	prevpc := vm.pc
-	opcode := vm.code[vm.pc]
-	len_operands := vm.skip(vm.pc)
-	operands := vm.code[vm.pc+1 : vm.pc+1+len_operands]
+	opcode := inst.Opcode
+	len_operands := uint64(len(inst.Args))
+	_ = prevpc // used for logging
+
+	// Check for OOG before decrementing
+	if vm.Gas < 1 {
+		vm.ResultCode = types.WORKRESULT_OOG
+		vm.MachineState = OOG
+		vm.terminated = true
+		return fmt.Errorf("out of gas , gas = %d", vm.Gas)
+	}
 	vm.Gas -= 1
+
+	// Store current step and PC for taint tracking
+	vm.currentStep = stepn
+	vm.currentPC = vm.pc
+
+	// Initialize TraceStep if any tracing mode is enabled
+	if PvmTraceMode || PvmTracePrintMode {
+		vm.ensureTraceWriters() // Lazy initialization of trace writers
+		simpleInst := inst.ToSimpleInstruction()
+		vm.CurrentStep = trace.NewTraceStep(simpleInst)
+		vm.CurrentStep.OpcodeStr = opcode_str(opcode)
+	}
 
 	switch {
 	case opcode <= 1: // A.5.1 No arguments
-		vm.HandleNoArgs(opcode)
+		vm.HandleNoArgs(inst)
 	case opcode == ECALLI: // A.5.2 One immediate
-		vm.HandleOneImm(opcode, operands)
+		vm.HandleOneImm(inst)
 		// host call invocation
-		// if vm.hostCall && vm.IsChild {
-		// 	return childHostCall
-		// }
+		if vm.hostCall && vm.IsChild {
+			// Child VM hit a host call - set state to HOST and terminate
+			vm.MachineState = HOST
+			vm.terminated = true
+			return errChildHostCall
+		}
 		if vm.hostCall {
 			if vm.host_func_id == TRANSFER {
 				vm.Gas -= 10
@@ -683,7 +992,7 @@ func (vm *VMGo) step(stepn int) error {
 				vm.Gas -= 10
 			}
 			// Invoke host function with panic recovery
-			if vm.Gas < 0 {
+			if vm.Gas > (1 << 63) { // Check for underflow (gas wrapped around to very large number)
 				fmt.Printf("Out of gas during host function %d call\n", vm.host_func_id)
 				vm.ResultCode = types.WORKRESULT_OOG
 				vm.MachineState = OOG
@@ -700,7 +1009,7 @@ func (vm *VMGo) step(stepn int) error {
 					return nil
 				}
 				if vm.host_func_id == TRANSFER && vm.ReadRegister(7) == OK {
-					vm.Gas -= int64(vm.ReadRegister(9))
+					vm.Gas -= vm.ReadRegister(9)
 				}
 				// Check if host function caused panic
 				if vm.MachineState == PANIC {
@@ -714,60 +1023,61 @@ func (vm *VMGo) step(stepn int) error {
 			vm.hostCall = false
 		}
 	case opcode == LOAD_IMM_64: // A.5.3 One Register and One Extended Width Immediate
-		vm.HandleOneRegOneEWImm(opcode, operands)
+		vm.HandleOneRegOneEWImm(inst)
 		if !vm.terminated {
 			vm.pc += 1 + len_operands
 		}
 	case 30 <= opcode && opcode <= 33: // A.5.4 Two Immediates
-		vm.HandleTwoImms(opcode, operands)
+		vm.HandleTwoImms(inst)
 		if !vm.terminated {
 			vm.pc += 1 + len_operands
 		}
 	case opcode == JUMP: // A.5.5 One offset
-		vm.HandleOneOffset(opcode, operands)
+		vm.HandleOneOffset(inst)
 	case 50 <= opcode && opcode <= 62: // A.5.6 One Register and One Immediate
-		vm.HandleOneRegOneImm(opcode, operands)
+		vm.HandleOneRegOneImm(inst)
 		if opcode != JUMP_IND {
 			if !vm.terminated {
 				vm.pc += 1 + len_operands
 			}
 		}
 	case 70 <= opcode && opcode <= 73: // A.5.7 One Register and Two Immediate
-		vm.HandleOneRegTwoImm(opcode, operands)
+		vm.HandleOneRegTwoImm(inst)
 		if !vm.terminated {
 			vm.pc += 1 + len_operands
 		}
 	case 80 <= opcode && opcode <= 90: // A.5.8 One Register, One Immediate and One Offset
-		vm.HandleOneRegOneImmOneOffset(opcode, operands)
+		vm.HandleOneRegOneImmOneOffset(inst)
 	case 100 <= opcode && opcode <= 111: // A.5.9 Two Registers
-		vm.HandleTwoRegs(opcode, operands)
+		vm.HandleTwoRegs(inst)
 		if !vm.terminated {
 			vm.pc += 1 + len_operands
 		}
 	case 120 <= opcode && opcode <= 161: // A.5.10 Two Registers and One Immediate
-		vm.HandleTwoRegsOneImm(opcode, operands)
+		vm.HandleTwoRegsOneImm(inst)
 		if !vm.terminated {
 			vm.pc += 1 + len_operands
 		}
 	case 170 <= opcode && opcode <= 175: // A.5.11 Two Registers and One Offset
-		vm.HandleTwoRegsOneOffset(opcode, operands)
+		vm.HandleTwoRegsOneOffset(inst)
 	case opcode == LOAD_IMM_JUMP_IND: // A.5.12 Two Register and Two Immediate
-		vm.HandleTwoRegsTwoImms(opcode, operands)
+		vm.HandleTwoRegsTwoImms(inst)
 	case 190 <= opcode && opcode <= 230: // A.5.13 Three Registers
-		vm.HandleThreeRegs(opcode, operands)
+		vm.HandleThreeRegs(inst)
 		if !vm.terminated {
 			vm.pc += 1 + len_operands
 		}
 
 	default:
-		fmt.Printf(vm.logging, "terminated: unknown opcode", "service", string(vm.ServiceMetadata), "opcode", opcode)
-		vm.HandleNoArgs(0) //TRAP
+		log.Info(vm.logging, "terminated: unknown opcode", "opcode", uint8(opcode), "service", string(vm.ServiceMetadata), "opcode", opcode)
+
+		vm.HandleNoArgs(&Instruction{Opcode: TRAP}) //TRAP
 	}
 
 	// avoid this: this is expensive
 	// Show every 1000 gas, plus every instruction in high-res window
-	showThisGas := (vm.Gas%1000 == 0) || (vm.Gas > 972100000 && vm.Gas <= 972300000)
-	if PvmLogging && showThisGas {
+	// showThisGas := (vm.Gas%1000 == 0) || (vm.Gas > 972100000 && vm.Gas <= 972300000)
+	if PvmLogging {
 		registers := vm.Ram.ReadRegisters()
 		prettyHex := "["
 		for i := 0; i < 13; i++ {
@@ -777,15 +1087,21 @@ func (vm *VMGo) step(stepn int) error {
 			prettyHex = prettyHex + fmt.Sprintf("%d", registers[i])
 		}
 		prettyHex = prettyHex + "]"
-
+		debugMem := false
 		// Read 16 bytes at 0x2d01e0 to track the memory region containing 0x2d01e8
-		debugMemAddr := uint32(0x2d01e0)
-		debugMemBytes, _ := vm.Ram.ReadRAMBytes(debugMemAddr, 16)
-		debugMemHex := fmt.Sprintf("%032x", debugMemBytes)
+		if debugMem {
+			debugMemAddr := uint32(0x2d01e0)
+			debugMemBytes, _ := vm.Ram.ReadRAMBytes(debugMemAddr, 16)
+			debugMemHex := fmt.Sprintf("%032x", debugMemBytes)
 
-		fmt.Printf("%s %d %d Gas: %d Registers:%s Mem[0x%x..0x%x]:%s%s\n",
-			opcode_str(opcode), stepn, prevpc, vm.Gas, prettyHex, debugMemAddr, debugMemAddr+15, debugMemHex, lastMemOp)
-		lastMemOp = "" // Clear for next instruction
+			fmt.Printf("%s %d %d Gas: %d Registers:%s Mem[0x%x..0x%x]:%s%s\n",
+				opcode_str(opcode), stepn, prevpc, vm.Gas, prettyHex, debugMemAddr, debugMemAddr+15, debugMemHex, lastMemOp)
+			// Note: lastMemOp will be cleared by encodeStepLog() after being captured
+		} else {
+			fmt.Printf("%s %d %d Gas: %d Registers:%s%s\n",
+				opcode_str(opcode), stepn, prevpc, vm.Gas, prettyHex, lastMemOp)
+			// Note: lastMemOp will be cleared by encodeStepLog() after being captured
+		}
 	}
 	if label, ok := vm.label_pc[int(vm.pc)]; ok {
 		fmt.Printf("[%s%s%s FINISH]\n", ColorBlue, lastLabel, ColorReset)
@@ -794,17 +1110,58 @@ func (vm *VMGo) step(stepn int) error {
 			lastLabel = label
 		}
 	}
+
+	// Write trace step if any tracing mode is enabled
+	if (PvmTraceMode || PvmTracePrintMode) && vm.CurrentStep != nil {
+		vm.CurrentStep.PostGas = uint64(vm.Gas)
+		regs := vm.Ram.ReadRegisters()
+		vm.CurrentStep.SetPostRegister(&regs)
+		if vm.MachineState != HALT {
+			state := machineStateToString(vm.MachineState)
+			vm.CurrentStep.SetPostMachineState(state)
+		}
+
+		// Write to file if file tracing is enabled
+		if PvmTraceMode && vm.JSONLTraceWriter != nil {
+			vm.JSONLTraceWriter.WriteStep(vm.CurrentStep)
+		}
+
+		// Write to stdout if print tracing is enabled
+		if PvmTracePrintMode && vm.JSONLTraceWriterPrint != nil && vm.CurrentStep.ChangedMemoryLength != nil {
+			vm.JSONLTraceWriterPrint.WriteStep(vm.CurrentStep)
+		}
+
+		vm.CurrentStep = nil
+	}
+
 	return nil
 }
 
 var lastLabel string
+
+func machineStateToString(state uint8) string {
+	switch state {
+	case HALT:
+		return "halt"
+	case PANIC:
+		return "panic"
+	case FAULT:
+		return "fault"
+	case HOST:
+		return "host"
+	case OOG:
+		return "oog"
+	default:
+		return fmt.Sprintf("unknown(%d)", state)
+	}
+}
 
 type StepSample struct {
 	Op   string   `json:"op"`
 	Mode string   `json:"mode"`
 	Step int      `json:"step"`
 	PC   uint64   `json:"pc"`
-	Gas  int64    `json:"gas"`
+	Gas  uint64   `json:"gas"`
 	Reg  []uint64 `json:"reg"`
 }
 
@@ -853,11 +1210,9 @@ func (vm *VMGo) djump(a uint64) {
 			vm.pc = pvmpc
 			fmt.Printf("djump to PC=%d\n", vm.pc)
 		}
-	} else if a == 0 {
-		// Handle the exit case where a=0 from the SDIV result
-		vm.terminated = true
-		vm.ResultCode = types.WORKRESULT_OK
-	} else if a > uint64(len(vm.J)*Z_A) || a%Z_A != 0 {
+	} else if a == 0 || a > uint64(len(vm.J)*Z_A) || a%Z_A != 0 {
+		// djump(0) is invalid - 0 is not a valid jump target
+		// Also invalid if a > J_size * Z_A or a is not aligned to Z_A
 		vm.terminated = true
 		vm.ResultCode = types.WORKRESULT_PANIC
 		vm.MachineState = PANIC
@@ -932,8 +1287,8 @@ func smod(a, b int64) int64 {
 	return modVal
 }
 
-func (vm *VMGo) HandleNoArgs(opcode byte) {
-	switch opcode {
+func (vm *VMGo) HandleNoArgs(inst *Instruction) {
+	switch inst.Opcode {
 	case TRAP:
 		vm.ResultCode = types.WORKRESULT_PANIC
 		vm.MachineState = PANIC
@@ -944,31 +1299,29 @@ func (vm *VMGo) HandleNoArgs(opcode byte) {
 	}
 }
 
-func (vm *VMGo) HandleOneImm(opcode byte, operands []byte) {
-	switch opcode {
+func (vm *VMGo) HandleOneImm(inst *Instruction) {
+	switch inst.Opcode {
 	case ECALLI:
-		lx := uint32(types.DecodeE_l(operands))
 		vm.hostCall = true
-		vm.host_func_id = int(lx)
-		// vm.ResultCode = types.
-		// vm.HostResultCode = types.
-		vm.pc += 1 + uint64(len(operands))
+		vm.host_func_id = int(inst.Imm1)
+		vm.pc += 1 + uint64(len(inst.Args))
 	}
 }
 
-func (vm *VMGo) HandleOneRegOneEWImm(opcode byte, operands []byte) {
-	// handle no operand means 0
-	originalOperands := make([]byte, len(operands))
-	copy(originalOperands, operands)
-
-	registerIndexA := min(12, int(originalOperands[0])%16)
-	lx := 8
-	vx := types.DecodeE_l(originalOperands[1 : 1+lx])
-	dumpLoadImm("LOAD_IMM_64", registerIndexA, uint64(vx), vx, 64, false)
-	vm.Ram.WriteRegister(registerIndexA, uint64(vx))
+func (vm *VMGo) HandleOneRegOneEWImm(inst *Instruction) {
+	// Use pre-decoded values from Instruction
+	registerIndexA := 0
+	if len(inst.DestRegs) > 0 {
+		registerIndexA = inst.DestRegs[0]
+	}
+	vx := inst.Imm1
+	dumpLoadImm("LOAD_IMM_64", registerIndexA, vx, vx, 64, false)
+	vm.Ram.WriteRegister(registerIndexA, vx)
+	vm.TaintRecordImm(registerIndexA, inst.Opcode) // Immediate value - creates IMM node
 }
 
-func (vm *VMGo) HandleTwoImms(opcode byte, operands []byte) {
+func (vm *VMGo) HandleTwoImms(inst *Instruction) {
+	operands := inst.Args
 	originalOperands := make([]byte, len(operands))
 	copy(originalOperands, operands)
 
@@ -982,228 +1335,224 @@ func (vm *VMGo) HandleTwoImms(opcode byte, operands []byte) {
 	vy := x_encode(types.DecodeE_l(originalOperands[1+lx:1+lx+ly]), uint32(ly))
 
 	addr := uint32(vx)
-	switch opcode {
+	switch inst.Opcode {
 	case STORE_IMM_U8:
-		vm.Fault_address = uint32(vm.Ram.WriteRAMBytes(addr, []byte{uint8(vy)}))
+		errCode := vm.WriteRAMBytes(addr, []byte{uint8(vy)})
+		vm.TaintRecordExternalWrite(uint64(addr), 1) // Store from immediate (external source)
 		dumpStoreGeneric("STORE_IMM_U8", uint64(addr), "imm", vy, 8)
+		if errCode != OK {
+			vm.ResultCode = types.WORKRESULT_PANIC
+			vm.terminated = true
+		}
 	case STORE_IMM_U16:
-		vm.Fault_address = uint32(vm.Ram.WriteRAMBytes(addr, types.E_l(vy%(1<<16), 2)))
-		dumpStoreGeneric("STORE_IMM_U16", uint64(addr), "imm", vy%(1<<16), 16)
+		errCode := vm.WriteRAMBytes(addr, types.E_l(vy&0xFFFF, 2))
+		vm.TaintRecordExternalWrite(uint64(addr), 2) // Store from immediate (external source)
+		dumpStoreGeneric("STORE_IMM_U16", uint64(addr), "imm", vy&0xFFFF, 16)
+		if errCode != OK {
+			vm.ResultCode = types.WORKRESULT_PANIC
+			vm.terminated = true
+		}
 	case STORE_IMM_U32:
-		vm.Fault_address = uint32(vm.Ram.WriteRAMBytes(addr, types.E_l(vy%(1<<32), 4)))
-		dumpStoreGeneric("STORE_IMM_U32", uint64(addr), "imm", vy%(1<<32), 32)
+		errCode := vm.WriteRAMBytes(addr, types.E_l(vy&0xFFFFFFFF, 4))
+		vm.TaintRecordExternalWrite(uint64(addr), 4) // Store from immediate (external source)
+		dumpStoreGeneric("STORE_IMM_U32", uint64(addr), "imm", vy&0xFFFFFFFF, 32)
+		if errCode != OK {
+			vm.ResultCode = types.WORKRESULT_PANIC
+			vm.terminated = true
+		}
 	case STORE_IMM_U64:
-		vm.Fault_address = uint32(vm.Ram.WriteRAMBytes(addr, types.E_l(vy, 8)))
+		errCode := vm.WriteRAMBytes(addr, types.E_l(vy, 8))
+		vm.TaintRecordExternalWrite(uint64(addr), 8) // Store from immediate (external source)
 		dumpStoreGeneric("STORE_IMM_U64", uint64(addr), "imm", vy, 64)
+		if errCode != OK {
+			vm.ResultCode = types.WORKRESULT_PANIC
+			vm.terminated = true
+		}
 	}
 }
 
-func (vm *VMGo) HandleOneOffset(opcode byte, operands []byte) {
-	vx := extractOneOffset(operands)
+func (vm *VMGo) HandleOneOffset(inst *Instruction) {
+	vx := inst.Offset1
 	dumpJumpOffset("JUMP", vx, vm.pc, vm.label_pc)
-	vm.branch(uint64(int64(vm.pc)+vx), 1, len(operands))
+	vm.branch(uint64(int64(vm.pc)+vx), 1, len(inst.Args))
 }
 
 // A.5.6. Instructions with Arguments of One Register & One Immediate.
-func (vm *VMGo) HandleOneRegOneImm(opcode byte, operands []byte) {
-	registerIndexA, vx := extractOneRegOneImm(operands)
+func (vm *VMGo) HandleOneRegOneImm(inst *Instruction) {
+	registerIndexA, vx := extractOneRegOneImm(inst.Args)
 	valueA := vm.Ram.ReadRegister(registerIndexA)
 
 	addr := uint32(vx)
-	switch opcode {
+	switch inst.Opcode {
 	case JUMP_IND:
 		dumpBranchImm("JUMP_IND", registerIndexA, valueA, vx, valueA+vx, false, true)
-		vm.djump((valueA + vx) % (1 << 32))
+		vm.djump((valueA + vx) & 0xFFFFFFFF)
 	case LOAD_IMM:
 		vm.Ram.WriteRegister(registerIndexA, vx)
+		vm.TaintRecordImm(registerIndexA, inst.Opcode) // Immediate value - creates IMM node
 		dumpLoadImm("LOAD_IMM", registerIndexA, uint64(addr), vx, 64, false)
 	case LOAD_U8:
-		value, errCode := vm.Ram.ReadRAMBytes(uint32(vx), 1)
-		if errCode == OK {
-			vm.Ram.WriteRegister(registerIndexA, uint64(value[0]))
-			dumpLoadGeneric("LOAD_U8", registerIndexA, uint64(addr), uint64(value[0]), 8, false)
-		} else {
+		value, errCode := vm.ReadRAMBytes(uint32(vx), 1)
+		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 			return
 		}
+		vm.Ram.WriteRegister(registerIndexA, uint64(value[0]))
+		vm.TaintRecordLoad(registerIndexA, uint64(addr), 1, inst.Opcode)
+		dumpLoadGeneric("LOAD_U8", registerIndexA, uint64(addr), uint64(value[0]), 8, false)
 	case LOAD_I8:
-		value, errCode := vm.Ram.ReadRAMBytes(addr, 1)
-		if errCode == OK {
-			res := x_encode(uint64(value[0]), 1)
-			vm.Ram.WriteRegister(registerIndexA, res)
-			dumpLoadGeneric("LOAD_I8", registerIndexA, uint64(addr), res, 8, true)
-		} else {
+		value, errCode := vm.ReadRAMBytes(addr, 1)
+		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 			return
 		}
+		res := x_encode(uint64(value[0]), 1)
+		vm.Ram.WriteRegister(registerIndexA, res)
+		vm.TaintRecordLoad(registerIndexA, uint64(addr), 1, inst.Opcode)
+		dumpLoadGeneric("LOAD_I8", registerIndexA, uint64(addr), res, 8, true)
 	case LOAD_U16:
-		value, errCode := vm.Ram.ReadRAMBytes(addr, 2)
-		if errCode == OK {
-			res := types.DecodeE_l(value)
-			vm.Ram.WriteRegister(registerIndexA, res)
-			dumpLoadGeneric("LOAD_U16", registerIndexA, uint64(addr), res, 16, false)
-		} else {
+		value, errCode := vm.ReadRAMBytes(addr, 2)
+		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 			return
 		}
+		res := types.DecodeE_l(value)
+		vm.Ram.WriteRegister(registerIndexA, res)
+		vm.TaintRecordLoad(registerIndexA, uint64(addr), 2, inst.Opcode)
+		dumpLoadGeneric("LOAD_U16", registerIndexA, uint64(addr), res, 16, false)
 	case LOAD_I16:
-		value, errCode := vm.Ram.ReadRAMBytes(addr, 2)
-		if errCode == OK {
-			res := x_encode(types.DecodeE_l(value), 2)
-			vm.Ram.WriteRegister(registerIndexA, res)
-			dumpLoadGeneric("LOAD_I16", registerIndexA, uint64(addr), res, 16, true)
-		} else {
+		value, errCode := vm.ReadRAMBytes(addr, 2)
+		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 			return
 		}
+		res := x_encode(types.DecodeE_l(value), 2)
+		vm.Ram.WriteRegister(registerIndexA, res)
+		vm.TaintRecordLoad(registerIndexA, uint64(addr), 2, inst.Opcode)
+		dumpLoadGeneric("LOAD_I16", registerIndexA, uint64(addr), res, 16, true)
 	case LOAD_U32:
-		value, errCode := vm.Ram.ReadRAMBytes(addr, 4)
-		if errCode == OK {
-			res := types.DecodeE_l(value)
-			vm.Ram.WriteRegister(registerIndexA, res)
-			dumpLoadGeneric("LOAD_U32", registerIndexA, uint64(addr), res, 32, false)
-		} else {
+		value, errCode := vm.ReadRAMBytes(addr, 4)
+		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 			return
 		}
+		res := types.DecodeE_l(value)
+		vm.Ram.WriteRegister(registerIndexA, res)
+		vm.TaintRecordLoad(registerIndexA, uint64(addr), 4, inst.Opcode)
+		dumpLoadGeneric("LOAD_U32", registerIndexA, uint64(addr), res, 32, false)
 	case LOAD_I32:
-		value, errCode := vm.Ram.ReadRAMBytes(addr, 4)
-		if errCode == OK {
-			res := x_encode(types.DecodeE_l(value), 4)
-			vm.Ram.WriteRegister(registerIndexA, res)
-			dumpLoadGeneric("LOAD_I32", registerIndexA, uint64(addr), res, 32, true)
-		} else {
+		value, errCode := vm.ReadRAMBytes(addr, 4)
+		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 			return
 		}
+		res := x_encode(types.DecodeE_l(value), 4)
+		vm.Ram.WriteRegister(registerIndexA, res)
+		vm.TaintRecordLoad(registerIndexA, uint64(addr), 4, inst.Opcode)
+		dumpLoadGeneric("LOAD_I32", registerIndexA, uint64(addr), res, 32, true)
 	case LOAD_U64:
-		value, errCode := vm.Ram.ReadRAMBytes(addr, 8)
-		if errCode == OK {
-			res := types.DecodeE_l(value)
-			vm.Ram.WriteRegister(registerIndexA, res)
-			dumpLoadGeneric("LOAD_U64", registerIndexA, uint64(addr), res, 64, false)
-		} else {
+		value, errCode := vm.ReadRAMBytes(addr, 8)
+		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 			return
 		}
+		res := types.DecodeE_l(value)
+		vm.Ram.WriteRegister(registerIndexA, res)
+		vm.TaintRecordLoad(registerIndexA, uint64(addr), 8, inst.Opcode)
+		dumpLoadGeneric("LOAD_U64", registerIndexA, uint64(addr), res, 64, false)
 	case STORE_U8:
-		errCode := vm.Ram.WriteRAMBytes(addr, []byte{uint8(valueA)})
-		if errCode == OK {
-			dumpStoreGeneric("STORE_U8", uint64(addr), reg(registerIndexA), valueA, 8)
-		} else {
+		errCode := vm.WriteRAMBytes(addr, []byte{uint8(valueA)})
+		vm.TaintRecordStore(registerIndexA, uint64(addr), 1, inst.Opcode)
+		dumpStoreGeneric("STORE_U8", uint64(addr), reg(registerIndexA), valueA, 8)
+		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 		}
 	case STORE_U16:
-		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(valueA%(1<<16), 2))
-		if errCode == OK {
-			dumpStoreGeneric("STORE_U16", uint64(addr), reg(registerIndexA), valueA%(1<<16), 16)
-		} else {
+		errCode := vm.WriteRAMBytes(addr, types.E_l(valueA&0xFFFF, 2))
+		vm.TaintRecordStore(registerIndexA, uint64(addr), 2, inst.Opcode)
+		dumpStoreGeneric("STORE_U16", uint64(addr), reg(registerIndexA), valueA&0xFFFF, 16)
+		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 		}
 	case STORE_U32:
-		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(valueA%(1<<32), 4))
-		if errCode == OK {
-			dumpStoreGeneric("STORE_U32", uint64(addr), reg(registerIndexA), valueA%(1<<32), 32)
-		} else {
+		errCode := vm.WriteRAMBytes(addr, types.E_l(valueA&0xFFFFFFFF, 4))
+		vm.TaintRecordStore(registerIndexA, uint64(addr), 4, inst.Opcode)
+		dumpStoreGeneric("STORE_U32", uint64(addr), reg(registerIndexA), valueA&0xFFFFFFFF, 32)
+		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 		}
 	case STORE_U64:
-		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(uint64(valueA), 8))
-		if errCode == OK {
-			dumpStoreGeneric("STORE_U64", uint64(addr), reg(registerIndexA), valueA, 64)
-		} else {
+		errCode := vm.WriteRAMBytes(addr, types.E_l(uint64(valueA), 8))
+		vm.TaintRecordStore(registerIndexA, uint64(addr), 8, inst.Opcode)
+		dumpStoreGeneric("STORE_U64", uint64(addr), reg(registerIndexA), valueA, 64)
+		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 		}
 	}
 }
 
 // A.5.7. Instructions with Arguments of One Register & Two Immediates.
-func (vm *VMGo) HandleOneRegTwoImm(opcode byte, operands []byte) {
-	registerIndexA, vx, vy := extractOneReg2Imm(operands)
+func (vm *VMGo) HandleOneRegTwoImm(inst *Instruction) {
+	registerIndexA, vx, vy := extractOneReg2Imm(inst.Args)
 	valueA := vm.Ram.ReadRegister(registerIndexA)
 	addr := uint32(valueA) + uint32(vx)
-	switch opcode {
+	switch inst.Opcode {
 	case STORE_IMM_IND_U8:
-		errCode := vm.Ram.WriteRAMBytes(addr, []byte{byte(uint8(vy))})
+		errCode := vm.WriteRAMBytes(addr, []byte{byte(uint8(vy))})
+		vm.TaintRecordExternalWrite(uint64(addr), 1) // Store from immediate (external source)
 		dumpStoreGeneric("STORE_IMM_IND_U8", uint64(addr), fmt.Sprintf("0x%x", vy), vy&0xff, 8)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 		}
 	case STORE_IMM_IND_U16:
-		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(vy%(1<<16), 2))
-		dumpStoreGeneric("STORE_IMM_IND_U16", uint64(addr), fmt.Sprintf("0x%x", vy), vy%(1<<16), 16)
+		errCode := vm.WriteRAMBytes(addr, types.E_l(vy&0xFFFF, 2))
+		vm.TaintRecordExternalWrite(uint64(addr), 2) // Store from immediate (external source)
+		dumpStoreGeneric("STORE_IMM_IND_U16", uint64(addr), fmt.Sprintf("0x%x", vy), vy&0xFFFF, 16)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 		}
 	case STORE_IMM_IND_U32:
-		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(vy%(1<<32), 4))
-		dumpStoreGeneric("STORE_IMM_IND_U32", uint64(addr), fmt.Sprintf("0x%x", vy), vy%(1<<32), 32)
+		errCode := vm.WriteRAMBytes(addr, types.E_l(vy&0xFFFFFFFF, 4))
+		vm.TaintRecordExternalWrite(uint64(addr), 4) // Store from immediate (external source)
+		dumpStoreGeneric("STORE_IMM_IND_U32", uint64(addr), fmt.Sprintf("0x%x", vy), vy&0xFFFFFFFF, 32)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 		}
 	case STORE_IMM_IND_U64:
-		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(uint64(vy), 8))
+		errCode := vm.WriteRAMBytes(addr, types.E_l(uint64(vy), 8))
+		vm.TaintRecordExternalWrite(uint64(addr), 8) // Store from immediate (external source)
 		dumpStoreGeneric("STORE_IMM_IND_U64", uint64(addr), fmt.Sprintf("0x%x", vy), vy, 64)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 		}
 	}
 }
 
 // A.5.8 One Register, One Immediate and One Offset
-func (vm *VMGo) HandleOneRegOneImmOneOffset(opcode byte, operands []byte) {
-	registerIndexA, vx, vy0 := extractOneRegOneImmOneOffset(operands)
+func (vm *VMGo) HandleOneRegOneImmOneOffset(inst *Instruction) {
+	registerIndexA, vx, vy0 := extractOneRegOneImmOneOffset(inst.Args)
 	valueA := vm.Ram.ReadRegister(registerIndexA)
 	vy := uint64(int64(vm.pc) + vy0)
-	operand_len := len(operands)
-	switch opcode {
+	operand_len := len(inst.Args)
+	switch inst.Opcode {
 	case LOAD_IMM_JUMP:
 		vm.Ram.WriteRegister(registerIndexA, vx)
+		vm.TaintRecordImm(registerIndexA, inst.Opcode) // Immediate value
 		dumpLoadImmJump("LOAD_IMM_JUMP", registerIndexA, vx)
 		vm.branch(vy, 1, operand_len)
 	case BRANCH_EQ_IMM:
@@ -1280,18 +1629,19 @@ func (vm *VMGo) HandleOneRegOneImmOneOffset(opcode byte, operands []byte) {
 }
 
 // A.5.9. Instructions with Arguments of Two Registers.
-func (vm *VMGo) HandleTwoRegs(opcode byte, operands []byte) {
-	registerIndexD, registerIndexA := extractTwoRegisters(operands)
+func (vm *VMGo) HandleTwoRegs(inst *Instruction) {
+	registerIndexD, registerIndexA := extractTwoRegisters(inst.Args)
 	valueA := vm.Ram.ReadRegister(registerIndexA)
 
 	var result uint64
-	switch opcode {
+	switch inst.Opcode {
 	case MOVE_REG:
 		result = valueA
 		dumpMov(registerIndexD, registerIndexA, result)
 	case SBRK:
 		if valueA == 0 {
 			vm.Ram.WriteRegister(registerIndexD, uint64(vm.Ram.GetCurrentHeapPointer()))
+			vm.TaintRecordImm(registerIndexD, inst.Opcode) // System value, no taint dependency
 			return
 		}
 		result = uint64(vm.Ram.GetCurrentHeapPointer())
@@ -1308,6 +1658,10 @@ func (vm *VMGo) HandleTwoRegs(opcode byte, operands []byte) {
 		}
 		vm.Ram.SetCurrentHeapPointer(uint32(new_heap_pointer))
 		dumpTwoRegs("SBRK", registerIndexD, registerIndexA, valueA, result)
+		// SBRK returns system value (heap pointer), treat as external/IMM
+		vm.TaintRecordImm(registerIndexD, inst.Opcode)
+		vm.Ram.WriteRegister(registerIndexD, result)
+		return
 	case COUNT_SET_BITS_64:
 		result = uint64(bits.OnesCount64(valueA))
 		dumpTwoRegs("COUNT_SET_BITS_64", registerIndexD, registerIndexA, valueA, result)
@@ -1343,142 +1697,151 @@ func (vm *VMGo) HandleTwoRegs(opcode byte, operands []byte) {
 		vm.MachineState = PANIC
 		vm.terminated = true
 	}
+	// Record taint based on operation type
+	if inst.Opcode == MOVE_REG {
+		// MOV is just alias update, no new node
+		vm.TaintRecordMov(registerIndexD, registerIndexA)
+	} else {
+		// Other operations (COUNT_SET_BITS, etc.) create new values
+		vm.TaintRecordALU(registerIndexD, []int{registerIndexA}, inst.Opcode)
+	}
 	vm.Ram.WriteRegister(registerIndexD, result)
 }
 
 // A.5.10 Two Registers and One Immediate
-func (vm *VMGo) HandleTwoRegsOneImm(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(operands)
+func (vm *VMGo) HandleTwoRegsOneImm(inst *Instruction) {
+	registerIndexA, registerIndexB, vx := extractTwoRegsOneImm(inst.Args)
 	valueA := vm.Ram.ReadRegister(registerIndexA)
 	valueB := vm.Ram.ReadRegister(registerIndexB)
-	addr := uint32((uint64(valueB) + vx) % (1 << 32))
+	addr := uint32((valueB + vx) & 0xFFFFFFFF)
 	var result uint64
 
-	switch opcode {
+	switch inst.Opcode {
 	case STORE_IND_U8:
-		errCode := vm.Ram.WriteRAMBytes(addr, []byte{byte(uint8(valueA))})
+		errCode := vm.WriteRAMBytes(addr, []byte{byte(uint8(valueA))})
+		vm.TaintRecordStore(registerIndexA, uint64(addr), 1, inst.Opcode)
 		dumpStoreGeneric("STORE_IND_U8", uint64(addr), reg(registerIndexA), valueA&0xff, 8)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 		}
 		return
 	case STORE_IND_U16:
-		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(valueA%(1<<16), 2))
+		errCode := vm.WriteRAMBytes(addr, types.E_l(valueA&0xFFFF, 2))
+		vm.TaintRecordStore(registerIndexA, uint64(addr), 2, inst.Opcode)
 		dumpStoreGeneric("STORE_IND_U16", uint64(addr), reg(registerIndexA), valueA&0xffff, 16)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 		}
 		return
 	case STORE_IND_U32:
-		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(valueA%(1<<32), 4))
+		errCode := vm.WriteRAMBytes(addr, types.E_l(valueA&0xFFFFFFFF, 4))
+		vm.TaintRecordStore(registerIndexA, uint64(addr), 4, inst.Opcode)
 		dumpStoreGeneric("STORE_IND_U32", uint64(addr), reg(registerIndexA), valueA&0xffffffff, 32)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 		}
 		return
 	case STORE_IND_U64:
-		errCode := vm.Ram.WriteRAMBytes(addr, types.E_l(uint64(valueA), 8))
+		errCode := vm.WriteRAMBytes(addr, types.E_l(uint64(valueA), 8))
+		vm.TaintRecordStore(registerIndexA, uint64(addr), 8, inst.Opcode)
 		dumpStoreGeneric("STORE_IND_U64", uint64(addr), reg(registerIndexA), valueA, 64)
 		if errCode != OK {
 			fmt.Printf("Failed to write 64-bit value to RAM at address 0x%x\n", addr)
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 		}
 		return
 	case LOAD_IND_U8:
-		value, errCode := vm.Ram.ReadRAMBytes(addr, 1)
+		value, errCode := vm.ReadRAMBytes(addr, 1)
 		//fmt.Printf("LOAD_IND_U8 from address %x == %d (addr=%x + %x)\n", addr, value, valueB, vx)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 			return
 		}
 		result = uint64(uint8(value[0]))
-
+		vm.TaintRecordLoad(registerIndexA, uint64(addr), 1, inst.Opcode)
 		dumpLoadGeneric("LOAD_IND_U8", registerIndexA, uint64(addr), result, 8, false)
-
+		vm.Ram.WriteRegister(registerIndexA, result)
+		return
 	case LOAD_IND_I8:
-		value, errCode := vm.Ram.ReadRAMBytes(addr, 1)
+		value, errCode := vm.ReadRAMBytes(addr, 1)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 			return
 		}
 		result = uint64(int8(value[0]))
+		vm.TaintRecordLoad(registerIndexA, uint64(addr), 1, inst.Opcode)
 		dumpLoadGeneric("LOAD_IND_I8", registerIndexA, uint64(addr), result, 8, true)
+		vm.Ram.WriteRegister(registerIndexA, result)
+		return
 	case LOAD_IND_U16:
-		value, errCode := vm.Ram.ReadRAMBytes(addr, 2)
+		value, errCode := vm.ReadRAMBytes(addr, 2)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 			return
 		}
 		result = types.DecodeE_l(value)
+		vm.TaintRecordLoad(registerIndexA, uint64(addr), 2, inst.Opcode)
 		dumpLoadGeneric("LOAD_IND_U16", registerIndexA, uint64(addr), result, 16, false)
+		vm.Ram.WriteRegister(registerIndexA, result)
+		return
 	case LOAD_IND_I16:
-		value, errCode := vm.Ram.ReadRAMBytes(addr, 2)
+		value, errCode := vm.ReadRAMBytes(addr, 2)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 			return
 		}
 		result = uint64(int16(types.DecodeE_l(value)))
+		vm.TaintRecordLoad(registerIndexA, uint64(addr), 2, inst.Opcode)
 		dumpLoadGeneric("LOAD_IND_I16", registerIndexA, uint64(addr), result, 16, true)
+		vm.Ram.WriteRegister(registerIndexA, result)
+		return
 	case LOAD_IND_U32:
-		value, errCode := vm.Ram.ReadRAMBytes(addr, 4)
+		value, errCode := vm.ReadRAMBytes(addr, 4)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 			return
 		}
 		result = types.DecodeE_l(value)
+		vm.TaintRecordLoad(registerIndexA, uint64(addr), 4, inst.Opcode)
 		dumpLoadGeneric("LOAD_IND_U32", registerIndexA, uint64(addr), result, 32, false)
+		vm.Ram.WriteRegister(registerIndexA, result)
+		return
 	case LOAD_IND_I32:
-		value, errCode := vm.Ram.ReadRAMBytes(addr, 4)
+		value, errCode := vm.ReadRAMBytes(addr, 4)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 			return
 		}
 		rawDecoded := types.DecodeE_l(value)
 		result = uint64(int32(rawDecoded))
+		vm.TaintRecordLoad(registerIndexA, uint64(addr), 4, inst.Opcode)
 		dumpLoadGeneric("LOAD_IND_I32", registerIndexA, uint64(addr), result, 32, true)
+		vm.Ram.WriteRegister(registerIndexA, result)
+		return
 	case LOAD_IND_U64:
-		value, errCode := vm.Ram.ReadRAMBytes(addr, 8)
+		value, errCode := vm.ReadRAMBytes(addr, 8)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
-			vm.MachineState = PANIC
 			vm.terminated = true
-			vm.Fault_address = uint32(errCode)
 			return
 		}
 		result = types.DecodeE_l(value)
+		vm.TaintRecordLoad(registerIndexA, uint64(addr), 8, inst.Opcode)
 		dumpLoadGeneric("LOAD_IND_U64", registerIndexA, uint64(addr), result, 64, false)
+		vm.Ram.WriteRegister(registerIndexA, result)
+		return
 	case ADD_IMM_32:
-		result = x_encode((valueB+vx)%(1<<32), 4)
+		result = x_encode((valueB+vx)&0xFFFFFFFF, 4)
 		dumpBinOp("+", registerIndexA, registerIndexB, vx, result)
 	case ADD_IMM_64:
 		result = valueB + vx
@@ -1493,7 +1856,7 @@ func (vm *VMGo) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 		result = valueB | vx
 		dumpBinOp("|", registerIndexA, registerIndexB, vx, result)
 	case MUL_IMM_32:
-		result = x_encode((valueB*vx)%(1<<32), 4)
+		result = x_encode((valueB*vx)&0xFFFFFFFF, 4)
 		dumpBinOp("*", registerIndexA, registerIndexB, vx, result)
 	case MUL_IMM_64:
 		result = valueB * vx
@@ -1511,13 +1874,13 @@ func (vm *VMGo) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 		result = boolToUint(int64(valueB) > int64(vx))
 		dumpCmpOp("s>", registerIndexA, registerIndexB, vx, result)
 	case NEG_ADD_IMM_32:
-		result = x_encode((vx-valueB)%(1<<32), 4)
+		result = x_encode((vx-valueB)&0xFFFFFFFF, 4)
 		dumpBinOp("-+", registerIndexA, registerIndexB, vx, result)
 	case NEG_ADD_IMM_64:
 		result = vx - valueB
 		dumpBinOp("-+", registerIndexA, registerIndexB, vx, result)
 	case SHLO_L_IMM_32:
-		result = x_encode(valueB<<(vx&63)%(1<<32), 4)
+		result = x_encode((valueB<<(vx&31))&0xFFFFFFFF, 4)
 		dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
 	case SHLO_L_IMM_64:
 		result = valueB << (vx & 63)
@@ -1535,17 +1898,20 @@ func (vm *VMGo) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 		result = uint64(int64(valueB) >> (vx & 63))
 		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
 	case SHLO_L_IMM_ALT_32:
-		result = x_encode(vx<<(valueB&63)%(1<<32), 4)
+		result = x_encode((vx<<(valueB&31))&0xFFFFFFFF, 4)
 		dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
 	case SHLO_L_IMM_ALT_64:
 		result = vx << (valueB & 63)
 		dumpShiftOp("<<", registerIndexA, registerIndexB, vx, result)
 	case SHLO_R_IMM_ALT_32:
-		result = x_encode(vx>>(valueB&63)%(1<<32), 4)
+		result = x_encode(uint64(uint32(vx)>>(valueB&31)), 4)
 		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
 	case SHLO_R_IMM_ALT_64:
 		result = vx >> (valueB & 63)
 		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
+	case SHAR_R_IMM_ALT_32:
+		result = uint64(int64(int32(vx)) >> (valueB & 31))
+		dumpShiftOp("SHAR_R_IMM_ALT_32", registerIndexA, registerIndexB, vx, result)
 	case SHAR_R_IMM_ALT_64:
 		result = uint64(int64(vx) >> (valueB & 63))
 		dumpShiftOp(">>", registerIndexA, registerIndexB, vx, result)
@@ -1567,6 +1933,10 @@ func (vm *VMGo) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 			result = valueA
 		}
 		dumpCmovOp("== 0", registerIndexA, registerIndexB, vx, valueA, result, true)
+		// CMOV: result depends on registerA, registerB, and immediate
+		vm.TaintRecordALU(registerIndexA, []int{registerIndexA, registerIndexB}, inst.Opcode)
+		vm.Ram.WriteRegister(registerIndexA, result)
+		return
 	case CMOV_NZ_IMM:
 		if valueB != 0 {
 			result = vx
@@ -1574,19 +1944,25 @@ func (vm *VMGo) HandleTwoRegsOneImm(opcode byte, operands []byte) {
 			result = valueA
 		}
 		dumpCmovOp("!= 0", registerIndexA, registerIndexB, vx, valueA, result, false)
+		// CMOV: result depends on registerA, registerB, and immediate
+		vm.TaintRecordALU(registerIndexA, []int{registerIndexA, registerIndexB}, inst.Opcode)
+		vm.Ram.WriteRegister(registerIndexA, result)
+		return
 	}
+	// For ALU operations with immediate: registerB op imm -> registerA
+	vm.TaintRecordALU(registerIndexA, []int{registerIndexB}, inst.Opcode)
 	vm.Ram.WriteRegister(registerIndexA, result)
 }
 
 // A.5.11 Two Registers and One Offset
-func (vm *VMGo) HandleTwoRegsOneOffset(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx0 := extractTwoRegsOneOffset(operands)
+func (vm *VMGo) HandleTwoRegsOneOffset(inst *Instruction) {
+	registerIndexA, registerIndexB, vx0 := extractTwoRegsOneOffset(inst.Args)
 	vx := uint64(int64(vm.pc) + int64(vx0))
 	valueA := vm.Ram.ReadRegister(registerIndexA)
 	valueB := vm.Ram.ReadRegister(registerIndexB)
-	operand_len := len(operands)
+	operand_len := len(inst.Args)
 
-	switch opcode {
+	switch inst.Opcode {
 	case BRANCH_EQ:
 		taken := 0
 		if valueA == valueB {
@@ -1637,24 +2013,25 @@ func (vm *VMGo) HandleTwoRegsOneOffset(opcode byte, operands []byte) {
 }
 
 // A.5.12. Instructions with Arguments of Two Registers and Two Immediates. (LOAD_IMM_JUMP_IND)
-func (vm *VMGo) HandleTwoRegsTwoImms(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, vx, vy := extractTwoRegsAndTwoImmediates(operands)
+func (vm *VMGo) HandleTwoRegsTwoImms(inst *Instruction) {
+	registerIndexA, registerIndexB, vx, vy := extractTwoRegsAndTwoImmediates(inst.Args)
 	valueB := vm.Ram.ReadRegister(registerIndexB)
 
 	vm.Ram.WriteRegister(registerIndexA, vx)
+	vm.TaintRecordImm(registerIndexA, inst.Opcode) // Immediate value
 
-	vm.djump((valueB + vy) % (1 << 32))
+	vm.djump((valueB + vy) & 0xFFFFFFFF)
 }
 
 // A.5.13. Instructions with Arguments of Three Registers.
-func (vm *VMGo) HandleThreeRegs(opcode byte, operands []byte) {
-	registerIndexA, registerIndexB, registerIndexD := extractThreeRegs(operands)
+func (vm *VMGo) HandleThreeRegs(inst *Instruction) {
+	registerIndexA, registerIndexB, registerIndexD := extractThreeRegs(inst.Args)
 
 	valueA := vm.Ram.ReadRegister(registerIndexA)
 	valueB := vm.Ram.ReadRegister(registerIndexB)
 
 	var result uint64
-	switch opcode {
+	switch inst.Opcode {
 	case ADD_32:
 		result = x_encode(uint64(uint32(valueA)+uint32(valueB)), 4)
 		dumpThreeRegOp("ADD_32", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
@@ -1805,16 +2182,20 @@ func (vm *VMGo) HandleThreeRegs(opcode byte, operands []byte) {
 		if valueB == 0 {
 			result = valueA
 			dumpCmovOp("CMOV_IZ", registerIndexD, registerIndexB, valueA, valueA, result, true)
-		} else {
-			return
+			// CMOV: result depends on registerA, registerB, and registerD (original value)
+			vm.TaintRecordALU(registerIndexD, []int{registerIndexA, registerIndexB, registerIndexD}, inst.Opcode)
+			vm.Ram.WriteRegister(registerIndexD, result)
 		}
+		return
 	case CMOV_NZ:
 		if valueB != 0 {
 			result = valueA
 			dumpCmovOp("CMOV_NZ", registerIndexD, registerIndexB, valueA, valueA, result, false)
-		} else {
-			return
+			// CMOV: result depends on registerA, registerB, and registerD (original value)
+			vm.TaintRecordALU(registerIndexD, []int{registerIndexA, registerIndexB, registerIndexD}, inst.Opcode)
+			vm.Ram.WriteRegister(registerIndexD, result)
 		}
+		return
 	case ROT_L_64:
 		result = bits.RotateLeft64(valueA, int(valueB&63))
 		dumpRotOp("<<", reg(registerIndexD), reg(registerIndexA), valueB&63, result)
@@ -1850,6 +2231,8 @@ func (vm *VMGo) HandleThreeRegs(opcode byte, operands []byte) {
 		dumpThreeRegOp("minu", registerIndexD, registerIndexA, registerIndexB, valueA, valueB, result)
 	}
 
+	// Record taint: both source registers -> dest register (creates ALU node)
+	vm.TaintRecordALU(registerIndexD, []int{registerIndexA, registerIndexB}, inst.Opcode)
 	vm.Ram.WriteRegister(registerIndexD, result)
 }
 
@@ -1921,8 +2304,195 @@ func (vm *VMGo) SetPVMContext(l string) {
 	vm.logging = l
 }
 
-func (vm *VMGo) GetGas() int64 {
+func (vm *VMGo) GetGas() uint64 {
 	return vm.Gas
+}
+
+func (vm *VMGo) SetGas(gas uint64) {
+	vm.Gas = gas
+}
+
+func (vm *VMGo) InitStep(host *VM, entryPoint uint32) error {
+	vm.terminated = false
+	vm.IsChild = false
+	vm.hostVM = host           // Store host VM reference for host function calls
+	vm.EntryPoint = entryPoint // Store entry point for gas accounting
+
+	// Defer closing trace writers to ensure they're closed on any exit path
+	if PvmTraceMode && vm.JSONLTraceWriter != nil {
+		defer vm.JSONLTraceWriter.Close()
+	}
+	if PvmTracePrintMode && vm.JSONLTraceWriterPrint != nil {
+		defer vm.JSONLTraceWriterPrint.Close()
+	}
+
+	// A.2 deblob
+	if vm.code == nil {
+		vm.ResultCode = types.WORKRESULT_PANIC
+		vm.MachineState = PANIC
+		vm.terminated = true
+		return errors.New("no code to execute1")
+	}
+
+	if len(vm.code) == 0 {
+		vm.ResultCode = types.WORKRESULT_PANIC
+		vm.MachineState = PANIC
+		vm.terminated = true
+		return errors.New("no code to execute2")
+	}
+
+	if len(vm.bitmask) == 0 {
+		vm.ResultCode = types.WORKRESULT_PANIC
+		vm.MachineState = PANIC
+		vm.terminated = true
+		return errors.New("failed to decode bitmask")
+	}
+	vm.pc = uint64(entryPoint)
+	return nil
+}
+
+func (vm *VMGo) InitStepwise(pvm *VM, entryPoint uint32) error {
+	vm.terminated = false
+	vm.IsChild = false
+	vm.hostVM = pvm // Store parent VM reference for host function calls
+	vm.EntryPoint = entryPoint
+
+	// Validate VM state
+	if vm.code == nil || len(vm.code) == 0 {
+		vm.ResultCode = types.WORKRESULT_PANIC
+		vm.MachineState = PANIC
+		vm.terminated = true
+		return errors.New("no code to execute")
+	}
+
+	if len(vm.bitmask) == 0 {
+		vm.ResultCode = types.WORKRESULT_PANIC
+		vm.MachineState = PANIC
+		vm.terminated = true
+		return errors.New("failed to decode bitmask")
+	}
+
+	vm.pc = uint64(entryPoint)
+	return nil
+}
+
+func (vm *VMGo) ExecuteStep(pvm *VM) []byte {
+	// Save state before execution
+	prevpc := vm.pc
+	opcode := byte(0)
+
+	// Check PC bounds
+	if vm.pc >= uint64(len(vm.code)) {
+		vm.ResultCode = types.WORKRESULT_PANIC
+		vm.MachineState = PANIC
+		vm.terminated = true
+		pvm.ResultCode = types.WORKRESULT_PANIC
+		pvm.MachineState = PANIC
+		pvm.terminated = true
+		return make([]byte, 369) // Return empty log on error
+	}
+
+	opcode = vm.code[vm.pc]
+
+	// Execute one step
+	if err := vm.step(0); err != nil {
+		// Update parent VM state
+		pvm.ResultCode = vm.ResultCode
+		pvm.MachineState = vm.MachineState
+		pvm.terminated = vm.terminated
+
+		// Encode partial log even on error
+		log := vm.encodeStepLog(opcode, prevpc)
+		return log
+	}
+
+	// Handle gas exhaustion
+	if vm.Gas > (1 << 63) { // Check for underflow (gas wrapped around to very large number)
+		vm.ResultCode = types.WORKRESULT_OOG
+		vm.MachineState = OOG
+		vm.terminated = true
+	}
+
+	// Set result code if not terminated
+	if !vm.terminated {
+		vm.ResultCode = types.WORKRESULT_OK
+		pvm.ResultCode = types.WORKRESULT_OK
+	} else {
+		pvm.ResultCode = vm.ResultCode
+		pvm.MachineState = vm.MachineState
+		pvm.terminated = vm.terminated
+	}
+
+	// Encode and return binary log
+	return vm.encodeStepLog(opcode, prevpc)
+}
+
+// encodeStepLog encodes execution state into 369-byte binary log format
+// Format: 1 byte opcode + 4 bytes prevpc + 8 bytes gas + 104 bytes registers + 256 bytes mem_op
+func (vm *VMGo) encodeStepLog(opcode byte, prevpc uint64) []byte {
+	log := make([]byte, 369)
+	offset := 0
+
+	// 1 byte: opcode
+	log[offset] = opcode
+	offset++
+
+	// 4 bytes: previous PC (little-endian uint32)
+	pc32 := uint32(prevpc)
+	log[offset] = byte(pc32)
+	log[offset+1] = byte(pc32 >> 8)
+	log[offset+2] = byte(pc32 >> 16)
+	log[offset+3] = byte(pc32 >> 24)
+	offset += 4
+
+	// 8 bytes: gas (little-endian uint64)
+	log[offset] = byte(vm.Gas)
+	log[offset+1] = byte(vm.Gas >> 8)
+	log[offset+2] = byte(vm.Gas >> 16)
+	log[offset+3] = byte(vm.Gas >> 24)
+	log[offset+4] = byte(vm.Gas >> 32)
+	log[offset+5] = byte(vm.Gas >> 40)
+	log[offset+6] = byte(vm.Gas >> 48)
+	log[offset+7] = byte(vm.Gas >> 56)
+	offset += 8
+
+	// 13*8 bytes: registers (little-endian uint64)
+	registers := vm.Ram.ReadRegisters()
+	for i := 0; i < 13; i++ {
+		reg := registers[i]
+		log[offset] = byte(reg)
+		log[offset+1] = byte(reg >> 8)
+		log[offset+2] = byte(reg >> 16)
+		log[offset+3] = byte(reg >> 24)
+		log[offset+4] = byte(reg >> 32)
+		log[offset+5] = byte(reg >> 40)
+		log[offset+6] = byte(reg >> 48)
+		log[offset+7] = byte(reg >> 56)
+		offset += 8
+	}
+
+	// 256 bytes: memory operation buffer
+	// Copy lastMemOp string into the buffer (matches C implementation's mem_op_buffer)
+	if len(lastMemOp) > 0 {
+		memOpBytes := []byte(lastMemOp)
+		copyLen := len(memOpBytes)
+		if copyLen > 256 {
+			copyLen = 256
+		}
+		copy(log[offset:offset+copyLen], memOpBytes)
+	}
+	// Clear lastMemOp for next instruction
+	lastMemOp = ""
+
+	return log
+}
+
+func (vm *VMGo) SetPC(pc uint64) {
+	vm.pc = pc
+}
+
+func (vm *VMGo) GetHostID() uint64 {
+	return uint64(vm.host_func_id)
 }
 
 // A.5.4. Instructions with Arguments of Two Immediates.
@@ -2089,22 +2659,57 @@ func (ram *RawRam) Close() error {
 	return nil
 }
 
-// GetMemAccess checks access rights for a memory range using mprotect probe.
-// DANGER: This function uses unsafe operations and can cause SIGSEGV if the address is invalid or inaccessible.
+// GetMemAccess checks access rights for a memory range.
+// Returns the minimum access level across all pages in the range.
 func (ram *RawRam) GetMemAccess(address uint32, length uint32) (int, error) {
-	pageIndex := int(address / PageSize)
-	if pageIndex < 0 || pageIndex >= TotalPages {
+	if length == 0 {
+		return PageMutable, nil
+	}
+	startPage := int(address / PageSize)
+	endPage := int((address + length - 1) / PageSize)
+	if startPage < 0 || startPage >= TotalPages || endPage < 0 || endPage >= TotalPages {
 		return PageInaccessible, fmt.Errorf("invalid address")
 	}
-	// Map lookup with default value of PageInaccessible (0)
-	access, ok := ram.mem_access[pageIndex]
-	if !ok {
-		access = PageInaccessible
+	// Check all pages in the range - return minimum access level
+	minAccess := PageMutable
+	for pageIndex := startPage; pageIndex <= endPage; pageIndex++ {
+		access, ok := ram.mem_access[pageIndex]
+		if !ok {
+			access = PageInaccessible
+		}
+		if pageIndex == 0 {
+			fmt.Printf("Page 0 Access = %d\n", access)
+		}
+		if access < minAccess {
+			minAccess = access
+		}
 	}
-	if pageIndex == 0 {
-		fmt.Printf("Page 0 Access = %d\n", access)
+	return minAccess, nil
+}
+
+// FindFaultPage finds the first page in a memory range that doesn't have the required access.
+// For writes, it looks for pages that are not PageMutable.
+// For reads, it looks for pages that are PageInaccessible.
+// Returns the page-aligned address of the first failing page.
+func (ram *RawRam) FindFaultPage(address uint32, length uint32, isWrite bool) uint32 {
+	if length == 0 {
+		return (address / PageSize) * PageSize
 	}
-	return access, nil
+	startPage := int(address / PageSize)
+	endPage := int((address + length - 1) / PageSize)
+	for pageIndex := startPage; pageIndex <= endPage; pageIndex++ {
+		access, ok := ram.mem_access[pageIndex]
+		if !ok {
+			access = PageInaccessible
+		}
+		if isWrite && access != PageMutable {
+			return uint32(pageIndex) * PageSize
+		}
+		if !isWrite && access == PageInaccessible {
+			return uint32(pageIndex) * PageSize
+		}
+	}
+	return (address / PageSize) * PageSize
 }
 
 // ReadMemory reads data from a specific address in the memory if it's readable.
@@ -2127,7 +2732,8 @@ func (ram *RawRam) ReadMemory(address uint32, length uint32) (data []byte, err e
 		return nil, fmt.Errorf("memory at address %x is not readable", address)
 	}
 
-	return ram.memory[int(address):int(endAddr)], nil
+	result := ram.memory[int(address):int(endAddr)]
+	return result, nil
 }
 
 // WriteMemory writes data to a specific address in the memory if it's writable.

@@ -11,7 +11,7 @@ extern "C" {
 // Register and architecture constants
 #define REG_SIZE 13
 
-#define W_X 1024
+#define W_X 3072  // MaxExports - GP 0.7.2
 #define M   128
 #define V   1023
 #define Z_A 2

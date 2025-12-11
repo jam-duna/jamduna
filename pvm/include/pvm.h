@@ -23,7 +23,7 @@ extern "C" {
 #define OOB ((uint64_t)((1ULL << 32) - 3))  // Out of bounds error
 
 // PVM-specific constants
-#define W_X 1024
+#define W_X 3072  // MaxExports - GP 0.7.2
 #define M 128
 #define V 1023
 #define Z_Q (1 << 16)
@@ -162,6 +162,14 @@ pvm_vm_t* pvm_create(uint32_t service_index,
                         uint64_t initial_gas);
 // Execute VM starting at entry point
 pvm_result_t pvm_execute(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child);
+
+// Initialize VM for stepwise execution
+pvm_result_t pvm_init_stepwise(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child);
+
+// Execute a single instruction step and log execution state
+// Log format (369 bytes): 1 byte opcode, 4 bytes prevpc, 8 bytes gas,
+//                         13*8 bytes registers, 256 bytes mem_op_buffer
+pvm_result_t pvm_step(pvm_vm_t* vm, uint8_t* log);
 
 // Destroy VM instance and free resources
 void pvm_destroy(pvm_vm_t* vm);

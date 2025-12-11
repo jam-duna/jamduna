@@ -73,7 +73,9 @@ static void signal_handler(int sig, siginfo_t *si, void *arg) {
     regPtr[12] = ctx->uc_mcontext.gregs[REG_R15];
 
     // Store crash information in additional slots
-    regPtr[32] = rip;   // Store RIP for crash analysis
+    regPtr[32] = rip;                      // Store RIP for crash analysis
+    regPtr[35] = (uint64_t)fault_addr;     // Store fault address for virtual address calculation
+    regPtr[36] = (uint64_t)sig;            // Store signal number to distinguish SIGSEGV from others
 
     // Jump back to the recovery point in execute_x86
     siglongjmp(tls_jump_env, 1);

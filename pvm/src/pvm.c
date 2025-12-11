@@ -311,6 +311,172 @@ pvm_result_t pvm_execute(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child) 
 }
 
 
+// ===============================
+// Stepwise Execution API
+// ===============================
+
+/**
+ * Initialize VM for stepwise execution
+ *
+ * @param vm VM instance
+ * @param entry_point Starting PC address
+ * @param is_child Whether this is a child VM execution
+ * @return PVM_RESULT_OK on success, PVM_RESULT_ERROR on error
+ */
+pvm_result_t pvm_init_stepwise(pvm_vm_t* vm, uint32_t entry_point, uint32_t is_child) {
+    if (vm && vm->pvm_tracing) {
+        printf("pvm_init_stepwise: entry_point=0x%x is_child=%d initial_gas=%lld\n",
+               entry_point, is_child, (long long)vm->gas);
+        fflush(stdout);
+    }
+
+    if (!vm) {
+        return PVM_RESULT_ERROR;
+    }
+
+    // Validate VM state
+    if (!vm->code || vm->code_len == 0 || !vm->bitmask || vm->bitmask_len == 0) {
+        vm->result_code = WORKDIGEST_PANIC;
+        vm->machine_state = PANIC;
+        vm->terminated = 1;
+        return PVM_RESULT_ERROR;
+    }
+
+    // Initialize VM state
+    vm->terminated = 0;
+    vm->pc = (uint64_t)entry_point;
+    vm->is_child = is_child;
+    vm->start_pc = entry_point;
+    vm->initializing = 0;
+
+    // Initialize dispatch table if not already done (thread-safe)
+    static pthread_once_t dispatch_init_once = PTHREAD_ONCE_INIT;
+    pthread_once(&dispatch_init_once, init_dispatch_table);
+
+    return PVM_RESULT_OK;
+}
+
+/**
+ * Execute a single instruction step and optionally log execution state
+ *
+ * @param vm VM instance
+ * @param log Optional buffer (369 bytes) to store execution log:
+ *            - 1 byte: opcode
+ *            - 4 bytes: previous PC (little-endian)
+ *            - 8 bytes: gas after execution (little-endian)
+ *            - 104 bytes: 13 registers (little-endian)
+ *            - 256 bytes: memory operation buffer
+ * @return PVM_RESULT_OK on success, PVM_RESULT_PANIC/OOG on error
+ */
+pvm_result_t pvm_step(pvm_vm_t* vm, uint8_t* log) {
+    // Extern declaration for mem_op_buffer from opcode_handlers.c
+    extern char mem_op_buffer[256];
+
+    // Check PC bounds
+    if (vm->pc >= vm->code_len) {
+        if (vm->pvm_tracing) {
+            printf("TRACE PC=0x%llx gas=%lld OUT_OF_BOUNDS code_len=%u - panicking\n",
+                   (unsigned long long)vm->pc, (long long)vm->gas, vm->code_len);
+            fflush(stdout);
+        }
+        pvm_panic(vm, OOB);
+        return PVM_RESULT_PANIC;
+    }
+
+    // Fetch opcode
+    uint8_t opcode = vm->code[vm->pc];
+    uint64_t prevpc = vm->pc;
+
+    // Find operand length using bitmask
+    uint64_t len_operands = 0;
+    uint64_t limit = vm->pc + 25;
+    if (limit > vm->bitmask_len) {
+        limit = vm->bitmask_len;
+    }
+
+    for (uint64_t i = vm->pc + 1; i < limit; i++) {
+        if (vm->bitmask[i]) {
+            len_operands = i - vm->pc - 1;
+            goto found;
+        }
+    }
+
+    len_operands = limit - vm->pc - 1;
+    if (len_operands > 24) {
+        len_operands = 24;
+    }
+
+    // Bound operand length by actual code length
+    uint64_t max_operands = vm->code_len - vm->pc - 1;
+    if (len_operands > max_operands) {
+        len_operands = max_operands;
+    }
+
+found:
+    ; // Empty statement after label
+
+    // Execute instruction
+    uint8_t* operands = vm->code + vm->pc + 1;
+    vm->gas--; // Decrement gas once per instruction
+
+    if (dispatch_table[opcode]) {
+        dispatch_table[opcode](vm, operands, len_operands);
+    } else {
+        if (vm->pvm_tracing) {
+            printf("Unknown opcode: %d\n", opcode);
+        }
+        pvm_panic(vm, WHAT);
+        return PVM_RESULT_PANIC;
+    }
+
+    // Check gas and termination state
+    if (!vm->terminated && vm->gas <= 0) {
+        if (vm->pvm_tracing) {
+            printf("OUT_OF_GAS: VM ran out of gas, final gas=%lld, pc=0x%llx\n",
+                   (long long)vm->gas, (unsigned long long)vm->pc);
+            fflush(stdout);
+        }
+        vm->result_code = WORKDIGEST_OOG;
+        vm->machine_state = OOG;
+        vm->terminated = 1;
+        return PVM_RESULT_OOG;
+    } else if (!vm->terminated) {
+        vm->result_code = WORKDIGEST_OK;
+    }
+
+    // Encode execution log if buffer provided
+    if (log) {
+        size_t offset = 0;
+
+        // 1 byte: opcode
+        log[offset++] = opcode;
+
+        // 4 bytes: previous PC (little-endian)
+        uint32_t pc32 = (uint32_t)prevpc;
+        memcpy(log + offset, &pc32, 4);
+        offset += 4;
+
+        // 8 bytes: gas after execution (little-endian)
+        int64_t gas64 = vm->gas;
+        memcpy(log + offset, &gas64, 8);
+        offset += 8;
+
+        // 13*8 bytes: registers (little-endian)
+        for (int i = 0; i < 13; i++) {
+            memcpy(log + offset, &vm->registers[i], 8);
+            offset += 8;
+        }
+
+        // 256 bytes: memory operation buffer
+        memcpy(log + offset, mem_op_buffer, 256);
+    }
+
+    // Clear entire mem_op_buffer for next instruction
+    memset(mem_op_buffer, 0, 256);
+
+    return PVM_RESULT_OK;
+}
+
 // VM cleanup
 void pvm_destroy(pvm_vm_t* vm) {
     if (!vm) return;

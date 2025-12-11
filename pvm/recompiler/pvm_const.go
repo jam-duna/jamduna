@@ -3,7 +3,6 @@ package recompiler
 const (
 	regSize = 13
 
-	W_X = 1024
 	M   = 128
 	V   = 1023
 	Z_A = 2
@@ -24,6 +23,10 @@ var (
 	debugRecompiler = false
 	UseTally        = false
 )
+
+func SetShowDisassembly(show bool) {
+	showDisassembly = show
+}
 
 const (
 	NONE = (1 << 64) - 1 // 2^32 - 1 15

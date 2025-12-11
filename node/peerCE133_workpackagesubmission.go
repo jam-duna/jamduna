@@ -166,6 +166,11 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 		slot = common.GetWallClockJCE(fudgeFactorJCE)
 	}
 	log.Debug(log.R, "CE133-onWorkPackageSubmission INCOMING", "NODE", n.id, "peer", peerID, "workpackage", newReq.WorkPackage.Hash(), "slot", slot)
+	if isSilent {
+		log.Info(log.R, "CE133-onWorkPackageSubmission INCOMING - SILENT MODE", "NODE", n.id)
+		return fmt.Errorf("Node %d is silent mode", n.id)
+	}
+
 	prevAssignments, assignments := n.statedb.CalculateAssignments(slot)
 	inSet := false
 	for _, assignment := range assignments {

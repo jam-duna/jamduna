@@ -28,6 +28,7 @@ members = [
     "auth_copy",
     "null_authorizer",
     "doom",
+    "fib",
 ]
 
 [workspace.package]

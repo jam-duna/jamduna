@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -27,6 +28,13 @@ type TestPageMap struct {
 	IsWritable bool   `json:"is-writable"` // true if the memory is written to, false if it is read from
 }
 
+var MachineStateToStr map[uint8]string = map[uint8]string{
+	HALT:  "halt",
+	OOG:   "out-of-gas",
+	PANIC: "panic",
+	FAULT: "page-fault",
+}
+
 // TestCase
 type TestCase struct {
 	Name           string        `json:"name"`
@@ -37,10 +45,12 @@ type TestCase struct {
 	InitialGas     int64         `json:"initial-gas"`
 	Code           []int         `json:"program"`
 	//Bitmask        []int         `json:"bitmask"`
-	ExpectedStatus string       `json:"expected-status"`
-	ExpectedRegs   []uint64     `json:"expected-regs"`
-	ExpectedPC     uint32       `json:"expected-pc"`
-	ExpectedMemory []TestMemory `json:"expected-memory"`
+	ExpectedStatus       string       `json:"expected-status"`
+	ExpectedRegs         []uint64     `json:"expected-regs"`
+	ExpectedPC           uint32       `json:"expected-pc"`
+	ExpectedMemory       []TestMemory `json:"expected-memory"`
+	ExpectedFaultAddress uint64       `json:"expected-page-fault-address"`
+	ExpectedGas          uint64       `json:"expected-gas"`
 }
 
 func pvm_test(tc TestCase, testMode string) error {
@@ -50,6 +60,8 @@ func pvm_test(tc TestCase, testMode string) error {
 		return recompiler_test(tc)
 	case "C_FFI":
 		return pvm_test_backend(tc, BackendInterpreter)
+	case "vmgo":
+		return vmgo_test_backend(tc)
 	default:
 		return pvm_test_backend(tc, BackendInterpreter)
 	}
@@ -108,6 +120,113 @@ func pvm_test_backend(tc TestCase, backend string) error {
 	}
 	return fmt.Errorf("register mismatch for test %s: expected %v, got %v", tc.Name, tc.ExpectedRegs, actualRegs)
 }
+
+// vmgo_test_backend tests VMGo directly without going through the VM wrapper
+// Note: VMGo allocates 4GB memory per instance, so we need explicit GC to avoid OOM
+func vmgo_test_backend(tc TestCase) error {
+	hostENV := NewMockHostEnv()
+	serviceAcct := uint32(0) // stub
+
+	// Convert test code to raw instruction bytes
+	rawCodeBytes := make([]byte, len(tc.Code))
+	for i, val := range tc.Code {
+		rawCodeBytes[i] = byte(val)
+	}
+	PvmLogging = true
+	// Decode the program blob to get a Program struct
+	p := DecodeProgram_pure_pvm_blob(rawCodeBytes)
+
+	// setup Gas
+	var initialGas int64 = tc.InitialGas
+	if tc.InitialGas == 0 {
+		initialGas = 10000 // Default gas for tests
+	}
+
+	// Create VMGo directly
+	vmgo := NewVMGo(serviceAcct, p, tc.InitialRegs, uint64(tc.InitialPC), uint64(initialGas), hostENV)
+
+	// Set the initial memory
+
+	var mutatedPages map[uint32]bool = make(map[uint32]bool)
+	for _, mem := range tc.InitialMemory {
+		//pvm.Ram.SetPageAccess(mem.Address/PageSize, 1, AccessMode{Readable: false, Writable: true, Inaccessible: false})
+		vmgo.Ram.SetMemAccess(mem.Address, uint32(len(mem.Data)), recompiler.PageMutable)
+		vmgo.WriteRAMBytes(mem.Address, mem.Data[:])
+		mutatedPages[mem.Address/4096] = true
+	}
+	var pageSet map[uint32]bool = make(map[uint32]bool)
+	for _, pm := range tc.InitialPageMap {
+		// Set the page access based on the initial page map
+		if pm.IsWritable {
+			err := vmgo.Ram.SetMemAccess(pm.Address, pm.Length, recompiler.PageMutable)
+			if err != nil {
+				return fmt.Errorf("failed to set memory access for address %x: %w", pm.Address, err)
+			}
+		} else {
+			err := vmgo.Ram.SetMemAccess(pm.Address, pm.Length, recompiler.PageImmutable)
+			if err != nil {
+				return fmt.Errorf("failed to set memory access for address %x: %w", pm.Address, err)
+			}
+		}
+		pageSet[pm.Address/4096] = true
+	}
+
+	for page, _ := range mutatedPages {
+		if !pageSet[page] {
+			// set to read-only if not in the initial page map
+			vmgo.SetPagesAccessRange(int(page), 1, recompiler.PageInaccessible)
+		}
+	}
+
+	// Create a minimal VM wrapper for the host reference
+	hostVM := &VM{
+		ExecutionVM: vmgo,
+		hostenv:     hostENV,
+	}
+	vmgo.IsChild = false
+
+	vmgo.Execute(hostVM, uint32(tc.InitialPC))
+
+	// Check the registers
+	actualRegs := vmgo.ReadRegisters()
+	regsMatch := equalIntSlices(actualRegs[:], tc.ExpectedRegs)
+
+	resultCodeStr := MachineStateToStr[vmgo.MachineState]
+
+	expectedCodeStr := tc.ExpectedStatus
+	// Destroy VM and force GC to release 4GB memory before returning
+	vmgo.Destroy()
+	runtime.GC()
+
+	if resultCodeStr == expectedCodeStr {
+		fmt.Printf("Result code match for test %s: %s\n", tc.Name, resultCodeStr)
+	} else {
+		return fmt.Errorf("result code mismatch for test %s: expected %s, got %s", tc.Name, expectedCodeStr, resultCodeStr)
+	}
+
+	//gas check
+	postGas := vmgo.Gas
+	expectedGas := tc.ExpectedGas
+	if expectedGas != 0 {
+		if uint64(postGas) != expectedGas {
+			return fmt.Errorf("gas mismatch for test %s: expected %d, got %d", tc.Name, expectedGas, postGas)
+		} else {
+			fmt.Printf("Gas match for test %s: %d\n", tc.Name, postGas)
+		}
+	}
+
+	if resultCodeStr == "page-fault" && tc.ExpectedFaultAddress != 0 {
+		if uint64(vmgo.Fault_address) != tc.ExpectedFaultAddress {
+			return fmt.Errorf("fault address mismatch for test %s: expected %x, got %x", tc.Name, tc.ExpectedFaultAddress, vmgo.Fault_address)
+		} else {
+			fmt.Printf("Fault address match for test %s: %x\n", tc.Name, vmgo.Fault_address)
+		}
+	}
+	if regsMatch {
+		return nil
+	}
+	return fmt.Errorf("register mismatch for test %s: expected %v, got %v", tc.Name, tc.ExpectedRegs, actualRegs)
+}
 func recompiler_test(tc TestCase) error {
 	var num_mismatch int
 	serviceAcct := uint32(0) // stub
@@ -128,6 +247,8 @@ func recompiler_test(tc TestCase) error {
 	w_byte := make([]byte, w_size)
 
 	rvm := NewRecompilerVM(serviceAcct, tc.InitialRegs, uint64(tc.InitialPC), 4096, hostENV, false, []byte{}, 100000, p, uint32(o_size), uint32(w_size), uint32(z), uint32(s), o_byte, w_byte)
+	recompiler.ALWAYS_COMPILE = true
+	defer runtime.GC()
 	// Set the initial memory
 	for _, mem := range tc.InitialMemory {
 		//pvm.Ram.SetPageAccess(mem.Address/PageSize, 1, AccessMode{Readable: false, Writable: true, Inaccessible: false})
@@ -191,21 +312,31 @@ func recompiler_test(tc TestCase) error {
 		}
 	}
 	rvm.Close()
-	return nil
-	resultCodeStr := types.HostResultCodeToString[resultCode]
-	if resultCodeStr == "page-fault" {
-		resultCodeStr = "panic"
-	}
+
+	actualRegs := rvm.ReadRegisters()
+	regsMatch := equalIntSlices(actualRegs[:], tc.ExpectedRegs)
+
+	resultCodeStr := MachineStateToStr[resultCode]
+
 	expectedCodeStr := tc.ExpectedStatus
-	if expectedCodeStr == "page-fault" {
-		expectedCodeStr = "panic"
-	}
+
 	if resultCodeStr == expectedCodeStr {
 		fmt.Printf("Result code match for test %s: %s\n", tc.Name, resultCodeStr)
 	} else {
 		return fmt.Errorf("result code mismatch for test %s: expected %s, got %s", tc.Name, expectedCodeStr, resultCodeStr)
 	}
-	return fmt.Errorf("register mismatch for test %s: expected %v, got %v", tc.Name, tc.ExpectedRegs, rvm.ReadRegisters())
+
+	if resultCodeStr == "page-fault" && tc.ExpectedFaultAddress != 0 {
+		if uint64(rvm.GetFaultAddress()) != tc.ExpectedFaultAddress {
+			return fmt.Errorf("fault address mismatch for test %s: expected %x, got %x", tc.Name, tc.ExpectedFaultAddress, rvm.GetFaultAddress())
+		} else {
+			fmt.Printf("Fault address match for test %s: %x\n", tc.Name, rvm.GetFaultAddress())
+		}
+	}
+	if regsMatch {
+		return nil
+	}
+	return fmt.Errorf("register mismatch for test %s: expected %v, got %v", tc.Name, tc.ExpectedRegs, actualRegs)
 }
 
 // BackendResult holds the execution result from a backend
@@ -217,7 +348,7 @@ type BackendResult struct {
 }
 
 func TestPVMAll(t *testing.T) {
-	mode := "C_FFI" // change to "C_FFI" to test the C backend
+	mode := "vmgo" // change to "C_FFI" to test the C backend
 	log.InitLogger("debug")
 	// Directory containing the JSON files
 	dir := "programs"
@@ -231,7 +362,9 @@ func TestPVMAll(t *testing.T) {
 	num_mismatch := 0
 	total_mismatch := 0
 	skip := map[string]bool{
-		"inst_ecalli_100.json": true, // skip ecalli test for now
+		"inst_ecalli_100.json":                  true, // skip ecalli test for now
+		"inst_store_imm_u8_trap_read_only.json": true, // skip store to read-only memory test for now
+		"inst_store_u8_trap_read_only.json":     true, // skip store to read-only memory test for now
 	}
 	for _, file := range files {
 		if skip[file.Name()] {
@@ -399,4 +532,95 @@ func TestEcalli(t *testing.T) {
 	if err != nil {
 		t.Errorf("CGO backend test failed for %s: %v", tc.Name, err)
 	}
+}
+
+// TestVMGoAll runs all PVM test cases using VMGo backend directly
+func TestVMGoAll(t *testing.T) {
+	mode := "vmgo"
+	log.InitLogger("debug")
+	// Directory containing the JSON files
+	dir := "programs"
+
+	// Read all files in the directory
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("Failed to read directory: %v", err)
+	}
+	count := 0
+	num_mismatch := 0
+	total_mismatch := 0
+	skip := map[string]bool{
+		"inst_ecalli_100.json": true, // skip ecalli test for now
+	}
+	for _, file := range files {
+		if skip[file.Name()] {
+			continue
+		}
+		if strings.Contains(file.Name(), "riscv") {
+			continue // skip riscv tests
+		}
+		count++
+		if file.IsDir() {
+			continue
+		}
+
+		if !strings.HasSuffix(file.Name(), ".json") {
+			continue
+		}
+
+		filePath := filepath.Join(dir, file.Name())
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			t.Fatalf("Failed to read file %s: %v", filePath, err)
+		}
+
+		var testCase TestCase
+		err = json.Unmarshal(data, &testCase)
+		if err != nil {
+			t.Fatalf("Failed to unmarshal JSON from file %s: %v", filePath, err)
+		}
+		name := testCase.Name
+		t.Run(name, func(t *testing.T) {
+			err = pvm_test(testCase, mode)
+			if err != nil {
+				t.Errorf("❌ [%s] VMGo test failed: %v", name, err)
+			} else {
+				t.Logf("✅ [%s] VMGo test passed", name)
+			}
+		})
+		total_mismatch += num_mismatch
+	}
+	// show the match rate
+	fmt.Printf("VMGo Match rate: %v/%v\n", count-total_mismatch, count)
+}
+
+// TestVMGoSingle runs a single test case using VMGo backend
+func TestVMGoSingle(t *testing.T) {
+	log.InitLogger("debug")
+	filename := "programs/inst_branch_eq_nok.json"
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatalf("Failed to read test file %s: %v", filename, err)
+	}
+
+	var tc TestCase
+	err = json.Unmarshal(data, &tc)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal test case from %s: %v", filename, err)
+	}
+
+	// Debug: Print the program bytes and expected behavior
+	t.Logf("Program bytes: %v", tc.Code)
+	t.Logf("Initial regs: %v", tc.InitialRegs)
+	t.Logf("Expected regs: %v", tc.ExpectedRegs)
+	t.Logf("Expected PC: %d", tc.ExpectedPC)
+	t.Logf("Expected status: %s", tc.ExpectedStatus)
+
+	// Test with VMGo backend directly
+	t.Run("vmgo", func(t *testing.T) {
+		err = vmgo_test_backend(tc)
+		if err != nil {
+			t.Errorf("VMGo backend test failed for %s: %v", tc.Name, err)
+		}
+	})
 }

@@ -43,9 +43,13 @@ const (
 	TotalPages = TotalMem / PageSize    // 1,048,576 pages
 )
 
+// PVM Machine States (from GP spec)
 const (
-	HOST  = 4
-	PANIC = 2
+	HALT  = 0 // regular halt ∎
+	PANIC = 1 // panic ☇
+	FAULT = 2 // page-fault F
+	HOST  = 3 // host-call h
+	OOG   = 4 // out-of-gas ∞
 )
 
 /*
@@ -82,7 +86,15 @@ const (
 	ripSlotIndex     = 32 // RIP is at index 32
 	heapPointerSlot  = 33 // Heap pointer is at index 33
 
-	opcodeDebugSlot = 34 // Opcode debug info is at index 34
+	opcodeDebugSlot    = 34 // Opcode debug info is at index 34
+	faultAddrSlotIndex = 35 // Fault address from signal handler is at index 35
+	signalSlotIndex    = 36 // Signal number from signal handler
+)
+
+// Signal numbers (from Linux)
+const (
+	SIGSEGV = 11
+	SIGBUS  = 7
 )
 
 type RecompilerVM struct {
@@ -92,7 +104,7 @@ type RecompilerVM struct {
 	HostFunc
 	pc uint64
 	//
-	Gas          int64
+	Gas          uint64
 	IsChild      bool
 	MachineState uint8
 	ResultCode   int
@@ -135,6 +147,7 @@ type RecompilerVM struct {
 
 	x86Code   []byte
 	djumpAddr uintptr // address of the jump table in x86Code
+	FaultAddr uint64  // address that caused fault, for debugging
 
 	reuseCode bool // whether to reuse the existing x86Code buffer
 }
@@ -282,18 +295,17 @@ func (rvm *RecompilerVM) SetJumpTable(j []uint32) error {
 	return nil
 }
 
-func (rvm *RecompilerVM) SetGas(gas int64) {
+func (rvm *RecompilerVM) SetGas(gas uint64) {
 	rvm.Gas = gas
-	rvm.WriteContextSlot(gasSlotIndex, uint64(gas), 8)
+	rvm.WriteContextSlot(gasSlotIndex, gas, 8)
 }
 
-func (rvm *RecompilerVM) GetGas() int64 {
+func (rvm *RecompilerVM) GetGas() uint64 {
 	return rvm.Gas
 }
 
 func (rvm *RecompilerVM) GetResultCode() uint8 {
-	state, _ := rvm.ReadContextSlot(vmStateSlotIndex)
-	return uint8(state)
+	return uint8(rvm.ResultCode)
 }
 
 func (rvm *RecompilerVM) Panic(uint64) {
@@ -676,14 +688,34 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(entry uint32) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to read gas from context slot: %w", err)
 	}
-	vm.Gas = int64(gas)
+	vm.Gas = gas
 	if crashed == -1 || err != nil {
-		vm.ResultCode = PANIC
-		vm.MachineState = PANIC
-		fmt.Printf("PANIC in ExecuteX86Code: %v\n", err)
+		vm.ResultCode = types.WORKDIGEST_PANIC // Result code is always PANIC for crashes
+		// Check signal type to determine if it's a memory fault (SIGSEGV/SIGBUS) or other error
+		sigNum, _ := vm.ReadContextSlot(signalSlotIndex)
+		if sigNum == SIGSEGV || sigNum == SIGBUS {
+			vm.MachineState = FAULT
+			vm.WriteContextSlot(vmStateSlotIndex, uint64(FAULT), 8)
+			fmt.Printf("FAULT (page-fault, signal=%d) in ExecuteX86Code: %v\n", sigNum, err)
+		} else {
+			vm.MachineState = PANIC
+			vm.WriteContextSlot(vmStateSlotIndex, uint64(PANIC), 8)
+			fmt.Printf("PANIC (signal=%d) in ExecuteX86Code: %v\n", sigNum, err)
+		}
 		fmt.Printf("codeAddr: 0x%x\n", vm.codeAddr)
 		fmt.Printf("djumpAddr: 0x%x\n", vm.djumpAddr)
 		fmt.Printf("realMemory address: 0x%x\n", vm.realMemAddr)
+		// Calculate virtual fault address by subtracting realMemAddr from the actual fault address
+		// Align to page boundary per GP spec
+		faultAddr, _ := vm.ReadContextSlot(faultAddrSlotIndex)
+		if faultAddr >= uint64(vm.realMemAddr) {
+			virtualAddr := faultAddr - uint64(vm.realMemAddr)
+			vm.FaultAddr = (virtualAddr / PageSize) * PageSize
+			fmt.Printf("Fault address: 0x%x (virtual: 0x%x, page-aligned: 0x%x)\n", faultAddr, virtualAddr, vm.FaultAddr)
+		} else {
+			vm.FaultAddr = (faultAddr / PageSize) * PageSize
+			fmt.Printf("Fault address: 0x%x (outside memory region, page-aligned: 0x%x)\n", faultAddr, vm.FaultAddr)
+		}
 		rip, _ := vm.ReadContextSlot(ripSlotIndex)
 		if rip >= uint64(vm.codeAddr) && rip < uint64(len(vm.realCode))+uint64(vm.codeAddr) {
 			// get the code offset out
@@ -753,19 +785,38 @@ func (vm *RecompilerVM) Resume() error {
 	if err != nil {
 		return fmt.Errorf("failed to read context slots: %w", err)
 	}
-	vm.Gas = int64(slots[0])
+	vm.Gas = slots[0]
 	vm.pc = slots[1]
 	vmState := slots[2]
 	host_id := slots[3]
 
 	if crashed == -1 || err != nil {
-		vm.ResultCode = PANIC
-		vm.MachineState = PANIC
-		fmt.Printf("PANIC in ExecuteX86Code: %v\n", err)
+		vm.ResultCode = types.WORKDIGEST_PANIC // Result code is always PANIC for crashes
+		// Check signal type to determine if it's a memory fault (SIGSEGV/SIGBUS) or other error
+		sigNum, _ := vm.ReadContextSlot(signalSlotIndex)
+		if sigNum == SIGSEGV || sigNum == SIGBUS {
+			vm.MachineState = FAULT
+			vm.WriteContextSlot(vmStateSlotIndex, uint64(FAULT), 8)
+			fmt.Printf("FAULT (page-fault, signal=%d) in Resume: %v\n", sigNum, err)
+		} else {
+			vm.MachineState = PANIC
+			vm.WriteContextSlot(vmStateSlotIndex, uint64(PANIC), 8)
+			fmt.Printf("PANIC (signal=%d) in Resume: %v\n", sigNum, err)
+		}
 		fmt.Printf("codeAddr: 0x%x\n", vm.codeAddr)
 		fmt.Printf("djumpAddr: 0x%x\n", vm.djumpAddr)
 		fmt.Printf("realMemory address: 0x%x\n", vm.realMemAddr)
-
+		// Calculate virtual fault address by subtracting realMemAddr from the actual fault address
+		// Align to page boundary per GP spec
+		faultAddr, _ := vm.ReadContextSlot(faultAddrSlotIndex)
+		if faultAddr >= uint64(vm.realMemAddr) {
+			virtualAddr := faultAddr - uint64(vm.realMemAddr)
+			vm.FaultAddr = (virtualAddr / PageSize) * PageSize
+			fmt.Printf("Fault address: 0x%x (virtual: 0x%x, page-aligned: 0x%x)\n", faultAddr, virtualAddr, vm.FaultAddr)
+		} else {
+			vm.FaultAddr = (faultAddr / PageSize) * PageSize
+			fmt.Printf("Fault address: 0x%x (outside memory region, page-aligned: 0x%x)\n", faultAddr, vm.FaultAddr)
+		}
 		// restore the gas calculation
 		rip, _ := vm.ReadContextSlot(ripSlotIndex)
 		if rip >= uint64(vm.codeAddr) && rip < uint64(len(vm.realCode))+uint64(vm.codeAddr) {
@@ -1457,4 +1508,61 @@ func (vm *RecompilerVM) GetX86FromPVMX(code []byte) error {
 		fmt.Printf("Loaded PVMX from %s (cached)\n", filename)
 	}
 	return nil
+}
+func (rvm *RecompilerVM) GetMachineState() uint8 {
+	state, _ := rvm.ReadContextSlot(vmStateSlotIndex)
+	return uint8(state)
+}
+
+func (rvm *RecompilerVM) ExecuteAsChild(entry uint32) error {
+	compileStart := time.Now()
+	rvm.pc = 0
+	rvm.WriteContextSlot(gasSlotIndex, uint64(rvm.Gas), 8)
+	// Only compile if x86Code is not already compiled
+	if len(rvm.x86Code) == 0 {
+		rvm.x86Code, rvm.djumpAddr, rvm.InstMapPVMToX86, rvm.InstMapX86ToPVM = rvm.compiler.CompileX86Code(rvm.pc)
+		err1 := rvm.SavePVMX()
+		if err1 != nil {
+			fmt.Printf("SavePVMX failed: %v\n", err1)
+		}
+	}
+	rvm.compileTime = time.Since(compileStart)
+
+	hardStart := time.Now()
+	execStart := time.Now()
+	if err := rvm.ExecuteX86CodeWithEntry(entry); err != nil {
+		// we don't have to return this , just print it
+		fmt.Printf("ExecuteX86 crash detected: %v\n", err)
+	}
+	// executionTime captures the time spent in ExecuteX86CodeWithEntry
+	// This includes mmap setup + actual x86 execution
+	rvm.executionTime = time.Since(execStart)
+
+	for rvm.MachineState == SBRK {
+		if rvm.MachineState == SBRK {
+			err := rvm.HandleSbrk()
+			if err != nil {
+				fmt.Printf("HandleSbrk failed: %v\n", err)
+				break
+			}
+		}
+		resumeStart := time.Now()
+		err := rvm.Resume()
+		resumeTime := time.Since(resumeStart)
+		rvm.executionTime += resumeTime
+		if err != nil {
+			fmt.Printf("Resume after host call failed: %v\n", err)
+			rvm.WriteContextSlot(vmStateSlotIndex, uint64(PANIC), 8)
+			break
+		}
+	}
+	rvm.allExecutionTime = time.Since(hardStart)
+	fmt.Printf("Child execution finished: compileTime=%v executionTime=%v totalTime=%v\n",
+		rvm.compileTime, rvm.executionTime, rvm.allExecutionTime)
+	return nil
+}
+
+func (rvm *RecompilerVM) GetHostID() uint64 {
+	hostId, _ := rvm.ReadContextSlot(hostFuncIdIndex)
+	return hostId
 }

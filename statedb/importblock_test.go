@@ -205,7 +205,7 @@ func TestTracesInterpreter(t *testing.T) {
 	//(t)
 }
 func TestTracesGoInterpreter(t *testing.T) {
-	PvmLogging = true
+	PvmLogging = false
 	DebugHostFunctions = false
 	log.InitLogger("debug")
 
@@ -251,6 +251,7 @@ func TestTracesGoInterpreter(t *testing.T) {
 				// Run the actual test logic for each file as a distinct sub-test.
 				t.Run(e.Name(), func(t *testing.T) {
 					runSingleSTFTest(t, filename, string(content), BackendGoInterpreter, false)
+					runtime.GC()
 				})
 			}
 		})

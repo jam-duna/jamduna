@@ -698,27 +698,32 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	workPackageBundle, err := n.fetchWorkPackageBundle(spec, workReport.SegmentRootLookup, workReport.CoreIndex, guarantors)
 	if err != nil {
 		log.Error(log.Audit, "auditWorkReport:FetchWorkPackageBundle", "err", err)
-		return
+	}
+	auditPass := false
+	if !isSilent {
+		auditPass = true
+		log.Info(log.Audit, "auditWorkReport:executeWorkPackageBundle FAKE PASS", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash())
+	} else {
+		wr, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, n.statedb.GetTimeslot(), log.Auditor, 0)
+		if err != nil {
+			log.Error(log.Audit, "auditWorkReport:ExecuteWorkPackageBundle", "err", err)
+			return judgement, err
+		}
+
+		if spec.ErasureRoot == wr.AvailabilitySpec.ErasureRoot {
+			auditPass = true
+			log.Debug(log.Audit, "auditWorkReport:executeWorkPackageBundle PASS", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash())
+		} else {
+			log.Warn(log.Audit, "auditWorkReport:executeWorkPackageBundle FAIL", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash())
+		}
 	}
 
-	wr, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, n.statedb.GetTimeslot(), log.Auditor, 0)
-	if err != nil {
-		return
-	}
-
+	// Cache work report before making judgement
 	select {
 	case n.workReportsCh <- workReport:
 		// successfully sent
 	default:
 		log.Warn(log.Audit, "auditWorkReport: workReportsCh full, dropping workReport", "workReport", workReport.Hash())
-	}
-
-	auditPass := false
-	if spec.ErasureRoot == wr.AvailabilitySpec.ErasureRoot {
-		auditPass = true
-		log.Debug(log.Audit, "auditWorkReport:executeWorkPackageBundle PASS", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash())
-	} else {
-		log.Warn(log.Audit, "auditWorkReport:executeWorkPackageBundle FAIL", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash())
 	}
 
 	judgement, err = n.MakeJudgement(workReport, auditPass)

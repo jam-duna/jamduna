@@ -241,6 +241,9 @@ const (
 	AlgoServiceCode = 10
 	AlgoServiceFile = "/services/algo/algo.pvm"
 
+	FibServiceCode = 15
+	FibServiceFile = "/services/fib/fib.pvm"
+
 	AuthCopyServiceCode = 20
 	AuthCopyServiceFile = "/services/auth_copy/auth_copy.pvm"
 )

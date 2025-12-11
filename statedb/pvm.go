@@ -3,12 +3,15 @@ package statedb
 import (
 	"fmt"
 	"math"
+	"net/http"
+	"sync"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/pvm/program"
 	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	"github.com/colorfulnotion/jam/types"
+	"github.com/gorilla/websocket"
 )
 
 const (
@@ -19,7 +22,6 @@ const (
 )
 
 const (
-	W_X = 1024
 	M   = types.TransferMemoSize
 	V   = 1023
 	Z_A = 2
@@ -47,13 +49,24 @@ type ExecutionVM interface {
 	ReadRAMBytes(uint32, uint32) ([]byte, uint64)
 	WriteRAMBytes(uint32, []byte) uint64
 	SetHeapPointer(uint32)
-
-	GetGas() int64
+	SetPagesAccessRange(startPage, pageCount int, access int) error
+	GetGas() uint64
+	SetGas(uint64)
+	GetPC() uint64
+	SetPC(uint64)
+	GetMachineState() uint8
+	GetFaultAddress() uint64
 	Panic(uint64)
 	SetHostResultCode(uint64)
 	Init(argument_data_a []byte) (err error)
 	Execute(vm *VM, EntryPoint uint32) error
+	ExecuteAsChild(entryPoint uint32) error
+	GetHostID() uint64
 	Destroy()
+
+	// to support ExecuteWorkPackageBundleSteps
+	InitStepwise(vm *VM, entryPoint uint32) error
+	ExecuteStep(vm *VM) []byte
 }
 
 type VM struct {
@@ -89,9 +102,8 @@ type VM struct {
 	N                common.Hash
 	Delta            map[uint32]*types.ServiceAccount
 
-	RefineM_map        map[uint32]*RefineM
-	Exports            [][]byte
-	ExportSegmentIndex uint32
+	Exports       [][]byte
+	TotalExported uint64
 
 	// Accumulate (used in host functions)
 	X        *types.XContext
@@ -102,6 +114,7 @@ type VM struct {
 	// These track read dependencies during execution to export as witnesses
 	codeWitness    map[common.Address][]byte                   // code reads
 	storageWitness map[common.Address]evmtypes.ContractStorage // storage reads
+	pushFrame      func([]byte)
 }
 
 type Program program.Program
@@ -258,6 +271,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		Service_index:   service_index,
 		ServiceMetadata: Metadata,
 		Backend:         pvmBackend,
+		VMs:             make(map[uint32]*ExecutionVM),
 	}
 
 	requiredMemory := uint64(uint64(5*Z_Z) + uint64(Z_func(o_size)) + uint64(Z_func(w_size+z*Z_P)) + uint64(Z_func(s)) + uint64(Z_I))
@@ -337,7 +351,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		vm.ExecutionVM = rvm
 	} else if vm.Backend == BackendGoInterpreter {
 		machine := NewVMGo(service_index, p, initialRegs, initialPC, initialGas, hostENV)
-		machine.Gas = int64(initialGas)
+		machine.Gas = initialGas
 		vm.ExecutionVM = machine
 		// o - read-only
 		rw_data_address := uint32(2*Z_Z) + Z_func(o_size)
@@ -366,6 +380,94 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 
 	vm.VMs = nil
 	return vm
+}
+
+func (vm *VM) attachFrameServer(addr, htmlPath string) error {
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+
+	var (
+		connMu sync.Mutex
+		wsConn *websocket.Conn
+	)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		http.ServeFile(w, r, htmlPath)
+	})
+
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		c, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			fmt.Println("upgrade error:", err)
+			return
+		}
+		fmt.Println("WS client connected")
+
+		connMu.Lock()
+		if wsConn != nil {
+			wsConn.Close()
+		}
+		wsConn = c
+		connMu.Unlock()
+
+		c.SetCloseHandler(func(code int, text string) error {
+			fmt.Printf("WS closed: %d %s\n", code, text)
+			connMu.Lock()
+			if wsConn == c {
+				wsConn = nil
+			}
+			connMu.Unlock()
+			return nil
+		})
+	})
+
+	vm.pushFrame = func(data []byte) {
+		connMu.Lock()
+		defer connMu.Unlock()
+		if wsConn != nil {
+			if err := wsConn.WriteMessage(websocket.BinaryMessage, data); err != nil {
+				fmt.Println("WS write error:", err)
+				wsConn.Close()
+				wsConn = nil
+			}
+		}
+	}
+
+	srv := &http.Server{Addr: addr, Handler: mux}
+	go func() {
+		fmt.Println("Viewer server listening on", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fmt.Println("ListenAndServe:", err)
+		}
+	}()
+	return nil
+}
+
+func (vm *VM) NewEmptyExecutionVM(service_index uint32, p *Program, initialRegs []uint64, initialPC uint64, initialHeap uint64, hostENV types.HostEnv, machineIndex uint32) *ExecutionVM {
+	var e_vm ExecutionVM
+	initialGas := uint64(0x7FFFFFFFFFFFFFFF)
+	if vm.Backend == BackendGoInterpreter || vm.Backend == BackendInterpreter {
+		machine := NewVMGo(service_index, p, initialRegs, initialPC, initialGas, hostENV)
+		machine.Gas = initialGas
+		// Track all steps (TargetStep=0 means no window restriction)
+		// machine.EnableTaintForStep(0, 0)
+		e_vm = machine
+		// Trace writers will be initialized lazily when first needed (allows dynamic enabling)
+	} else if vm.Backend == BackendInterpreter { // currently unreachable
+		// machine := NewInterpreter(service_index, p, initialRegs, initialPC, uint64(initialGas), hostENV)
+		// machine.SetHostCallBack()
+		// machine.SetLogging()
+		// e_vm = machine
+	} else if vm.Backend == BackendCompiler {
+		rvm := NewRecompilerVMWithoutSetup(service_index, initialRegs, initialPC, hostENV, false, []byte{}, uint64(initialGas), p)
+		e_vm = rvm
+	}
+
+	return &e_vm
 }
 
 func NewVMFromCode(serviceIndex uint32, code []byte, i uint64, initialHeap uint64, hostENV types.HostEnv, pvmBackend string, initialGas uint64) *VM {
@@ -416,6 +518,11 @@ func (vm *VM) ExecuteRefine(core uint16, workitemIndex uint32, workPackage types
 	vm.Extrinsics = extrinsics
 	vm.Imports = importsegments
 
+	for i := 0; i < int(workitemIndex); i++ {
+		item := workPackage.WorkItems[i]
+		vm.TotalExported += uint64(item.ExportCount)
+	}
+
 	vm.executeWithBackend(a, types.EntryPointRefine)
 	r, res = vm.getArgumentOutputs()
 
@@ -423,6 +530,48 @@ func (vm *VM) ExecuteRefine(core uint16, workitemIndex uint32, workPackage types
 	exportedSegments = vm.Exports
 
 	return r, res, exportedSegments
+}
+
+// input by order([work item index],[workpackage itself], [result from IsAuthorized], [import segments], [export count])
+func (vm *VM) SetupRefine(core uint16, workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash, n common.Hash) {
+	vm.Mode = ModeRefine
+
+	workitem := workPackage.WorkItems[workitemIndex]
+
+	// core index is now a refine argument in 0.7.4
+	a := append(types.E(uint64(core)), types.E(uint64(workitemIndex))...)
+	serviceBytes := types.E(uint64(workitem.Service))
+	a = append(a, serviceBytes...)
+	//fmt.Printf("ExecuteRefine  s %d bytes - %x\n", len(serviceBytes), serviceBytes)
+	encoded_workitem_payload, _ := types.Encode(workitem.Payload)
+	a = append(a, encoded_workitem_payload...) // variable number of bytes
+	//fmt.Printf("ExecuteRefine  payload %d bytes - %x\n", len(encoded_workitem_payload), encoded_workitem_payload)
+	a = append(a, workPackage.Hash().Bytes()...) // 32
+
+	//fmt.Printf("ExecuteRefine TOTAL len(a)=%d %x\n", len(a), a)
+	vm.WorkItemIndex = workitemIndex
+	vm.WorkPackage = workPackage
+
+	vm.N = n
+	vm.Authorization = authorization.Ok
+	vm.Extrinsics = extrinsics
+	vm.Imports = importsegments
+
+	for i := 0; i < int(workitemIndex); i++ {
+		item := workPackage.WorkItems[i]
+		vm.TotalExported += uint64(item.ExportCount)
+	}
+
+	vm.Init(a)
+	vm.IsChild = false
+
+	// Initialize for stepwise execution
+	err := vm.InitStepwise(vm, types.EntryPointRefine)
+	if err != nil {
+		log.Error(vm.logging, "InitStepwise failed", "error", err)
+	}
+
+	// do not execute ... we will do ExecuteStep one step at a time
 }
 
 func (vm *VM) ExecuteAccumulate(t uint32, s uint32, inputs []types.AccumulateInput, X *types.XContext, n common.Hash) (r types.Result, res uint64, xs *types.ServiceAccount) {
@@ -473,6 +622,10 @@ func (vm *VM) executeWithBackend(argumentData []byte, entryPoint uint32) {
 		log.Error(vm.logging, "VM execution failed", "error", err)
 	}
 	vm.ResultCode = vm.GetResultCode()
+	for _, m := range vm.VMs {
+		(*m).Destroy()
+	}
+	vm.VMs = nil
 }
 
 func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {

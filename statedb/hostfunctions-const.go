@@ -27,6 +27,8 @@ const (
 
 var DebugHostFunctions = false
 
+var DebugHostFunctionMap = map[int]int{}
+
 // DebugHostFunction prints colorized debug information about host function calls
 func (vm *VM) DebugHostFunction(hostFn int, format string, a ...any) {
 	if !DebugHostFunctions {
@@ -39,6 +41,7 @@ func (vm *VM) DebugHostFunction(hostFn int, format string, a ...any) {
 		"\x1b[35m", // magenta
 		"\x1b[36m", // cyan
 	}
+	DebugHostFunctionMap[hostFn] += 1
 	reset := "\x1b[0m"
 	color := colors[hostFn%len(colors)]
 	fmt.Printf("%s[%d]***** HostFunction %s ", color, vm.Service_index, HostFnToName(hostFn))
@@ -97,31 +100,31 @@ func HostFnToName(hostFn int) string {
 
 const (
 	// JAM Protocol Host Function IDs (0-26, 100)
-	GAS               = 0   // Gas metering
-	FETCH             = 1   // Fetch work package data
-	LOOKUP            = 2   // Lookup service state
-	READ              = 3   // Read from service state
-	WRITE             = 4   // Write to service state
-	INFO              = 5   // Query service information
-	HISTORICAL_LOOKUP = 6   // Lookup historical state
-	EXPORT            = 7   // Export data
-	MACHINE           = 8   // Create child VM
-	PEEK              = 9   // Peek child VM memory
-	POKE              = 10  // Poke child VM memory
-	PAGES             = 11  // Query VM memory pages
-	INVOKE            = 12  // Invoke child VM
-	EXPUNGE           = 13  // Destroy child VM
-	BLESS             = 14  // Bless service code
-	ASSIGN            = 15  // Assign service code
-	DESIGNATE         = 16  // Designate service
-	CHECKPOINT        = 17  // Create checkpoint
-	NEW               = 18  // Create new service
-	UPGRADE           = 19  // Upgrade service
-	TRANSFER          = 20  // Transfer service ownership
-	EJECT             = 21  // Eject service
-	QUERY             = 22  // Query service
-	SOLICIT           = 23  // Solicit service
-	FORGET            = 24  // Forget service
+	GAS                 = 0   // Gas metering
+	FETCH               = 1   // Fetch work package data
+	LOOKUP              = 2   // Lookup service state
+	READ                = 3   // Read from service state
+	WRITE               = 4   // Write to service state
+	INFO                = 5   // Query service information
+	HISTORICAL_LOOKUP   = 6   // Lookup historical state
+	EXPORT              = 7   // Export data
+	MACHINE             = 8   // Create child VM
+	PEEK                = 9   // Peek child VM memory
+	POKE                = 10  // Poke child VM memory
+	PAGES               = 11  // Query VM memory pages
+	INVOKE              = 12  // Invoke child VM
+	EXPUNGE             = 13  // Destroy child VM
+	BLESS               = 14  // Bless service code
+	ASSIGN              = 15  // Assign service code
+	DESIGNATE           = 16  // Designate service
+	CHECKPOINT          = 17  // Create checkpoint
+	NEW                 = 18  // Create new service
+	UPGRADE             = 19  // Upgrade service
+	TRANSFER            = 20  // Transfer service ownership
+	EJECT               = 21  // Eject service
+	QUERY               = 22  // Query service
+	SOLICIT             = 23  // Solicit service
+	FORGET              = 24  // Forget service
 	YIELD               = 25  // Yield control
 	PROVIDE             = 26  // Provide data
 	LOG                 = 100 // Debug logging

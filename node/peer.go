@@ -37,9 +37,9 @@ const (
 	CE143_PreimageRequest              = 143
 	CE144_AuditAnnouncement            = 144
 	CE145_JudgmentPublication          = 145
-
-	CE147_BundleRequest  = 147
-	CE148_SegmentRequest = 148
+	CE146_WPbundlesubmission           = 146
+	CE147_BundleRequest                = 147
+	CE148_SegmentRequest               = 148
 
 	CE149_GrandpaVote     = 149
 	CE150_GrandpaCommit   = 150
@@ -360,6 +360,12 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 			return nil
 		}
 		return n.onWorkPackageSubmission(ctx, stream, msg, peerID)
+	case CE146_WPbundlesubmission:
+		if !n.GetIsSync() {
+			n.AbortStream(stream, ErrStateNotSynced)
+			return nil
+		}
+		return n.onBundleSubmission(ctx, stream, msg, peerID)
 	case CE134_WorkPackageShare:
 		return n.onWorkPackageShare(ctx, stream, msg, peerID)
 	case CE135_WorkReportDistribution:
@@ -440,7 +446,7 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 	case CE155_EpochAggregateSignature:
 		return n.onEpochAggregateSignature(ctx, stream, msg, peerID)
 	default:
-		return errors.New("unknown message type")
+		return fmt.Errorf("unknown message Type msgType=%d", msgType)
 	}
 
 }

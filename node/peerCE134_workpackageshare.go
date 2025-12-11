@@ -15,6 +15,8 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
+var isSilent = false
+
 /*
 CE 134: Work-package sharing
 Sharing of a work-package between guarantors on the same core assignment.
@@ -387,6 +389,11 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		return fmt.Errorf("core index %d is not in the current guarantor assignments", newReq.CoreIndex)
 	}
 
+	if isSilent {
+		log.Info(log.R, "CE134-ShareWorkPackage INCOMING - SILENT MODE", "NODE", n.id)
+		return fmt.Errorf("Node %d is silent mode", n.id)
+	}
+
 	n.telemetryClient.WorkPackageBeingShared(n.PeerID32(peerID))
 	// --> Work Package Bundle
 	// Read message length (4 bytes)
@@ -506,6 +513,24 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		n.telemetryClient.WorkPackageFailed(eventID, err.Error())
 		return fmt.Errorf("onWorkPackageShare: executeWorkPackageBundle: %w", err)
 	}
+	savingBunlde := true
+	if savingBunlde {
+		bundleSnapshot := &types.WorkPackageBundleSnapshot{
+			PackageHash:       workReport.GetWorkPackageHash(),
+			CoreIndex:         uint16(workReport.CoreIndex),
+			Bundle:            *bundle,
+			SegmentRootLookup: received_segmentRootLookup,
+			Slot:              slot,
+			Report:            workReport,
+		}
+		if bundleSnapshot != nil && isWriteBundleGuarantor {
+			// packageHash_coreIndex_slot_audit
+			log.Info(log.Node, "Writing WorkPackageBundleSnapshot to disk", "workPackageHash", bundleSnapshot.PackageHash, "coreIndex", bundleSnapshot.CoreIndex, "slot", bundleSnapshot.Slot)
+			desc := fmt.Sprintf("%s_%d_%d_%s", bundleSnapshot.Bundle.WorkPackage.Hash(), bundleSnapshot.CoreIndex, n.id, "guarantor")
+			n.writeLogWithDescription(bundleSnapshot, bundleSnapshot.Slot, desc, false)
+		}
+	}
+
 	select {
 	case n.workReportsCh <- workReport:
 		// successfully sent

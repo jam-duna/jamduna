@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"os"
 	"reflect"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	bls "github.com/colorfulnotion/jam/bls"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/types"
+	"github.com/gorilla/websocket"
 )
 
 func randomOrdering(n int) []int {
@@ -41,10 +43,105 @@ func ecEncode(b []byte) (shards [][]byte, err error) {
 	return shards, nil
 }
 
-func Test137Batch(t *testing.T) {
-	t.Skip()
+func TestPlayback(t *testing.T) {
+	addr := "0.0.0.0:8080"
+	htmlPath := "./index.html"
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 
-	filepath := "test/full137resp_1024.json"
+	var (
+		connMu sync.Mutex
+		wsConn *websocket.Conn
+	)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		http.ServeFile(w, r, htmlPath)
+	})
+
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		c, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			fmt.Println("upgrade error:", err)
+			return
+		}
+		fmt.Println("WS client connected")
+
+		connMu.Lock()
+		if wsConn != nil {
+			wsConn.Close()
+		}
+		wsConn = c
+		connMu.Unlock()
+
+		c.SetCloseHandler(func(code int, text string) error {
+			fmt.Printf("WS closed: %d %s\n", code, text)
+			connMu.Lock()
+			if wsConn == c {
+				wsConn = nil
+			}
+			connMu.Unlock()
+			return nil
+		})
+	})
+
+	srv := &http.Server{Addr: addr, Handler: mux}
+	go func() {
+		fmt.Println("Viewer server listening on", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fmt.Println("ListenAndServe:", err)
+		}
+	}()
+
+	pushFrame := func(data []byte) {
+		connMu.Lock()
+		defer connMu.Unlock()
+		if wsConn != nil {
+			if err := wsConn.WriteMessage(websocket.BinaryMessage, data); err != nil {
+				fmt.Println("WS write error:", err)
+				wsConn.Close()
+				wsConn = nil
+			}
+		}
+	}
+	// TODO: read the  "test/reconstructed_video_doom_3072.bin" file
+	segments, err := os.ReadFile("test/reconstructed_video_doom_3072.bin")
+	if err != nil {
+		t.Fatalf("Failed to read reconstructed video file: %v", err)
+	}
+	pushFrame(segments)
+}
+func TestVideoReconstruction(t *testing.T) {
+
+	filepath := "test/full137resp_doom_3072.json"
+	testVectors, err := parse137Resp(filepath)
+	if err != nil {
+		t.Fatalf("Failed to parse 137 trace: %v", err)
+	}
+
+	exportedSegments, _, err := reconstructSegment(t, testVectors)
+	if err != nil {
+		t.Fatalf("Failed to reconstruct segments: %v", err)
+	}
+	fmt.Printf("Reconstructed %d exported segments\n", len(exportedSegments))
+	output := make([]byte, 0)
+	for segIdx, seg := range exportedSegments {
+		fmt.Printf("Exported Segment %d: %d\n", segIdx, len(seg))
+		output = append(output, seg...)
+	}
+	outputPath := "test/reconstructed_video_doom_3072.bin"
+	err = savefile(outputPath, output)
+	if err != nil {
+		t.Fatalf("Failed to save reconstructed video: %v", err)
+	}
+}
+
+func Test137Batch(t *testing.T) {
+
+	filepath := "test/full137resp_doom_3072.json"
 	testVectors, err := parse137Resp(filepath)
 	if err != nil {
 		t.Fatalf("Failed to parse 137 trace: %v", err)
@@ -52,15 +149,86 @@ func Test137Batch(t *testing.T) {
 
 	// Test Justification
 	test137Verification(t, testVectors)
+
 	// Reconstruct bundle
 	test137BundleReconstruction(t, testVectors)
+
+	//t.Skip()
 
 	// Recontruct Segments
 	testSegmentReconstruction(t, testVectors)
 }
 
+func TestAvailabilitySpecifierDerivation(t *testing.T) {
+	filepath := "test/full137resp_doom_3072.json"
+	testVectors, err := parse137Resp(filepath)
+	if err != nil {
+		t.Fatalf("Failed to parse 137 trace: %v", err)
+	}
+
+	// Step 1: Reconstruct the work package bundle
+	workPackageBundle, workPackageBundleBytes, _, err := reconstructBundleFull(testVectors)
+	if err != nil {
+		t.Fatalf("Failed to reconstruct bundle: %v", err)
+	}
+	t.Logf("Reconstructed WorkPackageBundle (len=%d bytes), Hash: %s", len(workPackageBundleBytes), workPackageBundle.WorkPackage.Hash().Hex())
+
+	exportedSegments, _, err := reconstructSegment(t, testVectors)
+	if err != nil {
+		t.Fatalf("Failed to reconstruct segments: %v", err)
+	}
+	t.Logf("Reconstructed %d exported segments", len(exportedSegments))
+
+	bClubs := buildBClub(workPackageBundleBytes)
+	sClubs := buildSClub(exportedSegments)
+
+	derivedErasureRoot := generateErasureRoot(bClubs, sClubs)
+
+	expectedErasureRoot := testVectors[0].ErasureRoot
+
+	if derivedErasureRoot != expectedErasureRoot {
+		t.Errorf("ErasureRoot mismatch!\n  Expected: %s\n  Derived:  %s", expectedErasureRoot.Hex(), derivedErasureRoot.Hex())
+	} else {
+		t.Logf("ErasureRoot matches: %s", derivedErasureRoot.Hex())
+	}
+
+	exportedSegmentTree := NewCDMerkleTree(exportedSegments)
+	derivedExportedSegmentRoot := exportedSegmentTree.RootHash()
+	t.Logf("Derived ExportedSegmentRoot: %s", derivedExportedSegmentRoot.Hex())
+}
+
+func TestExtractWorkPackageBundle(t *testing.T) {
+	filepath := "test/full137resp_doom_3072.json"
+	testVectors, err := parse137Resp(filepath)
+	if err != nil {
+		t.Fatalf("Failed to parse 137 trace: %v", err)
+	}
+
+	// Reconstruct the bundle from shards
+	workPackageBundle, _, _, err := reconstructBundleFull(testVectors)
+	if err != nil {
+		t.Fatalf("Failed to reconstruct bundle: %v", err)
+	}
+
+	// Marshal to JSON with pretty printing
+	jsonBytes, err := json.MarshalIndent(workPackageBundle, "", "  ")
+	if err != nil {
+		t.Fatalf("Failed to marshal WorkPackageBundle to JSON: %v", err)
+	}
+
+	// Save to file
+	outputPath := "test/workpackagebundle_doom_3072.json"
+	err = savefile(outputPath, jsonBytes)
+	if err != nil {
+		t.Fatalf("Failed to save WorkPackageBundle JSON: %v", err)
+	}
+
+	t.Logf("WorkPackageBundle saved to %s (%d bytes)", outputPath, len(jsonBytes))
+	t.Logf("WorkPackage Hash: %s", workPackageBundle.WorkPackage.Hash().Hex())
+}
+
 func TestSegs(t *testing.T) {
-	filepath := "test/full137resp_1024.json"
+	filepath := "test/full137resp_3072.json"
 	testVectors, err := parse137Resp(filepath)
 	if err != nil {
 		t.Fatalf("Failed to parse 137 trace: %v", err)
@@ -101,12 +269,15 @@ func computeExportedRoot(t *testing.T, testCases []Full137Resp) ([]common.Hash, 
 		return nil, fmt.Errorf("Failed to reconstruct segments: %v", err)
 	}
 	t.Logf("Redoing %d exported segments and %d paged proofs\n", len(exportedSegments), len(pagedProofs))
-	exportedRoots := make([]common.Hash, 0)
+	exportedRoots := make([]common.Hash, 0, len(exportedSegments)+1)
 	for i := 0; i <= len(exportedSegments); i++ {
 		segs := common.DeepCopySegments(exportedSegments[:i])
 		exportedSegmentTree := NewCDMerkleTree(segs)
 		exportedRoot := exportedSegmentTree.RootHash()
-		t.Logf("ExportedSegment Root with %d segment(s): %v\n", len(segs), exportedRoot)
+		// Only log every 100 segments to reduce output
+		if i%100 == 0 || i == len(exportedSegments) {
+			t.Logf("ExportedSegment Root with %d segment(s): %v\n", len(segs), exportedRoot)
+		}
 		exportedRoots = append(exportedRoots, exportedRoot)
 	}
 	exportedRootStr := make([]string, len(exportedRoots))
@@ -145,7 +316,7 @@ func testSegmentReconstruction(t *testing.T, testCases []Full137Resp) {
 		//fmt.Printf("derivedPageProofs %d (H=%x): %x\n", idx, common.ComputeHash(pagedProofByte), pagedProofByte)
 		paddedProof := common.PadToMultipleOfN(pagedProofByte, types.SegmentSize)
 		recoveredProofHash := common.ComputeHash(paddedProof)
-		fmt.Printf("RECEVERED PageProofs %d (H=%x): %x\n", idx, common.ComputeHash(paddedProof), paddedProof)
+		fmt.Printf("RECOVERED PageProofs %d (H=%x): %x\n", idx, common.ComputeHash(paddedProof), paddedProof)
 		if !bytes.Equal(recoveredProofHash, originalProofHash) {
 			t.Errorf("PageProof %d hash mismatch: Captured %x | Expected %x", idx, originalProofHash, recoveredProofHash)
 		} else {
@@ -155,6 +326,78 @@ func testSegmentReconstruction(t *testing.T, testCases []Full137Resp) {
 	exportedSegmentTree.PrintTree()
 	fmt.Printf("Redoing %d exported segments and %d paged proofs\n", len(exportedSegments), len(pagedProofs))
 	fmt.Printf("ExportedSegment Root with %d segment(s): %v\n", len(exportedSegments), exportedRoot)
+}
+
+// buildBClub builds b♣ from work package bundle bytes (local helper to avoid import cycle)
+func buildBClub(b []byte) []common.Hash {
+	paddedB := common.PadToMultipleOfN(b, types.ECPieceSize)
+	chunks, err := bls.Encode(paddedB, types.TotalValidators)
+	if err != nil {
+		return nil
+	}
+	bClubs := make([]common.Hash, types.TotalValidators)
+	for shardIdx, shard := range chunks {
+		bClubs[shardIdx] = common.Blake2Hash(shard)
+	}
+	return bClubs
+}
+
+// buildSClub builds s♣ from exported segments (local helper to avoid import cycle)
+func buildSClub(segments [][]byte) []common.Hash {
+	ecChunksArr := make([][]byte, types.TotalValidators)
+	for i := range ecChunksArr {
+		ecChunksArr[i] = []byte{}
+	}
+
+	// EC encode segments
+	for _, segmentData := range segments {
+		erasureCodingSegments, err := bls.Encode(segmentData, types.TotalValidators)
+		if err != nil {
+			return nil
+		}
+		for shardIndex, shard := range erasureCodingSegments {
+			ecChunksArr[shardIndex] = append(ecChunksArr[shardIndex], shard...)
+		}
+	}
+
+	// Generate and EC encode page proofs
+	pageProofs, err := GeneratePageProof(segments)
+	if err != nil {
+		return nil
+	}
+	for _, pagedProofByte := range pageProofs {
+		paddedProof := common.PadToMultipleOfN(pagedProofByte, types.SegmentSize)
+		erasureCodingPageSegments, err := bls.Encode(paddedProof, types.TotalValidators)
+		if err != nil {
+			return nil
+		}
+		for shardIndex, shard := range erasureCodingPageSegments {
+			ecChunksArr[shardIndex] = append(ecChunksArr[shardIndex], shard...)
+		}
+	}
+
+	// Build sClub from WBT of each shard's chunks
+	sClub := make([]common.Hash, types.TotalValidators)
+	chunkSize := types.SegmentSize / (types.TotalValidators / 3)
+	numChunks := len(segments) + len(pageProofs)
+
+	for shardIndex, ecData := range ecChunksArr {
+		chunks := make([][]byte, numChunks)
+		for n := 0; n < numChunks; n++ {
+			chunks[n] = ecData[n*chunkSize : (n+1)*chunkSize]
+		}
+		t := NewWellBalancedTree(chunks, types.Blake2b)
+		sClub[shardIndex] = common.BytesToHash(t.Root())
+	}
+
+	return sClub
+}
+
+// generateErasureRoot generates erasure root from bClub and sClub
+func generateErasureRoot(bClubs []common.Hash, sClubs []common.Hash) common.Hash {
+	bundleSegmentPairs := common.BuildBundleSegmentPairs(bClubs, sClubs)
+	t := NewWellBalancedTree(bundleSegmentPairs, types.Blake2b)
+	return common.BytesToHash(t.Root())
 }
 
 func ComputSegmentsAndProofs(totalSegmentAndProofCnt int) (importSegCnt int, pageProofCnt int) {
@@ -298,46 +541,55 @@ func reconstructSegment(t *testing.T, testCases []Full137Resp) ([][]byte, [][]by
 }
 
 func reconstructBundle(testCases []Full137Resp) (workPackageBundleByte []byte, recoveredBundleShards [][]byte, err error) {
+	_, workPackageBundleByte, recoveredBundleShards, err = reconstructBundleFull(testCases)
+	return workPackageBundleByte, recoveredBundleShards, err
+}
+
+func reconstructBundleFull(testCases []Full137Resp) (workPackageBundle *types.WorkPackageBundle, workPackageBundleByte []byte, recoveredBundleShards [][]byte, err error) {
 	if len(testCases) <= types.RecoveryThreshold {
-		return nil, nil, fmt.Errorf("Not enough test cases to reconstruct bundle")
+		return nil, nil, nil, fmt.Errorf("Not enough test cases to reconstruct bundle")
 	}
 	bundleShards := make([][]byte, len(testCases))
 	indexes := make([]uint32, len(testCases))
 	numShards := 0
-	bundleLen := 0
+	shardLen := 0
 	selectedOrders := randomOrdering(len(testCases))
 	for _, idx := range selectedOrders {
 		tc := testCases[idx]
 		bundleShards[numShards] = tc.BundleShard
-		bundleLen = len(tc.BundleShard) * 2 // it's okay to overload here
+		shardLen = len(tc.BundleShard)
 		indexes[numShards] = uint32(tc.ShardIdx)
 		numShards++
 	}
 
+	// EC encoding uses 1/3 + 2/3 scheme: original data is split into TotalValidators/3 pieces
+	// Each shard contains paddedBundleLen / (TotalValidators/3) bytes
+	// So: paddedBundleLen = shardLen * (TotalValidators / 3)
+	bundleLen := shardLen * (types.TotalValidators / 3)
 	encodedBundle, err := bls.Decode(bundleShards[:numShards], types.TotalValidators, indexes[:numShards], bundleLen)
 	if err != nil {
-		return nil, nil, fmt.Errorf("Failed to reconstruct bundle (bundleLen=%v, numShards=%v): %v ", bundleLen, numShards, err)
+		return nil, nil, nil, fmt.Errorf("Failed to reconstruct bundle (bundleLen=%v, numShards=%v): %v ", bundleLen, numShards, err)
 	}
 	workPackageBundleRaw, _, err := types.Decode(encodedBundle, reflect.TypeOf(types.WorkPackageBundle{}))
 	if err != nil {
-		return nil, nil, fmt.Errorf("Failed to decode reconstructed bundle: %v", err)
+		return nil, nil, nil, fmt.Errorf("Failed to decode reconstructed bundle: %v", err)
 	}
 
-	workPackageBundle, ok := workPackageBundleRaw.(types.WorkPackageBundle)
+	wpBundle, ok := workPackageBundleRaw.(types.WorkPackageBundle)
 	if !ok {
-		return nil, nil, fmt.Errorf("Failed to cast to WorkPackageBundle")
+		return nil, nil, nil, fmt.Errorf("Failed to cast to WorkPackageBundle")
 	}
-	workPackageBundleByte = workPackageBundle.Bytes()
+	workPackageBundleByte = wpBundle.Bytes()
 	recoveredBundleShards, err = ecEncode(workPackageBundleByte)
 	if err != nil {
-		return nil, nil, fmt.Errorf("Failed to ecEncode reconstructed bundle: %v", err)
+		return nil, nil, nil, fmt.Errorf("Failed to ecEncode reconstructed bundle: %v", err)
 	}
 	if false {
-		fmt.Printf("%v Reconstructed bundle hash: %s workPackageBundleLen=%v | BundlePadded:%d\n", selectedOrders, workPackageBundle.WorkPackage.Hash(), len(workPackageBundleByte), len(encodedBundle))
+		fmt.Printf("%v Reconstructed bundle hash: %s workPackageBundleLen=%v | BundlePadded:%d\n", selectedOrders, wpBundle.WorkPackage.Hash(), len(workPackageBundleByte), len(encodedBundle))
 		workpackageBundle, bLen, _ := types.DecodeBundle(workPackageBundleByte)
 		fmt.Printf("****\nReconstructed workPackageBundle(len:%v): %s\n", bLen, workpackageBundle.StringL())
 	}
-	return workPackageBundleByte, recoveredBundleShards, nil
+	return &wpBundle, workPackageBundleByte, recoveredBundleShards, nil
 }
 
 func test137BundleReconstruction(t *testing.T, testCases []Full137Resp) {

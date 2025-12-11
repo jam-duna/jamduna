@@ -180,7 +180,7 @@ func (vm *RecompilerVM) HandleEcalli() error {
 	if ok {
 		// if the host call handled the state change, we reset it to normal
 		if vm.MachineState == PANIC {
-			vm.ResultCode = PANIC
+			vm.ResultCode = types.WORKDIGEST_PANIC
 			fmt.Printf("PANIC in host call\n")
 			return fmt.Errorf("PANIC in host call")
 		}
@@ -198,7 +198,7 @@ func (vm *RecompilerVM) HandleEcalli() error {
 		if err != nil {
 			return fmt.Errorf("failed to write gas slot: %w", err)
 		}
-		vm.SetGas(int64(gas))
+		vm.SetGas(gas)
 		if gas > before_gas {
 			vm.MachineState = PANIC
 			vm.ResultCode = types.WORKDIGEST_OOG
