@@ -604,7 +604,7 @@ func StandardizePVMBackend(pvm_mode string) string {
 	var pvmBackend string
 	switch mode {
 	case "INTERPRETER":
-		pvmBackend = statedb.BackendGoInterpreter
+		pvmBackend = statedb.BackendInterpreter
 	case "COMPILER", "RECOMPILER", "X86":
 		if runtime.GOOS == "linux" {
 			pvmBackend = statedb.BackendCompiler
@@ -612,11 +612,11 @@ func StandardizePVMBackend(pvm_mode string) string {
 			log.Warn(log.Node, fmt.Sprintf("COMPILER Not Supported. Defaulting to interpreter"))
 		}
 	case "GO_INTERPRETER", "GOINTERPRETER":
-		pvmBackend = statedb.BackendGoInterpreter
+		pvmBackend = statedb.BackendInterpreter
 
 	default:
 		log.Warn(log.Node, fmt.Sprintf("Unknown PVM mode [%s], defaulting to interpreter", pvm_mode))
-		pvmBackend = statedb.BackendGoInterpreter
+		pvmBackend = statedb.BackendInterpreter
 	}
 	return pvmBackend
 }
@@ -1179,6 +1179,20 @@ func RobustSubmitAndWaitForWorkPackageBundles(ctx context.Context, n JNode, reqs
 
 		// Check if we should continue retrying
 		if attempt < maxRobustTries {
+			// If expired after JCEs, refresh the context before retrying
+			if strings.Contains(err.Error(), "expired after") {
+				newCtx, err := n.GetRefineContext()
+				if err != nil {
+					log.Error(log.Node, "RobustSubmitAndWaitForWorkPackageBundles: failed to refresh context", "err", err)
+				} else {
+					log.Info(log.Node, "RobustSubmitAndWaitForWorkPackageBundles: refreshing context",
+						"newAnchor", newCtx.Anchor.Hex(),
+						"newLookupAnchorSlot", newCtx.LookupAnchorSlot)
+					for _, req := range reqs {
+						req.WorkPackage.RefineContext = newCtx
+					}
+				}
+			}
 			log.Info(log.Node, "RobustSubmitAndWaitForWorkPackageBundles retrying", "nextAttempt", attempt+1, "backoffSeconds", 5)
 			// small backoff between retries
 			time.Sleep(5 * time.Second)
@@ -1426,6 +1440,10 @@ func (n *NodeContent) SubmitBundleSameCore(b *types.WorkPackageBundle) (err erro
 		log.Info(log.G, "SubmitBundleSameCore SUBMISSION SELF", "coreIndex", coreIndex)
 		return nil
 	}
+	// Use CE133 (basic work package submission) by default
+	// Set to false to use CE146 (full bundle submission with segments and import proofs)
+	useCE133 := false
+
 	// now we can send to the other 2 nodes
 	for _, assignment := range assignments {
 		if assignment.CoreIndex == coreIndex {
@@ -1439,12 +1457,92 @@ func (n *NodeContent) SubmitBundleSameCore(b *types.WorkPackageBundle) (err erro
 					if len(b.ExtrinsicData) > 0 {
 						blobs = b.ExtrinsicData[0]
 					}
-					err = peer.SendWorkPackageSubmission(context.Background(), b.WorkPackage, blobs, coreIndex)
-					if err != nil {
-						log.Error(log.Node, "SubmitBundleSameCore SendWorkPackageSubmission", "err", err, "pubkey", pubkey)
+
+					if useCE133 {
+						// Use CE133: Basic work package submission
+						err = peer.SendWorkPackageSubmission(context.Background(), b.WorkPackage, blobs, coreIndex)
+						if err != nil {
+							log.Error(log.Node, "SubmitBundleSameCore SendWorkPackageSubmission (CE133)", "err", err, "pubkey", pubkey)
+						} else {
+							// we only want to process ONE
+							return nil
+						}
 					} else {
-						// we only want to process ONE
-						return nil
+						// Use CE146: Full bundle submission with segments and import proofs
+						// First, compute the expected number of segments from work package
+						expectedSegments := 0
+						for _, workItem := range b.WorkPackage.WorkItems {
+							expectedSegments += len(workItem.ImportedSegments)
+						}
+
+						// Flatten segments and justifications from all work items
+						var allSegments [][]byte
+						var allImportProofs [][]common.Hash
+						for workItemIdx, workItemSegments := range b.ImportSegmentData {
+							for segIdx, segment := range workItemSegments {
+								allSegments = append(allSegments, segment)
+								// Get corresponding justification
+								if workItemIdx < len(b.Justification) && segIdx < len(b.Justification[workItemIdx]) {
+									allImportProofs = append(allImportProofs, b.Justification[workItemIdx][segIdx])
+								} else {
+									allImportProofs = append(allImportProofs, []common.Hash{})
+								}
+							}
+						}
+
+						// Validate that we have all required segments and proofs
+						// If validation fails and there are expected segments, fall back to CE133
+						ce146Valid := true
+						if expectedSegments > 0 {
+							if len(allSegments) != expectedSegments {
+								log.Warn(log.Node, "SubmitBundleSameCore CE146: segment count mismatch, falling back to CE133",
+									"expected", expectedSegments, "actual", len(allSegments))
+								ce146Valid = false
+							} else if len(allImportProofs) != expectedSegments {
+								log.Warn(log.Node, "SubmitBundleSameCore CE146: import proof count mismatch, falling back to CE133",
+									"expected", expectedSegments, "actual", len(allImportProofs))
+								ce146Valid = false
+							} else {
+								// Validate each segment has proper size and proof is non-empty
+								for i, seg := range allSegments {
+									if len(seg) != types.SegmentSize {
+										log.Warn(log.Node, "SubmitBundleSameCore CE146: invalid segment size, falling back to CE133",
+											"index", i, "expected", types.SegmentSize, "actual", len(seg))
+										ce146Valid = false
+										break
+									}
+									if len(allImportProofs[i]) == 0 {
+										log.Warn(log.Node, "SubmitBundleSameCore CE146: missing import proof, falling back to CE133",
+											"index", i)
+										ce146Valid = false
+										break
+									}
+								}
+							}
+						}
+
+						// If CE146 validation failed and we have imported segments, fall back to CE133
+						if !ce146Valid && expectedSegments > 0 {
+							log.Info(log.G, "SubmitBundleSameCore falling back to CE133 due to incomplete bundle data")
+							err = peer.SendWorkPackageSubmission(context.Background(), b.WorkPackage, blobs, coreIndex)
+							if err != nil {
+								log.Error(log.Node, "SubmitBundleSameCore SendWorkPackageSubmission (CE133 fallback)", "err", err, "pubkey", pubkey)
+							} else {
+								return nil
+							}
+						} else {
+							// Build segments-root mappings from work package's imported segments
+							// These map work package hashes to their exported segment roots
+							segmentsRootMappings := []JAMSNPSegmentRootMapping{}
+
+							err = peer.SendBundleSubmission(context.Background(), coreIndex, segmentsRootMappings, b.WorkPackage, blobs, allSegments, allImportProofs)
+							if err != nil {
+								log.Error(log.Node, "SubmitBundleSameCore SendBundleSubmission (CE146)", "err", err, "pubkey", pubkey)
+							} else {
+								log.Info(log.G, "SubmitBundleSameCore CE146 SUCCESS", "coreIndex", coreIndex, "numSegments", len(allSegments))
+								return nil
+							}
+						}
 					}
 				}
 			}
@@ -2188,7 +2286,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	}
 	start = time.Now()
 	valid_tickets := n.extrinsic_pool.GetTicketIDPairFromPool(used_entropy)
-	newStateDB, err := statedb.ApplyStateTransitionFromBlock(0, recoveredStateDB, ctx, nextBlock, valid_tickets, n.pvmBackend)
+	newStateDB, err := statedb.ApplyStateTransitionFromBlock(0, recoveredStateDB, ctx, nextBlock, valid_tickets, n.pvmBackend, "SKIP")
 	stateTransitionElapsed := common.ElapsedStr(start)
 	if err != nil {
 		fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)

@@ -249,8 +249,7 @@ func (c *Rollup) executeAndGuarantee(bundles []*types.WorkPackageBundle, validat
 		if bundle == nil {
 			continue
 		}
-
-		workReport, err := statedb.ExecuteWorkPackageBundle(uint16(coreIndex), *bundle, types.SegmentRootLookup{}, 0, log.OtherGuarantor, 0, c.pvmBackend)
+		workReport, err := statedb.ExecuteWorkPackageBundle(uint16(coreIndex), *bundle, types.SegmentRootLookup{}, 0, log.OtherGuarantor, 0, c.pvmBackend, "SKIP")
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed ExecuteWorkPackageBundle: %v", err)
 		}
@@ -356,7 +355,7 @@ func (c *Rollup) buildAndApplyBlock(ctx context.Context, validators []types.Vali
 	}
 
 	// Apply state transition
-	newStateDB, err := ApplyStateTransitionFromBlock(0, statedb, ctx, sealedBlock, nil, "interpreter")
+	newStateDB, err := ApplyStateTransitionFromBlock(0, statedb, ctx, sealedBlock, nil, "interpreter", "")
 	if err != nil {
 		return fmt.Errorf("failed to apply state transition: %w", err)
 	}

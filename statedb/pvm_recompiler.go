@@ -61,8 +61,10 @@ func NewRecompilerVMWithoutSetup(service_index uint32, initialRegs []uint64, ini
 	return recompiler
 }
 
-func (rvm *Recompiler) Execute(VM *VM, entry uint32) error {
+func (rvm *Recompiler) Execute(VM *VM, entry uint32, logDir string) error {
 	rvm.HostFunc = VM
+	// Note: logDir is currently unused in recompiler backend
+	// Tracing is handled differently in the compiled code
 	rvm.RecompilerVM.Execute(entry)
 	VM.ResultCode = rvm.GetResultCode()
 	return nil

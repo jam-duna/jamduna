@@ -455,7 +455,7 @@ func RunAccumulateHostFunctionsTest(b *Rollup) error {
 
 	// Validate with both backends
 	bundle := bundles[0]
-	backends := []string{BackendGoInterpreter}
+	backends := []string{BackendInterpreter}
 	if err := validateBundleWithBackends(b.stateDB, bundle, backends); err != nil {
 		return fmt.Errorf("validateBundleWithBackends failed: %w", err)
 	}
@@ -1603,7 +1603,7 @@ func validateBundleWithBackends(statedb *StateDB, bundle *types.WorkPackageBundl
 	var workReportHashes []common.Hash
 
 	for _, backend := range backends {
-		wr, err := statedb.ExecuteWorkPackageBundle(0, *bundle, types.SegmentRootLookup{}, 0, log.OtherGuarantor, 0, backend)
+		wr, err := statedb.ExecuteWorkPackageBundle(0, *bundle, types.SegmentRootLookup{}, 0, log.OtherGuarantor, 0, backend, "SKIP")
 		if err != nil {
 			return fmt.Errorf("failed to execute work package bundle with backend %s: %w", backend, err)
 		}
@@ -1641,7 +1641,7 @@ func validateBundleWithBackends(statedb *StateDB, bundle *types.WorkPackageBundl
 func TestBackends(t *testing.T) {
 	log.InitLogger("info")
 	log.EnableModule(log.Node)
-	backends := []string{BackendInterpreter, BackendGoInterpreter} // BackendCompiler, BackendCompilerSandbox
+	backends := []string{BackendInterpreter, BackendInterpreter} // BackendCompiler, BackendCompilerSandbox
 	// Read all bundle*.bin files in the current directory using glob
 	matches, err := filepath.Glob("bundle*.bin")
 	if err != nil {
@@ -1690,7 +1690,7 @@ func TestSingleBundle(t *testing.T) {
 	PvmLogging = false
 	defer func() { PvmLogging = false }()
 
-	backends := []string{BackendInterpreter, BackendGoInterpreter, BackendCompiler} //, BackendCompilerSandbox
+	backends := []string{BackendInterpreter, BackendInterpreter, BackendCompiler} //, BackendCompilerSandbox
 	bundleFile := "bundle-transfers-3-0x0c81146bcf33b8c31648b6181817cc1c7c2209725182a9a24b86ce34c03a3d4b.bin"
 
 	storage, err := initStorage(t.TempDir())

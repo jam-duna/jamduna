@@ -169,7 +169,7 @@ func ComputeStateTransition(storage *storage.StateDBStorage, stc *StateTransitio
 		return false, nil, nil, fmt.Errorf("PreState Error")
 	}
 	scBlock := stc.Block
-	postState, jamErr := ApplyStateTransitionFromBlock(0, preState, context.Background(), &scBlock, nil, pvmBackend)
+	postState, jamErr := ApplyStateTransitionFromBlock(0, preState, context.Background(), &scBlock, nil, pvmBackend, "")
 	if jamErr != nil {
 		// When validating Fuzzed STC, we shall expect jamError
 		return true, nil, jamErr, nil
@@ -191,7 +191,7 @@ func CheckStateTransition(storage types.JAMStorage, st *StateTransition, ancesto
 		return err
 	}
 	s0.AncestorSet = ancestorSet
-	s1, err := ApplyStateTransitionFromBlock(0, s0, context.Background(), &(st.Block), nil, pvmBackend)
+	s1, err := ApplyStateTransitionFromBlock(0, s0, context.Background(), &(st.Block), nil, pvmBackend, "")
 	if err != nil {
 		return err
 	}
@@ -229,7 +229,7 @@ func Prevalidation(preState *StateDB, st *StateTransition, sdb *storage.StateDBS
 	return nil
 }
 
-func CheckStateTransitionWithOutput(sdb *storage.StateDBStorage, st *StateTransition, ancestorSet map[common.Hash]uint32, pvmBackend string, runPrevalidation bool, writeFile ...string) (diffs map[string]DiffState, err error) {
+func CheckStateTransitionWithOutput(sdb *storage.StateDBStorage, st *StateTransition, ancestorSet map[common.Hash]uint32, pvmBackend string, runPrevalidation bool, logDir string, writeFile ...string) (diffs map[string]DiffState, err error) {
 	// Apply the state transition
 	t0 := time.Now()
 	preState, err := NewStateDBFromStateTransition(sdb, st)
@@ -248,7 +248,7 @@ func CheckStateTransitionWithOutput(sdb *storage.StateDBStorage, st *StateTransi
 	s0.Id = sdb.GetNodeID()
 	s0.AncestorSet = ancestorSet
 	bad_stf := bytes.Equal(st.PreState.StateRoot.Bytes(), st.PostState.StateRoot.Bytes())
-	s1, err := ApplyStateTransitionFromBlock(0, s0, context.Background(), &(st.Block), nil, pvmBackend)
+	s1, err := ApplyStateTransitionFromBlock(0, s0, context.Background(), &(st.Block), nil, pvmBackend, logDir)
 	bad_stf_from_us := bytes.Equal(s1.StateRoot.Bytes(), st.PostState.StateRoot.Bytes())
 	if err != nil {
 		if bad_stf_from_us {

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"path"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"sync"
@@ -245,7 +247,7 @@ type Usage struct {
 	Gas     uint64
 }
 
-func (s *StateDB) OuterAccumulate(g uint64, transfersIn []types.DeferredTransfer, workReports []types.WorkReport, o *types.PartialState, freeAccumulation map[uint32]uint64, pvmBackend string, accumulated_partial map[uint32]*types.XContext) (num_accumulations uint64, accumulation_output []types.AccumulationOutput, GasUsage []Usage) {
+func (s *StateDB) OuterAccumulate(outer_accumulation_index uint32, g uint64, transfersIn []types.DeferredTransfer, workReports []types.WorkReport, o *types.PartialState, freeAccumulation map[uint32]uint64, pvmBackend string, accumulated_partial map[uint32]*types.XContext, logDir string) (num_accumulations uint64, accumulation_output []types.AccumulationOutput, GasUsage []Usage) {
 	var gas_tmp uint64
 	// calculate i: https://graypaper.fluffylabs.dev/#/1c979cb/17cf0117cf01?v=0.7.1
 	i := uint64(0)
@@ -275,7 +277,8 @@ func (s *StateDB) OuterAccumulate(g uint64, transfersIn []types.DeferredTransfer
 		return
 	}
 	// transfers with ParallelizedAccumulate
-	p_gasUsed, transfersOut, p_outputs, p_gasUsage := s.ParallelizedAccumulate(o, transfersIn, workReports[0:i], freeAccumulation, pvmBackend, accumulated_partial) // parallelized accumulation the 0 to i work reports
+	p_gasUsed, transfersOut, p_outputs, p_gasUsage := s.ParallelizedAccumulate(o, transfersIn, workReports[0:i], freeAccumulation, pvmBackend, accumulated_partial, path.Join(logDir, fmt.Sprintf("%d", outer_accumulation_index)))
+
 	// n https://graypaper.fluffylabs.dev/#/1c979cb/17e70117e701?v=0.7.1
 	transfer_gases := uint64(0)
 	for _, t := range transfersIn {
@@ -286,7 +289,7 @@ func (s *StateDB) OuterAccumulate(g uint64, transfersIn []types.DeferredTransfer
 	gstar := g + transfer_gases
 
 	gstar -= p_gasUsed
-	incNum, incAccumulationOutput, incGasUsage := s.OuterAccumulate(gstar, transfersOut, workReports[i:], o, nil, pvmBackend, accumulated_partial) // recursive call to the rest of the work reports
+	incNum, incAccumulationOutput, incGasUsage := s.OuterAccumulate(outer_accumulation_index+1, gstar, transfersOut, workReports[i:], o, nil, pvmBackend, accumulated_partial, logDir) // recursive call to the rest of the work reports
 	num_accumulations = i + incNum
 	accumulation_output = append(p_outputs, incAccumulationOutput...)
 
@@ -324,6 +327,7 @@ func (s *StateDB) ParallelizedAccumulate(
 	freeAccumulation map[uint32]uint64,
 	pvmBackend string,
 	accumulated_partial map[uint32]*types.XContext,
+	logDir string,
 ) (totalGasUsed uint64, transfersOut []types.DeferredTransfer, accumulation_output []types.AccumulationOutput, GasUsage []Usage) {
 
 	GasUsage = make([]Usage, 0, 64)
@@ -380,7 +384,7 @@ func (s *StateDB) ParallelizedAccumulate(
 			for service := range jobCh {
 				t0 := time.Now()
 				// IMPORTANT: Parallel execution requires each worker gets a CLONE of o!!
-				out, gas, XY, exceptional := s.SingleAccumulate(o.Clone(), transfersIn, workReports, freeAccumulation, service, pvmBackend)
+				out, gas, XY, exceptional := s.SingleAccumulate(o.Clone(), transfersIn, workReports, freeAccumulation, service, pvmBackend, filepath.Join(logDir, fmt.Sprintf("%d", service)))
 				benchRec.Add("SingleAccumulate", time.Since(t0))
 
 				if XY == nil {
@@ -426,7 +430,7 @@ func (s *StateDB) ParallelizedAccumulate(
 		acc_results = make([]accRes, 0, len(services))
 		for _, service := range services {
 			t0 := time.Now()
-			out, gas, XY, exceptional := s.SingleAccumulate(o, transfersIn, workReports, freeAccumulation, service, pvmBackend)
+			out, gas, XY, exceptional := s.SingleAccumulate(o, transfersIn, workReports, freeAccumulation, service, pvmBackend, filepath.Join(logDir, fmt.Sprintf("%d", service)))
 			benchRec.Add("SingleAccumulate", time.Since(t0))
 
 			if XY == nil {
@@ -708,7 +712,7 @@ the actual pvm gas used. This function wrangles the work-
 items of a particular service from a set of work-reports and
 invokes pvm execution
 */
-func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.DeferredTransfer, workReports []types.WorkReport, freeAccumulation map[uint32]uint64, serviceID uint32, pvmBackend string) (accumulation_output common.Hash, gasUsed uint64, xy *types.XContext, exceptional bool) {
+func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.DeferredTransfer, workReports []types.WorkReport, freeAccumulation map[uint32]uint64, serviceID uint32, pvmBackend string, logDir string) (accumulation_output common.Hash, gasUsed uint64, xy *types.XContext, exceptional bool) {
 	t0 := time.Now()
 	// gas https://graypaper.fluffylabs.dev/#/1c979cb/181901181901?v=0.7.1
 	// 1. gas from free accumulation of this service (if any)
@@ -826,7 +830,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 
 	t0 = time.Now()
 
-	r, _, x_s := vm.ExecuteAccumulate(timeslot, serviceID, inputs, xContext, sd.JamState.SafroleState.Entropy[0]) //n is posterior entropy
+	r, _, x_s := vm.ExecuteAccumulate(timeslot, serviceID, inputs, xContext, sd.JamState.SafroleState.Entropy[0], logDir) //n is posterior entropy
 	benchRec.Add("ExecuteAccumulate", time.Since(t0))
 	exceptional = false
 	gasUsed = gas - uint64(max(vm.GetGas(), 0))

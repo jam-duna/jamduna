@@ -52,7 +52,7 @@ func GetX86CodeFromC(opcode byte, inst Instruction) []byte {
 
 	// Return the generated x86 code
 	if codeSize > 0 {
-		return outputBuffer[:int(codeSize)]
+		return outputBuffer[:codeSize:codeSize]
 	}
 
 	return nil

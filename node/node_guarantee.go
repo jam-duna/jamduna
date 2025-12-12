@@ -56,10 +56,50 @@ func (n *Node) clearQueueUsingBlock(guarantees []types.Guarantee) {
 //
 //	(1) uses WorkReportSearch to ensure that the WorkReports have been seen for all work items and thus imported segments are fetchable
 //	(2) uses CE139 in reconstructSegments to get all the imported segments and their justifications
+//
+// If the WPQueueItem already has ImportSegmentData and Justification (from CE146 bundle submission),
+// the segment fetching is skipped and the pre-fetched data is used directly.
 func (n *NodeContent) BuildBundleFromWPQueueItem(wpQueueItem *types.WPQueueItem) (bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, err error) {
 	workPackage := wpQueueItem.WorkPackage
 	eventID := wpQueueItem.EventID
 	segmentRootLookup = make(types.SegmentRootLookup, 0)
+
+	// Check if we already have pre-fetched bundle data from CE146
+	if wpQueueItem.ImportSegmentData != nil && wpQueueItem.Justification != nil {
+		log.Debug(log.G, "BuildBundleFromWPQueueItem using pre-fetched CE146 data",
+			"workPackageHash", workPackage.Hash(),
+			"numWorkItems", len(workPackage.WorkItems))
+
+		// Build segmentRootLookup from WorkReportSearch for the imported segments
+		segmentRootLookupMap := make(map[common.Hash]common.Hash)
+		for _, workItem := range workPackage.WorkItems {
+			for _, importedSegment := range workItem.ImportedSegments {
+				si := n.WorkReportSearch(importedSegment.RequestedHash)
+				if si != nil {
+					segmentRootLookupMap[si.WorkReport.AvailabilitySpec.WorkPackageHash] = si.WorkReport.AvailabilitySpec.ExportedSegmentRoot
+				}
+			}
+		}
+		for wph, segmentRootHash := range segmentRootLookupMap {
+			segmentRootLookup = append(segmentRootLookup, types.SegmentRootLookupItem{
+				WorkPackageHash: wph,
+				SegmentRoot:     segmentRootHash,
+			})
+		}
+		sort.Slice(segmentRootLookup, func(i, j int) bool {
+			return bytes.Compare(segmentRootLookup[i].WorkPackageHash.Bytes(), segmentRootLookup[j].WorkPackageHash.Bytes()) < 0
+		})
+
+		bundle = types.WorkPackageBundle{
+			WorkPackage:       workPackage,
+			ExtrinsicData:     []types.ExtrinsicsBlobs{wpQueueItem.Extrinsics},
+			ImportSegmentData: wpQueueItem.ImportSegmentData,
+			Justification:     wpQueueItem.Justification,
+		}
+		return bundle, segmentRootLookup, nil
+	}
+
+	// Original CE133 path: fetch segments via CE139 reconstruction
 	workReportSearchMap := make(map[common.Hash]*storage.SpecIndex)
 	segmentRootLookupMap := make(map[common.Hash]common.Hash)
 	// because CE139 requires erasureroot
@@ -330,6 +370,6 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 	if err != nil {
 		return work_report, fmt.Errorf("executeWorkPackageBundle:getStateDBByStateRoot: %v", err)
 	}
-	workReport, err := targetStateDB.ExecuteWorkPackageBundle(workPackageCoreIndex, package_bundle, segmentRootLookup, slot, execContext, eventID, n.pvmBackend)
+	workReport, err := targetStateDB.ExecuteWorkPackageBundle(workPackageCoreIndex, package_bundle, segmentRootLookup, slot, execContext, eventID, n.pvmBackend, "SKIP")
 	return workReport, err
 }

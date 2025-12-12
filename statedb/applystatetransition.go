@@ -76,7 +76,7 @@ func ApplyStateTransitionTickets(oldState *StateDB, ctx context.Context, blk *ty
 
 // given previous safrole, applt state transition using block
 // σ'≡Υ(σ,B)
-func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx context.Context, blk *types.Block, validated_tickets map[common.Hash]common.Hash, pvmBackend string) (s *StateDB, err error) {
+func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx context.Context, blk *types.Block, validated_tickets map[common.Hash]common.Hash, pvmBackend string, logDir string) (s *StateDB, err error) {
 	t1 := time.Now()
 	defer func() {
 		benchRec.Add("ApplyStateTransitionFromBlock", time.Since(t1))
@@ -256,7 +256,7 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 	deferred_transfers := make([]types.DeferredTransfer, 0)
 	t0 = time.Now()
 	accumulated_partial := make(map[uint32]*types.XContext)
-	num_accumulations, accumulation_output, gasUsage := s.OuterAccumulate(gas, deferred_transfers, accumulate_input_wr, o, f, pvmBackend, accumulated_partial) // outer accumulate
+	num_accumulations, accumulation_output, gasUsage := s.OuterAccumulate(0, gas, deferred_transfers, accumulate_input_wr, o, f, pvmBackend, accumulated_partial, logDir) // outer accumulate
 	if num_accumulations > 0 {
 		log.Trace(log.SDB, "ApplyStateTransition - OuterAccumulate", "n", s.Id, "blk", targetJCE, "s-", s.StateRoot.String_short(), "h.s-", blk.Header.ParentStateRoot.String_short(), "num_accumulations", num_accumulations, "gasUsage", gasUsage, "accumulation_output", accumulation_output)
 	}

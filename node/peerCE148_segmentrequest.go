@@ -157,38 +157,38 @@ func (p *Peer) SendSegmentRequest(ctx context.Context, segmentsRoot common.Hash,
 	// --> FIN
 	stream.Close()
 
-	// Receive responses for each segment
+	// <-- [Segment] - all segments concatenated in single message
+	allSegmentsBytes, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
+	if err != nil {
+		p.node.telemetryClient.SegmentRequestFailed(eventID, err.Error())
+		return nil, fmt.Errorf("receiveQuicBytes[CE148_SegmentRequest] segments: %w", err)
+	}
+
+	// <-- [Import-Proof] - all import proofs concatenated in single message
+	allProofsBytes, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
+	if err != nil {
+		p.node.telemetryClient.SegmentRequestFailed(eventID, err.Error())
+		return nil, fmt.Errorf("receiveQuicBytes[CE148_SegmentRequest] proofs: %w", err)
+	}
+
+	// Parse segments - split by SegmentSize (4104 bytes)
 	responses := make([]SegmentResponse, 0, len(segmentIndices))
+	for i := 0; i+types.SegmentSize <= len(allSegmentsBytes); i += types.SegmentSize {
+		responses = append(responses, SegmentResponse{
+			Segment: allSegmentsBytes[i : i+types.SegmentSize],
+		})
+	}
 
-	for i := 0; i < len(segmentIndices); i++ {
-		// <-- [Segment]
-		segmentBytes, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
+	// Parse import proofs - each is len++[Hash]
+	proofData := allProofsBytes
+	for i := 0; i < len(responses) && len(proofData) > 0; i++ {
+		proof, bytesConsumed, err := decodeImportProofWithLength(proofData)
 		if err != nil {
-			// Telemetry: Segment request failed (event 175)
-			p.node.telemetryClient.SegmentRequestFailed(eventID, err.Error())
-			return nil, fmt.Errorf("receiveQuicBytes[CE148_SegmentRequest] segment %d: %w", i, err)
-		}
-
-		// <-- [Import-Proof]
-		proofBytes, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
-		if err != nil {
-			// Telemetry: Segment request failed (event 175)
-			p.node.telemetryClient.SegmentRequestFailed(eventID, err.Error())
-			return nil, fmt.Errorf("receiveQuicBytes[CE148_SegmentRequest] proof %d: %w", i, err)
-		}
-
-		// Decode import proof
-		importProof, err := decodeImportProof(proofBytes)
-		if err != nil {
-			// Telemetry: Segment request failed (event 175)
 			p.node.telemetryClient.SegmentRequestFailed(eventID, err.Error())
 			return nil, fmt.Errorf("decodeImportProof[CE148_SegmentRequest] segment %d: %w", i, err)
 		}
-
-		responses = append(responses, SegmentResponse{
-			Segment:     segmentBytes,
-			ImportProof: importProof,
-		})
+		responses[i].ImportProof = proof
+		proofData = proofData[bytesConsumed:]
 	}
 
 	// Telemetry: Segments transferred (event 178)
@@ -249,7 +249,10 @@ func (n *Node) onSegmentRequest(ctx context.Context, stream quic.Stream, msg []b
 		return err
 	}
 
-	// Send each requested segment alongside its proof
+	// Collect all segments and proofs first
+	var allSegments []byte
+	var allImportProofs []byte
+
 	for _, segmentIdx := range req.SegmentIndices {
 		if int(segmentIdx) >= len(segments) {
 			log.Warn(log.Node, "onSegmentRequest: segment index out of range",
@@ -257,13 +260,7 @@ func (n *Node) onSegmentRequest(ctx context.Context, stream quic.Stream, msg []b
 				"segmentIndex", segmentIdx,
 				"availableSegments", len(segments))
 			n.telemetryClient.SegmentRequestFailed(eventID, fmt.Sprintf("segment %d out of range", segmentIdx))
-			if err := sendQuicBytes(ctx, stream, []byte{}, n.id, code); err != nil {
-				return fmt.Errorf("onSegmentRequest: sendQuicBytes empty segment failed: %w", err)
-			}
-			if err := sendQuicBytes(ctx, stream, types.E(0), n.id, code); err != nil {
-				return fmt.Errorf("onSegmentRequest: sendQuicBytes empty proof failed: %w", err)
-			}
-			continue
+			return fmt.Errorf("onSegmentRequest: segment %d out of range", segmentIdx)
 		}
 
 		proof, err := segmentTree.GenerateCDTJustificationX(int(segmentIdx), 0)
@@ -273,25 +270,23 @@ func (n *Node) onSegmentRequest(ctx context.Context, stream quic.Stream, msg []b
 				"segmentIndex", segmentIdx,
 				"err", err)
 			n.telemetryClient.SegmentRequestFailed(eventID, err.Error())
-			if err := sendQuicBytes(ctx, stream, []byte{}, n.id, code); err != nil {
-				return fmt.Errorf("onSegmentRequest: sendQuicBytes empty segment failed: %w", err)
-			}
-			if err := sendQuicBytes(ctx, stream, types.E(0), n.id, code); err != nil {
-				return fmt.Errorf("onSegmentRequest: sendQuicBytes empty proof failed: %w", err)
-			}
-			continue
+			return fmt.Errorf("onSegmentRequest: failed to generate justification for segment %d: %w", segmentIdx, err)
 		}
 
-		if err := sendQuicBytes(ctx, stream, segments[segmentIdx], n.id, code); err != nil {
-			n.telemetryClient.SegmentRequestFailed(eventID, err.Error())
-			return fmt.Errorf("onSegmentRequest: sendQuicBytes segment failed: %w", err)
-		}
+		allSegments = append(allSegments, segments[segmentIdx]...)
+		allImportProofs = append(allImportProofs, encodeImportProof(proof)...)
+	}
 
-		proofBytes := encodeImportProof(proof)
-		if err := sendQuicBytes(ctx, stream, proofBytes, n.id, code); err != nil {
-			n.telemetryClient.SegmentRequestFailed(eventID, err.Error())
-			return fmt.Errorf("onSegmentRequest: sendQuicBytes proof failed: %w", err)
-		}
+	// <-- [Segment] - all segments concatenated in single message
+	if err := sendQuicBytes(ctx, stream, allSegments, n.id, code); err != nil {
+		n.telemetryClient.SegmentRequestFailed(eventID, err.Error())
+		return fmt.Errorf("onSegmentRequest: sendQuicBytes segments failed: %w", err)
+	}
+
+	// <-- [Import-Proof] - all import proofs concatenated in single message
+	if err := sendQuicBytes(ctx, stream, allImportProofs, n.id, code); err != nil {
+		n.telemetryClient.SegmentRequestFailed(eventID, err.Error())
+		return fmt.Errorf("onSegmentRequest: sendQuicBytes proofs failed: %w", err)
 	}
 
 	// Telemetry: Segments transferred (event 178)
@@ -400,27 +395,3 @@ func encodeImportProof(proof []common.Hash) []byte {
 	return data
 }
 
-// decodeImportProof decodes an import proof (list of hashes) from bytes
-func decodeImportProof(data []byte) ([]common.Hash, error) {
-	if len(data) == 0 {
-		return nil, fmt.Errorf("empty import proof data")
-	}
-
-	// len++[Hash]
-	numHashes, bytesRead := types.DecodeE(data)
-	if bytesRead == 0 {
-		return nil, fmt.Errorf("failed to decode import proof length")
-	}
-	data = data[bytesRead:]
-
-	if uint64(len(data)) < numHashes*32 {
-		return nil, fmt.Errorf("insufficient data for import proof: expected %d bytes, got %d", numHashes*32, len(data))
-	}
-
-	proof := make([]common.Hash, numHashes)
-	for i := uint64(0); i < numHashes; i++ {
-		proof[i] = common.BytesToHash(data[i*32 : (i+1)*32])
-	}
-
-	return proof, nil
-}

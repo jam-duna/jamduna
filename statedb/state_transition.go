@@ -163,7 +163,7 @@ func ValidateStateTransitionFile(filename string, storageDir string, outputDir s
 	//fmt.Printf("STF: %s\n", stf.String())
 
 	// 3) do the state transition check
-	diffs, err := CheckStateTransitionWithOutput(test_storage, &stf, nil, outputDir, false)
+	diffs, err := CheckStateTransitionWithOutput(test_storage, &stf, nil, outputDir, false, "SKIP")
 	if err == nil {
 		fmt.Printf("✅ [%s] State transition succeeded with no diffs\n", filename)
 		return false, err

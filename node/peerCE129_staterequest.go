@@ -134,7 +134,7 @@ func (p *Peer) SendStateRequest(ctx context.Context, headerHash common.Hash, sta
 	}
 	stream.Close()
 
-	parts, err := receiveMultiple(ctx, stream, 3, p.PeerID, code)
+	parts, err := receiveMultiple(ctx, stream, 2, p.PeerID, code)
 	if err != nil {
 		return err
 	}

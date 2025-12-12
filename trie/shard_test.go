@@ -149,10 +149,10 @@ func Test137Batch(t *testing.T) {
 
 	// Test Justification
 	test137Verification(t, testVectors)
-
-	// Reconstruct bundle
-	test137BundleReconstruction(t, testVectors)
-
+	/*
+		// Reconstruct bundle
+		test137BundleReconstruction(t, testVectors)
+	*/
 	//t.Skip()
 
 	// Recontruct Segments

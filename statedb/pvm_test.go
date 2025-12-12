@@ -58,8 +58,6 @@ func pvm_test(tc TestCase, testMode string) error {
 	switch testMode {
 	case "recompiler":
 		return recompiler_test(tc)
-	case "C_FFI":
-		return pvm_test_backend(tc, BackendInterpreter)
 	case "vmgo":
 		return vmgo_test_backend(tc)
 	default:
@@ -92,7 +90,7 @@ func pvm_test_backend(tc TestCase, backend string) error {
 	}
 
 	pvm.IsChild = false
-	err := pvm.Execute(pvm, uint32(tc.InitialPC))
+	err := pvm.Execute(pvm, uint32(tc.InitialPC), "")
 	if err != nil {
 		return fmt.Errorf("C execution failed: %v", err)
 	}
@@ -185,7 +183,7 @@ func vmgo_test_backend(tc TestCase) error {
 	}
 	vmgo.IsChild = false
 
-	vmgo.Execute(hostVM, uint32(tc.InitialPC))
+	vmgo.Execute(hostVM, uint32(tc.InitialPC), "")
 
 	// Check the registers
 	actualRegs := vmgo.ReadRegisters()
@@ -281,7 +279,7 @@ func recompiler_test(tc TestCase) error {
 	}
 	vm := &VM{}
 	vm.ExecutionVM = rvm
-	rvm.Execute(vm, 0)
+	rvm.Execute(vm, 0, "")
 	// check the memory
 	for _, mem := range tc.ExpectedMemory {
 		data, err := rvm.ReadMemory(mem.Address, uint32(len(mem.Data)))

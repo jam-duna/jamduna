@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"path"
 	"reflect"
 	"time"
 
@@ -425,52 +426,17 @@ func pvmlog(logBytes []byte) string {
 		offset += 8
 	}
 
-	// Remaining bytes: memory operation buffer (ASCII string, null-terminated)
-	// Note: Should be 256 bytes but we handle variable length gracefully
-	memOpBytes := logBytes[offset:]
-
-	// Find null terminator
-	memOpLen := 0
-	for i, b := range memOpBytes {
-		if b == 0 {
-			memOpLen = i
-			break
-		}
-	}
-	if memOpLen == 0 && len(memOpBytes) > 0 && memOpBytes[0] != 0 {
-		// No null terminator found, use all remaining bytes
-		memOpLen = len(memOpBytes)
-	}
-	memOp := ""
-	if memOpLen > 0 {
-		memOp = string(memOpBytes[:memOpLen])
-	}
-
 	// Format output similar to C printf format
 	regStr := fmt.Sprintf("[%d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d]",
 		registers[0], registers[1], registers[2], registers[3],
 		registers[4], registers[5], registers[6], registers[7],
 		registers[8], registers[9], registers[10], registers[11], registers[12])
 
-	// Decode memory operations based on opcode
-	memOpStr := decodeMemoryOp(opcode, registers, memOp)
-
-	return fmt.Sprintf("%s PC:%d Gas:%d Registers:%s %s",
-		opcode_str(opcode), prevpc, int64(gas), regStr, memOpStr)
-}
-
-// decodeMemoryOp returns the memory operation string captured during execution
-// The buffer contains strings like " MEM_LOAD Mem[0x12345..0x12348]->0xabcd"
-// from pvmgo-instructions.go's lastMemOp variable
-func decodeMemoryOp(opcode byte, registers []uint64, memOpBuffer string) string {
-	// Simply return the memory operation buffer
-	// This matches the format from pvmgo-instructions.go:
-	// lastMemOp = fmt.Sprintf(" MEM_LOAD Mem[0x%x..0x%x]->%s", addr, addr+numBytes-1, valueHex)
-	return memOpBuffer
+	return fmt.Sprintf("%s PC:%d Gas:%d Registers:%s", opcode_str(opcode), prevpc, int64(gas), regStr)
 }
 
 // authorizeWP executes the authorization step for a work package
-func (statedb *StateDB) authorizeWP(workPackage types.WorkPackage, workPackageCoreIndex uint16, pvmBackend string) (r types.Result, p_a common.Hash, authGasUsed uint64, err error) {
+func (statedb *StateDB) authorizeWP(workPackage types.WorkPackage, workPackageCoreIndex uint16, pvmBackend string, logDir string) (r types.Result, p_a common.Hash, authGasUsed uint64, err error) {
 	log.Trace(log.Node, "authorizeWP", "NODE", statedb.Id, "workPackage", workPackage.Hash(), "workPackageCoreIndex", workPackageCoreIndex)
 	authcode, _, authindex, err := statedb.GetAuthorizeCode(workPackage)
 	if err != nil {
@@ -483,7 +449,7 @@ func (statedb *StateDB) authorizeWP(workPackage types.WorkPackage, workPackageCo
 		return
 	}
 
-	r = vm_auth.ExecuteAuthorization(workPackage, workPackageCoreIndex)
+	r = vm_auth.ExecuteAuthorization(workPackage, workPackageCoreIndex, logDir)
 	p_u := workPackage.AuthorizationCodeHash
 	p_p := workPackage.ConfigurationBlob
 	p_a = common.Blake2Hash(append(p_u.Bytes(), p_p...))
@@ -493,10 +459,11 @@ func (statedb *StateDB) authorizeWP(workPackage types.WorkPackage, workPackageCo
 }
 
 // NOTE: the refinecontext is NOT used here
-func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, slot uint32, execContext string, eventID uint64, pvmBackend string) (work_report types.WorkReport, err error) {
+func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, slot uint32, execContext string, eventID uint64, pvmBackend string, logDir string) (work_report types.WorkReport, err error) {
 	importsegments := make([][][]byte, len(package_bundle.WorkPackage.WorkItems))
 	results := []types.WorkDigest{}
-
+	saveToLogDir(logDir, "bundle.bin", package_bundle.Bytes())
+	saveToLogDir(logDir, "bundle.json", []byte(types.ToJSON(package_bundle)))
 	workPackage := package_bundle.WorkPackage
 
 	// Import Segments
@@ -504,7 +471,7 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 
 	// Authorization
 	authStart := time.Now()
-	r, p_a, authGasUsed, err := s.authorizeWP(workPackage, workPackageCoreIndex, pvmBackend)
+	r, p_a, authGasUsed, err := s.authorizeWP(workPackage, workPackageCoreIndex, pvmBackend, path.Join(logDir, "auth"))
 	authElapsed := time.Since(authStart)
 	// Check for underflow (gas wrapped around to very large number)
 	if authGasUsed > (1 << 63) {
@@ -553,7 +520,7 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		// 0.7.1 : core index is part of refine args
 		execStart := time.Now()
 		vm.hostenv = s
-		output, _, exported_segments := vm.ExecuteRefine(workPackageCoreIndex, uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData[index], workPackage.AuthorizationCodeHash, common.BytesToHash(trie.H0))
+		output, _, exported_segments := vm.ExecuteRefine(workPackageCoreIndex, uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData[index], workPackage.AuthorizationCodeHash, common.BytesToHash(trie.H0), path.Join(logDir, fmt.Sprintf("%d_%d", index, workItem.Service)))
 		segments = append(segments, exported_segments...)
 
 		execElapsed := time.Since(execStart)
@@ -641,6 +608,9 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		}
 		telemetryClient.WorkReportBuilt(eventID, workReportOutline)
 	}
+	saveToLogDir(logDir, "workreportderivation.json", []byte(types.ToJSON(d)))
+	saveToLogDir(logDir, "workreport.bin", workReport.Bytes())
+	saveToLogDir(logDir, "workreport.json", []byte(types.ToJSON(workReport)))
 	return workReport, nil
 }
 
@@ -672,7 +642,7 @@ func (s *StateDB) ExecuteWorkPackageBundleSteps(workPackageCoreIndex uint16, pac
 	copy(importsegments, package_bundle.ImportSegmentData)
 
 	// Authorization
-	r, _, authGasUsed, err := s.authorizeWP(workPackage, workPackageCoreIndex, pvmBackends[0])
+	r, _, authGasUsed, err := s.authorizeWP(workPackage, workPackageCoreIndex, pvmBackends[0], "SKIP")
 	if err != nil {
 		return err
 	}
@@ -737,7 +707,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 	originalRefineContext := s.GetRefineContext()
 	wp.RefineContext = originalRefineContext
 	log.Trace(log.SDB, "BuildBundle:", "STATEROOT", wp.RefineContext.StateRoot)
-	authorization, p_a, _, err := s.authorizeWP(wp, coreIndex, pvmBackend)
+	authorization, p_a, _, err := s.authorizeWP(wp, coreIndex, pvmBackend, "SKIP")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -761,7 +731,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 		vm.Timeslot = s.JamState.SafroleState.Timeslot
 		vm.SetPVMContext(log.Builder)
 		importsegments := make([][][]byte, len(wp.WorkItems))
-		result, _, exported_segments := vm.ExecuteRefine(coreIndex, uint32(index), wp, authorization, importsegments, 0, extrinsicsBlobs[index], p_a, common.BytesToHash(trie.H0))
+		result, _, exported_segments := vm.ExecuteRefine(coreIndex, uint32(index), wp, authorization, importsegments, 0, extrinsicsBlobs[index], p_a, common.BytesToHash(trie.H0), "")
 
 		// Post-SSR: Parse refine output to populate witness cache from exported segments
 		// Output format: [2B count] + count × [32B object_id + 2B index_start + 4B payload_length + 1B object_kind]

@@ -2,11 +2,13 @@ package statedb
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
 	"math/bits"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
 
@@ -45,7 +47,7 @@ var (
 	PvmTrace2 = false
 
 	// Trace mode flags - can be combined with bitwise OR
-	PvmTraceMode      = false // When true, writes trace to .jsonl file
+	PvmTraceMode      = false // When true, writes trace to binary files for reg/mem etc
 	PvmTracePrintMode = false // When true, prints trace to stdout
 	// Both can be enabled simultaneously for dual output
 
@@ -143,7 +145,7 @@ type VMGo struct {
 	JSONLTraceWriter      *trace.JSONLTraceWriter // File-based trace writer (when PvmTraceMode is true)
 	JSONLTraceWriterPrint *trace.JSONLTraceWriter // Stdout trace writer (when PvmTracePrintMode is true)
 
-	Logs VMLogs
+	files []*os.File
 
 	basicBlockExecutionCounter map[uint64]int // PVM PC to execution count
 
@@ -448,12 +450,6 @@ func NewVMGo(service_index uint32, p *Program, initialRegs []uint64, initialPC u
 		vm.Ram.WriteRegister(i, initialRegs[i])
 	}
 
-	if VMsCompare {
-		vm.Logs = make(VMLogs, 0)
-	} else {
-		vm.VMs = nil
-	}
-
 	// Pre-decode all instructions
 	vm.PreDecodeInstructions()
 
@@ -530,11 +526,12 @@ func (vm *VMGo) Destroy() {
 	vm.Ram.Close()
 
 	// Close trace writers if they were set up
-	if PvmTraceMode && vm.JSONLTraceWriter != nil {
-		defer vm.JSONLTraceWriter.Close()
-	}
-	if PvmTracePrintMode && vm.JSONLTraceWriterPrint != nil {
-		defer vm.JSONLTraceWriterPrint.Close()
+	if PvmTraceMode {
+		for _, file := range vm.files {
+			if file != nil {
+				defer file.Close()
+			}
+		}
 	}
 
 	runtime.GC()
@@ -542,12 +539,19 @@ func (vm *VMGo) Destroy() {
 
 // ensureTraceWriters initializes trace writers if they are enabled but not yet created.
 // This allows dynamic enabling of trace modes during execution.
-func (vm *VMGo) ensureTraceWriters() {
-	if PvmTraceMode && vm.JSONLTraceWriter == nil {
-		vm.JSONLTraceWriter, _ = trace.NewJSONLTraceWriterFile(fmt.Sprintf("pvm_trace_vmgo_%d.jsonl", vm.Service_index))
-	}
-	if PvmTracePrintMode && vm.JSONLTraceWriterPrint == nil {
-		vm.JSONLTraceWriterPrint = trace.NewJSONLTraceWriterStdout()
+// If logDir is provided, trace files will be written to that directory.
+func (vm *VMGo) ensureTraceWriters(logDir string) {
+	if PvmTraceMode && vm.files == nil {
+		files := make([]*os.File, 17)
+		filenames := []string{"r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10", "r11", "r12", "gas", "pc", "addr", "value"}
+		for i, name := range filenames {
+			var traceFile string
+			if logDir != "" {
+				traceFile = filepath.Join(logDir, name)
+			}
+			files[i], _ = os.Create(traceFile)
+		}
+		vm.files = files
 	}
 }
 
@@ -560,8 +564,7 @@ func (vm *VMGo) ExecuteAsChild(entryPoint uint32) error {
 	vm.IsChild = true
 	vm.EntryPoint = entryPoint // Store entry point for gas accounting
 	vm.MachineState = HALT
-	// Ensure trace writers are initialized if tracing is enabled
-	vm.ensureTraceWriters()
+	// Ensure trace writers are initialized if tracing is enabled (no specific logDir for child VMs)
 
 	// Defer closing trace writers to ensure they're flushed on any exit path
 	defer func() {
@@ -639,19 +642,14 @@ func (vm *VMGo) ExecuteAsChild(entryPoint uint32) error {
 	return nil
 }
 
-func (vm *VMGo) Execute(host *VM, entryPoint uint32) error {
+func (vm *VMGo) Execute(host *VM, entryPoint uint32, logDir string) error {
 	vm.terminated = false
 	vm.IsChild = false
 	vm.hostVM = host           // Store host VM reference for host function calls
 	vm.EntryPoint = entryPoint // Store entry point for gas accounting
 
-	// Defer closing trace writers to ensure they're closed on any exit path
-	if PvmTraceMode && vm.JSONLTraceWriter != nil {
-		defer vm.JSONLTraceWriter.Close()
-	}
-	if PvmTracePrintMode && vm.JSONLTraceWriterPrint != nil {
-		defer vm.JSONLTraceWriterPrint.Close()
-	}
+	// Ensure trace writers are initialized with the provided logDir
+	vm.ensureTraceWriters(logDir)
 
 	// A.2 deblob
 	if vm.code == nil {
@@ -740,17 +738,20 @@ func (vm *VMGo) WriteRAMBytes(addr uint32, data []byte) uint64 {
 		vm.MachineState = FAULT
 		// Find the first inaccessible page in the range
 		vm.Fault_address = vm.Ram.FindFaultPage(addr, uint32(len(data)), true)
-	} else if PvmTraceMode || PvmTracePrintMode {
-		if vm.CurrentStep != nil && vm.TrackingMemAddr != 0 {
-			for i := uint32(0); i < uint32(len(data)); i++ {
-				if addr+i == vm.TrackingMemAddr {
-					vm.CurrentStep.SetChangedMemory(uint64(addr+i), 1, data[i:i+1])
-					break
+	} else if PvmTraceMode {
+
+		/*
+			if vm.CurrentStep != nil && vm.TrackingMemAddr != 0 {
+				for i := uint32(0); i < uint32(len(data)); i++ {
+					if addr+i == vm.TrackingMemAddr {
+						vm.CurrentStep.SetChangedMemory(uint64(addr+i), 1, data[i:i+1])
+						break
+					}
 				}
+			} else if vm.CurrentStep != nil {
+				vm.CurrentStep.SetChangedMemory(uint64(addr), uint64(len(data)), data)
 			}
-		} else if vm.CurrentStep != nil {
-			vm.CurrentStep.SetChangedMemory(uint64(addr), uint64(len(data)), data)
-		}
+		*/
 	}
 	// (addr == 0x3ad40 || addr == 0x3ad41)
 	// Note: Taint tracking for regular instructions is handled in the instruction handlers
@@ -966,12 +967,11 @@ func (vm *VMGo) step(stepn int) error {
 	vm.currentPC = vm.pc
 
 	// Initialize TraceStep if any tracing mode is enabled
-	if PvmTraceMode || PvmTracePrintMode {
-		vm.ensureTraceWriters() // Lazy initialization of trace writers
-		simpleInst := inst.ToSimpleInstruction()
-		vm.CurrentStep = trace.NewTraceStep(simpleInst)
-		vm.CurrentStep.OpcodeStr = opcode_str(opcode)
-	}
+	// if PvmTraceMode || PvmTracePrintMode {
+	// 	simpleInst := inst.ToSimpleInstruction()
+	// 	vm.CurrentStep = trace.NewTraceStep(simpleInst)
+	// 	vm.CurrentStep.OpcodeStr = opcode_str(opcode)
+	// }
 
 	switch {
 	case opcode <= 1: // A.5.1 No arguments
@@ -1087,22 +1087,22 @@ func (vm *VMGo) step(stepn int) error {
 			prettyHex = prettyHex + fmt.Sprintf("%d", registers[i])
 		}
 		prettyHex = prettyHex + "]"
-		debugMem := false
-		// Read 16 bytes at 0x2d01e0 to track the memory region containing 0x2d01e8
-		if debugMem {
-			debugMemAddr := uint32(0x2d01e0)
-			debugMemBytes, _ := vm.Ram.ReadRAMBytes(debugMemAddr, 16)
-			debugMemHex := fmt.Sprintf("%032x", debugMemBytes)
-
-			fmt.Printf("%s %d %d Gas: %d Registers:%s Mem[0x%x..0x%x]:%s%s\n",
-				opcode_str(opcode), stepn, prevpc, vm.Gas, prettyHex, debugMemAddr, debugMemAddr+15, debugMemHex, lastMemOp)
-			// Note: lastMemOp will be cleared by encodeStepLog() after being captured
-		} else {
-			fmt.Printf("%s %d %d Gas: %d Registers:%s%s\n",
-				opcode_str(opcode), stepn, prevpc, vm.Gas, prettyHex, lastMemOp)
-			// Note: lastMemOp will be cleared by encodeStepLog() after being captured
-		}
+		fmt.Printf("%s %d %d Gas: %d Registers:%s\n",
+			opcode_str(opcode), stepn, prevpc, vm.Gas, prettyHex)
 	}
+	if PvmTraceMode && vm.files != nil {
+		registers := vm.Ram.ReadRegisters()
+		for i := 0; i < 13; i++ {
+			binary.Write(vm.files[i], binary.LittleEndian, registers[i])
+		}
+		binary.Write(vm.files[13], binary.LittleEndian, vm.Gas)
+		binary.Write(vm.files[14], binary.LittleEndian, prevpc)
+		binary.Write(vm.files[15], binary.LittleEndian, lastMemAddr)
+		binary.Write(vm.files[16], binary.LittleEndian, lastMemValue)
+		lastMemAddr = 0
+		lastMemValue = 0
+	}
+
 	if label, ok := vm.label_pc[int(vm.pc)]; ok {
 		fmt.Printf("[%s%s%s FINISH]\n", ColorBlue, lastLabel, ColorReset)
 		fmt.Printf("[%s%s%s START]\n", ColorBlue, label, ColorReset)
@@ -1112,27 +1112,27 @@ func (vm *VMGo) step(stepn int) error {
 	}
 
 	// Write trace step if any tracing mode is enabled
-	if (PvmTraceMode || PvmTracePrintMode) && vm.CurrentStep != nil {
-		vm.CurrentStep.PostGas = uint64(vm.Gas)
-		regs := vm.Ram.ReadRegisters()
-		vm.CurrentStep.SetPostRegister(&regs)
-		if vm.MachineState != HALT {
-			state := machineStateToString(vm.MachineState)
-			vm.CurrentStep.SetPostMachineState(state)
-		}
+	// if (PvmTraceMode || PvmTracePrintMode) && vm.CurrentStep != nil {
+	// 	vm.CurrentStep.PostGas = uint64(vm.Gas)
+	// 	regs := vm.Ram.ReadRegisters()
+	// 	vm.CurrentStep.SetPostRegister(&regs)
+	// 	if vm.MachineState != HALT {
+	// 		state := machineStateToString(vm.MachineState)
+	// 		vm.CurrentStep.SetPostMachineState(state)
+	// 	}
 
-		// Write to file if file tracing is enabled
-		if PvmTraceMode && vm.JSONLTraceWriter != nil {
-			vm.JSONLTraceWriter.WriteStep(vm.CurrentStep)
-		}
+	// 	// Write to file if file tracing is enabled
+	// 	if PvmTraceMode && vm.JSONLTraceWriter != nil {
+	// 		vm.JSONLTraceWriter.WriteStep(vm.CurrentStep)
+	// 	}
 
-		// Write to stdout if print tracing is enabled
-		if PvmTracePrintMode && vm.JSONLTraceWriterPrint != nil && vm.CurrentStep.ChangedMemoryLength != nil {
-			vm.JSONLTraceWriterPrint.WriteStep(vm.CurrentStep)
-		}
+	// 	// Write to stdout if print tracing is enabled
+	// 	if PvmTracePrintMode && vm.JSONLTraceWriterPrint != nil && vm.CurrentStep.ChangedMemoryLength != nil {
+	// 		vm.JSONLTraceWriterPrint.WriteStep(vm.CurrentStep)
+	// 	}
 
-		vm.CurrentStep = nil
-	}
+	// 	vm.CurrentStep = nil
+	// }
 
 	return nil
 }
@@ -2298,8 +2298,6 @@ var hiResGasRangeEnd = int64(math.MaxInt64)
 var BBSampleRate = 20_000_000
 var RecordLogSampleRate = 1
 
-type VMLogs []VMLog
-
 func (vm *VMGo) SetPVMContext(l string) {
 	vm.logging = l
 }
@@ -2319,12 +2317,12 @@ func (vm *VMGo) InitStep(host *VM, entryPoint uint32) error {
 	vm.EntryPoint = entryPoint // Store entry point for gas accounting
 
 	// Defer closing trace writers to ensure they're closed on any exit path
-	if PvmTraceMode && vm.JSONLTraceWriter != nil {
-		defer vm.JSONLTraceWriter.Close()
-	}
-	if PvmTracePrintMode && vm.JSONLTraceWriterPrint != nil {
-		defer vm.JSONLTraceWriterPrint.Close()
-	}
+	// if PvmTraceMode && vm.JSONLTraceWriter != nil {
+	// 	defer vm.JSONLTraceWriter.Close()
+	// }
+	// if PvmTracePrintMode && vm.JSONLTraceWriterPrint != nil {
+	// 	defer vm.JSONLTraceWriterPrint.Close()
+	// }
 
 	// A.2 deblob
 	if vm.code == nil {
@@ -2470,20 +2468,7 @@ func (vm *VMGo) encodeStepLog(opcode byte, prevpc uint64) []byte {
 		log[offset+7] = byte(reg >> 56)
 		offset += 8
 	}
-
-	// 256 bytes: memory operation buffer
-	// Copy lastMemOp string into the buffer (matches C implementation's mem_op_buffer)
-	if len(lastMemOp) > 0 {
-		memOpBytes := []byte(lastMemOp)
-		copyLen := len(memOpBytes)
-		if copyLen > 256 {
-			copyLen = 256
-		}
-		copy(log[offset:offset+copyLen], memOpBytes)
-	}
-	// Clear lastMemOp for next instruction
-	lastMemOp = ""
-
+	// bring in memAddr + memValue
 	return log
 }
 

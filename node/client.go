@@ -787,3 +787,37 @@ func (c *NodeClient) FetchJAMDASegments(workPackageHash common.Hash, indexStart 
 func (c *NodeClient) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
 	return nil, nil, fmt.Errorf("BuildBundle not supported for remote NodeClient connections yet")
 }
+
+// GetSegmentWithProof retrieves a segment and its CDT justification proof via RPC
+func (c *NodeClient) GetSegmentWithProof(segmentsRoot common.Hash, segmentIndex uint16) (segment []byte, importProof []common.Hash, found bool) {
+	req := []string{
+		segmentsRoot.Hex(),
+		fmt.Sprintf("%d", segmentIndex),
+	}
+
+	var res string
+	err := c.CallWithRetry("jam.GetSegmentWithProof", req, &res)
+	if err != nil {
+		log.Warn(log.Node, "GetSegmentWithProof RPC failed", "segmentsRoot", segmentsRoot, "segmentIndex", segmentIndex, "err", err)
+		return nil, nil, false
+	}
+
+	type segmentWithProofResponse struct {
+		Segment string   `json:"segment"`
+		Proof   []string `json:"proof"`
+	}
+
+	var response segmentWithProofResponse
+	if err := json.Unmarshal([]byte(res), &response); err != nil {
+		log.Warn(log.Node, "GetSegmentWithProof: failed to unmarshal response", "err", err)
+		return nil, nil, false
+	}
+
+	segment = common.Hex2Bytes(response.Segment)
+	importProof = make([]common.Hash, len(response.Proof))
+	for i, h := range response.Proof {
+		importProof[i] = common.HexToHash(h)
+	}
+
+	return segment, importProof, true
+}

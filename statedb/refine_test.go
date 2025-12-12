@@ -66,7 +66,7 @@ func TestBundleExecution(t *testing.T) {
 		t.Fatalf("❌ [%s] Failed to unmarshal bundle: %v", bundleFile, err)
 	}
 
-	testingBackend := BackendGoInterpreter
+	testingBackend := BackendInterpreter
 	if testingBackend == BackendCompiler {
 		// Enable debug tracing for compiler backend
 		PvmLogging = true
@@ -75,7 +75,7 @@ func TestBundleExecution(t *testing.T) {
 	} else {
 	}
 	t.Logf("🔍 [%s] Executing bundle with %s backend, package %s", bundleFile, testingBackend, bundle.Bundle.String())
-	wr, err := state.ExecuteWorkPackageBundle(bundle.CoreIndex, bundle.Bundle, bundle.SegmentRootLookup, stf.Block.TimeSlot(), "", 0, testingBackend)
+	wr, err := state.ExecuteWorkPackageBundle(bundle.CoreIndex, bundle.Bundle, bundle.SegmentRootLookup, stf.Block.TimeSlot(), "", 0, testingBackend, fmt.Sprintf("%s", bundle.Bundle.WorkPackage.Hash()))
 	if err != nil {
 		t.Fatalf("❌ [%s] Failed to execute bundle: %v", bundleFile, err)
 	}
@@ -148,7 +148,7 @@ func TestBundleStepExecution(t *testing.T) {
 	if err := json.Unmarshal(bundleContent, &bundle); err != nil {
 		t.Fatalf("❌ [%s] Failed to unmarshal bundle: %v", bundleFile, err)
 	}
-	testingBackends := []string{BackendGoInterpreter, BackendInterpreter}
+	testingBackends := []string{BackendInterpreter, BackendInterpreter}
 	err = state.ExecuteWorkPackageBundleSteps(bundle.CoreIndex, bundle.Bundle, bundle.SegmentRootLookup, stf.Block.TimeSlot(), "", 0, testingBackends)
 	if err != nil {
 		t.Fatalf("❌ [%s] Failed to execute bundle: %v", bundleFile, err)

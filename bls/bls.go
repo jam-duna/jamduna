@@ -200,10 +200,11 @@ func Encode(data []byte, V int) ([][]byte, error) {
 	C.encode(dataPtr, C.size_t(len(data)), C.size_t(V), outputPtr, C.size_t(shardSize))
 
 	// Convert the flat buffer into [][]byte
+	// Use 3-index slice to limit capacity, preventing append from corrupting adjacent shards
 	shards := make([][]byte, V)
 	for i := 0; i < V; i++ {
 		start := i * shardSize
-		shards[i] = output[start : start+shardSize]
+		shards[i] = output[start:start+shardSize:start+shardSize]
 	}
 
 	return shards, nil

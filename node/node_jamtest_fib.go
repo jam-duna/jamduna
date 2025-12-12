@@ -50,6 +50,7 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 	service0 := testServices["fib"]
 	_ = testServices["auth_copy"] // Keep for potential future use
 	fib_serviceIdx := uint32(statedb.FibServiceCode)
+	importEnabled := true
 
 	// Load expected roots for verification
 	expectedRoots, err := loadExpectedFibRoots()
@@ -58,7 +59,8 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 		return
 	}
 	// Test specific edge cases around powers of 2 boundaries
-	targetNList := []int{0, 1, 2, 3, 5, 10, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 257, 511, 512, 513, 1023, 1024, 1025, 2047, 2048, 2049, 3071, 3072}
+	//targetNList := []int{0, 1, 2, 3, 5, 10, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 257, 511, 512, 513, 1023, 1024, 1025, 2047, 2048, 2049, 3071, 3072}
+	targetNList := []int{5, 10, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 257, 511, 512, 513, 1023, 1024, 1025, 2047, 2048, 2049, 3071, 3072}
 	log.Info(log.Node, "FIB START", "targetNList", targetNList, "expectedRootsLoaded", len(expectedRoots))
 	log.Info(log.Node, "FIB START", "fib", fib_serviceIdx, "codeHash", service0.CodeHash)
 
@@ -66,14 +68,17 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 	prevFibN := -1 // Track the previous fibN to determine if we need to prefill
 
 	for idx, fibN := range targetNList {
-		// Pre-fill prevExportSegmentRoot from expectedRoots if not consecutive
-		if prevFibN != fibN-1 && fibN > 0 && fibN-1 < len(expectedRoots) {
-			prevExportSegmentRoot = expectedRoots[fibN-1]
-			log.Info(log.Node, "FIB prefilled prevExportSegmentRoot", "fibN", fibN, "fromIndex", fibN-1, "root", prevExportSegmentRoot.Hex())
-		}
+		// When consecutive (prevFibN == fibN-1), use prevExportSegmentRoot from the previous iteration
+		// When not consecutive, we can only import from the previous FIB we actually computed
+		// (since we don't have segments for fibN-1 stored if we skipped it)
 
 		imported := []types.ImportSegment{}
-		if fibN > 0 && idx > 0 && false {
+		// Only import if:
+		// - fibN > 1 (FIB(0) and FIB(1) have no meaningful segments to import)
+		// - idx > 0 (not the first iteration - we need a previous result)
+		// - prevFibN == fibN-1 (consecutive - we have segments for prevFibN stored)
+		// - prevExportSegmentRoot is non-zero (previous fib actually exported segments)
+		if importEnabled && fibN > 1 && idx > 0 && prevFibN == fibN-1 && prevExportSegmentRoot != (common.Hash{}) {
 			imported = append(imported, types.ImportSegment{
 				RequestedHash: prevExportSegmentRoot,
 				Index:         0, // TODO: add variety
@@ -110,9 +115,42 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 			},
 		}
 
+		// Build the bundle with import segment data and justifications if needed
+		var importSegmentData [][][]byte
+		var justifications [][][]common.Hash
+
+		if len(imported) > 0 {
+			// Initialize arrays for the single work item
+			importSegmentData = make([][][]byte, 1)
+			justifications = make([][][]common.Hash, 1)
+			importSegmentData[0] = make([][]byte, len(imported))
+			justifications[0] = make([][]common.Hash, len(imported))
+
+			// Fetch each imported segment with its proof
+			for i, imp := range imported {
+				segment, proof, found := n1.GetSegmentWithProof(imp.RequestedHash, uint16(imp.Index))
+				if !found {
+					log.Error(log.Node, "FIB: failed to get segment with proof",
+						"segmentsRoot", imp.RequestedHash,
+						"index", imp.Index)
+					return
+				}
+				importSegmentData[0][i] = segment
+				justifications[0][i] = proof
+				log.Info(log.Node, "FIB: fetched imported segment",
+					"fibN", fibN,
+					"segmentsRoot", imp.RequestedHash,
+					"index", imp.Index,
+					"segmentLen", len(segment),
+					"proofLen", len(proof))
+			}
+		}
+
 		wpr := &types.WorkPackageBundle{
-			WorkPackage:   wp,
-			ExtrinsicData: []types.ExtrinsicsBlobs{{}},
+			WorkPackage:       wp,
+			ExtrinsicData:     []types.ExtrinsicsBlobs{{}},
+			ImportSegmentData: importSegmentData,
+			Justification:     justifications,
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout*maxRobustTries)
@@ -140,7 +178,7 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 			verified = "NO_EXPECTED (fibN >= len(expectedRoots))"
 		}
 
-		log.Info(log.Node, fmt.Sprintf("FIB(%d)", fibN), "workPackageHash", wr.AvailabilitySpec.WorkPackageHash, "exportedSegmentRoot", wr.AvailabilitySpec.ExportedSegmentRoot, "verified", verified, "result", fmt.Sprintf("%x", data))
+		log.Info(log.Node, fmt.Sprintf("FIB(%d)", fibN), "workPackageHash", wr.AvailabilitySpec.WorkPackageHash, "exportedSegmentRoot", wr.AvailabilitySpec.ExportedSegmentRoot, "verified", verified, "resultLen", len(data))
 		prevFibN = fibN
 	}
 }

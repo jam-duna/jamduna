@@ -1,11 +1,15 @@
 package node
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/quic-go/quic-go"
 )
@@ -40,20 +44,65 @@ type JAMSNP_WpInfo struct {
 }
 
 func (info *JAMSNP_WpInfo) ToBytes() ([]byte, error) {
-	return types.Encode(info)
+	buf := new(bytes.Buffer)
+
+	// Serialize CoreIndex (2 bytes) - raw little-endian u16
+	if err := binary.Write(buf, binary.LittleEndian, info.CoreIndex); err != nil {
+		return nil, err
+	}
+
+	// Serialize SegmentsRootMappings - SCALE encoded (len++[...])
+	segmentsRootMappingsBytes, err := types.Encode(info.SegmentsRootMappings)
+	if err != nil {
+		return nil, fmt.Errorf("JAMSNP_WpInfo.ToBytes: %w", err)
+	}
+	if _, err := buf.Write(segmentsRootMappingsBytes); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
 }
 
 func (info *JAMSNP_WpInfo) FromBytes(data []byte) error {
-	// Decode the data into the struct
-	info_interface, _, err := types.Decode(data, reflect.TypeOf(*info))
+	buf := bytes.NewReader(data)
+
+	// Deserialize CoreIndex (2 bytes) - raw little-endian u16
+	if err := binary.Read(buf, binary.LittleEndian, &info.CoreIndex); err != nil {
+		return err
+	}
+
+	// Deserialize SegmentsRootMappings - SCALE encoded
+	decoded, _, err := types.Decode(data[2:], reflect.TypeOf([]JAMSNPSegmentRootMapping{}))
 	if err != nil {
 		return err
 	}
-	*info = info_interface.(JAMSNP_WpInfo)
+	info.SegmentsRootMappings = decoded.([]JAMSNPSegmentRootMapping)
+
 	return nil
 }
 
-func (p *Peer) SendBundleSubmission(ctx context.Context, coreIndex uint16, segmentsRootMappings []JAMSNPSegmentRootMapping, pkg types.WorkPackage, extrinsics types.ExtrinsicsBlobs, segments [][]byte, importProofs []common.Hash) (err error) {
+func (p *Peer) SendBundleSubmission(ctx context.Context, coreIndex uint16, segmentsRootMappings []JAMSNPSegmentRootMapping, pkg types.WorkPackage, extrinsics types.ExtrinsicsBlobs, segments [][]byte, importProofs [][]common.Hash) (err error) {
+	// Validate segment and proof counts match work package requirements
+	expectedSegments := 0
+	for _, workItem := range pkg.WorkItems {
+		expectedSegments += len(workItem.ImportedSegments)
+	}
+	if len(segments) != expectedSegments {
+		return fmt.Errorf("CE146 SendBundleSubmission: segment count mismatch: expected %d, got %d", expectedSegments, len(segments))
+	}
+	if len(importProofs) != expectedSegments {
+		return fmt.Errorf("CE146 SendBundleSubmission: import proof count mismatch: expected %d, got %d", expectedSegments, len(importProofs))
+	}
+	// Validate each segment has proper size and proof is non-empty
+	for i, seg := range segments {
+		if len(seg) != types.SegmentSize {
+			return fmt.Errorf("CE146 SendBundleSubmission: segment %d has invalid size %d (expected %d)", i, len(seg), types.SegmentSize)
+		}
+		if len(importProofs[i]) == 0 {
+			return fmt.Errorf("CE146 SendBundleSubmission: segment %d has no import proof", i)
+		}
+	}
+
 	wpInfo := JAMSNP_WpInfo{
 		CoreIndex:            coreIndex,
 		SegmentsRootMappings: segmentsRootMappings,
@@ -82,27 +131,32 @@ func (p *Peer) SendBundleSubmission(ctx context.Context, coreIndex uint16, segme
 		return err
 	}
 	// --> [Extrinsic] (Message size should equal sum of extrinsic data lengths)
-	extrinsicsBytes, err := types.Encode(extrinsics)
-	if err != nil {
-		return err
+	var extrinsicsBytes []byte
+	if len(extrinsics) == 0 {
+		extrinsicsBytes = []byte{}
+	} else {
+		extrinsicsBytes = extrinsics.Bytes()
 	}
 	err = sendQuicBytes(ctx, stream, extrinsicsBytes, p.PeerID, code)
 	if err != nil {
 		return err
 	}
-	// --> [Segment] (All imported segments)
+	// --> [Segment] (All imported segments) - sent as single concatenated message
+	var allSegments []byte
 	for _, segment := range segments {
-		err = sendQuicBytes(ctx, stream, segment, p.PeerID, code)
-		if err != nil {
-			return err
-		}
+		allSegments = append(allSegments, segment...)
 	}
-	// --> [Import-Proof] (Import proofs for all imported segments)
-	importProofsBytes, err := types.Encode(importProofs)
+	err = sendQuicBytes(ctx, stream, allSegments, p.PeerID, code)
 	if err != nil {
 		return err
 	}
-	err = sendQuicBytes(ctx, stream, importProofsBytes, p.PeerID, code)
+	// --> [Import-Proof] (Import proofs for all imported segments)
+	// Each Import-Proof is len++[Hash], concatenated into single message
+	var allImportProofs []byte
+	for _, proof := range importProofs {
+		allImportProofs = append(allImportProofs, encodeImportProof(proof)...)
+	}
+	err = sendQuicBytes(ctx, stream, allImportProofs, p.PeerID, code)
 	if err != nil {
 		return err
 	}
@@ -140,32 +194,223 @@ func (n *Node) onBundleSubmission(ctx context.Context, stream quic.Stream, msg [
 	}
 	extrinsics = extrinsicsInterface.(types.ExtrinsicsBlobs)
 
+	// Receive all segments as single concatenated message, then split by SegmentSize
+	allSegmentsBytes, err := receiveQuicBytes(ctx, stream, peerID, uint8(CE146_WPbundlesubmission))
+	if err != nil {
+		return err
+	}
 	var segments [][]byte
-	for range info.SegmentsRootMappings {
-		segmentBytes, err := receiveQuicBytes(ctx, stream, peerID, uint8(CE146_WPbundlesubmission))
-		if err != nil {
-			return err
-		}
-		segments = append(segments, segmentBytes)
+	for i := 0; i+types.SegmentSize <= len(allSegmentsBytes); i += types.SegmentSize {
+		segments = append(segments, allSegmentsBytes[i:i+types.SegmentSize])
 	}
 
 	importProofsBytes, err := receiveQuicBytes(ctx, stream, peerID, uint8(CE146_WPbundlesubmission))
 	if err != nil {
 		return err
 	}
-	var importProofs []common.Hash
-	importProofsInterface, _, err := types.Decode(importProofsBytes, reflect.TypeOf(importProofs))
-	if err != nil {
-		return err
+	// Decode [Import-Proof] - each Import-Proof is len++[Hash]
+	// Number of import proofs matches number of segments
+	var importProofs [][]common.Hash
+	data := importProofsBytes
+	for len(data) > 0 {
+		proof, bytesConsumed, err := decodeImportProofWithLength(data)
+		if err != nil {
+			return fmt.Errorf("decodeImportProof: %w", err)
+		}
+		importProofs = append(importProofs, proof)
+		data = data[bytesConsumed:]
 	}
-	importProofs = importProofsInterface.([]common.Hash)
 
 	// Handle the received work-package bundle submission
 	return n.HandleBundleSubmission(peerID, info.CoreIndex, info.SegmentsRootMappings, pkg, extrinsics, segments, importProofs)
 }
 
-func (n *Node) HandleBundleSubmission(peerID uint16, coreIndex uint16, segmentsRootMappings []JAMSNPSegmentRootMapping, pkg types.WorkPackage, extrinsics types.ExtrinsicsBlobs, segments [][]byte, importProofs []common.Hash) error {
-	fmt.Printf("Node %d received bundle submission from peer %d: coreIndex=%d, numSegments=%d, numImportProofs=%d\n", n.id, peerID, coreIndex, len(segments), len(importProofs))
-	// Further processing logic would go here
+func (n *Node) HandleBundleSubmission(peerID uint16, coreIndex uint16, segmentsRootMappings []JAMSNPSegmentRootMapping, pkg types.WorkPackage, extrinsics types.ExtrinsicsBlobs, segments [][]byte, importProofs [][]common.Hash) error {
+	log.Debug(log.R, "CE146-HandleBundleSubmission INCOMING", "NODE", n.id, "peer", peerID, "coreIndex", coreIndex, "workpackage", pkg.Hash(), "numSegments", len(segments), "numImportProofs", len(importProofs))
+
+	if isSilent {
+		log.Info(log.R, "CE146-HandleBundleSubmission INCOMING - SILENT MODE", "NODE", n.id)
+		return fmt.Errorf("Node %d is silent mode", n.id)
+	}
+
+	// Calculate slot based on JCE mode
+	var slot uint32
+	if n.jceMode == JCEDefault {
+		slot = n.statedb.GetTimeslot()
+	} else {
+		slot = common.GetWallClockJCE(fudgeFactorJCE)
+	}
+
+	// Validate core assignment
+	prevAssignments, assignments := n.statedb.CalculateAssignments(slot)
+	inSet := false
+	for _, assignment := range assignments {
+		if assignment.CoreIndex == coreIndex && types.Ed25519Key(assignment.Validator.Ed25519.PublicKey()) == n.GetEd25519Key() {
+			inSet = true
+			break
+		}
+	}
+	// Allow work packages from previous epoch assignments during transitions
+	if !inSet {
+		for _, assignment := range prevAssignments {
+			if assignment.CoreIndex == coreIndex && types.Ed25519Key(assignment.Validator.Ed25519.PublicKey()) == n.GetEd25519Key() {
+				inSet = true
+				break
+			}
+		}
+	}
+	if !inSet {
+		return fmt.Errorf("CE146: core index %d is not in the current guarantor assignments", coreIndex)
+	}
+
+	// Verify extrinsic data consistency with work package extrinsic hashes
+	if len(pkg.WorkItems) > 0 {
+		if err := pkg.WorkItems[0].CheckExtrinsics(extrinsics); err != nil {
+			log.Error(log.Node, "CE146-HandleBundleSubmission: extrinsic verification failed", "err", err)
+			return fmt.Errorf("extrinsic data inconsistent with hashes: %w", err)
+		}
+	}
+
+	workPackageHash := pkg.Hash()
+
+	// Check for duplicate work packages
+	if _, loaded := n.seenWorkPackages.LoadOrStore(workPackageHash, struct{}{}); loaded {
+		log.Trace(log.R, "CE146-HandleBundleSubmission: duplicate work package", "NODE", n.id, "workpackage", workPackageHash)
+		return nil
+	}
+
+	// Avoid duplicating work package submissions already in RecentBlocks
+	s := n.statedb
+	for _, block := range s.JamState.RecentBlocks.B_H {
+		if len(block.Reported) != 0 {
+			for _, segmentRootLookup := range block.Reported {
+				if segmentRootLookup.WorkPackageHash == workPackageHash {
+					return nil
+				}
+			}
+		}
+	}
+
+	// Compute expected number of segments from work package
+	expectedSegments := 0
+	for _, workItem := range pkg.WorkItems {
+		expectedSegments += len(workItem.ImportedSegments)
+	}
+
+	// Validate segment and proof counts
+	if expectedSegments > 0 {
+		if len(segments) != expectedSegments {
+			log.Error(log.Node, "CE146-HandleBundleSubmission: segment count mismatch",
+				"expected", expectedSegments, "actual", len(segments))
+			return fmt.Errorf("CE146: expected %d segments, got %d", expectedSegments, len(segments))
+		}
+		if len(importProofs) != expectedSegments {
+			log.Error(log.Node, "CE146-HandleBundleSubmission: import proof count mismatch",
+				"expected", expectedSegments, "actual", len(importProofs))
+			return fmt.Errorf("CE146: expected %d import proofs, got %d", expectedSegments, len(importProofs))
+		}
+		// Validate each segment has proper size and proof is non-empty
+		for i, seg := range segments {
+			if len(seg) != types.SegmentSize {
+				log.Error(log.Node, "CE146-HandleBundleSubmission: invalid segment size",
+					"index", i, "expected", types.SegmentSize, "actual", len(seg))
+				return fmt.Errorf("CE146: segment %d has invalid size %d (expected %d)", i, len(seg), types.SegmentSize)
+			}
+			if len(importProofs[i]) == 0 {
+				log.Error(log.Node, "CE146-HandleBundleSubmission: missing import proof",
+					"index", i)
+				return fmt.Errorf("CE146: segment %d has no import proof", i)
+			}
+		}
+	}
+
+	// Reorganize flat segments/importProofs into [workItemIndex][importedSegmentIndex] structure
+	// The segments and importProofs are sent in order: all segments for workItem 0, then workItem 1, etc.
+	importSegmentData := make([][][]byte, len(pkg.WorkItems))
+	justification := make([][][]common.Hash, len(pkg.WorkItems))
+	segmentIdx := 0
+	for workItemIdx, workItem := range pkg.WorkItems {
+		numImports := len(workItem.ImportedSegments)
+		importSegmentData[workItemIdx] = make([][]byte, numImports)
+		justification[workItemIdx] = make([][]common.Hash, numImports)
+		for impIdx := 0; impIdx < numImports; impIdx++ {
+			importSegmentData[workItemIdx][impIdx] = segments[segmentIdx]
+			justification[workItemIdx][impIdx] = importProofs[segmentIdx]
+			segmentIdx++
+		}
+	}
+
+	// Convert segmentsRootMappings to types.SegmentRootLookup for verification
+	segmentRootLookup := make(types.SegmentRootLookup, len(segmentsRootMappings))
+	for i, mapping := range segmentsRootMappings {
+		segmentRootLookup[i] = types.SegmentRootLookupItem{
+			WorkPackageHash: mapping.WorkPackageHash,
+			SegmentRoot:     mapping.SegmentRoot,
+		}
+	}
+
+	// Verify the bundle justifications before storing to queue
+	// This ensures the builder provided valid segments with correct CDT proofs
+	if len(segments) > 0 {
+		tempBundle := &types.WorkPackageBundle{
+			WorkPackage:       pkg,
+			ExtrinsicData:     []types.ExtrinsicsBlobs{extrinsics},
+			ImportSegmentData: importSegmentData,
+			Justification:     justification,
+		}
+		eventID := n.telemetryClient.GetEventID()
+		verified, err := n.statedb.VerifyBundle(tempBundle, segmentRootLookup, eventID)
+		if err != nil {
+			log.Error(log.Node, "CE146-HandleBundleSubmission: VerifyBundle error", "err", err)
+			return fmt.Errorf("CE146: VerifyBundle failed: %w", err)
+		}
+		if !verified {
+			log.Warn(log.Node, "CE146-HandleBundleSubmission: bundle verification failed", "workpackage", workPackageHash)
+			return fmt.Errorf("CE146: bundle verification failed for %s", workPackageHash)
+		}
+		log.Debug(log.R, "CE146-HandleBundleSubmission VERIFIED", "NODE", n.id, "workpackage", workPackageHash)
+	}
+
+	// Store to work package queue with pre-fetched bundle data
+	n.workPackageQueue.Store(workPackageHash, &types.WPQueueItem{
+		WorkPackage:        pkg,
+		CoreIndex:          coreIndex,
+		Extrinsics:         extrinsics,
+		AddTS:              time.Now().Unix(),
+		NextAttemptAfterTS: time.Now().Unix(),
+		Slot:               slot,
+		EventID:            n.telemetryClient.GetEventID(),
+		ImportSegmentData:  importSegmentData,
+		Justification:      justification,
+	})
+
+	log.Debug(log.R, "CE146-HandleBundleSubmission QUEUED", "NODE", n.id, "workpackage", workPackageHash, "coreIndex", coreIndex, "slot", slot, "numSegments", len(segments), "numImportProofs", len(importProofs))
+
 	return nil
+}
+
+// decodeImportProofWithLength decodes an import proof (len++[Hash]) and returns bytes consumed
+func decodeImportProofWithLength(data []byte) ([]common.Hash, int, error) {
+	if len(data) == 0 {
+		return nil, 0, fmt.Errorf("empty import proof data")
+	}
+
+	// len++[Hash]
+	numHashes, bytesRead := types.DecodeE(data)
+	if bytesRead == 0 {
+		return nil, 0, fmt.Errorf("failed to decode import proof length")
+	}
+
+	totalBytes := int(bytesRead) + int(numHashes)*32
+	if len(data) < totalBytes {
+		return nil, 0, fmt.Errorf("insufficient data for import proof: expected %d bytes, got %d", totalBytes, len(data))
+	}
+
+	proof := make([]common.Hash, numHashes)
+	for i := uint64(0); i < numHashes; i++ {
+		offset := int(bytesRead) + int(i)*32
+		proof[i] = common.BytesToHash(data[offset : offset+32])
+	}
+
+	return proof, totalBytes, nil
 }

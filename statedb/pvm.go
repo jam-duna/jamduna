@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/colorfulnotion/jam/common"
@@ -15,9 +18,8 @@ import (
 )
 
 const (
-	BackendInterpreter     = "interpreter"    // C interpreter
-	BackendGoInterpreter   = "go_interpreter" // Go interpreter
-	BackendCompiler        = "compiler"       // X86 recompiler
+	BackendInterpreter     = "interpreter" // Go interpreter
+	BackendCompiler        = "compiler"    // X86 recompiler
 	BackendCompilerSandbox = "sandbox"
 )
 
@@ -42,6 +44,17 @@ var (
 	PvmLogging = false
 )
 
+// saveToLogDir is a helper function to save data to a file in the log directory.
+// It creates the directory if needed and silently ignores errors if logDir is empty.
+// If logDir contains "SKIP" anywhere in the path, no files are written.
+func saveToLogDir(logDir, filename string, data []byte) {
+	if logDir == "" || strings.Contains(logDir, "SKIP") {
+		return
+	}
+	os.MkdirAll(logDir, 0755)
+	os.WriteFile(filepath.Join(logDir, filename), data, 0644)
+}
+
 type ExecutionVM interface {
 	ReadRegister(int) uint64
 	ReadRegisters() [13]uint64
@@ -59,7 +72,7 @@ type ExecutionVM interface {
 	Panic(uint64)
 	SetHostResultCode(uint64)
 	Init(argument_data_a []byte) (err error)
-	Execute(vm *VM, EntryPoint uint32) error
+	Execute(vm *VM, EntryPoint uint32, logDir string) error
 	ExecuteAsChild(entryPoint uint32) error
 	GetHostID() uint64
 	Destroy()
@@ -293,63 +306,13 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		panic("No code provided to NewVM")
 	}
 	vm.InitialGas = initialGas
-	if vm.Backend == BackendInterpreter {
-		// Create VM using FFI API
-		machine := NewInterpreter(service_index, p, initialRegs, initialPC, initialGas, vm)
-		vm.ExecutionVM = machine
-
-		// o - read-only
-		ro_data_address := uint32(Z_Z)
-		ro_data_address_end := ro_data_address + P_func(o_size)
-
-		machine.SetHostCallBack()
-		machine.SetLogging()
-		// s - stack
-		p_s := P_func(s)
-		stack_address := uint32(uint64(1<<32) - uint64(2*Z_Z) - uint64(Z_I) - uint64(p_s))
-		stack_address_end := uint32(uint64(1<<32) - uint64(2*Z_Z) - uint64(Z_I))
-
-		// a - argument outputs
-		output_address := uint32(0xFFFFFFFF) - Z_Z - Z_I + 1
-		output_end := uint32(0xFFFFFFFF)
-
-		// w - read-write
-		rw_data_address := uint32(2*Z_Z) + Z_func(o_size)
-		rw_data_address_end := rw_data_address + P_func(w_size) + z*Z_P
-		current_heap_pointer := rw_data_address_end
-
-		z_o := Z_func(o_size)
-		z_w := Z_func(w_size + z*Z_P)
-		z_s := Z_func(s)
-		requiredMemory = uint64(5*Z_Z + z_o + z_w + z_s + Z_I)
-		if requiredMemory > math.MaxUint32 {
-			log.Error(vm.logging, "Standard Program Initialization Error")
-		}
-		machine.SetHeapPointer(current_heap_pointer)
-		machine.SetMemoryBounds(rw_data_address, rw_data_address_end, ro_data_address, ro_data_address_end, output_address, output_end, stack_address, stack_address_end)
-		//fmt.Printf("Memory bounds set: RW [0x%x - 0x%x], RO [0x%x - 0x%x], Output [0x%x - 0x%x], Stack [0x%x - 0x%x]\n",
-		//		rw_data_address, rw_data_address_end, ro_data_address, ro_data_address_end, output_address, output_end, stack_address, stack_address_end)
-		if len(o_byte) > 0 {
-			result := vm.WriteRAMBytes(Z_Z, o_byte)
-			if result != OK {
-				fmt.Printf("Warning: Failed to initialize o_byte data: error %d\n", result)
-				panic("Failed to initialize o_byte data")
-			}
-		}
-		if len(w_byte) > 0 {
-			result := vm.WriteRAMBytes(rw_data_address, w_byte)
-			if result != OK {
-				fmt.Printf("Warning: Failed to initialize w_byte data: error %d\n", result)
-				panic("Failed to initialize w_byte data")
-			}
-		}
-	} else if vm.Backend == BackendCompiler {
+	if vm.Backend == BackendCompiler {
 		rvm := NewRecompilerVM(service_index, initialRegs, initialPC, initialHeap, hostENV, jam_ready_blob, Metadata, initialGas, p, o_size, w_size, z, s, o_byte, w_byte)
 		if rvm == nil {
 			return nil
 		}
 		vm.ExecutionVM = rvm
-	} else if vm.Backend == BackendGoInterpreter {
+	} else if vm.Backend == BackendInterpreter {
 		machine := NewVMGo(service_index, p, initialRegs, initialPC, initialGas, hostENV)
 		machine.Gas = initialGas
 		vm.ExecutionVM = machine
@@ -450,18 +413,13 @@ func (vm *VM) attachFrameServer(addr, htmlPath string) error {
 func (vm *VM) NewEmptyExecutionVM(service_index uint32, p *Program, initialRegs []uint64, initialPC uint64, initialHeap uint64, hostENV types.HostEnv, machineIndex uint32) *ExecutionVM {
 	var e_vm ExecutionVM
 	initialGas := uint64(0x7FFFFFFFFFFFFFFF)
-	if vm.Backend == BackendGoInterpreter || vm.Backend == BackendInterpreter {
+	if vm.Backend == BackendInterpreter {
 		machine := NewVMGo(service_index, p, initialRegs, initialPC, initialGas, hostENV)
 		machine.Gas = initialGas
 		// Track all steps (TargetStep=0 means no window restriction)
 		// machine.EnableTaintForStep(0, 0)
 		e_vm = machine
 		// Trace writers will be initialized lazily when first needed (allows dynamic enabling)
-	} else if vm.Backend == BackendInterpreter { // currently unreachable
-		// machine := NewInterpreter(service_index, p, initialRegs, initialPC, uint64(initialGas), hostENV)
-		// machine.SetHostCallBack()
-		// machine.SetLogging()
-		// e_vm = machine
 	} else if vm.Backend == BackendCompiler {
 		rvm := NewRecompilerVMWithoutSetup(service_index, initialRegs, initialPC, hostENV, false, []byte{}, uint64(initialGas), p)
 		e_vm = rvm
@@ -494,7 +452,7 @@ func (vm *VM) GetServiceIndex() uint32 {
 }
 
 // input by order([work item index],[workpackage itself], [result from IsAuthorized], [import segments], [export count])
-func (vm *VM) ExecuteRefine(core uint16, workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash, n common.Hash) (r types.Result, res uint64, exportedSegments [][]byte) {
+func (vm *VM) ExecuteRefine(core uint16, workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash, n common.Hash, logDir string) (r types.Result, res uint64, exportedSegments [][]byte) {
 	vm.Mode = ModeRefine
 
 	workitem := workPackage.WorkItems[workitemIndex]
@@ -523,11 +481,23 @@ func (vm *VM) ExecuteRefine(core uint16, workitemIndex uint32, workPackage types
 		vm.TotalExported += uint64(item.ExportCount)
 	}
 
-	vm.executeWithBackend(a, types.EntryPointRefine)
+	// Save inputs
+	saveToLogDir(logDir, "inputs", a)
+
+	vm.executeWithBackend(a, types.EntryPointRefine, logDir)
 	r, res = vm.getArgumentOutputs()
 
 	log.Trace(vm.logging, string(vm.ServiceMetadata), "Result", r.String(), "fault_address", vm.Fault_address, "resultCode", vm.ResultCode)
 	exportedSegments = vm.Exports
+
+	// Save all exported segments back to back in a single file
+	if len(exportedSegments) > 0 {
+		var allExports []byte
+		for _, segment := range exportedSegments {
+			allExports = append(allExports, segment...)
+		}
+		saveToLogDir(logDir, "exports", allExports)
+	}
 
 	return r, res, exportedSegments
 }
@@ -574,7 +544,7 @@ func (vm *VM) SetupRefine(core uint16, workitemIndex uint32, workPackage types.W
 	// do not execute ... we will do ExecuteStep one step at a time
 }
 
-func (vm *VM) ExecuteAccumulate(t uint32, s uint32, inputs []types.AccumulateInput, X *types.XContext, n common.Hash) (r types.Result, res uint64, xs *types.ServiceAccount) {
+func (vm *VM) ExecuteAccumulate(t uint32, s uint32, inputs []types.AccumulateInput, X *types.XContext, n common.Hash, logDir string) (r types.Result, res uint64, xs *types.ServiceAccount) {
 	vm.Mode = ModeAccumulate
 	vm.X = X //⎩I(u, s), I(u, s)⎫⎭
 	vm.Y = X.Clone()
@@ -597,27 +567,55 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, inputs []types.AccumulateInp
 	x_s.Mutable = true
 	vm.X.U.ServiceAccounts[s] = x_s
 	vm.ServiceAccount = x_s
-	vm.executeWithBackend(input_bytes, types.EntryPointAccumulate)
+
+	// Create subdirectory for this accumulate execution using service ID
+	accumulateLogDir := filepath.Join(logDir, fmt.Sprintf("%d", s))
+
+	// Save inputs
+	saveToLogDir(accumulateLogDir, "inputs", input_bytes)
+	// Save AccumulateInputs for inspection
+	if inputsEncoded, err := types.Encode(vm.AccumulateInputs); err == nil {
+		saveToLogDir(accumulateLogDir, "accumulate_inputs", inputsEncoded)
+	}
+
+	vm.executeWithBackend(input_bytes, types.EntryPointAccumulate, accumulateLogDir)
 	r, res = vm.getArgumentOutputs()
+
+	// Save outputs
+	if resBytes, err := types.Encode(res); err == nil {
+		saveToLogDir(accumulateLogDir, "outputs", resBytes)
+	}
+
 	return r, res, x_s
 }
 
-func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16) (r types.Result) {
+func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16, logDir string) (r types.Result) {
 	vm.Mode = ModeIsAuthorized
-	// CHECK: NOT 0.7.0 COMPLIANT
 	a, _ := types.Encode(uint8(c))
 
+	// Create subdirectory for authorization execution
+	authLogDir := filepath.Join(logDir, "auth")
+
+	// Save inputs
+	saveToLogDir(authLogDir, "inputs", a)
+
 	// fmt.Printf("ExecuteAuthorization - c=%d len(p_bytes)=%d len(c_bytes)=%d len(a)=%d a=%x WP=%s\n", c, len(p_bytes), len(c_bytes), len(a), a, p.String())
-	vm.executeWithBackend(a, types.EntryPointAuthorization)
+	vm.executeWithBackend(a, types.EntryPointAuthorization, authLogDir)
 	r, _ = vm.getArgumentOutputs()
+
+	// Save outputs
+	if rBytes, err := types.Encode(r); err == nil {
+		saveToLogDir(authLogDir, "outputs", rBytes)
+	}
+
 	return r
 }
 
-func (vm *VM) executeWithBackend(argumentData []byte, entryPoint uint32) {
+func (vm *VM) executeWithBackend(argumentData []byte, entryPoint uint32, logDir string) {
 	// fmt.Printf("Standard Program Initialization: %s=%x %s=%x\n", reg(7), argAddr, reg(8), uint32(len(argument_data_a)))
 	vm.Init(argumentData)
 	vm.IsChild = false
-	err := vm.ExecutionVM.Execute(vm, entryPoint)
+	err := vm.ExecutionVM.Execute(vm, entryPoint, logDir)
 	if err != nil {
 		log.Error(vm.logging, "VM execution failed", "error", err)
 	}

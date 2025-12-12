@@ -64,20 +64,16 @@ func PadToMultipleOfN(input []byte, n int) []byte {
 }
 
 func padToMultipleOfN(input []byte, n int) []byte {
-	length := len(input)
-	mod := (length+n-1)%n + 1
-
-	// Calculate the padding
-	padding := 0
-	if mod != 0 {
-		padding = n - mod
+	if n <= 0 {
+		return input
 	}
-
-	// Fill the padding
-	for i := 0; i < padding; i++ {
-		input = append(input, 0)
+	paddingSize := (n - (len(input) % n)) % n
+	if paddingSize == 0 {
+		return input
 	}
-	return input
+	padded := make([]byte, len(input)+paddingSize)
+	copy(padded, input)
+	return padded
 }
 
 // used for justification.. with $leaf as salt

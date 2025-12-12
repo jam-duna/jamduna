@@ -64,7 +64,7 @@ func GenerateFibSegments(numSegments int) [][]byte {
 // TestGenerateFibExportedRoots generates the exported roots for fib segments 0 to maxN
 // and saves them to exportedRoots.json
 func TestGenerateFibExportedRoots(t *testing.T) {
-	maxN := 3070 // Generate roots for 0 to 3072 segments (3073 entries)
+	maxN := 3072 // Generate roots for 0 to 3072 segments (3073 entries)
 
 	t.Logf("Generating exported roots for 0 to %d segments...\n", maxN)
 
@@ -137,10 +137,11 @@ func buildSClubForTest(segments [][]byte) ([]common.Hash, [][]byte) {
 	// Generate page proofs
 	pageProofs, _ := GeneratePageProof(segments)
 
-	// EC encode page proofs
+	// EC encode page proofs - pad to SegmentSize before encoding (like refine.go line 1172)
 	encodedPageProofs := make([][][]byte, len(pageProofs))
 	for i, proof := range pageProofs {
-		encoded, err := bls.Encode(proof, types.TotalValidators)
+		paddedProof := common.PadToMultipleOfN(proof, types.SegmentSize)
+		encoded, err := bls.Encode(paddedProof, types.TotalValidators)
 		if err != nil {
 			panic(fmt.Sprintf("buildSClubForTest: bls.Encode failed for page proof %d: %v", i, err))
 		}
@@ -166,7 +167,7 @@ func buildSClubForTest(segments [][]byte) ([]common.Hash, [][]byte) {
 		tree := NewWellBalancedTree(shardData, types.Blake2b)
 		sClub[vIdx] = tree.RootHash()
 
-		// Concatenate all shards for exportedShards
+		// Concatenate all shards for exportedShards (segments + page proofs)
 		var combined []byte
 		for _, shard := range shardData {
 			combined = append(combined, shard...)
@@ -246,7 +247,6 @@ func generateSyntheticFull137Resp(t *testing.T, numSegments int) ([]Full137Resp,
 	// Step 5: Generate erasure tree (for synthetic erasureRoot)
 	erasureTree := generateErasureTreeForTest(bClubs, sClubs)
 	syntheticErasureRoot := erasureTree.RootHash()
-	t.Logf("Synthetic erasureRoot: %s", syntheticErasureRoot.Hex())
 
 	// Step 6: Build Full137Resp for each shard with faithful EncodedPath
 	resps := make([]Full137Resp, types.TotalValidators)

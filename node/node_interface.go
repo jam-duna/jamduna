@@ -22,6 +22,9 @@ type JNode interface {
 	GetRefineContext() (types.RefineContext, error)
 	BuildBundle(types.WorkPackage, []types.ExtrinsicsBlobs, uint16, []common.Hash) (*types.WorkPackageBundle, *types.WorkReport, error)
 
+	// Segment retrieval for CE146 bundle building
+	GetSegmentWithProof(segmentsRoot common.Hash, segmentIndex uint16) (segment []byte, importProof []common.Hash, found bool)
+
 	// Ethereum internal methods (called by Jam RPC wrappers)
 	// Network Metadata
 	GetChainId() uint64

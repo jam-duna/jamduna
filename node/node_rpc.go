@@ -1775,3 +1775,45 @@ func (n *NodeContent) GetBlockByNumber(blockNumber string, fullTx bool) (*evmtyp
 
 	return ethBlock, nil
 }
+
+// GetSegmentWithProof returns a segment and its CDT justification proof for a given segments root and index
+// req = [segmentsRoot, segmentIndex]
+func (j *Jam) GetSegmentWithProof(req []string, res *string) error {
+	if len(req) != 2 {
+		return fmt.Errorf("invalid number of arguments: expected 2, got %d", len(req))
+	}
+
+	segmentsRoot := common.HexToHash(req[0])
+	segmentIndex, err := strconv.ParseUint(req[1], 10, 16)
+	if err != nil {
+		return fmt.Errorf("invalid segment index: %w", err)
+	}
+
+	segment, proof, found := j.NodeContent.GetSegmentWithProof(segmentsRoot, uint16(segmentIndex))
+	if !found {
+		return fmt.Errorf("segment not found for root %s index %d", segmentsRoot.Hex(), segmentIndex)
+	}
+
+	type segmentWithProofResponse struct {
+		Segment string   `json:"segment"`
+		Proof   []string `json:"proof"`
+	}
+
+	proofHex := make([]string, len(proof))
+	for i, h := range proof {
+		proofHex[i] = h.Hex()
+	}
+
+	response := segmentWithProofResponse{
+		Segment: common.Bytes2Hex(segment),
+		Proof:   proofHex,
+	}
+
+	jsonBytes, err := json.Marshal(response)
+	if err != nil {
+		return fmt.Errorf("failed to marshal response: %w", err)
+	}
+
+	*res = string(jsonBytes)
+	return nil
+}

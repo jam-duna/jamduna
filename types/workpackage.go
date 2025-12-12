@@ -42,6 +42,8 @@ type WPQueueItem struct {
 	NumFailures        int
 	Slot               uint32 // the slot for which this work package is intended
 	EventID            uint64
+	ImportSegmentData  [][][]byte        // [workItemIndex][importedSegmentIndex][bytes]
+	Justification      [][][]common.Hash // [workItemIndex][importedSegmentIndex][hashes]
 }
 
 func (a *WorkPackage) String() string {

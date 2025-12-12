@@ -59,8 +59,10 @@ func NewRecompilerVMSandbox(service_index uint32, code []byte, initialRegs []uin
 	return recompiler
 }
 
-func (rvm *RecompilerSandbox) Execute(VM *VM, entry uint32) error {
+func (rvm *RecompilerSandbox) Execute(VM *VM, entry uint32, logDir string) error {
 	rvm.HostFunc = VM
+	// Note: logDir is currently unused in sandbox recompiler backend
+	// Tracing is handled differently in the sandboxed compiled code
 	rvm.RecompilerSandboxVM.ExecuteSandBox(uint64(entry))
 	state := rvm.RecompilerSandboxVM.MachineState
 	VM.ResultCode = state

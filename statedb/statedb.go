@@ -653,7 +653,7 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 				used_entropy = s.GetSafrole().Entropy[2]
 			}
 			valid_tickets := extrinsic_pool.GetTicketIDPairFromPool(used_entropy)
-			newStateDB, err := ApplyStateTransitionFromBlock(authoringEventID, s, ctx, proposedBlk, valid_tickets, pvmBackend) // shawn to check.. valid_tickets was nil here before
+			newStateDB, err := ApplyStateTransitionFromBlock(authoringEventID, s, ctx, proposedBlk, valid_tickets, pvmBackend, "") // shawn to check.. valid_tickets was nil here before
 			if err != nil {
 				// Telemetry: BlockExecutionFailed (event 46) - Block execution failed after authoring
 				telemetryClient.BlockExecutionFailed(authoringEventID, err.Error())
