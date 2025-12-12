@@ -236,17 +236,17 @@ func branchCondSymbol(name string) string {
 
 var PvmInterpretation = false
 
-// Global variable to track memory operation for current instruction
-var lastMemAddr uint32
-var lastMemValue uint64
+// Global variables to track memory operation for current instruction
+var lastMemAddrRead uint32
+var lastMemValueRead uint64
+var lastMemAddrWrite uint32
+var lastMemValueWrite uint64
 
 func dumpStoreGeneric(_ string, addr uint64, regOrSrc string, value uint64, bits int) {
-	// Memory operation logging for PvmLogging - MUST come before PvmTrace check
-	if PvmLogging {
-		lastMemAddr = uint32(addr)
-		lastMemValue = value
+	if PvmTraceMode {
+		lastMemAddrWrite = uint32(addr)
+		lastMemValueWrite = value
 	}
-
 	if !PvmTrace {
 		return
 	}
@@ -266,12 +266,10 @@ func dumpLoadImmJump(_ string, registerIndexA int, vx uint64) {
 }
 
 func dumpLoadGeneric(_ string, regA int, addrOrVx uint64, value uint64, bits int, signed bool) {
-	// Memory operation logging for PvmLogging - MUST come before PvmTrace check
-	if PvmLogging {
-		lastMemAddr = uint32(regA)
-		lastMemValue = value
+	if PvmTraceMode {
+		lastMemAddrRead = uint32(addrOrVx)
+		lastMemValueRead = value
 	}
-
 	if !PvmTrace {
 		return
 	}
@@ -286,6 +284,11 @@ func dumpLoadGeneric(_ string, regA int, addrOrVx uint64, value uint64, bits int
 }
 
 func dumpLoadImm(_ string, regA int, addrOrVx uint64, value uint64, bits int, signed bool) {
+	if PvmTraceMode {
+		lastMemAddrRead = uint32(addrOrVx)
+		lastMemValueRead = value
+	}
+
 	if !PvmTrace {
 		return
 	}

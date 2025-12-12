@@ -15,6 +15,9 @@ import (
 )
 
 func TestBundleExecution(t *testing.T) {
+	// Enable PVM trace mode for detailed execution tracing
+	PvmTraceMode = true
+
 	// Load exported segments from JSON for CheckSegments validation
 	exportedSegmentsFile := "../trie/test/exported_segments_doom_3072.json"
 	exportedSegmentsData, err := os.ReadFile(exportedSegmentsFile)
@@ -73,6 +76,7 @@ func TestBundleExecution(t *testing.T) {
 		recompiler.EnableDebugTracing = false
 		recompiler.ALWAYS_COMPILE = true
 	} else {
+		PvmLogging = false
 	}
 	t.Logf("🔍 [%s] Executing bundle with %s backend, package %s", bundleFile, testingBackend, bundle.Bundle.String())
 	wr, err := state.ExecuteWorkPackageBundle(bundle.CoreIndex, bundle.Bundle, bundle.SegmentRootLookup, stf.Block.TimeSlot(), "", 0, testingBackend, fmt.Sprintf("%s", bundle.Bundle.WorkPackage.Hash()))

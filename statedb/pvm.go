@@ -44,6 +44,24 @@ var (
 	PvmLogging = false
 )
 
+// serializeHashes serializes an array of common.Hash back-to-back with no separators
+func serializeHashes(hashes []common.Hash) []byte {
+	result := make([]byte, 0, len(hashes)*32)
+	for _, h := range hashes {
+		result = append(result, h[:]...)
+	}
+	return result
+}
+
+// serializeECChunks serializes an array of DistributeECChunk back-to-back with no separators
+func serializeECChunks(chunks []types.DistributeECChunk) []byte {
+	result := make([]byte, 0)
+	for _, chunk := range chunks {
+		result = append(result, chunk.Data...)
+	}
+	return result
+}
+
 // saveToLogDir is a helper function to save data to a file in the log directory.
 // It creates the directory if needed and silently ignores errors if logDir is empty.
 // If logDir contains "SKIP" anywhere in the path, no files are written.
@@ -51,8 +69,29 @@ func saveToLogDir(logDir, filename string, data []byte) {
 	if logDir == "" || strings.Contains(logDir, "SKIP") {
 		return
 	}
+	if !PvmTraceMode {
+		return
+	}
 	os.MkdirAll(logDir, 0755)
 	os.WriteFile(filepath.Join(logDir, filename), data, 0644)
+}
+
+// saveToLogDirOutput saves the result to either "output" or "err" file based on the result code.
+// If r.Ok is set, writes to "output" file. If r.Err is set, writes to "err" file.
+func saveToLogDirOutput(logDir string, r types.Result, res uint64) {
+	if logDir == "" || strings.Contains(logDir, "SKIP") {
+		return
+	}
+	if !PvmTraceMode {
+		return
+	}
+	os.MkdirAll(logDir, 0755)
+	if len(r.Ok) > 0 {
+		os.WriteFile(filepath.Join(logDir, "output"), r.Ok, 0644)
+	} else if r.Err != 0 {
+		// Write error code as a single byte
+		os.WriteFile(filepath.Join(logDir, "err"), []byte{r.Err}, 0644)
+	}
 }
 
 type ExecutionVM interface {
@@ -84,10 +123,13 @@ type ExecutionVM interface {
 
 type VM struct {
 	ExecutionVM
-	VMs map[uint32]*ExecutionVM
+	VMs             map[uint32]*ExecutionVM
+	VmsEntryCounter map[uint32]int
 
-	Backend        string
-	IsChild        bool
+	Backend string
+	IsChild bool
+	LogDir  string // Log directory for trace files
+
 	ResultCode     uint8
 	HostResultCode uint64
 	MachineState   uint8
@@ -285,6 +327,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		ServiceMetadata: Metadata,
 		Backend:         pvmBackend,
 		VMs:             make(map[uint32]*ExecutionVM),
+		VmsEntryCounter: make(map[uint32]int),
 	}
 
 	requiredMemory := uint64(uint64(5*Z_Z) + uint64(Z_func(o_size)) + uint64(Z_func(w_size+z*Z_P)) + uint64(Z_func(s)) + uint64(Z_I))
@@ -410,7 +453,7 @@ func (vm *VM) attachFrameServer(addr, htmlPath string) error {
 	return nil
 }
 
-func (vm *VM) NewEmptyExecutionVM(service_index uint32, p *Program, initialRegs []uint64, initialPC uint64, initialHeap uint64, hostENV types.HostEnv, machineIndex uint32) *ExecutionVM {
+func (vm *VM) NewEmptyExecutionVM(service_index uint32, p *Program, initialRegs []uint64, initialPC uint64, initialHeap uint64, hostENV types.HostEnv, machineIndex uint32, childEntryIndex int) *ExecutionVM {
 	var e_vm ExecutionVM
 	initialGas := uint64(0x7FFFFFFFFFFFFFFF)
 	if vm.Backend == BackendInterpreter {
@@ -419,6 +462,9 @@ func (vm *VM) NewEmptyExecutionVM(service_index uint32, p *Program, initialRegs 
 		// Track all steps (TargetStep=0 means no window restriction)
 		// machine.EnableTaintForStep(0, 0)
 		e_vm = machine
+		machine.ChildIndex = int(machineIndex)
+		machine.ChildeEntryCount = childEntryIndex
+		machine.LogDir = vm.LogDir // Inherit logDir from parent VM
 		// Trace writers will be initialized lazily when first needed (allows dynamic enabling)
 	} else if vm.Backend == BackendCompiler {
 		rvm := NewRecompilerVMWithoutSetup(service_index, initialRegs, initialPC, hostENV, false, []byte{}, uint64(initialGas), p)
@@ -454,6 +500,7 @@ func (vm *VM) GetServiceIndex() uint32 {
 // input by order([work item index],[workpackage itself], [result from IsAuthorized], [import segments], [export count])
 func (vm *VM) ExecuteRefine(core uint16, workitemIndex uint32, workPackage types.WorkPackage, authorization types.Result, importsegments [][][]byte, export_count uint16, extrinsics types.ExtrinsicsBlobs, p_a common.Hash, n common.Hash, logDir string) (r types.Result, res uint64, exportedSegments [][]byte) {
 	vm.Mode = ModeRefine
+	vm.LogDir = logDir // Set logDir so child VMs can inherit it
 
 	workitem := workPackage.WorkItems[workitemIndex]
 
@@ -482,11 +529,11 @@ func (vm *VM) ExecuteRefine(core uint16, workitemIndex uint32, workPackage types
 	}
 
 	// Save inputs
-	saveToLogDir(logDir, "inputs", a)
+	saveToLogDir(logDir, "input", a)
 
 	vm.executeWithBackend(a, types.EntryPointRefine, logDir)
 	r, res = vm.getArgumentOutputs()
-
+	saveToLogDirOutput(logDir, r, res)
 	log.Trace(vm.logging, string(vm.ServiceMetadata), "Result", r.String(), "fault_address", vm.Fault_address, "resultCode", vm.ResultCode)
 	exportedSegments = vm.Exports
 
@@ -568,23 +615,16 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, inputs []types.AccumulateInp
 	vm.X.U.ServiceAccounts[s] = x_s
 	vm.ServiceAccount = x_s
 
-	// Create subdirectory for this accumulate execution using service ID
-	accumulateLogDir := filepath.Join(logDir, fmt.Sprintf("%d", s))
-
 	// Save inputs
-	saveToLogDir(accumulateLogDir, "inputs", input_bytes)
+	saveToLogDir(logDir, "input", input_bytes)
 	// Save AccumulateInputs for inspection
 	if inputsEncoded, err := types.Encode(vm.AccumulateInputs); err == nil {
-		saveToLogDir(accumulateLogDir, "accumulate_inputs", inputsEncoded)
+		saveToLogDir(logDir, "accumulate_input", inputsEncoded)
 	}
 
-	vm.executeWithBackend(input_bytes, types.EntryPointAccumulate, accumulateLogDir)
+	vm.executeWithBackend(input_bytes, types.EntryPointAccumulate, logDir)
 	r, res = vm.getArgumentOutputs()
-
-	// Save outputs
-	if resBytes, err := types.Encode(res); err == nil {
-		saveToLogDir(accumulateLogDir, "outputs", resBytes)
-	}
+	saveToLogDirOutput(logDir, r, res)
 
 	return r, res, x_s
 }
@@ -593,20 +633,13 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16, logDir string)
 	vm.Mode = ModeIsAuthorized
 	a, _ := types.Encode(uint8(c))
 
-	// Create subdirectory for authorization execution
-	authLogDir := filepath.Join(logDir, "auth")
-
 	// Save inputs
-	saveToLogDir(authLogDir, "inputs", a)
+	saveToLogDir(logDir, "input", a)
 
 	// fmt.Printf("ExecuteAuthorization - c=%d len(p_bytes)=%d len(c_bytes)=%d len(a)=%d a=%x WP=%s\n", c, len(p_bytes), len(c_bytes), len(a), a, p.String())
-	vm.executeWithBackend(a, types.EntryPointAuthorization, authLogDir)
-	r, _ = vm.getArgumentOutputs()
-
-	// Save outputs
-	if rBytes, err := types.Encode(r); err == nil {
-		saveToLogDir(authLogDir, "outputs", rBytes)
-	}
+	vm.executeWithBackend(a, types.EntryPointAuthorization, logDir)
+	r, res := vm.getArgumentOutputs()
+	saveToLogDirOutput(logDir, r, res)
 
 	return r
 }

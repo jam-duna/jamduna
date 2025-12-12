@@ -1973,6 +1973,7 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
                     object_kind: 3, // ObjectKind::Receipt
                 },
                 payload: intent_payload,
+                tx_index: i as u32,
             },
         };
         // Export payloads to DA segments

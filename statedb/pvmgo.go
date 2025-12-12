@@ -2,6 +2,7 @@ package statedb
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -59,25 +60,28 @@ var (
 )
 
 type VMGo struct {
-	Backend        string
-	IsChild        bool
-	JSize          uint64
-	Z              uint8
-	J              []uint32
-	code           []byte
-	bitmask        []byte
-	pc             uint64 // Program counter
-	ResultCode     uint8
-	HostResultCode uint64
-	MachineState   uint8
-	Fault_address  uint32
-	terminated     bool
-	hostCall       bool // ̵h in GP
-	host_func_id   int  // h in GP
-	hostVM         *VM  // Reference to host VM for host function calls
-	Ram            *RawRam
-	Gas            uint64
-	hostenv        types.HostEnv
+	Backend          string
+	IsChild          bool
+	ChildIndex       int
+	ChildeEntryCount int
+	LogDir           string // Log directory for trace files
+	JSize            uint64
+	Z                uint8
+	J                []uint32
+	code             []byte
+	bitmask          []byte
+	pc               uint64 // Program counter
+	ResultCode       uint8
+	HostResultCode   uint64
+	MachineState     uint8
+	Fault_address    uint32
+	terminated       bool
+	hostCall         bool // ̵h in GP
+	host_func_id     int  // h in GP
+	hostVM           *VM  // Reference to host VM for host function calls
+	Ram              *RawRam
+	Gas              uint64
+	hostenv          types.HostEnv
 
 	VMs map[uint32]*VMGo
 
@@ -145,7 +149,10 @@ type VMGo struct {
 	JSONLTraceWriter      *trace.JSONLTraceWriter // File-based trace writer (when PvmTraceMode is true)
 	JSONLTraceWriterPrint *trace.JSONLTraceWriter // Stdout trace writer (when PvmTracePrintMode is true)
 
-	files []*os.File
+	files        []*os.File
+	gzipWriters  []*gzip.Writer
+	traceBuffers []*bytes.Buffer
+	stepCounter  uint64
 
 	basicBlockExecutionCounter map[uint64]int // PVM PC to execution count
 
@@ -525,11 +532,16 @@ func (vm *VMGo) SetPagesAccessRange(startPage, pageCount int, access int) error 
 func (vm *VMGo) Destroy() {
 	vm.Ram.Close()
 
-	// Close trace writers if they were set up
+	// Flush and close trace writers if they were set up
 	if PvmTraceMode {
-		for _, file := range vm.files {
-			if file != nil {
-				defer file.Close()
+		vm.flushTraceBuffers()
+		// Close gzip writers first (writes footer), then files
+		for i := 0; i < len(vm.gzipWriters); i++ {
+			if vm.gzipWriters[i] != nil {
+				vm.gzipWriters[i].Close()
+			}
+			if vm.files[i] != nil {
+				vm.files[i].Close()
 			}
 		}
 	}
@@ -539,19 +551,44 @@ func (vm *VMGo) Destroy() {
 
 // ensureTraceWriters initializes trace writers if they are enabled but not yet created.
 // This allows dynamic enabling of trace modes during execution.
-// If logDir is provided, trace files will be written to that directory.
+// If logDir is provided, trace files will be written to that directory (gzip compressed).
 func (vm *VMGo) ensureTraceWriters(logDir string) {
-	if PvmTraceMode && vm.files == nil {
-		files := make([]*os.File, 17)
-		filenames := []string{"r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10", "r11", "r12", "gas", "pc", "addr", "value"}
-		for i, name := range filenames {
-			var traceFile string
-			if logDir != "" {
-				traceFile = filepath.Join(logDir, name)
-			}
-			files[i], _ = os.Create(traceFile)
+	// Skip if tracing is disabled, logDir is empty, or files already exist
+	if !PvmTraceMode || logDir == "" || vm.files != nil {
+		return
+	}
+
+	// Create the directory
+	os.MkdirAll(logDir, 0755)
+
+	// 18 files: r0-r12(13) + opcode (1) + gas(1) + pc(1) + loads(1) + stores(1)  TODO: hostWrites, hostReads
+	files := make([]*os.File, 18)
+	gzWriters := make([]*gzip.Writer, 18)
+	buffers := make([]*bytes.Buffer, 18)
+	filenames := []string{"r0.gz", "r1.gz", "r2.gz", "r3.gz", "r4.gz", "r5.gz", "r6.gz", "r7.gz", "r8.gz", "r9.gz", "r10.gz", "r11.gz", "r12.gz", "opcode.gz", "gas.gz", "pc.gz", "loads.gz", "stores.gz"}
+	for i, name := range filenames {
+		traceFile := filepath.Join(logDir, name)
+		files[i], _ = os.Create(traceFile)
+		gzWriters[i] = gzip.NewWriter(files[i])
+		buffers[i] = bytes.NewBuffer(make([]byte, 0, 8*1000000)) // Pre-allocate for 1M uint64s
+	}
+	vm.files = files
+	vm.gzipWriters = gzWriters
+	vm.traceBuffers = buffers
+	vm.stepCounter = 0
+}
+
+// flushTraceBuffers writes buffered trace data to gzip writers and resets buffers
+func (vm *VMGo) flushTraceBuffers() {
+	if vm.gzipWriters == nil || vm.traceBuffers == nil {
+		return
+	}
+	for i := 0; i < 18; i++ {
+		if vm.traceBuffers[i].Len() > 0 {
+			vm.gzipWriters[i].Write(vm.traceBuffers[i].Bytes())
+			vm.gzipWriters[i].Flush()
+			vm.traceBuffers[i].Reset()
 		}
-		vm.files = files
 	}
 }
 
@@ -564,15 +601,27 @@ func (vm *VMGo) ExecuteAsChild(entryPoint uint32) error {
 	vm.IsChild = true
 	vm.EntryPoint = entryPoint // Store entry point for gas accounting
 	vm.MachineState = HALT
-	// Ensure trace writers are initialized if tracing is enabled (no specific logDir for child VMs)
 
-	// Defer closing trace writers to ensure they're flushed on any exit path
+	// Build child-specific logDir: {parentLogDir}/child_{ChildIndex}_{ChildeEntryCount}
+	childLogDir := ""
+	if vm.LogDir != "" {
+		childLogDir = filepath.Join(vm.LogDir, fmt.Sprintf("child_%d_%d", vm.ChildIndex, vm.ChildeEntryCount))
+	}
+	vm.ensureTraceWriters(childLogDir)
+
+	// Defer flushing trace writers on any exit path
+	// Note: Do NOT close gzip here - child VM may be invoked multiple times
+	// Closing is handled by Destroy() when expunge is called
 	defer func() {
 		if vm.JSONLTraceWriter != nil {
 			vm.JSONLTraceWriter.Flush()
 		}
 		if vm.JSONLTraceWriterPrint != nil {
 			vm.JSONLTraceWriterPrint.Flush()
+		}
+		// Only flush gzip buffers, don't close (allows append on next invoke)
+		if PvmTraceMode && vm.gzipWriters != nil {
+			vm.flushTraceBuffers()
 		}
 	}()
 
@@ -639,6 +688,7 @@ func (vm *VMGo) ExecuteAsChild(entryPoint uint32) error {
 		vm.Gas++
 	}
 
+	// Note: trace buffers are flushed by defer above
 	return nil
 }
 
@@ -720,6 +770,11 @@ func (vm *VMGo) Execute(host *VM, entryPoint uint32, logDir string) error {
 		fmt.Printf("VM terminated with error code %d at PC %d (%v, %s, %s) Gas:%v\n", vm.ResultCode, vm.pc, vm.Service_index, vm.Mode, string(vm.ServiceMetadata), vm.Gas)
 	}
 
+	// Flush trace buffers before returning
+	if PvmTraceMode {
+		vm.flushTraceBuffers()
+	}
+
 	return nil
 }
 
@@ -738,25 +793,7 @@ func (vm *VMGo) WriteRAMBytes(addr uint32, data []byte) uint64 {
 		vm.MachineState = FAULT
 		// Find the first inaccessible page in the range
 		vm.Fault_address = vm.Ram.FindFaultPage(addr, uint32(len(data)), true)
-	} else if PvmTraceMode {
-
-		/*
-			if vm.CurrentStep != nil && vm.TrackingMemAddr != 0 {
-				for i := uint32(0); i < uint32(len(data)); i++ {
-					if addr+i == vm.TrackingMemAddr {
-						vm.CurrentStep.SetChangedMemory(uint64(addr+i), 1, data[i:i+1])
-						break
-					}
-				}
-			} else if vm.CurrentStep != nil {
-				vm.CurrentStep.SetChangedMemory(uint64(addr), uint64(len(data)), data)
-			}
-		*/
 	}
-	// (addr == 0x3ad40 || addr == 0x3ad41)
-	// Note: Taint tracking for regular instructions is handled in the instruction handlers
-	// (RecordRegToMem). External writes from host functions (hostPoke) need to call
-	// RecordExternalWrite directly after WriteRAMBytes.
 
 	return result
 }
@@ -919,6 +956,10 @@ var errChildHostCall = errors.New("host call not allowed in child VM")
 
 // step performs a single step in the PVM
 func (vm *VMGo) step(stepn int) error {
+	// Reset memory trace variables at the start of each step
+	if PvmTraceMode {
+	}
+
 	// Check if PC is out of bounds
 	if vm.pc >= uint64(len(vm.code)) {
 		vm.ResultCode = types.WORKRESULT_PANIC
@@ -1076,8 +1117,8 @@ func (vm *VMGo) step(stepn int) error {
 
 	// avoid this: this is expensive
 	// Show every 1000 gas, plus every instruction in high-res window
-	// showThisGas := (vm.Gas%1000 == 0) || (vm.Gas > 972100000 && vm.Gas <= 972300000)
-	if PvmLogging {
+	showThisGas := false
+	if PvmLogging || showThisGas {
 		registers := vm.Ram.ReadRegisters()
 		prettyHex := "["
 		for i := 0; i < 13; i++ {
@@ -1093,14 +1134,23 @@ func (vm *VMGo) step(stepn int) error {
 	if PvmTraceMode && vm.files != nil {
 		registers := vm.Ram.ReadRegisters()
 		for i := 0; i < 13; i++ {
-			binary.Write(vm.files[i], binary.LittleEndian, registers[i])
+			binary.Write(vm.traceBuffers[i], binary.LittleEndian, registers[i])
 		}
-		binary.Write(vm.files[13], binary.LittleEndian, vm.Gas)
-		binary.Write(vm.files[14], binary.LittleEndian, prevpc)
-		binary.Write(vm.files[15], binary.LittleEndian, lastMemAddr)
-		binary.Write(vm.files[16], binary.LittleEndian, lastMemValue)
-		lastMemAddr = 0
-		lastMemValue = 0
+		binary.Write(vm.traceBuffers[13], binary.LittleEndian, opcode)
+		binary.Write(vm.traceBuffers[14], binary.LittleEndian, vm.Gas)
+		binary.Write(vm.traceBuffers[15], binary.LittleEndian, prevpc)
+		// loads: addr(u32) + value(u64)
+		binary.Write(vm.traceBuffers[16], binary.LittleEndian, lastMemAddrRead)
+		binary.Write(vm.traceBuffers[16], binary.LittleEndian, lastMemValueRead)
+		// stores: addr(u32) + value(u64)
+		binary.Write(vm.traceBuffers[17], binary.LittleEndian, lastMemAddrWrite)
+		binary.Write(vm.traceBuffers[17], binary.LittleEndian, lastMemValueWrite)
+
+		// Flush every 1 million steps
+		vm.stepCounter++
+		if vm.stepCounter%1000000 == 0 {
+			vm.flushTraceBuffers()
+		}
 	}
 
 	if label, ok := vm.label_pc[int(vm.pc)]; ok {

@@ -66,6 +66,7 @@ jobs:
           make evm
           make null_authorizer
           make auth_copy
+          make fib
           make algo
           echo "Listing PVM files:"
           find services -name "*.pvm" || true

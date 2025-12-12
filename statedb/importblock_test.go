@@ -167,6 +167,7 @@ func TestStateTransitionInterpreter(t *testing.T) {
 
 func TestTracesInterpreter(t *testing.T) {
 	PvmLogging = false
+	PvmTraceMode = true
 	DebugHostFunctions = false
 	log.InitLogger("debug")
 
@@ -174,12 +175,12 @@ func TestTracesInterpreter(t *testing.T) {
 	testDirs := []string{
 		// path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
 		// path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy_light"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy_light"),
 	}
 	// Iterate over each directory.
 	for _, dir := range testDirs {

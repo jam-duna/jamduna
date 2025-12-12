@@ -1209,7 +1209,19 @@ func (vm *VM) hostInvoke() {
 	g = uint64(int64_g)
 	new_machine.SetGas(g)
 	pc := new_machine.GetPC()
+
+	// Flush parent trace buffers before invoke
+	if parentVMGo, ok := vm.ExecutionVM.(*VMGo); ok {
+		parentVMGo.flushTraceBuffers()
+	}
+
 	new_machine.ExecuteAsChild(uint32(pc))
+
+	// Flush child trace buffers after invoke
+	if childVMGo, ok := new_machine.(*VMGo); ok {
+		childVMGo.flushTraceBuffers()
+	}
+
 	postGas := new_machine.GetGas()
 	gasUsed := initGas - postGas
 	log.Info(vm.logging, "INVOKE: gas used", "n", n, "o", o, "g", g, "postGas", postGas, "gasUsed", gasUsed, "pc", pc)
@@ -1762,7 +1774,6 @@ func (vm *VM) hostExport() {
 		vm.Exports = append(vm.Exports, y)
 		vm.SetHostResultCode(OK)
 		//		vm.DebugHostFunction(EXPORT, "p=0x%x, z=%d, total_exports=%d, l=%d", p, z, len(vm.Exports), vm.TotalExported)
-		log.Info(vm.logging, "EXPORT", "p", fmt.Sprintf("0x%x", p), "z", z, "total_exports", len(vm.Exports), "l", len(y))
 		if vm.pushFrame != nil {
 			// Stream the latest segment to any attached frame server without clearing exports
 			// so exports remain available to the caller.
@@ -1799,7 +1810,9 @@ func (vm *VM) hostMachine() {
 	// todo: check if deblob sucess
 	log.Info(vm.logging, "hostMachine", "po", po, "pz", pz, "i", i, "n", min_n, "program_size", len(p))
 	program := DecodeProgram_pure_pvm_blob(p)
-	execMachine := vm.NewEmptyExecutionVM(vm.Service_index, program, make([]uint64, 13), i, 0, vm.hostenv, uint32(min_n))
+	currentCounter := vm.VmsEntryCounter[min_n]
+	execMachine := vm.NewEmptyExecutionVM(vm.Service_index, program, make([]uint64, 13), i, 0, vm.hostenv, uint32(min_n), currentCounter)
+	vm.VmsEntryCounter[min_n]++
 	if vm.VMs == nil {
 		vm.VMs = make(map[uint32]*ExecutionVM)
 	}

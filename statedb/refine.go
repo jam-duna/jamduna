@@ -509,9 +509,9 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		if vm == nil {
 			return work_report, fmt.Errorf("executeWorkPackageBundle: failed to create VM for service %d (corrupted bytecode?)", service_index)
 		}
-		if index == 0 {
-			vm.attachFrameServer("0.0.0.0:8080", "./index.html")
-		}
+		// if index == 0 {
+		// 	vm.attachFrameServer("0.0.0.0:8080", "./index.html")
+		// }
 		vm.Timeslot = s.JamState.SafroleState.Timeslot
 
 		vm.SetPVMContext(execContext)
@@ -529,7 +529,6 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 			fmt.Printf("*** %s compile and execute time %v\n", pvmBackend, compileElapsed)
 		}
 
-		log.Info(log.Node, "ExecuteRefine exports", "expected", int(workItem.ExportCount), "actual", len(exported_segments))
 		// Segments already appended earlier (before parsing refine output)
 		z := 0
 		for _, extrinsic := range workItem.Extrinsics {
@@ -608,6 +607,10 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		}
 		telemetryClient.WorkReportBuilt(eventID, workReportOutline)
 	}
+	saveToLogDir(logDir, "bclubs", serializeHashes(d.BClubs))
+	saveToLogDir(logDir, "sclubs", serializeHashes(d.SClubs))
+	saveToLogDir(logDir, "bundle_chunks", serializeECChunks(d.BundleChunks))
+	saveToLogDir(logDir, "segment_chunks", serializeECChunks(d.SegmentChunks))
 	saveToLogDir(logDir, "workreportderivation.json", []byte(types.ToJSON(d)))
 	saveToLogDir(logDir, "workreport.bin", workReport.Bytes())
 	saveToLogDir(logDir, "workreport.json", []byte(types.ToJSON(workReport)))
