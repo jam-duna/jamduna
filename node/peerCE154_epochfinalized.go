@@ -73,7 +73,8 @@ func (n *Node) onEpochFinalized(ctx context.Context, stream quic.Stream, msg []b
 	// Decode: Epoch ++ BeefyHash ++ BLS Signature
 	var epochFinalized JAMEpochFinalized
 	if err := epochFinalized.FromBytes(msg); err != nil {
-		return fmt.Errorf("onGrandpaCommit: decode failed: %w", err)
+		stream.CancelRead(ErrInvalidData)
+		return fmt.Errorf("onEpochFinalized: decode failed: %w", err)
 	}
 
 	// Process the BLS signature

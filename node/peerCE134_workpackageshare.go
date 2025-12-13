@@ -355,6 +355,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		fmt.Println("Error deserializing:", err)
 		// Telemetry: Work package failed (event 92)
 		n.telemetryClient.WorkPackageFailed(eventID, err.Error())
+		stream.CancelRead(ErrInvalidData)
 		return fmt.Errorf("onWorkPackageShare: decode share message: %w", err)
 	}
 
@@ -418,6 +419,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		fmt.Println("Error deserializing:", err)
 		// Telemetry: Work package failed (event 92)
 		n.telemetryClient.WorkPackageFailed(eventID, err.Error())
+		stream.CancelRead(ErrInvalidData)
 		return fmt.Errorf("onWorkPackageShare: decode bundle: %w\nencodedBundle data:\n%x", err, encodedBundle)
 	}
 	log.Trace(log.G, "onWorkPackageShare INCOMING QUIC", "mapLen", len(msg), "bundleLen", len(encodedBundle), "CoreIndex ++ SegmentRootMappings", fmt.Sprintf("0x%x", msg))
@@ -512,23 +514,6 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		// Telemetry: Work package failed (event 92)
 		n.telemetryClient.WorkPackageFailed(eventID, err.Error())
 		return fmt.Errorf("onWorkPackageShare: executeWorkPackageBundle: %w", err)
-	}
-	savingBunlde := true
-	if savingBunlde {
-		bundleSnapshot := &types.WorkPackageBundleSnapshot{
-			PackageHash:       workReport.GetWorkPackageHash(),
-			CoreIndex:         uint16(workReport.CoreIndex),
-			Bundle:            *bundle,
-			SegmentRootLookup: received_segmentRootLookup,
-			Slot:              slot,
-			Report:            workReport,
-		}
-		if bundleSnapshot != nil && isWriteBundleGuarantor {
-			// packageHash_coreIndex_slot_audit
-			log.Info(log.Node, "Writing WorkPackageBundleSnapshot to disk", "workPackageHash", bundleSnapshot.PackageHash, "coreIndex", bundleSnapshot.CoreIndex, "slot", bundleSnapshot.Slot)
-			desc := fmt.Sprintf("%s_%d_%d_%s", bundleSnapshot.Bundle.WorkPackage.Hash(), bundleSnapshot.CoreIndex, n.id, "guarantor")
-			n.writeLogWithDescription(bundleSnapshot, bundleSnapshot.Slot, desc, false)
-		}
 	}
 
 	select {

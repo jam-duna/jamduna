@@ -54,9 +54,10 @@ const (
 
 const (
 	isWriteSnapshot        = false
-	isWriteTransition      = false
-	isWriteBundleFollower  = false
-	isWriteBundleGuarantor = false
+	isWriteTransition      = true
+	isWriteBundle          = true
+	isWriteBundleFollower  = true
+	isWriteBundleGuarantor = true
 	isWriteBundleAuditor   = false
 )
 
@@ -1503,17 +1504,12 @@ func (n *NodeContent) SubmitBundleSameCore(b *types.WorkPackageBundle) (err erro
 									"expected", expectedSegments, "actual", len(allImportProofs))
 								ce146Valid = false
 							} else {
-								// Validate each segment has proper size and proof is non-empty
+								// Validate each segment has proper size
+								// Note: Empty proofs are valid for single-element CDT trees (leaf hash == root)
 								for i, seg := range allSegments {
 									if len(seg) != types.SegmentSize {
 										log.Warn(log.Node, "SubmitBundleSameCore CE146: invalid segment size, falling back to CE133",
 											"index", i, "expected", types.SegmentSize, "actual", len(seg))
-										ce146Valid = false
-										break
-									}
-									if len(allImportProofs[i]) == 0 {
-										log.Warn(log.Node, "SubmitBundleSameCore CE146: missing import proof, falling back to CE133",
-											"index", i)
 										ce146Valid = false
 										break
 									}

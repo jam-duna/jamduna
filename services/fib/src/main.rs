@@ -453,6 +453,7 @@ fn leak_output(mut output_BUFFER: Vec<u8>) -> (u64, u64) {
 
 #[polkavm_derive::polkavm_export]
 extern "C" fn accumulate(start_address: u64, length: u64) -> (u64, u64) {
+    //return empty_output(); 
     // Parse accumulate args (GP 0.7.2 format)
     let Some(args) = parse_accumulate_args(start_address, length) else {
         call_log(1, None, "FIB accumulate: parse_accumulate_args failed");

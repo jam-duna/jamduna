@@ -615,6 +615,12 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, inputs []types.AccumulateInp
 	vm.X.U.ServiceAccounts[s] = x_s
 	vm.ServiceAccount = x_s
 
+	// Create subdirectory for this accumulate execution using service ID
+	// Only build path if logging is enabled (logDir non-empty)
+	if logDir != "" {
+		logDir = filepath.Join(logDir, fmt.Sprintf("%d", s))
+	}
+
 	// Save inputs
 	saveToLogDir(logDir, "input", input_bytes)
 	// Save AccumulateInputs for inspection
@@ -632,6 +638,12 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, inputs []types.AccumulateInp
 func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16, logDir string) (r types.Result) {
 	vm.Mode = ModeIsAuthorized
 	a, _ := types.Encode(uint8(c))
+
+	// Create subdirectory for authorization execution
+	// Only build path if logging is enabled (logDir non-empty)
+	if logDir != "" {
+		logDir = filepath.Join(logDir, "auth")
+	}
 
 	// Save inputs
 	saveToLogDir(logDir, "input", a)

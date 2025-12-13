@@ -122,12 +122,9 @@ func (n *Node) onBundleRequest(ctx context.Context, stream quic.Stream, msg []by
 		)
 		// Telemetry: Bundle request failed (event 150)
 		n.telemetryClient.BundleRequestFailed(eventID, "bundle not found")
-		// Send empty response to indicate not found
-		code := uint8(CE147_BundleRequest)
-		if err := sendQuicBytes(ctx, stream, []byte{}, n.id, code); err != nil {
-			return fmt.Errorf("onBundleRequest: sendQuicBytes failed: %w", err)
-		}
-		return nil
+		// Cancel the stream to indicate not found (consistent with other CE protocols)
+		stream.CancelWrite(ErrKeyNotFound)
+		return fmt.Errorf("onBundleRequest: bundle not found for erasureRoot=%v", erasureRoot)
 	}
 
 	// <-- Work-Package Bundle

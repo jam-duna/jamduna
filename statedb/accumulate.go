@@ -277,7 +277,12 @@ func (s *StateDB) OuterAccumulate(outer_accumulation_index uint32, g uint64, tra
 		return
 	}
 	// transfers with ParallelizedAccumulate
-	p_gasUsed, transfersOut, p_outputs, p_gasUsage := s.ParallelizedAccumulate(o, transfersIn, workReports[0:i], freeAccumulation, pvmBackend, accumulated_partial, path.Join(logDir, fmt.Sprintf("parallel_%d", outer_accumulation_index)))
+	// Only build logDir path if logging is enabled (logDir non-empty)
+	parallelLogDir := ""
+	if logDir != "" {
+		parallelLogDir = path.Join(logDir, fmt.Sprintf("%d", outer_accumulation_index))
+	}
+	p_gasUsed, transfersOut, p_outputs, p_gasUsage := s.ParallelizedAccumulate(o, transfersIn, workReports[0:i], freeAccumulation, pvmBackend, accumulated_partial, parallelLogDir)
 
 	// n https://graypaper.fluffylabs.dev/#/1c979cb/17e70117e701?v=0.7.1
 	transfer_gases := uint64(0)
@@ -384,7 +389,12 @@ func (s *StateDB) ParallelizedAccumulate(
 			for service := range jobCh {
 				t0 := time.Now()
 				// IMPORTANT: Parallel execution requires each worker gets a CLONE of o!!
-				out, gas, XY, exceptional := s.SingleAccumulate(o.Clone(), transfersIn, workReports, freeAccumulation, service, pvmBackend, filepath.Join(logDir, fmt.Sprintf("single_%d", service)))
+				// Only build logDir path if logging is enabled (logDir non-empty)
+				svcLogDir := ""
+				if logDir != "" {
+					svcLogDir = filepath.Join(logDir, fmt.Sprintf("%d", service))
+				}
+				out, gas, XY, exceptional := s.SingleAccumulate(o.Clone(), transfersIn, workReports, freeAccumulation, service, pvmBackend, svcLogDir)
 				benchRec.Add("SingleAccumulate", time.Since(t0))
 
 				if XY == nil {
@@ -430,7 +440,12 @@ func (s *StateDB) ParallelizedAccumulate(
 		acc_results = make([]accRes, 0, len(services))
 		for _, service := range services {
 			t0 := time.Now()
-			out, gas, XY, exceptional := s.SingleAccumulate(o, transfersIn, workReports, freeAccumulation, service, pvmBackend, filepath.Join(logDir, fmt.Sprintf("single_%d", service)))
+			// Only build logDir path if logging is enabled (logDir non-empty)
+			svcLogDir := ""
+			if logDir != "" {
+				svcLogDir = filepath.Join(logDir, fmt.Sprintf("%d", service))
+			}
+			out, gas, XY, exceptional := s.SingleAccumulate(o, transfersIn, workReports, freeAccumulation, service, pvmBackend, svcLogDir)
 			benchRec.Add("SingleAccumulate", time.Since(t0))
 
 			if XY == nil {

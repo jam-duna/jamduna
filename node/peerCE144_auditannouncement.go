@@ -168,6 +168,7 @@ func (n *Node) onAuditAnnouncement(ctx context.Context, stream quic.Stream, msg 
 	var newReq JAMSNPAuditAnnouncement
 	if err := newReq.FromBytes(msg); err != nil {
 		log.Warn(log.Node, "onAuditAnnouncement: failed to deserialize announcement", "peerID", peerID, "error", err)
+		stream.CancelRead(ErrInvalidData)
 		return fmt.Errorf("onAuditAnnouncement: failed to deserialize announcement: %w", err)
 	}
 

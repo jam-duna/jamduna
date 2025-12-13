@@ -176,16 +176,19 @@ func (n *Node) onFullShardRequest(ctx context.Context, stream quic.Stream, msg [
 
 	// <-- Bundle Shard
 	if err := sendQuicBytes(ctx, stream, bundleShard, n.id, code); err != nil {
+		stream.CancelWrite(ErrCECode)
 		return fmt.Errorf("onFullShardRequest: send bundleShard failed: %w", err)
 	}
 
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
 	if err := sendQuicBytes(ctx, stream, exportedSegmentsAndProofShards, n.id, code); err != nil {
+		stream.CancelWrite(ErrCECode)
 		return fmt.Errorf("onFullShardRequest: send exportedSegments failed: %w", err)
 	}
 
 	// <-- Justification
 	if err := sendQuicBytes(ctx, stream, encodedPath, n.id, code); err != nil {
+		stream.CancelWrite(ErrCECode)
 		// Telemetry: Shard request failed (event 122)
 		n.telemetryClient.ShardRequestFailed(eventID, err.Error())
 		return fmt.Errorf("onFullShardRequest: send justification failed: %w", err)

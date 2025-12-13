@@ -254,25 +254,7 @@ func (n *Node) processWPQueueItem(wpItem *types.WPQueueItem) bool {
 		log.Warn(log.Node, "processWPQueueItem", "err", execErr)
 		panic(111)
 	}
-	bundleSnapshot := &types.WorkPackageBundleSnapshot{
-		PackageHash:       report.GetWorkPackageHash(),
-		CoreIndex:         coreIndex,
-		Bundle:            bundle,
-		SegmentRootLookup: segmentRootLookup,
-		Slot:              slot,
-		Report:            report,
-	}
-	if bundleSnapshot != nil && isWriteBundleGuarantor {
-		// packageHash_coreIndex_slot_audit
-		fmt.Printf("Writing bundle snapshot as guarantor: %s\n", bundleSnapshot.String())
-		desc := fmt.Sprintf("%s_%d_%d_%s", bundleSnapshot.Bundle.WorkPackage.Hash(), bundleSnapshot.CoreIndex, n.id, "guarantor")
-		n.writeLogWithDescription(bundleSnapshot, bundleSnapshot.Slot, desc, false)
-	}
-	if bundleSnapshot != nil && isWriteBundleGuarantor {
-		// packageHash_coreIndex_slot_audit
-		desc := fmt.Sprintf("%s_%d_%d_%s", bundleSnapshot.Bundle.WorkPackage.Hash(), bundleSnapshot.CoreIndex, n.id, "guarantor")
-		n.writeLogWithDescription(bundleSnapshot, bundleSnapshot.Slot, desc, false)
-	}
+
 	guarantee.Report = report
 	signerSecret := n.GetEd25519Secret()
 	gc := report.Sign(signerSecret, uint16(n.GetCurrValidatorIndex()))
@@ -371,5 +353,36 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 		return work_report, fmt.Errorf("executeWorkPackageBundle:getStateDBByStateRoot: %v", err)
 	}
 	workReport, err := targetStateDB.ExecuteWorkPackageBundle(workPackageCoreIndex, package_bundle, segmentRootLookup, slot, execContext, eventID, n.pvmBackend, "SKIP")
+
+	// Write bundle snapshot if enabled (centralized here instead of in each caller)
+	// Check the appropriate flag based on execContext role
+	shouldWrite := isWriteBundle && n.nodeSelf != nil
+	if shouldWrite {
+		switch execContext {
+		case log.FirstGuarantor:
+			shouldWrite = isWriteBundleGuarantor
+		case log.OtherGuarantor:
+			shouldWrite = isWriteBundleFollower
+		case log.Auditor:
+			shouldWrite = isWriteBundleAuditor
+		default:
+			shouldWrite = false
+		}
+	}
+
+	if shouldWrite {
+		bundleSnapshot := &types.WorkPackageBundleSnapshot{
+			PackageHash:       workReport.GetWorkPackageHash(),
+			CoreIndex:         uint16(workReport.CoreIndex),
+			Bundle:            package_bundle,
+			SegmentRootLookup: workReport.SegmentRootLookup,
+			Slot:              slot,
+			Report:            workReport,
+		}
+		desc := fmt.Sprintf("%s_%d_%d_%s", package_bundle.WorkPackage.Hash(), bundleSnapshot.CoreIndex, n.id, execContext)
+		n.nodeSelf.writeLogWithDescription(bundleSnapshot, slot, desc, false)
+		log.Info(log.Node, "Writing WorkPackageBundleSnapshot to disk", "n", n.String(), "role", execContext, "coreIndex", bundleSnapshot.CoreIndex, "slot", bundleSnapshot.Slot, "workPackageHash", bundleSnapshot.PackageHash)
+	}
+
 	return workReport, err
 }

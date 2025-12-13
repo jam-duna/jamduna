@@ -66,7 +66,8 @@ func (n *NodeContent) onWorkReportRequest(ctx context.Context, stream quic.Strea
 		return fmt.Errorf("onWorkReportRequest: WorkReportLookup failed: %w", err)
 	}
 	if !ok {
-		// work report not found; gracefully ignore
+		// work report not found
+		stream.CancelWrite(ErrKeyNotFound)
 		return nil
 	}
 
@@ -75,6 +76,7 @@ func (n *NodeContent) onWorkReportRequest(ctx context.Context, stream quic.Strea
 	respBytes := workReport.Bytes()
 	err = sendQuicBytes(ctx, stream, respBytes, n.id, CE136_WorkReportRequest)
 	if err != nil {
+		stream.CancelWrite(ErrCECode)
 		return fmt.Errorf("onWorkReportRequest: sendQuicBytes failed: %w, code=%d", err, code)
 	}
 

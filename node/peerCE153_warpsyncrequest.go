@@ -57,6 +57,7 @@ func (n *Node) onWarpSyncRequest(ctx context.Context, stream quic.Stream, msg []
 
 	// Decode: Set Id (uint32 in little-endian)
 	if len(msg) < 4 {
+		stream.CancelWrite(ErrInvalidData)
 		return fmt.Errorf("onWarpSyncRequest: invalid message length: expected at least 4 bytes, got %d", len(msg))
 	}
 	req := binary.LittleEndian.Uint32(msg[:4])
@@ -72,11 +73,13 @@ func (n *Node) onWarpSyncRequest(ctx context.Context, stream quic.Stream, msg []
 	// Send response
 	respBytes, err := response.ToBytes()
 	if err != nil {
+		stream.CancelWrite(ErrInvalidData)
 		return fmt.Errorf("onWarpSyncRequest: response.ToBytes failed: %w", err)
 	}
 
 	code := uint8(CE153_WarpSyncRequest)
 	if err := sendQuicBytes(ctx, stream, respBytes, peerID, code); err != nil {
+		stream.CancelWrite(ErrCECode)
 		return fmt.Errorf("onWarpSyncRequest: sendQuicBytes failed: %w", err)
 	}
 

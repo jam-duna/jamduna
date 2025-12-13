@@ -150,6 +150,7 @@ func (n *Node) onTicketDistribution(ctx context.Context, stream quic.Stream, msg
 	if err := newReq.FromBytes(msg); err != nil {
 		// Telemetry: Ticket transfer failed (event 83)
 		n.telemetryClient.TicketTransferFailed(n.PeerID32(peerID), connectionSide, wasCE132, err.Error())
+		stream.CancelRead(ErrInvalidData)
 		return fmt.Errorf("onTicketDistribution: failed to decode ticket distribution: %w %d", err, peerID)
 	}
 

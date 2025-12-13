@@ -146,6 +146,7 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 		log.Error(log.G, "onWorkPackageSubmission:FromBytes", "err", err)
 		// Telemetry: Work package failed (event 92)
 		n.telemetryClient.WorkPackageFailed(EventID, err.Error())
+		stream.CancelRead(ErrInvalidData)
 		return fmt.Errorf("onWorkPackageSubmission: decode failed: %w", err)
 	}
 	// --> [Extrinsic] (Message length should equal sum of extrinsic data lengths)
@@ -204,11 +205,13 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 	ext, _, err := types.Decode(extrinsicsBytes, reflect.TypeOf(types.ExtrinsicsBlobs{}))
 	if err != nil {
 		log.Error(log.Node, "onWorkPackageSubmission4a", "err", err)
+		stream.CancelRead(ErrInvalidData)
 		return fmt.Errorf("error in decoding data: %w", err)
 	}
 	extrinsics := ext.(types.ExtrinsicsBlobs)
 	if err != nil {
 		log.Error(log.Node, "onWorkPackageSubmission4b", "err", err)
+		stream.CancelRead(ErrInvalidData)
 		return fmt.Errorf("error in decoding data: %w", err)
 	}
 
@@ -216,6 +219,7 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 	if len(newReq.WorkPackage.WorkItems) > 0 {
 		if err := newReq.WorkPackage.WorkItems[0].CheckExtrinsics(extrinsics); err != nil {
 			log.Error(log.Node, "onWorkPackageSubmission: extrinsic verification failed", "err", err)
+			stream.CancelRead(ErrInvalidData)
 			return fmt.Errorf("extrinsic data inconsistent with hashes: %w", err)
 		}
 	}

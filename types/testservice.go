@@ -5,13 +5,16 @@ import (
 )
 
 type TestService struct {
-	ServiceCode     uint32
-	FileName        string
-	CodeHash        common.Hash
-	Code            []byte
-	ServiceName     string
-	MetadataAndCode []byte
-	Storage         map[common.Hash][]byte
+	AccountKey  []byte
+	PreimageKey []byte
+	ServiceCode uint32
+	FileName    string
+	CodeHash    common.Hash
+	//Code        []byte
+	CodeLen     uint32
+	ServiceName string
+	//	MetadataAndCode []byte
+	Storage map[common.Hash][]byte
 }
 
 type ServiceInfo struct {

@@ -211,8 +211,16 @@ func (j *Jam) GetRefineContext(req []string, res *string) error {
 		return fmt.Errorf("state not found for current header hash")
 	}
 
-	// Build RefineContext
+	// Build RefineContext (uses best block for Anchor)
 	refineCtx := sdb.GetRefineContext()
+
+	// Override LookupAnchor and LookupAnchorSlot with finalized block
+	// External implementations (e.g., PolkaJAM) require LookupAnchor to be finalized
+	finalizedBlock, err := j.NodeContent.GetFinalizedBlock()
+	if err == nil && finalizedBlock != nil {
+		refineCtx.LookupAnchor = finalizedBlock.Header.Hash()
+		refineCtx.LookupAnchorSlot = finalizedBlock.Header.Slot
+	}
 
 	// Marshal to JSON
 	jsonBytes, err := json.Marshal(refineCtx)
@@ -449,15 +457,24 @@ func (n *NodeContent) getRefineContext(prereqs ...common.Hash) types.RefineConte
 		return types.RefineContext{}
 	}
 
-	// B) LOOKUP ANCHOR
+	// B) LOOKUP ANCHOR - use actual finalized block
+	// External implementations (e.g., PolkaJAM) require LookupAnchor to be finalized
+	lookupAnchor := anchor
+	lookupAnchorSlot := sb.Header.Slot
+	finalizedBlock, err := n.GetFinalizedBlock()
+	if err == nil && finalizedBlock != nil {
+		lookupAnchor = finalizedBlock.Header.Hash()
+		lookupAnchorSlot = finalizedBlock.Header.Slot
+	}
+
 	return types.RefineContext{
 		// A) ANCHOR
 		Anchor:    anchor,
 		StateRoot: stateRoot,
 		BeefyRoot: beefyRoot,
 		// B) LOOKUP ANCHOR
-		LookupAnchor:     anchor,
-		LookupAnchorSlot: sb.Header.Slot,
+		LookupAnchor:     lookupAnchor,
+		LookupAnchorSlot: lookupAnchorSlot,
 		Prerequisites:    prereqs,
 	}
 }

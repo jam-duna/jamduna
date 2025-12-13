@@ -79,7 +79,14 @@ func TestBundleExecution(t *testing.T) {
 		PvmLogging = false
 	}
 	t.Logf("🔍 [%s] Executing bundle with %s backend, package %s", bundleFile, testingBackend, bundle.Bundle.String())
-	wr, err := state.ExecuteWorkPackageBundle(bundle.CoreIndex, bundle.Bundle, bundle.SegmentRootLookup, stf.Block.TimeSlot(), "", 0, testingBackend, fmt.Sprintf("%s", bundle.Bundle.WorkPackage.Hash()))
+	// Use "SKIP" to disable PVM output logging (prevents creating directories for each execution)
+	identifier := "SKIP"
+	if EnablePVMOutputLogs {
+		identifier = fmt.Sprintf("%s", bundle.Bundle.WorkPackage.Hash())
+	}
+	fmt.Sprintf("%s_bundle_execution", bundleFile)
+
+	wr, err := state.ExecuteWorkPackageBundle(bundle.CoreIndex, bundle.Bundle, bundle.SegmentRootLookup, stf.Block.TimeSlot(), "", 0, testingBackend, identifier)
 	if err != nil {
 		t.Fatalf("❌ [%s] Failed to execute bundle: %v", bundleFile, err)
 	}

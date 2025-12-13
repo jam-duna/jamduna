@@ -83,13 +83,16 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 	}()
 
 	s = oldState.Copy()
-	// Get the actual current root from storage (StateRoot may not be set yet)
-	currentRoot := s.sdb.GetRoot()
+	currentRoot := s.StateRoot
 	if currentRoot != blk.Header.ParentStateRoot {
-		//panic(fmt.Sprintf("ParentStateRoot does not match %s != %s", currentRoot, blk.Header.ParentStateRoot))
-		//os.Exit(0)
-		log.Error(log.SDB, "ParentStateRoot does not match", "expected", blk.Header.ParentStateRoot, "actual", currentRoot)
-		//return s, fmt.Errorf("ParentStateRoot does not match")
+		log.Error(log.SDB, "ParentStateRoot does not match",
+			"expected", blk.Header.ParentStateRoot,
+			"actual", currentRoot,
+			"blkSlot", blk.Header.Slot,
+			"blkHeaderHash", blk.Header.Hash(),
+			"blkParentHeaderHash", blk.Header.ParentHeaderHash,
+			"oldState.HeaderHash", oldState.HeaderHash,
+		)
 	}
 	recentBlocks := s.JamState.RecentBlocks.B_H
 	if len(recentBlocks) > 0 && blk.Header.ParentHeaderHash != recentBlocks[len(recentBlocks)-1].HeaderHash {

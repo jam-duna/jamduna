@@ -279,12 +279,14 @@ func (n *Node) onSegmentRequest(ctx context.Context, stream quic.Stream, msg []b
 
 	// <-- [Segment] - all segments concatenated in single message
 	if err := sendQuicBytes(ctx, stream, allSegments, n.id, code); err != nil {
+		stream.CancelWrite(ErrCECode)
 		n.telemetryClient.SegmentRequestFailed(eventID, err.Error())
 		return fmt.Errorf("onSegmentRequest: sendQuicBytes segments failed: %w", err)
 	}
 
 	// <-- [Import-Proof] - all import proofs concatenated in single message
 	if err := sendQuicBytes(ctx, stream, allImportProofs, n.id, code); err != nil {
+		stream.CancelWrite(ErrCECode)
 		n.telemetryClient.SegmentRequestFailed(eventID, err.Error())
 		return fmt.Errorf("onSegmentRequest: sendQuicBytes proofs failed: %w", err)
 	}

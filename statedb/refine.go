@@ -471,7 +471,12 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 
 	// Authorization
 	authStart := time.Now()
-	r, p_a, authGasUsed, err := s.authorizeWP(workPackage, workPackageCoreIndex, pvmBackend, path.Join(logDir, "auth"))
+	// Only build logDir path if logging is enabled (logDir non-empty)
+	authLogDir := ""
+	if logDir != "" {
+		authLogDir = path.Join(logDir, "auth")
+	}
+	r, p_a, authGasUsed, err := s.authorizeWP(workPackage, workPackageCoreIndex, pvmBackend, authLogDir)
 	authElapsed := time.Since(authStart)
 	// Check for underflow (gas wrapped around to very large number)
 	if authGasUsed > (1 << 63) {
@@ -520,7 +525,12 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		// 0.7.1 : core index is part of refine args
 		execStart := time.Now()
 		vm.hostenv = s
-		output, _, exported_segments := vm.ExecuteRefine(workPackageCoreIndex, uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData[index], workPackage.AuthorizationCodeHash, common.BytesToHash(trie.H0), path.Join(logDir, fmt.Sprintf("%d_%d", index, workItem.Service)))
+		// Only build logDir path if logging is enabled (logDir non-empty)
+		refineLogDir := ""
+		if logDir != "" {
+			refineLogDir = path.Join(logDir, fmt.Sprintf("%d_%d", index, workItem.Service))
+		}
+		output, _, exported_segments := vm.ExecuteRefine(workPackageCoreIndex, uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData[index], workPackage.AuthorizationCodeHash, common.BytesToHash(trie.H0), refineLogDir)
 		segments = append(segments, exported_segments...)
 
 		execElapsed := time.Since(execStart)

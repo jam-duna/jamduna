@@ -705,6 +705,7 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 		log.Info(log.Audit, "auditWorkReport:executeWorkPackageBundle FAKE PASS", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash())
 	} else {
 		wr, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, n.statedb.GetTimeslot(), log.Auditor, 0)
+
 		if err != nil {
 			log.Error(log.Audit, "auditWorkReport:ExecuteWorkPackageBundle", "err", err)
 			return judgement, err

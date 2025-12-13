@@ -166,6 +166,7 @@ func (n *Node) onBundleShardRequest(ctx context.Context, stream quic.Stream, msg
 
 	// Send bundle shard
 	if err := sendQuicBytes(ctx, stream, bundleShard, n.id, code); err != nil {
+		stream.CancelWrite(ErrCECode)
 		return fmt.Errorf("onBundleShardRequest: send bundleShard failed: %w", err)
 	}
 
@@ -175,10 +176,12 @@ func (n *Node) onBundleShardRequest(ctx context.Context, stream quic.Stream, msg
 
 	encodedJustification, err := common.EncodeJustification(sclubJustification, types.NumECPiecesPerSegment)
 	if err != nil {
+		stream.CancelWrite(ErrInvalidData)
 		return fmt.Errorf("onBundleShardRequest: encode justification failed: %w", err)
 	}
 
 	if err := sendQuicBytes(ctx, stream, encodedJustification, n.id, code); err != nil {
+		stream.CancelWrite(ErrCECode)
 		// Telemetry: Bundle shard request failed (event 142)
 		n.telemetryClient.BundleShardRequestFailed(eventID, err.Error())
 		return fmt.Errorf("onBundleShardRequest: send justification failed: %w", err)

@@ -18,6 +18,8 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+const isIncludeEVM = true
+
 func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, network string, addresses []string) (trace *StateTransition, err error) {
 	statedb, err := newStateDB(sdb, common.Hash{})
 	if err != nil {
@@ -112,12 +114,6 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 	// Load services into genesis state
 	services := []types.TestService{
 		{
-			ServiceCode: EVMServiceCode,
-			FileName:    EVMServiceFile,
-			ServiceName: "evm",
-			Storage:     storage,
-		},
-		{
 			ServiceCode: AuthCopyServiceCode,
 			FileName:    AuthCopyServiceFile,
 			ServiceName: "auth_copy",
@@ -133,6 +129,32 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 			ServiceName: "fib",
 		},
 	}
+
+	boostrapServiceIdx := FibServiceCode
+	if isIncludeEVM {
+		boostrapServiceIdx = EVMServiceCode
+		services = append(services, types.TestService{
+			ServiceCode: EVMServiceCode,
+			FileName:    EVMServiceFile,
+			ServiceName: "evm",
+			Storage:     storage,
+		})
+	}
+	for i, service := range services {
+		code, err0 := types.ReadCodeWithMetadata(service.FileName, service.ServiceName)
+		if err0 != nil {
+			return nil, err0
+		}
+		services[i].CodeLen = uint32(len(code))
+		services[i].CodeHash = common.Blake2Hash(code)
+		service_account := common.ComputeC_is(service.ServiceCode)
+		services[i].AccountKey = service_account.Bytes()[:31]
+		ap_internal_key := common.Compute_preimageBlob_internal(common.Blake2Hash(code))
+		account_preimage_hash := common.ComputeC_sh(service.ServiceCode, ap_internal_key)
+		services[i].PreimageKey = account_preimage_hash.Bytes()[:31]
+	}
+
+	fmt.Printf("Genesis Services:\n%+v\n", types.ToJSONHexIndent(services))
 
 	auth_pvm, err0 := common.GetFilePath(BootStrapNullAuthFile)
 	if err0 != nil {
@@ -164,7 +186,7 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 		codeHash := common.Blake2Hash(code)
 		codeLen := uint32(len(code)) // z
 		bootStrapAnchor := []uint32{0}
-		if service.ServiceCode == EVMServiceCode {
+		if service.ServiceCode == uint32(boostrapServiceIdx) {
 			// Calculate storage size including staking balances
 			// Each staking entry: 32 bytes (key) + 8 bytes (value) = 40 bytes
 			stakingStorageSize := uint64(len(service.Storage) * (32 + 8))
@@ -188,10 +210,9 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 			for k, v := range service.Storage {
 				statedb.WriteServiceStorage(service.ServiceCode, k.Bytes(), v)
 			}
-
 			statedb.writeService(service.ServiceCode, &bootstrapServiceAccount)
-			fmt.Printf("Service %s (fn:%s), codeHash %s, codeLen=%d, anchor %v, staking entries=%d\n",
-				service.ServiceName, service.FileName, codeHash.String(), codeLen, bootStrapAnchor, len(service.Storage))
+			fmt.Printf("Service %s(%d) %x\n%v\n\n", service.ServiceName, service.ServiceCode, service.AccountKey, bootstrapServiceAccount.JsonString())
+			//fmt.Printf("Service %s (fn:%s), codeHash %s, codeLen=%d, anchor %v, staking entries=%d\n", service.ServiceName, service.FileName, codeHash.String(), codeLen, bootStrapAnchor, len(service.Storage))
 		} else {
 			sa := types.ServiceAccount{
 				CodeHash:        codeHash,
@@ -208,8 +229,8 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 				statedb.WriteServiceStorage(service.ServiceCode, k.Bytes(), v)
 			}
 			statedb.writeService(service.ServiceCode, &sa)
-
-			fmt.Printf("Service %d %s (fn:%s), codeHash %s, codeLen=%d, anchor %v\n", service.ServiceCode, service.ServiceName, service.FileName, codeHash.String(), codeLen, bootStrapAnchor)
+			fmt.Printf("Service %s(%d).%x StorageEntries=%d\n%v\n\n", service.ServiceName, service.ServiceCode, service.AccountKey, len(service.Storage), sa.JsonString())
+			//fmt.Printf("Service %d %s (fn:%s), codeHash %s, codeLen=%d, anchor %v\n", service.ServiceCode, service.ServiceName, service.FileName, codeHash.String(), codeLen, bootStrapAnchor)
 		}
 	}
 

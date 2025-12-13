@@ -76,19 +76,23 @@ func (n *Node) onGrandpaCatchUp(ctx context.Context, stream quic.Stream, msg []b
 	// Decode: Round Number ++ Set Id ++ Slot
 	var catchup grandpa.GrandpaCatchUp
 	if err := catchup.FromBytes(msg); err != nil {
+		stream.CancelWrite(ErrInvalidData)
 		return fmt.Errorf("onGrandpaCatchUp: decode failed: %w", err)
 	}
 
 	// Get catchup data from GRANDPA state
 	responseBytes, ok, err := n.store.GetCatchupMassage(catchup.Round, catchup.SetId)
 	if err != nil {
+		stream.CancelWrite(ErrKeyNotFound)
 		return fmt.Errorf("failed to get catchup data: %w", err)
 	}
 	if !ok {
+		stream.CancelWrite(ErrKeyNotFound)
 		return fmt.Errorf("no catchup data found for round %d, set %d", catchup.Round, catchup.SetId)
 	}
 	// Send response: Catchup
 	if err := sendQuicBytes(ctx, stream, responseBytes, peerID, uint8(CE152_GrandpaCatchUp)); err != nil {
+		stream.CancelWrite(ErrCECode)
 		return fmt.Errorf("sendQuicBytes[CE152_GrandpaCatchUp] response failed: %w", err)
 	}
 

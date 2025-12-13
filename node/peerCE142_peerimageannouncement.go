@@ -94,6 +94,7 @@ func (n *Node) onPreimageAnnouncement(ctx context.Context, stream quic.Stream, m
 		log.Error(log.P, "onPreimageAnnouncement: failed to decode", "err", err)
 		// Telemetry: Preimage announcement failed (event 190)
 		n.telemetryClient.PreimageAnnouncementFailed(n.PeerID32(peerID), connectionSide, err.Error())
+		stream.CancelRead(ErrInvalidData)
 		return fmt.Errorf("onPreimageAnnouncement: decode failed: %w", err)
 	}
 
@@ -211,6 +212,7 @@ func (n *NodeContent) onPreimageRequest(ctx context.Context, stream quic.Stream,
 		log.Warn(log.P, "onPreimageRequest", "n", n.id, "hash", preimageHash, "msg", "preimage not found")
 		// Telemetry: Preimage request failed (event 195)
 		n.telemetryClient.PreimageRequestFailed(eventID, "preimage not found")
+		stream.CancelWrite(ErrKeyNotFound)
 		return nil
 	}
 
@@ -218,6 +220,7 @@ func (n *NodeContent) onPreimageRequest(ctx context.Context, stream quic.Stream,
 
 	respBytes := preimage.Blob
 	if err := sendQuicBytes(ctx, stream, respBytes, n.id, code); err != nil {
+		stream.CancelWrite(ErrCECode)
 		// Telemetry: Preimage request failed (event 195)
 		n.telemetryClient.PreimageRequestFailed(eventID, err.Error())
 		return fmt.Errorf("onPreimageRequest: sendQuicBytes failed: %w", err)

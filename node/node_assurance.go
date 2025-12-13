@@ -56,7 +56,22 @@ func (n *NodeContent) ReadGlobalDepth(serviceID uint32) (uint8, error) {
 }
 
 func (n *NodeContent) GetRefineContext() (types.RefineContext, error) {
-	return n.statedb.GetRefineContext(), nil
+	// Get base refine context from statedb (uses best block for Anchor)
+	refineCtx := n.statedb.GetRefineContext()
+
+	// Override LookupAnchor and LookupAnchorSlot with finalized block
+	// External implementations (e.g., PolkaJAM) require LookupAnchor to be finalized
+	finalizedBlock, err := n.GetFinalizedBlock()
+	if err != nil {
+		log.Warn(log.Node, "GetRefineContext: failed to get finalized block, using best block for LookupAnchor", "err", err)
+		return refineCtx, nil
+	}
+	if finalizedBlock != nil {
+		refineCtx.LookupAnchor = finalizedBlock.Header.Hash()
+		refineCtx.LookupAnchorSlot = finalizedBlock.Header.Slot
+	}
+
+	return refineCtx, nil
 }
 func (n *NodeContent) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
 	return n.statedb.BuildBundle(workPackage, extrinsicsBlobs, coreIndex, rawObjectIDs, n.pvmBackend)

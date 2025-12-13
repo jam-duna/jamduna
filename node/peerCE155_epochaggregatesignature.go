@@ -69,6 +69,7 @@ func (n *Node) onEpochAggregateSignature(ctx context.Context, stream quic.Stream
 	// Decode: Epoch ++ BeefyHash ++ BLS Signature
 	var epochFinalized JAMEpochFinalized
 	if err := epochFinalized.FromBytes(msg); err != nil {
+		stream.CancelRead(ErrInvalidData)
 		return fmt.Errorf("onEpochAggregateSignature: decode failed: %w", err)
 	}
 

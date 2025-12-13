@@ -21,6 +21,8 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+var EnablePVMOutputLogs = false
+
 func SaveReportTrace(path string, obj interface{}) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -99,18 +101,20 @@ func runSingleSTFTest(t *testing.T, filename string, content string, pvmBackend 
 	}
 	benchRec.Add("runSingleSTFTest:parseSTFFile", time.Since(t0))
 
-	// Create logDir from the last two path components
-	// e.g. xxx/storage_light/00000001.bin -> "storage_light/00000001"
-	parts := strings.Split(filepath.ToSlash(filename), "/")
+	// logDir controls PVM output logging - controlled by EnablePVMOutputLogs flag
+	// Set EnablePVMOutputLogs = true to write outputs to disk for debugging
 	var logDir string
-	if len(parts) >= 2 {
-		// Get last directory and filename (without extension)
-		dir := parts[len(parts)-2]
-		base := strings.TrimSuffix(parts[len(parts)-1], filepath.Ext(parts[len(parts)-1]))
-		logDir = dir + "/" + base
-	} else {
-		// Fallback to just the filename without extension
-		logDir = strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
+	if EnablePVMOutputLogs {
+		// Create logDir from the last two path components
+		// e.g. xxx/storage_light/00000001.bin -> "storage_light/00000001"
+		parts := strings.Split(filepath.ToSlash(filename), "/")
+		if len(parts) >= 2 {
+			dir := parts[len(parts)-2]
+			base := strings.TrimSuffix(parts[len(parts)-1], filepath.Ext(parts[len(parts)-1]))
+			logDir = dir + "/" + base
+		} else {
+			logDir = strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
+		}
 	}
 
 	t0 = time.Now()

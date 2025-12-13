@@ -93,13 +93,11 @@ func (p *Peer) SendBundleSubmission(ctx context.Context, coreIndex uint16, segme
 	if len(importProofs) != expectedSegments {
 		return fmt.Errorf("CE146 SendBundleSubmission: import proof count mismatch: expected %d, got %d", expectedSegments, len(importProofs))
 	}
-	// Validate each segment has proper size and proof is non-empty
+	// Validate each segment has proper size
+	// Note: Empty proofs are valid for single-element CDT trees (leaf hash == root)
 	for i, seg := range segments {
 		if len(seg) != types.SegmentSize {
 			return fmt.Errorf("CE146 SendBundleSubmission: segment %d has invalid size %d (expected %d)", i, len(seg), types.SegmentSize)
-		}
-		if len(importProofs[i]) == 0 {
-			return fmt.Errorf("CE146 SendBundleSubmission: segment %d has no import proof", i)
 		}
 	}
 
@@ -167,37 +165,44 @@ func (p *Peer) SendBundleSubmission(ctx context.Context, coreIndex uint16, segme
 
 func (n *Node) onBundleSubmission(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
 	defer stream.Close()
+
+	// Helper to cancel stream on error
+	cancelOnError := func(err error) error {
+		stream.CancelRead(ErrInvalidData)
+		return err
+	}
+
 	var info JAMSNP_WpInfo
 	err := info.FromBytes(msg)
 	if err != nil {
-		return err
+		return cancelOnError(err)
 	}
 	var pkg types.WorkPackage
 	pkgBytes, err := receiveQuicBytes(ctx, stream, peerID, uint8(CE146_WPbundlesubmission))
 	if err != nil {
-		return err
+		return cancelOnError(err)
 	}
 	pkgInterface, _, err := types.Decode(pkgBytes, reflect.TypeOf(pkg))
 	if err != nil {
-		return err
+		return cancelOnError(err)
 	}
 	pkg = pkgInterface.(types.WorkPackage)
 
 	extrinsicsBytes, err := receiveQuicBytes(ctx, stream, peerID, uint8(CE146_WPbundlesubmission))
 	if err != nil {
-		return err
+		return cancelOnError(err)
 	}
 	var extrinsics types.ExtrinsicsBlobs
 	extrinsicsInterface, _, err := types.Decode(extrinsicsBytes, reflect.TypeOf(extrinsics))
 	if err != nil {
-		return err
+		return cancelOnError(err)
 	}
 	extrinsics = extrinsicsInterface.(types.ExtrinsicsBlobs)
 
 	// Receive all segments as single concatenated message, then split by SegmentSize
 	allSegmentsBytes, err := receiveQuicBytes(ctx, stream, peerID, uint8(CE146_WPbundlesubmission))
 	if err != nil {
-		return err
+		return cancelOnError(err)
 	}
 	var segments [][]byte
 	for i := 0; i+types.SegmentSize <= len(allSegmentsBytes); i += types.SegmentSize {
@@ -206,7 +211,7 @@ func (n *Node) onBundleSubmission(ctx context.Context, stream quic.Stream, msg [
 
 	importProofsBytes, err := receiveQuicBytes(ctx, stream, peerID, uint8(CE146_WPbundlesubmission))
 	if err != nil {
-		return err
+		return cancelOnError(err)
 	}
 	// Decode [Import-Proof] - each Import-Proof is len++[Hash]
 	// Number of import proofs matches number of segments
@@ -215,7 +220,7 @@ func (n *Node) onBundleSubmission(ctx context.Context, stream quic.Stream, msg [
 	for len(data) > 0 {
 		proof, bytesConsumed, err := decodeImportProofWithLength(data)
 		if err != nil {
-			return fmt.Errorf("decodeImportProof: %w", err)
+			return cancelOnError(fmt.Errorf("decodeImportProof: %w", err))
 		}
 		importProofs = append(importProofs, proof)
 		data = data[bytesConsumed:]
@@ -309,17 +314,13 @@ func (n *Node) HandleBundleSubmission(peerID uint16, coreIndex uint16, segmentsR
 				"expected", expectedSegments, "actual", len(importProofs))
 			return fmt.Errorf("CE146: expected %d import proofs, got %d", expectedSegments, len(importProofs))
 		}
-		// Validate each segment has proper size and proof is non-empty
+		// Validate each segment has proper size
+		// Note: Empty proofs are valid for single-element CDT trees (leaf hash == root)
 		for i, seg := range segments {
 			if len(seg) != types.SegmentSize {
 				log.Error(log.Node, "CE146-HandleBundleSubmission: invalid segment size",
 					"index", i, "expected", types.SegmentSize, "actual", len(seg))
 				return fmt.Errorf("CE146: segment %d has invalid size %d (expected %d)", i, len(seg), types.SegmentSize)
-			}
-			if len(importProofs[i]) == 0 {
-				log.Error(log.Node, "CE146-HandleBundleSubmission: missing import proof",
-					"index", i)
-				return fmt.Errorf("CE146: segment %d has no import proof", i)
 			}
 		}
 	}

@@ -1774,6 +1774,7 @@ func (vm *VM) hostExport() {
 		vm.Exports = append(vm.Exports, y)
 		vm.SetHostResultCode(OK)
 		//		vm.DebugHostFunction(EXPORT, "p=0x%x, z=%d, total_exports=%d, l=%d", p, z, len(vm.Exports), vm.TotalExported)
+		//log.Info(vm.logging, "EXPORT", "p", fmt.Sprintf("0x%x", p), "z", z, "total_exports", len(vm.Exports), "l", len(y))
 		if vm.pushFrame != nil {
 			// Stream the latest segment to any attached frame server without clearing exports
 			// so exports remain available to the caller.

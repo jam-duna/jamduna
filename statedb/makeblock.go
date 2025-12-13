@@ -194,6 +194,13 @@ func (s *StateDB) BuildBlock(
 	needWinningMarker := sf.IseWinningMarkerNeeded(targetJCE)
 
 	stateRoot := s.GetStateRoot()
+	sdbRoot := s.sdb.GetRoot()
+	log.Debug(log.SDB, "BuildBlock: capturing state root",
+		"s.StateRoot", stateRoot,
+		"s.sdb.GetRoot()", sdbRoot,
+		"s.HeaderHash", s.HeaderHash,
+		"targetJCE", targetJCE,
+	)
 	s.JamState.CheckInvalidCoreIndex()
 	if err := s.InitTrieAndLoadJamState(stateRoot); err != nil {
 		return nil, err

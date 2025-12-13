@@ -185,7 +185,7 @@ func getServices(serviceNames []string, getmetadata bool) (services map[string]*
 			ServiceCode: tmpServiceCode, // TEMPORARY
 			FileName:    fileName,
 			CodeHash:    codeHash,
-			Code:        code,
+			//Code:        code,
 		}
 		log.Info(log.Node, serviceName, "codeHash", codeHash, "len", len(code))
 	}

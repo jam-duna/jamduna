@@ -304,6 +304,70 @@ const (
 	ErrInvalidData    = 0x1003
 )
 
+// CECodeName returns a human-readable name for CE protocol codes
+func CECodeName(code uint8) string {
+	switch code {
+	case UP0_BlockAnnouncement:
+		return "UP0_BlockAnnouncement"
+	case CE128_BlockRequest:
+		return "CE128_BlockRequest"
+	case CE129_StateRequest:
+		return "CE129_StateRequest"
+	case CE131_TicketDistribution:
+		return "CE131_TicketDistribution"
+	case CE132_TicketDistribution:
+		return "CE132_TicketDistribution"
+	case CE133_WorkPackageSubmission:
+		return "CE133_WorkPackageSubmission"
+	case CE134_WorkPackageShare:
+		return "CE134_WorkPackageShare"
+	case CE135_WorkReportDistribution:
+		return "CE135_WorkReportDistribution"
+	case CE136_WorkReportRequest:
+		return "CE136_WorkReportRequest"
+	case CE137_FullShardRequest:
+		return "CE137_FullShardRequest"
+	case CE138_BundleShardRequest:
+		return "CE138_BundleShardRequest"
+	case CE139_SegmentShardRequest:
+		return "CE139_SegmentShardRequest"
+	case CE140_SegmentShardRequestP:
+		return "CE140_SegmentShardRequestP"
+	case CE141_AssuranceDistribution:
+		return "CE141_AssuranceDistribution"
+	case CE142_PreimageAnnouncement:
+		return "CE142_PreimageAnnouncement"
+	case CE143_PreimageRequest:
+		return "CE143_PreimageRequest"
+	case CE144_AuditAnnouncement:
+		return "CE144_AuditAnnouncement"
+	case CE145_JudgmentPublication:
+		return "CE145_JudgmentPublication"
+	case CE146_WPbundlesubmission:
+		return "CE146_WPbundlesubmission"
+	case CE147_BundleRequest:
+		return "CE147_BundleRequest"
+	case CE148_SegmentRequest:
+		return "CE148_SegmentRequest"
+	case CE149_GrandpaVote:
+		return "CE149_GrandpaVote"
+	case CE150_GrandpaCommit:
+		return "CE150_GrandpaCommit"
+	case CE151_GrandpaState:
+		return "CE151_GrandpaState"
+	case CE152_GrandpaCatchUp:
+		return "CE152_GrandpaCatchUp"
+	case CE153_WarpSyncRequest:
+		return "CE153_WarpSyncRequest"
+	case CE154_EpochFinalized:
+		return "CE154_EpochFinalized"
+	case CE155_EpochAggregateSignature:
+		return "CE155_EpochAggregateSignature"
+	default:
+		return fmt.Sprintf("Unknown(%d)", code)
+	}
+}
+
 // DispatchIncomingQUICStream reads from QUIC and dispatches based on message type
 func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Stream, peerID uint16) error {
 	// Respect context by setting read deadline if present
@@ -341,114 +405,120 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 	}
 
 	// Dispatch based on msgType
+	var err error
 	switch msgType {
 	case UP0_BlockAnnouncement:
-		return n.onBlockAnnouncement(stream, msg, peerID)
+		err = n.onBlockAnnouncement(stream, msg, peerID)
 	case CE128_BlockRequest:
-		return n.onBlockRequest(ctx, stream, msg, peerID)
+		err = n.onBlockRequest(ctx, stream, msg, peerID)
 	case CE129_StateRequest:
-		return n.onStateRequest(ctx, stream, msg)
+		err = n.onStateRequest(ctx, stream, msg)
 	case CE131_TicketDistribution, CE132_TicketDistribution:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		return n.onTicketDistribution(ctx, stream, msg, peerID, msgType)
+		err = n.onTicketDistribution(ctx, stream, msg, peerID, msgType)
 	case CE133_WorkPackageSubmission:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		return n.onWorkPackageSubmission(ctx, stream, msg, peerID)
+		err = n.onWorkPackageSubmission(ctx, stream, msg, peerID)
 	case CE146_WPbundlesubmission:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		return n.onBundleSubmission(ctx, stream, msg, peerID)
+		err = n.onBundleSubmission(ctx, stream, msg, peerID)
 	case CE134_WorkPackageShare:
-		return n.onWorkPackageShare(ctx, stream, msg, peerID)
+		err = n.onWorkPackageShare(ctx, stream, msg, peerID)
 	case CE135_WorkReportDistribution:
-		return n.onWorkReportDistribution(ctx, stream, msg, peerID)
+		err = n.onWorkReportDistribution(ctx, stream, msg, peerID)
 	case CE136_WorkReportRequest:
-		return n.onWorkReportRequest(ctx, stream, msg)
+		err = n.onWorkReportRequest(ctx, stream, msg)
 	case CE137_FullShardRequest:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		return n.onFullShardRequest(ctx, stream, msg, peerID)
+		err = n.onFullShardRequest(ctx, stream, msg, peerID)
 	case CE138_BundleShardRequest:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		return n.onBundleShardRequest(ctx, stream, msg, peerID)
+		err = n.onBundleShardRequest(ctx, stream, msg, peerID)
 	case CE139_SegmentShardRequest:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		return n.onSegmentShardRequest(ctx, stream, msg, false, peerID)
+		err = n.onSegmentShardRequest(ctx, stream, msg, false, peerID)
 	case CE140_SegmentShardRequestP:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		return n.onSegmentShardRequest(ctx, stream, msg, true, peerID)
+		err = n.onSegmentShardRequest(ctx, stream, msg, true, peerID)
 	case CE141_AssuranceDistribution:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		return n.onAssuranceDistribution(ctx, stream, msg, peerID)
+		err = n.onAssuranceDistribution(ctx, stream, msg, peerID)
 	case CE142_PreimageAnnouncement:
-		return n.onPreimageAnnouncement(ctx, stream, msg, peerID)
+		err = n.onPreimageAnnouncement(ctx, stream, msg, peerID)
 	case CE143_PreimageRequest:
-		return n.onPreimageRequest(ctx, stream, msg)
+		err = n.onPreimageRequest(ctx, stream, msg)
 	case CE144_AuditAnnouncement:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		return n.onAuditAnnouncement(ctx, stream, msg, peerID)
+		err = n.onAuditAnnouncement(ctx, stream, msg, peerID)
 	case CE145_JudgmentPublication:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		return n.onJudgmentPublication(ctx, stream, msg, peerID)
+		err = n.onJudgmentPublication(ctx, stream, msg, peerID)
 	case CE147_BundleRequest:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		return n.onBundleRequest(ctx, stream, msg, peerID)
+		err = n.onBundleRequest(ctx, stream, msg, peerID)
 	case CE148_SegmentRequest:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		return n.onSegmentRequest(ctx, stream, msg, peerID)
+		err = n.onSegmentRequest(ctx, stream, msg, peerID)
 
 	case CE149_GrandpaVote:
-		return n.onGrandpaVote(ctx, stream, msg)
+		err = n.onGrandpaVote(ctx, stream, msg)
 	case CE150_GrandpaCommit:
-		return n.onGrandpaCommit(ctx, stream, msg)
+		err = n.onGrandpaCommit(ctx, stream, msg)
 	case CE151_GrandpaState:
-		return n.onGrandpaState(ctx, stream, msg, peerID)
+		err = n.onGrandpaState(ctx, stream, msg, peerID)
 	case CE152_GrandpaCatchUp:
-		return n.onGrandpaCatchUp(ctx, stream, msg, peerID)
+		err = n.onGrandpaCatchUp(ctx, stream, msg, peerID)
 	case CE153_WarpSyncRequest:
-		return n.onWarpSyncRequest(ctx, stream, msg, peerID)
+		err = n.onWarpSyncRequest(ctx, stream, msg, peerID)
 	case CE154_EpochFinalized:
-		return n.onEpochFinalized(ctx, stream, msg, peerID)
+		err = n.onEpochFinalized(ctx, stream, msg, peerID)
 	case CE155_EpochAggregateSignature:
-		return n.onEpochAggregateSignature(ctx, stream, msg, peerID)
+		err = n.onEpochAggregateSignature(ctx, stream, msg, peerID)
 	default:
 		return fmt.Errorf("unknown message Type msgType=%d", msgType)
 	}
 
+	// Wrap error with message type for better debugging
+	if err != nil {
+		return fmt.Errorf("[%s] %w", CECodeName(msgType), err)
+	}
+	return nil
 }
 
 func (n *Node) AbortStream(stream quic.Stream, code uint64) {

@@ -157,38 +157,45 @@ func (n *NodeContent) onStateRequest(ctx context.Context, stream quic.Stream, ms
 	err = newReq.FromBytes(msg)
 	if err != nil {
 		fmt.Println("Error deserializing:", err)
+		stream.CancelWrite(ErrInvalidData)
 		return fmt.Errorf("onStateRequest: failed to decode request: %w", err)
 	}
 
 	// Pull state data: boundary nodes + key-value pairs within given size and range
 	boundarynodes, keyvalues, ok, err := n.GetState(newReq.HeaderHash, newReq.StartKey, newReq.EndKey, newReq.MaximumSize)
 	if err != nil {
+		stream.CancelWrite(ErrKeyNotFound)
 		return fmt.Errorf("onStateRequest: GetState error: %w", err)
 	}
 	if !ok {
-		// No state found for the given range — optional: log and return nil to skip sending
+		// No state found for the given range
 		log.Warn(log.Node, "onStateRequest: state not found", "headerHash", newReq.HeaderHash)
+		stream.CancelWrite(ErrKeyNotFound)
 		return nil
 	}
 
 	// <-- [Boundary Node]
 	err = sendQuicBytes(ctx, stream, common.ConcatenateByteSlices(boundarynodes), n.id, CE129_StateRequest)
 	if err != nil {
+		stream.CancelWrite(ErrCECode)
 		return fmt.Errorf("onStateRequest: failed to send boundarynodes: %w", err)
 	}
 
 	// <-- [Key ++ Value]
 	select {
 	case <-ctx.Done():
+		stream.CancelWrite(ErrCECode)
 		return fmt.Errorf("onStateRequest: context cancelled before sending keyvalues: %w", ctx.Err())
 	default:
 	}
 	kvbytes, err := keyvalues.ToBytes()
 	if err != nil {
+		stream.CancelWrite(ErrInvalidData)
 		return fmt.Errorf("onStateRequest: failed to encode keyvalues: %w", err)
 	}
 	err = sendQuicBytes(ctx, stream, kvbytes, n.id, CE129_StateRequest)
 	if err != nil {
+		stream.CancelWrite(ErrCECode)
 		return fmt.Errorf("onStateRequest: failed to send keyvalues: %w", err)
 	}
 
