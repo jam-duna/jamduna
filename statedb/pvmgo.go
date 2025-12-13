@@ -658,22 +658,16 @@ func (vm *VMGo) ExecuteAsChild(entryPoint uint32) error {
 				if err == errChildHostCall {
 					// This is expected - child VM hit a host call
 					// MachineState and host_func_id are already set
-					if vm.Gas > (1 << 63) { // Check for underflow (gas wrapped around to very large number)
-						vm.ResultCode = types.WORKRESULT_OOG
-						vm.MachineState = OOG
-						vm.terminated = true
-						return fmt.Errorf("out of gas , gas = %d", vm.Gas)
-					}
 					return nil
 				}
 				return err
 			}
 			stepn++
-			if vm.Gas > (1 << 63) { // Check for underflow (gas wrapped around to very large number)
+			if vm.Gas == 0 {
 				vm.ResultCode = types.WORKRESULT_OOG
 				vm.MachineState = OOG
 				vm.terminated = true
-				return fmt.Errorf("out of gas , gas = %d", vm.Gas)
+				return fmt.Errorf("out of gas")
 			}
 		}
 	}
@@ -740,12 +734,12 @@ func (vm *VMGo) Execute(host *VM, entryPoint uint32, logDir string) error {
 				return err
 			}
 			stepn++
-			if vm.Gas > (1 << 63) { // Check for underflow (gas wrapped around to very large number)
+			if vm.Gas == 0 {
 				vm.ResultCode = types.WORKRESULT_OOG
 				vm.MachineState = OOG
 				vm.hostVM.ResultCode = types.WORKRESULT_OOG
 				vm.terminated = true
-				return fmt.Errorf("out of gas , gas = %d", vm.Gas)
+				return fmt.Errorf("out of gas")
 			}
 		}
 	}
@@ -965,7 +959,11 @@ func (vm *VMGo) step(stepn int) error {
 		vm.ResultCode = types.WORKRESULT_PANIC
 		vm.MachineState = PANIC
 		vm.terminated = true
-		vm.Gas -= 1
+		if vm.Gas >= 1 {
+			vm.Gas -= 1
+		} else {
+			vm.Gas = 0
+		}
 		return errors.New("program counter out of bounds")
 	}
 
@@ -998,6 +996,7 @@ func (vm *VMGo) step(stepn int) error {
 	if vm.Gas < 1 {
 		vm.ResultCode = types.WORKRESULT_OOG
 		vm.MachineState = OOG
+		vm.Gas = 0
 		vm.terminated = true
 		return fmt.Errorf("out of gas , gas = %d", vm.Gas)
 	}
@@ -1027,19 +1026,16 @@ func (vm *VMGo) step(stepn int) error {
 			return errChildHostCall
 		}
 		if vm.hostCall {
-			if vm.host_func_id == TRANSFER {
-				vm.Gas -= 10
-			} else {
-				vm.Gas -= 10
-			}
-			// Invoke host function with panic recovery
-			if vm.Gas > (1 << 63) { // Check for underflow (gas wrapped around to very large number)
+			// Check for OOG before decrementing host call gas cost (10)
+			if vm.Gas < 10 {
 				fmt.Printf("Out of gas during host function %d call\n", vm.host_func_id)
 				vm.ResultCode = types.WORKRESULT_OOG
 				vm.MachineState = OOG
+				vm.Gas = 0
 				vm.terminated = true
 				return nil
 			}
+			vm.Gas -= 10
 
 			// Call the host function
 			if vm.hostVM != nil {
@@ -1050,7 +1046,12 @@ func (vm *VMGo) step(stepn int) error {
 					return nil
 				}
 				if vm.host_func_id == TRANSFER && vm.ReadRegister(7) == OK {
-					vm.Gas -= vm.ReadRegister(9)
+					transferGas := vm.ReadRegister(9)
+					if vm.Gas < transferGas {
+						vm.Gas = 0
+					} else {
+						vm.Gas -= transferGas
+					}
 				}
 				// Check if host function caused panic
 				if vm.MachineState == PANIC {
@@ -2455,7 +2456,7 @@ func (vm *VMGo) ExecuteStep(pvm *VM) []byte {
 	}
 
 	// Handle gas exhaustion
-	if vm.Gas > (1 << 63) { // Check for underflow (gas wrapped around to very large number)
+	if vm.Gas == 0 {
 		vm.ResultCode = types.WORKRESULT_OOG
 		vm.MachineState = OOG
 		vm.terminated = true
@@ -2674,24 +2675,38 @@ const (
 type RawRam struct {
 	reg                  [13]uint64
 	current_heap_pointer uint32
-	memory               []byte
-	mem_access           map[int]int // Changed from array to map for lazy allocation
+	pages                map[uint32][]byte // pageIndex -> 4KB page data (sparse allocation)
+	mem_access           map[int]int       // pageIndex -> access level
 }
-
-const memSize = 4 * 1024 * 1024 * 1024 // 4GB + 1MB
 
 func NewRawRam() (*RawRam, error) {
 	return &RawRam{
-		memory:     make([]byte, memSize),
-		mem_access: make(map[int]int), // Initialize the map
+		pages:      make(map[uint32][]byte),
+		mem_access: make(map[int]int),
 		reg:        [13]uint64{},
 	}, nil
 }
-func (ram *RawRam) Close() error {
-	// deallocate resources if needed
-	ram.memory = nil
 
+func (ram *RawRam) Close() error {
+	// deallocate resources
+	ram.pages = nil
+	ram.mem_access = nil
 	return nil
+}
+
+// getPage returns the page data for the given page index, or nil if not allocated
+func (ram *RawRam) getPage(pageIndex uint32) []byte {
+	return ram.pages[pageIndex]
+}
+
+// getOrCreatePage returns the page data, allocating it if necessary
+func (ram *RawRam) getOrCreatePage(pageIndex uint32) []byte {
+	if page, ok := ram.pages[pageIndex]; ok {
+		return page
+	}
+	page := make([]byte, PageSize)
+	ram.pages[pageIndex] = page
+	return page
 }
 
 // GetMemAccess checks access rights for a memory range.
@@ -2748,6 +2763,7 @@ func (ram *RawRam) FindFaultPage(address uint32, length uint32, isWrite bool) ui
 }
 
 // ReadMemory reads data from a specific address in the memory if it's readable.
+// Uses sparse page-based memory - unallocated pages read as zeros.
 func (ram *RawRam) ReadMemory(address uint32, length uint32) (data []byte, err error) {
 	if length == 0 {
 		return []byte{}, nil
@@ -2756,8 +2772,9 @@ func (ram *RawRam) ReadMemory(address uint32, length uint32) (data []byte, err e
 	if endAddr < address {
 		return nil, fmt.Errorf("range overflow: addr=%x len=%d", address, length)
 	}
-	if int(endAddr) > len(ram.memory) {
-		return nil, fmt.Errorf("out of bounds: end=%x memlen=%d", endAddr, len(ram.memory))
+	// Check address space bounds (4GB)
+	if endAddr < address { // overflow check
+		return nil, fmt.Errorf("out of bounds: end=%x", endAddr)
 	}
 	access, err := ram.GetMemAccess(address, length)
 	if err != nil {
@@ -2767,18 +2784,43 @@ func (ram *RawRam) ReadMemory(address uint32, length uint32) (data []byte, err e
 		return nil, fmt.Errorf("memory at address %x is not readable", address)
 	}
 
-	result := ram.memory[int(address):int(endAddr)]
+	// Read across potentially multiple pages
+	result := make([]byte, length)
+	for offset := uint32(0); offset < length; {
+		pageIndex := (address + offset) / PageSize
+		pageOffset := (address + offset) % PageSize
+
+		// Calculate how many bytes to read from this page
+		bytesInPage := PageSize - pageOffset
+		bytesToRead := length - offset
+		if bytesToRead > bytesInPage {
+			bytesToRead = bytesInPage
+		}
+
+		page := ram.getPage(pageIndex)
+		if page != nil {
+			copy(result[offset:offset+bytesToRead], page[pageOffset:pageOffset+bytesToRead])
+		}
+		// If page is nil, result already contains zeros (default)
+
+		offset += bytesToRead
+	}
 	return result, nil
 }
 
 // WriteMemory writes data to a specific address in the memory if it's writable.
+// Uses sparse page-based memory - pages are allocated on first write.
 func (ram *RawRam) WriteMemory(address uint32, data []byte) error {
-	pageIndex := int(address / PageSize)
-	if pageIndex < 0 || pageIndex >= TotalPages {
-		return fmt.Errorf("invalid address %x for page index %d", address, pageIndex)
+	if len(data) == 0 {
+		return nil
+	}
+	length := uint32(len(data))
+	endAddr := address + length
+	if endAddr < address {
+		return fmt.Errorf("range overflow: addr=%x len=%d", address, length)
 	}
 
-	access, err := ram.GetMemAccess(address, uint32(len(data)))
+	access, err := ram.GetMemAccess(address, length)
 	if err != nil {
 		return fmt.Errorf("failed to get memory access: %w", err)
 	}
@@ -2786,9 +2828,23 @@ func (ram *RawRam) WriteMemory(address uint32, data []byte) error {
 		return fmt.Errorf("memory at address %x is not writable", address)
 	}
 
-	start := pageIndex * PageSize
-	offset := int(address % PageSize)
-	copy(ram.memory[start+offset:start+offset+len(data)], data)
+	// Write across potentially multiple pages
+	for offset := uint32(0); offset < length; {
+		pageIndex := (address + offset) / PageSize
+		pageOffset := (address + offset) % PageSize
+
+		// Calculate how many bytes to write to this page
+		bytesInPage := PageSize - pageOffset
+		bytesToWrite := length - offset
+		if bytesToWrite > bytesInPage {
+			bytesToWrite = bytesInPage
+		}
+
+		page := ram.getOrCreatePage(pageIndex)
+		copy(page[pageOffset:pageOffset+bytesToWrite], data[offset:offset+bytesToWrite])
+
+		offset += bytesToWrite
+	}
 	return nil
 }
 

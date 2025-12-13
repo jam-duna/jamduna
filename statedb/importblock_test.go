@@ -179,12 +179,12 @@ func TestTracesInterpreter(t *testing.T) {
 	testDirs := []string{
 		// path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
 		// path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
-		// path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
-		// path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
-		// path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
-		// path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy_light"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
+		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy"),
-		// path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy_light"),
 	}
 	// Iterate over each directory.
 	for _, dir := range testDirs {
@@ -218,6 +218,7 @@ func TestTracesInterpreter(t *testing.T) {
 				t.Run(e.Name(), func(t *testing.T) {
 					runSingleSTFTest(t, filename, string(content), BackendInterpreter, false)
 				})
+				runtime.GC()
 			}
 		})
 	}
