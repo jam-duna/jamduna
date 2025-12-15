@@ -9,9 +9,8 @@ import (
 	"os"
 	"time"
 
-	bandersnatch "github.com/colorfulnotion/jam/bandersnatch"
-	bls "github.com/colorfulnotion/jam/bls"
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/grandpa"
 	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	storage "github.com/colorfulnotion/jam/storage"
@@ -41,7 +40,7 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 				return nil, err
 			}
 		}
-		v, err0 := InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed, metadata)
+		v, err0 := grandpa.InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed, metadata)
 		if err0 != nil {
 			return nil, err0
 		}
@@ -66,8 +65,30 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 	}
 	j.SafroleState.PrevValidators = validators
 	j.SafroleState.CurrValidators = validators
-	j.SafroleState.NextValidators = validators
-	j.SafroleState.DesignatedValidators = validators
+
+	// introduces some variation in the validator sets
+	variantValidators := make(types.Validators, types.TotalValidators)
+	// 0 -> 1, 1->2, ..., N-1 -> 0
+	for i := 0; i < types.TotalValidators; i++ {
+		variantValidators[i] = validators[(i+1)%types.TotalValidators]
+	}
+	var variantBool bool = true
+	if variantBool {
+		j.SafroleState.NextValidators = variantValidators
+	} else {
+		j.SafroleState.NextValidators = validators
+	}
+	// do it again for designated validators
+	variantValidators2 := make(types.Validators, types.TotalValidators)
+	// 0 -> 2, 1->3, ..., N-2 -> 0, N-1 -> 1
+	for i := 0; i < types.TotalValidators; i++ {
+		variantValidators2[i] = validators[(i+2)%types.TotalValidators]
+	}
+	if variantBool {
+		j.SafroleState.DesignatedValidators = variantValidators2
+	} else {
+		j.SafroleState.DesignatedValidators = validators
+	}
 
 	/*
 		The on-chain randomness is initialized after the genesis block construction.
@@ -87,7 +108,7 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 		authQueueServiceID[i] = AuthCopyServiceCode
 	}
 	j.PrivilegedServiceIndices.AuthQueueServiceID = authQueueServiceID
-	j.PrivilegedServiceIndices.UpcomingValidatorsServiceID = EVMServiceCode // 0 - EVM service can call designate()
+	j.PrivilegedServiceIndices.UpcomingValidatorsServiceID = EVMServiceCode // 0 - EVM service can call designate() -- TODO: change it to algo next
 	j.PrivilegedServiceIndices.ManagerServiceID = EVMServiceCode
 	// 0.7.1 introduces RegistrarServiceID
 	j.PrivilegedServiceIndices.RegistrarServiceID = EVMServiceCode
@@ -154,7 +175,7 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 		services[i].PreimageKey = account_preimage_hash.Bytes()[:31]
 	}
 
-	fmt.Printf("Genesis Services:\n%+v\n", types.ToJSONHexIndent(services))
+	//fmt.Printf("Genesis Services:\n%+v\n", types.ToJSONHexIndent(services))
 
 	auth_pvm, err0 := common.GetFilePath(BootStrapNullAuthFile)
 	if err0 != nil {
@@ -211,7 +232,7 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 				statedb.WriteServiceStorage(service.ServiceCode, k.Bytes(), v)
 			}
 			statedb.writeService(service.ServiceCode, &bootstrapServiceAccount)
-			fmt.Printf("Service %s(%d) %x\n%v\n\n", service.ServiceName, service.ServiceCode, service.AccountKey, bootstrapServiceAccount.JsonString())
+			//fmt.Printf("Service %s(%d) %x\n%v\n\n", service.ServiceName, service.ServiceCode, service.AccountKey, bootstrapServiceAccount.JsonString())
 			//fmt.Printf("Service %s (fn:%s), codeHash %s, codeLen=%d, anchor %v, staking entries=%d\n", service.ServiceName, service.FileName, codeHash.String(), codeLen, bootStrapAnchor, len(service.Storage))
 		} else {
 			sa := types.ServiceAccount{
@@ -229,7 +250,7 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 				statedb.WriteServiceStorage(service.ServiceCode, k.Bytes(), v)
 			}
 			statedb.writeService(service.ServiceCode, &sa)
-			fmt.Printf("Service %s(%d).%x StorageEntries=%d\n%v\n\n", service.ServiceName, service.ServiceCode, service.AccountKey, len(service.Storage), sa.JsonString())
+			//fmt.Printf("Service %s(%d).%x StorageEntries=%d\n%v\n\n", service.ServiceName, service.ServiceCode, service.AccountKey, len(service.Storage), sa.JsonString())
 			//fmt.Printf("Service %d %s (fn:%s), codeHash %s, codeLen=%d, anchor %v\n", service.ServiceCode, service.ServiceName, service.FileName, codeHash.String(), codeLen, bootStrapAnchor)
 		}
 	}
@@ -242,6 +263,10 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 		for i := range j.AuthorizationQueue[idx] {
 			j.AuthorizationQueue[idx][i] = auth_code_hash_hash
 		}
+	}
+	// Initialize AuthorizationsPool with bootstrap authorizer for all cores
+	for i := 0; i < types.TotalCores; i++ {
+		j.AuthorizationsPool[i][0] = auth_code_hash_hash
 	}
 	statedb.JamState = j
 
@@ -478,97 +503,4 @@ func NewEpoch0Timestamp(test_name ...string) uint64 {
 		log.Trace(log.SDB, "NewEpoch0Timestamp", "Raw now", uint64(now), "Raw waitTime", waitTime, "Raw epoch0P", epoch0Phase, "Raw epoch0Timestamp", epoch0Timestamp)
 		return uint64(epoch0Timestamp)
 	}
-}
-
-func InitValidator(bandersnatch_seed, ed25519_seed, bls_seed []byte, metadata []byte) (types.Validator, error) {
-	validator := types.Validator{}
-	banderSnatch_pub, _, err := bandersnatch.InitBanderSnatchKey(bandersnatch_seed)
-	if err != nil {
-		return validator, fmt.Errorf("failed to init BanderSnatch Key")
-	}
-	ed25519_pub, _, err := types.InitEd25519Key(ed25519_seed)
-	if err != nil {
-		return validator, fmt.Errorf("failed to init Ed25519 Key")
-	}
-	bls_pub, _, err := bls.InitBLSKey(bls_seed)
-	if err != nil {
-		return validator, fmt.Errorf("failed to init BanderSnatch Key")
-	}
-
-	validator.Ed25519 = ed25519_pub
-	copy(validator.Bandersnatch[:], banderSnatch_pub.Bytes())
-	copy(validator.Metadata[:], metadata)
-	copy(validator.Bls[:], bls_pub.Bytes())
-	return validator, nil
-}
-
-func InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed []byte, metadata []byte) (types.ValidatorSecret, error) {
-	validatorSecret := types.ValidatorSecret{}
-	banderSnatch_pub, banderSnatch_priv, err := bandersnatch.InitBanderSnatchKey(bandersnatch_seed)
-	if err != nil {
-		return validatorSecret, fmt.Errorf("failed to init BanderSnatch Key")
-	}
-	ed25519_pub, ed25519_priv, err := types.InitEd25519Key(ed25519_seed)
-	if err != nil {
-		return validatorSecret, fmt.Errorf("failed to init Ed25519 Key")
-	}
-	bls_pub, bls_priv, err := bls.InitBLSKey(bls_seed)
-	if err != nil {
-		return validatorSecret, fmt.Errorf("failed to init BLS Key")
-	}
-
-	copy(validatorSecret.Ed25519Secret[:], ed25519_priv[:])
-	validatorSecret.Ed25519Pub = ed25519_pub
-
-	validatorSecret.BandersnatchSecret = banderSnatch_priv.Bytes()
-	validatorSecret.BandersnatchPub = types.BandersnatchKey(banderSnatch_pub)
-
-	copy(validatorSecret.BlsSecret[:], bls_priv.Bytes())
-	copy(validatorSecret.BlsPub[:], bls_pub.Bytes())
-
-	copy(validatorSecret.Metadata[:], metadata)
-	return validatorSecret, nil
-}
-
-func generateSeedSet(ringSize int) ([][]byte, error) {
-	ringSet := make([][]byte, ringSize)
-	for i := uint32(0); i < uint32(ringSize); i++ {
-		seed := make([]byte, 32)
-		for j := 0; j < 8; j++ {
-			binary.LittleEndian.PutUint32(seed[j*4:], i)
-		}
-		ringSet[i] = seed
-	}
-	return ringSet, nil
-}
-func GenerateValidatorSecretSet(numNodes int) ([]types.Validator, []types.ValidatorSecret, error) {
-
-	seeds, _ := generateSeedSet(numNodes)
-	validators := make([]types.Validator, numNodes)
-	validatorSecrets := make([]types.ValidatorSecret, numNodes)
-
-	for i := 0; i < int(numNodes); i++ {
-
-		seed_i := seeds[i]
-		bandersnatch_seed := seed_i
-		ed25519_seed := seed_i
-		bls_seed := seed_i
-		metadata := []byte{}
-		//metadata, _ := generateMetadata(i) // this is NOT used by other teams. somehow we agreed on empty metadata for now
-
-		validator, err := InitValidator(bandersnatch_seed, ed25519_seed, bls_seed, metadata)
-		if err != nil {
-			return validators, validatorSecrets, fmt.Errorf("failed to init validator %v", i)
-		}
-		validators[i] = validator
-
-		//bandersnatch_seed, ed25519_seed, bls_seed
-		validatorSecret, err := InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed, metadata)
-		if err != nil {
-			return validators, validatorSecrets, fmt.Errorf("failed to init validator secret=%v", i)
-		}
-		validatorSecrets[i] = validatorSecret
-	}
-
-	return validators, validatorSecrets, nil
 }

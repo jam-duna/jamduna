@@ -56,14 +56,14 @@ func (p *Peer) SendEpochAggregateSignature(ctx context.Context, epochFinalized J
 		return fmt.Errorf("WarpSyncRequest.ToBytes failed: %w", err)
 	}
 
-	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
 		return fmt.Errorf("sendQuicBytes[CE155_EpochAggregateSignature] failed: %w", err)
 	}
 
 	return nil
 }
 
-func (n *Node) onEpochAggregateSignature(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
+func (n *Node) onEpochAggregateSignature(ctx context.Context, stream quic.Stream, msg []byte, peerKey string) error {
 	defer stream.Close()
 
 	// Decode: Epoch ++ BeefyHash ++ BLS Signature

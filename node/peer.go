@@ -94,7 +94,7 @@ func NewPeer(n *Node, validatorIndex uint16, validator types.Validator, peerAddr
 	return p
 }
 
-func (p *Peer) GetPeer32() [32]byte {
+func (p *Peer) PeerKey() [32]byte {
 	return [32]byte(p.Validator.Ed25519)
 }
 
@@ -124,7 +124,7 @@ func (p *Peer) openStream(ctx context.Context, code uint8) (quic.Stream, error) 
 
 	var err error
 	if p.conn == nil {
-		eventID := p.node.telemetryClient.GetEventID(p.GetPeer32())
+		eventID := p.node.telemetryClient.GetEventID(p.PeerKey())
 		telemetryConnecting := false
 		host, port, splitErr := net.SplitHostPort(p.PeerAddr)
 		if splitErr != nil {
@@ -133,7 +133,7 @@ func (p *Peer) openStream(ctx context.Context, code uint8) (quic.Stream, error) 
 			log.Warn(log.Node, "openStream: failed to parse peer address for telemetry", "peerAddr", p.PeerAddr, "err", parseErr)
 		} else {
 
-			p.node.telemetryClient.ConnectingOut(p.GetPeer32(), addrBytes, portNum)
+			p.node.telemetryClient.ConnectingOut(p.PeerKey(), addrBytes, portNum)
 			telemetryConnecting = true
 		}
 
@@ -147,12 +147,12 @@ func (p *Peer) openStream(ctx context.Context, code uint8) (quic.Stream, error) 
 		conn, err := quic.DialAddr(dialCtx, p.PeerAddr, p.node.clientTLSConfig, GenerateQuicConfig())
 		if err != nil {
 			if err.Error() != "Context cancelled" {
-				log.Error(log.Node, "DialAddr failed", "node", p.node.id, "peerID", p.PeerID, "err", err)
+				log.Error(log.Node, "DialAddr failed", "node", p.node.id, "peerKey", p.Validator.Ed25519.ShortString(), "err", err)
 			}
 			if telemetryConnecting {
 				p.node.telemetryClient.ConnectOutFailed(eventID, err.Error())
 			}
-			return nil, fmt.Errorf("[P%d] DialAddr failed: %w", p.PeerID, err)
+			return nil, fmt.Errorf("[%s] DialAddr failed: %w", p.Validator.Ed25519.ShortString(), err)
 		} else {
 			go p.node.nodeSelf.handleConnection(conn)
 			p.conn = conn
@@ -188,7 +188,7 @@ func (p *Peer) openStream(ctx context.Context, code uint8) (quic.Stream, error) 
 
 	return stream, nil
 }
-func sendQuicBytes(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16, code uint8) (err error) {
+func sendQuicBytes(ctx context.Context, stream quic.Stream, msg []byte, peerKey string, code uint8) (err error) {
 	// Create a buffer to hold the length of the message (big-endian uint32)
 	if stream == nil {
 		return errors.New("stream is nil")
@@ -209,7 +209,7 @@ func sendQuicBytes(ctx context.Context, stream quic.Stream, msg []byte, peerID u
 	// First, write the message length to the stream
 	_, err = stream.Write(lenBuf)
 	if err != nil {
-		log.Warn(log.Node, "sendQuicBytes-length", "peerID", peerID, "err", err, "code", code, "msgLen", msgLen, "msg", common.Bytes2Hex(msg))
+		log.Warn(log.Node, "sendQuicBytes-length", "peerKey", peerKey, "err", err, "code", code, "msgLen", msgLen, "msg", common.Bytes2Hex(msg))
 		stream.Close()
 		return err
 	} else if code == UP0_BlockAnnouncement {
@@ -229,7 +229,7 @@ func sendQuicBytes(ctx context.Context, stream quic.Stream, msg []byte, peerID u
 	_, err = stream.Write(msg)
 	if err != nil {
 		stream.Close()
-		log.Warn(log.Node, "sendQuicBytes-msg", "peerID", peerID, "err", err, "code", code, "msgLen", msgLen, "msg", common.Bytes2Hex(msg))
+		log.Warn(log.Node, "sendQuicBytes-msg", "peerKey", peerKey, "err", err, "code", code, "msgLen", msgLen, "msg", common.Bytes2Hex(msg))
 		return err
 	}
 
@@ -237,7 +237,7 @@ func sendQuicBytes(ctx context.Context, stream quic.Stream, msg []byte, peerID u
 }
 
 // receiveMultiple reads `count` messages from a QUIC stream and returns a slice of received byte slices.
-func receiveMultiple(ctx context.Context, stream quic.Stream, count int, peerID uint16, code uint8) ([][]byte, error) {
+func receiveMultiple(ctx context.Context, stream quic.Stream, count int, peerKey string, code uint8) ([][]byte, error) {
 	results := make([][]byte, 0, count)
 
 	for i := 0; i < count; i++ {
@@ -245,9 +245,9 @@ func receiveMultiple(ctx context.Context, stream quic.Stream, count int, peerID 
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
-			data, err := receiveQuicBytes(ctx, stream, peerID, code)
+			data, err := receiveQuicBytes(ctx, stream, peerKey, code)
 			if err != nil {
-				log.Warn(log.Node, "receiveMultiple", "peerID", peerID, "err", err, "code", code)
+				log.Warn(log.Node, "receiveMultiple", "peerKey", peerKey, "err", err, "code", code)
 				return nil, fmt.Errorf("receiveQuicBytes[%d/%d]: %w", i+1, count, err)
 			}
 			results = append(results, data)
@@ -257,14 +257,14 @@ func receiveMultiple(ctx context.Context, stream quic.Stream, count int, peerID 
 	return results, nil
 }
 
-func receiveQuicBytes(ctx context.Context, stream quic.Stream, peerID uint16, code uint8) ([]byte, error) {
+func receiveQuicBytes(ctx context.Context, stream quic.Stream, peerKey string, code uint8) ([]byte, error) {
 	var lengthPrefix [4]byte
 
 	// Set read deadline from context if present
 	if useQuicDeadline {
 		if deadline, ok := ctx.Deadline(); ok {
 			if err := stream.SetReadDeadline(deadline); err != nil {
-				log.Error(log.Node, "SetReadDeadline failed", "peerID", peerID, "err", err, "code", code)
+				log.Error(log.Node, "SetReadDeadline failed", "peerKey", peerKey, "err", err, "code", code)
 				return nil, err
 			}
 		}
@@ -272,7 +272,7 @@ func receiveQuicBytes(ctx context.Context, stream quic.Stream, peerID uint16, co
 
 	// Read length prefix
 	if _, err := io.ReadFull(stream, lengthPrefix[:]); err != nil {
-		log.Error(log.Node, "receiveQuicBytes-length prefix", "peerID", peerID, "err", err, "code", code)
+		log.Error(log.Node, "receiveQuicBytes-length prefix", "peerKey", peerKey, "err", err, "code", code)
 		return nil, err
 	}
 	msgLen := binary.LittleEndian.Uint32(lengthPrefix[:])
@@ -282,7 +282,7 @@ func receiveQuicBytes(ctx context.Context, stream quic.Stream, peerID uint16, co
 	if useQuicDeadline {
 		if deadline, ok := ctx.Deadline(); ok {
 			if err := stream.SetReadDeadline(deadline); err != nil {
-				log.Error(log.Node, "SetReadDeadline failed", "peerID", peerID, "err", err, "code", code)
+				log.Error(log.Node, "SetReadDeadline failed", "peerKey", peerKey, "err", err, "code", code)
 				return nil, err
 			}
 		}
@@ -290,7 +290,7 @@ func receiveQuicBytes(ctx context.Context, stream quic.Stream, peerID uint16, co
 
 	// Read message body
 	if _, err := io.ReadFull(stream, buf); err != nil {
-		log.Error(log.Node, "receiveQuicBytes-message body", "peerID", peerID, "err", err, "code", code, "msgLen", msgLen)
+		log.Error(log.Node, "receiveQuicBytes-message body", "peerKey", peerKey, "err", err, "code", code, "msgLen", msgLen)
 		return nil, err
 	}
 
@@ -369,7 +369,8 @@ func CECodeName(code uint8) string {
 }
 
 // DispatchIncomingQUICStream reads from QUIC and dispatches based on message type
-func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Stream, peerID uint16) error {
+// peerKey is the Ed25519 pubKey hex string of the peer
+func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Stream, peerKey string) error {
 	// Respect context by setting read deadline if present
 	/*if deadline, ok := ctx.Deadline(); ok {
 		if err := stream.SetReadDeadline(deadline); err != nil {
@@ -398,7 +399,7 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 	// Read message body
 	msg := make([]byte, msgLen)
 	if _, err := io.ReadFull(stream, msg); err != nil {
-		log.Trace(log.Node, "DispatchIncomingQUICStream - message body", "peerID", peerID, "code", msgType, "err", err)
+		log.Trace(log.Node, "DispatchIncomingQUICStream - message body", "peerKey", peerKey, "code", msgType, "err", err)
 		stream.CancelRead(ErrCECode)
 		_ = stream.Close()
 		return err
@@ -408,9 +409,9 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 	var err error
 	switch msgType {
 	case UP0_BlockAnnouncement:
-		err = n.onBlockAnnouncement(stream, msg, peerID)
+		return n.onBlockAnnouncement(stream, msg, peerKey)
 	case CE128_BlockRequest:
-		err = n.onBlockRequest(ctx, stream, msg, peerID)
+		return n.onBlockRequest(ctx, stream, msg, peerKey)
 	case CE129_StateRequest:
 		err = n.onStateRequest(ctx, stream, msg)
 	case CE131_TicketDistribution, CE132_TicketDistribution:
@@ -418,23 +419,23 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		err = n.onTicketDistribution(ctx, stream, msg, peerID, msgType)
+		return n.onTicketDistribution(ctx, stream, msg, peerKey, msgType)
 	case CE133_WorkPackageSubmission:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		err = n.onWorkPackageSubmission(ctx, stream, msg, peerID)
+		err = n.onWorkPackageSubmission(ctx, stream, msg, peerKey)
 	case CE146_WPbundlesubmission:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		err = n.onBundleSubmission(ctx, stream, msg, peerID)
+		err = n.onBundleSubmission(ctx, stream, msg, peerKey)
 	case CE134_WorkPackageShare:
-		err = n.onWorkPackageShare(ctx, stream, msg, peerID)
+		err = n.onWorkPackageShare(ctx, stream, msg, peerKey)
 	case CE135_WorkReportDistribution:
-		err = n.onWorkReportDistribution(ctx, stream, msg, peerID)
+		err = n.onWorkReportDistribution(ctx, stream, msg, peerKey)
 	case CE136_WorkReportRequest:
 		err = n.onWorkReportRequest(ctx, stream, msg)
 	case CE137_FullShardRequest:
@@ -442,33 +443,33 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		err = n.onFullShardRequest(ctx, stream, msg, peerID)
+		err = n.onFullShardRequest(ctx, stream, msg, peerKey)
 	case CE138_BundleShardRequest:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		err = n.onBundleShardRequest(ctx, stream, msg, peerID)
+		err = n.onBundleShardRequest(ctx, stream, msg, peerKey)
 	case CE139_SegmentShardRequest:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		err = n.onSegmentShardRequest(ctx, stream, msg, false, peerID)
+		err = n.onSegmentShardRequest(ctx, stream, msg, false, peerKey)
 	case CE140_SegmentShardRequestP:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		err = n.onSegmentShardRequest(ctx, stream, msg, true, peerID)
+		err = n.onSegmentShardRequest(ctx, stream, msg, true, peerKey)
 	case CE141_AssuranceDistribution:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		err = n.onAssuranceDistribution(ctx, stream, msg, peerID)
+		err = n.onAssuranceDistribution(ctx, stream, msg, peerKey)
 	case CE142_PreimageAnnouncement:
-		err = n.onPreimageAnnouncement(ctx, stream, msg, peerID)
+		err = n.onPreimageAnnouncement(ctx, stream, msg, peerKey)
 	case CE143_PreimageRequest:
 		err = n.onPreimageRequest(ctx, stream, msg)
 	case CE144_AuditAnnouncement:
@@ -476,40 +477,40 @@ func (n *Node) DispatchIncomingQUICStream(ctx context.Context, stream quic.Strea
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		err = n.onAuditAnnouncement(ctx, stream, msg, peerID)
+		err = n.onAuditAnnouncement(ctx, stream, msg, peerKey)
 	case CE145_JudgmentPublication:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		err = n.onJudgmentPublication(ctx, stream, msg, peerID)
+		err = n.onJudgmentPublication(ctx, stream, msg, peerKey)
 	case CE147_BundleRequest:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		err = n.onBundleRequest(ctx, stream, msg, peerID)
+		err = n.onBundleRequest(ctx, stream, msg, peerKey)
 	case CE148_SegmentRequest:
 		if !n.GetIsSync() {
 			n.AbortStream(stream, ErrStateNotSynced)
 			return nil
 		}
-		err = n.onSegmentRequest(ctx, stream, msg, peerID)
+		err = n.onSegmentRequest(ctx, stream, msg, peerKey)
 
 	case CE149_GrandpaVote:
 		err = n.onGrandpaVote(ctx, stream, msg)
 	case CE150_GrandpaCommit:
 		err = n.onGrandpaCommit(ctx, stream, msg)
 	case CE151_GrandpaState:
-		err = n.onGrandpaState(ctx, stream, msg, peerID)
+		err = n.onGrandpaState(ctx, stream, msg, peerKey)
 	case CE152_GrandpaCatchUp:
-		err = n.onGrandpaCatchUp(ctx, stream, msg, peerID)
+		err = n.onGrandpaCatchUp(ctx, stream, msg, peerKey)
 	case CE153_WarpSyncRequest:
-		err = n.onWarpSyncRequest(ctx, stream, msg, peerID)
+		err = n.onWarpSyncRequest(ctx, stream, msg, peerKey)
 	case CE154_EpochFinalized:
-		err = n.onEpochFinalized(ctx, stream, msg, peerID)
+		err = n.onEpochFinalized(ctx, stream, msg, peerKey)
 	case CE155_EpochAggregateSignature:
-		err = n.onEpochAggregateSignature(ctx, stream, msg, peerID)
+		err = n.onEpochAggregateSignature(ctx, stream, msg, peerKey)
 	default:
 		return fmt.Errorf("unknown message Type msgType=%d", msgType)
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"time"
 
 	bandersnatch "github.com/colorfulnotion/jam/bandersnatch"
 	"github.com/colorfulnotion/jam/common"
@@ -99,8 +98,22 @@ func (t *Tranche0Evidence) FromBytes(data []byte) error {
 	return nil
 }
 
+// AuditAnnouncementObj wraps an audit announcement with the sender's keys and evidence.
+// This allows immediate enqueuing without waiting for statedb, deferring ValidatorIndex
+// derivation and evidence verification to processAuditAnnouncement (similar to AssuranceObject pattern).
+type AuditAnnouncementObj struct {
+	HeaderHash          common.Hash                     `json:"header_hash"`
+	Tranche             uint32                          `json:"tranche"`
+	Selected_WorkReport []types.AuditAnnouncementReport `json:"selected_workreport"`
+	Signature           types.Ed25519Signature          `json:"signature"`
+	Ed25519Key          types.Ed25519Key                `json:"ed25519_key"`      // Sender's key for ValidatorIndex derivation
+	BandersnatchKey     types.BandersnatchKey           `json:"bandersnatch_key"` // Sender's Bandersnatch key for evidence verification
+	EvidenceS0          []byte                          `json:"evidence_s0"`      // Tranche 0 evidence (nil if tranche > 0)
+	EvidenceSN          SubsequentTrancheEvidence       `json:"evidence_sn"`      // Tranche N evidence (empty if tranche == 0)
+}
+
 func (p *Peer) SendAuditAnnouncement(ctx context.Context, announcement JAMSNPAuditAnnouncement, evidence interface{}) error {
-	log.Debug(log.Node, "SendAuditAnnouncement", "peerID", p.PeerID, "headerHash", announcement.HeaderHash.String_short(), "tranche", announcement.Tranche)
+	log.Debug(log.Node, "SendAuditAnnouncement", "peerKey", p.Validator.Ed25519.ShortString(), "headerHash", announcement.HeaderHash.String_short(), "tranche", announcement.Tranche)
 	code := uint8(CE144_AuditAnnouncement)
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
@@ -114,7 +127,7 @@ func (p *Peer) SendAuditAnnouncement(ctx context.Context, announcement JAMSNPAud
 		return fmt.Errorf("ToBytes[AUDIT_ANNOUNCEMENT]: %w", err)
 	}
 
-	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
 		return fmt.Errorf("sendQuicBytes[AUDIT_ANNOUNCEMENT]: %w", err)
 	}
 
@@ -128,7 +141,7 @@ func (p *Peer) SendAuditAnnouncement(ctx context.Context, announcement JAMSNPAud
 		if err != nil {
 			return fmt.Errorf("ToBytes[Tranche0Evidence]: %w", err)
 		}
-		if err := sendQuicBytes(ctx, stream, evidenceBytes, p.PeerID, code); err != nil {
+		if err := sendQuicBytes(ctx, stream, evidenceBytes, p.Validator.Ed25519.String(), code); err != nil {
 			return fmt.Errorf("sendQuicBytes[Tranche0Evidence]: %w", err)
 		}
 	} else {
@@ -141,7 +154,7 @@ func (p *Peer) SendAuditAnnouncement(ctx context.Context, announcement JAMSNPAud
 		if err != nil {
 			return fmt.Errorf("ToBytes[SubsequentTrancheEvidence]: %w", err)
 		}
-		if err := sendQuicBytes(ctx, stream, evidenceBytes, p.PeerID, code); err != nil {
+		if err := sendQuicBytes(ctx, stream, evidenceBytes, p.Validator.Ed25519.String(), code); err != nil {
 			return fmt.Errorf("sendQuicBytes[SubsequentTrancheEvidence]: %w", err)
 		}
 	}
@@ -149,7 +162,7 @@ func (p *Peer) SendAuditAnnouncement(ctx context.Context, announcement JAMSNPAud
 	return nil
 }
 
-func AnnouncementToNoShow(a *types.Announcement) (JAMSNPNoShow, error) {
+func AuditAnnouncementToNoShow(a *types.AuditAnnouncement) (JAMSNPNoShow, error) {
 	var noShow JAMSNPNoShow
 	noShow.ValidatorIndex = uint16(a.ValidatorIndex)
 	noShow.Reports = make([]JAMSNPAuditAnnouncementReport, 0)
@@ -162,30 +175,48 @@ func AnnouncementToNoShow(a *types.Announcement) (JAMSNPNoShow, error) {
 	return noShow, nil
 }
 
-func (n *Node) onAuditAnnouncement(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
+// verifyBandersnatchS0 tries to verify s0 evidence against multiple validator sets.
+// After epoch rotation, the Bandersnatch key at the claimed index may be different.
+// We try the claimed index first (fast path), then search all validators in all sets.
+func verifyBandersnatchS0(sdb *statedb.StateDB, bandersnatchPub types.BandersnatchKey, evidenceBytes []byte) (bool, error) {
+	ok, err := sdb.Verify_s0(bandersnatch.BanderSnatchKey(bandersnatchPub[:]), evidenceBytes)
+	if err == nil && ok {
+		return true, nil
+	}
+	return false, fmt.Errorf("s0 evidence does not match any known validator")
+}
+
+// verifyBandersnatchSN verifies sN evidence using the peer's Bandersnatch key directly.
+func verifyBandersnatchSN(sdb *statedb.StateDB, bandersnatchPub types.BandersnatchKey, workreportHash common.Hash, signature []byte, tranche uint32) (bool, error) {
+	ok, err := sdb.Verify_sn(bandersnatch.BanderSnatchKey(bandersnatchPub[:]), workreportHash, signature, tranche)
+	if err == nil && ok {
+		return true, nil
+	}
+	return false, fmt.Errorf("sN evidence does not match any known validator")
+}
+
+func (n *Node) onAuditAnnouncement(ctx context.Context, stream quic.Stream, msg []byte, peerKey string) error {
 	defer stream.Close()
 	code := uint8(CE144_AuditAnnouncement)
 	var newReq JAMSNPAuditAnnouncement
 	if err := newReq.FromBytes(msg); err != nil {
-		log.Warn(log.Node, "onAuditAnnouncement: failed to deserialize announcement", "peerID", peerID, "error", err)
+		log.Warn(log.Node, "onAuditAnnouncement: failed to deserialize announcement", "peerKey", peerKey, "error", err)
 		stream.CancelRead(ErrInvalidData)
 		return fmt.Errorf("onAuditAnnouncement: failed to deserialize announcement: %w", err)
 	}
 
 	// Convert reports to internal format
-	selectedReports := make([]types.AnnouncementReport, len(newReq.Reports))
+	selectedReports := make([]types.AuditAnnouncementReport, len(newReq.Reports))
 	for i, report := range newReq.Reports {
-		selectedReports[i] = types.AnnouncementReport{
+		selectedReports[i] = types.AuditAnnouncementReport{
 			Core:           report.CoreIndex,
 			WorkReportHash: report.WorkReportHash,
 		}
 	}
-	announcement := types.Announcement{
-		HeaderHash:          newReq.HeaderHash,
-		Tranche:             uint32(newReq.Tranche),
-		Selected_WorkReport: selectedReports,
-		ValidatorIndex:      uint32(peerID),
-		Signature:           newReq.Signature,
+	// Get peer to access its validator info
+	peer, ok := n.peersByPubKey[peerKey]
+	if !ok {
+		return fmt.Errorf("onAuditAnnouncement: could not find peer for key %s", peerKey)
 	}
 
 	/*
@@ -195,109 +226,49 @@ func (n *Node) onAuditAnnouncement(ctx context.Context, stream quic.Stream, msg 
 		Subsequent Tranche Evidence = [Bandersnatch Signature (s_n(w) in GP) ++ len++[No-Show]] (One entry per announced work-report)
 		Evidence = First Tranche Evidence (If tranche is 0) OR Subsequent Tranche Evidence (If tranche is not 0)
 	*/
-	// step 1. get the data
+
+	// Read evidence from network FIRST to avoid back-pressure/timeout on sender
+	// while we wait for statedb to become available
+	var evidenceS0Bytes []byte
+	var evidenceSN SubsequentTrancheEvidence
 
 	if newReq.Tranche == 0 {
-		var evidenceS0 types.BandersnatchVrfSignature
-		evidenceBytes, err := receiveQuicBytes(ctx, stream, n.id, code)
+		var err error
+		evidenceS0Bytes, err = receiveQuicBytes(ctx, stream, n.GetEd25519Key().String(), code)
 		if err != nil {
 			return fmt.Errorf("onAuditAnnouncement: receive evidence_s0 failed: %w", err)
 		}
-		copy(evidenceS0[:], evidenceBytes)
-		// TODO: verify evidenceS0
-		var audit_statedb *statedb.StateDB
-		var ok bool
-		ticker := time.NewTicker(100 * time.Millisecond)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				audit_statedb, ok = n.getStateDBByHeaderHash(newReq.HeaderHash)
-				if ok {
-					break // TODO: CHECK -- this does not break the for loop, it just breaks the select case
-				}
-			case <-ctx.Done():
-				return fmt.Errorf("onAuditAnnouncement: audit statedb not found for header hash %s after timeout", newReq.HeaderHash.String_short())
-			}
-			if ok {
-				break // TODO: CHECK -- this does not break the for loop, it just breaks the select case
-			}
-		}
-
-		validator, err := audit_statedb.JamState.SafroleState.GetCurrValidator(int(peerID))
-		if err != nil {
-			return fmt.Errorf("onAuditAnnouncement: failed to get validator: %w", err)
-		}
-		bandersnatchPub := validator.Bandersnatch
-
-		ok, err = audit_statedb.Verify_s0(bandersnatch.BanderSnatchKey(bandersnatchPub[:]), evidenceBytes)
-		if err != nil {
-			return fmt.Errorf("onAuditAnnouncement: failed to verify evidenceS0: %w", err)
-		}
-		if !ok {
-			return fmt.Errorf("onAuditAnnouncement: evidenceS0 verification failed")
-		}
 	} else {
-		var evidenceSN SubsequentTrancheEvidence
-		evidenceBytes, err := receiveQuicBytes(ctx, stream, n.id, code)
+		evidenceBytes, err := receiveQuicBytes(ctx, stream, n.GetEd25519Key().String(), code)
 		if err != nil {
 			return fmt.Errorf("onAuditAnnouncement: receive evidence_sN failed: %w", err)
 		}
 		if err := evidenceSN.FromBytes(evidenceBytes); err != nil {
 			return fmt.Errorf("onAuditAnnouncement: failed to deserialize evidenceSN: %w", err)
 		}
-		// TODO: verify evidenceSN and evidenceSNNoShow
-		var audit_statedb *statedb.StateDB
-		var ok bool
-		ticker := time.NewTicker(100 * time.Millisecond)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				audit_statedb, ok = n.getStateDBByHeaderHash(newReq.HeaderHash)
-				if ok {
-					break
-				}
-			case <-ctx.Done():
-				return fmt.Errorf("onAuditAnnouncement: audit statedb not found for header hash %s after timeout", newReq.HeaderHash.String_short())
-			}
-			if ok {
-				break
-			}
-		}
-
-		validator, err := audit_statedb.JamState.SafroleState.GetCurrValidator(int(peerID))
-		if err != nil {
-			return fmt.Errorf("onAuditAnnouncement: failed to get validator: %w", err)
-		}
-		bandersnatchPub := validator.Bandersnatch
-		for _, evidence := range evidenceSN {
-			signature := evidence.Signature
-			if len(evidence.NoShows) == 0 {
-				return fmt.Errorf("onAuditAnnouncement: no shows are empty")
-			}
-			if len(evidence.NoShows[0].Reports) == 0 {
-				return fmt.Errorf("onAuditAnnouncement: no shows reports are empty")
-			}
-			workreportHash := evidence.NoShows[0].Reports[0].WorkReportHash
-			ok, err := audit_statedb.Verify_sn(bandersnatch.BanderSnatchKey(bandersnatchPub[:]), workreportHash, signature[:], uint32(newReq.Tranche))
-			if err != nil {
-				return fmt.Errorf("onAuditAnnouncement: failed to verify evidenceSN: %w", err)
-			}
-			if !ok {
-				return fmt.Errorf("onAuditAnnouncement: evidenceSN verification failed")
-			}
-		}
 	}
-	// Non-blocking send to announcementsCh and warns when the channel is full
+
+	// Create AuditAnnouncementObj with all data needed for deferred processing.
+	// ValidatorIndex derivation and evidence verification are deferred to processAuditAnnouncement
+	// to decouple network I/O from state availability (similar to AssuranceObject pattern).
+	auditAnnouncementObj := AuditAnnouncementObj{
+		HeaderHash:          newReq.HeaderHash,
+		Tranche:             uint32(newReq.Tranche),
+		Selected_WorkReport: selectedReports,
+		Signature:           newReq.Signature,
+		Ed25519Key:          peer.Validator.Ed25519,
+		BandersnatchKey:     peer.Validator.Bandersnatch,
+		EvidenceS0:          evidenceS0Bytes,
+		EvidenceSN:          evidenceSN,
+	}
+
+	// Non-blocking send to auditAnnouncementsCh - verification deferred to processAuditAnnouncement
 	select {
-	case n.announcementsCh <- announcement:
+	case n.auditAnnouncementsCh <- auditAnnouncementObj:
 		// Sent successfully
 	default:
-		log.Warn(log.Node, "onAuditAnnouncement: announcementsCh full, dropping announcement",
-			"peerID", peerID,
+		log.Warn(log.Node, "onAuditAnnouncement: auditAnnouncementsCh full, dropping announcement",
+			"peerKey", peerKey,
 			"headerHash", newReq.HeaderHash.String_short())
 	}
 

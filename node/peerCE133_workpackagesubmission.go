@@ -101,11 +101,11 @@ func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPack
 		p.node.telemetryClient.WorkPackageFailed(EventID, err.Error())
 		return err
 	}
-	p.node.telemetryClient.WorkPackageSubmission(EventID, p.GetPeer32(), wpOutline)
+	p.node.telemetryClient.WorkPackageSubmission(EventID, p.PeerKey(), wpOutline)
 	slot := common.GetWallClockJCE(fudgeFactorJCE)
-	log.Debug(log.R, "CE133-SendWorkPackageSubmission OUTGOING", "NODE", p.node.id, "peerID", p.PeerID, "coreIndex", core_idx, "slot", slot, "wp_hash", pkg.Hash())
+	log.Debug(log.R, "CE133-SendWorkPackageSubmission OUTGOING", "NODE", p.node.id, "peerKey", p.Validator.Ed25519.ShortString(), "coreIndex", core_idx, "slot", slot, "wp_hash", pkg.Hash())
 	//--> Core Index ++ Work Package
-	err = sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code)
+	err = sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code)
 	if err != nil {
 		log.Error(log.Node, "SendWorkPackageSubmission1", "err", err)
 		stream.Close()
@@ -121,7 +121,7 @@ func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPack
 	} else {
 		extrinsicsBytes = extrinsics.Bytes()
 	}
-	if err = sendQuicBytes(ctx, stream, extrinsicsBytes, p.PeerID, code); err != nil {
+	if err = sendQuicBytes(ctx, stream, extrinsicsBytes, p.Validator.Ed25519.String(), code); err != nil {
 		log.Error(log.Node, "SendWorkPackageSubmission Encode", "err", err)
 		stream.Close()
 		// Telemetry: Work package failed (event 92)
@@ -132,7 +132,7 @@ func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPack
 	return nil
 }
 
-func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) (err error) {
+func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, msg []byte, peerKey string) (err error) {
 	defer stream.Close()
 
 	// Telemetry: Receiving work package submission
@@ -166,7 +166,7 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 	} else {
 		slot = common.GetWallClockJCE(fudgeFactorJCE)
 	}
-	log.Debug(log.R, "CE133-onWorkPackageSubmission INCOMING", "NODE", n.id, "peer", peerID, "workpackage", newReq.WorkPackage.Hash(), "slot", slot)
+	log.Debug(log.R, "CE133-onWorkPackageSubmission INCOMING", "NODE", n.id, "peerKey", peerKey, "workpackage", newReq.WorkPackage.Hash(), "slot", slot)
 	if isSilent {
 		log.Info(log.R, "CE133-onWorkPackageSubmission INCOMING - SILENT MODE", "NODE", n.id)
 		return fmt.Errorf("Node %d is silent mode", n.id)

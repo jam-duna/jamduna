@@ -316,11 +316,11 @@ impl ObjectRef {
                 &result_buffer[Self::SERIALIZED_SIZE..Self::SERIALIZED_SIZE + payload_len],
             );
 
-            call_log(2, None, &format!("ObjectRef::fetch: object_id={}, service_id={}, max_payload={}, buffer={}, result_len={}, index={}, payload_length={}, actual_payload={}",
-                format_object_id(*object_id), service_id, max_payload_size, total_size, result_len, object_ref.index_start, object_ref.payload_length, payload_len));
+            call_log(2, None, &format!("ObjectRef::fetch: object_id={}, service_id={}, max_payload={}, buffer={}, result_len={}, index={}, payload_length={}, actual_payload={}, wph={}",
+                format_object_id(*object_id), service_id, max_payload_size, total_size, result_len, object_ref.index_start, object_ref.payload_length, payload_len, format_object_id(object_ref.work_package_hash)));
             if payload_len != object_ref.payload_length as usize {
-                call_log(1, None, &format!("  WARNING: Payload length mismatch! Got {} bytes but ObjectRef.payload_length indicates {} bytes",
-                    payload_len, object_ref.payload_length));
+                call_log(1, None, &format!("  WARNING: Payload length mismatch! Got {} bytes but ObjectRef.payload_length indicates {} bytes, wph={}",
+                    payload_len, object_ref.payload_length, format_object_id(object_ref.work_package_hash)));
             }
 
             Some((object_ref, payload))

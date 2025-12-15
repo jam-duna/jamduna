@@ -45,7 +45,7 @@ func (kvs *StateKeyValueList) ToBytes() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// FromBytes deserializes a byte array into a JAMSNPStateKeyValue struct
+// FromBytes deserializes a byte array into a StateKeyValue struct
 func (kv *StateKeyValue) FromBytes(data []byte) error {
 	buf := bytes.NewReader(data)
 
@@ -74,4 +74,53 @@ func (kv *StateKeyValue) FromBytes(data []byte) error {
 	}
 
 	return nil
+}
+
+// FromBytes deserializes a byte array into a StateKeyValueList
+func (kvs *StateKeyValueList) FromBytes(data []byte) error {
+	kvs.Items = nil
+	buf := bytes.NewReader(data)
+
+	for buf.Len() > 0 {
+		var kv StateKeyValue
+
+		// Deserialize Key (31 bytes)
+		if _, err := io.ReadFull(buf, kv.Key[:]); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+
+		// Deserialize Len (1 byte)
+		lenByte, err := buf.ReadByte()
+		if err != nil {
+			return err
+		}
+		kv.Len = lenByte
+
+		// Deserialize Value length (4 bytes)
+		var valueLength uint32
+		if err := binary.Read(buf, binary.LittleEndian, &valueLength); err != nil {
+			return err
+		}
+
+		// Deserialize Value (dynamically sized)
+		kv.Value = make([]byte, valueLength)
+		if _, err := io.ReadFull(buf, kv.Value); err != nil {
+			return err
+		}
+
+		kvs.Items = append(kvs.Items, kv)
+	}
+
+	return nil
+}
+
+// LastKey returns the last key in the list, or nil if empty
+func (kvs *StateKeyValueList) LastKey() *[31]byte {
+	if len(kvs.Items) == 0 {
+		return nil
+	}
+	return &kvs.Items[len(kvs.Items)-1].Key
 }

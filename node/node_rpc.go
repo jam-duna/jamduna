@@ -20,21 +20,18 @@ import (
 	types "github.com/colorfulnotion/jam/types"
 )
 
+// Jam is an RPC handler for a specific JAM service/rollup
+// Each Jam instance is bound to one serviceID and serves that rollup's blockchain
+// Multiple Jam instances run on different ports to serve different EVM chains within JAM
 type Jam struct {
 	*NodeContent
-	rollup    *statedb.Rollup // Legacy: for backward compatibility
-	serviceID uint32           // Service ID for this RPC instance
-	node      JNode            // Reference to the full node that implements JNode interface
+	serviceID uint32 // The specific service/rollup this RPC instance serves
+	node      JNode  // Reference to the full node
 }
 
-// GetRollup returns the rollup instance for this RPC server's serviceID
-// Uses lazy initialization via GetOrCreateRollup
+// GetRollup returns the rollup instance for this Jam's serviceID
+// Accesses NodeContent.rollups[serviceID] map via GetOrCreateRollup
 func (j *Jam) GetRollup() (*statedb.Rollup, error) {
-	if j.rollup != nil {
-		// Legacy mode: single rollup
-		return j.rollup, nil
-	}
-	// Multi-rollup mode: get or create rollup for this service
 	return j.NodeContent.GetOrCreateRollup(j.serviceID)
 }
 
@@ -166,7 +163,7 @@ func (j *Jam) NodeCommand(req []string, res *string) error {
 		}
 		*res = string(nodeStatusJson)
 	case "GetConnections":
-		for _, peer := range j.nodeSelf.peersInfo {
+		for _, peer := range j.nodeSelf.peersByPubKey {
 			peer.connectionMu.Lock()
 			defer peer.connectionMu.Unlock()
 			if peer.conn != nil {
@@ -378,9 +375,11 @@ func (j *Jam) GetCoreCoWorkersPeers(req []string, res *string) (err error) {
 	coreIndex := uint16(parsed)
 	peers := j.NodeContent.GetCoreCoWorkersPeers(coreIndex)
 
+	// Get current validator indices from safrole (not stale peer.PeerID)
+	sf := j.statedb.GetSafrole()
 	peerIDs := make([]uint16, len(peers))
 	for i := range peers {
-		peerIDs[i] = peers[i].PeerID
+		peerIDs[i] = uint16(sf.GetCurrValidatorIndex(peers[i].Validator.Ed25519))
 	}
 
 	jsonstr, err := json.Marshal(peerIDs)
@@ -411,13 +410,15 @@ func (j *Jam) FinalizedBlock(req []string, res *string) error {
 
 // jam.LatestFinalizedBlock
 func (j *Jam) LatestFinalizedBlock(req []string, res *string) error {
-
-	var block *types.Block // Replace 'Block' with the actual type returned by your methods.
+	var block *types.Block
 	var err error
 
 	block, err = j.NodeContent.GetFinalizedBlock()
 	if err != nil {
 		return fmt.Errorf("failed to get finalized block: %w", err)
+	}
+	if block == nil {
+		return fmt.Errorf("no finalized block available")
 	}
 	*res = block.String()
 	return nil
@@ -760,7 +761,9 @@ func (j *Jam) AuditWorkPackage(req []string, res *string) error {
 	spec := workReport.AvailabilitySpec
 	// now call C138 to get bundle_shard from C assurers, do ec reconstruction for b
 	// IMPORTANT: within reconstructPackageBundleSegments is a call to VerifyBundle
-	workPackageBundle, err := j.reconstructPackageBundleSegments(spec, workReport.SegmentRootLookup, workReport.CoreIndex)
+	// NOTE: This RPC endpoint uses current statedb since it's a manual audit request
+	// and we don't have the exact anchor header hash from the SpecIndex
+	workPackageBundle, err := j.reconstructPackageBundleSegments(spec, workReport.SegmentRootLookup, workReport.CoreIndex, j.statedb)
 	if err != nil {
 		return err
 	}
@@ -1235,10 +1238,10 @@ func encodeapi(objectType string, inp string) (string, error) {
 		var workDigest types.WorkDigest
 		err = json.Unmarshal(input, &workDigest)
 		obj = workDigest
-	case "Announcement":
-		var announcement types.Announcement
-		err = json.Unmarshal(input, &announcement)
-		obj = announcement
+	case "AuditAnnouncement":
+		var auditAnnouncement types.AuditAnnouncement
+		err = json.Unmarshal(input, &auditAnnouncement)
+		obj = auditAnnouncement
 	case "Judgement":
 		var judgement types.Judgement
 		err = json.Unmarshal(input, &judgement)
@@ -1367,8 +1370,8 @@ func decodeapi(objectType, input string) (string, error) {
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Assurance{}))
 	case "Preimages":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Preimages{}))
-	case "Announcement":
-		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Announcement{}))
+	case "AuditAnnouncement":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.AuditAnnouncement{}))
 	case "Judgement":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Judgement{}))
 	case "WorkPackage":

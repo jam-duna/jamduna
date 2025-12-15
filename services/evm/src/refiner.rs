@@ -1284,8 +1284,14 @@ impl BlockRefiner {
             match intent.effect.export_effect(start_index as usize) {
                 Ok(next_index) => {
                     log_info(&format!(
-                        "  ✅ Exported meta-shard[{}]: payload_len={}, export_count: {} → {}",
-                        idx, intent.effect.ref_info.payload_length, export_count, next_index
+                        "  ✅ Exported meta-shard[{}]: payload_len={}, export_count: {} → {}, wph={}, index_start={}, object_id={}",
+                        idx,
+                        intent.effect.ref_info.payload_length,
+                        export_count,
+                        next_index,
+                        crate::contractsharding::format_object_id(&intent.effect.ref_info.work_package_hash),
+                        start_index,
+                        crate::contractsharding::format_object_id(&intent.effect.object_id)
                     ));
                     export_count = next_index;
 

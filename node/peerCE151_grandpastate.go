@@ -33,14 +33,14 @@ func (p *Peer) SendGrandpaState(ctx context.Context, state grandpa.GrandpaStateM
 		return fmt.Errorf("GrandpaStateMessage.ToBytes failed: %w", err)
 	}
 
-	if err := sendQuicBytes(ctx, stream, stateBytes, p.PeerID, code); err != nil {
+	if err := sendQuicBytes(ctx, stream, stateBytes, p.Validator.Ed25519.String(), code); err != nil {
 		return fmt.Errorf("sendQuicBytes[CE151_GrandpaState] failed: %w", err)
 	}
 
 	return nil
 }
 
-func (n *Node) onGrandpaState(ctx context.Context, stream quic.Stream, msg []byte, peerId uint16) error {
+func (n *Node) onGrandpaState(ctx context.Context, stream quic.Stream, msg []byte, peerKey string) error {
 	defer stream.Close()
 
 	// Decode: Round Number ++ Set Id ++ Slot
@@ -48,7 +48,13 @@ func (n *Node) onGrandpaState(ctx context.Context, stream quic.Stream, msg []byt
 	if err := state.FromBytes(msg); err != nil {
 		return fmt.Errorf("onGrandpaState: decode failed: %w", err)
 	}
-	n.grandpa.SetWhoRoundReady(state.SetId, state.Round, peerId)
+	// Get peer to access its Ed25519 pubkey for grandpa tracking
+	// We store pubkey instead of PeerID because PeerID becomes stale after epoch rotation
+	peer, ok := n.peersByPubKey[peerKey]
+	if !ok {
+		return fmt.Errorf("onGrandpaState: could not find peer for key %s", peerKey)
+	}
+	n.grandpa.SetWhoRoundReady(state.SetId, state.Round, peer.Validator.Ed25519)
 	select {
 	case n.grandpa.StateMessageCh <- state:
 		return nil

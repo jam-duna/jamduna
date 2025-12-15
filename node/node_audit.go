@@ -25,16 +25,16 @@ func (n *Node) initAudit(headerHash common.Hash) {
 	}
 	n.auditingMapMutex.Unlock()
 
-	// initialized announcementMap
-	n.announcementMapMutex.Lock()
-	if _, exists := n.announcementMap[headerHash]; !exists {
-		n.announcementMap[headerHash] = &types.TrancheAnnouncement{
-			AnnouncementBucket: map[uint32]*types.AnnounceBucket{
+	// initialized auditAnnouncementMap
+	n.auditAnnouncementMapMutex.Lock()
+	if _, exists := n.auditAnnouncementMap[headerHash]; !exists {
+		n.auditAnnouncementMap[headerHash] = &types.AuditTrancheAnnouncement{
+			AnnouncementBucket: map[uint32]*types.AuditAnnounceBucket{
 				0: {},
 			},
 		}
 	}
-	n.announcementMapMutex.Unlock()
+	n.auditAnnouncementMapMutex.Unlock()
 	// initialized judgementMap
 	n.judgementMapMutex.Lock()
 	if _, exists := n.judgementMap[headerHash]; !exists {
@@ -82,36 +82,36 @@ func (n *Node) getAuditingStateDB(headerHash common.Hash) (*statedb.StateDB, err
 	return auditdb, nil
 }
 
-// this function is used to get the announcementMap (don't need mutex)
-func (n *Node) getTrancheAnnouncement(headerHash common.Hash) (*types.TrancheAnnouncement, error) {
+// this function is used to get the auditAnnouncementMap (don't need mutex)
+func (n *Node) getAuditTrancheAnnouncement(headerHash common.Hash) (*types.AuditTrancheAnnouncement, error) {
 
-	trancheAnnouncement, exists := n.announcementMap[headerHash]
+	trancheAnnouncement, exists := n.auditAnnouncementMap[headerHash]
 	if !exists {
-		return nil, fmt.Errorf("trancheAnnouncement %v not found for auditing", headerHash)
+		return nil, fmt.Errorf("auditTrancheAnnouncement %v not found for auditing", headerHash)
 	}
 	return trancheAnnouncement, nil
 }
 
-func (n *Node) updateTrancheAnnouncement(headerHash common.Hash, trancheAnnouncement *types.TrancheAnnouncement) error {
-	n.announcementMapMutex.Lock()
-	defer n.announcementMapMutex.Unlock()
-	n.announcementMap[headerHash] = trancheAnnouncement
+func (n *Node) updateAuditTrancheAnnouncement(headerHash common.Hash, trancheAnnouncement *types.AuditTrancheAnnouncement) error {
+	n.auditAnnouncementMapMutex.Lock()
+	defer n.auditAnnouncementMapMutex.Unlock()
+	n.auditAnnouncementMap[headerHash] = trancheAnnouncement
 	return nil
 }
 
-func (n *Node) checkTrancheAnnouncement(headerHash common.Hash) bool {
-	n.announcementMapMutex.Lock()
-	defer n.announcementMapMutex.Unlock()
+func (n *Node) checkAuditTrancheAnnouncement(headerHash common.Hash) bool {
+	n.auditAnnouncementMapMutex.Lock()
+	defer n.auditAnnouncementMapMutex.Unlock()
 
-	_, exists := n.announcementMap[headerHash]
+	_, exists := n.auditAnnouncementMap[headerHash]
 	return exists
 }
 
-func (n *Node) updateKnownWorkReportMapping(announcement types.Announcement) {
+func (n *Node) updateKnownWorkReportMapping(auditAnnouncement types.AuditAnnouncement) {
 	n.judgementWRMapMutex.Lock()
 	defer n.judgementWRMapMutex.Unlock()
-	for _, reportHash := range announcement.GetWorkReportHashes() {
-		n.judgementWRMap[reportHash] = announcement.HeaderHash
+	for _, reportHash := range auditAnnouncement.GetWorkReportHashes() {
+		n.judgementWRMap[reportHash] = auditAnnouncement.HeaderHash
 	}
 
 }
@@ -147,25 +147,25 @@ func (n *Node) getHeadHashFromWorkReportHash(workReportHash common.Hash) (common
 }
 
 func (n *Node) cleanWaitingAJ(headerHash common.Hash, workReports []types.WorkReport) {
-	n.waitingAnnouncementsMutex.Lock()
+	n.waitingAuditAnnouncementsMutex.Lock()
 	n.waitingJudgementsMutex.Lock()
-	defer n.waitingAnnouncementsMutex.Unlock()
+	defer n.waitingAuditAnnouncementsMutex.Unlock()
 	defer n.waitingJudgementsMutex.Unlock()
 
-	waitingAnnouncements := n.waitingAnnouncements
+	waitingAuditAnnouncements := n.waitingAuditAnnouncements
 	waitingJudgements := n.waitingJudgements
-	if waitingAnnouncements != nil {
-		for _, a := range waitingAnnouncements[headerHash] {
-			log.Trace(log.Audit, "sending waitingAnnouncements AGAIN", "n", n.String(), "a", a.Hash())
+	if waitingAuditAnnouncements != nil {
+		for _, a := range waitingAuditAnnouncements[headerHash] {
+			log.Trace(log.Audit, "sending waitingAuditAnnouncements AGAIN", "n", n.String(), "headerHash", a.HeaderHash.String_short())
 			select {
-			case n.announcementsCh <- a:
-				log.Debug(log.Audit, "cleanWaitingAJ: sent waiting announcement", "n", n.String(), "validator", a.ValidatorIndex)
+			case n.auditAnnouncementsCh <- a:
+				log.Debug(log.Audit, "cleanWaitingAJ: sent waiting audit announcement", "n", n.String(), "ed25519Key", a.Ed25519Key.ShortString())
 			default:
-				log.Warn(log.Audit, "cleanWaitingAJ: announcementsCh full, dropping announcement",
-					"n", n.String(), "hash", a.Hash().String_short())
+				log.Warn(log.Audit, "cleanWaitingAJ: auditAnnouncementsCh full, dropping announcement",
+					"n", n.String(), "headerHash", a.HeaderHash.String_short())
 			}
 		}
-		n.waitingAnnouncements[headerHash] = make([]types.Announcement, 0)
+		n.waitingAuditAnnouncements[headerHash] = make([]AuditAnnouncementObj, 0)
 	}
 	if waitingJudgements != nil {
 		for _, w := range workReports {
@@ -186,34 +186,34 @@ func (n *Node) cleanWaitingAJ(headerHash common.Hash, workReports []types.WorkRe
 }
 
 func (n *Node) cleanUselessAudit(header_hash common.Hash) {
-	n.announcementMapMutex.Lock()
+	n.auditAnnouncementMapMutex.Lock()
 	n.judgementMapMutex.Lock()
 	n.auditingMapMutex.Lock()
-	defer n.announcementMapMutex.Unlock()
+	defer n.auditAnnouncementMapMutex.Unlock()
 	defer n.judgementMapMutex.Unlock()
 	defer n.auditingMapMutex.Unlock()
 
-	delete(n.announcementMap, header_hash)
+	delete(n.auditAnnouncementMap, header_hash)
 	delete(n.judgementMap, header_hash)
 	delete(n.auditingMap, header_hash)
 
-	n.waitingAnnouncementsMutex.Lock()
+	n.waitingAuditAnnouncementsMutex.Lock()
 	n.waitingJudgementsMutex.Lock()
-	defer n.waitingAnnouncementsMutex.Unlock()
+	defer n.waitingAuditAnnouncementsMutex.Unlock()
 	defer n.waitingJudgementsMutex.Unlock()
 
-	delete(n.waitingAnnouncements, header_hash)
+	delete(n.waitingAuditAnnouncements, header_hash)
 	delete(n.waitingJudgements, header_hash)
 }
 
 func (n *Node) runAuditAnnouncementJudgement() {
 	for {
 		select {
-		case announcement := <-n.announcementsCh:
-			log.Debug(log.Audit, "runAuditAnnouncementJudgement: announcement", "n", n.String(), "validator", announcement.ValidatorIndex)
-			err := n.processAnnouncement(announcement)
+		case auditAnnouncementObj := <-n.auditAnnouncementsCh:
+			log.Debug(log.Audit, "runAuditAnnouncementJudgement: announcement", "n", n.String(), "headerHash", auditAnnouncementObj.HeaderHash.String_short())
+			err := n.processAuditAnnouncement(auditAnnouncementObj)
 			if err != nil {
-				log.Warn(log.Audit, "processAnnouncement", "err", err)
+				log.Warn(log.Audit, "processAuditAnnouncement", "err", err)
 			}
 		case judgement := <-n.judgementsCh:
 			log.Debug(log.Audit, "runAuditAnnouncementJudgement: judgement", "n", n.String(), "validator", judgement.Validator)
@@ -233,7 +233,7 @@ func (n *Node) runAudit() {
 			go func(audit_statedb *statedb.StateDB) {
 				headerHash := audit_statedb.GetHeaderHash()
 
-				log.Debug(log.Audit, "runAudit:start auditing block", "n", n.String(), "ts", audit_statedb.Block.TimeSlot(), "audit_statedb.headerHash", audit_statedb.HeaderHash, "headerHash", headerHash)
+				log.Debug(log.Audit, "runAudit:start auditing block", "n", n.String(), "H_t", audit_statedb.Block.TimeSlot(), "audit_statedb.headerHash", audit_statedb.HeaderHash.String_short(), "headerHash", headerHash.String_short())
 				err := n.addAuditingStateDB(audit_statedb)
 				if err != nil {
 					log.Error(log.Audit, "addAuditingStateDB", "err", err)
@@ -246,17 +246,22 @@ func (n *Node) runAudit() {
 					log.Error(log.Audit, "Audit Failed", "err", err)
 				} else {
 					// if the block is audited, we can start grandpa
-					log.Info(log.B, "Audit Done", "n", n.String(), "headerHash", headerHash, "audit_statedb.timeslot", audit_statedb.GetTimeslot())
+					numReports := len(audit_statedb.AvailableWorkReport)
+					if numReports > 0 {
+						log.Trace(log.B, fmt.Sprintf("Audit Done - with %d reports", numReports), "n", n.String(), "H_t", audit_statedb.GetTimeslot(), "headerHash", headerHash.String_short())
+					} else {
+						log.Trace(log.B, "Audit Done - Nothing to Audit", "n", n.String(), "H_t", audit_statedb.GetTimeslot(), "headerHash", headerHash.String_short())
+					}
 					// sourabh don't disable until it's stable I need this to tell if the audit is running
 					newBlock := audit_statedb.Block.Copy()
 					blockNode, ok := n.block_tree.GetBlockNode(newBlock.Header.HeaderHash())
 					if ok {
 						blockNode.Audited = true // for best block
 					} else {
-						log.Error(log.Audit, "runAudit: blockNode not found", "n", n.String(), "headerHash", headerHash)
+						log.Error(log.Audit, "runAudit: blockNode not found", "n", n.String(), "headerHash", headerHash.String_short())
 					}
 					if newBlock.GetParentHeaderHash() == (genesisBlockHash) && Grandpa {
-						log.Info(log.B, "Starting Grandpa after audit", "n", n.String(), "headerHash", headerHash)
+						log.Info(log.B, "Starting Grandpa after audit", "n", n.String(), "headerHash", headerHash.String_short())
 						n.StartGrandpa(newBlock.Copy())
 					}
 					time.Sleep(10 * time.Second) // remove it after audited
@@ -365,11 +370,11 @@ func (n *Node) ProcessAudit(tranche uint32, headerHash common.Hash) error {
 	// normal behavior
 	switch n.AuditNodeType {
 	case "normal":
-		reports, err = n.Announce(headerHash, tranche)
+		reports, err = n.AnnounceAudit(headerHash, tranche)
 		if err != nil {
 			return err
 		}
-		judges, err := n.Judge(headerHash, reports)
+		judges, err := n.Judge(headerHash, tranche, reports)
 		if err != nil {
 			return err
 		} else {
@@ -379,17 +384,17 @@ func (n *Node) ProcessAudit(tranche uint32, headerHash common.Hash) error {
 		// Lazy Announcer: should announce but doesn't
 	case "lousy_announcer":
 		// Lousy Announcer: announces but doesn't judge
-		reports, err = n.Announce(headerHash, tranche)
+		reports, err = n.AnnounceAudit(headerHash, tranche)
 		if err != nil {
 			return err
 		}
 	case "lying_judger_F":
 		// Lying Judge saying false [LJ-F]: announces, judges False for Truthful Guarantor
-		reports, err = n.Announce(headerHash, tranche)
+		reports, err = n.AnnounceAudit(headerHash, tranche)
 		if err != nil {
 			return err
 		}
-		judges, err := n.Judge(headerHash, reports)
+		judges, err := n.Judge(headerHash, tranche, reports)
 		if err != nil {
 			return err
 		} else {
@@ -401,11 +406,11 @@ func (n *Node) ProcessAudit(tranche uint32, headerHash common.Hash) error {
 		}
 	case "lying_judger_T":
 		// Lying Judge saying true [LJ-T]: announces, judges True for Lying Guarantor
-		reports, err = n.Announce(headerHash, tranche)
+		reports, err = n.AnnounceAudit(headerHash, tranche)
 		if err != nil {
 			return err
 		}
-		judges, err := n.Judge(headerHash, reports)
+		judges, err := n.Judge(headerHash, tranche, reports)
 		if err != nil {
 			return err
 		} else {
@@ -418,12 +423,12 @@ func (n *Node) ProcessAudit(tranche uint32, headerHash common.Hash) error {
 	case "non-selected_auditor":
 		// Non-selected Auditor: nothing to do & nothing to be malicious about
 		if tranche > 0 {
-			reports, err = n.Announce(headerHash, tranche)
+			reports, err = n.AnnounceAudit(headerHash, tranche)
 			if err != nil {
 				return err
 			}
 		}
-		judges, err := n.Judge(headerHash, reports)
+		judges, err := n.Judge(headerHash, tranche, reports)
 		if err != nil {
 			return err
 		} else {
@@ -431,12 +436,12 @@ func (n *Node) ProcessAudit(tranche uint32, headerHash common.Hash) error {
 		}
 
 	default:
-		reports, err = n.Announce(headerHash, tranche)
+		reports, err = n.AnnounceAudit(headerHash, tranche)
 		if err != nil {
 			return err
 		}
 		log.Debug(log.Audit, "selected reports", "n", n.String(), "ts", auditing_statedb.Block.TimeSlot(), "len(reports)", len(reports))
-		judges, err := n.Judge(headerHash, reports)
+		judges, err := n.Judge(headerHash, tranche, reports)
 		if err != nil {
 			return err
 		} else {
@@ -456,7 +461,7 @@ func (n *Node) ProcessAudit(tranche uint32, headerHash common.Hash) error {
 	return nil
 }
 
-func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkReportSelection, error) {
+func (n *Node) AnnounceAudit(headerHash common.Hash, tranche uint32) ([]types.WorkReportSelection, error) {
 	auditing_statedb, err := n.getAuditingStateDB(headerHash)
 	if err != nil {
 		return nil, err
@@ -480,21 +485,30 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 		if err != nil {
 			return nil, err
 		}
-		announcement, err := n.MakeAnnouncement(headerHash, 0, a0)
-		n.updateKnownWorkReportMapping(announcement)
-		hasmade := n.HaveMadeAnnouncement(announcement, headerHash)
+		auditAnnouncement, err := n.MakeAuditAnnouncement(headerHash, 0, a0)
+		n.updateKnownWorkReportMapping(auditAnnouncement)
+		hasmade := n.HaveMadeAuditAnnouncement(auditAnnouncement, headerHash)
 		if err != nil {
 			return nil, err
 		} else if hasmade {
-			// fmt.Printf("%s [T:%d] has made announcement %v\n", n.String(), auditing_statedb.GetTimeslot(), announcement.Hash())
-			log.Warn(log.Audit, "n", n.String(), "ts", auditing_statedb.GetTimeslot(), "has made announcement", "hash", announcement.Hash().String_short())
+			// fmt.Printf("%s [T:%d] has made audit announcement %v\n", n.String(), auditing_statedb.GetTimeslot(), auditAnnouncement.Hash())
+			log.Warn(log.Audit, "n", n.String(), "ts", auditing_statedb.GetTimeslot(), "has made audit announcement", "hash", auditAnnouncement.Hash().String_short())
 			return a0, nil
 		} else if !hasmade {
 			err = nil
-			n.announcementsCh <- announcement
+			auditAnnouncementObj := AuditAnnouncementObj{
+				HeaderHash:          auditAnnouncement.HeaderHash,
+				Tranche:             auditAnnouncement.Tranche,
+				Selected_WorkReport: auditAnnouncement.Selected_WorkReport,
+				Signature:           auditAnnouncement.Signature,
+				Ed25519Key:          n.GetEd25519Key(),
+				BandersnatchKey:     n.credential.BandersnatchPub,
+				// EvidenceS0/EvidenceSN not needed for self-generated announcements
+			}
+			n.auditAnnouncementsCh <- auditAnnouncementObj
 			announcementWithProof := JAMSNPAuditAnnouncementWithProof{}
 			workReports := make([]JAMSNPAuditAnnouncementReport, 0)
-			for _, w := range announcement.Selected_WorkReport {
+			for _, w := range auditAnnouncement.Selected_WorkReport {
 				workReports = append(workReports, JAMSNPAuditAnnouncementReport{
 					CoreIndex:      w.Core,
 					WorkReportHash: w.WorkReportHash,
@@ -504,7 +518,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 				HeaderHash: s.Block.Header.Hash(),
 				Tranche:    0,
 				Reports:    workReports,
-				Signature:  announcement.Signature,
+				Signature:  auditAnnouncement.Signature,
 			}
 			announcementWithProof.EvidenceTranche0 = Tranche0Evidence(s0)
 			if len(s0) >= 4 && binary.BigEndian.Uint32(s0[0:4]) == 0 {
@@ -520,7 +534,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 	}
 
 	banderSnatchSecret := bandersnatch.BanderSnatchSecret(n.GetBandersnatchSecret())
-	prev_bucket, err := n.GetAnnounceBucketByTranche(tranche-1, headerHash)
+	prev_bucket, err := n.GetAuditAnnounceBucketByTranche(tranche-1, headerHash)
 	if err != nil {
 		return nil, err
 	}
@@ -528,14 +542,23 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 	if err != nil {
 		return nil, err
 	}
-	announcement, err := n.MakeAnnouncement(headerHash, tranche, an)
-	n.updateKnownWorkReportMapping(announcement)
+	auditAnnouncement, err := n.MakeAuditAnnouncement(headerHash, tranche, an)
+	n.updateKnownWorkReportMapping(auditAnnouncement)
 
+	auditAnnouncementObj := AuditAnnouncementObj{
+		HeaderHash:          auditAnnouncement.HeaderHash,
+		Tranche:             auditAnnouncement.Tranche,
+		Selected_WorkReport: auditAnnouncement.Selected_WorkReport,
+		Signature:           auditAnnouncement.Signature,
+		Ed25519Key:          n.GetEd25519Key(),
+		BandersnatchKey:     n.credential.BandersnatchPub,
+		// EvidenceS0/EvidenceSN not needed for self-generated announcements
+	}
 	select {
-	case n.announcementsCh <- announcement:
+	case n.auditAnnouncementsCh <- auditAnnouncementObj:
 		// sent successfully
 	default:
-		log.Warn(log.Audit, "announcementsCh full")
+		log.Warn(log.Audit, "auditAnnouncementsCh full")
 	}
 
 	if err != nil {
@@ -543,7 +566,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 	} else {
 		announcementWithProof := JAMSNPAuditAnnouncementWithProof{}
 		workReports := make([]JAMSNPAuditAnnouncementReport, 0)
-		for _, w := range announcement.Selected_WorkReport {
+		for _, w := range auditAnnouncement.Selected_WorkReport {
 			workReports = append(workReports, JAMSNPAuditAnnouncementReport{
 				CoreIndex:      w.Core,
 				WorkReportHash: w.WorkReportHash,
@@ -554,7 +577,7 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 			HeaderHash: s.Block.Header.Hash(),
 			Tranche:    uint8(tranche),
 			Reports:    workReports,
-			Signature:  announcement.Signature,
+			Signature:  auditAnnouncement.Signature,
 		}
 		evidenceSn := make([]TrancheEvidence, len(sn))
 		for i, sig := range sn {
@@ -591,37 +614,47 @@ func (n *Node) Announce(headerHash common.Hash, tranche uint32) ([]types.WorkRep
 
 }
 
-func (n *Node) HaveMadeAnnouncement(announcement types.Announcement, headerHash common.Hash) bool {
-	n.announcementMapMutex.Lock()
-	defer n.announcementMapMutex.Unlock()
+func (n *Node) HaveMadeAuditAnnouncement(auditAnnouncement types.AuditAnnouncement, headerHash common.Hash) bool {
+	n.auditAnnouncementMapMutex.Lock()
+	defer n.auditAnnouncementMapMutex.Unlock()
 
-	tranche_announcement, err := n.getTrancheAnnouncement(headerHash)
+	tranche_announcement, err := n.getAuditTrancheAnnouncement(headerHash)
 	if err != nil {
 		return false
 	}
-	return tranche_announcement.HaveMadeAnnouncement(announcement)
+	return tranche_announcement.HaveMadeAnnouncement(auditAnnouncement)
 }
 
-func (n *Node) GetAnnounceBucketByTranche(tranche uint32, headerHash common.Hash) (*types.AnnounceBucket, error) {
-	n.announcementMapMutex.Lock()
-	defer n.announcementMapMutex.Unlock()
-	tranche_announcement, err := n.getTrancheAnnouncement(headerHash)
+func (n *Node) GetAuditAnnounceBucketByTranche(tranche uint32, headerHash common.Hash) (*types.AuditAnnounceBucket, error) {
+	n.auditAnnouncementMapMutex.Lock()
+	defer n.auditAnnouncementMapMutex.Unlock()
+	tranche_announcement, err := n.getAuditTrancheAnnouncement(headerHash)
 	if err != nil {
 		return nil, err
 	}
 	bucket, exists := tranche_announcement.AnnouncementBucket[tranche]
 	if !exists {
-		return nil, fmt.Errorf("tranche %v not found for auditing", tranche)
+		// Create empty bucket if it doesn't exist (may not have received any announcements for this tranche yet)
+		tranche_announcement.AnnouncementBucket[tranche] = &types.AuditAnnounceBucket{}
+		bucket = tranche_announcement.AnnouncementBucket[tranche]
 	}
 	return bucket, nil
 }
 
-func (n *Node) Judge(headerHash common.Hash, workReports []types.WorkReportSelection) (judgements []types.Judgement, err error) {
+func (n *Node) Judge(headerHash common.Hash, tranche uint32, workReports []types.WorkReportSelection) (judgements []types.Judgement, err error) {
 
 	judgement_bucket, err := n.getJudgementBucket(headerHash)
 	if len(workReports) == 0 {
 		return nil, nil
 	}
+
+	sdb, ok := n.getStateDBByHeaderHash(headerHash)
+	if !ok {
+		return nil, fmt.Errorf("Judge: statedb not found for headerHash %s", headerHash.Hex())
+	}
+	sf := sdb.GetSafrole()
+	validatorIndex := uint16(sf.GetCurrValidatorIndex(n.GetEd25519Key()))
+
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	errCh := make(chan error, len(workReports))
@@ -629,14 +662,15 @@ func (n *Node) Judge(headerHash common.Hash, workReports []types.WorkReportSelec
 		wg.Add(1)
 		go func(w types.WorkReportSelection) {
 			defer wg.Done()
-			hasmade := judgement_bucket.HaveMadeJudgementByValidator(w.WorkReport.Hash(), uint16(n.GetCurrValidatorIndex()))
+			hasmade := judgement_bucket.HaveMadeJudgementByValidator(w.WorkReport.Hash(), validatorIndex)
 			var j types.Judgement
 			var err error
 			if !hasmade {
 				j, err = n.auditWorkReport(w.WorkReport, headerHash)
-				fmt.Printf("AUDITED %s WorkReport %s: Judge=%v\n", n.String(), w.WorkReport.Hash().String_short(), j.Judge)
+				log.Trace(log.Audit, "ADDING AUDIT", "n", n.String(), "report", w.WorkReport.Hash().String_short(), "headerHash", headerHash.String_short(), "tranche", tranche, "judge", j.Judge, "vIdx", j.Validator, "ed25519Pub", n.GetEd25519Key().ShortString())
 			} else {
-				j, err = judgement_bucket.GetJudgementByValidator(w.WorkReport.Hash(), uint16(n.GetCurrValidatorIndex()))
+				j, err = judgement_bucket.GetJudgementByValidator(w.WorkReport.Hash(), validatorIndex)
+				log.Debug(log.Audit, "Already judged, skipping", "n", n.String(), "report", w.WorkReport.Hash().String_short(), "headerHash", headerHash.String_short(), "tranche", tranche, "vIdx", j.Validator)
 			}
 			if err != nil {
 				errCh <- err
@@ -666,9 +700,15 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	if err != nil {
 		return
 	}
+	auditing_statedb, err := n.getAuditingStateDB(headerHash)
+	if err != nil {
+		log.Error(log.Audit, "IMPOSSIBLE CASE - auditWorkReport:getAuditingStateDB", "err", err)
+		return
+	}
+	selfCurrentIdx := uint16(auditing_statedb.GetSafrole().GetCurrValidatorIndex(n.GetEd25519Key()))
 	judgment_bucket.RLock()
 	for _, j := range judgment_bucket.Judgements[workReport.Hash()] {
-		if j.Validator == n.id {
+		if j.Validator == selfCurrentIdx {
 			return j, nil
 		}
 	}
@@ -684,7 +724,7 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 		}
 		if wr.AvailabilitySpec.ErasureRoot == workReport.AvailabilitySpec.ErasureRoot && wr.CoreIndex == uint(core) {
 			n.workReportsMutex.Unlock()
-			judgement, err = n.MakeJudgement(workReport, true)
+			judgement, err = n.MakeJudgementWithStateDB(workReport, true, auditing_statedb)
 
 			return
 		}
@@ -695,15 +735,17 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 	spec := workReport.AvailabilitySpec
 	// get original 3 guarantors of headerHash
 	guarantors := n.getGuarantorsByHeaderHash(headerHash)
-	workPackageBundle, err := n.fetchWorkPackageBundle(spec, workReport.SegmentRootLookup, workReport.CoreIndex, guarantors)
+	workPackageBundle, err := n.fetchWorkPackageBundle(spec, workReport.SegmentRootLookup, workReport.CoreIndex, guarantors, auditing_statedb)
 	if err != nil {
 		log.Error(log.Audit, "auditWorkReport:FetchWorkPackageBundle", "err", err)
 	}
 	auditPass := false
-	if !isSilent {
+	if isSilent {
+		// Silent mode: skip actual execution, assume pass
 		auditPass = true
 		log.Info(log.Audit, "auditWorkReport:executeWorkPackageBundle FAKE PASS", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash())
 	} else {
+		// Actually execute and verify the work package
 		wr, err := n.executeWorkPackageBundle(uint16(workReport.CoreIndex), workPackageBundle, workReport.SegmentRootLookup, n.statedb.GetTimeslot(), log.Auditor, 0)
 
 		if err != nil {
@@ -727,7 +769,7 @@ func (n *Node) auditWorkReport(workReport types.WorkReport, headerHash common.Ha
 		log.Warn(log.Audit, "auditWorkReport: workReportsCh full, dropping workReport", "workReport", workReport.Hash())
 	}
 
-	judgement, err = n.MakeJudgement(workReport, auditPass)
+	judgement, err = n.MakeJudgementWithStateDB(workReport, auditPass, n.statedb)
 	elapse := common.ElapsedStr(start)
 	log.Debug(log.B, "auditWorkReport", "n", n.String(), "wph", workPackageBundle.WorkPackage.Hash(), "start time", start, "total judge elapse", elapse)
 	return
@@ -752,18 +794,18 @@ func (n *Node) DistributeJudgements(judges []types.Judgement, headerHash common.
 }
 
 // fetchWorkPackageBundle: fast path from guarantors, then slow path via reconstruction
-func (n *Node) fetchWorkPackageBundle(spec types.AvailabilitySpecifier, segmentRootLookup types.SegmentRootLookup, coreIndex uint, guarantors []uint16) (types.WorkPackageBundle, error) {
+// guarantors is a list of Ed25519 keys (not indices) to avoid stale PeerID issues after epoch rotation
+// targetDB is the anchor-specific statedb for this audit operation (not n.statedb which may be at a different epoch)
+func (n *Node) fetchWorkPackageBundle(spec types.AvailabilitySpecifier, segmentRootLookup types.SegmentRootLookup, coreIndex uint, guarantors []types.Ed25519Key, targetDB *statedb.StateDB) (types.WorkPackageBundle, error) {
 	eventID := n.telemetryClient.GetEventID(spec.WorkPackageHash)
 	// Fast path: Try to fetch bundle from original 3 guarantors with CE147
-	for i, peer := range n.peersInfo {
-		if slices.Contains(guarantors, uint16(i)) {
+	for _, peer := range n.peersByPubKey {
+		if slices.Contains(guarantors, peer.Validator.Ed25519) {
 			bundle, err := peer.SendBundleRequest(context.Background(), spec.ErasureRoot, eventID)
 			if err != nil {
 				continue
 			}
-			// Verify the bundle against the segment root lookup
-			// TODO: get the bundle refine context statedb
-			verified, err := n.statedb.VerifyBundle(bundle, segmentRootLookup, eventID)
+			verified, err := targetDB.VerifyBundle(bundle, segmentRootLookup, eventID)
 			if err != nil {
 				log.Warn(log.Node, "fetchWorkPackageBundle: VerifyBundle errored", "err", err)
 				return types.WorkPackageBundle{}, fmt.Errorf("verify bundle failed: %w", err)
@@ -776,9 +818,8 @@ func (n *Node) fetchWorkPackageBundle(spec types.AvailabilitySpecifier, segmentR
 		}
 	}
 
-	// Slow path: call C138 to get bundle_shard from C assurers, do ec reconstruction for b
 	// IMPORTANT: within reconstructPackageBundleSegments is a call to VerifyBundle
-	workPackageBundle, err := n.reconstructPackageBundleSegments(spec, segmentRootLookup, coreIndex)
+	workPackageBundle, err := n.reconstructPackageBundleSegments(spec, segmentRootLookup, coreIndex, targetDB)
 	if err != nil {
 		return types.WorkPackageBundle{}, fmt.Errorf("reconstructPackageBundleSegments failed: %v", err)
 	}
@@ -802,7 +843,7 @@ func (n *Node) CheckBlockAudited(headerHash common.Hash, tranche uint32) (bool, 
 	if err != nil {
 		return false, err
 	}
-	announcementBucket, err := n.GetAnnounceBucketByTranche(tranche, headerHash)
+	announcementBucket, err := n.GetAuditAnnounceBucketByTranche(tranche, headerHash)
 	if err != nil {
 		return false, err
 	}
@@ -893,113 +934,161 @@ func (n *Node) TraceOldGuarantee(headerHash common.Hash, workpackage_hash common
 	return types.Guarantee{}, fmt.Errorf("TraceOldGuarantee: wp %v not found", workpackage_hash)
 }
 
-// getGuarantorsByHeaderHash returns the guarantor validator indices for a given header hash
-func (n *Node) getGuarantorsByHeaderHash(headerHash common.Hash) []uint16 {
+// getGuarantorsByHeaderHash returns the guarantor Ed25519 keys for a given header hash
+// We return pubkeys instead of indices because peer.PeerID is stale after epoch rotation
+func (n *Node) getGuarantorsByHeaderHash(headerHash common.Hash) []types.Ed25519Key {
 	// Get the StateDB for the specific header hash
 	statedb, ok := n.getStateDBByHeaderHash(headerHash)
 	if !ok {
 		log.Warn(log.Audit, "getGuarantorsByHeaderHash: StateDB not found for header", "headerHash", headerHash)
-		return []uint16{0}
+		return nil
 	}
 
-	// Extract guarantor indices from GuarantorAssignments
-	var guarantors []uint16
+	// Extract guarantor Ed25519 keys from GuarantorAssignments
+	var guarantors []types.Ed25519Key
 	for _, assignment := range statedb.GuarantorAssignments {
-		// Get validator index using GetCurrValidatorIndex
-		validatorIndex := statedb.GetSafrole().GetCurrValidatorIndex(assignment.Validator.GetEd25519Key())
-		guarantors = append(guarantors, uint16(validatorIndex))
+		guarantors = append(guarantors, assignment.Validator.GetEd25519Key())
 	}
-	log.Debug(log.Audit, "getGuarantorsByHeaderHash", "headerHash", headerHash, "guarantorCount", len(guarantors), "guarantors", guarantors)
+	log.Debug(log.Audit, "getGuarantorsByHeaderHash", "headerHash", headerHash, "guarantorCount", len(guarantors))
 	return guarantors
 }
 
-// every time we make an announcement, we should broadcast it to the network
+// every time we make an audit announcement, we should broadcast it to the network
 // announcement before judgement
-func (n *Node) MakeAnnouncement(headerHash common.Hash, tranche uint32, w []types.WorkReportSelection) (types.Announcement, error) {
+func (n *Node) MakeAuditAnnouncement(headerHash common.Hash, tranche uint32, w []types.WorkReportSelection) (types.AuditAnnouncement, error) {
 	ed25519Key := n.GetEd25519Key()
 	ed25519Priv := n.GetEd25519Secret()
 
 	auditing_statedb, err := n.getAuditingStateDB(headerHash)
 	if err != nil {
-		return types.Announcement{}, err
+		return types.AuditAnnouncement{}, err
 	}
 
 	index := auditing_statedb.GetSafrole().GetCurrValidatorIndex(ed25519Key)
-	announcement, err := auditing_statedb.MakeAnnouncement(tranche, w, ed25519Priv, uint32(index))
+	announcement, err := auditing_statedb.MakeAuditAnnouncement(tranche, w, ed25519Priv, uint32(index))
 	if err != nil {
-		return types.Announcement{}, err
+		return types.AuditAnnouncement{}, err
 	}
 	return announcement, nil
 }
 
-func (n *Node) MakeJudgement(workreport types.WorkReport, auditPass bool) (judgement types.Judgement, err error) {
+func (n *Node) MakeJudgementWithStateDB(workreport types.WorkReport, auditPass bool, sdb *statedb.StateDB) (judgement types.Judgement, err error) {
+	selfCurrentIdx := uint16(sdb.GetSafrole().GetCurrValidatorIndex(n.GetEd25519Key()))
 	judgement = types.Judgement{
 		Judge:          auditPass,
-		Validator:      n.id,
+		Validator:      selfCurrentIdx,
 		WorkReportHash: workreport.Hash(),
 	}
 	judgement.Sign(n.GetEd25519Secret())
 	return judgement, nil
 }
 
-// put it in the announcement bucket
+// put it in the audit announcement bucket
 // thus we can check if there is someone absent
-func (n *Node) processAnnouncement(announcement types.Announcement) error {
-	headerHash := announcement.HeaderHash
-	index := int(announcement.ValidatorIndex)
+func (n *Node) processAuditAnnouncement(auditAnnouncementObj AuditAnnouncementObj) error {
+	headerHash := auditAnnouncementObj.HeaderHash
 	s, err := n.getAuditingStateDB(headerHash)
 	if err != nil {
-		fmt.Printf("%s [audit:processAnnouncement] auditingDB not found %v\n", n.String(), headerHash)
-		return err
+		// Statedb not ready yet: stash for retry when auditing is initialized
+		n.waitingAuditAnnouncementsMutex.Lock()
+		if n.waitingAuditAnnouncements == nil {
+			n.waitingAuditAnnouncements = make(map[common.Hash][]AuditAnnouncementObj)
+		}
+		n.waitingAuditAnnouncements[headerHash] = append(n.waitingAuditAnnouncements[headerHash], auditAnnouncementObj)
+		n.waitingAuditAnnouncementsMutex.Unlock()
+		log.Debug(log.Audit, "processAuditAnnouncement: auditingDB not ready, queued for retry",
+			"n", n.String(), "headerHash", headerHash.String_short())
+		return nil
 	}
-	validator, err := s.GetSafrole().GetCurrValidator(index)
-	if err != nil {
-		return err
-	}
-	pubkey := validator.Ed25519
-	if !n.checkTrancheAnnouncement(headerHash) {
-		n.waitingAnnouncementsMutex.Lock()
-		defer n.waitingAnnouncementsMutex.Unlock()
-		if announcement.Tranche != 0 {
+	if !n.checkAuditTrancheAnnouncement(headerHash) {
+		n.waitingAuditAnnouncementsMutex.Lock()
+		defer n.waitingAuditAnnouncementsMutex.Unlock()
+		if auditAnnouncementObj.Tranche != 0 {
 			// means we enter this too late, no need to audit
 			return fmt.Errorf("header %v not found for auditing statedb", headerHash)
 		}
-		if n.waitingAnnouncements == nil {
-			n.waitingAnnouncements = make(map[common.Hash][]types.Announcement)
+		if n.waitingAuditAnnouncements == nil {
+			n.waitingAuditAnnouncements = make(map[common.Hash][]AuditAnnouncementObj)
 		}
-		n.waitingAnnouncements[headerHash] = append(n.waitingAnnouncements[headerHash], announcement)
-		log.Debug(log.Audit, "processAnnouncement waitingAnnouncements", "n", n.String(), "ts", s.Block.TimeSlot(), "validator", index, "headerHash", headerHash.String_short())
+		n.waitingAuditAnnouncements[headerHash] = append(n.waitingAuditAnnouncements[headerHash], auditAnnouncementObj)
+		log.Debug(log.Audit, "processAuditAnnouncement waitingAuditAnnouncements", "n", n.String(), "ts", s.Block.TimeSlot(), "headerHash", headerHash.String_short())
 		return nil
 	}
 
-	log.Debug(log.Audit, "processAnnouncement", "n", n.String(), "ts", s.Block.TimeSlot(), "validator", index, "headerHash", headerHash.String_short())
-	if err := announcement.Verify(pubkey); err != nil {
-		log.Warn(log.Audit, "processAnnouncement: announcement.Verify failed", "n", n.String(), "ts", s.Block.TimeSlot(), "validator", index, "headerHash", headerHash.String_short())
+	// Verify Bandersnatch evidence (deferred from onAuditAnnouncement to decouple network I/O from state availability)
+	if auditAnnouncementObj.Tranche == 0 {
+		if len(auditAnnouncementObj.EvidenceS0) > 0 {
+			ok, err := verifyBandersnatchS0(s, auditAnnouncementObj.BandersnatchKey, auditAnnouncementObj.EvidenceS0)
+			if err != nil {
+				return fmt.Errorf("processAuditAnnouncement: failed to verify evidenceS0: %w", err)
+			}
+			if !ok {
+				return fmt.Errorf("processAuditAnnouncement: evidenceS0 verification failed")
+			}
+		}
+	} else {
+		for _, evidence := range auditAnnouncementObj.EvidenceSN {
+			signature := evidence.Signature
+			if len(evidence.NoShows) == 0 {
+				return fmt.Errorf("processAuditAnnouncement: no shows are empty")
+			}
+			if len(evidence.NoShows[0].Reports) == 0 {
+				return fmt.Errorf("processAuditAnnouncement: no shows reports are empty")
+			}
+			workreportHash := evidence.NoShows[0].Reports[0].WorkReportHash
+			ok, err := verifyBandersnatchSN(s, auditAnnouncementObj.BandersnatchKey, workreportHash, signature[:], auditAnnouncementObj.Tranche)
+			if err != nil {
+				return fmt.Errorf("processAuditAnnouncement: failed to verify evidenceSN: %w", err)
+			}
+			if !ok {
+				return fmt.Errorf("processAuditAnnouncement: evidenceSN verification failed")
+			}
+		}
+	}
+
+	// Derive ValidatorIndex from Ed25519Key using the statedb (handles epoch rotation)
+	validatorIdx := s.GetSafrole().GetCurrValidatorIndex(auditAnnouncementObj.Ed25519Key)
+
+	// Convert AuditAnnouncementObj to types.AuditAnnouncement
+	auditAnnouncement := types.AuditAnnouncement{
+		HeaderHash:          auditAnnouncementObj.HeaderHash,
+		Tranche:             auditAnnouncementObj.Tranche,
+		Selected_WorkReport: auditAnnouncementObj.Selected_WorkReport,
+		ValidatorIndex:      uint32(validatorIdx),
+		Signature:           auditAnnouncementObj.Signature,
+	}
+
+	index := int(auditAnnouncement.ValidatorIndex)
+	log.Debug(log.Audit, "processAuditAnnouncement", "n", n.String(), "ts", s.Block.TimeSlot(), "validator", index, "headerHash", headerHash.String_short())
+
+	// Try to verify audit announcement signature against multiple validator sets (handles epoch rotation)
+	if err := n.verifyAuditAnnouncementSignature(s, auditAnnouncement); err != nil {
+		log.Warn(log.Audit, "processAuditAnnouncement: auditAnnouncement.Verify failed", "n", n.String(), "ts", s.Block.TimeSlot(), "validator", index, "headerHash", headerHash.String_short())
 		return err
 	}
 
-	n.updateKnownWorkReportMapping(announcement)
+	n.updateKnownWorkReportMapping(auditAnnouncement)
 
-	// Lock just around the read-modify-write section for announcementMap
-	var trancheAnnouncement *types.TrancheAnnouncement
-	n.announcementMapMutex.Lock()
-	trancheAnnouncement, err = n.getTrancheAnnouncement(headerHash)
+	// Lock just around the read-modify-write section for auditAnnouncementMap
+	var trancheAnnouncement *types.AuditTrancheAnnouncement
+	n.auditAnnouncementMapMutex.Lock()
+	trancheAnnouncement, err = n.getAuditTrancheAnnouncement(headerHash)
 	if err == nil {
 		// Make a copy before unlocking if PutAnnouncement mutates it
 		trancheAnnouncement = trancheAnnouncement.Clone()
 	}
-	n.announcementMapMutex.Unlock()
+	n.auditAnnouncementMapMutex.Unlock()
 
 	if err != nil {
-		fmt.Printf("%s [audit:processAnnouncement] trancheAnnouncement not found %v\n", n.String(), headerHash)
+		fmt.Printf("%s [audit:processAuditAnnouncement] auditTrancheAnnouncement not found %v\n", n.String(), headerHash)
 		return err
 	}
 
-	if err := trancheAnnouncement.PutAnnouncement(announcement); err != nil {
-		fmt.Printf("%s [audit:processAnnouncement] trancheAnnouncement.PutAnnouncement failed %v\n", n.String(), headerHash)
+	if err := trancheAnnouncement.PutAnnouncement(auditAnnouncement); err != nil {
+		fmt.Printf("%s [audit:processAuditAnnouncement] auditTrancheAnnouncement.PutAnnouncement failed %v\n", n.String(), headerHash)
 		return err
 	}
-	n.updateTrancheAnnouncement(headerHash, trancheAnnouncement)
+	n.updateAuditTrancheAnnouncement(headerHash, trancheAnnouncement)
 	return nil
 }
 
@@ -1009,7 +1098,7 @@ func (n *Node) processAnnouncement(announcement types.Announcement) error {
 // if so, we should make a dispute extrinsic by checking we have the judgement or not
 func (n *Node) processJudgement(judgement types.Judgement) error {
 	headerHash, err := n.getHeadHashFromWorkReportHash(judgement.WorkReportHash)
-	if !n.checkTrancheAnnouncement(headerHash) || err != nil {
+	if !n.checkAuditTrancheAnnouncement(headerHash) || err != nil {
 		n.waitingJudgementsMutex.Lock()
 		defer n.waitingJudgementsMutex.Unlock()
 		if n.waitingJudgements == nil {
@@ -1025,14 +1114,9 @@ func (n *Node) processJudgement(judgement types.Judgement) error {
 		return err
 	}
 
-	index := int(judgement.Validator)
-	validator, err := auditing_statedb.GetSafrole().GetCurrValidator(index)
-	if err != nil {
-		return err
-	}
-	pubkey := validator.Ed25519
-	err = judgement.Verify(pubkey)
-	if err != nil {
+	// Try to verify judgement signature against multiple validator sets
+	// The signer used their validator index at sign time, but we may have a different validator set now
+	if err := n.verifyJudgementSignature(auditing_statedb, judgement); err != nil {
 		return err
 	}
 	judgementBucket, err := n.getJudgementBucket(headerHash)
@@ -1041,7 +1125,9 @@ func (n *Node) processJudgement(judgement types.Judgement) error {
 	}
 	judgementBucket.PutJudgement(judgement)
 	if !judgement.Judge {
-		if judgementBucket.HaveMadeJudgementByValidator(judgement.WorkReportHash, uint16(n.GetCurrValidatorIndex())) {
+		// Use auditing_statedb to get validator index for this block's epoch
+		selfValidatorIdx := uint16(auditing_statedb.GetSafrole().GetCurrValidatorIndex(n.GetEd25519Key()))
+		if judgementBucket.HaveMadeJudgementByValidator(judgement.WorkReportHash, selfValidatorIdx) {
 			return nil
 		} else {
 			var audit_report types.WorkReport
@@ -1064,4 +1150,98 @@ func (n *Node) processJudgement(judgement types.Judgement) error {
 	}
 
 	return nil
+}
+
+func (n *Node) verifyAuditAnnouncementSignature(sdb *statedb.StateDB, auditAnnouncement types.AuditAnnouncement) error {
+	index := int(auditAnnouncement.ValidatorIndex)
+	safrole := sdb.GetSafrole()
+
+	// First, try the fast path: check if the index matches in current validator set
+	if index < len(safrole.CurrValidators) {
+		pubkey := safrole.CurrValidators[index].Ed25519
+		if err := auditAnnouncement.Verify(pubkey); err == nil {
+			log.Trace(log.Audit, "verifyAuditAnnouncementSignature: verified with CurrValidators[index]",
+				"validatorIdx", index, "pubKey", pubkey.String()[:16])
+			return nil
+		}
+	}
+
+	// Fast path failed - need to search ALL validators in ALL sets
+	// After rotation, the same pubkey may be at a different index
+
+	// Try all CurrValidators
+	for i, v := range safrole.CurrValidators {
+		if err := auditAnnouncement.Verify(v.Ed25519); err == nil {
+			log.Trace(log.Audit, "verifyAuditAnnouncementSignature: found in CurrValidators",
+				"claimedIdx", index, "actualIdx", i, "pubKey", v.Ed25519.String()[:16])
+			return nil
+		}
+	}
+
+	// Try all PrevValidators (for epoch boundary cases)
+	for i, v := range safrole.PrevValidators {
+		if err := auditAnnouncement.Verify(v.Ed25519); err == nil {
+			log.Trace(log.Audit, "verifyAuditAnnouncementSignature: found in PrevValidators",
+				"claimedIdx", index, "actualIdx", i, "pubKey", v.Ed25519.String()[:16])
+			return nil
+		}
+	}
+
+	// Try all NextValidators (for cases where epoch is about to change)
+	for i, v := range safrole.NextValidators {
+		if err := auditAnnouncement.Verify(v.Ed25519); err == nil {
+			log.Trace(log.Audit, "verifyAuditAnnouncementSignature: found in NextValidators",
+				"claimedIdx", index, "actualIdx", i, "pubKey", v.Ed25519.String()[:16])
+			return nil
+		}
+	}
+
+	return fmt.Errorf("invalid signature by signature %q", auditAnnouncement.Signature)
+}
+
+func (n *Node) verifyJudgementSignature(sdb *statedb.StateDB, judgement types.Judgement) error {
+	index := int(judgement.Validator)
+	safrole := sdb.GetSafrole()
+
+	// First, try the fast path: check if the index matches in current validator set
+	if index < len(safrole.CurrValidators) {
+		pubkey := safrole.CurrValidators[index].Ed25519
+		if err := judgement.Verify(pubkey); err == nil {
+			log.Trace(log.Audit, "verifyJudgementSignature: verified with CurrValidators[index]",
+				"validatorIdx", index, "pubKey", pubkey.String()[:16])
+			return nil
+		}
+	}
+
+	// Fast path failed - need to search ALL validators in ALL sets
+	// After rotation, the same pubkey may be at a different index
+
+	// Try all CurrValidators
+	for i, v := range safrole.CurrValidators {
+		if err := judgement.Verify(v.Ed25519); err == nil {
+			log.Trace(log.Audit, "verifyJudgementSignature: found in CurrValidators",
+				"claimedIdx", index, "actualIdx", i, "pubKey", v.Ed25519.String()[:16])
+			return nil
+		}
+	}
+
+	// Try all PrevValidators (for epoch boundary cases)
+	for i, v := range safrole.PrevValidators {
+		if err := judgement.Verify(v.Ed25519); err == nil {
+			log.Trace(log.Audit, "verifyJudgementSignature: found in PrevValidators",
+				"claimedIdx", index, "actualIdx", i, "pubKey", v.Ed25519.String()[:16])
+			return nil
+		}
+	}
+
+	// Try all NextValidators (for cases where epoch is about to change)
+	for i, v := range safrole.NextValidators {
+		if err := judgement.Verify(v.Ed25519); err == nil {
+			log.Trace(log.Audit, "verifyJudgementSignature: found in NextValidators",
+				"claimedIdx", index, "actualIdx", i, "pubKey", v.Ed25519.String()[:16])
+			return nil
+		}
+	}
+
+	return fmt.Errorf("invalid signature by validator %d", index)
 }

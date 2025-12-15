@@ -59,6 +59,10 @@ func (k Ed25519Key) String() string {
 	return common.Hash(k).Hex()
 }
 
+func (k Ed25519Key) ShortString() string {
+	return common.Hash(k).Hex()[:10]
+}
+
 func (pk Ed25519Key) Bytes() []byte {
 	return pk[:]
 }

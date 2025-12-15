@@ -602,7 +602,7 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		Results:           results,
 		AuthGasUsed:       uint(authGasUsed),
 	}
-	log.Trace(log.Node, "executeWorkPackageBundle", "backend", pvmBackend, "role", vmLogging, "workreport", workReport.String())
+	log.Trace(log.Node, "executeWorkPackageBundle", "backend", pvmBackend, "role", vmLogging, "reportHash", workReport.Hash(), "workreport", workReport.AvailabilitySpec.String())
 
 	s.GetStorage().GetJAMDA().StoreBundleSpecSegments(spec, d, package_bundle, segments)
 
@@ -727,6 +727,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 
 	results := []types.WorkDigest{}
 	contractWitnessBlobs := make([][]byte, len(wp.WorkItems)) // Store contract witness blobs for later application
+	var segments [][]byte                                     // Collect all exported segments for storage
 
 	for index, workItem := range wp.WorkItems {
 		code, ok, err0 := s.ReadServicePreimageBlob(workItem.Service, workItem.CodeHash)
@@ -833,7 +834,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 		}
 
 		// Append exported segments (append slice directly)
-		//segments = append(segments, exported_segments...)
+		segments = append(segments, exported_segments...)
 
 		// Calculate total extrinsic bytes
 		totalExtrinsicBytes := 0
@@ -889,6 +890,22 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 				return &bundle, workReport, fmt.Errorf("failed to apply contract writes for work item %d: %v", i, err)
 			}
 			log.Trace(log.EVM, "Applied contract writes to state", "workItemIndex", i, "blobSize", len(blob))
+		}
+	}
+
+	// Store exported segments in JAMDA if the implementation supports a builder cache.
+	if len(segments) > 0 {
+		workPackageHash := wp.Hash()
+		type segmentStorer interface {
+			StoreSegment(common.Hash, uint16, []byte)
+		}
+		if storer, ok := s.GetStorage().GetJAMDA().(segmentStorer); ok {
+			for segmentIdx, segmentData := range segments {
+				storer.StoreSegment(workPackageHash, uint16(segmentIdx), segmentData)
+			}
+			log.Trace(log.DA, "Stored exported segments in JAMDA", "workPackageHash", workPackageHash.Hex(), "numSegments", len(segments))
+		} else {
+			log.Warn(log.DA, "JAMDA does not support StoreSegment", "type", fmt.Sprintf("%T", s.GetStorage().GetJAMDA()))
 		}
 	}
 

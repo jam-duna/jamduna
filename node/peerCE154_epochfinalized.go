@@ -60,14 +60,14 @@ func (p *Peer) SendEpochFinalized(ctx context.Context, epochFinalized JAMEpochFi
 		return fmt.Errorf("WarpSyncRequest.ToBytes failed: %w", err)
 	}
 
-	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
 		return fmt.Errorf("sendQuicBytes[CE154_EpochFinalized] failed: %w", err)
 	}
 
 	return nil
 }
 
-func (n *Node) onEpochFinalized(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
+func (n *Node) onEpochFinalized(ctx context.Context, stream quic.Stream, msg []byte, peerKey string) error {
 	defer stream.Close()
 
 	// Decode: Epoch ++ BeefyHash ++ BLS Signature

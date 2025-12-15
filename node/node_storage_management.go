@@ -122,7 +122,6 @@ func (n *NodeContent) StoreBundleSpecSegments(as *types.AvailabilitySpecifier, d
 	}
 }
 
-
 // Verification: CE137_FullShard
 func VerifyFullShard(erasureRoot common.Hash, shardIndex uint16, bundleShard []byte, exported_segments_and_proofpageShards []byte, encodedPath []byte) (bool, error) {
 	bClub := common.Blake2Hash(bundleShard)
@@ -217,6 +216,11 @@ func (n *NodeContent) StoreAuditDA_Assurer(erasureRoot common.Hash, shardIndex u
 }
 
 func (n *NodeContent) StoreWorkReport(wr types.WorkReport) error {
+	// Once availability info exists, drop any builder-cached segments for this work package
+	n.builderSegmentsMu.Lock()
+	delete(n.builderSegments, wr.AvailabilitySpec.WorkPackageHash)
+	n.builderSegmentsMu.Unlock()
+
 	return n.store.StoreWorkReport(&wr)
 }
 

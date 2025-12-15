@@ -135,14 +135,14 @@ func (p *Peer) SendJudgmentPublication(ctx context.Context, epoch uint32, j type
 	}
 	defer stream.Close()
 
-	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
 		return fmt.Errorf("sendQuicBytes[CE145_JudgmentPublication]: %w", err)
 	}
 	return nil
 }
 
 // Node has received a JudgementPublication message to act on
-func (n *Node) onJudgmentPublication(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
+func (n *Node) onJudgmentPublication(ctx context.Context, stream quic.Stream, msg []byte, peerKey string) error {
 	defer stream.Close()
 
 	var jp JAMSNPJudgmentPublication
@@ -158,7 +158,7 @@ func (n *Node) onJudgmentPublication(ctx context.Context, stream quic.Stream, ms
 	}
 	copy(judgement.Signature[:], jp.Signature[:])
 
-	n.peersInfo[peerID].AddKnownHash(judgement.Hash())
+	n.peersByPubKey[peerKey].AddKnownHash(judgement.Hash())
 	go n.broadcast(ctx, judgement)
 
 	select {
@@ -166,13 +166,13 @@ func (n *Node) onJudgmentPublication(ctx context.Context, stream quic.Stream, ms
 		// success
 	case <-ctx.Done():
 		log.Warn(log.Node, "onJudgmentPublication: context canceled before sending judgement",
-			"peerID", peerID,
+			"peerKey", peerKey,
 			"workReportHash", jp.WorkReportHash.String_short(),
 			"validator", jp.ValidatorIndex)
 		return ctx.Err()
 	default:
 		log.Warn(log.Node, "onJudgmentPublication: judgementsCh full, dropping judgement",
-			"peerID", peerID,
+			"peerKey", peerKey,
 			"workReportHash", jp.WorkReportHash.String_short(),
 			"validator", jp.ValidatorIndex)
 	}

@@ -176,14 +176,14 @@ func (p *Peer) SendWorkReportDistribution(
 	log.Debug(log.G, "onWorkReportDistribution OUTGOING SPEC", "workReport", wr.AvailabilitySpec.String())
 	log.Debug(log.G, "onWorkReportDistribution OUTGOING REPORT", "workReport", wr.String())
 
-	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
 		return fmt.Errorf("sendQuicBytes[CE135_WorkReportDistribution]: %w", err)
 	}
 
 	return nil
 }
 
-func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
+func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream, msg []byte, peerKey string) error {
 	defer stream.Close()
 	var newReq JAMSNPWorkReport
 	if err := newReq.FromBytes(msg); err != nil {
@@ -209,7 +209,7 @@ func (n *Node) onWorkReportDistribution(ctx context.Context, stream quic.Stream,
 
 	log.Trace(log.G, "onWorkReportDistribution INCOMING SPEC",
 		"n", n.String(),
-		"peerID", peerID,
+		"peerKey", peerKey,
 		"workPackageHash", workReport.GetWorkPackageHash(),
 		"workReportHash", workReport.Hash(),
 		"spec", workReport.AvailabilitySpec.String(),

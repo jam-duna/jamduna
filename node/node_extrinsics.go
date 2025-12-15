@@ -31,20 +31,42 @@ func (n *Node) processTicket(ticket types.Ticket) error {
 	return nil // Success
 }
 
-func (n *Node) processAssurance(assurance types.Assurance) error {
-	// Store the assurance in the tip's queued assurances
-	// Validate the assurance signature
+func (n *Node) processAssurance(assuranceObj AssuranceObject) error {
+	if _, ok := n.statedbMap[assuranceObj.Anchor]; !ok {
+		return fmt.Errorf("processAssurance: unknown anchor %s", assuranceObj.Anchor.Hex())
+	}
+	var assurance types.Assurance
+	assurance.Anchor = assuranceObj.Anchor
+	assurance.Bitfield = assuranceObj.Bitfield
+	assurance.Signature = assuranceObj.Signature
+	var err error
+	assurance.ValidatorIndex, err = n.findValidatorIndexByAnchor(assurance.Anchor, assuranceObj.Ed25519Key)
+	if err != nil {
+		return fmt.Errorf("processAssurance: findValidatorIndexByAnchor: %w", err)
+	}
 	if len(assurance.Signature) == 0 {
 		return fmt.Errorf("no assurance signature")
 	}
 
+	n.statedbMapMutex.Lock()
+	anchorStateDB, hasAnchorState := n.statedbMap[assurance.Anchor]
+	n.statedbMapMutex.Unlock()
+
+	var verifyStateDB *statedb.StateDB
+	if hasAnchorState {
+		verifyStateDB = anchorStateDB
+	} else {
+		// not sure if we should ever get here...
+		verifyStateDB = n.statedb
+	}
+
 	// Check the assurance validity
-	if err := n.statedb.CheckIncomingAssurance(&assurance); err != nil {
+	if err := verifyStateDB.CheckIncomingAssurance(&assurance); err != nil {
 		return err
 	}
 
 	// store it into extrinsic pool
-	err := n.extrinsic_pool.AddAssuranceToPool(assurance)
+	err = n.extrinsic_pool.AddAssuranceToPool(assurance)
 	if err != nil {
 		log.Error(log.A, "processAssurance:AddAssuranceToPool", "err", err)
 	}

@@ -57,12 +57,12 @@ func (p *Peer) SendPreimageAnnouncement(ctx context.Context, pa *types.PreimageA
 
 	// Telemetry: Preimage announced (event 191) - sending side
 	connectionSide := byte(0) // Local is announcer
-	p.node.telemetryClient.PreimageAnnounced(p.GetPeer32(), connectionSide, pa.ServiceIndex, pa.PreimageHash, pa.PreimageLen)
+	p.node.telemetryClient.PreimageAnnounced(p.PeerKey(), connectionSide, pa.ServiceIndex, pa.PreimageHash, pa.PreimageLen)
 
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
 		// Telemetry: Preimage announcement failed (event 190)
-		p.node.telemetryClient.PreimageAnnouncementFailed(p.GetPeer32(), connectionSide, err.Error())
+		p.node.telemetryClient.PreimageAnnouncementFailed(p.PeerKey(), connectionSide, err.Error())
 		return fmt.Errorf("openStream[CE142_PreimageAnnouncement]: %w", err)
 	}
 	defer stream.Close()
@@ -70,41 +70,42 @@ func (p *Peer) SendPreimageAnnouncement(ctx context.Context, pa *types.PreimageA
 	paBytes, err := pa.ToBytes()
 	if err != nil {
 		// Telemetry: Preimage announcement failed (event 190)
-		p.node.telemetryClient.PreimageAnnouncementFailed(p.GetPeer32(), connectionSide, err.Error())
+		p.node.telemetryClient.PreimageAnnouncementFailed(p.PeerKey(), connectionSide, err.Error())
 		return fmt.Errorf("ToBytes[CE142_PreimageAnnouncement]: %w", err)
 	}
 
-	if err := sendQuicBytes(ctx, stream, paBytes, p.PeerID, code); err != nil {
+	if err := sendQuicBytes(ctx, stream, paBytes, p.Validator.Ed25519.String(), code); err != nil {
 		// Telemetry: Preimage announcement failed (event 190)
-		p.node.telemetryClient.PreimageAnnouncementFailed(p.GetPeer32(), connectionSide, err.Error())
+		p.node.telemetryClient.PreimageAnnouncementFailed(p.PeerKey(), connectionSide, err.Error())
 		return fmt.Errorf("sendQuicBytes[CE142_PreimageAnnouncement]: %w", err)
 	}
 
 	return nil
 }
 
-func (n *Node) onPreimageAnnouncement(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
+func (n *Node) onPreimageAnnouncement(ctx context.Context, stream quic.Stream, msg []byte, peerKey string) error {
 	defer stream.Close()
 
 	// Telemetry: Preimage announced (event 191) - receiving side
 	connectionSide := byte(1) // Remote is announcer
 
+	// Get peer to access its PeerID for telemetry
+	p, ok := n.peersByPubKey[peerKey]
+	if !ok {
+		return fmt.Errorf("onPreimageAnnouncement: peer not found for key %s", peerKey)
+	}
+
 	var preimageAnnouncement types.PreimageAnnouncement
 	if err := preimageAnnouncement.FromBytes(msg); err != nil {
 		log.Error(log.P, "onPreimageAnnouncement: failed to decode", "err", err)
 		// Telemetry: Preimage announcement failed (event 190)
-		n.telemetryClient.PreimageAnnouncementFailed(n.PeerID32(peerID), connectionSide, err.Error())
+		n.telemetryClient.PreimageAnnouncementFailed(PubkeyBytes(p.Validator.Ed25519.String()), connectionSide, err.Error())
 		stream.CancelRead(ErrInvalidData)
 		return fmt.Errorf("onPreimageAnnouncement: decode failed: %w", err)
 	}
 
 	// Telemetry: Preimage announced (event 191)
-	n.telemetryClient.PreimageAnnounced(n.PeerID32(peerID), connectionSide, preimageAnnouncement.ServiceIndex, preimageAnnouncement.PreimageHash, preimageAnnouncement.PreimageLen)
-
-	p, ok := n.peersInfo[peerID]
-	if !ok {
-		return fmt.Errorf("invalid validator index %d", peerID)
-	}
+	n.telemetryClient.PreimageAnnounced(PubkeyBytes(p.Validator.Ed25519.String()), connectionSide, preimageAnnouncement.ServiceIndex, preimageAnnouncement.PreimageHash, preimageAnnouncement.PreimageLen)
 
 	serviceIndex := preimageAnnouncement.ServiceIndex
 	preimageHash := preimageAnnouncement.PreimageHash
@@ -122,7 +123,7 @@ func (n *Node) onPreimageAnnouncement(ctx context.Context, stream quic.Stream, m
 	}
 	log.Trace(log.Node, "BroadcastPreimageAnnouncement:AddPreimageToPool", "n", n.String(), "serviceID", serviceIndex, "len", len(preimage), "h", common.Blake2Hash(preimage))
 	// received a preimage announcement, mark it as known
-	n.peersInfo[peerID].AddKnownHash(preimageAnnouncement.PreimageHash)
+	n.peersByPubKey[peerKey].AddKnownHash(preimageAnnouncement.PreimageHash)
 	// broadcast the preimage announcement to other peers
 	go n.broadcast(ctx, preimageAnnouncement)
 
@@ -157,7 +158,7 @@ func (p *Peer) SendPreimageRequest(ctx context.Context, preimageHash common.Hash
 
 	// Telemetry: Sending preimage request (event 193)
 	eventID := p.node.telemetryClient.GetEventID()
-	p.node.telemetryClient.SendingPreimageRequest(p.GetPeer32(), preimageHash)
+	p.node.telemetryClient.SendingPreimageRequest(p.PeerKey(), preimageHash)
 
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
@@ -168,7 +169,7 @@ func (p *Peer) SendPreimageRequest(ctx context.Context, preimageHash common.Hash
 
 	// --> Hash
 	respBytes := preimageHash.Bytes()
-	if err := sendQuicBytes(ctx, stream, respBytes, p.PeerID, code); err != nil {
+	if err := sendQuicBytes(ctx, stream, respBytes, p.Validator.Ed25519.String(), code); err != nil {
 		// Telemetry: Preimage request failed (event 195)
 		p.node.telemetryClient.PreimageRequestFailed(eventID, err.Error())
 		return nil, fmt.Errorf("sendQuicBytes[CE143_PreimageRequest]: %w", err)
@@ -180,7 +181,7 @@ func (p *Peer) SendPreimageRequest(ctx context.Context, preimageHash common.Hash
 	// --> FIN
 	stream.Close()
 
-	preimage, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
+	preimage, err := receiveQuicBytes(ctx, stream, p.Validator.Ed25519.String(), code)
 	if err != nil {
 		// Telemetry: Preimage request failed (event 195)
 		p.node.telemetryClient.PreimageRequestFailed(eventID, err.Error())
@@ -219,7 +220,7 @@ func (n *NodeContent) onPreimageRequest(ctx context.Context, stream quic.Stream,
 	code := uint8(CE143_PreimageRequest)
 
 	respBytes := preimage.Blob
-	if err := sendQuicBytes(ctx, stream, respBytes, n.id, code); err != nil {
+	if err := sendQuicBytes(ctx, stream, respBytes, n.GetEd25519Key().String(), code); err != nil {
 		stream.CancelWrite(ErrCECode)
 		// Telemetry: Preimage request failed (event 195)
 		n.telemetryClient.PreimageRequestFailed(eventID, err.Error())

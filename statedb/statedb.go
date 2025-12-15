@@ -104,14 +104,37 @@ func (s *StateDB) ProcessIncomingJudgement(j types.Judgement) {
 }
 
 func (s *StateDB) CheckIncomingAssurance(a *types.Assurance) (err error) {
-	cred, err := s.GetSafrole().GetCurrValidator(int(a.ValidatorIndex))
-	if err != nil {
-		log.Error(log.SDB, "CheckIncomingAssurance: Invalid validator index", "err", err)
-		return err
+	safrole := s.GetSafrole()
+
+	anchorSlot, ok := s.AncestorSet[a.Anchor]
+	if !ok {
+		anchorSlot = safrole.Timeslot
 	}
+
+	anchorEpoch, _ := safrole.EpochAndPhase(anchorSlot)
+	currEpoch, _ := safrole.EpochAndPhase(safrole.Timeslot)
+
+	pubKey, ok := safrole.GetValidatorPubKeyAtTimeSlot(a.ValidatorIndex, anchorSlot)
+	if !ok {
+		log.Error(log.SDB, "CheckIncomingAssurance: Invalid validator index", "validatorIdx", a.ValidatorIndex, "anchorSlot", anchorSlot, "currSlot", safrole.Timeslot, "anchorEpoch", anchorEpoch, "currEpoch", currEpoch)
+		return fmt.Errorf("validator pubkey not found for index %d at slot %d", a.ValidatorIndex, anchorSlot)
+	}
+
+	// DEBUG: Log verification key details for baseline comparison
+	// log.Info(log.SDB, "CheckIncomingAssurance DEBUG",
+	// 	"validatorIdx", a.ValidatorIndex,
+	// 	"pubKeyUsedForVerify", pubKey.String()[:16],
+	// 	"anchorSlot", anchorSlot,
+	// 	"anchorEpoch", anchorEpoch,
+	// 	"anchorPhase", anchorPhase,
+	// 	"currSlot", safrole.Timeslot,
+	// 	"currEpoch", currEpoch,
+	// 	"currPhase", currPhase)
+
+	cred := types.Validator{Ed25519: pubKey}
 	err = a.VerifySignature(cred)
 	if err != nil {
-		log.Error(log.SDB, "CheckIncomingAssurance: Invalid Assurance", "err", err)
+		log.Error(log.SDB, "CheckIncomingAssurance: Invalid Assurance", "err", err, "anchorSlot", anchorSlot, "currSlot", safrole.Timeslot, "validatorIdx", a.ValidatorIndex, "pubKey", pubKey.String()[:16], "anchorEpoch", anchorEpoch, "currEpoch", currEpoch)
 		return
 	}
 	return nil
@@ -337,6 +360,12 @@ func (s *StateDB) InitTrieAndLoadJamState(stateRoot common.Hash) error {
 	d.SetAccumulateQueue(states[13])           // C14
 	d.SetAccumulateHistory(states[14])         // C15
 	d.SetAccumulateOutputs(states[15])         // C16
+
+	// Ensure SafroleState pointer is initialized if it's still nil
+	if d.SafroleState == nil {
+		d.SafroleState = NewSafroleState()
+	}
+
 	s.SetJamState(d)
 
 	// Because we have safrolestate as internal state, JamState is NOT enough.
@@ -603,7 +632,6 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 			// Telemetry: Authoring (event 40) - Block authoring begins
 			authoringEventID := telemetryClient.GetEventID(s.HeaderHash)
 			telemetryClient.Authoring(targetJCE, s.HeaderHash)
-
 			proposedBlk, err := s.MakeBlock(ctx, credential, targetJCE, ticketID, extrinsic_pool)
 			if err != nil {
 				// Telemetry: AuthoringFailed (event 41) - Block authoring failed
@@ -665,8 +693,7 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 				mode = "fallback"
 			}
 			log.Info(log.SDB, "Authored Block",
-				"n", s.Id,
-				"AUTHOR", s.Id,
+				"AUTHOR", proposedBlk.Header.AuthorIndex,
 				"s+", newStateDB.StateRoot.String_short(),
 				"p", common.Str(proposedBlk.GetParentHeaderHash()),
 				//"s", common.Str(proposedBlk.Header.ParentStateRoot),
@@ -823,6 +850,7 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block, sf0 *SafroleState) (isValid
 				}
 				fmt.Printf("%s validator %d : %v\n", marker, i, v)
 			}
+			// print previous
 			return false, validatorIdx, block_author_ietf_pub, fmt.Errorf("VerifyBlockHeader Failed: FallbackMode ValidatorKeyMismatch")
 		}
 		c = append([]byte(types.X_F), blockSealEntropy.Bytes()...)

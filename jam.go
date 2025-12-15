@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/binary"
 	"encoding/json"
 	"reflect"
 	"runtime"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/colorfulnotion/jam/chainspecs"
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/grandpa"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/node"
 	"github.com/colorfulnotion/jam/statedb"
@@ -105,7 +105,7 @@ func main() {
 		Short: "Generate keys for validators, pls generate keys for all validators before running the node",
 		Run: func(cmd *cobra.Command, args []string) {
 			// Generate keys for validators
-			_, _, err := GenerateValidatorSecretSet(types.TotalValidators, true, dataPath)
+			_, _, err := grandpa.GenerateValidatorSecretSetToPath(types.TotalValidators, true, dataPath)
 			if err != nil {
 				fmt.Printf("Error generating keys: %s", err)
 				os.Exit(1)
@@ -134,7 +134,7 @@ func main() {
 				}
 				seed = seed[:32]
 
-				validator, err := generateSelfValidatorPubKey(seed)
+				validator, err := grandpa.GenerateValidatorPubKeyFromSeed(seed)
 				if err != nil {
 					fmt.Printf("Error generating validator from seed: %s\n", err)
 					os.Exit(1)
@@ -448,7 +448,7 @@ func CheckValidatorInfo(validatorIndex int, peerList map[uint16]*node.Peer, data
 	}
 	seed = seed[:32]
 	// generate the validator from the seed
-	selfSecrets, err := statedb.InitValidatorSecret(seed, seed, seed, []byte{})
+	selfSecrets, err := grandpa.InitValidatorSecret(seed, seed, seed, []byte{})
 	if err != nil {
 		fmt.Printf("CheckValidatorInfo err %v\n", err)
 		os.Exit(1)
@@ -463,85 +463,6 @@ func CheckValidatorInfo(validatorIndex int, peerList map[uint16]*node.Peer, data
 	return selfSecrets
 }
 
-func GenerateValidatorSecretSet(numNodes int, save bool, dataDir ...string) ([]types.Validator, []types.ValidatorSecret, error) {
-
-	seeds, _ := generateSeedSet(numNodes)
-	validators := make([]types.Validator, numNodes)
-	validatorSecrets := make([]types.ValidatorSecret, numNodes)
-
-	for i := 0; i < int(numNodes); i++ {
-
-		seed_i := seeds[i]
-		if len(dataDir) != 0 {
-			keyDir := dataDir[0]
-			keyDir = filepath.Join(keyDir, "keys") // store the keys in a subdir
-			// if there is no seed file, create it
-			if err := os.MkdirAll(keyDir, 0700); err != nil {
-				return validators, validatorSecrets, fmt.Errorf("failed to create keys directory %s: %v", dataDir, err)
-			}
-			if save {
-				seedFile := filepath.Join(keyDir, fmt.Sprintf("seed_%d", i))
-
-				if _, err := os.Stat(seedFile); os.IsNotExist(err) {
-					// create the file
-					f, err := os.Create(seedFile)
-					if err != nil {
-						return validators, validatorSecrets, fmt.Errorf("failed to create seed file %s", seedFile)
-					}
-					// write the seed to the file
-					_, err = f.Write(seed_i)
-					if err != nil {
-						return validators, validatorSecrets, fmt.Errorf("failed to write seed to file %s", seedFile)
-					}
-					fmt.Printf("Seed file %s created\n", seedFile)
-					f.Close()
-				}
-
-			}
-		}
-
-		bandersnatch_seed := seed_i
-		ed25519_seed := seed_i
-		bls_seed := seed_i
-		metadata := []byte{}
-		//metadata, _ := generateMetadata(i) // this is NOT used by other teams. somehow we agreed on empty metadata for now
-
-		validator, err := statedb.InitValidator(bandersnatch_seed, ed25519_seed, bls_seed, metadata)
-		if err != nil {
-			return validators, validatorSecrets, fmt.Errorf("failed to init validator %v", i)
-		}
-		validators[i] = validator
-
-		//bandersnatch_seed, ed25519_seed, bls_seed
-		validatorSecret, err := statedb.InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed, metadata)
-		if err != nil {
-			return validators, validatorSecrets, fmt.Errorf("failed to init validator secret=%v", i)
-		}
-		validatorSecrets[i] = validatorSecret
-	}
-
-	return validators, validatorSecrets, nil
-}
-func generateSelfValidatorPubKey(seed []byte) (types.Validator, error) {
-	// Generate the validator public key from the seed
-	validator, err := statedb.InitValidator(seed, seed, seed, []byte{})
-	if err != nil {
-		return types.Validator{}, fmt.Errorf("failed to init validator %v", err)
-	}
-	return validator, nil
-}
-
-func generateSeedSet(ringSize int) ([][]byte, error) {
-	ringSet := make([][]byte, ringSize)
-	for i := uint32(0); i < uint32(ringSize); i++ {
-		seed := make([]byte, 32)
-		for j := 0; j < 8; j++ {
-			binary.LittleEndian.PutUint32(seed[j*4:], i)
-		}
-		ringSet[i] = seed
-	}
-	return ringSet, nil
-}
 func StartRuntimeMonitor(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {

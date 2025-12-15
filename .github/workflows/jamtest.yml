@@ -10,16 +10,16 @@ on:
   push:
     branches:
       - main
-  # Run both algo_node every 15 minutes
+  # Run both evm_node every 15 minutes
   schedule:
     - cron: "0 * * * *"
   workflow_dispatch:
 
 jobs:
   run-evm-tests:
-    name: Run algo_node
+    name: Run evm_node
     runs-on: self-hosted
-    timeout-minutes: 60
+    timeout-minutes: 50
 
     steps:
       - name: Checkout repository
@@ -79,17 +79,17 @@ jobs:
           echo "Listing PVM files:"
           find services -name "*.pvm" || true
 
-      - name: Run algo_node
+      - name: Run evm_node
         working-directory: ${{ github.workspace }}/node
         run: |
-          echo "Running make algo_node 3 times..."
-          for i in {1..10}; do
+          echo "Running make evm_node 2 times..."
+          for i in {1..4}; do
             echo "=== Run $i ==="
-            make algo_node
+            make evm_node_interpreter
           done
 
 
       - name: Done
-        run: echo "algo_node completed successfully."
+        run: echo "evm_node completed successfully."
 
 

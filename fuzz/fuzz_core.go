@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/grandpa"
 	"github.com/colorfulnotion/jam/jamerrors"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
@@ -262,7 +263,7 @@ func (f *Fuzzer) FuzzWithTargetedInvalidRateWithOptions(modes []string, stfs []*
 	validateInput := false
 	for _, stf := range stfs {
 		if validateInput {
-			diffs, stfErr := statedb.CheckStateTransitionWithOutput(store, stf, nil, f.pvmBackend, false)
+			diffs, stfErr := statedb.CheckStateTransitionWithOutput(store, stf, nil, f.pvmBackend, false, "")
 			if stfErr != nil {
 				statedb.HandleDiffs(diffs)
 				return nil, fmt.Errorf("invalid base STF provided: %v | %v", stfErr, stf.ToJSON())
@@ -347,7 +348,7 @@ func (f *Fuzzer) FuzzWithTargetedInvalidRate(modes []string, stfs []*statedb.Sta
 	validateInput := false
 	for _, stf := range stfs {
 		if validateInput {
-			diffs, stfErr := statedb.CheckStateTransitionWithOutput(store, stf, nil, f.pvmBackend, false)
+			diffs, stfErr := statedb.CheckStateTransitionWithOutput(store, stf, nil, f.pvmBackend, false, "")
 			if stfErr != nil {
 				statedb.HandleDiffs(diffs)
 				return nil, fmt.Errorf("invalid base STF provided: %v | %v", stfErr, stf.ToJSON())
@@ -576,7 +577,7 @@ func selectAllImportBlocksErrors(seed []byte, store types.JAMStorage, modes []st
 
 	errorList := make([]error, 0)
 	expectedNumNodes := 6
-	validators, validatorSecrets, err := statedb.GenerateValidatorSecretSet(expectedNumNodes)
+	validators, validatorSecrets, err := grandpa.GenerateValidatorSecretSet(expectedNumNodes)
 	//TODO: extract out validatorSet from stf.PreState and make sure sure validatorSecrets and validators are equal in size, opposed to hardcode numNodes
 	if len(validatorSecrets) != expectedNumNodes || len(validators) != expectedNumNodes || err != nil {
 		fmt.Printf("Invalid V(TotalValidators) | Expected=%v Found=%v\n", expectedNumNodes, len(validatorSecrets))

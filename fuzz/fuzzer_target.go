@@ -310,7 +310,7 @@ func (t *Target) onImportBlock(req *types.Block) *Message {
 	stateCopy := preState.Copy()
 
 	startTime := time.Now()
-	postState, jamErr := statedb.ApplyStateTransitionFromBlock(0, stateCopy, context.Background(), req, nil, pvmBackend)
+	postState, jamErr := statedb.ApplyStateTransitionFromBlock(0, stateCopy, context.Background(), req, nil, pvmBackend, "")
 	transitionDuration := time.Since(startTime)
 
 	if jamErr != nil {

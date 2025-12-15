@@ -132,6 +132,7 @@ func (n *Node) GetJAMSNPBlockAnnouncementFromHeader(header types.BlockHeader) (J
 	if n.block_tree == nil {
 		finalized_block.HeaderHash = common.Hash{}
 		finalized_block.Slot = 0
+		log.Warn(log.B, "GetLatestHandshake: block_tree is nil")
 	} else {
 		finalized_block.HeaderHash = finalized.Header.Hash()
 		finalized_block.Slot = finalized.Header.Slot
@@ -146,56 +147,81 @@ func (n *Node) GetJAMSNPBlockAnnouncementFromHeader(header types.BlockHeader) (J
 // this function is called by the node to send a block announcement to a peer
 // it will either init a new stream or use an existing stream
 func (p *Peer) GetOrInitBlockAnnouncementStream(ctx context.Context) (quic.Stream, error) {
+	n := p.node
+	peerKeyStr := p.Validator.Ed25519.String()
+	peerKey := p.Validator.Ed25519.ShortString()
+	selfKey := n.GetEd25519Key().ShortString()
+
+	// First check if we have an existing stream (outbound or inbound)
+	n.UP0_streamMu.Lock()
+	if existingStream, exist := n.UP0_stream[peerKeyStr]; exist && existingStream != nil {
+		log.Trace(log.B, "UP0_stream reuse outbound", "node", n.id, "self", selfKey, "peerKey", peerKey)
+		n.UP0_streamMu.Unlock()
+		return existingStream, nil
+	}
+	if existingStream, exist := n.UP0_inbound_stream[peerKeyStr]; exist && existingStream != nil {
+		log.Trace(log.B, "UP0_stream reuse inbound", "node", n.id, "self", selfKey, "peerKey", peerKey)
+		n.UP0_streamMu.Unlock()
+		return existingStream, nil
+	}
+	n.UP0_streamMu.Unlock()
+
+	// No existing stream, need to dial and create one
 	p.connectionMu.Lock()
 	conn := p.conn
 	p.connectionMu.Unlock()
-	n := p.node
 	var err error
 	if conn == nil {
 		p.conn, err = quic.DialAddr(ctx, p.PeerAddr, p.node.clientTLSConfig, GenerateQuicConfig())
 
-		log.Trace(log.B, "Dial From Up0", "peer", p.PeerID, "err", err)
+		log.Trace(log.B, "Dial From Up0", "peerKey", p.Validator.Ed25519.ShortString(), "err", err)
 		if p.conn != nil {
 			negotiatedProto := p.conn.ConnectionState().TLS.NegotiatedProtocol
 			log.Trace(log.Quic, "Client connected", "protocol", negotiatedProto)
 		}
 		if err != nil {
 			log.Error(log.Node, "GetOrInitBlockAnnouncementStream", "err", err)
-			n.UP0_streamMu.Lock()
-			delete(n.UP0_stream, uint16(p.PeerID))
-			n.UP0_streamMu.Unlock()
-			return nil, fmt.Errorf("peer %d connection is nil", p.PeerID)
+			return nil, fmt.Errorf("peer %s connection is nil", p.Validator.Ed25519.ShortString())
 		} else {
 			conn = p.conn
 			go p.node.nodeSelf.handleConnection(conn)
 		}
 	}
-	validator_index := p.PeerID
-	if n.statedb != nil {
-		validator_index = uint16(n.statedb.GetSafrole().GetCurrValidatorIndex(p.Validator.Ed25519))
-	}
 
+	// Double-check after dialing - maybe inbound stream was established while we were dialing
 	n.UP0_streamMu.Lock()
-	if _, exist := n.UP0_stream[uint16(validator_index)]; exist {
+	if existingStream, exist := n.UP0_stream[peerKeyStr]; exist && existingStream != nil {
+		log.Trace(log.B, "UP0_stream rejected - already exists (after dial)", "node", n.id, "self", selfKey, "peerKey", peerKey)
 		n.UP0_streamMu.Unlock()
-		return n.UP0_stream[uint16(validator_index)], nil
-	} else if _, exist := n.UP0_stream[uint16(p.PeerID)]; exist {
+		return existingStream, nil
+	}
+	if existingStream, exist := n.UP0_inbound_stream[peerKeyStr]; exist && existingStream != nil {
+		log.Trace(log.B, "UP0_stream reuse inbound (after dial)", "node", n.id, "self", selfKey, "peerKey", peerKey)
 		n.UP0_streamMu.Unlock()
-		return n.UP0_stream[uint16(p.PeerID)], nil
+		return existingStream, nil
 	}
 	n.UP0_streamMu.Unlock()
+
 	code := uint8(UP0_BlockAnnouncement)
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
 		return nil, err
 	}
+
 	n.UP0_streamMu.Lock()
-	n.UP0_stream[uint16(validator_index)] = stream
-	log.Trace(log.B, "InitBlockAnnouncementStream", "node", n.id, "->peer", p.PeerID)
+	if existingStream, exist := n.UP0_stream[peerKeyStr]; exist && existingStream != nil {
+		log.Warn(log.B, "UP0_stream rejected - race condition", "node", n.id, "self", selfKey, "peerKey", peerKey)
+		n.UP0_streamMu.Unlock()
+		stream.Close()
+		return existingStream, nil
+	}
+	n.UP0_stream[peerKeyStr] = stream
+	log.Trace(log.B, "UP0_stream stored", "node", n.id, "self", selfKey, "peerKey", peerKey)
+	log.Trace(log.B, "InitBlockAnnouncementStream", "node", n.id, "->peer", peerKey)
 
 	// Telemetry: BlockAnnouncementStreamOpened (event 60) - Local side opened stream
 	connectionSide := byte(0) // 0 = Local side opened the stream
-	peerIDBytes := n.PeerID32(p.PeerID)
+	peerIDBytes := PubkeyBytes(p.Validator.Ed25519.String())
 	n.telemetryClient.BlockAnnouncementStreamOpened(peerIDBytes, connectionSide)
 
 	n.UP0_streamMu.Unlock()
@@ -212,18 +238,18 @@ func (p *Peer) GetOrInitBlockAnnouncementStream(ctx context.Context) (quic.Strea
 			errChan <- fmt.Errorf("handshake_bytes is nil")
 			return
 		}
-		err = sendQuicBytes(ctx, stream, handshake_bytes, p.PeerID, code)
+		err = sendQuicBytes(ctx, stream, handshake_bytes, p.Validator.Ed25519.String(), code)
 		if err != nil {
 			errChan <- err
 		} else {
-			log.Debug(log.B, "sendQuicBytes", "peer", p.PeerID, "handshake", handshake)
+			log.Debug(log.B, "sendQuicBytes", "peerKey", peerKey, "handshake", handshake)
 		}
 	}()
 
 	// receive handshake
 	go func() {
 		defer wg.Done()
-		req, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
+		req, err := receiveQuicBytes(ctx, stream, p.Validator.Ed25519.String(), code)
 		if err != nil {
 			errChan <- fmt.Errorf("receiveQuicBytes err: %v", err)
 			return
@@ -233,7 +259,7 @@ func (p *Peer) GetOrInitBlockAnnouncementStream(ctx context.Context) (quic.Strea
 		if err != nil {
 			errChan <- fmt.Errorf("handshake_peer.FromBytes err: %v", err)
 		} else {
-			log.Debug(log.B, "receiveQuicBytes", "peer", p.PeerID, "handshake", handshake_peer)
+			log.Debug(log.B, "receiveQuicBytes", "peerKey", peerKey, "handshake", handshake_peer)
 			n := p.node.nodeSelf
 			if n == nil {
 				return
@@ -266,16 +292,37 @@ func (p *Peer) GetOrInitBlockAnnouncementStream(ctx context.Context) (quic.Strea
 		return nil, fmt.Errorf("handshake failed: %v", err)
 	case <-done:
 		// successful
+		log.Debug(log.B, "Handshake completed (initiator)", "peerKey", peerKey)
 	}
-	// ctx, cancel := context.WithCancel(p.node.ctx)
-	go n.nodeSelf.runBlockAnnouncement(stream, p.PeerID) // TODO: add ctx and inside runBlockAnnouncement, check ctx.Done() to exit the loop when canceled.
+	// Start reading announcements from this peer.
+	// This is safe because handshake exchange is complete - we've sent our handshake
+	// AND received peer's handshake response, so next message will be BlockAnnounce.
+	go n.nodeSelf.runBlockAnnouncement(stream, peerKeyStr, peerKey)
 	return stream, nil
 }
 
 // onBlockAnnouncement handles the incoming handshake (in msg) and replies in parallel,
 // then registers the stream and spins up runBlockAnnouncement.
-func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16) error {
+func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerKey string) error {
 	code := uint8(UP0_BlockAnnouncement)
+	selfKey := n.GetEd25519Key().ShortString()
+	peerKeyShort := peerKey[:10] // short version for logging
+
+	// Verify peer exists
+	if _, ok := n.peersByPubKey[peerKey]; !ok {
+		return fmt.Errorf("onBlockAnnouncement: could not find peer for key %s", peerKey)
+	}
+
+	// Early check - reject if stream already exists before doing expensive handshake
+	n.UP0_streamMu.Lock()
+	if _, exist := n.UP0_inbound_stream[peerKey]; exist {
+		log.Warn(log.B, "UP0_inbound_stream rejected - already exists", "node", n.id, "self", selfKey, "peerKey", peerKeyShort)
+		n.UP0_streamMu.Unlock()
+		stream.Close()
+		return nil
+	}
+	n.UP0_streamMu.Unlock()
+
 	errCh := make(chan error, 1)
 	var wg sync.WaitGroup
 
@@ -288,7 +335,6 @@ func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16
 			errCh <- fmt.Errorf("decode handshake failed: %w", decodeErr)
 			return
 		}
-		//log.Info(log.Node, "BlockAnnouncement received", "n", n.id, "peerID", peerID, "h", peerHS.FinalizedBlock.HeaderHash)
 
 		// If we're not synced, update latest info from their leaves
 		if !n.GetIsSync() {
@@ -312,7 +358,7 @@ func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16
 			errCh <- fmt.Errorf("handshake bytes nil")
 			return
 		}
-		if sendErr := sendQuicBytes(context.Background(), stream, data, n.id, code); sendErr != nil {
+		if sendErr := sendQuicBytes(context.Background(), stream, data, n.GetEd25519Key().String(), code); sendErr != nil {
 			errCh <- fmt.Errorf("send handshake failed: %w", sendErr)
 		}
 	}()
@@ -329,63 +375,112 @@ func (n *Node) onBlockAnnouncement(stream quic.Stream, msg []byte, peerID uint16
 		return fmt.Errorf("block announcement handshake err: %v", e)
 	case <-done:
 		// both succeeded
+		log.Debug(log.B, "Handshake completed (receiver)", "peerKey", peerKeyShort)
 	}
 
-	// register and start the persistent loop
+	// Final check after handshake - detect race condition
 	n.UP0_streamMu.Lock()
-	n.UP0_stream[peerID] = stream
+	if existingStream, exist := n.UP0_inbound_stream[peerKey]; exist && existingStream != nil {
+		log.Warn(log.B, "UP0_inbound_stream rejected - race condition", "node", n.id, "self", selfKey, "peerKey", peerKeyShort)
+		n.UP0_streamMu.Unlock()
+		stream.Close()
+		return nil
+	}
+	n.UP0_inbound_stream[peerKey] = stream
+	log.Trace(log.B, "UP0_inbound_stream stored", "node", n.id, "self", selfKey, "peerKey", peerKeyShort)
 	n.UP0_streamMu.Unlock()
 
 	// Telemetry: BlockAnnouncementStreamOpened (event 60) - Remote side opened stream
 	connectionSide := byte(1) // 1 = Remote side opened the stream
-	peerIDBytes := n.PeerID32(peerID)
+	peerIDBytes := PubkeyBytes(peerKey)
 	n.telemetryClient.BlockAnnouncementStreamOpened(peerIDBytes, connectionSide)
 
-	go n.runBlockAnnouncement(stream, peerID)
+	go n.runBlockAnnouncementInbound(stream, peerKey, peerKeyShort)
 	return nil
 }
 
-// runBlockAnnouncement loops reading announcements, non-blocking into the channel.
-func (n *Node) runBlockAnnouncement(stream quic.Stream, peerID uint16) {
+// runBlockAnnouncementInbound loops reading announcements on inbound streams.
+func (n *Node) runBlockAnnouncementInbound(stream quic.Stream, peerKeyStr string, peerKeyShort string) {
 	if stream == nil {
-		log.Warn(log.B, "runBlockAnnouncement", "peerID", peerID, "err", "nil stream")
+		log.Warn(log.B, "runBlockAnnouncementInbound", "peerKey", peerKeyShort, "err", "nil stream")
 		return
 	}
+	selfKey := n.GetEd25519Key().ShortString()
 	defer func() {
 		n.UP0_streamMu.Lock()
-		delete(n.UP0_stream, peerID)
+		delete(n.UP0_inbound_stream, peerKeyStr)
 		n.UP0_streamMu.Unlock()
-		log.Trace(log.B, "runBlockAnnouncement cleanup", "peerID", peerID)
-		// Emit telemetry event for block announcement stream closed (Event 61)
-		peerIDBytes := n.PeerID32(peerID)
-		n.telemetryClient.BlockAnnouncementStreamClosed(peerIDBytes, 0, "stream cleanup")
+		log.Trace(log.B, "UP0_inbound_stream deleted", "node", n.id, "self", selfKey, "peerKey", peerKeyShort)
+		peerIDBytes := PubkeyBytes(peerKeyStr)
+		n.telemetryClient.BlockAnnouncementStreamClosed(peerIDBytes, 0, "inbound stream cleanup")
 	}()
+	n.runBlockAnnouncementLoop(stream, peerKeyStr)
+}
+
+// runBlockAnnouncement loops reading announcements on outbound streams.
+func (n *Node) runBlockAnnouncement(stream quic.Stream, peerKeyStr string, peerKeyShort string) {
+	if stream == nil {
+		log.Warn(log.B, "runBlockAnnouncement", "peerKey", peerKeyShort, "err", "nil stream")
+		return
+	}
+	selfKey := n.GetEd25519Key().ShortString()
+	defer func() {
+		n.UP0_streamMu.Lock()
+		delete(n.UP0_stream, peerKeyStr)
+		n.UP0_streamMu.Unlock()
+		log.Trace(log.B, "UP0_stream deleted", "node", n.id, "self", selfKey, "peerKey", peerKeyShort)
+		peerIDBytes := PubkeyBytes(peerKeyStr)
+		n.telemetryClient.BlockAnnouncementStreamClosed(peerIDBytes, 0, "outbound stream cleanup")
+	}()
+	n.runBlockAnnouncementLoop(stream, peerKeyStr)
+}
+
+// runBlockAnnouncementLoop is the shared receive loop for both inbound and outbound streams.
+func (n *Node) runBlockAnnouncementLoop(stream quic.Stream, peerKeyStr string) {
 
 	code := uint8(UP0_BlockAnnouncement)
 	ctx := context.Background()
+	receivedFirstValid := false
+	peerKeyShort := peerKeyStr[:10]
 
 	for {
-		raw, err := receiveQuicBytes(ctx, stream, peerID, code)
+		raw, err := receiveQuicBytes(ctx, stream, peerKeyStr, code)
 		if err != nil {
-			log.Error(log.Node, "runBlockAnnouncement receive error", "peerID", peerID, "err", err)
+			log.Error(log.Node, "runBlockAnnouncement receive error", "peerKey", peerKeyShort, "err", err)
 			return
+		}
+
+		// Skip empty messages silently (likely handshake drain)
+		if len(raw) == 0 {
+			continue
 		}
 
 		var ann JAMSNP_BlockAnnounce
 		if err := ann.FromBytes(raw); err != nil {
-			log.Error(log.Node, "runBlockAnnouncement decode error", "peerID", peerID, "err", err)
-			// Emit telemetry event for malformed block announcement
-			peerIDBytes := n.PeerID32(peerID)
-			n.telemetryClient.BlockAnnouncementMalformed(peerIDBytes, err.Error())
-			// Also emit PeerMisbehaved since malformed messages are protocol violations
-			n.telemetryClient.PeerMisbehaved(peerIDBytes, "malformed block announcement: "+err.Error())
-
-			return
+			if !receivedFirstValid {
+				log.Trace(log.Node, "runBlockAnnouncement skipping invalid frame (pre-first-valid)", "peerKey", peerKeyShort, "rawLen", len(raw))
+			} else {
+				log.Warn(log.Node, "runBlockAnnouncement decode error", "peerKey", peerKeyShort, "err", err, "rawLen", len(raw))
+				peerIDBytes := PubkeyBytes(peerKeyStr)
+				n.telemetryClient.BlockAnnouncementMalformed(peerIDBytes, err.Error())
+			}
+			continue
 		}
 
+		// Skip slot=0 messages silently (likely handshake or genesis-related)
+		if ann.Header.Slot == 0 {
+			continue
+		}
+
+		receivedFirstValid = true
+
 		h := ann.Header.Hash()
-		//log.Info(log.Node, "runBlockAnnouncement received", "peerID", peerID, "slot", ann.Header.Slot, "h", h)
-		n.peersInfo[peerID].AddKnownHash(h)
+		peer, ok := n.peersByPubKey[peerKeyStr]
+		if ok {
+			peer.AddKnownHash(h)
+		} else {
+			log.Warn(log.B, "runBlockAnnouncement: peer not found in peersByPubKey", "peerKey", peerKeyShort)
+		}
 
 		if _, exists := n.block_tree.GetBlockNode(h); exists {
 			continue
@@ -397,13 +492,13 @@ func (n *Node) runBlockAnnouncement(stream quic.Stream, peerID uint16) {
 		}
 		select {
 		case n.blockAnnouncementsCh <- ann:
-			n.ba_checker.Set(h, peerID)
+			n.ba_checker.Set(h, peerKeyStr)
 			// Emit telemetry event for block announced (received from peer)
-			peerIDBytes := n.PeerID32(peerID)
+			peerIDBytes := PubkeyBytes(peerKeyStr)
 			n.telemetryClient.BlockAnnounced(peerIDBytes, 1, ann.Header.Slot, h)
 		default:
 			log.Warn(log.Node, "runBlockAnnouncement: channel full",
-				"peerID", peerID,
+				"peerKey", peerKeyStr,
 				"headerHash", h.String_short(),
 			)
 		}
@@ -419,6 +514,7 @@ func (n *Node) GetLatestFinalizedBlock() *types.Block {
 
 func (n *NodeContent) GetLatestHandshake() JAMSNP_Handshake {
 	if n.block_tree == nil {
+		log.Warn(log.B, "GetLatestHandshake: block_tree is nil")
 		return JAMSNP_Handshake{
 			FinalizedBlock: JAMSNP_BlockInfo{
 				HeaderHash: common.BytesToHash([]byte("no blocks yet")), // TODO: change this to a more meaningful value (genesis)

@@ -25,16 +25,18 @@ BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 BINARY := jamduna
 
+
 # Set default PVM backend based on OS.
 # On Linux, default to the faster 'compiler'. Otherwise, use 'interpreter'.
 ifeq ($(UNAME_S),Linux)
   PVM_BACKEND ?= compiler # Default to 'compiler' on Linux
+  CHAINSPEC ?= chainspecs/$(ARCH)/polkajam-spec.json
+#  CHAINSPEC ?= chainspecs/jamduna-spec.json
 else
   PVM_BACKEND ?= interpreter # Default to 'interpreter' on non-Linux
+  #CHAINSPEC ?= chainspecs/$(ARCH)/polkajam-spec.json
+  CHAINSPEC ?= chainspecs/jamduna-spec.json
 endif
-
-#CHAINSPEC ?= chainspecs/jamduna-spec.json
-CHAINSPEC ?= chainspecs/$(ARCH)/polkajam-spec.json
 
 
 POLKAJAM_BIN ?= bin/polkajam
@@ -309,9 +311,15 @@ run_polkajam_all:
 		$(POLKAJAM_BIN) --chain $(CHAINSPEC) --pvm-backend $(PVM_BACKEND) run  --temp  --dev-validator $$V_IDX --rpc-port=$$((19800 + $$i)) & \
 	done; \
 
-run_localclient: kill jam jam_clean run_5 run_1
-run_localclient_jam: kill duna_spec jam jam_clean run_parallel_jam
-run_localclient_jam_dead: kill jam jam_clean run_parallel_jam_with_deadnode
+run_localclient: kill jam jam_clean
+	@echo "Using chainspec: $(CHAINSPEC)"
+	@$(MAKE) run_5 run_1
+run_localclient_jam: kill duna_spec jam jam_clean
+	@echo "Using chainspec: $(CHAINSPEC)"
+	@$(MAKE) run_parallel_jam
+run_localclient_jam_dead: kill jam jam_clean
+	@echo "Using chainspec: $(CHAINSPEC)"
+	@$(MAKE) run_parallel_jam_with_deadnode
 
 run_single_node:jam_clean
 	@echo "Starting single node JAM instance..."

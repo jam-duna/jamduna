@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"io"
 	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
@@ -50,35 +49,48 @@ Guarantor -> Assurer
 [Protocol 140 only] }
 <-- FIN
 */
-// JAMSNPSegmentShardRequest represents the request structure
-type JAMSNPSegmentShardRequest struct {
+// JAMSNPSegmentShardRequestItem represents a single erasure-root request within a batch
+type JAMSNPSegmentShardRequestItem struct {
 	ErasureRoot  common.Hash `json:"erasure_root"`
 	ShardIndex   uint16      `json:"shard_index"`
-	Len          uint        `json:"len"`
 	SegmentIndex []uint16    `json:"segment_index"`
+}
+
+// JAMSNPSegmentShardRequest represents the request structure (array of items per spec)
+// Spec: --> [Erasure Root ++ Shard Index ++ len++[Segment Index]]
+type JAMSNPSegmentShardRequest struct {
+	Items []JAMSNPSegmentShardRequestItem
 }
 
 // ToBytes serializes the JAMSNPSegmentShardRequest struct into a byte array
 func (req *JAMSNPSegmentShardRequest) ToBytes() ([]byte, error) {
 	buf := new(bytes.Buffer)
 
-	// Serialize ErasureRoot (32 bytes for common.Hash)
-	if _, err := buf.Write(req.ErasureRoot[:]); err != nil {
+	// Encode array length
+	lenBytes := types.E(uint64(len(req.Items)))
+	if _, err := buf.Write(lenBytes); err != nil {
 		return nil, err
 	}
 
-	// Serialize ShardIndex (2 bytes)
-	if err := binary.Write(buf, binary.LittleEndian, req.ShardIndex); err != nil {
-		return nil, err
-	}
+	for _, item := range req.Items {
+		// Serialize ErasureRoot (32 bytes for common.Hash)
+		if _, err := buf.Write(item.ErasureRoot[:]); err != nil {
+			return nil, err
+		}
 
-	segIndexBytes, err := types.Encode(req.SegmentIndex)
-	if err != nil {
-		return nil, err
-	}
+		// Serialize ShardIndex (2 bytes)
+		if err := binary.Write(buf, binary.LittleEndian, item.ShardIndex); err != nil {
+			return nil, err
+		}
 
-	if _, err := buf.Write(segIndexBytes); err != nil {
-		return nil, err
+		segIndexBytes, err := types.Encode(item.SegmentIndex)
+		if err != nil {
+			return nil, err
+		}
+
+		if _, err := buf.Write(segIndexBytes); err != nil {
+			return nil, err
+		}
 	}
 
 	return buf.Bytes(), nil
@@ -86,33 +98,68 @@ func (req *JAMSNPSegmentShardRequest) ToBytes() ([]byte, error) {
 
 // FromBytes deserializes a byte array into a JAMSNPSegmentShardRequest struct
 func (req *JAMSNPSegmentShardRequest) FromBytes(data []byte) error {
-	buf := bytes.NewReader(data)
-
-	// Deserialize ErasureRoot (32 bytes for common.Hash)
-	if _, err := io.ReadFull(buf, req.ErasureRoot[:]); err != nil {
-		return err
+	if len(data) < 1 {
+		return fmt.Errorf("JAMSNPSegmentShardRequest: data too short")
 	}
 
-	// Deserialize ShardIndex (2 bytes)
-	if err := binary.Read(buf, binary.LittleEndian, &req.ShardIndex); err != nil {
-		return err
+	// Decode array length
+	numItems, bytesRead := types.DecodeE(data)
+	if bytesRead == 0 {
+		return fmt.Errorf("JAMSNPSegmentShardRequest: failed to decode item count")
 	}
-
-	remaining := data[34:] // 32 bytes for ErasureRoot + 2 bytes for ShardIndex
-
-	var segmentIndex []uint16
-	decodedData, _, decodeErr := types.Decode(remaining, reflect.TypeOf(segmentIndex))
-	if decodeErr != nil {
-		return fmt.Errorf("JAMSNPSegmentShardRequest - decode segment index Err: %w", decodeErr)
+	if numItems == 0 {
+		return fmt.Errorf("JAMSNPSegmentShardRequest: no items in request")
 	}
+	data = data[bytesRead:]
 
-	req.SegmentIndex = decodedData.([]uint16)
-	req.Len = uint(len(req.SegmentIndex))
+	req.Items = make([]JAMSNPSegmentShardRequestItem, numItems)
+	totalSegments := 0
+
+	for i := uint64(0); i < numItems; i++ {
+		if len(data) < 34 {
+			return fmt.Errorf("JAMSNPSegmentShardRequest: insufficient data for item %d", i)
+		}
+
+		// Deserialize ErasureRoot (32 bytes for common.Hash)
+		copy(req.Items[i].ErasureRoot[:], data[:32])
+		data = data[32:]
+
+		// Deserialize ShardIndex (2 bytes)
+		req.Items[i].ShardIndex = binary.LittleEndian.Uint16(data[:2])
+		data = data[2:]
+
+		// Decode segment indices
+		var segmentIndex []uint16
+		decodedData, bytesConsumed, decodeErr := types.Decode(data, reflect.TypeOf(segmentIndex))
+		if decodeErr != nil {
+			return fmt.Errorf("JAMSNPSegmentShardRequest - decode segment index for item %d Err: %w", i, decodeErr)
+		}
+
+		req.Items[i].SegmentIndex = decodedData.([]uint16)
+		data = data[bytesConsumed:]
+
+		if len(req.Items[i].SegmentIndex) == 0 {
+			return fmt.Errorf("JAMSNPSegmentShardRequest: empty segment indices for item %d", i)
+		}
+		totalSegments += len(req.Items[i].SegmentIndex)
+		if totalSegments > types.MaxExports {
+			return fmt.Errorf("JAMSNPSegmentShardRequest: too many total segments requested (%d > %d)", totalSegments, types.MaxExports)
+		}
+	}
 
 	return nil
 }
 
-// SendSegmentShardRequest sends a segment shard request to the peer and receives the response (kv variadic input is for telemetry)
+// TotalSegmentCount returns the total number of segments across all items
+func (req *JAMSNPSegmentShardRequest) TotalSegmentCount() int {
+	total := 0
+	for _, item := range req.Items {
+		total += len(item.SegmentIndex)
+	}
+	return total
+}
+
+// SendSegmentShardRequest sends a segment shard request to the peer (single erasure-root convenience wrapper)
 func (p *Peer) SendSegmentShardRequest(
 	ctx context.Context,
 	erasureRoot common.Hash,
@@ -121,9 +168,30 @@ func (p *Peer) SendSegmentShardRequest(
 	withJustification bool,
 	eventID uint64,
 ) (segmentShards []byte, justifications [][]byte, err error) {
+	items := []JAMSNPSegmentShardRequestItem{{
+		ErasureRoot:  erasureRoot,
+		ShardIndex:   shardIndex,
+		SegmentIndex: segmentIndex,
+	}}
+	return p.SendSegmentShardRequestBatch(ctx, items, withJustification, eventID)
+}
+
+// SendSegmentShardRequestBatch sends a batched segment shard request to the peer
+// Supports multiple erasure-roots in one request per spec: --> [Erasure Root ++ Shard Index ++ len++[Segment Index]]
+func (p *Peer) SendSegmentShardRequestBatch(
+	ctx context.Context,
+	items []JAMSNPSegmentShardRequestItem,
+	withJustification bool,
+	eventID uint64,
+) (segmentShards []byte, justifications [][]byte, err error) {
 
 	if ctx.Err() != nil {
 		return nil, nil, ctx.Err()
+	}
+
+	// Validate request
+	if len(items) == 0 {
+		return nil, nil, fmt.Errorf("no segment shard request items provided")
 	}
 
 	code := uint8(CE139_SegmentShardRequest)
@@ -131,17 +199,27 @@ func (p *Peer) SendSegmentShardRequest(
 		code = CE140_SegmentShardRequestP
 	}
 
-	// Build segment shard requests for telemetry
-	requests := make([]telemetry.SegmentShardRequest, len(segmentIndex))
-	for i, segIdx := range segmentIndex {
-		requests[i] = telemetry.SegmentShardRequest{
-			ImportSegmentID: segIdx,
-			ShardIndex:      shardIndex,
+	// Build segment shard requests for telemetry and validate
+	var requests []telemetry.SegmentShardRequest
+	totalSegments := 0
+	for _, item := range items {
+		if len(item.SegmentIndex) == 0 {
+			return nil, nil, fmt.Errorf("empty segment indices for erasure root %s", item.ErasureRoot.Hex())
 		}
+		for _, segIdx := range item.SegmentIndex {
+			requests = append(requests, telemetry.SegmentShardRequest{
+				ImportSegmentID: segIdx,
+				ShardIndex:      item.ShardIndex,
+			})
+		}
+		totalSegments += len(item.SegmentIndex)
+	}
+	if totalSegments > types.MaxExports {
+		return nil, nil, fmt.Errorf("too many total segments requested: %d > %d", totalSegments, types.MaxExports)
 	}
 
 	// Telemetry: Sending segment shard request (event 162)
-	p.node.telemetryClient.SendingSegmentShardRequest(eventID, p.GetPeer32(), withJustification, requests)
+	p.node.telemetryClient.SendingSegmentShardRequest(eventID, p.PeerKey(), withJustification, requests)
 
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
@@ -150,12 +228,7 @@ func (p *Peer) SendSegmentShardRequest(
 		return nil, nil, fmt.Errorf("openStream[%d]: %w", code, err)
 	}
 
-	req := &JAMSNPSegmentShardRequest{
-		ErasureRoot:  erasureRoot,
-		ShardIndex:   shardIndex,
-		Len:          uint(len(segmentIndex)),
-		SegmentIndex: segmentIndex,
-	}
+	req := &JAMSNPSegmentShardRequest{Items: items}
 
 	reqBytes, err := req.ToBytes()
 	if err != nil {
@@ -166,7 +239,7 @@ func (p *Peer) SendSegmentShardRequest(
 	}
 
 	// --> [Erasure Root ++ Shard Index ++ len++[Segment Index]]
-	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
 		// Telemetry: Segment shard request failed (event 164)
 		p.node.telemetryClient.SegmentShardRequestFailed(eventID, err.Error())
 		return nil, nil, fmt.Errorf("sendQuicBytes[%d]: %w", code, err)
@@ -178,7 +251,7 @@ func (p *Peer) SendSegmentShardRequest(
 	p.node.telemetryClient.SegmentShardRequestSent(eventID)
 
 	// <-- [Segment Shard]
-	segmentShards, err = receiveQuicBytes(ctx, stream, p.PeerID, code)
+	segmentShards, err = receiveQuicBytes(ctx, stream, p.Validator.Ed25519.String(), code)
 	if err != nil {
 		// Telemetry: Segment shard request failed (event 164)
 		p.node.telemetryClient.SegmentShardRequestFailed(eventID, err.Error())
@@ -187,7 +260,7 @@ func (p *Peer) SendSegmentShardRequest(
 
 	// Optionally receive justifications
 	if withJustification {
-		justifications, err = receiveMultiple(ctx, stream, len(segmentIndex), p.PeerID, code)
+		justifications, err = receiveMultiple(ctx, stream, totalSegments, p.Validator.Ed25519.String(), code)
 		if err != nil {
 			// Telemetry: Segment shard request failed (event 164)
 			p.node.telemetryClient.SegmentShardRequestFailed(eventID, err.Error())
@@ -201,9 +274,15 @@ func (p *Peer) SendSegmentShardRequest(
 	return segmentShards, justifications, nil
 }
 
-// onSegmentShardRequest handles incoming segment shard requests, with kv variadic arguments
-func (n *Node) onSegmentShardRequest(ctx context.Context, stream quic.Stream, msg []byte, withJustification bool, peerID uint16) (err error) {
+// onSegmentShardRequest handles incoming segment shard requests (supports batched requests)
+func (n *Node) onSegmentShardRequest(ctx context.Context, stream quic.Stream, msg []byte, withJustification bool, peerKey string) (err error) {
 	defer stream.Close()
+
+	// Get peer to access its PeerID for telemetry
+	peer, ok := n.peersByPubKey[peerKey]
+	if !ok {
+		return fmt.Errorf("onSegmentShardRequest: peer not found for key %s", peerKey)
+	}
 
 	var req JAMSNPSegmentShardRequest
 	code := uint8(CE139_SegmentShardRequest)
@@ -213,38 +292,48 @@ func (n *Node) onSegmentShardRequest(ctx context.Context, stream quic.Stream, ms
 
 	// Telemetry: Receiving segment shard request (event 163)
 	eventID := n.telemetryClient.GetEventID()
-	n.telemetryClient.ReceivingSegmentShardRequest(n.PeerID32(peerID), withJustification)
+	n.telemetryClient.ReceivingSegmentShardRequest(PubkeyBytes(peer.Validator.Ed25519.String()), withJustification)
 
 	err = req.FromBytes(msg)
 	if err != nil {
-		fmt.Println("Error deserializing:", err)
+		stream.CancelWrite(ErrInvalidData)
 		log.Warn(log.DA, "onSegmentShardRequest:FromBytes", "err", err, "CE139/140ReqMsg", fmt.Sprintf("0x%x", msg))
 		// Telemetry: Segment shard request failed (event 164)
 		n.telemetryClient.SegmentShardRequestFailed(eventID, err.Error())
 		return fmt.Errorf("onSegmentShardRequest: FromBytes failed: %w", err)
 	}
-	log.Debug(log.G, "onSegmentShardRequest:FromBytes Received", "CE139/140ReqMsg", fmt.Sprintf("0x%x", msg), "ErasureRoot", req.ErasureRoot, "ShardIndex", req.ShardIndex, "Len", req.Len, "SegmentIndex", req.SegmentIndex)
+	log.Debug(log.G, "onSegmentShardRequest:FromBytes Received", "CE139/140ReqMsg", fmt.Sprintf("0x%x", msg), "numItems", len(req.Items), "totalSegments", req.TotalSegmentCount())
 
 	// Telemetry: Segment shard request received (event 166)
-	n.telemetryClient.SegmentShardRequestReceived(eventID, uint16(req.Len))
+	n.telemetryClient.SegmentShardRequestReceived(eventID, uint16(req.TotalSegmentCount()))
 
-	selected_segmentshards, selected_segment_justifications, ok, err := n.GetSegmentShard_Assurer(req.ErasureRoot, req.ShardIndex, req.SegmentIndex, withJustification)
-	if err != nil {
-		stream.CancelWrite(ErrKeyNotFound)
-		log.Warn(log.DA, "onSegmentShardRequest:GetSegmentShard_Assurer", "err", err)
-		// Telemetry: Segment shard request failed (event 164)
-		n.telemetryClient.SegmentShardRequestFailed(eventID, err.Error())
-		return fmt.Errorf("onSegmentShardRequest: GetSegmentShard_Assurer failed: %w", err)
-	}
-	if !ok {
-		stream.CancelWrite(ErrKeyNotFound)
-		log.Warn(log.DA, "onSegmentShardRequest:GetSegmentShard_Assurer", "n", n.String(), "erasureRoot", req.ErasureRoot, "shardIndex", req.ShardIndex, "segmentIndex", req.SegmentIndex)
-		// Telemetry: Segment shard request failed (event 164)
-		n.telemetryClient.SegmentShardRequestFailed(eventID, "segment shard not found")
-		return fmt.Errorf("onSegmentShardRequest: segment shard not found")
+	// Collect all segment shards and justifications across all request items
+	var allSegmentShards [][]byte
+	var allJustifications [][]byte
+
+	for _, item := range req.Items {
+		selected_segmentshards, selected_segment_justifications, ok, err := n.GetSegmentShard_Assurer(item.ErasureRoot, item.ShardIndex, item.SegmentIndex, withJustification)
+		if err != nil {
+			stream.CancelWrite(ErrKeyNotFound)
+			log.Warn(log.DA, "onSegmentShardRequest:GetSegmentShard_Assurer", "err", err)
+			// Telemetry: Segment shard request failed (event 164)
+			n.telemetryClient.SegmentShardRequestFailed(eventID, err.Error())
+			return fmt.Errorf("onSegmentShardRequest: GetSegmentShard_Assurer failed: %w", err)
+		}
+		if !ok {
+			stream.CancelWrite(ErrKeyNotFound)
+			log.Warn(log.DA, "onSegmentShardRequest:GetSegmentShard_Assurer", "n", n.String(), "erasureRoot", item.ErasureRoot, "shardIndex", item.ShardIndex, "segmentIndex", item.SegmentIndex)
+			// Telemetry: Segment shard request failed (event 164)
+			n.telemetryClient.SegmentShardRequestFailed(eventID, "segment shard not found")
+			return fmt.Errorf("onSegmentShardRequest: segment shard not found")
+		}
+		allSegmentShards = append(allSegmentShards, selected_segmentshards...)
+		if withJustification {
+			allJustifications = append(allJustifications, selected_segment_justifications...)
+		}
 	}
 
-	combined_selected_segmentshards := bytes.Join(selected_segmentshards, nil)
+	combined_selected_segmentshards := bytes.Join(allSegmentShards, nil)
 
 	select {
 	case <-ctx.Done():
@@ -252,7 +341,7 @@ func (n *Node) onSegmentShardRequest(ctx context.Context, stream quic.Stream, ms
 	default:
 	}
 
-	err = sendQuicBytes(ctx, stream, combined_selected_segmentshards, n.id, code)
+	err = sendQuicBytes(ctx, stream, combined_selected_segmentshards, n.GetEd25519Key().String(), code)
 	if err != nil {
 		stream.CancelWrite(ErrCECode)
 		// Telemetry: Segment shard request failed (event 164)
@@ -261,21 +350,12 @@ func (n *Node) onSegmentShardRequest(ctx context.Context, stream quic.Stream, ms
 	}
 
 	if withJustification {
-		for item_idx, s_j := range selected_segment_justifications {
-			s_f := selected_segment_justifications[item_idx]
-
-			if err = sendQuicBytes(ctx, stream, s_f, n.id, code); err != nil {
+		for item_idx, s_j := range allJustifications {
+			if err = sendQuicBytes(ctx, stream, s_j, n.GetEd25519Key().String(), code); err != nil {
 				stream.CancelWrite(ErrCECode)
 				// Telemetry: Segment shard request failed (event 164)
 				n.telemetryClient.SegmentShardRequestFailed(eventID, err.Error())
-				return fmt.Errorf("onSegmentShardRequest: sendQuicBytes justification s_f failed (idx %d): %w", item_idx, err)
-			}
-
-			if err = sendQuicBytes(ctx, stream, s_j, n.id, code); err != nil {
-				stream.CancelWrite(ErrCECode)
-				// Telemetry: Segment shard request failed (event 164)
-				n.telemetryClient.SegmentShardRequestFailed(eventID, err.Error())
-				return fmt.Errorf("onSegmentShardRequest: sendQuicBytes justification s_j failed (idx %d): %w", item_idx, err)
+				return fmt.Errorf("onSegmentShardRequest: sendQuicBytes justification failed (idx %d): %w", item_idx, err)
 			}
 		}
 	}

@@ -1773,7 +1773,7 @@ func (vm *VM) hostExport() {
 		vm.Exports = append(vm.Exports, y)
 		vm.SetHostResultCode(OK)
 		//		vm.DebugHostFunction(EXPORT, "p=0x%x, z=%d, total_exports=%d, l=%d", p, z, len(vm.Exports), vm.TotalExported)
-		log.Info(vm.logging, "EXPORT", "p", fmt.Sprintf("0x%x", p), "z", z, "total_exports", len(vm.Exports), "l", len(y))
+		log.Trace(vm.logging, "EXPORT", "p", fmt.Sprintf("0x%x", p), "z", z, "total_exports", len(vm.Exports), "l", len(y))
 		if vm.pushFrame != nil {
 			// Stream the latest segment to any attached frame server without clearing exports
 			// so exports remain available to the caller.
@@ -2029,7 +2029,7 @@ func (vm *VM) hostLog() {
 		serviceMetadata = fmt.Sprintf("%s-child", serviceMetadata)
 	}
 	loggingVerbose := false
-	if vm.logging == log.FirstGuarantor || vm.logging == log.Auditor || vm.logging == log.Builder || vm.logging == log.PvmAuthoring {
+	if vm.logging == log.Builder || vm.logging == log.FirstGuarantor || vm.logging == log.OtherGuarantor {
 		loggingVerbose = false
 	}
 	if !loggingVerbose {
@@ -2155,7 +2155,7 @@ func (vm *VM) HostFetchWitness() error {
 		vm.WriteRegister(7, 0) // Return 0 = not found
 		return nil
 	} else if !found {
-		log.Info(vm.logging, funcName+": ❌ ReadObject returned found=false", "object_id", object_id)
+		log.Info(vm.logging, funcName+": ⚠️ ReadObject returned found=false", "object_id", object_id)
 		vm.WriteRegister(7, 0)
 		return nil
 	}
@@ -2235,7 +2235,7 @@ func (vm *VM) HostFetchWitness() error {
 					log.Trace(vm.logging, funcName+": ❌ ContractStorage type assertion failed from witness cache", "address", address.Hex())
 				}
 			} else {
-				fmt.Printf("❌ HostFetchWitness: No storage found in witness cache for address=%s\n", address.Hex())
+				//fmt.Printf("❌ HostFetchWitness: No storage found in witness cache for address=%s\n", address.Hex())
 
 				// Create minimal witness for storage shard
 				witness = &types.StateWitness{
@@ -2249,6 +2249,29 @@ func (vm *VM) HostFetchWitness() error {
 					},
 				}
 			}
+		}
+	}
+
+	// If payload not found in cache but witness exists, fetch payload from DA
+	// This handles meta-shards and other objects not in witness caches
+	if found && len(payload) == 0 && witness != nil && witness.Ref.PayloadLength > 0 {
+		// Fetch the payload from DA segments
+		var err error
+		payload, err = vm.hostenv.(*StateDB).sdb.FetchJAMDASegments(
+			witness.Ref.WorkPackageHash,
+			witness.Ref.IndexStart,
+			witness.Ref.IndexStart+uint16((witness.Ref.PayloadLength+types.SegmentSize-1)/types.SegmentSize),
+			witness.Ref.PayloadLength,
+		)
+		if err != nil {
+			log.Trace(vm.logging, "HostFetchWitness: failed to fetch payload from DA",
+				"object_id", object_id.Hex(),
+				"err", err)
+		} else {
+			log.Trace(vm.logging, "HostFetchWitness: Fetched payload from DA",
+				"object_id", object_id.Hex(),
+				"payload_len", len(payload))
+			witness.Payload = payload
 		}
 	}
 
@@ -2318,7 +2341,6 @@ func (vm *VM) HostFetchWitness() error {
 			return nil
 		}
 	}
-
 	vm.WriteRegister(7, total_size) // Return total bytes written
 	return nil
 }

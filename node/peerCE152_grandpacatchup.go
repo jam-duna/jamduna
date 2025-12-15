@@ -47,12 +47,12 @@ func (p *Peer) SendGrandpaCatchUp(ctx context.Context, catchup grandpa.GrandpaCa
 	}
 
 	// Send request
-	if err := sendQuicBytes(ctx, stream, requestBytes, p.PeerID, code); err != nil {
+	if err := sendQuicBytes(ctx, stream, requestBytes, p.Validator.Ed25519.String(), code); err != nil {
 		return nil, fmt.Errorf("sendQuicBytes[CE152_GrandpaCatchUp] request failed: %w", err)
 	}
 
 	// Receive response: Catchup
-	responseBytes, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
+	responseBytes, err := receiveQuicBytes(ctx, stream, p.Validator.Ed25519.String(), code)
 	if err != nil {
 		return nil, fmt.Errorf("receiveQuicBytes[CE152_GrandpaCatchUp] response failed: %w", err)
 	}
@@ -70,7 +70,7 @@ func (p *Peer) SendGrandpaCatchUp(ctx context.Context, catchup grandpa.GrandpaCa
 	return &response, nil
 }
 
-func (n *Node) onGrandpaCatchUp(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
+func (n *Node) onGrandpaCatchUp(ctx context.Context, stream quic.Stream, msg []byte, peerKey string) error {
 	defer stream.Close()
 
 	// Decode: Round Number ++ Set Id ++ Slot
@@ -91,7 +91,7 @@ func (n *Node) onGrandpaCatchUp(ctx context.Context, stream quic.Stream, msg []b
 		return fmt.Errorf("no catchup data found for round %d, set %d", catchup.Round, catchup.SetId)
 	}
 	// Send response: Catchup
-	if err := sendQuicBytes(ctx, stream, responseBytes, peerID, uint8(CE152_GrandpaCatchUp)); err != nil {
+	if err := sendQuicBytes(ctx, stream, responseBytes, n.GetEd25519Key().String(), uint8(CE152_GrandpaCatchUp)); err != nil {
 		stream.CancelWrite(ErrCECode)
 		return fmt.Errorf("sendQuicBytes[CE152_GrandpaCatchUp] response failed: %w", err)
 	}

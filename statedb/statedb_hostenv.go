@@ -349,7 +349,6 @@ func (s *StateDB) ReadObject(serviceID uint32, objectID common.Hash) (*types.Sta
 			Path:      proof,
 		}
 
-		log.Trace(log.EVM, "ReadObject: Successfully fetched meta-shard", "objectID", objectID, "payloadSize", len(payload), "proofLen", len(proof))
 		return witness, true, nil
 	}
 

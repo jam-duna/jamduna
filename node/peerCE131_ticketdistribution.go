@@ -124,34 +124,40 @@ func (p *Peer) SendTicketDistribution(ctx context.Context, epoch uint32, t types
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
 		// Telemetry: Ticket transfer failed (event 83)
-		p.node.telemetryClient.TicketTransferFailed(p.GetPeer32(), connectionSide, wasCE132, err.Error())
+		p.node.telemetryClient.TicketTransferFailed(p.PeerKey(), connectionSide, wasCE132, err.Error())
 		return fmt.Errorf("openStream failed: %w", err)
 	}
 	defer stream.Close()
 
-	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
 		// Telemetry: Ticket transfer failed (event 83)
-		p.node.telemetryClient.TicketTransferFailed(p.GetPeer32(), connectionSide, wasCE132, err.Error())
+		p.node.telemetryClient.TicketTransferFailed(p.PeerKey(), connectionSide, wasCE132, err.Error())
 		return fmt.Errorf("sendQuicBytes failed: %w", err)
 	}
 
-	p.node.telemetryClient.TicketTransferred(p.GetPeer32(), connectionSide, wasCE132, epoch, t.Attempt, vrfOutput)
+	p.node.telemetryClient.TicketTransferred(p.PeerKey(), connectionSide, wasCE132, epoch, t.Attempt, vrfOutput)
 	return nil
 }
 
-func (n *Node) onTicketDistribution(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16, msgType uint8) error {
+func (n *Node) onTicketDistribution(ctx context.Context, stream quic.Stream, msg []byte, peerKey string, msgType uint8) error {
 	defer stream.Close()
 
 	wasCE132 := (msgType == CE132_TicketDistribution)
 	connectionSide := byte(1) // Remote is sender
 
+	// Get peer to access its PeerID for telemetry
+	peer, ok := n.peersByPubKey[peerKey]
+	if !ok {
+		return fmt.Errorf("onTicketDistribution: peer not found for key %s", peerKey)
+	}
+
 	var newReq JAMSNPTicketDistribution
 	// Deserialize byte array back into the struct
 	if err := newReq.FromBytes(msg); err != nil {
 		// Telemetry: Ticket transfer failed (event 83)
-		n.telemetryClient.TicketTransferFailed(n.PeerID32(peerID), connectionSide, wasCE132, err.Error())
+		n.telemetryClient.TicketTransferFailed(PubkeyBytes(peer.Validator.Ed25519.String()), connectionSide, wasCE132, err.Error())
 		stream.CancelRead(ErrInvalidData)
-		return fmt.Errorf("onTicketDistribution: failed to decode ticket distribution: %w %d", err, peerID)
+		return fmt.Errorf("onTicketDistribution: failed to decode ticket distribution: %w %s", err, peerKey)
 	}
 
 	// <-- FIN
@@ -172,8 +178,10 @@ func (n *Node) onTicketDistribution(ctx context.Context, stream quic.Stream, msg
 		if err != nil {
 			log.Warn(log.Node, "CE131-invalid ticket", "err", err)
 			return err
-		} else if proxy != n.id {
-			log.Warn(log.Node, "CE131-not proxy for the ticket", "peerid", peerID)
+		}
+		selfCurrentIdx := uint16(n.statedb.GetSafrole().GetCurrValidatorIndex(n.GetEd25519Key()))
+		if proxy != selfCurrentIdx {
+			log.Warn(log.Node, "CE131-not proxy for the ticket", "peerKey", peerKey, "proxy", proxy, "selfCurrentIdx", selfCurrentIdx)
 			return nil
 		}
 		// we should send to everyone via CE132 now that we know the ticket id valid and that our node is the proxy
@@ -193,6 +201,6 @@ func (n *Node) onTicketDistribution(ctx context.Context, stream quic.Stream, msg
 	}
 
 	// Telemetry: Ticket transferred (event 84) - receiving side
-	n.telemetryClient.TicketTransferred(n.PeerID32(peerID), connectionSide, wasCE132, newReq.Epoch, newReq.Attempt, vrfOutput)
+	n.telemetryClient.TicketTransferred(PubkeyBytes(peer.Validator.Ed25519.String()), connectionSide, wasCE132, newReq.Epoch, newReq.Attempt, vrfOutput)
 	return nil
 }

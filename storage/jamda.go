@@ -29,16 +29,8 @@ func (m *MockJAMDA) FetchJAMDASegments(workPackageHash common.Hash, indexStart u
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	// fmt.Printf("MockJAMDA.FetchJAMDASegments: requested workPackageHash=%s, indexStart=%d, indexEnd=%d\n",
-	// 	workPackageHash.Hex(), indexStart, indexEnd)
-
 	wpSegments, ok := m.segments[workPackageHash]
 	if !ok {
-		// fmt.Printf("  ❌ NO SEGMENTS FOUND for workPackageHash=%s\n", workPackageHash.Hex())
-		// fmt.Printf("  Available work package hashes:\n")
-		// for wph := range m.segments {
-		// 	fmt.Printf("    - %s\n", wph.Hex())
-		// }
 		return []byte{}, nil
 	}
 
@@ -46,8 +38,7 @@ func (m *MockJAMDA) FetchJAMDASegments(workPackageHash common.Hash, indexStart u
 	for i := indexStart; i < indexEnd; i++ {
 		segment, exists := wpSegments[i]
 		if !exists {
-			fmt.Printf("  ❌ !!! Segment %d NOT FOUND for workPackageHash=%s\n", i, workPackageHash.Hex())
-			return []byte{}, fmt.Errorf("MockJAMDA !!! segment %d not found", i)
+			return []byte{}, fmt.Errorf("MockJAMDA segment %d not found", i)
 		}
 		payload = append(payload, segment...)
 	}
@@ -57,7 +48,6 @@ func (m *MockJAMDA) FetchJAMDASegments(workPackageHash common.Hash, indexStart u
 		payload = payload[:payloadLength]
 	}
 
-	// fmt.Printf("  ✅ Fetched %d bytes (payload_len=%d)\n", len(payload), payloadLength)
 	return payload, nil
 }
 

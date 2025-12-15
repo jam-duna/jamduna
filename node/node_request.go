@@ -142,8 +142,36 @@ func (n *NodeContent) GetState(headerHash common.Hash, startKey [31]byte, endKey
 func (n *Node) processBlockAnnouncement(ctx context.Context, np_blockAnnouncement JAMSNP_BlockAnnounce) ([]types.Block, error) {
 
 	validatorIndex := np_blockAnnouncement.Header.AuthorIndex
-	p, ok := n.peersInfo[validatorIndex]
-	if !ok {
+	newSlot := np_blockAnnouncement.Header.Slot
+	// check if epoch has changed
+	recoveredStateDB, err := statedb.NewStateDBFromStateRoot(np_blockAnnouncement.Header.ParentStateRoot, n.store)
+	if err != nil {
+		return nil, err
+	}
+	safrole := recoveredStateDB.GetSafrole()
+	isNewEpoch := safrole.IsNewEpoch(newSlot)
+	var author types.Validator
+	author, err = safrole.GetCurrValidator(int(validatorIndex))
+	if err != nil {
+		return nil, err
+	}
+	if isNewEpoch {
+		author, err = safrole.GetNextValidator(int(validatorIndex))
+		if err != nil {
+			return nil, err
+		}
+	}
+	var p *Peer
+	var found bool
+	for _, peer := range n.peersByPubKey {
+		peerKey := peer.Validator.Ed25519
+		if bytes.Equal(peerKey[:], author.Ed25519[:]) {
+			p = peer
+			found = true
+			break
+		}
+	}
+	if !found {
 		err := fmt.Errorf("invalid validator index %d", validatorIndex)
 		log.Error(log.Node, "processBlockAnnouncement", "err", err)
 		return nil, err
@@ -212,24 +240,7 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, np_blockAnnouncemen
 
 		if lastErr == nil && len(blocksRaw) > 0 {
 			if attempt > 1 {
-				// if attempt >1, we can try to find a new peer
 				log.Info(log.Node, "SendBlockRequest succeeded", "attempt", attempt, "blockHash", headerHash)
-				origin := validatorIndex
-				// find a new peer
-				for {
-					validatorIndex = uint16(rand0.Intn(len(n.peersInfo)))
-					if validatorIndex == origin || validatorIndex == n.id {
-						continue
-					} else {
-						break
-					}
-				}
-				_, ok = n.peersInfo[validatorIndex]
-				if !ok {
-					err := fmt.Errorf("invalid validator index %d", validatorIndex)
-					log.Error(log.Node, "processBlockAnnouncement", "err", err)
-					return nil, err
-				}
 			}
 			break
 		}
@@ -237,6 +248,21 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, np_blockAnnouncemen
 		if attempt == maxAttempts {
 			log.Warn(log.Node, "SendBlockRequest failed after 3 attempts", "mode", mode, "blockHash", headerHash, "lastErr", lastErr)
 			return nil, fmt.Errorf("SendBlockRequest failed after 3 attempts with mode=%v: %w", mode, lastErr)
+		}
+
+		// Failed attempt - try to find a different peer for the next attempt
+		log.Warn(log.Node, "SendBlockRequest failed, selecting new peer", "attempt", attempt, "blockHash", headerHash, "lastErr", lastErr)
+		currentPeerKey := p.Validator.Ed25519.String()
+		selfPubKey := n.GetEd25519Key().String()
+		peers := make([]*Peer, 0, len(n.peersByPubKey))
+		for pubKey, peer := range n.peersByPubKey {
+			if pubKey != currentPeerKey && pubKey != selfPubKey {
+				peers = append(peers, peer)
+			}
+		}
+		if len(peers) > 0 {
+			p = peers[rand0.Intn(len(peers))]
+			log.Info(log.Node, "SendBlockRequest: switched to new peer", "newPeerKey", p.Validator.Ed25519.ShortString())
 		}
 	}
 	for i := 0; i < len(blocksRaw); i++ {
@@ -271,6 +297,10 @@ func (n *NodeContent) cacheBlock(block *types.Block) error {
 
 		go n.nodeSelf.Clean(useless_header_hashes)
 
+		// Sync to GRANDPA round graphs
+		if n.nodeSelf.grandpa != nil {
+			n.nodeSelf.grandpa.SyncBlockToRoundGraphs(block)
+		}
 	}
 
 	return nil
@@ -434,12 +464,37 @@ func (n *Node) runGuarantees() {
 }
 
 func (n *Node) runAssurances() {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
 	for {
 		select {
 		case assurance := <-n.assurancesCh:
+			if _, ok := n.statedbMap[assurance.Anchor]; !ok {
+				if _, ok2 := n.queueAssurnce[assurance.Anchor]; !ok2 {
+					n.queueAssurnce[assurance.Anchor] = make(map[types.Ed25519Key]AssuranceObject)
+				}
+				n.queueAssurnce[assurance.Anchor][assurance.Ed25519Key] = assurance
+				continue
+			}
 			err := n.processAssurance(assurance)
 			if err != nil {
 				fmt.Printf("%s processAssurance: %v\n", n.String(), err)
+			}
+		case <-ticker.C:
+			for anchor, assuranceMap := range n.queueAssurnce {
+				if _, ok := n.statedbMap[anchor]; ok {
+					for _, assurance := range assuranceMap {
+						err := n.processAssurance(assurance)
+						if err != nil {
+							fmt.Printf("%s processAssurance from queue: %v\n", n.String(), err)
+						} else {
+							delete(n.queueAssurnce[anchor], assurance.Ed25519Key)
+						}
+					}
+					if len(n.queueAssurnce[anchor]) == 0 {
+						delete(n.queueAssurnce, anchor)
+					}
+				}
 			}
 		}
 	}
@@ -478,31 +533,42 @@ func (n *Node) RunRPCCommand() {
 
 var CurrentSlot = uint32(12)
 
-// process request
-func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interface{}, evID ...uint64) (resp interface{}, err error) {
+// sendRequestByPubKey sends a request to a peer identified by their pubKey (stable identity).
+func (n *NodeContent) sendRequestByPubKey(ctx context.Context, pubKey types.Ed25519Key, obj interface{}, evID ...uint64) (resp interface{}, err error) {
 	var eventID uint64
 	if len(evID) > 0 {
 		eventID = evID[0]
 	}
-	// Get the peer ID from the object
+
 	msgType := getMessageType(obj)
 	if msgType == "unknown" {
 		return nil, fmt.Errorf("unknown type: %s", msgType)
 	}
-	switch msgType {
 
+	// Check if this is a self-request
+	selfPubKey := n.GetEd25519Key()
+	isSelfRequest := pubKey == selfPubKey
+
+	// DEBUG: Log request details
+	log.Trace(log.Node, "sendRequestByPubKey DEBUG", "n", n.String(),
+		"selfPubKey", selfPubKey.String()[:16],
+		"targetPubKey", pubKey.String()[:16],
+		"msgType", msgType,
+		"isSelfRequest", isSelfRequest,
+		"eventID", eventID)
+
+	switch msgType {
 	case "CE128_request":
 		req := obj.(CE128_request)
 		headerHash := req.HeaderHash
 		direction := req.Direction
 		maximumBlocks := req.MaximumBlocks
-		if peerID == uint16(n.id) { // selfRequesting case
-			// no reason to even get here
-			return nil, fmt.Errorf("selfRequesting not supported")
+		if isSelfRequest {
+			return nil, fmt.Errorf("selfRequesting not supported for CE128")
 		}
-		peer, err := n.getPeerByIndex(peerID)
-		if err != nil {
-			return resp, err
+		peer, ok := n.GetPeerByPubKey(pubKey)
+		if !ok {
+			return resp, fmt.Errorf("peer not found for pubkey %s", pubKey.String()[:16])
 		}
 		blocks, err := peer.SendBlockRequest(ctx, headerHash, direction, maximumBlocks)
 		if err != nil {
@@ -518,16 +584,17 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 	case "CE138_request":
 		req := obj.(CE138_request)
 		erasureRoot := req.ErasureRoot
-		shardIdx_self := storage.ComputeShardIndex(req.CoreIndex, n.id)
 
-		log.Trace(log.DA, "CE138_request: abc", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex, "coreIdx", req.CoreIndex)
+		log.Trace(log.DA, "CE138_request", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex, "coreIdx", req.CoreIndex)
 
-		// handle selfRequesting case
-		if req.ShardIndex == shardIdx_self {
+		// handle selfRequesting case - only if shard actually belongs to us
+		selfValidatorIdx := n.statedb.GetSafrole().GetCurrValidatorIndex(selfPubKey)
+		myShardIdx := storage.ComputeShardIndex(req.CoreIndex, uint16(selfValidatorIdx))
+		if isSelfRequest && req.ShardIndex == myShardIdx {
 			log.Trace(log.DA, "CE138_request: selfRequesting", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex)
 			bundleShard, sClub, encodedPath, _, err := n.GetBundleShard_Assurer(req.ErasureRoot, req.ShardIndex)
 			if err != nil {
-				log.Error(log.DA, "CE138_request: selfRequesting ERROR", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(self)", n.id, "ERR", err)
+				log.Error(log.DA, "CE138_request: selfRequesting ERROR", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex, "ERR", err)
 				return resp, err
 			}
 			self_response := CE138_response{
@@ -536,24 +603,23 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 				SClub:         sClub,
 				Justification: encodedPath,
 			}
-			log.Trace(log.DA, "CE138_request: selfRequesting OK", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "CE138_response", types.ToJSONHex(self_response))
+			log.Trace(log.DA, "CE138_request: selfRequesting OK", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex, "CE138_response", types.ToJSONHex(self_response))
 			return self_response, nil
 		}
 
-		//peerID = req.ValidatorIndex
-		peer, err := n.getPeerByIndex(peerID) // TODO: what is this peerID??
-		if err != nil {
-			log.Error(log.DA, "CE138_request: SendBundleShardRequest ERROR on getPeerByIndex", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "ERR", err)
-			return resp, err
+		peer, ok := n.GetPeerByPubKey(pubKey)
+		if !ok {
+			log.Error(log.DA, "CE138_request: peer not found for pubkey", "n", n.String(), "pubKey", pubKey.String()[:16])
+			return resp, fmt.Errorf("peer not found for pubkey %s", pubKey.String()[:16])
 		}
-		log.Trace(log.DA, "CE138_request: SendBundleShardRequest", "n", n.String(), "erasureRoot", erasureRoot, "Req peer shardIndex", peerID, "peer.PeerID", peer.PeerID)
+		log.Trace(log.DA, "CE138_request: SendBundleShardRequest", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex, "peerKey", peer.Validator.Ed25519.ShortString())
 
 		startTime := time.Now()
 		bundleShard, sClub, encodedPath, err := peer.SendBundleShardRequest(ctx, erasureRoot, req.ShardIndex, eventID)
 		rtt := time.Since(startTime)
-		log.Debug(log.DA, "CE138_request: SendBundleShardRequest RTT", "n", n.String(), "peerID", peerID, "rtt", rtt)
+		log.Debug(log.DA, "CE138_request: SendBundleShardRequest RTT", "n", n.String(), "pubKey", pubKey.String()[:16], "rtt", rtt)
 		if err != nil {
-			log.Trace(log.DA, "CE138_request: SendBundleShardRequest ERROR on resp", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "ERR", err)
+			log.Trace(log.DA, "CE138_request: SendBundleShardRequest ERROR", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex, "ERR", err)
 			return resp, err
 		}
 		response := CE138_response{
@@ -562,7 +628,7 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 			SClub:         sClub,
 			Justification: encodedPath,
 		}
-		log.Trace(log.DA, "CE138_request: SendBundleShardRequest OK", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex(peerID)", peerID, "CE138_response", types.ToJSONHex(response))
+		log.Trace(log.DA, "CE138_request: SendBundleShardRequest OK", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex, "CE138_response", types.ToJSONHex(response))
 		return response, nil
 
 	case "CE139_request":
@@ -571,12 +637,11 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 		segmentIndices := req.SegmentIndices
 
 		log.Trace(log.DA, "CE139_request", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex, "coreIdx", req.CoreIndex)
-		peer, err := n.getPeerByIndex(peerID) // check
-		if err != nil {
-			return resp, err
-		}
-		// handle selfRequesting case
-		if req.ShardIndex == storage.ComputeShardIndex(req.CoreIndex, n.id) {
+
+		// handle selfRequesting case - only if shard actually belongs to us
+		selfValidatorIdx := n.statedb.GetSafrole().GetCurrValidatorIndex(selfPubKey)
+		myShardIdx := storage.ComputeShardIndex(req.CoreIndex, uint16(selfValidatorIdx))
+		if isSelfRequest && req.ShardIndex == myShardIdx {
 			selected_segmentshards, selected_justifications, ok, err := n.GetSegmentShard_Assurer(erasureRoot, req.ShardIndex, segmentIndices, false)
 			if err != nil {
 				return resp, err
@@ -587,11 +652,16 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 			combined_segmentShards := bytes.Join(selected_segmentshards, nil)
 			self_response := CE139_response{
 				ErasureRoot:           erasureRoot,
-				ShardIndex:            req.ShardIndex, // CHECK
+				ShardIndex:            req.ShardIndex,
 				SegmentShards:         combined_segmentShards,
 				SegmentJustifications: selected_justifications,
 			}
 			return self_response, nil
+		}
+
+		peer, ok := n.GetPeerByPubKey(pubKey)
+		if !ok {
+			return resp, fmt.Errorf("peer not found for pubkey %s", pubKey.String()[:16])
 		}
 		segmentShards, selected_justifications, err := peer.SendSegmentShardRequest(ctx, erasureRoot, req.ShardIndex, segmentIndices, false, eventID)
 		if err != nil {
@@ -607,11 +677,13 @@ func (n *NodeContent) sendRequest(ctx context.Context, peerID uint16, obj interf
 
 	default:
 		return nil, fmt.Errorf("unsupported type: %s", msgType)
-
 	}
 }
-func (n *NodeContent) makeRequests(
-	objs map[uint16]interface{},
+
+// makeRequestsByPubKey sends requests to peers identified by their pubKey (stable identity).
+// The map key is pubKey, which never changes across epoch rotations.
+func (n *NodeContent) makeRequestsByPubKey(
+	objs map[types.Ed25519Key]interface{},
 	minSuccess int,
 	singleTimeout, overallTimeout time.Duration,
 	evID ...uint64,
@@ -633,21 +705,21 @@ func (n *NodeContent) makeRequests(
 		doneOnce     sync.Once
 	)
 
-	for peerID, obj := range objs {
+	for pubKey, obj := range objs {
 		if getMessageType(obj) == "unknown" {
 			continue
 		}
 
 		wg.Add(1)
-		go func(peerID uint16, obj interface{}) {
+		go func(pubKey types.Ed25519Key, obj interface{}) {
 			defer wg.Done()
 
 			reqCtx, reqCancel := context.WithTimeout(ctx, singleTimeout)
 			defer reqCancel()
 
-			res, err := n.sendRequest(reqCtx, peerID, obj, eventID)
+			res, err := n.sendRequestByPubKey(reqCtx, pubKey, obj, eventID)
 			if err != nil {
-				log.Trace(log.DA, "sendRequest failed", "peerID", peerID, "err", err)
+				log.Trace(log.DA, "sendRequestByPubKey failed", "pubKey", pubKey.String()[:16], "err", err)
 				return
 			}
 
@@ -656,7 +728,7 @@ func (n *NodeContent) makeRequests(
 				return
 			}
 			resultsCh <- res
-		}(peerID, obj)
+		}(pubKey, obj)
 	}
 
 	// Streaming collection
@@ -685,7 +757,7 @@ func (n *NodeContent) makeRequests(
 	sc := successCount
 	mu.Unlock()
 
-	log.Trace(log.DA, "makeRequests: successCount", sc)
+	log.Trace(log.DA, "makeRequestsByPubKey: successCount", sc)
 
 	if sc < minSuccess {
 		return nil, fmt.Errorf("not enough successful requests (successCount:%d < minSuccess:%d)", sc, minSuccess)

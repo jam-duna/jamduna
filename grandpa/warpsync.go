@@ -95,7 +95,7 @@ func (g *Grandpa) ProcessWarpSyncFragment(fragment types.WarpSyncFragment) error
 	setID := fragment.Justification.SetId
 
 	// Verify the fragment's justification against the current authority set
-	if err := g.VerifyWarpSyncJustification(fragment); err != nil {
+	if err := g.VerifyWarpSyncJustification(fragment); err != nil { // TODO : verify the pub is in that set
 		return fmt.Errorf("justification verification failed for setID %d: %w", setID, err)
 	}
 
@@ -110,6 +110,11 @@ func (g *Grandpa) ProcessWarpSyncFragment(fragment types.WarpSyncFragment) error
 		}
 		// Update the scheduled authority set for the next epoch
 		g.SetScheduledAuthoritySet(newValidators)
+
+		// Cache validators in the manager for the new SetID
+		if g.manager != nil {
+			g.manager.CacheValidatorsForSetID(setID+1, newValidators)
+		}
 	}
 
 	// Store the fragment for future use

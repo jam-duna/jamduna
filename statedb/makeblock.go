@@ -232,6 +232,12 @@ func (s *StateDB) BuildBlock(
 	if err != nil {
 		return nil, err
 	}
+	if isNewEpoch {
+		authorIndex, err = sf.GetAuthorIndex(credential.BandersnatchPub.Hash(), "Next")
+		if err != nil {
+			return nil, err
+		}
+	}
 	h.AuthorIndex = authorIndex
 
 	// 3) Assemble Block

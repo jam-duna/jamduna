@@ -429,11 +429,78 @@ func (s *SafroleState) GetPrevValidatorIndex(key types.Ed25519Key) int {
 	return -1
 }
 
+func (s *SafroleState) GetValidatorPubKeyAtTimeSlot(validatorIdx uint16, slot uint32) (types.Ed25519Key, bool) {
+	epoch, _ := s.EpochAndPhase(slot)
+	currEpoch, _ := s.EpochAndPhase(s.Timeslot)
+
+	if epoch == currEpoch {
+		// Use current validator set
+		if int(validatorIdx) < len(s.CurrValidators) {
+			return s.CurrValidators[validatorIdx].Ed25519, true
+		}
+	} else if epoch == currEpoch-1 {
+		// Use previous validator set
+		if int(validatorIdx) < len(s.PrevValidators) {
+			return s.PrevValidators[validatorIdx].Ed25519, true
+		}
+	} else if epoch == currEpoch+1 {
+		// Slot is in the next epoch - use NextValidators (handles stale statedb scenario)
+		if int(validatorIdx) < len(s.NextValidators) {
+			return s.NextValidators[validatorIdx].Ed25519, true
+		}
+	}
+	// Fallback: try current validators for any slot (useful during initialization)
+	if int(validatorIdx) < len(s.CurrValidators) {
+		return s.CurrValidators[validatorIdx].Ed25519, true
+	}
+	return types.Ed25519Key{}, false
+}
+
+func (s *SafroleState) GetValidatorIndexAtSlot(key types.Ed25519Key, slot uint32) int {
+	epoch, _ := s.EpochAndPhase(slot)
+	currEpoch, _ := s.EpochAndPhase(s.Timeslot)
+
+	if epoch == currEpoch {
+		for i, v := range s.CurrValidators {
+			if v.Ed25519 == key {
+				return i
+			}
+		}
+	} else if epoch == currEpoch-1 {
+		for i, v := range s.PrevValidators {
+			if v.Ed25519 == key {
+				return i
+			}
+		}
+	} else if epoch == currEpoch+1 {
+		// Slot is in the next epoch - use NextValidators (handles stale statedb scenario)
+		for i, v := range s.NextValidators {
+			if v.Ed25519 == key {
+				return i
+			}
+		}
+	}
+	// Fallback: try current validators (useful during initialization)
+	for i, v := range s.CurrValidators {
+		if v.Ed25519 == key {
+			return i
+		}
+	}
+	return -1
+}
+
 func (s *SafroleState) GetCurrValidator(index int) (types.Validator, error) {
 	if index < 0 || index >= len(s.CurrValidators) {
 		return types.Validator{}, fmt.Errorf("validator index %d out of range [0, %d)", index, len(s.CurrValidators))
 	}
 	return s.CurrValidators[index], nil
+}
+
+func (s *SafroleState) GetNextValidator(index int) (types.Validator, error) {
+	if index < 0 || index >= len(s.NextValidators) {
+		return types.Validator{}, fmt.Errorf("validator index %d out of range [0, %d)", index, len(s.NextValidators))
+	}
+	return s.NextValidators[index], nil
 }
 
 func (s *SafroleState) SetValidatorData(validatorsData []byte, phase string) error {
@@ -584,7 +651,7 @@ func (s *SafroleState) generateTicket(secret bandersnatch.BanderSnatchSecret, ta
 }
 
 // ringVRF
-func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (common.Hash, error) {
+func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool, isTicketSubmissionClosed bool) (common.Hash, error) {
 	if t.Attempt >= types.TicketEntriesPerValidator {
 		return common.Hash{}, jamerrors.ErrTBadTicketAttemptNumber
 	}
@@ -592,7 +659,6 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (co
 	//step 0: derive ticketVRFInput
 	entroptIdx := 2
 	targetEpochRandomness := s.Entropy[entroptIdx]
-	isTicketSubmissionClosed := s.IsTicketSubmissionClosed(uint32(s.Timeslot))
 
 	if isTicketSubmissionClosed || shifted {
 		entroptIdx = 1
@@ -626,14 +692,13 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool) (co
 	return common.Hash{}, jamerrors.ErrTBadRingProof
 }
 
-func (s *SafroleState) validateTicketWithRing(t *types.Ticket, shifted bool, ringBytes []byte, ringSize int) (common.Hash, error) {
+func (s *SafroleState) validateTicketWithRing(t *types.Ticket, shifted bool, isTicketSubmissionClosed bool, ringBytes []byte, ringSize int) (common.Hash, error) {
 	if t.Attempt >= types.TicketEntriesPerValidator {
 		return common.Hash{}, jamerrors.ErrTBadTicketAttemptNumber
 	}
 
 	entroptIdx := 2
 	targetEpochRandomness := s.Entropy[entroptIdx]
-	isTicketSubmissionClosed := s.IsTicketSubmissionClosed(uint32(s.Timeslot))
 
 	if isTicketSubmissionClosed || shifted {
 		entroptIdx = 1
@@ -1143,7 +1208,7 @@ func (s *SafroleState) ValidateTicketTransition(targetJCE uint32, fresh_randomne
 	return s2, epochAdvanced, nil
 }
 
-func (s2 *SafroleState) validateTicketsParallel(tickets []types.Ticket, isShifted bool, ringBytes []byte, ringSize int, accMap map[common.Hash]bool, valid_tickets map[common.Hash]common.Hash) error {
+func (s2 *SafroleState) validateTicketsParallel(tickets []types.Ticket, isShifted bool, isTicketSubmissionClosed bool, ringBytes []byte, ringSize int, accMap map[common.Hash]bool, valid_tickets map[common.Hash]common.Hash) error {
 	var wg sync.WaitGroup
 	errors := make(chan error, len(tickets))
 	var mu sync.Mutex
@@ -1162,7 +1227,7 @@ func (s2 *SafroleState) validateTicketsParallel(tickets []types.Ticket, isShifte
 			ticket_id, ticketWasValid := valid_tickets[ticket_hash]
 			var err error
 			if !ticketWasValid {
-				ticket_id, err = s2.validateTicketWithRing(&t, isShifted, ringBytes, rSize)
+				ticket_id, err = s2.validateTicketWithRing(&t, isShifted, isTicketSubmissionClosed, ringBytes, rSize)
 				if err != nil {
 					errors <- jamerrors.ErrTBadRingProof
 					return
@@ -1192,19 +1257,19 @@ func (s2 *SafroleState) validateTicketsParallel(tickets []types.Ticket, isShifte
 	return nil
 }
 
-func (s2 *SafroleState) ValidateTickets(tickets []types.Ticket, isShifted bool, ringBytes []byte, ringSize int, accMap map[common.Hash]bool, valid_tickets map[common.Hash]common.Hash) error {
+func (s2 *SafroleState) ValidateTickets(tickets []types.Ticket, isShifted bool, isTicketSubmissionClosed bool, ringBytes []byte, ringSize int, accMap map[common.Hash]bool, valid_tickets map[common.Hash]common.Hash) error {
 	var err error
 	if useSerializedValidation {
 		// SERIALIZED: Deterministic, consensus-safe
-		err = s2.validateTicketsSerialized(tickets, isShifted, ringBytes, ringSize, accMap, valid_tickets)
+		err = s2.validateTicketsSerialized(tickets, isShifted, isTicketSubmissionClosed, ringBytes, ringSize, accMap, valid_tickets)
 	} else {
 		// PARALLEL: Faster but may have non-deterministic behavior
-		err = s2.validateTicketsParallel(tickets, isShifted, ringBytes, ringSize, accMap, valid_tickets)
+		err = s2.validateTicketsParallel(tickets, isShifted, isTicketSubmissionClosed, ringBytes, ringSize, accMap, valid_tickets)
 	}
 	return err
 }
 
-func (s2 *SafroleState) validateTicketsSerialized(tickets []types.Ticket, isShifted bool, ringBytes []byte, ringSize int, accMap map[common.Hash]bool, valid_tickets map[common.Hash]common.Hash) error {
+func (s2 *SafroleState) validateTicketsSerialized(tickets []types.Ticket, isShifted bool, isTicketSubmissionClosed bool, ringBytes []byte, ringSize int, accMap map[common.Hash]bool, valid_tickets map[common.Hash]common.Hash) error {
 	for _, t := range tickets {
 		if t.Attempt >= types.TicketEntriesPerValidator {
 			return jamerrors.ErrTBadTicketAttemptNumber
@@ -1215,7 +1280,7 @@ func (s2 *SafroleState) validateTicketsSerialized(tickets []types.Ticket, isShif
 		ticket_id, ticketWasValid := valid_tickets[ticket_hash]
 		var err error
 		if !ticketWasValid {
-			ticket_id, err = s2.validateTicketWithRing(&t, isShifted, ringBytes, ringSize)
+			ticket_id, err = s2.validateTicketWithRing(&t, isShifted, isTicketSubmissionClosed, ringBytes, ringSize)
 			if err != nil {
 				return jamerrors.ErrTBadRingProof
 			}
@@ -1237,7 +1302,14 @@ func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32,
 		valid_tickets = make(map[common.Hash]common.Hash)
 	}
 
-	prevEpoch, prevPhase := s.EpochAndPhase(uint32(s.Timeslot))
+	// Use targetJCE-1 for prev epoch calculation instead of s.Timeslot
+	// This avoids issues when s.Timeslot is stale (e.g., still at genesis 0)
+	// The parent slot is targetJCE-1, which determines if we're crossing an epoch boundary
+	prevSlot := targetJCE - 1
+	if targetJCE == 0 {
+		prevSlot = 0 // Handle edge case at genesis
+	}
+	prevEpoch, prevPhase := s.EpochAndPhase(prevSlot)
 	currEpoch, currPhase := s.EpochAndPhase(targetJCE)
 	// ticket mark check
 	if prevEpoch == currEpoch && (prevPhase < types.TicketSubmissionEndSlot && currPhase >= types.TicketSubmissionEndSlot) && len(s.NextEpochTicketsAccumulator) == types.EpochLength {
@@ -1292,6 +1364,9 @@ func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32,
 		s2.StableEntropy(s, new_entropy_0)
 	}
 
+	// Compute isTicketSubmissionClosed from currPhase (derived from targetJCE), not s.Timeslot
+	isTicketSubmissionClosed := currPhase >= types.TicketSubmissionEndSlot
+
 	ringBytes, ringSize := s2.GetRingSet("Next")
 
 	accMap := make(map[common.Hash]bool)
@@ -1301,7 +1376,7 @@ func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32,
 
 	ticketBodies := make([]types.TicketBody, 0) // n
 
-	err := s2.ValidateTickets(tickets, isShifted, ringBytes, ringSize, accMap, valid_tickets)
+	err := s2.ValidateTickets(tickets, isShifted, isTicketSubmissionClosed, ringBytes, ringSize, accMap, valid_tickets)
 	if err != nil {
 		return nil, err
 	}

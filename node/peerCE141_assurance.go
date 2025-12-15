@@ -35,6 +35,13 @@ type JAMSNPAssuranceDistribution struct {
 	Signature types.Ed25519Signature           `json:"signature"`
 }
 
+type AssuranceObject struct {
+	Anchor     common.Hash                      `json:"anchor"`
+	Bitfield   [types.Avail_bitfield_bytes]byte `json:"bitfield"`
+	Signature  types.Ed25519Signature           `json:"signature"`
+	Ed25519Key types.Ed25519Key                 `json:"ed25519_key"`
+}
+
 // ToBytes serializes the JAMSNPAssurance struct into a byte array
 func (assurance *JAMSNPAssuranceDistribution) ToBytes() ([]byte, error) {
 	buf := new(bytes.Buffer)
@@ -97,51 +104,83 @@ func (p *Peer) SendAssurance(ctx context.Context, a *types.Assurance, eventID ui
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
 		// Telemetry: Assurance send failed (event 127)
-		p.node.telemetryClient.AssuranceSendFailed(eventID, p.GetPeer32(), err.Error())
+		p.node.telemetryClient.AssuranceSendFailed(eventID, p.PeerKey(), err.Error())
 		return fmt.Errorf("openStream[CE141_AssuranceDistribution]: %w", err)
 	}
 	defer stream.Close()
 
-	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
 		// Telemetry: Assurance send failed (event 127)
-		p.node.telemetryClient.AssuranceSendFailed(eventID, p.GetPeer32(), err.Error())
+		p.node.telemetryClient.AssuranceSendFailed(eventID, p.PeerKey(), err.Error())
 		return fmt.Errorf("sendQuicBytes[CE141_AssuranceDistribution]: %w", err)
 	}
 
 	// Telemetry: Assurance sent (event 128)
-	p.node.telemetryClient.AssuranceSent(eventID, p.GetPeer32())
+	p.node.telemetryClient.AssuranceSent(eventID, p.PeerKey())
 
 	return nil
 }
 
-func (n *Node) onAssuranceDistribution(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
+func (n *Node) onAssuranceDistribution(ctx context.Context, stream quic.Stream, msg []byte, peerKey string) error {
 	defer stream.Close()
+
+	// Get peer to access its PeerID for telemetry
+	peer, ok := n.peersByPubKey[peerKey]
+	if !ok {
+		return fmt.Errorf("onAssuranceDistribution: peer not found for key %s", peerKey)
+	}
 
 	var newReq JAMSNPAssuranceDistribution
 	if err := newReq.FromBytes(msg); err != nil {
 		// Telemetry: Assurance receive failed (event 130)
-		n.telemetryClient.AssuranceReceiveFailed(n.PeerID32(peerID), err.Error())
+		n.telemetryClient.AssuranceReceiveFailed(PubkeyBytes(peer.Validator.Ed25519.String()), err.Error())
 		return fmt.Errorf("onAssuranceDistribution: failed to decode message: %w", err)
 	}
 
 	// Telemetry: Assurance received (event 131)
-	n.telemetryClient.AssuranceReceived(n.PeerID32(peerID), newReq.Anchor)
+	n.telemetryClient.AssuranceReceived(PubkeyBytes(peer.Validator.Ed25519.String()), newReq.Anchor)
 
-	assurance := types.Assurance{
-		Anchor:         newReq.Anchor,
-		Bitfield:       newReq.Bitfield,
-		ValidatorIndex: peerID,
-		Signature:      newReq.Signature,
+	// Find the correct validator index by verifying signature against all validators
+	// The CE141 protocol does NOT include validatorIndex, so we must derive it
+
+	assurance := AssuranceObject{
+		Anchor:     newReq.Anchor,
+		Bitfield:   newReq.Bitfield,
+		Ed25519Key: peer.Validator.Ed25519,
+		Signature:  newReq.Signature,
 	}
 
 	select {
 	case <-ctx.Done():
 		return fmt.Errorf("onAssuranceDistribution: context cancelled: %w", ctx.Err())
 	case n.assurancesCh <- assurance:
-		log.Trace(log.Quic, "onAssuranceDistribution received", "peerID", peerID, "anchor", newReq.Anchor)
+		log.Trace(log.Quic, "onAssuranceDistribution received", "peerKey", peerKey, "anchor", newReq.Anchor)
 	default:
-		log.Warn(log.Quic, "onAssuranceDistribution: assurance channel full, dropping", "peerID", peerID)
+		log.Warn(log.Quic, "onAssuranceDistribution: assurance channel full, dropping", "peerKey", peerKey)
 	}
 
 	return nil
+}
+
+func (n *Node) findValidatorIndexByAnchor(anchor common.Hash, ed25519key types.Ed25519Key) (uint16, error) {
+	safrole := n.statedb.GetSafrole()
+	statedb := n.statedb
+	if statedb != nil && statedb.Block.Header.Hash() == anchor {
+		for index, v := range safrole.CurrValidators {
+			if bytes.Equal(v.Ed25519[:], ed25519key[:]) {
+				return uint16(index), nil
+			}
+		}
+	} else {
+		statedb := n.statedbMap[anchor]
+		if statedb != nil {
+			safrole = statedb.GetSafrole()
+			for index, v := range safrole.CurrValidators {
+				if bytes.Equal(v.Ed25519[:], ed25519key[:]) {
+					return uint16(index), nil
+				}
+			}
+		}
+	}
+	return 0, fmt.Errorf("signature does not match any known validator")
 }

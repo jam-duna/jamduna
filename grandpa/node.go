@@ -9,7 +9,6 @@ import (
 	"github.com/colorfulnotion/jam/bls"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -130,7 +129,7 @@ func (m *MockGrandpaNode) Broadcast(msg interface{}, evID ...uint64) {
 }
 
 func SetupGrandpaNodes(numNodes int, genesis_blk types.Block) []*MockGrandpaNode {
-	validators, secrets, err := statedb.GenerateValidatorSecretSet(numNodes)
+	validators, secrets, err := GenerateValidatorSecretSet(numNodes)
 	if err != nil {
 		panic(err)
 	}
@@ -163,6 +162,7 @@ func SetupGrandpaNodes(numNodes int, genesis_blk types.Block) []*MockGrandpaNode
 
 	return mockNodes
 }
+
 func fakeroot() types.Block {
 	return types.Block{
 		Header: types.BlockHeader{

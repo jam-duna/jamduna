@@ -1,12 +1,11 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
-	"io"
-
-	"bytes"
 	"fmt"
+	"io"
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
@@ -107,11 +106,14 @@ func (req *JAMSNPStateRequest) FromBytes(data []byte) error {
 }
 
 type JAMSNPStateResponse struct {
-	Boundary  [][]byte              `json:"boundary"`
-	KeyValues []types.StateKeyValue `json:"keyValues"`
+	Boundary  []byte                  `json:"boundary"`
+	KeyValues types.StateKeyValueList `json:"keyValues"`
 }
 
-func (p *Peer) SendStateRequest(ctx context.Context, headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32) (err error) {
+const DefaultMaxStateSize = 5 * 1024 * 1024
+
+// FetchStateRange fetches a single page of state. Returns truncated=true if more data available.
+func (p *Peer) FetchStateRange(ctx context.Context, headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32) (resp *JAMSNPStateResponse, truncated bool, err error) {
 	req := &JAMSNPStateRequest{
 		HeaderHash:  headerHash,
 		StartKey:    startKey,
@@ -120,85 +122,168 @@ func (p *Peer) SendStateRequest(ctx context.Context, headerHash common.Hash, sta
 	}
 	reqBytes, err := req.ToBytes()
 	if err != nil {
-		return err
+		return nil, false, fmt.Errorf("FetchStateRange: %w", err)
 	}
+
 	code := uint8(CE129_StateRequest)
 	stream, err := p.openStream(ctx, code)
-	// --> Header Hash ++ Start Key ++ End Key ++ Maximum Size
 	if err != nil {
-		return err
+		return nil, false, fmt.Errorf("FetchStateRange: %w", err)
 	}
-	err = sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code)
-	if err != nil {
-		return err
+
+	if err = sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
+		return nil, false, fmt.Errorf("FetchStateRange: failed to send request: %w", err)
 	}
 	stream.Close()
 
-	parts, err := receiveMultiple(ctx, stream, 2, p.PeerID, code)
+	// <-- [Boundary Node]
+	boundaryBytes, err := receiveQuicBytes(ctx, stream, p.Validator.Ed25519.String(), code)
+	if err != nil {
+		return nil, false, fmt.Errorf("FetchStateRange: failed to receive boundary nodes: %w", err)
+	}
+
+	// <-- [Key ++ Value]
+	kvBytes, err := receiveQuicBytes(ctx, stream, p.Validator.Ed25519.String(), code)
+	if err != nil {
+		return nil, false, fmt.Errorf("FetchStateRange: failed to receive key-values: %w", err)
+	}
+
+	resp = &JAMSNPStateResponse{Boundary: boundaryBytes}
+	if err = resp.KeyValues.FromBytes(kvBytes); err != nil {
+		return nil, false, fmt.Errorf("FetchStateRange: %w", err)
+	}
+
+	if len(resp.KeyValues.Items) > 0 {
+		lastKey := resp.KeyValues.LastKey()
+		truncated = compareKeys(*lastKey, endKey) < 0
+	}
+
+	log.Debug(log.Node, "FetchStateRange",
+		"startKey", fmt.Sprintf("%x", startKey[:4]),
+		"endKey", fmt.Sprintf("%x", endKey[:4]),
+		"numKVs", len(resp.KeyValues.Items),
+		"truncated", truncated)
+
+	return resp, truncated, nil
+}
+
+func (p *Peer) SendStateRequest(ctx context.Context, headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32) error {
+	resp, _, err := p.FetchStateRange(ctx, headerHash, startKey, endKey, maximumSize)
 	if err != nil {
 		return err
 	}
-
-	//<-- [Boundary Node]
-	boundaryNode := parts[0]
-	//<-- [Key ++ Value]
-	keyVal := parts[1]
-	log.Info(log.Node, "SendStateRequest: received boundary node and key-value pairs",
-		"boundaryNodeLength", len(boundaryNode), "keyValLength", len(keyVal))
-	fmt.Printf("SendStateRequest: %x\n", keyVal)
+	log.Info(log.Node, "SendStateRequest",
+		"boundaryLength", len(resp.Boundary),
+		"numKeyValues", len(resp.KeyValues.Items))
 	return nil
+}
+
+func incrementKey(key [31]byte) ([31]byte, bool) {
+	result := key
+	for i := 30; i >= 0; i-- {
+		if result[i] < 0xFF {
+			result[i]++
+			return result, true
+		}
+		result[i] = 0
+	}
+	return result, false
+}
+
+func compareKeys(a, b [31]byte) int {
+	return bytes.Compare(a[:], b[:])
+}
+
+// StatePageHandler is called for each page. Return false to stop.
+type StatePageHandler func(boundary []byte, keyValues types.StateKeyValueList) bool
+
+// FetchStatePaginated fetches state with automatic pagination.
+func (p *Peer) FetchStatePaginated(ctx context.Context, headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32, handler StatePageHandler) (totalKVs int, err error) {
+	currentStart := startKey
+
+	for {
+		if ctx.Err() != nil {
+			return totalKVs, ctx.Err()
+		}
+
+		resp, truncated, err := p.FetchStateRange(ctx, headerHash, currentStart, endKey, maximumSize)
+		if err != nil {
+			return totalKVs, err
+		}
+
+		if len(resp.KeyValues.Items) == 0 {
+			break
+		}
+
+		totalKVs += len(resp.KeyValues.Items)
+
+		if handler != nil && !handler(resp.Boundary, resp.KeyValues) {
+			break
+		}
+
+		if !truncated {
+			break
+		}
+
+		lastKey := resp.KeyValues.LastKey()
+		nextStart, ok := incrementKey(*lastKey)
+		if !ok {
+			break
+		}
+
+		if compareKeys(nextStart, currentStart) <= 0 {
+			return totalKVs, fmt.Errorf("FetchStatePaginated: no progress at key %x", currentStart[:4])
+		}
+
+		currentStart = nextStart
+	}
+
+	return totalKVs, nil
 }
 
 func (n *NodeContent) onStateRequest(ctx context.Context, stream quic.Stream, msg []byte) (err error) {
 	defer stream.Close()
 
-	var newReq JAMSNPStateRequest
-	// Deserialize byte array back into the struct
-	err = newReq.FromBytes(msg)
-	if err != nil {
-		fmt.Println("Error deserializing:", err)
+	var req JAMSNPStateRequest
+	if err = req.FromBytes(msg); err != nil {
 		stream.CancelWrite(ErrInvalidData)
-		return fmt.Errorf("onStateRequest: failed to decode request: %w", err)
+		return fmt.Errorf("onStateRequest: %w", err)
 	}
 
-	// Pull state data: boundary nodes + key-value pairs within given size and range
-	boundarynodes, keyvalues, ok, err := n.GetState(newReq.HeaderHash, newReq.StartKey, newReq.EndKey, newReq.MaximumSize)
+	boundarynodes, keyvalues, ok, err := n.GetState(req.HeaderHash, req.StartKey, req.EndKey, req.MaximumSize)
 	if err != nil {
 		stream.CancelWrite(ErrKeyNotFound)
 		return fmt.Errorf("onStateRequest: GetState error: %w", err)
 	}
 	if !ok {
-		// No state found for the given range
-		log.Warn(log.Node, "onStateRequest: state not found", "headerHash", newReq.HeaderHash)
+		log.Warn(log.Node, "onStateRequest: state not found", "headerHash", req.HeaderHash)
 		stream.CancelWrite(ErrKeyNotFound)
 		return nil
 	}
 
 	// <-- [Boundary Node]
-	err = sendQuicBytes(ctx, stream, common.ConcatenateByteSlices(boundarynodes), n.id, CE129_StateRequest)
-	if err != nil {
+	if err = sendQuicBytes(ctx, stream, common.ConcatenateByteSlices(boundarynodes), n.GetEd25519Key().String(), CE129_StateRequest); err != nil {
 		stream.CancelWrite(ErrCECode)
 		return fmt.Errorf("onStateRequest: failed to send boundarynodes: %w", err)
 	}
 
-	// <-- [Key ++ Value]
 	select {
 	case <-ctx.Done():
 		stream.CancelWrite(ErrCECode)
 		return fmt.Errorf("onStateRequest: context cancelled before sending keyvalues: %w", ctx.Err())
 	default:
 	}
+
+	// <-- [Key ++ Value]
 	kvbytes, err := keyvalues.ToBytes()
 	if err != nil {
 		stream.CancelWrite(ErrInvalidData)
 		return fmt.Errorf("onStateRequest: failed to encode keyvalues: %w", err)
 	}
-	err = sendQuicBytes(ctx, stream, kvbytes, n.id, CE129_StateRequest)
-	if err != nil {
+	if err = sendQuicBytes(ctx, stream, kvbytes, n.GetEd25519Key().String(), CE129_StateRequest); err != nil {
 		stream.CancelWrite(ErrCECode)
 		return fmt.Errorf("onStateRequest: failed to send keyvalues: %w", err)
 	}
 
-	// <-- FIN
 	return nil
 }

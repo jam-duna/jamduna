@@ -1,7 +1,7 @@
-TIMEOUT            ?= 10m
+TIMEOUT            ?= 30m
 FIBTIMEOUT         ?= 30m
 TAGS               ?= tiny
-TargetN            ?= 6
+TargetN            ?= 30
 TargetAlgoN		   ?= 20
 TargetFibN		   ?= 10
 JCE_MANUAL         ?= true
@@ -56,6 +56,16 @@ auth_copy:
 	@go test -timeout $(TIMEOUT) -v -run '^TestAuthCopy$$' \
 	  -tags "network_test,$(TAGS)" $(TARGET_PARAM) \
 	  -jce_manual=$(JCE_MANUAL) -jam_node=$(JAM_NODE) -jam_local_client=$(JAM_LOCAL_CLIENT) $(PVM_PARAM)
+
+fallback:
+	@echo "Running TestFallback with timeout $(TIMEOUT)..."
+	@echo "go test -timeout $(TIMEOUT) -v -run TestFallback -tags \"network_test,$(TAGS)\" -jam_node=true"
+	@go test -timeout $(TIMEOUT) -v -run TestFallback -tags "network_test,$(TAGS)" -jam_node=true
+
+safrole:
+	@echo "Running TestNodeSafrole with timeout 20m..."
+	@echo "go test -timeout 20m -v -run TestSafrole -tags \"network_test,$(TAGS)\" -jam_node=true"
+	@go test -timeout 20m -v -run TestSafrole -tags "network_test,$(TAGS)" -jam_node=true
 
 disputes:
 	@echo "Running TestEVMDisputes with timeout $(TIMEOUT)..."

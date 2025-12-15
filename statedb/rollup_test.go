@@ -39,7 +39,7 @@ func TestAlgoBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("initStorage failed: %v", err)
 	}
-	c, err := NewRollup(storage, AlgoServiceCode)
+	c, err := NewRollupNode(storage, AlgoServiceCode)
 	if err != nil {
 		t.Fatalf("NewRollup failed: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestEVMBlocksMath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("initStorage failed: %v", err)
 	}
-	chain, err := NewRollup(storage, EVMServiceCode)
+	chain, err := NewRollupNode(storage, EVMServiceCode)
 	if err != nil {
 		t.Fatalf("NewRollup failed: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestEVMBlocksMath(t *testing.T) {
 // RunAccumulateHostFunctionsTest submits transactions for each accumulate host function via governance
 // For each function: creates a proposal, votes on it, then executes it (3 transactions per function)
 // All transactions are signed by EVM dev account 0 (which has governance voting power) and submitted in a single block
-func RunAccumulateHostFunctionsTest(b *Rollup) error {
+func RunAccumulateHostFunctionsTest(b *RollupNode) error {
 	log.Info(log.Node, "=== Testing Accumulate Host Functions ===")
 
 	// Get issuer account
@@ -538,7 +538,7 @@ func RunAccumulateHostFunctionsTest(b *Rollup) error {
 	return nil
 }
 
-func RunTransfersRound(b *Rollup, transfers []TransferTriple, round int) error {
+func RunTransfersRound(b *RollupNode, transfers []TransferTriple, round int) error {
 	const numAccounts = 11 // 10 dev accounts + 1 coinbase
 
 	// Coinbase address receives all transaction fees
@@ -1340,7 +1340,7 @@ func TestEVMBlocksTransfers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("initStorage failed: %v", err)
 	}
-	chain, err := NewRollup(storage, EVMServiceCode)
+	chain, err := NewRollupNode(storage, EVMServiceCode)
 	if err != nil {
 		t.Fatalf("NewRollup failed: %v", err)
 	}
@@ -1414,7 +1414,7 @@ func TestEVMBlocksDeployContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("initStorage failed: %v", err)
 	}
-	b, err := NewRollup(storage, EVMServiceCode)
+	b, err := NewRollupNode(storage, EVMServiceCode)
 	if err != nil {
 		t.Fatalf("NewRollup failed: %v", err)
 	}
@@ -1458,7 +1458,7 @@ func TestRewards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("initStorage failed: %v", err)
 	}
-	c, err := NewRollup(storage, EVMServiceCode)
+	c, err := NewRollupNode(storage, EVMServiceCode)
 	if err != nil {
 		t.Fatalf("NewRollup failed: %v", err)
 	}
@@ -1743,7 +1743,7 @@ func TestVerklePostStateVerification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("initStorage failed: %v", err)
 	}
-	chain, err := NewRollup(storage, EVMServiceCode)
+	chain, err := NewRollupNode(storage, EVMServiceCode)
 	if err != nil {
 		t.Fatalf("NewRollup failed: %v", err)
 	}

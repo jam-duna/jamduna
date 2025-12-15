@@ -34,12 +34,12 @@ func (p *Peer) SendWarpSyncRequest(ctx context.Context, req uint32) (types.WarpS
 	reqBytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(reqBytes, req)
 
-	if err := sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
 		return types.WarpSyncResponse{}, fmt.Errorf("sendQuicBytes[CE153_WarpSyncRequest] failed: %w", err)
 	}
 
 	// Receive: Catchup
-	respBytes, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
+	respBytes, err := receiveQuicBytes(ctx, stream, p.Validator.Ed25519.String(), code)
 	if err != nil {
 		return types.WarpSyncResponse{}, fmt.Errorf("receiveQuicBytes[CE153_WarpSyncRequest] failed: %w", err)
 	}
@@ -52,7 +52,7 @@ func (p *Peer) SendWarpSyncRequest(ctx context.Context, req uint32) (types.WarpS
 	return response, nil
 }
 
-func (n *Node) onWarpSyncRequest(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
+func (n *Node) onWarpSyncRequest(ctx context.Context, stream quic.Stream, msg []byte, peerKey string) error {
 	defer stream.Close()
 
 	// Decode: Set Id (uint32 in little-endian)
@@ -78,7 +78,7 @@ func (n *Node) onWarpSyncRequest(ctx context.Context, stream quic.Stream, msg []
 	}
 
 	code := uint8(CE153_WarpSyncRequest)
-	if err := sendQuicBytes(ctx, stream, respBytes, peerID, code); err != nil {
+	if err := sendQuicBytes(ctx, stream, respBytes, n.GetEd25519Key().String(), code); err != nil {
 		stream.CancelWrite(ErrCECode)
 		return fmt.Errorf("onWarpSyncRequest: sendQuicBytes failed: %w", err)
 	}

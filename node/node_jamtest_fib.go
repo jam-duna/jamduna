@@ -202,9 +202,16 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 			return
 		}
 
-		// TODO: Get exportedSegmentRoot from work report
-		// exportedSegmentRoot := wr.AvailabilitySpec.ExportedSegmentRoot
-		exportedSegmentRoot := common.Hash{}
+		// Get exportedSegmentRoot from work report using work package hash
+		workPackageHash := wp.Hash()
+		wr, err := n1.GetWorkReport(workPackageHash)
+		var exportedSegmentRoot common.Hash
+		if err != nil {
+			log.Warn(log.Node, "FIB: GetWorkReport failed", "workPackageHash", workPackageHash, "err", err)
+			exportedSegmentRoot = common.Hash{}
+		} else {
+			exportedSegmentRoot = wr.AvailabilitySpec.ExportedSegmentRoot
+		}
 
 		// Track this completed FIB for future imports
 		completedFibs = append(completedFibs, completedFibResult{

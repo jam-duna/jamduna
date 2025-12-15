@@ -15,14 +15,9 @@ func (n *NodeContent) GetBlockTree() *types.BlockTree {
 	return n.block_tree
 }
 
-// PeerID32 looks up a peer by ID and returns their Ed25519 public key as [32]byte for telemetry.
-// If the peer is not found, returns a zero-filled [32]byte.
-func (n *NodeContent) PeerID32(peerID uint16) [32]byte {
-	if peer, ok := n.peersInfo[peerID]; ok {
-		return [32]byte(peer.Validator.Ed25519)
-	}
-	// Return empty key if peer not found
-	return [32]byte{}
+// PubkeyBytes converts an Ed25519 pubkey hex string to [32]byte.
+func PubkeyBytes(peerKey string) [32]byte {
+	return [32]byte(common.HexToHash(peerKey))
 }
 
 func (n *NodeContent) SetServiceDir(dir string) {

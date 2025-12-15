@@ -224,7 +224,6 @@ func (p *Peer) ShareWorkPackage(
 	bundle types.WorkPackageBundle,
 	segmentRootLookup types.SegmentRootLookup,
 	pubKey types.Ed25519Key,
-	peerID uint16,
 	EventId uint64,
 ) (newReq JAMSNPWorkPackageShareResponse, err error) {
 
@@ -264,20 +263,20 @@ func (p *Peer) ShareWorkPackage(
 		WorkPackageHash: bundle.WorkPackage.Hash(),
 		SizeInBytes:     uint32(len(bundleBytes)),
 	}
-	p.node.telemetryClient.SharingWorkPackage(EventId, p.GetPeer32(), wpOutline)
+	p.node.telemetryClient.SharingWorkPackage(EventId, p.PeerKey(), wpOutline)
 
 	slot := common.GetWallClockJCE(fudgeFactorJCE)
-	log.Debug(log.R, "CE134-ShareWorkPackage OUTGOING", "NODE", p.node.id, "peer", peerID, "coreIndex", coreIndex, "slot", slot)
+	log.Debug(log.R, "CE134-ShareWorkPackage OUTGOING", "NODE", p.node.id, "peerKey", pubKey.ShortString(), "coreIndex", coreIndex, "slot", slot)
 	// Send request
 	// --> Core Index ++ Segment Root Mappings
-	if err = sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code); err != nil {
+	if err = sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
 		err = fmt.Errorf("sendQuicBytes1[CE134_WorkPackageShare]: %v", err)
 		// Telemetry: Work package failed (event 92)
 		p.node.telemetryClient.WorkPackageFailed(EventId, err.Error())
 		return
 	}
 	// --> Work Package Bundle
-	if err = sendQuicBytes(ctx, stream, encodedBundle, p.PeerID, code); err != nil {
+	if err = sendQuicBytes(ctx, stream, encodedBundle, p.Validator.Ed25519.String(), code); err != nil {
 		err = fmt.Errorf("sendQuicBytes2[CE134_WorkPackageShare]: %v", err)
 		// Telemetry: Work package failed (event 92)
 		p.node.telemetryClient.WorkPackageFailed(EventId, err.Error())
@@ -293,13 +292,13 @@ func (p *Peer) ShareWorkPackage(
 		"workPackageBundleBytes", fmt.Sprintf("0x%x", bundle.Bytes()),
 		"workPackageBundle", bundle.String(),
 	)
-	p.node.telemetryClient.BundleSent(EventId, p.node.PeerID32(p.PeerID))
+	p.node.telemetryClient.BundleSent(EventId, PubkeyBytes(p.Validator.Ed25519.String()))
 	// --> FIN
 	stream.Close()
 
 	// Receive response
 	//<-- Work Report Hash ++ Ed25519 Signature
-	respBytes, err := receiveQuicBytes(ctx, stream, p.PeerID, code)
+	respBytes, err := receiveQuicBytes(ctx, stream, p.Validator.Ed25519.String(), code)
 	if err != nil {
 		err = fmt.Errorf("receiveQuicBytes[CE134_WorkPackageShare]: %v", err)
 		// Telemetry: Work package failed (event 92)
@@ -324,7 +323,7 @@ func (p *Peer) ShareWorkPackage(
 	}
 
 	// Telemetry: Work report signature received (event 104)
-	p.node.telemetryClient.WorkReportSignatureReceived(EventId, p.GetPeer32(), workReportHash)
+	p.node.telemetryClient.WorkReportSignatureReceived(EventId, p.PeerKey(), workReportHash)
 
 	return newReq, nil
 }
@@ -343,8 +342,14 @@ func CompareSegmentRootLookup(a, b types.SegmentRootLookup) (bool, error) {
 	return len(mismatchIdx) == 0, fmt.Errorf("diff at %v", mismatchIdx)
 }
 
-func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) (err error) {
+func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg []byte, peerKey string) (err error) {
 	defer stream.Close()
+
+	// Get peer to access its PeerID for telemetry
+	peer, ok := n.peersByPubKey[peerKey]
+	if !ok {
+		return fmt.Errorf("onWorkPackageShare: peer not found for key %s", peerKey)
+	}
 
 	eventID := n.telemetryClient.GetEventID()
 
@@ -385,7 +390,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 			}
 		}
 	}
-	log.Debug(log.R, "CE134-ShareWorkPackage INCOMING", "NODE", n.id, "peer", peerID, "coreIndex", newReq.CoreIndex, "slot", slot)
+	log.Debug(log.R, "CE134-ShareWorkPackage INCOMING", "NODE", n.id, "peerKey", peerKey, "coreIndex", newReq.CoreIndex, "slot", slot)
 	if !inSet {
 		return fmt.Errorf("core index %d is not in the current guarantor assignments", newReq.CoreIndex)
 	}
@@ -395,7 +400,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 		return fmt.Errorf("Node %d is silent mode", n.id)
 	}
 
-	n.telemetryClient.WorkPackageBeingShared(n.PeerID32(peerID))
+	n.telemetryClient.WorkPackageBeingShared(PubkeyBytes(peer.Validator.Ed25519.String()))
 	// --> Work Package Bundle
 	// Read message length (4 bytes)
 	msgLenBytes := make([]byte, 4)
@@ -556,7 +561,7 @@ func (n *Node) onWorkPackageShare(ctx context.Context, stream quic.Stream, msg [
 	// Telemetry: Sending work report signature (event 103)
 	n.telemetryClient.WorkReportSignatureSent(eventID)
 
-	err = sendQuicBytes(ctx, stream, reqBytes, n.id, CE134_WorkPackageShare)
+	err = sendQuicBytes(ctx, stream, reqBytes, n.GetEd25519Key().String(), CE134_WorkPackageShare)
 	if err != nil {
 		return fmt.Errorf("onWorkPackageShare: sendQuicBytes failed: %w", err)
 	}

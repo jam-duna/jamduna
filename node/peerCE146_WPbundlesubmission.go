@@ -115,7 +115,7 @@ func (p *Peer) SendBundleSubmission(ctx context.Context, coreIndex uint16, segme
 		return err
 	}
 	// --> Core Index ++ Segments-Root Mappings
-	err = sendQuicBytes(ctx, stream, reqBytes, p.PeerID, code)
+	err = sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code)
 	if err != nil {
 		return err
 	}
@@ -124,7 +124,7 @@ func (p *Peer) SendBundleSubmission(ctx context.Context, coreIndex uint16, segme
 	if err != nil {
 		return err
 	}
-	err = sendQuicBytes(ctx, stream, pkgBytes, p.PeerID, code)
+	err = sendQuicBytes(ctx, stream, pkgBytes, p.Validator.Ed25519.String(), code)
 	if err != nil {
 		return err
 	}
@@ -135,7 +135,7 @@ func (p *Peer) SendBundleSubmission(ctx context.Context, coreIndex uint16, segme
 	} else {
 		extrinsicsBytes = extrinsics.Bytes()
 	}
-	err = sendQuicBytes(ctx, stream, extrinsicsBytes, p.PeerID, code)
+	err = sendQuicBytes(ctx, stream, extrinsicsBytes, p.Validator.Ed25519.String(), code)
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func (p *Peer) SendBundleSubmission(ctx context.Context, coreIndex uint16, segme
 	for _, segment := range segments {
 		allSegments = append(allSegments, segment...)
 	}
-	err = sendQuicBytes(ctx, stream, allSegments, p.PeerID, code)
+	err = sendQuicBytes(ctx, stream, allSegments, p.Validator.Ed25519.String(), code)
 	if err != nil {
 		return err
 	}
@@ -154,7 +154,7 @@ func (p *Peer) SendBundleSubmission(ctx context.Context, coreIndex uint16, segme
 	for _, proof := range importProofs {
 		allImportProofs = append(allImportProofs, encodeImportProof(proof)...)
 	}
-	err = sendQuicBytes(ctx, stream, allImportProofs, p.PeerID, code)
+	err = sendQuicBytes(ctx, stream, allImportProofs, p.Validator.Ed25519.String(), code)
 	if err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func (p *Peer) SendBundleSubmission(ctx context.Context, coreIndex uint16, segme
 	return nil
 }
 
-func (n *Node) onBundleSubmission(ctx context.Context, stream quic.Stream, msg []byte, peerID uint16) error {
+func (n *Node) onBundleSubmission(ctx context.Context, stream quic.Stream, msg []byte, peerKey string) error {
 	defer stream.Close()
 
 	// Helper to cancel stream on error
@@ -178,7 +178,7 @@ func (n *Node) onBundleSubmission(ctx context.Context, stream quic.Stream, msg [
 		return cancelOnError(err)
 	}
 	var pkg types.WorkPackage
-	pkgBytes, err := receiveQuicBytes(ctx, stream, peerID, uint8(CE146_WPbundlesubmission))
+	pkgBytes, err := receiveQuicBytes(ctx, stream, peerKey, uint8(CE146_WPbundlesubmission))
 	if err != nil {
 		return cancelOnError(err)
 	}
@@ -188,7 +188,7 @@ func (n *Node) onBundleSubmission(ctx context.Context, stream quic.Stream, msg [
 	}
 	pkg = pkgInterface.(types.WorkPackage)
 
-	extrinsicsBytes, err := receiveQuicBytes(ctx, stream, peerID, uint8(CE146_WPbundlesubmission))
+	extrinsicsBytes, err := receiveQuicBytes(ctx, stream, peerKey, uint8(CE146_WPbundlesubmission))
 	if err != nil {
 		return cancelOnError(err)
 	}
@@ -200,7 +200,7 @@ func (n *Node) onBundleSubmission(ctx context.Context, stream quic.Stream, msg [
 	extrinsics = extrinsicsInterface.(types.ExtrinsicsBlobs)
 
 	// Receive all segments as single concatenated message, then split by SegmentSize
-	allSegmentsBytes, err := receiveQuicBytes(ctx, stream, peerID, uint8(CE146_WPbundlesubmission))
+	allSegmentsBytes, err := receiveQuicBytes(ctx, stream, peerKey, uint8(CE146_WPbundlesubmission))
 	if err != nil {
 		return cancelOnError(err)
 	}
@@ -209,7 +209,7 @@ func (n *Node) onBundleSubmission(ctx context.Context, stream quic.Stream, msg [
 		segments = append(segments, allSegmentsBytes[i:i+types.SegmentSize])
 	}
 
-	importProofsBytes, err := receiveQuicBytes(ctx, stream, peerID, uint8(CE146_WPbundlesubmission))
+	importProofsBytes, err := receiveQuicBytes(ctx, stream, peerKey, uint8(CE146_WPbundlesubmission))
 	if err != nil {
 		return cancelOnError(err)
 	}
@@ -227,11 +227,11 @@ func (n *Node) onBundleSubmission(ctx context.Context, stream quic.Stream, msg [
 	}
 
 	// Handle the received work-package bundle submission
-	return n.HandleBundleSubmission(peerID, info.CoreIndex, info.SegmentsRootMappings, pkg, extrinsics, segments, importProofs)
+	return n.HandleBundleSubmission(peerKey, info.CoreIndex, info.SegmentsRootMappings, pkg, extrinsics, segments, importProofs)
 }
 
-func (n *Node) HandleBundleSubmission(peerID uint16, coreIndex uint16, segmentsRootMappings []JAMSNPSegmentRootMapping, pkg types.WorkPackage, extrinsics types.ExtrinsicsBlobs, segments [][]byte, importProofs [][]common.Hash) error {
-	log.Debug(log.R, "CE146-HandleBundleSubmission INCOMING", "NODE", n.id, "peer", peerID, "coreIndex", coreIndex, "workpackage", pkg.Hash(), "numSegments", len(segments), "numImportProofs", len(importProofs))
+func (n *Node) HandleBundleSubmission(peerKey string, coreIndex uint16, segmentsRootMappings []JAMSNPSegmentRootMapping, pkg types.WorkPackage, extrinsics types.ExtrinsicsBlobs, segments [][]byte, importProofs [][]common.Hash) error {
+	log.Debug(log.R, "CE146-HandleBundleSubmission INCOMING", "NODE", n.id, "peerKey", peerKey, "coreIndex", coreIndex, "workpackage", pkg.Hash(), "numSegments", len(segments), "numImportProofs", len(importProofs))
 
 	if isSilent {
 		log.Info(log.R, "CE146-HandleBundleSubmission INCOMING - SILENT MODE", "NODE", n.id)

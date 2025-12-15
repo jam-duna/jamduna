@@ -45,7 +45,7 @@ func (p *Peer) GetMultiBlocks(latest_genesis_headerhash common.Hash, ctx context
 
 func (n *Node) CanProposeFirstBlock() bool {
 	is_ok := true
-	for _, peer := range n.peersInfo {
+	for _, peer := range n.peersByPubKey {
 		block, err := peer.SendBlockRequest(context.Background(), genesisBlockHash, 0, 1)
 		if err != nil {
 			continue

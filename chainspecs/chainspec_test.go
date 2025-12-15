@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/grandpa"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -17,7 +17,7 @@ func TestGenerateConfigFile(t *testing.T) {
 	var devCfg DevConfig
 	devCfg.GenesisValidators = make([]GenesisValidator, 6)
 	devCfg.ID = "dev"
-	validators, _, _ := statedb.GenerateValidatorSecretSet(6)
+	validators, _, _ := grandpa.GenerateValidatorSecretSet(6)
 	for i, validator := range validators {
 		devCfg.GenesisValidators[i].NetAddr = fmt.Sprintf("127.0.0.1:%d", 40000+i)
 		devCfg.GenesisValidators[i].PeerID = common.ToSAN(validator.Ed25519[:])

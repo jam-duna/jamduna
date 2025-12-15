@@ -82,10 +82,10 @@ func encodeapi(objectType string, inp string) (string, error) {
 		var workDigest types.WorkDigest
 		err = json.Unmarshal(input, &workDigest)
 		obj = workDigest
-	case "Announcement":
-		var announcement types.Announcement
-		err = json.Unmarshal(input, &announcement)
-		obj = announcement
+	case "AuditAnnouncement":
+		var auditAnnouncement types.AuditAnnouncement
+		err = json.Unmarshal(input, &auditAnnouncement)
+		obj = auditAnnouncement
 	case "Judgement":
 		var judgement types.Judgement
 		err = json.Unmarshal(input, &judgement)
@@ -222,8 +222,8 @@ func decodeapi(objectType, input string) (string, error) {
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Assurance{}))
 	case "Preimages":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Preimages{}))
-	case "Announcement":
-		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Announcement{}))
+	case "AuditAnnouncement":
+		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.AuditAnnouncement{}))
 	case "Judgement":
 		decodedStruct, _, err = types.Decode(encodedBytes, reflect.TypeOf(types.Judgement{}))
 	case "WorkPackage":
@@ -418,7 +418,7 @@ func main() {
 		}
 
 		// Perform the state transition check.
-		diffs, err := statedb.CheckStateTransitionWithOutput(test_storage, &stf, nil, statedb.BackendInterpreter, false)
+		diffs, err := statedb.CheckStateTransitionWithOutput(test_storage, &stf, nil, statedb.BackendInterpreter, false, "")
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
 			// Build an errors array from the diffs map using PoststateCompared

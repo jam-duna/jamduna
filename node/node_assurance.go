@@ -29,10 +29,9 @@ func (n *Node) isAssuring(workPackageHash common.Hash) bool {
 	return ok
 }
 
-// For generating assurance extrinsic
-func (n *Node) generateAssurance(headerHash common.Hash, timeslot uint32) (a types.Assurance, numCores uint16) {
-	// this will generate an assurance based on RECENT work packages (based on some block timeslot)
-	wph := n.statedb.GetJamState().GetRecentWorkPackagesFromAvailabilityAssignments(timeslot)
+// For generating assurance extrinsic. sdb must be the statedb for the block being assured.
+func (n *Node) generateAssurance(headerHash common.Hash, timeslot uint32, sdb *statedb.StateDB) (a types.Assurance, numCores uint16) {
+	wph := sdb.GetJamState().GetRecentWorkPackagesFromAvailabilityAssignments(timeslot)
 	numCores = 0
 	for core, wph := range wph {
 		if n.isAssuring(wph) {
@@ -43,9 +42,52 @@ func (n *Node) generateAssurance(headerHash common.Hash, timeslot uint32) (a typ
 	if numCores == 0 {
 		return a, numCores
 	}
+
+	// Node has ONE identity (pubkey). The validator INDEX can change after epoch rotation,
+	// but the signing key is always the same for now
+	selfPubKey := n.GetEd25519Key()
+	safrole := sdb.GetSafrole()
+
+	// CRITICAL: Verify the passed statedb matches the anchor slot
+	if safrole.Timeslot != timeslot {
+		log.Error(log.DA, "generateAssurance: STATEDB SLOT MISMATCH!",
+			"n", n.String(),
+			"anchorSlot", timeslot,
+			"statedbSlot", safrole.Timeslot,
+			"selfPubKey", selfPubKey.String()[:16])
+	}
+
+	// Find our validator index in the validator set active at the anchor slot
+	selfValidatorIdx := safrole.GetValidatorIndexAtSlot(selfPubKey, timeslot)
+	if selfValidatorIdx < 0 {
+		log.Warn(log.DA, "generateAssurance: self not in validator set at anchor slot",
+			"anchorSlot", timeslot, "selfPubKey", selfPubKey.String()[:16])
+		return a, 0
+	}
+
+	// DEBUG: Print signing key details for baseline verification
+	ed25519Secret := n.GetEd25519Secret()
+	epoch, phase := safrole.EpochAndPhase(timeslot)
+	statedbEpoch, _ := safrole.EpochAndPhase(safrole.Timeslot)
+	validatorSetUsed := "CurrValidators"
+	if epoch == statedbEpoch+1 {
+		validatorSetUsed = "NextValidators"
+	} else if epoch == statedbEpoch-1 {
+		validatorSetUsed = "PrevValidators"
+	}
+	log.Trace(log.DA, "generateAssurance SIGNING", "n", n.String(),
+		"selfPubKey", selfPubKey.String()[:16],
+		"validatorIdx", selfValidatorIdx,
+		"anchorSlot", timeslot,
+		"anchorEpoch", epoch,
+		"phase", phase,
+		"statedbSlot", safrole.Timeslot,
+		"statedbEpoch", statedbEpoch,
+		"validatorSetUsed", validatorSetUsed)
+
 	a.Anchor = headerHash
-	a.ValidatorIndex = n.id
-	a.Sign(n.GetEd25519Secret())
+	a.ValidatorIndex = uint16(selfValidatorIdx)
+	a.Sign(ed25519Secret)
 
 	n.telemetryClient.AssuranceProvided(a)
 	return
@@ -78,7 +120,10 @@ func (n *NodeContent) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs
 }
 
 // upon audit, this does CE138 AND CE139 calls to ALL Assurers
-func (n *NodeContent) FetchAllBundleAndSegmentShards(coreIdx uint16, erasureRoot common.Hash, exportedSegmentLength uint16, verify bool, eventID uint64) {
+// targetDB is the anchor-specific statedb for this audit operation (not n.statedb which may be at a different epoch)
+func (n *NodeContent) FetchAllBundleAndSegmentShards(coreIdx uint16, erasureRoot common.Hash, exportedSegmentLength uint16, verify bool, eventID uint64, targetDB *statedb.StateDB) {
+	safrole := targetDB.GetSafrole()
+	currSlot := safrole.Timeslot
 	// Auditor -> Assurer CE138
 	shardIdxMap := make(map[uint16]uint16) // shardIdx -> validatorIdx
 	for vIdx := range types.TotalValidators {
@@ -90,15 +135,22 @@ func (n *NodeContent) FetchAllBundleAndSegmentShards(coreIdx uint16, erasureRoot
 	for i := range types.TotalValidators {
 		shardIdx := uint16(i)
 		vIdx := shardIdxMap[shardIdx]
-		//bundleShard []byte, sClub common.Hash, encodedPath []byte, err error
-		bundleShard, sClub, encodedPath, err := n.peersInfo[vIdx].SendBundleShardRequest(context.TODO(), erasureRoot, shardIdx, eventID)
+		pubKey, ok := safrole.GetValidatorPubKeyAtTimeSlot(vIdx, currSlot)
+		if !ok {
+			continue
+		}
+		peer, ok := n.GetPeerByPubKey(pubKey)
+		if !ok {
+			continue
+		}
+		bundleShard, sClub, encodedPath, err := peer.SendBundleShardRequest(context.TODO(), erasureRoot, shardIdx, eventID)
 		if err == nil {
 			resps[shardIdx] = trie.Bundle138Resp{
 				TreeLen:     types.TotalValidators,
 				ShardIdx:    int(shardIdx),
 				ErasureRoot: erasureRoot,
-				LeafHash:    nil, // TODO: compute leaf hash
-				Path:        nil, // TODO
+				LeafHash:    nil,
+				Path:        nil,
 				EncodedPath: encodedPath,
 				BundleShard: bundleShard,
 				Sclub:       sClub.Bytes(),
@@ -111,8 +163,9 @@ func (n *NodeContent) FetchAllBundleAndSegmentShards(coreIdx uint16, erasureRoot
 	fn := fmt.Sprintf("bundle138resp-%d.json", exportedSegmentLength)
 	os.WriteFile(fn, []byte(types.ToJSON(resps)), 0644)
 	// Guarantor -> Assurer CE139
+
 	if exportedSegmentLength > 0 {
-		segmentsPerPageProof := uint16(64) // TODO: make this a constant
+		segmentsPerPageProof := uint16(64)
 		allsegmentindices := make([]uint16, exportedSegmentLength)
 		proofpages := make([]uint16, 0)
 		for i := range exportedSegmentLength {
@@ -129,8 +182,15 @@ func (n *NodeContent) FetchAllBundleAndSegmentShards(coreIdx uint16, erasureRoot
 		for i := range types.TotalValidators {
 			shardIdx := uint16(i)
 			vIdx := shardIdxMap[shardIdx]
-			// segmentShards []byte, justifications [][]byte, err error
-			segmentShards, justifications, err := n.peersInfo[vIdx].SendSegmentShardRequest(context.TODO(), erasureRoot, shardIdx, allsegmentindices, verify, eventID)
+			pubKey, ok := safrole.GetValidatorPubKeyAtTimeSlot(vIdx, currSlot)
+			if !ok {
+				continue
+			}
+			peer, ok := n.GetPeerByPubKey(pubKey)
+			if !ok {
+				continue
+			}
+			segmentShards, justifications, err := peer.SendSegmentShardRequest(context.TODO(), erasureRoot, shardIdx, allsegmentindices, verify, eventID)
 			if err == nil {
 				resps[i] = trie.Segment139Resp{
 					ShardIdx:       shardIdx,
@@ -138,10 +198,8 @@ func (n *NodeContent) FetchAllBundleAndSegmentShards(coreIdx uint16, erasureRoot
 					Justifications: justifications,
 				}
 			} else {
-				log.Warn(log.DA, "assureData: SendSegmentShardRequest failed",
-					"validatorIdx", vIdx,
-					"shardIdx", shardIdx,
-					"err", err)
+				log.Warn(log.DA, "FetchAllBundleAndSegmentShards: SendSegmentShardRequest failed",
+					"validatorIdx", vIdx, "shardIdx", shardIdx, "err", err)
 			}
 		}
 		fn := fmt.Sprintf("segment139resp-%d.json", exportedSegmentLength)
@@ -173,17 +231,28 @@ func SelectGuarantor(g types.Guarantee, blacklistIdx []uint16) (uint16, error) {
 func (n *Node) FetchAllFullShards(g types.Guarantee, verify bool) {
 	spec := g.Report.AvailabilitySpec
 	coreIdx := g.Report.CoreIndex
-	vIdx := n.id
 	blacklistID := []uint16{5}
-	guarantor, err := SelectGuarantor(g, blacklistID)
+	guarantorIdx, err := SelectGuarantor(g, blacklistID)
 	if err != nil {
 		return
 	}
+
+	guarantorPubKey, ok := n.statedb.GetSafrole().GetValidatorPubKeyAtTimeSlot(guarantorIdx, g.Slot)
+	if !ok {
+		log.Warn(log.DA, "FetchAllFullShards: guarantor pubkey not found", "guarantorIdx", guarantorIdx)
+		return
+	}
+	guarantorPeer, ok := n.GetPeerByPubKey(guarantorPubKey)
+	if !ok {
+		log.Warn(log.DA, "FetchAllFullShards: guarantor peer not found", "guarantorPubKey", guarantorPubKey)
+		return
+	}
+
 	resps := make([]trie.Full137Resp, types.TotalValidators)
-	fmt.Printf("FetchAllFullShards: coreIdx=%d, vIdx=%d, guarantor=%d, erasureRoot=%s\n", coreIdx, vIdx, guarantor, spec.ErasureRoot)
+	fmt.Printf("FetchAllFullShards: coreIdx=%d, guarantorIdx=%d, erasureRoot=%s\n", coreIdx, guarantorIdx, spec.ErasureRoot)
 	for i := 0; i < types.TotalValidators; i++ {
 		shardIdx := uint16(i)
-		bundleShard, exportedShards, encodedPath, err := n.peersInfo[guarantor].SendFullShardRequest(context.TODO(), spec.ErasureRoot, shardIdx)
+		bundleShard, exportedShards, encodedPath, err := guarantorPeer.SendFullShardRequest(context.TODO(), spec.ErasureRoot, shardIdx)
 		if err == nil {
 			resps[int(shardIdx)] = trie.Full137Resp{
 				TreeLen:        types.TotalValidators,
@@ -194,10 +263,7 @@ func (n *Node) FetchAllFullShards(g types.Guarantee, verify bool) {
 				EncodedPath:    encodedPath,
 			}
 			log.Trace(log.DA, "FetchAllFullShards: SendFullShardRequest success CE137",
-				"coreIdx", coreIdx,
-				"validatorIdx", vIdx,
-				"shardIdx", shardIdx,
-			)
+				"coreIdx", coreIdx, "shardIdx", shardIdx)
 			if verify {
 				VerifyFullShard(spec.ErasureRoot, shardIdx, bundleShard, exportedShards, encodedPath)
 			}
@@ -227,57 +293,69 @@ const attemptReconstruction = false
 func (n *Node) assureData(ctx context.Context, g types.Guarantee, sdb *statedb.StateDB) error {
 	spec := g.Report.AvailabilitySpec
 	coredIdx := g.Report.CoreIndex
-	vIdx := n.id
-	shardIdx := storage.ComputeShardIndex(uint16(coredIdx), vIdx) // shardIdx != validatorIdx
 	workReportHash := g.Report.Hash()
+
+	myPubKey := n.GetEd25519Key()
+	selfValidatorIdx := n.statedb.GetSafrole().GetCurrValidatorIndex(myPubKey)
+	if selfValidatorIdx < 0 {
+		return fmt.Errorf("assureData: self not in current validator set")
+	}
+	shardIdx := storage.ComputeShardIndex(uint16(coredIdx), uint16(selfValidatorIdx))
 
 	const maxRetries = 3
 	var bundleShard []byte
 	var exportedShards []byte
 	var encodedPath []byte
 	var err error
-	var guarantor uint16
+	var guarantorIdx uint16
 
-	// Get All Shards
 	if attemptReconstruction {
 		n.FetchAllFullShards(g, true)
 	}
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		randomguarantor := rand0.Intn(len(g.Signatures))
-		guarantor = g.Signatures[randomguarantor].ValidatorIndex
+		guarantorIdx = g.Signatures[randomguarantor].ValidatorIndex
 
-		bundleShard, exportedShards, encodedPath, err = n.peersInfo[guarantor].SendFullShardRequest(ctx, spec.ErasureRoot, shardIdx)
+		guarantorPubKey, ok := n.statedb.GetSafrole().GetValidatorPubKeyAtTimeSlot(guarantorIdx, g.Slot)
+		if !ok {
+			log.Warn(log.DA, "assureData: guarantor pubkey not found", "guarantorIdx", guarantorIdx, "slot", g.Slot)
+			continue
+		}
+		guarantorPeer, ok := n.GetPeerByPubKey(guarantorPubKey)
+		if !ok {
+			log.Warn(log.DA, "assureData: guarantor peer not found", "guarantorPubKey", guarantorPubKey)
+			continue
+		}
+
+		bundleShard, exportedShards, encodedPath, err = guarantorPeer.SendFullShardRequest(ctx, spec.ErasureRoot, shardIdx)
 		if err == nil {
 			log.Trace(log.DA, "assureData: SendFullShardRequest success",
-				"coreIdx", coredIdx, "validatorIdx", vIdx, "shardIdx", shardIdx,
-				"erasureRoot", spec.ErasureRoot,
-				"guarantor", guarantor,
-				"bundleShard", fmt.Sprintf("%x", bundleShard))
+				"coreIdx", coredIdx, "selfValidatorIdx", selfValidatorIdx, "shardIdx", shardIdx,
+				"erasureRoot", spec.ErasureRoot, "guarantorIdx", guarantorIdx)
 			break
 		}
 		log.Warn(log.DA, "assureData: SendFullShardRequest attempt failed",
-			"coredIdx", coredIdx, "validatorIdx", vIdx, "shardIdx", shardIdx,
+			"coredIdx", coredIdx, "selfValidatorIdx", selfValidatorIdx, "shardIdx", shardIdx,
 			"attempt", attempt, "n", n.String(), "erasureRoot", spec.ErasureRoot,
-			"guarantor", guarantor, "err", err)
+			"guarantorIdx", guarantorIdx, "err", err)
 	}
 
 	if err != nil {
 		log.Error(log.DA, "assureData: SendFullShardRequest failed after retries",
-			"coredIdx", coredIdx, "shardIdx", "validatorIdx", vIdx, "shardIdx", shardIdx,
-			"n", n.String(), "erasureRoot", spec.ErasureRoot,
-			"guarantor", guarantor, "err", err)
+			"coredIdx", coredIdx, "selfValidatorIdx", selfValidatorIdx, "shardIdx", shardIdx,
+			"n", n.String(), "erasureRoot", spec.ErasureRoot, "err", err)
 		return fmt.Errorf("SendFullShardRequest (after retries): %w", err)
 	}
 
 	// CRITICAL: verify justification matches the erasure root before storage
 	verified, err := VerifyFullShard(spec.ErasureRoot, shardIdx, bundleShard, exportedShards, encodedPath)
 	if err != nil {
-		log.Error(log.DA, "assureData: VerifyFullShard error", "coredIdx", coredIdx, "validatorIdx", vIdx, "shardIdx", shardIdx, "n", n.String(), "err", err)
+		log.Error(log.DA, "assureData: VerifyFullShard error", "coredIdx", coredIdx, "selfValidatorIdx", selfValidatorIdx, "shardIdx", shardIdx, "n", n.String(), "err", err)
 		return fmt.Errorf("VerifyFullShard: %w", err)
 	}
 	if !verified {
-		log.Error(log.DA, "assureData: VerifyFullShard failed", "coredIdx", coredIdx, "validatorIdx", vIdx, "shardIdx", shardIdx, "n", n.String(), "verified", false)
+		log.Error(log.DA, "assureData: VerifyFullShard failed", "coredIdx", coredIdx, "selfValidatorIdx", selfValidatorIdx, "shardIdx", shardIdx, "n", n.String())
 		return fmt.Errorf("VerifyFullShard: failed verification")
 	}
 
@@ -286,7 +364,7 @@ func (n *Node) assureData(ctx context.Context, g types.Guarantee, sdb *statedb.S
 	}
 
 	if err := n.StoreWorkReport(g.Report); err != nil {
-		log.Error(log.DA, "assureData: StoreWorkReport failed", "coredIdx", coredIdx, "shardIdx", "validatorIdx", vIdx, "shardIdx", shardIdx, "n", n.String(), "err", err)
+		log.Error(log.DA, "assureData: StoreWorkReport failed", "coredIdx", coredIdx, "selfValidatorIdx", selfValidatorIdx, "shardIdx", shardIdx, "n", n.String(), "err", err)
 		return fmt.Errorf("StoreWorkReport: %w", err)
 	}
 
