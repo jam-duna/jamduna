@@ -25,7 +25,6 @@ import (
 	"os"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -173,6 +172,10 @@ type NodeContent struct {
 	servicesMap   map[uint32]*types.ServiceSummary
 	servicesMutex sync.Mutex
 
+	// Multi-rollup support: Each service gets its own Rollup instance
+	rollups      map[uint32]*statedb.Rollup
+	rollupsMutex sync.RWMutex
+
 	workPackageQueue sync.Map
 	seenWorkPackages sync.Map
 
@@ -212,6 +215,7 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage, pvmBackend string)
 		workPackagesCh:       make(chan types.WorkPackage, DefaultChannelSize),
 		workReportsCh:        make(chan types.WorkReport, DefaultChannelSize),
 		servicesMap:          make(map[uint32]*types.ServiceSummary),
+		rollups:              make(map[uint32]*statedb.Rollup),
 		workPackageQueue:     sync.Map{},
 		seenWorkPackages:     sync.Map{},
 		segmentCache:         make(map[string][]byte),
@@ -221,6 +225,59 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage, pvmBackend string)
 		pvmBackend:           pvmBackend,
 		telemetryClient:      telemetry.NewNoOpTelemetryClient(),
 	}
+}
+
+// Multi-Rollup Support: Helper methods
+
+// GetOrCreateRollup retrieves or creates a Rollup instance for the given serviceID
+// This ensures each service has its own isolated rollup state
+func (n *NodeContent) GetOrCreateRollup(serviceID uint32) (*statedb.Rollup, error) {
+	n.rollupsMutex.RLock()
+	rollup, exists := n.rollups[serviceID]
+	n.rollupsMutex.RUnlock()
+
+	if exists {
+		return rollup, nil
+	}
+
+	// Create new rollup for this service
+	n.rollupsMutex.Lock()
+	defer n.rollupsMutex.Unlock()
+
+	// Double-check after acquiring write lock
+	if rollup, exists := n.rollups[serviceID]; exists {
+		return rollup, nil
+	}
+
+	// Create rollup instance
+	newRollup, err := statedb.NewRollup(n.store, serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create rollup for service %d: %w", serviceID, err)
+	}
+
+	n.rollups[serviceID] = newRollup
+	log.Info(log.Node, "Created new rollup instance", "serviceID", serviceID)
+	return newRollup, nil
+}
+
+// ServiceIDFromPort calculates the serviceID from an RPC server port
+// Port allocation: HTTP=9000+2*N, WS=9000+2*N+1 for service N
+func ServiceIDFromPort(port int) uint32 {
+	if port < 9000 {
+		// Legacy ports (8545, etc.) default to service 0
+		return 0
+	}
+	// Calculate service ID from port offset
+	offset := port - 9000
+	return uint32(offset / 2)
+}
+
+// PortsForService calculates HTTP and WebSocket ports for a given serviceID
+// Returns (httpPort, wsPort)
+func PortsForService(serviceID uint32) (int, int) {
+	httpPort := 9000 + int(serviceID)*2
+	wsPort := httpPort + 1
+	return httpPort, wsPort
 }
 
 func (n *Node) Clean(block_hashes []common.Hash) {
@@ -1141,7 +1198,7 @@ const (
 )
 
 // RobustSubmitAndWaitForWorkPackageBundles will retry SubmitAndWaitForWorkPackageBundles up to 4 times
-func RobustSubmitAndWaitForWorkPackageBundles(ctx context.Context, n JNode, reqs []*types.WorkPackageBundle) (*types.WorkReport, error) {
+func RobustSubmitAndWaitForWorkPackageBundles(ctx context.Context, n JNode, reqs []*types.WorkPackageBundle) ([]common.Hash, []uint32, error) {
 	var lastErr error
 
 	for attempt := 1; attempt <= maxRobustTries; attempt++ {
@@ -1164,16 +1221,11 @@ func RobustSubmitAndWaitForWorkPackageBundles(ctx context.Context, n JNode, reqs
 		defer cancel()
 
 		startTime := time.Now()
-		hashes, err := n.SubmitAndWaitForWorkPackageBundles(attemptCtx, reqs)
+		stateRoots, timeslots, err := n.SubmitAndWaitForWorkPackageBundles(attemptCtx, reqs)
 		elapsed := time.Since(startTime)
 
 		if err == nil {
-			wr, err := n.GetWorkReport(hashes[0])
-			if err != nil {
-				log.Error(log.Node, "GetWorkReport ERR", "err", err)
-				return nil, fmt.Errorf("GetWorkReport failed: %w", err)
-			}
-			return wr, nil
+			return stateRoots, timeslots, nil
 		}
 		lastErr = err
 		log.Warn(log.Node, "RobustSubmitAndWaitForWorkPackageBundles", "attempt", attempt, "elapsed", elapsed, "err", err)
@@ -1200,7 +1252,7 @@ func RobustSubmitAndWaitForWorkPackageBundles(ctx context.Context, n JNode, reqs
 		}
 	}
 
-	return nil, fmt.Errorf("all retries failed after %d attempts: %w", maxRobustTries, lastErr)
+	return nil, nil, fmt.Errorf("all retries failed after %d attempts: %w", maxRobustTries, lastErr)
 }
 func (n *Node) SubmitBundle(ctx context.Context, bundle *types.WorkPackageBundle) error {
 	log.Info(log.Node, "Node SubmitBundle")
@@ -1240,12 +1292,12 @@ func (n *Node) SubmitBundle(ctx context.Context, bundle *types.WorkPackageBundle
 
 }
 
-func (n *Node) SubmitAndWaitForWorkPackageBundle(ctx context.Context, b *types.WorkPackageBundle) (common.Hash, error) {
+func (n *Node) SubmitAndWaitForWorkPackageBundle(ctx context.Context, b *types.WorkPackageBundle) (common.Hash, uint32, error) {
 	//fmt.Printf("NODE SubmitAndWaitForWorkPackageBundle %s\n", wp.WorkPackage.Hash())
 	err := n.SubmitBundleSameCore(b)
 	if err != nil {
 		log.Error(log.Node, "SubmitAndWaitForWorkPackageBundle", "err", err)
-		return common.Hash{}, fmt.Errorf("SubmitAndWaitForWorkPackageBundle: %w", err)
+		return common.Hash{}, 0, fmt.Errorf("SubmitAndWaitForWorkPackageBundle: %w", err)
 	}
 	workPackageHash := b.WorkPackage.Hash()
 	log.Info(log.Node, "SubmitAndWaitForWorkPackageBundle SUBMITTED", "workpackageHash", workPackageHash.Hex())
@@ -1263,11 +1315,12 @@ func (n *Node) SubmitAndWaitForWorkPackageBundle(ctx context.Context, b *types.W
 	for {
 		select {
 		case <-ctx.Done():
-			return workPackageHash, ctx.Err()
+			return common.Hash{}, 0, ctx.Err()
 		case <-ticker.C:
 			recentBlocks := n.statedb.JamState.RecentBlocks.B_H
 			accumulationHistory := n.statedb.JamState.AccumulationHistory
-
+			stateRoot := n.statedb.StateRoot
+			ts := n.statedb.JamState.SafroleState.Timeslot
 			if jceManager != nil {
 				if c15, e := types.Encode(accumulationHistory); e == nil {
 					jceManager.UpdateAccumulationState(c15)
@@ -1293,28 +1346,30 @@ func (n *Node) SubmitAndWaitForWorkPackageBundle(ctx context.Context, b *types.W
 				for _, h := range accumulationHistory[i].WorkPackageHash {
 					if h == workPackageHash {
 						log.Info(log.Node, "SubmitAndWaitForWorkPackageBundle ACCUMULATED", "workpackageHash", workPackageHash.Hex())
-						return workPackageHash, nil
+						return stateRoot, ts, nil
 					}
 				}
 			}
 
 			if currJCE-initialJCE >= types.RecentHistorySize {
-				return workPackageHash, fmt.Errorf("SubmitAndWaitForWorkPackageBundle: expired after %d JCEs", types.RecentHistorySize)
+				return common.Hash{}, 0, fmt.Errorf("SubmitAndWaitForWorkPackageBundle: expired after %d JCEs", types.RecentHistorySize)
 			}
 		}
 	}
 }
 
-func (n *Node) SubmitAndWaitForWorkPackageBundles(ctx context.Context, bundles []*types.WorkPackageBundle) ([]common.Hash, error) {
-	hashes := make([]common.Hash, len(bundles))
+func (n *Node) SubmitAndWaitForWorkPackageBundles(ctx context.Context, bundles []*types.WorkPackageBundle) ([]common.Hash, []uint32, error) {
+	stateRoots := make([]common.Hash, len(bundles))
+	timeslots := make([]uint32, len(bundles))
 	for i, bundle := range bundles {
-		hash, err := n.SubmitAndWaitForWorkPackageBundle(ctx, bundle)
+		stateRoot, ts, err := n.SubmitAndWaitForWorkPackageBundle(ctx, bundle)
 		if err != nil {
-			return hashes, err
+			return stateRoots, timeslots, err
 		}
-		hashes[i] = hash
+		stateRoots[i] = stateRoot
+		timeslots[i] = ts
 	}
-	return hashes, nil
+	return stateRoots, timeslots, nil
 }
 
 func (n *NodeContent) SetJCEManager(jceManager *ManualJCEManager) (err error) {
@@ -2799,70 +2854,6 @@ func NewJamState() *statedb.JamState {
 		//AvailabilityAssignments:  make([types.TotalCores]*CoreState),
 		SafroleState: NewSafroleState(),
 	}
-}
-
-func (n *NodeContent) getTargetStateDB(blockNumber string) (*statedb.StateDB, error) {
-	_, sdb, err := n.getTargetStateDBWithRoot(blockNumber)
-	return sdb, err
-}
-
-// getTargetStateDBWithRoot returns both the StateDB and the verkleRoot for a given block number
-func (n *NodeContent) getTargetStateDBWithRoot(blockNumber string) (common.Hash, *statedb.StateDB, error) {
-	// Handle "latest" - return current stateDB with current verkle root
-	if blockNumber == "latest" || blockNumber == "" {
-		sdb, ok := n.store.(*storage.StateDBStorage)
-		if !ok {
-			return common.Hash{}, nil, fmt.Errorf("storage is not StateDBStorage")
-		}
-		verkleRootBytes := sdb.CurrentVerkleTree.Commit().Bytes()
-		currentVerkleRoot := common.BytesToHash(verkleRootBytes[:])
-		return currentVerkleRoot, n.statedb, nil
-	}
-
-	// Handle "earliest" - block 0
-	if blockNumber == "earliest" {
-		blockNumber = "0x0"
-	}
-
-	// Handle "pending" - treat as latest for now
-	if blockNumber == "pending" {
-		sdb, ok := n.store.(*storage.StateDBStorage)
-		if !ok {
-			return common.Hash{}, nil, fmt.Errorf("storage is not StateDBStorage")
-		}
-		verkleRootBytes := sdb.CurrentVerkleTree.Commit().Bytes()
-		currentVerkleRoot := common.BytesToHash(verkleRootBytes[:])
-		return currentVerkleRoot, n.statedb, nil
-	}
-
-	// Parse hex string
-	if !strings.HasPrefix(blockNumber, "0x") {
-		return common.Hash{}, nil, fmt.Errorf("invalid block number format: %s", blockNumber)
-	}
-
-	// Check if this is a 32-byte hash (66 chars: "0x" + 64 hex chars) - treat as verkleRoot
-	if len(blockNumber) == 66 {
-		verkleRoot := common.HexToHash(blockNumber)
-		sdb, err := n.getStateDBByStateRoot(verkleRoot)
-		return verkleRoot, sdb, err
-	}
-
-	// Parse as block number (shorter hex string)
-	blockNum, err := strconv.ParseUint(blockNumber[2:], 16, 32)
-	if err != nil {
-		return common.Hash{}, nil, fmt.Errorf("invalid block number: %s", blockNumber)
-	}
-
-	// Fetch the block to get its verkleRoot
-	// Use EVMServiceCode for now - could be parameterized if needed
-	block, err := n.statedb.ReadBlockByNumber(statedb.EVMServiceCode, uint32(blockNum))
-	if err != nil {
-		return common.Hash{}, nil, fmt.Errorf("failed to read block %d: %v", blockNum, err)
-	}
-
-	// Look up stateDB by verkleRoot
-	sdb, err := n.getStateDBByStateRoot(block.VerkleRoot)
-	return block.VerkleRoot, sdb, err
 }
 
 // getStateDBByStateRoot looks up a StateDB by its stateRoot in the statedbMap

@@ -356,7 +356,7 @@ func (n *NodeContent) executeWorkPackageBundle(workPackageCoreIndex uint16, pack
 
 	// Write bundle snapshot if enabled (centralized here instead of in each caller)
 	// Check the appropriate flag based on execContext role
-	shouldWrite := isWriteBundle && n.nodeSelf != nil
+	shouldWrite := false // isWriteBundle && n.nodeSelf != nil
 	if shouldWrite {
 		switch execContext {
 		case log.FirstGuarantor:

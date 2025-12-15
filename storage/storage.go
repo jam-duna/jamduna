@@ -3,6 +3,7 @@ package storage
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/colorfulnotion/jam/common"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/ethereum/go-verkle"
@@ -112,6 +114,27 @@ type StateDBStorage struct {
 	// This is the authoritative source for BuildVerkleWitness
 	verkleReadLog      []types.VerkleRead
 	verkleReadLogMutex sync.Mutex // Protects verkleReadLog
+
+	// Multi-rollup support: Service-scoped state tracking
+	// Each service maintains its own EVM block history and verkle state
+
+	// Service-scoped verkle roots
+	// Key: "vr_{serviceID}_{blockNumber}" → verkleRoot
+	serviceVerkleRoots map[string]common.Hash
+
+	// Service-scoped JAM state roots (links service block to JAM state)
+	// Key: "jsr_{serviceID}_{blockNumber}" → ServiceBlockIndex
+	serviceJAMStateRoots map[string]*types.ServiceBlockIndex
+
+	// Service block hash index
+	// Key: "bhash_{serviceID}_{blockHash}" → blockNumber
+	serviceBlockHashIndex map[string]uint64
+
+	// Latest rollup block number per service
+	latestRollupBlock map[uint32]uint64
+
+	// Mutex for service-scoped maps
+	serviceMutex sync.RWMutex
 }
 
 const (
@@ -139,17 +162,21 @@ func NewStateDBStorage(path string, jamda types.JAMDA, telemetryClient types.Tel
 	trieDB := NewMerkleTree(nil)
 
 	s := &StateDBStorage{
-		db:                db,
-		logChan:           make(chan LogMessage, 100),
-		jamda:             jamda,
-		telemetryClient:   telemetryClient,
-		nodeID:            nodeID,
-		trieDB:            trieDB,
-		stagedInserts:     make(map[common.Hash][]byte),
-		stagedDeletes:     make(map[common.Hash]bool),
-		keys:              make(map[common.Hash]bool),
-		verkleRoots:       make(map[common.Hash]verkle.VerkleNode),
-		CurrentVerkleTree: verkle.New(),
+		db:                    db,
+		logChan:               make(chan LogMessage, 100),
+		jamda:                 jamda,
+		telemetryClient:       telemetryClient,
+		nodeID:                nodeID,
+		trieDB:                trieDB,
+		stagedInserts:         make(map[common.Hash][]byte),
+		stagedDeletes:         make(map[common.Hash]bool),
+		keys:                  make(map[common.Hash]bool),
+		verkleRoots:           make(map[common.Hash]verkle.VerkleNode),
+		CurrentVerkleTree:     verkle.New(),
+		serviceVerkleRoots:    make(map[string]common.Hash),
+		serviceJAMStateRoots:  make(map[string]*types.ServiceBlockIndex),
+		serviceBlockHashIndex: make(map[string]uint64),
+		latestRollupBlock:     make(map[uint32]uint64),
 	}
 
 	// Get initial root from trie
@@ -222,12 +249,92 @@ func (store *StateDBStorage) StoreVerkleTransition(verkleRoot common.Hash, tree 
 
 // GetVerkleTreeAtRoot retrieves a Verkle tree state by its root hash
 // Returns the tree and a boolean indicating if it was found
-func (store *StateDBStorage) GetVerkleTreeAtRoot(verkleRoot common.Hash) (verkle.VerkleNode, bool) {
+func (store *StateDBStorage) GetVerkleTreeAtRoot(verkleRoot common.Hash) (interface{}, bool) {
 	store.verkleRootsMutex.RLock()
 	defer store.verkleRootsMutex.RUnlock()
 
 	tree, found := store.verkleRoots[verkleRoot]
 	return tree, found
+}
+
+// GetVerkleNodeForBlockNumber maps a block number string to the corresponding Verkle tree
+// Returns: verkleTree, ok
+func (store *StateDBStorage) GetVerkleNodeForBlockNumber(blockNumber string) (interface{}, bool) {
+	// TODO: Implement actual blockNumber -> verkleRoot mapping
+	// For now, return the current verkle tree if blockNumber is "latest"
+	if blockNumber == "latest" || blockNumber == "" {
+		if store.CurrentVerkleTree != nil {
+			return store.CurrentVerkleTree, true
+		}
+		return nil, false
+	}
+	// For specific block numbers, need to lookup block and get its verkle root
+	// This requires accessing block storage which needs to be implemented
+	return nil, false
+}
+
+// GetBalance reads balance from Verkle tree using BasicData
+// Returns: balance (as 32-byte hash), error
+func (store *StateDBStorage) GetBalance(tree interface{}, address common.Address) (common.Hash, error) {
+	verkleTree, ok := tree.(verkle.VerkleNode)
+	if !ok {
+		return common.Hash{}, fmt.Errorf("invalid tree type")
+	}
+
+	// Read from Verkle tree BasicData
+	basicDataKey := BasicDataKey(address[:])
+	basicData, err := verkleTree.Get(basicDataKey[:], nil)
+	if err != nil {
+		return common.Hash{}, nil
+	}
+
+	if len(basicData) < 32 {
+		return common.Hash{}, nil
+	}
+
+	// Extract balance from BasicData (offset 16-31, 16 bytes, big-endian per EIP-6800)
+	// Copy directly to Hash (already big-endian), right-aligned
+	var balanceHash common.Hash
+	copy(balanceHash[16:32], basicData[16:32])
+
+	return balanceHash, nil
+}
+
+// GetNonce reads nonce from Verkle tree using BasicData
+// Returns: nonce, error
+func (store *StateDBStorage) GetNonce(tree interface{}, address common.Address) (uint64, error) {
+	verkleTree, ok := tree.(verkle.VerkleNode)
+	if !ok {
+		return 0, fmt.Errorf("invalid tree type")
+	}
+
+	// Read from Verkle tree BasicData
+	basicDataKey := BasicDataKey(address[:])
+	basicData, err := verkleTree.Get(basicDataKey[:], nil)
+	if err != nil {
+		return 0, nil
+	}
+
+	if len(basicData) < 32 {
+		return 0, nil
+	}
+
+	// Extract nonce from BasicData (offset 8-15, 8 bytes, big-endian per EIP-6800)
+	nonce := binary.BigEndian.Uint64(basicData[8:16])
+	return nonce, nil
+}
+
+// GetCurrentVerkleTree returns the current active Verkle tree
+// Returns: tree (nil if not available)
+func (store *StateDBStorage) GetCurrentVerkleTree() interface{} {
+	return store.CurrentVerkleTree
+}
+
+// StoreVerkleTree stores a verkle tree at a specific root hash
+func (store *StateDBStorage) StoreVerkleTree(root common.Hash, tree verkle.VerkleNode) {
+	store.verkleRootsMutex.Lock()
+	defer store.verkleRootsMutex.Unlock()
+	store.verkleRoots[root] = tree
 }
 
 func (store *StateDBStorage) ReadRawKV(key []byte) ([]byte, bool, error) {
@@ -434,7 +541,7 @@ func (store *StateDBStorage) FetchBalance(address common.Address, txIndex uint32
 	}
 
 	// Compute Verkle key for balance
-	verkleKey := evmtypes.BasicDataKey(address[:])
+	verkleKey := BasicDataKey(address[:])
 
 	// Track the read in verkleReadLog
 	store.AppendVerkleRead(types.VerkleRead{
@@ -464,7 +571,7 @@ func (store *StateDBStorage) FetchNonce(address common.Address, txIndex uint32) 
 	}
 
 	// Compute Verkle key for nonce
-	verkleKey := evmtypes.BasicDataKey(address[:])
+	verkleKey := BasicDataKey(address[:])
 
 	// Track the read in verkleReadLog
 	store.AppendVerkleRead(types.VerkleRead{
@@ -494,7 +601,7 @@ func (store *StateDBStorage) FetchCode(address common.Address, txIndex uint32) (
 	// Read code size from BasicData first
 	var codeSize uint32
 
-	basicDataKey := evmtypes.BasicDataKey(address[:])
+	basicDataKey := BasicDataKey(address[:])
 
 	// Track BasicData read for Verkle witness
 	store.AppendVerkleRead(types.VerkleRead{
@@ -513,7 +620,7 @@ func (store *StateDBStorage) FetchCode(address common.Address, txIndex uint32) (
 
 	if codeSize == 0 {
 		// Track CodeHash read even for EOAs for witness completeness
-		codeHashKey := evmtypes.CodeHashKey(address[:])
+		codeHashKey := CodeHashKey(address[:])
 		store.AppendVerkleRead(types.VerkleRead{
 			VerkleKey: common.BytesToHash(codeHashKey),
 			Address:   address,
@@ -532,7 +639,7 @@ func (store *StateDBStorage) FetchCode(address common.Address, txIndex uint32) (
 
 	// Read each chunk
 	for chunkID := uint64(0); chunkID < uint64(numChunks); chunkID++ {
-		chunkKey := evmtypes.CodeChunkKey(address[:], chunkID)
+		chunkKey := CodeChunkKey(address[:], chunkID)
 
 		// Track the read in verkleReadLog
 		store.AppendVerkleRead(types.VerkleRead{
@@ -573,12 +680,12 @@ func (store *StateDBStorage) FetchCodeHash(address common.Address, txIndex uint3
 	var codeHash [32]byte
 
 	if store.CurrentVerkleTree == nil {
-		copy(codeHash[:], evmtypes.GetEmptyCodeHash())
+		copy(codeHash[:], GetEmptyCodeHash())
 		return codeHash, nil
 	}
 
 	// Compute Verkle key for code hash
-	verkleKey := evmtypes.CodeHashKey(address[:])
+	verkleKey := CodeHashKey(address[:])
 
 	// Track the read in verkleReadLog
 	store.AppendVerkleRead(types.VerkleRead{
@@ -595,7 +702,7 @@ func (store *StateDBStorage) FetchCodeHash(address common.Address, txIndex uint3
 		copy(codeHash[:], codeHashData[:32])
 	} else {
 		// Code hash not found - return empty code hash
-		copy(codeHash[:], evmtypes.GetEmptyCodeHash())
+		copy(codeHash[:], GetEmptyCodeHash())
 	}
 
 	return codeHash, nil
@@ -612,7 +719,7 @@ func (store *StateDBStorage) FetchStorage(address common.Address, storageKey [32
 	}
 
 	// Compute Verkle key for storage slot
-	verkleKey := evmtypes.StorageSlotKey(address[:], storageKey[:])
+	verkleKey := StorageSlotKey(address[:], storageKey[:])
 
 	// Track the read in verkleReadLog
 	store.AppendVerkleRead(types.VerkleRead{
@@ -675,10 +782,10 @@ func (store *StateDBStorage) BuildVerkleWitness(contractWitnessBlob []byte) ([]b
 		return nil, fmt.Errorf("failed to build witness: %w", err)
 	}
 
-	// Store the post-state tree
-	if err := store.StoreVerkleTransition(postVerkleRoot, postTree); err != nil {
-		return nil, fmt.Errorf("failed to store verkle transition: %w", err)
-	}
+	// Store the post-state tree in verkleRoots map
+	store.verkleRootsMutex.Lock()
+	store.verkleRoots[postVerkleRoot] = postTree
+	store.verkleRootsMutex.Unlock()
 
 	return witnessBytes, nil
 }
@@ -715,4 +822,320 @@ func (store *StateDBStorage) ComputeBlockAccessListHash(verkleWitness []byte) (c
 	hash := bal.Hash()
 
 	return hash, accountCount, totalChanges, nil
+}
+
+// Multi-Rollup Support: Helper Functions
+
+// verkleRootKey generates the key for storing service verkle roots
+// Format: "vr_{serviceID}_{blockNumber}"
+func verkleRootKey(serviceID uint32, blockNumber uint32) string {
+	return fmt.Sprintf("vr_%d_%d", serviceID, blockNumber)
+}
+
+// jamStateRootKey generates the key for storing JAM state root mappings
+// Format: "jsr_{serviceID}_{blockNumber}"
+func jamStateRootKey(serviceID uint32, blockNumber uint32) string {
+	return fmt.Sprintf("jsr_%d_%d", serviceID, blockNumber)
+}
+
+// blockHashKey generates the key for block hash to block number lookup
+// Format: "bhash_{serviceID}_{blockHash}"
+func blockHashKey(serviceID uint32, blockHash common.Hash) string {
+	return fmt.Sprintf("bhash_%d_%s", serviceID, blockHash.Hex())
+}
+
+// parseBlockNumber parses a block number string into uint32
+// Supports: "latest", "earliest", "pending", or hex number (0x...)
+func parseBlockNumber(blockNumber string, latestBlock uint64) (uint32, error) {
+	switch blockNumber {
+	case "latest", "":
+		return uint32(latestBlock), nil
+	case "earliest":
+		return 0, nil
+	case "pending":
+		return uint32(latestBlock), nil
+	default:
+		// Try parsing as hex
+		if len(blockNumber) > 2 && blockNumber[:2] == "0x" {
+			blockNum, err := hex.DecodeString(blockNumber[2:])
+			if err != nil {
+				return 0, fmt.Errorf("invalid hex block number: %w", err)
+			}
+			var num uint64
+			for _, b := range blockNum {
+				num = (num << 8) | uint64(b)
+			}
+			return uint32(num), nil
+		}
+		return 0, fmt.Errorf("invalid block number format: %s", blockNumber)
+	}
+}
+
+// Multi-Rollup Support: Implementation Methods
+
+// GetVerkleNodeForServiceBlock retrieves the Verkle tree for a specific service's block
+func (store *StateDBStorage) GetVerkleNodeForServiceBlock(serviceID uint32, blockNumber string) (interface{}, bool) {
+	store.serviceMutex.RLock()
+	defer store.serviceMutex.RUnlock()
+
+	// Get latest block for this service
+	latestBlock, exists := store.latestRollupBlock[serviceID]
+	if !exists {
+		return nil, false
+	}
+
+	// Parse block number
+	blockNum, err := parseBlockNumber(blockNumber, latestBlock)
+	if err != nil {
+		return nil, false
+	}
+
+	// Lookup verkle root
+	key := verkleRootKey(serviceID, blockNum)
+	verkleRoot, ok := store.serviceVerkleRoots[key]
+	if !ok {
+		return nil, false
+	}
+
+	// Retrieve verkle tree from root
+	store.verkleRootsMutex.RLock()
+	defer store.verkleRootsMutex.RUnlock()
+
+	tree, found := store.verkleRoots[verkleRoot]
+	return tree, found
+}
+
+// StoreServiceBlock persists an EVM block for a specific service
+func (store *StateDBStorage) StoreServiceBlock(serviceID uint32, blockIface interface{}, jamStateRoot common.Hash, jamSlot uint32) error {
+	block, ok := blockIface.(*evmtypes.EvmBlockPayload)
+	if !ok {
+		return fmt.Errorf("block must be *evmtypes.EvmBlockPayload")
+	}
+
+	store.serviceMutex.Lock()
+	defer store.serviceMutex.Unlock()
+
+	blockNumber := block.Number
+
+	// Create ServiceBlockIndex
+	index := &types.ServiceBlockIndex{
+		ServiceID:    serviceID,
+		BlockNumber:  blockNumber,
+		BlockHash:    block.WorkPackageHash,
+		VerkleRoot:   block.VerkleRoot,
+		JAMStateRoot: jamStateRoot,
+		JAMSlot:      jamSlot,
+	}
+
+	// Store verkle root mapping
+	vrKey := verkleRootKey(serviceID, blockNumber)
+	store.serviceVerkleRoots[vrKey] = block.VerkleRoot
+
+	// Store JAM state root mapping
+	jsrKey := jamStateRootKey(serviceID, blockNumber)
+	store.serviceJAMStateRoots[jsrKey] = index
+
+	// Store block hash index
+	bhKey := blockHashKey(serviceID, block.WorkPackageHash)
+	store.serviceBlockHashIndex[bhKey] = uint64(blockNumber)
+
+	// Update latest block
+	if currentLatest, exists := store.latestRollupBlock[serviceID]; !exists || uint64(blockNumber) > currentLatest {
+		store.latestRollupBlock[serviceID] = uint64(blockNumber)
+	}
+
+	// Persist EvmBlockPayload to LevelDB
+	// Key: "sblock_{serviceID}_{blockNumber}"
+	blockKey := fmt.Sprintf("sblock_%d_%d", serviceID, blockNumber)
+	blockBytes, err := json.Marshal(block)
+	if err != nil {
+		return fmt.Errorf("failed to marshal block: %w", err)
+	}
+	if err := store.db.Put([]byte(blockKey), blockBytes, nil); err != nil {
+		return fmt.Errorf("failed to store block: %w", err)
+	}
+
+	return nil
+}
+
+// GetServiceBlock retrieves an EVM block by service ID and block number
+func (store *StateDBStorage) GetServiceBlock(serviceID uint32, blockNumber string) (interface{}, error) {
+	store.serviceMutex.RLock()
+	latestBlock, exists := store.latestRollupBlock[serviceID]
+	store.serviceMutex.RUnlock()
+
+	if !exists {
+		return nil, fmt.Errorf("no blocks for service %d", serviceID)
+	}
+
+	// Parse block number
+	blockNum, err := parseBlockNumber(blockNumber, latestBlock)
+	if err != nil {
+		return nil, err
+	}
+
+	// Retrieve from LevelDB
+	blockKey := fmt.Sprintf("sblock_%d_%d", serviceID, blockNum)
+	blockBytes, err := store.db.Get([]byte(blockKey), nil)
+	if err != nil {
+		return nil, fmt.Errorf("block not found: %w", err)
+	}
+
+	var block evmtypes.EvmBlockPayload
+	if err := json.Unmarshal(blockBytes, &block); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal block: %w", err)
+	}
+
+	return &block, nil
+}
+
+// GetTransactionByHash finds a transaction in a service's block history
+func (store *StateDBStorage) GetTransactionByHash(serviceID uint32, txHash common.Hash) (*types.Transaction, *types.BlockMetadata, error) {
+	store.serviceMutex.RLock()
+	latestBlock, exists := store.latestRollupBlock[serviceID]
+	store.serviceMutex.RUnlock()
+
+	if !exists {
+		return nil, nil, fmt.Errorf("no blocks for service %d", serviceID)
+	}
+
+	// TODO: Optimize with bloom filter or LRU cache
+	// For now, scan blocks from latest to earliest
+	for blockNum := latestBlock; blockNum >= 0; blockNum-- {
+		blockKey := fmt.Sprintf("sblock_%d_%d", serviceID, blockNum)
+		blockBytes, err := store.db.Get([]byte(blockKey), nil)
+		if err != nil {
+			if blockNum == 0 {
+				break
+			}
+			continue
+		}
+
+		var block evmtypes.EvmBlockPayload
+		if err := json.Unmarshal(blockBytes, &block); err != nil {
+			if blockNum == 0 {
+				break
+			}
+			continue
+		}
+
+		// Search transaction hashes in this block
+		for txIndex, hash := range block.TxHashes {
+			if hash == txHash {
+				metadata := &types.BlockMetadata{
+					BlockHash:   block.WorkPackageHash,
+					BlockNumber: block.Number,
+					TxIndex:     uint32(txIndex),
+				}
+				tx := &types.Transaction{
+					Hash: txHash,
+				}
+				return tx, metadata, nil
+			}
+		}
+
+		if blockNum == 0 {
+			break
+		}
+	}
+
+	return nil, nil, fmt.Errorf("transaction not found")
+}
+
+// GetBlockByNumber retrieves full EVM block by service ID and block number
+func (store *StateDBStorage) GetBlockByNumber(serviceID uint32, blockNumber string) (*types.EVMBlock, error) {
+	blockIface, err := store.GetServiceBlock(serviceID, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	block, ok := blockIface.(*evmtypes.EvmBlockPayload)
+	if !ok {
+		return nil, fmt.Errorf("invalid block type")
+	}
+
+	// Convert EvmBlockPayload to EVMBlock
+	transactions := make([]types.Transaction, len(block.TxHashes))
+	for i, txHash := range block.TxHashes {
+		transactions[i] = types.Transaction{Hash: txHash}
+	}
+
+	receipts := make([]types.Receipt, len(block.Transactions))
+	for i, txReceipt := range block.Transactions {
+		receipts[i] = types.Receipt{
+			TransactionHash: txReceipt.TransactionHash,
+			Success:         txReceipt.Success,
+			UsedGas:         txReceipt.UsedGas,
+		}
+	}
+
+	evmBlock := &types.EVMBlock{
+		BlockNumber:  block.Number,
+		BlockHash:    block.WorkPackageHash,
+		ParentHash:   common.Hash{}, // No parent hash in EvmBlockPayload
+		Timestamp:    block.Timestamp,
+		VerkleRoot:   block.VerkleRoot,
+		Transactions: transactions,
+		Receipts:     receipts,
+	}
+
+	return evmBlock, nil
+}
+
+// GetBlockByHash retrieves full EVM block by service ID and block hash
+func (store *StateDBStorage) GetBlockByHash(serviceID uint32, blockHash common.Hash) (*types.EVMBlock, error) {
+	store.serviceMutex.RLock()
+	bhKey := blockHashKey(serviceID, blockHash)
+	blockNum, exists := store.serviceBlockHashIndex[bhKey]
+	store.serviceMutex.RUnlock()
+
+	if !exists {
+		return nil, fmt.Errorf("block hash not found")
+	}
+
+	return store.GetBlockByNumber(serviceID, fmt.Sprintf("0x%x", blockNum))
+}
+
+// FinalizeEVMBlock is a helper to finalize an EVM block after accumulation
+// This stores the block data and associates it with JAM state
+// Call this after accumulate completes for an EVM service
+func (store *StateDBStorage) FinalizeEVMBlock(
+	serviceID uint32,
+	blockPayload interface{},
+	jamStateRoot common.Hash,
+	jamSlot uint32,
+) error {
+	// Type assert to *evmtypes.EvmBlockPayload
+	payload, ok := blockPayload.(*evmtypes.EvmBlockPayload)
+	if !ok {
+		return fmt.Errorf("invalid block payload type, expected *evmtypes.EvmBlockPayload")
+	}
+
+	// Store the block using StoreServiceBlock
+	if err := store.StoreServiceBlock(serviceID, payload, jamStateRoot, jamSlot); err != nil {
+		return fmt.Errorf("failed to store service block: %w", err)
+	}
+
+	// Store the verkle tree snapshot
+	store.verkleRootsMutex.Lock()
+	if store.CurrentVerkleTree != nil {
+		// The CurrentVerkleTree should already be the post-state tree
+		// Store it under the block's verkle root
+		store.verkleRoots[payload.VerkleRoot] = store.CurrentVerkleTree
+		log.Info(log.EVM, "Stored verkle tree snapshot",
+			"serviceID", serviceID,
+			"blockNumber", payload.Number,
+			"verkleRoot", payload.VerkleRoot.String())
+	}
+	store.verkleRootsMutex.Unlock()
+
+	log.Info(log.EVM, "Finalized EVM block",
+		"serviceID", serviceID,
+		"blockNumber", payload.Number,
+		"blockHash", payload.WorkPackageHash.String(),
+		"verkleRoot", payload.VerkleRoot.String(),
+		"jamStateRoot", jamStateRoot.String(),
+		"jamSlot", jamSlot)
+
+	return nil
 }

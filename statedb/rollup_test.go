@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	numRounds    = 1
+	numRounds    = 10
 	txnsPerRound = 3
 
 	saveBundles = false // set to true to save work package bundles to disk (and revalidate)
@@ -35,9 +35,13 @@ func TestAlgoBlocks(t *testing.T) {
 	)
 	log.InitLogger("info")
 	log.EnableModule(log.Node)
-	c, err := NewRollup(t.TempDir(), AlgoServiceCode)
+	storage, err := initStorage(t.TempDir())
 	if err != nil {
-		t.Fatalf("NewEVMService failed: %v", err)
+		t.Fatalf("initStorage failed: %v", err)
+	}
+	c, err := NewRollup(storage, AlgoServiceCode)
+	if err != nil {
+		t.Fatalf("NewRollup failed: %v", err)
 	}
 
 	auth_payload := make([]byte, 4)
@@ -75,9 +79,13 @@ func TestAlgoBlocks(t *testing.T) {
 }
 
 func TestEVMBlocksMath(t *testing.T) {
-	chain, err := NewRollup(t.TempDir(), EVMServiceCode)
+	storage, err := initStorage(t.TempDir())
 	if err != nil {
-		t.Fatalf("NewEVMService failed: %v", err)
+		t.Fatalf("initStorage failed: %v", err)
+	}
+	chain, err := NewRollup(storage, EVMServiceCode)
+	if err != nil {
+		t.Fatalf("NewRollup failed: %v", err)
 	}
 	err = chain.SubmitEVMGenesis(61_000_000)
 	if err != nil {
@@ -112,7 +120,7 @@ func TestEVMBlocksMath(t *testing.T) {
 		if err != nil {
 			t.Fatalf("SubmitEVMTransactions failed: %v", err)
 		}
-		block, err := chain.stateDB.GetBlockByNumber(chain.serviceID, "latest")
+		block, err := chain.GetEVMBlockByNumber("latest")
 		if err != nil {
 			t.Fatalf("GetBlockByNumber failed: %v", err)
 		}
@@ -137,12 +145,8 @@ func RunAccumulateHostFunctionsTest(b *Rollup) error {
 		return fmt.Errorf("failed to parse issuer private key: %w", err)
 	}
 
-	// Get current verkle root for state queries
-	verkleRootBytes := b.storage.CurrentVerkleTree.Commit().Bytes()
-	currentVerkleRoot := common.BytesToHash(verkleRootBytes[:])
-
 	// Get current nonce
-	nonce, err := b.stateDB.GetTransactionCount(b.serviceID, issuerAddr, currentVerkleRoot)
+	nonce, err := b.GetTransactionCount(issuerAddr, "latest")
 	if err != nil {
 		return fmt.Errorf("failed to get transaction count: %w", err)
 	}
@@ -461,7 +465,7 @@ func RunAccumulateHostFunctionsTest(b *Rollup) error {
 	}
 
 	// Get the latest block
-	block, err := b.stateDB.GetBlockByNumber(b.serviceID, "latest")
+	block, err := b.GetEVMBlockByNumber("latest")
 	if err != nil {
 		return fmt.Errorf("GetBlockByNumber failed: %w", err)
 	}
@@ -490,7 +494,7 @@ func RunAccumulateHostFunctionsTest(b *Rollup) error {
 	successCount := 0
 	logCount := 0
 	for idx, txHash := range txHashes {
-		receipt, err := b.stateDB.GetTransactionReceipt(b.serviceID, txHash)
+		receipt, err := b.getTransactionReceipt(txHash)
 		if err != nil {
 			log.Error(log.Node, "GetTransactionReceipt failed", "idx", idx, "txHash", txHash, "err", err)
 			continue
@@ -547,17 +551,13 @@ func RunTransfersRound(b *Rollup, transfers []TransferTriple, round int) error {
 	}
 	accounts[10] = coinbaseAddress
 
-	// Get current verkle root for state queries
-	verkleRootBytes := b.storage.CurrentVerkleTree.Commit().Bytes()
-	currentVerkleRoot := common.BytesToHash(verkleRootBytes[:])
-
 	// Track initial balances and nonces for all accounts
 	initialBalances := make([]*big.Int, numAccounts)
 	initialNonces := make([]uint64, numAccounts)
 
 	totalBefore := big.NewInt(0)
 	for i := 0; i < numAccounts; i++ {
-		balanceHash, err := b.stateDB.GetBalance(b.serviceID, accounts[i], currentVerkleRoot)
+		balanceHash, err := b.GetBalance(accounts[i], "latest")
 		if err != nil {
 			log.Error(log.Node, "GetBalance ERR", "account", i, "err", err)
 			return err
@@ -566,7 +566,7 @@ func RunTransfersRound(b *Rollup, transfers []TransferTriple, round int) error {
 		initialBalances[i] = balance
 		totalBefore = new(big.Int).Add(totalBefore, balance)
 
-		nonce, err := b.stateDB.GetTransactionCount(b.serviceID, accounts[i], currentVerkleRoot)
+		nonce, err := b.GetTransactionCount(accounts[i], "latest")
 		if err != nil {
 			log.Error(log.Node, "GetTransactionCount ERR", "account", i, "err", err)
 			return err
@@ -668,7 +668,7 @@ func RunTransfersRound(b *Rollup, transfers []TransferTriple, round int) error {
 		}
 	}
 	for idx, txHash := range txHashes {
-		receipt, recErr := b.stateDB.GetTransactionReceipt(b.serviceID, txHash)
+		receipt, recErr := b.getTransactionReceipt(txHash)
 		if recErr != nil {
 			log.Error(log.Node, "GetTransactionReceipt ERR", "idx", idx, "txHash", txHash, "err", recErr)
 			continue
@@ -679,7 +679,7 @@ func RunTransfersRound(b *Rollup, transfers []TransferTriple, round int) error {
 			"success", receipt.Success,
 			"gasUsed", receipt.UsedGas)
 	}
-	block, err := b.stateDB.GetBlockByNumber(b.serviceID, "latest")
+	block, err := b.GetEVMBlockByNumber("latest")
 	if err != nil {
 		return fmt.Errorf("GetBlockByNumber failed: %w", err)
 	}
@@ -690,18 +690,10 @@ func RunTransfersRound(b *Rollup, transfers []TransferTriple, round int) error {
 		return fmt.Errorf("failed to show transfer receipts: %w", err)
 	}
 
-	// Use the post-state verkle root from the executed block
-	// This is the verkle root that the guarantor computed and stored in the block
-	currentVerkleRootAfter := block.VerkleRoot
-
-	log.Info(log.Node, "📊 CHECKING BALANCES AFTER BLOCK",
-		"blockNumber", block.Number,
-		"verkleRootFromBlock", fmt.Sprintf("0x%x", currentVerkleRootAfter[:]))
-
 	// Check balances and nonces after transfers
 	totalAfter := big.NewInt(0)
 	for i := 0; i < numAccounts; i++ {
-		balanceHash, err := b.stateDB.GetBalance(b.serviceID, accounts[i], currentVerkleRootAfter)
+		balanceHash, err := b.GetBalance(accounts[i], "latest")
 		if err != nil {
 			log.Error(log.Node, "GetBalance ERR", "account", i, "err", err)
 			return err
@@ -709,7 +701,7 @@ func RunTransfersRound(b *Rollup, transfers []TransferTriple, round int) error {
 		balance := new(big.Int).SetBytes(balanceHash.Bytes())
 		totalAfter = new(big.Int).Add(totalAfter, balance)
 
-		nonce, err := b.stateDB.GetTransactionCount(b.serviceID, accounts[i], currentVerkleRootAfter)
+		nonce, err := b.GetTransactionCount(accounts[i], "latest")
 		if err != nil {
 			log.Error(log.Node, "GetTransactionCount ERR", "account", i, "err", err)
 			return err
@@ -748,7 +740,7 @@ func RunTransfersRound(b *Rollup, transfers []TransferTriple, round int) error {
 		return fmt.Errorf("balance mismatch: before=%s, after=%s, difference=%s", totalBefore.String(), totalAfter.String(), diff.String())
 	}
 	// Verify coinbase collected fees
-	coinbaseBalance, err := b.stateDB.GetBalance(b.serviceID, coinbaseAddress, currentVerkleRootAfter)
+	coinbaseBalance, err := b.GetBalance(coinbaseAddress, "latest")
 	if err != nil {
 		return fmt.Errorf("GetBalance (coinbase) failed: %w", err)
 	}
@@ -1344,21 +1336,20 @@ func maxInt(a, b int) int {
 // TestEVMGenesis runs the genesis process and validates the resulting state
 func TestEVMBlocksTransfers(t *testing.T) {
 	log.InitLogger("debug")
-	chain, err := NewRollup(t.TempDir(), EVMServiceCode)
+	storage, err := initStorage(t.TempDir())
 	if err != nil {
-		t.Fatalf("NewEVMService failed: %v", err)
+		t.Fatalf("initStorage failed: %v", err)
+	}
+	chain, err := NewRollup(storage, EVMServiceCode)
+	if err != nil {
+		t.Fatalf("NewRollup failed: %v", err)
 	}
 	initBalance := int64(61_000_000)
 	err = chain.SubmitEVMGenesis(initBalance)
 	if err != nil {
 		t.Fatalf("SubmitEVMGenesis failed: %v", err)
 	}
-
-	// Get current verkle root for state queries
-	verkleRootBytes := chain.storage.CurrentVerkleTree.Commit().Bytes()
-	currentVerkleRoot := common.BytesToHash(verkleRootBytes[:])
-
-	balance, err := chain.stateDB.GetBalance(chain.serviceID, evmtypes.IssuerAddress, currentVerkleRoot)
+	balance, err := chain.GetBalance(evmtypes.IssuerAddress, "latest")
 	if err != nil {
 		t.Fatalf("GetBalance failed: %v", err)
 	}
@@ -1373,7 +1364,7 @@ func TestEVMBlocksTransfers(t *testing.T) {
 	}
 	log.Info(log.Node, "✅ Genesis balance verified", "amount", actualBalance.String())
 
-	nonce, err := chain.stateDB.GetTransactionCount(chain.serviceID, evmtypes.IssuerAddress, currentVerkleRoot)
+	nonce, err := chain.GetTransactionCount(evmtypes.IssuerAddress, "latest")
 	if err != nil {
 		t.Fatalf("GetTransactionCount failed: %v", err)
 	}
@@ -1419,9 +1410,13 @@ func TestEVMBlocksTransfers(t *testing.T) {
 
 func TestEVMBlocksDeployContract(t *testing.T) {
 	log.InitLogger("info")
-	b, err := NewRollup(t.TempDir(), EVMServiceCode)
+	storage, err := initStorage(t.TempDir())
 	if err != nil {
-		t.Fatalf("NewEVMService failed: %v", err)
+		t.Fatalf("initStorage failed: %v", err)
+	}
+	b, err := NewRollup(storage, EVMServiceCode)
+	if err != nil {
+		t.Fatalf("NewRollup failed: %v", err)
 	}
 
 	err = b.SubmitEVMGenesis(61_000_000)
@@ -1434,7 +1429,7 @@ func TestEVMBlocksDeployContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeployContract failed: %v", err)
 	}
-	block, err := b.stateDB.GetBlockByNumber(b.serviceID, "latest")
+	block, err := b.GetEVMBlockByNumber("latest")
 	if err != nil {
 		t.Fatalf("GetBlockByNumber failed: %v", err)
 	}
@@ -1443,7 +1438,7 @@ func TestEVMBlocksDeployContract(t *testing.T) {
 	}
 
 	// Verify contract deployment by checking if code exists at the calculated address
-	deployedCode, err := b.stateDB.GetCode(b.serviceID, common.Address(contractAddress))
+	deployedCode, err := b.GetCode(common.Address(contractAddress), "latest")
 	if err != nil {
 		t.Fatalf("GetCode err %v", err)
 	}
@@ -1459,7 +1454,11 @@ func TestRewards(t *testing.T) {
 	t.Skip("RewardsServiceCode not defined")
 	log.InitLogger("info")
 	log.EnableModule(log.Node)
-	c, err := NewRollup(t.TempDir(), EVMServiceCode)
+	storage, err := initStorage(t.TempDir())
+	if err != nil {
+		t.Fatalf("initStorage failed: %v", err)
+	}
+	c, err := NewRollup(storage, EVMServiceCode)
 	if err != nil {
 		t.Fatalf("NewRollup failed: %v", err)
 	}
@@ -1740,7 +1739,11 @@ func TestVerklePostStateVerification(t *testing.T) {
 	log.InitLogger("info")
 	log.EnableModule(log.SDB)
 
-	chain, err := NewRollup(t.TempDir(), EVMServiceCode)
+	storage, err := initStorage(t.TempDir())
+	if err != nil {
+		t.Fatalf("initStorage failed: %v", err)
+	}
+	chain, err := NewRollup(storage, EVMServiceCode)
 	if err != nil {
 		t.Fatalf("NewRollup failed: %v", err)
 	}

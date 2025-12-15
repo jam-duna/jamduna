@@ -26,6 +26,7 @@ var root atomic.Value
 const (
 	Node    = "node"       // Node
 	SDB     = "state"      // StateDB
+	EVM     = "evm"        // EVM
 	Quic    = "quick"      // Quic
 	B       = "block"      // Block
 	P       = "preimage"   // Preimages

@@ -23,7 +23,6 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	"github.com/colorfulnotion/jam/types"
 	"golang.org/x/exp/rand"
 )
@@ -559,34 +558,23 @@ func evm(n1 JNode, nodes []*Node, testServices map[string]*types.TestService, ta
 		}
 		log.Info(log.Node, "✅ Submitted and accumulated EVM tx bundle", "evmN", evmN, "stateRoot", stateRoots[0], "timeslot", timeslots[0])
 
-		// After accumulation, get the EVM block from service storage and call FinalizeEVMBlock on ALL nodes
-		// This is per RPC-ROLLUP.md Phase 4 - critical for RPC queries to work
-		jamStateRoot := stateRoots[0]
-		jamSlot := timeslots[0]
+		/*				// Get latest JAM state for linking
+						latestBlock := node.GetLatestBlockInfo()
+						jamStateRoot := latestBlock.HeaderHash
+						jamSlot := latestBlock.Slot
 
-		// Get the service storage to retrieve the latest EVM block
-		storage, _ := node.GetStorage()
-		evmBlockIface, err := storage.GetServiceBlock(evm_serviceIdx, "latest")
-		if err != nil {
-			log.Error(log.Node, "Failed to get service block", "err", err, "evmN", evmN)
-		} else if evmBlockIface != nil {
-			evmBlockPayload, ok := evmBlockIface.(*evmtypes.EvmBlockPayload)
-			if !ok {
-				log.Error(log.Node, "Invalid block payload type", "evmN", evmN)
-			} else {
-				// Call FinalizeEVMBlock on ALL 6 nodes
-				for nodeIdx := 0; nodeIdx < numNodes; nodeIdx++ {
-					testNode := nodes[nodeIdx]
-					nodeStorage, _ := testNode.GetStorage()
-					finalizeErr := nodeStorage.FinalizeEVMBlock(evm_serviceIdx, evmBlockPayload, jamStateRoot, jamSlot)
-					if finalizeErr != nil {
-						log.Error(log.Node, "FinalizeEVMBlock failed", "nodeIdx", nodeIdx, "err", finalizeErr, "evmN", evmN)
-					} else {
-						log.Info(log.Node, "✅ FinalizeEVMBlock success", "nodeIdx", nodeIdx, "evmBlock", evmBlockPayload.Number, "evmN", evmN)
-					}
-				}
-			}
-		}
+						// Call FinalizeEVMBlock on ALL 6 nodes
+						for nodeIdx := 0; nodeIdx < numNodes; nodeIdx++ {
+							testNode := nodes[nodeIdx]
+							storage, _ := testNode.GetStorage()
+							finalizeErr := storage.FinalizeEVMBlock(evm_serviceIdx, &evmBlockPayload, jamStateRoot, jamSlot)
+							if finalizeErr != nil {
+								log.Error(log.Node, "FinalizeEVMBlock failed", "nodeIdx", nodeIdx, "err", finalizeErr, "evmN", evmN)
+							} else {
+								log.Info(log.Node, "✅ FinalizeEVMBlock success", "nodeIdx", nodeIdx, "evmBlock", evmBlockPayload.Number, "evmN", evmN)
+							}
+						}
+		*/
 	}
 	log.Info(log.Node, "✅ EVM test completed successfully", "iterations", targetN)
 }

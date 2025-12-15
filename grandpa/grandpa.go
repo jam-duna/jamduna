@@ -21,7 +21,6 @@ type Broadcaster interface {
 	Broadcast(msg interface{}, evID ...uint64)
 	FinalizedBlockHeader(headerHash common.Hash)
 	FinalizedEpoch(epoch uint32, beefyHash common.Hash, aggregatedSignature bls.Signature)
-	ReadContractStorageValue(serviceID uint32, contractAddress common.Address, storageKey common.Hash) (common.Hash, error)
 	GetServiceStorage(serviceID uint32, key []byte) ([]byte, bool, error)
 }
 

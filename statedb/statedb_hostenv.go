@@ -304,13 +304,13 @@ func (s *StateDB) ReadObject(serviceID uint32, objectID common.Hash) (*types.Sta
 	// Special case: Meta-shards are stored as ObjectRefs in JAM State that point to DA segments
 	// We must read the ObjectRef with proof, then fetch the payload from DA segments
 	if shardID, ok := ParseMetaShardObjectID(objectID); ok {
-		log.Trace(log.SDB, "ReadObject: Detected meta-shard object_id, reading ObjectRef", "objectID", objectID, "serviceID", serviceID, "shardID", shardID)
+		log.Trace(log.EVM, "ReadObject: Detected meta-shard object_id, reading ObjectRef", "objectID", objectID, "serviceID", serviceID, "shardID", shardID)
 		objRefBytes, proofBytes, _, found, err := s.sdb.GetServiceStorageWithProof(serviceID, objectID[:])
 		if err != nil {
 			return nil, false, fmt.Errorf("failed to read meta-shard ObjectRef: %v", err)
 		}
 		if !found {
-			log.Info(log.SDB, "ReadObject: Meta-shard ObjectRef not found in state", "objectID", objectID, "shardID", shardID)
+			log.Trace(log.EVM, "ReadObject: Meta-shard ObjectRef not found in state", "objectID", objectID, "shardID", shardID)
 			return nil, false, nil // Not an error - meta-shard just doesn't exist yet
 		}
 
@@ -349,7 +349,7 @@ func (s *StateDB) ReadObject(serviceID uint32, objectID common.Hash) (*types.Sta
 			Path:      proof,
 		}
 
-		log.Trace(log.SDB, "ReadObject: Successfully fetched meta-shard", "objectID", objectID, "payloadSize", len(payload), "proofLen", len(proof))
+		log.Trace(log.EVM, "ReadObject: Successfully fetched meta-shard", "objectID", objectID, "payloadSize", len(payload), "proofLen", len(proof))
 		return witness, true, nil
 	}
 
@@ -367,7 +367,7 @@ func (s *StateDB) ReadObject(serviceID uint32, objectID common.Hash) (*types.Sta
 	}
 
 	globalDepth := ldBytes[0]
-	log.Trace(log.SDB, "ReadObject: global_depth hint", "serviceID", serviceID, "objectID", objectID, "globalDepth", globalDepth)
+	log.Trace(log.EVM, "ReadObject: global_depth hint", "serviceID", serviceID, "objectID", objectID, "globalDepth", globalDepth)
 	// Step 2: Probe backwards from global_depth to find the actual meta-shard
 	var metaShardObjectID common.Hash
 	var shardID ShardId
@@ -395,13 +395,13 @@ func (s *StateDB) ReadObject(serviceID uint32, objectID common.Hash) (*types.Sta
 			metaShardObjectID = candidateObjectID
 			shardID = candidateShardID
 			found = true
-			log.Trace(log.SDB, "ReadObject: stopped at...", "ld", ld, "metaShardObjectID", metaShardObjectID, "shardID", shardID)
+			log.Trace(log.EVM, "ReadObject: stopped at...", "ld", ld, "metaShardObjectID", metaShardObjectID, "shardID", shardID)
 			break
 		}
 
 		// Stop at ld=0 to avoid underflow
 		if ld == 0 {
-			log.Trace(log.SDB, "ReadObject: stopped at ld=0")
+			log.Trace(log.EVM, "ReadObject: stopped at ld=0")
 			break
 		}
 	}
@@ -411,7 +411,7 @@ func (s *StateDB) ReadObject(serviceID uint32, objectID common.Hash) (*types.Sta
 	}
 
 	// Step 3: Check if we have a cached witness for this meta-shard
-	log.Trace(log.SDB, "ReadObject: meta-shard found", "objectID", objectID, "metaShardObjectID", metaShardObjectID, "shardID", shardID)
+	log.Trace(log.EVM, "ReadObject: meta-shard found", "objectID", objectID, "metaShardObjectID", metaShardObjectID, "shardID", shardID)
 
 	// Check cache first
 	if witness, cached := s.metashardWitnesses[metaShardObjectID]; cached {

@@ -175,7 +175,7 @@ func (s *StateDB) verifyPostStateAgainstExecution(workItem types.WorkItem, extri
 		builderVal := builderProof.postValues[i]
 		if guarantorVal, ok := guarantorWrites[key]; ok {
 			if !bytes.Equal(builderVal[:], guarantorVal[:]) {
-				log.Warn(log.SDB, "verifyPostStateAgainstExecution: value mismatch (non-fatal)",
+				log.Warn(log.EVM, "verifyPostStateAgainstExecution: value mismatch (non-fatal)",
 					"key", fmt.Sprintf("%x", key[:]),
 					"builder", fmt.Sprintf("%x", builderVal[:]),
 					"guarantor", fmt.Sprintf("%x", guarantorVal[:]))
@@ -183,7 +183,7 @@ func (s *StateDB) verifyPostStateAgainstExecution(workItem types.WorkItem, extri
 		}
 	}
 
-	log.Info(log.SDB, "Post-state key-set cross-check passed",
+	log.Trace(log.EVM, "Post-state key-set cross-check passed",
 		"writeKeys", len(builderProof.writeKeys),
 		"postRoot", fmt.Sprintf("%x", builderProof.postRoot[:8]))
 
@@ -201,11 +201,11 @@ func (s *StateDB) populateWitnessCacheFromRefineOutput(serviceID uint32, output 
 
 	// Parse metashard count
 	metashardCount := binary.LittleEndian.Uint16(output[0:2])
-	log.Info(log.SDB, "populateWitnessCacheFromRefineOutput", "metashardCount", metashardCount, "segments", len(segments), "outputLen", len(output))
+	log.Trace(log.EVM, "populateWitnessCacheFromRefineOutput", "metashardCount", metashardCount, "segments", len(segments), "outputLen", len(output))
 
 	if metashardCount > 0 {
 		// Handle metashard entries in the new format
-		log.Info(log.SDB, "Processing metashard entries", "count", metashardCount)
+		log.Trace(log.EVM, "Processing metashard entries", "count", metashardCount)
 
 		// Skip metashard entries for now - they're handled by the accumulate process
 		// The metashard entries are variable length, so we need to parse them to find where contract witness data starts
@@ -229,7 +229,7 @@ func (s *StateDB) populateWitnessCacheFromRefineOutput(serviceID uint32, output 
 			}
 
 			offset += entrySize
-			log.Debug(log.SDB, "Skipped metashard entry", "i", i, "ld", ld, "entrySize", entrySize)
+			log.Debug(log.EVM, "Skipped metashard entry", "i", i, "ld", ld, "entrySize", entrySize)
 		}
 
 		// After metashard entries, check if there's contract witness data
@@ -239,7 +239,7 @@ func (s *StateDB) populateWitnessCacheFromRefineOutput(serviceID uint32, output 
 			indexStart := binary.LittleEndian.Uint16(output[contractOffset : contractOffset+2])
 			payloadLength := binary.LittleEndian.Uint32(output[contractOffset+2 : contractOffset+6])
 
-			log.Info(log.SDB, "Found contract witness after metashards", "indexStart", indexStart, "payloadLength", payloadLength)
+			log.Trace(log.EVM, "Found contract witness after metashards", "indexStart", indexStart, "payloadLength", payloadLength)
 
 			if payloadLength > 0 {
 				// Read and load contract witness data
@@ -268,10 +268,10 @@ func (s *StateDB) loadContractWitnessFromNewFormat(serviceID uint32, output []by
 	indexStart := binary.LittleEndian.Uint16(output[2:4])
 	payloadLength := binary.LittleEndian.Uint32(output[4:8])
 
-	log.Info(log.SDB, "loadContractWitnessFromNewFormat", "indexStart", indexStart, "payloadLength", payloadLength)
+	log.Info(log.EVM, "loadContractWitnessFromNewFormat", "indexStart", indexStart, "payloadLength", payloadLength)
 
 	if payloadLength == 0 {
-		log.Info(log.SDB, "No contract witness data to load")
+		log.Info(log.EVM, "No contract witness data to load")
 		return nil
 	}
 
@@ -289,7 +289,7 @@ func (s *StateDB) loadContractWitnessFromNewFormat(serviceID uint32, output []by
 // parseAndLoadContractStorage parses contract witness blob and loads into witness cache
 // The payload contains multiple entries: [20B address][1B kind][4B payload_length][4B tx_index][...payload...]
 func (s *StateDB) parseAndLoadContractStorage(serviceID uint32, payload []byte) error {
-	log.Info(log.SDB, "parseAndLoadContractStorage", "serviceID", serviceID, "payloadLen", len(payload))
+	log.Trace(log.EVM, "parseAndLoadContractStorage", "serviceID", serviceID, "payloadLen", len(payload))
 
 	s.sdb.InitWitnessCache()
 
@@ -312,7 +312,7 @@ func (s *StateDB) parseAndLoadContractStorage(serviceID uint32, payload []byte) 
 		entryData := payload[offset+29 : offset+29+int(payloadLength)]
 		offset += 29 + int(payloadLength)
 
-		log.Info(log.SDB, "parseAndLoadContractStorage parsed entry", "address", address.Hex(), "kind", kind, "payloadLength", payloadLength)
+		log.Trace(log.EVM, "parseAndLoadContractStorage parsed entry", "address", address.Hex(), "kind", kind, "payloadLength", payloadLength)
 
 		// Only load storage shards (kind=1) into witness cache
 		// Other kinds (balance=2, nonce=6, code=0) are handled during witness generation
@@ -326,16 +326,16 @@ func (s *StateDB) parseAndLoadContractStorage(serviceID uint32, payload []byte) 
 			// Compute verkle root for the contract storage
 			verkleRoot, err := computeVerkleRoot(address, contractStorage)
 			if err != nil {
-				log.Warn(log.SDB, "Failed to compute verkle root", "address", address.Hex(), "error", err)
+				log.Warn(log.EVM, "Failed to compute verkle root", "address", address.Hex(), "error", err)
 				// Continue without verkle root - this is not a fatal error
 			} else {
-				log.Info(log.SDB, "Computed verkle root", "address", address.Hex(), "verkleRoot", verkleRoot.Hex())
+				log.Trace(log.EVM, "Computed verkle root", "address", address.Hex(), "verkleRoot", verkleRoot.Hex())
 			}
 
 			// Load into witness cache
 			s.sdb.SetContractStorage(address, evmtypes.ContractStorage{Shard: *contractStorage})
 
-			log.Info(log.SDB, "parseAndLoadContractStorage complete", "address", address.Hex(), "entries", len(contractStorage.Entries), "verkleRoot", verkleRoot.Hex())
+			log.Trace(log.EVM, "parseAndLoadContractStorage complete", "address", address.Hex(), "entries", len(contractStorage.Entries), "verkleRoot", verkleRoot.Hex())
 		}
 	}
 
@@ -719,7 +719,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 	// The state root here matches the root used when witnesses were fetched
 	originalRefineContext := s.GetRefineContext()
 	wp.RefineContext = originalRefineContext
-	log.Trace(log.SDB, "BuildBundle:", "STATEROOT", wp.RefineContext.StateRoot)
+	log.Trace(log.EVM, "BuildBundle:", "STATEROOT", wp.RefineContext.StateRoot)
 	authorization, p_a, _, err := s.authorizeWP(wp, coreIndex, pvmBackend, "SKIP")
 	if err != nil {
 		return nil, nil, err
@@ -749,7 +749,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 		// Post-SSR: Parse refine output to populate witness cache from exported segments
 		// Output format: [2B count] + count × [32B object_id + 2B index_start + 4B payload_length + 1B object_kind]
 		if err := s.populateWitnessCacheFromRefineOutput(workItem.Service, result.Ok, exported_segments); err != nil {
-			log.Warn(log.SDB, "Failed to populate witness cache from refine output", "error", err)
+			log.Warn(log.EVM, "Failed to populate witness cache from refine output", "error", err)
 		}
 
 		importedSegments, witnesses, err := vm.GetBuilderWitnesses()
@@ -762,7 +762,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 		// Extract contract witness blob from refine result output
 		contractWitnessBlob, err := s.extractContractWitnessBlob(result.Ok, exported_segments)
 		if err != nil {
-			log.Warn(log.SDB, "Failed to extract contract witness blob", "err", err)
+			log.Warn(log.EVM, "Failed to extract contract witness blob", "err", err)
 			return nil, nil, err
 		}
 		contractWitnessBlobs[index] = contractWitnessBlob // Store for later application to main tree
@@ -770,7 +770,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 		// Build verkle witness - all verkle logic handled in storage
 		verkleWitnessBytes, err := s.sdb.BuildVerkleWitness(contractWitnessBlob)
 		if err != nil {
-			log.Warn(log.SDB, "BuildVerkleWitness failed", "err", err)
+			log.Warn(log.EVM, "BuildVerkleWitness failed", "err", err)
 			return nil, nil, err
 		}
 
@@ -778,17 +778,17 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 		// This computes the BAL hash that will be embedded in the block payload
 		blockAccessListHash, accountCount, totalChanges, err := s.sdb.ComputeBlockAccessListHash(verkleWitnessBytes)
 		if err != nil {
-			log.Warn(log.SDB, "ComputeBlockAccessListHash failed", "err", err)
+			log.Warn(log.EVM, "ComputeBlockAccessListHash failed", "err", err)
 			// Non-fatal: continue without BAL hash (will be zeros)
 			blockAccessListHash = common.Hash{}
 		} else {
-			log.Info(log.SDB, "Block Access List computed", "hash", blockAccessListHash.Hex(), "accounts", accountCount, "changes", totalChanges)
+			log.Trace(log.EVM, "Block Access List computed", "hash", blockAccessListHash.Hex(), "accounts", accountCount, "changes", totalChanges)
 		}
 
 		// Extract post-state Verkle root from witness to update block payload
 		postStateRoot, err := extractPostStateRootFromWitness(verkleWitnessBytes)
 		if err != nil {
-			log.Warn(log.SDB, "Failed to extract post-state root from witness", "err", err)
+			log.Warn(log.EVM, "Failed to extract post-state root from witness", "err", err)
 			postStateRoot = common.Hash{} // leave unchanged if extraction fails
 		}
 
@@ -796,7 +796,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 		// The block was already exported during ExecuteRefine, so we need to update it in exported_segments
 		err = s.updateBlockPayload(exported_segments, blockAccessListHash, postStateRoot)
 		if err != nil {
-			log.Warn(log.SDB, "Failed to update block payload", "err", err)
+			log.Warn(log.EVM, "Failed to update block payload", "err", err)
 			// Non-fatal: continue with original block payload (BAL hash/root may be zeros)
 		}
 
@@ -813,7 +813,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 
 		// Verify post-state against execution
 		if err := s.verifyPostStateAgainstExecution(wp.WorkItems[index], extrinsicsBlobs[index], contractWitnessBlob); err != nil {
-			log.Warn(log.SDB, "Post-state verification failed", "err", err)
+			log.Warn(log.EVM, "Post-state verification failed", "err", err)
 			return nil, nil, fmt.Errorf("post-state verification failed: %w", err)
 		}
 
@@ -888,7 +888,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 			if err := s.sdb.ApplyContractWrites(blob); err != nil {
 				return &bundle, workReport, fmt.Errorf("failed to apply contract writes for work item %d: %v", i, err)
 			}
-			log.Info(log.SDB, "Applied contract writes to state", "workItemIndex", i, "blobSize", len(blob))
+			log.Trace(log.EVM, "Applied contract writes to state", "workItemIndex", i, "blobSize", len(blob))
 		}
 	}
 
@@ -1213,7 +1213,7 @@ func (n *StateDB) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup typ
 
 // computeVerkleRoot creates a verkle tree from contract storage entries and computes its root
 func computeVerkleRoot(address common.Address, contractStorage *evmtypes.ContractShard) (common.Hash, error) {
-	log.Debug(log.SDB, "computeVerkleRoot", "address", address.Hex(), "entries", len(contractStorage.Entries))
+	log.Debug(log.EVM, "computeVerkleRoot", "address", address.Hex(), "entries", len(contractStorage.Entries))
 
 	// Create a new verkle tree
 	tree := verkle.New()
@@ -1229,7 +1229,7 @@ func computeVerkleRoot(address common.Address, contractStorage *evmtypes.Contrac
 			return common.Hash{}, fmt.Errorf("failed to insert key %x into verkle tree: %v", key, err)
 		}
 
-		log.Info(log.SDB, "computeVerkleRoot: inserted entry", "key", fmt.Sprintf("%x", key), "value", fmt.Sprintf("%x", value))
+		log.Info(log.EVM, "computeVerkleRoot: inserted entry", "key", fmt.Sprintf("%x", key), "value", fmt.Sprintf("%x", value))
 	}
 
 	// Compute the commitment (verkle root)
@@ -1249,7 +1249,7 @@ func computeVerkleRoot(address common.Address, contractStorage *evmtypes.Contrac
 	hashBytes := hashFr.Bytes()
 	verkleRoot := common.BytesToHash(hashBytes[:])
 
-	log.Info(log.SDB, "computeVerkleRoot complete", "address", address.Hex(), "verkleRoot", verkleRoot.Hex(), "entries", len(contractStorage.Entries))
+	log.Info(log.EVM, "computeVerkleRoot complete", "address", address.Hex(), "verkleRoot", verkleRoot.Hex(), "entries", len(contractStorage.Entries))
 
 	return verkleRoot, nil
 }
@@ -1285,7 +1285,7 @@ func (s *StateDB) updateBlockPayload(exportedSegments [][]byte, balHash common.H
 	// Replace the first segment with the updated one
 	exportedSegments[0] = updatedSegment
 
-	log.Debug(log.SDB, "Updated block payload with BAL hash", "hash", balHash.Hex(), "segment_size", len(updatedSegment))
+	log.Debug(log.EVM, "Updated block payload with BAL hash", "hash", balHash.Hex(), "segment_size", len(updatedSegment))
 
 	return nil
 }

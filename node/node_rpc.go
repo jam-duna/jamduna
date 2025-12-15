@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"net"
 	"net/http"
 	"net/rpc"
@@ -18,16 +17,25 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/statedb/evmtypes"
-	"github.com/colorfulnotion/jam/storage"
 	types "github.com/colorfulnotion/jam/types"
-	ethCommon "github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 )
 
 type Jam struct {
 	*NodeContent
-	node JNode // Reference to the full node that implements JNode interface
+	rollup    *statedb.Rollup // Legacy: for backward compatibility
+	serviceID uint32           // Service ID for this RPC instance
+	node      JNode            // Reference to the full node that implements JNode interface
+}
+
+// GetRollup returns the rollup instance for this RPC server's serviceID
+// Uses lazy initialization via GetOrCreateRollup
+func (j *Jam) GetRollup() (*statedb.Rollup, error) {
+	if j.rollup != nil {
+		// Legacy mode: single rollup
+		return j.rollup, nil
+	}
+	// Multi-rollup mode: get or create rollup for this service
+	return j.NodeContent.GetOrCreateRollup(j.serviceID)
 }
 
 var MethodDescriptionMap = map[string]string{
@@ -1088,6 +1096,31 @@ func (n *NodeContent) startHTTPJSONRPCServer(port int, jam *Jam) {
 	}
 }
 
+// StartMultiServiceRPCServers starts RPC servers for multiple services
+// Each service gets its own HTTP and WebSocket ports
+func (n *Node) StartMultiServiceRPCServers(serviceIDs []uint32) {
+	for _, serviceID := range serviceIDs {
+		go n.startServiceRPCServer(serviceID)
+	}
+}
+
+// startServiceRPCServer starts RPC server for a specific service
+func (n *Node) startServiceRPCServer(serviceID uint32) {
+	httpPort, _ := PortsForService(serviceID)
+
+	// Create Jam instance for this service
+	jam := &Jam{
+		NodeContent: &n.NodeContent,
+		serviceID:   serviceID,
+		node:        n,
+	}
+
+	log.Info(log.Node, "Starting RPC server for service", "serviceID", serviceID, "httpPort", httpPort)
+
+	// Start HTTP JSON-RPC server for this service
+	n.NodeContent.startHTTPJSONRPCServer(httpPort, jam)
+}
+
 // callJamMethod calls the appropriate method on the Jam struct
 func callJamMethod(jam *Jam, method string, params []string, result *string) error {
 	switch method {
@@ -1405,95 +1438,6 @@ func decodeapi(objectType, input string) (string, error) {
 	return string(decodedJSON), nil
 }
 
-// Port and network configuration
-// Note: Port variables are defined in node_rpc_port.go
-
-// SendRawTransaction submits a signed transaction to the mempool
-func (n *NodeContent) SendRawTransaction(signedTxData []byte) (common.Hash, error) {
-	// Parse the raw transaction
-	tx, err := evmtypes.ParseRawTransaction(signedTxData)
-	if err != nil {
-		return common.Hash{}, fmt.Errorf("failed to parse transaction: %v", err)
-	}
-
-	// Recover sender from signature
-	sender, err := tx.RecoverSender()
-	if err != nil {
-		return common.Hash{}, fmt.Errorf("failed to recover sender: %v", err)
-	}
-	tx.From = sender
-
-	// Get or create transaction pool
-	if n.txPool == nil {
-		n.txPool = NewTxPool()
-		log.Info(log.Node, "SendRawTransaction: Created new TxPool")
-	}
-
-	// Validate signature - sender recovery already done above, verify it's valid
-	if sender == (common.Address{}) {
-		return common.Hash{}, fmt.Errorf("invalid signature: unable to recover sender address")
-	}
-
-	// Get current verkle root for state queries
-	sdb, ok := n.store.(*storage.StateDBStorage)
-	if !ok {
-		return common.Hash{}, fmt.Errorf("storage is not StateDBStorage")
-	}
-	verkleRootBytes := sdb.CurrentVerkleTree.Commit().Bytes()
-	currentVerkleRoot := common.BytesToHash(verkleRootBytes[:])
-
-	// Validate nonce against current state
-	serviceID := uint32(statedb.EVMServiceCode)
-	currentNonce, err := n.statedb.GetTransactionCount(serviceID, sender, currentVerkleRoot)
-	if err != nil {
-		return common.Hash{}, fmt.Errorf("failed to get current nonce for validation: %v", err)
-	}
-	if tx.Nonce < currentNonce {
-		return common.Hash{}, fmt.Errorf("nonce too low: transaction nonce %d, account nonce %d", tx.Nonce, currentNonce)
-	}
-
-	// Validate balance - sender must have enough to cover value + gas costs
-	balance, err := n.statedb.GetBalance(serviceID, sender, currentVerkleRoot)
-	if err != nil {
-		return common.Hash{}, fmt.Errorf("failed to get balance for validation: %v", err)
-	}
-	balanceBig := new(big.Int).SetBytes(balance.Bytes())
-
-	// Calculate total cost: value + (gas * gasPrice)
-	gasCost := new(big.Int).Mul(new(big.Int).SetUint64(tx.Gas), tx.GasPrice)
-	totalCost := new(big.Int).Add(tx.Value, gasCost)
-
-	if balanceBig.Cmp(totalCost) < 0 {
-		return common.Hash{}, fmt.Errorf("insufficient funds: balance %s, required %s (value %s + gas cost %s)",
-			balanceBig.String(), totalCost.String(), tx.Value.String(), gasCost.String())
-	}
-
-	// Validate gas limit against block gas limit (RefineGasAllocation per work item)
-	maxGasLimit := uint64(types.RefineGasAllocation)
-	if tx.Gas > maxGasLimit {
-		return common.Hash{}, fmt.Errorf("gas limit too high: transaction gas %d exceeds maximum %d", tx.Gas, maxGasLimit)
-	}
-
-	// Minimum gas for basic transaction is 1000
-	const minTxGas = 1000
-	if tx.Gas < minTxGas {
-		return common.Hash{}, fmt.Errorf("gas limit too low: transaction gas %d is below minimum %d", tx.Gas, minTxGas)
-	}
-
-	// Add transaction to mempool
-	err = n.txPool.AddTransaction(tx)
-	if err != nil {
-		return common.Hash{}, fmt.Errorf("failed to add transaction to mempool: %v", err)
-	}
-
-	log.Info(log.Node, "SendRawTransaction: Transaction added to mempool",
-		"hash", tx.Hash.String(),
-		"from", tx.From.String(),
-		"nonce", tx.Nonce)
-
-	return tx.Hash, nil
-}
-
 // JNode interface implementations - JAM-specific methods
 
 func (n *NodeContent) GetService(service uint32) (sa *types.ServiceAccount, ok bool, err error) {
@@ -1502,295 +1446,6 @@ func (n *NodeContent) GetService(service uint32) (sa *types.ServiceAccount, ok b
 
 func (n *NodeContent) GetServiceStorage(serviceID uint32, storageKey []byte) ([]byte, bool, error) {
 	return n.statedb.ReadServiceStorage(serviceID, storageKey)
-}
-
-// JNode interface implementations - Basic info methods
-
-func (n *NodeContent) GetChainId() uint64 {
-	return n.statedb.GetChainId()
-}
-
-func (n *NodeContent) GetAccounts() []common.Address {
-	return n.statedb.GetAccounts()
-}
-
-func (n *NodeContent) GetGasPrice() uint64 {
-	return n.statedb.GetGasPrice()
-}
-
-// JNode interface implementations - Contract State methods
-
-func (n *NodeContent) GetBalance(address common.Address, blockNumber string) (common.Hash, error) {
-	verkleRoot, targetStateDB, err := n.getTargetStateDBWithRoot(blockNumber)
-	if err != nil {
-		return common.Hash{}, err
-	}
-	serviceID := uint32(statedb.EVMServiceCode)
-	return targetStateDB.GetBalance(serviceID, address, verkleRoot)
-}
-
-func (n *NodeContent) GetStorageAt(address common.Address, position common.Hash, blockNumber string) (common.Hash, error) {
-	targetStateDB, err := n.getTargetStateDB(blockNumber)
-	if err != nil {
-		return common.Hash{}, err
-	}
-	serviceID := uint32(statedb.EVMServiceCode)
-	return targetStateDB.GetStorageAt(serviceID, address, position)
-}
-
-func (n *NodeContent) GetTransactionCount(address common.Address, blockNumber string) (uint64, error) {
-	verkleRoot, targetStateDB, err := n.getTargetStateDBWithRoot(blockNumber)
-	if err != nil {
-		return 0, err
-	}
-	serviceID := uint32(statedb.EVMServiceCode)
-	return targetStateDB.GetTransactionCount(serviceID, address, verkleRoot)
-}
-
-func (n *NodeContent) GetCode(address common.Address, blockNumber string) ([]byte, error) {
-	targetStateDB, err := n.getTargetStateDB(blockNumber)
-	if err != nil {
-		return nil, err
-	}
-	serviceID := uint32(statedb.EVMServiceCode)
-	return targetStateDB.GetCode(serviceID, address)
-}
-
-// JNode interface implementations - Transaction Operations
-
-func (n *NodeContent) EstimateGas(from common.Address, to *common.Address, gas uint64, gasPrice uint64, value uint64, data []byte) (uint64, error) {
-	serviceID := uint32(statedb.EVMServiceCode)
-	return n.statedb.EstimateGas(serviceID, from, to, gas, gasPrice, value, data, n.pvmBackend)
-}
-
-func (n *NodeContent) Call(from common.Address, to *common.Address, gas uint64, gasPrice uint64, value uint64, data []byte, blockNumber string) ([]byte, error) {
-	serviceID := uint32(statedb.EVMServiceCode)
-	return n.statedb.Call(serviceID, from, to, gas, gasPrice, value, data, blockNumber, n.pvmBackend)
-}
-
-// JNode interface implementations - Transaction Queries
-
-// boolToHexStatus converts a boolean success status to hex status string
-func boolToHexStatus(success bool) string {
-	if success {
-		return "0x1"
-	}
-	return "0x0"
-}
-func (n *NodeContent) GetTransactionReceipt(txHash common.Hash) (*evmtypes.EthereumTransactionReceipt, error) {
-	receipt, err := n.statedb.GetTransactionReceipt(statedb.EVMServiceCode, txHash)
-	if err != nil {
-		return nil, err
-	}
-
-	//serviceID := statedb.EVMServiceCode
-	// Parse transaction from receipt payload (RLP-encoded transaction)
-	ethTx, err := evmtypes.ConvertPayloadToEthereumTransaction(receipt)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse transaction from receipt: %v", err)
-	}
-
-	// Parse logs from receipt LogsData if available
-	var logs []evmtypes.EthereumLog
-	if len(receipt.LogsData) > 0 {
-		logIndexStart := receipt.LogIndexStart
-
-		logs, err = evmtypes.ParseLogsFromReceipt(receipt.LogsData, txHash,
-			receipt.BlockNumber, receipt.BlockHash, receipt.TransactionIndex, logIndexStart)
-		if err != nil {
-			log.Warn(log.Node, "GetTransactionReceipt: Failed to parse logs", "error", err)
-			logs = []evmtypes.EthereumLog{} // Use empty logs on parse failure
-		}
-	}
-
-	// Determine contract address for contract creation
-	var contractAddress *string
-	if ethTx.To == nil {
-		senderAddr := common.HexToAddress(ethTx.From)
-
-		// Parse nonce
-		var nonce uint64
-		fmt.Sscanf(ethTx.Nonce, "0x%x", &nonce)
-
-		// Calculate CREATE contract address using go-ethereum's built-in function
-		// Convert our common.Address to go-ethereum's common.Address
-		ethSenderAddr := ethCommon.Address(senderAddr)
-		contractAddr := crypto.CreateAddress(ethSenderAddr, nonce).Hex()
-		contractAddress = &contractAddr
-
-		// Note: CREATE2 detection would require parsing input data to check for CREATE2 opcode
-		// For now, we only handle CREATE transactions (when To == nil)
-	}
-
-	txType := "0x0"
-	if payload := receipt.Payload; len(payload) > 0 && payload[0] < 0x80 {
-		txType = fmt.Sprintf("0x%x", payload[0])
-	}
-
-	// Bloom filters removed - always use zero bytes for RPC compatibility
-	logsBloom := evmtypes.ComputeLogsBloom(logs) // Returns zero bytes
-
-	cumulativeGasUsed := receipt.CumulativeGas
-	if cumulativeGasUsed == 0 {
-		cumulativeGasUsed = receipt.UsedGas
-	}
-
-	// Build Ethereum receipt with transaction details from parsed RLP transaction
-	ethReceipt := &evmtypes.EthereumTransactionReceipt{
-		TransactionHash:   txHash.String(),
-		TransactionIndex:  fmt.Sprintf("%d", receipt.TransactionIndex),
-		BlockHash:         receipt.BlockHash.String(),
-		BlockNumber:       fmt.Sprintf("%x", receipt.BlockNumber),
-		From:              ethTx.From,
-		To:                ethTx.To,
-		CumulativeGasUsed: fmt.Sprintf("0x%x", cumulativeGasUsed),
-		GasUsed:           fmt.Sprintf("0x%x", receipt.UsedGas),
-		ContractAddress:   contractAddress,
-		Logs:              logs,
-		LogsBloom:         logsBloom,
-		Status:            boolToHexStatus(receipt.Success),
-		EffectiveGasPrice: ethTx.GasPrice,
-		Type:              txType,
-	}
-	return ethReceipt, nil
-}
-func (n *NodeContent) GetTransactionByHash(txHash common.Hash) (*evmtypes.EthereumTransactionResponse, error) {
-	serviceID := uint32(statedb.EVMServiceCode)
-	receipt, err := n.statedb.GetTransactionByHash(serviceID, txHash)
-	if err != nil {
-		return nil, err
-	}
-	if receipt == nil {
-		return nil, nil // Transaction not found
-	}
-
-	// Convert the original payload to Ethereum transaction format
-	ethTx, err := evmtypes.ConvertPayloadToEthereumTransaction(receipt)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert payload to Ethereum transaction: %v", err)
-	}
-
-	// Populate block metadata
-	ethTx.BlockHash = fmt.Sprintf("0x%x", receipt.BlockHash)
-	ethTx.BlockNumber = fmt.Sprintf("0x%x", receipt.BlockNumber)
-	ethTx.TransactionIndex = fmt.Sprintf("0x%x", receipt.TransactionIndex)
-
-	return ethTx, nil
-}
-
-func (n *NodeContent) GetTransactionByBlockHashAndIndex(serviceID uint32, blockHash common.Hash, index uint32) (*evmtypes.EthereumTransactionResponse, error) {
-	//serviceID := statedb.EVMServiceCode
-	// First, get the block to retrieve transaction hashes
-	block, err := n.statedb.GetBlockByHash(serviceID, blockHash, false)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get block: %v", err)
-	}
-	if block == nil {
-		return nil, nil // Block not found
-	}
-
-	// Fetch the full transaction
-	return n.GetTransactionByHashFormatted(serviceID, block.TxHashes[index])
-}
-
-func (n *NodeContent) GetTransactionByBlockNumberAndIndex(serviceID uint32, blockNumber string, index uint32) (*evmtypes.EthereumTransactionResponse, error) {
-
-	// First, get the block to retrieve transaction hashes
-	block, err := n.statedb.GetBlockByNumber(serviceID, blockNumber)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get block: %v", err)
-	}
-	if block == nil {
-		return nil, nil // Block not found
-	}
-
-	// Check if index is in range
-	if index >= uint32(len(block.TxHashes)) {
-		return nil, fmt.Errorf("index out of range")
-	}
-
-	// Fetch the full transaction
-	return n.GetTransactionByHashFormatted(serviceID, block.TxHashes[index])
-}
-
-func (n *NodeContent) GetLogs(fromBlock, toBlock uint32, addresses []common.Address, topics [][]common.Hash) ([]evmtypes.EthereumLog, error) {
-	serviceID := uint32(statedb.EVMServiceCode)
-	return n.statedb.GetLogs(serviceID, fromBlock, toBlock, addresses, topics)
-}
-
-// JNode interface implementations - Block Queries
-
-func (n *NodeContent) GetLatestBlockNumber() (uint32, error) {
-	serviceID := uint32(statedb.EVMServiceCode)
-	return n.statedb.GetLatestBlockNumber(serviceID)
-}
-
-func (n *NodeContent) GetBlockByHash(blockHash common.Hash, fullTx bool) (*evmtypes.EthereumBlock, error) {
-	serviceID := uint32(statedb.EVMServiceCode)
-	evmblock, err := n.statedb.GetBlockByHash(serviceID, blockHash, fullTx)
-	if err != nil {
-		return nil, err
-	}
-	ethblock := evmblock.ToEthereumBlock(evmblock.Number, fullTx)
-	return ethblock, nil
-}
-
-// GetTransactionByHashFormatted fetches a transaction and returns it in Ethereum JSON-RPC format
-func (n *NodeContent) GetTransactionByHashFormatted(serviceID uint32, txHash common.Hash) (*evmtypes.EthereumTransactionResponse, error) {
-	receipt, err := n.statedb.GetTransactionByHash(serviceID, txHash)
-	if err != nil {
-		return nil, err
-	}
-	if receipt == nil {
-		return nil, nil // Transaction not found
-	}
-
-	// Convert the original payload to Ethereum transaction format
-	ethTx, err := evmtypes.ConvertPayloadToEthereumTransaction(receipt)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert payload to Ethereum transaction: %v", err)
-	}
-
-	// Populate block/tx metadata
-	ethTx.BlockHash = fmt.Sprintf("0x%x", receipt.BlockHash)
-	ethTx.BlockNumber = fmt.Sprintf("0x%d", receipt.BlockNumber)
-	ethTx.TransactionIndex = fmt.Sprintf("0x%x", receipt.TransactionIndex)
-
-	return ethTx, nil
-}
-
-func (n *NodeContent) GetBlockByNumber(blockNumber string, fullTx bool) (*evmtypes.EthereumBlock, error) {
-	serviceID := uint32(statedb.EVMServiceCode)
-	evmBlock, err := n.statedb.GetBlockByNumber(serviceID, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-	log.Trace(log.Node, "GetBlockByNumber: Fetched block", "number", evmBlock.Number, "b", types.ToJSON(evmBlock))
-	// Generate metadata and convert EvmBlockPayload to Ethereum JSON-RPC format
-	ethBlock := evmBlock.ToEthereumBlock(evmBlock.Number, fullTx)
-
-	// If fullTx requested, fetch full transaction objects
-	if fullTx {
-            transactions := make([]evmtypes.EthereumTransactionResponse, 0, len(evmBlock.TxHashes))
-
-		for i, txHash := range evmBlock.TxHashes {
-			ethTx, err := n.GetTransactionByHashFormatted(serviceID, txHash)
-			if err != nil {
-				log.Warn(log.Node, "GetBlockByNumber: Failed to get transaction", "txHash", txHash.String(), "error", err)
-				continue
-			}
-                    if ethTx != nil {
-                            ethTx.BlockHash = evmBlock.WorkPackageHash.String()
-                            ethTx.BlockNumber = fmt.Sprintf("0x%x", evmBlock.Number)
-                            ethTx.TransactionIndex = fmt.Sprintf("0x%x", i)
-                            transactions = append(transactions, *ethTx)
-                    }
-            }
-
-		ethBlock.Transactions = transactions
-	}
-
-	return ethBlock, nil
 }
 
 // GetSegmentWithProof returns a segment and its CDT justification proof for a given segments root and index

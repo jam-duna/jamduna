@@ -455,23 +455,25 @@ func (c *NodeClient) SubmitWorkPackage(workPackageReq *types.WorkPackageBundle) 
 	return nil
 }
 
-func (c *NodeClient) SubmitAndWaitForWorkPackageBundle(ctx context.Context, workPackageReq *types.WorkPackageBundle) (workPackageHash common.Hash, err error) {
-	wphs, err := c.SubmitAndWaitForWorkPackageBundles(ctx, []*types.WorkPackageBundle{workPackageReq})
+func (c *NodeClient) SubmitAndWaitForWorkPackageBundle(ctx context.Context, workPackageReq *types.WorkPackageBundle) (stateRoot common.Hash, ts uint32, err error) {
+	stateRoots, timeslots, err := c.SubmitAndWaitForWorkPackageBundles(ctx, []*types.WorkPackageBundle{workPackageReq})
 	if err != nil {
-		return workPackageHash, err
+		return common.Hash{}, 0, err
 	}
-	return wphs[0], nil
+	return stateRoots[0], timeslots[0], nil
 }
 
-func (c *NodeClient) SubmitAndWaitForWorkPackageBundles(ctx context.Context, reqs []*types.WorkPackageBundle) ([]common.Hash, error) {
+func (c *NodeClient) SubmitAndWaitForWorkPackageBundles(ctx context.Context, reqs []*types.WorkPackageBundle) ([]common.Hash, []uint32, error) {
 	log.Info(log.Node, "NodeClient SubmitAndWaitForWorkPackageBundles", "reqLen", len(reqs))
 	workPackageHashes := make([]common.Hash, len(reqs))
+	stateRoots := make([]common.Hash, len(reqs))
+	timeslots := make([]uint32, len(reqs))
 	workPackageLastStatus := make(map[common.Hash]string)
 
 	// Initialize refine context
 	refineCtx, err := c.GetRefineContext()
 	if err != nil {
-		return workPackageHashes, err
+		return stateRoots, timeslots, err
 	}
 	for _, req := range reqs {
 		rc := refineCtx.Clone()
@@ -489,7 +491,7 @@ func (c *NodeClient) SubmitAndWaitForWorkPackageBundles(ctx context.Context, req
 		})
 		if err := c.SubmitWorkPackage(req); err != nil {
 			log.Warn(log.Node, "Failed to submit work package", "hash", hash, "err", err)
-			return workPackageHashes, err
+			return stateRoots, timeslots, err
 		}
 		workPackageLastStatus[hash] = "submitted"
 		log.Info(log.Node, "Subscribe", "h", hash)
@@ -505,24 +507,27 @@ func (c *NodeClient) SubmitAndWaitForWorkPackageBundles(ctx context.Context, req
 	for {
 		select {
 		case <-ctx.Done():
-			return workPackageHashes, ctx.Err()
+			return stateRoots, timeslots, ctx.Err()
 		case <-states.C:
 			state, err := c.GetState("latest")
 			if err == nil {
 				numacc := 0
-				for _, workPackageHash := range workPackageHashes {
+				for i, workPackageHash := range workPackageHashes {
 					for _, ah := range state.AccumulationHistory {
 						for _, h := range ah.WorkPackageHash {
 							if workPackageHash == h {
 								log.Info(log.Node, "Work package accumulated", "hash", workPackageHash.Hex())
 								numacc++
+								// TODO: Get state root from NodeClient - for now use empty hash
+								stateRoots[i] = common.Hash{}
+								timeslots[i] = state.Timeslot
 							}
 						}
 					}
 				}
 				if numacc == len(workPackageHashes) {
 					log.Info(log.Node, "All work packages accumulated")
-					return workPackageHashes, nil
+					return stateRoots, timeslots, nil
 				}
 			}
 		case <-ticker.C:
@@ -544,8 +549,15 @@ func (c *NodeClient) SubmitAndWaitForWorkPackageBundles(ctx context.Context, req
 				}
 			}
 			if numacc == len(workPackageHashes) {
+				state, err := c.GetState("latest")
+				if err == nil {
+					for i := range workPackageHashes {
+						stateRoots[i] = common.Hash{}
+						timeslots[i] = state.Timeslot
+					}
+				}
 				log.Info(log.Node, "All work packages accumulated")
-				return workPackageHashes, nil
+				return stateRoots, timeslots, nil
 			}
 
 		}
@@ -564,7 +576,7 @@ func (c *NodeClient) RobustSubmitWorkPackage(workpackage_req *types.WorkPackageB
 		workPackageHash = workpackage_req.WorkPackage.Hash()
 		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout)
 		defer cancel()
-		_, err = c.SubmitAndWaitForWorkPackageBundle(ctx, workpackage_req)
+		_, _, err = c.SubmitAndWaitForWorkPackageBundle(ctx, workpackage_req)
 		if err != nil {
 			log.Error(log.Node, "SendWorkPackageSubmission", "err", err)
 			tries = tries + 1

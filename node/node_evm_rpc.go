@@ -25,8 +25,14 @@ import (
 func (j *Jam) ChainId(req []string, res *string) error {
 	log.Info(log.Node, "ChainId")
 
+	// Get rollup for this service
+	rollup, err := j.GetRollup()
+	if err != nil {
+		return fmt.Errorf("failed to get rollup: %v", err)
+	}
+
 	// Call internal method
-	chainId := j.node.GetChainId()
+	chainId := rollup.GetChainId()
 	*res = fmt.Sprintf("0x%x", chainId)
 
 	log.Debug(log.Node, "ChainId: Returning chain ID", "chainId", *res)
@@ -45,8 +51,14 @@ func (j *Jam) ChainId(req []string, res *string) error {
 func (j *Jam) Accounts(req []string, res *string) error {
 	log.Info(log.Node, "Accounts")
 
+	// Get rollup for this service
+	rollup, err := j.GetRollup()
+	if err != nil {
+		return fmt.Errorf("failed to get rollup: %v", err)
+	}
+
 	// Call internal method
-	accounts := j.node.GetAccounts()
+	accounts := rollup.GetAccounts()
 
 	// Convert to JSON array
 	accountsJSON := "["
@@ -75,8 +87,14 @@ func (j *Jam) Accounts(req []string, res *string) error {
 func (j *Jam) GasPrice(req []string, res *string) error {
 	log.Info(log.Node, "GasPrice")
 
+	// Get rollup for this service
+	rollup, err := j.GetRollup()
+	if err != nil {
+		return fmt.Errorf("failed to get rollup: %v", err)
+	}
+
 	// Call internal method
-	gasPrice := j.node.GetGasPrice()
+	gasPrice := rollup.GetGasPrice()
 	*res = fmt.Sprintf("0x%x", gasPrice)
 
 	log.Debug(log.Node, "GasPrice: Returning gas price", "gasPrice", *res)
@@ -105,11 +123,17 @@ func (j *Jam) GetBalance(req []string, res *string) error {
 
 	log.Debug(log.Node, "GetBalance", "address", addressStr, "blockNumber", blockNumber)
 
+	// Get rollup for this service
+	rollup, err := j.GetRollup()
+	if err != nil {
+		return fmt.Errorf("failed to get rollup: %v", err)
+	}
+
 	// Parse address
 	address := common.HexToAddress(addressStr)
 
 	// Call internal method
-	balance, err := j.node.GetBalance(address, blockNumber)
+	balance, err := rollup.GetBalance(address, blockNumber)
 	if err != nil {
 		return fmt.Errorf("failed to get balance: %v", err)
 	}
@@ -146,7 +170,13 @@ func (j *Jam) GetStorageAt(req []string, res *string) error {
 	position := common.HexToHash(positionStr)
 
 	// Call internal method
-	value, err := j.node.GetStorageAt(address, position, blockNumber)
+	// Get rollup for this service
+	rollup, err := j.GetRollup()
+	if err != nil {
+		return fmt.Errorf("failed to get rollup: %v", err)
+	}
+
+	value, err := rollup.GetStorageAt(address, position, blockNumber)
 	if err != nil {
 		return fmt.Errorf("failed to get storage: %v", err)
 	}
@@ -180,7 +210,13 @@ func (j *Jam) GetTransactionCount(req []string, res *string) error {
 	address := common.HexToAddress(addressStr)
 
 	// Call internal method
-	nonce, err := j.node.GetTransactionCount(address, blockNumber)
+	// Get rollup for this service
+	rollup, err := j.GetRollup()
+	if err != nil {
+		return fmt.Errorf("failed to get rollup: %v", err)
+	}
+
+	nonce, err := rollup.GetTransactionCount(address, blockNumber)
 	if err != nil {
 		return fmt.Errorf("failed to get transaction count: %v", err)
 	}
@@ -214,7 +250,13 @@ func (j *Jam) GetCode(req []string, res *string) error {
 	address := common.HexToAddress(addressStr)
 
 	// Call internal method
-	code, err := j.node.GetCode(address, blockNumber)
+	// Get rollup for this service
+	rollup, err := j.GetRollup()
+	if err != nil {
+		return fmt.Errorf("failed to get rollup: %v", err)
+	}
+
+	code, err := rollup.GetCode(address, blockNumber)
 	if err != nil {
 		return fmt.Errorf("failed to get code: %v", err)
 	}
@@ -257,13 +299,20 @@ func (j *Jam) EstimateGas(req []string, res *string) error {
 	}
 
 	// Estimate gas using internal method
-	gasEstimate, err := j.node.EstimateGas(
+	// Get rollup for this service
+	rollup, err := j.GetRollup()
+	if err != nil {
+		return fmt.Errorf("failed to get rollup: %v", err)
+	}
+
+	gasEstimate, err := rollup.EstimateGas(
 		tx.From,
 		tx.To,
 		tx.Gas,
 		tx.GasPrice.Uint64(),
 		tx.Value.Uint64(),
 		tx.Data,
+		statedb.BackendInterpreter,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to estimate gas: %v", err)
@@ -325,7 +374,13 @@ func (j *Jam) Call(req []string, res *string) error {
 	}(), "data_len", len(callTx.Data))
 
 	// Execute call using internal method
-	result, err := j.node.Call(
+	// Get rollup for this service
+	rollup, err := j.GetRollup()
+	if err != nil {
+		return fmt.Errorf("failed to get rollup: %v", err)
+	}
+
+	result, err := rollup.Call(
 		callTx.From,
 		callTx.To,
 		callTx.Gas,
@@ -333,6 +388,7 @@ func (j *Jam) Call(req []string, res *string) error {
 		callTx.Value.Uint64(),
 		callTx.Data,
 		blockNumberStr,
+		statedb.BackendInterpreter,
 	)
 	if err != nil {
 		log.Error(log.Node, "Call: Transaction simulation failed", "error", err)
@@ -374,7 +430,13 @@ func (j *Jam) SendRawTransaction(req []string, res *string) error {
 	signedTxData := common.FromHex(signedTxDataHex)
 
 	// Submit transaction using internal method
-	txHash, err := j.node.SendRawTransaction(signedTxData)
+	// Get rollup for this service
+	rollup, err := j.GetRollup()
+	if err != nil {
+		return fmt.Errorf("failed to get rollup: %v", err)
+	}
+
+	txHash, err := rollup.SendRawTransaction(signedTxData)
 	if err != nil {
 		log.Error(log.Node, "SendRawTransaction: Failed to submit transaction", "error", err)
 		return fmt.Errorf("failed to submit transaction: %v", err)
@@ -419,7 +481,13 @@ func (j *Jam) GetTransactionReceipt(req []string, res *string) error {
 	}
 
 	// Get receipt using internal method
-	ethReceipt, err := j.node.GetTransactionReceipt(txHash)
+	// Get rollup for this service
+	rollup, err := j.GetRollup()
+	if err != nil {
+		return fmt.Errorf("failed to get rollup: %v", err)
+	}
+
+	ethReceipt, err := rollup.GetTransactionReceipt(txHash)
 	if err != nil {
 		log.Error(log.Node, "EthGetTransactionReceipt", "error", err, "txHash", txHashStr)
 		return fmt.Errorf("failed to get transaction receipt: %v", err)
@@ -476,7 +544,13 @@ func (j *Jam) GetTransactionByBlockHashAndIndex(req []string, res *string) error
 	}
 
 	// Get transaction using internal method
-	ethTx, err := j.node.GetTransactionByBlockHashAndIndex(uint32(j.GetChainId()), blockHash, uint32(index))
+	// Get rollup for this service
+	rollup, err := j.GetRollup()
+	if err != nil {
+		return fmt.Errorf("failed to get rollup: %v", err)
+	}
+
+	ethTx, err := rollup.GetTransactionByBlockHashAndIndex(blockHash, uint32(index))
 	if err != nil {
 		log.Warn(log.Node, "GetTransactionByBlockHashAndIndex: Failed", "error", err)
 		*res = "null"
@@ -529,7 +603,13 @@ func (j *Jam) GetTransactionByBlockNumberAndIndex(req []string, res *string) err
 	}
 
 	// Get transaction using internal method
-	ethTx, err := j.node.GetTransactionByBlockNumberAndIndex(uint32(j.GetChainId()), blockNumberStr, uint32(index))
+	// Get rollup for this service
+	rollup, err := j.GetRollup()
+	if err != nil {
+		return fmt.Errorf("failed to get rollup: %v", err)
+	}
+
+	ethTx, err := rollup.GetTransactionByBlockNumberAndIndex(blockNumberStr, uint32(index))
 	if err != nil {
 		log.Warn(log.Node, "GetTransactionByBlockNumberAndIndex: Failed", "error", err)
 		*res = "null"
@@ -585,7 +665,13 @@ func (j *Jam) GetTransactionByHash(req []string, res *string) error {
 	}
 
 	// Get transaction using internal method
-	ethTx, err := j.node.GetTransactionByHash(txHash)
+	// Get rollup for this service
+	rollup, err := j.GetRollup()
+	if err != nil {
+		return fmt.Errorf("failed to get rollup: %v", err)
+	}
+
+	ethTx, err := rollup.GetTransactionByHash(txHash)
 	if err != nil {
 		log.Error(log.Node, "EthGetTransactionByHash", "error", err, "txHash", txHashStr)
 		*res = "null"
@@ -729,7 +815,13 @@ func (j *Jam) GetLogs(req []string, res *string) error {
 	log.Debug(log.Node, "GetLogs: Parameters", "fromBlock", fromBlock, "toBlock", toBlock, "addresses", len(addresses), "topics", len(topics))
 
 	// 5. Call internal method
-	allLogs, err := j.node.GetLogs(fromBlock, toBlock, addresses, topics)
+	// Get rollup for this service
+	rollup, err := j.GetRollup()
+	if err != nil {
+		return fmt.Errorf("failed to get rollup: %v", err)
+	}
+
+	allLogs, err := rollup.GetLogs(fromBlock, toBlock, addresses, topics)
 	if err != nil {
 		return fmt.Errorf("failed to get logs: %v", err)
 	}
@@ -760,7 +852,13 @@ func (j *Jam) BlockNumber(req []string, res *string) error {
 	log.Info(log.Node, "BlockNumber")
 
 	// Call internal method to get latest block number
-	blockNumber, err := j.node.GetLatestBlockNumber()
+	// Get rollup for this service
+	rollup, err := j.GetRollup()
+	if err != nil {
+		return fmt.Errorf("failed to get rollup: %v", err)
+	}
+
+	blockNumber, err := rollup.GetLatestBlockNumber()
 	if err != nil {
 		return fmt.Errorf("failed to get latest block number: %v", err)
 	}
@@ -806,7 +904,13 @@ func (j *Jam) GetBlockByHash(req []string, res *string) error {
 	hash := common.HexToHash(blockHash)
 
 	// Call the implementation
-	block, err := j.node.GetBlockByHash(hash, fullTx)
+	// Get rollup for this service
+	rollup, err := j.GetRollup()
+	if err != nil {
+		return fmt.Errorf("failed to get rollup: %v", err)
+	}
+
+	block, err := rollup.GetBlockByHash(hash, fullTx)
 	if err != nil {
 		return fmt.Errorf("failed to get block by hash: %v", err)
 	}
@@ -861,7 +965,13 @@ func (j *Jam) GetBlockByNumber(req []string, res *string) error {
 	log.Info(log.Node, "GetBlockByNumber", "blockNumber", blockNumber, "fullTx", fullTx)
 
 	// Call internal method
-	ethBlock, err := j.node.GetBlockByNumber(blockNumber, fullTx)
+	// Get rollup for this service
+	rollup, err := j.GetRollup()
+	if err != nil {
+		return fmt.Errorf("failed to get rollup: %v", err)
+	}
+
+	ethBlock, err := rollup.GetBlockByNumber(blockNumber, fullTx)
 	if err != nil {
 		log.Warn(log.Node, "GetBlockByNumber: Failed to get block", "error", err)
 		*res = "null"
@@ -889,12 +999,18 @@ func (j *Jam) GetBlockByNumber(req []string, res *string) error {
 // curl -X POST http://localhost:8545 -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
 func (j *Jam) GetLatestBlockNumber() (uint32, error) {
 	// Call public method (same as BlockNumber/eth_blockNumber)
-	blockNumber, err := j.node.GetLatestBlockNumber()
+	// Get rollup for this service
+	rollup, err := j.GetRollup()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rollup: %v", err)
+	}
+
+	blockNumber, err := rollup.GetLatestBlockNumber()
 	if err != nil {
 		return 0, fmt.Errorf("failed to get latest block number: %v", err)
 	}
 
-	return blockNumber, err
+	return blockNumber, nil
 }
 
 // ===== Helper Functions =====
@@ -1047,58 +1163,4 @@ func (j *Jam) TxPoolInspect(req []string, res *string) error {
 
 	log.Debug(log.Node, "TxPoolInspect: Returning pool inspect", "result", *res)
 	return nil
-}
-
-// resolveBlockNumberToState resolves a block number string to a StateDB
-func (n *NodeContent) resolveBlockNumberToState(blockNumberStr string) (*statedb.StateDB, error) {
-	switch blockNumberStr {
-	case "latest", "pending":
-		// Use current state for latest/pending
-		return n.statedb, nil
-
-	case "earliest":
-		// Load genesis state (block 1)
-		return n.getHistoricalState(1)
-
-	default:
-		// Parse hex block number
-		if len(blockNumberStr) >= 2 && blockNumberStr[:2] == "0x" {
-			blockNum, err := strconv.ParseUint(blockNumberStr[2:], 16, 32)
-			if err != nil {
-				return nil, fmt.Errorf("invalid block number format: %v", err)
-			}
-			return n.getHistoricalState(uint32(blockNum))
-		}
-
-		return nil, fmt.Errorf("invalid block number format: %s", blockNumberStr)
-	}
-}
-
-// getHistoricalState reconstructs StateDB from a block's state root
-func (n *NodeContent) getHistoricalState(blockNumber uint32) (*statedb.StateDB, error) {
-	// Read block metadata to get state root
-	serviceID := uint32(n.GetChainId())
-	evmBlock, err := n.statedb.ReadBlockByNumber(serviceID, blockNumber)
-	if err != nil {
-		log.Warn(log.Node, "Failed to read block metadata, using current state",
-			"blockNumber", blockNumber, "error", err)
-		return n.statedb, nil
-	}
-
-	storage, err := n.GetStorage()
-	if err != nil {
-		log.Warn(log.Node, "Failed to get storage for historical state, using current state",
-			"blockNumber", blockNumber, "error", err)
-		return n.statedb, nil
-	}
-	// Reconstruct StateDB from the block's verkle root
-	fmt.Printf("Reconstructing historical state for block %d with verkle root %s\n", blockNumber, evmBlock.VerkleRoot.Hex())
-	historicalState, err := statedb.NewStateDBFromStateRoot(evmBlock.VerkleRoot, storage)
-	if err != nil {
-		log.Warn(log.Node, "Failed to reconstruct historical state, using current state",
-			"blockNumber", blockNumber, "verkleRoot", evmBlock.VerkleRoot.Hex(), "error", err)
-		return n.statedb, nil
-	}
-
-	return historicalState, nil
 }

@@ -150,6 +150,48 @@ type VerkleRead struct {
 	TxIndex    uint32         // Transaction index within work package (0=pre-exec, 1..n=txs)
 }
 
+// ServiceBlockIndex links service-specific EVM blocks to JAM state
+// Stored per service to track the EVM rollup block history
+type ServiceBlockIndex struct {
+	ServiceID    uint32      // Service ID
+	BlockNumber  uint32      // EVM block number within this service
+	BlockHash    common.Hash // EVM block hash
+	VerkleRoot   common.Hash // Verkle tree root after this block
+	JAMStateRoot common.Hash // JAM state root where this block is committed
+	JAMSlot      uint32      // JAM slot number when this block was finalized
+}
+
+// BlockMetadata provides context for a transaction within a block
+type BlockMetadata struct {
+	BlockHash   common.Hash
+	BlockNumber uint32
+	TxIndex     uint32
+}
+
+// EVMBlock represents a full EVM block for RPC responses
+type EVMBlock struct {
+	BlockNumber  uint32
+	BlockHash    common.Hash
+	ParentHash   common.Hash
+	Timestamp    uint32
+	VerkleRoot   common.Hash
+	Transactions []Transaction
+	Receipts     []Receipt
+}
+
+// Transaction represents an EVM transaction
+type Transaction struct {
+	Hash common.Hash
+	// Full transaction data would be stored in EvmBlockPayload
+}
+
+// Receipt represents an EVM transaction receipt
+type Receipt struct {
+	TransactionHash common.Hash
+	Success         bool
+	UsedGas         uint64
+}
+
 func (kv *KeyVal) UnmarshalJSON(data []byte) error {
 	var raw struct {
 		Key   string `json:"key"`
@@ -511,6 +553,61 @@ type JAMStorage interface {
 	// Used by both builder (to compute hash for payload) and guarantor (to verify builder's hash)
 	// Returns: hash, accountCount, totalChanges, error
 	ComputeBlockAccessListHash(verkleWitness []byte) (common.Hash, uint32, uint32, error)
+
+	// Verkle Tree Access Methods
+	// GetVerkleTreeAtRoot retrieves a Verkle tree at the specified root hash
+	// Returns: tree, found
+	GetVerkleTreeAtRoot(root common.Hash) (interface{}, bool)
+
+	// GetVerkleNodeForBlockNumber maps a block number string to the corresponding Verkle tree
+	// Returns: verkleTree, ok
+	GetVerkleNodeForBlockNumber(blockNumber string) (interface{}, bool)
+
+	// GetBalance reads balance from Verkle tree using BasicData
+	// Returns: balance (as 32-byte hash), error
+	GetBalance(tree interface{}, address common.Address) (common.Hash, error)
+
+	// GetNonce reads nonce from Verkle tree using BasicData
+	// Returns: nonce, error
+	GetNonce(tree interface{}, address common.Address) (uint64, error)
+
+	// GetCurrentVerkleTree returns the current active Verkle tree
+	// Returns: tree (nil if not available)
+	GetCurrentVerkleTree() interface{}
+
+	// Multi-Rollup Support: Service-Scoped State Management
+	// Each node can run multiple rollups (one per service), each with isolated state
+
+	// GetVerkleNodeForServiceBlock retrieves the Verkle tree for a specific service's block
+	// blockNumber supports: "latest", "earliest", "pending", or hex number
+	// Returns: verkleNode, ok
+	GetVerkleNodeForServiceBlock(serviceID uint32, blockNumber string) (interface{}, bool)
+
+	// StoreServiceBlock persists an EVM block for a specific service
+	// Links the EVM block to JAM state root and slot
+	// This is called post-accumulate when the EVM block is finalized
+	// block parameter should be *evmtypes.EvmBlockPayload
+	StoreServiceBlock(serviceID uint32, block interface{}, jamStateRoot common.Hash, jamSlot uint32) error
+
+	// GetServiceBlock retrieves an EVM block by service ID and block number
+	// blockNumber supports: "latest", "earliest", "pending", or hex number
+	// Returns *evmtypes.EvmBlockPayload
+	GetServiceBlock(serviceID uint32, blockNumber string) (interface{}, error)
+
+	// GetTransactionByHash finds a transaction in a service's block history
+	// Returns: transaction, block metadata, error
+	GetTransactionByHash(serviceID uint32, txHash common.Hash) (*Transaction, *BlockMetadata, error)
+
+	// GetBlockByNumber retrieves full EVM block by service ID and block number
+	GetBlockByNumber(serviceID uint32, blockNumber string) (*EVMBlock, error)
+
+	// GetBlockByHash retrieves full EVM block by service ID and block hash
+	GetBlockByHash(serviceID uint32, blockHash common.Hash) (*EVMBlock, error)
+
+	// FinalizeEVMBlock stores the EVM block and updates verkle tree snapshot
+	// This is called AFTER work package accumulation completes
+	// block parameter should be *evmtypes.EvmBlockPayload
+	FinalizeEVMBlock(serviceID uint32, blockPayload interface{}, jamStateRoot common.Hash, jamSlot uint32) error
 
 	// Lifecycle
 	Close() error

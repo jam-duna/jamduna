@@ -13,6 +13,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb/evmtypes"
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -2027,9 +2028,9 @@ func (vm *VM) hostLog() {
 	if vm.IsChild {
 		serviceMetadata = fmt.Sprintf("%s-child", serviceMetadata)
 	}
-	loggingVerbose := true
-	if vm.logging == log.FirstGuarantor || vm.logging == log.Auditor || vm.logging == log.Builder || vm.logging == log.PvmAuthoring || vm.logging == log.OtherGuarantor {
-		loggingVerbose = true
+	loggingVerbose := false
+	if vm.logging == log.FirstGuarantor || vm.logging == log.Auditor || vm.logging == log.Builder || vm.logging == log.PvmAuthoring {
+		loggingVerbose = false
 	}
 	if !loggingVerbose {
 		return
@@ -2136,8 +2137,7 @@ func (vm *VM) HostFetchWitness() error {
 	object_id := common.BytesToHash(object_id_bytes)
 
 	// Log all fetch_object calls to track meta-shard fetches
-	log.Info(vm.logging, "🔍 HostFetchWitness called", "role", vm.logging, "object_id", object_id, "service_id", service_id)
-	fmt.Printf("🔍 HostFetchWitness called: role=%s, object_id=%s, service_id=%d\n", vm.logging, object_id.Hex(), service_id)
+	log.Trace(vm.logging, "🔍 HostFetchWitness called", "role", vm.logging, "object_id", object_id, "service_id", service_id)
 
 	if vm.logging != log.Builder {
 		log.Info(vm.logging, "HostFetchWitness returning empty (not builder)", "role", vm.logging, "object_id", object_id)
@@ -2167,7 +2167,6 @@ func (vm *VM) HostFetchWitness() error {
 
 	// Determine object kind from objectID byte 31
 	objectKind := evmtypes.ObjectKind(object_id[31])
-	fmt.Printf("🔍 HostFetchWitness: address=%s, objectKind=%d\n", address.Hex(), objectKind)
 
 	var payload []byte
 
@@ -2186,7 +2185,6 @@ func (vm *VM) HostFetchWitness() error {
 				}
 				vm.codeWitness[address] = code
 				log.Trace(vm.logging, funcName+": ✅ Found code in witness cache", "address", address.Hex(), "codeSize", len(code))
-				fmt.Printf("✅ HostFetchWitness: Found code in witness cache: address=%s, codeSize=%d\n", address.Hex(), len(code))
 
 				// Create minimal witness for code
 				witness = &types.StateWitness{
@@ -2206,7 +2204,6 @@ func (vm *VM) HostFetchWitness() error {
 			shardID := evmtypes.ShardID{Ld: 0, Prefix56: [7]byte{}}
 
 			// Look up from witness cache
-			fmt.Printf("🔍 HostFetchWitness: Looking for storage in witness cache: address=%s\n", address.Hex())
 			if storageData, exists := stateDB.sdb.GetContractStorage(address); exists {
 				if contractStorage, ok := storageData.(evmtypes.ContractStorage); ok {
 					shard := contractStorage.Shard
@@ -2222,7 +2219,6 @@ func (vm *VM) HostFetchWitness() error {
 					}
 					vm.storageWitness[address] = storage
 					log.Trace(vm.logging, funcName+": ✅ Found storage shard in witness cache", "address", address.Hex(), "shardLD", shardID.Ld, "entryCount", len(shard.Entries))
-					fmt.Printf("✅ HostFetchWitness: Found storage shard in witness cache: address=%s, entries=%d\n", address.Hex(), len(shard.Entries))
 
 					// Create minimal witness for storage shard
 					witness = &types.StateWitness{
@@ -2377,7 +2373,7 @@ func (vm *VM) GetBuilderWitnesses() ([]types.ImportSegment, []types.StateWitness
 	msWitnesses := vm.hostenv.GetWitnesses()
 
 	for msobjectID, ms := range msWitnesses {
-		log.Trace(log.SDB, "Processing meta-shard witness", "metaShardObjectID", msobjectID)
+		log.Trace(log.EVM, "Processing meta-shard witness", "metaShardObjectID", msobjectID)
 		if ms.ObjectProofs == nil {
 			ms.ObjectProofs = make(map[common.Hash][]common.Hash)
 		}
@@ -2429,7 +2425,7 @@ func (vm *VM) GetBuilderWitnesses() ([]types.ImportSegment, []types.StateWitness
 
 			// Add import segments for this object
 			numSegments, _ := types.CalculateSegmentsAndLastBytes(ref.PayloadLength)
-			log.Trace(log.SDB, "Adding import segments - object", "objectID", objectID, "workPackageHash", ref.WorkPackageHash,
+			log.Trace(log.EVM, "Adding import segments - object", "objectID", objectID, "workPackageHash", ref.WorkPackageHash,
 				"start", ref.IndexStart, "numSegments", numSegments, "end", ref.IndexStart+numSegments)
 			for idx := ref.IndexStart; idx < ref.IndexStart+numSegments; idx++ {
 				importedSegments = append(importedSegments, types.ImportSegment{
@@ -2440,7 +2436,7 @@ func (vm *VM) GetBuilderWitnesses() ([]types.ImportSegment, []types.StateWitness
 		}
 		ref := ms.Ref
 		numSegments, _ := types.CalculateSegmentsAndLastBytes(ref.PayloadLength)
-		log.Trace(log.SDB, "Adding import segment - metashard", "objectID", msobjectID, "workPackageHash", ref.WorkPackageHash,
+		log.Trace(log.EVM, "Adding import segment - metashard", "objectID", msobjectID, "workPackageHash", ref.WorkPackageHash,
 			"start", ref.IndexStart, "numSegments", numSegments, "end", ref.IndexStart+numSegments,
 			"payloadLength", ref.PayloadLength)
 		for idx := ref.IndexStart; idx < ref.IndexStart+numSegments; idx++ {
@@ -2462,7 +2458,7 @@ func (vm *VM) GetBuilderWitnesses() ([]types.ImportSegment, []types.StateWitness
 	for _, sortable := range sortableRefs {
 		witnessSlice = append(witnessSlice, sortable.witness)
 	}
-	log.Info(log.SDB, "Compiled builder witnesses", "numWitnesses", len(witnessSlice), "numImportSegments", len(importedSegments))
+	log.Trace(log.EVM, "Compiled builder witnesses", "numWitnesses", len(witnessSlice), "numImportSegments", len(importedSegments))
 	return importedSegments, witnessSlice, nil
 }
 
@@ -2612,15 +2608,15 @@ func (vm *VM) hostFetchVerkle() {
 		fetchType, address.Hex(), outputMaxLen, txIndex)
 
 	switch fetchType {
-	case evmtypes.FETCH_BALANCE:
+	case storage.FETCH_BALANCE:
 		vm.fetchBalance(stateDB, address, outputPtr, outputMaxLen, txIndex)
-	case evmtypes.FETCH_NONCE:
+	case storage.FETCH_NONCE:
 		vm.fetchNonce(stateDB, address, outputPtr, outputMaxLen, txIndex)
-	case evmtypes.FETCH_CODE:
+	case storage.FETCH_CODE:
 		vm.fetchCode(stateDB, address, outputPtr, outputMaxLen, txIndex)
-	case evmtypes.FETCH_CODE_HASH:
+	case storage.FETCH_CODE_HASH:
 		vm.fetchCodeHash(stateDB, address, outputPtr, outputMaxLen, txIndex)
-	case evmtypes.FETCH_STORAGE:
+	case storage.FETCH_STORAGE:
 		// Read storage key (32 bytes)
 		var storageKey [32]byte
 		keyBytes, errCode2 := vm.ReadRAMBytes(keyPtr, 32)
@@ -2653,12 +2649,12 @@ func (vm *VM) fetchBalance(stateDB *StateDB, address common.Address, outputPtr u
 	// Fetch balance via clean interface (no type casting, verkle logic in StateDBStorage)
 	balance, err := stateDB.sdb.FetchBalance(address, txIndex)
 	if err != nil {
-		log.Info(vm.logging, "fetchBalance error", "address", address.Hex(), "txIndex", txIndex, "err", err)
+		log.Trace(vm.logging, "fetchBalance error", "address", address.Hex(), "txIndex", txIndex, "err", err)
 		vm.WriteRegister(7, 0)
 		return
 	}
 
-	log.Info(vm.logging, "fetchBalance", "address", address.Hex(), "balanceBE", fmt.Sprintf("%x", balance[:]), "txIndex", txIndex)
+	log.Trace(vm.logging, "fetchBalance", "address", address.Hex(), "balanceBE", fmt.Sprintf("%x", balance[:]), "txIndex", txIndex)
 
 	// Write to output
 	if errCode := vm.WriteRAMBytes(outputPtr, balance[:]); errCode != OK {
@@ -2685,12 +2681,12 @@ func (vm *VM) fetchNonce(stateDB *StateDB, address common.Address, outputPtr uin
 	// Fetch nonce via clean interface (no type casting, verkle logic in StateDBStorage)
 	nonce, err := stateDB.sdb.FetchNonce(address, txIndex)
 	if err != nil {
-		log.Info(vm.logging, "fetchNonce error", "address", address.Hex(), "txIndex", txIndex, "err", err)
+		log.Trace(vm.logging, "fetchNonce error", "address", address.Hex(), "txIndex", txIndex, "err", err)
 		vm.WriteRegister(7, 0)
 		return
 	}
 
-	log.Info(vm.logging, "fetchNonce", "address", address.Hex(), "nonceBE", fmt.Sprintf("%x", nonce[:]), "txIndex", txIndex)
+	log.Trace(vm.logging, "fetchNonce", "address", address.Hex(), "nonceBE", fmt.Sprintf("%x", nonce[:]), "txIndex", txIndex)
 
 	// Write to output
 	if errCode := vm.WriteRAMBytes(outputPtr, nonce[:]); errCode != OK {
@@ -2830,7 +2826,7 @@ func (vm *VM) hostVerifyVerkleProof() {
 	witnessPtr := uint32(vm.ReadRegister(7))
 	witnessLen := uint32(vm.ReadRegister(8))
 
-	log.Info(log.SDB, "hostVerifyVerkleProof called", "ptr", witnessPtr, "len", witnessLen)
+	log.Trace(log.SDB, "hostVerifyVerkleProof called", "ptr", witnessPtr, "len", witnessLen)
 
 	// Get StateDB from hostenv
 	stateDB, ok := vm.hostenv.(*StateDB)
@@ -2848,7 +2844,7 @@ func (vm *VM) hostVerifyVerkleProof() {
 		return
 	}
 
-	log.Info(log.SDB, "hostVerifyVerkleProof: Read witness from RAM", "dataLen", len(witnessData))
+	log.Trace(log.SDB, "hostVerifyVerkleProof: Read witness from RAM", "dataLen", len(witnessData))
 
 	// Parse witness
 	if len(witnessData) < 68 {
@@ -2927,7 +2923,7 @@ func (vm *VM) hostVerifyVerkleProof() {
 	preProofData := witnessData[offset : offset+int(preProofLen)]
 	offset += int(preProofLen)
 
-	log.Info(log.SDB, "hostVerifyVerkleProof: Parsed pre-state", "readCount", readCount, "preProofLen", preProofLen, "preRoot", fmt.Sprintf("%x", preStateRoot[:8]))
+	log.Trace(log.SDB, "hostVerifyVerkleProof: Parsed pre-state", "readCount", readCount, "preProofLen", preProofLen, "preRoot", fmt.Sprintf("%x", preStateRoot[:8]))
 
 	// Filter out absent keys (zero values) for proof verification
 	// The proof only contains present keys, but the witness includes all keys for cache population
@@ -2947,13 +2943,13 @@ func (vm *VM) hostVerifyVerkleProof() {
 		}
 	}
 
-	log.Info(log.SDB, "hostVerifyVerkleProof: Filtered for verification", "totalKeys", readCount, "presentKeys", len(presentReadKeys))
+	log.Trace(log.SDB, "hostVerifyVerkleProof: Filtered for verification", "totalKeys", readCount, "presentKeys", len(presentReadKeys))
 
 	if len(presentReadKeys) == 0 {
-		log.Info(log.SDB, "hostVerifyVerkleProof: no present read keys, skipping pre-state verification")
+		log.Trace(log.SDB, "hostVerifyVerkleProof: no present read keys, skipping pre-state verification")
 	} else {
 		// Verify pre-state proof (only for present keys)
-		valid, err := evmtypes.VerifyVerkleProof(preProofData, preStateRoot[:], presentReadKeys, presentReadValues)
+		valid, err := storage.VerifyVerkleProof(preProofData, preStateRoot[:], presentReadKeys, presentReadValues)
 		if err != nil {
 			log.Warn(log.SDB, "hostVerifyVerkleProof: pre-state verification error", "err", err)
 			vm.WriteRegister(7, 0)
@@ -2965,7 +2961,7 @@ func (vm *VM) hostVerifyVerkleProof() {
 			return
 		}
 
-		log.Info(log.SDB, "hostVerifyVerkleProof: ✅ pre-state proof valid")
+		log.Debug(log.SDB, "hostVerifyVerkleProof: ✅ pre-state proof valid")
 	}
 
 	// ===== PHASE 2: Parse and Verify Post-State Section (Writes) =====
@@ -3057,7 +3053,7 @@ func (vm *VM) hostVerifyVerkleProof() {
 	}
 	postProofData := witnessData[offset : offset+int(postProofLen)]
 
-	log.Info(log.SDB, "hostVerifyVerkleProof: Parsed post-state", "writeCount", writeCount, "postProofLen", postProofLen, "postRoot", fmt.Sprintf("%x", postStateRoot[:8]))
+	log.Trace(log.SDB, "hostVerifyVerkleProof: Parsed post-state", "writeCount", writeCount, "postProofLen", postProofLen, "postRoot", fmt.Sprintf("%x", postStateRoot[:8]))
 
 	if writeCount == 0 {
 		if !bytes.Equal(postStateRoot[:], preStateRoot[:]) {
@@ -3065,10 +3061,10 @@ func (vm *VM) hostVerifyVerkleProof() {
 			vm.WriteRegister(7, 0)
 			return
 		}
-		log.Info(log.SDB, "hostVerifyVerkleProof: no write entries, skipping post-state verification")
+		log.Trace(log.SDB, "hostVerifyVerkleProof: no write entries, skipping post-state verification")
 	} else {
 		// Verify post-state proof with state transition (PRE-root -> POST-root)
-		valid, err := evmtypes.VerifyVerkleProofWithTransition(postProofData, preStateRoot[:], postStateRoot[:], writeKeys, writePreValues, writePostValues)
+		valid, err := storage.VerifyVerkleProofWithTransition(postProofData, preStateRoot[:], postStateRoot[:], writeKeys, writePreValues, writePostValues)
 		if err != nil {
 			log.Warn(log.SDB, "hostVerifyVerkleProof: post-state verification error", "err", err)
 			vm.WriteRegister(7, 0)
@@ -3080,12 +3076,12 @@ func (vm *VM) hostVerifyVerkleProof() {
 			return
 		}
 
-		log.Info(log.SDB, "hostVerifyVerkleProof: ✅ post-state proof valid (state transition verified)")
+		log.Trace(log.SDB, "hostVerifyVerkleProof: ✅ post-state proof valid (state transition verified)")
 	}
 
 	// Both pre-state and post-state proofs are valid
 	// No need to check local tree - witness is self-validating
-	log.Info(log.SDB, "hostVerifyVerkleProof: ✅ dual-proof witness valid")
+	log.Trace(log.SDB, "hostVerifyVerkleProof: ✅ dual-proof witness valid")
 
 	// Proof is valid
 	vm.WriteRegister(7, 1)
@@ -3105,12 +3101,12 @@ func (vm *VM) hostComputeBALHash() {
 	witnessLen := uint32(vm.ReadRegister(8))
 	outputPtr := uint32(vm.ReadRegister(9))
 
-	log.Info(log.SDB, "hostComputeBALHash called", "witnessPtr", witnessPtr, "witnessLen", witnessLen, "outputPtr", outputPtr)
+	log.Trace(log.EVM, "hostComputeBALHash called", "witnessPtr", witnessPtr, "witnessLen", witnessLen, "outputPtr", outputPtr)
 
 	// Get StateDB from hostenv
 	stateDB, ok := vm.hostenv.(*StateDB)
 	if !ok || stateDB.sdb == nil {
-		log.Warn(log.SDB, "hostComputeBALHash: no StateDB")
+		log.Warn(log.EVM, "hostComputeBALHash: no StateDB")
 		vm.WriteRegister(7, 0)
 		return
 	}
@@ -3118,7 +3114,7 @@ func (vm *VM) hostComputeBALHash() {
 	// Read witness data from memory
 	witnessData, errCode := vm.ReadRAMBytes(witnessPtr, witnessLen)
 	if errCode != OK {
-		log.Warn(log.SDB, "hostComputeBALHash: ReadRAMBytes failed", "errCode", errCode)
+		log.Warn(log.EVM, "hostComputeBALHash: ReadRAMBytes failed", "errCode", errCode)
 		vm.WriteRegister(7, 0)
 		return
 	}
@@ -3126,17 +3122,17 @@ func (vm *VM) hostComputeBALHash() {
 	// Compute BAL hash using storage layer
 	balHash, accountCount, totalChanges, err := stateDB.sdb.ComputeBlockAccessListHash(witnessData)
 	if err != nil {
-		log.Warn(log.SDB, "hostComputeBALHash: computation failed", "err", err)
+		log.Warn(log.EVM, "hostComputeBALHash: computation failed", "err", err)
 		vm.WriteRegister(7, 0)
 		return
 	}
 
-	log.Info(log.SDB, "hostComputeBALHash: computed", "hash", balHash.Hex(), "accounts", accountCount, "changes", totalChanges)
+	log.Trace(log.EVM, "hostComputeBALHash: computed", "hash", balHash.Hex(), "accounts", accountCount, "changes", totalChanges)
 
 	// Write hash to output buffer
 	errCode = vm.WriteRAMBytes(outputPtr, balHash[:])
 	if errCode != OK {
-		log.Warn(log.SDB, "hostComputeBALHash: WriteRAMBytes failed", "errCode", errCode)
+		log.Warn(log.EVM, "hostComputeBALHash: WriteRAMBytes failed", "errCode", errCode)
 		vm.WriteRegister(7, 0)
 		return
 	}

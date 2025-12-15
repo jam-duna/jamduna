@@ -64,7 +64,7 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout*maxRobustTries)
-		wr, err := RobustSubmitAndWaitForWorkPackageBundles(ctx, n1, []*types.WorkPackageBundle{wpr})
+		_, _, err = RobustSubmitAndWaitForWorkPackageBundles(ctx, n1, []*types.WorkPackageBundle{wpr})
 		cancel()
 		if err != nil {
 			log.Error(log.Node, "SubmitAndWaitForWorkPackages ERR", "err", err)
@@ -72,6 +72,6 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 		}
 		k := common.ServiceStorageKey(algo_serviceIdx, []byte{0})
 		data, _, _ := n1.GetServiceStorage(algo_serviceIdx, k)
-		log.Info(log.Node, "algo", "workPackageHash", wr.AvailabilitySpec.WorkPackageHash, "exportedSegmentRoot", wr.AvailabilitySpec.ExportedSegmentRoot, "result", fmt.Sprintf("%x", data))
+		log.Info(log.Node, "algo", "algoN", algoN, "result", fmt.Sprintf("%x", data))
 	}
 }

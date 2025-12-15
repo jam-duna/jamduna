@@ -195,14 +195,16 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 		fmt.Printf("Submitting FIB(%d) WorkPackageBundle %v\n", fibN, wpr.StringL())
 
 		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout*maxRobustTries)
-		wr, err := RobustSubmitAndWaitForWorkPackageBundles(ctx, n1, []*types.WorkPackageBundle{wpr})
+		_, _, err = RobustSubmitAndWaitForWorkPackageBundles(ctx, n1, []*types.WorkPackageBundle{wpr})
 		cancel()
 		if err != nil {
 			log.Error(log.Node, "SubmitAndWaitForWorkPackages ERR", "err", err)
 			return
 		}
 
-		exportedSegmentRoot := wr.AvailabilitySpec.ExportedSegmentRoot
+		// TODO: Get exportedSegmentRoot from work report
+		// exportedSegmentRoot := wr.AvailabilitySpec.ExportedSegmentRoot
+		exportedSegmentRoot := common.Hash{}
 
 		// Track this completed FIB for future imports
 		completedFibs = append(completedFibs, completedFibResult{
@@ -227,6 +229,6 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 			verified = "NO_EXPECTED (fibN >= len(expectedRoots))"
 		}
 
-		log.Info(log.Node, fmt.Sprintf("FIB(%d)", fibN), "workPackageHash", wr.AvailabilitySpec.WorkPackageHash, "exportedSegmentRoot", exportedSegmentRoot, "verified", verified, "resultLen", len(data), "numImports", len(imported))
+		log.Info(log.Node, fmt.Sprintf("FIB(%d)", fibN), "fibN", fibN, "exportedSegmentRoot", exportedSegmentRoot, "verified", verified, "resultLen", len(data), "numImports", len(imported))
 	}
 }

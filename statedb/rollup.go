@@ -14,9 +14,10 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
+
 	"github.com/colorfulnotion/jam/statedb/evmtypes"
-	storage "github.com/colorfulnotion/jam/storage"
-	types "github.com/colorfulnotion/jam/types"
+	"github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/types"
 	ethereumCommon "github.com/ethereum/go-ethereum/common"
 	ethereumTypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -68,8 +69,63 @@ type Rollup struct {
 	stateDB            *StateDB
 	serviceID          uint32
 	previousGuarantees *[]types.Guarantee
-	storage            *storage.StateDBStorage
+	storage            types.JAMStorage
 	pvmBackend         string
+}
+
+// Getter methods for Rollup fields
+func (r *Rollup) GetStateDB() *StateDB {
+	return r.stateDB
+}
+
+func (r *Rollup) GetServiceID() uint32 {
+	return r.serviceID
+}
+
+func (r *Rollup) GetBalance(address common.Address, blockNumber string) (common.Hash, error) {
+	// Use service-scoped verkle tree lookup
+	tree, ok := r.storage.GetVerkleNodeForServiceBlock(r.serviceID, blockNumber)
+	if !ok {
+		return common.Hash{}, fmt.Errorf("verkle tree not found for service %d block %s", r.serviceID, blockNumber)
+	}
+	// Read balance from Verkle tree
+	balanceHash, err := r.storage.GetBalance(tree, address)
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	return balanceHash, nil
+}
+
+func (r *Rollup) GetTransactionCount(address common.Address, blockNumber string) (uint64, error) {
+	// Use service-scoped verkle tree lookup
+	tree, ok := r.storage.GetVerkleNodeForServiceBlock(r.serviceID, blockNumber)
+	if !ok {
+		return 0, fmt.Errorf("verkle tree not found for service %d block %s", r.serviceID, blockNumber)
+	}
+	nonce, err := r.storage.GetNonce(tree, address)
+	if err != nil {
+		return 0, err
+	}
+
+	return nonce, nil
+}
+
+func (r *Rollup) GetCode(address common.Address, blockNumber string) ([]byte, error) {
+	// Use service-scoped verkle tree lookup
+	tree, ok := r.storage.GetVerkleNodeForServiceBlock(r.serviceID, blockNumber)
+	if !ok {
+		return nil, fmt.Errorf("verkle tree not found for service %d block %s", r.serviceID, blockNumber)
+	}
+	verkleTree, ok := tree.(verkle.VerkleNode)
+	if !ok {
+		return nil, fmt.Errorf("invalid tree type")
+	}
+	code, err := storage.ReadCode(verkleTree, address[:])
+	if err != nil {
+		return nil, fmt.Errorf("failed to read code from Verkle tree: %w", err)
+	}
+	return code, nil
 }
 
 // DefaultWorkPackage creates a work package with common default values
@@ -115,42 +171,31 @@ func BuildPayload(payloadType PayloadType, count int, globalDepth uint8, numWitn
 	return payload
 }
 
-func NewRollup(testDir string, serviceID uint32) (*Rollup, error) {
-	storage, err := initStorage(testDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize storage: %w", err)
-	}
-
-	// Create genesis state, Create StateDB
-	genesisTrace, err := MakeGenesisStateTransition(storage, 0, "jam", nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create genesis state: %w", err)
-	}
-
-	statedb, err := NewStateDBFromStateTransitionPost(storage, genesisTrace)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create StateDB from genesis: %w", err)
-	}
+func NewRollup(jamStorage types.JAMStorage, serviceID uint32) (*Rollup, error) {
+	// Rollup is a lightweight query interface for service-scoped state
+	// It does NOT create its own StateDB - that would interfere with the node's JAM state
+	// For now, stateDB, previousGuarantees, and pvmBackend are left nil/empty
+	// TODO: Refactor to remove these fields entirely and use node reference instead
 	chain := Rollup{
 		serviceID:          serviceID,
-		stateDB:            statedb,
-		storage:            storage,
+		stateDB:            nil, // TODO: Remove this field
+		storage:            jamStorage,
 		previousGuarantees: nil,
-		pvmBackend:         BackendInterpreter, // BackendCompiler
+		pvmBackend:         BackendInterpreter,
 	}
 	return &chain, nil
 }
 
 // processWorkPackageBundles processes work packages in non-pipelined mode
 // Block N: guarantees, Block N+1: assurances (two blocks per work package)
-func (c *Rollup) processWorkPackageBundles(bundles []*types.WorkPackageBundle) error {
-	validators, validatorSecrets, bootstrapAuthCodeHash, err := c.setupValidators()
+func (r *Rollup) processWorkPackageBundles(bundles []*types.WorkPackageBundle) error {
+	validators, validatorSecrets, bootstrapAuthCodeHash, err := r.setupValidators()
 	if err != nil {
 		return err
 	}
 
 	// Execute bundles and create guarantees
-	_, activeGuarantees, err := c.executeAndGuarantee(bundles, validatorSecrets, c.stateDB)
+	_, activeGuarantees, err := r.executeAndGuarantee(bundles, validatorSecrets, r.stateDB)
 	if err != nil {
 		return err
 	}
@@ -158,32 +203,32 @@ func (c *Rollup) processWorkPackageBundles(bundles []*types.WorkPackageBundle) e
 	// Block 1: guarantees only
 	extrinsic := types.NewExtrinsic()
 	extrinsic.Guarantees = activeGuarantees
-	if err := c.buildAndApplyBlock(context.Background(), validators, validatorSecrets, bootstrapAuthCodeHash, &extrinsic); err != nil {
+	if err := r.buildAndApplyBlock(context.Background(), validators, validatorSecrets, bootstrapAuthCodeHash, &extrinsic); err != nil {
 		return err
 	}
 
 	// Block 2: assurances only
 	extrinsic = types.NewExtrinsic()
-	extrinsic.Assurances = c.createAssurances(0, validatorSecrets, c.stateDB)
-	if err := c.buildAndApplyBlock(context.Background(), validators, validatorSecrets, bootstrapAuthCodeHash, &extrinsic); err != nil {
+	extrinsic.Assurances = r.createAssurances(0, validatorSecrets, r.stateDB)
+	if err := r.buildAndApplyBlock(context.Background(), validators, validatorSecrets, bootstrapAuthCodeHash, &extrinsic); err != nil {
 		return err
 	}
 
-	c.previousGuarantees = nil
+	r.previousGuarantees = nil
 	return nil
 }
 
 // processWorkPackageBundlesPipelined processes work packages in pipelined mode
 // Block N contains: guarantees for current work + assurances for PREVIOUS block's work
 // TODO: set up assurances bitfields correctly
-func (c *Rollup) processWorkPackageBundlesPipelined(bundles []*types.WorkPackageBundle) error {
-	validators, validatorSecrets, bootstrapAuthCodeHash, err := c.setupValidators()
+func (r *Rollup) processWorkPackageBundlesPipelined(bundles []*types.WorkPackageBundle) error {
+	validators, validatorSecrets, bootstrapAuthCodeHash, err := r.setupValidators()
 	if err != nil {
 		return err
 	}
 
 	// Execute bundles and create guarantees for current work
-	guarantees, activeGuarantees, err := c.executeAndGuarantee(bundles, validatorSecrets, c.stateDB)
+	guarantees, activeGuarantees, err := r.executeAndGuarantee(bundles, validatorSecrets, r.stateDB)
 	if err != nil {
 		return err
 	}
@@ -191,27 +236,27 @@ func (c *Rollup) processWorkPackageBundlesPipelined(bundles []*types.WorkPackage
 	// Build extrinsic with current guarantees and previous assurances
 	extrinsic := types.NewExtrinsic()
 	extrinsic.Guarantees = activeGuarantees
-	if c.previousGuarantees != nil {
-		extrinsic.Assurances = c.createAssurancesForGuarantees(c.previousGuarantees, validatorSecrets, c.stateDB)
+	if r.previousGuarantees != nil {
+		extrinsic.Assurances = r.createAssurancesForGuarantees(r.previousGuarantees, validatorSecrets, r.stateDB)
 	}
 
-	if err := c.buildAndApplyBlock(context.Background(), validators, validatorSecrets, bootstrapAuthCodeHash, &extrinsic); err != nil {
+	if err := r.buildAndApplyBlock(context.Background(), validators, validatorSecrets, bootstrapAuthCodeHash, &extrinsic); err != nil {
 		return err
 	}
 
 	// Save guarantees for next block's assurances
-	c.previousGuarantees = &guarantees
+	r.previousGuarantees = &guarantees
 	return nil
 }
 
 // setupValidators generates validator secrets and bootstrap auth code hash
-func (c *Rollup) setupValidators() ([]types.Validator, []types.ValidatorSecret, common.Hash, error) {
+func (r *Rollup) setupValidators() ([]types.Validator, []types.ValidatorSecret, common.Hash, error) {
 	validators, validatorSecrets, err := GenerateValidatorSecretSet(types.TotalValidators)
 	if err != nil {
 		return nil, nil, common.Hash{}, fmt.Errorf("failed to generate validator secrets: %w", err)
 	}
 
-	bootstrapAuthCodeHash, err := c.getBootstrapAuthCodeHash()
+	bootstrapAuthCodeHash, err := r.getBootstrapAuthCodeHash()
 	if err != nil {
 		return nil, nil, common.Hash{}, err
 	}
@@ -220,7 +265,7 @@ func (c *Rollup) setupValidators() ([]types.Validator, []types.ValidatorSecret, 
 }
 
 // getBootstrapAuthCodeHash reads and hashes the bootstrap authorization code
-func (c *Rollup) getBootstrapAuthCodeHash() (common.Hash, error) {
+func (r *Rollup) getBootstrapAuthCodeHash() (common.Hash, error) {
 	authPvm, err := common.GetFilePath(BootStrapNullAuthFile)
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("failed to get auth file path: %w", err)
@@ -241,7 +286,7 @@ func (c *Rollup) getBootstrapAuthCodeHash() (common.Hash, error) {
 }
 
 // executeAndGuarantee executes bundles and creates signed guarantees
-func (c *Rollup) executeAndGuarantee(bundles []*types.WorkPackageBundle, validatorSecrets []types.ValidatorSecret, statedb *StateDB) ([]types.Guarantee, []types.Guarantee, error) {
+func (r *Rollup) executeAndGuarantee(bundles []*types.WorkPackageBundle, validatorSecrets []types.ValidatorSecret, statedb *StateDB) ([]types.Guarantee, []types.Guarantee, error) {
 	guarantees := make([]types.Guarantee, types.TotalCores)
 	activeGuarantees := make([]types.Guarantee, 0)
 
@@ -249,14 +294,14 @@ func (c *Rollup) executeAndGuarantee(bundles []*types.WorkPackageBundle, validat
 		if bundle == nil {
 			continue
 		}
-		workReport, err := statedb.ExecuteWorkPackageBundle(uint16(coreIndex), *bundle, types.SegmentRootLookup{}, 0, log.OtherGuarantor, 0, c.pvmBackend, "SKIP")
+		workReport, err := r.stateDB.ExecuteWorkPackageBundle(uint16(coreIndex), *bundle, types.SegmentRootLookup{}, 0, log.OtherGuarantor, 0, r.pvmBackend, "SKIP")
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed ExecuteWorkPackageBundle: %v", err)
 		}
 		workReport.CoreIndex = uint(coreIndex)
 
 		// Create guarantee with validator signatures
-		guarantee := c.createGuarantee(workReport, uint16(coreIndex), validatorSecrets, statedb)
+		guarantee := r.createGuarantee(workReport, uint16(coreIndex), validatorSecrets, statedb)
 		guarantees[coreIndex] = guarantee
 
 		if len(guarantee.Signatures) > 0 {
@@ -268,14 +313,14 @@ func (c *Rollup) executeAndGuarantee(bundles []*types.WorkPackageBundle, validat
 }
 
 // createGuarantee creates a guarantee with 3 validator signatures
-func (c *Rollup) createGuarantee(workReport types.WorkReport, coreIndex uint16, validatorSecrets []types.ValidatorSecret, statedb *StateDB) types.Guarantee {
+func (r *Rollup) createGuarantee(workReport types.WorkReport, coreIndex uint16, validatorSecrets []types.ValidatorSecret, statedb *StateDB) types.Guarantee {
 	guarantee := types.Guarantee{
 		Report:     workReport,
-		Slot:       statedb.GetTimeslot(),
+		Slot:       r.stateDB.GetTimeslot(),
 		Signatures: []types.GuaranteeCredential{},
 	}
 
-	_, assignments := statedb.CalculateAssignments(statedb.GetTimeslot())
+	_, assignments := r.stateDB.CalculateAssignments(r.stateDB.GetTimeslot())
 	var coreValidators []uint16
 	for idx, assignment := range assignments {
 		if assignment.CoreIndex == coreIndex {
@@ -294,12 +339,12 @@ func (c *Rollup) createGuarantee(workReport types.WorkReport, coreIndex uint16, 
 }
 
 // createAssurances creates assurances for a core
-func (c *Rollup) createAssurances(coreIndex uint16, validatorSecrets []types.ValidatorSecret, statedb *StateDB) []types.Assurance {
+func (r *Rollup) createAssurances(coreIndex uint16, validatorSecrets []types.ValidatorSecret, statedb *StateDB) []types.Assurance {
 	assurances := make([]types.Assurance, 0)
 
 	for i := 0; i < 6 && i < types.TotalValidators; i++ {
 		assurance := types.Assurance{
-			Anchor:         statedb.HeaderHash,
+			Anchor:         r.stateDB.HeaderHash,
 			Bitfield:       [types.Avail_bitfield_bytes]byte{},
 			ValidatorIndex: uint16(i),
 		}
@@ -312,7 +357,7 @@ func (c *Rollup) createAssurances(coreIndex uint16, validatorSecrets []types.Val
 }
 
 // createAssurancesForGuarantees creates assurances for multiple guarantees
-func (c *Rollup) createAssurancesForGuarantees(guarantees *[]types.Guarantee, validatorSecrets []types.ValidatorSecret, statedb *StateDB) []types.Assurance {
+func (r *Rollup) createAssurancesForGuarantees(guarantees *[]types.Guarantee, validatorSecrets []types.ValidatorSecret, statedb *StateDB) []types.Assurance {
 	assurances := make([]types.Assurance, 0)
 
 	for coreIndex := range *guarantees {
@@ -321,7 +366,7 @@ func (c *Rollup) createAssurancesForGuarantees(guarantees *[]types.Guarantee, va
 		}
 		for i := 0; i < 6 && i < types.TotalValidators; i++ {
 			assurance := types.Assurance{
-				Anchor:         statedb.HeaderHash,
+				Anchor:         r.stateDB.HeaderHash,
 				Bitfield:       [types.Avail_bitfield_bytes]byte{},
 				ValidatorIndex: uint16(i),
 			}
@@ -335,38 +380,38 @@ func (c *Rollup) createAssurancesForGuarantees(guarantees *[]types.Guarantee, va
 }
 
 // buildAndApplyBlock builds and applies a block with the given extrinsic
-func (c *Rollup) buildAndApplyBlock(ctx context.Context, validators []types.Validator, validatorSecrets []types.ValidatorSecret, bootstrapAuthCodeHash common.Hash, extrinsic *types.ExtrinsicData) error {
-	statedb := c.stateDB
-	targetJCE := statedb.GetTimeslot() + 1
+func (r *Rollup) buildAndApplyBlock(ctx context.Context, validators []types.Validator, validatorSecrets []types.ValidatorSecret, bootstrapAuthCodeHash common.Hash, extrinsic *types.ExtrinsicData) error {
+	s := r.stateDB
+	targetJCE := r.stateDB.GetTimeslot() + 1
 
 	// Find authorized block refiner
-	validatorSecret, err := c.findAuthorizedValidator(validators, validatorSecrets, targetJCE)
+	validatorSecret, err := r.findAuthorizedValidator(validators, validatorSecrets, targetJCE)
 	if err != nil {
 		return err
 	}
 
 	// Build block
-	sealedBlock, _ := statedb.BuildBlock(ctx, *validatorSecret, targetJCE, common.Hash{}, extrinsic)
+	sealedBlock, _ := s.BuildBlock(ctx, *validatorSecret, targetJCE, common.Hash{}, extrinsic)
 
 	// Add bootstrap authorization to pool for all cores
 	authorizerHash := common.Blake2Hash(append(bootstrapAuthCodeHash.Bytes(), []byte(nil)...))
 	for i := 0; i < types.TotalCores; i++ {
-		statedb.JamState.AuthorizationsPool[i][0] = authorizerHash
+		s.JamState.AuthorizationsPool[i][0] = authorizerHash
 	}
 
 	// Apply state transition
-	newStateDB, err := ApplyStateTransitionFromBlock(0, statedb, ctx, sealedBlock, nil, "interpreter", "")
+	newStateDB, err := ApplyStateTransitionFromBlock(0, r.stateDB, ctx, sealedBlock, nil, "interpreter", "")
 	if err != nil {
 		return fmt.Errorf("failed to apply state transition: %w", err)
 	}
 
-	c.stateDB = newStateDB
+	r.stateDB = newStateDB
 	return nil
 }
 
 // findAuthorizedValidator finds a validator authorized to build a block
-func (c *Rollup) findAuthorizedValidator(validators []types.Validator, validatorSecrets []types.ValidatorSecret, targetJCE uint32) (*types.ValidatorSecret, error) {
-	sf0, _ := c.stateDB.GetPosteriorSafroleEntropy(targetJCE)
+func (r *Rollup) findAuthorizedValidator(validators []types.Validator, validatorSecrets []types.ValidatorSecret, targetJCE uint32) (*types.ValidatorSecret, error) {
+	sf0, _ := r.stateDB.GetPosteriorSafroleEntropy(targetJCE)
 
 	for i := 0; i < types.TotalValidators; i++ {
 		isAuthorized, _, _, _ := sf0.IsAuthorizedBuilder(targetJCE, common.Hash(validators[i].Bandersnatch), []common.Hash{})
@@ -402,7 +447,7 @@ func parseIntParam(s string) (int64, error) {
 }
 
 // CallMath calls math functions on the deployed contract using the provided call strings
-func (c *Rollup) CallMath(mathAddress common.Address, callStrings []string) (txBytes [][]byte, alltopics map[common.Hash]string, err error) {
+func (r *Rollup) CallMath(mathAddress common.Address, callStrings []string) (txBytes [][]byte, alltopics map[common.Hash]string, err error) {
 
 	// mathCallSpec defines a mathematical function with its signature and events
 	type mathCallSpec struct {
@@ -570,12 +615,8 @@ func (c *Rollup) CallMath(mathAddress common.Address, callStrings []string) (txB
 	// Get caller account (using issuer account)
 	callerAddress, callerPrivKeyHex := common.GetEVMDevAccount(0)
 
-	// Get current verkle root for state queries
-	verkleRootBytes := c.storage.CurrentVerkleTree.Commit().Bytes()
-	currentVerkleRoot := common.BytesToHash(verkleRootBytes[:])
-
 	// Get initial nonce for the caller from current state
-	initialNonce, err := c.stateDB.GetTransactionCount(c.serviceID, callerAddress, currentVerkleRoot)
+	initialNonce, err := r.GetTransactionCount(callerAddress, "latest")
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get transaction count for caller %s: %w", callerAddress.String(), err)
 	}
@@ -607,7 +648,7 @@ func (c *Rollup) CallMath(mathAddress common.Address, callStrings []string) (txB
 			calldata,
 			gasPrice,
 			gasLimit,
-			uint64(c.serviceID),
+			uint64(r.serviceID),
 		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create evmmath call transaction for %s: %w", callString, err)
@@ -619,10 +660,11 @@ func (c *Rollup) CallMath(mathAddress common.Address, callStrings []string) (txB
 	return txBytes, alltopics, nil
 }
 
-// SubmitEVMTransactions creates and submits a work package with raw transactions, processes it, and returns the resulting block
-func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte) ([]*types.WorkPackageBundle, error) {
+// PackageMulticoreBundles packages raw transaction bytes into work package bundles for multiple cores
+// Returns bundles ready for submission to the network
+func (r *Rollup) PackageMulticoreBundles(evmTxsMulticore [][][]byte) ([]*types.WorkPackageBundle, error) {
 	bundles := make([]*types.WorkPackageBundle, len(evmTxsMulticore))
-	globalDepth, err := b.stateDB.ReadGlobalDepth(b.serviceID)
+	globalDepth, err := r.stateDB.ReadGlobalDepth(r.serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("ReadGlobalDepth failed: %v", err)
 	}
@@ -646,26 +688,37 @@ func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte) ([]*types.Wor
 			}
 		}
 
-		service, ok, err := b.stateDB.GetService(b.serviceID)
+		service, ok, err := r.stateDB.GetService(r.serviceID)
 		if err != nil || !ok {
 			return nil, fmt.Errorf("EVM service not found: %v", err)
 		}
 
 		// Create work package
-		wp := DefaultWorkPackage(b.serviceID, service)
+		wp := DefaultWorkPackage(r.serviceID, service)
 		wp.WorkItems[0].Payload = BuildPayload(PayloadTypeBuilder, numTxExtrinsics, globalDepth, 0, common.Hash{})
 		wp.WorkItems[0].Extrinsics = hashes
 
 		//  BuildBundle should return a Bundle (with ImportedSegments)
-		bundle2, _, err := b.stateDB.BuildBundle(wp, []types.ExtrinsicsBlobs{blobs}, uint16(coreIndex), nil, b.pvmBackend)
+		bundle2, _, err := r.stateDB.BuildBundle(wp, []types.ExtrinsicsBlobs{blobs}, uint16(coreIndex), nil, r.pvmBackend)
 		if err != nil {
 			return nil, fmt.Errorf("BuildBundle failed: %v", err)
 		}
 		bundles[coreIndex] = bundle2
 	}
 
+	return bundles, nil
+}
+
+// SubmitEVMTransactions creates and submits a work package with raw transactions, processes it, and returns the resulting block
+func (r *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte) ([]*types.WorkPackageBundle, error) {
+	// Package the transactions into bundles
+	bundles, err := r.PackageMulticoreBundles(evmTxsMulticore)
+	if err != nil {
+		return nil, err
+	}
+
 	// Process the bundles
-	err = b.processWorkPackageBundles(bundles)
+	err = r.processWorkPackageBundles(bundles)
 	if err != nil {
 		return nil, fmt.Errorf("processWorkPackageBundles failed: %w", err)
 	}
@@ -674,7 +727,7 @@ func (b *Rollup) SubmitEVMTransactions(evmTxsMulticore [][][]byte) ([]*types.Wor
 }
 
 // ShowTxReceipts displays transaction receipts for the given transaction hashes
-func (b *Rollup) ShowTxReceipts(evmBlock *evmtypes.EvmBlockPayload, txHashes []common.Hash, description string, allTopics map[common.Hash]string) error {
+func (r *Rollup) ShowTxReceipts(evmBlock *evmtypes.EvmBlockPayload, txHashes []common.Hash, description string, allTopics map[common.Hash]string) error {
 	log.Info(log.Node, "Showing transaction receipts", "description", description, "count", len(txHashes))
 
 	gasUsedTotal := big.NewInt(0)
@@ -684,7 +737,7 @@ func (b *Rollup) ShowTxReceipts(evmBlock *evmtypes.EvmBlockPayload, txHashes []c
 	}
 
 	for _, txHash := range txHashes {
-		receipt, err := b.stateDB.GetTransactionReceipt(b.serviceID, txHash)
+		receipt, err := r.getTransactionReceipt(txHash)
 		if err != nil {
 			return fmt.Errorf("failed to get transaction receipt for %s: %w", txHash.String(), err)
 		}
@@ -704,59 +757,11 @@ func (b *Rollup) ShowTxReceipts(evmBlock *evmtypes.EvmBlockPayload, txHashes []c
 	return nil
 }
 
-func AppendBootstrapExtrinsic(blobs *types.ExtrinsicsBlobs, workItems *[]types.WorkItemExtrinsic, extrinsic []byte) {
-	*blobs = append(*blobs, extrinsic)
-	*workItems = append(*workItems, types.WorkItemExtrinsic{
-		Hash: common.Blake2Hash(extrinsic),
-		Len:  uint32(len(extrinsic)),
-	})
-}
-
-// Helper: build K extrinsic for genesis storage initialization
-// Format: [address:20][storage_key:32][value:32] = 84 bytes (no command byte)
-func BuildKExtrinsic(address []byte, storageKey []byte, storageValue []byte) []byte {
-	extrinsic := make([]byte, 20+32+32)
-	copy(extrinsic[0:20], address)
-	copy(extrinsic[20:52], storageKey)
-	copy(extrinsic[52:84], storageValue)
-	return extrinsic
-}
-
-// Helper: initialize Solidity mapping storage for the Genesis case
-func InitializeMappings(blobs *types.ExtrinsicsBlobs, workItems *[]types.WorkItemExtrinsic, contractAddr common.Address, entries []MappingEntry) {
-	for _, entry := range entries {
-		var storageKey []byte
-
-		if entry.Slot == 255 { // Special marker for direct slot write (Key is the actual slot hash)
-			// Direct storage slot write - Key is interpreted as the storage slot address
-			storageKey = entry.Key[:]
-		} else {
-			// Compute Solidity mapping storage key: keccak256(abi.encode(key, slot))
-			keyInput := make([]byte, 64)
-			copy(keyInput[12:32], entry.Key[:])
-			keyInput[63] = entry.Slot
-			storageKey = crypto.Keccak256(keyInput)
-		}
-
-		// Encode value as 32-byte big-endian
-		valueBytes := entry.Value.FillBytes(make([]byte, 32))
-
-		AppendBootstrapExtrinsic(blobs, workItems, BuildKExtrinsic(contractAddr[:], storageKey[:], valueBytes))
-	}
-}
-
-// MappingEntry represents a single mapping entry to initialize
-type MappingEntry struct {
-	Slot  uint8          // Mapping slot number, or 255 for direct slot write
-	Key   common.Address // Mapping key (address), or direct storage slot if Slot==255
-	Value *big.Int       // Value to write
-}
-
-func (b *Rollup) SubmitEVMGenesis(startBalance int64) error {
+func (r *Rollup) SubmitEVMGenesis(startBalance int64) error {
 	log.Info(log.Node, "SubmitEVMGenesis - Initializing Verkle tree", "startBalance", startBalance)
 
 	// Get StateDBStorage to access Verkle tree
-	sdb, ok := b.stateDB.sdb.(*storage.StateDBStorage)
+	sdb, ok := r.stateDB.sdb.(*storage.StateDBStorage)
 	if !ok {
 		return fmt.Errorf("StateDB storage is not StateDBStorage")
 	}
@@ -796,7 +801,7 @@ func (b *Rollup) SubmitEVMGenesis(startBalance int64) error {
 	copy(basicData[32-len(balanceBytes):32], balanceBytes)
 
 	// Insert BasicData into Verkle tree
-	basicDataKey := evmtypes.BasicDataKey(issuerAddress[:])
+	basicDataKey := storage.BasicDataKey(issuerAddress[:])
 	if err := sdb.CurrentVerkleTree.Insert(basicDataKey, basicData[:], nil); err != nil {
 		return fmt.Errorf("failed to insert BasicData: %w", err)
 	}
@@ -822,7 +827,7 @@ func (b *Rollup) SubmitEVMGenesis(startBalance int64) error {
 		codeHash := crypto.Keccak256Hash(sc.code)
 
 		// Insert code via InsertCode (handles chunking, code hash, and BasicData update)
-		if err := evmtypes.InsertCode(sdb.CurrentVerkleTree, sc.address[:], sc.code, codeHash[:]); err != nil {
+		if err := storage.InsertCode(sdb.CurrentVerkleTree, sc.address[:], sc.code, codeHash[:]); err != nil {
 			return fmt.Errorf("failed to insert code for %s: %w", sc.address.Hex(), err)
 		}
 
@@ -835,14 +840,35 @@ func (b *Rollup) SubmitEVMGenesis(startBalance int64) error {
 	verkleRootHash := common.BytesToHash(verkleRootBytes[:])
 
 	// Store the verkle tree at this root for future queries
-	if err := sdb.StoreVerkleTransition(verkleRootHash, sdb.CurrentVerkleTree); err != nil {
-		return fmt.Errorf("failed to store verkle transition: %w", err)
+	sdb.StoreVerkleTree(verkleRootHash, sdb.CurrentVerkleTree)
+
+	// Create genesis block (block 0) for this service
+	genesisBlock := &evmtypes.EvmBlockPayload{
+		Number:              0,
+		WorkPackageHash:     common.Hash{}, // Genesis has no work package hash
+		SegmentRoot:         common.Hash{},
+		PayloadLength:       148, // Just the header
+		NumTransactions:     0,
+		Timestamp:           0,
+		GasUsed:             0,
+		VerkleRoot:          verkleRootHash,
+		TransactionsRoot:    common.Hash{},
+		ReceiptRoot:         common.Hash{},
+		BlockAccessListHash: common.Hash{},
+		TxHashes:            []common.Hash{},
+		ReceiptHashes:       []common.Hash{},
+		Transactions:        []evmtypes.TransactionReceipt{},
+	}
+
+	// Store genesis block using the multi-rollup infrastructure
+	if err := sdb.StoreServiceBlock(r.serviceID, genesisBlock, common.Hash{}, 0); err != nil {
+		return fmt.Errorf("failed to store genesis block: %w", err)
 	}
 
 	log.Info(log.Node, "✅ SubmitEVMGenesis complete", "verkleRoot", verkleRootHash.Hex())
 
 	// 4. Verify reads work
-	balanceHash, err := b.stateDB.GetBalance(b.serviceID, issuerAddress, verkleRootHash)
+	balanceHash, err := r.GetBalance(issuerAddress, "latest")
 	if err != nil {
 		return fmt.Errorf("GetBalance failed: %w", err)
 	}
@@ -852,7 +878,7 @@ func (b *Rollup) SubmitEVMGenesis(startBalance int64) error {
 		return fmt.Errorf("balance mismatch: expected %s, got %s", balanceWei.String(), balanceRead.String())
 	}
 
-	nonceRead, err := b.stateDB.GetTransactionCount(b.serviceID, issuerAddress, verkleRootHash)
+	nonceRead, err := r.GetTransactionCount(issuerAddress, "latest")
 	if err != nil {
 		return fmt.Errorf("GetTransactionCount failed: %w", err)
 	}
@@ -861,7 +887,7 @@ func (b *Rollup) SubmitEVMGenesis(startBalance int64) error {
 	}
 
 	for _, sc := range systemContracts {
-		code, err := b.stateDB.GetCode(b.serviceID, sc.address)
+		code, err := r.GetCode(sc.address, "latest")
 		if err != nil {
 			return fmt.Errorf("GetCode failed for %s: %w", sc.address.Hex(), err)
 		}
@@ -887,7 +913,7 @@ type TransferTriple struct {
 // - Middle rounds: mix of transfers between non-issuer accounts
 // - Last round: intentionally large amounts to test insufficient balance handling
 // - Amounts vary by round to create interesting test cases
-func (b *Rollup) createTransferTriplesForRound(roundNum int, txnsPerRound int) []TransferTriple {
+func (r *Rollup) createTransferTriplesForRound(roundNum int, txnsPerRound int) []TransferTriple {
 	const numDevAccounts = 10
 	transfers := make([]TransferTriple, 0, txnsPerRound)
 
@@ -947,7 +973,7 @@ func (b *Rollup) createTransferTriplesForRound(roundNum int, txnsPerRound int) [
 }
 
 // DeployContract deploys a contract and returns its address
-func (b *Rollup) DeployContract(contractFile string) (common.Address, error) {
+func (r *Rollup) DeployContract(contractFile string) (common.Address, error) {
 	// Load contract bytecode from file
 	contractBytecode, err := os.ReadFile(contractFile)
 	if err != nil {
@@ -961,12 +987,8 @@ func (b *Rollup) DeployContract(contractFile string) (common.Address, error) {
 		return common.Address{}, fmt.Errorf("failed to parse deployer private key: %w", err)
 	}
 
-	// Get current verkle root for state queries
-	verkleRootBytes := b.storage.CurrentVerkleTree.Commit().Bytes()
-	currentVerkleRoot := common.BytesToHash(verkleRootBytes[:])
-
 	// Get current nonce for the deployer
-	nonce, err := b.stateDB.GetTransactionCount(b.serviceID, deployerAddress, currentVerkleRoot)
+	nonce, err := r.GetTransactionCount(deployerAddress, "latest")
 	if err != nil {
 		return common.Address{}, fmt.Errorf("failed to get transaction count: %w", err)
 	}
@@ -986,7 +1008,7 @@ func (b *Rollup) DeployContract(contractFile string) (common.Address, error) {
 	)
 
 	// Sign transaction
-	signer := ethereumTypes.NewEIP155Signer(big.NewInt(int64(b.serviceID)))
+	signer := ethereumTypes.NewEIP155Signer(big.NewInt(int64(r.serviceID)))
 	signedTx, err := ethereumTypes.SignTx(ethTx, signer, deployerPrivKey)
 	if err != nil {
 		return common.Address{}, fmt.Errorf("failed to sign contract deployment transaction: %w", err)
@@ -1000,7 +1022,7 @@ func (b *Rollup) DeployContract(contractFile string) (common.Address, error) {
 	multiCoreTxBytes := make([][][]byte, 1)
 	multiCoreTxBytes[0] = [][]byte{txBytes}
 	// Submit contract deployment as work package
-	_, err = b.SubmitEVMTransactions(multiCoreTxBytes)
+	_, err = r.SubmitEVMTransactions(multiCoreTxBytes)
 	if err != nil {
 		return common.Address{}, fmt.Errorf("contract deployment failed: %w", err)
 	}
@@ -1009,7 +1031,819 @@ func (b *Rollup) DeployContract(contractFile string) (common.Address, error) {
 }
 
 // SaveWorkPackageBundle saves a WorkPackageBundle to disk using Encode
-func (b *Rollup) SaveWorkPackageBundle(bundle *types.WorkPackageBundle, filename string) error {
+func (r *Rollup) SaveWorkPackageBundle(bundle *types.WorkPackageBundle, filename string) error {
 	encoded := bundle.Encode()
 	return os.WriteFile(filename, encoded, 0644)
+}
+
+func (r *Rollup) GetChainId() uint64 {
+	return uint64(DefaultJAMChainID)
+}
+
+func (r *Rollup) GetAccounts() []common.Address {
+	return []common.Address{}
+}
+
+func (r *Rollup) GetGasPrice() uint64 {
+	return 1
+}
+
+// boolToHexStatus converts a boolean success status to hex status string
+func boolToHexStatus(success bool) string {
+	if success {
+		return "0x1"
+	}
+	return "0x0"
+}
+
+// GetTransactionReceipt fetches a transaction receipt
+func (r *Rollup) getTransactionReceipt(txHash common.Hash) (*evmtypes.TransactionReceipt, error) {
+	// Use ReadObject to get receipt from DA
+	receiptObjectID := evmtypes.TxToObjectID(txHash)
+	witness, found, err := r.stateDB.ReadObject(r.serviceID, receiptObjectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read transaction receipt: %v", err)
+	}
+	if !found {
+		return nil, nil // Transaction not found
+	}
+
+	// Parse raw receipt
+	receipt, err := evmtypes.ParseRawReceipt(witness)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse receipt: %v", err)
+	}
+	return receipt, nil
+}
+
+func (r *Rollup) GetTransactionReceipt(txHash common.Hash) (*evmtypes.EthereumTransactionReceipt, error) {
+	receipt, err := r.getTransactionReceipt(txHash)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse transaction from receipt payload (RLP-encoded transaction)
+	ethTx, err := evmtypes.ConvertPayloadToEthereumTransaction(receipt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse transaction from receipt: %v", err)
+	}
+
+	// Parse logs from receipt LogsData if available
+	var logs []evmtypes.EthereumLog
+	if len(receipt.LogsData) > 0 {
+		logIndexStart := receipt.LogIndexStart
+
+		logs, err = evmtypes.ParseLogsFromReceipt(receipt.LogsData, txHash,
+			receipt.BlockNumber, receipt.BlockHash, receipt.TransactionIndex, logIndexStart)
+		if err != nil {
+			log.Warn(log.Node, "GetTransactionReceipt: Failed to parse logs", "error", err)
+			logs = []evmtypes.EthereumLog{} // Use empty logs on parse failure
+		}
+	}
+
+	// Determine contract address for contract creation
+	var contractAddress *string
+	if ethTx.To == nil {
+		senderAddr := common.HexToAddress(ethTx.From)
+
+		// Parse nonce
+		var nonce uint64
+		fmt.Sscanf(ethTx.Nonce, "0x%x", &nonce)
+
+		// Calculate CREATE contract address using go-ethereum's built-in function
+		// Convert our common.Address to go-ethereum's common.Address
+		ethSenderAddr := ethereumCommon.Address(senderAddr)
+		contractAddr := crypto.CreateAddress(ethSenderAddr, nonce).Hex()
+		contractAddress = &contractAddr
+
+		// Note: CREATE2 detection would require parsing input data to check for CREATE2 opcode
+		// For now, we only handle CREATE transactions (when To == nil)
+	}
+
+	txType := "0x0"
+	if payload := receipt.Payload; len(payload) > 0 && payload[0] < 0x80 {
+		txType = fmt.Sprintf("0x%x", payload[0])
+	}
+
+	// Bloom filters removed - always use zero bytes for RPC compatibility
+	logsBloom := evmtypes.ComputeLogsBloom(logs) // Returns zero bytes
+
+	cumulativeGasUsed := receipt.CumulativeGas
+	if cumulativeGasUsed == 0 {
+		cumulativeGasUsed = receipt.UsedGas
+	}
+
+	// Build Ethereum receipt with transaction details from parsed RLP transaction
+	ethReceipt := &evmtypes.EthereumTransactionReceipt{
+		TransactionHash:   txHash.String(),
+		TransactionIndex:  fmt.Sprintf("%d", receipt.TransactionIndex),
+		BlockHash:         receipt.BlockHash.String(),
+		BlockNumber:       fmt.Sprintf("%x", receipt.BlockNumber),
+		From:              ethTx.From,
+		To:                ethTx.To,
+		CumulativeGasUsed: fmt.Sprintf("0x%x", cumulativeGasUsed),
+		GasUsed:           fmt.Sprintf("0x%x", receipt.UsedGas),
+		ContractAddress:   contractAddress,
+		Logs:              logs,
+		LogsBloom:         logsBloom,
+		Status:            boolToHexStatus(receipt.Success),
+		EffectiveGasPrice: ethTx.GasPrice,
+		Type:              txType,
+	}
+	return ethReceipt, nil
+}
+
+// GetTransactionByHash fetches a transaction receipt by hash
+// Returns raw TransactionReceipt and ObjectRef
+func (r *Rollup) getTransactionByHash(txHash common.Hash) (*evmtypes.TransactionReceipt, error) {
+	// Use ReadObject to get the transaction receipt with metadata from DA via meta-shard lookup
+	// This includes the Ref field which contains block number and transaction index
+	witness, found, err := r.stateDB.ReadObject(r.serviceID, txHash)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read transaction receipt: %v", err)
+	}
+	if !found {
+		return nil, nil // Transaction not found
+	}
+
+	// Parse the receipt data according to serialize_receipt format
+	receipt, err := evmtypes.ParseRawReceipt(witness)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse transaction receipt: %v", err)
+	}
+
+	return receipt, nil
+}
+
+func (r *Rollup) GetTransactionByHash(txHash common.Hash) (*evmtypes.EthereumTransactionResponse, error) {
+	receipt, err := r.getTransactionByHash(txHash)
+	if err != nil {
+		return nil, err
+	}
+	if receipt == nil {
+		return nil, nil // Transaction not found
+	}
+
+	// Convert the original payload to Ethereum transaction format
+	ethTx, err := evmtypes.ConvertPayloadToEthereumTransaction(receipt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert payload to Ethereum transaction: %v", err)
+	}
+
+	// Populate block metadata
+	ethTx.BlockHash = fmt.Sprintf("0x%x", receipt.BlockHash)
+	ethTx.BlockNumber = fmt.Sprintf("0x%x", receipt.BlockNumber)
+	ethTx.TransactionIndex = fmt.Sprintf("0x%x", receipt.TransactionIndex)
+
+	return ethTx, nil
+}
+
+// GetTransactionByHashFormatted fetches a transaction and returns it in Ethereum JSON-RPC format
+func (r *Rollup) GetTransactionByHashFormatted(txHash common.Hash) (*evmtypes.EthereumTransactionResponse, error) {
+	receipt, err := r.getTransactionByHash(txHash)
+	if err != nil {
+		return nil, err
+	}
+	if receipt == nil {
+		return nil, nil // Transaction not found
+	}
+
+	// Convert the original payload to Ethereum transaction format
+	ethTx, err := evmtypes.ConvertPayloadToEthereumTransaction(receipt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert payload to Ethereum transaction: %v", err)
+	}
+
+	// Populate block/tx metadata
+	ethTx.BlockHash = fmt.Sprintf("0x%x", receipt.BlockHash)
+	ethTx.BlockNumber = fmt.Sprintf("0x%d", receipt.BlockNumber)
+	ethTx.TransactionIndex = fmt.Sprintf("0x%x", receipt.TransactionIndex)
+
+	return ethTx, nil
+}
+
+func (r *Rollup) GetTransactionByBlockHashAndIndex(blockHash common.Hash, index uint32) (*evmtypes.EthereumTransactionResponse, error) {
+	// First, get the block to retrieve transaction hashes
+	block, err := r.readBlockByHash(blockHash)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get block: %v", err)
+	}
+	if block == nil {
+		return nil, nil // Block not found
+	}
+
+	// Fetch the full transaction
+	return r.GetTransactionByHashFormatted(block.TxHashes[index])
+}
+
+func (r *Rollup) GetTransactionByBlockNumberAndIndex(blockNumber string, index uint32) (*evmtypes.EthereumTransactionResponse, error) {
+
+	// First, get the block to retrieve transaction hashes
+	block, err := r.GetEVMBlockByNumber(blockNumber)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get block: %v", err)
+	}
+	if block == nil {
+		return nil, nil // Block not found
+	}
+
+	// Check if index is in range
+	if index >= uint32(len(block.TxHashes)) {
+		return nil, fmt.Errorf("index out of range")
+	}
+
+	// Fetch the full transaction
+	return r.GetTransactionByHashFormatted(block.TxHashes[index])
+}
+
+func (r *Rollup) GetLogs(fromBlock, toBlock uint32, addresses []common.Address, topics [][]common.Hash) ([]evmtypes.EthereumLog, error) {
+	var allLogs []evmtypes.EthereumLog
+
+	// Collect logs from the specified block range
+	for blockNum := fromBlock; blockNum <= toBlock; blockNum++ {
+		blockLogs, err := r.getLogsFromBlock(blockNum, addresses, topics)
+		if err != nil {
+			log.Warn(log.Node, "GetLogs: Failed to get logs from block", "blockNumber", blockNum, "error", err)
+			continue // Skip failed blocks but continue processing
+		}
+		allLogs = append(allLogs, blockLogs...)
+	}
+
+	return allLogs, nil
+}
+
+func (r *Rollup) GetLatestBlockNumber() (uint32, error) {
+
+	// Use same key as Rust: BLOCK_NUMBER_KEY = 0xFF repeated 32 times
+	// Rust stores only the next block number (4 bytes LE)
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = 0xFF
+	}
+
+	valueBytes, found, err := r.stateDB.ReadServiceStorage(r.serviceID, key)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read block number from storage: %v", err)
+	}
+	if !found || len(valueBytes) < 4 {
+		return 0, nil // Genesis state (block 0)
+	}
+
+	// Parse block_number (first 4 bytes, little-endian)
+	blockNumber := binary.LittleEndian.Uint32(valueBytes[:4])
+	if blockNumber > 0 {
+		return blockNumber - 1, nil
+	}
+	return 0, nil
+}
+
+func (r *Rollup) GetBlockByHash(blockHash common.Hash, fullTx bool) (*evmtypes.EthereumBlock, error) {
+	evmBlock, err := r.readBlockByHash(blockHash)
+	if err != nil {
+		// Block not found or error reading from DA
+		return nil, err
+	}
+
+	// If fullTx requested, fetch full transaction objects
+	if fullTx {
+		transactions := make([]evmtypes.TransactionReceipt, len(evmBlock.TxHashes))
+		for i, txHash := range evmBlock.TxHashes {
+			ethTx, err := r.getTransactionByHash(txHash)
+			if err != nil {
+				log.Warn(log.Node, "GetBlockByHash: Failed to get transaction",
+					"txHash", txHash.String(), "error", err)
+				continue
+			}
+			transactions[i] = *ethTx
+		}
+		evmBlock.Transactions = transactions
+	}
+	ethBlock := evmBlock.ToEthereumBlock(evmBlock.Number, fullTx)
+
+	return ethBlock, nil
+}
+
+func (r *Rollup) GetBlockByNumber(blockNumber string, fullTx bool) (*evmtypes.EthereumBlock, error) {
+	evmBlock, err := r.GetEVMBlockByNumber(blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	log.Trace(log.Node, "GetBlockByNumber: Fetched block", "number", evmBlock.Number, "b", types.ToJSON(evmBlock))
+	// Generate metadata and convert EvmBlockPayload to Ethereum JSON-RPC format
+	ethBlock := evmBlock.ToEthereumBlock(evmBlock.Number, fullTx)
+
+	// If fullTx requested, fetch full transaction objects
+	if fullTx {
+		transactions := make([]evmtypes.EthereumTransactionResponse, 0, len(evmBlock.TxHashes))
+
+		for i, txHash := range evmBlock.TxHashes {
+			ethTx, err := r.GetTransactionByHashFormatted(txHash)
+			if err != nil {
+				log.Warn(log.Node, "GetBlockByNumber: Failed to get transaction", "txHash", txHash.String(), "error", err)
+				continue
+			}
+			if ethTx != nil {
+				ethTx.BlockHash = evmBlock.WorkPackageHash.String()
+				ethTx.BlockNumber = fmt.Sprintf("0x%x", evmBlock.Number)
+				ethTx.TransactionIndex = fmt.Sprintf("0x%x", i)
+				transactions = append(transactions, *ethTx)
+			}
+		}
+
+		ethBlock.Transactions = transactions
+	}
+
+	return ethBlock, nil
+}
+
+// GetBlockByNumber fetches a block by number and returns raw EvmBlockPayload
+func (r *Rollup) GetEVMBlockByNumber(blockNumberStr string) (*evmtypes.EvmBlockPayload, error) {
+	// 1. Parse and resolve the block number
+	var targetBlockNumber uint32
+	var err error
+
+	switch blockNumberStr {
+	case "latest":
+		targetBlockNumber, err = r.GetLatestBlockNumber()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get latest block number: %v", err)
+		}
+		if targetBlockNumber < 1 {
+			return nil, fmt.Errorf("block 1 not ready yet")
+		}
+	case "earliest":
+		targetBlockNumber = 1 // Genesis block
+	default:
+		// Parse hex block number
+		if len(blockNumberStr) >= 2 && blockNumberStr[:2] == "0x" {
+			blockNum, parseErr := strconv.ParseUint(blockNumberStr[2:], 16, 32)
+			if parseErr != nil {
+				return nil, fmt.Errorf("invalid block number format: %v", parseErr)
+			}
+			targetBlockNumber = uint32(blockNum)
+		} else {
+			return nil, fmt.Errorf("invalid block number format: %s", blockNumberStr)
+		}
+	}
+
+	// 2. Read canonical block metadata from storage
+	return r.ReadBlockByNumber(targetBlockNumber)
+}
+
+// CreateSignedNativeTransfer wraps evmtypes.CreateSignedNativeTransfer for native ETH transfers
+func CreateSignedNativeTransfer(privateKeyHex string, nonce uint64, to common.Address, amount *big.Int, gasPrice *big.Int, gasLimit uint64, chainID uint64) (*evmtypes.EthereumTransaction, []byte, common.Hash, error) {
+	return evmtypes.CreateSignedNativeTransfer(privateKeyHex, nonce, to, amount, gasPrice, gasLimit, chainID)
+}
+
+// CreateSignedUSDMTransfer wraps evmtypes.CreateSignedUSDMTransfer with UsdmAddress
+func CreateSignedUSDMTransfer(privateKeyHex string, nonce uint64, to common.Address, amount *big.Int, gasPrice *big.Int, gasLimit uint64, chainID uint64) (*evmtypes.EthereumTransaction, []byte, common.Hash, error) {
+	return evmtypes.CreateSignedUSDMTransfer(evmtypes.UsdmAddress, privateKeyHex, nonce, to, amount, gasPrice, gasLimit, chainID)
+}
+
+func (r *Rollup) ReadBlockByNumber(blockNumber uint32) (*evmtypes.EvmBlockPayload, error) {
+	objectID := evmtypes.BlockNumberToObjectID(blockNumber)
+
+	// Read objectID key to get blockNumber => wph (32 bytes) + timestamp (4 bytes) + segment_root (32 bytes) mapping
+	valueBytes, found, err := r.stateDB.ReadServiceStorage(r.serviceID, objectID.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("failed to read block number mapping: %v", err)
+	}
+
+	if !found || len(valueBytes) < 68 {
+		return nil, fmt.Errorf("block %d [%s] not found %d", blockNumber, objectID, len(valueBytes))
+	}
+
+	// Parse work_package_hash (32 bytes) + timeslot (4 bytes, little-endian) + segment_root (32 bytes)
+	var workPackageHash common.Hash
+	copy(workPackageHash[:], valueBytes[:32])
+
+	return r.readBlockByHash(workPackageHash)
+}
+
+// here, blockHash is actually a workpackagehash so we can read segments directly from DA
+func (r *Rollup) readBlockByHash(workPackageHash common.Hash) (*evmtypes.EvmBlockPayload, error) {
+	// read the block number + timestamp from the blockHash key
+	var blockNumber uint32
+	var blockTimestamp uint32
+	var segmentRoot common.Hash
+	valueBytes, found, err := r.stateDB.ReadServiceStorage(r.serviceID, workPackageHash.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("failed to read block hash mapping: %v", err)
+	}
+	if found && len(valueBytes) >= 8 {
+		// Parse block number (4 bytes, little-endian)
+		blockNumber = binary.LittleEndian.Uint32(valueBytes[:4])
+		blockTimestamp = binary.LittleEndian.Uint32(valueBytes[4:8])
+		segmentRoot = common.BytesToHash(valueBytes[8:40])
+	}
+
+	payload, err := r.stateDB.sdb.FetchJAMDASegments(workPackageHash, 0, 1, types.SegmentSize)
+	if err != nil {
+		return nil, fmt.Errorf("block not found: %s", workPackageHash.Hex())
+	}
+
+	block, err := evmtypes.DeserializeEvmBlockPayload(payload, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deserialize block payload: %v", err)
+	}
+	// using block.PayloadLength figure out how many segments to read for full block
+	segments := (block.PayloadLength + types.SegmentSize - 1) / types.SegmentSize
+	if segments > 1 {
+		remainingLength := block.PayloadLength - types.SegmentSize
+		payload2, err := r.stateDB.sdb.FetchJAMDASegments(workPackageHash, 1, uint16(segments), remainingLength)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read additional block segments: %v", err)
+		}
+		payload = append(payload, payload2...)
+	}
+	block, err = evmtypes.DeserializeEvmBlockPayload(payload, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deserialize full block payload: %v", err)
+	}
+	block.WorkPackageHash = workPackageHash
+	block.SegmentRoot = segmentRoot
+	block.Timestamp = blockTimestamp
+	block.Number = blockNumber
+	return block, nil
+}
+
+// getLogsFromBlock retrieves logs from a specific block that match the filter criteria
+func (r *Rollup) getLogsFromBlock(blockNumber uint32, addresses []common.Address, topics [][]common.Hash) ([]evmtypes.EthereumLog, error) {
+	// 1. Get all transaction hashes from the block (use canonical metadata)
+	evmBlock, err := r.ReadBlockByNumber(blockNumber)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read block %d: %v", blockNumber, err)
+	}
+	blockTxHashes := evmBlock.TxHashes
+
+	var blockLogs []evmtypes.EthereumLog
+
+	// For each transaction, get its receipt and extract logs
+	for _, txHash := range blockTxHashes {
+		// Get transaction receipt using ReadObject abstraction
+		receiptObjectID := evmtypes.TxToObjectID(txHash)
+		witness, found, err := r.stateDB.ReadObject(EVMServiceCode, receiptObjectID)
+		if err != nil || !found {
+			log.Warn(log.Node, "getLogsFromBlock: Failed to read receipt", "txHash", txHash.String(), "error", err)
+			continue
+		}
+
+		receipt, err := evmtypes.ParseRawReceipt(witness)
+		if err != nil {
+			log.Warn(log.Node, "getLogsFromBlock: Failed to parse receipt", "txHash", txHash.String(), "error", err)
+			continue
+		}
+
+		// Extract and filter logs from this transaction
+		if len(receipt.LogsData) > 0 {
+			txLogs, err := evmtypes.ParseLogsFromReceipt(
+				receipt.LogsData,
+				txHash,
+				blockNumber,
+				receipt.BlockHash,
+				receipt.TransactionIndex,
+				uint64(0),
+			)
+			if err != nil {
+				log.Warn(log.Node, "getLogsFromBlock: Failed to parse logs", "txHash", txHash.String(), "error", err)
+				continue
+			}
+
+			// Apply address and topic filters
+			for _, ethLog := range txLogs {
+				if evmtypes.MatchesLogFilter(ethLog, addresses, topics) {
+					blockLogs = append(blockLogs, ethLog)
+				}
+			}
+		}
+	}
+
+	return blockLogs, nil
+}
+
+// ReadObjectRef reads ObjectRef bytes from service storage and deserializes them
+// Parameters:
+// - stateDB: The stateDB to read from, if nil uses r.statedb
+// - serviceCode: The service code to read from
+// - objectID: The object ID (typically a transaction hash or other identifier)
+// Returns:
+// - ObjectRef: The deserialized ObjectRef struct
+// - bool: true if found, false if not found
+// - error: any error that occurred
+func (r *Rollup) ReadObjectRef(serviceCode uint32, objectID common.Hash) (*types.ObjectRef, bool, error) {
+	// Read raw ObjectRef bytes from service storage
+	objectRefBytes, found, err := r.stateDB.ReadServiceStorage(serviceCode, objectID.Bytes())
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to read ObjectRef from service storage: %v", err)
+	}
+	if !found {
+		return nil, false, nil // ObjectRef not found
+	}
+
+	// Deserialize ObjectRef from storage data
+	offset := 0
+	objRef, err := types.DeserializeObjectRef(objectRefBytes, &offset)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to deserialize ObjectRef: %v", err)
+	}
+
+	return &objRef, true, nil
+}
+
+func (r *Rollup) GetStorageAt(address common.Address, position common.Hash, blockNumber string) (common.Hash, error) {
+	value, err := r.ReadContractStorageValue(address, position)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("failed to read storage: %v", err)
+	}
+	return value, nil
+}
+
+// ReadContractStorageValue reads EVM contract storage, checking witness cache first
+func (r *Rollup) ReadContractStorageValue(contractAddress common.Address, storageKey common.Hash) (common.Hash, error) {
+	// Read from StateDBStorage witness cache (populated during PrepareBuilderWitnesses or import)
+	value, found := r.stateDB.sdb.ReadStorageFromCache(contractAddress, storageKey)
+	if found {
+		return value, nil
+	}
+	// Not found in cache, return zero value
+	return common.Hash{}, nil
+}
+
+// // EstimateGas tests the EstimateGas functionality with a USDM transfer
+func (r *Rollup) EstimateGasTransfer(issuerAddress common.Address, usdmAddress common.Address, pvmBackend string) (uint64, error) {
+	recipientAddr, _ := common.GetEVMDevAccount(1)
+	transferAmount := big.NewInt(1000000) // 1M tokens (small test amount)
+
+	// Create transfer calldata: transfer(address,uint256)
+	estimateCalldata := make([]byte, 68)
+	copy(estimateCalldata[0:4], []byte{0xa9, 0x05, 0x9c, 0xbb}) // transfer(address,uint256) selector
+	copy(estimateCalldata[16:36], recipientAddr.Bytes())
+	copy(estimateCalldata[36:68], transferAmount.FillBytes(make([]byte, 32)))
+
+	estimatedGas, err := r.EstimateGas(issuerAddress, &usdmAddress, 100000, 1000000000, 0, estimateCalldata, pvmBackend)
+	if err != nil {
+		return 0, fmt.Errorf("EstimateGas failed: %w", err)
+	}
+	return estimatedGas, nil
+}
+
+// EstimateGas estimates the gas needed to execute a transaction
+func (r *Rollup) EstimateGas(from common.Address, to *common.Address, gas uint64, gasPrice uint64, value uint64, data []byte, pvmBackend string) (uint64, error) {
+	// Build Ethereum transaction for simulation
+	valueBig := new(big.Int).SetUint64(value)
+	gasPriceBig := new(big.Int).SetUint64(gasPrice)
+	tx := &evmtypes.EthereumTransaction{
+		From:     from,
+		To:       to,
+		Gas:      gas,
+		GasPrice: gasPriceBig,
+		Value:    valueBig,
+		Data:     data,
+	}
+
+	// Create simulation work package with payload "B"
+	workReport, err := r.createSimulatedTx(tx, pvmBackend)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create simulation work package: %v", err)
+	}
+	if len(workReport.Results) == 0 || len(workReport.Results[0].Result.Ok) == 0 {
+		return 0, fmt.Errorf("no result from simulation")
+	}
+
+	effects, err := types.DeserializeExecutionEffects(workReport.Results[0].Result.Ok)
+	if err != nil {
+		return 0, fmt.Errorf("failed to deserialize execution effects: %v", err)
+	}
+
+	intent := effects.WriteIntents[0]
+	gasUsed := uint64(0) // TODO
+	log.Info(log.SDB, "intent.Effect.ObjectID", "object_id", intent.Effect.ObjectID.String(),
+		"gas_used", gasUsed)
+
+	return gasUsed, nil
+}
+
+// Call simulates a transaction execution without submitting it
+func (r *Rollup) Call(from common.Address, to *common.Address, gas uint64, gasPrice uint64, value uint64, data []byte, blockNumber string, pvmBackend string) ([]byte, error) {
+	// Build Ethereum transaction for simulation
+	valueBig := new(big.Int).SetUint64(value)
+	gasPriceBig := new(big.Int).SetUint64(gasPrice)
+	tx := &evmtypes.EthereumTransaction{
+		From:     from,
+		To:       to,
+		Gas:      gas,
+		GasPrice: gasPriceBig,
+		Value:    valueBig,
+		Data:     data,
+	}
+
+	// Execute simulation
+	wr, err := r.createSimulatedTx(tx, pvmBackend)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute simulation: %v", err)
+	}
+
+	return wr.Results[0].Result.Ok[:], nil
+}
+
+// createSimulatedTx creates a work package, uses BuildBundle to generate a work report for simulating a transaction
+func (r *Rollup) createSimulatedTx(tx *evmtypes.EthereumTransaction, pvmBackend string) (workReport *types.WorkReport, err error) {
+	// 1. Convert Ethereum transaction to JAM extrinsic format
+	// Extrinsic format: caller(20) + target(20) + gas_limit(32) + gas_price(32) + value(32) + call_kind(4) + data_len(8) + data
+	dataLen := len(tx.Data)
+	extrinsicSize := 148 + dataLen // 20+20+32+32+32+4+8 + data
+	extrinsic := make([]byte, extrinsicSize)
+
+	offset := 0
+
+	// caller (20 bytes)
+	copy(extrinsic[offset:offset+20], tx.From.Bytes())
+	offset += 20
+
+	// target (20 bytes) - use zero address for contract creation
+	if tx.To != nil {
+		copy(extrinsic[offset:offset+20], tx.To.Bytes())
+	} else {
+		// Contract creation - use zero address
+		copy(extrinsic[offset:offset+20], make([]byte, 20))
+	}
+	offset += 20
+
+	// gas_limit (32 bytes, big-endian)
+	gasLimitBytes := make([]byte, 32)
+	binary.BigEndian.PutUint64(gasLimitBytes[24:32], tx.Gas)
+	copy(extrinsic[offset:offset+32], gasLimitBytes)
+	offset += 32
+
+	// gas_price (32 bytes, big-endian)
+	gasPriceBytes := tx.GasPrice.FillBytes(make([]byte, 32))
+	copy(extrinsic[offset:offset+32], gasPriceBytes)
+	offset += 32
+
+	// value (32 bytes, big-endian)
+	valueBytes := tx.Value.FillBytes(make([]byte, 32))
+	copy(extrinsic[offset:offset+32], valueBytes)
+	offset += 32
+
+	// call_kind (4 bytes, little-endian) - 0 = CALL, 1 = CREATE
+	callKind := uint32(0) // CALL
+	if tx.To == nil {
+		callKind = 1 // CREATE
+	}
+	binary.LittleEndian.PutUint32(extrinsic[offset:offset+4], callKind)
+	offset += 4
+
+	// data_len (8 bytes, little-endian)
+	binary.LittleEndian.PutUint64(extrinsic[offset:offset+8], uint64(dataLen))
+	offset += 8
+
+	// data
+	copy(extrinsic[offset:], tx.Data)
+
+	// 2. Get the EVM service info
+	evmService, ok, err := r.stateDB.GetService(r.serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get EVM service: %v", err)
+	}
+	if !ok {
+		return nil, fmt.Errorf("EVM service not found")
+	}
+
+	// 3. Create transaction hash
+	txHash := common.Blake2Hash(extrinsic)
+
+	// 4. Create work package
+	workPackage := DefaultWorkPackage(r.serviceID, evmService)
+	globalDepth, err := r.stateDB.ReadGlobalDepth(evmService.ServiceIndex)
+	if err != nil {
+		return nil, fmt.Errorf("ReadGlobalDepth failed: %v", err)
+	}
+	workPackage.WorkItems[0].Payload = BuildPayload(PayloadTypeCall, 1, globalDepth, 0, common.Hash{})
+	workPackage.WorkItems[0].Extrinsics = []types.WorkItemExtrinsic{
+		{
+			Hash: txHash,
+			Len:  uint32(len(extrinsic)),
+		},
+	}
+
+	// Execute the work package with proper parameters
+	// Use core index 0 for simulation, current slot, and mark as not first guarantor
+	_, workReport, err = r.stateDB.BuildBundle(workPackage, []types.ExtrinsicsBlobs{types.ExtrinsicsBlobs{extrinsic}}, 0, nil, pvmBackend)
+	if err != nil {
+		return nil, fmt.Errorf("BuildBundle failed: %v", err)
+	}
+	if workReport == nil {
+		return nil, fmt.Errorf("BuildBundle returned nil work report")
+	}
+
+	// Extract result from work report
+	if len(workReport.Results) > 0 {
+		// Return the output from the first work result
+		result := workReport.Results[0].Result
+		if len(result.Ok) > 0 {
+			// Parse ExecutionEffects to extract call output
+			// Format: ExecutionEffects serialization + call output appended
+			_, err := types.DeserializeExecutionEffects(result.Ok)
+			if err != nil {
+				log.Warn(log.Node, "createSimulatedTx: failed to deserialize effects", "err", err)
+				// Return raw result if deserialization fails
+				return workReport, nil
+			}
+
+			// The call output is appended after the serialized ExecutionEffects
+			// ExecutionEffects format: [write_intents_count:2][write_intents...]
+			// For payload "B", write_intents should be empty (count=0)
+			// Header size: 2 bytes
+			effectsHeaderSize := 2
+
+			// For payload "B", there should be no write intents, so output starts immediately after header
+			if len(result.Ok) > effectsHeaderSize {
+				// Extract the call output (everything after ExecutionEffects header)
+				callOutput := result.Ok[effectsHeaderSize:]
+				log.Debug(log.Node, "createSimulatedTx: extracted call output",
+					"gas_used", 0,
+					"output_len", len(callOutput))
+				return workReport, nil
+			}
+
+			// No output, return empty
+			return nil, fmt.Errorf("no call output from simulation")
+		}
+		if result.Err != 0 {
+			return nil, fmt.Errorf("simulation error code: %d", result.Err)
+		}
+	}
+
+	return nil, fmt.Errorf("no result from simulation")
+}
+
+// SendRawTransaction submits a signed transaction to the mempool
+func (n *Rollup) SendRawTransaction(signedTxData []byte) (common.Hash, error) {
+	// Parse the raw transaction
+	tx, err := evmtypes.ParseRawTransaction(signedTxData)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("failed to parse transaction: %v", err)
+	}
+
+	// Recover sender from signature
+	sender, err := tx.RecoverSender()
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("failed to recover sender: %v", err)
+	}
+	tx.From = sender
+
+	// Validate signature - sender recovery already done above, verify it's valid
+	if sender == (common.Address{}) {
+		return common.Hash{}, fmt.Errorf("invalid signature: unable to recover sender address")
+	}
+
+	// Validate nonce against current state
+	currentNonce, err := n.GetTransactionCount(sender, "latest")
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("failed to get current nonce for validation: %v", err)
+	}
+	if tx.Nonce < currentNonce {
+		return common.Hash{}, fmt.Errorf("nonce too low: transaction nonce %d, account nonce %d", tx.Nonce, currentNonce)
+	}
+
+	// Validate balance - sender must have enough to cover value + gas costs
+	balance, err := n.GetBalance(sender, "latest")
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("failed to get balance for validation: %v", err)
+	}
+	balanceBig := new(big.Int).SetBytes(balance.Bytes())
+
+	// Calculate total cost: value + (gas * gasPrice)
+	gasCost := new(big.Int).Mul(new(big.Int).SetUint64(tx.Gas), tx.GasPrice)
+	totalCost := new(big.Int).Add(tx.Value, gasCost)
+
+	if balanceBig.Cmp(totalCost) < 0 {
+		return common.Hash{}, fmt.Errorf("insufficient funds: balance %s, required %s (value %s + gas cost %s)",
+			balanceBig.String(), totalCost.String(), tx.Value.String(), gasCost.String())
+	}
+
+	// Validate gas limit against block gas limit (RefineGasAllocation per work item)
+	maxGasLimit := uint64(types.RefineGasAllocation)
+	if tx.Gas > maxGasLimit {
+		return common.Hash{}, fmt.Errorf("gas limit too high: transaction gas %d exceeds maximum %d", tx.Gas, maxGasLimit)
+	}
+
+	// Minimum gas for basic transaction is 1000
+	const minTxGas = 1000
+	if tx.Gas < minTxGas {
+		return common.Hash{}, fmt.Errorf("gas limit too low: transaction gas %d is below minimum %d", tx.Gas, minTxGas)
+	}
+
+	// TODO: Add transaction to mempool organized by BAL
+	// err = n.txPool.AddTransaction(tx)
+	// if err != nil {
+	// 	return common.Hash{}, fmt.Errorf("failed to add transaction to mempool: %v", err)
+	// }
+
+	log.Info(log.Node, "SendRawTransaction TODO Transaction added to mempool",
+		"hash", tx.Hash.String(),
+		"from", tx.From.String(),
+		"nonce", tx.Nonce)
+
+	return tx.Hash, nil
 }
