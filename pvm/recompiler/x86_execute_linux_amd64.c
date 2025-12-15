@@ -52,9 +52,10 @@ static void signal_handler(int sig, siginfo_t *si, void *arg) {
       case SIGTRAP: signame = "SIGTRAP"; break;
     }
 
-    fprintf(stderr, "[x86_execute] Caught %s at address %p (RIP=0x%llx RSP=0x%llx RBP=0x%llx)\n",
+    uint64_t r12 = ctx->uc_mcontext.gregs[REG_R12];
+    fprintf(stderr, "[x86_execute] Caught %s at address %p (RIP=0x%llx RSP=0x%llx RBP=0x%llx R12=0x%llx)\n",
             signame, fault_addr, (unsigned long long)rip,
-            (unsigned long long)rsp, (unsigned long long)rbp);
+            (unsigned long long)rsp, (unsigned long long)rbp, (unsigned long long)r12);
 
     // Save callee-saved registers into the provided buffer
     uint64_t* regPtr = (uint64_t*)tls_global_reg_ptr;

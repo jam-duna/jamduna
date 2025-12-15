@@ -52,6 +52,12 @@ var (
 	PvmTracePrintMode = false // When true, prints trace to stdout
 	// Both can be enabled simultaneously for dual output
 
+	// Verify mode: load existing trace and compare each step against it
+	// Set PvmVerifyDir to the trace directory to enable verification for a specific VM
+	// Or set PvmVerifyBaseDir to the work package hash directory to verify all phases (auth + refine)
+	PvmVerifyDir     = "" // e.g., "statedb/0x.../0_39711455" - for single VM verification
+	PvmVerifyBaseDir = "" // e.g., "statedb/0x..." - for full work package verification (matches logDir structure)
+
 	UseTally = false
 
 	// Optional debugging flags
@@ -203,6 +209,9 @@ type VMGo struct {
 	// Current execution state for taint tracking
 	currentStep int
 	currentPC   uint64
+
+	// Trace verification (PvmVerifyMode)
+	traceVerifier *TraceVerifier
 }
 
 // registerChildVM stores a reference to a child VM created via hostMachine/hostInvoke.
@@ -546,6 +555,13 @@ func (vm *VMGo) Destroy() {
 		}
 	}
 
+	// Close trace verifier and print summary
+	if vm.traceVerifier != nil {
+		fmt.Println(vm.traceVerifier.Summary())
+		vm.traceVerifier.Close()
+		vm.traceVerifier = nil
+	}
+
 	runtime.GC()
 }
 
@@ -578,6 +594,29 @@ func (vm *VMGo) ensureTraceWriters(logDir string) {
 	vm.stepCounter = 0
 }
 
+// ensureTraceVerifier initializes trace verifier if verification mode is enabled but not yet created.
+// This is the counterpart to ensureTraceWriters for verify mode.
+// verifyDir is the directory containing trace files to verify against.
+func (vm *VMGo) ensureTraceVerifier(verifyDir string) error {
+	// Skip if verification is disabled, verifyDir is empty, or verifier already exists
+	if PvmVerifyBaseDir == "" || verifyDir == "" || vm.traceVerifier != nil {
+		return nil
+	}
+
+	// Check if the verification directory exists
+	if _, err := os.Stat(verifyDir); err != nil {
+		return nil // Directory doesn't exist, skip verification
+	}
+
+	verifier, err := NewTraceVerifier(verifyDir)
+	if err != nil {
+		return fmt.Errorf("failed to initialize trace verifier from %s: %w", verifyDir, err)
+	}
+	vm.traceVerifier = verifier
+	fmt.Printf("🔍 [PvmVerify] Initialized trace verifier from %s\n", verifyDir)
+	return nil
+}
+
 // flushTraceBuffers writes buffered trace data to gzip writers and resets buffers
 func (vm *VMGo) flushTraceBuffers() {
 	if vm.gzipWriters == nil || vm.traceBuffers == nil {
@@ -603,11 +642,24 @@ func (vm *VMGo) ExecuteAsChild(entryPoint uint32) error {
 	vm.MachineState = HALT
 
 	// Build child-specific logDir: {parentLogDir}/child_{ChildIndex}_{ChildeEntryCount}
+	childSuffix := fmt.Sprintf("child_%d_%d", vm.ChildIndex, vm.ChildeEntryCount)
 	childLogDir := ""
 	if vm.LogDir != "" {
-		childLogDir = filepath.Join(vm.LogDir, fmt.Sprintf("child_%d_%d", vm.ChildIndex, vm.ChildeEntryCount))
+		childLogDir = filepath.Join(vm.LogDir, childSuffix)
 	}
 	vm.ensureTraceWriters(childLogDir)
+
+	// Initialize trace verifier for child VM if verification mode is enabled
+	// Derive verifyDir: {PvmVerifyBaseDir}/{parentSuffix}/{childSuffix}
+	if PvmVerifyBaseDir != "" && vm.LogDir != "" {
+		parentSuffix := filepath.Base(vm.LogDir)
+		if parentSuffix != "" && parentSuffix != "." && parentSuffix != "SKIP" {
+			verifyDir := filepath.Join(PvmVerifyBaseDir, parentSuffix, childSuffix)
+			if err := vm.ensureTraceVerifier(verifyDir); err != nil {
+				return err
+			}
+		}
+	}
 
 	// Defer flushing trace writers on any exit path
 	// Note: Do NOT close gzip here - child VM may be invoked multiple times
@@ -694,6 +746,38 @@ func (vm *VMGo) Execute(host *VM, entryPoint uint32, logDir string) error {
 
 	// Ensure trace writers are initialized with the provided logDir
 	vm.ensureTraceWriters(logDir)
+
+	// Initialize trace verifier if verification mode is enabled
+	// Option 1: PvmVerifyDir - verify against a specific trace directory
+	// Option 2: PvmVerifyBaseDir + logDir - derive verify directory from logDir structure
+	if vm.traceVerifier == nil {
+		var verifyDir string
+
+		if PvmVerifyDir != "" {
+			// Direct verification: use PvmVerifyDir as-is
+			verifyDir = PvmVerifyDir
+		} else if PvmVerifyBaseDir != "" && logDir != "" {
+			// Derive verification directory from logDir
+			// logDir is like "0x.../auth" or "0x.../0_39711455"
+			// We need the suffix (auth, 0_39711455) and append to PvmVerifyBaseDir
+			suffix := filepath.Base(logDir)
+			if suffix != "" && suffix != "." && suffix != "SKIP" {
+				verifyDir = filepath.Join(PvmVerifyBaseDir, suffix)
+			}
+		}
+
+		// Check if the verify directory exists and has the required files
+		if verifyDir != "" {
+			if _, err := os.Stat(filepath.Join(verifyDir, "opcode.gz")); err == nil {
+				verifier, err := NewTraceVerifier(verifyDir)
+				if err != nil {
+					return fmt.Errorf("failed to initialize trace verifier from %s: %w", verifyDir, err)
+				}
+				vm.traceVerifier = verifier
+				fmt.Printf("🔍 [PvmVerify] Initialized trace verifier from %s\n", verifyDir)
+			}
+		}
+	}
 
 	// A.2 deblob
 	if vm.code == nil {
@@ -950,9 +1034,10 @@ var errChildHostCall = errors.New("host call not allowed in child VM")
 
 // step performs a single step in the PVM
 func (vm *VMGo) step(stepn int) error {
-	// Reset memory trace variables at the start of each step
-	if PvmTraceMode {
-	}
+	// Note: Do NOT reset memory trackers here!
+	// The trace format preserves the last memory operation's values across steps.
+	// If no new load/store occurs, the previous step's values are carried over.
+	// This matches the trace file format where values "stick" until a new operation.
 
 	// Check if PC is out of bounds
 	if vm.pc >= uint64(len(vm.code)) {
@@ -1151,6 +1236,32 @@ func (vm *VMGo) step(stepn int) error {
 		vm.stepCounter++
 		if vm.stepCounter%1000000 == 0 {
 			vm.flushTraceBuffers()
+		}
+	}
+
+	// PvmVerifyMode: verify this step against pre-recorded trace
+	if vm.traceVerifier != nil {
+		registers := vm.Ram.ReadRegisters()
+		mismatch := vm.traceVerifier.VerifyStep(
+			opcode,
+			prevpc,
+			vm.Gas,
+			registers,
+			lastMemAddrRead,
+			lastMemValueRead,
+			lastMemAddrWrite,
+			lastMemValueWrite,
+		)
+		if mismatch != nil {
+			// Report mismatch but continue execution
+			fmt.Printf("❌ [PvmVerify] %s\n", mismatch.String())
+			fmt.Printf("   Opcode: %s (0x%02x), PC: %d, Gas: %d\n",
+				opcode_str(opcode), opcode, prevpc, vm.Gas)
+			fmt.Printf("   Registers: %v\n", registers)
+			if vm.traceVerifier.StopOnFirstMismatch {
+				vm.terminated = true
+				return fmt.Errorf("trace verification failed at step %d: %s", mismatch.Step, mismatch.Field)
+			}
 		}
 	}
 

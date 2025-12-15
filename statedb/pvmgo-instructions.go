@@ -243,7 +243,8 @@ var lastMemAddrWrite uint32
 var lastMemValueWrite uint64
 
 func dumpStoreGeneric(_ string, addr uint64, regOrSrc string, value uint64, bits int) {
-	if PvmTraceMode {
+	// Track memory writes for both trace mode and verify mode
+	if PvmTraceMode || PvmVerifyBaseDir != "" || PvmVerifyDir != "" {
 		lastMemAddrWrite = uint32(addr)
 		lastMemValueWrite = value
 	}
@@ -266,7 +267,8 @@ func dumpLoadImmJump(_ string, registerIndexA int, vx uint64) {
 }
 
 func dumpLoadGeneric(_ string, regA int, addrOrVx uint64, value uint64, bits int, signed bool) {
-	if PvmTraceMode {
+	// Track memory reads for both trace mode and verify mode
+	if PvmTraceMode || PvmVerifyBaseDir != "" || PvmVerifyDir != "" {
 		lastMemAddrRead = uint32(addrOrVx)
 		lastMemValueRead = value
 	}
@@ -284,7 +286,8 @@ func dumpLoadGeneric(_ string, regA int, addrOrVx uint64, value uint64, bits int
 }
 
 func dumpLoadImm(_ string, regA int, addrOrVx uint64, value uint64, bits int, signed bool) {
-	if PvmTraceMode {
+	// Track memory reads for both trace mode and verify mode
+	if PvmTraceMode || PvmVerifyBaseDir != "" || PvmVerifyDir != "" {
 		lastMemAddrRead = uint32(addrOrVx)
 		lastMemValueRead = value
 	}

@@ -216,7 +216,7 @@ func recompiler_integration_tests(tc TestCase) error {
 	}
 	rvm.Gas = tc.InitialGas
 	rvm.HostFunc = NewDummyHostFunc(rvm)
-	rvm.x86Code, rvm.djumpAddr, rvm.InstMapPVMToX86, rvm.InstMapX86ToPVM = rvm.compiler.CompileX86Code(rvm.pc)
+	rvm.x86Code, rvm.djumpAddrOffset, rvm.InstMapPVMToX86, rvm.InstMapX86ToPVM = rvm.compiler.CompileX86Code(rvm.pc)
 	rvm.Close()
 	var basicBlockDiffs []BasicBlockDiff
 	if GasMode == GasModeBasicBlock {

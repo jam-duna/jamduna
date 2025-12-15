@@ -298,11 +298,22 @@ func generateRemUOp32(inst Instruction) []byte {
 	src2Info := regInfoList[src2Idx]
 	dstInfo := regInfoList[dstIdx]
 
+	// Determine if dst conflicts with RAX/RDX
+	isDstRAX := dstIdx == 0
+	isDstRDX := dstIdx == 2
+	isSrc2RAX := src2Idx == 0
+	isSrc2RDX := src2Idx == 2
+
 	var code []byte
 
-	// Push RAX and RDX
-	code = append(code, emitPushReg(RAX)...)
-	code = append(code, emitPushReg(RDX)...)
+	// Conditional spill: only push if we need to restore later
+	// Exception: always push RAX/RDX if src2 uses them (needed for memory operand)
+	if !isDstRAX || isSrc2RAX {
+		code = append(code, emitPushReg(RAX)...)
+	}
+	if !isDstRDX || isSrc2RDX {
+		code = append(code, emitPushReg(RDX)...)
+	}
 
 	// 1) MOV EAX, src32
 	code = append(code, emitMovEaxFromRegRemUOp32(srcInfo)...)
@@ -328,9 +339,6 @@ func generateRemUOp32(inst Instruction) []byte {
 	code = append(code, emitXorReg32(EDX, EDX)...)
 
 	//    b) DIV r/m32 - handle src2 conflicts with RAX/RDX
-	isSrc2RAX := src2Idx == 0
-	isSrc2RDX := src2Idx == 2
-
 	if isSrc2RAX {
 		// If divisor is RAX, use the spilled original RAX from [RSP+8]
 		code = append(code, emitDivMemStackRemUOp32RAX()...)
@@ -351,8 +359,28 @@ func generateRemUOp32(inst Instruction) []byte {
 	// patch JMP → end
 	binary.LittleEndian.PutUint32(code[jmpOff+1:], uint32(end-(jmpOff+5)))
 
-	// Restore
-	code = append(code, emitPopRdxRaxRemUOp32()...)
+	// -- Restore RDX, RAX (conditionally) --
+	// Only pop registers that were pushed and whose value we need to restore
+	if !isDstRDX || isSrc2RDX {
+		// We pushed RDX, but only pop if dst is not RDX (otherwise we'd overwrite the result)
+		if !isDstRDX {
+			code = append(code, emitPopReg(RDX)...)
+		} else {
+			// dst is RDX but we pushed RDX for src2 - need to discard it without restoring
+			// ADD RSP, 8 to skip the pushed RDX
+			code = append(code, 0x48, 0x83, 0xC4, 0x08) // ADD RSP, 8
+		}
+	}
+	if !isDstRAX || isSrc2RAX {
+		// We pushed RAX, but only pop if dst is not RAX (otherwise we'd overwrite the result)
+		if !isDstRAX {
+			code = append(code, emitPopReg(RAX)...)
+		} else {
+			// dst is RAX but we pushed RAX for src2 - need to discard it without restoring
+			// ADD RSP, 8 to skip the pushed RAX
+			code = append(code, 0x48, 0x83, 0xC4, 0x08) // ADD RSP, 8
+		}
+	}
 	return code
 }
 
@@ -365,11 +393,22 @@ func generateDivUOp32(inst Instruction) []byte {
 	src2Info := regInfoList[srcIdx2]
 	dstInfo := regInfoList[dstIdx]
 
+	// Determine if dst conflicts with RAX/RDX
+	isDstRAX := dstIdx == 0
+	isDstRDX := dstIdx == 2
+	isSrc2RAX := srcIdx2 == 0
+	isSrc2RDX := srcIdx2 == 2
+
 	var code []byte
 
-	// Push RAX and RDX
-	code = append(code, emitPushReg(RAX)...)
-	code = append(code, emitPushReg(RDX)...)
+	// Conditional spill: only push if we need to restore later
+	// Exception: always push RAX/RDX if src2 uses them (needed for memory operand)
+	if !isDstRAX || isSrc2RAX {
+		code = append(code, emitPushReg(RAX)...)
+	}
+	if !isDstRDX || isSrc2RDX {
+		code = append(code, emitPushReg(RDX)...)
+	}
 
 	// 1) MOV EAX, src1
 	code = append(code, emitMovEaxFromRegDivUOp32(src1Info)...)
@@ -401,9 +440,6 @@ func generateDivUOp32(inst Instruction) []byte {
 	code = append(code, emitXorReg32(EDX, EDX)...)
 
 	// DIV r/m32 = src2 - handle src2 conflicts with RAX/RDX
-	isSrc2RAX := srcIdx2 == 0
-	isSrc2RDX := srcIdx2 == 2
-
 	if isSrc2RAX {
 		// If divisor is RAX, use the spilled original RAX from [RSP+8]
 		code = append(code, emitDivMemStackRemUOp32RAX()...)
@@ -422,8 +458,28 @@ func generateDivUOp32(inst Instruction) []byte {
 	binary.LittleEndian.PutUint32(code[jneOff+2:], uint32(doDiv-(jneOff+6)))
 	binary.LittleEndian.PutUint32(code[jmpOff+1:], uint32(end-(jmpOff+5)))
 
-	// restore RDX, RAX
-	code = append(code, emitPopRdxRaxDivUOp32()...)
+	// -- Restore RDX, RAX (conditionally) --
+	// Only pop registers that were pushed and whose value we need to restore
+	if !isDstRDX || isSrc2RDX {
+		// We pushed RDX, but only pop if dst is not RDX (otherwise we'd overwrite the result)
+		if !isDstRDX {
+			code = append(code, emitPopReg(RDX)...)
+		} else {
+			// dst is RDX but we pushed RDX for src2 - need to discard it without restoring
+			// ADD RSP, 8 to skip the pushed RDX
+			code = append(code, 0x48, 0x83, 0xC4, 0x08) // ADD RSP, 8
+		}
+	}
+	if !isDstRAX || isSrc2RAX {
+		// We pushed RAX, but only pop if dst is not RAX (otherwise we'd overwrite the result)
+		if !isDstRAX {
+			code = append(code, emitPopReg(RAX)...)
+		} else {
+			// dst is RAX but we pushed RAX for src2 - need to discard it without restoring
+			// ADD RSP, 8 to skip the pushed RAX
+			code = append(code, 0x48, 0x83, 0xC4, 0x08) // ADD RSP, 8
+		}
+	}
 
 	return code
 }
@@ -439,9 +495,20 @@ func generateDivSOp32(inst Instruction) []byte {
 	src2Info := regInfoList[src2Idx]
 	dstInfo := regInfoList[dstIdx]
 
+	// Determine if dst conflicts with RAX/RDX
+	isDstRAX := dstIdx == 0
+	isDstRDX := dstIdx == 2
+	isSrc2RDX := src2Idx == 2
+
 	code := []byte{}
-	code = append(code, emitPushReg(RAX)...) // PUSH RAX
-	code = append(code, emitPushReg(RDX)...) // PUSH RDX
+	// Conditional spill: only push if we need to restore later
+	// Exception: always push RDX if src2==RDX because we need it on stack for memory operand
+	if !isDstRAX {
+		code = append(code, emitPushReg(RAX)...) // PUSH RAX
+	}
+	if !isDstRDX || isSrc2RDX {
+		code = append(code, emitPushReg(RDX)...) // PUSH RDX
+	}
 
 	// 1) MOV EAX, src
 	code = append(code, emitMovEaxFromReg32(srcInfo)...)
@@ -497,7 +564,6 @@ func generateDivSOp32(inst Instruction) []byte {
 	code = append(code, emitCdq()...)
 
 	// IDIV r/m32 = src2 - handle src2 conflict with RDX
-	isSrc2RDX := src2Idx == 2
 	if isSrc2RDX {
 		// If divisor is RDX, use the spilled original RDX from [RSP]
 		code = append(code, emitIdivMemStackRemSOp32RDX()...)
@@ -513,8 +579,21 @@ func generateDivSOp32(inst Instruction) []byte {
 	binary.LittleEndian.PutUint32(code[jmpEnd+1:], uint32(endPos-(jmpEnd+5)))
 	binary.LittleEndian.PutUint32(code[jmpOvfEnd+1:], uint32(endPos-(jmpOvfEnd+5)))
 
-	// -- Restore RDX, RAX --
-	code = append(code, emitPopRdxRax()...)
+	// -- Restore RDX, RAX (conditionally) --
+	// Only pop registers that were pushed and whose value we need to restore
+	if !isDstRDX || isSrc2RDX {
+		// We pushed RDX, but only pop if dst is not RDX (otherwise we'd overwrite the result)
+		if !isDstRDX {
+			code = append(code, emitPopReg(RDX)...)
+		} else {
+			// dst is RDX but we pushed RDX for src2 - need to discard it without restoring
+			// ADD RSP, 8 to skip the pushed RDX
+			code = append(code, 0x48, 0x83, 0xC4, 0x08) // ADD RSP, 8
+		}
+	}
+	if !isDstRAX {
+		code = append(code, emitPopReg(RAX)...)
+	}
 
 	return code
 }

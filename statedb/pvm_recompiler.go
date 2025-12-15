@@ -55,16 +55,21 @@ func NewRecompilerVMWithoutSetup(service_index uint32, initialRegs []uint64, ini
 	rvm.SetBitMask(p.K)
 	rvm.SetJumpTable(p.J)
 
-	recompiler := &Recompiler{
+	// Child VMs use per-instruction gas mode to match interpreter trace for verification
+	rvm.SetCompilerGasMode(recompiler.GasModeInstruction)
+	rvm.SetCompilerIsChild(true)
+	rvm.IsChild = true
+
+	recompilerVM := &Recompiler{
 		RecompilerVM: rvm,
 	}
-	return recompiler
+	return recompilerVM
 }
 
 func (rvm *Recompiler) Execute(VM *VM, entry uint32, logDir string) error {
 	rvm.HostFunc = VM
-	// Note: logDir is currently unused in recompiler backend
-	// Tracing is handled differently in the compiled code
+	// Set LogDir for trace verification support
+	rvm.RecompilerVM.LogDir = logDir
 	rvm.RecompilerVM.Execute(entry)
 	VM.ResultCode = rvm.GetResultCode()
 	return nil
@@ -75,6 +80,7 @@ func (rvm *Recompiler) GetFaultAddress() uint64 {
 }
 
 func (rvm *Recompiler) Destroy() {
+	rvm.RecompilerVM.CloseVerifier()
 	rvm.RecompilerVM.Close()
 }
 

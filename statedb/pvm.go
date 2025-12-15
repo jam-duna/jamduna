@@ -468,6 +468,11 @@ func (vm *VM) NewEmptyExecutionVM(service_index uint32, p *Program, initialRegs 
 		// Trace writers will be initialized lazily when first needed (allows dynamic enabling)
 	} else if vm.Backend == BackendCompiler {
 		rvm := NewRecompilerVMWithoutSetup(service_index, initialRegs, initialPC, hostENV, false, []byte{}, uint64(initialGas), p)
+		// Set child VM info for trace verification
+		rvm.IsChild = true
+		rvm.ChildIndex = int(machineIndex)
+		rvm.ChildEntryCount = childEntryIndex
+		rvm.LogDir = vm.LogDir // Inherit logDir from parent VM
 		e_vm = rvm
 	}
 

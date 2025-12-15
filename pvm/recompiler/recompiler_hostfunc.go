@@ -10,17 +10,56 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+// Global verifier for recompiler (set by RecompilerVM before execution)
+var currentRecompilerVerifier *RecompilerTraceVerifier
+
+// SetCurrentVerifier sets the global verifier for the current execution
+func SetCurrentVerifier(v *RecompilerTraceVerifier) {
+	currentRecompilerVerifier = v
+}
+
+// ClearCurrentVerifier clears the global verifier
+func ClearCurrentVerifier() {
+	currentRecompilerVerifier = nil
+}
+
 //export goDebugPrintInstruction
 func goDebugPrintInstruction(opcode uint32, pc uint64, regDumpAddr unsafe.Pointer) {
 	// Read 13 registers from the register dump area
 	// Registers are stored at [regDumpAddr + 0] to [regDumpAddr + 104] (13 * 8 bytes)
 	regs := (*[13]uint64)(regDumpAddr)
 
-	fmt.Printf("[DEBUG] PC=%d Opcode=0x%02x (%s) | ", pc, opcode, opcode_str(byte(opcode)))
-	for i := 0; i < 13; i++ {
-		fmt.Printf("r%d=%d ", i, regs[i])
+	// If verification mode is enabled, verify this step
+	if EnableVerifyMode && currentRecompilerVerifier != nil {
+		var preRegs [13]uint64
+		for i := 0; i < 13; i++ {
+			preRegs[i] = regs[i]
+		}
+		mismatch := currentRecompilerVerifier.VerifyStepPreRegisters(byte(opcode), pc, preRegs)
+		if mismatch != nil {
+			fmt.Printf("❌ [RecompilerVerify] %s\n", mismatch.String())
+			fmt.Printf("   Opcode: %s (0x%02x), PC: %d\n", opcode_str(byte(opcode)), opcode, pc)
+			fmt.Printf("   Pre-Registers: ")
+			for i := 0; i < 13; i++ {
+				fmt.Printf("r%d=%d ", i, preRegs[i])
+			}
+			fmt.Printf("\n")
+			panic("Recompiler verification failed")
+			// Note: We don't terminate here - the verifier's StopOnFirstMismatch controls behavior
+		} else {
+			// fmt.Printf("✅ [RecompilerVerify] Step verified for Opcode: %s (0x%02x), PC: %d\n", opcode_str(byte(opcode)), opcode, pc)
+		}
+		return // Don't print debug output when verifying
 	}
-	fmt.Printf("\n")
+
+	// Original debug print behavior
+	if EnableDebugTracing {
+		fmt.Printf("[DEBUG] PC=%d Opcode=0x%02x (%s) | ", pc, opcode, opcode_str(byte(opcode)))
+		for i := 0; i < 13; i++ {
+			fmt.Printf("r%d=%d ", i, regs[i])
+		}
+		fmt.Printf("\n")
+	}
 }
 
 // encodeMovRdiImm64 encodes 'mov rdi, imm64'.
@@ -77,7 +116,6 @@ func (vm *RecompilerVM) InvokeSbrk(registerA uint32, registerIndexD uint32) (res
 		// fmt.Fprintf(os.Stderr, "RecompilerVM: Sbrk: Allocated %d pages from %d to %d\n", page_count, idx_start, idx_end)
 	}
 	vm.SetCurrentHeapPointer(new_heap_pointer)
-
 	vm.WriteRegister(int(registerIndexD), uint64(result))
 	return result
 }
@@ -229,6 +267,27 @@ func (vm *RecompilerVM) HandleSbrk() error {
 	}
 	regA := uint32(regAint)
 	regD := uint32(regDint)
+
+	// Verify SBRK instruction before execution if verify mode is enabled
+	if EnableVerifyMode && currentRecompilerVerifier != nil {
+		preRegs := vm.ReadRegisters()
+		var preRegsArray [13]uint64
+		for i := 0; i < 13 && i < len(preRegs); i++ {
+			preRegsArray[i] = preRegs[i]
+		}
+		mismatch := currentRecompilerVerifier.VerifyStepPreRegisters(SBRK, vm.pc, preRegsArray)
+		if mismatch != nil {
+			fmt.Printf("❌ [RecompilerVerify] SBRK %s\n", mismatch.String())
+			fmt.Printf("   Opcode: SBRK (0x%02x), PC: %d\n", SBRK, vm.pc)
+			fmt.Printf("   Pre-Registers: ")
+			for i := 0; i < 13; i++ {
+				fmt.Printf("r%d=%d ", i, preRegsArray[i])
+			}
+			fmt.Printf("\n")
+			panic("Recompiler verification failed at SBRK")
+		}
+	}
+
 	vm.InvokeSbrk(regA, regD)
 	return nil
 }

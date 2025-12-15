@@ -509,8 +509,10 @@ func generateImmShiftOp32Alt(subcode byte) func(inst Instruction) []byte {
 		// 3) MOVABS r64_dst, imm64 (load 64-bit immediate)
 		code = append(code, emitMovImmToReg64(dst, imm)...)
 
-		// 4) Shift 64-bit: D3 /subcode r/m64, CL
-		code = append(code, emitShiftRegCl(dst, subcode)...)
+		// 4) Shift 32-bit: D3 /subcode r/m32, CL (uses CL & 31 for shift count)
+		// NOTE: Must use 32-bit shift to match interpreter's (valueB & 31) behavior
+		// 64-bit shift would use (CL & 63) which is incorrect for 32-bit ops
+		code = append(code, emitShiftRegCl32(dst, subcode)...)
 
 		// 5) Truncate to 32-bit: AND r/m64, 0xFFFFFFFF (explicitly mask to 32 bits)
 		code = append(code, emitAndImmToReg64(dst, 0xFFFFFFFF)...)
@@ -561,21 +563,34 @@ func generateImmShiftOp32(opcode byte, subcode byte, alt bool) func(inst Instruc
 
 		if alt {
 			// ALT: immediate value on left, register count via CL
-			// 1) MOV r32_dst, imm32 (C7 /0 id)
+			//
+			// pvmgo.go behavior:
+			//   SHAR_R_IMM_ALT_32: result = uint64(int64(int32(vx)) >> (valueB & 31))
+			//   SHLO_R_IMM_ALT_32: result = x_encode(uint64(uint32(vx)>>(valueB&31)), 4)
+			//
+			// Both use 32-bit truncation, then shift, then sign-extend the 32-bit result.
+			// The difference is SAR preserves sign during shift, SHR doesn't.
+			// But both need sign-extension of the final 32-bit result via x_encode.
+
+			// 1) Save RCX and load shift count into CL
+			needSaveRCX := src.Name != "RCX"
+			if needSaveRCX {
+				code = append(code, emitPushReg(RCX)...)
+				code = append(code, emitMovRegToReg64(RCX, src)...)
+			}
+
+			// 2) MOV r32_dst, imm32 (truncate to 32-bit, zeros high bits)
 			code = append(code, emitMovImmToReg32(dst, uint32(imm))...)
 
-			// 2) XCHG ECX, r32_src  ; load count into CL
-			code = append(code, emitXchgReg32Reg32(RCX, src)...) // RCX
-
-			// 3) D3 /subcode r/m32(dst), CL - use shift helper
+			// 3) Shift 32-bit value by CL
 			code = append(code, emitShiftReg32ByCl(dst, subcode)...)
 
-			// 4) XCHG ECX, r32_src  ; restore ECX and src
-			code = append(code, emitXchgReg32Reg32(RCX, src)...)
+			// 4) Sign-extend 32-bit result to 64-bit (x_encode behavior)
+			code = append(code, emitMovsxd64(dst, dst)...)
 
-			// 5) if SAR (subcode==7), sign-extend 32->64: MOVSXD r64_dst, r/m32(dst)
-			if subcode == 7 {
-				code = append(code, emitMovsxd64(dst, dst)...)
+			// 5) Restore RCX
+			if needSaveRCX {
+				code = append(code, emitPopReg(RCX)...)
 			}
 		} else {
 			// NORMAL: register value on left, immediate count

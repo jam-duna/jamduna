@@ -1270,8 +1270,6 @@ func (vm *VM) hostInvoke() {
 		state := new_machine.GetMachineState()
 		log.Info(vm.logging, "INVOKE returning to parent", "n", n, "child.MachineState", state, "gasRemaining", new_machine.GetGas())
 		vm.WriteRegister(7, uint64(state))
-		vm.SetPC(0)
-
 	}
 	log.Info(vm.logging, "INVOKE OK", "n", n, "new_machine.MachineState", new_machine.GetMachineState(), "gasRemaining", new_machine.GetGas(), "pc", new_machine.GetPC())
 	vm.VMs[uint32(n)] = &new_machine
@@ -1774,7 +1772,7 @@ func (vm *VM) hostExport() {
 		vm.Exports = append(vm.Exports, y)
 		vm.SetHostResultCode(OK)
 		//		vm.DebugHostFunction(EXPORT, "p=0x%x, z=%d, total_exports=%d, l=%d", p, z, len(vm.Exports), vm.TotalExported)
-		//log.Info(vm.logging, "EXPORT", "p", fmt.Sprintf("0x%x", p), "z", z, "total_exports", len(vm.Exports), "l", len(y))
+		log.Info(vm.logging, "EXPORT", "p", fmt.Sprintf("0x%x", p), "z", z, "total_exports", len(vm.Exports), "l", len(y))
 		if vm.pushFrame != nil {
 			// Stream the latest segment to any attached frame server without clearing exports
 			// so exports remain available to the caller.

@@ -115,7 +115,9 @@ func (vm *X86Compiler) translateBasicBlock(startPC uint64) *BasicBlock {
 		instruction.GetArgs()
 
 		block.Instructions = append(block.Instructions, instruction)
-		if op == ECALLI {
+		if op == ECALLI && !vm.IsChild {
+			// Only charge ECALLI extra gas for parent VMs
+			// Child VMs return to parent on ECALLI without extra gas charge
 			lx := uint32(types.DecodeE_l(operands))
 			host_func_id := int(lx)
 			block.Instructions[chargeGasInstrunctionIndex].GasUsage += int64(vm.chargeGas(host_func_id))
@@ -126,7 +128,7 @@ func (vm *X86Compiler) translateBasicBlock(startPC uint64) *BasicBlock {
 		pc0 := pc
 		pc += uint64(olen) + 1
 		block.Instructions[chargeGasInstrunctionIndex].GasUsage += 1
-		if instruction.IsBranchInstruction() && GasMode == GasModeBasicBlock {
+		if instruction.IsBranchInstruction() && vm.gasMode == GasModeBasicBlock {
 			if pc+uint64(instruction.Offset1) >= uint64(len(vm.code)) {
 				if debugGasModel {
 					fmt.Printf("branch target 1 out of range pc=%d, offset1=%d so put trap\n", pc, instruction.Offset1)
@@ -148,7 +150,7 @@ func (vm *X86Compiler) translateBasicBlock(startPC uint64) *BasicBlock {
 			vm.setJumpMetadata(block, op, operands, pc0)
 			hitBasicBlock = true
 			break
-		} else if pc >= uint64(len(vm.code)) && GasMode == GasModeBasicBlock {
+		} else if pc >= uint64(len(vm.code)) && vm.gasMode == GasModeBasicBlock {
 			trap_instruction := Instruction{
 				Opcode: TRAP,
 				Args:   nil,
@@ -167,7 +169,7 @@ func (vm *X86Compiler) translateBasicBlock(startPC uint64) *BasicBlock {
 			fmt.Printf("[%d] %s srcReg=%d, destReg=%d\n", i, inst.String(), inst.SourceRegs, inst.DestRegs)
 		}
 	}
-	if GasMode == GasModeBasicBlock {
+	if vm.gasMode == GasModeBasicBlock {
 		block.GasModel.TransitionCycle(block.Instructions)
 	}
 
@@ -202,17 +204,17 @@ func (vm *X86Compiler) translateBasicBlock(startPC uint64) *BasicBlock {
 				code = append(code, generateIncMem(basicBlockCounterAddr)...)
 			}
 		}
-		if vm.isChargingGas && GasMode == GasModeInstruction {
+		if vm.isChargingGas && vm.gasMode == GasModeInstruction {
 			code = append(code, generateGasCheck(uint32(inst.GasUsage))...)
-		} else if vm.isChargingGas && GasMode == GasModeBasicBlock && i == 0 {
+		} else if vm.isChargingGas && vm.gasMode == GasModeBasicBlock && i == 0 {
 			gas_usage_int := max(1, block.GasModel.CycleCounter-3)
 			gas_usage := uint32(gas_usage_int)
 			code = append(code, generateGasCheck(gas_usage)...)
 			block.GasUsage = gas_usage
 		}
-		// Insert debug tracing call if enabled
-		// Skip ECALLI and SBRK because they dump registers themselves
-		if EnableDebugTracing && inst.Opcode != ECALLI && inst.Opcode != SBRK {
+		// Insert debug tracing call if enabled (also used for verification mode)
+		// Skip ECALLI and SBRK because they dump registers themselves and have special handling
+		if (EnableDebugTracing || EnableVerifyMode) && inst.Opcode != ECALLI && inst.Opcode != SBRK {
 			code = append(code, generateDebugCall(inst.Opcode, inst.Pc)...)
 		}
 		if inst.Opcode == ECALLI {
@@ -260,6 +262,13 @@ func (vm *X86Compiler) translateBasicBlock(startPC uint64) *BasicBlock {
 		} else if translateFunc, ok := pvmByteCodeToX86Code[inst.Opcode]; ok {
 			if i == len(block.Instructions)-1 {
 				block.LastInstructionOffset = len(code)
+			}
+			if inst.Pc == 4333 {
+				problemInstrunction = inst
+			}
+			if inst.Opcode == JUMP_IND || inst.Opcode == LOAD_IMM_JUMP_IND {
+				pcCode, _ := BuildWriteContextSlotCode(pcSlotIndex, inst.Pc, 8)
+				code = append(code, pcCode...)
 			}
 			additionalCode := translateFunc(inst)
 			code = append(code, additionalCode...)

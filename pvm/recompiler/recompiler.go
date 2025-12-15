@@ -123,6 +123,12 @@ type RecompilerVM struct {
 	ServiceMetadata []byte
 	Service_index   uint32
 
+	// Trace verification fields
+	LogDir          string // Log directory for trace files
+	ChildIndex      int    // Index of child VM (for child VMs)
+	ChildEntryCount int    // Entry count for child VM
+	traceVerifier   *RecompilerTraceVerifier
+
 	realCode []byte
 	codeAddr uintptr
 
@@ -145,9 +151,10 @@ type RecompilerVM struct {
 
 	vmBasicBlock int
 
-	x86Code   []byte
-	djumpAddr uintptr // address of the jump table in x86Code
-	FaultAddr uint64  // address that caused fault, for debugging
+	x86Code         []byte
+	djumpAddr       uintptr // absolute address of the jump table (codeAddr + offset)
+	djumpAddrOffset uintptr // original offset of djump table within x86Code (for reuse)
+	FaultAddr       uint64  // address that caused fault, for debugging
 
 	reuseCode bool // whether to reuse the existing x86Code buffer
 }
@@ -182,6 +189,13 @@ type X86Compiler struct {
 	isPCCounting    bool
 	IsBlockCounting bool // whether to count basic blocks
 
+	// Gas mode: GasModeBasicBlock or GasModeInstruction
+	// This allows per-compiler gas mode setting (e.g., child VMs use GasModeInstruction for verification)
+	gasMode int
+
+	// IsChild indicates this compiler is for a child VM (affects ECALLI gas charging)
+	IsChild bool
+
 	basicBlocks map[uint64]*BasicBlock // by PVM PC
 	x86Code     []byte
 }
@@ -189,11 +203,23 @@ type X86Compiler struct {
 type Compiler interface {
 	SetJumpTable(j []uint32) error
 	SetBitMask(bitmask []byte) error
+	SetGasMode(mode int)     // Set gas mode: GasModeBasicBlock or GasModeInstruction
+	SetIsChild(isChild bool) // Set whether this is a child VM compiler
 	CompileX86Code(startPC uint64) (x86code []byte, djumpAddr uintptr, InstMapPVMToX86 map[uint32]int, InstMapX86ToPVM map[int]uint32)
 	GetBasicBlock(pvmPC uint64) *BasicBlock
 }
 
 func NewX86Compiler(code []byte) *X86Compiler {
+	return NewX86CompilerWithGasMode(code, GasMode)
+}
+
+func (compiler *X86Compiler) SetIsChild(isChild bool) {
+	compiler.IsChild = isChild
+}
+
+// NewX86CompilerWithGasMode creates a new X86Compiler with a specified gas mode
+// Use GasModeInstruction for child VMs to match interpreter trace for verification
+func NewX86CompilerWithGasMode(code []byte, gasMode int) *X86Compiler {
 	return &X86Compiler{
 		code:            code,
 		x86Blocks:       make(map[uint64]*BasicBlock),
@@ -206,6 +232,7 @@ func NewX86Compiler(code []byte) *X86Compiler {
 		isPCCounting:    false, // default to counting PC
 		IsBlockCounting: false, // default to not counting basic blocks
 		Z:               0,
+		gasMode:         gasMode,
 	}
 }
 
@@ -218,6 +245,12 @@ func (compiler *X86Compiler) SetJumpTable(j []uint32) error {
 func (compiler *X86Compiler) SetBitMask(bitmask []byte) error {
 	compiler.bitmask = bitmask
 	return nil
+}
+
+// SetGasMode sets the gas mode for this compiler
+// Use GasModeInstruction for child VMs to match interpreter trace for verification
+func (compiler *X86Compiler) SetGasMode(mode int) {
+	compiler.gasMode = mode
 }
 
 type HostFunc interface {
@@ -274,8 +307,77 @@ const (
 // Global flag to enable/disable debug tracing of PVM instructions
 var EnableDebugTracing = false
 
+// Global flag to enable/disable debug output for recompiler execution results
+// (page faults, crashes, code reuse messages, etc.)
+var DebugRecompilerResult = false
+
+// ensureTraceVerifier initializes trace verifier if verification mode is enabled but not yet created.
+// verifyDir is derived from LogDir and VerifyBaseDir.
+func (rvm *RecompilerVM) ensureTraceVerifier() error {
+	// Skip if verification is disabled or verifier already exists
+	if !EnableVerifyMode || VerifyBaseDir == "" || rvm.traceVerifier != nil {
+		return nil
+	}
+
+	// Derive verification directory from LogDir
+	// LogDir is like "0x.../auth" or "0x.../0_39711455" or "0x.../0_39711455/child_0_0"
+	// We need to match this structure with VerifyBaseDir
+	if rvm.LogDir == "" {
+		return nil
+	}
+
+	// For parent VMs: verifyDir = VerifyBaseDir/suffix (e.g., VerifyBaseDir/0_39711455)
+	// For child VMs: verifyDir = VerifyBaseDir/parentSuffix/childSuffix
+	var verifyDir string
+	if rvm.IsChild {
+		// Child VM: derive from parent's LogDir + child suffix
+		childSuffix := fmt.Sprintf("child_%d_%d", rvm.ChildIndex, rvm.ChildEntryCount)
+		parentLogDir := rvm.LogDir // This should be the parent's logDir
+		parentSuffix := filepath.Base(parentLogDir)
+		if parentSuffix != "" && parentSuffix != "." && parentSuffix != "SKIP" {
+			verifyDir = filepath.Join(VerifyBaseDir, parentSuffix, childSuffix)
+		}
+	} else {
+		// Parent VM: derive suffix from LogDir
+		suffix := filepath.Base(rvm.LogDir)
+		if suffix != "" && suffix != "." && suffix != "SKIP" {
+			verifyDir = filepath.Join(VerifyBaseDir, suffix)
+		}
+	}
+
+	if verifyDir == "" {
+		return nil
+	}
+
+	// Check if the verification directory exists
+	if _, err := os.Stat(verifyDir); err != nil {
+		return nil // Directory doesn't exist, skip verification
+	}
+
+	// Check if opcode.gz exists
+	if _, err := os.Stat(filepath.Join(verifyDir, "opcode.gz")); err != nil {
+		return nil // No trace files, skip verification
+	}
+
+	verifier, err := NewRecompilerTraceVerifier(verifyDir)
+	if err != nil {
+		return fmt.Errorf("failed to initialize recompiler trace verifier from %s: %w", verifyDir, err)
+	}
+	rvm.traceVerifier = verifier
+	fmt.Printf("🔍 [RecompilerVerify] Initialized trace verifier from %s\n", verifyDir)
+	return nil
+}
+
 func (rvm *RecompilerVM) SetPC(pc uint64) {
 	rvm.pc = pc
+}
+
+// SetCompilerGasMode sets the gas mode for this VM's compiler
+// Use GasModeInstruction for child VMs to match interpreter trace for verification
+func (rvm *RecompilerVM) SetCompilerGasMode(mode int) {
+	if rvm.compiler != nil {
+		rvm.compiler.SetGasMode(mode)
+	}
 }
 
 func (rvm *RecompilerVM) GetPC() uint64 {
@@ -649,14 +751,40 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(entry uint32) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to mmap djumpTableFunc: %w", err)
 	}
-	// find the real memory placeholder and patch it
 
+	// Execute the code
+	err = vm.ExecuteAfterMmap(entry)
+	if err != nil {
+		return fmt.Errorf("ExecuteAfterMmap failed: %w", err)
+	}
+
+	return nil
+}
+
+func (vm *RecompilerVM) ExecuteAfterMmap(entry uint32) error {
+	// find the real memory placeholder and patch it
+	codeAddr := vm.realCode
 	binary.LittleEndian.PutUint64(vm.x86Code[regDumpOffset:regDumpOffset+8], uint64(vm.regDumpAddr))
 	// use entryPatch as a placeholder 0x99999999
 	//get the x86 pc
 	x86PC, ok := vm.InstMapPVMToX86[entry]
 	if !ok && entry != 0 {
-		return fmt.Errorf("entry %d not found in InstMapPVMToX86, isChild %v", entry, vm.IsChild)
+		// Fallback: search backwards to find the nearest valid instruction PC
+		foundValidPC := false
+		for i := int(entry); i >= 0; i-- {
+			if x86pc, found := vm.InstMapPVMToX86[uint32(i)]; found {
+				fmt.Printf("Warning: PC %d not a valid instruction start, using PC %d instead (x86PC=%d)\n", entry, i, x86pc)
+				x86PC = x86pc
+				entry = uint32(i)
+				vm.pc = uint64(entry)
+				vm.WriteContextSlot(pcSlotIndex, uint64(entry), 8)
+				foundValidPC = true
+				break
+			}
+		}
+		if !foundValidPC {
+			return fmt.Errorf("entry %d not found in InstMapPVMToX86, isChild %v", entry, vm.IsChild)
+		}
 	}
 	if debugRecompiler {
 		fmt.Printf("Executing code at x86 PC: %d (PVM PC: %d)\n", x86PC, entry)
@@ -664,7 +792,9 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(entry uint32) (err error) {
 	patch := make([]byte, 4)
 	binary.LittleEndian.PutUint32(patch, entryPatch)
 	binary.LittleEndian.PutUint32(vm.x86Code[entryOffset+1:entryOffset+5], uint32(x86PC-entryOffset-5))
-	vm.djumpAddr += vm.codeAddr
+	// djumpAddrOffset is the original offset within x86Code; add codeAddr to get absolute address
+	// This ensures correct address even when reusing compiled code
+	vm.djumpAddr = vm.djumpAddrOffset + vm.codeAddr
 	vm.WriteContextSlot(indirectJumpPointSlot, uint64(vm.djumpAddr), 8)
 
 	// if patchInstIdx == -1 {
@@ -696,25 +826,35 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(entry uint32) (err error) {
 		if sigNum == SIGSEGV || sigNum == SIGBUS {
 			vm.MachineState = FAULT
 			vm.WriteContextSlot(vmStateSlotIndex, uint64(FAULT), 8)
-			fmt.Printf("FAULT (page-fault, signal=%d) in ExecuteX86Code: %v\n", sigNum, err)
+			if DebugRecompilerResult {
+				fmt.Printf("FAULT (page-fault, signal=%d) in ExecuteX86Code: %v\n", sigNum, err)
+			}
 		} else {
 			vm.MachineState = PANIC
 			vm.WriteContextSlot(vmStateSlotIndex, uint64(PANIC), 8)
-			fmt.Printf("PANIC (signal=%d) in ExecuteX86Code: %v\n", sigNum, err)
+			if DebugRecompilerResult {
+				fmt.Printf("PANIC (signal=%d) in ExecuteX86Code: %v\n", sigNum, err)
+			}
 		}
-		fmt.Printf("codeAddr: 0x%x\n", vm.codeAddr)
-		fmt.Printf("djumpAddr: 0x%x\n", vm.djumpAddr)
-		fmt.Printf("realMemory address: 0x%x\n", vm.realMemAddr)
+		if DebugRecompilerResult {
+			fmt.Printf("codeAddr: 0x%x\n", vm.codeAddr)
+			fmt.Printf("djumpAddr: 0x%x\n", vm.djumpAddr)
+			fmt.Printf("realMemory address: 0x%x\n", vm.realMemAddr)
+		}
 		// Calculate virtual fault address by subtracting realMemAddr from the actual fault address
 		// Align to page boundary per GP spec
 		faultAddr, _ := vm.ReadContextSlot(faultAddrSlotIndex)
 		if faultAddr >= uint64(vm.realMemAddr) {
 			virtualAddr := faultAddr - uint64(vm.realMemAddr)
 			vm.FaultAddr = (virtualAddr / PageSize) * PageSize
-			fmt.Printf("Fault address: 0x%x (virtual: 0x%x, page-aligned: 0x%x)\n", faultAddr, virtualAddr, vm.FaultAddr)
+			if DebugRecompilerResult {
+				fmt.Printf("Fault address: 0x%x (virtual: 0x%x, page-aligned: 0x%x)\n", faultAddr, virtualAddr, vm.FaultAddr)
+			}
 		} else {
 			vm.FaultAddr = (faultAddr / PageSize) * PageSize
-			fmt.Printf("Fault address: 0x%x (outside memory region, page-aligned: 0x%x)\n", faultAddr, vm.FaultAddr)
+			if DebugRecompilerResult {
+				fmt.Printf("Fault address: 0x%x (outside memory region, page-aligned: 0x%x)\n", faultAddr, vm.FaultAddr)
+			}
 		}
 		rip, _ := vm.ReadContextSlot(ripSlotIndex)
 		if rip >= uint64(vm.codeAddr) && rip < uint64(len(vm.realCode))+uint64(vm.codeAddr) {
@@ -726,20 +866,100 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(entry uint32) (err error) {
 			if rip > uint64(vm.djumpAddr) {
 				pvm_pc_64, _ := vm.ReadContextSlot(pcSlotIndex)
 				pvm_pc = uint32(pvm_pc_64)
-				fmt.Printf("Recovered PVM PC: %d from RIP1: %d\n", pvm_pc, rip)
+				if DebugRecompilerResult {
+					fmt.Printf("Recovered PVM PC: %d [%s] from RIP1: %d\n", pvm_pc, opcode_str(vm.code[pvm_pc]), rip)
+				}
 				vm.WriteContextSlot(pcSlotIndex, uint64(pvm_pc), 8)
 				vm.SetPC(uint64(pvm_pc))
 			} else {
-				fmt.Printf("RIP at crash: %d, code offset: %d\n", rip, offset)
+				if DebugRecompilerResult {
+					fmt.Printf("RIP at crash: %d, code offset: %d, InstMapX86ToPVM size: %d\n", rip, offset, len(vm.InstMapX86ToPVM))
+				}
 
-				// get the pvm pc out
+				// get the pvm pc out by searching backwards from the crash offset
+				foundPC := false
 				for i := offset; i >= 0; i-- {
 					pvm_pc, ok = vm.InstMapX86ToPVM[i]
 					if ok {
-						fmt.Printf("Recovered PVM PC: %d from RIP: %d\n", pvm_pc, rip)
+						if DebugRecompilerResult {
+							fmt.Printf("Recovered PVM PC: %d [%s] from RIP: %d (x86 offset: %d)\n", pvm_pc, opcode_str(vm.code[pvm_pc]), rip, i)
+						}
 						vm.WriteContextSlot(pcSlotIndex, uint64(pvm_pc), 8)
 						vm.SetPC(uint64(pvm_pc))
+						foundPC = true
+
+						if DebugRecompilerResult {
+							// print the registers value
+							for regIdx := 0; regIdx < regSize; regIdx++ {
+								regVal := vm.ReadRegister(regIdx)
+								fmt.Printf("Reg %s: 0x%x (%d)\n", regInfoList[regIdx].Name, regVal, regVal)
+							}
+							if pvm_pc == uint32(problemInstrunction.Pc) {
+								// get the instruction at that pvm_pc
+								if problemInstrunction.SourceRegs != nil {
+									fmt.Printf("Problematic instruction at PVM PC %d: %s\n", pvm_pc, problemInstrunction.String())
+								}
+								if problemInstrunction.DestRegs != nil {
+									fmt.Printf("Problematic instruction at PVM PC %d: %s\n", pvm_pc, problemInstrunction.String())
+								}
+
+								// Disassemble x86 code around the crash point
+								fmt.Printf("\n=== X86 Disassembly around crash (offset %d) ===\n", i)
+								instrs := DisassembleInstructions(vm.realCode)
+								// Find the instruction index closest to crash offset
+								crashIdx := -1
+								for idx, instr := range instrs {
+									if instr.Offset >= i {
+										crashIdx = idx
+										break
+									}
+								}
+								if crashIdx == -1 {
+									crashIdx = len(instrs) - 1
+								}
+								// Print 5 instructions before and after
+								startIdx := crashIdx - 5
+								if startIdx < 0 {
+									startIdx = 0
+								}
+								endIdx := crashIdx + 6
+								if endIdx > len(instrs) {
+									endIdx = len(instrs)
+								}
+								for idx := startIdx; idx < endIdx; idx++ {
+									instr := instrs[idx]
+									marker := "  "
+									if idx == crashIdx {
+										marker = "=>"
+									}
+									fmt.Printf("%s 0x%04x: %s\n", marker, instr.Offset, instr.Instruction.String())
+								}
+								fmt.Printf("=== End Disassembly ===\n\n")
+							}
+						}
+
 						break
+					}
+				}
+				if !foundPC {
+					// Fallback: find the smallest x86 offset in the map (first instruction)
+					minOffset := int(^uint(0) >> 1) // max int
+					for x86off, pvmpc := range vm.InstMapX86ToPVM {
+						if x86off < minOffset {
+							minOffset = x86off
+							pvm_pc = pvmpc
+						}
+					}
+					if minOffset != int(^uint(0)>>1) {
+						if DebugRecompilerResult {
+							fmt.Printf("Warning: RIP offset %d before first mapped instruction at %d, using PVM PC %d\n", offset, minOffset, pvm_pc)
+						}
+						vm.WriteContextSlot(pcSlotIndex, uint64(pvm_pc), 8)
+						vm.SetPC(uint64(pvm_pc))
+					} else {
+						if DebugRecompilerResult {
+							fmt.Printf("Error: No instruction mapping found, InstMapX86ToPVM is empty\n")
+						}
 					}
 				}
 			}
@@ -758,8 +978,22 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(entry uint32) (err error) {
 	}
 	// get the vmstate out
 	vm.MachineState = uint8(vmState)
+
+	// Refund 1 gas on FAULT (matches interpreter behavior in pvmgo.go)
+	if vm.MachineState == FAULT {
+		vm.Gas++
+		vm.WriteContextSlot(gasSlotIndex, vm.Gas, 8)
+	}
 	return nil
 }
+
+func (rvm *RecompilerVM) SetCompilerIsChild(isChild bool) {
+	if rvm.compiler != nil {
+		rvm.compiler.SetIsChild(isChild)
+	}
+}
+
+var problemInstrunction Instruction
 
 func (vm *RecompilerVM) Resume() error {
 
@@ -789,6 +1023,12 @@ func (vm *RecompilerVM) Resume() error {
 	vm.pc = slots[1]
 	vmState := slots[2]
 	host_id := slots[3]
+	if vmState == FAULT {
+		// Refund 1 gas on FAULT (matches interpreter behavior in pvmgo.go)
+		vm.Gas++
+		vm.WriteContextSlot(gasSlotIndex, vm.Gas, 8)
+
+	}
 
 	if crashed == -1 || err != nil {
 		vm.ResultCode = types.WORKDIGEST_PANIC // Result code is always PANIC for crashes
@@ -797,25 +1037,35 @@ func (vm *RecompilerVM) Resume() error {
 		if sigNum == SIGSEGV || sigNum == SIGBUS {
 			vm.MachineState = FAULT
 			vm.WriteContextSlot(vmStateSlotIndex, uint64(FAULT), 8)
-			fmt.Printf("FAULT (page-fault, signal=%d) in Resume: %v\n", sigNum, err)
+			if DebugRecompilerResult {
+				fmt.Printf("FAULT (page-fault, signal=%d) in Resume: %v\n", sigNum, err)
+			}
 		} else {
 			vm.MachineState = PANIC
 			vm.WriteContextSlot(vmStateSlotIndex, uint64(PANIC), 8)
-			fmt.Printf("PANIC (signal=%d) in Resume: %v\n", sigNum, err)
+			if DebugRecompilerResult {
+				fmt.Printf("PANIC (signal=%d) in Resume: %v\n", sigNum, err)
+			}
 		}
-		fmt.Printf("codeAddr: 0x%x\n", vm.codeAddr)
-		fmt.Printf("djumpAddr: 0x%x\n", vm.djumpAddr)
-		fmt.Printf("realMemory address: 0x%x\n", vm.realMemAddr)
+		if DebugRecompilerResult {
+			fmt.Printf("codeAddr: 0x%x\n", vm.codeAddr)
+			fmt.Printf("djumpAddr: 0x%x\n", vm.djumpAddr)
+			fmt.Printf("realMemory address: 0x%x\n", vm.realMemAddr)
+		}
 		// Calculate virtual fault address by subtracting realMemAddr from the actual fault address
 		// Align to page boundary per GP spec
 		faultAddr, _ := vm.ReadContextSlot(faultAddrSlotIndex)
 		if faultAddr >= uint64(vm.realMemAddr) {
 			virtualAddr := faultAddr - uint64(vm.realMemAddr)
 			vm.FaultAddr = (virtualAddr / PageSize) * PageSize
-			fmt.Printf("Fault address: 0x%x (virtual: 0x%x, page-aligned: 0x%x)\n", faultAddr, virtualAddr, vm.FaultAddr)
+			if DebugRecompilerResult {
+				fmt.Printf("Fault address: 0x%x (virtual: 0x%x, page-aligned: 0x%x)\n", faultAddr, virtualAddr, vm.FaultAddr)
+			}
 		} else {
 			vm.FaultAddr = (faultAddr / PageSize) * PageSize
-			fmt.Printf("Fault address: 0x%x (outside memory region, page-aligned: 0x%x)\n", faultAddr, vm.FaultAddr)
+			if DebugRecompilerResult {
+				fmt.Printf("Fault address: 0x%x (outside memory region, page-aligned: 0x%x)\n", faultAddr, vm.FaultAddr)
+			}
 		}
 		// restore the gas calculation
 		rip, _ := vm.ReadContextSlot(ripSlotIndex)
@@ -828,21 +1078,50 @@ func (vm *RecompilerVM) Resume() error {
 			if rip > uint64(vm.djumpAddr) {
 				pvm_pc_64, _ := vm.ReadContextSlot(pcSlotIndex)
 				pvm_pc = uint32(pvm_pc_64)
-				fmt.Printf("Recovered PVM PC: %d from RIP1: %d\n", pvm_pc, rip)
+				if DebugRecompilerResult {
+					fmt.Printf("Recovered PVM PC: %d from RIP1: %d\n", pvm_pc, rip)
+				}
 				vm.WriteContextSlot(pcSlotIndex, uint64(pvm_pc), 8)
 				vm.SetPC(uint64(pvm_pc))
 			} else {
-				fmt.Printf("RIP at crash: %d, code offset: %d\n", rip, offset)
+				if DebugRecompilerResult {
+					fmt.Printf("RIP at crash: %d, code offset: %d, InstMapX86ToPVM size: %d\n", rip, offset, len(vm.InstMapX86ToPVM))
+				}
 
-				// get the pvm pc out
+				// get the pvm pc out by searching backwards from the crash offset
+				foundPC := false
 				for i := offset; i >= 0; i-- {
 					pvm_pc, ok = vm.InstMapX86ToPVM[i]
 					if ok {
-						fmt.Printf("Recovered PVM PC: %d from RIP: %d\n", pvm_pc, rip)
+						if DebugRecompilerResult {
+							fmt.Printf("Recovered PVM PC: %d [%s] from RIP: %d (x86 offset: %d)\n", pvm_pc, opcode_str(vm.code[pvm_pc]), rip, i)
+						}
 						vm.WriteContextSlot(pcSlotIndex, uint64(pvm_pc), 8)
 						vm.SetPC(uint64(pvm_pc))
-						fmt.Printf("code = %s\n", opcode_str(vm.code[pvm_pc]))
+
+						foundPC = true
 						break
+					}
+				}
+				if !foundPC {
+					// Fallback: find the smallest x86 offset in the map (first instruction)
+					minOffset := int(^uint(0) >> 1) // max int
+					for x86off, pvmpc := range vm.InstMapX86ToPVM {
+						if x86off < minOffset {
+							minOffset = x86off
+							pvm_pc = pvmpc
+						}
+					}
+					if minOffset != int(^uint(0)>>1) {
+						if DebugRecompilerResult {
+							fmt.Printf("Warning: RIP offset %d before first mapped instruction at %d, using PVM PC %d\n", offset, minOffset, pvm_pc)
+						}
+						vm.WriteContextSlot(pcSlotIndex, uint64(pvm_pc), 8)
+						vm.SetPC(uint64(pvm_pc))
+					} else {
+						if DebugRecompilerResult {
+							fmt.Printf("Error: No instruction mapping found, InstMapX86ToPVM is empty\n")
+						}
 					}
 				}
 			}
@@ -863,7 +1142,7 @@ func (vm *RecompilerVM) Resume() error {
 func (compiler *X86Compiler) CompileX86Code(startPC uint64) (x86code []byte, djumpAddr uintptr, InstMapPVMToX86 map[uint32]int, InstMapX86ToPVM map[int]uint32) {
 	compiler.initStartCode()
 	compiler.Compile(startPC)
-	if GasMode == GasModeBasicBlock {
+	if compiler.gasMode == GasModeBasicBlock {
 		// panic check for this trap
 		gas_check_code := generateGasCheck(2)
 		offsetPanic := len(compiler.x86Code)
@@ -882,8 +1161,23 @@ func (rvm *RecompilerVM) Execute(entry uint32) {
 	rvm.pc = 0
 	rvm.WriteContextSlot(gasSlotIndex, uint64(rvm.Gas), 8)
 
+	// Initialize trace verifier if verification mode is enabled
+	if err := rvm.ensureTraceVerifier(); err != nil {
+		fmt.Printf("Failed to initialize trace verifier: %v\n", err)
+	}
+	// Set global verifier for goDebugPrintInstruction callback
+	if rvm.traceVerifier != nil {
+		SetCurrentVerifier(rvm.traceVerifier)
+		defer func() {
+			ClearCurrentVerifier()
+			fmt.Println(rvm.traceVerifier.Summary())
+			rvm.traceVerifier.Close()
+			rvm.traceVerifier = nil
+		}()
+	}
+
 	if !rvm.reuseCode {
-		rvm.x86Code, rvm.djumpAddr, rvm.InstMapPVMToX86, rvm.InstMapX86ToPVM = rvm.compiler.CompileX86Code(rvm.pc)
+		rvm.x86Code, rvm.djumpAddrOffset, rvm.InstMapPVMToX86, rvm.InstMapX86ToPVM = rvm.compiler.CompileX86Code(rvm.pc)
 		err1 := rvm.SavePVMX()
 		if err1 != nil {
 			fmt.Printf("SavePVMX failed: %v\n", err1)
@@ -895,7 +1189,9 @@ func (rvm *RecompilerVM) Execute(entry uint32) {
 	execStart := time.Now()
 	if err := rvm.ExecuteX86CodeWithEntry(entry); err != nil {
 		// we don't have to return this , just print it
-		fmt.Printf("ExecuteX86 crash detected: %v\n", err)
+		if DebugRecompilerResult {
+			fmt.Printf("ExecuteX86 crash detected: %v\n", err)
+		}
 	}
 	// executionTime captures the time spent in ExecuteX86CodeWithEntry
 	// This includes mmap setup + actual x86 execution
@@ -921,6 +1217,11 @@ func (rvm *RecompilerVM) Execute(entry uint32) {
 			break
 		}
 		rvm.hostcallTime += time.Since(hostStart)
+
+		// Restore parent verifier before Resume (child may have overwritten it)
+		if rvm.traceVerifier != nil {
+			SetCurrentVerifier(rvm.traceVerifier)
+		}
 
 		resumeStart := time.Now()
 		err := rvm.Resume()
@@ -1373,11 +1674,19 @@ type PVMX struct {
 	SavingX86Entry0 uint64 `json:"saving_x86_entry0"`
 	SavingX86Entry5 uint64 `json:"saving_x86_entry5"`
 	X86Code         []byte `json:"x86_code"`
+	// Full instruction maps for PC recovery after crashes
+	InstMapPVMToX86 map[uint32]int `json:"inst_map_pvm_to_x86"`
+	InstMapX86ToPVM map[int]uint32 `json:"inst_map_x86_to_pvm"`
 }
 
 func EncodePVMX(p *PVMX) ([]byte, error) {
 	x86Len := uint32(len(p.X86Code))
-	size := 8 + 8 + 8 + 4 + len(p.X86Code) // 3 uint64 + length(uint32) + data
+	mapPVMToX86Len := uint32(len(p.InstMapPVMToX86))
+	mapX86ToPVMLen := uint32(len(p.InstMapX86ToPVM))
+
+	// Calculate size: 3 uint64 + x86 length(uint32) + x86 data + map1 length(uint32) + map1 data + map2 length(uint32) + map2 data
+	// Each map entry: uint32 key + int32 value = 8 bytes
+	size := 8 + 8 + 8 + 4 + len(p.X86Code) + 4 + int(mapPVMToX86Len)*8 + 4 + int(mapX86ToPVMLen)*8
 	buf := make([]byte, size)
 	pos := 0
 
@@ -1390,6 +1699,27 @@ func EncodePVMX(p *PVMX) ([]byte, error) {
 	binary.LittleEndian.PutUint32(buf[pos:], x86Len)
 	pos += 4
 	copy(buf[pos:], p.X86Code)
+	pos += len(p.X86Code)
+
+	// Encode InstMapPVMToX86: map[uint32]int
+	binary.LittleEndian.PutUint32(buf[pos:], mapPVMToX86Len)
+	pos += 4
+	for k, v := range p.InstMapPVMToX86 {
+		binary.LittleEndian.PutUint32(buf[pos:], k)
+		pos += 4
+		binary.LittleEndian.PutUint32(buf[pos:], uint32(v))
+		pos += 4
+	}
+
+	// Encode InstMapX86ToPVM: map[int]uint32
+	binary.LittleEndian.PutUint32(buf[pos:], mapX86ToPVMLen)
+	pos += 4
+	for k, v := range p.InstMapX86ToPVM {
+		binary.LittleEndian.PutUint32(buf[pos:], uint32(k))
+		pos += 4
+		binary.LittleEndian.PutUint32(buf[pos:], v)
+		pos += 4
+	}
 
 	return buf, nil
 }
@@ -1415,6 +1745,34 @@ func DecodePVMX(data []byte) (*PVMX, error) {
 	// Use slicing instead of allocate+copy for better performance
 	// This is safe because the data buffer is not reused after this function returns
 	p.X86Code = data[pos : pos+int(x86Len)]
+	pos += int(x86Len)
+
+	// Decode InstMapPVMToX86 if present (for backward compatibility with old format)
+	if pos < len(data) {
+		mapPVMToX86Len := binary.LittleEndian.Uint32(data[pos:])
+		pos += 4
+		p.InstMapPVMToX86 = make(map[uint32]int, mapPVMToX86Len)
+		for i := uint32(0); i < mapPVMToX86Len; i++ {
+			k := binary.LittleEndian.Uint32(data[pos:])
+			pos += 4
+			v := binary.LittleEndian.Uint32(data[pos:])
+			pos += 4
+			p.InstMapPVMToX86[k] = int(v)
+		}
+
+		// Decode InstMapX86ToPVM
+		mapX86ToPVMLen := binary.LittleEndian.Uint32(data[pos:])
+		pos += 4
+		p.InstMapX86ToPVM = make(map[int]uint32, mapX86ToPVMLen)
+		for i := uint32(0); i < mapX86ToPVMLen; i++ {
+			k := binary.LittleEndian.Uint32(data[pos:])
+			pos += 4
+			v := binary.LittleEndian.Uint32(data[pos:])
+			pos += 4
+			p.InstMapX86ToPVM[int(k)] = v
+		}
+	}
+
 	return p, nil
 }
 
@@ -1518,31 +1876,66 @@ func (rvm *RecompilerVM) ExecuteAsChild(entry uint32) error {
 	compileStart := time.Now()
 	rvm.pc = 0
 	rvm.WriteContextSlot(gasSlotIndex, uint64(rvm.Gas), 8)
+	currentState := rvm.GetMachineState()
+	rvm.WriteContextSlot(vmStateSlotIndex, uint64(HALT), 8)
+	// Initialize trace verifier for child VM if verification mode is enabled
+	// Note: We only initialize once; the verifier persists across multiple ExecuteAsChild calls
+	if err := rvm.ensureTraceVerifier(); err != nil {
+		fmt.Printf("Failed to initialize child trace verifier: %v\n", err)
+	}
+	// Set global verifier for goDebugPrintInstruction callback
+	if rvm.traceVerifier != nil {
+		SetCurrentVerifier(rvm.traceVerifier)
+		defer ClearCurrentVerifier()
+	}
+
 	// Only compile if x86Code is not already compiled
-	if len(rvm.x86Code) == 0 {
-		rvm.x86Code, rvm.djumpAddr, rvm.InstMapPVMToX86, rvm.InstMapX86ToPVM = rvm.compiler.CompileX86Code(rvm.pc)
-		err1 := rvm.SavePVMX()
-		if err1 != nil {
-			fmt.Printf("SavePVMX failed: %v\n", err1)
+	firstExec := len(rvm.x86Code) == 0
+	if firstExec {
+		rvm.x86Code, rvm.djumpAddrOffset, rvm.InstMapPVMToX86, rvm.InstMapX86ToPVM = rvm.compiler.CompileX86Code(rvm.pc)
+		if len(rvm.InstMapX86ToPVM) == 0 {
+			panic("InstMapX86ToPVM is empty after compilation")
+		} else {
+			fmt.Printf("InstMapX86ToPVM has %d entries after compilation\n", len(rvm.InstMapX86ToPVM))
+		}
+	} else {
+		if DebugRecompilerResult {
+			fmt.Printf("Reusing existing x86 code of size %d bytes\n", len(rvm.x86Code))
 		}
 	}
 	rvm.compileTime = time.Since(compileStart)
-
 	hardStart := time.Now()
-	execStart := time.Now()
-	if err := rvm.ExecuteX86CodeWithEntry(entry); err != nil {
-		// we don't have to return this , just print it
-		fmt.Printf("ExecuteX86 crash detected: %v\n", err)
+	if currentState == HOST {
+		rvm.Resume()
+	} else {
+		execStart := time.Now()
+		if firstExec {
+			if err := rvm.ExecuteX86CodeWithEntry(entry); err != nil {
+				// we don't have to return this , just print it
+				if DebugRecompilerResult {
+					fmt.Printf("ExecuteX86 crash detected: %v\n", err)
+				}
+			}
+		} else {
+			if err := rvm.ExecuteAfterMmap(entry); err != nil {
+				// we don't have to return this , just print it
+				if DebugRecompilerResult {
+					fmt.Printf("ExecuteX86 crash detected: %v\n", err)
+				}
+			}
+		}
+		// executionTime captures the time spent in ExecuteX86CodeWithEntry
+		// This includes mmap setup + actual x86 execution
+		rvm.executionTime = time.Since(execStart)
 	}
-	// executionTime captures the time spent in ExecuteX86CodeWithEntry
-	// This includes mmap setup + actual x86 execution
-	rvm.executionTime = time.Since(execStart)
 
 	for rvm.MachineState == SBRK {
 		if rvm.MachineState == SBRK {
 			err := rvm.HandleSbrk()
 			if err != nil {
-				fmt.Printf("HandleSbrk failed: %v\n", err)
+				if DebugRecompilerResult {
+					fmt.Printf("HandleSbrk failed: %v\n", err)
+				}
 				break
 			}
 		}
@@ -1551,18 +1944,43 @@ func (rvm *RecompilerVM) ExecuteAsChild(entry uint32) error {
 		resumeTime := time.Since(resumeStart)
 		rvm.executionTime += resumeTime
 		if err != nil {
-			fmt.Printf("Resume after host call failed: %v\n", err)
+			if DebugRecompilerResult {
+				fmt.Printf("Resume after host call failed: %v\n", err)
+			}
 			rvm.WriteContextSlot(vmStateSlotIndex, uint64(PANIC), 8)
 			break
 		}
 	}
 	rvm.allExecutionTime = time.Since(hardStart)
-	fmt.Printf("Child execution finished: compileTime=%v executionTime=%v totalTime=%v\n",
-		rvm.compileTime, rvm.executionTime, rvm.allExecutionTime)
+	if DebugRecompilerResult {
+		fmt.Printf("Child execution finished: compileTime=%v executionTime=%v totalTime=%v\n",
+			rvm.compileTime, rvm.executionTime, rvm.allExecutionTime)
+	}
+
+	// Refund 1 gas on FAULT (matches interpreter behavior in pvmgo.go)
+	if rvm.MachineState == FAULT {
+		rvm.Gas++
+		rvm.WriteContextSlot(gasSlotIndex, rvm.Gas, 8)
+	} else if rvm.MachineState == HALT {
+		opcode := rvm.code[rvm.pc]
+		fmt.Printf("Child VM halted normally at PC=%d opcode=%s\n", rvm.pc, opcode_str(opcode))
+	} else if rvm.MachineState == HOST {
+		rvm.SetPC(rvm.pc + 1)
+	}
 	return nil
 }
 
 func (rvm *RecompilerVM) GetHostID() uint64 {
 	hostId, _ := rvm.ReadContextSlot(hostFuncIdIndex)
 	return hostId
+}
+
+// CloseVerifier closes the trace verifier and prints the summary
+// This should be called when the VM execution is complete
+func (rvm *RecompilerVM) CloseVerifier() {
+	if rvm.traceVerifier != nil {
+		fmt.Println(rvm.traceVerifier.Summary())
+		rvm.traceVerifier.Close()
+		rvm.traceVerifier = nil
+	}
 }

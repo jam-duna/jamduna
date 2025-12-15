@@ -21,7 +21,7 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-var EnablePVMOutputLogs = false
+var EnablePVMOutputLogs = true
 
 func SaveReportTrace(path string, obj interface{}) {
 	dir := filepath.Dir(path)
