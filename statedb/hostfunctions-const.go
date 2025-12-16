@@ -131,5 +131,4 @@ const (
 	VERIFY_VERKLE_PROOF = 253 // Majik Verkle proof verification
 	FETCH_WITNESS       = 254 // Majik CE139 fetch/cache
 	FETCH_VERKLE        = 255 // Majik Verkle fetch (unified balance/nonce/code/storage)
-	COMPUTE_BAL_HASH    = 256 // Compute Block Access List hash from Verkle witness
 )

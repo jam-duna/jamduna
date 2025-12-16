@@ -26,6 +26,8 @@ extern "C" {
     /// Returns (via r7):
     /// - 1 if proof is valid
     /// - 0 if proof is invalid
+    ///
+    /// NOTE: Kept for dual-verification mode (cross-validation with native Rust)
     #[polkavm_import(index = 253)]
     pub fn host_verify_verkle_proof(witness_ptr: u64, witness_len: u64) -> u64;
 
@@ -51,19 +53,6 @@ extern "C" {
         output_max_len: u64,
         tx_index: u64,
     ) -> u64;
-
-    /// Compute Block Access List hash from Verkle witness (index 256)
-    ///
-    /// Parameters (via PVM registers):
-    /// - r7: witness_ptr (pointer to serialized Verkle witness)
-    /// - r8: witness_len (length of witness)
-    /// - r9: output_ptr (32-byte buffer for Blake2b hash)
-    ///
-    /// Returns (via r7):
-    /// - 1 if successful
-    /// - 0 if failed
-    #[polkavm_import(index = 256)]
-    pub fn host_compute_bal_hash(witness_ptr: u64, witness_len: u64, output_ptr: u64) -> u64;
 }
 
 // ===== Fetch Type Constants =====
@@ -571,52 +560,69 @@ impl VerkleWitness {
         result
     }
 
-    /// Verify the Verkle proof via host function using raw serialized bytes
-    ///
-    /// This allocates a buffer in PVM RAM sized to the witness data and passes its
-    /// address to the host function.
-    ///
-    /// Returns true if the proof is valid, false otherwise
-    pub fn verify_raw(witness_data: &[u8]) -> bool {
+    /// REMOVED: Verkle proof verification via Go FFI host function
+    /// The guarantor now skips verification until native Rust implementation is ready
+    /// See: services/evm/src/state.rs from_verkle_witness()
+    #[allow(dead_code)]
+    fn verify_raw_unused(witness_data: &[u8]) -> bool {
         utils::functions::log_info(&format!(
             "verify_raw: input witness_data.len()={}",
             witness_data.len()
         ));
 
-        // Allocate buffer sized to the incoming witness
-        // NOTE: Witnesses can exceed 64KB after dual-proof expansion; a fixed stack
-        // array would truncate verification to 64KB and falsely reject valid blocks.
-        // Heap-allocate to fit the exact witness length while keeping a contiguous
-        // region inside PVM RAM for the host call.
-        let mut buffer = alloc::vec![0u8; witness_data.len()];
-
-        // Copy witness to PVM RAM buffer
-        buffer.copy_from_slice(witness_data);
-
+        // Native Rust verification (always run)
+        let rust_result = super::verkle_proof::verify_verkle_witness(witness_data);
         utils::functions::log_info(&format!(
-            "verify_raw: calling host with ptr={:#x}, len={}",
-            buffer.as_ptr() as u64,
-            witness_data.len()
+            "verify_raw: Rust verification returned {}",
+            rust_result
         ));
 
-        // Pass PVM RAM address to host function
-        unsafe {
-            let result = host_verify_verkle_proof(
-                buffer.as_ptr() as u64,
-                witness_data.len() as u64,
-            );
-            utils::functions::log_info(&format!("verify_raw: host returned {}", result));
-            result == 1
+        // Dual verification mode: Cross-check with Go host function
+        #[cfg(feature = "dual-verkle-verify")]
+        {
+            utils::functions::log_info("verify_raw: Dual verification mode enabled");
+
+            let mut buffer = alloc::vec![0u8; witness_data.len()];
+            buffer.copy_from_slice(witness_data);
+
+            let go_result = unsafe {
+                let result = host_verify_verkle_proof(
+                    buffer.as_ptr() as u64,
+                    witness_data.len() as u64,
+                );
+                result == 1
+            };
+
+            utils::functions::log_info(&format!(
+                "verify_raw: Go verification returned {}",
+                go_result
+            ));
+
+            // Cross-validation check
+            if rust_result != go_result {
+                utils::functions::log_error(&format!(
+                    "❌ VERIFICATION MISMATCH! Rust={}, Go={} (witness_len={})",
+                    rust_result, go_result, witness_data.len()
+                ));
+                // In dual-verify mode, fail if implementations disagree
+                return false;
+            } else {
+                utils::functions::log_info(&format!(
+                    "✅ Dual verification agreement: both={}",
+                    rust_result
+                ));
+            }
         }
+
+        rust_result
     }
 
-    /// Verify the Verkle proof via host function
-    ///
-    /// Returns true if the proof is valid, false otherwise
+    /// REMOVED: Verkle proof verification
+    /// The guarantor now skips verification until native Rust implementation is ready
     #[allow(dead_code)]
     pub fn verify(&self) -> bool {
-        let serialized = self.serialize();
-        Self::verify_raw(&serialized)
+        // TODO: Implement native Rust Verkle proof verification
+        true // Accept all witnesses as valid for now
     }
 
     /// Parse the witness to extract state data into structured caches

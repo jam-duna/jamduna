@@ -34,6 +34,10 @@ mod tx;
 mod verkle;
 #[path = "verkle_constants.rs"]
 mod verkle_constants;
+#[path = "verkle_proof.rs"]
+mod verkle_proof;
+#[path = "block_access_list.rs"]
+mod block_access_list;
 #[path = "writes.rs"]
 mod writes;
 #[path = "witness_events.rs"]

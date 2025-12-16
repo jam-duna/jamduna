@@ -1090,20 +1090,24 @@ impl BlockRefiner {
                             }
 
                             if builder_claimed_bal {
-                                // Compute BAL hash from witness via host function
-                                let mut computed_bal_hash = [0u8; 32];
-                                let result = unsafe {
-                                    crate::verkle::host_compute_bal_hash(
-                                        witness_data.as_ptr() as u64,
-                                        witness_data.len() as u64,
-                                        computed_bal_hash.as_mut_ptr() as u64,
-                                    )
+                                // Compute BAL hash from witness (native Rust implementation)
+                                // Deserialize witness to build BAL
+                                let witness = match crate::verkle::VerkleWitness::deserialize(witness_data) {
+                                    Some(w) => w,
+                                    None => {
+                                        log_error("❌ Guarantor: Failed to deserialize witness for BAL computation");
+                                        return None;
+                                    }
                                 };
 
-                                if result == 0 {
-                                    log_error("❌ Guarantor: Failed to compute BAL hash from witness");
-                                    return None;
-                                }
+                                // Build BAL from witness (native Rust)
+                                let bal = crate::block_access_list::BlockAccessList::from_witness(&witness);
+                                let computed_bal_hash = bal.hash();
+
+                                log_info(&format!(
+                                    "Guarantor: Computed BAL hash = {}",
+                                    hex::encode(computed_bal_hash)
+                                ));
 
                                 // Compare computed hash with builder's claimed hash from payload
                                 if computed_bal_hash != metadata.block_access_list_hash {

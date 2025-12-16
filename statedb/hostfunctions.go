@@ -220,10 +220,6 @@ func (vm *VM) hostFunction(host_fn int) (bool, error) {
 		vm.hostFetchVerkle()
 		return true, nil
 
-	case COMPUTE_BAL_HASH: // 256
-		vm.hostComputeBALHash()
-		return true, nil
-
 	default:
 		vm.WriteRegister(7, WHAT)
 		return true, nil
@@ -3107,15 +3103,10 @@ func (vm *VM) hostVerifyVerkleProof() {
 	vm.WriteRegister(7, 1)
 }
 
-// hostComputeBALHash computes Block Access List hash from Verkle witness
-// Host function index: 256
-// Parameters (via PVM registers):
-// - r7: witness_ptr (pointer to serialized Verkle witness)
-// - r8: witness_len (length of witness)
-// - r9: output_ptr (32-byte buffer for Blake2b hash)
-// Returns (via r7):
-// - 1 if successful
-// - 0 if failed
+// REMOVED: hostComputeBALHash - now using native Rust implementation
+// Host function index: 256 is no longer in use
+// The native Rust BAL hash computation is in services/evm/src/block_access_list.rs
+/*
 func (vm *VM) hostComputeBALHash() {
 	witnessPtr := uint32(vm.ReadRegister(7))
 	witnessLen := uint32(vm.ReadRegister(8))
@@ -3139,6 +3130,8 @@ func (vm *VM) hostComputeBALHash() {
 		return
 	}
 
+	log.Info("bal", "[GO FFI] hostComputeBALHash called from Rust")
+
 	// Compute BAL hash using storage layer
 	balHash, accountCount, totalChanges, err := stateDB.sdb.ComputeBlockAccessListHash(witnessData)
 	if err != nil {
@@ -3147,7 +3140,7 @@ func (vm *VM) hostComputeBALHash() {
 		return
 	}
 
-	log.Trace(log.EVM, "hostComputeBALHash: computed", "hash", balHash.Hex(), "accounts", accountCount, "changes", totalChanges)
+	log.Info("bal", fmt.Sprintf("[GO FFI] hostComputeBALHash computed: hash=%s, accounts=%d, changes=%d", balHash.Hex(), accountCount, totalChanges))
 
 	// Write hash to output buffer
 	errCode = vm.WriteRAMBytes(outputPtr, balHash[:])
@@ -3160,3 +3153,4 @@ func (vm *VM) hostComputeBALHash() {
 	// Success
 	vm.WriteRegister(7, 1)
 }
+*/

@@ -28,6 +28,7 @@ members = [
     "null_authorizer",
     "doom",
     "fib",
+    "railgun",
 ]
 
 [workspace.package]

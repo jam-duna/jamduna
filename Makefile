@@ -60,7 +60,7 @@ else ifeq ($(UNAME_S),Darwin)
   endif
 endif
 
-.PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean jam_without_ffi_build run_parallel_jam kill_parallel_jam run_jam build_remote_nodes run_jam_remote_nodes da jamweb validatetraces testnet init-submodules update-submodules update-pvm-submodule update-services-submodule evm_jamtest algo_jamtest safrole_jamtest
+.PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean jam_without_ffi_build run_parallel_jam kill_parallel_jam run_jam build_remote_nodes run_jam_remote_nodes da jamweb validatetraces testnet init-submodules update-submodules update-pvm-submodule update-services-submodule evm_jamtest algo_jamtest safrole_jamtest railgun
 
 
 update-submodules:
@@ -520,4 +520,26 @@ compare_stf:
 	@echo "Building compare_stf tool..."
 	go build -o bin/compare_stf scripts/compare_stf.go
 
-.PHONY: compare_stf
+# JAM Railgun Service
+railgun:
+	@echo "Building Railgun privacy service..."
+	@echo "→ Checking Rust code..."
+	@cd services/railgun && cargo check --lib
+	@echo "✓ Railgun service code checked successfully"
+	@echo ""
+	@echo "🔫 Railgun service structure ready"
+	@echo "   Based on RAILGUN.md specification with all security fixes:"
+	@echo "   - Fee tally DELTA writes (prevents parallel conflicts)"
+	@echo "   - Gas limit binding in withdraw proofs"
+	@echo "   - 64-bit range constraints (prevents modulus wrap)"
+	@echo "   - has_change boolean flag (no sentinel collision)"
+	@echo "   - Encrypted payload enforcement"
+	@echo "   - Tree capacity overflow protection"
+	@echo ""
+	@echo "   Entry points:"
+	@echo "   - refine: ZK proof verification + state validation"
+	@echo "   - accumulate: Apply writes + process deposits"
+	@echo ""
+	@echo "   Note: Full RISC-V compilation requires polkavm target configuration"
+
+.PHONY: compare_stf railgun

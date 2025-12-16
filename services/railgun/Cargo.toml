@@ -1,0 +1,33 @@
+[package]
+name = "railgun"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[profile.release]
+panic = "abort"
+
+[profile.dev]
+panic = "abort"
+
+[lib]
+name = "railgun_service"
+path = "src/lib.rs"
+
+[[bin]]
+name = "railgun"
+path = "src/main.rs"
+
+[dependencies]
+polkavm-derive = { workspace = true }
+simplealloc = { workspace = true }
+utils = { path = "../utils" }
+hex = { version = "0.4", default-features = false, features = ["alloc"] }
+
+# ZK proof verification (will need arkworks for Groth16)
+# ark-groth16 = { version = "0.4", default-features = false }
+# ark-bn254 = { version = "0.4", default-features = false }
+# ark-serialize = { version = "0.4", default-features = false }
+
+[features]
+default = []
