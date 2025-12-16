@@ -32,6 +32,12 @@ type BasicBlock struct {
 	LastInstructionOffset int
 	needPatchNextx86Pc    bool
 
+	// Dynamic offsets for patching nextx86 slot (replaces hardcoded EcalliCodeIdx/SbrkCodeIdx)
+	ecalliNextx86Offset int
+	sbrkNextx86Offset   int
+	ecalliTotalLen      int // Total length of ECALLI code block
+	sbrkTotalLen        int // Total length of SBRK code block
+
 	GasModel *GasModel
 	GasUsage uint32
 }

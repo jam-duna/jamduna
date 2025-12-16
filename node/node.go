@@ -374,7 +374,8 @@ type Node struct {
 
 	guaranteesCh         chan types.Guarantee
 	assurancesCh         chan AssuranceObject
-	queueAssurnce        map[common.Hash]map[types.Ed25519Key]AssuranceObject
+	queueAssurance       map[common.Hash]map[types.Ed25519Key]AssuranceObject
+	queueAssuranceMutex  sync.Mutex
 	auditAnnouncementsCh chan AuditAnnouncementObj
 	judgementsCh         chan types.Judgement
 	auditingCh           chan *statedb.StateDB // use this to trigger auditing, block hash
@@ -783,7 +784,7 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 		ticketsCh:            make(chan types.Ticket, DefaultChannelSize),
 		guaranteesCh:         make(chan types.Guarantee, DefaultChannelSize),
 		assurancesCh:         make(chan AssuranceObject, DefaultChannelSize),
-		queueAssurnce:        make(map[common.Hash]map[types.Ed25519Key]AssuranceObject),
+		queueAssurance:       make(map[common.Hash]map[types.Ed25519Key]AssuranceObject),
 		auditAnnouncementsCh: make(chan AuditAnnouncementObj, DefaultChannelSize),
 		judgementsCh:         make(chan types.Judgement, DefaultChannelSize),
 		auditingCh:           make(chan *statedb.StateDB, DefaultChannelSize),

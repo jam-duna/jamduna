@@ -233,11 +233,18 @@ func (vm *X86Compiler) translateBasicBlock(startPC uint64) *BasicBlock {
 			code = append(code, vmStateCode...)
 			code = append(code, hostIdCode...)
 			code = append(code, pcCode...)
+			// Record the offset where nextx86Code starts (relative to this instruction's start)
+			nextx86CodeOffset := len(code) - codeLen
 			code = append(code, nextx86Code...)
 			code = append(code, dumpCode...)
 			code = append(code, X86_OP_RET)
+			// Record the total ECALLI code length (return address = instruction start + this length)
+			ecalliTotalLen := len(code) - codeLen
 
 			block.pvmPC_TO_x86Index[uint32(inst.Pc)] = codeLen
+			// Store dynamic offsets for patching
+			block.ecalliNextx86Offset = nextx86CodeOffset
+			block.ecalliTotalLen = ecalliTotalLen
 		} else if inst.Opcode == SBRK {
 			block.needPatchNextx86Pc = true
 			dstIdx, srcIdx := extractTwoRegisters(inst.Args)
@@ -255,21 +262,23 @@ func (vm *X86Compiler) translateBasicBlock(startPC uint64) *BasicBlock {
 			code = append(code, sbrkDCode...)
 			code = append(code, vmStateCode...)
 			code = append(code, pcCode...)
+			// Record the offset where nextx86Code starts (relative to this instruction's start)
+			nextx86CodeOffset := len(code) - codeLen
 			code = append(code, nextx86Code...)
 			code = append(code, dumpCode...)
 			code = append(code, X86_OP_RET)
+			// Record the total SBRK code length (return address = instruction start + this length)
+			sbrkTotalLen := len(code) - codeLen
+
 			block.pvmPC_TO_x86Index[uint32(inst.Pc)] = codeLen
+			// Store dynamic offsets for patching
+			block.sbrkNextx86Offset = nextx86CodeOffset
+			block.sbrkTotalLen = sbrkTotalLen
 		} else if translateFunc, ok := pvmByteCodeToX86Code[inst.Opcode]; ok {
 			if i == len(block.Instructions)-1 {
 				block.LastInstructionOffset = len(code)
 			}
-			if inst.Pc == 4333 {
-				problemInstrunction = inst
-			}
-			if inst.Opcode == JUMP_IND || inst.Opcode == LOAD_IMM_JUMP_IND {
-				pcCode, _ := BuildWriteContextSlotCode(pcSlotIndex, inst.Pc, 8)
-				code = append(code, pcCode...)
-			}
+
 			additionalCode := translateFunc(inst)
 			code = append(code, additionalCode...)
 			block.pvmPC_TO_x86Index[uint32(inst.Pc)] = codeLen
@@ -432,12 +441,21 @@ func (vm *X86Compiler) appendBlock(block *BasicBlock) {
 		vm.InstMapX86ToPVM[x86_realpc] = pvm_pc
 		vm.InstMapPVMToX86[pvm_pc] = x86_realpc
 		if block.needPatchNextx86Pc && (inst.Opcode == SBRK || inst.Opcode == ECALLI) {
-			codeIdx := SbrkCodeIdx
+			// Use dynamic offset instead of hardcoded EcalliCodeIdx/SbrkCodeIdx
+			var nextx86Offset, totalLen int
 			if inst.Opcode == ECALLI {
-				codeIdx = EcalliCodeIdx
+				nextx86Offset = block.ecalliNextx86Offset
+				totalLen = block.ecalliTotalLen
+			} else {
+				nextx86Offset = block.sbrkNextx86Offset
+				totalLen = block.sbrkTotalLen
 			}
-			binary.LittleEndian.PutUint64(vm.x86Code[x86_realpc+codeIdx:x86_realpc+codeIdx+8], uint64(x86_realpc+codeIdx+nextPcStartOffset))
-
+			// The nextx86Code contains an 8-byte placeholder at offset 3 within nextx86Code
+			// (after PUSH RAX [1 byte] + MOV opcode [2 bytes] = 3 bytes)
+			patchOffset := x86_realpc + nextx86Offset + 3
+			// nextX86Addr is the address after the entire ECALLI/SBRK code block
+			nextX86Addr := uint64(x86_realpc + totalLen)
+			binary.LittleEndian.PutUint64(vm.x86Code[patchOffset:patchOffset+8], nextX86Addr)
 		}
 		if debugRecompiler && false {
 			fmt.Printf("Mapped PVM PC %d to x86 PC %x\n", pvm_pc, x86_realpc)
@@ -455,13 +473,7 @@ func generateGasCheck(gasCharge uint32) []byte {
 	// JNS skip_trap
 	jumpPos := len(code)
 	code = append(code, 0x79, 0x00) // JNS rel8 - if gas is sufficient, jump to skip_trap
-
-	// Gas insufficient: add back the gas before triggering trap
-	if GasMode == GasModeBasicBlock {
-		code = append(code, generateAddMem64Imm32(BaseReg, offset, gasCharge)...)
-	}
 	code = append(code, 0x0F, 0x0B) // UD2 - trigger trap
-
 	// skip_trap:
 	// Patch rel8
 	code[jumpPos+1] = byte(len(code) - (jumpPos + 2)) // calculate relative jump distance

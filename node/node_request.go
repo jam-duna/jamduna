@@ -469,11 +469,17 @@ func (n *Node) runAssurances() {
 	for {
 		select {
 		case assurance := <-n.assurancesCh:
-			if _, ok := n.statedbMap[assurance.Anchor]; !ok {
-				if _, ok2 := n.queueAssurnce[assurance.Anchor]; !ok2 {
-					n.queueAssurnce[assurance.Anchor] = make(map[types.Ed25519Key]AssuranceObject)
+			n.statedbMapMutex.Lock()
+			_, statedbExists := n.statedbMap[assurance.Anchor]
+			n.statedbMapMutex.Unlock()
+
+			if !statedbExists {
+				n.queueAssuranceMutex.Lock()
+				if _, ok2 := n.queueAssurance[assurance.Anchor]; !ok2 {
+					n.queueAssurance[assurance.Anchor] = make(map[types.Ed25519Key]AssuranceObject)
 				}
-				n.queueAssurnce[assurance.Anchor][assurance.Ed25519Key] = assurance
+				n.queueAssurance[assurance.Anchor][assurance.Ed25519Key] = assurance
+				n.queueAssuranceMutex.Unlock()
 				continue
 			}
 			err := n.processAssurance(assurance)
@@ -481,21 +487,27 @@ func (n *Node) runAssurances() {
 				fmt.Printf("%s processAssurance: %v\n", n.String(), err)
 			}
 		case <-ticker.C:
-			for anchor, assuranceMap := range n.queueAssurnce {
-				if _, ok := n.statedbMap[anchor]; ok {
+			n.queueAssuranceMutex.Lock()
+			for anchor, assuranceMap := range n.queueAssurance {
+				n.statedbMapMutex.Lock()
+				_, statedbExists := n.statedbMap[anchor]
+				n.statedbMapMutex.Unlock()
+
+				if statedbExists {
 					for _, assurance := range assuranceMap {
 						err := n.processAssurance(assurance)
 						if err != nil {
 							fmt.Printf("%s processAssurance from queue: %v\n", n.String(), err)
 						} else {
-							delete(n.queueAssurnce[anchor], assurance.Ed25519Key)
+							delete(n.queueAssurance[anchor], assurance.Ed25519Key)
 						}
 					}
-					if len(n.queueAssurnce[anchor]) == 0 {
-						delete(n.queueAssurnce, anchor)
+					if len(n.queueAssurance[anchor]) == 0 {
+						delete(n.queueAssurance, anchor)
 					}
 				}
 			}
+			n.queueAssuranceMutex.Unlock()
 		}
 	}
 }

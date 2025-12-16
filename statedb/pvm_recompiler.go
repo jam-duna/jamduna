@@ -29,7 +29,7 @@ func NewRecompilerVM(service_index uint32, initialRegs []uint64, initialPC uint6
 	rvm.SetHeapPointer(current_heap_pointer)
 	rvm.SetBitMask(p.K)
 	rvm.SetJumpTable(p.J)
-	rvm.SetGas(initialGas) // Gas will be set later by specific execution methods
+	rvm.SetGas(int64(initialGas)) // Gas will be set later by specific execution methods
 	rvm.ServiceMetadata = Metadata
 
 	recompiler := &Recompiler{
@@ -49,7 +49,7 @@ func NewRecompilerVMWithoutSetup(service_index uint32, initialRegs []uint64, ini
 		return nil
 	}
 	rvm.SetMemoryBounds(0, 0, 0, 0, nil, nil)
-	rvm.SetGas(initialGas) // Gas will be set later by specific execution methods
+	rvm.SetGas(int64(initialGas)) // Gas will be set later by specific execution methods
 	rvm.ServiceMetadata = Metadata
 	rvm.SetHeapPointer(0)
 	rvm.SetBitMask(p.K)
@@ -86,6 +86,16 @@ func (rvm *Recompiler) Destroy() {
 
 func (rvm *Recompiler) SetPage(uint32, uint32, uint8) {
 
+}
+
+// GetGas returns the current gas as int64 (wrapper to satisfy ExecutionVM interface)
+func (rvm *Recompiler) GetGas() int64 {
+	return rvm.RecompilerVM.GetGas()
+}
+
+// SetGas sets the gas value (wrapper to satisfy ExecutionVM interface)
+func (rvm *Recompiler) SetGas(gas int64) {
+	rvm.RecompilerVM.SetGas(gas)
 }
 
 func (rvm *Recompiler) InitStepwise(vm *VM, entryPoint uint32) error {

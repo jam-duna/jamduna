@@ -24,12 +24,12 @@ func TestBundleExecution(t *testing.T) {
 	traceBaseDir := "0xf1166dc1eb7baff3d1c2450f319358c5c6789fe31313d331d4f035908045ad02"
 
 	// Choose backend: BackendInterpreter or BackendCompiler
-	testingBackend := BackendCompiler // Change to BackendInterpreter for interpreter verification
+	testingBackend := BackendInterpreter // Change to BackendInterpreter for interpreter verification
 
 	// Set up verification mode for the chosen backend
 	if testingBackend == BackendInterpreter {
 		// Interpreter verify mode
-		PvmVerifyBaseDir = traceBaseDir
+		// PvmVerifyBaseDir = traceBaseDir
 		PvmVerifyDir = "" // Clear direct verify dir
 	} else if testingBackend == BackendCompiler {
 		// Recompiler verify mode

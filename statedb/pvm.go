@@ -102,8 +102,8 @@ type ExecutionVM interface {
 	WriteRAMBytes(uint32, []byte) uint64
 	SetHeapPointer(uint32)
 	SetPagesAccessRange(startPage, pageCount int, access int) error
-	GetGas() uint64
-	SetGas(uint64)
+	GetGas() int64
+	SetGas(int64)
 	GetPC() uint64
 	SetPC(uint64)
 	GetMachineState() uint8
@@ -357,7 +357,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		vm.ExecutionVM = rvm
 	} else if vm.Backend == BackendInterpreter {
 		machine := NewVMGo(service_index, p, initialRegs, initialPC, initialGas, hostENV)
-		machine.Gas = initialGas
+		machine.Gas = int64(initialGas)
 		vm.ExecutionVM = machine
 		// o - read-only
 		rw_data_address := uint32(2*Z_Z) + Z_func(o_size)
@@ -458,7 +458,7 @@ func (vm *VM) NewEmptyExecutionVM(service_index uint32, p *Program, initialRegs 
 	initialGas := uint64(0x7FFFFFFFFFFFFFFF)
 	if vm.Backend == BackendInterpreter {
 		machine := NewVMGo(service_index, p, initialRegs, initialPC, initialGas, hostENV)
-		machine.Gas = initialGas
+		machine.Gas = int64(initialGas)
 		// Track all steps (TargetStep=0 means no window restriction)
 		// machine.EnableTaintForStep(0, 0)
 		e_vm = machine

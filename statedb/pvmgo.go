@@ -86,7 +86,7 @@ type VMGo struct {
 	host_func_id     int  // h in GP
 	hostVM           *VM  // Reference to host VM for host function calls
 	Ram              *RawRam
-	Gas              uint64
+	Gas              int64
 	hostenv          types.HostEnv
 
 	VMs map[uint32]*VMGo
@@ -439,7 +439,7 @@ func (vm *VMGo) SetMemoryBounds(o_size uint32,
 func NewVMGo(service_index uint32, p *Program, initialRegs []uint64, initialPC uint64, initialGas uint64, hostENV types.HostEnv) (vm *VMGo) {
 
 	vm = &VMGo{
-		Gas:           initialGas,
+		Gas:           int64(initialGas),
 		JSize:         p.JSize,
 		Z:             p.Z,
 		J:             p.J,
@@ -715,7 +715,8 @@ func (vm *VMGo) ExecuteAsChild(entryPoint uint32) error {
 				return err
 			}
 			stepn++
-			if vm.Gas == 0 {
+			if vm.Gas < 0 {
+				vm.Gas = 0
 				vm.ResultCode = types.WORKRESULT_OOG
 				vm.MachineState = OOG
 				vm.terminated = true
@@ -818,7 +819,8 @@ func (vm *VMGo) Execute(host *VM, entryPoint uint32, logDir string) error {
 				return err
 			}
 			stepn++
-			if vm.Gas == 0 {
+			if vm.Gas <= 0 {
+				vm.Gas = 0
 				vm.ResultCode = types.WORKRESULT_OOG
 				vm.MachineState = OOG
 				vm.hostVM.ResultCode = types.WORKRESULT_OOG
@@ -1044,9 +1046,8 @@ func (vm *VMGo) step(stepn int) error {
 		vm.ResultCode = types.WORKRESULT_PANIC
 		vm.MachineState = PANIC
 		vm.terminated = true
-		if vm.Gas >= 1 {
-			vm.Gas -= 1
-		} else {
+		vm.Gas -= 1
+		if vm.Gas < 0 {
 			vm.Gas = 0
 		}
 		return errors.New("program counter out of bounds")
@@ -1077,15 +1078,15 @@ func (vm *VMGo) step(stepn int) error {
 	len_operands := uint64(len(inst.Args))
 	_ = prevpc // used for logging
 
-	// Check for OOG before decrementing
-	if vm.Gas < 1 {
+	// Decrement gas and check for OOG
+	vm.Gas -= 1
+	if vm.Gas < 0 {
 		vm.ResultCode = types.WORKRESULT_OOG
 		vm.MachineState = OOG
 		vm.Gas = 0
 		vm.terminated = true
 		return fmt.Errorf("out of gas , gas = %d", vm.Gas)
 	}
-	vm.Gas -= 1
 
 	// Store current step and PC for taint tracking
 	vm.currentStep = stepn
@@ -1111,8 +1112,9 @@ func (vm *VMGo) step(stepn int) error {
 			return errChildHostCall
 		}
 		if vm.hostCall {
-			// Check for OOG before decrementing host call gas cost (10)
-			if vm.Gas < 10 {
+			// Decrement host call gas cost (10) and check for OOG
+			vm.Gas -= 10
+			if vm.Gas < 0 {
 				fmt.Printf("Out of gas during host function %d call\n", vm.host_func_id)
 				vm.ResultCode = types.WORKRESULT_OOG
 				vm.MachineState = OOG
@@ -1120,7 +1122,6 @@ func (vm *VMGo) step(stepn int) error {
 				vm.terminated = true
 				return nil
 			}
-			vm.Gas -= 10
 
 			// Call the host function
 			if vm.hostVM != nil {
@@ -1131,11 +1132,10 @@ func (vm *VMGo) step(stepn int) error {
 					return nil
 				}
 				if vm.host_func_id == TRANSFER && vm.ReadRegister(7) == OK {
-					transferGas := vm.ReadRegister(9)
-					if vm.Gas < transferGas {
+					transferGas := int64(vm.ReadRegister(9))
+					vm.Gas -= transferGas
+					if vm.Gas < 0 {
 						vm.Gas = 0
-					} else {
-						vm.Gas -= transferGas
 					}
 				}
 				// Check if host function caused panic
@@ -1245,7 +1245,7 @@ func (vm *VMGo) step(stepn int) error {
 		mismatch := vm.traceVerifier.VerifyStep(
 			opcode,
 			prevpc,
-			vm.Gas,
+			uint64(vm.Gas),
 			registers,
 			lastMemAddrRead,
 			lastMemValueRead,
@@ -2464,11 +2464,11 @@ func (vm *VMGo) SetPVMContext(l string) {
 	vm.logging = l
 }
 
-func (vm *VMGo) GetGas() uint64 {
+func (vm *VMGo) GetGas() int64 {
 	return vm.Gas
 }
 
-func (vm *VMGo) SetGas(gas uint64) {
+func (vm *VMGo) SetGas(gas int64) {
 	vm.Gas = gas
 }
 
@@ -2567,7 +2567,8 @@ func (vm *VMGo) ExecuteStep(pvm *VM) []byte {
 	}
 
 	// Handle gas exhaustion
-	if vm.Gas == 0 {
+	if vm.Gas <= 0 {
+		vm.Gas = 0
 		vm.ResultCode = types.WORKRESULT_OOG
 		vm.MachineState = OOG
 		vm.terminated = true

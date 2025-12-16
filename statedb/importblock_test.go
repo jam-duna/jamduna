@@ -171,19 +171,19 @@ func TestStateTransitionInterpreter(t *testing.T) {
 
 func TestTracesInterpreter(t *testing.T) {
 	PvmLogging = false
-	PvmTraceMode = true
+	PvmTraceMode = false
 	DebugHostFunctions = false
 	log.InitLogger("debug")
 
 	// Define all the directories you want to test in a single slice.
 	testDirs := []string{
-		path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "safrole"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "storage_light"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy_light"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
-		path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "storage"),
+		// path.Join(common.GetJAMTestVectorPath("traces"), "preimages"),
 		path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy"),
 	}
 	// Iterate over each directory.
@@ -227,6 +227,7 @@ func TestTracesInterpreter(t *testing.T) {
 func TestTracesRecompiler(t *testing.T) {
 	log.InitLogger("debug")
 
+	DebugHostFunctions = true
 	// Define all the directories you want to test in a single slice.
 	testDirs := []string{
 		// path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),

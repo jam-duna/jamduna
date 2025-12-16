@@ -85,7 +85,7 @@ jobs:
           echo "Running make evm_node 2 times..."
           for i in {1..4}; do
             echo "=== Run $i ==="
-            make evm_node_interpreter
+            make evm_node_compiler
           done
 
 

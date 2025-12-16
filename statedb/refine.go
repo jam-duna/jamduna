@@ -453,7 +453,7 @@ func (statedb *StateDB) authorizeWP(workPackage types.WorkPackage, workPackageCo
 	p_u := workPackage.AuthorizationCodeHash
 	p_p := workPackage.ConfigurationBlob
 	p_a = common.Blake2Hash(append(p_u.Bytes(), p_p...))
-	authGasUsed = types.IsAuthorizedGasAllocation - vm_auth.GetGas()
+	authGasUsed = uint64(int64(types.IsAuthorizedGasAllocation) - vm_auth.GetGas())
 
 	return
 }

@@ -736,8 +736,8 @@ func (vm *VM) hostTransfer() {
 
 // Gas Service
 func (vm *VM) hostGas() {
-	gasCost := uint64(0)                     // Define gas cost.TODO: check 0 vs 10 here
-	vm.WriteRegister(7, vm.GetGas()-gasCost) // its gas remaining AFTER the host call
+	gasCost := int64(0)                              // Define gas cost.TODO: check 0 vs 10 here
+	vm.WriteRegister(7, uint64(vm.GetGas()-gasCost)) // its gas remaining AFTER the host call
 	//vm.register[7] = uint64(1234567) // TEMPORARY
 	vm.SetHostResultCode(OK)
 }
@@ -1205,10 +1205,8 @@ func (vm *VM) hostInvoke() {
 		new_machine.WriteRegister(i-1, regVal)
 	}
 
-	initGas := g
-	int64_g := int64(g)
-	g = uint64(int64_g)
-	new_machine.SetGas(g)
+	initGas := int64(g)
+	new_machine.SetGas(initGas)
 	pc := new_machine.GetPC()
 
 	// Flush parent trace buffers before invoke
@@ -1227,7 +1225,7 @@ func (vm *VM) hostInvoke() {
 	gasUsed := initGas - postGas
 	log.Info(vm.logging, "INVOKE: gas used", "n", n, "o", o, "g", g, "postGas", postGas, "gasUsed", gasUsed, "pc", pc)
 	gasVal := new_machine.GetGas()
-	gasBytes = types.E_l(gasVal, 8)
+	gasBytes = types.E_l(uint64(gasVal), 8)
 	errCodeGas = vm.WriteRAMBytes(uint32(o), gasBytes)
 	if errCodeGas != OK {
 		vm.Panic(errCodeGas)

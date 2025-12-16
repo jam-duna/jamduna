@@ -224,20 +224,20 @@ func (vm *RecompilerVM) HandleEcalli() error {
 		}
 	}
 	if vm.host_func_id == TRANSFER && vm.ReadRegister(7) == OK {
-		gas, err := vm.ReadContextSlot(gasSlotIndex)
+		gasU64, err := vm.ReadContextSlot(gasSlotIndex)
 		if err != nil {
 			return fmt.Errorf("failed to read gas slot: %w", err)
 		}
-		before_gas := gas
-		transferGas := vm.ReadRegister(9)
+		gas := int64(gasU64)
+		transferGas := int64(vm.ReadRegister(9))
 		gas -= transferGas
 
-		err = vm.WriteContextSlot(gasSlotIndex, gas, 8)
+		err = vm.WriteContextSlot(gasSlotIndex, uint64(gas), 8)
 		if err != nil {
 			return fmt.Errorf("failed to write gas slot: %w", err)
 		}
 		vm.SetGas(gas)
-		if gas > before_gas {
+		if gas < 0 {
 			vm.MachineState = PANIC
 			vm.ResultCode = types.WORKDIGEST_OOG
 			vm.WriteContextSlot(vmStateSlotIndex, uint64(types.WORKDIGEST_OOG), 8)

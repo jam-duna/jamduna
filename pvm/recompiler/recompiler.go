@@ -104,7 +104,7 @@ type RecompilerVM struct {
 	HostFunc
 	pc uint64
 	//
-	Gas          uint64
+	Gas          int64
 	IsChild      bool
 	MachineState uint8
 	ResultCode   int
@@ -397,12 +397,12 @@ func (rvm *RecompilerVM) SetJumpTable(j []uint32) error {
 	return nil
 }
 
-func (rvm *RecompilerVM) SetGas(gas uint64) {
+func (rvm *RecompilerVM) SetGas(gas int64) {
 	rvm.Gas = gas
-	rvm.WriteContextSlot(gasSlotIndex, gas, 8)
+	rvm.WriteContextSlot(gasSlotIndex, uint64(gas), 8)
 }
 
-func (rvm *RecompilerVM) GetGas() uint64 {
+func (rvm *RecompilerVM) GetGas() int64 {
 	return rvm.Gas
 }
 
@@ -795,6 +795,10 @@ func (vm *RecompilerVM) ExecuteAfterMmap(entry uint32) error {
 	// djumpAddrOffset is the original offset within x86Code; add codeAddr to get absolute address
 	// This ensures correct address even when reusing compiled code
 	vm.djumpAddr = vm.djumpAddrOffset + vm.codeAddr
+	if DebugRecompilerResult {
+		fmt.Printf("ExecuteAfterMmap: djumpAddrOffset=0x%x codeAddr=0x%x djumpAddr=0x%x x86CodeLen=%d\n",
+			vm.djumpAddrOffset, vm.codeAddr, vm.djumpAddr, len(vm.x86Code))
+	}
 	vm.WriteContextSlot(indirectJumpPointSlot, uint64(vm.djumpAddr), 8)
 
 	// if patchInstIdx == -1 {
@@ -818,7 +822,7 @@ func (vm *RecompilerVM) ExecuteAfterMmap(entry uint32) error {
 	if err != nil {
 		return fmt.Errorf("failed to read gas from context slot: %w", err)
 	}
-	vm.Gas = gas
+	vm.Gas = int64(gas)
 	if crashed == -1 || err != nil {
 		vm.ResultCode = types.WORKDIGEST_PANIC // Result code is always PANIC for crashes
 		// Check signal type to determine if it's a memory fault (SIGSEGV/SIGBUS) or other error
@@ -863,6 +867,7 @@ func (vm *RecompilerVM) ExecuteAfterMmap(entry uint32) error {
 			var pvm_pc uint32
 			var ok bool
 			offset := int(rip - uint64(codeAddr))
+
 			if rip > uint64(vm.djumpAddr) {
 				pvm_pc_64, _ := vm.ReadContextSlot(pcSlotIndex)
 				pvm_pc = uint32(pvm_pc_64)
@@ -982,7 +987,7 @@ func (vm *RecompilerVM) ExecuteAfterMmap(entry uint32) error {
 	// Refund 1 gas on FAULT (matches interpreter behavior in pvmgo.go)
 	if vm.MachineState == FAULT {
 		vm.Gas++
-		vm.WriteContextSlot(gasSlotIndex, vm.Gas, 8)
+		vm.WriteContextSlot(gasSlotIndex, uint64(vm.Gas), 8)
 	}
 	return nil
 }
@@ -1019,14 +1024,14 @@ func (vm *RecompilerVM) Resume() error {
 	if err != nil {
 		return fmt.Errorf("failed to read context slots: %w", err)
 	}
-	vm.Gas = slots[0]
+	vm.Gas = int64(slots[0])
 	vm.pc = slots[1]
 	vmState := slots[2]
 	host_id := slots[3]
 	if vmState == FAULT {
 		// Refund 1 gas on FAULT (matches interpreter behavior in pvmgo.go)
 		vm.Gas++
-		vm.WriteContextSlot(gasSlotIndex, vm.Gas, 8)
+		vm.WriteContextSlot(gasSlotIndex, uint64(vm.Gas), 8)
 
 	}
 
@@ -1079,7 +1084,7 @@ func (vm *RecompilerVM) Resume() error {
 				pvm_pc_64, _ := vm.ReadContextSlot(pcSlotIndex)
 				pvm_pc = uint32(pvm_pc_64)
 				if DebugRecompilerResult {
-					fmt.Printf("Recovered PVM PC: %d from RIP1: %d\n", pvm_pc, rip)
+					fmt.Printf("Recovered PVM PC: %d [%s] from RIP1: %d\n", pvm_pc, opcode_str(vm.code[pvm_pc]), rip)
 				}
 				vm.WriteContextSlot(pcSlotIndex, uint64(pvm_pc), 8)
 				vm.SetPC(uint64(pvm_pc))
@@ -1781,10 +1786,12 @@ const tmpDir = "/tmp/pvmx_tmp"
 
 func (vm *RecompilerVM) SavePVMX() error {
 	pvmx := PVMX{
-		DjumpEntry:      uint64(vm.djumpAddr),
+		DjumpEntry:      uint64(vm.djumpAddrOffset), // Save offset, not absolute address
 		SavingX86Entry0: uint64(vm.InstMapPVMToX86[0]),
 		SavingX86Entry5: uint64(vm.InstMapPVMToX86[5]),
 		X86Code:         vm.x86Code,
+		InstMapPVMToX86: vm.InstMapPVMToX86,
+		InstMapX86ToPVM: vm.InstMapX86ToPVM,
 	}
 	// use codec to encode
 	data, err := EncodePVMX(&pvmx)
@@ -1853,17 +1860,29 @@ func (vm *RecompilerVM) GetX86FromPVMX(code []byte) error {
 	}
 
 	vm.djumpAddr = uintptr(pvmx.DjumpEntry)
+	vm.djumpAddrOffset = uintptr(pvmx.DjumpEntry)
 
-	if vm.InstMapPVMToX86 == nil {
-		vm.InstMapPVMToX86 = make(map[uint32]int)
+	// Load full instruction maps if available (new PVMX format)
+	if len(pvmx.InstMapPVMToX86) > 0 {
+		vm.InstMapPVMToX86 = pvmx.InstMapPVMToX86
+	} else {
+		// Fallback to legacy format with only entry points 0 and 5
+		if vm.InstMapPVMToX86 == nil {
+			vm.InstMapPVMToX86 = make(map[uint32]int)
+		}
+		vm.InstMapPVMToX86[0] = int(pvmx.SavingX86Entry0)
+		vm.InstMapPVMToX86[5] = int(pvmx.SavingX86Entry5)
 	}
-	vm.InstMapPVMToX86[0] = int(pvmx.SavingX86Entry0)
-	vm.InstMapPVMToX86[5] = int(pvmx.SavingX86Entry5)
+
+	if len(pvmx.InstMapX86ToPVM) > 0 {
+		vm.InstMapX86ToPVM = pvmx.InstMapX86ToPVM
+	}
 
 	vm.x86Code = pvmx.X86Code
 
 	if debugRecompiler {
-		fmt.Printf("Loaded PVMX from %s (cached)\n", filename)
+		fmt.Printf("Loaded PVMX from %s (cached), djumpAddrOffset=%d, InstMapPVMToX86 size=%d\n",
+			filename, vm.djumpAddrOffset, len(vm.InstMapPVMToX86))
 	}
 	return nil
 }
@@ -1906,22 +1925,21 @@ func (rvm *RecompilerVM) ExecuteAsChild(entry uint32) error {
 	rvm.compileTime = time.Since(compileStart)
 	hardStart := time.Now()
 	if currentState == HOST {
+		// Ensure djumpAddr is correctly set before Resume
+		// djumpAddr = djumpAddrOffset + codeAddr (absolute address needed for RIP comparison)
+		if rvm.codeAddr != 0 {
+			rvm.djumpAddr = rvm.djumpAddrOffset + rvm.codeAddr
+			rvm.WriteContextSlot(indirectJumpPointSlot, uint64(rvm.djumpAddr), 8)
+		}
 		rvm.Resume()
 	} else {
 		execStart := time.Now()
-		if firstExec {
-			if err := rvm.ExecuteX86CodeWithEntry(entry); err != nil {
-				// we don't have to return this , just print it
-				if DebugRecompilerResult {
-					fmt.Printf("ExecuteX86 crash detected: %v\n", err)
-				}
-			}
-		} else {
-			if err := rvm.ExecuteAfterMmap(entry); err != nil {
-				// we don't have to return this , just print it
-				if DebugRecompilerResult {
-					fmt.Printf("ExecuteX86 crash detected: %v\n", err)
-				}
+		// Always use ExecuteX86CodeWithEntry which handles mmap setup
+		// ExecuteAfterMmap should only be used after mmap is already done (e.g., in Resume)
+		if err := rvm.ExecuteX86CodeWithEntry(entry); err != nil {
+			// we don't have to return this , just print it
+			if DebugRecompilerResult {
+				fmt.Printf("ExecuteX86 crash detected: %v\n", err)
 			}
 		}
 		// executionTime captures the time spent in ExecuteX86CodeWithEntry
@@ -1960,7 +1978,7 @@ func (rvm *RecompilerVM) ExecuteAsChild(entry uint32) error {
 	// Refund 1 gas on FAULT (matches interpreter behavior in pvmgo.go)
 	if rvm.MachineState == FAULT {
 		rvm.Gas++
-		rvm.WriteContextSlot(gasSlotIndex, rvm.Gas, 8)
+		rvm.WriteContextSlot(gasSlotIndex, uint64(rvm.Gas), 8)
 	} else if rvm.MachineState == HALT {
 		opcode := rvm.code[rvm.pc]
 		fmt.Printf("Child VM halted normally at PC=%d opcode=%s\n", rvm.pc, opcode_str(opcode))
