@@ -39,7 +39,10 @@ var MethodDescriptionMap = map[string]string{
 	"Functions":   "Functions() -> functions description",
 	"NodeCommand": "NodeCommand(command string) -> will pass the command to the node",
 
-	"Block":                "Block(headerHash hexstring) -> string",
+	"FetchState129":  "FetchState129(headerHash hexstring) -> json {stateRoot, numKVs, match, stf}",
+	"VerifyState129": "VerifyState129(headerHash hexstring) -> json {stateRoot, numKVs, match} (no stf)",
+
+	"Block": "Block(headerHash hexstring) -> string",
 	"BestBlock":            "BestBlock(headerHash hexstring) -> string",
 	"FinalizedBlock":       "FinalizedBlock(headerHash hexstring) -> string",
 	"LatestFinalizedBlock": "LatestFinalizedBlock() -> string",
@@ -530,6 +533,90 @@ func (j *Jam) State(req []string, res *string) error {
 		return fmt.Errorf("state not found for header hash %s", headerHash.String())
 	}
 	*res = sdb.JamState.Snapshot(&statedb.StateSnapshotRaw{}, sdb.GetStateUpdates()).String()
+	return nil
+}
+
+// FetchState129 fetches state from peers via CE129 protocol and verifies against block header
+// Input: headerHash (the block whose posterior state to fetch)
+// Returns JSON with: headerHash, expectedStateRoot, computedStateRoot, match, numKVs, fetchedSlot
+func (j *Jam) FetchState129(req []string, res *string) error {
+	if len(req) != 1 {
+		return fmt.Errorf("invalid number of arguments: expected 1 (headerHash), got %d", len(req))
+	}
+
+	headerHash := common.HexToHash(req[0])
+
+	// CE129 returns the POSTERIOR state of the block (state AFTER applying block)
+	// Get posterior state from child block's ParentStateRoot
+	// The posterior state of block N equals the prior state (ParentStateRoot) of block N+1
+	childBlocks, err := j.NodeContent.GetAscendingBlockByHeader(headerHash)
+	if err != nil {
+		return fmt.Errorf("failed to look up child block for header %s: %w", headerHash.Hex(), err)
+	}
+	if len(childBlocks) == 0 {
+		return fmt.Errorf("no child block found for header %s (cannot determine posterior state root)", headerHash.Hex())
+	}
+
+	expectedStateRoot := childBlocks[0].Header.ParentStateRoot
+	log.Info(log.Node, "FetchState129: using child block's ParentStateRoot as expected posterior state",
+		"headerHash", headerHash.Hex(),
+		"childSlot", childBlocks[0].Header.Slot,
+		"expectedStateRoot", expectedStateRoot.Hex())
+
+	// Fetch state via CE129 from peers
+	result, err := j.NodeContent.nodeSelf.FetchState129RPC(headerHash, expectedStateRoot)
+	if err != nil {
+		return fmt.Errorf("FetchState129 failed: %w", err)
+	}
+
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("failed to marshal result: %w", err)
+	}
+
+	*res = string(resultJSON)
+	return nil
+}
+
+// VerifyState129 is a lighter version that doesn't return the full state snapshot (stf)
+// Input: headerHash (the block whose posterior state to verify)
+// Returns JSON with: headerHash, expectedStateRoot, computedStateRoot, match, numKVs, fetchedSlot
+func (j *Jam) VerifyState129(req []string, res *string) error {
+	if len(req) != 1 {
+		return fmt.Errorf("invalid number of arguments: expected 1 (headerHash), got %d", len(req))
+	}
+
+	headerHash := common.HexToHash(req[0])
+
+	// CE129 returns the POSTERIOR state of the block (state AFTER applying block)
+	// Get posterior state from child block's ParentStateRoot
+	// The posterior state of block N equals the prior state (ParentStateRoot) of block N+1
+	childBlocks, err := j.NodeContent.GetAscendingBlockByHeader(headerHash)
+	if err != nil {
+		return fmt.Errorf("failed to look up child block for header %s: %w", headerHash.Hex(), err)
+	}
+	if len(childBlocks) == 0 {
+		return fmt.Errorf("no child block found for header %s (cannot determine posterior state root)", headerHash.Hex())
+	}
+
+	expectedStateRoot := childBlocks[0].Header.ParentStateRoot
+	log.Info(log.Node, "VerifyState129: using child block's ParentStateRoot as expected posterior state",
+		"headerHash", headerHash.Hex(),
+		"childSlot", childBlocks[0].Header.Slot,
+		"expectedStateRoot", expectedStateRoot.Hex())
+
+	// Verify state via CE129 from peers (no stf in response)
+	result, err := j.NodeContent.nodeSelf.VerifyState129RPC(headerHash, expectedStateRoot)
+	if err != nil {
+		return fmt.Errorf("VerifyState129 failed: %w", err)
+	}
+
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("failed to marshal result: %w", err)
+	}
+
+	*res = string(resultJSON)
 	return nil
 }
 
@@ -1171,6 +1258,10 @@ func callJamMethod(jam *Jam, method string, params []string, result *string) err
 		return jam.TxPoolContent(params, result)
 	case "jam_txPoolInspect":
 		return jam.TxPoolInspect(params, result)
+	case "Jam.FetchState129":
+		return jam.FetchState129(params, result)
+	case "Jam.VerifyState129":
+		return jam.VerifyState129(params, result)
 	default:
 		return fmt.Errorf("method not found: %s", method)
 	}

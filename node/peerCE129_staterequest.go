@@ -110,10 +110,17 @@ type JAMSNPStateResponse struct {
 	KeyValues types.StateKeyValueList `json:"keyValues"`
 }
 
-const DefaultMaxStateSize = 5 * 1024 * 1024
+const DefaultMaxStateSize = 10 * 1024 * 1024 // 50MB - large enough for full state responses
 
 // FetchStateRange fetches a single page of state. Returns truncated=true if more data available.
 func (p *Peer) FetchStateRange(ctx context.Context, headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32) (resp *JAMSNPStateResponse, truncated bool, err error) {
+	log.Trace(log.Node, "FetchStateRange: sending request",
+		"peer", p.Validator.Ed25519.ShortString(),
+		"headerHash", headerHash.Hex(),
+		"startKey", fmt.Sprintf("%x", startKey[:]),
+		"endKey", fmt.Sprintf("%x", endKey[:]),
+		"maxSize", maximumSize)
+
 	req := &JAMSNPStateRequest{
 		HeaderHash:  headerHash,
 		StartKey:    startKey,
@@ -128,53 +135,112 @@ func (p *Peer) FetchStateRange(ctx context.Context, headerHash common.Hash, star
 	code := uint8(CE129_StateRequest)
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
-		return nil, false, fmt.Errorf("FetchStateRange: %w", err)
+		return nil, false, fmt.Errorf("FetchStateRange: failed to open stream: %w", err)
 	}
 
 	if err = sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
 		return nil, false, fmt.Errorf("FetchStateRange: failed to send request: %w", err)
 	}
+
+	log.Debug(log.Node, "FetchStateRange: request sent, closing write side",
+		"peer", p.Validator.Ed25519.ShortString(),
+		"reqBytesLen", len(reqBytes))
+
 	stream.Close()
 
+	log.Debug(log.Node, "FetchStateRange: waiting for response",
+		"peer", p.Validator.Ed25519.ShortString())
+
 	// <-- [Boundary Node]
-	boundaryBytes, err := receiveQuicBytes(ctx, stream, p.Validator.Ed25519.String(), code)
+	// <-- [Key ++ Value]
+	parts, err := receiveMultiple(ctx, stream, 2, p.Validator.Ed25519.String(), code)
 	if err != nil {
-		return nil, false, fmt.Errorf("FetchStateRange: failed to receive boundary nodes: %w", err)
+		log.Trace(log.Node, "FetchStateRange: failed to receive response",
+			"peer", p.Validator.Ed25519.ShortString(),
+			"headerHash", headerHash.Hex(),
+			"err", err)
+		return nil, false, fmt.Errorf("FetchStateRange: failed to receive response: %w", err)
 	}
 
-	// <-- [Key ++ Value]
-	kvBytes, err := receiveQuicBytes(ctx, stream, p.Validator.Ed25519.String(), code)
-	if err != nil {
-		return nil, false, fmt.Errorf("FetchStateRange: failed to receive key-values: %w", err)
-	}
+	boundaryBytes := parts[0]
+	kvBytes := parts[1]
 
 	resp = &JAMSNPStateResponse{Boundary: boundaryBytes}
 	if err = resp.KeyValues.FromBytes(kvBytes); err != nil {
 		return nil, false, fmt.Errorf("FetchStateRange: %w", err)
 	}
 
+	// Determine if response was truncated due to MaximumSize limit
+	// The server truncates when response would exceed maximumSize (unless only 1 KV)
+	// We consider it truncated if lastKey < endKey (more keys could exist)
 	if len(resp.KeyValues.Items) > 0 {
 		lastKey := resp.KeyValues.LastKey()
-		truncated = compareKeys(*lastKey, endKey) < 0
+		cmpResult := compareKeys(*lastKey, endKey)
+		truncated = cmpResult < 0
+		log.Debug(log.Node, "FetchStateRange: truncation check",
+			"lastKey", fmt.Sprintf("%x", (*lastKey)[:]),
+			"endKey", fmt.Sprintf("%x", endKey[:]),
+			"cmpResult", cmpResult,
+			"truncated", truncated)
 	}
 
-	log.Debug(log.Node, "FetchStateRange",
-		"startKey", fmt.Sprintf("%x", startKey[:4]),
-		"endKey", fmt.Sprintf("%x", endKey[:4]),
+	// Log first and last key if we have items
+	var firstKeyStr, lastKeyStr string
+	if len(resp.KeyValues.Items) > 0 {
+		firstKeyStr = fmt.Sprintf("%x", resp.KeyValues.Items[0].Key[:])
+		lastKeyStr = fmt.Sprintf("%x", resp.KeyValues.Items[len(resp.KeyValues.Items)-1].Key[:])
+	}
+
+	log.Trace(log.Node, "FetchStateRange: success",
+		"peer", p.Validator.Ed25519.ShortString(),
+		"headerHash", headerHash.Hex(),
+		"startKey", fmt.Sprintf("%x", startKey[:]),
+		"endKey", fmt.Sprintf("%x", endKey[:]),
+		"boundaryLen", len(resp.Boundary),
 		"numKVs", len(resp.KeyValues.Items),
+		"firstKey", firstKeyStr,
+		"lastKey", lastKeyStr,
 		"truncated", truncated)
 
 	return resp, truncated, nil
 }
 
 func (p *Peer) SendStateRequest(ctx context.Context, headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32) error {
-	resp, _, err := p.FetchStateRange(ctx, headerHash, startKey, endKey, maximumSize)
+	req := &JAMSNPStateRequest{
+		HeaderHash:  headerHash,
+		StartKey:    startKey,
+		EndKey:      endKey,
+		MaximumSize: maximumSize,
+	}
+	reqBytes, err := req.ToBytes()
 	if err != nil {
 		return err
 	}
-	log.Info(log.Node, "SendStateRequest",
-		"boundaryLength", len(resp.Boundary),
-		"numKeyValues", len(resp.KeyValues.Items))
+	code := uint8(CE129_StateRequest)
+	stream, err := p.openStream(ctx, code)
+	if err != nil {
+		return err
+	}
+	// --> Header Hash ++ Start Key ++ End Key ++ Maximum Size
+	err = sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code)
+	if err != nil {
+		return err
+	}
+	// --> FIN
+	stream.Close()
+
+	// <-- [Boundary Node]
+	// <-- [Key ++ Value]
+	parts, err := receiveMultiple(ctx, stream, 2, p.Validator.Ed25519.String(), code)
+	if err != nil {
+		return err
+	}
+
+	boundaryNode := parts[0]
+	keyVal := parts[1]
+	log.Info(log.Node, "SendStateRequest: received boundary node and key-value pairs",
+		"peer", p.Validator.Ed25519.ShortString(),
+		"boundaryNodeLength", len(boundaryNode), "keyValLength", len(keyVal))
 	return nil
 }
 
@@ -198,6 +264,8 @@ func compareKeys(a, b [31]byte) int {
 type StatePageHandler func(boundary []byte, keyValues types.StateKeyValueList) bool
 
 // FetchStatePaginated fetches state with automatic pagination.
+// When used with narrow key ranges (like single first-byte prefixes), empty responses
+// simply mean no keys exist in that range - we don't jump ahead.
 func (p *Peer) FetchStatePaginated(ctx context.Context, headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32, handler StatePageHandler) (totalKVs int, err error) {
 	currentStart := startKey
 
@@ -212,6 +280,11 @@ func (p *Peer) FetchStatePaginated(ctx context.Context, headerHash common.Hash, 
 		}
 
 		if len(resp.KeyValues.Items) == 0 {
+			// Empty response - no keys in range [currentStart, endKey]
+			// Since we use narrow ranges (per first-byte prefix), this just means no keys exist here
+			log.Debug(log.Node, "FetchStatePaginated: empty response, range complete",
+				"startKey", fmt.Sprintf("%x", startKey[:]),
+				"endKey", fmt.Sprintf("%x", endKey[:]))
 			break
 		}
 
@@ -231,8 +304,12 @@ func (p *Peer) FetchStatePaginated(ctx context.Context, headerHash common.Hash, 
 			break
 		}
 
+		log.Debug(log.Node, "FetchStatePaginated: advancing to next page",
+			"lastKey", fmt.Sprintf("%x", (*lastKey)[:]),
+			"nextStart", fmt.Sprintf("%x", nextStart[:]))
+
 		if compareKeys(nextStart, currentStart) <= 0 {
-			return totalKVs, fmt.Errorf("FetchStatePaginated: no progress at key %x", currentStart[:4])
+			return totalKVs, fmt.Errorf("FetchStatePaginated: no progress at key %x", currentStart[:])
 		}
 
 		currentStart = nextStart
@@ -246,20 +323,33 @@ func (n *NodeContent) onStateRequest(ctx context.Context, stream quic.Stream, ms
 
 	var req JAMSNPStateRequest
 	if err = req.FromBytes(msg); err != nil {
+		log.Warn(log.Node, "onStateRequest: FromBytes failed", "err", err)
 		stream.CancelWrite(ErrInvalidData)
 		return fmt.Errorf("onStateRequest: %w", err)
 	}
 
+	log.Debug(log.Node, "onStateRequest: received request",
+		"headerHash", req.HeaderHash.Hex(),
+		"startKey", fmt.Sprintf("%x", req.StartKey[:4]),
+		"endKey", fmt.Sprintf("%x", req.EndKey[:4]),
+		"maxSize", req.MaximumSize)
+
 	boundarynodes, keyvalues, ok, err := n.GetState(req.HeaderHash, req.StartKey, req.EndKey, req.MaximumSize)
 	if err != nil {
+		log.Warn(log.Node, "onStateRequest: GetState error", "headerHash", req.HeaderHash.Hex(), "err", err)
 		stream.CancelWrite(ErrKeyNotFound)
 		return fmt.Errorf("onStateRequest: GetState error: %w", err)
 	}
 	if !ok {
-		log.Warn(log.Node, "onStateRequest: state not found", "headerHash", req.HeaderHash)
+		log.Warn(log.Node, "onStateRequest: state not found", "headerHash", req.HeaderHash.Hex())
 		stream.CancelWrite(ErrKeyNotFound)
 		return nil
 	}
+
+	log.Debug(log.Node, "onStateRequest: GetState success",
+		"headerHash", req.HeaderHash.Hex(),
+		"numBoundaryNodes", len(boundarynodes),
+		"numKeyValues", len(keyvalues.Items))
 
 	// <-- [Boundary Node]
 	if err = sendQuicBytes(ctx, stream, common.ConcatenateByteSlices(boundarynodes), n.GetEd25519Key().String(), CE129_StateRequest); err != nil {
@@ -284,6 +374,11 @@ func (n *NodeContent) onStateRequest(ctx context.Context, stream quic.Stream, ms
 		stream.CancelWrite(ErrCECode)
 		return fmt.Errorf("onStateRequest: failed to send keyvalues: %w", err)
 	}
+
+	log.Info(log.Node, "onStateRequest: success",
+		"headerHash", req.HeaderHash.Hex(),
+		"numKeyValues", len(keyvalues.Items),
+		"kvBytesLen", len(kvbytes))
 
 	return nil
 }

@@ -727,7 +727,6 @@ func (t *MerkleTree) getTreeContentIncludeKey(node *Node, level int, startKey []
 				copy(k_31[:], node.Key[:31])
 				stateKeyValue := types.StateKeyValue{
 					Key:   k_31,
-					Len:   uint8(len(value)),
 					Value: value,
 				}
 				addSize := len(stateKeyValue.Key) + len(stateKeyValue.Value)
@@ -770,7 +769,6 @@ func (t *MerkleTree) getTreeContent(node *Node, level int, startKey []byte, endK
 			copy(k_31[:], node.Key[:31])
 			stateKeyValue := types.StateKeyValue{
 				Key:   k_31,
-				Len:   uint8(len(value)),
 				Value: value,
 			}
 			addSize := len(stateKeyValue.Key) + len(stateKeyValue.Value)

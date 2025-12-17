@@ -1,10 +1,8 @@
 package types
 
 import (
-	"encoding/binary"
-	"io"
-
 	"bytes"
+	"io"
 )
 
 type StateKeyValueList struct {
@@ -13,11 +11,11 @@ type StateKeyValueList struct {
 
 type StateKeyValue struct {
 	Key   [31]byte `json:"key"`
-	Len   uint8    `json:"len"`
 	Value []byte   `json:"value"`
 }
 
-// ToBytes serializes the JAMSNPStateKeyValue struct into a byte array
+// ToBytes serializes the StateKeyValueList into a byte array
+// Per GP spec CE129: Key = [u8; 31], Value = len++[u8] (JAM variable-length encoding)
 func (kvs *StateKeyValueList) ToBytes() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	for _, kv := range kvs.Items {
@@ -26,14 +24,9 @@ func (kvs *StateKeyValueList) ToBytes() ([]byte, error) {
 			return nil, err
 		}
 
-		// Serialize Len (1 byte, uint8)
-		if err := buf.WriteByte(kv.Len); err != nil {
-			return nil, err
-		}
-
-		// Serialize Value length (4 bytes for uint32 length)
-		valueLength := uint32(len(kv.Value))
-		if err := binary.Write(buf, binary.LittleEndian, valueLength); err != nil {
+		// Serialize Value with JAM's len++[u8] encoding (variable-length prefix)
+		lenBytes := E(uint64(len(kv.Value)))
+		if _, err := buf.Write(lenBytes); err != nil {
 			return nil, err
 		}
 
@@ -46,70 +39,64 @@ func (kvs *StateKeyValueList) ToBytes() ([]byte, error) {
 }
 
 // FromBytes deserializes a byte array into a StateKeyValue struct
+// Per GP spec CE129: Key = [u8; 31], Value = len++[u8] (JAM variable-length encoding)
 func (kv *StateKeyValue) FromBytes(data []byte) error {
-	buf := bytes.NewReader(data)
+	if len(data) < 31 {
+		return io.ErrUnexpectedEOF
+	}
 
 	// Deserialize Key (31 bytes)
-	if _, err := io.ReadFull(buf, kv.Key[:]); err != nil {
-		return err
+	copy(kv.Key[:], data[:31])
+	data = data[31:]
+
+	// Deserialize Value using JAM's len++[u8] encoding
+	valueLength, bytesRead := DecodeE(data)
+	if bytesRead == 0 {
+		return io.ErrUnexpectedEOF
+	}
+	data = data[bytesRead:]
+
+	if uint64(len(data)) < valueLength {
+		return io.ErrUnexpectedEOF
 	}
 
-	// Deserialize Len (1 byte)
-	lenByte, err := buf.ReadByte()
-	if err != nil {
-		return err
-	}
-	kv.Len = lenByte
-
-	// Deserialize Value length (4 bytes)
-	var valueLength uint32
-	if err := binary.Read(buf, binary.LittleEndian, &valueLength); err != nil {
-		return err
-	}
-
-	// Deserialize Value (dynamically sized)
 	kv.Value = make([]byte, valueLength)
-	if _, err := io.ReadFull(buf, kv.Value); err != nil {
-		return err
-	}
+	copy(kv.Value, data[:valueLength])
 
 	return nil
 }
 
 // FromBytes deserializes a byte array into a StateKeyValueList
+// Per GP spec CE129: Key = [u8; 31], Value = len++[u8] (JAM variable-length encoding)
 func (kvs *StateKeyValueList) FromBytes(data []byte) error {
 	kvs.Items = nil
-	buf := bytes.NewReader(data)
 
-	for buf.Len() > 0 {
+	for len(data) > 0 {
 		var kv StateKeyValue
 
+		// Need at least 31 bytes for the key
+		if len(data) < 31 {
+			break
+		}
+
 		// Deserialize Key (31 bytes)
-		if _, err := io.ReadFull(buf, kv.Key[:]); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return err
+		copy(kv.Key[:], data[:31])
+		data = data[31:]
+
+		// Deserialize Value using JAM's len++[u8] encoding (variable-length prefix)
+		valueLength, bytesRead := DecodeE(data)
+		if bytesRead == 0 {
+			return io.ErrUnexpectedEOF
+		}
+		data = data[bytesRead:]
+
+		if uint64(len(data)) < valueLength {
+			return io.ErrUnexpectedEOF
 		}
 
-		// Deserialize Len (1 byte)
-		lenByte, err := buf.ReadByte()
-		if err != nil {
-			return err
-		}
-		kv.Len = lenByte
-
-		// Deserialize Value length (4 bytes)
-		var valueLength uint32
-		if err := binary.Read(buf, binary.LittleEndian, &valueLength); err != nil {
-			return err
-		}
-
-		// Deserialize Value (dynamically sized)
 		kv.Value = make([]byte, valueLength)
-		if _, err := io.ReadFull(buf, kv.Value); err != nil {
-			return err
-		}
+		copy(kv.Value, data[:valueLength])
+		data = data[valueLength:]
 
 		kvs.Items = append(kvs.Items, kv)
 	}

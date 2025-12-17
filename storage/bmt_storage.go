@@ -196,11 +196,10 @@ func (t *StateDBStorage) GetStateByRange(startKey []byte, endKey []byte, maximum
 	return t.trieDB.GetStateByRange(startKey, endKey, maximumSize)
 }
 
-// GetAllKeyValues retrieves values for a list of keys from the trie
-// If no keys are provided, it defaults to retrieving C1-C16 state keys (0x01-0x10)
+// GetAllKeyValues retrieves key-value pairs tracked in the in-memory keys map
+// Note: This only returns keys inserted during the current session via the keys map.
+// For full trie traversal (including service storage), use GetStateByRange directly.
 func (t *StateDBStorage) GetAllKeyValues() []types.KeyVal {
-
-	// Retrieve values for provided keys
 	result := make([]types.KeyVal, 0, len(t.keys))
 	for key := range t.keys {
 		value, ok, err := t.Get(key[:])
@@ -211,7 +210,6 @@ func (t *StateDBStorage) GetAllKeyValues() []types.KeyVal {
 			result = append(result, kv)
 		}
 	}
-
 	return result
 }
 

@@ -30,6 +30,7 @@ import (
 	"time"
 
 	bls "github.com/colorfulnotion/jam/bls"
+	"github.com/colorfulnotion/jam/bmt/core"
 	chainspecs "github.com/colorfulnotion/jam/chainspecs"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/ed25519"
@@ -61,15 +62,17 @@ const (
 )
 
 const (
-	enableInit  = false
-	numNodes    = types.TotalValidators
-	quicAddr    = "127.0.0.1:%d"
-	Grandpa     = true
-	GrandpaEasy = false
-	Audit       = true
-	CE129_test  = false
-	CE138_test  = false
-	revalidate  = false // turn off for production (or publication of traces)
+	enableInit        = false
+	numNodes          = types.TotalValidators
+	quicAddr          = "127.0.0.1:%d"
+	Grandpa           = false
+	GrandpaEasy       = true
+	Audit             = true
+	CE129_test        = true
+	CE129_delay_slots = 3     // Wait this many slots before fetching state (allows data to propagate)
+	CE129_simple      = false // true = getCE129 (simple), false = fetchStates129 (paginated)
+	CE138_test        = false
+	revalidate        = false // turn off for production (or publication of traces)
 
 	paranoidVerification = false // turn off for production
 
@@ -404,6 +407,11 @@ type Node struct {
 	completedJCEMutex   sync.Mutex
 	jce_timestamp       map[uint32]time.Time
 	jce_timestamp_mutex sync.Mutex
+
+	// CE129 state request serialization
+	ce129Mutex      sync.Mutex
+	ce129Queue      []ce129QueueItem
+	ce129QueueMutex sync.Mutex
 
 	stop_receive_blk    chan string
 	restart_receive_blk chan string
@@ -2423,32 +2431,860 @@ func (n *Node) extendChain(ctx context.Context) error {
 	//TODO
 	return nil
 }
-func (n *Node) getCE129(nodeIndex uint16, headerHash common.Hash) {
+
+// getCE129 is the simple non-paginated version - just get raw response first
+func (n *Node) getCE129(headerHash common.Hash) {
 	var startKey [31]byte
 	var endKey [31]byte
 	for i := range 31 {
 		startKey[i] = 0x00
 		endKey[i] = 0xff
 	}
-	// Find peer by validator Ed25519 pubkey (not stale PeerID)
-	// Look up the pubkey for this validator index from the headerHash-specific statedb
-	sdb, ok := n.getStateDBByHeaderHash(headerHash)
-	if !ok {
-		log.Warn(log.Node, "getCE129: statedb not found for headerHash", "headerHash", headerHash)
+
+	selfPubKey := n.GetEd25519Key().String()
+	log.Info(log.Node, "getCE129: selfPubKey", "selfPubKey", selfPubKey[:16], "numPeers", len(n.peersByPubKey))
+
+	const maxAttempts = 4
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		// Try all connected peers (skip self)
+		for pubKey, peer := range n.peersByPubKey {
+			if pubKey == selfPubKey {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			log.Info(log.Node, "getCE129: trying peer", "pubKey", pubKey[:16], "headerHash", headerHash.Hex(), "attempt", attempt)
+			err := peer.SendStateRequest(ctx, headerHash, startKey, endKey, 10000000)
+			cancel()
+			if err != nil {
+				log.Warn(log.Node, "getCE129: SendStateRequest failed", "pubKey", pubKey[:16], "attempt", attempt, "err", err)
+				continue
+			}
+			// Success
+			log.Info(log.Node, "getCE129: SUCCESS with external peer", "pubKey", pubKey[:16], "attempt", attempt)
+			return
+		}
+		if attempt < maxAttempts {
+			time.Sleep(2 * time.Second)
+		}
+	}
+	log.Warn(log.Node, "getCE129: all external peers failed after retries", "headerHash", headerHash.Hex(), "attempts", maxAttempts)
+}
+
+// StateSnapshot holds the fetched state from CE129
+type StateSnapshot struct {
+	KeyVals []types.StateKeyValue
+}
+
+// ce129QueueItem represents a block queued for CE129 state fetching
+type ce129QueueItem struct {
+	headerHash      common.Hash
+	parentStateRoot common.Hash
+	slot            uint32
+	queuedAt        time.Time
+}
+
+// ComputeStateRoot computes the state root from the key-values using GP Binary Merkle Trie
+func (s *StateSnapshot) ComputeStateRoot() common.Hash {
+	if len(s.KeyVals) == 0 {
+		return common.Hash{}
+	}
+
+	// Deduplicate keys (in case pagination returned duplicates)
+	// Use a map keyed by the 31-byte key
+	seen := make(map[[31]byte]bool)
+	var uniqueKVs []types.StateKeyValue
+	for _, kv := range s.KeyVals {
+		if !seen[kv.Key] {
+			seen[kv.Key] = true
+			uniqueKVs = append(uniqueKVs, kv)
+		}
+	}
+
+	// Log all unique keys for debugging
+	var keyStrs []string
+	for _, kv := range uniqueKVs {
+		keyStrs = append(keyStrs, fmt.Sprintf("%x", kv.Key[:4]))
+	}
+	log.Info(log.Node, "ComputeStateRoot: deduplication",
+		"original", len(s.KeyVals),
+		"unique", len(uniqueKVs),
+		"keys", keyStrs)
+
+	// Sort keys to ensure deterministic order (though BuildGpTree should handle unsorted)
+	slices.SortFunc(uniqueKVs, func(a, b types.StateKeyValue) int {
+		return bytes.Compare(a.Key[:], b.Key[:])
+	})
+
+	// Convert StateKeyValue (31-byte keys) to KVPair (32-byte keys)
+	// JAM uses 31-byte keys, padded with 0 at the end for Merkle computation
+	kvPairs := make([]core.KVPair, len(uniqueKVs))
+	for i, kv := range uniqueKVs {
+		var key core.KeyPath
+		copy(key[:31], kv.Key[:])
+		// key[31] = 0 (already zero-initialized)
+		kvPairs[i] = core.KVPair{
+			Key:   key,
+			Value: kv.Value,
+		}
+	}
+
+	// Wrapper for Blake2 hash that returns [32]byte
+	hasher := func(data []byte) [32]byte {
+		h := common.Blake2Hash(data)
+		return [32]byte(h)
+	}
+
+	// Build the GP Binary Merkle Trie and get the root hash
+	tree := core.BuildGpTree(kvPairs, 0, hasher)
+	return common.BytesToHash(tree.Hash[:])
+}
+
+// KeyValRPC is a hex-friendly representation of a key/value
+type KeyValRPC struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// StateSnapshotRawRPC is a JSON-ready view of StateSnapshotRaw
+type StateSnapshotRawRPC struct {
+	StateRoot string      `json:"state_root"`
+	KeyVals   []KeyValRPC `json:"keyvals"`
+}
+
+// FetchState129Result is the result of the FetchState129RPC call
+type FetchState129Result struct {
+	HeaderHash        string              `json:"headerHash"`
+	ExpectedStateRoot string              `json:"expectedStateRoot"`
+	ComputedStateRoot string              `json:"computedStateRoot"`
+	Match             bool                `json:"match"`
+	NumKVs            int                 `json:"numKVs"`
+	FetchedSlot       uint32              `json:"fetchedSlot"`
+	Stf               StateSnapshotRawRPC `json:"stf,omitempty"`
+	Error             string              `json:"error,omitempty"`
+}
+
+// VerifyState129Result is a lighter result without the full state snapshot
+type VerifyState129Result struct {
+	HeaderHash        string `json:"headerHash"`
+	ExpectedStateRoot string `json:"expectedStateRoot"`
+	ComputedStateRoot string `json:"computedStateRoot"`
+	Match             bool   `json:"match"`
+	NumKVs            int    `json:"numKVs"`
+	FetchedSlot       uint32 `json:"fetchedSlot"`
+	Error             string `json:"error,omitempty"`
+}
+
+// FetchState129RPC fetches state via CE129 and verifies against expected state root
+func (n *Node) FetchState129RPC(headerHash common.Hash, expectedStateRoot common.Hash) (*FetchState129Result, error) {
+	result := &FetchState129Result{
+		HeaderHash:        headerHash.Hex(),
+		ExpectedStateRoot: expectedStateRoot.Hex(),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	const maxAttempts = 4
+	var snapshot *StateSnapshot
+	var computedStateRoot common.Hash
+	var lastErr error
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		// Fetch state via CE129
+		snapshot, lastErr = n.fetchStates129(ctx, headerHash)
+		if lastErr != nil {
+			log.Warn(log.Node, "FetchState129RPC: fetchStates129 failed", "headerHash", headerHash.Hex(), "attempt", attempt, "err", lastErr)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		result.NumKVs = len(snapshot.KeyVals)
+
+		// Compute state root from fetched key-values
+		computedStateRoot = snapshot.ComputeStateRoot()
+		result.ComputedStateRoot = computedStateRoot.Hex()
+		result.Match = computedStateRoot == expectedStateRoot
+
+		// Populate STF (StateSnapshotRaw) for debugging/output, with fixed-length hex keys
+		var kvs []KeyValRPC
+		for _, kv := range snapshot.KeyVals {
+			kvs = append(kvs, KeyValRPC{
+				Key:   fmt.Sprintf("0x%s", hex.EncodeToString(kv.Key[:])),
+				Value: fmt.Sprintf("0x%x", kv.Value),
+			})
+		}
+		result.Stf = StateSnapshotRawRPC{
+			StateRoot: computedStateRoot.Hex(),
+			KeyVals:   kvs,
+		}
+
+		// Extract fetched slot from C11
+		var c11Key [31]byte
+		c11Key[0] = 0x0b
+		for _, kv := range snapshot.KeyVals {
+			if kv.Key == c11Key && len(kv.Value) >= 4 {
+				result.FetchedSlot = binary.LittleEndian.Uint32(kv.Value[:4])
+				break
+			}
+		}
+
+		if result.Match {
+			break
+		}
+
+		if attempt < maxAttempts {
+			log.Warn(log.Node, "FetchState129RPC: mismatch, retrying",
+				"attempt", attempt,
+				"headerHash", headerHash.Hex(),
+				"expectedStateRoot", expectedStateRoot.Hex(),
+				"computedStateRoot", computedStateRoot.Hex(),
+				"numKVs", result.NumKVs)
+			time.Sleep(2 * time.Second)
+		}
+	}
+
+	if lastErr != nil && !result.Match {
+		result.Error = lastErr.Error()
+		return result, lastErr
+	}
+
+	log.Info(log.Node, "FetchState129RPC completed",
+		"headerHash", headerHash.Hex(),
+		"expectedStateRoot", expectedStateRoot.Hex(),
+		"computedStateRoot", computedStateRoot.Hex(),
+		"match", result.Match,
+		"numKVs", result.NumKVs,
+		"fetchedSlot", result.FetchedSlot)
+
+	return result, nil
+}
+
+// VerifyState129RPC is a lighter version that doesn't return the full state snapshot
+func (n *Node) VerifyState129RPC(headerHash common.Hash, expectedStateRoot common.Hash) (*VerifyState129Result, error) {
+	result := &VerifyState129Result{
+		HeaderHash:        headerHash.Hex(),
+		ExpectedStateRoot: expectedStateRoot.Hex(),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	const maxAttempts = 4
+	var snapshot *StateSnapshot
+	var computedStateRoot common.Hash
+	var lastErr error
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		// Fetch state via CE129
+		snapshot, lastErr = n.fetchStates129(ctx, headerHash)
+		if lastErr != nil {
+			log.Warn(log.Node, "VerifyState129RPC: fetchStates129 failed", "headerHash", headerHash.Hex(), "attempt", attempt, "err", lastErr)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		result.NumKVs = len(snapshot.KeyVals)
+
+		// Compute state root from fetched key-values
+		computedStateRoot = snapshot.ComputeStateRoot()
+		result.ComputedStateRoot = computedStateRoot.Hex()
+		result.Match = computedStateRoot == expectedStateRoot
+
+		// Extract fetched slot from C11
+		var c11Key [31]byte
+		c11Key[0] = 0x0b
+		for _, kv := range snapshot.KeyVals {
+			if kv.Key == c11Key && len(kv.Value) >= 4 {
+				result.FetchedSlot = binary.LittleEndian.Uint32(kv.Value[:4])
+				break
+			}
+		}
+
+		if result.Match {
+			break
+		}
+
+		if attempt < maxAttempts {
+			log.Warn(log.Node, "VerifyState129RPC: mismatch, retrying",
+				"attempt", attempt,
+				"headerHash", headerHash.Hex(),
+				"expectedStateRoot", expectedStateRoot.Hex(),
+				"computedStateRoot", computedStateRoot.Hex(),
+				"numKVs", result.NumKVs)
+			time.Sleep(2 * time.Second)
+		}
+	}
+
+	if lastErr != nil && !result.Match {
+		result.Error = lastErr.Error()
+		return result, lastErr
+	}
+
+	log.Info(log.Node, "VerifyState129RPC completed",
+		"headerHash", headerHash.Hex(),
+		"expectedStateRoot", expectedStateRoot.Hex(),
+		"computedStateRoot", computedStateRoot.Hex(),
+		"match", result.Match,
+		"numKVs", result.NumKVs,
+		"fetchedSlot", result.FetchedSlot)
+
+	return result, nil
+}
+
+// fetchStates129 fetches the full state for a given header hash using pagination
+// Distributes load across multiple peers in parallel for faster fetching
+// Includes retry logic with different peers for failed ranges
+func (n *Node) fetchStates129(ctx context.Context, headerHash common.Hash) (*StateSnapshot, error) {
+	selfPubKey := n.GetEd25519Key().String()
+
+	// Collect available peers (skip self)
+	var peers []*Peer
+	for pubKey, peer := range n.peersByPubKey {
+		if pubKey != selfPubKey {
+			peers = append(peers, peer)
+		}
+	}
+
+	if len(peers) == 0 {
+		return nil, fmt.Errorf("fetchStates129: no peers available")
+	}
+
+	log.Info(log.Node, "fetchStates129: starting parallel fetch",
+		"headerHash", headerHash.Hex(),
+		"numPeers", len(peers))
+
+	// Build key ranges (0x00 - 0xff), each prefix spans to the next prefix
+	type keyRange struct {
+		start [31]byte
+		end   [31]byte
+		index int
+	}
+	var keyRanges []keyRange
+	for i := 0; i < 256; i++ {
+		start := makeKey(byte(i))
+		var end [31]byte
+		if i < 255 {
+			end = makeKey(byte(i + 1))
+		} else {
+			end = makeKeyMax()
+		}
+		keyRanges = append(keyRanges, keyRange{start: start, end: end, index: i})
+	}
+
+	// Channel to collect results (include range index for tracking)
+	type fetchResult struct {
+		rangeIndex int
+		kvs        []types.StateKeyValue
+		err        error
+	}
+
+	// Fetch a single range with retries on the same peer
+	fetchRange := func(p *Peer, kr keyRange) fetchResult {
+		var kvs []types.StateKeyValue
+		var err error
+		const maxAttempts = 3
+		for attempt := 1; attempt <= maxAttempts; attempt++ {
+			if ctx.Err() != nil {
+				return fetchResult{rangeIndex: kr.index, err: ctx.Err()}
+			}
+			kvs = nil
+			_, err = p.FetchStatePaginated(ctx, headerHash, kr.start, kr.end, DefaultMaxStateSize,
+				func(boundary []byte, keyValues types.StateKeyValueList) bool {
+					kvs = append(kvs, keyValues.Items...)
+					return true
+				})
+			if err == nil {
+				if len(kvs) > 0 {
+					log.Debug(log.Node, "fetchStates129: range fetched",
+						"peer", p.Validator.Ed25519.ShortString(),
+						"prefix", fmt.Sprintf("%02x", kr.start[0]),
+						"numKVs", len(kvs))
+				}
+				return fetchResult{rangeIndex: kr.index, kvs: kvs}
+			}
+			log.Trace(log.Node, "fetchStates129: range fetch retry",
+				"peer", p.Validator.Ed25519.ShortString(),
+				"startKey", fmt.Sprintf("%02x", kr.start[0]),
+				"attempt", attempt,
+				"err", err)
+			time.Sleep(500 * time.Millisecond)
+		}
+		log.Warn(log.Node, "fetchStates129: range fetch failed",
+			"peer", p.Validator.Ed25519.ShortString(),
+			"startKey", fmt.Sprintf("%02x", kr.start[0]),
+			"err", err)
+		return fetchResult{rangeIndex: kr.index, err: err}
+	}
+
+	// First pass: distribute ranges across peers
+	resultCh := make(chan fetchResult, len(keyRanges))
+	var wg sync.WaitGroup
+	for i, kr := range keyRanges {
+		wg.Add(1)
+		peer := peers[i%len(peers)]
+		go func(p *Peer, kr keyRange) {
+			defer wg.Done()
+			resultCh <- fetchRange(p, kr)
+		}(peer, kr)
+	}
+
+	// Wait for all fetches to complete
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	// Collect results and track failed ranges
+	rangeResults := make(map[int][]types.StateKeyValue)
+	var failedRanges []keyRange
+	for result := range resultCh {
+		if result.err != nil {
+			failedRanges = append(failedRanges, keyRanges[result.rangeIndex])
+			continue
+		}
+		rangeResults[result.rangeIndex] = result.kvs
+	}
+
+	// Retry failed ranges with different peers (up to 2 more rounds)
+	for retryRound := 1; retryRound <= 2 && len(failedRanges) > 0; retryRound++ {
+		log.Info(log.Node, "fetchStates129: retrying failed ranges",
+			"retryRound", retryRound,
+			"numFailed", len(failedRanges))
+
+		retryCh := make(chan fetchResult, len(failedRanges))
+		var retryWg sync.WaitGroup
+		for i, kr := range failedRanges {
+			retryWg.Add(1)
+			// Use different peer offset for retry
+			peer := peers[(kr.index+retryRound)%len(peers)]
+			go func(p *Peer, kr keyRange) {
+				defer retryWg.Done()
+				retryCh <- fetchRange(p, kr)
+			}(peer, kr)
+			_ = i // avoid unused variable
+		}
+		go func() {
+			retryWg.Wait()
+			close(retryCh)
+		}()
+
+		// Collect retry results
+		var stillFailed []keyRange
+		for result := range retryCh {
+			if result.err != nil {
+				stillFailed = append(stillFailed, keyRanges[result.rangeIndex])
+				continue
+			}
+			rangeResults[result.rangeIndex] = result.kvs
+		}
+		failedRanges = stillFailed
+	}
+
+	// Build snapshot from results
+	snapshot := &StateSnapshot{}
+	for _, kvs := range rangeResults {
+		snapshot.KeyVals = append(snapshot.KeyVals, kvs...)
+	}
+
+	// Log final status
+	if len(failedRanges) > 0 {
+		failedPrefixes := make([]string, len(failedRanges))
+		for i, kr := range failedRanges {
+			failedPrefixes[i] = fmt.Sprintf("0x%02x", kr.start[0])
+		}
+		log.Warn(log.Node, "fetchStates129: some ranges still failed after retries",
+			"numFailed", len(failedRanges),
+			"failedPrefixes", failedPrefixes,
+			"totalKVs", len(snapshot.KeyVals))
+	}
+
+	// Deduplicate keys
+	seen := make(map[[31]byte]bool)
+	var uniqueKVs []types.StateKeyValue
+	var uniqueKeys []string
+	for _, kv := range snapshot.KeyVals {
+		if !seen[kv.Key] {
+			seen[kv.Key] = true
+			uniqueKVs = append(uniqueKVs, kv)
+			uniqueKeys = append(uniqueKeys, fmt.Sprintf("%x", kv.Key[:4]))
+		}
+	}
+	snapshot.KeyVals = uniqueKVs
+
+	if len(uniqueKVs) == 0 {
+		return nil, fmt.Errorf("fetchStates129: no KVs fetched for headerHash %s", headerHash.Hex())
+	}
+
+	log.Info(log.Node, "fetchStates129: parallel fetch complete",
+		"headerHash", headerHash.Hex(),
+		"totalKVs", len(snapshot.KeyVals),
+		"uniqueKVs", len(uniqueKVs),
+		"failedRanges", len(failedRanges),
+		"keys", uniqueKeys)
+
+	return snapshot, nil
+}
+
+// makeKey creates a 31-byte key with the given first byte, rest zeros
+func makeKey(firstByte byte) [31]byte {
+	var key [31]byte
+	key[0] = firstByte
+	return key
+}
+
+// makeKeyMax creates a 31-byte key with all 0xff
+func makeKeyMax() [31]byte {
+	var key [31]byte
+	for i := range key {
+		key[i] = 0xff
+	}
+	return key
+}
+
+// compareWithInternalState fetches state from internal statedb and compares with fetched snapshot
+func (n *Node) compareWithInternalState(expectedStateRoot common.Hash, fetchedSnapshot *StateSnapshot) {
+	log.Info(log.Node, "compareWithInternalState: fetching internal state",
+		"expectedStateRoot", expectedStateRoot.Hex())
+
+	// Get internal state from statedb by state root
+	internalStateDB, err := statedb.NewStateDBFromStateRoot(expectedStateRoot, n.store)
+	if err != nil {
+		log.Warn(log.Node, "compareWithInternalState: failed to get internal statedb",
+			"stateRoot", expectedStateRoot.Hex(),
+			"err", err)
 		return
 	}
-	sf := sdb.GetSafrole()
-	pubKey, ok := sf.GetValidatorPubKeyAtTimeSlot(nodeIndex, sf.Timeslot)
-	if !ok {
-		log.Warn(log.Node, "getCE129: validator pubkey not found", "nodeIndex", nodeIndex)
+
+	// Get all key-values from internal state
+	internalKVs := internalStateDB.GetAllKeyValues()
+	log.Info(log.Node, "compareWithInternalState: internal state loaded",
+		"stateRoot", expectedStateRoot.Hex(),
+		"numInternalKVs", len(internalKVs))
+
+	// Build map of fetched keys for comparison
+	fetchedMap := make(map[[31]byte][]byte)
+	for _, kv := range fetchedSnapshot.KeyVals {
+		fetchedMap[kv.Key] = kv.Value
+	}
+
+	// Decode and log C11 (Timeslot) from both sources for debugging
+	var c11Key [31]byte
+	c11Key[0] = 0x0b
+	var internalSlot, fetchedSlot uint32
+	for _, kv := range internalKVs {
+		if kv.Key[0] == 0x0b && len(kv.Value) >= 4 {
+			// Check if all other bytes are zero (C11 key pattern)
+			isC11 := true
+			for j := 1; j < 31 && j < len(kv.Key); j++ {
+				if kv.Key[j] != 0 {
+					isC11 = false
+					break
+				}
+			}
+			if isC11 {
+				internalSlot = binary.LittleEndian.Uint32(kv.Value[:4])
+			}
+		}
+	}
+	if fetchedVal, ok := fetchedMap[c11Key]; ok && len(fetchedVal) >= 4 {
+		fetchedSlot = binary.LittleEndian.Uint32(fetchedVal[:4])
+	}
+	log.Info(log.Node, "compareWithInternalState: timeslot comparison",
+		"internalSlot", internalSlot,
+		"fetchedSlot", fetchedSlot,
+		"slotDiff", int32(internalSlot)-int32(fetchedSlot))
+
+	// Log internal C1-C16 keys and compare with fetched
+	log.Info(log.Node, "compareWithInternalState: comparing C1-C16 keys")
+	for _, kv := range internalKVs {
+		// Convert 31-byte key format
+		var key31 [31]byte
+		copy(key31[:], kv.Key[:31])
+
+		// Check if this is a C1-C16 core state key: [i, 0, 0, 0, ...]
+		// First byte is 0x01-0x10, all other 30 bytes must be zero
+		isCoreKey := key31[0] >= 1 && key31[0] <= 16
+		if isCoreKey {
+			for j := 1; j < 31; j++ {
+				if key31[j] != 0 {
+					isCoreKey = false
+					break
+				}
+			}
+		}
+
+		if isCoreKey {
+			fetchedVal, found := fetchedMap[key31]
+			if found {
+				valMatch := len(fetchedVal) == len(kv.Value)
+				if valMatch {
+					for i := range kv.Value {
+						if kv.Value[i] != fetchedVal[i] {
+							valMatch = false
+							break
+						}
+					}
+				}
+				if valMatch {
+					log.Info(log.Node, "compareWithInternalState: C key MATCH",
+						"key", fmt.Sprintf("C%d(0x%02x)", key31[0], key31[0]),
+						"fullKey", fmt.Sprintf("%x", key31[:]),
+						"internalValLen", len(kv.Value),
+						"fetchedValLen", len(fetchedVal))
+				} else {
+					// Show first bytes of both values for debugging
+					internalPrefix := kv.Value
+					if len(internalPrefix) > 16 {
+						internalPrefix = internalPrefix[:16]
+					}
+					fetchedPrefix := fetchedVal
+					if len(fetchedPrefix) > 16 {
+						fetchedPrefix = fetchedPrefix[:16]
+					}
+					log.Error(log.Node, "compareWithInternalState: C key VALUE MISMATCH",
+						"key", fmt.Sprintf("C%d(0x%02x)", key31[0], key31[0]),
+						"fullKey", fmt.Sprintf("%x", key31[:]),
+						"internalValLen", len(kv.Value),
+						"fetchedValLen", len(fetchedVal),
+						"internalPrefix", fmt.Sprintf("%x", internalPrefix),
+						"fetchedPrefix", fmt.Sprintf("%x", fetchedPrefix))
+				}
+			} else {
+				log.Error(log.Node, "compareWithInternalState: C key MISSING from fetched",
+					"key", fmt.Sprintf("C%d(0x%02x)", key31[0], key31[0]),
+					"fullKey", fmt.Sprintf("%x", key31[:]),
+					"internalValLen", len(kv.Value))
+			}
+		}
+	}
+
+	// Count keys by first byte prefix in internal state
+	internalPrefixCounts := make(map[byte]int)
+	for _, kv := range internalKVs {
+		internalPrefixCounts[kv.Key[0]]++
+	}
+
+	// Count keys by first byte prefix in fetched state
+	fetchedPrefixCounts := make(map[byte]int)
+	for _, kv := range fetchedSnapshot.KeyVals {
+		fetchedPrefixCounts[kv.Key[0]]++
+	}
+
+	// Log prefix counts comparison
+	log.Info(log.Node, "compareWithInternalState: prefix counts",
+		"internalTotal", len(internalKVs),
+		"fetchedTotal", len(fetchedSnapshot.KeyVals))
+
+	// Find differences
+	var extraInInternal []string
+	var extraInFetched []string
+	var countMismatches []string
+
+	for prefix, count := range internalPrefixCounts {
+		fetchedCount := fetchedPrefixCounts[prefix]
+		if fetchedCount == 0 {
+			extraInInternal = append(extraInInternal, fmt.Sprintf("0x%02x(%d)", prefix, count))
+		} else if fetchedCount != count {
+			countMismatches = append(countMismatches, fmt.Sprintf("0x%02x(internal:%d,fetched:%d)", prefix, count, fetchedCount))
+		}
+	}
+	for prefix, count := range fetchedPrefixCounts {
+		if internalPrefixCounts[prefix] == 0 {
+			extraInFetched = append(extraInFetched, fmt.Sprintf("0x%02x(%d)", prefix, count))
+		}
+	}
+
+	if len(extraInInternal) > 0 {
+		log.Error(log.Node, "compareWithInternalState: prefixes ONLY in internal", "prefixes", extraInInternal)
+	}
+	if len(extraInFetched) > 0 {
+		log.Error(log.Node, "compareWithInternalState: prefixes ONLY in fetched", "prefixes", extraInFetched)
+	}
+	if len(countMismatches) > 0 {
+		log.Error(log.Node, "compareWithInternalState: prefix COUNT mismatches", "mismatches", countMismatches)
+	}
+
+	// Compute state root from internal KVs to verify
+	internalSnapshot := &StateSnapshot{}
+	for _, kv := range internalKVs {
+		var key31 [31]byte
+		copy(key31[:], kv.Key[:31])
+		internalSnapshot.KeyVals = append(internalSnapshot.KeyVals, types.StateKeyValue{
+			Key:   key31,
+			Value: kv.Value,
+		})
+	}
+	internalComputedRoot := internalSnapshot.ComputeStateRoot()
+	log.Info(log.Node, "compareWithInternalState: internal state root verification",
+		"expectedStateRoot", expectedStateRoot.Hex(),
+		"internalComputedRoot", internalComputedRoot.Hex(),
+		"match", internalComputedRoot == expectedStateRoot)
+}
+
+// compareWithInternalStateDB compares fetched state with internal statedb directly
+// Uses GetAllKeyValues() which now traverses the trie to get ALL keys including service storage
+func (n *Node) compareWithInternalStateDB(internalStateDB *statedb.StateDB, fetchedSnapshot *StateSnapshot) {
+	if internalStateDB == nil {
+		log.Warn(log.Node, "compareWithInternalStateDB: internalStateDB is nil")
 		return
 	}
-	peer, ok := n.peersByPubKey[pubKey.String()]
-	if !ok {
-		log.Warn(log.Node, "getCE129: peer not found", "nodeIndex", nodeIndex, "pubKey", pubKey.String())
+
+	// Pull all key-values from the internal state DB (includes services, not just C1-C16)
+	internalKVs := internalStateDB.GetAllKeyValues()
+	log.Info(log.Node, "compareWithInternalStateDB: internal state from GetAllKeyValues",
+		"stateRoot", internalStateDB.StateRoot.Hex(),
+		"numInternalKVs", len(internalKVs),
+		"internalTimeslot", internalStateDB.JamState.SafroleState.Timeslot)
+
+	// Build map of fetched keys for comparison
+	fetchedMap := make(map[[31]byte][]byte)
+	for _, kv := range fetchedSnapshot.KeyVals {
+		fetchedMap[kv.Key] = kv.Value
+	}
+
+	internalMap := make(map[[31]byte][]byte)
+	for _, kv := range internalKVs {
+		internalMap[kv.Key] = kv.Value
+	}
+
+	mismatchCount := 0
+	missingCount := 0
+	extraCount := 0
+	const maxLogged = 8
+
+	for _, kv := range internalKVs {
+		fetchedVal, found := fetchedMap[kv.Key]
+		keyNum := kv.Key[0]
+		keyHex := fmt.Sprintf("%x", kv.Key[:])
+		if found {
+			if bytes.Equal(kv.Value, fetchedVal) {
+				continue
+			}
+			mismatchCount++
+			if mismatchCount <= maxLogged {
+				internalPrefix := kv.Value
+				if len(internalPrefix) > 16 {
+					internalPrefix = internalPrefix[:16]
+				}
+				fetchedPrefix := fetchedVal
+				if len(fetchedPrefix) > 16 {
+					fetchedPrefix = fetchedPrefix[:16]
+				}
+				log.Error(log.Node, "compareWithInternalStateDB: key VALUE MISMATCH",
+					"key", fmt.Sprintf("0x%02x", keyNum),
+					"keyBytes", keyHex,
+					"internalValLen", len(kv.Value),
+					"fetchedValLen", len(fetchedVal),
+					"internalPrefix", fmt.Sprintf("%x", internalPrefix),
+					"fetchedPrefix", fmt.Sprintf("%x", fetchedPrefix))
+			}
+		} else {
+			missingCount++
+			if missingCount <= maxLogged {
+				log.Error(log.Node, "compareWithInternalStateDB: key MISSING from fetched",
+					"key", fmt.Sprintf("0x%02x", keyNum),
+					"keyBytes", keyHex,
+					"internalValLen", len(kv.Value))
+			}
+		}
+	}
+
+	for _, kv := range fetchedSnapshot.KeyVals {
+		if _, ok := internalMap[kv.Key]; !ok {
+			extraCount++
+			if extraCount <= maxLogged {
+				log.Error(log.Node, "compareWithInternalStateDB: key EXTRA in fetched",
+					"key", fmt.Sprintf("0x%02x", kv.Key[0]),
+					"keyBytes", fmt.Sprintf("%x", kv.Key[:]),
+					"fetchedValLen", len(kv.Value))
+			}
+		}
+	}
+
+	log.Info(log.Node, "compareWithInternalStateDB: prefix counts",
+		"internalTotalKVs", len(internalKVs),
+		"fetchedTotal", len(fetchedSnapshot.KeyVals),
+		"missing", missingCount,
+		"mismatched", mismatchCount,
+		"extraFetched", extraCount)
+}
+
+// processCE129Queue processes queued blocks for CE129 state fetching
+// Only processes blocks that are at least CE129_delay_slots behind the current slot
+func (n *Node) processCE129Queue(currentSlot uint32) {
+	// Serialize CE129 requests to avoid interleaved logs and peer conflicts
+	n.ce129Mutex.Lock()
+	defer n.ce129Mutex.Unlock()
+
+	// Get items ready to process (delayed by CE129_delay_slots)
+	n.ce129QueueMutex.Lock()
+	var toProcess []ce129QueueItem
+	var remaining []ce129QueueItem
+	for _, item := range n.ce129Queue {
+		if currentSlot >= item.slot+uint32(CE129_delay_slots) {
+			toProcess = append(toProcess, item)
+		} else {
+			remaining = append(remaining, item)
+		}
+	}
+	n.ce129Queue = remaining
+	n.ce129QueueMutex.Unlock()
+
+	if len(toProcess) == 0 {
 		return
 	}
-	peer.SendStateRequest(context.TODO(), headerHash, startKey, endKey, 10000000)
+
+	log.Info(log.Node, "processCE129Queue: processing delayed blocks",
+		"currentSlot", currentSlot,
+		"numToProcess", len(toProcess),
+		"numRemaining", len(remaining),
+		"delaySlots", CE129_delay_slots)
+
+	// Process each queued item
+	for _, item := range toProcess {
+		log.Info(log.Node, "CE129_test starting (delayed)",
+			"headerHash", item.headerHash.Hex(),
+			"parentStateRoot", item.parentStateRoot.Hex(),
+			"slot", item.slot,
+			"currentSlot", currentSlot,
+			"delaySlots", currentSlot-item.slot,
+			"CE129_simple", CE129_simple)
+
+		if CE129_simple {
+			// Simple mode: getCE129 (no parsing, just raw response)
+			n.getCE129(item.headerHash)
+		} else {
+			// Paginated mode: fetchStates129
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			snapshot, err := n.fetchStates129(ctx, item.headerHash)
+			cancel()
+			if err != nil {
+				log.Warn(log.Node, "fetchStates129 failed", "err", err)
+				continue
+			}
+
+			// Compute state root from fetched key-values and verify against expected
+			computedStateRoot := snapshot.ComputeStateRoot()
+
+			stateRootMatch := computedStateRoot == item.parentStateRoot
+			log.Info(log.Node, "fetchStates129 completed",
+				"headerHash", item.headerHash.Hex(),
+				"expectedStateRoot", item.parentStateRoot.Hex(),
+				"computedStateRoot", computedStateRoot.Hex(),
+				"stateRootMatch", stateRootMatch,
+				"numKeyVals", len(snapshot.KeyVals))
+
+			if !stateRootMatch {
+				log.Error(log.Node, "fetchStates129: STATE ROOT MISMATCH - pagination may be incomplete",
+					"expected", item.parentStateRoot.Hex(),
+					"computed", computedStateRoot.Hex(),
+					"numKeyVals", len(snapshot.KeyVals))
+
+				// Fetch from internal statedb to compare what k,v should be
+				n.compareWithInternalState(item.parentStateRoot, snapshot)
+			}
+		}
+	}
 }
 
 func (n *Node) applyChildrenRecursively(ctx context.Context, node *types.BT_Node) error {
@@ -2569,6 +3405,12 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	}
 	log.Info(log.B, "Imported Block",
 		"n", n.String(),
+		"p", nextBlock.Header.ParentHeaderHash,
+		"s", nextBlock.Header.ParentStateRoot,
+		"blk", nextBlock.Str(),
+	)
+	log.Info(log.B, "Imported Block",
+		"n", n.String(),
 		//"n", newStateDB.Id,
 		"author", nextBlock.Header.AuthorIndex,
 		"s+", newStateDB.StateRoot.String_short(),
@@ -2581,9 +3423,21 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	)
 	// TODO: write finalizd block kv here
 
-	if CE129_test {
-		go n.getCE129(nextBlock.Header.AuthorIndex, nextBlock.Header.Hash())
-	}
+	// CE129 automatic queue processing disabled - use RPC FetchState129 instead
+	// if CE129_test {
+	// 	// Queue this block for CE129 processing after delay
+	// 	n.ce129QueueMutex.Lock()
+	// 	n.ce129Queue = append(n.ce129Queue, ce129QueueItem{
+	// 		headerHash:      nextBlock.Header.ParentHeaderHash,
+	// 		parentStateRoot: nextBlock.Header.ParentStateRoot,
+	// 		slot:            nextBlock.Header.Slot,
+	// 		queuedAt:        time.Now(),
+	// 	})
+	// 	n.ce129QueueMutex.Unlock()
+	//
+	// 	// Process any blocks that are old enough (delayed by CE129_delay_slots)
+	// 	go n.processCE129Queue(nextBlock.Header.Slot)
+	// }
 
 	if newStateDB.GetSafrole().GetTimeSlot() != nextBlock.Header.Slot {
 		panic("ApplyBlock: TimeSlot mismatch")
