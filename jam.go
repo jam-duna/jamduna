@@ -52,6 +52,7 @@ func main() {
 		validatorIndex int
 		debug          string
 		start_time     string
+		role           string // "validator" or "builder"
 
 		logLevel string
 
@@ -63,6 +64,10 @@ func main() {
 		rpcListenIP string
 		bootnode    string
 		telemetry   string
+
+		// serviceIDs should trigger role=builder
+		serviceIDs    []uint32
+		serviceIDsStr string
 
 		// run variables
 		validatorIndexFlagSet bool
@@ -83,6 +88,9 @@ func main() {
 		validatorIndexFlag = "dev-validator"
 		debugFlag          = "debug"
 		chainSpecFlag      = "chain"
+		serviceIDsFlag     = "services"
+
+		roleFlag        = "role"
 
 		//run flags that is not supported yet
 		pvmBackendFlag  = "pvm-backend"
@@ -104,12 +112,14 @@ func main() {
 		Use:   "gen-keys",
 		Short: "Generate keys for validators, pls generate keys for all validators before running the node",
 		Run: func(cmd *cobra.Command, args []string) {
-			// Generate keys for validators
-			_, _, err := grandpa.GenerateValidatorSecretSetToPath(types.TotalValidators, true, dataPath)
+			// Generate keys for validators (TotalValidators + 1 for the builder/full node)
+			_, _, err := grandpa.GenerateValidatorSecretSetToPath(types.TotalValidators+1, true, dataPath)
 			if err != nil {
-				fmt.Printf("Error generating keys: %s", err)
+				fmt.Printf("Error generating keys: %s\n", err)
 				os.Exit(1)
 			}
+			keysPath := filepath.Join(dataPath, "keys")
+			fmt.Printf("Successfully generated %d validator keys in %s\n", types.TotalValidators+1, keysPath)
 		},
 	}
 
@@ -269,6 +279,22 @@ func main() {
 			if cmd.Flags().Changed(RPCPortFlag) {
 				node.WSPort = RPCPort
 			}
+			if cmd.Flags().Changed(serviceIDsFlag) {
+				parts := strings.Split(serviceIDsStr, ",")
+				serviceIDs = make([]uint32, 0, len(parts))
+				for _, p := range parts {
+					p = strings.TrimSpace(p)
+					if p == "" {
+						continue
+					}
+					val, err := strconv.ParseUint(p, 10, 32)
+					if err != nil {
+						fmt.Printf("Invalid service ID '%s': %v\n", p, err)
+						os.Exit(1)
+					}
+					serviceIDs = append(serviceIDs, uint32(val))
+				}
+			}
 
 			fmt.Printf("Running JAM DUNA node with the following flags:\n")
 			fmt.Printf("\033[33mdataPath: %s, Port: %d, RPCPort: %d, validatorIndex: %d, debug: %s, chainSpec: %s, logLevel: %s, start_time: %s. pvm_backend: %s\033[0m\n", dataPath, Port, RPCPort, validatorIndex, debug, chainSpec, logLevel, start_time, pvmBackend)
@@ -369,7 +395,15 @@ func main() {
 			}
 			epoch0Timestamp := statedb.NewEpoch0Timestamp("jam", start_time)
 
-			n, err := node.NewNode(uint16(validatorIndex), selfSecret, chainSpecData, pvmBackend, epoch0Timestamp, peers, peerList, dataPath, Port)
+
+// TODO: take in serviceids for multi-rollup support
+			// Normalize role string
+			nodeRole := types.RoleValidator
+			if role == "builder" {
+				nodeRole = types.RoleBuilder
+			}
+
+			n, err := node.NewNode(uint16(validatorIndex), selfSecret, chainSpecData, pvmBackend, epoch0Timestamp, peers, peerList, dataPath, Port, nodeRole)
 			if err != nil {
 				fmt.Printf("New Node Err:%s", err.Error())
 				os.Exit(1)
@@ -412,6 +446,9 @@ func main() {
 	runCmd.Flags().StringVar(&rpcListenIP, rpcListenIPFlag, "", "IP address for RPC server to listen on. `::` (the default) means all addresses. [default: ::]")
 	runCmd.Flags().StringVar(&bootnode, bootnodeFlag, "", "Specify a bootnode")
 	runCmd.Flags().StringVar(&telemetry, telemetryFlag, "", " Send data to TART server (JIP-3)")
+	runCmd.Flags().StringVar(&role, roleFlag, "validator", "Node role: 'validator' (default) or 'builder' (full node that doesn't participate in consensus)")
+	runCmd.Flags().StringVar(&serviceIDsStr, serviceIDsFlag, "", "Comma-separated list of service IDs to enable builder role")
+
 
 	// add commands to root
 	rootCmd.AddCommand(runCmd)
@@ -456,9 +493,15 @@ func CheckValidatorInfo(validatorIndex int, peerList map[uint16]*node.Peer, data
 
 	fmt.Printf("validatorIndex %d out of %d peers\n", validatorIndex, len(peerList))
 
-	if selfSecrets.BandersnatchPub != peerList[uint16(validatorIndex)].Validator.Bandersnatch {
-		fmt.Printf("Error: seed file does not match the metadata. self.BandersnatchPub=0x%x | peerList[%v].BandersnatchPub=0x%x", selfSecrets.BandersnatchPub, validatorIndex, peerList[uint16(validatorIndex)].Validator.Bandersnatch)
-		os.Exit(1)
+	// For builder/full nodes (validatorIndex >= TotalValidators), skip the chainspec validation
+	// since they are not part of the active validator set
+	if validatorIndex < types.TotalValidators {
+		if selfSecrets.BandersnatchPub != peerList[uint16(validatorIndex)].Validator.Bandersnatch {
+			fmt.Printf("Error: seed file does not match the metadata. self.BandersnatchPub=0x%x | peerList[%v].BandersnatchPub=0x%x", selfSecrets.BandersnatchPub, validatorIndex, peerList[uint16(validatorIndex)].Validator.Bandersnatch)
+			os.Exit(1)
+		}
+	} else {
+		fmt.Printf("Builder/full node mode: validator index %d is outside active validator set (0-%d), skipping chainspec validation\n", validatorIndex, types.TotalValidators-1)
 	}
 	return selfSecrets
 }

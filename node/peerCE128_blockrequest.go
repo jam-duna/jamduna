@@ -151,14 +151,23 @@ func (n *NodeContent) onBlockRequest(ctx context.Context, stream quic.Stream, ms
 	defer stream.Close()
 
 	// Get peer to access its PeerID for telemetry
+	// Note: Builder/full nodes may not be in peersByPubKey initially, so we handle that case
 	peer, ok := n.nodeSelf.peersByPubKey[peerKey]
 	if !ok {
-		return fmt.Errorf("onBlockRequest: peer not found for key %s", peerKey)
+		// This could be a builder node connecting - still serve the block request
+		log.Debug(log.Node, "onBlockRequest: peer not in peersByPubKey (may be builder/full node)", "peerKey", peerKey[:16]+"...")
 	}
 
 	// Telemetry: Receiving block request (event 64)
 	eventID := n.telemetryClient.GetEventID()
-	n.telemetryClient.ReceivingBlockRequest(PubkeyBytes(peer.Validator.Ed25519.String()))
+	// Use peerKey directly for telemetry if peer is not in peersByPubKey
+	var peerKeyBytes [32]byte
+	if peer != nil {
+		peerKeyBytes = PubkeyBytes(peer.Validator.Ed25519.String())
+	} else {
+		peerKeyBytes = PubkeyBytes(peerKey)
+	}
+	n.telemetryClient.ReceivingBlockRequest(peerKeyBytes)
 
 	// Deserialize byte array back into the struct
 	err = newReq.FromBytes(msg)

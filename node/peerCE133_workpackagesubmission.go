@@ -119,7 +119,9 @@ func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPack
 	if len(extrinsics) == 0 {
 		extrinsicsBytes = []byte{}
 	} else {
-		extrinsicsBytes = extrinsics.Bytes()
+		for _, blob := range extrinsics {
+			extrinsicsBytes = append(extrinsicsBytes, blob...)
+		}
 	}
 	if err = sendQuicBytes(ctx, stream, extrinsicsBytes, p.Validator.Ed25519.String(), code); err != nil {
 		log.Error(log.Node, "SendWorkPackageSubmission Encode", "err", err)
@@ -193,7 +195,7 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 		return fmt.Errorf("core index %d is not in the current guarantor assignments", newReq.CoreIndex)
 	}
 
-	// Read message body, which is the encoded extrinsics
+	// Read message body, which is the raw concatenated extrinsics
 	extrinsicsBytes := make([]byte, msgLen)
 	if _, err := io.ReadFull(stream, extrinsicsBytes); err != nil {
 		log.Error(log.Node, "onWorkPackageSubmission4", "err", err)
@@ -201,18 +203,20 @@ func (n *Node) onWorkPackageSubmission(ctx context.Context, stream quic.Stream, 
 		_ = stream.Close()
 		return err
 	}
-	// map extrinsicsBytes to extrinsics
-	ext, _, err := types.Decode(extrinsicsBytes, reflect.TypeOf(types.ExtrinsicsBlobs{}))
-	if err != nil {
-		log.Error(log.Node, "onWorkPackageSubmission4a", "err", err)
-		stream.CancelRead(ErrInvalidData)
-		return fmt.Errorf("error in decoding data: %w", err)
-	}
-	extrinsics := ext.(types.ExtrinsicsBlobs)
-	if err != nil {
-		log.Error(log.Node, "onWorkPackageSubmission4b", "err", err)
-		stream.CancelRead(ErrInvalidData)
-		return fmt.Errorf("error in decoding data: %w", err)
+	// Parse raw concatenated extrinsics using lengths from work package
+	var extrinsics types.ExtrinsicsBlobs
+	offset := 0
+	for _, workItem := range newReq.WorkPackage.WorkItems {
+		for _, ext := range workItem.Extrinsics {
+			extLen := int(ext.Len)
+			if offset+extLen > len(extrinsicsBytes) {
+				log.Error(log.Node, "onWorkPackageSubmission: extrinsics data too short", "need", extLen, "offset", offset, "total", len(extrinsicsBytes))
+				stream.CancelRead(ErrInvalidData)
+				return fmt.Errorf("extrinsics data too short: need %d bytes at offset %d, have %d total", extLen, offset, len(extrinsicsBytes))
+			}
+			extrinsics = append(extrinsics, extrinsicsBytes[offset:offset+extLen])
+			offset += extLen
+		}
 	}
 
 	// Verify extrinsic data consistency with work package extrinsic hashes

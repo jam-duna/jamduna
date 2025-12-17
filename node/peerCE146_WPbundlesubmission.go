@@ -82,21 +82,26 @@ func (info *JAMSNP_WpInfo) FromBytes(data []byte) error {
 }
 
 func (p *Peer) SendBundleSubmission(ctx context.Context, coreIndex uint16, segmentsRootMappings []JAMSNPSegmentRootMapping, pkg types.WorkPackage, extrinsics types.ExtrinsicsBlobs, segments [][]byte, importProofs [][]common.Hash) (err error) {
+	log.Info(log.Node, "SendBundleSubmission START", "peer", p.Validator.Ed25519.ShortString(), "coreIndex", coreIndex, "numSegmentRootMappings", len(segmentsRootMappings), "wpHash", pkg.Hash().Hex(), "numExtrinsics", len(extrinsics), "numSegments", len(segments), "numImportProofs", len(importProofs))
 	// Validate segment and proof counts match work package requirements
+
 	expectedSegments := 0
 	for _, workItem := range pkg.WorkItems {
 		expectedSegments += len(workItem.ImportedSegments)
 	}
 	if len(segments) != expectedSegments {
+		log.Error(log.Node, "SendBundleSubmission segment count mismatch", "peer", p.Validator.Ed25519.ShortString(), "expected", expectedSegments, "got", len(segments))
 		return fmt.Errorf("CE146 SendBundleSubmission: segment count mismatch: expected %d, got %d", expectedSegments, len(segments))
 	}
 	if len(importProofs) != expectedSegments {
+		log.Error(log.Node, "SendBundleSubmission import proof count mismatch", "peer", p.Validator.Ed25519.ShortString(), "expected", expectedSegments, "got", len(importProofs))
 		return fmt.Errorf("CE146 SendBundleSubmission: import proof count mismatch: expected %d, got %d", expectedSegments, len(importProofs))
 	}
 	// Validate each segment has proper size
 	// Note: Empty proofs are valid for single-element CDT trees (leaf hash == root)
 	for i, seg := range segments {
 		if len(seg) != types.SegmentSize {
+			log.Error(log.Node, "SendBundleSubmission invalid segment size", "peer", p.Validator.Ed25519.ShortString(), "index", i, "expected", types.SegmentSize, "got", len(seg))
 			return fmt.Errorf("CE146 SendBundleSubmission: segment %d has invalid size %d (expected %d)", i, len(seg), types.SegmentSize)
 		}
 	}
@@ -107,25 +112,30 @@ func (p *Peer) SendBundleSubmission(ctx context.Context, coreIndex uint16, segme
 	}
 	reqBytes, err := wpInfo.ToBytes()
 	if err != nil {
+		log.Error(log.Node, "SendBundleSubmission wpInfo.ToBytes failed", "peer", p.Validator.Ed25519.ShortString(), "err", err)
 		return err
 	}
 	code := uint8(CE146_WPbundlesubmission)
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
+		log.Error(log.Node, "SendBundleSubmission openStream failed", "peer", p.Validator.Ed25519.ShortString(), "err", err)
 		return err
 	}
 	// --> Core Index ++ Segments-Root Mappings
 	err = sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code)
 	if err != nil {
+		log.Error(log.Node, "SendBundleSubmission sendQuicBytes(wpInfo) failed", "peer", p.Validator.Ed25519.ShortString(), "err", err)
 		return err
 	}
 	// --> Work-Package
 	pkgBytes, err := types.Encode(pkg)
 	if err != nil {
+		log.Error(log.Node, "SendBundleSubmission types.Encode(pkg) failed", "peer", p.Validator.Ed25519.ShortString(), "err", err)
 		return err
 	}
 	err = sendQuicBytes(ctx, stream, pkgBytes, p.Validator.Ed25519.String(), code)
 	if err != nil {
+		log.Error(log.Node, "SendBundleSubmission sendQuicBytes(pkg) failed", "peer", p.Validator.Ed25519.ShortString(), "err", err)
 		return err
 	}
 	// --> [Extrinsic] (Message size should equal sum of extrinsic data lengths)
@@ -133,10 +143,13 @@ func (p *Peer) SendBundleSubmission(ctx context.Context, coreIndex uint16, segme
 	if len(extrinsics) == 0 {
 		extrinsicsBytes = []byte{}
 	} else {
-		extrinsicsBytes = extrinsics.Bytes()
+		for _, blob := range extrinsics {
+			extrinsicsBytes = append(extrinsicsBytes, blob...)
+		}
 	}
 	err = sendQuicBytes(ctx, stream, extrinsicsBytes, p.Validator.Ed25519.String(), code)
 	if err != nil {
+		log.Error(log.Node, "SendBundleSubmission sendQuicBytes(extrinsics) failed", "peer", p.Validator.Ed25519.ShortString(), "err", err)
 		return err
 	}
 	// --> [Segment] (All imported segments) - sent as single concatenated message
@@ -146,6 +159,7 @@ func (p *Peer) SendBundleSubmission(ctx context.Context, coreIndex uint16, segme
 	}
 	err = sendQuicBytes(ctx, stream, allSegments, p.Validator.Ed25519.String(), code)
 	if err != nil {
+		log.Error(log.Node, "SendBundleSubmission sendQuicBytes(segments) failed", "peer", p.Validator.Ed25519.ShortString(), "err", err)
 		return err
 	}
 	// --> [Import-Proof] (Import proofs for all imported segments)
@@ -156,18 +170,22 @@ func (p *Peer) SendBundleSubmission(ctx context.Context, coreIndex uint16, segme
 	}
 	err = sendQuicBytes(ctx, stream, allImportProofs, p.Validator.Ed25519.String(), code)
 	if err != nil {
+		log.Error(log.Node, "SendBundleSubmission sendQuicBytes(importProofs) failed", "peer", p.Validator.Ed25519.ShortString(), "err", err)
 		return err
 	}
 	// --> FIN
 	stream.Close()
+	log.Info(log.Node, "SendBundleSubmission COMPLETE", "peer", p.Validator.Ed25519.ShortString(), "coreIndex", coreIndex, "wpHash", pkg.Hash().Hex())
 	return nil
 }
 
 func (n *Node) onBundleSubmission(ctx context.Context, stream quic.Stream, msg []byte, peerKey string) error {
+	log.Info(log.Node, "onBundleSubmission RECEIVED", "NODE", n.id, "peerKey", peerKey, "msgLen", len(msg))
 	defer stream.Close()
 
 	// Helper to cancel stream on error
 	cancelOnError := func(err error) error {
+		log.Error(log.Node, "onBundleSubmission cancelOnError", "NODE", n.id, "err", err)
 		stream.CancelRead(ErrInvalidData)
 		return err
 	}
@@ -187,17 +205,25 @@ func (n *Node) onBundleSubmission(ctx context.Context, stream quic.Stream, msg [
 		return cancelOnError(err)
 	}
 	pkg = pkgInterface.(types.WorkPackage)
+	log.Info(log.Node, "onBundleSubmission parsed WP", "NODE", n.id, "wpHash", pkg.Hash().Hex(), "numWorkItems", len(pkg.WorkItems))
 
 	extrinsicsBytes, err := receiveQuicBytes(ctx, stream, peerKey, uint8(CE146_WPbundlesubmission))
 	if err != nil {
 		return cancelOnError(err)
 	}
+	// Parse raw concatenated extrinsics using lengths from work package
 	var extrinsics types.ExtrinsicsBlobs
-	extrinsicsInterface, _, err := types.Decode(extrinsicsBytes, reflect.TypeOf(extrinsics))
-	if err != nil {
-		return cancelOnError(err)
+	offset := 0
+	for _, workItem := range pkg.WorkItems {
+		for _, ext := range workItem.Extrinsics {
+			extLen := int(ext.Len)
+			if offset+extLen > len(extrinsicsBytes) {
+				return cancelOnError(fmt.Errorf("extrinsics data too short: need %d bytes at offset %d, have %d total", extLen, offset, len(extrinsicsBytes)))
+			}
+			extrinsics = append(extrinsics, extrinsicsBytes[offset:offset+extLen])
+			offset += extLen
+		}
 	}
-	extrinsics = extrinsicsInterface.(types.ExtrinsicsBlobs)
 
 	// Receive all segments as single concatenated message, then split by SegmentSize
 	allSegmentsBytes, err := receiveQuicBytes(ctx, stream, peerKey, uint8(CE146_WPbundlesubmission))

@@ -205,6 +205,7 @@ type NodeContent struct {
 	txPool *TxPool
 }
 
+// TODO: add in serviceIDs
 func NewNodeContent(id uint16, store *storage.StateDBStorage, pvmBackend string) NodeContent {
 	//fmt.Printf("[N%v] NewNodeContent pvmBackend: %s\n", id, pvmBackend)
 	return NodeContent{
@@ -233,6 +234,7 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage, pvmBackend string)
 		pvmBackend:           pvmBackend,
 		telemetryClient:      telemetry.NewNoOpTelemetryClient(),
 	}
+	// TODO: create rollups for each serviceID using GetOrCreateRollup
 }
 
 // Multi-Rollup Support: Helper methods
@@ -332,6 +334,7 @@ type Node struct {
 	NodeContent
 	IsSync   bool
 	IsSyncMu sync.RWMutex
+	Role     string // "validator" or "builder"
 
 	author_status string
 
@@ -699,8 +702,9 @@ func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 	}
 }
 
-func createNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int, jceMode string) (*Node, error) {
-	return newNode(id, credential, chainspec, pvmBackend, epoch0Timestamp, peers, peerList, dataDir, port, jceMode)
+// TODO: take in serviceIDs for multi-rollup support
+func createNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int, jceMode string, role string) (*Node, error) {
+	return newNode(id, credential, chainspec, pvmBackend, epoch0Timestamp, peers, peerList, dataDir, port, jceMode, role)
 }
 
 func PrintSpec(chainspec *chainspecs.ChainSpec) error {
@@ -727,8 +731,15 @@ func PrintSpec(chainspec *chainspecs.ChainSpec) error {
 	fmt.Printf("Spec: %s\n", _statedb.JamState.String())
 	return nil
 }
-func NewNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int) (*Node, error) {
-	return createNode(id, credential, chainspec, pvmBackend, epoch0Timestamp, peers, peerList, dataDir, port, JCEDefault)
+
+// TODO: take in serviceIDs for multi-rollup support
+func NewNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int, role string) (*Node, error) {
+	return createNode(id, credential, chainspec, pvmBackend, epoch0Timestamp, peers, peerList, dataDir, port, JCEDefault, role)
+}
+
+// IsBuilder returns true if this node is running in builder/full-node mode
+func (n *Node) IsBuilder() bool {
+	return n.Role == types.RoleBuilder
 }
 
 func StandardizePVMBackend(pvm_mode string) string {
@@ -759,9 +770,10 @@ func (n *Node) SetPVMBackend(pvm_mode string) {
 	log.Trace(log.Node, fmt.Sprintf("PVM Backend: [%s]", pvmBackend))
 }
 
-func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, epoch0Timestamp uint64, peers []string, startPeerList map[uint16]*Peer, dataDir string, port int, jceMode string) (*Node, error) {
+// TODO: take in serviceIDs for multi-rollup support
+func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, epoch0Timestamp uint64, peers []string, startPeerList map[uint16]*Peer, dataDir string, port int, jceMode string, role string) (*Node, error) {
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
-	log.Info(log.Node, fmt.Sprintf("NewNode [N%v]", id), "spec", chainspec.ID, "addr", addr, "dataDir", dataDir)
+	log.Info(log.Node, fmt.Sprintf("NewNode [N%v]", id), "spec", chainspec.ID, "addr", addr, "dataDir", dataDir, "role", role)
 	//REQUIRED FOR CAPTURING JOBID. DO NOT DELETE THIS LINE!!
 	fmt.Printf("[N%v] addr=%v, dataDir=%v\n", id, addr, dataDir) //REQUIRED FOR CAPTURING JOBID. DO NOT DELETE THIS LINE!!
 	//REQUIRED FOR CAPTURING JOBID. DO NOT DELETE THIS LINE!!
@@ -774,9 +786,12 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 	if err != nil {
 		return nil, fmt.Errorf("error generating self-signed certificate: %v", err)
 	}
+	// Builder nodes start as not synced so they will initiate sync with validators
+	initialSyncStatus := role != types.RoleBuilder
 	node := &Node{
 		NodeContent: NewNodeContent(id, nil, StandardizePVMBackend(pvmBackend)),
-		IsSync:      true,
+		IsSync:      initialSyncStatus,
+		Role:        role,
 		peers:       peers,
 		clients:     make(map[string]string),
 
@@ -935,6 +950,17 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 		node.clients[p.PeerAddr] = p.Validator.Ed25519.String()
 	}
 	node.clientsMutex.Unlock()
+	// Builder nodes should prefer the /builder ALPN suffix
+	// when initiating connections, per JAMNP-S spec.
+	// List both protocols so we can connect to validators that may not support /builder yet
+	var clientNextProtos []string
+	if role == types.RoleBuilder {
+		// Prefer /builder but also accept regular alpn for compatibility
+		clientNextProtos = []string{alpn_builder, alpn}
+		log.Info(log.Node, "Builder node using /builder ALPN (with fallback)", "id", id, "alpn", alpn_builder)
+	} else {
+		clientNextProtos = []string{alpn}
+	}
 	clientTLS := &tls.Config{
 		Certificates:       []tls.Certificate{cert},
 		InsecureSkipVerify: true,
@@ -972,7 +998,7 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 			log.Trace(log.Node, "VerifyPeerCertificate2 SUCCESS", "expectedSAN", expectedSAN, "cert.DNSNames", cert.DNSNames)
 			return nil
 		},
-		NextProtos: []string{alpn, alpn_builder},
+		NextProtos: clientNextProtos,
 	}
 	node.clientTLSConfig = clientTLS
 	log.Info(log.Node, "ListenAddr", "addr", addr)
@@ -1022,8 +1048,9 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 	node.setValidatorCredential(credential)
 	node.epoch0Timestamp = epoch0Timestamp
 
-	// DISABLED FOR NOW
-	if enableInit && !node.GetIsSync() {
+	// Enable initial sync for builder nodes or when enableInit is set
+	isBuilderNode := role == types.RoleBuilder
+	if (enableInit || isBuilderNode) && !node.GetIsSync() {
 		ctx, cancel := context.WithTimeout(context.Background(), VeryLargeTimeout)
 		defer cancel()
 		// Collect peers into a slice for random selection
@@ -1035,44 +1062,117 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 			}
 		}
 		if len(peers) == 0 {
-			log.Error(log.Node, "newNode: no peers available for sync")
-			return nil, fmt.Errorf("no peers available for sync")
-		}
-		randomselectedPeer := rand0.Intn(len(peers))
-		peer := peers[randomselectedPeer]
-		last_finalized := node.block_tree.GetLastFinalizedBlock()
-		block_header_hash := last_finalized.Block.Header.HeaderHash()
-		blocks, err := peer.GetMultiBlocks(block_header_hash, ctx)
-		if err != nil {
-			log.Error(log.Node, "GetMultiBlocks", "err", err, "hash", block_header_hash)
-			return nil, err
-		}
-		if len(blocks) == 0 {
-			log.Error(log.Node, "GetMultiBlocks", "blocks", blocks)
-			return nil, fmt.Errorf("GetMultiBlocks: no blocks")
-		}
-		for _, block := range blocks {
-			err := node.processBlock(&block)
-			if err != nil {
-				log.Error(log.Node, "processBlock", "err", err)
-				return nil, err
+			if isBuilderNode {
+				log.Info(log.Node, "Builder node starting without peers (standalone mode)")
+				node.SetIsSync(false, "builder standalone")
+			} else {
+				log.Error(log.Node, "newNode: no peers available for sync")
+				return nil, fmt.Errorf("no peers available for sync")
 			}
-			log.Info(log.Node, "newNode:processBlock", "block_hash", block.Header.HeaderHash().Hex())
+		} else if isBuilderNode {
+			log.Info(log.Node, "Builder node starting initial sync", "id", id, "numPeers", len(peers))
 		}
-		log.Info(log.Node, "newNode:extendChain", "block_hash", blocks[len(blocks)-1].Header.HeaderHash().Hex())
-		node.extendChain(ctx)
-	}
 
+		if len(peers) > 0 {
+			// For builder nodes, prefer connecting to the highest validator index (most likely to be jamduna)
+			// since polkajam may not accept builder connections
+			var peer *Peer
+			if isBuilderNode {
+				// Try validators in descending order (5, 4, 3...) to find a jamduna node first
+				for i := len(peers) - 1; i >= 0; i-- {
+					if peers[i].PeerID == uint16(types.TotalValidators-1) { // Validator 5
+						peer = peers[i]
+						log.Info(log.Node, "Builder: preferring validator 5 (jamduna) for initial sync", "peerID", peer.PeerID)
+						break
+					}
+				}
+				if peer == nil {
+					peer = peers[rand0.Intn(len(peers))]
+				}
+			} else {
+				peer = peers[rand0.Intn(len(peers))]
+			}
+			last_finalized := node.block_tree.GetLastFinalizedBlock()
+			block_header_hash := last_finalized.Block.Header.HeaderHash()
+
+			// For builder nodes, retry a few times if no blocks are available
+			// (the validator we're connecting to might still be syncing)
+			maxRetries := 1
+			if isBuilderNode {
+				maxRetries = 5
+			}
+			var blocks []types.Block
+			for retry := 0; retry < maxRetries; retry++ {
+				blocks, err = peer.GetMultiBlocks(block_header_hash, ctx)
+				if err != nil {
+					log.Error(log.Node, "GetMultiBlocks", "err", err, "hash", block_header_hash, "retry", retry)
+					if !isBuilderNode {
+						return nil, err
+					}
+					// Builder: wait and retry
+					time.Sleep(2 * time.Second)
+					continue
+				}
+				if len(blocks) > 0 {
+					break
+				}
+				if isBuilderNode && retry < maxRetries-1 {
+					log.Info(log.Node, "Builder: no blocks yet, waiting for validator to sync", "retry", retry+1, "maxRetries", maxRetries)
+					time.Sleep(2 * time.Second)
+				}
+			}
+
+			// For builder nodes, it's OK to start with no blocks - we'll sync via block announcements
+			if len(blocks) == 0 {
+				if isBuilderNode {
+					log.Info(log.Node, "Builder: starting without initial blocks, will sync via announcements")
+					node.SetIsSync(false, "builder waiting for blocks")
+				} else {
+					log.Error(log.Node, "GetMultiBlocks", "blocks", blocks)
+					return nil, fmt.Errorf("GetMultiBlocks: no blocks")
+				}
+			} else {
+				for _, block := range blocks {
+					err := node.processBlock(&block)
+					if err != nil {
+						log.Error(log.Node, "processBlock", "err", err)
+						return nil, err
+					}
+					log.Trace(log.Node, "newNode:processBlock", "block_hash", block.Header.HeaderHash().Hex())
+				}
+				log.Info(log.Node, "newNode:extendChain", "block_hash", blocks[len(blocks)-1].Header.HeaderHash().Hex())
+				node.extendChain(ctx)
+			}
+
+			// For builder nodes, establish block announcement streams to receive ongoing updates
+			if isBuilderNode {
+				log.Info(log.Node, "Builder: initializing block announcement streams")
+				for _, peer := range node.peersByPubKey {
+					go func(peer *Peer) {
+						ctx, cancel := context.WithTimeout(context.Background(), MediumTimeout)
+						defer cancel()
+						_, err := peer.GetOrInitBlockAnnouncementStream(ctx)
+						if err != nil {
+							log.Warn(log.Node, "Builder: failed to init block announcement stream", "peer", peer.Validator.Ed25519.ShortString(), "err", err)
+						} else {
+							log.Info(log.Node, "Builder: block announcement stream established", "peer", peer.Validator.Ed25519.ShortString())
+						}
+					}(peer)
+				}
+			}
+		}
+
+	}
 	go node.runAuthoring()
 	go node.runGuarantees()
 	go node.runAssurances()
 	go node.runWorkReports()
 	go node.runBlocksTickets()
 	go node.runReceiveBlock()
-	go node.StartRPCServer(int(id))
+	go node.StartRPCServer(int(id)) // for role=builder, should take a set of serviceids that the builder is building
 	go node.RunRPCCommand()
 	go node.runWPQueue()
-	if Audit {
+	if Audit && !node.IsBuilder() {
 		node.AuditFlag = true
 		go node.runAudit() // disable this to pause FetchWorkPackageBundle, if we disable this grandpa will not work
 		go node.runAuditAnnouncementJudgement()
@@ -1094,13 +1194,14 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 		go node.grandpa.RunManager()
 	}
 	// we need to organize the /ws usage to avoid conflicts
-	if node.id == 5 { // HACK
+	// Enable WebSocket for N5 (last validator) and N6 (builder node)
+	if node.id == DunaLastValidatorNode || node.id == DunaBuilderNode {
 		wg := &sync.WaitGroup{}
 		wg.Add(1)
 		go node.runJamWeb(context.Background(), wg, uint16(19800)+id, port) // TODO: setup default WS
 		go func() {
 			wg.Wait()
-			log.Info("jamweb", "Node 0", "shutdown complete")
+			log.Info("jamweb", fmt.Sprintf("Node %d", node.id), "shutdown complete")
 		}()
 	}
 
@@ -1957,7 +2058,7 @@ func (n *Node) handleConnection(conn quic.Connection) {
 
 	validatorIndex, ok := n.lookupPubKey(pubKey)
 	if !ok {
-		log.Info(log.Node, "handleConnection - found n.clients but unknown pubkey", "remoteAddr", remoteAddr, "port", port, "pubKey", pubKey)
+		log.Info(log.Node, "handleConnection - found n.clients but unknown pubkey (builder/full node)", "remoteAddr", remoteAddr, "port", port, "pubKey", pubKey)
 		validatorIndex = 9999
 		// remoteAddr change the port to 13000
 		// see how many number from the end
@@ -1968,9 +2069,27 @@ func (n *Node) handleConnection(conn quic.Connection) {
 		}
 		newAddr := net.JoinHostPort(host, "13370")
 		if _, ok := n.peersByPubKey[pubKey]; !ok {
-			peer := NewPeer(n, uint16(validatorIndex), types.Validator{}, newAddr)
+			// Create a Validator struct with the Ed25519 key set from the pubKey
+			// This is needed for broadcast() to properly identify the peer
+			builderValidator := types.Validator{}
+			pubKeyBytes := common.FromHex(pubKey)
+			if len(pubKeyBytes) == 32 {
+				copy(builderValidator.Ed25519[:], pubKeyBytes)
+			}
+			peer := NewPeer(n, uint16(validatorIndex), builderValidator, newAddr)
+			// Store the connection on the peer so we can send blocks to it
+			peer.connectionMu.Lock()
+			peer.conn = conn
+			peer.connectionMu.Unlock()
 			n.peersByPubKey[pubKey] = peer
-			log.Debug(log.Quic, "handleConnection: Non-Validator peer", "validatorIndex", validatorIndex, "pubKey", pubKey, "remoteAddr", remoteAddr, "newAddr", newAddr)
+			log.Debug(log.Quic, "handleConnection: Non-Validator peer (builder/full node) connected", "validatorIndex", validatorIndex, "pubKey", pubKey, "ed25519", builderValidator.Ed25519.ShortString(), "remoteAddr", remoteAddr, "newAddr", newAddr)
+		} else {
+			// Peer already exists, update its connection
+			peer := n.peersByPubKey[pubKey]
+			peer.connectionMu.Lock()
+			peer.conn = conn
+			peer.connectionMu.Unlock()
+			log.Debug(log.Quic, "handleConnection: Non-Validator peer connection updated", "pubKey", pubKey, "remoteAddr", remoteAddr)
 		}
 
 	} else {
@@ -2076,7 +2195,10 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}, evID ...uin
 
 	for _, p := range n.peersByPubKey {
 		// Derive peer's current validator index from their Ed25519 key (not stale PeerID)
-		peerCurrentIdx := uint16(sf.GetCurrValidatorIndex(p.Validator.Ed25519))
+		// Returns -1 for non-validators (builders/full nodes)
+		peerValidatorIdx := sf.GetCurrValidatorIndex(p.Validator.Ed25519)
+		isBuilderPeer := peerValidatorIdx < 0
+		peerCurrentIdx := uint16(peerValidatorIdx) // Will be 65535 for builders, but only used if !isBuilderPeer
 
 		if p.Validator.Ed25519 == n.credential.Ed25519Pub {
 			switch objType {
@@ -2120,9 +2242,10 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}, evID ...uin
 				b := obj.(JAMSNP_BlockAnnounce)
 				h := b.Header.Hash()
 
-				//TODO: what's the difference between block and block announcement case?
-				if !isGridNeighbor(selfCurrentIdx, peerCurrentIdx) {
-					log.Trace(log.Quic, "Skip Block Broadcast AAAA - NOT GRID NEIGHBOR", "n(self)", n.String(), "peer.ID", peerCurrentIdx)
+				// Grid check only applies to validator-to-validator communication
+				// Builders/full nodes are not constrained by grid topology per JAMNP spec
+				if !isBuilderPeer && !isGridNeighbor(selfCurrentIdx, peerCurrentIdx) {
+					log.Trace(log.Quic, "Skip Block Broadcast - NOT GRID NEIGHBOR", "n(self)", n.String(), "peer.ID", peerCurrentIdx)
 					return
 				}
 
@@ -3443,7 +3566,7 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 		panic("ApplyBlock: TimeSlot mismatch")
 	}
 	if latest_block_info == nil {
-		log.Info(log.B, "ApplyBlock: latest_block_info is nil", "n", n.String())
+		log.Trace(log.B, "ApplyBlock: latest_block_info is nil", "n", n.String())
 		return nil
 	}
 	if nextBlock.Header.Hash() == latest_block_info.HeaderHash {
@@ -3515,6 +3638,8 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 var cpu_flag = false
 
 func (n *Node) assureNewBlock(ctx context.Context, b *types.Block, sdb *statedb.StateDB) error {
+	// Broadcast to WebSocket clients BEFORE early return for builders
+	// This ensures non-validator nodes (like N6) still send work package status updates
 	if n.hub != nil {
 		finalizedBlockNode := n.block_tree.GetLastFinalizedBlock()
 		finalizedBlock := finalizedBlockNode.Block
@@ -3523,15 +3648,23 @@ func (n *Node) assureNewBlock(ctx context.Context, b *types.Block, sdb *statedb.
 		go n.hub.ReceiveLatestBlock(finalizedBlock, bestBlock, sdb, false)
 	}
 
+	// Store work reports BEFORE early return - all nodes need these for RPC queries
+	for _, g := range b.Extrinsic.Guarantees {
+		if err := n.StoreWorkReport(g.Report); err != nil {
+			log.Error(log.DA, "assureNewBlock: StoreWorkReport failed", "n", n.String(), "err", err)
+		}
+	}
+
+	// Builder/full nodes don't participate in assurance (EA)
+	if n.IsBuilder() {
+		return nil
+	}
+
 	if len(b.Extrinsic.Guarantees) > 0 {
 		var wg sync.WaitGroup
 		errCh := make(chan error, len(b.Extrinsic.Guarantees))
 
 		for _, g := range b.Extrinsic.Guarantees {
-			// First, store the work report (independent of assurance)
-			if err := n.StoreWorkReport(g.Report); err != nil {
-				log.Error(log.DA, "assureNewBlock: StoreWorkReport failed", "n", n.String(), "err", err)
-			}
 
 			wg.Add(1)
 			go func(g types.Guarantee) {

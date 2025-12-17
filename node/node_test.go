@@ -134,6 +134,45 @@ func GenerateRandomBasePort() uint16 {
 	return basePort
 }
 
+// Create builder node with RoleBuilder
+func NewBuilder(numNodes int, basePort uint16) (*Node, error) {
+	dir := "/tmp/jam_builder"
+	// Clean up builder directory to ensure fresh genesis state
+	os.RemoveAll(dir)
+	builderIndex := uint16(numNodes)
+
+	chainSpec, err := chainspecs.ReadSpec(types.Network)
+	if err != nil {
+		return nil, err
+	}
+
+	// Generate a validator secret for the builder
+	_, builderSecrets, err := grandpa.GenerateValidatorSecretSet(7)
+	if err != nil {
+		return nil, err
+	}
+
+	builderPeers := make([]string, types.TotalValidators)
+	builderPeerList := make(map[uint16]*Peer)
+	validators, _, err := grandpa.GenerateValidatorSecretSet(types.TotalValidators)
+	if err != nil {
+		return nil, err
+	}
+	for i := uint16(0); i < uint16(numNodes); i++ {
+		addr := fmt.Sprintf("127.0.0.1:%d", basePort+i)
+		builderPeers[i] = addr
+		builderPeerList[i] = &Peer{
+			PeerID:    i,
+			PeerAddr:  addr,
+			Validator: validators[i],
+		}
+	}
+	builder, err := newNode(builderIndex, builderSecrets[builderIndex], chainSpec, *pvmBackend,
+		statedb.NewEpoch0Timestamp(), builderPeers, builderPeerList,
+		dir, int(basePort+builderIndex), JCEDefault, types.RoleBuilder)
+	return builder, err
+}
+
 func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) {
 	chainSpec, err := chainspecs.ReadSpec(types.Network)
 	if err != nil {
@@ -150,7 +189,7 @@ func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
 		pvmBackend := statedb.BackendInterpreter
-		node, err := newNode(uint16(i), validatorSecrets[i], chainSpec, pvmBackend, epoch0Timestamp, peers, peerList, nodePaths[i], int(basePort)+i, jceMode)
+		node, err := newNode(uint16(i), validatorSecrets[i], chainSpec, pvmBackend, epoch0Timestamp, peers, peerList, nodePaths[i], int(basePort)+i, jceMode, types.RoleValidator)
 		if err != nil {
 			return nil, err
 		}
@@ -409,8 +448,14 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		safrole(jceManager)
 		waitForTermination(tNode, "fallback", FallbackEpochLen, FallbackBufferTime, t)
 	case "evm":
+		builder, err := NewBuilder(numNodes, 40000)
+		if err != nil {
+			t.Fatalf("Failed to create builder node: %v", err)
+		}
 		if *jam_node {
-			evm(bNode, nodes, testServices, 30)
+			evm(bNode, builder, testServices, 30)
+		} else {
+			evm(bNode, builder, testServices, 30)
 		}
 	case "algo":
 		algo(bNode, testServices, targetN)
@@ -534,48 +579,38 @@ func primeEVMGenesis(storage *stateStorage.StateDBStorage, serviceID uint32, sta
 	return nil
 }
 
-func evm(n1 JNode, nodes []*Node, testServices map[string]*types.TestService, targetN int) {
+func evm(n1 JNode, builder *Node, testServices map[string]*types.TestService, targetN int) {
 
 	evm_serviceIdx := uint32(statedb.EVMServiceCode)
 
-	// Get the node to access its rollup instances
-	node, ok := n1.(*Node)
+	// Prime EVM issuer balance/nonce for service 0 without resetting JAM state
+	log.Info(log.Node, "Priming EVM genesis on all nodes", "numNodes", numNodes)
+
+	storageIface, err := builder.GetStorage()
+	if err != nil {
+		log.Error(log.Node, "GetStorage failed", "err", err)
+		return
+	}
+	sdb, ok := storageIface.(*stateStorage.StateDBStorage)
 	if !ok {
-		log.Error(log.Node, "n1 is not a *Node")
+		log.Error(log.Node, "Storage type assertion failed", "type", fmt.Sprintf("%T", storageIface))
 		return
 	}
 
-	numNodes := len(nodes)
-
-	// Prime EVM issuer balance/nonce for service 0 without resetting JAM state
-	log.Info(log.Node, "Priming EVM genesis on all nodes", "numNodes", numNodes)
-	for i, testNode := range nodes {
-		storageIface, err := testNode.GetStorage()
-		if err != nil {
-			log.Error(log.Node, "GetStorage failed", "nodeIdx", i, "err", err)
-			return
-		}
-		sdb, ok := storageIface.(*stateStorage.StateDBStorage)
-		if !ok {
-			log.Error(log.Node, "Storage type assertion failed", "nodeIdx", i, "type", fmt.Sprintf("%T", storageIface))
-			return
-		}
-
-		if err := primeEVMGenesis(sdb, evm_serviceIdx, 61_000_000); err != nil {
-			log.Error(log.Node, "primeEVMGenesis failed", "nodeIdx", i, "err", err)
-			return
-		}
-
-		// Create Rollup instance and add to node's rollups map
-		rollup, err := statedb.NewRollup(storageIface, evm_serviceIdx, testNode)
-		if err != nil {
-			log.Error(log.Node, "NewRollup failed", "nodeIdx", i, "err", err)
-			return
-		}
-		testNode.rollupsMutex.Lock()
-		testNode.rollups[evm_serviceIdx] = rollup
-		testNode.rollupsMutex.Unlock()
+	if err := primeEVMGenesis(sdb, evm_serviceIdx, 61_000_000); err != nil {
+		log.Error(log.Node, "primeEVMGenesis failed", "err", err)
+		return
 	}
+
+	// Create Rollup instance and add to node's rollups map
+	rollup, err := statedb.NewRollup(storageIface, evm_serviceIdx, builder)
+	if err != nil {
+		log.Error(log.Node, "NewRollup failed", "err", err)
+		return
+	}
+	builder.rollupsMutex.Lock()
+	builder.rollups[evm_serviceIdx] = rollup
+	builder.rollupsMutex.Unlock()
 
 	// Track balances across iterations
 	const numAccounts = 11 // 10 dev accounts + 1 coinbase
@@ -591,8 +626,6 @@ func evm(n1 JNode, nodes []*Node, testServices map[string]*types.TestService, ta
 	}
 	accounts[10] = coinbaseAddress
 
-	// Initialize previous balances from genesis state
-	rollup := node.rollups[evm_serviceIdx]
 	for i := 0; i < numAccounts; i++ {
 		balanceHash, err := rollup.GetBalance(accounts[i], "latest")
 		if err != nil {
@@ -751,7 +784,7 @@ func evm(n1 JNode, nodes []*Node, testServices map[string]*types.TestService, ta
 			}
 		}
 
-		service, ok, err := node.GetService(evm_serviceIdx)
+		service, ok, err := builder.GetService(evm_serviceIdx)
 		if err != nil || !ok {
 			log.Error(log.Node, "GetService failed", "err", err)
 			return
@@ -770,7 +803,7 @@ func evm(n1 JNode, nodes []*Node, testServices map[string]*types.TestService, ta
 
 		// Create work package
 		wp := statedb.DefaultWorkPackage(evm_serviceIdx, service)
-		refineContext, err := node.GetRefineContext()
+		refineContext, err := builder.GetRefineContext()
 		if err != nil {
 			log.Error(log.Node, "GetRefineContext failed", "err", err)
 			return
@@ -781,13 +814,13 @@ func evm(n1 JNode, nodes []*Node, testServices map[string]*types.TestService, ta
 		wp.WorkItems[0].Payload = statedb.BuildPayload(statedb.PayloadTypeBuilder, len(txBytes), globalDepth, 0, common.Hash{})
 
 		// Build bundle using node's BuildBundle method
-		bundle, _, err := node.BuildBundle(wp, []types.ExtrinsicsBlobs{blobs}, 0, nil)
+		bundle, _, err := builder.BuildBundle(wp, []types.ExtrinsicsBlobs{blobs}, 0, nil)
 		if err != nil {
 			log.Error(log.Node, "BuildBundle failed", "err", err)
 			continue
 		}
 		bundles := []*types.WorkPackageBundle{bundle}
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout*maxRobustTries)
 		defer cancel()
 
 		stateRoots, timeslots, err := RobustSubmitAndWaitForWorkPackageBundles(ctx, n1, bundles)

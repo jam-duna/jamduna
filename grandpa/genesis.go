@@ -74,7 +74,6 @@ func InitValidatorSecret(bandersnatch_seed, ed25519_seed, bls_seed []byte, metad
 }
 
 func GenerateValidatorSecretSetToPath(numNodes int, save bool, dataDir ...string) ([]types.Validator, []types.ValidatorSecret, error) {
-
 	seeds, _ := GenerateSeedSet(numNodes)
 	validators := make([]types.Validator, numNodes)
 	validatorSecrets := make([]types.ValidatorSecret, numNodes)
@@ -91,7 +90,6 @@ func GenerateValidatorSecretSetToPath(numNodes int, save bool, dataDir ...string
 			}
 			if save {
 				seedFile := filepath.Join(keyDir, fmt.Sprintf("seed_%d", i))
-
 				if _, err := os.Stat(seedFile); os.IsNotExist(err) {
 					// create the file
 					f, err := os.Create(seedFile)
@@ -103,7 +101,6 @@ func GenerateValidatorSecretSetToPath(numNodes int, save bool, dataDir ...string
 					if err != nil {
 						return validators, validatorSecrets, fmt.Errorf("failed to write seed to file %s", seedFile)
 					}
-					fmt.Printf("Seed file %s created\n", seedFile)
 					f.Close()
 				}
 

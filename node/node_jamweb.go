@@ -45,6 +45,7 @@ type SubscriptionRequest struct {
 func (h *Hub) ReceiveLatestBlock(FinalizedBlock *types.Block, BestBlock *types.Block, sdb *statedb.StateDB, isFinalized bool) (err error) {
 	var data []byte
 	update := sdb.GetStateUpdates()
+	log.Trace(log.Web, "ReceiveLatestBlock", "numClients", len(h.clients), "numWorkPackageUpdates", len(update.WorkPackageUpdates), "slot", sdb.GetTimeslot())
 	for client := range h.clients {
 		log.Trace(log.Web, "ReceiveLatestBlock", "clientsubs", client.String())
 		if client.BestBlock != nil {
@@ -91,8 +92,10 @@ func (h *Hub) ReceiveLatestBlock(FinalizedBlock *types.Block, BestBlock *types.B
 		}
 		for wph, req := range client.WorkPackages {
 			if req != nil {
+				log.Trace(log.Web, "ReceiveLatestBlock: checking WorkPackage subscription", "wph", wph.Hex(), "numUpdates", len(update.WorkPackageUpdates))
 				res, ok := update.WorkPackageUpdates[wph]
 				if !ok || res == nil {
+					log.Info(log.Web, "ReceiveLatestBlock: WorkPackage NOT in updates", "wph", wph.Hex())
 					continue
 				}
 				payload := types.WSPayload{

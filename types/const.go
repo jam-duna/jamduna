@@ -32,6 +32,12 @@ const (
 	JamCommonEra = 1735732800 //1200 UTC on January 1, 2025
 )
 
+// Node roles
+const (
+	RoleValidator = "validator" // Participates in consensus (EG, EA, audit, judgements)
+	RoleBuilder   = "builder"   // Full node that syncs blocks but doesn't participate in consensus
+)
+
 const (
 	SecondsPerEpoch = EpochLength * SecondsPerSlot
 )

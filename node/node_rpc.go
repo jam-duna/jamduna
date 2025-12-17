@@ -42,7 +42,7 @@ var MethodDescriptionMap = map[string]string{
 	"FetchState129":  "FetchState129(headerHash hexstring) -> json {stateRoot, numKVs, match, stf}",
 	"VerifyState129": "VerifyState129(headerHash hexstring) -> json {stateRoot, numKVs, match} (no stf)",
 
-	"Block": "Block(headerHash hexstring) -> string",
+	"Block":                "Block(headerHash hexstring) -> string",
 	"BestBlock":            "BestBlock(headerHash hexstring) -> string",
 	"FinalizedBlock":       "FinalizedBlock(headerHash hexstring) -> string",
 	"LatestFinalizedBlock": "LatestFinalizedBlock() -> string",
@@ -1057,11 +1057,11 @@ func (n *Node) StartRPCServer(validatorIndex int) {
 
 func (n *NodeContent) startRPCServerImpl(validatorIndex int, node JNode) {
 	jam := new(Jam)
+	jam.serviceID = statedb.EVMServiceCode
 	jam.NodeContent = n
 	jam.node = node
 	// register the rpc methods
 	rpc.RegisterName("jam", jam)
-	// register ethereum rpc methods with eth_ prefix
 	rpc.RegisterName("eth", jam)
 
 	// Start TCP RPC server

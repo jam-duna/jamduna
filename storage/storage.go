@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"reflect"
 	"sync"
 
@@ -148,14 +149,24 @@ const (
 // NewStateDBStorage initializes a new LevelDB store
 // Uses memory-based storage if useMemory is true, otherwise uses file-based storage
 func NewStateDBStorage(path string, jamda types.JAMDA, telemetryClient types.TelemetryClient, nodeID uint16) (*StateDBStorage, error) {
+	// Ensure the directory exists before opening LevelDB
+	if err := os.MkdirAll(path, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create leveldb directory %s: %w", path, err)
+	}
+
+	log.Info(log.Node, "NewStateDBStorage: opening LevelDB", "path", path, "nodeID", nodeID)
+
 	db, err := leveldb.OpenFile(path, nil)
 	if err != nil {
+		log.Warn(log.Node, "NewStateDBStorage: LevelDB open failed, using memory storage", "path", path, "err", err)
 		// Fallback to memory storage if file fails
 		memStorage := leveldbstorage.NewMemStorage()
 		db, err = leveldb.Open(memStorage, nil)
 		if err != nil {
 			return nil, err
 		}
+	} else {
+		log.Info(log.Node, "NewStateDBStorage: LevelDB opened successfully", "path", path)
 	}
 
 	// Create empty trie database

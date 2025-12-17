@@ -514,7 +514,7 @@ func (r *Rollup) GetEVMBlockByNumber(blockNumberStr string) (*evmtypes.EvmBlockP
 	// 1. Parse and resolve the block number
 	var targetBlockNumber uint32
 	var err error
-
+	log.Info(log.Node, "GetEVMBlockByNumber: Fetching block", "blockNumberStr", blockNumberStr)
 	switch blockNumberStr {
 	case "latest":
 		targetBlockNumber, err = r.GetLatestBlockNumber()
@@ -540,6 +540,7 @@ func (r *Rollup) GetEVMBlockByNumber(blockNumberStr string) (*evmtypes.EvmBlockP
 	}
 
 	// 2. Read canonical block metadata from storage
+	log.Info(log.Node, "GetEVMBlockByNumber: Fetching block", "targetBlockNumber", targetBlockNumber)
 	return r.ReadBlockByNumber(targetBlockNumber)
 }
 
@@ -555,13 +556,14 @@ func CreateSignedUSDMTransfer(privateKeyHex string, nonce uint64, to common.Addr
 
 func (r *Rollup) ReadBlockByNumber(blockNumber uint32) (*evmtypes.EvmBlockPayload, error) {
 	objectID := evmtypes.BlockNumberToObjectID(blockNumber)
-
 	// Read objectID key to get blockNumber => wph (32 bytes) + timestamp (4 bytes) + segment_root (32 bytes) mapping
 	valueBytes, found, err := r.GetStateDB().ReadServiceStorage(r.serviceID, objectID.Bytes())
 	if err != nil {
+		log.Error(log.Node, "ReadBlockByNumber: Failed to read block number mapping", "blockNumber", blockNumber, "error", err)
 		return nil, fmt.Errorf("failed to read block number mapping: %v", err)
 	}
 
+	fmt.Printf("ReadBlockByNumber: blockNumber=%d objectID=%s %x\n", blockNumber, objectID.String(), valueBytes)
 	if !found || len(valueBytes) < 68 {
 		return nil, fmt.Errorf("block %d [%s] not found %d", blockNumber, objectID, len(valueBytes))
 	}

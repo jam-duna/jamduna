@@ -986,6 +986,11 @@ func (n *Node) MakeJudgementWithStateDB(workreport types.WorkReport, auditPass b
 // put it in the audit announcement bucket
 // thus we can check if there is someone absent
 func (n *Node) processAuditAnnouncement(auditAnnouncementObj AuditAnnouncementObj) error {
+	// Builder/full nodes don't participate in audit
+	if n.IsBuilder() {
+		return nil
+	}
+
 	headerHash := auditAnnouncementObj.HeaderHash
 	s, err := n.getAuditingStateDB(headerHash)
 	if err != nil {
@@ -1097,6 +1102,11 @@ func (n *Node) processAuditAnnouncement(auditAnnouncementObj AuditAnnouncementOb
 // if it's full set, we should check if there is a bad judgement
 // if so, we should make a dispute extrinsic by checking we have the judgement or not
 func (n *Node) processJudgement(judgement types.Judgement) error {
+	// Builder/full nodes don't participate in judgement
+	if n.IsBuilder() {
+		return nil
+	}
+
 	headerHash, err := n.getHeadHashFromWorkReportHash(judgement.WorkReportHash)
 	if !n.checkAuditTrancheAnnouncement(headerHash) || err != nil {
 		n.waitingJudgementsMutex.Lock()

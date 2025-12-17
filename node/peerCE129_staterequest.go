@@ -375,7 +375,7 @@ func (n *NodeContent) onStateRequest(ctx context.Context, stream quic.Stream, ms
 		return fmt.Errorf("onStateRequest: failed to send keyvalues: %w", err)
 	}
 
-	log.Info(log.Node, "onStateRequest: success",
+	log.Trace(log.Node, "onStateRequest: success",
 		"headerHash", req.HeaderHash.Hex(),
 		"numKeyValues", len(keyvalues.Items),
 		"kvBytesLen", len(kvbytes))

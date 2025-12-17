@@ -152,6 +152,10 @@ spin_0:
 		RUST_LOG=polkavm=trace,jam_node=trace $(POLKAJAM_BIN) --chain ${CHAINSPEC} run --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
 	done
 
+run_builder:
+	@rm -rf ${HOME}/.jamduna/jam-*
+	@$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator 6 --role builder --rpc-port=19806 --chain ${CHAINSPEC} --pvm-backend $(PVM_BACKEND) --debug rotation,guarantees
+
 run_1:
 	@rm -rf ${HOME}/.jamduna/jam-*
 	@$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator 5 --rpc-port=19805 --chain ${CHAINSPEC} --pvm-backend $(PVM_BACKEND) --debug rotation,guarantees

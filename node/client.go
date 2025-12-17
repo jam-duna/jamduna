@@ -436,6 +436,7 @@ func (c *NodeClient) GetRefineContext() (types.RefineContext, error) {
 // WORK PACKAGE
 func (c *NodeClient) SubmitWorkPackage(workPackageReq *types.WorkPackageBundle) error {
 	// Marshal the WorkPackageBundle to JSON
+	log.Info(log.Node, "!!!!! NodeClient SubmitWorkPackage", "workPackageReq", workPackageReq)
 	reqBytes, err := json.Marshal(workPackageReq)
 	if err != nil {
 		log.Warn(log.Node, "SubmitWorkPackage", "err", err)
@@ -464,7 +465,7 @@ func (c *NodeClient) SubmitAndWaitForWorkPackageBundle(ctx context.Context, work
 }
 
 func (c *NodeClient) SubmitAndWaitForWorkPackageBundles(ctx context.Context, reqs []*types.WorkPackageBundle) ([]common.Hash, []uint32, error) {
-	log.Info(log.Node, "NodeClient SubmitAndWaitForWorkPackageBundles", "reqLen", len(reqs))
+	log.Info(log.Node, "!!!!! NodeClient SubmitAndWaitForWorkPackageBundles", "reqLen", len(reqs))
 	workPackageHashes := make([]common.Hash, len(reqs))
 	stateRoots := make([]common.Hash, len(reqs))
 	timeslots := make([]uint32, len(reqs))
@@ -713,7 +714,7 @@ func (nc *NodeClient) GetBuildVersion() (string, error) {
 // SERVICE
 func (c *NodeClient) GetService(serviceID uint32) (sa *types.ServiceAccount, ok bool, err error) {
 	var jsonStr string
-	err = c.CallWithRetry("jam.Service", []string{}, &jsonStr)
+	err = c.CallWithRetry("jam.ServiceInfo", []string{fmt.Sprintf("%d", serviceID)}, &jsonStr)
 	if err != nil {
 		return &types.ServiceAccount{}, false, err
 	}
@@ -721,7 +722,7 @@ func (c *NodeClient) GetService(serviceID uint32) (sa *types.ServiceAccount, ok 
 	var service types.ServiceAccount
 	err = json.Unmarshal([]byte(jsonStr), &service)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to unmarshal refine context: %w", err)
+		return nil, false, fmt.Errorf("failed to unmarshal service info: %w", err)
 	}
 	return &service, true, nil
 
@@ -797,6 +798,7 @@ func (c *NodeClient) FetchJAMDASegments(workPackageHash common.Hash, indexStart 
 }
 
 func (c *NodeClient) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
+	panic(111)
 	return nil, nil, fmt.Errorf("BuildBundle not supported for remote NodeClient connections yet")
 }
 

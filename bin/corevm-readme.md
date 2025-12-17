@@ -30,7 +30,7 @@ Running `doom.corevm` should be straighforward while `doom-with-audio.corevm` wo
 ./jamt vm new ./doom.corevm 1000000000
 
 # Run CoreVM builder (SERVICE_ID is in jamt's output).
-./corevm-builder --temp --chain dev --gas 1000000000 SERVICE_ID
+./corevm-builder SERVICE_ID
 
 # Run CoreVM monitor (SERVICE_ID is in jamt's output).
 ./corevm-monitor SERVICE_ID

@@ -485,14 +485,15 @@ func (n *Node) runBlockAnnouncementLoop(stream quic.Stream, peerKeyStr string) {
 		if _, exists := n.block_tree.GetBlockNode(h); exists {
 			continue
 		}
-		received_blk_slot := ann.Header.Slot
-		if !n.ValidateJCE(received_blk_slot) {
-			// Block announcement is outside of reasonable bound
-			continue
-		}
+		//		received_blk_slot := ann.Header.Slot
+		//		if !n.ValidateJCE(received_blk_slot) {
+		// Block announcement is outside of reasonable bound
+		//			continue
+		//		}
 		select {
 		case n.blockAnnouncementsCh <- ann:
 			n.ba_checker.Set(h, peerKeyStr)
+			log.Debug(log.Node, "Block announcement received", "from", peerKeyShort, "slot", ann.Header.Slot, "hash", h.String_short())
 			// Emit telemetry event for block announced (received from peer)
 			peerIDBytes := PubkeyBytes(peerKeyStr)
 			n.telemetryClient.BlockAnnounced(peerIDBytes, 1, ann.Header.Slot, h)
