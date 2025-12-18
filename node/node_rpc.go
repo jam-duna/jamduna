@@ -964,14 +964,14 @@ func (j *Jam) FetchBlocks(req []string, res *string) error {
 	return fmt.Errorf("invalid Request")
 }
 
-func (j *Jam) SubmitWorkPackage(req []string, res *string) error {
+func (j *Jam) SubmitWorkPackageBundle(req []string, res *string) error {
 	if len(req) != 1 {
-		log.Info(log.Node, "SubmitWorkPackage error", "err", req)
+		log.Info(log.Node, "SubmitWorkPackageBundle error", "err", req)
 		return fmt.Errorf("invalid number of arguments")
 	}
 	var newReq types.WorkPackageBundle
 	if err := json.Unmarshal([]byte(req[0]), &newReq); err != nil {
-		log.Error(log.Node, "SubmitWorkPackage", "err", err)
+		log.Error(log.Node, "SubmitWorkPackageBundle", "err", err)
 		return fmt.Errorf("failed to decode WorkPackageBundle: %w", err)
 	}
 	j.NodeContent.SubmitBundleSameCore(&newReq)

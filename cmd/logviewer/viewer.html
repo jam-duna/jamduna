@@ -1,0 +1,1172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JAM Node Log Viewer</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 12px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .toolbar {
+            background: #333;
+            padding: 8px 10px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+            border-bottom: 1px solid #555;
+        }
+        .toolbar label {
+            color: #aaa;
+            font-size: 11px;
+        }
+        .toolbar input[type="text"] {
+            background: #252526;
+            border: 1px solid #555;
+            color: #d4d4d4;
+            padding: 3px 8px;
+            border-radius: 3px;
+            width: 180px;
+            font-size: 11px;
+        }
+        .toolbar input[type="text"]:focus {
+            outline: none;
+            border-color: #007acc;
+        }
+        .toolbar button {
+            background: #0e639c;
+            border: none;
+            color: white;
+            padding: 5px 12px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+        .toolbar button:hover {
+            background: #1177bb;
+        }
+        .toolbar button.active {
+            background: #16825d;
+        }
+        .toolbar button.danger {
+            background: #a31515;
+        }
+        .toolbar select {
+            background: #252526;
+            border: 1px solid #555;
+            color: #d4d4d4;
+            padding: 5px;
+            border-radius: 3px;
+        }
+        .node-toggles {
+            display: flex;
+            gap: 3px;
+        }
+        .node-toggle {
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            border: 1px solid #555;
+            background: #252526;
+            font-size: 11px;
+        }
+        .node-toggle.active {
+            border-color: #0e639c;
+        }
+        .node-toggle:hover {
+            border-color: #007acc;
+        }
+        .level-toggles {
+            display: flex;
+            gap: 3px;
+        }
+        .level-toggle {
+            padding: 3px 6px;
+            border-radius: 3px;
+            cursor: pointer;
+            border: 1px solid #555;
+            background: #252526;
+            font-size: 10px;
+            color: #888;
+        }
+        .level-toggle.active {
+            border-color: #007acc;
+        }
+        .level-toggle.level-ERROR { color: #f44747; }
+        .level-toggle.level-ERROR.active { background: #5a1d1d; border-color: #f44747; }
+        .level-toggle.level-WARN { color: #ce9178; }
+        .level-toggle.level-WARN.active { background: #4d3319; border-color: #ce9178; }
+        .level-toggle.level-INFO { color: #4ec9b0; }
+        .level-toggle.level-INFO.active { background: #1a4d44; border-color: #4ec9b0; }
+        .level-toggle.level-DEBUG { color: #569cd6; }
+        .level-toggle.level-DEBUG.active { background: #1d3a5a; border-color: #569cd6; }
+        .level-toggle.level-TRACE { color: #888; }
+        .level-toggle.level-TRACE.active { background: #333; border-color: #888; }
+        .level-count {
+            font-size: 9px;
+            opacity: 0.7;
+        }
+        .main-container {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+        .sidebar {
+            width: 280px;
+            background: #252526;
+            border-right: 1px solid #555;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .sidebar.collapsed {
+            width: 40px;
+        }
+        .sidebar-header {
+            padding: 8px;
+            background: #333;
+            border-bottom: 1px solid #555;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 5px;
+        }
+        .sidebar-header h3 {
+            font-size: 12px;
+            font-weight: normal;
+            color: #aaa;
+        }
+        .sidebar-buttons {
+            display: flex;
+            gap: 3px;
+        }
+        .sidebar-buttons button {
+            font-size: 10px;
+            padding: 2px 6px;
+            background: #3c3c3c;
+            border: 1px solid #555;
+            color: #aaa;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .sidebar-buttons button:hover {
+            background: #4c4c4c;
+            color: #fff;
+        }
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 5px;
+        }
+        .sidebar.collapsed .sidebar-content,
+        .sidebar.collapsed .sidebar-header h3 {
+            display: none;
+        }
+        .filter-tree {
+            font-size: 11px;
+        }
+        .tree-node {
+            padding: 2px 0;
+        }
+        .tree-node-header {
+            display: flex;
+            align-items: center;
+            padding: 3px 5px;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+        .tree-node-header:hover {
+            background: #2a2d2e;
+        }
+        .tree-toggle {
+            width: 16px;
+            color: #888;
+            font-size: 10px;
+        }
+        .tree-checkbox {
+            width: 14px;
+            height: 14px;
+            margin-right: 5px;
+            cursor: pointer;
+        }
+        .tree-label {
+            flex: 1;
+            color: #d4d4d4;
+        }
+        .tree-count {
+            color: #888;
+            font-size: 10px;
+            margin-left: 5px;
+        }
+        .tree-children {
+            margin-left: 16px;
+        }
+        .tree-children.collapsed {
+            display: none;
+        }
+        .log-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .view-mode-fused .log-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        .view-mode-split {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 1px;
+            background: #555;
+            flex: 1;
+            overflow: hidden;
+        }
+        .split-panel {
+            background: #1e1e1e;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .split-panel-header {
+            background: #333;
+            padding: 5px 10px;
+            border-bottom: 1px solid #555;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .split-panel-header .node-name {
+            font-weight: bold;
+        }
+        .split-panel .log-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 5px;
+            font-size: 11px;
+        }
+        .log-line {
+            padding: 2px 5px;
+            border-radius: 2px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            margin-bottom: 1px;
+        }
+        .log-line:hover {
+            background: #2a2a2a;
+        }
+        .log-line .timestamp {
+            color: #6a9955;
+        }
+        .log-line .level-TRACE {
+            color: #808080;
+        }
+        .log-line .level-DEBUG {
+            color: #569cd6;
+        }
+        .log-line .level-INFO {
+            color: #4ec9b0;
+        }
+        .log-line .level-WARN {
+            color: #ce9178;
+        }
+        .log-line .level-ERROR {
+            color: #f44747;
+        }
+        .log-line .module {
+            color: #dcdcaa;
+        }
+        .log-line .msg-type {
+            color: #c586c0;
+        }
+        .log-line .peer-id {
+            color: #d7ba7d;
+            font-style: italic;
+        }
+        .log-line .node-tag {
+            font-weight: bold;
+            padding: 1px 4px;
+            border-radius: 2px;
+            margin-right: 5px;
+            font-size: 10px;
+        }
+        .node-0 { background: #264f78; }
+        .node-1 { background: #4d4d4d; }
+        .node-2 { background: #6b4c9a; }
+        .node-3 { background: #2d7d46; }
+        .node-4 { background: #8b4513; }
+        .node-5 { background: #8b1a1a; }
+        .highlight {
+            background: #613214;
+        }
+        .stats {
+            color: #888;
+            font-size: 11px;
+        }
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #888;
+        }
+        .status-dot.connected {
+            background: #4ec9b0;
+        }
+        .status-dot.stale {
+            background: #ce9178;
+        }
+        .status-dot.active {
+            background: #4ec9b0;
+            animation: pulse 1s ease-in-out;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.3); opacity: 0.7; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .hidden {
+            display: none;
+        }
+        .divider {
+            width: 1px;
+            height: 20px;
+            background: #555;
+            margin: 0 5px;
+        }
+        .checkbox-partial {
+            opacity: 0.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <div class="status">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusText">Disconnected</span>
+        </div>
+        <div class="divider"></div>
+        <label>Filter:</label>
+        <input type="text" id="filter" placeholder="Regex filter... (press /)">
+        <div class="level-toggles" id="levelToggles"></div>
+        <div class="divider"></div>
+        <div class="node-toggles" id="nodeToggles"></div>
+        <div class="divider"></div>
+        <button id="viewModeBtn">Split View</button>
+        <button id="pauseBtn">Pause</button>
+        <button id="clearBtn" class="danger">Clear</button>
+        <button id="scrollBtn" class="active">Auto-scroll</button>
+        <span class="stats" id="stats">0 lines</span>
+    </div>
+    <div class="main-container">
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h3>Module Filter</h3>
+                <div class="sidebar-buttons">
+                    <button id="enableAllBtn" title="Enable all filters">All</button>
+                    <button id="disableAllBtn" title="Disable all filters">None</button>
+                    <button id="toggleSidebar">&#x2190;</button>
+                </div>
+            </div>
+            <div class="sidebar-content">
+                <div class="filter-tree" id="filterTree"></div>
+            </div>
+        </div>
+        <div class="log-area view-mode-fused" id="logArea">
+            <div class="log-container" id="logContainer"></div>
+        </div>
+    </div>
+
+    <script>
+        const logContainer = document.getElementById('logContainer');
+        const logArea = document.getElementById('logArea');
+        const filterInput = document.getElementById('filter');
+        const levelToggles = document.getElementById('levelToggles');
+        const nodeToggles = document.getElementById('nodeToggles');
+        const pauseBtn = document.getElementById('pauseBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const scrollBtn = document.getElementById('scrollBtn');
+        const viewModeBtn = document.getElementById('viewModeBtn');
+        const stats = document.getElementById('stats');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const sidebar = document.getElementById('sidebar');
+        const toggleSidebar = document.getElementById('toggleSidebar');
+        const filterTree = document.getElementById('filterTree');
+        const enableAllBtn = document.getElementById('enableAllBtn');
+        const disableAllBtn = document.getElementById('disableAllBtn');
+
+        let logs = [];
+        let paused = false;
+        let autoScroll = true;
+        let splitView = false;
+        let activeNodes = new Set();
+        let ws = null;
+        let reconnectTimeout = null;
+        let lastLogTime = 0;
+        let isConnected = false;
+        const STALE_THRESHOLD = 10000; // 10 seconds without logs = stale
+
+        // Module filter tree structure
+        // { module: { enabled: true, children: { submodule: { enabled: true, ... } } } }
+        let moduleTree = {};
+        let messageTypes = {}; // { "module::MsgType": { enabled: true, count: 0 } }
+
+        const levelPriority = { 'ERROR': 0, 'WARN': 1, 'INFO': 2, 'DEBUG': 3, 'TRACE': 4 };
+        const levels = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'];
+        let activeLevels = new Set(levels); // All enabled by default
+        let levelCounts = { ERROR: 0, WARN: 0, INFO: 0, DEBUG: 0, TRACE: 0 };
+        let levelElements = {};
+
+        // Initialize level toggles
+        for (const level of levels) {
+            const toggle = document.createElement('div');
+            toggle.className = `level-toggle level-${level} active`;
+            toggle.innerHTML = `${level} <span class="level-count">(0)</span>`;
+            toggle.dataset.level = level;
+            toggle.addEventListener('click', () => {
+                toggle.classList.toggle('active');
+                if (toggle.classList.contains('active')) {
+                    activeLevels.add(level);
+                } else {
+                    activeLevels.delete(level);
+                }
+                renderLogs();
+            });
+            levelToggles.appendChild(toggle);
+            levelElements[level] = toggle;
+        }
+
+        function updateLevelCounts() {
+            for (const level of levels) {
+                const countSpan = levelElements[level].querySelector('.level-count');
+                countSpan.textContent = `(${levelCounts[level]})`;
+            }
+        }
+
+        // Initialize node toggles (0-5)
+        for (let i = 0; i < 6; i++) {
+            const toggle = document.createElement('div');
+            toggle.className = 'node-toggle active';
+            toggle.textContent = `N${i}`;
+            toggle.dataset.node = i;
+            toggle.style.background = getNodeColor(i);
+            toggle.addEventListener('click', () => {
+                toggle.classList.toggle('active');
+                if (toggle.classList.contains('active')) {
+                    activeNodes.add(i);
+                } else {
+                    activeNodes.delete(i);
+                }
+                renderLogs();
+            });
+            nodeToggles.appendChild(toggle);
+            activeNodes.add(i);
+        }
+
+        function getNodeColor(n) {
+            const colors = ['#264f78', '#4d4d4d', '#6b4c9a', '#2d7d46', '#8b4513', '#8b1a1a'];
+            return colors[n % colors.length];
+        }
+
+        function parseLine(line, nodeId) {
+            // Parse log lines - thread name may or may not be present:
+            // Format 1: 2025-12-17 17:57:19 tokio-runtime-worker DEBUG jam_node::telemetry  Message
+            // Format 2: 2025-12-17 17:57:19 DEBUG jam_node::telemetry  Message
+            let match = line.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+\S+\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s+(\S+)\s+(.*)$/);
+            if (!match) {
+                // Try without thread name
+                match = line.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s+(\S+)\s+(.*)$/);
+            }
+            if (match) {
+                const module = match[3];
+                const message = match[4];
+                // Extract message type (first word before { or space or end)
+                const msgTypeMatch = message.match(/^(\w+)/);
+                const msgType = msgTypeMatch ? msgTypeMatch[1] : null;
+
+                return {
+                    timestamp: match[1],
+                    level: match[2],
+                    module: module,
+                    msgType: msgType,
+                    message: message,
+                    node: nodeId,
+                    raw: line
+                };
+            }
+            return { raw: line, node: nodeId };
+        }
+
+        function updateModuleTree(log) {
+            if (!log.module) return;
+
+            // Parse module path: jam_node::telemetry -> ['jam_node', 'telemetry']
+            const parts = log.module.split('::');
+            let current = moduleTree;
+
+            for (let i = 0; i < parts.length; i++) {
+                const part = parts[i];
+                if (!current[part]) {
+                    current[part] = { enabled: true, count: 0, children: {} };
+                }
+                current[part].count++;
+                current = current[part].children;
+            }
+
+            // Track message types at the leaf module level
+            if (log.msgType) {
+                const key = log.module + '::' + log.msgType;
+                if (!messageTypes[key]) {
+                    messageTypes[key] = { enabled: true, count: 0 };
+                }
+                messageTypes[key].count++;
+            }
+        }
+
+        function isModuleEnabled(module) {
+            if (!module) return true;
+            const parts = module.split('::');
+            let current = moduleTree;
+
+            for (const part of parts) {
+                if (!current[part]) return true;
+                if (!current[part].enabled) return false;
+                current = current[part].children;
+            }
+            return true;
+        }
+
+        function isMessageTypeEnabled(module, msgType) {
+            if (!msgType) return true;
+            const key = module + '::' + msgType;
+            if (messageTypes[key] && !messageTypes[key].enabled) return false;
+            return true;
+        }
+
+        function enableParentModules(path) {
+            // Enable all parent modules in the path
+            const parts = path.split('::');
+            let current = moduleTree;
+
+            for (let i = 0; i < parts.length; i++) {
+                if (current[parts[i]]) {
+                    current[parts[i]].enabled = true;
+                    current = current[parts[i]].children;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        function setModuleEnabled(path, enabled) {
+            const parts = path.split('::');
+            let current = moduleTree;
+
+            for (let i = 0; i < parts.length - 1; i++) {
+                if (!current[parts[i]]) return;
+                current = current[parts[i]].children;
+            }
+
+            const last = parts[parts.length - 1];
+            if (current[last]) {
+                current[last].enabled = enabled;
+                // Also set all children when disabling
+                if (!enabled) {
+                    setChildrenEnabled(current[last].children, enabled);
+                } else {
+                    // When enabling, also enable parent modules
+                    enableParentModules(path);
+                }
+            }
+        }
+
+        function setChildrenEnabled(children, enabled) {
+            for (const key in children) {
+                children[key].enabled = enabled;
+                setChildrenEnabled(children[key].children, enabled);
+            }
+        }
+
+        function setAllFiltersEnabled(enabled) {
+            // Set all modules
+            function setTreeEnabled(tree) {
+                for (const key in tree) {
+                    tree[key].enabled = enabled;
+                    setTreeEnabled(tree[key].children);
+                }
+            }
+            setTreeEnabled(moduleTree);
+
+            // Set all message types
+            for (const key in messageTypes) {
+                messageTypes[key].enabled = enabled;
+            }
+
+            renderFilterTree();
+            renderLogs();
+        }
+
+        function renderFilterTree() {
+            filterTree.innerHTML = '';
+            renderTreeLevel(moduleTree, filterTree, '');
+        }
+
+        function renderTreeLevel(tree, container, prefix) {
+            const sortedKeys = Object.keys(tree).sort();
+
+            for (const key of sortedKeys) {
+                const node = tree[key];
+                const path = prefix ? prefix + '::' + key : key;
+                const hasChildren = Object.keys(node.children).length > 0;
+
+                // Check if this module has message types
+                const msgTypesForModule = Object.keys(messageTypes).filter(k => {
+                    const parts = k.split('::');
+                    parts.pop(); // Remove msg type
+                    return parts.join('::') === path;
+                });
+
+                const nodeEl = document.createElement('div');
+                nodeEl.className = 'tree-node';
+
+                const header = document.createElement('div');
+                header.className = 'tree-node-header';
+
+                const toggle = document.createElement('span');
+                toggle.className = 'tree-toggle';
+                toggle.textContent = (hasChildren || msgTypesForModule.length > 0) ? '▼' : '';
+                header.appendChild(toggle);
+
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = 'tree-checkbox';
+                checkbox.checked = node.enabled;
+                checkbox.addEventListener('change', () => {
+                    setModuleEnabled(path, checkbox.checked);
+                    renderFilterTree();
+                    renderLogs();
+                });
+                header.appendChild(checkbox);
+
+                const label = document.createElement('span');
+                label.className = 'tree-label';
+                label.textContent = key;
+                header.appendChild(label);
+
+                const count = document.createElement('span');
+                count.className = 'tree-count';
+                count.textContent = `(${node.count})`;
+                header.appendChild(count);
+
+                nodeEl.appendChild(header);
+
+                // Create children container
+                if (hasChildren || msgTypesForModule.length > 0) {
+                    const childContainer = document.createElement('div');
+                    childContainer.className = 'tree-children';
+
+                    // Add child modules
+                    if (hasChildren) {
+                        renderTreeLevel(node.children, childContainer, path);
+                    }
+
+                    // Add message types at this level
+                    for (const msgKey of msgTypesForModule.sort()) {
+                        const msgType = msgKey.split('::').pop();
+                        const msgData = messageTypes[msgKey];
+
+                        const msgNode = document.createElement('div');
+                        msgNode.className = 'tree-node';
+
+                        const msgHeader = document.createElement('div');
+                        msgHeader.className = 'tree-node-header';
+
+                        const msgToggle = document.createElement('span');
+                        msgToggle.className = 'tree-toggle';
+                        msgHeader.appendChild(msgToggle);
+
+                        const msgCheckbox = document.createElement('input');
+                        msgCheckbox.type = 'checkbox';
+                        msgCheckbox.className = 'tree-checkbox';
+                        msgCheckbox.checked = msgData.enabled;
+                        msgCheckbox.addEventListener('change', () => {
+                            msgData.enabled = msgCheckbox.checked;
+                            // If enabling a message type, also enable its parent module path
+                            if (msgCheckbox.checked) {
+                                enableParentModules(path);
+                                renderFilterTree();
+                            }
+                            renderLogs();
+                        });
+                        msgHeader.appendChild(msgCheckbox);
+
+                        const msgLabel = document.createElement('span');
+                        msgLabel.className = 'tree-label';
+                        msgLabel.style.color = '#c586c0';
+                        msgLabel.textContent = msgType;
+                        msgHeader.appendChild(msgLabel);
+
+                        const msgCount = document.createElement('span');
+                        msgCount.className = 'tree-count';
+                        msgCount.textContent = `(${msgData.count})`;
+                        msgHeader.appendChild(msgCount);
+
+                        msgNode.appendChild(msgHeader);
+                        childContainer.appendChild(msgNode);
+                    }
+
+                    nodeEl.appendChild(childContainer);
+
+                    toggle.style.cursor = 'pointer';
+                    toggle.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        childContainer.classList.toggle('collapsed');
+                        toggle.textContent = childContainer.classList.contains('collapsed') ? '▶' : '▼';
+                    });
+                }
+
+                container.appendChild(nodeEl);
+            }
+        }
+
+        function renderLine(log, filterRegex, showNodeTag = true) {
+            const div = document.createElement('div');
+            div.className = 'log-line';
+
+            if (log.timestamp) {
+                if (showNodeTag) {
+                    const nodeTag = document.createElement('span');
+                    nodeTag.className = `node-tag node-${log.node}`;
+                    nodeTag.textContent = `N${log.node}`;
+                    div.appendChild(nodeTag);
+                }
+
+                const timestamp = document.createElement('span');
+                timestamp.className = 'timestamp';
+                timestamp.textContent = log.timestamp + ' ';
+                div.appendChild(timestamp);
+
+                const level = document.createElement('span');
+                level.className = `level-${log.level}`;
+                level.textContent = log.level.padEnd(5) + ' ';
+                div.appendChild(level);
+
+                const module = document.createElement('span');
+                module.className = 'module';
+                module.textContent = log.module + ' ';
+                div.appendChild(module);
+
+                let msg = log.message;
+                // Highlight peer identifiers first (pattern: id@ip:port)
+                const hasPeerId = /^[a-z0-9]{40,60}@\d+\.\d+\.\d+\.\d+:\d+/.test(msg);
+                msg = msg.replace(/([a-z0-9]{40,60}@\d+\.\d+\.\d+\.\d+:\d+)/g, '<span class="peer-id">$1</span>');
+                // Highlight message type (but not if it's part of a peer ID)
+                if (log.msgType && !hasPeerId) {
+                    msg = msg.replace(log.msgType, `<span class="msg-type">${log.msgType}</span>`);
+                }
+                if (filterRegex && filterRegex.source !== '(?:)') {
+                    msg = msg.replace(filterRegex, match => `<span class="highlight">${match}</span>`);
+                }
+                const msgSpan = document.createElement('span');
+                msgSpan.innerHTML = msg;
+                div.appendChild(msgSpan);
+            } else {
+                if (showNodeTag) {
+                    const nodeTag = document.createElement('span');
+                    nodeTag.className = `node-tag node-${log.node}`;
+                    nodeTag.textContent = `N${log.node}`;
+                    div.appendChild(nodeTag);
+                }
+
+                let text = log.raw;
+                // Highlight peer identifiers (pattern: id@ip:port)
+                text = text.replace(/([a-z0-9]{40,60}@\d+\.\d+\.\d+\.\d+:\d+)/g, '<span class="peer-id">$1</span>');
+                if (filterRegex && filterRegex.source !== '(?:)') {
+                    text = text.replace(filterRegex, match => `<span class="highlight">${match}</span>`);
+                }
+                const textSpan = document.createElement('span');
+                textSpan.innerHTML = text;
+                div.appendChild(textSpan);
+            }
+
+            return div;
+        }
+
+        function shouldShowLog(log) {
+            // Node filter
+            if (!activeNodes.has(log.node)) return false;
+
+            // Module filter
+            if (!isModuleEnabled(log.module)) return false;
+
+            // Message type filter
+            if (!isMessageTypeEnabled(log.module, log.msgType)) return false;
+
+            // Level filter
+            if (log.level && !activeLevels.has(log.level)) return false;
+
+            // Text filter
+            const filterText = filterInput.value.trim();
+            if (filterText) {
+                try {
+                    const regex = new RegExp(filterText, 'i');
+                    if (!regex.test(log.raw)) return false;
+                } catch (e) {
+                    if (!log.raw.toLowerCase().includes(filterText.toLowerCase())) return false;
+                }
+            }
+
+            return true;
+        }
+
+        function renderLogs() {
+            const filterText = filterInput.value.trim();
+            let filterRegex = null;
+            try {
+                if (filterText) filterRegex = new RegExp(filterText, 'gi');
+            } catch (e) {}
+
+            if (splitView) {
+                renderSplitView(filterRegex);
+            } else {
+                renderFusedView(filterRegex);
+            }
+        }
+
+        function renderFusedView(filterRegex) {
+            logArea.className = 'log-area view-mode-fused';
+            logArea.innerHTML = '<div class="log-container" id="logContainer"></div>';
+            const container = document.getElementById('logContainer');
+
+            let count = 0;
+            for (const log of logs) {
+                if (shouldShowLog(log)) {
+                    container.appendChild(renderLine(log, filterRegex, true));
+                    count++;
+                }
+            }
+            stats.textContent = `${count} / ${logs.length} lines`;
+
+            if (autoScroll) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+
+        function renderSplitView(filterRegex) {
+            logArea.className = 'log-area view-mode-split';
+            logArea.innerHTML = '';
+
+            // Create panel for each active node
+            const panels = {};
+            for (const nodeId of [...activeNodes].sort()) {
+                const panel = document.createElement('div');
+                panel.className = 'split-panel';
+
+                const header = document.createElement('div');
+                header.className = 'split-panel-header';
+
+                const nodeName = document.createElement('span');
+                nodeName.className = 'node-name';
+                nodeName.style.color = getNodeColor(nodeId);
+                nodeName.textContent = `Node ${nodeId}`;
+                header.appendChild(nodeName);
+
+                const nodeStats = document.createElement('span');
+                nodeStats.className = 'stats';
+                nodeStats.id = `stats-${nodeId}`;
+                header.appendChild(nodeStats);
+
+                panel.appendChild(header);
+
+                const container = document.createElement('div');
+                container.className = 'log-container';
+                container.id = `logs-${nodeId}`;
+                panel.appendChild(container);
+
+                logArea.appendChild(panel);
+                panels[nodeId] = container;
+            }
+
+            // Distribute logs to panels
+            const counts = {};
+            for (const nodeId of activeNodes) counts[nodeId] = 0;
+
+            for (const log of logs) {
+                if (!activeNodes.has(log.node)) continue;
+                if (!shouldShowLog(log)) continue;
+
+                panels[log.node].appendChild(renderLine(log, filterRegex, false));
+                counts[log.node]++;
+            }
+
+            // Update stats
+            let total = 0;
+            for (const nodeId of activeNodes) {
+                document.getElementById(`stats-${nodeId}`).textContent = `${counts[nodeId]} lines`;
+                total += counts[nodeId];
+            }
+            stats.textContent = `${total} / ${logs.length} lines`;
+
+            // Auto-scroll each panel
+            if (autoScroll) {
+                for (const nodeId of activeNodes) {
+                    const container = panels[nodeId];
+                    container.scrollTop = container.scrollHeight;
+                }
+            }
+        }
+
+        function addLog(line, nodeId) {
+            const log = parseLine(line, nodeId);
+            logs.push(log);
+            updateModuleTree(log);
+
+            // Update level counts
+            if (log.level && levelCounts[log.level] !== undefined) {
+                levelCounts[log.level]++;
+                updateLevelCounts();
+            }
+
+            // Keep max 10000 logs
+            if (logs.length > 10000) {
+                logs = logs.slice(-8000);
+            }
+
+            if (!paused) {
+                // Incremental update for fused view
+                if (!splitView && shouldShowLog(log)) {
+                    const filterText = filterInput.value.trim();
+                    let filterRegex = null;
+                    try {
+                        if (filterText) filterRegex = new RegExp(filterText, 'gi');
+                    } catch (e) {}
+
+                    const container = document.getElementById('logContainer');
+                    if (container) {
+                        container.appendChild(renderLine(log, filterRegex, true));
+
+                        const visibleCount = container.children.length;
+                        stats.textContent = `${visibleCount} / ${logs.length} lines`;
+
+                        if (autoScroll) {
+                            container.scrollTop = container.scrollHeight;
+                        }
+                    }
+                } else if (splitView && shouldShowLog(log)) {
+                    const filterText = filterInput.value.trim();
+                    let filterRegex = null;
+                    try {
+                        if (filterText) filterRegex = new RegExp(filterText, 'gi');
+                    } catch (e) {}
+
+                    const container = document.getElementById(`logs-${log.node}`);
+                    if (container) {
+                        container.appendChild(renderLine(log, filterRegex, false));
+
+                        if (autoScroll) {
+                            container.scrollTop = container.scrollHeight;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Periodically update filter tree
+        let treeUpdatePending = false;
+        setInterval(() => {
+            if (treeUpdatePending) {
+                renderFilterTree();
+                treeUpdatePending = false;
+            }
+        }, 2000);
+
+        function updateConnectionStatus() {
+            if (!isConnected) {
+                statusDot.className = 'status-dot';
+                return;
+            }
+
+            const now = Date.now();
+            const timeSinceLastLog = now - lastLogTime;
+
+            if (lastLogTime === 0) {
+                // Connected but no logs yet
+                statusDot.className = 'status-dot connected';
+                statusText.textContent = 'Connected (waiting for logs...)';
+            } else if (timeSinceLastLog > STALE_THRESHOLD) {
+                // No logs for a while
+                statusDot.className = 'status-dot stale';
+                const secs = Math.floor(timeSinceLastLog / 1000);
+                statusText.textContent = `Connected (no logs for ${secs}s)`;
+            } else {
+                statusDot.className = 'status-dot connected';
+                statusText.textContent = 'Connected (receiving logs)';
+            }
+        }
+
+        // Check connection status periodically
+        setInterval(updateConnectionStatus, 1000);
+
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                isConnected = true;
+                statusDot.className = 'status-dot connected';
+                statusText.textContent = 'Connected (waiting for logs...)';
+                if (reconnectTimeout) {
+                    clearTimeout(reconnectTimeout);
+                    reconnectTimeout = null;
+                }
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                lastLogTime = Date.now();
+                // Pulse animation on log received
+                statusDot.className = 'status-dot active';
+                setTimeout(() => {
+                    if (isConnected) statusDot.className = 'status-dot connected';
+                }, 1000);
+                statusText.textContent = 'Connected (receiving logs)';
+                addLog(data.line, data.node);
+                treeUpdatePending = true;
+            };
+
+            ws.onclose = () => {
+                isConnected = false;
+                statusDot.className = 'status-dot';
+                statusText.textContent = 'Disconnected - Reconnecting...';
+                reconnectTimeout = setTimeout(connect, 2000);
+            };
+
+            ws.onerror = () => {
+                ws.close();
+            };
+        }
+
+        // Event listeners
+        filterInput.addEventListener('input', () => {
+            renderLogs();
+        });
+
+        pauseBtn.addEventListener('click', () => {
+            paused = !paused;
+            pauseBtn.textContent = paused ? 'Resume' : 'Pause';
+            pauseBtn.classList.toggle('active', paused);
+            if (!paused) renderLogs();
+        });
+
+        clearBtn.addEventListener('click', () => {
+            logs = [];
+            moduleTree = {};
+            messageTypes = {};
+            levelCounts = { ERROR: 0, WARN: 0, INFO: 0, DEBUG: 0, TRACE: 0 };
+            updateLevelCounts();
+            renderFilterTree();
+            renderLogs();
+        });
+
+        scrollBtn.addEventListener('click', () => {
+            autoScroll = !autoScroll;
+            scrollBtn.classList.toggle('active', autoScroll);
+            if (autoScroll) {
+                renderLogs();
+            }
+        });
+
+        viewModeBtn.addEventListener('click', () => {
+            splitView = !splitView;
+            viewModeBtn.textContent = splitView ? 'Fused View' : 'Split View';
+            viewModeBtn.classList.toggle('active', splitView);
+            renderLogs();
+        });
+
+        toggleSidebar.addEventListener('click', () => {
+            sidebar.classList.toggle('collapsed');
+            toggleSidebar.textContent = sidebar.classList.contains('collapsed') ? '→' : '←';
+        });
+
+        enableAllBtn.addEventListener('click', () => {
+            setAllFiltersEnabled(true);
+        });
+
+        disableAllBtn.addEventListener('click', () => {
+            setAllFiltersEnabled(false);
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.key === '/' && document.activeElement !== filterInput) {
+                e.preventDefault();
+                filterInput.focus();
+            }
+            if (e.key === 'Escape') {
+                filterInput.blur();
+                filterInput.value = '';
+                renderLogs();
+            }
+            if (e.key === ' ' && document.activeElement !== filterInput) {
+                e.preventDefault();
+                pauseBtn.click();
+            }
+            if (e.key === 's' && document.activeElement !== filterInput) {
+                e.preventDefault();
+                viewModeBtn.click();
+            }
+        });
+
+        // Start connection
+        connect();
+
+        // Demo mode - if not connected, show sample data
+        setTimeout(() => {
+            if (!statusDot.classList.contains('connected')) {
+                statusText.textContent = 'Demo Mode (no server)';
+                const sampleLogs = [
+                    '2025-12-17 17:57:19 tokio-runtime-worker DEBUG jam_node::telemetry BlockTransferred { request_id: 0, slot: 5048493 }',
+                    '2025-12-17 17:57:19 tokio-runtime-worker DEBUG jam_node::telemetry BlockAnnounced { peer: ekwmt37xecoq6a7o }',
+                    '2025-12-17 17:57:19 tokio-runtime-worker INFO jam_node::chain Imported block 0x9ebf3fb7...',
+                    '2025-12-17 17:57:19 tokio-runtime-worker DEBUG jam_node::chain::state_db Inserted block',
+                    '2025-12-17 17:57:20 tokio-runtime-worker DEBUG jam_node::net::peer_manager Stream closed',
+                    '2025-12-17 17:57:20 tokio-runtime-worker WARN jam_node::chain Slow block processing: 150ms',
+                    '2025-12-17 17:57:21 tokio-runtime-worker ERROR jam_node::net Connection timeout',
+                    '2025-12-17 17:57:21 tokio-runtime-worker TRACE jam_node::chain::exec::accumulate Outputs: []',
+                    '2025-12-17 17:57:22 tokio-runtime-worker DEBUG jam_node::telemetry BlockVerified { importing_id: 0 }',
+                    '2025-12-17 17:57:22 tokio-runtime-worker DEBUG jam_node::telemetry BlockExecuted { authoring_id: 0 }',
+                    '2025-12-17 17:57:23 tokio-runtime-worker DEBUG jam_node::telemetry BestBlockChanged { slot: 5048493 }',
+                    '2025-12-17 17:57:24 tokio-runtime-worker DEBUG jam_node::chain::guarantors::table Guarantee table update',
+                ];
+                sampleLogs.forEach((line, i) => {
+                    setTimeout(() => {
+                        addLog(line, i % 6);
+                        treeUpdatePending = true;
+                    }, i * 200);
+                });
+                setTimeout(renderFilterTree, 3000);
+            }
+        }, 3000);
+    </script>
+</body>
+</html>

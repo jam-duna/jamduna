@@ -433,14 +433,14 @@ func (c *NodeClient) GetRefineContext() (types.RefineContext, error) {
 	return context, nil
 }
 
-// WORK PACKAGE
-func (c *NodeClient) SubmitWorkPackage(workPackageReq *types.WorkPackageBundle) error {
+// WORK PACKAGE BUNDLE
+func (c *NodeClient) SubmitWorkPackageBundle(bundleReq *types.WorkPackageBundle) error {
 	// Marshal the WorkPackageBundle to JSON
-	log.Info(log.Node, "!!!!! NodeClient SubmitWorkPackage", "workPackageReq", workPackageReq)
-	reqBytes, err := json.Marshal(workPackageReq)
+	log.Info(log.Node, "!!!!! NodeClient SubmitWorkPackageBundle", "bundleReq", bundleReq)
+	reqBytes, err := json.Marshal(bundleReq)
 	if err != nil {
-		log.Warn(log.Node, "SubmitWorkPackage", "err", err)
-		return fmt.Errorf("failed to marshal work package request: %w", err)
+		log.Warn(log.Node, "SubmitWorkPackageBundle", "err", err)
+		return fmt.Errorf("failed to marshal work package bundle request: %w", err)
 	}
 
 	// Prepare the request as a one-element string slice
@@ -448,9 +448,9 @@ func (c *NodeClient) SubmitWorkPackage(workPackageReq *types.WorkPackageBundle) 
 
 	var res string
 	// Call the remote RPC method
-	err = c.GetClient().Call("jam.SubmitWorkPackage", req, &res)
+	err = c.GetClient().Call("jam.SubmitWorkPackageBundle", req, &res)
 	if err != nil {
-		log.Warn(log.Node, "SubmitWorkPackage: jam.SubmitWorkPackage", "err", err)
+		log.Warn(log.Node, "SubmitWorkPackageBundle: jam.SubmitWorkPackageBundle", "err", err)
 		return err
 	}
 	return nil
@@ -490,7 +490,7 @@ func (c *NodeClient) SubmitAndWaitForWorkPackageBundles(ctx context.Context, req
 		c.Subscribe(SubWorkPackage, map[string]interface{}{
 			"hash": hash.String(),
 		})
-		if err := c.SubmitWorkPackage(req); err != nil {
+		if err := c.SubmitWorkPackageBundle(req); err != nil {
 			log.Warn(log.Node, "Failed to submit work package", "hash", hash, "err", err)
 			return stateRoots, timeslots, err
 		}
@@ -566,7 +566,7 @@ func (c *NodeClient) SubmitAndWaitForWorkPackageBundles(ctx context.Context, req
 
 }
 
-func (c *NodeClient) RobustSubmitWorkPackage(workpackage_req *types.WorkPackageBundle, maxTries int) (workPackageHash common.Hash, err error) {
+func (c *NodeClient) RobustSubmitWorkPackageBundle(workpackage_req *types.WorkPackageBundle, maxTries int) (workPackageHash common.Hash, err error) {
 	tries := 0
 	for tries < maxTries {
 		refine_context, err := c.GetRefineContext()
