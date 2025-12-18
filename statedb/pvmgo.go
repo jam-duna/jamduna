@@ -542,15 +542,23 @@ func (vm *VMGo) Destroy() {
 	vm.Ram.Close()
 
 	// Flush and close trace writers if they were set up
-	if PvmTraceMode {
+	// Lifecycle: flushTraceBuffers() -> gzipWriter.Close() (writes trailer) -> file.Sync() -> file.Close()
+	if PvmTraceMode && vm.gzipWriters != nil {
 		vm.flushTraceBuffers()
-		// Close gzip writers first (writes footer), then files
+		// Close gzip writers first (writes gzip trailer/footer), then sync and close files
 		for i := 0; i < len(vm.gzipWriters); i++ {
 			if vm.gzipWriters[i] != nil {
-				vm.gzipWriters[i].Close()
+				if err := vm.gzipWriters[i].Close(); err != nil {
+					log.Error(log.SDB, "Destroy: gzipWriter.Close failed", "index", i, "err", err)
+				}
 			}
 			if vm.files[i] != nil {
-				vm.files[i].Close()
+				if err := vm.files[i].Sync(); err != nil {
+					log.Error(log.SDB, "Destroy: file.Sync failed", "index", i, "err", err)
+				}
+				if err := vm.files[i].Close(); err != nil {
+					log.Error(log.SDB, "Destroy: file.Close failed", "index", i, "err", err)
+				}
 			}
 		}
 	}
@@ -575,7 +583,11 @@ func (vm *VMGo) ensureTraceWriters(logDir string) {
 	}
 
 	// Create the directory
-	os.MkdirAll(logDir, 0755)
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		log.Error(log.SDB, "ensureTraceWriters: failed to create directory, disabling tracing", "logDir", logDir, "err", err)
+		PvmTraceMode = false
+		return
+	}
 
 	// 18 files: r0-r12(13) + opcode (1) + gas(1) + pc(1) + loads(1) + stores(1)  TODO: hostWrites, hostReads
 	files := make([]*os.File, 18)
@@ -584,7 +596,18 @@ func (vm *VMGo) ensureTraceWriters(logDir string) {
 	filenames := []string{"r0.gz", "r1.gz", "r2.gz", "r3.gz", "r4.gz", "r5.gz", "r6.gz", "r7.gz", "r8.gz", "r9.gz", "r10.gz", "r11.gz", "r12.gz", "opcode.gz", "gas.gz", "pc.gz", "loads.gz", "stores.gz"}
 	for i, name := range filenames {
 		traceFile := filepath.Join(logDir, name)
-		files[i], _ = os.Create(traceFile)
+		f, err := os.Create(traceFile)
+		if err != nil {
+			log.Error(log.SDB, "ensureTraceWriters: failed to create trace file, disabling tracing", "file", traceFile, "err", err)
+			for j := 0; j < i; j++ {
+				if files[j] != nil {
+					files[j].Close()
+				}
+			}
+			PvmTraceMode = false
+			return
+		}
+		files[i] = f
 		gzWriters[i] = gzip.NewWriter(files[i])
 		buffers[i] = bytes.NewBuffer(make([]byte, 0, 8*1000000)) // Pre-allocate for 1M uint64s
 	}
@@ -623,9 +646,13 @@ func (vm *VMGo) flushTraceBuffers() {
 		return
 	}
 	for i := 0; i < 18; i++ {
-		if vm.traceBuffers[i].Len() > 0 {
-			vm.gzipWriters[i].Write(vm.traceBuffers[i].Bytes())
-			vm.gzipWriters[i].Flush()
+		if vm.traceBuffers[i] != nil && vm.traceBuffers[i].Len() > 0 && vm.gzipWriters[i] != nil {
+			if _, err := vm.gzipWriters[i].Write(vm.traceBuffers[i].Bytes()); err != nil {
+				log.Error(log.SDB, "flushTraceBuffers: Write failed", "index", i, "err", err)
+			}
+			if err := vm.gzipWriters[i].Flush(); err != nil {
+				log.Error(log.SDB, "flushTraceBuffers: Flush failed", "index", i, "err", err)
+			}
 			vm.traceBuffers[i].Reset()
 		}
 	}

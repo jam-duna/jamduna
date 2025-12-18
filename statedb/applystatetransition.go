@@ -425,7 +425,7 @@ func (s *StateDB) computeStateUpdates(blk *types.Block) {
 	// setup workpackage updates (guaranteed, queued, accumulated)
 	for _, g := range blk.Extrinsic.Guarantees {
 		wph := g.Report.AvailabilitySpec.WorkPackageHash
-		log.Info(log.SDB, "computeStateUpdates-GUARANTEE", "hash", wph, g.Report.String())
+		log.Trace(log.SDB, "computeStateUpdates-GUARANTEE", "hash", wph, g.Report.String())
 		s.stateUpdate.WorkPackageUpdates[wph] = &types.SubWorkPackageResult{
 			WorkPackageHash: wph,
 			HeaderHash:      s.HeaderHash,
@@ -435,9 +435,9 @@ func (s *StateDB) computeStateUpdates(blk *types.Block) {
 	}
 
 	h := s.JamState.AccumulationHistory[types.EpochLength-1]
-	log.Info(log.SDB, "computeStateUpdates: AccumulationHistory", "slot", s.GetTimeslot(), "numWPHs", len(h.WorkPackageHash))
+	log.Trace(log.SDB, "computeStateUpdates: AccumulationHistory", "slot", s.GetTimeslot(), "numWPHs", len(h.WorkPackageHash))
 	for _, wph := range h.WorkPackageHash {
-		log.Info(log.SDB, "computeStateUpdates: setting ACCUMULATED", "wph", wph.Hex(), "slot", s.GetTimeslot())
+		log.Trace(log.SDB, "computeStateUpdates: setting ACCUMULATED", "wph", wph.Hex(), "slot", s.GetTimeslot())
 		s.stateUpdate.WorkPackageUpdates[wph] = &types.SubWorkPackageResult{
 			WorkPackageHash: wph,
 			HeaderHash:      s.HeaderHash,

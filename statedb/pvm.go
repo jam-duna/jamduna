@@ -140,6 +140,7 @@ type VM struct {
 	hostenv    types.HostEnv
 	logging    string
 	InitialGas uint64
+	FinalGas   int64 // Gas remaining after execution (saved before destroying ExecutionVM)
 
 	// service metadata
 	ServiceAccount  *types.ServiceAccount
@@ -538,9 +539,10 @@ func (vm *VM) ExecuteRefine(core uint16, workitemIndex uint32, workPackage types
 
 	vm.executeWithBackend(a, types.EntryPointRefine, logDir)
 	r, res = vm.getArgumentOutputs()
+	exportedSegments = vm.Exports
+	vm.destroyVMs()
 	saveToLogDirOutput(logDir, r, res)
 	log.Trace(vm.logging, string(vm.ServiceMetadata), "Result", r.String(), "fault_address", vm.Fault_address, "resultCode", vm.ResultCode)
-	exportedSegments = vm.Exports
 
 	// Save all exported segments back to back in a single file
 	if len(exportedSegments) > 0 {
@@ -620,12 +622,6 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, inputs []types.AccumulateInp
 	vm.X.U.ServiceAccounts[s] = x_s
 	vm.ServiceAccount = x_s
 
-	// Create subdirectory for this accumulate execution using service ID
-	// Only build path if logging is enabled (logDir non-empty)
-	if logDir != "" {
-		logDir = filepath.Join(logDir, fmt.Sprintf("%d", s))
-	}
-
 	// Save inputs
 	saveToLogDir(logDir, "input", input_bytes)
 	// Save AccumulateInputs for inspection
@@ -635,6 +631,7 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, inputs []types.AccumulateInp
 
 	vm.executeWithBackend(input_bytes, types.EntryPointAccumulate, logDir)
 	r, res = vm.getArgumentOutputs()
+	vm.destroyVMs()
 	saveToLogDirOutput(logDir, r, res)
 
 	return r, res, x_s
@@ -644,18 +641,13 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16, logDir string)
 	vm.Mode = ModeIsAuthorized
 	a, _ := types.Encode(uint8(c))
 
-	// Create subdirectory for authorization execution
-	// Only build path if logging is enabled (logDir non-empty)
-	if logDir != "" {
-		logDir = filepath.Join(logDir, "auth")
-	}
-
 	// Save inputs
 	saveToLogDir(logDir, "input", a)
 
 	// fmt.Printf("ExecuteAuthorization - c=%d len(p_bytes)=%d len(c_bytes)=%d len(a)=%d a=%x WP=%s\n", c, len(p_bytes), len(c_bytes), len(a), a, p.String())
 	vm.executeWithBackend(a, types.EntryPointAuthorization, logDir)
 	r, res := vm.getArgumentOutputs()
+	vm.destroyVMs()
 	saveToLogDirOutput(logDir, r, res)
 
 	return r
@@ -663,6 +655,11 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16, logDir string)
 
 func (vm *VM) executeWithBackend(argumentData []byte, entryPoint uint32, logDir string) {
 	// fmt.Printf("Standard Program Initialization: %s=%x %s=%x\n", reg(7), argAddr, reg(8), uint32(len(argument_data_a)))
+	if vm.ExecutionVM == nil {
+		log.Error(vm.logging, "executeWithBackend: ExecutionVM is nil", "entryPoint", entryPoint)
+		vm.ResultCode = types.WORKDIGEST_PANIC
+		return
+	}
 	vm.Init(argumentData)
 	vm.IsChild = false
 	err := vm.ExecutionVM.Execute(vm, entryPoint, logDir)
@@ -670,13 +667,48 @@ func (vm *VM) executeWithBackend(argumentData []byte, entryPoint uint32, logDir 
 		log.Error(vm.logging, "VM execution failed", "error", err)
 	}
 	vm.ResultCode = vm.GetResultCode()
+	// Note: Do NOT destroy ExecutionVM here - it's needed by getArgumentOutputs() to read registers
+	// The caller is responsible for calling destroyVMs() after reading outputs
+}
+
+// destroyVMs cleans up all VMs after execution outputs have been read.
+// This writes gzip trailers for trace files and frees resources.
+// Gas is saved to FinalGas before destroying, so SafeGetGas() can be called after.
+func (vm *VM) destroyVMs() {
+	if vm.ExecutionVM != nil {
+		vm.FinalGas = vm.ExecutionVM.GetGas()
+		vm.ExecutionVM.Destroy()
+		vm.ExecutionVM = nil
+	}
 	for _, m := range vm.VMs {
 		(*m).Destroy()
 	}
 	vm.VMs = nil
 }
 
+// SafeGetGas returns the gas remaining. It's safe to call after destroyVMs().
+// If ExecutionVM is still active, returns live gas. If destroyed, returns saved FinalGas.
+func (vm *VM) SafeGetGas() int64 {
+	if vm == nil {
+		return 0
+	}
+	if vm.ExecutionVM != nil {
+		return vm.ExecutionVM.GetGas()
+	}
+	return vm.FinalGas
+}
+
+// GetGas forwards to SafeGetGas to preserve existing callers while avoiding nil deref
+func (vm *VM) GetGas() int64 {
+	return vm.SafeGetGas()
+}
+
 func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
+	if vm.ExecutionVM == nil {
+		r.Err = types.WORKDIGEST_PANIC
+		log.Error(vm.logging, "getArgumentOutputs: ExecutionVM is nil", "mode", vm.Mode, "service", string(vm.ServiceMetadata))
+		return r, 0
+	}
 	if vm.ResultCode == types.WORKDIGEST_OOG {
 		r.Err = types.WORKDIGEST_OOG
 		log.Debug(vm.logging, "getArgumentOutputs - OOG", "service", string(vm.ServiceMetadata))

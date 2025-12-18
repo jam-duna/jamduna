@@ -848,7 +848,7 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 	r, _, x_s := vm.ExecuteAccumulate(timeslot, serviceID, inputs, xContext, sd.JamState.SafroleState.Entropy[0], logDir) //n is posterior entropy
 	benchRec.Add("ExecuteAccumulate", time.Since(t0))
 	exceptional = false
-	gasUsed = gas - uint64(max(vm.GetGas(), 0))
+	gasUsed = gas - uint64(max(vm.SafeGetGas(), 0))
 	if r.Err == types.WORKDIGEST_OOG || r.Err == types.WORKDIGEST_PANIC {
 		exceptional = true
 		accumulation_output = vm.Y.Yield

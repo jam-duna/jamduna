@@ -109,3 +109,6 @@ bmt/stablecoin_transfers_with_balances-730.csv.gz
 /statedb/*.txt
 /statedb/0x*
 *.gz
+/statedb/*/
+/cmd/trace2log/trace2log*
+/trace2log*

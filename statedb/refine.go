@@ -453,7 +453,7 @@ func (statedb *StateDB) authorizeWP(workPackage types.WorkPackage, workPackageCo
 	p_u := workPackage.AuthorizationCodeHash
 	p_p := workPackage.ConfigurationBlob
 	p_a = common.Blake2Hash(append(p_u.Bytes(), p_p...))
-	authGasUsed = uint64(int64(types.IsAuthorizedGasAllocation) - vm_auth.GetGas())
+	authGasUsed = uint64(int64(types.IsAuthorizedGasAllocation) - vm_auth.SafeGetGas())
 
 	return
 }
@@ -544,12 +544,17 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		for _, extrinsic := range workItem.Extrinsics {
 			z += int(extrinsic.Len)
 		}
+		// Get gas safely before building result struct
+		var gasRemaining int64
+		if vm != nil {
+			gasRemaining = vm.SafeGetGas()
+		}
 		result := types.WorkDigest{
 			ServiceID:           workItem.Service,
 			CodeHash:            workItem.CodeHash,
 			PayloadHash:         common.Blake2Hash(workItem.Payload),
 			Gas:                 workItem.AccumulateGasLimit,
-			GasUsed:             uint(workItem.RefineGasLimit - uint64(vm.GetGas())),
+			GasUsed:             uint(workItem.RefineGasLimit - uint64(gasRemaining)),
 			NumImportedSegments: uint(len(workItem.ImportedSegments)),
 			NumExportedSegments: uint(len(exported_segments)),
 			NumExtrinsics: uint(func() int {
@@ -576,7 +581,7 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		results = append(results, result)
 
 		if eventID != 0 {
-			gasUsed := workItem.RefineGasLimit - uint64(vm.GetGas())
+			gasUsed := workItem.RefineGasLimit - uint64(vm.SafeGetGas())
 			refineCosts = append(refineCosts, telemetry.RefineCost{
 				TotalGasUsed:      gasUsed,
 				TotalTimeNs:       uint64(execElapsed.Nanoseconds()),
@@ -848,7 +853,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 			CodeHash:            workItem.CodeHash,
 			PayloadHash:         common.Blake2Hash(workItem.Payload),
 			Gas:                 workItem.AccumulateGasLimit,
-			GasUsed:             uint(workItem.RefineGasLimit - uint64(vm.GetGas())),
+			GasUsed:             uint(workItem.RefineGasLimit - uint64(vm.SafeGetGas())),
 			NumImportedSegments: uint(len(importedSegments)),
 			NumExportedSegments: uint(len(exported_segments)),
 			NumExtrinsics:       uint(len(extrinsicsBlobs[index])),
