@@ -289,6 +289,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	var bNode JNode
 	var tNode *Node
 	var nodes []*Node
+	var evmBuilder *Node // Builder node for EVM client mode
 	var err error
 
 	if !*jam_node { // NodeClient -- client scenario (could be dot-0 OR localhost:____ )
@@ -298,6 +299,18 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		if jam == "safrole" || jam == "fallback" {
 			t.Logf("Nothing to test for %s-client\n", jam)
 			return
+		}
+
+		// For EVM client mode, we need to spin up the builder node (N6) first
+		// before connecting to it, since run_localclient only starts N0-N5
+		if jam == "evm" && *jam_local_client {
+			fmt.Printf("jamtest: evm-client spinning up local builder node (N6)...\n")
+			evmBuilder, err = NewBuilder(numNodes, 40000)
+			if err != nil {
+				t.Fatalf("Failed to create builder node: %v", err)
+			}
+			// Give the builder time to start and sync
+			time.Sleep(5 * time.Second)
 		}
 
 		fmt.Printf("jamtest: %s-client (local=%v) finalization=%s\n", jam, *jam_local_client, finalizationMode)
@@ -447,15 +460,18 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		safrole(jceManager)
 		waitForTermination(tNode, "fallback", FallbackEpochLen, FallbackBufferTime, t)
 	case "evm":
-		builder, err := NewBuilder(numNodes, 40000)
-		if err != nil {
-			t.Fatalf("Failed to create builder node: %v", err)
+		// EVM needs a local builder node (N6) for storage access
+		// For client mode, evmBuilder was already created before connecting
+		builder := evmBuilder
+		if builder == nil {
+			// Node mode: create builder now
+			var err error
+			builder, err = NewBuilder(numNodes, 40000)
+			if err != nil {
+				t.Fatalf("Failed to create builder node: %v", err)
+			}
 		}
-		if *jam_node {
-			evm(bNode, builder, testServices, 30)
-		} else {
-			evm(bNode, builder, testServices, 30)
-		}
+		evm(bNode, builder, testServices, 30)
 	case "algo":
 		algo(bNode, testServices, targetN)
 	case "fib":

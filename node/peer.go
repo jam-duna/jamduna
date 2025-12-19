@@ -98,6 +98,14 @@ func (p *Peer) PeerKey() [32]byte {
 	return [32]byte(p.Validator.Ed25519)
 }
 
+func (p *Peer) SanKey() string {
+	return common.ToSAN(p.Validator.Ed25519[:])
+}
+
+func (p *Peer) SanKeyWithIP() string {
+	return fmt.Sprintf("%s@%s", common.ToSAN(p.Validator.Ed25519[:]), p.PeerAddr)
+}
+
 func (p *Peer) AddKnownHash(h common.Hash) {
 	p.knownHashes = append(p.knownHashes, h)
 	if len(p.knownHashes) > 128 {

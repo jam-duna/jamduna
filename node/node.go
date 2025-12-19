@@ -186,9 +186,10 @@ type NodeContent struct {
 	justificationCache map[string][]common.Hash
 	segmentCacheMutex  sync.RWMutex
 
-	// Builder-exported segment cache keyed by workPackageHash and segment index
-	builderSegments   map[common.Hash]map[uint16][]byte
-	builderSegmentsMu sync.RWMutex
+	builderSegments       map[common.Hash]map[uint16][]byte
+	builderSegmentsMu     sync.RWMutex
+	builderSubmittedWPs   map[common.Hash]struct{}
+	builderSubmittedWPsMu sync.RWMutex
 
 	loaded_services_dir string
 	block_tree          *types.BlockTree
@@ -228,6 +229,7 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage, pvmBackend string)
 		segmentCache:         make(map[string][]byte),
 		justificationCache:   make(map[string][]common.Hash),
 		builderSegments:      make(map[common.Hash]map[uint16][]byte),
+		builderSubmittedWPs:  make(map[common.Hash]struct{}),
 		new_timeslot_chan:    make(chan uint32, 1),
 		extrinsic_pool:       types.NewExtrinsicPool(),
 		pvmBackend:           pvmBackend,
@@ -548,6 +550,97 @@ func (n *NodeContent) StoreSegment(workPackageHash common.Hash, segmentIndex uin
 	segMap[segmentIndex] = buf
 }
 
+func (n *NodeContent) TrackSubmittedWorkPackage(workPackageHash common.Hash) {
+	n.builderSubmittedWPsMu.Lock()
+	defer n.builderSubmittedWPsMu.Unlock()
+	n.builderSubmittedWPs[workPackageHash] = struct{}{}
+	log.Debug(log.DA, "TrackSubmittedWorkPackage", "workPackageHash", workPackageHash)
+}
+
+func (n *NodeContent) IsBuilderSubmittedWorkPackage(workPackageHash common.Hash) bool {
+	n.builderSubmittedWPsMu.RLock()
+	defer n.builderSubmittedWPsMu.RUnlock()
+	_, ok := n.builderSubmittedWPs[workPackageHash]
+	return ok
+}
+
+func (n *NodeContent) UntrackSubmittedWorkPackage(workPackageHash common.Hash) {
+	n.builderSubmittedWPsMu.Lock()
+	defer n.builderSubmittedWPsMu.Unlock()
+	delete(n.builderSubmittedWPs, workPackageHash)
+}
+
+func (n *Node) persistBuilderSegmentsForGuarantee(g types.Guarantee) bool {
+	workPackageHash := g.Report.AvailabilitySpec.WorkPackageHash
+	exportedSegmentRoot := g.Report.AvailabilitySpec.ExportedSegmentRoot
+	segmentCount := g.Report.AvailabilitySpec.ExportedSegmentLength
+
+	if exportedSegmentRoot == (common.Hash{}) || segmentCount == 0 {
+		return true
+	}
+
+	// Check if already persisted (StoreWorkReport may have done it)
+	if _, ok := n.getSegmentsBySegmentRoot(exportedSegmentRoot); ok {
+		return true
+	}
+
+	// Try in-memory cache - builder should always have segments for its own submissions
+	n.builderSegmentsMu.RLock()
+	segMap, ok := n.builderSegments[workPackageHash]
+	if !ok || len(segMap) == 0 {
+		n.builderSegmentsMu.RUnlock()
+		log.Error(log.DA, "persistBuilderSegmentsForGuarantee: no segments in cache",
+			"workPackageHash", workPackageHash,
+			"exportedSegmentRoot", exportedSegmentRoot)
+		return false
+	}
+
+	maxIdx := uint16(0)
+	for idx := range segMap {
+		if idx > maxIdx {
+			maxIdx = idx
+		}
+	}
+	segments := make([][]byte, maxIdx+1)
+	for idx, data := range segMap {
+		segments[idx] = data
+	}
+	n.builderSegmentsMu.RUnlock()
+
+	for i, seg := range segments {
+		if seg == nil {
+			log.Error(log.DA, "persistBuilderSegmentsForGuarantee: gap in segments",
+				"workPackageHash", workPackageHash, "missingIndex", i)
+			return false
+		}
+	}
+
+	tree := trie.NewCDMerkleTree(segments)
+	computedRoot := common.BytesToHash(tree.Root())
+	if computedRoot != exportedSegmentRoot {
+		log.Error(log.DA, "persistBuilderSegmentsForGuarantee: root mismatch",
+			"workPackageHash", workPackageHash,
+			"expected", exportedSegmentRoot,
+			"computed", computedRoot)
+		return false
+	}
+
+	if !n.storeSegmentsBySegmentRoot(exportedSegmentRoot, segments) {
+		log.Error(log.DA, "persistBuilderSegmentsForGuarantee: store failed",
+			"workPackageHash", workPackageHash)
+		return false
+	}
+
+	log.Info(log.DA, "persistBuilderSegmentsForGuarantee: stored from cache",
+		"workPackageHash", workPackageHash,
+		"exportedSegmentRoot", exportedSegmentRoot,
+		"numSegments", len(segments))
+	n.builderSegmentsMu.Lock()
+	delete(n.builderSegments, workPackageHash)
+	n.builderSegmentsMu.Unlock()
+	return true
+}
+
 // FetchJAMDASegments implements DA segment retrieval with caching
 //
 // Current implementation:
@@ -772,17 +865,16 @@ func (n *Node) SetPVMBackend(pvm_mode string) {
 // TODO: take in serviceIDs for multi-rollup support
 func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, peers []string, startPeerList map[uint16]*Peer, dataDir string, port int, jceMode string, role string) (*Node, error) {
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
+	ed25519_priv := ed25519.PrivateKey(credential.Ed25519Secret[:])
+	ed25519_pub := ed25519_priv.Public().(ed25519.PublicKey)
+	sanID := common.ToSAN(ed25519_pub)
+	log.Info(log.Node, fmt.Sprintf("[N%v] %v@%v", id, sanID, addr))
 	log.Info(log.Node, fmt.Sprintf("NewNode [N%v]", id), "spec", chainspec.ID, "addr", addr, "dataDir", dataDir, "role", role)
 	//REQUIRED FOR CAPTURING JOBID. DO NOT DELETE THIS LINE!!
 	fmt.Printf("[N%v] addr=%v, dataDir=%v\n", id, addr, dataDir) //REQUIRED FOR CAPTURING JOBID. DO NOT DELETE THIS LINE!!
 	//REQUIRED FOR CAPTURING JOBID. DO NOT DELETE THIS LINE!!
 
 	var cert tls.Certificate
-	ed25519_priv := ed25519.PrivateKey(credential.Ed25519Secret[:])
-	ed25519_pub := ed25519_priv.Public().(ed25519.PublicKey)
-
-	peerID := common.ToSAN(ed25519_pub)
-	log.Info(log.Node, fmt.Sprintf("PeerIdentification [N%v]", id), "peerID", peerID)
 
 	cert, err := generateSelfSignedCert(ed25519_pub, ed25519_priv)
 	if err != nil {
@@ -1081,9 +1173,12 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 			if isBuilderNode {
 				// Try validators in descending order (5, 4, 3...) to find a jamduna node first
 				for i := len(peers) - 1; i >= 0; i-- {
-					if peers[i].PeerID == uint16(types.TotalValidators-1) { // Validator 5
+					//syncNode := uint16(types.TotalValidators - 1) // Validator 5
+					//syncNode := uint16(types.TotalValidators - 2)
+					syncNode := uint16(0)
+					if peers[i].PeerID == syncNode {
 						peer = peers[i]
-						log.Info(log.Node, "Builder: preferring validator 5 (jamduna) for initial sync", "peerID", peer.PeerID)
+						log.Info(log.Node, "Builder: initial sync", "peerID", peer.PeerID, "san", peer.SanKeyWithIP())
 						break
 					}
 				}
@@ -1154,9 +1249,9 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 						defer cancel()
 						_, err := peer.GetOrInitBlockAnnouncementStream(ctx)
 						if err != nil {
-							log.Warn(log.Node, "Builder: failed to init block announcement stream", "peer", peer.Validator.Ed25519.ShortString(), "err", err)
+							log.Warn(log.Node, "Builder: failed to init block announcement stream", "peer", peer.SanKeyWithIP(), "err", err)
 						} else {
-							log.Info(log.Node, "Builder: block announcement stream established", "peer", peer.Validator.Ed25519.ShortString())
+							log.Info(log.Node, "Builder: block announcement stream established", "peer", peer.SanKeyWithIP())
 						}
 					}(peer)
 				}
@@ -1388,6 +1483,11 @@ const (
 func RobustSubmitAndWaitForWorkPackageBundles(ctx context.Context, n JNode, reqs []*types.WorkPackageBundle) ([]common.Hash, []uint32, error) {
 	var lastErr error
 
+	trackedHashes := make([]common.Hash, len(reqs))
+	for i, req := range reqs {
+		trackedHashes[i] = req.WorkPackage.Hash()
+	}
+
 	for attempt := 1; attempt <= maxRobustTries; attempt++ {
 		// Check if caller's context is already done before starting attempt
 		if err := ctx.Err(); err != nil {
@@ -1441,14 +1541,27 @@ func RobustSubmitAndWaitForWorkPackageBundles(ctx context.Context, n JNode, reqs
 					log.Info(log.Node, "RobustSubmitAndWaitForWorkPackageBundles: refreshing context",
 						"newAnchor", newCtx.Anchor.Hex(),
 						"newLookupAnchorSlot", newCtx.LookupAnchorSlot)
-					for _, req := range reqs {
-						req.WorkPackage.RefineContext = newCtx
+
+					if nodeWithTracking, ok := n.(interface{ UntrackSubmittedWorkPackage(common.Hash) }); ok {
+						for _, oldHash := range trackedHashes {
+							nodeWithTracking.UntrackSubmittedWorkPackage(oldHash)
+						}
+					}
+					for i := range reqs {
+						reqs[i].WorkPackage.RefineContext = newCtx
+						trackedHashes[i] = reqs[i].WorkPackage.Hash()
 					}
 				}
 			}
 			log.Info(log.Node, "RobustSubmitAndWaitForWorkPackageBundles retrying", "nextAttempt", attempt+1, "backoffSeconds", 5)
 			// small backoff between retries
 			time.Sleep(5 * time.Second)
+		}
+	}
+
+	if nodeWithTracking, ok := n.(interface{ UntrackSubmittedWorkPackage(common.Hash) }); ok {
+		for _, hash := range trackedHashes {
+			nodeWithTracking.UntrackSubmittedWorkPackage(hash)
 		}
 	}
 
@@ -1653,6 +1766,8 @@ func (n *NodeContent) GetEd25519Key() types.Ed25519Key {
 func (n *NodeContent) SubmitBundleSameCore(b *types.WorkPackageBundle) (err error) {
 	workPackageHash := b.WorkPackage.Hash()
 	var coreIndex uint16
+
+	n.TrackSubmittedWorkPackage(workPackageHash)
 
 	// Calculate slot based on JCE mode:
 	// - JCEDefault: Use statedb's current timeslot to ensure correct safrole state
@@ -3799,8 +3914,15 @@ func (n *Node) assureNewBlock(ctx context.Context, b *types.Block, sdb *statedb.
 		}
 	}
 
-	// Builder/full nodes don't participate in assurance (EA)
 	if n.IsBuilder() {
+		for _, g := range b.Extrinsic.Guarantees {
+			workPackageHash := g.Report.AvailabilitySpec.WorkPackageHash
+			if n.IsBuilderSubmittedWorkPackage(workPackageHash) {
+				if n.persistBuilderSegmentsForGuarantee(g) {
+					n.UntrackSubmittedWorkPackage(workPackageHash)
+				}
+			}
+		}
 		return nil
 	}
 

@@ -90,7 +90,7 @@ func main() {
 		chainSpecFlag      = "chain"
 		serviceIDsFlag     = "services"
 
-		roleFlag        = "role"
+		roleFlag = "role"
 
 		//run flags that is not supported yet
 		pvmBackendFlag  = "pvm-backend"
@@ -353,7 +353,6 @@ func main() {
 			}
 			if validatorIndexFlagSet {
 				Port = 40000 + validatorIndex // fix later with a good metadata abstraction that works
-				fmt.Printf("Port from chainSpec: %d\n", Port)
 			}
 			dataPath = filepath.Join(dataPath, "jam-"+strconv.Itoa(validatorIndex))
 
@@ -394,7 +393,7 @@ func main() {
 				}
 			}
 
-// TODO: take in serviceids for multi-rollup support
+			// TODO: take in serviceids for multi-rollup support
 			// Normalize role string
 			nodeRole := types.RoleValidator
 			if role == "builder" {
@@ -447,7 +446,6 @@ func main() {
 	runCmd.Flags().StringVar(&role, roleFlag, "validator", "Node role: 'validator' (default) or 'builder' (full node that doesn't participate in consensus)")
 	runCmd.Flags().StringVar(&serviceIDsStr, serviceIDsFlag, "", "Comma-separated list of service IDs to enable builder role")
 
-
 	// add commands to root
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(genKeysCmd)
@@ -499,7 +497,7 @@ func CheckValidatorInfo(validatorIndex int, peerList map[uint16]*node.Peer, data
 			os.Exit(1)
 		}
 	} else {
-		fmt.Printf("Builder/full node mode: validator index %d is outside active validator set (0-%d), skipping chainspec validation\n", validatorIndex, types.TotalValidators-1)
+		//fmt.Printf("Builder/full node mode: validator index %d is outside active validator set (0-%d), skipping chainspec validation\n", validatorIndex, types.TotalValidators-1)
 	}
 	return selfSecrets
 }

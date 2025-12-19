@@ -101,6 +101,12 @@ func (n *NodeContent) GetMeta_Guarantor(erasureRoot common.Hash) (bClubs []commo
 }
 
 func (n *NodeContent) StoreBundleSpecSegments(as *types.AvailabilitySpecifier, d types.AvailabilitySpecifierDerivation, b types.WorkPackageBundle, segments [][]byte) {
+	log.Info(log.DA, "StoreBundleSpecSegments: storing",
+		"NODE", n.id,
+		"workPackageHash", as.WorkPackageHash,
+		"exportedSegmentRoot", as.ExportedSegmentRoot,
+		"numSegments", len(segments))
+
 	encodedSegments, err := types.Encode(segments)
 	if err != nil {
 		log.Error(log.Node, "StoreBundleSpecSegments: failed to encode segments", "erasureRoot", as.ErasureRoot, "err", err)
@@ -216,9 +222,44 @@ func (n *NodeContent) StoreAuditDA_Assurer(erasureRoot common.Hash, shardIndex u
 }
 
 func (n *NodeContent) StoreWorkReport(wr types.WorkReport) error {
-	// Once availability info exists, drop any builder-cached segments for this work package
+	workPackageHash := wr.AvailabilitySpec.WorkPackageHash
+	exportedSegmentRoot := wr.AvailabilitySpec.ExportedSegmentRoot
+
 	n.builderSegmentsMu.Lock()
-	delete(n.builderSegments, wr.AvailabilitySpec.WorkPackageHash)
+	segMap, ok := n.builderSegments[workPackageHash]
+	log.Info(log.DA, "StoreWorkReport: checking builderSegments",
+		"workPackageHash", workPackageHash,
+		"exportedSegmentRoot", exportedSegmentRoot,
+		"found", ok,
+		"numSegments", len(segMap))
+	if ok && len(segMap) > 0 {
+		// Convert map to ordered slice
+		maxIdx := uint16(0)
+		for idx := range segMap {
+			if idx > maxIdx {
+				maxIdx = idx
+			}
+		}
+		segments := make([][]byte, maxIdx+1)
+		for idx, data := range segMap {
+			segments[idx] = data
+		}
+
+		stored := false
+		if exportedSegmentRoot != (common.Hash{}) {
+			stored = n.storeSegmentsBySegmentRoot(exportedSegmentRoot, segments)
+			if stored {
+				log.Info(log.DA, "StoreWorkReport: re-indexed builder segments",
+					"workPackageHash", workPackageHash,
+					"exportedSegmentRoot", exportedSegmentRoot,
+					"numSegments", len(segments))
+			}
+		}
+		// Only delete cache after successful persistence
+		if stored {
+			delete(n.builderSegments, workPackageHash)
+		}
+	}
 	n.builderSegmentsMu.Unlock()
 
 	return n.store.StoreWorkReport(&wr)

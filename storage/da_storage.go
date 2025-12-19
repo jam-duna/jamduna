@@ -46,10 +46,15 @@ func (s *StateDBStorage) StoreBundleSpecSegments(
 		log.Warn(log.Node, "StoreBundleSpecSegments: failed to persist bundle", "erasureRoot", erasureRoot, "err", err)
 	}
 
-	// Store segments for CE 147
+	// Store segments for CE 147/148 GetSegmentWithProof lookups
 	segmentsKey := fmt.Sprintf("erasureSegments-%v", exportedSegmentRoot)
 	if err := s.WriteRawKV([]byte(segmentsKey), encodedSegments); err != nil {
 		log.Warn(log.Node, "StoreBundleSpecSegments: failed to persist segments", "segmentsRoot", exportedSegmentRoot, "err", err)
+	} else {
+		log.Debug(log.DA, "StoreBundleSpecSegments: stored segments",
+			"segmentsKey", segmentsKey,
+			"exportedSegmentRoot", exportedSegmentRoot,
+			"encodedLen", len(encodedSegments))
 	}
 
 	return nil

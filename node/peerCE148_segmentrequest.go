@@ -52,11 +52,10 @@ type SegmentRequest struct {
 }
 
 // ToBytes encodes a SegmentRequest to bytes
+// Format per spec: --> [Segments-Root ++ len++[Segment Index]]
+// Note: No outer array length - the array is delimited by FIN
 func (r *SegmentRequest) ToBytes() []byte {
 	var data []byte
-
-	// Encode array length
-	data = append(data, types.E(uint64(len(r.Items)))...)
 
 	for _, item := range r.Items {
 		// Segments-Root (32 bytes)
@@ -73,56 +72,53 @@ func (r *SegmentRequest) ToBytes() []byte {
 }
 
 // FromBytes decodes a SegmentRequest from bytes
+// Format per spec: --> [Segments-Root ++ len++[Segment Index]]
+// Note: No outer array length - items are parsed until data is exhausted
 func (r *SegmentRequest) FromBytes(data []byte) error {
-	if len(data) < 1 {
+	if len(data) < 32 {
 		return fmt.Errorf("invalid segment request: too short")
 	}
 
-	// Decode array length
-	numItems, bytesRead := types.DecodeE(data)
-	if bytesRead == 0 {
-		return fmt.Errorf("invalid segment request: failed to decode item count")
-	}
-	if numItems == 0 {
-		return fmt.Errorf("invalid segment request: no items in request")
-	}
-	data = data[bytesRead:]
-
-	r.Items = make([]SegmentRequestItem, numItems)
+	r.Items = nil
 	totalSegments := 0
 
-	for i := uint64(0); i < numItems; i++ {
-		if len(data) < 32 {
-			return fmt.Errorf("invalid segment request: insufficient data for segments root %d", i)
-		}
+	// Parse items until data is exhausted
+	for len(data) >= 32 {
+		item := SegmentRequestItem{}
 
 		// Segments-Root (32 bytes)
-		r.Items[i].SegmentsRoot = common.BytesToHash(data[:32])
+		item.SegmentsRoot = common.BytesToHash(data[:32])
 		data = data[32:]
 
 		// len++[Segment Index]
 		numIndices, bytesRead := types.DecodeE(data)
 		if bytesRead == 0 {
-			return fmt.Errorf("invalid segment request: failed to decode segment count for item %d", i)
+			return fmt.Errorf("invalid segment request: failed to decode segment count")
 		}
 		data = data[bytesRead:]
 
 		if numIndices == 0 {
-			return fmt.Errorf("invalid segment request: empty segment indices for item %d", i)
+			return fmt.Errorf("invalid segment request: empty segment indices")
 		}
 		totalSegments += int(numIndices)
 		if totalSegments > types.MaxExports {
 			return fmt.Errorf("invalid segment request: too many total segments requested (%d > %d)", totalSegments, types.MaxExports)
 		}
 
-		r.Items[i].SegmentIndices = make([]uint16, numIndices)
+		item.SegmentIndices = make([]uint16, numIndices)
 		for j := uint64(0); j < numIndices; j++ {
 			if len(data) < 2 {
-				return fmt.Errorf("invalid segment request: insufficient data for segment index %d/%d", i, j)
+				return fmt.Errorf("invalid segment request: insufficient data for segment index %d", j)
 			}
-			r.Items[i].SegmentIndices[j] = binary.LittleEndian.Uint16(data[:2])
+			item.SegmentIndices[j] = binary.LittleEndian.Uint16(data[:2])
 			data = data[2:]
 		}
+
+		r.Items = append(r.Items, item)
+	}
+
+	if len(r.Items) == 0 {
+		return fmt.Errorf("invalid segment request: no items parsed")
 	}
 
 	return nil
@@ -377,23 +373,19 @@ func (n *Node) onSegmentRequest(ctx context.Context, stream quic.Stream, msg []b
 }
 
 // GetSegmentWithProof retrieves a segment and its import proof from the availability store
-// If not found locally (e.g., on builder nodes), it will attempt to fetch from validators via CE147
+// If not found locally, it will attempt to fetch from validators via CE148
 func (n *NodeContent) GetSegmentWithProof(segmentsRoot common.Hash, segmentIndex uint16) (segment []byte, importProof []common.Hash, found bool) {
 	segments, ok := n.getSegmentsBySegmentRoot(segmentsRoot)
 	if !ok {
-		// Try to fetch from validators if we're a builder node
-		if n.nodeSelf != nil && n.nodeSelf.IsBuilder() {
-			log.Info(log.Node, "GetSegmentWithProof: segments not found locally, fetching from validators",
+		// Try to fetch from validators - first find segment count from work reports
+		segmentCount := n.findSegmentCountByRoot(segmentsRoot)
+		if segmentCount > 0 {
+			log.Info(log.Node, "GetSegmentWithProof: fetching from validators",
 				"segmentsRoot", segmentsRoot,
-				"segmentIndex", segmentIndex)
-			segments, ok = n.fetchSegmentsFromValidators(segmentsRoot)
-			if !ok {
-				log.Warn(log.Node, "GetSegmentWithProof: failed to fetch segments from validators",
-					"segmentsRoot", segmentsRoot,
-					"segmentIndex", segmentIndex)
-				return nil, nil, false
-			}
-		} else {
+				"segmentCount", segmentCount)
+			segments, ok = n.fetchSegmentsFromValidators(segmentsRoot, segmentCount)
+		}
+		if !ok {
 			log.Trace(log.Node, "GetSegmentWithProof: segments not found",
 				"segmentsRoot", segmentsRoot,
 				"segmentIndex", segmentIndex)
@@ -429,6 +421,16 @@ func (n *NodeContent) GetSegmentWithProof(segmentsRoot common.Hash, segmentIndex
 	return segments[segmentIndex], proof, true
 }
 
+// findSegmentCountByRoot searches work reports to find segment count for a given exported segment root
+func (n *NodeContent) findSegmentCountByRoot(segmentsRoot common.Hash) uint16 {
+	// WorkReportSearch can search by segmentRoot
+	si := n.WorkReportSearch(segmentsRoot)
+	if si != nil {
+		return si.WorkReport.AvailabilitySpec.ExportedSegmentLength
+	}
+	return 0
+}
+
 // getSegmentsBySegmentRoot retrieves the encoded segments for a given segments root
 func (n *NodeContent) getSegmentsBySegmentRoot(segmentsRoot common.Hash) (segmentBytes [][]byte, ok bool) {
 	segmentsKey := fmt.Sprintf("erasureSegments-%v", segmentsRoot)
@@ -443,12 +445,14 @@ func (n *NodeContent) getSegmentsBySegmentRoot(segmentsRoot common.Hash) (segmen
 	if err != nil {
 		log.Warn(log.Node, "getSegmentsBySegmentRoot: ReadRawKV failed",
 			"segmentsRoot", segmentsRoot,
+			"segmentsKey", segmentsKey,
 			"err", err)
 		return nil, false
 	}
 	if !found {
-		log.Trace(log.Node, "getSegmentsBySegmentRoot: segments not found",
-			"segmentsRoot", segmentsRoot)
+		log.Debug(log.Node, "getSegmentsBySegmentRoot: segments not found",
+			"segmentsRoot", segmentsRoot,
+			"segmentsKey", segmentsKey)
 		return nil, false
 	}
 
@@ -471,10 +475,7 @@ func (n *NodeContent) getSegmentsBySegmentRoot(segmentsRoot common.Hash) (segmen
 	return segments, true
 }
 
-// fetchSegmentsFromValidators fetches all segments for a given segmentsRoot from validators via CE147
-// This is used by builder nodes to serve segment requests when they don't have segments locally
-func (n *NodeContent) fetchSegmentsFromValidators(segmentsRoot common.Hash) ([][]byte, bool) {
-	// Get connected validators to fetch from
+func (n *NodeContent) fetchSegmentsFromValidators(segmentsRoot common.Hash, segmentCount uint16) ([][]byte, bool) {
 	if n.nodeSelf == nil {
 		log.Warn(log.Node, "fetchSegmentsFromValidators: nodeSelf is nil")
 		return nil, false
@@ -486,32 +487,27 @@ func (n *NodeContent) fetchSegmentsFromValidators(segmentsRoot common.Hash) ([][
 		return nil, false
 	}
 
-	// Try each peer until we get the segments
+	if segmentCount == 0 {
+		log.Warn(log.Node, "fetchSegmentsFromValidators: segmentCount is 0")
+		return nil, false
+	}
+
+	indices := make([]uint16, segmentCount)
+	for i := uint16(0); i < segmentCount; i++ {
+		indices[i] = i
+	}
+
 	for _, peer := range peers {
-		// Use CE148 segment request to fetch segments
-		// Request a reasonable batch of segment indices (0 to 15 to start, which covers most cases)
-		// If a work package exports more, we'll need to make additional requests
-
-		// Start with a probe request for indices 0-15 (typical small batch)
-		maxBatchSize := uint16(16)
-		indices := make([]uint16, maxBatchSize)
-		for i := uint16(0); i < maxBatchSize; i++ {
-			indices[i] = i
-		}
-
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		responses, err := peer.SendSegmentRequest(ctx, segmentsRoot, indices, 0)
 		cancel()
 
 		if err != nil {
 			log.Trace(log.Node, "fetchSegmentsFromValidators: SendSegmentRequest failed",
-				"peer", peer.PeerID,
-				"segmentsRoot", segmentsRoot,
-				"err", err)
+				"peer", peer.PeerID, "segmentsRoot", segmentsRoot, "err", err)
 			continue
 		}
 
-		// Collect successful segments
 		var allSegments [][]byte
 		for _, resp := range responses {
 			if resp.Segment != nil && len(resp.Segment) > 0 {
@@ -519,52 +515,53 @@ func (n *NodeContent) fetchSegmentsFromValidators(segmentsRoot common.Hash) ([][
 			}
 		}
 
-		if len(allSegments) > 0 {
-			// Verify the segments root matches
-			tree := trie.NewCDMerkleTree(allSegments)
-			computedRoot := common.BytesToHash(tree.Root())
-			if computedRoot != segmentsRoot {
-				log.Warn(log.Node, "fetchSegmentsFromValidators: computed root mismatch",
-					"expected", segmentsRoot,
-					"computed", computedRoot,
-					"numSegments", len(allSegments))
-				continue // Try next peer
-			}
-
-			// Cache the segments locally for future requests
-			n.storeSegmentsBySegmentRoot(segmentsRoot, allSegments)
-
-			log.Info(log.Node, "fetchSegmentsFromValidators: successfully fetched segments",
-				"segmentsRoot", segmentsRoot,
-				"numSegments", len(allSegments),
-				"fromPeer", peer.PeerID)
-			return allSegments, true
+		if len(allSegments) != int(segmentCount) {
+			log.Warn(log.Node, "fetchSegmentsFromValidators: wrong segment count",
+				"expected", segmentCount, "got", len(allSegments))
+			continue
 		}
+
+		tree := trie.NewCDMerkleTree(allSegments)
+		computedRoot := common.BytesToHash(tree.Root())
+		if computedRoot != segmentsRoot {
+			log.Warn(log.Node, "fetchSegmentsFromValidators: root mismatch",
+				"expected", segmentsRoot, "computed", computedRoot)
+			continue
+		}
+
+		if !n.storeSegmentsBySegmentRoot(segmentsRoot, allSegments) {
+			log.Warn(log.Node, "fetchSegmentsFromValidators: failed to store", "segmentsRoot", segmentsRoot)
+			continue
+		}
+
+		log.Info(log.Node, "fetchSegmentsFromValidators: success",
+			"segmentsRoot", segmentsRoot, "numSegments", len(allSegments), "fromPeer", peer.PeerID)
+		return allSegments, true
 	}
 
-	log.Warn(log.Node, "fetchSegmentsFromValidators: failed to fetch from any peer",
-		"segmentsRoot", segmentsRoot)
+	log.Warn(log.Node, "fetchSegmentsFromValidators: failed to fetch from any peer", "segmentsRoot", segmentsRoot)
 	return nil, false
 }
 
-// storeSegmentsBySegmentRoot caches fetched segments locally
-func (n *NodeContent) storeSegmentsBySegmentRoot(segmentsRoot common.Hash, segments [][]byte) {
+func (n *NodeContent) storeSegmentsBySegmentRoot(segmentsRoot common.Hash, segments [][]byte) bool {
 	encodedSegments, err := types.Encode(segments)
 	if err != nil {
 		log.Warn(log.Node, "storeSegmentsBySegmentRoot: failed to encode segments", "err", err)
-		return
+		return false
 	}
 
 	store, err := n.GetStorage()
 	if err != nil {
 		log.Warn(log.Node, "storeSegmentsBySegmentRoot: storage not available", "err", err)
-		return
+		return false
 	}
 
 	segmentsKey := fmt.Sprintf("erasureSegments-%v", segmentsRoot)
 	if err := store.WriteRawKV([]byte(segmentsKey), encodedSegments); err != nil {
 		log.Warn(log.Node, "storeSegmentsBySegmentRoot: failed to persist segments", "err", err)
+		return false
 	}
+	return true
 }
 
 // encodeImportProof encodes an import proof (list of hashes) to bytes

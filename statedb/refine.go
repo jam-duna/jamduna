@@ -752,91 +752,102 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 		importsegments := make([][][]byte, len(wp.WorkItems))
 		result, _, exported_segments := vm.ExecuteRefine(coreIndex, uint32(index), wp, authorization, importsegments, 0, extrinsicsBlobs[index], p_a, common.BytesToHash(trie.H0), "")
 
-		// Post-SSR: Parse refine output to populate witness cache from exported segments
-		// Output format: [2B count] + count × [32B object_id + 2B index_start + 4B payload_length + 1B object_kind]
-		if err := s.populateWitnessCacheFromRefineOutput(workItem.Service, result.Ok, exported_segments); err != nil {
-			log.Warn(log.EVM, "Failed to populate witness cache from refine output", "error", err)
-		}
+		// Check if this is an EVM service - only EVM needs metashard/verkle witness processing
+		isEVMService := workItem.Service == EVMServiceCode
 
-		importedSegments, witnesses, err := vm.GetBuilderWitnesses()
-		if err != nil {
-			log.Warn(log.DA, "BuildBundle: GetBuilderWitnesses failed", "err", err)
-			return nil, nil, err
-		}
+		// For non-EVM services (e.g., fib), skip EVM-specific witness processing
+		var importedSegments []types.ImportSegment
+		var witnesses []types.StateWitness
+		var contractWitnessBlob []byte
 
-		// Generate Verkle witness for builder mode (Step 2: Builder Refine)
-		// Extract contract witness blob from refine result output
-		contractWitnessBlob, err := s.extractContractWitnessBlob(result.Ok, exported_segments)
-		if err != nil {
-			log.Warn(log.EVM, "Failed to extract contract witness blob", "err", err)
-			return nil, nil, err
-		}
-		contractWitnessBlobs[index] = contractWitnessBlob // Store for later application to main tree
+		if isEVMService {
+			// Post-SSR: Parse refine output to populate witness cache from exported segments
+			// Output format: [2B count] + count × [32B object_id + 2B index_start + 4B payload_length + 1B object_kind]
+			if err := s.populateWitnessCacheFromRefineOutput(workItem.Service, result.Ok, exported_segments); err != nil {
+				log.Warn(log.EVM, "Failed to populate witness cache from refine output", "error", err)
+			}
 
-		// Build verkle witness - all verkle logic handled in storage
-		verkleWitnessBytes, err := s.sdb.BuildVerkleWitness(contractWitnessBlob)
-		if err != nil {
-			log.Warn(log.EVM, "BuildVerkleWitness failed", "err", err)
-			return nil, nil, err
-		}
+			importedSegments, witnesses, err = vm.GetBuilderWitnesses()
+			if err != nil {
+				log.Warn(log.DA, "BuildBundle: GetBuilderWitnesses failed", "err", err)
+				return nil, nil, err
+			}
 
-		// Build Block Access List from witness (Phase 4)
-		// This computes the BAL hash that will be embedded in the block payload
-		blockAccessListHash, accountCount, totalChanges, err := s.sdb.ComputeBlockAccessListHash(verkleWitnessBytes)
-		if err != nil {
-			log.Warn(log.EVM, "ComputeBlockAccessListHash failed", "err", err)
-			// Non-fatal: continue without BAL hash (will be zeros)
-			blockAccessListHash = common.Hash{}
-		} else {
-			log.Trace(log.EVM, "Block Access List computed", "hash", blockAccessListHash.Hex(), "accounts", accountCount, "changes", totalChanges)
-		}
+			// Generate Verkle witness for builder mode (Step 2: Builder Refine)
+			// Extract contract witness blob from refine result output
+			contractWitnessBlob, err = s.extractContractWitnessBlob(result.Ok, exported_segments)
+			if err != nil {
+				log.Warn(log.EVM, "Failed to extract contract witness blob", "err", err)
+				return nil, nil, err
+			}
+			contractWitnessBlobs[index] = contractWitnessBlob // Store for later application to main tree
 
-		// Extract post-state Verkle root from witness to update block payload
-		postStateRoot, err := extractPostStateRootFromWitness(verkleWitnessBytes)
-		if err != nil {
-			log.Warn(log.EVM, "Failed to extract post-state root from witness", "err", err)
-			postStateRoot = common.Hash{} // leave unchanged if extraction fails
-		}
+			// Build verkle witness - all verkle logic handled in storage
+			verkleWitnessBytes, err := s.sdb.BuildVerkleWitness(contractWitnessBlob)
+			if err != nil {
+				log.Warn(log.EVM, "BuildVerkleWitness failed", "err", err)
+				return nil, nil, err
+			}
 
-		// Update block payload with BAL hash and post-state root (Phase 4)
-		// The block was already exported during ExecuteRefine, so we need to update it in exported_segments
-		err = s.updateBlockPayload(exported_segments, blockAccessListHash, postStateRoot)
-		if err != nil {
-			log.Warn(log.EVM, "Failed to update block payload", "err", err)
-			// Non-fatal: continue with original block payload (BAL hash/root may be zeros)
-		}
+			// Build Block Access List from witness (Phase 4)
+			// This computes the BAL hash that will be embedded in the block payload
+			blockAccessListHash, accountCount, totalChanges, err := s.sdb.ComputeBlockAccessListHash(verkleWitnessBytes)
+			if err != nil {
+				log.Warn(log.EVM, "ComputeBlockAccessListHash failed", "err", err)
+				// Non-fatal: continue without BAL hash (will be zeros)
+				blockAccessListHash = common.Hash{}
+			} else {
+				log.Trace(log.EVM, "Block Access List computed", "hash", blockAccessListHash.Hex(), "accounts", accountCount, "changes", totalChanges)
+			}
 
-		// Prepend Verkle witness as FIRST extrinsic
-		extrinsicsBlobs[index] = append([][]byte{verkleWitnessBytes}, extrinsicsBlobs[index]...)
+			// Extract post-state Verkle root from witness to update block payload
+			postStateRoot, err := extractPostStateRootFromWitness(verkleWitnessBytes)
+			if err != nil {
+				log.Warn(log.EVM, "Failed to extract post-state root from witness", "err", err)
+				postStateRoot = common.Hash{} // leave unchanged if extraction fails
+			}
 
-		// Update work item extrinsics to include Verkle witness
-		verkleWitnessExtrinsic := types.WorkItemExtrinsic{
-			Hash: common.Blake2Hash(verkleWitnessBytes),
-			Len:  uint32(len(verkleWitnessBytes)),
-		}
-		// Prepend to extrinsics list
-		wp.WorkItems[index].Extrinsics = append([]types.WorkItemExtrinsic{verkleWitnessExtrinsic}, wp.WorkItems[index].Extrinsics...)
+			// Update block payload with BAL hash and post-state root (Phase 4)
+			// The block was already exported during ExecuteRefine, so we need to update it in exported_segments
+			err = s.updateBlockPayload(exported_segments, blockAccessListHash, postStateRoot)
+			if err != nil {
+				log.Warn(log.EVM, "Failed to update block payload", "err", err)
+				// Non-fatal: continue with original block payload (BAL hash/root may be zeros)
+			}
 
-		// Verify post-state against execution
-		if err := s.verifyPostStateAgainstExecution(wp.WorkItems[index], extrinsicsBlobs[index], contractWitnessBlob); err != nil {
-			log.Warn(log.EVM, "Post-state verification failed", "err", err)
-			return nil, nil, fmt.Errorf("post-state verification failed: %w", err)
-		}
+			// Prepend Verkle witness as FIRST extrinsic
+			extrinsicsBlobs[index] = append([][]byte{verkleWitnessBytes}, extrinsicsBlobs[index]...)
 
-		// Clear verkleReadLog for next execution via clean interface
-		s.sdb.ClearVerkleReadLog()
+			// Update work item extrinsics to include Verkle witness
+			verkleWitnessExtrinsic := types.WorkItemExtrinsic{
+				Hash: common.Blake2Hash(verkleWitnessBytes),
+				Len:  uint32(len(verkleWitnessBytes)),
+			}
+			// Prepend to extrinsics list
+			wp.WorkItems[index].Extrinsics = append([]types.WorkItemExtrinsic{verkleWitnessExtrinsic}, wp.WorkItems[index].Extrinsics...)
+
+			// Verify post-state against execution
+			if err := s.verifyPostStateAgainstExecution(wp.WorkItems[index], extrinsicsBlobs[index], contractWitnessBlob); err != nil {
+				log.Warn(log.EVM, "Post-state verification failed", "err", err)
+				return nil, nil, fmt.Errorf("post-state verification failed: %w", err)
+			}
+
+			// Clear verkleReadLog for next execution via clean interface
+			s.sdb.ClearVerkleReadLog()
+
+			// Append builder witnesses to extrinsicsBlobs -- this will be the metashards + the object proofs
+			builderWitnessCount := appendExtrinsicWitnessesToWorkItem(&wp.WorkItems[index], &extrinsicsBlobs, index, witnesses)
+			log.Trace(log.DA, "BuildBundle: Appended builder witnesses", "workItemIndex", index, "builderWitnessCount", builderWitnessCount, "totalExtrinsics", len(extrinsicsBlobs[index]))
+			// Update payload metadata with builder witness count and BAL hash
+			// ALWAYS update if payload exists (even if builderWitnessCount=0) to ensure BAL hash is included
+			if len(wp.WorkItems[index].Payload) >= 7 {
+				totalWitnessCount := uint16(builderWitnessCount)
+				wp.WorkItems[index].Payload = BuildPayload(PayloadTypeTransactions, int(originalTxCount), 0, int(totalWitnessCount), blockAccessListHash)
+			}
+		} // end if isEVMService
 
 		wp.WorkItems[index].ExportCount = uint16(len(exported_segments))
 		wp.WorkItems[index].ImportedSegments = importedSegments
-		// Append builder witnesses to extrinsicsBlobs -- this will be the metashards + the object proofs
-		builderWitnessCount := appendExtrinsicWitnessesToWorkItem(&wp.WorkItems[index], &extrinsicsBlobs, index, witnesses)
-		log.Trace(log.DA, "BuildBundle: Appended builder witnesses", "workItemIndex", index, "builderWitnessCount", builderWitnessCount, "totalExtrinsics", len(extrinsicsBlobs[index]))
-		// Update payload metadata with builder witness count and BAL hash
-		// ALWAYS update if payload exists (even if builderWitnessCount=0) to ensure BAL hash is included
-		if len(wp.WorkItems[index].Payload) >= 7 {
-			totalWitnessCount := uint16(builderWitnessCount)
-			wp.WorkItems[index].Payload = BuildPayload(PayloadTypeTransactions, int(originalTxCount), 0, int(totalWitnessCount), blockAccessListHash)
-		}
 
 		// Append exported segments (append slice directly)
 		segments = append(segments, exported_segments...)
@@ -898,7 +909,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 		}
 	}
 
-	// Store exported segments in JAMDA if the implementation supports a builder cache.
+	// Store exported segments for builder - both in memory cache and persisted to disk
 	if len(segments) > 0 {
 		workPackageHash := wp.Hash()
 		type segmentStorer interface {
@@ -908,10 +919,16 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 			for segmentIdx, segmentData := range segments {
 				storer.StoreSegment(workPackageHash, uint16(segmentIdx), segmentData)
 			}
-			log.Trace(log.DA, "Stored exported segments in JAMDA", "workPackageHash", workPackageHash.Hex(), "numSegments", len(segments))
-		} else {
-			log.Warn(log.DA, "JAMDA does not support StoreSegment", "type", fmt.Sprintf("%T", s.GetStorage().GetJAMDA()))
+			log.Trace(log.DA, "BuildBundle: stored segments in memory cache", "workPackageHash", workPackageHash.Hex(), "numSegments", len(segments))
 		}
+
+		// Persist segments to disk keyed by ExportedSegmentRoot for later retrieval
+		spec, d := NewAvailabilitySpecifier(bundle, segments)
+		s.GetStorage().GetJAMDA().StoreBundleSpecSegments(spec, d, bundle, segments)
+		log.Info(log.DA, "BuildBundle: persisted segments to disk",
+			"workPackageHash", workPackageHash.Hex(),
+			"exportedSegmentRoot", spec.ExportedSegmentRoot.Hex(),
+			"numSegments", len(segments))
 	}
 
 	return &bundle, workReport, nil

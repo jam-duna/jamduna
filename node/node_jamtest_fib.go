@@ -169,10 +169,7 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 			for i, imp := range imported {
 				segment, proof, found := n1.GetSegmentWithProof(imp.RequestedHash, uint16(imp.Index))
 				if !found {
-					log.Error(log.Node, "FIB: failed to get segment with proof",
-						"segmentsRoot", imp.RequestedHash,
-						"index", imp.Index)
-					return
+					panic(fmt.Sprintf("FIB: failed to get segment with proof segmentsRoot=%s index=%d", imp.RequestedHash, imp.Index))
 				}
 				importSegmentData[0][i] = segment
 				justifications[0][i] = proof
@@ -214,12 +211,16 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 			exportedSegmentRoot = wr.AvailabilitySpec.ExportedSegmentRoot
 		}
 
-		// Track this completed FIB for future imports
-		completedFibs = append(completedFibs, completedFibResult{
-			fibN:                fibN,
-			exportedSegmentRoot: exportedSegmentRoot,
-			numExported:         fibN, // FIB(N) exports N segments
-		})
+		// Track this completed FIB for future imports (only if we got a valid exportedSegmentRoot)
+		if exportedSegmentRoot != (common.Hash{}) {
+			completedFibs = append(completedFibs, completedFibResult{
+				fibN:                fibN,
+				exportedSegmentRoot: exportedSegmentRoot,
+				numExported:         fibN, // FIB(N) exports N segments
+			})
+		} else {
+			log.Warn(log.Node, "FIB: skipping from completedFibs due to zero exportedSegmentRoot", "fibN", fibN)
+		}
 
 		k := common.ServiceStorageKey(fib_serviceIdx, []byte{0})
 		data, _, _ := n1.GetServiceStorage(fib_serviceIdx, k)
