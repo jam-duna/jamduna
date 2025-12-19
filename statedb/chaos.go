@@ -10,7 +10,7 @@ func SimulateBlockAuthoringInterruption(blk *types.Block) (authoring_supressed b
 		return false
 	}
 	slot := blk.Header.Slot
-	epoch, phase := ComputeEpochAndPhase(blk.Header.Slot, 0)
+	epoch, phase := ComputeEpochAndPhase(blk.Header.Slot)
 	r := blk.Header.Seal[0] //
 
 	var pNot float64 // prob of NOT Brodcasting

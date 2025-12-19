@@ -123,8 +123,8 @@ func GenSpec(dev DevConfig) (chainSpec *ChainSpec, err error) {
 		ID: "jamduna",
 	}
 	address := make([]string, 0)
-	for _, validator := range dev.GenesisValidators {
-		fmt.Printf("Adding validator: %s,  netaddr: %s \n", validator.PeerID, validator.NetAddr)
+	for ind, validator := range dev.GenesisValidators {
+		fmt.Printf("Adding validator #%v: %s,  netaddr: %s \n", ind, validator.PeerID, validator.NetAddr)
 		// use the validator's Bandersnatch pubkey and prepend with the SAN
 		bootnode := fmt.Sprintf("%s@%s", validator.PeerID, validator.NetAddr)
 		chainSpec.Bootnodes = append(chainSpec.Bootnodes, bootnode)

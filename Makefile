@@ -343,8 +343,11 @@ kill_parallel_jam:
 
 kill:
 	@echo "Kill Jam Binaries(if any)..."
-	@pkill jam || true
-	sleep 1
+	@pkill -9 jam || true
+	@sleep 1
+	@pkill -9 jam || true
+	@sleep 1
+	@if pgrep jam > /dev/null; then echo "WARNING: Some jam processes still running"; pgrep -l jam; else echo "All jam processes terminated."; fi
 	@echo "Process cleanup complete."
 
 

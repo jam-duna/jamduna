@@ -142,8 +142,7 @@ type NodeContent struct {
 
 	server quic.Listener
 
-	pvmBackend      string
-	epoch0Timestamp uint64
+	pvmBackend string
 	// Jamweb
 	hub             *Hub
 	tlsConfig       *tls.Config
@@ -703,8 +702,8 @@ func (n *Node) setValidatorCredential(credential types.ValidatorSecret) {
 }
 
 // TODO: take in serviceIDs for multi-rollup support
-func createNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int, jceMode string, role string) (*Node, error) {
-	return newNode(id, credential, chainspec, pvmBackend, epoch0Timestamp, peers, peerList, dataDir, port, jceMode, role)
+func createNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, peers []string, peerList map[uint16]*Peer, dataDir string, port int, jceMode string, role string) (*Node, error) {
+	return newNode(id, credential, chainspec, pvmBackend, peers, peerList, dataDir, port, jceMode, role)
 }
 
 func PrintSpec(chainspec *chainspecs.ChainSpec) error {
@@ -733,8 +732,8 @@ func PrintSpec(chainspec *chainspecs.ChainSpec) error {
 }
 
 // TODO: take in serviceIDs for multi-rollup support
-func NewNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, epoch0Timestamp uint64, peers []string, peerList map[uint16]*Peer, dataDir string, port int, role string) (*Node, error) {
-	return createNode(id, credential, chainspec, pvmBackend, epoch0Timestamp, peers, peerList, dataDir, port, JCEDefault, role)
+func NewNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, peers []string, peerList map[uint16]*Peer, dataDir string, port int, role string) (*Node, error) {
+	return createNode(id, credential, chainspec, pvmBackend, peers, peerList, dataDir, port, JCEDefault, role)
 }
 
 // IsBuilder returns true if this node is running in builder/full-node mode
@@ -771,7 +770,7 @@ func (n *Node) SetPVMBackend(pvm_mode string) {
 }
 
 // TODO: take in serviceIDs for multi-rollup support
-func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, epoch0Timestamp uint64, peers []string, startPeerList map[uint16]*Peer, dataDir string, port int, jceMode string, role string) (*Node, error) {
+func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, peers []string, startPeerList map[uint16]*Peer, dataDir string, port int, jceMode string, role string) (*Node, error) {
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
 	log.Info(log.Node, fmt.Sprintf("NewNode [N%v]", id), "spec", chainspec.ID, "addr", addr, "dataDir", dataDir, "role", role)
 	//REQUIRED FOR CAPTURING JOBID. DO NOT DELETE THIS LINE!!
@@ -781,6 +780,9 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 	var cert tls.Certificate
 	ed25519_priv := ed25519.PrivateKey(credential.Ed25519Secret[:])
 	ed25519_pub := ed25519_priv.Public().(ed25519.PublicKey)
+
+	peerID := common.ToSAN(ed25519_pub)
+	log.Info(log.Node, fmt.Sprintf("PeerIdentification [N%v]", id), "peerID", peerID)
 
 	cert, err := generateSelfSignedCert(ed25519_pub, ed25519_priv)
 	if err != nil {
@@ -1046,7 +1048,6 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 	go node.runServer()
 
 	node.setValidatorCredential(credential)
-	node.epoch0Timestamp = epoch0Timestamp
 
 	// Enable initial sync for builder nodes or when enableInit is set
 	isBuilderNode := role == types.RoleBuilder
@@ -2782,6 +2783,114 @@ func (n *Node) FetchState129RPC(headerHash common.Hash, expectedStateRoot common
 	return result, nil
 }
 
+// recoverStateViaCE129 fetches the parent state via CE129 and rebuilds the StateDB
+// This is called when ApplyStateTransitionFromBlock fails with ParentHeaderHash mismatch
+func (n *Node) recoverStateViaCE129(ctx context.Context, nextBlock *types.Block) (*statedb.StateDB, error) {
+	parentHeaderHash := nextBlock.Header.ParentHeaderHash
+	parentStateRoot := nextBlock.Header.ParentStateRoot
+
+	log.Info(log.Node, "recoverStateViaCE129: Starting state recovery",
+		"n", n.String(),
+		"slot", nextBlock.TimeSlot(),
+		"parentHeaderHash", parentHeaderHash.String_short(),
+		"parentStateRoot", parentStateRoot.String_short(),
+	)
+
+	// Create a context with timeout for the recovery operation
+	recoveryCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	const maxAttempts = 4
+	var snapshot *StateSnapshot
+	var computedStateRoot common.Hash
+	var lastErr error
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		// Fetch state via CE129 using the parent header hash
+		snapshot, lastErr = n.fetchStates129(recoveryCtx, parentHeaderHash)
+		if lastErr != nil {
+			log.Warn(log.Node, "recoverStateViaCE129: fetchStates129 failed",
+				"n", n.String(),
+				"parentHeaderHash", parentHeaderHash.String_short(),
+				"attempt", attempt,
+				"err", lastErr,
+			)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		// Compute state root from fetched key-values
+		computedStateRoot = snapshot.ComputeStateRoot()
+
+		if computedStateRoot == parentStateRoot {
+			log.Info(log.Node, "recoverStateViaCE129: State root verified",
+				"n", n.String(),
+				"attempt", attempt,
+				"numKVs", len(snapshot.KeyVals),
+				"stateRoot", computedStateRoot.String_short(),
+			)
+			break
+		}
+
+		log.Warn(log.Node, "recoverStateViaCE129: State root mismatch, retrying",
+			"n", n.String(),
+			"attempt", attempt,
+			"expected", parentStateRoot.String_short(),
+			"computed", computedStateRoot.String_short(),
+			"numKVs", len(snapshot.KeyVals),
+		)
+
+		if attempt < maxAttempts {
+			time.Sleep(2 * time.Second)
+		}
+	}
+
+	if lastErr != nil {
+		return nil, fmt.Errorf("failed to fetch state after %d attempts: %w", maxAttempts, lastErr)
+	}
+
+	if computedStateRoot != parentStateRoot {
+		return nil, fmt.Errorf("state root mismatch after %d attempts: expected %s, got %s",
+			maxAttempts, parentStateRoot.String_short(), computedStateRoot.String_short())
+	}
+
+	// Convert StateSnapshot.KeyVals ([]types.StateKeyValue) to statedb.StateKeyVals ([]statedb.KeyVal)
+	// Both have the same structure: [31]byte Key and []byte Value
+	keyVals := make([]statedb.KeyVal, len(snapshot.KeyVals))
+	for i, kv := range snapshot.KeyVals {
+		keyVals[i] = statedb.KeyVal{
+			Key:   kv.Key,
+			Value: kv.Value,
+		}
+	}
+	stateKeyVals := &statedb.StateKeyVals{KeyVals: keyVals}
+
+	// Create a new StateDB from the recovered key-values
+	// We need to use the storage to create it
+	recoveredStateDB, err := statedb.NewStateDBFromStateKeyVals(n.store.(*storage.StateDBStorage), stateKeyVals)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create StateDB from recovered state: %w", err)
+	}
+
+	// Verify the state root matches
+	if recoveredStateDB.StateRoot != parentStateRoot {
+		return nil, fmt.Errorf("recovered StateDB state root mismatch: expected %s, got %s",
+			parentStateRoot.String_short(), recoveredStateDB.StateRoot.String_short())
+	}
+
+	recoveredStateDB.UnsetPosteriorEntropy()
+	recoveredStateDB.Block = nextBlock
+
+	log.Info(log.Node, "recoverStateViaCE129: State recovery complete",
+		"n", n.String(),
+		"slot", nextBlock.TimeSlot(),
+		"stateRoot", recoveredStateDB.StateRoot.String_short(),
+		"numKVs", len(snapshot.KeyVals),
+	)
+
+	return recoveredStateDB, nil
+}
+
 // VerifyState129RPC is a lighter version that doesn't return the full state snapshot
 func (n *Node) VerifyState129RPC(headerHash common.Hash, expectedStateRoot common.Hash) (*VerifyState129Result, error) {
 	result := &VerifyState129Result{
@@ -3475,8 +3584,43 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	newStateDB, err := statedb.ApplyStateTransitionFromBlock(0, recoveredStateDB, ctx, nextBlock, valid_tickets, n.pvmBackend, "SKIP")
 	stateTransitionElapsed := common.ElapsedStr(start)
 	if err != nil {
-		fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
-		return fmt.Errorf("ApplyStateTransitionFromBlock failed: %w", err)
+		// Check if this is a ParentHeaderHash mismatch error - trigger CE129 recovery
+		if strings.Contains(err.Error(), "ParentHeaderHash does not match recent block") {
+			log.Warn(log.Node, "ApplyBlock: ParentHeaderHash mismatch detected, attempting CE129 state recovery",
+				"n", n.String(),
+				"slot", nextBlock.TimeSlot(),
+				"parentHeaderHash", nextBlock.Header.ParentHeaderHash.String_short(),
+				"parentStateRoot", nextBlock.Header.ParentStateRoot.String_short(),
+			)
+
+			// Attempt CE129 state recovery
+			recoveredStateDB, err = n.recoverStateViaCE129(ctx, nextBlock)
+			if err != nil {
+				fmt.Printf("[N%d] extendChain FAIL CE129 recovery failed: %v\n", n.id, err)
+				return fmt.Errorf("ApplyStateTransitionFromBlock failed (CE129 recovery failed: %v): %w", err, err)
+			}
+
+			// Retry state transition with recovered state
+			log.Info(log.Node, "ApplyBlock: CE129 recovery successful, retrying state transition",
+				"n", n.String(),
+				"slot", nextBlock.TimeSlot(),
+			)
+			start = time.Now()
+			newStateDB, err = statedb.ApplyStateTransitionFromBlock(0, recoveredStateDB, ctx, nextBlock, valid_tickets, n.pvmBackend, "SKIP")
+			stateTransitionElapsed = common.ElapsedStr(start)
+			if err != nil {
+				fmt.Printf("[N%d] extendChain FAIL after CE129 recovery: %v\n", n.id, err)
+				return fmt.Errorf("ApplyStateTransitionFromBlock failed after CE129 recovery: %w", err)
+			}
+			log.Info(log.Node, "ApplyBlock: State transition successful after CE129 recovery",
+				"n", n.String(),
+				"slot", nextBlock.TimeSlot(),
+				"elapsed", stateTransitionElapsed,
+			)
+		} else {
+			fmt.Printf("[N%d] extendChain FAIL %v\n", n.id, err)
+			return fmt.Errorf("ApplyStateTransitionFromBlock failed: %w", err)
+		}
 	}
 	start = time.Now()
 
@@ -4185,7 +4329,7 @@ func (n *Node) WriteLog(logMsg storage.LogMessage, withJSON bool) error {
 
 	if msgType != "unknown" {
 
-		epoch, phase := statedb.ComputeEpochAndPhase(timeSlot, n.epoch0Timestamp)
+		epoch, phase := statedb.ComputeEpochAndPhase(timeSlot)
 
 		path := fmt.Sprintf("%s/%08d", structDir, timeSlot)
 		if epoch == 0 && phase == 0 {
@@ -4215,7 +4359,7 @@ func WriteSTFLog(stf *statedb.StateTransition, timeslot uint32, dataDir string, 
 		}
 	}
 
-	epoch, phase := statedb.ComputeEpochAndPhase(timeslot, 0)
+	epoch, phase := statedb.ComputeEpochAndPhase(timeslot)
 	path := fmt.Sprintf("%s/%v_%03d", structDir, epoch, phase)
 	if epoch == 0 && phase == 0 {
 		path = fmt.Sprintf("%s/genesis", structDir)
@@ -4322,27 +4466,11 @@ func (n *Node) GetJCETimestamp() uint64 {
 	return uint64(slotTime.Sub(common.JceStart) / time.Microsecond)
 }
 
-func (n *Node) SetCurrJCESSimple(currJCE uint32) {
-	// this would probably break safrole ticket mapping. But it's as clean as it can get
-	n.currJCEMutex.Lock()
-	defer n.currJCEMutex.Unlock()
-	prevJCE := n.currJCE
-	if prevJCE > currJCE {
-		log.Error(log.Node, "Invalid JCE: currJCE is less than previous JCE", "prevJCE", prevJCE, "currJCE", currJCE)
-		return
-	}
-	n.currJCE = currJCE
-	if prevJCE == currJCE {
-		return // set only once
-	}
-	//fmt.Printf("Node %d: Update CurrJCE %d\n", n.id, currJCE)
-}
-
 func (n *Node) SetCurrJCE(currJCE uint32) {
 	n.currJCEMutex.Lock()
 	defer n.currJCEMutex.Unlock()
 	prevJCE := n.currJCE
-	if prevJCE > currJCE {
+	if prevJCE > currJCE && n.jceMode != JCEDefault {
 		log.Error(log.Node, "Invalid JCE: currJCE is less than previous JCE", "prevJCE", prevJCE, "currJCE", currJCE)
 		return
 	}
@@ -4355,12 +4483,7 @@ func (n *Node) SetCurrJCE(currJCE uint32) {
 	if n.jce_timestamp == nil {
 		n.jce_timestamp = make(map[uint32]time.Time)
 	}
-	// for non-normal-jce case
-	if n.epoch0Timestamp != 0 {
-		n.jce_timestamp[currJCE] = time.Now()
-	} else { // for normal-jce case
-		n.jce_timestamp[currJCE] = time.Unix(int64(n.GetSlotTimestamp(currJCE)), 0)
-	}
+	n.jce_timestamp[currJCE] = time.Unix(int64(n.GetSlotTimestamp(currJCE)), 0)
 	n.jce_timestamp_mutex.Unlock()
 
 	if n.sendTickets {
@@ -4453,7 +4576,7 @@ func (n *Node) runAuthoring() {
 	tickerPulse := time.NewTicker(TickTime * time.Millisecond)
 	defer tickerPulse.Stop()
 
-	n.statedb.GetSafrole().EpochFirstSlot = uint32(n.epoch0Timestamp / types.SecondsPerSlot)
+	n.statedb.GetSafrole().EpochFirstSlot = 0
 	lastAuthorizableJCE := uint32(0)
 
 	for {

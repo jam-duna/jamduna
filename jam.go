@@ -393,8 +393,6 @@ func main() {
 					fmt.Println("Start time reached. Running now...")
 				}
 			}
-			epoch0Timestamp := statedb.NewEpoch0Timestamp("jam", start_time)
-
 
 // TODO: take in serviceids for multi-rollup support
 			// Normalize role string
@@ -403,7 +401,7 @@ func main() {
 				nodeRole = types.RoleBuilder
 			}
 
-			n, err := node.NewNode(uint16(validatorIndex), selfSecret, chainSpecData, pvmBackend, epoch0Timestamp, peers, peerList, dataPath, Port, nodeRole)
+			n, err := node.NewNode(uint16(validatorIndex), selfSecret, chainSpecData, pvmBackend, peers, peerList, dataPath, Port, nodeRole)
 			if err != nil {
 				fmt.Printf("New Node Err:%s", err.Error())
 				os.Exit(1)

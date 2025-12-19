@@ -585,15 +585,19 @@ func (n *NodeContent) runJamWeb(ctx context.Context, wg *sync.WaitGroup, basePor
 	wg.Add(1)
 	go n.hub.run(wg)
 
+	// Use a dedicated mux per server to avoid conflicts when multiple nodes run
+	mux := http.NewServeMux()
+
 	server := &http.Server{
-		Addr: addr,
+		Addr:    addr,
+		Handler: mux,
 	}
 
-	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(n.hub, w, r, wg)
 	})
 
-	http.HandleFunc("/rpc", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/rpc", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodOptions {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")

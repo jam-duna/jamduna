@@ -199,6 +199,7 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 		cancel()
 		if err != nil {
 			log.Error(log.Node, "SubmitAndWaitForWorkPackages ERR", "err", err)
+			panic(fmt.Sprintf("FIB(%d) FAILED", fibN))
 			return
 		}
 

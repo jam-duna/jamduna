@@ -90,7 +90,7 @@ func computeLevelDBPath(id string, unixtimestamp int, jobID string) (string, err
 	return path, nil
 }
 
-func SetupQuicNetwork(network string, basePort uint16) (uint64, []string, map[uint16]*Peer, []types.ValidatorSecret, []string, error) {
+func SetupQuicNetwork(network string, basePort uint16) ([]string, map[uint16]*Peer, []types.ValidatorSecret, []string, error) {
 	peers := make([]string, numNodes)
 	peerList := make(map[uint16]*Peer)
 	nodePaths := SetLevelDBPaths(numNodes)
@@ -98,10 +98,9 @@ func SetupQuicNetwork(network string, basePort uint16) (uint64, []string, map[ui
 	// Setup QuicNetwork using test keys
 	validators, validatorSecrets, err := grandpa.GenerateValidatorSecretSet(numNodes)
 	if err != nil {
-		return 0, nil, nil, nil, nil, fmt.Errorf("Failed to setup QuicNetwork")
+		return nil, nil, nil, nil, fmt.Errorf("Failed to setup QuicNetwork")
 	}
 
-	epoch0Timestamp := statedb.NewEpoch0Timestamp()
 	for i := uint16(0); i < numNodes; i++ {
 		addr := fmt.Sprintf(quicAddr, basePort+i)
 		peers[i] = addr
@@ -115,10 +114,10 @@ func SetupQuicNetwork(network string, basePort uint16) (uint64, []string, map[ui
 	// Print out peerList
 	prettyPeerList, err := json.MarshalIndent(peerList, "", "  ")
 	if err != nil {
-		return epoch0Timestamp, nil, nil, nil, nil, fmt.Errorf("Failed to marshal peerList: %v, %v", err, prettyPeerList)
+		return nil, nil, nil, nil, fmt.Errorf("Failed to marshal peerList: %v, %v", err, prettyPeerList)
 	}
 
-	return epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, nil
+	return peers, peerList, validatorSecrets, nodePaths, nil
 }
 
 func GenerateRandomBasePort() uint16 {
@@ -168,7 +167,7 @@ func NewBuilder(numNodes int, basePort uint16) (*Node, error) {
 		}
 	}
 	builder, err := newNode(builderIndex, builderSecrets[builderIndex], chainSpec, *pvmBackend,
-		statedb.NewEpoch0Timestamp(), builderPeers, builderPeerList,
+		builderPeers, builderPeerList,
 		dir, int(basePort+builderIndex), JCEDefault, types.RoleBuilder)
 	return builder, err
 }
@@ -180,7 +179,7 @@ func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) 
 	}
 
 	log.InitLogger("debug")
-	epoch0Timestamp, peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork(types.Network, basePort)
+	peers, peerList, validatorSecrets, nodePaths, err := SetupQuicNetwork(types.Network, basePort)
 
 	if err != nil {
 		return nil, err
@@ -189,7 +188,7 @@ func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
 		pvmBackend := statedb.BackendInterpreter
-		node, err := newNode(uint16(i), validatorSecrets[i], chainSpec, pvmBackend, epoch0Timestamp, peers, peerList, nodePaths[i], int(basePort)+i, jceMode, types.RoleValidator)
+		node, err := newNode(uint16(i), validatorSecrets[i], chainSpec, pvmBackend, peers, peerList, nodePaths[i], int(basePort)+i, jceMode, types.RoleValidator)
 		if err != nil {
 			return nil, err
 		}

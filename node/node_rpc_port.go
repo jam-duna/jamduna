@@ -39,7 +39,8 @@ func GetJAMNetworkWSPort() int {
 }
 
 func GetAddresses(local bool) (address string, wsUrl string) {
-	i := DunaLastValidatorNode
+	//i := DunaLastValidatorNode
+	i := DunaBuilderNode
 	if local {
 		address = fmt.Sprintf("localhost:%d", DefaultTCPPort+i)
 		wsUrl = fmt.Sprintf("ws://127.0.0.1:%d/ws", WSPort+i)

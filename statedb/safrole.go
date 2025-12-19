@@ -243,17 +243,11 @@ type ClaimData struct {
 	RandomnessSource []byte `json:"randomness_source"`
 }
 
-func ComputeEpochAndPhase(ts uint32, Epoch0Timestamp uint64) (currentEpoch uint32, currentPhase uint32) {
+func ComputeEpochAndPhase(ts uint32) (currentEpoch uint32, currentPhase uint32) {
 	if types.TimeUnitMode == "JAM" {
-		if ts < uint32(Epoch0Timestamp/types.SecondsPerSlot) {
-			currentEpoch = 0
-			currentPhase = 0
-			return currentEpoch, currentPhase
-		}
 		currentEpoch = uint32(ts / types.EpochLength)
 		currentPhase = uint32(ts % types.EpochLength)
 		return currentEpoch, currentPhase
-
 	}
 	return 0, 0
 }
