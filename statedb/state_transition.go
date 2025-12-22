@@ -44,8 +44,11 @@ func initStorage(testDir string) (*storage.StateDBStorage, error) {
 // printHexDiff prints two byte slices as hex, highlighting mismatched bytes in red.
 // If data exceeds 1KB, truncates output with "..."
 func printHexDiff(label string, exp, act []byte) {
-	const maxDisplay = 1024 // 1KB limit
 
+	var maxDisplay = 1024 // 1KB limit
+	if label == "C4" {
+		maxDisplay = 999999999999
+	}
 	// Check for missing keys
 	if len(exp) == 0 && len(act) > 0 {
 		fmt.Printf("%-10s | Expected: \033[33m<MISSING IN EXPECTED>\033[0m\n", label)

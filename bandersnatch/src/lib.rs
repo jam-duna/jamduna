@@ -1099,6 +1099,33 @@ pub extern "C" fn init_cache() {
     init_common_ring_sizes();
 }
 
+#[no_mangle]
+pub extern "C" fn validate_bandersnatch_pubkey(
+    pubkey_bytes: *const c_uchar,
+    pubkey_len: usize,
+) -> c_int {
+    use std::ptr;
+
+    // Convert pubkey bytes to a slice
+    let pubkey_slice = unsafe { slice::from_raw_parts(pubkey_bytes, pubkey_len) };
+
+    // Check if it's all zeros (padding point is valid)
+    if pubkey_slice.iter().all(|&b| b == 0) {
+        return 1; // Valid (padding point)
+    }
+
+    // Check correct length
+    if pubkey_len != 32 {
+        return 0; // Invalid length
+    }
+
+    // Try to deserialize the public key
+    match Public::deserialize_compressed_unchecked(pubkey_slice) {
+        Ok(_) => 1, // Valid public key
+        Err(_) => 0, // Invalid public key
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

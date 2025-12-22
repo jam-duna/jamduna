@@ -399,11 +399,17 @@ testnet:
 
 cryptolib:
 	@echo "Building crypto library statically for all platforms..."
-	@rustup target add x86_64-unknown-linux-musl
+	@rustup target add x86_64-unknown-linux-musl || true
 	@cd bandersnatch && \
+	INSTALLED_TARGETS="$$(rustup target list --installed 2>/dev/null || true)"; \
 	for TARGET in x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-gnu; do \
-		echo "  Building for $$TARGET..."; \
-		RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target=$$TARGET --features " "; \
+		if echo "$$INSTALLED_TARGETS" | grep -qx "$$TARGET"; then \
+			echo "  Building for $$TARGET..."; \
+			RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target=$$TARGET --features " " || \
+				echo "  Build failed for $$TARGET; continuing."; \
+		else \
+			echo "  Skipping $$TARGET (target not installed)."; \
+		fi; \
 	done
 	@mkdir -p bandersnatch/target/release
 	@cp bandersnatch/target/x86_64-unknown-linux-musl/release/libbandersnatch.a bandersnatch/target/release/libcrypto.linux_amd64.a || true

@@ -79,7 +79,7 @@ func runSingleSTFTestAndSave(t *testing.T, filename string, content string, pvmB
 	}
 }
 
-func runSingleSTFTest(t *testing.T, filename string, content string, pvmBackend string, runPrevalidation bool) {
+func runSingleSTFTest(t *testing.T, filename string, content string, pvmBackend string, runPrevalidation bool) error {
 	t.Helper()
 	start := time.Now()
 	t0 := time.Now()
@@ -88,7 +88,7 @@ func runSingleSTFTest(t *testing.T, filename string, content string, pvmBackend 
 	test_storage, err := initStorage(testDir)
 	if err != nil {
 		t.Errorf("❌ [%s] Error initializing storage: %v", filename, err)
-		return
+		return err
 	}
 	defer test_storage.Close()
 	benchRec.Add("runSingleSTFTest:initStorage", time.Since(t0))
@@ -97,7 +97,7 @@ func runSingleSTFTest(t *testing.T, filename string, content string, pvmBackend 
 	stf, err := parseSTFFile(filename, content)
 	if err != nil {
 		t.Errorf("❌ [%s] Failed to parse STF: %v", filename, err)
-		return
+		return err
 	}
 	benchRec.Add("runSingleSTFTest:parseSTFFile", time.Since(t0))
 
@@ -123,7 +123,7 @@ func runSingleSTFTest(t *testing.T, filename string, content string, pvmBackend 
 	elapsed := time.Since(start)
 	if err == nil {
 		fmt.Printf("✅ [%s] PostState.StateRoot %s matches (%.5fms)\n", filename, stf.PostState.StateRoot, float64(elapsed.Nanoseconds())/1000000)
-		return
+		return nil
 	} else {
 		fmt.Printf("Fail With Error: %v\n", err)
 	}
@@ -133,6 +133,7 @@ func runSingleSTFTest(t *testing.T, filename string, content string, pvmBackend 
 
 	HandleDiffs(diffs)
 	t.Errorf("❌ [%s] Test failed: %v (%.5fms)", filename, err, float64(elapsed.Nanoseconds())/1000000)
+	return err
 }
 
 func parseSTFFile(filename, content string) (StateTransition, error) {
@@ -360,7 +361,6 @@ func findFuzzTestFiles(sourcePath, targetVersion string, excludedTeams []string)
 
 	return testFiles, nil
 }
-
 func TestSingleFuzzTrace(t *testing.T) {
 	backend := BackendCompiler
 	if runtime.GOOS != "linux" {
@@ -376,7 +376,15 @@ func TestSingleFuzzTrace(t *testing.T) {
 		t.Fatalf("failed to get fuzz reports path: %v", err)
 	}
 
-	fileMap["1763489798"] = "fuzz-reports/0.7.1/traces/1763489798//00000950.bin"
+	// fileMap["1763489798"] = "fuzz-reports/0.7.1/traces/1763489798//00000950.bin"
+	fileMap["1766243147"] = "fuzz-reports/0.7.2/traces/1766243147/00000057.bin"
+	fileMap["1766243315_2078_00000118"] = "fuzz-reports/0.7.2/traces/1766243315_2078/00000118.bin"
+	fileMap["1766243315_2078_00000121"] = "fuzz-reports/0.7.2/traces/1766243315_2078/00000121.bin"
+	fileMap["1766243493_2882"] = "fuzz-reports/0.7.2/traces/1766243493_2882/00000030.bin"
+	fileMap["1766243861_8319_00000115"] = "fuzz-reports/0.7.2/traces/1766243861_8319/00000115.bin"
+	fileMap["1766243861_8319_00000119"] = "fuzz-reports/0.7.2/traces/1766243861_8319/00000119.bin"
+	// fileMap["1766244122_3401"] = "fuzz-reports/0.7.2/traces/1766244122_3401/00000891.bin" fixed by shawn
+	fileMap["1766255635_2557"] = "fuzz-reports/0.7.2/traces/1766255635_2557/00000153.bin"
 	PvmLogging = false
 	//	DebugHostFunctions = true
 	log.InitLogger("debug")
@@ -384,7 +392,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 	// log.EnableModule("pvm_validator")
 	log.EnableModule(log.SDB)
 
-	tc := []string{"1763489798"}
+	tc := []string{"1766255635_2557"}
 
 	PvmLogging = false
 	for _, team := range tc {
@@ -406,24 +414,137 @@ func TestSingleFuzzTrace(t *testing.T) {
 		})
 	}
 }
+func TestTaintSingleFuzzTrace(t *testing.T) {
+	// Force interpreter backend to enable taint tracking
+	backend := BackendInterpreter
+	t.Logf("Using backend: %s (forced for taint tracking)", backend)
+
+	fileMap := make(map[string]string)
+
+	jamConformancePath, err := GetFuzzReportsPath()
+	if err != nil {
+		t.Fatalf("failed to get fuzz reports path: %v", err)
+	}
+
+	// fileMap["1763489798"] = "fuzz-reports/0.7.1/traces/1763489798//00000950.bin"
+	fileMap["1766243147"] = "fuzz-reports/0.7.2/traces/1766243147/00000057.bin"
+	fileMap["1766243315_2078_00000118"] = "fuzz-reports/0.7.2/traces/1766243315_2078/00000118.bin"
+	fileMap["1766243315_2078_00000121"] = "fuzz-reports/0.7.2/traces/1766243315_2078/00000121.bin"
+	fileMap["1766243493_2882"] = "fuzz-reports/0.7.2/traces/1766243493_2882/00000030.bin"
+	fileMap["1766243861_8319_00000115"] = "fuzz-reports/0.7.2/traces/1766243861_8319/00000115.bin"
+	fileMap["1766243861_8319_00000119"] = "fuzz-reports/0.7.2/traces/1766243861_8319/00000119.bin"
+	// fileMap["1766244122_3401"] = "fuzz-reports/0.7.2/traces/1766244122_3401/00000891.bin" fixed by shawn
+	fileMap["1766255635_2557"] = "fuzz-reports/0.7.2/traces/1766255635_2557/00000153.bin"
+	PvmLogging = false
+	//	DebugHostFunctions = true
+	log.InitLogger("debug")
+	// log.EnableModule(log.PvmAuthoring)
+	// log.EnableModule("pvm_validator")
+	log.EnableModule(log.SDB)
+
+	tc := []string{"1766255635_2557"}
+
+	PvmLogging = false
+	for _, team := range tc {
+		filename, exists := fileMap[team]
+		if !exists {
+			t.Fatalf("team %s not found in fileMap", team)
+		}
+
+		filename = filepath.Join(jamConformancePath, filename)
+
+		content, err := os.ReadFile(filename)
+		if err != nil {
+			t.Fatalf("failed to read file %s: %v", filename, err)
+		}
+
+		t.Run(filepath.Base(filename), func(t *testing.T) {
+			runSingleSTFTestWithTaint(t, filename, string(content), backend, true)
+		})
+	}
+}
+
+// runSingleSTFTestWithTaint is a variant that enables taint tracking and prints trace after execution
+func runSingleSTFTestWithTaint(t *testing.T, filename string, content string, pvmBackend string, runPrevalidation bool) error {
+	t.Helper()
+
+	// Enable taint tracking globally before execution
+	EnableTaintTrackingGlobal = true
+	defer func() {
+		EnableTaintTrackingGlobal = false
+	}()
+
+	start := time.Now()
+	t0 := time.Now()
+	testDir := t.TempDir()
+
+	test_storage, err := initStorage(testDir)
+	if err != nil {
+		t.Errorf("❌ [%s] Error initializing storage: %v", filename, err)
+		return err
+	}
+	defer test_storage.Close()
+	benchRec.Add("runSingleSTFTest:initStorage", time.Since(t0))
+
+	t0 = time.Now()
+	stf, err := parseSTFFile(filename, content)
+	if err != nil {
+		t.Errorf("❌ [%s] Failed to parse STF: %v", filename, err)
+		return err
+	}
+	benchRec.Add("runSingleSTFTest:parseSTFFile", time.Since(t0))
+
+	var logDir string
+	if EnablePVMOutputLogs {
+		parts := strings.Split(filepath.ToSlash(filename), "/")
+		if len(parts) >= 2 {
+			dir := parts[len(parts)-2]
+			base := strings.TrimSuffix(parts[len(parts)-1], filepath.Ext(parts[len(parts)-1]))
+			logDir = dir + "/" + base
+		} else {
+			logDir = strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
+		}
+	}
+
+	t0 = time.Now()
+	diffs, err := CheckStateTransitionWithOutput(test_storage, &stf, nil, pvmBackend, runPrevalidation, logDir)
+	benchRec.Add("runSingleSTFTest:CheckStateTransitionWithOutput", time.Since(t0))
+	elapsed := time.Since(start)
+
+	// Note: Taint trace will be printed by individual VMs during execution
+	// The trace is automatically printed when taint tracking is enabled
+
+	if err == nil {
+		fmt.Printf("✅ [%s] PostState.StateRoot %s matches (%.5fms)\n", filename, stf.PostState.StateRoot, float64(elapsed.Nanoseconds())/1000000)
+		return nil
+	} else {
+		fmt.Printf("Fail With Error: %v\n", err)
+	}
+	if err.Error() == "OMIT" {
+		//	t.Skipf("⚠️ OMIT: Test case for [%s] is marked to be omitted.", filename)
+	}
+
+	HandleDiffs(diffs)
+	t.Errorf("❌ [%s] Test failed: %v (%.5fms)", filename, err, float64(elapsed.Nanoseconds())/1000000)
+	return err
+}
 
 func testFuzzTraceInternal(t *testing.T, saveOutput bool) {
 	t.Helper()
 
-	PvmLogging = true
+	PvmLogging = false
 
 	log.InitLogger("debug")
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule("pvm_validator")
 
-	targetVersion := "0.7.1"
+	targetVersion := "0.7.2"
 	excludedTeams := []string{""}
 
 	sourcePath, err := GetFuzzReportsPath()
 	if err != nil {
 		t.Fatalf("failed to get source fuzz reports path: %v", err)
 	}
-
 	var destinationPath string
 	if saveOutput {
 		destinationPath, err = GetDunaReportsPath()
@@ -443,6 +564,7 @@ func testFuzzTraceInternal(t *testing.T, saveOutput bool) {
 	if runtime.GOOS != "linux" {
 		backend = BackendInterpreter
 	}
+	bugMap := map[string]int{}
 	for _, filename := range testFiles {
 		currentFile := filename
 		relPath, _ := filepath.Rel(sourcePath, currentFile)
@@ -460,9 +582,21 @@ func testFuzzTraceInternal(t *testing.T, saveOutput bool) {
 				t.Parallel()
 				runSingleSTFTestAndSave(t, currentFile, string(content), backend, true, sourcePath, destinationPath)
 			} else {
-				runSingleSTFTest(t, currentFile, string(content), backend, true)
+				err := runSingleSTFTest(t, currentFile, string(content), backend, true)
+				if err != nil {
+					bugMap[err.Error()]++
+				}
 			}
 		})
+	}
+	fmt.Printf("=== Fuzz Trace Test Summary ===\n")
+	if len(bugMap) == 0 {
+		fmt.Printf("All tests passed successfully!\n")
+	} else {
+		for err, count := range bugMap {
+			fmt.Printf("Error: %v | Occurrences: %d\n", err, count)
+		}
+		t.Fatalf("Some tests failed. See summary above.")
 	}
 }
 

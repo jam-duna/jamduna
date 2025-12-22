@@ -41,7 +41,8 @@ const (
 )
 
 var (
-	PvmLogging = false
+	PvmLogging                = false
+	EnableTaintTrackingGlobal = false
 )
 
 // serializeHashes serializes an array of common.Hash back-to-back with no separators
@@ -359,6 +360,10 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 	} else if vm.Backend == BackendInterpreter {
 		machine := NewVMGo(service_index, p, initialRegs, initialPC, initialGas, hostENV)
 		machine.Gas = int64(initialGas)
+		// Enable taint tracking if requested
+		if EnableTaintTrackingGlobal {
+			machine.EnableTaintForStep(0, 0)
+		}
 		vm.ExecutionVM = machine
 		// o - read-only
 		rw_data_address := uint32(2*Z_Z) + Z_func(o_size)
@@ -461,7 +466,9 @@ func (vm *VM) NewEmptyExecutionVM(service_index uint32, p *Program, initialRegs 
 		machine := NewVMGo(service_index, p, initialRegs, initialPC, initialGas, hostENV)
 		machine.Gas = int64(initialGas)
 		// Track all steps (TargetStep=0 means no window restriction)
-		// machine.EnableTaintForStep(0, 0)
+		if EnableTaintTrackingGlobal {
+			machine.EnableTaintForStep(0, 0)
+		}
 		e_vm = machine
 		machine.ChildIndex = int(machineIndex)
 		machine.ChildeEntryCount = childEntryIndex

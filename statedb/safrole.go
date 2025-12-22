@@ -74,23 +74,30 @@ func (s *SafroleState) GetNextRingCommitment() ([]byte, error) {
 
 	ringBytes, ringSize := s.GetRingSet("Next")
 	if len(ringBytes) == 0 {
-		return nil, fmt.Errorf("not ready yet")
+		return nil, fmt.Errorf("not ready yet: no validators in NextValidators")
 	}
 
 	nextRingCommitment, err := bandersnatch.GetRingCommitment(ringSize, ringBytes)
 	if err != nil {
-		return nil, err
+		log.Error(log.SDB, "Failed to compute ring commitment",
+			"ringSize", ringSize,
+			"ringBytesLen", len(ringBytes),
+			"validatorsCount", len(s.NextValidators),
+			"err", err)
+		return nil, fmt.Errorf("failed to compute ring commitment: %w", err)
 	}
 
 	s.cachedNextRingCommitment = nextRingCommitment
 	s.nextValidatorsHash = currentHash
 
-	return nextRingCommitment, err
+	return nextRingCommitment, nil
 }
 
 func (s *SafroleState) GetSafroleBasicState() SafroleBasicState {
-	nextRingCommitment, _ := s.GetNextRingCommitment()
-
+	nextRingCommitment, err := s.GetNextRingCommitment()
+	if err != nil {
+		log.Warn(log.SDB, "GetSafroleBasicState: failed to get next ring commitment", "err", err)
+	}
 	basicState := SafroleBasicState{
 		NextValidators:    []types.Validator(s.NextValidators),
 		TicketAccumulator: s.NextEpochTicketsAccumulator,
@@ -170,9 +177,73 @@ func NewSafroleState() *SafroleState {
 	}
 }
 
-func VerifyEpochMarker(epochMark *types.EpochMark) (bool, error) {
-	//STUB
-	return true, nil
+func (s *SafroleState) VerifyEpochMarkerEntropyWithPreState(epochMark *types.EpochMark) error {
+	entropy_0 := s.Entropy[0]
+	entropy_1 := s.Entropy[1]
+	if epochMark == nil {
+		return nil
+	}
+	if epochMark.Entropy != entropy_0 {
+		return fmt.Errorf("epoch marker entropy[0] mismatch: expected %v, got %v", entropy_0, epochMark.Entropy)
+	}
+	if epochMark.TicketsEntropy != entropy_1 {
+		return fmt.Errorf("epoch marker entropy[1] mismatch: expected %v, got %v", entropy_1, epochMark.TicketsEntropy)
+	}
+	return nil
+}
+
+// VerifyEpochMarkValidators verifies that the epoch mark validators match the NextValidators
+// in both content and order, and checks the relationship between epoch mark presence and new epoch state.
+// This function should be called after VerifyEpochMarkerEntropyWithPreState.
+func (s *SafroleState) VerifyEpochMarkValidators(epochMark *types.EpochMark, isNewEpoch bool, nextValidators types.Validators) error {
+	// Check epoch mark consistency with epoch state
+	if isNewEpoch && epochMark == nil {
+		log.Warn(log.SDB, "New epoch but no epoch mark", "isNewEpoch", isNewEpoch, "epochMark", epochMark)
+		return fmt.Errorf("new epoch but no epoch mark")
+	} else if !isNewEpoch && epochMark != nil {
+		log.Warn(log.SDB, "Not new epoch but has epoch mark", "isNewEpoch", isNewEpoch, "epochMark", epochMark)
+		return fmt.Errorf("not new epoch but has epoch mark")
+	}
+
+	// The epochMark validators should match gamma k' (NextValidators) in both content and order
+	if epochMark != nil {
+		// (6.27) Verify Bandersnatch and Ed25519 validator keys beginning in the next epoch.
+
+		// First, check length consistency
+		if len(nextValidators) != types.TotalValidators {
+			return fmt.Errorf("NextValidators length mismatch: expected %d, got %d", types.TotalValidators, len(nextValidators))
+		}
+
+		// Verify each validator matches in order
+		for i := 0; i < types.TotalValidators; i++ {
+			epochMarkValidator := epochMark.Validators[i]
+			nextValidator := nextValidators[i]
+
+			// Verify Bandersnatch key matches
+			expectedBandersnatchKey := nextValidator.Bandersnatch.Hash()
+			if epochMarkValidator.BandersnatchKey != expectedBandersnatchKey {
+				log.Warn(log.SDB, "EpochMark Bandersnatch key mismatch",
+					"index", i,
+					"expected", expectedBandersnatchKey,
+					"got", epochMarkValidator.BandersnatchKey)
+				return fmt.Errorf("EpochMark validator[%d] Bandersnatch key mismatch: expected %v, got %v",
+					i, expectedBandersnatchKey, epochMarkValidator.BandersnatchKey)
+			}
+
+			// Verify Ed25519 key matches
+			expectedEd25519Key := common.Hash(nextValidator.Ed25519)
+			if epochMarkValidator.Ed25519Key != expectedEd25519Key {
+				log.Warn(log.SDB, "EpochMark Ed25519 key mismatch",
+					"index", i,
+					"expected", expectedEd25519Key,
+					"got", epochMarkValidator.Ed25519Key)
+				return fmt.Errorf("EpochMark validator[%d] Ed25519 key mismatch: expected %v, got %v",
+					i, expectedEd25519Key, epochMarkValidator.Ed25519Key)
+			}
+		}
+	}
+
+	return nil
 }
 
 func (s *SafroleState) GenerateEpochMarker() *types.EpochMark {
@@ -544,8 +615,20 @@ func (s *SafroleState) GetRingSet(phase string) (ringBytes []byte, ringSize int)
 	}
 	ringSize = len(validatorSet)
 	pubkeys := []bandersnatch.BanderSnatchKey{}
-	for _, v := range validatorSet {
+	for i, v := range validatorSet {
 		pubkey := bandersnatch.BanderSnatchKey(common.ConvertToSlice(v.Bandersnatch))
+
+		// Validate the Bandersnatch public key
+		if err := bandersnatch.ValidateBandersnatchKey(pubkey); err != nil {
+			log.Warn(log.SDB, "Invalid Bandersnatch key in validator set",
+				"phase", phase,
+				"validator_index", i,
+				"key", common.BytesToHexStr(pubkey[:]),
+				"err", err)
+			// Use zero padding for invalid keys (will be handled as padding point in FFI)
+			pubkey = bandersnatch.BanderSnatchKey{}
+		}
+
 		pubkeys = append(pubkeys, pubkey)
 	}
 	ringBytes = bandersnatch.InitRingSet(pubkeys)

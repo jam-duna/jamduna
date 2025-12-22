@@ -93,6 +93,7 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 			"blkParentHeaderHash", blk.Header.ParentHeaderHash,
 			"oldState.HeaderHash", oldState.HeaderHash,
 		)
+		return s, fmt.Errorf("ParentStateRoot does not match")
 	}
 	recentBlocks := s.JamState.RecentBlocks.B_H
 	if len(recentBlocks) > 0 && blk.Header.ParentHeaderHash != recentBlocks[len(recentBlocks)-1].HeaderHash {
@@ -160,6 +161,10 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 	t0 = time.Now()
 	sf := s.GetSafrole()
 	sf.OffenderState = s.GetJamState().DisputesState.Offenders
+	err = sf.VerifyEpochMarkerEntropyWithPreState(epochMark)
+	if err != nil {
+		return s, err
+	}
 	s2, err := sf.ApplyStateTransitionTickets(ctx, ticketExts, targetJCE, sf_header, validated_tickets) // Entropy computed!
 	if err != nil {
 		log.Error(log.SDB, "ApplyStateTransitionTickets", "err", jamerrors.GetErrorName(err))
@@ -167,32 +172,15 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 	}
 	benchRec.Add("ApplyStateTransitionTickets", time.Since(t0))
 
-	isNewEpoch := sf.IsNewEpoch(targetJCE)
-	if isNewEpoch && epochMark == nil {
-		log.Warn(log.SDB, "New epoch but no epoch mark", "NewEpoch", targetJCE, "epochMark", epochMark)
-		return s, fmt.Errorf("new epoch but no epoch mark")
-	}
-
 	t0 = time.Now()
 
-	//the epochMark validators should be in gamma k'
-	if epochMark != nil {
-		// (6.27)Bandersnatch validator keys (kb) beginning in the next epoch.
-		bandersnatch_keys_map := make(map[common.Hash]bool)
-		for _, keys := range epochMark.Validators {
-			bandersnatch_keys_map[keys.BandersnatchKey] = false
-		}
-		for _, validator := range s2.NextValidators {
-			if _, ok := bandersnatch_keys_map[validator.Bandersnatch.Hash()]; ok {
-				bandersnatch_keys_map[validator.Bandersnatch.Hash()] = true
-			}
-		}
-		for _, ok := range bandersnatch_keys_map {
-			if !ok {
-				return s, fmt.Errorf("EpochMark validators are not in NextValidators")
-			}
-		}
+	isNewEpoch := sf.IsNewEpoch(targetJCE)
+	// Verify epoch mark validators consistency
+	err = sf.VerifyEpochMarkValidators(epochMark, isNewEpoch, s2.NextValidators)
+	if err != nil {
+		return s, err
 	}
+
 	// ------ VerifyBlockHeader ------
 	isValid, _, _, headerErr := s.VerifyBlockHeader(blk, &s2)
 	if !isValid || headerErr != nil {
@@ -532,7 +520,7 @@ func (s *StateDB) ApplyStateTransitionAvailabilityAssignments(ctx context.Contex
 
 	// Guarantees checks
 	for _, g := range guarantees {
-		if err := s.VerifyGuaranteeBasic(g, targetJCE); err != nil {
+		if err := s.VerifyGuarantee(g, targetJCE); err != nil {
 			log.Error(log.SDB, "ApplyStateTransitionAvailabilityAssignments", "GuaranteeErr", err)
 			return nil, err
 		}

@@ -631,7 +631,7 @@ func opcode_str(opcode byte) string {
 		228: "MAX_U",
 		229: "MIN",
 		230: "MIN_U",
-		255: "Host Function Writing",
+		255: "EXTERNAL_WRITE",
 	}
 
 	if name, exists := opcodeMap[opcode]; exists {

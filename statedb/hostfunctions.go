@@ -84,7 +84,6 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 	if vm.MachineState == PANIC {
 		vm.ExecutionVM.Panic(uint64(host_fn))
 	}
-
 	// Log after host function call to match javajam format
 	vm.DebugHostFunction(host_fn, "Gas Used: %d, Gas Left: %d", gasUsed, currentGas)
 
@@ -92,138 +91,86 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 	return ok, err
 }
 
+var RefineHostFunctionMap = map[int]func(*VM){
+	GAS:               (*VM).hostGas,
+	FETCH:             (*VM).hostFetch,
+	HISTORICAL_LOOKUP: (*VM).hostHistoricalLookup,
+	EXPORT:            (*VM).hostExport,
+	MACHINE:           (*VM).hostMachine,
+	PEEK:              (*VM).hostPeek,
+	POKE:              (*VM).hostPoke,
+	PAGES:             (*VM).hostPages,
+	INVOKE:            (*VM).hostInvoke,
+	EXPUNGE:           (*VM).hostExpunge,
+	LOG:               (*VM).hostLog,
+}
+
+var AccumulateHostFunctionMap = map[int]func(*VM){
+	GAS:        (*VM).hostGas,
+	FETCH:      (*VM).hostFetch,
+	READ:       (*VM).hostRead,
+	WRITE:      (*VM).hostWrite,
+	LOOKUP:     (*VM).hostLookup,
+	INFO:       (*VM).hostInfo,
+	BLESS:      (*VM).hostBless,
+	ASSIGN:     (*VM).hostAssign,
+	DESIGNATE:  (*VM).hostDesignate,
+	CHECKPOINT: (*VM).hostCheckpoint,
+	NEW:        (*VM).hostNew,
+	UPGRADE:    (*VM).hostUpgrade,
+	TRANSFER:   (*VM).hostTransfer,
+	EJECT:      (*VM).hostEject,
+	QUERY:      (*VM).hostQuery,
+	SOLICIT:    (*VM).hostSolicit,
+	FORGET:     (*VM).hostForget,
+	YIELD:      (*VM).hostYield,
+	PROVIDE:    (*VM).hostProvide,
+	LOG:        (*VM).hostLog,
+}
+
 func (vm *VM) hostFunction(host_fn int) (bool, error) {
-	switch host_fn {
-	case GAS:
-		vm.hostGas()
-		return true, nil
+	// Handle Refine mode
+	if vm.Mode == ModeRefine {
+		// Try standard Refine host functions
+		if fn, ok := RefineHostFunctionMap[host_fn]; ok {
+			fn(vm)
+			return true, nil
+		}
 
-	case LOOKUP:
-		vm.hostLookup()
-		return true, nil
+		// Handle special Verkle functions (253-255)
+		switch host_fn {
+		case VERIFY_VERKLE_PROOF: // 253
+			vm.hostVerifyVerkleProof()
+			return true, nil
+		case FETCH_WITNESS: // 254
+			vm.HostFetchWitness()
+			return true, nil
+		case FETCH_VERKLE: // 255
+			vm.hostFetchVerkle()
+			return true, nil
+		}
 
-	case READ:
-		vm.hostRead()
-		return true, nil
-
-	case WRITE:
-		vm.hostWrite()
-		return true, nil
-
-	case INFO:
-		vm.hostInfo()
-		return true, nil
-
-	case BLESS:
-		vm.hostBless()
-		return true, nil
-
-	case ASSIGN:
-		vm.hostAssign()
-		return true, nil
-
-	case DESIGNATE:
-		vm.hostDesignate()
-		return true, nil
-
-	case CHECKPOINT:
-		vm.hostCheckpoint()
-		return true, nil
-
-	case NEW:
-		vm.hostNew()
-		return true, nil
-
-	case UPGRADE:
-		vm.hostUpgrade()
-		return true, nil
-
-	case TRANSFER:
-		vm.hostTransfer()
-		return true, nil
-
-	case EJECT:
-		vm.hostEject()
-		return true, nil
-
-	case QUERY:
-		vm.hostQuery()
-		return true, nil
-
-	case SOLICIT:
-		vm.hostSolicit()
-		return true, nil
-
-	case FORGET:
-		// t := vm.hostenv.GetTimeslot()
-		vm.hostForget()
-		return true, nil
-
-	case YIELD:
-		vm.hostYield()
-		return true, nil
-
-	case PROVIDE:
-		vm.hostProvide()
-		return true, nil
-
-	// Refine functions
-	case HISTORICAL_LOOKUP:
-		vm.hostHistoricalLookup()
-		return true, nil
-
-	case FETCH:
-		vm.hostFetch()
-		return true, nil
-
-	case EXPORT:
-		vm.hostExport()
-		return true, nil
-
-	case MACHINE:
-		vm.hostMachine()
-		return true, nil
-
-	case PEEK:
-		vm.hostPeek()
-		return true, nil
-
-	case POKE:
-		vm.hostPoke()
-		return true, nil
-
-	case PAGES:
-		vm.hostPages()
-		return true, nil
-
-	case INVOKE:
-		vm.hostInvoke()
-		return true, nil
-
-	case EXPUNGE:
-		vm.hostExpunge()
-		return true, nil
-
-	case LOG:
-		vm.hostLog()
-		return true, nil
-
-	case VERIFY_VERKLE_PROOF: // 253
-		vm.hostVerifyVerkleProof()
-		return true, nil
-
-	case FETCH_WITNESS: // 254
-		vm.HostFetchWitness()
-		return true, nil
-
-	case FETCH_VERKLE: // 255
-		vm.hostFetchVerkle()
-		return true, nil
-
-	default:
+		// Unknown function in Refine mode
 		vm.WriteRegister(7, WHAT)
 		return true, nil
 	}
+
+	// Handle Accumulate mode
+	if vm.Mode == ModeAccumulate {
+		if fn, ok := AccumulateHostFunctionMap[host_fn]; ok {
+			fn(vm)
+			return true, nil
+		}
+
+		// Unknown function in Accumulate mode
+		log.Warn(vm.logging, "Unknown Host Function in Accumulate Mode", "host_fn", host_fn)
+		vm.WriteRegister(7, WHAT)
+		return true, nil
+	}
+
+	// Unknown mode
+	vm.WriteRegister(7, WHAT)
+	return true, nil
 }
 
 // Information-on-Service (similar to hostRead)
@@ -295,6 +242,11 @@ func (vm *VM) hostInfo() {
 
 	bytesToWrite := val[f : f+l]
 	errcode := vm.WriteRAMBytes(uint32(bo), bytesToWrite)
+
+	// Record taint for external write
+	if vmgo, ok := vm.ExecutionVM.(*VMGo); ok {
+		vmgo.TaintRecordExternalWrite(uint64(bo), uint64(l), "PROVIDE")
+	}
 
 	if errcode != OK {
 		vm.terminated = true
@@ -974,6 +926,12 @@ func (vm *VM) hostFetch() {
 	l := min(uint64(len(v_Bytes))-f, omega_9) // max length
 	vm.DebugHostFunction(FETCH, "datatype = %d, o=%x, f=%d, l=%d , v=0x%x", datatype, o, f, l, v_Bytes[f:f+l])
 	errCode := vm.WriteRAMBytes(uint32(o), v_Bytes[f:f+l])
+
+	// Record taint for external write
+	if vmgo, ok := vm.ExecutionVM.(*VMGo); ok {
+		vmgo.TaintRecordExternalWrite(uint64(o), l, "FETCH")
+	}
+
 	if errCode != OK {
 		vm.Panic(errCode)
 		log.Trace(vm.logging, "FETCH FAIL", "datatype", datatype, "o", o, "v_Bytes", fmt.Sprintf("%x", v_Bytes), "l", l, "f", f, "f+l", f+l, "v_Bytes[f..f+l]", fmt.Sprintf("%x", v_Bytes[f:f+l]))
@@ -1223,6 +1181,12 @@ func (vm *VM) hostInvoke() {
 	gasVal := new_machine.GetGas()
 	gasBytes = types.E_l(uint64(gasVal), 8)
 	errCodeGas = vm.WriteRAMBytes(uint32(o), gasBytes)
+
+	// Record taint for external write (gas)
+	if vmgo, ok := vm.ExecutionVM.(*VMGo); ok {
+		vmgo.TaintRecordExternalWrite(uint64(o), 8, "INVOKE_GAS")
+	}
+
 	if errCodeGas != OK {
 		vm.Panic(errCodeGas)
 		return
@@ -1232,6 +1196,12 @@ func (vm *VM) hostInvoke() {
 		regVal := new_machine.ReadRegister(i - 1)
 		reg_bytes := types.E_l(regVal, 8)
 		errCode := vm.WriteRAMBytes(uint32(o)+8*uint32(i), reg_bytes)
+
+		// Record taint for external write (register)
+		if vmgo, ok := vm.ExecutionVM.(*VMGo); ok {
+			vmgo.TaintRecordExternalWrite(uint64(o)+8*uint64(i), 8, "INVOKE_REG")
+		}
+
 		if errCode != OK {
 			vm.Panic(errCode)
 			return
@@ -1318,6 +1288,12 @@ func (vm *VM) hostLookup() {
 	l = min(l, uint64(len(v))-f)
 
 	err := vm.WriteRAMBytes(uint32(o), v[:l])
+
+	// Record taint for external write
+	if vmgo, ok := vm.ExecutionVM.(*VMGo); ok {
+		vmgo.TaintRecordExternalWrite(uint64(o), l, "PROVIDE_CHILD")
+	}
+
 	if err != OK {
 		vm.Panic(err)
 		return
@@ -1399,7 +1375,7 @@ func (vm *VM) hostRead() {
 	f = min(f, lenval)
 	l = min(l, lenval-f)
 
-	//fmt.Printf("***** hostRead: bo= %x l=%d ==> end: %x\n", bo, len(val[f:f+l]), bo+uint64(len(val[f:f+l])))
+	vm.DebugHostFunction(READ, "s=%d, mu_k=0x%x, kLen=%d, bo=0x%x, f=%d, l=%d", a.ServiceIndex, mu_k, len(mu_k), bo, f, l)
 	if !ok { // || true
 		vm.WriteRegister(7, NONE)
 		vm.HostResultCode = NONE
@@ -1421,6 +1397,12 @@ func (vm *VM) hostRead() {
 		vm.MachineState = PANIC
 		return
 	}
+
+	// Record taint for external write
+	if vmgo, ok := vm.ExecutionVM.(*VMGo); ok {
+		vmgo.TaintRecordExternalWrite(uint64(bo), l, "READ")
+	}
+
 	vm.WriteRegister(7, lenval)
 }
 
@@ -1472,7 +1454,7 @@ func (vm *VM) hostWrite() {
 		v = slices.Clone(v)
 		val_len = uint64(len(v))
 	}
-	vm.DebugHostFunction(WRITE, "writing val 0x%x from address 0x%x, length %d", v, vo, vz)
+	vm.DebugHostFunction(WRITE, "[mu_k 0x%x]writing val 0x%x from address 0x%x, length %d", mu_k, v, vo, vz)
 
 	deltaItems := int32(0)
 	deltaSize := int64(0)
@@ -1721,6 +1703,12 @@ func (vm *VM) hostHistoricalLookup() {
 	f := min(omega_10, vLength)
 	l := min(omega_11, vLength-f)
 	errCode = vm.WriteRAMBytes(uint32(o), v[f:f+l])
+
+	// Record taint for external write
+	if vmgo, ok := vm.ExecutionVM.(*VMGo); ok {
+		vmgo.TaintRecordExternalWrite(uint64(o), l, "LOOKUP")
+	}
+
 	if errCode != OK {
 		vm.Panic(errCode)
 		return
@@ -1851,6 +1839,12 @@ func (vm *VM) hostPeek() {
 	}
 	// Debug: ALWAYS show first bytes for PEEK to trace result corruption
 	errCode = vm.WriteRAMBytes(uint32(o), s_data[:])
+
+	// Record taint for external write
+	if vmgo, ok := vm.ExecutionVM.(*VMGo); ok {
+		vmgo.TaintRecordExternalWrite(o, z, "PEEK")
+	}
+
 	if errCode != OK {
 		vm.Panic(errCode)
 		return
@@ -1892,7 +1886,7 @@ func (vm *VM) hostPoke() {
 	}
 	// Record taint for external write to child VM
 	if vmgo, ok := (*m_n).(*VMGo); ok {
-		vmgo.TaintRecordExternalWrite(o, z)
+		vmgo.TaintRecordExternalWrite(o, z, "POKE")
 	}
 	vm.WriteRegister(7, OK)
 	vm.SetHostResultCode(OK)
@@ -1971,7 +1965,7 @@ func (vm *VM) hostPages() {
 		(*m).WriteRAMBytes(uint32(pageAddress), toWrite)
 		// Record taint for external write to child VM
 		if vmgo, ok := (*m).(*VMGo); ok {
-			vmgo.TaintRecordExternalWrite(uint64(pageAddress), uint64(countLength))
+			vmgo.TaintRecordExternalWrite(uint64(pageAddress), uint64(countLength), "PAGES")
 		}
 	} else {
 		(*m).SetPagesAccessRange(page, count, PageMutable)
@@ -1979,7 +1973,7 @@ func (vm *VM) hostPages() {
 		(*m).WriteRAMBytes(uint32(pageAddress), toWrite)
 		// Record taint for external write to child VM
 		if vmgo, ok := (*m).(*VMGo); ok {
-			vmgo.TaintRecordExternalWrite(uint64(pageAddress), uint64(countLength))
+			vmgo.TaintRecordExternalWrite(uint64(pageAddress), uint64(countLength), "PAGES")
 		}
 	}
 	switch {
@@ -2022,6 +2016,7 @@ func (vm *VM) hostLog() {
 	if vm.IsChild {
 		serviceMetadata = fmt.Sprintf("%s-child", serviceMetadata)
 	}
+	vm.WriteRegister(7, WHAT)
 	loggingVerbose := false
 	if vm.logging == log.Builder || vm.logging == log.FirstGuarantor || vm.logging == log.OtherGuarantor {
 		loggingVerbose = false
@@ -2041,13 +2036,19 @@ func (vm *VM) hostLog() {
 	case 4: // 4: User agent displays as pedantic information
 		fmt.Printf("\x1b[37m[TRACE-%s] %s\x1b[0m\n", vm.logging, string(messageBytes))
 	}
-	vm.WriteRegister(7, WHAT)
+
 }
 
 func (vm *VM) PutGasAndRegistersToMemory(input_address uint32, gas uint64, regs []uint64) {
 	gasBytes := make([]byte, 8)
 	binary.LittleEndian.PutUint64(gasBytes, gas)
 	errCode := vm.WriteRAMBytes(input_address, gasBytes)
+
+	// Record taint for external write (gas)
+	if vmgo, ok := vm.ExecutionVM.(*VMGo); ok {
+		vmgo.TaintRecordExternalWrite(uint64(input_address), 8, "PUT_GAS_REGS_GAS")
+	}
+
 	if errCode != OK {
 		vm.SetHostResultCode(OOB)
 		return
@@ -2056,6 +2057,12 @@ func (vm *VM) PutGasAndRegistersToMemory(input_address uint32, gas uint64, regs 
 		regBytes := make([]byte, 8)
 		binary.LittleEndian.PutUint64(regBytes, reg)
 		errCode = vm.WriteRAMBytes(input_address+8+uint32(i*8), regBytes)
+
+		// Record taint for external write (register)
+		if vmgo, ok := vm.ExecutionVM.(*VMGo); ok {
+			vmgo.TaintRecordExternalWrite(uint64(input_address+8+uint32(i*8)), 8, "PUT_GAS_REGS_REG")
+		}
+
 		if errCode != OK {
 			vm.SetHostResultCode(OOB)
 			return

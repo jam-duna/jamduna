@@ -882,6 +882,16 @@ func (vm *VMGo) Execute(host *VM, entryPoint uint32, logDir string) error {
 		vm.flushTraceBuffers()
 	}
 
+	// Print taint tracking results if enabled
+	if vm.TaintConfig != nil && vm.TaintConfig.Enabled && vm.TaintGraph != nil {
+		fmt.Printf("\n=== Taint Tracking Results for Service %d ===\n", vm.Service_index)
+		fmt.Printf("%s\n", vm.GetTaintStats())
+		fmt.Printf("\n")
+		// Trace the target memory address
+		vm.PrintTaintTrace(0xfefdf4f0, 8, 100)
+		fmt.Printf("==========================================\n\n")
+	}
+
 	return nil
 }
 
@@ -1141,6 +1151,8 @@ func (vm *VMGo) step(stepn int) error {
 		if vm.hostCall {
 			// Decrement host call gas cost (10) and check for OOG
 			vm.Gas -= 10
+			if vm.host_func_id == LOG {
+			}
 			if vm.Gas < 0 {
 				fmt.Printf("Out of gas during host function %d call\n", vm.host_func_id)
 				vm.ResultCode = types.WORKRESULT_OOG
@@ -1527,7 +1539,7 @@ func (vm *VMGo) HandleTwoImms(inst *Instruction) {
 	switch inst.Opcode {
 	case STORE_IMM_U8:
 		errCode := vm.WriteRAMBytes(addr, []byte{uint8(vy)})
-		vm.TaintRecordExternalWrite(uint64(addr), 1) // Store from immediate (external source)
+		vm.TaintRecordExternalWrite(uint64(addr), 1, "STORE_IMM") // Store from immediate (external source)
 		dumpStoreGeneric("STORE_IMM_U8", uint64(addr), "imm", vy, 8)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
@@ -1535,7 +1547,7 @@ func (vm *VMGo) HandleTwoImms(inst *Instruction) {
 		}
 	case STORE_IMM_U16:
 		errCode := vm.WriteRAMBytes(addr, types.E_l(vy&0xFFFF, 2))
-		vm.TaintRecordExternalWrite(uint64(addr), 2) // Store from immediate (external source)
+		vm.TaintRecordExternalWrite(uint64(addr), 2, "STORE_IMM") // Store from immediate (external source)
 		dumpStoreGeneric("STORE_IMM_U16", uint64(addr), "imm", vy&0xFFFF, 16)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
@@ -1543,7 +1555,7 @@ func (vm *VMGo) HandleTwoImms(inst *Instruction) {
 		}
 	case STORE_IMM_U32:
 		errCode := vm.WriteRAMBytes(addr, types.E_l(vy&0xFFFFFFFF, 4))
-		vm.TaintRecordExternalWrite(uint64(addr), 4) // Store from immediate (external source)
+		vm.TaintRecordExternalWrite(uint64(addr), 4, "STORE_IMM") // Store from immediate (external source)
 		dumpStoreGeneric("STORE_IMM_U32", uint64(addr), "imm", vy&0xFFFFFFFF, 32)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
@@ -1551,7 +1563,7 @@ func (vm *VMGo) HandleTwoImms(inst *Instruction) {
 		}
 	case STORE_IMM_U64:
 		errCode := vm.WriteRAMBytes(addr, types.E_l(vy, 8))
-		vm.TaintRecordExternalWrite(uint64(addr), 8) // Store from immediate (external source)
+		vm.TaintRecordExternalWrite(uint64(addr), 8, "STORE_IMM") // Store from immediate (external source)
 		dumpStoreGeneric("STORE_IMM_U64", uint64(addr), "imm", vy, 64)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
@@ -1699,7 +1711,7 @@ func (vm *VMGo) HandleOneRegTwoImm(inst *Instruction) {
 	switch inst.Opcode {
 	case STORE_IMM_IND_U8:
 		errCode := vm.WriteRAMBytes(addr, []byte{byte(uint8(vy))})
-		vm.TaintRecordExternalWrite(uint64(addr), 1) // Store from immediate (external source)
+		vm.TaintRecordExternalWrite(uint64(addr), 1, "STORE_IMM") // Store from immediate (external source)
 		dumpStoreGeneric("STORE_IMM_IND_U8", uint64(addr), fmt.Sprintf("0x%x", vy), vy&0xff, 8)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
@@ -1707,7 +1719,7 @@ func (vm *VMGo) HandleOneRegTwoImm(inst *Instruction) {
 		}
 	case STORE_IMM_IND_U16:
 		errCode := vm.WriteRAMBytes(addr, types.E_l(vy&0xFFFF, 2))
-		vm.TaintRecordExternalWrite(uint64(addr), 2) // Store from immediate (external source)
+		vm.TaintRecordExternalWrite(uint64(addr), 2, "STORE_IMM") // Store from immediate (external source)
 		dumpStoreGeneric("STORE_IMM_IND_U16", uint64(addr), fmt.Sprintf("0x%x", vy), vy&0xFFFF, 16)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
@@ -1715,7 +1727,7 @@ func (vm *VMGo) HandleOneRegTwoImm(inst *Instruction) {
 		}
 	case STORE_IMM_IND_U32:
 		errCode := vm.WriteRAMBytes(addr, types.E_l(vy&0xFFFFFFFF, 4))
-		vm.TaintRecordExternalWrite(uint64(addr), 4) // Store from immediate (external source)
+		vm.TaintRecordExternalWrite(uint64(addr), 4, "STORE_IMM") // Store from immediate (external source)
 		dumpStoreGeneric("STORE_IMM_IND_U32", uint64(addr), fmt.Sprintf("0x%x", vy), vy&0xFFFFFFFF, 32)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC
@@ -1723,7 +1735,7 @@ func (vm *VMGo) HandleOneRegTwoImm(inst *Instruction) {
 		}
 	case STORE_IMM_IND_U64:
 		errCode := vm.WriteRAMBytes(addr, types.E_l(uint64(vy), 8))
-		vm.TaintRecordExternalWrite(uint64(addr), 8) // Store from immediate (external source)
+		vm.TaintRecordExternalWrite(uint64(addr), 8, "STORE_IMM") // Store from immediate (external source)
 		dumpStoreGeneric("STORE_IMM_IND_U64", uint64(addr), fmt.Sprintf("0x%x", vy), vy, 64)
 		if errCode != OK {
 			vm.ResultCode = types.WORKRESULT_PANIC

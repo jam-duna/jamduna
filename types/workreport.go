@@ -54,6 +54,19 @@ type WorkReport struct {
 	Results           []WorkDigest          `json:"results"`             // d
 }
 
+// GP v0.7.2 11.8 true if it's valid size
+func (w *WorkReport) CheckReportSize() bool {
+	rt_len := len(w.Trace)
+	rd_total := 0
+	for _, rd := range w.Results {
+		rd_total += len(rd.Result.Ok)
+	}
+	if rt_len+rd_total > MaxEncodedWorkReportSize {
+		return false
+	}
+	return true
+}
+
 // eq 190
 type WorkReportNeedAudit struct {
 	Q [TotalCores]WorkReport `json:"available_work_report"`

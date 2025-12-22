@@ -154,7 +154,29 @@ func (g *GuaranteeCredential) UnmarshalJSON(data []byte) error {
 	copy(g.Signature[:], sigBytes)
 	return nil
 }
-
+func (g *Guarantee) VerifyValidator(Validators []Validator) error {
+	signtext := g.Report.computeWorkReportBytes()
+	//verify the signature
+	numErrors := 0
+	for _, i := range g.Signatures {
+		//verify the signature
+		// [i.ValidatorIndex].Ed25519
+		validatorKey := Validators[i.ValidatorIndex].GetEd25519Key()
+		if !Ed25519Verify(validatorKey, signtext, i.Signature) {
+			numErrors++
+			//fmt.Printf("[guarantee:Verify] reportHash: %v; ERR invalid signature in guarantee by validator %v [validatorKey: %s prevValidatorKey: %s]\n", g.Report.Hash().String(), i.ValidatorIndex, common.Bytes2Hex(validatorKey[:]), common.Bytes2Hex(prevValidatorKey[:]))
+			//fmt.Printf("work report hash : %s\n", g.Report.Hash().String())
+			//fmt.Printf("sign salt : %s\n", common.Bytes2Hex(signtext))
+			//fmt.Printf("signature : %s\n", common.Bytes2Hex(i.Signature[:]))
+		} else {
+			//fmt.Printf("[guarantee:Verify] reportHash: %v; OK signature in guarantee by validator %v [PubKey: %s]\n", g.Report.Hash().String(), i.ValidatorIndex, common.Bytes2Hex(validatorKey[:]))
+		}
+	}
+	if numErrors > 0 {
+		return jamerrors.ErrGBadSignature
+	}
+	return nil
+}
 func (g *Guarantee) Verify(CurrV []Validator, PrevV []Validator) error {
 	signtext := g.Report.computeWorkReportBytes()
 	//verify the signature

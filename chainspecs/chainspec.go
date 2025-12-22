@@ -113,9 +113,10 @@ type DevConfig struct {
 	GenesisValidators []GenesisValidator `json:"genesis_validators"`
 }
 type GenesisValidator struct {
-	PeerID  string `json:"peer_id"`
-	Ed25519 string `json:"ed25519"`
-	NetAddr string `json:"net_addr"`
+	PeerID       string `json:"peer_id"`
+	Ed25519      string `json:"ed25519,omitempty"`
+	Bandersnatch string `json:"bandersnatch,omitempty"`
+	NetAddr      string `json:"net_addr"`
 }
 
 func GenSpec(dev DevConfig) (chainSpec *ChainSpec, err error) {

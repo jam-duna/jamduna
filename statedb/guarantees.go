@@ -74,6 +74,9 @@ func AcceptableGuaranteeError(err error) bool {
 
 // VerifyGuaranteeBasic checks signatures, core index, assignment, timeouts, gas, and code hash.
 func (s *StateDB) VerifyGuaranteeBasic(g types.Guarantee, targetJCE uint32) error {
+	if !g.Report.CheckReportSize() {
+		return fmt.Errorf("guarantee work report size exceeds maximum")
+	}
 	// common validations
 	if err := s.checkServicesExist(g); err != nil {
 		return err
@@ -115,6 +118,58 @@ func (s *StateDB) VerifyGuaranteeBasic(g types.Guarantee, targetJCE uint32) erro
 	// signature verification against current or previous validator set
 	validators, prevValidators := s.JamState.chooseValidatorSets(g.Slot)
 	if err := g.Verify(validators, prevValidators); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// VerifyGuaranteeBasic checks signatures, core index, assignment, timeouts, gas, and code hash.
+func (s *StateDB) VerifyGuarantee(g types.Guarantee, targetJCE uint32) error {
+	if !g.Report.CheckReportSize() {
+		return fmt.Errorf("guarantee work report size exceeds maximum")
+	}
+	// common validations
+	if err := s.checkServicesExist(g); err != nil {
+		return err
+	}
+	if g.Report.CoreIndex >= types.TotalCores {
+		return jamerrors.ErrGBadCoreIndex
+	}
+	if len(g.Signatures) < 2 {
+		return jamerrors.ErrGInsufficientGuarantees
+	}
+
+	// validator index uniqueness and sorting
+	if err := CheckSortedSignatures(g); err != nil {
+		return err
+	}
+
+	// pending or timeout checks on JamState
+	js := s.JamState
+	if err := js.checkReportPendingOnCore(g); err != nil {
+		return err
+	}
+	if targetJCE > 0 {
+		// assignment to core
+		if err := s.checkAssignment(g, targetJCE); err != nil {
+			return err
+		}
+		if err := js.checkReportTimeOut(g, targetJCE); err != nil {
+			return err
+		}
+	}
+
+	// additional block-level checks
+	for _, fn := range []func(types.Guarantee) error{s.checkTimeSlotHeader, s.checkRecentBlock, s.checkAnyPrereq, s.checkCodeHash, s.checkGas} {
+		if err := fn(g); err != nil {
+			return err
+		}
+	}
+
+	// signature verification against current or previous validator set
+	validators := s.JamState.chooseValidatorSet(g.Slot)
+	if err := g.VerifyValidator(validators); err != nil {
 		return err
 	}
 
@@ -283,7 +338,7 @@ func (s *StateDB) checkServicesExist(g types.Guarantee) error {
 	return nil
 }
 
-// v0.5 eq 11.29
+// GP 0.
 func (s *StateDB) checkGas(g types.Guarantee) error {
 	sum_rg := uint64(0)
 	for _, results := range g.Report.Results {
@@ -355,15 +410,15 @@ func (s *StateDB) checkRecentBlock(g types.Guarantee) error {
 		}
 	}
 
-	// if !anchor {
-	// 	return jamerrors.ErrGAnchorNotRecent
-	// }
-	// if !stateroot {
-	// 	return jamerrors.ErrGBadStateRoot
-	// }
-	// if !beefyroot {
-	// 	return jamerrors.ErrGBadBeefyMMRRoot
-	// }
+	if !anchor {
+		return jamerrors.ErrGAnchorNotRecent
+	}
+	if !stateroot {
+		return jamerrors.ErrGBadStateRoot
+	}
+	if !beefyroot {
+		return jamerrors.ErrGBadBeefyMMRRoot
+	}
 	return nil
 }
 

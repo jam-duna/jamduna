@@ -7,11 +7,11 @@ DEFAULT_ASN_VERSION = 1
 
 1. Be sure to change PATCH_VERSION in fuzzer_asn.go to the latest version 
 ```
-PATCH_VERSION = 6
+PATCH_VERSION = 1
 
 # JAM_VERSION = <GP_VERSION>.<PATCH_VERSION>
 GP_VERSION = 0.7.2
-JAM_VERSION = 0.7.2.0
+JAM_VERSION = 0.7.2.1
 ```
 
 2. Make the fuzzer with DEFAULT_ASN_VERSION
@@ -50,12 +50,12 @@ Check that our target has no issue!
 **Note:** Only the Linux compiler version (default) is published. The binaries use the compiler backend for better performance.
 
 ```
-gh release create v0.7.2.0 \
+gh release create v0.7.2.1 \
   $JAM_PATH/cmd/duna_fuzzer/duna_fuzzer_linux \
   $JAM_PATH/cmd/duna_target/duna_target_linux \
   --repo jam-duna/jamtestnet \
-  --title "v0.7.2.0 Fuzzer + Target" \
-  --notes $'Release v0.7.2.0 of duna_fuzzer and duna_target\n\nLinux binaries built with compiler backend for optimal performance.\n\n**Published binaries:**\n- duna_fuzzer_linux\n- duna_target_linux'
+  --title "v0.7.2.1 Fuzzer + Target" \
+  --notes $'Release v0.7.2.1 of duna_fuzzer and duna_target\n\nLinux binaries built with compiler backend for optimal performance.\n\n**Published binaries:**\n- duna_fuzzer_linux\n- duna_target_linux'
 ```
 
 

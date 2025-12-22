@@ -502,6 +502,25 @@ func InitCache() {
 	C.init_cache()
 }
 
+// ValidateBandersnatchKey validates if a Bandersnatch public key is valid
+// Returns nil if valid, error otherwise
+func ValidateBandersnatchKey(key BanderSnatchKey) error {
+	if len(key) != PubkeyLen {
+		return fmt.Errorf("invalid key length: expected %d bytes, got %d", PubkeyLen, len(key))
+	}
+
+	result := C.validate_bandersnatch_pubkey(
+		(*C.uchar)(unsafe.Pointer(&key[0])),
+		C.size_t(len(key)),
+	)
+
+	if result != 1 {
+		return fmt.Errorf("invalid bandersnatch public key: the input buffer contained invalid data")
+	}
+
+	return nil
+}
+
 func init() {
 	InitCache()
 }

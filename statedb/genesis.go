@@ -72,7 +72,7 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 	for i := 0; i < types.TotalValidators; i++ {
 		variantValidators[i] = validators[(i+1)%types.TotalValidators]
 	}
-	var variantBool bool = true
+	var variantBool bool = false
 	if variantBool {
 		j.SafroleState.NextValidators = variantValidators
 	} else {

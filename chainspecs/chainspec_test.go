@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"runtime"
 	"testing"
 
 	"github.com/colorfulnotion/jam/common"
@@ -21,9 +22,9 @@ func TestGenerateConfigFile(t *testing.T) {
 	for i, validator := range validators {
 		devCfg.GenesisValidators[i].NetAddr = fmt.Sprintf("127.0.0.1:%d", 40000+i)
 		devCfg.GenesisValidators[i].PeerID = common.ToSAN(validator.Ed25519[:])
-		devCfg.GenesisValidators[i].Ed25519 = common.Bytes2String(validator.Ed25519[:])
+		devCfg.GenesisValidators[i].Bandersnatch = common.Bytes2String(validator.Bandersnatch[:])
 	}
-	jsonBytes, err := json.MarshalIndent(devCfg, "", "  ")
+	jsonBytes, err := json.MarshalIndent(devCfg, "", "    ")
 	if err != nil {
 		t.Fatalf("Failed to marshal config: %v", err)
 	}
@@ -41,7 +42,15 @@ func TestGenerateConfigFile(t *testing.T) {
 }
 
 func TestParameterIsTheSame(t *testing.T) {
-	target := "linux-amd64/polkajam-spec.json"
+	var target string
+	switch runtime.GOOS {
+	case "linux":
+		target = "linux-amd64/polkajam-spec.json"
+	case "darwin":
+		target = "mac-arm64/polkajam-spec.json"
+	default:
+		t.Fatalf("Unsupported platform: %s", runtime.GOOS)
+	}
 	var chainSpec ChainSpec
 	// unmarshal the JSON data into the struct
 	data, err := os.ReadFile(target)

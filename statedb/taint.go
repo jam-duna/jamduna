@@ -51,17 +51,18 @@ func (k TaintNodeKind) String() string {
 // TaintNode represents a point where a new bit pattern is created
 // MOV doesn't create nodes - it just updates regSource mapping
 type TaintNode struct {
-	ID      TaintNodeID
-	Kind    TaintNodeKind
-	Step    int      // Execution step
-	PC      uint64   // Program counter
-	Opcode  byte     // Instruction opcode
-	Inputs  []TaintNodeID // Input nodes (e.g., for ADD: [node_from_r1, node_from_r2])
-	MemAddr uint64   // For LOAD/STORE: memory address
-	MemSize uint64   // For LOAD/STORE: size in bytes
-	RegDest int      // For ALU/LOAD: destination register (-1 if N/A)
-	RegSrc  int      // For STORE: source register (-1 if N/A)
-	Value   uint64   // The actual value (for debugging)
+	ID           TaintNodeID
+	Kind         TaintNodeKind
+	Step         int      // Execution step
+	PC           uint64   // Program counter
+	Opcode       byte     // Instruction opcode
+	Inputs       []TaintNodeID // Input nodes (e.g., for ADD: [node_from_r1, node_from_r2])
+	MemAddr      uint64   // For LOAD/STORE: memory address
+	MemSize      uint64   // For LOAD/STORE: size in bytes
+	RegDest      int      // For ALU/LOAD: destination register (-1 if N/A)
+	RegSrc       int      // For STORE: source register (-1 if N/A)
+	Value        uint64   // The actual value (for debugging)
+	HostFunction string   // For EXTERNAL: name of the host function that caused this write
 }
 
 func (n *TaintNode) String() string {
@@ -80,8 +81,12 @@ func (n *TaintNode) String() string {
 	if n.Kind == TaintKindStore && n.RegSrc >= 0 {
 		regStr = fmt.Sprintf(" r%d ->", n.RegSrc)
 	}
-	return fmt.Sprintf("Node%d[Step=%d PC=0x%x %s %s%s%s%s]",
-		n.ID, n.Step, n.PC, opcode_str(n.Opcode), n.Kind.String(), memStr, regStr, inputStr)
+	hostFnStr := ""
+	if n.Kind == TaintKindExternal && n.HostFunction != "" {
+		hostFnStr = fmt.Sprintf(" [%s]", n.HostFunction)
+	}
+	return fmt.Sprintf("Node%d[Step=%d PC=0x%x %s %s%s%s%s%s]",
+		n.ID, n.Step, n.PC, opcode_str(n.Opcode), n.Kind.String(), memStr, regStr, inputStr, hostFnStr)
 }
 
 // TaintGraph is the SSA-style taint tracking graph
@@ -207,10 +212,11 @@ func (g *TaintGraph) RecordStore(srcReg int, memAddr, memSize uint64, step int, 
 }
 
 // RecordExternalWrite handles external memory writes (e.g., hostPoke)
-func (g *TaintGraph) RecordExternalWrite(memAddr, memSize uint64, step int, pc uint64) {
+func (g *TaintGraph) RecordExternalWrite(memAddr, memSize uint64, step int, pc uint64, hostFunction string) {
 	node := g.newNode(TaintKindExternal, step, pc, OPCODE_EXTERNAL_WRITE)
 	node.MemAddr = memAddr
 	node.MemSize = memSize
+	node.HostFunction = hostFunction
 
 	// Update memory source for all bytes
 	for addr := memAddr; addr < memAddr+memSize; addr++ {
@@ -529,14 +535,14 @@ func (vm *VMGo) TaintRecordStore(srcReg int, memAddr, memSize uint64, opcode byt
 }
 
 // TaintRecordExternalWrite records an external memory write
-func (vm *VMGo) TaintRecordExternalWrite(memAddr, memSize uint64) {
+func (vm *VMGo) TaintRecordExternalWrite(memAddr, memSize uint64, hostFunction string) {
 	if vm.TaintConfig == nil || !vm.TaintConfig.Enabled || vm.TaintGraph == nil {
 		return
 	}
 	if !vm.shouldTrackStep() {
 		return
 	}
-	vm.TaintGraph.RecordExternalWrite(memAddr, memSize, vm.currentStep, vm.currentPC)
+	vm.TaintGraph.RecordExternalWrite(memAddr, memSize, vm.currentStep, vm.currentPC, hostFunction)
 }
 
 // PrintTaintTrace prints the backward trace from a memory address

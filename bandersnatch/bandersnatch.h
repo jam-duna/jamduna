@@ -179,6 +179,11 @@ void free_verifier(void* verifier_ptr);
 
 void init_cache();
 
+int validate_bandersnatch_pubkey(
+    const unsigned char* pubkey_bytes,
+    size_t pubkey_len
+);
+
 void encode(
     const unsigned char* input_ptr,
     size_t input_len,

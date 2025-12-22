@@ -811,7 +811,23 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block, sf0 *SafroleState) (isValid
 	h := bl.GetHeader()
 	validatorIdx = h.AuthorIndex
 	var err error
-
+	if len(bl.Header.OffendersMark) != 0 {
+		// check if the offender mark is valid
+		checkingKeys := map[types.Ed25519Key]struct{}{}
+		for _, culprit := range bl.Extrinsic.Disputes.Culprit {
+			checkingKeys[culprit.Key] = struct{}{}
+		}
+		for _, fault := range bl.Extrinsic.Disputes.Fault {
+			checkingKeys[fault.Key] = struct{}{}
+		}
+		for _, offenderMark := range bl.Header.OffendersMark {
+			if _, exists := checkingKeys[offenderMark]; !exists {
+				log.Error(log.SDB, "VerifyBlockHeader:OffenderMarkNotInDisputeExtrinsic",
+					"offenderMark", common.BytesToHexStr(offenderMark.Bytes()))
+				return false, validatorIdx, bandersnatch.BanderSnatchKey{}, fmt.Errorf("VerifyBlockHeader Failed: OffenderMarkNotInDisputeExtrinsic")
+			}
+		}
+	}
 	if sf0 == nil {
 		// ValidateTicketTransition
 		sf0, err = ApplyStateTransitionTickets(s, context.TODO(), bl, nil)
