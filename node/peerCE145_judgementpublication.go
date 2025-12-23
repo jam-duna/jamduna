@@ -135,7 +135,7 @@ func (p *Peer) SendJudgmentPublication(ctx context.Context, epoch uint32, j type
 	}
 	defer stream.Close()
 
-	if err := sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.SanKey(), code); err != nil {
 		return fmt.Errorf("sendQuicBytes[CE145_JudgmentPublication]: %w", err)
 	}
 	return nil

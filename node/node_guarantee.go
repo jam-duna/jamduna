@@ -259,15 +259,15 @@ func (n *Node) processWPQueueItem(wpItem *types.WPQueueItem) bool {
 	gc := report.Sign(signerSecret, uint16(n.GetCurrValidatorIndex()))
 	guarantee.Signatures = append(guarantee.Signatures, gc)
 
-	selfPubKey := n.GetEd25519Key().String()
+	selfPubKey := n.GetEd25519Key().SAN()
 	for _, coworker := range coworkers {
-		if coworker.Validator.Ed25519.String() == selfPubKey {
+		if coworker.Validator.Ed25519.SAN() == selfPubKey {
 			continue
 		}
 		fellow_response, errfellow := coworker.ShareWorkPackage(context.Background(), coreIndex, bundle, segmentRootLookup, coworker.Validator.Ed25519, wpItem.EventID)
 		if errfellow != nil {
 			log.Warn(log.Node, "processWPQueueItem", "n", n.String(), "errfellow", errfellow)
-			n.telemetryClient.WorkPackageSharingFailed(wpItem.EventID, PubkeyBytes(coworker.Validator.Ed25519.String()), errfellow.Error())
+			n.telemetryClient.WorkPackageSharingFailed(wpItem.EventID, PubkeyBytes(coworker.Validator.Ed25519.SAN()), errfellow.Error())
 
 		}
 		mutex.Lock()

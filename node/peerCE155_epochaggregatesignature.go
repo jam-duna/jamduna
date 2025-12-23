@@ -56,7 +56,7 @@ func (p *Peer) SendEpochAggregateSignature(ctx context.Context, epochFinalized J
 		return fmt.Errorf("WarpSyncRequest.ToBytes failed: %w", err)
 	}
 
-	if err := sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.SanKey(), code); err != nil {
 		return fmt.Errorf("sendQuicBytes[CE155_EpochAggregateSignature] failed: %w", err)
 	}
 

@@ -159,7 +159,7 @@ func (n *Node) cleanWaitingAJ(headerHash common.Hash, workReports []types.WorkRe
 			log.Trace(log.Audit, "sending waitingAuditAnnouncements AGAIN", "n", n.String(), "headerHash", a.HeaderHash.String_short())
 			select {
 			case n.auditAnnouncementsCh <- a:
-				log.Debug(log.Audit, "cleanWaitingAJ: sent waiting audit announcement", "n", n.String(), "ed25519Key", a.Ed25519Key.ShortString())
+				log.Debug(log.Audit, "cleanWaitingAJ: sent waiting audit announcement", "n", n.String(), "ed25519Key", a.Ed25519Key.SAN())
 			default:
 				log.Warn(log.Audit, "cleanWaitingAJ: auditAnnouncementsCh full, dropping announcement",
 					"n", n.String(), "headerHash", a.HeaderHash.String_short())
@@ -667,7 +667,7 @@ func (n *Node) Judge(headerHash common.Hash, tranche uint32, workReports []types
 			var err error
 			if !hasmade {
 				j, err = n.auditWorkReport(w.WorkReport, headerHash)
-				log.Trace(log.Audit, "ADDING AUDIT", "n", n.String(), "report", w.WorkReport.Hash().String_short(), "headerHash", headerHash.String_short(), "tranche", tranche, "judge", j.Judge, "vIdx", j.Validator, "ed25519Pub", n.GetEd25519Key().ShortString())
+				log.Trace(log.Audit, "ADDING AUDIT", "n", n.String(), "report", w.WorkReport.Hash().String_short(), "headerHash", headerHash.String_short(), "tranche", tranche, "judge", j.Judge, "vIdx", j.Validator, "ed25519Pub", n.GetEd25519Key().SAN())
 			} else {
 				j, err = judgement_bucket.GetJudgementByValidator(w.WorkReport.Hash(), validatorIndex)
 				log.Debug(log.Audit, "Already judged, skipping", "n", n.String(), "report", w.WorkReport.Hash().String_short(), "headerHash", headerHash.String_short(), "tranche", tranche, "vIdx", j.Validator)

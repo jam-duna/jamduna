@@ -37,13 +37,13 @@ func (p *Peer) SendWorkReportRequest(ctx context.Context, workReportHash common.
 	}
 
 	//--> Work Report Hash
-	if err := sendQuicBytes(ctx, stream, workReportHash.Bytes(), p.Validator.Ed25519.String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, workReportHash.Bytes(), p.SanKey(), code); err != nil {
 		return types.WorkReport{}, fmt.Errorf("sendQuicBytes[CE136_WorkReportRequest]: %w", err)
 	}
 	//--> FIN
 	stream.Close()
 
-	workReportBytes, err := receiveQuicBytes(ctx, stream, p.Validator.Ed25519.String(), code)
+	workReportBytes, err := receiveQuicBytes(ctx, stream, p.SanKey(), code)
 	if err != nil {
 		return types.WorkReport{}, fmt.Errorf("receiveQuicBytes[CE136_WorkReportRequest]: %w", err)
 	}
@@ -74,7 +74,7 @@ func (n *NodeContent) onWorkReportRequest(ctx context.Context, stream quic.Strea
 	// <-- WorkReport
 	code := uint8(CE136_WorkReportRequest)
 	respBytes := workReport.Bytes()
-	err = sendQuicBytes(ctx, stream, respBytes, n.GetEd25519Key().String(), CE136_WorkReportRequest)
+	err = sendQuicBytes(ctx, stream, respBytes, n.GetEd25519Key().SAN(), CE136_WorkReportRequest)
 	if err != nil {
 		stream.CancelWrite(ErrCECode)
 		return fmt.Errorf("onWorkReportRequest: sendQuicBytes failed: %w, code=%d", err, code)

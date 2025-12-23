@@ -113,7 +113,7 @@ type AuditAnnouncementObj struct {
 }
 
 func (p *Peer) SendAuditAnnouncement(ctx context.Context, announcement JAMSNPAuditAnnouncement, evidence interface{}) error {
-	log.Debug(log.Node, "SendAuditAnnouncement", "peerKey", p.Validator.Ed25519.ShortString(), "headerHash", announcement.HeaderHash.String_short(), "tranche", announcement.Tranche)
+	log.Debug(log.Node, "SendAuditAnnouncement", "peerKey", p.SanKey(), "headerHash", announcement.HeaderHash.String_short(), "tranche", announcement.Tranche)
 	code := uint8(CE144_AuditAnnouncement)
 	stream, err := p.openStream(ctx, code)
 	if err != nil {
@@ -127,7 +127,7 @@ func (p *Peer) SendAuditAnnouncement(ctx context.Context, announcement JAMSNPAud
 		return fmt.Errorf("ToBytes[AUDIT_ANNOUNCEMENT]: %w", err)
 	}
 
-	if err := sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.SanKey(), code); err != nil {
 		return fmt.Errorf("sendQuicBytes[AUDIT_ANNOUNCEMENT]: %w", err)
 	}
 
@@ -141,7 +141,7 @@ func (p *Peer) SendAuditAnnouncement(ctx context.Context, announcement JAMSNPAud
 		if err != nil {
 			return fmt.Errorf("ToBytes[Tranche0Evidence]: %w", err)
 		}
-		if err := sendQuicBytes(ctx, stream, evidenceBytes, p.Validator.Ed25519.String(), code); err != nil {
+		if err := sendQuicBytes(ctx, stream, evidenceBytes, p.SanKey(), code); err != nil {
 			return fmt.Errorf("sendQuicBytes[Tranche0Evidence]: %w", err)
 		}
 	} else {
@@ -154,7 +154,7 @@ func (p *Peer) SendAuditAnnouncement(ctx context.Context, announcement JAMSNPAud
 		if err != nil {
 			return fmt.Errorf("ToBytes[SubsequentTrancheEvidence]: %w", err)
 		}
-		if err := sendQuicBytes(ctx, stream, evidenceBytes, p.Validator.Ed25519.String(), code); err != nil {
+		if err := sendQuicBytes(ctx, stream, evidenceBytes, p.SanKey(), code); err != nil {
 			return fmt.Errorf("sendQuicBytes[SubsequentTrancheEvidence]: %w", err)
 		}
 	}
@@ -234,12 +234,12 @@ func (n *Node) onAuditAnnouncement(ctx context.Context, stream quic.Stream, msg 
 
 	if newReq.Tranche == 0 {
 		var err error
-		evidenceS0Bytes, err = receiveQuicBytes(ctx, stream, n.GetEd25519Key().String(), code)
+		evidenceS0Bytes, err = receiveQuicBytes(ctx, stream, n.GetEd25519Key().SAN(), code)
 		if err != nil {
 			return fmt.Errorf("onAuditAnnouncement: receive evidence_s0 failed: %w", err)
 		}
 	} else {
-		evidenceBytes, err := receiveQuicBytes(ctx, stream, n.GetEd25519Key().String(), code)
+		evidenceBytes, err := receiveQuicBytes(ctx, stream, n.GetEd25519Key().SAN(), code)
 		if err != nil {
 			return fmt.Errorf("onAuditAnnouncement: receive evidence_sN failed: %w", err)
 		}

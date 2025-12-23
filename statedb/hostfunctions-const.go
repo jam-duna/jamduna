@@ -1,6 +1,9 @@
 package statedb
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+)
 
 const (
 	ColorReset       = "\033[0m"
@@ -29,11 +32,17 @@ var DebugHostFunctions = false
 
 var DebugHostFunctionMap = map[int]int{}
 
+var debugHostFnMu sync.Mutex
+
 // DebugHostFunction prints colorized debug information about host function calls
 func (vm *VM) DebugHostFunction(hostFn int, format string, a ...any) {
 	if !DebugHostFunctions {
 		return
 	}
+	debugHostFnMu.Lock()
+	DebugHostFunctionMap[hostFn]++
+	debugHostFnMu.Unlock()
+
 	colors := []string{
 		"\x1b[32m", // green
 		"\x1b[33m", // yellow
@@ -41,7 +50,6 @@ func (vm *VM) DebugHostFunction(hostFn int, format string, a ...any) {
 		"\x1b[35m", // magenta
 		"\x1b[36m", // cyan
 	}
-	DebugHostFunctionMap[hostFn] += 1
 	reset := "\x1b[0m"
 	color := colors[hostFn%len(colors)]
 	fmt.Printf("%s[%d]***** HostFunction %s ", color, vm.Service_index, HostFnToName(hostFn))

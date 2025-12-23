@@ -203,7 +203,7 @@ func (p *Peer) SendSegmentRequestBatch(ctx context.Context, items []SegmentReque
 
 	// --> [Segments-Root ++ len++[Segment Index]]
 	reqBytes := req.ToBytes()
-	if err := sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.SanKey(), code); err != nil {
 		// Telemetry: Segment request failed (event 175)
 		p.node.telemetryClient.SegmentRequestFailed(eventID, err.Error())
 		return nil, fmt.Errorf("sendQuicBytes[CE148_SegmentRequest]: %w", err)
@@ -216,14 +216,14 @@ func (p *Peer) SendSegmentRequestBatch(ctx context.Context, items []SegmentReque
 	stream.Close()
 
 	// <-- [Segment] - all segments concatenated in single message
-	allSegmentsBytes, err := receiveQuicBytes(ctx, stream, p.Validator.Ed25519.String(), code)
+	allSegmentsBytes, err := receiveQuicBytes(ctx, stream, p.SanKey(), code)
 	if err != nil {
 		p.node.telemetryClient.SegmentRequestFailed(eventID, err.Error())
 		return nil, fmt.Errorf("receiveQuicBytes[CE148_SegmentRequest] segments: %w", err)
 	}
 
 	// <-- [Import-Proof] - all import proofs concatenated in single message
-	allProofsBytes, err := receiveQuicBytes(ctx, stream, p.Validator.Ed25519.String(), code)
+	allProofsBytes, err := receiveQuicBytes(ctx, stream, p.SanKey(), code)
 	if err != nil {
 		p.node.telemetryClient.SegmentRequestFailed(eventID, err.Error())
 		return nil, fmt.Errorf("receiveQuicBytes[CE148_SegmentRequest] proofs: %w", err)
@@ -254,7 +254,7 @@ func (p *Peer) SendSegmentRequestBatch(ctx context.Context, items []SegmentReque
 
 	log.Trace(log.Node, "CE148-SendSegmentRequestBatch",
 		"node", p.node.id,
-		"peerKey", p.Validator.Ed25519.ShortString(),
+		"peerKey", p.SanKey(),
 		"numItems", len(items),
 		"numRequested", totalSegments,
 		"numReceived", len(responses),
@@ -276,7 +276,7 @@ func (n *Node) onSegmentRequest(ctx context.Context, stream quic.Stream, msg []b
 
 	// Telemetry: Receiving segment request (event 174)
 	eventID := n.telemetryClient.GetEventID()
-	n.telemetryClient.ReceivingSegmentRequest(PubkeyBytes(peer.Validator.Ed25519.String()))
+	n.telemetryClient.ReceivingSegmentRequest(PubkeyBytes(peer.Validator.Ed25519.SAN()))
 
 	// Parse request
 	var req SegmentRequest
@@ -346,14 +346,14 @@ func (n *Node) onSegmentRequest(ctx context.Context, stream quic.Stream, msg []b
 	}
 
 	// <-- [Segment] - all segments concatenated in single message
-	if err := sendQuicBytes(ctx, stream, allSegments, n.GetEd25519Key().String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, allSegments, n.GetEd25519Key().SAN(), code); err != nil {
 		stream.CancelWrite(ErrCECode)
 		n.telemetryClient.SegmentRequestFailed(eventID, err.Error())
 		return fmt.Errorf("onSegmentRequest: sendQuicBytes segments failed: %w", err)
 	}
 
 	// <-- [Import-Proof] - all import proofs concatenated in single message
-	if err := sendQuicBytes(ctx, stream, allImportProofs, n.GetEd25519Key().String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, allImportProofs, n.GetEd25519Key().SAN(), code); err != nil {
 		stream.CancelWrite(ErrCECode)
 		n.telemetryClient.SegmentRequestFailed(eventID, err.Error())
 		return fmt.Errorf("onSegmentRequest: sendQuicBytes proofs failed: %w", err)

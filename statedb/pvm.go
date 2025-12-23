@@ -646,7 +646,7 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, inputs []types.AccumulateInp
 
 func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16, logDir string) (r types.Result) {
 	vm.Mode = ModeIsAuthorized
-	a, _ := types.Encode(uint8(c))
+	a, _ := types.Encode(uint16(c))
 
 	// Save inputs
 	saveToLogDir(logDir, "input", a)

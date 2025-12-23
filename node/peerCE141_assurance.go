@@ -109,7 +109,7 @@ func (p *Peer) SendAssurance(ctx context.Context, a *types.Assurance, eventID ui
 	}
 	defer stream.Close()
 
-	if err := sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.SanKey(), code); err != nil {
 		// Telemetry: Assurance send failed (event 127)
 		p.node.telemetryClient.AssuranceSendFailed(eventID, p.PeerKey(), err.Error())
 		return fmt.Errorf("sendQuicBytes[CE141_AssuranceDistribution]: %w", err)
@@ -133,12 +133,12 @@ func (n *Node) onAssuranceDistribution(ctx context.Context, stream quic.Stream, 
 	var newReq JAMSNPAssuranceDistribution
 	if err := newReq.FromBytes(msg); err != nil {
 		// Telemetry: Assurance receive failed (event 130)
-		n.telemetryClient.AssuranceReceiveFailed(PubkeyBytes(peer.Validator.Ed25519.String()), err.Error())
+		n.telemetryClient.AssuranceReceiveFailed(PubkeyBytes(peer.Validator.Ed25519.SAN()), err.Error())
 		return fmt.Errorf("onAssuranceDistribution: failed to decode message: %w", err)
 	}
 
 	// Telemetry: Assurance received (event 131)
-	n.telemetryClient.AssuranceReceived(PubkeyBytes(peer.Validator.Ed25519.String()), newReq.Anchor)
+	n.telemetryClient.AssuranceReceived(PubkeyBytes(peer.Validator.Ed25519.SAN()), newReq.Anchor)
 
 	// Find the correct validator index by verifying signature against all validators
 	// The CE141 protocol does NOT include validatorIndex, so we must derive it

@@ -18,7 +18,7 @@ const (
 
 // major.minor.patch
 var (
-	PATCH_VERSION = 1 // Bump this for patch releases
+	PATCH_VERSION = 2 // Bump this for patch releases
 	APP_VERSION   = fmt.Sprintf("0.3.%v", PATCH_VERSION)
 	JAM_VERSION   = fmt.Sprintf("%v.%v", GP_VERSION, PATCH_VERSION) // Tag as <0.7.2><.x> for our jam binary release
 )

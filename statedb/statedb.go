@@ -307,19 +307,70 @@ func (s *StateDB) GetStateUpdates() *types.StateUpdate {
 	return s.stateUpdate
 }
 
-func (s *StateDB) GetRefineContext() types.RefineContext {
-	currentStateRoot := s.GetStateRoot()
-	anchorHash := s.GetHeaderHash()
-	beefyRoot := s.getBeefyRootForAnchor(anchorHash)
+// GetRefineContextByDepth returns a RefineContext using the specified finality depth.
+// Use finalityDepth=5 for non-Grandpa, finalityDepth=2 for Grandpa.
+func (s *StateDB) GetRefineContextByDepth(finalityDepth int) types.RefineContext {
+	// Use historical anchor block from RecentBlocks to ensure state root will be found
+	// during guarantee verification (see checkRecentBlock in guarantees.go)
+	anchor := common.Hash{}
+	stateRoot := common.Hash{}
+	beefyRoot := common.Hash{}
+	lookupAnchorSlot := s.JamState.SafroleState.Timeslot
+
+	if len(s.JamState.RecentBlocks.B_H) > finalityDepth {
+		idx := len(s.JamState.RecentBlocks.B_H) - finalityDepth
+		anchorBlock := s.JamState.RecentBlocks.B_H[idx]
+		anchor = anchorBlock.HeaderHash
+		stateRoot = anchorBlock.StateRoot
+		beefyRoot = anchorBlock.B
+		if lookupAnchorSlot >= uint32(finalityDepth) {
+			lookupAnchorSlot = lookupAnchorSlot - uint32(finalityDepth)
+		}
+	} else if len(s.JamState.RecentBlocks.B_H) > 0 {
+		// Fallback to earliest available block if not enough history
+		anchorBlock := s.JamState.RecentBlocks.B_H[0]
+		anchor = anchorBlock.HeaderHash
+		stateRoot = anchorBlock.StateRoot
+		beefyRoot = anchorBlock.B
+	} else {
+		// No recent blocks available, use current state (legacy behavior)
+		anchor = s.GetHeaderHash()
+		stateRoot = s.GetStateRoot()
+		beefyRoot = s.getBeefyRootForAnchor(anchor)
+	}
 
 	return types.RefineContext{
-		Anchor:           anchorHash,
-		StateRoot:        currentStateRoot,
+		Anchor:           anchor,
+		StateRoot:        stateRoot,
 		BeefyRoot:        beefyRoot,
-		LookupAnchor:     anchorHash,
-		LookupAnchorSlot: s.JamState.SafroleState.Timeslot,
+		LookupAnchor:     anchor,
+		LookupAnchorSlot: lookupAnchorSlot,
 		Prerequisites:    []common.Hash{},
 	}
+}
+
+// GetRefineContext returns a RefineContext with default finality depth (5).
+// For Grandpa-enabled nodes, use GetRefineContextForAnchor with the finalized block hash.
+func (s *StateDB) GetRefineContext() types.RefineContext {
+	return s.GetRefineContextByDepth(5)
+}
+
+// GetRefineContextForAnchor returns a RefineContext for a specific anchor block hash.
+// Returns the context and true if the anchor is found in RecentBlocks, otherwise false.
+func (s *StateDB) GetRefineContextForAnchor(anchorHash common.Hash) (types.RefineContext, bool) {
+	for _, block := range s.JamState.RecentBlocks.B_H {
+		if block.HeaderHash == anchorHash {
+			return types.RefineContext{
+				Anchor:           block.HeaderHash,
+				StateRoot:        block.StateRoot,
+				BeefyRoot:        block.B,
+				LookupAnchor:     block.HeaderHash,
+				LookupAnchorSlot: s.JamState.SafroleState.Timeslot, // Will be overridden by caller
+				Prerequisites:    []common.Hash{},
+			}, true
+		}
+	}
+	return types.RefineContext{}, false
 }
 
 func (s *StateDB) SetJamState(jamState *JamState) {

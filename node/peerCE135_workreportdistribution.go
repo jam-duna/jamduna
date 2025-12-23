@@ -176,7 +176,7 @@ func (p *Peer) SendWorkReportDistribution(
 	log.Debug(log.G, "onWorkReportDistribution OUTGOING SPEC", "workReport", wr.AvailabilitySpec.String())
 	log.Debug(log.G, "onWorkReportDistribution OUTGOING REPORT", "workReport", wr.String())
 
-	if err := sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.SanKey(), code); err != nil {
 		return fmt.Errorf("sendQuicBytes[CE135_WorkReportDistribution]: %w", err)
 	}
 

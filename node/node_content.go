@@ -15,8 +15,18 @@ func (n *NodeContent) GetBlockTree() *types.BlockTree {
 	return n.block_tree
 }
 
-// PubkeyBytes converts an Ed25519 pubkey hex string to [32]byte.
+// PubkeyBytes converts an Ed25519 pubkey string (SAN or hex format) to [32]byte.
 func PubkeyBytes(peerKey string) [32]byte {
+	// Check if it's SAN format (starts with 'e' and is 53 chars)
+	if len(peerKey) == 53 && peerKey[0] == 'e' {
+		bytes, err := common.FromSAN(peerKey)
+		if err == nil && len(bytes) == 32 {
+			var result [32]byte
+			copy(result[:], bytes)
+			return result
+		}
+	}
+	// Fall back to hex format
 	return [32]byte(common.HexToHash(peerKey))
 }
 

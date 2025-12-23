@@ -133,9 +133,9 @@ type NodeContent struct {
 	node_name            string
 	AuditFlag            bool
 	command_chan         chan string
-	peersByPubKey        map[string]*Peer       //<Ed25519 pubKey hex> -> Peer (stable across rotations)
-	UP0_stream           map[string]quic.Stream //<Ed25519 pubKey hex> -> stream (self initiated, for sending)
-	UP0_inbound_stream   map[string]quic.Stream //<Ed25519 pubKey hex> -> stream (peer initiated, for receiving)
+	peersByPubKey        map[string]*Peer       //<Ed25519 pubKey SAN> -> Peer (stable across rotations)
+	UP0_stream           map[string]quic.Stream //<Ed25519 pubKey SAN> -> stream (self initiated, for sending)
+	UP0_inbound_stream   map[string]quic.Stream //<Ed25519 pubKey SAN> -> stream (peer initiated, for receiving)
 	UP0_streamMu         sync.Mutex
 	blockAnnouncementsCh chan JAMSNP_BlockAnnounce
 	ba_checker           *BlockAnnouncementChecker
@@ -1029,9 +1029,9 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 						return err
 					}
 					node.clientsMutex.Lock()
-					node.clients[remoteAddr] = common.Bytes2Hex(pubKey)
+					node.clients[remoteAddr] = common.ToSAN(pubKey)
 					node.clientsMutex.Unlock()
-					log.Trace(log.Node, "VerifyPeerCertificate", "remoteAddr", remoteAddr, "pubKey", common.Bytes2Hex(pubKey))
+					log.Trace(log.Node, "VerifyPeerCertificate", "remoteAddr", remoteAddr, "pubKey", common.ToSAN(pubKey))
 					return nil
 				},
 			}, nil
@@ -1041,7 +1041,7 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 	// put the white list to client
 	node.clientsMutex.Lock()
 	for _, p := range startPeerList {
-		node.clients[p.PeerAddr] = p.Validator.Ed25519.String()
+		node.clients[p.PeerAddr] = p.Validator.Ed25519.SAN()
 	}
 	node.clientsMutex.Unlock()
 	// Builder nodes should prefer the /builder ALPN suffix
@@ -1109,11 +1109,11 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 
 	for validatorIndex, p := range startPeerList {
 		peer := NewPeer(node, validatorIndex, p.Validator, p.PeerAddr)
-		node.peersByPubKey[p.Validator.Ed25519.String()] = peer
+		node.peersByPubKey[p.Validator.Ed25519.SAN()] = peer
 		// DISABLED FOR NOW
 		if enableInit {
 			if validatorIndex != id && FinalizedOk {
-				_, err = node.peersByPubKey[p.Validator.Ed25519.String()].GetOrInitBlockAnnouncementStream(context.Background())
+				_, err = node.peersByPubKey[p.Validator.Ed25519.SAN()].GetOrInitBlockAnnouncementStream(context.Background())
 				if err != nil {
 					log.Error(log.Node, "GetOrInitBlockAnnouncementStream", "err", err)
 				}
@@ -1400,7 +1400,7 @@ func (n *Node) GetBuild() string {
 
 // use ed25519 key to get peer info
 func (n *NodeContent) GetPeerInfoByEd25519(key types.Ed25519Key) (*Peer, error) {
-	peer, ok := n.peersByPubKey[key.String()]
+	peer, ok := n.peersByPubKey[key.SAN()]
 	if ok {
 		return peer, nil
 	}
@@ -1967,7 +1967,7 @@ func (n *Node) getState() *statedb.StateDB {
 // GetPeerByPubKey returns the peer associated with the given Ed25519 public key.
 // This provides stable routing across validator index rotations.
 func (n *NodeContent) GetPeerByPubKey(pubKey types.Ed25519Key) (*Peer, bool) {
-	peer, ok := n.peersByPubKey[pubKey.String()]
+	peer, ok := n.peersByPubKey[pubKey.SAN()]
 	return peer, ok
 }
 
@@ -2174,7 +2174,7 @@ func (n *Node) handleConnection(conn quic.Connection) {
 
 	validatorIndex, ok := n.lookupPubKey(pubKey)
 	if !ok {
-		log.Info(log.Node, "handleConnection - found n.clients but unknown pubkey (builder/full node)", "remoteAddr", remoteAddr, "port", port, "pubKey", pubKey)
+		log.Info(log.Node, "handleConnection - unknown peer (builder/full node)", "pubKey", fmt.Sprintf("%s@%v", pubKey, remoteAddr))
 		validatorIndex = 9999
 		// remoteAddr change the port to 13000
 		// see how many number from the end
@@ -2185,11 +2185,11 @@ func (n *Node) handleConnection(conn quic.Connection) {
 		}
 		newAddr := net.JoinHostPort(host, "13370")
 		if _, ok := n.peersByPubKey[pubKey]; !ok {
-			// Create a Validator struct with the Ed25519 key set from the pubKey
+			// Create a Validator struct with the Ed25519 key set from the pubKey (SAN format)
 			// This is needed for broadcast() to properly identify the peer
 			builderValidator := types.Validator{}
-			pubKeyBytes := common.FromHex(pubKey)
-			if len(pubKeyBytes) == 32 {
+			pubKeyBytes, err := common.FromSAN(pubKey)
+			if err == nil && len(pubKeyBytes) == 32 {
 				copy(builderValidator.Ed25519[:], pubKeyBytes)
 			}
 			peer := NewPeer(n, uint16(validatorIndex), builderValidator, newAddr)
@@ -2198,7 +2198,7 @@ func (n *Node) handleConnection(conn quic.Connection) {
 			peer.conn = conn
 			peer.connectionMu.Unlock()
 			n.peersByPubKey[pubKey] = peer
-			log.Debug(log.Quic, "handleConnection: Non-Validator peer (builder/full node) connected", "validatorIndex", validatorIndex, "pubKey", pubKey, "ed25519", builderValidator.Ed25519.ShortString(), "remoteAddr", remoteAddr, "newAddr", newAddr)
+			log.Debug(log.Quic, "handleConnection: Non-Validator peer (builder/full node) connected", "validatorIndex", validatorIndex, "pubKey", pubKey, "ed25519", builderValidator.Ed25519.SAN(), "remoteAddr", remoteAddr, "newAddr", newAddr)
 		} else {
 			// Peer already exists, update its connection
 			peer := n.peersByPubKey[pubKey]
@@ -2211,9 +2211,15 @@ func (n *Node) handleConnection(conn quic.Connection) {
 	} else {
 		log.Trace(log.Node, "handleConnection - KNOWN pubkey", "validatorIndex", validatorIndex, "remoteAddr", remoteAddr, "port", port, "pubKey", pubKey)
 		peer, ok := n.peersByPubKey[pubKey]
-		if ok && peer.conn == nil {
+		if ok {
 			peer.connectionMu.Lock()
+			if peer.conn != nil && peer.conn != conn {
+				// New connection arrived - update to new connection but don't aggressively
+				// close the old one as it may have in-flight requests. Let it close naturally.
+				log.Debug(log.Quic, "Updating to new connection (old will close naturally)", "peerKey", pubKey)
+			}
 			peer.conn = conn
+			peer.resetFailures()
 			peer.connectionMu.Unlock()
 		}
 	}
@@ -2336,7 +2342,7 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}, evID ...uin
 		}
 
 		peer := p
-		peerKey := peer.Validator.Ed25519.ShortString()
+		peerKey := peer.SanKey()
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -2373,7 +2379,7 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}, evID ...uin
 				//log.Info(log.Node, "broadcast-BlockAnnouncement", "h", h.String(), "n", n.String(), "peerID", peerID)
 				up0_stream, err := peer.GetOrInitBlockAnnouncementStream(context.Background())
 				if err != nil {
-					log.Warn(log.Quic, "GetOrInitBlockAnnouncementStream", "n", n.String(), "->p", peer.Validator.Ed25519.ShortString(), "err", err)
+					log.Warn(log.Quic, "GetOrInitBlockAnnouncementStream", "n", n.String(), "->p", peer.SanKey(), "err", err)
 					return
 				}
 				block_a_bytes := b.ToBytes()
@@ -2381,7 +2387,7 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}, evID ...uin
 					log.Error(log.Node, "Failed to encode block announcement", "header", h.String_short())
 					return
 				}
-				err = sendQuicBytes(ctx, up0_stream, block_a_bytes, peer.Validator.Ed25519.String(), UP0_BlockAnnouncement)
+				err = sendQuicBytes(ctx, up0_stream, block_a_bytes, peer.SanKey(), UP0_BlockAnnouncement)
 				if err != nil {
 					log.Warn(log.Quic, "SendBlockAnnouncement:sendQuicBytes (broadcast)", "n", n.String(), "err", err)
 				} else {
@@ -2405,7 +2411,7 @@ func (n *Node) broadcast(ctxParent context.Context, obj interface{}, evID ...uin
 			case reflect.TypeOf(JAMSNPAuditAnnouncementWithProof{}):
 				a := obj.(JAMSNPAuditAnnouncementWithProof)
 				tranche := a.Announcement.Tranche
-				log.Debug(log.Audit, "SendAuditAnnouncement", "n", n.String(), "tranche", tranche, "peerKey", peer.Validator.Ed25519.ShortString())
+				log.Debug(log.Audit, "SendAuditAnnouncement", "n", n.String(), "tranche", tranche, "peerKey", peer.SanKey())
 				if tranche == 0 {
 					s0 := a.EvidenceTranche0
 					if len(s0) >= 4 && binary.BigEndian.Uint32(s0[0:4]) == 0 {
@@ -2680,7 +2686,7 @@ func (n *Node) getCE129(headerHash common.Hash) {
 		endKey[i] = 0xff
 	}
 
-	selfPubKey := n.GetEd25519Key().String()
+	selfPubKey := n.GetEd25519Key().SAN()
 	log.Info(log.Node, "getCE129: selfPubKey", "selfPubKey", selfPubKey[:16], "numPeers", len(n.peersByPubKey))
 
 	const maxAttempts = 4
@@ -3082,7 +3088,7 @@ func (n *Node) VerifyState129RPC(headerHash common.Hash, expectedStateRoot commo
 // Distributes load across multiple peers in parallel for faster fetching
 // Includes retry logic with different peers for failed ranges
 func (n *Node) fetchStates129(ctx context.Context, headerHash common.Hash) (*StateSnapshot, error) {
-	selfPubKey := n.GetEd25519Key().String()
+	selfPubKey := n.GetEd25519Key().SAN()
 
 	// Collect available peers (skip self)
 	var peers []*Peer
@@ -3143,21 +3149,21 @@ func (n *Node) fetchStates129(ctx context.Context, headerHash common.Hash) (*Sta
 			if err == nil {
 				if len(kvs) > 0 {
 					log.Debug(log.Node, "fetchStates129: range fetched",
-						"peer", p.Validator.Ed25519.ShortString(),
+						"peer", p.SanKey(),
 						"prefix", fmt.Sprintf("%02x", kr.start[0]),
 						"numKVs", len(kvs))
 				}
 				return fetchResult{rangeIndex: kr.index, kvs: kvs}
 			}
 			log.Trace(log.Node, "fetchStates129: range fetch retry",
-				"peer", p.Validator.Ed25519.ShortString(),
+				"peer", p.SanKey(),
 				"startKey", fmt.Sprintf("%02x", kr.start[0]),
 				"attempt", attempt,
 				"err", err)
 			time.Sleep(500 * time.Millisecond)
 		}
 		log.Warn(log.Node, "fetchStates129: range fetch failed",
-			"peer", p.Validator.Ed25519.ShortString(),
+			"peer", p.SanKey(),
 			"startKey", fmt.Sprintf("%02x", kr.start[0]),
 			"err", err)
 		return fetchResult{rangeIndex: kr.index, err: err}

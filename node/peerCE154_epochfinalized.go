@@ -60,7 +60,7 @@ func (p *Peer) SendEpochFinalized(ctx context.Context, epochFinalized JAMEpochFi
 		return fmt.Errorf("WarpSyncRequest.ToBytes failed: %w", err)
 	}
 
-	if err := sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.SanKey(), code); err != nil {
 		return fmt.Errorf("sendQuicBytes[CE154_EpochFinalized] failed: %w", err)
 	}
 

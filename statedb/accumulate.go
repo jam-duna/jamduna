@@ -376,10 +376,26 @@ func (s *StateDB) ParallelizedAccumulate(
 		par = 1
 	}
 
-	const isParallel = false
+	const isParallel = true
 	var acc_results []accRes
 
 	if isParallel {
+		// Pre-apply all incoming transfer credits to o BEFORE parallel execution
+		// This ensures all parallel workers see consistent balances
+		for _, t := range transfersIn {
+			if sa, ok := o.GetService(t.ReceiverIndex); ok {
+				sa.ALLOW_MUTABLE()
+				sa.IncBalance(t.Amount)
+				sa.Dirty = true
+			} else if sa, ok, err := s.GetService(t.ReceiverIndex); err == nil && ok {
+				// Service not in o yet, add it with the credit applied
+				cloned := sa.Clone()
+				cloned.ALLOW_MUTABLE()
+				cloned.IncBalance(t.Amount)
+				cloned.Dirty = true
+				o.ServiceAccounts[t.ReceiverIndex] = cloned
+			}
+		}
 		jobCh := make(chan uint32, len(services))
 		resCh := make(chan accRes, len(services))
 		var wg sync.WaitGroup
@@ -394,7 +410,7 @@ func (s *StateDB) ParallelizedAccumulate(
 				if logDir != "" {
 					svcLogDir = filepath.Join(logDir, fmt.Sprintf("%d", service))
 				}
-				out, gas, XY, exceptional := s.SingleAccumulate(o.Clone(), transfersIn, workReports, freeAccumulation, service, pvmBackend, svcLogDir)
+				out, gas, XY, exceptional := s.SingleAccumulate(o.Clone(), transfersIn, workReports, freeAccumulation, service, pvmBackend, svcLogDir, true)
 				benchRec.Add("SingleAccumulate", time.Since(t0))
 
 				if XY == nil {
@@ -445,7 +461,7 @@ func (s *StateDB) ParallelizedAccumulate(
 			if logDir != "" {
 				svcLogDir = filepath.Join(logDir, fmt.Sprintf("%d", service))
 			}
-			out, gas, XY, exceptional := s.SingleAccumulate(o, transfersIn, workReports, freeAccumulation, service, pvmBackend, svcLogDir)
+			out, gas, XY, exceptional := s.SingleAccumulate(o, transfersIn, workReports, freeAccumulation, service, pvmBackend, svcLogDir, false)
 			benchRec.Add("SingleAccumulate", time.Since(t0))
 
 			if XY == nil {
@@ -727,7 +743,7 @@ the actual pvm gas used. This function wrangles the work-
 items of a particular service from a set of work-reports and
 invokes pvm execution
 */
-func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.DeferredTransfer, workReports []types.WorkReport, freeAccumulation map[uint32]uint64, serviceID uint32, pvmBackend string, logDir string) (accumulation_output common.Hash, gasUsed uint64, xy *types.XContext, exceptional bool) {
+func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.DeferredTransfer, workReports []types.WorkReport, freeAccumulation map[uint32]uint64, serviceID uint32, pvmBackend string, logDir string, creditsPreApplied bool) (accumulation_output common.Hash, gasUsed uint64, xy *types.XContext, exceptional bool) {
 	t0 := time.Now()
 	// gas https://graypaper.fluffylabs.dev/#/1c979cb/181901181901?v=0.7.1
 	// 1. gas from free accumulation of this service (if any)
@@ -806,7 +822,8 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 
 	// Apply transfer balance credits BEFORE creating XContext
 	// This ensures the balance increment is in the initial account state
-	if len(selectedTransfers) > 0 {
+	// Skip if credits were pre-applied (parallel mode)
+	if len(selectedTransfers) > 0 && !creditsPreApplied {
 		serviceAccount.ALLOW_MUTABLE()
 		for _, t := range selectedTransfers {
 			serviceAccount.IncBalance(t.Amount)

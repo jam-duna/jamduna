@@ -33,7 +33,7 @@ func (p *Peer) SendGrandpaState(ctx context.Context, state grandpa.GrandpaStateM
 		return fmt.Errorf("GrandpaStateMessage.ToBytes failed: %w", err)
 	}
 
-	if err := sendQuicBytes(ctx, stream, stateBytes, p.Validator.Ed25519.String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, stateBytes, p.SanKey(), code); err != nil {
 		return fmt.Errorf("sendQuicBytes[CE151_GrandpaState] failed: %w", err)
 	}
 

@@ -112,7 +112,7 @@ func (p *Peer) SendFullShardRequest(
 		return nil, nil, nil, fmt.Errorf("ToBytes[ShardRequest]: %w", err)
 	}
 
-	if err := sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.SanKey(), code); err != nil {
 		// Telemetry: Shard request failed (event 122)
 		p.node.telemetryClient.ShardRequestFailed(eventID, err.Error())
 		return nil, nil, nil, fmt.Errorf("sendQuicBytes[CE137]: %w", err)
@@ -126,7 +126,7 @@ func (p *Peer) SendFullShardRequest(
 	// <-- Bundle Shard
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
 	// <-- Justification
-	parts, err := receiveMultiple(ctx, stream, 3, p.Validator.Ed25519.String(), code)
+	parts, err := receiveMultiple(ctx, stream, 3, p.SanKey(), code)
 	if err != nil {
 		// Telemetry: Shard request failed (event 122)
 		p.node.telemetryClient.ShardRequestFailed(eventID, err.Error())
@@ -151,7 +151,7 @@ func (n *Node) onFullShardRequest(ctx context.Context, stream quic.Stream, msg [
 
 	// Telemetry: Receiving shard request (event 121)
 	eventID := n.telemetryClient.GetEventID()
-	n.telemetryClient.ReceivingShardRequest(PubkeyBytes(peer.Validator.Ed25519.String()))
+	n.telemetryClient.ReceivingShardRequest(PubkeyBytes(peer.Validator.Ed25519.SAN()))
 
 	var req JAMSNPShardRequest
 	if err := req.FromBytes(msg); err != nil {
@@ -181,19 +181,19 @@ func (n *Node) onFullShardRequest(ctx context.Context, stream quic.Stream, msg [
 	code := uint8(CE137_FullShardRequest)
 
 	// <-- Bundle Shard
-	if err := sendQuicBytes(ctx, stream, bundleShard, n.GetEd25519Key().String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, bundleShard, n.GetEd25519Key().SAN(), code); err != nil {
 		stream.CancelWrite(ErrCECode)
 		return fmt.Errorf("onFullShardRequest: send bundleShard failed: %w", err)
 	}
 
 	// <-- [Segment Shard] (Should include all exported and proof segment shards with the given index)
-	if err := sendQuicBytes(ctx, stream, exportedSegmentsAndProofShards, n.GetEd25519Key().String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, exportedSegmentsAndProofShards, n.GetEd25519Key().SAN(), code); err != nil {
 		stream.CancelWrite(ErrCECode)
 		return fmt.Errorf("onFullShardRequest: send exportedSegments failed: %w", err)
 	}
 
 	// <-- Justification
-	if err := sendQuicBytes(ctx, stream, encodedPath, n.GetEd25519Key().String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, encodedPath, n.GetEd25519Key().SAN(), code); err != nil {
 		stream.CancelWrite(ErrCECode)
 		// Telemetry: Shard request failed (event 122)
 		n.telemetryClient.ShardRequestFailed(eventID, err.Error())

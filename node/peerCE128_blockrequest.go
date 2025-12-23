@@ -99,7 +99,7 @@ func (p *Peer) SendBlockRequest(ctx context.Context, headerHash common.Hash, dir
 		return blocks, err
 	}
 
-	err = sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code)
+	err = sendQuicBytes(ctx, stream, reqBytes, p.SanKey(), code)
 	if err != nil {
 		log.Error(log.Node, "CE128 SendBlockRequest:sendQuicBytes", "p", p.String(), "err", err)
 		return blocks, err
@@ -111,9 +111,9 @@ func (p *Peer) SendBlockRequest(ctx context.Context, headerHash common.Hash, dir
 	eventID := p.node.telemetryClient.GetEventID()
 	p.node.telemetryClient.BlockRequestSent(eventID)
 
-	respBytes, err := receiveQuicBytes(ctx, stream, p.Validator.Ed25519.String(), code)
+	respBytes, err := receiveQuicBytes(ctx, stream, p.SanKey(), code)
 	if err != nil {
-		log.Error(log.Node, "CE128 SendBlockRequest:receiveQuicBytes", "peerKey", p.Validator.Ed25519.ShortString(), "err", err)
+		log.Error(log.Node, "CE128 SendBlockRequest:receiveQuicBytes", "peerKey", p.SanKey(), "err", err)
 		// Telemetry: Block request failed (event 65)
 		p.node.telemetryClient.BlockRequestFailed(eventID, err.Error())
 		return blocks, err
@@ -121,7 +121,7 @@ func (p *Peer) SendBlockRequest(ctx context.Context, headerHash common.Hash, dir
 
 	decodedBlocks, err := types.DecodeBlocks(respBytes)
 	if err != nil {
-		log.Error(log.Node, "CE128 DecodeBlocks", "peerKey", p.Validator.Ed25519.ShortString(), "err", err)
+		log.Error(log.Node, "CE128 DecodeBlocks", "peerKey", p.SanKey(), "err", err)
 		// Telemetry: Block request failed (event 65)
 		p.node.telemetryClient.BlockRequestFailed(eventID, err.Error())
 		return blocks, err
@@ -163,7 +163,7 @@ func (n *NodeContent) onBlockRequest(ctx context.Context, stream quic.Stream, ms
 	// Use peerKey directly for telemetry if peer is not in peersByPubKey
 	var peerKeyBytes [32]byte
 	if peer != nil {
-		peerKeyBytes = PubkeyBytes(peer.Validator.Ed25519.String())
+		peerKeyBytes = PubkeyBytes(peer.Validator.Ed25519.SAN())
 	} else {
 		peerKeyBytes = PubkeyBytes(peerKey)
 	}
@@ -222,7 +222,7 @@ func (n *NodeContent) onBlockRequest(ctx context.Context, stream quic.Stream, ms
 		}
 	}
 
-	err = sendQuicBytes(ctx, stream, blockBytes, n.GetEd25519Key().String(), CE128_BlockRequest)
+	err = sendQuicBytes(ctx, stream, blockBytes, n.GetEd25519Key().SAN(), CE128_BlockRequest)
 	if err != nil {
 		log.Warn(log.Node, "onBlockRequest sendQuicBytes", "headerHash", newReq.HeaderHash, "direction", newReq.Direction, "err", err)
 		// Telemetry: Block request failed (event 65)

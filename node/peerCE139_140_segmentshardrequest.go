@@ -239,7 +239,7 @@ func (p *Peer) SendSegmentShardRequestBatch(
 	}
 
 	// --> [Erasure Root ++ Shard Index ++ len++[Segment Index]]
-	if err := sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.SanKey(), code); err != nil {
 		// Telemetry: Segment shard request failed (event 164)
 		p.node.telemetryClient.SegmentShardRequestFailed(eventID, err.Error())
 		return nil, nil, fmt.Errorf("sendQuicBytes[%d]: %w", code, err)
@@ -251,7 +251,7 @@ func (p *Peer) SendSegmentShardRequestBatch(
 	p.node.telemetryClient.SegmentShardRequestSent(eventID)
 
 	// <-- [Segment Shard]
-	segmentShards, err = receiveQuicBytes(ctx, stream, p.Validator.Ed25519.String(), code)
+	segmentShards, err = receiveQuicBytes(ctx, stream, p.SanKey(), code)
 	if err != nil {
 		// Telemetry: Segment shard request failed (event 164)
 		p.node.telemetryClient.SegmentShardRequestFailed(eventID, err.Error())
@@ -260,7 +260,7 @@ func (p *Peer) SendSegmentShardRequestBatch(
 
 	// Optionally receive justifications
 	if withJustification {
-		justifications, err = receiveMultiple(ctx, stream, totalSegments, p.Validator.Ed25519.String(), code)
+		justifications, err = receiveMultiple(ctx, stream, totalSegments, p.SanKey(), code)
 		if err != nil {
 			// Telemetry: Segment shard request failed (event 164)
 			p.node.telemetryClient.SegmentShardRequestFailed(eventID, err.Error())
@@ -292,7 +292,7 @@ func (n *Node) onSegmentShardRequest(ctx context.Context, stream quic.Stream, ms
 
 	// Telemetry: Receiving segment shard request (event 163)
 	eventID := n.telemetryClient.GetEventID()
-	n.telemetryClient.ReceivingSegmentShardRequest(PubkeyBytes(peer.Validator.Ed25519.String()), withJustification)
+	n.telemetryClient.ReceivingSegmentShardRequest(PubkeyBytes(peer.Validator.Ed25519.SAN()), withJustification)
 
 	err = req.FromBytes(msg)
 	if err != nil {
@@ -341,7 +341,7 @@ func (n *Node) onSegmentShardRequest(ctx context.Context, stream quic.Stream, ms
 	default:
 	}
 
-	err = sendQuicBytes(ctx, stream, combined_selected_segmentshards, n.GetEd25519Key().String(), code)
+	err = sendQuicBytes(ctx, stream, combined_selected_segmentshards, n.GetEd25519Key().SAN(), code)
 	if err != nil {
 		stream.CancelWrite(ErrCECode)
 		// Telemetry: Segment shard request failed (event 164)
@@ -351,7 +351,7 @@ func (n *Node) onSegmentShardRequest(ctx context.Context, stream quic.Stream, ms
 
 	if withJustification {
 		for item_idx, s_j := range allJustifications {
-			if err = sendQuicBytes(ctx, stream, s_j, n.GetEd25519Key().String(), code); err != nil {
+			if err = sendQuicBytes(ctx, stream, s_j, n.GetEd25519Key().SAN(), code); err != nil {
 				stream.CancelWrite(ErrCECode)
 				// Telemetry: Segment shard request failed (event 164)
 				n.telemetryClient.SegmentShardRequestFailed(eventID, err.Error())

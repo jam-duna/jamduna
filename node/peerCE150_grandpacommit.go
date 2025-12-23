@@ -33,7 +33,7 @@ func (p *Peer) SendCommitMessage(ctx context.Context, commit grandpa.GrandpaComm
 		return fmt.Errorf("CommitMessage.ToBytes failed: %w", err)
 	}
 
-	if err := sendQuicBytes(ctx, stream, commitBytes, p.Validator.Ed25519.String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, commitBytes, p.SanKey(), code); err != nil {
 		return fmt.Errorf("sendQuicBytes[CE150_GrandpaCommit] failed: %w", err)
 	}
 

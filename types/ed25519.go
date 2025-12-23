@@ -63,6 +63,10 @@ func (k Ed25519Key) ShortString() string {
 	return common.Hash(k).Hex()[:10]
 }
 
+func (k Ed25519Key) SAN() string {
+	return common.ToSAN(k[:])
+}
+
 func (pk Ed25519Key) Bytes() []byte {
 	return pk[:]
 }

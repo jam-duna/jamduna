@@ -67,7 +67,7 @@ func (p *Peer) SendBundleShardRequest(
 	}
 
 	// --> Erasure Root ++ Shard Index
-	if err := sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.SanKey(), code); err != nil {
 		log.Trace(log.DA, "SendBundleShardRequest - sending error", "p", p.String(), "erasureRoot", erasureRoot, "shardIndex", shardIndex, "ERR", err)
 		// Telemetry: Bundle shard request failed (event 142)
 		p.node.telemetryClient.BundleShardRequestFailed(eventID, err.Error())
@@ -79,7 +79,7 @@ func (p *Peer) SendBundleShardRequest(
 	// Telemetry: Bundle shard request sent (event 143)
 	p.node.telemetryClient.BundleShardRequestSent(eventID)
 
-	parts, err := receiveMultiple(ctx, stream, 2, p.Validator.Ed25519.String(), code)
+	parts, err := receiveMultiple(ctx, stream, 2, p.SanKey(), code)
 	if err != nil {
 		log.Trace(log.DA, "SendBundleShardRequest - receive error", "p", p.String(), "erasureRoot", erasureRoot, "shardIndex", shardIndex, "ERR", err)
 		// Telemetry: Bundle shard request failed (event 142)
@@ -134,7 +134,7 @@ func (n *Node) onBundleShardRequest(ctx context.Context, stream quic.Stream, msg
 
 	// Telemetry: Receiving bundle shard request (event 141)
 	eventID := n.telemetryClient.GetEventID()
-	n.telemetryClient.ReceivingBundleShardRequest(PubkeyBytes(peer.Validator.Ed25519.String()))
+	n.telemetryClient.ReceivingBundleShardRequest(PubkeyBytes(peer.Validator.Ed25519.SAN()))
 
 	var req JAMSNPShardRequest
 	if err := req.FromBytes(msg); err != nil {
@@ -171,7 +171,7 @@ func (n *Node) onBundleShardRequest(ctx context.Context, stream quic.Stream, msg
 	}
 
 	// Send bundle shard
-	if err := sendQuicBytes(ctx, stream, bundleShard, n.GetEd25519Key().String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, bundleShard, n.GetEd25519Key().SAN(), code); err != nil {
 		stream.CancelWrite(ErrCECode)
 		return fmt.Errorf("onBundleShardRequest: send bundleShard failed: %w", err)
 	}
@@ -186,7 +186,7 @@ func (n *Node) onBundleShardRequest(ctx context.Context, stream quic.Stream, msg
 		return fmt.Errorf("onBundleShardRequest: encode justification failed: %w", err)
 	}
 
-	if err := sendQuicBytes(ctx, stream, encodedJustification, n.GetEd25519Key().String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, encodedJustification, n.GetEd25519Key().SAN(), code); err != nil {
 		stream.CancelWrite(ErrCECode)
 		// Telemetry: Bundle shard request failed (event 142)
 		n.telemetryClient.BundleShardRequestFailed(eventID, err.Error())

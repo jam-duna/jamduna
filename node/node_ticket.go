@@ -137,15 +137,15 @@ func (n *Node) BroadcastTickets(currJCE uint32, eventID uint64) {
 				// first step: send to proxy with CE131
 				// Get proxy's Ed25519 key from current safrole (not stale PeerID)
 				proxyPubKey := sf.CurrValidators[proxy].Ed25519
-				peerKey := proxyPubKey.String()
+				peerKey := proxyPubKey.SAN()
 				peer, ok := n.peersByPubKey[peerKey]
 				if !ok {
-					log.Warn(log.Quic, "SendTicketDistribution", "n", n.String(), "proxy", proxy, "proxyPubKey", proxyPubKey.ShortString(), "err", "peer not found")
+					log.Warn(log.Quic, "SendTicketDistribution", "n", n.String(), "proxy", proxy, "proxyPubKey", proxyPubKey.SAN(), "err", "peer not found")
 					continue
 				}
 				epoch := n.getEpoch()
 				if err := peer.SendTicketDistribution(ctx, epoch, ticket, true, eventID); err != nil {
-					log.Warn(log.Quic, "SendTicketDistribution", "n", n.String(), "->peerKey", peer.Validator.Ed25519.ShortString(), "err", err)
+					log.Warn(log.Quic, "SendTicketDistribution", "n", n.String(), "->peerKey", peer.SanKey(), "err", err)
 				}
 			}
 			*bucket.IsBroadcasted = true

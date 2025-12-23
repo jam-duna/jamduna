@@ -103,9 +103,9 @@ func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPack
 	}
 	p.node.telemetryClient.WorkPackageSubmission(EventID, p.PeerKey(), wpOutline)
 	slot := common.GetWallClockJCE(fudgeFactorJCE)
-	log.Debug(log.R, "CE133-SendWorkPackageSubmission OUTGOING", "NODE", p.node.id, "peerKey", p.Validator.Ed25519.ShortString(), "coreIndex", core_idx, "slot", slot, "wp_hash", pkg.Hash())
+	log.Debug(log.R, "CE133-SendWorkPackageSubmission OUTGOING", "NODE", p.node.id, "peerKey", p.SanKey(), "coreIndex", core_idx, "slot", slot, "wp_hash", pkg.Hash())
 	//--> Core Index ++ Work Package
-	err = sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code)
+	err = sendQuicBytes(ctx, stream, reqBytes, p.SanKey(), code)
 	if err != nil {
 		log.Error(log.Node, "SendWorkPackageSubmission1", "err", err)
 		stream.Close()
@@ -123,7 +123,7 @@ func (p *Peer) SendWorkPackageSubmission(ctx context.Context, pkg types.WorkPack
 			extrinsicsBytes = append(extrinsicsBytes, blob...)
 		}
 	}
-	if err = sendQuicBytes(ctx, stream, extrinsicsBytes, p.Validator.Ed25519.String(), code); err != nil {
+	if err = sendQuicBytes(ctx, stream, extrinsicsBytes, p.SanKey(), code); err != nil {
 		log.Error(log.Node, "SendWorkPackageSubmission Encode", "err", err)
 		stream.Close()
 		// Telemetry: Work package failed (event 92)

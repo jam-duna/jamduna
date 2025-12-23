@@ -53,6 +53,8 @@ const (
 	useQuicDeadline = false
 )
 
+const maxConsecutiveFailures = 3
+
 type Peer struct {
 	// these are initialized in NewPeer
 	node      *NodeContent
@@ -63,8 +65,10 @@ type Peer struct {
 	knownHashes []common.Hash
 
 	// these are established early on but may change
-	connectionMu sync.Mutex
-	conn         quic.Connection
+	connectionMu        sync.Mutex
+	conn                quic.Connection
+	consecutiveFailures int
+	lastFailureTime     time.Time
 }
 
 type PeerInfo struct {
@@ -126,9 +130,29 @@ func (p *Peer) String() string {
 	return fmt.Sprintf("[N%d => %d]", p.node.id, p.PeerID)
 }
 
+func (p *Peer) recordFailure() {
+	p.consecutiveFailures++
+	p.lastFailureTime = time.Now()
+}
+
+func (p *Peer) resetFailures() {
+	p.consecutiveFailures = 0
+}
+
+func (p *Peer) shouldBootConnection() bool {
+	return p.consecutiveFailures >= maxConsecutiveFailures
+}
+
 func (p *Peer) openStream(ctx context.Context, code uint8) (quic.Stream, error) {
 	p.connectionMu.Lock()
 	defer p.connectionMu.Unlock()
+
+	if p.conn != nil && p.shouldBootConnection() {
+		log.Warn(log.Node, "Booting stale connection after consecutive failures", "peerKey", p.SanKey(), "failures", p.consecutiveFailures)
+		_ = p.conn.CloseWithError(0, "Too many consecutive failures")
+		p.conn = nil
+		p.resetFailures()
+	}
 
 	var err error
 	if p.conn == nil {
@@ -155,15 +179,17 @@ func (p *Peer) openStream(ctx context.Context, code uint8) (quic.Stream, error) 
 		conn, err := quic.DialAddr(dialCtx, p.PeerAddr, p.node.clientTLSConfig, GenerateQuicConfig())
 		if err != nil {
 			if err.Error() != "Context cancelled" {
-				log.Error(log.Node, "DialAddr failed", "node", p.node.id, "peerKey", p.Validator.Ed25519.ShortString(), "err", err)
+				log.Error(log.Node, "DialAddr failed", "node", p.node.id, "peerKey", p.SanKey(), "err", err)
 			}
 			if telemetryConnecting {
 				p.node.telemetryClient.ConnectOutFailed(eventID, err.Error())
 			}
-			return nil, fmt.Errorf("[%s] DialAddr failed: %w", p.Validator.Ed25519.ShortString(), err)
+			p.recordFailure()
+			return nil, fmt.Errorf("[%s] DialAddr failed: %w", p.SanKey(), err)
 		} else {
 			go p.node.nodeSelf.handleConnection(conn)
 			p.conn = conn
+			p.resetFailures()
 			if telemetryConnecting {
 				p.node.telemetryClient.ConnectedOut(eventID)
 			}
@@ -179,6 +205,7 @@ func (p *Peer) openStream(ctx context.Context, code uint8) (quic.Stream, error) 
 		if stream != nil {
 			_ = stream.Close()
 		}
+		p.recordFailure()
 		return nil, fmt.Errorf("OpenStreamSync failed: %w", err)
 	}
 
@@ -191,9 +218,11 @@ func (p *Peer) openStream(ctx context.Context, code uint8) (quic.Stream, error) 
 		_ = stream.Close()
 		_ = p.conn.CloseWithError(0, "write failed")
 		p.conn = nil
+		p.recordFailure()
 		return nil, fmt.Errorf("failed to write code byte: %w", err)
 	}
 
+	p.resetFailures()
 	return stream, nil
 }
 func sendQuicBytes(ctx context.Context, stream quic.Stream, msg []byte, peerKey string, code uint8) (err error) {

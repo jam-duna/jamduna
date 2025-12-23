@@ -129,7 +129,7 @@ func (p *Peer) SendTicketDistribution(ctx context.Context, epoch uint32, t types
 	}
 	defer stream.Close()
 
-	if err := sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.SanKey(), code); err != nil {
 		// Telemetry: Ticket transfer failed (event 83)
 		p.node.telemetryClient.TicketTransferFailed(p.PeerKey(), connectionSide, wasCE132, err.Error())
 		return fmt.Errorf("sendQuicBytes failed: %w", err)
@@ -155,7 +155,7 @@ func (n *Node) onTicketDistribution(ctx context.Context, stream quic.Stream, msg
 	// Deserialize byte array back into the struct
 	if err := newReq.FromBytes(msg); err != nil {
 		// Telemetry: Ticket transfer failed (event 83)
-		n.telemetryClient.TicketTransferFailed(PubkeyBytes(peer.Validator.Ed25519.String()), connectionSide, wasCE132, err.Error())
+		n.telemetryClient.TicketTransferFailed(PubkeyBytes(peer.Validator.Ed25519.SAN()), connectionSide, wasCE132, err.Error())
 		stream.CancelRead(ErrInvalidData)
 		return fmt.Errorf("onTicketDistribution: failed to decode ticket distribution: %w %s", err, peerKey)
 	}
@@ -201,6 +201,6 @@ func (n *Node) onTicketDistribution(ctx context.Context, stream quic.Stream, msg
 	}
 
 	// Telemetry: Ticket transferred (event 84) - receiving side
-	n.telemetryClient.TicketTransferred(PubkeyBytes(peer.Validator.Ed25519.String()), connectionSide, wasCE132, newReq.Epoch, newReq.Attempt, vrfOutput)
+	n.telemetryClient.TicketTransferred(PubkeyBytes(peer.Validator.Ed25519.SAN()), connectionSide, wasCE132, newReq.Epoch, newReq.Attempt, vrfOutput)
 	return nil
 }

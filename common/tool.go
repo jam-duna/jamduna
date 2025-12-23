@@ -473,6 +473,39 @@ func ToSAN(pub []byte) string {
 	return "e" + B(n, 52)
 }
 
+// FromSAN decodes a SAN string back to a 32-byte public key
+func FromSAN(san string) ([]byte, error) {
+	if len(san) != 53 || san[0] != 'e' {
+		return nil, fmt.Errorf("invalid SAN format: must be 53 chars starting with 'e'")
+	}
+	n := new(big.Int)
+	for i := 1; i < len(san); i++ {
+		ch := san[i]
+		idx := -1
+		for j, c := range alphabet {
+			if c == ch {
+				idx = j
+				break
+			}
+		}
+		if idx == -1 {
+			return nil, fmt.Errorf("invalid character in SAN: %c", ch)
+		}
+		n.Mul(n, big.NewInt(32))
+		n.Add(n, big.NewInt(int64(idx)))
+	}
+	result := make([]byte, 32)
+	bigBytes := n.Bytes() // big-endian
+	copyLen := len(bigBytes)
+	if copyLen > 32 {
+		copyLen = 32
+	}
+	for i := 0; i < copyLen; i++ {
+		result[i] = bigBytes[len(bigBytes)-1-i]
+	}
+	return result, nil
+}
+
 func AddressToMetadata(address string) ([]byte, error) {
 	ipStr, portStr, err := net.SplitHostPort(address)
 	if err != nil {

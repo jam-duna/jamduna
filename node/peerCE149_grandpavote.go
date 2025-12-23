@@ -33,7 +33,7 @@ func (p *Peer) SendGrandpaVote(ctx context.Context, req grandpa.GrandpaVote) err
 	}
 	defer stream.Close()
 
-	if err := sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, reqBytes, p.SanKey(), code); err != nil {
 		return fmt.Errorf("SendGrandpaVote: sendQuicBytes failed: %w", err)
 	}
 	return nil

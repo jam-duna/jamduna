@@ -45,7 +45,7 @@ func (p *Peer) SendBundleRequest(ctx context.Context, erasureRoot common.Hash, e
 
 	// --> Erasure-Root
 	erasureRootBytes := erasureRoot.Bytes()
-	if err := sendQuicBytes(ctx, stream, erasureRootBytes, p.Validator.Ed25519.String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, erasureRootBytes, p.SanKey(), code); err != nil {
 		// Telemetry: Bundle request failed (event 150)
 		p.node.telemetryClient.BundleRequestFailed(eventID, err.Error())
 		return nil, fmt.Errorf("sendQuicBytes[CE147_BundleRequest]: %w", err)
@@ -58,7 +58,7 @@ func (p *Peer) SendBundleRequest(ctx context.Context, erasureRoot common.Hash, e
 	stream.Close()
 
 	// <-- Work-Package Bundle
-	bundleBytes, err := receiveQuicBytes(ctx, stream, p.Validator.Ed25519.String(), code)
+	bundleBytes, err := receiveQuicBytes(ctx, stream, p.SanKey(), code)
 	if err != nil {
 		// Telemetry: Bundle request failed (event 150)
 		p.node.telemetryClient.BundleRequestFailed(eventID, err.Error())
@@ -78,7 +78,7 @@ func (p *Peer) SendBundleRequest(ctx context.Context, erasureRoot common.Hash, e
 
 	log.Trace(log.Node, "CE147-SendBundleRequest",
 		"node", p.node.id,
-		"peerKey", p.Validator.Ed25519.ShortString(),
+		"peerKey", p.SanKey(),
 		"erasureRoot", erasureRoot,
 		"bundleSize", len(bundleBytes),
 		"workPackageHash", bundle.WorkPackage.Hash(),
@@ -99,7 +99,7 @@ func (n *Node) onBundleRequest(ctx context.Context, stream quic.Stream, msg []by
 
 	// Telemetry: Receiving bundle request (event 149)
 	eventID := n.telemetryClient.GetEventID()
-	n.telemetryClient.ReceivingBundleRequest(PubkeyBytes(peer.Validator.Ed25519.String()))
+	n.telemetryClient.ReceivingBundleRequest(PubkeyBytes(peer.Validator.Ed25519.SAN()))
 
 	// Parse erasure root
 	if len(msg) != 32 {
@@ -137,7 +137,7 @@ func (n *Node) onBundleRequest(ctx context.Context, stream quic.Stream, msg []by
 	bundleBytes := bundle.Bytes()
 
 	code := uint8(CE147_BundleRequest)
-	if err := sendQuicBytes(ctx, stream, bundleBytes, n.GetEd25519Key().String(), code); err != nil {
+	if err := sendQuicBytes(ctx, stream, bundleBytes, n.GetEd25519Key().SAN(), code); err != nil {
 		// Telemetry: Bundle request failed (event 150)
 		n.telemetryClient.BundleRequestFailed(eventID, err.Error())
 		return fmt.Errorf("onBundleRequest: sendQuicBytes failed: %w", err)

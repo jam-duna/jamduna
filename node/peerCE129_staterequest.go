@@ -115,7 +115,7 @@ const DefaultMaxStateSize = 10 * 1024 * 1024 // 50MB - large enough for full sta
 // FetchStateRange fetches a single page of state. Returns truncated=true if more data available.
 func (p *Peer) FetchStateRange(ctx context.Context, headerHash common.Hash, startKey [31]byte, endKey [31]byte, maximumSize uint32) (resp *JAMSNPStateResponse, truncated bool, err error) {
 	log.Trace(log.Node, "FetchStateRange: sending request",
-		"peer", p.Validator.Ed25519.ShortString(),
+		"peer", p.SanKey(),
 		"headerHash", headerHash.Hex(),
 		"startKey", fmt.Sprintf("%x", startKey[:]),
 		"endKey", fmt.Sprintf("%x", endKey[:]),
@@ -138,25 +138,25 @@ func (p *Peer) FetchStateRange(ctx context.Context, headerHash common.Hash, star
 		return nil, false, fmt.Errorf("FetchStateRange: failed to open stream: %w", err)
 	}
 
-	if err = sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code); err != nil {
+	if err = sendQuicBytes(ctx, stream, reqBytes, p.SanKey(), code); err != nil {
 		return nil, false, fmt.Errorf("FetchStateRange: failed to send request: %w", err)
 	}
 
 	log.Debug(log.Node, "FetchStateRange: request sent, closing write side",
-		"peer", p.Validator.Ed25519.ShortString(),
+		"peer", p.SanKey(),
 		"reqBytesLen", len(reqBytes))
 
 	stream.Close()
 
 	log.Debug(log.Node, "FetchStateRange: waiting for response",
-		"peer", p.Validator.Ed25519.ShortString())
+		"peer", p.SanKey())
 
 	// <-- [Boundary Node]
 	// <-- [Key ++ Value]
-	parts, err := receiveMultiple(ctx, stream, 2, p.Validator.Ed25519.String(), code)
+	parts, err := receiveMultiple(ctx, stream, 2, p.SanKey(), code)
 	if err != nil {
 		log.Trace(log.Node, "FetchStateRange: failed to receive response",
-			"peer", p.Validator.Ed25519.ShortString(),
+			"peer", p.SanKey(),
 			"headerHash", headerHash.Hex(),
 			"err", err)
 		return nil, false, fmt.Errorf("FetchStateRange: failed to receive response: %w", err)
@@ -192,7 +192,7 @@ func (p *Peer) FetchStateRange(ctx context.Context, headerHash common.Hash, star
 	}
 
 	log.Trace(log.Node, "FetchStateRange: success",
-		"peer", p.Validator.Ed25519.ShortString(),
+		"peer", p.SanKey(),
 		"headerHash", headerHash.Hex(),
 		"startKey", fmt.Sprintf("%x", startKey[:]),
 		"endKey", fmt.Sprintf("%x", endKey[:]),
@@ -222,7 +222,7 @@ func (p *Peer) SendStateRequest(ctx context.Context, headerHash common.Hash, sta
 		return err
 	}
 	// --> Header Hash ++ Start Key ++ End Key ++ Maximum Size
-	err = sendQuicBytes(ctx, stream, reqBytes, p.Validator.Ed25519.String(), code)
+	err = sendQuicBytes(ctx, stream, reqBytes, p.SanKey(), code)
 	if err != nil {
 		return err
 	}
@@ -231,7 +231,7 @@ func (p *Peer) SendStateRequest(ctx context.Context, headerHash common.Hash, sta
 
 	// <-- [Boundary Node]
 	// <-- [Key ++ Value]
-	parts, err := receiveMultiple(ctx, stream, 2, p.Validator.Ed25519.String(), code)
+	parts, err := receiveMultiple(ctx, stream, 2, p.SanKey(), code)
 	if err != nil {
 		return err
 	}
@@ -239,7 +239,7 @@ func (p *Peer) SendStateRequest(ctx context.Context, headerHash common.Hash, sta
 	boundaryNode := parts[0]
 	keyVal := parts[1]
 	log.Info(log.Node, "SendStateRequest: received boundary node and key-value pairs",
-		"peer", p.Validator.Ed25519.ShortString(),
+		"peer", p.SanKey(),
 		"boundaryNodeLength", len(boundaryNode), "keyValLength", len(keyVal))
 	return nil
 }
@@ -352,7 +352,7 @@ func (n *NodeContent) onStateRequest(ctx context.Context, stream quic.Stream, ms
 		"numKeyValues", len(keyvalues.Items))
 
 	// <-- [Boundary Node]
-	if err = sendQuicBytes(ctx, stream, common.ConcatenateByteSlices(boundarynodes), n.GetEd25519Key().String(), CE129_StateRequest); err != nil {
+	if err = sendQuicBytes(ctx, stream, common.ConcatenateByteSlices(boundarynodes), n.GetEd25519Key().SAN(), CE129_StateRequest); err != nil {
 		stream.CancelWrite(ErrCECode)
 		return fmt.Errorf("onStateRequest: failed to send boundarynodes: %w", err)
 	}
@@ -370,7 +370,7 @@ func (n *NodeContent) onStateRequest(ctx context.Context, stream quic.Stream, ms
 		stream.CancelWrite(ErrInvalidData)
 		return fmt.Errorf("onStateRequest: failed to encode keyvalues: %w", err)
 	}
-	if err = sendQuicBytes(ctx, stream, kvbytes, n.GetEd25519Key().String(), CE129_StateRequest); err != nil {
+	if err = sendQuicBytes(ctx, stream, kvbytes, n.GetEd25519Key().SAN(), CE129_StateRequest); err != nil {
 		stream.CancelWrite(ErrCECode)
 		return fmt.Errorf("onStateRequest: failed to send keyvalues: %w", err)
 	}

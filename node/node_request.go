@@ -252,8 +252,8 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, np_blockAnnouncemen
 
 		// Failed attempt - try to find a different peer for the next attempt
 		log.Warn(log.Node, "SendBlockRequest failed, selecting new peer", "attempt", attempt, "blockHash", headerHash, "lastErr", lastErr)
-		currentPeerKey := p.Validator.Ed25519.String()
-		selfPubKey := n.GetEd25519Key().String()
+		currentPeerKey := p.Validator.Ed25519.SAN()
+		selfPubKey := n.GetEd25519Key().SAN()
 		peers := make([]*Peer, 0, len(n.peersByPubKey))
 		for pubKey, peer := range n.peersByPubKey {
 			if pubKey != currentPeerKey && pubKey != selfPubKey {
@@ -262,7 +262,7 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, np_blockAnnouncemen
 		}
 		if len(peers) > 0 {
 			p = peers[rand0.Intn(len(peers))]
-			log.Info(log.Node, "SendBlockRequest: switched to new peer", "newPeerKey", p.Validator.Ed25519.ShortString())
+			log.Info(log.Node, "SendBlockRequest: switched to new peer", "newPeerKey", p.SanKey())
 		}
 	}
 	for i := 0; i < len(blocksRaw); i++ {
@@ -624,7 +624,7 @@ func (n *NodeContent) sendRequestByPubKey(ctx context.Context, pubKey types.Ed25
 			log.Error(log.DA, "CE138_request: peer not found for pubkey", "n", n.String(), "pubKey", pubKey.String()[:16])
 			return resp, fmt.Errorf("peer not found for pubkey %s", pubKey.String()[:16])
 		}
-		log.Trace(log.DA, "CE138_request: SendBundleShardRequest", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex, "peerKey", peer.Validator.Ed25519.ShortString())
+		log.Trace(log.DA, "CE138_request: SendBundleShardRequest", "n", n.String(), "erasureRoot", erasureRoot, "shardIndex", req.ShardIndex, "peerKey", peer.SanKey())
 
 		startTime := time.Now()
 		bundleShard, sClub, encodedPath, err := peer.SendBundleShardRequest(ctx, erasureRoot, req.ShardIndex, eventID)
