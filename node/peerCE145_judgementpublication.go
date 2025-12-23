@@ -145,6 +145,11 @@ func (p *Peer) SendJudgmentPublication(ctx context.Context, epoch uint32, j type
 func (n *Node) onJudgmentPublication(ctx context.Context, stream quic.Stream, msg []byte, peerKey string) error {
 	defer stream.Close()
 
+	// Builders don't process judgements - no consumer is running
+	if n.IsBuilder() || !Audit {
+		return nil
+	}
+
 	var jp JAMSNPJudgmentPublication
 	if err := jp.FromBytes(msg); err != nil {
 		return fmt.Errorf("onJudgmentPublication: failed to decode: %w", err)
@@ -158,7 +163,16 @@ func (n *Node) onJudgmentPublication(ctx context.Context, stream quic.Stream, ms
 	}
 	copy(judgement.Signature[:], jp.Signature[:])
 
-	n.peersByPubKey[peerKey].AddKnownHash(judgement.Hash())
+	jHash := judgement.Hash()
+	n.seenJudgementsMu.Lock()
+	if n.seenJudgements[jHash] {
+		n.seenJudgementsMu.Unlock()
+		return nil
+	}
+	n.seenJudgements[jHash] = true
+	n.seenJudgementsMu.Unlock()
+
+	n.peersByPubKey[peerKey].AddKnownHash(jHash)
 	go n.broadcast(ctx, judgement)
 
 	select {

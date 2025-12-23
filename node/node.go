@@ -385,6 +385,8 @@ type Node struct {
 	queueAssuranceMutex  sync.Mutex
 	auditAnnouncementsCh chan AuditAnnouncementObj
 	judgementsCh         chan types.Judgement
+	seenJudgements       map[common.Hash]bool
+	seenJudgementsMu     sync.Mutex
 	auditingCh           chan *statedb.StateDB // use this to trigger auditing, block hash
 
 	waitingAuditAnnouncements      map[common.Hash][]AuditAnnouncementObj
@@ -904,6 +906,7 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 		queueAssurance:       make(map[common.Hash]map[types.Ed25519Key]AssuranceObject),
 		auditAnnouncementsCh: make(chan AuditAnnouncementObj, DefaultChannelSize),
 		judgementsCh:         make(chan types.Judgement, DefaultChannelSize),
+		seenJudgements:       make(map[common.Hash]bool),
 		auditingCh:           make(chan *statedb.StateDB, DefaultChannelSize),
 
 		sendTickets:   false,

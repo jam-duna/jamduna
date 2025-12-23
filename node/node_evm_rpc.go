@@ -85,8 +85,6 @@ func (j *Jam) Accounts(req []string, res *string) error {
 // Example curl call:
 // curl -X POST http://localhost:8545 -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"eth_gasPrice","params":[],"id":1}'
 func (j *Jam) GasPrice(req []string, res *string) error {
-	log.Info(log.Node, "GasPrice")
-
 	// Get rollup for this service
 	rollup, err := j.GetRollup()
 	if err != nil {
@@ -96,8 +94,6 @@ func (j *Jam) GasPrice(req []string, res *string) error {
 	// Call internal method
 	gasPrice := rollup.GetGasPrice()
 	*res = fmt.Sprintf("0x%x", gasPrice)
-
-	log.Debug(log.Node, "GasPrice: Returning gas price", "gasPrice", *res)
 	return nil
 }
 
@@ -849,9 +845,6 @@ func (j *Jam) GetLogs(req []string, res *string) error {
 // Example curl call:
 // curl -X POST http://localhost:8545 -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
 func (j *Jam) BlockNumber(req []string, res *string) error {
-	log.Info(log.Node, "BlockNumber")
-
-	// Call internal method to get latest block number
 	// Get rollup for this service
 	rollup, err := j.GetRollup()
 	if err != nil {
@@ -864,7 +857,6 @@ func (j *Jam) BlockNumber(req []string, res *string) error {
 	}
 
 	*res = fmt.Sprintf("0x%x", blockNumber)
-	log.Debug(log.Node, "BlockNumber: Returning block number", "blockNumber", *res)
 	return nil
 }
 
