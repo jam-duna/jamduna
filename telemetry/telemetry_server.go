@@ -466,3 +466,20 @@ func (s *TelemetryServer) processEvent(timestamp string, discriminator byte, pay
 		s.logEvent(timestamp, peerAddr, "UNKNOWN_EVENT", fmt.Sprintf("discriminator:%d|raw_data:0x%x", discriminator, payload))
 	}
 }
+
+// DecodeEvent decodes a telemetry event payload using the appropriate decoder.
+// Returns the decoded string, or empty string if no decoder exists for this discriminator.
+func DecodeEvent(discriminator int, payload []byte) string {
+	if decoder, ok := discriminatorDecoder[discriminator]; ok {
+		return decoder(payload)
+	}
+	return ""
+}
+
+// GetEventTypeName returns the event type name for a discriminator
+func GetEventTypeName(discriminator int) string {
+	if name, ok := discriminatorToString[discriminator]; ok {
+		return name
+	}
+	return ""
+}

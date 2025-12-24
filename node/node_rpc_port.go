@@ -13,8 +13,8 @@ var WSPort = 19800
 
 // Duna node indices
 const (
-	DunaLastValidatorNode = 5 // N5 is the last validator node (N0-N5 are validators)
-	DunaBuilderNode       = 6 // N6 is the builder/full node
+	DunaValidatorNode = 5 // N5 is the last validator node (N0-N5 are validators)
+	DunaBuilderNode   = 6 // N6 is the builder/full node
 )
 
 func GetJAMNetwork() string {
@@ -39,8 +39,12 @@ func GetJAMNetworkWSPort() int {
 }
 
 func GetAddresses(local bool) (address string, wsUrl string) {
-	//i := DunaLastValidatorNode
-	i := DunaBuilderNode
+	i := DunaValidatorNode
+	//i := DunaBuilderNode
+	roleTpye := "BUILDER"
+	if i == DunaValidatorNode {
+		roleTpye = "VALIDATOR"
+	}
 	if local {
 		address = fmt.Sprintf("localhost:%d", DefaultTCPPort+i)
 		wsUrl = fmt.Sprintf("ws://127.0.0.1:%d/ws", WSPort+i)
@@ -48,5 +52,6 @@ func GetAddresses(local bool) (address string, wsUrl string) {
 		address = fmt.Sprintf("%s-%d.jamduna.org:%d", GetJAMNetwork(), i, DefaultTCPPort+i)
 		wsUrl = fmt.Sprintf("ws://%s-%d.jamduna.org:%d/ws", GetJAMNetwork(), i, WSPort+i)
 	}
+	fmt.Printf("[Connecting to %s] == %s (WS: %s)\n", roleTpye, address, wsUrl)
 	return
 }

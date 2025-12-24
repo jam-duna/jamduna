@@ -97,6 +97,11 @@ func (n *Node) buildTelemetryNodeInfo() (telemetry.NodeInfo, error) {
 	if err != nil {
 		return info, fmt.Errorf("invalid listen address %q: %w", listenerAddr.String(), err)
 	}
+	// Use 127.0.0.1 for telemetry if bound to any address (:: or 0.0.0.0)
+	// This ensures consistent IPv4-mapped format in NodeInfo
+	if host == "::" || host == "0.0.0.0" || host == "" {
+		host = "127.0.0.1"
+	}
 	addrBytes, addrPort, err := telemetry.ParseTelemetryAddress(host, port)
 	if err != nil {
 		return info, fmt.Errorf("failed to encode peer address: %w", err)

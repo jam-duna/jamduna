@@ -167,7 +167,11 @@ func DecodeTicketTransferFailed(payload []byte) string {
 		sideStr = "remote"
 	}
 
-	return fmt.Sprintf("peer_id:%s|connection_side:%s|was_ce132:%t|reason:%s", peerID, sideStr, wasCE132 != 0, reason)
+	protoStr := "CE131"
+	if wasCE132 != 0 {
+		protoStr = "CE132"
+	}
+	return fmt.Sprintf("peer_id:%s|connection_side:%s|protocol:%s|reason:%s", peerID, sideStr, protoStr, reason)
 }
 
 /*
@@ -229,6 +233,10 @@ func DecodeTicketTransferred(payload []byte) string {
 	if connectionSide == 1 {
 		sideStr = "remote"
 	}
+	protoStr := "CE131"
+	if wasCE132 != 0 {
+		protoStr = "CE132"
+	}
 
-	return fmt.Sprintf("peer_id:%s|connection_side:%s|was_ce132:%t|epoch_index:%d|attempt_number:%d|vrf_output:%s", peerID, sideStr, wasCE132 != 0, epochIndex, attemptNumber, vrfOutput)
+	return fmt.Sprintf("peer_id:%s|connection_side:%s|protocol:%s|epoch_index:%d|attempt_number:%d|vrf_output:%s", peerID, sideStr, protoStr, epochIndex, attemptNumber, vrfOutput)
 }

@@ -16,11 +16,14 @@ import (
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/node"
 	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/telemetry"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/spf13/cobra"
 
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -62,8 +65,8 @@ func main() {
 		externalIP  string
 		listenIP    string
 		rpcListenIP string
-		bootnode    string
-		telemetry   string
+		bootnode        string
+		telemetryEndpoint string
 
 		// serviceIDs should trigger role=builder
 		serviceIDs    []uint32
@@ -406,6 +409,15 @@ func main() {
 				os.Exit(1)
 			}
 			n.SetServiceDir("/services")
+
+			// Initialize telemetry if endpoint is specified
+			if telemetryEndpoint != "" {
+				if err := n.InitTelemetry(telemetryEndpoint); err != nil {
+					fmt.Printf("Warning: Failed to initialize telemetry: %v\n", err)
+				} else {
+					fmt.Printf("Telemetry enabled: %s\n", telemetryEndpoint)
+				}
+			}
 			n.WriteDebugFlag = true
 			storage, err := n.GetStorage()
 			if err != nil {
@@ -442,9 +454,58 @@ func main() {
 	runCmd.Flags().StringVar(&listenIP, listenIPFlag, "", "IP address to listen on. `::` (the default) means all addresses. [default: ::]")
 	runCmd.Flags().StringVar(&rpcListenIP, rpcListenIPFlag, "", "IP address for RPC server to listen on. `::` (the default) means all addresses. [default: ::]")
 	runCmd.Flags().StringVar(&bootnode, bootnodeFlag, "", "Specify a bootnode")
-	runCmd.Flags().StringVar(&telemetry, telemetryFlag, "", " Send data to TART server (JIP-3)")
+	runCmd.Flags().StringVar(&telemetryEndpoint, telemetryFlag, "", " Send data to TART server (JIP-3)")
 	runCmd.Flags().StringVar(&role, roleFlag, "validator", "Node role: 'validator' (default) or 'builder' (full node that doesn't participate in consensus)")
 	runCmd.Flags().StringVar(&serviceIDsStr, serviceIDsFlag, "", "Comma-separated list of service IDs to enable builder role")
+
+	// telemetry command (server mode)
+	var telemetryAddr string
+	var telemetryLogFile string
+	var telemetryServerCmd = &cobra.Command{
+		Use:   "telemetry",
+		Short: "Run a telemetry server to receive events from polkajam and jamduna nodes",
+		Long: `Run a telemetry server that listens for telemetry connections from JAM nodes.
+
+Example usage:
+  # Start telemetry server on default port 9999
+  ./jamduna telemetry
+
+  # Start with custom address and log file
+  ./jamduna telemetry --addr 0.0.0.0:9999 --log /tmp/telemetry.log
+
+  # Connect polkajam to this server
+  ./polkajam run --telemetry localhost:9999 ...
+
+  # Connect jamduna to this server (future support)
+  ./jamduna run --telemetry localhost:9999 ...`,
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Printf("Starting telemetry server on %s, logging to %s\n", telemetryAddr, telemetryLogFile)
+
+			server, err := telemetry.NewTelemetryServer(telemetryAddr, telemetryLogFile)
+			if err != nil {
+				fmt.Printf("Failed to create telemetry server: %v\n", err)
+				os.Exit(1)
+			}
+
+			// Handle graceful shutdown
+			sigChan := make(chan os.Signal, 1)
+			signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+			go func() {
+				<-sigChan
+				fmt.Println("\nShutting down telemetry server...")
+				server.Stop()
+				os.Exit(0)
+			}()
+
+			if err := server.Start(); err != nil {
+				fmt.Printf("Telemetry server error: %v\n", err)
+				os.Exit(1)
+			}
+		},
+	}
+	telemetryServerCmd.Flags().StringVar(&telemetryAddr, "addr", "0.0.0.0:9999", "Address to listen on for telemetry connections")
+	telemetryServerCmd.Flags().StringVar(&telemetryLogFile, "log", filepath.Join(os.TempDir(), "jamduna-telemetry.log"), "Path to telemetry log file")
 
 	// add commands to root
 	rootCmd.AddCommand(runCmd)
@@ -454,6 +515,7 @@ func main() {
 	rootCmd.AddCommand(testRefineCmd)
 	rootCmd.AddCommand(genSpecCmd)
 	rootCmd.AddCommand(printSpecCmd)
+	rootCmd.AddCommand(telemetryServerCmd)
 
 	// parse the persistent flags (Global flags)
 	rootCmd.PersistentFlags().Parse(os.Args[1:])

@@ -52,9 +52,10 @@ func parseHash(payload []byte, offset int) (string, int) {
 
 func parsePeerID(payload []byte, offset int) (string, int) {
 	if offset+32 > len(payload) {
-		return "0x0000000000000000000000000000000000000000000000000000000000000000", offset
+		return "e0000000000000000000000000000000000000000000000000000", offset
 	}
-	return fmt.Sprintf("0x%x", payload[offset:offset+32]), offset + 32
+	// Use SAN format (base-52 encoding) for peer IDs
+	return common.ToSAN(payload[offset : offset+32]), offset + 32
 }
 
 func parseAddress(payload []byte, offset int) (string, int) {

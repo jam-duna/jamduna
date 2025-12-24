@@ -18,9 +18,12 @@ type NodeInfo = types.NodeInfo
 type TelemetryClient struct {
 	addr        string
 	conn        net.Conn
+	connMu      sync.Mutex
 	nextEventID uint64
 	eventIDMu   sync.Mutex
-	disabled    bool // if true, telemetry is disabled (no-op)
+	disabled    bool     // if true, telemetry is disabled (no-op)
+	nodeInfo    NodeInfo // stored for reconnection
+	reconnecting bool    // true if reconnect goroutine is running
 }
 
 // NewNoOpTelemetryClient creates a disabled telemetry client that does nothing
@@ -51,23 +54,88 @@ func (c *TelemetryClient) GetEventID(...interface{}) uint64 {
 // Connect establishes a TCP connection to the telemetry server, sends the node information message,
 // and stores the connection for later reuse.
 func (c *TelemetryClient) Connect(nodeInfo NodeInfo) error {
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
+
 	if c.conn != nil {
 		return fmt.Errorf("telemetry client already connected to %s", c.addr)
 	}
 
+	// Store nodeInfo for reconnection
+	c.nodeInfo = nodeInfo
+
 	conn, err := net.Dial("tcp", c.addr)
 	if err != nil {
+		// Start background reconnection
+		c.startReconnect()
 		return fmt.Errorf("failed to connect to telemetry server at %s: %w", c.addr, err)
 	}
 
 	// Send node information message
 	if err := sendNodeInfo(conn, nodeInfo); err != nil {
 		conn.Close()
+		c.startReconnect()
 		return fmt.Errorf("failed to send node info: %w", err)
 	}
 
 	c.conn = conn
 	return nil
+}
+
+// startReconnect starts a background goroutine to reconnect to the telemetry server.
+// Must be called with connMu held.
+func (c *TelemetryClient) startReconnect() {
+	if c.reconnecting || c.disabled {
+		return
+	}
+	c.reconnecting = true
+	go c.reconnectLoop()
+}
+
+// reconnectLoop attempts to reconnect to the telemetry server with exponential backoff.
+func (c *TelemetryClient) reconnectLoop() {
+	backoff := time.Second
+	maxBackoff := 30 * time.Second
+
+	for {
+		time.Sleep(backoff)
+
+		c.connMu.Lock()
+		if c.disabled {
+			c.reconnecting = false
+			c.connMu.Unlock()
+			return
+		}
+
+		// Try to connect
+		conn, err := net.Dial("tcp", c.addr)
+		if err != nil {
+			c.connMu.Unlock()
+			// Exponential backoff
+			backoff = backoff * 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			continue
+		}
+
+		// Send node information message
+		if err := sendNodeInfo(conn, c.nodeInfo); err != nil {
+			conn.Close()
+			c.connMu.Unlock()
+			backoff = backoff * 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			continue
+		}
+
+		// Success - store connection and exit loop
+		c.conn = conn
+		c.reconnecting = false
+		c.connMu.Unlock()
+		return
+	}
 }
 
 // Conn returns the underlying telemetry connection, if established.
@@ -77,6 +145,12 @@ func (c *TelemetryClient) Conn() net.Conn {
 
 // Close terminates the telemetry connection and clears the stored state.
 func (c *TelemetryClient) Close() error {
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
+
+	// Mark as disabled to stop reconnection attempts
+	c.disabled = true
+
 	if c.conn == nil {
 		return nil
 	}
@@ -94,9 +168,15 @@ func (c *TelemetryClient) sendEvent(discriminator byte, eventPayload []byte) {
 		return
 	}
 
-	if c.conn == nil {
+	c.connMu.Lock()
+	conn := c.conn
+	if conn == nil {
+		// No connection - start reconnect if not already running
+		c.startReconnect()
+		c.connMu.Unlock()
 		return
 	}
+	c.connMu.Unlock()
 
 	// Build complete message: timestamp + discriminator + event-specific payload
 	var message []byte
@@ -113,12 +193,27 @@ func (c *TelemetryClient) sendEvent(discriminator byte, eventPayload []byte) {
 
 	// Send length prefix (little-endian 32-bit)
 	lengthBytes := Uint32ToBytes(uint32(len(message)))
-	if _, err := c.conn.Write(lengthBytes); err != nil {
+	if _, err := conn.Write(lengthBytes); err != nil {
+		c.handleWriteError()
 		return
 	}
 
 	// Send message content
-	c.conn.Write(message)
+	if _, err := conn.Write(message); err != nil {
+		c.handleWriteError()
+	}
+}
+
+// handleWriteError handles a write error by closing the connection and starting reconnection.
+func (c *TelemetryClient) handleWriteError() {
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
+
+	if c.conn != nil {
+		c.conn.Close()
+		c.conn = nil
+	}
+	c.startReconnect()
 }
 
 // currentTimestamp returns the number of microseconds elapsed since the

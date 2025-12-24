@@ -1,0 +1,11 @@
+{
+  "validators": [
+    {"node": 0, "name": "N0", "role": "validator", "peer_id": "eecgwpgwq3noky4ijm4jmvjtmuzv44qvigciusxakq5epnrfj2utb"},
+    {"node": 1, "name": "N1", "role": "validator", "peer_id": "en5ejs5b2tybkfh4ym5vpfh7nynby73xhtfzmazumtvcijpcsz6ma"},
+    {"node": 2, "name": "N2", "role": "validator", "peer_id": "ekwmt37xecoq6a7otkm4ux5gfmm4uwbat4bg5m223shckhaaxdpqa"},
+    {"node": 3, "name": "N3", "role": "validator", "peer_id": "etxckkczii4mvm22ox4m3horvx2bwlzerjxbd3n6c36qehdms2idb"},
+    {"node": 4, "name": "N4", "role": "validator", "peer_id": "eled3vb5nse3n7cii6ybvtms5s2bdwvlkivc7cnwa33oatby4txka"},
+    {"node": 5, "name": "N5", "role": "validator", "peer_id": "elfaiiixcuzmzroa34lajwp52cdsucikaxdviaoeuvnygdi3imtba"},
+    {"node": 6, "name": "N6", "role": "builder", "peer_id": "eg6obgy5kkagaxy5kcekqpz7rxzhj7sxcc2mmqk3lpaprcnt26adb"}
+  ]
+}

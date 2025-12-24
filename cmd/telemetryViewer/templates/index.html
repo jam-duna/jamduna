@@ -1,0 +1,2997 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JAM Telemetry Viewer</title>
+    <style>
+        :root {
+            --bg-primary: #1e1e1e;
+            --bg-secondary: #252526;
+            --bg-toolbar: #333;
+            --bg-sidebar: #252526;
+            --bg-log: #1e1e1e;
+            --bg-empty: #252526;
+            --text-primary: #d4d4d4;
+            --text-secondary: #aaa;
+            --text-muted: #666;
+            --border-color: #555;
+            --border-light: #444;
+            --accent-color: #007acc;
+            --log-line-hover: #2a2a2a;
+            --log-line-alt: #1e1e1e;
+            --timestamp-color: #6a9955;
+            --module-color: #4ec9b0;
+            --message-color: #dcdcaa;
+            --level-trace: #808080;
+            --level-debug: #569cd6;
+            --level-info: #4ec9b0;
+            --level-warn: #ce9178;
+            --level-error: #f44747;
+            --msg-type-color: #c586c0;
+            --peer-id-color: #d7ba7d;
+            --peer-ip-color: #9cdcfe;
+        }
+        body.light-theme {
+            --bg-primary: #faf9f7;
+            --bg-secondary: #f0eeeb;
+            --bg-toolbar: #e8e6e3;
+            --bg-sidebar: #f5f3f0;
+            --bg-log: #faf9f7;
+            --bg-empty: #f5f3f0;
+            --text-primary: #1a1a1a;
+            --text-secondary: #2d2d2d;
+            --text-muted: #555;
+            --border-color: #999;
+            --border-light: #bbb;
+            --accent-color: #0055bb;
+            --log-line-hover: #eae8e5;
+            --log-line-alt: #f5f3f0;
+            --timestamp-color: #004d00;
+            --module-color: #003d80;
+            --message-color: #4d2600;
+            --level-trace: #444;
+            --level-debug: #003d80;
+            --level-info: #005533;
+            --level-warn: #804000;
+            --level-error: #b30000;
+            --msg-type-color: #8b3a8b;
+            --peer-id-color: #6b4500;
+            --peer-ip-color: #444;
+        }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 12px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .toolbar {
+            background: var(--bg-toolbar);
+            padding: 8px 10px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .toolbar label {
+            color: var(--text-secondary);
+            font-size: 11px;
+        }
+        .toolbar input[type="text"] {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 3px 8px;
+            border-radius: 3px;
+            width: 180px;
+            font-size: 11px;
+        }
+        .toolbar input[type="text"]:focus {
+            outline: none;
+            border-color: var(--accent-color);
+        }
+        .toolbar button {
+            background: #0e639c;
+            border: none;
+            color: white;
+            padding: 5px 12px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+        .toolbar button:hover {
+            background: #1177bb;
+        }
+        .toolbar button.active {
+            background: #16825d;
+        }
+        .toolbar button.danger {
+            background: #a31515;
+        }
+        .toolbar button.theme-toggle {
+            background: #555;
+            font-size: 14px;
+            padding: 4px 10px;
+        }
+        body.light-theme .toolbar button.theme-toggle {
+            background: #ddd;
+            color: #333;
+        }
+        .toolbar select {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 5px;
+            border-radius: 3px;
+        }
+        .node-toggles {
+            display: flex;
+            gap: 3px;
+        }
+        .node-toggle {
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            border: 1px solid #333;
+            font-size: 11px;
+            opacity: 0.4;
+            filter: saturate(0.3);
+            transition: opacity 0.2s, filter 0.2s, border-color 0.2s;
+        }
+        .node-toggle.active {
+            border-color: #888;
+            opacity: 1;
+            filter: saturate(1);
+        }
+        .node-toggle:hover {
+            border-color: #007acc;
+        }
+        .level-toggles {
+            display: flex;
+            gap: 3px;
+        }
+        .level-toggle {
+            padding: 3px 6px;
+            border-radius: 3px;
+            cursor: pointer;
+            border: 1px solid #555;
+            background: #252526;
+            font-size: 10px;
+            color: #888;
+        }
+        .level-toggle.active {
+            border-color: #007acc;
+        }
+        .level-toggle.level-ERROR { color: #f44747; }
+        .level-toggle.level-ERROR.active { background: #5a1d1d; border-color: #f44747; }
+        .level-toggle.level-WARN { color: #ce9178; }
+        .level-toggle.level-WARN.active { background: #4d3319; border-color: #ce9178; }
+        .level-toggle.level-INFO { color: #4ec9b0; }
+        .level-toggle.level-INFO.active { background: #1a4d44; border-color: #4ec9b0; }
+        .level-toggle.level-DEBUG { color: #569cd6; }
+        .level-toggle.level-DEBUG.active { background: #1d3a5a; border-color: #569cd6; }
+        .level-toggle.level-TRACE { color: #888; }
+        .level-toggle.level-TRACE.active { background: #333; border-color: #888; }
+        .level-count {
+            font-size: 9px;
+            opacity: 0.7;
+        }
+        .main-container {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+        .sidebar {
+            width: 280px;
+            background: var(--bg-sidebar);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .sidebar.collapsed {
+            width: 40px;
+        }
+        .sidebar-header {
+            padding: 8px;
+            background: var(--bg-toolbar);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 5px;
+        }
+        .sidebar-header h3 {
+            font-size: 12px;
+            font-weight: normal;
+            color: var(--text-secondary);
+        }
+        .sidebar-buttons {
+            display: flex;
+            gap: 3px;
+        }
+        .sidebar-buttons button {
+            font-size: 10px;
+            padding: 2px 6px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .sidebar-buttons button:hover {
+            background: var(--log-line-hover);
+            color: var(--text-primary);
+        }
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 5px;
+            min-height: 0;
+        }
+        .sidebar-section {
+            display: flex;
+            flex-direction: column;
+            min-height: 100px;
+        }
+        .sidebar-section-header {
+            padding: 6px 8px;
+            background: var(--bg-toolbar);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .sidebar-section-header h4 {
+            font-size: 11px;
+            font-weight: normal;
+            color: var(--text-secondary);
+            margin: 0;
+        }
+        .sidebar-resize-handle {
+            height: 6px;
+            background: var(--border-light);
+            cursor: row-resize;
+            flex-shrink: 0;
+        }
+        .sidebar-resize-handle:hover {
+            background: var(--accent-color);
+        }
+        .peer-table {
+            width: 100%;
+            font-size: 10px;
+            border-collapse: collapse;
+        }
+        .peer-table th {
+            text-align: left;
+            padding: 4px 6px;
+            background: var(--bg-toolbar);
+            color: var(--text-secondary);
+            font-weight: normal;
+            border-bottom: 1px solid var(--border-color);
+            position: sticky;
+            top: 0;
+        }
+        .peer-table td {
+            padding: 3px 6px;
+            border-bottom: 1px solid var(--border-light);
+            color: var(--text-primary);
+        }
+        .peer-table tr:hover td {
+            background: var(--log-line-hover);
+        }
+        .peer-table .peer-node-col {
+            width: 32px;
+            text-align: center;
+        }
+        .peer-table .peer-role-col {
+            width: 20px;
+            text-align: center;
+            font-weight: bold;
+        }
+        .peer-table .peer-id-col {
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            cursor: pointer;
+        }
+        .peer-table .peer-id-col:hover {
+            background: var(--accent-color);
+            color: #fff;
+        }
+        .peer-table .peer-id-col.copied {
+            background: #16825d;
+            color: #fff;
+        }
+        .peer-table .peer-ip-col {
+            color: var(--peer-ip-color);
+        }
+        .sidebar-toggle-btn {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 2px 6px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 10px;
+        }
+        .sidebar-toggle-btn:hover {
+            background: var(--log-line-hover);
+            color: var(--text-primary);
+        }
+        .sidebar-section.collapsed {
+            flex: 0 0 auto !important;
+            height: auto !important;
+        }
+        .sidebar-section.collapsed .sidebar-content {
+            display: none;
+        }
+        .sidebar-section.collapsed + .sidebar-resize-handle {
+            display: none;
+        }
+        .sidebar-resize-handle + .sidebar-section.collapsed {
+            margin-top: 0;
+        }
+        .sidebar.collapsed .sidebar-content,
+        .sidebar.collapsed .sidebar-header h3 {
+            display: none;
+        }
+        .filter-tree {
+            font-size: 11px;
+        }
+        .tree-node {
+            padding: 2px 0;
+        }
+        .tree-node-header {
+            display: flex;
+            align-items: center;
+            padding: 3px 5px;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+        .tree-node-header:hover {
+            background: var(--log-line-hover);
+        }
+        .tree-toggle {
+            width: 16px;
+            color: var(--text-muted);
+            font-size: 10px;
+        }
+        .tree-checkbox {
+            width: 14px;
+            height: 14px;
+            margin-right: 5px;
+            cursor: pointer;
+        }
+        .tree-label {
+            flex: 1;
+            color: var(--text-primary);
+        }
+        .tree-label.msg-type {
+            color: var(--msg-type-color);
+        }
+        .tree-count {
+            color: var(--text-muted);
+            font-size: 10px;
+            margin-left: 5px;
+        }
+        .tree-children {
+            margin-left: 16px;
+        }
+        .tree-children.collapsed {
+            display: none;
+        }
+        .log-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .view-mode-fused .log-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        .view-mode-split {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            overflow: hidden;
+            padding: 4px;
+            gap: 4px;
+            background: #181818;
+        }
+        .split-row {
+            display: flex;
+            flex-direction: row;
+            flex: 1;
+            min-height: 100px;
+            gap: 4px;
+        }
+        .split-panel {
+            background: var(--bg-log);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            flex: 1;
+            min-width: 150px;
+            min-height: 100px;
+            border-radius: 8px;
+            border: 1px solid var(--border-light);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        .split-resize-handle-h {
+            width: 12px;
+            margin: 0 -4px;
+            background: transparent;
+            cursor: col-resize;
+            flex-shrink: 0;
+            transition: background 0.2s;
+            position: relative;
+            z-index: 10;
+            border-radius: 4px;
+        }
+        .split-resize-handle-h::after {
+            content: '⋮';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #555;
+            font-size: 16px;
+            pointer-events: none;
+            text-shadow: 0 0 4px #181818;
+        }
+        .split-resize-handle-h:hover,
+        .split-resize-handle-h.dragging {
+            background: rgba(0,122,204,0.3);
+        }
+        .split-resize-handle-h:hover::after,
+        .split-resize-handle-h.dragging::after {
+            color: #007acc;
+        }
+        .split-resize-handle-v {
+            height: 12px;
+            margin: -4px 0;
+            background: transparent;
+            cursor: row-resize;
+            flex-shrink: 0;
+            transition: background 0.2s;
+            position: relative;
+            z-index: 10;
+            border-radius: 4px;
+        }
+        .split-resize-handle-v::after {
+            content: '⋯';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #555;
+            font-size: 16px;
+            pointer-events: none;
+            text-shadow: 0 0 4px #181818;
+        }
+        .split-resize-handle-v:hover,
+        .split-resize-handle-v.dragging {
+            background: rgba(0,122,204,0.3);
+        }
+        .split-resize-handle-v:hover::after,
+        .split-resize-handle-v.dragging::after {
+            color: #007acc;
+        }
+        .layout-selector {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .layout-selector select {
+            background: #252526;
+            border: 1px solid #555;
+            color: #d4d4d4;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+        }
+        .split-panel-header {
+            padding: 6px 10px;
+            border-bottom: 1px solid rgba(0,0,0,0.3);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border-radius: 7px 7px 0 0;
+            position: relative;
+        }
+        .split-panel-header .node-name {
+            font-weight: bold;
+            color: #fff;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        }
+        .split-panel-header .header-right {
+            position: absolute;
+            right: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .split-panel-header .close-btn {
+            background: rgba(255,255,255,0.1);
+            border: none;
+            color: rgba(255,255,255,0.7);
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            padding: 2px 8px;
+            border-radius: 3px;
+            line-height: 1;
+            min-width: 24px;
+            min-height: 20px;
+        }
+        .split-panel-header .close-btn:hover {
+            background: rgba(220,50,50,0.8);
+            color: #fff;
+        }
+        .split-panel-header.dragging {
+            opacity: 0.7;
+            cursor: grabbing;
+        }
+        .split-panel.drag-over {
+            outline: 3px dashed #007acc;
+            outline-offset: -3px;
+            background: rgba(0, 122, 204, 0.1);
+        }
+        .split-panel.drag-over .log-container {
+            background: rgba(0, 122, 204, 0.05);
+        }
+        .split-panel.drag-over .split-panel-header {
+            filter: brightness(1.3);
+        }
+        .split-panel-header .drag-handle {
+            padding: 0 6px;
+            color: rgba(255,255,255,0.4);
+            font-size: 12px;
+            margin-right: 2px;
+        }
+        .split-panel .log-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 5px;
+            font-size: 11px;
+        }
+        .split-panel.empty-panel {
+            background: var(--bg-empty);
+        }
+        .split-panel .empty-header {
+            background: var(--bg-secondary) !important;
+        }
+        .split-panel .empty-label {
+            color: var(--text-muted);
+        }
+        .log-line {
+            padding: 2px 5px;
+            border-radius: 2px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            margin-bottom: 1px;
+        }
+        .log-line:hover {
+            background: var(--log-line-hover);
+        }
+        .log-line .timestamp {
+            color: var(--timestamp-color);
+        }
+        .log-line .level-TRACE {
+            color: var(--level-trace);
+        }
+        .log-line .level-DEBUG {
+            color: var(--level-debug);
+        }
+        .log-line .level-INFO {
+            color: var(--level-info);
+        }
+        .log-line .level-WARN {
+            color: var(--level-warn);
+        }
+        .log-line .level-ERROR {
+            color: var(--level-error);
+        }
+        .log-line .module {
+            color: var(--message-color);
+        }
+        .log-line .msg-type {
+            color: var(--msg-type-color);
+        }
+        .log-line .peer-id {
+            color: var(--peer-id-color);
+            font-style: italic;
+        }
+        .log-line .peer-ip {
+            color: var(--peer-ip-color);
+            font-style: italic;
+        }
+        .log-line .field-name {
+            color: #9cdcfe;
+            font-weight: 500;
+        }
+        .peer-node-tag {
+            font-weight: bold;
+            padding: 1px 4px;
+            border-radius: 3px;
+            margin: 0 2px;
+            font-size: 10px;
+            color: #fff;
+            text-shadow: 0 1px 1px rgba(0,0,0,0.3);
+            display: inline-block;
+        }
+        .category-tag {
+            font-weight: bold;
+            padding: 1px 4px;
+            border-radius: 3px;
+            margin: 0 2px;
+            font-size: 10px;
+            color: #fff;
+            text-shadow: 0 1px 1px rgba(0,0,0,0.3);
+            display: inline-block;
+        }
+        .log-line .node-tag {
+            font-weight: bold;
+            padding: 1px 4px;
+            border-radius: 2px;
+            margin-right: 5px;
+            font-size: 10px;
+        }
+        .node-0 { background: #264f78; }
+        .node-1 { background: #4d4d4d; }
+        .node-2 { background: #6b4c9a; }
+        .node-3 { background: #2d7d46; }
+        .node-4 { background: #8b4513; }
+        .node-5 { background: #8b1a1a; }
+        .node-6 { background: #1a6b6b; }
+        .highlight {
+            background: #613214;
+        }
+        .stats {
+            color: #888;
+            font-size: 11px;
+        }
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #888;
+        }
+        .status-dot.connected {
+            background: #4ec9b0;
+        }
+        .status-dot.stale {
+            background: #ce9178;
+        }
+        .status-dot.dead {
+            background: #f44747;
+        }
+        .status-dot.active {
+            background: #4ec9b0;
+            animation: pulse 1s ease-in-out;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.3); opacity: 0.7; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .hidden {
+            display: none;
+        }
+        .divider {
+            width: 1px;
+            height: 20px;
+            background: #555;
+            margin: 0 5px;
+        }
+        .checkbox-partial {
+            opacity: 0.5;
+        }
+        .resize-handle {
+            width: 8px;
+            background: linear-gradient(to right, #252526, #444, #252526);
+            cursor: col-resize;
+            flex-shrink: 0;
+            transition: background 0.2s;
+            position: relative;
+        }
+        .resize-handle::after {
+            content: '⋮';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #666;
+            font-size: 14px;
+            pointer-events: none;
+        }
+        .resize-handle:hover,
+        .resize-handle.dragging {
+            background: linear-gradient(to right, #252526, #007acc, #252526);
+        }
+        .resize-handle:hover::after,
+        .resize-handle.dragging::after {
+            color: #fff;
+        }
+        .settings-container {
+            position: relative;
+            margin-left: auto;
+        }
+        .settings-btn {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .settings-btn:hover {
+            background: var(--log-line-hover);
+            color: var(--text-primary);
+        }
+        .settings-menu {
+            display: none;
+            position: absolute;
+            top: 100%;
+            right: 0;
+            margin-top: 4px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            min-width: 180px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 1000;
+        }
+        .settings-menu.open {
+            display: block;
+        }
+        .settings-menu-item {
+            padding: 8px 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            color: var(--text-primary);
+        }
+        .settings-menu-item:hover {
+            background: var(--log-line-hover);
+        }
+        .settings-menu-item:first-child {
+            border-radius: 4px 4px 0 0;
+        }
+        .settings-menu-item:last-child {
+            border-radius: 0 0 4px 4px;
+        }
+        .settings-menu-divider {
+            height: 1px;
+            background: var(--border-color);
+            margin: 4px 0;
+        }
+        .settings-menu-info {
+            padding: 8px 12px;
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <div class="status">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusText">Disconnected</span>
+        </div>
+        <div class="divider"></div>
+        <label>Filter:</label>
+        <input type="text" id="filter" placeholder="Regex filter... (press /)">
+        <div class="level-toggles" id="levelToggles"></div>
+        <div class="divider"></div>
+        <div class="node-toggles" id="nodeToggles"></div>
+        <div class="divider"></div>
+        <button id="viewModeBtn">Fused View</button>
+        <div class="layout-selector" id="layoutSelector" style="display: flex;">
+            <label>Layout:</label>
+            <select id="layoutSelect">
+                <option value="auto">Auto</option>
+            </select>
+        </div>
+        <button id="pauseBtn">Pause</button>
+        <button id="clearBtn" class="danger">Clear</button>
+        <button id="reloadBtn">Reload</button>
+        <button id="scrollBtn" class="active">Auto-scroll</button>
+        <span class="stats" id="stats">0 lines</span>
+        <div class="settings-container">
+            <button id="settingsBtn" class="settings-btn" title="Settings">☰</button>
+            <div class="settings-menu" id="settingsMenu">
+                <div class="settings-menu-item" id="themeMenuItem">
+                    <span id="themeIcon">🌙</span>
+                    <span id="themeLabel">Dark Theme</span>
+                </div>
+                <div class="settings-menu-divider"></div>
+                <div class="settings-menu-item" id="importValidatorsMenuItem">
+                    <span>📋</span>
+                    <span>Import Validators JSON</span>
+                </div>
+                <div class="settings-menu-item" id="clearMappingsMenuItem">
+                    <span>🗑</span>
+                    <span>Clear Peer Mappings</span>
+                </div>
+                <div class="settings-menu-divider"></div>
+                <div class="settings-menu-item" id="logLimitMenuItem">
+                    <span>📊</span>
+                    <span>Log Limit: <select id="logLimitSelect" style="background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 3px; padding: 2px 4px; margin-left: 4px;">
+                        <option value="10000">10K</option>
+                        <option value="50000">50K</option>
+                        <option value="100000">100K</option>
+                        <option value="500000">500K</option>
+                        <option value="0">Unlimited</option>
+                    </select></span>
+                </div>
+                <div class="settings-menu-divider"></div>
+                <div class="settings-menu-item" id="saveFiltersMenuItem">
+                    <span>💾</span>
+                    <span>Save Filters (filter_list.json)</span>
+                </div>
+                <div class="settings-menu-item" id="loadFiltersMenuItem">
+                    <span>📂</span>
+                    <span>Import Filters from File</span>
+                </div>
+                <div class="settings-menu-item" id="clearFiltersMenuItem">
+                    <span>🗑</span>
+                    <span>Delete Saved Filters</span>
+                </div>
+                <input type="file" id="filterFileInput" accept=".json" style="display:none">
+                <div class="settings-menu-divider"></div>
+                <div class="settings-menu-info" id="versionInfo">Loading...</div>
+            </div>
+            <input type="file" id="validatorFileInput" accept=".json" style="display:none">
+        </div>
+    </div>
+    <div class="main-container">
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h3>Filters</h3>
+                <div class="sidebar-buttons">
+                    <button id="enableAllBtn" title="Enable all filters">All</button>
+                    <button id="disableAllBtn" title="Disable all filters">None</button>
+                    <button id="toggleSidebar">&#x2190;</button>
+                </div>
+            </div>
+            <div class="sidebar-section" id="moduleSection" style="flex: 1;">
+                <div class="sidebar-section-header">
+                    <h4>Module Filter</h4>
+                </div>
+                <div class="sidebar-content">
+                    <div class="filter-tree" id="filterTree"></div>
+                </div>
+            </div>
+            <div class="sidebar-resize-handle" id="sidebarSectionResize"></div>
+            <div class="sidebar-section" id="peerSection" style="flex: 0 0 220px;">
+                <div class="sidebar-section-header">
+                    <h4>Peer Info</h4>
+                    <button id="togglePeerSection" class="sidebar-toggle-btn" title="Collapse/Expand">▼</button>
+                </div>
+                <div class="sidebar-content" id="peerTableContainer">
+                    <table class="peer-table">
+                        <thead>
+                            <tr>
+                                <th class="peer-node-col">Node</th>
+                                <th class="peer-role-col">R</th>
+                                <th class="peer-id-col">Peer ID</th>
+                                <th class="peer-ip-col">IP</th>
+                            </tr>
+                        </thead>
+                        <tbody id="peerTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="resize-handle" id="resizeHandle"></div>
+        <div class="log-area view-mode-fused" id="logArea">
+            <div class="log-container" id="logContainer"></div>
+        </div>
+    </div>
+
+    <script>
+        const logContainer = document.getElementById('logContainer');
+        const logArea = document.getElementById('logArea');
+        const filterInput = document.getElementById('filter');
+        const levelToggles = document.getElementById('levelToggles');
+        const nodeToggles = document.getElementById('nodeToggles');
+        const pauseBtn = document.getElementById('pauseBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const reloadBtn = document.getElementById('reloadBtn');
+        const scrollBtn = document.getElementById('scrollBtn');
+        const viewModeBtn = document.getElementById('viewModeBtn');
+        const settingsBtn = document.getElementById('settingsBtn');
+        const settingsMenu = document.getElementById('settingsMenu');
+        const themeMenuItem = document.getElementById('themeMenuItem');
+        const themeIcon = document.getElementById('themeIcon');
+        const themeLabel = document.getElementById('themeLabel');
+        const stats = document.getElementById('stats');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const sidebar = document.getElementById('sidebar');
+        const toggleSidebar = document.getElementById('toggleSidebar');
+        const filterTree = document.getElementById('filterTree');
+        const enableAllBtn = document.getElementById('enableAllBtn');
+        const disableAllBtn = document.getElementById('disableAllBtn');
+        const resizeHandle = document.getElementById('resizeHandle');
+        const versionInfo = document.getElementById('versionInfo');
+        const layoutSelector = document.getElementById('layoutSelector');
+        const layoutSelect = document.getElementById('layoutSelect');
+
+        let logs = [];
+        let paused = false;
+        let autoScroll = true;
+        let splitView = true;
+        let activeNodes = new Set();
+        let gridLayout = 'auto';
+        let ws = null;
+        let reconnectTimeout = null;
+        let lastLogTime = 0;
+        let isConnected = false;
+        let reloading = false; // Flag to queue WebSocket messages during reload
+        let reloadQueue = []; // Queue for WebSocket messages received during reload
+        let loadedLogKeys = new Set(); // Set of "node:line" keys for deduplication
+        let logLimit = parseInt(localStorage.getItem('telemetryviewer-log-limit') || '50000'); // 0 = unlimited
+        let nodeOrder = [];
+        let draggedNodeId = null;
+        const STALE_THRESHOLD = 10000; // 10 seconds without logs = stale (orange)
+        const DEAD_THRESHOLD = 18000;  // 18 seconds without logs = dead (red)
+
+        let moduleTree = {};
+        let defaultModuleEnabled = true; // Default enabled state for new modules
+
+        // Saved filter settings - loaded from server's filter_list.json
+        // Format: { modules: { "path": enabled, ... }, defaultEnabled: bool }
+        let savedFilterSettings = null;
+
+        // Load filter settings from server on startup
+        async function loadFilterSettingsFromServer() {
+            try {
+                const response = await fetch('/filters');
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data && Object.keys(data).length > 0) {
+                        savedFilterSettings = data;
+                        if (data.hasOwnProperty('defaultEnabled')) {
+                            defaultModuleEnabled = data.defaultEnabled;
+                        }
+                        console.log('Loaded filter settings from server');
+                    }
+                }
+            } catch (err) {
+                console.log('No filter settings on server:', err.message);
+            }
+        }
+        // Load immediately
+        loadFilterSettingsFromServer();
+
+        // Peer ID to node mapping
+        // Sources: 1) Imported validator JSON, 2) PeerIdentification log lines, 3) Inference
+        let importedPeerMapping = {};  // peerId -> nodeNum (from imported JSON or log detection)
+        let peerRoleMap = {};          // peerId -> role ("validator" or "builder")
+        let peerIdIpMap = {};          // peerId -> ip (first seen)
+        let knownLogNodes = new Set(); // all log file node IDs we've seen
+        let peerToNode = {};           // peerId -> nodeNum (final computed mapping)
+        let unknownPeers = {};         // peerId -> "M0", "M1", etc. for unknown peers
+        let nextUnknownIndex = 0;      // Counter for unknown peer labels
+        let peerMappingDirty = true;
+
+        // Parse PeerIdentification log line: "PeerIdentification [Nx]" with peerID=...
+        // Actual format: INFO [12-18|17:16:28.054] PeerIdentification [N5]                  peerID=elfaiiix...
+        function parsePeerIdentificationLog(line, nodeId) {
+            // Match pattern: PeerIdentification [Nx] followed by peerID=<id>
+            const match = line.match(/PeerIdentification\s+\[N(\d+)\].*?peerID=([a-z0-9]{40,60})/i);
+            if (match) {
+                const logNodeId = parseInt(match[1], 10);
+                const peerId = match[2];
+                // This is a self-identification - store it as imported
+                if (!(peerId in importedPeerMapping)) {
+                    importedPeerMapping[peerId] = logNodeId;
+                    peerMappingDirty = true;
+                    console.log(`Auto-detected peer mapping: N${logNodeId} -> ${peerId.substring(0,12)}...`);
+                    savePeerMappings();
+                    updatePeerTable();
+                }
+            }
+        }
+
+        function recordPeerSighting(peerId, fromLogNodeId, ipPort = null) {
+            knownLogNodes.add(fromLogNodeId);
+            let needsTableUpdate = false;
+            if (ipPort && !peerIdIpMap[peerId]) {
+                peerIdIpMap[peerId] = ipPort;
+                needsTableUpdate = true;
+            }
+            // If this peer is not yet known, assign it an M# label
+            if (!(peerId in importedPeerMapping) && !(peerId in unknownPeers)) {
+                unknownPeers[peerId] = `M${nextUnknownIndex++}`;
+                peerMappingDirty = true;
+                needsTableUpdate = true;
+            }
+            if (needsTableUpdate) {
+                updatePeerTable();
+            }
+        }
+
+        function computePeerMapping() {
+            if (!peerMappingDirty) return;
+            peerMappingDirty = false;
+
+            // Merge imported mappings with any inferred ones
+            const newMapping = { ...importedPeerMapping };
+
+            // Check if mapping changed
+            const mappingChanged = JSON.stringify(peerToNode) !== JSON.stringify(newMapping);
+            if (mappingChanged) {
+                peerToNode = newMapping;
+                updatePeerTable();
+            }
+        }
+
+        function getPeerNodeId(peerId, ipPort = null, fromLogNodeId = null) {
+            // Record this sighting if we know which log it came from
+            if (fromLogNodeId !== null) {
+                recordPeerSighting(peerId, fromLogNodeId, ipPort);
+            }
+
+            // Recompute mapping periodically
+            computePeerMapping();
+
+            // Return the imported/detected node ID, or -1 if unknown
+            if (peerId in peerToNode) {
+                return peerToNode[peerId];
+            }
+
+            // Debug: log first unknown peer to help identify mapping issues
+            if (!(peerId in unknownPeers) && Object.keys(unknownPeers).length < 3) {
+                console.log('Unknown peer ID:', peerId);
+                console.log('Known mappings:', Object.keys(peerToNode));
+            }
+            return -1; // Unknown - will be shown as M#
+        }
+
+        // Get the unknown peer label (M0, M1, etc.)
+        function getUnknownPeerLabel(peerId) {
+            if (peerId in unknownPeers) {
+                return unknownPeers[peerId];
+            }
+            // Assign a new label
+            unknownPeers[peerId] = `M${nextUnknownIndex++}`;
+            return unknownPeers[peerId];
+        }
+
+        // Import validator mappings from JSON
+        function importValidatorMappings(jsonData) {
+            try {
+                let validators = [];
+                // Handle different JSON formats
+                if (Array.isArray(jsonData)) {
+                    validators = jsonData;
+                } else if (jsonData.genesis_validators) {
+                    validators = jsonData.genesis_validators;
+                } else if (jsonData.validators) {
+                    validators = jsonData.validators;
+                }
+
+                let imported = 0;
+                validators.forEach((v, index) => {
+                    const peerId = v.peer_id || v.peerID || v.peerId;
+                    const nodeNum = v.node !== undefined ? v.node : index;
+                    if (peerId) {
+                        importedPeerMapping[peerId] = nodeNum;
+                        imported++;
+                    }
+                });
+
+                if (imported > 0) {
+                    peerMappingDirty = true;
+                    computePeerMapping();
+                    savePeerMappings();
+                    console.log(`Imported ${imported} validator mappings`);
+                    alert(`Imported ${imported} validator mappings`);
+                } else {
+                    alert('No valid validator mappings found in JSON');
+                }
+            } catch (e) {
+                console.error('Failed to parse validator JSON:', e);
+                alert('Failed to parse validator JSON: ' + e.message);
+            }
+        }
+
+        // Save peer mappings to localStorage
+        function savePeerMappings() {
+            localStorage.setItem('telemetryviewer-peer-mappings', JSON.stringify(importedPeerMapping));
+        }
+
+        // Load peer mappings from localStorage and server config
+        function loadPeerMappings() {
+            // First load from localStorage (user overrides)
+            const saved = localStorage.getItem('telemetryviewer-peer-mappings');
+            if (saved) {
+                try {
+                    importedPeerMapping = JSON.parse(saved);
+                    peerMappingDirty = true;
+                    computePeerMapping();
+                    console.log(`Loaded ${Object.keys(importedPeerMapping).length} peer mappings from storage`);
+                } catch (e) {
+                    console.error('Failed to load peer mappings:', e);
+                }
+            }
+
+            // Then fetch server-side config (peerIdentification.json)
+            fetch('/peers')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.validators && Array.isArray(data.validators)) {
+                        let loaded = 0;
+                        for (const v of data.validators) {
+                            const peerId = v.peer_id || v.peerId;
+                            const nodeNum = v.node;
+                            const role = v.role || 'validator';
+                            if (peerId && nodeNum !== undefined && !(peerId in importedPeerMapping)) {
+                                importedPeerMapping[peerId] = nodeNum;
+                                peerRoleMap[peerId] = role;
+                                loaded++;
+                            }
+                        }
+                        if (loaded > 0) {
+                            peerMappingDirty = true;
+                            computePeerMapping();
+                            console.log(`Loaded ${loaded} peer mappings from server config`);
+                        }
+                    }
+                })
+                .catch(e => console.log('No server peer config available'));
+
+            // Fetch connected nodes to get IPs
+            fetchConnectedNodes();
+        }
+
+        // Fetch IP addresses from connected nodes
+        function fetchConnectedNodes() {
+            fetch('/api/nodes')
+                .then(r => r.json())
+                .then(nodes => {
+                    let updated = false;
+                    for (const [nodeIdStr, node] of Object.entries(nodes)) {
+                        const peerId = node.peerId;
+                        const peerIp = node.peerIp;
+                        if (peerId && peerIp && !peerIdIpMap[peerId]) {
+                            peerIdIpMap[peerId] = peerIp;
+                            updated = true;
+                        }
+                    }
+                    if (updated) {
+                        updatePeerTable();
+                    }
+                })
+                .catch(e => console.log('Failed to fetch connected nodes:', e));
+        }
+
+        // Periodically refresh node IPs
+        setInterval(fetchConnectedNodes, 5000);
+
+        // Clear all peer mappings
+        function clearPeerMappings() {
+            importedPeerMapping = {};
+            peerRoleMap = {};
+            unknownPeers = {};
+            nextUnknownIndex = 0;
+            peerToNode = {};
+            peerIdIpMap = {};
+            peerMappingDirty = true;
+            localStorage.removeItem('telemetryviewer-peer-mappings');
+            updatePeerTable();
+            console.log('Cleared all peer mappings');
+        }
+
+        // Update the peer mapping table in the sidebar
+        function updatePeerTable() {
+            const tbody = document.getElementById('peerTableBody');
+            if (!tbody) return;
+
+            tbody.innerHTML = '';
+
+            // First show known peers (sorted by node number)
+            const knownSorted = Object.entries(peerToNode).sort((a, b) => a[1] - b[1]);
+            for (const [peerId, nodeNum] of knownSorted) {
+                const tr = document.createElement('tr');
+
+                const nodeCell = document.createElement('td');
+                nodeCell.className = 'peer-node-col';
+                const nodeTag = document.createElement('span');
+                nodeTag.className = 'peer-node-tag';
+                nodeTag.style.background = getNodeColor(nodeNum);
+                nodeTag.textContent = `N${nodeNum}`;
+                nodeCell.appendChild(nodeTag);
+                tr.appendChild(nodeCell);
+
+                const roleCell = document.createElement('td');
+                roleCell.className = 'peer-role-col';
+                const role = peerRoleMap[peerId] || 'validator';
+                roleCell.textContent = role === 'builder' ? 'B' : 'V';
+                roleCell.title = role;
+                tr.appendChild(roleCell);
+
+                const idCell = document.createElement('td');
+                idCell.className = 'peer-id-col';
+                idCell.textContent = peerId.substring(0, 7) + '...';
+                idCell.title = peerId;
+                idCell.addEventListener('click', () => {
+                    navigator.clipboard.writeText(peerId).then(() => {
+                        idCell.classList.add('copied');
+                        setTimeout(() => idCell.classList.remove('copied'), 500);
+                    });
+                });
+                tr.appendChild(idCell);
+
+                const ipCell = document.createElement('td');
+                ipCell.className = 'peer-ip-col';
+                ipCell.textContent = peerIdIpMap[peerId] || '-';
+                tr.appendChild(ipCell);
+
+                tbody.appendChild(tr);
+            }
+
+            // Note: Unknown peers (M0, M1, etc.) from event payloads are NOT shown in this table.
+            // The Peer Info table only shows known connected nodes (N0-N6).
+            // Unknown peer IDs in log messages still get M# labels for display in the log view.
+        }
+
+        // Get peer ID by node number (reverse lookup)
+        function getPeerIdByNodeNumber(nodeNum) {
+            for (const [peerId, mappedNode] of Object.entries(peerToNode)) {
+                if (mappedNode === nodeNum) return peerId;
+            }
+            return null;
+        }
+
+        // Check if a log line contains a peer ID that maps to the given node number
+        function logContainsPeerNode(logRaw, nodeNum) {
+            const peerIdRegex = /\b([a-z0-9]{40,60})(@\d+\.\d+\.\d+\.\d+:\d+)?\b/g;
+            let match;
+            while ((match = peerIdRegex.exec(logRaw)) !== null) {
+                const peerId = match[1];
+                if (peerId in peerToNode && peerToNode[peerId] === nodeNum) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function formatPeerId(peerId, ipPort, fromLogNodeId = null) {
+            const nodeId = getPeerNodeId(peerId, ipPort, fromLogNodeId);
+            if (nodeId === -1) {
+                // Unknown mapping - show as M# (mystery peer)
+                const label = getUnknownPeerLabel(peerId);
+                const tag = `<span class="peer-node-tag" style="background:#666" title="${peerId}">${label}</span>`;
+                if (ipPort) {
+                    return `${tag}<span class="peer-ip">${ipPort}</span>`;
+                }
+                return tag;
+            }
+            const color = getNodeColor(nodeId);
+            // Just show the N# tag - peer ID can be looked up in Peer Info table
+            const nodeTag = `<span class="peer-node-tag" style="background:${color}">N${nodeId}</span>`;
+            if (ipPort) {
+                return `${nodeTag}<span class="peer-ip">${ipPort}</span>`;
+            }
+            return nodeTag;
+        }
+
+        const levelPriority = { 'ERROR': 0, 'WARN': 1, 'INFO': 2, 'DEBUG': 3, 'TRACE': 4 };
+        const levels = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'];
+        let activeLevels = new Set(levels);
+        let levelCounts = { ERROR: 0, WARN: 0, INFO: 0, DEBUG: 0, TRACE: 0 };
+        let levelElements = {};
+
+        for (const level of levels) {
+            const toggle = document.createElement('div');
+            toggle.className = `level-toggle level-${level} active`;
+            toggle.innerHTML = `${level} <span class="level-count">(0)</span>`;
+            toggle.dataset.level = level;
+            toggle.addEventListener('click', () => {
+                toggle.classList.toggle('active');
+                if (toggle.classList.contains('active')) {
+                    activeLevels.add(level);
+                } else {
+                    activeLevels.delete(level);
+                }
+                renderLogs();
+            });
+            levelToggles.appendChild(toggle);
+            levelElements[level] = toggle;
+        }
+
+        function updateLevelCounts() {
+            for (const level of levels) {
+                const countSpan = levelElements[level].querySelector('.level-count');
+                countSpan.textContent = `(${levelCounts[level]})`;
+            }
+        }
+
+        // Recalculate all counts from the logs array (used after truncation)
+        function recalculateAllCounts() {
+            // Reset counts
+            levelCounts = { ERROR: 0, WARN: 0, INFO: 0, DEBUG: 0, TRACE: 0 };
+            moduleTree = {};
+
+            // Recalculate from logs
+            for (const log of logs) {
+                if (log.level && levelCounts[log.level] !== undefined) {
+                    levelCounts[log.level]++;
+                }
+                if (log.module) {
+                    const parts = log.module.split('::');
+                    let current = moduleTree;
+                    let currentPath = '';
+                    for (let i = 0; i < parts.length; i++) {
+                        const part = parts[i];
+                        currentPath = currentPath ? currentPath + '::' + part : part;
+                        if (!current[part]) {
+                            current[part] = { enabled: getModuleEnabledState(currentPath), count: 0, children: {} };
+                        }
+                        current[part].count++;
+                        current = current[part].children;
+                    }
+                }
+            }
+            updateLevelCounts();
+            renderFilterTree();
+        }
+
+        for (let i = 0; i < 7; i++) {
+            const isActive = true; // All nodes enabled by default
+            const toggle = document.createElement('div');
+            toggle.className = 'node-toggle' + (isActive ? ' active' : '');
+            toggle.textContent = `N${i}`;
+            toggle.dataset.node = i;
+            toggle.style.background = getNodeColor(i);
+            toggle.addEventListener('click', () => {
+                toggle.classList.toggle('active');
+                if (toggle.classList.contains('active')) {
+                    activeNodes.add(i);
+                } else {
+                    activeNodes.delete(i);
+                }
+                if (splitView) updateLayoutOptions();
+                renderLogs();
+            });
+            nodeToggles.appendChild(toggle);
+            if (isActive) {
+                activeNodes.add(i);
+            }
+        }
+
+        function getNodeColor(n) {
+            const colors = ['#264f78', '#4d4d4d', '#6b4c9a', '#2d7d46', '#8b4513', '#8b1a1a', '#1a6b6b'];
+            return colors[n % colors.length];
+        }
+
+        // Category colors for telemetry event groups
+        const categoryColors = {
+            'Dropped': '#666666',
+            'Status': '#2d7d46',
+            'Networking': '#264f78',
+            'Block': '#8b4513',
+            'BlockSync': '#6b4c9a',
+            'Safrole': '#8b1a1a',
+            'WorkPackage': '#1a6b6b',
+            'Assurance': '#4d4d4d',
+            'Bundle': '#5c3d2e',
+            'Segment': '#2e5c3d',
+            'Preimage': '#3d2e5c',
+            'Unknown': '#666666'
+        };
+
+        function getCategoryColor(category) {
+            return categoryColors[category] || '#666666';
+        }
+
+        // Format module path with category tag: telemetry::Category::EVENT (X) -> <tag>Category</tag> EVENT <tag>X</tag>
+        function formatModulePath(modulePath) {
+            const match = modulePath.match(/^telemetry::(\w+)::(.+)\s+\((\d+)\)$/);
+            if (match) {
+                const category = match[1];
+                const eventName = match[2];
+                const discriminator = match[3];
+                const color = getCategoryColor(category);
+                // Use neutral gray for discriminator tag
+                return `<span class="category-tag" style="background:${color}">${category}</span> ${eventName} <span class="category-tag" style="background:#555">${discriminator}</span>`;
+            }
+            // Fallback for non-telemetry modules or without discriminator
+            const fallbackMatch = modulePath.match(/^telemetry::(\w+)::(.+)$/);
+            if (fallbackMatch) {
+                const category = fallbackMatch[1];
+                const event = fallbackMatch[2];
+                const color = getCategoryColor(category);
+                return `<span class="category-tag" style="background:${color}">${category}</span> ${event}`;
+            }
+            return modulePath;
+        }
+
+        function parseLine(line, nodeId) {
+            // First try to match telemetry lines with discriminator: telemetry::Category::EVENT (123)
+            let match = line.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+\S+\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s+(telemetry::\w+::\w+\s+\(\d+\))\s+(.*)$/);
+            if (!match) {
+                // Try without node name prefix
+                match = line.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s+(telemetry::\w+::\w+\s+\(\d+\))\s+(.*)$/);
+            }
+            if (!match) {
+                // Fallback for non-telemetry or non-discriminator modules
+                match = line.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+\S+\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s+(\S+)\s+(.*)$/);
+            }
+            if (!match) {
+                match = line.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s+(\S+)\s+(.*)$/);
+            }
+            if (match) {
+                const module = match[3];
+                const message = match[4];
+
+                return {
+                    timestamp: match[1],
+                    level: match[2],
+                    module: module,
+                    message: message,
+                    node: nodeId,
+                    raw: line
+                };
+            }
+            return { raw: line, node: nodeId };
+        }
+
+        // Get the enabled state for a new module from saved settings or default
+        function getModuleEnabledState(modulePath) {
+            if (savedFilterSettings && savedFilterSettings.modules) {
+                // Check for exact match first
+                if (savedFilterSettings.modules.hasOwnProperty(modulePath)) {
+                    return savedFilterSettings.modules[modulePath];
+                }
+                // Check if any parent is disabled (inherit from parent)
+                const parts = modulePath.split('::');
+                for (let i = parts.length - 1; i >= 0; i--) {
+                    const parentPath = parts.slice(0, i).join('::');
+                    if (parentPath && savedFilterSettings.modules.hasOwnProperty(parentPath)) {
+                        return savedFilterSettings.modules[parentPath];
+                    }
+                }
+                // Use saved default if available
+                if (savedFilterSettings.hasOwnProperty('defaultEnabled')) {
+                    return savedFilterSettings.defaultEnabled;
+                }
+            }
+            return defaultModuleEnabled;
+        }
+
+        function updateModuleTree(log) {
+            if (!log.module) return;
+            const parts = log.module.split('::');
+            let current = moduleTree;
+            let currentPath = '';
+
+            for (let i = 0; i < parts.length; i++) {
+                const part = parts[i];
+                currentPath = currentPath ? currentPath + '::' + part : part;
+                if (!current[part]) {
+                    current[part] = { enabled: getModuleEnabledState(currentPath), count: 0, children: {} };
+                }
+                current[part].count++;
+                current = current[part].children;
+            }
+        }
+
+        function isModuleEnabled(module) {
+            if (!module) return true;
+            const parts = module.split('::');
+            let current = moduleTree;
+
+            for (const part of parts) {
+                if (!current[part]) return true;
+                if (!current[part].enabled) return false;
+                current = current[part].children;
+            }
+            return true;
+        }
+
+        function enableParentModules(path) {
+            const parts = path.split('::');
+            let current = moduleTree;
+
+            for (let i = 0; i < parts.length; i++) {
+                if (current[parts[i]]) {
+                    current[parts[i]].enabled = true;
+                    current = current[parts[i]].children;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        function setModuleEnabled(path, enabled) {
+            const parts = path.split('::');
+            let current = moduleTree;
+
+            for (let i = 0; i < parts.length - 1; i++) {
+                if (!current[parts[i]]) return;
+                current = current[parts[i]].children;
+            }
+
+            const last = parts[parts.length - 1];
+            if (current[last]) {
+                current[last].enabled = enabled;
+                // Always propagate to children (both enable and disable)
+                setChildrenEnabled(current[last].children, enabled, path);
+                if (enabled) {
+                    enableParentModules(path);
+                }
+            }
+        }
+
+        function setChildrenEnabled(children, enabled, parentPath) {
+            for (const key in children) {
+                children[key].enabled = enabled;
+                const childPath = parentPath ? parentPath + '::' + key : key;
+                setChildrenEnabled(children[key].children, enabled, childPath);
+            }
+        }
+
+        function setAllFiltersEnabled(enabled) {
+            // Set default for new modules that appear after this
+            defaultModuleEnabled = enabled;
+
+            function setTreeEnabled(tree) {
+                for (const key in tree) {
+                    tree[key].enabled = enabled;
+                    setTreeEnabled(tree[key].children);
+                }
+            }
+            setTreeEnabled(moduleTree);
+
+            renderFilterTree();
+            renderLogs();
+        }
+
+        function renderFilterTree() {
+            filterTree.innerHTML = '';
+            renderTreeLevel(moduleTree, filterTree, '');
+        }
+
+        // Category order based on JIP-3 discriminator ranges
+        const categoryOrder = {
+            'telemetry': -1,
+            'Dropped': 0,
+            'Status': 10,
+            'Networking': 20,
+            'Block': 40,
+            'BlockSync': 60,
+            'Safrole': 80,
+            'WorkPackage': 90,
+            'Assurance': 120,
+            'Bundle': 140,
+            'Segment': 160,
+            'Preimage': 190,
+            'Unknown': 999
+        };
+
+        // Sort keys by category order or by discriminator number suffix
+        function sortTreeKeys(keys) {
+            return keys.sort((a, b) => {
+                // Check if keys are categories
+                if (categoryOrder[a] !== undefined && categoryOrder[b] !== undefined) {
+                    return categoryOrder[a] - categoryOrder[b];
+                }
+                // Check if keys have discriminator suffix (e.g., "BLOCK_ANNOUNCED (62)")
+                const matchA = a.match(/\((\d+)\)$/);
+                const matchB = b.match(/\((\d+)\)$/);
+                if (matchA && matchB) {
+                    return parseInt(matchA[1], 10) - parseInt(matchB[1], 10);
+                }
+                // Fall back to alphabetic sort
+                return a.localeCompare(b);
+            });
+        }
+
+        function renderTreeLevel(tree, container, prefix) {
+            const sortedKeys = sortTreeKeys(Object.keys(tree));
+
+            for (const key of sortedKeys) {
+                const node = tree[key];
+                const path = prefix ? prefix + '::' + key : key;
+                const hasChildren = Object.keys(node.children).length > 0;
+
+                const nodeEl = document.createElement('div');
+                nodeEl.className = 'tree-node';
+
+                const header = document.createElement('div');
+                header.className = 'tree-node-header';
+
+                const toggle = document.createElement('span');
+                toggle.className = 'tree-toggle';
+                toggle.textContent = hasChildren ? '▼' : '';
+                header.appendChild(toggle);
+
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = 'tree-checkbox';
+                checkbox.checked = node.enabled;
+                checkbox.addEventListener('change', () => {
+                    setModuleEnabled(path, checkbox.checked);
+                    renderFilterTree();
+                    renderLogs();
+                });
+                header.appendChild(checkbox);
+
+                const label = document.createElement('span');
+                label.className = 'tree-label';
+                // Check if this looks like a peer ID (40-60 lowercase alphanumeric)
+                if (/^[a-z0-9]{40,60}$/.test(key)) {
+                    const nodeId = getPeerNodeId(key);
+                    const peerTag = document.createElement('span');
+                    peerTag.className = 'peer-node-tag';
+                    if (nodeId === -1) {
+                        peerTag.style.background = '#666';
+                        peerTag.textContent = getUnknownPeerLabel(key);
+                    } else {
+                        peerTag.style.background = getNodeColor(nodeId);
+                        peerTag.textContent = `N${nodeId}`;
+                    }
+                    peerTag.title = key;
+                    label.appendChild(peerTag);
+                } else {
+                    // Check if key has discriminator format: EVENT_NAME (123)
+                    const discMatch = key.match(/^(.+)\s+\((\d+)\)$/);
+                    if (discMatch) {
+                        const eventName = discMatch[1];
+                        const discriminator = discMatch[2];
+                        label.textContent = eventName + ' ';
+                        const discTag = document.createElement('span');
+                        discTag.className = 'category-tag';
+                        discTag.style.background = '#555';
+                        discTag.textContent = discriminator;
+                        label.appendChild(discTag);
+                    } else if (categoryColors[key]) {
+                        // This is a category name - show as colored tag
+                        const catTag = document.createElement('span');
+                        catTag.className = 'category-tag';
+                        catTag.style.background = categoryColors[key];
+                        catTag.textContent = key;
+                        label.appendChild(catTag);
+                    } else {
+                        label.textContent = key;
+                    }
+                }
+                header.appendChild(label);
+
+                const count = document.createElement('span');
+                count.className = 'tree-count';
+                count.textContent = `(${node.count})`;
+                header.appendChild(count);
+
+                nodeEl.appendChild(header);
+
+                if (hasChildren) {
+                    const childContainer = document.createElement('div');
+                    childContainer.className = 'tree-children';
+
+                    renderTreeLevel(node.children, childContainer, path);
+
+                    nodeEl.appendChild(childContainer);
+
+                    toggle.style.cursor = 'pointer';
+                    toggle.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        childContainer.classList.toggle('collapsed');
+                        toggle.textContent = childContainer.classList.contains('collapsed') ? '▶' : '▼';
+                    });
+                }
+
+                container.appendChild(nodeEl);
+            }
+        }
+
+        function renderLine(log, filterRegex, showNodeTag = true) {
+            const div = document.createElement('div');
+            div.className = 'log-line';
+
+            if (log.timestamp) {
+                if (showNodeTag) {
+                    const nodeTag = document.createElement('span');
+                    nodeTag.className = `node-tag node-${log.node}`;
+                    nodeTag.textContent = `N${log.node}`;
+                    div.appendChild(nodeTag);
+                }
+
+                const timestamp = document.createElement('span');
+                timestamp.className = 'timestamp';
+                timestamp.textContent = log.timestamp + ' ';
+                div.appendChild(timestamp);
+
+                const level = document.createElement('span');
+                level.className = `level-${log.level}`;
+                level.textContent = log.level.padEnd(5) + ' ';
+                div.appendChild(level);
+
+                const module = document.createElement('span');
+                module.className = 'module';
+                module.innerHTML = formatModulePath(log.module) + ' ';
+                div.appendChild(module);
+
+                let msg = log.message;
+                // Replace pipe separators with spaces for cleaner display
+                msg = msg.replace(/\|/g, ' ');
+                // Color-code field names FIRST (before adding HTML, to avoid matching style attributes)
+                msg = msg.replace(/\b([a-z_]+):/gi, '<span class="field-name">$1:</span>');
+                // Remove "peer_id:" field name span since we'll replace it with the node tag
+                msg = msg.replace(/<span class="field-name">peer_id:<\/span>/g, '');
+                // Replace peer identifiers with [Nx] tags (with optional IP:port) in single pass
+                const hasPeerId = /[a-z0-9]{40,60}/.test(msg);
+                const logNodeId = log.node;
+                msg = msg.replace(/\b([a-z0-9]{40,60})(@\d+\.\d+\.\d+\.\d+:\d+)?\b/g, (match, peerId, ipPort) => {
+                    return formatPeerId(peerId, ipPort || null, logNodeId);
+                });
+                if (filterRegex && filterRegex.source !== '(?:)') {
+                    msg = msg.replace(filterRegex, match => `<span class="highlight">${match}</span>`);
+                }
+                const msgSpan = document.createElement('span');
+                msgSpan.innerHTML = msg;
+                div.appendChild(msgSpan);
+            } else {
+                if (showNodeTag) {
+                    const nodeTag = document.createElement('span');
+                    nodeTag.className = `node-tag node-${log.node}`;
+                    nodeTag.textContent = `N${log.node}`;
+                    div.appendChild(nodeTag);
+                }
+
+                let text = log.raw;
+                // Replace pipe separators with spaces for cleaner display
+                text = text.replace(/\|/g, ' ');
+                // Color-code field names FIRST (before adding HTML, to avoid matching style attributes)
+                text = text.replace(/\b([a-z_]+):/gi, '<span class="field-name">$1:</span>');
+                // Remove "peer_id:" field name span since we'll replace it with the node tag
+                text = text.replace(/<span class="field-name">peer_id:<\/span>/g, '');
+                // Replace peer identifiers with [Nx] tags (with optional IP:port) in single pass
+                const logNodeId2 = log.node;
+                text = text.replace(/\b([a-z0-9]{40,60})(@\d+\.\d+\.\d+\.\d+:\d+)?\b/g, (match, peerId, ipPort) => {
+                    return formatPeerId(peerId, ipPort || null, logNodeId2);
+                });
+                if (filterRegex && filterRegex.source !== '(?:)') {
+                    text = text.replace(filterRegex, match => `<span class="highlight">${match}</span>`);
+                }
+                const textSpan = document.createElement('span');
+                textSpan.innerHTML = text;
+                div.appendChild(textSpan);
+            }
+
+            return div;
+        }
+
+        function shouldShowLog(log) {
+            if (!activeNodes.has(log.node)) return false;
+            if (!isModuleEnabled(log.module)) return false;
+            if (log.level && !activeLevels.has(log.level)) return false;
+
+            const filterText = filterInput.value.trim();
+            if (filterText) {
+                // Check if filter is a peer node tag pattern (n0, N0, n1, N1, etc.)
+                const peerNodeMatch = filterText.match(/^n(\d+)$/i);
+                if (peerNodeMatch) {
+                    const nodeNum = parseInt(peerNodeMatch[1], 10);
+                    // Match if log contains a peer ID mapped to this node number
+                    if (logContainsPeerNode(log.raw, nodeNum)) {
+                        return true;
+                    }
+                }
+
+                // Check if filter is a SAN peer ID (40-60 lowercase alphanumeric chars starting with 'e')
+                // If so, look up the node number and treat it like searching for N#
+                if (/^e[a-z0-9]{39,59}$/i.test(filterText)) {
+                    const lowerPeerId = filterText.toLowerCase();
+                    if (lowerPeerId in peerToNode) {
+                        const nodeNum = peerToNode[lowerPeerId];
+                        if (logContainsPeerNode(log.raw, nodeNum)) {
+                            return true;
+                        }
+                    }
+                    // If the peer ID is in this log line, also show it
+                    if (log.raw.toLowerCase().includes(lowerPeerId)) {
+                        return true;
+                    }
+                    return false;
+                }
+
+                try {
+                    const regex = new RegExp(filterText, 'i');
+                    if (!regex.test(log.raw)) return false;
+                } catch (e) {
+                    if (!log.raw.toLowerCase().includes(filterText.toLowerCase())) return false;
+                }
+            }
+
+            return true;
+        }
+
+        function renderLogs() {
+            const filterText = filterInput.value.trim();
+            let filterRegex = null;
+            try {
+                if (filterText) filterRegex = new RegExp(filterText, 'gi');
+            } catch (e) {}
+
+            if (splitView) {
+                renderSplitView(filterRegex);
+            } else {
+                renderFusedView(filterRegex);
+            }
+        }
+
+        function renderFusedView(filterRegex) {
+            logArea.className = 'log-area view-mode-fused';
+            logArea.innerHTML = '<div class="log-container" id="logContainer"></div>';
+            const container = document.getElementById('logContainer');
+
+            let count = 0;
+            for (const log of logs) {
+                if (shouldShowLog(log)) {
+                    container.appendChild(renderLine(log, filterRegex, true));
+                    count++;
+                }
+            }
+            stats.textContent = `${count} / ${logs.length} lines`;
+
+            if (autoScroll) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+
+        function getGridDimensions(nodeCount) {
+            if (gridLayout === 'auto') {
+                if (nodeCount <= 1) return { rows: 1, cols: 1 };
+                if (nodeCount <= 2) return { rows: 1, cols: 2 };
+                if (nodeCount === 3) return { rows: 1, cols: 3 };
+                if (nodeCount <= 4) return { rows: 2, cols: 2 };
+                if (nodeCount <= 6) return { rows: 2, cols: 3 };
+                if (nodeCount <= 8) return { rows: 2, cols: 4 };
+                if (nodeCount <= 9) return { rows: 3, cols: 3 };
+                return { rows: Math.ceil(nodeCount / 4), cols: 4 };
+            }
+            const match = gridLayout.match(/(\d+)x(\d+)/);
+            if (match) {
+                return { rows: parseInt(match[1]), cols: parseInt(match[2]) };
+            }
+            return { rows: 1, cols: nodeCount };
+        }
+
+        function updateLayoutOptions() {
+            const n = activeNodes.size;
+            layoutSelect.innerHTML = '<option value="auto">Auto</option>';
+
+            if (n > 0) {
+                layoutSelect.innerHTML += `<option value="1x${n}">1×${n} (side by side)</option>`;
+                layoutSelect.innerHTML += `<option value="${n}x1">${n}×1 (stacked)</option>`;
+
+                // Only show grids that fit exactly or have at most 1 empty cell
+                const seen = new Set();
+                for (let rows = 2; rows <= Math.ceil(n / 2); rows++) {
+                    for (let cols = 2; cols <= Math.ceil(n / 2); cols++) {
+                        const cells = rows * cols;
+                        // Must fit all nodes with at most 1 empty cell
+                        if (cells >= n && cells <= n + 1) {
+                            const key = `${rows}x${cols}`;
+                            if (!seen.has(key)) {
+                                seen.add(key);
+                                layoutSelect.innerHTML += `<option value="${key}">${rows}×${cols}</option>`;
+                            }
+                        }
+                    }
+                }
+            }
+
+            const options = [...layoutSelect.options].map(o => o.value);
+            if (options.includes(gridLayout)) {
+                layoutSelect.value = gridLayout;
+            } else {
+                layoutSelect.value = 'auto';
+                gridLayout = 'auto';
+            }
+        }
+
+        function createPanel(nodeId) {
+            const panel = document.createElement('div');
+            panel.className = 'split-panel';
+            panel.id = `panel-${nodeId}`;
+            panel.dataset.nodeId = nodeId;
+
+            const header = document.createElement('div');
+            header.className = 'split-panel-header';
+            header.style.background = getNodeColor(nodeId);
+            header.style.cursor = 'grab';
+            header.title = 'Drag to reorder panels';
+            header.addEventListener('mousedown', (e) => {
+                // Don't start drag if clicking on close button
+                if (e.target.classList.contains('close-btn')) return;
+                e.preventDefault();
+                startPanelDrag(nodeId, panel, e);
+            });
+
+            const nodeName = document.createElement('span');
+            nodeName.className = 'node-name';
+            nodeName.textContent = `Node ${nodeId}`;
+            header.appendChild(nodeName);
+
+            const headerRight = document.createElement('div');
+            headerRight.className = 'header-right';
+
+            const nodeStats = document.createElement('span');
+            nodeStats.className = 'stats';
+            nodeStats.id = `stats-${nodeId}`;
+            nodeStats.style.color = 'rgba(255,255,255,0.7)';
+            headerRight.appendChild(nodeStats);
+
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'close-btn';
+            closeBtn.textContent = '×';
+            closeBtn.title = `Hide Node ${nodeId}`;
+            closeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                closeNodePanel(nodeId);
+            });
+            headerRight.appendChild(closeBtn);
+
+            header.appendChild(headerRight);
+            panel.appendChild(header);
+
+            const container = document.createElement('div');
+            container.className = 'log-container';
+            container.id = `logs-${nodeId}`;
+            panel.appendChild(container);
+
+            return panel;
+        }
+
+        function closeNodePanel(nodeId) {
+            activeNodes.delete(nodeId);
+            const toggle = document.querySelector(`.node-toggle[data-node="${nodeId}"]`);
+            if (toggle) {
+                toggle.classList.remove('active');
+            }
+            if (activeNodes.size <= 1) {
+                splitView = false;
+                viewModeBtn.textContent = 'Split View';
+                viewModeBtn.classList.remove('active');
+                layoutSelector.style.display = 'none';
+            } else {
+                updateLayoutOptions();
+            }
+
+            renderLogs();
+        }
+
+        function renderSplitView(filterRegex) {
+            logArea.className = 'log-area view-mode-split';
+            logArea.innerHTML = '';
+
+            const panels = {};
+            initNodeOrder();
+            const sortedNodes = getOrderedActiveNodes();
+            const nodeCount = sortedNodes.length;
+
+            if (nodeCount === 0) return;
+
+            const { rows, cols } = getGridDimensions(nodeCount);
+            let nodeIndex = 0;
+
+            for (let r = 0; r < rows; r++) {
+                if (r > 0) {
+                    const vHandle = document.createElement('div');
+                    vHandle.className = 'split-resize-handle-v';
+                    vHandle.dataset.topRow = `row-${r-1}`;
+                    vHandle.dataset.bottomRow = `row-${r}`;
+                    vHandle.addEventListener('mousedown', startVerticalResize);
+                    logArea.appendChild(vHandle);
+                }
+
+                const row = document.createElement('div');
+                row.className = 'split-row';
+                row.id = `row-${r}`;
+
+                for (let c = 0; c < cols; c++) {
+                    if (c > 0) {
+                        const hHandle = document.createElement('div');
+                        hHandle.className = 'split-resize-handle-h';
+                        const prevNodeId = nodeIndex > 0 && nodeIndex - 1 < sortedNodes.length ? sortedNodes[nodeIndex - 1] : null;
+                        const currNodeId = nodeIndex < sortedNodes.length ? sortedNodes[nodeIndex] : null;
+                        if (prevNodeId !== null && currNodeId !== null) {
+                            hHandle.dataset.leftPanel = `panel-${prevNodeId}`;
+                            hHandle.dataset.rightPanel = `panel-${currNodeId}`;
+                            hHandle.addEventListener('mousedown', startSplitResize);
+                        }
+                        row.appendChild(hHandle);
+                    }
+
+                    if (nodeIndex < nodeCount) {
+                        const nodeId = sortedNodes[nodeIndex];
+                        const panel = createPanel(nodeId);
+                        row.appendChild(panel);
+                        panels[nodeId] = document.getElementById(`logs-${nodeId}`) || panel.querySelector('.log-container');
+                        nodeIndex++;
+                    } else {
+                        const emptyPanel = document.createElement('div');
+                        emptyPanel.className = 'split-panel empty-panel';
+                        emptyPanel.innerHTML = '<div class="split-panel-header empty-header"><span class="empty-label">Empty</span></div><div class="log-container"></div>';
+                        row.appendChild(emptyPanel);
+                    }
+                }
+
+                logArea.appendChild(row);
+            }
+
+            for (const nodeId of sortedNodes) {
+                panels[nodeId] = document.getElementById(`logs-${nodeId}`);
+            }
+
+            const counts = {};
+            const totalCounts = {};
+            for (const nodeId of activeNodes) {
+                counts[nodeId] = 0;
+                totalCounts[nodeId] = 0;
+            }
+
+            // Count total logs per node first
+            for (const log of logs) {
+                if (!activeNodes.has(log.node)) continue;
+                totalCounts[log.node]++;
+            }
+
+            for (const log of logs) {
+                if (!activeNodes.has(log.node)) continue;
+                if (!shouldShowLog(log)) continue;
+
+                panels[log.node].appendChild(renderLine(log, filterRegex, false));
+                counts[log.node]++;
+            }
+
+            let total = 0;
+            for (const nodeId of activeNodes) {
+                document.getElementById(`stats-${nodeId}`).textContent = `${counts[nodeId]} / ${totalCounts[nodeId]} lines`;
+                total += counts[nodeId];
+            }
+            stats.textContent = `${total} / ${logs.length} lines`;
+
+            if (autoScroll) {
+                for (const nodeId of activeNodes) {
+                    const container = panels[nodeId];
+                    container.scrollTop = container.scrollHeight;
+                }
+            }
+        }
+
+        function addLog(line, nodeId) {
+            // Check for PeerIdentification log line to auto-detect peer mappings
+            parsePeerIdentificationLog(line, nodeId);
+
+            const log = parseLine(line, nodeId);
+            logs.push(log);
+            updateModuleTree(log);
+
+            if (log.level && levelCounts[log.level] !== undefined) {
+                levelCounts[log.level]++;
+                updateLevelCounts();
+            }
+
+            // Truncate logs if limit is set (logLimit > 0)
+            if (logLimit > 0 && logs.length > logLimit) {
+                const keepCount = Math.floor(logLimit * 0.8); // Keep 80% of limit
+                logs = logs.slice(-keepCount);
+                recalculateAllCounts(); // Recalculate counts after truncation
+            }
+
+            if (!paused) {
+                if (!splitView && shouldShowLog(log)) {
+                    const filterText = filterInput.value.trim();
+                    let filterRegex = null;
+                    try {
+                        if (filterText) filterRegex = new RegExp(filterText, 'gi');
+                    } catch (e) {}
+
+                    const container = document.getElementById('logContainer');
+                    if (container) {
+                        container.appendChild(renderLine(log, filterRegex, true));
+
+                        const visibleCount = container.children.length;
+                        stats.textContent = `${visibleCount} / ${logs.length} lines`;
+
+                        if (autoScroll) {
+                            container.scrollTop = container.scrollHeight;
+                        }
+                    }
+                } else if (splitView && shouldShowLog(log)) {
+                    const filterText = filterInput.value.trim();
+                    let filterRegex = null;
+                    try {
+                        if (filterText) filterRegex = new RegExp(filterText, 'gi');
+                    } catch (e) {}
+
+                    const container = document.getElementById(`logs-${log.node}`);
+                    if (container) {
+                        container.appendChild(renderLine(log, filterRegex, false));
+
+                        // Update per-panel stats
+                        const panelStats = document.getElementById(`stats-${log.node}`);
+                        if (panelStats) {
+                            panelStats.textContent = `${container.children.length} lines`;
+                        }
+
+                        // Update global stats
+                        let total = 0;
+                        for (const nodeId of activeNodes) {
+                            const nodeContainer = document.getElementById(`logs-${nodeId}`);
+                            if (nodeContainer) total += nodeContainer.children.length;
+                        }
+                        stats.textContent = `${total} / ${logs.length} lines`;
+
+                        if (autoScroll) {
+                            container.scrollTop = container.scrollHeight;
+                        }
+                    }
+                }
+            }
+        }
+
+        let treeUpdatePending = false;
+        setInterval(() => {
+            if (treeUpdatePending) {
+                renderFilterTree();
+                treeUpdatePending = false;
+            }
+        }, 2000);
+
+        function updateConnectionStatus() {
+            if (!isConnected) {
+                statusDot.className = 'status-dot';
+                statusText.textContent = 'Disconnected';
+                return;
+            }
+
+            const now = Date.now();
+            const timeSinceLastLog = now - lastLogTime;
+
+            if (lastLogTime === 0) {
+                statusDot.className = 'status-dot connected';
+                statusText.textContent = 'Connected (waiting for logs...)';
+            } else if (timeSinceLastLog > DEAD_THRESHOLD) {
+                statusDot.className = 'status-dot dead';
+                const secs = Math.floor(timeSinceLastLog / 1000);
+                statusText.textContent = `No logs for ${secs}s - nodes may be down`;
+            } else if (timeSinceLastLog > STALE_THRESHOLD) {
+                statusDot.className = 'status-dot stale';
+                const secs = Math.floor(timeSinceLastLog / 1000);
+                statusText.textContent = `Stale (no logs for ${secs}s)`;
+            } else {
+                statusDot.className = 'status-dot connected';
+                statusText.textContent = 'Connected (receiving logs)';
+            }
+        }
+
+        setInterval(updateConnectionStatus, 1000);
+
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                isConnected = true;
+                statusDot.className = 'status-dot connected';
+                statusText.textContent = 'Connected (waiting for logs...)';
+                if (reconnectTimeout) {
+                    clearTimeout(reconnectTimeout);
+                    reconnectTimeout = null;
+                }
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+
+                // Queue messages during reload for later processing
+                if (reloading) {
+                    if (data.type === 'log') {
+                        reloadQueue.push(data);
+                    }
+                    return;
+                }
+
+                if (data.type === 'status') {
+                    const nodeToggle = document.querySelector(`.node-toggle[data-node="${data.node}"]`);
+                    if (nodeToggle) {
+                        if (data.line === 'inactive') {
+                            nodeToggle.style.opacity = '0.4';
+                            nodeToggle.title = `Node ${data.node}: inactive (no logs)`;
+                        } else if (data.line === 'active') {
+                            nodeToggle.style.opacity = '1';
+                            nodeToggle.title = `Node ${data.node}: active`;
+                        }
+                    }
+                    return;
+                }
+
+                lastLogTime = Date.now();
+                statusDot.className = 'status-dot active';
+                setTimeout(() => {
+                    if (isConnected) statusDot.className = 'status-dot connected';
+                }, 1000);
+                statusText.textContent = 'Connected (receiving logs)';
+                addLog(data.line, data.node);
+                treeUpdatePending = true;
+            };
+
+            ws.onclose = () => {
+                isConnected = false;
+                statusDot.className = 'status-dot';
+                statusText.textContent = 'Disconnected - Reconnecting...';
+                reconnectTimeout = setTimeout(connect, 2000);
+            };
+
+            ws.onerror = () => {
+                ws.close();
+            };
+        }
+
+        filterInput.addEventListener('input', () => {
+            renderLogs();
+        });
+
+        pauseBtn.addEventListener('click', () => {
+            paused = !paused;
+            pauseBtn.textContent = paused ? 'Resume' : 'Pause';
+            pauseBtn.classList.toggle('active', paused);
+            if (!paused) renderLogs();
+        });
+
+        clearBtn.addEventListener('click', () => {
+            logs = [];
+            moduleTree = {};
+            levelCounts = { ERROR: 0, WARN: 0, INFO: 0, DEBUG: 0, TRACE: 0 };
+            updateLevelCounts();
+            renderFilterTree();
+            renderLogs();
+        });
+
+        // Reload button - clears logs and fetches all logs from beginning
+        reloadBtn.addEventListener('click', async () => {
+            // Pause WebSocket processing during reload (messages will be queued)
+            reloading = true;
+            reloadQueue = []; // Clear any previous queue
+            loadedLogKeys.clear(); // Clear deduplication set
+
+            // Clear current logs
+            logs = [];
+            moduleTree = {};
+            levelCounts = { ERROR: 0, WARN: 0, INFO: 0, DEBUG: 0, TRACE: 0 };
+            updateLevelCounts();
+            renderFilterTree();
+            renderLogs();
+
+            // Show loading state
+            reloadBtn.disabled = true;
+            reloadBtn.textContent = 'Loading...';
+
+            try {
+                // Pass log limit to server (0 = unlimited)
+                const limitParam = logLimit > 0 ? `?limit=${logLimit}` : '';
+                const response = await fetch(`/reload${limitParam}`);
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop(); // Keep incomplete line in buffer
+
+                    for (const line of lines) {
+                        if (line.trim()) {
+                            try {
+                                const data = JSON.parse(line);
+                                if (data.type === 'log') {
+                                    // Track loaded logs for deduplication
+                                    const logKey = `${data.node}:${data.line}`;
+                                    loadedLogKeys.add(logKey);
+                                    addLog(data.line, data.node);
+                                }
+                            } catch (e) {
+                                // Skip malformed JSON
+                            }
+                        }
+                    }
+                }
+
+                // Process any remaining buffer
+                if (buffer.trim()) {
+                    try {
+                        const data = JSON.parse(buffer);
+                        if (data.type === 'log') {
+                            const logKey = `${data.node}:${data.line}`;
+                            loadedLogKeys.add(logKey);
+                            addLog(data.line, data.node);
+                        }
+                    } catch (e) {
+                        // Skip malformed JSON
+                    }
+                }
+
+                // Process queued WebSocket messages, deduplicating against loaded logs
+                let queuedNew = 0;
+                for (const queuedData of reloadQueue) {
+                    const logKey = `${queuedData.node}:${queuedData.line}`;
+                    if (!loadedLogKeys.has(logKey)) {
+                        addLog(queuedData.line, queuedData.node);
+                        queuedNew++;
+                    }
+                }
+                if (queuedNew > 0) {
+                    console.log(`Reload: added ${queuedNew} new messages from queue (${reloadQueue.length - queuedNew} duplicates skipped)`);
+                }
+
+                renderLogs();
+            } catch (err) {
+                console.error('Reload failed:', err);
+            } finally {
+                reloadBtn.disabled = false;
+                reloadBtn.textContent = 'Reload';
+                // Clear deduplication data and queue
+                reloadQueue = [];
+                loadedLogKeys.clear();
+                // Resume WebSocket processing
+                reloading = false;
+            }
+        });
+
+        scrollBtn.addEventListener('click', () => {
+            autoScroll = !autoScroll;
+            scrollBtn.classList.toggle('active', autoScroll);
+            if (autoScroll) {
+                renderLogs();
+            }
+        });
+
+        // Settings menu toggle
+        settingsBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            settingsMenu.classList.toggle('open');
+        });
+
+        // Close settings menu when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!settingsMenu.contains(e.target) && e.target !== settingsBtn) {
+                settingsMenu.classList.remove('open');
+            }
+        });
+
+        // Theme toggle
+        let darkTheme = true;
+        function updateThemeUI() {
+            themeIcon.textContent = darkTheme ? '🌙' : '☀️';
+            themeLabel.textContent = darkTheme ? 'Dark Theme' : 'Light Theme';
+        }
+        themeMenuItem.addEventListener('click', () => {
+            darkTheme = !darkTheme;
+            document.body.classList.toggle('light-theme', !darkTheme);
+            updateThemeUI();
+            localStorage.setItem('telemetryviewer-theme', darkTheme ? 'dark' : 'light');
+        });
+        // Restore saved theme
+        if (localStorage.getItem('telemetryviewer-theme') === 'light') {
+            darkTheme = false;
+            document.body.classList.add('light-theme');
+            updateThemeUI();
+        }
+
+        // Import validators JSON handler
+        const validatorFileInput = document.getElementById('validatorFileInput');
+        const importValidatorsMenuItem = document.getElementById('importValidatorsMenuItem');
+        const clearMappingsMenuItem = document.getElementById('clearMappingsMenuItem');
+
+        importValidatorsMenuItem.addEventListener('click', () => {
+            validatorFileInput.click();
+            settingsMenu.classList.remove('open');
+        });
+
+        validatorFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const json = JSON.parse(evt.target.result);
+                        importValidatorMappings(json);
+                    } catch (err) {
+                        alert('Failed to parse JSON file: ' + err.message);
+                    }
+                };
+                reader.readAsText(file);
+            }
+            validatorFileInput.value = ''; // Reset so same file can be selected again
+        });
+
+        clearMappingsMenuItem.addEventListener('click', () => {
+            if (confirm('Clear all peer mappings? This will remove imported and auto-detected mappings.')) {
+                clearPeerMappings();
+                settingsMenu.classList.remove('open');
+            }
+        });
+
+        // Log limit setting
+        const logLimitSelect = document.getElementById('logLimitSelect');
+        logLimitSelect.value = logLimit.toString();
+        logLimitSelect.addEventListener('change', (e) => {
+            logLimit = parseInt(e.target.value);
+            localStorage.setItem('telemetryviewer-log-limit', logLimit.toString());
+            console.log(`Log limit set to: ${logLimit === 0 ? 'Unlimited' : logLimit}`);
+        });
+        // Prevent menu from closing when clicking on the select
+        logLimitSelect.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+
+        // Filter save/load functionality
+        const saveFiltersMenuItem = document.getElementById('saveFiltersMenuItem');
+        const loadFiltersMenuItem = document.getElementById('loadFiltersMenuItem');
+        const clearFiltersMenuItem = document.getElementById('clearFiltersMenuItem');
+        const filterFileInput = document.getElementById('filterFileInput');
+
+        // Save current filter state to server's filter_list.json
+        saveFiltersMenuItem.addEventListener('click', async () => {
+            // Collect all module paths and their enabled states
+            const modules = {};
+            function collectModules(tree, prefix) {
+                for (const key in tree) {
+                    const path = prefix ? prefix + '::' + key : key;
+                    modules[path] = tree[key].enabled;
+                    collectModules(tree[key].children, path);
+                }
+            }
+            collectModules(moduleTree, '');
+
+            const filterSettings = {
+                modules: modules,
+                defaultEnabled: defaultModuleEnabled
+            };
+
+            try {
+                const response = await fetch('/filters', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(filterSettings)
+                });
+                if (response.ok) {
+                    savedFilterSettings = filterSettings;
+                    console.log('Filters saved to filter_list.json on server');
+                } else {
+                    alert('Failed to save filters: ' + await response.text());
+                }
+            } catch (err) {
+                alert('Failed to save filters: ' + err.message);
+            }
+            settingsMenu.classList.remove('open');
+        });
+
+        // Import filters from JSON file (and save to server)
+        loadFiltersMenuItem.addEventListener('click', () => {
+            filterFileInput.click();
+            settingsMenu.classList.remove('open');
+        });
+
+        filterFileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    try {
+                        const json = JSON.parse(event.target.result);
+                        applyFilterSettings(json);
+                        savedFilterSettings = json;
+
+                        // Save to server
+                        const response = await fetch('/filters', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(json)
+                        });
+                        if (response.ok) {
+                            console.log('Filters imported and saved to server');
+                        }
+                    } catch (err) {
+                        alert('Failed to parse JSON file: ' + err.message);
+                    }
+                };
+                reader.readAsText(file);
+            }
+            filterFileInput.value = '';
+        });
+
+        // Apply filter settings to current module tree
+        function applyFilterSettings(settings) {
+            if (!settings) return;
+
+            // Apply default enabled state
+            if (settings.hasOwnProperty('defaultEnabled')) {
+                defaultModuleEnabled = settings.defaultEnabled;
+            }
+
+            // Apply module settings
+            if (settings.modules) {
+                function applyToTree(tree, prefix) {
+                    for (const key in tree) {
+                        const path = prefix ? prefix + '::' + key : key;
+                        if (settings.modules.hasOwnProperty(path)) {
+                            tree[key].enabled = settings.modules[path];
+                        }
+                        applyToTree(tree[key].children, path);
+                    }
+                }
+                applyToTree(moduleTree, '');
+            }
+
+            renderFilterTree();
+            renderLogs();
+        }
+
+        // Clear saved filter settings (delete from server)
+        clearFiltersMenuItem.addEventListener('click', async () => {
+            if (confirm('Clear saved filter settings? This will delete filter_list.json and reset filters to show all modules.')) {
+                try {
+                    await fetch('/filters', { method: 'DELETE' });
+                    savedFilterSettings = null;
+                    defaultModuleEnabled = true;
+                    setAllFiltersEnabled(true);
+                    console.log('Filter settings deleted from server');
+                } catch (err) {
+                    console.error('Failed to delete filters:', err);
+                }
+                settingsMenu.classList.remove('open');
+            }
+        });
+
+        // Load saved peer mappings on startup
+        loadPeerMappings();
+
+        viewModeBtn.addEventListener('click', () => {
+            splitView = !splitView;
+            viewModeBtn.textContent = splitView ? 'Fused View' : 'Split View';
+            viewModeBtn.classList.toggle('active', splitView);
+            layoutSelector.style.display = splitView ? 'flex' : 'none';
+            if (splitView) updateLayoutOptions();
+            renderLogs();
+        });
+
+        layoutSelect.addEventListener('change', () => {
+            gridLayout = layoutSelect.value;
+            renderLogs();
+        });
+
+        toggleSidebar.addEventListener('click', () => {
+            sidebar.classList.toggle('collapsed');
+            toggleSidebar.textContent = sidebar.classList.contains('collapsed') ? '→' : '←';
+        });
+
+        enableAllBtn.addEventListener('click', () => {
+            setAllFiltersEnabled(true);
+        });
+
+        disableAllBtn.addEventListener('click', () => {
+            setAllFiltersEnabled(false);
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === '/' && document.activeElement !== filterInput) {
+                e.preventDefault();
+                filterInput.focus();
+            }
+            if (e.key === 'Escape') {
+                filterInput.blur();
+                filterInput.value = '';
+                renderLogs();
+            }
+            if (e.key === ' ' && document.activeElement !== filterInput) {
+                e.preventDefault();
+                pauseBtn.click();
+            }
+            if (e.key === 's' && document.activeElement !== filterInput) {
+                e.preventDefault();
+                viewModeBtn.click();
+            }
+        });
+
+        let isResizing = false;
+        let startX = 0;
+        let startWidth = 0;
+
+        resizeHandle.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            startX = e.clientX;
+            startWidth = sidebar.offsetWidth;
+            resizeHandle.classList.add('dragging');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+            const diff = e.clientX - startX;
+            const newWidth = Math.max(100, Math.min(600, startWidth + diff));
+            sidebar.style.width = newWidth + 'px';
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isResizing) {
+                isResizing = false;
+                resizeHandle.classList.remove('dragging');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            }
+        });
+
+        // Sidebar section resize (module filter / peer table split)
+        const sidebarSectionResize = document.getElementById('sidebarSectionResize');
+        const moduleSection = document.getElementById('moduleSection');
+        const peerSection = document.getElementById('peerSection');
+        const togglePeerSection = document.getElementById('togglePeerSection');
+
+        // Toggle peer section collapse/expand
+        togglePeerSection.addEventListener('click', () => {
+            peerSection.classList.toggle('collapsed');
+            togglePeerSection.textContent = peerSection.classList.contains('collapsed') ? '▶' : '▼';
+            // Hide/show resize handle
+            sidebarSectionResize.style.display = peerSection.classList.contains('collapsed') ? 'none' : 'block';
+        });
+
+        let isSidebarSectionResizing = false;
+        let sidebarSectionStartY = 0;
+        let moduleSectionStartHeight = 0;
+        let peerSectionStartHeight = 0;
+
+        sidebarSectionResize.addEventListener('mousedown', (e) => {
+            isSidebarSectionResizing = true;
+            sidebarSectionStartY = e.clientY;
+            moduleSectionStartHeight = moduleSection.offsetHeight;
+            peerSectionStartHeight = peerSection.offsetHeight;
+            document.body.style.cursor = 'row-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (isSidebarSectionResizing) {
+                const diff = e.clientY - sidebarSectionStartY;
+                const newModuleHeight = Math.max(80, moduleSectionStartHeight + diff);
+                const newPeerHeight = Math.max(80, peerSectionStartHeight - diff);
+                if (newModuleHeight >= 80 && newPeerHeight >= 80) {
+                    moduleSection.style.flex = 'none';
+                    moduleSection.style.height = newModuleHeight + 'px';
+                    peerSection.style.flex = 'none';
+                    peerSection.style.height = newPeerHeight + 'px';
+                }
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isSidebarSectionResizing) {
+                isSidebarSectionResizing = false;
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            }
+        });
+
+        let splitResizingH = false;
+        let splitResizeHandleH = null;
+        let splitLeftPanel = null;
+        let splitRightPanel = null;
+        let splitStartX = 0;
+        let splitLeftStartWidth = 0;
+        let splitRightStartWidth = 0;
+
+        function startSplitResize(e) {
+            splitResizingH = true;
+            splitResizeHandleH = e.target;
+            splitLeftPanel = document.getElementById(splitResizeHandleH.dataset.leftPanel);
+            splitRightPanel = document.getElementById(splitResizeHandleH.dataset.rightPanel);
+            splitStartX = e.clientX;
+            splitLeftStartWidth = splitLeftPanel.offsetWidth;
+            splitRightStartWidth = splitRightPanel.offsetWidth;
+            splitResizeHandleH.classList.add('dragging');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        }
+
+        let splitResizingV = false;
+        let splitResizeHandleV = null;
+        let splitTopRow = null;
+        let splitBottomRow = null;
+        let splitStartY = 0;
+        let splitTopStartHeight = 0;
+        let splitBottomStartHeight = 0;
+
+        function startVerticalResize(e) {
+            splitResizingV = true;
+            splitResizeHandleV = e.target;
+            splitTopRow = document.getElementById(splitResizeHandleV.dataset.topRow);
+            splitBottomRow = document.getElementById(splitResizeHandleV.dataset.bottomRow);
+            splitStartY = e.clientY;
+            splitTopStartHeight = splitTopRow.offsetHeight;
+            splitBottomStartHeight = splitBottomRow.offsetHeight;
+            splitResizeHandleV.classList.add('dragging');
+            document.body.style.cursor = 'row-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        }
+
+        document.addEventListener('mousemove', (e) => {
+            if (splitResizingH && splitLeftPanel && splitRightPanel) {
+                const diff = e.clientX - splitStartX;
+                const newLeftWidth = Math.max(150, splitLeftStartWidth + diff);
+                const newRightWidth = Math.max(150, splitRightStartWidth - diff);
+                if (newLeftWidth >= 150 && newRightWidth >= 150) {
+                    splitLeftPanel.style.flex = 'none';
+                    splitRightPanel.style.flex = 'none';
+                    splitLeftPanel.style.width = newLeftWidth + 'px';
+                    splitRightPanel.style.width = newRightWidth + 'px';
+                }
+            }
+            if (splitResizingV && splitTopRow && splitBottomRow) {
+                const diff = e.clientY - splitStartY;
+                const newTopHeight = Math.max(100, splitTopStartHeight + diff);
+                const newBottomHeight = Math.max(100, splitBottomStartHeight - diff);
+
+                if (newTopHeight >= 100 && newBottomHeight >= 100) {
+                    splitTopRow.style.flex = 'none';
+                    splitBottomRow.style.flex = 'none';
+                    splitTopRow.style.height = newTopHeight + 'px';
+                    splitBottomRow.style.height = newBottomHeight + 'px';
+                }
+            }
+        });
+
+        function startPanelDrag(nodeId, panel, e) {
+            draggedNodeId = nodeId;
+            panel.style.opacity = '0.5';
+            panel.querySelector('.split-panel-header').classList.add('dragging');
+            document.body.style.cursor = 'grabbing';
+            document.body.style.userSelect = 'none';
+        }
+
+        document.addEventListener('mousemove', (e) => {
+            if (draggedNodeId !== null) {
+                const target = document.elementFromPoint(e.clientX, e.clientY);
+                if (target) {
+                    const targetPanel = target.closest('.split-panel');
+                    document.querySelectorAll('.split-panel.drag-over').forEach(p => p.classList.remove('drag-over'));
+                    if (targetPanel && targetPanel.dataset.nodeId && parseInt(targetPanel.dataset.nodeId) !== draggedNodeId) {
+                        targetPanel.classList.add('drag-over');
+                    }
+                }
+            }
+        });
+
+        document.addEventListener('mouseup', (e) => {
+            if (draggedNodeId !== null) {
+                // Reset ALL panel opacities and dragging states first (before swap changes IDs)
+                document.querySelectorAll('.split-panel').forEach(p => {
+                    p.style.opacity = '1';
+                    const header = p.querySelector('.split-panel-header');
+                    if (header) header.classList.remove('dragging');
+                });
+                document.querySelectorAll('.split-panel.drag-over').forEach(p => p.classList.remove('drag-over'));
+
+                const target = document.elementFromPoint(e.clientX, e.clientY);
+                if (target) {
+                    const targetPanel = target.closest('.split-panel');
+                    if (targetPanel && targetPanel.dataset.nodeId) {
+                        const targetNodeId = parseInt(targetPanel.dataset.nodeId);
+                        if (targetNodeId !== draggedNodeId) {
+                            swapNodes(draggedNodeId, targetNodeId);
+                        }
+                    }
+                }
+
+                draggedNodeId = null;
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            }
+        });
+
+        function getOrderedActiveNodes() {
+            const active = [...activeNodes];
+            if (nodeOrder.length === 0) {
+                return active.sort();
+            }
+            const ordered = [];
+            for (const n of nodeOrder) {
+                if (active.includes(n)) {
+                    ordered.push(n);
+                }
+            }
+            for (const n of active) {
+                if (!ordered.includes(n)) {
+                    ordered.push(n);
+                }
+            }
+            return ordered;
+        }
+
+        function initNodeOrder() {
+            if (nodeOrder.length === 0) {
+                nodeOrder = [...activeNodes].sort();
+            }
+        }
+
+        function swapNodes(nodeA, nodeB) {
+            initNodeOrder();
+            const idxA = nodeOrder.indexOf(nodeA);
+            const idxB = nodeOrder.indexOf(nodeB);
+            if (idxA !== -1 && idxB !== -1) {
+                nodeOrder[idxA] = nodeB;
+                nodeOrder[idxB] = nodeA;
+
+                // Swap panel contents in-place to preserve sizes
+                const panelA = document.getElementById(`panel-${nodeA}`);
+                const panelB = document.getElementById(`panel-${nodeB}`);
+
+                if (panelA && panelB) {
+                    // Get containers and their logs
+                    const containerA = document.getElementById(`logs-${nodeA}`);
+                    const containerB = document.getElementById(`logs-${nodeB}`);
+
+                    // Swap header colors and text
+                    const headerA = panelA.querySelector('.split-panel-header');
+                    const headerB = panelB.querySelector('.split-panel-header');
+                    headerA.style.background = getNodeColor(nodeB);
+                    headerB.style.background = getNodeColor(nodeA);
+                    headerA.querySelector('.node-name').textContent = `Node ${nodeB}`;
+                    headerB.querySelector('.node-name').textContent = `Node ${nodeA}`;
+
+                    // Update panel and container IDs
+                    panelA.id = `panel-${nodeB}`;
+                    panelB.id = `panel-${nodeA}`;
+                    panelA.dataset.nodeId = nodeB;
+                    panelB.dataset.nodeId = nodeA;
+                    containerA.id = `logs-${nodeB}`;
+                    containerB.id = `logs-${nodeA}`;
+
+                    // Update stats IDs
+                    const statsA = panelA.querySelector('.panel-stats');
+                    const statsB = panelB.querySelector('.panel-stats');
+                    if (statsA) statsA.id = `stats-${nodeB}`;
+                    if (statsB) statsB.id = `stats-${nodeA}`;
+
+                    // Swap log contents
+                    const logsA = [...containerA.children];
+                    const logsB = [...containerB.children];
+                    containerA.innerHTML = '';
+                    containerB.innerHTML = '';
+                    logsB.forEach(el => containerA.appendChild(el));
+                    logsA.forEach(el => containerB.appendChild(el));
+
+                    // Update close button handlers
+                    const closeA = headerA.querySelector('.close-btn');
+                    const closeB = headerB.querySelector('.close-btn');
+                    closeA.onclick = () => closeNodePanel(nodeB);
+                    closeB.onclick = () => closeNodePanel(nodeA);
+
+                    // Update drag handlers
+                    headerA.onmousedown = (e) => {
+                        if (e.target.classList.contains('close-btn')) return;
+                        e.preventDefault();
+                        startPanelDrag(nodeB, panelA, e);
+                    };
+                    headerB.onmousedown = (e) => {
+                        if (e.target.classList.contains('close-btn')) return;
+                        e.preventDefault();
+                        startPanelDrag(nodeA, panelB, e);
+                    };
+                } else {
+                    // Fallback to full re-render if panels not found
+                    renderLogs();
+                }
+            }
+        }
+
+        document.addEventListener('mouseup', () => {
+            if (splitResizingH) {
+                splitResizingH = false;
+                if (splitResizeHandleH) {
+                    splitResizeHandleH.classList.remove('dragging');
+                }
+                splitResizeHandleH = null;
+                splitLeftPanel = null;
+                splitRightPanel = null;
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            }
+            if (splitResizingV) {
+                splitResizingV = false;
+                if (splitResizeHandleV) {
+                    splitResizeHandleV.classList.remove('dragging');
+                }
+                splitResizeHandleV = null;
+                splitTopRow = null;
+                splitBottomRow = null;
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            }
+        });
+
+        // Fetch version info
+        fetch('/version')
+            .then(r => r.json())
+            .then(data => {
+                versionInfo.textContent = `v${data.version} (${data.buildTime})`;
+            })
+            .catch(() => {
+                versionInfo.textContent = '';
+            });
+
+        // Initialize split view layout and render
+        updateLayoutOptions();
+        renderLogs();
+
+        // Start connection
+        connect();
+
+        // Demo mode - if not connected, show sample data
+        setTimeout(() => {
+            if (!statusDot.classList.contains('connected')) {
+                statusText.textContent = 'Demo Mode (no server)';
+                const sampleLogs = [
+                    '2025-12-17 17:57:19 tokio-runtime-worker DEBUG jam_node::telemetry BlockTransferred { request_id: 0, slot: 5048493 }',
+                    '2025-12-17 17:57:19 tokio-runtime-worker DEBUG jam_node::telemetry BlockAnnounced { peer: ekwmt37xecoq6a7o }',
+                    '2025-12-17 17:57:19 tokio-runtime-worker INFO jam_node::chain Imported block 0x9ebf3fb7...',
+                    '2025-12-17 17:57:19 tokio-runtime-worker DEBUG jam_node::chain::state_db Inserted block',
+                    '2025-12-17 17:57:20 tokio-runtime-worker DEBUG jam_node::net::peer_manager Stream closed',
+                    '2025-12-17 17:57:20 tokio-runtime-worker WARN jam_node::chain Slow block processing: 150ms',
+                    '2025-12-17 17:57:21 tokio-runtime-worker ERROR jam_node::net Connection timeout',
+                    '2025-12-17 17:57:21 tokio-runtime-worker TRACE jam_node::chain::exec::accumulate Outputs: []',
+                    '2025-12-17 17:57:22 tokio-runtime-worker DEBUG jam_node::telemetry BlockVerified { importing_id: 0 }',
+                    '2025-12-17 17:57:22 tokio-runtime-worker DEBUG jam_node::telemetry BlockExecuted { authoring_id: 0 }',
+                    '2025-12-17 17:57:23 tokio-runtime-worker DEBUG jam_node::telemetry BestBlockChanged { slot: 5048493 }',
+                    '2025-12-17 17:57:24 tokio-runtime-worker DEBUG jam_node::chain::guarantors::table Guarantee table update',
+                ];
+                sampleLogs.forEach((line, i) => {
+                    setTimeout(() => {
+                        addLog(line, i % 6);
+                        treeUpdatePending = true;
+                    }, i * 200);
+                });
+                setTimeout(renderFilterTree, 3000);
+            }
+        }, 3000);
+    </script>
+</body>
+</html>

@@ -113,4 +113,5 @@ bmt/stablecoin_transfers_with_balances-730.csv.gz
 /cmd/trace2log/trace2log*
 /trace2log*
 /cmd/logviewer/logviewer*
-/logs/viewer.html
+/bin/telemetryViewer
+/telemetryViewer

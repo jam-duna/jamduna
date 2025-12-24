@@ -1294,7 +1294,7 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 	}
 	// we need to organize the /ws usage to avoid conflicts
 	// Enable WebSocket for N5 (last validator) and N6 (builder node)
-	if node.id == DunaLastValidatorNode || node.id == DunaBuilderNode {
+	if node.id == DunaValidatorNode || node.id == DunaBuilderNode {
 		wg := &sync.WaitGroup{}
 		wg.Add(1)
 		go node.runJamWeb(context.Background(), wg, uint16(19800)+id, port) // TODO: setup default WS
