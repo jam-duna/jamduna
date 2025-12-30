@@ -778,6 +778,16 @@ func (store *StateDBStorage) ClearVerkleReadLog() {
 	store.verkleReadLog = nil
 }
 
+func (store *StateDBStorage) ResetTrie() {
+	store.CurrentVerkleTree = verkle.New()
+	store.trieDB = NewMerkleTree(nil)
+	store.stagedInserts = make(map[common.Hash][]byte)
+	store.stagedDeletes = make(map[common.Hash]bool)
+	store.keys = make(map[common.Hash]bool)
+	store.verkleRoots = make(map[common.Hash]verkle.VerkleNode)
+	store.Root = store.trieDB.GetRoot()
+}
+
 // BuildVerkleWitness builds a dual-proof verkle witness and stores the post-state tree
 func (store *StateDBStorage) BuildVerkleWitness(contractWitnessBlob []byte) ([]byte, error) {
 	if store.CurrentVerkleTree == nil {

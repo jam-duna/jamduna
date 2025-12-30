@@ -188,7 +188,11 @@ func (t *Target) onInitialize(req *Initialize) *Message {
 		}
 	}
 
-	// Reuse the same logic as onSetState but with Initialize structure
+	// Reset the trie to avoid pollution from previous state
+	// This ensures the state root is computed purely from the provided KeyVals
+	t.store.ResetTrie()
+	t.stateDBMap = make(map[common.Hash]common.Hash)
+
 	startTime := time.Now()
 	recoveredStateDB, err := statedb.NewStateDBFromStateKeyVals(t.store, &req.KeyVals)
 	recoveredStateDBStateRoot := recoveredStateDB.StateRoot
@@ -222,6 +226,10 @@ func (t *Target) onSetState(req *HeaderWithState) *Message {
 	if t.stateDB != nil {
 		//log.Printf("%sWarning: Target already has a state initialized. Overwriting with new state.%s", colorYellow, common.ColorReset)
 	}
+
+	// Reset the trie to avoid pollution from previous state
+	t.store.ResetTrie()
+	t.stateDBMap = make(map[common.Hash]common.Hash)
 
 	startTime := time.Now()
 	recovered_statedb, err := statedb.NewStateDBFromStateKeyVals(t.store, &sky)

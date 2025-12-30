@@ -413,9 +413,7 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32, error) {
 		if len(data) < int(length+l) {
 			return nil, 0, fmt.Errorf("data length insufficient for slice length")
 		}
-		if item_len > 10000000 {
-			return nil, 0, fmt.Errorf("item_len too large %d", item_len)
-		}
+
 		v.Set(reflect.MakeSlice(t, int(item_len), int(item_len)))
 		length += l
 		for i := 0; i < int(item_len); i++ {

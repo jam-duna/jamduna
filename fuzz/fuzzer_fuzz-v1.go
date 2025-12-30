@@ -157,7 +157,12 @@ func Decode(data []byte) (*Message, error) {
 
 	// Special case for Error message (tag 255) - Error ::= UTF8String
 	if tag == 255 {
-		errorMsg := string(encodedBody)
+		// Decode using types.Decode since the string was encoded with types.Encode
+		decoded, _, err := types.Decode(encodedBody, reflect.TypeOf(""))
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode Error message: %w", err)
+		}
+		errorMsg := decoded.(string)
 		msg.Error = &errorMsg
 		return msg, nil
 	}

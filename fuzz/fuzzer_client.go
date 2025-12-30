@@ -217,8 +217,8 @@ func (f *Fuzzer) ImportBlock(block *types.Block) (*common.Hash, error) {
 
 	// Handle Error response (V1 protocol)
 	if receivedMsg.Error != nil {
-		log.Printf("%s[INCOMING RSP]%s Error - Rejected By Target%s", common.ColorBlue, common.ColorGray, common.ColorReset)
-		return nil, fmt.Errorf("ImportBlock failed - target returned Error")
+		log.Printf("%s[INCOMING RSP] Error - Rejected By Target: %s%s", common.ColorRed, *receivedMsg.Error, common.ColorReset)
+		return nil, fmt.Errorf("ImportBlock failed - target returned Error: %s", *receivedMsg.Error)
 	}
 
 	// Handle StateRoot response (success case or V0/V0r error with pre-state root)
