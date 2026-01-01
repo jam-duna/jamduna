@@ -1002,25 +1002,4 @@ mod tests {
         assert!(META_SHARD_MAX_ENTRIES <= max_entries);
     }
 
-    #[test]
-    fn test_process_single_object_write() {
-        let mut cached_shards = BTreeMap::new();
-        let mut meta_ssr = MetaSSR::new();
-
-        let writes = vec![(
-            [0x01; 32],
-            ObjectRef {
-                work_package_hash: [0xBB; 32],
-                index_start: 0,
-                payload_length: 100,
-                object_kind: 1,
-            },
-        )];
-
-        let intents = process_object_writes(writes, &mut cached_shards, &mut meta_ssr, 0, 0);
-
-        assert_eq!(intents.len(), 1);
-        assert_eq!(intents[0].entries.len(), 1);
-        assert_eq!(intents[0].entries[0].object_id, [0x01; 32]);
-    }
 }

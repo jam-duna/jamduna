@@ -31,13 +31,14 @@ import (
 
 	bls "github.com/colorfulnotion/jam/bls"
 	"github.com/colorfulnotion/jam/bmt/core"
+	evmrpc "github.com/colorfulnotion/jam/builder/evm/rpc"
 	chainspecs "github.com/colorfulnotion/jam/chainspecs"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/ed25519"
 	grandpa "github.com/colorfulnotion/jam/grandpa"
 	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
-	storage "github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/storage"
 	telemetry "github.com/colorfulnotion/jam/telemetry"
 	trie "github.com/colorfulnotion/jam/trie"
 	types "github.com/colorfulnotion/jam/types"
@@ -173,8 +174,7 @@ type NodeContent struct {
 	servicesMap   map[uint32]*types.ServiceSummary
 	servicesMutex sync.Mutex
 
-	// Multi-rollup support: Each service gets its own Rollup instance
-	rollups      map[uint32]*statedb.Rollup
+	rollups      map[uint32]*evmrpc.Rollup // TODO: remove rollup
 	rollupsMutex sync.RWMutex
 
 	workPackageQueue sync.Map
@@ -201,8 +201,9 @@ type NodeContent struct {
 	jceManagerMutex sync.Mutex
 	jceManager      *ManualJCEManager
 
-	// Ethereum transaction pool for guarantor mempool
-	txPool *TxPool
+	// DEPRECATED: Ethereum transaction pool - moved to EVMServiceHandler
+	// This will be removed in a future version
+	txPool *evmrpc.TxPool
 }
 
 // TODO: add in serviceIDs
@@ -223,7 +224,6 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage, pvmBackend string)
 		workPackagesCh:       make(chan types.WorkPackage, DefaultChannelSize),
 		workReportsCh:        make(chan types.WorkReport, DefaultChannelSize),
 		servicesMap:          make(map[uint32]*types.ServiceSummary),
-		rollups:              make(map[uint32]*statedb.Rollup),
 		workPackageQueue:     sync.Map{},
 		seenWorkPackages:     sync.Map{},
 		segmentCache:         make(map[string][]byte),
@@ -235,40 +235,6 @@ func NewNodeContent(id uint16, store *storage.StateDBStorage, pvmBackend string)
 		pvmBackend:           pvmBackend,
 		telemetryClient:      telemetry.NewNoOpTelemetryClient(),
 	}
-	// TODO: create rollups for each serviceID using GetOrCreateRollup
-}
-
-// Multi-Rollup Support: Helper methods
-
-// GetOrCreateRollup retrieves or creates a Rollup instance for the given serviceID
-// This ensures each service has its own isolated rollup state
-func (n *NodeContent) GetOrCreateRollup(serviceID uint32) (*statedb.Rollup, error) {
-	n.rollupsMutex.RLock()
-	rollup, exists := n.rollups[serviceID]
-	n.rollupsMutex.RUnlock()
-
-	if exists {
-		return rollup, nil
-	}
-
-	// Create new rollup for this service
-	n.rollupsMutex.Lock()
-	defer n.rollupsMutex.Unlock()
-
-	// Double-check after acquiring write lock
-	if rollup, exists := n.rollups[serviceID]; exists {
-		return rollup, nil
-	}
-
-	// Create rollup instance
-	newRollup, err := statedb.NewRollup(n.store, serviceID, n)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create rollup for service %d: %w", serviceID, err)
-	}
-
-	n.rollups[serviceID] = newRollup
-	log.Info(log.Node, "Created new rollup instance", "serviceID", serviceID)
-	return newRollup, nil
 }
 
 // GetStateDB implements statedb.StateProvider interface
@@ -1906,7 +1872,7 @@ func (n *NodeContent) SubmitBundleSameCore(b *types.WorkPackageBundle) (err erro
 
 							err = peer.SendBundleSubmission(context.Background(), coreIndex, segmentsRootMappings, b.WorkPackage, blobs, allSegments, allImportProofs)
 							if err != nil {
-								log.Error(log.Node, "SubmitBundleSameCore SendBundleSubmission (CE146)", "err", err, "pubkey", pubkey)
+								log.Error(log.Node, "SubmitBundleSameCore SendBundleSubmission (CE146)", "err", err, "pubkey", peer.SanKey())
 							} else {
 								log.Info(log.G, "SubmitBundleSameCore CE146 SUCCESS", "coreIndex", coreIndex, "numSegments", len(allSegments))
 								return nil
@@ -1918,6 +1884,18 @@ func (n *NodeContent) SubmitBundleSameCore(b *types.WorkPackageBundle) (err erro
 		}
 	}
 	return fmt.Errorf("SubmitBundleSameCore: no peers found for coreIndex %d", coreIndex)
+}
+
+// SubmitAndWaitForWorkPackageBundle submits a work package bundle and waits for it to be accumulated
+// Delegates to the underlying Node
+func (n *NodeContent) SubmitAndWaitForWorkPackageBundle(ctx context.Context, b *types.WorkPackageBundle) (common.Hash, uint32, error) {
+	return n.nodeSelf.SubmitAndWaitForWorkPackageBundle(ctx, b)
+}
+
+// GetWorkReport queries the network for a work report by its work package hash
+// Delegates to the underlying Node
+func (n *NodeContent) GetWorkReport(requestedHash common.Hash) (*types.WorkReport, error) {
+	return n.nodeSelf.GetWorkReport(requestedHash)
 }
 
 // this function will return the core workers of that core

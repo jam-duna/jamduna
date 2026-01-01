@@ -21,7 +21,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-var ALWAYS_COMPILE = false
+var ALWAYS_COMPILE = true
 var compiler_usage = compiler_go
 
 const (

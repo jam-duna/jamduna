@@ -127,8 +127,8 @@ func fib(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 		fib_payload := make([]byte, 4)
 		binary.LittleEndian.PutUint32(fib_payload, uint32(fibN))
 
-		// Get RefineContext
-		refineCtx, err := n1.GetRefineContext()
+		// Get RefineContext with buffer=5 for more tolerance
+		refineCtx, err := n1.GetRefineContextWithBuffer(5)
 		if err != nil {
 			log.Error(log.Node, "GetRefineContext failed", "err", err)
 			return

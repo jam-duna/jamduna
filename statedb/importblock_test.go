@@ -154,6 +154,20 @@ func parseSTFFile(filename, content string) (StateTransition, error) {
 	return stf, err
 }
 
+func parseSnapShotRawFile(filename, content string) (StateSnapshotRaw, error) {
+	var state StateSnapshotRaw
+	var err error
+	if strings.HasSuffix(filename, ".bin") {
+		state0, _, err := types.Decode([]byte(content), reflect.TypeOf(StateSnapshotRaw{}))
+		if err == nil {
+			state = state0.(StateSnapshotRaw)
+		}
+	} else {
+		err = json.Unmarshal([]byte(content), &state)
+	}
+	return state, err
+}
+
 func TestStateTransitionInterpreter(t *testing.T) {
 	PvmLogging = false
 

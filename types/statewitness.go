@@ -346,38 +346,28 @@ func CreateImportSegmentsAndWitness(
 }
 
 // SerializeWitness serializes a StateWitness to the fixed binary format expected by Rust
-// Format: object_id (32 bytes) + value (meta-shard ObjectRef from JAM State) + proofs (32 bytes each)
+// Format: object_id (32 bytes) | value_len (4) | value | proof_count (4) | proofs (32B each) | payload
 func (w StateWitness) SerializeWitness() []byte {
-	// Build the "value" field expected by Rust:
-	// ObjectRef (37 bytes) + timeslot (4 bytes) + blocknumber (4 bytes)
-	// If Value is empty or shorter than that, synthesize it from Ref/Timeslot/BlockNumber.
-	var value []byte
-	const refPlusContext = ObjectRefSerializedSize + 8
-	if len(w.Value) >= refPlusContext {
-		value = w.Value
-	} else {
-		refBytes := w.Ref.Serialize()
-		value = make([]byte, 0, refPlusContext)
-		value = append(value, refBytes...)
-		var ts [4]byte
-		var bn [4]byte
-		binary.LittleEndian.PutUint32(ts[:], w.Timeslot)
-		binary.LittleEndian.PutUint32(bn[:], w.BlockNumber)
-		value = append(value, ts[:]...)
-		value = append(value, bn[:]...)
-	}
+	value := w.Value
+	valueLen := uint32(len(value))
+	proofCount := uint32(len(w.Path))
 
-	// Calculate total size: 32 + len(value) + N*32
-	size := 32 + len(value) + (len(w.Path) * 32)
+	// Calculate total size up front to avoid reallocations
+	size := 32 + 4 + len(value) + 4 + (len(w.Path) * 32) + len(w.Payload)
 	buf := make([]byte, 0, size)
 
 	// 1. ObjectID (32 bytes)
 	buf = append(buf, w.ObjectID[:]...)
 
-	// 2. Value (meta-shard ObjectRef bytes from JAM State - typically 45 bytes)
+	// 2. Value length prefix + value bytes
+	var lenBuf [4]byte
+	binary.LittleEndian.PutUint32(lenBuf[:], valueLen)
+	buf = append(buf, lenBuf[:]...)
 	buf = append(buf, value...)
 
-	// 3. Proof hashes (32 bytes each) - optional
+	// 3. Proof count prefix + proof hashes (32 bytes each) - optional
+	binary.LittleEndian.PutUint32(lenBuf[:], proofCount)
+	buf = append(buf, lenBuf[:]...)
 	for _, hash := range w.Path {
 		buf = append(buf, hash[:]...)
 	}

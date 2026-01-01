@@ -418,11 +418,36 @@ func (c *NodeClient) ReadGlobalDepth(serviceID uint32) (result uint8, err error)
 	return result, err
 }
 
+func (c *NodeClient) GetWitnessCount() int {
+	// For remote clients, witness count is not available without StateDB access
+	// Return 0 as a placeholder (same as the original hardcoded value)
+	return 0
+}
+
 func (c *NodeClient) GetRefineContext() (types.RefineContext, error) {
 	var jsonStr string
 	err := c.baseClient.Call("jam.GetRefineContext", []string{}, &jsonStr)
 	if err != nil {
 		return types.RefineContext{}, err
+	}
+
+	var context types.RefineContext
+	err = json.Unmarshal([]byte(jsonStr), &context)
+	if err != nil {
+		return types.RefineContext{}, fmt.Errorf("failed to unmarshal refine context: %w", err)
+	}
+	return context, nil
+}
+
+// GetRefineContextWithBuffer returns a RefineContext with a specified buffer depth.
+// For remote clients, this calls the RPC with a buffer parameter.
+// If the RPC doesn't support buffer, it falls back to the default GetRefineContext.
+func (c *NodeClient) GetRefineContextWithBuffer(buffer int) (types.RefineContext, error) {
+	var jsonStr string
+	err := c.baseClient.Call("jam.GetRefineContextWithBuffer", []interface{}{buffer}, &jsonStr)
+	if err != nil {
+		// Fallback to default if RPC doesn't support buffer parameter
+		return c.GetRefineContext()
 	}
 
 	var context types.RefineContext

@@ -28,7 +28,7 @@ members = [
     "null_authorizer",
     "doom",
     "fib",
-    "railgun",
+    "orchard",
 ]
 
 [workspace.package]
@@ -79,6 +79,12 @@ serde_json = { version = "1.0.117" }
 syn = "2.0.25"
 tikv-jemallocator = "0.6.0"
 yansi = "0.5.1"
+
+[patch.crates-io]
+pasta_curves = { path = "../pasta_curves/pasta_curves" }
+halo2_proofs = { path = "../halo2/halo2_proofs" }
+halo2_gadgets = { path = "../halo2/halo2_gadgets" }
+maybe-rayon = { path = "vendor/maybe-rayon" }
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(polkavm_dev_debug_zygote)'] }
@@ -218,3 +224,6 @@ polkavm-zygote = { opt-level = 3, codegen-units = 1, debug = false, strip = "deb
 inherits = "release"
 lto = false
 codegen-units = 8
+
+
+[profile.dev]

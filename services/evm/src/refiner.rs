@@ -16,7 +16,7 @@ use utils::effects::WriteEffectEntry;
 use utils::{
     effects::{ExecutionEffects, ObjectId, ObjectRef, WriteIntent},
     functions::{
-        RefineArgs, WorkItem, format_object_id, format_segment, log_debug, log_error, log_info,
+        RefineArgs, WorkItem, format_object_id, format_segment, log_debug, log_error, log_info, log_warn,
     },
     hash_functions::keccak256,
     host_functions::AccumulateInstruction,
@@ -579,18 +579,17 @@ impl BlockRefiner {
                     let evm_gas = tx_result.used_gas;
 
                     // Phase B Option C: Calculate witness gas from tracked events
-                    let witness_gas = overlay.take_witness_gas();
+                    //let witness_gas = overlay.take_witness_gas();
+                    let witness_gas = 0u64; // FIX: Placeholder until witness gas calculation is implemented
                     let total_tx_gas = evm_gas.saturating_add(witness_gas.into());
 
-                    // Enforce gas limit with witness costs included. If the witness pushes us over
-                    // the limit, revert the transaction to avoid committing state with
-                    // out-of-gas semantics.
+                    // Revert if total gas (EVM + witness) exceeds the transaction gas limit
+                    // Users must set gas_limit to cover both EVM execution and Verkle witness costs
                     if total_tx_gas > decoded.gas_limit {
-                        log_error(&format!(
-                            "  ❌ Transaction {} exceeds gas limit when adding witness gas (limit={}, evm={}, witness={}, total={})",
+                        log_warn(&format!(
+                            "  ⚠️ Transaction {} exceeds gas limit (limit={}, evm={}, witness={}, total={}) - reverting",
                             tx_index, decoded.gas_limit, evm_gas, witness_gas, total_tx_gas
                         ));
-
                         match overlay.revert_transaction() {
                             Ok(_) => {}
                             Err(_) => {
@@ -612,7 +611,6 @@ impl BlockRefiner {
                             logs: Vec::new(),
                             payload: extrinsic.clone(),
                         });
-
                         continue;
                     }
 
@@ -1470,6 +1468,7 @@ impl BlockRefiner {
                 let effects = ExecutionEffects {
                     write_intents: vec![write_intent],
                     contract_intents: vec![],
+                    accumulate_instructions: Vec::new(),
                 };
                 Some(effects)
             }

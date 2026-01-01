@@ -13,6 +13,39 @@ use utils::{
 const BLOCK_HEADER_SIZE: usize = 148; // 4+4+4+8+32+32+32+32 = 148 bytes 
 const HASH_SIZE: usize = 32;
 
+/// Verkle state delta for delta replay (see services/evm/docs/VERKLE.md)
+#[derive(Debug, Clone)]
+pub struct VerkleStateDelta {
+    pub num_entries: u32,
+    pub entries: Vec<u8>,  // Flattened [key(32B), value(32B)] pairs
+}
+
+impl VerkleStateDelta {
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buffer = Vec::new();
+        buffer.extend_from_slice(&self.num_entries.to_le_bytes());
+        buffer.extend_from_slice(&self.entries);
+        buffer
+    }
+
+    pub fn deserialize(data: &[u8]) -> Result<Self, &'static str> {
+        if data.len() < 4 {
+            return Err("Delta too short");
+        }
+        let num_entries = u32::from_le_bytes(
+            data[0..4].try_into().map_err(|_| "Invalid num_entries")?
+        );
+        let expected_len = 4 + (num_entries as usize * 64);
+        if data.len() != expected_len {
+            return Err("Invalid delta length");
+        }
+        Ok(VerkleStateDelta {
+            num_entries,
+            entries: data[4..].to_vec(),
+        })
+    }
+}
+
 /// EVM block payload structure
 /// This structure is exported to DA as ObjectKind::Block
 #[derive(Debug, Clone)]
@@ -37,6 +70,9 @@ pub struct EvmBlockPayload {
 
     pub tx_hashes: Vec<ObjectId>,
     pub receipt_hashes: Vec<ObjectId>,
+
+    // NEW: Verkle state delta for replay (not included in header hash)
+    pub verkle_delta: Option<VerkleStateDelta>,
 }
 
 pub fn block_number_to_object_id(block_number: u32) -> ObjectId {
@@ -87,6 +123,11 @@ impl EvmBlockPayload {
         // Receipt hashes (no length prefix - use num_transactions from header)
         for receipt_hash in &self.receipt_hashes {
             buffer.extend_from_slice(receipt_hash);
+        }
+
+        // Verkle delta (optional, for services/evm/docs/VERKLE.md delta replay)
+        if let Some(delta) = &self.verkle_delta {
+            buffer.extend_from_slice(&delta.serialize());
         }
 
         buffer
@@ -179,6 +220,13 @@ impl EvmBlockPayload {
             offset += 32;
         }
 
+        // Parse verkle delta if present (optional field)
+        let verkle_delta = if offset < data.len() {
+            Some(VerkleStateDelta::deserialize(&data[offset..])?)
+        } else {
+            None
+        };
+
         Ok(EvmBlockPayload {
             payload_length,
             verkle_root,
@@ -190,6 +238,7 @@ impl EvmBlockPayload {
             timestamp,
             tx_hashes,
             receipt_hashes,
+            verkle_delta,
         })
     }
 

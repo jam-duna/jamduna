@@ -1222,6 +1222,11 @@ pub fn log_error(message: &str) {
 }
 
 #[inline(always)]
+pub fn log_warn(message: &str) {
+    call_log(2, None, message); // Use info level for warnings (no dedicated warn level in host)
+}
+
+#[inline(always)]
 pub fn log_info(message: &str) {
     call_log(2, None, message);
 }

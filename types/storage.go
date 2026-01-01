@@ -511,6 +511,14 @@ type JAMStorage interface {
 	GetJAMDA() JAMDA
 	GetNodeID() uint16
 
+	// Lifecycle
+	Close() error
+}
+
+// EVMJAMStorage extends JAMStorage with EVM-specific operations
+type EVMJAMStorage interface {
+	JAMStorage
+
 	// Witness Cache Operations (Phase 4+)
 	// These methods manage the witness cache for EVM execution
 	InitWitnessCache()
@@ -609,6 +617,15 @@ type JAMStorage interface {
 	// block parameter should be *evmtypes.EvmBlockPayload
 	FinalizeEVMBlock(serviceID uint32, blockPayload interface{}, jamStateRoot common.Hash, jamSlot uint32) error
 
-	// Lifecycle
-	Close() error
+	// InitializeEVMGenesis creates a genesis block for an EVM service with an initial account balance
+	// This sets up the Verkle tree with the genesis account and stores block 0
+	// Returns the verkle root hash and any error
+	InitializeEVMGenesis(serviceID uint32, issuerAddress common.Address, startBalance int64) (common.Hash, error)
+}
+
+// OrchardJAMStorage extends JAMStorage with Orchard-specific operations
+type OrchardJAMStorage interface {
+	JAMStorage
+
+	// TODO: Add Orchard-specific methods for notes, nullifiers, merkle trees, etc.
 }

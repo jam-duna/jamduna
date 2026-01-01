@@ -32,8 +32,8 @@ func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {
 		auth_payload := make([]byte, 4)
 		binary.LittleEndian.PutUint32(auth_payload, uint32(auth_serviceIdx))
 
-		// Get RefineContext and log what we get
-		refineCtx, err := n1.GetRefineContext()
+		// Get RefineContext with buffer=3 for more tolerance
+		refineCtx, err := n1.GetRefineContextWithBuffer(3)
 		if err != nil {
 			log.Error(log.Node, "GetRefineContext failed", "err", err)
 			return

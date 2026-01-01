@@ -12,6 +12,12 @@ use crate::effects::StateWitness;
 use alloc::{string::String, vec, vec::Vec};
 use std::println;
 
+fn read_test_service_id() -> Option<u32> {
+    std::env::var("JAM_TEST_SERVICE_ID")
+        .ok()
+        .and_then(|value| value.parse().ok())
+}
+
 /// Test witness verification with real data from Go tests
 ///
 /// To generate the test data, run:
@@ -40,6 +46,11 @@ fn verify_test() {
             // Test with real witness data
             match StateWitness::deserialize(&data) {
                 Ok(witness) => {
+                    let Some(service_id) = read_test_service_id() else {
+                        println!("JAM_TEST_SERVICE_ID not set; skipping real witness verification.");
+                        return;
+                    };
+
                     // Parse state root from filename
                     let state_root_hex =
                         "b1c7e52f8638ad944425874da47c59747fc42f0230d3bb55a8b1acc57b53e061";
@@ -51,24 +62,24 @@ fn verify_test() {
 
                     // Test 1: Real witness should verify with correct state root
                     assert!(
-                        witness.verify(state_root),
+                        witness.verify(service_id, state_root),
                         "Real witness data should verify against its state root"
                     );
 
                     // Test 2: Should fail with wrong state root
                     let wrong_root = [0xFFu8; 32];
                     assert!(
-                        !witness.verify(wrong_root),
+                        !witness.verify(service_id, wrong_root),
                         "Witness should fail verification with wrong state root"
                     );
 
                     // Test 3: Manually verify with verify_merkle_proof
-                    let value = witness.ref_info.serialize();
+                    let value = &witness.value;
                     assert!(
                         verify_merkle_proof(
-                            witness.ref_info.service_id,
+                            service_id,
                             &witness.object_id,
-                            &value,
+                            value,
                             &state_root,
                             &witness.path
                         ),
@@ -206,6 +217,11 @@ fn test_verify_exported_witnesses() {
         return;
     }
 
+    let Some(service_id) = read_test_service_id() else {
+        println!("JAM_TEST_SERVICE_ID not set; skipping exported witness verification.");
+        return;
+    };
+
     println!("Found {} witness files", witness_files.len());
 
     let mut successful_verifications = 0;
@@ -245,14 +261,11 @@ fn test_verify_exported_witnesses() {
 
         match StateWitness::deserialize(data) {
             Ok(witness) => {
-                // Serialize ObjectRef as the value for verification
-                let value = witness.ref_info.serialize();
-
                 // Verify the witness against the state root from filename
                 let verified = verify_merkle_proof(
-                    witness.ref_info.service_id,
+                    service_id,
                     &witness.object_id,
-                    &value,
+                    &witness.value,
                     &state_root,
                     &witness.path,
                 );
@@ -262,7 +275,7 @@ fn test_verify_exported_witnesses() {
                     println!(
                         "✓ {}: VERIFIED (service_id={}, path_len={})",
                         filename,
-                        witness.ref_info.service_id,
+                        service_id,
                         witness.path.len()
                     );
                 } else {

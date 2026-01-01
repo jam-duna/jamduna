@@ -1,0 +1,61 @@
+{
+  "metadata": {
+    "name": "multi_key_same_stem",
+    "description": "Single stem with two keys at suffixes 0 and 1",
+    "go_verkle_version": "v0.2.2",
+    "generated_at": "2025-12-25T07:13:05Z",
+    "scenario": "multi_key_same_stem"
+  },
+  "pre_state_root": "05ab27541bdfb907afbcc524964bba52091edd038954b38a7f6146696f3f23a0",
+  "post_state_root": "05ab27541bdfb907afbcc524964bba52091edd038954b38a7f6146696f3f23a0",
+  "verkle_proof": {
+    "otherStems": [],
+    "depthExtensionPresent": "0x0a",
+    "commitmentsByPath": [
+      "0x05ab27541bdfb907afbcc524964bba52091edd038954b38a7f6146696f3f23a0",
+      "0x5a44d9d1d2b22da416a900f06688a64ac6878bcfce4f3230412b3198bbe390fb",
+      "0x03b9f6961671ce1af96e43cffdc1d2b93c2fe4038ad42c7ffb9daa317b3d5adc"
+    ],
+    "d": "0x7033444504843ff397830476dfe30d9ddf743292469e705e4c64913e91f92843",
+    "ipaProof": {
+      "cl": [
+        "0x65fc5ba07a1abd53a4c775dc6c41a1769836b92e51643497a2212c94615d8c56",
+        "0x26e3b4b746ff368232a980181e600ac6d3a0ba8b7cf05b5964b186a513f0580c",
+        "0x5ccacfb0b53e09aeded3f34046ff11a1fe38d4a76836a5d964d962ce9f6eda35",
+        "0x3ff295cf005fab7c9f1ebc3e322d9e6bebbe8ce71237495e8d895a805a918917",
+        "0x16a32191a48ac11ceee79bafd2512a6dbf36ad0a235a07b9ac0f0d27e1a6a432",
+        "0x0e282635e8f50339d60203f591af769774ff5960d09adb5d9c055603d15eb750",
+        "0x5187e376930bc30912fb372afcf7b60574d70583787c292f6a70e60ba2060cd8",
+        "0x302533593e3c28df6b58ad5fde1f5e65e920d0e50a0a8805f131278e76f87a93"
+      ],
+      "cr": [
+        "0x129bc79bd76c0ecb778b577cc2d820f2ba74f9587dd597c09b42187b6968c727",
+        "0x6a7fab6d4ab529ae1e7fba68c62da2597da30c7b0e3deae4518d06b346dbff2e",
+        "0x139b6ef3e43c876f26c1a3aac14260c061bdb135a30357255579851edf32dd70",
+        "0x50f6051d099ce158d7dbd1a7dd77b731eb42fa61c0bbfd93033bc31cca64180b",
+        "0x4e7e67b787c5b3147cdfc105eea106f14597cc1fd6070bba0c545d5ddb1de557",
+        "0x0134d424e46a115210db140f7636bf4364a2a73a05032010d500af5e2d291395",
+        "0x59bcfb939e734b56f8c4fa7390bf9c2659634cd41d3b52f7dce41fe965bb2b03",
+        "0x05f64c165c0fe63fcab6b0f74ed33e8c599f4b1fb8a6f682949269355c7fb7b1"
+      ],
+      "finalEvaluation": "0x04792ec25a0ceb48ec43966aeadad862369bebeb8b24f23a0cc948c588f72453"
+    }
+  },
+  "state_diff": [
+    {
+      "stem": "0x60000000000000000000000000000000000000000000000000000000000000",
+      "suffixDiffs": [
+        {
+          "suffix": 0,
+          "currentValue": "0xee00000000000000000000000000000000000000000000000000000000000000",
+          "newValue": null
+        },
+        {
+          "suffix": 1,
+          "currentValue": "0xff00000000000000000000000000000000000000000000000000000000000000",
+          "newValue": null
+        }
+      ]
+    }
+  ]
+}

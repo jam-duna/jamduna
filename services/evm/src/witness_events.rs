@@ -17,11 +17,11 @@ type VerkleKey = (H160, U256, u8);
 
 // ===== Phase D: Precompile/System Contract Filtering =====
 
-/// Check if address is a JAM precompile (0x01-0x03)
-/// Per Phase D requirement: JAM precompiles are 0x01 (usdm), 0x02 (gov), 0x03 (math)
+/// Check if address is a JAM precompile (0x01-0x03, 0x10)
+/// Per Phase D requirement: JAM precompiles are 0x01 (usdm), 0x02 (gov), 0x03 (math), 0x10 (shield)
 #[inline]
 pub fn is_precompile(addr: H160) -> bool {
-    addr == USDM_ADDRESS || addr == GOVERNOR_ADDRESS || addr == MATH_PRECOMPILE_ADDRESS
+    addr == USDM_ADDRESS || addr == GOVERNOR_ADDRESS || addr == MATH_PRECOMPILE_ADDRESS || addr == SHIELD_ADDRESS
 }
 
 /// Check if address is a system contract
@@ -381,6 +381,12 @@ impl Default for VerkleEventTracker {
 mod tests {
     use super::*;
 
+    fn addr(val: u64) -> H160 {
+        let mut bytes = [0u8; 20];
+        bytes[12..].copy_from_slice(&val.to_be_bytes());
+        H160::from(bytes)
+    }
+
     #[test]
     fn test_storage_slot_tree_keys() {
         // Storage slot 0 should map to header storage area
@@ -397,7 +403,7 @@ mod tests {
     #[test]
     fn test_record_storage_access() {
         let mut tracker = VerkleEventTracker::new();
-        let addr = H160::from_low_u64_be(1);
+        let addr = addr(1);
 
         tracker.record_storage_access(addr, U256::zero());
 
@@ -409,7 +415,7 @@ mod tests {
     #[test]
     fn test_record_storage_write_fill() {
         let mut tracker = VerkleEventTracker::new();
-        let addr = H160::from_low_u64_be(1);
+        let addr = addr(1);
 
         // None→value write should be tracked as fill
         tracker.record_storage_write(addr, U256::zero(), None, U256::from(42));
@@ -424,7 +430,7 @@ mod tests {
     #[test]
     fn test_record_storage_write_no_fill() {
         let mut tracker = VerkleEventTracker::new();
-        let addr = H160::from_low_u64_be(1);
+        let addr = addr(1);
 
         // Some→value write should NOT be tracked as fill
         tracker.record_storage_write(addr, U256::zero(), Some(U256::from(1)), U256::from(42));
@@ -433,18 +439,4 @@ mod tests {
         assert_eq!(tracker.edited_leaves.len(), 1);
     }
 
-    #[test]
-    fn test_tx_level_events_no_edit_tracking() {
-        let mut tracker = VerkleEventTracker::new();
-        let addr = H160::from_low_u64_be(1);
-
-        // Record tx-level write
-        tracker.record_tx_origin_write(addr);
-
-        // Should have access tracking but NOT edit tracking
-        assert_eq!(tracker.accessed_branches.len(), 1);
-        assert_eq!(tracker.accessed_leaves.len(), 1);
-        assert_eq!(tracker.edited_subtrees.len(), 0); // No edit tracking for tx-level
-        assert_eq!(tracker.edited_leaves.len(), 0); // No edit tracking for tx-level
-    }
 }

@@ -6,12 +6,14 @@ toolchain go1.23.4
 
 require (
 	github.com/chzyer/readline v1.5.1
+	github.com/crate-crypto/go-ipa v0.0.0-20240724233137-53bbb0ceb27a
 	github.com/dop251/goja v0.0.0-20250309171923-bcd7cc6bf64c
 	github.com/ethereum/go-ethereum v1.16.1
 	github.com/ethereum/go-verkle v0.2.2
 	github.com/go-echarts/go-echarts/v2 v2.4.3
 	github.com/go-git/go-git/v5 v5.14.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/hdevalence/ed25519consensus v0.2.0
 	github.com/holiman/uint256 v1.3.2
 	github.com/nsf/jsondiff v0.0.0-20230430225905-43f6cf3098c1
@@ -39,7 +41,6 @@ require (
 	github.com/cloudflare/circl v1.6.0 // indirect
 	github.com/consensys/gnark-crypto v0.18.0 // indirect
 	github.com/crate-crypto/go-eth-kzg v1.3.0 // indirect
-	github.com/crate-crypto/go-ipa v0.0.0-20240724233137-53bbb0ceb27a // indirect
 	github.com/cyphar/filepath-securejoin v0.4.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0 // indirect

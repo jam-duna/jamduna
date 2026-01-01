@@ -12,7 +12,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
-	storage "github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/storage"
 	trie "github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -97,7 +97,30 @@ func (n *NodeContent) ReadGlobalDepth(serviceID uint32) (uint8, error) {
 	return n.statedb.ReadGlobalDepth(serviceID)
 }
 
+func (n *NodeContent) GetWitnessCount() int {
+	witnesses := n.statedb.GetWitnesses()
+	return len(witnesses)
+}
+
+// GetRefineContext returns a RefineContext using the default buffer for the platform.
+// Uses buffer=1 on Linux (production), buffer=2 on Mac (development).
 func (n *NodeContent) GetRefineContext() (types.RefineContext, error) {
+	// Use depth=1 on Linux (faster network, tighter timing), depth=2 on Mac (more buffer for dev)
+	buffer := 1
+	if runtime.GOOS == "darwin" {
+		buffer = 2
+	}
+	return n.GetRefineContextWithBuffer(buffer)
+}
+
+// GetRefineContextWithBuffer returns a RefineContext with a specified buffer depth.
+// Buffer determines how many blocks back from the chain head to use as anchor.
+// Larger buffer = more time for work package to reach validators before anchor expires.
+// With RecentHistorySize=8:
+//   - buffer=1: anchor at index 7 (most recent), validators need to be 7 blocks ahead to expire
+//   - buffer=2: anchor at index 6, validators need to be 6 blocks ahead to expire
+//   - buffer=3: anchor at index 5, validators need to be 5 blocks ahead to expire
+func (n *NodeContent) GetRefineContextWithBuffer(buffer int) (types.RefineContext, error) {
 	// Try to use finalized block as anchor (proper Grandpa finality)
 	finalizedBlock, err := n.GetFinalizedBlock()
 	if err == nil && finalizedBlock != nil {
@@ -111,8 +134,7 @@ func (n *NodeContent) GetRefineContext() (types.RefineContext, error) {
 		}
 		log.Warn(log.Node, "GetRefineContext: finalized block not in RecentBlocks, falling back to depth-based", "hash", finalizedHash.Hex())
 	}
-	GrandpaEasyDepth := 5 //use depth-based approximation (5 blocks back)
-	refineCtx := n.statedb.GetRefineContextByDepth(GrandpaEasyDepth)
+	refineCtx := n.statedb.GetRefineContextByDepth(buffer)
 	return refineCtx, nil
 }
 

@@ -77,6 +77,25 @@ func saveToLogDir(logDir, filename string, data []byte) {
 	os.WriteFile(filepath.Join(logDir, filename), data, 0644)
 }
 
+var saveToLogDirOnceMap sync.Map
+var PvmSaveBundle = false
+
+func saveToLogDirOnce(logDir, filename string, data []byte) {
+	if logDir == "" || strings.Contains(logDir, "SKIP") {
+		return
+	}
+	if !PvmSaveBundle {
+		return
+	}
+	key := filepath.Join(logDir, filename)
+	if _, loaded := saveToLogDirOnceMap.LoadOrStore(key, true); loaded {
+		return // already saved
+	}
+
+	os.MkdirAll(logDir, 0755)
+	os.WriteFile(key, data, 0644)
+}
+
 // saveToLogDirOutput saves the result to either "output" or "err" file based on the result code.
 // If r.Ok is set, writes to "output" file. If r.Err is set, writes to "err" file.
 func saveToLogDirOutput(logDir string, r types.Result, res uint64) {

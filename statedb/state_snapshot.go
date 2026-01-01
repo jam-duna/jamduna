@@ -52,6 +52,15 @@ type StateSnapshotRaw struct {
 	KeyVals   []KeyVal    `json:"keyvals"`
 }
 
+func (s *StateDB) GetStateSnapshotRaw() *StateSnapshotRaw {
+	keyVals := s.GetAllKeyValues()
+	snapshotRaw := StateSnapshotRaw{
+		StateRoot: s.GetStateRoot(),
+		KeyVals:   keyVals,
+	}
+	return &snapshotRaw
+}
+
 type StateKeyVals struct {
 	KeyVals []KeyVal `json:"keyvals"`
 }

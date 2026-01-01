@@ -21,13 +21,21 @@ primitive-types = { version = "0.12", default-features = false }
 evm = { path = "../vendor/evm", default-features = false }
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 sha3 = { version = "0.10", default-features = false }
+sha2 = { version = "0.10", default-features = false }
 rlp = { version = "0.5", default-features = false }
 libsecp256k1 = { version = "0.7", default-features = false, features = ["static-context"] }
-# Verkle tree proof verification (crate-crypto rust-verkle)
-# Temporarily disabled due to compilation issues - using Go FFI for now
-# verkle-trie = { git = "https://github.com/crate-crypto/rust-verkle" }
-# ipa-multipoint = { git = "https://github.com/crate-crypto/rust-verkle" }
-# banderwagon = { git = "https://github.com/crate-crypto/rust-verkle" }
+# Verkle tree proof verification
+# Using arkworks Bandersnatch for field/curve arithmetic (no_std compatible)
+# Verkle-specific logic (SRS, IPA, proofs) implemented from scratch in services/evm/src/verkle/
+ark-ed-on-bls12-381-bandersnatch = { version = "0.5", default-features = false }
+ark-ff = { version = "0.5", default-features = false }
+ark-ec = { version = "0.5", default-features = false }
+
+[dev-dependencies]
+hex-literal = "0.4"
+sha2 = "0.10"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 
 [features]
 default = []
@@ -37,3 +45,5 @@ dual-bal-verify = []
 dual-verkle-verify = []
 # Enable all dual verification modes
 dual-verify-all = ["dual-bal-verify", "dual-verkle-verify"]
+# Enable verbose verkle debugging output (for troubleshooting verification issues)
+verkle-debug = []

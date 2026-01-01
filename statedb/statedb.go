@@ -22,6 +22,16 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
+// StateProvider interface allows external components to access StateDB from a node
+// Implemented by NodeContent in production, or can be nil for storage-only queries
+type StateProvider interface {
+	GetStateDB() *StateDB
+	GetRefineContext() (types.RefineContext, error)
+	SubmitBundleSameCore(bundle *types.WorkPackageBundle) error
+	SubmitAndWaitForWorkPackageBundle(ctx context.Context, bundle *types.WorkPackageBundle) (common.Hash, uint32, error)
+	GetWorkReport(hash common.Hash) (*types.WorkReport, error)
+}
+
 const (
 	debugB = "beefy_mod"
 
@@ -259,6 +269,9 @@ const (
 	EVMServiceCode = 0
 	EVMServiceFile = "/services/evm/evm.pvm"
 
+	OrchardServiceCode = 1
+	OrchardServiceFile = "/services/orchard/orchard.pvm"
+
 	BootStrapNullAuthFile = "/services/null_authorizer/null_authorizer.pvm"
 
 	AlgoServiceCode = 10
@@ -293,6 +306,10 @@ func (s *StateDB) SetStorage(sdb types.JAMStorage) {
 
 func (s *StateDB) GetAllKeyValues() []KeyVal {
 	return s.sdb.GetAllKeyValues()
+}
+
+func (s *StateDB) GetServiceStorageWithProof(serviceID uint32, key []byte) ([]byte, [][]byte, common.Hash, bool, error) {
+	return s.sdb.GetServiceStorageWithProof(serviceID, key)
 }
 
 func (s *StateDB) GetSafrole() *SafroleState {

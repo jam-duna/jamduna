@@ -1,0 +1,78 @@
+{
+  "metadata": {
+    "name": "mixed_multi_stem",
+    "description": "Two stems with mixed present/absent keys (stem1: 0,10; stem2: 0,20)",
+    "go_verkle_version": "v0.2.2",
+    "generated_at": "2025-12-25T07:13:05Z",
+    "scenario": "mixed_multi_stem"
+  },
+  "pre_state_root": "2dbdb98e810245157baf83bb6cc9d94929e5f6cdcf5207562f4b0c2078f4f5ef",
+  "post_state_root": "2dbdb98e810245157baf83bb6cc9d94929e5f6cdcf5207562f4b0c2078f4f5ef",
+  "verkle_proof": {
+    "otherStems": [],
+    "depthExtensionPresent": "0x0a0a",
+    "commitmentsByPath": [
+      "0x2dbdb98e810245157baf83bb6cc9d94929e5f6cdcf5207562f4b0c2078f4f5ef",
+      "0x27fe4533ca931deb34e233fc2a939276d3e15c5727395ad628cdb60b81559499",
+      "0x6493a3a94a97bf6c35241fcf72b4f074b15f4747a2a1636a5f93a1b06b99d902",
+      "0x26ee453143b8e13f7e4bd32286bd9d154d5562770646baf249cb907c6bfd4cce",
+      "0x67f63f6764399f8dbe12d6d1618c77f2760245a90cdd55319024ebc7df038dd7"
+    ],
+    "d": "0x27693fb0180a88c55bfb7af6c0740575a6aba3abd217d3abc1f84fe3f84e6341",
+    "ipaProof": {
+      "cl": [
+        "0x1d5d959cab29bec0254998383b4e4480a4a52dc8e9cd849ea9455460838a51bd",
+        "0x6867d7c6e57578c7a5e2e01def702c1d893ae29bf02bc984abbccd94a11d3892",
+        "0x4ba91f4df7aa60f5d4096b273fb9a2118b5b49cdee22d9f1eb2325e4a214b4c3",
+        "0x2c158268f48252883f0eeb90bd6a7c6bcfb5e860f523fab307c947741c068d33",
+        "0x5e3c6707b080296e27304d5c428807002193720bcd1e77c21017ade739ab64ec",
+        "0x1f1469964b4bf54670d4cb0894da59a94726d53ad97517787e5968a096191360",
+        "0x67efafa829509526c2a239444a6536c2777c479cf635b87380358311a59065aa",
+        "0x1071f6a4e944ad8b5b722d2c94dd6aad7d6cd0490068441aeead40be5f813dab"
+      ],
+      "cr": [
+        "0x69f54d7b51da6b7526efc341e2f88019bcab8d28c7fbe89452ec9915c5b65715",
+        "0x38fc7036b902a6e964254c44b5bfb22a28af6e78ea511dc90e593f97586023d5",
+        "0x5adbd497a506a91ceeea8a2d85266ef97907fb68b7b2bac39dcd1c2a82e4e633",
+        "0x00b8986805a70a75bc96ae9bd2b4cc37bbbbcd20041cf0b288c8c68e5798ff45",
+        "0x261dc645725d095a1aaced3ac3b618f1fd93cf795f2fe0b96c151468c757d3c3",
+        "0x1c3747e7e4c532d24ad5ed198cd11429bca8873d38f6222c710d3f3a7d85bffa",
+        "0x39c663f72fbf483bd15d4187c56a5c29fa68063f8d9f32b059cb1ecf032f4df8",
+        "0x330bd76b801c3c728917df6284a1b5d7020dc814306322adbfb186483ea6fd88"
+      ],
+      "finalEvaluation": "0x1412feec25bba3066a85df5010a2e1f9f1e8722b400ac1bd65f19f4d68c20ed1"
+    }
+  },
+  "state_diff": [
+    {
+      "stem": "0x50000000000000000000000000000000000000000000000000000000000000",
+      "suffixDiffs": [
+        {
+          "suffix": 0,
+          "currentValue": "0x5100000000000000000000000000000000000000000000000000000000000000",
+          "newValue": null
+        },
+        {
+          "suffix": 10,
+          "currentValue": "0x5200000000000000000000000000000000000000000000000000000000000000",
+          "newValue": null
+        }
+      ]
+    },
+    {
+      "stem": "0x60000000000000000000000000000000000000000000000000000000000000",
+      "suffixDiffs": [
+        {
+          "suffix": 0,
+          "currentValue": "0x6100000000000000000000000000000000000000000000000000000000000000",
+          "newValue": null
+        },
+        {
+          "suffix": 20,
+          "currentValue": "0x6200000000000000000000000000000000000000000000000000000000000000",
+          "newValue": null
+        }
+      ]
+    }
+  ]
+}

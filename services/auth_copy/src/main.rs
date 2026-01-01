@@ -3,10 +3,8 @@
 
 extern crate alloc;
 use alloc::format;
-use alloc::vec;
-use alloc::vec::Vec;
+
 const SIZE0: usize = 0x10000;
-use alloc::boxed::Box;
 // allocate memory for stack
 use polkavm_derive::min_stack_size;
 min_stack_size!(SIZE0);
@@ -19,130 +17,194 @@ static ALLOCATOR: SimpleAlloc<SIZE1> = SimpleAlloc::new();
 
 use utils::constants::FIRST_READABLE_ADDRESS;
 use utils::functions::call_log;
-use utils::functions::{parse_accumulate_args, parse_accumulate_operand_args, parse_refine_args};
-use utils::hash_functions::blake2b_hash;
-use utils::host_functions::{assign, fetch}; // Added 'export' here
+use utils::hash_functions::keccak256;
+use utils::host_functions::fetch;
 
-fn build_combined_input(input: &[u8], wi_payload_address: u64, wi_payload_length: usize) -> Vec<u8> {
-    let wi_payload = unsafe { core::slice::from_raw_parts(wi_payload_address as *const u8, wi_payload_length) };
+// Import secp256k1 for signature verification
+use libsecp256k1::{recover, Message, RecoveryId, Signature};
 
-    let mut buffer = Vec::with_capacity(input.len() + wi_payload.len());
-    buffer.extend_from_slice(input);
-    buffer.extend_from_slice(wi_payload);
-    buffer
-}
-
+/// Authorizer entry point: validates ECDSA signature over work package hash
+///
+/// **ABI Contract**:
+/// - **Symbol**: `is_authorized` (exported PVM entry point)
+/// - **Arguments**: `(start_address: u64, length: u64)` - pointer to JAM codec core value
+/// - **Returns**: `(FIRST_READABLE_ADDRESS, 0)` on success, `(FIRST_READABLE_ADDRESS, 1)` on failure
+///
+/// **Input Format**: JAM codec u16 core index (LE, exactly 2 bytes for cores 0..340)
+/// - JAM runtime passes: `types.Encode(uint16(core))` → `E_l(core, 2)` → 2 bytes LE
+/// - Authorizer strictly validates: `length == 2` and parses `u16::from_le_bytes([lo, hi])`
+///
+/// **Verification steps**:
+/// 1. Parse core from JAM codec input argument (exactly 2 bytes LE)
+/// 2. Fetch 74-byte configuration blob (builder[20] || declared_value[16] || salt[32] || core[2] || cycle[4])
+/// 3. Fetch 65-byte authorization token (ECDSA signature: r[32] || s[32] || v[1])
+/// 4. Fetch 32-byte work package hash (Blake2b of encoded WP with AuthorizationToken=empty)
+/// 5. Recover signer using secp256k1 with Ethereum's keccak256 address derivation
+/// 6. Verify recovered address matches builder address in config blob
+/// 7. Verify core in config blob matches core argument (defense-in-depth)
 #[polkavm_derive::polkavm_export]
-extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
-polkavm_derive::sbrk(1024*1024);
-    let operand_ptr = core::ptr::addr_of!(OPERAND) as *const u8 as u64;
-    // Datatype 8: Should be fetching 32 bytes of p_u
-    let operand_len = unsafe { fetch(operand_ptr, 0, 4104, 8, 0, 0) };
-    // TODO: our fetch resp doesn't have discriminator len yet but should, then requiring that we get it to match 14.10
-    let input_slice = unsafe { core::slice::from_raw_parts(operand_ptr as *const u8, operand_len.try_into().unwrap()) };
+extern "C" fn is_authorized(start_address: u64, length: u64) -> (u64, u64) {
+    // Allocate 64KB heap for signature verification (libsecp256k1 uses stack-based computation)
+    polkavm_derive::sbrk(64 * 1024);
 
-    // use fetch to get 4 byte payload of work item 0
-    let payload_4: [u8; 4] = [0u8; 4]; // 'a' value
-    let payload_4_ptr = payload_4.as_ptr() as u64;
-    // Datatype 13: Should be fetching 4 bytes for 'a'
-    let payload_result0 = unsafe { fetch(payload_4_ptr, 0, 4, 13, 0, 0) };
-
-    let (_wi_service_index, wi_payload_start_address, _wi_payload_length, _wphash) =
-        if let Some(args) = parse_refine_args(start_address, length) {
-            (
-                args.wi_service_index,
-                args.wi_payload_start_address,
-                args.wi_payload_length,
-                args.wphash,
-            )
-        } else {
-            return (FIRST_READABLE_ADDRESS as u64, 0);
-        };
-
-    let output = blake2b_hash(input_slice);
-    unsafe {
-        let dest = core::ptr::addr_of_mut!(output_bytes_36);
-        core::ptr::copy_nonoverlapping(output.as_ptr(), (*dest).as_mut_ptr(), 32);
-        core::ptr::copy_nonoverlapping(payload_4.as_ptr(), (*dest).as_mut_ptr().add(32), 4);
+    // Parse core from input argument: JAM codec u16 (LE)
+    // JAM passes types.Encode(uint16(c)) which produces E_l(c, 2) = 2 bytes LE
+    if length != 2 {
+        call_log(2, None, &format!("is_authorized: expected 2-byte SCALE u16 input, got {} bytes", length));
+        return (FIRST_READABLE_ADDRESS as u64, 1);
     }
 
-    let output_address = core::ptr::addr_of!(output_bytes_36) as *const u8 as u64;
-    let output_length = 36u64;
+    let input_slice = unsafe { core::slice::from_raw_parts(start_address as *const u8, 2) };
+    let core = u16::from_le_bytes([input_slice[0], input_slice[1]]);
 
-    unsafe {
-        let arr = core::ptr::addr_of!(output_bytes_36);
+    // Fetch constants from AUTH.md Section 8
+    const WORK_PACKAGE_HASH: u64 = 0;  // fetch datatype: work package hash
+    const CONFIG_BLOB: u64 = 8;         // fetch datatype: configuration blob
+    const AUTH_TOKEN: u64 = 9;          // fetch datatype: authorization token
+
+    // Allocate buffers
+    let mut config_blob = [0u8; 74];   // builder[20] || declared_value[16] || salt[32] || core[2] || cycle[4]
+    let mut auth_token = [0u8; 65];    // ECDSA signature: r[32] || s[32] || v[1] (v in {27,28})
+    let mut wp_hash = [0u8; 32];       // Blake2b(Encode(WorkPackage) with AuthorizationToken=empty)
+
+    // Fetch configuration blob (exactly 74 bytes required)
+    let config_blob_ptr = config_blob.as_mut_ptr() as u64;
+    let config_len = unsafe { fetch(config_blob_ptr, 0, 74, CONFIG_BLOB, 0, 0) };
+    if config_len != 74 {
+        call_log(2, None, &format!("is_authorized: config blob must be exactly 74 bytes, got {}", config_len));
+        return (FIRST_READABLE_ADDRESS as u64, 1);
+    }
+
+    // Fetch authorization token (exactly 65-byte ECDSA signature)
+    let auth_token_ptr = auth_token.as_mut_ptr() as u64;
+    let auth_len = unsafe { fetch(auth_token_ptr, 0, 65, AUTH_TOKEN, 0, 0) };
+    if auth_len != 65 {
+        call_log(2, None, &format!("is_authorized: auth token must be exactly 65 bytes, got {}", auth_len));
+        return (FIRST_READABLE_ADDRESS as u64, 1);
+    }
+
+    // Fetch work package hash (exactly 32 bytes)
+    let wp_hash_ptr = wp_hash.as_mut_ptr() as u64;
+    let hash_len = unsafe { fetch(wp_hash_ptr, 0, 32, WORK_PACKAGE_HASH, 0, 0) };
+    if hash_len != 32 {
+        call_log(2, None, &format!("is_authorized: wp hash must be exactly 32 bytes, got {}", hash_len));
+        return (FIRST_READABLE_ADDRESS as u64, 1);
+    }
+
+    // Parse ECDSA signature: r[32] || s[32] || v[1]
+    let mut sig_bytes = [0u8; 64];
+    sig_bytes[..32].copy_from_slice(&auth_token[0..32]);  // r
+    sig_bytes[32..64].copy_from_slice(&auth_token[32..64]); // s
+    let v_raw = auth_token[64];  // v (Ethereum convention: 27 or 28)
+
+    // Normalize v: Ethereum uses 27/28, secp256k1 expects 0/1
+    // Strictly enforce Ethereum convention: only accept v ∈ {0, 1, 27, 28}
+    let recovery_id = if v_raw == 27 {
+        0
+    } else if v_raw == 28 {
+        1
+    } else if v_raw == 0 {
+        0  // Allow raw 0 for compatibility
+    } else if v_raw == 1 {
+        1  // Allow raw 1 for compatibility
+    } else {
+        call_log(2, None, &format!("is_authorized: invalid v value {} (must be 0,1,27, or 28)", v_raw));
+        return (FIRST_READABLE_ADDRESS as u64, 1);
+    };
+    // Note: recovery_id is guaranteed to be 0 or 1 at this point (no need for additional check)
+
+    // Recover signer from signature
+    let signature = match Signature::parse_standard(&sig_bytes) {
+        Ok(sig) => sig,
+        Err(_) => {
+            call_log(2, None, &format!("is_authorized: invalid signature format"));
+            return (FIRST_READABLE_ADDRESS as u64, 1);
+        }
+    };
+
+    let recid = match RecoveryId::parse(recovery_id) {
+        Ok(id) => id,
+        Err(_) => {
+            call_log(2, None, &format!("is_authorized: RecoveryId::parse failed for {}", recovery_id));
+            return (FIRST_READABLE_ADDRESS as u64, 1);
+        }
+    };
+
+    let message = Message::parse(&wp_hash);
+
+    let recovered_pubkey = match recover(&message, &signature, &recid) {
+        Ok(pubkey) => pubkey,
+        Err(_) => {
+            call_log(2, None, &format!("is_authorized: signature recovery failed"));
+            return (FIRST_READABLE_ADDRESS as u64, 1);
+        }
+    };
+
+    // Compute Ethereum address from recovered public key
+    // Address = last 20 bytes of keccak256(pubkey[1..65])
+    // pubkey[0] = 0x04 (uncompressed point marker), skip it
+    let pubkey_bytes = recovered_pubkey.serialize();
+    let pubkey_hash = keccak256(&pubkey_bytes[1..65]);
+    let recovered_address = &pubkey_hash.0[12..32]; // Last 20 bytes (.0 for H256 inner array)
+
+    // Extract builder address from config blob (first 20 bytes)
+    let expected_builder = &config_blob[0..20];
+
+    // Verify recovered address matches builder in config blob
+    if recovered_address != expected_builder {
         call_log(
             2,
             None,
             &format!(
-                "auth_copy ref input_slice={:x?} output_bytes_36={:x?} output_length={}",
-                input_slice, *arr, output_length
+                "is_authorized: signature mismatch - recovered={:02x?}, expected={:02x?}",
+                recovered_address, expected_builder
             ),
         );
-    }
-    return (output_address, output_length);
-}
-
-const N_Q: usize = 80;
-#[unsafe(no_mangle)]
-static mut OPERAND: [u8; 4104] = [0u8; 4104];
-static mut output_bytes_36: [u8; 36] = [0u8; 36];
-static mut authorization_hashes: [u8; 32 * N_Q] = [0u8; 32 * N_Q];
-
-#[polkavm_derive::polkavm_export]
-extern "C" fn accumulate(start_address: u64, length: u64) -> (u64, u64) {
-polkavm_derive::sbrk(1024*1024);
-    let output_bytes_36_ptr = core::ptr::addr_of!(output_bytes_36) as *const u8 as u64;
-    let (_timeslot, _service_index, _num_of_operands) = match parse_accumulate_args(start_address, length) {
-        Some(args) => (args.t, args.s, args.num_accumulate_inputs),
-        None => return (FIRST_READABLE_ADDRESS as u64, 0),
-    };
-    // fetch 36 byte output which will be (32 byte p_u_hash + 4 byte "a" from payload y)
-    let operand_ptr = core::ptr::addr_of!(OPERAND) as *const u8 as u64;
-    let operand_len = unsafe { fetch(operand_ptr, 0, 4104, 15, 0, 0) };
-
-    let (output_ptr, output_len) = match parse_accumulate_operand_args(operand_ptr, operand_len) {
-        Some(args) => (args.output_ptr, args.output_len),
-        None => return (FIRST_READABLE_ADDRESS as u64, 0),
-    };
-    // copy the last 36 bytes of the operand to output_bytes_36
-    if output_len < 36 {
-        unsafe {
-            call_log(
-                2,
-                None,
-                &format!("output_len ACC output_len={} is less than 36 bytes, returning error", output_len),
-            );
-        }
-        return (FIRST_READABLE_ADDRESS as u64, 0);
+        return (FIRST_READABLE_ADDRESS as u64, 1);
     }
 
-    unsafe {
-        // Reconstruct a slice from the raw output_ptr and output_len
-        let output_slice = core::slice::from_raw_parts(output_ptr as *const u8, output_len as usize);
-
-        // Copy the first 36 bytes into output_bytes_36
-        let dest = core::ptr::addr_of_mut!(output_bytes_36);
-        core::ptr::copy_nonoverlapping(output_slice.as_ptr(), (*dest).as_mut_ptr(), 36);
-
-        let arr = core::ptr::addr_of!(output_bytes_36);
-        let a = u32::from_le_bytes((&(*arr))[32..36].try_into().unwrap());
-
-        // Fill authorization_hashes with the first 32 bytes of output_bytes_36
-        let auth_hashes = core::ptr::addr_of_mut!(authorization_hashes);
-        for i in 0..N_Q {
-            core::ptr::copy_nonoverlapping((*arr).as_ptr(), (*auth_hashes).as_mut_ptr().add(i * 32), 32);
-        }
-
-        let authorization_hashes_address = core::ptr::addr_of!(authorization_hashes) as *const u8 as u64;
-        assign(0, authorization_hashes_address, a as u64);
-        assign(1, authorization_hashes_address, a as u64);
-        call_log(2, None, &format!("assigned core 0+1 service {}", a));
+    // Defense-in-depth: verify core and cycle fields in config blob
+    // Core field (bytes 68-69, BE u16)
+    let config_core = u16::from_be_bytes([config_blob[68], config_blob[69]]);
+    if config_core != core {
+        call_log(
+            2,
+            None,
+            &format!(
+                "is_authorized: core mismatch - config has {}, validating {}",
+                config_core, core
+            ),
+        );
+        return (FIRST_READABLE_ADDRESS as u64, 1);
     }
-    (output_bytes_36_ptr, 32)
+
+    // Cycle field validation (bytes 70-73, BE u32)
+    // Note: We don't have expected cycle in input, but we validate format consistency
+    let _config_cycle = u32::from_be_bytes([
+        config_blob[70], config_blob[71], config_blob[72], config_blob[73]
+    ]);
+    // TODO: If guarantor provides expected cycle, add validation:
+    // if config_cycle != expected_cycle { return error; }
+
+    call_log(
+        2,
+        None,
+        &format!(
+            "is_authorized: SUCCESS - builder {:02x?} authorized for core {}",
+            expected_builder, core
+        ),
+    );
+
+    // Success: signature valid, builder authorized
+    (FIRST_READABLE_ADDRESS as u64, 0)
 }
 
 #[polkavm_derive::polkavm_export]
-extern "C" fn on_transfer(_start_address: u64, _length: u64) -> (u64, u64) {
-    return (FIRST_READABLE_ADDRESS as u64, 0);
+extern "C" fn refine(_start_address: u64, _length: u64) -> (u64, u64) {
+    (FIRST_READABLE_ADDRESS as u64, 0)
+}
+
+#[polkavm_derive::polkavm_export]
+extern "C" fn accumulate(_start_address: u64, _length: u64) -> (u64, u64) {
+    (FIRST_READABLE_ADDRESS as u64, 0)
 }

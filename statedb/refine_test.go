@@ -17,14 +17,16 @@ import (
 func TestBundleExecution(t *testing.T) {
 	// Disable PvmTraceMode to prevent overwriting existing trace data
 	// Enable PvmVerifyMode to verify against existing trace
-	PvmTraceMode = false
+	PvmTraceMode = true
 	PvmLogging = false
 
-	// Use PvmVerifyBaseDir - the base directory containing auth/ and 0_39711455/ subdirectories
+	//doom setup
 	traceBaseDir := "0xf1166dc1eb7baff3d1c2450f319358c5c6789fe31313d331d4f035908045ad02"
+	targetDBfile := "test/04918460.json"
+	bundleFile := "test/04918460_0xf1166dc1eb7baff3d1c2450f319358c5c6789fe31313d331d4f035908045ad02_0_5_guarantor.json"
 
 	// Choose backend: BackendInterpreter or BackendCompiler
-	testingBackend := BackendInterpreter // Change to BackendInterpreter for interpreter verification
+	testingBackend := BackendCompiler // Change to BackendInterpreter for interpreter verification
 
 	// Set up verification mode for the chosen backend
 	if testingBackend == BackendInterpreter {
@@ -69,26 +71,40 @@ func TestBundleExecution(t *testing.T) {
 		t.Logf("   First segment: %d bytes, hash prefix: %x...", len(CheckSegments[0]), CheckSegments[0][:32])
 	}
 
-	targetDBfile := "test/04918460.json"
 	content, err := os.ReadFile(targetDBfile)
 	if err != nil {
 		t.Fatalf("❌ [%s] Failed to read file: %v", targetDBfile, err)
 	}
 	log.InitLogger("debug")
-	stf, err := parseSTFFile(targetDBfile, string(content))
-	if err != nil {
-		t.Fatalf("❌ [%s] Failed to parse STF: %v", targetDBfile, err)
+	var stateSnapShotRaw StateSnapshotRaw
+	var loadingState = "statetransition"
+	if loadingState == "statetransition" {
+		stf, err := parseSTFFile(targetDBfile, string(content))
+		if err != nil {
+			t.Fatalf("❌ [%s] Failed to parse STF: %v", targetDBfile, err)
+		}
+		stateSnapShotRaw = stf.PreState
+	} else {
+		stateSnapShotRaw, err = parseSnapShotRawFile(targetDBfile, string(content))
+		if err != nil {
+			t.Fatalf("❌ [%s] Failed to parse stateSnapShotRaw: %v", targetDBfile, err)
+		}
 	}
+
 	storage, err := InitStorage("/tmp/test")
 	if err != nil {
 		t.Fatalf("❌ [%s] Failed to init storage: %v", targetDBfile, err)
 	}
-
-	state, err := NewStateDBFromStateTransition(storage, &stf)
+	state, err := newStateDB(storage, common.Hash{})
 	if err != nil {
 		t.Fatalf("❌ [%s] Failed to create StateDB: %v", targetDBfile, err)
 	}
-	bundleFile := "test/04918460_0xf1166dc1eb7baff3d1c2450f319358c5c6789fe31313d331d4f035908045ad02_0_5_guarantor.json"
+	state.StateRoot, err = state.UpdateAllTrieStateRaw(stateSnapShotRaw)
+
+	state.JamState = NewJamState()
+	if err := state.InitTrieAndLoadJamState(state.StateRoot); err != nil {
+		t.Fatalf("❌ [%s] Failed to create StateDB: %v", targetDBfile, err)
+	}
 	bundleContent, err := os.ReadFile(bundleFile)
 	if err != nil {
 		t.Fatalf("❌ [%s] Failed to read bundle file: %v", bundleFile, err)
@@ -104,7 +120,7 @@ func TestBundleExecution(t *testing.T) {
 	// This allows PvmVerifyBaseDir to match logDir structure for verification
 	identifier := fmt.Sprintf("%s", bundle.Bundle.WorkPackage.Hash())
 
-	wr, err := state.ExecuteWorkPackageBundle(bundle.CoreIndex, bundle.Bundle, bundle.SegmentRootLookup, stf.Block.TimeSlot(), "", 0, testingBackend, identifier)
+	wr, err := state.ExecuteWorkPackageBundle(bundle.CoreIndex, bundle.Bundle, bundle.SegmentRootLookup, bundle.Slot, "", 0, testingBackend, identifier)
 	if err != nil {
 		// Check if it's a verification failure
 		if strings.Contains(err.Error(), "trace verification failed") {
@@ -114,7 +130,7 @@ func TestBundleExecution(t *testing.T) {
 	}
 	// see if the work report hash is the same
 	diff := CompareJSON(wr, bundle.Report)
-	if diff != "" {
+	if !strings.Contains(diff, "JSONs are identical") {
 		t.Errorf("❌ [%s] Work report does not match expected report:\n", bundleFile)
 		resultAns := wr.Results[0].Result.Ok
 		resultReal := bundle.Report.Results[0].Result.Ok

@@ -17,6 +17,50 @@ const (
 	HEADER_SIZE = 148
 )
 
+// PayloadType represents the type of EVM service payload
+type PayloadType byte
+
+const (
+	PayloadTypeBuilder      PayloadType = 0x00
+	PayloadTypeTransactions PayloadType = 0x01
+	PayloadTypeGenesis      PayloadType = 0x02
+	PayloadTypeCall         PayloadType = 0x03
+)
+
+// VerkleStateDelta represents the verkle state delta (VERKLE2.md Week 1)
+// Contains flattened [key(32B), value(32B)] pairs for state changes
+type VerkleStateDelta struct {
+	NumEntries uint32
+	Entries    []byte // Flattened key-value pairs
+}
+
+// Serialize serializes VerkleStateDelta to bytes
+func (d *VerkleStateDelta) Serialize() []byte {
+	if d == nil {
+		return nil
+	}
+	buffer := make([]byte, 4+len(d.Entries))
+	binary.LittleEndian.PutUint32(buffer[0:4], d.NumEntries)
+	copy(buffer[4:], d.Entries)
+	return buffer
+}
+
+// DeserializeVerkleStateDelta deserializes VerkleStateDelta from bytes
+func DeserializeVerkleStateDelta(data []byte) (*VerkleStateDelta, error) {
+	if len(data) < 4 {
+		return nil, fmt.Errorf("delta too short: got %d bytes, need at least 4", len(data))
+	}
+	numEntries := binary.LittleEndian.Uint32(data[0:4])
+	expectedLen := 4 + (numEntries * 64)
+	if uint32(len(data)) != expectedLen {
+		return nil, fmt.Errorf("invalid delta length: got %d, expected %d", len(data), expectedLen)
+	}
+	return &VerkleStateDelta{
+		NumEntries: numEntries,
+		Entries:    data[4:],
+	}, nil
+}
+
 // EvmBlockPayload represents the unified EVM block structure exported to JAM DA
 // This structure matches the Rust EvmBlockPayload exactly
 type EvmBlockPayload struct {
@@ -40,6 +84,10 @@ type EvmBlockPayload struct {
 	TxHashes      []common.Hash        // Transaction hashes (32 bytes each)
 	ReceiptHashes []common.Hash        // Receipt hashes (32 bytes each)
 	Transactions  []TransactionReceipt `json:"-"`
+
+	// Verkle state delta (VERKLE2.md Week 1)
+	// Optional field for delta-based state verification
+	VerkleStateDelta *VerkleStateDelta `json:"verkle_delta,omitempty"`
 }
 
 // EthereumBlock represents an Ethereum block for JSON-RPC responses (hex-encoded strings)
@@ -116,10 +164,22 @@ func (p *EvmBlockPayload) ToEthereumBlock(blockNumber uint32, fullTx bool) *Ethe
 
 // SerializeEvmBlockPayload serializes an EvmBlockPayload to bytes
 // Matches the Rust serialize() format exactly
+// Optional VerkleStateDelta is appended if present
 func SerializeEvmBlockPayload(payload *EvmBlockPayload) []byte {
-	// Calculate total size: 148 (fixed) + len(TxHashes)*32 + len(ReceiptHashes)*32
-	size := 148 + len(payload.TxHashes)*32 + len(payload.ReceiptHashes)*32
-	data := make([]byte, size)
+	// Calculate base size: 148 (fixed) + len(TxHashes)*32 + len(ReceiptHashes)*32
+	baseSize := 148 + len(payload.TxHashes)*32 + len(payload.ReceiptHashes)*32
+
+	// Calculate delta size if present
+	deltaSize := 0
+	var deltaBytes []byte
+	if payload.VerkleStateDelta != nil {
+		deltaBytes = payload.VerkleStateDelta.Serialize()
+		deltaSize = len(deltaBytes)
+	}
+
+	// Total size includes: base + 4 bytes (delta length) + delta data
+	totalSize := baseSize + 4 + deltaSize
+	data := make([]byte, totalSize)
 	offset := 0
 
 	// Serialize fixed header (148 bytes total)
@@ -157,6 +217,16 @@ func SerializeEvmBlockPayload(payload *EvmBlockPayload) []byte {
 	for _, receiptHash := range payload.ReceiptHashes {
 		copy(data[offset:offset+32], receiptHash[:])
 		offset += 32
+	}
+
+	// Serialize optional VerkleStateDelta
+	// Format: 4 bytes (delta_length) + delta_data
+	// If delta_length == 0, no delta present
+	binary.LittleEndian.PutUint32(data[offset:offset+4], uint32(deltaSize))
+	offset += 4
+	if deltaSize > 0 {
+		copy(data[offset:offset+deltaSize], deltaBytes)
+		offset += deltaSize
 	}
 
 	return data
@@ -224,6 +294,25 @@ func DeserializeEvmBlockPayload(data []byte, headerOnly bool) (*EvmBlockPayload,
 		}
 		copy(payload.ReceiptHashes[i][:], data[offset:offset+32])
 		offset += 32
+	}
+
+	// Parse optional VerkleStateDelta (if present)
+	// Format: 4 bytes (delta_length) + delta_data
+	if offset+4 <= len(data) {
+		deltaLen := binary.LittleEndian.Uint32(data[offset : offset+4])
+		offset += 4
+
+		if deltaLen > 0 {
+			if offset+int(deltaLen) > len(data) {
+				return nil, fmt.Errorf("insufficient data for verkle delta: need %d bytes, have %d", deltaLen, len(data)-offset)
+			}
+			delta, err := DeserializeVerkleStateDelta(data[offset : offset+int(deltaLen)])
+			if err != nil {
+				return nil, fmt.Errorf("failed to deserialize verkle delta: %w", err)
+			}
+			payload.VerkleStateDelta = delta
+			offset += int(deltaLen)
+		}
 	}
 
 	return payload, nil
@@ -365,4 +454,36 @@ func IsBlockObjectID(objectID common.Hash) (bool, uint32) {
 func ComputeLogsBloom(logs []EthereumLog) string {
 	// Return 256 bytes (512 hex chars) of zeros
 	return common.Bytes2Hex(make([]byte, 256))
+}
+
+// BuildPayload constructs a payload byte array for any payload type
+func BuildPayload(payloadType PayloadType, count int, globalDepth uint8, numWitnesses int, blockAccessListHash common.Hash) []byte {
+	payload := make([]byte, 40) // 1 + 4 + 1 + 2 + 32 = 40 bytes
+	payload[0] = byte(payloadType)
+	binary.LittleEndian.PutUint32(payload[1:5], uint32(count))
+	payload[5] = globalDepth
+	binary.LittleEndian.PutUint16(payload[6:8], uint16(numWitnesses))
+	copy(payload[8:40], blockAccessListHash[:])
+	return payload
+}
+
+// DefaultWorkPackage creates a work package with common default values
+func DefaultWorkPackage(serviceID uint32, service *types.ServiceAccount) types.WorkPackage {
+	return types.WorkPackage{
+		AuthCodeHost:          0,
+		AuthorizationCodeHash: common.Hash{}, // Caller should set if needed
+		AuthorizationToken:    nil,
+		ConfigurationBlob:     nil,
+		RefineContext:         types.RefineContext{}, // Caller should set this
+		WorkItems: []types.WorkItem{
+			{
+				Service:            serviceID,
+				CodeHash:           service.CodeHash,
+				RefineGasLimit:     types.RefineGasAllocation,
+				AccumulateGasLimit: types.AccumulationGasAllocation,
+				ImportedSegments:   []types.ImportSegment{},
+				ExportCount:        0,
+			},
+		},
+	}
 }

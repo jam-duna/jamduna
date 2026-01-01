@@ -11,13 +11,30 @@ func generateXnorOp64(inst Instruction) []byte {
 	dstReg := regInfoList[dst]
 
 	var code []byte
-	// XNOR: dst = ~(src1 ^ dst)
-	// Step 1: MOV dst, src1
-	code = append(code, emitMovRegToReg64(dstReg, src1)...)
-	// Step 2: XOR dst, src2
-	code = append(code, emitXorReg64(dstReg, src2)...)
-	// Step 3: NOT dst
-	code = append(code, emitNotReg64(dstReg)...)
+	// XNOR: dst = ~(src1 ^ src2)
+
+	// Handle aliasing: if dst == src2 and dst != src1, MOV dst, src1 will destroy src2
+	if dst == reg2 && dst != reg1 {
+		// dst aliases src2 but not src1
+		// Save src2 to RAX, do the operation, then use RAX as src2
+		code = append(code, emitPushReg(RAX)...)
+		code = append(code, emitMovRegToReg64(RAX, src2)...)
+		// Step 1: MOV dst, src1
+		code = append(code, emitMovRegToReg64(dstReg, src1)...)
+		// Step 2: XOR dst, RAX (original src2)
+		code = append(code, emitXorReg64(dstReg, RAX)...)
+		// Step 3: NOT dst
+		code = append(code, emitNotReg64(dstReg)...)
+		code = append(code, emitPopReg(RAX)...)
+	} else {
+		// No aliasing issue, or dst == src1 (which is fine, we read src1 first)
+		// Step 1: MOV dst, src1
+		code = append(code, emitMovRegToReg64(dstReg, src1)...)
+		// Step 2: XOR dst, src2
+		code = append(code, emitXorReg64(dstReg, src2)...)
+		// Step 3: NOT dst
+		code = append(code, emitNotReg64(dstReg)...)
+	}
 
 	return code
 }
@@ -973,6 +990,9 @@ func generateSetCondOp64(cc byte) func(inst Instruction) []byte {
 // generateMulUpperOp64 multiplies two 64-bit operands and stores the high 64 bits of the result in dst
 // mode: "signed" uses signed multiplication (IMUL), "unsigned" uses unsigned multiplication (MUL)
 // mode: "mixed" is treated the same as "unsigned" for now
+//
+// Key insight: MUL/IMUL uses RAX as implicit first operand and stores result in RDX:RAX
+// We need to handle aliasing when src1 or src2 is RAX (since we overwrite RAX with src1)
 func generateMulUpperOp64(mode string) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
 		reg1, reg2, dstIdx := extractThreeRegs(inst.Args)
@@ -982,9 +1002,19 @@ func generateMulUpperOp64(mode string) func(inst Instruction) []byte {
 
 		var code []byte
 
-		// Simple strategy: always save/restore RAX and RDX if needed
+		// Save/restore RAX and RDX if they're not the destination
 		saveRAX := dstIdx != 0
 		saveRDX := dstIdx != 2
+
+		// Aliasing case: src2 is RAX and src1 is NOT RAX
+		// When we do MOV RAX, src1, we destroy the original value of src2
+		// Solution: save src2 (RAX) to RCX first, then use RCX for the multiply
+		src2IsRAX := (reg2 == 0)
+		src1IsRAX := (reg1 == 0)
+		needTempForSrc2 := src2IsRAX && !src1IsRAX
+
+		// We need to save RCX if we're using it as temp and it's not otherwise involved
+		saveRCX := needTempForSrc2 && dstIdx != 1
 
 		if saveRAX {
 			code = append(code, emitPushReg(RAX)...)
@@ -992,16 +1022,31 @@ func generateMulUpperOp64(mode string) func(inst Instruction) []byte {
 		if saveRDX {
 			code = append(code, emitPushReg(RDX)...)
 		}
+		if saveRCX {
+			code = append(code, emitPushReg(RCX)...)
+		}
+
+		if needTempForSrc2 {
+			// Save original RAX (which is src2) to RCX before we overwrite RAX
+			code = append(code, emitMovRegToRegWithManualConstruction(RCX, RAX)...)
+		}
 
 		// Move src1 into RAX: MOV RAX, src1
 		code = append(code, emitMovRegToRegWithManualConstruction(RAX, src1)...)
 
+		// Choose the operand for MUL/IMUL
+		var mulOperand X86Reg
+		if needTempForSrc2 {
+			mulOperand = RCX
+		} else {
+			mulOperand = src2
+		}
+
 		// Multiply based on mode
 		if mode == "signed" {
-			code = append(code, emitImulReg64(src2)...)
+			code = append(code, emitImulReg64(mulOperand)...)
 		} else {
-			// For "unsigned" and "mixed", use unsigned MUL
-			code = append(code, emitMulReg64(src2)...)
+			code = append(code, emitMulReg64(mulOperand)...)
 		}
 
 		// Move high result (RDX) to destination if needed
@@ -1010,6 +1055,9 @@ func generateMulUpperOp64(mode string) func(inst Instruction) []byte {
 		}
 
 		// Restore in reverse order
+		if saveRCX {
+			code = append(code, emitPopReg(RCX)...)
+		}
 		if saveRDX {
 			code = append(code, emitPopReg(RDX)...)
 		}

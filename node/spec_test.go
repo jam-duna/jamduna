@@ -11,8 +11,8 @@ import (
 	chainspecs "github.com/colorfulnotion/jam/chainspecs"
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/statedb"
-	storage "github.com/colorfulnotion/jam/storage"
 	telemetry "github.com/colorfulnotion/jam/telemetry"
 	types "github.com/colorfulnotion/jam/types"
 )

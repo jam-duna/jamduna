@@ -13,24 +13,30 @@ use alloc::format;
 use primitive_types::{H160, H256, U256};
 use utils::hash_functions::keccak256;
 
+// Core Verkle math primitives (Bandersnatch over BLS12-381 scalar field)
+#[path = "verkle/field.rs"]
+pub mod field;
+#[path = "verkle/curve.rs"]
+pub mod curve;
+#[path = "verkle/srs.rs"]
+pub mod srs;
+#[path = "verkle/hash.rs"]
+pub mod hash;
+#[path = "verkle/ipa.rs"]
+pub mod ipa;
+#[path = "verkle/tree.rs"]
+pub mod tree;
+pub use curve::BandersnatchPoint;
+pub use field::{Fq, Fr};
+pub use srs::{generate_srs, generate_srs_points};
+pub use hash::hash_point_to_bytes;
+pub use ipa::{IPAProof, IPAConfig, Transcript, verify_ipa_proof, IPA_VECTOR_LENGTH, batch_invert};
+pub use tree::{VerkleNode, ValueUpdate, tree_from_state_diff, apply_state_diff_to_tree};
+
 // ===== FFI Declarations =====
 
 #[polkavm_derive::polkavm_import]
 extern "C" {
-    /// Verify Verkle proof via host function (index 253)
-    ///
-    /// Parameters (via PVM registers):
-    /// - r7: witness_ptr (pointer to serialized VerkleWitness)
-    /// - r8: witness_len (length of serialized witness)
-    ///
-    /// Returns (via r7):
-    /// - 1 if proof is valid
-    /// - 0 if proof is invalid
-    ///
-    /// NOTE: Kept for dual-verification mode (cross-validation with native Rust)
-    #[polkavm_import(index = 253)]
-    pub fn host_verify_verkle_proof(witness_ptr: u64, witness_len: u64) -> u64;
-
     /// Unified Verkle fetch function (two-step API) (index 255)
     ///
     /// Parameters (via PVM registers):
@@ -560,70 +566,6 @@ impl VerkleWitness {
         result
     }
 
-    /// REMOVED: Verkle proof verification via Go FFI host function
-    /// The guarantor now skips verification until native Rust implementation is ready
-    /// See: services/evm/src/state.rs from_verkle_witness()
-    #[allow(dead_code)]
-    fn verify_raw_unused(witness_data: &[u8]) -> bool {
-        utils::functions::log_info(&format!(
-            "verify_raw: input witness_data.len()={}",
-            witness_data.len()
-        ));
-
-        // Native Rust verification (always run)
-        let rust_result = super::verkle_proof::verify_verkle_witness(witness_data);
-        utils::functions::log_info(&format!(
-            "verify_raw: Rust verification returned {}",
-            rust_result
-        ));
-
-        // Dual verification mode: Cross-check with Go host function
-        #[cfg(feature = "dual-verkle-verify")]
-        {
-            utils::functions::log_info("verify_raw: Dual verification mode enabled");
-
-            let mut buffer = alloc::vec![0u8; witness_data.len()];
-            buffer.copy_from_slice(witness_data);
-
-            let go_result = unsafe {
-                let result = host_verify_verkle_proof(
-                    buffer.as_ptr() as u64,
-                    witness_data.len() as u64,
-                );
-                result == 1
-            };
-
-            utils::functions::log_info(&format!(
-                "verify_raw: Go verification returned {}",
-                go_result
-            ));
-
-            // Cross-validation check
-            if rust_result != go_result {
-                utils::functions::log_error(&format!(
-                    "❌ VERIFICATION MISMATCH! Rust={}, Go={} (witness_len={})",
-                    rust_result, go_result, witness_data.len()
-                ));
-                // In dual-verify mode, fail if implementations disagree
-                return false;
-            } else {
-                utils::functions::log_info(&format!(
-                    "✅ Dual verification agreement: both={}",
-                    rust_result
-                ));
-            }
-        }
-
-        rust_result
-    }
-
-    /// REMOVED: Verkle proof verification
-    /// The guarantor now skips verification until native Rust implementation is ready
-    #[allow(dead_code)]
-    pub fn verify(&self) -> bool {
-        // TODO: Implement native Rust Verkle proof verification
-        true // Accept all witnesses as valid for now
-    }
 
     /// Parse the witness to extract state data into structured caches
     ///

@@ -3,11 +3,13 @@ package storage
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"sort"
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/statedb/evmtypes"
+	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
+	evmverkle "github.com/colorfulnotion/jam/builder/evm/verkle"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-verkle"
@@ -102,25 +104,33 @@ func BuildVerkleWitness(
 	preStateRoot := tree.Commit()
 	preStateRootBytes := preStateRoot.Bytes()
 
-	// Step 4: Generate pre-state multiproof (only for present keys)
-	presentKeyBytes := make([][]byte, len(presentReadKeys))
-	for i, key := range presentReadKeys {
-		presentKeyBytes[i] = key[:]
+	// Step 4: Generate pre-state multiproof (for ALL keys, including absent ones)
+	// go-verkle handles absent keys via proof-of-absence stems
+	allKeyBytes := make([][]byte, len(allReadKeys))
+	for i, key := range allReadKeys {
+		allKeyBytes[i] = key[:]
 	}
 
 	var preProof []byte
-	if len(presentKeyBytes) == 0 {
+	if len(allKeyBytes) == 0 {
 		preProof = []byte{}
-		log.Trace(log.EVM, "BuildVerkleWitness: no present read keys, skipping pre-state proof generation")
+		log.Trace(log.EVM, "BuildVerkleWitness: no read keys, skipping pre-state proof generation")
 	} else {
-		preProof, _, _, err = GenerateVerkleProof(tree, presentKeyBytes)
+		preProof, _, _, err = evmverkle.GenerateVerkleProof(tree, allKeyBytes)
 		if err != nil {
 			return nil, common.Hash{}, nil, fmt.Errorf("failed to generate pre-state proof: %w", err)
 		}
-		log.Trace(log.EVM, "✅ Generated PRE-STATE proof",
+		log.Info(log.EVM, "✅ Generated PRE-STATE proof",
 			"proofLen", len(preProof),
+			"totalKeys", len(allReadKeys),
 			"presentKeys", len(presentReadKeys),
 			"preStateRoot", fmt.Sprintf("%x", preStateRootBytes[:]))
+
+		// NOTE: Go-side verification skipped because:
+		// 1. Proof now includes root at commitments_by_path[0] (for Rust verifier)
+		// 2. go-verkle's Verify() expects root as separate parameter, not in CommitmentsByPath
+		// 3. Would require unmarshaling proof, removing root, then verifying - wasteful
+		// 4. Rust guarantor will verify the proof cryptographically anyway
 	}
 
 	// ===== PHASE 2: Post-State Section (Writes) =====
@@ -178,8 +188,8 @@ func BuildVerkleWitness(
 		}
 	}
 
-	// Step 7: Generate post-state multiproof with state transition
-	// Pass BOTH pre-tree and post-tree to MakeVerkleMultiProof
+	// Step 7: Generate post-state multiproof (post-state only)
+	// Use postTree for both inputs so the proof is anchored to the post root.
 	writeKeyBytes := make([][]byte, len(writeKeys))
 	for i, key := range writeKeys {
 		writeKeyBytes[i] = key[:]
@@ -190,15 +200,17 @@ func BuildVerkleWitness(
 		postProof = []byte{}
 		log.Trace(log.EVM, "BuildVerkleWitness: no write keys, skipping post-state proof generation")
 	} else {
-		postProof, _, _, err = GenerateVerkleProofWithTransition(tree, postTree, writeKeyBytes)
+		postProof, _, _, err = evmverkle.GenerateVerkleProof(postTree, writeKeyBytes)
 		if err != nil {
 			return nil, common.Hash{}, nil, fmt.Errorf("failed to generate post-state proof: %w", err)
 		}
-		log.Trace(log.EVM, "✅ Generated POST-STATE proof (with state transition)",
+		log.Info(log.EVM, "✅ Generated POST-STATE proof",
 			"proofLen", len(postProof),
 			"writeKeys", len(writeKeys),
 			"preStateRoot", fmt.Sprintf("%x", preStateRootBytes[:]),
 			"postStateRoot", fmt.Sprintf("%x", postStateRootBytes[:]))
+
+		// NOTE: Go-side verification skipped (same reason as pre-state proof above)
 	}
 
 	// ===== PHASE 3: Serialize Dual-Proof Witness =====
@@ -289,6 +301,14 @@ func BuildVerkleWitness(
 		"preProofLen", preProofLen,
 		"postProofLen", postProofLen)
 
+	if outPath := os.Getenv("JAM_VERKLE_WITNESS_OUT"); outPath != "" {
+		if err := os.WriteFile(outPath, result, 0o644); err != nil {
+			log.Warn(log.EVM, "BuildVerkleWitness: failed to write witness file", "path", outPath, "err", err)
+		} else {
+			log.Info(log.EVM, "BuildVerkleWitness: wrote witness file", "path", outPath, "size", len(result))
+		}
+	}
+
 	return result, postStateRoot, postTree, nil
 }
 
@@ -373,7 +393,7 @@ func VerifyPostStateProof(
 		builderPostValueBytes[i] = builderPostValues[i][:]
 	}
 
-	valid, err := VerifyVerkleProof(
+	valid, err := evmverkle.VerifyVerkleProof(
 		postProofData,
 		claimedPostRoot[:],
 		builderWriteKeyBytes,
@@ -513,7 +533,7 @@ func extractKeyMetadata(contractBlob []byte, keys [][32]byte, verkleReadLog []ty
 			switch kind {
 			case 0x00: // Code
 				// BasicData key
-				basicKey := BasicDataKey(address[:])
+				basicKey := evmverkle.BasicDataKey(address[:])
 				var key32 [32]byte
 				copy(key32[:], basicKey)
 				if idx, ok := keyToIndex[key32]; ok {
@@ -526,7 +546,7 @@ func extractKeyMetadata(contractBlob []byte, keys [][32]byte, verkleReadLog []ty
 				}
 
 				// CodeHash key
-				codeHashKey := CodeHashKey(address[:])
+				codeHashKey := evmverkle.CodeHashKey(address[:])
 				copy(key32[:], codeHashKey)
 				if idx, ok := keyToIndex[key32]; ok {
 					metadata[idx] = KeyMetadata{
@@ -538,10 +558,10 @@ func extractKeyMetadata(contractBlob []byte, keys [][32]byte, verkleReadLog []ty
 				}
 
 				// Code chunks
-				chunks := ChunkifyCode(payload)
+				chunks := evmverkle.ChunkifyCode(payload)
 				numChunks := len(chunks) / 32
 				for chunkID := uint64(0); chunkID < uint64(numChunks); chunkID++ {
-					chunkKey := CodeChunkKey(address[:], chunkID)
+					chunkKey := evmverkle.CodeChunkKey(address[:], chunkID)
 					copy(key32[:], chunkKey)
 					if idx, ok := keyToIndex[key32]; ok {
 						metadata[idx] = KeyMetadata{
@@ -556,7 +576,7 @@ func extractKeyMetadata(contractBlob []byte, keys [][32]byte, verkleReadLog []ty
 			case 0x01: // Storage
 				entries, _ := evmtypes.ParseShardPayload(payload)
 				for _, entry := range entries {
-					storageKey := StorageSlotKey(address[:], entry.KeyH[:])
+					storageKey := evmverkle.StorageSlotKey(address[:], entry.KeyH[:])
 					var key32 [32]byte
 					copy(key32[:], storageKey)
 					if idx, ok := keyToIndex[key32]; ok {
@@ -573,7 +593,7 @@ func extractKeyMetadata(contractBlob []byte, keys [][32]byte, verkleReadLog []ty
 
 			case 0x02: // Balance
 				// Balance writes update BasicData (balance field)
-				basicKey := BasicDataKey(address[:])
+				basicKey := evmverkle.BasicDataKey(address[:])
 				var key32 [32]byte
 				copy(key32[:], basicKey)
 				if idx, ok := keyToIndex[key32]; ok {
@@ -587,7 +607,7 @@ func extractKeyMetadata(contractBlob []byte, keys [][32]byte, verkleReadLog []ty
 
 			case 0x06: // Nonce
 				// Nonce writes also update BasicData (nonce field)
-				basicKey := BasicDataKey(address[:])
+				basicKey := evmverkle.BasicDataKey(address[:])
 				var key32 [32]byte
 				copy(key32[:], basicKey)
 				if idx, ok := keyToIndex[key32]; ok {
@@ -669,31 +689,31 @@ func parseContractWitnessBlobForKeys(blob []byte, keySet map[[32]byte]struct{}) 
 
 		case 0x00: // Code
 			// Add code hash key
-			codeHashKey := CodeHashKey(address)
+			codeHashKey := evmverkle.CodeHashKey(address)
 			var key32 [32]byte
 			copy(key32[:], codeHashKey)
 			keySet[key32] = struct{}{}
 			writeKeyCount++
 
 			// Add code chunk keys
-			chunks := ChunkifyCode(payload)
+			chunks := evmverkle.ChunkifyCode(payload)
 			numChunks := len(chunks) / 32
 			for chunkID := uint64(0); chunkID < uint64(numChunks); chunkID++ {
-				chunkKey := CodeChunkKey(address, chunkID)
+				chunkKey := evmverkle.CodeChunkKey(address, chunkID)
 				copy(key32[:], chunkKey)
 				keySet[key32] = struct{}{}
 				writeKeyCount++
 			}
 
 			// Also add BasicData key (for code_size update)
-			basicDataKey := BasicDataKey(address)
+			basicDataKey := evmverkle.BasicDataKey(address)
 			copy(key32[:], basicDataKey)
 			keySet[key32] = struct{}{}
 			writeKeyCount++
 
 		case 0x02: // Balance
 			// Add BasicData key (for balance update)
-			basicDataKey := BasicDataKey(address)
+			basicDataKey := evmverkle.BasicDataKey(address)
 			var key32 [32]byte
 			copy(key32[:], basicDataKey)
 			keySet[key32] = struct{}{}
@@ -701,7 +721,7 @@ func parseContractWitnessBlobForKeys(blob []byte, keySet map[[32]byte]struct{}) 
 
 		case 0x06: // Nonce
 			// Add BasicData key (for nonce update)
-			basicDataKey := BasicDataKey(address)
+			basicDataKey := evmverkle.BasicDataKey(address)
 			var key32 [32]byte
 			copy(key32[:], basicDataKey)
 			keySet[key32] = struct{}{}
@@ -726,7 +746,7 @@ func extractStorageVerkleKeys(address []byte, payload []byte) ([][32]byte, error
 	keys := make([][32]byte, 0, len(entries))
 	for _, entry := range entries {
 		// Derive Verkle key from storage key
-		storageKey := StorageSlotKey(address, entry.KeyH[:])
+		storageKey := evmverkle.StorageSlotKey(address, entry.KeyH[:])
 		var key32 [32]byte
 		copy(key32[:], storageKey)
 		keys = append(keys, key32)
@@ -909,7 +929,7 @@ func applyStorageWrites(address []byte, payload []byte, tree verkle.VerkleNode) 
 	}
 
 	for _, entry := range entries {
-		verkleKey := StorageSlotKey(address, entry.KeyH[:])
+		verkleKey := evmverkle.StorageSlotKey(address, entry.KeyH[:])
 		if err := tree.Insert(verkleKey, entry.Value[:], nil); err != nil {
 			return fmt.Errorf("failed to insert storage slot: %v", err)
 		}
@@ -922,15 +942,15 @@ func applyStorageWrites(address []byte, payload []byte, tree verkle.VerkleNode) 
 // This includes: BasicData (code_size), CodeHash, and CodeChunks
 func applyCodeWrites(address []byte, code []byte, tree verkle.VerkleNode) error {
 	// 1. Insert code chunks
-	if err := InsertCodeChunks(tree, address, code); err != nil {
+	if err := evmverkle.InsertCodeChunks(tree, address, code); err != nil {
 		return fmt.Errorf("failed to insert code chunks: %v", err)
 	}
 
 	// 2. Insert code hash
-	codeHashKey := CodeHashKey(address)
+	codeHashKey := evmverkle.CodeHashKey(address)
 	var codeHash [32]byte
 	if len(code) == 0 {
-		copy(codeHash[:], GetEmptyCodeHash())
+		copy(codeHash[:], evmverkle.GetEmptyCodeHash())
 	} else {
 		hash := crypto.Keccak256(code)
 		copy(codeHash[:], hash)
@@ -940,7 +960,7 @@ func applyCodeWrites(address []byte, code []byte, tree verkle.VerkleNode) error 
 	}
 
 	// 3. Update BasicData with code_size
-	basicDataKey := BasicDataKey(address)
+	basicDataKey := evmverkle.BasicDataKey(address)
 	basicData := make([]byte, 32)
 
 	// Read existing BasicData first (to preserve balance/nonce)
@@ -970,7 +990,7 @@ func applyBalanceWrites(address []byte, payload []byte, tree verkle.VerkleNode) 
 
 	// Balance is stored in BasicData (offset 16-31, 16 bytes)
 	// Per EIP-6800: nonce at offset 8, balance at offset 16
-	basicDataKey := BasicDataKey(address)
+	basicDataKey := evmverkle.BasicDataKey(address)
 	basicData := make([]byte, 32)
 
 	// Read existing BasicData first (to preserve nonce/code_size)
@@ -997,7 +1017,7 @@ func applyNonceWrites(address []byte, payload []byte, tree verkle.VerkleNode) er
 
 	// Nonce is stored in BasicData (offset 8-15, 8 bytes)
 	// Per EIP-6800: version at 0-4, code_size at 5-7, nonce at 8-15, balance at 16-31
-	basicDataKey := BasicDataKey(address)
+	basicDataKey := evmverkle.BasicDataKey(address)
 	basicData := make([]byte, 32)
 
 	// Read existing BasicData first (to preserve balance/code_size)

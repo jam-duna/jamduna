@@ -21,8 +21,6 @@ func (m *MockJAMDA) StoreSegment(workPackageHash common.Hash, segmentIndex uint1
 		m.segments[workPackageHash] = make(map[uint16][]byte)
 	}
 	m.segments[workPackageHash][segmentIndex] = data
-	fmt.Printf("MockJAMDA.StoreSegment: workPackageHash=%s, segmentIndex=%d, len=%d\n",
-		workPackageHash.Hex(), segmentIndex, len(data))
 }
 
 func (m *MockJAMDA) FetchJAMDASegments(workPackageHash common.Hash, indexStart uint16, indexEnd uint16, payloadLength uint32) ([]byte, error) {

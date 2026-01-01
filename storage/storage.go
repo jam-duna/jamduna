@@ -7,10 +7,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"os"
 	"reflect"
 	"sync"
 
+	evmverkle "github.com/colorfulnotion/jam/builder/evm/verkle"
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb/evmtypes"
@@ -116,6 +118,10 @@ type StateDBStorage struct {
 	verkleReadLog      []types.VerkleRead
 	verkleReadLogMutex sync.Mutex // Protects verkleReadLog
 
+	// Checkpoint manager for proof serving (VERKLE2.md Week 2)
+	// Manages in-memory checkpoint trees with pinned (genesis, snapshots) + LRU cache
+	CheckpointManager *CheckpointTreeManager
+
 	// Multi-rollup support: Service-scoped state tracking
 	// Each service maintains its own EVM block history and verkle state
 
@@ -189,6 +195,21 @@ func NewStateDBStorage(path string, jamda types.JAMDA, telemetryClient types.Tel
 		serviceBlockHashIndex: make(map[string]uint64),
 		latestRollupBlock:     make(map[uint32]uint64),
 	}
+
+	// Initialize checkpoint manager (VERKLE2.md Week 2)
+	// maxCheckpoints: 100 (keeps ~100 fine checkpoints in LRU)
+	// coarsePeriod: 7200 blocks (~12h at 2s/block)
+	// finePeriod: 600 blocks (~1h at 2s/block)
+	checkpointManager, err := NewCheckpointTreeManager(
+		100,                 // maxCheckpoints
+		7200,                // coarsePeriod
+		600,                 // finePeriod
+		s.LoadBlockByHeight, // blockLoader callback
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create checkpoint manager: %w", err)
+	}
+	s.CheckpointManager = checkpointManager
 
 	// Get initial root from trie
 	initialRoot := trieDB.GetRoot()
@@ -293,7 +314,7 @@ func (store *StateDBStorage) GetBalance(tree interface{}, address common.Address
 	}
 
 	// Read from Verkle tree BasicData
-	basicDataKey := BasicDataKey(address[:])
+	basicDataKey := evmverkle.BasicDataKey(address[:])
 	basicData, err := verkleTree.Get(basicDataKey[:], nil)
 	if err != nil {
 		return common.Hash{}, nil
@@ -320,7 +341,7 @@ func (store *StateDBStorage) GetNonce(tree interface{}, address common.Address) 
 	}
 
 	// Read from Verkle tree BasicData
-	basicDataKey := BasicDataKey(address[:])
+	basicDataKey := evmverkle.BasicDataKey(address[:])
 	basicData, err := verkleTree.Get(basicDataKey[:], nil)
 	if err != nil {
 		return 0, nil
@@ -552,7 +573,7 @@ func (store *StateDBStorage) FetchBalance(address common.Address, txIndex uint32
 	}
 
 	// Compute Verkle key for balance
-	verkleKey := BasicDataKey(address[:])
+	verkleKey := evmverkle.BasicDataKey(address[:])
 
 	// Track the read in verkleReadLog
 	store.AppendVerkleRead(types.VerkleRead{
@@ -582,7 +603,7 @@ func (store *StateDBStorage) FetchNonce(address common.Address, txIndex uint32) 
 	}
 
 	// Compute Verkle key for nonce
-	verkleKey := BasicDataKey(address[:])
+	verkleKey := evmverkle.BasicDataKey(address[:])
 
 	// Track the read in verkleReadLog
 	store.AppendVerkleRead(types.VerkleRead{
@@ -612,7 +633,7 @@ func (store *StateDBStorage) FetchCode(address common.Address, txIndex uint32) (
 	// Read code size from BasicData first
 	var codeSize uint32
 
-	basicDataKey := BasicDataKey(address[:])
+	basicDataKey := evmverkle.BasicDataKey(address[:])
 
 	// Track BasicData read for Verkle witness
 	store.AppendVerkleRead(types.VerkleRead{
@@ -631,7 +652,7 @@ func (store *StateDBStorage) FetchCode(address common.Address, txIndex uint32) (
 
 	if codeSize == 0 {
 		// Track CodeHash read even for EOAs for witness completeness
-		codeHashKey := CodeHashKey(address[:])
+		codeHashKey := evmverkle.CodeHashKey(address[:])
 		store.AppendVerkleRead(types.VerkleRead{
 			VerkleKey: common.BytesToHash(codeHashKey),
 			Address:   address,
@@ -650,7 +671,7 @@ func (store *StateDBStorage) FetchCode(address common.Address, txIndex uint32) (
 
 	// Read each chunk
 	for chunkID := uint64(0); chunkID < uint64(numChunks); chunkID++ {
-		chunkKey := CodeChunkKey(address[:], chunkID)
+		chunkKey := evmverkle.CodeChunkKey(address[:], chunkID)
 
 		// Track the read in verkleReadLog
 		store.AppendVerkleRead(types.VerkleRead{
@@ -691,12 +712,12 @@ func (store *StateDBStorage) FetchCodeHash(address common.Address, txIndex uint3
 	var codeHash [32]byte
 
 	if store.CurrentVerkleTree == nil {
-		copy(codeHash[:], GetEmptyCodeHash())
+		copy(codeHash[:], evmverkle.GetEmptyCodeHash())
 		return codeHash, nil
 	}
 
 	// Compute Verkle key for code hash
-	verkleKey := CodeHashKey(address[:])
+	verkleKey := evmverkle.CodeHashKey(address[:])
 
 	// Track the read in verkleReadLog
 	store.AppendVerkleRead(types.VerkleRead{
@@ -713,7 +734,7 @@ func (store *StateDBStorage) FetchCodeHash(address common.Address, txIndex uint3
 		copy(codeHash[:], codeHashData[:32])
 	} else {
 		// Code hash not found - return empty code hash
-		copy(codeHash[:], GetEmptyCodeHash())
+		copy(codeHash[:], evmverkle.GetEmptyCodeHash())
 	}
 
 	return codeHash, nil
@@ -730,7 +751,7 @@ func (store *StateDBStorage) FetchStorage(address common.Address, storageKey [32
 	}
 
 	// Compute Verkle key for storage slot
-	verkleKey := StorageSlotKey(address[:], storageKey[:])
+	verkleKey := evmverkle.StorageSlotKey(address[:], storageKey[:])
 
 	// Track the read in verkleReadLog
 	store.AppendVerkleRead(types.VerkleRead{
@@ -1150,6 +1171,25 @@ func (store *StateDBStorage) FinalizeEVMBlock(
 	}
 	store.verkleRootsMutex.Unlock()
 
+	// Create checkpoint if needed (VERKLE2.md Week 2)
+	if store.CheckpointManager != nil && store.CurrentVerkleTree != nil {
+		blockHeight := uint64(payload.Number)
+
+		// Pin genesis checkpoint (never evicted)
+		if blockHeight == 0 {
+			store.CheckpointManager.PinCheckpoint(blockHeight, store.CurrentVerkleTree)
+			log.Info(log.EVM, "Pinned genesis checkpoint",
+				"height", blockHeight,
+				"verkleRoot", payload.VerkleRoot.String())
+		} else if store.CheckpointManager.ShouldCreateCheckpoint(blockHeight) {
+			// Add to LRU cache for fine/coarse checkpoints
+			store.CheckpointManager.AddCheckpoint(blockHeight, store.CurrentVerkleTree)
+			log.Info(log.EVM, "Created checkpoint",
+				"height", blockHeight,
+				"verkleRoot", payload.VerkleRoot.String())
+		}
+	}
+
 	log.Info(log.EVM, "Finalized EVM block",
 		"serviceID", serviceID,
 		"blockNumber", payload.Number,
@@ -1159,4 +1199,118 @@ func (store *StateDBStorage) FinalizeEVMBlock(
 		"jamSlot", jamSlot)
 
 	return nil
+}
+
+// InitializeEVMGenesis creates a genesis block for an EVM service with an initial account balance
+// This sets up the Verkle tree with the genesis account and stores block 0
+// Returns the verkle root hash and any error
+func (store *StateDBStorage) InitializeEVMGenesis(
+	serviceID uint32,
+	issuerAddress common.Address,
+	startBalance int64,
+) (common.Hash, error) {
+	log.Info(log.EVM, "InitializeEVMGenesis - Initializing EVM genesis state",
+		"serviceID", serviceID,
+		"issuerAddress", issuerAddress.Hex(),
+		"startBalance", startBalance)
+
+	// Convert startBalance to Wei (18 decimals)
+	balanceWei := new(big.Int).Mul(big.NewInt(startBalance), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+
+	// Get current verkle tree
+	if store.CurrentVerkleTree == nil {
+		return common.Hash{}, fmt.Errorf("CurrentVerkleTree is nil")
+	}
+
+	// Insert account BasicData (balance + nonce)
+	// BasicData format: [version(1) | reserved(4) | code_size(3) | nonce(8) | balance(16)] = 32 bytes
+	var basicData [32]byte
+	basicData[0] = 0 // version = 0
+
+	// code_size = 0 (EOA, no code)
+	basicData[5] = 0
+	basicData[6] = 0
+	basicData[7] = 0
+
+	// nonce = 1 (8 bytes at offset 8-15, big-endian per EIP-6800)
+	nonce := uint64(1)
+	binary.BigEndian.PutUint64(basicData[8:16], nonce)
+
+	// balance = balanceWei (16 bytes at offset 16-31, big-endian per EIP-6800)
+	balanceBytes := balanceWei.Bytes()
+	if len(balanceBytes) > 16 {
+		return common.Hash{}, fmt.Errorf("balance too large: %d bytes", len(balanceBytes))
+	}
+	// Copy to offset 16, right-aligned (pad left with zeros if needed)
+	copy(basicData[32-len(balanceBytes):32], balanceBytes)
+
+	// Insert BasicData into Verkle tree
+	basicDataKey := evmverkle.BasicDataKey(issuerAddress[:])
+	if err := store.CurrentVerkleTree.Insert(basicDataKey, basicData[:], nil); err != nil {
+		return common.Hash{}, fmt.Errorf("failed to insert BasicData: %w", err)
+	}
+
+	// Commit the updated verkle tree
+	verkleRoot := store.CurrentVerkleTree.Commit()
+	verkleRootBytes := verkleRoot.Bytes()
+	verkleRootHash := common.BytesToHash(verkleRootBytes[:])
+
+	// Store the updated verkle tree
+	store.StoreVerkleTree(verkleRootHash, store.CurrentVerkleTree)
+
+	// Create genesis block (block 0) for EVM service
+	genesisBlock := &evmtypes.EvmBlockPayload{
+		Number:              0,
+		WorkPackageHash:     common.Hash{},
+		SegmentRoot:         common.Hash{},
+		PayloadLength:       148,
+		NumTransactions:     0,
+		Timestamp:           0,
+		GasUsed:             0,
+		VerkleRoot:          verkleRootHash,
+		TransactionsRoot:    common.Hash{},
+		ReceiptRoot:         common.Hash{},
+		BlockAccessListHash: common.Hash{},
+		TxHashes:            []common.Hash{},
+		ReceiptHashes:       []common.Hash{},
+		Transactions:        []evmtypes.TransactionReceipt{},
+	}
+
+	// Store genesis block
+	if err := store.StoreServiceBlock(serviceID, genesisBlock, common.Hash{}, 0); err != nil {
+		return common.Hash{}, fmt.Errorf("failed to store genesis block: %w", err)
+	}
+
+	log.Info(log.EVM, "✅ InitializeEVMGenesis complete",
+		"verkleRoot", verkleRootHash.Hex(),
+		"issuerBalance", balanceWei.String())
+
+	return verkleRootHash, nil
+}
+
+// LoadBlockByHeight loads a block by height for checkpoint manager
+// This is used by CheckpointTreeManager for delta replay
+// Currently assumes serviceID 1 (primary EVM service)
+// TODO: Support multi-service checkpoint managers
+func (store *StateDBStorage) LoadBlockByHeight(height uint64) (*evmtypes.EvmBlockPayload, error) {
+	// Use serviceID 1 as default (primary EVM service)
+	const defaultServiceID = uint32(1)
+
+	blockKey := fmt.Sprintf("sblock_%d_%d", defaultServiceID, height)
+	blockBytes, err := store.db.Get([]byte(blockKey), nil)
+	if err != nil {
+		return nil, fmt.Errorf("block %d not found: %w", height, err)
+	}
+
+	var block evmtypes.EvmBlockPayload
+	if err := json.Unmarshal(blockBytes, &block); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal block %d: %w", height, err)
+	}
+
+	return &block, nil
+}
+
+// ExtractVerkleStateDelta extracts the verkle state delta from a post-state witness
+func (s *StateDBStorage) ExtractVerkleStateDelta(postStateWitness []byte) (*evmverkle.VerkleStateDelta, error) {
+	return evmverkle.ExtractVerkleStateDelta(postStateWitness)
 }

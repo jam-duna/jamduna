@@ -18,6 +18,9 @@ pub const GOVERNOR_ADDRESS: H160 = H160([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2
 /// Math precompile (0x0000000000000000000000000000000000000003)
 pub const MATH_PRECOMPILE_ADDRESS: H160 = H160([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3]);
 
+/// Shield.sol precompile for Railgun deposits (0x0000000000000000000000000000000000000010)
+pub const SHIELD_ADDRESS: H160 = H160([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0x10]);
+
 // ===== Tree Layout Constants =====
 
 /// Verkle tree branch width (number of children per node)

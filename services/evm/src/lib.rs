@@ -24,6 +24,11 @@ pub const PRECOMPILES: &[(u8, &[u8], &str)] = &[
         include_bytes!("../contracts/math-runtime.bin"),
         "math-runtime.bin",
     ),
+    (
+        0x10,
+        include_bytes!("../contracts/shield-runtime.bin"),
+        "shield-runtime.bin",
+    ),
 ];
 
 // Declare all modules (same as main.rs)

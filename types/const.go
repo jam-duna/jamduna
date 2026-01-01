@@ -71,7 +71,7 @@ const (
 	EpochLength                      = 12             // E: The length of an epoch in timeslots.
 	AccumulationGasAllocation        = 10_000_000     // G_A: The total gas allocated to a core for Accumulation.
 	IsAuthorizedGasAllocation        = 50000000       // G_I: The gas allocated to invoke a work-package’s Is-Authorized logic.
-	RefineGasAllocation              = 1000000000     // G_R: The total gas allocated for a work-package’s Refine logic.
+	RefineGasAllocation              = 1000000000     // HACK -- should be 1B G_R: The total gas allocated for a work-package’s Refine logic.
 	AccumulateGasAllocation_GT       = 20_000_000     // G_T: The total gas allocated across all cores for Accumulation. Should be no smaller than GA ⋅ C +∑g∈V(χg )(g).
 	RecentHistorySize                = 8              // H = 8: The size of recent history, in blocks.
 	MaxWorkItemsPerPackage           = 16             // I = 4: The maximum amount of work items in a package.

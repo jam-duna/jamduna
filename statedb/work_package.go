@@ -21,9 +21,13 @@ func (s *StateDB) GetAuthorizeCode(wp types.WorkPackage) (auth_code_real []byte,
 
 	code, ok, err := s.ReadServicePreimageBlob(p_h, p_u)
 	if err != nil || !ok {
-		log.Error(log.G, "GetAuthorizeCode: ReadServicePreimageBlob error", "workPackage", wp.String(), "codeHost", p_h, "codeHash", p_u, "error", err)
-		panic(2222)
-		return nil, nil, 0, fmt.Errorf("getAuthorizeCode: ReadServicePreimageBlob error, err %v, codehash:%v", err, p_u)
+		log.Error(log.G, "GetAuthorizeCode: ReadServicePreimageBlob not found",
+			"codeHost", p_h,
+			"codeHash", p_u,
+			"stateRoot", s.StateRoot,
+			"ok", ok,
+			"error", err)
+		return nil, nil, 0, fmt.Errorf("getAuthorizeCode: auth code preimage not found in service %d, hash=%s, stateRoot=%s", p_h, p_u.Hex(), s.StateRoot.Hex())
 	}
 	auth_code := AuthorizeCode{}
 	err = auth_code.Decode(code)

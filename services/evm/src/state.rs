@@ -325,12 +325,28 @@ impl MajikBackend {
         witness_data: &[u8],
         global_depth: u8,
     ) -> Option<Self> {
-        // TODO: Implement native Rust Verkle proof verification
-        // For now, skip verification and accept the witness as valid
-        // This avoids calling the Go FFI host function VERIFY_VERKLE_PROOF (index 253)
-        log_info("⚠️  Guarantor: Skipping Verkle proof verification (accepting witness as valid)");
+        // Native Rust Verkle proof verification (production ready)
+        // Cryptographic verification via verify_verkle_witness:
+        // - verify_prestate_commitment: validates pre-values exist in pre_state_root (IPA proof)
+        // - verify_post_state_commitment: validates post-values exist in post_state_root (IPA proof)
+        // - verify_ipa_multiproof: full line-by-line port of go-ipa verifier
+        //
+        // Transition verification happens during cache-only execution:
+        // - Pre-witness values loaded into read-only cache below
+        // - Any read not in cache = GUARANTOR ... MISS panic (execution invalid)
+        // - Deterministic re-execution + valid witnesses = valid state transition
+        //
+        // See services/evm/docs/VERKLE.md for JAM execution model details
 
-        // Deserialize the witness without verification
+        log_info("⚙️  Guarantor: Running Verkle proof verification");
+        // Currently uses Go FFI for witness parsing, but core crypto is native Rust
+        if !crate::verkle_proof::verify_verkle_witness(witness_data) {
+            log_error("❌ Guarantor: Verkle proof verification FAILED");
+            return None;
+        }
+        log_info("✅ Guarantor: Verkle proof verification PASSED");
+
+        // Deserialize the witness
         let witness = crate::verkle::VerkleWitness::deserialize(witness_data)?;
 
         // Parse witness to extract caches

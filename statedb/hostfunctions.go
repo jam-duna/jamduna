@@ -13,7 +13,6 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb/evmtypes"
-	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -35,6 +34,15 @@ var (
 const (
 	AccountStorageConst = 34 //[Gratis]
 	AccountLookupConst  = 81 //[Gratis]
+)
+
+// FETCH_VERKLE operation types
+const (
+	FETCH_BALANCE   = 0
+	FETCH_NONCE     = 1
+	FETCH_CODE      = 2
+	FETCH_CODE_HASH = 3
+	FETCH_STORAGE   = 4
 )
 
 func (vm *VM) panic(errCode uint64) {
@@ -139,9 +147,6 @@ func (vm *VM) hostFunction(host_fn int) (bool, error) {
 
 		// Handle special Verkle functions (253-255)
 		switch host_fn {
-		case VERIFY_VERKLE_PROOF: // 253
-			vm.hostVerifyVerkleProof()
-			return true, nil
 		case FETCH_WITNESS: // 254
 			vm.HostFetchWitness()
 			return true, nil
@@ -2017,24 +2022,25 @@ func (vm *VM) hostLog() {
 		serviceMetadata = fmt.Sprintf("%s-child", serviceMetadata)
 	}
 	vm.WriteRegister(7, WHAT)
-	loggingVerbose := false
+	loggingVerbose := true
 	if vm.logging == log.Builder || vm.logging == log.FirstGuarantor || vm.logging == log.OtherGuarantor {
-		loggingVerbose = false
+		loggingVerbose = true
 	}
 	if !loggingVerbose {
 		return
 	}
+	gasRemaining := vm.SafeGetGas()
 	switch level {
 	case 0: // 0: User agent displays as fatal error
-		fmt.Printf("\x1b[31m[FATAL-%s] %s\x1b[0m\n", vm.logging, string(messageBytes))
+		fmt.Printf("\x1b[31m[FATAL-%s] %s (gas: %d)\x1b[0m\n", vm.logging, string(messageBytes), gasRemaining)
 	case 1: // 1: User agent displays as warning
-		fmt.Printf("\x1b[33m[WARN-%s] %s\x1b[0m\n", vm.logging, string(messageBytes))
+		fmt.Printf("\x1b[33m[WARN-%s] %s (gas: %d)\x1b[0m\n", vm.logging, string(messageBytes), gasRemaining)
 	case 2: // 2: User agent displays as important information
-		fmt.Printf("\x1b[32m[INFO-%s] %s\x1b[0m\n", vm.logging, string(messageBytes))
+		fmt.Printf("\x1b[32m[INFO-%s] %s (gas: %d)\x1b[0m\n", vm.logging, string(messageBytes), gasRemaining)
 	case 3: // 3: User agent displays as helpful information
-		fmt.Printf("\x1b[36m[DEBUG-%s] %s\x1b[0m\n", vm.logging, string(messageBytes))
+		fmt.Printf("\x1b[36m[DEBUG-%s] %s (gas: %d)\x1b[0m\n", vm.logging, string(messageBytes), gasRemaining)
 	case 4: // 4: User agent displays as pedantic information
-		fmt.Printf("\x1b[37m[TRACE-%s] %s\x1b[0m\n", vm.logging, string(messageBytes))
+		fmt.Printf("\x1b[37m[TRACE-%s] %s (gas: %d)\x1b[0m\n", vm.logging, string(messageBytes), gasRemaining)
 	}
 
 }
@@ -2177,7 +2183,8 @@ func (vm *VM) HostFetchWitness() error {
 		switch objectKind {
 		case evmtypes.ObjectKindCode:
 			// Look up code from witness cache
-			if code, exists := stateDB.sdb.GetCode(address); exists {
+			evmStorage := stateDB.sdb.(types.EVMJAMStorage)
+			if code, exists := evmStorage.GetCode(address); exists {
 				payload = code
 				found = true
 				// Record as read dependency for witness export
@@ -2205,7 +2212,8 @@ func (vm *VM) HostFetchWitness() error {
 			shardID := evmtypes.ShardID{Ld: 0, Prefix56: [7]byte{}}
 
 			// Look up from witness cache
-			if storageData, exists := stateDB.sdb.GetContractStorage(address); exists {
+			evmStorage := stateDB.sdb.(types.EVMJAMStorage)
+			if storageData, exists := evmStorage.GetContractStorage(address); exists {
 				if contractStorage, ok := storageData.(evmtypes.ContractStorage); ok {
 					shard := contractStorage.Shard
 					payload = shard.Serialize()
@@ -2631,15 +2639,15 @@ func (vm *VM) hostFetchVerkle() {
 		fetchType, address.Hex(), outputMaxLen, txIndex)
 
 	switch fetchType {
-	case storage.FETCH_BALANCE:
+	case FETCH_BALANCE:
 		vm.fetchBalance(stateDB, address, outputPtr, outputMaxLen, txIndex)
-	case storage.FETCH_NONCE:
+	case FETCH_NONCE:
 		vm.fetchNonce(stateDB, address, outputPtr, outputMaxLen, txIndex)
-	case storage.FETCH_CODE:
+	case FETCH_CODE:
 		vm.fetchCode(stateDB, address, outputPtr, outputMaxLen, txIndex)
-	case storage.FETCH_CODE_HASH:
+	case FETCH_CODE_HASH:
 		vm.fetchCodeHash(stateDB, address, outputPtr, outputMaxLen, txIndex)
-	case storage.FETCH_STORAGE:
+	case FETCH_STORAGE:
 		// Read storage key (32 bytes)
 		var storageKey [32]byte
 		keyBytes, errCode2 := vm.ReadRAMBytes(keyPtr, 32)
@@ -2670,7 +2678,8 @@ func (vm *VM) fetchBalance(stateDB *StateDB, address common.Address, outputPtr u
 	}
 
 	// Fetch balance via clean interface (no type casting, verkle logic in StateDBStorage)
-	balance, err := stateDB.sdb.FetchBalance(address, txIndex)
+	evmStorage := stateDB.sdb.(types.EVMJAMStorage)
+	balance, err := evmStorage.FetchBalance(address, txIndex)
 	if err != nil {
 		log.Trace(vm.logging, "fetchBalance error", "address", address.Hex(), "txIndex", txIndex, "err", err)
 		vm.WriteRegister(7, 0)
@@ -2702,7 +2711,8 @@ func (vm *VM) fetchNonce(stateDB *StateDB, address common.Address, outputPtr uin
 	}
 
 	// Fetch nonce via clean interface (no type casting, verkle logic in StateDBStorage)
-	nonce, err := stateDB.sdb.FetchNonce(address, txIndex)
+	evmStorage := stateDB.sdb.(types.EVMJAMStorage)
+	nonce, err := evmStorage.FetchNonce(address, txIndex)
 	if err != nil {
 		log.Trace(vm.logging, "fetchNonce error", "address", address.Hex(), "txIndex", txIndex, "err", err)
 		vm.WriteRegister(7, 0)
@@ -2722,7 +2732,8 @@ func (vm *VM) fetchNonce(stateDB *StateDB, address common.Address, outputPtr uin
 // fetchCode fetches code from Verkle tree (two-step pattern)
 func (vm *VM) fetchCode(stateDB *StateDB, address common.Address, outputPtr uint32, outputMaxLen uint32, txIndex uint32) {
 	// Fetch code via clean interface (no type casting, verkle logic in StateDBStorage)
-	code, codeSize, err := stateDB.sdb.FetchCode(address, txIndex)
+	evmStorage := stateDB.sdb.(types.EVMJAMStorage)
+	code, codeSize, err := evmStorage.FetchCode(address, txIndex)
 	if err != nil {
 		log.Info(vm.logging, "fetchCode error", "address", address.Hex(), "err", err)
 		vm.WriteRegister(7, 0)
@@ -2769,7 +2780,8 @@ func (vm *VM) fetchCodeHash(stateDB *StateDB, address common.Address, outputPtr 
 	}
 
 	// Fetch code hash via clean interface (no type casting, verkle logic in StateDBStorage)
-	codeHash, err := stateDB.sdb.FetchCodeHash(address, txIndex)
+	evmStorage := stateDB.sdb.(types.EVMJAMStorage)
+	codeHash, err := evmStorage.FetchCodeHash(address, txIndex)
 	if err != nil {
 		log.Info(vm.logging, "fetchCodeHash error", "address", address.Hex(), "txIndex", txIndex, "err", err)
 		vm.WriteRegister(7, 0)
@@ -2799,7 +2811,8 @@ func (vm *VM) fetchStorage(stateDB *StateDB, address common.Address, storageKey 
 	}
 
 	// Fetch storage via clean interface (no type casting, verkle logic in StateDBStorage)
-	value, found, err := stateDB.sdb.FetchStorage(address, storageKey, txIndex)
+	evmStorage := stateDB.sdb.(types.EVMJAMStorage)
+	value, found, err := evmStorage.FetchStorage(address, storageKey, txIndex)
 	if err != nil || !found {
 		log.Info(vm.logging, "fetchStorage miss", "address", address.Hex(), "err", err)
 		vm.WriteRegister(7, 0)
@@ -2813,351 +2826,3 @@ func (vm *VM) fetchStorage(stateDB *StateDB, address common.Address, storageKey 
 	}
 	vm.WriteRegister(7, 32)
 }
-
-// hostVerifyVerkleProof verifies a dual-proof Verkle witness
-//
-// Input (register 7): witness_ptr - pointer to witness data
-// Input (register 8): witness_len - length of witness data
-// Output (register 7): 1 if proof is valid, 0 if invalid
-//
-// Dual-proof witness format (augmented with tx_index to support BAL):
-// PRE-STATE SECTION:
-// - 32B pre_state_root
-// - 4B read_count (big-endian u32)
-// - For each read entry (161 bytes):
-//   - 32B verkle_key
-//   - 61B metadata (1B type + 20B address + 8B extra + 32B storage_key)
-//   - 32B pre_value
-//   - 32B post_value (unused in pre-section)
-//   - 4B tx_index (big-endian)
-//
-// - 4B pre_proof_len (big-endian u32)
-// - pre_proof_len bytes of pre-proof data
-// POST-STATE SECTION:
-// - 32B post_state_root
-// - 4B write_count (big-endian u32)
-// - For each write entry (161 bytes):
-//   - 32B verkle_key
-//   - 61B metadata
-//   - 32B pre_value (unused in post-section)
-//   - 32B post_value
-//   - 4B tx_index (big-endian)
-//
-// - 4B post_proof_len (big-endian u32)
-// - post_proof_len bytes of post-proof data
-func (vm *VM) hostVerifyVerkleProof() {
-	witnessPtr := uint32(vm.ReadRegister(7))
-	witnessLen := uint32(vm.ReadRegister(8))
-
-	log.Trace(log.SDB, "hostVerifyVerkleProof called", "ptr", witnessPtr, "len", witnessLen)
-
-	// Get StateDB from hostenv
-	stateDB, ok := vm.hostenv.(*StateDB)
-	if !ok || stateDB.sdb == nil {
-		log.Warn(log.SDB, "hostVerifyVerkleProof: no StateDB")
-		vm.WriteRegister(7, 0) // Invalid: no StateDB
-		return
-	}
-
-	// Read witness data from memory
-	witnessData, errCode := vm.ReadRAMBytes(witnessPtr, witnessLen)
-	if errCode != OK {
-		log.Warn(log.SDB, "hostVerifyVerkleProof: ReadRAMBytes failed", "errCode", errCode)
-		vm.WriteRegister(7, 0) // Invalid: failed to read witness
-		return
-	}
-
-	log.Trace(log.SDB, "hostVerifyVerkleProof: Read witness from RAM", "dataLen", len(witnessData))
-
-	// Parse witness
-	if len(witnessData) < 68 {
-		vm.WriteRegister(7, 0) // Invalid: witness too small
-		return
-	}
-
-	offset := 0
-
-	// ===== PHASE 1: Parse and Verify Pre-State Section (Reads) =====
-
-	// Parse pre_state_root (32 bytes)
-	var preStateRoot [32]byte
-	copy(preStateRoot[:], witnessData[offset:offset+32])
-	offset += 32
-
-	// Parse read_count (4 bytes, big-endian)
-	if len(witnessData)-offset < 4 {
-		log.Warn(log.SDB, "hostVerifyVerkleProof: insufficient data for read_count")
-		vm.WriteRegister(7, 0)
-		return
-	}
-	readCount := uint32(witnessData[offset])<<24 | uint32(witnessData[offset+1])<<16 |
-		uint32(witnessData[offset+2])<<8 | uint32(witnessData[offset+3])
-	offset += 4
-
-	// Parse read entries (161 bytes each: 32 key + 61 metadata + 32 pre + 32 post + 4 txIndex)
-	readKeys := make([][]byte, readCount)
-	readPreValues := make([][]byte, readCount)
-
-	for i := uint32(0); i < readCount; i++ {
-		if len(witnessData)-offset < 161 {
-			log.Warn(log.SDB, "hostVerifyVerkleProof: insufficient data for read entry", "index", i)
-			vm.WriteRegister(7, 0)
-			return
-		}
-
-		// Read key (32 bytes)
-		key := make([]byte, 32)
-		copy(key, witnessData[offset:offset+32])
-		readKeys[i] = key
-		offset += 32
-
-		// Skip metadata (61 bytes: 1 type + 20 address + 8 extra + 32 storage_key)
-		offset += 61
-
-		// Read pre_value (32 bytes)
-		preValue := make([]byte, 32)
-		copy(preValue, witnessData[offset:offset+32])
-		readPreValues[i] = preValue
-		offset += 32
-
-		// Skip post_value (32 bytes)
-		offset += 32
-
-		// Skip txIndex (4 bytes)
-		offset += 4
-	}
-
-	// Parse pre_proof_len (4 bytes, big-endian)
-	if len(witnessData)-offset < 4 {
-		log.Warn(log.SDB, "hostVerifyVerkleProof: insufficient data for pre_proof_len")
-		vm.WriteRegister(7, 0)
-		return
-	}
-	preProofLen := uint32(witnessData[offset])<<24 | uint32(witnessData[offset+1])<<16 |
-		uint32(witnessData[offset+2])<<8 | uint32(witnessData[offset+3])
-	offset += 4
-
-	// Parse pre_proof_data
-	if len(witnessData)-offset < int(preProofLen) {
-		log.Warn(log.SDB, "hostVerifyVerkleProof: insufficient data for pre_proof", "expected", preProofLen, "have", len(witnessData)-offset)
-		vm.WriteRegister(7, 0)
-		return
-	}
-	preProofData := witnessData[offset : offset+int(preProofLen)]
-	offset += int(preProofLen)
-
-	log.Trace(log.SDB, "hostVerifyVerkleProof: Parsed pre-state", "readCount", readCount, "preProofLen", preProofLen, "preRoot", fmt.Sprintf("%x", preStateRoot[:8]))
-
-	// Filter out absent keys (zero values) for proof verification
-	// The proof only contains present keys, but the witness includes all keys for cache population
-	presentReadKeys := make([][]byte, 0, readCount)
-	presentReadValues := make([][]byte, 0, readCount)
-	for i := uint32(0); i < readCount; i++ {
-		isZero := true
-		for j := 0; j < 32; j++ {
-			if readPreValues[i][j] != 0 {
-				isZero = false
-				break
-			}
-		}
-		if !isZero {
-			presentReadKeys = append(presentReadKeys, readKeys[i])
-			presentReadValues = append(presentReadValues, readPreValues[i])
-		}
-	}
-
-	log.Trace(log.SDB, "hostVerifyVerkleProof: Filtered for verification", "totalKeys", readCount, "presentKeys", len(presentReadKeys))
-
-	if len(presentReadKeys) == 0 {
-		log.Trace(log.SDB, "hostVerifyVerkleProof: no present read keys, skipping pre-state verification")
-	} else {
-		// Verify pre-state proof (only for present keys)
-		valid, err := storage.VerifyVerkleProof(preProofData, preStateRoot[:], presentReadKeys, presentReadValues)
-		if err != nil {
-			log.Warn(log.SDB, "hostVerifyVerkleProof: pre-state verification error", "err", err)
-			vm.WriteRegister(7, 0)
-			return
-		}
-		if !valid {
-			log.Warn(log.SDB, "hostVerifyVerkleProof: pre-state proof invalid")
-			vm.WriteRegister(7, 0)
-			return
-		}
-
-		log.Debug(log.SDB, "hostVerifyVerkleProof: ✅ pre-state proof valid")
-	}
-
-	// ===== PHASE 2: Parse and Verify Post-State Section (Writes) =====
-
-	// Parse post_state_root (32 bytes)
-	if len(witnessData)-offset < 32 {
-		log.Warn(log.SDB, "hostVerifyVerkleProof: insufficient data for post_state_root")
-		vm.WriteRegister(7, 0)
-		return
-	}
-	var postStateRoot [32]byte
-	copy(postStateRoot[:], witnessData[offset:offset+32])
-	offset += 32
-
-	// Parse write_count (4 bytes, big-endian)
-	if len(witnessData)-offset < 4 {
-		log.Warn(log.SDB, "hostVerifyVerkleProof: insufficient data for write_count")
-		vm.WriteRegister(7, 0)
-		return
-	}
-	writeCount := uint32(witnessData[offset])<<24 | uint32(witnessData[offset+1])<<16 |
-		uint32(witnessData[offset+2])<<8 | uint32(witnessData[offset+3])
-	offset += 4
-
-	// Parse write entries (161 bytes each: 32 key + 61 metadata + 32 pre + 32 post + 4 txIndex)
-	writeKeys := make([][]byte, writeCount)
-	writePreValues := make([][]byte, writeCount)
-	writePostValues := make([][]byte, writeCount)
-
-	for i := uint32(0); i < writeCount; i++ {
-		if len(witnessData)-offset < 161 {
-			log.Warn(log.SDB, "hostVerifyVerkleProof: insufficient data for write entry", "index", i)
-			vm.WriteRegister(7, 0)
-			return
-		}
-
-		// Read key (32 bytes)
-		key := make([]byte, 32)
-		copy(key, witnessData[offset:offset+32])
-		writeKeys[i] = key
-		offset += 32
-
-		// Skip metadata (61 bytes)
-		offset += 61
-
-		// Read pre_value (32 bytes)
-		preValue := make([]byte, 32)
-		copy(preValue, witnessData[offset:offset+32])
-		// Check if pre-value is all zeros (absent key)
-		isZero := true
-		for j := 0; j < 32; j++ {
-			if preValue[j] != 0 {
-				isZero = false
-				break
-			}
-		}
-		if isZero {
-			writePreValues[i] = nil // Absent key
-		} else {
-			writePreValues[i] = preValue
-		}
-		offset += 32
-
-		// Read post_value (32 bytes)
-		postValue := make([]byte, 32)
-		copy(postValue, witnessData[offset:offset+32])
-		writePostValues[i] = postValue
-		offset += 32
-
-		// Skip txIndex (4 bytes)
-		offset += 4
-	}
-
-	// Parse post_proof_len (4 bytes, big-endian)
-	if len(witnessData)-offset < 4 {
-		log.Warn(log.SDB, "hostVerifyVerkleProof: insufficient data for post_proof_len")
-		vm.WriteRegister(7, 0)
-		return
-	}
-	postProofLen := uint32(witnessData[offset])<<24 | uint32(witnessData[offset+1])<<16 |
-		uint32(witnessData[offset+2])<<8 | uint32(witnessData[offset+3])
-	offset += 4
-
-	// Parse post_proof_data
-	if len(witnessData)-offset < int(postProofLen) {
-		log.Warn(log.SDB, "hostVerifyVerkleProof: insufficient data for post_proof", "expected", postProofLen, "have", len(witnessData)-offset)
-		vm.WriteRegister(7, 0)
-		return
-	}
-	postProofData := witnessData[offset : offset+int(postProofLen)]
-
-	log.Trace(log.SDB, "hostVerifyVerkleProof: Parsed post-state", "writeCount", writeCount, "postProofLen", postProofLen, "postRoot", fmt.Sprintf("%x", postStateRoot[:8]))
-
-	if writeCount == 0 {
-		if !bytes.Equal(postStateRoot[:], preStateRoot[:]) {
-			log.Warn(log.SDB, "hostVerifyVerkleProof: no writes but roots differ", "preRoot", fmt.Sprintf("%x", preStateRoot[:8]), "postRoot", fmt.Sprintf("%x", postStateRoot[:8]))
-			vm.WriteRegister(7, 0)
-			return
-		}
-		log.Trace(log.SDB, "hostVerifyVerkleProof: no write entries, skipping post-state verification")
-	} else {
-		// Verify post-state proof with state transition (PRE-root -> POST-root)
-		valid, err := storage.VerifyVerkleProofWithTransition(postProofData, preStateRoot[:], postStateRoot[:], writeKeys, writePreValues, writePostValues)
-		if err != nil {
-			log.Warn(log.SDB, "hostVerifyVerkleProof: post-state verification error", "err", err)
-			vm.WriteRegister(7, 0)
-			return
-		}
-		if !valid {
-			log.Warn(log.SDB, "hostVerifyVerkleProof: post-state proof invalid")
-			vm.WriteRegister(7, 0)
-			return
-		}
-
-		log.Trace(log.SDB, "hostVerifyVerkleProof: ✅ post-state proof valid (state transition verified)")
-	}
-
-	// Both pre-state and post-state proofs are valid
-	// No need to check local tree - witness is self-validating
-	log.Trace(log.SDB, "hostVerifyVerkleProof: ✅ dual-proof witness valid")
-
-	// Proof is valid
-	vm.WriteRegister(7, 1)
-}
-
-// REMOVED: hostComputeBALHash - now using native Rust implementation
-// Host function index: 256 is no longer in use
-// The native Rust BAL hash computation is in services/evm/src/block_access_list.rs
-/*
-func (vm *VM) hostComputeBALHash() {
-	witnessPtr := uint32(vm.ReadRegister(7))
-	witnessLen := uint32(vm.ReadRegister(8))
-	outputPtr := uint32(vm.ReadRegister(9))
-
-	log.Trace(log.EVM, "hostComputeBALHash called", "witnessPtr", witnessPtr, "witnessLen", witnessLen, "outputPtr", outputPtr)
-
-	// Get StateDB from hostenv
-	stateDB, ok := vm.hostenv.(*StateDB)
-	if !ok || stateDB.sdb == nil {
-		log.Warn(log.EVM, "hostComputeBALHash: no StateDB")
-		vm.WriteRegister(7, 0)
-		return
-	}
-
-	// Read witness data from memory
-	witnessData, errCode := vm.ReadRAMBytes(witnessPtr, witnessLen)
-	if errCode != OK {
-		log.Warn(log.EVM, "hostComputeBALHash: ReadRAMBytes failed", "errCode", errCode)
-		vm.WriteRegister(7, 0)
-		return
-	}
-
-	log.Info("bal", "[GO FFI] hostComputeBALHash called from Rust")
-
-	// Compute BAL hash using storage layer
-	balHash, accountCount, totalChanges, err := stateDB.sdb.ComputeBlockAccessListHash(witnessData)
-	if err != nil {
-		log.Warn(log.EVM, "hostComputeBALHash: computation failed", "err", err)
-		vm.WriteRegister(7, 0)
-		return
-	}
-
-	log.Info("bal", fmt.Sprintf("[GO FFI] hostComputeBALHash computed: hash=%s, accounts=%d, changes=%d", balHash.Hex(), accountCount, totalChanges))
-
-	// Write hash to output buffer
-	errCode = vm.WriteRAMBytes(outputPtr, balHash[:])
-	if errCode != OK {
-		log.Warn(log.EVM, "hostComputeBALHash: WriteRAMBytes failed", "errCode", errCode)
-		vm.WriteRegister(7, 0)
-		return
-	}
-
-	// Success
-	vm.WriteRegister(7, 1)
-}
-*/

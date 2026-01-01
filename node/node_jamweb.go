@@ -15,7 +15,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
-	storage "github.com/colorfulnotion/jam/storage"
+	"github.com/colorfulnotion/jam/storage"
 	types "github.com/colorfulnotion/jam/types"
 	"github.com/gorilla/websocket"
 )

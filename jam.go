@@ -20,6 +20,8 @@ import (
 	"github.com/colorfulnotion/jam/types"
 	"github.com/spf13/cobra"
 
+	// orchardrpc "github.com/colorfulnotion/jam/builder/orchard/rpc" // Disabled: requires librailgun_service FFI
+
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -60,12 +62,12 @@ func main() {
 		logLevel string
 
 		// run flags that is not supported yet
-		pvmBackend  string
-		peerID      int
-		externalIP  string
-		listenIP    string
-		rpcListenIP string
-		bootnode        string
+		pvmBackend        string
+		peerID            int
+		externalIP        string
+		listenIP          string
+		rpcListenIP       string
+		bootnode          string
 		telemetryEndpoint string
 
 		// serviceIDs should trigger role=builder
@@ -300,7 +302,13 @@ func main() {
 			}
 
 			fmt.Printf("Running JAM DUNA node with the following flags:\n")
-			fmt.Printf("\033[33mdataPath: %s, Port: %d, RPCPort: %d, validatorIndex: %d, debug: %s, chainSpec: %s, logLevel: %s, start_time: %s. pvm_backend: %s\033[0m\n", dataPath, Port, RPCPort, validatorIndex, debug, chainSpec, logLevel, start_time, pvmBackend)
+			fmt.Printf("\033[33m  PVM Backend: %s\n", pvmBackend)
+			fmt.Printf("  Data Path: %s\n", dataPath)
+			fmt.Printf("  Port: %d, RPC Port: %d\n", Port, RPCPort)
+			fmt.Printf("  Validator Index: %d\n", validatorIndex)
+			fmt.Printf("  Chain Spec: %s\n", chainSpec)
+			fmt.Printf("  Log Level: %s, Debug: %s\n", logLevel, debug)
+			fmt.Printf("  Start Time: %s\033[0m\n", start_time)
 
 			var err error
 			var validators []types.Validator
@@ -425,6 +433,7 @@ func main() {
 				os.Exit(1)
 			}
 			defer storage.Close()
+
 			fmt.Printf("New Node %d started, edkey %v, port%d, time:%s. buildVersion=%v pvm_backend=%v\n", validatorIndex, selfSecret.Ed25519Pub, Port, time.Now().String(), n.GetBuild(), pvmBackend)
 			StartRuntimeMonitor(30 * time.Second)
 			ticker := time.NewTicker(30 * time.Second)

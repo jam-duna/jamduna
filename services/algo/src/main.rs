@@ -1995,6 +1995,7 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
     let execution_effects = ExecutionEffects {
         write_intents,
         contract_intents: Vec::new(),
+        accumulate_instructions: Vec::new(),
     };
     let buffer = serialize_execution_effects(&execution_effects, 0, 0);
     log_info(&format!("🎯 refine returning buffer length={}", buffer.len()));

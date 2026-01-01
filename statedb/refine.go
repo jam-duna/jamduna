@@ -291,7 +291,8 @@ func (s *StateDB) loadContractWitnessFromNewFormat(serviceID uint32, output []by
 func (s *StateDB) parseAndLoadContractStorage(serviceID uint32, payload []byte) error {
 	log.Trace(log.EVM, "parseAndLoadContractStorage", "serviceID", serviceID, "payloadLen", len(payload))
 
-	s.sdb.InitWitnessCache()
+	evmStorage := s.sdb.(types.EVMJAMStorage)
+	evmStorage.InitWitnessCache()
 
 	offset := 0
 	for offset < len(payload) {
@@ -333,7 +334,7 @@ func (s *StateDB) parseAndLoadContractStorage(serviceID uint32, payload []byte) 
 			}
 
 			// Load into witness cache
-			s.sdb.SetContractStorage(address, evmtypes.ContractStorage{Shard: *contractStorage})
+			evmStorage.SetContractStorage(address, evmtypes.ContractStorage{Shard: *contractStorage})
 
 			log.Trace(log.EVM, "parseAndLoadContractStorage complete", "address", address.Hex(), "entries", len(contractStorage.Entries), "verkleRoot", verkleRoot.Hex())
 		}
@@ -462,8 +463,11 @@ func (statedb *StateDB) authorizeWP(workPackage types.WorkPackage, workPackageCo
 func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, slot uint32, execContext string, eventID uint64, pvmBackend string, logDir string) (work_report types.WorkReport, err error) {
 	importsegments := make([][][]byte, len(package_bundle.WorkPackage.WorkItems))
 	results := []types.WorkDigest{}
-	saveToLogDir(logDir, "bundle.bin", package_bundle.Bytes())
-	saveToLogDir(logDir, "bundle.json", []byte(types.ToJSON(package_bundle)))
+
+	saveToLogDirOnce(logDir, fmt.Sprintf("%v_bundle.bin", package_bundle.WorkPackage.Hash()), package_bundle.Bytes())
+	saveToLogDirOnce(logDir, fmt.Sprintf("%v_bundle.json", package_bundle.WorkPackage.Hash()), []byte(types.ToJSON(package_bundle)))
+	stateSnapShotRaw := s.GetStateSnapshotRaw()
+	saveToLogDirOnce(logDir, fmt.Sprintf("%v_statesnapstot.json", package_bundle.WorkPackage.Hash()), []byte(stateSnapShotRaw.String()))
 	workPackage := package_bundle.WorkPackage
 
 	// Import Segments
@@ -531,6 +535,7 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 			refineLogDir = path.Join(logDir, fmt.Sprintf("%d_%d", index, workItem.Service))
 		}
 		output, _, exported_segments := vm.ExecuteRefine(workPackageCoreIndex, uint32(index), workPackage, r, importsegments, workItem.ExportCount, package_bundle.ExtrinsicData[index], workPackage.AuthorizationCodeHash, common.BytesToHash(trie.H0), refineLogDir)
+
 		segments = append(segments, exported_segments...)
 
 		execElapsed := time.Since(execStart)
@@ -622,6 +627,15 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		}
 		telemetryClient.WorkReportBuilt(eventID, workReportOutline)
 	}
+	bundleSnapshot := &types.WorkPackageBundleSnapshot{
+		PackageHash:       workReport.GetWorkPackageHash(),
+		CoreIndex:         uint16(workReport.CoreIndex),
+		Bundle:            package_bundle,
+		SegmentRootLookup: workReport.SegmentRootLookup,
+		Slot:              slot,
+		Report:            workReport,
+	}
+	saveToLogDirOnce(logDir, fmt.Sprintf("%v_bundlesnap.json", workPackage.Hash()), []byte(types.ToJSON(bundleSnapshot)))
 	saveToLogDir(logDir, "bclubs", serializeHashes(d.BClubs))
 	saveToLogDir(logDir, "sclubs", serializeHashes(d.SClubs))
 	saveToLogDir(logDir, "bundle_chunks", serializeECChunks(d.BundleChunks))
@@ -783,7 +797,8 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 			contractWitnessBlobs[index] = contractWitnessBlob // Store for later application to main tree
 
 			// Build verkle witness - all verkle logic handled in storage
-			verkleWitnessBytes, err := s.sdb.BuildVerkleWitness(contractWitnessBlob)
+			evmStorage := s.sdb.(types.EVMJAMStorage)
+			verkleWitnessBytes, err := evmStorage.BuildVerkleWitness(contractWitnessBlob)
 			if err != nil {
 				log.Warn(log.EVM, "BuildVerkleWitness failed", "err", err)
 				return nil, nil, err
@@ -791,7 +806,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 
 			// Build Block Access List from witness (Phase 4)
 			// This computes the BAL hash that will be embedded in the block payload
-			blockAccessListHash, accountCount, totalChanges, err := s.sdb.ComputeBlockAccessListHash(verkleWitnessBytes)
+			blockAccessListHash, accountCount, totalChanges, err := evmStorage.ComputeBlockAccessListHash(verkleWitnessBytes)
 			if err != nil {
 				log.Warn(log.EVM, "ComputeBlockAccessListHash failed", "err", err)
 				// Non-fatal: continue without BAL hash (will be zeros)
@@ -807,12 +822,29 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 				postStateRoot = common.Hash{} // leave unchanged if extraction fails
 			}
 
-			// Update block payload with BAL hash and post-state root (Phase 4)
+			// Extract verkle state delta from post-state witness (VERKLE2.md Week 1)
+			// Type assert to *storage.StateDBStorage to access ExtractVerkleStateDelta
+			var verkleDelta *evmtypes.VerkleStateDelta
+			if storageDB, ok := s.sdb.(*storage.StateDBStorage); ok {
+				storageDelta, err := storageDB.ExtractVerkleStateDelta(verkleWitnessBytes)
+				if err != nil {
+					log.Warn(log.EVM, "Failed to extract verkle delta", "err", err)
+				} else if storageDelta != nil {
+					// Convert storage.VerkleStateDelta to evmtypes.VerkleStateDelta
+					verkleDelta = &evmtypes.VerkleStateDelta{
+						NumEntries: storageDelta.NumEntries,
+						Entries:    storageDelta.Entries,
+					}
+					log.Trace(log.EVM, "Extracted verkle delta", "entries", verkleDelta.NumEntries, "size", len(verkleDelta.Entries))
+				}
+			}
+
+			// Update block payload with BAL hash, post-state root, and delta (Phase 4)
 			// The block was already exported during ExecuteRefine, so we need to update it in exported_segments
-			err = s.updateBlockPayload(exported_segments, blockAccessListHash, postStateRoot)
+			err = s.updateBlockPayloadWithDelta(exported_segments, blockAccessListHash, postStateRoot, verkleDelta)
 			if err != nil {
 				log.Warn(log.EVM, "Failed to update block payload", "err", err)
-				// Non-fatal: continue with original block payload (BAL hash/root may be zeros)
+				// Non-fatal: continue with original block payload (BAL hash/root/delta may be zeros/nil)
 			}
 
 			// Prepend Verkle witness as FIRST extrinsic
@@ -833,7 +865,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 			}
 
 			// Clear verkleReadLog for next execution via clean interface
-			s.sdb.ClearVerkleReadLog()
+			evmStorage.ClearVerkleReadLog()
 
 			// Append builder witnesses to extrinsicsBlobs -- this will be the metashards + the object proofs
 			builderWitnessCount := appendExtrinsicWitnessesToWorkItem(&wp.WorkItems[index], &extrinsicsBlobs, index, witnesses)
@@ -841,8 +873,9 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 			// Update payload metadata with builder witness count and BAL hash
 			// ALWAYS update if payload exists (even if builderWitnessCount=0) to ensure BAL hash is included
 			if len(wp.WorkItems[index].Payload) >= 7 {
-				totalWitnessCount := uint16(builderWitnessCount)
-				wp.WorkItems[index].Payload = BuildPayload(PayloadTypeTransactions, int(originalTxCount), 0, int(totalWitnessCount), blockAccessListHash)
+				// Total witnesses = 1 (Verkle witness) + builderWitnessCount (metashards + object proofs)
+				totalWitnessCount := uint16(1 + builderWitnessCount)
+				wp.WorkItems[index].Payload = evmtypes.BuildPayload(evmtypes.PayloadTypeTransactions, int(originalTxCount), 0, int(totalWitnessCount), blockAccessListHash)
 			}
 		} // end if isEVMService
 
@@ -900,9 +933,10 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 	}
 	log.Trace(log.Node, "BuildBundle: Built", "payload", fmt.Sprintf("%x", bundle.WorkPackage.WorkItems[0].Payload))
 
+	evmStorage := s.sdb.(types.EVMJAMStorage)
 	for i, blob := range contractWitnessBlobs {
 		if len(blob) > 0 {
-			if err := s.sdb.ApplyContractWrites(blob); err != nil {
+			if err := evmStorage.ApplyContractWrites(blob); err != nil {
 				return &bundle, workReport, fmt.Errorf("failed to apply contract writes for work item %d: %v", i, err)
 			}
 			log.Trace(log.EVM, "Applied contract writes to state", "workItemIndex", i, "blobSize", len(blob))
@@ -1166,12 +1200,29 @@ func BuildSClub(segments [][]byte) (sClub []common.Hash, ecChunksArr []types.Dis
 	}
 	sClub = make([]common.Hash, types.TotalValidators)
 
-	chunkSize := (types.SegmentSize / (types.TotalValidators / 3))
-	for shardIndex, ec := range ecChunksArr {
-		chunks := make([][]byte, len(segments)+len(pageProofs))
-		for n := 0; n < len(chunks); n++ {
-			chunks[n] = ec.Data[n*chunkSize : (n+1)*chunkSize]
+	// Build chunks by tracking actual shard sizes from encoding
+	// We need to re-encode each segment/pageProof to know the shard boundaries
+	for shardIndex := 0; shardIndex < types.TotalValidators; shardIndex++ {
+		chunks := make([][]byte, 0, len(segments)+len(pageProofs))
+		offset := 0
+
+		// Add segment shards
+		for _, segmentData := range segments {
+			erasureCodingSegments, _ := bls.Encode(segmentData, types.TotalValidators)
+			shardSize := len(erasureCodingSegments[shardIndex])
+			chunks = append(chunks, ecChunksArr[shardIndex].Data[offset:offset+shardSize])
+			offset += shardSize
 		}
+
+		// Add pageProof shards
+		for _, pagedProofByte := range pageProofs {
+			paddedProof := common.PadToMultipleOfN(pagedProofByte, types.SegmentSize)
+			erasureCodingPageSegments, _ := bls.Encode(paddedProof, types.TotalValidators)
+			shardSize := len(erasureCodingPageSegments[shardIndex])
+			chunks = append(chunks, ecChunksArr[shardIndex].Data[offset:offset+shardSize])
+			offset += shardSize
+		}
+
 		t := trie.NewWellBalancedTree(chunks, types.Blake2b)
 		sClub[shardIndex] = common.BytesToHash(t.Root())
 	}
@@ -1297,6 +1348,13 @@ func computeVerkleRoot(address common.Address, contractStorage *evmtypes.Contrac
 // and optionally the post-state Verkle root (if provided).
 // The block is the first exported segment (ObjectKind::Block is exported first in refiner.rs)
 func (s *StateDB) updateBlockPayload(exportedSegments [][]byte, balHash common.Hash, postStateRoot common.Hash) error {
+	return s.updateBlockPayloadWithDelta(exportedSegments, balHash, postStateRoot, nil)
+}
+
+// updateBlockPayloadWithDelta updates the block payload in exported segments with the computed BAL hash,
+// post-state Verkle root, and optionally the verkle state delta (VERKLE2.md Week 1).
+// The block is the first exported segment (ObjectKind::Block is exported first in refiner.rs)
+func (s *StateDB) updateBlockPayloadWithDelta(exportedSegments [][]byte, balHash common.Hash, postStateRoot common.Hash, delta *evmtypes.VerkleStateDelta) error {
 	if len(exportedSegments) == 0 {
 		return fmt.Errorf("no exported segments")
 	}
@@ -1318,13 +1376,19 @@ func (s *StateDB) updateBlockPayload(exportedSegments [][]byte, balHash common.H
 		blockPayload.VerkleRoot = postStateRoot
 	}
 
+	// Update Verkle state delta if provided (VERKLE2.md Week 1)
+	if delta != nil {
+		blockPayload.VerkleStateDelta = delta
+		log.Debug(log.EVM, "Added verkle delta to block payload", "entries", delta.NumEntries, "bytes", 4+len(delta.Entries))
+	}
+
 	// Re-serialize the block payload
 	updatedSegment := evmtypes.SerializeEvmBlockPayload(blockPayload)
 
 	// Replace the first segment with the updated one
 	exportedSegments[0] = updatedSegment
 
-	log.Debug(log.EVM, "Updated block payload with BAL hash", "hash", balHash.Hex(), "segment_size", len(updatedSegment))
+	log.Debug(log.EVM, "Updated block payload", "balHash", balHash.Hex(), "verkleRoot", postStateRoot.Hex(), "segment_size", len(updatedSegment))
 
 	return nil
 }

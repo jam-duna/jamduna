@@ -3,8 +3,8 @@ package statedb
 import (
 	"fmt"
 
+	evmverkle "github.com/colorfulnotion/jam/builder/evm/verkle"
 	log "github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/storage"
 	"github.com/ethereum/go-verkle"
 )
 
@@ -16,7 +16,7 @@ func applyBalanceWrites(address []byte, balanceBytes []byte, tree verkle.VerkleN
 	}
 
 	// Read existing BasicData
-	basicDataKey := storage.BasicDataKey(address)
+	basicDataKey := evmverkle.BasicDataKey(address)
 	basicData := make([]byte, 32)
 
 	existing, err := tree.Get(basicDataKey, nil)
@@ -48,7 +48,7 @@ func applyNonceWrites(address []byte, nonceBytes []byte, tree verkle.VerkleNode)
 	log.Info(log.SDB, "applyNonceWrites", "address", fmt.Sprintf("0x%x", address), "nonce", fmt.Sprintf("%x", nonceBytes))
 
 	// Read existing BasicData
-	basicDataKey := storage.BasicDataKey(address)
+	basicDataKey := evmverkle.BasicDataKey(address)
 	basicData := make([]byte, 32)
 
 	existing, err := tree.Get(basicDataKey, nil)

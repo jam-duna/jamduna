@@ -299,6 +299,7 @@ impl MajikBackend {
             block_access_list_hash: [0u8; 32], // TODO: Compute from BAL in refine
             tx_hashes,
             receipt_hashes,
+            verkle_delta: None, // TODO: Extract from post-state witness (see services/evm/docs/VERKLE.md)
         };
 
         // Compute roots and finalize block
@@ -825,6 +826,10 @@ impl MajikBackend {
         // This ensures ObjectRefs have correct index_start values before being
         // embedded in meta-shard entries.
 
-        utils::effects::ExecutionEffects { write_intents, contract_intents }
+        utils::effects::ExecutionEffects {
+            write_intents,
+            contract_intents,
+            accumulate_instructions: Vec::new(),
+        }
     }
 }

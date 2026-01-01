@@ -29,12 +29,6 @@ type Jam struct {
 	node      JNode  // Reference to the full node
 }
 
-// GetRollup returns the rollup instance for this Jam's serviceID
-// Accesses NodeContent.rollups[serviceID] map via GetOrCreateRollup
-func (j *Jam) GetRollup() (*statedb.Rollup, error) {
-	return j.NodeContent.GetOrCreateRollup(j.serviceID)
-}
-
 var MethodDescriptionMap = map[string]string{
 	"Functions":   "Functions() -> functions description",
 	"NodeCommand": "NodeCommand(command string) -> will pass the command to the node",
@@ -64,36 +58,6 @@ var MethodDescriptionMap = map[string]string{
 
 	"Encode": "Encode(objectType string, input string) -> hexstring",
 	"Decode": "Decode(objectType string, input string) -> json string",
-
-	// Ethereum JSON-RPC methods
-	// node_rpc_evmnetwork.go - Network/Metadata
-	"ChainId":     "ChainId() -> chain ID hex",
-	"Accounts":    "Accounts() -> account addresses array",
-	"GasPrice":    "GasPrice() -> gas price hex",
-	"EstimateGas": "EstimateGas(txObj json, blockNumber string) -> gas estimate hex",
-	"GetCode":     "GetCode(address string, blockNumber string) -> bytecode hex",
-
-	// node_rpc_evmcontracts.go - State Access
-	"GetBalance":          "GetBalance(address string, blockNumber string) -> uint256 hex",
-	"GetStorageAt":        "GetStorageAt(address string, position string, blockNumber string) -> value hex",
-	"GetTransactionCount": "GetTransactionCount(address string, blockNumber string) -> uint256 hex",
-
-	// node_rpc_evmtx.go - Transaction
-	"GetTransactionReceipt":               "GetTransactionReceipt(txHash string) -> receipt json",
-	"GetTransactionByHash":                "GetTransactionByHash(txHash string) -> transaction json",
-	"GetTransactionByBlockHashAndIndex":   "GetTransactionByBlockHashAndIndex(blockHash string, index string) -> transaction json",
-	"GetTransactionByBlockNumberAndIndex": "GetTransactionByBlockNumberAndIndex(blockNumber string, index string) -> transaction json",
-	"GetLogs":                             "GetLogs(filter json) -> logs json array",
-	"SendRawTransaction":                  "SendRawTransaction(signedTxData hex) -> txHash",
-	"Call":                                "Call(txObj json, blockNumber string) -> data hex",
-
-	// node_rpc_evmblock.go - Block + Transaction pool management methods
-	"BlockNumber":      "BlockNumber() -> block number hex",
-	"GetBlockByHash":   "GetBlockByHash(blockHash string, fullTx bool) -> block json",
-	"GetBlockByNumber": "GetBlockByNumber(blockNumber string, fullTx bool) -> block json",
-	"TxPoolStatus":     "TxPoolStatus() -> pool statistics json",
-	"TxPoolContent":    "TxPoolContent() -> pending and queued transactions json",
-	"TxPoolInspect":    "TxPoolInspect() -> human readable pool summary",
 }
 
 type NodeStatusServer struct {
@@ -1223,59 +1187,41 @@ func (n *Node) startServiceRPCServer(serviceID uint32) {
 }
 
 // callJamMethod calls the appropriate method on the Jam struct
+// Service-specific methods (eth_*, z_*) are handled by independent RPC servers
 func callJamMethod(jam *Jam, method string, params []string, result *string) error {
+	// JAM core methods only - service methods are on separate ports
 	switch method {
-	// Ethereum methods
-	case "eth_chainId":
-		return jam.ChainId(params, result)
-	case "eth_accounts":
-		return jam.Accounts(params, result)
-	case "eth_gasPrice":
-		return jam.GasPrice(params, result)
-	case "eth_getBalance":
-		return jam.GetBalance(params, result)
-	case "eth_getStorageAt":
-		return jam.GetStorageAt(params, result)
-	case "eth_getTransactionCount":
-		return jam.GetTransactionCount(params, result)
-	case "eth_getCode":
-		return jam.GetCode(params, result)
-	case "eth_estimateGas":
-		return jam.EstimateGas(params, result)
-	case "eth_call":
-		return jam.Call(params, result)
-	case "eth_sendRawTransaction":
-		return jam.SendRawTransaction(params, result)
-	case "eth_getTransactionReceipt":
-		return jam.GetTransactionReceipt(params, result)
-	case "eth_getTransactionByHash":
-		return jam.GetTransactionByHash(params, result)
-	case "eth_getTransactionByBlockHashAndIndex":
-		return jam.GetTransactionByBlockHashAndIndex(params, result)
-	case "eth_getTransactionByBlockNumberAndIndex":
-		return jam.GetTransactionByBlockNumberAndIndex(params, result)
-	case "eth_getLogs":
-		return jam.GetLogs(params, result)
-	case "eth_blockNumber":
-		return jam.BlockNumber(params, result)
-	case "eth_getBlockByHash":
-		return jam.GetBlockByHash(params, result)
-	case "eth_getBlockByNumber":
-		return jam.GetBlockByNumber(params, result)
-	// JAM methods
-	case "jam_txPoolStatus":
-		return jam.TxPoolStatus(params, result)
-	case "jam_txPoolContent":
-		return jam.TxPoolContent(params, result)
-	case "jam_txPoolInspect":
-		return jam.TxPoolInspect(params, result)
 	case "Jam.FetchState129":
 		return jam.FetchState129(params, result)
 	case "Jam.VerifyState129":
 		return jam.VerifyState129(params, result)
 	default:
+		// Try reflection for other JAM methods
+		return callJamMethodReflection(jam, method, params, result)
+	}
+}
+
+func callJamMethodReflection(jam *Jam, method string, params []string, result *string) error {
+	// Use reflection to call method on Jam struct
+	jamValue := reflect.ValueOf(jam)
+	methodValue := jamValue.MethodByName(method)
+
+	if !methodValue.IsValid() {
 		return fmt.Errorf("method not found: %s", method)
 	}
+
+	// Call with params and result
+	args := []reflect.Value{
+		reflect.ValueOf(params),
+		reflect.ValueOf(result),
+	}
+
+	returns := methodValue.Call(args)
+	if len(returns) > 0 && !returns[0].IsNil() {
+		return returns[0].Interface().(error)
+	}
+
+	return nil
 }
 
 func ParsePeerList(peerListMapFile string) (peerInfoMap map[uint16]*PeerInfo, err error) {

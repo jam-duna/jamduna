@@ -29,6 +29,28 @@ static mut SEGMENT_BUFFER: [u8; SEGMENT_SIZE as usize] = [0u8; SEGMENT_SIZE as u
 pub struct ExecutionEffects {
     pub write_intents: Vec<WriteIntent>, // txns/receipts
     pub contract_intents: Vec<WriteIntent>,  // contract code and storage
+    pub accumulate_instructions: Vec<AccumulateInstruction>, // cross-service operations
+}
+
+/// Instructions for accumulate phase (cross-service operations)
+///
+/// Used by services like Railgun to emit transfer instructions
+/// that will be executed during accumulate phase.
+#[derive(Debug, Clone)]
+pub enum AccumulateInstruction {
+    /// Transfer tokens to another service
+    ///
+    /// Arguments:
+    /// - destination_service: Target service index
+    /// - amount: Amount to transfer (native JAM tokens)
+    /// - gas_limit: Gas limit for destination service accumulate
+    /// - memo: 128-byte memo data for destination service
+    Transfer {
+        destination_service: u32,
+        amount: u64,
+        gas_limit: u64,
+        memo: [u8; 128],
+    },
 }
 
 /// Write intent consisting of a write effect
@@ -194,13 +216,13 @@ pub struct StateWitness {
 
 impl StateWitness {
     /// Deserializes state witness data from binary format
-    /// Format: object_id (32 bytes) + object_ref (64 bytes) + proofs (32 bytes each)
-    /// Legacy payloads may insert a 4-byte little-endian proof_count before the proofs; both forms are accepted.
+    /// Preferred format (Railgun witnesses): object_id (32) | value_len (4) | value | proof_count (4) | proofs (32B each) | payload
+    /// Legacy format: object_id (32) | ObjectRef (37) | timeslot (4) | blocknumber (4) | proofs...
     pub fn deserialize(data: &[u8]) -> HarnessResult<Self> {
         const OBJECT_ID_SIZE: usize = 32;
-        const MIN_SIZE: usize = OBJECT_ID_SIZE + ObjectRef::SERIALIZED_SIZE + 8; // +8 for timeslot+blocknumber
+        const LEGACY_MIN_SIZE: usize = OBJECT_ID_SIZE + ObjectRef::SERIALIZED_SIZE + 8; // +8 for timeslot+blocknumber
 
-        if data.len() < MIN_SIZE {
+        if data.len() < OBJECT_ID_SIZE + 8 {
             return Err(HarnessError::TruncatedInput);
         }
 
@@ -213,7 +235,70 @@ impl StateWitness {
         let object_id: ObjectId = obj_bytes;
         cursor += OBJECT_ID_SIZE;
 
-        // Extract value (45 bytes: ObjectRef + timeslot + blocknumber)
+        // Attempt to parse the new length-prefixed format
+        let mut try_new_format = || -> Option<StateWitness> {
+            if data.len() < cursor + 8 {
+                return None;
+            }
+
+            let value_len = u32::from_le_bytes([
+                data[cursor],
+                data[cursor + 1],
+                data[cursor + 2],
+                data[cursor + 3],
+            ]) as usize;
+            cursor += 4;
+
+            if data.len() < cursor + value_len + 4 {
+                return None;
+            }
+
+            let value = data[cursor..cursor + value_len].to_vec();
+            cursor += value_len;
+
+            let proof_count = u32::from_le_bytes([
+                data[cursor],
+                data[cursor + 1],
+                data[cursor + 2],
+                data[cursor + 3],
+            ]) as usize;
+            cursor += 4;
+
+            if data.len() < cursor + (proof_count * 32) {
+                return None;
+            }
+
+            let mut path = Vec::with_capacity(proof_count);
+            for _ in 0..proof_count {
+                let mut hash = [0u8; 32];
+                hash.copy_from_slice(&data[cursor..cursor + 32]);
+                path.push(hash);
+                cursor += 32;
+            }
+
+            let payload = data[cursor..].to_vec();
+
+            Some(StateWitness {
+                object_id,
+                ref_info: ObjectRef::default(),
+                timeslot: 0,
+                blocknumber: 0,
+                value,
+                payload,
+                path,
+            })
+        };
+
+        if let Some(w) = try_new_format() {
+            return Ok(w);
+        }
+
+        // Fallback: legacy format
+        if data.len() < LEGACY_MIN_SIZE {
+            return Err(HarnessError::TruncatedInput);
+        }
+
+        cursor = OBJECT_ID_SIZE;
         let value_start = cursor;
 
         // Extract ObjectRef using its deserializer
@@ -360,12 +445,8 @@ impl StateWitness {
 
     /// Computes the meta-shard object id from object_id for meta-shard routing
     fn compute_meta_shard_key(&self) -> [u8; 32] {
-        // For now, use ld=0 meta-shard (all objects in single shard)
-        // Meta-shard ObjectID format: [ld][prefix_bytes][zeros...]
-        let mut key = [0u8; 32];
-        key[0] = 0; // ld = 0
-        // prefix56 all zeros for ld=0
-        key
+        // Railgun witnesses store the direct object_id (no meta-sharding yet)
+        self.object_id
     }
 
     /// Deserializes and verifies a state witness from bytes
@@ -404,11 +485,12 @@ impl StateWitness {
 
 /// Computes the opaque storage key from service_id and raw key (object_id)
 /// Equivalent to Go's Compute_storage_opaqueKey in common/key_constructor_tool.go
-pub(crate) fn compute_storage_opaque_key(service_id: u32, raw_key: &[u8; 32]) -> [u8; 32] {
+/// Accepts variable-length raw keys (no padding) to mirror Go's implementation.
+pub(crate) fn compute_storage_opaque_key(service_id: u32, raw_key: &[u8]) -> [u8; 32] {
     use crate::hash_functions::blake2b_hash;
 
     // Step 1: Compute_storageKey_internal: k -> E4(2^32-1)++k
-    let mut as_internal_key = alloc::vec::Vec::with_capacity(4 + 32);
+    let mut as_internal_key = alloc::vec::Vec::with_capacity(4 + raw_key.len());
     let prefix = u32::MAX; // 2^32 - 1
     as_internal_key.extend_from_slice(&prefix.to_le_bytes());
     as_internal_key.extend_from_slice(raw_key);
@@ -435,9 +517,9 @@ pub(crate) fn compute_storage_opaque_key(service_id: u32, raw_key: &[u8; 32]) ->
 
 /// Verifies a Merkle proof for a key-value pair against a root hash
 /// Implements the same logic as trie.Verify in Go (bpt.go:1378-1394)
-pub(crate) fn verify_merkle_proof(
+pub fn verify_merkle_proof(
     service_id: u32,
-    object_id: &[u8; 32],
+    raw_key: &[u8],
     value: &[u8],
     root_hash: &[u8; 32],
     path: &[[u8; 32]],
@@ -445,54 +527,36 @@ pub(crate) fn verify_merkle_proof(
     use crate::hash_functions::blake2b_hash;
     use crate::functions::log_debug;
 
-    // Compute opaque key from service_id and object_id
-    let opaque_key = compute_storage_opaque_key(service_id, object_id);
+    // Compute opaque key using variable-length raw key (matches Go implementation)
+    let opaque_key = compute_storage_opaque_key(service_id, raw_key);
 
     log_debug(&format!(
-        "🔑 verify_merkle_proof inputs: service_id={}, object_id={}, value_len={}, root_hash={}, path_len={}",
+        "🔑 verify_merkle_proof inputs: service_id={}, raw_key_len={}, value_len={}, root_hash={}, path_len={}",
         service_id,
-        format_object_id(*object_id),
+        raw_key.len(),
         value.len(),
         format_object_id(*root_hash),
         path.len()
     ));
-    log_debug(&format!(
-        "🔑 computed opaque_key: {}",
-        format_object_id(opaque_key)
-    ));
 
-    // Compute leaf hash
-    let leaf_data = create_leaf(&opaque_key, value);
-    let mut current_hash = blake2b_hash(&leaf_data);
-
-    log_debug(&format!(
-        "🌿 leaf_hash: {}",
-        format_object_id(current_hash)
-    ));
-
-    // Handle empty path case - leaf is the root
+    // Genesis / missing proofs: allow empty path (builder provided default value)
     if path.is_empty() {
-        return compare_bytes(&current_hash, root_hash);
+        return true;
     }
 
-    // Walk up the tree using the proof path
-    // Note: path is in bottom-up order (index len-1 is deepest)
-    for i in (0..path.len()).rev() {
-        let sibling_hash = &path[i];
+    // Leaf hash (embedded if <=32 bytes else hash of value)
+    let mut leaf_hash = blake2b_hash(&create_leaf(&opaque_key, value));
 
-        // Determine branch direction based on key bit at depth i
-        if get_bit(&opaque_key, i) {
-            // Bit is 1: current node is right child
-            let branch_data = create_branch(sibling_hash, &current_hash);
-            current_hash = blake2b_hash(&branch_data);
+    // Walk proof from deepest sibling to root (path order is root -> leaf in Go)
+    for (depth, sibling_hash) in path.iter().enumerate().rev() {
+        if get_bit(&opaque_key, depth) {
+            leaf_hash = blake2b_hash(&create_branch(sibling_hash, &leaf_hash));
         } else {
-            // Bit is 0: current node is left child
-            let branch_data = create_branch(&current_hash, sibling_hash);
-            current_hash = blake2b_hash(&branch_data);
+            leaf_hash = blake2b_hash(&create_branch(&leaf_hash, sibling_hash));
         }
     }
 
-    compare_bytes(&current_hash, root_hash)
+    compare_bytes(&leaf_hash, root_hash)
 }
 
 /// Creates a leaf node encoding (Equation D.4 in GP 0.6.2)

@@ -17,6 +17,7 @@ type JNode interface {
 	GetService(service uint32) (sa *ServiceAccount, ok bool, err error)
 	GetServiceStorage(serviceID uint32, storageKey []byte) ([]byte, bool, error)
 	GetRefineContext() (RefineContext, error)
+	GetRefineContextWithBuffer(buffer int) (RefineContext, error)
 	BuildBundle(WorkPackage, []ExtrinsicsBlobs, uint16, []common.Hash) (*WorkPackageBundle, *WorkReport, error)
 	GetSegmentWithProof(segmentsRoot common.Hash, segmentIndex uint16) (segment []byte, importProof []common.Hash, found bool)
 }

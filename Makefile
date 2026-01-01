@@ -30,8 +30,8 @@ BINARY := jamduna
 # On Linux, default to the faster 'compiler'. Otherwise, use 'interpreter'.
 ifeq ($(UNAME_S),Linux)
   PVM_BACKEND ?= compiler # Default to 'compiler' on Linux
-  CHAINSPEC ?= chainspecs/$(ARCH)/polkajam-spec.json
-#  CHAINSPEC ?= chainspecs/jamduna-spec.json
+  #CHAINSPEC ?= chainspecs/$(ARCH)/polkajam-spec.json
+  CHAINSPEC ?= chainspecs/jamduna-spec.json
 else
   PVM_BACKEND ?= interpreter # Default to 'interpreter' on non-Linux
   #CHAINSPEC ?= chainspecs/$(ARCH)/polkajam-spec.json
@@ -144,7 +144,13 @@ update-services-submodule:
 		echo "  3. Push: git push origin $$(git rev-parse --abbrev-ref HEAD)"; \
 	fi
 
-spin_localclient: jam kill_jam jam_clean spin_5 spin_0
+spin_localclient: jam  jam_clean spin_6
+
+spin_6:
+	@rm -rf ${HOME}/.jamduna/jam-*
+	@for i in 0 1 2 3 4 5; do \
+		$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator $$i  --rpc-port=$$((19800 + $$i)) --chain ${CHAINSPEC} --pvm-backend $(PVM_BACKEND)  >logs/jamduna-$$i.log 2>&1 & \
+	done
 
 spin_5:
 	@rm -rf ${HOME}/.jamduna/jam-*
@@ -157,29 +163,89 @@ spin_0:
 		RUST_LOG=polkavm=trace,jam_node=trace $(POLKAJAM_BIN) --chain ${CHAINSPEC} run --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
 	done
 
-run_builder: start_telemetry
+run_builder:
 	@rm -rf ${HOME}/.jamduna/jam-*
-	@echo "Telemetry UI: http://localhost:$(TELEMETRY_WEB_PORT)"
 	@$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator 6 --role builder --rpc-port=19806 --chain ${CHAINSPEC} --pvm-backend $(PVM_BACKEND) --debug rotation,guarantees --telemetry localhost:$(TELEMETRY_PORT)
 
 run_1:
+	@mkdir -p logs
 	@rm -rf ${HOME}/.jamduna/jam-*
-	@$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator 5 --rpc-port=19805 --chain ${CHAINSPEC} --pvm-backend $(PVM_BACKEND) --debug rotation,guarantees --telemetry localhost:$(TELEMETRY_PORT)
+	@echo ">> Starting jamduna validator 5..."
+	@$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator 5 --rpc-port=19805 --chain ${CHAINSPEC} --pvm-backend $(PVM_BACKEND) --debug rotation,guarantees --telemetry localhost:$(TELEMETRY_PORT) >logs/jamduna-5.log 2>&1 &
+	@sleep 1
+	@if pgrep -f "$(BINARY).*dev-validator 5" >/dev/null; then \
+		echo "✅ jamduna validator 5 started (log: logs/jamduna-5.log)"; \
+	else \
+		echo "❌ jamduna validator 5 failed to start. Check logs/jamduna-5.log"; \
+		tail -20 logs/jamduna-5.log 2>/dev/null || true; \
+	fi
 
 run_5:
+	@mkdir -p logs
+	@if [ ! -x "$(POLKAJAM_BIN)" ]; then \
+		echo "❌ Error: $(POLKAJAM_BIN) not found or not executable"; \
+		exit 1; \
+	fi
+	@echo ">> Starting polkajam validators 0-4..."
 	@for i in 0 1 2 3 4; do \
+		echo "   Starting validator $$i on port $$((19800 + $$i))..."; \
 		RUST_LOG=chain-core=debug,jam_node=trace $(POLKAJAM_BIN) --chain ${CHAINSPEC} run --pvm-backend $(PVM_BACKEND) --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) --telemetry localhost:$(TELEMETRY_PORT) >logs/polkajam-$$i.log 2>&1 & \
 	done
+	@sleep 2
+	@started=$$(pgrep -f "$(POLKAJAM_BIN).*dev-validator" 2>/dev/null | wc -l | tr -d ' '); \
+	if [ "$$started" -ge 5 ]; then \
+		echo "✅ All 5 polkajam validators started"; \
+	else \
+		echo "⚠️  Only $$started/5 polkajam validators started. Check logs/polkajam-*.log"; \
+		for i in 0 1 2 3 4; do \
+			if ! pgrep -f "$(POLKAJAM_BIN).*dev-validator $$i" >/dev/null 2>&1; then \
+				echo "   ❌ Validator $$i failed:"; \
+				tail -5 logs/polkajam-$$i.log 2>/dev/null || echo "      (no log)"; \
+			fi; \
+		done; \
+	fi
 
 run_6:
+	@mkdir -p logs
+	@if [ ! -x "$(POLKAJAM_BIN)" ]; then \
+		echo "❌ Error: $(POLKAJAM_BIN) not found or not executable"; \
+		exit 1; \
+	fi
+	@echo ">> Starting polkajam validators 0-5..."
 	@for i in 0 1 2 3 4 5; do \
 		RUST_LOG=chain-core=debug,jam_node=trace $(POLKAJAM_BIN) --chain ${CHAINSPEC} run --pvm-backend $(PVM_BACKEND) --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) --telemetry localhost:$(TELEMETRY_PORT) >logs/polkajam-$$i.log 2>&1 & \
 	done
+	@sleep 2
+	@started=$$(pgrep -f "$(POLKAJAM_BIN).*dev-validator" 2>/dev/null | wc -l | tr -d ' '); \
+	echo "✅ $$started/6 polkajam validators started"
 
 jam:
 	@echo "Building JAM...  "
 	mkdir -p $(OUTPUT_DIR)
 	go build -tags=  -o $(OUTPUT_DIR)/$(ARCH)/$(BINARY) .
+
+evm-builder:
+	@echo "Building EVM Builder..."
+	mkdir -p $(OUTPUT_DIR)
+	go build -o $(OUTPUT_DIR)/$(ARCH)/evm-builder ./cmd/evm-builder
+
+orchard-builder:
+	@echo "Building Orchard Builder..."
+	mkdir -p $(OUTPUT_DIR)
+	go build -o $(OUTPUT_DIR)/$(ARCH)/orchard-builder ./cmd/orchard-builder
+
+builders: evm-builder orchard-builder
+	@echo "All builders built successfully"
+
+run_evm_builder:
+	@echo "Building EVM Builder..."
+	@mkdir -p $(OUTPUT_DIR)
+	go build -o $(OUTPUT_DIR)/$(ARCH)/evm-builder ./cmd/evm-builder
+	@echo "Stopping any existing EVM Builder..."
+	@ps aux | grep 'bin/.*[e]vm-builder' | awk '{print $$2}' | while read pid; do kill $$pid 2>/dev/null || true; done
+	@sleep 1
+	@echo "Starting EVM Builder..."
+	@$(OUTPUT_DIR)/$(ARCH)/evm-builder run --dev-validator 6 --chain $(CHAINSPEC) --pvm-backend $(PVM_BACKEND) --debug rotation,guarantees --evm-rpc-port 8600 --telemetry localhost:$(TELEMETRY_PORT)
 
 duna_spec: jam
 	@echo "Generating Duna chainspec..."
@@ -306,6 +372,7 @@ run_parallel_jam:
 			--debug rotation,guarantees \
 			--pvm-backend $(PVM_BACKEND) \
 			--start-time "$(JAM_START_TIME)" \
+			--telemetry localhost:$(TELEMETRY_PORT) \
 			>logs/jamduna-$$i.log 2>&1 & \
 	done
 	@sleep 1
@@ -323,15 +390,25 @@ run_polkajam_all:
 
 run_localclient: kill jam jam_clean start_telemetry
 	@echo "Using chainspec: $(CHAINSPEC)"
-	@echo "Telemetry UI: http://localhost:$(TELEMETRY_WEB_PORT)"
 	@$(MAKE) run_5 run_1
+	@echo ""
+	@echo "========================================"
+	@echo "Local JAM network started (mixed mode)"
+	@echo "  Validators 0-4: polkajam (Rust)"
+	@echo "  Validator 5:    jamduna (Go)"
+	@echo "  Telemetry:      http://localhost:8088"
+	@echo "  Logs:           logs/*.log"
+	@echo "========================================"
+	@echo ""
+	@echo "To monitor: tail -f logs/jamduna-5.log"
+	@echo "To stop:    make kill"
+
 run_localclient_jam: kill duna_spec jam jam_clean start_telemetry
 	@echo "Using chainspec: $(CHAINSPEC)"
-	@echo "Telemetry UI: http://localhost:$(TELEMETRY_WEB_PORT)"
 	@$(MAKE) run_parallel_jam
+
 run_localclient_jam_dead: kill jam jam_clean start_telemetry
 	@echo "Using chainspec: $(CHAINSPEC)"
-	@echo "Telemetry UI: http://localhost:$(TELEMETRY_WEB_PORT)"
 	@$(MAKE) run_parallel_jam_with_deadnode
 
 run_single_node:jam_clean
@@ -341,9 +418,21 @@ run_single_node:jam_clean
 	@echo "Instance started."
 run_parallel_jam_with_deadnode:
 	@mkdir -p logs
-	@echo "Starting $(NUM_NODES) instances of $(OUTPUT_DIR)/$(ARCH)/$(BINARY)..."
-	@seq 0 $(shell echo $$(($(NUM_NODES) - 2))) | xargs -I{} -P $(NUM_NODES) sh -c 'PORT=$$(($(DEFAULT_PORT) + {})); $(OUTPUT_DIR)/$(ARCH)/$(BINARY) run  --chain $(CHAINSPEC) --dev-validator {}; echo "Instance {} finished with port $$PORT"' sh
-	@echo "All instances started."
+	@echo "Starting $(NUM_NODES) instances of $(OUTPUT_DIR)/$(BINARY) (one dead node)..."
+	@for i in $$(seq 0 $$(($(NUM_NODES) - 2))); do \
+		PORT=$$(($(DEFAULT_PORT) + $$i)); \
+		V_IDX=$$i; \
+		echo ">> Starting instance $$V_IDX on port $$PORT..."; \
+		$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run \
+			--chain $(CHAINSPEC) \
+			--dev-validator $$V_IDX \
+			--debug rotation,guarantees \
+			--pvm-backend $(PVM_BACKEND) \
+			--telemetry localhost:$(TELEMETRY_PORT) \
+			>logs/jamduna-$$i.log 2>&1 & \
+	done
+	@sleep 1
+	@echo "✅ All instances started (node $$(($(NUM_NODES) - 1)) is dead)."
 kill_parallel_jam:
 	@echo "Killing all instances of $(OUTPUT_DIR)/$(BINARY)..."
 	@pgrep -f "$(OUTPUT_DIR)/$(BINARY)"
@@ -352,11 +441,15 @@ kill_parallel_jam:
 
 kill: kill_telemetry
 	@echo "Kill Jam Binaries(if any)..."
-	@pkill -9 jam || true
+	@ps aux | grep 'bin/.*[j]amduna' | awk '{print $$2}' | while read pid; do kill -9 $$pid 2>/dev/null || true; done
+	@ps aux | grep 'bin/.*[e]vm-builder' | awk '{print $$2}' | while read pid; do kill -9 $$pid 2>/dev/null || true; done
+	@ps aux | grep 'bin/.*[o]rchard-builder' | awk '{print $$2}' | while read pid; do kill -9 $$pid 2>/dev/null || true; done
 	@sleep 1
-	@pkill -9 jam || true
+	@ps aux | grep 'bin/.*[j]amduna' | awk '{print $$2}' | while read pid; do kill -9 $$pid 2>/dev/null || true; done
+	@ps aux | grep 'bin/.*[e]vm-builder' | awk '{print $$2}' | while read pid; do kill -9 $$pid 2>/dev/null || true; done
+	@ps aux | grep 'bin/.*[o]rchard-builder' | awk '{print $$2}' | while read pid; do kill -9 $$pid 2>/dev/null || true; done
 	@sleep 1
-	@if pgrep jam > /dev/null; then echo "WARNING: Some jam processes still running"; pgrep -l jam; else echo "All jam processes terminated."; fi
+	@if ps aux | grep -E 'bin/.*[j]amduna|bin/.*[e]vm-builder|bin/.*[o]rchard-builder' > /dev/null; then echo "WARNING: Some processes still running"; ps aux | grep -E 'bin/.*[j]amduna|bin/.*[e]vm-builder|bin/.*[o]rchard-builder'; else echo "All jam processes terminated."; fi
 	@echo "Process cleanup complete."
 
 
@@ -585,7 +678,7 @@ telemetry:
 start_telemetry: telemetry_viewer
 	@echo "Starting telemetry viewer..."
 	@mkdir -p logs
-	@pkill -f telemetryViewer || true
+	@ps aux | grep 'bin/.*[t]elemetryViewer' | awk '{print $$2}' | while read pid; do kill $$pid 2>/dev/null || true; done
 	@$(OUTPUT_DIR)/telemetryViewer -telemetry 0.0.0.0:$(TELEMETRY_PORT) -web 0.0.0.0:$(TELEMETRY_WEB_PORT) -log $(TELEMETRY_LOG) >logs/telemetry-viewer.log 2>&1 &
 	@sleep 1
 	@echo "Telemetry viewer started: http://localhost:$(TELEMETRY_WEB_PORT)"
@@ -593,8 +686,8 @@ start_telemetry: telemetry_viewer
 # Kill telemetry processes
 kill_telemetry:
 	@echo "Killing telemetry processes..."
-	@pkill -f telemetryViewer || true
-	@pkill -f "jamduna telemetry" || true
+	@ps aux | grep 'bin/.*[t]elemetryViewer' | awk '{print $$2}' | while read pid; do kill $$pid 2>/dev/null || true; done
+	@ps aux | grep 'bin/.*jamduna.*[t]elemetry' | awk '{print $$2}' | while read pid; do kill $$pid 2>/dev/null || true; done
 	@echo "Telemetry processes killed."
 
 # Restart telemetry viewer (kills and restarts)

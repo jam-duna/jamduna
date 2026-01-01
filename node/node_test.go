@@ -5,12 +5,10 @@
 package node
 
 import (
-	"context"
 	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"math/big"
 	_ "net/http/pprof"
 	"os"
 	"os/user"
@@ -24,10 +22,7 @@ import (
 	grandpa "github.com/colorfulnotion/jam/grandpa"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/statedb/evmtypes"
-	stateStorage "github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
-	"github.com/ethereum/go-verkle"
 	"golang.org/x/exp/rand"
 )
 
@@ -289,7 +284,6 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 	var bNode JNode
 	var tNode *Node
 	var nodes []*Node
-	var evmBuilder *Node // Builder node for EVM client mode
 	var err error
 
 	if !*jam_node { // NodeClient -- client scenario (could be dot-0 OR localhost:____ )
@@ -299,18 +293,6 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		if jam == "safrole" || jam == "fallback" {
 			t.Logf("Nothing to test for %s-client\n", jam)
 			return
-		}
-
-		// For EVM client mode, we need to spin up the builder node (N6) first
-		// before connecting to it, since run_localclient only starts N0-N5
-		if jam == "evm" && *jam_local_client {
-			fmt.Printf("jamtest: evm-client spinning up local builder node (N6)...\n")
-			evmBuilder, err = NewBuilder(numNodes, 40000)
-			if err != nil {
-				t.Fatalf("Failed to create builder node: %v", err)
-			}
-			// Give the builder time to start and sync
-			time.Sleep(5 * time.Second)
 		}
 
 		fmt.Printf("jamtest: %s-client (local=%v) finalization=%s\n", jam, *jam_local_client, finalizationMode)
@@ -460,18 +442,9 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 		safrole(jceManager)
 		waitForTermination(tNode, "fallback", FallbackEpochLen, FallbackBufferTime, t)
 	case "evm":
-		// EVM needs a local builder node (N6) for storage access
-		// For client mode, evmBuilder was already created before connecting
-		builder := evmBuilder
-		if builder == nil {
-			// Node mode: create builder now
-			var err error
-			builder, err = NewBuilder(numNodes, 40000)
-			if err != nil {
-				t.Fatalf("Failed to create builder node: %v", err)
-			}
-		}
-		evm(bNode, builder, testServices, 30)
+		// EVM testing has been moved to builder/evm/rpc package
+		// Use: go test -v -run TestEVMBlocksTransfersRPC ./builder/evm/rpc/
+		t.Skip("EVM testing moved to builder/evm/rpc - run: go test -v -run TestEVMBlocksTransfersRPC ./builder/evm/rpc/")
 	case "algo":
 		algo(bNode, testServices, targetN)
 	case "fib":
@@ -541,355 +514,6 @@ func waitForTermination(watchNode *Node, caseType string, targetedEpochLen int, 
 	}
 }
 
-// primeEVMGenesis injects the issuer account and a block-0 snapshot into a node's storage
-// without re-running the full chain genesis.
-func primeEVMGenesis(storage *stateStorage.StateDBStorage, serviceID uint32, startBalance int64) error {
-	// Ensure we have a working tree
-	tree := storage.CurrentVerkleTree
-	if tree == nil {
-		tree = verkle.New()
-		storage.CurrentVerkleTree = tree
-	}
-
-	issuerAddress, _ := common.GetEVMDevAccount(0)
-	balanceWei := new(big.Int).Mul(big.NewInt(startBalance), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
-
-	var basicData [32]byte
-	// nonce = 1 per EIP-6800 layout
-	binary.BigEndian.PutUint64(basicData[8:16], uint64(1))
-	// balance at offset 16-31
-	balanceBytes := balanceWei.Bytes()
-	copy(basicData[32-len(balanceBytes):], balanceBytes)
-
-	if err := tree.Insert(stateStorage.BasicDataKey(issuerAddress[:]), basicData[:], nil); err != nil {
-		return fmt.Errorf("primeEVMGenesis: insert basic data failed: %w", err)
-	}
-
-	root := tree.Commit()
-	rootBytes := root.Bytes()
-	rootHash := common.BytesToHash(rootBytes[:])
-	storage.StoreVerkleTree(rootHash, tree)
-
-	genesisBlock := &evmtypes.EvmBlockPayload{
-		Number:              0,
-		WorkPackageHash:     common.Hash{},
-		SegmentRoot:         common.Hash{},
-		PayloadLength:       148,
-		NumTransactions:     0,
-		Timestamp:           0,
-		GasUsed:             0,
-		VerkleRoot:          rootHash,
-		TransactionsRoot:    common.Hash{},
-		ReceiptRoot:         common.Hash{},
-		BlockAccessListHash: common.Hash{},
-		TxHashes:            []common.Hash{},
-		ReceiptHashes:       []common.Hash{},
-		Transactions:        []evmtypes.TransactionReceipt{},
-	}
-
-	if err := storage.StoreServiceBlock(serviceID, genesisBlock, common.Hash{}, 0); err != nil {
-		return fmt.Errorf("primeEVMGenesis: store service block failed: %w", err)
-	}
-
-	return nil
-}
-
-func evm(n1 JNode, builder *Node, testServices map[string]*types.TestService, targetN int) {
-
-	evm_serviceIdx := uint32(statedb.EVMServiceCode)
-
-	// Prime EVM issuer balance/nonce for service 0 without resetting JAM state
-	log.Info(log.Node, "Priming EVM genesis on all nodes", "numNodes", numNodes)
-
-	storageIface, err := builder.GetStorage()
-	if err != nil {
-		log.Error(log.Node, "GetStorage failed", "err", err)
-		return
-	}
-	sdb, ok := storageIface.(*stateStorage.StateDBStorage)
-	if !ok {
-		log.Error(log.Node, "Storage type assertion failed", "type", fmt.Sprintf("%T", storageIface))
-		return
-	}
-
-	if err := primeEVMGenesis(sdb, evm_serviceIdx, 61_000_000); err != nil {
-		log.Error(log.Node, "primeEVMGenesis failed", "err", err)
-		return
-	}
-
-	// Create Rollup instance and add to node's rollups map
-	rollup, err := statedb.NewRollup(storageIface, evm_serviceIdx, builder)
-	if err != nil {
-		log.Error(log.Node, "NewRollup failed", "err", err)
-		return
-	}
-	builder.rollupsMutex.Lock()
-	builder.rollups[evm_serviceIdx] = rollup
-	builder.rollupsMutex.Unlock()
-
-	// Track balances across iterations
-	const numAccounts = 11 // 10 dev accounts + 1 coinbase
-	prevBalances := make([]*big.Int, numAccounts)
-
-	// Coinbase address receives all transaction fees
-	coinbaseAddress := common.HexToAddress("0xEaf3223589Ed19bcd171875AC1D0F99D31A5969c")
-
-	// Get all account addresses
-	accounts := make([]common.Address, numAccounts)
-	for i := 0; i < 10; i++ {
-		accounts[i], _ = common.GetEVMDevAccount(i)
-	}
-	accounts[10] = coinbaseAddress
-
-	for i := 0; i < numAccounts; i++ {
-		balanceHash, err := rollup.GetBalance(accounts[i], "latest")
-		if err != nil {
-			log.Warn(log.Node, "Failed to get initial balance", "account", i, "err", err)
-			prevBalances[i] = big.NewInt(0)
-		} else {
-			prevBalances[i] = new(big.Int).SetBytes(balanceHash[:])
-		}
-	}
-
-	// Create and submit EVM transactions across multiple iterations
-	for evmN := 0; evmN < targetN; evmN++ {
-		// Use sequential nonces starting from 0
-		nonce := uint64(evmN * 3) // Each iteration creates 3 transactions
-
-		// Build transaction extrinsics
-		numTxs := 3
-		txBytes := make([][]byte, numTxs)
-		txHashes := make([]common.Hash, numTxs)
-
-		if evmN < 3 {
-
-			// Create simple transfers from account 0 to other accounts
-			_, senderPrivKey := common.GetEVMDevAccount(0)
-
-			for i := 0; i < numTxs; i++ {
-				recipientIndex := (evmN*numTxs + i + 1) % 10
-				if recipientIndex == 0 {
-					recipientIndex = 1
-				}
-				recipientAddr, _ := common.GetEVMDevAccount(recipientIndex)
-				gasPrice := big.NewInt(1) // 1 wei
-				gasLimit := uint64(12_000_000)
-				amount := big.NewInt(int64(10000000*i + 200000000)) // variable amount
-
-				_, tx, txHash, err := statedb.CreateSignedNativeTransfer(
-					senderPrivKey,
-					nonce+uint64(i),
-					recipientAddr,
-					amount,
-					gasPrice,
-					gasLimit,
-					uint64(statedb.DefaultJAMChainID),
-				)
-				if err != nil {
-					log.Error(log.Node, "CreateSignedNativeTransfer ERR", "err", err)
-					return
-				}
-
-				txBytes[i] = tx
-				txHashes[i] = txHash
-			}
-		} else {
-			// Random transactions between dev accounts, ensuring its not the same account
-			// and that the amount does not exceed 50% of available balance (based on prevBalances)
-
-			// Track nonces per sender for this iteration
-			senderNonces := make(map[int]uint64)
-
-			for i := 0; i < numTxs; i++ {
-				// Select random sender from accounts 0-9 that has sufficient balance
-				var senderIndex int
-				var senderBalance *big.Int
-				maxAttempts := 50
-				for attempt := 0; attempt < maxAttempts; attempt++ {
-					senderIndex = rand.Intn(10)
-					senderBalance = prevBalances[senderIndex]
-
-					// Check if sender has enough balance (need at least for gas + some amount)
-					minRequired := big.NewInt(25_000_000) // minimum for gas + transfer
-					if senderBalance.Cmp(minRequired) > 0 {
-						break
-					}
-
-					if attempt == maxAttempts-1 {
-						log.Error(log.Node, "Could not find sender with sufficient balance", "iteration", evmN, "tx", i)
-						return
-					}
-				}
-
-				// Select random recipient (different from sender)
-				recipientIndex := rand.Intn(10)
-				for recipientIndex == senderIndex {
-					recipientIndex = rand.Intn(10)
-				}
-
-				// Calculate max transferable amount (50% of balance minus gas costs)
-				gasPrice := big.NewInt(1)
-				gasLimit := uint64(12_000_000)
-				maxGasCost := new(big.Int).Mul(gasPrice, big.NewInt(int64(gasLimit)))
-
-				maxTransfer := new(big.Int).Div(senderBalance, big.NewInt(2))
-				maxTransfer.Sub(maxTransfer, maxGasCost)
-
-				// Ensure maxTransfer is positive
-				if maxTransfer.Cmp(big.NewInt(1000)) < 0 {
-					maxTransfer = big.NewInt(1000)
-				}
-
-				// Random amount between 1000 and maxTransfer
-				randomAmount := big.NewInt(0)
-				if maxTransfer.Cmp(big.NewInt(10000)) > 0 {
-					// Use a random percentage of maxTransfer (10% to 90%)
-					percentage := 10 + rand.Intn(80)
-					randomAmount.Mul(maxTransfer, big.NewInt(int64(percentage)))
-					randomAmount.Div(randomAmount, big.NewInt(100))
-				} else {
-					randomAmount.Set(maxTransfer)
-				}
-
-				// Get sender's nonce
-				var currentNonce uint64
-				if nonce, exists := senderNonces[senderIndex]; exists {
-					currentNonce = nonce
-				} else {
-					// First tx from this sender in this iteration - get from rollup
-					addr, _ := common.GetEVMDevAccount(senderIndex)
-					nonceFromChain, err := rollup.GetTransactionCount(addr, "latest")
-					if err != nil {
-						log.Error(log.Node, "GetTransactionCount ERR", "account", senderIndex, "err", err)
-						return
-					}
-					currentNonce = nonceFromChain
-				}
-				senderNonces[senderIndex] = currentNonce + 1
-
-				// Create the transfer
-				senderAddr, senderPrivKey := common.GetEVMDevAccount(senderIndex)
-				recipientAddr, _ := common.GetEVMDevAccount(recipientIndex)
-
-				_, tx, txHash, err := statedb.CreateSignedNativeTransfer(
-					senderPrivKey,
-					currentNonce,
-					recipientAddr,
-					randomAmount,
-					gasPrice,
-					gasLimit,
-					uint64(statedb.DefaultJAMChainID),
-				)
-				if err != nil {
-					log.Error(log.Node, "CreateSignedNativeTransfer ERR", "err", err)
-					return
-				}
-
-				log.Info(log.Node, "📤 Random transfer",
-					"iteration", evmN,
-					"tx", i,
-					"from", fmt.Sprintf("Account[%d](%s)", senderIndex, senderAddr.Hex()),
-					"to", fmt.Sprintf("Account[%d](%s)", recipientIndex, recipientAddr.Hex()),
-					"amount", randomAmount.String(),
-					"nonce", currentNonce,
-				)
-
-				txBytes[i] = tx
-				txHashes[i] = txHash
-			}
-		}
-
-		service, ok, err := builder.GetService(evm_serviceIdx)
-		if err != nil || !ok {
-			log.Error(log.Node, "GetService failed", "err", err)
-			return
-		}
-
-		// Create extrinsics blobs and hashes
-		blobs := make(types.ExtrinsicsBlobs, numTxs)
-		extrinsics := make([]types.WorkItemExtrinsic, numTxs)
-		for i, tx := range txBytes {
-			blobs[i] = tx
-			extrinsics[i] = types.WorkItemExtrinsic{
-				Hash: common.Blake2Hash(tx),
-				Len:  uint32(len(tx)),
-			}
-		}
-
-		// Create work package
-		wp := statedb.DefaultWorkPackage(evm_serviceIdx, service)
-		refineContext, err := builder.GetRefineContext()
-		if err != nil {
-			log.Error(log.Node, "GetRefineContext failed", "err", err)
-			return
-		}
-		wp.RefineContext = refineContext
-		globalDepth := uint8(0)
-		wp.WorkItems[0].Extrinsics = extrinsics
-		wp.WorkItems[0].Payload = statedb.BuildPayload(statedb.PayloadTypeBuilder, len(txBytes), globalDepth, 0, common.Hash{})
-
-		// Build bundle using node's BuildBundle method
-		bundle, _, err := builder.BuildBundle(wp, []types.ExtrinsicsBlobs{blobs}, 0, nil)
-		if err != nil {
-			log.Error(log.Node, "BuildBundle failed", "err", err)
-			continue
-		}
-		bundles := []*types.WorkPackageBundle{bundle}
-		ctx, cancel := context.WithTimeout(context.Background(), RefineTimeout*maxRobustTries)
-		defer cancel()
-
-		stateRoots, timeslots, err := RobustSubmitAndWaitForWorkPackageBundles(ctx, n1, bundles)
-		if err != nil {
-			log.Error(log.Node, "⚠️ SubmitAndWaitForWorkPackages failed, continuing to next iteration", "err", err, "evmN", evmN)
-			continue
-		}
-		log.Info(log.Node, "✅ Submitted and accumulated EVM tx bundle", "evmN", evmN, "stateRoot", stateRoots[0], "timeslot", timeslots[0])
-
-		// Show the balance of all accounts after each iteration, sum them and show the deltas from previous round
-		currentBalances := make([]*big.Int, numAccounts)
-		totalBalance := big.NewInt(0)
-		totalDelta := big.NewInt(0)
-
-		log.Info(log.Node, "Account balances after iteration", "iteration", evmN)
-		for i := 0; i < numAccounts; i++ {
-			balanceHash, err := rollup.GetBalance(accounts[i], "latest")
-			if err != nil {
-				log.Warn(log.Node, "Failed to get balance", "account", i, "err", err)
-				currentBalances[i] = big.NewInt(0)
-			} else {
-				currentBalances[i] = new(big.Int).SetBytes(balanceHash[:])
-			}
-
-			delta := new(big.Int).Sub(currentBalances[i], prevBalances[i])
-			totalBalance.Add(totalBalance, currentBalances[i])
-			totalDelta.Add(totalDelta, delta)
-
-			if i == 10 {
-				log.Info(log.Node, "  Coinbase", "address", accounts[i].Hex(), "balance", currentBalances[i], "delta", delta)
-			} else {
-				log.Info(log.Node, "  Account", "idx", i, "address", accounts[i].Hex(), "balance", currentBalances[i], "delta", delta)
-			}
-		}
-
-		log.Info(log.Node, "Total balance", "sum", totalBalance, "delta", totalDelta)
-
-		// Verify total balance matches genesis amount (61M with 18 decimals)
-		expectedTotal := new(big.Int).Mul(big.NewInt(61_000_000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
-		if totalBalance.Cmp(expectedTotal) != 0 {
-			log.Error(log.Node, "❌ Total balance mismatch - money supply violation!",
-				"iteration", evmN,
-				"expected", expectedTotal.String(),
-				"actual", totalBalance.String(),
-				"diff", new(big.Int).Sub(totalBalance, expectedTotal).String())
-			return
-		}
-
-		// Update previous balances for next iteration
-		prevBalances = currentBalances
-
-	}
-	log.Info(log.Node, "✅ EVM test completed successfully", "iterations", targetN)
-}
 
 func TestFallback(t *testing.T) {
 	jamtest(t, "fallback", 0)

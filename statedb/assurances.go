@@ -110,7 +110,6 @@ func (s *StateDB) checkAssuranceInline(a types.Assurance, anchor common.Hash, va
 		return jamerrors.ErrABadCore
 	}
 
-	// (11.13) TIME CONSUMING signature verification -- use go routine? look inside
 	if err := a.VerifySignature(validators[validatorIdx]); err != nil {
 		log.Error(log.SDB, "Assurance signature verification failed", "err", err, "validator_index", a.ValidatorIndex)
 		return jamerrors.ErrABadSignature

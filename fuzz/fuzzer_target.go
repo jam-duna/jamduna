@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/storage"
 	// "github.com/colorfulnotion/jam/refine"
 	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 )
 

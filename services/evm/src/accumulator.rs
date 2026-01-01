@@ -45,23 +45,33 @@ impl BlockAccumulator {
 
         for (idx, input) in accumulate_inputs.iter().enumerate() {
             log_info(&format!("📥 Processing input #{}", idx));
-            let AccumulateInput::OperandElements(operand) = input else {
-                log_error(&format!("  Input #{}: Not OperandElements, skipping", idx));
-                continue;
-            };
 
-            log_info(&format!(
-                "  Input #{}: OperandElements, calling rollup_block",
-                idx
-            ));
-            // Process this work package's rollup block
-            accumulator.rollup_block(operand)?;
+            match input {
+                AccumulateInput::OperandElements(operand) => {
+                    log_info(&format!(
+                        "  Input #{}: OperandElements, calling rollup_block",
+                        idx
+                    ));
 
-            // Delete old blocks to prevent unbounded state growth
-            const BLOCK_RETENTION_LIMIT: u32 = 10000;
-            if accumulator.block_number > BLOCK_RETENTION_LIMIT {
-                let old_block_number = accumulator.block_number - BLOCK_RETENTION_LIMIT;
-                crate::block::EvmBlockPayload::delete_block(service_id, old_block_number);
+                    // Process this work package's rollup block
+                    accumulator.rollup_block(operand)?;
+
+                    // Delete old blocks to prevent unbounded state growth
+                    const BLOCK_RETENTION_LIMIT: u32 = 10000;
+                    if accumulator.block_number > BLOCK_RETENTION_LIMIT {
+                        let old_block_number = accumulator.block_number - BLOCK_RETENTION_LIMIT;
+                        crate::block::EvmBlockPayload::delete_block(service_id, old_block_number);
+                    }
+                }
+                AccumulateInput::DeferredTransfer(transfer) => {
+                    log_info(&format!(
+                        "  Input #{}: DeferredTransfer from service {}, amount={}",
+                        idx, transfer.sender_index, transfer.amount
+                    ));
+
+                    // Process Railgun withdrawal
+                    accumulator.process_railgun_withdrawal(transfer)?;
+                }
             }
         }
         EvmBlockPayload::write_blocknumber_key(accumulator.block_number);
@@ -628,6 +638,118 @@ impl BlockAccumulator {
 
         // Increment block_number for next block
         self.block_number += 1;
+
+        Some(())
+    }
+
+    /// Process Railgun withdrawal (DeferredTransfer from Railgun service → EVM)
+    ///
+    /// Memo v1 format: [version=0x01 | recipient(20) | asset_id(4) | reserved(103)]
+    /// Total: 128 bytes
+    ///
+    /// Validates memo format and credits recipient's EVM account with withdrawn amount.
+    /// The JAM runtime has already transferred the balance from Railgun service to EVM service.
+    fn process_railgun_withdrawal(&self, transfer: &utils::functions::DeferredTransfer) -> Option<()> {
+
+        // Validate memo version (must be 0x01)
+        if transfer.memo[0] != 0x01 {
+            log_error(&format!(
+                "❌ Invalid memo version: expected 0x01, got {}",
+                transfer.memo[0]
+            ));
+            return None;
+        }
+
+        // Extract recipient address (20 bytes at offset 1)
+        let mut recipient_bytes = [0u8; 20];
+        recipient_bytes.copy_from_slice(&transfer.memo[1..21]);
+
+        // Extract asset_id (4 bytes at offset 21, little-endian)
+        let asset_id = u32::from_le_bytes([
+            transfer.memo[21],
+            transfer.memo[22],
+            transfer.memo[23],
+            transfer.memo[24],
+        ]);
+
+        // Validate reserved bytes are zero (bytes 25..128)
+        for (idx, &byte) in transfer.memo[25..128].iter().enumerate() {
+            if byte != 0 {
+                log_error(&format!(
+                    "❌ Reserved byte at offset {} is non-zero: {}",
+                    25 + idx,
+                    byte
+                ));
+                return None;
+            }
+        }
+
+        log_info(&format!(
+            "💸 Railgun withdrawal: {} wei (asset {}) → 0x{}",
+            transfer.amount,
+            asset_id,
+            hex::encode(&recipient_bytes)
+        ));
+
+        // Credit recipient's EVM account balance
+        use primitive_types::{H160, U256};
+        use crate::state::balance_storage_key;
+        use utils::host_functions::read;
+
+        let recipient_address = H160::from_slice(&recipient_bytes);
+        let balance_key = balance_storage_key(recipient_address);
+
+        // Read current balance
+        let mut current_balance_bytes = [0u8; 32];
+        unsafe {
+            let bytes_read = read(
+                0, // current service
+                balance_key.as_ptr() as u64,
+                32,
+                current_balance_bytes.as_mut_ptr() as u64,
+                0,
+                32,
+            );
+            if bytes_read != 32 {
+                log_error(&format!("❌ Failed to read balance for 0x{}", hex::encode(&recipient_bytes)));
+                return None;
+            }
+        }
+
+        let current_balance = U256::from_little_endian(&current_balance_bytes);
+        let new_balance = current_balance + U256::from(transfer.amount);
+
+        log_info(&format!(
+            "  Current balance: {} wei, adding {} wei → {} wei",
+            current_balance,
+            transfer.amount,
+            new_balance
+        ));
+
+        // Write new balance
+        let mut new_balance_bytes = [0u8; 32];
+        new_balance.to_little_endian(&mut new_balance_bytes);
+
+        unsafe {
+            let result = utils::host_functions::write(
+                balance_key.as_ptr() as u64,
+                32,
+                new_balance_bytes.as_ptr() as u64,
+                32,
+            );
+            if result != 0 {
+                log_error(&format!("❌ Failed to write balance for 0x{}", hex::encode(&recipient_bytes)));
+                return None;
+            }
+        }
+
+        log_info(&format!(
+            "✅ Withdrawal processed: recipient=0x{}, amount={}, asset_id={}, new_balance={}",
+            hex::encode(&recipient_bytes),
+            transfer.amount,
+            asset_id,
+            new_balance
+        ));
 
         Some(())
     }
