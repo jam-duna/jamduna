@@ -26,6 +26,13 @@ func (t *StateDBStorage) SetRoot(root common.Hash) error {
 		return nil
 	}
 
+	// Use the MerkleTree's SetRoot to reconstruct the tree from the historical root
+	if err := t.trieDB.SetRoot(root); err != nil {
+		return fmt.Errorf("failed to set trie root to %s: %w", root.Hex(), err)
+	}
+
+	// Update our cached root
+	t.Root = root
 	return nil
 }
 

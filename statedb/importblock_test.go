@@ -2,6 +2,7 @@ package statedb
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -121,14 +122,28 @@ func runSingleSTFTest(t *testing.T, filename string, content string, pvmBackend 
 	diffs, err := CheckStateTransitionWithOutput(test_storage, &stf, nil, pvmBackend, runPrevalidation, logDir)
 	benchRec.Add("runSingleSTFTest:CheckStateTransitionWithOutput", time.Since(t0))
 	elapsed := time.Since(start)
+
+	// Determine if this STF expects a failure (PreState == PostState means invalid block)
+	expectsFailure := stf.PreState.StateRoot == stf.PostState.StateRoot
+
 	if err == nil {
-		fmt.Printf("✅ [%s] PostState.StateRoot %s matches (%.5fms)\n", filename, stf.PostState.StateRoot, float64(elapsed.Nanoseconds())/1000000)
+		if expectsFailure {
+			// Block was invalid and we correctly rejected it (no state change)
+			fmt.Printf("👍 [%s] Invalid block correctly rejected, StateRoot unchanged %s (%.5fms)\n", filename, stf.PostState.StateRoot, float64(elapsed.Nanoseconds())/1000000)
+		} else {
+			// Block was valid and we correctly processed it
+			fmt.Printf("✅ [%s] PostState.StateRoot %s matches (%.5fms)\n", filename, stf.PostState.StateRoot, float64(elapsed.Nanoseconds())/1000000)
+		}
 		return nil
-	} else {
-		fmt.Printf("Fail With Error: %v\n", err)
 	}
+
 	if err.Error() == "OMIT" {
 		//	t.Skipf("⚠️ OMIT: Test case for [%s] is marked to be omitted.", filename)
+	}
+
+	if expectsFailure {
+		fmt.Printf("👍 [%s] Expected failure correctly caught: %v (%.5fms)\n", filename, err, float64(elapsed.Nanoseconds())/1000000)
+		return nil
 	}
 
 	HandleDiffs(diffs)
@@ -620,6 +635,467 @@ func TestFuzzTrace(t *testing.T) {
 
 func TestPublishFuzzTrace(t *testing.T) {
 	testFuzzTraceInternal(t, true)
+}
+
+func TestFuzzTraceSequential(t *testing.T) {
+	log.InitLogger("debug")
+
+	targetVersion := "0.7.2"
+	testAllTraces := true // When true, loop through all traces; when false, only test specific cases
+
+	sourcePath, err := GetFuzzReportsPath()
+	if err != nil {
+		t.Fatalf("failed to get source fuzz reports path: %v", err)
+	}
+
+	if testAllTraces {
+		// Discover all trace directories dynamically
+		tracesDir := filepath.Join(sourcePath, fmt.Sprintf("fuzz-reports/%s/traces", targetVersion))
+		entries, err := os.ReadDir(tracesDir)
+		if err != nil {
+			t.Fatalf("failed to read traces directory %s: %v", tracesDir, err)
+		}
+
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			testCaseID := entry.Name()
+			t.Run(testCaseID, func(t *testing.T) {
+				runSequentialFuzzTrace(t, sourcePath, targetVersion, testCaseID)
+			})
+		}
+	} else {
+		// Test specific cases that failed before the SetRoot fix
+		testCases := []string{
+			"1766241867",
+			"1766241968",
+			"1766243315_1733",
+			"1766243493_8886",
+			"1766243861_2056",
+			"1766244122_3562",
+			"1766244251_4514",
+			"1766244251_9568",
+			"1766479507_3250",
+			"1766479507_7090",
+			"1766565819_4337",
+			"1766565819_9942",
+		}
+
+		for _, id := range testCases {
+			t.Run(id, func(t *testing.T) {
+				runSequentialFuzzTrace(t, sourcePath, targetVersion, id)
+			})
+		}
+	}
+}
+
+func TestBadFuzzTraceSequential(t *testing.T) {
+	log.InitLogger("debug")
+
+	targetVersion := "0.7.2"
+
+	sourcePath, err := GetFuzzReportsPath()
+	if err != nil {
+		t.Fatalf("failed to get source fuzz reports path: %v", err)
+	}
+
+	testCases := []struct {
+		id          string
+		expectedErr string
+		description string
+	}{
+		{"1766241867", "T6|TimeslotNotMonotonic", "Progress from slot X to slot X. Timeslot must be strictly monotonic."},
+		{"1766241968", "A3|BadCore", "One assurance targets a core without any assigned work report."},
+		{"1766243315_1733", "T6|TimeslotNotMonotonic", "Progress from slot X to slot X. Timeslot must be strictly monotonic."},
+		{"1766243493_8886", "A3|BadCore", "One assurance targets a core without any assigned work report."},
+		{"1766243861_2056", "ApplyStateTransitionFromBlock", "ValidateAddPreimage failed for service 0: preimage lookup not empty"},
+		{"1766244122_3562", "A3|BadCore", "One assurance targets a core without any assigned work report."},
+		{"1766244251_4514", "A3|BadCore", "One assurance targets a core without any assigned work report."},
+		{"1766244251_9568", "T6|TimeslotNotMonotonic", "Progress from slot X to slot X. Timeslot must be strictly monotonic."},
+		{"1766479507_3250", "T6|TimeslotNotMonotonic", "Progress from slot X to slot X. Timeslot must be strictly monotonic."},
+		{"1766479507_7090", "A3|BadCore", "One assurance targets a core without any assigned work report."},
+		{"1766565819_4337", "A3|BadCore", "One assurance targets a core without any assigned work report."},
+		{"1766565819_9942", "A3|BadCore", "One assurance targets a core without any assigned work report."},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.id+"_broken", func(t *testing.T) {
+			fmt.Printf("Testing case %s: expected error '%s' - %s\n", tc.id, tc.expectedErr, tc.description)
+			runSequentialFuzzTraceBroken(t, sourcePath, targetVersion, tc.id, tc.expectedErr)
+		})
+	}
+}
+
+func runSequentialFuzzTraceBroken(t *testing.T, sourcePath, targetVersion, testCaseID, expectedErr string) {
+	traceDir := filepath.Join(sourcePath, fmt.Sprintf("fuzz-reports/%s/traces", targetVersion), testCaseID)
+
+	backend := BackendCompiler
+	if runtime.GOOS != "linux" {
+		backend = BackendInterpreter
+	}
+	fmt.Printf("PVM Backend: %s\n", backend)
+
+	// Find step files (support up to 100000 steps for large traces)
+	stepFiles := []string{}
+	for i := 1; i <= 100000; i++ {
+		stepFile := filepath.Join(traceDir, fmt.Sprintf("%08d.bin", i))
+		if _, err := os.Stat(stepFile); err == nil {
+			stepFiles = append(stepFiles, stepFile)
+		}
+	}
+
+	if len(stepFiles) == 0 {
+		t.Fatalf("No step files found in %s", traceDir)
+	}
+
+	// Load the first step to get the initial PreState
+	firstStepContent, err := os.ReadFile(stepFiles[0])
+	if err != nil {
+		t.Fatalf("failed to read first step file: %v", err)
+	}
+	firstSTF, err := parseSTFFile(stepFiles[0], string(firstStepContent))
+	if err != nil {
+		t.Fatalf("failed to parse first step: %v", err)
+	}
+
+	// Initialize storage and state from first step's PreState
+	testDir := t.TempDir()
+	test_storage, err := initStorage(testDir)
+	if err != nil {
+		t.Fatalf("Failed to create storage: %v", err)
+	}
+	defer test_storage.Close()
+
+	stateDB, err := NewStateDBFromStateKeyVals(test_storage, &StateKeyVals{KeyVals: firstSTF.PreState.KeyVals})
+	if err != nil {
+		t.Fatalf("failed to initialize state from PreState: %v", err)
+	}
+
+	fmt.Printf("Initialized from first step's PreState: StateRoot=%s, Timeslot=%d", stateDB.StateRoot.Hex(), stateDB.GetTimeslot())
+
+	stateDBMap := make(map[common.Hash]common.Hash)
+
+	fmt.Printf("Found %d step files\n", len(stepFiles))
+	fmt.Printf("\n========================================\n")
+	fmt.Printf("TESTING: Broken SetRoot Bug Reproduction\n")
+	fmt.Printf("========================================\n")
+	fmt.Printf("Expected error for this trace: %s\n\n", expectedErr)
+	sawExpectedBug := false
+
+	for stepNum, stepFile := range stepFiles {
+		stepContent, err := os.ReadFile(stepFile)
+		if err != nil {
+			t.Fatalf("failed to read step file %s: %v", stepFile, err)
+		}
+
+		stf, err := parseSTFFile(stepFile, string(stepContent))
+		if err != nil {
+			t.Fatalf("failed to parse step %d: %v", stepNum+1, err)
+		}
+
+		block := &stf.Block
+
+		// Determine if this STF expects a state change (valid block)
+		expectsSuccess := stf.PreState.StateRoot != stf.PostState.StateRoot
+		binFileName := filepath.Base(stepFile)
+
+		fmt.Printf("\n=== %s (Step %d): slot=%d ===\n", binFileName, stepNum+1, block.Header.Slot)
+		fmt.Printf("  STF expects: %s\n", func() string {
+			if expectsSuccess {
+				return "SUCCESS (PreState != PostState)"
+			}
+			return "FAILURE (PreState == PostState, invalid block)"
+		}())
+		fmt.Printf("  Block.ParentStateRoot: %s\n", block.Header.ParentStateRoot.Hex())
+		fmt.Printf("  Current stateDB: StateRoot=%s, Timeslot=%d\n",
+			stateDB.StateRoot.Hex(), stateDB.GetTimeslot())
+
+		// BROKEN BEHAVIOR SIMULATION:
+		// The bug: StateDB.Copy() calls InitTrieAndLoadJamState(StateRoot).
+		// InitTrieAndLoadJamState calls sdb.SetRoot(stateRoot) then sdb.GetStates().
+		// Before fix: SetRoot did nothing, so GetStates() returned current state data.
+		// After copying JamState in-memory, InitTrieAndLoadJamState OVERWRITES it
+		// with data from GetStates() - which was the wrong (current) data!
+		//
+		// To simulate this, when we fork, we:
+		// 1. Use normal Copy() (which loads correct state with fixed SetRoot)
+		// 2. Then OVERWRITE JamState with current state's JamState (simulating broken GetStates)
+		preState := stateDB
+		isForkBlock := block.Header.ParentStateRoot != stateDB.StateRoot
+
+		if isForkBlock {
+			fmt.Printf("  🔀 FORK DETECTED! Block wants parent StateRoot different from current.\n")
+			fmt.Printf("     Block wants: %s, Current: %s\n",
+				block.Header.ParentStateRoot.Hex(), stateDB.StateRoot.Hex())
+			fmt.Printf("  🐛 SIMULATING BROKEN SetRoot: keeping current JamState (Timeslot=%d) instead of historical (Timeslot=0)\n",
+				stateDB.GetTimeslot())
+
+			// Normal copy creates state with correct JamState from historical trie
+			forkState := stateDB.Copy()
+			// Set the correct StateRoot (this part worked even before fix)
+			forkState.StateRoot = block.Header.ParentStateRoot
+
+			// SIMULATE THE BUG: Overwrite JamState with current state's data
+			// This is what happened when GetStates() returned current trie data
+			// instead of historical data
+			forkState.JamState = stateDB.JamState.Copy()
+
+			preState = forkState
+			fmt.Printf("  ⚠️  BROKEN STATE: StateRoot=%s (correct), but Timeslot=%d (WRONG!)\n",
+				preState.StateRoot.Hex(), preState.GetTimeslot())
+		}
+
+		// Apply state transition - the Copy() here will also reload JamState,
+		// but we need to simulate broken behavior there too
+		var stateCopy *StateDB
+		if isForkBlock {
+			// For fork case, create copy without proper InitTrieAndLoadJamState
+			stateCopy = &StateDB{
+				Id:               preState.Id,
+				Block:            preState.Block.Copy(),
+				ParentHeaderHash: preState.ParentHeaderHash,
+				HeaderHash:       preState.HeaderHash,
+				StateRoot:        preState.StateRoot,
+				JamState:         preState.JamState.Copy(), // Keep broken JamState
+				sdb:              preState.sdb,
+				AncestorSet:      preState.AncestorSet,
+				Authoring:        preState.Authoring,
+			}
+		} else {
+			stateCopy = preState.Copy()
+		}
+
+		fmt.Printf("  Applying STF with: Timeslot=%d → block.Slot=%d\n",
+			stateCopy.GetSafrole().Timeslot, block.Header.Slot)
+		postState, jamErr := ApplyStateTransitionFromBlock(0, stateCopy, context.Background(), block, nil, backend, "")
+
+		if jamErr != nil {
+			// Check if we got an error due to broken SetRoot on a valid fork block
+			if expectsSuccess && isForkBlock {
+				// Got error on a fork block that SHOULD have succeeded - this is the bug!
+				sawExpectedBug = true
+				fmt.Printf("  ❌ RESULT: %v\n", jamErr)
+				fmt.Printf("  🎯 THIS IS THE BUG! Fork block failed because broken SetRoot kept wrong state\n")
+				if strings.Contains(jamErr.Error(), expectedErr) {
+					fmt.Printf("     (Matches expected error: %s)\n", expectedErr)
+				} else {
+					fmt.Printf("     (Different error than expected '%s', but still demonstrates the bug)\n", expectedErr)
+				}
+			} else if expectsSuccess {
+				fmt.Printf("  ❌ RESULT: %v\n", jamErr)
+				fmt.Printf("     (STF expected success but got error)\n")
+			} else {
+				fmt.Printf("  👍 RESULT: %v\n", jamErr)
+				fmt.Printf("     (Expected failure - correctly caught)\n")
+			}
+		} else {
+			fmt.Printf("  ✅ RESULT: SUCCESS → PostStateRoot=%s, Timeslot=%d\n",
+				postState.StateRoot.Hex(), postState.GetTimeslot())
+			stateDB = postState
+			stateDBMap[block.Header.Hash()] = postState.StateRoot
+		}
+	}
+
+	fmt.Printf("\n========================================\n")
+	if sawExpectedBug {
+		fmt.Printf("✅ BUG SUCCESSFULLY DEMONSTRATED\n")
+		fmt.Printf("========================================\n")
+		fmt.Printf("The broken SetRoot caused '%s' errors on fork blocks.\n", expectedErr)
+		fmt.Printf("This reproduces what trace %s failed with before the fix.\n", testCaseID)
+		fmt.Printf("\nRoot cause: SetRoot didn't load historical trie data, so fork blocks\n")
+		fmt.Printf("used state from current chain instead of the forked parent state.\n")
+	} else {
+		fmt.Printf("❌ BUG NOT REPRODUCED\n")
+		fmt.Printf("========================================\n")
+		t.Errorf("Expected to see '%s' error on a valid fork block but didn't.", expectedErr)
+	}
+}
+
+// runSequentialFuzzTrace runs a single sequential fuzz trace test case
+func runSequentialFuzzTrace(t *testing.T, sourcePath, targetVersion, testCaseID string) {
+	traceDir := filepath.Join(sourcePath, fmt.Sprintf("fuzz-reports/%s/traces", targetVersion), testCaseID)
+
+	backend := BackendCompiler
+	if runtime.GOOS != "linux" {
+		backend = BackendInterpreter
+	}
+	fmt.Printf("PVM Backend: %s\n", backend)
+
+	// Find step files (support up to 100000 steps for large traces)
+	stepFiles := []string{}
+	for i := 1; i <= 100000; i++ {
+		stepFile := filepath.Join(traceDir, fmt.Sprintf("%08d.bin", i))
+		if _, err := os.Stat(stepFile); err == nil {
+			stepFiles = append(stepFiles, stepFile)
+		}
+	}
+
+	if len(stepFiles) == 0 {
+		t.Fatalf("No step files found in %s", traceDir)
+	}
+
+	// Load the first step to get the initial PreState
+	firstStepContent, err := os.ReadFile(stepFiles[0])
+	if err != nil {
+		t.Fatalf("failed to read first step file: %v", err)
+	}
+	firstSTF, err := parseSTFFile(stepFiles[0], string(firstStepContent))
+	if err != nil {
+		t.Fatalf("failed to parse first step: %v", err)
+	}
+
+	// Initialize storage and state from first step's PreState
+	testDir := t.TempDir()
+	test_storage, err := initStorage(testDir)
+	if err != nil {
+		t.Fatalf("Failed to create storage: %v", err)
+	}
+	defer test_storage.Close()
+
+	stateDB, err := NewStateDBFromStateKeyVals(test_storage, &StateKeyVals{KeyVals: firstSTF.PreState.KeyVals})
+	if err != nil {
+		t.Fatalf("failed to initialize state from PreState: %v", err)
+	}
+
+	// Track header hash -> state root mapping for fork handling (mirrors fuzzer target's stateDBMap)
+	stateDBMap := make(map[common.Hash]common.Hash)
+	// Record initial state with a synthetic genesis header hash
+	genesisHeaderHash := firstSTF.Block.Header.ParentHeaderHash
+	stateDBMap[genesisHeaderHash] = stateDB.StateRoot
+	stateDB.HeaderHash = genesisHeaderHash
+
+	fmt.Printf("Initialized from first step's PreState: StateRoot=%s, Timeslot=%d\n", stateDB.StateRoot.Hex(), stateDB.GetTimeslot())
+	fmt.Printf("Found %d step files to process sequentially\n", len(stepFiles))
+
+	// Track results
+	successfulImports := 0
+	expectedSuccesses := 0
+
+	// Process each step sequentially (simulates fuzzer's ImportBlock messages)
+	for stepNum, stepFile := range stepFiles {
+		stepContent, err := os.ReadFile(stepFile)
+		if err != nil {
+			t.Fatalf("failed to read step file %s: %v", stepFile, err)
+		}
+
+		stf, err := parseSTFFile(stepFile, string(stepContent))
+		if err != nil {
+			t.Fatalf("failed to parse step %d: %v", stepNum+1, err)
+		}
+
+		// Check if this step should succeed (pre != post means valid block)
+		shouldSucceed := stf.PreState.StateRoot != stf.PostState.StateRoot
+		if shouldSucceed {
+			expectedSuccesses++
+		}
+
+		block := &stf.Block
+		headerHash := block.Header.Hash()
+		binFileName := filepath.Base(stepFile)
+
+		fmt.Printf("\n=== %s (Step %d): slot=%d ===\n", binFileName, stepNum+1, block.Header.Slot)
+		fmt.Printf("  STF expects: %s\n", func() string {
+			if shouldSucceed {
+				return "SUCCESS (PreState != PostState)"
+			}
+			return "FAILURE (PreState == PostState, invalid block)"
+		}())
+		//		t.Logf("  Block.ParentStateRoot: %s", block.Header.ParentStateRoot.Hex())
+		//		t.Logf("  Current stateDB: StateRoot=%s, Timeslot=%d", stateDB.StateRoot.Hex(), stateDB.GetTimeslot())
+
+		// Fuzzer protocol: use current stateDB, handle forks by restoring to parent state
+		// This mirrors fuzzer_target.go:280-314
+		preState := stateDB
+
+		// Check if this is a fork (block's parent doesn't match current state)
+		if block.Header.ParentStateRoot != stateDB.StateRoot {
+			fmt.Printf("  Fork detected! Block wants parent: %s, we have: %s\n",
+				block.Header.ParentStateRoot.Hex(), stateDB.StateRoot.Hex())
+
+			// Look up parent header hash from stateDBMap (mirrors fuzzer target)
+			var foundParentHeaderHash common.Hash
+			for hdrHash, stateRoot := range stateDBMap {
+				if stateRoot == block.Header.ParentStateRoot {
+					foundParentHeaderHash = hdrHash
+					fmt.Printf("  Found parent in stateDBMap: HeaderHash=%s -> StateRoot=%s\n",
+						hdrHash.Hex(), stateRoot.Hex())
+					break
+				}
+			}
+
+			if foundParentHeaderHash != (common.Hash{}) {
+				// Try to restore to the parent state from trie
+				forkState := stateDB.Copy()
+				if err := forkState.InitTrieAndLoadJamState(block.Header.ParentStateRoot); err != nil {
+					fmt.Printf("  Failed to restore fork state: %v\n", err)
+				} else {
+					forkState.HeaderHash = foundParentHeaderHash
+					preState = forkState
+					fmt.Printf("  Fork state restored: HeaderHash=%s, StateRoot=%s, Timeslot=%d\n",
+						preState.HeaderHash.Hex(), preState.StateRoot.Hex(), preState.GetTimeslot())
+				}
+			} else {
+				fmt.Printf("  ERROR: Could not find parent state with StateRoot=%s in stateDBMap\n", block.Header.ParentStateRoot.Hex())
+			}
+		}
+		//t.Logf("  Using preState: StateRoot=%s, Timeslot=%d",preState.StateRoot.Hex(), preState.GetTimeslot())
+
+		// Apply state transition
+		stateCopy := preState.Copy()
+		postState, jamErr := ApplyStateTransitionFromBlock(0, stateCopy, context.Background(), block, nil, backend, "")
+
+		if jamErr != nil {
+			if shouldSucceed {
+				t.Errorf("❌ Step %d: Expected success but got error: %v", stepNum+1, jamErr)
+			}
+			fmt.Printf("  👍 Import FAILED: %v\n", jamErr)
+		} else {
+			successfulImports++
+
+			// Verify post state matches expected
+			if postState.StateRoot != stf.PostState.StateRoot {
+				t.Errorf("❌ Step %d: PostState mismatch! Got %s, expected %s", stepNum+1, postState.StateRoot.Hex(), stf.PostState.StateRoot.Hex())
+			}
+
+			// Update state (only on success, like the real target)
+			stateDB = postState
+			stateDBMap[headerHash] = postState.StateRoot
+
+			if !shouldSucceed {
+				t.Errorf("❌ Step %d: Expected failure but import succeeded", stepNum+1)
+			}
+			fmt.Printf("  ✅ Import SUCCESS: PostStateRoot=%s\n", postState.StateRoot.Hex())
+		}
+	}
+
+	fmt.Printf("\n=== Summary ===")
+	fmt.Printf("\nTotal steps: %d\n", len(stepFiles))
+	fmt.Printf("Successful imports: %d | Expected successes: %d\n", successfulImports, expectedSuccesses)
+
+	if successfulImports != expectedSuccesses {
+		t.Errorf("Import count mismatch: got %d successful, expected %d", successfulImports, expectedSuccesses)
+	}
+}
+
+// Genesis file structure for parsing
+type GenesisTrace struct {
+	Header types.BlockHeader `json:"header"`
+	State  StateSnapshotRaw  `json:"state"`
+}
+
+func parseGenesisFile(filename, content string) (*GenesisTrace, error) {
+	var genesis GenesisTrace
+	var err error
+	if strings.HasSuffix(filename, ".bin") {
+		genesis0, _, err := types.Decode([]byte(content), reflect.TypeOf(GenesisTrace{}))
+		if err == nil {
+			genesis = genesis0.(GenesisTrace)
+		}
+	} else {
+		err = json.Unmarshal([]byte(content), &genesis)
+	}
+	return &genesis, err
 }
 
 type logFile struct {

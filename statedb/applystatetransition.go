@@ -28,7 +28,7 @@ func ApplyStateTransitionTickets(oldState *StateDB, ctx context.Context, blk *ty
 	recentBlocks := s.JamState.RecentBlocks.B_H
 	if len(recentBlocks) > 0 && blk.Header.ParentHeaderHash != recentBlocks[len(recentBlocks)-1].HeaderHash {
 		log.Warn(log.SDB, "ApplyStateTransitionFromBlock", "ParentHeaderHash", blk.Header.ParentHeaderHash, "recentBlocks", recentBlocks[len(recentBlocks)-1].HeaderHash)
-		//return safroleState, fmt.Errorf("ParentHeaderHash does not match recent block")
+		return safroleState, fmt.Errorf("ParentHeaderHash does not match recent block")
 	}
 	s.JamState = oldState.JamState.Copy()
 	s.Block = blk
@@ -98,7 +98,7 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 	recentBlocks := s.JamState.RecentBlocks.B_H
 	if len(recentBlocks) > 0 && blk.Header.ParentHeaderHash != recentBlocks[len(recentBlocks)-1].HeaderHash {
 		log.Warn(log.SDB, "ApplyStateTransitionFromBlock: ParentHeaderHash does not match recent block", "ParentHeaderHash", blk.Header.ParentHeaderHash, "recentBlocks", recentBlocks[len(recentBlocks)-1].HeaderHash)
-		//return s, fmt.Errorf("ParentHeaderHash does not match recent block")
+		return s, fmt.Errorf("ParentHeaderHash does not match recent block")
 	}
 	old_timeslot := s.GetSafrole().Timeslot
 	s.JamState = oldState.JamState.Copy()

@@ -286,6 +286,56 @@ func (t *MerkleTree) GetRoot() common.Hash {
 	return trieNormalizeKey32(t.Root.Hash)
 }
 
+// SetRoot switches the tree to a different root hash by reconstructing
+// the in-memory tree from the data stored in writeBatch/levelDB.
+// This is used for fork handling where we need to restore to a historical state.
+//
+// Note: writeBatch is intentionally NOT cleared - it contains committed node data
+// needed to reconstruct historical states. Only staged (uncommitted) ops are cleared.
+func (t *MerkleTree) SetRoot(root common.Hash) error {
+	// For page-based storage, return nil (no-op) to maintain backward compatibility.
+	// TODO: Implement fork restore for page-based storage if needed in the future.
+	if t.usePages {
+		return nil
+	}
+
+	t.treeMutex.Lock()
+	defer t.treeMutex.Unlock()
+
+	// Clear staged (uncommitted) ops under stagedMutex to avoid cross-branch contamination.
+	// writeBatch is preserved as it contains committed nodes needed for historical lookups.
+	t.stagedMutex.Lock()
+	t.stagedInserts = make(map[common.Hash][]byte)
+	t.stagedDeletes = make(map[common.Hash]bool)
+	t.stagedMutex.Unlock()
+
+	// Empty root case
+	if root == (common.Hash{}) {
+		t.Root = nil
+		return nil
+	}
+
+	// Check if we're already at this root
+	if t.Root != nil && trieCompareBytes(t.Root.Hash, root[:]) {
+		return nil
+	}
+
+	// Reconstruct tree from the stored nodes in writeBatch/levelDB
+	rootNode, err := t.levelDBGetNode(root)
+	if err != nil {
+		return fmt.Errorf("failed to load root node for hash %s: %w", root.Hex(), err)
+	}
+
+	// Verify the loaded node actually matches the requested root (not a zero-hash fallback)
+	zeroHash := common.Hash{}
+	if bytes.Equal(rootNode.Hash, zeroHash[:]) && root != zeroHash {
+		return fmt.Errorf("root %s not found in storage (returned zero-hash node)", root.Hex())
+	}
+
+	t.Root = rootNode
+	return nil
+}
+
 func InitMerkleTreeFromHash(root common.Hash, db types.JAMStorage) (*MerkleTree, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database is not initialized")
