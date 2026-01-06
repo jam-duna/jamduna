@@ -428,11 +428,11 @@ func TestSinglePVM(t *testing.T) {
 	t.Logf("Expected PC: %d", tc.ExpectedPC)
 	t.Logf("Expected status: %s", tc.ExpectedStatus)
 
-	// Test with C FFI backend directly
+	// Test with recompiler backend directly
 	t.Run("recompiler", func(t *testing.T) {
 		err = recompiler_test(tc)
 		if err != nil {
-			t.Errorf("CGO backend test failed for %s: %v", tc.Name, err)
+			t.Errorf("recompiler test failed for %s: %v", tc.Name, err)
 		}
 	})
 }
@@ -452,7 +452,7 @@ func TestDoom(t *testing.T) {
 		t.Fatalf("Failed to decode program: %v", err)
 	}
 
-	// Create C FFI VM with decoded program code (matches Go line 67)
+	// Create recompiler VM with decoded program code (matches Go line 67)
 	vm, err := NewRecompilerVM(serviceAcct, p.Code, make([]uint64, 13), 0)
 	if err != nil {
 		t.Fatalf("failed to create RecompilerVM: %v", err)
@@ -612,7 +612,7 @@ func TestAlgo(t *testing.T) {
 		iter := uint64(payload[1])
 		iter_3 := iter * iter * iter
 		fmt.Printf("### Algo ID %d - Iterations: %d\n", n, iter_3)
-		// Create C FFI VM with decoded program code (matches Go line 67)
+		// Create recompiler VM with decoded program code (matches Go line 67)
 		vm, err := NewRecompilerVM(serviceAcct, p.Code, make([]uint64, 13), 0)
 		if err != nil {
 			t.Fatalf("failed to create RecompilerVM: %v", err)

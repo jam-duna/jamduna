@@ -22,7 +22,6 @@ import (
 )
 
 var ALWAYS_COMPILE = false
-var compiler_usage = compiler_go
 
 const (
 	GasModeBasicBlock  = iota
@@ -297,21 +296,12 @@ func NewRecompilerVM(serviceIndex uint32, code []byte, initialRegs []uint64, ini
 	err = rvm.GetX86FromPVMX(code)
 	if err != nil || ALWAYS_COMPILE {
 		fmt.Printf("GetX86FromPVMX failed: %v\n", err)
-		if compiler_usage == compiler_go {
-			rvm.compiler = NewX86Compiler(code)
-		} else if compiler_usage == compiler_c {
-			rvm.compiler = NewRecompilerC(code)
-		}
+		rvm.compiler = NewX86Compiler(code)
 	} else {
 		rvm.reuseCode = true
 	}
 	return rvm, nil
 }
-
-const (
-	compiler_go = "compiler_go"
-	compiler_c  = "compiler_c"
-)
 
 // Global flag to enable/disable debug tracing of PVM instructions
 var EnableDebugTracing = false

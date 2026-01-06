@@ -92,7 +92,7 @@ func pvm_test_backend(tc TestCase, backend string) error {
 	pvm.IsChild = false
 	err := pvm.Execute(pvm, uint32(tc.InitialPC), "")
 	if err != nil {
-		return fmt.Errorf("C execution failed: %v", err)
+		return fmt.Errorf("execution failed: %v", err)
 	}
 
 	// Check the registers
@@ -352,7 +352,7 @@ type BackendResult struct {
 }
 
 func TestPVMAll(t *testing.T) {
-	mode := "recompiler" // change to "C_FFI" to test the C backend
+	mode := "recompiler" // change to "vmgo" or BackendInterpreter for other backends
 	log.InitLogger("debug")
 	// Directory containing the JSON files
 	dir := "programs"
@@ -446,17 +446,17 @@ func TestSinglePVM(t *testing.T) {
 	t.Logf("Expected PC: %d", tc.ExpectedPC)
 	t.Logf("Expected status: %s", tc.ExpectedStatus)
 
-	// Test with C FFI backend directly
+	// Test with recompiler backend directly
 	t.Run("recompiler", func(t *testing.T) {
 		err = recompiler_test(tc)
 		if err != nil {
-			t.Errorf("CGO backend test failed for %s: %v", tc.Name, err)
+			t.Errorf("recompiler test failed for %s: %v", tc.Name, err)
 		}
 	})
 }
 
 func TestBranchEqNok(t *testing.T) {
-	mode := "C_FFI" // change to "C_FFI" to test the C backend
+	mode := BackendInterpreter // change to "recompiler" or "vmgo" to test other backends
 	log.InitLogger("debug")
 	filename := "programs/inst_branch_eq_nok.json"
 	data, err := os.ReadFile(filename)
@@ -477,17 +477,17 @@ func TestBranchEqNok(t *testing.T) {
 	t.Logf("Expected PC: %d", tc.ExpectedPC)
 	t.Logf("Expected status: %s", tc.ExpectedStatus)
 
-	// Test with C FFI backend directly
-	t.Run("C_FFI", func(t *testing.T) {
+	// Test with interpreter backend directly
+	t.Run("interpreter", func(t *testing.T) {
 		err = pvm_test(tc, mode)
 		if err != nil {
-			t.Errorf("CGO backend test failed for %s: %v", tc.Name, err)
+			t.Errorf("interpreter test failed for %s: %v", tc.Name, err)
 		}
 	})
 }
 
 func TestLoadU32(t *testing.T) {
-	mode := "C_FFI" // change to "C_FFI" to test the C backend
+	mode := BackendInterpreter // change to "recompiler" or "vmgo" to test other backends
 	log.InitLogger("debug")
 	filename := "programs/inst_load_u32.json"
 	data, err := os.ReadFile(filename)
@@ -508,17 +508,17 @@ func TestLoadU32(t *testing.T) {
 	t.Logf("Expected PC: %d", tc.ExpectedPC)
 	t.Logf("Expected status: %s", tc.ExpectedStatus)
 
-	// Test with C FFI backend directly
-	t.Run("C_FFI", func(t *testing.T) {
+	// Test with interpreter backend directly
+	t.Run("interpreter", func(t *testing.T) {
 		err = pvm_test(tc, mode)
 		if err != nil {
-			t.Errorf("CGO backend test failed for %s: %v", tc.Name, err)
+			t.Errorf("interpreter test failed for %s: %v", tc.Name, err)
 		}
 	})
 }
 
 func TestEcalli(t *testing.T) {
-	mode := "recompiler" // change to "C_FFI" to test the C backend
+	mode := "recompiler" // change to "vmgo" or BackendInterpreter for other backends
 	log.InitLogger("debug")
 	filename := "programs/inst_ecalli_100.json"
 	data, err := os.ReadFile(filename)
@@ -534,7 +534,7 @@ func TestEcalli(t *testing.T) {
 
 	err = pvm_test(tc, mode)
 	if err != nil {
-		t.Errorf("CGO backend test failed for %s: %v", tc.Name, err)
+		t.Errorf("recompiler test failed for %s: %v", tc.Name, err)
 	}
 }
 

@@ -1,6 +1,11 @@
 package x86gencheck
 
-import "github.com/colorfulnotion/jam/pvm/program"
+import (
+	"github.com/colorfulnotion/jam/pvm/program"
+	"github.com/colorfulnotion/jam/pvm/recompiler"
+)
+
+type Instruction = recompiler.Instruction
 
 func Skip(bitmask []byte, pc uint64) uint64 {
 	n := uint64(len(bitmask))

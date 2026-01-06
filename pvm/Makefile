@@ -110,43 +110,6 @@ format:
 		echo "clang-format not found, skipping code formatting"; \
 	fi
 
-pvm: all-platforms
+pvm: all
 
-# Build for all platforms (cross-compilation)
-# Note: This target only creates platform-specific .a files (*.linux_amd64.a, *.mac_arm64.a, etc.)
-# It does NOT create the base libcompiler.a to avoid confusion about which arch they are
-all-platforms:
-	@echo "Building libcompiler for all platforms..."
-	@mkdir -p lib_tmp
-	@echo "  Building recompiler C library for Linux amd64..."
-	@CC=x86_64-linux-musl-gcc AR=x86_64-linux-musl-ar $(MAKE) -C recompiler_c clean
-	@CC=x86_64-linux-musl-gcc AR=x86_64-linux-musl-ar CFLAGS="-Wall -Wextra -std=c99 -fPIC -O3 -DNDEBUG" $(MAKE) -C recompiler_c all CC=x86_64-linux-musl-gcc AR=x86_64-linux-musl-ar CFLAGS="-Wall -Wextra -std=c99 -fPIC -O3 -DNDEBUG"
-	@cp recompiler_c/lib/libcompiler.a lib_tmp/libcompiler.linux_amd64.a || true
-	@echo "  Building recompiler C library for Linux arm64..."
-	@if command -v aarch64-linux-musl-gcc >/dev/null 2>&1; then \
-		CC=aarch64-linux-musl-gcc AR=aarch64-linux-musl-ar $(MAKE) -C recompiler_c clean; \
-		CC=aarch64-linux-musl-gcc AR=aarch64-linux-musl-ar CFLAGS="-Wall -Wextra -std=c99 -fPIC -O3 -DNDEBUG" $(MAKE) -C recompiler_c all CC=aarch64-linux-musl-gcc AR=aarch64-linux-musl-ar CFLAGS="-Wall -Wextra -std=c99 -fPIC -O3 -DNDEBUG"; \
-		cp recompiler_c/lib/libcompiler.a lib_tmp/libcompiler.linux_arm64.a; \
-	else \
-		echo "    Skipping recompiler Linux arm64 (no aarch64-linux-musl-gcc)"; \
-	fi
-	@echo "  Building recompiler C library for macOS amd64..."
-	@CC=clang AR=ar $(MAKE) -C recompiler_c clean
-	@CC=clang AR=ar CFLAGS="-Wall -Wextra -std=c99 -fPIC -O3 -DNDEBUG -target x86_64-apple-macos10.12" $(MAKE) -C recompiler_c all CC=clang AR=ar CFLAGS="-Wall -Wextra -std=c99 -fPIC -O3 -DNDEBUG -target x86_64-apple-macos10.12"
-	@cp recompiler_c/lib/libcompiler.a lib_tmp/libcompiler.mac_amd64.a || true
-	@echo "  Building recompiler C library for macOS arm64..."
-	@CC=clang AR=ar $(MAKE) -C recompiler_c clean
-	@CC=clang AR=ar CFLAGS="-Wall -Wextra -std=c99 -fPIC -O3 -DNDEBUG -target arm64-apple-macos11" $(MAKE) -C recompiler_c all CC=clang AR=ar CFLAGS="-Wall -Wextra -std=c99 -fPIC -O3 -DNDEBUG -target arm64-apple-macos11"
-	@cp recompiler_c/lib/libcompiler.a lib_tmp/libcompiler.mac_arm64.a || true
-
-	@echo "  Copying platform libraries to final locations..."
-	@cp lib_tmp/libcompiler.*.a recompiler_c/lib/ || true
-	@echo "  Copying platform libraries to ffi/ directory..."
-	@mkdir -p ../ffi
-	@cp lib_tmp/libcompiler.*.a ../ffi/ || true
-	@rm -rf lib_tmp
-	@echo "  Cleaning up non-platform-specific files to avoid confusion..."
-	@rm -f recompiler_c/lib/libcompiler.a recompiler_c/lib/libcompiler.so
-	@echo "libcompiler.*.a files ready for all platforms in recompiler_c/lib/ and ffi/."
-
-.PHONY: all directories debug release clean install uninstall test info list-sources check-deps format all-platforms
+.PHONY: all directories debug release clean install uninstall test info list-sources check-deps format
