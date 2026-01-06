@@ -132,7 +132,10 @@ func vmgo_test_backend(tc TestCase) error {
 	}
 	PvmLogging = true
 	// Decode the program blob to get a Program struct
-	p := DecodeProgram_pure_pvm_blob(rawCodeBytes)
+	p, err := DecodeProgram_pure_pvm_blob(rawCodeBytes)
+	if err != nil {
+		return fmt.Errorf("failed to decode program: %w", err)
+	}
 
 	// setup Gas
 	var initialGas int64 = tc.InitialGas
@@ -236,7 +239,10 @@ func recompiler_test(tc TestCase) error {
 	}
 	fmt.Printf("running test: %s\n", tc.Name)
 	hostENV := NewMockHostEnv()
-	p := DecodeProgram_pure_pvm_blob(rawCodeBytes)
+	p, err := DecodeProgram_pure_pvm_blob(rawCodeBytes)
+	if err != nil {
+		return fmt.Errorf("failed to decode program: %w", err)
+	}
 	o_size := 0
 	w_size := 0
 	z := 0

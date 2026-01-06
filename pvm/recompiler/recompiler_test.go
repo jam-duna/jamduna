@@ -60,8 +60,12 @@ func recompiler_test(tc TestCase) error {
 	var p *program.Program
 	var o_size, w_size, z, s uint32
 	var o_byte, w_byte []byte
+	var err error
 
-	p = program.DecodeCorePart(rawCodeBytes)
+	p, err = program.DecodeCorePart(rawCodeBytes)
+	if err != nil {
+		return fmt.Errorf("failed to decode program: %w", err)
+	}
 	o_size = 0
 	w_size = uint32(4096)
 	z = 0
@@ -184,8 +188,12 @@ func recompiler_integration_tests(tc TestCase) error {
 	var p *program.Program
 	var o_size, w_size, z, s uint32
 	var o_byte, w_byte []byte
+	var err error
 
-	p = program.DecodeCorePart(rawCodeBytes)
+	p, err = program.DecodeCorePart(rawCodeBytes)
+	if err != nil {
+		return fmt.Errorf("failed to decode program: %w", err)
+	}
 	o_size = 0
 	w_size = uint32(4096)
 	z = 0
@@ -439,7 +447,10 @@ func TestDoom(t *testing.T) {
 	}
 
 	// CRITICAL: Use DecodeCorePart like Go does (matches recompiler_test.go line 59)
-	p, o_size, w_size, z, s, o_byte, w_byte := program.DecodeProgram(rawCodeBytes)
+	p, o_size, w_size, z, s, o_byte, w_byte, err := program.DecodeProgram(rawCodeBytes)
+	if err != nil {
+		t.Fatalf("Failed to decode program: %v", err)
+	}
 
 	// Create C FFI VM with decoded program code (matches Go line 67)
 	vm, err := NewRecompilerVM(serviceAcct, p.Code, make([]uint64, 13), 0)
@@ -502,7 +513,10 @@ func TestEcalli(t *testing.T) {
 	var o_size, w_size, z, s uint32
 	var o_byte, w_byte []byte
 
-	p = program.DecodeCorePart(rawCodeBytes)
+	p, err = program.DecodeCorePart(rawCodeBytes)
+	if err != nil {
+		t.Fatalf("Failed to decode program: %v", err)
+	}
 	o_size = 0
 	w_size = uint32(4096)
 	z = 0
@@ -585,7 +599,10 @@ func TestAlgo(t *testing.T) {
 	fmt.Printf("- Tag: %s\n", tag)
 	fmt.Printf("## Performance Results\n")
 	// CRITICAL: Use DecodeCorePart like Go does (matches recompiler_test.go line 59)
-	p, o_size, w_size, z, s, o_byte, w_byte := program.DecodeProgram(rawCodeBytes)
+	p, o_size, w_size, z, s, o_byte, w_byte, err := program.DecodeProgram(rawCodeBytes)
+	if err != nil {
+		t.Fatalf("Failed to decode program: %v", err)
+	}
 
 	for n := 0; n <= numBlocks; n++ {
 		payload := make([]byte, 2)

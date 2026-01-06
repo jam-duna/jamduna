@@ -4,6 +4,10 @@
 # Available services
 SERVICES = evm auth_copy null_authorizer algo fib orchard
 
+# Test services (use -m flag for main() entry point)
+TEST_SERVICES = $(wildcard test_services/*/Cargo.toml)
+TEST_SERVICE_NAMES = $(foreach svc,$(TEST_SERVICES),$(notdir $(patsubst %/,%,$(dir $(svc)))))
+
 # Build configuration
 TARGET_DIR = riscv64emac-unknown-none-polkavm/release
 TARGET_JSON = $(CURDIR)/crates/polkavm-linker/riscv64emac-unknown-none-polkavm.json
@@ -13,10 +17,25 @@ CARGO_FLAGS = +nightly build -Z build-std=core,alloc --release
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
 
-.PHONY: all $(SERVICES) clean list help check-toolchain
+.PHONY: all $(SERVICES) test-services clean list help check-toolchain
 
 # Default target
 all: $(SERVICES)
+
+# Build all test services
+test-services: check-toolchain
+	@echo "Building test services with main() entry point..."
+	@for test_svc in $(TEST_SERVICE_NAMES); do \
+		echo "Building test service: $$test_svc"; \
+		cd test_services/$$test_svc && cargo $(CARGO_FLAGS) --target $(TARGET_JSON); \
+		cd ../..; \
+		cargo run -p polkatool jam-service -m target/$(TARGET_DIR)/$$test_svc \
+			-o test_services/$$test_svc/$$test_svc.pvm \
+			-d test_services/$$test_svc/$${test_svc}_blob.pvm && \
+		cargo run -p polkatool disassemble test_services/$$test_svc/$${test_svc}_blob.pvm \
+			--show-raw-bytes > test_services/$$test_svc/$$test_svc.txt && \
+		echo "✓ Test service $$test_svc built successfully!"; \
+	done
 
 # Build individual services
 $(SERVICES): check-toolchain
@@ -39,6 +58,12 @@ clean:
 		rm -f $$service/*.pvm; \
 		rm -f $$service/*.txt; \
 	done
+	@for test_svc in $(TEST_SERVICE_NAMES); do \
+		echo "Cleaning test service $$test_svc..."; \
+		rm -rf test_services/$$test_svc/target; \
+		rm -f test_services/$$test_svc/*.pvm; \
+		rm -f test_services/$$test_svc/*.txt; \
+	done
 	@rm -rf target
 	@echo "Cleanup complete!"
 
@@ -49,11 +74,17 @@ list:
 		echo "  - $$service"; \
 	done
 	@echo ""
+	@echo "Test services (main() entry point):"
+	@for test_svc in $(TEST_SERVICE_NAMES); do \
+		echo "  - $$test_svc"; \
+	done
+	@echo ""
 	@echo "Usage:"
-	@echo "  make <service>     - Build specific service"
-	@echo "  make all          - Build all services"
-	@echo "  make clean        - Clean all build artifacts"
-	@echo "  make list         - Show this list"
+	@echo "  make <service>      - Build specific service"
+	@echo "  make all           - Build all production services"
+	@echo "  make test-services - Build all test services"
+	@echo "  make clean         - Clean all build artifacts"
+	@echo "  make list          - Show this list"
 
 # Help target
 help: list

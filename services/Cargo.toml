@@ -29,6 +29,12 @@ members = [
     "doom",
     "fib",
     "orchard",
+    "railgun",
+
+    # Test services
+    "test_services/simple-test",
+    "test_services/arithmetic-bench",
+    "test_services/memory-bench",
 ]
 
 [workspace.package]

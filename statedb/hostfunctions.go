@@ -1794,9 +1794,13 @@ func (vm *VM) hostMachine() {
 			break
 		}
 	}
-	// todo: check if deblob sucess
 	log.Info(vm.logging, "hostMachine", "po", po, "pz", pz, "i", i, "n", min_n, "program_size", len(p))
-	program := DecodeProgram_pure_pvm_blob(p)
+	program, err := DecodeProgram_pure_pvm_blob(p)
+	if err != nil {
+		log.Error(vm.logging, "hostMachine: DecodeProgram_pure_pvm_blob failed", "error", err)
+		vm.Panic(WHO)
+		return
+	}
 	currentCounter := vm.VmsEntryCounter[min_n]
 	execMachine := vm.NewEmptyExecutionVM(vm.Service_index, program, make([]uint64, 13), i, 0, vm.hostenv, uint32(min_n), currentCounter)
 	vm.VmsEntryCounter[min_n]++

@@ -19,8 +19,11 @@ func Skip(bitmask []byte, pc uint64) uint64 {
 	return 24
 }
 
-func ParsePVM_Instructions(rawCodeBytes []byte) (instrs []Instruction) {
-	p := program.DecodeCorePart(rawCodeBytes)
+func ParsePVM_Instructions(rawCodeBytes []byte) (instrs []Instruction, err error) {
+	p, err := program.DecodeCorePart(rawCodeBytes)
+	if err != nil {
+		return nil, err
+	}
 	instrs = make([]Instruction, 0)
 	bitMask := p.K
 	code := p.Code
@@ -33,13 +36,15 @@ func ParsePVM_Instructions(rawCodeBytes []byte) (instrs []Instruction) {
 		instrs = append(instrs, Instruction{Opcode: op, Args: operands})
 		pc += 1 + olen
 	}
-	return instrs
+	return instrs, nil
 }
 
-func ParsePvmByteCodeInstructions(raw_code []byte) (instrs []Instruction) {
-
+func ParsePvmByteCodeInstructions(raw_code []byte) (instrs []Instruction, err error) {
 	instrs = make([]Instruction, 0)
-	p, _, _, _, _, _, _ := program.DecodeProgram(raw_code)
+	p, _, _, _, _, _, _, err := program.DecodeProgram(raw_code)
+	if err != nil {
+		return nil, err
+	}
 	bitMask := p.K
 	code := p.Code
 
@@ -52,10 +57,13 @@ func ParsePvmByteCodeInstructions(raw_code []byte) (instrs []Instruction) {
 		instrs = append(instrs, Instruction{Opcode: op, Args: operands})
 		pc += 1 + olen
 	}
-	return instrs
+	return instrs, nil
 }
 
-func ParsePvmByteCode(raw_code []byte) (code []byte, bitmask []byte, jumpTable []uint32) {
-	p, _, _, _, _, _, _ := program.DecodeProgram(raw_code)
-	return p.Code, p.K, p.J
+func ParsePvmByteCode(raw_code []byte) (code []byte, bitmask []byte, jumpTable []uint32, err error) {
+	p, _, _, _, _, _, _, err := program.DecodeProgram(raw_code)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return p.Code, p.K, p.J, nil
 }

@@ -1,0 +1,78 @@
+{
+  "files": [
+    {
+      "file_name": "algo.pvm",
+      "file_path": "../../services/algo/algo.pvm",
+      "compile_time": 21559898,
+      "pvm_code_size": 74624,
+      "pvm_instruction_count": 23480,
+      "pvm_basic_block_count": 4160,
+      "x86_code_size": 646452,
+      "x86_instruction_count": 128215,
+      "x86_to_pvm_code_ratio": 8.662789451114923,
+      "x86_to_pvm_instruction_ratio": 5.460604770017036
+    },
+    {
+      "file_name": "auth_copy.pvm",
+      "file_path": "../../services/auth_copy/auth_copy.pvm",
+      "compile_time": 4289581,
+      "pvm_code_size": 15004,
+      "pvm_instruction_count": 4821,
+      "pvm_basic_block_count": 897,
+      "x86_code_size": 131183,
+      "x86_instruction_count": 25572,
+      "x86_to_pvm_code_ratio": 8.743201812849907,
+      "x86_to_pvm_instruction_ratio": 5.304293714996889
+    },
+    {
+      "file_name": "evm.pvm",
+      "file_path": "../../services/evm/evm.pvm",
+      "compile_time": 160874479,
+      "pvm_code_size": 645433,
+      "pvm_instruction_count": 193703,
+      "pvm_basic_block_count": 26370,
+      "x86_code_size": 5361434,
+      "x86_instruction_count": 1039830,
+      "x86_to_pvm_code_ratio": 8.306724323051347,
+      "x86_to_pvm_instruction_ratio": 5.368166729477602
+    },
+    {
+      "file_name": "fib.pvm",
+      "file_path": "../../services/fib/fib.pvm",
+      "compile_time": 3749671,
+      "pvm_code_size": 12444,
+      "pvm_instruction_count": 4157,
+      "pvm_basic_block_count": 916,
+      "x86_code_size": 115484,
+      "x86_instruction_count": 22472,
+      "x86_to_pvm_code_ratio": 9.280295724847315,
+      "x86_to_pvm_instruction_ratio": 5.405821505893673
+    },
+    {
+      "file_name": "null_authorizer.pvm",
+      "file_path": "../../services/null_authorizer/null_authorizer.pvm",
+      "compile_time": 1837282,
+      "pvm_code_size": 5957,
+      "pvm_instruction_count": 2070,
+      "pvm_basic_block_count": 423,
+      "x86_code_size": 55588,
+      "x86_instruction_count": 10971,
+      "x86_to_pvm_code_ratio": 9.33154272284707,
+      "x86_to_pvm_instruction_ratio": 5.3
+    }
+  ],
+  "aggregate": {
+    "total_files": 5,
+    "total_compile_time": 192310911,
+    "average_compile_time": 38462182,
+    "min_compile_time": 1837282,
+    "max_compile_time": 160874479,
+    "total_pvm_code_size": 753462,
+    "total_pvm_instructions": 228231,
+    "total_pvm_basic_blocks": 32766,
+    "total_x86_code_size": 6310141,
+    "total_x86_instructions": 1227060,
+    "average_x86_to_pvm_code_ratio": 8.864910806942111,
+    "average_x86_to_pvm_instruction_ratio": 5.36777734407704
+  }
+}

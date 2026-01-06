@@ -57,8 +57,12 @@ func RunTestCase(t *testing.T, tc TestCaseNew) {
 	var p *program.Program
 	var o_size, w_size, z, s uint32
 	var o_byte, w_byte []byte
+	var err error
 
-	p = program.DecodeCorePart(rawCodeBytes)
+	p, err = program.DecodeCorePart(rawCodeBytes)
+	if err != nil {
+		t.Fatalf("Failed to decode program: %v", err)
+	}
 	o_size = 0
 	w_size = uint32(4096)
 	z = 0

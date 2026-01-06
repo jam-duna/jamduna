@@ -19,7 +19,6 @@ import (
 	"github.com/colorfulnotion/jam/pvm/recompiler"
 	"github.com/colorfulnotion/jam/pvm/trace"
 	"github.com/colorfulnotion/jam/types" // go get golang.org/x/example/hello/reverse
-	"golang.org/x/exp/slices"
 	"golang.org/x/sys/unix"
 )
 
@@ -98,6 +97,12 @@ type VMGo struct {
 	// Execution Context Tracking (for multi-contract debugging)
 	ContextStack   []ExecutionContext // Stack of nested execution contexts
 	CurrentContext *ExecutionContext  // Currently active execution context
+
+	// Instruction Type Recording
+	RecordInstructionType  bool  // If true, record instruction type counts
+	ArithmeticCount        int64 // Count of arithmetic instructions executed
+	MemoryCount            int64 // Count of memory access instructions executed
+	ControlFlowCount       int64 // Count of control flow instructions executed
 
 	// Work Package Inputs
 	WorkItemIndex uint32
@@ -1077,7 +1082,6 @@ func (vm *VMGo) step(stepn int) error {
 	// The trace format preserves the last memory operation's values across steps.
 	// If no new load/store occurs, the previous step's values are carried over.
 	// This matches the trace file format where values "stick" until a new operation.
-
 	// Check if PC is out of bounds
 	if vm.pc >= uint64(len(vm.code)) {
 		vm.ResultCode = types.WORKRESULT_PANIC
@@ -1114,6 +1118,19 @@ func (vm *VMGo) step(stepn int) error {
 	opcode := inst.Opcode
 	len_operands := uint64(len(inst.Args))
 	_ = prevpc // used for logging
+
+	// Record instruction type if enabled
+	if vm.RecordInstructionType {
+		category := program.GetInstructionCategory(opcode)
+		switch category {
+		case program.CategoryArithmetic:
+			vm.ArithmeticCount++
+		case program.CategoryMemory:
+			vm.MemoryCount++
+		case program.CategoryControlFlow:
+			vm.ControlFlowCount++
+		}
+	}
 
 	// Decrement gas and check for OOG
 	vm.Gas -= 1
@@ -1236,14 +1253,13 @@ func (vm *VMGo) step(stepn int) error {
 
 	default:
 		log.Info(vm.logging, "terminated: unknown opcode", "opcode", uint8(opcode), "service", string(vm.ServiceMetadata), "opcode", opcode)
-
 		vm.HandleNoArgs(&Instruction{Opcode: TRAP}) //TRAP
 	}
 
 	// avoid this: this is expensive
 	// Show every 1000 gas, plus every instruction in high-res window
-	showThisGas := false
-	if PvmLogging || showThisGas {
+	showThisGas := true
+	if PvmLogging && showThisGas {
 		registers := vm.Ram.ReadRegisters()
 		prettyHex := "["
 		for i := 0; i < 13; i++ {
@@ -1445,25 +1461,11 @@ func (vm *VMGo) branch(vx uint64, taken int, operand_len int) {
 }
 
 func z_encode(a uint64, n uint32) int64 {
-	if n == 0 || n > 8 {
-		return 0
-	}
-	shift := 64 - 8*n
-	return int64(a<<shift) >> shift
+	return program.ZEncode(a, n)
 }
 
 func x_encode(x uint64, n uint32) uint64 {
-	if n == 0 || n > 8 {
-		return 0
-	}
-	shift := 8*n - 1
-	q := x >> shift
-	if n == 8 {
-		return x
-	}
-	mask := (uint64(1) << (8 * n)) - 1
-	factor := ^mask
-	return x + q*factor
+	return program.XEncode(x, n)
 }
 
 func smod(a, b int64) int64 {
@@ -1496,7 +1498,7 @@ func (vm *VMGo) HandleNoArgs(inst *Instruction) {
 		fmt.Printf("TRAP encountered at pc %d in mode %s\n", vm.pc, vm.Mode)
 		vm.terminated = true
 	case FALLTHROUGH:
-		vm.pc += 1
+		vm.pc += 1 + uint64(len(inst.Args))
 	}
 }
 
@@ -2684,131 +2686,53 @@ func (vm *VMGo) GetHostID() uint64 {
 
 // A.5.4. Instructions with Arguments of Two Immediates.
 func extractTwoImm(oargs []byte) (vx uint64, vy uint64) {
-	args := slices.Clone(oargs)
-	lx := min(4, int(args[0])%8)
-	ly := min(4, max(0, len(args)-lx-1))
-	if ly == 0 {
-		ly = 1
-		args = append(args, 0)
-	}
-	vx = x_encode(types.DecodeE_l(args[1:1+lx]), uint32(lx))       // offset
-	vy = x_encode(types.DecodeE_l(args[1+lx:1+lx+ly]), uint32(ly)) // value
-
-	return
+	return program.ExtractTwoImm(oargs)
 }
 
 // A.5.5. Instructions with Arguments of One Offset. (JUMP)
 func extractOneOffset(oargs []byte) (vx int64) {
-	args := slices.Clone(oargs)
-	lx := min(4, len(args))
-	if lx == 0 {
-		lx = 1
-		args = append(args, 0)
-	}
-	vx = z_encode(types.DecodeE_l(args[0:lx]), uint32(lx))
-	return vx
+	return program.ExtractOneOffset(oargs)
 }
 
 // A.5.6. Instructions with Arguments of One Register & One Immediate. (JUMP_IND)
 func extractOneRegOneImm(oargs []byte) (reg1 int, vx uint64) {
-	args := slices.Clone(oargs)
-	registerIndexA := min(12, int(args[0])%16)
-	lx := min(4, max(0, len(args))-1)
-	if lx == 0 {
-		lx = 1
-		args = append(args, 0)
-	}
-	vx = x_encode(types.DecodeE_l(args[1:1+lx]), uint32(lx))
-	return int(registerIndexA), vx
+	return program.ExtractOneRegOneImm(oargs)
 }
 
 // A.5.7. Instructions with Arguments of One Register and Two Immediates.
 func extractOneReg2Imm(oargs []byte) (reg1 int, vx uint64, vy uint64) {
-	args := slices.Clone(oargs)
-
-	reg1 = min(12, int(args[0])%16)
-	lx := min(4, (int(args[0])/16)%8)
-	ly := min(4, max(0, len(args)-lx-1))
-	if ly == 0 {
-		ly = 1
-		args = append(args, 0)
-	}
-
-	vx = x_encode(types.DecodeE_l(args[1:1+lx]), uint32(lx))
-	vy = x_encode(types.DecodeE_l(args[1+lx:1+lx+ly]), uint32(ly))
-	return int(reg1), vx, vy
+	return program.ExtractOneReg2Imm(oargs)
 }
 
 // A.5.8. Instructions with Arguments of One Register, One Immediate and One Offset. (LOAD_IMM_JUMP, BRANCH_{EQ/NE/...}_IMM)
 func extractOneRegOneImmOneOffset(oargs []byte) (registerIndexA int, vx uint64, vy int64) {
-	args := slices.Clone(oargs)
-	registerIndexA = min(12, int(args[0])%16)
-	lx := min(4, (int(args[0]) / 16 % 8))
-	ly := min(4, max(0, len(args)-lx-1))
-	if ly == 0 {
-		ly = 1
-		args = append(args, 0)
-	}
-
-	vx = x_encode(types.DecodeE_l(args[1:1+lx]), uint32(lx))
-	vy = z_encode(types.DecodeE_l(args[1+lx:1+lx+ly]), uint32(ly))
-	return registerIndexA, vx, vy
+	return program.ExtractOneRegOneImmOneOffset(oargs)
 }
 
 // A.5.9. Instructions with Arguments of Two Registers.
 func extractTwoRegisters(args []byte) (regD, regA int) {
-	regD = min(12, int(args[0]&0x0F))
-	regA = min(12, int(args[0]>>4))
-	return
+	return program.ExtractTwoRegisters(args)
 }
 
 // A.5.10. Instructions with Arguments of Two Registers and One Immediate.
 func extractTwoRegsOneImm(args []byte) (reg1, reg2 int, imm uint64) {
-	reg1 = min(12, int(args[0]&0x0F))
-	reg2 = min(12, int(args[0])/16)
-	lx := min(4, max(0, len(args)-1))
-	imm = x_encode(types.DecodeE_l(args[1:1+lx]), uint32(lx))
-	return
+	return program.ExtractTwoRegsOneImm(args)
 }
 
 // A.5.11. Instructions with Arguments of Two Registers and One Offset. (BRANCH_{EQ/NE/...})
 func extractTwoRegsOneOffset(oargs []byte) (registerIndexA, registerIndexB int, vx int64) {
-	args := slices.Clone(oargs)
-	registerIndexA = min(12, int(args[0])%16)
-	registerIndexB = min(12, int(args[0])/16)
-	lx := min(4, max(0, len(args)-1))
-	if lx == 0 {
-		lx = 1
-		args = append(args, 0)
-	}
-	vx = int64(z_encode(types.DecodeE_l(args[1:1+lx]), uint32(lx)))
-	return registerIndexA, registerIndexB, vx
+	return program.ExtractTwoRegsOneOffset(oargs)
 }
 
 // A.5.12. Instructions with Arguments of Two Registers and Two Immediates. (LOAD_IMM_JUMP_IND)
 // This instruction is used to load an immediate value into a register and then jump to an address.
 func extractTwoRegsAndTwoImmediates(oargs []byte) (registerIndexA, registerIndexB int, vx, vy uint64) {
-	args := slices.Clone(oargs)
-	registerIndexA = min(12, int(args[0])%16)
-	registerIndexB = min(12, int(args[0])/16)
-	lx := min(4, (int(args[1]) % 8))
-	ly := min(4, max(0, len(args)-lx-2))
-	if ly == 0 {
-		ly = 1
-		args = append(args, 0)
-	}
-
-	vx = x_encode(types.DecodeE_l(args[2:2+lx]), uint32(lx))
-	vy = x_encode(types.DecodeE_l(args[2+lx:2+lx+ly]), uint32(ly))
-	return registerIndexA, registerIndexB, vx, vy
+	return program.ExtractTwoRegsAndTwoImmediates(oargs)
 }
 
 // A.5.13. Instructions with Arguments of Three Registers.
 func extractThreeRegs(args []byte) (reg1, reg2, dst int) {
-	reg1 = min(12, int(args[0]&0x0F))
-	reg2 = min(12, int(args[0]>>4))
-	dst = min(12, int(args[1]))
-	return
+	return program.ExtractThreeRegs(args)
 }
 
 const (
@@ -3112,4 +3036,40 @@ func (ram *RawRam) WriteRegister(index int, value uint64) {
 // ReadRegisters returns a copy of the current register values.
 func (ram *RawRam) ReadRegisters() [regSize]uint64 {
 	return ram.reg
+}
+
+// InstructionTypeStats contains statistics about instruction types executed
+type InstructionTypeStats struct {
+	ArithmeticCount  int64
+	MemoryCount      int64
+	ControlFlowCount int64
+	TotalCount       int64
+}
+
+// GetInstructionTypeStats returns the current instruction type statistics
+func (vm *VMGo) GetInstructionTypeStats() InstructionTypeStats {
+	return InstructionTypeStats{
+		ArithmeticCount:  vm.ArithmeticCount,
+		MemoryCount:      vm.MemoryCount,
+		ControlFlowCount: vm.ControlFlowCount,
+		TotalCount:       vm.ArithmeticCount + vm.MemoryCount + vm.ControlFlowCount,
+	}
+}
+
+// ResetInstructionTypeStats resets all instruction type counters to zero
+func (vm *VMGo) ResetInstructionTypeStats() {
+	vm.ArithmeticCount = 0
+	vm.MemoryCount = 0
+	vm.ControlFlowCount = 0
+}
+
+// PrintInstructionTypeStats prints instruction type statistics to stdout
+func (vm *VMGo) PrintInstructionTypeStats() {
+	stats := vm.GetInstructionTypeStats()
+	fmt.Printf("\n=== Instruction Type Statistics ===\n")
+	fmt.Printf("Arithmetic:   %d (%.2f%%)\n", stats.ArithmeticCount, float64(stats.ArithmeticCount)/float64(stats.TotalCount)*100)
+	fmt.Printf("Memory:       %d (%.2f%%)\n", stats.MemoryCount, float64(stats.MemoryCount)/float64(stats.TotalCount)*100)
+	fmt.Printf("Control Flow: %d (%.2f%%)\n", stats.ControlFlowCount, float64(stats.ControlFlowCount)/float64(stats.TotalCount)*100)
+	fmt.Printf("Total:        %d\n", stats.TotalCount)
+	fmt.Printf("===================================\n\n")
 }

@@ -1,0 +1,512 @@
+package program
+
+// PVM Instructions - Unified Definition
+// This file contains all PVM instruction opcodes following Appendix A of the PVM specification.
+// All other packages should import and use these constants instead of defining their own.
+
+// A.5.1. Instructions without Arguments.
+const (
+	TRAP        = 0
+	FALLTHROUGH = 1
+)
+
+// A.5.2. Instructions with Arguments of One Immediate.
+const (
+	ECALLI = 10 // 0x0a
+)
+
+// A.5.3. Instructions with Arguments of One Register and One Extended Width Immediate.
+const (
+	LOAD_IMM_64 = 20 // 0x14
+)
+
+// A.5.4. Instructions with Arguments of Two Immediates.
+const (
+	STORE_IMM_U8  = 30
+	STORE_IMM_U16 = 31
+	STORE_IMM_U32 = 32
+	STORE_IMM_U64 = 33 // NEW, 32-bit twin = store_imm_u32
+)
+
+// A.5.5. Instructions with Arguments of One Offset.
+const (
+	JUMP = 40 // 0x28
+)
+
+// A.5.6. Instructions with Arguments of One Register & One Immediate.
+const (
+	JUMP_IND  = 50
+	LOAD_IMM  = 51
+	LOAD_U8   = 52
+	LOAD_I8   = 53
+	LOAD_U16  = 54
+	LOAD_I16  = 55
+	LOAD_U32  = 56
+	LOAD_I32  = 57
+	LOAD_U64  = 58
+	STORE_U8  = 59
+	STORE_U16 = 60
+	STORE_U32 = 61
+	STORE_U64 = 62
+)
+
+// A.5.7. Instructions with Arguments of One Register & Two Immediates.
+const (
+	STORE_IMM_IND_U8  = 70 // 0x46
+	STORE_IMM_IND_U16 = 71 // 0x47
+	STORE_IMM_IND_U32 = 72 // 0x48
+	STORE_IMM_IND_U64 = 73 // 0x49 NEW, 32-bit twin = store_imm_ind_u32
+)
+
+// A.5.8. Instructions with Arguments of One Register, One Immediate and One Offset.
+const (
+	LOAD_IMM_JUMP   = 80
+	BRANCH_EQ_IMM   = 81 // 0x51
+	BRANCH_NE_IMM   = 82
+	BRANCH_LT_U_IMM = 83
+	BRANCH_LE_U_IMM = 84
+	BRANCH_GE_U_IMM = 85
+	BRANCH_GT_U_IMM = 86
+	BRANCH_LT_S_IMM = 87
+	BRANCH_LE_S_IMM = 88
+	BRANCH_GE_S_IMM = 89
+	BRANCH_GT_S_IMM = 90
+)
+
+// A.5.9. Instructions with Arguments of Two Registers.
+const (
+	MOVE_REG              = 100
+	SBRK                  = 101
+	COUNT_SET_BITS_64     = 102
+	COUNT_SET_BITS_32     = 103
+	LEADING_ZERO_BITS_64  = 104
+	LEADING_ZERO_BITS_32  = 105
+	TRAILING_ZERO_BITS_64 = 106
+	TRAILING_ZERO_BITS_32 = 107
+	SIGN_EXTEND_8         = 108
+	SIGN_EXTEND_16        = 109
+	ZERO_EXTEND_16        = 110
+	REVERSE_BYTES         = 111
+)
+
+// A.5.10. Instructions with Arguments of Two Registers & One Immediate.
+const (
+	STORE_IND_U8      = 120
+	STORE_IND_U16     = 121
+	STORE_IND_U32     = 122
+	STORE_IND_U64     = 123
+	LOAD_IND_U8       = 124
+	LOAD_IND_I8       = 125
+	LOAD_IND_U16      = 126
+	LOAD_IND_I16      = 127
+	LOAD_IND_U32      = 128
+	LOAD_IND_I32      = 129
+	LOAD_IND_U64      = 130
+	ADD_IMM_32        = 131
+	AND_IMM           = 132
+	XOR_IMM           = 133
+	OR_IMM            = 134
+	MUL_IMM_32        = 135
+	SET_LT_U_IMM      = 136
+	SET_LT_S_IMM      = 137
+	SHLO_L_IMM_32     = 138
+	SHLO_R_IMM_32     = 139
+	SHAR_R_IMM_32     = 140
+	NEG_ADD_IMM_32    = 141
+	SET_GT_U_IMM      = 142
+	SET_GT_S_IMM      = 143
+	SHLO_L_IMM_ALT_32 = 144
+	SHLO_R_IMM_ALT_32 = 145
+	SHAR_R_IMM_ALT_32 = 146
+	CMOV_IZ_IMM       = 147
+	CMOV_NZ_IMM       = 148
+	ADD_IMM_64        = 149
+	MUL_IMM_64        = 150
+	SHLO_L_IMM_64     = 151
+	SHLO_R_IMM_64     = 152
+	SHAR_R_IMM_64     = 153
+	NEG_ADD_IMM_64    = 154
+	SHLO_L_IMM_ALT_64 = 155
+	SHLO_R_IMM_ALT_64 = 156
+	SHAR_R_IMM_ALT_64 = 157
+	ROT_R_64_IMM      = 158
+	ROT_R_64_IMM_ALT  = 159
+	ROT_R_32_IMM      = 160
+	ROT_R_32_IMM_ALT  = 161
+)
+
+// A.5.11. Instructions with Arguments of Two Registers & One Offset.
+const (
+	BRANCH_EQ   = 170
+	BRANCH_NE   = 171
+	BRANCH_LT_U = 172
+	BRANCH_LT_S = 173
+	BRANCH_GE_U = 174
+	BRANCH_GE_S = 175
+)
+
+// A.5.12. Instruction with Arguments of Two Registers and Two Immediates.
+const (
+	LOAD_IMM_JUMP_IND = 180
+)
+
+// A.5.13. Instructions with Arguments of Three Registers.
+const (
+	ADD_32        = 190
+	SUB_32        = 191
+	MUL_32        = 192
+	DIV_U_32      = 193
+	DIV_S_32      = 194
+	REM_U_32      = 195
+	REM_S_32      = 196
+	SHLO_L_32     = 197
+	SHLO_R_32     = 198
+	SHAR_R_32     = 199
+	ADD_64        = 200
+	SUB_64        = 201
+	MUL_64        = 202
+	DIV_U_64      = 203
+	DIV_S_64      = 204
+	REM_U_64      = 205
+	REM_S_64      = 206
+	SHLO_L_64     = 207
+	SHLO_R_64     = 208
+	SHAR_R_64     = 209
+	AND           = 210
+	XOR           = 211
+	OR            = 212
+	MUL_UPPER_S_S = 213
+	MUL_UPPER_U_U = 214
+	MUL_UPPER_S_U = 215
+	SET_LT_U      = 216
+	SET_LT_S      = 217
+	CMOV_IZ       = 218
+	CMOV_NZ       = 219
+	ROT_L_64      = 220
+	ROT_L_32      = 221
+	ROT_R_64      = 222
+	ROT_R_32      = 223
+	AND_INV       = 224
+	OR_INV        = 225
+	XNOR          = 226
+	MAX           = 227
+	MAX_U         = 228
+	MIN           = 229
+	MIN_U         = 230
+)
+
+// Additional constants for recompiler
+const (
+	UNLIKELY = 3
+)
+
+// Host function indexes for ECALLI instruction
+const (
+	GAS    = 0
+	LOOKUP = 1
+	READ   = 2
+	WRITE  = 3
+	CODE   = 4
+	FETCH  = 5
+	INFO   = 6
+	EMIT   = 7
+	PANIC  = 8
+)
+
+// OpcodeToString returns the string representation of an opcode
+func OpcodeToString(opcode byte) string {
+	name, exists := opcodeNames[opcode]
+	if !exists {
+		return "UNKNOWN"
+	}
+	return name
+}
+
+// opcodeNames maps opcode bytes to their string names
+var opcodeNames = map[byte]string{
+	0:   "TRAP",
+	1:   "FALLTHROUGH",
+	10:  "ECALLI",
+	20:  "LOAD_IMM_64",
+	30:  "STORE_IMM_U8",
+	31:  "STORE_IMM_U16",
+	32:  "STORE_IMM_U32",
+	33:  "STORE_IMM_U64",
+	40:  "JUMP",
+	50:  "JUMP_IND",
+	51:  "LOAD_IMM",
+	52:  "LOAD_U8",
+	53:  "LOAD_I8",
+	54:  "LOAD_U16",
+	55:  "LOAD_I16",
+	56:  "LOAD_U32",
+	57:  "LOAD_I32",
+	58:  "LOAD_U64",
+	59:  "STORE_U8",
+	60:  "STORE_U16",
+	61:  "STORE_U32",
+	62:  "STORE_U64",
+	70:  "STORE_IMM_IND_U8",
+	71:  "STORE_IMM_IND_U16",
+	72:  "STORE_IMM_IND_U32",
+	73:  "STORE_IMM_IND_U64",
+	80:  "LOAD_IMM_JUMP",
+	81:  "BRANCH_EQ_IMM",
+	82:  "BRANCH_NE_IMM",
+	83:  "BRANCH_LT_U_IMM",
+	84:  "BRANCH_LE_U_IMM",
+	85:  "BRANCH_GE_U_IMM",
+	86:  "BRANCH_GT_U_IMM",
+	87:  "BRANCH_LT_S_IMM",
+	88:  "BRANCH_LE_S_IMM",
+	89:  "BRANCH_GE_S_IMM",
+	90:  "BRANCH_GT_S_IMM",
+	100: "MOVE_REG",
+	101: "SBRK",
+	102: "COUNT_SET_BITS_64",
+	103: "COUNT_SET_BITS_32",
+	104: "LEADING_ZERO_BITS_64",
+	105: "LEADING_ZERO_BITS_32",
+	106: "TRAILING_ZERO_BITS_64",
+	107: "TRAILING_ZERO_BITS_32",
+	108: "SIGN_EXTEND_8",
+	109: "SIGN_EXTEND_16",
+	110: "ZERO_EXTEND_16",
+	111: "REVERSE_BYTES",
+	120: "STORE_IND_U8",
+	121: "STORE_IND_U16",
+	122: "STORE_IND_U32",
+	123: "STORE_IND_U64",
+	124: "LOAD_IND_U8",
+	125: "LOAD_IND_I8",
+	126: "LOAD_IND_U16",
+	127: "LOAD_IND_I16",
+	128: "LOAD_IND_U32",
+	129: "LOAD_IND_I32",
+	130: "LOAD_IND_U64",
+	131: "ADD_IMM_32",
+	132: "AND_IMM",
+	133: "XOR_IMM",
+	134: "OR_IMM",
+	135: "MUL_IMM_32",
+	136: "SET_LT_U_IMM",
+	137: "SET_LT_S_IMM",
+	138: "SHLO_L_IMM_32",
+	139: "SHLO_R_IMM_32",
+	140: "SHAR_R_IMM_32",
+	141: "NEG_ADD_IMM_32",
+	142: "SET_GT_U_IMM",
+	143: "SET_GT_S_IMM",
+	144: "SHLO_L_IMM_ALT_32",
+	145: "SHLO_R_IMM_ALT_32",
+	146: "SHAR_R_IMM_ALT_32",
+	147: "CMOV_IZ_IMM",
+	148: "CMOV_NZ_IMM",
+	149: "ADD_IMM_64",
+	150: "MUL_IMM_64",
+	151: "SHLO_L_IMM_64",
+	152: "SHLO_R_IMM_64",
+	153: "SHAR_R_IMM_64",
+	154: "NEG_ADD_IMM_64",
+	155: "SHLO_L_IMM_ALT_64",
+	156: "SHLO_R_IMM_ALT_64",
+	157: "SHAR_R_IMM_ALT_64",
+	158: "ROT_R_64_IMM",
+	159: "ROT_R_64_IMM_ALT",
+	160: "ROT_R_32_IMM",
+	161: "ROT_R_32_IMM_ALT",
+	170: "BRANCH_EQ",
+	171: "BRANCH_NE",
+	172: "BRANCH_LT_U",
+	173: "BRANCH_LT_S",
+	174: "BRANCH_GE_U",
+	175: "BRANCH_GE_S",
+	180: "LOAD_IMM_JUMP_IND",
+	190: "ADD_32",
+	191: "SUB_32",
+	192: "MUL_32",
+	193: "DIV_U_32",
+	194: "DIV_S_32",
+	195: "REM_U_32",
+	196: "REM_S_32",
+	197: "SHLO_L_32",
+	198: "SHLO_R_32",
+	199: "SHAR_R_32",
+	200: "ADD_64",
+	201: "SUB_64",
+	202: "MUL_64",
+	203: "DIV_U_64",
+	204: "DIV_S_64",
+	205: "REM_U_64",
+	206: "REM_S_64",
+	207: "SHLO_L_64",
+	208: "SHLO_R_64",
+	209: "SHAR_R_64",
+	210: "AND",
+	211: "XOR",
+	212: "OR",
+	213: "MUL_UPPER_S_S",
+	214: "MUL_UPPER_U_U",
+	215: "MUL_UPPER_S_U",
+	216: "SET_LT_U",
+	217: "SET_LT_S",
+	218: "CMOV_IZ",
+	219: "CMOV_NZ",
+	220: "ROT_L_64",
+	221: "ROT_L_32",
+	222: "ROT_R_64",
+	223: "ROT_R_32",
+	224: "AND_INV",
+	225: "OR_INV",
+	226: "XNOR",
+	227: "MAX",
+	228: "MAX_U",
+	229: "MIN",
+	230: "MIN_U",
+	255: "EXTERNAL_WRITE",
+}
+
+// IsBasicBlockTerminator returns true if the opcode terminates a basic block
+func IsBasicBlockTerminator(opcode byte) bool {
+	switch opcode {
+	case TRAP, FALLTHROUGH, JUMP, JUMP_IND, LOAD_IMM_JUMP,
+		BRANCH_EQ_IMM, BRANCH_NE_IMM, BRANCH_LT_U_IMM, BRANCH_LE_U_IMM,
+		BRANCH_GE_U_IMM, BRANCH_GT_U_IMM, BRANCH_LT_S_IMM, BRANCH_LE_S_IMM,
+		BRANCH_GE_S_IMM, BRANCH_GT_S_IMM,
+		BRANCH_EQ, BRANCH_NE, BRANCH_LT_U, BRANCH_LT_S, BRANCH_GE_U, BRANCH_GE_S,
+		LOAD_IMM_JUMP_IND:
+		return true
+	}
+	return false
+}
+
+// InstructionCategory represents the category of an instruction
+type InstructionCategory int
+
+const (
+	CategoryUnknown InstructionCategory = iota
+	CategoryArithmetic
+	CategoryMemory
+	CategoryControlFlow
+)
+
+// GetInstructionCategory returns the category of an instruction
+func GetInstructionCategory(opcode byte) InstructionCategory {
+	switch opcode {
+	// Control Flow Instructions
+	case TRAP, FALLTHROUGH, UNLIKELY:
+		return CategoryControlFlow
+	case JUMP, JUMP_IND:
+		return CategoryControlFlow
+	case LOAD_IMM_JUMP, LOAD_IMM_JUMP_IND:
+		return CategoryControlFlow
+	case BRANCH_EQ_IMM, BRANCH_NE_IMM, BRANCH_LT_U_IMM, BRANCH_LE_U_IMM,
+		BRANCH_GE_U_IMM, BRANCH_GT_U_IMM, BRANCH_LT_S_IMM, BRANCH_LE_S_IMM,
+		BRANCH_GE_S_IMM, BRANCH_GT_S_IMM:
+		return CategoryControlFlow
+	case BRANCH_EQ, BRANCH_NE, BRANCH_LT_U, BRANCH_LT_S, BRANCH_GE_U, BRANCH_GE_S:
+		return CategoryControlFlow
+	case ECALLI:
+		return CategoryControlFlow
+
+	// Memory Access Instructions
+	case LOAD_IMM, LOAD_IMM_64:
+		return CategoryMemory
+	case LOAD_U8, LOAD_I8, LOAD_U16, LOAD_I16, LOAD_U32, LOAD_I32, LOAD_U64:
+		return CategoryMemory
+	case STORE_U8, STORE_U16, STORE_U32, STORE_U64:
+		return CategoryMemory
+	case STORE_IMM_U8, STORE_IMM_U16, STORE_IMM_U32, STORE_IMM_U64:
+		return CategoryMemory
+	case STORE_IMM_IND_U8, STORE_IMM_IND_U16, STORE_IMM_IND_U32, STORE_IMM_IND_U64:
+		return CategoryMemory
+	case STORE_IND_U8, STORE_IND_U16, STORE_IND_U32, STORE_IND_U64:
+		return CategoryMemory
+	case LOAD_IND_U8, LOAD_IND_I8, LOAD_IND_U16, LOAD_IND_I16, LOAD_IND_U32, LOAD_IND_I32, LOAD_IND_U64:
+		return CategoryMemory
+	case SBRK:
+		return CategoryMemory
+
+	// Arithmetic & Logic Instructions
+	case MOVE_REG:
+		return CategoryArithmetic
+	case ADD_32, SUB_32, MUL_32, DIV_U_32, DIV_S_32, REM_U_32, REM_S_32:
+		return CategoryArithmetic
+	case ADD_64, SUB_64, MUL_64, DIV_U_64, DIV_S_64, REM_U_64, REM_S_64:
+		return CategoryArithmetic
+	case ADD_IMM_32, MUL_IMM_32, NEG_ADD_IMM_32:
+		return CategoryArithmetic
+	case ADD_IMM_64, MUL_IMM_64, NEG_ADD_IMM_64:
+		return CategoryArithmetic
+	case AND, OR, XOR, AND_INV, OR_INV, XNOR:
+		return CategoryArithmetic
+	case AND_IMM, OR_IMM, XOR_IMM:
+		return CategoryArithmetic
+	case SHLO_L_32, SHLO_R_32, SHAR_R_32:
+		return CategoryArithmetic
+	case SHLO_L_64, SHLO_R_64, SHAR_R_64:
+		return CategoryArithmetic
+	case SHLO_L_IMM_32, SHLO_R_IMM_32, SHAR_R_IMM_32:
+		return CategoryArithmetic
+	case SHLO_L_IMM_64, SHLO_R_IMM_64, SHAR_R_IMM_64:
+		return CategoryArithmetic
+	case SHLO_L_IMM_ALT_32, SHLO_R_IMM_ALT_32, SHAR_R_IMM_ALT_32:
+		return CategoryArithmetic
+	case SHLO_L_IMM_ALT_64, SHLO_R_IMM_ALT_64, SHAR_R_IMM_ALT_64:
+		return CategoryArithmetic
+	case ROT_L_32, ROT_R_32, ROT_L_64, ROT_R_64:
+		return CategoryArithmetic
+	case ROT_R_32_IMM, ROT_R_32_IMM_ALT, ROT_R_64_IMM, ROT_R_64_IMM_ALT:
+		return CategoryArithmetic
+	case MUL_UPPER_S_S, MUL_UPPER_U_U, MUL_UPPER_S_U:
+		return CategoryArithmetic
+	case SET_LT_U, SET_LT_S, SET_GT_U_IMM, SET_GT_S_IMM, SET_LT_U_IMM, SET_LT_S_IMM:
+		return CategoryArithmetic
+	case CMOV_IZ, CMOV_NZ, CMOV_IZ_IMM, CMOV_NZ_IMM:
+		return CategoryArithmetic
+	case COUNT_SET_BITS_32, COUNT_SET_BITS_64:
+		return CategoryArithmetic
+	case LEADING_ZERO_BITS_32, LEADING_ZERO_BITS_64:
+		return CategoryArithmetic
+	case TRAILING_ZERO_BITS_32, TRAILING_ZERO_BITS_64:
+		return CategoryArithmetic
+	case SIGN_EXTEND_8, SIGN_EXTEND_16, ZERO_EXTEND_16:
+		return CategoryArithmetic
+	case REVERSE_BYTES:
+		return CategoryArithmetic
+	case MAX, MAX_U, MIN, MIN_U:
+		return CategoryArithmetic
+
+	default:
+		return CategoryUnknown
+	}
+}
+
+// IsArithmeticInstruction returns true if the opcode is an arithmetic instruction
+func IsArithmeticInstruction(opcode byte) bool {
+	return GetInstructionCategory(opcode) == CategoryArithmetic
+}
+
+// IsMemoryInstruction returns true if the opcode is a memory access instruction
+func IsMemoryInstruction(opcode byte) bool {
+	return GetInstructionCategory(opcode) == CategoryMemory
+}
+
+// IsControlFlowInstruction returns true if the opcode is a control flow instruction
+func IsControlFlowInstruction(opcode byte) bool {
+	return GetInstructionCategory(opcode) == CategoryControlFlow
+}
+
+// GetCategoryName returns the string name of an instruction category
+func GetCategoryName(category InstructionCategory) string {
+	switch category {
+	case CategoryArithmetic:
+		return "Arithmetic"
+	case CategoryMemory:
+		return "Memory"
+	case CategoryControlFlow:
+		return "ControlFlow"
+	default:
+		return "Unknown"
+	}
+}

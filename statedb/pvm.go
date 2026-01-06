@@ -215,41 +215,14 @@ const (
 	OOG   = 4 // out-of-gas ∞
 )
 
-func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, []byte) {
-	pure := p
-	// see A.37
-	o_size := types.DecodeE_l(pure[:3])
-	w_size := types.DecodeE_l(pure[3:6])
-	z_val := types.DecodeE_l(pure[6:8])
-	s_val := types.DecodeE_l(pure[8:11])
-	//fmt.Printf("DecodeProgram: o_size=%d, w_size=%d, z_val=%d, s_val=%d, total_header_size=11\n",o_size, w_size, z_val, s_val)
-	var o_byte, w_byte []byte
-	offset := uint64(11)
-	if offset+o_size <= uint64(len(pure)) {
-		o_byte = pure[offset : offset+o_size]
-	} else {
-		o_byte = make([]byte, o_size)
-	}
-	offset += o_size
-
-	if offset+w_size <= uint64(len(pure)) {
-		w_byte = pure[offset : offset+w_size]
-	} else {
-		w_byte = make([]byte, w_size)
-	}
-	offset += w_size
-
-	c_size := types.DecodeE_l(pure[offset : offset+4])
-	offset += 4
-	if len(pure[offset:]) != int(c_size) {
-		// fmt.Printf("DecodeProgram o_size: %d, w_size: %d, z_val: %d, s_val: %d len(w_byte)=%d\n", o_size, w_size, z_val, s_val, len(w_byte))
-		return nil, 0, 0, 0, 0, nil, nil
-	}
-	return (*Program)(decodeCorePart(pure[offset:])), uint32(o_size), uint32(w_size), uint32(z_val), uint32(s_val), o_byte, w_byte
+func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, []byte, error) {
+	prog, o, w, z, s, oB, wB, err := program.DecodeProgram(p)
+	return (*Program)(prog), o, w, z, s, oB, wB, err
 }
 
-func DecodeProgram_pure_pvm_blob(p []byte) *Program {
-	return (*Program)(decodeCorePart(p))
+func DecodeProgram_pure_pvm_blob(p []byte) (*Program, error) {
+	prog, err := decodeCorePart(p)
+	return (*Program)(prog), err
 }
 
 // EncodeProgram encodes raw instruction code and bitmask into a PVM blob format
@@ -323,17 +296,27 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		panic("pvmBackend cannot be empty")
 	}
 	if len(code) == 0 {
+		fmt.Println("No code provided to NewVM")
 		return nil
 	}
 
 	var p *Program
 	var o_size, w_size, z, s uint32
 	var o_byte, w_byte []byte
+	var err error
 
 	if jam_ready_blob {
-		p, o_size, w_size, z, s, o_byte, w_byte = DecodeProgram(code)
+		p, o_size, w_size, z, s, o_byte, w_byte, err = DecodeProgram(code)
+		if err != nil {
+			fmt.Println("DecodeProgram failed:", err)
+			return nil
+		}
 	} else {
-		p = DecodeProgram_pure_pvm_blob(code)
+		p, err = DecodeProgram_pure_pvm_blob(code)
+		if err != nil {
+			fmt.Println("DecodeProgram_pure_pvm_blob failed:", err)
+			return nil
+		}
 		o_size = 0
 		w_size = uint32(initialHeap)
 		z = 0
@@ -373,6 +356,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 	if vm.Backend == BackendCompiler {
 		rvm := NewRecompilerVM(service_index, initialRegs, initialPC, initialHeap, hostENV, jam_ready_blob, Metadata, initialGas, p, o_size, w_size, z, s, o_byte, w_byte)
 		if rvm == nil {
+			fmt.Println("NewRecompilerVM failed")
 			return nil
 		}
 		vm.ExecutionVM = rvm
@@ -697,6 +681,11 @@ func (vm *VM) executeWithBackend(argumentData []byte, entryPoint uint32, logDir 
 	// The caller is responsible for calling destroyVMs() after reading outputs
 }
 
+func (vm *VM) ExecuteWithBackend(argumentData []byte, entryPoint uint32, logDir string) {
+	vm.executeWithBackend(argumentData, entryPoint, logDir)
+	vm.destroyVMs()
+}
+
 // destroyVMs cleans up all VMs after execution outputs have been read.
 // This writes gzip trailers for trace files and frees resources.
 // Gas is saved to FinalGas before destroying, so SafeGetGas() can be called after.
@@ -763,10 +752,23 @@ func (vm *VM) getArgumentOutputs() (r types.Result, res uint64) {
 	return r, 0
 }
 
+func (vm *VM) GetArgumentOutputs() (r types.Result, res uint64) {
+	return vm.getArgumentOutputs()
+}
+
 func (vm *VM) GetMachineState() uint8 {
 	return vm.MachineState
 }
 
 func (vm *VM) GetResultCode() uint8 {
 	return vm.ResultCode
+}
+
+// GetInterpreterVM returns the underlying VMGo instance if using interpreter backend
+// Returns nil if using a different backend
+func (vm *VM) GetInterpreterVM() *VMGo {
+	if vmGo, ok := vm.ExecutionVM.(*VMGo); ok {
+		return vmGo
+	}
+	return nil
 }

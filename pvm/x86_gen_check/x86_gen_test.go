@@ -34,7 +34,10 @@ func TestCompilePVM(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to read file %s: %v", path, err)
 			}
-			code, bitmask, jumpTable := ParsePvmByteCode(data)
+			code, bitmask, jumpTable, err := ParsePvmByteCode(data)
+			if err != nil {
+				t.Fatalf("Failed to parse PVM bytecode from %s: %v", path, err)
+			}
 			testPvmFileCompiler(t, code, bitmask, jumpTable)
 		})
 	}

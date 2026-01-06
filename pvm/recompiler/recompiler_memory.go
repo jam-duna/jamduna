@@ -1,7 +1,6 @@
 package recompiler
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"runtime"
@@ -307,6 +306,11 @@ func (rvm *RecompilerRam) ReadRegisters() [regSize]uint64 {
 
 // A.5.3. Instructions with Arguments of One Register and One Extended Width Immediate.
 func generateLoadImm64(inst Instruction) []byte {
+	if len(inst.Args) < 9 {
+		//pad with zeros
+		padding := make([]byte, 9-len(inst.Args))
+		inst.Args = append(inst.Args, padding...)
+	}
 	dst := min(12, int(inst.Args[0]))
 	imm := binary.LittleEndian.Uint64(inst.Args[1:9])
 
@@ -321,10 +325,23 @@ func generateStoreImmGeneric(
 ) func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
 		disp, immVal := extractTwoImm(inst.Args)
-
-		// Use helper function for store immediate with base SIB addressing
+		offset := uint32(disp)
 		immBytes := immBuilder(immVal)
-		return emitStoreImmWithBaseSIB(BaseReg, uint32(disp), immBytes, opcode, prefix)
+
+		// Check if offset is in upper 2GB (would be misinterpreted as negative)
+		if isLargeOffset(offset) {
+			// Use scratch register (RCX) to hold the offset
+			var code []byte
+			code = append(code, emitPushReg(RCX)...)
+			code = append(code, emitMovImmToReg64(RCX, uint64(offset))...)
+			// Store to [BaseReg + RCX] with disp32=0
+			code = append(code, emitStoreImmIndWithSIB(RCX, BaseReg, 0, immBytes, opcode, prefix)...)
+			code = append(code, emitPopReg(RCX)...)
+			return code
+		}
+
+		// Normal case: offset < 0x80000000, safe to use as signed disp32
+		return emitStoreImmWithBaseSIB(BaseReg, offset, immBytes, opcode, prefix)
 	}
 }
 
@@ -332,19 +349,29 @@ func generateStoreImmGeneric(
 // Complete generateStoreImmU64
 func generateStoreImmU64(inst Instruction) []byte {
 	disp64, immVal := extractTwoImm(inst.Args)
-	disp := uint32(disp64)
+	offset := uint32(disp64)
 
 	// Split into lower/higher 32 bits
 	low32, high32 := splitU64(immVal)
 
-	// Allocate a slice with enough capacity
+	// Check if offset is in upper 2GB (would be misinterpreted as negative)
+	if isLargeOffset(offset) {
+		// Use scratch register (RCX) to hold the offset
+		var code []byte
+		code = append(code, emitPushReg(RCX)...)
+		code = append(code, emitMovImmToReg64(RCX, uint64(offset))...)
+		// Write lower 32 bits to [BaseReg + RCX]
+		code = append(code, emitStoreImmIndU32WithRegs(RCX, BaseReg, 0, low32)...)
+		// Write higher 32 bits to [BaseReg + RCX + 4]
+		code = append(code, emitStoreImmIndU32WithRegs(RCX, BaseReg, 4, high32)...)
+		code = append(code, emitPopReg(RCX)...)
+		return code
+	}
+
+	// Normal case: offset < 0x80000000, safe to use as signed disp32
 	buf := make([]byte, 0, (1+1+1+1+4+4)*2)
-
-	// Write lower 32 bits
-	buf = emitStoreImm32(buf, disp, low32)
-	// Write higher 32 bits, disp+4
-	buf = emitStoreImm32(buf, disp+4, high32)
-
+	buf = emitStoreImm32(buf, offset, low32)
+	buf = emitStoreImm32(buf, offset+4, high32)
 	return buf
 }
 
@@ -371,21 +398,68 @@ func generateLoadWithBase(opcodes []byte, rexW bool) func(inst Instruction) []by
 	return func(inst Instruction) []byte {
 		dstReg, disp := extractOneRegOneImm(inst.Args)
 		dst := regInfoList[dstReg]
-		base := BaseReg
+		offset := uint32(disp)
 
-		// Use helper function for SIB-based load
-		return emitLoadWithBaseSIB(dst, base, uint32(disp), opcodes, rexW)
+		// Check if offset is in upper 2GB (would be misinterpreted as negative)
+		if isLargeOffset(offset) {
+			// Use scratch register (RCX) to hold the offset
+			// But if dst == RCX, use RAX instead
+			scratch := RCX
+			if dst == RCX {
+				scratch = RAX
+			}
+			var code []byte
+			code = append(code, emitPushReg(scratch)...)
+			code = append(code, emitMovImmToReg64(scratch, uint64(offset))...)
+			// Load from [BaseReg + scratch] with disp32=0
+			prefix := byte(X86_NO_PREFIX)
+			code = append(code, emitLoadWithSIB(dst, BaseReg, scratch, 0, opcodes, rexW, prefix)...)
+			code = append(code, emitPopReg(scratch)...)
+			return code
+		}
+
+		// Normal case: offset < 0x80000000, safe to use as signed disp32
+		return emitLoadWithBaseSIB(dst, BaseReg, offset, opcodes, rexW)
 	}
 }
 
 func generateStoreWithBase(opcode byte, prefix byte, rexW bool) func(inst Instruction) []byte {
+	// Determine size based on parameters
+	var size int
+	if opcode == X86_OP_MOV_RM8_R8 {
+		size = 1
+	} else if prefix == X86_PREFIX_66 {
+		size = 2
+	} else if rexW {
+		size = 8
+	} else {
+		size = 4
+	}
+
 	return func(inst Instruction) []byte {
 		srcIdx, disp := extractOneRegOneImm(inst.Args)
 		src := regInfoList[srcIdx]
-		base := BaseReg
+		offset := uint32(disp)
 
-		// Use helper function for SIB-based store
-		return emitStoreWithBaseSIB(src, base, uint32(disp), opcode, prefix, rexW)
+		// Check if offset is in upper 2GB (would be misinterpreted as negative)
+		if isLargeOffset(offset) {
+			// Use scratch register (RCX) to hold the offset
+			// But if src == RCX, use RAX instead
+			scratch := RCX
+			if src == RCX {
+				scratch = RAX
+			}
+			var code []byte
+			code = append(code, emitPushReg(scratch)...)
+			code = append(code, emitMovImmToReg64(scratch, uint64(offset))...)
+			// Store to [BaseReg + scratch] with disp32=0
+			code = append(code, emitStoreWithSIB(src, BaseReg, scratch, 0, size)...)
+			code = append(code, emitPopReg(scratch)...)
+			return code
+		}
+
+		// Normal case: offset < 0x80000000, safe to use as signed disp32
+		return emitStoreWithBaseSIB(src, BaseReg, offset, opcode, prefix, rexW)
 	}
 }
 
@@ -393,12 +467,28 @@ func generateStoreImmIndU8(inst Instruction) []byte {
 	// 1) Extract register index, displacement, and 8-bit immediate value
 	regAIndex, disp64, immVal := extractOneReg2Imm(inst.Args)
 	idx := regInfoList[regAIndex]
-	base := BaseReg
-	disp := uint32(disp64)
+	offset := uint32(disp64)
 
 	// 2) Use helper function for SIB-based store with 8-bit immediate
 	immValU8 := uint8(immVal & X86_MASK_8BIT)
-	return emitStoreImmIndWithSIB(idx, base, disp, []byte{immValU8}, X86_OP_MOV_RM_IMM8, X86_NO_PREFIX)
+
+	// PVM spec: addr = uint32((idx + offset) & 0xFFFFFFFF)
+	// We must mask the address to 32 bits.
+	scratch := RCX
+	if idx == RCX {
+		scratch = RDX
+	}
+
+	var code []byte
+	// scratch = idx (low 32 bits, zero-extended to 64 bits)
+	code = append(code, emitMovRegToReg32(scratch, idx)...)
+
+	// PVM address calculation: addr = uint32((idx + offset) & 0xFFFFFFFF)
+	// Use 32-bit ADD for proper wrap-around semantics
+	code = append(code, emitAddRegUint32(scratch, offset)...)
+
+	code = append(code, emitStoreImmIndWithSIB(scratch, BaseReg, 0, []byte{immValU8}, X86_OP_MOV_RM_IMM8, X86_NO_PREFIX)...)
+	return code
 }
 
 // generateStoreImmIndU16 generates machine code for MOV word ptr [Base+index*1+disp], imm16
@@ -406,14 +496,29 @@ func generateStoreImmIndU16(inst Instruction) []byte {
 	// 1) extract register index, displacement, and 16-bit immediate value
 	regAIndex, disp64, immVal := extractOneReg2Imm(inst.Args)
 	idx := regInfoList[regAIndex]
-	base := BaseReg
-	disp := uint32(disp64)
-	//fmt.Printf("generateStoreImmIndU16: regAIndex=%d, disp64=%d, immVal=%d\n", regAIndex, disp64, immVal)
+	offset := uint32(disp64)
 
 	// 2) Use helper function for SIB-based store with 16-bit immediate and 0x66 prefix
 	imm16 := uint16(immVal & X86_MASK_16BIT)
 	immBytes := []byte{byte(imm16), byte(imm16 >> 8)}
-	return emitStoreImmIndWithSIB(idx, base, disp, immBytes, X86_OP_MOV_RM_IMM, X86_PREFIX_66)
+
+	// PVM spec: addr = uint32((idx + offset) & 0xFFFFFFFF)
+	// We must mask the address to 32 bits.
+	scratch := RCX
+	if idx == RCX {
+		scratch = RDX
+	}
+
+	var code []byte
+	// scratch = idx (low 32 bits, zero-extended to 64 bits)
+	code = append(code, emitMovRegToReg32(scratch, idx)...)
+
+	// PVM address calculation: addr = uint32((idx + offset) & 0xFFFFFFFF)
+	// Use 32-bit ADD for proper wrap-around semantics
+	code = append(code, emitAddRegUint32(scratch, offset)...)
+
+	code = append(code, emitStoreImmIndWithSIB(scratch, BaseReg, 0, immBytes, X86_OP_MOV_RM_IMM, X86_PREFIX_66)...)
+	return code
 }
 
 // generateStoreImmIndU32 generates machine code for MOV dword ptr [Base+index*1+disp], imm32
@@ -421,8 +526,7 @@ func generateStoreImmIndU32(inst Instruction) []byte {
 	// 1) extract register index, displacement, and 32-bit immediate value
 	regAIndex, disp64, immVal := extractOneReg2Imm(inst.Args)
 	idx := regInfoList[regAIndex]
-	base := BaseReg
-	disp := uint32(disp64)
+	offset := uint32(disp64)
 
 	// 2) Use helper function for SIB-based store with 32-bit immediate
 	imm32 := uint32(immVal)
@@ -430,7 +534,24 @@ func generateStoreImmIndU32(inst Instruction) []byte {
 		byte(imm32), byte(imm32 >> 8),
 		byte(imm32 >> 16), byte(imm32 >> 24),
 	}
-	return emitStoreImmIndWithSIB(idx, base, disp, immBytes, X86_OP_MOV_RM_IMM, X86_NO_PREFIX)
+
+	// PVM spec: addr = uint32((idx + offset) & 0xFFFFFFFF)
+	// We must mask the address to 32 bits.
+	scratch := RCX
+	if idx == RCX {
+		scratch = RDX
+	}
+
+	var code []byte
+	// scratch = idx (low 32 bits, zero-extended to 64 bits)
+	code = append(code, emitMovRegToReg32(scratch, idx)...)
+
+	// PVM address calculation: addr = uint32((idx + offset) & 0xFFFFFFFF)
+	// Use 32-bit ADD for proper wrap-around semantics
+	code = append(code, emitAddRegUint32(scratch, offset)...)
+
+	code = append(code, emitStoreImmIndWithSIB(scratch, BaseReg, 0, immBytes, X86_OP_MOV_RM_IMM, X86_NO_PREFIX)...)
+	return code
 }
 
 // generateStoreImmIndU64 generates machine code for MOV qword ptr [Base+index*1+disp], imm64
@@ -438,18 +559,28 @@ func generateStoreImmIndU64(inst Instruction) []byte {
 	// 1) extract register index, displacement, and 64-bit immediate value
 	regAIndex, disp64, immVal := extractOneReg2Imm(inst.Args)
 	idx := regInfoList[regAIndex]
-	base := BaseReg
-	disp := uint32(disp64)
-	//fmt.Printf("generateStoreImmIndU64: regAIndex=%d, disp64=%d, immVal=%d\n", regAIndex, disp64, immVal)
+	offset := uint32(disp64)
 
 	// 2) split the 64-bit immediate into two 32-bit parts
 	low := uint32(immVal & X86_MASK_32BIT)
 	high := uint32(immVal >> 32)
 
-	// 3) Use helper functions for both parts
-	buf := bytes.NewBuffer(nil)
-	buf.Write(emitStoreImmIndU32WithRegs(idx, base, disp, low))
-	buf.Write(emitStoreImmIndU32WithRegs(idx, base, disp+4, high))
+	// PVM spec: addr = uint32((idx + offset) & 0xFFFFFFFF)
+	// We must mask the address to 32 bits.
+	scratch := RCX
+	if idx == RCX {
+		scratch = RDX
+	}
 
-	return buf.Bytes()
+	var code []byte
+	// scratch = idx (low 32 bits, zero-extended to 64 bits)
+	code = append(code, emitMovRegToReg32(scratch, idx)...)
+
+	// PVM address calculation: addr = uint32((idx + offset) & 0xFFFFFFFF)
+	// Use 32-bit ADD for proper wrap-around semantics
+	code = append(code, emitAddRegUint32(scratch, offset)...)
+
+	code = append(code, emitStoreImmIndU32WithRegs(scratch, BaseReg, 0, low)...)
+	code = append(code, emitStoreImmIndU32WithRegs(scratch, BaseReg, 4, high)...)
+	return code
 }

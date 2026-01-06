@@ -24,11 +24,20 @@ func NewRecompilerVMSandbox(service_index uint32, code []byte, initialRegs []uin
 	var p *Program
 	var o_size, w_size, z, s uint32
 	var o_byte, w_byte []byte
+	var err error
 
 	if jam_ready_blob {
-		p, o_size, w_size, z, s, o_byte, w_byte = DecodeProgram(code)
+		p, o_size, w_size, z, s, o_byte, w_byte, err = DecodeProgram(code)
+		if err != nil {
+			log.Error("", "DecodeProgram failed", "error", err)
+			return nil
+		}
 	} else {
-		p = DecodeProgram_pure_pvm_blob(code)
+		p, err = DecodeProgram_pure_pvm_blob(code)
+		if err != nil {
+			log.Error("", "DecodeProgram_pure_pvm_blob failed", "error", err)
+			return nil
+		}
 		o_size = 0
 		w_size = uint32(initialHeap)
 		z = 0

@@ -21,7 +21,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-var ALWAYS_COMPILE = true
+var ALWAYS_COMPILE = false
 var compiler_usage = compiler_go
 
 const (
@@ -41,6 +41,14 @@ const (
 	PageSize   = 4096                   // 4 KiB
 	TotalMem   = 4 * 1024 * 1024 * 1024 // 4 GiB
 	TotalPages = TotalMem / PageSize    // 1,048,576 pages
+
+	// BaseRegOffset is added to realMemAddr when setting up BaseReg.
+	// This allows signed disp32 (-2GB to +2GB) to cover the full 4GB address space.
+	// With BaseReg = realMemAddr + 0x80000000:
+	//   - PVM address 0x00000000 -> disp32 = -0x80000000 (signed -2GB)
+	//   - PVM address 0x80000000 -> disp32 = 0x00000000
+	//   - PVM address 0xFFFFFFFF -> disp32 = 0x7FFFFFFF (signed +2GB-1)
+	BaseRegOffset = 0x80000000
 )
 
 // PVM Machine States (from GP spec)
@@ -156,7 +164,8 @@ type RecompilerVM struct {
 	djumpAddrOffset uintptr // original offset of djump table within x86Code (for reuse)
 	FaultAddr       uint64  // address that caused fault, for debugging
 
-	reuseCode bool // whether to reuse the existing x86Code buffer
+	reuseCode bool   // whether to reuse the existing x86Code buffer
+	bitmask   []byte // bitmask for valid instruction starts (K array from Program)
 }
 
 type X86Compiler struct {
@@ -311,6 +320,64 @@ var EnableDebugTracing = false
 // (page faults, crashes, code reuse messages, etc.)
 var DebugRecompilerResult = false
 
+// debugPrintCrashContext prints register values and disassembly around a crash point.
+// Only prints if DebugRecompilerResult is enabled.
+func debugPrintCrashContext(vm *RecompilerVM, pvm_pc uint32, x86Offset int) {
+	if !DebugRecompilerResult {
+		return
+	}
+
+	// Print register values
+	for regIdx := 0; regIdx < regSize; regIdx++ {
+		regVal := vm.ReadRegister(regIdx)
+		fmt.Printf("Reg %s: 0x%x (%d)\n", regInfoList[regIdx].Name, regVal, regVal)
+	}
+
+	// Check if this is the problematic instruction
+	// Disassemble x86 code around the crash point
+	fmt.Printf("\n=== X86 Disassembly around crash (offset %d) ===\n", x86Offset)
+	instrs := DisassembleInstructions(vm.realCode)
+
+	// Find the instruction index closest to crash offset
+	crashIdx := -1
+	for idx, instr := range instrs {
+		if instr.Offset >= x86Offset {
+			crashIdx = idx
+			break
+		}
+	}
+	if crashIdx == -1 {
+		crashIdx = len(instrs) - 1
+	}
+
+	// Print 10 instructions before and after
+	startIdx := crashIdx - 10
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	endIdx := crashIdx + 11
+	if endIdx > len(instrs) {
+		endIdx = len(instrs)
+	}
+	for idx := startIdx; idx < endIdx; idx++ {
+		instr := instrs[idx]
+		marker := "  "
+		if idx == crashIdx {
+			marker = "=>"
+		}
+		// Get the raw bytes for this instruction
+		instrLen := instr.Instruction.Len
+		instrEnd := instr.Offset + instrLen
+		if instrEnd > len(vm.realCode) {
+			instrEnd = len(vm.realCode)
+		}
+		rawBytes := vm.realCode[instr.Offset:instrEnd]
+		fmt.Printf("%s 0x%04x: %-24s ; bytes: %02x\n", marker, instr.Offset, instr.Instruction.String(), rawBytes)
+	}
+	fmt.Printf("=== End Disassembly ===\n\n")
+
+}
+
 // ensureTraceVerifier initializes trace verifier if verification mode is enabled but not yet created.
 // verifyDir is derived from LogDir and VerifyBaseDir.
 func (rvm *RecompilerVM) ensureTraceVerifier() error {
@@ -384,6 +451,7 @@ func (rvm *RecompilerVM) GetPC() uint64 {
 	return rvm.pc
 }
 func (rvm *RecompilerVM) SetBitMask(bitmask []byte) error {
+	rvm.bitmask = bitmask
 	if rvm.compiler != nil {
 		rvm.compiler.SetBitMask(bitmask)
 	}
@@ -451,7 +519,9 @@ func (vm *X86Compiler) initStartCode() {
 		code := encodeMem64ToReg(i, BaseRegIndex, offset)
 		vm.startCode = append(vm.startCode, code...)
 	}
-	// Adjust BaseReg from regDumpAddr to realMemAddr: BaseReg = regDumpAddr + regMemsize
+	// Adjust BaseReg from regDumpAddr to realMemAddr:
+	// BaseReg = regDumpAddr + regMemsize
+	// This points BaseReg to the start of the PVM guest memory.
 	vm.startCode = append(vm.startCode, emitAddRegImm32Force81(BaseReg, regMemsize)...)
 	// padding with jump to the entry point
 	vm.startCode = append(vm.startCode, X86_OP_JMP_REL32) // JMP rel32
@@ -461,6 +531,7 @@ func (vm *X86Compiler) initStartCode() {
 	vm.startCode = append(vm.startCode, patch...)
 
 	// Build exit code in temporary buffer
+	// Reverse the BaseReg adjustment: BaseReg = BaseReg - regMemsize
 	exitCode := emitSubRegImm32Force81(BaseReg, regMemsize)
 	for i := 0; i < len(regInfoList); i++ {
 		if i == BaseRegIndex {
@@ -764,6 +835,17 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(entry uint32) (err error) {
 }
 
 func (vm *RecompilerVM) ExecuteAfterMmap(entry uint32) error {
+	// Validate that entry PC points to a valid instruction start using bitmask
+	// This matches the interpreter's behavior in pvmgo.go
+	if len(vm.bitmask) > 0 {
+		if int(entry) >= len(vm.bitmask) || vm.bitmask[entry] == 0 {
+			vm.ResultCode = types.WORKDIGEST_PANIC
+			vm.MachineState = PANIC
+			vm.WriteContextSlot(vmStateSlotIndex, uint64(PANIC), 8)
+			return fmt.Errorf("program counter %d does not point to a valid instruction start", entry)
+		}
+	}
+
 	// find the real memory placeholder and patch it
 	codeAddr := vm.realCode
 	binary.LittleEndian.PutUint64(vm.x86Code[regDumpOffset:regDumpOffset+8], uint64(vm.regDumpAddr))
@@ -771,22 +853,11 @@ func (vm *RecompilerVM) ExecuteAfterMmap(entry uint32) error {
 	//get the x86 pc
 	x86PC, ok := vm.InstMapPVMToX86[entry]
 	if !ok && entry != 0 {
-		// Fallback: search backwards to find the nearest valid instruction PC
-		foundValidPC := false
-		for i := int(entry); i >= 0; i-- {
-			if x86pc, found := vm.InstMapPVMToX86[uint32(i)]; found {
-				fmt.Printf("Warning: PC %d not a valid instruction start, using PC %d instead (x86PC=%d)\n", entry, i, x86pc)
-				x86PC = x86pc
-				entry = uint32(i)
-				vm.pc = uint64(entry)
-				vm.WriteContextSlot(pcSlotIndex, uint64(entry), 8)
-				foundValidPC = true
-				break
-			}
-		}
-		if !foundValidPC {
-			return fmt.Errorf("entry %d not found in InstMapPVMToX86, isChild %v", entry, vm.IsChild)
-		}
+		// Entry not found in instruction map - this means PC is not a valid instruction start
+		vm.ResultCode = types.WORKDIGEST_PANIC
+		vm.MachineState = PANIC
+		vm.WriteContextSlot(vmStateSlotIndex, uint64(PANIC), 8)
+		return fmt.Errorf("entry %d not found in InstMapPVMToX86, isChild %v", entry, vm.IsChild)
 	}
 	if debugRecompiler {
 		fmt.Printf("Executing code at x86 PC: %d (PVM PC: %d)\n", x86PC, entry)
@@ -895,55 +966,7 @@ func (vm *RecompilerVM) ExecuteAfterMmap(entry uint32) error {
 						vm.SetPC(uint64(pvm_pc))
 						foundPC = true
 
-						if DebugRecompilerResult {
-							// print the registers value
-							for regIdx := 0; regIdx < regSize; regIdx++ {
-								regVal := vm.ReadRegister(regIdx)
-								fmt.Printf("Reg %s: 0x%x (%d)\n", regInfoList[regIdx].Name, regVal, regVal)
-							}
-							if pvm_pc == uint32(problemInstrunction.Pc) {
-								// get the instruction at that pvm_pc
-								if problemInstrunction.SourceRegs != nil {
-									fmt.Printf("Problematic instruction at PVM PC %d: %s\n", pvm_pc, problemInstrunction.String())
-								}
-								if problemInstrunction.DestRegs != nil {
-									fmt.Printf("Problematic instruction at PVM PC %d: %s\n", pvm_pc, problemInstrunction.String())
-								}
-
-								// Disassemble x86 code around the crash point
-								fmt.Printf("\n=== X86 Disassembly around crash (offset %d) ===\n", i)
-								instrs := DisassembleInstructions(vm.realCode)
-								// Find the instruction index closest to crash offset
-								crashIdx := -1
-								for idx, instr := range instrs {
-									if instr.Offset >= i {
-										crashIdx = idx
-										break
-									}
-								}
-								if crashIdx == -1 {
-									crashIdx = len(instrs) - 1
-								}
-								// Print 5 instructions before and after
-								startIdx := crashIdx - 5
-								if startIdx < 0 {
-									startIdx = 0
-								}
-								endIdx := crashIdx + 6
-								if endIdx > len(instrs) {
-									endIdx = len(instrs)
-								}
-								for idx := startIdx; idx < endIdx; idx++ {
-									instr := instrs[idx]
-									marker := "  "
-									if idx == crashIdx {
-										marker = "=>"
-									}
-									fmt.Printf("%s 0x%04x: %s\n", marker, instr.Offset, instr.Instruction.String())
-								}
-								fmt.Printf("=== End Disassembly ===\n\n")
-							}
-						}
+						debugPrintCrashContext(vm, pvm_pc, i)
 
 						break
 					}
@@ -1088,6 +1111,7 @@ func (vm *RecompilerVM) Resume() error {
 				if DebugRecompilerResult {
 					fmt.Printf("Recovered PVM PC: %d [%s] from RIP1: %d\n", pvm_pc, opcode_str(vm.code[pvm_pc]), rip)
 				}
+				debugPrintCrashContext(vm, pvm_pc, offset)
 				vm.WriteContextSlot(pcSlotIndex, uint64(pvm_pc), 8)
 				vm.SetPC(uint64(pvm_pc))
 			} else {
@@ -1102,6 +1126,7 @@ func (vm *RecompilerVM) Resume() error {
 					if ok {
 						if DebugRecompilerResult {
 							fmt.Printf("Recovered PVM PC: %d [%s] from RIP: %d (x86 offset: %d)\n", pvm_pc, opcode_str(vm.code[pvm_pc]), rip, i)
+							debugPrintCrashContext(vm, pvm_pc, i)
 						}
 						vm.WriteContextSlot(pcSlotIndex, uint64(pvm_pc), 8)
 						vm.SetPC(uint64(pvm_pc))
@@ -1157,8 +1182,20 @@ func (compiler *X86Compiler) CompileX86Code(startPC uint64) (x86code []byte, dju
 		compiler.InstMapPVMToX86[uint32(pc)] = offsetPanic
 		compiler.InstMapX86ToPVM[offsetPanic] = uint32(pc)
 		compiler.x86Code = append(compiler.x86Code, gas_check_code...)
+	} else if compiler.gasMode == GasModeInstruction {
+
+		gas_check_code := generateGasCheck(1)
+		offsetPanic := len(compiler.x86Code)
+		pc := len(compiler.code)
+		compiler.InstMapPVMToX86[uint32(pc)] = offsetPanic
+		compiler.InstMapX86ToPVM[offsetPanic] = uint32(pc)
+		compiler.x86Code = append(compiler.x86Code, gas_check_code...)
+		if EnableDebugTracing {
+			compiler.x86Code = append(compiler.x86Code, generateDebugCall(TRAP, uint64(pc))...)
+		}
 	}
 	compiler.x86Code = append(compiler.x86Code, emitTrap()...) // in case direct fallthrough
+	compiler.buildJumpTableMap()
 	compiler.Patch()
 	return compiler.x86Code, compiler.djumpAddr, compiler.InstMapPVMToX86, compiler.InstMapX86ToPVM
 }
@@ -1239,6 +1276,13 @@ func (rvm *RecompilerVM) Execute(entry uint32) {
 			rvm.WriteContextSlot(vmStateSlotIndex, uint64(PANIC), 8)
 			break
 		}
+	}
+	if rvm.GetGas() < 0 {
+		rvm.WriteContextSlot(gasSlotIndex, uint64(0), 8)
+		rvm.Gas = 0
+		rvm.MachineState = OOG
+		rvm.WriteContextSlot(vmStateSlotIndex, uint64(OOG), 8)
+
 	}
 	rvm.allExecutionTime = time.Since(hardStart)
 }
@@ -1548,6 +1592,9 @@ var jumpIndTempReg = RCX
 func generateJumpIndirect(inst Instruction) []byte {
 	// 1) Extract baseIdx and vx
 	operands := slices.Clone(inst.Args)
+	if len(operands) < 1 {
+		operands = []byte{0}
+	}
 	baseIdx := min(12, int(operands[0])&0x0F)
 	lx := min(4, max(0, len(operands))-1)
 	if lx == 0 {
@@ -1796,6 +1843,15 @@ func DecodePVMX(data []byte) (*PVMX, error) {
 // tmp directory
 const tmpDir = "/tmp/pvmx_tmp"
 
+var pvmxCacheVersion = common.GetCommitHash()
+
+func pvmxCacheDir() string {
+	if pvmxCacheVersion == "" {
+		pvmxCacheVersion = "unknown"
+	}
+	return filepath.Join(tmpDir, pvmxCacheVersion)
+}
+
 func (vm *RecompilerVM) SavePVMX() error {
 	pvmx := PVMX{
 		DjumpEntry:      uint64(vm.djumpAddrOffset), // Save offset, not absolute address
@@ -1811,17 +1867,14 @@ func (vm *RecompilerVM) SavePVMX() error {
 		return fmt.Errorf("failed to encode PVMX: %w", err)
 	}
 	// write to file
-	// check if the dir exists
-	if _, err := os.Stat(tmpDir); os.IsNotExist(err) {
-		err = os.Mkdir(tmpDir, 0755)
-		if err != nil {
-			return fmt.Errorf("failed to create tmp dir: %w", err)
-		}
+	cacheDir := pvmxCacheDir()
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return fmt.Errorf("failed to create tmp dir: %w", err)
 	}
 	// get the pvm code and compute the hash
 	pvm_code := vm.code
 	pvm_hash := common.Blake2Hash(pvm_code)
-	filename := fmt.Sprintf("%s/%v.pvmx", tmpDir, pvm_hash)
+	filename := filepath.Join(cacheDir, pvm_hash.String()+".pvmx")
 	err = os.WriteFile(filename, data, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to write PVMX to file: %w", err)
@@ -1864,7 +1917,7 @@ func loadPVMXOnce(filename string) (*PVMX, error) {
 func (vm *RecompilerVM) GetX86FromPVMX(code []byte) error {
 	// return fmt.Errorf("ALWAYS COMPILE")
 	pvmHash := common.Blake2Hash(code)
-	filename := filepath.Join(tmpDir, pvmHash.String()+".pvmx")
+	filename := filepath.Join(pvmxCacheDir(), pvmHash.String()+".pvmx")
 
 	pvmx, err := loadPVMXOnce(filename)
 	if err != nil {

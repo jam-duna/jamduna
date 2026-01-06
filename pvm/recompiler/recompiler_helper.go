@@ -4,6 +4,46 @@ import (
 	"encoding/binary"
 )
 
+// isLargeOffset returns true if the offset is >= 0x80000000 (upper 2GB),
+// which would be misinterpreted as negative by signed disp32.
+func isLargeOffset(offset uint32) bool {
+	return offset >= BaseRegOffset
+}
+
+// emitAddRegUint32 adds a uint32 value to a 32-bit register correctly,
+// using 32-bit ADD for proper wrap-around semantics (result zero-extended to 64-bit).
+// This is used for PVM address calculation: addr = uint32((regB + offset) & 0xFFFFFFFF)
+func emitAddRegUint32(reg X86Reg, val uint32) []byte {
+	// Use 32-bit ADD which naturally wraps around and zero-extends to 64-bit.
+	// For values >= 0x80000000, we still need to split to avoid sign-extension issues,
+	// but now using 32-bit operations.
+	if val < BaseRegOffset {
+		// Value < 0x80000000, can use normal 32-bit ADD
+		return emitAddReg32Imm32(reg, val)
+	}
+	// Value >= 0x80000000 would be sign-extended as negative.
+	// Split: add 0x7FFFFFFF first, then add (val - 0x7FFFFFFF)
+	code := emitAddReg32Imm32(reg, 0x7FFFFFFF)
+	remainder := val - 0x7FFFFFFF
+	code = append(code, emitAddReg32Imm32(reg, remainder)...)
+	return code
+}
+
+// emitSubRegUint32 subtracts a uint32 value from a 64-bit register correctly,
+// handling values >= 0x80000000 that would be sign-extended incorrectly by SUB imm32.
+func emitSubRegUint32(reg X86Reg, val uint32) []byte {
+	if val < BaseRegOffset {
+		// Value < 0x80000000, can use normal SUB imm32
+		return emitSubRegImm32Force81(reg, val)
+	}
+	// Value >= 0x80000000 would be sign-extended as negative.
+	// Split: sub 0x7FFFFFFF first, then sub (val - 0x7FFFFFFF)
+	code := emitSubRegImm32Force81(reg, 0x7FFFFFFF)
+	remainder := val - 0x7FFFFFFF
+	code = append(code, emitSubRegImm32Force81(reg, remainder)...)
+	return code
+}
+
 // ================================================================================================
 // Data-Driven PVM Bytecode to x86 Mapping
 // ================================================================================================
@@ -118,7 +158,7 @@ var pvmByteCodeToX86Code = map[byte]func(Instruction) []byte{
 	SET_GT_U_IMM:      generateImmSetCondOp32New(X86_OP2_SETA), // SETA / above unsigned
 	SET_GT_S_IMM:      generateImmSetCondOp32New(X86_OP2_SETG), // SETG / above signed
 	SHLO_L_IMM_32:     generateImmShiftOp32SHLO(X86_REG_SHL),
-	SHLO_R_IMM_32:     generateImmShiftOp32(X86_OP_GROUP2_RM_IMM8, X86_REG_SHR, false),
+	SHLO_R_IMM_32:     generateImmShiftOp32SHLO(X86_REG_SHR),
 	SHLO_L_IMM_ALT_32: generateImmShiftOp32Alt(X86_REG_SHL),
 	SHLO_R_IMM_ALT_32: generateImmShiftOp32(X86_OP_GROUP2_RM_IMM8, X86_REG_SHR, true),
 	SHAR_R_IMM_ALT_32: generateImmShiftOp32(X86_OP_GROUP2_RM_IMM8, X86_REG_SAR, true),
@@ -612,6 +652,8 @@ func emitCmpRegImm32Force81(reg X86Reg, imm int32) []byte {
 }
 
 // emitAddRegImm32Force81 emits: ADD reg, imm32 using opcode 0x81 (forces 32-bit immediate form).
+// WARNING: imm is interpreted as signed by x86! Values >= 0x80000000 will be sign-extended
+// to negative 64-bit values. Use emitAddRegImm64 for large unsigned values.
 func emitAddRegImm32Force81(reg X86Reg, imm uint32) []byte {
 	rex := buildREX(true, false, false, reg.REXBit == 1)
 	modrm := buildModRM(X86_MOD_REGISTER, X86_REG_ADD, reg.RegBits) // /0 for ADD
@@ -620,12 +662,67 @@ func emitAddRegImm32Force81(reg X86Reg, imm uint32) []byte {
 	return result
 }
 
+// emitAddReg32Imm32 emits: ADD r32, imm32 (32-bit operation, result zero-extended to 64-bit).
+// This is used for PVM address calculation where we need 32-bit wrap-around semantics.
+func emitAddReg32Imm32(reg X86Reg, imm uint32) []byte {
+	var result []byte
+	// Only need REX if using R8-R15
+	if reg.REXBit == 1 {
+		rex := buildREX(false, false, false, true) // REX.B for extended register
+		result = append(result, rex)
+	}
+	modrm := buildModRM(X86_MOD_REGISTER, X86_REG_ADD, reg.RegBits) // /0 for ADD
+	result = append(result, 0x81, modrm)
+	result = append(result, encodeU32(imm)...)
+	return result
+}
+
 // emitSubRegImm32Force81 emits: SUB reg, imm32 using opcode 0x81 (forces 32-bit immediate form).
+// WARNING: imm is interpreted as signed by x86! Values >= 0x80000000 will be sign-extended
+// to negative 64-bit values. Use emitSubRegImm64 for large unsigned values.
 func emitSubRegImm32Force81(reg X86Reg, imm uint32) []byte {
 	rex := buildREX(true, false, false, reg.REXBit == 1)
 	modrm := buildModRM(X86_MOD_REGISTER, X86_REG_SUB, reg.RegBits) // /5 for SUB
 	result := []byte{rex, 0x81, modrm}
 	result = append(result, encodeU32(imm)...)
+	return result
+}
+
+// emitAddRegImm64 emits ADD reg, imm64 safely handling values >= 0x80000000.
+// For values < 0x80000000, it uses a single ADD imm32 instruction.
+// For larger values, it splits into multiple ADD instructions with values <= 0x7FFFFFFF.
+func emitAddRegImm64(reg X86Reg, imm uint64) []byte {
+	var result []byte
+	remaining := imm
+	const maxSignedImm32 uint64 = 0x7FFFFFFF
+	for remaining > 0 {
+		if remaining <= maxSignedImm32 {
+			result = append(result, emitAddRegImm32Force81(reg, uint32(remaining))...)
+			remaining = 0
+		} else {
+			result = append(result, emitAddRegImm32Force81(reg, uint32(maxSignedImm32))...)
+			remaining -= maxSignedImm32
+		}
+	}
+	return result
+}
+
+// emitSubRegImm64 emits SUB reg, imm64 safely handling values >= 0x80000000.
+// For values < 0x80000000, it uses a single SUB imm32 instruction.
+// For larger values, it splits into multiple SUB instructions with values <= 0x7FFFFFFF.
+func emitSubRegImm64(reg X86Reg, imm uint64) []byte {
+	var result []byte
+	remaining := imm
+	const maxSignedImm32 uint64 = 0x7FFFFFFF
+	for remaining > 0 {
+		if remaining <= maxSignedImm32 {
+			result = append(result, emitSubRegImm32Force81(reg, uint32(remaining))...)
+			remaining = 0
+		} else {
+			result = append(result, emitSubRegImm32Force81(reg, uint32(maxSignedImm32))...)
+			remaining -= maxSignedImm32
+		}
+	}
 	return result
 }
 

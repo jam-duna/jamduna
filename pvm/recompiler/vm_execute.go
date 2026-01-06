@@ -101,7 +101,10 @@ func (vm *X86Compiler) translateBasicBlock(startPC uint64) *BasicBlock {
 		op := vm.code[pc]
 
 		olen := vm.skip(pc)
-		operands := vm.code[pc+1 : pc+1+olen]
+		var operands []byte
+		if olen > 0 && pc+1+uint64(olen) <= uint64(len(vm.code)) {
+			operands = vm.code[pc+1 : pc+1+olen]
+		}
 		if pc == 0 && op == JUMP && showDisassembly {
 			fmt.Printf("JUMP at PC %d with operands %x\n", pc, operands)
 			fmt.Printf("operands length: %d\n", olen)
@@ -282,19 +285,26 @@ func (vm *X86Compiler) translateBasicBlock(startPC uint64) *BasicBlock {
 			additionalCode := translateFunc(inst)
 			code = append(code, additionalCode...)
 			block.pvmPC_TO_x86Index[uint32(inst.Pc)] = codeLen
+		} else if !(inst.Opcode == UNLIKELY && vm.gasMode == GasModeBasicBlock) {
+			if i == len(block.Instructions)-1 {
+				block.LastInstructionOffset = len(code)
+			}
+			trapCode := generateTrap(inst)
+			code = append(code, trapCode...)
 		}
 	}
 
 	// add a trap if we didn't hit a basic block instruction at the end
 	if !hitBasicBlock {
+		gasCostCode := generateGasCheck(1)
 		trapCode := generateTrap(Instruction{
 			Opcode: TRAP,
 			Args:   nil,
 		})
+		code = append(code, gasCostCode...)
 		code = append(code, trapCode...)
 		block.JumpType = TRAP_JUMP
 	}
-
 	block.X86Code = code
 	block.PVMNextPC = pc
 	vm.basicBlocks[startPC] = block
@@ -429,11 +439,6 @@ func (vm *X86Compiler) appendBlock(block *BasicBlock) {
 	vm.x86Code = append(vm.x86Code, block.X86Code...)
 	block.X86PC = vm.x86PC
 	vm.x86PC += uint64(len(block.X86Code))
-	for _, pvmPC := range vm.J {
-		if idx, exists := block.pvmPC_TO_x86Index[pvmPC]; exists {
-			vm.JumpTableMap = append(vm.JumpTableMap, uint64(startLen+idx))
-		}
-	}
 	for _, inst := range block.Instructions {
 		pvm_pc := uint32(inst.Pc)
 		idx := block.pvmPC_TO_x86Index[pvm_pc]
@@ -461,6 +466,21 @@ func (vm *X86Compiler) appendBlock(block *BasicBlock) {
 			fmt.Printf("Mapped PVM PC %d to x86 PC %x\n", pvm_pc, x86_realpc)
 		}
 	}
+}
+
+func (vm *X86Compiler) buildJumpTableMap() {
+	// Build JumpTableMap once from the compiled instruction map.
+	if len(vm.J) == 0 {
+		vm.JumpTableMap = nil
+		return
+	}
+	jumpTableMap := make([]uint64, 0, len(vm.J))
+	for _, pvmPC := range vm.J {
+		if x86PC, exists := vm.InstMapPVMToX86[pvmPC]; exists {
+			jumpTableMap = append(jumpTableMap, uint64(x86PC))
+		}
+	}
+	vm.JumpTableMap = jumpTableMap
 }
 
 func generateGasCheck(gasCharge uint32) []byte {

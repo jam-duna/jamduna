@@ -293,6 +293,14 @@ static bool jit_lookup_x86_offset(const compiler_t* compiler, uint32_t pvm_pc, u
     if (!compiler || !out_offset) {
         return false;
     }
+    if (compiler->pvm_to_x86_direct && pvm_pc < compiler->pvm_to_x86_direct_size) {
+        uint32_t offset = compiler->pvm_to_x86_direct[pvm_pc];
+        if (offset != UINT32_MAX) {
+            *out_offset = offset;
+            return true;
+        }
+        return false;
+    }
     for (uint32_t i = 0; i < compiler->pvm_to_x86_count; i++) {
         if (compiler->pvm_to_x86_map[i].pvm_pc == pvm_pc) {
             *out_offset = compiler->pvm_to_x86_map[i].x86_offset;
@@ -363,6 +371,7 @@ void compiler_destroy(compiler_t* compiler) {
     free(compiler->exit_code);
     free(compiler->pvm_to_x86_map);
     free(compiler->x86_to_pvm_map);
+    free(compiler->pvm_to_x86_direct);
     hash_map_destroy((hash_map_t*)compiler->basic_blocks_map);
     free(compiler);
 }
@@ -464,6 +473,21 @@ int compiler_compile(compiler_t* compiler, uint64_t start_pc,
         compiler->exit_code = NULL;
     }
     compiler->exit_code_size = 0;
+
+    if (compiler->pvm_to_x86_direct) {
+        free(compiler->pvm_to_x86_direct);
+        compiler->pvm_to_x86_direct = NULL;
+    }
+    compiler->pvm_to_x86_direct_size = compiler->bytecode_size;
+    if (compiler->pvm_to_x86_direct_size > 0) {
+        size_t direct_bytes = (size_t)compiler->pvm_to_x86_direct_size * sizeof(uint32_t);
+        compiler->pvm_to_x86_direct = (uint32_t*)malloc(direct_bytes);
+        if (!compiler->pvm_to_x86_direct) {
+            DEBUG_JIT("Failed to allocate direct PC lookup table\n");
+            return -1;
+        }
+        memset(compiler->pvm_to_x86_direct, 0xFF, direct_bytes);
+    }
     
     if (!compiler->pvm_to_x86_map || !compiler->x86_to_pvm_map) {
         DEBUG_JIT("Failed to allocate PC mapping arrays\n");
@@ -1394,6 +1418,9 @@ int jit_add_pc_mapping(compiler_t* compiler, uint32_t pvm_pc, uint32_t x86_offse
     compiler->pvm_to_x86_map[compiler->pvm_to_x86_count].pvm_pc = pvm_pc;
     compiler->pvm_to_x86_map[compiler->pvm_to_x86_count].x86_offset = x86_offset;
     compiler->pvm_to_x86_count++;
+    if (compiler->pvm_to_x86_direct && pvm_pc < compiler->pvm_to_x86_direct_size) {
+        compiler->pvm_to_x86_direct[pvm_pc] = x86_offset;
+    }
 
     // Same for x86_to_pvm
     if (compiler->x86_to_pvm_count >= compiler->x86_to_pvm_capacity) {

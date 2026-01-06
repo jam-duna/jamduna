@@ -1,5 +1,9 @@
 package recompiler
 
+import (
+	"github.com/colorfulnotion/jam/pvm/program"
+)
+
 const (
 	regSize = 13
 
@@ -41,198 +45,173 @@ const (
 	OK   = 0             // 0
 )
 
-// Appendix A - Instuctions
-
-// A.5.1. Instructions without Arguments.
+// Import all instruction constants from the unified pvm/program package
 const (
-	TRAP        = 0
-	FALLTHROUGH = 1
-	UNLIKELY    = 3
-)
+	// A.5.1. Instructions without Arguments
+	TRAP        = program.TRAP
+	FALLTHROUGH = program.FALLTHROUGH
+	UNLIKELY    = program.UNLIKELY
 
-// A.5.2. Instructions with Arguments of One Immediate.
-const (
-	ECALLI = 10 // 0x0a
-)
+	// A.5.2. Instructions with Arguments of One Immediate
+	ECALLI = program.ECALLI
 
-// A.5.3. Instructions with Arguments of One Register and One Extended Width Immediate.
-const (
-	LOAD_IMM_64 = 20 // 0x14
-)
+	// A.5.3. Instructions with Arguments of One Register and One Extended Width Immediate
+	LOAD_IMM_64 = program.LOAD_IMM_64
 
-// A.5.4. Instructions with Arguments of Two Immediates.
-const (
-	STORE_IMM_U8  = 30
-	STORE_IMM_U16 = 31
-	STORE_IMM_U32 = 32
-	STORE_IMM_U64 = 33 // NEW, 32-bit twin = store_imm_u32
-)
+	// A.5.4. Instructions with Arguments of Two Immediates
+	STORE_IMM_U8  = program.STORE_IMM_U8
+	STORE_IMM_U16 = program.STORE_IMM_U16
+	STORE_IMM_U32 = program.STORE_IMM_U32
+	STORE_IMM_U64 = program.STORE_IMM_U64
 
-// A.5.5. Instructions with Arguments of One Offset.
-const (
-	JUMP = 40 // 0x28
-)
+	// A.5.5. Instructions with Arguments of One Offset
+	JUMP = program.JUMP
 
-// A.5.6. Instructions with Arguments of One Register & Two Immediates.
-const (
-	JUMP_IND  = 50
-	LOAD_IMM  = 51
-	LOAD_U8   = 52
-	LOAD_I8   = 53
-	LOAD_U16  = 54
-	LOAD_I16  = 55
-	LOAD_U32  = 56
-	LOAD_I32  = 57
-	LOAD_U64  = 58
-	STORE_U8  = 59
-	STORE_U16 = 60
-	STORE_U32 = 61
-	STORE_U64 = 62
-)
+	// A.5.6. Instructions with Arguments of One Register & One Immediate
+	JUMP_IND  = program.JUMP_IND
+	LOAD_IMM  = program.LOAD_IMM
+	LOAD_U8   = program.LOAD_U8
+	LOAD_I8   = program.LOAD_I8
+	LOAD_U16  = program.LOAD_U16
+	LOAD_I16  = program.LOAD_I16
+	LOAD_U32  = program.LOAD_U32
+	LOAD_I32  = program.LOAD_I32
+	LOAD_U64  = program.LOAD_U64
+	STORE_U8  = program.STORE_U8
+	STORE_U16 = program.STORE_U16
+	STORE_U32 = program.STORE_U32
+	STORE_U64 = program.STORE_U64
 
-// A.5.7. Instructions with Arguments of One Register & Two Immediates.
-const (
-	STORE_IMM_IND_U8  = 70 // 0x46
-	STORE_IMM_IND_U16 = 71 // 0x47
-	STORE_IMM_IND_U32 = 72 // 0x48
-	STORE_IMM_IND_U64 = 73 // 0x49 NEW, 32-bit twin = store_imm_ind_u32
-)
+	// A.5.7. Instructions with Arguments of One Register & Two Immediates
+	STORE_IMM_IND_U8  = program.STORE_IMM_IND_U8
+	STORE_IMM_IND_U16 = program.STORE_IMM_IND_U16
+	STORE_IMM_IND_U32 = program.STORE_IMM_IND_U32
+	STORE_IMM_IND_U64 = program.STORE_IMM_IND_U64
 
-// A.5.8. Instructions with Arguments of One Register, One Immediate and One Offset.
-const (
-	LOAD_IMM_JUMP   = 80
-	BRANCH_EQ_IMM   = 81 // 0x51
-	BRANCH_NE_IMM   = 82
-	BRANCH_LT_U_IMM = 83
-	BRANCH_LE_U_IMM = 84
-	BRANCH_GE_U_IMM = 85
-	BRANCH_GT_U_IMM = 86
-	BRANCH_LT_S_IMM = 87
-	BRANCH_LE_S_IMM = 88
-	BRANCH_GE_S_IMM = 89
-	BRANCH_GT_S_IMM = 90
-)
+	// A.5.8. Instructions with Arguments of One Register, One Immediate and One Offset
+	LOAD_IMM_JUMP   = program.LOAD_IMM_JUMP
+	BRANCH_EQ_IMM   = program.BRANCH_EQ_IMM
+	BRANCH_NE_IMM   = program.BRANCH_NE_IMM
+	BRANCH_LT_U_IMM = program.BRANCH_LT_U_IMM
+	BRANCH_LE_U_IMM = program.BRANCH_LE_U_IMM
+	BRANCH_GE_U_IMM = program.BRANCH_GE_U_IMM
+	BRANCH_GT_U_IMM = program.BRANCH_GT_U_IMM
+	BRANCH_LT_S_IMM = program.BRANCH_LT_S_IMM
+	BRANCH_LE_S_IMM = program.BRANCH_LE_S_IMM
+	BRANCH_GE_S_IMM = program.BRANCH_GE_S_IMM
+	BRANCH_GT_S_IMM = program.BRANCH_GT_S_IMM
 
-// A.5.9. Instructions with Arguments of Two Registers.
-const (
-	MOVE_REG              = 100
-	SBRK                  = 101
-	COUNT_SET_BITS_64     = 102
-	COUNT_SET_BITS_32     = 103
-	LEADING_ZERO_BITS_64  = 104
-	LEADING_ZERO_BITS_32  = 105
-	TRAILING_ZERO_BITS_64 = 106
-	TRAILING_ZERO_BITS_32 = 107
-	SIGN_EXTEND_8         = 108
-	SIGN_EXTEND_16        = 109
-	ZERO_EXTEND_16        = 110
-	REVERSE_BYTES         = 111
-)
+	// A.5.9. Instructions with Arguments of Two Registers
+	MOVE_REG              = program.MOVE_REG
+	SBRK                  = program.SBRK
+	COUNT_SET_BITS_64     = program.COUNT_SET_BITS_64
+	COUNT_SET_BITS_32     = program.COUNT_SET_BITS_32
+	LEADING_ZERO_BITS_64  = program.LEADING_ZERO_BITS_64
+	LEADING_ZERO_BITS_32  = program.LEADING_ZERO_BITS_32
+	TRAILING_ZERO_BITS_64 = program.TRAILING_ZERO_BITS_64
+	TRAILING_ZERO_BITS_32 = program.TRAILING_ZERO_BITS_32
+	SIGN_EXTEND_8         = program.SIGN_EXTEND_8
+	SIGN_EXTEND_16        = program.SIGN_EXTEND_16
+	ZERO_EXTEND_16        = program.ZERO_EXTEND_16
+	REVERSE_BYTES         = program.REVERSE_BYTES
 
-// A.5.9. Instructions with Arguments of Two Registers & One Immediate.
-const (
-	STORE_IND_U8      = 120
-	STORE_IND_U16     = 121
-	STORE_IND_U32     = 122
-	STORE_IND_U64     = 123
-	LOAD_IND_U8       = 124
-	LOAD_IND_I8       = 125
-	LOAD_IND_U16      = 126
-	LOAD_IND_I16      = 127
-	LOAD_IND_U32      = 128
-	LOAD_IND_I32      = 129
-	LOAD_IND_U64      = 130
-	ADD_IMM_32        = 131
-	AND_IMM           = 132
-	XOR_IMM           = 133
-	OR_IMM            = 134
-	MUL_IMM_32        = 135
-	SET_LT_U_IMM      = 136
-	SET_LT_S_IMM      = 137
-	SHLO_L_IMM_32     = 138
-	SHLO_R_IMM_32     = 139
-	SHAR_R_IMM_32     = 140
-	NEG_ADD_IMM_32    = 141
-	SET_GT_U_IMM      = 142
-	SET_GT_S_IMM      = 143
-	SHLO_L_IMM_ALT_32 = 144
-	SHLO_R_IMM_ALT_32 = 145
-	SHAR_R_IMM_ALT_32 = 146
-	CMOV_IZ_IMM       = 147
-	CMOV_NZ_IMM       = 148
-	ADD_IMM_64        = 149
-	MUL_IMM_64        = 150
-	SHLO_L_IMM_64     = 151
-	SHLO_R_IMM_64     = 152
-	SHAR_R_IMM_64     = 153
-	NEG_ADD_IMM_64    = 154
-	SHLO_L_IMM_ALT_64 = 155
-	SHLO_R_IMM_ALT_64 = 156
-	SHAR_R_IMM_ALT_64 = 157
-	ROT_R_64_IMM      = 158
-	ROT_R_64_IMM_ALT  = 159
-	ROT_R_32_IMM      = 160
-	ROT_R_32_IMM_ALT  = 161
-)
+	// A.5.10. Instructions with Arguments of Two Registers & One Immediate
+	STORE_IND_U8      = program.STORE_IND_U8
+	STORE_IND_U16     = program.STORE_IND_U16
+	STORE_IND_U32     = program.STORE_IND_U32
+	STORE_IND_U64     = program.STORE_IND_U64
+	LOAD_IND_U8       = program.LOAD_IND_U8
+	LOAD_IND_I8       = program.LOAD_IND_I8
+	LOAD_IND_U16      = program.LOAD_IND_U16
+	LOAD_IND_I16      = program.LOAD_IND_I16
+	LOAD_IND_U32      = program.LOAD_IND_U32
+	LOAD_IND_I32      = program.LOAD_IND_I32
+	LOAD_IND_U64      = program.LOAD_IND_U64
+	ADD_IMM_32        = program.ADD_IMM_32
+	AND_IMM           = program.AND_IMM
+	XOR_IMM           = program.XOR_IMM
+	OR_IMM            = program.OR_IMM
+	MUL_IMM_32        = program.MUL_IMM_32
+	SET_LT_U_IMM      = program.SET_LT_U_IMM
+	SET_LT_S_IMM      = program.SET_LT_S_IMM
+	SHLO_L_IMM_32     = program.SHLO_L_IMM_32
+	SHLO_R_IMM_32     = program.SHLO_R_IMM_32
+	SHAR_R_IMM_32     = program.SHAR_R_IMM_32
+	NEG_ADD_IMM_32    = program.NEG_ADD_IMM_32
+	SET_GT_U_IMM      = program.SET_GT_U_IMM
+	SET_GT_S_IMM      = program.SET_GT_S_IMM
+	SHLO_L_IMM_ALT_32 = program.SHLO_L_IMM_ALT_32
+	SHLO_R_IMM_ALT_32 = program.SHLO_R_IMM_ALT_32
+	SHAR_R_IMM_ALT_32 = program.SHAR_R_IMM_ALT_32
+	CMOV_IZ_IMM       = program.CMOV_IZ_IMM
+	CMOV_NZ_IMM       = program.CMOV_NZ_IMM
+	ADD_IMM_64        = program.ADD_IMM_64
+	MUL_IMM_64        = program.MUL_IMM_64
+	SHLO_L_IMM_64     = program.SHLO_L_IMM_64
+	SHLO_R_IMM_64     = program.SHLO_R_IMM_64
+	SHAR_R_IMM_64     = program.SHAR_R_IMM_64
+	NEG_ADD_IMM_64    = program.NEG_ADD_IMM_64
+	SHLO_L_IMM_ALT_64 = program.SHLO_L_IMM_ALT_64
+	SHLO_R_IMM_ALT_64 = program.SHLO_R_IMM_ALT_64
+	SHAR_R_IMM_ALT_64 = program.SHAR_R_IMM_ALT_64
+	ROT_R_64_IMM      = program.ROT_R_64_IMM
+	ROT_R_64_IMM_ALT  = program.ROT_R_64_IMM_ALT
+	ROT_R_32_IMM      = program.ROT_R_32_IMM
+	ROT_R_32_IMM_ALT  = program.ROT_R_32_IMM_ALT
 
-// A.5.11. Instructions with Arguments of Two Registers & One Offset.
-const (
-	BRANCH_EQ   = 170
-	BRANCH_NE   = 171
-	BRANCH_LT_U = 172
-	BRANCH_LT_S = 173
-	BRANCH_GE_U = 174
-	BRANCH_GE_S = 175
-)
+	// A.5.11. Instructions with Arguments of Two Registers & One Offset
+	BRANCH_EQ   = program.BRANCH_EQ
+	BRANCH_NE   = program.BRANCH_NE
+	BRANCH_LT_U = program.BRANCH_LT_U
+	BRANCH_LT_S = program.BRANCH_LT_S
+	BRANCH_GE_U = program.BRANCH_GE_U
+	BRANCH_GE_S = program.BRANCH_GE_S
 
-// A.5.12. Instruction with Arguments of Two Registers and Two Immediates.
-const (
-	LOAD_IMM_JUMP_IND = 180
-)
+	// A.5.12. Instruction with Arguments of Two Registers and Two Immediates
+	LOAD_IMM_JUMP_IND = program.LOAD_IMM_JUMP_IND
 
-// A.5.13. Instructions with Arguments of Three Registers.
-const (
-	ADD_32        = 190
-	SUB_32        = 191
-	MUL_32        = 192
-	DIV_U_32      = 193
-	DIV_S_32      = 194
-	REM_U_32      = 195
-	REM_S_32      = 196
-	SHLO_L_32     = 197
-	SHLO_R_32     = 198
-	SHAR_R_32     = 199
-	ADD_64        = 200
-	SUB_64        = 201
-	MUL_64        = 202
-	DIV_U_64      = 203
-	DIV_S_64      = 204
-	REM_U_64      = 205
-	REM_S_64      = 206
-	SHLO_L_64     = 207
-	SHLO_R_64     = 208
-	SHAR_R_64     = 209
-	AND           = 210
-	XOR           = 211
-	OR            = 212
-	MUL_UPPER_S_S = 213
-	MUL_UPPER_U_U = 214
-	MUL_UPPER_S_U = 215
-	SET_LT_U      = 216
-	SET_LT_S      = 217
-	CMOV_IZ       = 218
-	CMOV_NZ       = 219
-	ROT_L_64      = 220
-	ROT_L_32      = 221
-	ROT_R_64      = 222
-	ROT_R_32      = 223
-	AND_INV       = 224
-	OR_INV        = 225
-	XNOR          = 226
-	MAX           = 227
-	MAX_U         = 228
-	MIN           = 229
-	MIN_U         = 230
+	// A.5.13. Instructions with Arguments of Three Registers
+	ADD_32        = program.ADD_32
+	SUB_32        = program.SUB_32
+	MUL_32        = program.MUL_32
+	DIV_U_32      = program.DIV_U_32
+	DIV_S_32      = program.DIV_S_32
+	REM_U_32      = program.REM_U_32
+	REM_S_32      = program.REM_S_32
+	SHLO_L_32     = program.SHLO_L_32
+	SHLO_R_32     = program.SHLO_R_32
+	SHAR_R_32     = program.SHAR_R_32
+	ADD_64        = program.ADD_64
+	SUB_64        = program.SUB_64
+	MUL_64        = program.MUL_64
+	DIV_U_64      = program.DIV_U_64
+	DIV_S_64      = program.DIV_S_64
+	REM_U_64      = program.REM_U_64
+	REM_S_64      = program.REM_S_64
+	SHLO_L_64     = program.SHLO_L_64
+	SHLO_R_64     = program.SHLO_R_64
+	SHAR_R_64     = program.SHAR_R_64
+	AND           = program.AND
+	XOR           = program.XOR
+	OR            = program.OR
+	MUL_UPPER_S_S = program.MUL_UPPER_S_S
+	MUL_UPPER_U_U = program.MUL_UPPER_U_U
+	MUL_UPPER_S_U = program.MUL_UPPER_S_U
+	SET_LT_U      = program.SET_LT_U
+	SET_LT_S      = program.SET_LT_S
+	CMOV_IZ       = program.CMOV_IZ
+	CMOV_NZ       = program.CMOV_NZ
+	ROT_L_64      = program.ROT_L_64
+	ROT_L_32      = program.ROT_L_32
+	ROT_R_64      = program.ROT_R_64
+	ROT_R_32      = program.ROT_R_32
+	AND_INV       = program.AND_INV
+	OR_INV        = program.OR_INV
+	XNOR          = program.XNOR
+	MAX           = program.MAX
+	MAX_U         = program.MAX_U
+	MIN           = program.MIN
+	MIN_U         = program.MIN_U
 )
 
 // Appendix B - Host function

@@ -56,6 +56,10 @@ struct compiler {
     uint32_t x86_to_pvm_count;
     uint32_t x86_to_pvm_capacity;
 
+    // Direct lookup table for PVM PC -> x86 offset (UINT32_MAX means invalid)
+    uint32_t* pvm_to_x86_direct;
+    uint32_t pvm_to_x86_direct_size;
+
     // Internal compilation state
     void* basic_blocks_map;  // Hash map of basic blocks (opaque)
     x86_codegen_t codegen;   // Code generation context
