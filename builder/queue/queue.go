@@ -92,6 +92,15 @@ type QueueItem struct {
 	WPHash      common.Hash              // Work package hash (computed after BuildBundle)
 	SubmittedAt time.Time                // When item was submitted (zero if not submitted)
 	Status      WorkPackageBundleStatus  // Current status
+
+	// OriginalExtrinsics stores the transaction extrinsics BEFORE Verkle witness prepending.
+	// Used for rebuilding bundles on resubmission - BuildBundle prepends a fresh witness,
+	// so we need the original txs to avoid double-prepending.
+	OriginalExtrinsics []types.ExtrinsicsBlobs
+
+	// OriginalWorkItemExtrinsics stores the WorkItems[].Extrinsics metadata BEFORE Verkle witness prepending.
+	// BuildBundle also prepends metadata entries, so we need to restore the original metadata on rebuild.
+	OriginalWorkItemExtrinsics [][]types.WorkItemExtrinsic
 }
 
 // QueueState manages the work package submission pipeline
@@ -199,6 +208,51 @@ func (qs *QueueState) Enqueue(bundle *types.WorkPackageBundle) (uint64, error) {
 	qs.HashByVer[blockNumber][1] = item.WPHash
 
 	log.Info(log.Node, "Queue: Enqueued work package",
+		"service", qs.serviceID,
+		"blockNumber", blockNumber,
+		"wpHash", item.WPHash.Hex(),
+		"queueSize", len(qs.Queued))
+
+	return blockNumber, nil
+}
+
+// EnqueueWithOriginalExtrinsics adds a new bundle to the queue along with original extrinsics
+// The originalExtrinsics are the transaction extrinsics BEFORE Verkle witness prepending,
+// used for rebuilding bundles on resubmission without double-prepending the witness.
+// The originalWorkItemExtrinsics are the WorkItems[].Extrinsics metadata BEFORE Verkle witness prepending.
+func (qs *QueueState) EnqueueWithOriginalExtrinsics(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic) (uint64, error) {
+	qs.mu.Lock()
+	defer qs.mu.Unlock()
+
+	if len(qs.Queued) >= qs.config.MaxQueueDepth {
+		return 0, fmt.Errorf("queue full: %d items queued (max %d)", len(qs.Queued), qs.config.MaxQueueDepth)
+	}
+
+	blockNumber := qs.nextBlockNumber
+	qs.nextBlockNumber++
+
+	item := &QueueItem{
+		BlockNumber:                blockNumber,
+		Version:                    1,
+		EventID:                    qs.nextEventID(),
+		AddTS:                      time.Now(),
+		Bundle:                     bundle,
+		WPHash:                     bundle.WorkPackage.Hash(),
+		Status:                     StatusQueued,
+		OriginalExtrinsics:         originalExtrinsics,
+		OriginalWorkItemExtrinsics: originalWorkItemExtrinsics,
+	}
+
+	qs.Queued[blockNumber] = item
+	qs.Status[blockNumber] = StatusQueued
+	qs.CurrentVer[blockNumber] = 1
+
+	if qs.HashByVer[blockNumber] == nil {
+		qs.HashByVer[blockNumber] = make(map[int]common.Hash)
+	}
+	qs.HashByVer[blockNumber][1] = item.WPHash
+
+	log.Info(log.Node, "Queue: Enqueued work package with original extrinsics",
 		"service", qs.serviceID,
 		"blockNumber", blockNumber,
 		"wpHash", item.WPHash.Hex(),

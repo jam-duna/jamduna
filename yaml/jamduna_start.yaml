@@ -1,0 +1,111 @@
+---
+# Play 1: Gather facts from all validators (to get their IPs)
+- name: Gather facts from all validators
+  hosts: jam
+  gather_facts: true
+
+# Play 2: Generate config and build on localhost
+- name: Build JAM locally on polkavm
+  hosts: localhost
+  connection: local
+  vars:
+    jam_root: /root/go/src/github.com/colorfulnotion/jam
+  tasks:
+    - name: Generate distributed config from discovered IPs
+      template:
+        src: "{{ jam_root }}/yaml/distributed-config.json.j2"
+        dest: "{{ jam_root }}/chainspecs/distributed-config.json"
+        mode: '0644'
+
+    - name: Build jamduna binary
+      command: make jam
+      args:
+        chdir: "{{ jam_root }}"
+
+    - name: Generate distributed chainspec
+      command: make duna_spec_remote
+      args:
+        chdir: "{{ jam_root }}"
+
+    - name: Start telemetry viewer (listener + web UI)
+      command: make start_telemetry
+      args:
+        chdir: "{{ jam_root }}"
+
+# Play 3: Stop all validators and prepare (parallel)
+- name: Prepare all validators
+  hosts: jam
+  become: true
+  vars:
+    jam_root: /root/go/src/github.com/colorfulnotion/jam
+    jam_bin: "{{ jam_root }}/bin/linux-amd64/jamduna"
+    chainspec_dir: "{{ jam_root }}/chainspecs"
+    log_dir: "{{ jam_root }}/logs"
+
+  tasks:
+    - name: Stop existing jamduna
+      shell: pkill -f "jamduna run" || true
+      failed_when: false
+      changed_when: false
+
+    - name: Clean old validator data
+      file:
+        path: "/root/.jamduna/jam-{{ validator_id }}"
+        state: absent
+
+    - name: Ensure directory structure exists
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ jam_root }}"
+        - "{{ jam_root }}/bin/linux-amd64"
+        - "{{ chainspec_dir }}"
+        - "{{ log_dir }}"
+
+    - name: Copy jamduna binary
+      copy:
+        src: "{{ jam_bin }}"
+        dest: "{{ jam_bin }}"
+        mode: '0755'
+
+    - name: Copy chainspecs directory
+      copy:
+        src: "{{ chainspec_dir }}/"
+        dest: "{{ chainspec_dir }}/"
+        mode: '0644'
+        directory_mode: '0755'
+
+    - name: Copy validator seed
+      copy:
+        src: "/root/.jamduna/keys/seed_{{ validator_id }}"
+        dest: "/root/.jamduna/keys/seed_{{ validator_id }}"
+        mode: '0600'
+
+    - name: Remove old logs
+      file:
+        path: "{{ log_dir }}/jamduna-{{ validator_id }}.log"
+        state: absent
+
+# Play 4: Start all validators together (parallel)
+- name: Start all validators simultaneously
+  hosts: jam
+  become: true
+  vars:
+    jam_root: /root/go/src/github.com/colorfulnotion/jam
+    jam_bin: "{{ jam_root }}/bin/linux-amd64/jamduna"
+    chainspec_file: "{{ jam_root }}/chainspecs/jamduna-distributed-spec.json"
+    log_dir: "{{ jam_root }}/logs"
+    telemetry_server: "10.128.0.3:9999"
+
+  tasks:
+    - name: Start jamduna validator
+      shell: >
+        nohup {{ jam_bin }} run
+        --dev-validator {{ validator_id }}
+        --rpc-port {{ 19800 + validator_id }}
+        --chain {{ chainspec_file }}
+        --pvm-backend interpreter
+        --telemetry {{ telemetry_server }}
+        > {{ log_dir }}/jamduna-{{ validator_id }}.log 2>&1 &

@@ -4,8 +4,6 @@ UNAME_M := $(shell uname -m)
 SRC := jam.go
 
 NUM_NODES ?= 6
-DEFAULT_PORT ?= 40000
-SINGLE_NODE_PORT ?= 40005
 BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 JAM_START_TIME ?= $(shell \
 	if date --version >/dev/null 2>&1; then \
@@ -60,11 +58,19 @@ else ifeq ($(UNAME_S),Darwin)
   endif
 endif
 
-.PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean jam_without_ffi_build run_parallel_jam kill_parallel_jam run_jam build_remote_nodes run_jam_remote_nodes da jamweb validatetraces testnet init-submodules update-submodules update-pvm-submodule update-services-submodule evm_jamtest algo_jamtest safrole_jamtest railgun telemetry telemetry_viewer kill_telemetry restart_telemetry
+.PHONY: bls bandersnatch ffi jam clean beauty fmt-check allcoverage coveragetest coverage cleancoverage clean jam_without_ffi_build run_parallel_jam kill_parallel_jam run_jam build_remote_nodes run_jam_remote_nodes da jamweb validatetraces testnet init-submodules update-submodules update-pvm-submodule update-services-submodule evm_jamtest algo_jamtest safrole_jamtest telemetry telemetry_viewer kill_telemetry restart_telemetry
 
-# Telemetry settings
+# ----------------------------------------
+# Port Configuration
+# ----------------------------------------
+DEFAULT_PORT ?= 40000
+SINGLE_NODE_PORT ?= $(shell echo $$(($(DEFAULT_PORT) + 5)))
+RPC_BASE_PORT ?= 19800
+EVM_RPC_PORT ?= 8600
 TELEMETRY_PORT ?= 9999
 TELEMETRY_WEB_PORT ?= 8088
+
+# Telemetry settings
 TELEMETRY_LOG ?= logs/telemetry.log
 
 
@@ -149,29 +155,29 @@ spin_localclient: jam  jam_clean spin_6
 spin_6:
 	@rm -rf ${HOME}/.jamduna/jam-*
 	@for i in 0 1 2 3 4 5; do \
-		$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator $$i  --rpc-port=$$((19800 + $$i)) --chain ${CHAINSPEC} --pvm-backend $(PVM_BACKEND)  >logs/jamduna-$$i.log 2>&1 & \
+		$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator $$i  --rpc-port=$$(($(RPC_BASE_PORT) + $$i)) --chain ${CHAINSPEC} --pvm-backend $(PVM_BACKEND)  >logs/jamduna-$$i.log 2>&1 & \
 	done
 
 spin_5:
 	@rm -rf ${HOME}/.jamduna/jam-*
 	@for i in 1 2 3 4 5; do \
-		$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator $$i  --rpc-port=$$((19800 + $$i)) --chain ${CHAINSPEC} --pvm-backend $(PVM_BACKEND)  >logs/jamduna-$$i.log 2>&1 & \
+		$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator $$i  --rpc-port=$$(($(RPC_BASE_PORT) + $$i)) --chain ${CHAINSPEC} --pvm-backend $(PVM_BACKEND)  >logs/jamduna-$$i.log 2>&1 & \
 	done
 
 spin_0:
 	@for i in 0; do \
-		RUST_LOG=polkavm=trace,jam_node=trace $(POLKAJAM_BIN) --chain ${CHAINSPEC} run --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) >logs/polkajam-$$i.log 2>&1 & \
+		RUST_LOG=polkavm=trace,jam_node=trace $(POLKAJAM_BIN) --chain ${CHAINSPEC} run --temp --dev-validator $$i --rpc-port=$$(($(RPC_BASE_PORT) + $$i)) >logs/polkajam-$$i.log 2>&1 & \
 	done
 
 run_builder:
 	@rm -rf ${HOME}/.jamduna/jam-*
-	@$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator 6 --role builder --rpc-port=19806 --chain ${CHAINSPEC} --pvm-backend $(PVM_BACKEND) --debug rotation,guarantees --telemetry localhost:$(TELEMETRY_PORT)
+	@$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator 6 --role builder --rpc-port=$$(($(RPC_BASE_PORT) + 6)) --chain ${CHAINSPEC} --pvm-backend $(PVM_BACKEND) --debug rotation,guarantees --telemetry localhost:$(TELEMETRY_PORT)
 
 run_1:
 	@mkdir -p logs
 	@rm -rf ${HOME}/.jamduna/jam-*
 	@echo ">> Starting jamduna validator 5..."
-	@$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator 5 --rpc-port=19805 --chain ${CHAINSPEC} --pvm-backend $(PVM_BACKEND) --debug rotation,guarantees --telemetry localhost:$(TELEMETRY_PORT) >logs/jamduna-5.log 2>&1 &
+	@$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator 5 --rpc-port=$$(($(RPC_BASE_PORT) + 5)) --chain ${CHAINSPEC} --pvm-backend $(PVM_BACKEND) --debug rotation,guarantees --telemetry localhost:$(TELEMETRY_PORT) >logs/jamduna-5.log 2>&1 &
 	@sleep 1
 	@if pgrep -f "$(BINARY).*dev-validator 5" >/dev/null; then \
 		echo "✅ jamduna validator 5 started (log: logs/jamduna-5.log)"; \
@@ -188,8 +194,8 @@ run_5:
 	fi
 	@echo ">> Starting polkajam validators 0-4..."
 	@for i in 0 1 2 3 4; do \
-		echo "   Starting validator $$i on port $$((19800 + $$i))..."; \
-		RUST_LOG=chain-core=debug,jam_node=trace $(POLKAJAM_BIN) --chain ${CHAINSPEC} run --pvm-backend $(PVM_BACKEND) --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) --telemetry localhost:$(TELEMETRY_PORT) >logs/polkajam-$$i.log 2>&1 & \
+		echo "   Starting validator $$i on port $$(($(RPC_BASE_PORT) + $$i))..."; \
+		RUST_LOG=chain-core=debug,jam_node=trace $(POLKAJAM_BIN) --chain ${CHAINSPEC} run --pvm-backend $(PVM_BACKEND) --temp --dev-validator $$i --rpc-port=$$(($(RPC_BASE_PORT) + $$i)) --telemetry localhost:$(TELEMETRY_PORT) >logs/polkajam-$$i.log 2>&1 & \
 	done
 	@sleep 2
 	@started=$$(pgrep -f "$(POLKAJAM_BIN).*dev-validator" 2>/dev/null | wc -l | tr -d ' '); \
@@ -213,7 +219,7 @@ run_6:
 	fi
 	@echo ">> Starting polkajam validators 0-5..."
 	@for i in 0 1 2 3 4 5; do \
-		RUST_LOG=chain-core=debug,jam_node=trace $(POLKAJAM_BIN) --chain ${CHAINSPEC} run --pvm-backend $(PVM_BACKEND) --temp --dev-validator $$i --rpc-port=$$((19800 + $$i)) --telemetry localhost:$(TELEMETRY_PORT) >logs/polkajam-$$i.log 2>&1 & \
+		RUST_LOG=chain-core=debug,jam_node=trace $(POLKAJAM_BIN) --chain ${CHAINSPEC} run --pvm-backend $(PVM_BACKEND) --temp --dev-validator $$i --rpc-port=$$(($(RPC_BASE_PORT) + $$i)) --telemetry localhost:$(TELEMETRY_PORT) >logs/polkajam-$$i.log 2>&1 & \
 	done
 	@sleep 2
 	@started=$$(pgrep -f "$(POLKAJAM_BIN).*dev-validator" 2>/dev/null | wc -l | tr -d ' '); \
@@ -243,13 +249,37 @@ run_evm_builder:
 	go build -o $(OUTPUT_DIR)/$(ARCH)/evm-builder ./cmd/evm-builder
 	@echo "Stopping any existing EVM Builder..."
 	@ps aux | grep 'bin/.*[e]vm-builder' | awk '{print $$2}' | while read pid; do kill $$pid 2>/dev/null || true; done
+	@mkdir -p logs
 	@sleep 1
 	@echo "Starting EVM Builder..."
-	@$(OUTPUT_DIR)/$(ARCH)/evm-builder run --dev-validator 6 --chain $(CHAINSPEC) --pvm-backend $(PVM_BACKEND) --debug rotation,guarantees --evm-rpc-port 8600 --telemetry localhost:$(TELEMETRY_PORT)
+	@echo "EVM RPC available at: http://localhost:$(EVM_RPC_PORT)"
+	@$(OUTPUT_DIR)/$(ARCH)/evm-builder run --dev-validator 6 --chain $(CHAINSPEC) --pvm-backend $(PVM_BACKEND) --debug rotation,guarantees --evm-rpc-port $(EVM_RPC_PORT) --telemetry localhost:$(TELEMETRY_PORT) 2>&1 | tee logs/evm-builder.log
+
+run_evm_builder_remote: evm-builder
+	@echo "Stopping any existing EVM Builder..."
+	@ps aux | grep 'bin/.*[e]vm-builder' | awk '{print $$2}' | while read pid; do kill $$pid 2>/dev/null || true; done
+	@rm -rf /root/.jamduna/jam-6
+	@mkdir -p logs
+	@sleep 1
+	@echo "Starting EVM Builder (distributed mode)..."
+	@echo "EVM RPC available at: http://localhost:$(EVM_RPC_PORT)"
+	@$(OUTPUT_DIR)/$(ARCH)/evm-builder run --dev-validator 6 --chain chainspecs/jamduna-distributed-spec.json --pvm-backend $(PVM_BACKEND) --debug rotation,guarantees --evm-rpc-port $(EVM_RPC_PORT) --telemetry localhost:$(TELEMETRY_PORT) 2>&1 | tee logs/remote-evm-builder.log
 
 duna_spec: jam
-	@echo "Generating Duna chainspec..."
+	@echo "Generating Duna chainspec (local)..."
 	./$(OUTPUT_DIR)/$(ARCH)/$(BINARY) gen-spec chainspecs/dev-config.json chainspecs/jamduna-spec.json
+
+duna_spec_remote: jam
+	@echo "Generating Duna chainspec (distributed)..."
+	./$(OUTPUT_DIR)/$(ARCH)/$(BINARY) gen-spec chainspecs/distributed-config.json chainspecs/jamduna-distributed-spec.json
+
+stop_remoteclient_jam:
+	@echo "Stopping all remote validators..."
+	ansible-playbook -i yaml/hosts.txt yaml/jamduna_stop.yaml
+
+run_remoteclient_jam:
+	@echo "Starting all remote validators..."
+	ansible-playbook -i yaml/hosts.txt yaml/jamduna_start.yaml
 
 polka_spec: jam
 	@echo "Generating Polka chainspec..."
@@ -385,7 +415,7 @@ run_polkajam_all:
 		PORT=$$(($(DEFAULT_PORT) + $$i)); \
 		V_IDX=$$i; \
 		echo ">> Starting instance $$V_IDX on port $$PORT..."; \
-		$(POLKAJAM_BIN) --chain $(CHAINSPEC) --pvm-backend $(PVM_BACKEND) run  --temp  --dev-validator $$V_IDX --rpc-port=$$((19800 + $$i)) & \
+		$(POLKAJAM_BIN) --chain $(CHAINSPEC) --pvm-backend $(PVM_BACKEND) run  --temp  --dev-validator $$V_IDX --rpc-port=$$(($(RPC_BASE_PORT) + $$i)) & \
 	done; \
 
 run_localclient: kill jam jam_clean start_telemetry
@@ -396,7 +426,7 @@ run_localclient: kill jam jam_clean start_telemetry
 	@echo "Local JAM network started (mixed mode)"
 	@echo "  Validators 0-4: polkajam (Rust)"
 	@echo "  Validator 5:    jamduna (Go)"
-	@echo "  Telemetry:      http://localhost:8088"
+	@echo "  Telemetry:      http://localhost:$(TELEMETRY_WEB_PORT)"
 	@echo "  Logs:           logs/*.log"
 	@echo "========================================"
 	@echo ""
@@ -635,29 +665,7 @@ compare_stf:
 	@echo "Building compare_stf tool..."
 	go build -o bin/compare_stf scripts/compare_stf.go
 
-# JAM Railgun Service
-railgun:
-	@echo "Building Railgun privacy service..."
-	@echo "→ Checking Rust code..."
-	@cd services/railgun && cargo check --lib
-	@echo "✓ Railgun service code checked successfully"
-	@echo ""
-	@echo "🔫 Railgun service structure ready"
-	@echo "   Based on RAILGUN.md specification with all security fixes:"
-	@echo "   - Fee tally DELTA writes (prevents parallel conflicts)"
-	@echo "   - Gas limit binding in withdraw proofs"
-	@echo "   - 64-bit range constraints (prevents modulus wrap)"
-	@echo "   - has_change boolean flag (no sentinel collision)"
-	@echo "   - Encrypted payload enforcement"
-	@echo "   - Tree capacity overflow protection"
-	@echo ""
-	@echo "   Entry points:"
-	@echo "   - refine: ZK proof verification + state validation"
-	@echo "   - accumulate: Apply writes + process deposits"
-	@echo ""
-	@echo "   Note: Full RISC-V compilation requires polkavm target configuration"
-
-.PHONY: compare_stf railgun
+.PHONY: compare_stf
 
 # ----------------------------------------
 # Telemetry targets
@@ -681,7 +689,7 @@ start_telemetry: telemetry_viewer
 	@ps aux | grep 'bin/.*[t]elemetryViewer' | awk '{print $$2}' | while read pid; do kill $$pid 2>/dev/null || true; done
 	@$(OUTPUT_DIR)/telemetryViewer -telemetry 0.0.0.0:$(TELEMETRY_PORT) -web 0.0.0.0:$(TELEMETRY_WEB_PORT) -log $(TELEMETRY_LOG) >logs/telemetry-viewer.log 2>&1 &
 	@sleep 1
-	@echo "Telemetry viewer started: http://localhost:$(TELEMETRY_WEB_PORT)"
+	@echo "Telemetry viewer started: http://localhost:$(TELEMETRY_WEB_PORT) | http://polkavm.jamduna.org:$(TELEMETRY_WEB_PORT)"
 
 # Kill telemetry processes
 kill_telemetry:

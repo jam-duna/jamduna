@@ -1,0 +1,13 @@
+{
+    "id": "jamduna",
+    "genesis_validators": [
+{% for host in groups['jam'] | sort %}
+        {
+            "peer_id": "{{ hostvars[host]['peer_id'] }}",
+            "bandersnatch": "{{ hostvars[host]['bandersnatch'] }}",
+            "net_addr": "{{ hostvars[host]['ansible_default_ipv4']['address'] }}:{{ 40000 + hostvars[host]['validator_id'] | int }}"
+        }{% if not loop.last %},{% endif %}
+
+{% endfor %}
+    ]
+}

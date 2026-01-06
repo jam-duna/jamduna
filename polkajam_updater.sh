@@ -4,6 +4,13 @@ set -euo pipefail
 
 GITHUB_API_URL="https://api.github.com/repos/paritytech/polkajam-releases/releases"
 
+# Curl timeout settings
+CURL_CONNECT_TIMEOUT=10
+CURL_API_MAX_TIME=30
+CURL_DOWNLOAD_MAX_TIME=600  # 10 minutes for large downloads
+CURL_RETRY_COUNT=3
+CURL_RETRY_DELAY=2
+
 if [ -z "${JAM_PATH:-}" ]; then
     echo "Error: Environment variable JAM_PATH is not set." >&2
     echo "Please set it to your Jam installation directory, e.g.:" >&2
@@ -65,6 +72,50 @@ check_dependencies() {
     if [ "$missing_deps" -eq 1 ]; then
         exit 1
     fi
+}
+
+# Robust curl wrapper with retries and timeouts
+# Usage: curl_fetch URL [output_file]
+# If output_file is provided, downloads to file; otherwise outputs to stdout
+curl_fetch() {
+    local url="$1"
+    local output_file="${2:-}"
+    local attempt=1
+    local result
+
+    while [ $attempt -le $CURL_RETRY_COUNT ]; do
+        if [ -n "$output_file" ]; then
+            # Download to file with progress bar
+            if curl -L \
+                --connect-timeout "$CURL_CONNECT_TIMEOUT" \
+                --max-time "$CURL_DOWNLOAD_MAX_TIME" \
+                --retry 2 \
+                --retry-delay 1 \
+                --fail \
+                --progress-bar \
+                "$url" -o "$output_file" 2>&1; then
+                return 0
+            fi
+        else
+            # Fetch to stdout (API calls)
+            result=$(curl -sS \
+                --connect-timeout "$CURL_CONNECT_TIMEOUT" \
+                --max-time "$CURL_API_MAX_TIME" \
+                --retry 2 \
+                --retry-delay 1 \
+                --fail \
+                "$url" 2>&1) && { echo "$result"; return 0; }
+        fi
+
+        if [ $attempt -lt $CURL_RETRY_COUNT ]; then
+            echo "  Attempt $attempt failed, retrying in ${CURL_RETRY_DELAY}s..." >&2
+            sleep "$CURL_RETRY_DELAY"
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    echo "Error: Failed to fetch $url after $CURL_RETRY_COUNT attempts" >&2
+    return 1
 }
 
 determine_platform_or_use_env() {
@@ -181,7 +232,19 @@ fetch_and_store_release() {
     mkdir -p "$RUN_SPECIFIC_EXTRACTION_DIR"
 
     echo "Fetching release information..."
-    ALL_RELEASES_JSON=$(curl -s "$GITHUB_API_URL")
+    if ! ALL_RELEASES_JSON=$(curl_fetch "$GITHUB_API_URL"); then
+        echo "Error: Failed to fetch release information from GitHub API." >&2
+        PROCESSED_RELEASE_TAG=""
+        return 1
+    fi
+
+    # Validate we got valid JSON
+    if ! echo "$ALL_RELEASES_JSON" | jq -e '.' >/dev/null 2>&1; then
+        echo "Error: Invalid JSON response from GitHub API." >&2
+        echo "Response: ${ALL_RELEASES_JSON:0:200}..." >&2
+        PROCESSED_RELEASE_TAG=""
+        return 1
+    fi
 
     if [ -n "$release_tag_to_fetch" ]; then
         release_json=$(echo "$ALL_RELEASES_JSON" | jq -r --arg TAG "$release_tag_to_fetch" '.[] | select(.tag_name == $TAG)')
@@ -226,7 +289,11 @@ fetch_and_store_release() {
 
     download_path="$RUN_SPECIFIC_DOWNLOAD_DIR/$asset_filename"
     echo "Downloading $asset_filename..."
-    curl -L --progress-bar "$asset_url" -o "$download_path" || { echo "Error: Download failed." >&2; PROCESSED_RELEASE_TAG=""; return 1; }
+    if ! curl_fetch "$asset_url" "$download_path"; then
+        echo "Error: Download failed after retries." >&2
+        PROCESSED_RELEASE_TAG=""
+        return 1
+    fi
     echo "Download complete."
 
     echo "Extracting $asset_filename..."
@@ -355,7 +422,23 @@ process_and_deploy_specific_tag() {
 
 list_remote_releases_and_select_for_processing() {
     echo "Fetching available releases from GitHub..."
-    ALL_RELEASES_JSON=$(curl -s "$GITHUB_API_URL")
+    if ! ALL_RELEASES_JSON=$(curl_fetch "$GITHUB_API_URL"); then
+        echo "Error: Failed to fetch releases from GitHub API." >&2
+        return 1
+    fi
+
+    # Validate we got valid JSON (not an error message)
+    if ! echo "$ALL_RELEASES_JSON" | jq -e '.' >/dev/null 2>&1; then
+        echo "Error: Invalid JSON response from GitHub API." >&2
+        return 1
+    fi
+
+    # Check if we got an empty array or error response
+    if [ "$(echo "$ALL_RELEASES_JSON" | jq -r 'if type == "array" then length else 0 end')" -eq 0 ]; then
+        echo "Error: No releases found or API returned an error." >&2
+        echo "$ALL_RELEASES_JSON" | jq -r '.message // empty' >&2
+        return 1
+    fi
     
     local stable_releases=()
     while IFS='|' read -r tag timestamp; do

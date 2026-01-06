@@ -68,6 +68,7 @@ jobs:
           make auth_copy
           make fib
           make algo
+          make orchard
           echo "Listing PVM files:"
           find services -name "*.pvm" || true
 

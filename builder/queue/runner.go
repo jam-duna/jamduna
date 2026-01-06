@@ -220,6 +220,13 @@ func (r *Runner) EnqueueBundle(bundle *types.WorkPackageBundle) (uint64, error) 
 	return r.queue.Enqueue(bundle)
 }
 
+// EnqueueBundleWithOriginalExtrinsics enqueues a bundle with original transaction extrinsics and metadata
+// The originalExtrinsics are needed for rebuilding on resubmission (to avoid double-prepending Verkle witness)
+// The originalWorkItemExtrinsics are needed to restore WorkItems[].Extrinsics metadata before rebuilding
+func (r *Runner) EnqueueBundleWithOriginalExtrinsics(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic) (uint64, error) {
+	return r.queue.EnqueueWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics)
+}
+
 // HandleGuaranteed processes a guarantee event
 func (r *Runner) HandleGuaranteed(wpHash common.Hash) {
 	r.queue.OnGuaranteed(wpHash)

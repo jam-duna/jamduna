@@ -130,3 +130,4 @@ services/railgun/keys/railgun_spend.pk
 services/railgun/keys/railgun_withdraw.pk
 services/railgun/keys/railgun_spend.pk
 orchard-builder
+evm-builder

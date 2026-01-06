@@ -201,8 +201,43 @@ func main() {
 				}
 				// Update the work package with new refine context
 				item.Bundle.WorkPackage.RefineContext = refineCtx
-				// Rebuild the bundle
-				bundle, _, err := n.BuildBundle(item.Bundle.WorkPackage, item.Bundle.ExtrinsicData, 0, nil)
+
+				// CRITICAL: Restore original WorkItems[].Extrinsics metadata before rebuilding
+				// BuildBundle prepends Verkle witness metadata to this list, so we need to reset it
+				if item.OriginalWorkItemExtrinsics != nil {
+					for i, origExtrinsics := range item.OriginalWorkItemExtrinsics {
+						if i < len(item.Bundle.WorkPackage.WorkItems) {
+							// Deep copy the original metadata
+							item.Bundle.WorkPackage.WorkItems[i].Extrinsics = make([]types.WorkItemExtrinsic, len(origExtrinsics))
+							copy(item.Bundle.WorkPackage.WorkItems[i].Extrinsics, origExtrinsics)
+						}
+					}
+				}
+
+				// Use OriginalExtrinsics (transaction-only, no Verkle witness) for rebuilding
+				// BuildBundle will prepend a fresh Verkle witness with the new RefineContext
+				var extrinsicsForRebuild []types.ExtrinsicsBlobs
+				if item.OriginalExtrinsics == nil {
+					// Fallback: shouldn't happen if EnqueueBundleWithOriginalExtrinsics was used
+					log.Warn(log.Node, "buildBundleFunc: OriginalExtrinsics is nil, using Bundle.ExtrinsicData (may cause issues)")
+					extrinsicsForRebuild = item.Bundle.ExtrinsicData
+				} else {
+					// CRITICAL: Make a deep copy of OriginalExtrinsics to prevent mutation
+					// BuildBundle modifies extrinsicsBlobs in place (prepends Verkle witness),
+					// so we must copy to avoid corrupting OriginalExtrinsics for future resubmissions
+					extrinsicsForRebuild = make([]types.ExtrinsicsBlobs, len(item.OriginalExtrinsics))
+					for i, blobs := range item.OriginalExtrinsics {
+						extrinsicsForRebuild[i] = make(types.ExtrinsicsBlobs, len(blobs))
+						for j, blob := range blobs {
+							// Deep copy each byte slice
+							extrinsicsForRebuild[i][j] = make([]byte, len(blob))
+							copy(extrinsicsForRebuild[i][j], blob)
+						}
+					}
+				}
+
+				// Rebuild the bundle with transaction-only extrinsics
+				bundle, _, err := n.BuildBundle(item.Bundle.WorkPackage, extrinsicsForRebuild, 0, nil)
 				return bundle, err
 			}
 
@@ -380,12 +415,34 @@ func buildAndEnqueueWorkPackage(n *node.Node, rollup *evmrpc.Rollup, txPool *evm
 	}
 
 	// Prepare work package and extrinsics from pending transactions
+	// extrinsicsBlobs contains ONLY the transaction RLP data (no Verkle witness yet)
 	workPackage, extrinsicsBlobs, err := rollup.PrepareWorkPackage(refineCtx, pendingTxs)
 	if err != nil {
 		return fmt.Errorf("failed to prepare work package: %w", err)
 	}
 
+	// Save original extrinsics BEFORE BuildBundle prepends the Verkle witness
+	// This is needed for rebuilding on resubmission
+	// CRITICAL: Must deep copy to prevent mutation by BuildBundle
+	originalExtrinsics := make([]types.ExtrinsicsBlobs, len(extrinsicsBlobs))
+	for i, blobs := range extrinsicsBlobs {
+		originalExtrinsics[i] = make(types.ExtrinsicsBlobs, len(blobs))
+		for j, blob := range blobs {
+			originalExtrinsics[i][j] = make([]byte, len(blob))
+			copy(originalExtrinsics[i][j], blob)
+		}
+	}
+
+	// Save original WorkItems[].Extrinsics metadata BEFORE BuildBundle prepends Verkle witness metadata
+	// This is needed for rebuilding on resubmission - BuildBundle also prepends metadata entries
+	originalWorkItemExtrinsics := make([][]types.WorkItemExtrinsic, len(workPackage.WorkItems))
+	for i, wi := range workPackage.WorkItems {
+		originalWorkItemExtrinsics[i] = make([]types.WorkItemExtrinsic, len(wi.Extrinsics))
+		copy(originalWorkItemExtrinsics[i], wi.Extrinsics)
+	}
+
 	// Build bundle via NodeContent.BuildBundle -> StateDB.BuildBundle (executes refine)
+	// NOTE: BuildBundle prepends a Verkle witness to each work item's extrinsics
 	bundle, workReport, err := n.BuildBundle(workPackage, extrinsicsBlobs, 0, nil)
 	if err != nil {
 		return fmt.Errorf("failed to build bundle: %w", err)
@@ -396,8 +453,8 @@ func buildAndEnqueueWorkPackage(n *node.Node, rollup *evmrpc.Rollup, txPool *evm
 		txPool.RemoveTransaction(tx.Hash)
 	}
 
-	// Enqueue to queue runner for managed submission
-	blockNumber, err := queueRunner.EnqueueBundle(bundle)
+	// Enqueue to queue runner with original extrinsics for resubmission support
+	blockNumber, err := queueRunner.EnqueueBundleWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics)
 	if err != nil {
 		return fmt.Errorf("failed to enqueue bundle: %w", err)
 	}

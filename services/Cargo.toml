@@ -29,7 +29,6 @@ members = [
     "doom",
     "fib",
     "orchard",
-    "railgun",
 
     # Test services
     "test_services/simple-test",
@@ -80,7 +79,7 @@ rustc-demangle = "0.1.23"
 ruzstd = { version = "0.5.0", default-features = false }
 schnellru = { version = "0.2.3" }
 sdl2 = { git = "https://github.com/Rust-SDL2/rust-sdl2.git", rev = "c242701c1ebc40aa78608c51bc44a6ce30e8023d" }
-serde = { version = "1.0.203", features = ["derive"] }
+serde = { version = "=1.0.215", features = ["derive"] }
 serde_json = { version = "1.0.117" }
 syn = "2.0.25"
 tikv-jemallocator = "0.6.0"
