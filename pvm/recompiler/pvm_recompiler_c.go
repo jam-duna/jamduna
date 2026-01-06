@@ -29,5 +29,5 @@ func (rc *RecompilerC) SetGasMode(mode int) {
 
 // SetIsChild is a no-op for the C compiler
 func (rc *RecompilerC) SetIsChild(isChild bool) {
-	// C compiler doesn't support child mode switching
+	_ = rc.C_Compiler.SetIsChild(isChild)
 }

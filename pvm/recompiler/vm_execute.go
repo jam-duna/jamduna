@@ -600,14 +600,9 @@ func generateDebugCall(opcode byte, pc uint64) []byte {
 	code = append(code, imm64...)
 
 	// Argument 3 (RDX): reg_dump_addr (void*)
-	// R12 currently points to realMemAddr, we need regDumpAddr which is at R12 - dumpSize
-	// mov rdx, r12
-	code = append(code, 0x4C, 0x89, 0xE2) // MOV RDX, R12
-	// sub rdx, dumpSize
-	code = append(code, 0x48, 0x81, 0xEA) // SUB RDX, imm32
-	dumpImm32 := make([]byte, 4)
-	binary.LittleEndian.PutUint32(dumpImm32, uint32(dumpSize))
-	code = append(code, dumpImm32...)
+	// BaseReg currently points to realMemAddr, regDumpAddr is at BaseReg - dumpSize.
+	code = append(code, emitMovRegToReg64(RDX, BaseReg)...)
+	code = append(code, emitSubRegImm32Force81(RDX, uint32(dumpSize))...)
 
 	// Load function address into RAX
 	// movabs rax, debugFuncAddr

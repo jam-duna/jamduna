@@ -257,7 +257,7 @@ func TestTracesInterpreter(t *testing.T) {
 func TestTracesRecompiler(t *testing.T) {
 	log.InitLogger("debug")
 
-	DebugHostFunctions = true
+	DebugHostFunctions = false
 	// Define all the directories you want to test in a single slice.
 	testDirs := []string{
 		path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),

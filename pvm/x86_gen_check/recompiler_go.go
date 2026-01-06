@@ -2,7 +2,11 @@ package x86gencheck
 
 /*
 #cgo CFLAGS: -I../recompiler_c/include -std=c99
-#cgo LDFLAGS: -L${SRCDIR}/../recompiler_c/lib ${SRCDIR}/../recompiler_c/lib/libcompiler.a
+#cgo linux,amd64 LDFLAGS: -L${SRCDIR}/../../ffi -lcompiler.linux_amd64
+#cgo linux,arm64 LDFLAGS: -L${SRCDIR}/../../ffi -lcompiler.linux_arm64
+#cgo darwin,amd64 LDFLAGS: -L${SRCDIR}/../../ffi -lcompiler.mac_amd64
+#cgo darwin,arm64 LDFLAGS: -L${SRCDIR}/../../ffi -lcompiler.mac_arm64
+#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/../../ffi -lcompiler.windows_amd64
 
 #include <stdlib.h>
 #include <stdint.h>

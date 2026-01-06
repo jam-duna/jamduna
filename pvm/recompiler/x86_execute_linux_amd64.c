@@ -57,18 +57,19 @@ static void signal_handler(int sig, siginfo_t *si, void *arg) {
             signame, fault_addr, (unsigned long long)rip,
             (unsigned long long)rsp, (unsigned long long)rbp, (unsigned long long)r12);
 
-    // Save callee-saved registers into the provided buffer
+    // Save guest-visible registers into the provided buffer.
+    // This order MUST match Go's regInfoList (PVM regs 0..12) in pvm/recompiler/x86_registers.go.
     uint64_t* regPtr = (uint64_t*)tls_global_reg_ptr;
     regPtr[0]  = ctx->uc_mcontext.gregs[REG_RAX];
-    regPtr[1]  = ctx->uc_mcontext.gregs[REG_RCX];
-    regPtr[2]  = ctx->uc_mcontext.gregs[REG_RDX];
-    regPtr[3]  = ctx->uc_mcontext.gregs[REG_RBX];
-    regPtr[4]  = ctx->uc_mcontext.gregs[REG_RSI];
-    regPtr[5]  = ctx->uc_mcontext.gregs[REG_RDI];
-    regPtr[6]  = ctx->uc_mcontext.gregs[REG_R8];
-    regPtr[7]  = ctx->uc_mcontext.gregs[REG_R9];
-    regPtr[8]  = ctx->uc_mcontext.gregs[REG_R10];
-    regPtr[9]  = ctx->uc_mcontext.gregs[REG_R11];
+    regPtr[1]  = ctx->uc_mcontext.gregs[REG_RDX];
+    regPtr[2]  = ctx->uc_mcontext.gregs[REG_RBX];
+    regPtr[3]  = ctx->uc_mcontext.gregs[REG_RSI];
+    regPtr[4]  = ctx->uc_mcontext.gregs[REG_RDI];
+    regPtr[5]  = ctx->uc_mcontext.gregs[REG_R8];
+    regPtr[6]  = ctx->uc_mcontext.gregs[REG_R9];
+    regPtr[7]  = ctx->uc_mcontext.gregs[REG_R10];
+    regPtr[8]  = ctx->uc_mcontext.gregs[REG_R11];
+    regPtr[9]  = ctx->uc_mcontext.gregs[REG_R12];
     regPtr[10] = ctx->uc_mcontext.gregs[REG_R13];
     regPtr[11] = ctx->uc_mcontext.gregs[REG_R14];
     regPtr[12] = ctx->uc_mcontext.gregs[REG_R15];

@@ -385,6 +385,12 @@ int compiler_set_bitmask(compiler_t* compiler, const uint8_t* bitmask, uint32_t 
     return 0;
 }
 
+int compiler_set_is_child(compiler_t* compiler, int is_child) {
+    if (!compiler) return -1;
+    compiler->is_child = (is_child != 0);
+    return 0;
+}
+
 // Forward declarations (from .old implementation)
 static basic_block_t* jit_parse_basic_block(compiler_t* compiler, uint32_t start_pc);
 static int jit_translate_basic_block_impl(compiler_t* compiler, basic_block_t* block);
@@ -477,32 +483,32 @@ int compiler_compile(compiler_t* compiler, uint64_t start_pc,
     const uint64_t REG_DUMP_MEM_PATCH = 0x8888888888888888ULL;
     const uint32_t ENTRY_PATCH = 0x99999999;
     const uint32_t REG_MEM_SIZE = 0x100000; // dumpSize = 1MB
-    const int BASE_REG_INDEX = 14; // R12
     const int NUM_PVM_REGS = 13; // Number of PVM registers
+    const x86_reg_t BASE_REG = X86_RBP; // BaseReg (matches Go's BaseReg=RBP)
 
-    // 1. MOV R12, 0x8888888888888888 (placeholder for regDumpMem address)
-    x86_encode_mov_reg64_imm64(&start_gen, X86_R12, REG_DUMP_MEM_PATCH);
+    // 1. MOV BaseReg, 0x8888888888888888 (placeholder for regDumpMem address)
+    x86_encode_mov_reg64_imm64(&start_gen, BASE_REG, REG_DUMP_MEM_PATCH);
 
-    // 2. Load all 13 registers from regDumpMem: MOV regN, [R12 + N*8]
+    // 2. Load all 13 PVM registers from regDumpMem: MOV regN, [BaseReg + N*8]
     // Use pvm_reg_to_x86 mapping to skip RSP/RBP like Go does
     extern const x86_reg_t pvm_reg_to_x86[14];
     for (int i = 0; i < NUM_PVM_REGS; i++) {
         int32_t offset = i * 8;
         x86_reg_t x86_reg = pvm_reg_to_x86[i];
-        x86_encode_mov_reg64_mem(&start_gen, x86_reg, X86_R12, offset);
+        x86_encode_mov_reg64_mem(&start_gen, x86_reg, BASE_REG, offset);
     }
 
-    // 3. Adjust R12 from regDumpAddr to realMemAddr: ADD R12, 0x100000
-    // Manual encoding: 49 81 C4 00 00 10 00 = ADD R12, 0x100000
-    uint8_t add_r12[] = {
-        0x49, 0x81, 0xC4,  // ADD R12, imm32
+    // 3. Adjust BaseReg from regDumpAddr to realMemAddr: ADD BaseReg, 0x100000
+    // Manual encoding: 48 81 C5 00 00 10 00 = ADD RBP, 0x100000
+    uint8_t add_base[] = {
+        0x48, 0x81, 0xC5,  // ADD RBP, imm32
         (uint8_t)(REG_MEM_SIZE & 0xFF),
         (uint8_t)((REG_MEM_SIZE >> 8) & 0xFF),
         (uint8_t)((REG_MEM_SIZE >> 16) & 0xFF),
         (uint8_t)((REG_MEM_SIZE >> 24) & 0xFF)
     };
     x86_codegen_ensure_capacity(&start_gen, 7);
-    memcpy(start_gen.buffer + start_gen.offset, add_r12, 7);
+    memcpy(start_gen.buffer + start_gen.offset, add_base, 7);
     start_gen.offset += 7;
 
     // 4. JMP rel32 with placeholder 0x99999999 (to entry point)
@@ -604,22 +610,22 @@ int compiler_compile(compiler_t* compiler, uint64_t start_pc,
         return -1;
     }
 
-    // 1. SUB R12, 0x100000 (point R12 back to regDumpMem)
-    uint8_t sub_r12[] = {
-        0x49, 0x81, 0xEC,  // SUB R12, imm32
+    // 1. SUB BaseReg, 0x100000 (point BaseReg back to regDumpMem)
+    // Manual encoding: 48 81 ED 00 00 10 00 = SUB RBP, 0x100000
+    uint8_t sub_base[] = {
+        0x48, 0x81, 0xED,  // SUB RBP, imm32
         0x00, 0x00, 0x10, 0x00  // 0x100000
     };
     x86_codegen_ensure_capacity(&exit_gen, 7);
-    memcpy(exit_gen.buffer + exit_gen.offset, sub_r12, 7);
+    memcpy(exit_gen.buffer + exit_gen.offset, sub_base, 7);
     exit_gen.offset += 7;
 
-    // 2. Save all registers (except R12) back to regDumpMem: MOV [R12 + N*8], regN
+    // 2. Save all 13 PVM registers back to regDumpMem: MOV [BaseReg + N*8], regN
     // Use pvm_reg_to_x86 mapping to match Go's register order
     for (int i = 0; i < NUM_PVM_REGS; i++) {
-        if (i == BASE_REG_INDEX) continue; // Skip R12 itself (it's the base pointer)
         int32_t offset = i * 8;
         x86_reg_t x86_reg = pvm_reg_to_x86[i];
-        x86_encode_mov_mem_reg64(&exit_gen, X86_R12, offset, x86_reg);
+        x86_encode_mov_mem_reg64(&exit_gen, BASE_REG, offset, x86_reg);
     }
 
     // 3. RET
@@ -736,8 +742,8 @@ static basic_block_t* jit_parse_basic_block(compiler_t* compiler, uint32_t start
         if (charge_gas_instruction_index < block->instruction_count) {
             instruction_t* charge_inst = basic_block_get_instruction(block, charge_gas_instruction_index);
             if (charge_inst) {
-                // If current opcode is ECALLI, add extra gas (matches Go: if op == ECALLI)
-                if (opcode == ECALLI) {
+                // If current opcode is ECALLI, add extra gas for parent VMs only (matches Go).
+                if (opcode == ECALLI && !compiler->is_child) {
                     uint32_t host_func = 0;
                     if (operand_view && operand_len > 0) {
                         host_func = decode_e_l(operand_view, operand_len);
@@ -898,41 +904,74 @@ static int jit_append_block(compiler_t* compiler, basic_block_t* block) {
         entry = entry->next;
     }
 
-    // Patch nextx86 placeholder for ECALLI/SBRK instructions (matches Go's appendBlock logic)
-    // const EcalliCodeIdx = 146, SbrkCodeIdx = 185, nextPcStartOffset = 119
-    const uint32_t ECALLI_CODE_IDX = 146;
-    const uint32_t SBRK_CODE_IDX = 185;
-    const uint32_t NEXT_PC_START_OFFSET = 119;
+    // Patch nextx86 placeholder for ECALLI/SBRK instructions (matches Go logic) by scanning for the
+    // imm64 placeholder and patching it to the x86 address of the next instruction in the block.
+    const uint64_t NEXTX86_PLACEHOLDER = 0x8686868686868686ULL;
 
     for (size_t i = 0; i < block->instruction_count; i++) {
         instruction_t* inst = basic_block_get_instruction(block, i);
         if (!inst) continue;
+        if (inst->opcode != ECALLI && inst->opcode != SBRK) continue;
 
-        if (inst->opcode == ECALLI || inst->opcode == SBRK) {
-            // Find this instruction's x86 offset
-            pvm_pc_map_entry_t* inst_entry = block->pvm_pc_to_x86_map;
-            while (inst_entry) {
-                if (inst_entry->pvm_pc == (uint32_t)inst->pc) {
-                    uint64_t x86_realpc = block_start + (uint64_t)inst_entry->x86_offset;
-                    uint32_t code_idx = (inst->opcode == ECALLI) ? ECALLI_CODE_IDX : SBRK_CODE_IDX;
-                    uint64_t patch_location = x86_realpc + code_idx;
-                    uint64_t next_x86_addr = x86_realpc + code_idx + NEXT_PC_START_OFFSET;
-
-                    // Patch the 8-byte placeholder with actual next x86 address (little-endian)
-                    if (patch_location + 8 <= compiler->x86_code_size) {
-                        compiler->x86_code[patch_location + 0] = (uint8_t)(next_x86_addr & 0xFF);
-                        compiler->x86_code[patch_location + 1] = (uint8_t)((next_x86_addr >> 8) & 0xFF);
-                        compiler->x86_code[patch_location + 2] = (uint8_t)((next_x86_addr >> 16) & 0xFF);
-                        compiler->x86_code[patch_location + 3] = (uint8_t)((next_x86_addr >> 24) & 0xFF);
-                        compiler->x86_code[patch_location + 4] = (uint8_t)((next_x86_addr >> 32) & 0xFF);
-                        compiler->x86_code[patch_location + 5] = (uint8_t)((next_x86_addr >> 40) & 0xFF);
-                        compiler->x86_code[patch_location + 6] = (uint8_t)((next_x86_addr >> 48) & 0xFF);
-                        compiler->x86_code[patch_location + 7] = (uint8_t)((next_x86_addr >> 56) & 0xFF);
-                    }
-                    break;
-                }
-                inst_entry = inst_entry->next;
+        // Find this instruction's x86 offset (within the block)
+        pvm_pc_map_entry_t* inst_entry = block->pvm_pc_to_x86_map;
+        uint32_t inst_x86_offset = 0;
+        bool found_inst = false;
+        while (inst_entry) {
+            if (inst_entry->pvm_pc == (uint32_t)inst->pc) {
+                inst_x86_offset = (uint32_t)inst_entry->x86_offset;
+                found_inst = true;
+                break;
             }
+            inst_entry = inst_entry->next;
+        }
+        if (!found_inst) continue;
+
+        // Compute x86 end PC as the start of the next instruction (or end of block if last).
+        uint64_t x86_realpc = block_start + (uint64_t)inst_x86_offset;
+        uint64_t x86_endpc = block_start + block_size;
+        if (i + 1 < block->instruction_count) {
+            instruction_t* next_inst = basic_block_get_instruction(block, i + 1);
+            if (next_inst) {
+                pvm_pc_map_entry_t* next_entry = block->pvm_pc_to_x86_map;
+                while (next_entry) {
+                    if (next_entry->pvm_pc == (uint32_t)next_inst->pc) {
+                        x86_endpc = block_start + (uint64_t)next_entry->x86_offset;
+                        break;
+                    }
+                    next_entry = next_entry->next;
+                }
+            }
+        }
+        if (x86_endpc <= x86_realpc) continue;
+
+        // Scan for the placeholder imm64 within [x86_realpc, x86_endpc).
+        uint64_t patch_location = 0;
+        bool found_placeholder = false;
+        uint64_t scan_end = x86_endpc;
+        if (scan_end > compiler->x86_code_size) scan_end = compiler->x86_code_size;
+        for (uint64_t pos = x86_realpc; pos + 8 <= scan_end; pos++) {
+            uint64_t v;
+            memcpy(&v, compiler->x86_code + pos, sizeof(v));
+            if (v == NEXTX86_PLACEHOLDER) {
+                patch_location = pos;
+                found_placeholder = true;
+                break;
+            }
+        }
+        if (!found_placeholder) continue;
+
+        // Patch the 8-byte placeholder with the actual next x86 address (little-endian).
+        uint64_t next_x86_addr = x86_endpc;
+        if (patch_location + 8 <= compiler->x86_code_size) {
+            compiler->x86_code[patch_location + 0] = (uint8_t)(next_x86_addr & 0xFF);
+            compiler->x86_code[patch_location + 1] = (uint8_t)((next_x86_addr >> 8) & 0xFF);
+            compiler->x86_code[patch_location + 2] = (uint8_t)((next_x86_addr >> 16) & 0xFF);
+            compiler->x86_code[patch_location + 3] = (uint8_t)((next_x86_addr >> 24) & 0xFF);
+            compiler->x86_code[patch_location + 4] = (uint8_t)((next_x86_addr >> 32) & 0xFF);
+            compiler->x86_code[patch_location + 5] = (uint8_t)((next_x86_addr >> 40) & 0xFF);
+            compiler->x86_code[patch_location + 6] = (uint8_t)((next_x86_addr >> 48) & 0xFF);
+            compiler->x86_code[patch_location + 7] = (uint8_t)((next_x86_addr >> 56) & 0xFF);
         }
     }
 

@@ -17,22 +17,22 @@
 // Note: pvm_translators_init is now defined in x86_translators_complete.c
 
 // PVM register to x86 register mapping (exactly matches Go recompiler regInfoList)
-// Go regInfoList: RAX, RCX, RDX, RBX, RSI, RDI, R8, R9, R10, R11, R13, R14, R15, R12 (14 registers)
+// Go regInfoList: RAX, RDX, RBX, RSI, RDI, R8, R9, R10, R11, R12, R13, R14, R15, RBP (14 registers)
 const x86_reg_t pvm_reg_to_x86[14] = {
     X86_RAX,  // Index 0 → RAX
-    X86_RCX,  // Index 1 → RCX  
-    X86_RDX,  // Index 2 → RDX
-    X86_RBX,  // Index 3 → RBX
-    X86_RSI,  // Index 4 → RSI
-    X86_RDI,  // Index 5 → RDI
-    X86_R8,   // Index 6 → R8
-    X86_R9,   // Index 7 → R9
-    X86_R10,  // Index 8 → R10
-    X86_R11,  // Index 9 → R11
+    X86_RDX,  // Index 1 → RDX
+    X86_RBX,  // Index 2 → RBX
+    X86_RSI,  // Index 3 → RSI
+    X86_RDI,  // Index 4 → RDI
+    X86_R8,   // Index 5 → R8
+    X86_R9,   // Index 6 → R9
+    X86_R10,  // Index 7 → R10
+    X86_R11,  // Index 8 → R11
+    X86_R12,  // Index 9 → R12
     X86_R13,  // Index 10 → R13
     X86_R14,  // Index 11 → R14
     X86_R15,  // Index 12 → R15
-    X86_R12   // Index 13 → R12 (BaseReg)
+    X86_RBP   // Index 13 → RBP (BaseReg)
 };
 
 // Helper function to calculate REX prefix
@@ -186,35 +186,33 @@ x86_encode_result_t x86_encode_gas_check(x86_codegen_t* gen, uint32_t gas_charge
     }
 
     size_t start_offset = gen->offset;
-    // CRITICAL FIX: Gas slot addressing in both modes
-    // In sandbox mode: R12 = 0x10000000 (guest base), gas is at 0x0FF00000 + 14*8
-    // In native mode: R12 = real_memory_addr, gas is at (reg_dump_addr + 14*8)
-    // Both modes need the same negative offset since gas is in the dump area which is 1MB before R12
+    // Gas slot addressing (matches Go): BaseReg points to realMemAddr, and reg dump is at BaseReg - DUMP_SIZE.
     int32_t displacement;
 #ifdef USE_UNICORN_EXECUTION
-    // Sandbox mode: Gas is in dump area (0x0FF00000), but R12 points to guest base (0x10000000)
-    // Offset = (0x0FF00000 + 14*8) - 0x10000000 = -0x100000 + 0x70 = -0xFFF90
     displacement = (int32_t)(GAS_SLOT_INDEX * 8 - DUMP_SIZE);  // 14*8 - 0x100000 = -0xFFF90
 #else
-    // Native mode: Gas is in reg_dump which is 1MB before real_memory
     displacement = (int32_t)(GAS_SLOT_INDEX * 8 - DUMP_SIZE);  // 14*8 - 0x100000 = -0xFFF90
 #endif
 
     // Match Go's generateSubMem64Imm32 exactly
-    // REX Prefix: REX.W = 1 (0x48), REX.B = 1 for R12 (0x01)
-    uint8_t rex = 0x48;  // REX.W = 1
-    rex |= 0x01;         // REX.B = 1 for R12
+    const x86_reg_t base_reg = pvm_reg_to_x86[13]; // BaseReg
+    const uint8_t base_bits = x86_reg_bits(base_reg);
+
+    // REX Prefix: REX.W = 1 (0x48), plus REX.B if BaseReg is extended.
+    uint8_t rex = 0x48 | (x86_reg_needs_rex(base_reg) ? 0x01 : 0x00);
     gen->buffer[gen->offset++] = rex;
 
     // Opcode: 81 /5 (SUB r/m64, imm32)
     gen->buffer[gen->offset++] = 0x81;
 
-    // ModRM: mod=10 (disp32), reg=5 (SUB), rm=R12.RegBits (4)
-    uint8_t modrm = 0x80 | (5 << 3) | (4 & 0x07);  // 0x80 | 0x28 | 4 = 0xAC
+    // ModRM: mod=10 (disp32), reg=5 (SUB), rm=BaseReg.RegBits
+    uint8_t modrm = 0x80 | (5 << 3) | (base_bits & 0x07);
     gen->buffer[gen->offset++] = modrm;
 
-    // SIB: required for R12 - scale=0, index=none(100), base=100
-    gen->buffer[gen->offset++] = 0x24;
+    // SIB is required only when rm==100 (RSP/R12).
+    if ((base_bits & 0x07) == 4) {
+        gen->buffer[gen->offset++] = 0x24; // scale=0, index=none(100), base=100
+    }
 
     // disp32 (displacement) - little endian
     gen->buffer[gen->offset++] = (uint8_t)(displacement & 0xFF);
@@ -262,7 +260,8 @@ x86_encode_result_t x86_encode_mov_reg64_mem(x86_codegen_t* gen, x86_reg_t dst, 
     code[pos++] = X86_OP_MOV_R_RM;
 
     uint8_t base_bits = x86_reg_bits(base);
-    bool force_disp8 = (base_bits == 4); // RSP or R12 requires SIB with displacement
+    // RSP/R12 (rm=100) forces a SIB, and RBP/R13 (rm=101) cannot be encoded with mod=00.
+    bool force_disp8 = (base_bits == 4 || base_bits == 5);
     uint8_t mod = (offset == 0 && !force_disp8) ? X86_MOD_MEM :
                   (offset >= -128 && offset <= 127) ? X86_MOD_MEM_DISP8 : X86_MOD_MEM_DISP32;
 
@@ -300,10 +299,14 @@ x86_encode_result_t x86_encode_mov_reg32_mem(x86_codegen_t* gen, x86_reg_t dst, 
     
     // ModRM byte - R12 and RSP always require displacement even when offset=0
     uint8_t base_bits = x86_reg_bits(base);
-    bool force_disp8 = (base_bits == 4); // RSP or R12
+    bool force_disp8 = (base_bits == 4 || base_bits == 5); // RSP/R12 need SIB, RBP/R13 cannot be mod=00
     uint8_t mod = (offset == 0 && !force_disp8) ? X86_MOD_MEM : 
                   (offset >= -128 && offset <= 127) ? X86_MOD_MEM_DISP8 : X86_MOD_MEM_DISP32;
     code[pos++] = X86_MODRM(mod, x86_reg_bits(dst), base_bits);
+
+    if (base_bits == 4) {
+        code[pos++] = 0x24; // SIB: scale=0, index=4 (none), base=4 (R12/RSP)
+    }
     
     // Displacement
     if (mod == X86_MOD_MEM_DISP8) {
@@ -334,10 +337,14 @@ x86_encode_result_t x86_encode_mov_mem_reg32(x86_codegen_t* gen, x86_reg_t base,
     
     // ModRM byte - R12 and RSP always require displacement even when offset=0
     uint8_t base_bits = x86_reg_bits(base);
-    bool force_disp8 = (base_bits == 4); // RSP or R12
+    bool force_disp8 = (base_bits == 4 || base_bits == 5); // RSP/R12 need SIB, RBP/R13 cannot be mod=00
     uint8_t mod = (offset == 0 && !force_disp8) ? X86_MOD_MEM : 
                   (offset >= -128 && offset <= 127) ? X86_MOD_MEM_DISP8 : X86_MOD_MEM_DISP32;
     code[pos++] = X86_MODRM(mod, x86_reg_bits(src), base_bits);
+
+    if (base_bits == 4) {
+        code[pos++] = 0x24; // SIB: scale=0, index=4 (none), base=4 (R12/RSP)
+    }
     
     // Displacement
     if (mod == X86_MOD_MEM_DISP8) {
@@ -368,10 +375,14 @@ x86_encode_result_t x86_encode_add_reg32_mem(x86_codegen_t* gen, x86_reg_t dst, 
     
     // R12 and RSP always require displacement even when offset=0
     uint8_t base_bits = x86_reg_bits(base);
-    bool force_disp8 = (base_bits == 4); // RSP or R12
+    bool force_disp8 = (base_bits == 4 || base_bits == 5); // RSP/R12 need SIB, RBP/R13 cannot be mod=00
     uint8_t mod = (offset == 0 && !force_disp8) ? X86_MOD_MEM : 
                   (offset >= -128 && offset <= 127) ? X86_MOD_MEM_DISP8 : X86_MOD_MEM_DISP32;
     code[pos++] = X86_MODRM(mod, x86_reg_bits(dst), base_bits);
+
+    if (base_bits == 4) {
+        code[pos++] = 0x24; // SIB: scale=0, index=4 (none), base=4 (R12/RSP)
+    }
     
     if (mod == X86_MOD_MEM_DISP8) {
         code[pos++] = (uint8_t)offset;
@@ -416,10 +427,14 @@ x86_encode_result_t x86_encode_sub_reg32_mem(x86_codegen_t* gen, x86_reg_t dst, 
     
     // R12 and RSP always require displacement even when offset=0
     uint8_t base_bits = x86_reg_bits(base);
-    bool force_disp8 = (base_bits == 4); // RSP or R12
+    bool force_disp8 = (base_bits == 4 || base_bits == 5); // RSP/R12 need SIB, RBP/R13 cannot be mod=00
     uint8_t mod = (offset == 0 && !force_disp8) ? X86_MOD_MEM : 
                   (offset >= -128 && offset <= 127) ? X86_MOD_MEM_DISP8 : X86_MOD_MEM_DISP32;
     code[pos++] = X86_MODRM(mod, x86_reg_bits(dst), base_bits);
+
+    if (base_bits == 4) {
+        code[pos++] = 0x24; // SIB: scale=0, index=4 (none), base=4 (R12/RSP)
+    }
     
     if (mod == X86_MOD_MEM_DISP8) {
         code[pos++] = (uint8_t)offset;
@@ -464,10 +479,14 @@ x86_encode_result_t x86_encode_cmp_reg32_mem(x86_codegen_t* gen, x86_reg_t reg, 
     
     // R12 and RSP always require displacement even when offset=0
     uint8_t base_bits = x86_reg_bits(base);
-    bool force_disp8 = (base_bits == 4); // RSP or R12
+    bool force_disp8 = (base_bits == 4 || base_bits == 5); // RSP/R12 need SIB, RBP/R13 cannot be mod=00
     uint8_t mod = (offset == 0 && !force_disp8) ? X86_MOD_MEM : 
                   (offset >= -128 && offset <= 127) ? X86_MOD_MEM_DISP8 : X86_MOD_MEM_DISP32;
     code[pos++] = X86_MODRM(mod, x86_reg_bits(reg), base_bits);
+
+    if (base_bits == 4) {
+        code[pos++] = 0x24; // SIB: scale=0, index=4 (none), base=4 (R12/RSP)
+    }
     
     if (mod == X86_MOD_MEM_DISP8) {
         code[pos++] = (uint8_t)offset;
@@ -577,12 +596,10 @@ x86_encode_result_t x86_encode_movsxd64(x86_codegen_t* gen, x86_reg_t dst, x86_r
     uint8_t code[3];
     uint32_t pos = 0;
     
-    // REX.W prefix if needed
+    // REX.W prefix is required for MOVSXD r64, r/m32.
     bool needs_rex_r = x86_reg_needs_rex(dst);
     bool needs_rex_b = x86_reg_needs_rex(src);
-    if (needs_rex_r || needs_rex_b) {
-        code[pos++] = x86_calc_rex_prefix(true, needs_rex_r, false, needs_rex_b); // REX.W = 1
-    }
+    code[pos++] = x86_calc_rex_prefix(true, needs_rex_r, false, needs_rex_b); // REX.W = 1
     
     // Opcode: MOVSXD
     code[pos++] = 0x63;
@@ -598,19 +615,17 @@ x86_encode_result_t x86_encode_mov_mem_reg64(x86_codegen_t* gen, x86_reg_t base,
     uint8_t code[10];
     uint32_t pos = 0;
     
-    // REX prefix if needed
+    // REX.W is required for MOV r/m64, r64.
     bool needs_rex_r = x86_reg_needs_rex(src);
     bool needs_rex_b = x86_reg_needs_rex(base);
-    if (needs_rex_r || needs_rex_b) {
-        code[pos++] = x86_calc_rex_prefix(true, needs_rex_r, false, needs_rex_b); // REX.W = 1
-    }
+    code[pos++] = x86_calc_rex_prefix(true, needs_rex_r, false, needs_rex_b); // REX.W = 1
     
     // Opcode: MOV r/m64, r64
     code[pos++] = 0x89;
     
     // ModRM byte - R12 and RSP always require displacement even when offset=0
     uint8_t base_bits = x86_reg_bits(base);
-    bool force_disp8 = (base_bits == 4); // RSP or R12
+    bool force_disp8 = (base_bits == 4 || base_bits == 5); // RSP/R12 need SIB, RBP/R13 cannot be mod=00
     uint8_t mod = (offset == 0 && !force_disp8) ? X86_MOD_MEM : 
                   (offset >= -128 && offset <= 127) ? X86_MOD_MEM_DISP8 : X86_MOD_MEM_DISP32;
     

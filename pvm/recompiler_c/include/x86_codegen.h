@@ -21,8 +21,8 @@ typedef enum {
     X86_R12 = 12, X86_R13 = 13, X86_R14 = 14, X86_R15 = 15
 } x86_reg_t;
 
-// PVM register to x86 register mapping
-// R12 points to the register dump area in memory (matches Go implementation)
+// PVM register to x86 register mapping (matches Go's regInfoList in pvm/recompiler/x86_registers.go).
+// pvm_reg_to_x86[0..12] are guest-visible PVM regs; pvm_reg_to_x86[13] is BaseReg (guest RAM base).
 extern const x86_reg_t pvm_reg_to_x86[14];
 
 // x86 instruction prefixes and opcodes
@@ -141,8 +141,7 @@ void extract_three_registers(const uint8_t* operands, uint8_t* dst, uint8_t* src
 int32_t extract_offset(const uint8_t* operands);
 void extract_reg_and_offset(const uint8_t* operands, uint8_t* reg, int32_t* offset);
 
-// Memory offset calculation for PVM registers (matches Go implementation)
-// R12 points to register dump area, registers are at R12 + (reg_index * 8)
+// Memory offset calculation for slots in the register-dump buffer (matches Go layout).
 #define PVM_REG_OFFSET(reg_index) ((reg_index) * 8)
 
 // Debug and introspection

@@ -82,6 +82,22 @@ func (c *C_Compiler) SetBitMask(bitmask []byte) error {
 	return nil
 }
 
+// SetIsChild sets whether this compiler instance is used for a child VM (matches Go's SetIsChild).
+func (c *C_Compiler) SetIsChild(isChild bool) error {
+	if c.cCompiler == nil {
+		return fmt.Errorf("compiler not initialized")
+	}
+	var flag C.int
+	if isChild {
+		flag = 1
+	}
+	result := C.compiler_set_is_child(c.cCompiler, flag)
+	if result != 0 {
+		return fmt.Errorf("SetIsChild failed with code %d", result)
+	}
+	return nil
+}
+
 // CompileX86Code compiles PVM bytecode to x86 machine code
 // Matches Go's CompileX86Code(startPC uint64) (x86code []byte, djumpAddr uintptr, InstMapPVMToX86 map[uint32]int, InstMapX86ToPVM map[int]uint32)
 func (c *C_Compiler) CompileX86Code(startPC uint64) (

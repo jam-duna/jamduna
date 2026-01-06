@@ -86,11 +86,7 @@ func generateAndInvOp64(inst Instruction) []byte {
 	var code []byte
 
 	// 1) PUSH tmp to preserve original value
-	if tmp.Name == "r12" {
-		code = append(code, emitPushReg(tmp)...) // PUSH R12
-	} else {
-		panic("Unsupported BaseReg for push")
-	}
+	code = append(code, emitPushReg(tmp)...)
 
 	// 2) MOV tmp, src2
 	code = append(code, emitMovRegToReg64(tmp, src2)...)
@@ -105,11 +101,7 @@ func generateAndInvOp64(inst Instruction) []byte {
 	code = append(code, emitMovRegToReg64(dst, tmp)...)
 
 	// 6) POP tmp to restore
-	if tmp.Name == "r12" {
-		code = append(code, emitPopReg(tmp)...) // POP R12
-	} else {
-		panic("Unsupported BaseReg for pop")
-	}
+	code = append(code, emitPopReg(tmp)...)
 
 	return code
 }
@@ -126,19 +118,27 @@ func generateRemUOp64(inst Instruction) []byte {
 	buf := []byte{}
 
 	// Determine if dst conflicts with RAX/RDX
-	isDstRAX := dstIdx == 0
-	isDstRDX := dstIdx == 2
+	isDstRAX := dst.Name == RAX.Name
+	isDstRDX := dst.Name == RDX.Name
+	isSrc2RAX := src2.Name == RAX.Name
+	isSrc2RDX := src2.Name == RDX.Name
+
+	// Spill policy:
+	// - If src2 is RAX, we must spill both RAX and RDX to preserve the divisor at [RSP+8].
+	// - If src2 is RDX, we must spill RDX to preserve the divisor at [RSP].
+	pushRAX := !isDstRAX || isSrc2RAX
+	pushRDX := !isDstRDX || isSrc2RDX || isSrc2RAX
 
 	// 0) Conditional spill: only push if we need to restore later
-	if !isDstRAX {
+	if pushRAX {
 		buf = append(buf, emitPushReg(RAX)...)
 	}
-	if !isDstRDX {
+	if pushRDX {
 		buf = append(buf, emitPushReg(RDX)...)
 	}
 
 	// 1) MOV dividend into RAX (if src1 != RAX)
-	if srcIdx != 0 {
+	if src1.Name != RAX.Name {
 		buf = append(buf, emitMovRaxFromRegRemUOp64(src1)...)
 	}
 
@@ -152,9 +152,6 @@ func generateRemUOp64(inst Instruction) []byte {
 	// 3) Normal path: clear RDX, DIV, move remainder
 	// XOR RDX, RDX
 	buf = append(buf, emitXorReg64(RDX, RDX)...)
-
-	isSrc2RAX := src2Idx == 0
-	isSrc2RDX := src2Idx == 2
 
 	if isSrc2RAX {
 		// If divisor is RAX, use the spilled original RAX from [RSP+8]
@@ -187,11 +184,21 @@ func generateRemUOp64(inst Instruction) []byte {
 
 	// end: restore if spilled
 	endOff := len(buf)
-	if !isDstRDX {
-		buf = append(buf, emitPopReg(RDX)...)
+	if pushRDX {
+		if !isDstRDX {
+			buf = append(buf, emitPopReg(RDX)...)
+		} else {
+			// Discard without restoring (keep result in RDX)
+			buf = append(buf, 0x48, 0x83, 0xC4, 0x08) // ADD RSP, 8
+		}
 	}
-	if !isDstRAX {
-		buf = append(buf, emitPopReg(RAX)...)
+	if pushRAX {
+		if !isDstRAX {
+			buf = append(buf, emitPopReg(RAX)...)
+		} else {
+			// Discard without restoring (keep result in RAX)
+			buf = append(buf, 0x48, 0x83, 0xC4, 0x08) // ADD RSP, 8
+		}
 	}
 
 	// Patch JE and JMP offsets
@@ -208,17 +215,19 @@ func generateRemSOp64(inst Instruction) []byte {
 	src2Info := regInfoList[src2Idx]
 	dstInfo := regInfoList[dstIdx]
 
-	isDstRAX := dstIdx == 0
-	isDstRDX := dstIdx == 2
-	isSrc2RDX := src2Idx == 2
+	isDstRAX := dstInfo.Name == RAX.Name
+	isDstRDX := dstInfo.Name == RDX.Name
+	isSrc2RDX := src2Info.Name == RDX.Name
 
 	buf := []byte{}
 
-	// Conditional spill
-	if !isDstRAX {
+	// Conditional spill (if src2 is RDX, we must spill RDX for stack-based operand).
+	pushRAX := !isDstRAX
+	pushRDX := !isDstRDX || isSrc2RDX
+	if pushRAX {
 		buf = append(buf, emitPushReg(RAX)...)
 	}
-	if !isDstRDX {
+	if pushRDX {
 		buf = append(buf, emitPushReg(RDX)...)
 	}
 
@@ -292,11 +301,19 @@ func generateRemSOp64(inst Instruction) []byte {
 
 	// end: restore
 	endOff := len(buf)
-	if !isDstRDX {
-		buf = append(buf, emitPopReg(RDX)...)
+	if pushRDX {
+		if !isDstRDX {
+			buf = append(buf, emitPopReg(RDX)...)
+		} else {
+			buf = append(buf, 0x48, 0x83, 0xC4, 0x08) // ADD RSP, 8
+		}
 	}
-	if !isDstRAX {
-		buf = append(buf, emitPopReg(RAX)...)
+	if pushRAX {
+		if !isDstRAX {
+			buf = append(buf, emitPopReg(RAX)...)
+		} else {
+			buf = append(buf, 0x48, 0x83, 0xC4, 0x08) // ADD RSP, 8
+		}
 	}
 
 	// patch branch offsets
@@ -316,10 +333,10 @@ func generateRemUOp32(inst Instruction) []byte {
 	dstInfo := regInfoList[dstIdx]
 
 	// Determine if dst conflicts with RAX/RDX
-	isDstRAX := dstIdx == 0
-	isDstRDX := dstIdx == 2
-	isSrc2RAX := src2Idx == 0
-	isSrc2RDX := src2Idx == 2
+	isDstRAX := dstInfo.Name == RAX.Name
+	isDstRDX := dstInfo.Name == RDX.Name
+	isSrc2RAX := src2Info.Name == RAX.Name
+	isSrc2RDX := src2Info.Name == RDX.Name
 
 	var code []byte
 
@@ -411,10 +428,10 @@ func generateDivUOp32(inst Instruction) []byte {
 	dstInfo := regInfoList[dstIdx]
 
 	// Determine if dst conflicts with RAX/RDX
-	isDstRAX := dstIdx == 0
-	isDstRDX := dstIdx == 2
-	isSrc2RAX := srcIdx2 == 0
-	isSrc2RDX := srcIdx2 == 2
+	isDstRAX := dstInfo.Name == RAX.Name
+	isDstRDX := dstInfo.Name == RDX.Name
+	isSrc2RAX := src2Info.Name == RAX.Name
+	isSrc2RDX := src2Info.Name == RDX.Name
 
 	var code []byte
 
@@ -513,9 +530,9 @@ func generateDivSOp32(inst Instruction) []byte {
 	dstInfo := regInfoList[dstIdx]
 
 	// Determine if dst conflicts with RAX/RDX
-	isDstRAX := dstIdx == 0
-	isDstRDX := dstIdx == 2
-	isSrc2RDX := src2Idx == 2
+	isDstRAX := dstInfo.Name == RAX.Name
+	isDstRDX := dstInfo.Name == RDX.Name
+	isSrc2RDX := src2Info.Name == RDX.Name
 
 	code := []byte{}
 	// Conditional spill: only push if we need to restore later
@@ -815,8 +832,9 @@ func generateROTL64() func(inst Instruction) []byte {
 		// 	b.Name, src2Idx,
 		// 	dst.Name, dstIdx)
 		// ─── 1) LOAD COUNT INTO CL ───
-		// If count isn't already in CL (reg 1) and we won't overwrite CL as the dst:
-		if src2Idx != 1 && dstIdx != 1 {
+		// If count isn't already in CL and we won't overwrite CL as the dst:
+		needLoadCountIntoCL := b.Name != RCX.Name && dst.Name != RCX.Name
+		if needLoadCountIntoCL {
 			// push rcx
 			code = append(code, emitPushReg(RCX)...)
 
@@ -848,7 +866,7 @@ func generateROTL64() func(inst Instruction) []byte {
 		)
 
 		// ─── 4) RESTORE RCX ───
-		if src2Idx != 1 && dstIdx != 1 {
+		if needLoadCountIntoCL {
 			code = append(code, emitPopReg(RCX)...) // pop rcx
 		}
 
@@ -893,19 +911,14 @@ func generateSHLO_L_64() func(inst Instruction) []byte {
 		src2 := regInfoList[src2Idx]
 		dst := regInfoList[dstIdx]
 
-		// Constants for RCX/RAX indices
-		const (
-			raxIdx = 0
-			rcxIdx = 1
-		)
-		rcx := regInfoList[rcxIdx]
-		rax := regInfoList[raxIdx]
+		rcx := RCX
+		rax := RAX
 
 		var code []byte
 
 		// Case 1: shift==dst
-		if src2Idx == dstIdx {
-			if dstIdx == rcxIdx {
+		if src2.Name == dst.Name {
+			if dst.Name == rcx.Name {
 				// shift==dst==RCX
 				code = append(code, emitPushReg(rax)...)
 				code = append(code, emitMovRegToReg64(rax, src2)...)
@@ -923,8 +936,8 @@ func generateSHLO_L_64() func(inst Instruction) []byte {
 			}
 
 			// Case 2: dst==RCX!=shift
-		} else if dstIdx == rcxIdx {
-			if src2Idx == raxIdx {
+		} else if dst.Name == rcx.Name {
+			if src2.Name == rax.Name {
 				// shift in RAX
 				code = append(code, emitPushReg(rax)...)
 				code = append(code, emitMovRegToReg64(rcx, src1)...)
@@ -946,9 +959,9 @@ func generateSHLO_L_64() func(inst Instruction) []byte {
 			// Case 3: dst!=RCX && shift!=dst
 		} else {
 			code = append(code, emitMovRegToReg64(dst, src1)...)
-			if src2Idx == rcxIdx {
+			if src2.Name == rcx.Name {
 				code = append(code, emitShiftOp64(opcode, regField, dst)...)
-			} else if src1Idx == rcxIdx {
+			} else if src1.Name == rcx.Name {
 				code = append(code, emitMovRegToReg64(rcx, src2)...)
 				code = append(code, emitShiftOp64(opcode, regField, dst)...)
 			} else {
@@ -1002,9 +1015,9 @@ func generateMulUpperOp64(mode string) func(inst Instruction) []byte {
 
 		var code []byte
 
-		// Save/restore RAX and RDX if they're not the destination
-		saveRAX := dstIdx != 0
-		saveRDX := dstIdx != 2
+		// Simple strategy: always save/restore RAX and RDX if needed
+		saveRAX := dst.Name != RAX.Name
+		saveRDX := dst.Name != RDX.Name
 
 		// Aliasing case: src2 is RAX and src1 is NOT RAX
 		// When we do MOV RAX, src1, we destroy the original value of src2
@@ -1050,7 +1063,7 @@ func generateMulUpperOp64(mode string) func(inst Instruction) []byte {
 		}
 
 		// Move high result (RDX) to destination if needed
-		if dstIdx != 2 {
+		if dst.Name != RDX.Name {
 			code = append(code, emitMovRegToReg64(dst, RDX)...)
 		}
 
@@ -1350,91 +1363,28 @@ func generateSHLO_R_32() func(inst Instruction) []byte {
 
 func generateROT_R_32() func(inst Instruction) []byte {
 	return func(inst Instruction) []byte {
-		opcode := byte(X86_OP_GROUP2_RM_CL)
-		regField := byte(1)
-		// regA = value, regB = shift, dst = destination
 		regAIdx, regBIdx, dstIdx := extractThreeRegs(inst.Args)
 		srcA := regInfoList[regAIdx]
 		srcB := regInfoList[regBIdx]
 		dst := regInfoList[dstIdx]
 
-		// Formal indices for RAX/RCX in regInfoList
-		const (
-			raxIdx = 0
-			rcxIdx = 1
-		)
-
 		var code []byte
 
-		// ── Special case: shift register == dst ────────────────────
+		// Special case: shift register aliases dst. We must capture the shift count (CL) before overwriting dst.
 		if regBIdx == dstIdx {
-			// 1) save RCX
-			code = append(code, emitPushReg(RCX)...) // PUSH RCX
-
-			// 2) MOV ECX, dst  ; CL = old shift count
-			rex := byte(X86_REX_BASE)
-			if dst.REXBit == 1 {
-				rex |= X86_REX_B
-			} // REX.B
-			mod := byte(X86_MOD_REGISTER<<6 | (dst.RegBits << 3) | byte(rcxIdx))
-			code = append(code, rex, X86_OP_MOV_R_RM, mod) // X86_OP_MOV_R_RM /r = MOV r32, r/m32
-
-			// 3) MOV dst, srcA
-			rex = byte(X86_REX_BASE)
-			if srcA.REXBit == 1 {
-				rex |= X86_REX_R
-			} // REX.R
-			if dst.REXBit == 1 {
-				rex |= X86_REX_B
-			} // REX.B
-			mod = byte(X86_MOD_REGISTER<<6 | (srcA.RegBits << 3) | dst.RegBits)
-			code = append(code, rex, X86_OP_MOV_RM_R, mod) // X86_OP_MOV_RM_R /r = MOV r/m32, r32
-
-			// 4) ROR dst, CL
-			rex = byte(X86_REX_BASE)
-			if dst.REXBit == 1 {
-				rex |= X86_REX_B
-			}
-			mod = byte(X86_MOD_REGISTER<<6 | (regField << 3) | dst.RegBits)
-			code = append(code, rex, opcode, mod)
-
-			// 5) restore RCX
-			code = append(code, emitPopReg(RCX)...) // POP RCX
-
+			code = append(code, emitPushReg(RCX)...)
+			code = append(code, emitMovEcxFromReg32(srcB)...)
+			code = append(code, emitMovReg32(dst, srcA)...)
+			code = append(code, emitShiftReg32ByCl(dst, 1)...)
+			code = append(code, emitPopReg(RCX)...)
 			return code
 		}
 
-		// ── Normal case: dst != shift ─────────────────────────────
-		// 1) MOV dst, srcA
-		rex1 := byte(X86_REX_BASE)
-		if srcA.REXBit == 1 {
-			rex1 |= X86_REX_R
-		}
-		if dst.REXBit == 1 {
-			rex1 |= X86_REX_B
-		}
-		m1 := byte(X86_MOD_REGISTER<<6 | (srcA.RegBits << 3) | dst.RegBits)
-		code = append(code, rex1, X86_OP_MOV_RM_R, m1)
-
-		// 2) XCHG ECX, srcB      ; put shift into CL
-		rexX := byte(X86_REX_BASE)
-		if srcB.REXBit == 1 {
-			rexX |= X86_REX_R
-		}
-		mX := byte(X86_MOD_REGISTER<<6 | (srcB.RegBits << 3) | byte(rcxIdx))
-		code = append(code, rexX, X86_OP_XCHG_RM_R, mX)
-
-		// 3) ROR dst, CL
-		rex2 := byte(X86_REX_BASE)
-		if dst.REXBit == 1 {
-			rex2 |= X86_REX_B
-		}
-		m2 := byte(X86_MOD_REGISTER<<6 | (regField << 3) | dst.RegBits)
-		code = append(code, rex2, opcode, m2)
-
-		// 4) XCHG ECX, srcB      ; restore original CL/source
-		code = append(code, rexX, X86_OP_XCHG_RM_R, mX)
-
+		// Normal case: swap shift count into ECX/CL, rotate, then restore.
+		code = append(code, emitMovReg32(dst, srcA)...)
+		code = append(code, emitXchgReg32Reg32(srcB, RCX)...)
+		code = append(code, emitShiftReg32ByCl(dst, 1)...)
+		code = append(code, emitXchgReg32Reg32(srcB, RCX)...)
 		return code
 	}
 }
@@ -1482,6 +1432,8 @@ func generateDivSOp64(inst Instruction) []byte {
 	dstInfo := regInfoList[dstIdx]
 
 	code := []byte{}
+	isDstRAX := dstInfo.Name == RAX.Name
+	isDstRDX := dstInfo.Name == RDX.Name
 
 	// Spill RAX/RDX
 	code = append(code, emitPushReg(RAX)...)
@@ -1554,9 +1506,17 @@ func generateDivSOp64(inst Instruction) []byte {
 	binary.LittleEndian.PutUint32(code[jmpEndAll+1:], uint32(endAllPos-(jmpEndAll+5)))
 	binary.LittleEndian.PutUint32(code[jmpEndAll2+1:], uint32(endAllPos-(jmpEndAll2+5)))
 
-	// restore RDX, RAX
-	code = append(code, emitPopReg(RDX)...)
-	code = append(code, emitPopReg(RAX)...)
+	// restore / discard saved RDX, RAX (do not clobber result registers)
+	if !isDstRDX {
+		code = append(code, emitPopReg(RDX)...)
+	} else {
+		code = append(code, 0x48, 0x83, 0xC4, 0x08) // ADD RSP, 8
+	}
+	if !isDstRAX {
+		code = append(code, emitPopReg(RAX)...)
+	} else {
+		code = append(code, 0x48, 0x83, 0xC4, 0x08) // ADD RSP, 8
+	}
 
 	return code
 }
@@ -1567,6 +1527,8 @@ func generateDivUOp64(inst Instruction) []byte {
 	dst := regInfoList[dstIdx]
 
 	code := []byte{}
+	isDstRAX := dst.Name == RAX.Name
+	isDstRDX := dst.Name == RDX.Name
 
 	// ── spill RAX/RDX on the stack ──
 	code = append(code, emitPushReg(RAX)...)
@@ -1609,9 +1571,17 @@ func generateDivUOp64(inst Instruction) []byte {
 	endPos := len(code)
 	binary.LittleEndian.PutUint32(code[jmpPos+1:], uint32(endPos-(jmpPos+5)))
 
-	// ── restore RDX/RAX from stack ──
-	code = append(code, emitPopReg(RDX)...)
-	code = append(code, emitPopReg(RAX)...)
+	// ── restore / discard saved RDX/RAX from stack ──
+	if !isDstRDX {
+		code = append(code, emitPopReg(RDX)...)
+	} else {
+		code = append(code, 0x48, 0x83, 0xC4, 0x08) // ADD RSP, 8
+	}
+	if !isDstRAX {
+		code = append(code, emitPopReg(RAX)...)
+	} else {
+		code = append(code, 0x48, 0x83, 0xC4, 0x08) // ADD RSP, 8
+	}
 
 	return code
 }
@@ -1668,7 +1638,7 @@ func generateRemSOp32(inst Instruction) []byte {
 	// 11) CDQ                   ; sign‐extend EAX → EDX:EAX
 	code = append(code, emitCdq()...)
 	// 12) IDIV   src2 - handle src2 conflict with RDX
-	isSrc2RDX := src2Idx == 2
+	isSrc2RDX := src2Info.Name == RDX.Name
 	if isSrc2RDX {
 		// If divisor is RDX, use the spilled original RDX from [RSP]
 		code = append(code, emitIdivMemStackRemSOp32RDX()...)
@@ -1688,8 +1658,19 @@ func generateRemSOp32(inst Instruction) []byte {
 
 	// --- end label -------------------------------------------------
 	end := len(code)
-	// restore RDX, RAX
-	code = append(code, emitPopRdxRax()...)
+	// restore / discard saved RDX, RAX (do not clobber result registers)
+	isDstRAX := dstInfo.Name == RAX.Name
+	isDstRDX := dstInfo.Name == RDX.Name
+	if !isDstRDX {
+		code = append(code, emitPopReg(RDX)...)
+	} else {
+		code = append(code, 0x48, 0x83, 0xC4, 0x08) // ADD RSP, 8
+	}
+	if !isDstRAX {
+		code = append(code, emitPopReg(RAX)...)
+	} else {
+		code = append(code, 0x48, 0x83, 0xC4, 0x08) // ADD RSP, 8
+	}
 
 	// ─── patch all the jumps ───────────────────────────────────────────────────
 	// JE zeroDiv

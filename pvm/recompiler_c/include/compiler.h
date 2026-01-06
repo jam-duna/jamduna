@@ -64,6 +64,7 @@ struct compiler {
     bool is_charging_gas;
     bool is_pc_counting;
     bool is_block_counting;
+    bool is_child;
 
     // Compiled basic blocks (for later jump patching)
     basic_block_t** basic_blocks;
@@ -113,6 +114,15 @@ int compiler_set_jump_table(compiler_t* compiler,
 int compiler_set_bitmask(compiler_t* compiler,
                              const uint8_t* bitmask,
                              uint32_t size);
+
+/**
+ * Set whether this compiler instance is used for a child VM.
+ * Matches Go's Compiler.SetIsChild; currently used for parity knobs.
+ * @param compiler Compiler instance
+ * @param is_child Non-zero to enable child mode
+ * @return 0 on success, negative on error
+ */
+int compiler_set_is_child(compiler_t* compiler, int is_child);
 
 /**
  * Compile PVM bytecode to x86 machine code (matches Go's CompileX86Code)

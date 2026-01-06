@@ -451,8 +451,8 @@ func (vm *X86Compiler) initStartCode() {
 		code := encodeMem64ToReg(i, BaseRegIndex, offset)
 		vm.startCode = append(vm.startCode, code...)
 	}
-	// Adjust R12 from regDumpAddr to realMemAddr: R12 = regDumpAddr + regMemsize
-	vm.startCode = append(vm.startCode, emitAddR12Imm32(regMemsize)...)
+	// Adjust BaseReg from regDumpAddr to realMemAddr: BaseReg = regDumpAddr + regMemsize
+	vm.startCode = append(vm.startCode, emitAddRegImm32Force81(BaseReg, regMemsize)...)
 	// padding with jump to the entry point
 	vm.startCode = append(vm.startCode, X86_OP_JMP_REL32) // JMP rel32
 	// use entryPatch as a placeholder 0x99999999
@@ -461,7 +461,7 @@ func (vm *X86Compiler) initStartCode() {
 	vm.startCode = append(vm.startCode, patch...)
 
 	// Build exit code in temporary buffer
-	exitCode := emitSubR12Imm32(regMemsize)
+	exitCode := emitSubRegImm32Force81(BaseReg, regMemsize)
 	for i := 0; i < len(regInfoList); i++ {
 		if i == BaseRegIndex {
 			continue // skip R12 into [R12]
@@ -726,7 +726,9 @@ func DisassembleInstructions(code []byte) []X86Instr {
 	return instructions
 }
 
-const entryOffset = 82
+// entryOffset is the byte offset of the JMP rel32 opcode in initStartCode's prologue.
+// It depends on the exact prologue encoding (register mapping / BaseReg choice).
+const entryOffset = 69
 const regDumpOffset = 2
 
 func (rvm *X86Compiler) Patch() {
@@ -1388,28 +1390,35 @@ func BuildWriteContextSlotCode(slotIndex int, value uint64, size int) ([]byte, e
 		emitImm32(uint32(value))
 	}
 
-	// Temporarily shift R12 from the real memory base to the register-dump slot.
-	code = append(code, emitSubR12Imm32(dumpOffset)...)
+	// Temporarily shift BaseReg from the real memory base to the register-dump slot.
+	code = append(code, emitSubRegImm32Force81(BaseReg, dumpOffset)...)
 
 	if slotOffset != 0 {
-		code = append(code, emitAddR12Imm32(slotOffset)...)
+		code = append(code, emitAddRegImm32Force81(BaseReg, slotOffset)...)
 	}
 
 	switch size {
 	case 8:
-		// 49 89 04 24        ; mov [r12], rax
-		emit(0x49, 0x89, 0x04, 0x24)
+		// mov [BaseReg], rax
+		// 49 89 04 24 for r12, but use generic SIB form: 48 89 84 24 disp32 would be [rsp+disp].
+		// Here we use SIB with base=BaseReg: modrm rm=100, sib base=BaseReg.
+		rex := buildREX(true, false, false, BaseReg.REXBit == 1)
+		modrm := buildModRM(0x02, 0, 0x04) // mod=10 disp32, reg=RAX(0), rm=100 (SIB)
+		sib := buildSIB(0, 4, BaseReg.RegBits)
+		emit(rex, X86_OP_MOV_RM_R, modrm, sib, 0, 0, 0, 0) // disp32=0
 	case 4:
-		// 41 89 04 24        ; mov [r12], eax
-		emit(0x41, 0x89, 0x04, 0x24)
+		rex := buildREX(false, false, false, BaseReg.REXBit == 1)
+		modrm := buildModRM(0x02, 0, 0x04) // mod=10 disp32, reg=EAX(0), rm=100 (SIB)
+		sib := buildSIB(0, 4, BaseReg.RegBits)
+		emit(rex, X86_OP_MOV_RM_R, modrm, sib, 0, 0, 0, 0) // disp32=0
 	}
 
 	if slotOffset != 0 {
-		code = append(code, emitSubR12Imm32(slotOffset)...)
+		code = append(code, emitSubRegImm32Force81(BaseReg, slotOffset)...)
 	}
 
-	// Restore R12 to the real memory base
-	code = append(code, emitAddR12Imm32(dumpOffset)...)
+	// Restore BaseReg to the real memory base
+	code = append(code, emitAddRegImm32Force81(BaseReg, dumpOffset)...)
 
 	// Restore RAX and return
 	code = append(code, emitPopReg(RAX)...)
@@ -1447,21 +1456,24 @@ func (vm *RecompilerVM) BuildWriteRipToContextSlotCode(slotIndex int) ([]byte, e
 	dumpOffset := uint32(dumpSize)
 
 	// Temporarily repoint R12 to the register dump buffer.
-	code = append(code, emitSubR12Imm32(dumpOffset)...)
+	code = append(code, emitSubRegImm32Force81(BaseReg, dumpOffset)...)
 
 	if slotOffset != 0 {
-		code = append(code, emitAddR12Imm32(slotOffset)...)
+		code = append(code, emitAddRegImm32Force81(BaseReg, slotOffset)...)
 	}
 
-	// 49 89 04 24          ; mov [r12], rax
-	emit(0x49, 0x89, 0x04, 0x24)
+	// mov [BaseReg], rax (use SIB form with base=BaseReg)
+	rex := buildREX(true, false, false, BaseReg.REXBit == 1)
+	modrm := buildModRM(0x02, 0, 0x04) // mod=10 disp32, reg=RAX(0), rm=100 (SIB)
+	sib := buildSIB(0, 4, BaseReg.RegBits)
+	emit(rex, X86_OP_MOV_RM_R, modrm, sib, 0, 0, 0, 0) // disp32=0
 
 	if slotOffset != 0 {
-		code = append(code, emitSubR12Imm32(slotOffset)...)
+		code = append(code, emitSubRegImm32Force81(BaseReg, slotOffset)...)
 	}
 
-	// Restore R12 to the real memory base
-	code = append(code, emitAddR12Imm32(dumpOffset)...)
+	// Restore BaseReg to the real memory base
+	code = append(code, emitAddRegImm32Force81(BaseReg, dumpOffset)...)
 
 	// Restore RAX
 	code = append(code, emitPopReg(RAX)...)

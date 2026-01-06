@@ -14,6 +14,7 @@ var (
 	RCX = X86Reg{"rcx", 1, 0} // Used for loop counters or intermediates
 	RDX = X86Reg{"rdx", 2, 0} // Often paired with rax for mul/div
 	RBX = X86Reg{"rbx", 3, 0}
+	RBP = X86Reg{"rbp", 5, 0}
 	RSI = X86Reg{"rsi", 6, 0} // Often used as function argument
 	RDI = X86Reg{"rdi", 7, 0} // Often used as function argument
 	R8  = X86Reg{"r8", 0, 1}  // Typically function argument #5
@@ -34,7 +35,10 @@ var (
 
 // regInfoList contains all available registers in allocation order
 var regInfoList = []X86Reg{
-	RAX, RCX, RDX, RBX, RSI, RDI, R8, R9, R10, R11, R13, R14, R15, R12,
+	// PVM regs [0..12] (13 regs): RCX is intentionally excluded and treated as a scratch register.
+	RAX, RDX, RBX, RSI, RDI, R8, R9, R10, R11, R12, R13, R14, R15,
+	// Base register (index 13): used as memory base for guest RAM and for regDump addressing.
+	RBP,
 }
 
 // BaseRegIndex is the index for the base register used in memory operations

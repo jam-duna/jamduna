@@ -346,7 +346,7 @@ type BackendResult struct {
 }
 
 func TestPVMAll(t *testing.T) {
-	mode := "vmgo" // change to "C_FFI" to test the C backend
+	mode := "recompiler" // change to "C_FFI" to test the C backend
 	log.InitLogger("debug")
 	// Directory containing the JSON files
 	dir := "programs"

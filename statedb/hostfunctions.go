@@ -2017,7 +2017,7 @@ func (vm *VM) hostLog() {
 	if serviceMetadata == "" {
 		serviceMetadata = "unknown"
 	}
-
+	vm.WriteRegister(7, WHAT)
 	if vm.IsChild {
 		serviceMetadata = fmt.Sprintf("%s-child", serviceMetadata)
 	}

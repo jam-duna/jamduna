@@ -35,7 +35,7 @@ func TestBundleExecution(t *testing.T) {
 		PvmVerifyDir = "" // Clear direct verify dir
 	} else if testingBackend == BackendCompiler {
 		// Recompiler verify mode
-		recompiler.EnableVerifyMode = false
+		// recompiler.EnableVerifyMode = true
 		// recompiler.VerifyBaseDir = traceBaseDir
 		recompiler.ALWAYS_COMPILE = true
 	}

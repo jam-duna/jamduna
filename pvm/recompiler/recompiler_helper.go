@@ -611,6 +611,24 @@ func emitCmpRegImm32Force81(reg X86Reg, imm int32) []byte {
 	return result
 }
 
+// emitAddRegImm32Force81 emits: ADD reg, imm32 using opcode 0x81 (forces 32-bit immediate form).
+func emitAddRegImm32Force81(reg X86Reg, imm uint32) []byte {
+	rex := buildREX(true, false, false, reg.REXBit == 1)
+	modrm := buildModRM(X86_MOD_REGISTER, X86_REG_ADD, reg.RegBits) // /0 for ADD
+	result := []byte{rex, 0x81, modrm}
+	result = append(result, encodeU32(imm)...)
+	return result
+}
+
+// emitSubRegImm32Force81 emits: SUB reg, imm32 using opcode 0x81 (forces 32-bit immediate form).
+func emitSubRegImm32Force81(reg X86Reg, imm uint32) []byte {
+	rex := buildREX(true, false, false, reg.REXBit == 1)
+	modrm := buildModRM(X86_MOD_REGISTER, X86_REG_SUB, reg.RegBits) // /5 for SUB
+	result := []byte{rex, 0x81, modrm}
+	result = append(result, encodeU32(imm)...)
+	return result
+}
+
 // ================================================================================================
 // Push/Pop Instructions
 // ================================================================================================
@@ -1229,6 +1247,12 @@ func emitAluRegReg(reg1, reg2 X86Reg, subcode byte) []byte {
 // emitLoadWithSIB emits: Load instruction with SIB addressing [base + index*1 + disp32]
 // Used for patterns like MOVSX reg, [base + index + disp32]
 func emitLoadWithSIB(dst, base, index X86Reg, disp32 int32, opcodeBytes []byte, is64bit bool, prefix byte) []byte {
+	// x86 SIB encoding cannot use RSP/R12 as the index register (index field 0b100 means "no index").
+	// Since scale=1 here, [base+index+disp] is commutative; swap to keep index encodable.
+	if index.RegBits&0x07 == 4 && base.RegBits&0x07 != 4 {
+		base, index = index, base
+	}
+
 	// Construct REX prefix: W=1 for 64-bit, R/X/B for high registers
 	rex := buildREX(is64bit, dst.REXBit != 0, index.REXBit != 0, base.REXBit != 0)
 
@@ -1257,6 +1281,12 @@ func emitLoadWithSIB(dst, base, index X86Reg, disp32 int32, opcodeBytes []byte, 
 func emitStoreWithSIB(src, base, index X86Reg, disp32 int32, size int) []byte {
 	var buf []byte
 
+	// x86 SIB encoding cannot use RSP/R12 as the index register (index field 0b100 means "no index").
+	// Since scale=1 here, [base+index+disp] is commutative; swap to keep index encodable.
+	if index.RegBits&0x07 == 4 && base.RegBits&0x07 != 4 {
+		base, index = index, base
+	}
+
 	// 1) For 16-bit word, add operand-size override prefix
 	if size == 2 {
 		buf = append(buf, 0x66)
@@ -1264,7 +1294,14 @@ func emitStoreWithSIB(src, base, index X86Reg, disp32 int32, size int) []byte {
 
 	// 2) Compute REX prefix
 	rex := buildREX(size == 8, src.REXBit == 1, index.REXBit == 1, base.REXBit == 1)
-	if rex != 0x40 {
+	// For 8-bit stores, we must emit a REX prefix even when it's "empty" (0x40) if the
+	// source register is one of {SPL,BPL,SIL,DIL}. Without a REX prefix, ModRM reg codes
+	// 4..7 refer to {AH,CH,DH,BH} instead.
+	needRex := rex != 0x40
+	if size == 1 && src.REXBit == 0 && src.RegBits >= 4 {
+		needRex = true
+	}
+	if needRex {
 		buf = append(buf, rex)
 	}
 
@@ -1327,6 +1364,12 @@ func emitAddRegImm32WithManualConstruction(reg X86Reg, imm uint64) []byte {
 // emitStoreImmIndWithSIB emits: MOV [base + index*1 + disp32], imm (with SIB addressing)
 func emitStoreImmIndWithSIB(idx X86Reg, base X86Reg, disp uint32, imm []byte, opcode byte, prefix byte) []byte {
 	var buf []byte
+
+	// x86 SIB encoding cannot use RSP/R12 as the index register (index field 0b100 means "no index").
+	// Since scale=1 here, [base+idx+disp] is commutative; swap to keep index encodable.
+	if idx.RegBits&0x07 == 4 && base.RegBits&0x07 != 4 {
+		base, idx = idx, base
+	}
 
 	// Add prefix if specified (e.g., 0x66 for 16-bit)
 	if prefix != 0 {
@@ -2014,7 +2057,7 @@ func emitDiv32(src X86Reg) []byte {
 // emitDivMemStackRemUOp32RAX emits: DIV dword ptr [RSP+8] (for src2==RAX case in 32-bit)
 func emitDivMemStackRemUOp32RAX() []byte {
 	return []byte{
-		0xF7, 0xB4, 0x24,       // F7 /6 rm=4 (SIB follows), mod=10 (disp32)
+		0xF7, 0xB4, 0x24, // F7 /6 rm=4 (SIB follows), mod=10 (disp32)
 		0x08, 0x00, 0x00, 0x00, // disp32 = 8
 	}
 }
@@ -2023,7 +2066,7 @@ func emitDivMemStackRemUOp32RAX() []byte {
 func emitDivMemStackRemUOp32RDX() []byte {
 	return []byte{
 		0xF7, 0x34, // F7 /6 rm=4 (SIB follows), mod=00
-		0x24,       // SIB: scale=0,index=RSP,base=RSP
+		0x24, // SIB: scale=0,index=RSP,base=RSP
 	}
 }
 
@@ -2031,7 +2074,7 @@ func emitDivMemStackRemUOp32RDX() []byte {
 func emitIdivMemStackRemSOp32RDX() []byte {
 	return []byte{
 		0xF7, 0x3C, // F7 /7 rm=4 (SIB follows), mod=00
-		0x24,       // SIB: scale=0,index=RSP,base=RSP
+		0x24, // SIB: scale=0,index=RSP,base=RSP
 	}
 }
 

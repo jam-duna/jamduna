@@ -83,6 +83,7 @@ static x86_encode_result_t emit_alu_reg_reg64(x86_codegen_t* gen, x86_reg_t dst,
 // Forward declarations for emit functions used in scratch register logic
 static x86_encode_result_t emit_push_reg(x86_codegen_t* gen, x86_reg_t reg);
 static x86_encode_result_t emit_pop_reg(x86_codegen_t* gen, x86_reg_t reg);
+static x86_encode_result_t emit_add_rsp8(x86_codegen_t* gen);
 static x86_encode_result_t emit_mov_reg_to_reg64(x86_codegen_t* gen, x86_reg_t dst, x86_reg_t src);
 static x86_encode_result_t emit_sub_reg64(x86_codegen_t* gen, x86_reg_t dst, x86_reg_t src);
 
@@ -246,9 +247,14 @@ static uint8_t build_rex_always(bool w, bool r, bool x, bool b) {
 
 // extractThreeRegs (utils.go:451-455)
 static void extract_three_regs(const uint8_t* args, uint8_t* r1, uint8_t* r2, uint8_t* rd) {
-    *r1 = args[0] & 0x0F;       // min(12, int(args[0]&0x0F))
-    *r2 = (args[0] >> 4) & 0x0F; // min(12, int(args[0]>>4))
-    *rd = args[1] & 0x0F;       // min(12, int(args[1]))
+    // Match Go exactly: clamp each decoded 4-bit field to max register index 12.
+    uint8_t raw1 = args[0] & 0x0F;
+    uint8_t raw2 = (args[0] >> 4) & 0x0F;
+    uint8_t rawd = args[1] & 0x0F;
+
+    *r1 = raw1 > 12 ? 12 : raw1; // min(12, int(args[0]&0x0F))
+    *r2 = raw2 > 12 ? 12 : raw2; // min(12, int(args[0]>>4))
+    *rd = rawd > 12 ? 12 : rawd; // min(12, int(args[1]))
 }
 
 // extractOneRegOneImm (utils.go:347-356) - simplified version for 32-bit immediates
@@ -469,9 +475,8 @@ static x86_encode_result_t generate_binary_op_64(x86_codegen_t* gen, const instr
             src1_idx = src2_idx;
             src2_idx = temp;
         } else {
-            // For non-commutative operations, we MUST use a scratch register (BaseReg)
-            // Use X86_R12 as scratch register (BaseReg equivalent in C)
-            x86_reg_t base_reg = X86_R12;
+            // For non-commutative operations, we MUST use a scratch register (BaseReg).
+            x86_reg_t base_reg = X86_RBP;
             x86_reg_t src1_x86 = pvm_reg_to_x86[src1_idx];
             x86_reg_t src2_x86 = pvm_reg_to_x86[src2_idx];
             x86_reg_t dst_x86 = pvm_reg_to_x86[dst_idx];
@@ -1152,7 +1157,24 @@ static x86_encode_result_t emit_mov_reg_to_reg_with_manual_construction(x86_code
 
 // emitMovEcxFromReg32: MOV ECX, reg32 (specific to Go patterns)
 static x86_encode_result_t emit_mov_ecx_from_reg32(x86_codegen_t* gen, x86_reg_t src) {
-    return emit_mov_reg_reg32(gen, X86_RCX, src);
+    x86_encode_result_t result = {0};
+    const reg_info_t* src_info = &reg_info_list[src];
+
+    if (x86_codegen_ensure_capacity(gen, 3) != 0) return result;
+    uint32_t start_offset = gen->offset;
+
+    // Go: rex := buildREX(false, false, false, src.REXBit == 1)
+    uint8_t rex = build_rex(false, false, false, src_info->rex_bit);
+    gen->buffer[gen->offset++] = rex;
+
+    // 0x8B /r = MOV r32, r/m32 (dest=ECX)
+    gen->buffer[gen->offset++] = X86_OP_MOV_R_RM;
+    gen->buffer[gen->offset++] = 0xC0 | (1 << 3) | src_info->reg_bits; // reg=ECX (1), rm=src
+
+    result.code = &gen->buffer[start_offset];
+    result.size = gen->offset - start_offset;
+    result.offset = start_offset;
+    return result;
 }
 
 // emitMovEaxFromReg32: MOV EAX, reg32 (specific to Go patterns) - uses 0x8B opcode
@@ -1324,17 +1346,65 @@ static x86_encode_result_t emit_mov_eax_from_reg_rem_u_op32(x86_codegen_t* gen, 
 // Result MOV functions for division/remainder operations
 // emitMovDstFromRaxDivUOp64: MOV dst, RAX (store division result 64-bit)
 static x86_encode_result_t emit_mov_dst_from_rax_div_u_op64(x86_codegen_t* gen, x86_reg_t dst) {
-    return emit_mov_reg_to_reg_with_manual_construction(gen, dst, X86_RAX);
+    x86_encode_result_t result = {0};
+    const reg_info_t* dst_info = &reg_info_list[dst];
+    const reg_info_t* rax_info = &reg_info_list[X86_RAX];
+
+    if (x86_codegen_ensure_capacity(gen, 3) != 0) return result;
+    uint32_t start_offset = gen->offset;
+
+    uint8_t rex = build_rex(true, rax_info->rex_bit, false, dst_info->rex_bit);
+    uint8_t modrm = 0xC0 | (rax_info->reg_bits << 3) | dst_info->reg_bits; // mod=11, reg=RAX, rm=dst
+    gen->buffer[gen->offset++] = rex;
+    gen->buffer[gen->offset++] = X86_OP_MOV_RM_R; // 0x89
+    gen->buffer[gen->offset++] = modrm;
+
+    result.code = &gen->buffer[start_offset];
+    result.size = gen->offset - start_offset;
+    result.offset = start_offset;
+    return result;
 }
 
 // emitMovDstFromRdxRemUOp64: MOV dst, RDX (store remainder result 64-bit)
 static x86_encode_result_t emit_mov_dst_from_rdx_rem_u_op64(x86_codegen_t* gen, x86_reg_t dst) {
-    return emit_mov_reg_to_reg_with_manual_construction(gen, dst, X86_RDX);
+    x86_encode_result_t result = {0};
+    const reg_info_t* dst_info = &reg_info_list[dst];
+    const reg_info_t* rdx_info = &reg_info_list[X86_RDX];
+
+    if (x86_codegen_ensure_capacity(gen, 3) != 0) return result;
+    uint32_t start_offset = gen->offset;
+
+    uint8_t rex = build_rex(true, rdx_info->rex_bit, false, dst_info->rex_bit);
+    uint8_t modrm = 0xC0 | (rdx_info->reg_bits << 3) | dst_info->reg_bits; // mod=11, reg=RDX, rm=dst
+    gen->buffer[gen->offset++] = rex;
+    gen->buffer[gen->offset++] = X86_OP_MOV_RM_R; // 0x89
+    gen->buffer[gen->offset++] = modrm;
+
+    result.code = &gen->buffer[start_offset];
+    result.size = gen->offset - start_offset;
+    result.offset = start_offset;
+    return result;
 }
 
 // emitMovDstFromRaxRemUOp64: MOV dst, RAX (store remainder result when in RAX)
 static x86_encode_result_t emit_mov_dst_from_rax_rem_u_op64(x86_codegen_t* gen, x86_reg_t dst) {
-    return emit_mov_reg_to_reg_with_manual_construction(gen, dst, X86_RAX);
+    x86_encode_result_t result = {0};
+    const reg_info_t* dst_info = &reg_info_list[dst];
+    const reg_info_t* rax_info = &reg_info_list[X86_RAX];
+
+    if (x86_codegen_ensure_capacity(gen, 3) != 0) return result;
+    uint32_t start_offset = gen->offset;
+
+    uint8_t rex = build_rex(true, rax_info->rex_bit, false, dst_info->rex_bit);
+    uint8_t modrm = 0xC0 | (rax_info->reg_bits << 3) | dst_info->reg_bits; // mod=11, reg=RAX, rm=dst
+    gen->buffer[gen->offset++] = rex;
+    gen->buffer[gen->offset++] = X86_OP_MOV_RM_R; // 0x89
+    gen->buffer[gen->offset++] = modrm;
+
+    result.code = &gen->buffer[start_offset];
+    result.size = gen->offset - start_offset;
+    result.offset = start_offset;
+    return result;
 }
 
 // 32-bit result functions
@@ -3922,30 +3992,23 @@ static x86_encode_result_t generate_rot_r_32(x86_codegen_t* gen, const instructi
         x86_encode_result_t push_result = emit_push_reg(gen, X86_RCX);
         if (push_result.size == 0) return result;
         
-        // 2) MOV ECX, dst (CL = old shift count)
-        // Go: rex = X86_REX_BASE + dst.REXBit, mod = (dst.RegBits << 3) | rcxIdx
-        uint8_t rex = 0x40; // X86_REX_BASE
         const reg_info_t* dst_info = &reg_info_list[dst];
-        if (dst_info->rex_bit) rex |= 0x01; // REX.B
-        uint8_t mod = 0xC0 | (dst_info->reg_bits << 3) | 0x01; // rcxIdx = 1
-        gen->buffer[gen->offset++] = rex;
-        gen->buffer[gen->offset++] = 0x8B; // MOV r32, r/m32
-        gen->buffer[gen->offset++] = mod;
-        
-        // 3) MOV dst, regA 
         const reg_info_t* regA_info = &reg_info_list[regA];
-        rex = 0x40; // X86_REX_BASE
-        if (regA_info->rex_bit) rex |= 0x04; // REX.R
-        if (dst_info->rex_bit) rex |= 0x01;   // REX.B
-        mod = 0xC0 | (regA_info->reg_bits << 3) | dst_info->reg_bits;
-        gen->buffer[gen->offset++] = rex;
-        gen->buffer[gen->offset++] = 0x89; // MOV r/m32, r32
-        gen->buffer[gen->offset++] = mod;
+        const reg_info_t* regB_info = &reg_info_list[regB];
+
+        // 2) MOV ECX, regB (shift count) - matches Go's emitMovEcxFromReg32
+        gen->buffer[gen->offset++] = build_rex(false, false, false, regB_info->rex_bit);
+        gen->buffer[gen->offset++] = X86_OP_MOV_R_RM; // 0x8B
+        gen->buffer[gen->offset++] = 0xC0 | (1 << 3) | regB_info->reg_bits; // reg=ECX (1), rm=regB
+        
+        // 3) MOV r32_dst, r32_regA - matches Go's emitMovReg32
+        gen->buffer[gen->offset++] = build_rex(false, dst_info->rex_bit, false, regA_info->rex_bit);
+        gen->buffer[gen->offset++] = X86_OP_MOV_R_RM; // 0x8B
+        gen->buffer[gen->offset++] = 0xC0 | (dst_info->reg_bits << 3) | regA_info->reg_bits;
         
         // 4) ROR dst, CL - opcode D3, regField = 1 (ROR)
-        rex = 0x40; // X86_REX_BASE
-        if (dst_info->rex_bit) rex |= 0x01; // REX.B
-        mod = 0xC0 | (0x01 << 3) | dst_info->reg_bits; // regField = 1 for ROR
+        uint8_t rex = 0x40 | (dst_info->rex_bit ? 0x01 : 0x00);
+        uint8_t mod = 0xC0 | (0x01 << 3) | dst_info->reg_bits; // regField = 1 for ROR
         gen->buffer[gen->offset++] = rex;
         gen->buffer[gen->offset++] = 0xD3; // Shift/rotate by CL
         gen->buffer[gen->offset++] = mod;
@@ -3955,17 +4018,13 @@ static x86_encode_result_t generate_rot_r_32(x86_codegen_t* gen, const instructi
         if (pop_result.size == 0) return result;
     } else {
         // Normal case: dst != shift
-        // 1) MOV dst, regA (32-bit operation, no W bit)
+        // 1) MOV r32_dst, r32_regA (matches Go's emitMovReg32)
         const reg_info_t* regA_info = &reg_info_list[regA];
         const reg_info_t* dst_info = &reg_info_list[dst];
-        
-        uint8_t rex1 = 0x40; // X86_REX_BASE
-        if (regA_info->rex_bit) rex1 |= 0x04; // REX.R
-        if (dst_info->rex_bit) rex1 |= 0x01;  // REX.B
-        uint8_t mod1 = 0xC0 | (regA_info->reg_bits << 3) | dst_info->reg_bits;
-        gen->buffer[gen->offset++] = rex1;
-        gen->buffer[gen->offset++] = 0x89; // MOV r/m32, r32
-        gen->buffer[gen->offset++] = mod1;
+
+        gen->buffer[gen->offset++] = build_rex(false, dst_info->rex_bit, false, regA_info->rex_bit);
+        gen->buffer[gen->offset++] = X86_OP_MOV_R_RM; // 0x8B
+        gen->buffer[gen->offset++] = 0xC0 | (dst_info->reg_bits << 3) | regA_info->reg_bits;
         
         // 2) XCHG ECX, regB (32-bit operation, no W bit)  
         const reg_info_t* regB_info = &reg_info_list[regB];
@@ -4303,8 +4362,8 @@ static x86_encode_result_t generate_mul_upper_u_u(x86_codegen_t* gen, const inst
     x86_reg_t dst = pvm_reg_to_x86[dst_idx];
     
     // Determine if we need to save RAX and RDX (based on Go logic)
-    bool save_rax = (dst_idx != 0);  // RAX is PVM register 0
-    bool save_rdx = (dst_idx != 2);  // RDX is PVM register 2
+    bool save_rax = (dst != X86_RAX);
+    bool save_rdx = (dst != X86_RDX);
     
     // 1) Save RAX if needed
     if (save_rax) {
@@ -4342,7 +4401,7 @@ static x86_encode_result_t generate_mul_upper_u_u(x86_codegen_t* gen, const inst
     if (mul_result.size == 0) return result;
     
     // 5) MOV dst, RDX (high part of result goes to dst)
-    if (dst_idx != 2) {  // Only move if dst != RDX
+    if (dst != X86_RDX) {  // Only move if dst != RDX
         x86_encode_result_t mov_dst = emit_mov_reg_to_reg64(gen, dst, X86_RDX);
         if (mov_dst.size == 0) return result;
     }
@@ -4749,12 +4808,16 @@ static x86_encode_result_t generate_jump_indirect(x86_codegen_t* gen, const inst
     gen->buffer[gen->offset++] = (offset >> 16) & 0xFF;
     gen->buffer[gen->offset++] = (offset >> 24) & 0xFF;
 
-    // 4) JMP [R12+disp32] with REX prefix - matches Go exactly (49 FF A4 24 + 4 bytes disp)
+    // 4) JMP [BaseReg+disp32] with REX prefix - matches Go emitJmpRegMemDisp(BaseReg, disp)
+    const x86_reg_t base_reg = X86_RBP;
+    const reg_info_t* base_info = &reg_info_list[base_reg];
     if (x86_codegen_ensure_capacity(gen, 8) != 0) return result;
-    gen->buffer[gen->offset++] = 0x49; // REX.WB (W=0, B=1 for R12)
+    gen->buffer[gen->offset++] = build_rex(true, false, false, base_info->rex_bit);
     gen->buffer[gen->offset++] = 0xFF; // JMP r/m64
-    gen->buffer[gen->offset++] = 0xA4; // ModRM: mod=10, reg=100(JMP), rm=100(SIB)
-    gen->buffer[gen->offset++] = 0x24; // SIB: scale=00, index=100(none), base=100(R12)
+    gen->buffer[gen->offset++] = build_modrm(2, 4, base_info->reg_bits); // mod=10, /4, rm=base
+    if ((base_info->reg_bits & 0x07) == 4) {
+        gen->buffer[gen->offset++] = 0x24; // SIB for RSP/R12 base
+    }
     // Write 32-bit displacement in little-endian
     gen->buffer[gen->offset++] = (disp >> 0) & 0xFF;
     gen->buffer[gen->offset++] = (disp >> 8) & 0xFF;
@@ -4929,13 +4992,15 @@ static x86_encode_result_t generate_load_imm_jump_indirect(x86_codegen_t* gen, c
     gen->buffer[gen->offset++] = 0xFF;
 
     // 6) JMP [BaseReg + indirectJumpPointSlot*8-dumpSize] - generateJumpRegMem(BaseReg, disp)
-    const x86_reg_t base_reg = X86_R12; // BaseReg = R12
+    const x86_reg_t base_reg = X86_RBP; // BaseReg (matches Go BaseReg)
     const reg_info_t* base_reg_info = &reg_info_list[base_reg];
     uint8_t rex6 = build_rex(true, false, false, base_reg_info->rex_bit);
-    gen->buffer[gen->offset++] = rex6; // REX.WB for BaseReg (R12)
+    gen->buffer[gen->offset++] = rex6;
     gen->buffer[gen->offset++] = 0xFF; // JMP r/m64
-    gen->buffer[gen->offset++] = 0xA4; // ModRM: mod=10, reg=100(JMP), rm=100(SIB)
-    gen->buffer[gen->offset++] = 0x24; // SIB: scale=00, index=100(none), base=100(BaseReg)
+    gen->buffer[gen->offset++] = build_modrm(2, 4, base_reg_info->reg_bits); // mod=10 disp32, /4, rm=base
+    if ((base_reg_info->reg_bits & 0x07) == 4) {
+        gen->buffer[gen->offset++] = 0x24; // SIB for RSP/R12 base
+    }
     // Write 32-bit displacement in little-endian exactly like Go binary.LittleEndian.PutUint32
     gen->buffer[gen->offset++] = (uint8_t)(disp & 0xFF);
     gen->buffer[gen->offset++] = (uint8_t)((disp >> 8) & 0xFF);
@@ -4958,6 +5023,8 @@ static x86_encode_result_t generate_div_u_64(x86_codegen_t* gen, const instructi
     x86_reg_t src1 = pvm_reg_to_x86[src1_idx];
     x86_reg_t src2 = pvm_reg_to_x86[src2_idx]; 
     x86_reg_t dst = pvm_reg_to_x86[dst_idx];
+    bool is_dst_rax = (dst == X86_RAX);
+    bool is_dst_rdx = (dst == X86_RDX);
     
     if (x86_codegen_ensure_capacity(gen, 80) != 0) return result;
     
@@ -5048,9 +5115,17 @@ static x86_encode_result_t generate_div_u_64(x86_codegen_t* gen, const instructi
     gen->buffer[jmp_patch + 2] = (uint8_t)((jmp_offset >> 16) & 0xFF);
     gen->buffer[jmp_patch + 3] = (uint8_t)((jmp_offset >> 24) & 0xFF);
     
-    // POP RDX, RAX (restore registers)
-    gen->buffer[gen->offset++] = 0x5A; // POP RDX
-    gen->buffer[gen->offset++] = 0x58; // POP RAX
+    // Restore / discard saved RDX, RAX (do not clobber result registers)
+    if (!is_dst_rdx) {
+        gen->buffer[gen->offset++] = 0x5A; // POP RDX
+    } else {
+        emit_add_rsp8(gen);
+    }
+    if (!is_dst_rax) {
+        gen->buffer[gen->offset++] = 0x58; // POP RAX
+    } else {
+        emit_add_rsp8(gen);
+    }
     
     result.size = gen->offset - start_offset;
     result.code = &gen->buffer[start_offset];
@@ -5068,6 +5143,8 @@ static x86_encode_result_t generate_div_s_64(x86_codegen_t* gen, const instructi
     x86_reg_t src1 = pvm_reg_to_x86[src1_idx];
     x86_reg_t src2 = pvm_reg_to_x86[src2_idx];
     x86_reg_t dst = pvm_reg_to_x86[dst_idx];
+    bool is_dst_rax = (dst == X86_RAX);
+    bool is_dst_rdx = (dst == X86_RDX);
     
     if (x86_codegen_ensure_capacity(gen, 120) != 0) return result;
     
@@ -5237,9 +5314,17 @@ static x86_encode_result_t generate_div_s_64(x86_codegen_t* gen, const instructi
     gen->buffer[jmp_end_all_2_patch + 2] = (uint8_t)((jmp_end_all_2_offset >> 16) & 0xFF);
     gen->buffer[jmp_end_all_2_patch + 3] = (uint8_t)((jmp_end_all_2_offset >> 24) & 0xFF);
     
-    // POP RDX, RAX (restore registers)
-    gen->buffer[gen->offset++] = 0x5A; // POP RDX
-    gen->buffer[gen->offset++] = 0x58; // POP RAX
+    // Restore / discard saved RDX, RAX (do not clobber result registers)
+    if (!is_dst_rdx) {
+        gen->buffer[gen->offset++] = 0x5A; // POP RDX
+    } else {
+        emit_add_rsp8(gen);
+    }
+    if (!is_dst_rax) {
+        gen->buffer[gen->offset++] = 0x58; // POP RAX
+    } else {
+        emit_add_rsp8(gen);
+    }
     
     result.size = gen->offset - start_offset;
     result.code = &gen->buffer[start_offset];
@@ -5599,8 +5684,8 @@ static x86_encode_result_t generate_compare_branch_generic(x86_codegen_t* gen, c
     
     // Use regInfoList mapping (matching Go exactly)
     const x86_reg_t regInfoList[14] = {
-        X86_RAX, X86_RCX, X86_RDX, X86_RBX, X86_RSI, X86_RDI, X86_R8, X86_R9, 
-        X86_R10, X86_R11, X86_R13, X86_R14, X86_R15, X86_R12
+        X86_RAX, X86_RDX, X86_RBX, X86_RSI, X86_RDI, X86_R8, X86_R9,
+        X86_R10, X86_R11, X86_R12, X86_R13, X86_R14, X86_R15, X86_RBP,
     };
     
     x86_reg_t rA = (aIdx < 14) ? regInfoList[aIdx] : X86_RAX;
@@ -5692,11 +5777,14 @@ static x86_encode_result_t generate_store_imm_generic(x86_codegen_t* gen, const 
         gen->buffer[gen->offset++] = prefix;
     }
     
-    // REX prefix for R12 base (matches Go's buildREX(false, false, false, base.REXBit == 1))
-    gen->buffer[gen->offset++] = 0x41; // REX.B (no W bit)
+    const x86_reg_t base = X86_RBP; // BaseReg (matches Go)
+    const reg_info_t* base_info = &reg_info_list[base];
+
+    // REX prefix (matches Go's buildREX(false, false, false, base.REXBit == 1))
+    gen->buffer[gen->offset++] = build_rex(false, false, false, base_info->rex_bit);
     gen->buffer[gen->offset++] = opcode;
     gen->buffer[gen->offset++] = 0x84; // ModRM: 10 000 100 (R12 + disp32)
-    gen->buffer[gen->offset++] = 0x24; // SIB: 00 100 100 (scale=1, index=none, base=R12)
+    gen->buffer[gen->offset++] = 0x20 | base_info->reg_bits; // SIB: scale=0,index=none,base=BaseReg
     
     // 32-bit displacement (address)
     gen->buffer[gen->offset++] = (uint8_t)(addr & 0xFF);
@@ -5734,11 +5822,14 @@ static x86_encode_result_t generate_store_imm_32_raw(x86_codegen_t* gen, uint32_
     
     uint32_t start_offset = gen->offset;
     
-    // REX prefix for R12 base (matches Go's buildREX(false, false, false, base.REXBit == 1))
-    gen->buffer[gen->offset++] = 0x41; // REX.B (no W bit)
+    const x86_reg_t base = X86_RBP; // BaseReg (matches Go)
+    const reg_info_t* base_info = &reg_info_list[base];
+
+    // REX prefix (matches Go's buildREX(false, false, false, base.REXBit == 1))
+    gen->buffer[gen->offset++] = build_rex(false, false, false, base_info->rex_bit);
     gen->buffer[gen->offset++] = X86_OP_MOV_RM_IMM; // 0xC7
-    gen->buffer[gen->offset++] = 0x84; // ModRM: 10 000 100 (R12 + disp32)
-    gen->buffer[gen->offset++] = 0x24; // SIB: 00 100 100 (scale=1, index=none, base=R12)
+    gen->buffer[gen->offset++] = 0x84; // ModRM: 10 000 100 (SIB follows)
+    gen->buffer[gen->offset++] = 0x20 | base_info->reg_bits; // SIB: scale=0,index=none,base=BaseReg
     
     // 32-bit displacement (address)
     gen->buffer[gen->offset++] = (uint8_t)(addr & 0xFF);
@@ -5776,10 +5867,10 @@ static x86_encode_result_t generate_store_imm_u64(x86_codegen_t* gen, const inst
     x86_encode_result_t result = {0};
     uint32_t start_offset = gen->offset;
     
-    // Store lower 32 bits at [R12 + disp]
+    // Store lower 32 bits at [BaseReg + disp]
     generate_store_imm_32_raw(gen, addr, low32);
     
-    // Store higher 32 bits at [R12 + disp + 4]
+    // Store higher 32 bits at [BaseReg + disp + 4]
     generate_store_imm_32_raw(gen, addr + 4, high32);
     
     result.code = &gen->buffer[start_offset];
@@ -5813,8 +5904,11 @@ static x86_encode_result_t generate_load_with_base_generic(x86_codegen_t* gen, c
     
     uint32_t start_offset = gen->offset;
     
+    const x86_reg_t base = X86_RBP; // BaseReg (matches Go)
+    const reg_info_t* base_info = &reg_info_list[base];
+
     // REX prefix (must come first)
-    uint8_t rex = build_rex(rex_w, dst_info->rex_bit, false, true); // base=R12 needs REX.B
+    uint8_t rex = build_rex(rex_w, dst_info->rex_bit, false, base_info->rex_bit);
     gen->buffer[gen->offset++] = rex;
     
     // Emit opcodes (0x0F 0xB6 for MOVZX r32, r/m8)
@@ -5822,9 +5916,9 @@ static x86_encode_result_t generate_load_with_base_generic(x86_codegen_t* gen, c
         gen->buffer[gen->offset++] = opcodes[i];
     }
     
-    // ModRM + SIB for [R12 + disp32]
-    gen->buffer[gen->offset++] = 0x84 | (dst_info->reg_bits << 3); // ModRM
-    gen->buffer[gen->offset++] = 0x24; // SIB
+    // ModRM + SIB for [BaseReg + disp32] (SIB form matches Go)
+    gen->buffer[gen->offset++] = 0x84 | (dst_info->reg_bits << 3); // ModRM: mod=10, rm=4
+    gen->buffer[gen->offset++] = 0x20 | base_info->reg_bits;       // SIB: scale=0,index=none,base=BaseReg
     
     // 32-bit displacement
     gen->buffer[gen->offset++] = (uint8_t)(disp & 0xFF);
@@ -5891,12 +5985,15 @@ static x86_encode_result_t generate_store_with_base_generic(x86_codegen_t* gen, 
         gen->buffer[gen->offset++] = prefix;
     }
     
-    uint8_t rex = build_rex(rex_w, src_info->rex_bit, false, true);
+    const x86_reg_t base = X86_RBP; // BaseReg (matches Go)
+    const reg_info_t* base_info = &reg_info_list[base];
+
+    uint8_t rex = build_rex(rex_w, src_info->rex_bit, false, base_info->rex_bit);
     gen->buffer[gen->offset++] = rex;
     
     gen->buffer[gen->offset++] = opcode;
     gen->buffer[gen->offset++] = 0x84 | (src_info->reg_bits << 3);
-    gen->buffer[gen->offset++] = 0x24;
+    gen->buffer[gen->offset++] = 0x20 | base_info->reg_bits;
     
     gen->buffer[gen->offset++] = (uint8_t)(disp & 0xFF);
     gen->buffer[gen->offset++] = (uint8_t)((disp >> 8) & 0xFF);
@@ -6059,9 +6156,17 @@ static x86_encode_result_t generate_rem_u_32(x86_codegen_t* gen, const instructi
     x86_encode_result_t result = {0};
     uint32_t start_offset = gen->offset;
 
-    // Preserve RAX/RDX which DIV clobbers
-    emit_push_reg(gen, X86_RAX);
-    emit_push_reg(gen, X86_RDX);
+    // Determine if dst conflicts with RAX/RDX
+    bool is_dst_rax = (dst == X86_RAX);
+    bool is_dst_rdx = (dst == X86_RDX);
+    bool is_src2_rax = (src2 == X86_RAX);
+    bool is_src2_rdx = (src2 == X86_RDX);
+
+    // Conditional spill (match Go): always spill if src2 uses RAX/RDX (needed for memory operand)
+    bool push_rax = (!is_dst_rax) || is_src2_rax;
+    bool push_rdx = (!is_dst_rdx) || is_src2_rdx;
+    if (push_rax) emit_push_reg(gen, X86_RAX);
+    if (push_rdx) emit_push_reg(gen, X86_RDX);
 
     // MOV EAX, src32
     emit_mov_eax_from_reg_rem_u_op32(gen, src);
@@ -6086,9 +6191,6 @@ static x86_encode_result_t generate_rem_u_32(x86_codegen_t* gen, const instructi
     // Zero high part, perform division
     emit_xor_reg32(gen, X86_RDX, X86_RDX);
 
-    bool is_src2_rax = (src2_idx == 0);
-    bool is_src2_rdx = (src2_idx == 2);
-
     if (is_src2_rax) {
         emit_div_mem_stack_rem_u_op32_rax(gen);
     } else if (is_src2_rdx) {
@@ -6109,8 +6211,21 @@ static x86_encode_result_t generate_rem_u_32(x86_codegen_t* gen, const instructi
     int32_t jmp_disp = (int32_t)(end_offset - (jmp_offset + 5));
     *(int32_t*)&gen->buffer[jmp_offset + 1] = jmp_disp;
 
-    // Restore caller state
-    emit_pop_rdx_rax_rem_u_op32(gen);
+    // Restore / discard saved RDX, RAX (do not clobber result registers)
+    if (push_rdx) {
+        if (!is_dst_rdx) {
+            emit_pop_reg(gen, X86_RDX);
+        } else {
+            emit_add_rsp8(gen);
+        }
+    }
+    if (push_rax) {
+        if (!is_dst_rax) {
+            emit_pop_reg(gen, X86_RAX);
+        } else {
+            emit_add_rsp8(gen);
+        }
+    }
 
     result.code = &gen->buffer[start_offset];
     result.size = gen->offset - start_offset;
@@ -6131,23 +6246,31 @@ static x86_encode_result_t generate_rem_u_64(x86_codegen_t* gen, const instructi
     x86_reg_t src2 = pvm_reg_to_x86[src2_idx];
     x86_reg_t dst = pvm_reg_to_x86[dst_idx];
     
-    // Determine if dst conflicts with RAX/RDX  
-    bool is_dst_rax = (dst_idx == 0);
-    bool is_dst_rdx = (dst_idx == 2);
-    
-    // 0) Conditional spill: only push if we need to restore later
-    if (!is_dst_rax) {
-        x86_encode_result_t push_rax = emit_push_reg(gen, X86_RAX);
-        if (push_rax.size == 0) return result;
+    // Determine if dst/src2 conflict with RAX/RDX (match Go spill policy)
+    bool is_dst_rax = (dst == X86_RAX);
+    bool is_dst_rdx = (dst == X86_RDX);
+    bool is_src2_rax = (src2 == X86_RAX);
+    bool is_src2_rdx = (src2 == X86_RDX);
+
+    // Spill policy (Go):
+    // - If src2 is RAX, spill both RAX and RDX so divisor is at [RSP+8].
+    // - If src2 is RDX, spill RDX so divisor is at [RSP].
+    bool push_rax = (!is_dst_rax) || is_src2_rax;
+    bool push_rdx = (!is_dst_rdx) || is_src2_rdx || is_src2_rax;
+
+    // 0) Conditional spill
+    if (push_rax) {
+        x86_encode_result_t push_rax_res = emit_push_reg(gen, X86_RAX);
+        if (push_rax_res.size == 0) return result;
     }
-    if (!is_dst_rdx) {
-        x86_encode_result_t push_rdx = emit_push_reg(gen, X86_RDX);
-        if (push_rdx.size == 0) return result;
+    if (push_rdx) {
+        x86_encode_result_t push_rdx_res = emit_push_reg(gen, X86_RDX);
+        if (push_rdx_res.size == 0) return result;
     }
     
     // 1) MOV dividend into RAX (if src1 != RAX)
-    if (src_idx != 0) {
-        x86_encode_result_t mov_rax = emit_mov_reg_to_reg_with_manual_construction(gen, X86_RAX, src1);
+    if (src1 != X86_RAX) {
+        x86_encode_result_t mov_rax = emit_mov_rax_from_reg_rem_u_op64(gen, src1);
         if (mov_rax.size == 0) return result;
     }
     
@@ -6165,9 +6288,6 @@ static x86_encode_result_t generate_rem_u_64(x86_codegen_t* gen, const instructi
     if (xor_rdx.size == 0) return result;
     
     // DIV src2 (handling register conflicts)
-    bool is_src2_rax = (src2_idx == 0);
-    bool is_src2_rdx = (src2_idx == 2);
-    
     if (is_src2_rax) {
         // If divisor is RAX, use the spilled original RAX from [RSP+8]
         x86_encode_result_t div_result = emit_div_mem_stack_rem_u_op64_rax(gen);
@@ -6187,8 +6307,7 @@ static x86_encode_result_t generate_rem_u_64(x86_codegen_t* gen, const instructi
         x86_encode_result_t xchg_result = emit_xchg_rax_rdx_rem_u_op64(gen);
         if (xchg_result.size == 0) return result;
     } else if (!is_dst_rdx) {
-        // MOV dst, RDX - using 0x89 opcode like Go
-        x86_encode_result_t mov_dst = emit_mov_reg_from_reg_max(gen, dst, X86_RDX);
+        x86_encode_result_t mov_dst = emit_mov_dst_from_rdx_rem_u_op64(gen, dst);
         if (mov_dst.size == 0) return result;
     }
     
@@ -6200,20 +6319,27 @@ static x86_encode_result_t generate_rem_u_64(x86_codegen_t* gen, const instructi
     // zeroDiv: divisor was zero => dst = dividend (in RAX)
     uint32_t zero_offset = gen->offset;
     if (!is_dst_rax) {
-        // MOV dst, RAX - using 0x89 opcode like Go  
-        x86_encode_result_t mov_dst_rax = emit_mov_reg_from_reg_max(gen, dst, X86_RAX);
+        x86_encode_result_t mov_dst_rax = emit_mov_dst_from_rax_rem_u_op64(gen, dst);
         if (mov_dst_rax.size == 0) return result;
     }
     
     // end: restore if spilled
     uint32_t end_offset = gen->offset;
-    if (!is_dst_rdx) {
-        x86_encode_result_t pop_rdx = emit_pop_reg(gen, X86_RDX);
-        if (pop_rdx.size == 0) return result;
+    if (push_rdx) {
+        if (!is_dst_rdx) {
+            x86_encode_result_t pop_rdx = emit_pop_reg(gen, X86_RDX);
+            if (pop_rdx.size == 0) return result;
+        } else {
+            if (emit_add_rsp8(gen).size == 0) return result;
+        }
     }
-    if (!is_dst_rax) {
-        x86_encode_result_t pop_rax = emit_pop_reg(gen, X86_RAX);
-        if (pop_rax.size == 0) return result;
+    if (push_rax) {
+        if (!is_dst_rax) {
+            x86_encode_result_t pop_rax = emit_pop_reg(gen, X86_RAX);
+            if (pop_rax.size == 0) return result;
+        } else {
+            if (emit_add_rsp8(gen).size == 0) return result;
+        }
     }
     
     // Fix up jump offsets
@@ -6280,7 +6406,7 @@ static x86_encode_result_t generate_rem_s_32(x86_codegen_t* gen, const instructi
 
     emit_cdq(gen);
 
-    bool is_src2_rdx = (src2_idx == 2);
+    bool is_src2_rdx = (src2 == X86_RDX);
     if (is_src2_rdx) {
         emit_idiv_mem_stack_rem_s_op32_rdx(gen);
     } else {
@@ -6298,8 +6424,18 @@ static x86_encode_result_t generate_rem_s_32(x86_codegen_t* gen, const instructi
 
     // end:
     uint32_t end_offset = gen->offset;
-    emit_pop_reg(gen, X86_RDX);
-    emit_pop_reg(gen, X86_RAX);
+    bool is_dst_rax = (dst == X86_RAX);
+    bool is_dst_rdx = (dst == X86_RDX);
+    if (!is_dst_rdx) {
+        emit_pop_reg(gen, X86_RDX);
+    } else {
+        emit_add_rsp8(gen);
+    }
+    if (!is_dst_rax) {
+        emit_pop_reg(gen, X86_RAX);
+    } else {
+        emit_add_rsp8(gen);
+    }
 
     // Patch jumps
     int32_t je_disp = (int32_t)(zero_offset - (je_zero_offset + 6));
@@ -6323,6 +6459,20 @@ static x86_encode_result_t generate_rem_s_32(x86_codegen_t* gen, const instructi
     return result;
 }
 
+static x86_encode_result_t emit_add_rsp8(x86_codegen_t* gen) {
+    x86_encode_result_t result = {0};
+    if (x86_codegen_ensure_capacity(gen, 4) != 0) return result;
+    uint32_t start_offset = gen->offset;
+    gen->buffer[gen->offset++] = 0x48;
+    gen->buffer[gen->offset++] = 0x83;
+    gen->buffer[gen->offset++] = 0xC4;
+    gen->buffer[gen->offset++] = 0x08;
+    result.code = &gen->buffer[start_offset];
+    result.size = gen->offset - start_offset;
+    result.offset = start_offset;
+    return result;
+}
+
 // generate_rem_s_64: REM_S_64 instruction (64-bit signed remainder)
 // Following Go's generateRemSOp64 - much more complex with conditional spilling
 static x86_encode_result_t generate_rem_s_64(x86_codegen_t* gen, const instruction_t* inst) {
@@ -6333,20 +6483,18 @@ static x86_encode_result_t generate_rem_s_64(x86_codegen_t* gen, const instructi
     x86_reg_t src2 = pvm_reg_to_x86[src2_idx];  
     x86_reg_t dst = pvm_reg_to_x86[dst_idx];
     
-    bool is_dst_rax = (dst_idx == 0);
-    bool is_dst_rdx = (dst_idx == 2); 
-    bool is_src2_rdx = (src2_idx == 2);
+    bool is_dst_rax = (dst == X86_RAX);
+    bool is_dst_rdx = (dst == X86_RDX);
+    bool is_src2_rdx = (src2 == X86_RDX);
     
     x86_encode_result_t result = {0};
     uint32_t start_offset = gen->offset;
     
-    // Conditional spill - only push if dst is not RAX/RDX
-    if (!is_dst_rax) {
-        emit_push_reg(gen, X86_RAX);
-    }
-    if (!is_dst_rdx) {
-        emit_push_reg(gen, X86_RDX);
-    }
+    // Conditional spill (Go): push RAX if dst != RAX, push RDX if dst != RDX OR if divisor is RDX.
+    bool push_rax = !is_dst_rax;
+    bool push_rdx = !is_dst_rdx || is_src2_rdx;
+    if (push_rax) emit_push_reg(gen, X86_RAX);
+    if (push_rdx) emit_push_reg(gen, X86_RDX);
     
     // MOV RAX, src
     emit_mov_rax_from_reg_rem_s_op64(gen, src);
@@ -6421,11 +6569,21 @@ static x86_encode_result_t generate_rem_s_64(x86_codegen_t* gen, const instructi
     
     // end: restore
     uint32_t end_start = gen->offset;
-    if (!is_dst_rdx) {
-        emit_pop_reg(gen, X86_RDX);
+    if (push_rdx) {
+        if (!is_dst_rdx) {
+            emit_pop_reg(gen, X86_RDX);
+        } else {
+            // Discard without restoring (keep result in RDX)
+            emit_add_rsp8(gen);
+        }
     }
-    if (!is_dst_rax) {
-        emit_pop_reg(gen, X86_RAX);
+    if (push_rax) {
+        if (!is_dst_rax) {
+            emit_pop_reg(gen, X86_RAX);
+        } else {
+            // Discard without restoring (keep result in RAX)
+            emit_add_rsp8(gen);
+        }
     }
     
     // Fix up jump offsets
@@ -6566,7 +6724,7 @@ static x86_encode_result_t generate_mul_64(x86_codegen_t* gen, const instruction
     x86_reg_t src1 = pvm_reg_to_x86[src1_idx];
     x86_reg_t src2 = pvm_reg_to_x86[src2_idx];
     x86_reg_t dst = pvm_reg_to_x86[dst_idx];
-    x86_reg_t scratch = X86_R12; // BaseReg equivalent - Go uses BaseReg which is R12
+    x86_reg_t scratch = X86_RBP; // BaseReg (matches Go BaseReg)
     
     if (x86_codegen_ensure_capacity(gen, 20) != 0) return result; // Estimate max size
     
@@ -6576,13 +6734,11 @@ static x86_encode_result_t generate_mul_64(x86_codegen_t* gen, const instruction
     // If dst aliases src2 (and not src1), preserve src2 in scratch
     if (dst_idx == src2_idx && dst_idx != src1_idx) {
         used_scratch = true;
-        // PUSH scratch
-        const reg_info_t* scratch_info = &reg_info_list[scratch];
-        uint8_t push_rex = 0x40 | (scratch_info->rex_bit ? 1 : 0);
-        gen->buffer[gen->offset++] = push_rex;
-        gen->buffer[gen->offset++] = 0x50 + scratch_info->reg_bits; // PUSH reg
+        // PUSH scratch (matches Go emitPushReg)
+        emit_push_reg(gen, scratch);
         
         // MOV scratch, src2 - use 0x89 like Go emitMovRegToReg64(scratch, src2)
+        const reg_info_t* scratch_info = &reg_info_list[scratch];
         const reg_info_t* src2_info = &reg_info_list[src2];
         uint8_t mov_rex = 0x48 | (src2_info->rex_bit ? 4 : 0) | (scratch_info->rex_bit ? 1 : 0); // R=src2, B=scratch
         uint8_t mov_modrm = 0xC0 | (src2_info->reg_bits << 3) | scratch_info->reg_bits; // reg=src2, rm=scratch
@@ -6614,11 +6770,8 @@ static x86_encode_result_t generate_mul_64(x86_codegen_t* gen, const instruction
     
     // Restore scratch if used
     if (used_scratch) {
-        // POP scratch
-        const reg_info_t* scratch_info = &reg_info_list[scratch];
-        uint8_t pop_rex = 0x40 | (scratch_info->rex_bit ? 1 : 0);
-        gen->buffer[gen->offset++] = pop_rex;
-        gen->buffer[gen->offset++] = 0x58 + scratch_info->reg_bits; // POP reg
+        // POP scratch (matches Go emitPopReg)
+        emit_pop_reg(gen, scratch);
     }
     
     result.size = gen->offset - start_offset;
@@ -6662,6 +6815,18 @@ static void extract_two_regs_one_imm_store_ind(const uint8_t* args, size_t args_
 static x86_encode_result_t emit_store_with_sib_indirect(x86_codegen_t* gen, uint8_t src_reg, uint8_t base_reg, uint8_t index_reg, int32_t disp32, int size) {
     x86_encode_result_t result = {0};
     uint32_t start_offset = gen->offset;
+
+    // x86 SIB encoding cannot use RSP/R12 as the index register (index field 0b100 means "no index").
+    // Since scale=1 here, [base+index+disp] is commutative; swap to keep index encodable (matches Go).
+    uint8_t base_bits = base_reg & 0x07;
+    uint8_t index_bits = index_reg & 0x07;
+    if (index_bits == 4 && base_bits != 4) {
+        uint8_t tmp = base_reg;
+        base_reg = index_reg;
+        index_reg = tmp;
+        base_bits = base_reg & 0x07;
+        index_bits = index_reg & 0x07;
+    }
     
     // 1) For 16-bit word, add operand-size override prefix
     if (size == 2) {
@@ -6670,7 +6835,6 @@ static x86_encode_result_t emit_store_with_sib_indirect(x86_codegen_t* gen, uint
     }
     
     // 2) Compute REX prefix
-    // Map PVM registers to regInfoList equivalent using hardcoded mappings
     uint8_t src_rex_bit = (src_reg >= 8) ? 1 : 0;     // Extended registers need REX.R
     uint8_t index_rex_bit = (index_reg >= 8) ? 1 : 0; // Extended registers need REX.X
     uint8_t base_rex_bit = (base_reg >= 8) ? 1 : 0;   // Extended registers need REX.B
@@ -6681,7 +6845,14 @@ static x86_encode_result_t emit_store_with_sib_indirect(x86_codegen_t* gen, uint
     bool b = (base_rex_bit == 1);
     
     uint8_t rex = 0x40 | (w ? 8 : 0) | (r ? 4 : 0) | (x ? 2 : 0) | (b ? 1 : 0);
-    if (rex != 0x40) {
+    // For 8-bit stores, we must emit a REX prefix even when it's "empty" (0x40) if the
+    // source register is one of {SPL,BPL,SIL,DIL}. Without a REX prefix, ModRM reg codes
+    // 4..7 refer to {AH,CH,DH,BH} instead.
+    bool need_rex = (rex != 0x40);
+    if (size == 1 && src_reg < 8 && (src_reg & 0x07) >= 4) {
+        need_rex = true;
+    }
+    if (need_rex) {
         if (x86_codegen_ensure_capacity(gen, 1) != 0) return result;
         gen->buffer[gen->offset++] = rex;
     }
@@ -6700,8 +6871,8 @@ static x86_encode_result_t emit_store_with_sib_indirect(x86_codegen_t* gen, uint
     uint8_t modrm = (2 << 6) | (src_bits << 3) | 4; // mod=10, reg=src, rm=100 (SIB)
     
     // scale=0×1, index=index, base=base
-    uint8_t index_bits = index_reg & 0x07;
-    uint8_t base_bits = base_reg & 0x07;
+    index_bits = index_reg & 0x07;
+    base_bits = base_reg & 0x07;
     uint8_t sib = (0 << 6) | (index_bits << 3) | base_bits; // scale=0, index=index, base=base
     
     if (x86_codegen_ensure_capacity(gen, 6) != 0) return result; // ModRM + SIB + disp32
@@ -6726,13 +6897,9 @@ static x86_encode_result_t generate_store_ind_u8(x86_codegen_t* gen, const instr
     uint64_t disp64;
     extract_two_regs_one_imm_store_ind(inst->args, inst->args_size, &src_idx, &dst_idx, &disp64);
     
-    // Map PVM register indices to x86 registers using Go's regInfoList mapping
-    // regInfoList = [RAX, RCX, RDX, RBX, RSI, RDI, R8, R9, R10, R11, R13, R14, R15, R12]
-    uint8_t regInfoList_map[14] = {0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 13, 14, 15, 12}; // RAX, RCX, RDX, RBX, RSI, RDI, R8, R9, R10, R11, R13, R14, R15, R12
-    
-    uint8_t src_reg = regInfoList_map[src_idx];
-    uint8_t index_reg = regInfoList_map[dst_idx]; 
-    uint8_t base_reg = 12; // R12 (BaseReg equivalent)
+    uint8_t src_reg = (uint8_t)pvm_reg_to_x86[src_idx];
+    uint8_t index_reg = (uint8_t)pvm_reg_to_x86[dst_idx];
+    uint8_t base_reg = (uint8_t)X86_RBP;
     
     return emit_store_with_sib_indirect(gen, src_reg, base_reg, index_reg, (int32_t)disp64, 1);
 }
@@ -6743,11 +6910,9 @@ static x86_encode_result_t generate_store_ind_u16(x86_codegen_t* gen, const inst
     uint64_t disp64;
     extract_two_regs_one_imm_store_ind(inst->args, inst->args_size, &src_idx, &dst_idx, &disp64);
     
-    // Map PVM register indices to x86 registers using Go's regInfoList mapping
-    uint8_t regInfoList_map[14] = {0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 13, 14, 15, 12};
-    uint8_t src_reg = regInfoList_map[src_idx];
-    uint8_t index_reg = regInfoList_map[dst_idx]; 
-    uint8_t base_reg = 12; // R12 (BaseReg equivalent)
+    uint8_t src_reg = (uint8_t)pvm_reg_to_x86[src_idx];
+    uint8_t index_reg = (uint8_t)pvm_reg_to_x86[dst_idx];
+    uint8_t base_reg = (uint8_t)X86_RBP;
     
     return emit_store_with_sib_indirect(gen, src_reg, base_reg, index_reg, (int32_t)disp64, 2);
 }
@@ -6758,11 +6923,9 @@ static x86_encode_result_t generate_store_ind_u32(x86_codegen_t* gen, const inst
     uint64_t disp64;
     extract_two_regs_one_imm_store_ind(inst->args, inst->args_size, &src_idx, &dst_idx, &disp64);
     
-    // Map PVM register indices to x86 registers using Go's regInfoList mapping
-    uint8_t regInfoList_map[14] = {0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 13, 14, 15, 12};
-    uint8_t src_reg = regInfoList_map[src_idx];
-    uint8_t index_reg = regInfoList_map[dst_idx]; 
-    uint8_t base_reg = 12; // R12 (BaseReg equivalent)
+    uint8_t src_reg = (uint8_t)pvm_reg_to_x86[src_idx];
+    uint8_t index_reg = (uint8_t)pvm_reg_to_x86[dst_idx];
+    uint8_t base_reg = (uint8_t)X86_RBP;
     
     return emit_store_with_sib_indirect(gen, src_reg, base_reg, index_reg, (int32_t)disp64, 4);
 }
@@ -6773,11 +6936,9 @@ static x86_encode_result_t generate_store_ind_u64(x86_codegen_t* gen, const inst
     uint64_t disp64;
     extract_two_regs_one_imm_store_ind(inst->args, inst->args_size, &src_idx, &dst_idx, &disp64);
     
-    // Map PVM register indices to x86 registers using Go's regInfoList mapping
-    uint8_t regInfoList_map[14] = {0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 13, 14, 15, 12};
-    uint8_t src_reg = regInfoList_map[src_idx];
-    uint8_t index_reg = regInfoList_map[dst_idx]; 
-    uint8_t base_reg = 12; // R12 (BaseReg equivalent)
+    uint8_t src_reg = (uint8_t)pvm_reg_to_x86[src_idx];
+    uint8_t index_reg = (uint8_t)pvm_reg_to_x86[dst_idx];
+    uint8_t base_reg = (uint8_t)X86_RBP;
     
     return emit_store_with_sib_indirect(gen, src_reg, base_reg, index_reg, (int32_t)disp64, 8);
 }
@@ -6830,6 +6991,16 @@ static void extract_one_reg_two_imm(const uint8_t* args, size_t args_size, uint8
 static x86_encode_result_t emit_store_imm_ind_with_sib(x86_codegen_t* gen, uint8_t idx_reg, uint8_t base_reg, uint32_t disp, uint8_t* imm, int imm_size, uint8_t opcode, uint8_t prefix) {
     x86_encode_result_t result = {0};
     uint32_t start_offset = gen->offset;
+
+    // x86 SIB encoding cannot use RSP/R12 as the index register (index field 0b100 means "no index").
+    // Since scale=1 here, [base+idx+disp] is commutative; swap to keep index encodable (matches Go).
+    uint8_t base_bits = base_reg & 0x07;
+    uint8_t idx_bits = idx_reg & 0x07;
+    if (idx_bits == 4 && base_bits != 4) {
+        uint8_t tmp = base_reg;
+        base_reg = idx_reg;
+        idx_reg = tmp;
+    }
     
     // Add prefix if specified (e.g., 0x66 for 16-bit)
     if (prefix != 0) {
@@ -6859,8 +7030,8 @@ static x86_encode_result_t emit_store_imm_ind_with_sib(x86_codegen_t* gen, uint8
     gen->buffer[gen->offset++] = 0x84;
     
     // SIB: scale=0(×1)=00, index=idx.RegBits, base=base.RegBits
-    uint8_t idx_bits = idx_reg & 0x07;
-    uint8_t base_bits = base_reg & 0x07;
+    idx_bits = idx_reg & 0x07;
+    base_bits = base_reg & 0x07;
     uint8_t sib = (0 << 6) | (idx_bits << 3) | base_bits; // scale=0, index=idx, base=base
     if (x86_codegen_ensure_capacity(gen, 1) != 0) return result;
     gen->buffer[gen->offset++] = sib;
@@ -6890,10 +7061,8 @@ static x86_encode_result_t generate_store_imm_ind_u8(x86_codegen_t* gen, const i
     uint64_t disp64, imm_val;
     extract_one_reg_two_imm(inst->args, inst->args_size, &reg_idx, &disp64, &imm_val);
     
-    // Map PVM register to x86 register using regInfoList mapping
-    uint8_t regInfoList_map[14] = {0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 13, 14, 15, 12};
-    uint8_t idx_reg = regInfoList_map[reg_idx];
-    uint8_t base_reg = 12; // R12 (BaseReg equivalent)
+    uint8_t idx_reg = (uint8_t)pvm_reg_to_x86[reg_idx];
+    uint8_t base_reg = (uint8_t)X86_RBP;
     uint32_t disp = (uint32_t)disp64;
     
     uint8_t imm_val_u8 = (uint8_t)(imm_val & 0xFF);
@@ -6906,10 +7075,8 @@ static x86_encode_result_t generate_store_imm_ind_u16(x86_codegen_t* gen, const 
     uint64_t disp64, imm_val;
     extract_one_reg_two_imm(inst->args, inst->args_size, &reg_idx, &disp64, &imm_val);
     
-    // Map PVM register to x86 register using regInfoList mapping
-    uint8_t regInfoList_map[14] = {0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 13, 14, 15, 12};
-    uint8_t idx_reg = regInfoList_map[reg_idx];
-    uint8_t base_reg = 12; // R12 (BaseReg equivalent)
+    uint8_t idx_reg = (uint8_t)pvm_reg_to_x86[reg_idx];
+    uint8_t base_reg = (uint8_t)X86_RBP;
     uint32_t disp = (uint32_t)disp64;
     
     uint8_t imm_bytes[2];
@@ -6924,10 +7091,8 @@ static x86_encode_result_t generate_store_imm_ind_u32(x86_codegen_t* gen, const 
     uint64_t disp64, imm_val;
     extract_one_reg_two_imm(inst->args, inst->args_size, &reg_idx, &disp64, &imm_val);
     
-    // Map PVM register to x86 register using regInfoList mapping
-    uint8_t regInfoList_map[14] = {0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 13, 14, 15, 12};
-    uint8_t idx_reg = regInfoList_map[reg_idx];
-    uint8_t base_reg = 12; // R12 (BaseReg equivalent)
+    uint8_t idx_reg = (uint8_t)pvm_reg_to_x86[reg_idx];
+    uint8_t base_reg = (uint8_t)X86_RBP;
     uint32_t disp = (uint32_t)disp64;
     
     uint8_t imm_bytes[4];
@@ -6944,10 +7109,8 @@ static x86_encode_result_t generate_store_imm_ind_u64(x86_codegen_t* gen, const 
     uint64_t disp64, imm_val;
     extract_one_reg_two_imm(inst->args, inst->args_size, &reg_idx, &disp64, &imm_val);
     
-    // Map PVM register to x86 register using regInfoList mapping
-    uint8_t regInfoList_map[14] = {0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 13, 14, 15, 12};
-    uint8_t idx_reg = regInfoList_map[reg_idx];
-    uint8_t base_reg = 12; // R12 (BaseReg equivalent)
+    uint8_t idx_reg = (uint8_t)pvm_reg_to_x86[reg_idx];
+    uint8_t base_reg = (uint8_t)X86_RBP;
     uint32_t disp = (uint32_t)disp64;
     
     // For 64-bit stores, x86 doesn't have direct MOV r/m64, imm64
@@ -7615,8 +7778,9 @@ static x86_encode_result_t generate_shlo_l_imm_alt_32(x86_codegen_t* gen, const 
     // 3) MOVABS dst64, imm64 - load immediate into destination
     emit_mov_imm_to_reg64(gen, dst, imm_uint64);
     
-    // 4) SHL dst, CL - perform 64-bit shift based on CL
-    emit_shift_reg_cl(gen, dst, 4); // subcode=4 (SHL)
+    // 4) Shift 32-bit: D3 /subcode r/m32, CL (uses CL & 31 for shift count)
+    // NOTE: Must use 32-bit shift to match interpreter's (valueB & 31) behavior (and Go's emitShiftRegCl32).
+    emit_shift_reg32_by_cl(gen, dst, 4); // subcode=4 (SHL)
 
     // 5) AND dst, 0xFFFFFFFF - truncate to 32-bit
     emit_alu_reg_imm32(gen, dst, X86_REG_AND, (int32_t)0xFFFFFFFF);
@@ -7638,46 +7802,34 @@ static x86_encode_result_t generate_shlo_r_imm_alt_32(x86_codegen_t* gen, const 
     uint8_t dst_idx, src_idx;
     uint32_t imm32;
     extract_two_regs_one_imm(inst->args, inst->args_size, &dst_idx, &src_idx, &imm32);
-    
-    // Apply Go's x_encode logic: sign extend the immediate like Go does
-    // For test [137,1,0,255]: extract [1,0,255] -> 0xFF0001 (24-bit) -> sign extend to 64-bit
-    int lx = (inst->args_size > 1) ? ((inst->args_size - 1 > 4) ? 4 : (inst->args_size - 1)) : 0;
-    uint64_t imm_uint64;
-    if (lx > 0 && lx < 8) {
-        // Go's x_encode: check high bit and sign extend
-        uint64_t mask = (1ULL << (8 * lx)) - 1;
-        uint64_t sign_bit = 1ULL << (8 * lx - 1);
-        if (imm32 & sign_bit) {
-            imm_uint64 = imm32 | (~mask);  // Set high bits to 1
-        } else {
-            imm_uint64 = imm32 & mask;     // Keep high bits as 0
-        }
-    } else {
-        imm_uint64 = imm32;
-    }
-    
+
     x86_reg_t dst = pvm_reg_to_x86[dst_idx];
     x86_reg_t src = pvm_reg_to_x86[src_idx];
-    
+
     x86_encode_result_t result = {0};
-    if (x86_codegen_ensure_capacity(gen, 30) != 0) return result;
+    if (x86_codegen_ensure_capacity(gen, 40) != 0) return result;
     uint32_t start_offset = gen->offset;
-    
-    // Follow Go's generateImmShiftOp32(..., alt=true) pattern: MOV32/XCHG32/SHIFT32/XCHG32
-    // Expected: 41 BB 01 00 FF FF 41 87 CA 41 D3 EB 41 87 CA
-    
-    // 1) MOV r32_dst, imm32 (C7 /0 id)
-    emit_mov_imm_to_reg32(gen, dst, (uint32_t)imm32);
-    
-    // 2) XCHG ECX, r32_src  ; load count into CL
-    emit_xchg_reg32_reg32(gen, X86_RCX, src);
-    
-    // 3) D3 /subcode r/m32(dst), CL - use shift helper  
-    emit_shift_reg32_by_cl(gen, dst, 5); // subcode=5 (SHR)
-    
-    // 4) XCHG ECX, r32_src  ; restore ECX and src
-    emit_xchg_reg32_reg32(gen, X86_RCX, src);
-    
+
+    // Match Go's generateImmShiftOp32(opcode, subcode, alt=true) sequence for SHR:
+    // - optional: PUSH RCX; MOV RCX, src
+    // - MOV r32_dst, imm32
+    // - SHIFT r/m32(dst), CL
+    // - MOVSXD r64_dst, r/m32(dst)
+    // - optional: POP RCX
+    bool need_save_rcx = (src != X86_RCX);
+    if (need_save_rcx) {
+        emit_push_reg(gen, X86_RCX);
+        emit_mov_reg_to_reg64(gen, X86_RCX, src);
+    }
+
+    emit_mov_imm_to_reg32(gen, dst, imm32);
+    emit_shift_reg32_by_cl(gen, dst, 5); // /5 = SHR
+    emit_movsxd64(gen, dst, dst);
+
+    if (need_save_rcx) {
+        emit_pop_reg(gen, X86_RCX);
+    }
+
     result.code = &gen->buffer[start_offset];
     result.size = gen->offset - start_offset;
     result.offset = start_offset;
@@ -7687,49 +7839,29 @@ static x86_encode_result_t generate_shar_r_imm_alt_32(x86_codegen_t* gen, const 
     uint8_t dst_idx, src_idx;
     uint32_t imm32;
     extract_two_regs_one_imm(inst->args, inst->args_size, &dst_idx, &src_idx, &imm32);
-    
-    // Apply Go's x_encode logic: sign extend the immediate like Go does
-    // For test [137,1,0,255]: extract [1,0,255] -> 0xFF0001 (24-bit) -> sign extend to 64-bit
-    int lx = (inst->args_size > 1) ? ((inst->args_size - 1 > 4) ? 4 : (inst->args_size - 1)) : 0;
-    uint64_t imm_uint64;
-    if (lx > 0 && lx < 8) {
-        // Go's x_encode: check high bit and sign extend
-        uint64_t mask = (1ULL << (8 * lx)) - 1;
-        uint64_t sign_bit = 1ULL << (8 * lx - 1);
-        if (imm32 & sign_bit) {
-            imm_uint64 = imm32 | (~mask);  // Set high bits to 1
-        } else {
-            imm_uint64 = imm32 & mask;     // Keep high bits as 0
-        }
-    } else {
-        imm_uint64 = imm32;
-    }
-    
+
     x86_reg_t dst = pvm_reg_to_x86[dst_idx];
     x86_reg_t src = pvm_reg_to_x86[src_idx];
-    
+
     x86_encode_result_t result = {0};
-    if (x86_codegen_ensure_capacity(gen, 30) != 0) return result;
+    if (x86_codegen_ensure_capacity(gen, 40) != 0) return result;
     uint32_t start_offset = gen->offset;
-    
-    // Follow Go's generateImmShiftOp32(..., alt=true) pattern: MOV32/XCHG32/SHIFT32/XCHG32 + MOVSXD
-    // Expected: 41 BB 01 00 FF FF 41 87 CA 41 D3 FB 41 87 CA 4D 63 DB
-    
-    // 1) MOV r32_dst, imm32 (C7 /0 id)
-    emit_mov_imm_to_reg32(gen, dst, (uint32_t)imm32);
-    
-    // 2) XCHG ECX, r32_src  ; load count into CL
-    emit_xchg_reg32_reg32(gen, X86_RCX, src);
-    
-    // 3) D3 /subcode r/m32(dst), CL - use shift helper  
-    emit_shift_reg32_by_cl(gen, dst, 7); // subcode=7 (SAR)
-    
-    // 4) XCHG ECX, r32_src  ; restore ECX and src
-    emit_xchg_reg32_reg32(gen, X86_RCX, src);
-    
-    // 5) MOVSXD r64_dst, r/m32(dst) - sign-extend 32->64 for SAR
+
+    // Match Go's generateImmShiftOp32(opcode, subcode, alt=true) sequence for SAR.
+    bool need_save_rcx = (src != X86_RCX);
+    if (need_save_rcx) {
+        emit_push_reg(gen, X86_RCX);
+        emit_mov_reg_to_reg64(gen, X86_RCX, src);
+    }
+
+    emit_mov_imm_to_reg32(gen, dst, imm32);
+    emit_shift_reg32_by_cl(gen, dst, 7); // /7 = SAR
     emit_movsxd64(gen, dst, dst);
-    
+
+    if (need_save_rcx) {
+        emit_pop_reg(gen, X86_RCX);
+    }
+
     result.code = &gen->buffer[start_offset];
     result.size = gen->offset - start_offset;
     result.offset = start_offset;
@@ -7750,8 +7882,8 @@ static x86_encode_result_t generate_shlo_l_imm_alt_64(x86_codegen_t* gen, const 
     if (x86_codegen_ensure_capacity(gen, 35) != 0) return result;
     uint32_t start_offset = gen->offset;
     
-    // Go pattern: BaseReg = R12 (register 12 in x86), BaseRegIndex = 13 in Go (maps to R12)
-    x86_reg_t base_reg = X86_R12;
+    // Go pattern: BaseReg = RBP, BaseRegIndex = 13
+    x86_reg_t base_reg = X86_RBP;
     bool same_reg = (dst_idx == src_idx);
     
     if (same_reg) {
@@ -7832,7 +7964,7 @@ static x86_encode_result_t generate_shlo_r_imm_alt_64(x86_codegen_t* gen, const 
     x86_reg_t src = pvm_reg_to_x86[src_idx];
     x86_reg_t dst = pvm_reg_to_x86[dst_idx];
     bool same_reg = (dst_idx == src_idx);
-    x86_reg_t base_reg = X86_R12;
+    x86_reg_t base_reg = X86_RBP;
 
     x86_encode_result_t result = {0};
     if (x86_codegen_ensure_capacity(gen, 30) != 0) return result;
@@ -7908,13 +8040,13 @@ static x86_encode_result_t generate_shar_r_imm_alt_64(x86_codegen_t* gen, const 
     // Follow Go's generateImmShiftOp64Alt pattern exactly
     bool same_reg = (dst_idx == src_idx);
     
-    // 1) Same register case - use BaseReg (R12) pattern like Go
+    // 1) Same register case - use BaseReg pattern like Go
     if (same_reg) {
-        // PUSH BaseReg (R12) - matches Go's emitPushReg(BaseReg)
-        emit_push_reg(gen, X86_R12);
+        // PUSH BaseReg - matches Go's emitPushReg(BaseReg)
+        emit_push_reg(gen, X86_RBP);
         
         // Change dst to BaseReg like Go: dstIdx = BaseRegIndex, dst = regInfoList[dstIdx]
-        dst = X86_R12;
+        dst = X86_RBP;
         
         // MOV BaseReg, src - matches Go's emitMovRegToRegImmShiftOp64Alt(src, dst)
         emit_mov_reg_to_reg64(gen, dst, src);
@@ -7954,8 +8086,8 @@ static x86_encode_result_t generate_shar_r_imm_alt_64(x86_codegen_t* gen, const 
         // Move result back to src - matches Go's emitMovBaseRegToSrcImmShiftOp64Alt(BaseReg, src)
         emit_mov_reg_to_reg64(gen, src, dst);
         
-        // POP BaseReg (R12) - matches Go's emitPopReg(BaseReg)
-        emit_pop_reg(gen, X86_R12);
+        // POP BaseReg - matches Go's emitPopReg(BaseReg)
+        emit_pop_reg(gen, X86_RBP);
     }
     
     result.code = &gen->buffer[start_offset];
@@ -8915,9 +9047,19 @@ static x86_encode_result_t emit_load_with_sib(x86_codegen_t* gen, x86_reg_t dst,
     
     size_t start_offset = gen->offset;
     
-    const reg_info_t* dst_info = &reg_info_list[dst];
+    // x86 SIB encoding cannot use RSP/R12 as the index register (index field 0b100 means "no index").
+    // Since scale=1 here, [base+index+disp] is commutative; swap to keep index encodable (matches Go).
     const reg_info_t* base_info = &reg_info_list[base];
     const reg_info_t* index_info = &reg_info_list[index];
+    if ((index_info->reg_bits & 0x07) == 4 && (base_info->reg_bits & 0x07) != 4) {
+        x86_reg_t tmp = base;
+        base = index;
+        index = tmp;
+        base_info = &reg_info_list[base];
+        index_info = &reg_info_list[index];
+    }
+
+    const reg_info_t* dst_info = &reg_info_list[dst];
     
     // Add optional prefix
     if (prefix != 0) {
@@ -9048,7 +9190,7 @@ static x86_encode_result_t generate_load_ind_u8(x86_codegen_t* gen, const instru
     
     x86_reg_t regA = pvm_reg_to_x86[regA_idx < 12 ? regA_idx : 12];
     x86_reg_t regB = pvm_reg_to_x86[regB_idx < 12 ? regB_idx : 12];
-    x86_reg_t base_reg = X86_R12; // BaseReg equivalent
+    x86_reg_t base_reg = X86_RBP; // BaseReg
     
     // zero-extend byte into the full 64-bit reg: MOVZX r64, r/m8 (0F B6 /r)
     const uint8_t opcodes[] = {X86_PREFIX_0F, X86_OP2_MOVZX_R_RM8};
@@ -9067,7 +9209,7 @@ static x86_encode_result_t generate_load_ind_i8(x86_codegen_t* gen, const instru
     
     x86_reg_t regA = pvm_reg_to_x86[regA_idx < 12 ? regA_idx : 12];
     x86_reg_t regB = pvm_reg_to_x86[regB_idx < 12 ? regB_idx : 12];
-    x86_reg_t base_reg = X86_R12; // BaseReg equivalent
+    x86_reg_t base_reg = X86_RBP; // BaseReg
     
     if (x86_codegen_ensure_capacity(gen, 30) != 0) return result;
     
@@ -9101,25 +9243,15 @@ static x86_encode_result_t generate_load_ind_u16(x86_codegen_t* gen, const instr
     
     x86_reg_t regA = pvm_reg_to_x86[regA_idx < 12 ? regA_idx : 12];
     x86_reg_t regB = pvm_reg_to_x86[regB_idx < 12 ? regB_idx : 12];
-    x86_reg_t base_reg = X86_R12; // BaseReg equivalent
+    x86_reg_t base_reg = X86_RBP; // BaseReg
     
     if (x86_codegen_ensure_capacity(gen, 30) != 0) return result;
     
     size_t start_offset = gen->offset;
     
-    // Special handling for BaseReg==R12 (as in Go code)
-    x86_reg_t base, index;
-    if (reg_info_list[base_reg].reg_bits == 4) { // r12 as base - swap base and index
-        base = regB;
-        index = base_reg;
-    } else {
-        base = base_reg;
-        index = regB;
-    }
-    
     // MOVZX r64, r/m16 (0F B7 /r) with 66h prefix
     const uint8_t opcodes[] = {X86_PREFIX_0F, X86_OP2_MOVZX_R_RM16};
-    x86_encode_result_t load_result = emit_load_with_sib(gen, regA, base, index, (int32_t)vx, opcodes, 2, false, X86_PREFIX_66);
+    x86_encode_result_t load_result = emit_load_with_sib(gen, regA, base_reg, regB, (int32_t)vx, opcodes, 2, false, X86_PREFIX_66);
     
     if (load_result.size == 0) return result;
     
@@ -9145,7 +9277,7 @@ static x86_encode_result_t generate_load_ind_i16(x86_codegen_t* gen, const instr
     
     x86_reg_t regA = pvm_reg_to_x86[regA_idx < 12 ? regA_idx : 12];
     x86_reg_t regB = pvm_reg_to_x86[regB_idx < 12 ? regB_idx : 12];
-    x86_reg_t base_reg = X86_R12; // BaseReg equivalent
+    x86_reg_t base_reg = X86_RBP; // BaseReg
     
     if (x86_codegen_ensure_capacity(gen, 30) != 0) return result;
     
@@ -9177,7 +9309,7 @@ static x86_encode_result_t generate_load_ind_u32(x86_codegen_t* gen, const instr
     
     x86_reg_t regA = pvm_reg_to_x86[regA_idx < 12 ? regA_idx : 12];
     x86_reg_t regB = pvm_reg_to_x86[regB_idx < 12 ? regB_idx : 12];
-    x86_reg_t base_reg = X86_R12; // BaseReg equivalent
+    x86_reg_t base_reg = X86_RBP; // BaseReg
     
     // zero-extend via 32-bit MOV → clears upper 32 bits in 64-bit reg
     const uint8_t opcodes[] = {X86_OP_MOV_R_RM};
@@ -9194,7 +9326,7 @@ static x86_encode_result_t generate_load_ind_i32(x86_codegen_t* gen, const instr
     
     x86_reg_t regA = pvm_reg_to_x86[regA_idx < 12 ? regA_idx : 12];
     x86_reg_t regB = pvm_reg_to_x86[regB_idx < 12 ? regB_idx : 12];
-    x86_reg_t base_reg = X86_R12; // BaseReg equivalent
+    x86_reg_t base_reg = X86_RBP; // BaseReg
     
     // MOVSXD r64, dword ptr [BaseReg + regB*1 + disp32] (63 /r)
     const uint8_t opcodes[] = {X86_OP_MOVSXD};
@@ -9211,7 +9343,7 @@ static x86_encode_result_t generate_load_ind_u64(x86_codegen_t* gen, const instr
     
     x86_reg_t regA = pvm_reg_to_x86[regA_idx < 12 ? regA_idx : 12];
     x86_reg_t regB = pvm_reg_to_x86[regB_idx < 12 ? regB_idx : 12];
-    x86_reg_t base_reg = X86_R12; // BaseReg equivalent
+    x86_reg_t base_reg = X86_RBP; // BaseReg
     
     // full 64-bit MOV r64, r/m64
     const uint8_t opcodes[] = {X86_OP_MOV_R_RM};
@@ -9335,9 +9467,17 @@ static x86_encode_result_t generate_div_u_32(x86_codegen_t* gen, const instructi
     x86_encode_result_t result = {0};
     uint32_t start_offset = gen->offset;
 
-    // Preserve RAX/RDX (clobbered by DIV)
-    emit_push_reg(gen, X86_RAX);
-    emit_push_reg(gen, X86_RDX);
+    // Determine if dst conflicts with RAX/RDX
+    bool is_dst_rax = (dst == X86_RAX);
+    bool is_dst_rdx = (dst == X86_RDX);
+    bool is_src2_rax = (src2 == X86_RAX);
+    bool is_src2_rdx = (src2 == X86_RDX);
+
+    // Conditional spill (match Go): always spill if src2 uses RAX/RDX (needed for memory operand)
+    bool push_rax = (!is_dst_rax) || is_src2_rax;
+    bool push_rdx = (!is_dst_rdx) || is_src2_rdx;
+    if (push_rax) emit_push_reg(gen, X86_RAX);
+    if (push_rdx) emit_push_reg(gen, X86_RDX);
 
     // MOV EAX, dividend
     emit_mov_eax_from_reg_div_u_op32(gen, src1);
@@ -9363,9 +9503,6 @@ static x86_encode_result_t generate_div_u_32(x86_codegen_t* gen, const instructi
     // Clear high half and perform division
     emit_xor_reg32(gen, X86_RDX, X86_RDX);
 
-    bool is_src2_rax = (src2_idx == 0);
-    bool is_src2_rdx = (src2_idx == 2);
-
     if (is_src2_rax) {
         emit_div_mem_stack_rem_u_op32_rax(gen);
     } else if (is_src2_rdx) {
@@ -9386,8 +9523,21 @@ static x86_encode_result_t generate_div_u_32(x86_codegen_t* gen, const instructi
     int32_t jmp_disp = (int32_t)(end_offset - (jmp_offset + 5));
     *(int32_t*)&gen->buffer[jmp_offset + 1] = jmp_disp;
 
-    // Restore registers
-    emit_pop_rdx_rax_div_u_op32(gen);
+    // Restore / discard saved RDX, RAX (do not clobber result registers)
+    if (push_rdx) {
+        if (!is_dst_rdx) {
+            emit_pop_reg(gen, X86_RDX);
+        } else {
+            emit_add_rsp8(gen);
+        }
+    }
+    if (push_rax) {
+        if (!is_dst_rax) {
+            emit_pop_reg(gen, X86_RAX);
+        } else {
+            emit_add_rsp8(gen);
+        }
+    }
 
     result.code = &gen->buffer[start_offset];
     result.size = gen->offset - start_offset;
@@ -9407,9 +9557,14 @@ static x86_encode_result_t generate_div_s_32(x86_codegen_t* gen, const instructi
     x86_encode_result_t result = {0};
     uint32_t start_offset = gen->offset;
 
-    // Preserve caller RAX/RDX
-    emit_push_reg(gen, X86_RAX);
-    emit_push_reg(gen, X86_RDX);
+    bool is_dst_rax = (dst == X86_RAX);
+    bool is_dst_rdx = (dst == X86_RDX);
+    bool is_src2_rdx = (src2 == X86_RDX);
+
+    bool push_rax = !is_dst_rax;
+    bool push_rdx = !is_dst_rdx || is_src2_rdx;
+    if (push_rax) emit_push_reg(gen, X86_RAX);
+    if (push_rdx) emit_push_reg(gen, X86_RDX);
 
     // MOV EAX, dividend
     emit_mov_eax_from_reg32(gen, src1);
@@ -9452,7 +9607,6 @@ static x86_encode_result_t generate_div_s_32(x86_codegen_t* gen, const instructi
 
     emit_cdq(gen);
 
-    bool is_src2_rdx = (src2_idx == 2);
     if (is_src2_rdx) {
         emit_idiv_mem_stack_rem_s_op32_rdx(gen);
     } else {
@@ -9479,8 +9633,21 @@ static x86_encode_result_t generate_div_s_32(x86_codegen_t* gen, const instructi
     int32_t jmp_ovf_end_disp = (int32_t)(end_offset - (jmp_ovf_end_offset + 5));
     *(int32_t*)&gen->buffer[jmp_ovf_end_offset + 1] = jmp_ovf_end_disp;
 
-    // Restore RDX, RAX
-    emit_pop_rdx_rax(gen);
+    // Restore / discard saved RDX, RAX (do not clobber result registers)
+    if (push_rdx) {
+        if (!is_dst_rdx) {
+            emit_pop_reg(gen, X86_RDX);
+        } else {
+            emit_add_rsp8(gen);
+        }
+    }
+    if (push_rax) {
+        if (!is_dst_rax) {
+            emit_pop_reg(gen, X86_RAX);
+        } else {
+            emit_add_rsp8(gen);
+        }
+    }
 
     result.code = &gen->buffer[start_offset];
     result.size = gen->offset - start_offset;
@@ -9499,7 +9666,7 @@ static x86_encode_result_t generate_and_inv(x86_codegen_t* gen, const instructio
     x86_reg_t src1 = pvm_reg_to_x86[src1_idx];
     x86_reg_t src2 = pvm_reg_to_x86[src2_idx];
     x86_reg_t dst = pvm_reg_to_x86[dst_idx];
-    x86_reg_t tmp = X86_R12; // BaseReg equivalent
+    x86_reg_t tmp = X86_RBP; // BaseReg
     
     if (x86_codegen_ensure_capacity(gen, 25) != 0) return result;
     size_t start_offset = gen->offset;
@@ -10008,8 +10175,8 @@ static x86_encode_result_t generate_mul_upper_s_u(x86_codegen_t* gen, const inst
     const reg_info_t* dst_info = &reg_info_list[dst];
     
     // Check if we need to save RAX and RDX (matching Go's logic)
-    bool save_rax = (dst_idx != 0);  // dst != RAX
-    bool save_rdx = (dst_idx != 2);  // dst != RDX
+    bool save_rax = (dst != X86_RAX);
+    bool save_rdx = (dst != X86_RDX);
     
     // 1. Conditionally save RAX and RDX
     if (save_rax) {
@@ -10036,7 +10203,7 @@ static x86_encode_result_t generate_mul_upper_s_u(x86_codegen_t* gen, const inst
     gen->buffer[gen->offset++] = mod2;
     
     // 4. MOV dst, RDX (move high result to destination if dst != RDX)
-    if (dst_idx != 2) { // if dst != RDX
+    if (dst != X86_RDX) { // if dst != RDX
         uint8_t rex3 = build_rex_always(true, false, false, dst_info->rex_bit);
         uint8_t mod3 = 0xC0 | (0x02 << 3) | dst_info->reg_bits; // reg=2/RDX, rm=dst
         gen->buffer[gen->offset++] = rex3;
@@ -10081,8 +10248,8 @@ static x86_encode_result_t generate_mul_upper_s_s(x86_codegen_t* gen, const inst
     const reg_info_t* dst_info = &reg_info_list[dst];
     
     // Check if we need to save RAX and RDX (matching Go's logic)
-    bool save_rax = (dst_idx != 0);  // dst != RAX
-    bool save_rdx = (dst_idx != 2);  // dst != RDX
+    bool save_rax = (dst != X86_RAX);
+    bool save_rdx = (dst != X86_RDX);
     
     // 1. Conditionally save RAX and RDX
     if (save_rax) {
@@ -10109,7 +10276,7 @@ static x86_encode_result_t generate_mul_upper_s_s(x86_codegen_t* gen, const inst
     gen->buffer[gen->offset++] = mod2;
     
     // 4. MOV dst, RDX (move high result to destination if dst != RDX)
-    if (dst_idx != 2) { // if dst != RDX
+    if (dst != X86_RDX) { // if dst != RDX
         uint8_t rex3 = build_rex_always(true, false, false, dst_info->rex_bit);
         uint8_t mod3 = 0xC0 | (0x02 << 3) | dst_info->reg_bits; // reg=2/RDX, rm=dst
         gen->buffer[gen->offset++] = rex3;
@@ -10200,52 +10367,107 @@ static int emit_dump_registers(x86_codegen_t* gen) {
         return -1;
     }
 
-    // Temporarily reposition R12 to the register dump buffer (regDumpAddr = realMemAddr - dumpSize)
+    // Temporarily reposition BaseReg to the register dump buffer (regDumpAddr = realMemAddr - dumpSize)
     // Matches Go: emitAddRegImm32(BaseReg, -dumpOffset)
-    // ADD R12, -0x100000 (which is SUB R12, 0x100000)
-    uint32_t dumpOffset = 0x100000;
-    gen->buffer[gen->offset++] = 0x49; // REX.WB (R12 needs REX.B)
+    const uint32_t dumpOffset = 0x100000;
+    // 48 81 C5 00 00 F0 FF  => ADD RBP, -0x100000
+    gen->buffer[gen->offset++] = 0x48; // REX.W
     gen->buffer[gen->offset++] = 0x81; // ADD r/m64, imm32
-    gen->buffer[gen->offset++] = 0xC4; // ModR/M: mod=11, reg=0 (ADD), rm=100 (R12)
-    *(uint32_t*)&gen->buffer[gen->offset] = (uint32_t)(-(int32_t)dumpOffset); // -0x100000
+    gen->buffer[gen->offset++] = 0xC5; // ModR/M: mod=11, /0 (ADD), rm=101 (RBP)
+    *(uint32_t*)&gen->buffer[gen->offset] = (uint32_t)(-(int32_t)dumpOffset);
     gen->offset += 4;
 
-    // Store all 14 registers (0-13) to memory, including R12 at index 13
+    // Store all 14 registers (0-13) to memory (matches Go regInfoList order).
+    // BaseReg is used only as the addressing base for the dump buffer.
     for (int i = 0; i < 14; i++) {
         x86_reg_t src_reg = pvm_reg_to_x86[i];
-        int32_t offset = i * 8;
+        uint8_t disp8 = (uint8_t)(i * 8);
 
-        // Generate MOV [R12+offset], src_reg (matches Go encodeMovRegToMem)
-        uint8_t rex = 0x49; // REX.W + REX.B (for R12)
+        // MOV [RBP+disp8], src_reg (matches Go encodeMovRegToMem with BaseReg=RBP)
+        uint8_t rex = 0x48; // REX.W
         if (src_reg >= X86_R8) {
             rex |= 0x04; // REX.R for extended source register
         }
         gen->buffer[gen->offset++] = rex;
         gen->buffer[gen->offset++] = 0x89; // MOV r/m64, r64
 
-        // Go always uses mod=01 (disp8) even for offset=0
-        uint8_t modrm;
-        if (offset >= -128 && offset <= 127) {
-            modrm = 0x44 | ((src_reg & 7) << 3); // mod=01, reg=src, rm=100 (SIB+disp8)
-        } else {
-            modrm = 0x84 | ((src_reg & 7) << 3); // mod=10, reg=src, rm=100 (SIB+disp32)
-        }
-        gen->buffer[gen->offset++] = modrm;
-
-        // SIB byte for R12 base
-        gen->buffer[gen->offset++] = 0x24; // scale=00, index=100 (none), base=100 (R12)
-
-        // Displacement - Go always includes it even for offset=0
-        if (offset >= -128 && offset <= 127) {
-            gen->buffer[gen->offset++] = (uint8_t)offset; // disp8
-        } else {
-            *(uint32_t*)&gen->buffer[gen->offset] = (uint32_t)offset; // disp32
-            gen->offset += 4;
-        }
+        // mod=01 (disp8), rm=RBP(101)
+        gen->buffer[gen->offset++] = 0x45 | ((src_reg & 7) << 3);
+        gen->buffer[gen->offset++] = disp8;
     }
 
-    // Note: Go DumpRegisterToMemory(false) does NOT restore R12
+    // Note: Go DumpRegisterToMemory(false) does NOT restore BaseReg
     return 0;
+}
+
+// emit_write_context_slot_imm emits the exact instruction sequence produced by Go's BuildWriteContextSlotCode
+// for an immediate value (size=4 or 8), using BaseReg=RBP.
+static void emit_write_context_slot_imm(x86_codegen_t* gen, uint32_t slot_index, uint64_t value, int size) {
+    const uint32_t dumpOffset = 0x100000;
+    const uint32_t slotOffset = slot_index * 8;
+
+    // push rax
+    gen->buffer[gen->offset++] = 0x50;
+
+    if (size == 8) {
+        // mov rax, imm64
+        gen->buffer[gen->offset++] = 0x48;
+        gen->buffer[gen->offset++] = 0xB8;
+        *(uint64_t*)&gen->buffer[gen->offset] = value;
+        gen->offset += 8;
+    } else {
+        // mov eax, imm32
+        gen->buffer[gen->offset++] = 0xB8;
+        *(uint32_t*)&gen->buffer[gen->offset] = (uint32_t)value;
+        gen->offset += 4;
+    }
+
+    // sub rbp, dumpOffset
+    gen->buffer[gen->offset++] = 0x48;
+    gen->buffer[gen->offset++] = 0x81;
+    gen->buffer[gen->offset++] = 0xED;
+    *(uint32_t*)&gen->buffer[gen->offset] = dumpOffset;
+    gen->offset += 4;
+
+    if (slotOffset != 0) {
+        // add rbp, slotOffset
+        gen->buffer[gen->offset++] = 0x48;
+        gen->buffer[gen->offset++] = 0x81;
+        gen->buffer[gen->offset++] = 0xC5;
+        *(uint32_t*)&gen->buffer[gen->offset] = slotOffset;
+        gen->offset += 4;
+    }
+
+    // mov [rbp], {rax|eax} using SIB+disp32(0) form (matches Go's generic BaseReg store)
+    if (size == 8) {
+        gen->buffer[gen->offset++] = 0x48; // REX.W
+    } else {
+        gen->buffer[gen->offset++] = 0x40; // empty REX prefix (Go emits it)
+    }
+    gen->buffer[gen->offset++] = 0x89; // MOV r/m, r
+    gen->buffer[gen->offset++] = 0x84; // ModRM: mod=10 disp32, reg=RAX/EAX(0), rm=100 (SIB)
+    gen->buffer[gen->offset++] = 0x25; // SIB: scale=0, index=none(100), base=RBP(101)
+    *(uint32_t*)&gen->buffer[gen->offset] = 0;
+    gen->offset += 4;
+
+    if (slotOffset != 0) {
+        // sub rbp, slotOffset
+        gen->buffer[gen->offset++] = 0x48;
+        gen->buffer[gen->offset++] = 0x81;
+        gen->buffer[gen->offset++] = 0xED;
+        *(uint32_t*)&gen->buffer[gen->offset] = slotOffset;
+        gen->offset += 4;
+    }
+
+    // add rbp, dumpOffset
+    gen->buffer[gen->offset++] = 0x48;
+    gen->buffer[gen->offset++] = 0x81;
+    gen->buffer[gen->offset++] = 0xC5;
+    *(uint32_t*)&gen->buffer[gen->offset] = dumpOffset;
+    gen->offset += 4;
+
+    // pop rax
+    gen->buffer[gen->offset++] = 0x58;
 }
 
 // ECALLI implementation - matches Go ECALLI handling in vm_execute.go:133-152
@@ -10255,7 +10477,7 @@ static x86_encode_result_t generate_ecalli(x86_codegen_t* gen, const instruction
 
 //     printf("[ECALLI] reg_dump_addr=0x%lx\n", (unsigned long)gen->reg_dump_addr);
 
-    if (x86_codegen_ensure_capacity(gen, 200) != 0) {
+    if (x86_codegen_ensure_capacity(gen, 320) != 0) {
         return result; // Error
     }
 
@@ -10284,194 +10506,15 @@ static x86_encode_result_t generate_ecalli(x86_codegen_t* gen, const instruction
         return result;
     }
 
-    // Follow Go pattern exactly using R12-based addressing like Go's BuildWriteContextSlotCode:
-    // 1. BuildWriteContextSlotCode(vmStateSlotIndex, HOST, 8)
-    // 2. BuildWriteContextSlotCode(hostFuncIdIndex, uint64(opcode), 4)
-    // 3. BuildWriteContextSlotCode(pcSlotIndex, inst.Pc, 8)
-    // 4. BuildWriteContextSlotCode(nextx86SlotIndex, nextx86SlotPatch, 8)
-    // 5. DumpRegisterToMemory(false)
-    // 6. X86_OP_RET
-
-    uint32_t dumpOffset = 0x100000; // DUMP_SIZE
-
-    // 1. Write HOST state (4) to context slot 30 - EXACT Go BuildWriteContextSlotCode pattern for 8-byte write
-    uint32_t vm_state_offset = VM_STATE_SLOT_INDEX * 8;
-    // PUSH RAX
-    gen->buffer[gen->offset++] = 0x50;
-    // MOV RAX, imm64 (HOST value = 4)
-    gen->buffer[gen->offset++] = 0x48; // REX.W
-    gen->buffer[gen->offset++] = 0xB8; // MOV RAX, imm64
-    *(uint64_t*)&gen->buffer[gen->offset] = 4; // HOST state
-    gen->offset += 8;
-    // SUB R12, dumpOffset
-    gen->buffer[gen->offset++] = 0x49; // REX.WB
-    gen->buffer[gen->offset++] = 0x81; // SUB r/m64, imm32
-    gen->buffer[gen->offset++] = 0xEC; // ModR/M: r12
-    *(uint32_t*)&gen->buffer[gen->offset] = dumpOffset;
-    gen->offset += 4;
-    if (vm_state_offset != 0) {
-        // ADD R12, vm_state_offset
-        gen->buffer[gen->offset++] = 0x49; // REX.WB
-        gen->buffer[gen->offset++] = 0x81; // ADD r/m64, imm32
-        gen->buffer[gen->offset++] = 0xC4; // ModR/M: r12
-        *(uint32_t*)&gen->buffer[gen->offset] = vm_state_offset;
-        gen->offset += 4;
-    }
-    // MOV [R12], RAX
-    gen->buffer[gen->offset++] = 0x49; // REX.W
-    gen->buffer[gen->offset++] = 0x89; // MOV r/m64, r64
-    gen->buffer[gen->offset++] = 0x04; // ModR/M
-    gen->buffer[gen->offset++] = 0x24; // SIB
-    if (vm_state_offset != 0) {
-        // SUB R12, vm_state_offset
-        gen->buffer[gen->offset++] = 0x49; // REX.WB
-        gen->buffer[gen->offset++] = 0x81; // SUB r/m64, imm32
-        gen->buffer[gen->offset++] = 0xEC; // ModR/M: r12
-        *(uint32_t*)&gen->buffer[gen->offset] = vm_state_offset;
-        gen->offset += 4;
-    }
-    // ADD R12, dumpOffset
-    gen->buffer[gen->offset++] = 0x49; // REX.WB
-    gen->buffer[gen->offset++] = 0x81; // ADD r/m64, imm32
-    gen->buffer[gen->offset++] = 0xC4; // ModR/M: r12
-    *(uint32_t*)&gen->buffer[gen->offset] = dumpOffset;
-    gen->offset += 4;
-    // POP RAX
-    gen->buffer[gen->offset++] = 0x58;
-
-    // 2. Write host function ID to context slot 31 - 4 bytes like Go
-    uint32_t host_func_id_offset = HOST_FUNC_ID_INDEX * 8;
-    // PUSH RAX
-    gen->buffer[gen->offset++] = 0x50;
-    // MOV EAX, opcode (32-bit)
-    gen->buffer[gen->offset++] = 0xB8; // MOV EAX, imm32
-    *(uint32_t*)&gen->buffer[gen->offset] = (uint32_t)opcode;
-    gen->offset += 4;
-    // SUB R12, dumpOffset
-    gen->buffer[gen->offset++] = 0x49; // REX.WB
-    gen->buffer[gen->offset++] = 0x81; // SUB r/m64, imm32
-    gen->buffer[gen->offset++] = 0xEC; // ModR/M: r12
-    *(uint32_t*)&gen->buffer[gen->offset] = dumpOffset;
-    gen->offset += 4;
-    if (host_func_id_offset != 0) {
-        // ADD R12, host_func_id_offset
-        gen->buffer[gen->offset++] = 0x49; // REX.WB
-        gen->buffer[gen->offset++] = 0x81; // ADD r/m64, imm32
-        gen->buffer[gen->offset++] = 0xC4; // ModR/M: r12
-        *(uint32_t*)&gen->buffer[gen->offset] = host_func_id_offset;
-        gen->offset += 4;
-    }
-    // MOV [R12], EAX
-    gen->buffer[gen->offset++] = 0x41; // REX.B
-    gen->buffer[gen->offset++] = 0x89; // MOV r/m32, r32
-    gen->buffer[gen->offset++] = 0x04; // ModR/M
-    gen->buffer[gen->offset++] = 0x24; // SIB
-    if (host_func_id_offset != 0) {
-        // SUB R12, host_func_id_offset
-        gen->buffer[gen->offset++] = 0x49; // REX.WB
-        gen->buffer[gen->offset++] = 0x81; // SUB r/m64, imm32
-        gen->buffer[gen->offset++] = 0xEC; // ModR/M: r12
-        *(uint32_t*)&gen->buffer[gen->offset] = host_func_id_offset;
-        gen->offset += 4;
-    }
-    // ADD R12, dumpOffset
-    gen->buffer[gen->offset++] = 0x49; // REX.WB
-    gen->buffer[gen->offset++] = 0x81; // ADD r/m64, imm32
-    gen->buffer[gen->offset++] = 0xC4; // ModR/M: r12
-    *(uint32_t*)&gen->buffer[gen->offset] = dumpOffset;
-    gen->offset += 4;
-    // POP RAX
-    gen->buffer[gen->offset++] = 0x58;
-
-    // 3. Write PC to context slot 15 - EXACT Go BuildWriteContextSlotCode pattern for 8-byte write
-    uint32_t pc_offset = PC_SLOT_INDEX * 8;
-    // PUSH RAX
-    gen->buffer[gen->offset++] = 0x50;
-    // MOV RAX, imm64 (PC value)
-    gen->buffer[gen->offset++] = 0x48; // REX.W
-    gen->buffer[gen->offset++] = 0xB8; // MOV RAX, imm64
-    *(uint64_t*)&gen->buffer[gen->offset] = inst->pc;
-    gen->offset += 8;
-    // SUB R12, dumpOffset
-    gen->buffer[gen->offset++] = 0x49; // REX.WB
-    gen->buffer[gen->offset++] = 0x81; // SUB r/m64, imm32
-    gen->buffer[gen->offset++] = 0xEC; // ModR/M: r12
-    *(uint32_t*)&gen->buffer[gen->offset] = dumpOffset;
-    gen->offset += 4;
-    if (pc_offset != 0) {
-        // ADD R12, pc_offset
-        gen->buffer[gen->offset++] = 0x49; // REX.WB
-        gen->buffer[gen->offset++] = 0x81; // ADD r/m64, imm32
-        gen->buffer[gen->offset++] = 0xC4; // ModR/M: r12
-        *(uint32_t*)&gen->buffer[gen->offset] = pc_offset;
-        gen->offset += 4;
-    }
-    // MOV [R12], RAX
-    gen->buffer[gen->offset++] = 0x49; // REX.W
-    gen->buffer[gen->offset++] = 0x89; // MOV r/m64, r64
-    gen->buffer[gen->offset++] = 0x04; // ModR/M
-    gen->buffer[gen->offset++] = 0x24; // SIB
-    if (pc_offset != 0) {
-        // SUB R12, pc_offset
-        gen->buffer[gen->offset++] = 0x49; // REX.WB
-        gen->buffer[gen->offset++] = 0x81; // SUB r/m64, imm32
-        gen->buffer[gen->offset++] = 0xEC; // ModR/M: r12
-        *(uint32_t*)&gen->buffer[gen->offset] = pc_offset;
-        gen->offset += 4;
-    }
-    // ADD R12, dumpOffset
-    gen->buffer[gen->offset++] = 0x49; // REX.WB
-    gen->buffer[gen->offset++] = 0x81; // ADD r/m64, imm32
-    gen->buffer[gen->offset++] = 0xC4; // ModR/M: r12
-    *(uint32_t*)&gen->buffer[gen->offset] = dumpOffset;
-    gen->offset += 4;
-    // POP RAX
-    gen->buffer[gen->offset++] = 0x58;
-
-    // 4. Write next x86 instruction address to context slot 21 - EXACT Go BuildWriteContextSlotCode pattern for 8-byte write
-    uint32_t nextx86_offset = NEXT_X86_SLOT_INDEX * 8;
-    // PUSH RAX
-    gen->buffer[gen->offset++] = 0x50;
-    // MOV RAX, imm64 (nextx86SlotPatch value)
-    gen->buffer[gen->offset++] = 0x48; // REX.W
-    gen->buffer[gen->offset++] = 0xB8; // MOV RAX, imm64
-    *(uint64_t*)&gen->buffer[gen->offset] = 0x8686868686868686ULL; // nextx86SlotPatch placeholder
-    gen->offset += 8;
-    // SUB R12, dumpOffset
-    gen->buffer[gen->offset++] = 0x49; // REX.WB
-    gen->buffer[gen->offset++] = 0x81; // SUB r/m64, imm32
-    gen->buffer[gen->offset++] = 0xEC; // ModR/M: r12
-    *(uint32_t*)&gen->buffer[gen->offset] = dumpOffset;
-    gen->offset += 4;
-    if (nextx86_offset != 0) {
-        // ADD R12, nextx86_offset
-        gen->buffer[gen->offset++] = 0x49; // REX.WB
-        gen->buffer[gen->offset++] = 0x81; // ADD r/m64, imm32
-        gen->buffer[gen->offset++] = 0xC4; // ModR/M: r12
-        *(uint32_t*)&gen->buffer[gen->offset] = nextx86_offset;
-        gen->offset += 4;
-    }
-    // MOV [R12], RAX
-    gen->buffer[gen->offset++] = 0x49; // REX.W
-    gen->buffer[gen->offset++] = 0x89; // MOV r/m64, r64
-    gen->buffer[gen->offset++] = 0x04; // ModR/M
-    gen->buffer[gen->offset++] = 0x24; // SIB
-    if (nextx86_offset != 0) {
-        // SUB R12, nextx86_offset
-        gen->buffer[gen->offset++] = 0x49; // REX.WB
-        gen->buffer[gen->offset++] = 0x81; // SUB r/m64, imm32
-        gen->buffer[gen->offset++] = 0xEC; // ModR/M: r12
-        *(uint32_t*)&gen->buffer[gen->offset] = nextx86_offset;
-        gen->offset += 4;
-    }
-    // ADD R12, dumpOffset
-    gen->buffer[gen->offset++] = 0x49; // REX.WB
-    gen->buffer[gen->offset++] = 0x81; // ADD r/m64, imm32
-    gen->buffer[gen->offset++] = 0xC4; // ModR/M: r12
-    *(uint32_t*)&gen->buffer[gen->offset] = dumpOffset;
-    gen->offset += 4;
-    // POP RAX
-    gen->buffer[gen->offset++] = 0x58;
+    // BuildWriteContextSlotCode(vmStateSlotIndex, HOST, 8)
+    // Go recompiler HOST state = 3 (see pvm/recompiler/recompiler.go).
+    emit_write_context_slot_imm(gen, VM_STATE_SLOT_INDEX, 3, 8);
+    // BuildWriteContextSlotCode(hostFuncIdIndex, opcode, 4)
+    emit_write_context_slot_imm(gen, HOST_FUNC_ID_INDEX, opcode, 4);
+    // BuildWriteContextSlotCode(pcSlotIndex, inst.Pc, 8)
+    emit_write_context_slot_imm(gen, PC_SLOT_INDEX, inst->pc, 8);
+    // BuildWriteContextSlotCode(nextx86SlotIndex, nextx86SlotPatch, 8)
+    emit_write_context_slot_imm(gen, NEXT_X86_SLOT_INDEX, 0x8686868686868686ULL, 8);
 
     // 5. Dump registers to memory (matches Go DumpRegisterToMemory(false) pattern exactly)
     if (emit_dump_registers(gen) != 0) {
@@ -10492,7 +10535,7 @@ static x86_encode_result_t generate_sbrk(x86_codegen_t* gen, const instruction_t
     x86_encode_result_t result = {0};
     uint32_t start_offset = gen->offset;
 
-    if (x86_codegen_ensure_capacity(gen, 300) != 0) {
+    if (x86_codegen_ensure_capacity(gen, 340) != 0) {
         return result; // Error
     }
 
@@ -10523,231 +10566,16 @@ static x86_encode_result_t generate_sbrk(x86_codegen_t* gen, const instruction_t
     // 6. DumpRegisterToMemory(false)
     // 7. X86_OP_RET
 
-    uint32_t dumpOffset = 0x100000; // DUMP_SIZE
-
-    // 1. Write srcIdx to context slot 22 (SBRK_A_INDEX) - 4 bytes
-    uint32_t sbrk_a_offset = SBRK_A_INDEX * 8;
-    // PUSH RAX
-    gen->buffer[gen->offset++] = 0x50;
-    // MOV EAX, srcIdx (32-bit)
-    gen->buffer[gen->offset++] = 0xB8; // MOV EAX, imm32
-    *(uint32_t*)&gen->buffer[gen->offset] = (uint32_t)srcIdx;
-    gen->offset += 4;
-    // SUB R12, dumpOffset
-    gen->buffer[gen->offset++] = 0x49; // REX.WB
-    gen->buffer[gen->offset++] = 0x81; // SUB r/m64, imm32
-    gen->buffer[gen->offset++] = 0xEC; // ModR/M: r12
-    *(uint32_t*)&gen->buffer[gen->offset] = dumpOffset;
-    gen->offset += 4;
-    if (sbrk_a_offset != 0) {
-        // ADD R12, sbrk_a_offset
-        gen->buffer[gen->offset++] = 0x49; // REX.WB
-        gen->buffer[gen->offset++] = 0x81; // ADD r/m64, imm32
-        gen->buffer[gen->offset++] = 0xC4; // ModR/M: r12
-        *(uint32_t*)&gen->buffer[gen->offset] = sbrk_a_offset;
-        gen->offset += 4;
-    }
-    // MOV [R12], EAX
-    gen->buffer[gen->offset++] = 0x41; // REX.B
-    gen->buffer[gen->offset++] = 0x89; // MOV r/m32, r32
-    gen->buffer[gen->offset++] = 0x04; // ModR/M
-    gen->buffer[gen->offset++] = 0x24; // SIB
-    if (sbrk_a_offset != 0) {
-        // SUB R12, sbrk_a_offset
-        gen->buffer[gen->offset++] = 0x49; // REX.WB
-        gen->buffer[gen->offset++] = 0x81; // SUB r/m64, imm32
-        gen->buffer[gen->offset++] = 0xEC; // ModR/M: r12
-        *(uint32_t*)&gen->buffer[gen->offset] = sbrk_a_offset;
-        gen->offset += 4;
-    }
-    // ADD R12, dumpOffset
-    gen->buffer[gen->offset++] = 0x49; // REX.WB
-    gen->buffer[gen->offset++] = 0x81; // ADD r/m64, imm32
-    gen->buffer[gen->offset++] = 0xC4; // ModR/M: r12
-    *(uint32_t*)&gen->buffer[gen->offset] = dumpOffset;
-    gen->offset += 4;
-    // POP RAX
-    gen->buffer[gen->offset++] = 0x58;
-
-    // 2. Write dstIdx to context slot 23 (SBRK_D_INDEX) - 4 bytes
-    uint32_t sbrk_d_offset = SBRK_D_INDEX * 8;
-    // PUSH RAX
-    gen->buffer[gen->offset++] = 0x50;
-    // MOV EAX, dstIdx (32-bit)
-    gen->buffer[gen->offset++] = 0xB8; // MOV EAX, imm32
-    *(uint32_t*)&gen->buffer[gen->offset] = (uint32_t)dstIdx;
-    gen->offset += 4;
-    // SUB R12, dumpOffset
-    gen->buffer[gen->offset++] = 0x49; // REX.WB
-    gen->buffer[gen->offset++] = 0x81; // SUB r/m64, imm32
-    gen->buffer[gen->offset++] = 0xEC; // ModR/M: r12
-    *(uint32_t*)&gen->buffer[gen->offset] = dumpOffset;
-    gen->offset += 4;
-    if (sbrk_d_offset != 0) {
-        // ADD R12, sbrk_d_offset
-        gen->buffer[gen->offset++] = 0x49; // REX.WB
-        gen->buffer[gen->offset++] = 0x81; // ADD r/m64, imm32
-        gen->buffer[gen->offset++] = 0xC4; // ModR/M: r12
-        *(uint32_t*)&gen->buffer[gen->offset] = sbrk_d_offset;
-        gen->offset += 4;
-    }
-    // MOV [R12], EAX
-    gen->buffer[gen->offset++] = 0x41; // REX.B
-    gen->buffer[gen->offset++] = 0x89; // MOV r/m32, r32
-    gen->buffer[gen->offset++] = 0x04; // ModR/M
-    gen->buffer[gen->offset++] = 0x24; // SIB
-    if (sbrk_d_offset != 0) {
-        // SUB R12, sbrk_d_offset
-        gen->buffer[gen->offset++] = 0x49; // REX.WB
-        gen->buffer[gen->offset++] = 0x81; // SUB r/m64, imm32
-        gen->buffer[gen->offset++] = 0xEC; // ModR/M: r12
-        *(uint32_t*)&gen->buffer[gen->offset] = sbrk_d_offset;
-        gen->offset += 4;
-    }
-    // ADD R12, dumpOffset
-    gen->buffer[gen->offset++] = 0x49; // REX.WB
-    gen->buffer[gen->offset++] = 0x81; // ADD r/m64, imm32
-    gen->buffer[gen->offset++] = 0xC4; // ModR/M: r12
-    *(uint32_t*)&gen->buffer[gen->offset] = dumpOffset;
-    gen->offset += 4;
-    // POP RAX
-    gen->buffer[gen->offset++] = 0x58;
-
-    // 3-6. Same as ECALLI: VM state, PC, next x86 address
-    // 3. Write SBRK state (101) to context slot 30 - 8 bytes
-    uint32_t vm_state_offset = VM_STATE_SLOT_INDEX * 8;
-    // PUSH RAX
-    gen->buffer[gen->offset++] = 0x50;
-    // MOV RAX, imm64 (SBRK value = 101)
-    gen->buffer[gen->offset++] = 0x48; // REX.W
-    gen->buffer[gen->offset++] = 0xB8; // MOV RAX, imm64
-    *(uint64_t*)&gen->buffer[gen->offset] = SBRK; // 101
-    gen->offset += 8;
-    // SUB R12, dumpOffset
-    gen->buffer[gen->offset++] = 0x49; // REX.WB
-    gen->buffer[gen->offset++] = 0x81; // SUB r/m64, imm32
-    gen->buffer[gen->offset++] = 0xEC; // ModR/M: r12
-    *(uint32_t*)&gen->buffer[gen->offset] = dumpOffset;
-    gen->offset += 4;
-    if (vm_state_offset != 0) {
-        // ADD R12, vm_state_offset
-        gen->buffer[gen->offset++] = 0x49; // REX.WB
-        gen->buffer[gen->offset++] = 0x81; // ADD r/m64, imm32
-        gen->buffer[gen->offset++] = 0xC4; // ModR/M: r12
-        *(uint32_t*)&gen->buffer[gen->offset] = vm_state_offset;
-        gen->offset += 4;
-    }
-    // MOV [R12], RAX
-    gen->buffer[gen->offset++] = 0x49; // REX.W
-    gen->buffer[gen->offset++] = 0x89; // MOV r/m64, r64
-    gen->buffer[gen->offset++] = 0x04; // ModR/M
-    gen->buffer[gen->offset++] = 0x24; // SIB
-    if (vm_state_offset != 0) {
-        // SUB R12, vm_state_offset
-        gen->buffer[gen->offset++] = 0x49; // REX.WB
-        gen->buffer[gen->offset++] = 0x81; // SUB r/m64, imm32
-        gen->buffer[gen->offset++] = 0xEC; // ModR/M: r12
-        *(uint32_t*)&gen->buffer[gen->offset] = vm_state_offset;
-        gen->offset += 4;
-    }
-    // ADD R12, dumpOffset
-    gen->buffer[gen->offset++] = 0x49; // REX.WB
-    gen->buffer[gen->offset++] = 0x81; // ADD r/m64, imm32
-    gen->buffer[gen->offset++] = 0xC4; // ModR/M: r12
-    *(uint32_t*)&gen->buffer[gen->offset] = dumpOffset;
-    gen->offset += 4;
-    // POP RAX
-    gen->buffer[gen->offset++] = 0x58;
-
-    // 4. Write PC to context slot 15 - 8 bytes (same as ECALLI)
-    uint32_t pc_offset = PC_SLOT_INDEX * 8;
-    // PUSH RAX
-    gen->buffer[gen->offset++] = 0x50;
-    // MOV RAX, imm64 (PC value)
-    gen->buffer[gen->offset++] = 0x48; // REX.W
-    gen->buffer[gen->offset++] = 0xB8; // MOV RAX, imm64
-    *(uint64_t*)&gen->buffer[gen->offset] = inst->pc;
-    gen->offset += 8;
-    // SUB R12, dumpOffset
-    gen->buffer[gen->offset++] = 0x49; // REX.WB
-    gen->buffer[gen->offset++] = 0x81; // SUB r/m64, imm32
-    gen->buffer[gen->offset++] = 0xEC; // ModR/M: r12
-    *(uint32_t*)&gen->buffer[gen->offset] = dumpOffset;
-    gen->offset += 4;
-    if (pc_offset != 0) {
-        // ADD R12, pc_offset
-        gen->buffer[gen->offset++] = 0x49; // REX.WB
-        gen->buffer[gen->offset++] = 0x81; // ADD r/m64, imm32
-        gen->buffer[gen->offset++] = 0xC4; // ModR/M: r12
-        *(uint32_t*)&gen->buffer[gen->offset] = pc_offset;
-        gen->offset += 4;
-    }
-    // MOV [R12], RAX
-    gen->buffer[gen->offset++] = 0x49; // REX.W
-    gen->buffer[gen->offset++] = 0x89; // MOV r/m64, r64
-    gen->buffer[gen->offset++] = 0x04; // ModR/M
-    gen->buffer[gen->offset++] = 0x24; // SIB
-    if (pc_offset != 0) {
-        // SUB R12, pc_offset
-        gen->buffer[gen->offset++] = 0x49; // REX.WB
-        gen->buffer[gen->offset++] = 0x81; // SUB r/m64, imm32
-        gen->buffer[gen->offset++] = 0xEC; // ModR/M: r12
-        *(uint32_t*)&gen->buffer[gen->offset] = pc_offset;
-        gen->offset += 4;
-    }
-    // ADD R12, dumpOffset
-    gen->buffer[gen->offset++] = 0x49; // REX.WB
-    gen->buffer[gen->offset++] = 0x81; // ADD r/m64, imm32
-    gen->buffer[gen->offset++] = 0xC4; // ModR/M: r12
-    *(uint32_t*)&gen->buffer[gen->offset] = dumpOffset;
-    gen->offset += 4;
-    // POP RAX
-    gen->buffer[gen->offset++] = 0x58;
-
-    // 5. Write next x86 instruction address to context slot 21 - 8 bytes (same as ECALLI)
-    uint32_t nextx86_offset = NEXT_X86_SLOT_INDEX * 8;
-    // PUSH RAX
-    gen->buffer[gen->offset++] = 0x50;
-    // MOV RAX, imm64 (nextx86SlotPatch value)
-    gen->buffer[gen->offset++] = 0x48; // REX.W
-    gen->buffer[gen->offset++] = 0xB8; // MOV RAX, imm64
-    *(uint64_t*)&gen->buffer[gen->offset] = 0x8686868686868686ULL; // nextx86SlotPatch placeholder
-    gen->offset += 8;
-    // SUB R12, dumpOffset
-    gen->buffer[gen->offset++] = 0x49; // REX.WB
-    gen->buffer[gen->offset++] = 0x81; // SUB r/m64, imm32
-    gen->buffer[gen->offset++] = 0xEC; // ModR/M: r12
-    *(uint32_t*)&gen->buffer[gen->offset] = dumpOffset;
-    gen->offset += 4;
-    if (nextx86_offset != 0) {
-        // ADD R12, nextx86_offset
-        gen->buffer[gen->offset++] = 0x49; // REX.WB
-        gen->buffer[gen->offset++] = 0x81; // ADD r/m64, imm32
-        gen->buffer[gen->offset++] = 0xC4; // ModR/M: r12
-        *(uint32_t*)&gen->buffer[gen->offset] = nextx86_offset;
-        gen->offset += 4;
-    }
-    // MOV [R12], RAX
-    gen->buffer[gen->offset++] = 0x49; // REX.W
-    gen->buffer[gen->offset++] = 0x89; // MOV r/m64, r64
-    gen->buffer[gen->offset++] = 0x04; // ModR/M
-    gen->buffer[gen->offset++] = 0x24; // SIB
-    if (nextx86_offset != 0) {
-        // SUB R12, nextx86_offset
-        gen->buffer[gen->offset++] = 0x49; // REX.WB
-        gen->buffer[gen->offset++] = 0x81; // SUB r/m64, imm32
-        gen->buffer[gen->offset++] = 0xEC; // ModR/M: r12
-        *(uint32_t*)&gen->buffer[gen->offset] = nextx86_offset;
-        gen->offset += 4;
-    }
-    // ADD R12, dumpOffset
-    gen->buffer[gen->offset++] = 0x49; // REX.WB
-    gen->buffer[gen->offset++] = 0x81; // ADD r/m64, imm32
-    gen->buffer[gen->offset++] = 0xC4; // ModR/M: r12
-    *(uint32_t*)&gen->buffer[gen->offset] = dumpOffset;
-    gen->offset += 4;
-    // POP RAX
-    gen->buffer[gen->offset++] = 0x58;
+    // BuildWriteContextSlotCode(sbrkAIndex, uint64(srcIdx), 4)
+    emit_write_context_slot_imm(gen, SBRK_A_INDEX, srcIdx, 4);
+    // BuildWriteContextSlotCode(sbrkDIndex, uint64(dstIdx), 4)
+    emit_write_context_slot_imm(gen, SBRK_D_INDEX, dstIdx, 4);
+    // BuildWriteContextSlotCode(vmStateSlotIndex, SBRK, 8)
+    emit_write_context_slot_imm(gen, VM_STATE_SLOT_INDEX, SBRK, 8);
+    // BuildWriteContextSlotCode(pcSlotIndex, inst.Pc, 8)
+    emit_write_context_slot_imm(gen, PC_SLOT_INDEX, inst->pc, 8);
+    // BuildWriteContextSlotCode(nextx86SlotIndex, nextx86SlotPatch, 8)
+    emit_write_context_slot_imm(gen, NEXT_X86_SLOT_INDEX, 0x8686868686868686ULL, 8);
 
     // 6. Dump registers to memory (matches Go DumpRegisterToMemory(false))
     if (emit_dump_registers(gen) != 0) {

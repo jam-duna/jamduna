@@ -74,6 +74,10 @@ func ReadStateTransitions(baseDir string) (stfs []*statedb.StateTransition, err 
 		if strings.Contains(file.Name(), "guarantor") {
 			continue
 		}
+		// Skip genesis files (they are state snapshots, not state transitions)
+		if file.Name() == "genesis.bin" || file.Name() == "genesis.json" || file.Name() == "00000000.bin" || file.Name() == "00000000.json" {
+			continue
+		}
 		if strings.HasSuffix(file.Name(), ".bin") || strings.HasSuffix(file.Name(), ".json") {
 			stPath := filepath.Join(baseDir, file.Name())
 			isJSON := strings.HasSuffix(file.Name(), ".json")
