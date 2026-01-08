@@ -1,5 +1,4 @@
-// run test: go test ./statedb -v
-package statedb
+package pvm
 
 import (
 	"bytes"
@@ -12,8 +11,10 @@ import (
 	"testing"
 
 	log "github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/pvm/interpreter"
+	"github.com/colorfulnotion/jam/pvm/pvmtypes"
 	"github.com/colorfulnotion/jam/pvm/recompiler"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/colorfulnotion/jam/pvm/testutil"
 )
 
 // memory_for test
@@ -29,10 +30,10 @@ type TestPageMap struct {
 }
 
 var MachineStateToStr map[uint8]string = map[uint8]string{
-	HALT:  "halt",
-	OOG:   "out-of-gas",
-	PANIC: "panic",
-	FAULT: "page-fault",
+	pvmtypes.HALT:  "halt",
+	pvmtypes.OOG:   "out-of-gas",
+	pvmtypes.PANIC: "panic",
+	pvmtypes.FAULT: "page-fault",
 }
 
 // TestCase
@@ -61,68 +62,14 @@ func pvm_test(tc TestCase, testMode string) error {
 	case "vmgo":
 		return vmgo_test_backend(tc)
 	default:
-		return pvm_test_backend(tc, BackendInterpreter)
+		return fmt.Errorf("unknown test mode: %s", testMode)
 	}
-}
-
-func pvm_test_backend(tc TestCase, backend string) error {
-	hostENV := NewMockHostEnv()
-	serviceAcct := uint32(0) // stub
-
-	// Convert test code to raw instruction bytes
-	rawCodeBytes := make([]byte, len(tc.Code))
-	for i, val := range tc.Code {
-		rawCodeBytes[i] = byte(val)
-	}
-
-	// setup Gas
-	var initialGas int64 = tc.InitialGas
-	if tc.InitialGas == 0 {
-		initialGas = 10000 // Default gas for tests
-	}
-
-	pvm := NewVM(serviceAcct, rawCodeBytes, tc.InitialRegs, uint64(tc.InitialPC), 4096, hostENV, false, []byte{}, backend, uint64(initialGas))
-	defer pvm.Destroy()
-
-	// Setup memory
-	for _, mem := range tc.InitialMemory {
-		pvm.WriteRAMBytes(mem.Address, mem.Data[:])
-	}
-
-	pvm.IsChild = false
-	err := pvm.Execute(pvm, uint32(tc.InitialPC), "")
-	if err != nil {
-		return fmt.Errorf("execution failed: %v", err)
-	}
-
-	// Check the registers
-	actualRegs := pvm.ReadRegisters()
-	if equalIntSlices(actualRegs[:], tc.ExpectedRegs) {
-		// fmt.Printf("Register match for test %s \n", tc.Name)
-		return nil
-	}
-
-	resultCode := pvm.ResultCode
-	resultCodeStr := types.HostResultCodeToString[resultCode]
-	if resultCodeStr == "page-fault" {
-		resultCodeStr = "panic"
-	}
-	expectedCodeStr := tc.ExpectedStatus
-	if expectedCodeStr == "page-fault" {
-		expectedCodeStr = "panic"
-	}
-	if resultCodeStr == expectedCodeStr {
-		fmt.Printf("Result code match for test %s: %s\n", tc.Name, resultCodeStr)
-	} else {
-		return fmt.Errorf("result code mismatch for test %s: expected %s, got %s", tc.Name, expectedCodeStr, resultCodeStr)
-	}
-	return fmt.Errorf("register mismatch for test %s: expected %v, got %v", tc.Name, tc.ExpectedRegs, actualRegs)
 }
 
 // vmgo_test_backend tests VMGo directly without going through the VM wrapper
 // Note: VMGo allocates 4GB memory per instance, so we need explicit GC to avoid OOM
 func vmgo_test_backend(tc TestCase) error {
-	hostENV := NewMockHostEnv()
+	hostENV := testutil.NewMockHostEnv()
 	serviceAcct := uint32(0) // stub
 
 	// Convert test code to raw instruction bytes
@@ -130,7 +77,7 @@ func vmgo_test_backend(tc TestCase) error {
 	for i, val := range tc.Code {
 		rawCodeBytes[i] = byte(val)
 	}
-	PvmLogging = true
+	interpreter.PvmLogging = true
 	// Decode the program blob to get a Program struct
 	p, err := DecodeProgram_pure_pvm_blob(rawCodeBytes)
 	if err != nil {
@@ -144,13 +91,13 @@ func vmgo_test_backend(tc TestCase) error {
 	}
 
 	// Create VMGo directly
-	vmgo := NewVMGo(serviceAcct, p, tc.InitialRegs, uint64(tc.InitialPC), uint64(initialGas), hostENV)
+	vmgo := interpreter.NewVMGo(serviceAcct, p, tc.InitialRegs, uint64(tc.InitialPC), uint64(initialGas), hostENV)
 
 	// Set the initial memory
 
 	var mutatedPages map[uint32]bool = make(map[uint32]bool)
 	for _, mem := range tc.InitialMemory {
-		//pvm.Ram.SetPageAccess(mem.Address/PageSize, 1, AccessMode{Readable: false, Writable: true, Inaccessible: false})
+		//Ram.SetPageAccess(mem.Address/PageSize, 1, AccessMode{Readable: false, Writable: true, Inaccessible: false})
 		vmgo.Ram.SetMemAccess(mem.Address, uint32(len(mem.Data)), recompiler.PageMutable)
 		vmgo.WriteRAMBytes(mem.Address, mem.Data[:])
 		mutatedPages[mem.Address/4096] = true
@@ -180,13 +127,9 @@ func vmgo_test_backend(tc TestCase) error {
 	}
 
 	// Create a minimal VM wrapper for the host reference
-	hostVM := &VM{
-		ExecutionVM: vmgo,
-		hostenv:     hostENV,
-	}
 	vmgo.IsChild = false
-
-	vmgo.Execute(hostVM, uint32(tc.InitialPC), "")
+	fakeVM := &pvmtypes.FakeHostVM{}
+	vmgo.Execute(fakeVM, uint32(tc.InitialPC), "")
 
 	// Check the registers
 	actualRegs := vmgo.ReadRegisters()
@@ -238,7 +181,7 @@ func recompiler_test(tc TestCase) error {
 		rawCodeBytes[i] = byte(val)
 	}
 	fmt.Printf("running test: %s\n", tc.Name)
-	hostENV := NewMockHostEnv()
+	hostENV := testutil.NewMockHostEnv()
 	p, err := DecodeProgram_pure_pvm_blob(rawCodeBytes)
 	if err != nil {
 		return fmt.Errorf("failed to decode program: %w", err)
@@ -255,12 +198,12 @@ func recompiler_test(tc TestCase) error {
 	defer runtime.GC()
 	// Set the initial memory
 	for _, mem := range tc.InitialMemory {
-		//pvm.Ram.SetPageAccess(mem.Address/PageSize, 1, AccessMode{Readable: false, Writable: true, Inaccessible: false})
+		//Ram.SetPageAccess(mem.Address/PageSize, 1, AccessMode{Readable: false, Writable: true, Inaccessible: false})
 		rvm.SetMemAccess(mem.Address, uint32(len(mem.Data)), recompiler.PageMutable)
 		rvm.WriteRAMBytes(mem.Address, mem.Data[:])
 	}
 	// if len(tc.InitialMemory) == 0 {
-	// 	pvm.Ram.SetPageAccess(32, 1, AccessMode{Readable: false, Writable: false, Inaccessible: true})
+	// 	Ram.SetPageAccess(32, 1, AccessMode{Readable: false, Writable: false, Inaccessible: true})
 	// }
 	resultCode := uint8(0)
 	rvm.Gas = 100000000000
@@ -283,9 +226,8 @@ func recompiler_test(tc TestCase) error {
 		rvm.WriteRegister(i, reg)
 		fmt.Printf("Register %d initialized to %d\n", i, reg)
 	}
-	vm := &VM{}
-	vm.ExecutionVM = rvm
-	rvm.Execute(vm, 0, "")
+	fakeVM := &pvmtypes.FakeHostVM{}
+	rvm.Execute(fakeVM, 0, "")
 	// check the memory
 	for _, mem := range tc.ExpectedMemory {
 		data, err := rvm.ReadMemory(mem.Address, uint32(len(mem.Data)))
@@ -352,10 +294,10 @@ type BackendResult struct {
 }
 
 func TestPVMAll(t *testing.T) {
-	mode := "recompiler" // change to "vmgo" or BackendInterpreter for other backends
+	mode := "vmgo" // change to "vmgo" or BackendInterpreter for other backends
 	log.InitLogger("debug")
 	// Directory containing the JSON files
-	dir := "programs"
+	dir := "testdata/programs"
 
 	// Read all files in the directory
 	files, err := os.ReadDir(dir)
@@ -427,7 +369,7 @@ func equalIntSlices(a, b []uint64) bool {
 
 func TestSinglePVM(t *testing.T) {
 	log.InitLogger("debug")
-	filename := "programs/inst_ecalli_100.json"
+	filename := "testdata/programs/inst_ecalli_100.json"
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("Failed to read test file %s: %v", filename, err)
@@ -458,7 +400,7 @@ func TestSinglePVM(t *testing.T) {
 func TestBranchEqNok(t *testing.T) {
 	mode := BackendInterpreter // change to "recompiler" or "vmgo" to test other backends
 	log.InitLogger("debug")
-	filename := "programs/inst_branch_eq_nok.json"
+	filename := "testdata/programs/inst_branch_eq_nok.json"
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("Failed to read test file %s: %v", filename, err)
@@ -489,7 +431,7 @@ func TestBranchEqNok(t *testing.T) {
 func TestLoadU32(t *testing.T) {
 	mode := BackendInterpreter // change to "recompiler" or "vmgo" to test other backends
 	log.InitLogger("debug")
-	filename := "programs/inst_load_u32.json"
+	filename := "testdata/programs/inst_load_u32.json"
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("Failed to read test file %s: %v", filename, err)
@@ -520,7 +462,7 @@ func TestLoadU32(t *testing.T) {
 func TestEcalli(t *testing.T) {
 	mode := "recompiler" // change to "vmgo" or BackendInterpreter for other backends
 	log.InitLogger("debug")
-	filename := "programs/inst_ecalli_100.json"
+	filename := "testdata/programs/inst_ecalli_100.json"
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("Failed to read test file %s: %v", filename, err)
@@ -543,7 +485,7 @@ func TestVMGoAll(t *testing.T) {
 	mode := "vmgo"
 	log.InitLogger("debug")
 	// Directory containing the JSON files
-	dir := "programs"
+	dir := "testdata/programs"
 
 	// Read all files in the directory
 	files, err := os.ReadDir(dir)
@@ -601,7 +543,7 @@ func TestVMGoAll(t *testing.T) {
 // TestVMGoSingle runs a single test case using VMGo backend
 func TestVMGoSingle(t *testing.T) {
 	log.InitLogger("debug")
-	filename := "programs/inst_branch_eq_nok.json"
+	filename := "testdata/programs/inst_branch_eq_nok.json"
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("Failed to read test file %s: %v", filename, err)

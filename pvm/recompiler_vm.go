@@ -1,7 +1,8 @@
-package statedb
+package pvm
 
 import (
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/pvm/pvmtypes"
 	"github.com/colorfulnotion/jam/pvm/recompiler"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -23,8 +24,8 @@ func NewRecompilerVM(service_index uint32, initialRegs []uint64, initialPC uint6
 
 	rvm.SetMemoryBounds(o_size, w_size, z, s, o_byte, w_byte)
 	// w - read-write
-	rw_data_address := uint32(2*Z_Z) + Z_func(o_size)
-	rw_data_address_end := rw_data_address + P_func(w_size) + z*Z_P
+	rw_data_address := uint32(2*pvmtypes.Z_Z) + pvmtypes.ZFunc(o_size)
+	rw_data_address_end := rw_data_address + pvmtypes.PFunc(w_size) + z*pvmtypes.Z_P
 	current_heap_pointer := rw_data_address_end
 	rvm.SetHeapPointer(current_heap_pointer)
 	rvm.SetBitMask(p.K)
@@ -66,12 +67,12 @@ func NewRecompilerVMWithoutSetup(service_index uint32, initialRegs []uint64, ini
 	return recompilerVM
 }
 
-func (rvm *Recompiler) Execute(VM *VM, entry uint32, logDir string) error {
-	rvm.HostFunc = VM
+func (rvm *Recompiler) Execute(vm pvmtypes.HostVM, entry uint32, logDir string) error {
+	rvm.HostFunc = vm
 	// Set LogDir for trace verification support
 	rvm.RecompilerVM.LogDir = logDir
 	rvm.RecompilerVM.Execute(entry)
-	VM.ResultCode = rvm.GetResultCode()
+	vm.SetResultCode(rvm.GetResultCode())
 	return nil
 }
 
@@ -98,10 +99,10 @@ func (rvm *Recompiler) SetGas(gas int64) {
 	rvm.RecompilerVM.SetGas(gas)
 }
 
-func (rvm *Recompiler) InitStepwise(vm *VM, entryPoint uint32) error {
+func (rvm *Recompiler) InitStepwise(vm pvmtypes.HostVM, entryPoint uint32) error {
 	panic("InitStepwise not implemented for Recompiler backend")
 }
 
-func (rvm *Recompiler) ExecuteStep(vm *VM) []byte {
+func (rvm *Recompiler) ExecuteStep(vm pvmtypes.HostVM) []byte {
 	panic("ExecuteStep not implemented for Recompiler backend")
 }

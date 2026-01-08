@@ -1,6 +1,6 @@
 // PVM Disassembler - Disassembles JAM-format PVM blobs into human-readable assembly
 
-package statedb
+package pvm
 
 import (
 	"fmt"

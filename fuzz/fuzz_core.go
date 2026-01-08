@@ -12,6 +12,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/grandpa"
 	"github.com/colorfulnotion/jam/jamerrors"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
@@ -719,7 +720,7 @@ func selectAllImportBlocksErrors(seed []byte, store types.JAMStorage, modes []st
 			}
 
 			// TODO: need ancestorSet
-			stfErrActual := statedb.CheckStateTransition(store, &stfMutated, nil, statedb.BackendInterpreter)
+			stfErrActual := statedb.CheckStateTransition(store, &stfMutated, nil, pvm.BackendInterpreter)
 			if stfErrActual == stfErrExpected || true {
 				errorList = append(errorList, stfErrExpected)
 				mutatedSTFs = append(mutatedSTFs, stfMutated)

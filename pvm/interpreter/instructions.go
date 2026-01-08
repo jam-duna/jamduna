@@ -1,4 +1,4 @@
-package statedb
+package interpreter
 
 import (
 	"fmt"
@@ -612,7 +612,7 @@ func opcode_str(opcode byte) string {
 	return fmt.Sprintf("OPCODE %d", opcode)
 }
 
-func (vm *VM) Str(logStr string) string {
+func (vm *VMGo) Str(logStr string) string {
 	return fmt.Sprintf("%s_%s: %s", vm.ServiceMetadata, vm.Mode, logStr)
 }
 

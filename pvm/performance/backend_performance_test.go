@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/pvm/program"
+	"github.com/colorfulnotion/jam/pvm/testutil"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -23,7 +25,7 @@ const (
 )
 
 func VM_EXECUTE(code []byte, backend string, initialGas uint64, arg []byte, jamReady bool) (duration time.Duration, result uint8) {
-	hostENV := statedb.NewMockHostEnv()
+	hostENV := testutil.NewMockHostEnv()
 	vm := statedb.NewVM(0, code, make([]uint64, 13), 0, 4096, hostENV, jamReady, []byte{}, backend, initialGas)
 	if vm == nil {
 		return 0, types.WORKDIGEST_PANIC
@@ -79,8 +81,8 @@ func TestArithmeticBenchBackendPerformance(t *testing.T) {
 	}
 
 	backends := []string{
-		statedb.BackendInterpreter,
-		statedb.BackendCompiler,
+		pvm.BackendInterpreter,
+		pvm.BackendCompiler,
 	}
 
 	var results []BackendBenchResult
@@ -155,7 +157,7 @@ func TestArithmeticBenchBackendPerformance(t *testing.T) {
 	t.Logf("Saved runtime chart: %s", runtimeChart)
 
 	speedupChart := filepath.Join(resultsDir, "backend_speedup.png")
-	if err := GenerateBackendSpeedupChart(results, config, speedupChart, statedb.BackendInterpreter, statedb.BackendCompiler); err != nil {
+	if err := GenerateBackendSpeedupChart(results, config, speedupChart, pvm.BackendInterpreter, pvm.BackendCompiler); err != nil {
 		t.Fatalf("Failed to generate speedup chart: %v", err)
 	}
 	t.Logf("Saved speedup chart: %s", speedupChart)
@@ -215,8 +217,8 @@ func TestMemoryBenchBackendPerformance(t *testing.T) {
 	}
 
 	backends := []string{
-		statedb.BackendInterpreter,
-		statedb.BackendCompiler,
+		pvm.BackendInterpreter,
+		pvm.BackendCompiler,
 	}
 
 	var results []BackendBenchResult
@@ -292,7 +294,7 @@ func TestMemoryBenchBackendPerformance(t *testing.T) {
 	t.Logf("Saved runtime chart: %s", runtimeChart)
 
 	speedupChart := filepath.Join(resultsDir, "memory_backend_speedup.png")
-	if err := GenerateBackendSpeedupChart(results, config, speedupChart, statedb.BackendInterpreter, statedb.BackendCompiler); err != nil {
+	if err := GenerateBackendSpeedupChart(results, config, speedupChart, pvm.BackendInterpreter, pvm.BackendCompiler); err != nil {
 		t.Fatalf("Failed to generate speedup chart: %v", err)
 	}
 	t.Logf("Saved speedup chart: %s", speedupChart)

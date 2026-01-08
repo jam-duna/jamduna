@@ -12,6 +12,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/fuzz"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -26,7 +27,7 @@ const (
 
 // defaultBackend can be set at build time via -ldflags "-X main.defaultBackend=compiler"
 // Default is interpreter for compatibility
-var defaultBackend = statedb.BackendInterpreter
+var defaultBackend = pvm.BackendInterpreter
 
 func validateImportBlockConfig(jConfig types.ConfigJamBlocks) {
 	if jConfig.Network != "tiny" {

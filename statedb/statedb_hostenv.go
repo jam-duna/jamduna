@@ -10,8 +10,6 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-const OK uint64 = 0
-
 func (s *StateDB) writeAccount(sa *types.ServiceAccount) (serviceUpdate *types.ServiceUpdate, err error) {
 	if !sa.Mutable {
 		return nil, fmt.Errorf("WriteAccount")
@@ -702,4 +700,15 @@ func VerifyStateWitnessRef(witness types.StateWitness, stateRoot common.Hash) bo
 
 func (s *StateDB) GetForgets() []*types.SubServiceRequestResult {
 	return s.stateUpdate.GetForgets()
+}
+
+// EVMStorage exposes EVM storage operations for PVM host functions.
+func (s *StateDB) EVMStorage() (types.EVMJAMStorage, bool) {
+	evmStorage, ok := s.sdb.(types.EVMJAMStorage)
+	return evmStorage, ok
+}
+
+// FetchJAMDASegments proxies DA segment retrieval to the underlying storage.
+func (s *StateDB) FetchJAMDASegments(workPackageHash common.Hash, indexStart uint16, indexEnd uint16, payloadLength uint32) (payload []byte, err error) {
+	return s.sdb.FetchJAMDASegments(workPackageHash, indexStart, indexEnd, payloadLength)
 }

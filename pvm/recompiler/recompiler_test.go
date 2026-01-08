@@ -269,7 +269,7 @@ type BasicBlockDiff struct {
 func TestPVM_Integration(t *testing.T) {
 	log.InitLogger("debug")
 	// Directory containing the JSON files
-	dir := "../../statedb/new_gas_model_test/integration-tests"
+	dir := "../testdata/new_gas_model_test/integration-tests"
 
 	// Read all files in the directory
 	files, err := os.ReadDir(dir)
@@ -338,7 +338,7 @@ type BackendResult struct {
 func TestPVMAll(t *testing.T) {
 	log.InitLogger("debug")
 	// Directory containing the JSON files
-	dir := "../../statedb/programs"
+	dir := "../testdata/programs"
 
 	// Read all files in the directory
 	files, err := os.ReadDir(dir)
@@ -409,7 +409,7 @@ func equalIntSlices(a, b []uint64) bool {
 
 func TestSinglePVM(t *testing.T) {
 	log.InitLogger("debug")
-	filename := "../../statedb/programs/inst_load_u8_nok.json"
+	filename := "../testdata/programs/inst_load_u8_nok.json"
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("Failed to read test file %s: %v", filename, err)
@@ -490,7 +490,7 @@ func TestDoom(t *testing.T) {
 
 func TestEcalli(t *testing.T) {
 	log.InitLogger("debug")
-	filename := "../../statedb/programs/inst_ecalli_100.json"
+	filename := "../testdata/programs/inst_ecalli_100.json"
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("Failed to read test file %s: %v", filename, err)

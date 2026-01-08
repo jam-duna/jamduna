@@ -37,6 +37,7 @@ import (
 	"github.com/colorfulnotion/jam/ed25519"
 	grandpa "github.com/colorfulnotion/jam/grandpa"
 	log "github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	telemetry "github.com/colorfulnotion/jam/telemetry"
@@ -807,19 +808,19 @@ func StandardizePVMBackend(pvm_mode string) string {
 	var pvmBackend string
 	switch mode {
 	case "INTERPRETER":
-		pvmBackend = statedb.BackendInterpreter
+		pvmBackend = pvm.BackendInterpreter
 	case "COMPILER", "RECOMPILER", "X86":
 		if runtime.GOOS == "linux" {
-			pvmBackend = statedb.BackendCompiler
+			pvmBackend = pvm.BackendCompiler
 		} else {
 			log.Warn(log.Node, fmt.Sprintf("COMPILER Not Supported. Defaulting to interpreter"))
 		}
 	case "GO_INTERPRETER", "GOINTERPRETER":
-		pvmBackend = statedb.BackendInterpreter
+		pvmBackend = pvm.BackendInterpreter
 
 	default:
 		log.Warn(log.Node, fmt.Sprintf("Unknown PVM mode [%s], defaulting to interpreter", pvm_mode))
-		pvmBackend = statedb.BackendInterpreter
+		pvmBackend = pvm.BackendInterpreter
 	}
 	return pvmBackend
 }

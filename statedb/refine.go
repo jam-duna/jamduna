@@ -11,6 +11,8 @@ import (
 	bls "github.com/colorfulnotion/jam/bls"
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/pvm/interpreter"
+	"github.com/colorfulnotion/jam/pvm/program"
 	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/telemetry"
@@ -433,7 +435,7 @@ func pvmlog(logBytes []byte) string {
 		registers[4], registers[5], registers[6], registers[7],
 		registers[8], registers[9], registers[10], registers[11], registers[12])
 
-	return fmt.Sprintf("%s PC:%d Gas:%d Registers:%s", opcode_str(opcode), prevpc, int64(gas), regStr)
+	return fmt.Sprintf("%s PC:%d Gas:%d Registers:%s", program.OpcodeToString(opcode), prevpc, int64(gas), regStr)
 }
 
 // authorizeWP executes the authorization step for a work package
@@ -464,10 +466,10 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 	importsegments := make([][][]byte, len(package_bundle.WorkPackage.WorkItems))
 	results := []types.WorkDigest{}
 
-	saveToLogDirOnce(logDir, fmt.Sprintf("%v_bundle.bin", package_bundle.WorkPackage.Hash()), package_bundle.Bytes())
-	saveToLogDirOnce(logDir, fmt.Sprintf("%v_bundle.json", package_bundle.WorkPackage.Hash()), []byte(types.ToJSON(package_bundle)))
+	SaveToLogDirOnce(logDir, fmt.Sprintf("%v_bundle.bin", package_bundle.WorkPackage.Hash()), package_bundle.Bytes())
+	SaveToLogDirOnce(logDir, fmt.Sprintf("%v_bundle.json", package_bundle.WorkPackage.Hash()), []byte(types.ToJSON(package_bundle)))
 	stateSnapShotRaw := s.GetStateSnapshotRaw()
-	saveToLogDirOnce(logDir, fmt.Sprintf("%v_statesnapstot.json", package_bundle.WorkPackage.Hash()), []byte(stateSnapShotRaw.String()))
+	SaveToLogDirOnce(logDir, fmt.Sprintf("%v_statesnapstot.json", package_bundle.WorkPackage.Hash()), []byte(stateSnapShotRaw.String()))
 	workPackage := package_bundle.WorkPackage
 
 	// Import Segments
@@ -635,14 +637,14 @@ func (s *StateDB) ExecuteWorkPackageBundle(workPackageCoreIndex uint16, package_
 		Slot:              slot,
 		Report:            workReport,
 	}
-	saveToLogDirOnce(logDir, fmt.Sprintf("%v_bundlesnap.json", workPackage.Hash()), []byte(types.ToJSON(bundleSnapshot)))
-	saveToLogDir(logDir, "bclubs", serializeHashes(d.BClubs))
-	saveToLogDir(logDir, "sclubs", serializeHashes(d.SClubs))
-	saveToLogDir(logDir, "bundle_chunks", serializeECChunks(d.BundleChunks))
-	saveToLogDir(logDir, "segment_chunks", serializeECChunks(d.SegmentChunks))
-	saveToLogDir(logDir, "workreportderivation.json", []byte(types.ToJSON(d)))
-	saveToLogDir(logDir, "workreport.bin", workReport.Bytes())
-	saveToLogDir(logDir, "workreport.json", []byte(types.ToJSON(workReport)))
+	SaveToLogDirOnce(logDir, fmt.Sprintf("%v_bundlesnap.json", workPackage.Hash()), []byte(types.ToJSON(bundleSnapshot)))
+	SaveToLogDir(logDir, "bclubs", SerializeHashes(d.BClubs))
+	SaveToLogDir(logDir, "sclubs", SerializeHashes(d.SClubs))
+	SaveToLogDir(logDir, "bundle_chunks", SerializeECChunks(d.BundleChunks))
+	SaveToLogDir(logDir, "segment_chunks", SerializeECChunks(d.SegmentChunks))
+	SaveToLogDir(logDir, "workreportderivation.json", []byte(types.ToJSON(d)))
+	SaveToLogDir(logDir, "workreport.bin", workReport.Bytes())
+	SaveToLogDir(logDir, "workreport.json", []byte(types.ToJSON(workReport)))
 	return workReport, nil
 }
 
@@ -663,10 +665,10 @@ func (s *StateDB) ReadGlobalDepth(serviceID uint32) (depth uint8, err error) {
 
 func (s *StateDB) ExecuteWorkPackageBundleSteps(workPackageCoreIndex uint16, package_bundle types.WorkPackageBundle, segmentRootLookup types.SegmentRootLookup, slot uint32, execContext string, eventID uint64, pvmBackends []string) (err error) {
 	// Enable memory operation logging for step-by-step execution
-	oldPvmLogging := PvmLogging
-	PvmLogging = true
+	oldPvmLogging := interpreter.PvmLogging
+	interpreter.PvmLogging = true
 	defer func() {
-		PvmLogging = oldPvmLogging
+		interpreter.PvmLogging = oldPvmLogging
 	}()
 
 	importsegments := make([][][]byte, len(package_bundle.WorkPackage.WorkItems))

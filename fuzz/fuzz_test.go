@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/colorfulnotion/jam/jamerrors"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
@@ -54,7 +55,7 @@ func testFuzz(t *testing.T, Base_Dir string, modes []string, stfs []*statedb.Sta
 		if len(possibleErrs) > 0 {
 			for errIdx, expectedErr := range possibleErrs {
 				mutatedStf := mutatedSTFs[errIdx]
-				errActual := statedb.CheckStateTransition(sdb_storage, &mutatedStf, nil, statedb.BackendInterpreter)
+				errActual := statedb.CheckStateTransition(sdb_storage, &mutatedStf, nil, pvm.BackendInterpreter)
 				if errActual == expectedErr {
 					// write as dump
 					stChallenge := statedb.StateTransitionChallenge{

@@ -4,7 +4,7 @@
 // PVM Fuzz Test - Compares Go Interpreter vs X86 Recompiler
 // Uses Rust FFI to generate valid PolkaVM program blobs from arbitrary fuzzing data
 
-package statedb
+package pvm
 
 import (
 	"bytes"
@@ -12,7 +12,10 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/colorfulnotion/jam/pvm/interpreter"
+	"github.com/colorfulnotion/jam/pvm/pvmtypes"
 	"github.com/colorfulnotion/jam/pvm/recompiler"
+	"github.com/colorfulnotion/jam/pvm/testutil"
 )
 
 // FuzzResult holds execution result from a backend
@@ -26,7 +29,7 @@ type FuzzResult struct {
 
 // executeInterpreter runs the program on VMGo (Go interpreter)
 func executeInterpreter(programBlob []byte, initialRegs []uint64, initialGas int64) (*FuzzResult, error) {
-	hostENV := NewMockHostEnv()
+	hostENV := testutil.NewMockHostEnv()
 	serviceAcct := uint32(0)
 
 	p, err := DecodeProgram_pure_pvm_blob(programBlob)
@@ -37,7 +40,7 @@ func executeInterpreter(programBlob []byte, initialRegs []uint64, initialGas int
 		return nil, fmt.Errorf("failed to decode program: empty code")
 	}
 
-	vmgo := NewVMGo(serviceAcct, p, initialRegs, 0, uint64(initialGas), hostENV)
+	vmgo := interpreter.NewVMGo(serviceAcct, p, initialRegs, 0, uint64(initialGas), hostENV)
 	if vmgo == nil {
 		return nil, fmt.Errorf("failed to create VMGo")
 	}
@@ -46,15 +49,11 @@ func executeInterpreter(programBlob []byte, initialRegs []uint64, initialGas int
 		runtime.GC()
 	}()
 
-	// Create minimal VM wrapper
-	hostVM := &VM{
-		ExecutionVM: vmgo,
-		hostenv:     hostENV,
-	}
 	vmgo.IsChild = true // Use instruction-level gas mode for comparison
 
 	// Execute
-	err = vmgo.Execute(hostVM, 0, "")
+	fakeVM := &pvmtypes.FakeHostVM{}
+	err = vmgo.Execute(fakeVM, 0, "")
 	fmt.Printf("VMGo execution finished with error: %v\n", err)
 
 	// Collect result
@@ -74,7 +73,7 @@ func executeInterpreter(programBlob []byte, initialRegs []uint64, initialGas int
 
 // executeRecompiler runs the program on X86 JIT recompiler
 func executeRecompiler(programBlob []byte, initialRegs []uint64, initialGas int64) (*FuzzResult, error) {
-	hostENV := NewMockHostEnv()
+	hostENV := testutil.NewMockHostEnv()
 	serviceAcct := uint32(0)
 
 	p, err := DecodeProgram_pure_pvm_blob(programBlob)
@@ -95,8 +94,8 @@ func executeRecompiler(programBlob []byte, initialRegs []uint64, initialGas int6
 	}()
 
 	// Execute
-	vm := &VM{ExecutionVM: rvm}
-	rvm.Execute(vm, 0, "")
+	fakeVM := &pvmtypes.FakeHostVM{}
+	rvm.Execute(fakeVM, 0, "")
 
 	// Collect result
 	result := &FuzzResult{
@@ -132,7 +131,7 @@ func compareResults(interp, recomp *FuzzResult) error {
 	}
 
 	// Compare PC (only if both halted normally)
-	if interp.ResultCode == HALT && recomp.ResultCode == HALT {
+	if interp.ResultCode == pvmtypes.HALT && recomp.ResultCode == pvmtypes.HALT {
 		if interp.PC != recomp.PC {
 			errors = append(errors, fmt.Sprintf("PC mismatch: interpreter=%d, recompiler=%d",
 				interp.PC, recomp.PC))
@@ -207,7 +206,7 @@ func FuzzPVMCorrectness(f *testing.F) {
 	recompiler.EnableDebugTracing = false
 	recompiler.SetShowDisassembly(false)
 	recompiler.DebugRecompilerResult = false
-	PvmLogging = false
+	interpreter.PvmLogging = false
 	// Add seed corpus
 	f.Add([]byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07})
 	f.Add([]byte{0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80})

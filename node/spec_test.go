@@ -11,6 +11,7 @@ import (
 	chainspecs "github.com/colorfulnotion/jam/chainspecs"
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/statedb"
 	telemetry "github.com/colorfulnotion/jam/telemetry"
@@ -188,7 +189,7 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 
 	pvmStart := time.Now()
 
-	vm_auth := statedb.NewVMFromCode(authindex, authcode, 0, 0, s, statedb.BackendInterpreter, types.IsAuthorizedGasAllocation)
+	vm_auth := statedb.NewVMFromCode(authindex, authcode, 0, 0, s, pvm.BackendInterpreter, types.IsAuthorizedGasAllocation)
 	if vm_auth == nil {
 		t.Fatalf("Failed to create VM for authorization (corrupted bytecode?)")
 	}
@@ -212,7 +213,7 @@ func TestBootstrapCodeFromSpec(t *testing.T) {
 			log.Crit(log.Node, "executeWorkPackageBundle: Code and CodeHash Mismatch")
 		}
 		// fmt.Printf("index %d, code len=%d\n", service_index, len(code))
-		vm := statedb.NewVMFromCode(service_index, code, 0, 0, s, statedb.BackendInterpreter, workItem.RefineGasLimit)
+		vm := statedb.NewVMFromCode(service_index, code, 0, 0, s, pvm.BackendInterpreter, workItem.RefineGasLimit)
 		if vm == nil {
 			t.Fatalf("Failed to create VM for service %d (corrupted bytecode?)", service_index)
 		}

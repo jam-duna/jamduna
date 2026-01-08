@@ -3,7 +3,7 @@
 
 // PVM Fuzz FFI - Rust FFI wrapper for generating valid PolkaVM program blobs
 
-package statedb
+package pvm
 
 /*
 #cgo LDFLAGS: -L/root/go/src/github.com/colorfulnotion/polkavm/fuzz/target/release -lpolkavm_ffi -ldl -lpthread -lm

@@ -1,0 +1,57 @@
+{
+  "name": "inst_store_indirect_u8_upper2gb_reg0",
+  "initial-regs": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    171,
+    0,
+    0,
+    0,
+    0
+  ],
+  "initial-pc": 0,
+  "initial-page-map": [],
+  "initial-memory": [],
+  "initial-gas": 10000,
+  "program": [
+    0,
+    0,
+    6,
+    120,
+    120,
+    0,
+    0,
+    0,
+    128,
+    1
+  ],
+  "expected-status": "page-fault",
+  "expected-regs": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    171,
+    0,
+    0,
+    0,
+    0
+  ],
+  "expected-pc": 0,
+  "expected-memory": [],
+  "expected-gas": 9975,
+  "expected-page-fault-address": 2147483648,
+  "block-gas-costs": {
+    "0": 25
+  }
+}

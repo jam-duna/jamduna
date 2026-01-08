@@ -8,10 +8,11 @@ import (
 	"os"
 	"slices"
 	"sort"
-	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/pvm"
+	"github.com/colorfulnotion/jam/pvm/pvmtypes"
 	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
@@ -35,6 +36,29 @@ const (
 	AccountStorageConst = 34 //[Gratis]
 	AccountLookupConst  = 81 //[Gratis]
 )
+
+type externalWriteTracker interface {
+	TaintRecordExternalWrite(memAddr, memSize uint64, hostFunction string)
+}
+
+type traceBufferFlusher interface {
+	FlushTraceBuffers()
+}
+
+type evmStorageProvider interface {
+	EVMStorage() (types.EVMJAMStorage, bool)
+}
+
+type daFetcher interface {
+	FetchJAMDASegments(workPackageHash common.Hash, indexStart uint16, indexEnd uint16, payloadLength uint32) (payload []byte, err error)
+}
+
+func getEVMStorage(hostenv types.HostEnv) (types.EVMJAMStorage, bool) {
+	if provider, ok := hostenv.(evmStorageProvider); ok {
+		return provider.EVMStorage()
+	}
+	return nil, false
+}
 
 // FETCH_VERKLE operation types
 const (
@@ -76,7 +100,6 @@ type Refine_parameters struct {
 // Returns true if the call results in a halt condition, otherwise false
 func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 
-	t0 := time.Now()
 	rawGas := vm.GetGas()
 	if rawGas < 0 {
 		rawGas = 0
@@ -95,7 +118,6 @@ func (vm *VM) InvokeHostCall(host_fn int) (bool, error) {
 	// Log after host function call to match javajam format
 	vm.DebugHostFunction(host_fn, "Gas Used: %d, Gas Left: %d", gasUsed, currentGas)
 
-	benchRec.Add("InvokeHostCall", time.Since(t0))
 	return ok, err
 }
 
@@ -249,8 +271,8 @@ func (vm *VM) hostInfo() {
 	errcode := vm.WriteRAMBytes(uint32(bo), bytesToWrite)
 
 	// Record taint for external write
-	if vmgo, ok := vm.ExecutionVM.(*VMGo); ok {
-		vmgo.TaintRecordExternalWrite(uint64(bo), uint64(l), "PROVIDE")
+	if tracker, ok := vm.ExecutionVM.(externalWriteTracker); ok {
+		tracker.TaintRecordExternalWrite(uint64(bo), uint64(l), "PROVIDE")
 	}
 
 	if errcode != OK {
@@ -933,8 +955,8 @@ func (vm *VM) hostFetch() {
 	errCode := vm.WriteRAMBytes(uint32(o), v_Bytes[f:f+l])
 
 	// Record taint for external write
-	if vmgo, ok := vm.ExecutionVM.(*VMGo); ok {
-		vmgo.TaintRecordExternalWrite(uint64(o), l, "FETCH")
+	if tracker, ok := vm.ExecutionVM.(externalWriteTracker); ok {
+		tracker.TaintRecordExternalWrite(uint64(o), l, "FETCH")
 	}
 
 	if errCode != OK {
@@ -1169,15 +1191,15 @@ func (vm *VM) hostInvoke() {
 	pc := new_machine.GetPC()
 
 	// Flush parent trace buffers before invoke
-	if parentVMGo, ok := vm.ExecutionVM.(*VMGo); ok {
-		parentVMGo.flushTraceBuffers()
+	if flusher, ok := vm.ExecutionVM.(traceBufferFlusher); ok {
+		flusher.FlushTraceBuffers()
 	}
 
 	new_machine.ExecuteAsChild(uint32(pc))
 
 	// Flush child trace buffers after invoke
-	if childVMGo, ok := new_machine.(*VMGo); ok {
-		childVMGo.flushTraceBuffers()
+	if flusher, ok := new_machine.(traceBufferFlusher); ok {
+		flusher.FlushTraceBuffers()
 	}
 
 	postGas := new_machine.GetGas()
@@ -1188,8 +1210,8 @@ func (vm *VM) hostInvoke() {
 	errCodeGas = vm.WriteRAMBytes(uint32(o), gasBytes)
 
 	// Record taint for external write (gas)
-	if vmgo, ok := vm.ExecutionVM.(*VMGo); ok {
-		vmgo.TaintRecordExternalWrite(uint64(o), 8, "INVOKE_GAS")
+	if tracker, ok := vm.ExecutionVM.(externalWriteTracker); ok {
+		tracker.TaintRecordExternalWrite(uint64(o), 8, "INVOKE_GAS")
 	}
 
 	if errCodeGas != OK {
@@ -1203,8 +1225,8 @@ func (vm *VM) hostInvoke() {
 		errCode := vm.WriteRAMBytes(uint32(o)+8*uint32(i), reg_bytes)
 
 		// Record taint for external write (register)
-		if vmgo, ok := vm.ExecutionVM.(*VMGo); ok {
-			vmgo.TaintRecordExternalWrite(uint64(o)+8*uint64(i), 8, "INVOKE_REG")
+		if tracker, ok := vm.ExecutionVM.(externalWriteTracker); ok {
+			tracker.TaintRecordExternalWrite(uint64(o)+8*uint64(i), 8, "INVOKE_REG")
 		}
 
 		if errCode != OK {
@@ -1223,7 +1245,7 @@ func (vm *VM) hostInvoke() {
 	//}
 	// 786
 	status := new_machine.GetMachineState()
-	resultMap[uint64(status)]++
+	pvmtypes.ResultMap[uint64(status)]++
 	switch status {
 	case FAULT:
 		log.Info(vm.logging, "INVOKE FAULT", "n", n, "new_machine.GetFaultAddress()", new_machine.GetFaultAddress())
@@ -1244,8 +1266,6 @@ func (vm *VM) hostInvoke() {
 	log.Info(vm.logging, "INVOKE OK", "n", n, "new_machine.MachineState", new_machine.GetMachineState(), "gasRemaining", new_machine.GetGas(), "pc", new_machine.GetPC())
 	vm.VMs[uint32(n)] = &new_machine
 }
-
-var resultMap = map[uint64]int{}
 
 // Lookup preimage
 func (vm *VM) hostLookup() {
@@ -1295,8 +1315,8 @@ func (vm *VM) hostLookup() {
 	err := vm.WriteRAMBytes(uint32(o), v[:l])
 
 	// Record taint for external write
-	if vmgo, ok := vm.ExecutionVM.(*VMGo); ok {
-		vmgo.TaintRecordExternalWrite(uint64(o), l, "PROVIDE_CHILD")
+	if tracker, ok := vm.ExecutionVM.(externalWriteTracker); ok {
+		tracker.TaintRecordExternalWrite(uint64(o), l, "PROVIDE_CHILD")
 	}
 
 	if err != OK {
@@ -1404,8 +1424,8 @@ func (vm *VM) hostRead() {
 	}
 
 	// Record taint for external write
-	if vmgo, ok := vm.ExecutionVM.(*VMGo); ok {
-		vmgo.TaintRecordExternalWrite(uint64(bo), l, "READ")
+	if tracker, ok := vm.ExecutionVM.(externalWriteTracker); ok {
+		tracker.TaintRecordExternalWrite(uint64(bo), l, "READ")
 	}
 
 	vm.WriteRegister(7, lenval)
@@ -1710,8 +1730,8 @@ func (vm *VM) hostHistoricalLookup() {
 	errCode = vm.WriteRAMBytes(uint32(o), v[f:f+l])
 
 	// Record taint for external write
-	if vmgo, ok := vm.ExecutionVM.(*VMGo); ok {
-		vmgo.TaintRecordExternalWrite(uint64(o), l, "LOOKUP")
+	if tracker, ok := vm.ExecutionVM.(externalWriteTracker); ok {
+		tracker.TaintRecordExternalWrite(uint64(o), l, "LOOKUP")
 	}
 
 	if errCode != OK {
@@ -1795,7 +1815,7 @@ func (vm *VM) hostMachine() {
 		}
 	}
 	log.Info(vm.logging, "hostMachine", "po", po, "pz", pz, "i", i, "n", min_n, "program_size", len(p))
-	program, err := DecodeProgram_pure_pvm_blob(p)
+	program, err := pvm.DecodeProgram_pure_pvm_blob(p)
 	if err != nil {
 		log.Error(vm.logging, "hostMachine: DecodeProgram_pure_pvm_blob failed", "error", err)
 		vm.Panic(WHO)
@@ -1850,8 +1870,8 @@ func (vm *VM) hostPeek() {
 	errCode = vm.WriteRAMBytes(uint32(o), s_data[:])
 
 	// Record taint for external write
-	if vmgo, ok := vm.ExecutionVM.(*VMGo); ok {
-		vmgo.TaintRecordExternalWrite(o, z, "PEEK")
+	if tracker, ok := vm.ExecutionVM.(externalWriteTracker); ok {
+		tracker.TaintRecordExternalWrite(o, z, "PEEK")
 	}
 
 	if errCode != OK {
@@ -1894,8 +1914,8 @@ func (vm *VM) hostPoke() {
 		return
 	}
 	// Record taint for external write to child VM
-	if vmgo, ok := (*m_n).(*VMGo); ok {
-		vmgo.TaintRecordExternalWrite(o, z, "POKE")
+	if tracker, ok := (*m_n).(externalWriteTracker); ok {
+		tracker.TaintRecordExternalWrite(o, z, "POKE")
 	}
 	vm.WriteRegister(7, OK)
 	vm.SetHostResultCode(OK)
@@ -1948,7 +1968,7 @@ func (vm *VM) hostPages() {
 		return
 	}
 
-	if p < 16 || p+c >= (1<<32)/Z_P || r > 4 {
+	if p < 16 || p+c >= (1<<32)/pvmtypes.Z_P || r > 4 {
 		vm.WriteRegister(7, HUH)
 		vm.SetHostResultCode(HUH)
 		log.Trace(vm.logging, "hostPages HUH", "n", n, "p", p, "c", c, "r", r)
@@ -1958,8 +1978,8 @@ func (vm *VM) hostPages() {
 	count := int(c)
 	// get the page address
 	var toWrite []byte
-	pageAddress := page * Z_P
-	countLength := count * Z_P
+	pageAddress := page * pvmtypes.Z_P
+	countLength := count * pvmtypes.Z_P
 	if r > 2 {
 		var errCode uint64
 		toWrite, errCode = vm.ReadRAMBytes(uint32(pageAddress), uint32(countLength))
@@ -1970,28 +1990,28 @@ func (vm *VM) hostPages() {
 			log.Trace(vm.logging, "hostPages HUH", "n", n, "p", p, "c", c, "r", r)
 			return
 		}
-		(*m).SetPagesAccessRange(page, count, PageMutable)
+		(*m).SetPagesAccessRange(page, count, pvmtypes.PageMutable)
 		(*m).WriteRAMBytes(uint32(pageAddress), toWrite)
 		// Record taint for external write to child VM
-		if vmgo, ok := (*m).(*VMGo); ok {
-			vmgo.TaintRecordExternalWrite(uint64(pageAddress), uint64(countLength), "PAGES")
+		if tracker, ok := (*m).(externalWriteTracker); ok {
+			tracker.TaintRecordExternalWrite(uint64(pageAddress), uint64(countLength), "PAGES")
 		}
 	} else {
-		(*m).SetPagesAccessRange(page, count, PageMutable)
+		(*m).SetPagesAccessRange(page, count, pvmtypes.PageMutable)
 		toWrite = make([]byte, countLength)
 		(*m).WriteRAMBytes(uint32(pageAddress), toWrite)
 		// Record taint for external write to child VM
-		if vmgo, ok := (*m).(*VMGo); ok {
-			vmgo.TaintRecordExternalWrite(uint64(pageAddress), uint64(countLength), "PAGES")
+		if tracker, ok := (*m).(externalWriteTracker); ok {
+			tracker.TaintRecordExternalWrite(uint64(pageAddress), uint64(countLength), "PAGES")
 		}
 	}
 	switch {
 	case r == 0: // To deallocate a page (previously void)
-		(*m).SetPagesAccessRange(page, count, PageInaccessible)
+		(*m).SetPagesAccessRange(page, count, pvmtypes.PageInaccessible)
 	case r == 1 || r == 3: // read-only
-		(*m).SetPagesAccessRange(page, count, PageImmutable)
+		(*m).SetPagesAccessRange(page, count, pvmtypes.PageImmutable)
 	case r == 2 || r == 4: // read-write
-		(*m).SetPagesAccessRange(page, count, PageMutable)
+		(*m).SetPagesAccessRange(page, count, pvmtypes.PageMutable)
 	}
 	if r > 2 {
 		vm.DebugHostFunction(PAGES, "PAGES WRITE n=%d, p=%d, c=%d, r=%d -- wrote data", n, p, c, r)
@@ -2055,8 +2075,8 @@ func (vm *VM) PutGasAndRegistersToMemory(input_address uint32, gas uint64, regs 
 	errCode := vm.WriteRAMBytes(input_address, gasBytes)
 
 	// Record taint for external write (gas)
-	if vmgo, ok := vm.ExecutionVM.(*VMGo); ok {
-		vmgo.TaintRecordExternalWrite(uint64(input_address), 8, "PUT_GAS_REGS_GAS")
+	if tracker, ok := vm.ExecutionVM.(externalWriteTracker); ok {
+		tracker.TaintRecordExternalWrite(uint64(input_address), 8, "PUT_GAS_REGS_GAS")
 	}
 
 	if errCode != OK {
@@ -2069,8 +2089,8 @@ func (vm *VM) PutGasAndRegistersToMemory(input_address uint32, gas uint64, regs 
 		errCode = vm.WriteRAMBytes(input_address+8+uint32(i*8), regBytes)
 
 		// Record taint for external write (register)
-		if vmgo, ok := vm.ExecutionVM.(*VMGo); ok {
-			vmgo.TaintRecordExternalWrite(uint64(input_address+8+uint32(i*8)), 8, "PUT_GAS_REGS_REG")
+		if tracker, ok := vm.ExecutionVM.(externalWriteTracker); ok {
+			tracker.TaintRecordExternalWrite(uint64(input_address+8+uint32(i*8)), 8, "PUT_GAS_REGS_REG")
 		}
 
 		if errCode != OK {
@@ -2181,13 +2201,10 @@ func (vm *VM) HostFetchWitness() error {
 
 	var payload []byte
 
-	// Get StateDB from hostenv
-	stateDB, ok := vm.hostenv.(*StateDB)
-	if ok {
+	if evmStorage, ok := getEVMStorage(vm.hostenv); ok {
 		switch objectKind {
 		case evmtypes.ObjectKindCode:
 			// Look up code from witness cache
-			evmStorage := stateDB.sdb.(types.EVMJAMStorage)
 			if code, exists := evmStorage.GetCode(address); exists {
 				payload = code
 				found = true
@@ -2216,7 +2233,6 @@ func (vm *VM) HostFetchWitness() error {
 			shardID := evmtypes.ShardID{Ld: 0, Prefix56: [7]byte{}}
 
 			// Look up from witness cache
-			evmStorage := stateDB.sdb.(types.EVMJAMStorage)
 			if storageData, exists := evmStorage.GetContractStorage(address); exists {
 				if contractStorage, ok := storageData.(evmtypes.ContractStorage); ok {
 					shard := contractStorage.Shard
@@ -2270,21 +2286,23 @@ func (vm *VM) HostFetchWitness() error {
 	if found && len(payload) == 0 && witness != nil && witness.Ref.PayloadLength > 0 {
 		// Fetch the payload from DA segments
 		var err error
-		payload, err = vm.hostenv.(*StateDB).sdb.FetchJAMDASegments(
-			witness.Ref.WorkPackageHash,
-			witness.Ref.IndexStart,
-			witness.Ref.IndexStart+uint16((witness.Ref.PayloadLength+types.SegmentSize-1)/types.SegmentSize),
-			witness.Ref.PayloadLength,
-		)
-		if err != nil {
-			log.Trace(vm.logging, "HostFetchWitness: failed to fetch payload from DA",
-				"object_id", object_id.Hex(),
-				"err", err)
-		} else {
-			log.Trace(vm.logging, "HostFetchWitness: Fetched payload from DA",
-				"object_id", object_id.Hex(),
-				"payload_len", len(payload))
-			witness.Payload = payload
+		if fetcher, ok := vm.hostenv.(daFetcher); ok {
+			payload, err = fetcher.FetchJAMDASegments(
+				witness.Ref.WorkPackageHash,
+				witness.Ref.IndexStart,
+				witness.Ref.IndexStart+uint16((witness.Ref.PayloadLength+types.SegmentSize-1)/types.SegmentSize),
+				witness.Ref.PayloadLength,
+			)
+			if err != nil {
+				log.Trace(vm.logging, "HostFetchWitness: failed to fetch payload from DA",
+					"object_id", object_id.Hex(),
+					"err", err)
+			} else {
+				log.Trace(vm.logging, "HostFetchWitness: Fetched payload from DA",
+					"object_id", object_id.Hex(),
+					"payload_len", len(payload))
+				witness.Payload = payload
+			}
 		}
 	}
 
@@ -2497,109 +2515,6 @@ func (vm *VM) GetBuilderWitnesses() ([]types.ImportSegment, []types.StateWitness
 	return importedSegments, witnessSlice, nil
 }
 
-// parseMetaShardEntries extracts ObjectRefEntry list from meta-shard payload
-// The payload format matches metashard_lookup.go DeserializeMetaShard:
-// [8B shard_id][32B merkle_root][2B count][entries...]
-// Each entry: [32B object_id][37B object_ref]
-func parseMetaShardEntries(payload []byte) ([]ObjectRefEntry, error) {
-	if len(payload) < 42 { // 8 + 32 + 2 = minimum header size
-		return nil, fmt.Errorf("meta-shard payload too short")
-	}
-
-	// Skip shard_id (8 bytes) and merkle_root (32 bytes)
-	offset := 40
-
-	// Parse entry count (2 bytes)
-	count := binary.LittleEndian.Uint16(payload[offset : offset+2])
-	offset += 2
-
-	entries := make([]ObjectRefEntry, 0, count)
-	for i := uint16(0); i < count; i++ {
-		if offset+69 > len(payload) { // 32 (object_id) + 37 (object_ref)
-			return nil, fmt.Errorf("meta-shard entry %d truncated", i)
-		}
-
-		var entry ObjectRefEntry
-		copy(entry.ObjectID[:], payload[offset:offset+32])
-		offset += 32
-
-		// Deserialize ObjectRef (37 bytes)
-		objRef, err := types.DeserializeObjectRef(payload, &offset)
-		if err != nil {
-			return nil, fmt.Errorf("failed to deserialize ObjectRef at entry %d: %v", i, err)
-		}
-		entry.ObjectRef = objRef
-		entries = append(entries, entry)
-	}
-
-	return entries, nil
-}
-
-// generateMetaShardInclusionProof generates a BMT inclusion proof for an objectID in meta-shard entries
-func generateMetaShardInclusionProof(merkleRoot [32]byte, objectID common.Hash, entries []ObjectRefEntry) ([]common.Hash, error) {
-	// Find the entry for this objectID
-	entryIndex := -1
-	for i, entry := range entries {
-		if entry.ObjectID == objectID {
-			entryIndex = i
-			break
-		}
-	}
-
-	if entryIndex == -1 {
-		return nil, fmt.Errorf("objectID %s not found in meta-shard entries", objectID.Hex())
-	}
-
-	// Convert entries to BMT key-value pairs format
-	kvPairs := make([][2][]byte, 0, len(entries))
-	for _, entry := range entries {
-		// Serialize the ObjectRef for the value
-		objectRefBytes := entry.ObjectRef.Serialize()
-
-		// Use ObjectID as key, serialized ObjectRef as value
-		kvPairs = append(kvPairs, [2][]byte{
-			entry.ObjectID.Bytes(), // key: 32-byte ObjectID
-			objectRefBytes,         // value: 37-byte serialized ObjectRef
-		})
-	}
-
-	// Create BMT tree from the entries (matching Rust compute_entries_bmt_root approach)
-	metaShardTree := trie.NewMerkleTree(kvPairs)
-
-	// Verify the tree root matches the expected merkle root from meta-shard header
-	// This is critical security validation - ensures the meta-shard payload hasn't been tampered with
-	computedRoot := metaShardTree.GetRoot()
-	if computedRoot != common.BytesToHash(merkleRoot[:]) {
-		return nil, fmt.Errorf("meta-shard BMT root mismatch: expected %x, computed %x",
-			merkleRoot, computedRoot)
-	}
-
-	// Generate BMT inclusion proof for the target objectID
-	// This proves that the ObjectRef for this objectID is included in the meta-shard
-	proofBytes, err := metaShardTree.GetPath(objectID.Bytes())
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate BMT proof for objectID %s: %v", objectID.Hex(), err)
-	}
-
-	// Convert [][]byte to []common.Hash format expected by StateWitness.ObjectProofs
-	proof := make([]common.Hash, len(proofBytes))
-	for i, proofByte := range proofBytes {
-		if len(proofByte) != 32 {
-			return nil, fmt.Errorf("invalid proof hash length: expected 32, got %d", len(proofByte))
-		}
-		copy(proof[i][:], proofByte)
-	}
-
-	log.Debug(log.SDB, "Generated meta-shard BMT inclusion proof",
-		"objectID", objectID.Hex(),
-		"entryIndex", entryIndex,
-		"totalEntries", len(entries),
-		"proofLength", len(proof),
-		"merkleRoot", fmt.Sprintf("%x", merkleRoot))
-
-	return proof, nil
-}
-
 // hostFetchVerkle implements the unified Verkle fetch host function
 // This is called by the EVM service (Rust) to fetch state from the Verkle tree
 //
@@ -2623,8 +2538,7 @@ func (vm *VM) hostFetchVerkle() {
 	outputMaxLen := uint32(vm.ReadRegister(11))
 	txIndex := uint32(vm.ReadRegister(12))
 
-	// Get StateDB from hostenv
-	stateDB, ok := vm.hostenv.(*StateDB)
+	evmStorage, ok := getEVMStorage(vm.hostenv)
 	if !ok {
 		vm.WriteRegister(7, 0)
 		return
@@ -2644,13 +2558,13 @@ func (vm *VM) hostFetchVerkle() {
 
 	switch fetchType {
 	case FETCH_BALANCE:
-		vm.fetchBalance(stateDB, address, outputPtr, outputMaxLen, txIndex)
+		vm.fetchBalance(evmStorage, address, outputPtr, outputMaxLen, txIndex)
 	case FETCH_NONCE:
-		vm.fetchNonce(stateDB, address, outputPtr, outputMaxLen, txIndex)
+		vm.fetchNonce(evmStorage, address, outputPtr, outputMaxLen, txIndex)
 	case FETCH_CODE:
-		vm.fetchCode(stateDB, address, outputPtr, outputMaxLen, txIndex)
+		vm.fetchCode(evmStorage, address, outputPtr, outputMaxLen, txIndex)
 	case FETCH_CODE_HASH:
-		vm.fetchCodeHash(stateDB, address, outputPtr, outputMaxLen, txIndex)
+		vm.fetchCodeHash(evmStorage, address, outputPtr, outputMaxLen, txIndex)
 	case FETCH_STORAGE:
 		// Read storage key (32 bytes)
 		var storageKey [32]byte
@@ -2660,7 +2574,7 @@ func (vm *VM) hostFetchVerkle() {
 			return
 		}
 		copy(storageKey[:], keyBytes)
-		vm.fetchStorage(stateDB, address, storageKey, outputPtr, outputMaxLen, txIndex)
+		vm.fetchStorage(evmStorage, address, storageKey, outputPtr, outputMaxLen, txIndex)
 	default:
 		// Unknown fetch type - return 0
 		vm.WriteRegister(7, 0)
@@ -2668,7 +2582,7 @@ func (vm *VM) hostFetchVerkle() {
 }
 
 // fetchBalance fetches balance from Verkle tree
-func (vm *VM) fetchBalance(stateDB *StateDB, address common.Address, outputPtr uint32, outputMaxLen uint32, txIndex uint32) {
+func (vm *VM) fetchBalance(evmStorage types.EVMJAMStorage, address common.Address, outputPtr uint32, outputMaxLen uint32, txIndex uint32) {
 	// Step 1: Query size
 	if outputMaxLen == 0 {
 		vm.WriteRegister(7, 32) // Balance is always 32 bytes
@@ -2681,8 +2595,6 @@ func (vm *VM) fetchBalance(stateDB *StateDB, address common.Address, outputPtr u
 		return
 	}
 
-	// Fetch balance via clean interface (no type casting, verkle logic in StateDBStorage)
-	evmStorage := stateDB.sdb.(types.EVMJAMStorage)
 	balance, err := evmStorage.FetchBalance(address, txIndex)
 	if err != nil {
 		log.Trace(vm.logging, "fetchBalance error", "address", address.Hex(), "txIndex", txIndex, "err", err)
@@ -2701,7 +2613,7 @@ func (vm *VM) fetchBalance(stateDB *StateDB, address common.Address, outputPtr u
 }
 
 // fetchNonce fetches nonce from Verkle tree
-func (vm *VM) fetchNonce(stateDB *StateDB, address common.Address, outputPtr uint32, outputMaxLen uint32, txIndex uint32) {
+func (vm *VM) fetchNonce(evmStorage types.EVMJAMStorage, address common.Address, outputPtr uint32, outputMaxLen uint32, txIndex uint32) {
 	// Step 1: Query size
 	if outputMaxLen == 0 {
 		vm.WriteRegister(7, 32) // Nonce is always 32 bytes
@@ -2714,8 +2626,6 @@ func (vm *VM) fetchNonce(stateDB *StateDB, address common.Address, outputPtr uin
 		return
 	}
 
-	// Fetch nonce via clean interface (no type casting, verkle logic in StateDBStorage)
-	evmStorage := stateDB.sdb.(types.EVMJAMStorage)
 	nonce, err := evmStorage.FetchNonce(address, txIndex)
 	if err != nil {
 		log.Trace(vm.logging, "fetchNonce error", "address", address.Hex(), "txIndex", txIndex, "err", err)
@@ -2734,9 +2644,7 @@ func (vm *VM) fetchNonce(stateDB *StateDB, address common.Address, outputPtr uin
 }
 
 // fetchCode fetches code from Verkle tree (two-step pattern)
-func (vm *VM) fetchCode(stateDB *StateDB, address common.Address, outputPtr uint32, outputMaxLen uint32, txIndex uint32) {
-	// Fetch code via clean interface (no type casting, verkle logic in StateDBStorage)
-	evmStorage := stateDB.sdb.(types.EVMJAMStorage)
+func (vm *VM) fetchCode(evmStorage types.EVMJAMStorage, address common.Address, outputPtr uint32, outputMaxLen uint32, txIndex uint32) {
 	code, codeSize, err := evmStorage.FetchCode(address, txIndex)
 	if err != nil {
 		log.Info(vm.logging, "fetchCode error", "address", address.Hex(), "err", err)
@@ -2770,7 +2678,7 @@ func (vm *VM) fetchCode(stateDB *StateDB, address common.Address, outputPtr uint
 }
 
 // fetchCodeHash fetches code hash from Verkle tree
-func (vm *VM) fetchCodeHash(stateDB *StateDB, address common.Address, outputPtr uint32, outputMaxLen uint32, txIndex uint32) {
+func (vm *VM) fetchCodeHash(evmStorage types.EVMJAMStorage, address common.Address, outputPtr uint32, outputMaxLen uint32, txIndex uint32) {
 	// Step 1: Query size
 	if outputMaxLen == 0 {
 		vm.WriteRegister(7, 32) // Code hash is always 32 bytes
@@ -2783,8 +2691,6 @@ func (vm *VM) fetchCodeHash(stateDB *StateDB, address common.Address, outputPtr 
 		return
 	}
 
-	// Fetch code hash via clean interface (no type casting, verkle logic in StateDBStorage)
-	evmStorage := stateDB.sdb.(types.EVMJAMStorage)
 	codeHash, err := evmStorage.FetchCodeHash(address, txIndex)
 	if err != nil {
 		log.Info(vm.logging, "fetchCodeHash error", "address", address.Hex(), "txIndex", txIndex, "err", err)
@@ -2801,7 +2707,7 @@ func (vm *VM) fetchCodeHash(stateDB *StateDB, address common.Address, outputPtr 
 }
 
 // fetchStorage fetches storage value from Verkle tree
-func (vm *VM) fetchStorage(stateDB *StateDB, address common.Address, storageKey [32]byte, outputPtr uint32, outputMaxLen uint32, txIndex uint32) {
+func (vm *VM) fetchStorage(evmStorage types.EVMJAMStorage, address common.Address, storageKey [32]byte, outputPtr uint32, outputMaxLen uint32, txIndex uint32) {
 	// Step 1: Query size
 	if outputMaxLen == 0 {
 		vm.WriteRegister(7, 32) // Storage values are always 32 bytes
@@ -2814,8 +2720,6 @@ func (vm *VM) fetchStorage(stateDB *StateDB, address common.Address, storageKey 
 		return
 	}
 
-	// Fetch storage via clean interface (no type casting, verkle logic in StateDBStorage)
-	evmStorage := stateDB.sdb.(types.EVMJAMStorage)
 	value, found, err := evmStorage.FetchStorage(address, storageKey, txIndex)
 	if err != nil || !found {
 		log.Info(vm.logging, "fetchStorage miss", "address", address.Hex(), "err", err)

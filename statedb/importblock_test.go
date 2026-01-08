@@ -19,6 +19,9 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/pvm"
+	"github.com/colorfulnotion/jam/pvm/interpreter"
+	"github.com/colorfulnotion/jam/pvm/pvmtypes"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -184,7 +187,7 @@ func parseSnapShotRawFile(filename, content string) (StateSnapshotRaw, error) {
 }
 
 func TestStateTransitionInterpreter(t *testing.T) {
-	PvmLogging = false
+	interpreter.PvmLogging = false
 
 	filename := path.Join(common.GetJAMTestVectorPath("traces"), "preimages_light/00000060.bin")
 	content, err := os.ReadFile(filename)
@@ -195,14 +198,14 @@ func TestStateTransitionInterpreter(t *testing.T) {
 	log.EnableModule(log.PvmAuthoring)
 	log.EnableModule("pvm_validator")
 	t.Run(filepath.Base(filename), func(t *testing.T) {
-		runSingleSTFTest(t, filename, string(content), BackendInterpreter, false)
+		runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter, false)
 	})
 }
 
 func TestTracesInterpreter(t *testing.T) {
-	PvmTraceMode = false
-	PvmLogging = false
-	DebugHostFunctions = false
+	interpreter.PvmTraceMode = false
+	interpreter.PvmLogging = false
+	pvmtypes.DebugHostFunctions = false
 	log.InitLogger("debug")
 
 	// Define all the directories you want to test in a single slice.
@@ -246,7 +249,7 @@ func TestTracesInterpreter(t *testing.T) {
 
 				// Run the actual test logic for each file as a distinct sub-test.
 				t.Run(e.Name(), func(t *testing.T) {
-					runSingleSTFTest(t, filename, string(content), BackendInterpreter, false)
+					runSingleSTFTest(t, filename, string(content), pvm.BackendInterpreter, false)
 				})
 				runtime.GC()
 			}
@@ -257,7 +260,7 @@ func TestTracesInterpreter(t *testing.T) {
 func TestTracesRecompiler(t *testing.T) {
 	log.InitLogger("debug")
 
-	DebugHostFunctions = false
+	pvmtypes.DebugHostFunctions = false
 	// Define all the directories you want to test in a single slice.
 	testDirs := []string{
 		path.Join(common.GetJAMTestVectorPath("traces"), "fallback"),
@@ -300,7 +303,7 @@ func TestTracesRecompiler(t *testing.T) {
 
 				// Run the actual test logic for each file as a distinct sub-test.
 				t.Run(e.Name(), func(t *testing.T) {
-					runSingleSTFTest(t, filename, string(content), BackendCompiler, false)
+					runSingleSTFTest(t, filename, string(content), pvm.BackendCompiler, false)
 				})
 			}
 		})
@@ -327,14 +330,14 @@ func dump_performance(t *testing.T) {
 func TestSingleCompare(t *testing.T) {
 	// DO NOT CHANGE THIS
 	log.InitLogger("debug")
-	PvmLogging = false
+	interpreter.PvmLogging = false
 
 	filename := path.Join(common.GetJAMTestVectorPath("traces"), "fuzzy/00000174.bin")
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", filename, err)
 	}
-	runSingleSTFTest(t, filename, string(content), BackendCompiler, false)
+	runSingleSTFTest(t, filename, string(content), pvm.BackendCompiler, false)
 }
 
 func GetFuzzReportsPath(subDir ...string) (string, error) {
@@ -391,11 +394,11 @@ func findFuzzTestFiles(sourcePath, targetVersion string, excludedTeams []string)
 	return testFiles, nil
 }
 func TestSingleFuzzTrace(t *testing.T) {
-	backend := BackendCompiler
+	backend := pvm.BackendCompiler
 	if runtime.GOOS != "linux" {
-		backend = BackendInterpreter
+		backend = pvm.BackendInterpreter
 	}
-	//backend = BackendInterpreter
+	//backend = pvm.BackendInterpreter
 	t.Logf("Using backend: %s", backend)
 
 	fileMap := make(map[string]string)
@@ -414,7 +417,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 	fileMap["1766243861_8319_00000119"] = "fuzz-reports/0.7.2/traces/1766243861_8319/00000119.bin"
 	// fileMap["1766244122_3401"] = "fuzz-reports/0.7.2/traces/1766244122_3401/00000891.bin" fixed by shawn
 	fileMap["1766255635_2557"] = "fuzz-reports/0.7.2/traces/1766255635_2557/00000153.bin"
-	PvmLogging = false
+	interpreter.PvmLogging = false
 	//	DebugHostFunctions = true
 	log.InitLogger("debug")
 	// log.EnableModule(log.PvmAuthoring)
@@ -423,7 +426,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 
 	tc := []string{"1766255635_2557"}
 
-	PvmLogging = false
+	interpreter.PvmLogging = false
 	for _, team := range tc {
 		filename, exists := fileMap[team]
 		if !exists {
@@ -445,7 +448,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 }
 func TestTaintSingleFuzzTrace(t *testing.T) {
 	// Force interpreter backend to enable taint tracking
-	backend := BackendInterpreter
+	backend := pvm.BackendInterpreter
 	t.Logf("Using backend: %s (forced for taint tracking)", backend)
 
 	fileMap := make(map[string]string)
@@ -464,7 +467,7 @@ func TestTaintSingleFuzzTrace(t *testing.T) {
 	fileMap["1766243861_8319_00000119"] = "fuzz-reports/0.7.2/traces/1766243861_8319/00000119.bin"
 	// fileMap["1766244122_3401"] = "fuzz-reports/0.7.2/traces/1766244122_3401/00000891.bin" fixed by shawn
 	fileMap["1766255635_2557"] = "fuzz-reports/0.7.2/traces/1766255635_2557/00000153.bin"
-	PvmLogging = false
+	interpreter.PvmLogging = false
 	//	DebugHostFunctions = true
 	log.InitLogger("debug")
 	// log.EnableModule(log.PvmAuthoring)
@@ -473,7 +476,7 @@ func TestTaintSingleFuzzTrace(t *testing.T) {
 
 	tc := []string{"1766255635_2557"}
 
-	PvmLogging = false
+	interpreter.PvmLogging = false
 	for _, team := range tc {
 		filename, exists := fileMap[team]
 		if !exists {
@@ -498,9 +501,9 @@ func runSingleSTFTestWithTaint(t *testing.T, filename string, content string, pv
 	t.Helper()
 
 	// Enable taint tracking globally before execution
-	EnableTaintTrackingGlobal = true
+	interpreter.EnableTaintTrackingGlobal = true
 	defer func() {
-		EnableTaintTrackingGlobal = false
+		interpreter.EnableTaintTrackingGlobal = false
 	}()
 
 	start := time.Now()
@@ -561,7 +564,7 @@ func runSingleSTFTestWithTaint(t *testing.T, filename string, content string, pv
 func testFuzzTraceInternal(t *testing.T, saveOutput bool) {
 	t.Helper()
 
-	PvmLogging = false
+	interpreter.PvmLogging = false
 
 	log.InitLogger("debug")
 	log.EnableModule(log.PvmAuthoring)
@@ -589,9 +592,9 @@ func testFuzzTraceInternal(t *testing.T, saveOutput bool) {
 	if len(testFiles) == 0 {
 		t.Fatalf("No valid .bin files found for version '%s' under %s (after exclusions)", targetVersion, sourcePath)
 	}
-	backend := BackendCompiler
+	backend := pvm.BackendCompiler
 	if runtime.GOOS != "linux" {
-		backend = BackendInterpreter
+		backend = pvm.BackendInterpreter
 	}
 	bugMap := map[string]int{}
 	for _, filename := range testFiles {
@@ -690,235 +693,13 @@ func TestFuzzTraceSequential(t *testing.T) {
 	}
 }
 
-func TestBadFuzzTraceSequential(t *testing.T) {
-	log.InitLogger("debug")
-
-	targetVersion := "0.7.2"
-
-	sourcePath, err := GetFuzzReportsPath()
-	if err != nil {
-		t.Fatalf("failed to get source fuzz reports path: %v", err)
-	}
-
-	testCases := []struct {
-		id          string
-		expectedErr string
-		description string
-	}{
-		{"1766241867", "T6|TimeslotNotMonotonic", "Progress from slot X to slot X. Timeslot must be strictly monotonic."},
-		{"1766241968", "A3|BadCore", "One assurance targets a core without any assigned work report."},
-		{"1766243315_1733", "T6|TimeslotNotMonotonic", "Progress from slot X to slot X. Timeslot must be strictly monotonic."},
-		{"1766243493_8886", "A3|BadCore", "One assurance targets a core without any assigned work report."},
-		{"1766243861_2056", "ApplyStateTransitionFromBlock", "ValidateAddPreimage failed for service 0: preimage lookup not empty"},
-		{"1766244122_3562", "A3|BadCore", "One assurance targets a core without any assigned work report."},
-		{"1766244251_4514", "A3|BadCore", "One assurance targets a core without any assigned work report."},
-		{"1766244251_9568", "T6|TimeslotNotMonotonic", "Progress from slot X to slot X. Timeslot must be strictly monotonic."},
-		{"1766479507_3250", "T6|TimeslotNotMonotonic", "Progress from slot X to slot X. Timeslot must be strictly monotonic."},
-		{"1766479507_7090", "A3|BadCore", "One assurance targets a core without any assigned work report."},
-		{"1766565819_4337", "A3|BadCore", "One assurance targets a core without any assigned work report."},
-		{"1766565819_9942", "A3|BadCore", "One assurance targets a core without any assigned work report."},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.id+"_broken", func(t *testing.T) {
-			fmt.Printf("Testing case %s: expected error '%s' - %s\n", tc.id, tc.expectedErr, tc.description)
-			runSequentialFuzzTraceBroken(t, sourcePath, targetVersion, tc.id, tc.expectedErr)
-		})
-	}
-}
-
-func runSequentialFuzzTraceBroken(t *testing.T, sourcePath, targetVersion, testCaseID, expectedErr string) {
-	traceDir := filepath.Join(sourcePath, fmt.Sprintf("fuzz-reports/%s/traces", targetVersion), testCaseID)
-
-	backend := BackendCompiler
-	if runtime.GOOS != "linux" {
-		backend = BackendInterpreter
-	}
-	fmt.Printf("PVM Backend: %s\n", backend)
-
-	// Find step files (support up to 100000 steps for large traces)
-	stepFiles := []string{}
-	for i := 1; i <= 100000; i++ {
-		stepFile := filepath.Join(traceDir, fmt.Sprintf("%08d.bin", i))
-		if _, err := os.Stat(stepFile); err == nil {
-			stepFiles = append(stepFiles, stepFile)
-		}
-	}
-
-	if len(stepFiles) == 0 {
-		t.Fatalf("No step files found in %s", traceDir)
-	}
-
-	// Load the first step to get the initial PreState
-	firstStepContent, err := os.ReadFile(stepFiles[0])
-	if err != nil {
-		t.Fatalf("failed to read first step file: %v", err)
-	}
-	firstSTF, err := parseSTFFile(stepFiles[0], string(firstStepContent))
-	if err != nil {
-		t.Fatalf("failed to parse first step: %v", err)
-	}
-
-	// Initialize storage and state from first step's PreState
-	testDir := t.TempDir()
-	test_storage, err := initStorage(testDir)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	defer test_storage.Close()
-
-	stateDB, err := NewStateDBFromStateKeyVals(test_storage, &StateKeyVals{KeyVals: firstSTF.PreState.KeyVals})
-	if err != nil {
-		t.Fatalf("failed to initialize state from PreState: %v", err)
-	}
-
-	fmt.Printf("Initialized from first step's PreState: StateRoot=%s, Timeslot=%d", stateDB.StateRoot.Hex(), stateDB.GetTimeslot())
-
-	stateDBMap := make(map[common.Hash]common.Hash)
-
-	fmt.Printf("Found %d step files\n", len(stepFiles))
-	fmt.Printf("\n========================================\n")
-	fmt.Printf("TESTING: Broken SetRoot Bug Reproduction\n")
-	fmt.Printf("========================================\n")
-	fmt.Printf("Expected error for this trace: %s\n\n", expectedErr)
-	sawExpectedBug := false
-
-	for stepNum, stepFile := range stepFiles {
-		stepContent, err := os.ReadFile(stepFile)
-		if err != nil {
-			t.Fatalf("failed to read step file %s: %v", stepFile, err)
-		}
-
-		stf, err := parseSTFFile(stepFile, string(stepContent))
-		if err != nil {
-			t.Fatalf("failed to parse step %d: %v", stepNum+1, err)
-		}
-
-		block := &stf.Block
-
-		// Determine if this STF expects a state change (valid block)
-		expectsSuccess := stf.PreState.StateRoot != stf.PostState.StateRoot
-		binFileName := filepath.Base(stepFile)
-
-		fmt.Printf("\n=== %s (Step %d): slot=%d ===\n", binFileName, stepNum+1, block.Header.Slot)
-		fmt.Printf("  STF expects: %s\n", func() string {
-			if expectsSuccess {
-				return "SUCCESS (PreState != PostState)"
-			}
-			return "FAILURE (PreState == PostState, invalid block)"
-		}())
-		fmt.Printf("  Block.ParentStateRoot: %s\n", block.Header.ParentStateRoot.Hex())
-		fmt.Printf("  Current stateDB: StateRoot=%s, Timeslot=%d\n",
-			stateDB.StateRoot.Hex(), stateDB.GetTimeslot())
-
-		// BROKEN BEHAVIOR SIMULATION:
-		// The bug: StateDB.Copy() calls InitTrieAndLoadJamState(StateRoot).
-		// InitTrieAndLoadJamState calls sdb.SetRoot(stateRoot) then sdb.GetStates().
-		// Before fix: SetRoot did nothing, so GetStates() returned current state data.
-		// After copying JamState in-memory, InitTrieAndLoadJamState OVERWRITES it
-		// with data from GetStates() - which was the wrong (current) data!
-		//
-		// To simulate this, when we fork, we:
-		// 1. Use normal Copy() (which loads correct state with fixed SetRoot)
-		// 2. Then OVERWRITE JamState with current state's JamState (simulating broken GetStates)
-		preState := stateDB
-		isForkBlock := block.Header.ParentStateRoot != stateDB.StateRoot
-
-		if isForkBlock {
-			fmt.Printf("  🔀 FORK DETECTED! Block wants parent StateRoot different from current.\n")
-			fmt.Printf("     Block wants: %s, Current: %s\n",
-				block.Header.ParentStateRoot.Hex(), stateDB.StateRoot.Hex())
-			fmt.Printf("  🐛 SIMULATING BROKEN SetRoot: keeping current JamState (Timeslot=%d) instead of historical (Timeslot=0)\n",
-				stateDB.GetTimeslot())
-
-			// Normal copy creates state with correct JamState from historical trie
-			forkState := stateDB.Copy()
-			// Set the correct StateRoot (this part worked even before fix)
-			forkState.StateRoot = block.Header.ParentStateRoot
-
-			// SIMULATE THE BUG: Overwrite JamState with current state's data
-			// This is what happened when GetStates() returned current trie data
-			// instead of historical data
-			forkState.JamState = stateDB.JamState.Copy()
-
-			preState = forkState
-			fmt.Printf("  ⚠️  BROKEN STATE: StateRoot=%s (correct), but Timeslot=%d (WRONG!)\n",
-				preState.StateRoot.Hex(), preState.GetTimeslot())
-		}
-
-		// Apply state transition - the Copy() here will also reload JamState,
-		// but we need to simulate broken behavior there too
-		var stateCopy *StateDB
-		if isForkBlock {
-			// For fork case, create copy without proper InitTrieAndLoadJamState
-			stateCopy = &StateDB{
-				Id:               preState.Id,
-				Block:            preState.Block.Copy(),
-				ParentHeaderHash: preState.ParentHeaderHash,
-				HeaderHash:       preState.HeaderHash,
-				StateRoot:        preState.StateRoot,
-				JamState:         preState.JamState.Copy(), // Keep broken JamState
-				sdb:              preState.sdb,
-				AncestorSet:      preState.AncestorSet,
-				Authoring:        preState.Authoring,
-			}
-		} else {
-			stateCopy = preState.Copy()
-		}
-
-		fmt.Printf("  Applying STF with: Timeslot=%d → block.Slot=%d\n",
-			stateCopy.GetSafrole().Timeslot, block.Header.Slot)
-		postState, jamErr := ApplyStateTransitionFromBlock(0, stateCopy, context.Background(), block, nil, backend, "")
-
-		if jamErr != nil {
-			// Check if we got an error due to broken SetRoot on a valid fork block
-			if expectsSuccess && isForkBlock {
-				// Got error on a fork block that SHOULD have succeeded - this is the bug!
-				sawExpectedBug = true
-				fmt.Printf("  ❌ RESULT: %v\n", jamErr)
-				fmt.Printf("  🎯 THIS IS THE BUG! Fork block failed because broken SetRoot kept wrong state\n")
-				if strings.Contains(jamErr.Error(), expectedErr) {
-					fmt.Printf("     (Matches expected error: %s)\n", expectedErr)
-				} else {
-					fmt.Printf("     (Different error than expected '%s', but still demonstrates the bug)\n", expectedErr)
-				}
-			} else if expectsSuccess {
-				fmt.Printf("  ❌ RESULT: %v\n", jamErr)
-				fmt.Printf("     (STF expected success but got error)\n")
-			} else {
-				fmt.Printf("  👍 RESULT: %v\n", jamErr)
-				fmt.Printf("     (Expected failure - correctly caught)\n")
-			}
-		} else {
-			fmt.Printf("  ✅ RESULT: SUCCESS → PostStateRoot=%s, Timeslot=%d\n",
-				postState.StateRoot.Hex(), postState.GetTimeslot())
-			stateDB = postState
-			stateDBMap[block.Header.Hash()] = postState.StateRoot
-		}
-	}
-
-	fmt.Printf("\n========================================\n")
-	if sawExpectedBug {
-		fmt.Printf("✅ BUG SUCCESSFULLY DEMONSTRATED\n")
-		fmt.Printf("========================================\n")
-		fmt.Printf("The broken SetRoot caused '%s' errors on fork blocks.\n", expectedErr)
-		fmt.Printf("This reproduces what trace %s failed with before the fix.\n", testCaseID)
-		fmt.Printf("\nRoot cause: SetRoot didn't load historical trie data, so fork blocks\n")
-		fmt.Printf("used state from current chain instead of the forked parent state.\n")
-	} else {
-		fmt.Printf("❌ BUG NOT REPRODUCED\n")
-		fmt.Printf("========================================\n")
-		t.Errorf("Expected to see '%s' error on a valid fork block but didn't.", expectedErr)
-	}
-}
-
 // runSequentialFuzzTrace runs a single sequential fuzz trace test case
 func runSequentialFuzzTrace(t *testing.T, sourcePath, targetVersion, testCaseID string) {
 	traceDir := filepath.Join(sourcePath, fmt.Sprintf("fuzz-reports/%s/traces", targetVersion), testCaseID)
 
-	backend := BackendCompiler
+	backend := pvm.BackendCompiler
 	if runtime.GOOS != "linux" {
-		backend = BackendInterpreter
+		backend = pvm.BackendInterpreter
 	}
 	fmt.Printf("PVM Backend: %s\n", backend)
 

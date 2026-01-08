@@ -11,26 +11,27 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm/program"
+	"github.com/colorfulnotion/jam/pvm"
+	"github.com/colorfulnotion/jam/pvm/interpreter"
+	"github.com/colorfulnotion/jam/pvm/pvmtypes"
 	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/gorilla/websocket"
 )
 
 const (
-	BackendInterpreter     = "interpreter" // Go interpreter
-	BackendCompiler        = "compiler"    // X86 recompiler
+	BackendInterpreter = pvm.BackendInterpreter // Go interpreter
+	BackendCompiler    = pvm.BackendCompiler    // X86 recompiler
 )
 
-const (
-	M   = types.TransferMemoSize
-	V   = 1023
-	Z_A = 2
+// DebugHostFunction forwards host-function debug output to the shared helper.
+func (vm *VM) DebugHostFunction(hostFn int, format string, a ...any) {
+	pvmtypes.DebugHostFunction(vm.Service_index, hostFn, format, a...)
+}
 
-	Z_P = (1 << 12)
-	Z_Q = (1 << 16)
-	Z_I = (1 << 24)
-	Z_Z = (1 << 16)
+const (
+	M = types.TransferMemoSize
+	V = 1023
 )
 
 const (
@@ -39,13 +40,8 @@ const (
 	ModeRefine       = "refine"
 )
 
-var (
-	PvmLogging                = false
-	EnableTaintTrackingGlobal = false
-)
-
-// serializeHashes serializes an array of common.Hash back-to-back with no separators
-func serializeHashes(hashes []common.Hash) []byte {
+// SerializeHashes serializes an array of common.Hash back-to-back with no separators.
+func SerializeHashes(hashes []common.Hash) []byte {
 	result := make([]byte, 0, len(hashes)*32)
 	for _, h := range hashes {
 		result = append(result, h[:]...)
@@ -53,8 +49,8 @@ func serializeHashes(hashes []common.Hash) []byte {
 	return result
 }
 
-// serializeECChunks serializes an array of DistributeECChunk back-to-back with no separators
-func serializeECChunks(chunks []types.DistributeECChunk) []byte {
+// SerializeECChunks serializes an array of DistributeECChunk back-to-back with no separators.
+func SerializeECChunks(chunks []types.DistributeECChunk) []byte {
 	result := make([]byte, 0)
 	for _, chunk := range chunks {
 		result = append(result, chunk.Data...)
@@ -62,14 +58,14 @@ func serializeECChunks(chunks []types.DistributeECChunk) []byte {
 	return result
 }
 
-// saveToLogDir is a helper function to save data to a file in the log directory.
+// SaveToLogDir is a helper function to save data to a file in the log directory.
 // It creates the directory if needed and silently ignores errors if logDir is empty.
 // If logDir contains "SKIP" anywhere in the path, no files are written.
-func saveToLogDir(logDir, filename string, data []byte) {
+func SaveToLogDir(logDir, filename string, data []byte) {
 	if logDir == "" || strings.Contains(logDir, "SKIP") {
 		return
 	}
-	if !PvmTraceMode {
+	if !interpreter.PvmTraceMode {
 		return
 	}
 	os.MkdirAll(logDir, 0755)
@@ -79,7 +75,7 @@ func saveToLogDir(logDir, filename string, data []byte) {
 var saveToLogDirOnceMap sync.Map
 var PvmSaveBundle = false
 
-func saveToLogDirOnce(logDir, filename string, data []byte) {
+func SaveToLogDirOnce(logDir, filename string, data []byte) {
 	if logDir == "" || strings.Contains(logDir, "SKIP") {
 		return
 	}
@@ -95,13 +91,13 @@ func saveToLogDirOnce(logDir, filename string, data []byte) {
 	os.WriteFile(key, data, 0644)
 }
 
-// saveToLogDirOutput saves the result to either "output" or "err" file based on the result code.
+// SaveToLogDirOutput saves the result to either "output" or "err" file based on the result code.
 // If r.Ok is set, writes to "output" file. If r.Err is set, writes to "err" file.
-func saveToLogDirOutput(logDir string, r types.Result, res uint64) {
+func SaveToLogDirOutput(logDir string, r types.Result, res uint64) {
 	if logDir == "" || strings.Contains(logDir, "SKIP") {
 		return
 	}
-	if !PvmTraceMode {
+	if !interpreter.PvmTraceMode {
 		return
 	}
 	os.MkdirAll(logDir, 0755)
@@ -113,32 +109,7 @@ func saveToLogDirOutput(logDir string, r types.Result, res uint64) {
 	}
 }
 
-type ExecutionVM interface {
-	ReadRegister(int) uint64
-	ReadRegisters() [13]uint64
-	WriteRegister(int, uint64)
-	ReadRAMBytes(uint32, uint32) ([]byte, uint64)
-	WriteRAMBytes(uint32, []byte) uint64
-	SetHeapPointer(uint32)
-	SetPagesAccessRange(startPage, pageCount int, access int) error
-	GetGas() int64
-	SetGas(int64)
-	GetPC() uint64
-	SetPC(uint64)
-	GetMachineState() uint8
-	GetFaultAddress() uint64
-	Panic(uint64)
-	SetHostResultCode(uint64)
-	Init(argument_data_a []byte) (err error)
-	Execute(vm *VM, EntryPoint uint32, logDir string) error
-	ExecuteAsChild(entryPoint uint32) error
-	GetHostID() uint64
-	Destroy()
-
-	// to support ExecuteWorkPackageBundleSteps
-	InitStepwise(vm *VM, entryPoint uint32) error
-	ExecuteStep(vm *VM) []byte
-}
+type ExecutionVM = pvm.ExecutionVM
 
 type VM struct {
 	ExecutionVM
@@ -192,101 +163,28 @@ type VM struct {
 	pushFrame      func([]byte)
 }
 
-type Program program.Program
+type Program = pvm.Program
 
 const (
-	NONE = (1 << 64) - 1 // 2^32 - 1 15
-	WHAT = (1 << 64) - 2 // 2^32 - 2 14
-	OOB  = (1 << 64) - 3 // 2^32 - 3 13
-	WHO  = (1 << 64) - 4 // 2^32 - 4 12
-	FULL = (1 << 64) - 5 // 2^32 - 5 11
-	CORE = (1 << 64) - 6 // 2^32 - 6 10
-	CASH = (1 << 64) - 7 // 2^32 - 7 9
-	LOW  = (1 << 64) - 8 // 2^32 - 8 8
-	HUH  = (1 << 64) - 9 // 2^32 - 9 7
+	OK   = pvmtypes.OK
+	NONE = pvmtypes.NONE
+	WHAT = pvmtypes.WHAT
+	OOB  = pvmtypes.OOB
+	WHO  = pvmtypes.WHO
+	FULL = pvmtypes.FULL
+	CORE = pvmtypes.CORE
+	CASH = pvmtypes.CASH
+	LOW  = pvmtypes.LOW
+	HUH  = pvmtypes.HUH
 )
 
 const (
-	HALT  = 0 // regular halt ∎
-	PANIC = 1 // panic ☇
-	FAULT = 2 // page-fault F
-	HOST  = 3 // host-call̵ h
-	OOG   = 4 // out-of-gas ∞
+	HALT  = pvmtypes.HALT  // regular halt
+	PANIC = pvmtypes.PANIC // panic
+	FAULT = pvmtypes.FAULT // page-fault
+	HOST  = pvmtypes.HOST  // host-call
+	OOG   = pvmtypes.OOG   // out-of-gas
 )
-
-func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, []byte, error) {
-	prog, o, w, z, s, oB, wB, err := program.DecodeProgram(p)
-	return (*Program)(prog), o, w, z, s, oB, wB, err
-}
-
-func DecodeProgram_pure_pvm_blob(p []byte) (*Program, error) {
-	prog, err := decodeCorePart(p)
-	return (*Program)(prog), err
-}
-
-// EncodeProgram encodes raw instruction code and bitmask into a PVM blob format
-// that can be decoded by decodeCorePart
-func EncodeProgram(code []byte, bitmask []byte) []byte {
-	j_size := uint64(0) // TODO: add J support
-	z := uint64(0)      // TODO: add z support correctly
-	c_size := uint64(len(code))
-
-	// Encode the header values using JAM's E() function
-	j_size_encoded := types.E(j_size)
-	z_encoded := types.E(z)
-	c_size_encoded := types.E(c_size)
-
-	// Compress bitmask: convert from bit array to byte array
-	k_bytes := compressBits(bitmask)
-
-	// Build the blob: header + j_bytes + c_bytes + k_bytes
-	blob := make([]byte, 0)
-	blob = append(blob, j_size_encoded...)
-	blob = append(blob, z_encoded...)
-	blob = append(blob, c_size_encoded...)
-	// TODO: No j_bytes since j_size * z = 0 * 0 = 0
-	blob = append(blob, code...)    // c_bytes
-	blob = append(blob, k_bytes...) // k_bytes (compressed bitmask)
-
-	fmt.Printf("EncodeProgram: j_size=%d, z=%d, c_size=%d, code_len=%d, bitmask_len=%d, k_bytes_len=%d, total_blob_len=%d BLOB: %v\n",
-		j_size, z, c_size, len(code), len(bitmask), len(k_bytes), len(blob), blob)
-	return blob
-}
-
-// compressBits converts a bitmask bit array ([]byte with 0/1 values) to compressed bytes
-func compressBits(bitmask []byte) []byte {
-	if len(bitmask) == 0 {
-		return []byte{}
-	}
-
-	// Pack bits into bytes
-	numBytes := (len(bitmask) + 7) / 8
-	compressed := make([]byte, numBytes)
-
-	for i, bit := range bitmask {
-		if bit != 0 {
-			byteIndex := i / 8 // optimize?
-			bitIndex := i % 8
-			compressed[byteIndex] |= (1 << bitIndex)
-		}
-	}
-
-	return compressed
-}
-
-var decodeCorePart = program.DecodeCorePart
-
-func CeilingDivide(a, b uint32) uint32 {
-	return (a + b - 1) / b
-}
-
-func P_func(x uint32) uint32 {
-	return Z_P * CeilingDivide(x, Z_P)
-}
-
-func Z_func(x uint32) uint32 {
-	return Z_Z * CeilingDivide(x, Z_Z)
-}
 
 // NewVM initializes a new VM with a given program
 func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC uint64, initialHeap uint64, hostENV types.HostEnv, jam_ready_blob bool, Metadata []byte, pvmBackend string, initialGas uint64) *VM {
@@ -305,13 +203,13 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 	var err error
 
 	if jam_ready_blob {
-		p, o_size, w_size, z, s, o_byte, w_byte, err = DecodeProgram(code)
+		p, o_size, w_size, z, s, o_byte, w_byte, err = pvm.DecodeProgram(code)
 		if err != nil {
 			fmt.Println("DecodeProgram failed:", err)
 			return nil
 		}
 	} else {
-		p, err = DecodeProgram_pure_pvm_blob(code)
+		p, err = pvm.DecodeProgram_pure_pvm_blob(code)
 		if err != nil {
 			fmt.Println("DecodeProgram_pure_pvm_blob failed:", err)
 			return nil
@@ -333,7 +231,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		VmsEntryCounter: make(map[uint32]int),
 	}
 
-	requiredMemory := uint64(uint64(5*Z_Z) + uint64(Z_func(o_size)) + uint64(Z_func(w_size+z*Z_P)) + uint64(Z_func(s)) + uint64(Z_I))
+	requiredMemory := uint64(uint64(5*pvmtypes.Z_Z) + uint64(pvmtypes.ZFunc(o_size)) + uint64(pvmtypes.ZFunc(w_size+z*pvmtypes.Z_P)) + uint64(pvmtypes.ZFunc(s)) + uint64(pvmtypes.Z_I))
 	if requiredMemory > math.MaxUint32 {
 		log.Error(vm.logging, "Standard Program Initialization Error")
 		return nil
@@ -353,30 +251,30 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 	}
 	vm.InitialGas = initialGas
 	if vm.Backend == BackendCompiler {
-		rvm := NewRecompilerVM(service_index, initialRegs, initialPC, initialHeap, hostENV, jam_ready_blob, Metadata, initialGas, p, o_size, w_size, z, s, o_byte, w_byte)
+		rvm := pvm.NewRecompilerVM(service_index, initialRegs, initialPC, initialHeap, hostENV, jam_ready_blob, Metadata, initialGas, p, o_size, w_size, z, s, o_byte, w_byte)
 		if rvm == nil {
 			fmt.Println("NewRecompilerVM failed")
 			return nil
 		}
 		vm.ExecutionVM = rvm
 	} else if vm.Backend == BackendInterpreter {
-		machine := NewVMGo(service_index, p, initialRegs, initialPC, initialGas, hostENV)
+		machine := interpreter.NewVMGo(service_index, p, initialRegs, initialPC, initialGas, hostENV)
 		machine.Gas = int64(initialGas)
 		// Enable taint tracking if requested
-		if EnableTaintTrackingGlobal {
+		if interpreter.EnableTaintTrackingGlobal {
 			machine.EnableTaintForStep(0, 0)
 		}
 		vm.ExecutionVM = machine
 		// o - read-only
-		rw_data_address := uint32(2*Z_Z) + Z_func(o_size)
-		rw_data_address_end := rw_data_address + P_func(w_size) + z*Z_P
+		rw_data_address := uint32(2*pvmtypes.Z_Z) + pvmtypes.ZFunc(o_size)
+		rw_data_address_end := rw_data_address + pvmtypes.PFunc(w_size) + z*pvmtypes.Z_P
 		current_heap_pointer := rw_data_address_end
 		machine.SetHeapPointer(current_heap_pointer)
 
-		z_o := Z_func(o_size)
-		z_w := Z_func(w_size + z*Z_P)
-		z_s := Z_func(s)
-		requiredMemory = uint64(5*Z_Z + z_o + z_w + z_s + Z_I)
+		z_o := pvmtypes.ZFunc(o_size)
+		z_w := pvmtypes.ZFunc(w_size + z*pvmtypes.Z_P)
+		z_s := pvmtypes.ZFunc(s)
+		requiredMemory = uint64(5*pvmtypes.Z_Z + z_o + z_w + z_s + pvmtypes.Z_I)
 		if requiredMemory > math.MaxUint32 {
 			log.Error(vm.logging, "Standard Program Initialization Error")
 		}
@@ -457,10 +355,10 @@ func (vm *VM) NewEmptyExecutionVM(service_index uint32, p *Program, initialRegs 
 	var e_vm ExecutionVM
 	initialGas := uint64(0x7FFFFFFFFFFFFFFF)
 	if vm.Backend == BackendInterpreter {
-		machine := NewVMGo(service_index, p, initialRegs, initialPC, initialGas, hostENV)
+		machine := interpreter.NewVMGo(service_index, p, initialRegs, initialPC, initialGas, hostENV)
 		machine.Gas = int64(initialGas)
 		// Track all steps (TargetStep=0 means no window restriction)
-		if EnableTaintTrackingGlobal {
+		if interpreter.EnableTaintTrackingGlobal {
 			machine.EnableTaintForStep(0, 0)
 		}
 		e_vm = machine
@@ -469,7 +367,7 @@ func (vm *VM) NewEmptyExecutionVM(service_index uint32, p *Program, initialRegs 
 		machine.LogDir = vm.LogDir // Inherit logDir from parent VM
 		// Trace writers will be initialized lazily when first needed (allows dynamic enabling)
 	} else if vm.Backend == BackendCompiler {
-		rvm := NewRecompilerVMWithoutSetup(service_index, initialRegs, initialPC, hostENV, false, []byte{}, uint64(initialGas), p)
+		rvm := pvm.NewRecompilerVMWithoutSetup(service_index, initialRegs, initialPC, hostENV, false, []byte{}, uint64(initialGas), p)
 		// Set child VM info for trace verification
 		rvm.IsChild = true
 		rvm.ChildIndex = int(machineIndex)
@@ -536,13 +434,13 @@ func (vm *VM) ExecuteRefine(core uint16, workitemIndex uint32, workPackage types
 	}
 
 	// Save inputs
-	saveToLogDir(logDir, "input", a)
+	SaveToLogDir(logDir, "input", a)
 
 	vm.executeWithBackend(a, types.EntryPointRefine, logDir)
 	r, res = vm.getArgumentOutputs()
 	exportedSegments = vm.Exports
 	vm.destroyVMs()
-	saveToLogDirOutput(logDir, r, res)
+	SaveToLogDirOutput(logDir, r, res)
 	log.Trace(vm.logging, string(vm.ServiceMetadata), "Result", r.String(), "fault_address", vm.Fault_address, "resultCode", vm.ResultCode)
 
 	// Save all exported segments back to back in a single file
@@ -551,7 +449,7 @@ func (vm *VM) ExecuteRefine(core uint16, workitemIndex uint32, workPackage types
 		for _, segment := range exportedSegments {
 			allExports = append(allExports, segment...)
 		}
-		saveToLogDir(logDir, "exports", allExports)
+		SaveToLogDir(logDir, "exports", allExports)
 	}
 
 	return r, res, exportedSegments
@@ -624,16 +522,16 @@ func (vm *VM) ExecuteAccumulate(t uint32, s uint32, inputs []types.AccumulateInp
 	vm.ServiceAccount = x_s
 
 	// Save inputs
-	saveToLogDir(logDir, "input", input_bytes)
+	SaveToLogDir(logDir, "input", input_bytes)
 	// Save AccumulateInputs for inspection
 	if inputsEncoded, err := types.Encode(vm.AccumulateInputs); err == nil {
-		saveToLogDir(logDir, "accumulate_input", inputsEncoded)
+		SaveToLogDir(logDir, "accumulate_input", inputsEncoded)
 	}
 
 	vm.executeWithBackend(input_bytes, types.EntryPointAccumulate, logDir)
 	r, res = vm.getArgumentOutputs()
 	vm.destroyVMs()
-	saveToLogDirOutput(logDir, r, res)
+	SaveToLogDirOutput(logDir, r, res)
 
 	return r, res, x_s
 }
@@ -643,13 +541,13 @@ func (vm *VM) ExecuteAuthorization(p types.WorkPackage, c uint16, logDir string)
 	a, _ := types.Encode(uint16(c))
 
 	// Save inputs
-	saveToLogDir(logDir, "input", a)
+	SaveToLogDir(logDir, "input", a)
 
 	// fmt.Printf("ExecuteAuthorization - c=%d len(p_bytes)=%d len(c_bytes)=%d len(a)=%d a=%x WP=%s\n", c, len(p_bytes), len(c_bytes), len(a), a, p.String())
 	vm.executeWithBackend(a, types.EntryPointAuthorization, logDir)
 	r, res := vm.getArgumentOutputs()
 	vm.destroyVMs()
-	saveToLogDirOutput(logDir, r, res)
+	SaveToLogDirOutput(logDir, r, res)
 
 	return r
 }
@@ -755,10 +653,22 @@ func (vm *VM) GetResultCode() uint8 {
 	return vm.ResultCode
 }
 
+func (vm *VM) SetResultCode(code uint8) {
+	vm.ResultCode = code
+}
+
+func (vm *VM) SetMachineState(state uint8) {
+	vm.MachineState = state
+}
+
+func (vm *VM) SetTerminated(terminated bool) {
+	vm.terminated = terminated
+}
+
 // GetInterpreterVM returns the underlying VMGo instance if using interpreter backend
 // Returns nil if using a different backend
-func (vm *VM) GetInterpreterVM() *VMGo {
-	if vmGo, ok := vm.ExecutionVM.(*VMGo); ok {
+func (vm *VM) GetInterpreterVM() *interpreter.VMGo {
+	if vmGo, ok := vm.ExecutionVM.(*interpreter.VMGo); ok {
 		return vmGo
 	}
 	return nil

@@ -1,4 +1,4 @@
-package statedb
+package interpreter
 
 import (
 	"bytes"
@@ -16,10 +16,10 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/pvm/program"
+	"github.com/colorfulnotion/jam/pvm/pvmtypes"
 	"github.com/colorfulnotion/jam/pvm/recompiler"
 	"github.com/colorfulnotion/jam/pvm/trace"
 	"github.com/colorfulnotion/jam/types" // go get golang.org/x/example/hello/reverse
-	"golang.org/x/sys/unix"
 )
 
 // ExecutionContext tracks the state of a specific contract execution context
@@ -45,6 +45,9 @@ const (
 var (
 	PvmTrace  = false // Temporarily enabled to demonstrate context tracking
 	PvmTrace2 = false
+
+	PvmLogging                = false
+	EnableTaintTrackingGlobal = false
 
 	// Trace mode flags - can be combined with bitwise OR
 	PvmTraceMode      = false // When true, writes trace to binary files for reg/mem etc
@@ -83,7 +86,7 @@ type VMGo struct {
 	terminated       bool
 	hostCall         bool // ̵h in GP
 	host_func_id     int  // h in GP
-	hostVM           *VM  // Reference to host VM for host function calls
+	hostVM           pvmtypes.HostVM // Reference to host VM for host function calls
 	Ram              *RawRam
 	Gas              int64
 	hostenv          types.HostEnv
@@ -380,28 +383,28 @@ func (vm *VMGo) Standard_Program_Initialization(argument_data_a []byte) {
 		argument_data_a = []byte{0}
 	}
 
-	z_w := Z_func(vm.w_size + vm.z*Z_P)
+	z_w := pvmtypes.ZFunc(vm.w_size + vm.z*pvmtypes.Z_P)
 
 	// o_byte
-	vm.Ram.WriteRAMBytes(Z_Z, vm.o_byte)
+	vm.Ram.WriteRAMBytes(pvmtypes.Z_Z, vm.o_byte)
 
 	// w_byte
-	z_o := Z_func(vm.o_size)
-	w_addr := 2*Z_Z + z_o
+	z_o := pvmtypes.ZFunc(vm.o_size)
+	w_addr := 2*pvmtypes.Z_Z + z_o
 	vm.Ram.WriteRAMBytes(w_addr, vm.w_byte)
 
 	// argument
-	argAddr := uint32(0xFFFFFFFF) - Z_Z - Z_I + 1
+	argAddr := uint32(0xFFFFFFFF) - pvmtypes.Z_Z - pvmtypes.Z_I + 1
 	vm.Ram.WriteRAMBytes(argAddr, argument_data_a)
 	//fmt.Printf("Copied argument_data_a (len %d) to RAM at address %x\n", len(argument_data_a), argAddr)
-	z_s := Z_func(vm.s)
-	requiredMemory := uint64(5*Z_Z + z_o + z_w + z_s + Z_I)
+	z_s := pvmtypes.ZFunc(vm.s)
+	requiredMemory := uint64(5*pvmtypes.Z_Z + z_o + z_w + z_s + pvmtypes.Z_I)
 	if requiredMemory > math.MaxUint32 {
 		panic("Standard Program Initialization Error")
 	}
 
 	//vm.Ram.WriteRegister(0, uint64(0xFFFFFFFF-(1<<16)+1))
-	vm.Ram.WriteRegister(1, uint64(0xFFFFFFFF-2*Z_Z-Z_I+1))
+	vm.Ram.WriteRegister(1, uint64(0xFFFFFFFF-2*pvmtypes.Z_Z-pvmtypes.Z_I+1))
 	vm.Ram.WriteRegister(7, uint64(argAddr))
 	vm.Ram.WriteRegister(8, uint64(uint32(len(argument_data_a))))
 
@@ -441,7 +444,7 @@ func (vm *VMGo) SetMemoryBounds(o_size uint32,
 }
 
 // NewVMGo initializes a new VMGo with a given program
-func NewVMGo(service_index uint32, p *Program, initialRegs []uint64, initialPC uint64, initialGas uint64, hostENV types.HostEnv) (vm *VMGo) {
+func NewVMGo(service_index uint32, p *program.Program, initialRegs []uint64, initialPC uint64, initialGas uint64, hostENV types.HostEnv) (vm *VMGo) {
 
 	vm = &VMGo{
 		Gas:           int64(initialGas),
@@ -547,9 +550,9 @@ func (vm *VMGo) Destroy() {
 	vm.Ram.Close()
 
 	// Flush and close trace writers if they were set up
-	// Lifecycle: flushTraceBuffers() -> gzipWriter.Close() (writes trailer) -> file.Sync() -> file.Close()
+	// Lifecycle: FlushTraceBuffers() -> gzipWriter.Close() (writes trailer) -> file.Sync() -> file.Close()
 	if PvmTraceMode && vm.gzipWriters != nil {
-		vm.flushTraceBuffers()
+		vm.FlushTraceBuffers()
 		// Close gzip writers first (writes gzip trailer/footer), then sync and close files
 		for i := 0; i < len(vm.gzipWriters); i++ {
 			if vm.gzipWriters[i] != nil {
@@ -645,8 +648,8 @@ func (vm *VMGo) ensureTraceVerifier(verifyDir string) error {
 	return nil
 }
 
-// flushTraceBuffers writes buffered trace data to gzip writers and resets buffers
-func (vm *VMGo) flushTraceBuffers() {
+// FlushTraceBuffers writes buffered trace data to gzip writers and resets buffers.
+func (vm *VMGo) FlushTraceBuffers() {
 	if vm.gzipWriters == nil || vm.traceBuffers == nil {
 		return
 	}
@@ -705,7 +708,7 @@ func (vm *VMGo) ExecuteAsChild(entryPoint uint32) error {
 		}
 		// Only flush gzip buffers, don't close (allows append on next invoke)
 		if PvmTraceMode && vm.gzipWriters != nil {
-			vm.flushTraceBuffers()
+			vm.FlushTraceBuffers()
 		}
 	}()
 
@@ -771,7 +774,7 @@ func (vm *VMGo) ExecuteAsChild(entryPoint uint32) error {
 	return nil
 }
 
-func (vm *VMGo) Execute(host *VM, entryPoint uint32, logDir string) error {
+func (vm *VMGo) Execute(host pvmtypes.HostVM, entryPoint uint32, logDir string) error {
 	vm.terminated = false
 	vm.IsChild = false
 	vm.hostVM = host           // Store host VM reference for host function calls
@@ -855,19 +858,21 @@ func (vm *VMGo) Execute(host *VM, entryPoint uint32, logDir string) error {
 				vm.Gas = 0
 				vm.ResultCode = types.WORKRESULT_OOG
 				vm.MachineState = OOG
-				vm.hostVM.ResultCode = types.WORKRESULT_OOG
+				if vm.hostVM != nil {
+					vm.hostVM.SetResultCode(types.WORKRESULT_OOG)
+				}
 				vm.terminated = true
 				return fmt.Errorf("out of gas")
 			}
 		}
 	}
 
-	if DebugHostFunctions {
+	if pvmtypes.DebugHostFunctions {
 		fmt.Printf("Host functions called in this execution: ")
-		for hostFn, count := range DebugHostFunctionMap {
-			fmt.Printf("%s(%d) \n", HostFnToName(hostFn), count)
-			if hostFn == INVOKE {
-				for resultCode, rcCount := range resultMap {
+		for hostFn, count := range pvmtypes.DebugHostFunctionMap {
+			fmt.Printf("%s(%d) \n", pvmtypes.HostFnToName(hostFn), count)
+			if hostFn == pvmtypes.INVOKE {
+				for resultCode, rcCount := range pvmtypes.ResultMap {
 					fmt.Printf("   Result code %s: %d times\n", machineStateToString(uint8(resultCode)), rcCount)
 				}
 			}
@@ -878,13 +883,15 @@ func (vm *VMGo) Execute(host *VM, entryPoint uint32, logDir string) error {
 	if !vm.terminated {
 		vm.ResultCode = types.WORKRESULT_OK
 	} else if vm.ResultCode != types.WORKRESULT_OK {
-		vm.hostVM.ResultCode = vm.ResultCode
+		if vm.hostVM != nil {
+			vm.hostVM.SetResultCode(vm.ResultCode)
+		}
 		fmt.Printf("VM terminated with error code %d at PC %d (%v, %s, %s) Gas:%v\n", vm.ResultCode, vm.pc, vm.Service_index, vm.Mode, string(vm.ServiceMetadata), vm.Gas)
 	}
 
 	// Flush trace buffers before returning
 	if PvmTraceMode {
-		vm.flushTraceBuffers()
+		vm.FlushTraceBuffers()
 	}
 
 	// Print taint tracking results if enabled
@@ -932,7 +939,9 @@ func (vm *VMGo) ReadRegisters() [13]uint64 {
 
 func (vm *VMGo) Panic(code uint64) {
 	vm.ResultCode = types.WORKRESULT_PANIC
-	vm.hostVM.ResultCode = types.WORKRESULT_PANIC
+	if vm.hostVM != nil {
+		vm.hostVM.SetResultCode(types.WORKRESULT_PANIC)
+	}
 	vm.terminated = true
 }
 
@@ -970,73 +979,73 @@ func (vm *VMGo) Init(argument_data_a []byte) error {
 	// o_byte
 	o_len := len(vm.o_byte)
 	var err error
-	if err = vm.Ram.SetMemAccess(Z_Z, uint32(o_len), PageMutable); err != nil {
+	if err = vm.Ram.SetMemAccess(pvmtypes.Z_Z, uint32(o_len), pvmtypes.PageMutable); err != nil {
 		return fmt.Errorf("SetMemAccess1 failed o_len=%d (o_byte): %w", o_len, err)
 	}
-	if err = vm.Ram.WriteMemory(Z_Z, vm.o_byte); err != nil {
+	if err = vm.Ram.WriteMemory(pvmtypes.Z_Z, vm.o_byte); err != nil {
 		return fmt.Errorf("WriteMemory failed (o_byte): %w", err)
 	}
-	if err = vm.Ram.SetMemAccess(Z_Z, uint32(o_len), PageImmutable); err != nil {
+	if err = vm.Ram.SetMemAccess(pvmtypes.Z_Z, uint32(o_len), pvmtypes.PageImmutable); err != nil {
 		return fmt.Errorf("SetMemAccess2 failed (o_byte): %w", err)
 	}
 	//2)
 	//p|o|
-	p_o_len := P_func(uint32(o_len))
-	if err = vm.Ram.SetMemAccess(Z_Z+uint32(o_len), p_o_len, PageImmutable); err != nil {
+	p_o_len := pvmtypes.PFunc(uint32(o_len))
+	if err = vm.Ram.SetMemAccess(pvmtypes.Z_Z+uint32(o_len), p_o_len, pvmtypes.PageImmutable); err != nil {
 		return fmt.Errorf("SetMemAccess failed (p_o_byte): %w", err)
 	}
 
-	z_o := Z_func(vm.o_size)
-	z_w := Z_func(vm.w_size + vm.z*Z_P)
-	z_s := Z_func(vm.s)
-	requiredMemory := uint64(5*Z_Z + z_o + z_w + z_s + Z_I)
+	z_o := pvmtypes.ZFunc(vm.o_size)
+	z_w := pvmtypes.ZFunc(vm.w_size + vm.z*pvmtypes.Z_P)
+	z_s := pvmtypes.ZFunc(vm.s)
+	requiredMemory := uint64(5*pvmtypes.Z_Z + z_o + z_w + z_s + pvmtypes.Z_I)
 	if requiredMemory > math.MaxUint32 {
 		return fmt.Errorf("Standard Program Initialization Error: requiredMemory too large")
 	}
 	// 3)
 	// w_byte
-	w_addr := 2*Z_Z + z_o
+	w_addr := 2*pvmtypes.Z_Z + z_o
 	w_len := uint32(len(vm.w_byte))
-	if err = vm.Ram.SetMemAccess(w_addr, w_len, PageMutable); err != nil {
+	if err = vm.Ram.SetMemAccess(w_addr, w_len, pvmtypes.PageMutable); err != nil {
 		return fmt.Errorf("SetMemAccess failed (w_byte): %w", err)
 	}
 	if err = vm.Ram.WriteMemory(w_addr, vm.w_byte); err != nil {
 		return fmt.Errorf("WriteMemory failed (w_byte): %w", err)
 	}
 	// 4)
-	addr4 := 2*Z_Z + z_o + w_len
+	addr4 := 2*pvmtypes.Z_Z + z_o + w_len
 	little_z := vm.z
-	len4 := P_func(w_len) + little_z*Z_P - w_len
-	if err = vm.Ram.SetMemAccess(addr4, len4, PageMutable); err != nil {
+	len4 := pvmtypes.PFunc(w_len) + little_z*pvmtypes.Z_P - w_len
+	if err = vm.Ram.SetMemAccess(addr4, len4, pvmtypes.PageMutable); err != nil {
 		return fmt.Errorf("SetMemAccess failed (addr4): %w", err)
 	}
 	// 5)
-	addr5 := 0xFFFFFFFF + 1 - 2*Z_Z - Z_I - P_func(vm.s)
-	len5 := P_func(vm.s)
-	if err = vm.Ram.SetMemAccess(addr5, len5, PageMutable); err != nil {
+	addr5 := 0xFFFFFFFF + 1 - 2*pvmtypes.Z_Z - pvmtypes.Z_I - pvmtypes.PFunc(vm.s)
+	len5 := pvmtypes.PFunc(vm.s)
+	if err = vm.Ram.SetMemAccess(addr5, len5, pvmtypes.PageMutable); err != nil {
 		return fmt.Errorf("SetMemAccess failed (addr5): %w", err)
 	}
 	// 6)
-	argAddr := uint32(0xFFFFFFFF) - Z_Z - Z_I + 1
-	if err = vm.Ram.SetMemAccess(argAddr, uint32(len(argument_data_a)), PageMutable); err != nil {
+	argAddr := uint32(0xFFFFFFFF) - pvmtypes.Z_Z - pvmtypes.Z_I + 1
+	if err = vm.Ram.SetMemAccess(argAddr, uint32(len(argument_data_a)), pvmtypes.PageMutable); err != nil {
 		return fmt.Errorf("SetMemAccess failed (argAddr): %w", err)
 	}
 	if err = vm.Ram.WriteMemory(argAddr, argument_data_a); err != nil {
 		return fmt.Errorf("WriteMemory failed (argAddr): %w", err)
 	}
 	// set it back to immutable
-	if err = vm.Ram.SetMemAccess(argAddr+uint32(len(argument_data_a)), Z_I, PageImmutable); err != nil {
+	if err = vm.Ram.SetMemAccess(argAddr+uint32(len(argument_data_a)), pvmtypes.Z_I, pvmtypes.PageImmutable); err != nil {
 		return fmt.Errorf("SetMemAccess failed (argAddr+len): %w", err)
 	}
 	// 7)
 	addr7 := argAddr + uint32(len(argument_data_a))
-	len7 := argAddr + P_func(uint32(len(argument_data_a))) - addr7
-	if err = vm.Ram.SetMemAccess(addr7, len7, PageImmutable); err != nil {
+	len7 := argAddr + pvmtypes.PFunc(uint32(len(argument_data_a))) - addr7
+	if err = vm.Ram.SetMemAccess(addr7, len7, pvmtypes.PageImmutable); err != nil {
 		return fmt.Errorf("SetMemAccess failed (addr7): %w", err)
 	}
 
 	vm.WriteRegister(0, uint64(0xFFFFFFFF-(1<<16)+1))
-	vm.WriteRegister(1, uint64(0xFFFFFFFF-2*Z_Z-Z_I+1))
+	vm.WriteRegister(1, uint64(0xFFFFFFFF-2*pvmtypes.Z_Z-pvmtypes.Z_I+1))
 	vm.WriteRegister(7, uint64(argAddr))
 	vm.WriteRegister(8, uint64(uint32(len(argument_data_a))))
 
@@ -1168,7 +1177,7 @@ func (vm *VMGo) step(stepn int) error {
 		if vm.hostCall {
 			// Decrement host call gas cost (10) and check for OOG
 			vm.Gas -= 10
-			if vm.host_func_id == LOG {
+			if vm.host_func_id == pvmtypes.LOG {
 			}
 			if vm.Gas < 0 {
 				fmt.Printf("Out of gas during host function %d call\n", vm.host_func_id)
@@ -1183,11 +1192,11 @@ func (vm *VMGo) step(stepn int) error {
 			if vm.hostVM != nil {
 				_, err := vm.hostVM.InvokeHostCall(vm.host_func_id)
 				if err != nil {
-					fmt.Printf("HostCall %s (%d) ERROR: %v\n", HostFnToName(vm.host_func_id), vm.host_func_id, err)
+					fmt.Printf("HostCall %s (%d) ERROR: %v\n", pvmtypes.HostFnToName(vm.host_func_id), vm.host_func_id, err)
 					vm.terminated = true
 					return nil
 				}
-				if vm.host_func_id == TRANSFER && vm.ReadRegister(7) == OK {
+				if vm.host_func_id == pvmtypes.TRANSFER && vm.ReadRegister(7) == OK {
 					transferGas := int64(vm.ReadRegister(9))
 					vm.Gas -= transferGas
 					if vm.Gas < 0 {
@@ -1290,7 +1299,7 @@ func (vm *VMGo) step(stepn int) error {
 		// Flush every 1 million steps
 		vm.stepCounter++
 		if vm.stepCounter%1000000 == 0 {
-			vm.flushTraceBuffers()
+			vm.FlushTraceBuffers()
 		}
 	}
 
@@ -1321,8 +1330,8 @@ func (vm *VMGo) step(stepn int) error {
 	}
 
 	if label, ok := vm.label_pc[int(vm.pc)]; ok {
-		fmt.Printf("[%s%s%s FINISH]\n", ColorBlue, lastLabel, ColorReset)
-		fmt.Printf("[%s%s%s START]\n", ColorBlue, label, ColorReset)
+		fmt.Printf("[%s%s%s FINISH]\n", pvmtypes.ColorBlue, lastLabel, pvmtypes.ColorReset)
+		fmt.Printf("[%s%s%s START]\n", pvmtypes.ColorBlue, label, pvmtypes.ColorReset)
 		if lastLabel != label {
 			lastLabel = label
 		}
@@ -1427,14 +1436,14 @@ func (vm *VMGo) djump(a uint64) {
 			vm.pc = pvmpc
 			fmt.Printf("djump to PC=%d\n", vm.pc)
 		}
-	} else if a == 0 || a > uint64(len(vm.J)*Z_A) || a%Z_A != 0 {
+	} else if a == 0 || a > uint64(len(vm.J)*pvmtypes.Z_A) || a%pvmtypes.Z_A != 0 {
 		// djump(0) is invalid - 0 is not a valid jump target
 		// Also invalid if a > J_size * Z_A or a is not aligned to Z_A
 		vm.terminated = true
 		vm.ResultCode = types.WORKRESULT_PANIC
 		vm.MachineState = PANIC
 	} else {
-		target_pc := uint64(vm.J[(a/Z_A)-1])
+		target_pc := uint64(vm.J[(a/pvmtypes.Z_A)-1])
 		// Validate target PC is within bounds
 		if target_pc >= uint64(len(vm.code)) {
 			vm.terminated = true
@@ -1848,13 +1857,13 @@ func (vm *VMGo) HandleTwoRegs(inst *Instruction) {
 			return
 		}
 		result = uint64(vm.Ram.GetCurrentHeapPointer())
-		next_page_boundary := P_func(vm.Ram.GetCurrentHeapPointer())
+		next_page_boundary := pvmtypes.PFunc(vm.Ram.GetCurrentHeapPointer())
 		new_heap_pointer := uint64(vm.Ram.GetCurrentHeapPointer()) + valueA
 
 		if new_heap_pointer > uint64(next_page_boundary) {
-			final_boundary := P_func(uint32(new_heap_pointer))
-			idx_start := next_page_boundary / Z_P
-			idx_end := final_boundary / Z_P
+			final_boundary := pvmtypes.PFunc(uint32(new_heap_pointer))
+			idx_start := next_page_boundary / pvmtypes.Z_P
+			idx_end := final_boundary / pvmtypes.Z_P
 			page_count := idx_end - idx_start
 
 			vm.Ram.allocatePages(idx_start, page_count)
@@ -2513,7 +2522,7 @@ func (vm *VMGo) SetGas(gas int64) {
 	vm.Gas = gas
 }
 
-func (vm *VMGo) InitStep(host *VM, entryPoint uint32) error {
+func (vm *VMGo) InitStep(host pvmtypes.HostVM, entryPoint uint32) error {
 	vm.terminated = false
 	vm.IsChild = false
 	vm.hostVM = host           // Store host VM reference for host function calls
@@ -2552,7 +2561,7 @@ func (vm *VMGo) InitStep(host *VM, entryPoint uint32) error {
 	return nil
 }
 
-func (vm *VMGo) InitStepwise(pvm *VM, entryPoint uint32) error {
+func (vm *VMGo) InitStepwise(pvm pvmtypes.HostVM, entryPoint uint32) error {
 	vm.terminated = false
 	vm.IsChild = false
 	vm.hostVM = pvm // Store parent VM reference for host function calls
@@ -2577,7 +2586,7 @@ func (vm *VMGo) InitStepwise(pvm *VM, entryPoint uint32) error {
 	return nil
 }
 
-func (vm *VMGo) ExecuteStep(pvm *VM) []byte {
+func (vm *VMGo) ExecuteStep(pvm pvmtypes.HostVM) []byte {
 	// Save state before execution
 	prevpc := vm.pc
 	opcode := byte(0)
@@ -2587,9 +2596,9 @@ func (vm *VMGo) ExecuteStep(pvm *VM) []byte {
 		vm.ResultCode = types.WORKRESULT_PANIC
 		vm.MachineState = PANIC
 		vm.terminated = true
-		pvm.ResultCode = types.WORKRESULT_PANIC
-		pvm.MachineState = PANIC
-		pvm.terminated = true
+		pvm.SetResultCode(types.WORKRESULT_PANIC)
+		pvm.SetMachineState(PANIC)
+		pvm.SetTerminated(true)
 		return make([]byte, 369) // Return empty log on error
 	}
 
@@ -2598,9 +2607,9 @@ func (vm *VMGo) ExecuteStep(pvm *VM) []byte {
 	// Execute one step
 	if err := vm.step(0); err != nil {
 		// Update parent VM state
-		pvm.ResultCode = vm.ResultCode
-		pvm.MachineState = vm.MachineState
-		pvm.terminated = vm.terminated
+		pvm.SetResultCode(vm.ResultCode)
+		pvm.SetMachineState(vm.MachineState)
+		pvm.SetTerminated(vm.terminated)
 
 		// Encode partial log even on error
 		log := vm.encodeStepLog(opcode, prevpc)
@@ -2618,11 +2627,11 @@ func (vm *VMGo) ExecuteStep(pvm *VM) []byte {
 	// Set result code if not terminated
 	if !vm.terminated {
 		vm.ResultCode = types.WORKRESULT_OK
-		pvm.ResultCode = types.WORKRESULT_OK
+		pvm.SetResultCode(types.WORKRESULT_OK)
 	} else {
-		pvm.ResultCode = vm.ResultCode
-		pvm.MachineState = vm.MachineState
-		pvm.terminated = vm.terminated
+		pvm.SetResultCode(vm.ResultCode)
+		pvm.SetMachineState(vm.MachineState)
+		pvm.SetTerminated(vm.terminated)
 	}
 
 	// Encode and return binary log
@@ -2741,12 +2750,6 @@ const (
 	PageSize     = 4096
 )
 
-const (
-	PageInaccessible = unix.PROT_NONE
-	PageMutable      = unix.PROT_READ | unix.PROT_WRITE
-	PageImmutable    = unix.PROT_READ
-)
-
 type RawRam struct {
 	reg                  [13]uint64
 	current_heap_pointer uint32
@@ -2788,19 +2791,19 @@ func (ram *RawRam) getOrCreatePage(pageIndex uint32) []byte {
 // Returns the minimum access level across all pages in the range.
 func (ram *RawRam) GetMemAccess(address uint32, length uint32) (int, error) {
 	if length == 0 {
-		return PageMutable, nil
+		return pvmtypes.PageMutable, nil
 	}
 	startPage := int(address / PageSize)
 	endPage := int((address + length - 1) / PageSize)
 	if startPage < 0 || startPage >= TotalPages || endPage < 0 || endPage >= TotalPages {
-		return PageInaccessible, fmt.Errorf("invalid address")
+		return pvmtypes.PageInaccessible, fmt.Errorf("invalid address")
 	}
 	// Check all pages in the range - return minimum access level
-	minAccess := PageMutable
+	minAccess := pvmtypes.PageMutable
 	for pageIndex := startPage; pageIndex <= endPage; pageIndex++ {
 		access, ok := ram.mem_access[pageIndex]
 		if !ok {
-			access = PageInaccessible
+			access = pvmtypes.PageInaccessible
 		}
 		if pageIndex == 0 {
 			fmt.Printf("Page 0 Access = %d\n", access)
@@ -2813,8 +2816,8 @@ func (ram *RawRam) GetMemAccess(address uint32, length uint32) (int, error) {
 }
 
 // FindFaultPage finds the first page in a memory range that doesn't have the required access.
-// For writes, it looks for pages that are not PageMutable.
-// For reads, it looks for pages that are PageInaccessible.
+// For writes, it looks for pages that are not pvmtypes.PageMutable.
+// For reads, it looks for pages that are pvmtypes.PageInaccessible.
 // Returns the page-aligned address of the first failing page.
 func (ram *RawRam) FindFaultPage(address uint32, length uint32, isWrite bool) uint32 {
 	if length == 0 {
@@ -2825,12 +2828,12 @@ func (ram *RawRam) FindFaultPage(address uint32, length uint32, isWrite bool) ui
 	for pageIndex := startPage; pageIndex <= endPage; pageIndex++ {
 		access, ok := ram.mem_access[pageIndex]
 		if !ok {
-			access = PageInaccessible
+			access = pvmtypes.PageInaccessible
 		}
-		if isWrite && access != PageMutable {
+		if isWrite && access != pvmtypes.PageMutable {
 			return uint32(pageIndex) * PageSize
 		}
-		if !isWrite && access == PageInaccessible {
+		if !isWrite && access == pvmtypes.PageInaccessible {
 			return uint32(pageIndex) * PageSize
 		}
 	}
@@ -2855,7 +2858,7 @@ func (ram *RawRam) ReadMemory(address uint32, length uint32) (data []byte, err e
 	if err != nil {
 		return nil, fmt.Errorf("failed to get memory access: %w", err)
 	}
-	if access == PageInaccessible {
+	if access == pvmtypes.PageInaccessible {
 		return nil, fmt.Errorf("memory at address %x is not readable", address)
 	}
 
@@ -2899,7 +2902,7 @@ func (ram *RawRam) WriteMemory(address uint32, data []byte) error {
 	if err != nil {
 		return fmt.Errorf("failed to get memory access: %w", err)
 	}
-	if access != PageMutable {
+	if access != pvmtypes.PageMutable {
 		return fmt.Errorf("memory at address %x is not writable", address)
 	}
 
@@ -3007,7 +3010,7 @@ func (ram *RawRam) ReadRAMBytes(address uint32, length uint32) (data []byte, res
 }
 
 func (ram *RawRam) allocatePages(startPage uint32, count uint32) {
-	ram.SetPagesAccessRange(int(startPage), int(count), PageMutable)
+	ram.SetPagesAccessRange(int(startPage), int(count), pvmtypes.PageMutable)
 }
 
 // GetCurrentHeapPointer

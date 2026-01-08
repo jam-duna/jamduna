@@ -8,10 +8,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/colorfulnotion/jam/pvm/program"
-	"github.com/colorfulnotion/jam/pvm/recompiler"
 )
 
 // TestBenchmarkAllPVMFiles runs performance benchmarks on all .pvm files in services directory

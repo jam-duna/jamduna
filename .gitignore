@@ -86,9 +86,10 @@ assets/zcash-srs-2-11-uncompressed.bin
 /cmd/duna_bench/duna_targeth_*
 /cmd/duna_bench/reports
 /reports
-duna_target
-/duna_fuzzer
-duna_bench
+duna_target*
+duna_fuzzer*
+duna_bench*
+duna_replay*
 
 # Allow refine test data to be committed
 !cmd/duna_fuzzer/refine/

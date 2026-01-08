@@ -14,12 +14,9 @@ DEFAULT_ASN_VERSION := 1
 # Use the active SDK for header/lib paths on macOS builds.
 SDK_PATH         := $(shell xcrun --show-sdk-path)
 
-.PHONY: all build run test-fallback test-safrole test-assurances clean cpnode cpstf fuzz fuzz_only make asn0 asn1 asn0r
+.PHONY: all build run test-fallback test-safrole test-assurances clean cpnode cpstf fuzz fuzz_only make asn1 asn0r
 
 all: build
-
-# ASN.0 builds (legacy)
-asn0: static_fuzzer0_linux static_fuzzer0_mac
 
 # Default ASN version build (follows DEFAULT_ASN_VERSION)
 make: asn$(DEFAULT_ASN_VERSION)
@@ -125,29 +122,6 @@ static_fuzzer0r_mac:
 	-o $(BINARY_NAME)_asn0r_mac .
 	@rm -f ../../ffi/libunicorn.a
 	@echo "Build complete for $(BINARY_NAME)_asn0r_mac on macOS (amd64)."
-
-static_fuzzer0_linux:
-	@echo "Building static duna_fuzzer (ASN.0) for Linux (amd64)..."
-	@ln -sf $(CURDIR)/../../ffi/libunicorn.linux_amd64.a ../../ffi/libunicorn.a
-	-@CGO_LDFLAGS="" GOOS=linux GOARCH=amd64 CC=x86_64-linux-musl-gcc CGO_ENABLED=1 \
-	go build -tags="cgo,$(NETWORK),asn0" \
-	-ldflags="-s -w -extldflags '-static'" \
-	-o $(if $(filter 0,$(DEFAULT_ASN_VERSION)),$(BINARY_NAME)_linux,$(BINARY_NAME)_asn0_linux) .
-	@rm -f ../../ffi/libunicorn.a
-	@echo "Build complete for $(if $(filter 0,$(DEFAULT_ASN_VERSION)),$(BINARY_NAME)_linux,$(BINARY_NAME)_asn0_linux) on Linux (amd64)."
-
-static_fuzzer0_mac:
-	@echo "Building static duna_fuzzer (ASN.0) for macOS (amd64)..."
-	@ln -sf $(CURDIR)/../../ffi/libunicorn.mac.a ../../ffi/libunicorn.a
-	-@MACOSX_DEPLOYMENT_TARGET=14.0 \
-	  GOOS=darwin GOARCH=amd64 CC=clang CGO_ENABLED=1 \
-	  CGO_CFLAGS="-mmacosx-version-min=14.0 -isysroot $(SDK_PATH)" \
-	  CGO_LDFLAGS="-mmacosx-version-min=14.0 -isysroot $(SDK_PATH)" \
-	go build -tags="cgo,$(NETWORK),asn0" \
-	-ldflags="-s -w" \
-	-o $(if $(filter 0,$(DEFAULT_ASN_VERSION)),$(BINARY_NAME)_mac,$(BINARY_NAME)_asn0_mac) .
-	@rm -f ../../ffi/libunicorn.a
-	@echo "Build complete for $(if $(filter 0,$(DEFAULT_ASN_VERSION)),$(BINARY_NAME)_mac,$(BINARY_NAME)_asn0_mac) on macOS (amd64)."
 
 run:
 	go build -tags=$(NETWORK) -o $(BINARY_NAME_FUZZ) ../fuzzer

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	telemetry "github.com/colorfulnotion/jam/telemetry"
 	types "github.com/colorfulnotion/jam/types"
@@ -109,7 +110,7 @@ func (n *Node) buildTelemetryNodeInfo() (telemetry.NodeInfo, error) {
 	info.PeerAddress = addrBytes
 	info.PeerPort = addrPort
 
-	if n.pvmBackend == statedb.BackendCompiler {
+	if n.pvmBackend == pvm.BackendCompiler {
 		info.NodeFlags |= 1
 	}
 

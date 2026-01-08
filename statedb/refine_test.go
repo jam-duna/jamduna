@@ -10,6 +10,8 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/pvm"
+	"github.com/colorfulnotion/jam/pvm/interpreter"
 	"github.com/colorfulnotion/jam/pvm/recompiler"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -17,8 +19,8 @@ import (
 func TestBundleExecution(t *testing.T) {
 	// Disable PvmTraceMode to prevent overwriting existing trace data
 	// Enable PvmVerifyMode to verify against existing trace
-	PvmTraceMode = true
-	PvmLogging = false
+	interpreter.PvmTraceMode = true
+	interpreter.PvmLogging = false
 
 	//doom setup
 	traceBaseDir := "0xf1166dc1eb7baff3d1c2450f319358c5c6789fe31313d331d4f035908045ad02"
@@ -26,14 +28,14 @@ func TestBundleExecution(t *testing.T) {
 	bundleFile := "test/04918460_0xf1166dc1eb7baff3d1c2450f319358c5c6789fe31313d331d4f035908045ad02_0_5_guarantor.json"
 
 	// Choose backend: BackendInterpreter or BackendCompiler
-	testingBackend := BackendCompiler // Change to BackendInterpreter for interpreter verification
+	testingBackend := pvm.BackendCompiler // Change to BackendInterpreter for interpreter verification
 
 	// Set up verification mode for the chosen backend
-	if testingBackend == BackendInterpreter {
+	if testingBackend == pvm.BackendInterpreter {
 		// Interpreter verify mode
 		// PvmVerifyBaseDir = traceBaseDir
-		PvmVerifyDir = "" // Clear direct verify dir
-	} else if testingBackend == BackendCompiler {
+		interpreter.PvmVerifyDir = "" // Clear direct verify dir
+	} else if testingBackend == pvm.BackendCompiler {
 		// Recompiler verify mode
 		// recompiler.EnableVerifyMode = true
 		// recompiler.VerifyBaseDir = traceBaseDir
@@ -42,8 +44,8 @@ func TestBundleExecution(t *testing.T) {
 
 	defer func() {
 		// Reset all verify modes after test
-		PvmVerifyBaseDir = ""
-		PvmVerifyDir = ""
+		interpreter.PvmVerifyBaseDir = ""
+		interpreter.PvmVerifyDir = ""
 		recompiler.EnableVerifyMode = false
 		recompiler.VerifyBaseDir = ""
 	}()
@@ -198,7 +200,7 @@ func TestBundleStepExecution(t *testing.T) {
 	if err := json.Unmarshal(bundleContent, &bundle); err != nil {
 		t.Fatalf("❌ [%s] Failed to unmarshal bundle: %v", bundleFile, err)
 	}
-	testingBackends := []string{BackendInterpreter, BackendInterpreter}
+	testingBackends := []string{pvm.BackendInterpreter, pvm.BackendInterpreter}
 	err = state.ExecuteWorkPackageBundleSteps(bundle.CoreIndex, bundle.Bundle, bundle.SegmentRootLookup, stf.Block.TimeSlot(), "", 0, testingBackends)
 	if err != nil {
 		t.Fatalf("❌ [%s] Failed to execute bundle: %v", bundleFile, err)
@@ -216,7 +218,7 @@ func TestTraceReader(t *testing.T) {
 		return
 	}
 
-	reader, err := NewTraceReader(traceDir)
+	reader, err := interpreter.NewTraceReader(traceDir)
 	if err != nil {
 		t.Fatalf("❌ Failed to create TraceReader: %v", err)
 	}
@@ -255,10 +257,10 @@ func TestBundleVerifyMode(t *testing.T) {
 	}
 
 	// Enable verify mode
-	PvmVerifyDir = traceDir
-	PvmTraceMode = false // Don't write new traces, just verify
+	interpreter.PvmVerifyDir = traceDir
+	interpreter.PvmTraceMode = false // Don't write new traces, just verify
 	defer func() {
-		PvmVerifyDir = "" // Reset after test
+		interpreter.PvmVerifyDir = "" // Reset after test
 	}()
 
 	// Load exported segments from JSON for CheckSegments validation
@@ -307,7 +309,7 @@ func TestBundleVerifyMode(t *testing.T) {
 		t.Fatalf("❌ [%s] Failed to unmarshal bundle: %v", bundleFile, err)
 	}
 
-	testingBackend := BackendInterpreter
+	testingBackend := pvm.BackendInterpreter
 	t.Logf("🔍 [PvmVerifyMode] Executing bundle with %s backend, verifying against trace in %s", testingBackend, traceDir)
 
 	identifier := "SKIP" // Don't write output logs

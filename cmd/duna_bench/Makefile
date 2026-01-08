@@ -15,9 +15,6 @@ asn1: static_bench1_linux static_bench1_interpreter_linux static_bench1_mac
 # ASN.0r builds (extended with refinement)
 asn0r: static_bench0r_linux static_bench0r_mac
 
-# ASN.0 builds (legacy)
-asn0: static_bench0_linux static_bench0_mac
-
 dynamic_build:
 	@echo "Building dynamic $(BINARY_NAME) for current platform..."
 	@GOOS=$(shell go env GOOS) GOARCH=$(shell go env GOARCH) \
@@ -94,26 +91,6 @@ static_bench0r_mac:
 	-ldflags="-s -w" \
 	-o $(BINARY_NAME)_asn0r_mac .
 	@echo "Build complete: $(BINARY_NAME)_asn0r_mac"
-
-static_bench0_linux:
-	@echo "Building static $(BINARY_NAME) (ASN.0) for Linux (amd64)..."
-	-@CGO_LDFLAGS="" GOOS=linux GOARCH=amd64 CC=x86_64-linux-musl-gcc CGO_ENABLED=1 \
-	go build -tags="cgo,$(NETWORK),asn0" \
-	-ldflags="-s -w -extldflags '-static'" \
-	-o $(if $(filter 0,$(DEFAULT_ASN_VERSION)),$(BINARY_NAME)_linux,$(BINARY_NAME)_asn0_linux) .
-	@echo "Build complete: $(if $(filter 0,$(DEFAULT_ASN_VERSION)),$(BINARY_NAME)_linux,$(BINARY_NAME)_asn0_linux)"
-
-static_bench0_mac:
-	@echo "Building static $(BINARY_NAME) (ASN.0) for macOS (amd64)..."
-	-@MACOSX_DEPLOYMENT_TARGET=14.0 \
-	  GOOS=darwin GOARCH=amd64 CC=clang CGO_ENABLED=1 \
-	  CGO_CFLAGS="-mmacosx-version-min=14.0 -isysroot $(SDK_PATH)" \
-	  CGO_LDFLAGS="-mmacosx-version-min=14.0 -isysroot $(SDK_PATH)" \
-	go build -tags="cgo,$(NETWORK),asn0" \
-	-ldflags="-s -w" \
-	-o $(if $(filter 0,$(DEFAULT_ASN_VERSION)),$(BINARY_NAME)_mac,$(BINARY_NAME)_asn0_mac) .
-	@echo "Build complete: $(if $(filter 0,$(DEFAULT_ASN_VERSION)),$(BINARY_NAME)_mac,$(BINARY_NAME)_asn0_mac)"
-
 
 clean:
 	rm -f $(BINARY_NAME) $(BINARY_NAME)_linux $(BINARY_NAME)_mac $(BINARY_NAME)_dynamic \

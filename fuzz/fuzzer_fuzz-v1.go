@@ -1,5 +1,5 @@
-//go:build asn1
-// +build asn1
+//go:build !asn0r
+// +build !asn0r
 
 package fuzz
 

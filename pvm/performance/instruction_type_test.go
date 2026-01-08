@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/colorfulnotion/jam/pvm"
+	"github.com/colorfulnotion/jam/pvm/testutil"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -33,7 +35,7 @@ func TestSimpleTestServiceInstructionTypes(t *testing.T) {
 	}
 
 	// Create a simple host environment
-	hostEnv := statedb.NewMockHostEnv()
+	hostEnv := testutil.NewMockHostEnv()
 
 	// Create VM using NewVMFromCode (similar to how services are loaded)
 	// Parameters: serviceIndex, code, initialPC, initialHeap, hostEnv, backend, initialGas
@@ -43,7 +45,7 @@ func TestSimpleTestServiceInstructionTypes(t *testing.T) {
 		0,                          // initial PC (entry point)
 		1024*1024,                  // 1MB initial heap
 		hostEnv,                    // host environment
-		statedb.BackendInterpreter, // use interpreter backend
+		pvm.BackendInterpreter, // use interpreter backend
 		10_000_000,                 // initial gas (10 million)
 	)
 

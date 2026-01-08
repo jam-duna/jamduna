@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/colorfulnotion/jam/fuzz"
+	"github.com/colorfulnotion/jam/pvm/interpreter"
 	"github.com/colorfulnotion/jam/statedb"
 )
 
@@ -53,10 +54,10 @@ func main() {
 	statedb.RecordTime = false
 	if pvmLogging != "" {
 		if pvmLogging == "trace" {
-			statedb.PvmLogging = true
+			interpreter.PvmLogging = true
 
 		} else if pvmLogging == "debug" {
-			statedb.PvmLogging = true
+			interpreter.PvmLogging = true
 		}
 	}
 	target := fuzz.NewTarget(socketPath, targetInfo, defaultBackend, debugState, dumpStf, dumpLocation)

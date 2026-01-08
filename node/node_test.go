@@ -21,7 +21,7 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	grandpa "github.com/colorfulnotion/jam/grandpa"
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/types"
 	"golang.org/x/exp/rand"
 )
@@ -44,7 +44,7 @@ var jce_manual = flag.Bool("jce_manual", false, "jce_manual")
 var jam_node = flag.Bool("jam_node", false, "jam_node")
 var jam_local_client = flag.Bool("jam_local_client", false, "jam_local_client")
 var manifest = flag.Bool("manifest", false, "manifest")
-var pvmBackend = flag.String("pvm_backend", statedb.BackendInterpreter, "PVM mode to use (interpreter, compiler)")
+var pvmBackend = flag.String("pvm_backend", pvm.BackendInterpreter, "PVM mode to use (interpreter, compiler)")
 var targetNum = flag.Int("targetN", -1, "targetN")
 
 func generateJobID() string {
@@ -182,7 +182,7 @@ func SetUpNodes(jceMode string, numNodes int, basePort uint16) ([]*Node, error) 
 
 	nodes := make([]*Node, numNodes)
 	for i := 0; i < numNodes; i++ {
-		pvmBackend := statedb.BackendInterpreter
+		pvmBackend := pvm.BackendInterpreter
 		node, err := newNode(uint16(i), validatorSecrets[i], chainSpec, pvmBackend, peers, peerList, nodePaths[i], int(basePort)+i, jceMode, types.RoleValidator)
 		if err != nil {
 			return nil, err
@@ -337,7 +337,7 @@ func jamtest(t *testing.T, jam_raw string, targetN int) {
 			} else {
 				if i%2 == 1 {
 					if runtime.GOOS == "linux" {
-						compilerBackend := statedb.BackendCompiler
+						compilerBackend := pvm.BackendCompiler
 						pvmBackend = &compilerBackend
 					}
 				}
@@ -513,7 +513,6 @@ func waitForTermination(watchNode *Node, caseType string, targetedEpochLen int, 
 		t.Fatalf("[%v] Failed: %v", caseType, err)
 	}
 }
-
 
 func TestFallback(t *testing.T) {
 	jamtest(t, "fallback", 0)

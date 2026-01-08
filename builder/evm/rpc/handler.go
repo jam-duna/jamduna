@@ -8,7 +8,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/pvm"
 	evmtypes "github.com/colorfulnotion/jam/statedb/evmtypes"
 )
 
@@ -309,7 +309,7 @@ func (h *EVMRPCHandler) EstimateGas(req []string, res *string) error {
 		tx.GasPrice.Uint64(),
 		tx.Value.Uint64(),
 		tx.Data,
-		statedb.BackendInterpreter,
+		pvm.BackendInterpreter,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to estimate gas: %v", err)
@@ -382,7 +382,7 @@ func (h *EVMRPCHandler) Call(req []string, res *string) error {
 		callTx.Value.Uint64(),
 		callTx.Data,
 		blockNumberStr,
-		statedb.BackendInterpreter,
+		pvm.BackendInterpreter,
 	)
 	if err != nil {
 		log.Error(log.Node, "Call: Transaction simulation failed", "error", err)

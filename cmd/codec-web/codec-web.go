@@ -13,6 +13,7 @@ import (
 	"reflect"
 
 	"github.com/colorfulnotion/jam/common"
+	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/telemetry"
@@ -418,7 +419,7 @@ func main() {
 		}
 
 		// Perform the state transition check.
-		diffs, err := statedb.CheckStateTransitionWithOutput(test_storage, &stf, nil, statedb.BackendInterpreter, false, "")
+		diffs, err := statedb.CheckStateTransitionWithOutput(test_storage, &stf, nil, pvm.BackendInterpreter, false, "")
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
 			// Build an errors array from the diffs map using PoststateCompared

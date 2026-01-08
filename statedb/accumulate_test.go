@@ -16,6 +16,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/pvm"
 	storage "github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/nsf/jsondiff"
@@ -310,7 +311,7 @@ func testAccumulateSTF(testname string, TestCase AccumulateTestCase, t *testing.
 	accumulate_input_wr := TestCase.Input.Reports
 	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
 	transfersIn := make([]types.DeferredTransfer, 0)
-	n, _, _ := s.OuterAccumulate(0, g, transfersIn, accumulate_input_wr, o, f, BackendInterpreter, make(map[uint32]*types.XContext), "SKIP")
+	n, _, _ := s.OuterAccumulate(0, g, transfersIn, accumulate_input_wr, o, f, pvm.BackendInterpreter, make(map[uint32]*types.XContext), "SKIP")
 	if err != nil {
 		t.Errorf("OuterAccumulate failed: %v", err)
 	}
@@ -424,7 +425,7 @@ func AccumulateSTF(testname string, TestCase AccumulateTestCase) error {
 	accumulate_input_wr := TestCase.Input.Reports
 	accumulate_input_wr = s.AccumulatableSequence(accumulate_input_wr)
 	transfersIn := make([]types.DeferredTransfer, 0)
-	num_accumulations, accumulation_output, accumulate_gas := s.OuterAccumulate(0, g, transfersIn, accumulate_input_wr, o, f, BackendInterpreter, make(map[uint32]*types.XContext), "SKIP")
+	num_accumulations, accumulation_output, accumulate_gas := s.OuterAccumulate(0, g, transfersIn, accumulate_input_wr, o, f, pvm.BackendInterpreter, make(map[uint32]*types.XContext), "SKIP")
 	log.Info(log.SDB, "AccumulateSTF", "num_accumulations", num_accumulations, "accumulate_gas", accumulate_gas, "accumulation_output", accumulation_output)
 
 	// make sure all service accounts can be written

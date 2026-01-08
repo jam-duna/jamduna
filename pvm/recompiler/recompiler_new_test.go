@@ -10,7 +10,7 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-const test_data_dir = "../../statedb/new_gas_model_test/tests/programs/"
+const test_data_dir = "../testdata/new_gas_model_test/tests/programs/"
 
 func TestPVM_NewAll(t *testing.T) {
 

@@ -23,6 +23,8 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
+	"github.com/colorfulnotion/jam/pvm"
+	"github.com/colorfulnotion/jam/pvm/interpreter"
 	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	"github.com/colorfulnotion/jam/types"
 	ethereumCommon "github.com/ethereum/go-ethereum/common"
@@ -468,7 +470,7 @@ func RunAccumulateHostFunctionsTest(b *RollupNode) error {
 
 	// Validate with both backends
 	bundle := bundles[0]
-	backends := []string{BackendInterpreter}
+	backends := []string{pvm.BackendInterpreter}
 	if err := validateBundleWithBackends(b.stateDB, bundle, backends); err != nil {
 		return fmt.Errorf("validateBundleWithBackends failed: %w", err)
 	}
@@ -671,7 +673,7 @@ func RunTransfersRound(b *RollupNode, transfers []TransferTriple, round int) err
 	// Validate the bundle with the stable interpreter backend
 	// (go_interpreter currently diverges on export counting post-Verkle refactor)
 	if false {
-		backends := []string{BackendInterpreter}
+		backends := []string{pvm.BackendInterpreter}
 		if err := validateBundleWithBackends(b.stateDB, bundle, backends); err != nil {
 			panic(err.Error())
 		}
@@ -1648,9 +1650,9 @@ func validateBundleWithBackends(statedb *StateDB, bundle *types.WorkPackageBundl
 
 // TestBackends tests multiple backends against WorkPackageBundle files saved with saveBundles = true
 func TestBackends(t *testing.T) {
-	log.InitLogger("info")
-	log.EnableModule(log.Node)
-	backends := []string{BackendInterpreter, BackendInterpreter} // BackendCompiler, BackendCompilerSandbox
+log.InitLogger("info")
+log.EnableModule(log.Node)
+	backends := []string{pvm.BackendInterpreter, pvm.BackendInterpreter} // BackendCompiler, BackendCompilerSandbox
 	// Read all bundle*.bin files in the current directory using glob
 	matches, err := filepath.Glob("bundle*.bin")
 	if err != nil {
@@ -1696,10 +1698,10 @@ func TestBackends(t *testing.T) {
 func TestSingleBundle(t *testing.T) {
 	log.InitLogger("info")
 	log.EnableModule(log.Node)
-	PvmLogging = false
-	defer func() { PvmLogging = false }()
+	interpreter.PvmLogging = false
+	defer func() { interpreter.PvmLogging = false }()
 
-	backends := []string{BackendInterpreter, BackendInterpreter, BackendCompiler} //, BackendCompilerSandbox
+	backends := []string{pvm.BackendInterpreter, pvm.BackendInterpreter, pvm.BackendCompiler} //, BackendCompilerSandbox
 	bundleFile := "bundle-transfers-3-0x0c81146bcf33b8c31648b6181817cc1c7c2209725182a9a24b86ce34c03a3d4b.bin"
 
 	storage, err := initStorage(t.TempDir())

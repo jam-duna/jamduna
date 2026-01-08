@@ -1,4 +1,4 @@
-package statedb
+package testutil
 
 import (
 	"github.com/colorfulnotion/jam/common"
