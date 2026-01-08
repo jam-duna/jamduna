@@ -17,7 +17,7 @@ else
   PVM_BACKEND ?= interpreter # Default to 'interpreter' on non-Linux
 endif
 
-# Run as make <test_name>_<node|client|localclient>_<interpreter|compiler|sandbox>
+# Run as make <test_name>_<node|client|localclient>_<interpreter|compiler>
 
 # Conditionally set -targetN, or empty if TargetN=-1
 TARGET_PARAM = $(if $(filter -1,$(TargetN)),,$(shell echo -targetN=$(TargetN)))
@@ -113,12 +113,4 @@ disputes:
 		$(MAKE) $*; \
 	else \
 		$(MAKE) $* PVM_BACKEND=compiler; \
-	fi
-
-%_sandbox:
-	@if echo "$*" | grep -q "_client$$" || echo "$*" | grep -q "_localclient$$"; then \
-		echo "Warning: PVM mode '_sandbox' is ignored for non-node test '$*'."; \
-		$(MAKE) $*; \
-	else \
-		$(MAKE) $* PVM_BACKEND=sandbox; \
 	fi

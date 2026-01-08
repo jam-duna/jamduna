@@ -44,7 +44,7 @@ var jce_manual = flag.Bool("jce_manual", false, "jce_manual")
 var jam_node = flag.Bool("jam_node", false, "jam_node")
 var jam_local_client = flag.Bool("jam_local_client", false, "jam_local_client")
 var manifest = flag.Bool("manifest", false, "manifest")
-var pvmBackend = flag.String("pvm_backend", statedb.BackendInterpreter, "PVM mode to use (interpreter, compiler, sandbox)")
+var pvmBackend = flag.String("pvm_backend", statedb.BackendInterpreter, "PVM mode to use (interpreter, compiler)")
 var targetNum = flag.Int("targetN", -1, "targetN")
 
 func generateJobID() string {

@@ -275,7 +275,7 @@ func main() {
 	if runtime.GOOS == "linux" {
 		defaultPVMBackend = statedb.BackendCompiler
 	}
-	runCmd.Flags().StringVar(&pvmBackend, "pvm-backend", defaultPVMBackend, "PVM backend (interpreter, compiler, sandbox)")
+	runCmd.Flags().StringVar(&pvmBackend, "pvm-backend", defaultPVMBackend, "PVM backend (interpreter, compiler)")
 	runCmd.Flags().StringVar(&debug, "debug", "rotation,guarantees", "Debug modules to enable")
 	runCmd.Flags().IntVar(&port, "port", 0, "Network port (default: 40000 + validator index)")
 	runCmd.Flags().StringVar(&telemetryEndpoint, "telemetry", "", "Telemetry server endpoint (e.g., localhost:9999)")

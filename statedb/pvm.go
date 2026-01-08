@@ -20,7 +20,6 @@ import (
 const (
 	BackendInterpreter     = "interpreter" // Go interpreter
 	BackendCompiler        = "compiler"    // X86 recompiler
-	BackendCompilerSandbox = "sandbox"
 )
 
 const (
@@ -385,14 +384,6 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		machine.SetHeapPointer(current_heap_pointer)
 		machine.SetMemoryBounds(o_size, w_size, z, s, o_byte, w_byte)
 	}
-	//  else if vm.Backend == BackendCompilerSandbox {
-	// 	rvm := NewRecompilerVMSandbox(service_index, code, initialRegs, initialPC, initialHeap, hostENV, jam_ready_blob, Metadata, initialGas, pvmBackend)
-	// 	if rvm == nil {
-	// 		return nil
-	// 	}
-	// 	vm.ExecutionVM = rvm
-	// }
-
 	vm.VMs = nil
 	return vm
 }
