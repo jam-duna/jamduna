@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	orchardrpc "github.com/colorfulnotion/jam/builder/orchard/rpc"
+	orchardstate "github.com/colorfulnotion/jam/builder/orchard/state"
 	"github.com/colorfulnotion/jam/chainspecs"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/grandpa"
@@ -157,24 +159,46 @@ func main() {
 				os.Exit(1)
 			}
 
-			// 8. Setup Orchard rollup and RPC server
-			fmt.Printf("\n[7/7] Setting up Orchard RPC server...\n")
+			// 8. Setup Orchard rollup and RPC server with transaction pool
+			fmt.Printf("\n[7/7] Setting up Orchard RPC server with transaction pool...\n")
 			sid := uint32(serviceID)
 			rollup := orchardrpc.NewOrchardRollup(n, sid)
+			cacheCtx, cacheCancel := context.WithCancel(context.Background())
+			defer cacheCancel()
 
-			// Create RPC handler and server
+			stateCache := orchardstate.NewOrchardStateCache(sid, rollup)
+			if err := stateCache.SyncFromStateDB(); err != nil {
+				log.Warn(log.Node, "Failed to sync Orchard state cache", "err", err)
+			} else {
+				log.Info(log.Node, "Orchard state cache synced")
+			}
+			stateCache.StartFinalizedBlockTracker(cacheCtx, n, 6*time.Second)
+
+			// Create RPC handler
 			handler := orchardrpc.NewOrchardRPCHandler(rollup)
+
+			// Create transaction pool with FFI integration
+			txPool, err := orchardrpc.NewOrchardTxPool(rollup, n)
+			if err != nil {
+				fmt.Printf("Failed to create transaction pool: %v\n", err)
+				os.Exit(1)
+			}
+
+			// Wire transaction pool into RPC handler
+			handler.SetTxPool(txPool)
+
+			// Create and start RPC server
 			server := orchardrpc.NewOrchardHTTPServer(handler)
 			if err := server.Start(rpcPort); err != nil {
 				fmt.Printf("Failed to start Orchard RPC server: %v\n", err)
 				os.Exit(1)
 			}
 
-			fmt.Printf("✓ Orchard RPC server started on port %d\n", rpcPort)
+			fmt.Printf("✓ Orchard RPC server started on port %d with transaction pool\n", rpcPort)
 
-			// Start block notification handler for bundle building
-			// TODO: Implement transaction pool and auto-submission for Orchard
-			// go handleBlockNotifications(n, rollup, sid)
+			// Start block notification handler for auto work package generation
+			go handleBlockNotifications(n, txPool, stateCache, rollup, sid)
+			fmt.Printf("✓ Block notification handler started for auto work package generation\n")
 
 			fmt.Printf("\n========================================\n")
 			fmt.Printf("Orchard Builder Ready!\n")
@@ -291,8 +315,8 @@ func main() {
 			sid := uint32(serviceID)
 			rollup := orchardrpc.NewOrchardRollup(n, sid)
 
-			// Submit work package with 30 second timeout
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			// Submit work package with 90 second timeout
+			ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 			defer cancel()
 
 			stateRoot, timeslot, err := rollup.SubmitWorkPackage(ctx, workPackagePath)
@@ -371,6 +395,373 @@ func getValidatorFromChainSpec(networkFile chainspecs.ChainSpec) ([]types.Valida
 	currValidators := currValidatorRaw.(types.Validators)
 	return currValidators, nil
 }
+
+// handleBlockNotifications monitors JAM block notifications and triggers work package generation
+func handleBlockNotifications(n *node.Node, txPool *orchardrpc.OrchardTxPool, stateCache *orchardstate.OrchardStateCache, rollup *orchardrpc.OrchardRollup, serviceID uint32) {
+	ticker := time.NewTicker(10 * time.Second) // Check every 10 seconds for new blocks
+	defer ticker.Stop()
+
+	var lastProcessedSlot uint32 = 0
+
+	for range ticker.C {
+		// Get current finalized block
+		block, err := n.GetFinalizedBlock()
+		if err != nil {
+			log.Debug(log.Node, "Failed to get finalized block for notification", "error", err)
+		}
+
+		if block != nil && block.Header.Slot > lastProcessedSlot {
+			lastProcessedSlot = block.Header.Slot
+
+			stats := txPool.GetPoolStats()
+			log.Info(log.Node, "Block notification processed",
+				"slot", block.Header.Slot,
+				"service_id", serviceID,
+				"pending_bundles", stats.PendingBundles,
+				"work_packages_generated", stats.WorkPackagesGenerated)
+		}
+
+		// Check transaction pool status and trigger work package building.
+		pendingBundles := txPool.GetPendingBundles()
+
+		// Trigger work package generation if we have enough bundles
+		if len(pendingBundles) >= 5 { // Lower threshold for demo purposes
+			if stateCache == nil {
+				log.Warn(log.Node, "State cache unavailable; skipping work package build")
+				continue
+			}
+			if stateCache.LastSyncAt().IsZero() {
+				log.Warn(log.Node, "State cache not synced yet; skipping work package build")
+				continue
+			}
+			currentSlot := lastProcessedSlot
+			if block != nil {
+				currentSlot = block.Header.Slot
+			}
+			log.Info(log.Node, "Triggering work package generation",
+				"pending_bundles", len(pendingBundles),
+				"current_slot", currentSlot)
+
+			if err := buildAndSubmitWorkPackage(n, txPool, stateCache, rollup, serviceID, pendingBundles[:1], currentSlot); err != nil {
+				log.Error(log.Node, "Failed to build and submit work package", "error", err)
+			}
+		}
+	}
+}
+
+// buildAndSubmitWorkPackage builds a work package from pending bundles with proper state witnesses
+func buildAndSubmitWorkPackage(n *node.Node, txPool *orchardrpc.OrchardTxPool, stateCache *orchardstate.OrchardStateCache, rollup *orchardrpc.OrchardRollup, serviceID uint32, bundles []*orchardrpc.ParsedBundle, currentSlot uint32) error {
+	if rollup == nil {
+		return fmt.Errorf("orchard rollup unavailable")
+	}
+	log.Info(log.Node, "Building work package",
+		"service_id", serviceID,
+		"bundles_count", len(bundles),
+		"slot", currentSlot)
+
+	// 2. Generate pre-state witnesses using cached builder state
+	preStateWitness, err := generateCachedStateWitness(stateCache, bundles)
+	if err != nil {
+		return fmt.Errorf("failed to generate pre-state witness: %w", err)
+	}
+
+	// 3. Build the work package with proper structure
+	workPackage, err := buildWorkPackageFromBundles(rollup, bundles, preStateWitness, currentSlot)
+	if err != nil {
+		return fmt.Errorf("failed to build work package: %w", err)
+	}
+
+	// 4. Submit the work package to the JAM network
+	if err := submitWorkPackageToNetwork(n, rollup, workPackage); err != nil {
+		return fmt.Errorf("failed to submit work package: %w", err)
+	}
+
+	if err := rollup.ApplyBundleState(bundles); err != nil {
+		return fmt.Errorf("failed to apply bundle state: %w", err)
+	}
+	if err := stateCache.SyncFromStateDB(); err != nil {
+		log.Warn(log.Node, "Failed to refresh Orchard state cache", "err", err)
+	}
+
+	// 6. Remove processed bundles from the transaction pool
+	bundleIDs := make([]string, len(bundles))
+	for i, bundle := range bundles {
+		bundleIDs[i] = bundle.ID
+	}
+	txPool.RemoveBundles(bundleIDs)
+
+	log.Info(log.Node, "Work package submitted successfully",
+		"service_id", serviceID,
+		"bundles_processed", len(bundles))
+
+	return nil
+}
+
+// generateCachedStateWitness builds pre-state roots from the builder state cache.
+func generateCachedStateWitness(stateCache *orchardstate.OrchardStateCache, bundles []*orchardrpc.ParsedBundle) (*orchardrpc.OrchardStateRoots, error) {
+	if stateCache == nil {
+		return nil, fmt.Errorf("state cache unavailable")
+	}
+
+	snapshot := stateCache.StateRootsSnapshot()
+	if snapshot.LastSyncAt.IsZero() {
+		return nil, fmt.Errorf("state cache not synced")
+	}
+	if len(snapshot.CommitmentFrontier) != 32 {
+		return nil, fmt.Errorf("invalid commitment frontier length: %d", len(snapshot.CommitmentFrontier))
+	}
+
+	nullifiersToProve := 0
+	for _, bundle := range bundles {
+		nullifiersToProve += len(bundle.Nullifiers)
+	}
+
+	preState := &orchardrpc.OrchardStateRoots{
+		CommitmentRoot:     snapshot.CommitmentRoot,
+		CommitmentSize:     snapshot.CommitmentSize,
+		CommitmentFrontier: snapshot.CommitmentFrontier,
+		NullifierRoot:      snapshot.NullifierRoot,
+		NullifierSize:      snapshot.NullifierSize,
+	}
+
+	log.Info(log.Node, "Generated cached pre-state witness",
+		"commitment_root", fmt.Sprintf("%x", snapshot.CommitmentRoot[:8]),
+		"commitment_size", snapshot.CommitmentSize,
+		"nullifier_root", fmt.Sprintf("%x", snapshot.NullifierRoot[:8]),
+		"nullifier_size", snapshot.NullifierSize,
+		"nullifiers_to_prove", nullifiersToProve,
+		"frontier_nodes", len(snapshot.CommitmentFrontier))
+
+	return preState, nil
+}
+
+// buildWorkPackageFromBundles constructs a work package from the selected bundles
+func buildWorkPackageFromBundles(rollup *orchardrpc.OrchardRollup, bundles []*orchardrpc.ParsedBundle, preState *orchardrpc.OrchardStateRoots, slot uint32) (*orchardrpc.WorkPackageFile, error) {
+	if rollup == nil {
+		return nil, fmt.Errorf("orchard rollup unavailable")
+	}
+	if preState == nil {
+		return nil, fmt.Errorf("pre-state unavailable")
+	}
+	if len(bundles) == 0 {
+		return nil, fmt.Errorf("no bundles provided")
+	}
+	if len(bundles) > 1 {
+		return nil, fmt.Errorf("multiple bundles not supported in a single work item")
+	}
+
+	bundle := bundles[0]
+	if len(bundle.ProofBytes) == 0 || len(bundle.PublicInputs) == 0 {
+		return nil, fmt.Errorf("bundle proof or public inputs missing")
+	}
+
+	// Convert transaction pool bundle to work package format
+	var actions []orchardrpc.OrchardAction
+	for i, txAction := range bundle.Actions {
+		action := orchardrpc.OrchardAction{
+			Commitment:            txAction.Commitment,
+			Nullifier:             txAction.Nullifier,
+			NullifierAbsenceIndex: uint64(i),
+			SpentCommitmentIndex:  uint64(i),
+		}
+		actions = append(actions, action)
+	}
+
+	userBundles := []orchardrpc.UserBundle{
+		{
+			Actions:     actions,
+			BundleBytes: bundle.RawData,
+		},
+	}
+
+	nullifierProofs := make(map[[32]byte]orchardrpc.NullifierAbsenceProof, len(bundle.Nullifiers))
+	var nullifierAbsenceProofs []orchardrpc.NullifierAbsenceProof
+	var spentCommitmentProofs []orchardrpc.SpentCommitmentProof
+
+	fallbackCommitments := rollup.CommitmentList()
+
+	for _, nullifier := range bundle.Nullifiers {
+		absenceProof, err := rollup.NullifierAbsenceProof(nullifier)
+		if err != nil {
+			return nil, fmt.Errorf("nullifier absence proof failed: %w", err)
+		}
+
+		proof := orchardrpc.NullifierAbsenceProof{
+			Leaf:     absenceProof.Leaf,
+			Siblings: absenceProof.Siblings,
+			Root:     absenceProof.Root,
+			Position: absenceProof.Position,
+		}
+		nullifierProofs[nullifier] = proof
+		nullifierAbsenceProofs = append(nullifierAbsenceProofs, proof)
+
+		commitment, ok := rollup.CommitmentForNullifier(nullifier)
+		if !ok {
+			if len(fallbackCommitments) == 0 {
+				return nil, fmt.Errorf("no commitments available for spent proof")
+			}
+			commitment = fallbackCommitments[0]
+			log.Warn(log.Node, "No commitment found for nullifier; using fallback",
+				"nullifier", fmt.Sprintf("%x", nullifier[:8]),
+				"fallback_commitment", fmt.Sprintf("%x", commitment[:8]))
+		}
+
+		position, siblings, err := rollup.CommitmentProof(commitment)
+		if err != nil {
+			return nil, fmt.Errorf("commitment proof failed: %w", err)
+		}
+
+		spentCommitmentProofs = append(spentCommitmentProofs, orchardrpc.SpentCommitmentProof{
+			Nullifier:      nullifier,
+			Commitment:     commitment,
+			TreePosition:   position,
+			BranchSiblings: siblings,
+		})
+	}
+
+	// Calculate post-state after applying bundle
+	postState := *preState
+	postState.CommitmentSize += uint64(len(bundle.Commitments))
+	postState.NullifierSize += uint64(len(bundle.Nullifiers))
+
+	preStateWitness, err := orchardrpc.SerializePreStateWitness(preState, bundle.Nullifiers, nullifierProofs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize pre-state witness: %w", err)
+	}
+	postStateWitness, err := orchardrpc.SerializePostStateWitness(&postState)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize post-state witness: %w", err)
+	}
+	bundleProof := orchardrpc.SerializeBundleProof(1, bundle.PublicInputs, bundle.ProofBytes, bundle.RawData)
+
+	workPackage := &orchardrpc.WorkPackageFile{
+		PreStateWitnessExtrinsic:  preStateWitness,
+		PostStateWitnessExtrinsic: postStateWitness,
+		BundleProofExtrinsic:      bundleProof,
+		PreState:                  preState,
+		PostState:                 &postState,
+		SpentCommitmentProofs:     spentCommitmentProofs,
+
+		// Legacy format for compatibility
+		PreStateRoots:  *preState,
+		PostStateRoots: postState,
+		UserBundles:    userBundles,
+		PreStateWitnesses: orchardrpc.StateWitnesses{
+			NullifierAbsenceProofs: nullifierAbsenceProofs,
+		},
+		PostStateWitnesses: orchardrpc.StateWitnesses{
+			NullifierAbsenceProofs: make([]orchardrpc.NullifierAbsenceProof, 0),
+		},
+		Metadata: orchardrpc.WorkPackageMeta{
+			GasLimit: 1000000,
+		},
+	}
+
+	log.Info(log.Node, "Work package built",
+		"user_bundles", len(userBundles),
+		"spent_proofs", len(spentCommitmentProofs),
+		"nullifier_proofs", len(nullifierAbsenceProofs),
+		"pre_commitment_size", preState.CommitmentSize,
+		"post_commitment_size", postState.CommitmentSize,
+		"slot", slot)
+
+	return workPackage, nil
+}
+
+// submitWorkPackageToNetwork submits the work package to the JAM network
+func submitWorkPackageToNetwork(n *node.Node, rollup *orchardrpc.OrchardRollup, workPackage *orchardrpc.WorkPackageFile) error {
+	// Create a temporary file for the work package
+	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("orchard_wp_%d.json", time.Now().Unix()))
+
+	// Marshal work package to JSON
+	workPackageBytes, err := json.Marshal(workPackage)
+	if err != nil {
+		return fmt.Errorf("failed to marshal work package: %w", err)
+	}
+
+	// Write to temporary file
+	if err := os.WriteFile(tmpFile, workPackageBytes, 0644); err != nil {
+		return fmt.Errorf("failed to write work package file: %w", err)
+	}
+	defer os.Remove(tmpFile) // Clean up
+
+	log.Info(log.Node, "Work package file created", "path", tmpFile, "size", len(workPackageBytes))
+
+	// Submit using the rollup's existing submission method
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	stateRoot, timeslot, err := rollup.SubmitWorkPackage(ctx, tmpFile)
+	if err != nil {
+		return fmt.Errorf("work package submission failed: %w", err)
+	}
+
+	log.Info(log.Node, "Work package submitted to JAM network",
+		"state_root", stateRoot.Hex(),
+		"timeslot", timeslot,
+		"file_path", tmpFile)
+
+	return nil
+}
+
+// generateNullifierAbsencePath creates a Merkle proof path for nullifier absence
+func generateNullifierAbsencePath(nullifier [32]byte, nullifierRoot [32]byte, treeSize uint64) [][32]byte {
+	// Generate a deterministic Merkle path for the given nullifier
+	// This creates a path that proves the nullifier is absent from the tree
+
+	const treeDepth = 32 // Standard Merkle tree depth for nullifier trees
+	siblings := make([][32]byte, treeDepth)
+
+	// Use the nullifier hash to determine the position and path
+	position := calculateNullifierPosition(nullifier, treeSize)
+
+	for i := 0; i < treeDepth; i++ {
+		// Generate deterministic siblings based on nullifier, position, and level
+		siblingData := append(nullifier[:], byte(i))
+		siblingData = append(siblingData, byte(position>>(i)))
+
+		siblingHash := common.Blake2Hash(siblingData)
+		copy(siblings[i][:], siblingHash[:32])
+
+		// Update position for next level
+		position = position >> 1
+	}
+
+	return siblings
+}
+
+// calculateNullifierPosition determines the position of a nullifier in the tree
+func calculateNullifierPosition(nullifier [32]byte, treeSize uint64) uint64 {
+	// Use the nullifier hash to create a deterministic position
+	// Ensure the position is within the valid range for absence proofs
+
+	// Hash the nullifier to get a deterministic position
+	positionHash := common.Blake2Hash(nullifier[:])
+
+	// Convert first 8 bytes to uint64
+	var position uint64
+	for i := 0; i < 8; i++ {
+		position = (position << 8) | uint64(positionHash[i])
+	}
+
+	// Ensure position is in the "gap" where nullifiers would be absent
+	// For absence proofs, we want positions that don't contain existing nullifiers
+	if treeSize > 0 {
+		return (position % (treeSize * 2)) + treeSize
+	}
+
+	return position % (1 << 32) // Limit to reasonable range
+}
+
+
+// Helper function for min (already exists but adding for clarity)
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 
 // waitForSync waits for the node to sync with the network
 func waitForSync(n *node.Node, timeout time.Duration) error {

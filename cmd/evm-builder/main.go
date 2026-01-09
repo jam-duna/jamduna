@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -33,6 +34,15 @@ var (
 	Commit    = "none"
 	BuildTime = "unknown"
 )
+
+// Builder configuration
+const (
+	// MaxTxsPerBundle is the maximum transactions per work package bundle
+	MaxTxsPerBundle = 5000
+)
+
+// coreCounter is used to round-robin work packages between cores 0 and 1
+var coreCounter uint64
 
 func main() {
 	var rootCmd = &cobra.Command{
@@ -64,6 +74,7 @@ func main() {
 			fmt.Printf("  EVM RPC Port: %d\n", evmRPCPort)
 			fmt.Printf("  Service ID: %d\n", serviceID)
 			fmt.Printf("  PVM Backend: %s\n", pvmBackend)
+			fmt.Printf("  Max Txs Per Bundle: %d\n", MaxTxsPerBundle)
 
 			// Initialize logging
 			log.InitLogger("debug")
@@ -186,9 +197,13 @@ func main() {
 			// Create queue runner for managed submission
 			queueState := queue.NewQueueState(sid)
 
-			// Submit callback - sends bundle to network
-			submitFunc := func(bundle *types.WorkPackageBundle) (common.Hash, error) {
-				n.SubmitBundleSameCore(bundle)
+			// Submit callback - sends bundle to network on a specific core
+			// Uses SubmitBundleToCore for non-validator builder nodes
+			submitFunc := func(bundle *types.WorkPackageBundle, coreIndex uint16) (common.Hash, error) {
+				err := n.SubmitBundleToCore(bundle, coreIndex)
+				if err != nil {
+					return common.Hash{}, err
+				}
 				return bundle.WorkPackage.Hash(), nil
 			}
 
@@ -237,7 +252,9 @@ func main() {
 				}
 
 				// Rebuild the bundle with transaction-only extrinsics
-				bundle, _, err := n.BuildBundle(item.Bundle.WorkPackage, extrinsicsForRebuild, 0, nil)
+				// Use round-robin core assignment
+				coreIdx := getNextCoreIndex()
+				bundle, _, err := n.BuildBundle(item.Bundle.WorkPackage, extrinsicsForRebuild, coreIdx, nil)
 				return bundle, err
 			}
 
@@ -247,6 +264,9 @@ func main() {
 
 			// Start block notification handler for bundle building
 			go handleBlockNotifications(n, rollup, txPool, sid, queueRunner)
+
+			// Start block event handler for guarantee/accumulation detection
+			go handleBlockEvents(n, sid, queueRunner)
 
 			fmt.Printf("\n========================================\n")
 			fmt.Printf("EVM Builder Ready!\n")
@@ -376,34 +396,59 @@ func waitForSync(n *node.Node, timeout time.Duration) error {
 	}
 }
 
-// handleBlockNotifications monitors for new blocks and pending transactions
+// handleBlockNotifications monitors for pending transactions and builds parallel bundles
+// Pipeline: Pull TotalCores * MaxTxsPerBundle txns → Build bundles for each core → Submit together
 func handleBlockNotifications(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrpc.TxPool, serviceID uint32, queueRunner *queue.Runner) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		if txPool.Size() == 0 {
+		pendingCount := txPool.Size()
+		if pendingCount == 0 {
 			continue
 		}
 
-		log.Info(log.Node, "Pending transactions detected", "count", txPool.Size(), "service_id", serviceID)
+		// Calculate batch size: TotalCores * MaxTxsPerBundle (e.g., 2 * 5 = 10 txns per batch)
+		batchSize := types.TotalCores * MaxTxsPerBundle
+		if pendingCount < batchSize {
+			// If we have fewer txns than a full batch, still process what we have
+			// But ensure we have at least MaxTxsPerBundle for one bundle
+			if pendingCount < MaxTxsPerBundle {
+				batchSize = pendingCount
+			} else {
+				batchSize = pendingCount
+			}
+		}
 
-		if err := buildAndEnqueueWorkPackage(n, rollup, txPool, serviceID, queueRunner); err != nil {
-			log.Error(log.Node, "Failed to build and enqueue work package", "err", err)
+		log.Info(log.Node, "📦 Building parallel bundles",
+			"pendingTxs", pendingCount,
+			"batchSize", batchSize,
+			"totalCores", types.TotalCores,
+			"maxTxsPerBundle", MaxTxsPerBundle)
+
+		// Build bundles for each core (up to TotalCores bundles per tick)
+		bundlesBuilt := 0
+		for core := 0; core < types.TotalCores && txPool.Size() >= MaxTxsPerBundle; core++ {
+			if err := buildAndEnqueueWorkPackageForCore(n, rollup, txPool, serviceID, queueRunner, uint16(core)); err != nil {
+				log.Error(log.Node, "Failed to build bundle for core", "core", core, "err", err)
+				break // Stop if we hit an error
+			}
+			bundlesBuilt++
+		}
+
+		if bundlesBuilt > 0 {
+			log.Info(log.Node, "📤 Parallel bundles enqueued",
+				"bundlesBuilt", bundlesBuilt,
+				"remainingTxs", txPool.Size())
 		}
 	}
 }
 
-// EVMBuilderBuffer is the anchor buffer depth for EVM work packages.
-// Larger buffer = more time for work package to reach validators before anchor expires.
-// With RecentHistorySize=8, buffer=3 means validators can be up to 5 blocks ahead.
-const EVMBuilderBuffer = 3
-
-// buildAndEnqueueWorkPackage builds a work package from pending txs and enqueues for submission
-// Routes through NodeContent.BuildBundle -> StateDB.BuildBundle which executes refine
-func buildAndEnqueueWorkPackage(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrpc.TxPool, serviceID uint32, queueRunner *queue.Runner) error {
-	// Get pending transactions
-	pendingTxs := txPool.GetPendingTransactions()
+// buildAndEnqueueWorkPackageForCore builds a work package for a specific core from MaxTxsPerBundle transactions
+// Each bundle is independent with its own pre→post Verkle state
+func buildAndEnqueueWorkPackageForCore(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrpc.TxPool, serviceID uint32, queueRunner *queue.Runner, coreIdx uint16) error {
+	// Get only MaxTxsPerBundle pending transactions
+	pendingTxs := txPool.GetPendingTransactionsLimit(MaxTxsPerBundle)
 	if len(pendingTxs) == 0 {
 		return fmt.Errorf("no pending transactions")
 	}
@@ -412,6 +457,22 @@ func buildAndEnqueueWorkPackage(n *node.Node, rollup *evmrpc.Rollup, txPool *evm
 	refineCtx, err := n.GetRefineContextWithBuffer(EVMBuilderBuffer)
 	if err != nil {
 		return fmt.Errorf("failed to get refine context: %w", err)
+	}
+
+	// Log transactions being included in this work package
+	log.Info(log.Node, "📦 Building work package for core",
+		"core", coreIdx,
+		"txCount", len(pendingTxs),
+		"anchorSlot", refineCtx.LookupAnchorSlot)
+	for i, tx := range pendingTxs {
+		log.Info(log.Node, "  📦 TX in package",
+			"core", coreIdx,
+			"idx", i,
+			"hash", tx.Hash.Hex(),
+			"nonce", tx.Nonce,
+			"from", tx.From.Hex(),
+			"to", tx.To.Hex(),
+			"value", tx.Value.String())
 	}
 
 	// Prepare work package and extrinsics from pending transactions
@@ -443,27 +504,116 @@ func buildAndEnqueueWorkPackage(n *node.Node, rollup *evmrpc.Rollup, txPool *evm
 
 	// Build bundle via NodeContent.BuildBundle -> StateDB.BuildBundle (executes refine)
 	// NOTE: BuildBundle prepends a Verkle witness to each work item's extrinsics
-	bundle, workReport, err := n.BuildBundle(workPackage, extrinsicsBlobs, 0, nil)
+	// Use the specified core index (not round-robin)
+	bundle, workReport, err := n.BuildBundle(workPackage, extrinsicsBlobs, coreIdx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to build bundle: %w", err)
 	}
 
-	// Clear processed transactions from pool
+	// Clear processed transactions from pool AFTER successful bundle build
 	for _, tx := range pendingTxs {
 		txPool.RemoveTransaction(tx.Hash)
 	}
 
 	// Enqueue to queue runner with original extrinsics for resubmission support
-	blockNumber, err := queueRunner.EnqueueBundleWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics)
+	// Pass coreIdx so the runner submits to the correct core
+	blockNumber, err := queueRunner.EnqueueBundleWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIdx)
 	if err != nil {
 		return fmt.Errorf("failed to enqueue bundle: %w", err)
 	}
 
-	log.Info(log.Node, "Work package enqueued",
-		"wp_hash", bundle.WorkPackage.Hash().Hex(),
-		"work_report_hash", workReport.Hash().Hex(),
-		"block_number", blockNumber,
-		"service_id", serviceID)
+	log.Info(log.Node, "📤 Work package enqueued to JAM queue",
+		"wpHash", bundle.WorkPackage.Hash().Hex(),
+		"workReportHash", workReport.Hash().Hex(),
+		"blockNumber", blockNumber,
+		"targetCore", coreIdx,
+		"serviceID", serviceID,
+		"txCount", len(pendingTxs),
+		"pipeline", "queue->submit->guarantee(E_G)->accumulate->EVM")
 
 	return nil
+}
+
+// handleBlockEvents monitors imported blocks for guarantees and accumulations
+// This is critical for the queue to know when work packages are guaranteed/accumulated
+func handleBlockEvents(n *node.Node, serviceID uint32, queueRunner *queue.Runner) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	var lastProcessedSlot uint32
+	// Track which work package hashes we've already notified as accumulated
+	// to avoid duplicate notifications
+	notifiedAccumulated := make(map[common.Hash]struct{})
+
+	for range ticker.C {
+		stateDB := n.GetStateDB()
+		if stateDB == nil {
+			continue
+		}
+		block := stateDB.GetBlock()
+		if block == nil {
+			continue
+		}
+
+		currentSlot := block.TimeSlot()
+		if currentSlot <= lastProcessedSlot {
+			continue
+		}
+		lastProcessedSlot = currentSlot
+
+		// Check for guarantees (E_G) in this block
+		if len(block.Extrinsic.Guarantees) > 0 {
+			log.Info(log.Node, "🔒 Block has E_G (guarantees)",
+				"slot", currentSlot,
+				"count", len(block.Extrinsic.Guarantees))
+		}
+		for _, guarantee := range block.Extrinsic.Guarantees {
+			wpHash := guarantee.Report.GetWorkPackageHash()
+			log.Info(log.Node, "🔒 E_G: Guarantee detected",
+				"slot", currentSlot,
+				"wpHash", wpHash.Hex(),
+				"coreIndex", guarantee.Report.CoreIndex)
+			queueRunner.HandleGuaranteed(wpHash)
+		}
+
+		// Check for accumulations in AccumulationHistory
+		// The most recent accumulations are in AccumulationHistory[EpochLength-1]
+		jamState := stateDB.GetJamState()
+		if jamState != nil {
+			latestHistory := jamState.AccumulationHistory[types.EpochLength-1]
+			for _, wpHash := range latestHistory.WorkPackageHash {
+				if _, already := notifiedAccumulated[wpHash]; !already {
+					log.Info(log.Node, "📦 Accumulation detected",
+						"slot", currentSlot,
+						"wpHash", wpHash.Hex())
+					queueRunner.HandleAccumulated(wpHash)
+					notifiedAccumulated[wpHash] = struct{}{}
+				}
+			}
+		}
+	}
+}
+
+// EVMBuilderBuffer is the anchor buffer depth for EVM work packages.
+// Larger buffer = older anchor (further back in RecentBlocks).
+// With RecentHistorySize=8:
+//
+//	buffer=3 → anchor at index 5 (3rd newest) → ~3 slots before expiry
+//	buffer=5 → anchor at index 3 (5th newest) → ~5 slots before expiry
+//
+// Increased from 3 to 5 for multi-round transfers where block N+1 is built
+// while block N is still being guaranteed/accumulated.
+const EVMBuilderBuffer = 5
+
+// getNextCoreIndex returns the next core index (0 or 1) using round-robin
+// Builder is not a validator, so it can submit to any core. We rotate between
+// cores 0 and 1 to distribute load. Each work package submission targets one core.
+func getNextCoreIndex() uint16 {
+	count := atomic.AddUint64(&coreCounter, 1)
+	coreIdx := uint16(count % 2) // Alternate between 0 and 1
+	log.Info(log.Node, "🎯 Core rotation (round-robin)",
+		"targetCore", coreIdx,
+		"submissionNum", count,
+		"note", "builder->E_G submission")
+	return coreIdx
 }

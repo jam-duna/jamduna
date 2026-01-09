@@ -40,12 +40,11 @@ func (w *FFIWallet) ProofFor(extrinsicType ExtrinsicType, inputData []byte) ([]b
 		return nil, nil, ErrInvalidInput
 	}
 
-	proof, err := w.ffi.GenerateProof(extrinsicType, inputData)
+	proof, publicInputs, err := w.ffi.GenerateProofWithPublicInputs(extrinsicType, inputData)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	publicInputs := append([]byte(nil), inputData...)
 	return proof, publicInputs, nil
 }
 

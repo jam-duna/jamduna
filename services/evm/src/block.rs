@@ -13,14 +13,14 @@ use utils::{
 const BLOCK_HEADER_SIZE: usize = 148; // 4+4+4+8+32+32+32+32 = 148 bytes 
 const HASH_SIZE: usize = 32;
 
-/// Verkle state delta for delta replay (see services/evm/docs/VERKLE.md)
+/// UBT state delta for delta replay (see services/evm/docs/UBT-CODEX.md)
 #[derive(Debug, Clone)]
-pub struct VerkleStateDelta {
+pub struct UbtStateDelta {
     pub num_entries: u32,
     pub entries: Vec<u8>,  // Flattened [key(32B), value(32B)] pairs
 }
 
-impl VerkleStateDelta {
+impl UbtStateDelta {
     pub fn serialize(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
         buffer.extend_from_slice(&self.num_entries.to_le_bytes());
@@ -39,7 +39,7 @@ impl VerkleStateDelta {
         if data.len() != expected_len {
             return Err("Invalid delta length");
         }
-        Ok(VerkleStateDelta {
+        Ok(UbtStateDelta {
             num_entries,
             entries: data[4..].to_vec(),
         })
@@ -59,8 +59,8 @@ pub struct EvmBlockPayload {
     pub timestamp: u32,
     /// Gas used
     pub gas_used: u64,
-    /// Verkle tree root (state commitment)
-    pub verkle_root: [u8; 32],
+    /// UBT state root (state commitment)
+    pub ubt_root: [u8; 32],
     /// Transactions root
     pub transactions_root: [u8; 32],
     /// Receipt root
@@ -71,8 +71,8 @@ pub struct EvmBlockPayload {
     pub tx_hashes: Vec<ObjectId>,
     pub receipt_hashes: Vec<ObjectId>,
 
-    // NEW: Verkle state delta for replay (not included in header hash)
-    pub verkle_delta: Option<VerkleStateDelta>,
+    // NEW: UBT state delta for replay (not included in header hash)
+    pub ubt_delta: Option<UbtStateDelta>,
 }
 
 pub fn block_number_to_object_id(block_number: u32) -> ObjectId {
@@ -97,7 +97,7 @@ impl EvmBlockPayload {
         offset += 4;
         buffer[offset..offset + 8].copy_from_slice(&self.gas_used.to_le_bytes());
         offset += 8;
-        buffer[offset..offset + HASH_SIZE].copy_from_slice(&self.verkle_root);
+        buffer[offset..offset + HASH_SIZE].copy_from_slice(&self.ubt_root);
         offset += HASH_SIZE;
         buffer[offset..offset + HASH_SIZE].copy_from_slice(&self.transactions_root);
         offset += HASH_SIZE;
@@ -125,8 +125,8 @@ impl EvmBlockPayload {
             buffer.extend_from_slice(receipt_hash);
         }
 
-        // Verkle delta (optional, for services/evm/docs/VERKLE.md delta replay)
-        if let Some(delta) = &self.verkle_delta {
+        // UBT delta (optional, for services/evm/docs/UBT-CODEX.md delta replay)
+        if let Some(delta) = &self.ubt_delta {
             buffer.extend_from_slice(&delta.serialize());
         }
 
@@ -172,9 +172,9 @@ impl EvmBlockPayload {
         );
         offset += 8;
 
-        let verkle_root: [u8; HASH_SIZE] = data[offset..offset + HASH_SIZE]
+        let ubt_root: [u8; HASH_SIZE] = data[offset..offset + HASH_SIZE]
             .try_into()
-            .map_err(|_| "Invalid verkle_root")?;
+            .map_err(|_| "Invalid ubt_root")?;
         offset += HASH_SIZE;
 
         let transactions_root: [u8; HASH_SIZE] = data[offset..offset + HASH_SIZE]
@@ -220,16 +220,41 @@ impl EvmBlockPayload {
             offset += 32;
         }
 
-        // Parse verkle delta if present (optional field)
-        let verkle_delta = if offset < data.len() {
-            Some(VerkleStateDelta::deserialize(&data[offset..])?)
+        // Parse UBT delta if present (optional field)
+        let ubt_delta = if offset < data.len() {
+            Some(UbtStateDelta::deserialize(&data[offset..])?)
         } else {
             None
         };
 
+        // Parse optional verkle proof with state diff
+        // Format: 4 bytes (proof_length) + proof_data
+        let _verkle_proof_with_state_diff = if offset + 4 <= data.len() {
+            let proof_len = u32::from_le_bytes(
+                data[offset..offset + 4].try_into().map_err(|_| "Invalid proof_len")?
+            ) as usize;
+            offset += 4;
+
+            if proof_len > 0 {
+                if offset + proof_len > data.len() {
+                    return Err("Insufficient data for verkle proof");
+                }
+                let proof = data[offset..offset + proof_len].to_vec();
+                offset += proof_len;
+                Some(proof)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Silence unused variable warning
+        let _ = offset;
+
         Ok(EvmBlockPayload {
             payload_length,
-            verkle_root,
+            ubt_root,
             transactions_root,
             receipt_root,
             block_access_list_hash,
@@ -238,7 +263,7 @@ impl EvmBlockPayload {
             timestamp,
             tx_hashes,
             receipt_hashes,
-            verkle_delta,
+            ubt_delta,
         })
     }
 

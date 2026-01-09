@@ -58,12 +58,12 @@ mod contractsharding;
 mod state;
 #[path = "tx.rs"]
 mod tx;
-#[path = "verkle.rs"]
-pub mod verkle;
-#[path = "verkle_constants.rs"]
-pub mod verkle_constants;
-#[path = "verkle_proof.rs"]
-pub mod verkle_proof;
+#[path = "ubt.rs"]
+pub mod ubt;
+#[path = "ubt_constants.rs"]
+pub mod ubt_constants;
+#[path = "ubt_host.rs"]
+pub mod ubt_host;
 #[path = "block_access_list.rs"]
 pub mod block_access_list;
 #[path = "writes.rs"]
@@ -83,15 +83,16 @@ pub extern "C" fn fetch_object(_s: u64, _ko: u64, _kz: u64, _o: u64, _f: u64, _l
     0 // Return 0 (not found) - tests don't need actual DA operations
 }
 
-// Provide stub for host_fetch_verkle during testing
+// Provide stub for host_fetch_ubt during testing
 #[cfg(test)]
 #[unsafe(no_mangle)]
-pub extern "C" fn host_fetch_verkle(
+pub extern "C" fn host_fetch_ubt(
     _fetch_type: u64,
     _address_ptr: u64,
     _key_ptr: u64,
     _output_ptr: u64,
     _output_max_len: u64,
+    _tx_index: u64,
 ) -> u64 {
-    0 // Return 0 (not found) - tests don't need actual Verkle operations
+    0 // Return 0 (not found) - tests don't need actual UBT operations
 }

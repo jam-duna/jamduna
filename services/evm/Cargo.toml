@@ -24,12 +24,7 @@ sha3 = { version = "0.10", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 rlp = { version = "0.5", default-features = false }
 libsecp256k1 = { version = "0.7", default-features = false, features = ["static-context"] }
-# Verkle tree proof verification
-# Using arkworks Bandersnatch for field/curve arithmetic (no_std compatible)
-# Verkle-specific logic (SRS, IPA, proofs) implemented from scratch in services/evm/src/verkle/
-ark-ed-on-bls12-381-bandersnatch = { version = "0.5", default-features = false }
-ark-ff = { version = "0.5", default-features = false }
-ark-ec = { version = "0.5", default-features = false }
+blake3 = { workspace = true }
 
 [dev-dependencies]
 hex-literal = "0.4"
@@ -41,9 +36,5 @@ serde_json = { workspace = true }
 default = []
 # Enable dual BAL hash verification: cross-check Rust vs Go BAL computation
 dual-bal-verify = []
-# Enable dual verkle verification: cross-check Rust vs Go verkle proofs
-dual-verkle-verify = []
 # Enable all dual verification modes
-dual-verify-all = ["dual-bal-verify", "dual-verkle-verify"]
-# Enable verbose verkle debugging output (for troubleshooting verification issues)
-verkle-debug = []
+dual-verify-all = ["dual-bal-verify"]

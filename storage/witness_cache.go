@@ -3,7 +3,7 @@ package storage
 import (
 	"fmt"
 	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/statedb/evmtypes"
+	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
 )
 
 // InitWitnessCache initializes the witness cache maps
@@ -17,8 +17,8 @@ func (store *StateDBStorage) InitWitnessCache() {
 	if store.Code == nil {
 		store.Code = make(map[common.Address][]byte)
 	}
-	if store.VerkleProofs == nil {
-		store.VerkleProofs = make(map[common.Address]evmtypes.VerkleMultiproof)
+	if store.UBTProofs == nil {
+		store.UBTProofs = make(map[common.Address]evmtypes.UBTMultiproof)
 	}
 }
 
@@ -112,5 +112,5 @@ func (store *StateDBStorage) ClearWitnessCache() {
 
 	store.Storageshard = make(map[common.Address]evmtypes.ContractStorage)
 	store.Code = make(map[common.Address][]byte)
-	store.VerkleProofs = make(map[common.Address]evmtypes.VerkleMultiproof)
+	store.UBTProofs = make(map[common.Address]evmtypes.UBTMultiproof)
 }

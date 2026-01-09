@@ -1,7 +1,7 @@
 use core::{cmp, ops::Range};
 
 use super::{RegionColumn, RegionShape};
-use crate::collections::{BTreeSet, HashMap, Vec, vec};
+use crate::collections::{BTreeSet, HashMap, Vec};
 use crate::{circuit::RegionStart, plonk::Any};
 
 /// A region allocated within a column.

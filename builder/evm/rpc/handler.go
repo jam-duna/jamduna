@@ -1,15 +1,16 @@
 package rpc
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 
+	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/pvm"
-	evmtypes "github.com/colorfulnotion/jam/statedb/evmtypes"
 )
 
 // EVMRPCHandler handles all EVM JSON-RPC methods
@@ -653,9 +654,24 @@ func (h *EVMRPCHandler) GetTransactionByHash(req []string, res *string) error {
 		return nil
 	}
 
+	if h.txPool != nil {
+		if pendingTx, ok := h.txPool.GetTransaction(txHash); ok {
+			pendingBytes, err := json.Marshal(pendingTransactionResponse(pendingTx))
+			if err != nil {
+				return fmt.Errorf("failed to marshal pending transaction: %v", err)
+			}
+			*res = string(pendingBytes)
+			log.Info(log.Node, "EthGetTransactionByHash", "result", "pending", "txHash", txHashStr)
+			return nil
+		}
+	}
+
 	// Get transaction using internal method
-	// Get rollup for this service
 	rollup := h.GetRollup()
+	if rollup == nil {
+		*res = "null"
+		return nil
+	}
 
 	ethTx, err := rollup.GetTransactionByHash(txHash)
 	if err != nil {
@@ -680,6 +696,44 @@ func (h *EVMRPCHandler) GetTransactionByHash(req []string, res *string) error {
 	*res = string(txBytes)
 	log.Info(log.Node, "EthGetTransactionByHash", "result", "transaction found", "txHash", txHashStr)
 	return nil
+}
+
+func pendingTransactionResponse(tx *evmtypes.EthereumTransaction) map[string]interface{} {
+	var to *string
+	if tx.To != nil {
+		toStr := tx.To.String()
+		to = &toStr
+	}
+
+	var v, r, s string
+	if tx.V != nil {
+		v = fmt.Sprintf("0x%x", tx.V)
+	}
+	if tx.R != nil {
+		r = fmt.Sprintf("0x%x", tx.R)
+	}
+	if tx.S != nil {
+		s = fmt.Sprintf("0x%x", tx.S)
+	}
+
+	input := "0x" + hex.EncodeToString(tx.Data)
+
+	return map[string]interface{}{
+		"hash":             tx.Hash.String(),
+		"nonce":            fmt.Sprintf("0x%x", tx.Nonce),
+		"blockHash":        nil,
+		"blockNumber":      nil,
+		"transactionIndex": nil,
+		"from":             tx.From.String(),
+		"to":               to,
+		"value":            fmt.Sprintf("0x%x", tx.Value),
+		"gasPrice":         fmt.Sprintf("0x%x", tx.GasPrice),
+		"gas":              fmt.Sprintf("0x%x", tx.Gas),
+		"input":            input,
+		"v":                v,
+		"r":                r,
+		"s":                s,
+	}
 }
 
 // GetLogs fetches event logs matching a filter from JAM State/DA.

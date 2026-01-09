@@ -30,12 +30,12 @@ mod contractsharding;
 mod state;
 #[path = "tx.rs"]
 mod tx;
-#[path = "verkle.rs"]
-mod verkle;
-#[path = "verkle_constants.rs"]
-mod verkle_constants;
-#[path = "verkle_proof.rs"]
-mod verkle_proof;
+#[path = "ubt.rs"]
+mod ubt;
+#[path = "ubt_constants.rs"]
+mod ubt_constants;
+#[path = "ubt_host.rs"]
+mod ubt_host;
 #[path = "block_access_list.rs"]
 mod block_access_list;
 #[path = "writes.rs"]
@@ -44,6 +44,7 @@ mod writes;
 mod witness_events;
 
 use alloc::{format, vec::Vec};
+use alloc::string::{String, ToString};
 #[cfg(any(
     all(
         any(target_arch = "riscv32", target_arch = "riscv64"),
@@ -87,7 +88,7 @@ use simplealloc::SimpleAlloc;
 use utils::{
     constants::FIRST_READABLE_ADDRESS,
     functions::{
-        fetch_accumulate_inputs, fetch_extrinsics, fetch_refine_context, fetch_work_item,
+        fetch_accumulate_inputs, fetch_refine_context, fetch_work_item,
         log_error, log_info, parse_accumulate_args, parse_refine_args,
     },
 };
@@ -151,6 +152,12 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
         }
     };
 
+    log_info(&format!(
+        "📦 Refine: fetching work item wi_index={} start_address={} length={}",
+        refine_args.wi_index,
+        start_address,
+        length
+    ));
     let Some(work_item) = fetch_work_item(refine_args.wi_index) else {
         log_error(&format!(
             "Refine: fetch_work_item failed for wi_index={}",
@@ -158,26 +165,31 @@ extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
         ));
         return empty_output();
     };
-
-    // Fetch extrinsics for this work item
-    let extrinsics = match fetch_extrinsics(refine_args.wi_index) {
-        Ok(exts) => exts,
-        Err(e) => {
-            log_error(&format!("Refine: fetch_extrinsics failed: {:?}", e));
-            return empty_output();
-        }
-    };
-
     log_info(&format!(
-        "📦 Refine: Fetched {} extrinsics",
-        extrinsics.len()
+        "📦 Refine: fetched work item service={} payload_len={} extrinsics_meta={} import_segments={} export_count={}",
+        work_item.service,
+        work_item.payload.len(),
+        work_item.work_item_extrinsics.len(),
+        work_item.imported_segments.len(),
+        work_item.export_count
+    ));
+    let num_extrinsics = work_item.work_item_extrinsics.len();
+    let extrinsic_sizes: Vec<String> = work_item
+        .work_item_extrinsics
+        .iter()
+        .map(|ext| ext.len.to_string())
+        .collect();
+    log_info(&format!(
+        "📦 Refine: work item extrinsics={} sizes=[{}]",
+        num_extrinsics,
+        extrinsic_sizes.join(", ")
     ));
 
     // Process work item and execute transactions
     let (execution_effects, accumulate_instructions, contract_witness_index_start, contract_witness_payload_length) = match BlockRefiner::from_work_item(
         refine_args.wi_index,
         &work_item,
-        &extrinsics,
+        num_extrinsics,
         &refine_context,
         &refine_args,
     ) {

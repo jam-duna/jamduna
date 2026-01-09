@@ -170,7 +170,7 @@ func TestOrchardBlocksFFI(t *testing.T) {
 	})
 
 	t.Log("🎉 All Orchard extrinsic tests passed!")
-	t.Log("Builder→Guarantor flow validated for all 4 extrinsic types")
+	t.Log("Builder→Guarantor flow validated for all 3 extrinsic types")
 }
 
 // createTestExtrinsicData creates test data for a given extrinsic type

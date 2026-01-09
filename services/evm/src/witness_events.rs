@@ -1,6 +1,6 @@
-//! Verkle witness access/write event tracking for EIP-4762
+//! UBT witness access/write event tracking for EIP-4762
 //!
-//! This module tracks all Verkle tree access and write events during transaction execution
+//! This module tracks all UBT tree access and write events during transaction execution
 //! to enable witness-based gas charging and proof construction.
 
 extern crate alloc;
@@ -8,12 +8,12 @@ extern crate alloc;
 use alloc::collections::BTreeSet;
 use primitive_types::{H160, U256};
 
-use crate::verkle_constants::*;
+use crate::ubt_constants::*;
 
-// Verkle tree key: (address, tree_key, sub_key)
+// UBT tree key: (address, tree_key, sub_key)
 // tree_key = pos / 256 (U256 to avoid truncation for high slots)
 // sub_key = pos % 256
-type VerkleKey = (H160, U256, u8);
+type UBTKey = (H160, U256, u8);
 
 // ===== Phase D: Precompile/System Contract Filtering =====
 
@@ -33,19 +33,19 @@ pub fn is_system_contract(addr: H160) -> bool {
     false
 }
 
-/// Tracks all Verkle tree access and write events during execution
-pub struct VerkleEventTracker {
+/// Tracks all UBT tree access and write events during execution
+pub struct UBTEventTracker {
     // Access tracking (reads)
     accessed_branches: BTreeSet<(H160, U256)>, // (address, tree_key)
-    accessed_leaves: BTreeSet<VerkleKey>,      // (address, tree_key, sub_key)
+    accessed_leaves: BTreeSet<UBTKey>,      // (address, tree_key, sub_key)
 
     // Write tracking
     edited_subtrees: BTreeSet<(H160, U256)>, // First edit to subtree
-    edited_leaves: BTreeSet<VerkleKey>,      // First edit to leaf
-    leaf_fills: BTreeSet<VerkleKey>,         // None→value writes (CHUNK_FILL_COST)
+    edited_leaves: BTreeSet<UBTKey>,      // First edit to leaf
+    leaf_fills: BTreeSet<UBTKey>,         // None→value writes (CHUNK_FILL_COST)
 }
 
-impl VerkleEventTracker {
+impl UBTEventTracker {
     /// Create a new empty event tracker
     pub fn new() -> Self {
         Self {
@@ -77,7 +77,7 @@ impl VerkleEventTracker {
         )
     }
 
-    /// Calculate Verkle tree keys from storage slot
+    /// Calculate UBT tree keys from storage slot
     /// Implements get_storage_slot_tree_keys from EIP-4762
     ///
     /// Handles arbitrary U256 storage slots correctly by using proper modulo arithmetic
@@ -94,10 +94,10 @@ impl VerkleEventTracker {
         };
 
         // tree_key = pos / 256 (can be very large for large storage slots)
-        let tree_key = pos_u256 / U256::from(VERKLE_NODE_WIDTH);
+        let tree_key = pos_u256 / U256::from(UBT_NODE_WIDTH);
 
         // sub_key = pos % 256 (always fits in u8)
-        let sub_key = (pos_u256 % U256::from(VERKLE_NODE_WIDTH)).low_u64() as u8;
+        let sub_key = (pos_u256 % U256::from(UBT_NODE_WIDTH)).low_u64() as u8;
 
         (tree_key, sub_key)
     }
@@ -142,14 +142,12 @@ impl VerkleEventTracker {
             return;
         }
 
-        const CODEHASH_LEAF_KEY: u8 = 1; // Code hash at position 1
-
         // Track branch access (tree_key = 0 for code hash)
         self.accessed_branches.insert((address, U256::zero()));
 
         // Track leaf access
         self.accessed_leaves
-            .insert((address, U256::zero(), CODEHASH_LEAF_KEY));
+            .insert((address, U256::zero(), CODE_HASH_LEAF_KEY));
     }
 
     /// Record code chunk access (CODECOPY, EXTCODECOPY, execution)
@@ -163,8 +161,8 @@ impl VerkleEventTracker {
 
         // Code chunks start at CODE_OFFSET
         let pos = CODE_OFFSET + chunk_index;
-        let tree_key = U256::from(pos / VERKLE_NODE_WIDTH);
-        let sub_key = (pos % VERKLE_NODE_WIDTH) as u8;
+        let tree_key = U256::from(pos / UBT_NODE_WIDTH);
+        let sub_key = (pos % UBT_NODE_WIDTH) as u8;
 
         // Track branch access
         self.accessed_branches.insert((address, tree_key));
@@ -227,8 +225,8 @@ impl VerkleEventTracker {
 
         for chunk_index in 0..num_chunks {
             let pos = CODE_OFFSET + chunk_index;
-            let tree_key = U256::from(pos / VERKLE_NODE_WIDTH);
-            let sub_key = (pos % VERKLE_NODE_WIDTH) as u8;
+            let tree_key = U256::from(pos / UBT_NODE_WIDTH);
+            let sub_key = (pos % UBT_NODE_WIDTH) as u8;
 
             // Track branch/leaf access
             self.accessed_branches.insert((address, tree_key));
@@ -243,9 +241,8 @@ impl VerkleEventTracker {
         }
 
         // Also track code hash write (as fill for new account)
-        const CODEHASH_LEAF_KEY: u8 = 1;
         self.accessed_branches.insert((address, U256::zero()));
-        let codehash_key = (address, U256::zero(), CODEHASH_LEAF_KEY);
+        let codehash_key = (address, U256::zero(), CODE_HASH_LEAF_KEY);
         self.accessed_leaves.insert(codehash_key);
         self.edited_subtrees.insert((address, U256::zero()));
         self.edited_leaves.insert(codehash_key);
@@ -328,50 +325,13 @@ impl VerkleEventTracker {
     /// Get the set of accessed leaves for witness construction
     /// NOTE: Reserved for future witness proof generation (Phase C)
     #[allow(dead_code)]
-    pub fn accessed_leaves(&self) -> &BTreeSet<VerkleKey> {
+    pub fn accessed_leaves(&self) -> &BTreeSet<UBTKey> {
         &self.accessed_leaves
     }
 
-    /// Calculate total witness gas cost from all tracked events (Phase B Option C)
-    ///
-    /// Returns the total gas cost for the witness based on first-access tracking.
-    /// Call this after transaction execution completes to get the witness gas charge.
-    ///
-    /// Gas breakdown:
-    /// - WITNESS_BRANCH_COST (1900) per unique (address, tree_key) branch access
-    /// - WITNESS_CHUNK_COST (200) per unique (address, tree_key, sub_key) leaf access
-    /// - SUBTREE_EDIT_COST (3000) per unique (address, tree_key) subtree edit
-    /// - CHUNK_EDIT_COST (500) per unique (address, tree_key, sub_key) leaf edit
-    /// - CHUNK_FILL_COST (6200) per unique (address, tree_key, sub_key) fill
-    pub fn calculate_total_witness_gas(&self) -> u64 {
-        let mut total = 0u64;
-
-        // Charge for all accessed branches
-        total = total.saturating_add(
-            (self.accessed_branches.len() as u64).saturating_mul(WITNESS_BRANCH_COST),
-        );
-
-        // Charge for all accessed leaves
-        total = total
-            .saturating_add((self.accessed_leaves.len() as u64).saturating_mul(WITNESS_CHUNK_COST));
-
-        // Charge for all edited subtrees
-        total = total
-            .saturating_add((self.edited_subtrees.len() as u64).saturating_mul(SUBTREE_EDIT_COST));
-
-        // Charge for all edited leaves
-        total =
-            total.saturating_add((self.edited_leaves.len() as u64).saturating_mul(CHUNK_EDIT_COST));
-
-        // Charge for all fills
-        total =
-            total.saturating_add((self.leaf_fills.len() as u64).saturating_mul(CHUNK_FILL_COST));
-
-        total
-    }
 }
 
-impl Default for VerkleEventTracker {
+impl Default for UBTEventTracker {
     fn default() -> Self {
         Self::new()
     }
@@ -390,19 +350,19 @@ mod tests {
     #[test]
     fn test_storage_slot_tree_keys() {
         // Storage slot 0 should map to header storage area
-        let (tree_key, sub_key) = VerkleEventTracker::get_storage_slot_tree_keys(U256::zero());
+        let (tree_key, sub_key) = UBTEventTracker::get_storage_slot_tree_keys(U256::zero());
         assert_eq!(tree_key, U256::zero()); // 64 / 256 = 0
         assert_eq!(sub_key, 64); // 64 % 256 = 64
 
         // Storage slot 1
-        let (tree_key, sub_key) = VerkleEventTracker::get_storage_slot_tree_keys(U256::one());
+        let (tree_key, sub_key) = UBTEventTracker::get_storage_slot_tree_keys(U256::one());
         assert_eq!(tree_key, U256::zero()); // 65 / 256 = 0
         assert_eq!(sub_key, 65); // 65 % 256 = 65
     }
 
     #[test]
     fn test_record_storage_access() {
-        let mut tracker = VerkleEventTracker::new();
+        let mut tracker = UBTEventTracker::new();
         let addr = addr(1);
 
         tracker.record_storage_access(addr, U256::zero());
@@ -414,7 +374,7 @@ mod tests {
 
     #[test]
     fn test_record_storage_write_fill() {
-        let mut tracker = VerkleEventTracker::new();
+        let mut tracker = UBTEventTracker::new();
         let addr = addr(1);
 
         // None→value write should be tracked as fill
@@ -429,7 +389,7 @@ mod tests {
 
     #[test]
     fn test_record_storage_write_no_fill() {
-        let mut tracker = VerkleEventTracker::new();
+        let mut tracker = UBTEventTracker::new();
         let addr = addr(1);
 
         // Some→value write should NOT be tracked as fill

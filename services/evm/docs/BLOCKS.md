@@ -4,24 +4,11 @@ This document describes the complete block construction, transaction execution, 
 
 ## Recent Updates (December 2025)
 
-### Verkle Tree Integration (EIP-6800)
+### UBT Witness Integration
 
-The EVM service now supports Verkle tree state access via two execution modes:
-
-- **Builder Mode** (default): Uses `host_fetch_verkle()` to read state from Verkle tree during execution
-  - Balance/nonce/code/storage fetched via Verkle host functions
-  - Verkle reads logged to `StateDBStorage.verkleReadLog` in storage layer
-  - Witness construction implemented in storage package (`storage.BuildVerkleWitness()`)
-  - Dual-proof format: pre-state proof (reads) + post-state proof (writes)
-
-- **Guarantor Mode**: Verifies execution using VerkleWitness provided in first extrinsic
-  - Witness deserialized and verified before execution via `host_verify_verkle_proof()`
-  - All state reads from pre-populated caches (panic on cache miss)
-  - Backend created via `MajikBackend::from_verkle_witness()`
-
-**Detection**: Guarantor mode triggered when first extrinsic is VerkleWitness (size >= 197 bytes)
-
-**Architecture**: Storage package owns Verkle tree and witness construction; statedb package handles EVM operations and host functions. See [VERKLE.md](VERKLE.md) for complete details on dual-proof witness format, BasicData layout (balance at offset 16-31, nonce at offset 8-15), and ApplyContractWrites implementation.
+The EVM service now uses UBT multiproofs for stateless execution. Builder mode logs reads via
+`host_fetch_ubt`, emits two witness extrinsics (pre/post), and the guarantor verifies those
+extrinsics before cache-only re-execution. See `services/evm/docs/UBT-CODEX.md` for details.
 
 ---
 

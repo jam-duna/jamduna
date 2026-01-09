@@ -3,7 +3,7 @@
 // Defines the minimal consensus-critical state maintained by the JAM Orchard service.
 // Builders maintain full off-chain state and provide Merkle witnesses.
 
-use crate::merkle_impl::{verify_commitment_proof, SparseMerkleTree, sparse_empty_leaf};
+use crate::merkle_impl::{SparseMerkleTree, sparse_empty_leaf};
 use crate::{Error, Result};
 use incrementalmerkletree::{Hashable, Level};
 use orchard::tree::MerkleHashOrchard;
@@ -52,10 +52,6 @@ pub type MerkleProof = crate::merkle_impl::MerkleProof;
 /// Pre-execution state witnesses (builder provides these)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateWitnesses {
-    /// Commitment tree root and size witnesses
-    pub commitment_root_proof: MerkleProof,
-    pub commitment_size: u64,
-
     /// Nullifier non-membership proofs (one per spent note)
     pub nullifier_absence_proofs: Vec<MerkleProof>,
 
@@ -101,24 +97,6 @@ pub fn verify_pre_witnesses(
     state: &OrchardState,
     witnesses: &StateWitnesses,
 ) -> Result<()> {
-    // Verify commitment root witness
-    if witnesses.commitment_root_proof.root != state.commitment_root {
-        return Err(Error::InvalidWitness(
-            "Commitment root mismatch".to_string()
-        ));
-    }
-    if !verify_commitment_proof(&witnesses.commitment_root_proof, state.commitment_root) {
-        return Err(Error::InvalidWitness(
-            "Invalid commitment root proof".to_string()
-        ));
-    }
-
-    if witnesses.commitment_size != state.commitment_size {
-        return Err(Error::InvalidWitness(
-            "Commitment size mismatch".to_string()
-        ));
-    }
-
     // Verify nullifier absence proofs
     for proof in &witnesses.nullifier_absence_proofs {
         if proof.root != state.nullifier_root {

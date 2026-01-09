@@ -9,10 +9,13 @@ pub mod workpackage;
 pub mod bundle_codec;
 pub mod merkle;
 pub mod merkle_impl;
+pub mod sinsemilla_merkle;
 pub mod sequence;
 pub mod witness_based;
+pub mod transparent_script;
+pub mod ffi;
 
-pub use workpackage::{WorkPackageBuilder, WorkPackage, OrchardExtrinsic};
+pub use workpackage::{OrchardExtrinsic, TransparentData, TransparentState, WorkPackage, WorkPackageBuilder};
 pub use state::{OrchardState, StateWitnesses, WriteIntents};
 pub use witness::{build_witnesses, verify_witnesses};
 

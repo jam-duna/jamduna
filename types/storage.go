@@ -139,10 +139,10 @@ type KeyVal struct {
 	Value []byte   `json:"value"`
 }
 
-// VerkleRead tracks a single Verkle tree read operation
-// Used to build witnesses for EVM execution validation
-type VerkleRead struct {
-	VerkleKey  common.Hash    // Full 32-byte verkle key (31-byte stem + 1-byte suffix)
+// UBTRead tracks a single UBT-backed state read operation.
+// Used to build witnesses for EVM execution validation.
+type UBTRead struct {
+	TreeKey    common.Hash    // Full 32-byte UBT tree key (31-byte stem + 1-byte subindex)
 	Address    common.Address // Address being read (for metadata extraction)
 	KeyType    uint8          // 0=BasicData, 1=CodeHash, 2=CodeChunk, 3=Storage
 	Extra      uint64         // ChunkID for code chunks
@@ -156,7 +156,7 @@ type ServiceBlockIndex struct {
 	ServiceID    uint32      // Service ID
 	BlockNumber  uint32      // EVM block number within this service
 	BlockHash    common.Hash // EVM block hash
-	VerkleRoot   common.Hash // Verkle tree root after this block
+	UBTRoot      common.Hash // UBT state root after this block
 	JAMStateRoot common.Hash // JAM state root where this block is committed
 	JAMSlot      uint32      // JAM slot number when this block was finalized
 }
@@ -174,7 +174,7 @@ type EVMBlock struct {
 	BlockHash    common.Hash
 	ParentHash   common.Hash
 	Timestamp    uint32
-	VerkleRoot   common.Hash
+	UBTRoot      common.Hash // UBT state root for this block
 	Transactions []Transaction
 	Receipts     []Receipt
 }
@@ -529,9 +529,9 @@ type EVMJAMStorage interface {
 	ReadStorageFromCache(contractAddress common.Address, storageKey common.Hash) (common.Hash, bool)
 	ClearWitnessCache()
 
-	// EVM State Access Methods (Verkle-based)
-	// These methods provide clean interface for EVM state reads without exposing verkle internals
-	// All verkle key computation and tree access is encapsulated in the implementation
+	// EVM State Access Methods (UBT-backed witness log)
+	// These methods provide clean interface for EVM state reads without exposing tree internals
+	// All key computation and tree access is encapsulated in the implementation
 	// txIndex parameter tracks which transaction in work package caused this access (for BAL construction)
 	FetchBalance(address common.Address, txIndex uint32) ([32]byte, error)
 	FetchNonce(address common.Address, txIndex uint32) ([32]byte, error)
@@ -539,57 +539,56 @@ type EVMJAMStorage interface {
 	FetchCodeHash(address common.Address, txIndex uint32) ([32]byte, error)
 	FetchStorage(address common.Address, storageKey [32]byte, txIndex uint32) ([32]byte, bool, error)
 
-	// Verkle Read Log Management
-	// These methods manage the read log that tracks all verkle reads during execution
-	AppendVerkleRead(read VerkleRead)
-	GetVerkleReadLog() []VerkleRead
-	ClearVerkleReadLog()
+	// UBT Read Log Management
+	// These methods manage the read log that tracks all UBT reads during execution
+	AppendUBTRead(read UBTRead)
+	GetUBTReadLog() []UBTRead
+	ClearUBTReadLog()
 
-	// Verkle Witness Building
-	// BuildVerkleWitness builds a dual-proof verkle witness and stores the post-state tree
-	// All verkle tree access is encapsulated in the implementation
-	// Returns: witnessBytes, error
-	BuildVerkleWitness(contractWitnessBlob []byte) (witnessBytes []byte, err error)
+	// UBT Witness Building
+	// BuildUBTWitness builds dual UBT witnesses and stores the post-state tree
+	// Returns: preWitness, postWitness, error
+	BuildUBTWitness(contractWitnessBlob []byte) (preWitness []byte, postWitness []byte, err error)
 
 	// Contract Write Application
-	// ApplyContractWrites applies contract writes (code, storage, balance, nonce) to the current Verkle tree
+	// ApplyContractWrites applies contract writes (code, storage, balance, nonce) to the current UBT tree
 	// This is called after work items are processed to update the state
 	ApplyContractWrites(blob []byte) error
 
 	// Block Access List (BAL) Computation
-	// ComputeBlockAccessListHash builds BAL from verkle witness and returns hash + statistics
+	// ComputeBlockAccessListHash builds BAL from UBT witnesses and returns hash + statistics
 	// Used by both builder (to compute hash for payload) and guarantor (to verify builder's hash)
 	// Returns: hash, accountCount, totalChanges, error
-	ComputeBlockAccessListHash(verkleWitness []byte) (common.Hash, uint32, uint32, error)
+	ComputeBlockAccessListHash(preWitness []byte, postWitness []byte) (common.Hash, uint32, uint32, error)
 
-	// Verkle Tree Access Methods
-	// GetVerkleTreeAtRoot retrieves a Verkle tree at the specified root hash
+	// UBT Tree Access Methods
+	// GetUBTTreeAtRoot retrieves a UBT tree at the specified root hash
 	// Returns: tree, found
-	GetVerkleTreeAtRoot(root common.Hash) (interface{}, bool)
+	GetUBTTreeAtRoot(root common.Hash) (interface{}, bool)
 
-	// GetVerkleNodeForBlockNumber maps a block number string to the corresponding Verkle tree
-	// Returns: verkleTree, ok
-	GetVerkleNodeForBlockNumber(blockNumber string) (interface{}, bool)
+	// GetUBTNodeForBlockNumber maps a block number string to the corresponding UBT tree
+	// Returns: ubtTree, ok
+	GetUBTNodeForBlockNumber(blockNumber string) (interface{}, bool)
 
-	// GetBalance reads balance from Verkle tree using BasicData
+	// GetBalance reads balance from UBT tree using BasicData
 	// Returns: balance (as 32-byte hash), error
 	GetBalance(tree interface{}, address common.Address) (common.Hash, error)
 
-	// GetNonce reads nonce from Verkle tree using BasicData
+	// GetNonce reads nonce from UBT tree using BasicData
 	// Returns: nonce, error
 	GetNonce(tree interface{}, address common.Address) (uint64, error)
 
-	// GetCurrentVerkleTree returns the current active Verkle tree
+	// GetCurrentUBTTree returns the current active UBT tree
 	// Returns: tree (nil if not available)
-	GetCurrentVerkleTree() interface{}
+	GetCurrentUBTTree() interface{}
 
 	// Multi-Rollup Support: Service-Scoped State Management
 	// Each node can run multiple rollups (one per service), each with isolated state
 
-	// GetVerkleNodeForServiceBlock retrieves the Verkle tree for a specific service's block
+	// GetUBTNodeForServiceBlock retrieves the UBT tree for a specific service's block
 	// blockNumber supports: "latest", "earliest", "pending", or hex number
-	// Returns: verkleNode, ok
-	GetVerkleNodeForServiceBlock(serviceID uint32, blockNumber string) (interface{}, bool)
+	// Returns: ubtNode, ok
+	GetUBTNodeForServiceBlock(serviceID uint32, blockNumber string) (interface{}, bool)
 
 	// StoreServiceBlock persists an EVM block for a specific service
 	// Links the EVM block to JAM state root and slot
@@ -612,14 +611,14 @@ type EVMJAMStorage interface {
 	// GetBlockByHash retrieves full EVM block by service ID and block hash
 	GetBlockByHash(serviceID uint32, blockHash common.Hash) (*EVMBlock, error)
 
-	// FinalizeEVMBlock stores the EVM block and updates verkle tree snapshot
+	// FinalizeEVMBlock stores the EVM block and updates UBT tree snapshot
 	// This is called AFTER work package accumulation completes
 	// block parameter should be *evmtypes.EvmBlockPayload
 	FinalizeEVMBlock(serviceID uint32, blockPayload interface{}, jamStateRoot common.Hash, jamSlot uint32) error
 
 	// InitializeEVMGenesis creates a genesis block for an EVM service with an initial account balance
-	// This sets up the Verkle tree with the genesis account and stores block 0
-	// Returns the verkle root hash and any error
+	// This sets up the UBT tree with the genesis account and stores block 0
+	// Returns the UBT root hash and any error
 	InitializeEVMGenesis(serviceID uint32, issuerAddress common.Address, startBalance int64) (common.Hash, error)
 }
 

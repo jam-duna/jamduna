@@ -9,16 +9,15 @@ import (
 	"time"
 
 	bls "github.com/colorfulnotion/jam/bls"
+	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/pvm/interpreter"
 	"github.com/colorfulnotion/jam/pvm/program"
-	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/telemetry"
 	"github.com/colorfulnotion/jam/trie"
 	types "github.com/colorfulnotion/jam/types"
-	"github.com/ethereum/go-verkle"
 )
 
 const (
@@ -108,7 +107,7 @@ func parseBuilderPostStateSection(postState []byte) (*builderPostStateProof, err
 	proof.postValues = make([][32]byte, writeCount)
 
 	for i := 0; i < int(writeCount); i++ {
-		// 32B VerkleKey
+		// 32B tree key
 		copy(proof.writeKeys[i][:], postState[offset:offset+32])
 		offset += 32
 
@@ -135,13 +134,13 @@ func parseBuilderPostStateSection(postState []byte) (*builderPostStateProof, err
 }
 
 func (s *StateDB) verifyPostStateAgainstExecution(workItem types.WorkItem, extrinsicData [][]byte, contractWitnessBlob []byte) error {
-	if len(extrinsicData) == 0 || len(workItem.Extrinsics) == 0 {
+	if len(extrinsicData) < 2 || len(workItem.Extrinsics) < 2 {
 		return fmt.Errorf("missing extrinsic data for post-state verification")
 	}
 
-	verkleWitness := extrinsicData[0]
-	if uint32(len(verkleWitness)) != workItem.Extrinsics[0].Len {
-		return fmt.Errorf("verkle witness length mismatch: expected %d, got %d", workItem.Extrinsics[0].Len, len(verkleWitness))
+	postWitness := extrinsicData[1]
+	if uint32(len(postWitness)) != workItem.Extrinsics[1].Len {
+		return fmt.Errorf("post witness length mismatch: expected %d, got %d", workItem.Extrinsics[1].Len, len(postWitness))
 	}
 
 	stateStorage, ok := s.sdb.(*storage.StateDBStorage)
@@ -149,21 +148,16 @@ func (s *StateDB) verifyPostStateAgainstExecution(workItem types.WorkItem, extri
 		return fmt.Errorf("unexpected storage type %T (need StateDBStorage)", s.sdb)
 	}
 
-	if stateStorage.CurrentVerkleTree == nil {
-		return fmt.Errorf("no verkle tree available for post-state verification")
+	if stateStorage.CurrentUBT == nil {
+		return fmt.Errorf("no UBT tree available for post-state verification")
 	}
 
-	_, postState, err := storage.SplitWitnessSections(verkleWitness)
-	if err != nil {
-		return fmt.Errorf("failed to split dual-proof witness: %w", err)
-	}
-
-	builderProof, err := parseBuilderPostStateSection(postState)
+	builderProof, err := parseBuilderPostStateSection(postWitness)
 	if err != nil {
 		return fmt.Errorf("failed to parse builder post-state section: %w", err)
 	}
 
-	guarantorWrites, err := storage.ExtractWriteMapFromContractWitness(stateStorage.CurrentVerkleTree, contractWitnessBlob)
+	guarantorWrites, err := storage.ExtractUBTWriteMapFromContractWitness(stateStorage.CurrentUBT, contractWitnessBlob)
 	if err != nil {
 		return fmt.Errorf("failed to derive guarantor write set: %w", err)
 	}
@@ -326,19 +320,19 @@ func (s *StateDB) parseAndLoadContractStorage(serviceID uint32, payload []byte) 
 				return fmt.Errorf("failed to deserialize contract shard: %v", err)
 			}
 
-			// Compute verkle root for the contract storage
-			verkleRoot, err := computeVerkleRoot(address, contractStorage)
+			// Compute UBT root for the contract storage
+			ubtRoot, err := computeUBTRoot(address, contractStorage)
 			if err != nil {
-				log.Warn(log.EVM, "Failed to compute verkle root", "address", address.Hex(), "error", err)
-				// Continue without verkle root - this is not a fatal error
+				log.Warn(log.EVM, "Failed to compute UBT root", "address", address.Hex(), "error", err)
+				// Continue without root - this is not a fatal error
 			} else {
-				log.Trace(log.EVM, "Computed verkle root", "address", address.Hex(), "verkleRoot", verkleRoot.Hex())
+				log.Trace(log.EVM, "Computed UBT root", "address", address.Hex(), "ubtRoot", ubtRoot.Hex())
 			}
 
 			// Load into witness cache
 			evmStorage.SetContractStorage(address, evmtypes.ContractStorage{Shard: *contractStorage})
 
-			log.Trace(log.EVM, "parseAndLoadContractStorage complete", "address", address.Hex(), "entries", len(contractStorage.Entries), "verkleRoot", verkleRoot.Hex())
+			log.Trace(log.EVM, "parseAndLoadContractStorage complete", "address", address.Hex(), "entries", len(contractStorage.Entries), "ubtRoot", ubtRoot.Hex())
 		}
 	}
 
@@ -767,8 +761,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 		vm.SetPVMContext(log.Builder)
 		importsegments := make([][][]byte, len(wp.WorkItems))
 		result, _, exported_segments := vm.ExecuteRefine(coreIndex, uint32(index), wp, authorization, importsegments, 0, extrinsicsBlobs[index], p_a, common.BytesToHash(trie.H0), "")
-
-		// Check if this is an EVM service - only EVM needs metashard/verkle witness processing
+		// Check if this is an EVM service - only EVM needs metashard/state witness processing
 		isEVMService := workItem.Service == EVMServiceCode
 
 		// For non-EVM services (e.g., fib), skip EVM-specific witness processing
@@ -789,7 +782,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 				return nil, nil, err
 			}
 
-			// Generate Verkle witness for builder mode (Step 2: Builder Refine)
+			// Generate UBT witness for builder mode (Step 2: Builder Refine)
 			// Extract contract witness blob from refine result output
 			contractWitnessBlob, err = s.extractContractWitnessBlob(result.Ok, exported_segments)
 			if err != nil {
@@ -798,17 +791,40 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 			}
 			contractWitnessBlobs[index] = contractWitnessBlob // Store for later application to main tree
 
-			// Build verkle witness - all verkle logic handled in storage
+			// Build UBT witnesses - all UBT logic handled in storage
 			evmStorage := s.sdb.(types.EVMJAMStorage)
-			verkleWitnessBytes, err := evmStorage.BuildVerkleWitness(contractWitnessBlob)
+			ubtPreWitness, ubtPostWitness, err := evmStorage.BuildUBTWitness(contractWitnessBlob)
 			if err != nil {
-				log.Warn(log.EVM, "BuildVerkleWitness failed", "err", err)
+				log.Warn(log.EVM, "BuildUBTWitness failed", "err", err)
 				return nil, nil, err
 			}
 
-			// Build Block Access List from witness (Phase 4)
+			// Verify both witnesses immediately after generation
+			preStats, err := s.verifyUBTWitness(ubtPreWitness, "pre", storage.WitnessValuePre)
+			if err != nil {
+				log.Warn(log.EVM, "Pre-witness verification failed", "err", err)
+				return nil, nil, fmt.Errorf("pre-witness verification failed: %w", err)
+			}
+			postStats, err := s.verifyUBTWitness(ubtPostWitness, "post", storage.WitnessValuePost)
+			if err != nil {
+				log.Warn(log.EVM, "Post-witness verification failed", "err", err)
+				return nil, nil, fmt.Errorf("post-witness verification failed: %w", err)
+			}
+			preHead, preTail := witnessEdgeHex(ubtPreWitness)
+			postHead, postTail := witnessEdgeHex(ubtPostWitness)
+			log.Info(log.EVM, "BuildBundle: UBT witnesses verified (go)",
+				"pre_root", common.BytesToHash(preStats.Root[:]).Hex(),
+				"post_root", common.BytesToHash(postStats.Root[:]).Hex(),
+				"pre_len", len(ubtPreWitness),
+				"post_len", len(ubtPostWitness),
+				"pre_head64", preHead,
+				"pre_tail64", preTail,
+				"post_head64", postHead,
+				"post_tail64", postTail)
+
+			// Build Block Access List from witnesses (Phase 4)
 			// This computes the BAL hash that will be embedded in the block payload
-			blockAccessListHash, accountCount, totalChanges, err := evmStorage.ComputeBlockAccessListHash(verkleWitnessBytes)
+			blockAccessListHash, accountCount, totalChanges, err := evmStorage.ComputeBlockAccessListHash(ubtPreWitness, ubtPostWitness)
 			if err != nil {
 				log.Warn(log.EVM, "ComputeBlockAccessListHash failed", "err", err)
 				// Non-fatal: continue without BAL hash (will be zeros)
@@ -817,66 +833,60 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 				log.Trace(log.EVM, "Block Access List computed", "hash", blockAccessListHash.Hex(), "accounts", accountCount, "changes", totalChanges)
 			}
 
-			// Extract post-state Verkle root from witness to update block payload
-			postStateRoot, err := extractPostStateRootFromWitness(verkleWitnessBytes)
+			// Extract post-state UBT root from witness to update block payload
+			postStateRoot, err := extractPostStateRootFromWitness(ubtPostWitness)
 			if err != nil {
 				log.Warn(log.EVM, "Failed to extract post-state root from witness", "err", err)
 				postStateRoot = common.Hash{} // leave unchanged if extraction fails
 			}
 
-			// Extract verkle state delta from post-state witness (VERKLE2.md Week 1)
-			// Type assert to *storage.StateDBStorage to access ExtractVerkleStateDelta
-			var verkleDelta *evmtypes.VerkleStateDelta
-			if storageDB, ok := s.sdb.(*storage.StateDBStorage); ok {
-				storageDelta, err := storageDB.ExtractVerkleStateDelta(verkleWitnessBytes)
-				if err != nil {
-					log.Warn(log.EVM, "Failed to extract verkle delta", "err", err)
-				} else if storageDelta != nil {
-					// Convert storage.VerkleStateDelta to evmtypes.VerkleStateDelta
-					verkleDelta = &evmtypes.VerkleStateDelta{
-						NumEntries: storageDelta.NumEntries,
-						Entries:    storageDelta.Entries,
-					}
-					log.Trace(log.EVM, "Extracted verkle delta", "entries", verkleDelta.NumEntries, "size", len(verkleDelta.Entries))
-				}
-			}
+			var stateDelta *evmtypes.UBTStateDelta
+			stateDelta = nil
 
 			// Update block payload with BAL hash, post-state root, and delta (Phase 4)
 			// The block was already exported during ExecuteRefine, so we need to update it in exported_segments
-			err = s.updateBlockPayloadWithDelta(exported_segments, blockAccessListHash, postStateRoot, verkleDelta)
+			err = s.updateBlockPayloadWithDelta(exported_segments, blockAccessListHash, postStateRoot, stateDelta)
 			if err != nil {
 				log.Warn(log.EVM, "Failed to update block payload", "err", err)
 				// Non-fatal: continue with original block payload (BAL hash/root/delta may be zeros/nil)
 			}
 
-			// Prepend Verkle witness as FIRST extrinsic
-			extrinsicsBlobs[index] = append([][]byte{verkleWitnessBytes}, extrinsicsBlobs[index]...)
+			// Prepend UBT witnesses as the first two extrinsics (pre, post)
+			extrinsicsBlobs[index] = append([][]byte{ubtPreWitness, ubtPostWitness}, extrinsicsBlobs[index]...)
 
-			// Update work item extrinsics to include Verkle witness
-			verkleWitnessExtrinsic := types.WorkItemExtrinsic{
-				Hash: common.Blake2Hash(verkleWitnessBytes),
-				Len:  uint32(len(verkleWitnessBytes)),
+			// Update work item extrinsics to include UBT witnesses
+			ubtPreExtrinsic := types.WorkItemExtrinsic{
+				Hash: common.Blake2Hash(ubtPreWitness),
+				Len:  uint32(len(ubtPreWitness)),
 			}
-			// Prepend to extrinsics list
-			wp.WorkItems[index].Extrinsics = append([]types.WorkItemExtrinsic{verkleWitnessExtrinsic}, wp.WorkItems[index].Extrinsics...)
-
+			ubtPostExtrinsic := types.WorkItemExtrinsic{
+				Hash: common.Blake2Hash(ubtPostWitness),
+				Len:  uint32(len(ubtPostWitness)),
+			}
+			// Prepend to extrinsics list in order
+			wp.WorkItems[index].Extrinsics = append([]types.WorkItemExtrinsic{ubtPreExtrinsic, ubtPostExtrinsic}, wp.WorkItems[index].Extrinsics...)
+			log.Info(log.EVM, "BuildBundle: prepended UBT witnesses",
+				"pre_hash", ubtPreExtrinsic.Hash.Hex(),
+				"pre_len", ubtPreExtrinsic.Len,
+				"post_hash", ubtPostExtrinsic.Hash.Hex(),
+				"post_len", ubtPostExtrinsic.Len)
 			// Verify post-state against execution
 			if err := s.verifyPostStateAgainstExecution(wp.WorkItems[index], extrinsicsBlobs[index], contractWitnessBlob); err != nil {
 				log.Warn(log.EVM, "Post-state verification failed", "err", err)
 				return nil, nil, fmt.Errorf("post-state verification failed: %w", err)
 			}
 
-			// Clear verkleReadLog for next execution via clean interface
-			evmStorage.ClearVerkleReadLog()
+			// Clear UBT read log for next execution via clean interface
+			evmStorage.ClearUBTReadLog()
 
 			// Append builder witnesses to extrinsicsBlobs -- this will be the metashards + the object proofs
 			builderWitnessCount := appendExtrinsicWitnessesToWorkItem(&wp.WorkItems[index], &extrinsicsBlobs, index, witnesses)
-			log.Trace(log.DA, "BuildBundle: Appended builder witnesses", "workItemIndex", index, "builderWitnessCount", builderWitnessCount, "totalExtrinsics", len(extrinsicsBlobs[index]))
+			log.Info(log.EVM, "BuildBundle: Appended builder witnesses", "workItemIndex", index, "builderWitnessCount", builderWitnessCount, "totalExtrinsics", len(extrinsicsBlobs[index]))
 			// Update payload metadata with builder witness count and BAL hash
 			// ALWAYS update if payload exists (even if builderWitnessCount=0) to ensure BAL hash is included
 			if len(wp.WorkItems[index].Payload) >= 7 {
-				// Total witnesses = 1 (Verkle witness) + builderWitnessCount (metashards + object proofs)
-				totalWitnessCount := uint16(1 + builderWitnessCount)
+				// Total witnesses = 2 (UBT pre/post) + builderWitnessCount (metashards + object proofs)
+				totalWitnessCount := uint16(2 + builderWitnessCount)
 				wp.WorkItems[index].Payload = evmtypes.BuildPayload(evmtypes.PayloadTypeTransactions, int(originalTxCount), 0, int(totalWitnessCount), blockAccessListHash)
 			}
 		} // end if isEVMService
@@ -931,7 +941,8 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 
 	// Create work report from results -- note that this does not have availability spec
 	workReport := &types.WorkReport{
-		Results: results,
+		CoreIndex: uint(coreIndex),
+		Results:   results,
 	}
 	log.Trace(log.Node, "BuildBundle: Built", "payload", fmt.Sprintf("%x", bundle.WorkPackage.WorkItems[0].Payload))
 
@@ -1303,60 +1314,34 @@ func (n *StateDB) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup typ
 	return true, nil
 }
 
-// computeVerkleRoot creates a verkle tree from contract storage entries and computes its root
-func computeVerkleRoot(address common.Address, contractStorage *evmtypes.ContractShard) (common.Hash, error) {
-	log.Debug(log.EVM, "computeVerkleRoot", "address", address.Hex(), "entries", len(contractStorage.Entries))
+// computeUBTRoot creates a UBT tree from contract storage entries and computes its root.
+func computeUBTRoot(address common.Address, contractStorage *evmtypes.ContractShard) (common.Hash, error) {
+	log.Debug(log.EVM, "computeUBTRoot", "address", address.Hex(), "entries", len(contractStorage.Entries))
 
-	// Create a new verkle tree
-	tree := verkle.New()
-
-	// Insert each storage entry into the verkle tree
+	tree := storage.NewUnifiedBinaryTree(storage.Config{Profile: storage.JAMProfile})
 	for _, entry := range contractStorage.Entries {
-		// Use the storage key hash as the verkle key
-		key := entry.KeyH[:]
-		value := entry.Value[:]
-
-		err := tree.Insert(key, value, nil)
-		if err != nil {
-			return common.Hash{}, fmt.Errorf("failed to insert key %x into verkle tree: %v", key, err)
-		}
-
-		log.Info(log.EVM, "computeVerkleRoot: inserted entry", "key", fmt.Sprintf("%x", key), "value", fmt.Sprintf("%x", value))
+		key := storage.GetStorageSlotKey(storage.JAMProfile, address, entry.KeyH)
+		tree.Insert(key, entry.Value)
 	}
 
-	// Compute the commitment (verkle root)
-	commitment := tree.Commit()
-	if commitment == nil {
-		return common.Hash{}, fmt.Errorf("failed to compute verkle commitment")
-	}
+	root := tree.RootHash()
+	ubtRoot := common.BytesToHash(root[:])
+	log.Info(log.EVM, "computeUBTRoot complete", "address", address.Hex(), "ubtRoot", ubtRoot.Hex(), "entries", len(contractStorage.Entries))
 
-	// Get the hash representation of the commitment
-	hashFr := tree.Hash()
-	if hashFr == nil {
-		return common.Hash{}, fmt.Errorf("failed to get verkle hash")
-	}
-
-	// Convert the field element to bytes and then to Hash
-	// Note: This conversion may need adjustment based on the actual field element representation
-	hashBytes := hashFr.Bytes()
-	verkleRoot := common.BytesToHash(hashBytes[:])
-
-	log.Info(log.EVM, "computeVerkleRoot complete", "address", address.Hex(), "verkleRoot", verkleRoot.Hex(), "entries", len(contractStorage.Entries))
-
-	return verkleRoot, nil
+	return ubtRoot, nil
 }
 
 // updateBlockPayload updates the block payload in exported segments with the computed BAL hash
-// and optionally the post-state Verkle root (if provided).
+// and optionally the post-state root (if provided).
 // The block is the first exported segment (ObjectKind::Block is exported first in refiner.rs)
 func (s *StateDB) updateBlockPayload(exportedSegments [][]byte, balHash common.Hash, postStateRoot common.Hash) error {
 	return s.updateBlockPayloadWithDelta(exportedSegments, balHash, postStateRoot, nil)
 }
 
 // updateBlockPayloadWithDelta updates the block payload in exported segments with the computed BAL hash,
-// post-state Verkle root, and optionally the verkle state delta (VERKLE2.md Week 1).
+// post-state root, and optionally the state delta.
 // The block is the first exported segment (ObjectKind::Block is exported first in refiner.rs)
-func (s *StateDB) updateBlockPayloadWithDelta(exportedSegments [][]byte, balHash common.Hash, postStateRoot common.Hash, delta *evmtypes.VerkleStateDelta) error {
+func (s *StateDB) updateBlockPayloadWithDelta(exportedSegments [][]byte, balHash common.Hash, postStateRoot common.Hash, delta *evmtypes.UBTStateDelta) error {
 	if len(exportedSegments) == 0 {
 		return fmt.Errorf("no exported segments")
 	}
@@ -1373,15 +1358,15 @@ func (s *StateDB) updateBlockPayloadWithDelta(exportedSegments [][]byte, balHash
 	// Update the BAL hash
 	blockPayload.BlockAccessListHash = balHash
 
-	// Update Verkle root if provided (non-zero)
+	// Update UBT root if provided (non-zero)
 	if postStateRoot != (common.Hash{}) {
-		blockPayload.VerkleRoot = postStateRoot
+		blockPayload.UBTRoot = postStateRoot
 	}
 
-	// Update Verkle state delta if provided (VERKLE2.md Week 1)
+	// Update UBT state delta if provided (UBT Week 1)
 	if delta != nil {
-		blockPayload.VerkleStateDelta = delta
-		log.Debug(log.EVM, "Added verkle delta to block payload", "entries", delta.NumEntries, "bytes", 4+len(delta.Entries))
+		blockPayload.UBTStateDelta = delta
+		log.Debug(log.EVM, "Added state delta to block payload", "entries", delta.NumEntries, "bytes", 4+len(delta.Entries))
 	}
 
 	// Re-serialize the block payload
@@ -1390,50 +1375,53 @@ func (s *StateDB) updateBlockPayloadWithDelta(exportedSegments [][]byte, balHash
 	// Replace the first segment with the updated one
 	exportedSegments[0] = updatedSegment
 
-	log.Debug(log.EVM, "Updated block payload", "balHash", balHash.Hex(), "verkleRoot", postStateRoot.Hex(), "segment_size", len(updatedSegment))
+	log.Debug(log.EVM, "Updated block payload", "balHash", balHash.Hex(), "ubtRoot", postStateRoot.Hex(), "segment_size", len(updatedSegment))
 
 	return nil
 }
 
-// extractPostStateRootFromWitness extracts the post-state Verkle root from a serialized witness
-// Witness format: 32B pre_root + 4B read_count + (161B * reads) + 4B pre_proof_len + pre_proof +
-//
-//	32B post_root + ...
+// extractPostStateRootFromWitness extracts the post-state UBT root from a witness section.
+// Witness section format: 32B root + 4B count + (161B * entries) + 4B proof_len + proof.
 func extractPostStateRootFromWitness(witness []byte) (common.Hash, error) {
-	if len(witness) < 68 {
-		return common.Hash{}, fmt.Errorf("witness too short")
-	}
-
-	offset := 32 // skip pre_root
-
-	if len(witness)-offset < 4 {
-		return common.Hash{}, fmt.Errorf("witness missing read_count")
-	}
-	readCount := binary.BigEndian.Uint32(witness[offset : offset+4])
-	offset += 4
-
-	entryLen := 161
-	need := int(readCount) * entryLen
-	if len(witness)-offset < need {
-		return common.Hash{}, fmt.Errorf("witness truncated in read entries: need %d", need)
-	}
-	offset += need
-
-	if len(witness)-offset < 4 {
-		return common.Hash{}, fmt.Errorf("witness missing pre_proof_len")
-	}
-	preProofLen := binary.BigEndian.Uint32(witness[offset : offset+4])
-	offset += 4
-
-	if len(witness)-offset < int(preProofLen) {
-		return common.Hash{}, fmt.Errorf("witness truncated in pre_proof: need %d", preProofLen)
-	}
-	offset += int(preProofLen)
-
-	if len(witness)-offset < 32 {
-		return common.Hash{}, fmt.Errorf("witness missing post_root")
+	if len(witness) < 32 {
+		return common.Hash{}, fmt.Errorf("witness too short: %d bytes", len(witness))
 	}
 	var postRoot common.Hash
-	copy(postRoot[:], witness[offset:offset+32])
+	copy(postRoot[:], witness[:32])
 	return postRoot, nil
+}
+
+// verifyUBTWitness verifies a UBT witness section and returns summary stats.
+func (s *StateDB) verifyUBTWitness(witness []byte, label string, kind storage.WitnessValueKind) (*storage.UBTWitnessStats, error) {
+	hasher := storage.NewBlake3Hasher(storage.JAMProfile)
+	var expectedRoot *[32]byte
+	if kind == storage.WitnessValuePre {
+		if stateStorage, ok := s.sdb.(*storage.StateDBStorage); ok && stateStorage.CurrentUBT != nil {
+			root := stateStorage.CurrentUBT.RootHash()
+			expectedRoot = &root
+		}
+	}
+	stats, err := storage.VerifyUBTWitnessSection(witness, expectedRoot, kind, hasher)
+	if err != nil {
+		return nil, fmt.Errorf("%s witness verification failed: %w", label, err)
+	}
+	log.Trace(log.EVM, "UBT witness verified", "label", label, "root", fmt.Sprintf("%x", stats.Root[:8]), "entries", stats.EntryCount)
+	return stats, nil
+}
+
+func witnessEdgeHex(data []byte) (string, string) {
+	if len(data) == 0 {
+		return "", ""
+	}
+	headLen := 64
+	if len(data) < headLen {
+		headLen = len(data)
+	}
+	tailLen := 64
+	if len(data) < tailLen {
+		tailLen = len(data)
+	}
+	head := fmt.Sprintf("%x", data[:headLen])
+	tail := fmt.Sprintf("%x", data[len(data)-tailLen:])
+	return head, tail
 }

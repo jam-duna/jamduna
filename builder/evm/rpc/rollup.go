@@ -10,16 +10,16 @@ import (
 	"strings"
 	"sync"
 
-	evmverkle "github.com/colorfulnotion/jam/builder/evm/verkle"
+	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
+	"github.com/colorfulnotion/jam/builder/queue"
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/statedb"
-	evmtypes "github.com/colorfulnotion/jam/statedb/evmtypes"
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 	ethereumCommon "github.com/ethereum/go-ethereum/common"
 	ethereumTypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-verkle"
 )
 
 const (
@@ -88,12 +88,12 @@ func (r *Rollup) GetServiceID() uint32 {
 }
 
 func (r *Rollup) GetBalance(address common.Address, blockNumber string) (common.Hash, error) {
-	// Use service-scoped verkle tree lookup
-	tree, ok := r.storage.GetVerkleNodeForServiceBlock(r.serviceID, blockNumber)
+	// Use service-scoped state tree lookup
+	tree, ok := r.storage.GetUBTNodeForServiceBlock(r.serviceID, blockNumber)
 	if !ok {
-		return common.Hash{}, fmt.Errorf("verkle tree not found for service %d block %s", r.serviceID, blockNumber)
+		return common.Hash{}, fmt.Errorf("state tree not found for service %d block %s", r.serviceID, blockNumber)
 	}
-	// Read balance from Verkle tree
+	// Read balance from UBT tree
 	balanceHash, err := r.storage.GetBalance(tree, address)
 	if err != nil {
 		return common.Hash{}, err
@@ -103,10 +103,10 @@ func (r *Rollup) GetBalance(address common.Address, blockNumber string) (common.
 }
 
 func (r *Rollup) GetTransactionCount(address common.Address, blockNumber string) (uint64, error) {
-	// Use service-scoped verkle tree lookup
-	tree, ok := r.storage.GetVerkleNodeForServiceBlock(r.serviceID, blockNumber)
+	// Use service-scoped state tree lookup
+	tree, ok := r.storage.GetUBTNodeForServiceBlock(r.serviceID, blockNumber)
 	if !ok {
-		return 0, fmt.Errorf("verkle tree not found for service %d block %s", r.serviceID, blockNumber)
+		return 0, fmt.Errorf("state tree not found for service %d block %s", r.serviceID, blockNumber)
 	}
 	nonce, err := r.storage.GetNonce(tree, address)
 	if err != nil {
@@ -117,18 +117,18 @@ func (r *Rollup) GetTransactionCount(address common.Address, blockNumber string)
 }
 
 func (r *Rollup) GetCode(address common.Address, blockNumber string) ([]byte, error) {
-	// Use service-scoped verkle tree lookup
-	tree, ok := r.storage.GetVerkleNodeForServiceBlock(r.serviceID, blockNumber)
+	// Use service-scoped state tree lookup
+	tree, ok := r.storage.GetUBTNodeForServiceBlock(r.serviceID, blockNumber)
 	if !ok {
-		return nil, fmt.Errorf("verkle tree not found for service %d block %s", r.serviceID, blockNumber)
+		return nil, fmt.Errorf("state tree not found for service %d block %s", r.serviceID, blockNumber)
 	}
-	verkleTree, ok := tree.(verkle.VerkleNode)
+	ubtTree, ok := tree.(*storage.UnifiedBinaryTree)
 	if !ok {
 		return nil, fmt.Errorf("invalid tree type")
 	}
-	code, err := evmverkle.ReadCode(verkleTree, address[:])
+	code, _, err := storage.ReadCodeFromTree(ubtTree, address)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read code from Verkle tree: %w", err)
+		return nil, fmt.Errorf("failed to read code from state tree: %w", err)
 	}
 	return code, nil
 }
@@ -252,6 +252,66 @@ func (r *Rollup) PrepareWorkPackage(refineCtx types.RefineContext, pendingTxs []
 		"num_extrinsics", len(extrinsics))
 
 	return workPackage, extrinsicsBlobs, nil
+}
+
+// BuildAndEnqueueWorkPackage builds a bundle from pending txs and enqueues it for submission.
+func (r *Rollup) BuildAndEnqueueWorkPackage(
+	refineCtx types.RefineContext,
+	txPool *TxPool,
+	queueRunner *queue.Runner,
+) error {
+	if txPool == nil {
+		return fmt.Errorf("txpool is nil")
+	}
+	pendingTxs := txPool.GetPendingTransactions()
+	if len(pendingTxs) == 0 {
+		return fmt.Errorf("no pending transactions")
+	}
+	if queueRunner == nil {
+		return fmt.Errorf("queue runner is nil")
+	}
+
+	workPackage, extrinsicsBlobs, err := r.PrepareWorkPackage(refineCtx, pendingTxs)
+	if err != nil {
+		return fmt.Errorf("failed to prepare work package: %w", err)
+	}
+
+	originalExtrinsics := make([]types.ExtrinsicsBlobs, len(extrinsicsBlobs))
+	for i, blobs := range extrinsicsBlobs {
+		originalExtrinsics[i] = make(types.ExtrinsicsBlobs, len(blobs))
+		for j, blob := range blobs {
+			originalExtrinsics[i][j] = make([]byte, len(blob))
+			copy(originalExtrinsics[i][j], blob)
+		}
+	}
+
+	originalWorkItemExtrinsics := make([][]types.WorkItemExtrinsic, len(workPackage.WorkItems))
+	for i, wi := range workPackage.WorkItems {
+		originalWorkItemExtrinsics[i] = make([]types.WorkItemExtrinsic, len(wi.Extrinsics))
+		copy(originalWorkItemExtrinsics[i], wi.Extrinsics)
+	}
+
+	bundle, workReport, err := r.GetStateDB().BuildBundle(workPackage, extrinsicsBlobs, 0, nil, r.pvmBackend)
+	if err != nil {
+		return fmt.Errorf("failed to build bundle: %w", err)
+	}
+
+	for _, tx := range pendingTxs {
+		txPool.RemoveTransaction(tx.Hash)
+	}
+
+	blockNumber, err := queueRunner.EnqueueBundleWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, 0)
+	if err != nil {
+		return fmt.Errorf("failed to enqueue bundle: %w", err)
+	}
+
+	log.Info(log.Node, "Work package enqueued",
+		"wp_hash", bundle.WorkPackage.Hash().Hex(),
+		"work_report_hash", workReport.Hash().Hex(),
+		"block_number", blockNumber,
+		"service_id", r.serviceID)
+
+	return nil
 }
 
 func (r *Rollup) convertTxToExtrinsic(tx *evmtypes.EthereumTransaction) []byte {
@@ -1016,7 +1076,7 @@ func (r *Rollup) createSimulatedTx(tx *evmtypes.EthereumTransaction, pvmBackend 
 }
 
 // PrimeGenesis initializes the EVM genesis state with an issuer account balance.
-// This is a LOCAL verkle tree operation - it does NOT submit a work package.
+// This is a LOCAL state tree operation - it does NOT submit a work package.
 // The issuer account (dev account 0) is credited with startBalance JAM tokens.
 //
 // Parameters:
@@ -1465,12 +1525,12 @@ func (r *Rollup) SubmitEVMGenesis(startBalance int64) error {
 
 	// Delegate to storage layer
 	evmStorage := r.storage.(types.EVMJAMStorage)
-	verkleRootHash, err := evmStorage.InitializeEVMGenesis(r.serviceID, issuerAddress, startBalance)
+	ubtRootHash, err := evmStorage.InitializeEVMGenesis(r.serviceID, issuerAddress, startBalance)
 	if err != nil {
 		return fmt.Errorf("failed to initialize EVM genesis: %w", err)
 	}
 
-	log.Info(log.Node, "✅ SubmitEVMGenesis complete", "verkleRoot", verkleRootHash.Hex())
+	log.Info(log.Node, "✅ SubmitEVMGenesis complete", "ubtRoot", ubtRootHash.Hex())
 	return nil
 }
 

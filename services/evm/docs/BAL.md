@@ -7,7 +7,7 @@
 **Data Structures & Core BAL Construction** - Fully implemented in Go:
 
 1. **Witness Format Augmentation** ([types/storage.go](../../types/storage.go), [storage/witness.go](../../storage/witness.go))
-   - ✅ Added `TxIndex` field to `VerkleRead` struct (types/storage.go:150)
+   - ✅ Added `TxIndex` field to `UBTRead` struct (types/storage.go:150)
    - ✅ Updated witness serialization from 157 to 161 bytes per entry (storage/witness.go:199-266)
    - ✅ Modified `KeyMetadata` to include `TxIndex` (storage/witness.go:380)
    - ✅ Updated `extractKeyMetadataFromReads` and `extractKeyMetadata` to propagate TxIndex
@@ -39,9 +39,9 @@
 
 **TX Index Propagation** - Fully implemented for both reads and writes:
 
-1. **Read Attribution** - Verkle state fetches track which transaction triggered each read
-   - ✅ Rust→Go polkavm FFI passes `tx_index` parameter ([services/evm/src/verkle.rs](../../services/evm/src/verkle.rs), [statedb/hostfunctions.go](../../statedb/hostfunctions.go))
-   - ✅ All `VerkleRead` entries populated with correct `TxIndex` ([storage/storage.go](../../storage/storage.go))
+1. **Read Attribution** - UBT state fetches track which transaction triggered each read
+   - ✅ Rust→Go polkavm FFI passes `tx_index` parameter ([services/evm/src/ubt_host.rs](../../services/evm/src/ubt_host.rs), [statedb/hostfunctions.go](../../statedb/hostfunctions.go))
+   - ✅ All `UBTRead` entries populated with correct `TxIndex` ([storage/storage.go](../../storage/storage.go))
 
 2. **Write Attribution** - Contract witness blob embeds per-write tx_index (BREAKING CHANGE)
    - ✅ Blob format: `[20B address][1B kind][4B payload_length][4B tx_index][payload]` (29-byte header)
@@ -56,13 +56,13 @@
 **Builder/Guarantor Integration** - Fully implemented:
 
 1. **Builder Integration** ([statedb/refine.go:543-560](../../statedb/refine.go#L543-L560))
-   - ✅ Calls `ComputeBlockAccessListHash()` after verkle witness generation
+   - ✅ Calls `ComputeBlockAccessListHash()` after ubt witness generation
    - ✅ Updates block payload with computed BAL hash before export ([statedb/refine.go:1052-1080](../../statedb/refine.go#L1052-L1080))
    - ✅ Logs BAL statistics (account count, total changes)
    - ✅ **Note**: Single refine processes entire block with tx_index loop in Rust, NOT per-transaction refines
 
 2. **Guarantor Integration** ([statedb/refine.go:360-400](../../statedb/refine.go#L360-L400))
-   - ✅ Extracts verkle witness from first extrinsic
+   - ✅ Extracts pre/post ubt witnesses from the first two extrinsics
    - ✅ Computes BAL hash from witness (identical process to builder)
    - ✅ Extracts claimed BAL hash from received block payload
    - ✅ Verifies hash matches builder's claimed `block_access_list_hash`
@@ -79,15 +79,16 @@
 ### 📋 Implementation Files
 
 **Completed**:
-- `types/storage.go` - VerkleRead with TxIndex field; JAMStorage interface updated
+- `types/storage.go` - UBTRead with TxIndex field; JAMStorage interface updated
 - `storage/witness.go` - 161-byte witness serialization; 29-byte blob header parsing; extractKeyMetadata uses blob tx_index
 - `storage/storage.go` - All Fetch* methods accept txIndex parameter
-- `statedb/hostfunctions.go` - hostFetchVerkle reads tx_index from register 12
-- `services/evm/src/verkle.rs` - host_fetch_verkle wrappers accept tx_index; 161-byte witness deserialization/serialization with tx_index field
-- `services/evm/src/state.rs` - MajikBackend tracks and passes current_tx_index to verkle fetches
+- `statedb/hostfunctions.go` - hostFetchUBT reads tx_index from register 12
+- `services/evm/src/ubt_host.rs` - host_fetch_ubt wrappers accept tx_index
+- `services/evm/src/ubt.rs` - witness section parsing + multiproof verification (tx_index included in entries)
+- `services/evm/src/state.rs` - MajikBackend tracks and passes current_tx_index to ubt fetches
 - `services/utils/src/effects.rs` - WriteEffectEntry includes tx_index field
 - `services/evm/src/backend.rs` - All WriteEffectEntry creations include tx_index
-- `services/evm/src/refiner.rs` - Blob serialization writes 4-byte tx_index; guarantor verifies BAL hash via host_compute_bal_hash
+- `services/evm/src/refiner.rs` - Blob serialization writes 4-byte tx_index; guarantor verifies BAL hash natively in Rust from UBT entries
 - `statedb/refine.go` - Builder computes BAL hash and embeds it in payloads
 - `storage/block_access_list.go` - Complete BAL construction (504 lines)
 - `storage/block_access_list_test.go` - Complete test suite (691 lines, 13 tests passing)
@@ -100,15 +101,15 @@
 
 ## Executive Summary
 
-Block Access Lists (EIP-7928) provide deterministic tracking of all state accesses during block execution. For JAM EVM, BAL construction requires **transaction boundary metadata** embedded in the verkle witness to enable stateless verification.
+Block Access Lists (EIP-7928) provide deterministic tracking of all state accesses during block execution. For JAM EVM, BAL construction requires **transaction boundary metadata** embedded in the ubt witness to enable stateless verification.
 
-**Goal**: Let the builder deterministically derive a `BlockAccessList` and `block_access_list_hash` from verkle witness data augmented with transaction indices, so guarantors can recompute and verify it without re-execution.
+**Goal**: Let the builder deterministically derive a `BlockAccessList` and `block_access_list_hash` from ubt witness data augmented with transaction indices, so guarantors can recompute and verify it without re-execution.
 
 **Two-Phase Approach**:
 
 1. **Builder Mode (Runtime Tracking)**:
    - During execution: Track writes with `blockAccessIndex` (transaction index)
-   - After execution: Build verkle witness WITH transaction indices embedded in metadata
+   - After execution: Build ubt witness WITH transaction indices embedded in metadata
    - Construct `BlockAccessList` from augmented witness → compute `block_access_list_hash`
 
 2. **Guarantor Mode (Witness-Only Reconstruction)**:
@@ -123,9 +124,9 @@ Block Access Lists (EIP-7928) provide deterministic tracking of all state access
 - Fraud detection: Guarantors verify access patterns match builder's claim via hash comparison
 - Deterministic serialization enables hash-based verification
 - Stateless verification: Guarantor derives BAL from witness metadata alone (no execution state required)
-- Complements verkle witnesses (BAL = logical view, Verkle = cryptographic proof)
+- Complements ubt witnesses (BAL = logical view, UBT = cryptographic proof)
 
-**Critical Requirement**: Verkle witness metadata must include `txIndex` (transaction index) for each read/write entry to enable stateless BAL reconstruction.
+**Critical Requirement**: UBT witness metadata must include `txIndex` (transaction index) for each read/write entry to enable stateless BAL reconstruction.
 
 ---
 
@@ -144,9 +145,9 @@ Building on EIP-7928, our BAL implementation for JAM must achieve:
 
 ## Architecture Overview
 
-### Relationship to Verkle Witnesses
+### Relationship to UBT Witnesses
 
-**Verkle Witnesses** (cryptographic layer):
+**UBT Witnesses** (cryptographic layer):
 - Pre-state proof: Keys exist and have claimed values
 - Post-state proof: Keys transitioned to new values
 - Purpose: Stateless verification via cryptographic proofs
@@ -214,7 +215,7 @@ Core structs:
 
 ### Block Access Index Mapping
 
-**Formula**: `blockAccessIndex = extrinsicIndex` for transaction extrinsics (where extrinsic[0] is verkle witness)
+**Formula**: `blockAccessIndex = extrinsicIndex` for transaction extrinsics (where extrinsic[0] is ubt witness)
 
 **Mapping**:
 - `blockAccessIndex = 0`: Pre-execution system calls (genesis, validator set updates)
@@ -223,7 +224,7 @@ Core structs:
 
 **Example Work Package**:
 ```
-Extrinsic[0]: Verkle witness          → Not represented in BAL (metadata only)
+Extrinsic[0]: UBT witness          → Not represented in BAL (metadata only)
 Extrinsic[1]: Transaction A            → blockAccessIndex = 1
 Extrinsic[2]: Transaction B            → blockAccessIndex = 2
 Extrinsic[3]: Transaction C            → blockAccessIndex = 3
@@ -251,7 +252,7 @@ This section describes the **deterministic** algorithm for constructing BAL from
 // WriteEvent tracks a single state modification
 type WriteEvent struct {
     BlockAccessIndex uint32   // Monotonic counter per block
-    VerkleKey        [32]byte // Computed verkle key
+    UBTKey        [32]byte // Computed ubt key
     Address          common.Address
     KeyType          uint8    // BasicData, Storage, Code, etc.
     StorageKey       [32]byte // For storage writes
@@ -274,7 +275,7 @@ func NewWriteEventTracker(initialIndex uint32) *WriteEventTracker {
 }
 
 func (t *WriteEventTracker) RecordWrite(
-    verkleKey [32]byte,
+    ubtKey [32]byte,
     address common.Address,
     keyType uint8,
     storageKey [32]byte,
@@ -282,7 +283,7 @@ func (t *WriteEventTracker) RecordWrite(
 ) {
     t.events = append(t.events, WriteEvent{
         BlockAccessIndex: t.nextAccessIndex,
-        VerkleKey:        verkleKey,
+        UBTKey:        ubtKey,
         Address:          address,
         KeyType:          keyType,
         StorageKey:       storageKey,
@@ -298,7 +299,7 @@ func (t *WriteEventTracker) NextTransaction() {
 
 **blockAccessIndex Mapping**:
 - `0`: Pre-execution system calls (genesis, validator set updates)
-- `1..n`: Transaction index (extrinsic[i] where i=1..n, since extrinsic[0] is verkle witness)
+- `1..n`: Transaction index (extrinsic[i] where i=1..n, since extrinsic[0] is ubt witness)
 - `n+1`: Optional post-finalization (rewards, slashing)
 
 **CRITICAL**: Initialize tracker with correct starting index:
@@ -429,8 +430,8 @@ Parses dual-proof witness into pre-state and post-state sections for BAL constru
 ### Guarantor Verification
 
 Guarantor follows **identical** algorithm:
-1. Extract pre/post witness sections from first extrinsic (builder's witness)
-2. Call `BuildBlockAccessList(preStateWitness, postStateWitness)` - same function as builder
+1. Extract pre/post witness extrinsics (builder's witnesses)
+2. Call `BuildBlockAccessList(preWitness, postWitness)` - same function as builder
 3. Compute `bal.Hash()` using identical RLP encoding
 4. Compare hash with builder's claimed `block_access_list_hash`
 5. **No re-execution required** - everything derived from witness metadata (txIndex field)
@@ -478,12 +479,12 @@ func (bal *BlockAccessList) DecodeRLP(s *rlp.Stream) error {
 
 ---
 
-### Phase 2: Builder - Construct BAL from Verkle Logs
+### Phase 2: Builder - Construct BAL from UBT Logs
 
 **File**: `statedb/access_list_builder.go` (new)
 
 ```go
-// BuildBlockAccessList constructs BAL from augmented verkle witness
+// BuildBlockAccessList constructs BAL from augmented ubt witness
 //
 // Process:
 // 1. Parse augmented pre-state witness for reads (161-byte entries with txIndex)
@@ -640,37 +641,15 @@ func assembleAccountChanges(
 func BuildBundle(...) {
     // ... execute transactions ...
 
-    // Build verkle witness
+    // Build augmented UBT witnesses (161-byte entries with txIndex)
     contractBlob := extractContractWitness(vm)
-    verkleReadLog := storage.GetVerkleReadLog()
-    witness, err := storage.BuildVerkleWitness(contractBlob, verkleReadLog, tree)
-
-    // Prepend witness as first extrinsic
-    extrinsics = append([][]byte{witness}, extrinsics...)
-}
-```
-
-**New Flow** (witness-based):
-```go
-func BuildBundle(...) {
-    // ... execute transactions ...
-
-    // Build augmented verkle witness (161-byte entries with txIndex)
-    contractBlob := extractContractWitness(vm)
-    verkleReadLog := storage.GetVerkleReadLog()
-    witness, err := storage.BuildVerkleWitness(contractBlob, verkleReadLog, tree)
+    ubtPreWitness, ubtPostWitness, err := evmStorage.BuildUBTWitness(contractBlob)
     if err != nil {
-        return nil, fmt.Errorf("failed to build verkle witness: %w", err)
+        return nil, fmt.Errorf("failed to build ubt witnesses: %w", err)
     }
 
-    // Extract pre-state and post-state witness sections
-    preStateWitness, postStateWitness, err := splitWitnessSections(witness)
-    if err != nil {
-        return nil, fmt.Errorf("failed to split witness sections: %w", err)
-    }
-
-    // Build block access list from augmented witness
-    bal, err := BuildBlockAccessList(preStateWitness, postStateWitness)
+    // Build block access list from augmented witnesses
+    bal, err := BuildBlockAccessList(ubtPreWitness, ubtPostWitness)
     if err != nil {
         return nil, fmt.Errorf("failed to build block access list: %w", err)
     }
@@ -685,40 +664,8 @@ func BuildBundle(...) {
     workItem.BlockAccessList = bal
     workItem.BlockAccessListHash = balHash
 
-    // Prepend witness as first extrinsic
-    extrinsics = append([][]byte{witness}, extrinsics...)
-}
-
-// splitWitnessSections parses the dual-proof witness into pre/post sections
-func splitWitnessSections(witness []byte) (preState, postState []byte, err error) {
-    // Parse witness structure:
-    // [32B pre_root][4B read_count][read_entries...][4B pre_proof_len][pre_proof...]
-    // [32B post_root][4B write_count][write_entries...][4B post_proof_len][post_proof...]
-
-    if len(witness) < 36 {
-        return nil, nil, fmt.Errorf("witness too short")
-    }
-
-    offset := 0
-
-    // Read count
-    readCount := binary.BigEndian.Uint32(witness[32:36])
-    offset = 36 + int(readCount)*161  // 161 bytes per entry
-
-    // Pre-proof length
-    if offset+4 > len(witness) {
-        return nil, nil, fmt.Errorf("invalid witness: missing pre_proof_len")
-    }
-    preProofLen := binary.BigEndian.Uint32(witness[offset:offset+4])
-    offset += 4 + int(preProofLen)
-
-    // Pre-state section ends here
-    preState = witness[:offset]
-
-    // Post-state section starts here
-    postState = witness[offset:]
-
-    return preState, postState, nil
+    // Prepend witnesses as first two extrinsics (pre, post)
+    extrinsics = append([][]byte{ubtPreWitness, ubtPostWitness}, extrinsics...)
 }
 ```
 
@@ -739,14 +686,14 @@ type WorkItem struct {
 
 **File**: `statedb/access_list_verifier.go` (new)
 
-**CRITICAL INSIGHT**: Guarantor uses the SAME witness as builder (first extrinsic), so both call `BuildBlockAccessList()` with identical inputs. This ensures deterministic BAL hashes without re-execution.
+**CRITICAL INSIGHT**: Guarantor uses the same pre/post witness extrinsics as the builder (first two extrinsics), so both call `BuildBlockAccessList()` with identical inputs. This ensures deterministic BAL hashes without re-execution.
 
 ```go
 // VerifyBlockAccessList checks guarantor's execution matches builder's BAL
 //
 // Process (STATELESS):
-// 1. Extract pre/post witness sections from first extrinsic (builder's witness)
-// 2. Call BuildBlockAccessList() with same witness data
+// 1. Read pre/post witness extrinsics (builder's witnesses)
+// 2. Call BuildBlockAccessList() with the same witness data
 // 3. Compare hash with builder's claimed hash
 // 4. If mismatch, perform detailed comparison to identify fraud
 //
@@ -754,24 +701,19 @@ type WorkItem struct {
 func VerifyBlockAccessList(
     builderBAL *BlockAccessList,
     builderHash common.Hash,
-    witnessBlob []byte,  // First extrinsic (augmented witness)
+    preWitness []byte,  // First extrinsic (augmented pre witness)
+    postWitness []byte, // Second extrinsic (augmented post witness)
 ) error {
-    // Step 1: Split witness sections
-    preStateWitness, postStateWitness, err := splitWitnessSections(witnessBlob)
-    if err != nil {
-        return fmt.Errorf("failed to split witness sections: %w", err)
-    }
-
-    // Step 2: Reconstruct BAL from witness (deterministic)
-    guarantorBAL, err := BuildBlockAccessList(preStateWitness, postStateWitness)
+    // Step 1: Reconstruct BAL from witness (deterministic)
+    guarantorBAL, err := BuildBlockAccessList(preWitness, postWitness)
     if err != nil {
         return fmt.Errorf("failed to build guarantor BAL: %w", err)
     }
 
-    // Step 3: Compute hash
+    // Step 2: Compute hash
     guarantorHash := guarantorBAL.Hash()
 
-    // Step 4: Quick check - hashes match?
+    // Step 3: Quick check - hashes match?
     if guarantorHash == builderHash {
         log.Info(log.SDB, "✅ Block access list verified (hash match)",
             "balHash", builderHash.Hex())
@@ -872,7 +814,7 @@ func ExecuteAsGuarantor(...) {
 
     // After execution, verify BAL
     guarantorWitness := extractContractWitness(vm)
-    guarantorReadLog := storage.GetVerkleReadLog()
+    guarantorReadLog := storage.GetUBTReadLog()
 
     err := VerifyBlockAccessList(
         workItem.BlockAccessList,
@@ -894,7 +836,7 @@ func ExecuteAsGuarantor(...) {
 
 **Problem**: Current implementation doesn't track which transaction caused each access.
 
-**Solution**: Flow `tx_index` from Rust (refiner.rs) → through host_fetch_verkle → to Go AppendVerkleRead.
+**Solution**: Flow `tx_index` from Rust (refiner.rs) → through host_fetch_ubt → to Go AppendUBTRead.
 
 **Architecture**:
 - `refiner.rs:426-491` iterates over transactions in Rust within a single refine call
@@ -904,13 +846,13 @@ func ExecuteAsGuarantor(...) {
 
 ---
 
-**File 1**: `services/evm/src/verkle.rs` (modify)
+**File 1**: `services/evm/src/ubt_host.rs` (modify)
 
-Update `host_fetch_verkle` import to accept tx_index:
+Update `host_fetch_ubt` import to accept tx_index:
 
 ```rust
 #[polkavm_import(index = 255)]
-pub fn host_fetch_verkle(
+pub fn host_fetch_ubt(
     fetch_type: u64,
     address_ptr: u64,
     key_ptr: u64,
@@ -923,10 +865,10 @@ pub fn host_fetch_verkle(
 Update all wrapper functions to accept and pass tx_index:
 
 ```rust
-pub fn fetch_balance_verkle(address: H160, tx_index: u32) -> U256 {
+pub fn fetch_balance_ubt(address: H160, tx_index: u32) -> U256 {
     let mut output = [0u8; 32];
     unsafe {
-        let written = host_fetch_verkle(
+        let written = host_fetch_ubt(
             FETCH_BALANCE as u64,
             address.as_ptr() as u64,
             0,
@@ -940,17 +882,17 @@ pub fn fetch_balance_verkle(address: H160, tx_index: u32) -> U256 {
 }
 
 // Similarly update:
-// - fetch_nonce_verkle(address, tx_index)
-// - fetch_code_verkle(address, tx_index)
-// - fetch_code_hash_verkle(address, tx_index)
-// - fetch_storage_verkle(address, key, tx_index)
+// - fetch_nonce_ubt(address, tx_index)
+// - fetch_code_ubt(address, tx_index)
+// - fetch_code_hash_ubt(address, tx_index)
+// - fetch_storage_ubt(address, key, tx_index)
 ```
 
 ---
 
 **File 2**: `services/evm/src/state.rs` (modify)
 
-Update `MajikBackend` methods to pass `current_tx_index` to verkle fetches:
+Update `MajikBackend` methods to pass `current_tx_index` to ubt fetches:
 
 ```rust
 impl RuntimeBaseBackend for MajikBackend {
@@ -962,9 +904,9 @@ impl RuntimeBaseBackend for MajikBackend {
 
         match self.execution_mode {
             ExecutionMode::Builder => {
-                // Pass current_tx_index from overlay
-                let tx_index = self.overlay.current_tx_index.unwrap_or(0) as u32;
-                let balance = crate::verkle::fetch_balance_verkle(address, tx_index);
+                // Pass current_tx_index from backend
+                let tx_index = self.current_tx_index.borrow().unwrap_or(0) as u32;
+                let balance = crate::ubt_host::fetch_balance_ubt(address, tx_index);
                 self.balances.borrow_mut().insert(address, balance);
                 balance
             }
@@ -982,10 +924,10 @@ impl RuntimeBaseBackend for MajikBackend {
 
 **File 3**: `statedb/hostfunctions.go` (modify)
 
-Update `hostFetchVerkle()` to read tx_index from register 12:
+Update `hostFetchUBT()` to read tx_index from register 12:
 
 ```go
-func (vm *VM) hostFetchVerkle() {
+func (vm *VM) hostFetchUBT() {
     fetchType := uint8(vm.ReadRegister(7))
     addressPtr := uint32(vm.ReadRegister(8))
     keyPtr := uint32(vm.ReadRegister(9))
@@ -1037,15 +979,15 @@ Update Fetch* methods to accept and use txIndex:
 func (store *StateDBStorage) FetchBalance(address common.Address, txIndex uint32) ([32]byte, error) {
     var balance [32]byte
 
-    if store.CurrentVerkleTree == nil {
+    if store.CurrentUBT == nil {
         return balance, nil
     }
 
-    verkleKey := evmtypes.BasicDataKey(address[:])
+    ubtKey := evmtypes.BasicDataKey(address[:])
 
     // Track read with transaction index
-    store.AppendVerkleRead(types.VerkleRead{
-        VerkleKey: common.BytesToHash(verkleKey),
+    store.AppendUBTRead(types.UBTRead{
+        UBTKey: common.BytesToHash(ubtKey),
         Address:   address,
         KeyType:   0, // BasicData
         Extra:     0,
@@ -1064,9 +1006,9 @@ func (store *StateDBStorage) FetchBalance(address common.Address, txIndex uint32
 
 ### Problem Statement
 
-The original verkle witness format did NOT include transaction index information. Now augmented to 161 bytes:
+The original ubt witness format did NOT include transaction index information. Now augmented to 161 bytes:
 ```
-[32B verkle_key][1B key_type][20B address][8B extra]
+[32B ubt_key][1B key_type][20B address][8B extra]
 [32B storage_key][32B pre_value][32B post_value][4B tx_index]
 = 161 bytes
 ```
@@ -1077,7 +1019,7 @@ The original verkle witness format did NOT include transaction index information
 
 **Augmented Format** (161 bytes per entry):
 ```
-[32B verkle_key][1B key_type][20B address][8B extra]
+[32B ubt_key][1B key_type][20B address][8B extra]
 [32B storage_key][32B pre_value][32B post_value][4B txIndex]
 = 161 bytes
 ```
@@ -1092,11 +1034,11 @@ The original verkle witness format did NOT include transaction index information
 
 **✅ IMPLEMENTED**
 
-#### Phase 1.1: Add TxIndex field to VerkleRead
+#### Phase 1.1: Add TxIndex field to UBTRead
 
 **File**: [types/storage.go:142-151](../../types/storage.go#L142-L151)
 
-Added `TxIndex uint32` field to `VerkleRead` struct
+Added `TxIndex uint32` field to `UBTRead` struct
 
 #### Phase 1.2: Update witness serialization to 161 bytes
 
@@ -1107,13 +1049,13 @@ Key changes:
 - Changed size calculation from 157 to 161 bytes per entry ([lines 199-203](../../storage/witness.go#L199-L203))
 - Added TxIndex serialization (4 bytes, big-endian) in pre-state section ([line 225](../../storage/witness.go#L225))
 - Added TxIndex serialization in post-state section ([line 266](../../storage/witness.go#L266))
-- Updated `extractKeyMetadataFromReads` to copy TxIndex from VerkleRead ([lines 398-404](../../storage/witness.go#L398-L404))
+- Updated `extractKeyMetadataFromReads` to copy TxIndex from UBTRead ([lines 398-404](../../storage/witness.go#L398-L404))
 - Updated `extractKeyMetadata` to propagate TxIndex from reads to writes ([lines 421-434](../../storage/witness.go#L421-L434))
 
 **Note**: Transaction index tracking during execution (builder-side) is not yet implemented. Currently TxIndex will be 0 for all entries. Full integration requires:
 - `statedb/statedb_evm.go`: Add `currentTxIndex` tracking
 - `statedb/refine.go`: Call `SetCurrentTransactionIndex()` before each transaction
-- `storage/storage.go`: Update `AppendVerkleRead` calls to include current txIndex
+- `storage/storage.go`: Update `AppendUBTRead` calls to include current txIndex
 
 ### Guarantor Parsing
 
@@ -1252,7 +1194,7 @@ Hash: Blake2b(rlp.encode(Accounts)) = 0x1234...5678
 
 **Note**: All values use fixed-size arrays:
 - Balance: 32-byte array with uint128 in last 16 bytes (big-endian)
-- Nonce: 8-byte array with uint64 (little-endian, matching verkle BasicData format)
+- Nonce: 8-byte array with uint64 (little-endian, matching ubt BasicData format)
 - Storage: 32-byte arrays for keys and values
 
 ---
@@ -1270,9 +1212,9 @@ Implementation requires changes across multiple files:
 
 ### Modified Files
 
-- **`storage/storage.go`**: Add `TxIndex` to VerkleReadEntry
+- **`storage/storage.go`**: Add `TxIndex` to UBTReadEntry
   ```go
-  type VerkleReadEntry struct {
+  type UBTReadEntry struct {
       // ... existing fields ...
       TxIndex uint32  // NEW: Transaction index within work package
   }
@@ -1294,11 +1236,11 @@ Implementation requires changes across multiple files:
   - Add `SetCurrentTransactionIndex()` method
   - Call before each transaction execution
 
-- **`statedb/hostfunctions.go`**: Pass `TxIndex` to verkle read tracking
-  - Update all `AppendVerkleRead()` calls to include `stateDB.GetCurrentTransactionIndex()`
+- **`statedb/hostfunctions.go`**: Pass `TxIndex` to ubt read tracking
+  - Update all `AppendUBTRead()` calls to include `stateDB.GetCurrentTransactionIndex()`
   - Surface `block_access_list_hash` to Rust if needed in payload metadata
 
-- **`statedb/evmtypes/verkle.go`**: Helper to extract address/key from metadata for grouping
+- **`statedb/evmtypes/ubt.go`**: Helper to extract address/key from metadata for grouping
   - Utility functions for BAL construction from witness entries
 
 - **`types/bundle.go`**: Add BAL fields to WorkItem
@@ -1500,7 +1442,7 @@ func TestGuarantorBALVerification(t *testing.T) {
     err = VerifyBlockAccessList(
         bundle.WorkItem.BlockAccessList,
         bundle.WorkItem.BlockAccessListHash,
-        guarantor.verkleReadLog,
+        guarantor.ubtReadLog,
         guarantor.contractWitness,
         1,
     )
@@ -1529,7 +1471,7 @@ func TestGuarantorDetectsFraudulentBAL(t *testing.T) {
     err = VerifyBlockAccessList(
         bundle.WorkItem.BlockAccessList,
         bundle.WorkItem.BlockAccessListHash,
-        guarantor.verkleReadLog,
+        guarantor.ubtReadLog,
         guarantor.contractWitness,
         1,
     )
@@ -1588,7 +1530,7 @@ func TestGuarantorDetectsFraudulentBAL(t *testing.T) {
 ### BAL Construction Cost
 
 **Builder**:
-- Parse verkleReadLog: O(n) where n = read count
+- Parse ubtReadLog: O(n) where n = read count
 - Parse contractWitnessBlob: O(m) where m = write count
 - Sort accounts: O(a log a) where a = account count
 - Sort per-account keys: O(k log k) where k = keys per account
@@ -1654,13 +1596,13 @@ func TestGuarantorDetectsFraudulentBAL(t *testing.T) {
 
 ### Phase 3: Transaction Index Tracking ✅ COMPLETE
 
-**Phase 3A: Read Attribution (Verkle State Fetches)**
-- [x] Extend `VerkleRead` with `TxIndex` → [types/storage.go:150](../../types/storage.go#L150)
+**Phase 3A: Read Attribution (UBT State Fetches)**
+- [x] Extend `UBTRead` with `TxIndex` → [types/storage.go:150](../../types/storage.go#L150)
 - [x] Update witness serialization to 161 bytes → [storage/witness.go:199-266](../../storage/witness.go#L199-L266)
-- [x] **Rust side**: Add `tx_index` parameter to `host_fetch_verkle()` and wrappers → [services/evm/src/verkle.rs:45-191](../../services/evm/src/verkle.rs#L45-L191)
-- [x] **Rust side**: Pass `current_tx_index` from `MajikBackend` to verkle fetches → [services/evm/src/state.rs:133-931](../../services/evm/src/state.rs#L133-L931)
-- [x] **Go side**: Read `tx_index` from register 12 in `hostFetchVerkle()` → [statedb/hostfunctions.go:2546](../../statedb/hostfunctions.go#L2546)
-- [x] **Go side**: Update `Fetch*()` signatures and pass to `AppendVerkleRead()` → [storage/storage.go:429-622](../../storage/storage.go#L429-L622)
+- [x] **Rust side**: Add `tx_index` parameter to `host_fetch_ubt()` and wrappers → [services/evm/src/ubt_host.rs](../../services/evm/src/ubt_host.rs)
+- [x] **Rust side**: Pass `current_tx_index` from `MajikBackend` to ubt fetches → [services/evm/src/state.rs:133-931](../../services/evm/src/state.rs#L133-L931)
+- [x] **Go side**: Read `tx_index` from register 12 in `hostFetchUBT()` → [statedb/hostfunctions.go:2546](../../statedb/hostfunctions.go#L2546)
+- [x] **Go side**: Update `Fetch*()` signatures and pass to `AppendUBTRead()` → [storage/storage.go:429-622](../../storage/storage.go#L429-L622)
 - [x] **Go side**: Update JAMStorage interface → [types/storage.go:486-490](../../types/storage.go#L486-L490)
 
 **Phase 3B: Write Attribution (Contract Witness Blob) ⚠️ FORMAT READY, DATA NOT YET POPULATED**
@@ -1691,7 +1633,7 @@ func TestGuarantorDetectsFraudulentBAL(t *testing.T) {
   - `process_code_changes()` → uses `WriteKey::Code(address)`
   - `process_balance_changes()` → uses `WriteKey::Balance(address)`
   - `process_nonce_changes()` → uses `WriteKey::Nonce(address)`
-- ⚠️ **Storage limitation**: Contract witness blob still aggregates all storage slots into one `StorageShard` entry with `tx_index=0` (see [services/evm/src/backend.rs:628-634](../backend.rs#L628-L634)). The verkle witness carries per-slot `tx_index` for reads/writes, but when the Go side parses the contract blob, storage slot metadata inherits `tx_index=0`. Impact: BAL hash remains deterministic (builder and guarantor agree) and fraud detection works, but transaction-level attribution for storage writes is lost. Fix would require emitting per-slot storage entries (with per-slot `tx_index` from `write_tx_index` map) instead of an aggregate shard—an invasive format change.
+- ⚠️ **Storage limitation**: Contract witness blob still aggregates all storage slots into one `StorageShard` entry with `tx_index=0` (see [services/evm/src/backend.rs:628-634](../backend.rs#L628-L634)). The ubt witness carries per-slot `tx_index` for reads/writes, but when the Go side parses the contract blob, storage slot metadata inherits `tx_index=0`. Impact: BAL hash remains deterministic (builder and guarantor agree) and fraud detection works, but transaction-level attribution for storage writes is lost. Fix would require emitting per-slot storage entries (with per-slot `tx_index` from `write_tx_index` map) instead of an aggregate shard—an invasive format change.
 
 ### Phase 4: Builder/Guarantor Integration ✅ COMPLETE
 
@@ -1722,19 +1664,15 @@ func TestGuarantorDetectsFraudulentBAL(t *testing.T) {
 - [x] Parse `block_access_list_hash` from payload metadata in Rust → [services/evm/src/refiner.rs:40,85-86](../refiner.rs#L40)
   - Added `block_access_list_hash: [u8; 32]` field to `PayloadMetadata`
   - Updated `parse_payload_metadata()` to parse 40-byte payload
-- [x] Add host function for BAL computation (index 256) → [services/evm/src/verkle.rs:55-66](../verkle.rs#L55-L66), [statedb/hostfunctions.go:3030-3082](../../statedb/hostfunctions.go#L3030-L3082)
-  - `host_compute_bal_hash(witness_ptr, witness_len, output_ptr)` → returns Blake2b hash
-  - Calls `ComputeBlockAccessListHash()` from Go storage layer
-  - Returns 1 on success, 0 on failure
 - [x] **Single point of verification (Rust only)** → [services/evm/src/refiner.rs:1024-1084](../refiner.rs#L1024-L1084)
   - **Payload type enforcement**: Transaction payloads MUST have non-zero BAL hash (lines 1028-1035)
     - `PayloadType::Transactions` and `PayloadType::Builder` require non-zero hash
     - Zero hash only allowed for `PayloadType::Genesis` and `PayloadType::Call`
-  - **Witness requirement**: If BAL hash claimed → verkle witness MUST be provided (lines 1071-1078)
+  - **Witness requirement**: If BAL hash claimed → ubt witness MUST be provided (lines 1071-1078)
     - Missing witness when hash claimed = immediate rejection
     - Prevents witness stripping attacks
   - **Hash verification**: Compute BAL from witness, compare with payload claim (lines 1040-1064)
-    - Calls `host_compute_bal_hash()` on guarantor's verkle witness
+    - Builds BAL from `UBTWitness` entries and hashes it in Rust
     - Compares computed hash with builder's claimed hash from `PayloadMetadata`
     - Any mismatch = immediate rejection
   - **Fail-closed**: ALL errors reject the work package (no silent failures)
@@ -1745,8 +1683,8 @@ func TestGuarantorDetectsFraudulentBAL(t *testing.T) {
 
 **Security Architecture**: Guarantor verification (Rust - single point of truth)
 1. **Payload Type Check**: Transaction payloads MUST have non-zero BAL hash
-2. **Witness Requirement Check**: If BAL hash claimed → verkle witness MUST be provided
-3. **Hash Verification**: Compute BAL from guarantor's verkle witness, extract builder's claimed hash from payload metadata, compare: computed == claimed → Accept : Reject
+2. **Witness Requirement Check**: If BAL hash claimed → ubt witness MUST be provided
+3. **Hash Verification**: Compute BAL from guarantor's ubt witness, extract builder's claimed hash from payload metadata, compare: computed == claimed → Accept : Reject
 4. **Fail-Closed**: Any error → REJECT immediately
 
 **Why Go verification was removed** → [statedb/refine.go:360-364](../../statedb/refine.go#L360-L364)
@@ -1792,24 +1730,23 @@ Test: `TestEVMBlocksTransfers` - End-to-end verification of first work package (
 - ✅ Builder passes non-zero BAL hash to `BuildPayload()` ([refine.go:592](statedb/refine.go#L592))
 - ✅ Guarantor receives 40-byte payload with BAL hash (Rust parsing implemented)
 - ✅ Guarantor rejects transaction payloads with zero BAL hash (verification working correctly)
-- ❌ **BLOCKER**: Pre-existing verkle witness bug - `GenerateVerkleProofWithTransition: empty key list`
+- ❌ **BLOCKER**: Pre-existing ubt witness bug - `GenerateUBTProofWithTransition: empty key list`
 
 **What's Actually Untested** (Critical Gaps):
-1. **Host function boundary** (`host_compute_bal_hash` PVM register handling) - no test exercises index 256
-2. **Payload round-trip** (Go BuildPayload → Rust parse_payload_metadata → BAL hash extraction) - untested
-3. **Rust verification rules** (hash mismatch, missing witness, computation failure) - only tested via integration failure
-4. **Builder→Guarantor agreement** (both compute identical hash from same witness) - blocked by verkle bug
+1. **Payload round-trip** (Go BuildPayload → Rust parse_payload_metadata → BAL hash extraction) - untested
+2. **Rust verification rules** (hash mismatch, missing witness, computation failure) - only tested via integration failure
+3. **Builder→Guarantor agreement** (both compute identical hash from same witness) - blocked by ubt bug
 
-**Blocking Issue - Verkle Witness Generation**:
-- **Error**: `GenerateVerkleProofWithTransition: empty key list`
+**Blocking Issue - UBT Witness Generation**:
+- **Error**: `GenerateUBTProofWithTransition: empty key list`
 - **Root cause**: Balance-only/nonce-only transactions don't generate storage keys for witness
-- **Location**: Verkle witness generation in [statedb/witness.go](statedb/witness.go)
-- **Impact**: Cannot generate post-state proof → cannot create verkle witness → cannot test BAL flow
-- **Scope**: Unrelated to BAL implementation - upstream verkle tree issue
+- **Location**: UBT witness generation in [statedb/witness.go](statedb/witness.go)
+- **Impact**: Cannot generate post-state proof → cannot create ubt witness → cannot test BAL flow
+- **Scope**: Unrelated to BAL implementation - upstream ubt tree issue
 - **Workaround**: Use storage-writing transactions (contract calls) instead of simple transfers
 
 **TODO - Fix Integration Test**:
-- [ ] **Option 1**: Fix verkle witness generation to handle balance-only transactions
+- [ ] **Option 1**: Fix ubt witness generation to handle balance-only transactions
   - Add account keys to key list even when no storage changes
   - Ensure BasicData (balance, nonce, code) changes generate witness entries
   - Location: [statedb/witness.go](statedb/witness.go)
@@ -1821,13 +1758,13 @@ Test: `TestEVMBlocksTransfers` - End-to-end verification of first work package (
 
 **Expected Flow After Fix**:
 1. Builder executes transaction (with storage writes to avoid empty key list)
-2. Builder generates verkle witness with state changes
+2. Builder generates ubt witness with state changes
 3. Builder computes BAL hash: `blockAccessListHash = ComputeBlockAccessListHash(witness)`
 4. Builder embeds hash in block payload (148-byte header, bytes 116-148)
 5. Builder creates work item payload: `BuildPayload(..., blockAccessListHash)` (40 bytes, hash at bytes 8-40)
 6. Guarantor receives work package with non-zero BAL hash in payload metadata
 7. Guarantor re-executes transaction and generates own witness
-8. Guarantor calls `host_compute_bal_hash(witness)` via PVM
+8. Guarantor computes BAL hash in Rust from UBT witness entries
 9. Guarantor compares computed hash with builder's claimed hash → ACCEPT
 10. Test passes - first work package verified successfully
 
@@ -1841,16 +1778,16 @@ Test: `TestEVMBlocksTransfers` - End-to-end verification of first work package (
   - Verify PayloadType::Call with zero hash is accepted
 - [ ] Test: Missing witness when BAL hash claimed → MUST reject
   - Provide non-zero BAL hash in payload metadata
-  - Omit verkle witness from extrinsics
-  - Verify error message: "Builder claimed BAL hash ... but no Verkle witness provided"
+  - Omit ubt witness from extrinsics
+  - Verify error message: "Builder claimed BAL hash ... but no UBT witness provided"
 - [ ] Test: Hash mismatch → MUST reject
-  - Provide verkle witness with state changes
+  - Provide ubt witness with state changes
   - Provide incorrect BAL hash in payload metadata
   - Verify guarantor computes correct hash and rejects mismatch
   - Verify error message includes both hashes
 - [ ] Test: Hash computation failure → MUST reject
-  - Provide malformed verkle witness (e.g., truncated, invalid format)
-  - Verify host_compute_bal_hash returns 0
+  - Provide malformed ubt witness (e.g., truncated, invalid format)
+  - Verify witness parsing fails before BAL hash computation
   - Verify error message: "Failed to compute BAL hash from witness"
 
 **6C: Payload Format Propagation Tests** → **CRITICAL**
@@ -1869,36 +1806,27 @@ Test: `TestEVMBlocksTransfers` - End-to-end verification of first work package (
   - Verify BlockAccessListHash field matches input
   - Test with 148-byte header (verify no truncation)
 
-**6D: Host Function Boundary Tests** → **CRITICAL**
-- [ ] Test: host_compute_bal_hash success path
-  - Build valid dual-proof verkle witness in Rust
-  - Allocate 32-byte output buffer
-  - Call host_compute_bal_hash(witness_ptr, witness_len, output_ptr)
-  - Verify return value = 1
-  - Verify output buffer contains valid Blake2b hash (32 bytes non-zero)
-  - Compare with Go ComputeBlockAccessListHash on same witness → MUST match
-- [ ] Test: host_compute_bal_hash failure path
+**6D: Rust BAL Computation Tests** → **CRITICAL**
+- [ ] Test: malformed ubt witness rejects before BAL hashing
   - Invalid witness: truncated (< 68 bytes)
   - Invalid witness: corrupted count field
   - Invalid witness: wrong entry size
-  - Verify return value = 0 for all cases
-- [ ] Test: Host function register/memory correctness
-  - Verify witness pointer/length passed correctly (r7, r8)
-  - Verify output pointer passed correctly (r9)
-  - Verify 32 bytes written to output buffer (not truncated)
+- [ ] Test: BAL computation uses canonical ordering
+  - Build a witness with multiple accounts and storage keys
+  - Verify BAL hash is stable across repeated runs
   - Test with witness at different memory addresses (alignment)
 
 **6E: Integration Tests - Builder/Guarantor Flows**
 - [ ] Test: Builder flow end-to-end (covered by 6A PoC)
   - Execute transactions
-  - Generate verkle witness
+  - Generate ubt witness
   - Compute BAL hash from witness
   - Update block payload with BAL hash
   - Update work item payload metadata with BAL hash
   - Verify all BAL hash values consistent across payload metadata, block payload, and computed from witness
 - [ ] Test: Guarantor verification - correct builder (covered by 6A PoC)
   - Guarantor receives work package with builder's BAL hash in payload
-  - Guarantor receives builder's verkle witness in extrinsics
+  - Guarantor receives builder's ubt witness in extrinsics
   - Guarantor re-executes transactions
   - Guarantor computes BAL hash from witness
   - Guarantor compares with builder's claimed hash → ACCEPT
@@ -1909,10 +1837,10 @@ Test: `TestEVMBlocksTransfers` - End-to-end verification of first work package (
   - Scenario 4: Builder uses zero hash on transaction payload (zero hash not allowed) → REJECT (covered by 6A PoC current failure)
 
 **6F: Negative Tests - Edge Cases**
-- [ ] Test: Empty verkle witness (no reads, no writes)
+- [ ] Test: Empty ubt witness (no reads, no writes)
   - Verify non-zero BAL hash produced (RLP of empty structure)
   - Verify hash deterministic
-- [ ] Test: Very large verkle witness (1000+ entries)
+- [ ] Test: Very large ubt witness (1000+ entries)
   - Verify performance acceptable
   - Verify no truncation or buffer overflow
 - [ ] Test: Concurrent verification (multiple guarantors)
@@ -1976,11 +1904,11 @@ Test: `TestEVMBlocksTransfers` - End-to-end verification of first work package (
 - **EIP-7928**: Block-Level Access Lists
   - https://eips.ethereum.org/EIPS/eip-7928
 
-- **EIP-6800**: Ethereum state using a unified verkle tree
+- **EIP-6800**: Ethereum state using a unified ubt tree
   - https://eips.ethereum.org/EIPS/eip-6800
 
-- **Verkle Trees**:
-  - https://vitalik.eth.limo/general/2021/06/18/verkle.html
+- **UBT Trees**:
+  - https://vitalik.eth.limo/general/2021/06/18/ubt.html
 
 - **JAM Gray Paper**:
   - Work packages, refine/accumulate phases
@@ -2001,14 +1929,14 @@ Test: `TestEVMBlocksTransfers` - End-to-end verification of first work package (
 
 **Modified Files**:
 - `statedb/refine.go` - Integrate BAL into BuildBundle
-- `storage/storage.go` - Add TxIndex to VerkleReadEntry
-- `statedb/hostfunctions.go` - Pass TxIndex to AppendVerkleRead
+- `storage/storage.go` - Add TxIndex to UBTReadEntry
+- `statedb/hostfunctions.go` - Pass TxIndex to AppendUBTRead
 - `statedb/statedb_evm.go` - Add currentTxIndex tracking
 - `types/bundle.go` - Add BAL fields to WorkItem
 
 **Existing Files** (for context):
-- `services/evm/docs/VERKLE.md` - Verkle witness documentation
-- `storage/witness.go` - Verkle witness construction
-- `statedb/evmtypes/verkle.go` - Verkle key generation
+- `services/evm/docs/UBT-CODEX.md` - UBT witness documentation
+- `storage/witness.go` - UBT witness construction
+- `statedb/evmtypes/ubt.go` - UBT key generation
 
 ---

@@ -72,6 +72,16 @@ impl IncrementalMerkleTree {
         self.leaves.len()
     }
 
+    /// Return all leaf commitments in insertion order.
+    pub fn leaves(&self) -> Vec<[u8; 32]> {
+        self.leaves.iter().map(|leaf| leaf.to_bytes()).collect()
+    }
+
+    /// Return the right-edge frontier nodes for incremental append.
+    pub fn frontier(&self) -> Vec<[u8; 32]> {
+        compute_frontier_from_leaves(&self.leaves, self.depth)
+    }
+
     /// Compute the Merkle root from leaves
     fn compute_root(&self) -> MerkleHashOrchard {
         if self.leaves.is_empty() {
@@ -115,6 +125,41 @@ impl IncrementalMerkleTree {
             root: self.compute_root().to_bytes(),
         })
     }
+}
+
+fn compute_frontier_from_leaves(
+    leaves: &[MerkleHashOrchard],
+    depth: usize,
+) -> Vec<[u8; 32]> {
+    let mut frontier: Vec<Option<MerkleHashOrchard>> = vec![None; depth];
+    let mut size: u64 = 0;
+
+    for leaf in leaves {
+        let mut node = *leaf;
+        let mut level = 0usize;
+        let mut cursor = size;
+
+        while (cursor & 1) == 1 {
+            let left = frontier[level]
+                .expect("frontier missing node for occupied subtree");
+            node = MerkleHashOrchard::combine(Level::from(level as u8), &left, &node);
+            frontier[level] = None;
+            level += 1;
+            cursor >>= 1;
+        }
+
+        frontier[level] = Some(node);
+        size += 1;
+    }
+
+    frontier
+        .into_iter()
+        .enumerate()
+        .map(|(level, node)| {
+            node.unwrap_or_else(|| MerkleHashOrchard::empty_root(Level::from(level as u8)))
+                .to_bytes()
+        })
+        .collect()
 }
 
 /// Sparse Merkle tree for nullifier set
@@ -176,6 +221,11 @@ impl SparseMerkleTree {
         let root = self.compute_root();
         self.cached_root = Some(root);
         root
+    }
+
+    /// Number of stored nullifiers.
+    pub fn len(&self) -> usize {
+        self.nullifiers.len()
     }
 
     /// Compute sparse Merkle root

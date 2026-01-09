@@ -105,16 +105,16 @@ impl MajikBackend {
                 .push((*key, *value));
         }
 
-        // NOTE: In Verkle mode, balance/nonce changes are written directly to the Verkle tree
+        // NOTE: In UBT mode, balance/nonce changes are written directly to the UBT tree
         // as BasicData leaf values by the Go overlay commit, NOT as contract storage to 0x01.
-        // This legacy USDM-based mirroring is disabled in Verkle mode.
+        // This legacy USDM-based mirroring is disabled in UBT mode.
         // The balance/nonce caches are still updated in to_execution_effects (lines 629-640)
         // to maintain consistency for subsequent reads within the same block.
 
-        // VERKLE MODE: Skip contract 0x01 storage writes (handled by Verkle tree directly)
+        // UBT MODE: Skip contract 0x01 storage writes (handled by UBT tree directly)
         // if !change_set.balances.is_empty() || !change_set.nonces.is_empty() {
         //     let system_contract = h160_from_low_u64_be(0x01);
-        //     ... (commented out for Verkle mode)
+        //     ... (commented out for UBT mode)
         // }
 
         let contract_addresses = storage_by_address.keys().copied().collect::<BTreeSet<_>>();
@@ -222,7 +222,7 @@ impl MajikBackend {
         receipts: &[TransactionReceiptRecord],
         work_package_hash: [u8; 32],
         write_intents: &mut Vec<WriteIntent>,
-        verkle_root: [u8; 32],
+        ubt_root: [u8; 32],
         timeslot: u32,
         total_gas_used: u64,
     ) {
@@ -272,9 +272,9 @@ impl MajikBackend {
 
 
         log_info(&format!(
-            "DRAFT BLOCK: {} txns, verkleroot={}, timestamp={}, total_gas_used={}",
+            "DRAFT BLOCK: {} txns, ubt_root={}, timestamp={}, total_gas_used={}",
             receipts.len(),
-            format_object_id(&verkle_root),
+            format_object_id(&ubt_root),
             timeslot,
             total_gas_used
         ));
@@ -293,13 +293,13 @@ impl MajikBackend {
             num_transactions: receipts.len() as u32,
             timestamp: timeslot,
             gas_used: total_gas_used,
-            verkle_root,
+            ubt_root,
             transactions_root: [0u8; 32], // Will be computed by prepare_for_da_export
             receipt_root: [0u8; 32],      // Will be computed by prepare_for_da_export
             block_access_list_hash: [0u8; 32], // TODO: Compute from BAL in refine
             tx_hashes,
             receipt_hashes,
-            verkle_delta: None, // TODO: Extract from post-state witness (see services/evm/docs/VERKLE.md)
+            ubt_delta: None, // TODO: Extract from post-state witness (see services/evm/docs/UBT-CODEX.md)
         };
 
         // Compute roots and finalize block
@@ -719,7 +719,7 @@ impl MajikBackend {
         write_tx_index: &BTreeMap<crate::state::WriteKey, u32>,
         work_package_hash: [u8; 32],
         receipts: &[TransactionReceiptRecord],
-        verkle_root: [u8; 32],
+        ubt_root: [u8; 32],
         timeslot: u32,
         total_gas_used: u64,
     ) -> utils::effects::ExecutionEffects {
@@ -810,14 +810,14 @@ impl MajikBackend {
         // 5. Handle receipts and assemble block
         if total_gas_used > 0 {
             log_info(&format!(
-                "📝 Emitting block with verkle_root (POST-state root): {}",
-                format_object_id(&verkle_root)
+                "📝 Emitting block with ubt_root (POST-state root): {}",
+                format_object_id(&ubt_root)
             ));
             self.emit_receipts_and_block(
                 receipts,
                 work_package_hash,
                 &mut write_intents,
-                verkle_root,
+                ubt_root,
                 timeslot,
                 total_gas_used,
             );

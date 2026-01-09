@@ -768,6 +768,7 @@ impl<F: Field> Mul<F> for Expression<F> {
 /// Represents an index into a vector where each entry corresponds to a distinct
 /// point that polynomials are queried at.
 #[derive(Copy, Clone, Debug)]
+#[allow(dead_code)]
 pub(crate) struct PointIndex(pub usize);
 
 /// A "virtual cell" is a PLONK cell that has been queried at a particular relative offset
@@ -898,6 +899,7 @@ impl<F: Field, C: Into<Constraint<F>>, Iter: IntoIterator<Item = C>> IntoIterato
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub(crate) struct Gate<F: Field> {
     name: &'static str,
     constraint_names: Vec<&'static str>,
@@ -908,6 +910,7 @@ pub(crate) struct Gate<F: Field> {
     queried_cells: Vec<VirtualCell>,
 }
 
+#[allow(dead_code)]
 impl<F: Field> Gate<F> {
     pub(crate) fn name(&self) -> &'static str {
         self.name

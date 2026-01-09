@@ -1,4 +1,4 @@
-package types
+package evmtypes
 
 import (
 	"encoding/binary"

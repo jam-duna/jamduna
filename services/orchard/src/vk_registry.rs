@@ -8,55 +8,56 @@ use crate::errors::{OrchardError, Result};
 use blake2::{Blake2b, Digest};
 use core::sync::atomic::{AtomicBool, Ordering};
 
-/// Circuit field layouts (consensus-critical)
-pub const SPEND_LAYOUT: [&str; 44] = [
-    "anchor_root", "num_inputs", "num_outputs",
-    "input_nullifier_0", "input_nullifier_1", "input_nullifier_2", "input_nullifier_3",
-    "output_commitment_0", "output_commitment_1", "output_commitment_2", "output_commitment_3",
-    "delta_0_asset_id", "delta_0_in_public_lo", "delta_0_in_public_hi",
-    "delta_0_out_public_lo", "delta_0_out_public_hi",
-    "delta_0_burn_public_lo", "delta_0_burn_public_hi",
-    "delta_0_mint_public_lo", "delta_0_mint_public_hi",
-    "delta_1_asset_id", "delta_1_in_public_lo", "delta_1_in_public_hi",
-    "delta_1_out_public_lo", "delta_1_out_public_hi",
-    "delta_1_burn_public_lo", "delta_1_burn_public_hi",
-    "delta_1_mint_public_lo", "delta_1_mint_public_hi",
-    "delta_2_asset_id", "delta_2_in_public_lo", "delta_2_in_public_hi",
-    "delta_2_out_public_lo", "delta_2_out_public_hi",
-    "delta_2_burn_public_lo", "delta_2_burn_public_hi",
-    "delta_2_mint_public_lo", "delta_2_mint_public_hi",
-    "allowed_root", "terms_hash", "poi_root", "epoch", "fee_lo", "fee_hi"
+/// Orchard NU5 Action Circuit Public Input Layout (CONSENSUS-CRITICAL)
+///
+/// Per orchard/src/circuit.rs:Instance, each action has 9 public inputs:
+/// 1. anchor: Commitment tree root (32 bytes)
+/// 2. cv_net_x: Net value commitment x-coordinate (field element)
+/// 3. cv_net_y: Net value commitment y-coordinate (field element)
+/// 4. nf_old: Nullifier of spent note (32 bytes)
+/// 5. rk_x: Randomized verification key x-coordinate (field element)
+/// 6. rk_y: Randomized verification key y-coordinate (field element)
+/// 7. cmx: New note commitment (32 bytes)
+/// 8. enable_spend: Spend enabled flag (field element, 0 or 1)
+/// 9. enable_output: Output enabled flag (field element, 0 or 1)
+///
+/// For a bundle with N actions, total public inputs = 9 * N
+///
+/// NOTE: This is the per-action layout. Bundle proofs concatenate all actions.
+pub const ORCHARD_NU5_ACTION_LAYOUT: [&str; 9] = [
+    "anchor",        // Commitment tree root
+    "cv_net_x",      // Net value commitment x-coordinate
+    "cv_net_y",      // Net value commitment y-coordinate
+    "nf_old",        // Nullifier of spent note
+    "rk_x",          // Randomized verification key x-coordinate
+    "rk_y",          // Randomized verification key y-coordinate
+    "cmx",           // Extracted commitment of new note
+    "enable_spend",  // Spend enabled flag (bool as field element)
+    "enable_output", // Output enabled flag (bool as field element)
 ];
 
-pub const WITHDRAW_LAYOUT: [&str; 17] = [
-    "anchor_root", "anchor_size", "nullifier",
-    "recipient_0", "recipient_1", "recipient_2",
-    "amount_lo", "amount_hi", "asset_id", "gas_limit",
-    "fee_lo", "fee_hi", "poi_root", "epoch",
-    "has_change", "change_commitment", "next_root"
+/// Orchard ZSA Action Circuit Public Input Layout (CONSENSUS-CRITICAL)
+///
+/// ZSA adds `enable_zsa` as the 10th field.
+pub const ORCHARD_ZSA_ACTION_LAYOUT: [&str; 10] = [
+    "anchor",        // Commitment tree root
+    "cv_net_x",      // Net value commitment x-coordinate
+    "cv_net_y",      // Net value commitment y-coordinate
+    "nf_old",        // Nullifier of spent note
+    "rk_x",          // Randomized verification key x-coordinate
+    "rk_y",          // Randomized verification key y-coordinate
+    "cmx",           // Extracted commitment of new note
+    "enable_spend",  // Spend enabled flag (bool as field element)
+    "enable_output", // Output enabled flag (bool as field element)
+    "enable_zsa",    // ZSA enable flag (bool as field element)
 ];
 
-pub const ISSUANCE_LAYOUT: [&str; 11] = [
-    "asset_id", "mint_amount_lo", "mint_amount_hi",
-    "burn_amount_lo", "burn_amount_hi",
-    "issuer_pk_0", "issuer_pk_1", "issuer_pk_2",
-    "signature_verification_0", "signature_verification_1",
-    "issuance_root"
-];
-
-pub const BATCH_LAYOUT: [&str; 17] = [
-    "anchor_root", "anchor_size", "next_root",
-    "nullifiers_root", "commitments_root", "deltas_root",
-    "issuance_root", "memo_root", "equity_allowed_root", "poi_root",
-    "total_fee_lo", "total_fee_hi", "epoch", "num_user_txs",
-    "min_fee_per_tx_lo", "min_fee_per_tx_hi", "batch_hash"
-];
+/// Current production layout (Orchard NU5)
+pub const SPEND_LAYOUT: [&str; 9] = ORCHARD_NU5_ACTION_LAYOUT;
 
 /// Circuit domain separation tags
 pub const DOMAIN_SPEND_V1: &str = "orchard_spend_v1";
-pub const DOMAIN_WITHDRAW_V1: &str = "orchard_withdraw_v1";
-pub const DOMAIN_ISSUANCE_V1: &str = "orchard_issue_v1";
-pub const DOMAIN_BATCH_V1: &str = "orchard_batch_v1";
+pub const DOMAIN_ZSA_V1: &str = "orchard_zsa_v1";
 
 /// VK registry entry
 #[derive(Clone, Debug)]
@@ -71,45 +72,32 @@ pub struct VkEntry {
 
 /// VK registry with deterministic Blake2b-256 hash verification
 pub struct VkRegistry {
-    entries: [VkEntry; 4],
+    entries: [VkEntry; 2],
 }
 
 impl VkRegistry {
     /// Create new VK registry with embedded verification keys
+    ///
+    /// NOTE: field_count is per-action (9 fields). Total public inputs for a bundle
+    /// with N actions = 9 * N. The caller must validate this.
     pub fn new() -> Self {
         Self {
             entries: [
                 VkEntry {
                     vk_id: 1,
-                    field_count: 44,
+                    field_count: 9, // Per-action field count (Orchard NU5)
                     domain: DOMAIN_SPEND_V1,
                     layout: &SPEND_LAYOUT,
-                    vk_hash: compute_vk_hash(crate::crypto::ORCHARD_SPEND_VK_BYTES),
-                    vk_bytes: crate::crypto::ORCHARD_SPEND_VK_BYTES,
+                    vk_hash: compute_vk_hash(crate::crypto::ORCHARD_VK_BYTES),
+                    vk_bytes: crate::crypto::ORCHARD_VK_BYTES,
                 },
                 VkEntry {
                     vk_id: 2,
-                    field_count: 17,
-                    domain: DOMAIN_WITHDRAW_V1,
-                    layout: &WITHDRAW_LAYOUT,
-                    vk_hash: compute_vk_hash(crate::crypto::ORCHARD_WITHDRAW_VK_BYTES),
-                    vk_bytes: crate::crypto::ORCHARD_WITHDRAW_VK_BYTES,
-                },
-                VkEntry {
-                    vk_id: 3,
-                    field_count: 11,
-                    domain: DOMAIN_ISSUANCE_V1,
-                    layout: &ISSUANCE_LAYOUT,
-                    vk_hash: compute_vk_hash(crate::crypto::ORCHARD_ISSUANCE_VK_BYTES),
-                    vk_bytes: crate::crypto::ORCHARD_ISSUANCE_VK_BYTES,
-                },
-                VkEntry {
-                    vk_id: 4,
-                    field_count: 17,
-                    domain: DOMAIN_BATCH_V1,
-                    layout: &BATCH_LAYOUT,
-                    vk_hash: compute_vk_hash(crate::crypto::ORCHARD_BATCH_VK_BYTES),
-                    vk_bytes: crate::crypto::ORCHARD_BATCH_VK_BYTES,
+                    field_count: 10, // Per-action field count (Orchard ZSA)
+                    domain: DOMAIN_ZSA_V1,
+                    layout: &ORCHARD_ZSA_ACTION_LAYOUT,
+                    vk_hash: compute_vk_hash(crate::crypto::ORCHARD_ZSA_VK_BYTES),
+                    vk_bytes: crate::crypto::ORCHARD_ZSA_VK_BYTES,
                 },
             ],
         }
@@ -135,18 +123,36 @@ impl VkRegistry {
     }
 
     /// Validate public inputs match expected field layout
+    ///
+    /// For Orchard NU5, public_inputs.len() must be a multiple of 9 (9 fields per action).
+    /// The number of actions is derived from the public input count.
     pub fn validate_public_inputs(&self, vk_id: u32, public_inputs: &[[u8; 32]]) -> Result<()> {
         let entry = self.get_vk_entry(vk_id)?;
 
-        if public_inputs.len() != entry.field_count {
+        // For Orchard NU5: total fields = 9 * num_actions
+        let fields_per_action = entry.field_count;
+        if public_inputs.len() % fields_per_action != 0 {
             return Err(OrchardError::PublicInputMismatch {
                 vk_id,
-                expected_fields: entry.field_count,
+                expected_fields: fields_per_action,
                 provided_fields: public_inputs.len(),
             });
         }
 
+        let num_actions = public_inputs.len() / fields_per_action;
+        if num_actions == 0 {
+            return Err(OrchardError::StateError(
+                "Bundle must have at least one action".into()
+            ));
+        }
+
         Ok(())
+    }
+
+    /// Get number of actions from public inputs
+    pub fn get_action_count(&self, vk_id: u32, public_inputs: &[[u8; 32]]) -> Result<usize> {
+        let entry = self.get_vk_entry(vk_id)?;
+        Ok(public_inputs.len() / entry.field_count)
     }
 }
 

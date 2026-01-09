@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
@@ -18,6 +20,8 @@ import (
 type OrchardRPCHandler struct {
 	orchardRollup *OrchardRollup
 	wallet        OrchardWallet
+	txPool        *OrchardTxPool
+	// transparentTxStore is accessed via orchardRollup.transparentTxStore (shared instance)
 }
 
 type sendAmount struct {
@@ -45,7 +49,14 @@ func NewOrchardRPCHandlerWithWallet(orchardRollup *OrchardRollup, wallet Orchard
 	return &OrchardRPCHandler{
 		orchardRollup: orchardRollup,
 		wallet:        wallet,
+		txPool:        nil, // Will be set by SetTxPool after initialization
+		// transparentTxStore is accessed via orchardRollup.transparentTxStore
 	}
+}
+
+// SetTxPool sets the transaction pool for this handler
+func (h *OrchardRPCHandler) SetTxPool(txPool *OrchardTxPool) {
+	h.txPool = txPool
 }
 
 // GetOrchardRollup returns the rollup instance for direct access
@@ -56,6 +67,14 @@ func (h *OrchardRPCHandler) GetOrchardRollup() *OrchardRollup {
 // GetWallet returns the configured wallet for RPC calls.
 func (h *OrchardRPCHandler) GetWallet() OrchardWallet {
 	return h.wallet
+}
+
+// Close releases resources owned by the handler.
+func (h *OrchardRPCHandler) Close() error {
+	if h.orchardRollup != nil {
+		return h.orchardRollup.Close()
+	}
+	return nil
 }
 
 // ===== Blockchain & Chain State =====
@@ -325,6 +344,31 @@ func (h *OrchardRPCHandler) GetBlock(req []string, res *string) error {
 		}
 	}
 
+	// Add transparent transactions for this block
+	if orchardRollup.transparentTxStore != nil {
+		transparentTxs, err := orchardRollup.transparentTxStore.GetBlockTransactionsVerbose(height)
+		if err != nil {
+			log.Warn(log.Node, "Failed to get transparent transactions for block", "height", height, "error", err)
+		} else if transparentTxs != nil {
+			for _, tx := range transparentTxs {
+				blockTx := map[string]interface{}{
+					"txid":          tx.TxID,
+					"hash":          tx.TxID,
+					"version":       tx.Version,
+					"size":          tx.Size,
+					"locktime":      tx.LockTime,
+					"vin":           tx.Vin,
+					"vout":          tx.Vout,
+					"blockhash":     tx.BlockHash,
+					"confirmations": tx.Confirmations,
+					"time":          tx.Timestamp.Unix(),
+					"blocktime":     tx.Timestamp.Unix(),
+				}
+				blockTransactions = append(blockTransactions, blockTx)
+			}
+		}
+	}
+
 	block := map[string]interface{}{
 		"hash":   meta.Hash.String(),
 		"height": height,
@@ -456,7 +500,7 @@ func (h *OrchardRPCHandler) ZGetTreeState(req []string, res *string) error {
 	return nil
 }
 
-// ZGetSubtreesByIndex returns Orchard subtree roots for incremental syncing
+// ZGetSubtreesByIndex returns Orchard subtree roots and commitments for incremental syncing
 //
 // Parameters:
 // - pool (string): Pool name ("orchard")
@@ -468,7 +512,7 @@ func (h *OrchardRPCHandler) ZGetTreeState(req []string, res *string) error {
 //
 // RPC Docs (z_getsubtreesbyindex):
 // Request: {"jsonrpc":"1.0","id":1,"method":"z_getsubtreesbyindex","params":["orchard",0,10]}
-// Response: {"result":{"subtrees":[{"root":"aaa...","end_height":905000}]}}
+// Response: {"result":{"pool":"orchard","start_index":0,"subtrees":[{"index":0,"root":"0x...","height":16,"commitments":["0x..."]}]}}
 //
 // Example curl call:
 // curl -X POST http://localhost:8545 -H "Content-Type: application/json" -d '{"jsonrpc":"1.0","method":"z_getsubtreesbyindex","params":["orchard",0,10],"id":1}'
@@ -497,16 +541,44 @@ func (h *OrchardRPCHandler) ZGetSubtreesByIndex(req []string, res *string) error
 
 	log.Info(log.Node, "ZGetSubtreesByIndex", "pool", pool, "startIndex", startIndex, "limit", limit)
 
-	// For PoC, return simplified subtree structure
-	subtrees := []map[string]interface{}{
-		{
-			"root":       "0xabc123...",
-			"end_height": 905000,
-		},
+	const orchardSubtreeHeight = 16
+	subtreeSize := uint64(1 << orchardSubtreeHeight)
+
+	commitments := h.GetOrchardRollup().CommitmentList()
+	total := uint64(len(commitments))
+
+	subtrees := make([]map[string]interface{}, 0)
+
+	for i := uint64(0); i < limit; i++ {
+		subtreeIndex := startIndex + i
+		offset := subtreeIndex * subtreeSize
+		if offset >= total {
+			break
+		}
+
+		end := offset + subtreeSize
+		if end > total {
+			end = total
+		}
+
+		commitmentsSlice := commitments[offset:end]
+		commitmentHex := make([]string, len(commitmentsSlice))
+		for j, commitment := range commitmentsSlice {
+			commitmentHex[j] = "0x" + hex.EncodeToString(commitment[:])
+		}
+
+		subtrees = append(subtrees, map[string]interface{}{
+			"index":       subtreeIndex,
+			"root":        common.Hash{}.Hex(),
+			"height":      orchardSubtreeHeight,
+			"commitments": commitmentHex,
+		})
 	}
 
 	result := map[string]interface{}{
-		"subtrees": subtrees,
+		"pool":        pool,
+		"start_index": startIndex,
+		"subtrees":    subtrees,
 	}
 
 	jsonBytes, err := json.Marshal(result)
@@ -901,20 +973,68 @@ func (h *OrchardRPCHandler) ZSendMany(req []string, res *string) error {
 	if err := validateAddressFormat(wallet, fromAddress); err != nil {
 		return fmt.Errorf("invalid source address: %w", err)
 	}
-	if _, err := parseAndValidateSendManyAmounts(wallet, amountsJson); err != nil {
+
+	amounts, err := parseAndValidateSendManyAmounts(wallet, amountsJson)
+	if err != nil {
 		return fmt.Errorf("invalid sendmany request: %v", err)
 	}
 
-	// Generate operation ID
-	randomBytes, err := generateRandomBytes(4)
+	// Synthesize Orchard bundle from send_many request
+	bundleData, bundleID, err := h.synthesizeOrchardBundle(fromAddress, amounts)
 	if err != nil {
-		return fmt.Errorf("failed to generate operation id: %v", err)
+		return fmt.Errorf("failed to synthesize Orchard bundle: %w", err)
 	}
-	opId := "opid-" + hex.EncodeToString(randomBytes)
 
-	*res = opId
-	log.Debug(log.Node, "ZSendMany: Returning operation ID", "opId", opId)
+	// Submit bundle to transaction pool if available
+	if h.txPool != nil {
+		if err := h.txPool.AddBundle(bundleData, nil, bundleID); err != nil {
+			log.Warn(log.Node, "Failed to add bundle to pool, proceeding with operation ID",
+				"bundle_id", bundleID, "error", err)
+		} else {
+			log.Info(log.Node, "Bundle synthesized and added to pool",
+				"bundle_id", bundleID, "recipients", len(amounts))
+		}
+	} else {
+		log.Warn(log.Node, "Transaction pool not available, returning operation ID only", "bundle_id", bundleID)
+	}
+
+	// Return operation ID (which doubles as bundle ID for tracking)
+	*res = bundleID
+	log.Debug(log.Node, "ZSendMany: Returning operation ID", "opId", bundleID)
 	return nil
+}
+
+// synthesizeOrchardBundle creates a deterministic Orchard bundle from a z_sendmany request.
+// This uses the Rust Orchard builder via FFI to produce a real bundle, proof, and signatures.
+func (h *OrchardRPCHandler) synthesizeOrchardBundle(fromAddress string, amounts []sendAmount) ([]byte, string, error) {
+	// Generate deterministic bundle ID from request parameters
+	requestData := fmt.Sprintf("sendmany:%s:%v", fromAddress, amounts)
+	bundleHash := common.Blake2Hash([]byte(requestData))
+	bundleID := "opid-" + hex.EncodeToString(bundleHash[:8]) // Use first 8 bytes for operation ID
+
+	if h.txPool == nil {
+		return nil, "", fmt.Errorf("transaction pool unavailable")
+	}
+
+	for i, amount := range amounts {
+		if _, err := validateAmountWithinRange(amount.Amount); err != nil {
+			return nil, "", fmt.Errorf("invalid amount for recipient %d: %w", i, err)
+		}
+	}
+
+	anchor := h.txPool.CurrentAnchor()
+	bundleBytes, err := h.txPool.GenerateBundle([]byte(requestData), anchor)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to generate bundle: %w", err)
+	}
+
+	log.Info(log.Node, "Orchard bundle synthesized",
+		"bundle_id", bundleID,
+		"from", fromAddress,
+		"recipients", len(amounts),
+		"bundle_size", len(bundleBytes))
+
+	return bundleBytes, bundleID, nil
 }
 
 // ZSendManyWithChangeTo sends Orchard funds with explicit change address
@@ -1134,4 +1254,437 @@ func generateRandomBytes(n int) ([]byte, error) {
 		return nil, err
 	}
 	return buf, nil
+}
+
+// ===== Transaction Pool RPC Methods =====
+
+// ZSendRawOrchardBundle submits a raw Orchard bundle to the transaction pool
+//
+// Parameters:
+// - hexData (string): Hex-encoded Orchard bundle data
+//
+// Returns:
+// - string: Transaction ID/hash
+//
+// RPC Docs (z_sendraworchardbundle):
+// Request: {"jsonrpc":"1.0","id":1,"method":"z_sendraworchardbundle","params":["0x1234..."]}
+// Response: {"result":"bundle_hash_123..."}
+//
+// Example curl call:
+// curl -X POST http://localhost:8232 -H "Content-Type: application/json" -d '{"jsonrpc":"1.0","method":"z_sendraworchardbundle","params":["0x1234..."],"id":1}'
+func (h *OrchardRPCHandler) ZSendRawOrchardBundle(req []string, res *string) error {
+	if len(req) != 1 && len(req) != 2 {
+		return fmt.Errorf("invalid number of arguments: expected 1 or 2, got %d", len(req))
+	}
+
+	hexData := req[0]
+	var bundleData []byte
+	if hexData != "" {
+		var err error
+		bundleData, err = hex.DecodeString(strings.TrimPrefix(hexData, "0x"))
+		if err != nil {
+			return fmt.Errorf("invalid hex data: %w", err)
+		}
+	}
+
+	var issueBundle []byte
+	var err error
+	if len(req) == 2 && req[1] != "" {
+		issueBundle, err = hex.DecodeString(strings.TrimPrefix(req[1], "0x"))
+		if err != nil {
+			return fmt.Errorf("invalid issue bundle hex data: %w", err)
+		}
+	}
+	if len(bundleData) == 0 && len(issueBundle) == 0 {
+		return fmt.Errorf("bundle data cannot be empty")
+	}
+
+	// Enforce payload size limit to prevent memory abuse
+	totalSize := len(bundleData) + len(issueBundle)
+	if totalSize > 64*1024 { // 64KB limit
+		return fmt.Errorf("bundle too large: %d bytes > 64KB", totalSize)
+	}
+
+	if h.txPool == nil {
+		return fmt.Errorf("transaction pool not initialized")
+	}
+
+	// Generate bundle ID from data hash
+	var idBuf []byte
+	idBuf = make([]byte, 0, 8+len(bundleData)+len(issueBundle))
+	var lenBuf [4]byte
+	binary.LittleEndian.PutUint32(lenBuf[:], uint32(len(bundleData)))
+	idBuf = append(idBuf, lenBuf[:]...)
+	idBuf = append(idBuf, bundleData...)
+	binary.LittleEndian.PutUint32(lenBuf[:], uint32(len(issueBundle)))
+	idBuf = append(idBuf, lenBuf[:]...)
+	idBuf = append(idBuf, issueBundle...)
+	bundleHash := common.Blake2Hash(idBuf)
+	bundleID := hex.EncodeToString(bundleHash[:])
+
+	// Submit to transaction pool
+	if err := h.txPool.AddBundle(bundleData, issueBundle, bundleID); err != nil {
+		return fmt.Errorf("failed to add bundle to pool: %w", err)
+	}
+
+	*res = bundleID
+	log.Info(log.Node, "Raw Orchard bundle submitted",
+		"bundle_id", bundleID,
+		"orchard_bytes", len(bundleData),
+		"issue_bytes", len(issueBundle))
+
+	return nil
+}
+
+// ZGetMempoolInfo returns information about the transaction pool
+//
+// Parameters: none
+//
+// Returns:
+// - object: Mempool statistics
+//
+// RPC Docs (z_getmempoolinfo):
+// Request: {"jsonrpc":"1.0","id":1,"method":"z_getmempoolinfo","params":[]}
+// Response: {"result":{"size":42,"bytes":1024000,"usage":2048000}}
+//
+// Example curl call:
+// curl -X POST http://localhost:8232 -H "Content-Type: application/json" -d '{"jsonrpc":"1.0","method":"z_getmempoolinfo","params":[],"id":1}'
+func (h *OrchardRPCHandler) ZGetMempoolInfo(req []string, res *string) error {
+	if len(req) != 0 {
+		return fmt.Errorf("invalid number of arguments: expected 0, got %d", len(req))
+	}
+
+	if h.txPool == nil {
+		return fmt.Errorf("transaction pool not initialized")
+	}
+
+	stats := h.txPool.GetPoolStats()
+
+	// Create mempool info response
+	info := map[string]interface{}{
+		"size":                    stats.PendingBundles,
+		"bytes":                   stats.PendingBundles * 1000, // Estimate 1KB per bundle
+		"usage":                   stats.PendingBundles * 2000, // Estimate 2KB memory usage per bundle
+		"total_bundles":           stats.TotalBundles,
+		"work_packages_generated": stats.WorkPackagesGenerated,
+		"tree_size":               stats.TreeSize,
+		"nullifier_count":         stats.NullifierCount,
+		"last_activity":           stats.LastActivity.Unix(),
+	}
+
+	jsonData, err := json.Marshal(info)
+	if err != nil {
+		return fmt.Errorf("failed to marshal mempool info: %w", err)
+	}
+
+	*res = string(jsonData)
+	return nil
+}
+
+// ZGetRawMempool returns a list of transaction IDs in the mempool
+//
+// Parameters:
+// - verbose (bool, optional): Whether to return detailed info (default false)
+//
+// Returns:
+// - array or object: Transaction IDs or detailed transaction info
+//
+// RPC Docs (z_getrawmempool):
+// Request: {"jsonrpc":"1.0","id":1,"method":"z_getrawmempool","params":[false]}
+// Response: {"result":["txid1","txid2","txid3"]}
+//
+// Example curl call:
+// curl -X POST http://localhost:8232 -H "Content-Type: application/json" -d '{"jsonrpc":"1.0","method":"z_getrawmempool","params":[false],"id":1}'
+func (h *OrchardRPCHandler) ZGetRawMempool(req []string, res *string) error {
+	verbose := false
+	if len(req) > 0 {
+		if req[0] == "true" {
+			verbose = true
+		}
+	}
+	if len(req) > 1 {
+		return fmt.Errorf("invalid number of arguments: expected 0 or 1, got %d", len(req))
+	}
+
+	if h.txPool == nil {
+		return fmt.Errorf("transaction pool not initialized")
+	}
+
+	bundles := h.txPool.GetPendingBundles()
+
+	var result interface{}
+
+	if verbose {
+		// Return detailed bundle information
+		detailed := make(map[string]interface{})
+		for _, bundle := range bundles {
+			detailed[bundle.ID] = map[string]interface{}{
+				"time":         bundle.Timestamp.Unix(),
+				"size":         len(bundle.RawData),
+				"actions":      len(bundle.Actions),
+				"nullifiers":   len(bundle.Nullifiers),
+				"commitments":  len(bundle.Commitments),
+				"gas_estimate": bundle.GasEstimate,
+			}
+		}
+		result = detailed
+	} else {
+		// Return simple array of bundle IDs
+		ids := make([]string, 0, len(bundles))
+		for _, bundle := range bundles {
+			ids = append(ids, bundle.ID)
+		}
+		result = ids
+	}
+
+	jsonData, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("failed to marshal mempool data: %w", err)
+	}
+
+	*res = string(jsonData)
+	return nil
+}
+
+// ===== Transparent Transaction RPC Methods =====
+
+// TransparentTxDataResponse is a builder-side payload for tag=4 extrinsics.
+type TransparentTxDataResponse struct {
+	Available                  bool     `json:"available"`
+	TransparentTxDataExtrinsic []byte   `json:"transparent_tx_data_extrinsic,omitempty"`
+	TransparentMerkleRoot      [32]byte `json:"transparent_merkle_root,omitempty"`
+	TransparentUtxoRoot        [32]byte `json:"transparent_utxo_root,omitempty"`
+	TransparentUtxoSize        uint64   `json:"transparent_utxo_size,omitempty"`
+}
+
+// GetTransparentTxData returns a prebuilt TransparentTxData extrinsic with roots.
+//
+// Parameters: none
+//
+// Returns:
+// - object: {available, transparent_tx_data_extrinsic, transparent_merkle_root, transparent_utxo_root, transparent_utxo_size}
+//
+// Example curl call:
+// curl -X POST http://localhost:8232 -H "Content-Type: application/json" -d '{"jsonrpc":"1.0","method":"gettransparenttxdata","params":[],"id":1}'
+func (h *OrchardRPCHandler) GetTransparentTxData(req []string, res *string) error {
+	if h.orchardRollup == nil {
+		return fmt.Errorf("orchard rollup not initialized")
+	}
+
+	var currentHeight uint32
+	if height, err := h.orchardRollup.LatestBlockNumber(); err == nil {
+		currentHeight = height
+	}
+	_, extrinsic, merkleRoot, utxoRoot, utxoSize, _, _, err := h.orchardRollup.buildTransparentTxDataExtrinsic(currentHeight)
+	if err != nil {
+		return err
+	}
+
+	response := TransparentTxDataResponse{
+		Available:                  len(extrinsic) > 0,
+		TransparentTxDataExtrinsic: extrinsic,
+		TransparentMerkleRoot:      merkleRoot,
+		TransparentUtxoRoot:        utxoRoot,
+		TransparentUtxoSize:        utxoSize,
+	}
+
+	jsonBytes, err := json.Marshal(response)
+	if err != nil {
+		return fmt.Errorf("failed to marshal transparent tx data: %w", err)
+	}
+	*res = string(jsonBytes)
+	return nil
+}
+
+// GetRawTransaction returns raw transaction data for transparent transactions
+//
+// Parameters:
+// - txid (string): Transaction ID
+// - verbose (bool, optional): Return JSON object if true, hex string if false (default false)
+//
+// Returns:
+// - string: Raw transaction hex or JSON object
+//
+// RPC Docs (getrawtransaction):
+// Request: {"jsonrpc":"1.0","id":1,"method":"getrawtransaction","params":["txid123",false]}
+// Response: {"result":"0100000001..."}
+//
+// Example curl call:
+// curl -X POST http://localhost:8232 -H "Content-Type: application/json" -d '{"jsonrpc":"1.0","method":"getrawtransaction","params":["txid123",false],"id":1}'
+func (h *OrchardRPCHandler) GetRawTransaction(req []string, res *string) error {
+	if len(req) < 1 {
+		return fmt.Errorf("invalid number of arguments: expected at least 1, got %d", len(req))
+	}
+
+	txid := req[0]
+	verbose := false
+	if len(req) > 1 {
+		if req[1] == "true" || req[1] == "1" {
+			verbose = true
+		}
+	}
+
+	log.Info(log.Node, "GetRawTransaction", "txid", txid, "verbose", verbose)
+
+	if h.orchardRollup == nil || h.orchardRollup.transparentTxStore == nil {
+		return fmt.Errorf("transparent transaction store not initialized")
+	}
+
+	result, err := h.orchardRollup.transparentTxStore.GetRawTransaction(txid, verbose)
+	if err != nil {
+		return err
+	}
+
+	if verbose {
+		// Return JSON object
+		jsonBytes, err := json.Marshal(result)
+		if err != nil {
+			return fmt.Errorf("failed to marshal transaction: %w", err)
+		}
+		*res = string(jsonBytes)
+	} else {
+		// Return hex string
+		*res = result.(string)
+	}
+
+	log.Debug(log.Node, "GetRawTransaction: Returning transaction", "txid", txid, "verbose", verbose)
+	return nil
+}
+
+// SendRawTransaction broadcasts a raw transparent transaction to the network
+//
+// Parameters:
+// - hexstring (string): Raw transaction in hex format
+// - allowhighfees (bool, optional): Allow high fees (default false)
+//
+// Returns:
+// - string: Transaction ID
+//
+// RPC Docs (sendrawtransaction):
+// Request: {"jsonrpc":"1.0","id":1,"method":"sendrawtransaction","params":["0100000001..."]}
+// Response: {"result":"txid123..."}
+//
+// Example curl call:
+// curl -X POST http://localhost:8232 -H "Content-Type: application/json" -d '{"jsonrpc":"1.0","method":"sendrawtransaction","params":["0100000001..."],"id":1}'
+func (h *OrchardRPCHandler) SendRawTransaction(req []string, res *string) error {
+	if len(req) < 1 {
+		return fmt.Errorf("invalid number of arguments: expected at least 1, got %d", len(req))
+	}
+
+	txHex := req[0]
+	if txHex == "" {
+		return fmt.Errorf("transaction hex cannot be empty")
+	}
+
+	log.Info(log.Node, "SendRawTransaction", "tx_size", len(txHex))
+
+	if h.orchardRollup == nil || h.orchardRollup.transparentTxStore == nil {
+		return fmt.Errorf("transparent transaction store not initialized")
+	}
+	if h.orchardRollup.transparentUtxoTree == nil {
+		return fmt.Errorf("transparent UTXO tree not initialized")
+	}
+
+	// Validate transaction against builder-side consensus rules before mempool admission.
+	txBytes, err := hex.DecodeString(stripHexPrefix(txHex))
+	if err != nil {
+		return fmt.Errorf("invalid transaction hex: %w", err)
+	}
+
+	parsedTx, err := ParseZcashTxV5(txBytes)
+	if err != nil {
+		return fmt.Errorf("failed to parse transaction: %w", err)
+	}
+
+	var currentHeight uint32
+	if height, err := h.orchardRollup.LatestBlockNumber(); err == nil {
+		currentHeight = height
+	}
+	currentTime := uint32(time.Now().Unix())
+	if err := ValidateTransparentTxs([]*ZcashTxV5{parsedTx}, h.orchardRollup.transparentUtxoTree, currentHeight, currentTime); err != nil {
+		return fmt.Errorf("transparent consensus validation failed: %w", err)
+	}
+
+	// Add transaction to mempool
+	txid, err := h.orchardRollup.transparentTxStore.AddRawTransaction(txHex)
+	if err != nil {
+		return fmt.Errorf("failed to add transaction: %w", err)
+	}
+
+	*res = txid
+	log.Info(log.Node, "SendRawTransaction: Transaction broadcast", "txid", txid)
+
+	return nil
+}
+
+// GetRawMempool returns all transaction IDs in the transparent mempool
+//
+// Parameters:
+// - verbose (bool, optional): Return detailed info if true (default false)
+//
+// Returns:
+// - array or object: Transaction IDs or detailed transaction info
+//
+// RPC Docs (getrawmempool):
+// Request: {"jsonrpc":"1.0","id":1,"method":"getrawmempool","params":[false]}
+// Response: {"result":["txid1","txid2","txid3"]}
+//
+// Example curl call:
+// curl -X POST http://localhost:8232 -H "Content-Type: application/json" -d '{"jsonrpc":"1.0","method":"getrawmempool","params":[false],"id":1}'
+func (h *OrchardRPCHandler) GetRawMempool(req []string, res *string) error {
+	verbose := false
+	if len(req) > 0 {
+		if req[0] == "true" || req[0] == "1" {
+			verbose = true
+		}
+	}
+
+	log.Info(log.Node, "GetRawMempool", "verbose", verbose)
+
+	if h.orchardRollup == nil || h.orchardRollup.transparentTxStore == nil {
+		return fmt.Errorf("transparent transaction store not initialized")
+	}
+
+	result := h.orchardRollup.transparentTxStore.GetMempool(verbose)
+
+	jsonBytes, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("failed to marshal mempool: %w", err)
+	}
+
+	*res = string(jsonBytes)
+	log.Debug(log.Node, "GetRawMempool: Returning mempool")
+
+	return nil
+}
+
+// GetMempoolInfo returns mempool information
+//
+// Parameters: none
+//
+// Returns:
+// - object: Mempool statistics
+//
+// RPC Docs (getmempoolinfo):
+// Request: {"jsonrpc":"1.0","id":1,"method":"getmempoolinfo","params":[]}
+// Response: {"result":{"size":42,"bytes":1024000}}
+//
+// Example curl call:
+// curl -X POST http://localhost:8232 -H "Content-Type: application/json" -d '{"jsonrpc":"1.0","method":"getmempoolinfo","params":[],"id":1}'
+func (h *OrchardRPCHandler) GetMempoolInfo(req []string, res *string) error {
+	log.Info(log.Node, "GetMempoolInfo")
+
+	if h.orchardRollup == nil || h.orchardRollup.transparentTxStore == nil {
+		return fmt.Errorf("transparent transaction store not initialized")
+	}
+
+	info := h.orchardRollup.transparentTxStore.GetMempoolInfo()
+
+	jsonBytes, err := json.Marshal(info)
+	if err != nil {
+		return fmt.Errorf("failed to marshal mempool info: %w", err)
+	}
+
+	*res = string(jsonBytes)
+	return nil
 }

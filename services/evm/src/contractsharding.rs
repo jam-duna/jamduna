@@ -175,7 +175,7 @@ pub enum ObjectKind {
     Code = 0x00,
     /// Storage shard object (kind=0x01)
     StorageShard = 0x01,
-    /// Balance object - balance updates for Verkle BasicData (kind=0x02)
+    /// Balance object - balance updates for UBT BasicData (kind=0x02)
     Balance = 0x02,
 
     /// Receipt object (kind=0x03) - contains full transaction data
@@ -184,7 +184,7 @@ pub enum ObjectKind {
     MetaShard = 0x04,
     /// Block object (kind=0x05)
     Block = 0x05,
-    /// Nonce object - nonce updates for Verkle BasicData (kind=0x06)
+    /// Nonce object - nonce updates for UBT BasicData (kind=0x06)
     Nonce = 0x06,
 }
 

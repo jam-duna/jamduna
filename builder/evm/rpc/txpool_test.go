@@ -14,8 +14,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/statedb"
-	evmtypes "github.com/colorfulnotion/jam/statedb/evmtypes"
-	"github.com/colorfulnotion/jam/builder/evm/types"
+	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
 	ethereumCommon "github.com/ethereum/go-ethereum/common"
 	ethereumTypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"

@@ -12,12 +12,10 @@ import (
 	"reflect"
 	"sync"
 
-	evmverkle "github.com/colorfulnotion/jam/builder/evm/verkle"
+	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	"github.com/colorfulnotion/jam/types"
-	"github.com/ethereum/go-verkle"
 	"github.com/syndtr/goleveldb/leveldb"
 	leveldbstorage "github.com/syndtr/goleveldb/leveldb/storage"
 )
@@ -61,6 +59,13 @@ const (
 	CheckStateTransition = false
 )
 
+const defaultUBTProfile = JAMProfile
+
+func ubtTreeKeyToHash(key TreeKey) common.Hash {
+	keyBytes := key.ToBytes()
+	return common.BytesToHash(keyBytes[:])
+}
+
 type LogMessage struct {
 	Payload     interface{}
 	Description string
@@ -97,37 +102,37 @@ type StateDBStorage struct {
 	// Witness cache (Phase 4+): Direct witness provision for EVM execution
 	// These caches are populated after refine execution and persist across queries
 	// Maps are protected by witnessMutex for thread-safe access
-	Storageshard map[common.Address]evmtypes.ContractStorage  // address → complete storage
-	Code         map[common.Address][]byte                    // address → bytecode
-	witnessMutex sync.RWMutex                                 // Protects witness caches
-	VerkleProofs map[common.Address]evmtypes.VerkleMultiproof // address → verkle multiproof (Phase 2, future)
+	Storageshard map[common.Address]evmtypes.ContractStorage // address → complete storage
+	Code         map[common.Address][]byte                   // address → bytecode
+	witnessMutex sync.RWMutex                                // Protects witness caches
+	UBTProofs    map[common.Address]evmtypes.UBTMultiproof   // address → UBT multiproof
 
-	// Verkle tree storage: verkleRoot → VerkleNode
-	// Stores historical Verkle tree states by their root hash
-	// Allows querying state at any specific verkleRoot (e.g., at a specific block)
-	verkleRoots      map[common.Hash]verkle.VerkleNode
-	verkleRootsMutex sync.RWMutex // Protects verkleRoots map
+	// UBT tree storage: stateRoot → UBT tree
+	// Stores historical UBT states by their root hash
+	// Allows querying state at any specific state root (e.g., at a specific block)
+	ubtRoots      map[common.Hash]*UnifiedBinaryTree
+	ubtRootsMutex sync.RWMutex // Protects ubtRoots map
 
-	// CurrentVerkleTree is the active working tree for the current execution
+	// CurrentUBT is the active working UBT tree for the current execution
 	// This is used during transaction execution and witness generation
-	// After execution completes, the post-state tree is stored in verkleRoots
-	CurrentVerkleTree verkle.VerkleNode
+	// After execution completes, the post-state tree is stored in ubtRoots
+	CurrentUBT *UnifiedBinaryTree
 
-	// Verkle read log: Tracks all Verkle tree reads during EVM execution
-	// This is the authoritative source for BuildVerkleWitness
-	verkleReadLog      []types.VerkleRead
-	verkleReadLogMutex sync.Mutex // Protects verkleReadLog
+	// UBT read log: Tracks all UBT-backed reads during EVM execution
+	// This is the authoritative source for BuildUBTWitness
+	ubtReadLog      []types.UBTRead
+	ubtReadLogMutex sync.Mutex // Protects ubtReadLog
 
-	// Checkpoint manager for proof serving (VERKLE2.md Week 2)
+	// Checkpoint manager for proof serving (UBT checkpoint tree)
 	// Manages in-memory checkpoint trees with pinned (genesis, snapshots) + LRU cache
 	CheckpointManager *CheckpointTreeManager
 
 	// Multi-rollup support: Service-scoped state tracking
-	// Each service maintains its own EVM block history and verkle state
+	// Each service maintains its own EVM block history and state
 
-	// Service-scoped verkle roots
-	// Key: "vr_{serviceID}_{blockNumber}" → verkleRoot
-	serviceVerkleRoots map[string]common.Hash
+	// Service-scoped state roots
+	// Key: "vr_{serviceID}_{blockNumber}" → state root
+	serviceUBTRoots map[string]common.Hash
 
 	// Service-scoped JAM state roots (links service block to JAM state)
 	// Key: "jsr_{serviceID}_{blockNumber}" → ServiceBlockIndex
@@ -188,15 +193,15 @@ func NewStateDBStorage(path string, jamda types.JAMDA, telemetryClient types.Tel
 		stagedInserts:         make(map[common.Hash][]byte),
 		stagedDeletes:         make(map[common.Hash]bool),
 		keys:                  make(map[common.Hash]bool),
-		verkleRoots:           make(map[common.Hash]verkle.VerkleNode),
-		CurrentVerkleTree:     verkle.New(),
-		serviceVerkleRoots:    make(map[string]common.Hash),
+		ubtRoots:              make(map[common.Hash]*UnifiedBinaryTree),
+		CurrentUBT:            NewUnifiedBinaryTree(Config{Profile: defaultUBTProfile}),
+		serviceUBTRoots:       make(map[string]common.Hash),
 		serviceJAMStateRoots:  make(map[string]*types.ServiceBlockIndex),
 		serviceBlockHashIndex: make(map[string]uint64),
 		latestRollupBlock:     make(map[uint32]uint64),
 	}
 
-	// Initialize checkpoint manager (VERKLE2.md Week 2)
+	// Initialize checkpoint manager (UBT checkpoint tree)
 	// maxCheckpoints: 100 (keeps ~100 fine checkpoints in LRU)
 	// coarsePeriod: 7200 blocks (~12h at 2s/block)
 	// finePeriod: 600 blocks (~1h at 2s/block)
@@ -265,108 +270,90 @@ func (store *StateDBStorage) CloseDB() error {
 	return store.db.Close()
 }
 
-// StoreVerkleTransition stores a Verkle tree state by its root hash
-// This allows later retrieval of the exact tree state at a specific verkleRoot
-func (store *StateDBStorage) StoreVerkleTransition(verkleRoot common.Hash, tree verkle.VerkleNode) error {
-	store.verkleRootsMutex.Lock()
-	defer store.verkleRootsMutex.Unlock()
+// StoreUBTTransition stores a UBT tree state by its root hash.
+func (store *StateDBStorage) StoreUBTTransition(ubtRoot common.Hash, tree *UnifiedBinaryTree) error {
+	store.ubtRootsMutex.Lock()
+	defer store.ubtRootsMutex.Unlock()
 
 	if tree == nil {
-		return fmt.Errorf("cannot store nil VerkleNode")
+		return fmt.Errorf("cannot store nil UBT tree")
 	}
 
-	store.verkleRoots[verkleRoot] = tree
+	store.ubtRoots[ubtRoot] = tree
 	return nil
 }
 
-// GetVerkleTreeAtRoot retrieves a Verkle tree state by its root hash
-// Returns the tree and a boolean indicating if it was found
-func (store *StateDBStorage) GetVerkleTreeAtRoot(verkleRoot common.Hash) (interface{}, bool) {
-	store.verkleRootsMutex.RLock()
-	defer store.verkleRootsMutex.RUnlock()
+// GetUBTTreeAtRoot retrieves a UBT tree state by its root hash.
+func (store *StateDBStorage) GetUBTTreeAtRoot(ubtRoot common.Hash) (interface{}, bool) {
+	store.ubtRootsMutex.RLock()
+	defer store.ubtRootsMutex.RUnlock()
 
-	tree, found := store.verkleRoots[verkleRoot]
+	tree, found := store.ubtRoots[ubtRoot]
 	return tree, found
 }
 
-// GetVerkleNodeForBlockNumber maps a block number string to the corresponding Verkle tree
-// Returns: verkleTree, ok
-func (store *StateDBStorage) GetVerkleNodeForBlockNumber(blockNumber string) (interface{}, bool) {
-	// TODO: Implement actual blockNumber -> verkleRoot mapping
-	// For now, return the current verkle tree if blockNumber is "latest"
+// GetUBTNodeForBlockNumber maps a block number string to the corresponding UBT tree.
+func (store *StateDBStorage) GetUBTNodeForBlockNumber(blockNumber string) (interface{}, bool) {
+	// TODO: Implement actual blockNumber -> UBT root mapping
+	// For now, return the current UBT tree if blockNumber is "latest"
 	if blockNumber == "latest" || blockNumber == "" {
-		if store.CurrentVerkleTree != nil {
-			return store.CurrentVerkleTree, true
+		if store.CurrentUBT != nil {
+			return store.CurrentUBT, true
 		}
 		return nil, false
 	}
-	// For specific block numbers, need to lookup block and get its verkle root
+	// For specific block numbers, need to lookup block and get its state root
 	// This requires accessing block storage which needs to be implemented
 	return nil, false
 }
 
-// GetBalance reads balance from Verkle tree using BasicData
-// Returns: balance (as 32-byte hash), error
+// GetBalance reads balance from the UBT tree using BasicData.
 func (store *StateDBStorage) GetBalance(tree interface{}, address common.Address) (common.Hash, error) {
-	verkleTree, ok := tree.(verkle.VerkleNode)
+	ubtTree, ok := tree.(*UnifiedBinaryTree)
 	if !ok {
 		return common.Hash{}, fmt.Errorf("invalid tree type")
 	}
 
-	// Read from Verkle tree BasicData
-	basicDataKey := evmverkle.BasicDataKey(address[:])
-	basicData, err := verkleTree.Get(basicDataKey[:], nil)
-	if err != nil {
+	basicKey := GetBasicDataKey(defaultUBTProfile, address)
+	value, found, _ := ubtTree.Get(&basicKey)
+	if !found {
 		return common.Hash{}, nil
 	}
 
-	if len(basicData) < 32 {
-		return common.Hash{}, nil
-	}
-
-	// Extract balance from BasicData (offset 16-31, 16 bytes, big-endian per EIP-6800)
-	// Copy directly to Hash (already big-endian), right-aligned
+	basicData := DecodeBasicDataLeaf(value)
 	var balanceHash common.Hash
-	copy(balanceHash[16:32], basicData[16:32])
+	copy(balanceHash[16:32], basicData.Balance[:])
 
 	return balanceHash, nil
 }
 
-// GetNonce reads nonce from Verkle tree using BasicData
-// Returns: nonce, error
+// GetNonce reads nonce from the UBT tree using BasicData.
 func (store *StateDBStorage) GetNonce(tree interface{}, address common.Address) (uint64, error) {
-	verkleTree, ok := tree.(verkle.VerkleNode)
+	ubtTree, ok := tree.(*UnifiedBinaryTree)
 	if !ok {
 		return 0, fmt.Errorf("invalid tree type")
 	}
 
-	// Read from Verkle tree BasicData
-	basicDataKey := evmverkle.BasicDataKey(address[:])
-	basicData, err := verkleTree.Get(basicDataKey[:], nil)
-	if err != nil {
+	basicKey := GetBasicDataKey(defaultUBTProfile, address)
+	value, found, _ := ubtTree.Get(&basicKey)
+	if !found {
 		return 0, nil
 	}
 
-	if len(basicData) < 32 {
-		return 0, nil
-	}
-
-	// Extract nonce from BasicData (offset 8-15, 8 bytes, big-endian per EIP-6800)
-	nonce := binary.BigEndian.Uint64(basicData[8:16])
-	return nonce, nil
+	basicData := DecodeBasicDataLeaf(value)
+	return basicData.Nonce, nil
 }
 
-// GetCurrentVerkleTree returns the current active Verkle tree
-// Returns: tree (nil if not available)
-func (store *StateDBStorage) GetCurrentVerkleTree() interface{} {
-	return store.CurrentVerkleTree
+// GetCurrentUBTTree returns the current active UBT tree.
+func (store *StateDBStorage) GetCurrentUBTTree() interface{} {
+	return store.CurrentUBT
 }
 
-// StoreVerkleTree stores a verkle tree at a specific root hash
-func (store *StateDBStorage) StoreVerkleTree(root common.Hash, tree verkle.VerkleNode) {
-	store.verkleRootsMutex.Lock()
-	defer store.verkleRootsMutex.Unlock()
-	store.verkleRoots[root] = tree
+// StoreUBTTree stores a UBT tree at a specific root hash.
+func (store *StateDBStorage) StoreUBTTree(root common.Hash, tree *UnifiedBinaryTree) {
+	store.ubtRootsMutex.Lock()
+	defer store.ubtRootsMutex.Unlock()
+	store.ubtRoots[root] = tree
 }
 
 func (store *StateDBStorage) ReadRawKV(key []byte) ([]byte, bool, error) {
@@ -562,103 +549,101 @@ func (store *StateDBStorage) StoreWarpSyncFragment(setID uint32, fragment types.
 	return nil
 }
 
-// ===== EVM State Access Methods (Verkle-based) =====
+// ===== EVM State Access Methods (UBT-backed log, UBT reads) =====
 
-// FetchBalance fetches balance from Verkle tree
+// FetchBalance fetches balance from the UBT tree.
 func (store *StateDBStorage) FetchBalance(address common.Address, txIndex uint32) ([32]byte, error) {
 	var balance [32]byte
 
-	if store.CurrentVerkleTree == nil {
+	if store.CurrentUBT == nil {
 		return balance, nil // Return zero balance if no tree
 	}
 
-	// Compute Verkle key for balance
-	verkleKey := evmverkle.BasicDataKey(address[:])
+	// Compute UBT tree key for balance
+	ubtKey := GetBasicDataKey(defaultUBTProfile, address)
 
-	// Track the read in verkleReadLog
-	store.AppendVerkleRead(types.VerkleRead{
-		VerkleKey: common.BytesToHash(verkleKey),
-		Address:   address,
-		KeyType:   0, // BasicData
-		Extra:     0,
-		TxIndex:   txIndex,
+	// Track the read in ubtReadLog
+	store.AppendUBTRead(types.UBTRead{
+		TreeKey: ubtTreeKeyToHash(ubtKey),
+		Address: address,
+		KeyType: 0, // BasicData
+		Extra:   0,
+		TxIndex: txIndex,
 	})
 
-	// Read BasicData from Verkle tree
-	basicData, err := store.CurrentVerkleTree.Get(verkleKey, nil)
-	if err == nil && len(basicData) >= 32 {
-		// Balance is at offset 16-31 in BasicData (16 bytes)
-		copy(balance[16:32], basicData[16:32])
+	// Read BasicData from UBT tree
+	if basicDataValue, found, _ := store.CurrentUBT.Get(&ubtKey); found {
+		basicData := DecodeBasicDataLeaf(basicDataValue)
+		copy(balance[16:32], basicData.Balance[:])
 	}
 
 	return balance, nil
 }
 
-// FetchNonce fetches nonce from Verkle tree
+// FetchNonce fetches nonce from the UBT tree.
 func (store *StateDBStorage) FetchNonce(address common.Address, txIndex uint32) ([32]byte, error) {
 	var nonce [32]byte
 
-	if store.CurrentVerkleTree == nil {
+	if store.CurrentUBT == nil {
 		return nonce, nil // Return zero nonce if no tree
 	}
 
-	// Compute Verkle key for nonce
-	verkleKey := evmverkle.BasicDataKey(address[:])
+	// Compute UBT tree key for nonce
+	ubtKey := GetBasicDataKey(defaultUBTProfile, address)
 
-	// Track the read in verkleReadLog
-	store.AppendVerkleRead(types.VerkleRead{
-		VerkleKey: common.BytesToHash(verkleKey),
-		Address:   address,
-		KeyType:   0, // BasicData
-		Extra:     0,
-		TxIndex:   txIndex,
+	// Track the read in ubtReadLog
+	store.AppendUBTRead(types.UBTRead{
+		TreeKey: ubtTreeKeyToHash(ubtKey),
+		Address: address,
+		KeyType: 0, // BasicData
+		Extra:   0,
+		TxIndex: txIndex,
 	})
 
-	// Read BasicData from Verkle tree
-	basicData, err := store.CurrentVerkleTree.Get(verkleKey, nil)
-	if err == nil && len(basicData) >= 32 {
-		// Nonce is at offset 8-15 in BasicData (8 bytes)
-		copy(nonce[24:32], basicData[8:16])
+	// Read BasicData from UBT tree
+	if basicDataValue, found, _ := store.CurrentUBT.Get(&ubtKey); found {
+		basicData := DecodeBasicDataLeaf(basicDataValue)
+		binary.BigEndian.PutUint64(nonce[24:32], basicData.Nonce)
 	}
 
 	return nonce, nil
 }
 
-// FetchCode fetches code from Verkle tree
+// FetchCode fetches code from the UBT tree.
 func (store *StateDBStorage) FetchCode(address common.Address, txIndex uint32) ([]byte, uint32, error) {
-	if store.CurrentVerkleTree == nil {
+	if store.CurrentUBT == nil {
 		return nil, 0, nil
 	}
 
 	// Read code size from BasicData first
 	var codeSize uint32
 
-	basicDataKey := evmverkle.BasicDataKey(address[:])
+	ubtBasicKey := GetBasicDataKey(defaultUBTProfile, address)
 
-	// Track BasicData read for Verkle witness
-	store.AppendVerkleRead(types.VerkleRead{
-		VerkleKey: common.BytesToHash(basicDataKey),
-		Address:   address,
-		KeyType:   0, // BasicData
-		Extra:     0,
-		TxIndex:   txIndex,
+	// Track BasicData read for UBT witness
+	store.AppendUBTRead(types.UBTRead{
+		TreeKey: ubtTreeKeyToHash(ubtBasicKey),
+		Address: address,
+		KeyType: 0, // BasicData
+		Extra:   0,
+		TxIndex: txIndex,
 	})
 
-	basicData, err := store.CurrentVerkleTree.Get(basicDataKey, nil)
-	if err == nil && len(basicData) >= 32 {
-		// Extract code_size from offset 5-7 (3 bytes, big-endian uint24)
-		codeSize = uint32(basicData[5])<<16 | uint32(basicData[6])<<8 | uint32(basicData[7])
+	basicDataValue, found, _ := store.CurrentUBT.Get(&ubtBasicKey)
+	if found {
+		basicData := DecodeBasicDataLeaf(basicDataValue)
+		codeSize = basicData.CodeSize
 	}
 
 	if codeSize == 0 {
 		// Track CodeHash read even for EOAs for witness completeness
-		codeHashKey := evmverkle.CodeHashKey(address[:])
-		store.AppendVerkleRead(types.VerkleRead{
-			VerkleKey: common.BytesToHash(codeHashKey),
-			Address:   address,
-			KeyType:   1, // CodeHash
-			Extra:     0,
-			TxIndex:   txIndex,
+		ubtCodeHashKey := GetCodeHashKey(defaultUBTProfile, address)
+		store.AppendUBTRead(types.UBTRead{
+			TreeKey: ubtTreeKeyToHash(ubtCodeHashKey),
+			Address: address,
+			KeyType: 1, // CodeHash
+			Extra:   0,
+			TxIndex: txIndex,
 		})
 		return nil, 0, nil
 	}
@@ -671,20 +656,20 @@ func (store *StateDBStorage) FetchCode(address common.Address, txIndex uint32) (
 
 	// Read each chunk
 	for chunkID := uint64(0); chunkID < uint64(numChunks); chunkID++ {
-		chunkKey := evmverkle.CodeChunkKey(address[:], chunkID)
+		ubtChunkKey := GetCodeChunkKey(defaultUBTProfile, address, chunkID)
 
-		// Track the read in verkleReadLog
-		store.AppendVerkleRead(types.VerkleRead{
-			VerkleKey: common.BytesToHash(chunkKey),
-			Address:   address,
-			KeyType:   2, // CodeChunk
-			Extra:     chunkID,
-			TxIndex:   txIndex,
+		// Track the read in ubtReadLog
+		store.AppendUBTRead(types.UBTRead{
+			TreeKey: ubtTreeKeyToHash(ubtChunkKey),
+			Address: address,
+			KeyType: 2, // CodeChunk
+			Extra:   chunkID,
+			TxIndex: txIndex,
 		})
 
 		// Read chunk from tree
-		chunkData, err := store.CurrentVerkleTree.Get(chunkKey, nil)
-		if err != nil || len(chunkData) < 32 {
+		chunkData, found, _ := store.CurrentUBT.Get(&ubtChunkKey)
+		if !found {
 			return nil, 0, fmt.Errorf("chunk %d not found", chunkID)
 		}
 
@@ -707,55 +692,55 @@ func (store *StateDBStorage) FetchCode(address common.Address, txIndex uint32) (
 	return code, codeSize, nil
 }
 
-// FetchCodeHash fetches code hash from Verkle tree
+// FetchCodeHash fetches code hash from the UBT tree.
 func (store *StateDBStorage) FetchCodeHash(address common.Address, txIndex uint32) ([32]byte, error) {
 	var codeHash [32]byte
 
-	if store.CurrentVerkleTree == nil {
-		copy(codeHash[:], evmverkle.GetEmptyCodeHash())
+	if store.CurrentUBT == nil {
+		codeHash = emptyCodeHash()
 		return codeHash, nil
 	}
 
-	// Compute Verkle key for code hash
-	verkleKey := evmverkle.CodeHashKey(address[:])
+	// Compute UBT tree key for code hash
+	ubtKey := GetCodeHashKey(defaultUBTProfile, address)
 
-	// Track the read in verkleReadLog
-	store.AppendVerkleRead(types.VerkleRead{
-		VerkleKey: common.BytesToHash(verkleKey),
-		Address:   address,
-		KeyType:   1, // CodeHash
-		Extra:     0,
-		TxIndex:   txIndex,
+	// Track the read in ubtReadLog
+	store.AppendUBTRead(types.UBTRead{
+		TreeKey: ubtTreeKeyToHash(ubtKey),
+		Address: address,
+		KeyType: 1, // CodeHash
+		Extra:   0,
+		TxIndex: txIndex,
 	})
 
-	// Read code hash from Verkle tree
-	codeHashData, err := store.CurrentVerkleTree.Get(verkleKey, nil)
-	if err == nil && len(codeHashData) >= 32 {
-		copy(codeHash[:], codeHashData[:32])
+	// Read code hash from UBT tree
+	codeHashData, found, _ := store.CurrentUBT.Get(&ubtKey)
+	if found {
+		codeHash = codeHashData
 	} else {
 		// Code hash not found - return empty code hash
-		copy(codeHash[:], evmverkle.GetEmptyCodeHash())
+		codeHash = emptyCodeHash()
 	}
 
 	return codeHash, nil
 }
 
-// FetchStorage fetches storage value from Verkle tree
+// FetchStorage fetches storage value from the UBT tree.
 // Returns (value, found, error) where found=false indicates the slot was absent.
 func (store *StateDBStorage) FetchStorage(address common.Address, storageKey [32]byte, txIndex uint32) ([32]byte, bool, error) {
 	var value [32]byte
 	found := false
 
-	if store.CurrentVerkleTree == nil {
+	if store.CurrentUBT == nil {
 		return value, found, nil
 	}
 
-	// Compute Verkle key for storage slot
-	verkleKey := evmverkle.StorageSlotKey(address[:], storageKey[:])
+	// Compute UBT tree key for storage slot
+	ubtKey := GetStorageSlotKey(defaultUBTProfile, address, storageKey)
 
-	// Track the read in verkleReadLog
-	store.AppendVerkleRead(types.VerkleRead{
-		VerkleKey:  common.BytesToHash(verkleKey),
+	// Track the read in ubtReadLog
+	store.AppendUBTRead(types.UBTRead{
+		TreeKey:    ubtTreeKeyToHash(ubtKey),
 		Address:    address,
 		KeyType:    3, // Storage
 		Extra:      0,
@@ -763,86 +748,79 @@ func (store *StateDBStorage) FetchStorage(address common.Address, storageKey [32
 		TxIndex:    txIndex,
 	})
 
-	// Read storage value from Verkle tree
-	storageData, err := store.CurrentVerkleTree.Get(verkleKey, nil)
-	if err == nil && len(storageData) >= 32 {
-		copy(value[:], storageData[:32])
+	// Read storage value from UBT tree
+	storageData, ok, _ := store.CurrentUBT.Get(&ubtKey)
+	if ok {
+		value = storageData
 		found = true
 	}
 
 	return value, found, nil
 }
 
-// ===== Verkle Read Log Management =====
+// ===== UBT Read Log Management =====
 
-// AppendVerkleRead appends a verkle read to the log
-func (store *StateDBStorage) AppendVerkleRead(read types.VerkleRead) {
-	store.verkleReadLogMutex.Lock()
-	defer store.verkleReadLogMutex.Unlock()
-	store.verkleReadLog = append(store.verkleReadLog, read)
+// AppendUBTRead appends a UBT read to the log.
+func (store *StateDBStorage) AppendUBTRead(read types.UBTRead) {
+	store.ubtReadLogMutex.Lock()
+	defer store.ubtReadLogMutex.Unlock()
+	store.ubtReadLog = append(store.ubtReadLog, read)
 }
 
-// GetVerkleReadLog returns a copy of the verkle read log
-func (store *StateDBStorage) GetVerkleReadLog() []types.VerkleRead {
-	store.verkleReadLogMutex.Lock()
-	defer store.verkleReadLogMutex.Unlock()
-	// Return a copy to prevent external modification
-	logCopy := make([]types.VerkleRead, len(store.verkleReadLog))
-	copy(logCopy, store.verkleReadLog)
+// GetUBTReadLog returns a copy of the UBT read log.
+func (store *StateDBStorage) GetUBTReadLog() []types.UBTRead {
+	store.ubtReadLogMutex.Lock()
+	defer store.ubtReadLogMutex.Unlock()
+	logCopy := make([]types.UBTRead, len(store.ubtReadLog))
+	copy(logCopy, store.ubtReadLog)
 	return logCopy
 }
 
-// ClearVerkleReadLog clears the verkle read log
-func (store *StateDBStorage) ClearVerkleReadLog() {
-	store.verkleReadLogMutex.Lock()
-	defer store.verkleReadLogMutex.Unlock()
-	store.verkleReadLog = nil
+// ClearUBTReadLog clears the UBT read log.
+func (store *StateDBStorage) ClearUBTReadLog() {
+	store.ubtReadLogMutex.Lock()
+	defer store.ubtReadLogMutex.Unlock()
+	store.ubtReadLog = nil
 }
 
 func (store *StateDBStorage) ResetTrie() {
-	store.CurrentVerkleTree = verkle.New()
+	store.CurrentUBT = NewUnifiedBinaryTree(Config{Profile: defaultUBTProfile})
 	store.trieDB = NewMerkleTree(nil)
 	store.stagedInserts = make(map[common.Hash][]byte)
 	store.stagedDeletes = make(map[common.Hash]bool)
 	store.keys = make(map[common.Hash]bool)
-	store.verkleRoots = make(map[common.Hash]verkle.VerkleNode)
+	store.ubtRoots = make(map[common.Hash]*UnifiedBinaryTree)
 	store.Root = store.trieDB.GetRoot()
 }
 
-// BuildVerkleWitness builds a dual-proof verkle witness and stores the post-state tree
-func (store *StateDBStorage) BuildVerkleWitness(contractWitnessBlob []byte) ([]byte, error) {
-	if store.CurrentVerkleTree == nil {
-		return nil, fmt.Errorf("no verkle tree available")
+// BuildUBTWitness builds dual UBT witnesses and stores the post-state tree.
+func (store *StateDBStorage) BuildUBTWitness(contractWitnessBlob []byte) ([]byte, []byte, error) {
+	if store.CurrentUBT == nil {
+		return nil, nil, fmt.Errorf("no UBT tree available")
 	}
 
-	// Get the verkle read log
-	verkleReadLog := store.GetVerkleReadLog()
+	// Get the UBT read log
+	ubtReadLog := store.GetUBTReadLog()
 
-	// Build witness using the function from witness.go
-	witnessBytes, postVerkleRoot, postTree, err := BuildVerkleWitness(verkleReadLog, contractWitnessBlob, store.CurrentVerkleTree)
+	// Build witness using the UBT function from witness.go
+	preWitness, postWitness, postUBTRoot, postTree, err := BuildUBTWitness(ubtReadLog, contractWitnessBlob, store.CurrentUBT)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build witness: %w", err)
+		return nil, nil, fmt.Errorf("failed to build witness: %w", err)
 	}
 
-	// Store the post-state tree in verkleRoots map
-	store.verkleRootsMutex.Lock()
-	store.verkleRoots[postVerkleRoot] = postTree
-	store.verkleRootsMutex.Unlock()
+	// Store the post-state tree in ubtRoots map
+	store.ubtRootsMutex.Lock()
+	store.ubtRoots[postUBTRoot] = postTree
+	store.ubtRootsMutex.Unlock()
 
-	return witnessBytes, nil
+	return preWitness, postWitness, nil
 }
 
-// ComputeBlockAccessListHash builds BAL from verkle witness and returns hash + statistics
+// ComputeBlockAccessListHash builds BAL from UBT witnesses and returns hash + statistics
 // Used by both builder (to compute hash for payload) and guarantor (to verify builder's hash)
-func (store *StateDBStorage) ComputeBlockAccessListHash(verkleWitness []byte) (common.Hash, uint32, uint32, error) {
-	// Split witness into pre-state and post-state sections
-	preState, postState, err := SplitWitnessSections(verkleWitness)
-	if err != nil {
-		return common.Hash{}, 0, 0, fmt.Errorf("failed to split witness: %w", err)
-	}
-
-	// Build Block Access List from witness
-	bal, err := BuildBlockAccessList(preState, postState)
+func (store *StateDBStorage) ComputeBlockAccessListHash(preWitness []byte, postWitness []byte) (common.Hash, uint32, uint32, error) {
+	// Build Block Access List from witnesses
+	bal, err := BuildBlockAccessList(preWitness, postWitness)
 	if err != nil {
 		return common.Hash{}, 0, 0, fmt.Errorf("failed to build BAL: %w", err)
 	}
@@ -868,9 +846,9 @@ func (store *StateDBStorage) ComputeBlockAccessListHash(verkleWitness []byte) (c
 
 // Multi-Rollup Support: Helper Functions
 
-// verkleRootKey generates the key for storing service verkle roots
+// ubtRootKey generates the key for storing service UBT roots
 // Format: "vr_{serviceID}_{blockNumber}"
-func verkleRootKey(serviceID uint32, blockNumber uint32) string {
+func ubtRootKey(serviceID uint32, blockNumber uint32) string {
 	return fmt.Sprintf("vr_%d_%d", serviceID, blockNumber)
 }
 
@@ -915,8 +893,8 @@ func parseBlockNumber(blockNumber string, latestBlock uint64) (uint32, error) {
 
 // Multi-Rollup Support: Implementation Methods
 
-// GetVerkleNodeForServiceBlock retrieves the Verkle tree for a specific service's block
-func (store *StateDBStorage) GetVerkleNodeForServiceBlock(serviceID uint32, blockNumber string) (interface{}, bool) {
+// GetUBTNodeForServiceBlock retrieves the UBT tree for a specific service's block
+func (store *StateDBStorage) GetUBTNodeForServiceBlock(serviceID uint32, blockNumber string) (interface{}, bool) {
 	store.serviceMutex.RLock()
 	defer store.serviceMutex.RUnlock()
 
@@ -932,18 +910,18 @@ func (store *StateDBStorage) GetVerkleNodeForServiceBlock(serviceID uint32, bloc
 		return nil, false
 	}
 
-	// Lookup verkle root
-	key := verkleRootKey(serviceID, blockNum)
-	verkleRoot, ok := store.serviceVerkleRoots[key]
+	// Lookup UBT root
+	key := ubtRootKey(serviceID, blockNum)
+	ubtRoot, ok := store.serviceUBTRoots[key]
 	if !ok {
 		return nil, false
 	}
 
-	// Retrieve verkle tree from root
-	store.verkleRootsMutex.RLock()
-	defer store.verkleRootsMutex.RUnlock()
+	// Retrieve UBT tree from root
+	store.ubtRootsMutex.RLock()
+	defer store.ubtRootsMutex.RUnlock()
 
-	tree, found := store.verkleRoots[verkleRoot]
+	tree, found := store.ubtRoots[ubtRoot]
 	return tree, found
 }
 
@@ -964,14 +942,14 @@ func (store *StateDBStorage) StoreServiceBlock(serviceID uint32, blockIface inte
 		ServiceID:    serviceID,
 		BlockNumber:  blockNumber,
 		BlockHash:    block.WorkPackageHash,
-		VerkleRoot:   block.VerkleRoot,
+		UBTRoot:      block.UBTRoot,
 		JAMStateRoot: jamStateRoot,
 		JAMSlot:      jamSlot,
 	}
 
-	// Store verkle root mapping
-	vrKey := verkleRootKey(serviceID, blockNumber)
-	store.serviceVerkleRoots[vrKey] = block.VerkleRoot
+	// Store UBT root mapping
+	ubtKey := ubtRootKey(serviceID, blockNumber)
+	store.serviceUBTRoots[ubtKey] = block.UBTRoot
 
 	// Store JAM state root mapping
 	jsrKey := jamStateRootKey(serviceID, blockNumber)
@@ -1116,7 +1094,7 @@ func (store *StateDBStorage) GetBlockByNumber(serviceID uint32, blockNumber stri
 		BlockHash:    block.WorkPackageHash,
 		ParentHash:   common.Hash{}, // No parent hash in EvmBlockPayload
 		Timestamp:    block.Timestamp,
-		VerkleRoot:   block.VerkleRoot,
+		UBTRoot:      block.UBTRoot,
 		Transactions: transactions,
 		Receipts:     receipts,
 	}
@@ -1158,35 +1136,35 @@ func (store *StateDBStorage) FinalizeEVMBlock(
 		return fmt.Errorf("failed to store service block: %w", err)
 	}
 
-	// Store the verkle tree snapshot
-	store.verkleRootsMutex.Lock()
-	if store.CurrentVerkleTree != nil {
-		// The CurrentVerkleTree should already be the post-state tree
-		// Store it under the block's verkle root
-		store.verkleRoots[payload.VerkleRoot] = store.CurrentVerkleTree
-		log.Info(log.EVM, "Stored verkle tree snapshot",
+	// Store the UBT tree snapshot
+	store.ubtRootsMutex.Lock()
+	if store.CurrentUBT != nil {
+		// The CurrentUBT should already be the post-state tree
+		// Store it under the block's UBT root
+		store.ubtRoots[payload.UBTRoot] = store.CurrentUBT
+		log.Info(log.EVM, "Stored UBT tree snapshot",
 			"serviceID", serviceID,
 			"blockNumber", payload.Number,
-			"verkleRoot", payload.VerkleRoot.String())
+			"ubtRoot", payload.UBTRoot.String())
 	}
-	store.verkleRootsMutex.Unlock()
+	store.ubtRootsMutex.Unlock()
 
-	// Create checkpoint if needed (VERKLE2.md Week 2)
-	if store.CheckpointManager != nil && store.CurrentVerkleTree != nil {
+	// Create checkpoint if needed (UBT checkpoint tree)
+	if store.CheckpointManager != nil && store.CurrentUBT != nil {
 		blockHeight := uint64(payload.Number)
 
 		// Pin genesis checkpoint (never evicted)
 		if blockHeight == 0 {
-			store.CheckpointManager.PinCheckpoint(blockHeight, store.CurrentVerkleTree)
+			store.CheckpointManager.PinCheckpoint(blockHeight, store.CurrentUBT)
 			log.Info(log.EVM, "Pinned genesis checkpoint",
 				"height", blockHeight,
-				"verkleRoot", payload.VerkleRoot.String())
+				"ubtRoot", payload.UBTRoot.String())
 		} else if store.CheckpointManager.ShouldCreateCheckpoint(blockHeight) {
 			// Add to LRU cache for fine/coarse checkpoints
-			store.CheckpointManager.AddCheckpoint(blockHeight, store.CurrentVerkleTree)
+			store.CheckpointManager.AddCheckpoint(blockHeight, store.CurrentUBT)
 			log.Info(log.EVM, "Created checkpoint",
 				"height", blockHeight,
-				"verkleRoot", payload.VerkleRoot.String())
+				"ubtRoot", payload.UBTRoot.String())
 		}
 	}
 
@@ -1194,16 +1172,15 @@ func (store *StateDBStorage) FinalizeEVMBlock(
 		"serviceID", serviceID,
 		"blockNumber", payload.Number,
 		"blockHash", payload.WorkPackageHash.String(),
-		"verkleRoot", payload.VerkleRoot.String(),
+		"ubtRoot", payload.UBTRoot.String(),
 		"jamStateRoot", jamStateRoot.String(),
 		"jamSlot", jamSlot)
 
 	return nil
 }
 
-// InitializeEVMGenesis creates a genesis block for an EVM service with an initial account balance
-// This sets up the Verkle tree with the genesis account and stores block 0
-// Returns the verkle root hash and any error
+// InitializeEVMGenesis creates a genesis block for an EVM service with an initial account balance.
+// This sets up the UBT tree with the genesis account and stores block 0.
 func (store *StateDBStorage) InitializeEVMGenesis(
 	serviceID uint32,
 	issuerAddress common.Address,
@@ -1217,46 +1194,29 @@ func (store *StateDBStorage) InitializeEVMGenesis(
 	// Convert startBalance to Wei (18 decimals)
 	balanceWei := new(big.Int).Mul(big.NewInt(startBalance), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
 
-	// Get current verkle tree
-	if store.CurrentVerkleTree == nil {
-		return common.Hash{}, fmt.Errorf("CurrentVerkleTree is nil")
+	// Get current UBT tree
+	if store.CurrentUBT == nil {
+		return common.Hash{}, fmt.Errorf("CurrentUBT is nil")
 	}
 
-	// Insert account BasicData (balance + nonce)
-	// BasicData format: [version(1) | reserved(4) | code_size(3) | nonce(8) | balance(16)] = 32 bytes
-	var basicData [32]byte
-	basicData[0] = 0 // version = 0
-
-	// code_size = 0 (EOA, no code)
-	basicData[5] = 0
-	basicData[6] = 0
-	basicData[7] = 0
-
-	// nonce = 1 (8 bytes at offset 8-15, big-endian per EIP-6800)
-	nonce := uint64(1)
-	binary.BigEndian.PutUint64(basicData[8:16], nonce)
-
-	// balance = balanceWei (16 bytes at offset 16-31, big-endian per EIP-6800)
+	// Insert account BasicData (balance + nonce).
+	var balance [16]byte
 	balanceBytes := balanceWei.Bytes()
 	if len(balanceBytes) > 16 {
 		return common.Hash{}, fmt.Errorf("balance too large: %d bytes", len(balanceBytes))
 	}
-	// Copy to offset 16, right-aligned (pad left with zeros if needed)
-	copy(basicData[32-len(balanceBytes):32], balanceBytes)
+	copy(balance[16-len(balanceBytes):], balanceBytes)
 
-	// Insert BasicData into Verkle tree
-	basicDataKey := evmverkle.BasicDataKey(issuerAddress[:])
-	if err := store.CurrentVerkleTree.Insert(basicDataKey, basicData[:], nil); err != nil {
-		return common.Hash{}, fmt.Errorf("failed to insert BasicData: %w", err)
-	}
+	basicData := NewBasicDataLeaf(1, balance, 0)
+	basicDataKey := GetBasicDataKey(defaultUBTProfile, issuerAddress)
+	store.CurrentUBT.Insert(basicDataKey, basicData.Encode())
 
-	// Commit the updated verkle tree
-	verkleRoot := store.CurrentVerkleTree.Commit()
-	verkleRootBytes := verkleRoot.Bytes()
-	verkleRootHash := common.BytesToHash(verkleRootBytes[:])
+	// Compute the updated UBT root
+	ubtRoot := store.CurrentUBT.RootHash()
+	ubtRootHash := common.BytesToHash(ubtRoot[:])
 
-	// Store the updated verkle tree
-	store.StoreVerkleTree(verkleRootHash, store.CurrentVerkleTree)
+	// Store the updated UBT tree
+	store.StoreUBTTree(ubtRootHash, store.CurrentUBT)
 
 	// Create genesis block (block 0) for EVM service
 	genesisBlock := &evmtypes.EvmBlockPayload{
@@ -1267,7 +1227,7 @@ func (store *StateDBStorage) InitializeEVMGenesis(
 		NumTransactions:     0,
 		Timestamp:           0,
 		GasUsed:             0,
-		VerkleRoot:          verkleRootHash,
+		UBTRoot:             ubtRootHash,
 		TransactionsRoot:    common.Hash{},
 		ReceiptRoot:         common.Hash{},
 		BlockAccessListHash: common.Hash{},
@@ -1282,10 +1242,10 @@ func (store *StateDBStorage) InitializeEVMGenesis(
 	}
 
 	log.Info(log.EVM, "✅ InitializeEVMGenesis complete",
-		"verkleRoot", verkleRootHash.Hex(),
+		"stateRoot", ubtRootHash.Hex(),
 		"issuerBalance", balanceWei.String())
 
-	return verkleRootHash, nil
+	return ubtRootHash, nil
 }
 
 // LoadBlockByHeight loads a block by height for checkpoint manager
@@ -1308,9 +1268,4 @@ func (store *StateDBStorage) LoadBlockByHeight(height uint64) (*evmtypes.EvmBloc
 	}
 
 	return &block, nil
-}
-
-// ExtractVerkleStateDelta extracts the verkle state delta from a post-state witness
-func (s *StateDBStorage) ExtractVerkleStateDelta(postStateWitness []byte) (*evmverkle.VerkleStateDelta, error) {
-	return evmverkle.ExtractVerkleStateDelta(postStateWitness)
 }

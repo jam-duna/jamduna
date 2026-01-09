@@ -42,7 +42,7 @@ The JAM architecture uses **independent RPC servers** for each service. No routi
 │                             │   │                             │
 │  • EVM transaction pool     │   │  • Orchard note pool        │
 │  • Bundle construction      │   │  • Bundle construction      │
-│  • Verkle witness gen       │   │  • Halo2 proof gen          │
+│  • UBT witness gen          │   │  • Halo2 proof gen          │
 │                             │   │                             │
 │  RPC Port: 8545             │   │  RPC Port: 8232             │
 │  Methods: eth_*             │   │  Methods: z_* (Zcash-compatible)               │
@@ -219,8 +219,8 @@ curl -X POST http://localhost:8232 \
 **Structure**:
 ```
 evm/
-├── verkle/              # EVM Verkle tree state
-├── witness/             # EVM witness generation
+├── ubt/                 # EVM UBT (Unified Binary Tree) state
+├── witness/             # EVM UBT witness generation
 ├── rpc/                 # EVM RPC layer
 │   ├── server.go        # EVMHTTPServer - independent HTTP server
 │   ├── handler.go       # EVMRPCHandler - eth_* RPC methods

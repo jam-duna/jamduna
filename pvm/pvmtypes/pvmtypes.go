@@ -200,7 +200,7 @@ const (
 	PROVIDE           = 26  // Provide data
 	LOG               = 100 // Debug logging
 	FETCH_WITNESS     = 254 // Majik CE139 fetch/cache
-	FETCH_VERKLE      = 255 // Majik Verkle fetch (unified balance/nonce/code/storage)
+	FETCH_UBT         = 255 // Majik UBT fetch (unified balance/nonce/code/storage)
 )
 
 // hostFnNames maps host function IDs to human-readable names
@@ -237,7 +237,7 @@ var hostFnNames = map[int]string{
 
 	// Custom Host Functions
 	FETCH_WITNESS: "FETCH_WITNESS",
-	FETCH_VERKLE:  "FETCH_VERKLE",
+	FETCH_UBT:     "FETCH_UBT",
 }
 
 // HostFnToName returns the human-readable name for a host function ID

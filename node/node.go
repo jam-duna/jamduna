@@ -56,10 +56,10 @@ const (
 
 const (
 	isWriteSnapshot        = false
-	isWriteTransition      = true
-	isWriteBundle          = true
-	isWriteBundleFollower  = true
-	isWriteBundleGuarantor = true
+	isWriteTransition      = false
+	isWriteBundle          = false
+	isWriteBundleFollower  = false
+	isWriteBundleGuarantor = false
 	isWriteBundleAuditor   = false
 )
 
@@ -833,7 +833,11 @@ func (n *Node) SetPVMBackend(pvm_mode string) {
 
 // TODO: take in serviceIDs for multi-rollup support
 func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, peers []string, startPeerList map[uint16]*Peer, dataDir string, port int, jceMode string, role string) (*Node, error) {
-	addr := fmt.Sprintf("0.0.0.0:%d", port)
+	bindAddr := os.Getenv("JAM_BIND_ADDR")
+	if bindAddr == "" {
+		bindAddr = "0.0.0.0"
+	}
+	addr := fmt.Sprintf("%s:%d", bindAddr, port)
 	ed25519_priv := ed25519.PrivateKey(credential.Ed25519Secret[:])
 	ed25519_pub := ed25519_priv.Public().(ed25519.PublicKey)
 	sanID := common.ToSAN(ed25519_pub)
@@ -1885,6 +1889,118 @@ func (n *NodeContent) SubmitBundleSameCore(b *types.WorkPackageBundle) (err erro
 		}
 	}
 	return fmt.Errorf("SubmitBundleSameCore: no peers found for coreIndex %d", coreIndex)
+}
+
+// SubmitBundleToCore submits a bundle to a specific core (for non-validator builders)
+// Unlike SubmitBundleSameCore, this function:
+// 1. Takes an explicit target core index
+// 2. Sends to ALL validators on that core (not filtering out self)
+// This is designed for builder nodes that are not part of the validator set
+func (n *NodeContent) SubmitBundleToCore(b *types.WorkPackageBundle, targetCoreIndex uint16) (err error) {
+	workPackageHash := b.WorkPackage.Hash()
+	n.TrackSubmittedWorkPackage(workPackageHash)
+
+	// Calculate slot based on JCE mode
+	var slot uint32
+	if n.nodeSelf.jceMode == JCEDefault {
+		slot = n.statedb.GetTimeslot()
+	} else {
+		slot = common.GetWallClockJCE(fudgeFactorJCE)
+	}
+	_, assignments := n.statedb.CalculateAssignments(slot)
+
+	// Find peers assigned to the target core
+	peers := make([]uint16, 0)
+	for _, assignment := range assignments {
+		if assignment.CoreIndex == targetCoreIndex {
+			peer, err := n.GetPeerInfoByEd25519(assignment.Validator.Ed25519)
+			if err == nil {
+				peers = append(peers, peer.PeerID)
+			}
+		}
+	}
+	log.Info(log.G, "SubmitBundleToCore SUBMISSION Start", "NODE", n.id, "validators", peers, "coreIndex", targetCoreIndex, "slot", slot)
+
+	// Use CE146 (full bundle submission)
+	useCE133 := false
+
+	// Send to validators on the target core
+	for _, assignment := range assignments {
+		if assignment.CoreIndex == targetCoreIndex {
+			pubkey := assignment.Validator.Ed25519
+			peer, err := n.GetPeerInfoByEd25519(pubkey)
+			if err != nil {
+				log.Error(log.Node, "SubmitBundleToCore GetPeerInfoByEd25519", "err", err, "pubkey", pubkey)
+				continue
+			}
+
+			blobs := types.ExtrinsicsBlobs{}
+			if len(b.ExtrinsicData) > 0 {
+				blobs = b.ExtrinsicData[0]
+			}
+
+			if useCE133 {
+				err = peer.SendWorkPackageSubmission(context.Background(), b.WorkPackage, blobs, targetCoreIndex)
+				if err != nil {
+					log.Error(log.Node, "SubmitBundleToCore SendWorkPackageSubmission (CE133)", "err", err, "pubkey", pubkey)
+				} else {
+					return nil
+				}
+			} else {
+				// Use CE146: Full bundle submission
+				expectedSegments := 0
+				for _, workItem := range b.WorkPackage.WorkItems {
+					expectedSegments += len(workItem.ImportedSegments)
+				}
+
+				var allSegments [][]byte
+				var allImportProofs [][]common.Hash
+				for workItemIdx, workItemSegments := range b.ImportSegmentData {
+					for segIdx, segment := range workItemSegments {
+						allSegments = append(allSegments, segment)
+						if workItemIdx < len(b.Justification) && segIdx < len(b.Justification[workItemIdx]) {
+							allImportProofs = append(allImportProofs, b.Justification[workItemIdx][segIdx])
+						} else {
+							allImportProofs = append(allImportProofs, []common.Hash{})
+						}
+					}
+				}
+
+				ce146Valid := true
+				if expectedSegments > 0 {
+					if len(allSegments) != expectedSegments || len(allImportProofs) != expectedSegments {
+						ce146Valid = false
+					} else {
+						for _, seg := range allSegments {
+							if len(seg) != types.SegmentSize {
+								ce146Valid = false
+								break
+							}
+						}
+					}
+				}
+
+				if !ce146Valid && expectedSegments > 0 {
+					err = peer.SendWorkPackageSubmission(context.Background(), b.WorkPackage, blobs, targetCoreIndex)
+					if err != nil {
+						log.Error(log.Node, "SubmitBundleToCore CE133 fallback", "err", err, "pubkey", pubkey)
+					} else {
+						return nil
+					}
+				} else {
+					segmentsRootMappings := []JAMSNPSegmentRootMapping{}
+					err = peer.SendBundleSubmission(context.Background(), targetCoreIndex, segmentsRootMappings, b.WorkPackage, blobs, allSegments, allImportProofs)
+					if err != nil {
+						log.Error(log.Node, "SubmitBundleToCore SendBundleSubmission (CE146)", "err", err, "pubkey", peer.SanKey())
+					} else {
+						log.Info(log.G, "SubmitBundleToCore CE146 SUCCESS", "coreIndex", targetCoreIndex, "numSegments", len(allSegments))
+						return nil
+					}
+				}
+			}
+		}
+	}
+	return fmt.Errorf("SubmitBundleToCore: no peers found for coreIndex %d", targetCoreIndex)
 }
 
 // SubmitAndWaitForWorkPackageBundle submits a work package bundle and waits for it to be accumulated

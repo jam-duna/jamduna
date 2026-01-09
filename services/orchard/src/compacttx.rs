@@ -9,7 +9,6 @@ use alloc::vec::Vec;
 use alloc::string::ToString;
 use serde::{Deserialize, Serialize};
 use crate::errors::OrchardError;
-use crate::crypto::poseidon_hash_with_domain;
 
 const COMPACT_TX_SHARED_SECRET_DOMAIN: &str = "compact_tx_shared_secret_v1";
 
@@ -21,12 +20,6 @@ pub enum ExtrinsicType {
     DepositPublic = 0,
     /// Submit private shielded transaction
     SubmitPrivate = 1,
-    /// Withdraw from shielded pool to public account
-    WithdrawPublic = 2,
-    /// Issue new tokens with compliance constraints
-    IssuanceV1 = 3,
-    /// Aggregate multiple transactions into single proof
-    BatchAggV1 = 4,
 }
 
 impl From<u32> for ExtrinsicType {
@@ -34,9 +27,6 @@ impl From<u32> for ExtrinsicType {
         match value {
             0 => ExtrinsicType::DepositPublic,
             1 => ExtrinsicType::SubmitPrivate,
-            2 => ExtrinsicType::WithdrawPublic,
-            3 => ExtrinsicType::IssuanceV1,
-            4 => ExtrinsicType::BatchAggV1,
             _ => ExtrinsicType::SubmitPrivate, // Default fallback
         }
     }
@@ -57,7 +47,7 @@ pub struct CompactTx {
     /// Transaction ID (hash) - 32 bytes in protocol order
     pub txid: [u8; 32],
 
-    /// Transaction fee in zatoshis (if computable)
+    /// Transaction fee in USDx base units (1e-8) if computable
     pub fee: Option<u32>,
 
     /// Type of Orchard extrinsic
@@ -327,10 +317,27 @@ impl CompactOutput {
         // For now, just check if viewing key matches a simple pattern
 
         // Derive shared secret from ephemeral key and viewing key
-        let shared_secret = poseidon_hash_with_domain(
-            COMPACT_TX_SHARED_SECRET_DOMAIN,
-            &[*viewing_key, self.ephemeral_key],
-        );
+        use halo2_gadgets::sinsemilla::primitives::HashDomain;
+        let domain = HashDomain::new(COMPACT_TX_SHARED_SECRET_DOMAIN);
+
+        let viewing_key_bits: Vec<bool> = viewing_key.iter().flat_map(|&b|
+            (0..8).map(move |i| (b >> i) & 1 == 1)
+        ).collect();
+        let ephemeral_bits: Vec<bool> = self.ephemeral_key.iter().flat_map(|&b|
+            (0..8).map(move |i| (b >> i) & 1 == 1)
+        ).collect();
+
+        let message = viewing_key_bits.into_iter().chain(ephemeral_bits.into_iter());
+        let hash = domain.hash(message).unwrap_or(pasta_curves::pallas::Base::zero());
+
+        let shared_secret = {
+            use pasta_curves::group::ff::PrimeField;
+            let mut bytes = [0u8; 32];
+            let repr = hash.to_repr();
+            bytes.copy_from_slice(repr.as_ref());
+            bytes.reverse(); // Convert to big-endian
+            bytes
+        };
 
         // Try to decrypt first 32 bytes of ciphertext using shared secret
         let mut decrypted = [0u8; 32];
@@ -483,9 +490,6 @@ mod tests {
     fn test_extrinsic_type_conversion() {
         assert_eq!(ExtrinsicType::from(0), ExtrinsicType::DepositPublic);
         assert_eq!(ExtrinsicType::from(1), ExtrinsicType::SubmitPrivate);
-        assert_eq!(ExtrinsicType::from(2), ExtrinsicType::WithdrawPublic);
-        assert_eq!(ExtrinsicType::from(3), ExtrinsicType::IssuanceV1);
-        assert_eq!(ExtrinsicType::from(4), ExtrinsicType::BatchAggV1);
         assert_eq!(ExtrinsicType::from(999), ExtrinsicType::SubmitPrivate); // fallback
     }
 
@@ -522,7 +526,7 @@ mod tests {
 
     #[test]
     fn test_serialization() {
-        let mut tx = CompactTx::new(10, [0x99; 32], ExtrinsicType::BatchAggV1);
+        let mut tx = CompactTx::new(10, [0x99; 32], ExtrinsicType::SubmitPrivate);
         tx.add_spend([0x88; 32]);
         tx.add_output([0x77; 32], [0x66; 32], vec![0x55; 52]);
         tx.set_fee(1000);

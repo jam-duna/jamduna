@@ -1,4 +1,6 @@
-use crate::error::{bail, Error};
+#[cfg(feature = "std")]
+use crate::error::bail;
+use crate::error::Error;
 use crate::gas::{CostModel, CostModelRef};
 use alloc::sync::Arc;
 use polkavm_assembler::Assembler;
@@ -166,7 +168,10 @@ impl Config {
 
     /// Creates a new default configuration and seeds it from the environment variables.
     pub fn from_env() -> Result<Self, Error> {
+        #[cfg(feature = "std")]
         let mut config = Self::new();
+        #[cfg(not(feature = "std"))]
+        let config = Self::new();
 
         #[cfg(feature = "std")]
         {

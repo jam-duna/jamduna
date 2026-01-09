@@ -4,7 +4,7 @@ use rand_core::OsRng;
 
 use super::{verify_proof, VerificationStrategy};
 use crate::{
-    collections::Vec,
+    collections::{vec, Vec},
     multicore::{IntoParallelIterator, TryFoldAndReduce},
     plonk::{Error, VerifyingKey},
     poly::commitment::{Guard, Params, MSM},

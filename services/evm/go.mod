@@ -4,7 +4,6 @@ go 1.23.4
 
 require (
 	github.com/crate-crypto/go-ipa v0.0.0-20240724233137-53bbb0ceb27a
-	github.com/ethereum/go-verkle v0.2.2
 )
 
 require (

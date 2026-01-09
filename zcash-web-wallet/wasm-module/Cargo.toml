@@ -1,0 +1,61 @@
+[package]
+name = "zcash-tx-viewer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "WASM module for decrypting Zcash shielded transactions"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Core library
+zcash-wallet-core = { path = "../core" }
+
+# Zcash crates - disable proving features for WASM compatibility
+orchard = { workspace = true, features = ["std"] }
+sapling-crypto = { workspace = true, features = ["std"] }
+zcash_address.workspace = true
+zcash_keys = { workspace = true, features = ["transparent-inputs", "sapling", "orchard"] }
+zcash_primitives = { workspace = true, features = ["std"] }
+zcash_protocol.workspace = true
+zcash_transparent.workspace = true
+zip32.workspace = true
+
+# BIP39 mnemonic (for entropy generation)
+rand.workspace = true
+
+# NU7 IssueBundle helpers
+blake2b_simd.workspace = true
+k256.workspace = true
+pasta_curves.workspace = true
+sinsemilla.workspace = true
+
+# WASM bindings
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["console"] }
+
+# HTML generation
+html-bootstrap.workspace = true
+html-builder.workspace = true
+html-elements.workspace = true
+
+# Serialization
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# Crypto utilities
+bech32.workspace = true
+
+# WASM support for randomness
+getrandom = { version = "0.2", features = ["js"] }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[profile.release]
+opt-level = "s"
+lto = true

@@ -1,9 +1,13 @@
 #![allow(dead_code)]
+#![allow(static_mut_refs)]
 #![cfg_attr(any(target_arch = "riscv32", target_arch = "riscv64"), no_std)]
 #![cfg_attr(any(target_arch = "riscv32", target_arch = "riscv64"), no_main)]
 
 #[macro_use]
 extern crate alloc;
+
+#[allow(unused_imports)]
+use orchard_service as _;
 
 // Orchard service modules
 #[path = "refiner.rs"]
@@ -24,6 +28,28 @@ mod vk_registry;
 mod witness;
 #[path = "bundle_codec.rs"]
 mod bundle_codec;
+#[path = "compactblock.rs"]
+mod compactblock;
+#[path = "compacttx.rs"]
+mod compacttx;
+#[path = "sinsemilla_nostd.rs"]
+mod sinsemilla_nostd;
+#[path = "bundle_parser.rs"]
+mod bundle_parser;
+#[path = "signature_verifier.rs"]
+mod signature_verifier;
+#[path = "nu7_types.rs"]
+mod nu7_types;
+
+// Transparent verification modules (Stage 4)
+#[path = "transparent_parser.rs"]
+mod transparent_parser;
+#[path = "transparent_utxo.rs"]
+mod transparent_utxo;
+#[path = "transparent_script.rs"]
+mod transparent_script;
+#[path = "transparent_verify.rs"]
+mod transparent_verify;
 
 // Service constants removed - service ID now sourced from work item
 
@@ -48,7 +74,23 @@ macro_rules! min_stack_size {
     ($size:expr) => {};
 }
 
-use simplealloc::SimpleAlloc;
+#[cfg(any(
+    all(
+        any(target_arch = "riscv32", target_arch = "riscv64"),
+        target_feature = "e"
+    ),
+    doc
+))]
+use polkavm_derive::sbrk as polkavm_sbrk;
+#[cfg(not(any(
+    all(
+        any(target_arch = "riscv32", target_arch = "riscv64"),
+        target_feature = "e"
+    ),
+    doc
+)))]
+fn polkavm_sbrk(_size: usize) {}
+
 use utils::{
     constants::FIRST_READABLE_ADDRESS,
     functions::{
@@ -60,16 +102,11 @@ use utils::{
 #[cfg(not(any(target_arch = "riscv32", target_arch = "riscv64")))]
 fn main() {}
 
-// Import log_crit only for RISC-V target (used in panic handler)
-#[cfg(all(not(test), target_arch = "riscv32", target_feature = "e"))]
-use utils::functions::log_crit;
 
-const SIZE0: usize = 0x200000; // 2 MB stack
+const SIZE0: usize = 0x800000; // 8 MB stack for Halo2 verify
 min_stack_size!(SIZE0);
 
-const SIZE1: usize = 0x200000;
-#[global_allocator]
-static ALLOCATOR: SimpleAlloc<SIZE1> = SimpleAlloc::new();
+const SBRK_SIZE: usize = 64 * 1024 * 1024;
 
 /// Refine entry point for JAM Orchard service
 ///
@@ -84,7 +121,10 @@ static ALLOCATOR: SimpleAlloc<SIZE1> = SimpleAlloc::new();
 /// - `(output_ptr, output_len)`: Pointer and length of serialized execution effects
 #[polkavm_derive::polkavm_export]
 pub extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
+    polkavm_sbrk(SBRK_SIZE);
     log_info("🔫 Orchard refine started");
+    let build_mode = if cfg!(debug_assertions) { "debug" } else { "release" };
+    log_info(&alloc::format!("🔧 Build mode: {}", build_mode));
 
     // Parse refine arguments from PVM memory
     let Some(refine_args) = parse_refine_args(start_address, length) else {
@@ -108,6 +148,14 @@ pub extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
     let Some(work_item) = fetch_work_item(refine_args.wi_index) else {
         log_error("Failed to fetch work item");
         return (FIRST_READABLE_ADDRESS as u64, 0);
+    };
+
+    let pre_state = match refiner::parse_pre_state_payload(&work_item.payload) {
+        Ok(pre_state) => pre_state,
+        Err(e) => {
+            log_error(&alloc::format!("Failed to parse pre-state payload: {:?}", e));
+            return (FIRST_READABLE_ADDRESS as u64, 0);
+        }
     };
 
     // Fetch extrinsics for this work item
@@ -134,6 +182,9 @@ pub extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
     let refine_output = match refiner::process_extrinsics_witness_aware(
         work_item.service,
         &refine_context,
+        &refine_args.wphash,
+        work_item.refine_gas_limit,
+        &pre_state,
         &parsed_extrinsics,
         None,  // Witnesses now bundled with extrinsics
     ) {
@@ -182,6 +233,7 @@ pub extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
     core::mem::forget(buffer);
     (ptr, len)
 }
+
 
 /// Accumulate entry point for JAM Orchard service
 ///

@@ -15,10 +15,11 @@ pub enum OrchardError {
 
     // State errors
     AnchorMismatch { expected: [u8; 32], got: [u8; 32] },
+    NullifierRootMismatch { expected: [u8; 32], got: [u8; 32] },
     NullifierAlreadySpent { nullifier: [u8; 32] },
-    InvalidVerkleProof { key: [u8; 32] },
     TreeCapacityExceeded { current_size: u64, requested_additions: u64, capacity: u64 },
     WitnessMissing,
+    InvalidStateLength { expected: usize, got: usize },
 
     // Validation errors
     InvalidMemoVersion { version: u8 },
@@ -82,17 +83,20 @@ impl core::fmt::Display for OrchardError {
             OrchardError::AnchorMismatch { expected, got } => {
                 write!(f, "Anchor mismatch: expected {:?}, got {:?}", expected, got)
             }
+            OrchardError::NullifierRootMismatch { expected, got } => {
+                write!(f, "Nullifier root mismatch: expected {:?}, got {:?}", expected, got)
+            }
             OrchardError::NullifierAlreadySpent { nullifier } => {
                 write!(f, "Nullifier already spent: {:?}", nullifier)
-            }
-            OrchardError::InvalidVerkleProof { key } => {
-                write!(f, "Invalid Verkle proof for key: {:?}", key)
             }
             OrchardError::TreeCapacityExceeded { current_size, requested_additions, capacity } => {
                 write!(f, "Tree capacity exceeded: {} + {} > {}", current_size, requested_additions, capacity)
             }
             OrchardError::WitnessMissing => {
                 write!(f, "State witness missing for key")
+            }
+            OrchardError::InvalidStateLength { expected, got } => {
+                write!(f, "Invalid state length: expected {} bytes, got {}", expected, got)
             }
             OrchardError::InvalidMemoVersion { version } => {
                 write!(f, "Invalid memo version: {}", version)

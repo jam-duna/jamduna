@@ -52,33 +52,36 @@ func (s WorkPackageBundleStatus) String() string {
 
 // Configuration parameters for the queue
 const (
-	DefaultMaxQueueDepth     = 8           // Maximum items waiting to be submitted
-	DefaultMaxInflight       = 3           // Maximum items in Submitted or Guaranteed state
-	DefaultSubmissionTimeout = 30 * time.Second // Time before Submitted item is considered failed
-	DefaultGuaranteeTimeout  = 18 * time.Second // Time before Guaranteed item is considered failed (3 JAM blocks)
-	DefaultRetentionWindow   = 100         // Number of finalized blocks to retain
-	DefaultMaxVersionRetries = 5           // Maximum resubmission attempts before dropping
+	DefaultMaxQueueDepth      = 8            // Maximum items waiting to be submitted
+	DefaultMaxInflight        = 3            // Maximum items in Submitted or Guaranteed state
+	DefaultSubmissionTimeout  = 30 * time.Second // Time before Submitted item is considered failed
+	DefaultGuaranteeTimeout   = 18 * time.Second // Time before Submitted item without guarantee is requeued (3 JAM blocks)
+	DefaultAccumulateTimeout  = 60 * time.Second // Time before Guaranteed item without accumulation is considered failed (10 JAM blocks)
+	DefaultRetentionWindow    = 100          // Number of finalized blocks to retain
+	DefaultMaxVersionRetries  = 5            // Maximum resubmission attempts before dropping
 )
 
 // QueueConfig holds configuration for the work package queue
 type QueueConfig struct {
-	MaxQueueDepth     int
-	MaxInflight       int
-	SubmissionTimeout time.Duration
-	GuaranteeTimeout  time.Duration
-	RetentionWindow   int
-	MaxVersionRetries int
+	MaxQueueDepth      int
+	MaxInflight        int
+	SubmissionTimeout  time.Duration
+	GuaranteeTimeout   time.Duration
+	AccumulateTimeout  time.Duration
+	RetentionWindow    int
+	MaxVersionRetries  int
 }
 
 // DefaultConfig returns the default queue configuration
 func DefaultConfig() QueueConfig {
 	return QueueConfig{
-		MaxQueueDepth:     DefaultMaxQueueDepth,
-		MaxInflight:       DefaultMaxInflight,
-		SubmissionTimeout: DefaultSubmissionTimeout,
-		GuaranteeTimeout:  DefaultGuaranteeTimeout,
-		RetentionWindow:   DefaultRetentionWindow,
-		MaxVersionRetries: DefaultMaxVersionRetries,
+		MaxQueueDepth:      DefaultMaxQueueDepth,
+		MaxInflight:        DefaultMaxInflight,
+		SubmissionTimeout:  DefaultSubmissionTimeout,
+		GuaranteeTimeout:   DefaultGuaranteeTimeout,
+		AccumulateTimeout:  DefaultAccumulateTimeout,
+		RetentionWindow:    DefaultRetentionWindow,
+		MaxVersionRetries:  DefaultMaxVersionRetries,
 	}
 }
 
@@ -90,8 +93,10 @@ type QueueItem struct {
 	AddTS       time.Time                // When item was added to queue
 	Bundle      *types.WorkPackageBundle // The actual bundle to submit
 	WPHash      common.Hash              // Work package hash (computed after BuildBundle)
-	SubmittedAt time.Time                // When item was submitted (zero if not submitted)
+	SubmittedAt  time.Time               // When item was submitted (zero if not submitted)
+	GuaranteedAt time.Time               // When item was guaranteed (zero if not guaranteed)
 	Status      WorkPackageBundleStatus  // Current status
+	CoreIndex   uint16                   // Target core index for submission
 
 	// OriginalExtrinsics stores the transaction extrinsics BEFORE Verkle witness prepending.
 	// Used for rebuilding bundles on resubmission - BuildBundle prepends a fresh witness,
@@ -175,9 +180,9 @@ func (qs *QueueState) nextEventID() uint64 {
 	return qs.eventIDCounter
 }
 
-// Enqueue adds a new bundle to the queue
+// Enqueue adds a new bundle to the queue for a specific target core
 // Returns the assigned block number and error if queue is full
-func (qs *QueueState) Enqueue(bundle *types.WorkPackageBundle) (uint64, error) {
+func (qs *QueueState) Enqueue(bundle *types.WorkPackageBundle, coreIndex uint16) (uint64, error) {
 	qs.mu.Lock()
 	defer qs.mu.Unlock()
 
@@ -196,6 +201,7 @@ func (qs *QueueState) Enqueue(bundle *types.WorkPackageBundle) (uint64, error) {
 		Bundle:      bundle,
 		WPHash:      bundle.WorkPackage.Hash(),
 		Status:      StatusQueued,
+		CoreIndex:   coreIndex,
 	}
 
 	qs.Queued[blockNumber] = item
@@ -210,6 +216,7 @@ func (qs *QueueState) Enqueue(bundle *types.WorkPackageBundle) (uint64, error) {
 	log.Info(log.Node, "Queue: Enqueued work package",
 		"service", qs.serviceID,
 		"blockNumber", blockNumber,
+		"coreIndex", coreIndex,
 		"wpHash", item.WPHash.Hex(),
 		"queueSize", len(qs.Queued))
 
@@ -220,7 +227,7 @@ func (qs *QueueState) Enqueue(bundle *types.WorkPackageBundle) (uint64, error) {
 // The originalExtrinsics are the transaction extrinsics BEFORE Verkle witness prepending,
 // used for rebuilding bundles on resubmission without double-prepending the witness.
 // The originalWorkItemExtrinsics are the WorkItems[].Extrinsics metadata BEFORE Verkle witness prepending.
-func (qs *QueueState) EnqueueWithOriginalExtrinsics(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic) (uint64, error) {
+func (qs *QueueState) EnqueueWithOriginalExtrinsics(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic, coreIndex uint16) (uint64, error) {
 	qs.mu.Lock()
 	defer qs.mu.Unlock()
 
@@ -239,6 +246,7 @@ func (qs *QueueState) EnqueueWithOriginalExtrinsics(bundle *types.WorkPackageBun
 		Bundle:                     bundle,
 		WPHash:                     bundle.WorkPackage.Hash(),
 		Status:                     StatusQueued,
+		CoreIndex:                  coreIndex,
 		OriginalExtrinsics:         originalExtrinsics,
 		OriginalWorkItemExtrinsics: originalWorkItemExtrinsics,
 	}
@@ -252,10 +260,17 @@ func (qs *QueueState) EnqueueWithOriginalExtrinsics(bundle *types.WorkPackageBun
 	}
 	qs.HashByVer[blockNumber][1] = item.WPHash
 
+	// Count original extrinsics (transactions before Verkle witness prepending)
+	txCount := 0
+	for _, blobs := range originalExtrinsics {
+		txCount += len(blobs)
+	}
 	log.Info(log.Node, "Queue: Enqueued work package with original extrinsics",
 		"service", qs.serviceID,
 		"blockNumber", blockNumber,
+		"coreIndex", coreIndex,
 		"wpHash", item.WPHash.Hex(),
+		"txCount", txCount,
 		"queueSize", len(qs.Queued))
 
 	return blockNumber, nil
@@ -363,13 +378,14 @@ func (qs *QueueState) OnGuaranteed(wpHash common.Hash) {
 
 	if item, ok := qs.Inflight[bn]; ok {
 		item.Status = StatusGuaranteed
+		item.GuaranteedAt = time.Now()
 	}
 
 	if qs.onStatusChange != nil {
 		qs.onStatusChange(bn, oldStatus, StatusGuaranteed)
 	}
 
-	log.Info(log.Node, "Queue: Marked guaranteed",
+	log.Info(log.Node, "🔒 Queue: Marked guaranteed",
 		"service", qs.serviceID,
 		"blockNumber", bn,
 		"version", ver,
@@ -410,7 +426,7 @@ func (qs *QueueState) OnAccumulated(wpHash common.Hash) {
 	// Prune old finalized items
 	qs.pruneOlder(bn)
 
-	log.Info(log.Node, "Queue: Marked accumulated",
+	log.Info(log.Node, "📦 Queue: Marked accumulated",
 		"service", qs.serviceID,
 		"blockNumber", bn,
 		"version", ver,
@@ -505,10 +521,11 @@ func (qs *QueueState) OnTimeoutOrFailure(failedBN uint64) {
 		qs.Status[bn] = StatusQueued
 		delete(qs.Inflight, bn)
 
-		log.Info(log.Node, "Queue: Requeued after failure",
+		log.Info(log.Node, "🔄 Queue: Requeued after failure",
 			"service", qs.serviceID,
 			"blockNumber", bn,
-			"newVersion", newVersion)
+			"newVersion", newVersion,
+			"wpHash", item.WPHash.Hex())
 	}
 }
 
@@ -549,26 +566,34 @@ func (qs *QueueState) CheckTimeouts() {
 	now := time.Now()
 
 	for bn, item := range qs.Inflight {
-		if item.SubmittedAt.IsZero() {
-			continue
-		}
-
 		var timeout time.Duration
+		var refTime time.Time
+
 		switch item.Status {
 		case StatusSubmitted:
+			if item.SubmittedAt.IsZero() {
+				continue
+			}
 			timeout = qs.config.SubmissionTimeout
+			refTime = item.SubmittedAt
 		case StatusGuaranteed:
-			timeout = qs.config.GuaranteeTimeout
+			// Use AccumulateTimeout from GuaranteedAt (more lenient)
+			if item.GuaranteedAt.IsZero() {
+				continue
+			}
+			timeout = qs.config.AccumulateTimeout
+			refTime = item.GuaranteedAt
 		default:
 			continue
 		}
 
-		if now.Sub(item.SubmittedAt) > timeout {
+		if now.Sub(refTime) > timeout {
 			log.Warn(log.Node, "Queue: Timeout detected",
 				"service", qs.serviceID,
 				"blockNumber", bn,
 				"status", item.Status.String(),
-				"submittedAt", item.SubmittedAt)
+				"refTime", refTime,
+				"timeout", timeout)
 
 			// Unlock and call OnTimeoutOrFailure (which will relock)
 			qs.mu.Unlock()

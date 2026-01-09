@@ -1,4 +1,4 @@
-package types
+package evmtypes
 
 import (
 	"bytes"
@@ -433,9 +433,9 @@ type ContractStorage struct {
 	Shard ContractShard // Single shard containing all contract storage
 }
 
-// VerkleMultiproof represents a verkle tree multiproof for state validation
-// Phase 2: Stub implementation - to be replaced with actual verkle proof library
-type VerkleMultiproof struct {
+// UBTMultiproof represents a UBT multiproof for state validation
+// Phase 2: Stub implementation - to be replaced with actual UBT proof library
+type UBTMultiproof struct {
 	// Map of storage key hash to proof path
 	Proofs map[common.Hash][]common.Hash
 }

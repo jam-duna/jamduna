@@ -32,7 +32,7 @@ use utils::objects::ObjectRef;
 use crate::contractsharding::{ContractShard, ContractStorage};
 use crate::contractsharding::{ObjectKind, code_object_id, contract_shard_object_id};
 use crate::receipt::TransactionReceiptRecord;
-use crate::witness_events::{VerkleEventTracker, is_precompile, is_system_contract};
+use crate::witness_events::{UBTEventTracker, is_precompile, is_system_contract};
 use utils::hash_functions::keccak256;
 
 // ===== Type Conversions =====
@@ -124,7 +124,7 @@ pub struct EnvironmentData {
 /// Execution mode for MajikBackend
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExecutionMode {
-    /// Builder mode: uses Verkle host functions for reads (Go maintains verkleReadLog)
+    /// Builder mode: uses UBT host functions for reads (Go maintains ubtReadLog)
     Builder,
     /// Guarantor mode: uses cache-only reads (panics on miss)
     Guarantor,
@@ -148,7 +148,7 @@ pub struct MajikBackend {
     pub meta_ssr: RefCell<crate::meta_sharding::MetaSSR>, // Global SSR for all ObjectRefs
     pub meta_shards: RefCell<BTreeMap<crate::da::ShardId, crate::meta_sharding::MetaShard>>, // Cached meta-shards
 
-    // Verkle mode (builder vs guarantor)
+    // Witness mode (builder vs guarantor)
     pub execution_mode: ExecutionMode,
 
     // Current transaction index (set by MajikOverlay for BAL tracking)
@@ -278,7 +278,7 @@ impl MajikBackend {
                     // These object kinds are not imported during constructor - skip
                 }
                 Some(ObjectKind::Balance) | Some(ObjectKind::Nonce) => {
-                    // Balance/Nonce updates are applied to Verkle tree post-execution, not during constructor
+                    // Balance/Nonce updates are applied to UBT tree post-execution, not during constructor
                     // Skip during witness import
                 }
                 None => {
@@ -314,55 +314,19 @@ impl MajikBackend {
         backend
     }
 
-    /// Create a MajikBackend from a Verkle witness (Guarantor mode)
-    ///
-    /// This verifies the Verkle proof and populates the backend caches
-    /// with the pre-state values from the witness.
-    ///
-    /// Returns None if the witness is invalid or verification fails.
-    pub fn from_verkle_witness(
+    /// Create a MajikBackend from verified UBT witness entries (Guarantor mode).
+    pub fn from_ubt_entries(
         environment: EnvironmentData,
-        witness_data: &[u8],
+        entries: &[crate::ubt::UBTWitnessEntry],
         global_depth: u8,
     ) -> Option<Self> {
-        // Native Rust Verkle proof verification (production ready)
-        // Cryptographic verification via verify_verkle_witness:
-        // - verify_prestate_commitment: validates pre-values exist in pre_state_root (IPA proof)
-        // - verify_post_state_commitment: validates post-values exist in post_state_root (IPA proof)
-        // - verify_ipa_multiproof: full line-by-line port of go-ipa verifier
-        //
-        // Transition verification happens during cache-only execution:
-        // - Pre-witness values loaded into read-only cache below
-        // - Any read not in cache = GUARANTOR ... MISS panic (execution invalid)
-        // - Deterministic re-execution + valid witnesses = valid state transition
-        //
-        // See services/evm/docs/VERKLE.md for JAM execution model details
+        log_info("⚙️  Guarantor: Loading caches from UBT witness entries");
 
-        log_info("⚙️  Guarantor: Running Verkle proof verification");
-        // Currently uses Go FFI for witness parsing, but core crypto is native Rust
-        if !crate::verkle_proof::verify_verkle_witness(witness_data) {
-            log_error("❌ Guarantor: Verkle proof verification FAILED");
-            return None;
-        }
-        log_info("✅ Guarantor: Verkle proof verification PASSED");
+        let (balances, nonces, code, code_hashes, storage) =
+            crate::ubt::entries_to_caches(entries);
 
-        // Deserialize the witness
-        let witness = crate::verkle::VerkleWitness::deserialize(witness_data)?;
-
-        // Parse witness to extract caches
-        let (balances, nonces, code, code_hashes, storage) = witness.parse_to_caches();
-        log_info(&format!(
-            "from_verkle_witness: caches loaded balances={} nonces={} code={} storage={}",
-            balances.len(),
-            nonces.len(),
-            code.len(),
-            storage.len()
-        ));
-
-        // Extract service_id before moving environment
         let service_id = environment.service_id;
 
-        // Convert flat storage map to ContractStorage with shards
         let mut storage_shards_map = BTreeMap::new();
         for ((address, key), value) in storage {
             let contract_storage =
@@ -374,18 +338,15 @@ impl MajikBackend {
                         },
                     });
 
-            // Insert in sorted order
             let shard = &mut contract_storage.shard;
             match shard
                 .entries
                 .binary_search_by_key(&key, |entry| entry.key_h)
             {
                 Ok(idx) => {
-                    // Update existing entry
                     shard.entries[idx].value = value;
                 }
                 Err(idx) => {
-                    // Insert new entry
                     shard
                         .entries
                         .insert(idx, crate::contractsharding::EvmEntry { key_h: key, value });
@@ -393,7 +354,6 @@ impl MajikBackend {
             }
         }
 
-        // Create backend in Guarantor mode with populated caches
         let backend = Self {
             code_storage: RefCell::new(code),
             code_hashes: RefCell::new(code_hashes),
@@ -527,8 +487,8 @@ pub struct MajikOverlay<'config> {
     /// Track which transaction modified which state keys (for BAL tx_index attribution)
     /// Maps state key → tx_index that last modified it
     write_tx_index: BTreeMap<WriteKey, u32>,
-    /// Verkle witness event tracker (Phase A: tracking only, no gas charging yet)
-    witness_events: RefCell<VerkleEventTracker>,
+    /// UBT witness event tracker (Phase A: tracking only, no gas charging yet)
+    witness_events: RefCell<UBTEventTracker>,
 }
 
 /// Identifies a unique state write location
@@ -549,7 +509,7 @@ impl<'config> MajikOverlay<'config> {
             current_tx_logs: Vec::new(),
             tx_logs: Vec::new(),
             write_tx_index: BTreeMap::new(),
-            witness_events: RefCell::new(VerkleEventTracker::new()),
+            witness_events: RefCell::new(UBTEventTracker::new()),
         }
     }
 
@@ -557,13 +517,13 @@ impl<'config> MajikOverlay<'config> {
     pub fn begin_transaction(&mut self, tx_index: usize) {
         self.overlay.push_substate();
         self.current_tx_index = Some(tx_index);
-        // Also update backend's current_tx_index for verkle fetches
+        // Also update backend's current_tx_index for UBT fetches
         *self.overlay.backend().current_tx_index.borrow_mut() = Some(tx_index);
         // Reset witness tracking so each transaction accounts for its own events
         self.witness_events.borrow_mut().clear();
         // Reset witness event tracking for this transaction to avoid
         // carrying over access/write events (and gas) from previous transactions.
-        //*self.witness_events.borrow_mut() = VerkleEventTracker::new();
+        //*self.witness_events.borrow_mut() = UBTEventTracker::new();
         self.current_tx_logs.clear();
         if self.tx_logs.len() <= tx_index {
             self.tx_logs.resize(tx_index + 1, Vec::new());
@@ -636,34 +596,14 @@ impl<'config> MajikOverlay<'config> {
         witness.record_tx_target_write(target);
     }
 
-    /// Get witness gas cost for transaction (Phase B Option C)
-    ///
-    /// Returns the total witness gas cost calculated from all tracked events.
-    /// This should be added to the EVM gas_used after transaction execution completes.
-    ///
-    /// NOTE: Currently unused - use `take_witness_gas()` instead for automatic reset
-    #[allow(dead_code)]
-    pub fn get_witness_gas(&self) -> u64 {
-        self.witness_events.borrow().calculate_total_witness_gas()
-    }
 
-    /// Take witness gas and reset tracker for next transaction (Phase B Option C)
-    ///
-    /// Returns the total witness gas cost and clears all tracked events.
-    /// This ensures each transaction has its own isolated witness gas accounting.
-    pub fn take_witness_gas(&mut self) -> u64 {
-        let mut witness = self.witness_events.borrow_mut();
-        let gas = witness.calculate_total_witness_gas();
-        witness.clear();
-        gas
-    }
 
     /// Log current witness tracking statistics for debugging/visibility
     pub fn log_witness_stats(&self) {
         let (branches, leaves, edited_subtrees, edited_leaves, fills) =
             self.witness_events.borrow().stats();
         log_info(&format!(
-            "Verkle witness stats: branches={} leaves={} edited_subtrees={} edited_leaves={} fills={}",
+            "UBT witness stats: branches={} leaves={} edited_subtrees={} edited_leaves={} fills={}",
             branches, leaves, edited_subtrees, edited_leaves, fills
         ));
     }
@@ -676,7 +616,7 @@ impl<'config> MajikOverlay<'config> {
         self,
         work_package_hash: [u8; 32],
         receipts: &[TransactionReceiptRecord],
-        verkle_root: [u8; 32],
+        ubt_root: [u8; 32],
         timeslot: u32,
         total_gas_used: u64,
         _service_id: u32,
@@ -690,7 +630,7 @@ impl<'config> MajikOverlay<'config> {
             &self.write_tx_index,
             work_package_hash,
             receipts,
-            verkle_root,
+            ubt_root,
             timeslot,
             total_gas_used,
         );
@@ -713,7 +653,7 @@ impl TransactionalBackend for MajikOverlay<'_> {
 }
 
 impl RuntimeBaseBackend for MajikOverlay<'_> {
-    /// Balance read - delegates to overlay which supports Verkle
+    /// Balance read - delegates to overlay which supports UBT
     fn balance(&self, address: H160) -> U256 {
         // Track account header access for witness (Phase A: no gas charging yet)
         self.witness_events
@@ -722,7 +662,7 @@ impl RuntimeBaseBackend for MajikOverlay<'_> {
         self.overlay.balance(address)
     }
 
-    /// Code read - delegates to overlay which supports Verkle
+    /// Code read - delegates to overlay which supports UBT
     fn code(&self, address: H160) -> Vec<u8> {
         let code = self.overlay.code(address);
 
@@ -740,7 +680,7 @@ impl RuntimeBaseBackend for MajikOverlay<'_> {
         code
     }
 
-    /// Code hash - delegates to overlay which supports Verkle
+    /// Code hash - delegates to overlay which supports UBT
     fn code_hash(&self, address: H160) -> H256 {
         // Track code hash access for witness (Phase A: no gas charging yet)
         self.witness_events
@@ -769,7 +709,7 @@ impl RuntimeBaseBackend for MajikOverlay<'_> {
         self.overlay.exists(address)
     }
 
-    /// Nonce read - delegates to overlay which supports Verkle
+    /// Nonce read - delegates to overlay which supports UBT
     fn nonce(&self, address: H160) -> U256 {
         self.overlay.nonce(address)
     }
@@ -1011,7 +951,7 @@ impl EvmRuntimeBackend for MajikOverlay<'_> {
 
 impl RuntimeBaseBackend for MajikBackend {
     /// Balance with DA import on cache miss
-    /// Builder mode: uses Verkle host function (Go maintains verkleReadLog)
+    /// Builder mode: uses UBT host function (Go maintains ubtReadLog)
     /// Guarantor mode: uses cache-only (panics on miss)
     fn balance(&self, address: H160) -> U256 {
         log_info(&format!(
@@ -1030,12 +970,12 @@ impl RuntimeBaseBackend for MajikBackend {
 
         match self.execution_mode {
             ExecutionMode::Builder => {
-                // Builder: fetch from Verkle tree via host function
+                // Builder: fetch from UBT tree via host function
                 let tx_index = self.current_tx_index.borrow().unwrap_or(0) as u32;
-                let balance = crate::verkle::fetch_balance_verkle(address, tx_index);
+                let balance = crate::ubt_host::fetch_balance_ubt(address, tx_index);
                 self.balances.borrow_mut().insert(address, balance);
                 log_info(&format!(
-                    "balance fetched via verkle ({:?}) value={} tx_index={}",
+                    "balance fetched via ubt ({:?}) value={} tx_index={}",
                     address, balance, tx_index
                 ));
                 balance
@@ -1049,7 +989,7 @@ impl RuntimeBaseBackend for MajikBackend {
     }
 
     /// Code from cache with DA import on miss
-    /// Builder mode: uses Verkle host function (Go maintains verkleReadLog)
+    /// Builder mode: uses UBT host function (Go maintains ubtReadLog)
     /// Guarantor mode: uses cache-only (panics on miss)
     fn code(&self, address: H160) -> Vec<u8> {
         log_info(&format!(
@@ -1077,9 +1017,9 @@ impl RuntimeBaseBackend for MajikBackend {
 
         match self.execution_mode {
             ExecutionMode::Builder => {
-                // Builder: fetch from Verkle tree via host function
+                // Builder: fetch from UBT tree via host function
                 let tx_index = self.current_tx_index.borrow().unwrap_or(0) as u32;
-                let bytecode = crate::verkle::fetch_code_verkle(address, tx_index);
+                let bytecode = crate::ubt_host::fetch_code_ubt(address, tx_index);
 
                 if bytecode.is_empty() {
                     // Negative caching: remember EOAs with no bytecode
@@ -1126,7 +1066,7 @@ impl RuntimeBaseBackend for MajikBackend {
     }
 
     /// Code hash with caching optimization
-    /// Builder mode: uses Verkle host function (Go maintains verkleReadLog)
+    /// Builder mode: uses UBT host function (Go maintains ubtReadLog)
     /// Guarantor mode: uses cache-only (panics on miss)
     fn code_hash(&self, address: H160) -> H256 {
         // Check cache first
@@ -1139,9 +1079,9 @@ impl RuntimeBaseBackend for MajikBackend {
 
         match self.execution_mode {
             ExecutionMode::Builder => {
-                // Builder: fetch from Verkle tree via host function
+                // Builder: fetch from UBT tree via host function
                 let tx_index = self.current_tx_index.borrow().unwrap_or(0) as u32;
-                let hash = crate::verkle::fetch_code_hash_verkle(address, tx_index);
+                let hash = crate::ubt_host::fetch_code_hash_ubt(address, tx_index);
                 self.code_hashes.borrow_mut().insert(address, hash);
                 hash
             }
@@ -1152,8 +1092,8 @@ impl RuntimeBaseBackend for MajikBackend {
         }
     }
 
-    /// Storage via Verkle tree
-    /// Builder mode: uses Verkle host function (Go maintains verkleReadLog)
+    /// Storage via UBT tree
+    /// Builder mode: uses UBT host function (Go maintains ubtReadLog)
     /// Guarantor mode: uses cache-only (panics on miss)
     fn storage(&self, address: H160, key: H256) -> H256 {
         // Check cache first (for within-transaction reads)
@@ -1181,10 +1121,10 @@ impl RuntimeBaseBackend for MajikBackend {
 
         match self.execution_mode {
             ExecutionMode::Builder => {
-                // Builder: fetch from Verkle tree via host function
+                // Builder: fetch from UBT tree via host function
                 let tx_index = self.current_tx_index.borrow().unwrap_or(0) as u32;
                 let (value, found) =
-                    crate::verkle::fetch_storage_verkle_with_presence(address, key, tx_index);
+                    crate::ubt_host::fetch_storage_ubt_with_presence(address, key, tx_index);
 
                 // Cache the value for within-transaction reads
                 let mut storage_shards = self.storage_shards.borrow_mut();
@@ -1252,7 +1192,7 @@ impl RuntimeBaseBackend for MajikBackend {
     }
 
     /// Nonce with DA import on cache miss
-    /// Builder mode: uses Verkle host function (Go maintains verkleReadLog)
+    /// Builder mode: uses UBT host function (Go maintains ubtReadLog)
     /// Guarantor mode: uses cache-only (panics on miss)
     fn nonce(&self, address: H160) -> U256 {
         log_info(&format!(
@@ -1271,12 +1211,12 @@ impl RuntimeBaseBackend for MajikBackend {
 
         match self.execution_mode {
             ExecutionMode::Builder => {
-                // Builder: fetch from Verkle tree via host function
+                // Builder: fetch from UBT tree via host function
                 let tx_index = self.current_tx_index.borrow().unwrap_or(0) as u32;
-                let nonce = crate::verkle::fetch_nonce_verkle(address, tx_index);
+                let nonce = crate::ubt_host::fetch_nonce_ubt(address, tx_index);
                 self.nonces.borrow_mut().insert(address, nonce);
                 log_info(&format!(
-                    "nonce fetched via verkle ({:?}) value={} tx_index={}",
+                    "nonce fetched via ubt ({:?}) value={} tx_index={}",
                     address, nonce, tx_index
                 ));
                 nonce

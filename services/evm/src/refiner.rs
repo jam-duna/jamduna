@@ -1,5 +1,8 @@
 //! Block Refiner - manages block construction and imported objects during refine
 
+/// Set to true to enable verbose refine logging
+const REFINE_VERBOSE: bool = false;
+
 use crate::{
     contractsharding::format_data_hex,
     genesis,
@@ -7,7 +10,7 @@ use crate::{
     tx::{DecodedCallCreate, decode_call_args, decode_transact_args},
     witness_events::{is_precompile, is_system_contract},
 };
-use alloc::{collections::BTreeMap, format, string::ToString, vec, vec::Vec};
+use alloc::{collections::BTreeMap, format, string::{String, ToString}, vec, vec::Vec};
 use evm::backend::RuntimeBackend;
 use evm::interpreter::ExitError;
 use evm::interpreter::runtime::Log;
@@ -16,7 +19,7 @@ use utils::effects::WriteEffectEntry;
 use utils::{
     effects::{ExecutionEffects, ObjectId, ObjectRef, WriteIntent},
     functions::{
-        RefineArgs, WorkItem, format_object_id, format_segment, log_debug, log_error, log_info, log_warn,
+        RefineArgs, WorkItem, fetch_extrinsic, format_object_id, format_segment, log_debug, log_error, log_info, log_warn,
     },
     hash_functions::keccak256,
     host_functions::AccumulateInstruction,
@@ -93,6 +96,17 @@ pub fn parse_payload_metadata(payload: &[u8]) -> Option<PayloadMetadata> {
         global_depth,
         block_access_list_hash,
     })
+}
+
+fn hex_head_tail(data: &[u8]) -> (String, String) {
+    if data.is_empty() {
+        return (String::new(), String::new());
+    }
+    let head_len = core::cmp::min(64, data.len());
+    let tail_len = core::cmp::min(64, data.len());
+    let head = format_segment(&data[..head_len]);
+    let tail = format_segment(&data[data.len() - tail_len..]);
+    (head, tail)
 }
 
 /// Parse accumulate instruction from event log
@@ -368,12 +382,13 @@ impl BlockRefiner {
         &mut self,
         mut backend: MajikBackend,
         config: &evm::standard::Config,
-        extrinsics: &[Vec<u8>],
+        work_item_index: u16,
+        tx_start_index: usize,
         tx_count_expected: u32,
         refine_args: &RefineArgs,
         refine_context: &utils::functions::RefineContext,
         service_id: u32,
-        post_state_verkle_root: Option<[u8; 32]>,
+        post_state_root: Option<[u8; 32]>,
     ) -> Option<(ExecutionEffects, MajikBackend)> {
         use crate::receipt::TransactionReceiptRecord;
         use crate::state::MajikOverlay;
@@ -389,19 +404,38 @@ impl BlockRefiner {
         let mut total_gas_used: u64 = 0;
         let mut total_log_count: u32 = 0;
 
-        // Execute transactions from extrinsics (only first tx_count_expected, not witnesses)
-        let tx_extrinsics = extrinsics.iter().take(tx_count_expected as usize);
-        for (tx_index, extrinsic) in tx_extrinsics.enumerate() {
+        // Fetch and execute transactions (only tx_count_expected, not witnesses)
+        for tx_offset in 0..tx_count_expected {
+            let tx_index = tx_offset as usize;
+            let extrinsic_index = tx_start_index + tx_index;
+            let extrinsic = match fetch_extrinsic(work_item_index, extrinsic_index as u32) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    log_error(&format!(
+                        "  Failed to fetch extrinsic {}: {:?}",
+                        extrinsic_index, e
+                    ));
+                    return None;
+                }
+            };
+            if extrinsic.is_empty() {
+                log_error(&format!(
+                    "  Empty extrinsic at index {}",
+                    extrinsic_index
+                ));
+                return None;
+            }
             // Compute transaction hash from RLP-encoded signed transaction
-            let tx_hash_bytes = keccak256(extrinsic);
+            let tx_hash_bytes = keccak256(&extrinsic);
             let mut tx_hash = [0u8; 32];
             tx_hash.copy_from_slice(tx_hash_bytes.as_bytes());
 
             log_debug(&format!(
-                "  Processing extrinsic {}: {} bytes, tx_hash={}",
+                "  Processing extrinsic {}: {} bytes, tx_hash={}, data={:?}",
                 tx_index,
                 extrinsic.len(),
-                format_object_id(tx_hash_bytes.0)
+                format_object_id(tx_hash_bytes.0),
+                extrinsic
             ));
 
             // Decode extrinsic into transaction format
@@ -418,13 +452,15 @@ impl BlockRefiner {
                 }
             };
 
-            log_info(&format!(
-                "  TXHASH {} Decoded: caller={:?}, gas_limit={}, value={}",
-                hex::encode(tx_hash),
-                decoded.caller,
-                decoded.gas_limit,
-                decoded.value
-            ));
+            if REFINE_VERBOSE {
+                log_info(&format!(
+                    "  TXHASH {} Decoded: caller={:?}, gas_limit={}, value={}",
+                    hex::encode(tx_hash),
+                    decoded.caller,
+                    decoded.gas_limit,
+                    decoded.value
+                ));
+            }
             overlay.begin_transaction(tx_index);
 
             // Record transaction-level witness events (Phase A: EIP-4762)
@@ -462,7 +498,7 @@ impl BlockRefiner {
             let resolver = EtableResolver::new(&(), &etable);
             let invoker = Invoker::new(&resolver);
 
-            log_info("  🔨 Matching call_create...");
+            if REFINE_VERBOSE { log_info("  🔨 Matching call_create..."); }
             let call_create = match decoded.call_create {
                 DecodedCallCreate::Call { address, ref data } => {
                     if data.len() >= 4 {
@@ -523,51 +559,13 @@ impl BlockRefiner {
             };
 
             // Execute transaction with standard EVM gas table
-            log_info(&format!("  ⚡ Starting evm::transact for tx {}", tx_index));
+            if REFINE_VERBOSE { log_info(&format!("  ⚡ Starting evm::transact for tx {}", tx_index)); }
             let result = evm::transact(args, None, &mut overlay, &invoker);
-            log_info(&format!("  ⚡ Finished evm::transact for tx {}", tx_index));
+            if REFINE_VERBOSE { log_info(&format!("  ⚡ Finished evm::transact for tx {}", tx_index)); }
 
-            // Log transaction result details
-            match &result {
-                Ok(tx_result) => {
-                    log_info(&format!(
-                        "  ✅ Transaction {} completed successfully Used gas: {}",
-                        tx_index, tx_result.used_gas
-                    ));
-
-                    use evm::standard::TransactValueCallCreate;
-                    match &tx_result.call_create {
-                        TransactValueCallCreate::Call { succeed: _, retval } => {
-                            // log_info(&format!("    Call result: {:?} Return data length: {} bytes", succeed, retval.len()));
-                            if !retval.is_empty() {
-                                if retval.len() <= 64 {
-                                    // log_info(&format!(
-                                    //     "    Return data: 0x{}",
-                                    //     hex::encode(retval)
-                                    // ));
-                                } else {
-                                    log_info(&format!(
-                                        "    Return data (first 64 bytes): 0x{}",
-                                        hex::encode(&retval[..64])
-                                    ));
-                                    log_info(&format!(
-                                        "    Return data (last 32 bytes): 0x{}",
-                                        hex::encode(&retval[retval.len() - 32..])
-                                    ));
-                                }
-                            }
-                        }
-                        TransactValueCallCreate::Create { succeed, address } => {
-                            log_info(&format!(
-                                "    Create result: {:?} Contract address: {:?}",
-                                succeed, address
-                            ));
-                        }
-                    }
-                }
-                Err(e) => {
-                    log_error(&format!("  ❌ Transaction {} failed: {:?}", tx_index, e));
-                }
+            // Log transaction result details (disabled for performance)
+            if let Err(e) = &result {
+                log_error(&format!("  ❌ Transaction {} failed: {:?}", tx_index, e));
             }
 
             // Log shard entries after transaction completion
@@ -584,7 +582,7 @@ impl BlockRefiner {
                     let total_tx_gas = evm_gas.saturating_add(witness_gas.into());
 
                     // Revert if total gas (EVM + witness) exceeds the transaction gas limit
-                    // Users must set gas_limit to cover both EVM execution and Verkle witness costs
+                    // Users must set gas_limit to cover both EVM execution and UBT witness costs
                     if total_tx_gas > decoded.gas_limit {
                         log_warn(&format!(
                             "  ⚠️ Transaction {} exceeds gas limit (limit={}, evm={}, witness={}, total={}) - reverting",
@@ -616,7 +614,7 @@ impl BlockRefiner {
 
                     match overlay.commit_transaction() {
                         Ok(_) => {
-                            log_info(&format!("  Transaction {} committed", tx_index));
+                            if REFINE_VERBOSE { log_info(&format!("  Transaction {} committed", tx_index)); }
                             _committed = true;
                             let logs = overlay.take_transaction_logs(tx_index);
                             let log_count = logs.len() as u32;
@@ -663,10 +661,12 @@ impl BlockRefiner {
                             total_gas_used =
                                 total_gas_used.saturating_add(total_tx_gas.as_u64());
 
-                            log_info(&format!(
-                                "  ⛽ Gas used: {} (EVM: {}, Witness: {}, total: {})",
-                                total_tx_gas, evm_gas, witness_gas, total_gas_used
-                            ));
+                            if REFINE_VERBOSE {
+                                log_info(&format!(
+                                    "  ⛽ Gas used: {} (EVM: {}, Witness: {}, total: {})",
+                                    total_tx_gas, evm_gas, witness_gas, total_gas_used
+                                ));
+                            }
 
                             receipts.push(TransactionReceiptRecord {
                                 hash: tx_hash,
@@ -739,10 +739,12 @@ impl BlockRefiner {
 
                     total_gas_used = total_gas_used.saturating_add(estimated_gas.as_u64());
 
-                    log_info(&format!(
-                        "  ⛽ Gas (failed tx): ~{} est (total: {})",
-                        estimated_gas, total_gas_used
-                    ));
+                    if REFINE_VERBOSE {
+                        log_info(&format!(
+                            "  ⛽ Gas (failed tx): ~{} est (total: {})",
+                            estimated_gas, total_gas_used
+                        ));
+                    }
 
                     receipts.push(TransactionReceiptRecord {
                         hash: tx_hash,
@@ -759,8 +761,8 @@ impl BlockRefiner {
             }
         }
 
-        // Use post_state_verkle_root if available (guarantor mode), otherwise use refine_context.state_root
-        let verkle_root_for_block = post_state_verkle_root.unwrap_or(refine_context.state_root);
+        // Use post_state_root if available (guarantor mode), otherwise use refine_context.state_root
+        let state_root_for_block = post_state_root.unwrap_or(refine_context.state_root);
 
         // Phase A: Log witness event statistics
         overlay.log_witness_stats();
@@ -768,77 +770,22 @@ impl BlockRefiner {
         let (effects, backend) = overlay.deconstruct(
             refine_args.wphash,
             &receipts,
-            verkle_root_for_block,
+            state_root_for_block,
             refine_context.lookup_anchor_slot,
             total_gas_used,
             service_id,
         );
 
-        log_info(&format!(
-            "🎯 Gas Summary: total_consumed={} transactions={} total_writes={}",
-            total_gas_used,
-            receipts.len(),
-            effects.write_intents.len()
-        ));
+        if REFINE_VERBOSE {
+            log_info(&format!(
+                "🎯 Gas Summary: total_consumed={} transactions={} total_writes={}",
+                total_gas_used,
+                receipts.len(),
+                effects.write_intents.len()
+            ));
+        }
 
         Some((effects, backend))
-    }
-
-    /// Extract post_state_root from Verkle witness
-    /// Witness format: 32B pre_root + (read section) + 32B post_root + (write section)
-    fn extract_post_state_root_from_witness(witness_data: &[u8]) -> Option<[u8; 32]> {
-        if witness_data.len() < 68 {
-            return None;
-        }
-
-        let mut offset = 32; // Skip pre_state_root
-
-        // Skip read_count (4 bytes)
-        if witness_data.len() < offset + 4 {
-            return None;
-        }
-        let read_count = u32::from_be_bytes([
-            witness_data[offset],
-            witness_data[offset + 1],
-            witness_data[offset + 2],
-            witness_data[offset + 3],
-        ]);
-        offset += 4;
-
-        // Skip read entries (161 bytes each: includes 4-byte tx_index)
-        let read_section_size = (read_count as usize) * 161;
-        if witness_data.len() < offset + read_section_size {
-            return None;
-        }
-        offset += read_section_size;
-
-        // Skip pre_proof_len (4 bytes)
-        if witness_data.len() < offset + 4 {
-            return None;
-        }
-        let pre_proof_len = u32::from_be_bytes([
-            witness_data[offset],
-            witness_data[offset + 1],
-            witness_data[offset + 2],
-            witness_data[offset + 3],
-        ]) as usize;
-        offset += 4;
-
-        // Skip pre_proof_data
-        if witness_data.len() < offset + pre_proof_len {
-            return None;
-        }
-        offset += pre_proof_len;
-
-        // Now we're at post_state_root (32 bytes)
-        if witness_data.len() < offset + 32 {
-            return None;
-        }
-
-        let mut post_state_root = [0u8; 32];
-        post_state_root.copy_from_slice(&witness_data[offset..offset + 32]);
-
-        Some(post_state_root)
     }
 
     /// Create default environment for a given service (chain_id)
@@ -879,32 +826,164 @@ impl BlockRefiner {
     pub fn from_work_item(
         work_item_index: u16,
         work_item: &WorkItem,
-        extrinsics: &[Vec<u8>],
+        num_extrinsics: usize,
         refine_context: &utils::functions::RefineContext,
         refine_args: &RefineArgs,
     ) -> Option<(ExecutionEffects, Vec<AccumulateInstruction>, u16, u32)> {
         use utils::effects::StateWitness;
 
+        log_info(&format!(
+            "📦 from_work_item: parsing payload len={} head={}",
+            work_item.payload.len(),
+            format_segment(&work_item.payload)
+        ));
         // Parse payload metadata
-        let metadata = parse_payload_metadata(&work_item.payload)?;
+        let metadata = match parse_payload_metadata(&work_item.payload) {
+            Some(metadata) => metadata,
+            None => {
+                log_error("📦 from_work_item: parse_payload_metadata failed");
+                return None;
+            }
+        };
         log_info(&format!(
             "📦 Payload metadata: type={:?}, tx_count={}, global_depth={}, witness_count={}, extrinsics={}",
             metadata.payload_type,
             metadata.payload_size,
             metadata.global_depth,
             metadata.witness_count,
-            extrinsics.len()
+            num_extrinsics
         ));
+        log_info(&format!(
+            "📦 Payload raw: len={}, bytes=0x{}",
+            work_item.payload.len(),
+            hex::encode(&work_item.payload)
+        ));
+        let extrinsic_sizes: Vec<String> = work_item
+            .work_item_extrinsics
+            .iter()
+            .map(|ext| ext.len.to_string())
+            .collect();
+        log_info(&format!(
+            "📦 Extrinsic sizes: [{}]",
+            extrinsic_sizes.join(", ")
+        ));
+        let fetch_extrinsic_by_index = |idx: usize| -> Option<Vec<u8>> {
+            match fetch_extrinsic(work_item_index, idx as u32) {
+                Ok(bytes) => Some(bytes),
+                Err(e) => {
+                    log_error(&format!(
+                        "❌ Refine: fetch_extrinsic failed idx={} err={:?}",
+                        idx, e
+                    ));
+                    None
+                }
+            }
+        };
+        let mut ubt_pre_witness: Option<crate::ubt::UBTWitnessSection> = None;
+        let mut ubt_post_witness: Option<crate::ubt::UBTWitnessSection> = None;
+        let mut ubt_witness_count = 0usize;
+
+        if num_extrinsics >= 2 {
+            let pre_bytes = match fetch_extrinsic_by_index(0) {
+                Some(bytes) => bytes,
+                None => return None,
+            };
+            if crate::ubt::UBTWitnessSection::deserialize(&pre_bytes).is_ok() {
+                let post_bytes = match fetch_extrinsic_by_index(1) {
+                    Some(bytes) => bytes,
+                    None => return None,
+                };
+                match crate::ubt::verify_witness_section(
+                    &pre_bytes,
+                    None,
+                    crate::ubt::WitnessValueKind::Pre,
+                ) {
+                    Ok(pre) => {
+                        match crate::ubt::verify_witness_section(
+                            &post_bytes,
+                            None,
+                            crate::ubt::WitnessValueKind::Post,
+                        ) {
+                        Ok(post) => {
+                            ubt_pre_witness = Some(pre);
+                            ubt_post_witness = Some(post);
+                            ubt_witness_count = 2;
+                            log_info(&format!(
+                                "🔐 Detected UBT witness extrinsics (pre={}, post={})",
+                                pre_bytes.len(),
+                                post_bytes.len()
+                            ));
+                            if let (Some(pre_w), Some(post_w)) =
+                                (ubt_pre_witness.as_ref(), ubt_post_witness.as_ref())
+                            {
+                                let (pre_head, pre_tail) = hex_head_tail(&pre_bytes);
+                                let (post_head, post_tail) = hex_head_tail(&post_bytes);
+                                log_info(&format!(
+                                    "✅ UBT verified: pre_root=0x{}, pre_entries={}, pre_keys={}, pre_nodes={}, pre_refs={}, pre_stems={}, pre_ext={}, post_root=0x{}, post_entries={}, post_keys={}, post_nodes={}, post_refs={}, post_stems={}, post_ext={}",
+                                    hex::encode(pre_w.root),
+                                    pre_w.entries.len(),
+                                    pre_w.proof.keys.len(),
+                                    pre_w.proof.nodes.len(),
+                                    pre_w.proof.node_refs.len(),
+                                    pre_w.proof.stems.len(),
+                                    pre_w.extensions.len(),
+                                    hex::encode(post_w.root),
+                                    post_w.entries.len(),
+                                    post_w.proof.keys.len(),
+                                    post_w.proof.nodes.len(),
+                                    post_w.proof.node_refs.len(),
+                                    post_w.proof.stems.len(),
+                                    post_w.extensions.len()
+                                ));
+                                log_info(&format!(
+                                    "🔍 UBT witness bytes: pre_len={}, pre_head64={}, pre_tail64={}, post_len={}, post_head64={}, post_tail64={}",
+                                    pre_bytes.len(),
+                                    pre_head,
+                                    pre_tail,
+                                    post_bytes.len(),
+                                    post_head,
+                                    post_tail
+                                ));
+                            }
+                        }
+                        Err(err) => {
+                            log_error(&format!(
+                                "❌ UBT pre witness found but post witness verification failed: {:?}",
+                                err
+                            ));
+                            return None;
+                        }
+                        }
+                    }
+                    Err(err) => {
+                        log_error(&format!(
+                            "❌ UBT pre witness verification failed: {:?}",
+                            err
+                        ));
+                        return None;
+                    }
+                }
+            }
+        }
+
         // Only process witnesses for PayloadTransaction/PayloadBuilder
-        let witness_start_idx = metadata.payload_size as usize;
+        let tx_count = metadata.payload_size as usize;
+        let witness_start_idx = tx_count + ubt_witness_count;
+        if witness_start_idx > num_extrinsics {
+            log_error(&format!(
+                "❌ Refine: extrinsic count too small: witness_start_idx={} num_extrinsics={}",
+                witness_start_idx, num_extrinsics
+            ));
+            return None;
+        }
         let mut block_builder = BlockRefiner::new();
         let mut imported_objects: BTreeMap<ObjectId, (ObjectRef, Vec<u8>)> = BTreeMap::new();
 
-        for (idx, extrinsic) in extrinsics.iter().enumerate() {
-            // Skip transaction extrinsics
-            if idx < witness_start_idx {
-                continue;
-            }
+        for idx in witness_start_idx..num_extrinsics {
+            let extrinsic = match fetch_extrinsic_by_index(idx) {
+                Some(bytes) => bytes,
+                None => return None,
+            };
             // log_debug(&format!(
             //         "🔍 Attempting to decode witness extrinsic idx={} len={}",
             //         idx,
@@ -918,11 +997,11 @@ impl BlockRefiner {
                     log_error(&format!("Empty extrinsic at index {}", idx));
                     return None;
                 }
-
+                
                 // Deserialize and verify state witness (no format byte prefix)
                 match StateWitness::deserialize_and_verify(
                     work_item.service,
-                    extrinsic,
+                    &extrinsic,
                     refine_context.state_root,
                 ) {
                     Ok(state_witness) => {
@@ -939,16 +1018,18 @@ impl BlockRefiner {
                         if let Some(payload) =
                             state_witness.fetch_object_payload(work_item, work_item_index)
                         {
+                            if REFINE_VERBOSE {
+                                let payload_len = payload.len();
+                                log_info(&format!(
+                                    "✅ Payload{}: Verified + imported object {} (payload_length={})",
+                                    payload_type_str,
+                                    format_object_id(object_id),
+                                    payload_len
+                                ));
+                            }
                             imported_objects.insert(object_id, (object_ref, payload));
-                            // let payload_len = payload.len();
-                            // log_info(&format!(
-                            //     "✅ Payload{}: Verified + imported object {} (payload_length={})",
-                            //     payload_type_str,
-                            //     format_object_id(object_id),
-                            //     payload_len
-                            // ));
                         } else {
-                            log_info(&format!(
+                            log_warn(&format!(
                                 "⚠️  Payload{}: Verified witness but could not fetch payload for object {}",
                                 payload_type_str,
                                 format_object_id(object_id)
@@ -969,10 +1050,12 @@ impl BlockRefiner {
             }
         }
 
-        log_info(&format!(
-            "📥 Refine: Set up block builder for {} objects",
-            imported_objects.len()
-        ));
+        if REFINE_VERBOSE {
+            log_info(&format!(
+                "📥 Refine: Set up block builder for {} objects",
+                imported_objects.len()
+            ));
+        }
 
         // Create environment/backend from work item context
         use crate::state::MajikBackend;
@@ -981,51 +1064,30 @@ impl BlockRefiner {
         let config = Config::shanghai();
         let environment = Self::create_environment(work_item.service, metadata.payload_type);
 
-        // Detect Guarantor mode: Check if we have a Verkle witness in work package
-        // Verkle witness is the FIRST extrinsic (before transactions)
-        // Format: 32B pre_state_root + 32B post_state_root + 4B num_keys + keys + proof
-        let mut verkle_witness_data: Option<&[u8]> = None;
+        let mut post_state_root: Option<[u8; 32]> = None;
 
-        // Check if first extrinsic is a Verkle witness (guarantor mode)
-        if !extrinsics.is_empty() {
-            let candidate = &extrinsics[0];
-            // VerkleWitness minimum size: 32B pre_root + 32B post_root + 4B num_keys + (at least 1 key × 125B) + 4B proof_len = 197B
-            if candidate.len() >= 197 {
-                verkle_witness_data = Some(candidate);
-                log_info(&format!(
-                    "🔐 Detected Verkle witness in first extrinsic (size={} bytes)",
-                    candidate.len()
-                ));
-            }
-        }
+        let mut backend = if let (Some(pre_witness), Some(post_witness)) =
+            (ubt_pre_witness.as_ref(), ubt_post_witness.as_ref())
+        {
+            log_info("🔐 Guarantor mode: Verifying UBT witnesses...");
+            post_state_root = Some(post_witness.root);
 
-        // Extract post_state_root from witness if in guarantor mode
-        let mut post_state_verkle_root: Option<[u8; 32]> = None;
-
-        let mut backend = if let Some(witness_data) = verkle_witness_data {
-            // Guarantor mode: Verify Verkle witness and populate caches
-            log_info("🔐 Guarantor mode: Verifying Verkle witness...");
-
-            // Extract post_state_root from witness (need to parse witness format)
-            post_state_verkle_root = Self::extract_post_state_root_from_witness(witness_data);
-
-            match MajikBackend::from_verkle_witness(
+            match MajikBackend::from_ubt_entries(
                 environment,
-                witness_data,
+                &pre_witness.entries,
                 metadata.global_depth,
             ) {
                 Some(backend) => {
-                    log_info("✅ Verkle witness verified successfully");
+                    log_info("✅ UBT witnesses verified successfully");
                     backend
                 }
                 None => {
-                    log_error("❌ Verkle witness verification failed");
+                    log_error("❌ UBT witness cache load failed");
                     return None;
                 }
             }
         } else {
-            // Builder mode: Use Verkle host functions during execution
-            log_info("🔨 Builder mode: Will generate Verkle witness after execution");
+            log_info("🔨 Builder mode: Will generate UBT witnesses after execution");
             let execution_mode = crate::state::ExecutionMode::Builder;
 
             MajikBackend::new(
@@ -1043,7 +1105,7 @@ impl BlockRefiner {
         let (mut execution_effects, accumulate_instructions) =
             if metadata.payload_type == PayloadType::Call {
                 // Call mode - return early from refine_call_payload (no accumulate instructions in Call mode)
-                return Self::refine_call_payload(backend, &config, extrinsics)
+                return Self::refine_call_payload(backend, &config, work_item_index, num_extrinsics)
                     .map(|effects| (effects, Vec::new(), 0u16, 0u32));
             } else if metadata.payload_type == PayloadType::Transactions
                 || metadata.payload_type == PayloadType::Builder
@@ -1051,35 +1113,30 @@ impl BlockRefiner {
                 // Execute transactions
                 let mut block_builder = block_builder;
 
-                // In guarantor mode, skip the first extrinsic (Verkle witness)
-                // In builder mode, process all extrinsics (no witness present)
-                let tx_extrinsics = if verkle_witness_data.is_some() {
-                    &extrinsics[1..]  // Skip witness in guarantor mode
-                } else {
-                    extrinsics  // All extrinsics are transactions in builder mode
-                };
-
                 match block_builder.refine_payload_transactions(
                     backend,
                     &config,
-                    tx_extrinsics,
+                    work_item_index,
+                    ubt_witness_count,
                     metadata.payload_size,
                     refine_args,
                     refine_context,
                     work_item.service,
-                    post_state_verkle_root,
+                    post_state_root,
                 ) {
                     Some((effects, returned_backend)) => {
                         backend = returned_backend;
                         let instructions = block_builder.accumulate_instructions;
 
                         // Guarantor BAL verification (Phase 4D)
-                        // Only performed when a Verkle witness is present (guarantor mode)
+                        // Only performed when UBT witnesses are present (guarantor mode)
                         let builder_claimed_bal = metadata.block_access_list_hash != [0u8; 32];
                         let is_transaction_payload = metadata.payload_type == PayloadType::Transactions
                             || metadata.payload_type == PayloadType::Builder;
 
-                        if let Some(witness_data) = verkle_witness_data {
+                        if let (Some(pre_witness), Some(post_witness)) =
+                            (ubt_pre_witness.as_ref(), ubt_post_witness.as_ref())
+                        {
                             // Guarantor mode: enforce BAL rules
                             if is_transaction_payload && !builder_claimed_bal {
                                 // Transaction payload MUST have non-zero BAL hash
@@ -1089,23 +1146,18 @@ impl BlockRefiner {
 
                             if builder_claimed_bal {
                                 // Compute BAL hash from witness (native Rust implementation)
-                                // Deserialize witness to build BAL
-                                let witness = match crate::verkle::VerkleWitness::deserialize(witness_data) {
-                                    Some(w) => w,
-                                    None => {
-                                        log_error("❌ Guarantor: Failed to deserialize witness for BAL computation");
-                                        return None;
-                                    }
-                                };
-
-                                // Build BAL from witness (native Rust)
-                                let bal = crate::block_access_list::BlockAccessList::from_witness(&witness);
+                                let bal = crate::block_access_list::BlockAccessList::from_ubt_entries(
+                                    &pre_witness.entries,
+                                    &post_witness.entries,
+                                );
                                 let computed_bal_hash = bal.hash();
 
-                                log_info(&format!(
-                                    "Guarantor: Computed BAL hash = {}",
-                                    hex::encode(computed_bal_hash)
-                                ));
+                                if REFINE_VERBOSE {
+                                    log_info(&format!(
+                                        "Guarantor: Computed BAL hash = {}",
+                                        hex::encode(computed_bal_hash)
+                                    ));
+                                }
 
                                 // Compare computed hash with builder's claimed hash from payload
                                 if computed_bal_hash != metadata.block_access_list_hash {
@@ -1117,13 +1169,15 @@ impl BlockRefiner {
                                     return None;
                                 }
 
-                                log_info(&format!(
-                                    "✅ Guarantor: BAL hash verified: {}",
-                                    hex::encode(computed_bal_hash)
-                                ));
+                                if REFINE_VERBOSE {
+                                    log_info(&format!(
+                                        "✅ Guarantor: BAL hash verified: {}",
+                                        hex::encode(computed_bal_hash)
+                                    ));
+                                }
                             } else {
                                 // No BAL hash claimed (genesis/call payloads)
-                                log_info("Guarantor: No BAL hash in payload (genesis/call mode)");
+                                if REFINE_VERBOSE { log_info("Guarantor: No BAL hash in payload (genesis/call mode)"); }
                             }
                         } else {
                             // Builder mode: BAL hash will be computed and injected after refine in Go
@@ -1192,10 +1246,12 @@ impl BlockRefiner {
         let contract_witness_index_start: u16;
         let contract_witness_payload_length: u32;
 
-        log_info(&format!(
-            "📦 Processing {} contract_intents for witness blob export",
-            execution_effects.contract_intents.len()
-        ));
+        if REFINE_VERBOSE {
+            log_info(&format!(
+                "📦 Processing {} contract_intents for witness blob export",
+                execution_effects.contract_intents.len()
+            ));
+        }
 
         if !execution_effects.contract_intents.is_empty() {
             let mut contract_blob_buffer = Vec::new();
@@ -1240,14 +1296,16 @@ impl BlockRefiner {
                     contract_witness_payload_length = contract_export_entry.ref_info.payload_length;
                     export_count = next_index;
 
-                    log_info(&format!(
-                        "  ✅ Exported contract witness blob: {} intents, index_start={}, total_len={}, export_count: {} → {}",
-                        execution_effects.contract_intents.len(),
-                        contract_witness_index_start,
-                        contract_witness_payload_length,
-                        contract_export_entry.ref_info.index_start,
-                        next_index
-                    ));
+                    if REFINE_VERBOSE {
+                        log_info(&format!(
+                            "  ✅ Exported contract witness blob: {} intents, index_start={}, total_len={}, export_count: {} → {}",
+                            execution_effects.contract_intents.len(),
+                            contract_witness_index_start,
+                            contract_witness_payload_length,
+                            contract_export_entry.ref_info.index_start,
+                            next_index
+                        ));
+                    }
                 }
                 Err(e) => {
                     log_error(&format!("  ❌ Failed to export contract witness blob: {:?}", e));
@@ -1267,34 +1325,40 @@ impl BlockRefiner {
             work_item.service,
             metadata.payload_type as u8,
         );
-        log_info(&format!(
-            "📦 Generated {} meta-shard write intents",
-            meta_write_intents.len()
-        ));
+        if REFINE_VERBOSE {
+            log_info(&format!(
+                "📦 Generated {} meta-shard write intents",
+                meta_write_intents.len()
+            ));
+        }
 
         // Clone meta_write_intents BEFORE export since export_effect may corrupt memory via FFI
         let mut meta_intents_for_output = meta_write_intents.clone();
 
         // Export meta-shard payloads to DA segments
-        log_info(&format!(
-            "📤 Exporting {} meta-shard intents...",
-            meta_write_intents.len()
-        ));
+        if REFINE_VERBOSE {
+            log_info(&format!(
+                "📤 Exporting {} meta-shard intents...",
+                meta_write_intents.len()
+            ));
+        }
         for (idx, intent) in meta_write_intents.iter_mut().enumerate() {
             let start_index = export_count;
 
             match intent.effect.export_effect(start_index as usize) {
                 Ok(next_index) => {
-                    log_info(&format!(
-                        "  ✅ Exported meta-shard[{}]: payload_len={}, export_count: {} → {}, wph={}, index_start={}, object_id={}",
-                        idx,
-                        intent.effect.ref_info.payload_length,
-                        export_count,
-                        next_index,
-                        crate::contractsharding::format_object_id(&intent.effect.ref_info.work_package_hash),
-                        start_index,
-                        crate::contractsharding::format_object_id(&intent.effect.object_id)
-                    ));
+                    if REFINE_VERBOSE {
+                        log_info(&format!(
+                            "  ✅ Exported meta-shard[{}]: payload_len={}, export_count: {} → {}, wph={}, index_start={}, object_id={}",
+                            idx,
+                            intent.effect.ref_info.payload_length,
+                            export_count,
+                            next_index,
+                            crate::contractsharding::format_object_id(&intent.effect.ref_info.work_package_hash),
+                            start_index,
+                            crate::contractsharding::format_object_id(&intent.effect.object_id)
+                        ));
+                    }
                     export_count = next_index;
 
                     // Update the cloned version with the index_start value that was set during export
@@ -1323,11 +1387,13 @@ impl BlockRefiner {
             let object_ref = intent.effect.ref_info.clone();
             let payload = intent.effect.payload.clone();
 
-            log_info(&format!(
-                "  📝 Storing meta-shard in imported_objects cache: object_id={:?}, payload_len={}",
-                object_id,
-                payload.len()
-            ));
+            if REFINE_VERBOSE {
+                log_info(&format!(
+                    "  📝 Storing meta-shard in imported_objects cache: object_id={:?}, payload_len={}",
+                    object_id,
+                    payload.len()
+                ));
+            }
 
             backend
                 .imported_objects
@@ -1339,10 +1405,12 @@ impl BlockRefiner {
         // The original write_intents contain storage shards, code, etc. that must be serialized.
         execution_effects.write_intents.extend(meta_intents_for_output);
 
-        log_info(&format!(
-            "📋 Collected {} accumulate instructions",
-            accumulate_instructions.len()
-        ));
+        if REFINE_VERBOSE {
+            log_info(&format!(
+                "📋 Collected {} accumulate instructions",
+                accumulate_instructions.len()
+            ));
+        }
 
         Some((
             execution_effects,
@@ -1358,7 +1426,8 @@ impl BlockRefiner {
     pub fn refine_call_payload(
         mut backend: MajikBackend,
         config: &evm::standard::Config,
-        extrinsics: &[Vec<u8>],
+        work_item_index: u16,
+        num_extrinsics: usize,
     ) -> Option<ExecutionEffects> {
         use evm::interpreter::etable::DispatchEtable;
         use evm::interpreter::trap::CallCreateTrap;
@@ -1369,15 +1438,28 @@ impl BlockRefiner {
         genesis::load_precompiles(&mut backend);
         let mut overlay = MajikOverlay::new(backend, &config.runtime);
 
-        if extrinsics.len() != 1 {
+        if num_extrinsics != 1 {
             log_error(&format!(
                 "❌ Payload Call expects exactly 1 extrinsic, got {}",
-                extrinsics.len()
+                num_extrinsics
             ));
             return None;
         }
 
-        let extrinsic = &extrinsics[0];
+        let extrinsic = match fetch_extrinsic(work_item_index, 0) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                log_error(&format!(
+                    "❌ Payload Call: failed to fetch extrinsic: {:?}",
+                    e
+                ));
+                return None;
+            }
+        };
+        if extrinsic.is_empty() {
+            log_error("❌ Payload Call: empty extrinsic");
+            return None;
+        }
 
         // Decode unsigned call arguments
         let decoded = match decode_call_args(extrinsic.as_ptr() as u64, extrinsic.len() as u64) {
@@ -1388,10 +1470,12 @@ impl BlockRefiner {
             }
         };
 
-        log_info(&format!(
-            "📞 PayloadCall from={:?}, gas_limit={}, value={}",
-            decoded.caller, decoded.gas_limit, decoded.value
-        ));
+        if REFINE_VERBOSE {
+            log_info(&format!(
+                "📞 PayloadCall from={:?}, gas_limit={}, value={}",
+                decoded.caller, decoded.gas_limit, decoded.value
+            ));
+        }
 
         let etable: DispatchEtable<State<'_>, MajikOverlay<'_>, CallCreateTrap> =
             DispatchEtable::runtime();
@@ -1400,19 +1484,23 @@ impl BlockRefiner {
 
         let call_create = match decoded.call_create {
             DecodedCallCreate::Call { address, data } => {
-                log_info(&format!(
-                    "  CALL {:?}→{:?}, data_len={}",
-                    decoded.caller,
-                    address,
-                    data.len()
-                ));
+                if REFINE_VERBOSE {
+                    log_info(&format!(
+                        "  CALL {:?}→{:?}, data_len={}",
+                        decoded.caller,
+                        address,
+                        data.len()
+                    ));
+                }
                 TransactArgsCallCreate::Call { address, data }
             }
             DecodedCallCreate::Create { init_code } => {
-                log_info(&format!(
-                    "  CREATE with {} bytes init_code",
-                    init_code.len()
-                ));
+                if REFINE_VERBOSE {
+                    log_info(&format!(
+                        "  CREATE with {} bytes init_code",
+                        init_code.len()
+                    ));
+                }
                 TransactArgsCallCreate::Create {
                     init_code,
                     salt: None,
@@ -1442,12 +1530,14 @@ impl BlockRefiner {
                     evm::standard::TransactValueCallCreate::Create { .. } => Vec::new(),
                 };
 
-                log_info(&format!(
-                    "✅ Payload Call: Success, gas_used={}, output_len={}, output={}",
-                    gas_used,
-                    output.len(),
-                    format_segment(&output)
-                ));
+                if REFINE_VERBOSE {
+                    log_info(&format!(
+                        "✅ Payload Call: Success, gas_used={}, output_len={}, output={}",
+                        gas_used,
+                        output.len(),
+                        format_segment(&output)
+                    ));
+                }
 
                 // create WriteIntent
                 let write_intent = WriteIntent {

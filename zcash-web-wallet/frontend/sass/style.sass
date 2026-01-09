@@ -1,0 +1,441 @@
+@use "variables" as *
+@use "theme"
+
+// Base styles
+body
+  background-color: var(--body-bg)
+  color: var(--body-color)
+  transition: background-color 0.3s ease, color 0.3s ease
+
+// Cards
+.card
+  background-color: var(--card-bg)
+  border-color: var(--card-border-color)
+
+.card-header
+  background-color: var(--card-bg) !important
+  border-color: var(--card-border-color) !important
+  color: var(--body-color) !important
+
+// Form controls
+.form-control,
+.form-select
+  background-color: var(--input-bg)
+  border-color: var(--input-border-color)
+  color: var(--input-color)
+
+  &:focus
+    background-color: var(--input-bg)
+    border-color: var(--input-border-color)
+    color: var(--input-color)
+
+  &::placeholder
+    color: var(--muted-color)
+
+// Form labels
+.form-label
+  color: var(--body-color) !important
+
+// Form text (help text)
+.form-text
+  color: var(--muted-color) !important
+
+// Buttons
+.btn-outline-secondary
+  color: var(--body-color)
+  border-color: var(--input-border-color)
+
+  &:hover
+    background-color: var(--hover-bg)
+    color: var(--body-color)
+
+// Info card styling for dark mode
+.card.border-info
+  .card-header
+    color: var(--body-color) !important
+
+  .card-body
+    color: var(--body-color) !important
+
+    p
+      color: var(--body-color) !important
+
+    strong
+      color: var(--body-color) !important
+
+    code
+      color: #67e8f9 !important
+      background-color: rgba(103, 232, 249, 0.1) !important
+
+// Warning card styling for dark mode
+.card.border-warning
+  .card-header
+    color: var(--body-color) !important
+
+  .card-body
+    color: var(--body-color) !important
+
+    p
+      color: var(--body-color) !important
+
+    strong
+      color: var(--body-color) !important
+
+// Secondary card styling for dark mode (About This Project)
+.card.border-secondary
+  .card-header
+    color: var(--body-color) !important
+
+  .card-body
+    color: var(--body-color) !important
+
+    p
+      color: var(--body-color) !important
+
+    strong
+      color: var(--body-color) !important
+
+    h6
+      color: var(--body-color) !important
+
+    a
+      color: #67e8f9 !important
+
+// Sapling diversifier note alert styling for dark mode
+[data-theme="dark"] .sapling-note
+  background-color: rgba(255, 193, 7, 0.15)
+  border-color: rgba(255, 193, 7, 0.3)
+  color: #ffc107
+
+  strong
+    color: #ffc107
+
+  i
+    color: #ffc107
+
+@media (prefers-color-scheme: dark)
+  :root:not([data-theme="light"]) .sapling-note
+    background-color: rgba(255, 193, 7, 0.15)
+    border-color: rgba(255, 193, 7, 0.3)
+    color: #ffc107
+
+    strong
+      color: #ffc107
+
+    i
+      color: #ffc107
+
+// Monospace text
+.mono
+  font-family: $font-mono
+  font-size: $font-size-small
+
+// Results section
+.result-section
+  margin-top: 1rem
+
+// Output cards
+.output-card
+  background-color: var(--output-card-bg)
+  border-left: $card-border-width solid $color-default
+
+  &.sapling
+    border-left-color: $color-sapling
+
+  &.orchard
+    border-left-color: $color-orchard
+
+  &.transparent
+    border-left-color: $color-transparent
+
+// Key info text
+.key-info
+  font-size: $font-size-small
+
+// Loading spinner
+.loading-spinner
+  display: none
+
+.loading
+  .loading-spinner
+    display: inline-block
+
+  .btn-text
+    display: none
+
+// Endpoint item
+.endpoint-item
+  display: flex
+  align-items: center
+  gap: 0.5rem
+  padding: 0.5rem
+  border-radius: $border-radius
+
+  &:hover
+    background-color: var(--hover-bg)
+
+  .endpoint-url
+    flex: 1
+    overflow: hidden
+    text-overflow: ellipsis
+    white-space: nowrap
+
+// Theme toggle button
+.theme-toggle
+  cursor: pointer
+  background: none
+  border: none
+  padding: 0.5rem
+  color: var(--body-color)
+  transition: color 0.3s ease
+
+  &:hover
+    opacity: 0.8
+
+// Muted text override for dark mode
+.text-muted
+  color: var(--muted-color) !important
+
+// Bootstrap text utility classes - theme aware
+.text-body
+  color: var(--body-color) !important
+
+.text-body-secondary
+  color: var(--muted-color) !important
+
+// Card body text should inherit theme color
+.card-body
+  color: var(--body-color)
+
+// List group - theme aware
+.list-group-item
+  background-color: var(--card-bg)
+  border-color: var(--card-border-color)
+  color: var(--body-color)
+
+// Modal - theme aware
+.modal-content
+  background-color: var(--card-bg)
+  color: var(--body-color)
+
+.modal-header
+  border-color: var(--card-border-color)
+
+.modal-footer
+  border-color: var(--card-border-color)
+
+// Background utility - theme aware
+.bg-body-tertiary
+  background-color: var(--output-card-bg) !important
+
+// bg-light override for dark mode (used in seed phrase and UFVK display)
+[data-theme="dark"] .bg-light
+  background-color: var(--card-bg) !important
+  color: var(--body-color) !important
+  border: 1px solid var(--card-border-color)
+
+@media (prefers-color-scheme: dark)
+  :root:not([data-theme="light"]) .bg-light
+    background-color: var(--card-bg) !important
+    color: var(--body-color) !important
+    border: 1px solid var(--card-border-color)
+
+// Tables - theme aware
+.table
+  --bs-table-bg: var(--card-bg)
+  --bs-table-color: var(--body-color)
+  --bs-table-border-color: var(--card-border-color)
+  --bs-table-striped-bg: var(--hover-bg)
+  --bs-table-hover-bg: var(--hover-bg)
+
+  thead
+    color: var(--body-color)
+
+    th
+      color: var(--body-color) !important
+
+  tbody
+    color: var(--body-color)
+
+// Ensure strong text uses theme color
+strong
+  color: var(--body-color)
+
+// Alerts - theme aware for dark mode
+[data-theme="dark"]
+  .alert-info
+    background-color: rgba(13, 202, 240, 0.15)
+    border-color: rgba(13, 202, 240, 0.3)
+    color: #6edff6
+
+    strong
+      color: #6edff6
+
+    code
+      color: #67e8f9
+      background-color: rgba(103, 232, 249, 0.1)
+
+  .alert-warning
+    background-color: rgba(255, 193, 7, 0.15)
+    border-color: rgba(255, 193, 7, 0.3)
+    color: #ffda6a
+
+    strong
+      color: #ffda6a
+
+  .alert-success
+    background-color: rgba(25, 135, 84, 0.15)
+    border-color: rgba(25, 135, 84, 0.3)
+    color: #75b798
+
+    strong
+      color: #75b798
+
+    .alert-link
+      color: #a3cfbb
+      text-decoration: underline
+
+      &:hover
+        color: #c7e2d4
+
+  .alert-danger
+    background-color: rgba(220, 53, 69, 0.15)
+    border-color: rgba(220, 53, 69, 0.3)
+    color: #ea868f
+
+    strong
+      color: #ea868f
+
+@media (prefers-color-scheme: dark)
+  :root:not([data-theme="light"])
+    .alert-info
+      background-color: rgba(13, 202, 240, 0.15)
+      border-color: rgba(13, 202, 240, 0.3)
+      color: #6edff6
+
+      strong
+        color: #6edff6
+
+      code
+        color: #67e8f9
+        background-color: rgba(103, 232, 249, 0.1)
+
+    .alert-warning
+      background-color: rgba(255, 193, 7, 0.15)
+      border-color: rgba(255, 193, 7, 0.3)
+      color: #ffda6a
+
+      strong
+        color: #ffda6a
+
+    .alert-success
+      background-color: rgba(25, 135, 84, 0.15)
+      border-color: rgba(25, 135, 84, 0.3)
+      color: #75b798
+
+      strong
+        color: #75b798
+
+      .alert-link
+        color: #a3cfbb
+        text-decoration: underline
+
+        &:hover
+          color: #c7e2d4
+
+    .alert-danger
+      background-color: rgba(220, 53, 69, 0.15)
+      border-color: rgba(220, 53, 69, 0.3)
+      color: #ea868f
+
+      strong
+        color: #ea868f
+
+// Table row variants for dark mode
+[data-theme="dark"]
+  .table-success
+    --bs-table-bg: rgba(25, 135, 84, 0.2)
+    --bs-table-color: #75b798
+    --bs-table-border-color: rgba(25, 135, 84, 0.3)
+
+  .table-danger
+    --bs-table-bg: rgba(220, 53, 69, 0.2)
+    --bs-table-color: #ea868f
+    --bs-table-border-color: rgba(220, 53, 69, 0.3)
+
+  .table-warning
+    --bs-table-bg: rgba(255, 193, 7, 0.2)
+    --bs-table-color: #ffda6a
+    --bs-table-border-color: rgba(255, 193, 7, 0.3)
+
+@media (prefers-color-scheme: dark)
+  :root:not([data-theme="light"])
+    .table-success
+      --bs-table-bg: rgba(25, 135, 84, 0.2)
+      --bs-table-color: #75b798
+      --bs-table-border-color: rgba(25, 135, 84, 0.3)
+
+    .table-danger
+      --bs-table-bg: rgba(220, 53, 69, 0.2)
+      --bs-table-color: #ea868f
+      --bs-table-border-color: rgba(220, 53, 69, 0.3)
+
+    .table-warning
+      --bs-table-bg: rgba(255, 193, 7, 0.2)
+      --bs-table-color: #ffda6a
+      --bs-table-border-color: rgba(255, 193, 7, 0.3)
+
+// Dropdown menu - theme aware
+.dropdown-menu
+  background-color: var(--card-bg)
+  border-color: var(--card-border-color)
+
+.dropdown-item
+  color: var(--body-color)
+
+  &:hover,
+  &:focus
+    background-color: var(--hover-bg)
+    color: var(--body-color)
+
+// Mobile responsiveness
+@media (max-width: 576px)
+  .display-5
+    font-size: 1.5rem
+
+  .card-body
+    padding: 1rem
+
+  .mono
+    font-size: 0.75rem
+    word-break: break-all
+
+  .output-card .card-body
+    padding: 0.75rem
+
+  .btn
+    padding: 0.5rem 1rem
+
+  // Header layout on mobile
+  header .d-flex
+    flex-direction: column
+    align-items: center !important
+
+  .header-title
+    text-align: center
+    margin-bottom: 0.5rem
+
+  .header-controls
+    justify-content: center
+    width: 100%
+
+@media (max-width: 768px)
+  .container
+    padding-left: 1rem
+    padding-right: 1rem
+
+  header
+    margin-bottom: 2rem !important
+
+  .col-lg-6
+    margin-bottom: 1.5rem

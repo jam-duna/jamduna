@@ -1454,16 +1454,27 @@ pub fn fetch_imported_segment(work_item_index: u16, index: u32) -> HarnessResult
 /// Fetches an extrinsic by index from the host environment
 pub fn fetch_extrinsic(work_item_index: u16, index: u32) -> HarnessResult<Vec<u8>> {
     const FETCH_DATATYPE_EXTRINSIC: u64 = 3;
-    let mut buffer = vec![0u8; 256 * 1024];
-    match fetch_data(
-        &mut buffer,
-        FETCH_DATATYPE_EXTRINSIC,
-        work_item_index as u64,
-        index as u64,
-        256 * 1024,
-    )? {
-        Some(buffer) => Ok(buffer),
-        None => Ok(Vec::new()),
+    // Get a slice from the static buffer safely
+    let buffer_slice = unsafe {
+        let ptr = core::ptr::addr_of_mut!(TEST_BUFFER);
+        core::slice::from_raw_parts_mut((*ptr).as_mut_ptr(), (*ptr).len())
+    };
+    unsafe {
+        let result_len = fetch(
+            buffer_slice.as_mut_ptr() as u64,
+            0,
+            WORK_ITEM_FETCH_BUFFER as u64,
+            FETCH_DATATYPE_EXTRINSIC,
+            work_item_index as u64,
+            index as u64,
+        );
+        if result_len == 0 {
+            return Ok(Vec::new());
+        }
+        if result_len > WORK_ITEM_FETCH_BUFFER as u64 {
+            return Err(HarnessError::HostFetchFailed);
+        }
+        Ok(buffer_slice[..result_len as usize].to_vec())
     }
 }
 
@@ -1508,6 +1519,10 @@ pub fn fetch_header() -> Option<BlockHeader> {
 /// Fetches extrinsics by index from the host environment
 pub fn fetch_extrinsics(work_item_index: u16) -> HarnessResult<Vec<Vec<u8>>> {
     const FETCH_DATATYPE_EXTRINSICS: u64 = 4;
+    log_info(&format!(
+        "fetch_extrinsics: start work_item_index={}",
+        work_item_index
+    ));
 
     // Get a slice from the static buffer safely
     let buffer_slice = unsafe {
@@ -1520,11 +1535,11 @@ pub fn fetch_extrinsics(work_item_index: u16) -> HarnessResult<Vec<Vec<u8>>> {
         FETCH_DATATYPE_EXTRINSICS,
         work_item_index as u64,
         0,
-        256 * 1024,
+        WORK_ITEM_FETCH_BUFFER as u64,
     )? {
         Some(_buffer) => {
             let mut cursor = 0;
-            let buffer_len = 256 * 1024;
+            let buffer_len = WORK_ITEM_FETCH_BUFFER;
 
             // Get number of extrinsics using variable-length encoding
             if cursor >= buffer_len {
@@ -1539,13 +1554,17 @@ pub fn fetch_extrinsics(work_item_index: u16) -> HarnessResult<Vec<Vec<u8>>> {
             let count_slice = &count_full_slice[..count_len_len as usize];
 
             let extrinsics_count = decode_e(count_slice) as usize;
+            log_info(&format!(
+                "fetch_extrinsics: count_len_len={} extrinsics_count={}",
+                count_len_len, extrinsics_count
+            ));
 
             cursor += count_len_len as usize;
 
             let mut extrinsics = Vec::with_capacity(extrinsics_count);
 
             // For each extrinsic, extract length first using variable-length encoding, then extract that many bytes
-            for _ in 0..extrinsics_count {
+            for idx in 0..extrinsics_count {
                 if cursor >= buffer_len {
                     return Err(HarnessError::TruncatedInput);
                 }
@@ -1565,9 +1584,20 @@ pub fn fetch_extrinsics(work_item_index: u16) -> HarnessResult<Vec<Vec<u8>>> {
                 if cursor + extrinsic_len > buffer_len {
                     return Err(HarnessError::TruncatedInput);
                 }
+                let preview_len = core::cmp::min(32, extrinsic_len);
+                let preview = format_segment(&buffer_slice[cursor..cursor+preview_len]);
+                log_info(&format!(
+                    "fetch_extrinsics: idx={} len={} cursor={} preview={}",
+                    idx, extrinsic_len, cursor, preview
+                ));
                 extrinsics.push(buffer_slice[cursor..cursor + extrinsic_len].to_vec());
                 cursor += extrinsic_len;
             }
+            log_info(&format!(
+                "fetch_extrinsics: done count={} final_cursor={}",
+                extrinsics.len(),
+                cursor
+            ));
             Ok(extrinsics)
         }
         None => Ok(Vec::new()),
@@ -1670,8 +1700,9 @@ pub struct WorkItemExtrinsic {
     pub len: u32,
 }
 
-static mut BUFFER: [u8; 4104] = [0u8; 4104];
-static mut TEST_BUFFER: [u8; 4096 * 16] = [0u8; 4096 * 16];
+const WORK_ITEM_FETCH_BUFFER: usize = 1024 * 1024;
+static mut BUFFER: [u8; WORK_ITEM_FETCH_BUFFER] = [0u8; WORK_ITEM_FETCH_BUFFER];
+static mut TEST_BUFFER: [u8; WORK_ITEM_FETCH_BUFFER] = [0u8; WORK_ITEM_FETCH_BUFFER];
 
 /// Fetches and constructs a WorkItem from the JAM runtime
 pub fn fetch_work_item(wi_index: u16) -> Option<WorkItem> {
@@ -1688,7 +1719,7 @@ pub fn fetch_work_item(wi_index: u16) -> Option<WorkItem> {
         FETCH_DATATYPE_WORK_ITEM,
         wi_index as u64,
         0,
-        4104,
+        WORK_ITEM_FETCH_BUFFER as u64,
     ) {
         Ok(Some(d)) => d,
         Ok(None) => {

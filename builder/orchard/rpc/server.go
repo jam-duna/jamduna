@@ -131,6 +131,22 @@ func (s *OrchardHTTPServer) handleJSONRPC(w http.ResponseWriter, r *http.Request
 		err = s.handler.ZSendManyWithChangeTo(stringParams, &result)
 	case "z_viewtransaction":
 		err = s.handler.ZViewTransaction(stringParams, &result)
+	case "z_sendraworchardbundle":
+		err = s.handler.ZSendRawOrchardBundle(stringParams, &result)
+	case "z_getmempoolinfo":
+		err = s.handler.ZGetMempoolInfo(stringParams, &result)
+	case "z_getrawmempool":
+		err = s.handler.ZGetRawMempool(stringParams, &result)
+	case "getrawtransaction":
+		err = s.handler.GetRawTransaction(stringParams, &result)
+	case "sendrawtransaction":
+		err = s.handler.SendRawTransaction(stringParams, &result)
+	case "gettransparenttxdata":
+		err = s.handler.GetTransparentTxData(stringParams, &result)
+	case "getrawmempool":
+		err = s.handler.GetRawMempool(stringParams, &result)
+	case "getmempoolinfo":
+		err = s.handler.GetMempoolInfo(stringParams, &result)
 	default:
 		err = fmt.Errorf("unknown method: %s", req.Method)
 	}

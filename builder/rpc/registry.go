@@ -5,7 +5,6 @@ import (
 	"net/rpc"
 
 	evmrpc "github.com/colorfulnotion/jam/builder/evm/rpc"
-	evmwitness "github.com/colorfulnotion/jam/builder/evm/witness"
 )
 
 // BuilderRPCRegistry manages all builder RPC namespace registrations
@@ -21,7 +20,7 @@ func NewBuilderRPCRegistry(server *rpc.Server) *BuilderRPCRegistry {
 	}
 }
 
-// RegisterEVMOnly registers only EVM RPC methods
-func (r *BuilderRPCRegistry) RegisterEVMOnly(evmBuilder *evmwitness.EVMBuilder) error {
-	return evmrpc.RegisterEthereumRPC(r.server, evmBuilder)
+// RegisterEVMOnly registers only EVM RPC methods.
+func (r *BuilderRPCRegistry) RegisterEVMOnly(rollup *evmrpc.Rollup, txPool *evmrpc.TxPool) error {
+	return evmrpc.RegisterEthereumRPC(r.server, rollup, txPool)
 }

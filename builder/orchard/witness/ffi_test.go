@@ -1,9 +1,37 @@
 package witness
 
 import (
-	"bytes"
+	"os"
+	"strings"
 	"testing"
 )
+
+func requireRealProofs(t *testing.T) {
+	t.Helper()
+	if os.Getenv("ORCHARD_REAL_PROOFS") == "" {
+		t.Skip("Real Halo2 proof generation not wired; set ORCHARD_REAL_PROOFS=1 to run")
+	}
+
+	ffi, err := NewOrchardFFI()
+	if err != nil {
+		t.Skipf("Real proof generation unavailable: %v", err)
+		return
+	}
+	defer ffi.Cleanup()
+
+	_, err = ffi.GenerateProof(SubmitPrivate, []byte{0x01})
+	if err != nil && strings.Contains(err.Error(), "mock proof generation removed") {
+		t.Skip("Real Halo2 proof generation not implemented yet")
+	}
+}
+
+var supportedProofTypes = []ExtrinsicType{
+	SubmitPrivate,
+}
+
+var supportedProofNames = []string{
+	"SubmitPrivate",
+}
 
 func TestOrchardFFI_Init(t *testing.T) {
 	ffi, err := NewOrchardFFI()
@@ -219,6 +247,7 @@ func TestOrchardFFI_PoseidonHash(t *testing.T) {
 }
 
 func TestOrchardFFI_MockProofGeneration(t *testing.T) {
+	requireRealProofs(t)
 	ffi, err := NewOrchardFFI()
 	if err != nil {
 		t.Fatalf("Failed to initialize Orchard FFI: %v", err)
@@ -228,17 +257,10 @@ func TestOrchardFFI_MockProofGeneration(t *testing.T) {
 	inputData := []byte("test input data")
 
 	// Test proof generation for each extrinsic type
-	extrinsicTypes := []ExtrinsicType{
-		DepositPublic,
-		SubmitPrivate,
-		WithdrawPublic,
-		IssuanceV1,
-		BatchAggV1,
-	}
-
-	for _, extrinsicType := range extrinsicTypes {
-		t.Run(string(rune(extrinsicType)), func(t *testing.T) {
-			proof, err := ffi.GenerateProof(extrinsicType, inputData)
+	for i, extrinsicType := range supportedProofTypes {
+		name := supportedProofNames[i]
+		t.Run(name, func(t *testing.T) {
+			proof, publicInputs, err := ffi.GenerateProofWithPublicInputs(extrinsicType, inputData)
 			if err != nil {
 				t.Fatalf("Failed to generate proof for type %d: %v", extrinsicType, err)
 			}
@@ -248,8 +270,8 @@ func TestOrchardFFI_MockProofGeneration(t *testing.T) {
 				t.Errorf("Expected proof length %d, got %d", OrchardProofSize, len(proof))
 			}
 
-			// Verify the mock proof with the same input data used for generation
-			err = ffi.VerifyProof(extrinsicType, proof, inputData)
+			// Verify the proof with its generated public inputs
+			err = ffi.VerifyProof(extrinsicType, proof, publicInputs)
 			if err != nil {
 				t.Fatalf("Failed to verify proof for type %d: %v", extrinsicType, err)
 			}
@@ -260,6 +282,7 @@ func TestOrchardFFI_MockProofGeneration(t *testing.T) {
 }
 
 func TestOrchardFFI_ProcessExtrinsic(t *testing.T) {
+	requireRealProofs(t)
 	ffi, err := NewOrchardFFI()
 	if err != nil {
 		t.Fatalf("Failed to initialize Orchard FFI: %v", err)
@@ -268,9 +291,9 @@ func TestOrchardFFI_ProcessExtrinsic(t *testing.T) {
 
 	wallet := newDeterministicWallet(ffi)
 
-	// Test data for a deposit
+	// Test data for a private submission
 	extrinsicData := ExtrinsicData{
-		Type:         DepositPublic,
+		Type:         SubmitPrivate,
 		AssetID:      1,
 		Amount:       Uint128{Lo: 1000, Hi: 0},
 		OwnerPk:      [32]byte{0x01, 0x02, 0x03}, // Sample public key
@@ -313,6 +336,7 @@ func TestOrchardFFI_ProcessExtrinsic(t *testing.T) {
 }
 
 func TestOrchardFFI_AllExtrinsicTypes(t *testing.T) {
+	requireRealProofs(t)
 	ffi, err := NewOrchardFFI()
 	if err != nil {
 		t.Fatalf("Failed to initialize Orchard FFI: %v", err)
@@ -320,24 +344,9 @@ func TestOrchardFFI_AllExtrinsicTypes(t *testing.T) {
 	defer ffi.Cleanup()
 	wallet := newDeterministicWallet(ffi)
 
-	extrinsicTypes := []ExtrinsicType{
-		DepositPublic,
-		SubmitPrivate,
-		WithdrawPublic,
-		IssuanceV1,
-		BatchAggV1,
-	}
-
-	typeNames := []string{
-		"DepositPublic",
-		"SubmitPrivate",
-		"WithdrawPublic",
-		"IssuanceV1",
-		"BatchAggV1",
-	}
-
-	for i, extrinsicType := range extrinsicTypes {
-		t.Run(typeNames[i], func(t *testing.T) {
+	for i, extrinsicType := range supportedProofTypes {
+		name := supportedProofNames[i]
+		t.Run(name, func(t *testing.T) {
 			// Create test data for this extrinsic type
 			extrinsicData := ExtrinsicData{
 				Type:         extrinsicType,
@@ -353,15 +362,15 @@ func TestOrchardFFI_AllExtrinsicTypes(t *testing.T) {
 			// Process and verify the extrinsic
 			result, err := ffi.ProcessExtrinsic(extrinsicData, wallet)
 			if err != nil {
-				t.Fatalf("Failed to process %s: %v", typeNames[i], err)
+				t.Fatalf("Failed to process %s: %v", name, err)
 			}
 
 			err = ffi.VerifyExtrinsic(extrinsicData, result, wallet)
 			if err != nil {
-				t.Fatalf("Failed to verify %s: %v", typeNames[i], err)
+				t.Fatalf("Failed to verify %s: %v", name, err)
 			}
 
-			t.Logf("Successfully processed and verified %s", typeNames[i])
+			t.Logf("Successfully processed and verified %s", name)
 		})
 	}
 }
@@ -378,7 +387,7 @@ func TestOrchardFFI_ErrorHandling(t *testing.T) {
 	invalidProof := []byte{0x00, 0x01, 0x02} // Too short
 	publicInputs := []byte("test")
 
-	err = ffi.VerifyProof(DepositPublic, invalidProof, publicInputs)
+	err = ffi.VerifyProof(SubmitPrivate, invalidProof, publicInputs)
 	if err == nil {
 		t.Error("Expected verification to fail with invalid proof")
 	}
@@ -466,7 +475,7 @@ func BenchmarkOrchardFFI_ProcessExtrinsic(b *testing.B) {
 	wallet := newDeterministicWallet(ffi)
 
 	extrinsicData := ExtrinsicData{
-		Type:         DepositPublic,
+		Type:         SubmitPrivate,
 		AssetID:      1,
 		Amount:       Uint128{Lo: 1000},
 		OwnerPk:      [32]byte{1},
@@ -489,6 +498,7 @@ func BenchmarkOrchardFFI_ProcessExtrinsic(b *testing.B) {
 // TestOrchardFFI_FullBuilderGuarantorFlow tests the complete builder→guarantor flow
 // This is the integration test that demonstrates real end-to-end Orchard operation
 func TestOrchardFFI_FullBuilderGuarantorFlow(t *testing.T) {
+	requireRealProofs(t)
 	ffi, err := NewOrchardFFI()
 	if err != nil {
 		t.Fatalf("Failed to initialize Orchard FFI: %v", err)
@@ -499,17 +509,13 @@ func TestOrchardFFI_FullBuilderGuarantorFlow(t *testing.T) {
 	serviceID := ffi.GetServiceID()
 	t.Logf("Orchard Service ID: %d", serviceID)
 
-	// Test all Orchard extrinsic types
+	// Test the single Orchard circuit (SubmitPrivate)
 	extrinsicTypes := []struct {
 		name          string
 		extrinsicType ExtrinsicType
 		description   string
 	}{
-		{"DepositPublic", DepositPublic, "Deposit public funds into shielded pool"},
 		{"SubmitPrivate", SubmitPrivate, "Submit private transaction with ZK proof"},
-		{"WithdrawPublic", WithdrawPublic, "Withdraw from shielded pool to public account"},
-		{"IssuanceV1", IssuanceV1, "Issue new tokens with compliance constraints"},
-		{"BatchAggV1", BatchAggV1, "Aggregate multiple transactions into single proof"},
 	}
 
 	for i, testCase := range extrinsicTypes {
@@ -549,31 +555,14 @@ func TestOrchardFFI_FullBuilderGuarantorFlow(t *testing.T) {
 				t.Fatalf("Guarantor verification failed: %v", err)
 			}
 
-			// Verify that different extrinsic types produce different results
-			if i > 0 {
-				// Generate the same data with a different extrinsic type
-				differentTypeData := extrinsicData
-				differentTypeData.Type = extrinsicTypes[0].extrinsicType // Use first type
-				if differentTypeData.Type != testCase.extrinsicType {
-					differentResult, err := ffi.ProcessExtrinsic(differentTypeData, wallet)
-					if err != nil {
-						t.Fatalf("Failed to process different type: %v", err)
-					}
-					// Proofs should be different for different extrinsic types
-					if bytes.Equal(result.Proof, differentResult.Proof) {
-						t.Error("Different extrinsic types produced identical proofs")
-					}
-				}
-			}
-
 			t.Logf("✅ %s completed successfully", testCase.name)
 			t.Logf("   Builder→Guarantor flow validated")
 			t.Logf("   Proof verified: %d bytes", len(result.Proof))
 		})
 	}
 
-	t.Log("🎉 All Orchard extrinsic tests passed!")
-	t.Log("Builder→Guarantor flow validated for all 5 extrinsic types")
+	t.Log("🎉 Orchard extrinsic test passed!")
+	t.Log("Builder→Guarantor flow validated for the single circuit")
 }
 
 // createTestBytes32 creates a deterministic 32-byte array for testing

@@ -116,13 +116,13 @@ impl CompactBlock {
     }
 
     /// Serialize to bytes for storage/transmission
-    pub fn to_bytes(&self) -> Result<Vec<u8>, OrchardError> {
-        serde_cbor::to_vec(self).map_err(|_| OrchardError::SerializationError)
+    pub fn to_bytes(&self) -> Result<Vec<u8>, crate::errors::OrchardError> {
+        serde_cbor::to_vec(self).map_err(|_| crate::errors::OrchardError::SerializationError("CBOR serialization failed".into()))
     }
 
     /// Deserialize from bytes
-    pub fn from_bytes(data: &[u8]) -> Result<Self, OrchardError> {
-        serde_cbor::from_slice(data).map_err(|_| OrchardError::SerializationError)
+    pub fn from_bytes(data: &[u8]) -> Result<Self, crate::errors::OrchardError> {
+        serde_cbor::from_slice(data).map_err(|_| crate::errors::OrchardError::SerializationError("CBOR deserialization failed".into()))
     }
 }
 

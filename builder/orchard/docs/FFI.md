@@ -4,21 +4,218 @@ This document describes the FFI (Foreign Function Interface) integration for Orc
 
 ## Overview
 
-The Orchard service requires cryptographic operations provided by the Zcash `orchard` crate:
-- Orchard bundle proof generation and verification (Halo2/IPA on Pallas/Vesta)
+The Orchard service currently exposes a **limited FFI surface**:
+- Sinsemilla hashing and Merkle tree utilities (builder/orchard/ffi)
+- Commitment/nullifier helpers and witness bundle helpers (services/orchard/src/ffi.rs)
+- Halo2 proof **verification only** (services/orchard/src/ffi.rs)
+
+Not yet implemented via FFI:
 - Orchard key derivation and address generation
-- Note commitment and nullifier generation using Orchard algorithms
-- Sinsemilla hashing for Merkle tree operations
+- Orchard bundle proof generation
+- Full Orchard bundle verification via FFI
 
 The FFI implementation provides C-compatible functions exposed from Rust that can be called from Go via CGO bindings.
 
 ## Implementation Status
 
-🚧 **IN PROGRESS**: Core FFI redesign for Orchard-only operations
+✅ **IMPLEMENTED**: Sinsemilla Merkle Tree FFI (CGO bindings complete)
+✅ **IMPLEMENTED**: Commitment/nullifier helpers + witness bundle helpers
+✅ **IMPLEMENTED**: Halo2 proof verification (verify-only)
+🚧 **IN PROGRESS**: Key/address derivation and bundle prove/verify FFI
 
-## Required FFI Functions for Orchard
+## Current Exported Functions (services/orchard/src/ffi.rs)
+
+- `orchard_init`, `orchard_cleanup`, `orchard_get_service_id`
+- `orchard_nullifier_with_service_id`, `orchard_nullifier`
+- `orchard_commitment_with_service_id`, `orchard_commitment`
+- `orchard_poseidon_hash` (Blake2b placeholder; legacy compatibility)
+- `orchard_create_witness_bundle`, `orchard_witness_add_read`, `orchard_serialize_witness`
+- `orchard_verify_halo2_proof`
+
+## New CGO Sinsemilla FFI Implementation
+
+### C Export Functions
+
+**File**: `builder/orchard/ffi/src/lib.rs`
+
+```rust
+/// Compute Sinsemilla Merkle tree root from leaves
+#[no_mangle]
+pub unsafe extern "C" fn sinsemilla_compute_root(
+    leaves: *const u8,        // Flattened leaf array (leaves_len * 32 bytes)
+    leaves_len: usize,        // Number of 32-byte leaves
+    root_out: *mut u8,        // 32-byte output buffer for computed root
+) -> i32                      // FFI_SUCCESS (0) or error code
+
+/// Compute Sinsemilla Merkle root + frontier from leaves
+#[no_mangle]
+pub unsafe extern "C" fn sinsemilla_compute_root_and_frontier(
+    leaves: *const u8,         // Flattened leaf array (leaves_len * 32 bytes)
+    leaves_len: usize,         // Number of 32-byte leaves
+    root_out: *mut u8,         // 32-byte output buffer for computed root
+    frontier_out: *mut u8,     // Frontier output buffer (TREE_DEPTH * 32 bytes)
+    frontier_len_out: *mut usize, // Output: frontier length
+) -> i32                       // FFI_SUCCESS (0) or error code
+
+/// Append new leaves to existing tree using frontier
+#[no_mangle]
+pub unsafe extern "C" fn sinsemilla_append_with_frontier(
+    old_root: *const u8,      // Current tree root (32 bytes)
+    old_size: u64,            // Current number of leaves
+    frontier: *const u8,      // Frontier hashes (frontier_len * 32 bytes)
+    frontier_len: usize,      // Number of frontier elements
+    new_leaves: *const u8,    // New leaves to append (new_leaves_len * 32 bytes)
+    new_leaves_len: usize,    // Number of new leaves
+    new_root_out: *mut u8,    // 32-byte output buffer for new root
+) -> i32                      // FFI_SUCCESS (0) or error code
+
+/// Append new leaves and return updated frontier
+#[no_mangle]
+pub unsafe extern "C" fn sinsemilla_append_with_frontier_update(
+    old_root: *const u8,       // Current tree root (32 bytes)
+    old_size: u64,             // Current number of leaves
+    frontier: *const u8,       // Frontier hashes (frontier_len * 32 bytes)
+    frontier_len: usize,       // Number of frontier elements
+    new_leaves: *const u8,     // New leaves to append (new_leaves_len * 32 bytes)
+    new_leaves_len: usize,     // Number of new leaves
+    new_root_out: *mut u8,     // 32-byte output buffer for new root
+    new_frontier_out: *mut u8, // Updated frontier output buffer (TREE_DEPTH * 32 bytes)
+    new_frontier_len_out: *mut usize, // Output: frontier length
+) -> i32                       // FFI_SUCCESS (0) or error code
+
+/// Generate Merkle proof for commitment at given position
+#[no_mangle]
+pub unsafe extern "C" fn sinsemilla_generate_proof(
+    commitment: *const u8,         // Target commitment (32 bytes)
+    tree_position: u64,            // Position in tree
+    all_commitments: *const u8,    // All tree commitments (commitments_len * 32 bytes)
+    commitments_len: usize,        // Number of commitments
+    proof_out: *mut u8,           // Output buffer for proof siblings
+    proof_len_out: *mut usize,    // Output: actual proof length
+) -> i32                          // FFI_SUCCESS (0) or error code
+```
+
+### Go CGO Wrapper
+
+**File**: `builder/orchard/ffi/sinsemilla.go`
+
+```go
+/*
+#cgo LDFLAGS: -L${SRCDIR} -lorchard_ffi
+#include "orchard_ffi.h"
+*/
+import "C"
+
+// SinsemillaMerkleTree maintains Orchard commitment tree state
+type SinsemillaMerkleTree struct {
+    root     [32]byte      // Current tree root
+    size     uint64        // Number of leaves in tree
+    frontier [][32]byte    // Frontier for efficient updates
+}
+
+func NewSinsemillaMerkleTree() *SinsemillaMerkleTree
+func (t *SinsemillaMerkleTree) ComputeRoot(leaves [][32]byte) error
+func (t *SinsemillaMerkleTree) AppendWithFrontier(newLeaves [][32]byte) error
+func (t *SinsemillaMerkleTree) GenerateProof(commitment [32]byte, position uint64, allCommitments [][32]byte) ([][32]byte, error)
+func (t *SinsemillaMerkleTree) GetRoot() [32]byte
+func (t *SinsemillaMerkleTree) GetSize() uint64
+func (t *SinsemillaMerkleTree) GetFrontier() [][32]byte
+func (t *SinsemillaMerkleTree) SetFrontier(frontier [][32]byte)
+```
+
+### Build System Integration
+
+**File**: `builder/orchard/ffi/Makefile`
+
+```make
+.PHONY: all clean ffi test
+
+# Build the FFI library
+ffi:
+	cargo build --release --lib
+	cp target/release/liborchard_ffi.a .
+	cp orchard_ffi.h .
+
+# Test the FFI
+test: ffi
+	go test -v .
+
+# Clean artifacts
+clean:
+	cargo clean
+	rm -f liborchard_ffi.a orchard_ffi.h
+```
+
+**File**: `builder/orchard/ffi/Cargo.toml`
+
+```toml
+[package]
+name = "orchard_ffi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+orchard = { path = "../zcash-orchard", default-features = false, features = ["std"] }
+incrementalmerkletree = "0.8.1"
+
+[build-dependencies]
+cbindgen = "0.24"
+```
+
+### Error Handling
+
+```rust
+// FFI Error codes
+pub const FFI_SUCCESS: i32 = 0;
+pub const FFI_ERROR_NULL_POINTER: i32 = -1;
+pub const FFI_ERROR_INVALID_INPUT: i32 = -2;
+pub const FFI_ERROR_COMPUTATION_FAILED: i32 = -3;
+```
+
+```go
+// Go error handling
+func ffiErrorToGo(code C.int) error {
+    switch code {
+    case FFI_ERROR_NULL_POINTER:
+        return errors.New("FFI null pointer error")
+    case FFI_ERROR_INVALID_INPUT:
+        return errors.New("FFI invalid input error")
+    case FFI_ERROR_COMPUTATION_FAILED:
+        return errors.New("FFI computation failed")
+    default:
+        return errors.New("unknown FFI error")
+    }
+}
+```
+
+### Usage Example
+
+```go
+// Create tree and compute initial root
+tree := NewSinsemillaMerkleTree()
+leaves := [][32]byte{commitment1, commitment2, commitment3, commitment4}
+err := tree.ComputeRoot(leaves)
+
+// Efficiently append new commitments (frontier is updated by FFI)
+newLeaves := [][32]byte{commitment5, commitment6}
+err = tree.AppendWithFrontier(newLeaves)
+
+// Generate membership proof
+proof, err := tree.GenerateProof(commitment1, 0, append(leaves, newLeaves...))
+```
+
+## FFI Functions (Implemented + Planned)
+
+**Status key**:
+- ✅ Implemented today
+- ❌ Planned / not exported
 
 ### 1. System Functions
+
+**Status**: ✅ Implemented
 
 ```rust
 // File: src/ffi.rs
@@ -37,6 +234,8 @@ pub extern "C" fn orchard_get_service_id() -> u32
 ```
 
 ### 2. Key Management
+
+**Status**: ❌ Not implemented (planned)
 
 ```rust
 /// Generate Orchard spending key from seed
@@ -71,40 +270,58 @@ pub extern "C" fn orchard_generate_address(
 
 ### 3. Orchard Cryptographic Operations
 
+**Status**: ✅ Implemented (limited surface)
+
 ```rust
-/// Generate Orchard nullifier
+/// Generate Orchard nullifier (legacy wrapper)
 #[no_mangle]
 pub extern "C" fn orchard_nullifier(
-    spending_key: *const u8,      // 32 bytes
-    rho: *const u8,              // 32 bytes (note position)
-    psi: *const u8,              // 32 bytes (note randomness)
-    commitment: *const u8,        // 32 bytes (note commitment)
+    sk_spend: *const u8,          // 32 bytes
+    rho: *const u8,               // 32 bytes
+    commitment: *const u8,        // 32 bytes
     output: *mut u8,             // 32 bytes output buffer
 ) -> u32
 
-/// Generate Orchard note commitment
+/// Generate Orchard nullifier with explicit service ID
 #[no_mangle]
-pub extern "C" fn orchard_commitment(
-    value: u64,                   // Note value
-    diversifier: *const u8,       // 11 bytes
-    pk_d: *const u8,             // 32 bytes (diversified transmission key)
-    rho: *const u8,              // 32 bytes (note position)
-    psi: *const u8,              // 32 bytes (note randomness)
+pub extern "C" fn orchard_nullifier_with_service_id(
+    sk_spend: *const u8,          // 32 bytes
+    rho: *const u8,               // 32 bytes
+    commitment: *const u8,        // 32 bytes
     output: *mut u8,             // 32 bytes output buffer
+    service_id: u32,
 ) -> u32
 
-/// Compute Sinsemilla hash (Orchard hash function)
+/// Generate note commitment with explicit fields + service ID
 #[no_mangle]
-pub extern "C" fn orchard_sinsemilla_hash(
-    domain: *const u8,           // Domain tag bytes (UTF-8)
-    domain_len: u32,             // Domain length
-    inputs: *const u8,           // Input bit array
-    input_bit_len: u32,          // Number of input bits
+pub extern "C" fn orchard_commitment_with_service_id(
+    asset_id: u32,
+    amount_lo: u64,
+    amount_hi: u64,
+    owner_pk: *const u8,          // 32 bytes
+    rho: *const u8,               // 32 bytes
+    note_rseed: *const u8,        // 32 bytes
+    unlock_height: u64,
+    memo_hash: *const u8,         // 32 bytes
     output: *mut u8,             // 32 bytes output buffer
+    service_id: u32,
 ) -> u32
+
+/// Legacy commitment wrapper (service_id = 1)
+#[no_mangle]
+pub extern "C" fn orchard_commitment(/* same args as above */) -> u32
+
+/// Domain-separated hash placeholder (Blake2b-based, legacy compatibility)
+#[no_mangle]
+pub extern "C" fn orchard_poseidon_hash(/* ... */) -> u32
 ```
 
+**Note**: Sinsemilla Merkle operations are exposed via `sinsemilla_*` FFI in
+`builder/orchard/ffi`, not via `orchard_sinsemilla_hash`.
+
 ### 4. Bundle Proof Operations
+
+**Status**: ❌ Not implemented (planned). Only `orchard_verify_halo2_proof` exists today.
 
 ```rust
 /// Generate Orchard bundle proof
@@ -131,6 +348,10 @@ pub extern "C" fn orchard_verify_bundle(
 ```
 
 ## Go Integration Implementation
+
+**Note**: The CGO bindings below are **planned** for the full Orchard FFI surface.
+Today, Go integration is limited to the Sinsemilla CGO bindings in
+`builder/orchard/ffi` and the minimal FFI functions listed above.
 
 ### CGO Bindings
 
@@ -521,9 +742,9 @@ let sk_slice = unsafe {
 ## Success Criteria
 
 ✅ **Phase 1**: Basic FFI functions working with `orchard` crate integration
-✅ **Phase 2**: Full bundle proof generation and verification
-✅ **Phase 3**: JAM service integration with witness-based execution
-✅ **Phase 4**: Performance meets production requirements (<5s proof generation)
-✅ **Phase 5**: WASM support for browser-based operations
+⏳ **Phase 2**: Full bundle proof generation and verification
+⏳ **Phase 3**: JAM service integration with witness-based execution
+⏳ **Phase 4**: Performance meets production requirements (<5s proof generation)
+⏳ **Phase 5**: WASM support for browser-based operations
 
-This Orchard FFI implementation provides a secure, efficient bridge between Go's JAM integration and Rust's Orchard cryptographic operations, enabling full Zcash-compatible privacy functionality within the JAM ecosystem.
+This Orchard FFI implementation provides a limited bridge between Go's JAM integration and Rust's Orchard cryptographic operations. Full Zcash-compatible Orchard proof/key functionality remains planned.

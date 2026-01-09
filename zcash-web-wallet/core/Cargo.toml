@@ -1,0 +1,32 @@
+[package]
+name = "zcash-wallet-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Core library for Zcash wallet derivation and transaction scanning"
+
+[dependencies]
+# Zcash crates
+orchard.workspace = true
+zcash_address.workspace = true
+zcash_keys = { workspace = true, features = ["transparent-inputs", "sapling", "orchard"] }
+zcash_note_encryption.workspace = true
+zcash_primitives = { workspace = true, features = ["circuits"] }
+zcash_protocol.workspace = true
+zcash_transparent = { workspace = true, features = ["transparent-inputs"] }
+zip32.workspace = true
+
+# BIP39 mnemonic
+bip39.workspace = true
+
+# Crypto
+secp256k1.workspace = true
+
+# Serialization
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+rand.workspace = true

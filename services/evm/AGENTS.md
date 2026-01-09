@@ -10,7 +10,7 @@ For detailed information on specific components and concepts, see:
 - **[Blocks and Payloads](docs/BLOCKS.md)** - Payload types, witness handling, and execution flow
 - **[RPC Interface](docs/RPC.md)** - JSON-RPC API specification and endpoints
 - **[Stablecoins & Cores](docs/STABLECOINS-CORES.md)** - System contract responsibilities and token accounting
-- **[Verkle Integration](docs/VERKLE.md)** - Witness formats, verification, and ExecutionMode usage
+- **[UBT Integration](docs/UBT-CODEX.md)** - Witness formats, verification, and ExecutionMode usage
 
 ## Overview
 
@@ -28,7 +28,7 @@ The EVM service implements a full Ethereum-compatible runtime within the JAM pro
 - **`MajikBackend`**: DA-style storage backend with object versioning and caching (see [Backend Architecture](docs/BACKEND.md))
 - **`MajikOverlay`**: Transaction isolation and dependency tracking (see [Backend Architecture](docs/BACKEND.md))
 - **Bootstrap Interpreter**: Genesis state initialization from extrinsics
-- **Sharded Storage**: SSR-based storage with automatic sharding and caching (see [Verkle Integration](docs/VERKLE.md))
+- **Sharded Storage**: SSR-based storage with automatic sharding and caching (see [UBT Integration](docs/UBT-CODEX.md))
 
 ### Service Accord
 
@@ -93,7 +93,7 @@ After bootstrap, the service processes standard EVM transactions:
 
 - **Balance Caching**: Prevents infinite DA fetches for cross-instance access (see [Backend Architecture](docs/BACKEND.md))
 - **Negative Code Caching**: Avoids repeated DA lookups for EOAs (Externally Owned Accounts)
-- **Storage Sharding**: Efficient access to contract storage via SSR resolution (see [Verkle Integration](docs/VERKLE.md))
+- **Storage Sharding**: Efficient access to contract storage via SSR resolution (see [UBT Integration](docs/UBT-CODEX.md))
 
 ## Building
 
@@ -142,7 +142,7 @@ make evm
 
 ### Storage Layout
 
-Contract storage uses JAM's sharded approach (see [Verkle Integration](docs/VERKLE.md) for details):
+Contract storage uses JAM's sharded approach (see [UBT Integration](docs/UBT-CODEX.md) for details):
 - SSR metadata tracks storage structure
 - Individual shards contain key-value pairs
 - Automatic sharding based on storage access patterns
@@ -155,4 +155,4 @@ This design provides Ethereum compatibility while leveraging JAM's DA layer for 
 - **[Backend Architecture](docs/BACKEND.md)** - Detailed implementation of storage backends and overlay coordination
 - **[Blocks and Payloads](docs/BLOCKS.md)** - Payload handling, witness placement, and block assembly
 - **[RPC Interface](docs/RPC.md)** - External interfaces and service integration
-- **[Verkle Integration](docs/VERKLE.md)** - State commitments, proofs, and execution modes
+- **[UBT Integration](docs/UBT-CODEX.md)** - State commitments, proofs, and execution modes

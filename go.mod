@@ -43,6 +43,7 @@ require (
 	github.com/ProtonMail/go-crypto v1.1.5 // indirect
 	github.com/ajstarks/svgo v0.0.0-20211024235047-1546f124cd8b // indirect
 	github.com/bits-and-blooms/bitset v1.20.0 // indirect
+	github.com/btcsuite/btcd/btcec/v2 v2.3.6 // indirect
 	github.com/campoy/embedmd v1.0.0 // indirect
 	github.com/cloudflare/circl v1.6.0 // indirect
 	github.com/consensys/gnark-crypto v0.18.0 // indirect
@@ -67,7 +68,7 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
-	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
+	github.com/klauspost/cpuid/v2 v2.0.12 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/onsi/ginkgo/v2 v2.11.0 // indirect
 	github.com/pjbgf/sha1cd v0.3.2 // indirect
@@ -80,6 +81,7 @@ require (
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	github.com/yudai/golcs v0.0.0-20170316035057-ecda9a501e82 // indirect
 	github.com/yudai/pp v2.0.1+incompatible // indirect
+	github.com/zeebo/blake3 v0.2.4 // indirect
 	go.uber.org/mock v0.5.0 // indirect
 	golang.org/x/image v0.25.0 // indirect
 	golang.org/x/mod v0.24.0 // indirect

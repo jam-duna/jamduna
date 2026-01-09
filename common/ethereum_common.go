@@ -1,13 +1,15 @@
 package common
 
 import (
+	"crypto/ecdsa"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"reflect"
 
 	ethereumCommon "github.com/ethereum/go-ethereum/common"
-	//"github.com/ethereum/go-ethereum/common/hexutil"
-	//"encoding/hex"
-	"encoding/json"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 // Hash is a custom type based on Ethereum's common.Hash
@@ -207,5 +209,46 @@ func GetEVMDevAccount(index int) (Address, string) {
 		"dbda1821b80551c9d65939329250298aa3472ba22feea921c0cf5d620ea67b97", // Account #8
 		"2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6", // Account #9
 	}
-	return addresses[index%10], privateKeys[index%10]
+
+	// For indices < 10, use hardcoded dev accounts
+	if index < 10 {
+		return addresses[index], privateKeys[index]
+	}
+
+	// For indices >= 10, generate deterministic key from index
+	return generateDeterministicAccount(index)
+}
+
+// generateDeterministicAccount generates a deterministic private key and address from an index
+// Uses Keccak256("jam-dev-account" || index) to derive a private key
+func generateDeterministicAccount(index int) (Address, string) {
+	// Create deterministic seed from index
+	indexBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(indexBytes, uint64(index))
+
+	seed := append([]byte("jam-dev-account"), indexBytes...)
+	privateKeyBytes := Keccak256(seed).Bytes()
+
+	// Generate ECDSA private key from bytes
+	privateKey, err := crypto.ToECDSA(privateKeyBytes)
+	if err != nil {
+		// Fallback: hash again if invalid key (extremely rare)
+		privateKeyBytes = Keccak256(privateKeyBytes).Bytes()
+		privateKey, err = crypto.ToECDSA(privateKeyBytes)
+		if err != nil {
+			panic(fmt.Sprintf("failed to generate private key for index %d: %v", index, err))
+		}
+	}
+
+	// Derive address from private key
+	publicKey := privateKey.Public()
+	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+	if !ok {
+		panic(fmt.Sprintf("failed to cast public key for index %d", index))
+	}
+	address := crypto.PubkeyToAddress(*publicKeyECDSA)
+
+	// Return address and private key (without 0x prefix)
+	privateKeyHex := hex.EncodeToString(privateKeyBytes)
+	return Address(address), privateKeyHex
 }

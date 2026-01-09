@@ -222,11 +222,11 @@ func TestParseAugmentedPreStateReads(t *testing.T) {
 	witness = append(witness, countBytes...)
 
 	// Entry: 161 bytes
-	// [32B verkle_key][1B key_type][20B address][8B extra]
+	// [32B ubt_key][1B key_type][20B address][8B extra]
 	// [32B storage_key][32B pre_value][32B post_value][4B txIndex]
 
-	verkleKey := common.HexToHash("0xaaaa")
-	witness = append(witness, verkleKey[:]...)
+	ubtKey := common.HexToHash("0xaaaa")
+	witness = append(witness, ubtKey[:]...)
 
 	keyType := uint8(KeyTypeStorage)
 	witness = append(witness, keyType)
@@ -270,8 +270,8 @@ func TestParseAugmentedPreStateReads(t *testing.T) {
 	}
 
 	entry := reads[0]
-	if entry.VerkleKey != verkleKey {
-		t.Errorf("VerkleKey mismatch: expected %x, got %x", verkleKey, entry.VerkleKey)
+	if entry.UBTKey != ubtKey {
+		t.Errorf("UBTKey mismatch: expected %x, got %x", ubtKey, entry.UBTKey)
 	}
 
 	if entry.KeyType != keyType {
@@ -483,6 +483,10 @@ func TestSplitWitnessSections(t *testing.T) {
 	// Pre-proof data
 	preProof := make([]byte, 100)
 	witness = append(witness, preProof...)
+	// Pre-extension count (0)
+	preExtCount := make([]byte, 4)
+	binary.BigEndian.PutUint32(preExtCount, 0)
+	witness = append(witness, preExtCount...)
 
 	preStateSectionLen := len(witness)
 
@@ -510,6 +514,10 @@ func TestSplitWitnessSections(t *testing.T) {
 	// Post-proof data
 	postProof := make([]byte, 200)
 	witness = append(witness, postProof...)
+	// Post-extension count (0)
+	postExtCount := make([]byte, 4)
+	binary.BigEndian.PutUint32(postExtCount, 0)
+	witness = append(witness, postExtCount...)
 
 	// Split
 	preState, postState, err := SplitWitnessSections(witness)
@@ -524,7 +532,7 @@ func TestSplitWitnessSections(t *testing.T) {
 	}
 
 	// Verify post-state section length
-	expectedPostLen := 32 + 4 + (161 * 2) + 4 + 200
+	expectedPostLen := 32 + 4 + (161 * 2) + 4 + 200 + 4
 	if len(postState) != expectedPostLen {
 		t.Errorf("Post-state section length mismatch: expected %d, got %d",
 			expectedPostLen, len(postState))
@@ -555,11 +563,11 @@ func TestBuildBalanceChanges(t *testing.T) {
 
 	writes := []WriteEntry{
 		{
-			Address:  addr,
-			KeyType:  KeyTypeBasicData,
-			PreValue: preValue,
+			Address:   addr,
+			KeyType:   KeyTypeBasicData,
+			PreValue:  preValue,
 			PostValue: postValue,
-			TxIndex:  1,
+			TxIndex:   1,
 		},
 	}
 
@@ -707,15 +715,15 @@ func TestBuildBlockAccessListFromWitness(t *testing.T) {
 	addr1 := common.HexToAddress("0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
 	storageKey1 := common.HexToHash("0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB")
 
-	verkleKey1 := common.HexToHash("0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC")
-	witness = append(witness, verkleKey1[:]...)
+	ubtKey1 := common.HexToHash("0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC")
+	witness = append(witness, ubtKey1[:]...)
 	witness = append(witness, byte(KeyTypeStorage)) // key_type
 	witness = append(witness, addr1[:]...)          // address (20 bytes)
 	witness = append(witness, make([]byte, 8)...)   // extra (8 bytes)
 	witness = append(witness, storageKey1[:]...)    // storage_key (32 bytes)
 	preValue1 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000042")
-	witness = append(witness, preValue1[:]...)      // pre_value (32 bytes)
-	witness = append(witness, preValue1[:]...)      // post_value (same = read-only) (32 bytes)
+	witness = append(witness, preValue1[:]...) // pre_value (32 bytes)
+	witness = append(witness, preValue1[:]...) // post_value (same = read-only) (32 bytes)
 	txIndex1 := uint32(0)
 	txIndex1Bytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(txIndex1Bytes, txIndex1)
@@ -723,8 +731,8 @@ func TestBuildBlockAccessListFromWitness(t *testing.T) {
 
 	// Read entry 1b: Different storage key for same address that WILL be written
 	storageKey1b := common.HexToHash("0x3333333333333333333333333333333333333333333333333333333333333333")
-	verkleKey1b := common.HexToHash("0x4444444444444444444444444444444444444444444444444444444444444444")
-	witness = append(witness, verkleKey1b[:]...)
+	ubtKey1b := common.HexToHash("0x4444444444444444444444444444444444444444444444444444444444444444")
+	witness = append(witness, ubtKey1b[:]...)
 	witness = append(witness, byte(KeyTypeStorage))
 	witness = append(witness, addr1[:]...)
 	witness = append(witness, make([]byte, 8)...)
@@ -736,8 +744,8 @@ func TestBuildBlockAccessListFromWitness(t *testing.T) {
 
 	// Read entry 2: Balance read for address 0xDDDD
 	addr2 := common.HexToAddress("0xDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD")
-	verkleKey2 := common.HexToHash("0xEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE")
-	witness = append(witness, verkleKey2[:]...)
+	ubtKey2 := common.HexToHash("0xEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE")
+	witness = append(witness, ubtKey2[:]...)
 	witness = append(witness, byte(KeyTypeBasicData)) // key_type
 	witness = append(witness, addr2[:]...)            // address (20 bytes)
 	witness = append(witness, make([]byte, 8)...)     // extra (8 bytes)
@@ -753,6 +761,9 @@ func TestBuildBlockAccessListFromWitness(t *testing.T) {
 	preProofLenBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(preProofLenBytes, preProofLen)
 	witness = append(witness, preProofLenBytes...)
+	preExtCount := make([]byte, 4)
+	binary.BigEndian.PutUint32(preExtCount, 0)
+	witness = append(witness, preExtCount...)
 
 	// ===== POST-STATE SECTION (WRITES) =====
 	postRoot := common.HexToHash("0x2222222222222222222222222222222222222222222222222222222222222222")
@@ -764,21 +775,21 @@ func TestBuildBlockAccessListFromWitness(t *testing.T) {
 	witness = append(witness, writeCountBytes...)
 
 	// Write entry 1: Storage write for addr1 (modify storageKey1b, not storageKey1 which is read-only)
-	witness = append(witness, verkleKey1b[:]...)
+	witness = append(witness, ubtKey1b[:]...)
 	witness = append(witness, byte(KeyTypeStorage))
 	witness = append(witness, addr1[:]...)
 	witness = append(witness, make([]byte, 8)...)
 	witness = append(witness, storageKey1b[:]...)
-	witness = append(witness, preValue1b[:]...)          // pre_value (0x11)
+	witness = append(witness, preValue1b[:]...) // pre_value (0x11)
 	postValue1b := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000100")
-	witness = append(witness, postValue1b[:]...)         // post_value (0x100)
+	witness = append(witness, postValue1b[:]...) // post_value (0x100)
 	txIndex1Write := uint32(1)
 	txIndex1WriteBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(txIndex1WriteBytes, txIndex1Write)
 	witness = append(witness, txIndex1WriteBytes...)
 
 	// Write entry 2: Balance write for addr2 (modify balance)
-	witness = append(witness, verkleKey2[:]...)
+	witness = append(witness, ubtKey2[:]...)
 	witness = append(witness, byte(KeyTypeBasicData))
 	witness = append(witness, addr2[:]...)
 	witness = append(witness, make([]byte, 8)...)
@@ -797,6 +808,9 @@ func TestBuildBlockAccessListFromWitness(t *testing.T) {
 	postProofLenBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(postProofLenBytes, postProofLen)
 	witness = append(witness, postProofLenBytes...)
+	postExtCount := make([]byte, 4)
+	binary.BigEndian.PutUint32(postExtCount, 0)
+	witness = append(witness, postExtCount...)
 
 	// ===== BUILD BAL =====
 	preState, postState, err := SplitWitnessSections(witness)
@@ -1002,9 +1016,9 @@ func TestParseAugmentedPostStateWrites(t *testing.T) {
 
 	// Entry 1: Balance write
 	addr1 := common.HexToAddress("0xAAAA")
-	verkleKey1 := common.HexToHash("0xBBBB")
+	ubtKey1 := common.HexToHash("0xBBBB")
 
-	postState = append(postState, verkleKey1[:]...)
+	postState = append(postState, ubtKey1[:]...)
 	postState = append(postState, byte(KeyTypeBasicData))
 	postState = append(postState, addr1[:]...)
 	postState = append(postState, make([]byte, 8)...)
@@ -1023,9 +1037,9 @@ func TestParseAugmentedPostStateWrites(t *testing.T) {
 	// Entry 2: Storage write
 	addr2 := common.HexToAddress("0xCCCC")
 	storageKey2 := common.HexToHash("0xDDDD")
-	verkleKey2 := common.HexToHash("0xEEEE")
+	ubtKey2 := common.HexToHash("0xEEEE")
 
-	postState = append(postState, verkleKey2[:]...)
+	postState = append(postState, ubtKey2[:]...)
 	postState = append(postState, byte(KeyTypeStorage))
 	postState = append(postState, addr2[:]...)
 	postState = append(postState, make([]byte, 8)...)

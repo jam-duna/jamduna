@@ -3,22 +3,25 @@
 /// This module provides C-compatible functions that can be called from Go
 /// to perform Halo2 proof generation, verification, and cryptographic operations.
 
-use crate::crypto::{commitment, nullifier, poseidon_hash_with_domain};
+use crate::crypto::{commitment, nullifier};
+use crate::bundle_codec::{decode_issue_bundle, decode_swap_bundle, decode_zsa_bundle};
+use crate::refiner::{parse_pre_state_payload, process_extrinsics_witness_aware};
+use crate::nu7_types::OrchardBundleType;
+use crate::state::OrchardExtrinsic;
 use crate::witness::{WitnessBundle, StateRead};
 use alloc::vec::Vec;
 use alloc::string::ToString;
 use core::slice;
 use core::ptr;
-use core::str;
+use blake2::Blake2bVar;
+use blake2::digest::{Update, VariableOutput};
+use utils::functions::RefineContext;
 
 /// Extrinsic type constants for FFI
 #[repr(C)]
 pub enum ExtrinsicType {
     DepositPublic = 0,
     SubmitPrivate = 1,
-    WithdrawPublic = 2,
-    IssuanceV1 = 3,
-    BatchAggV1 = 4,
 }
 
 /// FFI Result codes
@@ -150,68 +153,99 @@ pub extern "C" fn orchard_commitment_with_service_id(
     }
 }
 
-/// Generate Poseidon hash with domain separation
+/// Refine a work package in-process using witness-aware validation.
 ///
 /// # Safety
-/// All pointers must be valid for the specified lengths
-/// MEMORY-SAFE: Enhanced bounds checking and overflow protection
+/// All pointers must be valid for the specified lengths.
 #[no_mangle]
-pub extern "C" fn orchard_poseidon_hash(
-    domain: *const u8,        // Domain tag bytes (UTF-8)
-    domain_len: u32,          // Domain length (1-64 bytes)
-    inputs: *const u8,        // Input field elements (32 bytes each, big-endian)
-    input_count: u32,         // Number of inputs (1-10)
-    output: *mut u8,          // 32 bytes output buffer
+pub extern "C" fn orchard_refine_witness_aware(
+    service_id: u32,
+    pre_state_payload_ptr: *const u8,
+    pre_state_payload_len: u32,
+    pre_witness_ptr: *const u8,
+    pre_witness_len: u32,
+    post_witness_ptr: *const u8,
+    post_witness_len: u32,
+    bundle_proof_ptr: *const u8,
+    bundle_proof_len: u32,
 ) -> u32 {
-    // SECURITY: Validate input parameters with strict bounds
-    const MAX_POSEIDON_INPUTS: u32 = 10; // Domain + up to 10 inputs
-    const MAX_DOMAIN_LEN: u32 = 64;
-
-    if domain.is_null() || inputs.is_null() || output.is_null() {
+    if pre_state_payload_ptr.is_null() || pre_state_payload_len == 0 {
         return FFIResult::InvalidInput as u32;
     }
-    if domain_len == 0 || domain_len > MAX_DOMAIN_LEN {
+    if pre_witness_ptr.is_null() || pre_witness_len == 0 {
         return FFIResult::InvalidInput as u32;
     }
-    if input_count == 0 || input_count > MAX_POSEIDON_INPUTS {
+    if bundle_proof_ptr.is_null() || bundle_proof_len == 0 {
         return FFIResult::InvalidInput as u32;
     }
 
-    unsafe {
-        let domain_slice = slice::from_raw_parts(domain, domain_len as usize);
-        let domain_str = match str::from_utf8(domain_slice) {
-            Ok(value) => value,
-            Err(_) => return FFIResult::InvalidInput as u32,
-        };
+    let pre_state_payload = unsafe {
+        slice::from_raw_parts(pre_state_payload_ptr, pre_state_payload_len as usize)
+    };
+    let pre_state = match parse_pre_state_payload(pre_state_payload) {
+        Ok(state) => state,
+        Err(_) => return FFIResult::InvalidInput as u32,
+    };
 
-        // SECURITY: Check for overflow when calculating total size
-        let total_input_bytes = match input_count.checked_mul(32) {
-            Some(size) => size as usize,
-            None => return FFIResult::InvalidInput as u32, // Overflow detected
-        };
+    let pre_witness_bytes = unsafe {
+        slice::from_raw_parts(pre_witness_ptr, pre_witness_len as usize)
+    };
+    let pre_extrinsic = match OrchardExtrinsic::deserialize(pre_witness_bytes) {
+        Ok(extrinsic) => extrinsic,
+        Err(_) => return FFIResult::SerializationError as u32,
+    };
 
-        let inputs_slice = slice::from_raw_parts(inputs, total_input_bytes);
-        let mut field_inputs: Vec<[u8; 32]> = Vec::new();
+    let mut extrinsics = Vec::new();
+    extrinsics.push(pre_extrinsic);
 
-        // SECURITY: Safe chunk processing with exact size validation
-        for chunk in inputs_slice.chunks_exact(32) {
-            let mut bytes = [0u8; 32];
-            bytes.copy_from_slice(chunk);
-            field_inputs.push(bytes);
-        }
-
-        // Verify we got the expected number of field elements
-        if field_inputs.len() != input_count as usize {
+    if post_witness_len > 0 {
+        if post_witness_ptr.is_null() {
             return FFIResult::InvalidInput as u32;
         }
+        let post_witness_bytes = unsafe {
+            slice::from_raw_parts(post_witness_ptr, post_witness_len as usize)
+        };
+        let post_extrinsic = match OrchardExtrinsic::deserialize(post_witness_bytes) {
+            Ok(extrinsic) => extrinsic,
+            Err(_) => return FFIResult::SerializationError as u32,
+        };
+        extrinsics.push(post_extrinsic);
+    }
 
-        let result = poseidon_hash_with_domain(domain_str, &field_inputs);
+    let bundle_proof_bytes = unsafe {
+        slice::from_raw_parts(bundle_proof_ptr, bundle_proof_len as usize)
+    };
+    let bundle_extrinsic = match OrchardExtrinsic::deserialize(bundle_proof_bytes) {
+        Ok(extrinsic) => extrinsic,
+        Err(_) => return FFIResult::SerializationError as u32,
+    };
+    extrinsics.push(bundle_extrinsic);
 
-        let output_slice = slice::from_raw_parts_mut(output, 32);
-        output_slice.copy_from_slice(&result);
-        FFIResult::Success as u32
+    let refine_context = RefineContext {
+        anchor: [0u8; 32],
+        state_root: [0u8; 32],
+        beefy_root: [0u8; 32],
+        lookup_anchor: [0u8; 32],
+        lookup_anchor_slot: 0,
+        prerequisites: Vec::new(),
+    };
+    let work_package_hash = [0u8; 32];
+    let refine_gas_limit = 10_000_000u64;
+
+    match process_extrinsics_witness_aware(
+        service_id,
+        &refine_context,
+        &work_package_hash,
+        refine_gas_limit,
+        &pre_state,
+        &extrinsics,
+        None,
+    ) {
+        Ok(_) => FFIResult::Success as u32,
+        Err(_) => FFIResult::VerificationFailed as u32,
     }
 }
+
 
 /// Serialize witness bundle to JSON
 ///
@@ -492,6 +526,304 @@ pub extern "C" fn orchard_commitment(
     )
 }
 
+/// Domain-separated Poseidon-like hash for FFI callers.
+/// Note: Uses Blake2b as a deterministic placeholder for legacy clients.
+#[no_mangle]
+pub extern "C" fn orchard_poseidon_hash(
+    domain: *const u8,
+    domain_len: u32,
+    inputs: *const u8,
+    input_count: u32,
+    output: *mut u8,
+) -> u32 {
+    if domain.is_null() || inputs.is_null() || output.is_null() {
+        return FFIResult::InvalidInput as u32;
+    }
+    if domain_len == 0 || domain_len > 64 || input_count == 0 || input_count > 10 {
+        return FFIResult::InvalidInput as u32;
+    }
+
+    let domain_slice = unsafe { slice::from_raw_parts(domain, domain_len as usize) };
+    let inputs_len = (input_count as usize)
+        .checked_mul(32)
+        .unwrap_or(0);
+    if inputs_len == 0 {
+        return FFIResult::InvalidInput as u32;
+    }
+    let inputs_slice = unsafe { slice::from_raw_parts(inputs, inputs_len) };
+
+    let mut hasher = match Blake2bVar::new(32) {
+        Ok(h) => h,
+        Err(_) => return FFIResult::InternalError as u32,
+    };
+    hasher.update(domain_slice);
+    hasher.update(&(input_count as u32).to_le_bytes());
+    hasher.update(inputs_slice);
+
+    let mut out = [0u8; 32];
+    if hasher.finalize_variable(&mut out).is_err() {
+        return FFIResult::InternalError as u32;
+    }
+
+    unsafe {
+        ptr::copy_nonoverlapping(out.as_ptr(), output, out.len());
+    }
+    FFIResult::Success as u32
+}
+
+/// Compute IssueBundle commitments from encoded IssueBundle bytes.
+///
+/// # Safety
+/// All pointers must be valid for the specified lengths.
+#[no_mangle]
+pub extern "C" fn orchard_issue_bundle_commitments(
+    issue_bundle_ptr: *const u8,
+    issue_bundle_len: u32,
+    commitments_ptr: *mut u8,
+    commitments_cap: u32,
+    commitments_len_out: *mut u32,
+) -> u32 {
+    if issue_bundle_ptr.is_null() || commitments_ptr.is_null() || commitments_len_out.is_null() {
+        return FFIResult::InvalidInput as u32;
+    }
+    if issue_bundle_len == 0 {
+        unsafe {
+            *commitments_len_out = 0;
+        }
+        return FFIResult::Success as u32;
+    }
+
+    let issue_bundle = unsafe { slice::from_raw_parts(issue_bundle_ptr, issue_bundle_len as usize) };
+    let decoded = match decode_issue_bundle(issue_bundle) {
+        Ok(Some(bundle)) => bundle,
+        Ok(None) => {
+            unsafe {
+                *commitments_len_out = 0;
+            }
+            return FFIResult::Success as u32;
+        }
+        Err(_) => return FFIResult::SerializationError as u32,
+    };
+
+    let commitments = match crate::signature_verifier::compute_issue_bundle_commitments(&decoded) {
+        Ok(values) => values,
+        Err(_) => return FFIResult::SerializationError as u32,
+    };
+
+    let total_bytes = match commitments.len().checked_mul(32) {
+        Some(value) => value,
+        None => return FFIResult::InvalidInput as u32,
+    };
+    if total_bytes > commitments_cap as usize {
+        return FFIResult::InvalidInput as u32;
+    }
+
+    unsafe {
+        let out = slice::from_raw_parts_mut(commitments_ptr, total_bytes);
+        for (idx, commitment) in commitments.iter().enumerate() {
+            let offset = idx * 32;
+            out[offset..offset + 32].copy_from_slice(commitment);
+        }
+        *commitments_len_out = commitments.len() as u32;
+    }
+
+    FFIResult::Success as u32
+}
+
+/// Decode a V6 Orchard bundle and return action groups, nullifiers, commitments, and bundle type.
+///
+/// # Safety
+/// All pointers must be valid for the specified lengths.
+#[no_mangle]
+pub extern "C" fn orchard_decode_bundle_v6(
+    orchard_bundle_ptr: *const u8,
+    orchard_bundle_len: u32,
+    issue_bundle_ptr: *const u8,
+    issue_bundle_len: u32,
+    bundle_type_out: *mut u8,
+    group_sizes_ptr: *mut u32,
+    group_sizes_cap: u32,
+    group_count_out: *mut u32,
+    nullifiers_ptr: *mut u8,
+    nullifiers_cap: u32,
+    commitments_ptr: *mut u8,
+    commitments_cap: u32,
+    issue_bundle_out: *mut u8,
+    issue_bundle_cap: u32,
+    issue_bundle_len_out: *mut u32,
+) -> u32 {
+    if bundle_type_out.is_null()
+        || group_sizes_ptr.is_null()
+        || group_count_out.is_null()
+        || nullifiers_ptr.is_null()
+        || commitments_ptr.is_null()
+    {
+        return FFIResult::InvalidInput as u32;
+    }
+    if orchard_bundle_len == 0 && issue_bundle_len == 0 {
+        return FFIResult::InvalidInput as u32;
+    }
+    if orchard_bundle_len > 0 && orchard_bundle_ptr.is_null() {
+        return FFIResult::InvalidInput as u32;
+    }
+    if issue_bundle_len > 0 && issue_bundle_ptr.is_null() {
+        return FFIResult::InvalidInput as u32;
+    }
+
+    let mut group_sizes: Vec<usize> = Vec::new();
+    let mut total_actions: usize = 0;
+    let mut zsa_bundle = None;
+
+    let mut swap_bundle = None;
+    let bundle_type = if orchard_bundle_len == 0 {
+        OrchardBundleType::ZSA
+    } else {
+        let orchard_bundle =
+            unsafe { slice::from_raw_parts(orchard_bundle_ptr, orchard_bundle_len as usize) };
+        let mut decoded_swap = decode_swap_bundle(orchard_bundle).ok();
+        if let Some(bundle) = decoded_swap.as_ref() {
+            group_sizes.reserve(bundle.action_groups.len());
+            for group in &bundle.action_groups {
+                group_sizes.push(group.actions.len());
+                total_actions = total_actions.saturating_add(group.actions.len());
+            }
+            swap_bundle = decoded_swap.take();
+            OrchardBundleType::Swap
+        } else if let Ok(bundle) = decode_zsa_bundle(orchard_bundle) {
+            group_sizes.push(bundle.actions.len());
+            total_actions = bundle.actions.len();
+            zsa_bundle = Some(bundle);
+            OrchardBundleType::ZSA
+        } else {
+            return FFIResult::SerializationError as u32;
+        }
+    };
+
+    if group_sizes.len() > group_sizes_cap as usize {
+        return FFIResult::InvalidInput as u32;
+    }
+
+    let total_bytes = match total_actions.checked_mul(32) {
+        Some(value) => value,
+        None => return FFIResult::InvalidInput as u32,
+    };
+    if total_bytes > nullifiers_cap as usize || total_bytes > commitments_cap as usize {
+        return FFIResult::InvalidInput as u32;
+    }
+
+    if issue_bundle_len > 0 {
+        let issue_bundle =
+            unsafe { slice::from_raw_parts(issue_bundle_ptr, issue_bundle_len as usize) };
+        if decode_issue_bundle(issue_bundle).is_err() {
+            return FFIResult::SerializationError as u32;
+        }
+        if !issue_bundle_out.is_null() {
+            if issue_bundle_len as usize > issue_bundle_cap as usize {
+                return FFIResult::InvalidInput as u32;
+            }
+            unsafe {
+                let out = slice::from_raw_parts_mut(issue_bundle_out, issue_bundle_len as usize);
+                out.copy_from_slice(issue_bundle);
+            }
+        }
+    }
+
+    unsafe {
+        *bundle_type_out = bundle_type as u8;
+        *group_count_out = group_sizes.len() as u32;
+        if !issue_bundle_len_out.is_null() {
+            *issue_bundle_len_out = issue_bundle_len;
+        }
+
+        let group_sizes_out = slice::from_raw_parts_mut(group_sizes_ptr, group_sizes.len());
+        for (idx, size) in group_sizes.iter().enumerate() {
+            group_sizes_out[idx] = *size as u32;
+        }
+
+        if total_bytes > 0 {
+            let nullifiers_out = slice::from_raw_parts_mut(nullifiers_ptr, total_bytes);
+            let commitments_out = slice::from_raw_parts_mut(commitments_ptr, total_bytes);
+
+            let mut action_idx = 0usize;
+            match bundle_type {
+                OrchardBundleType::Swap => {
+                    if let Some(bundle) = swap_bundle.as_ref() {
+                        for group in &bundle.action_groups {
+                            for action in &group.actions {
+                                let offset = action_idx * 32;
+                                nullifiers_out[offset..offset + 32].copy_from_slice(&action.nullifier);
+                                commitments_out[offset..offset + 32].copy_from_slice(&action.cmx);
+                                action_idx += 1;
+                            }
+                        }
+                    }
+                }
+                OrchardBundleType::ZSA => {
+                    let Some(bundle) = zsa_bundle.as_ref() else {
+                        return FFIResult::SerializationError as u32;
+                    };
+                    for action in &bundle.actions {
+                        let offset = action_idx * 32;
+                        nullifiers_out[offset..offset + 32].copy_from_slice(&action.nullifier);
+                        commitments_out[offset..offset + 32].copy_from_slice(&action.cmx);
+                        action_idx += 1;
+                    }
+                }
+                OrchardBundleType::Vanilla => {
+                    return FFIResult::InvalidInput as u32;
+                }
+            }
+        }
+    }
+
+    FFIResult::Success as u32
+}
+
+/// Verify Halo2 proof using the embedded Orchard verifying key.
+///
+/// # Safety
+/// All pointers must be valid for the specified lengths.
+#[no_mangle]
+pub extern "C" fn orchard_verify_halo2_proof(
+    vk_id: u32,
+    proof_ptr: *const u8,
+    proof_len: u32,
+    public_inputs_ptr: *const u8,
+    public_inputs_len: u32, // number of 32-byte elements
+) -> u32 {
+    if proof_ptr.is_null() || public_inputs_ptr.is_null() {
+        return FFIResult::InvalidInput as u32;
+    }
+    if public_inputs_len == 0 {
+        return FFIResult::InvalidInput as u32;
+    }
+
+    let proof = unsafe { slice::from_raw_parts(proof_ptr, proof_len as usize) };
+    let inputs_bytes_len = match (public_inputs_len as usize).checked_mul(32) {
+        Some(len) => len,
+        None => return FFIResult::InvalidInput as u32,
+    };
+    let inputs_bytes = unsafe { slice::from_raw_parts(public_inputs_ptr, inputs_bytes_len) };
+
+    let mut inputs = Vec::with_capacity(public_inputs_len as usize);
+    for i in 0..public_inputs_len as usize {
+        let start = i * 32;
+        let end = start + 32;
+        if end > inputs_bytes.len() {
+            return FFIResult::InvalidInput as u32;
+        }
+        let mut input = [0u8; 32];
+        input.copy_from_slice(&inputs_bytes[start..end]);
+        inputs.push(input);
+    }
+
+    match crate::crypto::verify_halo2_proof(proof, &inputs, vk_id) {
+        Ok(true) => FFIResult::Success as u32,
+        Ok(false) => FFIResult::VerificationFailed as u32,
+        Err(_) => FFIResult::VerificationFailed as u32,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -541,6 +873,54 @@ mod tests {
 
         assert_eq!(result, FFIResult::Success as u32);
         assert_ne!(output, [0u8; 32]); // Should have generated some output
+    }
+
+    #[test]
+    fn test_ffi_decode_issue_only_v6() {
+        let mut issue_bundle = Vec::new();
+        issue_bundle.push(1); // issuer_len
+        issue_bundle.push(0x01); // issuer_key
+        issue_bundle.push(1); // action_count
+        issue_bundle.extend_from_slice(&[0u8; 32]); // asset_desc_hash
+        issue_bundle.push(1); // note_count
+        issue_bundle.extend_from_slice(&[0u8; 43]); // recipient
+        issue_bundle.extend_from_slice(&1u64.to_le_bytes()); // value
+        issue_bundle.extend_from_slice(&[0u8; 32]); // rho
+        issue_bundle.extend_from_slice(&[0u8; 32]); // rseed
+        issue_bundle.push(0); // finalize
+        issue_bundle.push(0); // sighash_info_len
+        issue_bundle.push(0); // signature_len
+
+        let mut bundle_type: u8 = 0;
+        let mut group_sizes = [0u32; 8];
+        let mut group_count: u32 = 0;
+        let mut nullifiers = [0u8; 32 * 4];
+        let mut commitments = [0u8; 32 * 4];
+        let mut issue_out = vec![0u8; issue_bundle.len()];
+        let mut issue_len_out: u32 = 0;
+
+        let result = orchard_decode_bundle_v6(
+            core::ptr::null(),
+            0,
+            issue_bundle.as_ptr(),
+            issue_bundle.len() as u32,
+            &mut bundle_type as *mut u8,
+            group_sizes.as_mut_ptr(),
+            group_sizes.len() as u32,
+            &mut group_count as *mut u32,
+            nullifiers.as_mut_ptr(),
+            nullifiers.len() as u32,
+            commitments.as_mut_ptr(),
+            commitments.len() as u32,
+            issue_out.as_mut_ptr(),
+            issue_out.len() as u32,
+            &mut issue_len_out as *mut u32,
+        );
+
+        assert_eq!(result, FFIResult::Success as u32);
+        assert_eq!(group_count, 0);
+        assert_eq!(issue_len_out as usize, issue_bundle.len());
+        assert_eq!(issue_out, issue_bundle);
     }
 
     // ❌ REMOVED: Mock proof tests that used the insecure mock proof functions

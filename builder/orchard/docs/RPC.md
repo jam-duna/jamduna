@@ -1,74 +1,55 @@
-# Zcash JSON-RPC Reference (Orchard-only JAM Service)
+# Zcash JSON-RPC Reference (JAM Orchard Service)
 
-This document describes the **Zcash-compatible JSON-RPC calls** for JAM's Orchard service implementation. The API provides full compatibility with standard Zcash RPC while integrating with JAM's builder/guarantor architecture.
+This document describes the **complete Zcash-compatible JSON-RPC API** for JAM's Orchard service, supporting **both Orchard (shielded) and transparent transactions**.
 
-- Transport: HTTP JSON-RPC
-- Auth: RPC username/password or cookie auth
-- All examples use `"id": 1` for brevity
+- **Transport**: HTTP JSON-RPC 1.0
+- **Default Port**: 8232
+- **Auth**: None (unauthenticated for development; production deployments should use reverse proxy auth)
+- **Implementation**: [builder/orchard/rpc/handler.go](../rpc/handler.go)
+
+---
+
+## API Categories
+
+| Category | Methods | Description |
+|----------|---------|-------------|
+| **[Blockchain](#blockchain-rpcs-shared)** | `getblockchaininfo`, `getbestblockhash`, `getblockcount`, `getblockhash`, `getblock`, `getblockheader`, `z_getblockchaininfo` | Chain state queries (shared by both pools) |
+| **[Orchard Tree](#orchard-tree-state-rpcs)** | `z_gettreestate`, `z_getsubtreesbyindex`, `z_getnotescount` | Orchard commitment tree and witness data |
+| **[Orchard Wallet](#orchard-wallet-rpcs)** | `z_getnewaddress`, `z_listaddresses`, `z_validateaddress`, `z_getbalance`, `z_listunspent`, `z_listreceivedbyaddress`, `z_listnotes` | Orchard shielded address and note management |
+| **[Orchard Transactions](#orchard-transaction-rpcs)** | `z_sendmany`, `z_sendmanywithchangeto`, `z_sendraworchardbundle`, `z_viewtransaction` | Orchard shielded transaction construction and viewing |
+| **[Orchard Mempool](#orchard-mempool-rpcs)** | `z_getmempoolinfo`, `z_getrawmempool` | Orchard shielded mempool queries |
+| **[Transparent Transactions](#transparent-transaction-rpcs)** | `getrawtransaction`, `sendrawtransaction` | Transparent transaction queries and broadcast |
+| **[Transparent Mempool](#transparent-mempool-rpcs)** | `getmempoolinfo`, `getrawmempool` | Transparent mempool queries |
+
+---
 
 ## Implementation Status
 
-### **✅ 1. JAM Integration Complete**
-**Status:** Implemented | **Priority:** High
-
-**What works:**
+### ✅ **JAM Integration Complete**
 - Orchard bundle processing via JAM refine/accumulate
+- Transparent transaction verification via UTXO Merkle proofs
 - Tree state reads from JAM service storage
 - Builder-sponsored transaction submission
 - Witness-based execution model integration
 
----
+### ✅ **Dual Pool Architecture**
+- **Orchard Pool**: Privacy-preserving shielded transactions (note-based)
+- **Transparent Pool**: UTXO-based transactions with visible amounts/addresses
+- Work package integration for both pools via expanded payload format
 
-### **✅ 2. Orchard State Management**
-**Status:** Implemented | **Priority:** High
+### ⚠️ **Security warning (malicious builder)**
+- Transparent RPC methods (`getrawtransaction`, `sendrawtransaction`, mempool queries) depend on **builder-supplied UTXO roots/proofs** (optional snapshots) that are only checked against the claimed pre-state root/size. There is **no JAM witness or genesis anchor** for the transparent UTXO set yet, so an untrusted builder could fabricate a compatible snapshot/root and create spendable inputs. Treat transparent RPCs as **experimental and trusted-builder-only** until the UTXO root/size is anchored in JAM state.
 
-**What works:**
-- Standard Orchard commitment tree (Sinsemilla, depth 32)
-- Nullifier tracking for double-spend prevention
-- Note commitment append operations
-- Tree witness generation for light clients
-
----
-
-### **🚧 3. Full Orchard FFI Integration**
-**Status:** In Progress | **Priority:** High | **Timeline:** 2-3 weeks
-
-**Current State:**
+### 🚧 **Orchard FFI Integration** (In Progress)
 - Basic FFI stub functions implemented
-- Need full `orchard` crate integration
-- Bundle proof generation/verification pending
-
-**Next Steps:**
-1. **Orchard Crate Integration**: Replace stubs with real `orchard` crate calls
-2. **Bundle Proof Generation**: Implement Halo2 proof generation via FFI
-3. **Address Generation**: Real Orchard key derivation and address encoding
+- Need full `orchard` crate integration for proof generation
+- Bundle verification and address derivation pending
 
 ---
 
-## JAM Orchard RPC Implementation
+## Blockchain RPCs (Shared)
 
-The JAM node implements Zcash-compatible RPC methods in `builder/orchard/rpc/orchard_handler.go`:
-
-| Method                        | Category          | Status | Description |
-| ----------------------------- | ----------------- | ------ | ----------- |
-| getblockchaininfo             | Chain             | ✅     | Orchard-specific blockchain info |
-| z_getblockchaininfo           | Chain             | ✅     | Extended Orchard statistics |
-| getbestblockhash / getblockcount / getblockhash | Chain | ✅ | JAM block integration |
-| getblock / getblockheader     | Chain             | ✅     | Orchard bundle data in blocks |
-| z_gettreestate                | Tree              | ✅     | Orchard tree state from JAM storage |
-| z_getsubtreesbyindex          | Tree              | 🚧     | Subtree root management |
-| z_getnotescount               | Tree              | ✅     | Note counting |
-| z_getnewaddress               | Wallet            | 🚧     | Orchard address generation via FFI |
-| z_listaddresses               | Wallet            | ✅     | Address enumeration |
-| z_validateaddress             | Wallet            | 🚧     | Orchard address validation |
-| z_getbalance                  | Wallet            | ✅     | Note value summation |
-| z_listunspent / z_listreceivedbyaddress / z_listnotes | Wallet | ✅ | Note management |
-| z_sendmany / z_sendmanywithchangeto | Wallet      | 🚧     | Orchard bundle submission |
-| z_viewtransaction             | Wallet            | ✅     | Transaction inspection |
-
----
-
-## Core Chain Methods
+These methods query chain state and work for both Orchard and transparent transactions.
 
 ### getblockchaininfo
 Returns information about the Orchard-enabled JAM blockchain.
@@ -80,22 +61,15 @@ Returns information about the Orchard-enabled JAM blockchain.
 // Response
 {
   "result": {
-    "chain": "jam-orchard",
+    "chain": "orchard",
     "blocks": 150000,
-    "bestblockhash": "0x1a2b3c4d...",
-    "difficulty": 1.0,
-    "verificationprogress": 0.999,
-    "chainwork": "0x00000000000000000000000000000000000000000000001a2b3c4d5e6f7890",
-    "size_on_disk": 12345678,
-    "commitments": 45000,  // Total Orchard note commitments
-    "valuePools": [
-      {
-        "id": "orchard",
-        "monitored": true,
-        "chainValue": 1000000000000,  // Total Orchard pool value
-        "chainValueZat": 100000000000000
+    "headers": 150000,
+    "upgrades": {
+      "orchard": {
+        "activationheight": 1,
+        "status": "active"
       }
-    ]
+    }
   }
 }
 ```
@@ -110,30 +84,13 @@ Extended blockchain info with Orchard-specific data.
 // Response
 {
   "result": {
-    "chain": "jam-orchard",
     "blocks": 150000,
-    "bestblockhash": "0x1a2b3c4d...",
-    "consensus": {
-      "chaintip": "orchard-v1",
-      "nextblock": "orchard-v1"
-    },
-    "upgrades": {
-      "orchard": {
-        "name": "Orchard",
-        "activationheight": 0,
-        "status": "active"
+    "orchard": {
+      "commitmentTreeSize": 45000,
+      "valuePools": {
+        "chainValue": 1.5
       }
-    },
-    "valuePools": [
-      {
-        "id": "orchard",
-        "monitored": true,
-        "chainValue": 1000000000000,
-        "chainValueZat": 100000000000000,
-        "notes": 45000,
-        "nullifiers": 12000
-      }
-    ]
+    }
   }
 }
 ```
@@ -180,27 +137,26 @@ Returns block information including Orchard bundles.
 
 ---
 
-## Tree State Methods
+## Orchard Tree State RPCs
+
+These methods provide access to the Orchard commitment tree for light client witness building.
 
 ### z_gettreestate
 Returns the current Orchard commitment tree state.
 
+**Parameters**:
+1. `height` (number, required) - Block height (currently ignored, returns latest state)
+
 ```json
 // Request
-{"method": "z_gettreestate", "params": ["latest"], "id": 1}
+{"method": "z_gettreestate", "params": [150000], "id": 1}
 
 // Response
 {
   "result": {
-    "height": 150000,
-    "hash": "0x1a2b3c4d...",
-    "time": 1735571200,
     "orchard": {
-      "commitments": {
-        "finalRoot": "0x9876543210fedcba...",
-        "finalState": "000100...", // Serialized tree state
-        "size": 45000
-      }
+      "commitmentTreeSize": 45000,
+      "commitmentTreeRoot": "0x9876543210fedcba..."
     }
   }
 }
@@ -221,7 +177,12 @@ Returns Orchard subtree roots for light client witness building.
     "subtrees": [
       {
         "root": "0x1234567890abcdef...",
-        "height": 16  // Subtree height within the main tree
+        "height": 16,  // Subtree height within the main tree
+        "index": 0,
+        "commitments": [
+          "0xaaaaaaaa...",
+          "0xbbbbbbbb..."
+        ]
       },
       // ... up to 10 subtrees
     ]
@@ -231,7 +192,9 @@ Returns Orchard subtree roots for light client witness building.
 
 ---
 
-## Wallet Methods
+## Orchard Wallet RPCs
+
+These methods manage Orchard shielded addresses and notes.
 
 ### z_getnewaddress
 Generates a new Orchard diversified address.
@@ -273,7 +236,7 @@ Returns the total balance for Orchard addresses.
 
 // Response
 {
-  "result": 1.5  // Balance in ZEC (converted from zatoshi)
+  "result": 1.5  // Balance in USDx (converted from zatoshi)
 }
 ```
 
@@ -303,6 +266,71 @@ Lists unspent Orchard notes.
 }
 ```
 
+### z_listreceivedbyaddress
+List notes received by a specific Orchard address.
+
+**Parameters**:
+1. `address` (string, required) - Orchard address
+2. `minconf` (number, optional, default=1) - Minimum confirmations
+
+**Returns**: Array of received notes
+
+```json
+// Request
+{"method": "z_listreceivedbyaddress", "params": ["u1abcdef...", 1], "id": 1}
+
+// Response
+{
+  "result": [
+    {
+      "txid": "0x5a6b7c8d...",
+      "amount": 0.5,
+      "memo": "Payment received",
+      "confirmations": 150,
+      "blockheight": 149850
+    }
+  ]
+}
+```
+
+### z_listnotes
+List all Orchard notes in the wallet.
+
+**Parameters**:
+1. `minconf` (number, optional, default=1) - Minimum confirmations
+2. `maxconf` (number, optional, default=9999999) - Maximum confirmations
+
+**Returns**: Array of notes with full details
+
+```json
+// Request
+{"method": "z_listnotes", "params": [1, 9999999], "id": 1}
+
+// Response
+{
+  "result": [
+    {
+      "txid": "0x5a6b7c8d...",
+      "pool": "orchard",
+      "actionIndex": 0,
+      "address": "u1abcdef...",
+      "amount": 0.5,
+      "amountZat": 50000000,
+      "memo": "",
+      "confirmations": 150,
+      "spendable": true,
+      "change": false
+    }
+  ]
+}
+```
+
+---
+
+## Orchard Transaction RPCs
+
+These methods handle Orchard shielded transaction construction, submission, and viewing.
+
 ### z_sendmany
 Sends Orchard transactions to multiple recipients.
 
@@ -331,25 +359,154 @@ Sends Orchard transactions to multiple recipients.
 }
 ```
 
-### z_getoperationstatus
-Checks the status of async operations like z_sendmany.
+### z_sendmanywithchangeto
+Send Orchard transaction with explicit change address.
 
 ```json
 // Request
-{"method": "z_getoperationstatus", "params": [["opid-12345678..."]], "id": 1}
+{
+  "method": "z_sendmanywithchangeto",
+  "params": [
+    "u1abcdef1234567890...",  // From address
+    [
+      {"address": "u1fedcba9876543210...", "amount": 0.1}
+    ],
+    1,        // Min confirmations
+    0.00001,  // Fee
+    "u1change1234567890..."   // Change address
+  ],
+  "id": 1
+}
+
+// Response
+{
+  "result": "opid-12345678-abcd-ef90-1234-567890abcdef"
+}
+```
+
+### z_sendraworchardbundle
+Submit a pre-built Orchard bundle (for client-side bundle construction).
+
+**Parameters**:
+1. `bundle_hex` (string, required) - Serialized Orchard bundle in hex format
+
+**Returns**: Transaction ID (string)
+
+```json
+// Request
+{
+  "method": "z_sendraworchardbundle",
+  "params": ["01abcdef..."],
+  "id": 1
+}
+
+// Response
+{
+  "result": "0x9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b"
+}
+```
+
+### z_viewtransaction
+View details of an Orchard transaction.
+
+**Parameters**:
+1. `txid` (string, required) - Transaction ID
+
+**Returns**: JSON object with transaction details including actions, value balance, and memo data
+
+```json
+// Request
+{
+  "method": "z_viewtransaction",
+  "params": ["0x9a8b7c6d..."],
+  "id": 1
+}
+
+// Response
+{
+  "result": {
+    "txid": "0x9a8b7c6d...",
+    "orchard": {
+      "actions": [
+        {
+          "spend": {
+            "cv": "0x1234567890abcdef...",
+            "nullifier": "0xabcdef1234567890...",
+            "rk": "0xfedcba0987654321..."
+          },
+          "output": {
+            "cv": "0x1234567890abcdef...",
+            "cmu": "0x0fedcba987654321...",
+            "ephemeralKey": "0x...",
+            "encCiphertext": "0x...",
+            "outCiphertext": "0x..."
+          }
+        }
+      ],
+      "valueBalance": 0,
+      "anchor": "0x9876543210fedcba...",
+      "bindingSig": "0x..."
+    }
+  }
+}
+```
+
+**Note**: `z_sendmany` and `z_sendmanywithchangeto` currently return synchronously (not via operation IDs), so `z_getoperationstatus` is not yet implemented.
+
+---
+
+## Orchard Mempool RPCs
+
+These methods query the Orchard shielded transaction mempool.
+
+### z_getmempoolinfo
+Returns statistics about the Orchard mempool.
+
+```json
+// Request
+{"method": "z_getmempoolinfo", "params": [], "id": 1}
+
+// Response
+{
+  "result": {
+    "size": 15,              // Number of transactions
+    "bytes": 45000,          // Total size in bytes
+    "usage": 45000,          // Memory usage
+    "maxmempool": 300000000  // Max mempool size
+  }
+}
+```
+
+### z_getrawmempool
+Query Orchard mempool contents.
+
+**Parameters**:
+1. `verbose` (boolean, optional, default=false) - Return detailed info if true
+
+```json
+// Request (non-verbose)
+{"method": "z_getrawmempool", "params": [false], "id": 1}
 
 // Response
 {
   "result": [
-    {
-      "id": "opid-12345678-abcd-ef90-1234-567890abcdef",
-      "status": "success",
-      "creation_time": 1735571200,
-      "result": {
-        "txid": "0x9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b"
-      }
-    }
+    "0x9a8b7c6d...",
+    "0x1a2b3c4d..."
   ]
+}
+
+// Request (verbose)
+{"method": "z_getrawmempool", "params": [true], "id": 1}
+
+// Response
+{
+  "result": {
+    "0x9a8b7c6d...": {
+      "size": 3000,
+      "time": 1735571200,
+      "height": 150000
+    }
+  }
 }
 ```
 
@@ -453,6 +610,337 @@ When `z_sendmany` is called:
    - Full Zcash RPC compatibility test suite
    - Performance benchmarks against zcashd
    - Integration tests with real Orchard test vectors
+
+---
+
+## Transparent Transaction RPCs
+
+### Overview
+
+The Orchard service provides **Zcash-compatible transparent transaction RPCs** for web wallet integration. These methods emulate a Zcash full-node interface, enabling wallets to broadcast and query transparent transactions without code changes.
+
+**Implementation**: [handler.go](../rpc/handler.go), [transparent_tx.go](../rpc/transparent_tx.go)
+
+**Status**: ✅ Fully Implemented (2026-01-04)
+
+**State binding (anti-malicious-builder)**: Even if a work package carries no `TransparentTxData` extrinsic (no transparent transactions in the block), validators emit no-op transparent state transitions so accumulate checks the builder-supplied transparent roots/sizes. Builders cannot zero these fields to sidestep transparent verification.
+
+---
+
+### `getrawtransaction`
+
+Retrieve a raw transaction by txid.
+
+**Parameters**:
+1. `txid` (string, required) - Transaction ID
+2. `verbose` (boolean, optional, default=false) - Return JSON object if true
+
+**Returns**:
+- **Non-verbose**: Raw transaction hex string
+- **Verbose**: JSON object with transaction details
+
+**Example Request**:
+```json
+{
+  "jsonrpc": "1.0",
+  "method": "getrawtransaction",
+  "params": ["abcd1234...", false],
+  "id": 1
+}
+```
+
+**Example Response** (non-verbose):
+```json
+{
+  "result": "0100000001abcd...",
+  "error": null,
+  "id": 1
+}
+```
+
+**Example Response** (verbose):
+```json
+{
+  "result": {
+    "txid": "abcd1234...",
+    "version": 5,
+    "locktime": 0,
+    "vin": [...],
+    "vout": [...],
+    "blockhash": "",
+    "confirmations": 0,
+    "time": 1704398400,
+    "blocktime": 0
+  },
+  "error": null,
+  "id": 1
+}
+```
+
+**Scope**: Mempool/submitted transactions only (no historical blockchain queries yet)
+
+---
+
+### `sendrawtransaction`
+
+Submit a raw transaction to the mempool.
+
+**Parameters**:
+1. `hexstring` (string, required) - Raw transaction hex
+2. `allowhighfees` (boolean, optional, default=false) - Allow high fees (currently ignored)
+
+**Returns**: Transaction ID (string)
+
+**Example Request**:
+```json
+{
+  "jsonrpc": "1.0",
+  "method": "sendrawtransaction",
+  "params": ["0100000001abcd..."],
+  "id": 1
+}
+```
+
+**Example Response**:
+```json
+{
+  "result": "abcd1234567890...",
+  "error": null,
+  "id": 1
+}
+```
+
+**Validation**:
+- ✅ Hex decoding
+- ✅ Transaction parsing (Zcash v5)
+- ✅ ZIP-244 TxID computation
+- ✅ Mempool addition
+
+**Web Wallet Workflow**:
+1. Wallet builds transaction client-side (WASM)
+2. Wallet signs transaction with private keys (never sent to server)
+3. Wallet calls `sendrawtransaction` with signed hex
+4. Server validates and adds to mempool
+5. Server returns txid for tracking
+
+---
+
+## Transparent Mempool RPCs
+
+These methods query the transparent transaction mempool.
+
+### `getrawmempool`
+
+Query the transparent mempool.
+
+**Parameters**:
+1. `verbose` (boolean, optional, default=false) - Return detailed info if true
+
+**Returns**:
+- **Non-verbose**: Array of txids
+- **Verbose**: Object with txid → transaction details
+
+**Example Request**:
+```json
+{
+  "jsonrpc": "1.0",
+  "method": "getrawmempool",
+  "params": [false],
+  "id": 1
+}
+```
+
+**Example Response** (non-verbose):
+```json
+{
+  "result": ["txid1...", "txid2...", "txid3..."],
+  "error": null,
+  "id": 1
+}
+```
+
+**Example Response** (verbose):
+```json
+{
+  "result": {
+    "txid1...": {
+      "size": 250,
+      "fee": 0.0001,
+      "time": 1704398400
+    },
+    "txid2...": { ... }
+  },
+  "error": null,
+  "id": 1
+}
+```
+
+### `getmempoolinfo`
+
+Get transparent mempool statistics.
+
+**Parameters**: None
+
+**Returns**: JSON object with mempool stats
+
+**Example Request**:
+```json
+{
+  "jsonrpc": "1.0",
+  "method": "getmempoolinfo",
+  "params": [],
+  "id": 1
+}
+```
+
+**Example Response**:
+```json
+{
+  "result": {
+    "size": 42,
+    "bytes": 10500,
+    "usage": 10500,
+    "maxmempool": 300000000,
+    "mempoolminfee": 0.00000100
+  },
+  "error": null,
+  "id": 1
+}
+```
+
+---
+
+## Web Wallet Integration
+
+### Transparent Transaction Flow
+
+**1. Transaction Building** (Client-Side):
+- Web wallet WASM module builds Zcash v5 transparent transaction
+- User provides UTXOs, recipients, amounts
+- **Private keys NEVER leave the browser**
+- Transaction signing happens **client-side**
+
+**2. Transaction Broadcast**:
+```javascript
+// Wallet calls sendrawtransaction with signed tx
+const response = await fetch('http://localhost:8232', {
+  method: 'POST',
+  body: JSON.stringify({
+    jsonrpc: '1.0',
+    method: 'sendrawtransaction',
+    params: [signedTxHex],
+    id: 1
+  })
+});
+const {result: txid} = await response.json();
+```
+
+**3. Transaction Verification**:
+```javascript
+// Verify broadcast succeeded
+const tx = await rpc('getrawtransaction', [txid, true]);
+
+// Check mempool status
+const mempool = await rpc('getrawmempool', [false]);
+console.log('In mempool:', mempool.includes(txid));
+```
+
+---
+
+### Security Properties
+
+**Client-Side Key Isolation**:
+- ✅ Private keys isolated in browser (never transmitted)
+- ✅ Only signed raw transaction hex sent to server
+- ✅ Server cannot access or derive private keys
+- ✅ Full non-custodial model
+
+**Mempool Security**:
+- ✅ Transaction parsing and hex validation
+- ✅ ZIP-244 TxID computation (consensus-accurate)
+- ✅ P2PKH/P2SH signature verification (Go builder)
+- ✅ Rust validator signature verification (P2PKH/P2SH) when tag=4 is present
+
+---
+
+### Dual Pool Architecture
+
+The service supports **both pools** simultaneously:
+
+**Transparent Pool** (UTXO-based):
+- Standard Bitcoin-style transactions
+- Visible amounts and addresses
+- Mempool via `TransparentTxStore`
+- RPCs: `sendrawtransaction`, `getrawtransaction`, `getrawmempool`, `getmempoolinfo`
+
+**Orchard Pool** (note-based):
+- Privacy-preserving shielded transactions
+- Hidden amounts and recipients
+- Mempool via `OrchardTxPool`
+- RPCs: `z_sendmany`, `z_listunspent`, `z_getbalance`, etc.
+
+---
+
+### Limitations
+
+**Current Scope**:
+- ✅ Mempool queries work (submitted transactions)
+- ⚠️ Historical lookups are limited to the index only (no chain scan)
+- ✅ Block index for `getrawtransaction` and `getblock` lookups (LevelDB-backed)
+- ⚠️ Full transaction storage remains in-memory; mempool entries are persisted
+
+**Future Work**:
+- Persistent transaction storage beyond mempool + index
+- Confirmation tracking across multiple blocks
+- Reorg handling
+
+---
+
+## Complete RPC Method Reference
+
+### Blockchain Methods (Shared)
+| Method | Pool | Status | Description |
+|--------|------|--------|-------------|
+| `getblockchaininfo` | Both | ✅ | General blockchain info |
+| `z_getblockchaininfo` | Both | ✅ | Extended blockchain info with pool statistics |
+| `getbestblockhash` | Both | ✅ | Latest block hash |
+| `getblockcount` | Both | ✅ | Current block height |
+| `getblockhash` | Both | ✅ | Block hash by height |
+| `getblock` | Both | ✅ | Block data with pool transactions |
+| `getblockheader` | Both | ✅ | Block header only |
+
+### Orchard Methods
+| Method | Category | Status | Description |
+|--------|----------|--------|-------------|
+| `z_gettreestate` | Tree | ✅ | Orchard commitment tree state |
+| `z_getsubtreesbyindex` | Tree | 🚧 | Subtree roots for light clients |
+| `z_getnotescount` | Tree | ✅ | Note count in tree |
+| `z_getnewaddress` | Wallet | 🚧 | Generate Orchard address (FFI pending) |
+| `z_listaddresses` | Wallet | ✅ | List all Orchard addresses |
+| `z_validateaddress` | Wallet | 🚧 | Validate Orchard address format (FFI pending) |
+| `z_getbalance` | Wallet | ✅ | Orchard pool balance |
+| `z_listunspent` | Wallet | ✅ | List unspent Orchard notes |
+| `z_listreceivedbyaddress` | Wallet | ✅ | Notes received by address |
+| `z_listnotes` | Wallet | ✅ | All Orchard notes |
+| `z_sendmany` | Transaction | 🚧 | Send to multiple recipients (FFI pending) |
+| `z_sendmanywithchangeto` | Transaction | 🚧 | Send with explicit change address (FFI pending) |
+| `z_sendraworchardbundle` | Transaction | ✅ | Submit pre-built bundle |
+| `z_viewtransaction` | Transaction | ✅ | View transaction details |
+| `z_getoperationstatus` | Transaction | ❌ | Check async operation status (not yet implemented) |
+| `z_getmempoolinfo` | Mempool | ✅ | Orchard mempool statistics |
+| `z_getrawmempool` | Mempool | ✅ | Orchard mempool contents |
+
+### Transparent Methods
+| Method | Category | Status | Description |
+|--------|----------|--------|-------------|
+| `getrawtransaction` | Transaction | ✅ | Retrieve raw transparent transaction |
+| `sendrawtransaction` | Transaction | ✅ | Broadcast transparent transaction |
+| `getrawmempool` | Mempool | ✅ | Transparent mempool contents |
+| `getmempoolinfo` | Mempool | ✅ | Transparent mempool statistics |
+
+**Legend**:
+- ✅ **Fully Implemented**
+- 🚧 **In Progress** (FFI integration pending)
 
 ---
 

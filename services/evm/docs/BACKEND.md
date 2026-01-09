@@ -85,7 +85,7 @@ pub struct MajikBackend {
 
 | Field | Backing Data | Why `RefCell`? | Notes |
 |-------|--------------|----------------|-------|
-| `code_storage` | Bytecode blobs | Lazy-import bytecode, then cache for future calls | Populated by Verkle fetch or DA import |
+| `code_storage` | Bytecode blobs | Lazy-import bytecode, then cache for future calls | Populated by UBT fetch or DA import |
 | `code_hashes` | Keccak of bytecode | Provide `EXTCODEHASH` without recomputing | Updated alongside bytecode |
 | `storage_shards` | SSR header + shard map | Need to import or mutate shards inside read paths | Wraps `ContractStorage` |
 | `balances` / `nonces` | System-contract slots | `balance()` or `nonce()` run with `&self` | Cache zeroes to avoid TRAPs |
@@ -114,8 +114,8 @@ fn balance(&self, address: H160) -> U256 {
     // Cache miss - fetch based on execution mode
     match self.execution_mode {
         ExecutionMode::Builder => {
-            // Builder mode: Use Verkle host function
-            let balance = crate::verkle::fetch_balance_verkle(address);
+            // Builder mode: Use UBT host function
+            let balance = crate::ubt_host::fetch_balance_ubt(address, 0);
             self.balances.borrow_mut().insert(address, balance);
             balance
         }
@@ -161,57 +161,10 @@ Following this recipe keeps the JAM EVM runtime fast, deterministic, and safe ev
 
 ---
 
-## Verkle Tree Integration (EIP-6800)
+## UBT Witness Integration
 
-### Execution Modes
-
-The backend supports two execution modes for Verkle state access:
-
-| Mode | Description | State Access | Witness |
-|------|-------------|--------------|---------|
-| **Builder** | Generates Verkle witness during execution | Calls `host_fetch_verkle()` for cache misses | Constructed after execution via `storage.BuildVerkleWitness()` |
-| **Guarantor** | Verifies execution using provided witness | Reads from pre-populated caches only | Parsed and verified before execution |
-
-**Mode Detection** (`refiner.rs:867-920`):
-- **Guarantor mode**: Detected when first extrinsic is a VerkleWitness (size >= 197 bytes)
-  - VerkleWitness deserialized and verified via `host_verify_verkle_proof()`
-  - Caches populated from witness pre-state values
-  - Backend created via `MajikBackend::from_verkle_witness()`
-- **Builder mode**: Default when no Verkle witness present
-  - Backend created via `MajikBackend::new()` with `ExecutionMode::Builder`
-  - Verkle witness generated after execution in Go storage layer
-
-### Verkle Tree Structure (EIP-6800)
-
-**Account State Keys**:
-```
-GetTreeKey(address, subIndex):
-  stem = Pedersen(address || le64(subIndex >> 8))
-  suffix = subIndex & 0xFF
-
-BasicData (suffix 0):  [version(1) | reserved(4) | code_size(3) | nonce(8) | balance(16)] = 32B
-  Offset 0:      Version (1 byte)
-  Offset 5-7:    Code size (3 bytes, big-endian)
-  Offset 8-15:   Nonce (8 bytes, big-endian)
-  Offset 16-31:  Balance (16 bytes, big-endian uint128)
-CodeHash (suffix 1):   [code_hash:32]
-CodeChunk(N) (suffix 128+N): [push_offset(1) | code_chunk(31)]
-Storage(slot) (suffix 64+): Verkle key for storage slot
-```
-
-**Host Functions** (`statedb/hostfunctions.go:2095-2850`):
-- `host_fetch_verkle(FETCH_BALANCE, address, ...) -> balance` (reads BasicData offset 16-31)
-- `host_fetch_verkle(FETCH_NONCE, address, ...) -> nonce` (reads BasicData offset 8-15)
-- `host_fetch_verkle(FETCH_CODE, address, ...) -> code` (reads code chunks)
-- `host_fetch_verkle(FETCH_CODE_HASH, address, ...) -> code_hash` (reads CodeHash key)
-- `host_fetch_verkle(FETCH_STORAGE, address, key, ...) -> value` (reads storage slot)
-- `host_verify_verkle_proof(witness_ptr, witness_len) -> valid`
-
-**Witness Construction** (`storage/witness.go`):
-- Dual-proof format: pre-state proof (reads) + post-state proof (writes)
-- `BuildVerkleWitness()` generates both proofs after execution
-- `ApplyContractWrites()` applies contract writes to Verkle tree
-- Read log tracked via `StateDBStorage.verkleReadLog`
+The EVM service now uses UBT multiproofs (JAMProfile hashing).
+See `services/evm/docs/UBT-CODEX.md` for the architecture, witness format, and execution flow.
 
 ### Cache-First Pattern
 
@@ -230,8 +183,8 @@ fn state_read(&self, address: H160) -> Value {
     // 2. Handle cache miss based on mode
     match self.execution_mode {
         ExecutionMode::Builder => {
-            // Fetch from Verkle tree via host function
-            let value = crate::verkle::fetch_value_verkle(address);
+            // Fetch from UBT tree via host function
+            let value = crate::ubt_host::fetch_balance_ubt(address, 0);
             self.cache.borrow_mut().insert(address, value);
             value
         }
@@ -244,11 +197,11 @@ fn state_read(&self, address: H160) -> Value {
 ```
 
 **Design Rationale**:
-- **Builder**: Verkle reads logged to `StateDBStorage.verkleReadLog` (storage layer maintains authoritative log)
+- **Builder**: UBT reads logged to `StateDBStorage.ubtReadLog` (storage layer maintains authoritative log)
 - **Guarantor**: All accessed state must be in witness (deterministic verification)
 - **Two-step API**: Query size first (`output_max_len=0`), then fetch data
 - **Witness ownership**: Storage package owns witness construction and tree operations
-- **Clean separation**: statedb = EVM operations, storage = Verkle tree + witness
+- **Clean separation**: statedb = EVM operations, storage = UBT tree + witness
 
 ---
 
@@ -258,13 +211,13 @@ fn state_read(&self, address: H160) -> Value {
 **Interface:** `fn balance(&self, address: H160) -> U256`
 **Description:** Gets the balance associated with an address.
 **JAM DA/State Handling:**
-- **Builder Mode**: Uses Verkle host function `host_fetch_verkle(FETCH_BALANCE)` to read from Verkle tree
-  - Go reads BasicData key (suffix 0) from Verkle tree
+- **Builder Mode**: Uses UBT host function `host_fetch_ubt(FETCH_BALANCE)` to read from UBT tree
+  - Go reads BasicData key (suffix 0) from UBT tree
   - Extracts balance from bytes [16:31] of BasicData (16 bytes, big-endian uint128)
-  - Logs read to `StateDBStorage.verkleReadLog` for witness construction
-- **Guarantor Mode**: Reads from pre-populated cache (populated from VerkleWitness)
+  - Logs read to `StateDBStorage.ubtReadLog` for witness construction
+- **Guarantor Mode**: Reads from pre-populated cache (populated from UBTWitness)
   - Cache miss causes panic (witness must contain all accessed state)
-- Verkle tree structure per EIP-6800: balance stored at BasicData offset 16-31
+- UBT tree structure per EIP-6800: balance stored at BasicData offset 16-31
 
 **Call Sites:**
 1. **BALANCE opcode** ([eval/system.rs:53](../services/vendor/evm-interpreter/src/eval/system.rs#L53)) – Pops an address off the stack and pushes the result of `handler.balance`.
@@ -345,13 +298,13 @@ fn state_read(&self, address: H160) -> Value {
 **Interface:** `fn nonce(&self, address: H160) -> U256`
 **Description:** Returns the current nonce used for replay protection and CREATE address derivation.
 **JAM DA/State Handling:**
-- **Builder Mode**: Uses Verkle host function `host_fetch_verkle(FETCH_NONCE)` to read from Verkle tree
-  - Go reads BasicData key (suffix 0) from Verkle tree
+- **Builder Mode**: Uses UBT host function `host_fetch_ubt(FETCH_NONCE)` to read from UBT tree
+  - Go reads BasicData key (suffix 0) from UBT tree
   - Extracts nonce from bytes [8:15] of BasicData (8 bytes, big-endian uint64)
-  - Logs read to `StateDBStorage.verkleReadLog` for witness construction
-- **Guarantor Mode**: Reads from pre-populated cache (populated from VerkleWitness)
+  - Logs read to `StateDBStorage.ubtReadLog` for witness construction
+- **Guarantor Mode**: Reads from pre-populated cache (populated from UBTWitness)
   - Cache miss causes panic (witness must contain all accessed state)
-- Verkle tree structure per EIP-6800: nonce stored at BasicData offset 8-15
+- UBT tree structure per EIP-6800: nonce stored at BasicData offset 8-15
 - Used for CREATE address derivation: `keccak256(rlp([sender, nonce]))[12:]`; nonce=0 required for `can_create`.
 
 **Call Sites:**

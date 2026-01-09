@@ -3,7 +3,9 @@
 // Demonstrates building complete JAM work packages for the Orchard service
 // entirely in Rust, without Go FFI.
 
-use orchard_builder::{WorkPackage, OrchardState, WorkPackageBuilder, OrchardBundle};
+use orchard_builder::{OrchardBundle, OrchardState, TransparentData, TransparentState, WorkPackage, WorkPackageBuilder};
+use orchard_builder::witness::BuilderState;
+use orchard_builder::workpackage::WorkPackagePayload;
 use orchard_builder::witness_based::{
     actions_from_bundle, build_witness_based_extrinsic, refine_witness_based,
     UserBundleWithWitnesses, WorkPackageMetadata,
@@ -21,7 +23,9 @@ use halo2_proofs::{
     poly::commitment::Params,
 };
 use pasta_curves::vesta::Affine as VestaAffine;
-use std::io::{BufReader, BufWriter};
+use serde::Deserialize;
+use std::io::{BufReader, BufWriter, Read, Write};
+use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use rand::{RngCore, rngs::OsRng};
 
@@ -73,6 +77,7 @@ fn print_usage() {
     println!("  --fee <amount>       (deprecated) Ignored in zero-sum mode");
     println!("  --gas <limit>        Gas limit (default: 100000)");
     println!("  --actions <count>    Number of actions (default: 2)");
+    println!("  --transparent-rpc <url>  Fetch transparent tx data via JSON-RPC");
     println!("  --out <file>         Output file (default: workpackage.bin)");
     println!();
     println!("SEQUENCE OPTIONS:");
@@ -80,6 +85,7 @@ fn print_usage() {
     println!("  --wallets <count>    Wallets/actions per work package (default: 10)");
     println!("  --actions <count>    Alias for --wallets");
     println!("  --fee <amount>       (deprecated) Ignored in zero-sum mode");
+    println!("  --transparent-rpc <url>  Fetch transparent tx data via JSON-RPC");
     println!("  --out <file>         Output JSON file (default: sequence.json)");
 }
 
@@ -92,6 +98,7 @@ fn build_work_package(args: &[String]) -> Result<(), Box<dyn std::error::Error>>
     let mut gas_limit = 100_000u64;
     let mut action_count = 2usize; // Orchard requires minimum 2 actions
     let mut out_file = PathBuf::from("workpackage.bin");
+    let mut transparent_rpc: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -128,6 +135,10 @@ fn build_work_package(args: &[String]) -> Result<(), Box<dyn std::error::Error>>
                 i += 1;
                 out_file = PathBuf::from(&args[i]);
             }
+            "--transparent-rpc" => {
+                i += 1;
+                transparent_rpc = Some(args[i].clone());
+            }
             _ => {
                 eprintln!("Unknown option: {}", args[i]);
                 return Ok(());
@@ -144,6 +155,9 @@ fn build_work_package(args: &[String]) -> Result<(), Box<dyn std::error::Error>>
     println!("  Gas limit:    {}", gas_limit);
     println!("  Actions:      {}", action_count);
     println!("  Output file:  {:?}", out_file);
+    if let Some(rpc) = &transparent_rpc {
+        println!("  Transparent RPC: {}", rpc);
+    }
 
     // Load or create state
     let chain_state = if state_file.exists() {
@@ -163,7 +177,15 @@ fn build_work_package(args: &[String]) -> Result<(), Box<dyn std::error::Error>>
 
     // Build work package
     println!("Generating witnesses and building work package...");
-    let work_package = wp_builder.build_work_package(bundle, gas_limit)?;
+    let transparent_data = match &transparent_rpc {
+        Some(url) => fetch_transparent_tx_data(url)?,
+        None => None,
+    };
+    let work_package = wp_builder.build_work_package_with_transparent(
+        bundle,
+        gas_limit,
+        transparent_data,
+    )?;
 
     // Serialize and save
     println!("Serializing work package...");
@@ -183,6 +205,7 @@ fn build_sequence(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut gas_limit = 100_000u64;
     let mut out_dir = PathBuf::from("./work_packages");
     let mut _builder_id = [42u8; 32];
+    let mut transparent_rpc: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -214,6 +237,10 @@ fn build_sequence(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 i += 1;
                 out_dir = PathBuf::from(&args[i]);
             }
+            "--transparent-rpc" => {
+                i += 1;
+                transparent_rpc = Some(args[i].clone());
+            }
             _ => {
                 eprintln!("Unknown option: {}", args[i]);
                 return Ok(());
@@ -236,9 +263,13 @@ fn build_sequence(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&out_dir)?;
 
     // Initialize builder state (full trees maintained by builder)
-    let mut commitment_tree = IncrementalMerkleTree::new(32);
-    let mut nullifier_set = SparseMerkleTree::new(32);
-    let mut current_state = OrchardState::default();
+    let initial_state = OrchardState::default();
+    let builder_state = BuilderState {
+        commitment_tree: IncrementalMerkleTree::new(32),
+        nullifier_set: SparseMerkleTree::new(32),
+        chain_state: initial_state,
+    };
+    let mut wp_builder = WorkPackageBuilder::from_builder_state(builder_state, 1);
 
     println!("Generating and verifying {} work packages...", count);
     println!();
@@ -261,82 +292,89 @@ fn build_sequence(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     println!("✓ Wallets funded at anchor {}", hex::encode(&funded_root[..8]));
     println!();
 
+    // Sync builder state with the funded commitments before spending.
+    let funding_intents = wp_builder.compute_write_intents(&funding_bundle)?;
+    wp_builder.apply_write_intents(&funding_intents)?;
+
     for pkg_num in 0..count {
         println!("Package {}/{}:", pkg_num + 1, count);
         println!("├─ Pre-state:");
+        let current_state = wp_builder.chain_state().clone();
         println!("│  ├─ Commitment Root: {}", hex::encode(&current_state.commitment_root[..8]));
         println!("│  ├─ Commitment Size:  {}", current_state.commitment_size);
         println!("│  └─ Nullifier Root:  {}", hex::encode(&current_state.nullifier_root[..8]));
 
         let bundle = build_spend_bundle(&wallets, &orchard_tree, &proving_key)?;
         let bundle_for_state = bundle.clone();
-        let actions = actions_from_bundle(&bundle);
         let bundle_commitment_base = orchard_tree.size();
-
-        // Serialize bundle to bytes for JAM submission
-        let bundle_bytes = {
-            use orchard_builder::bundle_codec::serialize_bundle;
-            serialize_bundle(&bundle)?
-        };
-
-        // Create a user bundle (real Bundle<Authorized, i64>)
-        let action_count = actions.len();
-        let user_bundle = UserBundleWithWitnesses {
-            bundle: Some(bundle),
-            bundle_bytes,
-            actions,
-        };
-
-        // Build work package metadata
-        let metadata = WorkPackageMetadata {
-            gas_limit,
-        };
+        let action_count = bundle.actions().len();
+        let mut spent_positions = Vec::with_capacity(wallets.len());
+        for wallet in &wallets {
+            let position = match wallet.position {
+                Some(position) => position,
+                None => return Err("Wallet missing note position".into()),
+            };
+            spent_positions.push(u64::from(position));
+        }
 
         println!("│");
         println!("├─ Building work package with 1 user bundle ({} actions)...", action_count);
 
-        // Build witness-based extrinsic
-        let extrinsic = build_witness_based_extrinsic(
-            &mut commitment_tree,
-            &mut nullifier_set,
-            &current_state,
-            vec![user_bundle],
-            metadata,
+        // Use NEW WorkPackageBuilder API to generate 3 extrinsics
+        let transparent_data = match &transparent_rpc {
+            Some(url) => fetch_transparent_tx_data(url)?,
+            None => None,
+        };
+        let work_package = wp_builder.build_work_package_with_spent_positions_and_transparent(
+            bundle,
+            &spent_positions,
+            gas_limit,
+            transparent_data,
         )?;
 
-        println!("│  ├─ Pre-witnesses:  {} commitment proofs, {} nullifier absence proofs",
-            extrinsic.pre_state_witnesses.spent_note_commitment_proofs.len(),
-            extrinsic.pre_state_witnesses.nullifier_absence_proofs.len());
-        println!("│  ├─ User bundles:   {} bundle(s)",
-            extrinsic.user_bundles.len());
-        println!("│  └─ Post-witnesses: {} commitment proofs, {} nullifier proofs",
-            extrinsic.post_state_witnesses.new_commitment_proofs.len(),
-            extrinsic.post_state_witnesses.new_nullifier_proofs.len());
+        // Extract the OrchardExtrinsic from the payload
+        let orchard_extrinsic = match &work_package.payload {
+            WorkPackagePayload::Submit(extrinsic) => extrinsic,
+            _ => return Err("Expected Submit payload".into()),
+        };
 
-        // Save to disk
+        println!("│  ├─ Pre-state witness:        {} bytes",
+            orchard_extrinsic.pre_state_witness_extrinsic.len());
+        println!("│  ├─ Post-state witness:       {} bytes",
+            orchard_extrinsic.post_state_witness_extrinsic.len());
+        println!("│  └─ Bundle proof:             {} bytes",
+            orchard_extrinsic.bundle_proof_extrinsic.len());
+
+        // Save to disk using NEW format
         let pkg_file = out_dir.join(format!("package_{:03}.json", pkg_num));
-        let json = serde_json::to_string_pretty(&extrinsic)?;
+        let json = serde_json::to_string_pretty(&orchard_extrinsic)?;
         std::fs::write(&pkg_file, &json)?;
 
         println!("│");
         println!("├─ Saved to: {:?}", pkg_file);
         println!("│  └─ Size: {} bytes", json.len());
 
-        // VERIFY using stateless refine (the actual JAM verification!)
+        // VERIFY using the new refine API with 3 extrinsics
         println!("│");
-        print!("└─ Running JAM refine (stateless)... ");
-        refine_witness_based(&extrinsic)?;
-        println!("✓ VERIFIED");
+        print!("└─ Refine verification ");
+        let write_intents = match wp_builder.compute_write_intents(&bundle_for_state) {
+            Ok(intents) => {
+                println!("✓ PASSED!");
+                intents
+            }
+            Err(e) => {
+                println!("✗ FAILED: {:?}", e);
+                return Err(format!("Refine verification failed: {:?}", e).into());
+            }
+        };
 
         println!();
 
         orchard_tree.append_bundle(&bundle_for_state);
         update_wallet_notes_from_bundle(&bundle_for_state, bundle_commitment_base, &mut wallets)?;
 
-        // Update current state for next package
-        current_state.commitment_root = extrinsic.post_state_roots.commitment_root;
-        current_state.commitment_size = extrinsic.post_state_roots.commitment_size;
-        current_state.nullifier_root = extrinsic.post_state_roots.nullifier_root;
+        // Update current state for next package by applying write intents
+        wp_builder.apply_write_intents(&write_intents)?;
     }
 
     println!("════════════════════════════════════════");
@@ -413,6 +451,106 @@ fn inspect_work_package(args: &[String]) -> Result<(), Box<dyn std::error::Error
 
 // Helper functions
 
+#[derive(Deserialize)]
+struct RpcError {
+    code: i64,
+    message: String,
+}
+
+#[derive(Deserialize)]
+struct RpcResponse<T> {
+    result: Option<T>,
+    error: Option<RpcError>,
+}
+
+#[derive(Deserialize)]
+struct TransparentTxDataResponse {
+    available: Option<bool>,
+    transparent_tx_data_extrinsic: Option<String>,
+    transparent_merkle_root: Option<[u8; 32]>,
+    transparent_utxo_root: Option<[u8; 32]>,
+    transparent_utxo_size: Option<u64>,
+}
+
+fn fetch_transparent_tx_data(
+    rpc_url: &str,
+) -> Result<Option<TransparentData>, Box<dyn std::error::Error>> {
+    let (host, port, path) = parse_http_url(rpc_url)?;
+
+    let request_body = serde_json::json!({
+        "jsonrpc": "1.0",
+        "id": 1,
+        "method": "gettransparenttxdata",
+        "params": [],
+    });
+    let body = serde_json::to_string(&request_body)?;
+
+    let mut stream = TcpStream::connect(format!("{}:{}", host, port))?;
+    let request = format!(
+        "POST {} HTTP/1.1\r\nHost: {}:{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        path,
+        host,
+        port,
+        body.len(),
+        body
+    );
+    stream.write_all(request.as_bytes())?;
+
+    let mut response = String::new();
+    stream.read_to_string(&mut response)?;
+
+    let body = response
+        .split("\r\n\r\n")
+        .nth(1)
+        .ok_or("missing HTTP response body")?;
+
+    let rpc_response: RpcResponse<TransparentTxDataResponse> = serde_json::from_str(body)?;
+    if let Some(err) = rpc_response.error {
+        return Err(format!("RPC error {}: {}", err.code, err.message).into());
+    }
+    let result = match rpc_response.result {
+        Some(result) => result,
+        None => return Ok(None),
+    };
+
+    let available = result.available.unwrap_or(false);
+    let extrinsic_b64 = result.transparent_tx_data_extrinsic.unwrap_or_default();
+    if !available || extrinsic_b64.is_empty() {
+        return Ok(None);
+    }
+
+    use base64::Engine;
+    let extrinsic = base64::engine::general_purpose::STANDARD
+        .decode(extrinsic_b64.as_bytes())?;
+
+    let pre_state = TransparentState {
+        merkle_root: result.transparent_merkle_root.unwrap_or([0u8; 32]),
+        utxo_root: result.transparent_utxo_root.unwrap_or([0u8; 32]),
+        utxo_size: result.transparent_utxo_size.unwrap_or(0),
+    };
+
+    Ok(Some(TransparentData {
+        tx_data_extrinsic: extrinsic,
+        pre_state,
+        post_state: None,
+    }))
+}
+
+fn parse_http_url(url: &str) -> Result<(String, u16, String), Box<dyn std::error::Error>> {
+    let url = url
+        .strip_prefix("http://")
+        .ok_or("only http:// URLs are supported")?;
+    let (host_port, path) = match url.split_once('/') {
+        Some((host_port, path)) => (host_port, format!("/{}", path)),
+        None => (url, "/".to_string()),
+    };
+    let (host, port) = match host_port.split_once(':') {
+        Some((host, port)) => (host.to_string(), port.parse::<u16>()?),
+        None => (host_port.to_string(), 80),
+    };
+    Ok((host, port, path))
+}
+
 fn parse_hex_32(s: &str) -> Result<[u8; 32], Box<dyn std::error::Error>> {
     let s = s.strip_prefix("0x").unwrap_or(s);
     let bytes = hex::decode(s)?;
@@ -429,7 +567,7 @@ const DEFAULT_KEYS_DIR: &str = "keys/orchard";
 const PARAMS_FILE: &str = "orchard.params";
 const VK_FILE: &str = "orchard.vk";
 const DEFAULT_WALLET_COUNT: usize = 2;
-const DEFAULT_NOTE_VALUE: u64 = 1000;
+const DEFAULT_NOTE_VALUE: u64 = 500_000;
 const ORCHARD_MERKLE_DEPTH: usize = 32;
 
 fn load_or_create_params(
@@ -703,6 +841,10 @@ fn build_spend_bundle(
     let memo = [0u8; 512];
     let mut signing_keys = Vec::with_capacity(wallets.len());
 
+    // Calculate fee: 1000 per action (2000 total for 2 actions)
+    let fee_per_action = 200_000u64;
+    let total_fee = fee_per_action * wallets.len() as u64;
+
     for wallet in wallets {
         let note = wallet.note.ok_or("Wallet missing note")?;
         let position = wallet.position.ok_or("Wallet missing note position")?;
@@ -711,8 +853,12 @@ fn build_spend_bundle(
         builder
             .add_spend(wallet.fvk.clone(), note, merkle_path)
             .map_err(|e| format!("Failed to add spend: {:?}", e))?;
+
+        // Output less than input to create positive value_balance for fees
+        // Each wallet pays fee_per_action
+        let output_value = note.value().inner() - fee_per_action;
         builder
-            .add_output(None, wallet.address, note.value(), memo)
+            .add_output(None, wallet.address, orchard::value::NoteValue::from_raw(output_value), memo)
             .map_err(|e| format!("Failed to add output: {:?}", e))?;
 
         signing_keys.push(SpendAuthorizingKey::from(&wallet.sk));

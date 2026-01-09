@@ -2,6 +2,7 @@ use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicBool, Ordering};
 
+#[allow(dead_code)]
 pub struct Mutex<T> {
     pub value: UnsafeCell<T>,
     pub flag: AtomicBool,
@@ -13,8 +14,10 @@ unsafe impl<T> Send for Mutex<T> where T: Send {}
 // SAFETY: It's always safe to access this mutex from multiple threads.
 unsafe impl<T> Sync for Mutex<T> where T: Send {}
 
+#[allow(dead_code)]
 pub struct MutexGuard<'a, T: 'a>(&'a Mutex<T>);
 
+#[allow(dead_code)]
 impl<T> Mutex<T> {
     #[inline]
     pub const fn new(value: T) -> Self {
@@ -25,7 +28,7 @@ impl<T> Mutex<T> {
     }
 
     #[inline]
-    pub fn lock(&self) -> MutexGuard<T> {
+    pub fn lock(&self) -> MutexGuard<'_, T> {
         while self
             .flag
             .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)

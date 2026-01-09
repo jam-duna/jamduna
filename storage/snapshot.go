@@ -8,11 +8,9 @@ import (
 	"os"
 	"sort"
 
+	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/statedb/evmtypes"
-	evmverkle "github.com/colorfulnotion/jam/builder/evm/verkle"
-	"github.com/ethereum/go-verkle"
 )
 
 // SnapshotMetadata contains snapshot file metadata
@@ -24,12 +22,12 @@ type SnapshotMetadata struct {
 	Description string
 }
 
-// LoadFromSnapshot initializes verkle tree from compressed key-value snapshot
+// LoadFromSnapshot initializes a UBT tree from a compressed key-value snapshot.
 func (s *StateDBStorage) LoadFromSnapshot(
 	snapshotPath string,
 	snapshotHeight uint64,
 	expectedRoot common.Hash,
-) (verkle.VerkleNode, error) {
+) (*UnifiedBinaryTree, error) {
 	// 1. Open gzipped snapshot
 	f, err := os.Open(snapshotPath)
 	if err != nil {
@@ -49,27 +47,25 @@ func (s *StateDBStorage) LoadFromSnapshot(
 		return nil, fmt.Errorf("failed to read snapshot: %w", err)
 	}
 
-	// 3. Parse as VerkleStateDelta (snapshot is just full state as delta)
-	snapshot := &evmverkle.VerkleStateDelta{}
-	if err := snapshot.Deserialize(snapshotData); err != nil {
+	// 3. Parse as state delta (snapshot is just full state as delta)
+	snapshot, err := evmtypes.DeserializeUBTStateDelta(snapshotData)
+	if err != nil {
 		return nil, fmt.Errorf("failed to deserialize snapshot: %w", err)
 	}
 
 	// 4. Build tree from snapshot
-	tree := verkle.New()
+	tree := NewUnifiedBinaryTree(Config{Profile: defaultUBTProfile})
 	for i := uint32(0); i < snapshot.NumEntries; i++ {
 		offset := i * 64
-		key := snapshot.Entries[offset : offset+32]
-		value := snapshot.Entries[offset+32 : offset+64]
-
-		if err := tree.Insert(key, value, nil); err != nil {
-			return nil, fmt.Errorf("snapshot insert failed at entry %d: %w", i, err)
-		}
+		var keyBytes [32]byte
+		copy(keyBytes[:], snapshot.Entries[offset:offset+32])
+		var value [32]byte
+		copy(value[:], snapshot.Entries[offset+32:offset+64])
+		tree.Insert(TreeKeyFromBytes(keyBytes), value)
 	}
 
-	tree.Commit()
-	hashBytes := tree.Hash().Bytes()
-	actualRoot := common.BytesToHash(hashBytes[:])
+	root := tree.RootHash()
+	actualRoot := common.BytesToHash(root[:])
 
 	// 5. CRITICAL: Verify snapshot integrity
 	if actualRoot != expectedRoot {
@@ -88,11 +84,11 @@ func (s *StateDBStorage) LoadFromSnapshot(
 
 // ReplayToHead replays deltas from snapshot to current head
 func (s *StateDBStorage) ReplayToHead(
-	snapshotTree verkle.VerkleNode,
+	snapshotTree *UnifiedBinaryTree,
 	snapshotHeight uint64,
 	headHeight uint64,
 	blockLoader func(uint64) (*evmtypes.EvmBlockPayload, error),
-) (verkle.VerkleNode, error) {
+) (*UnifiedBinaryTree, error) {
 	if headHeight < snapshotHeight {
 		return nil, fmt.Errorf("head height %d < snapshot height %d", headHeight, snapshotHeight)
 	}
@@ -112,21 +108,18 @@ func (s *StateDBStorage) ReplayToHead(
 			return nil, fmt.Errorf("failed to load block %d: %w", h, err)
 		}
 
-		if block.VerkleStateDelta == nil || block.VerkleStateDelta.NumEntries == 0 {
-			return nil, fmt.Errorf("block %d missing verkle delta", h)
+		if block.UBTStateDelta == nil || block.UBTStateDelta.NumEntries == 0 {
+			return nil, fmt.Errorf("block %d missing state delta", h)
 		}
 
-		// Convert evmverkle.VerkleStateDelta to storage.VerkleStateDelta
-		storageDelta := &evmverkle.VerkleStateDelta{
-			NumEntries: block.VerkleStateDelta.NumEntries,
-			Entries:    block.VerkleStateDelta.Entries,
-		}
-
-		expectedRoot := common.BytesToHash(block.VerkleRoot[:])
-		// Use standalone helper instead of dummy StateDBStorage{}
-		newTree, err := evmverkle.ReplayVerkleStateDelta(currentTree, storageDelta, expectedRoot)
+		expectedRoot := common.BytesToHash(block.UBTRoot[:])
+		newTree, root, err := ApplyStateDelta(currentTree, block.UBTStateDelta)
 		if err != nil {
 			return nil, fmt.Errorf("replay failed at block %d: %w", h, err)
+		}
+		actualRoot := common.BytesToHash(root[:])
+		if actualRoot != expectedRoot {
+			return nil, fmt.Errorf("replay root mismatch at block %d: expected %x, got %x", h, expectedRoot, actualRoot)
 		}
 
 		currentTree = newTree
@@ -145,10 +138,9 @@ func (s *StateDBStorage) ReplayToHead(
 	if err != nil {
 		return nil, fmt.Errorf("failed to load head block %d for validation: %w", headHeight, err)
 	}
-	expectedHeadRoot := common.BytesToHash(headBlock.VerkleRoot[:])
-	currentTree.Commit()
-	currentHashBytes := currentTree.Hash().Bytes()
-	actualHeadRoot := common.BytesToHash(currentHashBytes[:])
+	expectedHeadRoot := common.BytesToHash(headBlock.UBTRoot[:])
+	root := currentTree.RootHash()
+	actualHeadRoot := common.BytesToHash(root[:])
 	if actualHeadRoot != expectedHeadRoot {
 		return nil, fmt.Errorf("final root mismatch at head %d: expected %x, got %x",
 			headHeight, expectedHeadRoot, actualHeadRoot)
@@ -165,7 +157,7 @@ func (s *StateDBStorage) ReplayToHead(
 
 // ExportSnapshot creates compressed key-value snapshot from checkpoint
 func (s *StateDBStorage) ExportSnapshot(
-	tree verkle.VerkleNode,
+	tree *UnifiedBinaryTree,
 	height uint64,
 	outputPath string,
 ) error {
@@ -201,22 +193,19 @@ func (s *StateDBStorage) ExportSnapshot(
 	return nil
 }
 
-// extractAllKeysFromTree walks the tree and extracts all key-value pairs
-func extractAllKeysFromTree(tree verkle.VerkleNode) (*evmverkle.VerkleStateDelta, error) {
+// extractAllKeysFromTree walks the tree and extracts all key-value pairs.
+func extractAllKeysFromTree(tree *UnifiedBinaryTree) (*evmtypes.UBTStateDelta, error) {
 	if tree == nil {
 		return nil, fmt.Errorf("tree is nil")
 	}
 
-	// Collect all key-value pairs by traversing the tree
-	pairs := make(map[[32]byte][]byte)
-	if err := walkTree(tree, pairs); err != nil {
-		return nil, fmt.Errorf("tree traversal failed: %w", err)
-	}
-
-	// Convert map to sorted slice for deterministic output
-	keys := make([][32]byte, 0, len(pairs))
-	for key := range pairs {
-		keys = append(keys, key)
+	entries := tree.Iter()
+	keys := make([][32]byte, 0, len(entries))
+	values := make(map[[32]byte][32]byte, len(entries))
+	for _, entry := range entries {
+		keyBytes := entry.Key.ToBytes()
+		keys = append(keys, keyBytes)
+		values[keyBytes] = entry.Value
 	}
 
 	// Sort by key (deterministic ordering)
@@ -224,8 +213,7 @@ func extractAllKeysFromTree(tree verkle.VerkleNode) (*evmverkle.VerkleStateDelta
 		return bytes.Compare(keys[i][:], keys[j][:]) < 0
 	})
 
-	// Build flattened entries
-	delta := &evmverkle.VerkleStateDelta{
+	delta := &evmtypes.UBTStateDelta{
 		NumEntries: uint32(len(keys)),
 		Entries:    make([]byte, len(keys)*64),
 	}
@@ -233,59 +221,11 @@ func extractAllKeysFromTree(tree verkle.VerkleNode) (*evmverkle.VerkleStateDelta
 	for i, key := range keys {
 		offset := i * 64
 		copy(delta.Entries[offset:offset+32], key[:])
-		copy(delta.Entries[offset+32:offset+64], pairs[key])
+		value := values[key]
+		copy(delta.Entries[offset+32:offset+64], value[:])
 	}
 
 	return delta, nil
-}
-
-// walkTree recursively walks the verkle tree and collects all key-value pairs
-func walkTree(node verkle.VerkleNode, pairs map[[32]byte][]byte) error {
-	if node == nil {
-		return nil
-	}
-
-	// Type-assert to check node type
-	switch n := node.(type) {
-	case *verkle.InternalNode:
-		// Internal node: recursively walk children
-		children := n.Children()
-		for _, child := range children {
-			if child != nil {
-				if err := walkTree(child, pairs); err != nil {
-					return err
-				}
-			}
-		}
-
-	case *verkle.LeafNode:
-		// Leaf node: extract all key-value pairs
-		// Leaf nodes store up to 256 values (suffix 0-255)
-		for i := 0; i < 256; i++ {
-			key := n.Key(i)
-			if key == nil {
-				continue
-			}
-
-			value := n.Value(i)
-			if value == nil {
-				continue
-			}
-
-			// Copy to fixed-size array
-			var keyArr [32]byte
-			copy(keyArr[:], key)
-
-			pairs[keyArr] = value
-		}
-
-	default:
-		// Unknown node type (Empty, StatelessInternal, etc.)
-		// Skip these nodes
-		log.Trace(log.SDB, "Skipping unknown node type during tree walk", "type", fmt.Sprintf("%T", n))
-	}
-
-	return nil
 }
 
 // ColdStart performs full cold start from snapshot file
@@ -317,7 +257,7 @@ func (s *StateDBStorage) ColdStart(
 
 		// 4. Set as current tree
 		s.mutex.Lock()
-		s.CurrentVerkleTree = currentTree
+		s.CurrentUBT = currentTree
 		s.mutex.Unlock()
 
 		log.Info(log.SDB, "Cold start complete",
@@ -327,7 +267,7 @@ func (s *StateDBStorage) ColdStart(
 	} else {
 		// No replay needed - snapshot is at head
 		s.mutex.Lock()
-		s.CurrentVerkleTree = snapshotTree.Copy()
+		s.CurrentUBT = snapshotTree.Copy()
 		s.mutex.Unlock()
 
 		log.Info(log.SDB, "Cold start complete (no replay needed)",

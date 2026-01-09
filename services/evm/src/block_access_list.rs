@@ -1,12 +1,12 @@
 //! Block Access List (BAL) construction and hashing
 //!
 //! Based on EIP-7928 adapted for JAM's stateless verification model.
-//! Constructs BAL from verified Verkle witness for deterministic block_access_list_hash.
+//! Constructs BAL from verified UBT witnesses for deterministic block_access_list_hash.
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use primitive_types::{H160, H256};
-use crate::verkle::{VerkleWitness, VerkleWitnessEntry, VerkleKeyType};
+use crate::ubt::{UBTKeyType, UBTWitnessEntry};
 
 /// Block Access List - all state accesses in a block
 #[derive(Debug, Clone)]
@@ -71,65 +71,66 @@ pub struct CodeChange {
 }
 
 impl BlockAccessList {
-    /// Build BAL from verified Verkle witness
-    pub fn from_witness(witness: &VerkleWitness) -> Self {
+    /// Build BAL from verified UBT witness entries.
+    pub fn from_ubt_entries(
+        read_entries: &[UBTWitnessEntry],
+        write_entries: &[UBTWitnessEntry],
+    ) -> Self {
         let mut account_map: BTreeMap<H160, AccountChanges> = BTreeMap::new();
 
-        // Step 1: Process reads (from pre-state section)
-        let write_keys = collect_write_keys(&witness.write_entries);
+        let write_keys = collect_write_keys_ubt(write_entries);
 
-        for read in &witness.read_entries {
-            // Skip reads that were later written (they belong in writes section)
-            if is_modified(read, &write_keys) {
+        for read in read_entries {
+            if is_modified_ubt(read, &write_keys) {
                 continue;
             }
 
-            let account = account_map.entry(read.metadata.address)
+            let account = account_map
+                .entry(read.metadata.address)
                 .or_insert_with(|| AccountChanges::new(read.metadata.address));
 
-            // Only storage reads are tracked as read-only
-            if read.metadata.key_type == VerkleKeyType::Storage {
+            if read.metadata.key_type == UBTKeyType::Storage {
                 account.storage_reads.push(StorageRead {
                     key: read.metadata.storage_key,
                 });
             }
         }
 
-        // Step 2: Process writes (from post-state section)
-        let slot_changes = build_slot_changes(&witness.write_entries);
-        let balance_changes = build_balance_changes(&witness.write_entries);
-        let nonce_changes = build_nonce_changes(&witness.write_entries);
-        let code_changes = build_code_changes(&witness.write_entries);
+        let slot_changes = build_slot_changes_ubt(write_entries);
+        let balance_changes = build_balance_changes_ubt(write_entries);
+        let nonce_changes = build_nonce_changes_ubt(write_entries);
+        let code_changes = build_code_changes_ubt(write_entries);
 
-        // Step 3: Populate account changes
         for (addr, slots) in slot_changes {
-            account_map.entry(addr)
+            account_map
+                .entry(addr)
                 .or_insert_with(|| AccountChanges::new(addr))
                 .storage_changes = slots;
         }
 
         for (addr, changes) in balance_changes {
-            account_map.entry(addr)
+            account_map
+                .entry(addr)
                 .or_insert_with(|| AccountChanges::new(addr))
                 .balance_changes = changes;
         }
 
         for (addr, changes) in nonce_changes {
-            account_map.entry(addr)
+            account_map
+                .entry(addr)
                 .or_insert_with(|| AccountChanges::new(addr))
                 .nonce_changes = changes;
         }
 
         for (addr, changes) in code_changes {
-            account_map.entry(addr)
+            account_map
+                .entry(addr)
                 .or_insert_with(|| AccountChanges::new(addr))
                 .code_changes = changes;
         }
 
-        // Step 4: Sort accounts by address (BTreeMap already sorted)
         let mut accounts: Vec<AccountChanges> = account_map.into_values().collect();
 
-        // Step 5: Sort within each account
         for account in &mut accounts {
             account.storage_reads.sort_by_key(|r| r.key);
             account.storage_changes.sort_by_key(|c| c.key);
@@ -225,37 +226,34 @@ impl AccountChanges {
     }
 }
 
-/// Helper: Check if a read was later modified (appears in writes)
-fn is_modified(read: &VerkleWitnessEntry, write_keys: &BTreeMap<(H160, H256), ()>) -> bool {
-    if read.metadata.key_type == VerkleKeyType::Storage {
+fn is_modified_ubt(read: &UBTWitnessEntry, write_keys: &BTreeMap<(H160, H256), ()>) -> bool {
+    if read.metadata.key_type == UBTKeyType::Storage {
         write_keys.contains_key(&(read.metadata.address, read.metadata.storage_key))
     } else {
         false
     }
 }
 
-/// Helper: Collect all written (address, storage_key) pairs
-fn collect_write_keys(writes: &[VerkleWitnessEntry]) -> BTreeMap<(H160, H256), ()> {
+fn collect_write_keys_ubt(writes: &[UBTWitnessEntry]) -> BTreeMap<(H160, H256), ()> {
     let mut keys = BTreeMap::new();
     for write in writes {
-        if write.metadata.key_type == VerkleKeyType::Storage {
+        if write.metadata.key_type == UBTKeyType::Storage {
             keys.insert((write.metadata.address, write.metadata.storage_key), ());
         }
     }
     keys
 }
 
-/// Helper: Group storage writes by (address, key)
-fn build_slot_changes(writes: &[VerkleWitnessEntry]) -> BTreeMap<H160, Vec<SlotChanges>> {
-    // Group by (address, key)
+fn build_slot_changes_ubt(writes: &[UBTWitnessEntry]) -> BTreeMap<H160, Vec<SlotChanges>> {
     let mut slot_map: BTreeMap<H160, BTreeMap<H256, Vec<SlotWrite>>> = BTreeMap::new();
 
     for write in writes {
-        if write.metadata.key_type != VerkleKeyType::Storage {
+        if write.metadata.key_type != UBTKeyType::Storage {
             continue;
         }
 
-        slot_map.entry(write.metadata.address)
+        slot_map
+            .entry(write.metadata.address)
             .or_insert_with(BTreeMap::new)
             .entry(write.metadata.storage_key)
             .or_insert_with(Vec::new)
@@ -266,10 +264,11 @@ fn build_slot_changes(writes: &[VerkleWitnessEntry]) -> BTreeMap<H160, Vec<SlotC
             });
     }
 
-    // Convert to Vec<SlotChanges>
-    slot_map.into_iter()
+    slot_map
+        .into_iter()
         .map(|(addr, slots)| {
-            let changes = slots.into_iter()
+            let changes = slots
+                .into_iter()
                 .map(|(key, writes)| SlotChanges { key, writes })
                 .collect();
             (addr, changes)
@@ -277,22 +276,21 @@ fn build_slot_changes(writes: &[VerkleWitnessEntry]) -> BTreeMap<H160, Vec<SlotC
         .collect()
 }
 
-/// Helper: Extract balance changes from BasicData writes
-fn build_balance_changes(writes: &[VerkleWitnessEntry]) -> BTreeMap<H160, Vec<BalanceChange>> {
+fn build_balance_changes_ubt(writes: &[UBTWitnessEntry]) -> BTreeMap<H160, Vec<BalanceChange>> {
     let mut changes: BTreeMap<H160, Vec<BalanceChange>> = BTreeMap::new();
 
     for write in writes {
-        if write.metadata.key_type != VerkleKeyType::BasicData {
+        if write.metadata.key_type != UBTKeyType::BasicData {
             continue;
         }
 
-        // Extract balance from BasicData (bytes 16-31)
         let mut pre_balance = [0u8; 32];
         let mut post_balance = [0u8; 32];
         pre_balance[16..32].copy_from_slice(&write.pre_value[16..32]);
         post_balance[16..32].copy_from_slice(&write.post_value[16..32]);
 
-        changes.entry(write.metadata.address)
+        changes
+            .entry(write.metadata.address)
             .or_insert_with(Vec::new)
             .push(BalanceChange {
                 block_access_index: write.metadata.tx_index,
@@ -304,22 +302,21 @@ fn build_balance_changes(writes: &[VerkleWitnessEntry]) -> BTreeMap<H160, Vec<Ba
     changes
 }
 
-/// Helper: Extract nonce changes from BasicData writes
-fn build_nonce_changes(writes: &[VerkleWitnessEntry]) -> BTreeMap<H160, Vec<NonceChange>> {
+fn build_nonce_changes_ubt(writes: &[UBTWitnessEntry]) -> BTreeMap<H160, Vec<NonceChange>> {
     let mut changes: BTreeMap<H160, Vec<NonceChange>> = BTreeMap::new();
 
     for write in writes {
-        if write.metadata.key_type != VerkleKeyType::BasicData {
+        if write.metadata.key_type != UBTKeyType::BasicData {
             continue;
         }
 
-        // Extract nonce from BasicData (bytes 8-15, little-endian)
         let mut pre_nonce = [0u8; 8];
         let mut post_nonce = [0u8; 8];
         pre_nonce.copy_from_slice(&write.pre_value[8..16]);
         post_nonce.copy_from_slice(&write.post_value[8..16]);
 
-        changes.entry(write.metadata.address)
+        changes
+            .entry(write.metadata.address)
             .or_insert_with(Vec::new)
             .push(NonceChange {
                 block_access_index: write.metadata.tx_index,
@@ -331,37 +328,33 @@ fn build_nonce_changes(writes: &[VerkleWitnessEntry]) -> BTreeMap<H160, Vec<Nonc
     changes
 }
 
-/// Helper: Extract code changes from BasicData + CodeHash writes
-fn build_code_changes(writes: &[VerkleWitnessEntry]) -> BTreeMap<H160, Vec<CodeChange>> {
-    // First pass: collect code_size from BasicData writes
-    let mut code_sizes: BTreeMap<H160, (u32, u32)> = BTreeMap::new(); // (tx_index, code_size)
+fn build_code_changes_ubt(writes: &[UBTWitnessEntry]) -> BTreeMap<H160, Vec<CodeChange>> {
+    let mut code_sizes: BTreeMap<H160, (u32, u32)> = BTreeMap::new();
 
     for write in writes {
-        if write.metadata.key_type == VerkleKeyType::BasicData {
-            // Extract code_size from BasicData (bytes 5-7, 3 bytes big-endian)
+        if write.metadata.key_type == UBTKeyType::BasicData {
             let code_size = ((write.post_value[5] as u32) << 16)
                 | ((write.post_value[6] as u32) << 8)
                 | (write.post_value[7] as u32);
 
-            // Only track if code_size changed (deployment)
             if code_size > 0 {
                 code_sizes.insert(write.metadata.address, (write.metadata.tx_index, code_size));
             }
         }
     }
 
-    // Second pass: build CodeChanges from CodeHash writes
     let mut changes: BTreeMap<H160, Vec<CodeChange>> = BTreeMap::new();
 
     for write in writes {
-        if write.metadata.key_type == VerkleKeyType::CodeHash {
+        if write.metadata.key_type == UBTKeyType::CodeHash {
             let code_hash = H256::from(write.post_value);
             let (tx_index, code_size) = code_sizes
                 .get(&write.metadata.address)
                 .copied()
                 .unwrap_or((write.metadata.tx_index, 0));
 
-            changes.entry(write.metadata.address)
+            changes
+                .entry(write.metadata.address)
                 .or_insert_with(Vec::new)
                 .push(CodeChange {
                     block_access_index: tx_index,
@@ -380,16 +373,7 @@ mod tests {
 
     #[test]
     fn test_empty_bal() {
-        let witness = VerkleWitness {
-            pre_state_root: H256::zero(),
-            read_entries: Vec::new(),
-            pre_proof_data: Vec::new(),
-            post_state_root: H256::zero(),
-            write_entries: Vec::new(),
-            post_proof_data: Vec::new(),
-        };
-
-        let bal = BlockAccessList::from_witness(&witness);
+        let bal = BlockAccessList::from_ubt_entries(&[], &[]);
         assert_eq!(bal.accounts.len(), 0);
 
         // Empty BAL should have deterministic hash
@@ -399,17 +383,8 @@ mod tests {
 
     #[test]
     fn test_bal_hash_determinism() {
-        let witness = VerkleWitness {
-            pre_state_root: H256::zero(),
-            read_entries: Vec::new(),
-            pre_proof_data: Vec::new(),
-            post_state_root: H256::zero(),
-            write_entries: Vec::new(),
-            post_proof_data: Vec::new(),
-        };
-
-        let bal1 = BlockAccessList::from_witness(&witness);
-        let bal2 = BlockAccessList::from_witness(&witness);
+        let bal1 = BlockAccessList::from_ubt_entries(&[], &[]);
+        let bal2 = BlockAccessList::from_ubt_entries(&[], &[]);
 
         assert_eq!(bal1.hash(), bal2.hash());
     }

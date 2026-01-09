@@ -1,0 +1,109 @@
+[
+  {
+    "name": "empty_tree_get",
+    "operations": [],
+    "queries": [
+      {"stem": "010203", "subindex": 5, "expected": null}
+    ],
+    "expected_root": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "name": "single_insert_get",
+    "operations": [
+      {"type": "insert", "stem": "0102030405", "subindex": 10, "value": "2a2b2c2d00000000000000000000000000000000000000000000000000000000"}
+    ],
+    "queries": [
+      {"stem": "0102030405", "subindex": 10, "expected": "2a2b2c2d00000000000000000000000000000000000000000000000000000000"}
+    ],
+    "expected_root": "e99de480b4a75e8747072cafdd6a621323a445a72418aff1c0c6ea94b9e7ae36"
+  },
+  {
+    "name": "get_different_stem",
+    "operations": [
+      {"type": "insert", "stem": "010203", "subindex": 10, "value": "6465660000000000000000000000000000000000000000000000000000000000"}
+    ],
+    "queries": [
+      {"stem": "040506", "subindex": 20, "expected": null}
+    ],
+    "expected_root": "1d440f04deeefe9eefce87dd36ee458d176c96eeef24976124aa734ba6e2f6a3"
+  },
+  {
+    "name": "same_stem_different_subindex",
+    "operations": [
+      {"type": "insert", "stem": "010203", "subindex": 10, "value": "6465660000000000000000000000000000000000000000000000000000000000"}
+    ],
+    "queries": [
+      {"stem": "010203", "subindex": 20, "expected": null}
+    ],
+    "expected_root": "1d440f04deeefe9eefce87dd36ee458d176c96eeef24976124aa734ba6e2f6a3"
+  },
+  {
+    "name": "multiple_inserts_same_stem",
+    "operations": [
+      {"type": "insert", "stem": "010203", "subindex": 10, "value": "6465660000000000000000000000000000000000000000000000000000000000"},
+      {"type": "insert", "stem": "010203", "subindex": 20, "value": "c8c9ca0000000000000000000000000000000000000000000000000000000000"}
+    ],
+    "queries": [
+      {"stem": "010203", "subindex": 10, "expected": "6465660000000000000000000000000000000000000000000000000000000000"},
+      {"stem": "010203", "subindex": 20, "expected": "c8c9ca0000000000000000000000000000000000000000000000000000000000"}
+    ],
+    "expected_root": "967e146f04d994fd7dfeb3e286c172520df6b10233ed99fb22e4e465d11b6623"
+  },
+  {
+    "name": "delete_removes_value",
+    "operations": [
+      {"type": "insert", "stem": "010203", "subindex": 10, "value": "2a2b2c0000000000000000000000000000000000000000000000000000000000"},
+      {"type": "delete", "stem": "010203", "subindex": 10}
+    ],
+    "queries": [
+      {"stem": "010203", "subindex": 10, "expected": null}
+    ],
+    "expected_root": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "name": "insert_preserves_others",
+    "operations": [
+      {"type": "insert", "stem": "0a141e", "subindex": 1, "value": "6f00000000000000000000000000000000000000000000000000000000000000"},
+      {"type": "insert", "stem": "28323c", "subindex": 2, "value": "de00000000000000000000000000000000000000000000000000000000000000"},
+      {"type": "insert", "stem": "46505a", "subindex": 3, "value": "fffefd0000000000000000000000000000000000000000000000000000000000"}
+    ],
+    "queries": [
+      {"stem": "0a141e", "subindex": 1, "expected": "6f00000000000000000000000000000000000000000000000000000000000000"},
+      {"stem": "28323c", "subindex": 2, "expected": "de00000000000000000000000000000000000000000000000000000000000000"},
+      {"stem": "46505a", "subindex": 3, "expected": "fffefd0000000000000000000000000000000000000000000000000000000000"}
+    ],
+    "expected_root": "fab09756aee742db4d6b0a6429f8ea1058a6dda4b7a7a11b1f80cacb89b26ceb"
+  },
+  {
+    "name": "overwrite_value",
+    "operations": [
+      {"type": "insert", "stem": "050505", "subindex": 50, "value": "0101010000000000000000000000000000000000000000000000000000000000"},
+      {"type": "insert", "stem": "050505", "subindex": 50, "value": "0202020000000000000000000000000000000000000000000000000000000000"}
+    ],
+    "queries": [
+      {"stem": "050505", "subindex": 50, "expected": "0202020000000000000000000000000000000000000000000000000000000000"}
+    ],
+    "expected_root": "b90133f6608ff19fe4e572ba1c20b1e551477114604197d15dcfa3e084f278df"
+  },
+  {
+    "name": "delete_nonexistent",
+    "operations": [
+      {"type": "insert", "stem": "010203", "subindex": 10, "value": "2a00000000000000000000000000000000000000000000000000000000000000"},
+      {"type": "delete", "stem": "090909", "subindex": 99}
+    ],
+    "queries": [
+      {"stem": "010203", "subindex": 10, "expected": "2a00000000000000000000000000000000000000000000000000000000000000"}
+    ],
+    "expected_root": "121c07e36957120129770f21af1a2129e6be88b0b76396a51428e405de808a4e"
+  },
+  {
+    "name": "large_values",
+    "operations": [
+      {"type": "insert", "stem": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "subindex": 255, "value": "abababababababababababababababababababababababababababababababab"}
+    ],
+    "queries": [
+      {"stem": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "subindex": 255, "expected": "abababababababababababababababababababababababababababababababab"}
+    ],
+    "expected_root": "f653c8a3cadb52e0de33976381fc95b6ed684e6cb14cde1e8845908d1ad742eb"
+  }
+]

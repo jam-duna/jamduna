@@ -255,6 +255,16 @@ run_evm_builder:
 	@echo "EVM RPC available at: http://localhost:$(EVM_RPC_PORT)"
 	@$(OUTPUT_DIR)/$(ARCH)/evm-builder run --dev-validator 6 --chain $(CHAINSPEC) --pvm-backend $(PVM_BACKEND) --debug rotation,guarantees --evm-rpc-port $(EVM_RPC_PORT) --telemetry localhost:$(TELEMETRY_PORT) 2>&1 | tee logs/evm-builder.log
 
+run_evm_multi:
+	@echo "Running EVM Multi-Round Transfer Test..."
+	@echo "Ensure validators and EVM builder are running first"
+	go test -v -count=1 -run TestEVMMultiRoundTransfers ./builder/evm/rpc/
+
+run_evm_single:
+	@echo "Running EVM Single Transfer Test..."
+	@echo "Ensure validators and EVM builder are running first"
+	go test -v -count=1 -run TestEVMBlocksTransfersRPC ./builder/evm/rpc/
+
 run_evm_builder_remote: evm-builder
 	@echo "Stopping any existing EVM Builder..."
 	@ps aux | grep 'bin/.*[e]vm-builder' | awk '{print $$2}' | while read pid; do kill $$pid 2>/dev/null || true; done

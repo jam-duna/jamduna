@@ -8,14 +8,13 @@ import (
 	"math/big"
 	"net/http"
 	"os"
-	"strconv"
+	"sync"
 	"testing"
 	"time"
 
 	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
-	statedbevmtypes "github.com/colorfulnotion/jam/statedb/evmtypes"
 )
 
 // HTTPJSONRPCClient is a simple HTTP JSON-RPC client for testing
@@ -117,7 +116,7 @@ func TestEVMBlocksTransfersRPC(t *testing.T) {
 	evmClient := NewEVMClient(rpcClient)
 
 	// Test 0: Prime EVM genesis state (set up issuer balance)
-	// This initializes LOCAL verkle tree state - no work package submission
+	// This initializes LOCAL UBT tree state - no work package submission
 	t.Run("PrimeGenesis", func(t *testing.T) {
 		var result interface{}
 		err := rpcClient.Call("jam_primeGenesis", []string{"61000000"}, &result)
@@ -183,133 +182,499 @@ func TestEVMBlocksTransfersRPC(t *testing.T) {
 		log.Info(log.Node, "✅ Transaction count", "address", issuerAddr.String(), "nonce", nonce)
 	})
 
-	// Test 5: Send a transfer transaction
-	t.Run("SendTransfer", func(t *testing.T) {
+	// Test 5: Prebuild 50 transactions, submit ALL to txpool, expect ONE bundle (single-core mode)
+	// Use with: make run_evm_single
+	t.Run("SendBatchedTransfers", func(t *testing.T) {
+		totalTxCount := 5000 // Prebuild 50 transactions
 		senderAddr, senderPrivKey := common.GetEVMDevAccount(0)
 		recipientAddr, _ := common.GetEVMDevAccount(1)
 
 		// Get current nonce
-		nonce, err := evmClient.GetTransactionCount(senderAddr, "latest")
+		baseNonce, err := evmClient.GetTransactionCount(senderAddr, "latest")
 		if err != nil {
 			t.Fatalf("GetTransactionCount failed: %v", err)
 		}
 
-		// Get sender balance first
+		// Get balances before
 		senderBalanceBefore, err := evmClient.GetBalance(senderAddr, "latest")
 		if err != nil {
 			t.Fatalf("GetBalance (sender before) failed: %v", err)
 		}
 		senderBalanceBeforeInt := new(big.Int).SetBytes(senderBalanceBefore.Bytes())
 
-		// Get recipient balance before
 		recipientBalanceBefore, err := evmClient.GetBalance(recipientAddr, "latest")
 		if err != nil {
 			t.Fatalf("GetBalance (recipient before) failed: %v", err)
 		}
 		recipientBalanceBeforeInt := new(big.Int).SetBytes(recipientBalanceBefore.Bytes())
 
-		log.Info(log.Node, "Before transfer",
+		log.Info(log.Node, "📦 Single bundle test: Prebuilding 50 transactions for ONE work package",
+			"totalTxCount", totalTxCount,
 			"sender", senderAddr.String(),
 			"senderBalance", senderBalanceBeforeInt.String(),
 			"recipient", recipientAddr.String(),
 			"recipientBalance", recipientBalanceBeforeInt.String(),
-			"nonce", nonce)
+			"baseNonce", baseNonce)
 
-		// Create and sign transfer
-		amount := new(big.Int).Mul(big.NewInt(1), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)) // 1 ETH
-		gasPrice := big.NewInt(1_000_000_000)                                                            // 1 gwei (minimum gas price)
+		// Transaction parameters
+		amount := new(big.Int).Mul(big.NewInt(1), new(big.Int).Exp(big.NewInt(10), big.NewInt(17), nil)) // 0.1 ETH each
+		gasPrice := big.NewInt(1_000_000_000)                                                            // 1 gwei
 		gasLimit := uint64(21000)
 
-		_, signedTx, txHash, err := evmtypes.CreateSignedNativeTransfer(
-			senderPrivKey,
-			nonce,
-			recipientAddr,
-			amount,
-			gasPrice,
-			gasLimit,
-			DefaultJAMChainID,
-		)
-		if err != nil {
-			t.Fatalf("CreateSignedNativeTransfer failed: %v", err)
+		// Track all transactions
+		type txInfo struct {
+			hash     common.Hash
+			nonce    uint64
+			signedTx []byte
+			receipt  *evmtypes.EthereumTransactionReceipt
 		}
+		txs := make([]txInfo, totalTxCount)
 
-		log.Info(log.Node, "📤 Sending transfer",
-			"txHash", txHash.String(),
-			"from", senderAddr.String(),
-			"to", recipientAddr.String(),
-			"amount", amount.String())
-
-		// Send transaction
-		returnedHash, err := evmClient.SendRawTransaction(signedTx)
-		if err != nil {
-			t.Fatalf("SendRawTransaction failed: %v", err)
-		}
-
-		log.Info(log.Node, "✅ Transaction sent", "returnedHash", returnedHash.String())
-
-		// Wait for transaction to be included (poll every 6s to match JAM block time)
-		log.Info(log.Node, "⏳ Waiting for transaction to be included (polling every 6s)...")
-		var receipt *statedbevmtypes.EthereumTransactionReceipt
-		for i := 0; i < 20; i++ { // Wait up to 120 seconds (20 * 6s)
-			time.Sleep(6 * time.Second)
-			receipt, err = evmClient.GetTransactionReceipt(txHash)
-			if err == nil && receipt != nil && receipt.BlockHash != "" {
-				break
+		// ========== PHASE 1: Prebuild ALL 50 transactions ==========
+		log.Info(log.Node, "🔧 PHASE 1: Prebuilding signed transactions", "count", totalTxCount)
+		for i := 0; i < totalTxCount; i++ {
+			nonce := baseNonce + uint64(i)
+			_, signedTx, txHash, err := evmtypes.CreateSignedNativeTransfer(
+				senderPrivKey,
+				nonce,
+				recipientAddr,
+				amount,
+				gasPrice,
+				gasLimit,
+				DefaultJAMChainID,
+			)
+			if err != nil {
+				t.Fatalf("CreateSignedNativeTransfer failed for tx %d: %v", i, err)
 			}
-			log.Info(log.Node, "⏳ Receipt not yet available, waiting...", "attempt", i+1)
+
+			txs[i] = txInfo{hash: txHash, nonce: nonce, signedTx: signedTx}
+			if i%10 == 0 {
+				log.Info(log.Node, "🔧 Prebuilt tx", "index", i, "nonce", nonce, "txHash", txHash.String())
+			}
+		}
+		log.Info(log.Node, "✅ PHASE 1 complete: transactions prebuilt", "count", totalTxCount)
+
+		// ========== PHASE 2: Submit ALL transactions to txpool rapidly ==========
+		log.Info(log.Node, "📤 PHASE 2: Submitting ALL transactions to txpool", "count", totalTxCount)
+		submitStart := time.Now()
+		for i := 0; i < totalTxCount; i++ {
+			_, err := evmClient.SendRawTransaction(txs[i].signedTx)
+			if err != nil {
+				t.Fatalf("SendRawTransaction failed for tx %d: %v", i, err)
+			}
+			if i%10 == 0 {
+				log.Info(log.Node, "📤 Submitted tx", "index", i, "nonce", txs[i].nonce)
+			}
+			// NO DELAY - submit all as fast as possible to batch into ONE bundle
+		}
+		submitDuration := time.Since(submitStart)
+		log.Info(log.Node, "✅ PHASE 2 complete: All transactions submitted", "count", totalTxCount, "duration", submitDuration)
+
+		// ========== PHASE 3: Wait for all transactions (expect ONE bundle) ==========
+		log.Info(log.Node, "⏳ PHASE 3: Waiting for transactions (expecting ONE bundle)...")
+		pollInterval := 6 * time.Second
+		maxWaitRounds := 60
+		pendingCount := totalTxCount
+		bundleHashes := make(map[string]int) // Track unique block hashes
+		var mu sync.Mutex
+
+		for round := 0; round < maxWaitRounds && pendingCount > 0; round++ {
+			time.Sleep(pollInterval)
+
+			// Poll all pending receipts in parallel
+			var wg sync.WaitGroup
+			for i := range txs {
+				if txs[i].receipt != nil {
+					continue
+				}
+				wg.Add(1)
+				go func(idx int) {
+					defer wg.Done()
+					receipt, err := evmClient.GetTransactionReceipt(txs[idx].hash)
+					if err == nil && receipt != nil && receipt.BlockHash != "" {
+						mu.Lock()
+						txs[idx].receipt = receipt
+						pendingCount--
+						bundleHashes[receipt.BlockHash]++
+						confirmed := totalTxCount - pendingCount
+						mu.Unlock()
+
+						log.Info(log.Node, "✅ TX confirmed",
+							"index", idx,
+							"nonce", txs[idx].nonce,
+							"blockNumber", receipt.BlockNumber,
+							"wpHash", receipt.BlockHash[:18]+"...",
+							"status", receipt.Status,
+							"progress", fmt.Sprintf("%d/%d", confirmed, totalTxCount))
+					}
+				}(i)
+			}
+			wg.Wait()
+
+			mu.Lock()
+			pending := pendingCount
+			bundles := len(bundleHashes)
+			mu.Unlock()
+
+			if pending > 0 {
+				log.Info(log.Node, "⏳ Polling receipts...",
+					"round", round+1,
+					"pending", pending,
+					"confirmed", totalTxCount-pending,
+					"bundlesFound", bundles)
+			}
 		}
 
-		if receipt == nil || receipt.BlockHash == "" {
-			t.Fatal("Transaction was not included in a block within 120 seconds")
+		// ========== PHASE 4: Report results ==========
+		confirmedCount := 0
+		for i := range txs {
+			if txs[i].receipt != nil {
+				confirmedCount++
+			} else {
+				log.Info(log.Node, "❌ Transaction not confirmed", "index", i, "nonce", txs[i].nonce)
+			}
 		}
 
-		log.Info(log.Node, "✅ Transaction included",
-			"blockNumber", receipt.BlockNumber,
-			"status", receipt.Status,
-			"gasUsed", receipt.GasUsed)
-
-		// Verify balances changed
-		senderBalanceAfter, err := evmClient.GetBalance(senderAddr, "latest")
-		if err != nil {
-			t.Fatalf("GetBalance (sender after) failed: %v", err)
+		// Report bundle distribution
+		log.Info(log.Node, "📊 Results", "confirmed", confirmedCount, "total", totalTxCount, "bundles", len(bundleHashes))
+		for hash, count := range bundleHashes {
+			log.Info(log.Node, "📦 Bundle", "hash", hash[:18]+"...", "txCount", count)
 		}
-		senderBalanceAfterInt := new(big.Int).SetBytes(senderBalanceAfter.Bytes())
 
+		// Verify single bundle expectation
+		if len(bundleHashes) != 1 {
+			t.Errorf("❌ Expected 1 bundle (single-core mode), got %d bundles", len(bundleHashes))
+		} else {
+			log.Info(log.Node, "✅ All transactions in ONE bundle as expected (single-core mode)", "count", confirmedCount)
+		}
+
+		if confirmedCount < totalTxCount {
+			t.Errorf("Only %d/%d transactions confirmed within timeout", confirmedCount, totalTxCount)
+		}
+
+		// Verify final balances
 		recipientBalanceAfter, err := evmClient.GetBalance(recipientAddr, "latest")
 		if err != nil {
 			t.Fatalf("GetBalance (recipient after) failed: %v", err)
 		}
 		recipientBalanceAfterInt := new(big.Int).SetBytes(recipientBalanceAfter.Bytes())
 
-		log.Info(log.Node, "After transfer",
-			"senderBalance", senderBalanceAfterInt.String(),
-			"recipientBalance", recipientBalanceAfterInt.String())
+		totalReceived := new(big.Int).Mul(amount, big.NewInt(int64(confirmedCount)))
+		expectedRecipientBalance := new(big.Int).Add(recipientBalanceBeforeInt, totalReceived)
 
-		// Verify recipient received the amount
-		expectedRecipientBalance := new(big.Int).Add(recipientBalanceBeforeInt, amount)
+		log.Info(log.Node, "📊 Balance verification",
+			"recipientBefore", recipientBalanceBeforeInt.String(),
+			"recipientAfter", recipientBalanceAfterInt.String(),
+			"expected", expectedRecipientBalance.String(),
+			"confirmedCount", confirmedCount)
+
 		if recipientBalanceAfterInt.Cmp(expectedRecipientBalance) != 0 {
-			t.Errorf("Recipient balance mismatch: expected %s, got %s",
-				expectedRecipientBalance.String(), recipientBalanceAfterInt.String())
+			diff := new(big.Int).Sub(recipientBalanceAfterInt, expectedRecipientBalance)
+			t.Errorf("Recipient balance mismatch: expected %s, got %s (diff=%s)",
+				expectedRecipientBalance.String(), recipientBalanceAfterInt.String(), diff.String())
 		} else {
 			log.Info(log.Node, "✅ Recipient balance verified")
-		}
-
-		// Verify sender balance decreased by amount + gas
-		gasUsedVal, err := strconv.ParseUint(receipt.GasUsed[2:], 16, 64)
-		if err != nil {
-			t.Fatalf("Failed to parse gasUsed: %v", err)
-		}
-		gasUsed := new(big.Int).SetUint64(gasUsedVal)
-		gasCost := new(big.Int).Mul(gasUsed, gasPrice)
-		expectedSenderBalance := new(big.Int).Sub(senderBalanceBeforeInt, amount)
-		expectedSenderBalance = new(big.Int).Sub(expectedSenderBalance, gasCost)
-
-		if senderBalanceAfterInt.Cmp(expectedSenderBalance) != 0 {
-			t.Errorf("Sender balance mismatch: expected %s, got %s",
-				expectedSenderBalance.String(), senderBalanceAfterInt.String())
-		} else {
-			log.Info(log.Node, "✅ Sender balance verified")
 		}
 	})
 }
 
+// TestEVMMultiRoundTransfers tests parallel core submission and multi-bundle scheduling
+// Prebuilds 50 transactions, submits ALL to txpool, expects 10 bundles × 5 txns each
+// Tests: parallel submission to both cores AND multiple bundle scheduling
+// Prerequisites:
+// 1. make run_localclient (validators running)
+// 2. make run_evm_builder (EVM builder with RPC) - multi-core mode
+func TestEVMMultiRoundTransfers(t *testing.T) {
+	log.InitLogger("debug")
+
+	evmRPCEndpoint := os.Getenv("EVM_RPC_ENDPOINT")
+	if evmRPCEndpoint == "" {
+		evmRPCEndpoint = "http://localhost:8600"
+	}
+	log.Info(log.Node, "Using EVM RPC endpoint", "endpoint", evmRPCEndpoint)
+
+	rpcClient := NewHTTPJSONRPCClient(evmRPCEndpoint)
+	evmClient := NewEVMClient(rpcClient)
+
+	// Configuration: 50 txns total, expect 10 bundles × 5 txns each
+	totalTxCount := 5000
+	expectedTxsPerBundle := 5000
+	expectedBundles := totalTxCount / expectedTxsPerBundle // 10 bundles
+	numCores := 2                                          // Target both cores
+
+	// Prime genesis first
+	t.Run("PrimeGenesis", func(t *testing.T) {
+		var result interface{}
+		balance := fmt.Sprintf("%d000000", totalTxCount+10) // Extra buffer for gas
+		err := rpcClient.Call("jam_primeGenesis", []string{balance}, &result)
+		if err != nil {
+			t.Fatalf("jam_primeGenesis failed: %v", err)
+		}
+		log.Info(log.Node, "✅ Genesis primed", "balance", balance)
+	})
+
+	t.Run("SendMultiBundleTransfers", func(t *testing.T) {
+		senderAddr, senderPrivKey := common.GetEVMDevAccount(0)
+		recipientAddr, _ := common.GetEVMDevAccount(1)
+
+		// Get initial nonce
+		baseNonce, err := evmClient.GetTransactionCount(senderAddr, "latest")
+		if err != nil {
+			t.Fatalf("GetTransactionCount failed: %v", err)
+		}
+
+		// Get initial balances
+		senderBalanceBefore, err := evmClient.GetBalance(senderAddr, "latest")
+		if err != nil {
+			t.Fatalf("GetBalance (sender before) failed: %v", err)
+		}
+		recipientBalanceBefore, err := evmClient.GetBalance(recipientAddr, "latest")
+		if err != nil {
+			t.Fatalf("GetBalance (recipient before) failed: %v", err)
+		}
+
+		senderBalanceBeforeInt := new(big.Int).SetBytes(senderBalanceBefore.Bytes())
+		recipientBalanceBeforeInt := new(big.Int).SetBytes(recipientBalanceBefore.Bytes())
+
+		log.Info(log.Node, "📦 Multi-bundle test: Prebuilding 50 transactions for 10 bundles × 5 txns",
+			"totalTxCount", totalTxCount,
+			"expectedBundles", expectedBundles,
+			"expectedTxsPerBundle", expectedTxsPerBundle,
+			"numCores", numCores,
+			"sender", senderAddr.String(),
+			"senderBalance", senderBalanceBeforeInt.String(),
+			"recipient", recipientAddr.String(),
+			"recipientBalance", recipientBalanceBeforeInt.String(),
+			"baseNonce", baseNonce)
+
+		// Transaction parameters
+		amount := new(big.Int).Mul(big.NewInt(1), new(big.Int).Exp(big.NewInt(10), big.NewInt(17), nil)) // 0.1 ETH
+		gasPrice := big.NewInt(1_000_000_000)                                                            // 1 gwei
+		gasLimit := uint64(21000)
+
+		// Track all transactions
+		type txInfo struct {
+			hash      common.Hash
+			nonce     uint64
+			signedTx  []byte
+			receipt   *evmtypes.EthereumTransactionReceipt
+			coreIndex string
+			bundleIdx int
+		}
+		txs := make([]txInfo, totalTxCount)
+
+		// ========== PHASE 1: Prebuild ALL 50 transactions ==========
+		log.Info(log.Node, "🔧 PHASE 1: Prebuilding signed transactions", "count", totalTxCount)
+		for i := 0; i < totalTxCount; i++ {
+			nonce := baseNonce + uint64(i)
+			_, signedTx, txHash, err := evmtypes.CreateSignedNativeTransfer(
+				senderPrivKey,
+				nonce,
+				recipientAddr,
+				amount,
+				gasPrice,
+				gasLimit,
+				DefaultJAMChainID,
+			)
+			if err != nil {
+				t.Fatalf("CreateSignedNativeTransfer failed for tx %d: %v", i, err)
+			}
+
+			txs[i] = txInfo{hash: txHash, nonce: nonce, signedTx: signedTx, bundleIdx: -1}
+			if i%10 == 0 {
+				log.Info(log.Node, "🔧 Prebuilt tx", "index", i, "nonce", nonce, "txHash", txHash.String())
+			}
+		}
+		log.Info(log.Node, "✅ PHASE 1 complete: transactions prebuilt", "count", totalTxCount)
+
+		// ========== PHASE 2: Submit ALL transactions to txpool rapidly ==========
+		log.Info(log.Node, "📤 PHASE 2: Submitting ALL transactions to txpool", "count", totalTxCount)
+		submitStart := time.Now()
+		for i := 0; i < totalTxCount; i++ {
+			_, err := evmClient.SendRawTransaction(txs[i].signedTx)
+			if err != nil {
+				t.Fatalf("SendRawTransaction failed for tx %d: %v", i, err)
+			}
+			if i%10 == 0 {
+				log.Info(log.Node, "📤 Submitted tx", "index", i, "nonce", txs[i].nonce)
+			}
+			// NO DELAY - submit all as fast as possible, let builder distribute to bundles
+		}
+		submitDuration := time.Since(submitStart)
+		log.Info(log.Node, "✅ PHASE 2 complete: All transactions submitted", "count", totalTxCount, "duration", submitDuration)
+
+		// ========== PHASE 3: Wait for all transactions across multiple bundles ==========
+		log.Info(log.Node, "⏳ PHASE 3: Waiting for transactions across expected bundles", "expectedBundles", expectedBundles)
+		pollInterval := 6 * time.Second
+		maxWaitRounds := 60
+		pendingCount := totalTxCount
+
+		// Track unique block hashes (each represents a work package/bundle)
+		bundleHashes := make(map[string]int) // blockHash -> bundle index
+		bundleIndex := 0
+		var mu sync.Mutex
+
+		for round := 0; round < maxWaitRounds && pendingCount > 0; round++ {
+			time.Sleep(pollInterval)
+
+			// Poll all pending receipts in parallel
+			var wg sync.WaitGroup
+			for i := range txs {
+				if txs[i].receipt != nil {
+					continue
+				}
+				wg.Add(1)
+				go func(idx int) {
+					defer wg.Done()
+					receipt, err := evmClient.GetTransactionReceipt(txs[idx].hash)
+					if err == nil && receipt != nil && receipt.BlockHash != "" {
+						// Query work report to get core index (do this outside lock)
+						var workReport map[string]interface{}
+						coreIdx := "unknown"
+						if err := rpcClient.Call("jam_getWorkReport", []string{receipt.BlockHash}, &workReport); err == nil && workReport != nil {
+							if ci, ok := workReport["coreIndex"]; ok {
+								coreIdx = fmt.Sprintf("%v", ci)
+							}
+						}
+
+						mu.Lock()
+						txs[idx].receipt = receipt
+						pendingCount--
+
+						// Track which bundle this tx belongs to
+						if _, exists := bundleHashes[receipt.BlockHash]; !exists {
+							bundleHashes[receipt.BlockHash] = bundleIndex
+							bundleIndex++
+							log.Info(log.Node, "📦 New bundle identified",
+								"bundleIdx", bundleIndex-1,
+								"blockHash", receipt.BlockHash[:18]+"...",
+								"blockNumber", receipt.BlockNumber)
+						}
+						txs[idx].bundleIdx = bundleHashes[receipt.BlockHash]
+						txs[idx].coreIndex = coreIdx
+						confirmed := totalTxCount - pendingCount
+						mu.Unlock()
+
+						log.Info(log.Node, "✅ TX confirmed",
+							"txIdx", idx,
+							"nonce", txs[idx].nonce,
+							"bundleIdx", txs[idx].bundleIdx,
+							"coreIndex", coreIdx,
+							"blockNumber", receipt.BlockNumber,
+							"status", receipt.Status,
+							"progress", fmt.Sprintf("%d/%d", confirmed, totalTxCount))
+					}
+				}(i)
+			}
+			wg.Wait()
+
+			mu.Lock()
+			pending := pendingCount
+			bundles := len(bundleHashes)
+			mu.Unlock()
+
+			if pending > 0 {
+				log.Info(log.Node, "⏳ Polling receipts...",
+					"round", round+1,
+					"pending", pending,
+					"confirmed", totalTxCount-pending,
+					"bundlesFound", bundles)
+			}
+		}
+
+		// ========== PHASE 4: Report results and distribution analysis ==========
+		log.Info(log.Node, "📊 PHASE 4: Analyzing bundle and core distribution...")
+
+		// Count confirmed and build distributions
+		confirmedCount := 0
+		bundleDistribution := make(map[int]int)  // bundleIdx -> tx count
+		coreDistribution := make(map[string]int) // coreIdx -> tx count
+		for i := range txs {
+			if txs[i].receipt != nil {
+				confirmedCount++
+				bundleDistribution[txs[i].bundleIdx]++
+				coreDistribution[txs[i].coreIndex]++
+			} else {
+				log.Info(log.Node, "❌ Transaction not confirmed", "index", i, "nonce", txs[i].nonce)
+			}
+		}
+
+		// Report bundle distribution
+		log.Info(log.Node, "📊 Bundle Distribution Analysis",
+			"totalTx", totalTxCount,
+			"confirmed", confirmedCount,
+			"totalBundles", len(bundleHashes),
+			"expectedBundles", expectedBundles,
+			"expectedTxsPerBundle", expectedTxsPerBundle)
+
+		for bundleIdx := 0; bundleIdx < len(bundleHashes); bundleIdx++ {
+			count := bundleDistribution[bundleIdx]
+			log.Info(log.Node, "📦 Bundle breakdown", "bundleIdx", bundleIdx, "txCount", count)
+		}
+
+		// Report core distribution
+		log.Info(log.Node, "📊 Core Distribution (parallel processing)", "coreDistribution", coreDistribution)
+		for core, count := range coreDistribution {
+			log.Info(log.Node, "🔧 Core usage", "coreIndex", core, "txCount", count)
+		}
+
+		// Verify multi-bundle expectation
+		if len(bundleHashes) < 2 {
+			t.Errorf("❌ Expected multiple bundles (multi-core mode), got only %d bundle(s)", len(bundleHashes))
+		} else {
+			log.Info(log.Node, "✅ Transactions distributed across multiple bundles (multi-core mode working)", "bundles", len(bundleHashes))
+		}
+
+		// Verify parallel core usage
+		if len(coreDistribution) >= numCores {
+			log.Info(log.Node, "✅ Both cores utilized for parallel processing", "coresUsed", len(coreDistribution))
+		} else {
+			log.Info(log.Node, "⚠️ Limited core utilization", "coresUsed", len(coreDistribution), "expected", numCores)
+		}
+
+		log.Info(log.Node, "📊 Distribution summary",
+			"totalTx", totalTxCount,
+			"confirmed", confirmedCount,
+			"totalBundles", len(bundleHashes),
+			"bundleDistribution", bundleDistribution,
+			"coreDistribution", coreDistribution)
+
+		if confirmedCount < totalTxCount {
+			t.Errorf("Only %d/%d transactions confirmed within timeout", confirmedCount, totalTxCount)
+		}
+
+		// Verify final balances
+		recipientBalanceAfter, err := evmClient.GetBalance(recipientAddr, "latest")
+		if err != nil {
+			t.Fatalf("GetBalance (recipient after) failed: %v", err)
+		}
+		recipientBalanceAfterInt := new(big.Int).SetBytes(recipientBalanceAfter.Bytes())
+
+		totalReceived := new(big.Int).Mul(amount, big.NewInt(int64(confirmedCount)))
+		expectedRecipientBalance := new(big.Int).Add(recipientBalanceBeforeInt, totalReceived)
+
+		log.Info(log.Node, "📊 Balance verification",
+			"recipientBefore", recipientBalanceBeforeInt.String(),
+			"recipientAfter", recipientBalanceAfterInt.String(),
+			"expected", expectedRecipientBalance.String(),
+			"confirmedCount", confirmedCount)
+
+		if recipientBalanceAfterInt.Cmp(expectedRecipientBalance) != 0 {
+			diff := new(big.Int).Sub(recipientBalanceAfterInt, expectedRecipientBalance)
+			t.Errorf("Recipient balance mismatch: expected %s, got %s (diff=%s)",
+				expectedRecipientBalance.String(), recipientBalanceAfterInt.String(), diff.String())
+		} else {
+			log.Info(log.Node, "✅ Recipient balance verified")
+		}
+
+		// Summary
+		avgTxsPerBundle := float64(confirmedCount) / float64(len(bundleHashes))
+		log.Info(log.Node, "📊 SUMMARY",
+			"totalBundles", len(bundleHashes),
+			"expectedBundles", expectedBundles,
+			"avgTxsPerBundle", fmt.Sprintf("%.1f", avgTxsPerBundle),
+			"expectedTxsPerBundle", expectedTxsPerBundle,
+			"coresUtilized", len(coreDistribution),
+			"expectedCores", numCores)
+	})
+}

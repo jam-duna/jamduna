@@ -10,9 +10,9 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-// SubmitFunc is the callback for submitting a work package bundle
+// SubmitFunc is the callback for submitting a work package bundle to a specific core
 // Returns the work package hash and error
-type SubmitFunc func(bundle *types.WorkPackageBundle) (common.Hash, error)
+type SubmitFunc func(bundle *types.WorkPackageBundle, coreIndex uint16) (common.Hash, error)
 
 // BuildBundleFunc is the callback for building/rebuilding a bundle
 // This is called when an item needs to be resubmitted with a new RefineContext
@@ -163,8 +163,8 @@ func (r *Runner) tick() {
 			item.Bundle = newBundle
 		}
 
-		// Submit the bundle
-		wpHash, err := r.submitFunc(item.Bundle)
+		// Submit the bundle to the target core
+		wpHash, err := r.submitFunc(item.Bundle, item.CoreIndex)
 		if err != nil {
 			log.Error(log.Node, "Queue Runner: Submission failed",
 				"service", r.serviceID,
@@ -181,11 +181,24 @@ func (r *Runner) tick() {
 		// Mark as submitted
 		r.queue.MarkSubmitted(item, wpHash)
 
-		log.Info(log.Node, "Queue Runner: Submitted successfully",
+		// Get work item count for logging
+		workItemCount := 0
+		extrinsicCount := 0
+		if item.Bundle != nil {
+			workItemCount = len(item.Bundle.WorkPackage.WorkItems)
+			for _, wi := range item.Bundle.WorkPackage.WorkItems {
+				extrinsicCount += len(wi.Extrinsics)
+			}
+		}
+
+		log.Info(log.Node, "🚀 Work package SUBMITTED to network",
+			"wpHash", wpHash.Hex(),
 			"service", r.serviceID,
 			"blockNumber", item.BlockNumber,
 			"version", item.Version,
-			"wpHash", wpHash.Hex())
+			"workItems", workItemCount,
+			"extrinsics", extrinsicCount,
+			"status", "awaiting guarantee (E_G)")
 	}
 }
 
@@ -215,16 +228,16 @@ func (r *Runner) GetQueue() *QueueState {
 	return r.queue
 }
 
-// EnqueueBundle is a convenience method to enqueue a bundle
-func (r *Runner) EnqueueBundle(bundle *types.WorkPackageBundle) (uint64, error) {
-	return r.queue.Enqueue(bundle)
+// EnqueueBundle is a convenience method to enqueue a bundle for a specific core
+func (r *Runner) EnqueueBundle(bundle *types.WorkPackageBundle, coreIndex uint16) (uint64, error) {
+	return r.queue.Enqueue(bundle, coreIndex)
 }
 
 // EnqueueBundleWithOriginalExtrinsics enqueues a bundle with original transaction extrinsics and metadata
 // The originalExtrinsics are needed for rebuilding on resubmission (to avoid double-prepending Verkle witness)
 // The originalWorkItemExtrinsics are needed to restore WorkItems[].Extrinsics metadata before rebuilding
-func (r *Runner) EnqueueBundleWithOriginalExtrinsics(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic) (uint64, error) {
-	return r.queue.EnqueueWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics)
+func (r *Runner) EnqueueBundleWithOriginalExtrinsics(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic, coreIndex uint16) (uint64, error) {
+	return r.queue.EnqueueWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIndex)
 }
 
 // HandleGuaranteed processes a guarantee event

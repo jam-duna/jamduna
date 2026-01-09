@@ -1,10 +1,11 @@
-use core::error;
 use core::fmt;
 use crate::io;
 
 use crate::collections::String;
 use super::TableColumn;
 use super::{Any, Column};
+#[cfg(feature = "std")]
+use std::error;
 
 /// This is an error that could occur during proving or circuit synthesis.
 // TODO: these errors need to be cleaned up
@@ -104,8 +105,7 @@ impl error::Error for Error {
     }
 }
 
-#[cfg(not(feature = "std"))]
-impl error::Error for Error {}
+// No_std builds skip Error impl to avoid unstable `core::error::Error`.
 
 /// This is an error that could occur during table synthesis.
 #[derive(Debug)]

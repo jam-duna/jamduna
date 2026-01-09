@@ -32,5 +32,5 @@ const (
 	PROVIDE           = pvmtypes.PROVIDE
 	LOG               = pvmtypes.LOG
 	FETCH_WITNESS     = pvmtypes.FETCH_WITNESS
-	FETCH_VERKLE      = pvmtypes.FETCH_VERKLE
+	FETCH_UBT         = pvmtypes.FETCH_UBT
 )

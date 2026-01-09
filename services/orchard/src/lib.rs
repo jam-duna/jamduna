@@ -6,21 +6,17 @@
 extern crate alloc;
 
 #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
-extern crate simplealloc;
-
-#[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
 use simplealloc::SimpleAlloc;
+
+const SIZE1: usize = 0x4000000; // 64 MB heap for no_std allocator
+#[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
+#[global_allocator]
+static ALLOCATOR: SimpleAlloc<SIZE1> = SimpleAlloc::new();
 
 #[cfg(not(any(target_arch = "riscv32", target_arch = "riscv64")))]
 extern crate std;
 
-#[cfg(not(any(target_arch = "riscv32", target_arch = "riscv64")))]
-#[global_allocator]
-static ALLOC: std::alloc::System = std::alloc::System;
-
-#[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
-#[global_allocator]
-static ALLOC: SimpleAlloc<{ 1024 * 1024 }> = SimpleAlloc::new(); // 1MB allocator
+// Global allocator is defined here for no_std targets.
 
 // Conditional logging - stubs when not in polkavm mode
 #[cfg(feature = "polkavm")]
@@ -46,14 +42,29 @@ pub mod witness;
 pub mod compactblock;
 pub mod compacttx;
 pub mod bundle_codec;
+pub mod bundle_parser;
+pub mod signature_verifier;
+pub mod nu7_types;
+
+pub mod sinsemilla_nostd;
 
 #[cfg(feature = "ffi")]
 pub mod ffi;
 
-// PVM-specific modules only available in polkavm mode
-#[cfg(feature = "polkavm")]
+// Transparent modules are available in polkavm mode or when the transparent feature is enabled.
+#[cfg(any(feature = "polkavm", feature = "transparent", feature = "ffi"))]
+pub mod transparent_parser;
+#[cfg(any(feature = "polkavm", feature = "transparent", feature = "ffi"))]
+pub mod transparent_utxo;
+#[cfg(any(feature = "polkavm", feature = "transparent", feature = "ffi"))]
+pub mod transparent_script;
+#[cfg(any(feature = "polkavm", feature = "transparent", feature = "ffi"))]
+pub mod transparent_verify;
+#[cfg(any(feature = "polkavm", feature = "ffi"))]
+pub mod objects;
+#[cfg(any(feature = "polkavm", feature = "ffi"))]
 pub mod refiner;
-#[cfg(feature = "polkavm")]
+#[cfg(any(feature = "polkavm", feature = "ffi"))]
 pub mod accumulator;
 
 #[cfg(test)]

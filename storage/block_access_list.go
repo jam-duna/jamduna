@@ -88,7 +88,7 @@ func (bal *BlockAccessList) Hash() common.Hash {
 
 // ReadEntry represents a single entry from the pre-state witness section
 type ReadEntry struct {
-	VerkleKey  common.Hash
+	UBTKey     common.Hash
 	KeyType    uint8
 	Address    common.Address
 	Extra      uint64
@@ -100,7 +100,7 @@ type ReadEntry struct {
 
 // WriteEntry represents a single entry from the post-state witness section
 type WriteEntry struct {
-	VerkleKey  common.Hash
+	UBTKey     common.Hash
 	KeyType    uint8
 	Address    common.Address
 	Extra      uint64
@@ -130,8 +130,8 @@ func parseAugmentedPreStateReads(preStateWitness []byte) ([]ReadEntry, error) {
 	for i := uint32(0); i < count; i++ {
 		entry := &reads[i]
 
-		// 32B VerkleKey
-		copy(entry.VerkleKey[:], preStateWitness[offset:offset+32])
+		// 32B UBTKey
+		copy(entry.UBTKey[:], preStateWitness[offset:offset+32])
 		offset += 32
 
 		// 1B KeyType
@@ -186,8 +186,8 @@ func parseAugmentedPostStateWrites(postStateWitness []byte) ([]WriteEntry, error
 	for i := uint32(0); i < count; i++ {
 		entry := &writes[i]
 
-		// 32B VerkleKey
-		copy(entry.VerkleKey[:], postStateWitness[offset:offset+32])
+		// 32B UBTKey
+		copy(entry.UBTKey[:], postStateWitness[offset:offset+32])
 		offset += 32
 
 		// 1B KeyType
@@ -479,7 +479,7 @@ func assembleAccountChanges(
 	return accounts
 }
 
-// BuildBlockAccessList constructs BAL from augmented verkle witness
+// BuildBlockAccessList constructs BAL from augmented UBT witness
 //
 // Process:
 // 1. Parse augmented pre-state witness for reads (161-byte entries with txIndex)
@@ -548,6 +548,14 @@ func SplitWitnessSections(witness []byte) (preState, postState []byte, err error
 	}
 	preProofLen := binary.BigEndian.Uint32(witness[offset : offset+4])
 	offset += 4 + int(preProofLen)
+
+	if offset+4 > len(witness) {
+		return nil, nil, fmt.Errorf("invalid witness: missing pre_extension_count at offset %d", offset)
+	}
+	extCount := binary.BigEndian.Uint32(witness[offset : offset+4])
+	offset += 4
+	extSize := int(extCount) * (32 + 31 + 32 + 2 + 248*32)
+	offset += extSize
 
 	if offset > len(witness) {
 		return nil, nil, fmt.Errorf("invalid witness: pre-section overflow at offset %d", offset)

@@ -6,20 +6,17 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/statedb/evmtypes"
-	evmverkle "github.com/colorfulnotion/jam/builder/evm/verkle"
-	"github.com/ethereum/go-verkle"
+	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
 	lru "github.com/hashicorp/golang-lru/v2"
 )
 
-// CheckpointTreeManager manages in-memory verkle tree checkpoints
-// Implements VERKLE2.md Week 2 specification
+// CheckpointTreeManager manages in-memory UBT tree checkpoints.
 type CheckpointTreeManager struct {
 	// In-memory checkpoint trees (LRU cache)
-	trees *lru.Cache[uint64, verkle.VerkleNode]
+	trees *lru.Cache[uint64, *UnifiedBinaryTree]
 
 	// Pinned checkpoints (never evicted)
-	pinned map[uint64]verkle.VerkleNode
+	pinned map[uint64]*UnifiedBinaryTree
 
 	// Mutex for concurrent access
 	mu sync.RWMutex
@@ -39,14 +36,14 @@ func NewCheckpointTreeManager(
 	finePeriod uint64,
 	blockLoader func(uint64) (*evmtypes.EvmBlockPayload, error),
 ) (*CheckpointTreeManager, error) {
-	cache, err := lru.New[uint64, verkle.VerkleNode](maxCheckpoints)
+	cache, err := lru.New[uint64, *UnifiedBinaryTree](maxCheckpoints)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create LRU cache: %w", err)
 	}
 
 	return &CheckpointTreeManager{
 		trees:        cache,
-		pinned:       make(map[uint64]verkle.VerkleNode),
+		pinned:       make(map[uint64]*UnifiedBinaryTree),
 		coarsePeriod: coarsePeriod,
 		finePeriod:   finePeriod,
 		blockLoader:  blockLoader,
@@ -54,7 +51,7 @@ func NewCheckpointTreeManager(
 }
 
 // GetCheckpoint returns checkpoint tree (from cache, pinned, or rebuilt)
-func (cm *CheckpointTreeManager) GetCheckpoint(height uint64) (verkle.VerkleNode, error) {
+func (cm *CheckpointTreeManager) GetCheckpoint(height uint64) (*UnifiedBinaryTree, error) {
 	cm.mu.RLock()
 
 	// Check pinned first (genesis always pinned)
@@ -76,7 +73,7 @@ func (cm *CheckpointTreeManager) GetCheckpoint(height uint64) (verkle.VerkleNode
 }
 
 // rebuildCheckpoint rebuilds checkpoint from nearest earlier checkpoint
-func (cm *CheckpointTreeManager) rebuildCheckpoint(height uint64) (verkle.VerkleNode, error) {
+func (cm *CheckpointTreeManager) rebuildCheckpoint(height uint64) (*UnifiedBinaryTree, error) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -102,10 +99,9 @@ func (cm *CheckpointTreeManager) rebuildCheckpoint(height uint64) (verkle.Verkle
 	if err != nil {
 		return nil, fmt.Errorf("failed to load base block %d for verification: %w", baseHeight, err)
 	}
-	expectedBaseRoot := common.BytesToHash(baseBlock.VerkleRoot[:])
-	baseTreeCopy.Commit()
-	baseHashBytes := baseTreeCopy.Hash().Bytes()
-	actualBaseRoot := common.BytesToHash(baseHashBytes[:])
+	expectedBaseRoot := common.BytesToHash(baseBlock.UBTRoot[:])
+	baseHash := baseTreeCopy.RootHash()
+	actualBaseRoot := common.BytesToHash(baseHash[:])
 	if actualBaseRoot != expectedBaseRoot {
 		return nil, fmt.Errorf("base checkpoint %d root mismatch: expected %x, got %x",
 			baseHeight, expectedBaseRoot, actualBaseRoot)
@@ -127,7 +123,7 @@ func (cm *CheckpointTreeManager) rebuildCheckpoint(height uint64) (verkle.Verkle
 	if err != nil {
 		return nil, fmt.Errorf("failed to load block %d for verification: %w", height, err)
 	}
-	expectedRoot := common.BytesToHash(block.VerkleRoot[:])
+	expectedRoot := common.BytesToHash(block.UBTRoot[:])
 
 	if finalRoot != expectedRoot {
 		return nil, fmt.Errorf("rebuilt checkpoint %d root mismatch: expected %x, got %x",
@@ -147,9 +143,9 @@ func (cm *CheckpointTreeManager) rebuildCheckpoint(height uint64) (verkle.Verkle
 }
 
 // findNearestCheckpoint finds highest checkpoint < height (must hold lock)
-func (cm *CheckpointTreeManager) findNearestCheckpoint(height uint64) (uint64, verkle.VerkleNode) {
+func (cm *CheckpointTreeManager) findNearestCheckpoint(height uint64) (uint64, *UnifiedBinaryTree) {
 	best := uint64(0)
-	var bestTree verkle.VerkleNode
+	var bestTree *UnifiedBinaryTree
 
 	// Check pinned checkpoints first (genesis)
 	for h, tree := range cm.pinned {
@@ -174,10 +170,10 @@ func (cm *CheckpointTreeManager) findNearestCheckpoint(height uint64) (uint64, v
 
 // replayRange replays blocks from baseHeight+1 to targetHeight using delta replay
 func (cm *CheckpointTreeManager) replayRange(
-	baseTree verkle.VerkleNode,
+	baseTree *UnifiedBinaryTree,
 	baseHeight uint64,
 	targetHeight uint64,
-) (verkle.VerkleNode, common.Hash, error) {
+) (*UnifiedBinaryTree, common.Hash, error) {
 	currentTree := baseTree
 	var finalRoot common.Hash
 
@@ -187,41 +183,35 @@ func (cm *CheckpointTreeManager) replayRange(
 			return nil, common.Hash{}, fmt.Errorf("failed to load block %d: %w", h, err)
 		}
 
-		expectedRoot := common.BytesToHash(block.VerkleRoot[:])
+		expectedRoot := common.BytesToHash(block.UBTRoot[:])
 
-		// Check if block has delta (Week 1 integration)
-		if block.VerkleStateDelta != nil && block.VerkleStateDelta.NumEntries > 0 {
-			// Convert evmverkle.VerkleStateDelta to storage.VerkleStateDelta
-			storageDelta := &evmverkle.VerkleStateDelta{
-				NumEntries: block.VerkleStateDelta.NumEntries,
-				Entries:    block.VerkleStateDelta.Entries,
-			}
-
-			// Apply delta using verified replay (VERKLE2.md Week 1)
-			// Use standalone helper instead of dummy StateDBStorage{}
-			replayedTree, err := evmverkle.ReplayVerkleStateDelta(currentTree, storageDelta, expectedRoot)
+		// Check if block has delta
+		if block.UBTStateDelta != nil && block.UBTStateDelta.NumEntries > 0 {
+			replayedTree, root, err := ApplyStateDelta(currentTree, block.UBTStateDelta)
 			if err != nil {
 				return nil, common.Hash{}, fmt.Errorf("delta replay failed at block %d: %w", h, err)
 			}
-
-			// Update current tree to replayed tree
+			actualRoot := common.BytesToHash(root[:])
+			if actualRoot != expectedRoot {
+				return nil, common.Hash{}, fmt.Errorf("delta root mismatch at block %d: expected %x, got %x", h, expectedRoot, actualRoot)
+			}
 			currentTree = replayedTree
-			finalRoot = expectedRoot
+			finalRoot = actualRoot
 
 			log.Trace(log.SDB, "Replayed delta",
 				"height", h,
-				"entries", block.VerkleStateDelta.NumEntries,
+				"entries", block.UBTStateDelta.NumEntries,
 				"root", expectedRoot.Hex())
 		} else {
 			// No delta in block - this shouldn't happen in normal operation
 			// Fall back to just using the expected root without verification
-			log.Warn(log.SDB, "Block missing verkle delta",
+			log.Warn(log.SDB, "Block missing state delta",
 				"height", h,
 				"root", expectedRoot.Hex())
 
 			// Cannot replay without delta - tree may be incorrect
 			// Return error to force use of snapshot or different checkpoint
-			return nil, common.Hash{}, fmt.Errorf("block %d missing verkle delta (cannot rebuild checkpoint)", h)
+			return nil, common.Hash{}, fmt.Errorf("block %d missing state delta (cannot rebuild checkpoint)", h)
 		}
 
 		// Log progress every 100 blocks
@@ -237,7 +227,7 @@ func (cm *CheckpointTreeManager) replayRange(
 }
 
 // AddCheckpoint stores a checkpoint tree in LRU cache
-func (cm *CheckpointTreeManager) AddCheckpoint(height uint64, tree verkle.VerkleNode) {
+func (cm *CheckpointTreeManager) AddCheckpoint(height uint64, tree *UnifiedBinaryTree) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	cm.trees.Add(height, tree)
@@ -247,15 +237,15 @@ func (cm *CheckpointTreeManager) AddCheckpoint(height uint64, tree verkle.Verkle
 }
 
 // PinCheckpoint pins a checkpoint so it's never evicted (e.g., genesis, snapshots)
-func (cm *CheckpointTreeManager) PinCheckpoint(height uint64, tree verkle.VerkleNode) {
+func (cm *CheckpointTreeManager) PinCheckpoint(height uint64, tree *UnifiedBinaryTree) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	cm.pinned[height] = tree
 
-	hashBytes := tree.Hash().Bytes()
+	root := tree.RootHash()
 	log.Info(log.SDB, "Pinned checkpoint",
 		"height", height,
-		"root", common.BytesToHash(hashBytes[:]).Hex())
+		"root", common.BytesToHash(root[:]).Hex())
 }
 
 // UnpinCheckpoint removes a checkpoint from pinned set (use with caution)

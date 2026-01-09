@@ -13,6 +13,7 @@ use halo2_proofs::{
     transcript::{Blake2bRead, Blake2bWrite},
 };
 use pasta_curves::{arithmetic::CurveAffine, pallas, vesta};
+use core2::io;
 use rand::RngCore;
 
 use self::{
@@ -784,16 +785,16 @@ impl VerifyingKey {
     }
 
     /// Constructs a verifying key from params and a serialized VK.
-    pub fn read<R: std::io::Read>(
+    pub fn read<R: io::Read>(
         params: halo2_proofs::poly::commitment::Params<vesta::Affine>,
         mut reader: R,
-    ) -> std::io::Result<Self> {
+    ) -> io::Result<Self> {
         let vk = plonk::VerifyingKey::read(&mut reader)?;
         Ok(VerifyingKey { params, vk })
     }
 
     /// Serializes the verifying key.
-    pub fn write<W: std::io::Write>(&self, writer: W) -> std::io::Result<()> {
+    pub fn write<W: io::Write>(&self, writer: W) -> io::Result<()> {
         self.vk.write(writer)
     }
 }

@@ -9,12 +9,12 @@ import (
 	"strings"
 	"sync"
 
+	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/pvm/interpreter"
 	"github.com/colorfulnotion/jam/pvm/pvmtypes"
-	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	"github.com/colorfulnotion/jam/types"
 	"github.com/gorilla/websocket"
 )
@@ -156,7 +156,7 @@ type VM struct {
 	Y        types.XContext
 	Timeslot uint32
 
-	// Verkle tree witness transition (Phase 1): Witness recording for builder
+	// UBT tree witness transition (Phase 1): Witness recording for builder
 	// These track read dependencies during execution to export as witnesses
 	codeWitness    map[common.Address][]byte                   // code reads
 	storageWitness map[common.Address]evmtypes.ContractStorage // storage reads

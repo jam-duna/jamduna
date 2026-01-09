@@ -1,0 +1,296 @@
+[
+  {
+    "name": "op_return",
+    "script": "6a",
+    "initial_stack": [],
+    "expected_stack": [],
+    "expected_error": "op_return"
+  },
+  {
+    "name": "op_nop",
+    "script": "61",
+    "initial_stack": ["01"],
+    "expected_stack": ["01"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_dup",
+    "script": "76",
+    "initial_stack": ["01"],
+    "expected_stack": ["01", "01"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_drop",
+    "script": "75",
+    "initial_stack": ["01", "02"],
+    "expected_stack": ["01"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_swap",
+    "script": "7c",
+    "initial_stack": ["01", "02"],
+    "expected_stack": ["02", "01"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_over",
+    "script": "78",
+    "initial_stack": ["01", "02"],
+    "expected_stack": ["01", "02", "01"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_rot",
+    "script": "7b",
+    "initial_stack": ["01", "02", "03"],
+    "expected_stack": ["02", "03", "01"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_ifdup_true",
+    "script": "73",
+    "initial_stack": ["01"],
+    "expected_stack": ["01", "01"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_ifdup_false",
+    "script": "73",
+    "initial_stack": [""],
+    "expected_stack": [""],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_depth",
+    "script": "74",
+    "initial_stack": ["01", "02", "03"],
+    "expected_stack": ["01", "02", "03", "03"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_size",
+    "script": "82",
+    "initial_stack": ["010203"],
+    "expected_stack": ["010203", "03"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_equal_true",
+    "script": "87",
+    "initial_stack": ["01", "01"],
+    "expected_stack": ["01"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_equal_false",
+    "script": "87",
+    "initial_stack": ["01", "02"],
+    "expected_stack": [""],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_equalverify_true",
+    "script": "88",
+    "initial_stack": ["02", "01", "01"],
+    "expected_stack": ["02"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_verify_true",
+    "script": "69",
+    "initial_stack": ["01", "02"],
+    "expected_stack": ["01"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_verify_false",
+    "script": "69",
+    "initial_stack": ["01", ""],
+    "expected_stack": [],
+    "expected_error": "verify_failed"
+  },
+  {
+    "name": "op_1negate",
+    "script": "4f",
+    "initial_stack": [],
+    "expected_stack": ["81"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_hash160",
+    "script": "a9",
+    "initial_stack": ["010203"],
+    "expected_stack": ["9bc4860bb936abf262d7a51f74b4304833fee3b2"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_checkmultisig_0of0",
+    "script": "000000ae",
+    "initial_stack": [],
+    "expected_stack": ["01"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_checkmultisigverify_0of0",
+    "script": "000000af",
+    "initial_stack": [],
+    "expected_stack": [],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_pick",
+    "script": "79",
+    "initial_stack": ["01", "02", "03", "01"],
+    "expected_stack": ["01", "02", "03", "02"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_roll",
+    "script": "7a",
+    "initial_stack": ["01", "02", "03", "01"],
+    "expected_stack": ["01", "03", "02"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_nip",
+    "script": "77",
+    "initial_stack": ["01", "02"],
+    "expected_stack": ["02"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_tuck",
+    "script": "7d",
+    "initial_stack": ["01", "02"],
+    "expected_stack": ["02", "01", "02"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_2dup",
+    "script": "6e",
+    "initial_stack": ["01", "02"],
+    "expected_stack": ["01", "02", "01", "02"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_3dup",
+    "script": "6f",
+    "initial_stack": ["01", "02", "03"],
+    "expected_stack": ["01", "02", "03", "01", "02", "03"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_2over",
+    "script": "70",
+    "initial_stack": ["01", "02", "03", "04"],
+    "expected_stack": ["01", "02", "03", "04", "01", "02"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_2swap",
+    "script": "72",
+    "initial_stack": ["01", "02", "03", "04"],
+    "expected_stack": ["03", "04", "01", "02"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_2rot",
+    "script": "71",
+    "initial_stack": ["01", "02", "03", "04", "05", "06"],
+    "expected_stack": ["03", "04", "05", "06", "01", "02"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_altstack_roundtrip",
+    "script": "6b6c",
+    "initial_stack": ["01", "02"],
+    "expected_stack": ["01", "02"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_1add",
+    "script": "8b",
+    "initial_stack": ["01"],
+    "expected_stack": ["02"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_1sub",
+    "script": "8c",
+    "initial_stack": ["02"],
+    "expected_stack": ["01"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_add",
+    "script": "93",
+    "initial_stack": ["02", "03"],
+    "expected_stack": ["05"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_sub",
+    "script": "94",
+    "initial_stack": ["05", "02"],
+    "expected_stack": ["03"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_booland",
+    "script": "9a",
+    "initial_stack": ["01", ""],
+    "expected_stack": [""],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_numequal",
+    "script": "9c",
+    "initial_stack": ["02", "02"],
+    "expected_stack": ["01"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_lessthan",
+    "script": "9f",
+    "initial_stack": ["01", "02"],
+    "expected_stack": ["01"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_within_true",
+    "script": "a5",
+    "initial_stack": ["02", "01", "04"],
+    "expected_stack": ["01"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_if_true",
+    "script": "5163010167010268",
+    "initial_stack": [],
+    "expected_stack": ["01"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "op_if_false",
+    "script": "0063010167010268",
+    "initial_stack": [],
+    "expected_stack": ["02"],
+    "expected_error": "ok"
+  },
+  {
+    "name": "stack_underflow_drop",
+    "script": "75",
+    "initial_stack": [],
+    "expected_stack": [],
+    "expected_error": "stack_underflow"
+  },
+  {
+    "name": "invalid_opcode",
+    "script": "ff",
+    "initial_stack": [],
+    "expected_stack": [],
+    "expected_error": "invalid_opcode"
+  }
+]

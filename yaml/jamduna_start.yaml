@@ -106,6 +106,6 @@
         --dev-validator {{ validator_id }}
         --rpc-port {{ 19800 + validator_id }}
         --chain {{ chainspec_file }}
-        --pvm-backend interpreter
+        --pvm-backend compiler
         --telemetry {{ telemetry_server }}
         > {{ log_dir }}/jamduna-{{ validator_id }}.log 2>&1 &

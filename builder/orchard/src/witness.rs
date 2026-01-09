@@ -3,14 +3,9 @@
 // Builders maintain full off-chain state and generate Merkle witnesses
 // for all state accesses required by the JAM service.
 
-use crate::merkle_impl::{
-    verify_commitment_proof, IncrementalMerkleTree, MerkleProof, SparseMerkleTree, sparse_empty_leaf,
-};
+use crate::merkle_impl::{IncrementalMerkleTree, SparseMerkleTree, sparse_empty_leaf};
 use crate::state::{OrchardState, StateWitnesses, WriteIntents};
 use crate::{Error, Result, OrchardBundle};
-use incrementalmerkletree::{Hashable, Level};
-use orchard::tree::MerkleHashOrchard;
-
 /// Builder's off-chain state (full data, not just roots)
 #[derive(Clone)]
 pub struct BuilderState {
@@ -65,9 +60,6 @@ pub fn build_witnesses(
     // Extract nullifiers from bundle
     let nullifiers = extract_nullifiers(bundle)?;
 
-    // Build commitment tree witness
-    let commitment_root_proof = build_commitment_root_proof(&builder_state.commitment_tree);
-
     // Build nullifier absence proofs
     let mut nullifier_absence_proofs = Vec::new();
     for nullifier in &nullifiers {
@@ -76,8 +68,6 @@ pub fn build_witnesses(
     }
 
     Ok(StateWitnesses {
-        commitment_root_proof,
-        commitment_size: builder_state.chain_state.commitment_size,
         nullifier_absence_proofs,
         gas_min: builder_state.chain_state.gas_min,
         gas_max: builder_state.chain_state.gas_max,
@@ -90,14 +80,6 @@ pub fn verify_witnesses(
     witnesses: &StateWitnesses,
     bundle: &OrchardBundle,
 ) -> Result<()> {
-    // Verify commitment root witness
-    if !verify_commitment_proof(&witnesses.commitment_root_proof, state.commitment_root) {
-        return Err(Error::InvalidWitness("Invalid commitment root proof".to_string()));
-    }
-    if witnesses.commitment_root_proof.root != state.commitment_root {
-        return Err(Error::InvalidWitness("Commitment root mismatch".to_string()));
-    }
-
     // Verify nullifier count matches bundle actions
     let action_count = bundle.actions().len();
     if witnesses.nullifier_absence_proofs.len() != action_count {
@@ -202,26 +184,3 @@ fn extract_commitments(bundle: &OrchardBundle) -> Result<Vec<[u8; 32]>> {
 }
 
 const ORCHARD_MERKLE_DEPTH: usize = 32;
-
-fn build_commitment_root_proof(tree: &IncrementalMerkleTree) -> MerkleProof {
-    if tree.size() == 0 {
-        return empty_commitment_proof();
-    }
-
-    tree.prove(0).unwrap_or_else(empty_commitment_proof)
-}
-
-fn empty_commitment_proof() -> MerkleProof {
-    let leaf = MerkleHashOrchard::empty_leaf().to_bytes();
-    let siblings = (0..ORCHARD_MERKLE_DEPTH)
-        .map(|level| MerkleHashOrchard::empty_root(Level::from(level as u8)).to_bytes())
-        .collect();
-    let root = MerkleHashOrchard::empty_root(Level::from(ORCHARD_MERKLE_DEPTH as u8)).to_bytes();
-
-    MerkleProof {
-        leaf,
-        siblings,
-        position: 0,
-        root,
-    }
-}

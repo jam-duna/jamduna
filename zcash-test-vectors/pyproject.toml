@@ -1,0 +1,82 @@
+[tool.poetry]
+name = "zcash-test-vectors"
+version = "0.1.0"
+description = "Zcash test vectors"
+authors = [
+    "Jack Grigg <jack@z.cash>",
+    "Daira-Emma Hopwood <daira@jacaranda.org>",
+    "Ying Tong Lai <yingtong@ethereum.org>",
+    "Taylor Hornby <taylor@defuse.ca>",
+    "Kris Nuttycombe <kris@electriccoin.co>",
+    "Simon <simon@bitcartel.com>",
+    "Ariel Gabizon <ariel.gabizon@gmail.com>",
+    "Deirdre Connolly <durumcrustulum@gmail.com>",
+]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+homepage = "https://github.com/zcash-hackworks/zcash-test-vectors/"
+repository = "https://github.com/zcash-hackworks/zcash-test-vectors/"
+documentation = "https://github.com/zcash-hackworks/zcash-test-vectors/"
+classifiers = [
+    "Private :: Do Not Upload",
+]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+numpy = "1.26.4"
+chacha20poly1305 = "0.0.3"
+cryptography = "38.0.1"
+secp256k1 = "0.14.0"
+base58 = "2.1.1"
+ripemd-hash = "^1.0.1"
+
+[tool.poetry.scripts]
+# General test vectors
+f4jumble = "zcash_test_vectors.f4jumble:main"
+f4jumble_long = "zcash_test_vectors.f4jumble:long_test_vectors"
+unified_address = "zcash_test_vectors.unified_address:main"
+unified_full_viewing_keys = "zcash_test_vectors.unified_full_viewing_keys:main"
+unified_incoming_viewing_keys = "zcash_test_vectors.unified_incoming_viewing_keys:main"
+zip_0032_registered = "zcash_test_vectors.zip_0032:registered_key_derivation_tvs"
+zip_0032_arbitrary = "zcash_test_vectors.zip_0032:arbitrary_key_derivation_tvs"
+zip_0143 = "zcash_test_vectors.zip_0143:main"
+zip_0243 = "zcash_test_vectors.zip_0243:main"
+zip_0244 = "zcash_test_vectors.zip_0244:main"
+zip_0233 = "zcash_test_vectors.zip_0233:main"
+
+# Transparent test vectors
+bip_0032 = "zcash_test_vectors.transparent.bip_0032:main"
+zip_0316 = "zcash_test_vectors.transparent.zip_0316:main"
+zip_0320 = "zcash_test_vectors.transparent.zip_0320:main"
+
+# Sapling test vectors
+sapling_generators = "zcash_test_vectors.sapling.generators:main"
+sapling_key_components = "zcash_test_vectors.sapling.key_components:main"
+sapling_note_encryption = "zcash_test_vectors.sapling.note_encryption:main"
+sapling_signatures = "zcash_test_vectors.sapling.redjubjub:main"
+sapling_zip32 = "zcash_test_vectors.sapling.zip32:main"
+sapling_zip32_hard = "zcash_test_vectors.sapling.zip32:hard"
+
+# Orchard test vectors
+orchard_empty_roots = "zcash_test_vectors.orchard.empty_roots:main"
+orchard_generators = "zcash_test_vectors.orchard.generators:main"
+orchard_group_hash = "zcash_test_vectors.orchard.group_hash:main"
+orchard_key_components = "zcash_test_vectors.orchard.key_components:main"
+orchard_map_to_curve = "zcash_test_vectors.orchard.group_hash:map_to_curve_test_vectors"
+orchard_merkle_tree = "zcash_test_vectors.orchard.merkle_tree:main"
+orchard_note_encryption = "zcash_test_vectors.orchard.note_encryption:main"
+orchard_poseidon = "zcash_test_vectors.orchard.poseidon:main"
+orchard_poseidon_hash = "zcash_test_vectors.orchard.poseidon:hash_test_vectors"
+orchard_sinsemilla = "zcash_test_vectors.orchard.sinsemilla:main"
+orchard_zip32 = "zcash_test_vectors.orchard.zip32:main"
+
+# OrchardZSA test vectors
+orchard_zsa_asset_base="zcash_test_vectors.orchard_zsa.asset_base:main"
+orchard_zsa_issuance_auth_sig="zcash_test_vectors.orchard_zsa.issuance_auth_sig:main"
+orchard_zsa_key_components = "zcash_test_vectors.orchard_zsa.key_components:main"
+orchard_zsa_note_encryption = "zcash_test_vectors.orchard_zsa.note_encryption:main"
+orchard_zsa_digests = "zcash_test_vectors.transaction_v6:main"

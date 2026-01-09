@@ -8,7 +8,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
-	evmtypes "github.com/colorfulnotion/jam/statedb/evmtypes"
+	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
 )
 
 // TxPoolStatus represents the status of a transaction in the pool
@@ -148,6 +148,22 @@ func (pool *TxPool) GetPendingTransactions() []*evmtypes.EthereumTransaction {
 	txs := make([]*evmtypes.EthereumTransaction, 0, len(pool.pending))
 	for _, entry := range pool.pending {
 		txs = append(txs, entry.Tx)
+	}
+	return txs
+}
+
+// GetPendingTransactionsLimit returns up to `limit` pending transactions
+// Transactions are returned in nonce order for each sender
+func (pool *TxPool) GetPendingTransactionsLimit(limit int) []*evmtypes.EthereumTransaction {
+	pool.mutex.RLock()
+	defer pool.mutex.RUnlock()
+
+	txs := make([]*evmtypes.EthereumTransaction, 0, limit)
+	for _, entry := range pool.pending {
+		txs = append(txs, entry.Tx)
+		if len(txs) >= limit {
+			break
+		}
 	}
 	return txs
 }

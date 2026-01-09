@@ -9,11 +9,11 @@ import (
 	"slices"
 	"sort"
 
+	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/pvm"
 	"github.com/colorfulnotion/jam/pvm/pvmtypes"
-	"github.com/colorfulnotion/jam/statedb/evmtypes"
 	"github.com/colorfulnotion/jam/trie"
 	"github.com/colorfulnotion/jam/types"
 )
@@ -32,35 +32,43 @@ var (
 	debugPeek = os.Getenv("PVM_DEBUG_PEEK") == "1"
 )
 
-const (
-	AccountStorageConst = 34 //[Gratis]
-	AccountLookupConst  = 81 //[Gratis]
-)
-
 type externalWriteTracker interface {
-	TaintRecordExternalWrite(memAddr, memSize uint64, hostFunction string)
+	TaintRecordExternalWrite(offset uint64, length uint64, reason string)
 }
 
 type traceBufferFlusher interface {
 	FlushTraceBuffers()
 }
 
-type evmStorageProvider interface {
-	EVMStorage() (types.EVMJAMStorage, bool)
-}
-
 type daFetcher interface {
-	FetchJAMDASegments(workPackageHash common.Hash, indexStart uint16, indexEnd uint16, payloadLength uint32) (payload []byte, err error)
+	FetchJAMDASegments(workPackageHash common.Hash, indexStart uint16, indexEnd uint16, payloadLength uint32) ([]byte, error)
 }
 
 func getEVMStorage(hostenv types.HostEnv) (types.EVMJAMStorage, bool) {
-	if provider, ok := hostenv.(evmStorageProvider); ok {
-		return provider.EVMStorage()
+	if env, ok := hostenv.(interface {
+		EVMStorage() (types.EVMJAMStorage, bool)
+	}); ok {
+		return env.EVMStorage()
+	}
+	if env, ok := hostenv.(interface {
+		GetStorage() types.JAMStorage
+	}); ok {
+		if evmStorage, ok := env.GetStorage().(types.EVMJAMStorage); ok {
+			return evmStorage, true
+		}
+	}
+	if evmStorage, ok := hostenv.(types.EVMJAMStorage); ok {
+		return evmStorage, true
 	}
 	return nil, false
 }
 
-// FETCH_VERKLE operation types
+const (
+	AccountStorageConst = 34 //[Gratis]
+	AccountLookupConst  = 81 //[Gratis]
+)
+
+// FETCH_UBT operation types
 const (
 	FETCH_BALANCE   = 0
 	FETCH_NONCE     = 1
@@ -167,13 +175,13 @@ func (vm *VM) hostFunction(host_fn int) (bool, error) {
 			return true, nil
 		}
 
-		// Handle special Verkle functions (253-255)
+		// Handle special UBT functions (253-255)
 		switch host_fn {
 		case FETCH_WITNESS: // 254
 			vm.HostFetchWitness()
 			return true, nil
-		case FETCH_VERKLE: // 255
-			vm.hostFetchVerkle()
+		case FETCH_UBT: // 255
+			vm.hostFetchUBT()
 			return true, nil
 		}
 
@@ -831,7 +839,7 @@ func (vm *VM) hostFetch() {
 			allowed = false
 		}
 	}
-	log.Trace(vm.logging, "FETCH", "mode", mode, "allowed", allowed, "datatype", datatype, "omega_7", o, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12)
+	log.Info(vm.logging, "FETCH", "mode", mode, "allowed", allowed, "datatype", datatype, "omega_7", o, "omega_8", omega_8, "omega_9", omega_9, "omega_11", omega_11, "omega_12", omega_12)
 
 	if allowed {
 		switch datatype {
@@ -856,7 +864,7 @@ func (vm *VM) hostFetch() {
 			extrinsic_number := omega_12
 			if len(vm.Extrinsics) > 0 {
 				v_Bytes = vm.Extrinsics[extrinsic_number]
-				// fmt.Printf("hostFetch case 4: Extrinsics length %d %x\n", len(v_Bytes), v_Bytes)
+				fmt.Printf("hostFetch case 3: Extrinsic # %d length %d\n", extrinsic_number, len(v_Bytes))
 			}
 		case EXTRINSICS_BY_WORK_ITEM_4: // ALL extrinsics of a work item -- note that this has a variable-length prefix
 			if len(vm.Extrinsics) > 0 {
@@ -864,7 +872,7 @@ func (vm *VM) hostFetch() {
 			} else {
 				v_Bytes = []byte{0}
 			}
-
+			fmt.Printf("hostFetch case 4: Extrinsics length %d %x\n", len(v_Bytes), v_Bytes)
 		case IMPORTED_SEGMENT_BY_WORK_ITEM_SEGMENT_INDEX_5: // a SPECIFIC imported segment of a work item -- not that this does not have a variable length prefix
 			workItem := omega_11
 			segmentIndex := omega_12
@@ -2191,7 +2199,7 @@ func (vm *VM) HostFetchWitness() error {
 		return nil
 	}
 
-	// Phase 1: Check witness caches first (verkle tree witness transition)
+	// Phase 1: Check witness caches first (UBT witness transition)
 	// Extract address from objectID (first 20 bytes)
 	var address common.Address
 	copy(address[:], object_id[:20])
@@ -2386,7 +2394,7 @@ func (vm *VM) GetBuilderWitnesses() ([]types.ImportSegment, []types.StateWitness
 	sortableRefs := make([]sortableWitness, 0)
 	importedSegments := make([]types.ImportSegment, 0)
 
-	// Phase 1: Export code witnesses (verkle tree witness transition)
+	// Phase 1: Export code witnesses (UBT witness transition)
 	for address, code := range vm.codeWitness {
 		objectID := evmtypes.CodeToObjectID(address)
 		witness := types.StateWitness{
@@ -2515,9 +2523,6 @@ func (vm *VM) GetBuilderWitnesses() ([]types.ImportSegment, []types.StateWitness
 	return importedSegments, witnessSlice, nil
 }
 
-// hostFetchVerkle implements the unified Verkle fetch host function
-// This is called by the EVM service (Rust) to fetch state from the Verkle tree
-//
 // Register layout:
 //
 //	r7: fetch_type (0=Balance, 1=Nonce, 2=Code, 3=CodeHash, 4=Storage)
@@ -2530,7 +2535,7 @@ func (vm *VM) GetBuilderWitnesses() ([]types.ImportSegment, []types.StateWitness
 //
 //	Step 1 (output_max_len=0): actual size needed
 //	Step 2 (output_max_len>0): bytes written (0 = insufficient buffer or not found)
-func (vm *VM) hostFetchVerkle() {
+func (vm *VM) hostFetchUBT() {
 	fetchType := uint8(vm.ReadRegister(7))
 	addressPtr := uint32(vm.ReadRegister(8))
 	keyPtr := uint32(vm.ReadRegister(9))
@@ -2553,7 +2558,7 @@ func (vm *VM) hostFetchVerkle() {
 	}
 	copy(address[:], addrBytes)
 
-	vm.DebugHostFunction(FETCH_VERKLE, "fetchType=%d address=%s outputMaxLen=%d txIndex=%d",
+	vm.DebugHostFunction(FETCH_UBT, "fetchType=%d address=%s outputMaxLen=%d txIndex=%d",
 		fetchType, address.Hex(), outputMaxLen, txIndex)
 
 	switch fetchType {
@@ -2581,7 +2586,7 @@ func (vm *VM) hostFetchVerkle() {
 	}
 }
 
-// fetchBalance fetches balance from Verkle tree
+// fetchBalance fetches balance from UBT tree
 func (vm *VM) fetchBalance(evmStorage types.EVMJAMStorage, address common.Address, outputPtr uint32, outputMaxLen uint32, txIndex uint32) {
 	// Step 1: Query size
 	if outputMaxLen == 0 {
@@ -2612,7 +2617,7 @@ func (vm *VM) fetchBalance(evmStorage types.EVMJAMStorage, address common.Addres
 	vm.WriteRegister(7, 32)
 }
 
-// fetchNonce fetches nonce from Verkle tree
+// fetchNonce fetches nonce from UBT tree
 func (vm *VM) fetchNonce(evmStorage types.EVMJAMStorage, address common.Address, outputPtr uint32, outputMaxLen uint32, txIndex uint32) {
 	// Step 1: Query size
 	if outputMaxLen == 0 {
@@ -2643,7 +2648,7 @@ func (vm *VM) fetchNonce(evmStorage types.EVMJAMStorage, address common.Address,
 	vm.WriteRegister(7, 32)
 }
 
-// fetchCode fetches code from Verkle tree (two-step pattern)
+// fetchCode fetches code from UBT tree (two-step pattern)
 func (vm *VM) fetchCode(evmStorage types.EVMJAMStorage, address common.Address, outputPtr uint32, outputMaxLen uint32, txIndex uint32) {
 	code, codeSize, err := evmStorage.FetchCode(address, txIndex)
 	if err != nil {
@@ -2677,7 +2682,7 @@ func (vm *VM) fetchCode(evmStorage types.EVMJAMStorage, address common.Address, 
 	vm.WriteRegister(7, uint64(len(code)))
 }
 
-// fetchCodeHash fetches code hash from Verkle tree
+// fetchCodeHash fetches code hash from UBT tree
 func (vm *VM) fetchCodeHash(evmStorage types.EVMJAMStorage, address common.Address, outputPtr uint32, outputMaxLen uint32, txIndex uint32) {
 	// Step 1: Query size
 	if outputMaxLen == 0 {
@@ -2706,7 +2711,7 @@ func (vm *VM) fetchCodeHash(evmStorage types.EVMJAMStorage, address common.Addre
 	vm.WriteRegister(7, 32)
 }
 
-// fetchStorage fetches storage value from Verkle tree
+// fetchStorage fetches storage value from UBT tree
 func (vm *VM) fetchStorage(evmStorage types.EVMJAMStorage, address common.Address, storageKey [32]byte, outputPtr uint32, outputMaxLen uint32, txIndex uint32) {
 	// Step 1: Query size
 	if outputMaxLen == 0 {

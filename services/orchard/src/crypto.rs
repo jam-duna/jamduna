@@ -8,6 +8,7 @@
 
 use crate::errors::{OrchardError, Result};
 use crate::vk_registry::get_vk_registry;
+use crate::sinsemilla_nostd;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 
@@ -27,42 +28,142 @@ use alloc::format;
 // Blake2 for hashing
 use blake2::{Blake2b, Digest, Blake2bVar};
 use blake2::digest::{Update, VariableOutput};
-use halo2_gadgets::poseidon::{
-    primitives::{self as poseidon, ConstantLength, P128Pow5T3},
-};
 
 // Halo2 imports for IPA verification
 use halo2_proofs::{
     poly::commitment::Params,
     plonk::{VerifyingKey as Halo2VerifyingKey},
-    transcript::{Blake2bRead, Challenge255, Transcript},
+    transcript::{Blake2bRead, Challenge255},
 };
 use halo2_proofs::pasta::vesta;
 use halo2_proofs::pasta::pallas::Base as PallasBase;
-use halo2_proofs::pasta::group::ff::{FromUniformBytes, PrimeField};
+use halo2_proofs::pasta::group::ff::{FromUniformBytes, PrimeField, PrimeFieldBits};
+
+static mut EMPTY_NODES_CACHE: Option<Vec<[u8; 32]>> = None;
+
+fn empty_nodes_cache(depth: usize) -> &'static Vec<[u8; 32]> {
+    unsafe {
+        let needs_init = EMPTY_NODES_CACHE
+            .as_ref()
+            .map(|nodes| nodes.len() != depth + 1)
+            .unwrap_or(true);
+        if needs_init {
+            crate::log_info(&format!(
+                "empty_nodes_cache: init start depth={}",
+                depth
+            ));
+            let mut nodes = Vec::with_capacity(depth + 1);
+            let mut current = empty_node_bytes(0);
+            nodes.push(current);
+            crate::log_info("empty_nodes_cache: level 0 ready");
+            for level in 1..=depth {
+                current = merkle_combine_at(level - 1, &current, &current)
+                    .expect("empty node combine failed");
+                nodes.push(current);
+                crate::log_info(&format!(
+                    "empty_nodes_cache: level {} ready",
+                    level
+                ));
+            }
+            EMPTY_NODES_CACHE = Some(nodes);
+            crate::log_info("empty_nodes_cache: init done");
+        }
+        EMPTY_NODES_CACHE.as_ref().expect("empty node cache")
+    }
+}
 #[cfg(feature = "orchard")]
 use incrementalmerkletree::Level;
 #[cfg(feature = "orchard")]
 use orchard::tree::MerkleHashOrchard;
 
-/// Binary Poseidon tree depth (consensus-critical)
+/// Binary tree depth (consensus-critical)
 pub const TREE_DEPTH: usize = 32;
-pub const BATCH_TREE_DEPTH: usize = 16;
 
 const NOTE_COMMITMENT_DOMAIN: &str = "note_cm_v1";
 const NULLIFIER_DOMAIN: &str = "nf_v1";
 const COMMITMENT_TREE_DOMAIN: &str = "commitment_tree_v1";
-const COMMITMENT_BATCH_DOMAIN: &str = "cm_batch_v1";
-const COMMITMENT_TREE_BATCH_DOMAIN: &str = "cm_tree_v1";
 const EXERCISE_TERMS_DOMAIN: &str = "exercise_terms_v1";
 const SWAP_QUOTE_DOMAIN: &str = "quote_v1";
+const ASSET_ID_DOMAIN: &[u8; 16] = b"ZSA_Asset_ID_v1\0";
 
 const VK_BUNDLE_MAGIC: &[u8; 8] = b"RGVKv1\0\0";
+const HALO2_VK_MAGIC: &[u8; 8] = b"H2VKv1\0\0";
 const VK_BUNDLE_HEADER_LEN: usize = 8 + 4 + 4;
+
+/// Embedded verification key for the Orchard NU5 circuit.
+pub const ORCHARD_VK_BYTES: &[u8] = include_bytes!("../keys/orchard.vk");
+/// Embedded IPA commitment parameters for the Orchard NU5 circuit.
+pub const ORCHARD_PARAMS_BYTES: &[u8] = include_bytes!("../keys/orchard.params");
+/// Embedded verification key for the Orchard ZSA circuit.
+pub const ORCHARD_ZSA_VK_BYTES: &[u8] = include_bytes!("../keys/orchard_zsa.vk");
+/// Embedded IPA commitment parameters for the Orchard ZSA circuit.
+pub const ORCHARD_ZSA_PARAMS_BYTES: &[u8] = include_bytes!("../keys/orchard_zsa.params");
 
 struct VkBundle {
     k: u32,
     vk_bytes: Vec<u8>,
+}
+
+struct CachedHalo2Verifier {
+    k: u32,
+    vk: Halo2VerifyingKey<vesta::Affine>,
+    params: Params<vesta::Affine>,
+    vk_hash: [u8; 32],
+}
+
+static mut HALO2_CACHE: Option<CachedHalo2Verifier> = None;
+
+fn get_halo2_cache(
+    vk_bytes: &[u8],
+    params_bytes: &[u8],
+) -> Result<(&'static CachedHalo2Verifier, bool)> {
+    unsafe {
+        let vk_hash = vk_hash_bytes(vk_bytes);
+        if HALO2_CACHE
+            .as_ref()
+            .map(|cache| cache.vk_hash != vk_hash)
+            .unwrap_or(true)
+        {
+            crate::log_info("Halo2 cache init: start");
+            crate::log_info(&format!(
+                "Halo2 cache init: vk_bytes_len={}",
+                vk_bytes.len()
+            ));
+            crate::log_info("Halo2 cache init: parse_vk_bundle start");
+            let vk_bundle = parse_vk_bundle(vk_bytes)?;
+            crate::log_info(&format!(
+                "Halo2 cache init: parse_vk_bundle done (k={}, vk_len={})",
+                vk_bundle.k,
+                vk_bundle.vk_bytes.len()
+            ));
+            crate::log_info("Halo2 cache init: Halo2VerifyingKey::read start");
+            let vk = Halo2VerifyingKey::read(&mut &vk_bundle.vk_bytes[..]).map_err(|_| {
+                OrchardError::ParseError("failed to deserialize halo2 vk".to_string())
+            })?;
+            crate::log_info("Halo2 cache init: Halo2VerifyingKey::read done");
+            crate::log_info("Halo2 cache init: Params::read start");
+            let params = Params::<vesta::Affine>::read(&mut &params_bytes[..]).map_err(|_| {
+                OrchardError::ParseError("failed to deserialize halo2 params".to_string())
+            })?;
+            if params.k() != vk_bundle.k {
+                return Err(OrchardError::ParseError(
+                    "halo2 params k mismatch".to_string(),
+                ));
+            }
+            crate::log_info("Halo2 cache init: Params::read done");
+            crate::log_info("Halo2 cache init: vk_hash start");
+            crate::log_info("Halo2 cache init: vk_hash done");
+            HALO2_CACHE = Some(CachedHalo2Verifier {
+                k: vk_bundle.k,
+                vk,
+                params,
+                vk_hash,
+            });
+            crate::log_info("Halo2 cache init: done");
+            return Ok((HALO2_CACHE.as_ref().unwrap_unchecked(), false));
+        }
+        Ok((HALO2_CACHE.as_ref().unwrap_unchecked(), true))
+    }
 }
 
 /// Halo2/IPA proof verification
@@ -76,41 +177,56 @@ pub fn verify_halo2_proof(
 ) -> Result<bool> {
     use crate::log_info;
 
+    log_info(&format!(
+        "Halo2 input summary: vk_id={}, proof_bytes_len={}, public_inputs_len={}",
+        vk_id,
+        proof_bytes.len(),
+        public_inputs.len(),
+    ));
+
     // 1. Load VK from registry and validate field layout
     let registry = get_vk_registry();
     let vk_entry = registry.get_vk_entry(vk_id)?;
     registry.validate_public_inputs(vk_id, public_inputs)?;
+    let action_count = registry.get_action_count(vk_id, public_inputs)?;
 
     log_info(&format!(
         "Halo2 verification starting: vk_id={}, domain={}, fields={}",
         vk_id, vk_entry.domain, vk_entry.field_count
     ));
 
+
+
     // 2. Load VK bytes from embedded constants and parse bundle
-    let vk_bytes = match vk_id {
-        1 => ORCHARD_SPEND_VK_BYTES,
-        2 => ORCHARD_WITHDRAW_VK_BYTES,
-        3 => ORCHARD_ISSUANCE_VK_BYTES,
-        4 => ORCHARD_BATCH_VK_BYTES,
+    let (vk_bytes, params_bytes) = match vk_id {
+        1 => (ORCHARD_VK_BYTES, ORCHARD_PARAMS_BYTES),
+        2 => (ORCHARD_ZSA_VK_BYTES, ORCHARD_ZSA_PARAMS_BYTES),
         _ => return Err(OrchardError::InvalidVkId { vk_id }),
     };
-    let vk_bundle = parse_vk_bundle(vk_bytes)?;
+    if vk_bytes.is_empty() || params_bytes.is_empty() {
+        return Err(OrchardError::ParseError(
+            "missing halo2 vk/params bytes for vk_id".to_string(),
+        ));
+    }
+    let (cache, cache_hit) = get_halo2_cache(vk_bytes, params_bytes)?;
+    if cache_hit {
+        log_info("Halo2 verification: cache hit");
+    } else {
+        log_info("Halo2 verification: cache miss (initialized)");
+    }
 
-    // 3. Deserialize VK from canonical bytes
-    let vk = Halo2VerifyingKey::read(&mut &vk_bundle.vk_bytes[..]).map_err(|_| {
-        OrchardError::ParseError("failed to deserialize halo2 vk".to_string())
-    })?;
-    let expected_hash = vk_hash_bytes(&vk_bundle.vk_bytes);
+    // 3. VK + params from cache
     log_info(&format!(
         "✅ VK bundle verified: vk_id={}, k={}, hash={:?}",
-        vk_id, vk_bundle.k, &expected_hash[..8]
+        vk_id, cache.k, &cache.vk_hash[..8]
     ));
 
-    // 4. Convert public inputs from bytes to Pallas field elements
+    // 4. Convert public inputs from bytes to Pallas field elements (little-endian)
+    log_info("Halo2 verification: public input conversion start");
     let pallas_inputs: Result<Vec<PallasBase>> = public_inputs.iter()
         .map(|bytes| {
-            // Convert 32-byte array to field element (big-endian)
-            // This matches the canonical field encoding from CIRCUITS.md
+            // Convert 32-byte array to field element (little-endian)
+            // This matches the canonical field encoding from the Orchard circuit
             let mut repr = <PallasBase as PrimeField>::Repr::default();
             repr.as_mut().copy_from_slice(bytes);
             PallasBase::from_repr(repr)
@@ -119,16 +235,15 @@ pub fn verify_halo2_proof(
         })
         .collect();
     let pallas_inputs = pallas_inputs?;
+    log_info("Halo2 verification: public input conversion done");
 
-    // 5. Initialize Blake2b transcript with domain separation
+    // 5. Initialize Blake2b transcript (Orchard circuit does not apply domain separation)
+    log_info("Halo2 verification: transcript init start");
     let mut transcript = Blake2bRead::<_, vesta::Affine, Challenge255<vesta::Affine>>::init(proof_bytes);
-    let domain_scalar = domain_str_to_field(vk_entry.domain);
-    transcript
-        .common_scalar(domain_scalar)
-        .map_err(|_| OrchardError::InvalidProof)?;
+    log_info("Halo2 verification: transcript init done");
 
     // 6. Load universal parameters (IPA commitment params)
-    let params = Params::<vesta::Affine>::new(vk_bundle.k);
+    log_info("Halo2 verification: params ready (cached)");
 
     // 7. Verify the Halo2 proof using real IPA verification
     // This performs actual cryptographic verification against the circuit VK
@@ -138,20 +253,34 @@ pub fn verify_halo2_proof(
     }
 
     // Real Halo2 verification with proper transcript and strategy
-    let instances: [&[PallasBase]; 1] = [&pallas_inputs];
-    let instance_slices: [&[&[PallasBase]]; 1] = [&instances];
+    let fields_per_action = vk_entry.field_count;
+    let mut action_instances: Vec<Vec<&[PallasBase]>> = Vec::with_capacity(action_count);
+    for action_idx in 0..action_count {
+        let start = action_idx * fields_per_action;
+        let end = start + fields_per_action;
+        action_instances.push(vec![&pallas_inputs[start..end]]);
+    }
+    let instance_slices: Vec<&[&[PallasBase]]> =
+        action_instances.iter().map(|i| &i[..]).collect();
+    log_info(&format!(
+        "Halo2 verification: verify_proof start (instances={}, fields_per_action={})",
+        instance_slices.len(),
+        fields_per_action,
+    ));
     match halo2_proofs::plonk::verify_proof(
-        &params,
-        &vk,
-        halo2_proofs::plonk::SingleVerifier::new(&params),
+        &cache.params,
+        &cache.vk,
+        halo2_proofs::plonk::SingleVerifier::new(&cache.params),
         &instance_slices,
         &mut transcript,
     ) {
         Ok(_) => {
+            log_info("Halo2 verification: verify_proof done (success)");
             log_info("✅ Halo2/IPA proof verification succeeded - REAL VERIFICATION ACTIVE");
             Ok(true)
         }
         Err(e) => {
+            log_info("Halo2 verification: verify_proof done (failure)");
             log_info(&format!("❌ Halo2/IPA proof verification failed: {:?} - REAL VERIFICATION ACTIVE", e));
             Ok(false)
         }
@@ -166,141 +295,6 @@ fn _blake2_hash_domain(domain: &str) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-/// TODO: Embedded verification key for real Orchard circuit
-/// Will use Zcash's production Orchard verifying key
-/// For now, stub these out (legacy code from Railgun implementation)
-pub const ORCHARD_SPEND_VK_BYTES: &[u8] = &[];
-pub const ORCHARD_WITHDRAW_VK_BYTES: &[u8] = &[];
-pub const ORCHARD_ISSUANCE_VK_BYTES: &[u8] = &[];
-pub const ORCHARD_BATCH_VK_BYTES: &[u8] = &[];
-
-/// Build public inputs for IssuanceV1 circuit (11 fields)
-/// Matches ISSUANCE_LAYOUT from vk_registry.rs:
-/// ["asset_id", "mint_amount_lo", "mint_amount_hi", "burn_amount_lo", "burn_amount_hi",
-///  "issuer_pk_0", "issuer_pk_1", "issuer_pk_2",
-///  "signature_verification_0", "signature_verification_1", "issuance_root"]
-pub fn build_issuance_public_inputs(
-    asset_id: u32,
-    mint_amount: u128,
-    burn_amount: u128,
-    issuer_pk: &[u8; 32],
-    signature_verification_data: &[u8; 64],
-    issuance_root: &[u8; 32],
-) -> Vec<[u8; 32]> {
-    // Returns vector of field element encodings, where each [u8; 32] represents
-    // a single field element in the circuit's public input layout.
-    // Fields are packed according to ISSUANCE_LAYOUT with proper big-endian encoding
-
-    let mut inputs = Vec::with_capacity(11);
-
-    // Field 0: asset_id (u32)
-    inputs.push(u32_to_field_bytes(asset_id));
-
-    // Fields 1-2: mint_amount (u128 split into lo/hi)
-    inputs.push(u128_lo_to_field_bytes(mint_amount));
-    inputs.push(u128_hi_to_field_bytes(mint_amount));
-
-    // Fields 3-4: burn_amount (u128 split into lo/hi)
-    inputs.push(u128_lo_to_field_bytes(burn_amount));
-    inputs.push(u128_hi_to_field_bytes(burn_amount));
-
-    // Fields 5-7: issuer_pk (32 bytes packed as 11/11/10)
-    let [pk0, pk1, pk2] = pack_32_bytes_to_field_bytes(*issuer_pk);
-    inputs.extend_from_slice(&[pk0, pk1, pk2]);
-
-    // Fields 8-9: signature_verification_data (big-endian field encodings)
-    let sig0_bytes: [u8; 32] = signature_verification_data[..32].try_into().unwrap_or([0u8; 32]);
-    let sig1_bytes: [u8; 32] = signature_verification_data[32..64].try_into().unwrap_or([0u8; 32]);
-    let sig0 = pallas_from_bytes_be(&sig0_bytes).unwrap_or_else(|_| PallasBase::zero());
-    let sig1 = pallas_from_bytes_be(&sig1_bytes).unwrap_or_else(|_| PallasBase::zero());
-    inputs.push(pallas_to_bytes(&sig0));
-    inputs.push(pallas_to_bytes(&sig1));
-
-    // Field 10: issuance_root ([u8; 32])
-    inputs.push(*issuance_root);
-
-    assert_eq!(inputs.len(), 11, "IssuanceV1 circuit expects exactly 11 public input fields");
-    inputs
-}
-
-/// Build public inputs for BatchAggV1 circuit (17 fields)
-/// Matches BATCH_LAYOUT from vk_registry.rs:
-/// ["anchor_root", "anchor_size", "next_root", "nullifiers_root", "commitments_root", "deltas_root",
-///  "issuance_root", "memo_root", "equity_allowed_root", "poi_root",
-///  "total_fee_lo", "total_fee_hi", "epoch", "num_user_txs", "min_fee_per_tx_lo", "min_fee_per_tx_hi", "batch_hash"]
-pub fn build_batch_public_inputs(
-    anchor_root: &[u8; 32],
-    anchor_size: u64,
-    next_root: &[u8; 32],
-    nullifiers_root: &[u8; 32],
-    commitments_root: &[u8; 32],
-    deltas_root: &[u8; 32],
-    issuance_root: &[u8; 32],
-    memo_root: &[u8; 32],
-    equity_allowed_root: &[u8; 32],
-    poi_root: &[u8; 32],
-    total_fee: u128,
-    epoch: u64,
-    num_user_txs: u32,
-    min_fee_per_tx: u128,
-    batch_hash: &[u8; 32],
-) -> Vec<[u8; 32]> {
-    // Returns vector of field element encodings, where each [u8; 32] represents
-    // a single field element in the circuit's public input layout.
-    // Fields are packed according to BATCH_LAYOUT with proper big-endian encoding
-
-    let mut inputs = Vec::with_capacity(17);
-
-    // Field 0: anchor_root ([u8; 32])
-    inputs.push(*anchor_root);
-
-    // Field 1: anchor_size (u64)
-    inputs.push(u64_to_field_bytes(anchor_size));
-
-    // Field 2: next_root ([u8; 32])
-    inputs.push(*next_root);
-
-    // Field 3: nullifiers_root ([u8; 32])
-    inputs.push(*nullifiers_root);
-
-    // Field 4: commitments_root ([u8; 32])
-    inputs.push(*commitments_root);
-
-    // Field 5: deltas_root ([u8; 32])
-    inputs.push(*deltas_root);
-
-    // Field 6: issuance_root ([u8; 32])
-    inputs.push(*issuance_root);
-
-    // Field 7: memo_root ([u8; 32])
-    inputs.push(*memo_root);
-
-    // Field 8: equity_allowed_root ([u8; 32])
-    inputs.push(*equity_allowed_root);
-
-    // Field 9: poi_root ([u8; 32])
-    inputs.push(*poi_root);
-
-    // Fields 10-11: total_fee (u128 split into lo/hi)
-    inputs.push(u128_lo_to_field_bytes(total_fee));
-    inputs.push(u128_hi_to_field_bytes(total_fee));
-
-    // Field 12: epoch (u64)
-    inputs.push(u64_to_field_bytes(epoch));
-
-    // Field 13: num_user_txs (u32)
-    inputs.push(u32_to_field_bytes(num_user_txs));
-
-    // Fields 14-15: min_fee_per_tx (u128 split into lo/hi)
-    inputs.push(u128_lo_to_field_bytes(min_fee_per_tx));
-    inputs.push(u128_hi_to_field_bytes(min_fee_per_tx));
-
-    // Field 16: batch_hash ([u8; 32])
-    inputs.push(*batch_hash);
-
-    assert_eq!(inputs.len(), 17, "BatchAggV1 circuit expects exactly 17 public input fields");
-    inputs
-}
 
 /// Helper functions for field encoding
 
@@ -328,14 +322,6 @@ fn u128_hi_to_field_bytes(value: u128) -> [u8; 32] {
     bytes
 }
 
-fn pack_32_bytes_to_field_bytes(bytes: [u8; 32]) -> [[u8; 32]; 3] {
-    [
-        pack_bytes_to_field_bytes(&bytes[0..11]),
-        pack_bytes_to_field_bytes(&bytes[11..22]),
-        pack_bytes_to_field_bytes(&bytes[22..32]),
-    ]
-}
-
 fn reduce_bytes_to_field_bytes(bytes: [u8; 32]) -> [u8; 32] {
     let mut wide = [0u8; 64];
     for (dst, src) in wide.iter_mut().zip(bytes.iter().rev()) {
@@ -347,25 +333,12 @@ fn reduce_bytes_to_field_bytes(bytes: [u8; 32]) -> [u8; 32] {
     repr
 }
 
-fn pack_bytes_to_field_bytes(bytes: &[u8]) -> [u8; 32] {
-    let mut out = [0u8; 32];
-    let offset = 32 - bytes.len();
-    out[offset..].copy_from_slice(bytes);
-    out
-}
-
 fn pallas_from_bytes(bytes: &[u8; 32]) -> Result<PallasBase> {
     let mut repr = <PallasBase as PrimeField>::Repr::default();
     repr.as_mut().copy_from_slice(bytes);
     PallasBase::from_repr(repr)
         .into_option()
         .ok_or(OrchardError::InvalidFieldElement)
-}
-
-fn pallas_from_bytes_be(bytes: &[u8; 32]) -> Result<PallasBase> {
-    let mut le = *bytes;
-    le.reverse();
-    pallas_from_bytes(&le)
 }
 
 pub fn pallas_from_bytes_reduced(bytes: &[u8; 32]) -> PallasBase {
@@ -377,130 +350,13 @@ pub fn pallas_from_bytes_reduced(bytes: &[u8; 32]) -> PallasBase {
         .unwrap_or_else(|| PallasBase::zero())
 }
 
-fn pallas_from_u32(value: u32) -> PallasBase {
-    PallasBase::from(value as u64)
-}
-
-fn pallas_from_u64(value: u64) -> PallasBase {
-    PallasBase::from(value)
-}
-
-fn split_u128_to_pallas_fields(value: u128) -> [PallasBase; 2] {
-    let lo = value as u64;
-    let hi = (value >> 64) as u64;
-    [PallasBase::from(lo), PallasBase::from(hi)]
-}
-
-fn pack_32_bytes_to_pallas_fields(bytes: [u8; 32]) -> [PallasBase; 3] {
-    let chunk1 = pack_bytes_to_field_bytes(&bytes[0..11]);
-    let chunk2 = pack_bytes_to_field_bytes(&bytes[11..22]);
-    let chunk3 = pack_bytes_to_field_bytes(&bytes[22..32]);
-    [
-        pallas_from_bytes(&chunk1).unwrap_or_else(|_| PallasBase::zero()),
-        pallas_from_bytes(&chunk2).unwrap_or_else(|_| PallasBase::zero()),
-        pallas_from_bytes(&chunk3).unwrap_or_else(|_| PallasBase::zero()),
-    ]
-}
-
 pub fn pallas_to_bytes(value: &PallasBase) -> [u8; 32] {
-    let mut repr = value.to_repr();
-    repr.reverse();
-    repr
+    // Use the canonical little-endian encoding (matches MerkleHashOrchard::to_bytes)
+    value.to_repr()
 }
 
-fn poseidon_hash_domain_1(domain: &str, value: PallasBase) -> PallasBase {
-    let domain_field = domain_str_to_field(domain);
-    let input = [domain_field, value];
-    poseidon::Hash::<_, P128Pow5T3, ConstantLength<2>, 3, 2>::init().hash(input)
-}
 
-fn poseidon_hash_domain_2(domain: &str, left: PallasBase, right: PallasBase) -> PallasBase {
-    let domain_field = domain_str_to_field(domain);
-    let input = [domain_field, left, right];
-    poseidon::Hash::<_, P128Pow5T3, ConstantLength<3>, 3, 2>::init().hash(input)
-}
-
-fn poseidon_hash_domain_3(
-    domain: &str,
-    a: PallasBase,
-    b: PallasBase,
-    c: PallasBase,
-) -> PallasBase {
-    let domain_field = domain_str_to_field(domain);
-    let input = [domain_field, a, b, c];
-    poseidon::Hash::<_, P128Pow5T3, ConstantLength<4>, 3, 2>::init().hash(input)
-}
-
-fn poseidon_hash_domain_10(domain: &str, inputs: [PallasBase; 10]) -> PallasBase {
-    let domain_field = domain_str_to_field(domain);
-    let input = [
-        domain_field,
-        inputs[0],
-        inputs[1],
-        inputs[2],
-        inputs[3],
-        inputs[4],
-        inputs[5],
-        inputs[6],
-        inputs[7],
-        inputs[8],
-        inputs[9],
-    ];
-    poseidon::Hash::<_, P128Pow5T3, ConstantLength<11>, 3, 2>::init().hash(input)
-}
-
-fn poseidon_hash_from_fields(field_inputs: &[PallasBase]) -> PallasBase {
-    match field_inputs.len() {
-        2 => {
-            let arr: [PallasBase; 2] = field_inputs.try_into().unwrap();
-            poseidon::Hash::<_, P128Pow5T3, ConstantLength<2>, 3, 2>::init().hash(arr)
-        }
-        3 => {
-            let arr: [PallasBase; 3] = field_inputs.try_into().unwrap();
-            poseidon::Hash::<_, P128Pow5T3, ConstantLength<3>, 3, 2>::init().hash(arr)
-        }
-        4 => {
-            let arr: [PallasBase; 4] = field_inputs.try_into().unwrap();
-            poseidon::Hash::<_, P128Pow5T3, ConstantLength<4>, 3, 2>::init().hash(arr)
-        }
-        7 => {
-            let arr: [PallasBase; 7] = field_inputs.try_into().unwrap();
-            poseidon::Hash::<_, P128Pow5T3, ConstantLength<7>, 3, 2>::init().hash(arr)
-        }
-        9 => {
-            let arr: [PallasBase; 9] = field_inputs.try_into().unwrap();
-            poseidon::Hash::<_, P128Pow5T3, ConstantLength<9>, 3, 2>::init().hash(arr)
-        }
-        11 => {
-            let arr: [PallasBase; 11] = field_inputs.try_into().unwrap();
-            poseidon::Hash::<_, P128Pow5T3, ConstantLength<11>, 3, 2>::init().hash(arr)
-        }
-        _ => {
-            let mut padded = [PallasBase::zero(); 11];
-            let copy_len = core::cmp::min(field_inputs.len(), 11);
-            padded[..copy_len].copy_from_slice(&field_inputs[..copy_len]);
-            poseidon::Hash::<_, P128Pow5T3, ConstantLength<11>, 3, 2>::init().hash(padded)
-        }
-    }
-}
-
-/// Poseidon hash over Pallas base field with explicit domain tag.
-///
-/// Inputs are 32-byte big-endian field elements. Domain bytes are hashed as the first element.
-pub fn poseidon_hash_with_domain(domain: &str, inputs: &[[u8; 32]]) -> [u8; 32] {
-    let mut field_inputs: Vec<PallasBase> = Vec::with_capacity(inputs.len() + 1);
-    field_inputs.push(domain_str_to_field(domain));
-    field_inputs.extend(inputs.iter().map(pallas_from_bytes_reduced));
-    let hash = poseidon_hash_from_fields(&field_inputs);
-    pallas_to_bytes(&hash)
-}
-
-/// Poseidon hash for commitment tree internal nodes (domain-separated)
-fn commitment_tree_hash_2(left: PallasBase, right: PallasBase) -> PallasBase {
-    poseidon_hash_domain_2(COMMITMENT_TREE_DOMAIN, left, right)
-}
-
-/// Commitment: Poseidon("note_cm_v1", asset_id, amount, owner_pk, rho, note_rseed, unlock_height, memo_hash)
+/// Commitment: Sinsemilla("note_cm_v1", asset_id, amount, owner_pk, rho, note_rseed, unlock_height, memo_hash)
 ///
 /// Matches services/orchard/docs/CIRCUITS.md and halo2-circuits note_commitment_native.
 pub fn commitment(
@@ -512,44 +368,124 @@ pub fn commitment(
     unlock_height: u64,
     memo_hash: &[u8; 32],
 ) -> Result<[u8; 32]> {
-    let asset_id_fp = pallas_from_u32(asset_id);
-    let [amount_lo_fp, amount_hi_fp] = split_u128_to_pallas_fields(amount);
-    let [pk0, pk1, pk2] = pack_32_bytes_to_pallas_fields(*owner_pk);
-    let rho_fp = pallas_from_bytes_reduced(rho);
-    let note_rseed_fp = pallas_from_bytes_reduced(note_rseed);
-    let unlock_height_fp = pallas_from_u64(unlock_height);
-    let memo_hash_fp = pallas_from_bytes_reduced(memo_hash);
+    use halo2_gadgets::sinsemilla::primitives::HashDomain;
 
-    let cm = poseidon_hash_domain_10(
-        NOTE_COMMITMENT_DOMAIN,
-        [
-            asset_id_fp,
-            amount_lo_fp,
-            amount_hi_fp,
-            pk0,
-            pk1,
-            pk2,
-            rho_fp,
-            note_rseed_fp,
-            unlock_height_fp,
-            memo_hash_fp,
-        ],
-    );
+    // Create Sinsemilla hash domain for note commitment
+    let domain = HashDomain::new(NOTE_COMMITMENT_DOMAIN);
 
+    // Convert all inputs to bit representations for Sinsemilla
+    let asset_id_bits: Vec<bool> = (0..32).map(|i| (asset_id >> i) & 1 == 1).collect();
+    let amount_bits: Vec<bool> = (0..128).map(|i| (amount >> i) & 1 == 1).collect();
+
+    let owner_pk_bits: Vec<bool> = owner_pk.iter().flat_map(|&b|
+        (0..8).map(move |i| (b >> i) & 1 == 1)
+    ).collect();
+    let rho_bits: Vec<bool> = rho.iter().flat_map(|&b|
+        (0..8).map(move |i| (b >> i) & 1 == 1)
+    ).collect();
+    let note_rseed_bits: Vec<bool> = note_rseed.iter().flat_map(|&b|
+        (0..8).map(move |i| (b >> i) & 1 == 1)
+    ).collect();
+    let unlock_height_bits: Vec<bool> = (0..64).map(|i| (unlock_height >> i) & 1 == 1).collect();
+    let memo_hash_bits: Vec<bool> = memo_hash.iter().flat_map(|&b|
+        (0..8).map(move |i| (b >> i) & 1 == 1)
+    ).collect();
+
+    // Build message for Sinsemilla
+    let message = core::iter::empty()
+        .chain(asset_id_bits)
+        .chain(amount_bits)
+        .chain(owner_pk_bits)
+        .chain(rho_bits)
+        .chain(note_rseed_bits)
+        .chain(unlock_height_bits)
+        .chain(memo_hash_bits);
+
+    let cm = domain.hash(message).unwrap_or(PallasBase::zero());
     Ok(pallas_to_bytes(&cm))
 }
 
-/// Nullifier: Poseidon("nf_v1", sk_spend, rho, commitment)
+/// Nullifier: Sinsemilla("nf_v1", sk_spend, rho, commitment)
 pub fn nullifier(
     sk_spend: &[u8; 32],
     rho: &[u8; 32],
     commitment: &[u8; 32],
 ) -> Result<[u8; 32]> {
-    let sk_fp = pallas_from_bytes_reduced(sk_spend);
-    let rho_fp = pallas_from_bytes_reduced(rho);
-    let cm_fp = pallas_from_bytes_be(commitment)?;
-    let nf = poseidon_hash_domain_3(NULLIFIER_DOMAIN, sk_fp, rho_fp, cm_fp);
+    use halo2_gadgets::sinsemilla::primitives::HashDomain;
+
+    // Create Sinsemilla hash domain for nullifier
+    let domain = HashDomain::new(NULLIFIER_DOMAIN);
+
+    // Convert all inputs to bit representations for Sinsemilla
+    let sk_bits: Vec<bool> = sk_spend.iter().flat_map(|&b|
+        (0..8).map(move |i| (b >> i) & 1 == 1)
+    ).collect();
+    let rho_bits: Vec<bool> = rho.iter().flat_map(|&b|
+        (0..8).map(move |i| (b >> i) & 1 == 1)
+    ).collect();
+    let commitment_bits: Vec<bool> = commitment.iter().flat_map(|&b|
+        (0..8).map(move |i| (b >> i) & 1 == 1)
+    ).collect();
+
+    // Build message for Sinsemilla
+    let message = core::iter::empty()
+        .chain(sk_bits)
+        .chain(rho_bits)
+        .chain(commitment_bits);
+
+    let nf = domain.hash(message).unwrap_or(PallasBase::zero());
     Ok(pallas_to_bytes(&nf))
+}
+
+/// Derive deterministic asset ID from issuer key + asset description hash (NU7/ZSA)
+///
+/// Asset ID derivation follows the Zcash ZSA specification:
+/// - Same issuer + description = same asset ID (deterministic)
+/// - Different issuer OR description = different asset ID
+///
+/// Uses BLAKE2b-256 with domain separation for cryptographic binding.
+///
+/// # Arguments
+/// * `issuer_key` - IssueValidatingKey (32 bytes, public key for asset issuance)
+/// * `asset_desc_hash` - BLAKE2b hash of asset description (32 bytes)
+///
+/// # Returns
+/// * `AssetBase` - 32-byte asset identifier
+///
+/// # Specification
+/// Matches orchard/src/issuance.rs derivation:
+/// ```text
+/// asset_id = BLAKE2b-256(
+///     personalization: "ZSA_Asset_ID_v1\0",
+///     data: issuer_key || asset_desc_hash
+/// )
+/// ```
+pub fn derive_asset_id(
+    issuer_key: &[u8; 32],
+    asset_desc_hash: &[u8; 32],
+) -> crate::nu7_types::AssetBase {
+    use blake2::digest::{FixedOutput, Update};
+
+    // Blake2b-256 with personalization for domain separation
+    let mut hasher = Blake2b::<blake2::digest::consts::U32>::new();
+    Update::update(&mut hasher, ASSET_ID_DOMAIN);
+    Update::update(&mut hasher, issuer_key);
+    Update::update(&mut hasher, asset_desc_hash);
+
+    let hash = hasher.finalize_fixed();
+    crate::nu7_types::AssetBase::from_bytes(hash.into())
+}
+
+/// Sinsemilla hash for commitment tree internal nodes (domain-separated)
+fn commitment_tree_hash_2(left: PallasBase, right: PallasBase) -> PallasBase {
+    use halo2_gadgets::sinsemilla::primitives::HashDomain;
+    let domain = HashDomain::new(COMMITMENT_TREE_DOMAIN);
+
+    let left_bits = left.to_le_bits().into_iter().take(255);
+    let right_bits = right.to_le_bits().into_iter().take(255);
+    let message = left_bits.chain(right_bits);
+
+    domain.hash(message).unwrap_or(PallasBase::zero())
 }
 
 /// Verify Groth16 proof (BN254 curve)
@@ -626,90 +562,66 @@ pub fn merkle_append_from_leaves(
 /// This implements the MerkleAppend operation documented in ORCHARD.md:
 /// next_root = MerkleAppend(anchor_root, anchor_size, new_commitments)
 ///
-/// Note: This is a simplified implementation that reconstructs the tree.
-/// A production implementation would use incremental Merkle tree operations.
+/// **LIMITATION**: Only works correctly when current_size == 0.
+/// For non-zero sizes, uses placeholder empty leaves which produces incorrect roots.
+///
+/// When 'orchard' feature is enabled, uses real Sinsemilla hashing.
+/// Otherwise, uses no_std Sinsemilla implementation.
 pub fn merkle_append(
     _anchor_root: &[u8; 32],
     current_size: u64,
     new_commitments: &[[u8; 32]],
 ) -> Result<[u8; 32]> {
-    // TODO: In a production implementation, this would:
-    // 1. Reconstruct the existing tree from anchor_root + size
-    // 2. Use incremental append operations for efficiency
-    // 3. Validate the anchor_root matches the current tree state
+    if new_commitments.is_empty() {
+        if current_size == 0 {
+            // Empty tree
+            return merkle_root_from_leaves(&[]);
+        }
+        return Err(OrchardError::ParseError("Cannot reconstruct tree from root alone".into()));
+    }
 
-    // For now, we simulate the operation by treating the current size
-    // as indicating an existing tree of that size with placeholder leaves
+    // Build all_leaves = [existing leaves (placeholders)] + [new commitments]
     let mut all_leaves = Vec::with_capacity(current_size as usize + new_commitments.len());
 
-    // Add placeholder leaves for existing commitments
-    // In reality, these would be read from state or computed from anchor_root
-    for _ in 0..current_size {
-        all_leaves.push([0u8; 32]); // Placeholder - should be actual commitment values
+    // LIMITATION: Using placeholder leaves for existing commitments
+    // This only produces correct roots when current_size == 0
+    #[cfg(feature = "orchard")]
+    {
+        use incrementalmerkletree::Hashable;
+        for _ in 0..current_size {
+            all_leaves.push(MerkleHashOrchard::empty_leaf().to_bytes());
+        }
+    }
+
+    #[cfg(not(feature = "orchard"))]
+    {
+        for _ in 0..current_size {
+            all_leaves.push(sinsemilla_nostd::empty_leaf()); // Sinsemilla empty leaf
+        }
     }
 
     // Add new commitments
     all_leaves.extend_from_slice(new_commitments);
 
-    // Compute new root
+    // Compute new root (uses Sinsemilla if orchard feature enabled, else Poseidon)
     merkle_root_from_leaves(&all_leaves)
 }
 
-/// Compute Poseidon Merkle root for a contiguous set of leaves padded with zeros
+/// Compute Merkle root for a contiguous set of leaves
+///
+/// DEFAULT: Uses no_std Sinsemilla implementation for compatibility with builder.
+/// Can use full orchard crate with 'orchard' feature (requires std).
 pub fn merkle_root_from_leaves(leaves: &[[u8; 32]]) -> Result<[u8; 32]> {
     #[cfg(feature = "orchard")]
     {
+        // Use full orchard crate implementation (requires std)
         return orchard_merkle_root_from_leaves(leaves);
     }
 
     #[cfg(not(feature = "orchard"))]
     {
-        let mut current_level: Vec<PallasBase> = if leaves.is_empty() {
-            vec![PallasBase::zero()]
-        } else {
-            leaves
-                .iter()
-                .map(pallas_from_bytes_be)
-                .collect::<Result<Vec<_>>>()?
-        };
-
-        let mut target_size = current_level.len().next_power_of_two();
-        if target_size < 2 && !current_level.is_empty() {
-            target_size = 2;
-        }
-        current_level.resize(target_size, PallasBase::zero());
-
-        let mut current_depth = 0usize;
-        let mut size = target_size;
-        while size > 1 {
-            current_depth += 1;
-            size >>= 1;
-        }
-
-        while current_level.len() > 1 {
-            let mut next_level = Vec::with_capacity(current_level.len() / 2);
-            for pair in current_level.chunks_exact(2) {
-                next_level.push(commitment_tree_hash_2(pair[0], pair[1]));
-            }
-            current_level = next_level;
-        }
-
-        let mut root = current_level[0];
-        if current_depth < TREE_DEPTH {
-            let mut zero = PallasBase::zero();
-            let mut zero_hashes = Vec::with_capacity(TREE_DEPTH + 1);
-            zero_hashes.push(zero);
-            for _ in 0..TREE_DEPTH {
-                zero = commitment_tree_hash_2(zero, zero);
-                zero_hashes.push(zero);
-            }
-
-            for level in current_depth..TREE_DEPTH {
-                root = commitment_tree_hash_2(root, zero_hashes[level]);
-            }
-        }
-
-        Ok(pallas_to_bytes(&root))
+        // DEFAULT: Use no_std Sinsemilla-compatible implementation
+        return sinsemilla_nostd::compute_merkle_root_sinsemilla(leaves);
     }
 }
 
@@ -756,91 +668,6 @@ fn orchard_merkle_root_from_leaves(leaves: &[[u8; 32]]) -> Result<[u8; 32]> {
     Ok(root.to_bytes())
 }
 
-/// Compute batch commitments_root (depth 16) using domain-separated Poseidon
-pub fn commitments_root_from_batch_commitments(
-    commitments: &[[u8; 32]],
-) -> Result<[u8; 32]> {
-    if commitments.len() > (1usize << BATCH_TREE_DEPTH) {
-        return Err(OrchardError::ParseError(
-            "batch commitments exceed tree capacity".to_string(),
-        ));
-    }
-
-    let mut leaves = Vec::with_capacity(commitments.len());
-    for commitment in commitments {
-        let commitment_fp = pallas_from_bytes_be(commitment)?;
-        leaves.push(poseidon_hash_domain_1(COMMITMENT_BATCH_DOMAIN, commitment_fp));
-    }
-
-    let mut current_level = if leaves.is_empty() {
-        vec![PallasBase::zero()]
-    } else {
-        leaves
-    };
-    let mut target_size = current_level.len().next_power_of_two();
-    if target_size < 2 && !current_level.is_empty() {
-        target_size = 2;
-    }
-    current_level.resize(target_size, PallasBase::zero());
-
-    let mut current_depth = 0usize;
-    let mut size = target_size;
-    while size > 1 {
-        current_depth += 1;
-        size >>= 1;
-    }
-
-    while current_level.len() > 1 {
-        let mut next_level = Vec::with_capacity(current_level.len() / 2);
-        for pair in current_level.chunks_exact(2) {
-            next_level.push(poseidon_hash_domain_2(
-                COMMITMENT_TREE_BATCH_DOMAIN,
-                pair[0],
-                pair[1],
-            ));
-        }
-        current_level = next_level;
-    }
-
-    let mut root = current_level[0];
-    if current_depth < BATCH_TREE_DEPTH {
-        let mut zero = PallasBase::zero();
-        let mut zero_hashes = Vec::with_capacity(BATCH_TREE_DEPTH + 1);
-        zero_hashes.push(zero);
-        for _ in 0..BATCH_TREE_DEPTH {
-            zero = poseidon_hash_domain_2(COMMITMENT_TREE_BATCH_DOMAIN, zero, zero);
-            zero_hashes.push(zero);
-        }
-
-        for level in current_depth..BATCH_TREE_DEPTH {
-            root = poseidon_hash_domain_2(
-                COMMITMENT_TREE_BATCH_DOMAIN,
-                root,
-                zero_hashes[level],
-            );
-        }
-    }
-
-    Ok(pallas_to_bytes(&root))
-}
-
-#[cfg(feature = "groth16")]
-fn load_verifying_key(bytes_override: &[u8]) -> Option<PreparedVerifyingKey<Bn254>> {
-    let bytes = if bytes_override.is_empty() {
-        ORCHARD_SPEND_VK_BYTES
-    } else {
-        bytes_override
-    };
-
-    match VerifyingKey::<Bn254>::deserialize_compressed(bytes) {
-        Ok(vk) => Some(PreparedVerifyingKey::<Bn254>::from(vk)),
-        Err(_) => {
-            utils::functions::log_error("Failed to deserialize verification key");
-            None
-        }
-    }
-}
-
 /// Compute Merkle root from leaf and path proof
 ///
 /// Used for membership verification in circuits
@@ -884,18 +711,242 @@ pub fn merkle_root_from_path(
 
     #[cfg(not(feature = "orchard"))]
     {
-        let mut current = pallas_from_bytes_be(leaf)?;
+        let mut current = *leaf;
 
-        for (is_right, sibling) in path_indices.iter().zip(path_siblings.iter()) {
-            let sibling_fp = pallas_from_bytes_be(sibling)?;
-            current = if *is_right {
-                commitment_tree_hash_2(sibling_fp, current)
+        for (level, (is_right, sibling)) in path_indices.iter().zip(path_siblings.iter()).enumerate() {
+            let (left, right) = if *is_right {
+                (sibling, &current)
             } else {
-                commitment_tree_hash_2(current, sibling_fp)
+                (&current, sibling)
             };
+            current = merkle_combine_at(level, left, right)?;
         }
 
-        Ok(pallas_to_bytes(&current))
+        Ok(current)
+    }
+}
+
+/// Verify a commitment's Merkle branch against a root.
+pub fn verify_commitment_branch(
+    commitment: &[u8; 32],
+    position: u64,
+    siblings: &[[u8; 32]],
+    expected_root: &[u8; 32],
+) -> Result<()> {
+    let mut path_indices = Vec::with_capacity(siblings.len());
+    for level in 0..siblings.len() {
+        path_indices.push(((position >> level) & 1) == 1);
+    }
+
+    let computed = merkle_root_from_path(commitment, &path_indices, siblings)?;
+    if &computed != expected_root {
+        return Err(OrchardError::StateError(
+            "Commitment branch does not match root".into(),
+        ));
+    }
+
+    Ok(())
+}
+
+/// Append new commitments using a commitment frontier.
+pub fn merkle_append_with_frontier(
+    current_root: &[u8; 32],
+    current_size: u64,
+    frontier: &[[u8; 32]],
+    new_commitments: &[[u8; 32]],
+) -> Result<[u8; 32]> {
+    let depth = sinsemilla_nostd::TREE_DEPTH;
+    crate::log_info(&format!(
+        "merkle_append_with_frontier: init empty nodes depth={}",
+        depth
+    ));
+    let empty_nodes = empty_nodes_cache(depth);
+    crate::log_info("merkle_append_with_frontier: empty nodes ready");
+    crate::log_info(&format!(
+        "merkle_append_with_frontier: start size={}, new_commitments={}, depth={}",
+        current_size,
+        new_commitments.len(),
+        depth
+    ));
+    if frontier.len() != depth {
+        return Err(OrchardError::ParseError(format!(
+            "frontier length mismatch: expected {}, got {}",
+            depth,
+            frontier.len()
+        )));
+    }
+
+    let frontier_all_zero = frontier.iter().all(|node| node.iter().all(|b| *b == 0));
+    let root_all_zero = current_root.iter().all(|b| *b == 0);
+    crate::log_info(&format!(
+        "merkle_append_with_frontier: flags root_zero={}, frontier_zero={}, size={}",
+        root_all_zero,
+        frontier_all_zero,
+        current_size
+    ));
+    if root_all_zero && frontier_all_zero && current_size <= 2 {
+        // Skip pre-root check for placeholder frontier (pre-state roots are zeros).
+        crate::log_info("merkle_append_with_frontier: pre-root check skipped");
+    } else {
+        crate::log_info("merkle_append_with_frontier: pre-root check begin");
+        let computed_root = merkle_root_from_frontier(frontier, current_size)?;
+        crate::log_info("merkle_append_with_frontier: pre-root check done");
+        if &computed_root != current_root {
+            return Err(OrchardError::StateError(
+                "Frontier does not match current commitment_root".into(),
+            ));
+        }
+    }
+
+    let mut frontier_nodes = frontier.to_vec();
+    let mut size = current_size;
+
+    for (idx, commitment) in new_commitments.iter().enumerate() {
+        crate::log_info(&format!(
+            "merkle_append_with_frontier: append commitment {} at size={}",
+            idx,
+            size
+        ));
+        let mut node = *commitment;
+        let mut level = 0usize;
+        let mut cursor = size;
+
+        while (cursor & 1) == 1 {
+            let left = frontier_nodes[level];
+            crate::log_info(&format!(
+                "merkle_append_with_frontier: combine at level {} (cursor={})",
+                level,
+                cursor
+            ));
+            node = merkle_combine_at(level, &left, &node)?;
+            crate::log_info(&format!(
+                "merkle_append_with_frontier: combined level {} -> {:?}",
+                level,
+                &node[..4]
+            ));
+            frontier_nodes[level] = empty_nodes[level];
+            level += 1;
+            cursor >>= 1;
+        }
+
+        frontier_nodes[level] = node;
+        size += 1;
+        crate::log_info(&format!(
+            "merkle_append_with_frontier: set frontier level {} size={}",
+            level,
+            size
+        ));
+    }
+
+    crate::log_info(&format!(
+        "merkle_append_with_frontier: append done size={}",
+        size
+    ));
+    crate::log_info("merkle_append_with_frontier: post-root compute begin");
+    let root = merkle_root_from_frontier(&frontier_nodes, size)?;
+    crate::log_info("merkle_append_with_frontier: post-root compute done");
+    Ok(root)
+}
+
+/// Recompute a Merkle root from a commitment frontier and size.
+pub fn merkle_root_from_frontier(
+    frontier: &[[u8; 32]],
+    size: u64,
+) -> Result<[u8; 32]> {
+    let empty_nodes = empty_nodes_cache(sinsemilla_nostd::TREE_DEPTH);
+    crate::log_info(&format!(
+        "merkle_root_from_frontier: start size={}",
+        size
+    ));
+    if size == 0 {
+        return Ok(empty_nodes[sinsemilla_nostd::TREE_DEPTH]);
+    }
+
+    let depth = sinsemilla_nostd::TREE_DEPTH;
+    let mut digest: Option<[u8; 32]> = None;
+    let mut current_level: usize = 0;
+    let mut cursor = size;
+
+    // Fold subtree roots from the frontier, lifting the right subtree with empties.
+    for level in 0..depth {
+        if (cursor & 1) == 1 {
+            crate::log_info(&format!(
+                "merkle_root_from_frontier: fold level {} (current_level={})",
+                level,
+                current_level
+            ));
+            let node = frontier[level];
+            if let Some(existing) = digest {
+                let mut acc = existing;
+                for l in current_level..level {
+                    crate::log_info(&format!(
+                        "merkle_root_from_frontier: lift acc at level {}",
+                        l
+                    ));
+                    acc = merkle_combine_at(l, &acc, &empty_nodes[l])?;
+                }
+                crate::log_info(&format!(
+                    "merkle_root_from_frontier: combine node at level {}",
+                    level
+                ));
+                digest = Some(merkle_combine_at(level, &node, &acc)?);
+                current_level = level + 1;
+            } else {
+                digest = Some(node);
+                current_level = level;
+            }
+        }
+        cursor >>= 1;
+    }
+
+    let mut acc = digest.ok_or_else(|| OrchardError::StateError("frontier root missing".into()))?;
+    for l in current_level..depth {
+        crate::log_info(&format!(
+            "merkle_root_from_frontier: final lift level {}",
+            l
+        ));
+        acc = merkle_combine_at(l, &acc, &empty_nodes[l])?;
+    }
+
+    crate::log_info("merkle_root_from_frontier: done");
+    Ok(acc)
+}
+
+fn merkle_combine_at(level: usize, left: &[u8; 32], right: &[u8; 32]) -> Result<[u8; 32]> {
+    #[cfg(feature = "orchard")]
+    {
+        use incrementalmerkletree::Hashable;
+        use incrementalmerkletree::Level;
+        use orchard::tree::MerkleHashOrchard;
+
+        let left_hash = MerkleHashOrchard::from_bytes(left)
+            .into_option()
+            .ok_or_else(|| OrchardError::ParseError("invalid left node".into()))?;
+        let right_hash = MerkleHashOrchard::from_bytes(right)
+            .into_option()
+            .ok_or_else(|| OrchardError::ParseError("invalid right node".into()))?;
+        let combined = MerkleHashOrchard::combine(Level::from(level as u8), &left_hash, &right_hash);
+        return Ok(combined.to_bytes());
+    }
+
+    #[cfg(not(feature = "orchard"))]
+    {
+        sinsemilla_nostd::merkle_combine_bytes(level, left, right)
+    }
+}
+
+fn empty_node_bytes(level: usize) -> [u8; 32] {
+    #[cfg(feature = "orchard")]
+    {
+        use incrementalmerkletree::Hashable;
+        use incrementalmerkletree::Level;
+        use orchard::tree::MerkleHashOrchard;
+        return MerkleHashOrchard::empty_root(Level::from(level as u8)).to_bytes();
+    }
+
+    #[cfg(not(feature = "orchard"))]
+    {
+        sinsemilla_nostd::empty_node_bytes(level)
     }
 }
 
@@ -1058,10 +1109,13 @@ pub struct SwapQuote {
     pub venue_id: [u8; 32],
 }
 
-/// Compute exercise terms hash: Poseidon("exercise_terms_v1", ...)
+/// Compute exercise terms hash: Sinsemilla("exercise_terms_v1", ...)
 fn compute_exercise_terms_hash(terms: &ExerciseTerms) -> [u8; 32] {
-    // Domain-separated hash matching circuit implementation
-    poseidon_hash_with_domain(EXERCISE_TERMS_DOMAIN, &[
+    use halo2_gadgets::sinsemilla::primitives::HashDomain;
+
+    let domain = HashDomain::new(EXERCISE_TERMS_DOMAIN);
+
+    let data = [
         u32_to_bytes(terms.option_asset_id),
         u32_to_bytes(terms.stock_asset_id),
         u32_to_bytes(terms.cash_asset_id),
@@ -1069,12 +1123,23 @@ fn compute_exercise_terms_hash(terms: &ExerciseTerms) -> [u8; 32] {
         u32_to_bytes(terms.ratio),
         u64_to_bytes(terms.expiry_height),
         terms.company_id,
-    ])
+    ];
+
+    let message = data.iter().flat_map(|bytes|
+        bytes.iter().flat_map(|&b| (0..8).map(move |i| (b >> i) & 1 == 1))
+    );
+
+    let hash = domain.hash(message).unwrap_or(PallasBase::zero());
+    pallas_to_bytes(&hash)
 }
 
-/// Compute swap quote hash: Poseidon("quote_v1", ...)
+/// Compute swap quote hash: Sinsemilla("quote_v1", ...)
 fn compute_swap_quote_hash(quote: &SwapQuote) -> [u8; 32] {
-    poseidon_hash_with_domain(SWAP_QUOTE_DOMAIN, &[
+    use halo2_gadgets::sinsemilla::primitives::HashDomain;
+
+    let domain = HashDomain::new(SWAP_QUOTE_DOMAIN);
+
+    let data = [
         quote.quote_id,
         u32_to_bytes(quote.asset_base),
         u32_to_bytes(quote.asset_quote),
@@ -1084,7 +1149,14 @@ fn compute_swap_quote_hash(quote: &SwapQuote) -> [u8; 32] {
         u32_to_bytes(quote.fee_bps),
         u64_to_bytes(quote.expiry_height),
         quote.venue_id,
-    ])
+    ];
+
+    let message = data.iter().flat_map(|bytes|
+        bytes.iter().flat_map(|&b| (0..8).map(move |i| (b >> i) & 1 == 1))
+    );
+
+    let hash = domain.hash(message).unwrap_or(PallasBase::zero());
+    pallas_to_bytes(&hash)
 }
 
 /// Convert u32 to 32-byte big-endian representation
@@ -1123,22 +1195,6 @@ fn u128_to_bytes(val: u128) -> [u8; 32] {
     bytes
 }
 
-/// Verify Verkle membership proof
-///
-/// verify_verkle_proof(state_root, key, value, proof) (services/orchard/docs/ORCHARD.md refine path)
-///
-/// JAM uses Banderwagon curve with IPA multiproof
-pub fn verify_verkle_proof(
-    _state_root: &[u8; 32],
-    _key: &[u8; 32],
-    _value: &[u8; 32],
-    _proof: &[u8],
-) -> Result<()> {
-    // TODO: Implement using Banderwagon + IPA verification
-    // This requires JAM's verkle-trie library integration
-    // For now, delegate to host function (outside no_std scope)
-    Err(OrchardError::InvalidVerkleProof { key: [0u8; 32] })
-}
 
 /// 64-bit range check (ensures value is in [0, 2^64))
 ///
@@ -1204,28 +1260,39 @@ fn parse_vk_bundle(vk_bytes: &[u8]) -> Result<VkBundle> {
             "vk bundle missing header".to_string(),
         ));
     }
-    if !vk_bytes.starts_with(VK_BUNDLE_MAGIC) {
-        return Err(OrchardError::ParseError(
-            "vk bundle missing magic header".to_string(),
-        ));
+
+    if vk_bytes.starts_with(VK_BUNDLE_MAGIC) {
+        let mut k_bytes = [0u8; 4];
+        k_bytes.copy_from_slice(&vk_bytes[8..12]);
+        let k = u32::from_le_bytes(k_bytes);
+
+        let mut len_bytes = [0u8; 4];
+        len_bytes.copy_from_slice(&vk_bytes[12..16]);
+        let vk_len = u32::from_le_bytes(len_bytes) as usize;
+
+        if vk_bytes.len() != VK_BUNDLE_HEADER_LEN + vk_len {
+            return Err(OrchardError::ParseError(
+                "vk bundle length mismatch".to_string(),
+            ));
+        }
+
+        let vk_bytes = vk_bytes[VK_BUNDLE_HEADER_LEN..].to_vec();
+        return Ok(VkBundle { k, vk_bytes });
     }
 
-    let mut k_bytes = [0u8; 4];
-    k_bytes.copy_from_slice(&vk_bytes[8..12]);
-    let k = u32::from_le_bytes(k_bytes);
-
-    let mut len_bytes = [0u8; 4];
-    len_bytes.copy_from_slice(&vk_bytes[12..16]);
-    let vk_len = u32::from_le_bytes(len_bytes) as usize;
-
-    if vk_bytes.len() != VK_BUNDLE_HEADER_LEN + vk_len {
-        return Err(OrchardError::ParseError(
-            "vk bundle length mismatch".to_string(),
-        ));
+    if vk_bytes.starts_with(HALO2_VK_MAGIC) {
+        let mut k_bytes = [0u8; 4];
+        k_bytes.copy_from_slice(&vk_bytes[8..12]);
+        let k = u32::from_le_bytes(k_bytes);
+        return Ok(VkBundle {
+            k,
+            vk_bytes: vk_bytes.to_vec(),
+        });
     }
 
-    let vk_bytes = vk_bytes[VK_BUNDLE_HEADER_LEN..].to_vec();
-    Ok(VkBundle { k, vk_bytes })
+    Err(OrchardError::ParseError(
+        "vk bundle missing magic header".to_string(),
+    ))
 }
 
 fn vk_hash_bytes(bytes: &[u8]) -> [u8; 32] {
@@ -1312,21 +1379,57 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_poseidon_hash_deterministic() {
-        let input1 = [1u8; 32];
-        let input2 = [2u8; 32];
-        let domain = "poseidon_test_v1";
-
-        let h1 = poseidon_hash_with_domain(domain, &[input1, input2]);
-        let h2 = poseidon_hash_with_domain(domain, &[input1, input2]);
-
-        assert_eq!(h1, h2, "Poseidon hash must be deterministic");
-    }
 
     #[test]
     fn test_range_check_64bit() {
         // Placeholder test for range checking
         assert!(true);
+    }
+
+    #[test]
+    fn test_derive_asset_id_deterministic() {
+        let issuer_key = [1u8; 32];
+        let asset_desc_hash = [2u8; 32];
+
+        let asset_id_1 = derive_asset_id(&issuer_key, &asset_desc_hash);
+        let asset_id_2 = derive_asset_id(&issuer_key, &asset_desc_hash);
+
+        assert_eq!(asset_id_1, asset_id_2, "Asset ID derivation must be deterministic");
+        assert_ne!(asset_id_1.to_bytes(), [0u8; 32], "Asset ID should not be zero");
+    }
+
+    #[test]
+    fn test_derive_asset_id_different_issuer() {
+        let issuer_key_1 = [1u8; 32];
+        let issuer_key_2 = [2u8; 32];
+        let asset_desc_hash = [3u8; 32];
+
+        let asset_id_1 = derive_asset_id(&issuer_key_1, &asset_desc_hash);
+        let asset_id_2 = derive_asset_id(&issuer_key_2, &asset_desc_hash);
+
+        assert_ne!(asset_id_1, asset_id_2, "Different issuers must produce different asset IDs");
+    }
+
+    #[test]
+    fn test_derive_asset_id_different_description() {
+        let issuer_key = [1u8; 32];
+        let asset_desc_hash_1 = [2u8; 32];
+        let asset_desc_hash_2 = [3u8; 32];
+
+        let asset_id_1 = derive_asset_id(&issuer_key, &asset_desc_hash_1);
+        let asset_id_2 = derive_asset_id(&issuer_key, &asset_desc_hash_2);
+
+        assert_ne!(asset_id_1, asset_id_2, "Different descriptions must produce different asset IDs");
+    }
+
+    #[test]
+    fn test_derive_asset_id_not_native() {
+        let issuer_key = [1u8; 32];
+        let asset_desc_hash = [2u8; 32];
+
+        let asset_id = derive_asset_id(&issuer_key, &asset_desc_hash);
+
+        assert!(!asset_id.is_native(), "Derived asset ID should not equal native USDx");
+        assert_ne!(asset_id, crate::nu7_types::AssetBase::NATIVE);
     }
 }

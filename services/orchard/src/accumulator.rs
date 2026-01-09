@@ -3,13 +3,15 @@
 ///
 /// Applies verified state changes and processes deferred transfers.
 
-use alloc::{vec::Vec, format};
+use alloc::{collections::BTreeSet, format, string::String, vec::Vec};
 use crate::errors::{OrchardError, Result};
 use crate::objects::ObjectKind;
 use crate::crypto::{commitment, merkle_append_from_leaves, merkle_root_from_leaves};
+use crate::state::OrchardServiceState;
 use utils::effects::WriteIntent;
 use crate::refiner::RefineOutput;
 use utils::functions::{log_info, log_error, AccumulateArgs, AccumulateInput, DeferredTransfer};
+use utils::host_functions as hf;
 use core::convert::TryInto;
 
 /// Memo v1 layout: [version=0x01 | pk(32) | rho(32) | reserved(63)]
@@ -32,19 +34,16 @@ pub fn process_accumulate(
     ));
     let _ = args;
 
-    // Fetch current state for deposit validation
-    let (commitment_root_bytes, _) = fetch_state_value(service_id, b"commitment_root")?;
-    let mut commitment_root = to_array32(&commitment_root_bytes)?;
-    let (commitment_size_bytes, _) = fetch_state_value(service_id, b"commitment_size")?;
-    let mut commitment_size = u64::from_le_bytes(
-        commitment_size_bytes[..8].try_into()
-            .map_err(|_| OrchardError::ParseError("Invalid commitment_size".into()))?
-    );
-    let mut commitments = collect_commitments(service_id, commitment_size)?;
+    // Fetch consolidated state (152 bytes: commitment + nullifier + transparent)
+    let (state_bytes, _) = fetch_state_value(service_id, b"orchard_state")?;
+    let mut state = OrchardServiceState::from_bytes(&state_bytes)?;
+
+    // Verify commitment tree integrity
+    let mut commitments = collect_commitments(service_id, state.commitment_size)?;
     let computed_root = merkle_root_from_leaves(&commitments)?;
-    if computed_root != commitment_root {
+    if computed_root != state.commitment_root {
         return Err(OrchardError::AnchorMismatch {
-            expected: commitment_root,
+            expected: state.commitment_root,
             got: computed_root,
         });
     }
@@ -66,7 +65,7 @@ pub fn process_accumulate(
 
     log_info(&format!(
         "State: root={:?}, size={}, gas=[{}, {}]",
-        &commitment_root[..8], commitment_size, gas_min, gas_max
+        &state.commitment_root[..8], state.commitment_size, gas_min, gas_max
     ));
 
     // Process inputs
@@ -81,7 +80,7 @@ pub fn process_accumulate(
                 ));
 
                 // Process deposit (DepositPublic flow in services/orchard/docs/ORCHARD.md)
-                commitment_root = process_deposit(
+                state.commitment_root = process_deposit(
                     service_id,
                     transfer,
                     &mut commitments,
@@ -89,7 +88,7 @@ pub fn process_accumulate(
                     gas_max,
                 )?;
 
-                commitment_size = commitments.len() as u64;
+                state.commitment_size = commitments.len() as u64;
             }
             AccumulateInput::OperandElements(elements) => {
                 // Apply write intents from refine result (if present)
@@ -98,14 +97,9 @@ pub fn process_accumulate(
                     apply_write_intents(service_id, &write_intents)?;
 
                     // Refresh local view after applying intents
-                    let (root_bytes, _) = fetch_state_value(service_id, b"commitment_root")?;
-                    commitment_root = to_array32(&root_bytes)?;
-                    let (size_bytes, _) = fetch_state_value(service_id, b"commitment_size")?;
-                    commitment_size = u64::from_le_bytes(
-                        size_bytes[..8].try_into()
-                            .map_err(|_| OrchardError::ParseError("Invalid commitment_size".into()))?
-                    );
-                    commitments = collect_commitments(service_id, commitment_size)?;
+                    let (state_bytes, _) = fetch_state_value(service_id, b"orchard_state")?;
+                    state = OrchardServiceState::from_bytes(&state_bytes)?;
+                    commitments = collect_commitments(service_id, state.commitment_size)?;
                 } else {
                     log_error("OperandElements missing ok payload; skipping");
                 }
@@ -113,17 +107,13 @@ pub fn process_accumulate(
         }
     }
 
-    // Update commitment_size in state
-    write_state_value(
-        service_id,
-        b"commitment_size",
-        &commitment_size.to_le_bytes(),
-    )?;
+    // Update consolidated state in JAM
+    write_state_value(service_id, b"orchard_state", &state.to_bytes())?;
 
     log_info(&format!(
         "Accumulate processing completed: commitment_root={:?}, commitment_size={}",
-        &commitment_root[..8],
-        commitment_size
+        &state.commitment_root[..8],
+        state.commitment_size
     ));
     Ok(())
 }
@@ -132,7 +122,7 @@ pub fn process_accumulate(
 ///
 /// DepositPublic accumulate flow (services/orchard/docs/ORCHARD.md §1):
 /// 1. Enforce gas bounds
-/// 2. Parse memo v1: [version | pk | rho | reserved]
+/// 2. Parse memo v1/v2: [version | pk | rho | reserved], v2 can optionally carry a commitment
 /// 3. Compute commitment_expected = Com(amount, pk, rho)
 /// 4. Verify value binding (commitment from memo must match)
 /// 5. Check tree capacity
@@ -170,13 +160,14 @@ fn process_deposit(
     }
 
     // Parse based on version
-    let (asset_id, pk, rho) = if memo_version == 0x02 {
+    let (asset_id, pk, rho, memo_commitment) = if memo_version == 0x02 {
         // Memo v2 (Phase 6 multi-asset):
         // [0]: version = 0x02
         // [1..5]: asset_id (u32)
         // [5..37]: pk (32 bytes)
         // [37..69]: rho (32 bytes)
-        // [69..128]: reserved (59 bytes)
+        // [69..101]: optional commitment (32 bytes, zero = not provided)
+        // [101..128]: reserved (27 bytes, must be zero)
 
         let asset_id = u32::from_le_bytes([memo[1], memo[2], memo[3], memo[4]]);
 
@@ -186,16 +177,21 @@ fn process_deposit(
         let mut rho = [0u8; 32];
         rho.copy_from_slice(&memo[37..69]);
 
-        // Check reserved bytes are zero (bytes 69..128)
-        for &byte in &memo[69..128] {
-            if byte != 0 {
+        let reserved = &memo[69..128];
+        let mut memo_commitment = None;
+        if reserved.iter().any(|&byte| byte != 0) {
+            let (commitment_bytes, tail) = reserved.split_at(32);
+            if tail.iter().any(|&byte| byte != 0) {
                 return Err(OrchardError::ParseError(
-                    "Reserved memo bytes must be zero in v2".into()
+                    "Reserved memo bytes must be zero after commitment".into(),
                 ));
             }
+            let mut commitment = [0u8; 32];
+            commitment.copy_from_slice(commitment_bytes);
+            memo_commitment = Some(commitment);
         }
 
-        (asset_id, pk, rho)
+        (asset_id, pk, rho, memo_commitment)
     } else {
         // Memo v1 (backward compatibility):
         // [0]: version = 0x01
@@ -219,7 +215,7 @@ fn process_deposit(
         }
 
         // Default to CASH for v1 memos (backward compat)
-        (1u32, pk, rho)
+        (1u32, pk, rho, None)
     };
 
     // Step 3: Compute commitment_expected (DepositPublic spec)
@@ -242,9 +238,13 @@ fn process_deposit(
     ));
 
     // Step 4: Value binding check (DepositPublic spec)
-    // Note: In a real implementation, the memo would also contain the commitment
-    // For now, we trust the computed commitment is correct
-    // TODO: Parse commitment from memo and verify equality
+    if let Some(commitment) = memo_commitment {
+        if commitment != commitment_expected {
+            return Err(OrchardError::ParseError(
+                "Deposit memo commitment mismatch".into(),
+            ));
+        }
+    }
 
     // Step 5: Check tree capacity (DepositPublic spec)
     const TREE_CAPACITY: u64 = 1u64 << 32;
@@ -265,9 +265,6 @@ fn process_deposit(
     // Write commitment to storage
     let commitment_key = format!("commitment_{}", commitment_size);
     write_state_value(service_id, commitment_key.as_bytes(), &commitment_expected)?;
-
-    // Write new root
-    write_state_value(service_id, b"commitment_root", &new_root)?;
 
     log_info(&format!(
         "Inserted commitment at position {}, new root: {:?}",
@@ -301,6 +298,8 @@ fn apply_write_intents(service_id: u32, intents: &[WriteIntent]) -> Result<()> {
 
     log_info(&format!("Applying {} write intents", intents.len()));
 
+    let mut fee_transfer_total: u64 = 0;
+
     //  Process intents by object_kind
     for (idx, intent) in intents.iter().enumerate() {
         let kind = ObjectKind::from_u8(intent.effect.ref_info.object_kind);
@@ -328,23 +327,24 @@ fn apply_write_intents(service_id: u32, intents: &[WriteIntent]) -> Result<()> {
                 }
 
                 // Read current commitment tree state
-                let (size_bytes, _) = fetch_state_value(service_id, b"commitment_size")?;
-                let commitment_size = u64::from_le_bytes(size_bytes[..8].try_into().unwrap());
+                let (state_bytes, _) = fetch_state_value(service_id, b"orchard_state")?;
+                let mut state = OrchardServiceState::from_bytes(&state_bytes)?;
 
                 // Collect existing commitments
-                let mut commitments = collect_commitments(service_id, commitment_size)?;
+                let mut commitments = collect_commitments(service_id, state.commitment_size)?;
 
                 // Add new commitment
                 commitments.push(commitment);
                 let new_root = merkle_root_from_leaves(&commitments)?;
                 let new_size = commitments.len() as u64;
 
-                // Write updated state
-                write_state_value(service_id, b"commitment_root", &new_root)?;
-                write_state_value(service_id, b"commitment_size", &new_size.to_le_bytes())?;
+                // Update consolidated state
+                state.commitment_root = new_root;
+                state.commitment_size = new_size;
+                write_state_value(service_id, b"orchard_state", &state.to_bytes())?;
 
                 // Write the commitment itself
-                let commitment_key = format!("commitment_{}", commitment_size);
+                let commitment_key = format!("commitment_{}", state.commitment_size - 1);
                 write_state_value(service_id, commitment_key.as_bytes(), &commitment)?;
 
                 // Phase 7: Supply tracking for deposits (transparent → shielded)
@@ -372,7 +372,7 @@ fn apply_write_intents(service_id: u32, intents: &[WriteIntent]) -> Result<()> {
                 write_state_value(service_id, key, value)?;
             }
 
-            Some(ObjectKind::StateWrite) | Some(ObjectKind::FeeTally) | Some(ObjectKind::DeltaWrite) => {
+            Some(ObjectKind::StateWrite) | Some(ObjectKind::DeltaWrite) => {
                 // Generic state write with embedded key: [key_len:2][key][value]
                 if intent.effect.payload.len() < 2 {
                     return Err(OrchardError::ParseError("StateWrite data too short".into()));
@@ -383,6 +383,109 @@ fn apply_write_intents(service_id: u32, intents: &[WriteIntent]) -> Result<()> {
                 }
                 let key = &intent.effect.payload[2..2 + key_len];
                 let value = &intent.effect.payload[2 + key_len..];
+
+                if key == b"commitment_root" {
+                    let (old_root, new_root) = parse_transition_root(value, "commitment_root")?;
+                    let (state_bytes, _) = fetch_state_value(service_id, b"orchard_state")?;
+                    let mut state = OrchardServiceState::from_bytes(&state_bytes)?;
+                    if state.commitment_root != old_root {
+                        return Err(OrchardError::StateError(
+                            "commitment_root transition mismatch".into()
+                        ));
+                    }
+                    state.commitment_root = new_root;
+                    write_state_value(service_id, b"orchard_state", &state.to_bytes())?;
+                    continue;
+                }
+
+                if key == b"nullifier_root" {
+                    let (old_root, new_root) = parse_transition_root(value, "nullifier_root")?;
+                    let (state_bytes, _) = fetch_state_value(service_id, b"orchard_state")?;
+                    let mut state = OrchardServiceState::from_bytes(&state_bytes)?;
+                    if state.nullifier_root != old_root {
+                        return Err(OrchardError::StateError(
+                            "nullifier_root transition mismatch".into()
+                        ));
+                    }
+                    state.nullifier_root = new_root;
+                    write_state_value(service_id, b"orchard_state", &state.to_bytes())?;
+                    continue;
+                }
+
+                if key == b"nullifier_size" {
+                    let (old_size, new_size) = parse_transition_size(value)?;
+                    let (state_bytes, _) = fetch_state_value(service_id, b"orchard_state")?;
+                    let mut state = OrchardServiceState::from_bytes(&state_bytes)?;
+                    if state.nullifier_size != old_size {
+                        return Err(OrchardError::StateError(
+                            "nullifier_size transition mismatch".into()
+                        ));
+                    }
+                    if new_size < old_size {
+                        return Err(OrchardError::StateError(
+                            "nullifier_size must be monotonic".into()
+                        ));
+                    }
+                    state.nullifier_size = new_size;
+                    write_state_value(service_id, b"orchard_state", &state.to_bytes())?;
+                    continue;
+                }
+
+                if key == b"commitment_size" {
+                    let (old_size, new_size) = parse_transition_size(value)?;
+                    let (state_bytes, _) = fetch_state_value(service_id, b"orchard_state")?;
+                    let mut state = OrchardServiceState::from_bytes(&state_bytes)?;
+                    if state.commitment_size != old_size {
+                        return Err(OrchardError::StateError(
+                            "commitment_size transition mismatch".into()
+                        ));
+                    }
+                    state.commitment_size = new_size;
+                    write_state_value(service_id, b"orchard_state", &state.to_bytes())?;
+                    continue;
+                }
+
+                if key == b"transparent_merkle_root" {
+                    let (old_root, new_root) = parse_transition_root(value, "transparent_merkle_root")?;
+                    let (state_bytes, _) = fetch_state_value(service_id, b"orchard_state")?;
+                    let mut state = OrchardServiceState::from_bytes(&state_bytes)?;
+                    if state.transparent_merkle_root != old_root {
+                        return Err(OrchardError::StateError(
+                            "transparent_merkle_root transition mismatch".into(),
+                        ));
+                    }
+                    state.transparent_merkle_root = new_root;
+                    write_state_value(service_id, b"orchard_state", &state.to_bytes())?;
+                    continue;
+                }
+
+                if key == b"transparent_utxo_root" {
+                    let (old_root, new_root) = parse_transition_root(value, "transparent_utxo_root")?;
+                    let (state_bytes, _) = fetch_state_value(service_id, b"orchard_state")?;
+                    let mut state = OrchardServiceState::from_bytes(&state_bytes)?;
+                    if state.transparent_utxo_root != old_root {
+                        return Err(OrchardError::StateError(
+                            "transparent_utxo_root transition mismatch".into(),
+                        ));
+                    }
+                    state.transparent_utxo_root = new_root;
+                    write_state_value(service_id, b"orchard_state", &state.to_bytes())?;
+                    continue;
+                }
+
+                if key == b"transparent_utxo_size" {
+                    let (old_size, new_size) = parse_transition_size(value)?;
+                    let (state_bytes, _) = fetch_state_value(service_id, b"orchard_state")?;
+                    let mut state = OrchardServiceState::from_bytes(&state_bytes)?;
+                    if state.transparent_utxo_size != old_size {
+                        return Err(OrchardError::StateError(
+                            "transparent_utxo_size transition mismatch".into(),
+                        ));
+                    }
+                    state.transparent_utxo_size = new_size;
+                    write_state_value(service_id, b"orchard_state", &state.to_bytes())?;
+                    continue;
+                }
 
                 // NEW: Process multi-asset delta writes
                 // Key format: "delta_{size}_{index}_{component}" where component is:
@@ -406,6 +509,17 @@ fn apply_write_intents(service_id: u32, intents: &[WriteIntent]) -> Result<()> {
                 log_info("Compact block data stored successfully");
             }
 
+            Some(ObjectKind::FeeTally) => {
+                let amount = parse_fee_tally_amount(&intent.effect.payload)?;
+                if amount > 0 {
+                    fee_transfer_total = fee_transfer_total.checked_add(amount).ok_or_else(|| {
+                        OrchardError::StateError("Fee transfer total overflow".into())
+                    })?;
+                } else {
+                    log_info("FeeTally amount is zero; skipping transfer");
+                }
+            }
+
             None => {
                 log_error(&format!("Unknown object_kind: {}", intent.effect.ref_info.object_kind));
                 return Err(OrchardError::ParseError("Unknown object_kind".into()));
@@ -413,7 +527,62 @@ fn apply_write_intents(service_id: u32, intents: &[WriteIntent]) -> Result<()> {
         }
     }
 
+    if fee_transfer_total > 0 {
+        execute_fee_transfer(fee_transfer_total)?;
+    }
+
     log_info("All write intents applied successfully");
+    Ok(())
+}
+
+fn parse_fee_tally_amount(payload: &[u8]) -> Result<u64> {
+    if payload.len() != 16 {
+        return Err(OrchardError::ParseError(
+            "Invalid FeeTally payload length".into(),
+        ));
+    }
+
+    let amount_u128 = u128::from_le_bytes(
+        payload
+            .try_into()
+            .map_err(|_| OrchardError::ParseError("Invalid FeeTally payload".into()))?,
+    );
+
+    if amount_u128 > u64::MAX as u128 {
+        return Err(OrchardError::ParseError(
+            "FeeTally amount exceeds u64".into(),
+        ));
+    }
+
+    Ok(amount_u128 as u64)
+}
+
+fn execute_fee_transfer(amount: u64) -> Result<()> {
+    const FEE_TRANSFER_DESTINATION: u64 = 0;
+    const FEE_TRANSFER_GAS: u64 = 10_000;
+
+    log_info(&format!(
+        "Executing fee transfer: {} units to service {}",
+        amount, FEE_TRANSFER_DESTINATION
+    ));
+
+    let memo = [0u8; MEMO_SIZE];
+    let result = unsafe {
+        hf::transfer(
+            FEE_TRANSFER_DESTINATION, // d: destination service
+            amount,                   // a: amount
+            FEE_TRANSFER_GAS,         // g: gas limit
+            memo.as_ptr() as u64,     // o: memo pointer
+        )
+    };
+
+    if result != 0 {
+        return Err(OrchardError::StateError(format!(
+            "Fee transfer failed with code: {}",
+            result
+        )));
+    }
+
     Ok(())
 }
 
@@ -698,6 +867,38 @@ fn to_array32(bytes: &[u8]) -> Result<[u8; 32]> {
     Ok(out)
 }
 
+fn parse_transition_root(value: &[u8], key: &str) -> Result<([u8; 32], [u8; 32])> {
+    if value.len() != 1 + 32 + 32 {
+        return Err(OrchardError::ParseError(
+            format!("Invalid {} transition payload", key)
+        ));
+    }
+    if value[0] != 1 {
+        return Err(OrchardError::ParseError(
+            format!("Unsupported {} transition version", key)
+        ));
+    }
+    let old_root = to_array32(&value[1..33])?;
+    let new_root = to_array32(&value[33..65])?;
+    Ok((old_root, new_root))
+}
+
+fn parse_transition_size(value: &[u8]) -> Result<(u64, u64)> {
+    if value.len() != 1 + 8 + 8 {
+        return Err(OrchardError::ParseError(
+            "Invalid commitment_size transition payload".into()
+        ));
+    }
+    if value[0] != 1 {
+        return Err(OrchardError::ParseError(
+            "Unsupported commitment_size transition version".into()
+        ));
+    }
+    let old_size = u64::from_le_bytes(value[1..9].try_into().unwrap());
+    let new_size = u64::from_le_bytes(value[9..17].try_into().unwrap());
+    Ok((old_size, new_size))
+}
+
 /// Write state value by key
 fn write_state_value(_service_id: u32, key: &[u8], value: &[u8]) -> Result<()> {
     use utils::constants::{WHAT, FULL};
@@ -955,6 +1156,8 @@ pub fn process_accumulate_witness_aware(
         RefineOutput::Guarantor { intents, .. } => intents,
     };
 
+    validate_transition_policies(&intents)?;
+
     // Apply all write intents to JAM state
     for intent in &intents {
         apply_write_intent_to_jam_state(intent, jam_state_writer)?;
@@ -965,6 +1168,141 @@ pub fn process_accumulate_witness_aware(
     validate_supply_invariants(&intents)?;
 
     Ok(())
+}
+
+fn validate_transition_policies(intents: &[WriteIntent]) -> Result<()> {
+    let mut commitment_size_transition: Option<(u64, u64)> = None;
+    let mut commitment_intents = 0usize;
+    let mut nullifier_size_transition: Option<(u64, u64)> = None;
+    let mut nullifier_intents = 0usize;
+    let mut state_write_keys: BTreeSet<String> = BTreeSet::new();
+    let mut transparent_merkle_changed: Option<bool> = None;
+    let mut transparent_utxo_root_changed: Option<bool> = None;
+    let mut transparent_utxo_size_changed: Option<bool> = None;
+
+    for intent in intents {
+        let kind = ObjectKind::from_u8(intent.effect.ref_info.object_kind);
+        if kind == Some(ObjectKind::Commitment) {
+            commitment_intents += 1;
+            continue;
+        }
+        if kind == Some(ObjectKind::Nullifier) {
+            nullifier_intents += 1;
+            continue;
+        }
+
+        if kind != Some(ObjectKind::StateWrite) {
+            continue;
+        }
+
+        if let Some((key, value)) = extract_state_write_key_value(intent)? {
+            let key_string = String::from(key);
+            if !state_write_keys.insert(key_string) {
+                return Err(OrchardError::StateError(format!(
+                    "Duplicate state transition for key {}",
+                    key
+                )));
+            }
+
+            if key == "commitment_size" {
+                if commitment_size_transition.is_some() {
+                    return Err(OrchardError::StateError(
+                        "Duplicate commitment_size transition".into(),
+                    ));
+                }
+                commitment_size_transition = Some(parse_transition_size(value)?);
+            }
+            if key == "nullifier_size" {
+                if nullifier_size_transition.is_some() {
+                    return Err(OrchardError::StateError(
+                        "Duplicate nullifier_size transition".into(),
+                    ));
+                }
+                nullifier_size_transition = Some(parse_transition_size(value)?);
+            }
+            if key == "transparent_merkle_root" {
+                let (old_root, new_root) =
+                    parse_transition_root(value, "transparent_merkle_root")?;
+                transparent_merkle_changed = Some(old_root != new_root);
+            }
+            if key == "transparent_utxo_root" {
+                let (old_root, new_root) = parse_transition_root(value, "transparent_utxo_root")?;
+                transparent_utxo_root_changed = Some(old_root != new_root);
+            }
+            if key == "transparent_utxo_size" {
+                let (old_size, new_size) = parse_transition_size(value)?;
+                transparent_utxo_size_changed = Some(old_size != new_size);
+            }
+        }
+    }
+
+    if let Some((old_size, new_size)) = commitment_size_transition {
+        if new_size < old_size {
+            return Err(OrchardError::StateError(
+                "commitment_size must be monotonic".into(),
+            ));
+        }
+        let expected = (new_size - old_size) as usize;
+        if commitment_intents != expected {
+            return Err(OrchardError::StateError(format!(
+                "commitment intent count mismatch: expected {}, got {}",
+                expected, commitment_intents
+            )));
+        }
+    } else if commitment_intents > 0 {
+        return Err(OrchardError::StateError(
+            "Missing commitment_size transition".into(),
+        ));
+    }
+
+    if let Some((old_size, new_size)) = nullifier_size_transition {
+        if new_size < old_size {
+            return Err(OrchardError::StateError(
+                "nullifier_size must be monotonic".into(),
+            ));
+        }
+        let expected = (new_size - old_size) as usize;
+        if nullifier_intents != expected {
+            return Err(OrchardError::StateError(format!(
+                "nullifier intent count mismatch: expected {}, got {}",
+                expected, nullifier_intents
+            )));
+        }
+    } else if nullifier_intents > 0 {
+        return Err(OrchardError::StateError(
+            "Missing nullifier_size transition".into(),
+        ));
+    }
+
+    let transparent_present = transparent_merkle_changed.is_some() as u8
+        + transparent_utxo_root_changed.is_some() as u8
+        + transparent_utxo_size_changed.is_some() as u8;
+    if transparent_present > 0 && transparent_present < 3 {
+        return Err(OrchardError::StateError(
+            "Transparent transitions must include merkle_root, utxo_root, and utxo_size".into(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn extract_state_write_key_value<'a>(
+    intent: &'a WriteIntent,
+) -> Result<Option<(&'a str, &'a [u8])>> {
+    let payload = &intent.effect.payload;
+    if payload.len() < 2 {
+        return Err(OrchardError::ParseError("WriteIntent payload too short".into()));
+    }
+
+    let key_len = u16::from_le_bytes([payload[0], payload[1]]) as usize;
+    if payload.len() < 2 + key_len {
+        return Err(OrchardError::ParseError("WriteIntent key truncated".into()));
+    }
+
+    let key = core::str::from_utf8(&payload[2..2 + key_len])
+        .map_err(|_| OrchardError::ParseError("Invalid UTF-8 in key".into()))?;
+    let value = &payload[2 + key_len..];
+    Ok(Some((key, value)))
 }
 
 /// Apply a WriteIntent to JAM state
@@ -987,6 +1325,116 @@ fn apply_write_intent_to_jam_state(
     let key = core::str::from_utf8(&payload[2..2 + key_len])
         .map_err(|_| OrchardError::ParseError("Invalid UTF-8 in key".into()))?;
     let value = &payload[2 + key_len..];
+
+    if key == "commitment_root" {
+        let (old_root, new_root) = parse_transition_root(value, "commitment_root")?;
+        let current = jam_state.read_state(key)?;
+        let current_root = to_array32(&current)?;
+        if current_root != old_root {
+            return Err(OrchardError::StateError(
+                "commitment_root transition mismatch".into()
+            ));
+        }
+        jam_state.write_state(key, &new_root)?;
+        return Ok(());
+    }
+
+    if key == "nullifier_root" {
+        let (old_root, new_root) = parse_transition_root(value, "nullifier_root")?;
+        let current = jam_state.read_state(key)?;
+        let current_root = to_array32(&current)?;
+        if current_root != old_root {
+            return Err(OrchardError::StateError(
+                "nullifier_root transition mismatch".into()
+            ));
+        }
+        jam_state.write_state(key, &new_root)?;
+        return Ok(());
+    }
+
+    if key == "nullifier_size" {
+        let (old_size, new_size) = parse_transition_size(value)?;
+        let current = jam_state.read_state(key)?;
+        if current.len() < 8 {
+            return Err(OrchardError::ParseError("Invalid nullifier_size".into()));
+        }
+        let current_size = u64::from_le_bytes(current[..8].try_into().unwrap());
+        if current_size != old_size {
+            return Err(OrchardError::StateError(
+                "nullifier_size transition mismatch".into()
+            ));
+        }
+        if new_size < old_size {
+            return Err(OrchardError::StateError(
+                "nullifier_size must be monotonic".into()
+            ));
+        }
+        jam_state.write_state(key, &new_size.to_le_bytes())?;
+        return Ok(());
+    }
+
+    if key == "commitment_size" {
+        let (old_size, new_size) = parse_transition_size(value)?;
+        let current = jam_state.read_state(key)?;
+        if current.len() < 8 {
+            return Err(OrchardError::ParseError("Invalid commitment_size".into()));
+        }
+        let current_size = u64::from_le_bytes(current[..8].try_into().unwrap());
+        if current_size != old_size {
+            return Err(OrchardError::StateError(
+                "commitment_size transition mismatch".into()
+            ));
+        }
+        if new_size < old_size {
+            return Err(OrchardError::StateError(
+                "commitment_size must be monotonic".into()
+            ));
+        }
+        jam_state.write_state(key, &new_size.to_le_bytes())?;
+        return Ok(());
+    }
+
+    if key == "transparent_merkle_root" {
+        let (old_root, new_root) = parse_transition_root(value, "transparent_merkle_root")?;
+        let current = jam_state.read_state(key)?;
+        let current_root = to_array32(&current)?;
+        if current_root != old_root {
+            return Err(OrchardError::StateError(
+                "transparent_merkle_root transition mismatch".into(),
+            ));
+        }
+        jam_state.write_state(key, &new_root)?;
+        return Ok(());
+    }
+
+    if key == "transparent_utxo_root" {
+        let (old_root, new_root) = parse_transition_root(value, "transparent_utxo_root")?;
+        let current = jam_state.read_state(key)?;
+        let current_root = to_array32(&current)?;
+        if current_root != old_root {
+            return Err(OrchardError::StateError(
+                "transparent_utxo_root transition mismatch".into(),
+            ));
+        }
+        jam_state.write_state(key, &new_root)?;
+        return Ok(());
+    }
+
+    if key == "transparent_utxo_size" {
+        let (old_size, new_size) = parse_transition_size(value)?;
+        let current = jam_state.read_state(key)?;
+        if current.len() < 8 {
+            return Err(OrchardError::ParseError("Invalid transparent_utxo_size".into()));
+        }
+        let current_size = u64::from_le_bytes(current[..8].try_into().unwrap());
+        if current_size != old_size {
+            return Err(OrchardError::StateError(
+                "transparent_utxo_size transition mismatch".into(),
+            ));
+        }
+        jam_state.write_state(key, &new_size.to_le_bytes())?;
+        return Ok(());
+    }
 
     jam_state.write_state(key, value)?;
     Ok(())
@@ -1017,7 +1465,7 @@ fn emit_accumulator_events(intent: &WriteIntent) -> Result<()> {
             log_info(&format!("Deposit processed: object_id={:?}", &object_id[..8]));
         }
         Some(ObjectKind::FeeTally) => {
-            log_info(&format!("Fee accumulated: object_id={:?}", &object_id[..8]));
+            log_info(&format!("FeeTally intent applied: object_id={:?}", &object_id[..8]));
         }
         Some(ObjectKind::DeltaWrite) => {
             log_info(&format!("Delta written: object_id={:?}", &object_id[..8]));

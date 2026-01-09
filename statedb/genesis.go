@@ -12,161 +12,12 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/grandpa"
 	log "github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/statedb/evmtypes"
+	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
 	storage "github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
-	"github.com/crate-crypto/go-ipa/bandersnatch/fr"
-	"github.com/crate-crypto/go-ipa/ipa"
 )
 
 const isIncludeEVM = true
-
-// Storage keys for Verkle IPA preimages
-var (
-	SRS_HASH_KEY     = [32]byte{0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE}
-	WEIGHTS_HASH_KEY = [32]byte{0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD, 0xFD}
-)
-
-// initializeVerklePreimages generates and stores SRS and barycentric weights as preimages
-// This is called during EVM service genesis initialization to cache the expensive
-// cryptographic parameters needed for Verkle proof verification.
-//
-// Gas savings: ~630M gas per verification (SRS: 264M + weights: 52M per proof × 2 proofs)
-func initializeVerklePreimages(statedb *StateDB, serviceCode uint32) error {
-	log.Info(log.SDB, "Generating Verkle IPA preimages for genesis", "service", serviceCode)
-
-	// Generate SRS (256 Bandersnatch G1 points)
-	// Uses deterministic seed "eth_verkle_oct_2021"
-	srs := ipa.GenerateRandomPoints(256)
-
-	// Serialize SRS points (256 × 32 bytes = 8KB)
-	srsBytes := make([]byte, 0, 256*32)
-	for _, point := range srs {
-		pointBytes := point.Bytes()
-		srsBytes = append(srsBytes, pointBytes[:]...)
-	}
-
-	// Generate barycentric weights (256 field elements)
-	precompWeights := ipa.NewPrecomputedWeights()
-
-	// Serialize barycentric weights
-	// Structure: 512 field elements (256 weights + 256 inverse weights)
-	// Plus: 510 inverted domain elements (254 × 2 for k and -k, k ∈ [1,255])
-	weightsBytes := serializeBarycentricWeights(precompWeights)
-
-	// Compute preimage hashes
-	srsHash := common.Blake2Hash(srsBytes)
-	weightsHash := common.Blake2Hash(weightsBytes)
-
-	log.Info(log.SDB, "Generated Verkle preimages",
-		"srs_size", len(srsBytes),
-		"weights_size", len(weightsBytes),
-		"srs_hash", srsHash.String(),
-		"weights_hash", weightsHash.String())
-
-	// Store preimages in service preimage blobs
-	statedb.WriteServicePreimageBlob(serviceCode, srsBytes)
-	statedb.WriteServicePreimageBlob(serviceCode, weightsBytes)
-
-	// Register preimage lookups (length-prefixed for historical_lookup)
-	bootStrapAnchor := []uint32{0} // Genesis block anchor
-	statedb.WriteServicePreimageLookup(serviceCode, srsHash, uint32(len(srsBytes)), bootStrapAnchor)
-	statedb.WriteServicePreimageLookup(serviceCode, weightsHash, uint32(len(weightsBytes)), bootStrapAnchor)
-
-	// Store hashes in service storage for runtime retrieval
-	statedb.WriteServiceStorage(serviceCode, SRS_HASH_KEY[:], srsHash.Bytes())
-	statedb.WriteServiceStorage(serviceCode, WEIGHTS_HASH_KEY[:], weightsHash.Bytes())
-
-	// Log hashes in Rust array format for hardcoding
-	log.Info(log.SDB, "✅ Verkle IPA preimages initialized",
-		"service", serviceCode,
-		"estimated_gas_savings", "630M per verification")
-	fmt.Printf("\n━━━ VERKLE IPA PREIMAGE HASHES (hardcode in Rust) ━━━\n")
-	fmt.Printf("const SRS_PREIMAGE_HASH: [u8; 32] = %#v;\n", srsHash)
-	fmt.Printf("const WEIGHTS_PREIMAGE_HASH: [u8; 32] = %#v;\n", weightsHash)
-	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
-
-	return nil
-}
-
-// serializeBarycentricWeights serializes PrecomputedWeights to bytes
-// Format: [weights_count:4][weight_0:32][weight_1:32]...[inverted_count:4][inv_0:32][inv_1:32]...
-func serializeBarycentricWeights(precomp *ipa.PrecomputedWeights) []byte {
-	// Access via reflection since fields are private
-	// Total: 512 barycentric weights (256 + 256 inverses) + 510 inverted domain (254 + 254)
-	// = 1022 field elements × 32 bytes = 32,704 bytes (~32KB)
-
-	bytes := make([]byte, 0, 1022*32+8) // +8 for two count prefixes
-
-	// Serialize barycentric weights count
-	weightsCount := uint32(512) // 256 weights + 256 inverse weights
-	countBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(countBytes, weightsCount)
-	bytes = append(bytes, countBytes...)
-
-	// We need to access the private fields via the ComputeBarycentricCoefficients method
-	// For now, we'll regenerate the weights inline
-	for i := uint64(0); i < 256; i++ {
-		weight := computeBarycentricWeightForElement(i)
-		weightBytes := weight.Bytes()
-		bytes = append(bytes, weightBytes[:]...)
-
-		var invWeight [32]byte
-		var inv fr.Element
-		inv.Inverse(&weight)
-		invBytes := inv.Bytes()
-		copy(invWeight[:], invBytes[:])
-		bytes = append(bytes, invWeight[:]...)
-	}
-
-	// Serialize inverted domain count
-	invertedCount := uint32(510) // 254 × 2 for k and -k
-	binary.LittleEndian.PutUint32(countBytes, invertedCount)
-	bytes = append(bytes, countBytes...)
-
-	// Serialize inverted domain (1/k and -1/k for k ∈ [1,255])
-	for i := uint64(1); i < 256; i++ {
-		var k fr.Element
-		k.SetUint64(i)
-		k.Inverse(&k)
-
-		kBytes := k.Bytes()
-		bytes = append(bytes, kBytes[:]...)
-
-		var negK fr.Element
-		zero := fr.Zero()
-		negK.Sub(&zero, &k)
-		negKBytes := negK.Bytes()
-		bytes = append(bytes, negKBytes[:]...)
-	}
-
-	return bytes
-}
-
-// computeBarycentricWeightForElement computes A'(x_j) for element j in domain [0,255]
-// This is the same as ipa.computeBarycentricWeightForElement but exported
-func computeBarycentricWeightForElement(element uint64) fr.Element {
-	var domainElementFr fr.Element
-	domainElementFr.SetUint64(element)
-
-	total := fr.One()
-
-	for i := uint64(0); i < 256; i++ {
-		if i == element {
-			continue
-		}
-
-		var iFr fr.Element
-		iFr.SetUint64(i)
-
-		var tmp fr.Element
-		tmp.Sub(&domainElementFr, &iFr)
-
-		total.Mul(&total, &tmp)
-	}
-
-	return total
-}
 
 // initializeOrchardStorage creates genesis storage for Orchard service
 func initializeOrchardStorage() map[common.Hash][]byte {
@@ -421,18 +272,9 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 				statedb.WriteServiceStorage(service.ServiceCode, k.Bytes(), v)
 			}
 
-			// Initialize Verkle IPA preimages for EVM service (630M gas optimization)
-			// MUST be done before computing service account metadata
 			numPreimageBlobs := uint32(2) // code + auth_code
 			numStorageEntries := uint32(len(service.Storage))
 			if service.ServiceCode == EVMServiceCode {
-				if err := initializeVerklePreimages(statedb, service.ServiceCode); err != nil {
-					return nil, fmt.Errorf("failed to initialize Verkle preimages: %w", err)
-				}
-				// Add 2 additional blobs (SRS + weights) and 2 storage entries (hash keys)
-				numPreimageBlobs += 2
-				numStorageEntries += 2
-
 				// Initialize SSR key with global_depth=0 for ReadObject to work before first accumulate
 				// Key: "SSR" (3 bytes raw), Value: single byte 0 (global_depth hint)
 				// This allows GetTransactionReceipt and other ReadObject calls to work immediately
@@ -445,21 +287,13 @@ func MakeGenesisStateTransition(sdb types.JAMStorage, epochFirstSlot uint64, net
 			// Each staking entry: 32 bytes (key) + 8 bytes (value) = 40 bytes
 			stakingStorageSize := uint64(len(service.Storage) * (32 + 8))
 
-			// Verkle preimages storage size (if EVM service):
-			// SRS: 8192 bytes, Weights: 32712 bytes, plus 2 hash entries (64 bytes)
-			// SSR key: 3 bytes key + 1 byte value = 4 bytes (but storage formula uses 32+s)
-			verkleStorageSize := uint64(0)
-			if service.ServiceCode == EVMServiceCode {
-				verkleStorageSize = 8192 + 32712 + 64 + 33 // SRS + weights + 2 hash keys + SSR entry (32+1)
-			}
-
 			bootstrapServiceAccount := types.ServiceAccount{
 				CodeHash:        codeHash,
 				Balance:         balance,
 				GasLimitG:       100,
 				GasLimitM:       100,
-				StorageSize:     uint64(81*numPreimageBlobs) + uint64(codeLen) + uint64(auth_code_len) + stakingStorageSize + verkleStorageSize, // a_l = ∑ 81+z per (h,z) + ∑ 32+s https://graypaper.fluffylabs.dev/#/5f542d7/116e01116e01
-				NumStorageItems: 2*numPreimageBlobs + numStorageEntries,                                                                         //a_i = 2⋅∣al∣+∣as∣
+				StorageSize:     uint64(81*numPreimageBlobs) + uint64(codeLen) + uint64(auth_code_len) + stakingStorageSize, // a_l = ∑ 81+z per (h,z) + ∑ 32+s https://graypaper.fluffylabs.dev/#/5f542d7/116e01116e01
+				NumStorageItems: 2*numPreimageBlobs + numStorageEntries,                                                     //a_i = 2⋅∣al∣+∣as∣
 			}
 
 			statedb.writeService(service.ServiceCode, &bootstrapServiceAccount)

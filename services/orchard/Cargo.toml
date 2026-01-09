@@ -4,24 +4,50 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
-[profile.release]
-panic = "unwind"  # FFI requires unwinding panic mode
-
-[profile.dev]
-panic = "unwind"  # FFI requires unwinding panic mode
-
-# Create self-contained dynamic library without Rust std dependency
-[target.x86_64-apple-darwin]
-rustflags = ["-C", "prefer-dynamic=no"]
 
 [lib]
 name = "orchard_service"
 path = "src/lib.rs"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib", "rlib", "staticlib"]
 
 [[bin]]
 name = "orchard"
 path = "src/main.rs"
+
+[[bin]]
+name = "halo2_verify_host"
+path = "src/bin/halo2_verify_host.rs"
+required-features = ["std"]
+
+[[test]]
+name = "transparent_testvectors"
+path = "tests/transparent_testvectors.rs"
+required-features = ["transparent"]
+
+[[test]]
+name = "transparent_p2pkh"
+path = "tests/transparent_p2pkh.rs"
+required-features = ["transparent"]
+
+[[test]]
+name = "transparent_consensus"
+path = "tests/transparent_consensus.rs"
+required-features = ["transparent"]
+
+[[test]]
+name = "transparent_malformed"
+path = "tests/transparent_malformed.rs"
+required-features = ["transparent"]
+
+[[test]]
+name = "transparent_script_parity"
+path = "tests/transparent_script_parity.rs"
+required-features = ["transparent"]
+
+[[test]]
+name = "transparent_script_fuzz"
+path = "tests/transparent_script_fuzz.rs"
+required-features = ["transparent"]
 
 [dependencies]
 polkavm-derive = { workspace = true }
@@ -31,6 +57,10 @@ hex = { version = "0.4", default-features = false, features = ["alloc"] }
 nonempty = { version = "0.11", default-features = false }
 subtle = { version = "2.6", default-features = false }
 incrementalmerkletree = { version = "0.8.2", default-features = false }
+sinsemilla = { version = "0.1", default-features = false }
+ff = { version = "0.13", default-features = false }
+lazy_static = { version = "1.4", default-features = false, features = ["spin_no_std"] }
+k256 = { version = "0.13", default-features = false, features = ["arithmetic", "schnorr"] }
 
 # ZK proof verification (arkworks for Groth16)
 ark-groth16 = { version = "0.4", default-features = false, optional = true }
@@ -42,27 +72,35 @@ ark-std = { version = "0.4", default-features = false, optional = true }
 
 # Blake2 for hashing (no_std compatible)
 blake2 = { version = "0.10", default-features = false }
+blake2b_simd = { version = "1.0", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+libsecp256k1 = { version = "0.7", default-features = false, features = ["static-context"] }
+ripemd = { version = "0.1", default-features = false }
 rand = { version = "0.8", default-features = false, features = ["std"], optional = true }
 
 # Serde for serialization (no_std compatible)
 serde = { version = "1.0", default-features = false, features = ["alloc", "derive"] }
 serde_bytes = { version = "0.11", default-features = false, features = ["alloc"] }
-serde_cbor = { version = "0.11", default-features = false, features = ["std", "alloc"] }
+serde_cbor = { version = "0.11", default-features = false, features = ["alloc"] }
 
 # Zcash Orchard for production bundle verification
-orchard = { path = "../../builder/orchard/zcash-orchard", default-features = false, features = ["circuit", "std"], optional = true }
+orchard = { path = "../../orchard", default-features = false, features = ["circuit", "std"], optional = true }
+zcash_note_encryption = { version = "0.4", default-features = false, optional = true }
 
-# Halo2 dependencies (Orchard uses these internally)
-halo2_proofs = { version = "0.3", default-features = false }
-halo2_gadgets = { version = "0.4", default-features = false }
-pasta_curves = { version = "0.5", default-features = false }
+# Halo2 dependencies (no_std local fork)
+halo2_proofs = { path = "../../halo2/halo2_proofs", default-features = false }
+halo2_gadgets = { path = "../../halo2/halo2_gadgets", default-features = false }
+pasta_curves = { path = "../../pasta_curves/pasta_curves", default-features = false, features = ["alloc", "bits", "sqrt-table"] }
+core2 = { version = "0.4", default-features = false, features = ["alloc"] }
 
 [features]
-default = []
+default = ["ffi"]
 ffi = []
 polkavm = []
+transparent = []
 std = []
-orchard = ["std", "dep:orchard", "dep:rand"]
+orchard = ["std", "dep:orchard", "dep:rand", "dep:zcash_note_encryption"]
+orchard-issuance = ["orchard"]
 groth16 = [
     "ark-groth16",
     "ark-bn254",
@@ -76,3 +114,6 @@ groth16 = [
 rand = "0.8"
 ff = "0.13"
 serde_json = "1.0"
+serde_cbor = { version = "0.11", default-features = false, features = ["std"] }
+libsecp256k1 = { version = "0.7", default-features = false, features = ["static-context", "hmac"] }
+base64 = "0.21"

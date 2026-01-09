@@ -28,6 +28,7 @@ type StateProvider interface {
 	GetStateDB() *StateDB
 	GetRefineContext() (types.RefineContext, error)
 	SubmitBundleSameCore(bundle *types.WorkPackageBundle) error
+	SubmitBundleToCore(bundle *types.WorkPackageBundle, targetCoreIndex uint16) error
 	SubmitAndWaitForWorkPackageBundle(ctx context.Context, bundle *types.WorkPackageBundle) (common.Hash, uint32, error)
 	GetWorkReport(hash common.Hash) (*types.WorkReport, error)
 }

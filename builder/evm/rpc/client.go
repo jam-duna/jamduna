@@ -6,7 +6,7 @@ import (
 
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
-	evmtypes "github.com/colorfulnotion/jam/statedb/evmtypes"
+	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
 )
 
 // EVMClient provides EVM-specific RPC client methods
