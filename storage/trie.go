@@ -675,6 +675,15 @@ func (t *MerkleTree) GetStagedSize() int {
 	return len(t.stagedInserts) + len(t.stagedDeletes)
 }
 
+// ClearStagedOps discards all uncommitted staged operations without affecting the tree.
+// This is used to clean up after failed state transitions that share the same storage.
+func (t *MerkleTree) ClearStagedOps() {
+	t.stagedMutex.Lock()
+	defer t.stagedMutex.Unlock()
+	t.stagedInserts = make(map[common.Hash][]byte)
+	t.stagedDeletes = make(map[common.Hash]bool)
+}
+
 func (n *Node) String() string {
 	s := fmt.Sprintf("Node Hash=%x, Key=%x\n", n.Hash, n.Key)
 	return s

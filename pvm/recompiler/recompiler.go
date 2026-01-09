@@ -1278,33 +1278,42 @@ func (rvm *RecompilerVM) Execute(entry uint32) {
 }
 
 // Standard_Program_Initialization initializes the program memory and registers
-func (vm *RecompilerVM) Init(argument_data_a []byte) (err error) {
+// Debug flag for memory region initialization
+const debugMemoryRegionsRecompiler = false
 
+func (vm *RecompilerVM) Init(argument_data_a []byte) (err error) {
 	if len(argument_data_a) == 0 {
 		argument_data_a = []byte{0}
 	}
-	//1)
-	// o_byte
-	o_len := len(vm.o_byte)
 
-	if err = vm.SetMemAccess(Z_Z, uint32(o_len), PageMutable); err != nil {
+	if debugMemoryRegionsRecompiler {
+		fmt.Printf("\n=== RecompilerVM Memory Initialization ===\n")
+	}
+
+	// 1) Program code (RO after write)
+	o_len := uint32(len(vm.o_byte))
+	if err = vm.SetMemAccess(Z_Z, o_len, PageMutable); err != nil {
 		return fmt.Errorf("SetMemAccess1 failed o_len=%d (o_byte): %w", o_len, err)
 	}
 	if err = vm.WriteMemory(Z_Z, vm.o_byte); err != nil {
 		return fmt.Errorf("WriteMemory failed (o_byte): %w", err)
 	}
-	if err = vm.SetMemAccess(Z_Z, uint32(o_len), PageImmutable); err != nil {
+	if err = vm.SetMemAccess(Z_Z, o_len, PageImmutable); err != nil {
 		return fmt.Errorf("SetMemAccess2 failed (o_byte): %w", err)
 	}
-	//2)
-	// Padding after o_byte: the gap between o_len and its page-aligned size
-	// This padding should be immutable (read-only zeros)
-	p_o_len := P_func(uint32(o_len))
-	padding_after_o := p_o_len - uint32(o_len)
-	if padding_after_o > 0 {
-		if err = vm.SetMemAccess(Z_Z+uint32(o_len), padding_after_o, PageImmutable); err != nil {
-			return fmt.Errorf("SetMemAccess failed (o_byte padding): %w", err)
+	if debugMemoryRegionsRecompiler {
+		fmt.Printf("[1] Program Code (RO):  0x%08x - 0x%08x (len=%d)\n", Z_Z, Z_Z+o_len, o_len)
+	}
+
+	// 2) Padding after code (align to page boundary)
+	padding_len := P_func(o_len) - o_len
+	if padding_len > 0 {
+		if err = vm.SetMemAccess(Z_Z+o_len, padding_len, PageImmutable); err != nil {
+			return fmt.Errorf("SetMemAccess failed (p_o_byte): %w", err)
 		}
+	}
+	if debugMemoryRegionsRecompiler {
+		fmt.Printf("[2] Code Padding (RO):  0x%08x - 0x%08x (len=%d)\n", Z_Z+o_len, Z_Z+o_len+padding_len, padding_len)
 	}
 
 	z_o := Z_func(vm.o_size)
@@ -1312,10 +1321,10 @@ func (vm *RecompilerVM) Init(argument_data_a []byte) (err error) {
 	z_s := Z_func(vm.s)
 	requiredMemory := uint64(5*Z_Z + z_o + z_w + z_s + Z_I)
 	if requiredMemory > math.MaxUint32 {
-		return
+		return fmt.Errorf("Standard Program Initialization Error: requiredMemory too large")
 	}
-	// 3)
-	// w_byte
+
+	// 3) Read/Write data (Heap start)
 	w_addr := 2*Z_Z + z_o
 	w_len := uint32(len(vm.w_byte))
 	if err = vm.SetMemAccess(w_addr, w_len, PageMutable); err != nil {
@@ -1324,42 +1333,79 @@ func (vm *RecompilerVM) Init(argument_data_a []byte) (err error) {
 	if err = vm.WriteMemory(w_addr, vm.w_byte); err != nil {
 		return fmt.Errorf("WriteMemory failed (w_byte): %w", err)
 	}
-	// 4)
-	addr4 := 2*Z_Z + z_o + w_len
-	little_z := vm.z
-	len4 := P_func(w_len) + little_z*Z_P - w_len
-	if err = vm.SetMemAccess(addr4, len4, PageMutable); err != nil {
-		return fmt.Errorf("SetMemAccess failed (addr4): %w", err)
-	}
-	// 5)
-	addr5 := 0xFFFFFFFF + 1 - 2*Z_Z - Z_I - P_func(vm.s)
-	len5 := P_func(vm.s)
-	if err = vm.SetMemAccess(addr5, len5, PageMutable); err != nil {
-		return fmt.Errorf("SetMemAccess failed (addr5): %w", err)
-	}
-	// 6)
-	argAddr := uint32(0xFFFFFFFF) - Z_Z - Z_I + 1
-	if err = vm.SetMemAccess(argAddr, uint32(len(argument_data_a)), PageMutable); err != nil {
-		return fmt.Errorf("SetMemAccess failed (argAddr): %w", err)
-	}
-	if err = vm.WriteMemory(argAddr, argument_data_a); err != nil {
-		return fmt.Errorf("WriteMemory failed (argAddr): %w", err)
-	}
-	// set it back to immutable
-	if err = vm.SetMemAccess(argAddr+uint32(len(argument_data_a)), Z_I, PageImmutable); err != nil {
-		return fmt.Errorf("SetMemAccess failed (argAddr+len): %w", err)
-	}
-	// 7)
-	addr7 := argAddr + uint32(len(argument_data_a))
-	len7 := argAddr + P_func(uint32(len(argument_data_a))) - addr7
-	if err = vm.SetMemAccess(addr7, len7, PageImmutable); err != nil {
-		return fmt.Errorf("SetMemAccess failed (addr7): %w", err)
+	if debugMemoryRegionsRecompiler {
+		fmt.Printf("[3] Heap Start (RW):    0x%08x - 0x%08x (len=%d)\n", w_addr, w_addr+w_len, w_len)
 	}
 
-	vm.WriteRegister(0, uint64(0xFFFFFFFF-(1<<16)+1))
-	vm.WriteRegister(1, uint64(0xFFFFFFFF-2*Z_Z-Z_I+1))
-	vm.WriteRegister(7, uint64(argAddr))
-	vm.WriteRegister(8, uint64(uint32(len(argument_data_a))))
+	// 4) Heap continuation (rest of heap to page boundary + extra pages)
+	heap_cont_addr := 2*Z_Z + z_o + w_len
+	heap_cont_len := P_func(w_len) + vm.z*Z_P - w_len
+	if err = vm.SetMemAccess(heap_cont_addr, heap_cont_len, PageMutable); err != nil {
+		return fmt.Errorf("SetMemAccess failed (heap_cont): %w", err)
+	}
+	if debugMemoryRegionsRecompiler {
+		fmt.Printf("[4] Heap Continuation (RW): 0x%08x - 0x%08x (len=%d)\n", heap_cont_addr, heap_cont_addr+heap_cont_len, heap_cont_len)
+	}
+
+	// 5) Stack (from high memory, growing downwards)
+	stack_addr := 0x100000000 - 2*Z_Z - Z_I - P_func(vm.s)
+	stack_len := P_func(vm.s)
+	if err = vm.SetMemAccess(stack_addr, stack_len, PageMutable); err != nil {
+		return fmt.Errorf("SetMemAccess failed (stack): %w", err)
+	}
+	if debugMemoryRegionsRecompiler {
+		fmt.Printf("[5] Stack (RW):         0x%08x - 0x%08x (len=%d)\n", stack_addr, stack_addr+stack_len, stack_len)
+	}
+
+	// 6) Arguments (read-only)
+	args_len := uint32(len(argument_data_a))
+	args_addr := uint32(0x100000000 - Z_Z - Z_I)
+	if err = vm.SetMemAccess(args_addr, args_len, PageMutable); err != nil {
+		return fmt.Errorf("SetMemAccess failed (args): %w", err)
+	}
+	if err = vm.WriteMemory(args_addr, argument_data_a); err != nil {
+		return fmt.Errorf("WriteMemory failed (args): %w", err)
+	}
+	if err = vm.SetMemAccess(args_addr, args_len, PageImmutable); err != nil {
+		return fmt.Errorf("SetMemAccess failed (args immutable): %w", err)
+	}
+	if debugMemoryRegionsRecompiler {
+		fmt.Printf("[6] Arguments (RO):     0x%08x - 0x%08x (len=%d)\n", args_addr, args_addr+args_len, args_len)
+	}
+
+	// 7) Padding after arguments (to page boundary)
+	args_padding_len := P_func(args_len) - args_len
+	if args_padding_len > 0 {
+		if err = vm.SetMemAccess(args_addr+args_len, args_padding_len, PageImmutable); err != nil {
+			return fmt.Errorf("SetMemAccess failed (args_padding): %w", err)
+		}
+	}
+	if debugMemoryRegionsRecompiler {
+		fmt.Printf("[7] Args Padding (RO):  0x%08x - 0x%08x (len=%d)\n", args_addr+args_len, args_addr+args_len+args_padding_len, args_padding_len)
+	}
+
+	// Note: Per Graypaper, the rest of the argument region [Base+|a|, Base+Z_I) remains UNMAPPED
+
+	// Register initialization per Gray Paper:
+	// r0 = 2^32 - 2^16 (heap base)
+	// r1 = 2^32 - 2·Z_Z - Z_I (stack top)
+	// r7 = 2^32 - Z_Z - Z_I (args pointer)
+	// r8 = |argument_data_a| (args length)
+	vm.WriteRegister(0, uint64(0x100000000-(1<<16)))       // 2^32 - 2^16
+	vm.WriteRegister(1, uint64(0x100000000-2*Z_Z-Z_I))     // 2^32 - 2·Z_Z - Z_I
+	vm.WriteRegister(7, uint64(args_addr))                 // args_addr = 2^32 - Z_Z - Z_I
+	vm.WriteRegister(8, uint64(args_len))
+
+	if debugMemoryRegionsRecompiler {
+		fmt.Printf("\nRegister Initialization:\n")
+		fmt.Printf("  r0 (heap_base):      0x%016x\n", vm.ReadRegister(0))
+		fmt.Printf("  r1 (stack_top):      0x%016x\n", vm.ReadRegister(1))
+		fmt.Printf("  r7 (args_ptr):       0x%016x\n", vm.ReadRegister(7))
+		fmt.Printf("  r8 (args_len):       0x%016x (%d)\n", vm.ReadRegister(8), vm.ReadRegister(8))
+		fmt.Printf("\nTotal Required Memory: %d bytes (0x%x)\n", requiredMemory, requiredMemory)
+		fmt.Printf("==========================================\n\n")
+	}
+
 	return nil
 }
 

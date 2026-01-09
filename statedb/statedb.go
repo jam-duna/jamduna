@@ -880,6 +880,13 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block, sf0 *SafroleState) (isValid
 	h := bl.GetHeader()
 	validatorIdx = h.AuthorIndex
 	var err error
+	authorIdx := h.AuthorIndex
+	if authorIdx >= uint16(types.TotalValidators) {
+		log.Error(log.SDB, "VerifyBlockHeader:InvalidAuthorIndex",
+			"authorIdx", authorIdx,
+			"totalValidators", types.TotalValidators)
+		return false, validatorIdx, bandersnatch.BanderSnatchKey{}, fmt.Errorf("VerifyBlockHeader Failed: InvalidAuthorIndex")
+	}
 	if len(bl.Header.OffendersMark) != 0 {
 		// check if the offender mark is valid
 		checkingKeys := map[types.Ed25519Key]struct{}{}

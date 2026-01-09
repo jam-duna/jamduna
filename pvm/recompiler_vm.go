@@ -106,3 +106,20 @@ func (rvm *Recompiler) InitStepwise(vm pvmtypes.HostVM, entryPoint uint32) error
 func (rvm *Recompiler) ExecuteStep(vm pvmtypes.HostVM) []byte {
 	panic("ExecuteStep not implemented for Recompiler backend")
 }
+
+// CheckMemoryAccess checks if a memory range is readable or writable
+// Returns (canRead bool, canWrite bool)
+func (rvm *Recompiler) CheckMemoryAccess(address uint32, length uint32) (bool, bool) {
+	access, err := rvm.RecompilerVM.GetMemAccess(address, length)
+	if err != nil {
+		return false, false
+	}
+
+	// PageInaccessible (0) - cannot read or write
+	// PageImmutable (PROT_READ) - can read, cannot write
+	// PageMutable (PROT_READ | PROT_WRITE) - can read and write
+	canRead := access == pvmtypes.PageImmutable || access == pvmtypes.PageMutable
+	canWrite := access == pvmtypes.PageMutable
+
+	return canRead, canWrite
+}

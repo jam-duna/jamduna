@@ -23,6 +23,7 @@ func normalizeKey32(src []byte) common.Hash {
 func (t *StateDBStorage) SetRoot(root common.Hash) error {
 	currentRoot := t.GetRoot()
 	if currentRoot == root {
+		t.trieDB.ClearStagedOps()
 		return nil
 	}
 

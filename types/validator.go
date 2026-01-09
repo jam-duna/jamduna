@@ -237,6 +237,15 @@ func (T AuthorizationQueue) Decode(data []byte) (interface{}, uint32) {
 	return T, length
 }
 
+func (v Validators) String() string {
+	// print JSON
+	jsonBytes, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprintf("%v", err)
+	}
+	return string(jsonBytes)
+}
+
 // validators
 func (T Validators) Decode(data []byte) (interface{}, uint32) {
 	if len(data) == 0 {

@@ -84,8 +84,8 @@ type VMGo struct {
 	MachineState     uint8
 	Fault_address    uint32
 	terminated       bool
-	hostCall         bool // ̵h in GP
-	host_func_id     int  // h in GP
+	hostCall         bool            // ̵h in GP
+	host_func_id     int             // h in GP
 	hostVM           pvmtypes.HostVM // Reference to host VM for host function calls
 	Ram              *RawRam
 	Gas              int64
@@ -102,10 +102,10 @@ type VMGo struct {
 	CurrentContext *ExecutionContext  // Currently active execution context
 
 	// Instruction Type Recording
-	RecordInstructionType  bool  // If true, record instruction type counts
-	ArithmeticCount        int64 // Count of arithmetic instructions executed
-	MemoryCount            int64 // Count of memory access instructions executed
-	ControlFlowCount       int64 // Count of control flow instructions executed
+	RecordInstructionType bool  // If true, record instruction type counts
+	ArithmeticCount       int64 // Count of arithmetic instructions executed
+	MemoryCount           int64 // Count of memory access instructions executed
+	ControlFlowCount      int64 // Count of control flow instructions executed
 
 	// Work Package Inputs
 	WorkItemIndex uint32
@@ -886,7 +886,7 @@ func (vm *VMGo) Execute(host pvmtypes.HostVM, entryPoint uint32, logDir string) 
 		if vm.hostVM != nil {
 			vm.hostVM.SetResultCode(vm.ResultCode)
 		}
-		fmt.Printf("VM terminated with error code %d at PC %d (%v, %s, %s) Gas:%v\n", vm.ResultCode, vm.pc, vm.Service_index, vm.Mode, string(vm.ServiceMetadata), vm.Gas)
+		fmt.Printf("[%d] VM terminated with error code %d at PC %d (%v, %s, %s) Gas:%v\n", vm.Service_index, vm.ResultCode, vm.pc, vm.Service_index, vm.Mode, string(vm.ServiceMetadata), vm.Gas)
 	}
 
 	// Flush trace buffers before returning
@@ -971,28 +971,43 @@ func (vm *VMGo) SetCore(coreIndex uint16) {
 	vm.CoreIndex = coreIndex
 }
 
+// Debug flag for memory region initialization
+const debugMemoryRegions = false
+
 func (vm *VMGo) Init(argument_data_a []byte) error {
 	if len(argument_data_a) == 0 {
 		argument_data_a = []byte{0}
 	}
-	//1)
-	// o_byte
-	o_len := len(vm.o_byte)
+
+	if debugMemoryRegions {
+		fmt.Printf("\n=== VMGo Memory Initialization (BackendInterpreter) ===\n")
+	}
+
+	// 1) Program code (RO after write)
+	o_len := uint32(len(vm.o_byte))
 	var err error
-	if err = vm.Ram.SetMemAccess(pvmtypes.Z_Z, uint32(o_len), pvmtypes.PageMutable); err != nil {
+	if err = vm.Ram.SetMemAccess(pvmtypes.Z_Z, o_len, pvmtypes.PageMutable); err != nil {
 		return fmt.Errorf("SetMemAccess1 failed o_len=%d (o_byte): %w", o_len, err)
 	}
 	if err = vm.Ram.WriteMemory(pvmtypes.Z_Z, vm.o_byte); err != nil {
 		return fmt.Errorf("WriteMemory failed (o_byte): %w", err)
 	}
-	if err = vm.Ram.SetMemAccess(pvmtypes.Z_Z, uint32(o_len), pvmtypes.PageImmutable); err != nil {
+	if err = vm.Ram.SetMemAccess(pvmtypes.Z_Z, o_len, pvmtypes.PageImmutable); err != nil {
 		return fmt.Errorf("SetMemAccess2 failed (o_byte): %w", err)
 	}
-	//2)
-	//p|o|
-	p_o_len := pvmtypes.PFunc(uint32(o_len))
-	if err = vm.Ram.SetMemAccess(pvmtypes.Z_Z+uint32(o_len), p_o_len, pvmtypes.PageImmutable); err != nil {
-		return fmt.Errorf("SetMemAccess failed (p_o_byte): %w", err)
+	if debugMemoryRegions {
+		fmt.Printf("[1] Program Code (RO):  0x%08x - 0x%08x (len=%d)\n", pvmtypes.Z_Z, pvmtypes.Z_Z+o_len, o_len)
+	}
+
+	// 2) Padding after code (align to page boundary)
+	padding_len := pvmtypes.PFunc(o_len) - o_len
+	if padding_len > 0 {
+		if err = vm.Ram.SetMemAccess(pvmtypes.Z_Z+o_len, padding_len, pvmtypes.PageImmutable); err != nil {
+			return fmt.Errorf("SetMemAccess failed (p_o_byte): %w", err)
+		}
+	}
+	if debugMemoryRegions {
+		fmt.Printf("[2] Code Padding (RO):  0x%08x - 0x%08x (len=%d)\n", pvmtypes.Z_Z+o_len, pvmtypes.Z_Z+o_len+padding_len, padding_len)
 	}
 
 	z_o := pvmtypes.ZFunc(vm.o_size)
@@ -1002,8 +1017,8 @@ func (vm *VMGo) Init(argument_data_a []byte) error {
 	if requiredMemory > math.MaxUint32 {
 		return fmt.Errorf("Standard Program Initialization Error: requiredMemory too large")
 	}
-	// 3)
-	// w_byte
+
+	// 3) Read/Write data (Heap start)
 	w_addr := 2*pvmtypes.Z_Z + z_o
 	w_len := uint32(len(vm.w_byte))
 	if err = vm.Ram.SetMemAccess(w_addr, w_len, pvmtypes.PageMutable); err != nil {
@@ -1012,42 +1027,77 @@ func (vm *VMGo) Init(argument_data_a []byte) error {
 	if err = vm.Ram.WriteMemory(w_addr, vm.w_byte); err != nil {
 		return fmt.Errorf("WriteMemory failed (w_byte): %w", err)
 	}
-	// 4)
-	addr4 := 2*pvmtypes.Z_Z + z_o + w_len
-	little_z := vm.z
-	len4 := pvmtypes.PFunc(w_len) + little_z*pvmtypes.Z_P - w_len
-	if err = vm.Ram.SetMemAccess(addr4, len4, pvmtypes.PageMutable); err != nil {
-		return fmt.Errorf("SetMemAccess failed (addr4): %w", err)
-	}
-	// 5)
-	addr5 := 0xFFFFFFFF + 1 - 2*pvmtypes.Z_Z - pvmtypes.Z_I - pvmtypes.PFunc(vm.s)
-	len5 := pvmtypes.PFunc(vm.s)
-	if err = vm.Ram.SetMemAccess(addr5, len5, pvmtypes.PageMutable); err != nil {
-		return fmt.Errorf("SetMemAccess failed (addr5): %w", err)
-	}
-	// 6)
-	argAddr := uint32(0xFFFFFFFF) - pvmtypes.Z_Z - pvmtypes.Z_I + 1
-	if err = vm.Ram.SetMemAccess(argAddr, uint32(len(argument_data_a)), pvmtypes.PageMutable); err != nil {
-		return fmt.Errorf("SetMemAccess failed (argAddr): %w", err)
-	}
-	if err = vm.Ram.WriteMemory(argAddr, argument_data_a); err != nil {
-		return fmt.Errorf("WriteMemory failed (argAddr): %w", err)
-	}
-	// set it back to immutable
-	if err = vm.Ram.SetMemAccess(argAddr+uint32(len(argument_data_a)), pvmtypes.Z_I, pvmtypes.PageImmutable); err != nil {
-		return fmt.Errorf("SetMemAccess failed (argAddr+len): %w", err)
-	}
-	// 7)
-	addr7 := argAddr + uint32(len(argument_data_a))
-	len7 := argAddr + pvmtypes.PFunc(uint32(len(argument_data_a))) - addr7
-	if err = vm.Ram.SetMemAccess(addr7, len7, pvmtypes.PageImmutable); err != nil {
-		return fmt.Errorf("SetMemAccess failed (addr7): %w", err)
+	if debugMemoryRegions {
+		fmt.Printf("[3] Heap Start (RW):    0x%08x - 0x%08x (len=%d)\n", w_addr, w_addr+w_len, w_len)
 	}
 
-	vm.WriteRegister(0, uint64(0xFFFFFFFF-(1<<16)+1))
-	vm.WriteRegister(1, uint64(0xFFFFFFFF-2*pvmtypes.Z_Z-pvmtypes.Z_I+1))
-	vm.WriteRegister(7, uint64(argAddr))
-	vm.WriteRegister(8, uint64(uint32(len(argument_data_a))))
+	// 4) Heap continuation (rest of heap to page boundary + extra pages)
+	heap_cont_addr := 2*pvmtypes.Z_Z + z_o + w_len
+	heap_cont_len := pvmtypes.PFunc(w_len) + vm.z*pvmtypes.Z_P - w_len
+	if err = vm.Ram.SetMemAccess(heap_cont_addr, heap_cont_len, pvmtypes.PageMutable); err != nil {
+		return fmt.Errorf("SetMemAccess failed (heap_cont): %w", err)
+	}
+	if debugMemoryRegions {
+		fmt.Printf("[4] Heap Continuation (RW): 0x%08x - 0x%08x (len=%d)\n", heap_cont_addr, heap_cont_addr+heap_cont_len, heap_cont_len)
+	}
+
+	// 5) Stack (from high memory, growing downwards)
+	stack_addr := 0x100000000 - 2*pvmtypes.Z_Z - pvmtypes.Z_I - pvmtypes.PFunc(vm.s)
+	stack_len := pvmtypes.PFunc(vm.s)
+	if err = vm.Ram.SetMemAccess(stack_addr, stack_len, pvmtypes.PageMutable); err != nil {
+		return fmt.Errorf("SetMemAccess failed (stack): %w", err)
+	}
+	if debugMemoryRegions {
+		fmt.Printf("[5] Stack (RW):         0x%08x - 0x%08x (len=%d)\n", stack_addr, stack_addr+stack_len, stack_len)
+	}
+
+	// 6) Arguments (read-only)
+	args_len := uint32(len(argument_data_a))
+	args_addr := uint32(0x100000000 - pvmtypes.Z_Z - pvmtypes.Z_I)
+	if err = vm.Ram.SetMemAccess(args_addr, args_len, pvmtypes.PageMutable); err != nil {
+		return fmt.Errorf("SetMemAccess failed (args): %w", err)
+	}
+	if err = vm.Ram.WriteMemory(args_addr, argument_data_a); err != nil {
+		return fmt.Errorf("WriteMemory failed (args): %w", err)
+	}
+	if err = vm.Ram.SetMemAccess(args_addr, args_len, pvmtypes.PageImmutable); err != nil {
+		return fmt.Errorf("SetMemAccess failed (args immutable): %w", err)
+	}
+	if debugMemoryRegions {
+		fmt.Printf("[6] Arguments (RO):     0x%08x - 0x%08x (len=%d)\n", args_addr, args_addr+args_len, args_len)
+	}
+
+	// 7) Padding after arguments (to page boundary)
+	args_padding_addr := args_addr + args_len
+	args_padding_len := pvmtypes.PFunc(args_len) - args_len
+	if args_padding_len > 0 {
+		if err = vm.Ram.SetMemAccess(args_padding_addr, args_padding_len, pvmtypes.PageImmutable); err != nil {
+			return fmt.Errorf("SetMemAccess failed (args_padding): %w", err)
+		}
+	}
+	if debugMemoryRegions {
+		fmt.Printf("[7] Args Padding (RO):  0x%08x - 0x%08x (len=%d)\n", args_padding_addr, args_padding_addr+args_padding_len, args_padding_len)
+	}
+
+	// Register initialization per Gray Paper:
+	// r0 = 2^32 - 2^16 (heap base)
+	// r1 = 2^32 - 2·Z_Z - Z_I (stack top)
+	// r7 = 2^32 - Z_Z - Z_I (args pointer)
+	// r8 = |argument_data_a| (args length)
+	vm.WriteRegister(0, uint64(0x100000000-(1<<16)))                     // 2^32 - 2^16
+	vm.WriteRegister(1, uint64(0x100000000-2*pvmtypes.Z_Z-pvmtypes.Z_I)) // 2^32 - 2·Z_Z - Z_I
+	vm.WriteRegister(7, uint64(args_addr))                               // args_addr = 2^32 - Z_Z - Z_I
+	vm.WriteRegister(8, uint64(args_len))
+
+	if debugMemoryRegions {
+		fmt.Printf("\nRegister Initialization:\n")
+		fmt.Printf("  r0 (heap_base):      0x%016x\n", vm.ReadRegister(0))
+		fmt.Printf("  r1 (stack_top):      0x%016x\n", vm.ReadRegister(1))
+		fmt.Printf("  r7 (args_ptr):       0x%016x\n", vm.ReadRegister(7))
+		fmt.Printf("  r8 (args_len):       0x%016x (%d)\n", vm.ReadRegister(8), vm.ReadRegister(8))
+		fmt.Printf("\nTotal Required Memory: %d bytes (0x%x)\n", requiredMemory, requiredMemory)
+		fmt.Printf("===================================================\n\n")
+	}
 
 	return nil
 }
@@ -2685,6 +2735,23 @@ func (vm *VMGo) encodeStepLog(opcode byte, prevpc uint64) []byte {
 	return log
 }
 
+// CheckMemoryAccess checks if a memory range is readable or writable
+// Returns (canRead bool, canWrite bool)
+func (vm *VMGo) CheckMemoryAccess(address uint32, length uint32) (bool, bool) {
+	access, err := vm.Ram.GetMemAccess(address, length)
+	if err != nil {
+		return false, false
+	}
+
+	// PageInaccessible (0) - cannot read or write
+	// PageImmutable (PROT_READ) - can read, cannot write
+	// PageMutable (PROT_READ | PROT_WRITE) - can read and write
+	canRead := access == pvmtypes.PageImmutable || access == pvmtypes.PageMutable
+	canWrite := access == pvmtypes.PageMutable
+
+	return canRead, canWrite
+}
+
 func (vm *VMGo) SetPC(pc uint64) {
 	vm.pc = pc
 }
@@ -2799,12 +2866,22 @@ func (ram *RawRam) GetMemAccess(address uint32, length uint32) (int, error) {
 		return pvmtypes.PageInaccessible, fmt.Errorf("invalid address")
 	}
 	// Check all pages in the range - return minimum access level
+	// Per Graypaper: V_μ = {i | μ_{⌊i/Z_P⌋} ≠ ∅}
+	// A page must exist in μ (pages map) to be accessible
 	minAccess := pvmtypes.PageMutable
 	for pageIndex := startPage; pageIndex <= endPage; pageIndex++ {
-		access, ok := ram.mem_access[pageIndex]
-		if !ok {
+		// Check if page exists in memory (μ_{pageIndex} ≠ ∅)
+		_, pageExists := ram.pages[uint32(pageIndex)]
+		access, accessDefined := ram.mem_access[pageIndex]
+
+		// If page doesn't exist in pages map, it's inaccessible regardless of mem_access
+		if !pageExists {
+			access = pvmtypes.PageInaccessible
+		} else if !accessDefined {
+			// Page exists but no access permissions defined - treat as inaccessible
 			access = pvmtypes.PageInaccessible
 		}
+
 		if pageIndex == 0 {
 			fmt.Printf("Page 0 Access = %d\n", access)
 		}
@@ -2863,6 +2940,7 @@ func (ram *RawRam) ReadMemory(address uint32, length uint32) (data []byte, err e
 	}
 
 	// Read across potentially multiple pages
+	// GetMemAccess already verified all pages exist and are readable
 	result := make([]byte, length)
 	for offset := uint32(0); offset < length; {
 		pageIndex := (address + offset) / PageSize
@@ -2876,10 +2954,12 @@ func (ram *RawRam) ReadMemory(address uint32, length uint32) (data []byte, err e
 		}
 
 		page := ram.getPage(pageIndex)
-		if page != nil {
-			copy(result[offset:offset+bytesToRead], page[pageOffset:pageOffset+bytesToRead])
+		// GetMemAccess guarantees page exists (per Graypaper V_μ definition)
+		// If page is somehow nil here, it indicates a programming error
+		if page == nil {
+			return nil, fmt.Errorf("internal error: page %d should exist but is nil", pageIndex)
 		}
-		// If page is nil, result already contains zeros (default)
+		copy(result[offset:offset+bytesToRead], page[pageOffset:pageOffset+bytesToRead])
 
 		offset += bytesToRead
 	}
@@ -2907,6 +2987,8 @@ func (ram *RawRam) WriteMemory(address uint32, data []byte) error {
 	}
 
 	// Write across potentially multiple pages
+	// Per Graypaper: can only write to pages that exist in μ
+	// GetMemAccess already verified all pages exist and are writable
 	for offset := uint32(0); offset < length; {
 		pageIndex := (address + offset) / PageSize
 		pageOffset := (address + offset) % PageSize
@@ -2918,7 +3000,12 @@ func (ram *RawRam) WriteMemory(address uint32, data []byte) error {
 			bytesToWrite = bytesInPage
 		}
 
-		page := ram.getOrCreatePage(pageIndex)
+		// Per Graypaper V_μ: only access pages that exist in μ
+		// GetMemAccess guarantees page exists, so getPage should never return nil
+		page := ram.getPage(pageIndex)
+		if page == nil {
+			return fmt.Errorf("internal error: page %d should exist but is nil (addr=0x%x)", pageIndex, address+offset)
+		}
 		copy(page[pageOffset:pageOffset+bytesToWrite], data[offset:offset+bytesToWrite])
 
 		offset += bytesToWrite
@@ -2932,6 +3019,11 @@ func (ram *RawRam) SetPageAccess(pageIndex int, access int) error {
 		return fmt.Errorf("invalid page index")
 	}
 	ram.mem_access[pageIndex] = access
+	// Per Graypaper: setting page access means adding page to μ
+	// Ensure page exists in pages map (create if not exists)
+	if _, exists := ram.pages[uint32(pageIndex)]; !exists {
+		ram.pages[uint32(pageIndex)] = make([]byte, PageSize)
+	}
 	return nil
 }
 func (ram *RawRam) SetPagesAccessRange(startPage, pageCount int, access int) error {
@@ -2941,6 +3033,11 @@ func (ram *RawRam) SetPagesAccessRange(startPage, pageCount int, access int) err
 	endPage := startPage + pageCount
 	for i := startPage; i < endPage; i++ {
 		ram.mem_access[i] = access
+		// Per Graypaper: setting page access means adding page to μ
+		// Ensure page exists in pages map (create if not exists)
+		if _, exists := ram.pages[uint32(i)]; !exists {
+			ram.pages[uint32(i)] = make([]byte, PageSize)
+		}
 	}
 	return nil
 }

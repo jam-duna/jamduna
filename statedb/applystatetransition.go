@@ -217,6 +217,9 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 	}
 	for ed25519Key, _ := range num_reports {
 		validatorIndex := s.JamState.SafroleState.GetCurrValidatorIndex(ed25519Key)
+		if validatorIndex < 0 {
+			continue
+		}
 		s.JamState.tallyStatistics(uint32(validatorIndex), "reports", 1)
 		// fmt.Printf("Validator %d: %d reports\n", validatorIndex, nreports)
 	}

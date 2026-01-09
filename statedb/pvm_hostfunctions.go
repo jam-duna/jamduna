@@ -286,7 +286,7 @@ func (vm *VM) hostInfo() {
 		vm.MachineState = PANIC
 		return
 	}
-	vm.DebugHostFunction(INFO, "bo=%x, f=%d, l=%d , v=0x%x", bo, f, l, val[f:f+l])
+	vm.DebugHostFunction(INFO, "FETCHING %d, bo=%x, f=%d, l=%d , v=0x%x, balance=%d", fetch, bo, f, l, val[f:f+l], t.Balance)
 
 	bytesPreview := bytesToWrite
 	if len(bytesPreview) > 96 {
@@ -372,6 +372,8 @@ func (vm *VM) hostBless() {
 	vm.SetHostResultCode(OK)
 }
 
+const maxUint32 = (1 << 32) - 1
+
 // Assign Core x_c[i]
 func (vm *VM) hostAssign() {
 	if vm.Mode != ModeAccumulate {
@@ -386,7 +388,6 @@ func (vm *VM) hostAssign() {
 
 	q, errcode := vm.ReadRAMBytes(uint32(o), 32*types.MaxAuthorizationQueueItems)
 	if errcode != OK {
-		vm.WriteRegister(7, OOB)
 		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
 		vm.terminated = true
@@ -395,6 +396,7 @@ func (vm *VM) hostAssign() {
 	if c >= types.TotalCores {
 		vm.WriteRegister(7, CORE)
 		vm.SetHostResultCode(CORE)
+		vm.DebugHostFunction(ASSIGN, "c=%d invalid", c)
 		return
 	}
 	bold_q := make([]common.Hash, types.MaxAuthorizationQueueItems)
@@ -408,13 +410,21 @@ func (vm *VM) hostAssign() {
 		vm.WriteRegister(7, HUH)
 		vm.SetHostResultCode(HUH)
 		log.Trace(vm.logging, "ASSIGN HUH", "c", c, "AuthQueueServiceID[c]", privilegedService_a, "xs", xs.ServiceIndex)
+		vm.DebugHostFunction(ASSIGN, "privilegedService_a=%d xs.ServiceIndex=%d", privilegedService_a, xs.ServiceIndex)
 		return
 	}
 
+	//who
+	if a > maxUint32 {
+		vm.WriteRegister(7, WHO)
+		vm.SetHostResultCode(WHO)
+		log.Trace(vm.logging, "ASSIGN WHO", "c", c, "a", a)
+		return
+	}
 	copy(vm.X.U.QueueWorkReport[c][:], bold_q[:])
 	vm.X.U.PrivilegedState.AuthQueueServiceID[c] = uint32(a)
 	vm.X.U.QueueDirty = true
-
+	vm.DebugHostFunction(ASSIGN, "c=%d assigned to a=%d", c, a)
 	log.Trace(vm.logging, "ASSIGN OK", "c", c, "AuthQueueServiceID[c]", a, "xs", xs.ServiceIndex)
 	vm.WriteRegister(7, OK)
 	vm.SetHostResultCode(OK)
@@ -457,6 +467,7 @@ func (vm *VM) hostDesignate() {
 		v_bold[i] = newv
 	}
 	vm.X.U.UpcomingValidators = v_bold
+	vm.DebugHostFunction(DESIGNATE, "Designated %d validators \n%s", len(v_bold), vm.X.U.UpcomingValidators.String())
 	vm.X.U.UpcomingDirty = true
 
 	log.Trace(vm.logging, "DESIGNATE OK", "UpcomingValidatorsServiceID", privilegedService_v, "validatorsLen", len(v_bold), "TotalValidators", types.TotalValidators, "xs", xs.ServiceIndex)
@@ -988,11 +999,12 @@ func (vm *VM) hostYield() {
 
 	o := vm.ReadRegister(7)
 	h, errCode := vm.ReadRAMBytes(uint32(o), 32)
+	vm.DebugHostFunction(YIELD, "h 0x%x from %x", h, o)
 	if errCode != OK {
 		vm.Panic(errCode)
-
 		return
 	}
+
 	y := common.BytesToHash(h)
 	vm.X.Yield = y
 	vm.WriteRegister(7, OK)
@@ -1291,6 +1303,11 @@ func (vm *VM) hostLookup() {
 	if a == nil {
 		a, _ = vm.getXUDS(omega_7)
 	}
+	if a == nil {
+		vm.WriteRegister(7, NONE)
+		vm.SetHostResultCode(NONE)
+		return
+	}
 
 	h := vm.ReadRegister(8)
 	o := vm.ReadRegister(9)
@@ -1301,6 +1318,7 @@ func (vm *VM) hostLookup() {
 		vm.Panic(err_k)
 		return
 	}
+	vm.DebugHostFunction(LOOKUP, "s=%d, h=0x%x, R: 0x%x, o=0x%x, f=%d, l=%d", a.ServiceIndex, common.BytesToHash(k_bytes), uint32(h), o, f, l)
 
 	var account_blobhash common.Hash
 
@@ -1309,26 +1327,35 @@ func (vm *VM) hostLookup() {
 	var preimage_source string
 
 	account_blobhash = common.Hash(k_bytes)
+
 	ok, v, preimage_source = a.ReadPreimage(account_blobhash, vm.hostenv)
+	f = min(f, uint64(len(v)))
+	l = min(l, uint64(len(v))-f)
+	_, writable := vm.CheckMemoryAccess(uint32(o), uint32(l))
+	if !writable {
+		vm.Panic(2)
+		log.Trace(vm.logging, "LOOKUP FAULT - memory not writable", "s", fmt.Sprintf("%d", a.ServiceIndex), "h", account_blobhash, "o", o, "l", l)
+		return
+	}
 	if !ok {
+		vm.DebugHostFunction(LOOKUP, "PREIMAGE LOOKUP NONE s=%d, h=0x%x, R: 0x%x, W:o=0x%x, f=%d, l=%d", a.ServiceIndex, account_blobhash, uint32(h), o, f, l)
 		vm.WriteRegister(7, NONE)
 		log.Trace(vm.logging, "LOOKUP NONE", "s", fmt.Sprintf("%d", a.ServiceIndex), "h", account_blobhash, "preimage_source", preimage_source)
 		vm.SetHostResultCode(NONE)
 		return
 	}
-	f = min(f, uint64(len(v)))
-	l = min(l, uint64(len(v))-f)
 
-	err := vm.WriteRAMBytes(uint32(o), v[:l])
+	err := vm.WriteRAMBytes(uint32(o), v[f:l])
+	if err != OK {
+		vm.Panic(err)
+		return
+	} else {
+		vm.DebugHostFunction(LOOKUP, "s=%d, h=0x%x,R: 0x%x, W:o=0x%x, f=%d, l=%d, v=0x%x", a.ServiceIndex, account_blobhash, uint32(h), o, f, l, v[f:l])
+	}
 
 	// Record taint for external write
 	if tracker, ok := vm.ExecutionVM.(externalWriteTracker); ok {
 		tracker.TaintRecordExternalWrite(uint64(o), l, "PROVIDE_CHILD")
-	}
-
-	if err != OK {
-		vm.Panic(err)
-		return
 	}
 
 	if len(v) != 0 {
@@ -1339,6 +1366,7 @@ func (vm *VM) hostLookup() {
 		logStr = fmt.Sprintf("len = %d, v = %s", len(v), fmt.Sprintf("%x", v))
 	}
 	log.Trace(vm.logging, "LOOKUP OK", "s", fmt.Sprintf("%d", a.ServiceIndex), "h", h, "v", logStr)
+	vm.DebugHostFunction(LOOKUP, "s=%d, h=0x%x, o=0x%x, f=%d, l=%d, v=0x%x", a.ServiceIndex, account_blobhash, o, f, l, v[f:l])
 	vm.SetHostResultCode(OK)
 }
 

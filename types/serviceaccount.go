@@ -541,6 +541,7 @@ func (s *ServiceAccount) DecBalance(balance uint64) {
 	}
 	s.Dirty = true
 	s.Balance -= balance
+	//fmt.Printf("DecBalance: Service %d Balance: %d (-%d)\n", s.ServiceIndex, s.Balance, balance)
 }
 func (s *ServiceAccount) IncBalance(balance uint64) {
 	if !s.Mutable {
@@ -549,6 +550,7 @@ func (s *ServiceAccount) IncBalance(balance uint64) {
 	}
 	s.Dirty = true
 	s.Balance += balance
+	//fmt.Printf("IncBalance: Service %d Balance: %d (+%d)\n", s.ServiceIndex, s.Balance, balance)
 }
 
 // AdjustNumStorageItems adjusts the number of storage items by delta and marks it dirty
@@ -731,6 +733,14 @@ func (s *ServiceAccount) MergeUpdates(updates *ServiceAccount) {
 		if _, exists := s.Preimage[k]; !exists || v.Dirty {
 			s.Preimage[k] = v
 		}
+	}
+	// Merge Balance if the updates account is dirty (Balance was modified via Inc/DecBalance)
+	if updates.Dirty {
+		s.Balance = updates.Balance
+		s.CodeHash = updates.CodeHash
+		s.GasLimitG = updates.GasLimitG
+		s.GasLimitM = updates.GasLimitM
+		s.GratisOffset = updates.GratisOffset
 	}
 	if updates.NumStorageItemsDirty {
 		s.NumStorageItems = updates.NumStorageItems

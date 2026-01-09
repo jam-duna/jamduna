@@ -144,6 +144,10 @@ func (u *PartialState) Clone() *PartialState {
 		QueueWorkReport: u.QueueWorkReport,
 		// Shallow copy; AlwaysAccServiceID handled below
 		PrivilegedState: u.PrivilegedState,
+
+		UpcomingDirty:   u.UpcomingDirty,
+		QueueDirty:      u.QueueDirty,
+		PrivilegedDirty: u.PrivilegedDirty,
 	}
 
 	// Copy UpcomingValidators

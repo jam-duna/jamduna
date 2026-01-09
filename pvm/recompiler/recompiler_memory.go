@@ -85,7 +85,7 @@ func (rvm *RecompilerRam) Close() error {
 // Only returns PageMutable if ALL pages in the range are mutable.
 func (rvm *RecompilerRam) GetMemAccess(address uint32, length uint32) (int, error) {
 	if length == 0 {
-		return PageInaccessible, fmt.Errorf("zero length")
+		return PageMutable, nil
 	}
 
 	// Check for overflow
@@ -102,11 +102,14 @@ func (rvm *RecompilerRam) GetMemAccess(address uint32, length uint32) (int, erro
 	}
 
 	// Check all pages in the range and return the most restrictive access
+	// Per Graypaper: V_μ = {i | μ_{⌊i/Z_P⌋} ≠ ∅}
+	// For recompiler, a page exists in μ iff it's defined in memAccess
 	// PageInaccessible (0) < PageImmutable (PROT_READ) < PageMutable (PROT_READ|PROT_WRITE)
 	mostRestrictive := PageMutable
 	for pageIdx := startPage; pageIdx <= endPage; pageIdx++ {
 		access, ok := rvm.memAccess[pageIdx]
 		if !ok {
+			// Page not in μ (memAccess) - treat as inaccessible per Graypaper
 			access = PageInaccessible
 		}
 		if access == PageInaccessible {

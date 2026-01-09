@@ -40,6 +40,10 @@ type ExecutionVM interface {
 	// to support ExecuteWorkPackageBundleSteps
 	InitStepwise(vm pvmtypes.HostVM, entryPoint uint32) error
 	ExecuteStep(vm pvmtypes.HostVM) []byte
+
+	// CheckMemoryAccess checks if a memory range is readable or writable
+	// Returns (canRead bool, canWrite bool)
+	CheckMemoryAccess(address uint32, length uint32) (bool, bool)
 }
 
 func DecodeProgram(p []byte) (*Program, uint32, uint32, uint32, uint32, []byte, []byte, error) {

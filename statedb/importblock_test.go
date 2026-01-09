@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -407,16 +408,19 @@ func TestSingleFuzzTrace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get fuzz reports path: %v", err)
 	}
+	/*
+			--- PASS: TestFuzzTrace/fuzz-reports/0.7.2/traces/1767871405_1375/00000033.bin (0.08s)
+		    --- PASS: TestFuzzTrace/fuzz-reports/0.7.2/traces/1767871405_1375/00000034.bin (0.16s)
+		    --- PASS: TestFuzzTrace/fuzz-reports/0.7.2/traces/1767871405_1375/00000035.bin (0.10s)
+		    --- PASS: TestFuzzTrace/fuzz-reports/0.7.2/traces/1767871405_1375/00000036.bin (0.05s)
+		    --- PASS: TestFuzzTrace/fuzz-reports/0.7.2/traces/1767871405_1375/00000037.bin (0.09s)
+	*/
 
-	// fileMap["1763489798"] = "fuzz-reports/0.7.1/traces/1763489798//00000950.bin"
-	fileMap["1766243147"] = "fuzz-reports/0.7.2/traces/1766243147/00000057.bin"
-	fileMap["1766243315_2078_00000118"] = "fuzz-reports/0.7.2/traces/1766243315_2078/00000118.bin"
-	fileMap["1766243315_2078_00000121"] = "fuzz-reports/0.7.2/traces/1766243315_2078/00000121.bin"
-	fileMap["1766243493_2882"] = "fuzz-reports/0.7.2/traces/1766243493_2882/00000030.bin"
-	fileMap["1766243861_8319_00000115"] = "fuzz-reports/0.7.2/traces/1766243861_8319/00000115.bin"
-	fileMap["1766243861_8319_00000119"] = "fuzz-reports/0.7.2/traces/1766243861_8319/00000119.bin"
-	// fileMap["1766244122_3401"] = "fuzz-reports/0.7.2/traces/1766244122_3401/00000891.bin" fixed by shawn
-	fileMap["1766255635_2557"] = "fuzz-reports/0.7.2/traces/1766255635_2557/00000153.bin"
+	fileMap["1767871405_1375_33"] = "fuzz-reports/0.7.2/traces/1767871405_1375/00000033.bin"
+	fileMap["1767871405_1375_34"] = "fuzz-reports/0.7.2/traces/1767871405_1375/00000034.bin"
+	fileMap["1767871405_1375_35"] = "fuzz-reports/0.7.2/traces/1767871405_1375/00000035.bin"
+	fileMap["1767871405_1375_36"] = "fuzz-reports/0.7.2/traces/1767871405_1375/00000036.bin"
+	fileMap["1767871405_1375_37"] = "fuzz-reports/0.7.2/traces/1767871405_1375/00000037.bin"
 	interpreter.PvmLogging = false
 	//	DebugHostFunctions = true
 	log.InitLogger("debug")
@@ -424,7 +428,7 @@ func TestSingleFuzzTrace(t *testing.T) {
 	// log.EnableModule("pvm_validator")
 	log.EnableModule(log.SDB)
 
-	tc := []string{"1766255635_2557"}
+	tc := []string{"1767871405_1375_33", "1767871405_1375_34", "1767871405_1375_35", "1767871405_1375_36", "1767871405_1375_37"}
 
 	interpreter.PvmLogging = false
 	for _, team := range tc {
@@ -632,7 +636,7 @@ func testFuzzTraceInternal(t *testing.T, saveOutput bool) {
 	}
 }
 
-func TestFuzzTrace(t *testing.T) {
+func TestFuzzTraceIndependent(t *testing.T) {
 	testFuzzTraceInternal(t, false)
 }
 
@@ -665,36 +669,35 @@ func TestFuzzTraceSequential(t *testing.T) {
 			}
 			testCaseID := entry.Name()
 			t.Run(testCaseID, func(t *testing.T) {
-				runSequentialFuzzTrace(t, sourcePath, targetVersion, testCaseID)
+				runSequentialFuzzTrace(t, sourcePath, targetVersion, testCaseID, false)
 			})
 		}
 	} else {
 		// Test specific cases that failed before the SetRoot fix
 		testCases := []string{
-			"1766241867",
-			"1766241968",
-			"1766243315_1733",
-			"1766243493_8886",
-			"1766243861_2056",
-			"1766244122_3562",
-			"1766244251_4514",
-			"1766244251_9568",
-			"1766479507_3250",
-			"1766479507_7090",
-			"1766565819_4337",
-			"1766565819_9942",
+			"1767871405_1375", // host function bug???
+			// "1767871405_3282", // fixed: memory args access problem
+			// "1767871405_6428", //fixed: who in assign
+			// "1767872928_5525", // fixed: memory args access problem
+			// "1767872928_7649", //fixed
+			// "1767889897_7743", //fixed
+			// "1767891325_1291", //fixed by tallystatic key checking
+			// "1767871405_9518", // fixed by memory region correction
+			// "1767895984_8247", //fixed by fix the clone for partial state
+			// "1767896003_7770", //fixed by update existing.MergeUpdates(sa)
 		}
 
 		for _, id := range testCases {
 			t.Run(id, func(t *testing.T) {
-				runSequentialFuzzTrace(t, sourcePath, targetVersion, id)
+				pvmtypes.DebugHostFunctions = true
+				runSequentialFuzzTrace(t, sourcePath, targetVersion, id, true)
 			})
 		}
 	}
 }
 
 // runSequentialFuzzTrace runs a single sequential fuzz trace test case
-func runSequentialFuzzTrace(t *testing.T, sourcePath, targetVersion, testCaseID string) {
+func runSequentialFuzzTrace(t *testing.T, sourcePath, targetVersion, testCaseID string, printDiff bool) {
 	traceDir := filepath.Join(sourcePath, fmt.Sprintf("fuzz-reports/%s/traces", targetVersion), testCaseID)
 
 	backend := pvm.BackendCompiler
@@ -703,14 +706,12 @@ func runSequentialFuzzTrace(t *testing.T, sourcePath, targetVersion, testCaseID 
 	}
 	fmt.Printf("PVM Backend: %s\n", backend)
 
-	// Find step files (support up to 100000 steps for large traces)
-	stepFiles := []string{}
-	for i := 1; i <= 100000; i++ {
-		stepFile := filepath.Join(traceDir, fmt.Sprintf("%08d.bin", i))
-		if _, err := os.Stat(stepFile); err == nil {
-			stepFiles = append(stepFiles, stepFile)
-		}
+	// Find step files by globbing for .bin files (handles any starting number)
+	stepFiles, err := filepath.Glob(filepath.Join(traceDir, "*.bin"))
+	if err != nil {
+		t.Fatalf("failed to glob step files: %v", err)
 	}
+	sort.Strings(stepFiles) // Ensure files are in order
 
 	if len(stepFiles) == 0 {
 		t.Fatalf("No step files found in %s", traceDir)
@@ -838,7 +839,10 @@ func runSequentialFuzzTrace(t *testing.T, sourcePath, targetVersion, testCaseID 
 			if postState.StateRoot != stf.PostState.StateRoot {
 				t.Errorf("❌ Step %d: PostState mismatch! Got %s, expected %s", stepNum+1, postState.StateRoot.Hex(), stf.PostState.StateRoot.Hex())
 			}
-
+			if printDiff {
+				diffs := compareKeyValsWithOutput(stf.PreState.KeyVals, postState.GetAllKeyValues(), stf.PostState.KeyVals)
+				HandleDiffs(diffs)
+			}
 			// Update state (only on success, like the real target)
 			stateDB = postState
 			stateDBMap[headerHash] = postState.StateRoot
