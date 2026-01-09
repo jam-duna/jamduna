@@ -57,9 +57,6 @@ func getEVMStorage(hostenv types.HostEnv) (types.EVMJAMStorage, bool) {
 			return evmStorage, true
 		}
 	}
-	if evmStorage, ok := hostenv.(types.EVMJAMStorage); ok {
-		return evmStorage, true
-	}
 	return nil, false
 }
 
@@ -862,9 +859,11 @@ func (vm *VM) hostFetch() {
 
 		case EXTRINSIC_BY_WORK_PACKAGE_EXTRINSIC_INDEX_3: // a SPECIFIC extrinsic of a work item -- note that this does NOT have a variable-length prefix
 			extrinsic_number := omega_12
-			if len(vm.Extrinsics) > 0 {
+			if int(extrinsic_number) < len(vm.Extrinsics) {
 				v_Bytes = vm.Extrinsics[extrinsic_number]
 				fmt.Printf("hostFetch case 3: Extrinsic # %d length %d\n", extrinsic_number, len(v_Bytes))
+			} else {
+				log.Warn(vm.logging, "FETCH case 3: extrinsic_number out of range", "extrinsic_number", extrinsic_number, "len(Extrinsics)", len(vm.Extrinsics))
 			}
 		case EXTRINSICS_BY_WORK_ITEM_4: // ALL extrinsics of a work item -- note that this has a variable-length prefix
 			if len(vm.Extrinsics) > 0 {

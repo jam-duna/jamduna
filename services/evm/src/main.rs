@@ -97,10 +97,10 @@ use utils::{
 #[cfg(all(not(test), target_arch = "riscv32", target_feature = "e"))]
 use utils::functions::log_crit;
 
-const SIZE0: usize = 0x200000;
+const SIZE0: usize = 0x800000;
 min_stack_size!(SIZE0);
 
-const SIZE1: usize = 0x200000;
+const SIZE1: usize = 0x2000000;
 #[global_allocator]
 static ALLOCATOR: SimpleAlloc<SIZE1> = SimpleAlloc::new();
 
@@ -131,7 +131,7 @@ const PRECOMPILES: &[(u8, &[u8], &str)] = &[
 
 #[polkavm_derive::polkavm_export]
 extern "C" fn refine(start_address: u64, length: u64) -> (u64, u64) {
-    polkavm_sbrk(4096 * 4096);
+    polkavm_sbrk(8192 * 4096);
     let Some(refine_args) = parse_refine_args(start_address, length) else {
         log_error("Refine: parse_refine_args failed");
         return empty_output();

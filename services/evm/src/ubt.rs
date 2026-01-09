@@ -1,6 +1,6 @@
 //! UBT witness parsing + multiproof verification (JAM profile hashing).
 
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
@@ -67,7 +67,7 @@ pub struct ExtensionProof {
     pub stem: Stem,
     pub stem_hash: [u8; 32],
     pub divergence_depth: u16,
-    pub siblings: Vec<[u8; 32]>,
+    // Siblings removed - verified inline during deserialization to save memory
 }
 
 impl UBTWitnessSection {
@@ -122,48 +122,74 @@ impl UBTWitnessSection {
         if offset < data.len() {
             let ext_count = usize::try_from(read_u32_be(data, &mut offset)?)
                 .map_err(|_| UBTError::ParseError)?;
+
+            // Guard: cap extension count to prevent memory exhaustion
+            const MAX_EXTENSIONS: usize = 256;
+            if ext_count > MAX_EXTENSIONS {
+                return Err(UBTError::ParseError);
+            }
+
             extensions = Vec::with_capacity(ext_count);
-            for ext_idx in 0..ext_count {
-                log_info(&format!("Parsing extension {} offset={} remaining={}", ext_idx, offset, data.len() - offset));
-                let missing_stem = read_array_31(data, &mut offset)?;  // Changed from key(32) to missing_stem(31)
-                log_info(&format!("  Read missing_stem, offset={}", offset));
+            let mut seen_missing_stems = BTreeSet::new();
+            for _ext_idx in 0..ext_count {
+                let missing_stem = read_array_31(data, &mut offset)?;
+                if !seen_missing_stems.insert(missing_stem) {
+                    return Err(UBTError::InvalidProof);
+                }
                 let stem = read_array_31(data, &mut offset)?;
-                log_info(&format!("  Read stem, offset={}", offset));
                 let stem_hash = read_array_32(data, &mut offset)?;
-                log_info(&format!("  Read stem_hash, offset={}", offset));
                 let divergence_depth = read_u16_be(data, &mut offset)?;
-                log_info(&format!("  Read divergence_depth={}, offset={}", divergence_depth, offset));
 
                 // Sparse encoding: read bitmap (31 bytes) + non-zero siblings
-                log_info(&format!("  Reading bitmap at offset={}", offset));
                 let bitmap = read_array_31(data, &mut offset)?;
-                log_info(&format!("  Read bitmap, offset={}", offset));
 
-                // Reconstruct 248 siblings from bitmap
-                let mut siblings = Vec::with_capacity(248);
-                let mut non_zero_count = 0;
+                // Verify extension proof inline to avoid storing 248×32 bytes per extension
+                // Validate prefix match
+                if divergence_depth >= 248 {
+                    return Err(UBTError::InvalidProof);
+                }
+                if !extension_prefix_matches(&missing_stem, &stem, divergence_depth) {
+                    return Err(UBTError::InvalidProof);
+                }
+
+                // Verify root reconstruction from bitmap-compressed siblings
+                let mut current = stem_hash;
+                let mut depth = 247u16;
                 for i in 0..248 {
                     let byte_idx = i / 8;
                     let bit_idx = 7 - (i % 8);
                     let bit_set = (bitmap[byte_idx] & (1 << bit_idx)) != 0;
-                    if bit_set {
-                        siblings.push(read_array_32(data, &mut offset)?);
-                        non_zero_count += 1;
-                    } else {
-                        siblings.push(ZERO32);
-                    }
-                }
-                log_info(&format!(
-                    "Extension proof: divergence_depth={}, non_zero_siblings={}/248",
-                    divergence_depth, non_zero_count
-                ));
 
+                    let sibling = if bit_set {
+                        read_array_32(data, &mut offset)?
+                    } else {
+                        ZERO32
+                    };
+
+                    // Hash with sibling based on stem bit at this depth
+                    if stem_bit(&stem, depth) == 0 {
+                        current = combine_trie_hashes(current, sibling);
+                    } else {
+                        current = combine_trie_hashes(sibling, current);
+                    }
+
+                    if depth == 0 {
+                        break;
+                    }
+                    depth -= 1;
+                }
+
+                // Verify reconstructed hash matches root
+                if current != root {
+                    return Err(UBTError::RootMismatch);
+                }
+
+                // Store only metadata, not siblings (saves ~8KB per extension)
                 extensions.push(ExtensionProof {
                     missing_stem,
                     stem,
                     stem_hash,
                     divergence_depth,
-                    siblings,
                 });
             }
         }
@@ -209,7 +235,7 @@ pub fn verify_witness_section(
     }
 
     verify_multi_proof(&section.proof, section.root)?;
-    verify_extension_proofs(&section.extensions, section.root)?;
+    // Extension proofs already verified inline during deserialization
     verify_entries_against_proof(&section, value_kind)?;
 
     Ok(section)
@@ -569,42 +595,15 @@ fn verify_multi_proof(mp: &MultiProof, expected_root: [u8; 32]) -> Result<(), UB
     Ok(())
 }
 
-fn verify_extension_proofs(
-    proofs: &[ExtensionProof],
-    expected_root: [u8; 32],
+// Extension proofs are now verified inline during deserialization to save memory.
+// This function is no longer used but kept for reference.
+#[allow(dead_code)]
+fn verify_extension_proofs_old(
+    _proofs: &[ExtensionProof],
+    _expected_root: [u8; 32],
 ) -> Result<(), UBTError> {
-    let mut seen_keys: BTreeMap<Stem, ()> = BTreeMap::new();
-    for proof in proofs {
-        if seen_keys.insert(proof.missing_stem, ()).is_some() {
-            return Err(UBTError::InvalidProof);
-        }
-        if proof.divergence_depth >= 248 {
-            return Err(UBTError::InvalidProof);
-        }
-        if proof.siblings.len() != 248 {
-            return Err(UBTError::InvalidProof);
-        }
-        if !extension_prefix_matches(&proof.missing_stem, &proof.stem, proof.divergence_depth) {
-            return Err(UBTError::InvalidProof);
-        }
-
-        let mut current = proof.stem_hash;
-        let mut depth = 247u16;
-        for sibling in &proof.siblings {
-            if stem_bit(&proof.stem, depth) == 0 {
-                current = combine_trie_hashes(current, *sibling);
-            } else {
-                current = combine_trie_hashes(*sibling, current);
-            }
-            if depth == 0 {
-                break;
-            }
-            depth -= 1;
-        }
-        if current != expected_root {
-            return Err(UBTError::RootMismatch);
-        }
-    }
+    // Moved to inline verification in deserialize() to avoid storing
+    // 248×32 bytes of sibling hashes per extension proof.
     Ok(())
 }
 

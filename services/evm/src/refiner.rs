@@ -430,13 +430,15 @@ impl BlockRefiner {
             let mut tx_hash = [0u8; 32];
             tx_hash.copy_from_slice(tx_hash_bytes.as_bytes());
 
-            log_debug(&format!(
+            if REFINE_VERBOSE {
+                log_debug(&format!(
                 "  Processing extrinsic {}: {} bytes, tx_hash={}, data={:?}",
                 tx_index,
                 extrinsic.len(),
                 format_object_id(tx_hash_bytes.0),
                 extrinsic
-            ));
+                ));
+            }
 
             // Decode extrinsic into transaction format
             const ARG_HEADER_LEN: usize = 148; // caller(20) + target(20) + gas_limit(32) + gas_price(32) + value(32) + call_kind(4) + data_len(8)
@@ -501,35 +503,37 @@ impl BlockRefiner {
             if REFINE_VERBOSE { log_info("  🔨 Matching call_create..."); }
             let call_create = match decoded.call_create {
                 DecodedCallCreate::Call { address, ref data } => {
-                    if data.len() >= 4 {
-                        let mut selector = [0u8; 4];
-                        selector.copy_from_slice(&data[0..4]);
+                    if REFINE_VERBOSE {
+                        if data.len() >= 4 {
+                            let mut selector = [0u8; 4];
+                            selector.copy_from_slice(&data[0..4]);
 
-                        let mut log_parts = vec![
-                            format!("CALL {:?}→{:?}", decoded.caller, address),
-                            format!("calldata=0x{}", hex::encode(&data)),
-                            format!("sel=0x{}", hex::encode(&selector)),
-                        ];
+                            let mut log_parts = vec![
+                                format!("CALL {:?}→{:?}", decoded.caller, address),
+                                format!("calldata=0x{}", hex::encode(&data)),
+                                format!("sel=0x{}", hex::encode(&selector)),
+                            ];
 
-                        if data.len() >= 4 + 32 {
-                            let mut addr_bytes = [0u8; 20];
-                            addr_bytes.copy_from_slice(&data[4 + 12..4 + 32]);
-                            let decoded_addr = H160::from(addr_bytes);
-                            log_parts.push(format!("arg0={:?}", decoded_addr));
+                            if data.len() >= 4 + 32 {
+                                let mut addr_bytes = [0u8; 20];
+                                addr_bytes.copy_from_slice(&data[4 + 12..4 + 32]);
+                                let decoded_addr = H160::from(addr_bytes);
+                                log_parts.push(format!("arg0={:?}", decoded_addr));
+                            }
+                            if data.len() >= 4 + 32 + 32 {
+                                let amount = U256::from_big_endian(&data[4 + 32..4 + 64]);
+                                log_parts.push(format!("arg1={}", amount));
+                            }
+
+                            log_debug(&format!("  {}", log_parts.join(", ")));
+                        } else {
+                            log_debug(&format!(
+                                "  CALL {:?}→{:?}, calldata={}",
+                                decoded.caller,
+                                address,
+                                format_data_hex(&data)
+                            ));
                         }
-                        if data.len() >= 4 + 32 + 32 {
-                            let amount = U256::from_big_endian(&data[4 + 32..4 + 64]);
-                            log_parts.push(format!("arg1={}", amount));
-                        }
-
-                        log_debug(&format!("  {}", log_parts.join(", ")));
-                    } else {
-                        log_debug(&format!(
-                            "  CALL {:?}→{:?}, calldata={}",
-                            decoded.caller,
-                            address,
-                            format_data_hex(&data)
-                        ));
                     }
                     TransactArgsCallCreate::Call {
                         address,
@@ -537,10 +541,12 @@ impl BlockRefiner {
                     }
                 }
                 DecodedCallCreate::Create { ref init_code } => {
-                    log_debug(&format!(
-                        "  CREATE with {} bytes init_code",
-                        init_code.len()
-                    ));
+                    if REFINE_VERBOSE {
+                        log_debug(&format!(
+                            "  CREATE with {} bytes init_code",
+                            init_code.len()
+                        ));
+                    }
                     TransactArgsCallCreate::Create {
                         init_code: init_code.clone(),
                         salt: None,
@@ -830,8 +836,6 @@ impl BlockRefiner {
         refine_context: &utils::functions::RefineContext,
         refine_args: &RefineArgs,
     ) -> Option<(ExecutionEffects, Vec<AccumulateInstruction>, u16, u32)> {
-        use utils::effects::StateWitness;
-
         log_info(&format!(
             "📦 from_work_item: parsing payload len={} head={}",
             work_item.payload.len(),
@@ -881,9 +885,9 @@ impl BlockRefiner {
         };
         let mut ubt_pre_witness: Option<crate::ubt::UBTWitnessSection> = None;
         let mut ubt_post_witness: Option<crate::ubt::UBTWitnessSection> = None;
-        let mut ubt_witness_count = 0usize;
+        let mut ubt_witness_count = metadata.witness_count;
 
-        if num_extrinsics >= 2 {
+        if ubt_witness_count >= 2 {
             let pre_bytes = match fetch_extrinsic_by_index(0) {
                 Some(bytes) => bytes,
                 None => return None,
@@ -907,44 +911,11 @@ impl BlockRefiner {
                         Ok(post) => {
                             ubt_pre_witness = Some(pre);
                             ubt_post_witness = Some(post);
-                            ubt_witness_count = 2;
                             log_info(&format!(
-                                "🔐 Detected UBT witness extrinsics (pre={}, post={})",
+                                "🔐 Verified UBT witness extrinsics (pre={}, post={})",
                                 pre_bytes.len(),
                                 post_bytes.len()
                             ));
-                            if let (Some(pre_w), Some(post_w)) =
-                                (ubt_pre_witness.as_ref(), ubt_post_witness.as_ref())
-                            {
-                                let (pre_head, pre_tail) = hex_head_tail(&pre_bytes);
-                                let (post_head, post_tail) = hex_head_tail(&post_bytes);
-                                log_info(&format!(
-                                    "✅ UBT verified: pre_root=0x{}, pre_entries={}, pre_keys={}, pre_nodes={}, pre_refs={}, pre_stems={}, pre_ext={}, post_root=0x{}, post_entries={}, post_keys={}, post_nodes={}, post_refs={}, post_stems={}, post_ext={}",
-                                    hex::encode(pre_w.root),
-                                    pre_w.entries.len(),
-                                    pre_w.proof.keys.len(),
-                                    pre_w.proof.nodes.len(),
-                                    pre_w.proof.node_refs.len(),
-                                    pre_w.proof.stems.len(),
-                                    pre_w.extensions.len(),
-                                    hex::encode(post_w.root),
-                                    post_w.entries.len(),
-                                    post_w.proof.keys.len(),
-                                    post_w.proof.nodes.len(),
-                                    post_w.proof.node_refs.len(),
-                                    post_w.proof.stems.len(),
-                                    post_w.extensions.len()
-                                ));
-                                log_info(&format!(
-                                    "🔍 UBT witness bytes: pre_len={}, pre_head64={}, pre_tail64={}, post_len={}, post_head64={}, post_tail64={}",
-                                    pre_bytes.len(),
-                                    pre_head,
-                                    pre_tail,
-                                    post_bytes.len(),
-                                    post_head,
-                                    post_tail
-                                ));
-                            }
                         }
                         Err(err) => {
                             log_error(&format!(
@@ -968,94 +939,8 @@ impl BlockRefiner {
 
         // Only process witnesses for PayloadTransaction/PayloadBuilder
         let tx_count = metadata.payload_size as usize;
-        let witness_start_idx = tx_count + ubt_witness_count;
-        if witness_start_idx > num_extrinsics {
-            log_error(&format!(
-                "❌ Refine: extrinsic count too small: witness_start_idx={} num_extrinsics={}",
-                witness_start_idx, num_extrinsics
-            ));
-            return None;
-        }
         let mut block_builder = BlockRefiner::new();
         let mut imported_objects: BTreeMap<ObjectId, (ObjectRef, Vec<u8>)> = BTreeMap::new();
-
-        for idx in witness_start_idx..num_extrinsics {
-            let extrinsic = match fetch_extrinsic_by_index(idx) {
-                Some(bytes) => bytes,
-                None => return None,
-            };
-            // log_debug(&format!(
-            //         "🔍 Attempting to decode witness extrinsic idx={} len={}",
-            //         idx,
-            //         extrinsic.len()
-            // ));
-            if metadata.payload_type == PayloadType::Transactions
-                || metadata.payload_type == PayloadType::Builder
-            {
-                // Witness extrinsics are serialized directly without format byte prefix
-                if extrinsic.is_empty() {
-                    log_error(&format!("Empty extrinsic at index {}", idx));
-                    return None;
-                }
-                
-                // Deserialize and verify state witness (no format byte prefix)
-                match StateWitness::deserialize_and_verify(
-                    work_item.service,
-                    &extrinsic,
-                    refine_context.state_root,
-                ) {
-                    Ok(state_witness) => {
-                        let object_id = state_witness.object_id;
-                        let object_ref = state_witness.ref_info.clone();
-
-                        let payload_type_str = if metadata.payload_type == PayloadType::Transactions
-                        {
-                            "Transactions"
-                        } else {
-                            "Builder"
-                        };
-
-                        if let Some(payload) =
-                            state_witness.fetch_object_payload(work_item, work_item_index)
-                        {
-                            if REFINE_VERBOSE {
-                                let payload_len = payload.len();
-                                log_info(&format!(
-                                    "✅ Payload{}: Verified + imported object {} (payload_length={})",
-                                    payload_type_str,
-                                    format_object_id(object_id),
-                                    payload_len
-                                ));
-                            }
-                            imported_objects.insert(object_id, (object_ref, payload));
-                        } else {
-                            log_warn(&format!(
-                                "⚠️  Payload{}: Verified witness but could not fetch payload for object {}",
-                                payload_type_str,
-                                format_object_id(object_id)
-                            ));
-                        }
-                    }
-                    Err(e) => {
-                        log_error(&format!(
-                            "Failed to deserialize or verify witness at index {}: {:?}",
-                            idx, e
-                        ));
-                        return None;
-                    }
-                }
-            } else if metadata.payload_type == PayloadType::Call {
-                // Handle Call payload - early exit handled below
-                // No witness processing needed for Call payloads
-            }
-        }
-
-        if REFINE_VERBOSE {
-            log_info(&format!(
-                "📥 Refine: Set up block builder for {} objects",
-                imported_objects.len()
-            ));
-        }
 
         // Create environment/backend from work item context
         use crate::state::MajikBackend;
@@ -1117,7 +1002,7 @@ impl BlockRefiner {
                     backend,
                     &config,
                     work_item_index,
-                    ubt_witness_count,
+                    ubt_witness_count as usize,
                     metadata.payload_size,
                     refine_args,
                     refine_context,
@@ -1272,10 +1157,12 @@ impl BlockRefiner {
                 contract_blob_buffer.extend_from_slice(&tx_index.to_le_bytes());
                 contract_blob_buffer.extend_from_slice(&intent.effect.payload);
 
-                log_debug(&format!(
-                    "  Contract blob: addr={:?}, kind={}, payload_len={}, tx_index={}",
-                    H160::from(address), object_kind, payload_length, tx_index
-                ));
+                if REFINE_VERBOSE {
+                    log_debug(&format!(
+                        "  Contract blob: addr={:?}, kind={}, payload_len={}, tx_index={}",
+                        H160::from(address), object_kind, payload_length, tx_index
+                    ));
+                }
             }
 
             // Export the entire contract blob buffer as ONE segment range
@@ -1294,6 +1181,16 @@ impl BlockRefiner {
                 Ok(next_index) => {
                     contract_witness_index_start = contract_export_entry.ref_info.index_start;
                     contract_witness_payload_length = contract_export_entry.ref_info.payload_length;
+
+                    // Always log contract witness export for debugging
+                    log_info(&format!(
+                        "📤 Contract witness exported: {} intents, index_start={}, payload_len={}, next_index={}",
+                        execution_effects.contract_intents.len(),
+                        contract_witness_index_start,
+                        contract_witness_payload_length,
+                        next_index
+                    ));
+
                     export_count = next_index;
 
                     if REFINE_VERBOSE {

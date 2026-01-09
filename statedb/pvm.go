@@ -428,6 +428,16 @@ func (vm *VM) ExecuteRefine(core uint16, workitemIndex uint32, workPackage types
 	vm.Extrinsics = extrinsics
 	vm.Imports = importsegments
 
+	// DEBUG: Check for metadata/blob count mismatch at ExecuteRefine entry
+	metadataCount := len(workitem.Extrinsics)
+	blobCount := len(extrinsics)
+	if metadataCount != blobCount {
+		log.Error(vm.logging, "ExecuteRefine: MISMATCH between metadata and blob count!",
+			"workitemIndex", workitemIndex,
+			"metadataCount", metadataCount,
+			"blobCount", blobCount)
+	}
+
 	for i := 0; i < int(workitemIndex); i++ {
 		item := workPackage.WorkItems[i]
 		vm.TotalExported += uint64(item.ExportCount)

@@ -1159,7 +1159,7 @@ func (n *Rollup) SendRawTransaction(signedTxData []byte) (common.Hash, error) {
 		return common.Hash{}, fmt.Errorf("failed to add transaction to mempool: %v", err)
 	}
 
-	log.Info(log.Node, "SendRawTransaction: Transaction added to mempool",
+	log.Debug(log.Node, "SendRawTransaction: Transaction added to mempool",
 		"hash", tx.Hash.String(),
 		"from", tx.From.String(),
 		"nonce", tx.Nonce,

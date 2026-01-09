@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"sync"
 
+	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
 	"github.com/colorfulnotion/jam/common"
 	"github.com/colorfulnotion/jam/log"
-	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
 	lru "github.com/hashicorp/golang-lru/v2"
 )
 

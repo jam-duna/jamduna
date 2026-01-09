@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
+	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
-	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
 )
 
 // TxPoolStatus represents the status of a transaction in the pool
@@ -24,9 +24,9 @@ const (
 // TxPoolEntry represents a transaction entry in the pool
 type TxPoolEntry struct {
 	Tx       *evmtypes.EthereumTransaction `json:"transaction"`
-	Status   TxPoolStatus                 `json:"status"`
-	AddedAt  time.Time                    `json:"addedAt"`
-	Attempts int                          `json:"attempts"`
+	Status   TxPoolStatus                  `json:"status"`
+	AddedAt  time.Time                     `json:"addedAt"`
+	Attempts int                           `json:"attempts"`
 }
 
 // TxPool manages pending Ethereum transactions for the guarantor
@@ -116,10 +116,10 @@ func (pool *TxPool) AddTransaction(tx *evmtypes.EthereumTransaction) error {
 	// Add to appropriate pool based on nonce
 	if pool.shouldQueue(tx) {
 		pool.addToQueued(entry)
-		log.Info(log.Node, "TxPool: Added transaction to queue", "hash", tx.Hash.String(), "from", tx.From.String(), "nonce", tx.Nonce)
+		log.Debug(log.Node, "TxPool: Added transaction to queue", "hash", tx.Hash.String(), "from", tx.From.String(), "nonce", tx.Nonce)
 	} else {
 		pool.addToPending(entry)
-		log.Info(log.Node, "TxPool: Added transaction to pending", "hash", tx.Hash.String(), "from", tx.From.String(), "nonce", tx.Nonce)
+		log.Debug(log.Node, "TxPool: Added transaction to pending", "hash", tx.Hash.String(), "from", tx.From.String(), "nonce", tx.Nonce)
 	}
 
 	pool.stats.TotalReceived++
@@ -197,7 +197,7 @@ func (pool *TxPool) RemoveTransaction(hash common.Hash) bool {
 	if entry, exists := pool.pending[hash]; exists {
 		pool.removeFromPending(entry)
 		pool.stats.TotalProcessed++
-		log.Info(log.Node, "TxPool: Removed transaction from pending", "hash", hash.String())
+		log.Debug(log.Node, "TxPool: Removed transaction from pending", "hash", hash.String())
 		return true
 	}
 
@@ -205,7 +205,7 @@ func (pool *TxPool) RemoveTransaction(hash common.Hash) bool {
 	if entry, exists := pool.queued[hash]; exists {
 		pool.removeFromQueued(entry)
 		pool.stats.TotalProcessed++
-		log.Info(log.Node, "TxPool: Removed transaction from queued", "hash", hash.String())
+		log.Debug(log.Node, "TxPool: Removed transaction from queued", "hash", hash.String())
 		return true
 	}
 

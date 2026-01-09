@@ -154,27 +154,28 @@ impl WriteEffectEntry {
             //     self.ref_info.payload_length,
             //     self.payload.len()
             // ));
-            // IMPORTANT: Create a copy of the payload to pass to the FFI.
-            // The export() FFI function can corrupt nearby memory, so we MUST NOT
-            // pass a pointer to self.payload directly. Instead, we copy it to a
-            // temporary location and export from there.
-            let payload_copy = self.payload.clone();
+            // IMPORTANT: export() only accepts up to SEGMENT_SIZE bytes per call.
+            // Copy each chunk into a static buffer before calling the FFI to avoid
+            // passing pointers into self.payload (which can be corrupted by the FFI).
+            let mut offset = 0usize;
+            while offset < self.payload.len() {
+                let remaining = self.payload.len() - offset;
+                let chunk_len = core::cmp::min(remaining, SEGMENT_SIZE as usize);
+                let buffer_ptr = &raw mut SEGMENT_BUFFER as *mut u8;
+                unsafe {
+                    core::ptr::copy_nonoverlapping(
+                        self.payload.as_ptr().add(offset),
+                        buffer_ptr,
+                        chunk_len,
+                    );
+                }
 
-            let result = unsafe {
-                export(
-                    payload_copy.as_ptr() as u64,
-                    payload_copy.len() as u64
-                )
-            };
-
-            // Check if export succeeded (result should be the next segment index)
-            if result == u64::MAX {
-                return Err(HarnessError::HostFetchFailed);
+                let result = unsafe { export(buffer_ptr as u64, chunk_len as u64) };
+                if result == u64::MAX {
+                    return Err(HarnessError::HostFetchFailed);
+                }
+                offset += chunk_len;
             }
-
-            // IMPORTANT: The FFI corrupts payload_copy's memory. We must NOT let Rust
-            // try to drop it, as that will TRAP. Use mem::forget to leak it instead.
-            core::mem::forget(payload_copy);
 
         // log_info(&format!(
         //     "export_effect --  object_id={}, index_start={}, payload_length={}",
@@ -185,7 +186,8 @@ impl WriteEffectEntry {
 
         // Calculate next index based on payload_length and segment size
             // Each segment is SEGMENT_SIZE bytes (4104), so we need ceil(payload_length / SEGMENT_SIZE) segments
-            let num_segments = (self.ref_info.payload_length as u64 + SEGMENT_SIZE - 1) / SEGMENT_SIZE;
+            let num_segments =
+                (self.ref_info.payload_length as u64 + SEGMENT_SIZE - 1) / SEGMENT_SIZE;
             let next_index = start_index as u64 + num_segments;
             u16::try_from(next_index).map_err(|_| HarnessError::ParseError)
         } else {

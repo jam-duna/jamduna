@@ -10,13 +10,13 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-// SubmitFunc is the callback for submitting a work package bundle to a specific core
-// Returns the work package hash and error
-type SubmitFunc func(bundle *types.WorkPackageBundle, coreIndex uint16) (common.Hash, error)
+// Submitter is a callback for submitting a work package bundle to a specific core.
+// Returns the work package hash and error.
+type Submitter func(bundle *types.WorkPackageBundle, coreIndex uint16) (common.Hash, error)
 
-// BuildBundleFunc is the callback for building/rebuilding a bundle
-// This is called when an item needs to be resubmitted with a new RefineContext
-type BuildBundleFunc func(item *QueueItem) (*types.WorkPackageBundle, error)
+// BundleBuilder is a callback for building/rebuilding a bundle with fresh RefineContext.
+// This is called when an item needs to be resubmitted due to timeout or failure.
+type BundleBuilder func(item *QueueItem) (*types.WorkPackageBundle, error)
 
 // Runner manages the queue submission loop
 type Runner struct {
@@ -26,8 +26,8 @@ type Runner struct {
 	serviceID uint32
 
 	// Callbacks
-	submitFunc     SubmitFunc
-	buildBundleFunc BuildBundleFunc
+	submitter     Submitter
+	bundleBuilder BundleBuilder
 
 	// Control
 	tickInterval time.Duration
@@ -56,13 +56,13 @@ func DefaultRunnerConfig() RunnerConfig {
 }
 
 // NewRunner creates a new queue runner
-func NewRunner(queue *QueueState, serviceID uint32, submitFunc SubmitFunc, buildBundleFunc BuildBundleFunc) *Runner {
+func NewRunner(queue *QueueState, serviceID uint32, submitter Submitter, bundleBuilder BundleBuilder) *Runner {
 	config := DefaultRunnerConfig()
 	return &Runner{
 		queue:                 queue,
 		serviceID:             serviceID,
-		submitFunc:            submitFunc,
-		buildBundleFunc:       buildBundleFunc,
+		submitter:             submitter,
+		bundleBuilder:         bundleBuilder,
 		tickInterval:          config.TickInterval,
 		submissionWindowStart: config.SubmissionWindowStart,
 		submissionWindowEnd:   config.SubmissionWindowEnd,
@@ -135,8 +135,40 @@ func (r *Runner) tick() {
 
 	// Check if we're in the submission window
 	if !r.inSubmissionWindow() {
+		// Log queue status periodically when not in window
+		stats := r.queue.GetStats()
+		if stats.QueuedCount > 0 || stats.InflightCount > 0 {
+			now := time.Now()
+			timeslotDuration := 6 * time.Second
+			epochStart := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
+			elapsed := now.Sub(epochStart)
+			positionInSlot := elapsed % timeslotDuration
+			secondsUntilNext := timeslotDuration - positionInSlot
+
+			log.Debug(log.Node, "Queue Runner: Waiting for submission window",
+				"queued", stats.QueuedCount,
+				"inflight", stats.InflightCount,
+				"submitted", stats.SubmittedCount,
+				"guaranteed", stats.GuaranteedCount,
+				"secondsUntilNextSlot", secondsUntilNext.Seconds(),
+				"windowStart", r.submissionWindowStart,
+				"windowEnd", r.submissionWindowEnd)
+		}
 		return
 	}
+
+	// Log that we entered the submission window with detailed status
+	stats := r.queue.GetStats()
+	effectiveInflight := stats.SubmittedCount + stats.GuaranteedCount // Items that block new submissions
+	log.Info(log.Node, "Queue Runner: In submission window",
+		"queued", stats.QueuedCount,
+		"inflightMapSize", stats.InflightCount,
+		"effectiveInflight", effectiveInflight,
+		"submitted", stats.SubmittedCount,
+		"guaranteed", stats.GuaranteedCount,
+		"accumulated", stats.AccumulatedCount,
+		"finalized", stats.FinalizedCount,
+		"canSubmit", r.queue.CanSubmit())
 
 	// Try to submit items while we can
 	for r.queue.CanSubmit() {
@@ -146,8 +178,8 @@ func (r *Runner) tick() {
 		}
 
 		// If this is a resubmission (version > 1), rebuild the bundle
-		if item.Version > 1 && r.buildBundleFunc != nil {
-			newBundle, err := r.buildBundleFunc(item)
+		if item.Version > 1 && r.bundleBuilder != nil {
+			newBundle, err := r.bundleBuilder(item)
 			if err != nil {
 				log.Error(log.Node, "Queue Runner: Failed to rebuild bundle",
 					"service", r.serviceID,
@@ -164,7 +196,7 @@ func (r *Runner) tick() {
 		}
 
 		// Submit the bundle to the target core
-		wpHash, err := r.submitFunc(item.Bundle, item.CoreIndex)
+		wpHash, err := r.submitter(item.Bundle, item.CoreIndex)
 		if err != nil {
 			log.Error(log.Node, "Queue Runner: Submission failed",
 				"service", r.serviceID,
@@ -234,7 +266,7 @@ func (r *Runner) EnqueueBundle(bundle *types.WorkPackageBundle, coreIndex uint16
 }
 
 // EnqueueBundleWithOriginalExtrinsics enqueues a bundle with original transaction extrinsics and metadata
-// The originalExtrinsics are needed for rebuilding on resubmission (to avoid double-prepending Verkle witness)
+// The originalExtrinsics are needed for rebuilding on resubmission (to avoid double-prepending UBT witness)
 // The originalWorkItemExtrinsics are needed to restore WorkItems[].Extrinsics metadata before rebuilding
 func (r *Runner) EnqueueBundleWithOriginalExtrinsics(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic, coreIndex uint16) (uint64, error) {
 	return r.queue.EnqueueWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIndex)

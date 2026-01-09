@@ -10,7 +10,6 @@ import (
 
 	"github.com/colorfulnotion/jam/fuzz"
 	"github.com/colorfulnotion/jam/pvm"
-	"github.com/colorfulnotion/jam/statedb"
 	"github.com/colorfulnotion/jam/types"
 )
 

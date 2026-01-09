@@ -87,23 +87,24 @@ func DefaultConfig() QueueConfig {
 
 // QueueItem represents a work package in the queue with version tracking
 type QueueItem struct {
+	BundleID    string                   // Persistent identifier that survives resubmissions (format: "B-{blockNumber}")
 	BlockNumber uint64                   // Rollup block number (may be provisional)
 	Version     int                      // Version for resubmission tracking
 	EventID     uint64                   // Telemetry event ID
 	AddTS       time.Time                // When item was added to queue
 	Bundle      *types.WorkPackageBundle // The actual bundle to submit
-	WPHash      common.Hash              // Work package hash (computed after BuildBundle)
+	WPHash      common.Hash              // Work package hash (computed after BuildBundle) - CHANGES on resubmit!
 	SubmittedAt  time.Time               // When item was submitted (zero if not submitted)
 	GuaranteedAt time.Time               // When item was guaranteed (zero if not guaranteed)
 	Status      WorkPackageBundleStatus  // Current status
 	CoreIndex   uint16                   // Target core index for submission
 
-	// OriginalExtrinsics stores the transaction extrinsics BEFORE Verkle witness prepending.
+	// OriginalExtrinsics stores the transaction extrinsics BEFORE UBT witness prepending.
 	// Used for rebuilding bundles on resubmission - BuildBundle prepends a fresh witness,
 	// so we need the original txs to avoid double-prepending.
 	OriginalExtrinsics []types.ExtrinsicsBlobs
 
-	// OriginalWorkItemExtrinsics stores the WorkItems[].Extrinsics metadata BEFORE Verkle witness prepending.
+	// OriginalWorkItemExtrinsics stores the WorkItems[].Extrinsics metadata BEFORE UBT witness prepending.
 	// BuildBundle also prepends metadata entries, so we need to restore the original metadata on rebuild.
 	OriginalWorkItemExtrinsics [][]types.WorkItemExtrinsic
 }
@@ -133,6 +134,10 @@ type QueueState struct {
 	// Hash tracking by version: blockNumber -> version -> wpHash
 	HashByVer map[uint64]map[int]common.Hash
 
+	// Reverse lookup: wpHash -> blockNumber (for guarantee/accumulate events)
+	// This is updated every time a bundle is submitted with a new hash
+	HashToBlock map[common.Hash]uint64
+
 	// Finalized items (for verification and retention)
 	Finalized map[uint64]*QueueItem
 
@@ -161,6 +166,7 @@ func NewQueueStateWithConfig(serviceID uint32, config QueueConfig) *QueueState {
 		Status:          make(map[uint64]WorkPackageBundleStatus),
 		CurrentVer:      make(map[uint64]int),
 		HashByVer:       make(map[uint64]map[int]common.Hash),
+		HashToBlock:     make(map[common.Hash]uint64),
 		Finalized:       make(map[uint64]*QueueItem),
 		nextBlockNumber: 1, // Start from block 1 (0 is genesis)
 		eventIDCounter:  0,
@@ -193,13 +199,17 @@ func (qs *QueueState) Enqueue(bundle *types.WorkPackageBundle, coreIndex uint16)
 	blockNumber := qs.nextBlockNumber
 	qs.nextBlockNumber++
 
+	bundleID := fmt.Sprintf("B-%d", blockNumber)
+	wpHash := bundle.WorkPackage.Hash()
+
 	item := &QueueItem{
+		BundleID:    bundleID,
 		BlockNumber: blockNumber,
 		Version:     1,
 		EventID:     qs.nextEventID(),
 		AddTS:       time.Now(),
 		Bundle:      bundle,
-		WPHash:      bundle.WorkPackage.Hash(),
+		WPHash:      wpHash,
 		Status:      StatusQueued,
 		CoreIndex:   coreIndex,
 	}
@@ -211,22 +221,24 @@ func (qs *QueueState) Enqueue(bundle *types.WorkPackageBundle, coreIndex uint16)
 	if qs.HashByVer[blockNumber] == nil {
 		qs.HashByVer[blockNumber] = make(map[int]common.Hash)
 	}
-	qs.HashByVer[blockNumber][1] = item.WPHash
+	qs.HashByVer[blockNumber][1] = wpHash
+	qs.HashToBlock[wpHash] = blockNumber // Reverse lookup
 
 	log.Info(log.Node, "Queue: Enqueued work package",
 		"service", qs.serviceID,
+		"bundleID", bundleID,
 		"blockNumber", blockNumber,
 		"coreIndex", coreIndex,
-		"wpHash", item.WPHash.Hex(),
+		"wpHash", wpHash.Hex(),
 		"queueSize", len(qs.Queued))
 
 	return blockNumber, nil
 }
 
 // EnqueueWithOriginalExtrinsics adds a new bundle to the queue along with original extrinsics
-// The originalExtrinsics are the transaction extrinsics BEFORE Verkle witness prepending,
+// The originalExtrinsics are the transaction extrinsics BEFORE UBT witness prepending,
 // used for rebuilding bundles on resubmission without double-prepending the witness.
-// The originalWorkItemExtrinsics are the WorkItems[].Extrinsics metadata BEFORE Verkle witness prepending.
+// The originalWorkItemExtrinsics are the WorkItems[].Extrinsics metadata BEFORE UBT witness prepending.
 func (qs *QueueState) EnqueueWithOriginalExtrinsics(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic, coreIndex uint16) (uint64, error) {
 	qs.mu.Lock()
 	defer qs.mu.Unlock()
@@ -238,13 +250,17 @@ func (qs *QueueState) EnqueueWithOriginalExtrinsics(bundle *types.WorkPackageBun
 	blockNumber := qs.nextBlockNumber
 	qs.nextBlockNumber++
 
+	bundleID := fmt.Sprintf("B-%d", blockNumber)
+	wpHash := bundle.WorkPackage.Hash()
+
 	item := &QueueItem{
+		BundleID:                   bundleID,
 		BlockNumber:                blockNumber,
 		Version:                    1,
 		EventID:                    qs.nextEventID(),
 		AddTS:                      time.Now(),
 		Bundle:                     bundle,
-		WPHash:                     bundle.WorkPackage.Hash(),
+		WPHash:                     wpHash,
 		Status:                     StatusQueued,
 		CoreIndex:                  coreIndex,
 		OriginalExtrinsics:         originalExtrinsics,
@@ -258,18 +274,20 @@ func (qs *QueueState) EnqueueWithOriginalExtrinsics(bundle *types.WorkPackageBun
 	if qs.HashByVer[blockNumber] == nil {
 		qs.HashByVer[blockNumber] = make(map[int]common.Hash)
 	}
-	qs.HashByVer[blockNumber][1] = item.WPHash
+	qs.HashByVer[blockNumber][1] = wpHash
+	qs.HashToBlock[wpHash] = blockNumber // Reverse lookup
 
-	// Count original extrinsics (transactions before Verkle witness prepending)
+	// Count original extrinsics (transactions before UBT witness prepending)
 	txCount := 0
 	for _, blobs := range originalExtrinsics {
 		txCount += len(blobs)
 	}
 	log.Info(log.Node, "Queue: Enqueued work package with original extrinsics",
 		"service", qs.serviceID,
+		"bundleID", bundleID,
 		"blockNumber", blockNumber,
 		"coreIndex", coreIndex,
-		"wpHash", item.WPHash.Hex(),
+		"wpHash", wpHash.Hex(),
 		"txCount", txCount,
 		"queueSize", len(qs.Queued))
 
@@ -334,23 +352,44 @@ func (qs *QueueState) MarkSubmitted(item *QueueItem, wpHash common.Hash) {
 	defer qs.mu.Unlock()
 
 	oldStatus := qs.Status[item.BlockNumber]
+	oldHash := item.WPHash
 	item.Status = StatusSubmitted
 	item.SubmittedAt = time.Now()
 	item.WPHash = wpHash
 
 	qs.Inflight[item.BlockNumber] = item
 	qs.Status[item.BlockNumber] = StatusSubmitted
+
+	// Initialize HashByVer map for this block number if needed
+	if qs.HashByVer[item.BlockNumber] == nil {
+		qs.HashByVer[item.BlockNumber] = make(map[int]common.Hash)
+	}
 	qs.HashByVer[item.BlockNumber][item.Version] = wpHash
+
+	// CRITICAL: Register the NEW hash in reverse lookup for guarantee matching
+	// The wpHash may have changed due to RefineContext changes on resubmission
+	qs.HashToBlock[wpHash] = item.BlockNumber
 
 	if qs.onStatusChange != nil {
 		qs.onStatusChange(item.BlockNumber, oldStatus, StatusSubmitted)
 	}
 
-	log.Info(log.Node, "Queue: Marked submitted",
+	// Calculate inflight count
+	inflightCount := qs.inflight()
+
+	// Log hash change if this is a resubmission with new hash
+	hashChanged := oldHash != wpHash && oldHash != (common.Hash{})
+
+	log.Info(log.Node, "Queue: Marked submitted (tracking hash for guarantee)",
 		"service", qs.serviceID,
+		"bundleID", item.BundleID,
 		"blockNumber", item.BlockNumber,
 		"version", item.Version,
-		"wpHash", wpHash.Hex())
+		"coreIndex", item.CoreIndex,
+		"hashChanged", hashChanged,
+		"wpHash", wpHash.Hex(),
+		"inflightCount", inflightCount,
+		"queuedRemaining", len(qs.Queued))
 }
 
 // OnGuaranteed handles a guarantee event for a work package hash
@@ -358,38 +397,85 @@ func (qs *QueueState) OnGuaranteed(wpHash common.Hash) {
 	qs.mu.Lock()
 	defer qs.mu.Unlock()
 
+	// Log incoming guarantee with hash details
+	log.Info(log.Node, "Queue: OnGuaranteed called",
+		"wpHash", wpHash.Hex(),
+		"hashToBlockSize", len(qs.HashToBlock),
+		"hashByVerSize", len(qs.HashByVer))
+
 	bn, ver := qs.lookupByHash(wpHash)
 	if bn == 0 {
-		log.Debug(log.Node, "Queue: OnGuaranteed for unknown hash", "wpHash", wpHash.Hex())
+		// Log all known hashes to help debug
+		var knownHashes []string
+		for blockNum, versions := range qs.HashByVer {
+			for v, h := range versions {
+				knownHashes = append(knownHashes, fmt.Sprintf("bn=%d,v=%d,hash=%s", blockNum, v, h.Hex()[:16]))
+			}
+		}
+		log.Warn(log.Node, "Queue: OnGuaranteed for UNKNOWN hash - NOT FOUND in queue",
+			"incomingHash", wpHash.Hex(),
+			"knownHashCount", len(knownHashes),
+			"knownHashes", knownHashes)
 		return
 	}
 
-	// Check if this is the current version
-	if ver != qs.CurrentVer[bn] {
-		log.Debug(log.Node, "Queue: OnGuaranteed for stale version",
+	// Accept guarantee for ANY version of this block - if an older version got guaranteed,
+	// that's great! We should accept it and cancel any pending resubmission.
+	// This handles the race condition where:
+	// 1. We submit v1, timeout waiting for guarantee, increment to v2
+	// 2. v1's guarantee finally arrives - we should accept it!
+	currentVer := qs.CurrentVer[bn]
+	if ver != currentVer {
+		log.Info(log.Node, "Queue: OnGuaranteed for older version - accepting (canceling pending resubmit)",
 			"blockNumber", bn,
-			"version", ver,
-			"currentVersion", qs.CurrentVer[bn])
-		return
+			"guaranteedVersion", ver,
+			"currentVersion", currentVer,
+			"wpHash", wpHash.Hex())
+		// Update current version to the guaranteed one
+		qs.CurrentVer[bn] = ver
 	}
 
 	oldStatus := qs.Status[bn]
 	qs.Status[bn] = StatusGuaranteed
 
+	var bundleID string
+	// Check both Inflight and Queued - item might be in queue for resubmission
 	if item, ok := qs.Inflight[bn]; ok {
 		item.Status = StatusGuaranteed
 		item.GuaranteedAt = time.Now()
+		item.Version = ver // Update to the version that was actually guaranteed
+		item.WPHash = wpHash
+		bundleID = item.BundleID
+	} else if item, ok := qs.Queued[bn]; ok {
+		// Item was requeued but older version got guaranteed - move it to Inflight
+		item.Status = StatusGuaranteed
+		item.GuaranteedAt = time.Now()
+		item.Version = ver
+		item.WPHash = wpHash
+		bundleID = item.BundleID
+		qs.Inflight[bn] = item
+		delete(qs.Queued, bn)
+		log.Info(log.Node, "Queue: Moved item from Queued to Inflight after guarantee",
+			"bundleID", bundleID,
+			"blockNumber", bn)
 	}
 
 	if qs.onStatusChange != nil {
 		qs.onStatusChange(bn, oldStatus, StatusGuaranteed)
 	}
 
+	// Calculate new inflight count
+	inflightCount := qs.inflight()
+
 	log.Info(log.Node, "🔒 Queue: Marked guaranteed",
 		"service", qs.serviceID,
+		"bundleID", bundleID,
 		"blockNumber", bn,
 		"version", ver,
-		"wpHash", wpHash.Hex())
+		"wpHash", wpHash.Hex(),
+		"oldStatus", oldStatus.String(),
+		"newInflightCount", inflightCount,
+		"queuedCount", len(qs.Queued))
 }
 
 // OnAccumulated handles an accumulation event for a work package hash
@@ -403,20 +489,30 @@ func (qs *QueueState) OnAccumulated(wpHash common.Hash) {
 		return
 	}
 
-	// Check if this is the current version
-	if ver != qs.CurrentVer[bn] {
-		log.Debug(log.Node, "Queue: OnAccumulated for stale version",
+	// Accept accumulation for ANY version - similar to OnGuaranteed
+	currentVer := qs.CurrentVer[bn]
+	if ver != currentVer {
+		log.Info(log.Node, "Queue: OnAccumulated for older version - accepting",
 			"blockNumber", bn,
-			"version", ver,
-			"currentVersion", qs.CurrentVer[bn])
-		return
+			"accumulatedVersion", ver,
+			"currentVersion", currentVer,
+			"wpHash", wpHash.Hex())
+		qs.CurrentVer[bn] = ver
 	}
 
 	oldStatus := qs.Status[bn]
 	qs.Status[bn] = StatusAccumulated
 
+	var bundleID string
 	if item, ok := qs.Inflight[bn]; ok {
 		item.Status = StatusAccumulated
+		bundleID = item.BundleID
+	} else if item, ok := qs.Queued[bn]; ok {
+		// Item was requeued but older version got accumulated
+		item.Status = StatusAccumulated
+		bundleID = item.BundleID
+		qs.Inflight[bn] = item
+		delete(qs.Queued, bn)
 	}
 
 	if qs.onStatusChange != nil {
@@ -426,11 +522,18 @@ func (qs *QueueState) OnAccumulated(wpHash common.Hash) {
 	// Prune old finalized items
 	qs.pruneOlder(bn)
 
-	log.Info(log.Node, "📦 Queue: Marked accumulated",
+	// Calculate new inflight count - accumulation frees up a slot!
+	inflightCount := qs.inflight()
+
+	log.Info(log.Node, "📦 Queue: Marked accumulated (slot freed!)",
 		"service", qs.serviceID,
+		"bundleID", bundleID,
 		"blockNumber", bn,
 		"version", ver,
-		"wpHash", wpHash.Hex())
+		"wpHash", wpHash.Hex(),
+		"oldStatus", oldStatus.String(),
+		"newInflightCount", inflightCount,
+		"queuedCount", len(qs.Queued))
 }
 
 // OnFinalized handles a finalization event for a work package hash
@@ -444,23 +547,29 @@ func (qs *QueueState) OnFinalized(wpHash common.Hash) {
 		return
 	}
 
-	// Check if this is the current version
-	if ver != qs.CurrentVer[bn] {
-		log.Debug(log.Node, "Queue: OnFinalized for stale version",
+	// Accept finalization for ANY version - similar to OnGuaranteed/OnAccumulated
+	currentVer := qs.CurrentVer[bn]
+	if ver != currentVer {
+		log.Info(log.Node, "Queue: OnFinalized for older version - accepting",
 			"blockNumber", bn,
-			"version", ver,
-			"currentVersion", qs.CurrentVer[bn])
-		return
+			"finalizedVersion", ver,
+			"currentVersion", currentVer,
+			"wpHash", wpHash.Hex())
+		qs.CurrentVer[bn] = ver
 	}
 
 	oldStatus := qs.Status[bn]
 	qs.Status[bn] = StatusFinalized
 
-	// Move from inflight to finalized
+	// Move from inflight or queued to finalized
 	if item, ok := qs.Inflight[bn]; ok {
 		item.Status = StatusFinalized
 		qs.Finalized[bn] = item
 		delete(qs.Inflight, bn)
+	} else if item, ok := qs.Queued[bn]; ok {
+		item.Status = StatusFinalized
+		qs.Finalized[bn] = item
+		delete(qs.Queued, bn)
 	}
 
 	if qs.onStatusChange != nil {
@@ -530,7 +639,23 @@ func (qs *QueueState) OnTimeoutOrFailure(failedBN uint64) {
 }
 
 // lookupByHash finds block number and version for a given work package hash
+// Uses the reverse lookup map first (O(1)), falls back to scanning HashByVer
 func (qs *QueueState) lookupByHash(wpHash common.Hash) (blockNumber uint64, version int) {
+	// Fast path: use reverse lookup map
+	if bn, ok := qs.HashToBlock[wpHash]; ok {
+		// Find the version for this hash
+		if versions, ok := qs.HashByVer[bn]; ok {
+			for ver, hash := range versions {
+				if hash == wpHash {
+					return bn, ver
+				}
+			}
+		}
+		// Found in reverse map but not in HashByVer - shouldn't happen, but return what we have
+		return bn, qs.CurrentVer[bn]
+	}
+
+	// Slow path fallback: scan all versions (for backwards compatibility)
 	for bn, versions := range qs.HashByVer {
 		for ver, hash := range versions {
 			if hash == wpHash {
@@ -568,14 +693,18 @@ func (qs *QueueState) CheckTimeouts() {
 	for bn, item := range qs.Inflight {
 		var timeout time.Duration
 		var refTime time.Time
+		var timeoutType string
 
 		switch item.Status {
 		case StatusSubmitted:
 			if item.SubmittedAt.IsZero() {
 				continue
 			}
-			timeout = qs.config.SubmissionTimeout
+			// Use GuaranteeTimeout for items awaiting guarantee (shorter timeout)
+			// This ensures we resubmit quickly if guarantee is not received
+			timeout = qs.config.GuaranteeTimeout
 			refTime = item.SubmittedAt
+			timeoutType = "guarantee"
 		case StatusGuaranteed:
 			// Use AccumulateTimeout from GuaranteedAt (more lenient)
 			if item.GuaranteedAt.IsZero() {
@@ -583,17 +712,37 @@ func (qs *QueueState) CheckTimeouts() {
 			}
 			timeout = qs.config.AccumulateTimeout
 			refTime = item.GuaranteedAt
+			timeoutType = "accumulate"
 		default:
 			continue
 		}
 
-		if now.Sub(refTime) > timeout {
-			log.Warn(log.Node, "Queue: Timeout detected",
+		elapsed := now.Sub(refTime)
+		remaining := timeout - elapsed
+
+		// Log detailed timeout status for debugging
+		if elapsed > timeout/2 {
+			log.Debug(log.Node, "Queue: Timeout check",
 				"service", qs.serviceID,
 				"blockNumber", bn,
+				"version", item.Version,
 				"status", item.Status.String(),
-				"refTime", refTime,
-				"timeout", timeout)
+				"timeoutType", timeoutType,
+				"elapsed", elapsed.Round(time.Second),
+				"timeout", timeout,
+				"remaining", remaining.Round(time.Second))
+		}
+
+		if elapsed > timeout {
+			log.Warn(log.Node, "Queue: Timeout detected - will requeue",
+				"service", qs.serviceID,
+				"blockNumber", bn,
+				"version", item.Version,
+				"status", item.Status.String(),
+				"timeoutType", timeoutType,
+				"elapsed", elapsed.Round(time.Second),
+				"timeout", timeout,
+				"wpHash", item.WPHash.Hex())
 
 			// Unlock and call OnTimeoutOrFailure (which will relock)
 			qs.mu.Unlock()

@@ -26,8 +26,12 @@ use primitive_types::U256;
 use evm::backend::OverlayedChangeSet;
 use primitive_types::{H160, H256};
 use utils::effects::{WriteEffectEntry, WriteIntent};
+#[allow(unused_imports)]
 use utils::functions::{log_debug, log_info};
 use utils::objects::{ObjectId, ObjectRef};
+
+/// Set to true to enable verbose backend logs
+const BACKEND_VERBOSE: bool = false;
 use crate::format_object_id;
 impl MajikBackend {
     /// Build a mapping from object IDs to transaction indices that wrote to them
@@ -271,20 +275,22 @@ impl MajikBackend {
         }
 
 
-        log_info(&format!(
-            "DRAFT BLOCK: {} txns, ubt_root={}, timestamp={}, total_gas_used={}",
-            receipts.len(),
-            format_object_id(&ubt_root),
-            timeslot,
-            total_gas_used
-        ));
+        if BACKEND_VERBOSE {
+            log_info(&format!(
+                "DRAFT BLOCK: {} txns, ubt_root={}, timestamp={}, total_gas_used={}",
+                receipts.len(),
+                format_object_id(&ubt_root),
+                timeslot,
+                total_gas_used
+            ));
 
-        // Log tx_hashes and receipt_hashes
-        for (i, tx_hash) in tx_hashes.iter().enumerate() {
-            log_info(&format!("  tx_hash[{}]: {}", i, hex::encode(tx_hash)));
-        }
-        for (i, receipt_hash) in receipt_hashes.iter().enumerate() {
-            log_info(&format!("  receipt_hash[{}]: {}", i, hex::encode(receipt_hash)));
+            // Log tx_hashes and receipt_hashes
+            for (i, tx_hash) in tx_hashes.iter().enumerate() {
+                log_info(&format!("  tx_hash[{}]: {}", i, hex::encode(tx_hash)));
+            }
+            for (i, receipt_hash) in receipt_hashes.iter().enumerate() {
+                log_info(&format!("  receipt_hash[{}]: {}", i, hex::encode(receipt_hash)));
+            }
         }
 
         // Assemble EvmBlockPayload
@@ -348,7 +354,9 @@ impl MajikBackend {
         let deletes_count = deletes.len();
 
         for address in deletes {
-            log_info(&format!("  Account deletion: {:?}", address));
+            if BACKEND_VERBOSE {
+                log_info(&format!("  Account deletion: {:?}", address));
+            }
             // Account deletion should clear code, storage, balance, nonce
             // This is already handled by storage_resets, but we should also export tombstone for code object
             let code_object_id_val = code_object_id(*address);
@@ -725,21 +733,23 @@ impl MajikBackend {
     ) -> utils::effects::ExecutionEffects {
         let balance_count = change_set.balances.len();
         let nonce_count = change_set.nonces.len();
-        if let Some((addr, bal)) = change_set.balances.iter().next() {
-            log_info(&format!(
-                "to_execution_effects: balances={} (first {:?}={})",
-                balance_count, addr, bal
-            ));
-        } else {
-            log_info("to_execution_effects: balances=0");
-        }
-        if let Some((addr, nonce)) = change_set.nonces.iter().next() {
-            log_info(&format!(
-                "to_execution_effects: nonces={} (first {:?}={})",
-                nonce_count, addr, nonce
-            ));
-        } else {
-            log_info("to_execution_effects: nonces=0");
+        if BACKEND_VERBOSE {
+            if let Some((addr, bal)) = change_set.balances.iter().next() {
+                log_info(&format!(
+                    "to_execution_effects: balances={} (first {:?}={})",
+                    balance_count, addr, bal
+                ));
+            } else {
+                log_info("to_execution_effects: balances=0");
+            }
+            if let Some((addr, nonce)) = change_set.nonces.iter().next() {
+                log_info(&format!(
+                    "to_execution_effects: nonces={} (first {:?}={})",
+                    nonce_count, addr, nonce
+                ));
+            } else {
+                log_info("to_execution_effects: nonces=0");
+            }
         }
 
         {
@@ -782,7 +792,9 @@ impl MajikBackend {
         );
 
         // 3a. Handle balance changes
-        log_info(&format!("🔧 Processing {} balance changes", change_set.balances.len()));
+        if BACKEND_VERBOSE {
+            log_info(&format!("🔧 Processing {} balance changes", change_set.balances.len()));
+        }
         self.process_balance_changes(
             &change_set.balances,
             write_tx_index,
@@ -791,7 +803,9 @@ impl MajikBackend {
         );
 
         // 3b. Handle nonce changes
-        log_info(&format!("🔧 Processing {} nonce changes", change_set.nonces.len()));
+        if BACKEND_VERBOSE {
+            log_info(&format!("🔧 Processing {} nonce changes", change_set.nonces.len()));
+        }
         self.process_nonce_changes(
             &change_set.nonces,
             write_tx_index,
@@ -809,10 +823,12 @@ impl MajikBackend {
 
         // 5. Handle receipts and assemble block
         if total_gas_used > 0 {
-            log_info(&format!(
-                "📝 Emitting block with ubt_root (POST-state root): {}",
-                format_object_id(&ubt_root)
-            ));
+            if BACKEND_VERBOSE {
+                log_info(&format!(
+                    "📝 Emitting block with ubt_root (POST-state root): {}",
+                    format_object_id(&ubt_root)
+                ));
+            }
             self.emit_receipts_and_block(
                 receipts,
                 work_package_hash,

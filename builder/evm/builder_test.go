@@ -111,7 +111,7 @@ func TestEVMBlocksTransfersLocal(t *testing.T) {
 
 	// Create transactions
 	fromAddr, fromPrivKey := common.GetEVMDevAccount(0)
-	const transferCount = 51
+	const transferCount = 300
 	receivers := make([]common.Address, 0, transferCount)
 	for i := 1; i <= transferCount; i++ {
 		addr, _ := common.GetEVMDevAccount(i)

@@ -51,11 +51,11 @@ func (s *StateDB) extractContractWitnessBlob(output []byte, segments [][]byte) (
 			offset += entrySize
 		}
 
-		// Contract witness metadata at end: [2B index_start][4B payload_length]
+		// Contract witness metadata immediately follows metashard entries:
+		// [2B index_start][4B payload_length]
 		if offset+6 <= len(output) {
-			contractOffset := len(output) - 6
-			indexStart := binary.LittleEndian.Uint16(output[contractOffset : contractOffset+2])
-			payloadLength := binary.LittleEndian.Uint32(output[contractOffset+2 : contractOffset+6])
+			indexStart := binary.LittleEndian.Uint16(output[offset : offset+2])
+			payloadLength := binary.LittleEndian.Uint32(output[offset+2 : offset+6])
 
 			if payloadLength > 0 {
 				return s.readPayloadFromSegments(segments, uint32(indexStart), payloadLength)
@@ -230,12 +230,10 @@ func (s *StateDB) populateWitnessCacheFromRefineOutput(serviceID uint32, output 
 
 		// After metashard entries, check if there's contract witness data
 		if offset+6 <= len(output) {
-			// Contract witness metadata should be at the end: [2B index_start][4B payload_length]
-			contractOffset := len(output) - 6
-			indexStart := binary.LittleEndian.Uint16(output[contractOffset : contractOffset+2])
-			payloadLength := binary.LittleEndian.Uint32(output[contractOffset+2 : contractOffset+6])
-
-			log.Trace(log.EVM, "Found contract witness after metashards", "indexStart", indexStart, "payloadLength", payloadLength)
+			// Contract witness metadata immediately follows the metashard entries:
+			// [2B index_start][4B payload_length]
+			indexStart := binary.LittleEndian.Uint16(output[offset : offset+2])
+			payloadLength := binary.LittleEndian.Uint32(output[offset+2 : offset+6])
 
 			if payloadLength > 0 {
 				// Read and load contract witness data
@@ -302,8 +300,10 @@ func (s *StateDB) parseAndLoadContractStorage(serviceID uint32, payload []byte) 
 		payloadLength := binary.LittleEndian.Uint32(payload[offset+21 : offset+25])
 		// Skip tx_index (offset 25-29)
 
-		if len(payload)-offset-29 < int(payloadLength) {
-			return fmt.Errorf("insufficient payload data at offset %d", offset)
+		remaining := len(payload) - offset - 29
+
+		if remaining < int(payloadLength) {
+			return fmt.Errorf("insufficient payload data at offset %d: need %d, have %d", offset, payloadLength, remaining)
 		}
 
 		entryData := payload[offset+29 : offset+29+int(payloadLength)]
@@ -919,6 +919,22 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 	}
 
 	// Use buildBundle to fetch imported segments and justifications
+	// CRITICAL: Verify metadata count matches blob count before creating bundle
+	for i, wi := range wp.WorkItems {
+		metadataCount := len(wi.Extrinsics)
+		blobCount := len(extrinsicsBlobs[i])
+		if metadataCount != blobCount {
+			log.Error(log.EVM, "BuildBundle: MISMATCH between metadata and blob count!",
+				"workItemIndex", i,
+				"metadataCount", metadataCount,
+				"blobCount", blobCount)
+		} else {
+			log.Info(log.EVM, "BuildBundle: extrinsic counts match",
+				"workItemIndex", i,
+				"count", metadataCount,
+				"blobCount", blobCount)
+		}
+	}
 	wpq := &types.WPQueueItem{
 		WorkPackage: wp,
 		CoreIndex:   coreIndex,
@@ -1363,7 +1379,7 @@ func (s *StateDB) updateBlockPayloadWithDelta(exportedSegments [][]byte, balHash
 		blockPayload.UBTRoot = postStateRoot
 	}
 
-	// Update UBT state delta if provided (UBT Week 1)
+	// Update UBT state delta if provided (UBT-CODEX.md)
 	if delta != nil {
 		blockPayload.UBTStateDelta = delta
 		log.Debug(log.EVM, "Added state delta to block payload", "entries", delta.NumEntries, "bytes", 4+len(delta.Entries))

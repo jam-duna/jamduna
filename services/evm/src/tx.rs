@@ -10,7 +10,11 @@
 
 use alloc::{format, vec::Vec};
 use primitive_types::{H160, H256, U256};
+#[allow(unused_imports)]
 use utils::functions::{log_error, log_info};
+
+/// Set to true to enable verbose transaction decoding logs
+const TX_VERBOSE: bool = false;
 use utils::hash_functions::keccak256;
 
 /// Decoded transaction arguments from host function call
@@ -96,10 +100,12 @@ fn decode_legacy_transaction(rlp_bytes: &[u8]) -> Option<DecodedTransactArgs> {
         DecodedCallCreate::Call { address, data }
     };
 
-    log_info(&format!(
-        "✅ Decoded legacy tx: from={:?}, gas_limit={}, gas_price={}, value={}",
-        caller, gas_limit, gas_price, value
-    ));
+    if TX_VERBOSE {
+        log_info(&format!(
+            "✅ Decoded legacy tx: from={:?}, gas_limit={}, gas_price={}, value={}",
+            caller, gas_limit, gas_price, value
+        ));
+    }
 
     Some(DecodedTransactArgs {
         caller,
@@ -143,10 +149,12 @@ fn decode_eip2930_transaction(payload: &[u8]) -> Option<DecodedTransactArgs> {
         DecodedCallCreate::Call { address, data }
     };
 
-    log_info(&format!(
-        "✅ Decoded EIP-2930 tx: from={:?}, gas_limit={}, gas_price={}, chain_id={}",
-        caller, gas_limit, gas_price, chain_id
-    ));
+    if TX_VERBOSE {
+        log_info(&format!(
+            "✅ Decoded EIP-2930 tx: from={:?}, gas_limit={}, gas_price={}, chain_id={}",
+            caller, gas_limit, gas_price, chain_id
+        ));
+    }
 
     Some(DecodedTransactArgs {
         caller,
@@ -202,10 +210,12 @@ fn decode_eip1559_transaction(payload: &[u8]) -> Option<DecodedTransactArgs> {
         DecodedCallCreate::Call { address, data }
     };
 
-    log_info(&format!(
-        "✅ Decoded EIP-1559 tx: from={:?}, gas_limit={}, max_fee={}, chain_id={}",
-        caller, gas_limit, max_fee_per_gas, chain_id
-    ));
+    if TX_VERBOSE {
+        log_info(&format!(
+            "✅ Decoded EIP-1559 tx: from={:?}, gas_limit={}, max_fee={}, chain_id={}",
+            caller, gas_limit, max_fee_per_gas, chain_id
+        ));
+    }
 
     // Use max_fee_per_gas as gas_price for fee calculation
     Some(DecodedTransactArgs {
@@ -278,10 +288,12 @@ fn recover_sender_legacy(
     let pub_key_hash = keccak256(&pub_key_bytes[1..65]); // Skip first byte (0x04 prefix)
     let address = H160::from_slice(&pub_key_hash.0[12..32]);
 
-    log_info(&format!(
-        "🔐 Recovered sender: {:?} (v={}, chain_id={:?})",
-        address, v, chain_id
-    ));
+    if TX_VERBOSE {
+        log_info(&format!(
+            "🔐 Recovered sender: {:?} (v={}, chain_id={:?})",
+            address, v, chain_id
+        ));
+    }
 
     Some(address)
 }
@@ -399,7 +411,9 @@ fn recover_from_signature(r: U256, s: U256, recovery_id: u8, signing_hash: &H256
     let pub_key_hash = keccak256(&pub_key_bytes[1..65]);
     let address = H160::from_slice(&pub_key_hash.0[12..32]);
 
-    log_info(&format!("🔐 Recovered sender: {:?}", address));
+    if TX_VERBOSE {
+        log_info(&format!("🔐 Recovered sender: {:?}", address));
+    }
 
     Some(address)
 }
@@ -486,10 +500,12 @@ pub fn decode_call_args(args_addr: u64, args_len: u64) -> Option<DecodedTransact
         DecodedCallCreate::Call { address, data }
     };
 
-    log_info(&format!(
-        "✅ Decoded call args: from={:?}, gas_limit={}, gas_price={}, value={}, call_kind={}",
-        caller, gas_limit, gas_price, value, call_kind
-    ));
+    if TX_VERBOSE {
+        log_info(&format!(
+            "✅ Decoded call args: from={:?}, gas_limit={}, gas_price={}, value={}, call_kind={}",
+            caller, gas_limit, gas_price, value, call_kind
+        ));
+    }
 
     Some(DecodedTransactArgs {
         caller,

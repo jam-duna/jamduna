@@ -35,14 +35,17 @@ var (
 	BuildTime = "unknown"
 )
 
-// Builder configuration
+// Builder configuration defaults
 const (
-	// MaxTxsPerBundle is the maximum transactions per work package bundle
-	MaxTxsPerBundle = 5000
+	// DefaultMaxTxsPerBundle is the default maximum transactions per work package bundle
+	DefaultMaxTxsPerBundle = 5
 )
 
 // coreCounter is used to round-robin work packages between cores 0 and 1
 var coreCounter uint64
+
+// maxTxsPerBundleConfig holds the configured max transactions per bundle
+var maxTxsPerBundleConfig int
 
 func main() {
 	var rootCmd = &cobra.Command{
@@ -61,6 +64,7 @@ func main() {
 		debug             string
 		port              int
 		telemetryEndpoint string
+		maxTxsPerBundle   int
 	)
 
 	var runCmd = &cobra.Command{
@@ -74,7 +78,10 @@ func main() {
 			fmt.Printf("  EVM RPC Port: %d\n", evmRPCPort)
 			fmt.Printf("  Service ID: %d\n", serviceID)
 			fmt.Printf("  PVM Backend: %s\n", pvmBackend)
-			fmt.Printf("  Max Txs Per Bundle: %d\n", MaxTxsPerBundle)
+			fmt.Printf("  Max Txs Per Bundle: %d\n", maxTxsPerBundle)
+
+			// Set package-level config for use by buildAndEnqueueWorkPackageForCore
+			maxTxsPerBundleConfig = maxTxsPerBundle
 
 			// Initialize logging
 			log.InitLogger("debug")
@@ -197,68 +204,37 @@ func main() {
 			// Create queue runner for managed submission
 			queueState := queue.NewQueueState(sid)
 
-			// Submit callback - sends bundle to network on a specific core
-			// Uses SubmitBundleToCore for non-validator builder nodes
-			submitFunc := func(bundle *types.WorkPackageBundle, coreIndex uint16) (common.Hash, error) {
+			// Create submitter callback - submits bundle to guarantor via CE146
+			submitter := func(bundle *types.WorkPackageBundle, coreIndex uint16) (common.Hash, error) {
+				wpHash := bundle.WorkPackage.Hash()
 				err := n.SubmitBundleToCore(bundle, coreIndex)
 				if err != nil {
 					return common.Hash{}, err
 				}
-				return bundle.WorkPackage.Hash(), nil
+				return wpHash, nil
 			}
 
-			// Build bundle callback - rebuilds bundle with fresh RefineContext
-			buildBundleFunc := func(item *queue.QueueItem) (*types.WorkPackageBundle, error) {
+			// Create bundle builder callback - rebuilds bundle with fresh RefineContext
+			bundleBuilder := func(item *queue.QueueItem) (*types.WorkPackageBundle, error) {
+				if item.Bundle == nil {
+					return nil, fmt.Errorf("queue item has no bundle")
+				}
 				// Get fresh refine context
 				refineCtx, err := n.GetRefineContextWithBuffer(EVMBuilderBuffer)
 				if err != nil {
-					return nil, err
+					return nil, fmt.Errorf("failed to get refine context: %w", err)
 				}
-				// Update the work package with new refine context
+				// Update work package with new context
 				item.Bundle.WorkPackage.RefineContext = refineCtx
-
-				// CRITICAL: Restore original WorkItems[].Extrinsics metadata before rebuilding
-				// BuildBundle prepends Verkle witness metadata to this list, so we need to reset it
-				if item.OriginalWorkItemExtrinsics != nil {
-					for i, origExtrinsics := range item.OriginalWorkItemExtrinsics {
-						if i < len(item.Bundle.WorkPackage.WorkItems) {
-							// Deep copy the original metadata
-							item.Bundle.WorkPackage.WorkItems[i].Extrinsics = make([]types.WorkItemExtrinsic, len(origExtrinsics))
-							copy(item.Bundle.WorkPackage.WorkItems[i].Extrinsics, origExtrinsics)
-						}
-					}
+				// Rebuild via StateDB.BuildBundle
+				bundle, _, err := n.BuildBundle(item.Bundle.WorkPackage, item.OriginalExtrinsics, item.CoreIndex, nil)
+				if err != nil {
+					return nil, fmt.Errorf("failed to rebuild bundle: %w", err)
 				}
-
-				// Use OriginalExtrinsics (transaction-only, no Verkle witness) for rebuilding
-				// BuildBundle will prepend a fresh Verkle witness with the new RefineContext
-				var extrinsicsForRebuild []types.ExtrinsicsBlobs
-				if item.OriginalExtrinsics == nil {
-					// Fallback: shouldn't happen if EnqueueBundleWithOriginalExtrinsics was used
-					log.Warn(log.Node, "buildBundleFunc: OriginalExtrinsics is nil, using Bundle.ExtrinsicData (may cause issues)")
-					extrinsicsForRebuild = item.Bundle.ExtrinsicData
-				} else {
-					// CRITICAL: Make a deep copy of OriginalExtrinsics to prevent mutation
-					// BuildBundle modifies extrinsicsBlobs in place (prepends Verkle witness),
-					// so we must copy to avoid corrupting OriginalExtrinsics for future resubmissions
-					extrinsicsForRebuild = make([]types.ExtrinsicsBlobs, len(item.OriginalExtrinsics))
-					for i, blobs := range item.OriginalExtrinsics {
-						extrinsicsForRebuild[i] = make(types.ExtrinsicsBlobs, len(blobs))
-						for j, blob := range blobs {
-							// Deep copy each byte slice
-							extrinsicsForRebuild[i][j] = make([]byte, len(blob))
-							copy(extrinsicsForRebuild[i][j], blob)
-						}
-					}
-				}
-
-				// Rebuild the bundle with transaction-only extrinsics
-				// Use round-robin core assignment
-				coreIdx := getNextCoreIndex()
-				bundle, _, err := n.BuildBundle(item.Bundle.WorkPackage, extrinsicsForRebuild, coreIdx, nil)
-				return bundle, err
+				return bundle, nil
 			}
 
-			queueRunner := queue.NewRunner(queueState, sid, submitFunc, buildBundleFunc)
+			queueRunner := queue.NewRunner(queueState, sid, submitter, bundleBuilder)
 			queueRunner.Start(context.Background())
 			defer queueRunner.Stop()
 
@@ -299,6 +275,7 @@ func main() {
 	runCmd.Flags().StringVar(&debug, "debug", "rotation,guarantees", "Debug modules to enable")
 	runCmd.Flags().IntVar(&port, "port", 0, "Network port (default: 40000 + validator index)")
 	runCmd.Flags().StringVar(&telemetryEndpoint, "telemetry", "", "Telemetry server endpoint (e.g., localhost:9999)")
+	runCmd.Flags().IntVar(&maxTxsPerBundle, "max-txs-per-bundle", DefaultMaxTxsPerBundle, "Maximum transactions per work package bundle")
 
 	rootCmd.AddCommand(runCmd)
 
@@ -408,27 +385,15 @@ func handleBlockNotifications(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrp
 			continue
 		}
 
-		// Calculate batch size: TotalCores * MaxTxsPerBundle (e.g., 2 * 5 = 10 txns per batch)
-		batchSize := types.TotalCores * MaxTxsPerBundle
-		if pendingCount < batchSize {
-			// If we have fewer txns than a full batch, still process what we have
-			// But ensure we have at least MaxTxsPerBundle for one bundle
-			if pendingCount < MaxTxsPerBundle {
-				batchSize = pendingCount
-			} else {
-				batchSize = pendingCount
-			}
-		}
-
-		log.Info(log.Node, "📦 Building parallel bundles",
+		log.Info(log.Node, "📦 Building bundles",
 			"pendingTxs", pendingCount,
-			"batchSize", batchSize,
 			"totalCores", types.TotalCores,
-			"maxTxsPerBundle", MaxTxsPerBundle)
+			"maxTxsPerBundle", maxTxsPerBundleConfig)
 
-		// Build bundles for each core (up to TotalCores bundles per tick)
+		// Build bundles for each core while we have transactions
+		// Each bundle takes up to MaxTxsPerBundle transactions
 		bundlesBuilt := 0
-		for core := 0; core < types.TotalCores && txPool.Size() >= MaxTxsPerBundle; core++ {
+		for core := 0; core < types.TotalCores && txPool.Size() > 0; core++ {
 			if err := buildAndEnqueueWorkPackageForCore(n, rollup, txPool, serviceID, queueRunner, uint16(core)); err != nil {
 				log.Error(log.Node, "Failed to build bundle for core", "core", core, "err", err)
 				break // Stop if we hit an error
@@ -437,18 +402,18 @@ func handleBlockNotifications(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrp
 		}
 
 		if bundlesBuilt > 0 {
-			log.Info(log.Node, "📤 Parallel bundles enqueued",
+			log.Info(log.Node, "📤 Bundles enqueued",
 				"bundlesBuilt", bundlesBuilt,
 				"remainingTxs", txPool.Size())
 		}
 	}
 }
 
-// buildAndEnqueueWorkPackageForCore builds a work package for a specific core from MaxTxsPerBundle transactions
-// Each bundle is independent with its own pre→post Verkle state
+// buildAndEnqueueWorkPackageForCore builds a work package for a specific core from maxTxsPerBundleConfig transactions
+// Each bundle is independent with its own pre→post UBT state
 func buildAndEnqueueWorkPackageForCore(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrpc.TxPool, serviceID uint32, queueRunner *queue.Runner, coreIdx uint16) error {
-	// Get only MaxTxsPerBundle pending transactions
-	pendingTxs := txPool.GetPendingTransactionsLimit(MaxTxsPerBundle)
+	// Get only maxTxsPerBundleConfig pending transactions
+	pendingTxs := txPool.GetPendingTransactionsLimit(maxTxsPerBundleConfig)
 	if len(pendingTxs) == 0 {
 		return fmt.Errorf("no pending transactions")
 	}
@@ -464,8 +429,9 @@ func buildAndEnqueueWorkPackageForCore(n *node.Node, rollup *evmrpc.Rollup, txPo
 		"core", coreIdx,
 		"txCount", len(pendingTxs),
 		"anchorSlot", refineCtx.LookupAnchorSlot)
+
 	for i, tx := range pendingTxs {
-		log.Info(log.Node, "  📦 TX in package",
+		log.Debug(log.Node, "  📦 TX in package",
 			"core", coreIdx,
 			"idx", i,
 			"hash", tx.Hash.Hex(),
@@ -476,13 +442,13 @@ func buildAndEnqueueWorkPackageForCore(n *node.Node, rollup *evmrpc.Rollup, txPo
 	}
 
 	// Prepare work package and extrinsics from pending transactions
-	// extrinsicsBlobs contains ONLY the transaction RLP data (no Verkle witness yet)
+	// extrinsicsBlobs contains ONLY the transaction RLP data (no UBT witness yet)
 	workPackage, extrinsicsBlobs, err := rollup.PrepareWorkPackage(refineCtx, pendingTxs)
 	if err != nil {
 		return fmt.Errorf("failed to prepare work package: %w", err)
 	}
 
-	// Save original extrinsics BEFORE BuildBundle prepends the Verkle witness
+	// Save original extrinsics BEFORE BuildBundle prepends the UBT witness
 	// This is needed for rebuilding on resubmission
 	// CRITICAL: Must deep copy to prevent mutation by BuildBundle
 	originalExtrinsics := make([]types.ExtrinsicsBlobs, len(extrinsicsBlobs))
@@ -494,7 +460,7 @@ func buildAndEnqueueWorkPackageForCore(n *node.Node, rollup *evmrpc.Rollup, txPo
 		}
 	}
 
-	// Save original WorkItems[].Extrinsics metadata BEFORE BuildBundle prepends Verkle witness metadata
+	// Save original WorkItems[].Extrinsics metadata BEFORE BuildBundle prepends UBT witness metadata
 	// This is needed for rebuilding on resubmission - BuildBundle also prepends metadata entries
 	originalWorkItemExtrinsics := make([][]types.WorkItemExtrinsic, len(workPackage.WorkItems))
 	for i, wi := range workPackage.WorkItems {
@@ -503,7 +469,7 @@ func buildAndEnqueueWorkPackageForCore(n *node.Node, rollup *evmrpc.Rollup, txPo
 	}
 
 	// Build bundle via NodeContent.BuildBundle -> StateDB.BuildBundle (executes refine)
-	// NOTE: BuildBundle prepends a Verkle witness to each work item's extrinsics
+	// NOTE: BuildBundle prepends a UBT witness to each work item's extrinsics
 	// Use the specified core index (not round-robin)
 	bundle, workReport, err := n.BuildBundle(workPackage, extrinsicsBlobs, coreIdx, nil)
 	if err != nil {
@@ -616,4 +582,93 @@ func getNextCoreIndex() uint16 {
 		"submissionNum", count,
 		"note", "builder->E_G submission")
 	return coreIdx
+}
+
+// buildAndEnqueueWorkPackage builds a work package from pending txs and enqueues for submission
+// Routes through NodeContent.BuildBundle -> StateDB.BuildBundle which executes refine
+func buildAndEnqueueWorkPackage(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrpc.TxPool, serviceID uint32, queueRunner *queue.Runner) error {
+	// Get pending transactions
+	pendingTxs := txPool.GetPendingTransactions()
+	if len(pendingTxs) == 0 {
+		return fmt.Errorf("no pending transactions")
+	}
+
+	// Get refine context with EVM-specific buffer (larger than default for more tolerance)
+	refineCtx, err := n.GetRefineContextWithBuffer(EVMBuilderBuffer)
+	if err != nil {
+		return fmt.Errorf("failed to get refine context: %w", err)
+	}
+
+	// Log transactions being included in this work package
+	log.Info(log.Node, "📦 Building work package",
+		"txCount", len(pendingTxs),
+		"anchorSlot", refineCtx.LookupAnchorSlot)
+	for i, tx := range pendingTxs {
+		log.Info(log.Node, "  📦 TX in package",
+			"idx", i,
+			"hash", tx.Hash.Hex(),
+			"nonce", tx.Nonce,
+			"from", tx.From.Hex(),
+			"to", tx.To.Hex(),
+			"value", tx.Value.String())
+	}
+
+	// Prepare work package and extrinsics from pending transactions
+	// extrinsicsBlobs contains ONLY the transaction RLP data (no UBT witness yet)
+	workPackage, extrinsicsBlobs, err := rollup.PrepareWorkPackage(refineCtx, pendingTxs)
+	if err != nil {
+		return fmt.Errorf("failed to prepare work package: %w", err)
+	}
+
+	// Save original extrinsics BEFORE BuildBundle prepends the UBT witness
+	// This is needed for rebuilding on resubmission
+	// CRITICAL: Must deep copy to prevent mutation by BuildBundle
+	originalExtrinsics := make([]types.ExtrinsicsBlobs, len(extrinsicsBlobs))
+	for i, blobs := range extrinsicsBlobs {
+		originalExtrinsics[i] = make(types.ExtrinsicsBlobs, len(blobs))
+		for j, blob := range blobs {
+			originalExtrinsics[i][j] = make([]byte, len(blob))
+			copy(originalExtrinsics[i][j], blob)
+		}
+	}
+
+	// Save original WorkItems[].Extrinsics metadata BEFORE BuildBundle prepends UBT witness metadata
+	// This is needed for rebuilding on resubmission - BuildBundle also prepends metadata entries
+	originalWorkItemExtrinsics := make([][]types.WorkItemExtrinsic, len(workPackage.WorkItems))
+	for i, wi := range workPackage.WorkItems {
+		originalWorkItemExtrinsics[i] = make([]types.WorkItemExtrinsic, len(wi.Extrinsics))
+		copy(originalWorkItemExtrinsics[i], wi.Extrinsics)
+	}
+
+	// Build bundle via NodeContent.BuildBundle -> StateDB.BuildBundle (executes refine)
+	// NOTE: BuildBundle prepends a UBT witness to each work item's extrinsics
+	// Use round-robin core assignment (alternates between core 0 and 1)
+	coreIdx := getNextCoreIndex()
+	bundle, workReport, err := n.BuildBundle(workPackage, extrinsicsBlobs, coreIdx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to build bundle: %w", err)
+	}
+
+	// Clear processed transactions from pool AFTER successful bundle build
+	for _, tx := range pendingTxs {
+		txPool.RemoveTransaction(tx.Hash)
+	}
+
+	// Enqueue to queue runner with original extrinsics for resubmission support
+	// Pass coreIdx so the runner submits to the correct core
+	blockNumber, err := queueRunner.EnqueueBundleWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIdx)
+	if err != nil {
+		return fmt.Errorf("failed to enqueue bundle: %w", err)
+	}
+
+	log.Info(log.Node, "📤 Work package enqueued to JAM queue",
+		"wpHash", bundle.WorkPackage.Hash().Hex(),
+		"workReportHash", workReport.Hash().Hex(),
+		"blockNumber", blockNumber,
+		"targetCore", coreIdx,
+		"serviceID", serviceID,
+		"txCount", len(pendingTxs),
+		"pipeline", "queue->submit->guarantee(E_G)->accumulate->EVM")
+
+	return nil
 }

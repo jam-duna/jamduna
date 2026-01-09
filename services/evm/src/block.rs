@@ -227,9 +227,9 @@ impl EvmBlockPayload {
             None
         };
 
-        // Parse optional verkle proof with state diff
+        // Parse reserved proof field (must be 0 in UBT blocks)
         // Format: 4 bytes (proof_length) + proof_data
-        let _verkle_proof_with_state_diff = if offset + 4 <= data.len() {
+        let _reserved_proof = if offset + 4 <= data.len() {
             let proof_len = u32::from_le_bytes(
                 data[offset..offset + 4].try_into().map_err(|_| "Invalid proof_len")?
             ) as usize;
@@ -237,7 +237,7 @@ impl EvmBlockPayload {
 
             if proof_len > 0 {
                 if offset + proof_len > data.len() {
-                    return Err("Insufficient data for verkle proof");
+                    return Err("Insufficient data for reserved proof field");
                 }
                 let proof = data[offset..offset + proof_len].to_vec();
                 offset += proof_len;

@@ -419,7 +419,7 @@ func (h *EVMRPCHandler) SendRawTransaction(req []string, res *string) error {
 	}
 	signedTxDataHex := req[0]
 
-	log.Info(log.Node, "SendRawTransaction", "signedTxData", signedTxDataHex[:min(len(signedTxDataHex), 64)])
+	log.Debug(log.Node, "SendRawTransaction", "signedTxData", signedTxDataHex[:min(len(signedTxDataHex), 64)])
 
 	// Convert hex string to bytes
 	signedTxData := common.FromHex(signedTxDataHex)
@@ -462,7 +462,7 @@ func (h *EVMRPCHandler) GetTransactionReceipt(req []string, res *string) error {
 	}
 	txHashStr := req[0]
 
-	log.Info(log.Node, "EthGetTransactionReceipt", "txHash", txHashStr)
+	//log.Info(log.Node, "EthGetTransactionReceipt", "txHash", txHashStr)
 
 	// Parse the transaction hash
 	txHash := common.HexToHash(txHashStr)
@@ -478,10 +478,17 @@ func (h *EVMRPCHandler) GetTransactionReceipt(req []string, res *string) error {
 
 	ethReceipt, err := rollup.GetTransactionReceipt(txHash)
 	if err != nil {
-		// "meta-shard not found" is expected during guarantee→accumulate window, not an error
+		// These errors are expected during the guarantee→accumulate→DA-propagation window:
+		// - "meta-shard not found" / "not found": data not yet written
+		// - "not enough successful requests": DA layer still propagating to validators
+		// - "FetchJAMDASegments": segment fetch failed (DA propagation in progress)
+		// Treat all as "pending" and return null (client should retry)
 		errStr := err.Error()
-		if strings.Contains(errStr, "meta-shard not found") || strings.Contains(errStr, "not found") {
-			log.Debug(log.Node, "EthGetTransactionReceipt", "status", "pending (not yet accumulated)", "txHash", txHashStr)
+		if strings.Contains(errStr, "meta-shard not found") ||
+			strings.Contains(errStr, "not found") ||
+			strings.Contains(errStr, "not enough successful requests") ||
+			strings.Contains(errStr, "FetchJAMDASegments") {
+			log.Debug(log.Node, "EthGetTransactionReceipt", "status", "pending (DA propagation)", "txHash", txHashStr)
 			*res = "null"
 			return nil
 		}
@@ -1261,5 +1268,30 @@ func (h *EVMRPCHandler) GetWorkReport(req []string, res *string) error {
 	}
 
 	*res = string(wrJSON)
+	return nil
+}
+
+// TxpoolStatus returns the current status of the transaction pool
+//
+// Parameters: none
+//
+// Returns:
+// - object: Transaction pool status with pending and queued counts
+//
+// Example curl call:
+// curl -X POST http://localhost:8545 -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"txpool_status","params":[],"id":1}'
+func (h *EVMRPCHandler) TxpoolStatus(req []string, res *string) error {
+	txPool := h.GetTxPool()
+	stats := txPool.GetStats()
+
+	statusJSON, err := json.Marshal(map[string]interface{}{
+		"pending": fmt.Sprintf("0x%x", stats.PendingCount),
+		"queued":  fmt.Sprintf("0x%x", stats.QueuedCount),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to marshal txpool status: %v", err)
+	}
+
+	*res = string(statusJSON)
 	return nil
 }

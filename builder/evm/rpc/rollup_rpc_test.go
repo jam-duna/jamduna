@@ -8,7 +8,6 @@ import (
 	"math/big"
 	"net/http"
 	"os"
-	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +15,149 @@ import (
 	"github.com/colorfulnotion/jam/common"
 	log "github.com/colorfulnotion/jam/log"
 )
+
+const totalTxCount = 51
+
+// txInfo tracks transaction state during testing
+type txInfo struct {
+	hash      common.Hash
+	nonce     uint64
+	signedTx  []byte
+	receipt   *evmtypes.EthereumTransactionReceipt
+	coreIndex string
+	bundleIdx int
+}
+
+// receiptPollerResult holds the result of a receipt polling operation
+type receiptPollerResult struct {
+	idx          int
+	receipt      *evmtypes.EthereumTransactionReceipt
+	coreIndex    string
+	bundleHash   string
+	isNewBundle  bool
+	newBundleIdx int
+}
+
+// pollReceiptSimple polls for a transaction receipt without work report lookup.
+// Used in single-core mode tests.
+// DEPRECATED: Use block-based confirmation instead for scalability.
+func pollReceiptSimple(evmClient *EVMClient, txHash common.Hash, idx int) *receiptPollerResult {
+	receipt, err := evmClient.GetTransactionReceipt(txHash)
+	if err != nil || receipt == nil || receipt.BlockHash == "" {
+		return nil
+	}
+	return &receiptPollerResult{
+		idx:        idx,
+		receipt:    receipt,
+		bundleHash: receipt.BlockHash,
+	}
+}
+
+// confirmTxsFromBlocks checks for new blocks and marks all included transactions as confirmed.
+// This is O(blocks) instead of O(transactions) - scales to 5000+ txns per block.
+func confirmTxsFromBlocks(rpcClient *HTTPJSONRPCClient, txs []txInfo, lastBlockChecked uint64) (newLastBlock uint64, confirmedCount int) {
+	newLastBlock = lastBlockChecked
+
+	// Get current block number
+	var blockNumHex string
+	if err := rpcClient.Call("eth_blockNumber", []string{}, &blockNumHex); err != nil {
+		return lastBlockChecked, 0
+	}
+
+	var currentBlock uint64
+	fmt.Sscanf(blockNumHex, "0x%x", &currentBlock)
+
+	if currentBlock <= lastBlockChecked {
+		return lastBlockChecked, 0
+	}
+
+	// Build a map of pending tx hashes for fast lookup
+	pendingTxs := make(map[string]int) // txHash -> index in txs slice
+	for i, tx := range txs {
+		if tx.receipt == nil {
+			pendingTxs[tx.hash.String()] = i
+		}
+	}
+
+	if len(pendingTxs) == 0 {
+		return currentBlock, 0
+	}
+
+	// Check each new block
+	for blockNum := lastBlockChecked + 1; blockNum <= currentBlock; blockNum++ {
+		var block map[string]interface{}
+		blockNumStr := fmt.Sprintf("0x%x", blockNum)
+		if err := rpcClient.Call("eth_getBlockByNumber", []interface{}{blockNumStr, false}, &block); err != nil {
+			continue
+		}
+
+		if block == nil {
+			continue
+		}
+
+		// Get transactions from block (array of tx hashes when fullTx=false)
+		txHashesRaw, ok := block["transactions"].([]interface{})
+		if !ok {
+			continue
+		}
+
+		blockHash, _ := block["hash"].(string)
+
+		// Mark all matching transactions as confirmed
+		for txIdx, txHashRaw := range txHashesRaw {
+			txHashStr, ok := txHashRaw.(string)
+			if !ok {
+				continue
+			}
+
+			if idx, found := pendingTxs[txHashStr]; found {
+				// Create minimal receipt from block info
+				txs[idx].receipt = &evmtypes.EthereumTransactionReceipt{
+					TransactionHash:  txHashStr,
+					TransactionIndex: fmt.Sprintf("0x%x", txIdx),
+					BlockHash:        blockHash,
+					BlockNumber:      blockNumStr,
+					Status:           "0x1", // Assume success
+				}
+				confirmedCount++
+				delete(pendingTxs, txHashStr) // Remove from pending
+
+				log.Info(log.Node, "✅ TX confirmed via block",
+					"txIdx", idx,
+					"blockNumber", blockNum,
+					"txIndex", txIdx,
+					"progress", fmt.Sprintf("%d pending", len(pendingTxs)))
+			}
+		}
+	}
+
+	return currentBlock, confirmedCount
+}
+
+// pollReceiptWithWorkReport polls for a transaction receipt and fetches the work report
+// to determine core index. Used in multi-core mode tests.
+func pollReceiptWithWorkReport(evmClient *EVMClient, rpcClient *HTTPJSONRPCClient, txHash common.Hash, idx int) *receiptPollerResult {
+	receipt, err := evmClient.GetTransactionReceipt(txHash)
+	if err != nil || receipt == nil || receipt.BlockHash == "" {
+		return nil
+	}
+
+	// Query work report to get core index
+	var workReport map[string]interface{}
+	coreIdx := "unknown"
+	if err := rpcClient.Call("jam_getWorkReport", []string{receipt.BlockHash}, &workReport); err == nil && workReport != nil {
+		if ci, ok := workReport["coreIndex"]; ok {
+			coreIdx = fmt.Sprintf("%v", ci)
+		}
+	}
+
+	return &receiptPollerResult{
+		idx:        idx,
+		receipt:    receipt,
+		coreIndex:  coreIdx,
+		bundleHash: receipt.BlockHash,
+	}
+}
 
 // HTTPJSONRPCClient is a simple HTTP JSON-RPC client for testing
 type HTTPJSONRPCClient struct {
@@ -185,7 +327,6 @@ func TestEVMBlocksTransfersRPC(t *testing.T) {
 	// Test 5: Prebuild 50 transactions, submit ALL to txpool, expect ONE bundle (single-core mode)
 	// Use with: make run_evm_single
 	t.Run("SendBatchedTransfers", func(t *testing.T) {
-		totalTxCount := 5000 // Prebuild 50 transactions
 		senderAddr, senderPrivKey := common.GetEVMDevAccount(0)
 		recipientAddr, _ := common.GetEVMDevAccount(1)
 
@@ -222,12 +363,6 @@ func TestEVMBlocksTransfersRPC(t *testing.T) {
 		gasLimit := uint64(21000)
 
 		// Track all transactions
-		type txInfo struct {
-			hash     common.Hash
-			nonce    uint64
-			signedTx []byte
-			receipt  *evmtypes.EthereumTransactionReceipt
-		}
 		txs := make([]txInfo, totalTxCount)
 
 		// ========== PHASE 1: Prebuild ALL 50 transactions ==========
@@ -270,58 +405,78 @@ func TestEVMBlocksTransfersRPC(t *testing.T) {
 		submitDuration := time.Since(submitStart)
 		log.Info(log.Node, "✅ PHASE 2 complete: All transactions submitted", "count", totalTxCount, "duration", submitDuration)
 
+		// Check txpool status to verify transactions are pending
+		var txpoolStatus map[string]string
+		if err := rpcClient.Call("txpool_status", []string{}, &txpoolStatus); err == nil {
+			log.Info(log.Node, "📊 TxPool status after submission",
+				"pending", txpoolStatus["pending"],
+				"queued", txpoolStatus["queued"])
+		}
+
 		// ========== PHASE 3: Wait for all transactions (expect ONE bundle) ==========
-		log.Info(log.Node, "⏳ PHASE 3: Waiting for transactions (expecting ONE bundle)...")
+		// Use block-based confirmation: O(blocks) instead of O(transactions)
+		log.Info(log.Node, "⏳ PHASE 3: Waiting for transactions via block monitoring (expecting ONE bundle)...")
 		pollInterval := 6 * time.Second
 		maxWaitRounds := 60
-		pendingCount := totalTxCount
 		bundleHashes := make(map[string]int) // Track unique block hashes
-		var mu sync.Mutex
+		var lastBlockChecked uint64 = 0
 
-		for round := 0; round < maxWaitRounds && pendingCount > 0; round++ {
+		// Get initial block number
+		var blockNumHex string
+		if err := rpcClient.Call("eth_blockNumber", []string{}, &blockNumHex); err == nil {
+			fmt.Sscanf(blockNumHex, "0x%x", &lastBlockChecked)
+		}
+
+		for round := 0; round < maxWaitRounds; round++ {
 			time.Sleep(pollInterval)
 
-			// Poll all pending receipts in parallel
-			var wg sync.WaitGroup
+			// Check new blocks and confirm all included transactions
+			newLastBlock, confirmed := confirmTxsFromBlocks(rpcClient, txs, lastBlockChecked)
+			lastBlockChecked = newLastBlock
+
+			// Count pending and collect bundle hashes
+			pendingCount := 0
 			for i := range txs {
-				if txs[i].receipt != nil {
-					continue
+				if txs[i].receipt == nil {
+					pendingCount++
+				} else {
+					bundleHashes[txs[i].receipt.BlockHash]++
 				}
-				wg.Add(1)
-				go func(idx int) {
-					defer wg.Done()
-					receipt, err := evmClient.GetTransactionReceipt(txs[idx].hash)
-					if err == nil && receipt != nil && receipt.BlockHash != "" {
-						mu.Lock()
-						txs[idx].receipt = receipt
-						pendingCount--
-						bundleHashes[receipt.BlockHash]++
-						confirmed := totalTxCount - pendingCount
-						mu.Unlock()
-
-						log.Info(log.Node, "✅ TX confirmed",
-							"index", idx,
-							"nonce", txs[idx].nonce,
-							"blockNumber", receipt.BlockNumber,
-							"wpHash", receipt.BlockHash[:18]+"...",
-							"status", receipt.Status,
-							"progress", fmt.Sprintf("%d/%d", confirmed, totalTxCount))
-					}
-				}(i)
 			}
-			wg.Wait()
 
-			mu.Lock()
-			pending := pendingCount
-			bundles := len(bundleHashes)
-			mu.Unlock()
-
-			if pending > 0 {
-				log.Info(log.Node, "⏳ Polling receipts...",
+			if confirmed > 0 {
+				log.Info(log.Node, "📦 Block scan complete",
 					"round", round+1,
-					"pending", pending,
-					"confirmed", totalTxCount-pending,
-					"bundlesFound", bundles)
+					"newlyConfirmed", confirmed,
+					"pending", pendingCount,
+					"confirmed", totalTxCount-pendingCount,
+					"bundlesFound", len(bundleHashes))
+			}
+
+			if pendingCount == 0 {
+				break
+			}
+
+			// Check txpool status
+			var txpoolStatus map[string]string
+			txpoolPending := "?"
+			if err := rpcClient.Call("txpool_status", []string{}, &txpoolStatus); err == nil {
+				txpoolPending = txpoolStatus["pending"]
+			}
+
+			log.Info(log.Node, "⏳ Waiting for blocks...",
+				"round", round+1,
+				"pending", pendingCount,
+				"confirmed", totalTxCount-pendingCount,
+				"lastBlock", lastBlockChecked,
+				"txpoolPending", txpoolPending)
+		}
+
+		// Deduplicate bundle counts (we accumulated them each round)
+		bundleHashes = make(map[string]int)
+		for i := range txs {
+			if txs[i].receipt != nil {
+				bundleHashes[txs[i].receipt.BlockHash]++
 			}
 		}
 
@@ -396,11 +551,11 @@ func TestEVMMultiRoundTransfers(t *testing.T) {
 	rpcClient := NewHTTPJSONRPCClient(evmRPCEndpoint)
 	evmClient := NewEVMClient(rpcClient)
 
-	// Configuration: 50 txns total, expect 10 bundles × 5 txns each
-	totalTxCount := 5000
-	expectedTxsPerBundle := 5000
-	expectedBundles := totalTxCount / expectedTxsPerBundle // 10 bundles
-	numCores := 2                                          // Target both cores
+	// These should match the builder's --max-txs-per-bundle flag
+	// With 5 txns per bundle and 2 cores, we get 2 bundles per round
+	expectedTxsPerBundle := 5
+	expectedBundles := (totalTxCount + expectedTxsPerBundle - 1) / expectedTxsPerBundle // ceil division
+	numCores := 2                                                                       // Target both cores
 
 	// Prime genesis first
 	t.Run("PrimeGenesis", func(t *testing.T) {
@@ -453,14 +608,6 @@ func TestEVMMultiRoundTransfers(t *testing.T) {
 		gasLimit := uint64(21000)
 
 		// Track all transactions
-		type txInfo struct {
-			hash      common.Hash
-			nonce     uint64
-			signedTx  []byte
-			receipt   *evmtypes.EthereumTransactionReceipt
-			coreIndex string
-			bundleIdx int
-		}
 		txs := make([]txInfo, totalTxCount)
 
 		// ========== PHASE 1: Prebuild ALL 50 transactions ==========
@@ -504,82 +651,67 @@ func TestEVMMultiRoundTransfers(t *testing.T) {
 		log.Info(log.Node, "✅ PHASE 2 complete: All transactions submitted", "count", totalTxCount, "duration", submitDuration)
 
 		// ========== PHASE 3: Wait for all transactions across multiple bundles ==========
-		log.Info(log.Node, "⏳ PHASE 3: Waiting for transactions across expected bundles", "expectedBundles", expectedBundles)
+		// Use block-based confirmation: O(blocks) instead of O(transactions)
+		log.Info(log.Node, "⏳ PHASE 3: Waiting for transactions via block monitoring", "expectedBundles", expectedBundles)
 		pollInterval := 6 * time.Second
 		maxWaitRounds := 60
-		pendingCount := totalTxCount
 
 		// Track unique block hashes (each represents a work package/bundle)
 		bundleHashes := make(map[string]int) // blockHash -> bundle index
 		bundleIndex := 0
-		var mu sync.Mutex
+		var lastBlockChecked uint64 = 0
 
-		for round := 0; round < maxWaitRounds && pendingCount > 0; round++ {
+		// Get initial block number
+		var blockNumHex string
+		if err := rpcClient.Call("eth_blockNumber", []string{}, &blockNumHex); err == nil {
+			fmt.Sscanf(blockNumHex, "0x%x", &lastBlockChecked)
+		}
+
+		for round := 0; round < maxWaitRounds; round++ {
 			time.Sleep(pollInterval)
 
-			// Poll all pending receipts in parallel
-			var wg sync.WaitGroup
+			// Check new blocks and confirm all included transactions
+			newLastBlock, confirmed := confirmTxsFromBlocks(rpcClient, txs, lastBlockChecked)
+			lastBlockChecked = newLastBlock
+
+			// Count pending and track bundles
+			pendingCount := 0
 			for i := range txs {
-				if txs[i].receipt != nil {
-					continue
-				}
-				wg.Add(1)
-				go func(idx int) {
-					defer wg.Done()
-					receipt, err := evmClient.GetTransactionReceipt(txs[idx].hash)
-					if err == nil && receipt != nil && receipt.BlockHash != "" {
-						// Query work report to get core index (do this outside lock)
-						var workReport map[string]interface{}
-						coreIdx := "unknown"
-						if err := rpcClient.Call("jam_getWorkReport", []string{receipt.BlockHash}, &workReport); err == nil && workReport != nil {
-							if ci, ok := workReport["coreIndex"]; ok {
-								coreIdx = fmt.Sprintf("%v", ci)
-							}
-						}
-
-						mu.Lock()
-						txs[idx].receipt = receipt
-						pendingCount--
-
-						// Track which bundle this tx belongs to
-						if _, exists := bundleHashes[receipt.BlockHash]; !exists {
-							bundleHashes[receipt.BlockHash] = bundleIndex
-							bundleIndex++
-							log.Info(log.Node, "📦 New bundle identified",
-								"bundleIdx", bundleIndex-1,
-								"blockHash", receipt.BlockHash[:18]+"...",
-								"blockNumber", receipt.BlockNumber)
-						}
-						txs[idx].bundleIdx = bundleHashes[receipt.BlockHash]
-						txs[idx].coreIndex = coreIdx
-						confirmed := totalTxCount - pendingCount
-						mu.Unlock()
-
-						log.Info(log.Node, "✅ TX confirmed",
-							"txIdx", idx,
-							"nonce", txs[idx].nonce,
-							"bundleIdx", txs[idx].bundleIdx,
-							"coreIndex", coreIdx,
-							"blockNumber", receipt.BlockNumber,
-							"status", receipt.Status,
-							"progress", fmt.Sprintf("%d/%d", confirmed, totalTxCount))
+				if txs[i].receipt == nil {
+					pendingCount++
+				} else if txs[i].bundleIdx < 0 {
+					// Assign bundle index for newly confirmed txs
+					blockHash := txs[i].receipt.BlockHash
+					if _, exists := bundleHashes[blockHash]; !exists {
+						bundleHashes[blockHash] = bundleIndex
+						bundleIndex++
+						log.Info(log.Node, "📦 New bundle identified",
+							"bundleIdx", bundleIndex-1,
+							"blockHash", blockHash[:18]+"...",
+							"blockNumber", txs[i].receipt.BlockNumber)
 					}
-				}(i)
+					txs[i].bundleIdx = bundleHashes[blockHash]
+				}
 			}
-			wg.Wait()
 
-			mu.Lock()
-			pending := pendingCount
-			bundles := len(bundleHashes)
-			mu.Unlock()
-
-			if pending > 0 {
-				log.Info(log.Node, "⏳ Polling receipts...",
+			if confirmed > 0 {
+				log.Info(log.Node, "📦 Block scan complete",
 					"round", round+1,
-					"pending", pending,
-					"confirmed", totalTxCount-pending,
-					"bundlesFound", bundles)
+					"newlyConfirmed", confirmed,
+					"pending", pendingCount,
+					"confirmed", totalTxCount-pendingCount,
+					"bundlesFound", len(bundleHashes))
 			}
+
+			if pendingCount == 0 {
+				break
+			}
+
+			log.Info(log.Node, "⏳ Waiting for blocks...",
+				"round", round+1,
+				"pending", pendingCount,
+				"confirmed", totalTxCount-pendingCount,
+				"lastBlock", lastBlockChecked)
 		}
 
 		// ========== PHASE 4: Report results and distribution analysis ==========

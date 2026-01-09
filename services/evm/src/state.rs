@@ -26,8 +26,12 @@ use evm::interpreter::runtime::{
 };
 use primitive_types::{H160, H256, U256};
 use utils::effects::ObjectId;
+#[allow(unused_imports)]
 use utils::functions::{log_error, log_info};
 use utils::objects::ObjectRef;
+
+/// Set to true to enable verbose state access logs
+const STATE_VERBOSE: bool = false;
 
 use crate::contractsharding::{ContractShard, ContractStorage};
 use crate::contractsharding::{ObjectKind, code_object_id, contract_shard_object_id};
@@ -213,12 +217,14 @@ impl MajikBackend {
             address_bytes.copy_from_slice(&object_id[0..20]);
             let address = H160::from(address_bytes);
 
-            log_info(&format!(
-                "Processing imported object: address={:?}, object_id={}, object_kind={}",
-                address,
-                crate::contractsharding::format_object_id(&object_id),
-                object_ref.object_kind
-            ));
+            if STATE_VERBOSE {
+                log_info(&format!(
+                    "Processing imported object: address={:?}, object_id={}, object_kind={}",
+                    address,
+                    crate::contractsharding::format_object_id(&object_id),
+                    object_ref.object_kind
+                ));
+            }
             match ObjectKind::from_u8(object_ref.object_kind as u8) {
                 Some(ObjectKind::Code) => {
                     // Code object - load bytecode directly from witness
@@ -253,11 +259,13 @@ impl MajikBackend {
                         backend.service_id,
                     ) {
                         MetaShardDeserializeResult::ValidatedHeader(shard_id, meta_shard) => {
-                            log_info(&format!(
-                                "  ✅ Imported MetaShard: shard_id={:?}, {} entries",
-                                shard_id,
-                                meta_shard.entries.len()
-                            ));
+                            if STATE_VERBOSE {
+                                log_info(&format!(
+                                    "  ✅ Imported MetaShard: shard_id={:?}, {} entries",
+                                    shard_id,
+                                    meta_shard.entries.len()
+                                ));
+                            }
 
                             // Insert into cache, even if empty (empty shards must be tracked!)
                             backend
@@ -954,19 +962,21 @@ impl RuntimeBaseBackend for MajikBackend {
     /// Builder mode: uses UBT host function (Go maintains ubtReadLog)
     /// Guarantor mode: uses cache-only (panics on miss)
     fn balance(&self, address: H160) -> U256 {
-        log_info(&format!(
-            "balance() called addr={:?} mode={:?}",
-            address, self.execution_mode
-        ));
+        if STATE_VERBOSE {
+            log_info(&format!(
+                "balance() called addr={:?} mode={:?}",
+                address, self.execution_mode
+            ));
+        }
         // Check cache first
         {
             let balances = self.balances.borrow();
             if let Some(balance) = balances.get(&address) {
-                log_info(&format!("balance HIT {:?}={}", address, balance));
+                if STATE_VERBOSE { log_info(&format!("balance HIT {:?}={}", address, balance)); }
                 return *balance;
             }
         }
-        log_info(&format!("balance MISS {:?}", address));
+        if STATE_VERBOSE { log_info(&format!("balance MISS {:?}", address)); }
 
         match self.execution_mode {
             ExecutionMode::Builder => {
@@ -992,15 +1002,17 @@ impl RuntimeBaseBackend for MajikBackend {
     /// Builder mode: uses UBT host function (Go maintains ubtReadLog)
     /// Guarantor mode: uses cache-only (panics on miss)
     fn code(&self, address: H160) -> Vec<u8> {
-        log_info(&format!(
-            "code() called addr={:?} mode={:?}",
-            address, self.execution_mode
-        ));
+        if STATE_VERBOSE {
+            log_info(&format!(
+                "code() called addr={:?} mode={:?}",
+                address, self.execution_mode
+            ));
+        }
         // Check positive cache first
         {
             let code_storage = self.code_storage.borrow();
             if let Some(code) = code_storage.get(&address) {
-                log_info(&format!("code HIT {:?} len={}", address, code.len()));
+                if STATE_VERBOSE { log_info(&format!("code HIT {:?} len={}", address, code.len())); }
                 return code.clone();
             }
         }
@@ -1009,11 +1021,11 @@ impl RuntimeBaseBackend for MajikBackend {
         {
             let negative_cache = self.negative_code_cache.borrow();
             if negative_cache.contains_key(&address) {
-                log_info(&format!("code HIT (negative) {:?}", address));
+                if STATE_VERBOSE { log_info(&format!("code HIT (negative) {:?}", address)); }
                 return Vec::new();
             }
         }
-        log_info(&format!("code MISS {:?}", address));
+        if STATE_VERBOSE { log_info(&format!("code MISS {:?}", address)); }
 
         match self.execution_mode {
             ExecutionMode::Builder => {
@@ -1044,7 +1056,7 @@ impl RuntimeBaseBackend for MajikBackend {
                     let empty_code_hash = keccak256(&[]);
                     if code_hash.as_bytes() == empty_code_hash.as_bytes() {
                         // Empty code hash = EOA (no code)
-                        log_info(&format!("code() EOA (empty hash) {:?}", address));
+                        if STATE_VERBOSE { log_info(&format!("code() EOA (empty hash) {:?}", address)); }
                         self.negative_code_cache.borrow_mut().insert(address, ());
                         return Vec::new();
                     } else {
@@ -1057,7 +1069,7 @@ impl RuntimeBaseBackend for MajikBackend {
                     }
                 } else {
                     // No code hash in witness = assume EOA (conservative default)
-                    log_info(&format!("code() EOA (no hash in witness) {:?}", address));
+                    if STATE_VERBOSE { log_info(&format!("code() EOA (no hash in witness) {:?}", address)); }
                     self.negative_code_cache.borrow_mut().insert(address, ());
                     return Vec::new();
                 }
@@ -1195,19 +1207,21 @@ impl RuntimeBaseBackend for MajikBackend {
     /// Builder mode: uses UBT host function (Go maintains ubtReadLog)
     /// Guarantor mode: uses cache-only (panics on miss)
     fn nonce(&self, address: H160) -> U256 {
-        log_info(&format!(
-            "nonce() called addr={:?} mode={:?}",
-            address, self.execution_mode
-        ));
+        if STATE_VERBOSE {
+            log_info(&format!(
+                "nonce() called addr={:?} mode={:?}",
+                address, self.execution_mode
+            ));
+        }
         // Check cache first
         {
             let nonces = self.nonces.borrow();
             if let Some(nonce) = nonces.get(&address) {
-                log_info(&format!("nonce HIT {:?}={}", address, nonce));
+                if STATE_VERBOSE { log_info(&format!("nonce HIT {:?}={}", address, nonce)); }
                 return *nonce;
             }
         }
-        log_info(&format!("nonce MISS {:?}", address));
+        if STATE_VERBOSE { log_info(&format!("nonce MISS {:?}", address)); }
 
         match self.execution_mode {
             ExecutionMode::Builder => {

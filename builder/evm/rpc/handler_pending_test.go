@@ -4,8 +4,8 @@ import (
 	"math/big"
 	"testing"
 
+	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
 	"github.com/colorfulnotion/jam/common"
-	evmtypes "github.com/colorfulnotion/jam/statedb/evmtypes"
 )
 
 func TestPendingTransactionResponse(t *testing.T) {

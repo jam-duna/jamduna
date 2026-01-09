@@ -84,7 +84,8 @@ type EvmBlockPayload struct {
 	ReceiptHashes []common.Hash        // Receipt hashes (32 bytes each)
 	Transactions  []TransactionReceipt `json:"-"`
 
-	// UBT state delta for delta-based state verification
+	// UBT state delta for delta-based state verification (UBT-CODEX.md)
+	// Optional field - enables replay verification without full re-execution
 	UBTStateDelta *UBTStateDelta `json:"ubt_delta,omitempty"`
 }
 
@@ -323,7 +324,7 @@ func DeserializeEvmBlockPayload(data []byte, headerOnly bool) (*EvmBlockPayload,
 		offset += 4
 
 		if proofLen > 0 {
-			return nil, fmt.Errorf("verkle proofs are not supported in UBT-only blocks")
+			return nil, fmt.Errorf("proof field is reserved and must be 0 in UBT blocks")
 		}
 	}
 

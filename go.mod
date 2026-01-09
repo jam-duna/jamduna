@@ -5,8 +5,8 @@ go 1.23.0
 toolchain go1.23.4
 
 require (
+	github.com/btcsuite/btcd/btcec/v2 v2.3.6
 	github.com/chzyer/readline v1.5.1
-	github.com/crate-crypto/go-ipa v0.0.0-20240724233137-53bbb0ceb27a
 	github.com/dop251/goja v0.0.0-20250309171923-bcd7cc6bf64c
 	github.com/ethereum/go-ethereum v1.16.1
 	github.com/ethereum/go-verkle v0.2.2
@@ -21,15 +21,16 @@ require (
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
-	github.com/unicorn-engine/unicorn v0.0.0-20250410153552-f8c6db950420
 	github.com/xlab/treeprint v1.2.0
 	github.com/yudai/gojsondiff v1.0.0
+	github.com/zeebo/blake3 v0.2.4
 	github.com/zeebo/xxh3 v1.0.2
 	golang.org/x/arch v0.17.0
 	golang.org/x/crypto v0.36.0
 	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394
 	golang.org/x/sync v0.12.0
 	golang.org/x/sys v0.31.0
+	gonum.org/v1/plot v0.16.0
 )
 
 require (
@@ -43,11 +44,11 @@ require (
 	github.com/ProtonMail/go-crypto v1.1.5 // indirect
 	github.com/ajstarks/svgo v0.0.0-20211024235047-1546f124cd8b // indirect
 	github.com/bits-and-blooms/bitset v1.20.0 // indirect
-	github.com/btcsuite/btcd/btcec/v2 v2.3.6 // indirect
 	github.com/campoy/embedmd v1.0.0 // indirect
 	github.com/cloudflare/circl v1.6.0 // indirect
 	github.com/consensys/gnark-crypto v0.18.0 // indirect
 	github.com/crate-crypto/go-eth-kzg v1.3.0 // indirect
+	github.com/crate-crypto/go-ipa v0.0.0-20240724233137-53bbb0ceb27a // indirect
 	github.com/cyphar/filepath-securejoin v0.4.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0 // indirect
@@ -81,14 +82,12 @@ require (
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	github.com/yudai/golcs v0.0.0-20170316035057-ecda9a501e82 // indirect
 	github.com/yudai/pp v2.0.1+incompatible // indirect
-	github.com/zeebo/blake3 v0.2.4 // indirect
 	go.uber.org/mock v0.5.0 // indirect
 	golang.org/x/image v0.25.0 // indirect
 	golang.org/x/mod v0.24.0 // indirect
 	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
 	golang.org/x/tools v0.31.0 // indirect
-	gonum.org/v1/plot v0.16.0 // indirect
 	google.golang.org/protobuf v1.36.3 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

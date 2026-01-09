@@ -55,6 +55,9 @@ use alloc::vec::Vec;
 use utils::functions::log_info;
 use utils::objects::ObjectRef;
 
+/// Set to true to enable verbose meta-sharding logs (per-object, per-entry details)
+const META_VERBOSE: bool = false;
+
 // Import shared types and helper functions from da module
 use crate::da::{self, SplitPoint, SerializeError, ShardId, take_prefix56, mask_prefix56, matches_prefix};
 
@@ -320,11 +323,13 @@ impl MetaShard {
             return None;
         }
 
-        log_info(&format!(
-            "🔀 Recursive split starting: {} entries in shard ld={}",
-            self.entries.len(),
-            shard_id.ld
-        ));
+        if META_VERBOSE {
+            log_info(&format!(
+                "🔀 Recursive split starting: {} entries in shard ld={}",
+                self.entries.len(),
+                shard_id.ld
+            ));
+        }
 
         let mut leaf_shards = Vec::new();
         let mut work_queue = vec![(shard_id, self)];
@@ -340,10 +345,12 @@ impl MetaShard {
             // Check if we've reached maximum depth
             if current_id.ld >= 255 {
                 // Cannot split further, keep as leaf even if over threshold
-                log_info(&format!(
-                    "⚠️  Max depth reached: {} entries remain in shard",
-                    current_data.entries.len()
-                ));
+                if META_VERBOSE {
+                    log_info(&format!(
+                        "⚠️  Max depth reached: {} entries remain in shard",
+                        current_data.entries.len()
+                    ));
+                }
                 leaf_shards.push((current_id, current_data));
                 continue;
             }
@@ -352,15 +359,17 @@ impl MetaShard {
             let (left_id, left_data, right_id, right_data, split_entry) =
                 current_data.split_once(current_id);
 
-            let total_entries = left_data.entries.len() + right_data.entries.len();
-            log_info(&format!(
-                "  Split ld={} → ld={}: {} entries → [{}, {}]",
-                current_id.ld,
-                left_id.ld,
-                total_entries,
-                left_data.entries.len(),
-                right_data.entries.len()
-            ));
+            if META_VERBOSE {
+                let total_entries = left_data.entries.len() + right_data.entries.len();
+                log_info(&format!(
+                    "  Split ld={} → ld={}: {} entries → [{}, {}]",
+                    current_id.ld,
+                    left_id.ld,
+                    total_entries,
+                    left_data.entries.len(),
+                    right_data.entries.len()
+                ));
+            }
 
             // Record split point for this internal split point
             split_entries.push(split_entry);
@@ -379,11 +388,13 @@ impl MetaShard {
             }
         }
 
-        log_info(&format!(
-            "✅ Recursive split complete: {} leaf shards, {} split points",
-            leaf_shards.len(),
-            split_entries.len()
-        ));
+        if META_VERBOSE {
+            log_info(&format!(
+                "✅ Recursive split complete: {} leaf shards, {} split points",
+                leaf_shards.len(),
+                split_entries.len()
+            ));
+        }
 
         Some((leaf_shards, split_entries))
     }
@@ -537,37 +548,39 @@ pub fn process_object_writes(
         return Vec::new();
     }
 
-    // Log all object_writes contents
+    // Log summary (always) and details (only if META_VERBOSE)
     log_info(&format!(
-        "📦 Processing {} object writes for meta-sharding:",
+        "📦 Processing {} object writes for meta-sharding",
         object_writes.len()
     ));
-    for (idx, (object_id, object_ref)) in object_writes.iter().enumerate() {
-        log_info(&format!(
-            "  [{}] object_id={}, object_ref={{wph: {}, idx_start: {}, payload_len: {}, kind: {}}}",
-            idx,
-            crate::contractsharding::format_object_id(object_id),
-            crate::contractsharding::format_object_id(&object_ref.work_package_hash),
-            object_ref.index_start,
-            object_ref.payload_length,
-            object_ref.object_kind
-        ));
-    }
+    if META_VERBOSE {
+        for (idx, (object_id, object_ref)) in object_writes.iter().enumerate() {
+            log_info(&format!(
+                "  [{}] object_id={}, object_ref={{wph: {}, idx_start: {}, payload_len: {}, kind: {}}}",
+                idx,
+                crate::contractsharding::format_object_id(object_id),
+                crate::contractsharding::format_object_id(&object_ref.work_package_hash),
+                object_ref.index_start,
+                object_ref.payload_length,
+                object_ref.object_kind
+            ));
+        }
 
-    // Log meta_ssr state
-    log_info(&format!(
-        "📦 MetaSSR state: global_depth={}, {} entries",
-        meta_ssr.global_depth,
-        meta_ssr.entries.len()
-    ));
-    for (idx, entry) in meta_ssr.entries.iter().enumerate() {
+        // Log meta_ssr state
         log_info(&format!(
-            "  Split Point [{}]: d={}, ld={}, prefix56={:?}",
-            idx,
-            entry.d,
-            entry.ld,
-            &entry.prefix56[..]
+            "📦 MetaSSR state: global_depth={}, {} entries",
+            meta_ssr.global_depth,
+            meta_ssr.entries.len()
         ));
+        for (idx, entry) in meta_ssr.entries.iter().enumerate() {
+            log_info(&format!(
+                "  Split Point [{}]: d={}, ld={}, prefix56={:?}",
+                idx,
+                entry.d,
+                entry.ld,
+                &entry.prefix56[..]
+            ));
+        }
     }
 
     // 1. Group object writes by meta-shard
@@ -604,10 +617,12 @@ pub fn process_object_writes(
             });
     }
 
-    log_info(&format!(
-        "  Grouped into {} meta-shards",
-        shard_updates.len()
-    ));
+    if META_VERBOSE {
+        log_info(&format!(
+            "  Grouped into {} meta-shards",
+            shard_updates.len()
+        ));
+    }
 
     let mut write_intents = Vec::new();
 
@@ -629,20 +644,26 @@ pub fn process_object_writes(
                         // Payload includes 8-byte header: [ld (1B)][prefix56 (7B)][merkle_root + entries...]
                         match MetaShard::deserialize_with_id_validated(&payload, &object_id, service_id) {
                             MetaShardDeserializeResult::ValidatedHeader(_shard_id, shard) => {
-                                log_info(&format!(
-                                    "  ✅ Fetched {} entries from DA (was cached as empty)",
-                                    shard.entries.len()
-                                ));
+                                if META_VERBOSE {
+                                    log_info(&format!(
+                                        "  ✅ Fetched {} entries from DA (was cached as empty)",
+                                        shard.entries.len()
+                                    ));
+                                }
                                 shard
                             }
                             MetaShardDeserializeResult::ValidationFailed => {
-                                log_info("  ⚠️  Deserialization/validation failed, using empty cache");
+                                if META_VERBOSE {
+                                    log_info("  ⚠️  Deserialization/validation failed, using empty cache");
+                                }
                                 cached.clone()
                             }
                         }
                     }
                     None => {
-                        log_info("  Meta-shard not in DA (using empty cache)");
+                        if META_VERBOSE {
+                            log_info("  Meta-shard not in DA (using empty cache)");
+                        }
                         cached.clone()
                     }
                 }
@@ -661,11 +682,15 @@ pub fn process_object_writes(
                     // Payload includes 8-byte header: [ld (1B)][prefix56 (7B)][merkle_root + entries...]
                     match MetaShard::deserialize_with_id_validated(&payload, &object_id, service_id) {
                         MetaShardDeserializeResult::ValidatedHeader(_shard_id, shard) => {
-                            log_info(&format!("  ✅ Fetched {} entries from DA", shard.entries.len()));
+                            if META_VERBOSE {
+                                log_info(&format!("  ✅ Fetched {} entries from DA", shard.entries.len()));
+                            }
                             shard
                         }
                         MetaShardDeserializeResult::ValidationFailed => {
-                            log_info("  ⚠️  Deserialization/validation failed, using empty");
+                            if META_VERBOSE {
+                                log_info("  ⚠️  Deserialization/validation failed, using empty");
+                            }
                             MetaShard {
                                 merkle_root: [0u8; 32],
                                 entries: Vec::new(),
@@ -674,7 +699,9 @@ pub fn process_object_writes(
                     }
                 }
                 None => {
-                    log_info("  Meta-shard not in DA (new)");
+                    if META_VERBOSE {
+                        log_info("  Meta-shard not in DA (new)");
+                    }
                     MetaShard {
                         merkle_root: [0u8; 32],
                         entries: Vec::new(),
@@ -683,12 +710,14 @@ pub fn process_object_writes(
             }
         };
 
-        log_info(&format!(
-            "  Meta-shard {:?}: {} existing + {} new entries",
-            shard_id,
-            shard_data.entries.len(),
-            new_entries.len()
-        ));
+        if META_VERBOSE {
+            log_info(&format!(
+                "  Meta-shard {:?}: {} existing + {} new entries",
+                shard_id,
+                shard_data.entries.len(),
+                new_entries.len()
+            ));
+        }
 
         // Merge new entries (update or insert)
         for new_entry in new_entries {
@@ -710,11 +739,13 @@ pub fn process_object_writes(
         // Check if shard needs splitting
         match shard_data.clone().maybe_split(shard_id, META_SHARD_SPLIT_THRESHOLD) {
             Some((leaf_shards, split_entries)) => {
-                log_info(&format!(
-                    "  ✅ Split complete: {} leaf shards, {} split points",
-                    leaf_shards.len(),
-                    split_entries.len()
-                ));
+                if META_VERBOSE {
+                    log_info(&format!(
+                        "  ✅ Split complete: {} leaf shards, {} split points",
+                        leaf_shards.len(),
+                        split_entries.len()
+                    ));
+                }
 
                 // Update MetaSSR with new split entries
                 for split_entry in split_entries {
@@ -723,7 +754,7 @@ pub fn process_object_writes(
                 meta_ssr.entries.sort();
 
                 // Sanity check: Warn if entry count is unusually high
-                if meta_ssr.entries.len() > 1_000_000 {
+                if meta_ssr.entries.len() > 1_000_000 && META_VERBOSE {
                     log_info(&format!(
                         "  ⚠️  Meta-SSR has {} routing entries (unusually high!)",
                         meta_ssr.entries.len()
