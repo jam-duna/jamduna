@@ -16,7 +16,8 @@ type Submitter func(bundle *types.WorkPackageBundle, coreIndex uint16) (common.H
 
 // BundleBuilder is a callback for building/rebuilding a bundle with fresh RefineContext.
 // This is called when an item needs to be resubmitted due to timeout or failure.
-type BundleBuilder func(item *QueueItem) (*types.WorkPackageBundle, error)
+// The QueueStats parameter allows the callback to calculate dynamic anchor offset.
+type BundleBuilder func(item *QueueItem, stats QueueStats) (*types.WorkPackageBundle, error)
 
 // Runner manages the queue submission loop
 type Runner struct {
@@ -177,9 +178,36 @@ func (r *Runner) tick() {
 			break
 		}
 
-		// If this is a resubmission (version > 1), rebuild the bundle
-		if item.Version > 1 && r.bundleBuilder != nil {
-			newBundle, err := r.bundleBuilder(item)
+		// Check if bundle needs rebuild:
+		// 1. Resubmission (version > 1) always needs rebuild for fresh RefineContext
+		// 2. First submission with stale anchor needs rebuild
+		needsRebuild := item.Version > 1
+		if !needsRebuild && r.bundleBuilder != nil && item.Bundle != nil {
+			// Check if anchor is getting stale
+			// G15 check: anchor hash must exist in RecentBlocks.B_H (last 8 blocks = 48 seconds)
+			// We use a safety margin of 2 blocks (~12 seconds) to account for network delays
+			const anchorSafetyMargin uint32 = 2
+			const recentHistorySize uint32 = 8 // types.RecentHistorySize
+			anchorSlot := item.Bundle.WorkPackage.RefineContext.LookupAnchorSlot
+			currentSlot := common.ComputeTimeSlot("JAM")
+			if currentSlot > anchorSlot {
+				anchorAge := currentSlot - anchorSlot
+				if anchorAge > (recentHistorySize - anchorSafetyMargin) {
+					log.Info(log.Node, "Queue Runner: Bundle anchor getting stale, will rebuild",
+						"service", r.serviceID,
+						"blockNumber", item.BlockNumber,
+						"anchorSlot", anchorSlot,
+						"currentSlot", currentSlot,
+						"anchorAge", anchorAge,
+						"threshold", recentHistorySize-anchorSafetyMargin)
+					needsRebuild = true
+				}
+			}
+		}
+
+		if needsRebuild && r.bundleBuilder != nil {
+			stats := r.queue.GetStats()
+			newBundle, err := r.bundleBuilder(item, stats)
 			if err != nil {
 				log.Error(log.Node, "Queue Runner: Failed to rebuild bundle",
 					"service", r.serviceID,
@@ -258,6 +286,11 @@ func (r *Runner) inSubmissionWindow() bool {
 // GetQueue returns the underlying queue state
 func (r *Runner) GetQueue() *QueueState {
 	return r.queue
+}
+
+// GetStats returns the current queue statistics
+func (r *Runner) GetStats() QueueStats {
+	return r.queue.GetStats()
 }
 
 // EnqueueBundle is a convenience method to enqueue a bundle for a specific core

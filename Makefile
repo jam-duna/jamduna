@@ -258,12 +258,14 @@ run_evm_builder:
 run_evm_multi:
 	@echo "Running EVM Multi-Round Transfer Test..."
 	@echo "Ensure validators and EVM builder are running first"
-	go test -v -count=1 -run TestEVMMultiRoundTransfers ./builder/evm/rpc/
+	@mkdir -p logs
+	go test -v -count=1 -run TestEVMMultiRoundTransfers ./builder/evm/rpc/ 2>&1 | tee logs/evm-multi-test.log
 
 run_evm_single:
 	@echo "Running EVM Single Transfer Test..."
 	@echo "Ensure validators and EVM builder are running first"
-	go test -v -count=1 -run TestEVMBlocksTransfersRPC ./builder/evm/rpc/
+	@mkdir -p logs
+	go test -v -count=1 -run TestEVMBlocksTransfersRPC ./builder/evm/rpc/ 2>&1 | tee logs/evm-single-test.log
 
 run_evm_builder_remote: evm-builder
 	@echo "Stopping any existing EVM Builder..."

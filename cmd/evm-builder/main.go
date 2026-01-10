@@ -18,6 +18,7 @@ import (
 	"time"
 
 	evmrpc "github.com/colorfulnotion/jam/builder/evm/rpc"
+	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
 	"github.com/colorfulnotion/jam/builder/queue"
 	"github.com/colorfulnotion/jam/chainspecs"
 	"github.com/colorfulnotion/jam/common"
@@ -215,19 +216,64 @@ func main() {
 			}
 
 			// Create bundle builder callback - rebuilds bundle with fresh RefineContext
-			bundleBuilder := func(item *queue.QueueItem) (*types.WorkPackageBundle, error) {
+			bundleBuilder := func(item *queue.QueueItem, stats queue.QueueStats) (*types.WorkPackageBundle, error) {
 				if item.Bundle == nil {
 					return nil, fmt.Errorf("queue item has no bundle")
 				}
-				// Get fresh refine context
-				refineCtx, err := n.GetRefineContextWithBuffer(EVMBuilderBuffer)
+				// Calculate dynamic anchor offset based on queue position
+				// Leave 2 blocks headroom before anchor expires
+				// Subtract 1 for each bundle pair ahead in queue (fresher anchor for later bundles)
+				queuePosition := stats.QueuedCount + stats.InflightCount
+				bundlePairsAhead := queuePosition / types.TotalCores
+				anchorOffset := types.RecentHistorySize - 2 - bundlePairsAhead
+				if anchorOffset < 1 {
+					anchorOffset = 1
+				}
+
+				// Get fresh refine context with dynamic offset
+				refineCtx, err := n.GetRefineContextWithBuffer(anchorOffset)
 				if err != nil {
 					return nil, fmt.Errorf("failed to get refine context: %w", err)
 				}
 				// Update work package with new context
 				item.Bundle.WorkPackage.RefineContext = refineCtx
+
+				// Restore original WorkItem metadata before rebuild.
+				// BuildBundle modifies WorkItems[].Extrinsics (prepends UBT witnesses) and
+				// WorkItems[].Payload (changes type from Builder to Transactions, adds witness count).
+				// We must restore the original state to avoid double-prepending witnesses.
+				if item.OriginalWorkItemExtrinsics != nil {
+					for i := range item.Bundle.WorkPackage.WorkItems {
+						if i < len(item.OriginalWorkItemExtrinsics) {
+							item.Bundle.WorkPackage.WorkItems[i].Extrinsics = item.OriginalWorkItemExtrinsics[i]
+							// Also restore payload to original Builder type with correct tx count
+							// Original payload: PayloadTypeBuilder (0x00), tx_count, globalDepth=0, witnesses=0, BAL=zeros
+							txCount := len(item.OriginalWorkItemExtrinsics[i])
+							item.Bundle.WorkPackage.WorkItems[i].Payload = evmtypes.BuildPayload(
+								evmtypes.PayloadTypeBuilder,
+								txCount,
+								0, // globalDepth
+								0, // numWitnesses (will be set by BuildBundle)
+								common.Hash{}, // BAL hash (will be computed by BuildBundle)
+							)
+						}
+					}
+				}
+
+				// Deep copy OriginalExtrinsics before passing to BuildBundle.
+				// BuildBundle modifies extrinsicsBlobs in place (prepends UBT witnesses),
+				// so we must pass a copy to avoid corrupting OriginalExtrinsics for future rebuilds.
+				extrinsicsCopy := make([]types.ExtrinsicsBlobs, len(item.OriginalExtrinsics))
+				for i, blobs := range item.OriginalExtrinsics {
+					extrinsicsCopy[i] = make(types.ExtrinsicsBlobs, len(blobs))
+					for j, blob := range blobs {
+						extrinsicsCopy[i][j] = make([]byte, len(blob))
+						copy(extrinsicsCopy[i][j], blob)
+					}
+				}
+
 				// Rebuild via StateDB.BuildBundle
-				bundle, _, err := n.BuildBundle(item.Bundle.WorkPackage, item.OriginalExtrinsics, item.CoreIndex, nil)
+				bundle, _, err := n.BuildBundle(item.Bundle.WorkPackage, extrinsicsCopy, item.CoreIndex, nil)
 				if err != nil {
 					return nil, fmt.Errorf("failed to rebuild bundle: %w", err)
 				}
@@ -394,7 +440,18 @@ func handleBlockNotifications(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrp
 		// Each bundle takes up to MaxTxsPerBundle transactions
 		bundlesBuilt := 0
 		for core := 0; core < types.TotalCores && txPool.Size() > 0; core++ {
-			if err := buildAndEnqueueWorkPackageForCore(n, rollup, txPool, serviceID, queueRunner, uint16(core)); err != nil {
+			// Calculate anchor offset based on current queue position
+			// Leave 2 blocks headroom before anchor expires
+			// Subtract 1 for each bundle pair ahead in queue (fresher anchor for later bundles)
+			stats := queueRunner.GetStats()
+			queuePosition := stats.QueuedCount + stats.InflightCount
+			bundlePairsAhead := queuePosition / types.TotalCores
+			anchorOffset := types.RecentHistorySize - 2 - bundlePairsAhead
+			if anchorOffset < 1 {
+				anchorOffset = 1
+			}
+
+			if err := buildAndEnqueueWorkPackageForCore(n, rollup, txPool, serviceID, queueRunner, uint16(core), anchorOffset); err != nil {
 				log.Error(log.Node, "Failed to build bundle for core", "core", core, "err", err)
 				break // Stop if we hit an error
 			}
@@ -411,15 +468,16 @@ func handleBlockNotifications(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrp
 
 // buildAndEnqueueWorkPackageForCore builds a work package for a specific core from maxTxsPerBundleConfig transactions
 // Each bundle is independent with its own pre→post UBT state
-func buildAndEnqueueWorkPackageForCore(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrpc.TxPool, serviceID uint32, queueRunner *queue.Runner, coreIdx uint16) error {
+// anchorOffset controls how far back the anchor slot is from current slot (smaller = fresher anchor)
+func buildAndEnqueueWorkPackageForCore(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrpc.TxPool, serviceID uint32, queueRunner *queue.Runner, coreIdx uint16, anchorOffset int) error {
 	// Get only maxTxsPerBundleConfig pending transactions
 	pendingTxs := txPool.GetPendingTransactionsLimit(maxTxsPerBundleConfig)
 	if len(pendingTxs) == 0 {
 		return fmt.Errorf("no pending transactions")
 	}
 
-	// Get refine context with EVM-specific buffer (larger than default for more tolerance)
-	refineCtx, err := n.GetRefineContextWithBuffer(EVMBuilderBuffer)
+	// Get refine context with the specified anchor offset
+	refineCtx, err := n.GetRefineContextWithBuffer(anchorOffset)
 	if err != nil {
 		return fmt.Errorf("failed to get refine context: %w", err)
 	}
@@ -428,7 +486,8 @@ func buildAndEnqueueWorkPackageForCore(n *node.Node, rollup *evmrpc.Rollup, txPo
 	log.Info(log.Node, "📦 Building work package for core",
 		"core", coreIdx,
 		"txCount", len(pendingTxs),
-		"anchorSlot", refineCtx.LookupAnchorSlot)
+		"anchorSlot", refineCtx.LookupAnchorSlot,
+		"anchorOffset", anchorOffset)
 
 	for i, tx := range pendingTxs {
 		log.Debug(log.Node, "  📦 TX in package",
@@ -476,16 +535,17 @@ func buildAndEnqueueWorkPackageForCore(n *node.Node, rollup *evmrpc.Rollup, txPo
 		return fmt.Errorf("failed to build bundle: %w", err)
 	}
 
-	// Clear processed transactions from pool AFTER successful bundle build
-	for _, tx := range pendingTxs {
-		txPool.RemoveTransaction(tx.Hash)
-	}
-
 	// Enqueue to queue runner with original extrinsics for resubmission support
 	// Pass coreIdx so the runner submits to the correct core
 	blockNumber, err := queueRunner.EnqueueBundleWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIdx)
 	if err != nil {
 		return fmt.Errorf("failed to enqueue bundle: %w", err)
+	}
+
+	// Clear processed transactions from pool AFTER successful enqueue
+	// CRITICAL: Only remove after enqueue succeeds to avoid losing transactions if queue is full
+	for _, tx := range pendingTxs {
+		txPool.RemoveTransaction(tx.Hash)
 	}
 
 	log.Info(log.Node, "📤 Work package enqueued to JAM queue",
@@ -560,17 +620,6 @@ func handleBlockEvents(n *node.Node, serviceID uint32, queueRunner *queue.Runner
 	}
 }
 
-// EVMBuilderBuffer is the anchor buffer depth for EVM work packages.
-// Larger buffer = older anchor (further back in RecentBlocks).
-// With RecentHistorySize=8:
-//
-//	buffer=3 → anchor at index 5 (3rd newest) → ~3 slots before expiry
-//	buffer=5 → anchor at index 3 (5th newest) → ~5 slots before expiry
-//
-// Increased from 3 to 5 for multi-round transfers where block N+1 is built
-// while block N is still being guaranteed/accumulated.
-const EVMBuilderBuffer = 5
-
 // getNextCoreIndex returns the next core index (0 or 1) using round-robin
 // Builder is not a validator, so it can submit to any core. We rotate between
 // cores 0 and 1 to distribute load. Each work package submission targets one core.
@@ -593,8 +642,8 @@ func buildAndEnqueueWorkPackage(n *node.Node, rollup *evmrpc.Rollup, txPool *evm
 		return fmt.Errorf("no pending transactions")
 	}
 
-	// Get refine context with EVM-specific buffer (larger than default for more tolerance)
-	refineCtx, err := n.GetRefineContextWithBuffer(EVMBuilderBuffer)
+	// Get refine context with safe buffer (leave 2 blocks headroom before anchor expires)
+	refineCtx, err := n.GetRefineContextWithBuffer(types.RecentHistorySize - 2)
 	if err != nil {
 		return fmt.Errorf("failed to get refine context: %w", err)
 	}
@@ -649,16 +698,17 @@ func buildAndEnqueueWorkPackage(n *node.Node, rollup *evmrpc.Rollup, txPool *evm
 		return fmt.Errorf("failed to build bundle: %w", err)
 	}
 
-	// Clear processed transactions from pool AFTER successful bundle build
-	for _, tx := range pendingTxs {
-		txPool.RemoveTransaction(tx.Hash)
-	}
-
 	// Enqueue to queue runner with original extrinsics for resubmission support
 	// Pass coreIdx so the runner submits to the correct core
 	blockNumber, err := queueRunner.EnqueueBundleWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIdx)
 	if err != nil {
 		return fmt.Errorf("failed to enqueue bundle: %w", err)
+	}
+
+	// Clear processed transactions from pool AFTER successful enqueue
+	// CRITICAL: Only remove after enqueue succeeds to avoid losing transactions if queue is full
+	for _, tx := range pendingTxs {
+		txPool.RemoveTransaction(tx.Hash)
 	}
 
 	log.Info(log.Node, "📤 Work package enqueued to JAM queue",

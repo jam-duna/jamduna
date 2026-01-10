@@ -52,7 +52,7 @@ func (s WorkPackageBundleStatus) String() string {
 
 // Configuration parameters for the queue
 const (
-	DefaultMaxQueueDepth      = 8            // Maximum items waiting to be submitted
+	DefaultMaxQueueDepth      = 12           // Maximum items waiting to be submitted
 	DefaultMaxInflight        = 3            // Maximum items in Submitted or Guaranteed state
 	DefaultSubmissionTimeout  = 30 * time.Second // Time before Submitted item is considered failed
 	DefaultGuaranteeTimeout   = 18 * time.Second // Time before Submitted item without guarantee is requeued (3 JAM blocks)
@@ -294,11 +294,13 @@ func (qs *QueueState) EnqueueWithOriginalExtrinsics(bundle *types.WorkPackageBun
 	return blockNumber, nil
 }
 
-// inflight returns the count of items in Submitted or Guaranteed state
+// inflight returns the count of items blocking core slots (only Submitted state)
+// Once guaranteed, the core is free for new submissions - we just track guaranteed
+// items until they accumulate for cleanup purposes.
 func (qs *QueueState) inflight() int {
 	count := 0
 	for _, status := range qs.Status {
-		if status == StatusSubmitted || status == StatusGuaranteed {
+		if status == StatusSubmitted {
 			count++
 		}
 	}
@@ -507,11 +509,15 @@ func (qs *QueueState) OnAccumulated(wpHash common.Hash) {
 	if item, ok := qs.Inflight[bn]; ok {
 		item.Status = StatusAccumulated
 		bundleID = item.BundleID
+		// Move to Finalized and remove from Inflight - accumulation completes the lifecycle
+		qs.Finalized[bn] = item
+		delete(qs.Inflight, bn)
 	} else if item, ok := qs.Queued[bn]; ok {
 		// Item was requeued but older version got accumulated
 		item.Status = StatusAccumulated
 		bundleID = item.BundleID
-		qs.Inflight[bn] = item
+		// Move directly to Finalized
+		qs.Finalized[bn] = item
 		delete(qs.Queued, bn)
 	}
 
@@ -533,6 +539,7 @@ func (qs *QueueState) OnAccumulated(wpHash common.Hash) {
 		"wpHash", wpHash.Hex(),
 		"oldStatus", oldStatus.String(),
 		"newInflightCount", inflightCount,
+		"inflightMapSize", len(qs.Inflight),
 		"queuedCount", len(qs.Queued))
 }
 
@@ -602,6 +609,19 @@ func (qs *QueueState) OnTimeoutOrFailure(failedBN uint64) {
 	for _, bn := range toRequeue {
 		item := qs.Inflight[bn]
 		if item == nil {
+			continue
+		}
+
+		// CRITICAL: Double-check status before requeuing - another goroutine may have
+		// processed a guarantee event between timeout detection and this function call.
+		// This prevents duplicate execution of the same transactions.
+		currentStatus := qs.Status[bn]
+		if currentStatus == StatusGuaranteed || currentStatus == StatusAccumulated || currentStatus == StatusFinalized {
+			log.Info(log.Node, "Queue: OnTimeoutOrFailure skipping - bundle already guaranteed/accumulated",
+				"service", qs.serviceID,
+				"blockNumber", bn,
+				"currentStatus", currentStatus.String(),
+				"wpHash", item.WPHash.Hex())
 			continue
 		}
 
@@ -734,6 +754,20 @@ func (qs *QueueState) CheckTimeouts() {
 		}
 
 		if elapsed > timeout {
+			// CRITICAL: Before requeuing, check if ANY version of this block was already
+			// guaranteed or accumulated. This prevents duplicate execution when the original
+			// bundle's guarantee arrives after we timeout but before we resubmit.
+			currentStatus := qs.Status[bn]
+			if currentStatus == StatusGuaranteed || currentStatus == StatusAccumulated || currentStatus == StatusFinalized {
+				log.Info(log.Node, "Queue: Timeout detected but bundle already guaranteed/accumulated - skipping requeue",
+					"service", qs.serviceID,
+					"blockNumber", bn,
+					"version", item.Version,
+					"currentStatus", currentStatus.String(),
+					"wpHash", item.WPHash.Hex())
+				continue
+			}
+
 			log.Warn(log.Node, "Queue: Timeout detected - will requeue",
 				"service", qs.serviceID,
 				"blockNumber", bn,
