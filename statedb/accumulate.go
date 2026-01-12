@@ -928,6 +928,10 @@ func TransferSelect(t []types.DeferredTransfer, d uint32) []types.DeferredTransf
 func (s *StateDB) ApplyStateTransitionAccumulation(w_star []types.WorkReport, num uint64, previousTimeslot uint32) {
 	jam := s.GetJamState()
 	w_q := jam.QueuedExecution(s.AvailableWorkReport)
+	if num > uint64(len(w_star)) {
+		log.Warn(log.SDB, "ApplyStateTransitionAccumulation: num exceeds work reports", "num", num, "workreports", len(w_star))
+		num = uint64(len(w_star))
+	}
 	jam.UpdateLatestHistory(w_star, int(num))
 	jam.UpdateReadyQueuedReport(w_q, previousTimeslot)
 }
@@ -960,6 +964,9 @@ func (j *JamState) UpdateReadyQueuedReport(w_q []types.AccumulationQueue, previo
 	timeslot := j.SafroleState.Timeslot
 	_, phase := j.SafroleState.EpochAndPhase(timeslot)
 	if previous_t == 0 {
+		return
+	}
+	if previous_t > timeslot {
 		return
 	}
 	for i := uint32(0); i < types.EpochLength; i++ {

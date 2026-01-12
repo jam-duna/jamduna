@@ -41,6 +41,10 @@ func (t *StateDBStorage) GetRoot() common.Hash {
 	return t.Root
 }
 
+func (t *StateDBStorage) ClearStagedOps() {
+	t.trieDB.ClearStagedOps()
+}
+
 func (t *StateDBStorage) OverlayRoot() (common.Hash, error) {
 	// Create a temporary tree clone to compute overlay root without committing
 	// Check if there are any staged operations

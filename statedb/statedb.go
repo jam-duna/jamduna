@@ -639,6 +639,15 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 	tmpAvailableWorkReport := make([]types.WorkReport, len(s.AvailableWorkReport))
 	copy(tmpAvailableWorkReport, s.AvailableWorkReport)
 
+	// Deep copy AncestorSet to prevent cross-contamination between branches.
+	var tmpAncestorSet map[common.Hash]uint32
+	if s.AncestorSet != nil {
+		tmpAncestorSet = make(map[common.Hash]uint32, len(s.AncestorSet))
+		for k, v := range s.AncestorSet {
+			tmpAncestorSet[k] = v
+		}
+	}
+
 	newStateDB = &StateDB{
 		Id:               s.Id,
 		Block:            s.Block.Copy(), // You might need to deep copy the Block if it's mutable
@@ -651,7 +660,7 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		logChan:             make(chan storage.LogMessage, 100),
 		metashardWitnesses:  make(map[common.Hash]*types.StateWitness),
 		AvailableWorkReport: tmpAvailableWorkReport,
-		AncestorSet:         s.AncestorSet, // TODO: CHECK why we have this in CheckStateTransition
+		AncestorSet:         tmpAncestorSet,
 		Authoring:           s.Authoring,
 		/*
 			Following flds are not copied over..?
@@ -826,15 +835,17 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 	}
 
 	// (12.42)
-	for index, l := range preimages {
+	validPreimages := preimages[:0]
+	for _, l := range preimages {
 		_, err := s.ValidateAddPreimageWithUpdatedService(l.Requester, l.Blob, ServiceAccounts)
 		if err != nil {
-			//delete this preimage from array
-			preimages = append(preimages[:index], preimages[index+1:]...)
+			continue
 		}
+		validPreimages = append(validPreimages, l)
 		num_preimages++
 		num_octets += l.BlobLength()
 	}
+	preimages = validPreimages
 
 	// (12.43) ready for state transition
 	for _, l := range preimages {
@@ -929,11 +940,17 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block, sf0 *SafroleState) (isValid
 	if sf0.GetEpochTWithPhase(targetJCE) == 1 {
 		// Safrole
 		_, currPhase := sf0.EpochAndPhase(targetJCE)
+		if int(currPhase) >= len(sf0.TicketsOrKeys.Tickets) {
+			return false, validatorIdx, block_author_ietf_pub, fmt.Errorf("VerifyBlockHeader Failed: missing winning ticket")
+		}
 		winning_ticket := (sf0.TicketsOrKeys.Tickets)[currPhase]
 		c = ticketSealVRFInput(blockSealEntropy, uint8(winning_ticket.Attempt))
 	} else {
 		// Fallback
 		_, currPhase := sf0.EpochAndPhase(targetJCE)
+		if int(currPhase) >= len(sf0.TicketsOrKeys.Keys) {
+			return false, validatorIdx, block_author_ietf_pub, fmt.Errorf("VerifyBlockHeader Failed: missing fallback key")
+		}
 		currentValidatorKey := (sf0.TicketsOrKeys.Keys)[currPhase]
 		if !bytes.Equal(currentValidatorKey.Bytes(), block_author_ietf_pub.Bytes()) {
 			fmt.Printf("=== VALIDATOR KEY MISMATCH ===\n")
@@ -984,8 +1001,6 @@ func (s *StateDB) VerifyBlockHeader(bl *types.Block, sf0 *SafroleState) (isValid
 			"bl.Extrinsic.Hash()", common.BytesToHexStr(bl.Extrinsic.Hash()),
 			"block_author_ietf_pub", common.BytesToHexStr(block_author_ietf_pub[:]),
 			"validatorIdx", validatorIdx)
-		log.Error(log.SDB, "VerifyBlockHeader:ExtrinsicHashMismatch",
-			"guarantees[0]", bl.Extrinsic.Guarantees[0].String())
 		return false, validatorIdx, block_author_ietf_pub, fmt.Errorf("VerifyBlockHeader Failed: ExtrinsicHash Mismatch")
 	}
 
@@ -1096,9 +1111,9 @@ func (s *StateDB) GetAncestorTimeSlot() []uint32 {
 }
 
 func (s *StateDB) SetAncestor(blockHeader types.BlockHeader, oldState *StateDB) {
-	ancestorSet := oldState.AncestorSet
-	if ancestorSet == nil {
-		ancestorSet = make(map[common.Hash]uint32)
+	ancestorSet := make(map[common.Hash]uint32, len(oldState.AncestorSet)+1)
+	for k, v := range oldState.AncestorSet {
+		ancestorSet[k] = v
 	}
 	ancestorSet[blockHeader.Hash()] = blockHeader.Slot
 	s.AncestorSet = ancestorSet

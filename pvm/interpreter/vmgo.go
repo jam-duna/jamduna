@@ -867,17 +867,22 @@ func (vm *VMGo) Execute(host pvmtypes.HostVM, entryPoint uint32, logDir string) 
 		}
 	}
 
-	if pvmtypes.DebugHostFunctions {
-		fmt.Printf("Host functions called in this execution: ")
-		for hostFn, count := range pvmtypes.DebugHostFunctionMap {
-			fmt.Printf("%s(%d) \n", pvmtypes.HostFnToName(hostFn), count)
-			if hostFn == pvmtypes.INVOKE {
-				for resultCode, rcCount := range pvmtypes.ResultMap {
-					fmt.Printf("   Result code %s: %d times\n", machineStateToString(uint8(resultCode)), rcCount)
+	if pvmtypes.DebugHostFunctions && vm.hostVM != nil {
+		debugStats := vm.hostVM.GetDebugStats()
+		if debugStats != nil {
+			fmt.Printf("Host functions called in this execution: ")
+			hostFnCounts := debugStats.GetHostFunctionCounts()
+			for hostFn, count := range hostFnCounts {
+				fmt.Printf("%s(%d) \n", pvmtypes.HostFnToName(hostFn), count)
+				if hostFn == pvmtypes.INVOKE {
+					resultCounts := debugStats.GetResultCounts()
+					for resultCode, rcCount := range resultCounts {
+						fmt.Printf("   Result code %s: %d times\n", machineStateToString(uint8(resultCode)), rcCount)
+					}
 				}
 			}
+			fmt.Printf("\n")
 		}
-		fmt.Printf("\n")
 	}
 	// if vm finished without error, set result code to OK
 	if !vm.terminated {

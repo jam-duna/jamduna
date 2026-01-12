@@ -402,6 +402,7 @@ type JAMStorage interface {
 	GetRoot() common.Hash
 	OverlayRoot() (common.Hash, error) // Compute root from staged overlay without committing (mirrors Rust Session::finish)
 	SetRoot(root common.Hash) error
+	ClearStagedOps()
 
 	// Service Operations - per-service account data management
 	DeleteService(s uint32) error

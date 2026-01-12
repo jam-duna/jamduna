@@ -729,6 +729,9 @@ func (vm *X86Compiler) initDJumpFunc(x86CodeLen int) {
 }
 
 func (vm *RecompilerVM) Close() error {
+	if vm.regDumpAddr != 0 {
+		ClearCurrentVerifier(vm.regDumpAddr)
+	}
 	var errs []error
 	if len(errs) > 0 {
 		return fmt.Errorf("Close encountered errors: %v", errs)
@@ -825,8 +828,9 @@ func (vm *RecompilerVM) ExecuteX86CodeWithEntry(entry uint32) (err error) {
 }
 
 func (vm *RecompilerVM) ExecuteAfterMmap(entry uint32) error {
-	// Validate that entry PC points to a valid instruction start using bitmask
-	// This matches the interpreter's behavior in pvmgo.go
+	// Validate that entry PC points to a valid instruction start using bitmask.
+	// This matches the interpreter's behavior in pvmgo.go.
+	// Length check is required for safety: legacy programs or missing K have no bitmask.
 	if len(vm.bitmask) > 0 {
 		if int(entry) >= len(vm.bitmask) || vm.bitmask[entry] == 0 {
 			vm.ResultCode = types.WORKDIGEST_PANIC
@@ -838,7 +842,7 @@ func (vm *RecompilerVM) ExecuteAfterMmap(entry uint32) error {
 
 	// find the real memory placeholder and patch it
 	codeAddr := vm.realCode
-	binary.LittleEndian.PutUint64(vm.x86Code[regDumpOffset:regDumpOffset+8], uint64(vm.regDumpAddr))
+
 	// use entryPatch as a placeholder 0x99999999
 	//get the x86 pc
 	x86PC, ok := vm.InstMapPVMToX86[entry]
@@ -852,9 +856,6 @@ func (vm *RecompilerVM) ExecuteAfterMmap(entry uint32) error {
 	if debugRecompiler {
 		fmt.Printf("Executing code at x86 PC: %d (PVM PC: %d)\n", x86PC, entry)
 	}
-	patch := make([]byte, 4)
-	binary.LittleEndian.PutUint32(patch, entryPatch)
-	binary.LittleEndian.PutUint32(vm.x86Code[entryOffset+1:entryOffset+5], uint32(x86PC-entryOffset-5))
 	// djumpAddrOffset is the original offset within x86Code; add codeAddr to get absolute address
 	// This ensures correct address even when reusing compiled code
 	vm.djumpAddr = vm.djumpAddrOffset + vm.codeAddr
@@ -868,6 +869,11 @@ func (vm *RecompilerVM) ExecuteAfterMmap(entry uint32) error {
 	// 	return fmt.Errorf("no entry patch placeholder found in x86 code")
 	// }
 	copy(codeAddr, vm.x86Code)
+
+	// Patch per-VM executable buffer (do not mutate cached x86Code).
+	binary.LittleEndian.PutUint64(codeAddr[regDumpOffset:regDumpOffset+8], uint64(vm.regDumpAddr))
+
+	binary.LittleEndian.PutUint32(codeAddr[entryOffset+1:entryOffset+5], uint32(x86PC-entryOffset-5))
 
 	// Keep PROT_WRITE|PROT_EXEC for fast patching during Resume()
 	// Security note: This allows self-modifying code but improves performance
@@ -1199,11 +1205,12 @@ func (rvm *RecompilerVM) Execute(entry uint32) {
 	if err := rvm.ensureTraceVerifier(); err != nil {
 		fmt.Printf("Failed to initialize trace verifier: %v\n", err)
 	}
-	// Set global verifier for goDebugPrintInstruction callback
+	// Set per-VM verifier for goDebugPrintInstruction callback
 	if rvm.traceVerifier != nil {
-		SetCurrentVerifier(rvm.traceVerifier)
+		regDumpAddr := uintptr(unsafe.Pointer(&rvm.regDumpMem[0]))
+		SetCurrentVerifier(regDumpAddr, rvm.traceVerifier)
 		defer func() {
-			ClearCurrentVerifier()
+			ClearCurrentVerifier(regDumpAddr)
 			fmt.Println(rvm.traceVerifier.Summary())
 			rvm.traceVerifier.Close()
 			rvm.traceVerifier = nil
@@ -1254,7 +1261,8 @@ func (rvm *RecompilerVM) Execute(entry uint32) {
 
 		// Restore parent verifier before Resume (child may have overwritten it)
 		if rvm.traceVerifier != nil {
-			SetCurrentVerifier(rvm.traceVerifier)
+			regDumpAddr := uintptr(unsafe.Pointer(&rvm.regDumpMem[0]))
+			SetCurrentVerifier(regDumpAddr, rvm.traceVerifier)
 		}
 
 		resumeStart := time.Now()
@@ -1964,8 +1972,13 @@ func (vm *RecompilerVM) GetX86FromPVMX(code []byte) error {
 	vm.djumpAddrOffset = uintptr(pvmx.DjumpEntry)
 
 	// Load full instruction maps if available (new PVMX format)
+	// Deep copy maps because vm_execute.go mutates them during execution.
+	// Sharing cached map references across VMs would reintroduce data races.
 	if len(pvmx.InstMapPVMToX86) > 0 {
-		vm.InstMapPVMToX86 = pvmx.InstMapPVMToX86
+		vm.InstMapPVMToX86 = make(map[uint32]int, len(pvmx.InstMapPVMToX86))
+		for k, v := range pvmx.InstMapPVMToX86 {
+			vm.InstMapPVMToX86[k] = v
+		}
 	} else {
 		// Fallback to legacy format with only entry points 0 and 5
 		if vm.InstMapPVMToX86 == nil {
@@ -1976,9 +1989,13 @@ func (vm *RecompilerVM) GetX86FromPVMX(code []byte) error {
 	}
 
 	if len(pvmx.InstMapX86ToPVM) > 0 {
-		vm.InstMapX86ToPVM = pvmx.InstMapX86ToPVM
+		vm.InstMapX86ToPVM = make(map[int]uint32, len(pvmx.InstMapX86ToPVM))
+		for k, v := range pvmx.InstMapX86ToPVM {
+			vm.InstMapX86ToPVM[k] = v
+		}
 	}
 
+	// Cached x86Code is immutable; per-VM patching happens in the mmap buffer.
 	vm.x86Code = pvmx.X86Code
 
 	if debugRecompiler {
@@ -2003,10 +2020,11 @@ func (rvm *RecompilerVM) ExecuteAsChild(entry uint32) error {
 	if err := rvm.ensureTraceVerifier(); err != nil {
 		fmt.Printf("Failed to initialize child trace verifier: %v\n", err)
 	}
-	// Set global verifier for goDebugPrintInstruction callback
+	// Set per-VM verifier for goDebugPrintInstruction callback
 	if rvm.traceVerifier != nil {
-		SetCurrentVerifier(rvm.traceVerifier)
-		defer ClearCurrentVerifier()
+		regDumpAddr := uintptr(unsafe.Pointer(&rvm.regDumpMem[0]))
+		SetCurrentVerifier(regDumpAddr, rvm.traceVerifier)
+		defer ClearCurrentVerifier(regDumpAddr)
 	}
 
 	// Only compile if x86Code is not already compiled

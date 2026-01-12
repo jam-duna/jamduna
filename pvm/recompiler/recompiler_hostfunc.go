@@ -3,6 +3,7 @@ package recompiler
 import "C"
 import (
 	"fmt"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -10,17 +11,33 @@ import (
 	"github.com/colorfulnotion/jam/types"
 )
 
-// Global verifier for recompiler (set by RecompilerVM before execution)
-var currentRecompilerVerifier *RecompilerTraceVerifier
+// Per-VM verifier storage keyed by regDumpAddr
+// regDumpAddr is stable and unique per VM instance (allocated in regDumpMem)
+var (
+	verifierStorageMu sync.RWMutex
+	verifierStorage   = make(map[uintptr]*RecompilerTraceVerifier)
+)
 
-// SetCurrentVerifier sets the global verifier for the current execution
-func SetCurrentVerifier(v *RecompilerTraceVerifier) {
-	currentRecompilerVerifier = v
+// SetCurrentVerifier sets the verifier for a VM identified by its regDumpAddr
+func SetCurrentVerifier(regDumpAddr uintptr, v *RecompilerTraceVerifier) {
+	verifierStorageMu.Lock()
+	verifierStorage[regDumpAddr] = v
+	verifierStorageMu.Unlock()
 }
 
-// ClearCurrentVerifier clears the global verifier
-func ClearCurrentVerifier() {
-	currentRecompilerVerifier = nil
+// ClearCurrentVerifier clears the verifier for a VM identified by its regDumpAddr
+func ClearCurrentVerifier(regDumpAddr uintptr) {
+	verifierStorageMu.Lock()
+	delete(verifierStorage, regDumpAddr)
+	verifierStorageMu.Unlock()
+}
+
+// getCurrentVerifier retrieves the verifier for a VM by its regDumpAddr
+func getCurrentVerifier(regDumpAddr uintptr) *RecompilerTraceVerifier {
+	verifierStorageMu.RLock()
+	v := verifierStorage[regDumpAddr]
+	verifierStorageMu.RUnlock()
+	return v
 }
 
 //export goDebugPrintInstruction
@@ -30,12 +47,13 @@ func goDebugPrintInstruction(opcode uint32, pc uint64, regDumpAddr unsafe.Pointe
 	regs := (*[13]uint64)(regDumpAddr)
 
 	// If verification mode is enabled, verify this step
-	if EnableVerifyMode && currentRecompilerVerifier != nil {
+	verifier := getCurrentVerifier(uintptr(regDumpAddr))
+	if EnableVerifyMode && verifier != nil {
 		var preRegs [13]uint64
 		for i := 0; i < 13; i++ {
 			preRegs[i] = regs[i]
 		}
-		mismatch := currentRecompilerVerifier.VerifyStepPreRegisters(byte(opcode), pc, preRegs)
+		mismatch := verifier.VerifyStepPreRegisters(byte(opcode), pc, preRegs)
 		if mismatch != nil {
 			fmt.Printf("❌ [RecompilerVerify] %s\n", mismatch.String())
 			fmt.Printf("   Opcode: %s (0x%02x), PC: %d\n", opcode_str(byte(opcode)), opcode, pc)
@@ -136,10 +154,15 @@ func NewDummyHostFunc(vm HostFuncVM) *DummyHostFunc {
 }
 
 // NOTE: add "time" to the file imports (import "time")
-var lastFrameTime time.Time
-var frameCount uint64
-var totalFrameDuration time.Duration
-var totalCalled = 0
+// Debug counters for DummyHostFunc (only used in tests)
+// Protected by mutex to prevent races in parallel test execution
+var (
+	dummyHostFuncMu     sync.Mutex
+	lastFrameTime       time.Time
+	frameCount          uint64
+	totalFrameDuration  time.Duration
+	totalCalled         = 0
+)
 
 func (d *DummyHostFunc) InvokeHostCall(host_fn int) (bool, error) {
 	vm := d.vm
@@ -174,6 +197,10 @@ func (d *DummyHostFunc) InvokeHostCall(host_fn int) (bool, error) {
 	}
 	if host_fn == EXPORT {
 		// EXPORT == frame out. Timestamp and compute instant & average frame rate.
+		// Lock to protect shared debug counters in parallel test execution
+		dummyHostFuncMu.Lock()
+		defer dummyHostFuncMu.Unlock()
+
 		now := time.Now()
 		if lastFrameTime.IsZero() {
 			lastFrameTime = now
@@ -269,13 +296,15 @@ func (vm *RecompilerVM) HandleSbrk() error {
 	regD := uint32(regDint)
 
 	// Verify SBRK instruction before execution if verify mode is enabled
-	if EnableVerifyMode && currentRecompilerVerifier != nil {
+	regDumpAddr := uintptr(unsafe.Pointer(&vm.regDumpMem[0]))
+	verifier := getCurrentVerifier(regDumpAddr)
+	if EnableVerifyMode && verifier != nil {
 		preRegs := vm.ReadRegisters()
 		var preRegsArray [13]uint64
 		for i := 0; i < 13 && i < len(preRegs); i++ {
 			preRegsArray[i] = preRegs[i]
 		}
-		mismatch := currentRecompilerVerifier.VerifyStepPreRegisters(SBRK, vm.pc, preRegsArray)
+		mismatch := verifier.VerifyStepPreRegisters(SBRK, vm.pc, preRegsArray)
 		if mismatch != nil {
 			fmt.Printf("❌ [RecompilerVerify] SBRK %s\n", mismatch.String())
 			fmt.Printf("   Opcode: SBRK (0x%02x), PC: %d\n", SBRK, vm.pc)

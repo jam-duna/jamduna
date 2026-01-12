@@ -1264,7 +1264,9 @@ func (vm *VM) hostInvoke() {
 	//}
 	// 786
 	status := new_machine.GetMachineState()
-	pvmtypes.ResultMap[uint64(status)]++
+	if vm.DebugStats != nil {
+		vm.DebugStats.RecordResult(uint64(status))
+	}
 	switch status {
 	case FAULT:
 		log.Info(vm.logging, "INVOKE FAULT", "n", n, "new_machine.GetFaultAddress()", new_machine.GetFaultAddress())

@@ -21,6 +21,11 @@ func BenchRows() []sdbtiming.Row { return benchRec.Snapshot() }
 
 func ApplyStateTransitionTickets(oldState *StateDB, ctx context.Context, blk *types.Block, validated_tickets map[common.Hash]common.Hash) (safroleState *SafroleState, err error) {
 	s := oldState.Copy()
+	defer func() {
+		if err != nil && s != nil && s.sdb != nil {
+			s.sdb.ClearStagedOps()
+		}
+	}()
 	if s.StateRoot != blk.Header.ParentStateRoot {
 		//fmt.Printf("Apply Block %v\n", blk.Header.Hash())
 		//return safroleState, fmt.Errorf("ParentStateRoot does not match")
@@ -80,6 +85,9 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 	t1 := time.Now()
 	defer func() {
 		benchRec.Add("ApplyStateTransitionFromBlock", time.Since(t1))
+		if err != nil && s != nil && s.sdb != nil {
+			s.sdb.ClearStagedOps()
+		}
 	}()
 
 	s = oldState.Copy()
@@ -259,6 +267,10 @@ func ApplyStateTransitionFromBlock(blockEventID uint64, oldState *StateDB, ctx c
 	// (χ′, δ†, ι′, φ′)
 	for _, sa := range o.ServiceAccounts {
 		sa.ALLOW_MUTABLE() // make sure all service accounts can be written
+	}
+	if num_accumulations > uint64(len(accumulate_input_wr)) {
+		log.Error(log.SDB, "ApplyStateTransitionFromBlock: num_accumulations exceeds work reports", "num_accumulations", num_accumulations, "workreports", len(accumulate_input_wr))
+		num_accumulations = uint64(len(accumulate_input_wr))
 	}
 	accumulated_workreports := accumulate_input_wr[:num_accumulations]
 	for _, report := range accumulated_workreports {

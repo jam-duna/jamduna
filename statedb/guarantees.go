@@ -29,6 +29,9 @@ func (j *JamState) ProcessGuarantees(ctx context.Context, guarantees []types.Gua
 				index := sig.ValidatorIndex
 				// get the key from the previous validator set
 				if uint32(index) < uint32(len(j.SafroleState.PrevValidators)) {
+					if int(index) >= len(prev_assignment) {
+						return reports, fmt.Errorf("ProcessGuarantees: previous assignment index out of range")
+					}
 					ed25519key := prev_assignment[index].Validator.Ed25519
 					// fmt.Printf("Validator %d: %s (PrevValidators)\n", index, ed25519key)
 					reports[ed25519key]++

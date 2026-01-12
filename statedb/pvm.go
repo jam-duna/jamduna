@@ -26,7 +26,7 @@ const (
 
 // DebugHostFunction forwards host-function debug output to the shared helper.
 func (vm *VM) DebugHostFunction(hostFn int, format string, a ...any) {
-	pvmtypes.DebugHostFunction(vm.Service_index, hostFn, format, a...)
+	pvmtypes.DebugHostFunction(vm.DebugStats, vm.Service_index, hostFn, format, a...)
 }
 
 const (
@@ -132,6 +132,9 @@ type VM struct {
 	InitialGas uint64
 	FinalGas   int64 // Gas remaining after execution (saved before destroying ExecutionVM)
 
+	// Debug statistics (per-VM, thread-safe)
+	DebugStats *pvmtypes.DebugStats
+
 	// service metadata
 	ServiceAccount  *types.ServiceAccount
 	Service_index   uint32
@@ -229,6 +232,7 @@ func NewVM(service_index uint32, code []byte, initialRegs []uint64, initialPC ui
 		Backend:         pvmBackend,
 		VMs:             make(map[uint32]*ExecutionVM),
 		VmsEntryCounter: make(map[uint32]int),
+		DebugStats:      pvmtypes.NewDebugStats(),
 	}
 
 	requiredMemory := uint64(uint64(5*pvmtypes.Z_Z) + uint64(pvmtypes.ZFunc(o_size)) + uint64(pvmtypes.ZFunc(w_size+z*pvmtypes.Z_P)) + uint64(pvmtypes.ZFunc(s)) + uint64(pvmtypes.Z_I))
@@ -673,6 +677,10 @@ func (vm *VM) SetMachineState(state uint8) {
 
 func (vm *VM) SetTerminated(terminated bool) {
 	vm.terminated = terminated
+}
+
+func (vm *VM) GetDebugStats() *pvmtypes.DebugStats {
+	return vm.DebugStats
 }
 
 // GetInterpreterVM returns the underlying VMGo instance if using interpreter backend

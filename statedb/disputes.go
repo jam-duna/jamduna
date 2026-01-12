@@ -228,13 +228,14 @@ func (j *JamState) Disputes(input *types.Dispute) (types.OffenderMarker, error) 
 
 func (j *JamState) checkSignature(v types.Verdict) error {
 	// check the signature
-	if v.Epoch == j.SafroleState.Timeslot/E {
+	currEpoch := j.SafroleState.Timeslot / E
+	if v.Epoch == currEpoch {
 		// check the signature
 		err := v.Verify(j.SafroleState.CurrValidators)
 		if err != nil {
 			return jamerrors.ErrDBadSignatureInVerdict
 		}
-	} else if v.Epoch == j.SafroleState.Timeslot/E-1 {
+	} else if currEpoch > 0 && v.Epoch == currEpoch-1 {
 		err := v.Verify(j.SafroleState.PrevValidators)
 		if err != nil {
 			return jamerrors.ErrDBadSignatureInVerdict

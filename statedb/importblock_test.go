@@ -675,16 +675,11 @@ func TestFuzzTraceSequential(t *testing.T) {
 	} else {
 		// Test specific cases that failed before the SetRoot fix
 		testCases := []string{
-			"1767871405_1375", // host function bug???
-			// "1767871405_3282", // fixed: memory args access problem
-			// "1767871405_6428", //fixed: who in assign
-			// "1767872928_5525", // fixed: memory args access problem
-			// "1767872928_7649", //fixed
-			// "1767889897_7743", //fixed
-			// "1767891325_1291", //fixed by tallystatic key checking
-			// "1767871405_9518", // fixed by memory region correction
-			// "1767895984_8247", //fixed by fix the clone for partial state
-			// "1767896003_7770", //fixed by update existing.MergeUpdates(sa)
+			"1768066437_2547",
+			"1767896003_7458",
+			"1766565819_6597",
+			"1766243861_8319",
+			"1767871405_1947",
 		}
 
 		for _, id := range testCases {
@@ -830,6 +825,7 @@ func runSequentialFuzzTrace(t *testing.T, sourcePath, targetVersion, testCaseID 
 		if jamErr != nil {
 			if shouldSucceed {
 				t.Errorf("❌ Step %d: Expected success but got error: %v", stepNum+1, jamErr)
+				t.Errorf("File Path: %s", stepFile)
 			}
 			fmt.Printf("  👍 Import FAILED: %v\n", jamErr)
 		} else {
@@ -849,6 +845,7 @@ func runSequentialFuzzTrace(t *testing.T, sourcePath, targetVersion, testCaseID 
 
 			if !shouldSucceed {
 				t.Errorf("❌ Step %d: Expected failure but import succeeded", stepNum+1)
+
 			}
 			fmt.Printf("  ✅ Import SUCCESS: PostStateRoot=%s\n", postState.StateRoot.Hex())
 		}

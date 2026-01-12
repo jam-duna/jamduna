@@ -50,8 +50,16 @@ func (s *StateDB) RotateGuarantors() {
 	copy(s.GuarantorAssignments, assignments)
 
 	assignments = make([]types.GuarantorAssignment, 0)
-	t = s.JamState.SafroleState.Timeslot - types.ValidatorCoreRotationPeriod
-	if (s.JamState.SafroleState.Timeslot-types.ValidatorCoreRotationPeriod)/types.EpochLength == s.JamState.SafroleState.Timeslot/types.EpochLength {
+	if s.JamState.SafroleState.Timeslot >= types.ValidatorCoreRotationPeriod {
+		t = s.JamState.SafroleState.Timeslot - types.ValidatorCoreRotationPeriod
+	} else {
+		t = 0
+	}
+	prev_slot := uint32(0)
+	if s.JamState.SafroleState.Timeslot >= types.ValidatorCoreRotationPeriod {
+		prev_slot = s.JamState.SafroleState.Timeslot - types.ValidatorCoreRotationPeriod
+	}
+	if prev_slot/types.EpochLength == s.JamState.SafroleState.Timeslot/types.EpochLength {
 		cores := Permute(s.JamState.SafroleState.Entropy[2], t)
 		for i, validator := range s.JamState.SafroleState.CurrValidators {
 			assignments = append(assignments, types.GuarantorAssignment{
@@ -97,7 +105,10 @@ func (s *StateDB) CalculateAssignments(slot uint32) (PreviousGuarantorAssignment
 
 	// (11.22) Previous assignments M* = (η2, k) if (τ - R) ÷ E = τ ÷ E, otherwise (η3, λ)
 	prev_assignments := make([]types.GuarantorAssignment, 0)
-	prev_slot := slot - types.ValidatorCoreRotationPeriod
+	prev_slot := uint32(0)
+	if slot >= types.ValidatorCoreRotationPeriod {
+		prev_slot = slot - types.ValidatorCoreRotationPeriod
+	}
 
 	if prev_slot/types.EpochLength == slot/types.EpochLength {
 		cores := Permute(safrole.Entropy[2], prev_slot)

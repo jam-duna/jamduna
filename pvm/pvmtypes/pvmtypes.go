@@ -83,12 +83,14 @@ type HostVM interface {
 	SetResultCode(code uint8)
 	SetMachineState(state uint8)
 	SetTerminated(terminated bool)
+	GetDebugStats() *DebugStats
 }
 
 type FakeHostVM struct {
 	ResultCode   uint8
 	MachineState uint8
 	Terminated   bool
+	DebugStats   *DebugStats
 }
 
 func (f *FakeHostVM) InvokeHostCall(hostFn int) (bool, error) {
@@ -113,6 +115,10 @@ func (f *FakeHostVM) SetMachineState(state uint8) {
 
 func (f *FakeHostVM) SetTerminated(terminated bool) {
 	f.Terminated = terminated
+}
+
+func (f *FakeHostVM) GetDebugStats() *DebugStats {
+	return f.DebugStats
 }
 
 // ============================================================================
@@ -140,20 +146,65 @@ const (
 
 var DebugHostFunctions = false
 
-var DebugHostFunctionMap = map[int]int{}
+// DebugStats holds per-execution debug statistics for host function calls
+type DebugStats struct {
+	mu              sync.Mutex
+	HostFunctionMap map[int]int
+	ResultMap       map[uint64]int
+}
 
-var ResultMap = map[uint64]int{}
+// NewDebugStats creates a new DebugStats instance
+func NewDebugStats() *DebugStats {
+	return &DebugStats{
+		HostFunctionMap: make(map[int]int),
+		ResultMap:       make(map[uint64]int),
+	}
+}
 
-var debugHostFnMu sync.Mutex
+// RecordHostFunction increments the counter for a host function
+func (d *DebugStats) RecordHostFunction(hostFn int) {
+	d.mu.Lock()
+	d.HostFunctionMap[hostFn]++
+	d.mu.Unlock()
+}
+
+// RecordResult increments the counter for a result code
+func (d *DebugStats) RecordResult(resultCode uint64) {
+	d.mu.Lock()
+	d.ResultMap[resultCode]++
+	d.mu.Unlock()
+}
+
+// GetHostFunctionCounts returns a copy of the host function call counts
+func (d *DebugStats) GetHostFunctionCounts() map[int]int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	result := make(map[int]int, len(d.HostFunctionMap))
+	for k, v := range d.HostFunctionMap {
+		result[k] = v
+	}
+	return result
+}
+
+// GetResultCounts returns a copy of the result code counts
+func (d *DebugStats) GetResultCounts() map[uint64]int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	result := make(map[uint64]int, len(d.ResultMap))
+	for k, v := range d.ResultMap {
+		result[k] = v
+	}
+	return result
+}
 
 // DebugHostFunction prints colorized debug information about host function calls.
-func DebugHostFunction(serviceIndex uint32, hostFn int, format string, a ...any) {
+func DebugHostFunction(stats *DebugStats, serviceIndex uint32, hostFn int, format string, a ...any) {
 	if !DebugHostFunctions {
 		return
 	}
-	debugHostFnMu.Lock()
-	DebugHostFunctionMap[hostFn]++
-	debugHostFnMu.Unlock()
+	if stats != nil {
+		stats.RecordHostFunction(hostFn)
+	}
 
 	colors := []string{
 		"\x1b[32m", // green

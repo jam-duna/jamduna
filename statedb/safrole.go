@@ -215,7 +215,7 @@ func (s *SafroleState) VerifyEpochMarkValidators(epochMark *types.EpochMark, isN
 		}
 
 		// Verify each validator matches in order
-		for i := 0; i < types.TotalValidators; i++ {
+		for i := range epochMark.Validators {
 			epochMarkValidator := epochMark.Validators[i]
 			nextValidator := nextValidators[i]
 
@@ -759,8 +759,7 @@ func (s *SafroleState) ValidateProposedTicket(t *types.Ticket, shifted bool, isT
 			return common.BytesToHash(ticket_id), nil
 		} else {
 			ticketID, _ := t.TicketID()
-			log.Warn(log.SDB, "Failed to verify ticket", "ticket_id", ticketID, "attempt", t.Attempt, "target_epoch_randomness", targetEpochRandomness, "ERR", err)
-			log.Warn(log.SDB, "Failed to verify ticket", "ticket_id", ticketID, "ticket_signature", t.String())
+			log.Warn(log.SDB, "Failed to ValidateProposedTicket ticket", "ticket_id", ticketID, "ticket_signature", t.String())
 		}
 	}
 
@@ -793,8 +792,7 @@ func (s *SafroleState) validateTicketWithRing(t *types.Ticket, shifted bool, isT
 			return common.BytesToHash(ticket_id), nil
 		} else {
 			ticketID, _ := t.TicketID()
-			log.Warn(log.SDB, "Failed to verify ticket", "ticket_id", ticketID, "attempt", t.Attempt, "target_epoch_randomness", targetEpochRandomness, "ERR", err)
-			log.Warn(log.SDB, "Failed to verify ticket", "ticket_id", ticketID, "ticket_signature", t.String())
+			log.Warn(log.SDB, "Failed to validateTicketWithRing ticket", "ticket_id", ticketID, "ticket_signature", t.String(), "targetEpochRandomness", targetEpochRandomness, "attempt", t.Attempt)
 		}
 	}
 
@@ -1002,7 +1000,9 @@ func (s *SafroleState) GetGonnaAuthorSlot(first_slot_index uint32, bandersnatchP
 	//TicketsOrKeys
 	slotMap := make(map[uint32]common.Hash)
 	t_or_k := s.TicketsOrKeys
-	first_slot_index = first_slot_index - 1
+	if first_slot_index > 0 {
+		first_slot_index = first_slot_index - 1
+	}
 	if len(t_or_k.Tickets) == types.EpochLength {
 		for i := 0; i < types.EpochLength; i++ {
 			winning_ticket_id := s.GetPrimaryWinningTicket(first_slot_index + uint32(i))
@@ -1301,7 +1301,9 @@ func (s2 *SafroleState) validateTicketsParallel(tickets []types.Ticket, isShifte
 			}
 			// see if ticket exists in valid_tickets
 			ticket_hash := t.Hash()
+			mu.Lock()
 			ticket_id, ticketWasValid := valid_tickets[ticket_hash]
+			mu.Unlock()
 			var err error
 			if !ticketWasValid {
 				ticket_id, err = s2.validateTicketWithRing(&t, isShifted, isTicketSubmissionClosed, ringBytes, rSize)
@@ -1379,13 +1381,7 @@ func (s *SafroleState) ValidateSaforle(tickets []types.Ticket, targetJCE uint32,
 		valid_tickets = make(map[common.Hash]common.Hash)
 	}
 
-	// Use targetJCE-1 for prev epoch calculation instead of s.Timeslot
-	// This avoids issues when s.Timeslot is stale (e.g., still at genesis 0)
-	// The parent slot is targetJCE-1, which determines if we're crossing an epoch boundary
-	prevSlot := targetJCE - 1
-	if targetJCE == 0 {
-		prevSlot = 0 // Handle edge case at genesis
-	}
+	prevSlot := s.Timeslot
 	prevEpoch, prevPhase := s.EpochAndPhase(prevSlot)
 	currEpoch, currPhase := s.EpochAndPhase(targetJCE)
 	// ticket mark check
