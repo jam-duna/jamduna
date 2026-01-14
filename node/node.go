@@ -3889,13 +3889,15 @@ func (n *Node) ApplyBlock(ctx context.Context, nextBlockNode *types.BT_Node) err
 	if newStateDB.JamState.SafroleState.GetEpochT() == 0 {
 		mode = "fallback"
 	}
-	log.Info(log.B, "Imported Block",
-		"n", n.String(),
-		"p", nextBlock.Header.ParentHeaderHash,
-		"s", nextBlock.Header.ParentStateRoot,
-		"blk", nextBlock.Str(),
-	)
-	log.Info(log.B, "Imported Block",
+	/*
+		log.Info(log.B, "Imported Block",
+			"n", n.String(),
+			"p", nextBlock.Header.ParentHeaderHash,
+			"s", nextBlock.Header.ParentStateRoot,
+			"blk", nextBlock.Str(),
+		)
+	*/
+	log.Info(log.B, "⚡ Imported Block",
 		"n", n.String(),
 		//"n", newStateDB.Id,
 		"author", nextBlock.Header.AuthorIndex,

@@ -196,14 +196,69 @@ Work packages which are dequeued from `Queued` into `Submitted` status might not
 
 In addition, if the builder network is decentralized,
 if there is a lack of liveness between these builders, any possibility of potential forks requires a rollup
-consensus algorithm at the L2 level, motivating the use of Safrole, GRANDPA for builders finalizing the L2 rollup.
+consensus algorithm at the L2 level.
 We will set aside this possibility until v3 and just support a single builder.
+
+## Protocol Limitation: On-Chain Duplicate Prevention
+
+**CRITICAL**: The builder can minimize but **cannot eliminate** on-chain duplicate guarantees.
+
+### Why Duplicates Can Occur
+
+The JAM protocol does **not enforce uniqueness** at the consensus layer for work package hashes targeting the same rollup block. Validators will guarantee any work package that:
+
+1. Passes validation checks (anchor recent, valid signatures, etc.)
+2. Is within the rotation period validity window (4-7 slots)
+3. Meets resource requirements
+
+This means multiple versions of the same rollup block **can be guaranteed on-chain** if:
+
+* Both are submitted before the rotation period expires
+* Network partitions cause split guarantees
+* Multiple builders submit conflicting versions
+
+### Builder Defense: 54-Second Timeout
+
+The builder uses a **54-second GuaranteeTimeout** (rotation period max 42s + safety 12s) to ensure:
+
+* Old versions **expire on-chain** before new versions are submitted
+* Validators reject expired guarantees via `checkAssignment()` failure
+* Single-builder deployments minimize duplicate risk
+
+However, this is **defense-in-depth, not prevention**:
+
+* The builder controls submission timing
+* The builder **cannot control** validator acceptance
+* Protocol-level enforcement would require consensus changes
+
+### Operational Impact
+
+**For operators**:
+
+* Monitor metrics: `DuplicateGuaranteeRejected`, `DuplicateAccumulateRejected`, `NonWinningVersionsCanceled`
+* These counters track when duplicates were observed
+* If counters increase, investigate network delays or timeout configuration
+
+**For downstream systems**:
+
+* Design consumers to handle duplicate guarantees gracefully
+* Use "first guarantee wins" semantics
+* Index by work package hash or rollup block number and deduplicate
+* The queue's `WinningVer` tracking enforces this locally (builder-side only)
+* Note: `bundleID` is a builder-local string (e.g., "B-7"), not protocol-visible
+
+**For multi-builder setups** (future work):
+
+* Will require builder-level coordination/consensus protocol
+* Builders must coordinate before submission
+* Consider primary-secondary election
+* Note: Multi-builder setup not currently implemented (planned for v3+)
 
 The queue uses `blockNumber` as its key and a per-block version to handle resubmissions.
 
-Because ordered accumulation respects the prerequisites of the work package, an out of order submission 
+Because ordered accumulation respects the prerequisites of the work package, an out of order submission
 will result in cascading effects: If blockNumber 1000 does not accumulate, neither can 1001, thus 1002
-because the prereqs have not accumulated.    So a resubmit of 1000 with a different WPH requires a resubmit of 1001 and 1002 with their new WPHs.  Due to H=8 max queue depth and typical network conditions, in practice this implies at most 2-3 items having a `WorkPackageBundleStatus` of `Submitted` or `Guaranteed` at any time. If the number of in-flight items exceeds 3, the builder should avoid submitting more WPs until the pipeline clears.  
+because the prereqs have not accumulated.    So a resubmit of 1000 with a different WPH requires a resubmit of 1001 and 1002 with their new WPHs.  Due to H=12 max queue depth and typical network conditions, in practice this implies at most 2-3 items having a `WorkPackageBundleStatus` of `Submitted` at any time (blocking cores). If the number of submitted items exceeds the MaxInflight limit (default 3), the builder will wait until cores are freed (via guarantee) before submitting more WPs.  
 
 Consider these situations
 
@@ -253,7 +308,7 @@ cores we can just have every WP done on its own core and have fewer limits) and 
 ## Robust Queue Algorithm
 
 This Go sketch keeps throughput high while remaining safe under reorgs, timeouts, and resubmissions.
-It tracks versions per block number and treats older hashes as stale.
+It tracks versions per block number and enforces "first guarantee wins" to prevent duplicate execution.
 
 ```go
 func (qs *QueueState) Tick(now uint64, maxInflight int) {
@@ -275,17 +330,27 @@ func (qs *QueueState) Tick(now uint64, maxInflight int) {
 
 func (qs *QueueState) OnGuaranteed(hash [32]byte) {
 	bn, ver := qs.lookupByHash(hash)
-	if ver != qs.CurrentVer[bn] {
-		markStale(hash)
-		return
+
+	// CRITICAL: First guarantee wins - prevents duplicate execution
+	if winningVer, exists := qs.WinningVer[bn]; exists {
+		if ver != winningVer {
+			log("Rejecting guarantee for non-winning version")
+			return
+		}
+	} else {
+		// First guarantee - this version wins!
+		qs.WinningVer[bn] = ver
+		qs.cancelOtherVersions(bn, ver)
 	}
 	qs.Status[bn] = Guaranteed
 }
 
 func (qs *QueueState) OnAccumulated(hash [32]byte) {
 	bn, ver := qs.lookupByHash(hash)
-	if ver != qs.CurrentVer[bn] {
-		markStale(hash)
+
+	// Only accept accumulation for winning version
+	if winningVer, exists := qs.WinningVer[bn]; exists && ver != winningVer {
+		log("Rejecting accumulation for non-winning version")
 		return
 	}
 	qs.Status[bn] = Accumulated
@@ -294,8 +359,10 @@ func (qs *QueueState) OnAccumulated(hash [32]byte) {
 
 func (qs *QueueState) OnFinalized(hash [32]byte) {
 	bn, ver := qs.lookupByHash(hash)
-	if ver != qs.CurrentVer[bn] {
-		markStale(hash)
+
+	// Only accept finalization for winning version
+	if winningVer, exists := qs.WinningVer[bn]; exists && ver != winningVer {
+		log("Rejecting finalization for non-winning version")
 		return
 	}
 	qs.Status[bn] = Finalized
@@ -327,17 +394,49 @@ func (qs *QueueState) OnCanonicalBlockNumber(oldBn, newBn int) {
 ```
 
 Invariants:
-* Only the latest version for a `blockNumber` may advance to Accumulated/Finalized.
+
+* Only the winning version (first guaranteed) for a `blockNumber` may advance to Accumulated/Finalized.
 * Accumulation is strictly ordered by `blockNumber` and prerequisites.
-* Stale hashes may be guaranteed but are never accumulated.
+* Non-winning versions may be guaranteed but are never accumulated (duplicate execution prevention).
 
 ## Configuration Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `MaxQueueDepth` (H) | 8 | Maximum items in `Queued` before blocking new bundles |
-| `MaxInflight` | 3 | Maximum items with status `Submitted` or `Guaranteed` |
-| `SubmissionTimeout` | 30s | Time before a `Submitted` item is considered failed |
-| `GuaranteeTimeout` | 18s | Time before a `Guaranteed` item is considered failed (3 JAM blocks) |
+| `MaxQueueDepth` (H) | 12 | Maximum items in `Queued` before blocking new bundles |
+| `MaxInflight` | 3 | Maximum items with status `Submitted` (cores blocked) |
+| `SubmitRetryInterval` | 6s | **Fast retry**: resubmit same version every N seconds within 48s window |
+| `MaxSubmitRetries` | 8 | **Fast retry**: max submission attempts (1 initial + 7 retries) |
+| `GuaranteeTimeout` | 54s | **Slow timeout**: increment version after refine expiry (**must be ≥ 42s**) |
+| `AccumulateTimeout` | 60s | Time before a `Guaranteed` item without accumulation is considered failed (10 JAM blocks) |
 | `RetentionWindow` | 100 | Number of finalized blocks to retain in maps before pruning |
-| `MaxVersionRetries` | 5 | Maximum resubmission attempts before dropping a block |
+| `MaxVersionRetries` | 5 | Maximum version increments before dropping a block |
+
+### Two-Tier Timeout Strategy
+
+The queue implements a **two-tier timeout strategy** to recover quickly from network failures while preventing duplicate execution:
+
+**Fast Retry (Same Version)**:
+
+* Resubmits the **same work package** (same hash) every 6 seconds
+* Maximum 8 attempts over 48 seconds (`RecentHistorySize` window)
+* Safe because identical hash = idempotent (can only accumulate once)
+* Recovers from transient QUIC timeouts and validator unavailability
+
+**Slow Timeout (New Version)**:
+
+* After 54 seconds without guarantee, increment version
+* Rebuilds bundle with new refine context and prerequisites
+* **Critical**: 54s = rotation period maximum (42s) + safety margin (12s)
+* Ensures old version expired on-chain before new version submitted
+* Prevents validators from guaranteeing both v1 and v2 (duplicate execution)
+
+**CRITICAL DESIGN NOTE**: `GuaranteeTimeout` (54s) is derived from the JAM protocol's **strictest** validation constraint - the validator rotation period check in `checkAssignment()`. This check enforces that guarantee age must be ≤ `(currentSlot % RotationPeriod) + RotationPeriod`, which varies from 4-7 slots (24-42 seconds) depending on rotation position. Using the maximum (42s) + safety margin (12s) ensures that when a bundle times out and is resubmitted with a new version, the old version's guarantee slot is **too old for validators to accept**, preventing validators from guaranteeing both versions. Without this constraint, duplicate transaction execution is possible even with local `WinningVer` gating, since the builder cannot control which bundles validators choose to guarantee.
+
+**Three validation constraints** (in order of strictness):
+
+1. **Rotation period** (`checkAssignment`): 4-7 slots (24-42s) - **strictest, runs first**
+2. **RecentBlocks** (`checkRecentBlock`): 8 slots (48s)
+3. **LookupAnchor** (`checkTimeSlotHeader`): 24 slots (144s)
+
+The configuration uses constraint #1's minimum (24s) for maximum safety.

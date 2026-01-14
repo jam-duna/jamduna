@@ -15,18 +15,20 @@ import (
 type TxPoolStatus int
 
 const (
-	TxStatusPending TxPoolStatus = iota
-	TxStatusQueued
-	TxStatusDropped
-	TxStatusIncluded
+	TxStatusPending  TxPoolStatus = iota // Available for bundle inclusion
+	TxStatusQueued                       // Queued for future nonce
+	TxStatusInBundle                     // Locked - already assigned to a bundle
+	TxStatusDropped                      // Dropped due to expiry or error
+	TxStatusIncluded                     // Successfully included in accumulated block
 )
 
 // TxPoolEntry represents a transaction entry in the pool
 type TxPoolEntry struct {
-	Tx       *evmtypes.EthereumTransaction `json:"transaction"`
-	Status   TxPoolStatus                  `json:"status"`
-	AddedAt  time.Time                     `json:"addedAt"`
-	Attempts int                           `json:"attempts"`
+	Tx          *evmtypes.EthereumTransaction `json:"transaction"`
+	Status      TxPoolStatus                  `json:"status"`
+	AddedAt     time.Time                     `json:"addedAt"`
+	Attempts    int                           `json:"attempts"`
+	BlockNumber uint64                        `json:"blockNumber"` // EVM block number this tx is assigned to (when InBundle)
 }
 
 // TxPool manages pending Ethereum transactions for the guarantor
@@ -63,6 +65,7 @@ type TxPoolConfig struct {
 type TxPoolStats struct {
 	PendingCount   int `json:"pendingCount"`
 	QueuedCount    int `json:"queuedCount"`
+	InBundleCount  int `json:"inBundleCount"`  // Transactions locked to bundles
 	TotalReceived  int `json:"totalReceived"`
 	TotalProcessed int `json:"totalProcessed"`
 	TotalDropped   int `json:"totalDropped"`
@@ -140,19 +143,22 @@ func (pool *TxPool) GetTransaction(hash common.Hash) (*evmtypes.EthereumTransact
 	return nil, false
 }
 
-// GetPendingTransactions returns all pending transactions
+// GetPendingTransactions returns all pending transactions that are NOT locked to a bundle
 func (pool *TxPool) GetPendingTransactions() []*evmtypes.EthereumTransaction {
 	pool.mutex.RLock()
 	defer pool.mutex.RUnlock()
 
 	txs := make([]*evmtypes.EthereumTransaction, 0, len(pool.pending))
 	for _, entry := range pool.pending {
-		txs = append(txs, entry.Tx)
+		// Only return transactions that are not already assigned to a bundle
+		if entry.Status == TxStatusPending {
+			txs = append(txs, entry.Tx)
+		}
 	}
 	return txs
 }
 
-// GetPendingTransactionsLimit returns up to `limit` pending transactions
+// GetPendingTransactionsLimit returns up to `limit` pending transactions that are NOT locked to a bundle
 // Transactions are returned in nonce order for each sender
 func (pool *TxPool) GetPendingTransactionsLimit(limit int) []*evmtypes.EthereumTransaction {
 	pool.mutex.RLock()
@@ -160,9 +166,12 @@ func (pool *TxPool) GetPendingTransactionsLimit(limit int) []*evmtypes.EthereumT
 
 	txs := make([]*evmtypes.EthereumTransaction, 0, limit)
 	for _, entry := range pool.pending {
-		txs = append(txs, entry.Tx)
-		if len(txs) >= limit {
-			break
+		// Only return transactions that are not already assigned to a bundle
+		if entry.Status == TxStatusPending {
+			txs = append(txs, entry.Tx)
+			if len(txs) >= limit {
+				break
+			}
 		}
 	}
 	return txs
@@ -181,9 +190,20 @@ func (pool *TxPool) GetStats() TxPoolStats {
 	pool.mutex.RLock()
 	defer pool.mutex.RUnlock()
 
-	// Update current counts
-	pool.stats.PendingCount = len(pool.pending)
+	// Count transactions by status
+	pendingCount := 0
+	inBundleCount := 0
+	for _, entry := range pool.pending {
+		if entry.Status == TxStatusPending {
+			pendingCount++
+		} else if entry.Status == TxStatusInBundle {
+			inBundleCount++
+		}
+	}
+
+	pool.stats.PendingCount = pendingCount
 	pool.stats.QueuedCount = len(pool.queued)
+	pool.stats.InBundleCount = inBundleCount
 
 	return pool.stats
 }
@@ -213,6 +233,8 @@ func (pool *TxPool) RemoveTransaction(hash common.Hash) bool {
 }
 
 // CleanupExpiredTransactions removes expired transactions
+// NOTE: Transactions that are locked to a bundle (TxStatusInBundle) are NOT expired,
+// as they are actively being processed and will be removed on accumulation or unlocked on failure.
 func (pool *TxPool) CleanupExpiredTransactions() {
 	pool.mutex.Lock()
 	defer pool.mutex.Unlock()
@@ -220,8 +242,12 @@ func (pool *TxPool) CleanupExpiredTransactions() {
 	now := time.Now()
 	expiredHashes := make([]common.Hash, 0)
 
-	// Check pending transactions
+	// Check pending transactions - skip those locked to bundles
 	for hash, entry := range pool.pending {
+		if entry.Status == TxStatusInBundle {
+			// Don't expire transactions that are locked to a bundle
+			continue
+		}
 		if now.Sub(entry.AddedAt) > pool.config.TxTTL {
 			expiredHashes = append(expiredHashes, hash)
 		}
@@ -361,4 +387,110 @@ func (pool *TxPool) removeFromQueued(entry *TxPoolEntry) {
 			delete(pool.queuedBySender, tx.From)
 		}
 	}
+}
+
+// LockTransactionsToBundle marks transactions as assigned to a specific EVM block number.
+// These transactions will be excluded from GetPendingTransactions() until unlocked or removed.
+// NOTE: Only transactions in the "pending" pool are locked. Queued transactions (future nonces)
+// are not locked, but this is OK since we only build bundles from pending transactions.
+// PANICS if any transaction is already locked to a DIFFERENT bundle - this indicates a critical bug.
+// Returns the number of transactions successfully locked.
+func (pool *TxPool) LockTransactionsToBundle(hashes []common.Hash, blockNumber uint64) int {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+
+	locked := 0
+	for _, hash := range hashes {
+		if entry, exists := pool.pending[hash]; exists {
+			if entry.Status == TxStatusPending {
+				entry.Status = TxStatusInBundle
+				entry.BlockNumber = blockNumber
+				locked++
+				log.Debug(log.Node, "TxPool: Locked transaction to bundle",
+					"hash", hash.Hex(),
+					"blockNumber", blockNumber)
+			} else if entry.Status == TxStatusInBundle {
+				// CRITICAL: Transaction already locked to a bundle
+				if entry.BlockNumber != blockNumber {
+					// Different bundle - this is a bug! Same tx in two bundles = duplicate execution
+					log.Error(log.Node, "CRITICAL BUG: Transaction already locked to DIFFERENT bundle",
+						"txHash", hash.Hex(),
+						"existingBundle", entry.BlockNumber,
+						"newBundle", blockNumber)
+					panic(fmt.Sprintf("TxPool: CRITICAL BUG - transaction %s already locked to bundle %d, cannot lock to bundle %d",
+						hash.Hex(), entry.BlockNumber, blockNumber))
+				}
+				// Same bundle - this is OK (idempotent), skip silently
+				log.Debug(log.Node, "TxPool: Transaction already locked to same bundle (idempotent)",
+					"hash", hash.Hex(),
+					"blockNumber", blockNumber)
+			} else {
+				log.Warn(log.Node, "TxPool: Cannot lock transaction - unexpected status",
+					"hash", hash.Hex(),
+					"currentStatus", entry.Status)
+			}
+		}
+	}
+
+	if locked > 0 {
+		log.Info(log.Node, "TxPool: Locked transactions to bundle",
+			"count", locked,
+			"blockNumber", blockNumber)
+	}
+
+	return locked
+}
+
+// UnlockTransactionsFromBundle returns transactions back to pending status.
+// Used when a bundle fails or expires and transactions need to be re-included in new bundles.
+// Returns the number of transactions successfully unlocked.
+func (pool *TxPool) UnlockTransactionsFromBundle(hashes []common.Hash) int {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+
+	unlocked := 0
+	for _, hash := range hashes {
+		if entry, exists := pool.pending[hash]; exists {
+			if entry.Status == TxStatusInBundle {
+				entry.Status = TxStatusPending
+				entry.BlockNumber = 0
+				unlocked++
+				log.Debug(log.Node, "TxPool: Unlocked transaction from bundle",
+					"hash", hash.Hex())
+			}
+		}
+	}
+
+	if unlocked > 0 {
+		log.Info(log.Node, "TxPool: Unlocked transactions from bundle",
+			"count", unlocked)
+	}
+
+	return unlocked
+}
+
+// RemoveTransactionsByHashes removes multiple transactions from the pool (used after accumulation)
+func (pool *TxPool) RemoveTransactionsByHashes(hashes []common.Hash) int {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+
+	removed := 0
+	for _, hash := range hashes {
+		if entry, exists := pool.pending[hash]; exists {
+			pool.removeFromPending(entry)
+			pool.stats.TotalProcessed++
+			removed++
+		} else if entry, exists := pool.queued[hash]; exists {
+			pool.removeFromQueued(entry)
+			pool.stats.TotalProcessed++
+			removed++
+		}
+	}
+
+	if removed > 0 {
+		log.Info(log.Node, "TxPool: Removed accumulated transactions",
+			"count", removed)
+	}
+
+	return removed
 }

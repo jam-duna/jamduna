@@ -430,6 +430,18 @@ impl BlockRefiner {
             let mut tx_hash = [0u8; 32];
             tx_hash.copy_from_slice(tx_hash_bytes.as_bytes());
 
+            // DIAGNOSTIC: Log tx_hash that will be used as receipt object_id
+            log_info(&format!(
+                "🔑 TX_HASH tx_index={} tx_hash={} extrinsic_len={} extrinsic_prefix={:02x}{:02x}{:02x}{:02x}",
+                tx_index,
+                format_object_id(tx_hash_bytes.0),
+                extrinsic.len(),
+                extrinsic.get(0).unwrap_or(&0),
+                extrinsic.get(1).unwrap_or(&0),
+                extrinsic.get(2).unwrap_or(&0),
+                extrinsic.get(3).unwrap_or(&0),
+            ));
+
             if REFINE_VERBOSE {
                 log_debug(&format!(
                 "  Processing extrinsic {}: {} bytes, tx_hash={}, data={:?}",

@@ -197,7 +197,13 @@ func (s *StateDB) populateWitnessCacheFromRefineOutput(serviceID uint32, output 
 
 	// Parse metashard count
 	metashardCount := binary.LittleEndian.Uint16(output[0:2])
-	log.Trace(log.EVM, "populateWitnessCacheFromRefineOutput", "metashardCount", metashardCount, "segments", len(segments), "outputLen", len(output))
+	// DIAGNOSTIC: Log metashardCount for debugging receipt lookup
+	log.Warn(log.EVM, "📊 REFINE_OUTPUT_PARSED",
+		"serviceID", serviceID,
+		"metashardCount", metashardCount,
+		"segments", len(segments),
+		"outputLen", len(output),
+	)
 
 	if metashardCount > 0 {
 		// Handle metashard entries in the new format
@@ -760,6 +766,19 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 		vm.Timeslot = s.JamState.SafroleState.Timeslot
 		vm.SetPVMContext(log.Builder)
 		importsegments := make([][][]byte, len(wp.WorkItems))
+
+		// Safety guard: verify payload witness_count + tx_count won't exceed extrinsics array bounds
+		// PVM uses witness_count as tx_start_index, so witness_count + tx_count must <= len(extrinsics)
+		if len(workItem.Payload) >= 8 {
+			payloadTxCount := binary.LittleEndian.Uint32(workItem.Payload[1:5])
+			payloadWitnessCount := binary.LittleEndian.Uint16(workItem.Payload[6:8])
+			extrinsicsLen := uint32(len(extrinsicsBlobs[index]))
+			if uint32(payloadWitnessCount)+payloadTxCount > extrinsicsLen {
+				return nil, nil, fmt.Errorf("invalid payload: witness_count(%d) + tx_count(%d) = %d exceeds extrinsics_len(%d)",
+					payloadWitnessCount, payloadTxCount, uint32(payloadWitnessCount)+payloadTxCount, extrinsicsLen)
+			}
+		}
+
 		result, _, exported_segments := vm.ExecuteRefine(coreIndex, uint32(index), wp, authorization, importsegments, 0, extrinsicsBlobs[index], p_a, common.BytesToHash(trie.H0), "")
 		// Check if this is an EVM service - only EVM needs metashard/state witness processing
 		isEVMService := workItem.Service == EVMServiceCode
@@ -885,9 +904,10 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 			// Update payload metadata with builder witness count and BAL hash
 			// ALWAYS update if payload exists (even if builderWitnessCount=0) to ensure BAL hash is included
 			if len(wp.WorkItems[index].Payload) >= 7 {
-				// Total witnesses = 2 (UBT pre/post) + builderWitnessCount (metashards + object proofs)
-				totalWitnessCount := uint16(2 + builderWitnessCount)
-				wp.WorkItems[index].Payload = evmtypes.BuildPayload(evmtypes.PayloadTypeTransactions, int(originalTxCount), 0, int(totalWitnessCount), blockAccessListHash)
+				// witness_count in payload should ONLY include prepended UBT witnesses (2), NOT appended builder witnesses
+				// This is because PVM uses witness_count to determine tx_start_index for 0-based extrinsic access
+				ubtWitnessCount := uint16(2) // UBT pre/post witnesses are prepended at indices 0-1
+				wp.WorkItems[index].Payload = evmtypes.BuildPayload(evmtypes.PayloadTypeTransactions, int(originalTxCount), 0, int(ubtWitnessCount), blockAccessListHash)
 			}
 		} // end if isEVMService
 

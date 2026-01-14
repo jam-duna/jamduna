@@ -252,8 +252,8 @@ func main() {
 							item.Bundle.WorkPackage.WorkItems[i].Payload = evmtypes.BuildPayload(
 								evmtypes.PayloadTypeBuilder,
 								txCount,
-								0, // globalDepth
-								0, // numWitnesses (will be set by BuildBundle)
+								0,             // globalDepth
+								0,             // numWitnesses (will be set by BuildBundle)
 								common.Hash{}, // BAL hash (will be computed by BuildBundle)
 							)
 						}
@@ -281,6 +281,32 @@ func main() {
 			}
 
 			queueRunner := queue.NewRunner(queueState, sid, submitter, bundleBuilder)
+
+			// Set callback to remove transactions from pool when bundles accumulate
+			queueRunner.SetOnAccumulated(func(wpHash common.Hash, txHashes []common.Hash) {
+				log.Info(log.Node, "🗑️  Removing accumulated transactions from txpool",
+					"wpHash", wpHash.Hex(),
+					"txCount", len(txHashes))
+				removed := txPool.RemoveTransactionsByHashes(txHashes)
+				log.Info(log.Node, "✅ Removed accumulated transactions",
+					"wpHash", wpHash.Hex(),
+					"removed", removed,
+					"requested", len(txHashes))
+			})
+
+			// Set callback to unlock transactions when bundles fail permanently (max retries exceeded)
+			// This allows transactions to be re-included in future bundles
+			queueRunner.SetOnFailed(func(blockNumber uint64, txHashes []common.Hash) {
+				log.Warn(log.Node, "🔓 Unlocking transactions from failed bundle",
+					"blockNumber", blockNumber,
+					"txCount", len(txHashes))
+				unlocked := txPool.UnlockTransactionsFromBundle(txHashes)
+				log.Info(log.Node, "🔓 Unlocked transactions from failed bundle",
+					"blockNumber", blockNumber,
+					"unlocked", unlocked,
+					"requested", len(txHashes))
+			})
+
 			queueRunner.Start(context.Background())
 			defer queueRunner.Stop()
 
@@ -452,8 +478,13 @@ func handleBlockNotifications(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrp
 			}
 
 			if err := buildAndEnqueueWorkPackageForCore(n, rollup, txPool, serviceID, queueRunner, uint16(core), anchorOffset); err != nil {
-				log.Error(log.Node, "Failed to build bundle for core", "core", core, "err", err)
-				break // Stop if we hit an error
+				// "no pending transactions" is expected when txpool is empty - log as debug
+				if err.Error() == "no pending transactions" {
+					log.Debug(log.Node, "No pending transactions for core", "core", core)
+				} else {
+					log.Warn(log.Node, "Failed to build bundle for core", "core", core, "err", err)
+				}
+				break // Stop if we hit an error or no more transactions
 			}
 			bundlesBuilt++
 		}
@@ -527,6 +558,12 @@ func buildAndEnqueueWorkPackageForCore(n *node.Node, rollup *evmrpc.Rollup, txPo
 		copy(originalWorkItemExtrinsics[i], wi.Extrinsics)
 	}
 
+	// Collect transaction hashes for txpool cleanup on accumulation
+	txHashes := make([]common.Hash, len(pendingTxs))
+	for i, tx := range pendingTxs {
+		txHashes[i] = tx.Hash
+	}
+
 	// Build bundle via NodeContent.BuildBundle -> StateDB.BuildBundle (executes refine)
 	// NOTE: BuildBundle prepends a UBT witness to each work item's extrinsics
 	// Use the specified core index (not round-robin)
@@ -535,18 +572,22 @@ func buildAndEnqueueWorkPackageForCore(n *node.Node, rollup *evmrpc.Rollup, txPo
 		return fmt.Errorf("failed to build bundle: %w", err)
 	}
 
-	// Enqueue to queue runner with original extrinsics for resubmission support
+	// Enqueue to queue runner with original extrinsics and tx hashes for resubmission support
 	// Pass coreIdx so the runner submits to the correct core
-	blockNumber, err := queueRunner.EnqueueBundleWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIdx)
+	// Transactions will be removed from txpool only when bundle accumulates (not now)
+	blockNumber, err := queueRunner.EnqueueBundleWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIdx, txHashes)
 	if err != nil {
 		return fmt.Errorf("failed to enqueue bundle: %w", err)
 	}
 
-	// Clear processed transactions from pool AFTER successful enqueue
-	// CRITICAL: Only remove after enqueue succeeds to avoid losing transactions if queue is full
-	for _, tx := range pendingTxs {
-		txPool.RemoveTransaction(tx.Hash)
-	}
+	// Lock transactions to this bundle AFTER successful enqueue
+	// They will be removed by the onAccumulated callback when the bundle accumulates on-chain
+	// Or unlocked if the bundle fails/expires
+	locked := txPool.LockTransactionsToBundle(txHashes, blockNumber)
+	log.Info(log.Node, "🔒 Locked transactions to bundle",
+		"blockNumber", blockNumber,
+		"txCount", len(txHashes),
+		"locked", locked)
 
 	log.Info(log.Node, "📤 Work package enqueued to JAM queue",
 		"wpHash", bundle.WorkPackage.Hash().Hex(),
@@ -600,6 +641,15 @@ func handleBlockEvents(n *node.Node, serviceID uint32, queueRunner *queue.Runner
 				"wpHash", wpHash.Hex(),
 				"coreIndex", guarantee.Report.CoreIndex)
 			queueRunner.HandleGuaranteed(wpHash)
+
+			// Store work report for segment retrieval via FetchJAMDASegments
+			// This is critical - without this, blocks cannot be read back after accumulation
+			// because the builder cache is cleared after guarantee persistence
+			if err := n.StoreWorkReport(guarantee.Report); err != nil {
+				log.Error(log.Node, "handleBlockEvents: StoreWorkReport failed", "wpHash", wpHash.Hex(), "err", err)
+			} else {
+				log.Info(log.Node, "💾 Stored work report for segment retrieval", "wpHash", wpHash.Hex(), "exportedSegmentRoot", guarantee.Report.AvailabilitySpec.ExportedSegmentRoot.Hex())
+			}
 		}
 
 		// Check for accumulations in AccumulationHistory
@@ -689,6 +739,12 @@ func buildAndEnqueueWorkPackage(n *node.Node, rollup *evmrpc.Rollup, txPool *evm
 		copy(originalWorkItemExtrinsics[i], wi.Extrinsics)
 	}
 
+	// Collect transaction hashes for txpool cleanup on accumulation
+	txHashes := make([]common.Hash, len(pendingTxs))
+	for i, tx := range pendingTxs {
+		txHashes[i] = tx.Hash
+	}
+
 	// Build bundle via NodeContent.BuildBundle -> StateDB.BuildBundle (executes refine)
 	// NOTE: BuildBundle prepends a UBT witness to each work item's extrinsics
 	// Use round-robin core assignment (alternates between core 0 and 1)
@@ -698,18 +754,22 @@ func buildAndEnqueueWorkPackage(n *node.Node, rollup *evmrpc.Rollup, txPool *evm
 		return fmt.Errorf("failed to build bundle: %w", err)
 	}
 
-	// Enqueue to queue runner with original extrinsics for resubmission support
+	// Enqueue to queue runner with original extrinsics and tx hashes for resubmission support
 	// Pass coreIdx so the runner submits to the correct core
-	blockNumber, err := queueRunner.EnqueueBundleWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIdx)
+	// Transactions will be removed from txpool only when bundle accumulates (not now)
+	blockNumber, err := queueRunner.EnqueueBundleWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIdx, txHashes)
 	if err != nil {
 		return fmt.Errorf("failed to enqueue bundle: %w", err)
 	}
 
-	// Clear processed transactions from pool AFTER successful enqueue
-	// CRITICAL: Only remove after enqueue succeeds to avoid losing transactions if queue is full
-	for _, tx := range pendingTxs {
-		txPool.RemoveTransaction(tx.Hash)
-	}
+	// Lock transactions to this bundle AFTER successful enqueue
+	// They will be removed by the onAccumulated callback when the bundle accumulates on-chain
+	// Or unlocked if the bundle fails/expires
+	locked := txPool.LockTransactionsToBundle(txHashes, blockNumber)
+	log.Info(log.Node, "🔒 Locked transactions to bundle",
+		"blockNumber", blockNumber,
+		"txCount", len(txHashes),
+		"locked", locked)
 
 	log.Info(log.Node, "📤 Work package enqueued to JAM queue",
 		"wpHash", bundle.WorkPackage.Hash().Hex(),

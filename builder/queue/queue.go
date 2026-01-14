@@ -52,36 +52,69 @@ func (s WorkPackageBundleStatus) String() string {
 
 // Configuration parameters for the queue
 const (
-	DefaultMaxQueueDepth      = 12           // Maximum items waiting to be submitted
-	DefaultMaxInflight        = 3            // Maximum items in Submitted or Guaranteed state
-	DefaultSubmissionTimeout  = 30 * time.Second // Time before Submitted item is considered failed
-	DefaultGuaranteeTimeout   = 18 * time.Second // Time before Submitted item without guarantee is requeued (3 JAM blocks)
-	DefaultAccumulateTimeout  = 60 * time.Second // Time before Guaranteed item without accumulation is considered failed (10 JAM blocks)
-	DefaultRetentionWindow    = 100          // Number of finalized blocks to retain
-	DefaultMaxVersionRetries  = 5            // Maximum resubmission attempts before dropping
+	DefaultMaxQueueDepth = 12  // Maximum items waiting to be submitted
+	DefaultMaxInflight   = 3   // Maximum items in Submitted state (cores blocked)
+
+	// Fast retry configuration (same version, network failure recovery)
+	// Uses RecentHistorySize window (48s) for safe retries within anchor validity
+	DefaultSubmitRetryInterval = 6 * time.Second // Retry same version every 1 JAM block
+	DefaultMaxSubmitRetries    = 8               // Max submission attempts (1 initial + 7 retries = 8 total attempts over ~48s)
+
+	// CRITICAL: GuaranteeTimeout must exceed the refine validity window to prevent on-chain duplicates
+	// When v1 times out and v2 is submitted, v1 must be expired on-chain before v2 can be guaranteed.
+	// Otherwise, both v1 and v2 could be guaranteed by validators, causing duplicate execution.
+	//
+	// THREE validation constraints exist for guarantee age (all checked in VerifyGuarantee):
+	// 1. checkAssignment (statedb/guarantees.go:183): diff <= (currentSlot % RotationPeriod) + RotationPeriod
+	//    - RotationPeriod = 4, so max age varies: 4-7 slots (24-42s) depending on rotation position
+	//    - Returns ErrGReportEpochBeforeLast if violated
+	// 2. checkRecentBlock (statedb/guarantees.go:388): anchor/state/beefy in RecentBlocks (size=8)
+	//    - Max age: RecentHistorySize × SecondsPerSlot = 8 × 6s = 48 seconds
+	//    - Returns ErrGAnchorNotRecent if violated
+	// 3. checkTimeSlotHeader (statedb/guarantees.go:429): LookupAnchorSlot >= currentSlot - 24
+	//    - Max age: LookupAnchorMaxAge × SecondsPerSlot = 24 × 6s = 144 seconds
+	//    - Returns ErrGReportEpochBeforeLast if violated
+	//
+	// The BINDING constraint is checkAssignment's rotation period check (runs first):
+	// - Minimum validity: 4 slots = 24 seconds (when currentSlot % 4 = 0)
+	// - Maximum validity: 7 slots = 42 seconds (when currentSlot % 4 = 3)
+	//
+	// To ensure v1 expired before v2 submitted IN ALL CASES, use maximum validity:
+	// - Maximum validity window: 7 × 6 = 42 seconds
+	// - Safety margin: 2 slots = 12 seconds (for network delays)
+	//
+	// Total timeout = 42s + 12s = 54s (9 JAM blocks)
+	// This ensures v1's guarantee slot is too old (fails checkAssignment) before we resubmit as v2.
+	DefaultGuaranteeTimeout = 54 * time.Second
+
+	DefaultAccumulateTimeout = 60 * time.Second // Time before Guaranteed item without accumulation is considered failed (10 JAM blocks)
+	DefaultRetentionWindow   = 100              // Number of finalized blocks to retain
+	DefaultMaxVersionRetries = 5                // Maximum resubmission attempts before dropping
 )
 
 // QueueConfig holds configuration for the work package queue
 type QueueConfig struct {
-	MaxQueueDepth      int
-	MaxInflight        int
-	SubmissionTimeout  time.Duration
-	GuaranteeTimeout   time.Duration
-	AccumulateTimeout  time.Duration
-	RetentionWindow    int
-	MaxVersionRetries  int
+	MaxQueueDepth       int
+	MaxInflight         int
+	SubmitRetryInterval time.Duration // Fast retry: resubmit same version every N seconds
+	MaxSubmitRetries    int           // Fast retry: max attempts before slow timeout
+	GuaranteeTimeout    time.Duration // Slow timeout: increment version after refine expiry
+	AccumulateTimeout   time.Duration
+	RetentionWindow     int
+	MaxVersionRetries   int
 }
 
 // DefaultConfig returns the default queue configuration
 func DefaultConfig() QueueConfig {
 	return QueueConfig{
-		MaxQueueDepth:      DefaultMaxQueueDepth,
-		MaxInflight:        DefaultMaxInflight,
-		SubmissionTimeout:  DefaultSubmissionTimeout,
-		GuaranteeTimeout:   DefaultGuaranteeTimeout,
-		AccumulateTimeout:  DefaultAccumulateTimeout,
-		RetentionWindow:    DefaultRetentionWindow,
-		MaxVersionRetries:  DefaultMaxVersionRetries,
+		MaxQueueDepth:       DefaultMaxQueueDepth,
+		MaxInflight:         DefaultMaxInflight,
+		SubmitRetryInterval: DefaultSubmitRetryInterval,
+		MaxSubmitRetries:    DefaultMaxSubmitRetries,
+		GuaranteeTimeout:    DefaultGuaranteeTimeout,
+		AccumulateTimeout:   DefaultAccumulateTimeout,
+		RetentionWindow:     DefaultRetentionWindow,
+		MaxVersionRetries:   DefaultMaxVersionRetries,
 	}
 }
 
@@ -107,6 +140,14 @@ type QueueItem struct {
 	// OriginalWorkItemExtrinsics stores the WorkItems[].Extrinsics metadata BEFORE UBT witness prepending.
 	// BuildBundle also prepends metadata entries, so we need to restore the original metadata on rebuild.
 	OriginalWorkItemExtrinsics [][]types.WorkItemExtrinsic
+
+	// TransactionHashes stores the transaction hashes included in this bundle
+	// Used to remove transactions from txpool only after accumulation (not after enqueue)
+	TransactionHashes []common.Hash
+
+	// Fast retry tracking: resubmit same version on network failures
+	SubmitAttempts int       // Number of times this version was submitted
+	LastSubmitAt   time.Time // Last submission attempt timestamp
 }
 
 // QueueState manages the work package submission pipeline
@@ -138,6 +179,10 @@ type QueueState struct {
 	// This is updated every time a bundle is submitted with a new hash
 	HashToBlock map[common.Hash]uint64
 
+	// WinningVer tracks which version was first guaranteed (immutable once set)
+	// This enforces "first guarantee wins" to prevent duplicate execution
+	WinningVer map[uint64]int
+
 	// Finalized items (for verification and retention)
 	Finalized map[uint64]*QueueItem
 
@@ -147,8 +192,15 @@ type QueueState struct {
 	// Event ID generator
 	eventIDCounter uint64
 
+	// Operational metrics (for observability)
+	duplicateGuaranteeRejected  int // Counter for rejected duplicate guarantees
+	duplicateAccumulateRejected int // Counter for rejected duplicate accumulations
+	nonWinningVersionsCanceled  int // Counter for canceled non-winning versions
+
 	// Callbacks for queue events
-	onStatusChange func(blockNumber uint64, oldStatus, newStatus WorkPackageBundleStatus)
+	onStatusChange   func(blockNumber uint64, oldStatus, newStatus WorkPackageBundleStatus)
+	onAccumulated    func(wpHash common.Hash, txHashes []common.Hash) // Called when bundle accumulates
+	onFailed         func(blockNumber uint64, txHashes []common.Hash) // Called when bundle fails permanently (max retries exceeded)
 }
 
 // NewQueueState creates a new queue state with default configuration
@@ -167,6 +219,7 @@ func NewQueueStateWithConfig(serviceID uint32, config QueueConfig) *QueueState {
 		CurrentVer:      make(map[uint64]int),
 		HashByVer:       make(map[uint64]map[int]common.Hash),
 		HashToBlock:     make(map[common.Hash]uint64),
+		WinningVer:      make(map[uint64]int),
 		Finalized:       make(map[uint64]*QueueItem),
 		nextBlockNumber: 1, // Start from block 1 (0 is genesis)
 		eventIDCounter:  0,
@@ -178,6 +231,21 @@ func (qs *QueueState) SetStatusChangeCallback(cb func(blockNumber uint64, oldSta
 	qs.mu.Lock()
 	defer qs.mu.Unlock()
 	qs.onStatusChange = cb
+}
+
+// SetOnAccumulated sets the callback for accumulation events (thread-safe)
+func (qs *QueueState) SetOnAccumulated(cb func(wpHash common.Hash, txHashes []common.Hash)) {
+	qs.mu.Lock()
+	defer qs.mu.Unlock()
+	qs.onAccumulated = cb
+}
+
+// SetOnFailed sets the callback for failure events (thread-safe)
+// Called when a bundle fails permanently (max retries exceeded)
+func (qs *QueueState) SetOnFailed(cb func(blockNumber uint64, txHashes []common.Hash)) {
+	qs.mu.Lock()
+	defer qs.mu.Unlock()
+	qs.onFailed = cb
 }
 
 // nextEventID generates a unique event ID
@@ -239,7 +307,7 @@ func (qs *QueueState) Enqueue(bundle *types.WorkPackageBundle, coreIndex uint16)
 // The originalExtrinsics are the transaction extrinsics BEFORE UBT witness prepending,
 // used for rebuilding bundles on resubmission without double-prepending the witness.
 // The originalWorkItemExtrinsics are the WorkItems[].Extrinsics metadata BEFORE UBT witness prepending.
-func (qs *QueueState) EnqueueWithOriginalExtrinsics(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic, coreIndex uint16) (uint64, error) {
+func (qs *QueueState) EnqueueWithOriginalExtrinsics(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic, coreIndex uint16, txHashes []common.Hash) (uint64, error) {
 	qs.mu.Lock()
 	defer qs.mu.Unlock()
 
@@ -265,6 +333,7 @@ func (qs *QueueState) EnqueueWithOriginalExtrinsics(bundle *types.WorkPackageBun
 		CoreIndex:                  coreIndex,
 		OriginalExtrinsics:         originalExtrinsics,
 		OriginalWorkItemExtrinsics: originalWorkItemExtrinsics,
+		TransactionHashes:          txHashes,
 	}
 
 	qs.Queued[blockNumber] = item
@@ -356,7 +425,12 @@ func (qs *QueueState) MarkSubmitted(item *QueueItem, wpHash common.Hash) {
 	oldStatus := qs.Status[item.BlockNumber]
 	oldHash := item.WPHash
 	item.Status = StatusSubmitted
-	item.SubmittedAt = time.Now()
+	now := time.Now()
+	if item.SubmittedAt.IsZero() {
+		item.SubmittedAt = now
+	}
+	item.LastSubmitAt = now
+	item.SubmitAttempts++
 	item.WPHash = wpHash
 
 	qs.Inflight[item.BlockNumber] = item
@@ -394,6 +468,68 @@ func (qs *QueueState) MarkSubmitted(item *QueueItem, wpHash common.Hash) {
 		"queuedRemaining", len(qs.Queued))
 }
 
+// cancelOtherVersions removes non-winning versions from Queued/Inflight and invalidates their hashes.
+// This prevents duplicate execution when an older version wins the guarantee race.
+//
+// IMPORTANT: This only provides LOCAL consistency. It cannot prevent on-chain duplicates
+// if multiple versions were already submitted to validators. The GuaranteeTimeout (54s)
+// is configured to exceed the rotation period validity window (42s maximum) to ensure old
+// versions are invalid on-chain before resubmission, which is the only true guarantee against duplicates.
+func (qs *QueueState) cancelOtherVersions(bn uint64, winningVer int) {
+	canceledCount := 0
+
+	// If there's a queued item with a different version, remove it
+	if item, ok := qs.Queued[bn]; ok && item.Version != winningVer {
+		log.Info(log.Node, "Queue: Canceling queued non-winning version",
+			"service", qs.serviceID,
+			"blockNumber", bn,
+			"canceledVersion", item.Version,
+			"winningVersion", winningVer,
+			"wpHash", item.WPHash.Hex())
+		delete(qs.Queued, bn)
+		canceledCount++
+	}
+
+	// If there's an inflight item with a different version, remove it
+	// This handles the case where a non-winning version was submitted but an older version won
+	if item, ok := qs.Inflight[bn]; ok && item.Version != winningVer {
+		log.Info(log.Node, "Queue: Canceling inflight non-winning version",
+			"service", qs.serviceID,
+			"blockNumber", bn,
+			"canceledVersion", item.Version,
+			"winningVersion", winningVer,
+			"wpHash", item.WPHash.Hex())
+		delete(qs.Inflight, bn)
+		// Don't update Status here - the winning version will set it when it's processed
+		// Status[bn] may still be StatusSubmitted or already StatusGuaranteed depending on timing
+		canceledCount++
+	}
+
+	// Invalidate hash mappings for all non-winning versions
+	if versions, ok := qs.HashByVer[bn]; ok {
+		for ver, hash := range versions {
+			if ver != winningVer {
+				log.Debug(log.Node, "Queue: Invalidating hash for non-winning version",
+					"service", qs.serviceID,
+					"blockNumber", bn,
+					"version", ver,
+					"wpHash", hash.Hex())
+				delete(qs.HashToBlock, hash)
+			}
+		}
+	}
+
+	if canceledCount > 0 {
+		qs.nonWinningVersionsCanceled += canceledCount
+		log.Info(log.Node, "Queue: Completed non-winning version cleanup",
+			"service", qs.serviceID,
+			"blockNumber", bn,
+			"winningVersion", winningVer,
+			"canceledCount", canceledCount,
+			"totalCanceled", qs.nonWinningVersionsCanceled)
+	}
+}
+
 // OnGuaranteed handles a guarantee event for a work package hash
 func (qs *QueueState) OnGuaranteed(wpHash common.Hash) {
 	qs.mu.Lock()
@@ -421,20 +557,35 @@ func (qs *QueueState) OnGuaranteed(wpHash common.Hash) {
 		return
 	}
 
-	// Accept guarantee for ANY version of this block - if an older version got guaranteed,
-	// that's great! We should accept it and cancel any pending resubmission.
-	// This handles the race condition where:
-	// 1. We submit v1, timeout waiting for guarantee, increment to v2
-	// 2. v1's guarantee finally arrives - we should accept it!
-	currentVer := qs.CurrentVer[bn]
-	if ver != currentVer {
-		log.Info(log.Node, "Queue: OnGuaranteed for older version - accepting (canceling pending resubmit)",
+	// CRITICAL: Enforce "first guarantee wins" to prevent duplicate execution
+	// Check if a winning version has already been chosen for this block
+	if winningVer, exists := qs.WinningVer[bn]; exists {
+		if ver != winningVer {
+			qs.duplicateGuaranteeRejected++
+			log.Warn(log.Node, "❌ Queue: REJECTING guarantee for non-winning version (duplicate execution prevention)",
+				"service", qs.serviceID,
+				"blockNumber", bn,
+				"rejectedVersion", ver,
+				"winningVersion", winningVer,
+				"wpHash", wpHash.Hex(),
+				"totalDuplicatesRejected", qs.duplicateGuaranteeRejected)
+			return
+		}
+		// This is the winning version - proceed normally
+		log.Debug(log.Node, "Queue: OnGuaranteed for already-chosen winning version",
 			"blockNumber", bn,
-			"guaranteedVersion", ver,
-			"currentVersion", currentVer,
-			"wpHash", wpHash.Hex())
-		// Update current version to the guaranteed one
+			"version", ver)
+	} else {
+		// First guarantee for this block - this version wins!
+		qs.WinningVer[bn] = ver
 		qs.CurrentVer[bn] = ver
+		log.Info(log.Node, "🏆 Queue: First guarantee - this version WINS (canceling all others)",
+			"service", qs.serviceID,
+			"blockNumber", bn,
+			"winningVersion", ver,
+			"wpHash", wpHash.Hex())
+		// Cancel all other versions (queued items and hash mappings)
+		qs.cancelOtherVersions(bn, ver)
 	}
 
 	oldStatus := qs.Status[bn]
@@ -483,32 +634,51 @@ func (qs *QueueState) OnGuaranteed(wpHash common.Hash) {
 // OnAccumulated handles an accumulation event for a work package hash
 func (qs *QueueState) OnAccumulated(wpHash common.Hash) {
 	qs.mu.Lock()
-	defer qs.mu.Unlock()
 
 	bn, ver := qs.lookupByHash(wpHash)
 	if bn == 0 {
+		qs.mu.Unlock()
 		log.Debug(log.Node, "Queue: OnAccumulated for unknown hash", "wpHash", wpHash.Hex())
 		return
 	}
 
-	// Accept accumulation for ANY version - similar to OnGuaranteed
-	currentVer := qs.CurrentVer[bn]
-	if ver != currentVer {
-		log.Info(log.Node, "Queue: OnAccumulated for older version - accepting",
+	// CRITICAL: Only accept accumulation for the winning version
+	// This prevents duplicate execution when multiple versions were guaranteed
+	if winningVer, exists := qs.WinningVer[bn]; exists {
+		if ver != winningVer {
+			qs.duplicateAccumulateRejected++
+			qs.mu.Unlock()
+			log.Warn(log.Node, "❌ Queue: REJECTING accumulation for non-winning version (duplicate execution prevention)",
+				"service", qs.serviceID,
+				"blockNumber", bn,
+				"rejectedVersion", ver,
+				"winningVersion", winningVer,
+				"wpHash", wpHash.Hex(),
+				"totalDuplicatesRejected", qs.duplicateAccumulateRejected)
+			return
+		}
+	} else {
+		// Accumulation without prior guarantee - this shouldn't happen but accept it as winner
+		log.Warn(log.Node, "Queue: OnAccumulated without prior guarantee - accepting as winner",
+			"service", qs.serviceID,
 			"blockNumber", bn,
-			"accumulatedVersion", ver,
-			"currentVersion", currentVer,
+			"version", ver,
 			"wpHash", wpHash.Hex())
+		qs.WinningVer[bn] = ver
 		qs.CurrentVer[bn] = ver
+		qs.cancelOtherVersions(bn, ver)
 	}
 
 	oldStatus := qs.Status[bn]
 	qs.Status[bn] = StatusAccumulated
 
 	var bundleID string
+	var txHashes []common.Hash
+	var callback func(common.Hash, []common.Hash)
 	if item, ok := qs.Inflight[bn]; ok {
 		item.Status = StatusAccumulated
 		bundleID = item.BundleID
+		txHashes = item.TransactionHashes
 		// Move to Finalized and remove from Inflight - accumulation completes the lifecycle
 		qs.Finalized[bn] = item
 		delete(qs.Inflight, bn)
@@ -516,6 +686,7 @@ func (qs *QueueState) OnAccumulated(wpHash common.Hash) {
 		// Item was requeued but older version got accumulated
 		item.Status = StatusAccumulated
 		bundleID = item.BundleID
+		txHashes = item.TransactionHashes
 		// Move directly to Finalized
 		qs.Finalized[bn] = item
 		delete(qs.Queued, bn)
@@ -523,6 +694,11 @@ func (qs *QueueState) OnAccumulated(wpHash common.Hash) {
 
 	if qs.onStatusChange != nil {
 		qs.onStatusChange(bn, oldStatus, StatusAccumulated)
+	}
+
+	// Capture callback and txHashes to invoke outside the lock
+	if qs.onAccumulated != nil && len(txHashes) > 0 {
+		callback = qs.onAccumulated
 	}
 
 	// Prune old finalized items
@@ -541,6 +717,14 @@ func (qs *QueueState) OnAccumulated(wpHash common.Hash) {
 		"newInflightCount", inflightCount,
 		"inflightMapSize", len(qs.Inflight),
 		"queuedCount", len(qs.Queued))
+
+	// Release lock before invoking callback to avoid blocking the queue
+	qs.mu.Unlock()
+
+	// Invoke callback outside the lock - it may do I/O (remove from txpool, logging)
+	if callback != nil {
+		callback(wpHash, txHashes)
+	}
 }
 
 // OnFinalized handles a finalization event for a work package hash
@@ -554,15 +738,27 @@ func (qs *QueueState) OnFinalized(wpHash common.Hash) {
 		return
 	}
 
-	// Accept finalization for ANY version - similar to OnGuaranteed/OnAccumulated
-	currentVer := qs.CurrentVer[bn]
-	if ver != currentVer {
-		log.Info(log.Node, "Queue: OnFinalized for older version - accepting",
+	// CRITICAL: Only accept finalization for the winning version
+	if winningVer, exists := qs.WinningVer[bn]; exists {
+		if ver != winningVer {
+			log.Warn(log.Node, "❌ Queue: REJECTING finalization for non-winning version",
+				"service", qs.serviceID,
+				"blockNumber", bn,
+				"rejectedVersion", ver,
+				"winningVersion", winningVer,
+				"wpHash", wpHash.Hex())
+			return
+		}
+	} else {
+		// Finalization without prior guarantee - shouldn't happen but accept as winner
+		log.Warn(log.Node, "Queue: OnFinalized without prior guarantee - accepting as winner",
+			"service", qs.serviceID,
 			"blockNumber", bn,
-			"finalizedVersion", ver,
-			"currentVersion", currentVer,
+			"version", ver,
 			"wpHash", wpHash.Hex())
+		qs.WinningVer[bn] = ver
 		qs.CurrentVer[bn] = ver
+		qs.cancelOtherVersions(bn, ver)
 	}
 
 	oldStatus := qs.Status[bn]
@@ -594,7 +790,6 @@ func (qs *QueueState) OnFinalized(wpHash common.Hash) {
 // It requeues the failed block and all subsequent blocks with new versions
 func (qs *QueueState) OnTimeoutOrFailure(failedBN uint64) {
 	qs.mu.Lock()
-	defer qs.mu.Unlock()
 
 	now := time.Now()
 
@@ -605,6 +800,13 @@ func (qs *QueueState) OnTimeoutOrFailure(failedBN uint64) {
 			toRequeue = append(toRequeue, bn)
 		}
 	}
+
+	// Track failed items to notify callback after releasing lock
+	type failedItem struct {
+		blockNumber uint64
+		txHashes    []common.Hash
+	}
+	var failedItems []failedItem
 
 	for _, bn := range toRequeue {
 		item := qs.Inflight[bn]
@@ -631,9 +833,17 @@ func (qs *QueueState) OnTimeoutOrFailure(failedBN uint64) {
 			log.Warn(log.Node, "Queue: Max retries exceeded, dropping block",
 				"service", qs.serviceID,
 				"blockNumber", bn,
-				"version", newVersion-1)
+				"version", newVersion-1,
+				"txCount", len(item.TransactionHashes))
 			qs.Status[bn] = StatusFailed
 			delete(qs.Inflight, bn)
+			// Track for callback notification
+			if len(item.TransactionHashes) > 0 {
+				failedItems = append(failedItems, failedItem{
+					blockNumber: bn,
+					txHashes:    item.TransactionHashes,
+				})
+			}
 			continue
 		}
 
@@ -644,7 +854,9 @@ func (qs *QueueState) OnTimeoutOrFailure(failedBN uint64) {
 		item.Version = newVersion
 		item.AddTS = now
 		item.Status = StatusQueued
-		item.SubmittedAt = time.Time{} // Reset submission time
+		item.SubmittedAt = time.Time{}  // Reset submission time
+		item.LastSubmitAt = time.Time{} // Reset retry tracking
+		item.SubmitAttempts = 0         // Reset retry counter for new version
 
 		qs.Queued[bn] = item
 		qs.Status[bn] = StatusQueued
@@ -655,6 +867,17 @@ func (qs *QueueState) OnTimeoutOrFailure(failedBN uint64) {
 			"blockNumber", bn,
 			"newVersion", newVersion,
 			"wpHash", item.WPHash.Hex())
+	}
+
+	// Capture callback to invoke outside lock
+	callback := qs.onFailed
+	qs.mu.Unlock()
+
+	// Invoke callback for each failed item
+	if callback != nil {
+		for _, failed := range failedItems {
+			callback(failed.blockNumber, failed.txHashes)
+		}
 	}
 }
 
@@ -695,10 +918,19 @@ func (qs *QueueState) pruneOlder(currentBN uint64) {
 	cutoff := currentBN - uint64(qs.config.RetentionWindow)
 	for bn := range qs.Finalized {
 		if bn < cutoff {
+			// CRITICAL: Remove all hashes for this block number from reverse lookup
+			// to prevent late guarantee/accumulation events from resurrecting pruned blocks
+			if versions, ok := qs.HashByVer[bn]; ok {
+				for _, hash := range versions {
+					delete(qs.HashToBlock, hash)
+				}
+			}
+
 			delete(qs.Finalized, bn)
 			delete(qs.Status, bn)
 			delete(qs.CurrentVer, bn)
 			delete(qs.HashByVer, bn)
+			delete(qs.WinningVer, bn)
 		}
 	}
 }
@@ -720,11 +952,81 @@ func (qs *QueueState) CheckTimeouts() {
 			if item.SubmittedAt.IsZero() {
 				continue
 			}
-			// Use GuaranteeTimeout for items awaiting guarantee (shorter timeout)
-			// This ensures we resubmit quickly if guarantee is not received
+
+			// TWO-TIER TIMEOUT STRATEGY:
+			// 1. Fast retry (same version): Resubmit same bundle within RecentHistorySize window (48s)
+			//    - Safe because same hash = idempotent (no duplicate execution)
+			//    - Recovers from transient network failures quickly
+			// 2. Slow timeout (new version): After refine expiry (54s), increment version
+			//    - Only after v1's refine is expired on-chain, preventing duplicate guarantees
+
+			elapsed := now.Sub(item.SubmittedAt)
+			sinceLastSubmit := now.Sub(item.LastSubmitAt)
+
+			// Fast retry window: min(RecentHistorySize × SecondsPerSlot, GuaranteeTimeout)
+			recentHistoryWindow := time.Duration(types.RecentHistorySize*types.SecondsPerSlot) * time.Second
+			fastRetryWindow := recentHistoryWindow
+			if qs.config.GuaranteeTimeout < fastRetryWindow {
+				fastRetryWindow = qs.config.GuaranteeTimeout
+			}
+
+			// Slow timeout after refine expiry
 			timeout = qs.config.GuaranteeTimeout
 			refTime = item.SubmittedAt
 			timeoutType = "guarantee"
+
+			if elapsed > timeout {
+				// CRITICAL: Before incrementing version, check if ANY version was already guaranteed
+				currentStatus := qs.Status[bn]
+				if currentStatus == StatusGuaranteed || currentStatus == StatusAccumulated || currentStatus == StatusFinalized {
+					log.Info(log.Node, "Queue: Timeout detected but bundle already guaranteed/accumulated - skipping requeue",
+						"service", qs.serviceID,
+						"blockNumber", bn,
+						"version", item.Version,
+						"currentStatus", currentStatus.String(),
+						"wpHash", item.WPHash.Hex())
+					continue
+				}
+
+				log.Warn(log.Node, "Queue: Refine expired - incrementing version",
+					"service", qs.serviceID,
+					"blockNumber", bn,
+					"version", item.Version,
+					"attempts", item.SubmitAttempts,
+					"elapsed", elapsed.Round(time.Second),
+					"timeout", timeout,
+					"wpHash", item.WPHash.Hex())
+
+				// Unlock and call OnTimeoutOrFailure to increment version
+				qs.mu.Unlock()
+				qs.OnTimeoutOrFailure(bn)
+				qs.mu.Lock()
+				return // Restart checking after modification
+			}
+
+			// Check for fast retry within retry window
+			if elapsed < fastRetryWindow &&
+				sinceLastSubmit >= qs.config.SubmitRetryInterval &&
+				item.SubmitAttempts < qs.config.MaxSubmitRetries {
+
+				log.Info(log.Node, "Queue: Fast retry same version (network failure recovery)",
+					"service", qs.serviceID,
+					"blockNumber", bn,
+					"version", item.Version,
+					"attempt", item.SubmitAttempts+1,
+					"maxAttempts", qs.config.MaxSubmitRetries,
+					"elapsed", elapsed.Round(time.Second),
+					"sinceLastSubmit", sinceLastSubmit.Round(time.Second),
+					"wpHash", item.WPHash.Hex())
+
+				// Requeue with same version for fast retry
+				item.Status = StatusQueued
+				qs.Status[bn] = StatusQueued
+				qs.Queued[bn] = item
+				delete(qs.Inflight, bn)
+				continue
+			}
+
 		case StatusGuaranteed:
 			// Use AccumulateTimeout from GuaranteedAt (more lenient)
 			if item.GuaranteedAt.IsZero() {
@@ -733,68 +1035,54 @@ func (qs *QueueState) CheckTimeouts() {
 			timeout = qs.config.AccumulateTimeout
 			refTime = item.GuaranteedAt
 			timeoutType = "accumulate"
-		default:
-			continue
-		}
 
-		elapsed := now.Sub(refTime)
-		remaining := timeout - elapsed
+			elapsed := now.Sub(refTime)
+			remaining := timeout - elapsed
 
-		// Log detailed timeout status for debugging
-		if elapsed > timeout/2 {
-			log.Debug(log.Node, "Queue: Timeout check",
-				"service", qs.serviceID,
-				"blockNumber", bn,
-				"version", item.Version,
-				"status", item.Status.String(),
-				"timeoutType", timeoutType,
-				"elapsed", elapsed.Round(time.Second),
-				"timeout", timeout,
-				"remaining", remaining.Round(time.Second))
-		}
-
-		if elapsed > timeout {
-			// CRITICAL: Before requeuing, check if ANY version of this block was already
-			// guaranteed or accumulated. This prevents duplicate execution when the original
-			// bundle's guarantee arrives after we timeout but before we resubmit.
-			currentStatus := qs.Status[bn]
-			if currentStatus == StatusGuaranteed || currentStatus == StatusAccumulated || currentStatus == StatusFinalized {
-				log.Info(log.Node, "Queue: Timeout detected but bundle already guaranteed/accumulated - skipping requeue",
+			// Log detailed timeout status for debugging
+			if elapsed > timeout/2 {
+				log.Debug(log.Node, "Queue: Timeout check",
 					"service", qs.serviceID,
 					"blockNumber", bn,
 					"version", item.Version,
-					"currentStatus", currentStatus.String(),
-					"wpHash", item.WPHash.Hex())
-				continue
+					"status", item.Status.String(),
+					"timeoutType", timeoutType,
+					"elapsed", elapsed.Round(time.Second),
+					"timeout", timeout,
+					"remaining", remaining.Round(time.Second))
 			}
 
-			log.Warn(log.Node, "Queue: Timeout detected - will requeue",
-				"service", qs.serviceID,
-				"blockNumber", bn,
-				"version", item.Version,
-				"status", item.Status.String(),
-				"timeoutType", timeoutType,
-				"elapsed", elapsed.Round(time.Second),
-				"timeout", timeout,
-				"wpHash", item.WPHash.Hex())
+			if elapsed > timeout {
+				log.Warn(log.Node, "Queue: Accumulate timeout - will requeue",
+					"service", qs.serviceID,
+					"blockNumber", bn,
+					"version", item.Version,
+					"elapsed", elapsed.Round(time.Second),
+					"wpHash", item.WPHash.Hex())
 
-			// Unlock and call OnTimeoutOrFailure (which will relock)
-			qs.mu.Unlock()
-			qs.OnTimeoutOrFailure(bn)
-			qs.mu.Lock()
-			return // Restart checking after modification
+				qs.mu.Unlock()
+				qs.OnTimeoutOrFailure(bn)
+				qs.mu.Lock()
+				return
+			}
+
+		default:
+			continue
 		}
 	}
 }
 
 // Stats returns queue statistics
 type QueueStats struct {
-	QueuedCount     int
-	InflightCount   int
-	FinalizedCount  int
-	SubmittedCount  int
-	GuaranteedCount int
-	AccumulatedCount int
+	QueuedCount                int
+	InflightCount              int
+	FinalizedCount             int
+	SubmittedCount             int
+	GuaranteedCount            int
+	AccumulatedCount           int
+	DuplicateGuaranteeRejected int // Counter for rejected duplicate guarantees
+	DuplicateAccumulateRejected int // Counter for rejected duplicate accumulations
+	NonWinningVersionsCanceled int // Counter for canceled non-winning versions
 }
 
 // GetStats returns current queue statistics
@@ -803,9 +1091,12 @@ func (qs *QueueState) GetStats() QueueStats {
 	defer qs.mu.RUnlock()
 
 	stats := QueueStats{
-		QueuedCount:    len(qs.Queued),
-		InflightCount:  len(qs.Inflight),
-		FinalizedCount: len(qs.Finalized),
+		QueuedCount:                len(qs.Queued),
+		InflightCount:              len(qs.Inflight),
+		FinalizedCount:             len(qs.Finalized),
+		DuplicateGuaranteeRejected: qs.duplicateGuaranteeRejected,
+		DuplicateAccumulateRejected: qs.duplicateAccumulateRejected,
+		NonWinningVersionsCanceled: qs.nonWinningVersionsCanceled,
 	}
 
 	for _, status := range qs.Status {

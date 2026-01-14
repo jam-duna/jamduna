@@ -219,11 +219,10 @@ func (r *Rollup) PrepareWorkPackage(refineCtx types.RefineContext, pendingTxs []
 		globalDepth = 0
 	}
 
-	// Get actual witness count from StateDB witnesses cache
-	witnesses := sdb.GetWitnesses()
-	numWitnesses := len(witnesses)
-
 	// Create work package with proper auth code hash
+	// NOTE: witness_count must be 0 for initial Builder payload because PVM uses witness_count
+	// as tx_start_index. Witnesses (UBT pre/post) are prepended later in BuildBundle, and the
+	// payload is updated to PayloadTypeTransactions with the correct witness_count at that time.
 	workPackage := types.WorkPackage{
 		AuthCodeHost:          0,
 		AuthorizationCodeHash: getBootstrapAuthCodeHash(),
@@ -239,7 +238,7 @@ func (r *Rollup) PrepareWorkPackage(refineCtx types.RefineContext, pendingTxs []
 				ImportedSegments:   []types.ImportSegment{},
 				ExportCount:        0,
 				Extrinsics:         extrinsics,
-				Payload:            evmtypes.BuildPayload(evmtypes.PayloadTypeBuilder, len(pendingTxs), globalDepth, numWitnesses, common.Hash{}),
+				Payload:            evmtypes.BuildPayload(evmtypes.PayloadTypeBuilder, len(pendingTxs), globalDepth, 0, common.Hash{}),
 			},
 		},
 	}
@@ -291,25 +290,33 @@ func (r *Rollup) BuildAndEnqueueWorkPackage(
 		copy(originalWorkItemExtrinsics[i], wi.Extrinsics)
 	}
 
+	// Collect transaction hashes for txpool cleanup on accumulation
+	txHashes := make([]common.Hash, len(pendingTxs))
+	for i, tx := range pendingTxs {
+		txHashes[i] = tx.Hash
+	}
+
 	bundle, workReport, err := r.GetStateDB().BuildBundle(workPackage, extrinsicsBlobs, 0, nil, r.pvmBackend)
 	if err != nil {
 		return fmt.Errorf("failed to build bundle: %w", err)
 	}
 
-	for _, tx := range pendingTxs {
-		txPool.RemoveTransaction(tx.Hash)
-	}
-
-	blockNumber, err := queueRunner.EnqueueBundleWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, 0)
+	blockNumber, err := queueRunner.EnqueueBundleWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, 0, txHashes)
 	if err != nil {
 		return fmt.Errorf("failed to enqueue bundle: %w", err)
 	}
+
+	// Lock transactions to this bundle AFTER successful enqueue
+	// They will be removed by the onAccumulated callback when the bundle accumulates on-chain
+	// Or unlocked if the bundle fails/expires
+	txPool.LockTransactionsToBundle(txHashes, blockNumber)
 
 	log.Info(log.Node, "Work package enqueued",
 		"wp_hash", bundle.WorkPackage.Hash().Hex(),
 		"work_report_hash", workReport.Hash().Hex(),
 		"block_number", blockNumber,
-		"service_id", r.serviceID)
+		"service_id", r.serviceID,
+		"locked_txs", len(txHashes))
 
 	return nil
 }
@@ -630,12 +637,44 @@ func (r *Rollup) GetBlockByNumber(blockNumber string, fullTx bool) (*evmtypes.Et
 
 	// If fullTx requested, fetch full transaction objects
 	if fullTx {
+		// DIAGNOSTIC: Log all TxHashes in the block
+		log.Warn(log.Node, "📋 BLOCK_TX_HASHES",
+			"blockNumber", evmBlock.Number,
+			"numTxHashes", len(evmBlock.TxHashes),
+		)
+		for i, txHash := range evmBlock.TxHashes {
+			log.Warn(log.Node, "📋 BLOCK_TX_HASH",
+				"index", i,
+				"txHash", txHash.Hex(),
+			)
+		}
+
 		transactions := make([]evmtypes.EthereumTransactionResponse, 0, len(evmBlock.TxHashes))
 
 		for i, txHash := range evmBlock.TxHashes {
 			ethTx, err := r.GetTransactionByHashFormatted(txHash)
 			if err != nil {
 				log.Warn(log.Node, "GetBlockByNumber: Failed to get transaction", "txHash", txHash.String(), "error", err)
+				// Create minimal transaction response with just the hash
+				// This allows block scanning to still match transactions by hash
+				// even when full receipt data is not yet available in meta-shards
+				minimalTx := evmtypes.EthereumTransactionResponse{
+					Hash:             txHash.String(),
+					BlockHash:        evmBlock.WorkPackageHash.String(),
+					BlockNumber:      fmt.Sprintf("0x%x", evmBlock.Number),
+					TransactionIndex: fmt.Sprintf("0x%x", i),
+					// Set default values for required fields
+					Nonce:    "0x0",
+					From:     "0x0000000000000000000000000000000000000000",
+					Value:    "0x0",
+					GasPrice: "0x0",
+					Gas:      "0x0",
+					Input:    "0x",
+					V:        "0x0",
+					R:        "0x0",
+					S:        "0x0",
+				}
+				transactions = append(transactions, minimalTx)
 				continue
 			}
 			if ethTx != nil {

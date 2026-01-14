@@ -770,13 +770,15 @@ func (s *StateDB) ProcessState(ctx context.Context, currJCE uint32, credential t
 			if sf0.GetEpochTWithPhase(targetJCE) == 0 {
 				mode = "fallback"
 			}
-			log.Info(log.B, "Authored Block",
-				"n", proposedBlk.Header.AuthorIndex,
-				"p", proposedBlk.Header.ParentHeaderHash,
-				"s", proposedBlk.Header.ParentStateRoot,
-				"blk", proposedBlk.Str(),
-			)
-			log.Info(log.SDB, "Authored Block",
+			/*
+				log.Info(log.B, "Authored Block",
+					"n", proposedBlk.Header.AuthorIndex,
+					"p", proposedBlk.Header.ParentHeaderHash,
+					"s", proposedBlk.Header.ParentStateRoot,
+					"blk", proposedBlk.Str(),
+				)
+			*/
+			log.Info(log.SDB, "⚡ Authored Block",
 				"AUTHOR", proposedBlk.Header.AuthorIndex,
 				"s+", newStateDB.StateRoot.String_short(),
 				"p", common.Str(proposedBlk.GetParentHeaderHash()),

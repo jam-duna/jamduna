@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -132,6 +133,172 @@ func confirmTxsFromBlocks(rpcClient *HTTPJSONRPCClient, txs []txInfo, lastBlockC
 	}
 
 	return currentBlock, confirmedCount
+}
+
+// confirmTxsFromBlocksWithUnexpected is like confirmTxsFromBlocks, but it also detects
+// transactions sent to the recipient that are not part of the tracked tx list.
+// It also tracks blocks that returned null and retries them on subsequent calls.
+func confirmTxsFromBlocksWithUnexpected(rpcClient *HTTPJSONRPCClient, txs []txInfo, lastBlockChecked uint64, recipient common.Address, unresolvedBlocks map[uint64]int) (newLastBlock uint64, confirmedCount int, unexpectedCount int) {
+	newLastBlock = lastBlockChecked
+	const maxRetries = 10
+
+	// Get current block number
+	var blockNumHex string
+	if err := rpcClient.Call("eth_blockNumber", []string{}, &blockNumHex); err != nil {
+		return lastBlockChecked, 0, 0
+	}
+
+	var currentBlock uint64
+	fmt.Sscanf(blockNumHex, "0x%x", &currentBlock)
+
+	// Build maps for fast lookup
+	trackedTxs := make(map[string]int) // txHash -> index in txs slice
+	pendingTxs := make(map[string]int) // txHash -> index in txs slice
+	for i, tx := range txs {
+		txHash := tx.hash.String()
+		trackedTxs[txHash] = i
+		if tx.receipt == nil {
+			pendingTxs[txHash] = i
+		}
+	}
+
+	if len(trackedTxs) == 0 {
+		return currentBlock, 0, 0
+	}
+
+	recipientHex := recipient.String()
+
+	// Helper function to process a block and return (resolved, confirmed, unexpected)
+	processBlock := func(blockNum uint64, isRetry bool) (resolved bool, conf int, unexp int) {
+		var block map[string]interface{}
+		blockNumStr := fmt.Sprintf("0x%x", blockNum)
+		if err := rpcClient.Call("eth_getBlockByNumber", []interface{}{blockNumStr, true}, &block); err != nil {
+			return false, 0, 0
+		}
+
+		if block == nil {
+			return false, 0, 0
+		}
+
+		txObjsRaw, ok := block["transactions"].([]interface{})
+		if !ok {
+			return true, 0, 0 // Block exists but has no transactions field - consider resolved
+		}
+
+		blockHash, _ := block["hash"].(string)
+
+		// Log diagnostic info for blocks - always log first time, helps debug hash mismatches
+		if len(txObjsRaw) > 0 {
+			var txHashes []string
+			for _, txObjRaw := range txObjsRaw {
+				if txObj, ok := txObjRaw.(map[string]interface{}); ok {
+					if h, ok := txObj["hash"].(string); ok {
+						txHashes = append(txHashes, h)
+					}
+				}
+			}
+			// Check how many of these tx hashes match our pending list
+			matchCount := 0
+			for _, h := range txHashes {
+				if _, found := pendingTxs[h]; found {
+					matchCount++
+				}
+			}
+			if isRetry {
+				log.Info(log.Node, "🔄 Retry resolved block",
+					"blockNumber", blockNum,
+					"txCount", len(txObjsRaw),
+					"matchingPending", matchCount,
+					"txHashes", txHashes)
+			} else if matchCount == 0 && len(txHashes) > 0 {
+				// No matches - potential hash mismatch issue
+				log.Warn(log.Node, "⚠️ Block has txs but NONE match pending list (hash mismatch?)",
+					"blockNumber", blockNum,
+					"blockTxCount", len(txHashes),
+					"pendingCount", len(pendingTxs),
+					"blockTxHashes", txHashes)
+			}
+		}
+
+		for txIdx, txObjRaw := range txObjsRaw {
+			txObj, ok := txObjRaw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			txHashStr, _ := txObj["hash"].(string)
+
+			if idx, found := pendingTxs[txHashStr]; found {
+				// Create minimal receipt from block info
+				txs[idx].receipt = &evmtypes.EthereumTransactionReceipt{
+					TransactionHash:  txHashStr,
+					TransactionIndex: fmt.Sprintf("0x%x", txIdx),
+					BlockHash:        blockHash,
+					BlockNumber:      blockNumStr,
+					Status:           "0x1", // Assume success
+				}
+				conf++
+				delete(pendingTxs, txHashStr)
+
+				log.Info(log.Node, "✅ TX confirmed via block",
+					"txIdx", idx,
+					"blockNumber", blockNum,
+					"txIndex", txIdx,
+					"progress", fmt.Sprintf("%d pending", len(pendingTxs)),
+					"isRetry", isRetry)
+				continue
+			}
+
+			if _, tracked := trackedTxs[txHashStr]; tracked {
+				continue
+			}
+
+			toAddr, _ := txObj["to"].(string)
+			if toAddr != "" && strings.EqualFold(toAddr, recipientHex) {
+				unexp++
+				log.Warn(log.Node, "⚠️ Unexpected recipient tx detected",
+					"txHash", txHashStr,
+					"blockNumber", blockNum,
+					"blockHash", blockHash)
+			}
+		}
+		return true, conf, unexp
+	}
+
+	// First, retry previously unresolved blocks
+	for blockNum, retryCount := range unresolvedBlocks {
+		if retryCount >= maxRetries {
+			continue // Give up after max retries
+		}
+		resolved, conf, unexp := processBlock(blockNum, true)
+		if resolved {
+			delete(unresolvedBlocks, blockNum)
+			confirmedCount += conf
+			unexpectedCount += unexp
+		} else {
+			unresolvedBlocks[blockNum] = retryCount + 1
+			if retryCount+1 >= maxRetries {
+				log.Warn(log.Node, "⚠️ Block unresolved after max retries",
+					"blockNumber", blockNum,
+					"retries", maxRetries)
+			}
+		}
+	}
+
+	// Then process new blocks
+	for blockNum := lastBlockChecked + 1; blockNum <= currentBlock; blockNum++ {
+		resolved, conf, unexp := processBlock(blockNum, false)
+		if resolved {
+			confirmedCount += conf
+			unexpectedCount += unexp
+		} else {
+			// Track for retry
+			unresolvedBlocks[blockNum] = 1
+			log.Debug(log.Node, "📋 Block returned null, queued for retry",
+				"blockNumber", blockNum)
+		}
+	}
+
+	return currentBlock, confirmedCount, unexpectedCount
 }
 
 // pollReceiptWithWorkReport polls for a transaction receipt and fetches the work report
@@ -660,6 +827,8 @@ func TestEVMMultiRoundTransfers(t *testing.T) {
 		bundleHashes := make(map[string]int) // blockHash -> bundle index
 		bundleIndex := 0
 		var lastBlockChecked uint64 = 0
+		unexpectedRecipientTxs := 0
+		unresolvedBlocks := make(map[uint64]int) // blockNum -> retry count
 
 		// Get initial block number
 		var blockNumHex string
@@ -670,9 +839,10 @@ func TestEVMMultiRoundTransfers(t *testing.T) {
 		for round := 0; round < maxWaitRounds; round++ {
 			time.Sleep(pollInterval)
 
-			// Check new blocks and confirm all included transactions
-			newLastBlock, confirmed := confirmTxsFromBlocks(rpcClient, txs, lastBlockChecked)
+			// Check new blocks and confirm all included transactions (with retry for unresolved blocks)
+			newLastBlock, confirmed, unexpected := confirmTxsFromBlocksWithUnexpected(rpcClient, txs, lastBlockChecked, recipientAddr, unresolvedBlocks)
 			lastBlockChecked = newLastBlock
+			unexpectedRecipientTxs += unexpected
 
 			// Count pending and track bundles
 			pendingCount := 0
@@ -711,11 +881,23 @@ func TestEVMMultiRoundTransfers(t *testing.T) {
 				"round", round+1,
 				"pending", pendingCount,
 				"confirmed", totalTxCount-pendingCount,
-				"lastBlock", lastBlockChecked)
+				"lastBlock", lastBlockChecked,
+				"unresolvedBlocks", len(unresolvedBlocks))
 		}
 
 		// ========== PHASE 4: Report results and distribution analysis ==========
 		log.Info(log.Node, "📊 PHASE 4: Analyzing bundle and core distribution...")
+
+		// Log any remaining unresolved blocks for debugging
+		if len(unresolvedBlocks) > 0 {
+			unresolvedList := make([]uint64, 0, len(unresolvedBlocks))
+			for blockNum := range unresolvedBlocks {
+				unresolvedList = append(unresolvedList, blockNum)
+			}
+			log.Warn(log.Node, "⚠️ Some blocks remained unresolved after all retries",
+				"count", len(unresolvedBlocks),
+				"blocks", unresolvedList)
+		}
 
 		// Count confirmed and build distributions
 		confirmedCount := 0
@@ -773,6 +955,10 @@ func TestEVMMultiRoundTransfers(t *testing.T) {
 
 		if confirmedCount < totalTxCount {
 			t.Errorf("Only %d/%d transactions confirmed within timeout", confirmedCount, totalTxCount)
+		}
+
+		if unexpectedRecipientTxs > 0 {
+			t.Errorf("Detected %d unexpected transactions sent to recipient (non-test txs)", unexpectedRecipientTxs)
 		}
 
 		// Verify final balances

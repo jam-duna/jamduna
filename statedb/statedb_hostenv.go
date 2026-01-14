@@ -364,7 +364,12 @@ func (s *StateDB) ReadObject(serviceID uint32, objectID common.Hash) (*types.Sta
 	}
 
 	globalDepth := ldBytes[0]
-	log.Trace(log.EVM, "ReadObject: global_depth hint", "serviceID", serviceID, "objectID", objectID, "globalDepth", globalDepth)
+	// DIAGNOSTIC: Log global_depth for receipt lookup debugging
+	log.Warn(log.EVM, "🔎 LOOKUP_START",
+		"serviceID", serviceID,
+		"objectID", objectID.Hex(),
+		"globalDepth", globalDepth,
+	)
 	// Step 2: Probe backwards from global_depth to find the actual meta-shard
 	var metaShardObjectID common.Hash
 	var shardID ShardId
@@ -392,7 +397,12 @@ func (s *StateDB) ReadObject(serviceID uint32, objectID common.Hash) (*types.Sta
 			metaShardObjectID = candidateObjectID
 			shardID = candidateShardID
 			found = true
-			log.Trace(log.EVM, "ReadObject: stopped at...", "ld", ld, "metaShardObjectID", metaShardObjectID, "shardID", shardID)
+			// DIAGNOSTIC: Log chosen meta-shard for receipt lookup debugging
+			log.Warn(log.EVM, "🔎 LOOKUP_FOUND_SHARD",
+				"ld", ld,
+				"metaShardObjectID", metaShardObjectID.Hex(),
+				"shardPrefix", fmt.Sprintf("%02x%02x%02x", shardID.Prefix56[0], shardID.Prefix56[1], shardID.Prefix56[2]),
+			)
 			break
 		}
 
@@ -561,6 +571,19 @@ func (s *StateDB) ReadObject(serviceID uint32, objectID common.Hash) (*types.Sta
 	// Look up the requested objectID in the cached map
 	foundRef, hasRef := witness.ObjectRefs[objectID]
 	if !hasRef {
+		// DIAGNOSTIC: Dump meta-shard entries on miss
+		log.Warn(log.SDB, "🔍 METASHARD_MISS: object_id not found",
+			"lookupObjectID", objectID.Hex(),
+			"metaShardID", metaShardObjectID.Hex(),
+			"numEntries", len(metaShard.Entries),
+		)
+		for i, entry := range metaShard.Entries {
+			log.Warn(log.SDB, "🔍 METASHARD_ENTRY",
+				"index", i,
+				"entryObjectID", entry.ObjectID.Hex(),
+				"matchesLookup", entry.ObjectID == objectID,
+			)
+		}
 		return nil, false, fmt.Errorf("object_id %s not found in meta-shard", objectID.Hex())
 	}
 

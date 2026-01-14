@@ -104,6 +104,21 @@ func (r *Runner) Stop() {
 	log.Info(log.Node, "Queue Runner: Stopped", "service", r.serviceID)
 }
 
+// SetOnAccumulated sets a callback to be invoked when bundles accumulate
+// This callback receives the work package hash and transaction hashes
+// Thread-safe: can be called before or after runner starts
+func (r *Runner) SetOnAccumulated(callback func(wpHash common.Hash, txHashes []common.Hash)) {
+	r.queue.SetOnAccumulated(callback)
+}
+
+// SetOnFailed sets a callback to be invoked when bundles fail permanently (max retries exceeded)
+// This callback receives the block number and transaction hashes, allowing the caller to unlock
+// transactions in the txpool so they can be re-included in future bundles
+// Thread-safe: can be called before or after runner starts
+func (r *Runner) SetOnFailed(callback func(blockNumber uint64, txHashes []common.Hash)) {
+	r.queue.SetOnFailed(callback)
+}
+
 // IsRunning returns whether the runner is active
 func (r *Runner) IsRunning() bool {
 	r.mu.RLock()
@@ -160,11 +175,9 @@ func (r *Runner) tick() {
 
 	// Log that we entered the submission window with detailed status
 	stats := r.queue.GetStats()
-	effectiveInflight := stats.SubmittedCount + stats.GuaranteedCount // Items that block new submissions
 	log.Info(log.Node, "Queue Runner: In submission window",
 		"queued", stats.QueuedCount,
 		"inflightMapSize", stats.InflightCount,
-		"effectiveInflight", effectiveInflight,
 		"submitted", stats.SubmittedCount,
 		"guaranteed", stats.GuaranteedCount,
 		"accumulated", stats.AccumulatedCount,
@@ -301,8 +314,8 @@ func (r *Runner) EnqueueBundle(bundle *types.WorkPackageBundle, coreIndex uint16
 // EnqueueBundleWithOriginalExtrinsics enqueues a bundle with original transaction extrinsics and metadata
 // The originalExtrinsics are needed for rebuilding on resubmission (to avoid double-prepending UBT witness)
 // The originalWorkItemExtrinsics are needed to restore WorkItems[].Extrinsics metadata before rebuilding
-func (r *Runner) EnqueueBundleWithOriginalExtrinsics(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic, coreIndex uint16) (uint64, error) {
-	return r.queue.EnqueueWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIndex)
+func (r *Runner) EnqueueBundleWithOriginalExtrinsics(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic, coreIndex uint16, txHashes []common.Hash) (uint64, error) {
+	return r.queue.EnqueueWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIndex, txHashes)
 }
 
 // HandleGuaranteed processes a guarantee event

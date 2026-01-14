@@ -258,6 +258,15 @@ impl MajikBackend {
             let receipt_object_id = receipt_object_id_from_receipt(record);
             let receipt_payload = serialize_receipt(record);
 
+            // DIAGNOSTIC: Log receipt object_id being written
+            log_info(&format!(
+                "📝 RECEIPT_WRITE tx_index={} object_id={} record_hash={} payload_len={}",
+                record.tx_index,
+                format_object_id(&receipt_object_id),
+                format_object_id(&record.hash),
+                receipt_payload.len(),
+            ));
+
             let receipt_object_ref = utils::objects::ObjectRef::new(
                 work_package_hash,
                 receipt_payload.len() as u32,
