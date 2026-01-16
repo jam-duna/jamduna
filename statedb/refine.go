@@ -148,7 +148,10 @@ func (s *StateDB) verifyPostStateAgainstExecution(workItem types.WorkItem, extri
 		return fmt.Errorf("unexpected storage type %T (need StateDBStorage)", s.sdb)
 	}
 
-	if stateStorage.CurrentUBT == nil {
+	// Use GetActiveTree() to get the correct tree for parallel bundle building
+	// This returns the active snapshot if set, otherwise CurrentUBT
+	tree := stateStorage.GetActiveTree()
+	if tree == nil {
 		return fmt.Errorf("no UBT tree available for post-state verification")
 	}
 
@@ -157,7 +160,7 @@ func (s *StateDB) verifyPostStateAgainstExecution(workItem types.WorkItem, extri
 		return fmt.Errorf("failed to parse builder post-state section: %w", err)
 	}
 
-	guarantorWrites, err := storage.ExtractUBTWriteMapFromContractWitness(stateStorage.CurrentUBT, contractWitnessBlob)
+	guarantorWrites, err := storage.ExtractUBTWriteMapFromContractWitness(tree, contractWitnessBlob)
 	if err != nil {
 		return fmt.Errorf("failed to derive guarantor write set: %w", err)
 	}
@@ -982,19 +985,42 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 	}
 	log.Trace(log.Node, "BuildBundle: Built", "payload", fmt.Sprintf("%x", bundle.WorkPackage.WorkItems[0].Payload))
 
+	// Compute work package hash once for segment storage
+	workPackageHash := wp.Hash()
+
+	// Apply contract writes to the active UBT snapshot (if multi-snapshot mode is active)
+	// or store as pending writes for legacy deferred application
 	evmStorage := s.sdb.(types.EVMJAMStorage)
-	for i, blob := range contractWitnessBlobs {
-		if len(blob) > 0 {
-			if err := evmStorage.ApplyContractWrites(blob); err != nil {
-				return &bundle, workReport, fmt.Errorf("failed to apply contract writes for work item %d: %v", i, err)
-			}
-			log.Trace(log.EVM, "Applied contract writes to state", "workItemIndex", i, "blobSize", len(blob))
+	var totalBlobSize int
+	for _, blob := range contractWitnessBlobs {
+		totalBlobSize += len(blob)
+	}
+	if totalBlobSize > 0 {
+		// Concatenate all blobs for this work package
+		combinedBlob := make([]byte, 0, totalBlobSize)
+		for _, blob := range contractWitnessBlobs {
+			combinedBlob = append(combinedBlob, blob...)
+		}
+
+		// Try to apply writes to active snapshot (multi-snapshot mode)
+		// If no snapshot is active, fall back to deferred writes
+		if err := evmStorage.ApplyWritesToActiveSnapshot(combinedBlob); err != nil {
+			// No active snapshot - use legacy deferred writes path
+			evmStorage.StorePendingWrites(workPackageHash, combinedBlob)
+			log.Info(log.EVM, "BuildBundle: stored pending writes for deferred application (legacy mode)",
+				"wpHash", workPackageHash.Hex(),
+				"combinedBlobSize", len(combinedBlob),
+				"workItemCount", len(contractWitnessBlobs))
+		} else {
+			log.Info(log.EVM, "BuildBundle: applied writes to active snapshot",
+				"wpHash", workPackageHash.Hex(),
+				"combinedBlobSize", len(combinedBlob),
+				"workItemCount", len(contractWitnessBlobs))
 		}
 	}
 
 	// Store exported segments for builder - both in memory cache and persisted to disk
 	if len(segments) > 0 {
-		workPackageHash := wp.Hash()
 		type segmentStorer interface {
 			StoreSegment(common.Hash, uint16, []byte)
 		}
@@ -1432,9 +1458,14 @@ func (s *StateDB) verifyUBTWitness(witness []byte, label string, kind storage.Wi
 	hasher := storage.NewBlake3Hasher(storage.JAMProfile)
 	var expectedRoot *[32]byte
 	if kind == storage.WitnessValuePre {
-		if stateStorage, ok := s.sdb.(*storage.StateDBStorage); ok && stateStorage.CurrentUBT != nil {
-			root := stateStorage.CurrentUBT.RootHash()
-			expectedRoot = &root
+		if stateStorage, ok := s.sdb.(*storage.StateDBStorage); ok {
+			// Use GetActiveTree() to get the correct tree for parallel bundle building
+			// This returns the active snapshot if set, otherwise CurrentUBT
+			tree := stateStorage.GetActiveTree()
+			if tree != nil {
+				root := tree.RootHash()
+				expectedRoot = &root
+			}
 		}
 	}
 	stats, err := storage.VerifyUBTWitnessSection(witness, expectedRoot, kind, hasher)

@@ -30,6 +30,9 @@ type Runner struct {
 	submitter     Submitter
 	bundleBuilder BundleBuilder
 
+	// Snapshot management for rebuild invalidation
+	snapshotManager SnapshotManager
+
 	// Control
 	tickInterval time.Duration
 	stopCh       chan struct{}
@@ -57,13 +60,14 @@ func DefaultRunnerConfig() RunnerConfig {
 }
 
 // NewRunner creates a new queue runner
-func NewRunner(queue *QueueState, serviceID uint32, submitter Submitter, bundleBuilder BundleBuilder) *Runner {
+func NewRunner(queue *QueueState, serviceID uint32, submitter Submitter, bundleBuilder BundleBuilder, snapshotManager SnapshotManager) *Runner {
 	config := DefaultRunnerConfig()
 	return &Runner{
 		queue:                 queue,
 		serviceID:             serviceID,
 		submitter:             submitter,
 		bundleBuilder:         bundleBuilder,
+		snapshotManager:       snapshotManager,
 		tickInterval:          config.TickInterval,
 		submissionWindowStart: config.SubmissionWindowStart,
 		submissionWindowEnd:   config.SubmissionWindowEnd,
@@ -105,17 +109,174 @@ func (r *Runner) Stop() {
 }
 
 // SetOnAccumulated sets a callback to be invoked when bundles accumulate
-// This callback receives the work package hash and transaction hashes
+// This callback receives the work package hash, block number, and transaction hashes
 // Thread-safe: can be called before or after runner starts
-func (r *Runner) SetOnAccumulated(callback func(wpHash common.Hash, txHashes []common.Hash)) {
+func (r *Runner) SetOnAccumulated(callback func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash)) {
 	r.queue.SetOnAccumulated(callback)
 }
 
+// PendingWritesApplier is an interface for applying deferred UBT writes.
+// Implemented by EVMJAMStorage to apply pending contract writes when bundles accumulate.
+type PendingWritesApplier interface {
+	ApplyPendingWrites(wpHash common.Hash) (bool, error)
+	DiscardPendingWrites(wpHash common.Hash) bool
+}
+
+// SnapshotManager is an interface for managing multi-snapshot UBT state.
+// Implemented by EVMJAMStorage to support parallel bundle building with proper state chaining.
+type SnapshotManager interface {
+	// Snapshot lifecycle
+	CreateSnapshotForBlock(blockNumber uint64) error
+	SetActiveSnapshot(blockNumber uint64) error
+	ClearActiveSnapshot()
+	ApplyWritesToActiveSnapshot(blob []byte) error
+
+	// Accumulation handling
+	CommitSnapshot(blockNumber uint64) error
+
+	// Fallback: Apply pending writes if snapshot path failed
+	// This handles the case where ApplyWritesToActiveSnapshot failed and
+	// writes were stored via StorePendingWrites instead
+	ApplyPendingWrites(wpHash common.Hash) (bool, error)
+
+	// Failure handling
+	InvalidateSnapshotsFrom(blockNumber uint64) int
+	InvalidateSnapshot(blockNumber uint64) bool // Single snapshot invalidation for rebuilds
+	DiscardPendingWrites(wpHash common.Hash) bool
+
+	// Monitoring
+	GetSnapshotBlockNumbers() []uint64
+	GetPendingSnapshotCount() int
+}
+
+// SetOnAccumulatedWithStorage sets up callbacks that apply pending UBT writes when bundles accumulate.
+// This ensures CurrentUBT only advances for bundles that actually accumulate on-chain.
+// The userCallback is invoked AFTER writes are applied (e.g., for txpool cleanup).
+func (r *Runner) SetOnAccumulatedWithStorage(storage PendingWritesApplier, userCallback func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash)) {
+	r.queue.SetOnAccumulated(func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash) {
+		// Apply pending writes to CurrentUBT now that bundle has accumulated
+		applied, err := storage.ApplyPendingWrites(wpHash)
+		if err != nil {
+			log.Error(log.Node, "Failed to apply pending writes on accumulation",
+				"wpHash", wpHash.Hex(),
+				"blockNumber", blockNumber,
+				"error", err)
+		} else if applied {
+			log.Info(log.Node, "Applied deferred UBT writes on accumulation",
+				"wpHash", wpHash.Hex(),
+				"blockNumber", blockNumber,
+				"txCount", len(txHashes))
+		}
+
+		// Invoke user callback (e.g., remove txs from txpool)
+		if userCallback != nil {
+			userCallback(wpHash, blockNumber, txHashes)
+		}
+	})
+}
+
+// SetOnFailedWithStorage sets up callbacks that discard pending UBT writes when bundles fail.
+// This ensures CurrentUBT doesn't advance for failed bundles.
+// The userCallback is invoked AFTER writes are discarded (e.g., to unlock txs in txpool).
+func (r *Runner) SetOnFailedWithStorage(storage PendingWritesApplier, userCallback func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash)) {
+	r.queue.SetOnFailed(func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash) {
+		// Discard pending writes for this failed bundle
+		discarded := storage.DiscardPendingWrites(wpHash)
+		if discarded {
+			log.Info(log.Node, "Discarded pending UBT writes for failed bundle",
+				"wpHash", wpHash.Hex(),
+				"blockNumber", blockNumber,
+				"txCount", len(txHashes))
+		}
+
+		// Invoke user callback (e.g., unlock txs in txpool)
+		if userCallback != nil {
+			userCallback(wpHash, blockNumber, txHashes)
+		}
+	})
+}
+
+// SetOnAccumulatedWithSnapshots sets up callbacks that commit UBT snapshots when bundles accumulate.
+// This is the recommended approach for parallel bundle building with multi-snapshot UBT.
+// The userCallback is invoked AFTER snapshot is committed (e.g., for txpool cleanup).
+//
+// This callback handles both the snapshot path AND the legacy pending writes path:
+// - Snapshot path: ApplyWritesToActiveSnapshot succeeded, CommitSnapshot promotes snapshot to canonical
+// - Legacy fallback: ApplyWritesToActiveSnapshot failed, writes stored via StorePendingWrites,
+//   ApplyPendingWrites applies them to CurrentUBT
+func (r *Runner) SetOnAccumulatedWithSnapshots(storage SnapshotManager, userCallback func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash)) {
+	r.queue.SetOnAccumulated(func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash) {
+		// Commit the snapshot for this block to canonical state
+		if blockNumber > 0 {
+			if err := storage.CommitSnapshot(blockNumber); err != nil {
+				log.Error(log.Node, "Failed to commit snapshot on accumulation",
+					"wpHash", wpHash.Hex(),
+					"blockNumber", blockNumber,
+					"error", err)
+			} else {
+				log.Info(log.Node, "Committed UBT snapshot on accumulation",
+					"wpHash", wpHash.Hex(),
+					"blockNumber", blockNumber,
+					"txCount", len(txHashes))
+			}
+		}
+
+		// FALLBACK: Also try to apply any pending writes that were stored via legacy path
+		// This handles the case where ApplyWritesToActiveSnapshot failed (no active snapshot)
+		// and writes were stored via StorePendingWrites instead
+		if applied, err := storage.ApplyPendingWrites(wpHash); err != nil {
+			log.Error(log.Node, "Failed to apply pending writes on accumulation (fallback path)",
+				"wpHash", wpHash.Hex(),
+				"blockNumber", blockNumber,
+				"error", err)
+		} else if applied {
+			log.Info(log.Node, "Applied pending writes on accumulation (fallback path)",
+				"wpHash", wpHash.Hex(),
+				"blockNumber", blockNumber)
+		}
+
+		// Invoke user callback (e.g., remove txs from txpool)
+		if userCallback != nil {
+			userCallback(wpHash, blockNumber, txHashes)
+		}
+	})
+}
+
+// SetOnFailedWithSnapshots sets up callbacks that invalidate UBT snapshots when bundles fail.
+// This ensures failed bundles and their descendants are discarded.
+// The userCallback is invoked AFTER snapshots are invalidated (e.g., to unlock txs in txpool).
+func (r *Runner) SetOnFailedWithSnapshots(storage SnapshotManager, userCallback func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash)) {
+	r.queue.SetOnFailed(func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash) {
+		// Invalidate snapshots for this block and all descendants
+		invalidated := storage.InvalidateSnapshotsFrom(blockNumber)
+		if invalidated > 0 {
+			log.Info(log.Node, "Invalidated UBT snapshots for failed bundle",
+				"wpHash", wpHash.Hex(),
+				"blockNumber", blockNumber,
+				"invalidatedCount", invalidated,
+				"txCount", len(txHashes))
+		}
+
+		// Also discard any pending writes for this work package (fallback path cleanup)
+		if storage.DiscardPendingWrites(wpHash) {
+			log.Info(log.Node, "Discarded pending writes for failed bundle",
+				"wpHash", wpHash.Hex(),
+				"blockNumber", blockNumber)
+		}
+
+		// Invoke user callback (e.g., unlock txs in txpool)
+		if userCallback != nil {
+			userCallback(wpHash, blockNumber, txHashes)
+		}
+	})
+}
+
 // SetOnFailed sets a callback to be invoked when bundles fail permanently (max retries exceeded)
-// This callback receives the block number and transaction hashes, allowing the caller to unlock
-// transactions in the txpool so they can be re-included in future bundles
+// This callback receives the wpHash, block number, and transaction hashes, allowing the caller to:
+// - Discard pending UBT writes keyed by wpHash
+// - Unlock transactions in the txpool so they can be re-included in future bundles
 // Thread-safe: can be called before or after runner starts
-func (r *Runner) SetOnFailed(callback func(blockNumber uint64, txHashes []common.Hash)) {
+func (r *Runner) SetOnFailed(callback func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash)) {
 	r.queue.SetOnFailed(callback)
 }
 
@@ -219,6 +380,20 @@ func (r *Runner) tick() {
 		}
 
 		if needsRebuild && r.bundleBuilder != nil {
+			// Invalidate existing snapshot before rebuild to prevent pollution
+			// When v1 is built, it writes to snapshot N. If v1 times out and v2 is built,
+			// v2 would reuse snapshot N (with v1's writes) and add more writes on top.
+			// This causes balance double-counting. By invalidating, we force a fresh snapshot
+			// that clones from the parent (N-1 or CurrentUBT), not from v1's polluted state.
+			if r.snapshotManager != nil {
+				invalidated := r.snapshotManager.InvalidateSnapshot(item.BlockNumber)
+				log.Info(log.Node, "Queue Runner: Invalidated snapshot before rebuild",
+					"service", r.serviceID,
+					"blockNumber", item.BlockNumber,
+					"version", item.Version,
+					"invalidated", invalidated)
+			}
+
 			stats := r.queue.GetStats()
 			newBundle, err := r.bundleBuilder(item, stats)
 			if err != nil {
@@ -299,6 +474,12 @@ func (r *Runner) inSubmissionWindow() bool {
 // GetQueue returns the underlying queue state
 func (r *Runner) GetQueue() *QueueState {
 	return r.queue
+}
+
+// PeekNextBlockNumber returns what the next block number will be without incrementing.
+// Use this to set up per-bundle snapshots BEFORE calling BuildBundle.
+func (r *Runner) PeekNextBlockNumber() uint64 {
+	return r.queue.PeekNextBlockNumber()
 }
 
 // GetStats returns the current queue statistics

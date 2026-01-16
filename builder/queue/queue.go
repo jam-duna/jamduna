@@ -83,13 +83,15 @@ const (
 	// - Maximum validity window: 7 × 6 = 42 seconds
 	// - Safety margin: 2 slots = 12 seconds (for network delays)
 	//
-	// Total timeout = 42s + 12s = 54s (9 JAM blocks)
+	// Total timeout = 42s + 18s = 60s (10 JAM blocks)
 	// This ensures v1's guarantee slot is too old (fails checkAssignment) before we resubmit as v2.
-	DefaultGuaranteeTimeout = 54 * time.Second
+	// The extra buffer accounts for network latency and validator processing time.
+	DefaultGuaranteeTimeout = 60 * time.Second
 
-	DefaultAccumulateTimeout = 60 * time.Second // Time before Guaranteed item without accumulation is considered failed (10 JAM blocks)
-	DefaultRetentionWindow   = 100              // Number of finalized blocks to retain
-	DefaultMaxVersionRetries = 5                // Maximum resubmission attempts before dropping
+	DefaultAccumulateTimeout    = 60 * time.Second // Time before Guaranteed item without accumulation is considered failed (10 JAM blocks)
+	DefaultRetentionWindow      = 100              // Number of finalized blocks to retain
+	DefaultMaxVersionRetries    = 5                // Maximum resubmission attempts before dropping
+	DefaultMaxAccumulateTimeouts = 3               // Max accumulate timeouts before marking guaranteed bundle as failed
 )
 
 // QueueConfig holds configuration for the work package queue
@@ -102,19 +104,25 @@ type QueueConfig struct {
 	AccumulateTimeout   time.Duration
 	RetentionWindow     int
 	MaxVersionRetries   int
+
+	// MaxAccumulateTimeouts: How many accumulate timeouts a guaranteed bundle can hit
+	// before being marked as failed. Prevents stuck bundles that are guaranteed
+	// but never accumulate (e.g., due to accumulate entry point failure).
+	MaxAccumulateTimeouts int
 }
 
 // DefaultConfig returns the default queue configuration
 func DefaultConfig() QueueConfig {
 	return QueueConfig{
-		MaxQueueDepth:       DefaultMaxQueueDepth,
-		MaxInflight:         DefaultMaxInflight,
-		SubmitRetryInterval: DefaultSubmitRetryInterval,
-		MaxSubmitRetries:    DefaultMaxSubmitRetries,
-		GuaranteeTimeout:    DefaultGuaranteeTimeout,
-		AccumulateTimeout:   DefaultAccumulateTimeout,
-		RetentionWindow:     DefaultRetentionWindow,
-		MaxVersionRetries:   DefaultMaxVersionRetries,
+		MaxQueueDepth:         DefaultMaxQueueDepth,
+		MaxInflight:           DefaultMaxInflight,
+		SubmitRetryInterval:   DefaultSubmitRetryInterval,
+		MaxSubmitRetries:      DefaultMaxSubmitRetries,
+		GuaranteeTimeout:      DefaultGuaranteeTimeout,
+		AccumulateTimeout:     DefaultAccumulateTimeout,
+		RetentionWindow:       DefaultRetentionWindow,
+		MaxVersionRetries:     DefaultMaxVersionRetries,
+		MaxAccumulateTimeouts: DefaultMaxAccumulateTimeouts,
 	}
 }
 
@@ -148,6 +156,11 @@ type QueueItem struct {
 	// Fast retry tracking: resubmit same version on network failures
 	SubmitAttempts int       // Number of times this version was submitted
 	LastSubmitAt   time.Time // Last submission attempt timestamp
+
+	// Stuck-guaranteed tracking: count how many accumulate timeouts have fired
+	// while bundle remains in Guaranteed state without accumulating.
+	// Used to detect and fail bundles that are guaranteed but never accumulate.
+	AccumulateTimeoutCount int
 }
 
 // QueueState manages the work package submission pipeline
@@ -199,8 +212,8 @@ type QueueState struct {
 
 	// Callbacks for queue events
 	onStatusChange   func(blockNumber uint64, oldStatus, newStatus WorkPackageBundleStatus)
-	onAccumulated    func(wpHash common.Hash, txHashes []common.Hash) // Called when bundle accumulates
-	onFailed         func(blockNumber uint64, txHashes []common.Hash) // Called when bundle fails permanently (max retries exceeded)
+	onAccumulated    func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash)   // Called when bundle accumulates
+	onFailed         func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash) // Called when bundle fails permanently (max retries exceeded)
 }
 
 // NewQueueState creates a new queue state with default configuration
@@ -234,7 +247,8 @@ func (qs *QueueState) SetStatusChangeCallback(cb func(blockNumber uint64, oldSta
 }
 
 // SetOnAccumulated sets the callback for accumulation events (thread-safe)
-func (qs *QueueState) SetOnAccumulated(cb func(wpHash common.Hash, txHashes []common.Hash)) {
+// Callback receives wpHash, blockNumber, and txHashes for snapshot commit and cleanup
+func (qs *QueueState) SetOnAccumulated(cb func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash)) {
 	qs.mu.Lock()
 	defer qs.mu.Unlock()
 	qs.onAccumulated = cb
@@ -242,7 +256,8 @@ func (qs *QueueState) SetOnAccumulated(cb func(wpHash common.Hash, txHashes []co
 
 // SetOnFailed sets the callback for failure events (thread-safe)
 // Called when a bundle fails permanently (max retries exceeded)
-func (qs *QueueState) SetOnFailed(cb func(blockNumber uint64, txHashes []common.Hash)) {
+// Callback receives wpHash to allow cleanup of pending writes keyed by wpHash
+func (qs *QueueState) SetOnFailed(cb func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash)) {
 	qs.mu.Lock()
 	defer qs.mu.Unlock()
 	qs.onFailed = cb
@@ -252,6 +267,14 @@ func (qs *QueueState) SetOnFailed(cb func(blockNumber uint64, txHashes []common.
 func (qs *QueueState) nextEventID() uint64 {
 	qs.eventIDCounter++
 	return qs.eventIDCounter
+}
+
+// PeekNextBlockNumber returns what the next block number will be without incrementing.
+// Use this to set up per-bundle snapshots BEFORE calling BuildBundle.
+func (qs *QueueState) PeekNextBlockNumber() uint64 {
+	qs.mu.RLock()
+	defer qs.mu.RUnlock()
+	return qs.nextBlockNumber
 }
 
 // Enqueue adds a new bundle to the queue for a specific target core
@@ -674,7 +697,7 @@ func (qs *QueueState) OnAccumulated(wpHash common.Hash) {
 
 	var bundleID string
 	var txHashes []common.Hash
-	var callback func(common.Hash, []common.Hash)
+	var callback func(common.Hash, uint64, []common.Hash)
 	if item, ok := qs.Inflight[bn]; ok {
 		item.Status = StatusAccumulated
 		bundleID = item.BundleID
@@ -696,8 +719,11 @@ func (qs *QueueState) OnAccumulated(wpHash common.Hash) {
 		qs.onStatusChange(bn, oldStatus, StatusAccumulated)
 	}
 
-	// Capture callback and txHashes to invoke outside the lock
-	if qs.onAccumulated != nil && len(txHashes) > 0 {
+	// Capture callback to invoke outside the lock
+	// NOTE: txHashes may be empty if the winning version was not in Inflight/Queued
+	// (e.g., an older version won while a newer version was being built)
+	// The callback is still invoked to commit the snapshot - txpool cleanup is skipped if empty
+	if qs.onAccumulated != nil {
 		callback = qs.onAccumulated
 	}
 
@@ -723,7 +749,7 @@ func (qs *QueueState) OnAccumulated(wpHash common.Hash) {
 
 	// Invoke callback outside the lock - it may do I/O (remove from txpool, logging)
 	if callback != nil {
-		callback(wpHash, txHashes)
+		callback(wpHash, bn, txHashes)
 	}
 }
 
@@ -803,6 +829,7 @@ func (qs *QueueState) OnTimeoutOrFailure(failedBN uint64) {
 
 	// Track failed items to notify callback after releasing lock
 	type failedItem struct {
+		wpHash      common.Hash
 		blockNumber uint64
 		txHashes    []common.Hash
 	}
@@ -840,6 +867,7 @@ func (qs *QueueState) OnTimeoutOrFailure(failedBN uint64) {
 			// Track for callback notification
 			if len(item.TransactionHashes) > 0 {
 				failedItems = append(failedItems, failedItem{
+					wpHash:      item.WPHash,
 					blockNumber: bn,
 					txHashes:    item.TransactionHashes,
 				})
@@ -876,7 +904,7 @@ func (qs *QueueState) OnTimeoutOrFailure(failedBN uint64) {
 	// Invoke callback for each failed item
 	if callback != nil {
 		for _, failed := range failedItems {
-			callback(failed.blockNumber, failed.txHashes)
+			callback(failed.wpHash, failed.blockNumber, failed.txHashes)
 		}
 	}
 }
@@ -1053,16 +1081,60 @@ func (qs *QueueState) CheckTimeouts() {
 			}
 
 			if elapsed > timeout {
-				log.Warn(log.Node, "Queue: Accumulate timeout - will requeue",
+				// Increment accumulate timeout counter for this guaranteed bundle
+				item.AccumulateTimeoutCount++
+
+				log.Warn(log.Node, "Queue: Accumulate timeout for guaranteed bundle",
 					"service", qs.serviceID,
 					"blockNumber", bn,
 					"version", item.Version,
 					"elapsed", elapsed.Round(time.Second),
+					"accumulateTimeoutCount", item.AccumulateTimeoutCount,
+					"maxAccumulateTimeouts", qs.config.MaxAccumulateTimeouts,
 					"wpHash", item.WPHash.Hex())
 
-				qs.mu.Unlock()
-				qs.OnTimeoutOrFailure(bn)
-				qs.mu.Lock()
+				// Check if we've exceeded max accumulate timeouts
+				if item.AccumulateTimeoutCount >= qs.config.MaxAccumulateTimeouts {
+					log.Error(log.Node, "Queue: Guaranteed bundle stuck - max accumulate timeouts exceeded, marking as FAILED",
+						"service", qs.serviceID,
+						"blockNumber", bn,
+						"version", item.Version,
+						"accumulateTimeoutCount", item.AccumulateTimeoutCount,
+						"wpHash", item.WPHash.Hex(),
+						"hint", "Bundle was guaranteed but never accumulated. Check accumulate entry point logs on JAM node.")
+
+					// Mark as failed and notify callback
+					qs.Status[bn] = StatusFailed
+					failedItem := item
+					delete(qs.Inflight, bn)
+
+					// Clear version tracking so this block can be rebuilt cleanly
+					delete(qs.WinningVer, bn)
+					delete(qs.CurrentVer, bn)
+
+					// Reset GuaranteedAt to prevent immediate re-timeout
+					// (not strictly necessary since we're deleting from Inflight)
+
+					// Invoke onFailed callback to invalidate snapshots and unlock txs
+					if qs.onFailed != nil {
+						qs.mu.Unlock()
+						qs.onFailed(failedItem.WPHash, failedItem.BlockNumber, failedItem.TransactionHashes)
+						qs.mu.Lock()
+					}
+					return
+				}
+
+				// Reset GuaranteedAt to give another timeout window
+				// This prevents spamming logs every tick
+				item.GuaranteedAt = now
+
+				// Don't call OnTimeoutOrFailure - the bundle is still guaranteed,
+				// we're just waiting for accumulation. Log and continue.
+				log.Info(log.Node, "Queue: Resetting accumulate timeout window for stuck guaranteed bundle",
+					"service", qs.serviceID,
+					"blockNumber", bn,
+					"remainingAttempts", qs.config.MaxAccumulateTimeouts-item.AccumulateTimeoutCount,
+					"wpHash", item.WPHash.Hex())
 				return
 			}
 

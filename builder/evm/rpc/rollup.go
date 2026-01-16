@@ -254,6 +254,7 @@ func (r *Rollup) PrepareWorkPackage(refineCtx types.RefineContext, pendingTxs []
 }
 
 // BuildAndEnqueueWorkPackage builds a bundle from pending txs and enqueues it for submission.
+// Uses multi-snapshot UBT system for parallel bundle building with proper state chaining.
 func (r *Rollup) BuildAndEnqueueWorkPackage(
 	refineCtx types.RefineContext,
 	txPool *TxPool,
@@ -296,27 +297,69 @@ func (r *Rollup) BuildAndEnqueueWorkPackage(
 		txHashes[i] = tx.Hash
 	}
 
+	// === Multi-Snapshot UBT: Create and activate per-bundle snapshot ===
+	// Get block number BEFORE building so we can create/activate snapshot
+	blockNumber := queueRunner.PeekNextBlockNumber()
+
+	// Get storage for snapshot management
+	evmStorage := r.GetStateDB().GetStorage().(types.EVMJAMStorage)
+
+	// Create snapshot for this block, chaining from previous block's snapshot or canonical
+	if err := evmStorage.CreateSnapshotForBlock(blockNumber); err != nil {
+		// If parent state was superseded (out-of-order commit), we cannot build.
+		// This should not happen for initial builds, only for rebuilds.
+		log.Error(log.EVM, "Failed to create snapshot - cannot build bundle",
+			"blockNumber", blockNumber,
+			"error", err)
+		return fmt.Errorf("cannot create snapshot for block %d: %w", blockNumber, err)
+	}
+
+	// Activate the snapshot for reads during BuildBundle
+	if err := evmStorage.SetActiveSnapshot(blockNumber); err != nil {
+		log.Warn(log.EVM, "Failed to activate snapshot",
+			"blockNumber", blockNumber,
+			"error", err)
+	}
+
+	// Build bundle - reads will use active snapshot if set
 	bundle, workReport, err := r.GetStateDB().BuildBundle(workPackage, extrinsicsBlobs, 0, nil, r.pvmBackend)
+
+	// Always clear active snapshot after build, regardless of success/failure
+	evmStorage.ClearActiveSnapshot()
+
 	if err != nil {
+		// On build failure, invalidate the snapshot we created
+		evmStorage.InvalidateSnapshotsFrom(blockNumber)
 		return fmt.Errorf("failed to build bundle: %w", err)
 	}
 
-	blockNumber, err := queueRunner.EnqueueBundleWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, 0, txHashes)
+	// Enqueue the bundle - this increments nextBlockNumber
+	enqueuedBlockNumber, err := queueRunner.EnqueueBundleWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, 0, txHashes)
 	if err != nil {
+		// On enqueue failure, invalidate the snapshot
+		evmStorage.InvalidateSnapshotsFrom(blockNumber)
 		return fmt.Errorf("failed to enqueue bundle: %w", err)
+	}
+
+	// Sanity check: enqueued block number should match what we peeked
+	if enqueuedBlockNumber != blockNumber {
+		log.Warn(log.EVM, "Block number mismatch between peek and enqueue",
+			"peeked", blockNumber,
+			"enqueued", enqueuedBlockNumber)
 	}
 
 	// Lock transactions to this bundle AFTER successful enqueue
 	// They will be removed by the onAccumulated callback when the bundle accumulates on-chain
 	// Or unlocked if the bundle fails/expires
-	txPool.LockTransactionsToBundle(txHashes, blockNumber)
+	txPool.LockTransactionsToBundle(txHashes, enqueuedBlockNumber)
 
 	log.Info(log.Node, "Work package enqueued",
 		"wp_hash", bundle.WorkPackage.Hash().Hex(),
 		"work_report_hash", workReport.Hash().Hex(),
-		"block_number", blockNumber,
+		"block_number", enqueuedBlockNumber,
 		"service_id", r.serviceID,
-		"locked_txs", len(txHashes))
+		"locked_txs", len(txHashes),
+		"pending_snapshots", evmStorage.GetPendingSnapshotCount())
 
 	return nil
 }

@@ -216,6 +216,7 @@ func main() {
 			}
 
 			// Create bundle builder callback - rebuilds bundle with fresh RefineContext
+			// NOTE: Rebuilds use snapshot activation like initial builds for correct state chaining
 			bundleBuilder := func(item *queue.QueueItem, stats queue.QueueStats) (*types.WorkPackageBundle, error) {
 				if item.Bundle == nil {
 					return nil, fmt.Errorf("queue item has no bundle")
@@ -272,32 +273,71 @@ func main() {
 					}
 				}
 
+				// === Multi-Snapshot UBT: Create and activate snapshot for rebuild ===
+				// CreateSnapshotForBlock is idempotent - if snapshot already exists, it reuses it.
+				// No need to delete snapshots before rebuild.
+				blockNumber := item.BlockNumber
+
+				// Create snapshot for this block, chaining from previous block's snapshot or canonical
+				if err := evmstorage.CreateSnapshotForBlock(blockNumber); err != nil {
+					// If parent state was superseded (out-of-order commit), we cannot rebuild.
+					// The bundle's state is already committed via a later block - skip this rebuild.
+					log.Error(log.EVM, "Rebuild: Cannot create snapshot - aborting rebuild",
+						"blockNumber", blockNumber,
+						"error", err)
+					return nil, fmt.Errorf("cannot rebuild block %d: %w", blockNumber, err)
+				} else {
+					// Activate the snapshot for reads during BuildBundle
+					if err := evmstorage.SetActiveSnapshot(blockNumber); err != nil {
+						log.Warn(log.EVM, "Rebuild: Failed to activate snapshot",
+							"blockNumber", blockNumber,
+							"error", err)
+					}
+				}
+
 				// Rebuild via StateDB.BuildBundle
 				bundle, _, err := n.BuildBundle(item.Bundle.WorkPackage, extrinsicsCopy, item.CoreIndex, nil)
+
+				// Always clear active snapshot after build
+				evmstorage.ClearActiveSnapshot()
+
 				if err != nil {
+					// On rebuild failure, invalidate the snapshot we created
+					evmstorage.InvalidateSnapshotsFrom(blockNumber)
 					return nil, fmt.Errorf("failed to rebuild bundle: %w", err)
 				}
+
+				log.Info(log.EVM, "Rebuild: completed with snapshot",
+					"blockNumber", blockNumber,
+					"pendingSnapshots", evmstorage.GetPendingSnapshotCount())
+
 				return bundle, nil
 			}
 
-			queueRunner := queue.NewRunner(queueState, sid, submitter, bundleBuilder)
+			queueRunner := queue.NewRunner(queueState, sid, submitter, bundleBuilder, evmstorage)
 
-			// Set callback to remove transactions from pool when bundles accumulate
-			queueRunner.SetOnAccumulated(func(wpHash common.Hash, txHashes []common.Hash) {
+			// Set up snapshot-aware callbacks for multi-snapshot UBT parallel bundle building.
+			// These callbacks commit/invalidate UBT snapshots in addition to txpool cleanup.
+			queueRunner.SetOnAccumulatedWithSnapshots(evmstorage, func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash) {
+				// Called AFTER snapshot is committed to canonical state
 				log.Info(log.Node, "🗑️  Removing accumulated transactions from txpool",
 					"wpHash", wpHash.Hex(),
+					"blockNumber", blockNumber,
 					"txCount", len(txHashes))
 				removed := txPool.RemoveTransactionsByHashes(txHashes)
 				log.Info(log.Node, "✅ Removed accumulated transactions",
 					"wpHash", wpHash.Hex(),
+					"blockNumber", blockNumber,
 					"removed", removed,
 					"requested", len(txHashes))
 			})
 
-			// Set callback to unlock transactions when bundles fail permanently (max retries exceeded)
-			// This allows transactions to be re-included in future bundles
-			queueRunner.SetOnFailed(func(blockNumber uint64, txHashes []common.Hash) {
+			// Set callback to invalidate snapshots and unlock transactions when bundles fail permanently
+			// This also invalidates descendant snapshots that depend on the failed bundle
+			queueRunner.SetOnFailedWithSnapshots(evmstorage, func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash) {
+				// Called AFTER snapshots are invalidated
 				log.Warn(log.Node, "🔓 Unlocking transactions from failed bundle",
+					"wpHash", wpHash.Hex(),
 					"blockNumber", blockNumber,
 					"txCount", len(txHashes))
 				unlocked := txPool.UnlockTransactionsFromBundle(txHashes)
@@ -498,7 +538,7 @@ func handleBlockNotifications(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrp
 }
 
 // buildAndEnqueueWorkPackageForCore builds a work package for a specific core from maxTxsPerBundleConfig transactions
-// Each bundle is independent with its own pre→post UBT state
+// Each bundle is independent with its own pre→post UBT state using multi-snapshot UBT system
 // anchorOffset controls how far back the anchor slot is from current slot (smaller = fresher anchor)
 func buildAndEnqueueWorkPackageForCore(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrpc.TxPool, serviceID uint32, queueRunner *queue.Runner, coreIdx uint16, anchorOffset int) error {
 	// Get only maxTxsPerBundleConfig pending transactions
@@ -564,38 +604,77 @@ func buildAndEnqueueWorkPackageForCore(n *node.Node, rollup *evmrpc.Rollup, txPo
 		txHashes[i] = tx.Hash
 	}
 
+	// === Multi-Snapshot UBT: Create and activate per-bundle snapshot ===
+	// Get block number BEFORE building so we can create/activate snapshot
+	blockNumber := queueRunner.PeekNextBlockNumber()
+
+	// Get storage for snapshot management
+	storage, _ := n.GetStorage()
+	evmStorage := storage.(types.EVMJAMStorage)
+
+	// Create snapshot for this block, chaining from previous block's snapshot or canonical
+	if err := evmStorage.CreateSnapshotForBlock(blockNumber); err != nil {
+		log.Warn(log.EVM, "Failed to create snapshot, using canonical state",
+			"blockNumber", blockNumber,
+			"error", err)
+		// Continue without snapshot - will use canonical CurrentUBT
+	} else {
+		// Activate the snapshot for reads during BuildBundle
+		if err := evmStorage.SetActiveSnapshot(blockNumber); err != nil {
+			log.Warn(log.EVM, "Failed to activate snapshot",
+				"blockNumber", blockNumber,
+				"error", err)
+		}
+	}
+
 	// Build bundle via NodeContent.BuildBundle -> StateDB.BuildBundle (executes refine)
 	// NOTE: BuildBundle prepends a UBT witness to each work item's extrinsics
 	// Use the specified core index (not round-robin)
 	bundle, workReport, err := n.BuildBundle(workPackage, extrinsicsBlobs, coreIdx, nil)
+
+	// Always clear active snapshot after build, regardless of success/failure
+	evmStorage.ClearActiveSnapshot()
+
 	if err != nil {
+		// On build failure, invalidate the snapshot we created
+		evmStorage.InvalidateSnapshotsFrom(blockNumber)
 		return fmt.Errorf("failed to build bundle: %w", err)
 	}
 
 	// Enqueue to queue runner with original extrinsics and tx hashes for resubmission support
 	// Pass coreIdx so the runner submits to the correct core
 	// Transactions will be removed from txpool only when bundle accumulates (not now)
-	blockNumber, err := queueRunner.EnqueueBundleWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIdx, txHashes)
+	enqueuedBlockNumber, err := queueRunner.EnqueueBundleWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIdx, txHashes)
 	if err != nil {
+		// On enqueue failure, invalidate the snapshot
+		evmStorage.InvalidateSnapshotsFrom(blockNumber)
 		return fmt.Errorf("failed to enqueue bundle: %w", err)
+	}
+
+	// Sanity check: enqueued block number should match what we peeked
+	if enqueuedBlockNumber != blockNumber {
+		log.Warn(log.EVM, "Block number mismatch between peek and enqueue",
+			"peeked", blockNumber,
+			"enqueued", enqueuedBlockNumber)
 	}
 
 	// Lock transactions to this bundle AFTER successful enqueue
 	// They will be removed by the onAccumulated callback when the bundle accumulates on-chain
 	// Or unlocked if the bundle fails/expires
-	locked := txPool.LockTransactionsToBundle(txHashes, blockNumber)
+	locked := txPool.LockTransactionsToBundle(txHashes, enqueuedBlockNumber)
 	log.Info(log.Node, "🔒 Locked transactions to bundle",
-		"blockNumber", blockNumber,
+		"blockNumber", enqueuedBlockNumber,
 		"txCount", len(txHashes),
 		"locked", locked)
 
 	log.Info(log.Node, "📤 Work package enqueued to JAM queue",
 		"wpHash", bundle.WorkPackage.Hash().Hex(),
 		"workReportHash", workReport.Hash().Hex(),
-		"blockNumber", blockNumber,
+		"blockNumber", enqueuedBlockNumber,
 		"targetCore", coreIdx,
 		"serviceID", serviceID,
 		"txCount", len(pendingTxs),
+		"pendingSnapshots", evmStorage.GetPendingSnapshotCount(),
 		"pipeline", "queue->submit->guarantee(E_G)->accumulate->EVM")
 
 	return nil
@@ -653,17 +732,34 @@ func handleBlockEvents(n *node.Node, serviceID uint32, queueRunner *queue.Runner
 		}
 
 		// Check for accumulations in AccumulationHistory
-		// The most recent accumulations are in AccumulationHistory[EpochLength-1]
+		// AccumulationHistory is a sliding window where [EpochLength-1] is the most recent.
+		// We scan all slots to catch any accumulations we might have missed.
 		jamState := stateDB.GetJamState()
 		if jamState != nil {
-			latestHistory := jamState.AccumulationHistory[types.EpochLength-1]
-			for _, wpHash := range latestHistory.WorkPackageHash {
-				if _, already := notifiedAccumulated[wpHash]; !already {
-					log.Info(log.Node, "📦 Accumulation detected",
-						"slot", currentSlot,
-						"wpHash", wpHash.Hex())
-					queueRunner.HandleAccumulated(wpHash)
-					notifiedAccumulated[wpHash] = struct{}{}
+			// Log accumulation history state periodically for debugging
+			var totalInHistory int
+			for i := 0; i < types.EpochLength; i++ {
+				totalInHistory += len(jamState.AccumulationHistory[i].WorkPackageHash)
+			}
+			if totalInHistory > 0 {
+				log.Debug(log.Node, "📊 AccumulationHistory state",
+					"slot", currentSlot,
+					"totalWPsInHistory", totalInHistory,
+					"latestSlotCount", len(jamState.AccumulationHistory[types.EpochLength-1].WorkPackageHash))
+			}
+
+			// Check all history slots for accumulations (not just the latest)
+			// This ensures we catch accumulations even if we missed a slot
+			for historyIdx := 0; historyIdx < types.EpochLength; historyIdx++ {
+				for _, wpHash := range jamState.AccumulationHistory[historyIdx].WorkPackageHash {
+					if _, already := notifiedAccumulated[wpHash]; !already {
+						log.Info(log.Node, "📦 Accumulation detected",
+							"slot", currentSlot,
+							"historyIndex", historyIdx,
+							"wpHash", wpHash.Hex())
+						queueRunner.HandleAccumulated(wpHash)
+						notifiedAccumulated[wpHash] = struct{}{}
+					}
 				}
 			}
 		}

@@ -147,6 +147,35 @@ type StateDBStorage struct {
 
 	// Mutex for service-scoped maps
 	serviceMutex sync.RWMutex
+
+	// Pending UBT writes: wpHash → contractWitnessBlob
+	// Stores contract writes that have been computed but not yet applied to CurrentUBT
+	// Writes are applied only when OnAccumulated fires, ensuring CurrentUBT
+	// only advances for bundles that actually accumulate on-chain
+	pendingWrites      map[common.Hash][]byte
+	pendingWritesMutex sync.RWMutex
+
+	// Multi-snapshot UBT system for parallel bundle building
+	// Each bundle gets its own UBT snapshot that chains from the previous bundle's post-state.
+	// Snapshots are committed in order on accumulation, invalidated on failure.
+	//
+	// Key: blockNumber → UBT snapshot for that block
+	// The snapshot represents the expected POST-state after that block's execution
+	pendingSnapshots      map[uint64]*UnifiedBinaryTree
+	pendingSnapshotsMutex sync.RWMutex
+
+	// Tracks which block numbers have active snapshots, ordered by block number
+	// Used for invalidating descendant snapshots on failure
+	snapshotOrder []uint64
+
+	// activeSnapshotBlock: The blockNumber whose snapshot is currently being used for reads
+	// Set to 0 when reading from canonicalUBT (CurrentUBT)
+	activeSnapshotBlock uint64
+
+	// lastCommittedSnapshotBlock: The highest block number whose snapshot has been committed to CurrentUBT
+	// Used to handle out-of-order accumulation: if a later block accumulates first,
+	// earlier blocks' snapshots are already superseded (included in the later snapshot)
+	lastCommittedSnapshotBlock uint64
 }
 
 const (
@@ -199,6 +228,10 @@ func NewStateDBStorage(path string, jamda types.JAMDA, telemetryClient types.Tel
 		serviceJAMStateRoots:  make(map[string]*types.ServiceBlockIndex),
 		serviceBlockHashIndex: make(map[string]uint64),
 		latestRollupBlock:     make(map[uint32]uint64),
+		pendingWrites:         make(map[common.Hash][]byte),
+		pendingSnapshots:      make(map[uint64]*UnifiedBinaryTree),
+		snapshotOrder:         make([]uint64, 0),
+		activeSnapshotBlock:   0,
 	}
 
 	// Initialize checkpoint manager (UBT checkpoint tree)
@@ -552,10 +585,12 @@ func (store *StateDBStorage) StoreWarpSyncFragment(setID uint32, fragment types.
 // ===== EVM State Access Methods (UBT-backed log, UBT reads) =====
 
 // FetchBalance fetches balance from the UBT tree.
+// Uses GetActiveTree() to support multi-snapshot parallel bundle building.
 func (store *StateDBStorage) FetchBalance(address common.Address, txIndex uint32) ([32]byte, error) {
 	var balance [32]byte
 
-	if store.CurrentUBT == nil {
+	tree := store.GetActiveTree()
+	if tree == nil {
 		return balance, nil // Return zero balance if no tree
 	}
 
@@ -572,7 +607,7 @@ func (store *StateDBStorage) FetchBalance(address common.Address, txIndex uint32
 	})
 
 	// Read BasicData from UBT tree
-	if basicDataValue, found, _ := store.CurrentUBT.Get(&ubtKey); found {
+	if basicDataValue, found, _ := tree.Get(&ubtKey); found {
 		basicData := DecodeBasicDataLeaf(basicDataValue)
 		copy(balance[16:32], basicData.Balance[:])
 	}
@@ -581,10 +616,12 @@ func (store *StateDBStorage) FetchBalance(address common.Address, txIndex uint32
 }
 
 // FetchNonce fetches nonce from the UBT tree.
+// Uses GetActiveTree() to support multi-snapshot parallel bundle building.
 func (store *StateDBStorage) FetchNonce(address common.Address, txIndex uint32) ([32]byte, error) {
 	var nonce [32]byte
 
-	if store.CurrentUBT == nil {
+	tree := store.GetActiveTree()
+	if tree == nil {
 		return nonce, nil // Return zero nonce if no tree
 	}
 
@@ -601,7 +638,7 @@ func (store *StateDBStorage) FetchNonce(address common.Address, txIndex uint32) 
 	})
 
 	// Read BasicData from UBT tree
-	if basicDataValue, found, _ := store.CurrentUBT.Get(&ubtKey); found {
+	if basicDataValue, found, _ := tree.Get(&ubtKey); found {
 		basicData := DecodeBasicDataLeaf(basicDataValue)
 		binary.BigEndian.PutUint64(nonce[24:32], basicData.Nonce)
 	}
@@ -610,8 +647,10 @@ func (store *StateDBStorage) FetchNonce(address common.Address, txIndex uint32) 
 }
 
 // FetchCode fetches code from the UBT tree.
+// Uses GetActiveTree() to support multi-snapshot parallel bundle building.
 func (store *StateDBStorage) FetchCode(address common.Address, txIndex uint32) ([]byte, uint32, error) {
-	if store.CurrentUBT == nil {
+	tree := store.GetActiveTree()
+	if tree == nil {
 		return nil, 0, nil
 	}
 
@@ -629,7 +668,7 @@ func (store *StateDBStorage) FetchCode(address common.Address, txIndex uint32) (
 		TxIndex: txIndex,
 	})
 
-	basicDataValue, found, _ := store.CurrentUBT.Get(&ubtBasicKey)
+	basicDataValue, found, _ := tree.Get(&ubtBasicKey)
 	if found {
 		basicData := DecodeBasicDataLeaf(basicDataValue)
 		codeSize = basicData.CodeSize
@@ -668,7 +707,7 @@ func (store *StateDBStorage) FetchCode(address common.Address, txIndex uint32) (
 		})
 
 		// Read chunk from tree
-		chunkData, found, _ := store.CurrentUBT.Get(&ubtChunkKey)
+		chunkData, found, _ := tree.Get(&ubtChunkKey)
 		if !found {
 			return nil, 0, fmt.Errorf("chunk %d not found", chunkID)
 		}
@@ -693,10 +732,12 @@ func (store *StateDBStorage) FetchCode(address common.Address, txIndex uint32) (
 }
 
 // FetchCodeHash fetches code hash from the UBT tree.
+// Uses GetActiveTree() to support multi-snapshot parallel bundle building.
 func (store *StateDBStorage) FetchCodeHash(address common.Address, txIndex uint32) ([32]byte, error) {
 	var codeHash [32]byte
 
-	if store.CurrentUBT == nil {
+	tree := store.GetActiveTree()
+	if tree == nil {
 		codeHash = emptyCodeHash()
 		return codeHash, nil
 	}
@@ -714,7 +755,7 @@ func (store *StateDBStorage) FetchCodeHash(address common.Address, txIndex uint3
 	})
 
 	// Read code hash from UBT tree
-	codeHashData, found, _ := store.CurrentUBT.Get(&ubtKey)
+	codeHashData, found, _ := tree.Get(&ubtKey)
 	if found {
 		codeHash = codeHashData
 	} else {
@@ -727,11 +768,13 @@ func (store *StateDBStorage) FetchCodeHash(address common.Address, txIndex uint3
 
 // FetchStorage fetches storage value from the UBT tree.
 // Returns (value, found, error) where found=false indicates the slot was absent.
+// Uses GetActiveTree() to support multi-snapshot parallel bundle building.
 func (store *StateDBStorage) FetchStorage(address common.Address, storageKey [32]byte, txIndex uint32) ([32]byte, bool, error) {
 	var value [32]byte
 	found := false
 
-	if store.CurrentUBT == nil {
+	tree := store.GetActiveTree()
+	if tree == nil {
 		return value, found, nil
 	}
 
@@ -749,7 +792,7 @@ func (store *StateDBStorage) FetchStorage(address common.Address, storageKey [32
 	})
 
 	// Read storage value from UBT tree
-	storageData, ok, _ := store.CurrentUBT.Get(&ubtKey)
+	storageData, ok, _ := tree.Get(&ubtKey)
 	if ok {
 		value = storageData
 		found = true
@@ -794,8 +837,12 @@ func (store *StateDBStorage) ResetTrie() {
 }
 
 // BuildUBTWitness builds dual UBT witnesses and stores the post-state tree.
+// Uses GetActiveTree() to support multi-snapshot parallel bundle building.
 func (store *StateDBStorage) BuildUBTWitness(contractWitnessBlob []byte) ([]byte, []byte, error) {
-	if store.CurrentUBT == nil {
+	// Use GetActiveTree() to get the correct tree for parallel bundle building
+	// This returns the active snapshot if set, otherwise CurrentUBT
+	tree := store.GetActiveTree()
+	if tree == nil {
 		return nil, nil, fmt.Errorf("no UBT tree available")
 	}
 
@@ -803,7 +850,7 @@ func (store *StateDBStorage) BuildUBTWitness(contractWitnessBlob []byte) ([]byte
 	ubtReadLog := store.GetUBTReadLog()
 
 	// Build witness using the UBT function from witness.go
-	preWitness, postWitness, postUBTRoot, postTree, err := BuildUBTWitness(ubtReadLog, contractWitnessBlob, store.CurrentUBT)
+	preWitness, postWitness, postUBTRoot, postTree, err := BuildUBTWitness(ubtReadLog, contractWitnessBlob, tree)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to build witness: %w", err)
 	}
@@ -898,9 +945,21 @@ func (store *StateDBStorage) GetUBTNodeForServiceBlock(serviceID uint32, blockNu
 	store.serviceMutex.RLock()
 	defer store.serviceMutex.RUnlock()
 
+	// For "latest"/"pending" queries, always use CurrentUBT if available
+	// This ensures we return the most up-to-date state from CommitSnapshot,
+	// which may be ahead of the indexed blocks (FinalizeEVMBlock may not have been called yet)
+	if blockNumber == "latest" || blockNumber == "pending" {
+		if store.CurrentUBT != nil {
+			return store.CurrentUBT, true
+		}
+	}
+
 	// Get latest block for this service
 	latestBlock, exists := store.latestRollupBlock[serviceID]
 	if !exists {
+		log.Info(log.EVM, "GetUBTNodeForServiceBlock: no indexed blocks and no CurrentUBT",
+			"serviceID", serviceID,
+			"blockNumber", blockNumber)
 		return nil, false
 	}
 
@@ -914,6 +973,12 @@ func (store *StateDBStorage) GetUBTNodeForServiceBlock(serviceID uint32, blockNu
 	key := ubtRootKey(serviceID, blockNum)
 	ubtRoot, ok := store.serviceUBTRoots[key]
 	if !ok {
+		// Block not indexed yet - fall back to CurrentUBT for latest block
+		if uint64(blockNum) == latestBlock || blockNumber == "latest" || blockNumber == "pending" {
+			if store.CurrentUBT != nil {
+				return store.CurrentUBT, true
+			}
+		}
 		return nil, false
 	}
 
@@ -922,6 +987,14 @@ func (store *StateDBStorage) GetUBTNodeForServiceBlock(serviceID uint32, blockNu
 	defer store.ubtRootsMutex.RUnlock()
 
 	tree, found := store.ubtRoots[ubtRoot]
+	if !found {
+		// Tree not found in index - fall back to CurrentUBT for latest
+		if blockNumber == "latest" || blockNumber == "pending" {
+			if store.CurrentUBT != nil {
+				return store.CurrentUBT, true
+			}
+		}
+	}
 	return tree, found
 }
 
