@@ -37,9 +37,56 @@ pub struct TransactionReceiptRecord {
 impl TransactionReceiptRecord {}
 
 /// Returns the ObjectID for a receipt (transaction hash)
+/// DEPRECATED: Use block_receipts_object_id for block-scoped receipt storage
+/// Meta-shard overwrites make per-tx object IDs unreliable for multi-bundle scenarios.
 pub fn receipt_object_id_from_receipt(record: &TransactionReceiptRecord) -> [u8; 32] {
     // Receipt ObjectID = transaction hash for direct RPC lookup
     record.hash
+}
+
+/// Returns the ObjectID for block receipts blob keyed by BlockCommitment
+/// Format: [0xFE][block_commitment bytes 1-31] (first byte replaced with 0xFE prefix)
+///
+/// BlockCommitment is stable across bundle rebuilds because it's computed from:
+/// - Block header fields (PayloadLength, NumTransactions, Timestamp, GasUsed)
+/// - State roots (UBTRoot, TransactionsRoot, ReceiptRoot, BlockAccessListHash)
+///
+/// These are all deterministic given the same transactions, unlike WPH which
+/// changes based on RefineContext (anchor, prerequisites).
+///
+/// This avoids collision with:
+/// - Block metadata objects (0xFF prefix)
+/// - Meta-shard objects (txHash-based)
+/// - Other object types
+///
+/// Slow path flow for receipt lookup:
+/// 1. Scan blocks to find which block contains txHash
+/// 2. Compute BlockCommitment from the block
+/// 3. Fetch block receipts via block_receipts_object_id(block_commitment)
+/// 4. Search receipts for matching txHash
+pub fn block_receipts_object_id(block_commitment: [u8; 32]) -> [u8; 32] {
+    let mut key = block_commitment;
+    key[0] = 0xFE; // Replace first byte with prefix to avoid collisions
+    key
+}
+
+/// Serialize all receipts for a block into a single blob
+/// Format: [receipt_count:4][receipt_0][receipt_1]...[receipt_n]
+/// Each receipt: [receipt_len:4][receipt_data:receipt_len]
+pub fn serialize_block_receipts(receipts: &[&TransactionReceiptRecord]) -> Vec<u8> {
+    let mut result = Vec::new();
+
+    // Receipt count (4 bytes)
+    result.extend_from_slice(&(receipts.len() as u32).to_le_bytes());
+
+    // Serialize each receipt with length prefix
+    for record in receipts {
+        let receipt_data = serialize_receipt(record);
+        result.extend_from_slice(&(receipt_data.len() as u32).to_le_bytes());
+        result.extend_from_slice(&receipt_data);
+    }
+
+    result
 }
 
 /// Set to true to enable verbose receipt serialization logs

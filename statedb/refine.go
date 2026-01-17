@@ -24,9 +24,10 @@ const (
 	debugSpec = false
 )
 
-// extractContractWitnessBlob extracts the contract witness payload from refine output
+// ExtractContractWitnessBlob extracts the contract witness payload from refine output
 // Returns the raw contract witness blob (balance/nonce/code/storage writes)
-func (s *StateDB) extractContractWitnessBlob(output []byte, segments [][]byte) ([]byte, error) {
+// Exported for Phase 1 execution in builder network.
+func (s *StateDB) ExtractContractWitnessBlob(output []byte, segments [][]byte) ([]byte, error) {
 	if len(output) < 2 {
 		return []byte{}, nil
 	}
@@ -75,6 +76,341 @@ func (s *StateDB) extractContractWitnessBlob(output []byte, segments [][]byte) (
 	}
 
 	return []byte{}, nil
+}
+
+// SEGMENT_SIZE matches the Rust constant for DA segment size
+const SEGMENT_SIZE = 4096
+
+// ExtractReceiptsFromRefineOutput extracts transaction receipts from the refine output.
+//
+// Refine output format:
+// 1. Section 1: Meta-shards [2B count][entries...]
+// 2. Section 2: Contract witness metadata [2B index_start][4B payload_length]
+// 3. Section 3: Block receipts metadata [1B has_receipts][if 1: 2B index_start][4B payload_length]
+// 4. AccumulateInstructions (appended in main.rs)
+//
+// Algorithm:
+// 1. Skip Section 1 (meta-shards)
+// 2. Skip Section 2 (contract witness)
+// 3. Parse Section 3 to get block receipts location
+// 4. Read receipts blob from segments and parse
+//
+// Exported for builder network to capture receipts without relying on DA.
+func (s *StateDB) ExtractReceiptsFromRefineOutput(output []byte, segments [][]byte) ([]*evmtypes.TransactionReceipt, error) {
+	if len(output) < 2 {
+		return nil, nil
+	}
+
+	offset := 0
+
+	// Section 1: Skip meta-shard entries
+	// Format: [2B count][N entries × (1B ld + prefix_bytes + 5B packed)]
+	metashardCount := binary.LittleEndian.Uint16(output[offset : offset+2])
+	offset += 2
+
+	log.Debug(log.EVM, "ExtractReceiptsFromRefineOutput: parsing",
+		"metashardCount", metashardCount,
+		"outputLen", len(output),
+		"segmentsCount", len(segments))
+
+	// Skip each meta-shard entry
+	for i := uint16(0); i < metashardCount; i++ {
+		if offset >= len(output) {
+			return nil, fmt.Errorf("truncated metashard data at entry %d", i)
+		}
+
+		// Parse ld to know prefix size
+		ld := output[offset]
+		offset += 1
+
+		prefixBytes := int((ld + 7) / 8)
+		if offset+prefixBytes+5 > len(output) {
+			return nil, fmt.Errorf("truncated metashard entry %d", i)
+		}
+
+		// Skip prefix + packed ObjectRef
+		offset += prefixBytes + 5
+	}
+
+	// Section 2: Skip contract witness metadata
+	// Format: [2B index_start][4B payload_length]
+	if offset+6 > len(output) {
+		return nil, fmt.Errorf("truncated contract witness metadata")
+	}
+	offset += 6 // Skip 2 + 4 bytes
+
+	// Section 3: Block receipts metadata
+	// Format: [1B has_receipts][if 1: 2B index_start][4B payload_length]
+	if offset >= len(output) {
+		return nil, fmt.Errorf("missing receipts section")
+	}
+
+	hasReceipts := output[offset]
+	offset += 1
+
+	if hasReceipts == 0 {
+		log.Debug(log.EVM, "ExtractReceiptsFromRefineOutput: no receipts in this block")
+		return nil, nil
+	}
+
+	if offset+6 > len(output) {
+		return nil, fmt.Errorf("truncated receipts metadata")
+	}
+
+	receiptsIndexStart := binary.LittleEndian.Uint16(output[offset : offset+2])
+	offset += 2
+
+	receiptsPayloadLength := binary.LittleEndian.Uint32(output[offset : offset+4])
+	offset += 4
+
+	log.Info(log.EVM, "ExtractReceiptsFromRefineOutput: found receipts section",
+		"indexStart", receiptsIndexStart,
+		"payloadLength", receiptsPayloadLength)
+
+	if receiptsPayloadLength == 0 {
+		return nil, nil
+	}
+
+	// Read receipts blob from segments
+	receiptsBlob, err := s.readPayloadFromSegments(segments, uint32(receiptsIndexStart), receiptsPayloadLength)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read receipts blob from segments: %v", err)
+	}
+
+	// Parse block receipts blob
+	// Format: [4B count][receipt_len:4][receipt_data]...
+	receipts, err := evmtypes.ParseBlockReceiptsBlob(receiptsBlob)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse block receipts blob: %v", err)
+	}
+
+	// Sort receipts by TransactionIndex to ensure correct ordering
+	sortReceiptsByTxIndex(receipts)
+
+	log.Info(log.EVM, "ExtractReceiptsFromRefineOutput: complete",
+		"totalReceipts", len(receipts))
+
+	return receipts, nil
+}
+
+// sortReceiptsByTxIndex sorts receipts slice by TransactionIndex in ascending order.
+// Also sorts logs within each receipt by LogIndex.
+func sortReceiptsByTxIndex(receipts []*evmtypes.TransactionReceipt) {
+	// Sort receipts by TransactionIndex
+	for i := 0; i < len(receipts)-1; i++ {
+		for j := i + 1; j < len(receipts); j++ {
+			if receipts[j].TransactionIndex < receipts[i].TransactionIndex {
+				receipts[i], receipts[j] = receipts[j], receipts[i]
+			}
+		}
+	}
+
+	// Sort logs within each receipt by LogIndex
+	for _, receipt := range receipts {
+		if len(receipt.Logs) > 1 {
+			sortLogsByIndex(receipt.Logs)
+		}
+	}
+}
+
+// sortLogsByIndex sorts logs slice by LogIndex in ascending order
+func sortLogsByIndex(logs []evmtypes.Log) {
+	for i := 0; i < len(logs)-1; i++ {
+		for j := i + 1; j < len(logs); j++ {
+			if logs[j].LogIndex < logs[i].LogIndex {
+				logs[i], logs[j] = logs[j], logs[i]
+			}
+		}
+	}
+}
+
+// calculatePayloadLength computes payload length from segment count and last segment size
+func calculatePayloadLength(numSegments, lastSegmentSize uint16) uint32 {
+	if numSegments == 0 {
+		return 0
+	}
+	if numSegments == 1 {
+		return uint32(lastSegmentSize)
+	}
+	return uint32(numSegments-1)*SEGMENT_SIZE + uint32(lastSegmentSize)
+}
+
+// extractReceiptsFromMetaShard parses a meta-shard payload and extracts receipt payloads.
+//
+// Meta-shard format (with header): [ld:1][prefix56:7][merkle_root:32][count:2][ObjectRefEntry...]
+// ObjectRefEntry format: [object_id:32][ObjectRef:37] = 69 bytes each
+// ObjectRef format: [work_package_hash:32][packed:5]
+func (s *StateDB) extractReceiptsFromMetaShard(payload []byte, segments [][]byte) ([]*evmtypes.TransactionReceipt, error) {
+	// Meta-shard with header: [ld:1][prefix56:7][merkle_root:32][count:2][entries...]
+	// Minimum size: 1 + 7 + 32 + 2 = 42 bytes
+	if len(payload) < 42 {
+		return nil, fmt.Errorf("meta-shard payload too short: %d bytes", len(payload))
+	}
+
+	// Skip header: ld (1) + prefix56 (7) = 8 bytes
+	dataOffset := 8
+
+	// Skip merkle_root (32 bytes)
+	dataOffset += 32
+
+	// Read entry count
+	entryCount := binary.LittleEndian.Uint16(payload[dataOffset : dataOffset+2])
+	dataOffset += 2
+
+	log.Debug(log.EVM, "extractReceiptsFromMetaShard: parsing",
+		"payloadLen", len(payload),
+		"entryCount", entryCount)
+
+	var receipts []*evmtypes.TransactionReceipt
+	const objectRefEntrySize = 69 // 32 bytes object_id + 37 bytes ObjectRef
+
+	for j := uint16(0); j < entryCount; j++ {
+		if dataOffset+objectRefEntrySize > len(payload) {
+			return receipts, fmt.Errorf("truncated ObjectRefEntry at index %d", j)
+		}
+
+		// Parse ObjectRefEntry: [object_id:32][ObjectRef:37]
+		// objectID := payload[dataOffset : dataOffset+32]
+		dataOffset += 32
+
+		// Parse ObjectRef: [work_package_hash:32][packed:5]
+		// workPackageHash := payload[dataOffset : dataOffset+32]
+		dataOffset += 32
+
+		// Parse packed (5 bytes, big-endian):
+		// index_start (12) | index_end (12) | last_segment_size (12) | object_kind (4)
+		packedBytes := payload[dataOffset : dataOffset+5]
+		dataOffset += 5
+
+		packed := uint64(packedBytes[0])<<32 | uint64(packedBytes[1])<<24 |
+			uint64(packedBytes[2])<<16 | uint64(packedBytes[3])<<8 | uint64(packedBytes[4])
+
+		entryIndexStart := uint16((packed >> 28) & 0xFFF)
+		entryIndexEnd := uint16((packed >> 16) & 0xFFF)
+		entryLastSegSize := uint16((packed >> 4) & 0xFFF)
+		entryKind := evmtypes.ObjectKind(packed & 0x0F)
+
+		// Only process Receipt entries (kind=3)
+		if entryKind != evmtypes.ObjectKindReceipt {
+			continue
+		}
+
+		// Calculate receipt payload length
+		entryNumSegments := uint16(0)
+		if entryIndexEnd > entryIndexStart {
+			entryNumSegments = entryIndexEnd - entryIndexStart
+		}
+		if entryNumSegments > 0 && entryLastSegSize == 0 {
+			entryLastSegSize = SEGMENT_SIZE
+		}
+		receiptPayloadLen := calculatePayloadLength(entryNumSegments, entryLastSegSize)
+
+		if receiptPayloadLen == 0 {
+			continue
+		}
+
+		// Read the receipt payload from segments
+		receiptPayload, err := s.readPayloadFromSegments(segments, uint32(entryIndexStart), receiptPayloadLen)
+		if err != nil {
+			log.Debug(log.EVM, "Failed to read receipt payload from segments",
+				"entryIndex", j, "indexStart", entryIndexStart, "length", receiptPayloadLen, "err", err)
+			continue
+		}
+
+		// Parse the receipt
+		receipt, err := parseReceiptPayload(receiptPayload, uint32(j))
+		if err != nil {
+			log.Debug(log.EVM, "Failed to parse receipt payload",
+				"entryIndex", j, "err", err)
+			continue
+		}
+
+		receipts = append(receipts, receipt)
+		log.Debug(log.EVM, "Extracted receipt from meta-shard",
+			"txHash", receipt.TransactionHash.Hex(),
+			"success", receipt.Success,
+			"gasUsed", receipt.UsedGas)
+	}
+
+	return receipts, nil
+}
+
+// parseReceiptPayload parses a raw receipt payload into TransactionReceipt.
+// Receipt format (from Rust services/evm/src/receipt.rs):
+// [logs_payload_len:4][logs_payload:variable][tx_hash:32][tx_type:1][success:1][used_gas:8]
+// [cumulative_gas:4][log_index_start:4][tx_index:4][tx_payload_len:4][tx_payload:variable]
+func parseReceiptPayload(data []byte, defaultTxIndex uint32) (*evmtypes.TransactionReceipt, error) {
+	minSize := 4 + 32 + 1 + 1 + 8 + 4 + 4 + 4 + 4 // logs_len + hash + type + success + gas + cumulative + log_idx + tx_idx + payload_len
+	if len(data) < minSize {
+		return nil, fmt.Errorf("receipt payload too short: %d bytes, need at least %d", len(data), minSize)
+	}
+
+	offset := 0
+
+	// Logs payload
+	logsLen := binary.LittleEndian.Uint32(data[offset : offset+4])
+	offset += 4
+	if len(data) < offset+int(logsLen) {
+		return nil, fmt.Errorf("insufficient data for logs")
+	}
+	logsData := make([]byte, logsLen)
+	copy(logsData, data[offset:offset+int(logsLen)])
+	offset += int(logsLen)
+
+	// Transaction hash
+	var txHash common.Hash
+	copy(txHash[:], data[offset:offset+32])
+	offset += 32
+
+	// Transaction type
+	txType := data[offset]
+	offset += 1
+
+	// Success flag
+	success := data[offset] == 1
+	offset += 1
+
+	// Used gas
+	usedGas := binary.LittleEndian.Uint64(data[offset : offset+8])
+	offset += 8
+
+	// Cumulative gas
+	cumulativeGas := uint64(binary.LittleEndian.Uint32(data[offset : offset+4]))
+	offset += 4
+
+	// Log index start
+	logIndexStart := uint64(binary.LittleEndian.Uint32(data[offset : offset+4]))
+	offset += 4
+
+	// Transaction index
+	txIndex := binary.LittleEndian.Uint32(data[offset : offset+4])
+	offset += 4
+
+	// Transaction payload
+	if len(data) < offset+4 {
+		return nil, fmt.Errorf("insufficient data for payload length")
+	}
+	payloadLen := binary.LittleEndian.Uint32(data[offset : offset+4])
+	offset += 4
+
+	var payload []byte
+	if len(data) >= offset+int(payloadLen) {
+		payload = make([]byte, payloadLen)
+		copy(payload, data[offset:offset+int(payloadLen)])
+	}
+
+	return &evmtypes.TransactionReceipt{
+		TransactionHash:  txHash,
+		Type:             txType,
+		Version:          0,
+		Success:          success,
+		UsedGas:          usedGas,
+		Payload:          payload,
+		LogsData:         logsData,
+		CumulativeGas:    cumulativeGas,
+		LogIndexStart:    logIndexStart,
+		TransactionIndex: txIndex,
+	}, nil
 }
 
 type builderPostStateProof struct {
@@ -806,7 +1142,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 
 			// Generate UBT witness for builder mode (Step 2: Builder Refine)
 			// Extract contract witness blob from refine result output
-			contractWitnessBlob, err = s.extractContractWitnessBlob(result.Ok, exported_segments)
+			contractWitnessBlob, err = s.ExtractContractWitnessBlob(result.Ok, exported_segments)
 			if err != nil {
 				log.Warn(log.EVM, "Failed to extract contract witness blob", "err", err)
 				return nil, nil, err

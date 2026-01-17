@@ -108,6 +108,14 @@ impl EvmBlockPayload {
         buffer
     }
 
+    /// Compute BlockCommitment - the stable block identifier used for builder consensus
+    /// This is Blake2b hash of the 148-byte fixed header.
+    /// BlockCommitment is stable across bundle rebuilds because it depends only on
+    /// deterministic execution results, not on RefineContext.
+    pub fn block_commitment(&self) -> [u8; 32] {
+        blake2b_hash(&self.serialize_header())
+    }
+
     /// Serialize the block payload to bytes for DA export
     pub fn serialize(&self) -> Vec<u8> {
         let mut buffer = Vec::new();

@@ -11,7 +11,7 @@
 //! - Account deletions → Code tombstones (empty payload)
 //! - Logs → Receipt objects
 
-use crate::receipt::{TransactionReceiptRecord, receipt_object_id_from_receipt, serialize_receipt};
+use crate::receipt::{TransactionReceiptRecord, block_receipts_object_id, serialize_block_receipts};
 use crate::contractsharding::{
     ContractShard, ContractStorage, EvmEntry, ShardId,
 };
@@ -240,9 +240,7 @@ impl MajikBackend {
         let mut receipt_hashes = Vec::with_capacity(receipts.len());
         let mut cumulative_gas = 0u64;
 
-        // Phase 1: Export receipt payloads to DA and collect hashes
-        // Receipt ObjectID is the transaction hash (no modification)
-        // The receipt payload contains all transaction data, so we don't export transactions separately
+        // Phase 1: Collect hashes for block assembly
         for record in receipts {
             // Collect transaction hash
             tx_hashes.push(record.hash);
@@ -253,36 +251,7 @@ impl MajikBackend {
             let receipt_rlp = encode_canonical_receipt_rlp(record, cumulative_gas);
             let receipt_hash = keccak256(&receipt_rlp).0;
             receipt_hashes.push(receipt_hash);
-
-            // Export receipt to DA
-            let receipt_object_id = receipt_object_id_from_receipt(record);
-            let receipt_payload = serialize_receipt(record);
-
-            // DIAGNOSTIC: Log receipt object_id being written
-            log_info(&format!(
-                "📝 RECEIPT_WRITE tx_index={} object_id={} record_hash={} payload_len={}",
-                record.tx_index,
-                format_object_id(&receipt_object_id),
-                format_object_id(&record.hash),
-                receipt_payload.len(),
-            ));
-
-            let receipt_object_ref = utils::objects::ObjectRef::new(
-                work_package_hash,
-                receipt_payload.len() as u32,
-                crate::contractsharding::ObjectKind::Receipt as u8,
-            );
-
-            write_intents.push(WriteIntent {
-                effect: WriteEffectEntry {
-                    object_id: receipt_object_id,
-                    ref_info: receipt_object_ref,
-                    payload: receipt_payload,
-                    tx_index: 0,  // TODO: Track per-transaction writes to attribute correctly
-                },
-            });
         }
-
 
         if BACKEND_VERBOSE {
             log_info(&format!(
@@ -302,7 +271,8 @@ impl MajikBackend {
             }
         }
 
-        // Assemble EvmBlockPayload
+        // Phase 2: Assemble EvmBlockPayload to compute BlockCommitment
+        // BlockCommitment is needed BEFORE writing receipts because it's used as the ObjectID
         let mut block_payload = crate::block::EvmBlockPayload {
             payload_length: 0, // Will be computed after serialization
             num_transactions: receipts.len() as u32,
@@ -327,6 +297,39 @@ impl MajikBackend {
         let mut serialized = block_payload.serialize();
         block_payload.payload_length = serialized.len() as u32;
         serialized = block_payload.serialize();
+
+        // Phase 3: Export ALL receipts as a single block-scoped blob
+        // ObjectID = [0xFE][BlockCommitment bytes 1-31]
+        // BlockCommitment is stable across bundle rebuilds (unlike WPH which changes with RefineContext)
+        // This avoids meta-shard collision documented in queue/README.md
+        // Slow path: scan blocks → compute BlockCommitment → fetch receipts → find txHash
+        let block_commitment = block_payload.block_commitment();
+        let receipt_refs: Vec<&TransactionReceiptRecord> = receipts.iter().collect();
+        let block_receipts_payload = serialize_block_receipts(&receipt_refs);
+        let block_receipts_id = block_receipts_object_id(block_commitment);
+
+        log_info(&format!(
+            "📝 BLOCK_RECEIPTS_WRITE block_commitment={} object_id={} receipt_count={} payload_len={}",
+            format_object_id(&block_commitment),
+            format_object_id(&block_receipts_id),
+            receipts.len(),
+            block_receipts_payload.len(),
+        ));
+
+        let block_receipts_ref = utils::objects::ObjectRef::new(
+            work_package_hash,
+            block_receipts_payload.len() as u32,
+            crate::contractsharding::ObjectKind::Receipt as u8,
+        );
+
+        write_intents.push(WriteIntent {
+            effect: WriteEffectEntry {
+                object_id: block_receipts_id,
+                ref_info: block_receipts_ref,
+                payload: block_receipts_payload,
+                tx_index: 0,
+            },
+        });
 
         // log_info(&format!(
         //     "📦 Block assembled: {} txs, {} gas, {} bytes",

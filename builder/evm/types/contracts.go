@@ -26,6 +26,7 @@ var MathAddress = PRECOMPILES[2].Address
 var IssuerAddress = common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266")
 
 // ObjectKind represents the type of DA object, matching the Rust enum
+// in services/evm/src/contractsharding.rs
 type ObjectKind byte
 
 const (
@@ -33,29 +34,62 @@ const (
 	ObjectKindCode ObjectKind = 0x00
 	// Storage shard object (kind=0x01)
 	ObjectKindStorageShard ObjectKind = 0x01
-	// SSR metadata object (kind=0x02)
-	ObjectKindSSRMetadata ObjectKind = 0x02
+	// Balance object - balance updates for UBT BasicData (kind=0x02)
+	ObjectKindBalance ObjectKind = 0x02
 	// Receipt object (kind=0x03)
 	ObjectKindReceipt ObjectKind = 0x03
-	// Transaction object (kind=0x04)
-	ObjectKindTransaction ObjectKind = 0x04
-	// Block - block object (kind=0x05)
+	// MetaShard object - ObjectID→ObjectRef mappings (kind=0x04)
+	ObjectKindMetaShard ObjectKind = 0x04
+	// Block object (kind=0x05)
 	ObjectKindBlock ObjectKind = 0x05
+	// Nonce object - nonce updates for UBT BasicData (kind=0x06)
+	ObjectKindNonce ObjectKind = 0x06
 )
 
 // TxToObjectID converts a transaction hash to a receipt object ID
 // Uses the raw transaction hash directly as the ObjectID (no modification)
 // The ObjectKind discriminator is stored in ObjectRef.TxSlotKind field (upper 8 bits)
+//
+// DEPRECATED: Meta-shard overwrites make this unreliable for multi-bundle scenarios.
+// Use BlockReceiptsToObjectID + block scanning for reliable slow-path receipt lookup.
 func TxToObjectID(txHash common.Hash) common.Hash {
 	return txHash // Use raw hash directly - no modification
 }
 
-// SsrToObjectID constructs SSR object ID: [20B address][11B zero][1B kind=0x02]
+// BlockReceiptsToObjectID converts BlockCommitment to ObjectID for block receipts blob
+// Format: [0xFE][block_commitment bytes 1-31] (first byte replaced with 0xFE prefix)
+//
+// BlockCommitment is stable across bundle rebuilds because it's computed from:
+// - Block header fields (PayloadLength, NumTransactions, Timestamp, GasUsed)
+// - State roots (UBTRoot, TransactionsRoot, ReceiptRoot, BlockAccessListHash)
+//
+// These are all deterministic given the same transactions, unlike WPH which
+// changes based on RefineContext (anchor, prerequisites).
+//
+// This avoids collision with:
+// - Block metadata objects (0xFF prefix)
+// - Meta-shard objects (txHash-based)
+// - Other object types
+//
+// This supports the slow-path receipt lookup:
+// 1. Scan blocks to find which block contains txHash
+// 2. Compute BlockCommitment from the block
+// 3. Fetch all receipts via BlockReceiptsToObjectID(votingDigest)
+// 4. Search receipts for matching txHash
+func BlockReceiptsToObjectID(votingDigest common.Hash) common.Hash {
+	var key common.Hash
+	copy(key[:], votingDigest[:])
+	key[0] = 0xFE // Replace first byte with prefix to avoid collisions
+	return key
+}
+
+// SsrToObjectID constructs SSR/Balance object ID: [20B address][11B zero][1B kind=0x02]
+// Note: kind=0x02 is Balance in current Rust enum
 func SsrToObjectID(address common.Address) common.Hash {
 	var objectID common.Hash
 	copy(objectID[:20], address[:])
 	// Bytes 20..31 stay zero
-	objectID[31] = byte(ObjectKindSSRMetadata)
+	objectID[31] = byte(ObjectKindBalance)
 	return objectID
 }
 

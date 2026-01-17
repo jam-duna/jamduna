@@ -120,8 +120,14 @@ type StateDBStorage struct {
 
 	// UBT read log: Tracks all UBT-backed reads during EVM execution
 	// This is the authoritative source for BuildUBTWitness
-	ubtReadLog      []types.UBTRead
-	ubtReadLogMutex sync.Mutex // Protects ubtReadLog
+	ubtReadLog        []types.UBTRead
+	ubtReadLogMutex   sync.Mutex // Protects ubtReadLog
+	ubtReadLogEnabled bool       // Phase 1 support: when false, AppendUBTRead is a no-op
+
+	// Pinned state root for Phase 1 verification
+	// When set, reads use the tree at this root instead of CurrentUBT
+	pinnedStateRoot *common.Hash
+	pinnedTree      *UnifiedBinaryTree
 
 	// Checkpoint manager for proof serving (UBT checkpoint tree)
 	// Manages in-memory checkpoint trees with pinned (genesis, snapshots) + LRU cache
@@ -224,6 +230,7 @@ func NewStateDBStorage(path string, jamda types.JAMDA, telemetryClient types.Tel
 		keys:                  make(map[common.Hash]bool),
 		ubtRoots:              make(map[common.Hash]*UnifiedBinaryTree),
 		CurrentUBT:            NewUnifiedBinaryTree(Config{Profile: defaultUBTProfile}),
+		ubtReadLogEnabled:     true, // Default: logging enabled (normal operation)
 		serviceUBTRoots:       make(map[string]common.Hash),
 		serviceJAMStateRoots:  make(map[string]*types.ServiceBlockIndex),
 		serviceBlockHashIndex: make(map[string]uint64),
@@ -804,9 +811,13 @@ func (store *StateDBStorage) FetchStorage(address common.Address, storageKey [32
 // ===== UBT Read Log Management =====
 
 // AppendUBTRead appends a UBT read to the log.
+// If read logging is disabled (Phase 1 mode), this is a no-op.
 func (store *StateDBStorage) AppendUBTRead(read types.UBTRead) {
 	store.ubtReadLogMutex.Lock()
 	defer store.ubtReadLogMutex.Unlock()
+	if !store.ubtReadLogEnabled {
+		return // Phase 1 mode: skip logging for faster execution
+	}
 	store.ubtReadLog = append(store.ubtReadLog, read)
 }
 
@@ -824,6 +835,85 @@ func (store *StateDBStorage) ClearUBTReadLog() {
 	store.ubtReadLogMutex.Lock()
 	defer store.ubtReadLogMutex.Unlock()
 	store.ubtReadLog = nil
+}
+
+// SetUBTReadLogEnabled enables or disables UBT read logging.
+// When disabled (Phase 1), AppendUBTRead is a no-op for faster execution.
+// When enabled (Phase 2/normal), reads are logged for witness generation.
+func (store *StateDBStorage) SetUBTReadLogEnabled(enabled bool) {
+	store.ubtReadLogMutex.Lock()
+	defer store.ubtReadLogMutex.Unlock()
+	store.ubtReadLogEnabled = enabled
+	log.Debug(log.EVM, "SetUBTReadLogEnabled", "enabled", enabled)
+}
+
+// IsUBTReadLogEnabled returns whether UBT read logging is currently enabled.
+func (store *StateDBStorage) IsUBTReadLogEnabled() bool {
+	store.ubtReadLogMutex.Lock()
+	defer store.ubtReadLogMutex.Unlock()
+	return store.ubtReadLogEnabled
+}
+
+// GetCurrentUBTRoot returns the current UBT state root hash.
+// If a state is pinned, returns that root. Otherwise returns CurrentUBT root.
+func (store *StateDBStorage) GetCurrentUBTRoot() common.Hash {
+	store.mutex.RLock()
+	defer store.mutex.RUnlock()
+
+	if store.pinnedStateRoot != nil {
+		return *store.pinnedStateRoot
+	}
+
+	if store.CurrentUBT == nil {
+		return common.Hash{}
+	}
+	root := store.CurrentUBT.RootHash()
+	return common.BytesToHash(root[:])
+}
+
+// PinToStateRoot pins execution to a specific historical state root.
+// Used for Phase 1 verification where we need to re-execute against the same pre-state.
+// Returns error if the state root is not available.
+func (store *StateDBStorage) PinToStateRoot(root common.Hash) error {
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+
+	// Check if we have this root in ubtRoots
+	store.ubtRootsMutex.RLock()
+	tree, found := store.ubtRoots[root]
+	store.ubtRootsMutex.RUnlock()
+
+	if !found {
+		// Check if current tree matches
+		if store.CurrentUBT != nil {
+			currentRoot := store.CurrentUBT.RootHash()
+			if common.BytesToHash(currentRoot[:]) == root {
+				tree = store.CurrentUBT
+				found = true
+			}
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("state root %s not available for pinning", root.Hex())
+	}
+
+	store.pinnedStateRoot = &root
+	store.pinnedTree = tree
+	log.Info(log.EVM, "PinToStateRoot", "root", root.Hex())
+	return nil
+}
+
+// UnpinState releases the pinned state and returns to normal operation.
+func (store *StateDBStorage) UnpinState() {
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+
+	if store.pinnedStateRoot != nil {
+		log.Info(log.EVM, "UnpinState", "was_pinned_to", store.pinnedStateRoot.Hex())
+	}
+	store.pinnedStateRoot = nil
+	store.pinnedTree = nil
 }
 
 func (store *StateDBStorage) ResetTrie() {
@@ -1048,6 +1138,19 @@ func (store *StateDBStorage) StoreServiceBlock(serviceID uint32, blockIface inte
 		return fmt.Errorf("failed to store block: %w", err)
 	}
 
+	// Index transaction hashes for fast eth_getTransactionReceipt lookup
+	// Key: "stx_{serviceID}_{txHash}" -> "blockNumber:txIndex" (8 bytes)
+	for i, txHash := range block.TxHashes {
+		txKey := fmt.Sprintf("stx_%d_%s", serviceID, txHash.Hex())
+		txValue := make([]byte, 8)
+		binary.LittleEndian.PutUint32(txValue[0:4], blockNumber)
+		binary.LittleEndian.PutUint32(txValue[4:8], uint32(i))
+		if err := store.db.Put([]byte(txKey), txValue, nil); err != nil {
+			log.Warn(log.EVM, "Failed to index transaction hash", "txHash", txHash.Hex(), "err", err)
+			// Continue - don't fail the whole block store for index failure
+		}
+	}
+
 	return nil
 }
 
@@ -1083,7 +1186,36 @@ func (store *StateDBStorage) GetServiceBlock(serviceID uint32, blockNumber strin
 }
 
 // GetTransactionByHash finds a transaction in a service's block history
+// Uses tx hash index for O(1) lookup instead of scanning all blocks
 func (store *StateDBStorage) GetTransactionByHash(serviceID uint32, txHash common.Hash) (*types.Transaction, *types.BlockMetadata, error) {
+	// First, try the tx hash index (fast path)
+	txKey := fmt.Sprintf("stx_%d_%s", serviceID, txHash.Hex())
+	txValue, err := store.db.Get([]byte(txKey), nil)
+	if err == nil && len(txValue) == 8 {
+		// Index hit - extract blockNumber and txIndex
+		blockNum := binary.LittleEndian.Uint32(txValue[0:4])
+		txIndex := binary.LittleEndian.Uint32(txValue[4:8])
+
+		// Load the block to get block hash
+		blockKey := fmt.Sprintf("sblock_%d_%d", serviceID, blockNum)
+		blockBytes, err := store.db.Get([]byte(blockKey), nil)
+		if err == nil {
+			var block evmtypes.EvmBlockPayload
+			if err := json.Unmarshal(blockBytes, &block); err == nil {
+				metadata := &types.BlockMetadata{
+					BlockHash:   block.WorkPackageHash,
+					BlockNumber: blockNum,
+					TxIndex:     txIndex,
+				}
+				tx := &types.Transaction{
+					Hash: txHash,
+				}
+				return tx, metadata, nil
+			}
+		}
+	}
+
+	// Fallback: scan blocks (for blocks stored before index was added)
 	store.serviceMutex.RLock()
 	latestBlock, exists := store.latestRollupBlock[serviceID]
 	store.serviceMutex.RUnlock()
@@ -1092,8 +1224,6 @@ func (store *StateDBStorage) GetTransactionByHash(serviceID uint32, txHash commo
 		return nil, nil, fmt.Errorf("no blocks for service %d", serviceID)
 	}
 
-	// TODO: Optimize with bloom filter or LRU cache
-	// For now, scan blocks from latest to earliest
 	for blockNum := latestBlock; blockNum >= 0; blockNum-- {
 		blockKey := fmt.Sprintf("sblock_%d_%d", serviceID, blockNum)
 		blockBytes, err := store.db.Get([]byte(blockKey), nil)
@@ -1113,12 +1243,12 @@ func (store *StateDBStorage) GetTransactionByHash(serviceID uint32, txHash commo
 		}
 
 		// Search transaction hashes in this block
-		for txIndex, hash := range block.TxHashes {
+		for txIdx, hash := range block.TxHashes {
 			if hash == txHash {
 				metadata := &types.BlockMetadata{
 					BlockHash:   block.WorkPackageHash,
 					BlockNumber: block.Number,
-					TxIndex:     uint32(txIndex),
+					TxIndex:     uint32(txIdx),
 				}
 				tx := &types.Transaction{
 					Hash: txHash,
@@ -1133,6 +1263,75 @@ func (store *StateDBStorage) GetTransactionByHash(serviceID uint32, txHash commo
 	}
 
 	return nil, nil, fmt.Errorf("transaction not found")
+}
+
+// GetTxLocation returns the block number and tx index for a transaction hash
+// This is a fast O(1) lookup using the tx hash index
+func (store *StateDBStorage) GetTxLocation(serviceID uint32, txHash common.Hash) (blockNumber uint32, txIndex uint32, found bool) {
+	txKey := fmt.Sprintf("stx_%d_%s", serviceID, txHash.Hex())
+	txValue, err := store.db.Get([]byte(txKey), nil)
+	if err != nil || len(txValue) != 8 {
+		return 0, 0, false
+	}
+	blockNumber = binary.LittleEndian.Uint32(txValue[0:4])
+	txIndex = binary.LittleEndian.Uint32(txValue[4:8])
+	return blockNumber, txIndex, true
+}
+
+// GetTransactionReceipt retrieves a full transaction receipt from stored block data.
+// This is the primary method for eth_getTransactionReceipt when using builder/LevelDB as primary source.
+// Returns the TransactionReceipt with all fields populated (Success, UsedGas, Logs, etc.)
+// Returns nil if not found. The returned interface{} is *evmtypes.TransactionReceipt.
+func (store *StateDBStorage) GetTransactionReceipt(serviceID uint32, txHash common.Hash) (interface{}, error) {
+	// First, find the block containing this transaction
+	blockNum, txIndex, found := store.GetTxLocation(serviceID, txHash)
+	if !found {
+		return nil, nil // Transaction not indexed
+	}
+
+	// Load the block
+	blockKey := fmt.Sprintf("sblock_%d_%d", serviceID, blockNum)
+	blockBytes, err := store.db.Get([]byte(blockKey), nil)
+	if err != nil {
+		return nil, fmt.Errorf("block %d not found: %w", blockNum, err)
+	}
+
+	var block evmtypes.EvmBlockPayload
+	if err := json.Unmarshal(blockBytes, &block); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal block: %w", err)
+	}
+
+	// Check if receipt data is available
+	if int(txIndex) >= len(block.Transactions) {
+		// Receipt data not stored (old blocks or missing data)
+		// Return minimal receipt with just the metadata
+		return &evmtypes.TransactionReceipt{
+			TransactionHash:  txHash,
+			BlockHash:        block.WorkPackageHash,
+			BlockNumber:      blockNum,
+			TransactionIndex: txIndex,
+			Timestamp:        block.Timestamp,
+		}, nil
+	}
+
+	// Get the full receipt
+	receipt := block.Transactions[txIndex]
+
+	// Fill in block context if not already set
+	if receipt.BlockHash == (common.Hash{}) {
+		receipt.BlockHash = block.WorkPackageHash
+	}
+	if receipt.BlockNumber == 0 {
+		receipt.BlockNumber = blockNum
+	}
+	if receipt.TransactionIndex == 0 && txIndex > 0 {
+		receipt.TransactionIndex = txIndex
+	}
+	if receipt.Timestamp == 0 {
+		receipt.Timestamp = block.Timestamp
+	}
+
+	return &receipt, nil
 }
 
 // GetBlockByNumber retrieves full EVM block by service ID and block number

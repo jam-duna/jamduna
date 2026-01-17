@@ -546,6 +546,27 @@ type EVMJAMStorage interface {
 	GetUBTReadLog() []UBTRead
 	ClearUBTReadLog()
 
+	// Phase 1 Execution Support (Builder Network)
+	// SetUBTReadLogEnabled enables/disables UBT read logging
+	// When disabled (Phase 1), EVM execution is faster but cannot generate witnesses
+	// When enabled (Phase 2), read log is populated for witness generation
+	SetUBTReadLogEnabled(enabled bool)
+
+	// IsUBTReadLogEnabled returns whether UBT read logging is currently enabled
+	IsUBTReadLogEnabled() bool
+
+	// GetCurrentUBTRoot returns the current UBT state root hash
+	// This is the EVMPreStateRoot before execution or EVMPostStateRoot after
+	GetCurrentUBTRoot() common.Hash
+
+	// PinToStateRoot pins execution to a specific historical state root
+	// Used for Phase 1 verification (re-execute against same pre-state)
+	// Returns error if the state root is not available (too old or never existed)
+	PinToStateRoot(root common.Hash) error
+
+	// UnpinState releases the pinned state and returns to normal operation
+	UnpinState()
+
 	// UBT Witness Building
 	// BuildUBTWitness builds dual UBT witnesses and stores the post-state tree
 	// Returns: preWitness, postWitness, error
@@ -621,6 +642,17 @@ type EVMJAMStorage interface {
 	// GetTransactionByHash finds a transaction in a service's block history
 	// Returns: transaction, block metadata, error
 	GetTransactionByHash(serviceID uint32, txHash common.Hash) (*Transaction, *BlockMetadata, error)
+
+	// GetTxLocation returns the block number and tx index for a transaction hash
+	// This is a fast O(1) lookup using the tx hash index persisted in LevelDB
+	// Returns: blockNumber, txIndex, found
+	GetTxLocation(serviceID uint32, txHash common.Hash) (uint32, uint32, bool)
+
+	// GetTransactionReceipt retrieves a full transaction receipt from stored block data.
+	// This is the primary method for eth_getTransactionReceipt when using builder/LevelDB as source.
+	// Returns the TransactionReceipt with all fields (Success, UsedGas, Logs, etc.) or nil if not found.
+	// The returned interface{} is *evmtypes.TransactionReceipt
+	GetTransactionReceipt(serviceID uint32, txHash common.Hash) (interface{}, error)
 
 	// GetBlockByNumber retrieves full EVM block by service ID and block number
 	GetBlockByNumber(serviceID uint32, blockNumber string) (*EVMBlock, error)

@@ -5,15 +5,19 @@ use alloc::{vec::Vec, format};
 /// Serialize ExecutionEffects to refine output.
 ///
 /// Format:
-/// 1. Meta-shards (OLD compact format): N entries × (1B ld + prefix_bytes + 5B packed ObjectRef)
+/// 1. Meta-shards (OLD compact format): [2B count][N entries × (1B ld + prefix_bytes + 5B packed ObjectRef)]
 /// 2. Contract witness metadata: [2B index_start][4B total_payload_length]
 ///    - Points to segment range containing serialized contract storage/code blobs
 ///    - Each blob in segments: [20B address][1B kind][4B payload_length][...payload...]
-/// 3. AccumulateInstructions (appended in main.rs)
+/// 3. Block receipts metadata: [1B has_receipts][if 1: 2B index_start][4B payload_length]
+///    - Points to segment range containing block receipts blob
+///    - Blob format: [4B count][receipt_len:4][receipt_data]...
+/// 4. AccumulateInstructions (appended in main.rs)
 ///
 /// This allows:
 /// - Accumulate to parse meta-shards (section 1)
 /// - Go side to read contract storage/code from segments (section 2)
+/// - Go side to extract receipts from segments (section 3)
 pub fn serialize_execution_effects(
     effects: &utils::effects::ExecutionEffects,
     contract_witness_index_start: u16,
@@ -108,6 +112,39 @@ pub fn serialize_execution_effects(
         ));
     } else {
         log_info("📤 Section 2: No contract storage/code objects");
+    }
+
+    // Section 3: Block receipts metadata
+    // Find the block receipts write intent (keyed by BlockCommitment with 0xFE prefix)
+    // Filter by both ObjectKind::Receipt AND object_id[0] == 0xFE to distinguish
+    // block-scoped receipts from any future per-tx receipt objects
+    let receipt_intent = effects.write_intents
+        .iter()
+        .find(|intent| {
+            intent.effect.ref_info.object_kind == ObjectKind::Receipt as u8
+                && intent.effect.object_id[0] == 0xFE
+        });
+
+    if let Some(intent) = receipt_intent {
+        let obj_ref = &intent.effect.ref_info;
+
+        // has_receipts = 1
+        buffer.push(1u8);
+
+        // index_start (2 bytes)
+        buffer.extend_from_slice(&obj_ref.index_start.to_le_bytes());
+
+        // payload_length (4 bytes)
+        buffer.extend_from_slice(&obj_ref.payload_length.to_le_bytes());
+
+        log_info(&format!(
+            "📤 Section 3: Block receipts metadata - index_start={}, payload_length={} bytes",
+            obj_ref.index_start, obj_ref.payload_length
+        ));
+    } else {
+        // has_receipts = 0
+        buffer.push(0u8);
+        log_info("📤 Section 3: No block receipts");
     }
 
     log_info(&format!(

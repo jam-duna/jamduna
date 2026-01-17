@@ -72,6 +72,10 @@ type Rollup struct {
 	node       statedb.StateProvider // Optional: provides access to node's StateDB for queries
 	txPool     *TxPool               // Transaction pool for pending transactions
 	pvmBackend string
+
+	// Block cache for RPC serving (builder only)
+	// Keyed by BlockCommitment with secondary indexes for number/hash/txHash
+	blockCache *evmtypes.BuilderBlockCache
 }
 
 // GetStateDB returns the StateDB from the node (if available)
@@ -165,8 +169,21 @@ func NewRollup(jamStorage types.EVMJAMStorage, serviceID uint32, node statedb.St
 		node:       node,
 		txPool:     nil, // Will be set by SetTxPool() in builder
 		pvmBackend: pvmBackend,
+		blockCache: evmtypes.NewBuilderBlockCache(1000), // Keep 1000 blocks
 	}
 	return &rollup, nil
+}
+
+// GetBlockCache returns the builder block cache for RPC serving
+func (r *Rollup) GetBlockCache() *evmtypes.BuilderBlockCache {
+	return r.blockCache
+}
+
+// AddBlock adds a block to the cache (called after Phase 1 execution)
+func (r *Rollup) AddBlock(block *evmtypes.EvmBlockPayload) {
+	if r.blockCache != nil {
+		r.blockCache.AddBlock(block)
+	}
 }
 
 // SetTxPool sets the transaction pool for this rollup (builder only)
@@ -251,6 +268,132 @@ func (r *Rollup) PrepareWorkPackage(refineCtx types.RefineContext, pendingTxs []
 		"num_extrinsics", len(extrinsics))
 
 	return workPackage, extrinsicsBlobs, nil
+}
+
+// ExecutePhase1 executes EVM transactions WITHOUT witness generation (Phase 1 mode).
+// This is used by the Builder Network to reach consensus on blocks before JAM submission.
+// UBT read logging is disabled for faster execution; witnesses are generated in Phase 2.
+//
+// Returns Phase1Result containing:
+// - EVMPreStateRoot: UBT root before execution
+// - EVMPostStateRoot: UBT root after execution
+// - StateChanges: contract witness blob for Phase 2 witness generation
+// - TotalGasUsed: aggregate gas consumption
+func (r *Rollup) ExecutePhase1(
+	workPackage types.WorkPackage,
+	extrinsicsBlobs []types.ExtrinsicsBlobs,
+) (*evmtypes.Phase1Result, error) {
+	if r.node == nil {
+		return nil, fmt.Errorf("node not available for Phase 1 execution")
+	}
+
+	sdb := r.node.GetStateDB()
+	if sdb == nil {
+		return nil, fmt.Errorf("StateDB not available")
+	}
+
+	// Step 1: Capture EVMPreStateRoot BEFORE execution
+	evmPreStateRoot := r.storage.GetCurrentUBTRoot()
+	log.Info(log.EVM, "ExecutePhase1: captured pre-state root", "root", evmPreStateRoot.Hex())
+
+	// Step 2: DISABLE UBT read logging for Phase 1 (faster execution)
+	r.storage.SetUBTReadLogEnabled(false)
+	defer r.storage.SetUBTReadLogEnabled(true) // Re-enable on exit
+
+	// Step 3: Clear any stale read log entries
+	r.storage.ClearUBTReadLog()
+
+	// Step 4: Execute refine WITHOUT witness generation
+	// We use a modified BuildBundle that skips witness prepending
+	var totalGasUsed uint64
+	var stateChanges []byte
+	var allReceipts []*evmtypes.TransactionReceipt
+
+	for idx, workItem := range workPackage.WorkItems {
+		code, ok, err := sdb.ReadServicePreimageBlob(workItem.Service, workItem.CodeHash)
+		if err != nil || !ok || len(code) == 0 {
+			return nil, fmt.Errorf("ExecutePhase1: failed to read service code: service=%d, codeHash=%s, err=%v",
+				workItem.Service, workItem.CodeHash.Hex(), err)
+		}
+
+		// Create VM for execution
+		vm := statedb.NewVMFromCode(workItem.Service, code, 0, 0, sdb, r.pvmBackend, workItem.RefineGasLimit)
+		if vm == nil {
+			return nil, fmt.Errorf("ExecutePhase1: failed to create VM for service %d", workItem.Service)
+		}
+		vm.Timeslot = sdb.GetTimeslot()
+		vm.SetPVMContext(log.Builder)
+
+		// Execute refine (without witness overhead since logging is disabled)
+		importsegments := make([][][]byte, len(workPackage.WorkItems))
+		authorization := types.Result{Ok: nil} // Simplified for Phase 1
+
+		result, _, exportedSegments := vm.ExecuteRefine(
+			0, // coreIndex (not relevant for Phase 1)
+			uint32(idx),
+			workPackage,
+			authorization,
+			importsegments,
+			0, // exportCount
+			extrinsicsBlobs[idx],
+			workPackage.AuthorizationCodeHash,
+			common.Hash{},
+			"", // logDir
+		)
+
+		// Extract state changes from refine output
+		if len(result.Ok) > 0 && len(exportedSegments) > 0 {
+			blob, err := sdb.ExtractContractWitnessBlob(result.Ok, exportedSegments)
+			if err != nil {
+				log.Warn(log.EVM, "ExecutePhase1: failed to extract contract witness blob", "err", err)
+			} else {
+				stateChanges = append(stateChanges, blob...)
+			}
+
+			// Extract receipts from refine output Section 3 (block receipts pointer)
+			// The pointer tells us where the block receipts blob is in exportedSegments
+			receipts, err := sdb.ExtractReceiptsFromRefineOutput(result.Ok, exportedSegments)
+			if err != nil {
+				log.Warn(log.EVM, "ExecutePhase1: failed to extract receipts", "err", err)
+			} else if len(receipts) > 0 {
+				allReceipts = append(allReceipts, receipts...)
+				log.Debug(log.EVM, "ExecutePhase1: extracted receipts", "count", len(receipts))
+			}
+		}
+
+		// Track gas used
+		gasUsed := workItem.RefineGasLimit - uint64(vm.SafeGetGas())
+		totalGasUsed += gasUsed
+
+		log.Debug(log.EVM, "ExecutePhase1: work item executed",
+			"idx", idx,
+			"service", workItem.Service,
+			"gasUsed", gasUsed,
+			"resultLen", len(result.Ok))
+	}
+
+	// Step 5: Capture EVMPostStateRoot AFTER execution
+	evmPostStateRoot := r.storage.GetCurrentUBTRoot()
+	log.Info(log.EVM, "ExecutePhase1: captured post-state root",
+		"preRoot", evmPreStateRoot.Hex(),
+		"postRoot", evmPostStateRoot.Hex(),
+		"totalGasUsed", totalGasUsed,
+		"receiptsExtracted", len(allReceipts))
+
+	// Verify read log is empty (confirms Phase 1 mode worked)
+	readLog := r.storage.GetUBTReadLog()
+	if len(readLog) != 0 {
+		log.Warn(log.EVM, "ExecutePhase1: unexpected non-empty read log", "entries", len(readLog))
+	}
+
+	return &evmtypes.Phase1Result{
+		EVMPreStateRoot:  evmPreStateRoot,
+		EVMPostStateRoot: evmPostStateRoot,
+		TotalGasUsed:     totalGasUsed,
+		StateChanges:     stateChanges,
+		Blocks:           nil, // Single block for now; batching adds multiple
+		Receipts:         allReceipts,
+	}, nil
 }
 
 // BuildAndEnqueueWorkPackage builds a bundle from pending txs and enqueues it for submission.
@@ -403,12 +546,136 @@ func boolToHexStatus(success bool) string {
 }
 
 // GetTransactionReceipt fetches a transaction receipt
+// First checks local block cache (builder primary), then falls back to DA block scanning (validator fallback)
 func (r *Rollup) getTransactionReceipt(txHash common.Hash) (*evmtypes.TransactionReceipt, error) {
-	// Use ReadObject to get receipt from DA
+	// PRIMARY: Check local block cache first (builder mode)
+	if r.blockCache != nil {
+		if block, txIndex, found := r.blockCache.GetByTxHash(txHash); found {
+			if int(txIndex) < len(block.Transactions) {
+				receipt := block.Transactions[txIndex]
+				// Fill in block context
+				if receipt.BlockHash == (common.Hash{}) {
+					receipt.BlockHash = block.WorkPackageHash
+				}
+				if receipt.BlockNumber == 0 {
+					receipt.BlockNumber = block.Number
+				}
+				if receipt.Timestamp == 0 {
+					receipt.Timestamp = block.Timestamp
+				}
+				return &receipt, nil
+			}
+		}
+	}
+
+	// SLOW PATH FALLBACK: Scan blocks to find txHash, then fetch block receipts from DA
+	// This is used when builder cache is unavailable (validator mode / untrusted builder)
+	//
+	// Flow:
+	// 1. Get latest block number
+	// 2. Scan blocks backwards to find which block contains txHash
+	// 3. Fetch all receipts for that block via BlockReceiptsToObjectID
+	// 4. Return the matching receipt
+	return r.getTransactionReceiptSlowPath(txHash)
+}
+
+// getTransactionReceiptSlowPath scans blocks to find a transaction and returns its receipt from DA
+// This is O(N) in block count but doesn't depend on meta-shard indexing which can be overwritten
+func (r *Rollup) getTransactionReceiptSlowPath(txHash common.Hash) (*evmtypes.TransactionReceipt, error) {
+	// Step 1: Get latest block number
+	latestBlockNum, err := r.GetLatestBlockNumber()
+	if err != nil {
+		return nil, fmt.Errorf("slow path: failed to get latest block number: %v", err)
+	}
+
+	// Step 2: Scan blocks to find which one contains this txHash
+	var foundBlock *evmtypes.EvmBlockPayload
+	var foundTxIndex uint32
+	found := false
+
+	// Scan backwards from latest (most recent txs are more likely to be queried)
+	for blockNum := latestBlockNum; blockNum >= 1; blockNum-- {
+		block, err := r.ReadBlockByNumber(blockNum)
+		if err != nil {
+			log.Warn(log.Node, "slow path: failed to read block", "blockNumber", blockNum, "error", err)
+			continue
+		}
+
+		// Check if this block contains our txHash
+		for i, hash := range block.TxHashes {
+			if hash == txHash {
+				foundBlock = block
+				foundTxIndex = uint32(i)
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+
+	if !found {
+		return nil, nil // Transaction not found in any block
+	}
+
+	// Compute BlockCommitment from the block (stable across bundle rebuilds)
+	votingDigest := foundBlock.BlockCommitment()
+
+	log.Debug(log.Node, "slow path: found tx in block",
+		"txHash", txHash.Hex(),
+		"blockNumber", foundBlock.Number,
+		"votingDigest", votingDigest.Hex(),
+		"txIndex", foundTxIndex)
+
+	// Step 3: Fetch block receipts from DA using BlockReceiptsToObjectID(BlockCommitment)
+	// BlockCommitment is stable across bundle rebuilds (unlike WPH which changes with RefineContext)
+	receiptsObjectID := evmtypes.BlockReceiptsToObjectID(votingDigest)
+	witness, exists, err := r.GetStateDB().ReadObject(r.serviceID, receiptsObjectID)
+	if err != nil {
+		return nil, fmt.Errorf("slow path: failed to read block receipts: %v", err)
+	}
+	if !exists {
+		// Receipts not yet written to DA - fall back to reading individual receipt
+		// This can happen for very recent blocks
+		log.Debug(log.Node, "slow path: block receipts not in DA, trying individual lookup",
+			"blockNumber", foundBlock.Number)
+		return r.getTransactionReceiptLegacy(txHash)
+	}
+
+	// Step 4: Parse receipts blob and find the matching receipt
+	receipts, err := evmtypes.ParseBlockReceiptsBlob(witness.Payload)
+	if err != nil {
+		return nil, fmt.Errorf("slow path: failed to parse block receipts: %v", err)
+	}
+
+	// Find receipt by txHash
+	for _, receipt := range receipts {
+		if receipt.TransactionHash == txHash {
+			// Fill in block context
+			receipt.BlockNumber = foundBlock.Number
+			receipt.BlockHash = foundBlock.WorkPackageHash
+			if receipt.TransactionIndex != foundTxIndex {
+				log.Warn(log.Node, "slow path: receipt tx_index mismatch",
+					"txHash", txHash.Hex(),
+					"blockNumber", foundBlock.Number,
+					"receiptIndex", receipt.TransactionIndex,
+					"blockIndex", foundTxIndex)
+			}
+			return receipt, nil
+		}
+	}
+
+	return nil, fmt.Errorf("slow path: receipt not found in block receipts blob (block=%d)", foundBlock.Number)
+}
+
+// getTransactionReceiptLegacy uses the old meta-shard based lookup
+// DEPRECATED: Meta-shard overwrites make this unreliable for multi-bundle scenarios
+func (r *Rollup) getTransactionReceiptLegacy(txHash common.Hash) (*evmtypes.TransactionReceipt, error) {
 	receiptObjectID := evmtypes.TxToObjectID(txHash)
 	witness, found, err := r.GetStateDB().ReadObject(r.serviceID, receiptObjectID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read transaction receipt: %v", err)
+		return nil, fmt.Errorf("legacy: failed to read transaction receipt: %v", err)
 	}
 	if !found {
 		return nil, nil // Transaction not found
@@ -417,7 +684,7 @@ func (r *Rollup) getTransactionReceipt(txHash common.Hash) (*evmtypes.Transactio
 	// Parse raw receipt
 	receipt, err := evmtypes.ParseRawReceipt(witness)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse receipt: %v", err)
+		return nil, fmt.Errorf("legacy: failed to parse receipt: %v", err)
 	}
 	return receipt, nil
 }

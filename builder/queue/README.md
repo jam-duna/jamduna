@@ -950,6 +950,170 @@ This means receipts from earlier bundles can disappear from the meta-shard index
 - If parallelism is required, prefer **block-scoped lookup** (block hash + tx index) or a **builder-side index** built from block payloads.
 - Without merging, the RPC path for `eth_getTransactionByHash`/`eth_getTransactionReceipt` must use an alternate index (block-scoped or builder-local), because the meta-shard index is not stable across bundles.
 
+### Receipt Lookup: Fast Path vs Slow Path
+
+The system provides two paths for `eth_getTransactionReceipt` lookups:
+
+#### Fast Path: Builder Block Cache (Builder Mode)
+
+When running as a builder, receipts are served from the **in-memory block cache** via O(1) hash lookup:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      FAST PATH RECEIPT LOOKUP                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  1. User queries eth_getTransactionReceipt(txHash)                      │
+│                                                                         │
+│  2. Check builder's blockCache via GetByTxHash(txHash)                  │
+│     byTxHash[txHash] → TxLocation{BlockNumber, TxIndex, BlockCommitment}   │
+│                                                                         │
+│  3. Use TxLocation to retrieve block and receipt:                       │
+│     byNumber[blockNumber] → EvmBlockPayload                             │
+│     block.Transactions[txIndex] → receipt                               │
+│     └── If found → return receipt immediately (O(1))                    │
+│     └── If not found → fall through to slow path                        │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Properties:**
+- O(1) lookup via `byTxHash` map index
+- Only available in builder mode (blockCache is nil in validator mode)
+- Cache populated when bundles are built via `rollup.AddBlock(evmBlock)`
+- No DA fetches required - purely in-memory
+
+**Code Reference:** [builder/evm/rpc/rollup.go](../evm/rpc/rollup.go) - `getTransactionReceipt()` calls `blockCache.GetByTxHash()`
+
+#### Slow Path: Block-Scoped Receipt Lookup via BlockCommitment
+
+**Solution implemented:** Instead of per-transaction meta-shard indexing, receipts are stored as a **block-scoped blob** keyed by `BlockCommitment`. This eliminates the overwrite problem because each block has a unique, stable identifier.
+
+**BlockCommitment Properties:**
+- Blake2b hash of the 148-byte fixed block header
+- Computed from deterministic fields: `PayloadLength`, `NumTransactions`, `Timestamp`, `GasUsed`, `UBTRoot`, `TransactionsRoot`, `ReceiptRoot`, `BlockAccessListHash`
+- **Stable across bundle rebuilds** - unlike `WorkPackageHash` which changes based on `RefineContext` (anchor, prerequisites)
+- No circular dependency: receipt content → receipt_hash → ReceiptRoot → BlockCommitment → storage ObjectID
+
+**ObjectID Format:**
+```
+[0xFE][BlockCommitment bytes 1-31]  // First byte replaced with 0xFE prefix
+```
+
+This avoids collision with:
+- Block metadata objects (`0xFF` prefix)
+- Meta-shard objects (txHash-based)
+- Other object types
+
+**Refine Output Extraction:**
+
+The refine output contains a Section 3 that points to the block receipts blob. When extracting the receipts pointer, the code filters by **both** `ObjectKind::Receipt` (0x03) **and** the `0xFE` prefix byte:
+
+```rust
+// services/evm/src/writes.rs:121-126
+let receipt_intent = effects.write_intents
+    .iter()
+    .find(|intent| {
+        intent.effect.ref_info.object_kind == ObjectKind::Receipt as u8
+            && intent.effect.object_id[0] == 0xFE
+    });
+```
+
+This dual filter ensures that:
+1. Only receipt objects are considered (not storage, code, or meta-shards)
+2. Only **block-scoped** receipts (with 0xFE prefix) are selected, not potential future per-tx receipt objects
+
+Without the 0xFE prefix check, Section 3 could incorrectly grab a per-tx receipt object if that feature is reintroduced in the future.
+
+**Slow Path Flow:**
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    SLOW PATH RECEIPT LOOKUP                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  1. User queries eth_getTransactionReceipt(txHash)                      │
+│                                                                         │
+│  2. PRIMARY: Check builder's local block cache (builder mode only)      │
+│     └── If found → return receipt immediately                           │
+│     └── Note: blockCache is only populated when running as builder.     │
+│              In validator mode, blockCache is nil and this step is      │
+│              skipped entirely, falling through to slow path.            │
+│                                                                         │
+│  3. SLOW PATH FALLBACK (validator mode / untrusted builder):            │
+│                                                                         │
+│     a) Get latest block number from DA                                  │
+│                                                                         │
+│     b) Scan blocks backwards (most recent first):                       │
+│        for blockNum := latest; blockNum >= 1; blockNum-- {              │
+│            block := ReadBlockByNumber(blockNum)                         │
+│            for i, hash := range block.TxHashes {                        │
+│                if hash == txHash {                                      │
+│                    foundBlock = block                                   │
+│                    foundTxIndex = i                                     │
+│                    break                                                │
+│                }                                                        │
+│            }                                                            │
+│        }                                                                │
+│                                                                         │
+│     c) Compute BlockCommitment from found block:                           │
+│        votingDigest := block.BlockCommitment()  // Blake2b(148-byte header)│
+│                                                                         │
+│     d) Fetch block receipts from DA:                                    │
+│        objectID := BlockReceiptsToObjectID(votingDigest)  // 0xFE prefix│
+│        receiptsBlob := ReadObject(serviceID, objectID)                  │
+│                                                                         │
+│     e) Parse receipts blob and find matching txHash:                    │
+│        receipts := ParseBlockReceiptsBlob(receiptsBlob)                 │
+│        for _, receipt := range receipts {                               │
+│            if receipt.TransactionHash == txHash {                       │
+│                return receipt                                           │
+│            }                                                            │
+│        }                                                                │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Block Receipts Blob Format:**
+```
+[receipt_count:4][receipt_0][receipt_1]...[receipt_n]
+
+Each receipt:
+[receipt_len:4][receipt_data:receipt_len]
+
+Receipt data format:
+[logs_payload_len:4][logs_payload:variable][tx_hash:32][tx_type:1][success:1]
+[used_gas:8][cumulative_gas:4][log_index_start:4][tx_index:4]
+[tx_payload_len:4][tx_payload:variable]
+```
+
+**Code References:**
+- Rust serialization: `services/evm/src/receipt.rs:serialize_block_receipts()`, `block_receipts_object_id()`
+- Rust block: `services/evm/src/block.rs:block_commitment()`
+- Go parsing: `builder/evm/types/receipt.go:ParseBlockReceiptsBlob()`, `parseReceiptData()`
+- Go ObjectID: `builder/evm/types/contracts.go:BlockReceiptsToObjectID()`
+- Go slow path: `builder/evm/rpc/rollup.go:getTransactionReceiptSlowPath()`
+
+**Performance Characteristics:**
+- O(N) in number of blocks for initial scan (worst case)
+- Scan is backwards from latest (most recent txs queried more often)
+- Once block is found, single DA fetch for all receipts in that block
+- No meta-shard collision issues regardless of bundle ordering
+
+**Trade-offs:**
+| Aspect | Slow Path (BlockCommitment) | Meta-Shard Index |
+|--------|--------------------------|------------------|
+| Reliability | Always works | Overwrites cause misses |
+| Latency | O(blocks) scan | O(1) if index valid |
+| Storage | Block-scoped blobs | Per-tx entries |
+| Parallelism | Safe | Collision-prone |
+
+**When Slow Path is Used:**
+1. Builder cache miss (validator mode)
+2. Untrusted builder scenario
+3. Historical transaction lookup
+4. Fallback when meta-shard lookup fails
+
 ### Technical Details: Meta-Shard Collision at ld=0
 
 **How receipt object_id is computed:**

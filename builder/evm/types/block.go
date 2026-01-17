@@ -82,11 +82,43 @@ type EvmBlockPayload struct {
 	// Variable-length fields (not part of hash computation)
 	TxHashes      []common.Hash        // Transaction hashes (32 bytes each)
 	ReceiptHashes []common.Hash        // Receipt hashes (32 bytes each)
-	Transactions  []TransactionReceipt `json:"-"`
+	Transactions  []TransactionReceipt // Full receipt data for each transaction
 
 	// UBT state delta for delta-based state verification (UBT-CODEX.md)
 	// Optional field - enables replay verification without full re-execution
 	UBTStateDelta *UBTStateDelta `json:"ubt_delta,omitempty"`
+}
+
+// String returns a JSON representation of the EvmBlockPayload for marshal/unmarshal compatibility.
+func (p *EvmBlockPayload) String() string {
+	return types.ToJSONHexIndent(p)
+}
+
+// BlockCommitment returns the hash that builders should vote on.
+// This is computed from the deterministic block fields only (excludes witness data).
+func (p *EvmBlockPayload) BlockCommitment() common.Hash {
+	// Serialize only the fields that are deterministic and must match across builders
+	// This is the 148-byte fixed header
+	data := make([]byte, 148)
+	offset := 0
+
+	binary.LittleEndian.PutUint32(data[offset:offset+4], p.PayloadLength)
+	offset += 4
+	binary.LittleEndian.PutUint32(data[offset:offset+4], p.NumTransactions)
+	offset += 4
+	binary.LittleEndian.PutUint32(data[offset:offset+4], p.Timestamp)
+	offset += 4
+	binary.LittleEndian.PutUint64(data[offset:offset+8], p.GasUsed)
+	offset += 8
+	copy(data[offset:offset+32], p.UBTRoot[:])
+	offset += 32
+	copy(data[offset:offset+32], p.TransactionsRoot[:])
+	offset += 32
+	copy(data[offset:offset+32], p.ReceiptRoot[:])
+	offset += 32
+	copy(data[offset:offset+32], p.BlockAccessListHash[:])
+
+	return common.Blake2Hash(data)
 }
 
 // EthereumBlock represents an Ethereum block for JSON-RPC responses (hex-encoded strings)
@@ -331,11 +363,6 @@ func DeserializeEvmBlockPayload(data []byte, headerOnly bool) (*EvmBlockPayload,
 	return payload, nil
 }
 
-// String returns a JSON representation of the EvmBlockPayload
-func (p *EvmBlockPayload) String() string {
-	return types.ToJSON(p)
-}
-
 // VerifyBlockBMTProofs verifies that the BMT roots in block metadata are correctly computed
 func VerifyBlockBMTProofs(block *EvmBlockPayload) error {
 	// Verify Transactions Root
@@ -498,5 +525,175 @@ func DefaultWorkPackage(serviceID uint32, service *types.ServiceAccount) types.W
 				ExportCount:        0,
 			},
 		},
+	}
+}
+
+// BuilderBlockCache provides keyed access to EVM blocks for RPC serving.
+// Primary index is BlockCommitment (what builders vote on).
+// Secondary indexes for common RPC queries: block number, block hash, tx hash.
+type BuilderBlockCache struct {
+	// Primary index: BlockCommitment -> block (what builders vote on)
+	byBlockCommitment map[common.Hash]*EvmBlockPayload
+
+	// Secondary indexes for RPC
+	byNumber map[uint64]*EvmBlockPayload   // eth_getBlockByNumber
+	byHash   map[common.Hash]*EvmBlockPayload // eth_getBlockByHash (WorkPackageHash)
+	byTxHash map[common.Hash]*TxLocation      // eth_getTransactionReceipt
+
+	// Track latest for "latest" block queries
+	latestBlockNumber uint64
+
+	// Retention limit (prune older blocks)
+	maxBlocks int
+}
+
+// TxLocation stores the location of a transaction for receipt lookup
+type TxLocation struct {
+	BlockNumber uint64
+	TxIndex     uint32
+	BlockCommitment common.Hash // Reference to the block
+}
+
+// NewBuilderBlockCache creates a new block cache with specified retention
+func NewBuilderBlockCache(maxBlocks int) *BuilderBlockCache {
+	if maxBlocks <= 0 {
+		maxBlocks = 1000 // Default: keep 1000 blocks
+	}
+	return &BuilderBlockCache{
+		byBlockCommitment: make(map[common.Hash]*EvmBlockPayload),
+		byNumber:       make(map[uint64]*EvmBlockPayload),
+		byHash:         make(map[common.Hash]*EvmBlockPayload),
+		byTxHash:       make(map[common.Hash]*TxLocation),
+		maxBlocks:      maxBlocks,
+	}
+}
+
+// AddBlock adds a block to the cache with all indexes
+func (c *BuilderBlockCache) AddBlock(block *EvmBlockPayload) {
+	if block == nil {
+		return
+	}
+
+	votingDigest := block.BlockCommitment()
+	blockNumber := uint64(block.Number)
+
+	// Primary index
+	c.byBlockCommitment[votingDigest] = block
+
+	// Secondary indexes
+	c.byNumber[blockNumber] = block
+	if block.WorkPackageHash != (common.Hash{}) {
+		c.byHash[block.WorkPackageHash] = block
+	}
+
+	// Index transactions for receipt lookup
+	for i, txHash := range block.TxHashes {
+		c.byTxHash[txHash] = &TxLocation{
+			BlockNumber:  blockNumber,
+			TxIndex:      uint32(i),
+			BlockCommitment: votingDigest,
+		}
+	}
+
+	// Update latest
+	if blockNumber > c.latestBlockNumber {
+		c.latestBlockNumber = blockNumber
+	}
+
+	// Prune if over limit
+	c.pruneIfNeeded()
+}
+
+// GetByBlockCommitment returns block by its voting digest (primary key)
+func (c *BuilderBlockCache) GetByBlockCommitment(digest common.Hash) (*EvmBlockPayload, bool) {
+	block, ok := c.byBlockCommitment[digest]
+	return block, ok
+}
+
+// GetByNumber returns block by number (eth_getBlockByNumber)
+func (c *BuilderBlockCache) GetByNumber(number uint64) (*EvmBlockPayload, bool) {
+	block, ok := c.byNumber[number]
+	return block, ok
+}
+
+// GetByHash returns block by hash (eth_getBlockByHash)
+func (c *BuilderBlockCache) GetByHash(hash common.Hash) (*EvmBlockPayload, bool) {
+	block, ok := c.byHash[hash]
+	return block, ok
+}
+
+// GetLatest returns the latest block
+func (c *BuilderBlockCache) GetLatest() (*EvmBlockPayload, bool) {
+	return c.GetByNumber(c.latestBlockNumber)
+}
+
+// GetLatestBlockNumber returns the latest block number
+func (c *BuilderBlockCache) GetLatestBlockNumber() uint64 {
+	return c.latestBlockNumber
+}
+
+// GetTxLocation returns the location of a transaction for receipt lookup
+func (c *BuilderBlockCache) GetTxLocation(txHash common.Hash) (*TxLocation, bool) {
+	loc, ok := c.byTxHash[txHash]
+	return loc, ok
+}
+
+// GetByTxHash returns the block and tx index for a transaction hash
+// This is used by GetTransactionReceipt to lookup receipts from local cache
+func (c *BuilderBlockCache) GetByTxHash(txHash common.Hash) (*EvmBlockPayload, uint32, bool) {
+	loc, ok := c.byTxHash[txHash]
+	if !ok {
+		return nil, 0, false
+	}
+	block, ok := c.byNumber[loc.BlockNumber]
+	if !ok {
+		return nil, 0, false
+	}
+	return block, loc.TxIndex, true
+}
+
+// Len returns the number of blocks in cache
+func (c *BuilderBlockCache) Len() int {
+	return len(c.byBlockCommitment)
+}
+
+// pruneIfNeeded removes oldest blocks if over maxBlocks limit
+func (c *BuilderBlockCache) pruneIfNeeded() {
+	if len(c.byNumber) <= c.maxBlocks {
+		return
+	}
+
+	// Find oldest block numbers to prune
+	var oldest uint64 = c.latestBlockNumber
+	for bn := range c.byNumber {
+		if bn < oldest {
+			oldest = bn
+		}
+	}
+
+	// Remove blocks older than (latest - maxBlocks)
+	threshold := c.latestBlockNumber - uint64(c.maxBlocks)
+	for bn := oldest; bn < threshold; bn++ {
+		c.removeBlock(bn)
+	}
+}
+
+// removeBlock removes a block and its indexes
+func (c *BuilderBlockCache) removeBlock(blockNumber uint64) {
+	block, ok := c.byNumber[blockNumber]
+	if !ok {
+		return
+	}
+
+	// Remove from all indexes
+	delete(c.byNumber, blockNumber)
+	delete(c.byBlockCommitment, block.BlockCommitment())
+	if block.WorkPackageHash != (common.Hash{}) {
+		delete(c.byHash, block.WorkPackageHash)
+	}
+
+	// Remove tx indexes
+	for _, txHash := range block.TxHashes {
+		delete(c.byTxHash, txHash)
 	}
 }
