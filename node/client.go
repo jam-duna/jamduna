@@ -822,7 +822,7 @@ func (c *NodeClient) FetchJAMDASegments(workPackageHash common.Hash, indexStart 
 	return nil, fmt.Errorf("FetchJAMDASegments not supported for remote NodeClient connections yet")
 }
 
-func (c *NodeClient) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
+func (c *NodeClient) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash, skipApplyWrites bool) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
 	panic(111)
 	return nil, nil, fmt.Errorf("BuildBundle not supported for remote NodeClient connections yet")
 }

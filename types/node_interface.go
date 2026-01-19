@@ -18,6 +18,9 @@ type JNode interface {
 	GetServiceStorage(serviceID uint32, storageKey []byte) ([]byte, bool, error)
 	GetRefineContext() (RefineContext, error)
 	GetRefineContextWithBuffer(buffer int) (RefineContext, error)
-	BuildBundle(WorkPackage, []ExtrinsicsBlobs, uint16, []common.Hash) (*WorkPackageBundle, *WorkReport, error)
+	// BuildBundle executes a work package and generates witnesses.
+	// skipApplyWrites: If true, skip storing/applying contract writes to state.
+	// Use skipApplyWrites=true when Phase 1 has already applied state changes.
+	BuildBundle(workPackage WorkPackage, extrinsics []ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash, skipApplyWrites bool) (*WorkPackageBundle, *WorkReport, error)
 	GetSegmentWithProof(segmentsRoot common.Hash, segmentIndex uint16) (segment []byte, importProof []common.Hash, found bool)
 }

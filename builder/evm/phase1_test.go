@@ -256,6 +256,16 @@ func TestMultiSnapshotUBT(t *testing.T) {
 			TxHashes:        txHashes,
 			Transactions:    receipts, // Receipts extracted from refine output
 		}
+		// In production, Phase 2 sets WorkPackageHash = BlockCommitment after bundle building.
+		// For testing, we simulate this by setting WorkPackageHash to the BlockCommitment.
+		// BlockCommitment is the stable voting digest (doesn't change on resubmission).
+		blockCommitment := evmBlock.BlockCommitment()
+		evmBlock.WorkPackageHash = blockCommitment
+		// Also update each receipt's BlockHash and BlockNumber
+		for i := range evmBlock.Transactions {
+			evmBlock.Transactions[i].BlockHash = blockCommitment
+			evmBlock.Transactions[i].BlockNumber = uint32(blockNumber)
+		}
 		fmt.Printf("BlockCommitment: %s\nEvmBlock: %s\n", evmBlock.BlockCommitment().Hex(), evmBlock.String())
 
 		// Builder keeps the EVM block for consensus voting and RPC serving

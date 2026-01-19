@@ -652,6 +652,16 @@ func (c *BuilderBlockCache) GetByTxHash(txHash common.Hash) (*EvmBlockPayload, u
 	return block, loc.TxIndex, true
 }
 
+// UpdateBlockHash updates a block's WorkPackageHash and adds it to the byHash index
+// Called after Phase 2 when the WPH becomes known
+func (c *BuilderBlockCache) UpdateBlockHash(block *EvmBlockPayload, wpHash common.Hash) {
+	if block == nil || wpHash == (common.Hash{}) {
+		return
+	}
+	block.WorkPackageHash = wpHash
+	c.byHash[wpHash] = block
+}
+
 // Len returns the number of blocks in cache
 func (c *BuilderBlockCache) Len() int {
 	return len(c.byBlockCommitment)

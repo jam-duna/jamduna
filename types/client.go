@@ -11,12 +11,15 @@ type NodeClient interface {
 	GetWitnessCount() int
 
 	// Bundle execution
+	// skipApplyWrites: If true, skip storing/applying contract writes to state.
+	// Use skipApplyWrites=true when Phase 1 has already applied state changes.
 	BuildBundle(
 		workPackage WorkPackage,
 		extrinsics []ExtrinsicsBlobs,
 		coreIndex uint16,
 		authTokens []AuthorizeCode,
 		pvmBackend string,
+		skipApplyWrites bool,
 	) (*WorkPackage, *WorkReport, error)
 }
 

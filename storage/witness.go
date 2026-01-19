@@ -442,8 +442,18 @@ func (store *StateDBStorage) ClearActiveSnapshot() {
 }
 
 // GetActiveTree returns the UBT tree that should be used for reads.
-// Returns the active snapshot if set, otherwise CurrentUBT.
+// Priority: pinnedTree (Phase 2) > activeSnapshot > CurrentUBT.
 func (store *StateDBStorage) GetActiveTree() *UnifiedBinaryTree {
+	// Check pinnedTree first (set by PinToStateRoot for Phase 2 execution)
+	store.mutex.RLock()
+	if store.pinnedTree != nil {
+		tree := store.pinnedTree
+		store.mutex.RUnlock()
+		return tree
+	}
+	store.mutex.RUnlock()
+
+	// Check active snapshot (for parallel bundle building)
 	store.pendingSnapshotsMutex.RLock()
 	activeBlock := store.activeSnapshotBlock
 	if activeBlock > 0 {
@@ -453,6 +463,8 @@ func (store *StateDBStorage) GetActiveTree() *UnifiedBinaryTree {
 		}
 	}
 	store.pendingSnapshotsMutex.RUnlock()
+
+	// Fall back to CurrentUBT
 	return store.CurrentUBT
 }
 

@@ -994,5 +994,47 @@ func TestEVMMultiRoundTransfers(t *testing.T) {
 			"expectedTxsPerBundle", expectedTxsPerBundle,
 			"coresUtilized", len(coreDistribution),
 			"expectedCores", numCores)
+
+		// ========== PHASE 5: Verify eth_getTransactionReceipt RPC ==========
+		// This ensures receipts are coming from the real path (not legacy bogus path)
+		log.Info(log.Node, "🧾 PHASE 5: Verifying eth_getTransactionReceipt RPC returns valid receipts...")
+		fmt.Println("=== RECEIPT VERIFICATION (eth_getTransactionReceipt) ===")
+
+		receiptVerifyCount := min(5, len(txs)) // Verify first 5 receipts
+		for i := 0; i < receiptVerifyCount; i++ {
+			if txs[i].receipt == nil {
+				fmt.Printf("  Receipt[%d]: SKIPPED (tx not confirmed)\n", i)
+				continue
+			}
+
+			txHash := txs[i].hash
+			var ethReceipt *evmtypes.EthereumTransactionReceipt
+			err := rpcClient.Call("eth_getTransactionReceipt", []string{txHash.String()}, &ethReceipt)
+			if err != nil {
+				t.Fatalf("eth_getTransactionReceipt failed for tx %d: %v", i, err)
+			}
+			if ethReceipt == nil {
+				t.Fatalf("eth_getTransactionReceipt returned nil for tx %d (hash=%s)", i, txHash.Hex())
+			}
+
+			// Print detailed receipt info (like TestMultiSnapshotUBT does)
+			fmt.Printf("  Receipt[%d]: %s\n", i, ethReceipt.String())
+
+			// Verify critical receipt fields
+			if ethReceipt.TransactionHash != txHash.String() {
+				t.Errorf("Receipt tx hash mismatch: expected %s, got %s", txHash.String(), ethReceipt.TransactionHash)
+			}
+			if ethReceipt.Status != "0x1" {
+				t.Errorf("Receipt shows failure for tx %d (status=%s)", i, ethReceipt.Status)
+			}
+			if ethReceipt.GasUsed != "0x5208" { // 21000 in hex for simple transfers
+				fmt.Printf("    ⚠️ GasUsed unexpected: expected 0x5208 (21000), got %s\n", ethReceipt.GasUsed)
+			}
+			if ethReceipt.BlockHash == "" || ethReceipt.BlockNumber == "" {
+				t.Errorf("Receipt missing block info for tx %d", i)
+			}
+		}
+		fmt.Printf("✅ Verified %d receipts via eth_getTransactionReceipt RPC\n", receiptVerifyCount)
+		log.Info(log.Node, "✅ Receipt verification complete", "verified", receiptVerifyCount)
 	})
 }

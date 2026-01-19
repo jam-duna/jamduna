@@ -138,8 +138,11 @@ func (n *NodeContent) GetRefineContextWithBuffer(buffer int) (types.RefineContex
 	return refineCtx, nil
 }
 
-func (n *NodeContent) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
-	return n.statedb.BuildBundle(workPackage, extrinsicsBlobs, coreIndex, rawObjectIDs, n.pvmBackend)
+// BuildBundle builds a work package bundle with witness generation.
+// skipApplyWrites: If true, skip storing/applying contract writes to state.
+// Use skipApplyWrites=true when Phase 1 has already applied state changes and this call is only generating witnesses.
+func (n *NodeContent) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash, skipApplyWrites bool) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
+	return n.statedb.BuildBundle(workPackage, extrinsicsBlobs, coreIndex, rawObjectIDs, n.pvmBackend, skipApplyWrites)
 }
 
 // upon audit, this does CE138 AND CE139 calls to ALL Assurers

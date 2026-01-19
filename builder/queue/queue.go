@@ -277,6 +277,16 @@ func (qs *QueueState) PeekNextBlockNumber() uint64 {
 	return qs.nextBlockNumber
 }
 
+// ReserveNextBlockNumber increments and returns the next block number.
+// Use this during Phase 1 batch building to reserve block numbers before Phase 2 enqueue.
+func (qs *QueueState) ReserveNextBlockNumber() uint64 {
+	qs.mu.Lock()
+	defer qs.mu.Unlock()
+	blockNumber := qs.nextBlockNumber
+	qs.nextBlockNumber++
+	return blockNumber
+}
+
 // Enqueue adds a new bundle to the queue for a specific target core
 // Returns the assigned block number and error if queue is full
 func (qs *QueueState) Enqueue(bundle *types.WorkPackageBundle, coreIndex uint16) (uint64, error) {
@@ -341,6 +351,25 @@ func (qs *QueueState) EnqueueWithOriginalExtrinsics(bundle *types.WorkPackageBun
 	blockNumber := qs.nextBlockNumber
 	qs.nextBlockNumber++
 
+	return qs.enqueueWithBlockNumber(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIndex, txHashes, blockNumber)
+}
+
+// EnqueueWithReservedBlockNumber adds a bundle using a pre-reserved block number.
+// Use this when block numbers were reserved during Phase 1 batch building.
+func (qs *QueueState) EnqueueWithReservedBlockNumber(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic, coreIndex uint16, txHashes []common.Hash, blockNumber uint64) error {
+	qs.mu.Lock()
+	defer qs.mu.Unlock()
+
+	if len(qs.Queued) >= qs.config.MaxQueueDepth {
+		return fmt.Errorf("queue full: %d items queued (max %d)", len(qs.Queued), qs.config.MaxQueueDepth)
+	}
+
+	_, err := qs.enqueueWithBlockNumber(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIndex, txHashes, blockNumber)
+	return err
+}
+
+// enqueueWithBlockNumber is the internal implementation for enqueueing with a specific block number.
+func (qs *QueueState) enqueueWithBlockNumber(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic, coreIndex uint16, txHashes []common.Hash, blockNumber uint64) (uint64, error) {
 	bundleID := fmt.Sprintf("B-%d", blockNumber)
 	wpHash := bundle.WorkPackage.Hash()
 

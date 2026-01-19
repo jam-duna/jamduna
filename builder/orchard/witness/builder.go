@@ -201,7 +201,7 @@ func (b *OrchardBuilder) BuildBundle(txs []OrchardTransaction) (*types.WorkPacka
 	extrinsicsBlobs = append(extrinsicsBlobs, extrinsicDataArray)
 
 	// Execute bundle to generate witnesses for the pending transactions
-	_, workReport, err := b.jamClient.BuildBundle(workPackage, extrinsicsBlobs, 0, nil, "")
+	_, workReport, err := b.jamClient.BuildBundle(workPackage, extrinsicsBlobs, 0, nil, "", false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute bundle: %v", err)
 	}

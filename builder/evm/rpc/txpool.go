@@ -1,8 +1,10 @@
 package rpc
 
 import (
+	"bytes"
 	"fmt"
 	"math/big"
+	"sort"
 	"sync"
 	"time"
 
@@ -158,6 +160,139 @@ func (pool *TxPool) GetPendingTransactions() []*evmtypes.EthereumTransaction {
 	return txs
 }
 
+// GetPendingTransactionsSorted returns all pending transactions sorted by (sender, nonce).
+// This ensures deterministic ordering for batch processing and correct nonce sequencing.
+func (pool *TxPool) GetPendingTransactionsSorted() []*evmtypes.EthereumTransaction {
+	pool.mutex.RLock()
+	defer pool.mutex.RUnlock()
+
+	txs := make([]*evmtypes.EthereumTransaction, 0, len(pool.pending))
+	for _, entry := range pool.pending {
+		if entry.Status == TxStatusPending {
+			txs = append(txs, entry.Tx)
+		}
+	}
+
+	// Sort by (sender address, nonce) for deterministic ordering
+	sort.Slice(txs, func(i, j int) bool {
+		// First compare by sender address
+		cmp := bytes.Compare(txs[i].From.Bytes(), txs[j].From.Bytes())
+		if cmp != 0 {
+			return cmp < 0
+		}
+		// Same sender: sort by nonce ascending
+		return txs[i].Nonce < txs[j].Nonce
+	})
+
+	return txs
+}
+
+// GetAndLockPendingTransactionsSorted atomically gets all pending transactions sorted by (sender, nonce)
+// and locks them to a "batch processing" state with BlockNumber=0.
+// Caller MUST call AssignBlockNumber() per-batch to set the real block number,
+// or UnlockTransactionsFromBundle() on failure.
+// This prevents race conditions where transactions could be modified between fetch and lock.
+func (pool *TxPool) GetAndLockPendingTransactionsSorted() ([]*evmtypes.EthereumTransaction, []common.Hash) {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+
+	txs := make([]*evmtypes.EthereumTransaction, 0, len(pool.pending))
+
+	for _, entry := range pool.pending {
+		if entry.Status == TxStatusPending {
+			txs = append(txs, entry.Tx)
+			// Mark as in-bundle with block 0 (MUST be updated via AssignBlockNumber)
+			entry.Status = TxStatusInBundle
+			entry.BlockNumber = 0
+		}
+	}
+
+	// Sort by (sender address, nonce) for deterministic ordering
+	sort.Slice(txs, func(i, j int) bool {
+		cmp := bytes.Compare(txs[i].From.Bytes(), txs[j].From.Bytes())
+		if cmp != 0 {
+			return cmp < 0
+		}
+		return txs[i].Nonce < txs[j].Nonce
+	})
+
+	// Build hashes in sorted order
+	hashes := make([]common.Hash, len(txs))
+	for i, tx := range txs {
+		hashes[i] = tx.Hash
+	}
+
+	return txs, hashes
+}
+
+// AssignBlockNumber updates the BlockNumber for transactions that were locked via
+// GetAndLockPendingTransactionsSorted(). This MUST be called per-batch after Phase 1 succeeds.
+//
+// Behavior:
+// - Updates transactions with BlockNumber=0 to the specified blockNumber
+// - Idempotent: if BlockNumber already equals blockNumber, no-op (not counted in return value)
+//
+// PANICS if:
+// - A transaction hash is not found in the pool (indicates pool corruption or logic error)
+// - A transaction has unexpected status (not TxStatusInBundle)
+// - A transaction is already assigned to a DIFFERENT non-zero block (double-bundle bug)
+//
+// Returns the number of transactions actually updated (excludes idempotent no-ops).
+func (pool *TxPool) AssignBlockNumber(hashes []common.Hash, blockNumber uint64) int {
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+
+	updated := 0
+	for _, hash := range hashes {
+		entry, exists := pool.pending[hash]
+		if !exists {
+			// CRITICAL: Transaction should exist - it was locked by GetAndLockPendingTransactionsSorted
+			log.Error(log.Node, "CRITICAL BUG: Transaction not found in pool during AssignBlockNumber",
+				"txHash", hash.Hex(),
+				"blockNumber", blockNumber)
+			panic(fmt.Sprintf("TxPool: CRITICAL BUG - transaction %s not found in pool during AssignBlockNumber for block %d",
+				hash.Hex(), blockNumber))
+		}
+
+		if entry.Status != TxStatusInBundle {
+			// CRITICAL: Transaction should be InBundle - it was locked by GetAndLockPendingTransactionsSorted
+			log.Error(log.Node, "CRITICAL BUG: Transaction has unexpected status during AssignBlockNumber",
+				"txHash", hash.Hex(),
+				"status", entry.Status,
+				"expectedStatus", TxStatusInBundle,
+				"blockNumber", blockNumber)
+			panic(fmt.Sprintf("TxPool: CRITICAL BUG - transaction %s has status %d (expected %d) during AssignBlockNumber for block %d",
+				hash.Hex(), entry.Status, TxStatusInBundle, blockNumber))
+		}
+
+		if entry.BlockNumber == 0 {
+			// Expected case: update from temporary state
+			entry.BlockNumber = blockNumber
+			updated++
+		} else if entry.BlockNumber != blockNumber {
+			// CRITICAL: Already assigned to a DIFFERENT block - this is a double-bundle bug!
+			log.Error(log.Node, "CRITICAL BUG: Transaction already assigned to different block",
+				"txHash", hash.Hex(),
+				"existingBlock", entry.BlockNumber,
+				"newBlock", blockNumber)
+			panic(fmt.Sprintf("TxPool: CRITICAL BUG - transaction %s already assigned to block %d, cannot assign to block %d",
+				hash.Hex(), entry.BlockNumber, blockNumber))
+		}
+		// else: same block number, idempotent - skip silently (updated not incremented)
+	}
+
+	// Sanity check: we should have updated all hashes (unless idempotent re-assignment)
+	// On first call, updated should equal len(hashes)
+	if updated > 0 {
+		log.Debug(log.Node, "TxPool: Assigned block number to transactions",
+			"updated", updated,
+			"total", len(hashes),
+			"blockNumber", blockNumber)
+	}
+
+	return updated
+}
+
 // GetPendingTransactionsLimit returns up to `limit` pending transactions that are NOT locked to a bundle
 // Transactions are returned in nonce order for each sender
 func (pool *TxPool) GetPendingTransactionsLimit(limit int) []*evmtypes.EthereumTransaction {
@@ -177,12 +312,26 @@ func (pool *TxPool) GetPendingTransactionsLimit(limit int) []*evmtypes.EthereumT
 	return txs
 }
 
-// Size returns the total number of transactions in the pool
+// Size returns the total number of transactions in the pool (includes all statuses)
 func (pool *TxPool) Size() int {
 	pool.mutex.RLock()
 	defer pool.mutex.RUnlock()
 
 	return len(pool.pending) + len(pool.queued)
+}
+
+// GetPendingOnlyCount returns count of transactions with TxStatusPending only (excludes InBundle and queued)
+func (pool *TxPool) GetPendingOnlyCount() int {
+	pool.mutex.RLock()
+	defer pool.mutex.RUnlock()
+
+	count := 0
+	for _, entry := range pool.pending {
+		if entry.Status == TxStatusPending {
+			count++
+		}
+	}
+	return count
 }
 
 // GetStats returns current pool statistics

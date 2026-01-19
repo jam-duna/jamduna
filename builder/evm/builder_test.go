@@ -192,7 +192,7 @@ func TestEVMBlocksTransfersLocal(t *testing.T) {
 	}
 
 	// Now execute the bundle with StateDB.BuildBundle
-	bundle, workReport, err := n.GetStateDB().BuildBundle(workPackage, extrinsicsBlobs, 0, nil, statedb.BackendInterpreter)
+	bundle, workReport, err := n.GetStateDB().BuildBundle(workPackage, extrinsicsBlobs, 0, nil, statedb.BackendInterpreter, false)
 
 	if err != nil {
 		t.Fatalf("StateDB.BuildBundle returned error: %v", err)

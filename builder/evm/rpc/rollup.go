@@ -292,8 +292,10 @@ func (r *Rollup) ExecutePhase1(
 		return nil, fmt.Errorf("StateDB not available")
 	}
 
-	// Step 1: Capture EVMPreStateRoot BEFORE execution
+	// Step 1: Capture EVMPreStateRoot BEFORE execution and store pre-state tree
+	// We must store the tree for PinToStateRoot to work in Phase 2
 	evmPreStateRoot := r.storage.GetCurrentUBTRoot()
+	r.storage.StoreCurrentUBTAtRoot(evmPreStateRoot)
 	log.Info(log.EVM, "ExecutePhase1: captured pre-state root", "root", evmPreStateRoot.Hex())
 
 	// Step 2: DISABLE UBT read logging for Phase 1 (faster execution)
@@ -372,7 +374,15 @@ func (r *Rollup) ExecutePhase1(
 			"resultLen", len(result.Ok))
 	}
 
-	// Step 5: Capture EVMPostStateRoot AFTER execution
+	// Step 5: Apply state changes to CurrentUBT to advance state for next block
+	if len(stateChanges) > 0 {
+		if err := r.storage.ApplyContractWrites(stateChanges); err != nil {
+			return nil, fmt.Errorf("ExecutePhase1: failed to apply state changes: %w", err)
+		}
+		log.Debug(log.EVM, "ExecutePhase1: applied state changes", "blobSize", len(stateChanges))
+	}
+
+	// Step 6: Capture EVMPostStateRoot AFTER applying state changes
 	evmPostStateRoot := r.storage.GetCurrentUBTRoot()
 	log.Info(log.EVM, "ExecutePhase1: captured post-state root",
 		"preRoot", evmPreStateRoot.Hex(),
@@ -465,7 +475,7 @@ func (r *Rollup) BuildAndEnqueueWorkPackage(
 	}
 
 	// Build bundle - reads will use active snapshot if set
-	bundle, workReport, err := r.GetStateDB().BuildBundle(workPackage, extrinsicsBlobs, 0, nil, r.pvmBackend)
+	bundle, workReport, err := r.GetStateDB().BuildBundle(workPackage, extrinsicsBlobs, 0, nil, r.pvmBackend, false)
 
 	// Always clear active snapshot after build, regardless of success/failure
 	evmStorage.ClearActiveSnapshot()
@@ -636,11 +646,12 @@ func (r *Rollup) getTransactionReceiptSlowPath(txHash common.Hash) (*evmtypes.Tr
 		return nil, fmt.Errorf("slow path: failed to read block receipts: %v", err)
 	}
 	if !exists {
-		// Receipts not yet written to DA - fall back to reading individual receipt
-		// This can happen for very recent blocks
-		log.Debug(log.Node, "slow path: block receipts not in DA, trying individual lookup",
-			"blockNumber", foundBlock.Number)
-		return r.getTransactionReceiptLegacy(txHash)
+		// Receipts not yet written to DA - return nil (pending)
+		// This can happen for very recent blocks that haven't been accumulated yet
+		log.Debug(log.Node, "slow path: block receipts not in DA yet (pending)",
+			"blockNumber", foundBlock.Number,
+			"txHash", txHash.Hex())
+		return nil, nil
 	}
 
 	// Step 4: Parse receipts blob and find the matching receipt
@@ -667,26 +678,6 @@ func (r *Rollup) getTransactionReceiptSlowPath(txHash common.Hash) (*evmtypes.Tr
 	}
 
 	return nil, fmt.Errorf("slow path: receipt not found in block receipts blob (block=%d)", foundBlock.Number)
-}
-
-// getTransactionReceiptLegacy uses the old meta-shard based lookup
-// DEPRECATED: Meta-shard overwrites make this unreliable for multi-bundle scenarios
-func (r *Rollup) getTransactionReceiptLegacy(txHash common.Hash) (*evmtypes.TransactionReceipt, error) {
-	receiptObjectID := evmtypes.TxToObjectID(txHash)
-	witness, found, err := r.GetStateDB().ReadObject(r.serviceID, receiptObjectID)
-	if err != nil {
-		return nil, fmt.Errorf("legacy: failed to read transaction receipt: %v", err)
-	}
-	if !found {
-		return nil, nil // Transaction not found
-	}
-
-	// Parse raw receipt
-	receipt, err := evmtypes.ParseRawReceipt(witness)
-	if err != nil {
-		return nil, fmt.Errorf("legacy: failed to parse receipt: %v", err)
-	}
-	return receipt, nil
 }
 
 func (r *Rollup) GetTransactionReceipt(txHash common.Hash) (*evmtypes.EthereumTransactionReceipt, error) {
@@ -1375,7 +1366,7 @@ func (r *Rollup) createSimulatedTx(tx *evmtypes.EthereumTransaction, pvmBackend 
 
 	// Execute the work package with proper parameters
 	// Use core index 0 for simulation, current slot, and mark as not first guarantor
-	_, workReport, err = r.GetStateDB().BuildBundle(workPackage, []types.ExtrinsicsBlobs{types.ExtrinsicsBlobs{extrinsic}}, 0, nil, pvmBackend)
+	_, workReport, err = r.GetStateDB().BuildBundle(workPackage, []types.ExtrinsicsBlobs{types.ExtrinsicsBlobs{extrinsic}}, 0, nil, pvmBackend, false)
 	if err != nil {
 		return nil, fmt.Errorf("BuildBundle failed: %v", err)
 	}
@@ -1813,7 +1804,7 @@ func (r *Rollup) PackageMulticoreBundles(evmTxsMulticore [][][]byte) ([]*types.W
 		wp.WorkItems[0].Payload = evmtypes.BuildPayload(evmtypes.PayloadTypeBuilder, numTxExtrinsics, globalDepth, 0, common.Hash{})
 		wp.WorkItems[0].Extrinsics = hashes
 		//  BuildBundle should return a Bundle (with ImportedSegments)
-		bundle2, _, err := r.GetStateDB().BuildBundle(wp, []types.ExtrinsicsBlobs{blobs}, uint16(coreIndex), nil, r.pvmBackend)
+		bundle2, _, err := r.GetStateDB().BuildBundle(wp, []types.ExtrinsicsBlobs{blobs}, uint16(coreIndex), nil, r.pvmBackend, false)
 		if err != nil {
 			return nil, fmt.Errorf("BuildBundle failed: %v", err)
 		}

@@ -559,6 +559,10 @@ type EVMJAMStorage interface {
 	// This is the EVMPreStateRoot before execution or EVMPostStateRoot after
 	GetCurrentUBTRoot() common.Hash
 
+	// StoreCurrentUBTAtRoot stores a copy of CurrentUBT at the given root hash
+	// Used by Phase 1 to preserve pre-state trees for Phase 2 pinning
+	StoreCurrentUBTAtRoot(root common.Hash)
+
 	// PinToStateRoot pins execution to a specific historical state root
 	// Used for Phase 1 verification (re-execute against same pre-state)
 	// Returns error if the state root is not available (too old or never existed)

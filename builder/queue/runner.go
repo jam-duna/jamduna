@@ -482,6 +482,12 @@ func (r *Runner) PeekNextBlockNumber() uint64 {
 	return r.queue.PeekNextBlockNumber()
 }
 
+// ReserveNextBlockNumber increments and returns the next block number.
+// Use this during Phase 1 batch building to reserve block numbers before Phase 2 enqueue.
+func (r *Runner) ReserveNextBlockNumber() uint64 {
+	return r.queue.ReserveNextBlockNumber()
+}
+
 // GetStats returns the current queue statistics
 func (r *Runner) GetStats() QueueStats {
 	return r.queue.GetStats()
@@ -497,6 +503,12 @@ func (r *Runner) EnqueueBundle(bundle *types.WorkPackageBundle, coreIndex uint16
 // The originalWorkItemExtrinsics are needed to restore WorkItems[].Extrinsics metadata before rebuilding
 func (r *Runner) EnqueueBundleWithOriginalExtrinsics(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic, coreIndex uint16, txHashes []common.Hash) (uint64, error) {
 	return r.queue.EnqueueWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIndex, txHashes)
+}
+
+// EnqueueBundleWithReservedBlockNumber enqueues a bundle using a pre-reserved block number.
+// Use this when block numbers were reserved during Phase 1 batch building.
+func (r *Runner) EnqueueBundleWithReservedBlockNumber(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic, coreIndex uint16, txHashes []common.Hash, blockNumber uint64) error {
+	return r.queue.EnqueueWithReservedBlockNumber(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIndex, txHashes, blockNumber)
 }
 
 // HandleGuaranteed processes a guarantee event

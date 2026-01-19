@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -42,8 +41,6 @@ const (
 	DefaultMaxTxsPerBundle = 5
 )
 
-// coreCounter is used to round-robin work packages between cores 0 and 1
-var coreCounter uint64
 
 // maxTxsPerBundleConfig holds the configured max transactions per bundle
 var maxTxsPerBundleConfig int
@@ -81,7 +78,7 @@ func main() {
 			fmt.Printf("  PVM Backend: %s\n", pvmBackend)
 			fmt.Printf("  Max Txs Per Bundle: %d\n", maxTxsPerBundle)
 
-			// Set package-level config for use by buildAndEnqueueWorkPackageForCore
+			// Set package-level config for two-phase bundle building
 			maxTxsPerBundleConfig = maxTxsPerBundle
 
 			// Initialize logging
@@ -295,8 +292,8 @@ func main() {
 					}
 				}
 
-				// Rebuild via StateDB.BuildBundle
-				bundle, _, err := n.BuildBundle(item.Bundle.WorkPackage, extrinsicsCopy, item.CoreIndex, nil)
+				// Rebuild via StateDB.BuildBundle (skip writes - already applied)
+				bundle, _, err := n.BuildBundle(item.Bundle.WorkPackage, extrinsicsCopy, item.CoreIndex, nil, true)
 
 				// Always clear active snapshot after build
 				evmstorage.ClearActiveSnapshot()
@@ -485,102 +482,171 @@ func waitForSync(n *node.Node, timeout time.Duration) error {
 	}
 }
 
+// phase1BlockData holds all data needed to execute Phase 2 for a block
+type phase1BlockData struct {
+	blockNumber               uint64
+	coreIdx                   uint16
+	workPackage               types.WorkPackage
+	extrinsicsBlobs           []types.ExtrinsicsBlobs
+	originalExtrinsics        []types.ExtrinsicsBlobs
+	originalWorkItemExtrinsics [][]types.WorkItemExtrinsic
+	txHashes                  []common.Hash
+	phase1Result              *evmtypes.Phase1Result
+	evmBlock                  *evmtypes.EvmBlockPayload
+}
+
 // handleBlockNotifications monitors for pending transactions and builds parallel bundles
-// Pipeline: Pull TotalCores * MaxTxsPerBundle txns → Build bundles for each core → Submit together
+// Two-Phase Pipeline:
+//   Phase 1: Pull ALL txns upfront, build ALL evmBlocks (no witnesses) - FAST
+//   Phase 2: Generate witnesses and submit bundles to JAM - with verification
 func handleBlockNotifications(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrpc.TxPool, serviceID uint32, queueRunner *queue.Runner) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		pendingCount := txPool.Size()
+		// Use GetPendingOnlyCount to exclude transactions already in bundles
+		pendingCount := txPool.GetPendingOnlyCount()
 		if pendingCount == 0 {
 			continue
 		}
 
-		log.Info(log.Node, "📦 Building bundles",
-			"pendingTxs", pendingCount,
-			"totalCores", types.TotalCores,
+		// Get storage for snapshot management
+		storage, _ := n.GetStorage()
+		evmStorage := storage.(types.EVMJAMStorage)
+
+		// ============================================================
+		// PHASE 1: Pull ALL txns upfront, build ALL evmBlocks (no witnesses)
+		// ============================================================
+
+		// (1) Atomically get AND lock ALL pending transactions (sorted by sender+nonce)
+		// This prevents race conditions and ensures deterministic ordering
+		allPendingTxs, allTxHashes := txPool.GetAndLockPendingTransactionsSorted()
+		if len(allPendingTxs) == 0 {
+			continue
+		}
+
+		log.Info(log.Node, "🔷 PHASE 1: Building all evmBlocks...",
+			"totalPendingTxs", len(allPendingTxs),
 			"maxTxsPerBundle", maxTxsPerBundleConfig)
 
-		// Build bundles for each core while we have transactions
-		// Each bundle takes up to MaxTxsPerBundle transactions
-		bundlesBuilt := 0
-		for core := 0; core < types.TotalCores && txPool.Size() > 0; core++ {
-			// Calculate anchor offset based on current queue position
-			// Leave 2 blocks headroom before anchor expires
-			// Subtract 1 for each bundle pair ahead in queue (fresher anchor for later bundles)
+		// Track which transactions were successfully processed for cleanup on failure
+		// (2) Build ALL evmBlocks from the pre-fetched transaction list
+		var phase1Blocks []phase1BlockData
+		txOffset := 0
+		blockIdx := 0
+		phase1Failed := false
+
+		for txOffset < len(allPendingTxs) {
+			// Calculate how many txns for this bundle
+			endOffset := txOffset + maxTxsPerBundleConfig
+			if endOffset > len(allPendingTxs) {
+				endOffset = len(allPendingTxs)
+			}
+			batchTxs := allPendingTxs[txOffset:endOffset]
+			batchHashes := allTxHashes[txOffset:endOffset]
+
+			// Round-robin core assignment
+			coreIdx := uint16(blockIdx % types.TotalCores)
+
+			// Calculate anchor offset based on queue position
 			stats := queueRunner.GetStats()
-			queuePosition := stats.QueuedCount + stats.InflightCount
+			queuePosition := stats.QueuedCount + stats.InflightCount + len(phase1Blocks)
 			bundlePairsAhead := queuePosition / types.TotalCores
 			anchorOffset := types.RecentHistorySize - 2 - bundlePairsAhead
 			if anchorOffset < 1 {
 				anchorOffset = 1
 			}
 
-			if err := buildAndEnqueueWorkPackageForCore(n, rollup, txPool, serviceID, queueRunner, uint16(core), anchorOffset); err != nil {
-				// "no pending transactions" is expected when txpool is empty - log as debug
-				if err.Error() == "no pending transactions" {
-					log.Debug(log.Node, "No pending transactions for core", "core", core)
-				} else {
-					log.Warn(log.Node, "Failed to build bundle for core", "core", core, "err", err)
-				}
-				break // Stop if we hit an error or no more transactions
+			blockData, err := executePhase1ForBatch(n, rollup, queueRunner, batchTxs, batchHashes, coreIdx, anchorOffset)
+			if err != nil {
+				log.Warn(log.Node, "Phase 1 failed", "blockIdx", blockIdx, "core", coreIdx, "err", err)
+				phase1Failed = true
+				break
 			}
-			bundlesBuilt++
+
+			// Assign real block number to this batch's transactions (updates from BlockNumber=0)
+			txPool.AssignBlockNumber(batchHashes, blockData.blockNumber)
+
+			phase1Blocks = append(phase1Blocks, *blockData)
+			txOffset = endOffset
+			blockIdx++
 		}
 
-		if bundlesBuilt > 0 {
-			log.Info(log.Node, "📤 Bundles enqueued",
-				"bundlesBuilt", bundlesBuilt,
-				"remainingTxs", txPool.Size())
+		// If Phase 1 failed or produced no blocks, unlock unprocessed transactions
+		if phase1Failed || len(phase1Blocks) == 0 {
+			// Unlock transactions that weren't assigned to a block
+			unprocessedHashes := allTxHashes[txOffset:]
+			if len(unprocessedHashes) > 0 {
+				txPool.UnlockTransactionsFromBundle(unprocessedHashes)
+				log.Info(log.Node, "🔓 Unlocked unprocessed transactions after Phase 1 failure",
+					"count", len(unprocessedHashes))
+			}
+			if len(phase1Blocks) == 0 {
+				continue
+			}
 		}
+
+		log.Info(log.Node, "🔷 PHASE 1 complete: All evmBlocks ready",
+			"blocksBuilt", len(phase1Blocks),
+			"totalTxsProcessed", txOffset)
+
+		// ============================================================
+		// PHASE 2: Generate witnesses and submit ALL bundles
+		// ============================================================
+		log.Info(log.Node, "🔶 PHASE 2: Generating witnesses and submitting bundles...")
+
+		bundlesSubmitted := 0
+		for _, blockData := range phase1Blocks {
+			if err := executePhase2ForBlock(n, rollup, txPool, serviceID, queueRunner, evmStorage, &blockData); err != nil {
+				log.Warn(log.Node, "Phase 2 failed for block",
+					"blockNumber", blockData.blockNumber,
+					"core", blockData.coreIdx,
+					"err", err)
+				// Continue with other blocks - don't break
+				continue
+			}
+			bundlesSubmitted++
+		}
+
+		stats := txPool.GetStats()
+		log.Info(log.Node, "🔶 PHASE 2 complete: Bundles submitted",
+			"bundlesSubmitted", bundlesSubmitted,
+			"pendingTxs", stats.PendingCount,
+			"inBundleTxs", stats.InBundleCount,
+			"queuedTxs", stats.QueuedCount)
 	}
 }
 
-// buildAndEnqueueWorkPackageForCore builds a work package for a specific core from maxTxsPerBundleConfig transactions
-// Each bundle is independent with its own pre→post UBT state using multi-snapshot UBT system
-// anchorOffset controls how far back the anchor slot is from current slot (smaller = fresher anchor)
-func buildAndEnqueueWorkPackageForCore(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrpc.TxPool, serviceID uint32, queueRunner *queue.Runner, coreIdx uint16, anchorOffset int) error {
-	// Get only maxTxsPerBundleConfig pending transactions
-	pendingTxs := txPool.GetPendingTransactionsLimit(maxTxsPerBundleConfig)
-	if len(pendingTxs) == 0 {
-		return fmt.Errorf("no pending transactions")
+// executePhase1ForBatch executes Phase 1 for a batch of transactions: build evmBlock without witnesses.
+// Takes pre-fetched and pre-locked transactions (already sorted by sender+nonce).
+// Returns phase1BlockData containing all info needed for Phase 2.
+func executePhase1ForBatch(n *node.Node, rollup *evmrpc.Rollup, queueRunner *queue.Runner, batchTxs []*evmtypes.EthereumTransaction, batchHashes []common.Hash, coreIdx uint16, anchorOffset int) (*phase1BlockData, error) {
+	if len(batchTxs) == 0 {
+		return nil, fmt.Errorf("no transactions in batch")
 	}
 
 	// Get refine context with the specified anchor offset
 	refineCtx, err := n.GetRefineContextWithBuffer(anchorOffset)
 	if err != nil {
-		return fmt.Errorf("failed to get refine context: %w", err)
+		return nil, fmt.Errorf("failed to get refine context: %w", err)
 	}
 
-	// Log transactions being included in this work package
-	log.Info(log.Node, "📦 Building work package for core",
+	// Reserve block number upfront so each Phase 1 call gets a unique number
+	blockNumber := queueRunner.ReserveNextBlockNumber()
+
+	log.Info(log.Node, "🔷 Phase 1: Building evmBlock",
+		"blockNumber", blockNumber,
 		"core", coreIdx,
-		"txCount", len(pendingTxs),
-		"anchorSlot", refineCtx.LookupAnchorSlot,
-		"anchorOffset", anchorOffset)
+		"txCount", len(batchTxs),
+		"anchorSlot", refineCtx.LookupAnchorSlot)
 
-	for i, tx := range pendingTxs {
-		log.Debug(log.Node, "  📦 TX in package",
-			"core", coreIdx,
-			"idx", i,
-			"hash", tx.Hash.Hex(),
-			"nonce", tx.Nonce,
-			"from", tx.From.Hex(),
-			"to", tx.To.Hex(),
-			"value", tx.Value.String())
-	}
-
-	// Prepare work package and extrinsics from pending transactions
-	// extrinsicsBlobs contains ONLY the transaction RLP data (no UBT witness yet)
-	workPackage, extrinsicsBlobs, err := rollup.PrepareWorkPackage(refineCtx, pendingTxs)
+	// Prepare work package and extrinsics from batch transactions
+	workPackage, extrinsicsBlobs, err := rollup.PrepareWorkPackage(refineCtx, batchTxs)
 	if err != nil {
-		return fmt.Errorf("failed to prepare work package: %w", err)
+		return nil, fmt.Errorf("failed to prepare work package: %w", err)
 	}
 
-	// Save original extrinsics BEFORE BuildBundle prepends the UBT witness
-	// This is needed for rebuilding on resubmission
-	// CRITICAL: Must deep copy to prevent mutation by BuildBundle
+	// Save original extrinsics BEFORE any modification (deep copy)
 	originalExtrinsics := make([]types.ExtrinsicsBlobs, len(extrinsicsBlobs))
 	for i, blobs := range extrinsicsBlobs {
 		originalExtrinsics[i] = make(types.ExtrinsicsBlobs, len(blobs))
@@ -590,92 +656,123 @@ func buildAndEnqueueWorkPackageForCore(n *node.Node, rollup *evmrpc.Rollup, txPo
 		}
 	}
 
-	// Save original WorkItems[].Extrinsics metadata BEFORE BuildBundle prepends UBT witness metadata
-	// This is needed for rebuilding on resubmission - BuildBundle also prepends metadata entries
+	// Save original WorkItems[].Extrinsics metadata
 	originalWorkItemExtrinsics := make([][]types.WorkItemExtrinsic, len(workPackage.WorkItems))
 	for i, wi := range workPackage.WorkItems {
 		originalWorkItemExtrinsics[i] = make([]types.WorkItemExtrinsic, len(wi.Extrinsics))
 		copy(originalWorkItemExtrinsics[i], wi.Extrinsics)
 	}
 
-	// Collect transaction hashes for txpool cleanup on accumulation
-	txHashes := make([]common.Hash, len(pendingTxs))
-	for i, tx := range pendingTxs {
-		txHashes[i] = tx.Hash
+	// Execute Phase 1: EVM without witnesses
+	// Note: No snapshot needed here - Phase 2 pins to pre-state root directly
+	phase1Result, err := rollup.ExecutePhase1(workPackage, originalExtrinsics)
+	if err != nil {
+		return nil, fmt.Errorf("Phase 1 execution failed: %w", err)
 	}
 
-	// === Multi-Snapshot UBT: Create and activate per-bundle snapshot ===
-	// Get block number BEFORE building so we can create/activate snapshot
-	blockNumber := queueRunner.PeekNextBlockNumber()
-
-	// Get storage for snapshot management
-	storage, _ := n.GetStorage()
-	evmStorage := storage.(types.EVMJAMStorage)
-
-	// Create snapshot for this block, chaining from previous block's snapshot or canonical
-	if err := evmStorage.CreateSnapshotForBlock(blockNumber); err != nil {
-		log.Warn(log.EVM, "Failed to create snapshot, using canonical state",
-			"blockNumber", blockNumber,
-			"error", err)
-		// Continue without snapshot - will use canonical CurrentUBT
-	} else {
-		// Activate the snapshot for reads during BuildBundle
-		if err := evmStorage.SetActiveSnapshot(blockNumber); err != nil {
-			log.Warn(log.EVM, "Failed to activate snapshot",
-				"blockNumber", blockNumber,
-				"error", err)
+	// Build EvmBlockPayload
+	var receipts []evmtypes.TransactionReceipt
+	for _, r := range phase1Result.Receipts {
+		if r != nil {
+			receipts = append(receipts, *r)
 		}
 	}
 
-	// Build bundle via NodeContent.BuildBundle -> StateDB.BuildBundle (executes refine)
-	// NOTE: BuildBundle prepends a UBT witness to each work item's extrinsics
-	// Use the specified core index (not round-robin)
-	bundle, workReport, err := n.BuildBundle(workPackage, extrinsicsBlobs, coreIdx, nil)
-
-	// Always clear active snapshot after build, regardless of success/failure
-	evmStorage.ClearActiveSnapshot()
-
-	if err != nil {
-		// On build failure, invalidate the snapshot we created
-		evmStorage.InvalidateSnapshotsFrom(blockNumber)
-		return fmt.Errorf("failed to build bundle: %w", err)
+	evmBlock := &evmtypes.EvmBlockPayload{
+		Number:          uint32(blockNumber),
+		NumTransactions: uint32(len(batchTxs)),
+		GasUsed:         phase1Result.TotalGasUsed,
+		UBTRoot:         phase1Result.EVMPostStateRoot,
+		TxHashes:        batchHashes,
+		Transactions:    receipts,
 	}
 
-	// Enqueue to queue runner with original extrinsics and tx hashes for resubmission support
-	// Pass coreIdx so the runner submits to the correct core
-	// Transactions will be removed from txpool only when bundle accumulates (not now)
-	enqueuedBlockNumber, err := queueRunner.EnqueueBundleWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIdx, txHashes)
+	blockCommitment := evmBlock.BlockCommitment()
+	log.Info(log.Node, "🔷 Phase 1 complete: evmBlock ready",
+		"blockNumber", blockNumber,
+		"blockCommitment", blockCommitment.Hex(),
+		"preStateRoot", phase1Result.EVMPreStateRoot.Hex(),
+		"postStateRoot", phase1Result.EVMPostStateRoot.Hex(),
+		"receipts", len(receipts))
+
+	// Store block in cache for RPC serving (receipts available immediately)
+	rollup.AddBlock(evmBlock)
+
+	return &phase1BlockData{
+		blockNumber:                blockNumber,
+		coreIdx:                    coreIdx,
+		workPackage:                workPackage,
+		extrinsicsBlobs:            extrinsicsBlobs,
+		originalExtrinsics:         originalExtrinsics,
+		originalWorkItemExtrinsics: originalWorkItemExtrinsics,
+		txHashes:                   batchHashes,
+		phase1Result:               phase1Result,
+		evmBlock:                   evmBlock,
+	}, nil
+}
+
+// executePhase2ForBlock executes Phase 2 for a block: generate witnesses and submit bundle.
+func executePhase2ForBlock(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrpc.TxPool, serviceID uint32, queueRunner *queue.Runner, evmStorage types.EVMJAMStorage, blockData *phase1BlockData) error {
+	blockCommitment := blockData.evmBlock.BlockCommitment()
+
+	log.Info(log.Node, "🔶 Phase 2: Generating witnesses",
+		"blockNumber", blockData.blockNumber,
+		"blockCommitment", blockCommitment.Hex(),
+		"preStateRoot", blockData.phase1Result.EVMPreStateRoot.Hex())
+
+	// Pin to pre-state root for witness generation
+	if err := evmStorage.PinToStateRoot(blockData.phase1Result.EVMPreStateRoot); err != nil {
+		txPool.UnlockTransactionsFromBundle(blockData.txHashes)
+		return fmt.Errorf("CRITICAL: failed to pin to pre-state root: %w", err)
+	}
+
+	// Build bundle with witness generation (skip writes - Phase 1 already applied them)
+	bundle, workReport, err := n.BuildBundle(blockData.workPackage, blockData.extrinsicsBlobs, blockData.coreIdx, nil, true)
+
+	// Unpin after build
+	evmStorage.UnpinState()
+
 	if err != nil {
-		// On enqueue failure, invalidate the snapshot
-		evmStorage.InvalidateSnapshotsFrom(blockNumber)
+		txPool.UnlockTransactionsFromBundle(blockData.txHashes)
+		return fmt.Errorf("Phase 2 bundle build failed: %w", err)
+	}
+
+	// Update the cached evmBlock with the BlockCommitment as the BlockHash
+	// This is needed for eth_getTransactionReceipt to return correct BlockHash
+	// We use blockCommitment (voting digest) rather than bundle.WorkPackage.Hash() because:
+	// - WorkPackageHash includes RefineContext which changes on resubmission
+	// - BlockCommitment is derived from deterministic 148-byte header and is stable
+	blockData.evmBlock.WorkPackageHash = blockCommitment
+	// Also update each receipt's BlockHash and BlockNumber
+	for i := range blockData.evmBlock.Transactions {
+		blockData.evmBlock.Transactions[i].BlockHash = blockCommitment
+		blockData.evmBlock.Transactions[i].BlockNumber = uint32(blockData.blockNumber)
+	}
+	// Also update the block cache's byHash index
+	rollup.GetBlockCache().UpdateBlockHash(blockData.evmBlock, blockCommitment)
+
+	// Enqueue bundle using pre-reserved block number from Phase 1
+	err = queueRunner.EnqueueBundleWithReservedBlockNumber(
+		bundle,
+		blockData.originalExtrinsics,
+		blockData.originalWorkItemExtrinsics,
+		blockData.coreIdx,
+		blockData.txHashes,
+		blockData.blockNumber,
+	)
+	if err != nil {
+		txPool.UnlockTransactionsFromBundle(blockData.txHashes)
 		return fmt.Errorf("failed to enqueue bundle: %w", err)
 	}
 
-	// Sanity check: enqueued block number should match what we peeked
-	if enqueuedBlockNumber != blockNumber {
-		log.Warn(log.EVM, "Block number mismatch between peek and enqueue",
-			"peeked", blockNumber,
-			"enqueued", enqueuedBlockNumber)
-	}
-
-	// Lock transactions to this bundle AFTER successful enqueue
-	// They will be removed by the onAccumulated callback when the bundle accumulates on-chain
-	// Or unlocked if the bundle fails/expires
-	locked := txPool.LockTransactionsToBundle(txHashes, enqueuedBlockNumber)
-	log.Info(log.Node, "🔒 Locked transactions to bundle",
-		"blockNumber", enqueuedBlockNumber,
-		"txCount", len(txHashes),
-		"locked", locked)
-
-	log.Info(log.Node, "📤 Work package enqueued to JAM queue",
+	log.Info(log.Node, "🔶 Phase 2 complete: Bundle submitted",
+		"blockNumber", blockData.blockNumber,
 		"wpHash", bundle.WorkPackage.Hash().Hex(),
 		"workReportHash", workReport.Hash().Hex(),
-		"blockNumber", enqueuedBlockNumber,
-		"targetCore", coreIdx,
+		"blockCommitment", blockCommitment.Hex(),
+		"core", blockData.coreIdx,
 		"serviceID", serviceID,
-		"txCount", len(pendingTxs),
-		"pendingSnapshots", evmStorage.GetPendingSnapshotCount(),
-		"pipeline", "queue->submit->guarantee(E_G)->accumulate->EVM")
+		"txCount", len(blockData.txHashes))
 
 	return nil
 }
@@ -766,115 +863,3 @@ func handleBlockEvents(n *node.Node, serviceID uint32, queueRunner *queue.Runner
 	}
 }
 
-// getNextCoreIndex returns the next core index (0 or 1) using round-robin
-// Builder is not a validator, so it can submit to any core. We rotate between
-// cores 0 and 1 to distribute load. Each work package submission targets one core.
-func getNextCoreIndex() uint16 {
-	count := atomic.AddUint64(&coreCounter, 1)
-	coreIdx := uint16(count % 2) // Alternate between 0 and 1
-	log.Info(log.Node, "🎯 Core rotation (round-robin)",
-		"targetCore", coreIdx,
-		"submissionNum", count,
-		"note", "builder->E_G submission")
-	return coreIdx
-}
-
-// buildAndEnqueueWorkPackage builds a work package from pending txs and enqueues for submission
-// Routes through NodeContent.BuildBundle -> StateDB.BuildBundle which executes refine
-func buildAndEnqueueWorkPackage(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrpc.TxPool, serviceID uint32, queueRunner *queue.Runner) error {
-	// Get pending transactions
-	pendingTxs := txPool.GetPendingTransactions()
-	if len(pendingTxs) == 0 {
-		return fmt.Errorf("no pending transactions")
-	}
-
-	// Get refine context with safe buffer (leave 2 blocks headroom before anchor expires)
-	refineCtx, err := n.GetRefineContextWithBuffer(types.RecentHistorySize - 2)
-	if err != nil {
-		return fmt.Errorf("failed to get refine context: %w", err)
-	}
-
-	// Log transactions being included in this work package
-	log.Info(log.Node, "📦 Building work package",
-		"txCount", len(pendingTxs),
-		"anchorSlot", refineCtx.LookupAnchorSlot)
-	for i, tx := range pendingTxs {
-		log.Info(log.Node, "  📦 TX in package",
-			"idx", i,
-			"hash", tx.Hash.Hex(),
-			"nonce", tx.Nonce,
-			"from", tx.From.Hex(),
-			"to", tx.To.Hex(),
-			"value", tx.Value.String())
-	}
-
-	// Prepare work package and extrinsics from pending transactions
-	// extrinsicsBlobs contains ONLY the transaction RLP data (no UBT witness yet)
-	workPackage, extrinsicsBlobs, err := rollup.PrepareWorkPackage(refineCtx, pendingTxs)
-	if err != nil {
-		return fmt.Errorf("failed to prepare work package: %w", err)
-	}
-
-	// Save original extrinsics BEFORE BuildBundle prepends the UBT witness
-	// This is needed for rebuilding on resubmission
-	// CRITICAL: Must deep copy to prevent mutation by BuildBundle
-	originalExtrinsics := make([]types.ExtrinsicsBlobs, len(extrinsicsBlobs))
-	for i, blobs := range extrinsicsBlobs {
-		originalExtrinsics[i] = make(types.ExtrinsicsBlobs, len(blobs))
-		for j, blob := range blobs {
-			originalExtrinsics[i][j] = make([]byte, len(blob))
-			copy(originalExtrinsics[i][j], blob)
-		}
-	}
-
-	// Save original WorkItems[].Extrinsics metadata BEFORE BuildBundle prepends UBT witness metadata
-	// This is needed for rebuilding on resubmission - BuildBundle also prepends metadata entries
-	originalWorkItemExtrinsics := make([][]types.WorkItemExtrinsic, len(workPackage.WorkItems))
-	for i, wi := range workPackage.WorkItems {
-		originalWorkItemExtrinsics[i] = make([]types.WorkItemExtrinsic, len(wi.Extrinsics))
-		copy(originalWorkItemExtrinsics[i], wi.Extrinsics)
-	}
-
-	// Collect transaction hashes for txpool cleanup on accumulation
-	txHashes := make([]common.Hash, len(pendingTxs))
-	for i, tx := range pendingTxs {
-		txHashes[i] = tx.Hash
-	}
-
-	// Build bundle via NodeContent.BuildBundle -> StateDB.BuildBundle (executes refine)
-	// NOTE: BuildBundle prepends a UBT witness to each work item's extrinsics
-	// Use round-robin core assignment (alternates between core 0 and 1)
-	coreIdx := getNextCoreIndex()
-	bundle, workReport, err := n.BuildBundle(workPackage, extrinsicsBlobs, coreIdx, nil)
-	if err != nil {
-		return fmt.Errorf("failed to build bundle: %w", err)
-	}
-
-	// Enqueue to queue runner with original extrinsics and tx hashes for resubmission support
-	// Pass coreIdx so the runner submits to the correct core
-	// Transactions will be removed from txpool only when bundle accumulates (not now)
-	blockNumber, err := queueRunner.EnqueueBundleWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIdx, txHashes)
-	if err != nil {
-		return fmt.Errorf("failed to enqueue bundle: %w", err)
-	}
-
-	// Lock transactions to this bundle AFTER successful enqueue
-	// They will be removed by the onAccumulated callback when the bundle accumulates on-chain
-	// Or unlocked if the bundle fails/expires
-	locked := txPool.LockTransactionsToBundle(txHashes, blockNumber)
-	log.Info(log.Node, "🔒 Locked transactions to bundle",
-		"blockNumber", blockNumber,
-		"txCount", len(txHashes),
-		"locked", locked)
-
-	log.Info(log.Node, "📤 Work package enqueued to JAM queue",
-		"wpHash", bundle.WorkPackage.Hash().Hex(),
-		"workReportHash", workReport.Hash().Hex(),
-		"blockNumber", blockNumber,
-		"targetCore", coreIdx,
-		"serviceID", serviceID,
-		"txCount", len(pendingTxs),
-		"pipeline", "queue->submit->guarantee(E_G)->accumulate->EVM")
-
-	return nil
-}

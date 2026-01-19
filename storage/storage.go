@@ -396,6 +396,25 @@ func (store *StateDBStorage) StoreUBTTree(root common.Hash, tree *UnifiedBinaryT
 	store.ubtRoots[root] = tree
 }
 
+// StoreCurrentUBTAtRoot stores a COPY of CurrentUBT at the given root hash.
+// Used by Phase 1 to preserve pre-state trees for Phase 2 pinning.
+func (store *StateDBStorage) StoreCurrentUBTAtRoot(root common.Hash) {
+	if store.CurrentUBT == nil {
+		log.Warn(log.EVM, "StoreCurrentUBTAtRoot: CurrentUBT is nil", "root", root.Hex())
+		return
+	}
+	store.ubtRootsMutex.Lock()
+	defer store.ubtRootsMutex.Unlock()
+	// Store a copy so mutations to CurrentUBT don't affect the stored tree
+	copiedTree := store.CurrentUBT.Copy()
+	store.ubtRoots[root] = copiedTree
+	copiedRoot := copiedTree.RootHash()
+	log.Info(log.EVM, "StoreCurrentUBTAtRoot: stored pre-state tree",
+		"requestedRoot", root.Hex(),
+		"copiedTreeRoot", common.BytesToHash(copiedRoot[:]).Hex(),
+		"totalStoredRoots", len(store.ubtRoots))
+}
+
 func (store *StateDBStorage) ReadRawKV(key []byte) ([]byte, bool, error) {
 
 	data, err := store.db.Get(key, nil)
@@ -881,7 +900,17 @@ func (store *StateDBStorage) PinToStateRoot(root common.Hash) error {
 	// Check if we have this root in ubtRoots
 	store.ubtRootsMutex.RLock()
 	tree, found := store.ubtRoots[root]
+	storedRoots := make([]string, 0, len(store.ubtRoots))
+	for r := range store.ubtRoots {
+		storedRoots = append(storedRoots, r.Hex()[:10])
+	}
 	store.ubtRootsMutex.RUnlock()
+
+	log.Info(log.EVM, "PinToStateRoot: checking",
+		"requestedRoot", root.Hex(),
+		"foundInUbtRoots", found,
+		"storedRootsCount", len(storedRoots),
+		"storedRoots", storedRoots)
 
 	if !found {
 		// Check if current tree matches
@@ -890,6 +919,7 @@ func (store *StateDBStorage) PinToStateRoot(root common.Hash) error {
 			if common.BytesToHash(currentRoot[:]) == root {
 				tree = store.CurrentUBT
 				found = true
+				log.Info(log.EVM, "PinToStateRoot: found in CurrentUBT")
 			}
 		}
 	}

@@ -942,7 +942,7 @@ func (j *Jam) SubmitWorkPackageBundle(req []string, res *string) error {
 	// Builder executes BuildBundle to generate and store exported segments
 	// This makes the builder responsible for its own copy of the segments
 	if j.NodeContent.nodeSelf.IsBuilder() {
-		_, _, err := j.NodeContent.BuildBundle(newReq.WorkPackage, newReq.ExtrinsicData, 0, nil)
+		_, _, err := j.NodeContent.BuildBundle(newReq.WorkPackage, newReq.ExtrinsicData, 0, nil, false)
 		if err != nil {
 			log.Error(log.Node, "SubmitWorkPackageBundle: BuildBundle failed", "err", err)
 			return fmt.Errorf("BuildBundle failed: %w", err)

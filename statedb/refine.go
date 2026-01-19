@@ -1072,7 +1072,10 @@ func (s *StateDB) ExecuteWorkPackageBundleSteps(workPackageCoreIndex uint16, pac
 
 // BuildBundle maps a work package into a WorkPackageBundle using JAMDA interface
 // It updates the workpackage work items: (1)  ExportCount ImportedSegments with a special HostFetchWitness call
-func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash, pvmBackend string) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
+//
+// skipApplyWrites: If true, skip storing/applying contract writes to state.
+// Use this when Phase 1 has already applied state changes and Phase 2 is only generating witnesses.
+func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash, pvmBackend string, skipApplyWrites bool) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
 	wp := workPackage.Clone()
 
 	// CRITICAL: Capture RefineContext BEFORE execution (used for witness verification)
@@ -1325,34 +1328,40 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 	workPackageHash := wp.Hash()
 
 	// Apply contract writes to the active UBT snapshot (if multi-snapshot mode is active)
-	// or store as pending writes for legacy deferred application
+	// or store as pending writes for legacy deferred application.
+	// Skip if skipApplyWrites is true (Phase 2 mode - Phase 1 already applied writes).
 	evmStorage := s.sdb.(types.EVMJAMStorage)
-	var totalBlobSize int
-	for _, blob := range contractWitnessBlobs {
-		totalBlobSize += len(blob)
-	}
-	if totalBlobSize > 0 {
-		// Concatenate all blobs for this work package
-		combinedBlob := make([]byte, 0, totalBlobSize)
+	if !skipApplyWrites {
+		var totalBlobSize int
 		for _, blob := range contractWitnessBlobs {
-			combinedBlob = append(combinedBlob, blob...)
+			totalBlobSize += len(blob)
 		}
+		if totalBlobSize > 0 {
+			// Concatenate all blobs for this work package
+			combinedBlob := make([]byte, 0, totalBlobSize)
+			for _, blob := range contractWitnessBlobs {
+				combinedBlob = append(combinedBlob, blob...)
+			}
 
-		// Try to apply writes to active snapshot (multi-snapshot mode)
-		// If no snapshot is active, fall back to deferred writes
-		if err := evmStorage.ApplyWritesToActiveSnapshot(combinedBlob); err != nil {
-			// No active snapshot - use legacy deferred writes path
-			evmStorage.StorePendingWrites(workPackageHash, combinedBlob)
-			log.Info(log.EVM, "BuildBundle: stored pending writes for deferred application (legacy mode)",
-				"wpHash", workPackageHash.Hex(),
-				"combinedBlobSize", len(combinedBlob),
-				"workItemCount", len(contractWitnessBlobs))
-		} else {
-			log.Info(log.EVM, "BuildBundle: applied writes to active snapshot",
-				"wpHash", workPackageHash.Hex(),
-				"combinedBlobSize", len(combinedBlob),
-				"workItemCount", len(contractWitnessBlobs))
+			// Try to apply writes to active snapshot (multi-snapshot mode)
+			// If no snapshot is active, fall back to deferred writes
+			if err := evmStorage.ApplyWritesToActiveSnapshot(combinedBlob); err != nil {
+				// No active snapshot - use legacy deferred writes path
+				evmStorage.StorePendingWrites(workPackageHash, combinedBlob)
+				log.Info(log.EVM, "BuildBundle: stored pending writes for deferred application (legacy mode)",
+					"wpHash", workPackageHash.Hex(),
+					"combinedBlobSize", len(combinedBlob),
+					"workItemCount", len(contractWitnessBlobs))
+			} else {
+				log.Info(log.EVM, "BuildBundle: applied writes to active snapshot",
+					"wpHash", workPackageHash.Hex(),
+					"combinedBlobSize", len(combinedBlob),
+					"workItemCount", len(contractWitnessBlobs))
+			}
 		}
+	} else {
+		log.Debug(log.EVM, "BuildBundle: skipping state writes (Phase 2 mode - already applied in Phase 1)",
+			"wpHash", workPackageHash.Hex())
 	}
 
 	// Store exported segments for builder - both in memory cache and persisted to disk
