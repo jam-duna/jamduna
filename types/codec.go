@@ -22,12 +22,47 @@ type CustomDecoder interface {
 	Decode(data []byte) (interface{}, uint32)
 }
 
-func powerOfTwo(exp uint32) uint64 {
-	var result uint64 = 1
-	for i := uint32(0); i < exp; i++ {
-		result *= 2
+// Cache for map kv pair types to avoid repeated reflect.StructOf calls
+var (
+	kvPairTypeCache   = make(map[reflect.Type]reflect.Type)
+	kvPairTypeCacheMu sync.RWMutex
+)
+
+func getKVPairSliceType(keyType, valueType reflect.Type) reflect.Type {
+	// Create a unique key for this map type
+	mapType := reflect.MapOf(keyType, valueType)
+
+	kvPairTypeCacheMu.RLock()
+	if sliceType, ok := kvPairTypeCache[mapType]; ok {
+		kvPairTypeCacheMu.RUnlock()
+		return sliceType
 	}
-	return result
+	kvPairTypeCacheMu.RUnlock()
+
+	// Create the kv pair type
+	kvPairType := reflect.StructOf([]reflect.StructField{
+		{
+			Name: "Key",
+			Type: keyType,
+			Tag:  reflect.StructTag(`json:"key"`),
+		},
+		{
+			Name: "Value",
+			Type: valueType,
+			Tag:  reflect.StructTag(`json:"value"`),
+		},
+	})
+	sliceType := reflect.SliceOf(kvPairType)
+
+	kvPairTypeCacheMu.Lock()
+	kvPairTypeCache[mapType] = sliceType
+	kvPairTypeCacheMu.Unlock()
+
+	return sliceType
+}
+
+func powerOfTwo(exp uint32) uint64 {
+	return 1 << exp
 }
 
 func E_l(x uint64, l uint32) []byte {
@@ -66,14 +101,27 @@ func E(x uint64) []byte {
 		return []byte{0}
 	}
 	for l := uint32(0); l < 8; l++ {
-		if x >= powerOfTwo(7*l) && x < powerOfTwo(7*(l+1)) {
-			encoded := []byte{byte(powerOfTwo(8) - powerOfTwo(8-l) + x/powerOfTwo(8*l))}
-			encoded = append(encoded, E_l(x%powerOfTwo(8*l), l)...)
+		lower := uint64(1) << (7 * l)       // powerOfTwo(7*l)
+		upper := uint64(1) << (7 * (l + 1)) // powerOfTwo(7*(l+1))
+		if x >= lower && x < upper {
+			divisor := uint64(1) << (8 * l) // powerOfTwo(8*l)
+			headerBase := uint64(256) - (uint64(1) << (8 - l))
+			// Pre-allocate exact size
+			encoded := make([]byte, 1+l)
+			encoded[0] = byte(headerBase + x/divisor)
+			// Inline E_l for trailing bytes
+			rem := x % divisor
+			for i := uint32(0); i < l; i++ {
+				encoded[1+i] = byte(rem)
+				rem >>= 8
+			}
 			return encoded
 		}
 	}
-	encoded := []byte{byte(powerOfTwo(8) - 1)}
-	encoded = append(encoded, E_l(x, 8)...)
+	// x >= 2^56, need 9 bytes
+	encoded := make([]byte, 9)
+	encoded[0] = 255
+	binary.LittleEndian.PutUint64(encoded[1:], x)
 	return encoded
 }
 
@@ -115,7 +163,9 @@ func DecodeE(encoded []byte) (uint64, uint32) {
 
 // GP v0.3.6 eq(274) ↕x≡(|x|,x) - Length Discriminator Encoding. Maybe Reuqired later [DO NOT DELETE]
 func LengthE(x []uint64) []byte {
-	encoded := E(uint64(len(x)))
+	// Pre-allocate: length prefix (max 9 bytes) + each uint64 (max 9 bytes each)
+	encoded := make([]byte, 0, 9+len(x)*9)
+	encoded = append(encoded, E(uint64(len(x)))...)
 	for i := 0; i < len(x); i++ {
 		encoded = append(encoded, E(x[i])...)
 	}
@@ -125,7 +175,7 @@ func LengthE(x []uint64) []byte {
 // GP v0.3.6 eq(274) ↕x≡(|x|,x) - Length Discriminator Decoding. Maybe Reuqired later [DO NOT DELETE]
 func DecodeLengthE(encoded []byte) ([]uint64, uint32) {
 	length, l := DecodeE([]byte{encoded[0]})
-	var T []uint64
+	T := make([]uint64, 0, int(length)) // Pre-allocate capacity
 	for i := 0; i < int(length); i++ {
 		x, len := DecodeE(encoded[l:])
 		T = append(T, x)
@@ -152,7 +202,37 @@ func CheckCustomEncode(data interface{}) (bool, []byte) {
 	return false, []byte{}
 }
 
+// Cache for custom decoder type checks
+var (
+	customDecoderCache   = make(map[reflect.Type]bool)
+	customDecoderCacheMu sync.RWMutex
+)
+
+func isCustomDecoder(t reflect.Type) bool {
+	customDecoderCacheMu.RLock()
+	if result, ok := customDecoderCache[t]; ok {
+		customDecoderCacheMu.RUnlock()
+		return result
+	}
+	customDecoderCacheMu.RUnlock()
+
+	// Check if type implements CustomDecoder
+	instance := reflect.New(t).Elem().Interface()
+	_, isDecoder := instance.(CustomDecoder)
+
+	customDecoderCacheMu.Lock()
+	customDecoderCache[t] = isDecoder
+	customDecoderCacheMu.Unlock()
+
+	return isDecoder
+}
+
 func CheckCustomDecode(data []byte, t reflect.Type) (bool, interface{}, uint32) {
+	// Fast path: check cache first
+	if !isCustomDecoder(t) {
+		return false, nil, 0
+	}
+
 	instance := reflect.New(t).Elem().Interface()
 
 	defer func() {
@@ -205,46 +285,56 @@ func Encode(data interface{}) ([]byte, error) {
 	case reflect.Uint64:
 		return E_l(uint64(v.Uint()), 8), nil
 	case reflect.String:
-		uint64Slice := make([]uint64, 0)
-		for _, c := range v.String() {
-			uint64Slice = append(uint64Slice, uint64(c))
-		}
-		encoded := E(uint64(len(uint64Slice)))
-		for i := 0; i < len(uint64Slice); i++ {
-			encoded = append(encoded, E(uint64Slice[i])...)
+		s := v.String()
+		runes := []rune(s)
+		// Pre-allocate: length prefix (max 9 bytes) + each rune encoded (max 9 bytes each)
+		encoded := make([]byte, 0, 9+len(runes)*9)
+		encoded = append(encoded, E(uint64(len(runes)))...)
+		for _, c := range runes {
+			encoded = append(encoded, E(uint64(c))...)
 		}
 		return encoded, nil
 
 	// GP v0.3.6 eq(273) Sequence Encoding
 	case reflect.Array:
-		var encoded []byte
-		for i := 0; i < v.Len(); i++ {
-			// GP v0.3.6 eq(268)  "The serialization of an octet-sequence as itself"
-			if v.Index(i).Kind() == reflect.Uint8 {
-				encoded = append(encoded, []byte{byte(v.Index(i).Uint())}...)
-			} else {
-				encodedVi, err := Encode(v.Index(i).Interface())
-				if err != nil {
-					return nil, err
-				}
-				encoded = append(encoded, encodedVi...)
+		arrayLen := v.Len()
+		// Fast path for [N]byte arrays - direct byte copy
+		if arrayLen > 0 && v.Index(0).Kind() == reflect.Uint8 {
+			encoded := make([]byte, arrayLen)
+			for i := 0; i < arrayLen; i++ {
+				encoded[i] = byte(v.Index(i).Uint())
 			}
+			return encoded, nil
+		}
+		// General case for other array types
+		var encoded []byte
+		for i := 0; i < arrayLen; i++ {
+			encodedVi, err := Encode(v.Index(i).Interface())
+			if err != nil {
+				return nil, err
+			}
+			encoded = append(encoded, encodedVi...)
 		}
 		return encoded, nil
 
 	case reflect.Slice:
 		// GP v0.3.6 eq(274) Length Discriminator Encoding
-		encoded := E(uint64(v.Len()))
-		for i := 0; i < v.Len(); i++ {
-			if v.Index(i).Kind() == reflect.Uint8 {
-				encoded = append(encoded, []byte{byte(v.Index(i).Uint())}...)
-			} else {
-				encodedVi, err := Encode(v.Index(i).Interface())
-				if err != nil {
-					return nil, err
-				}
-				encoded = append(encoded, encodedVi...)
+		sliceLen := v.Len()
+		// Fast path for []byte slices - use v.Bytes() for direct access
+		if v.Type().Elem().Kind() == reflect.Uint8 {
+			encoded := E(uint64(sliceLen))
+			if sliceLen > 0 {
+				encoded = append(encoded, v.Bytes()...)
 			}
+			return encoded, nil
+		}
+		encoded := E(uint64(sliceLen))
+		for i := 0; i < sliceLen; i++ {
+			encodedVi, err := Encode(v.Index(i).Interface())
+			if err != nil {
+				return nil, err
+			}
+			encoded = append(encoded, encodedVi...)
 		}
 		return encoded, nil
 
@@ -284,8 +374,16 @@ func Encode(data interface{}) ([]byte, error) {
 				return keys[i].Uint() < keys[j].Uint()
 			case reflect.String:
 				return keys[i].String() < keys[j].String()
+			case reflect.Float32, reflect.Float64:
+				return keys[i].Float() < keys[j].Float()
+			case reflect.Bool:
+				// false < true
+				return !keys[i].Bool() && keys[j].Bool()
 			default:
-				return fmt.Sprintf("%v", keys[i]) < fmt.Sprintf("%v", keys[j])
+				// For complex types like arrays/structs, compare their encoded bytes
+				ei, _ := Encode(keys[i].Interface())
+				ej, _ := Encode(keys[j].Interface())
+				return string(ei) < string(ej)
 			}
 		})
 
@@ -293,7 +391,7 @@ func Encode(data interface{}) ([]byte, error) {
 			Key   interface{}
 			Value interface{}
 		}
-		var sortedKVPairs []kvPair
+		sortedKVPairs := make([]kvPair, 0, len(keys)) // Pre-allocate capacity
 		for _, key := range keys {
 			sortedKVPairs = append(sortedKVPairs, kvPair{
 				Key:   key.Interface(),
@@ -366,7 +464,8 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32, error) {
 			return nil, 0, fmt.Errorf("data length insufficient for decoding string length")
 		}
 		length += l
-		var T []uint64
+		var sb strings.Builder
+		sb.Grow(int(str_len)) // Pre-allocate capacity
 		for i := 0; i < int(str_len); i++ {
 			if len(data) < int(length+1) {
 				return nil, 0, fmt.Errorf("data length insufficient for string character")
@@ -375,23 +474,24 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32, error) {
 			if len(data) < int(length+l) {
 				return nil, 0, fmt.Errorf("data length insufficient for string character decoding")
 			}
-			T = append(T, x)
+			sb.WriteRune(rune(x))
 			length += l
 		}
-		var str string
-		for _, c := range T {
-			str += string(rune(c))
-		}
-		v.SetString(str)
+		v.SetString(sb.String())
 	case reflect.Array:
-		for i := 0; i < v.Len(); i++ {
-			if len(data) < int(length+1) {
-				return nil, 0, fmt.Errorf("data length insufficient for array element")
+		arrayLen := v.Len()
+		// Fast path for [N]byte arrays - use copy instead of element-by-element
+		if arrayLen > 0 && v.Index(0).Kind() == reflect.Uint8 {
+			if len(data) < int(length)+arrayLen {
+				return nil, 0, fmt.Errorf("data length insufficient for byte array")
 			}
-			if v.Index(i).Kind() == reflect.Uint8 {
-				v.Index(i).Set(reflect.ValueOf(data[length]))
-				length++
-			} else {
+			reflect.Copy(v, reflect.ValueOf(data[length:length+uint32(arrayLen)]))
+			length += uint32(arrayLen)
+		} else {
+			for i := 0; i < arrayLen; i++ {
+				if len(data) < int(length+1) {
+					return nil, 0, fmt.Errorf("data length insufficient for array element")
+				}
 				if len(data[length:]) < 1 {
 					return nil, 0, fmt.Errorf("data length insufficient for array element decoding")
 				}
@@ -418,31 +518,38 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32, error) {
 			return nil, 0, fmt.Errorf("slice length %d exceeds remaining data %d", item_len, len(data)-int(length))
 		}
 
-		v.Set(reflect.MakeSlice(t, int(item_len), int(item_len)))
 		length += l
+
+		// Fast path for []byte - use copy instead of element-by-element
+		if t.Elem().Kind() == reflect.Uint8 {
+			if len(data) < int(length)+int(item_len) {
+				return nil, 0, fmt.Errorf("data length insufficient for byte slice")
+			}
+			byteSlice := make([]byte, item_len)
+			copy(byteSlice, data[length:length+uint32(item_len)])
+			length += uint32(item_len)
+			return byteSlice, length, nil
+		}
+
+		v.Set(reflect.MakeSlice(t, int(item_len), int(item_len)))
 		for i := 0; i < int(item_len); i++ {
 			if len(data) < int(length+1) {
 				return nil, 0, fmt.Errorf("data length insufficient for slice element")
 			}
-			if v.Index(i).Kind() == reflect.Uint8 {
-				v.Index(i).Set(reflect.ValueOf(data[length]))
-				length++
-			} else {
-				if len(data[length:]) < 1 {
-					return nil, 0, fmt.Errorf("data length insufficient for slice element decoding")
-				}
-				elem, l, err := Decode(data[length:], v.Index(i).Type())
-				if err != nil {
-					return nil, 0, err
-				}
-				if len(data) < int(length+l) {
-					return nil, 0, fmt.Errorf("data length insufficient for slice element decoding")
-				}
-				if elem != nil {
-					v.Index(i).Set(reflect.ValueOf(elem))
-				}
-				length += l
+			if len(data[length:]) < 1 {
+				return nil, 0, fmt.Errorf("data length insufficient for slice element decoding")
 			}
+			elem, l, err := Decode(data[length:], v.Index(i).Type())
+			if err != nil {
+				return nil, 0, err
+			}
+			if len(data) < int(length+l) {
+				return nil, 0, fmt.Errorf("data length insufficient for slice element decoding")
+			}
+			if elem != nil {
+				v.Index(i).Set(reflect.ValueOf(elem))
+			}
+			length += l
 		}
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
@@ -496,20 +603,8 @@ func Decode(data []byte, t reflect.Type) (interface{}, uint32, error) {
 		keyType := t.Key()
 		valueType := t.Elem()
 
-		kvPairType := reflect.StructOf([]reflect.StructField{
-			{
-				Name: "Key",
-				Type: keyType,
-				Tag:  reflect.StructTag(`json:"key"`),
-			},
-			{
-				Name: "Value",
-				Type: valueType,
-				Tag:  reflect.StructTag(`json:"value"`),
-			},
-		})
-
-		kvPairSliceType := reflect.SliceOf(kvPairType)
+		// Use cached kv pair slice type
+		kvPairSliceType := getKVPairSliceType(keyType, valueType)
 
 		decoded, l, err := Decode(data, kvPairSliceType)
 		if err != nil {

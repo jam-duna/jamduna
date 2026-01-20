@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	_ "net/http/pprof"
 	"os"
 	"path"
 	"path/filepath"
 	"reflect"
 	"regexp"
 	"runtime"
+	"runtime/pprof"
 	"sort"
 	"strconv"
 	"strings"
@@ -261,6 +263,14 @@ func TestTracesInterpreter(t *testing.T) {
 func TestTracesRecompiler(t *testing.T) {
 	log.InitLogger("debug")
 
+	cpuFile, err := os.Create("cpu.prof")
+	if err != nil {
+		t.Fatalf("could not create CPU profile: %v", err)
+	}
+	if err := pprof.StartCPUProfile(cpuFile); err != nil {
+		t.Fatalf("could not start CPU profile: %v", err)
+	}
+
 	pvmtypes.DebugHostFunctions = false
 	// Define all the directories you want to test in a single slice.
 	testDirs := []string{
@@ -310,6 +320,30 @@ func TestTracesRecompiler(t *testing.T) {
 		})
 	}
 	dump_performance(t)
+
+	// Stop CPU profiling
+	pprof.StopCPUProfile()
+	cpuFile.Close()
+
+	// Write heap profile
+	heapFile, err := os.Create("heap.prof")
+	if err != nil {
+		t.Fatalf("could not create heap profile: %v", err)
+	}
+	runtime.GC() // Run GC first to get more accurate heap information
+	if err := pprof.WriteHeapProfile(heapFile); err != nil {
+		t.Fatalf("could not write heap profile: %v", err)
+	}
+	heapFile.Close()
+
+	fmt.Println("\n========================================")
+	fmt.Println("Profiling complete! Files have been saved:")
+	fmt.Println("  - cpu.prof")
+	fmt.Println("  - heap.prof")
+	fmt.Println("")
+	fmt.Println("  go tool pprof -http=:8080 cpu.prof")
+	fmt.Println("  go tool pprof -http=:8081 heap.prof")
+	fmt.Println("========================================")
 }
 func dump_performance(t *testing.T) {
 	return

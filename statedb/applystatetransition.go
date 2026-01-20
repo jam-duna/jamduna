@@ -428,7 +428,7 @@ func (s *StateDB) computeStateUpdates(blk *types.Block) {
 	// setup workpackage updates (guaranteed, queued, accumulated)
 	for _, g := range blk.Extrinsic.Guarantees {
 		wph := g.Report.AvailabilitySpec.WorkPackageHash
-		log.Trace(log.SDB, "computeStateUpdates-GUARANTEE", "hash", wph, g.Report.String())
+		log.Trace(log.SDB, "computeStateUpdates-GUARANTEE", "hash", wph)
 		s.stateUpdate.WorkPackageUpdates[wph] = &types.SubWorkPackageResult{
 			WorkPackageHash: wph,
 			HeaderHash:      s.HeaderHash,

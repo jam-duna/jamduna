@@ -51,6 +51,8 @@ ffi/libcrypto.*.a
 
 /statedb/*.out
 /statedb/*.test
+/statedb/*.pprof
+/statedb/*.prof
 # service guarantees JSON
 guarantees/*.json
 

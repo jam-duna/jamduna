@@ -1,6 +1,7 @@
 package types
 
 import (
+	"bytes"
 	"fmt"
 	"reflect"
 	"sort"
@@ -44,13 +45,13 @@ func encodeDebugWithPath(data interface{}, data_byte []byte, fieldPath []string)
 		fmt.Printf("encoding with E_l(8): %d\n", v.Uint())
 		return E_l(uint64(v.Uint()), 8), nil
 	case reflect.String:
-		uint64Slice := make([]uint64, 0)
-		for _, c := range v.String() {
-			uint64Slice = append(uint64Slice, uint64(c))
-		}
-		encoded := E(uint64(len(uint64Slice)))
-		for i := 0; i < len(uint64Slice); i++ {
-			encoded = append(encoded, E(uint64Slice[i])...)
+		s := v.String()
+		runes := []rune(s)
+		// Pre-allocate: length prefix (max 9 bytes) + each rune encoded (max 9 bytes each)
+		encoded := make([]byte, 0, 9+len(runes)*9)
+		encoded = append(encoded, E(uint64(len(runes)))...)
+		for _, c := range runes {
+			encoded = append(encoded, E(uint64(c))...)
 		}
 		return encoded, nil
 	case reflect.Array:
@@ -65,7 +66,7 @@ func encodeDebugWithPath(data interface{}, data_byte []byte, fieldPath []string)
 					return nil, err
 				}
 				origin_data := data_byte[len(encoded) : len(encoded)+len(encodedVi)]
-				if !reflect.DeepEqual(origin_data, encodedVi) {
+				if !bytes.Equal(origin_data, encodedVi) {
 					fmt.Printf("❌ Mismatch at Field Path: %s\n", strings.Join(newPath, "."))
 					fmt.Printf("  → Origin Data:  %x\n", origin_data)
 					fmt.Printf("  → Encoded Data: %x\n", encodedVi)
@@ -91,7 +92,7 @@ func encodeDebugWithPath(data interface{}, data_byte []byte, fieldPath []string)
 					return nil, err
 				}
 				origin_data := data_byte[len(encoded) : len(encoded)+len(encodedVi)]
-				if !reflect.DeepEqual(origin_data, encodedVi) {
+				if !bytes.Equal(origin_data, encodedVi) {
 					fmt.Printf("❌ Mismatch at Field Path: %s\n", strings.Join(newPath, "."))
 					fmt.Printf("  → Origin Data:  %x\n", origin_data)
 					fmt.Printf("  → Encoded Data: %x\n", encodedVi)
@@ -123,7 +124,7 @@ func encodeDebugWithPath(data interface{}, data_byte []byte, fieldPath []string)
 			}
 
 			origin_data := data_byte[offset : offset+len(encodedVi)]
-			if !reflect.DeepEqual(origin_data, encodedVi) {
+			if !bytes.Equal(origin_data, encodedVi) {
 				fmt.Printf("❌ Mismatch at Field Path: %s\n", strings.Join(newPath, "."))
 				fmt.Printf("  → Origin Data:  %x\n", origin_data)
 				fmt.Printf("  → Encoded Data: %x\n", encodedVi)
@@ -157,8 +158,14 @@ func encodeDebugWithPath(data interface{}, data_byte []byte, fieldPath []string)
 				return keys[i].Uint() < keys[j].Uint()
 			case reflect.String:
 				return keys[i].String() < keys[j].String()
+			case reflect.Float32, reflect.Float64:
+				return keys[i].Float() < keys[j].Float()
+			case reflect.Bool:
+				return !keys[i].Bool() && keys[j].Bool()
 			default:
-				return fmt.Sprintf("%v", keys[i]) < fmt.Sprintf("%v", keys[j])
+				ei, _ := Encode(keys[i].Interface())
+				ej, _ := Encode(keys[j].Interface())
+				return string(ei) < string(ej)
 			}
 		})
 
@@ -166,7 +173,7 @@ func encodeDebugWithPath(data interface{}, data_byte []byte, fieldPath []string)
 			Key   interface{}
 			Value interface{}
 		}
-		var sortedKVPairs []kvPair
+		sortedKVPairs := make([]kvPair, 0, len(keys)) // Pre-allocate capacity
 		for _, key := range keys {
 			sortedKVPairs = append(sortedKVPairs, kvPair{
 				Key:   key.Interface(),
