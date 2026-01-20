@@ -485,10 +485,14 @@ func (s *StateDB) verifyPostStateAgainstExecution(workItem types.WorkItem, extri
 	}
 
 	// Use GetActiveTree() to get the correct tree for parallel bundle building
-	// This returns the active snapshot if set, otherwise CurrentUBT
-	tree := stateStorage.GetActiveTree()
-	if tree == nil {
+	// This returns the active snapshot if set, otherwise canonical
+	treeIface := stateStorage.GetActiveTree()
+	if treeIface == nil {
 		return fmt.Errorf("no UBT tree available for post-state verification")
+	}
+	tree, ok := treeIface.(*storage.UnifiedBinaryTree)
+	if !ok {
+		return fmt.Errorf("active tree is not *UnifiedBinaryTree")
 	}
 
 	builderProof, err := parseBuilderPostStateSection(postWitness)
@@ -1343,21 +1347,35 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 				combinedBlob = append(combinedBlob, blob...)
 			}
 
-			// Try to apply writes to active snapshot (multi-snapshot mode)
-			// If no snapshot is active, fall back to deferred writes
-			if err := evmStorage.ApplyWritesToActiveSnapshot(combinedBlob); err != nil {
-				// No active snapshot - use legacy deferred writes path
-				evmStorage.StorePendingWrites(workPackageHash, combinedBlob)
-				log.Info(log.EVM, "BuildBundle: stored pending writes for deferred application (legacy mode)",
-					"wpHash", workPackageHash.Hex(),
-					"combinedBlobSize", len(combinedBlob),
-					"workItemCount", len(contractWitnessBlobs))
-			} else {
-				log.Info(log.EVM, "BuildBundle: applied writes to active snapshot",
-					"wpHash", workPackageHash.Hex(),
-					"combinedBlobSize", len(combinedBlob),
-					"workItemCount", len(contractWitnessBlobs))
+			// Root-first mode requires activeRoot to be set by the caller.
+			activeRoot := evmStorage.GetActiveRoot()
+			if activeRoot == (common.Hash{}) {
+				return nil, nil, fmt.Errorf("BuildBundle: active root not set (root-first only)")
 			}
+
+			// ROOT-FIRST PATH: Apply writes via copy-on-write to the active root
+			// This creates a new tree at postRoot and stores it in treeStore
+			newRoot, err := evmStorage.ApplyWritesToTree(activeRoot, combinedBlob)
+			if err != nil {
+				log.Error(log.EVM, "BuildBundle: failed to apply writes via root-first path",
+					"wpHash", workPackageHash.Hex(),
+					"activeRoot", activeRoot.Hex(),
+					"error", err)
+				return nil, nil, fmt.Errorf("BuildBundle: failed to apply writes: %w", err)
+			}
+			// Update activeRoot to point to the new tree so GetActiveUBTRoot() returns postRoot
+			if err := evmStorage.SetActiveRoot(newRoot); err != nil {
+				log.Error(log.EVM, "BuildBundle: failed to update active root to postRoot",
+					"wpHash", workPackageHash.Hex(),
+					"newRoot", newRoot.Hex(),
+					"error", err)
+				return nil, nil, fmt.Errorf("BuildBundle: failed to update active root: %w", err)
+			}
+			log.Info(log.EVM, "BuildBundle: applied writes via root-first path",
+				"wpHash", workPackageHash.Hex(),
+				"preRoot", activeRoot.Hex(),
+				"postRoot", newRoot.Hex(),
+				"combinedBlobSize", len(combinedBlob))
 		}
 	} else {
 		log.Debug(log.EVM, "BuildBundle: skipping state writes (Phase 2 mode - already applied in Phase 1)",
@@ -1804,9 +1822,9 @@ func (s *StateDB) verifyUBTWitness(witness []byte, label string, kind storage.Wi
 	var expectedRoot *[32]byte
 	if kind == storage.WitnessValuePre {
 		if stateStorage, ok := s.sdb.(*storage.StateDBStorage); ok {
-			// Use GetActiveTree() to get the correct tree for parallel bundle building
-			// This returns the active snapshot if set, otherwise CurrentUBT
-			tree := stateStorage.GetActiveTree()
+			// Use GetActiveTreeTyped() to get the correct tree for parallel bundle building
+			// This returns the active snapshot if set, otherwise canonical
+			tree := stateStorage.GetActiveTreeTyped()
 			if tree != nil {
 				root := tree.RootHash()
 				expectedRoot = &root

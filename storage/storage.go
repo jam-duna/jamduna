@@ -107,16 +107,36 @@ type StateDBStorage struct {
 	witnessMutex sync.RWMutex                                // Protects witness caches
 	UBTProofs    map[common.Address]evmtypes.UBTMultiproof   // address → UBT multiproof
 
-	// UBT tree storage: stateRoot → UBT tree
-	// Stores historical UBT states by their root hash
-	// Allows querying state at any specific state root (e.g., at a specific block)
+	// ===== Root-First State Model =====
+	//
+	// The storage system uses a root-first state model where all trees are accessed
+	// by their state root hash, not by block number. This enables:
+	// - Standalone pre/post per bundle (each bundle carries its own preRoot/postRoot)
+	// - Safe resubmission without affecting other bundles
+	// - Clean invalidation by root (no orphaned indexes)
+	//
+	// Key principle: The canonical state is "the tree at canonicalRoot", not a mutable global.
+
+	// treeStore: Unified store for all UBT trees by their root hash.
+	// This is the single source of truth for tree lookup.
+	// Trees are added when snapshots are created or writes applied.
+	// Trees are removed when explicitly discarded (GC).
+	treeStore      map[common.Hash]*UnifiedBinaryTree
+	treeStoreMutex sync.RWMutex
+
+	// canonicalRoot: The state root of the canonical (committed) state.
+	// This replaces the concept of "CurrentUBT" - canonical state is just treeStore[canonicalRoot].
+	// Updated by CommitAsCanonical when a bundle accumulates.
+	canonicalRoot common.Hash
+
+	// activeRoot: The state root being used for the current execution context.
+	// Set before execution begins, cleared after. Used by GetActiveTree.
+	activeRoot common.Hash
+
+	// DEPRECATED: ubtRoots - kept for interface compatibility, no longer used internally.
+	// Use treeStore instead.
 	ubtRoots      map[common.Hash]*UnifiedBinaryTree
 	ubtRootsMutex sync.RWMutex // Protects ubtRoots map
-
-	// CurrentUBT is the active working UBT tree for the current execution
-	// This is used during transaction execution and witness generation
-	// After execution completes, the post-state tree is stored in ubtRoots
-	CurrentUBT *UnifiedBinaryTree
 
 	// UBT read log: Tracks all UBT-backed reads during EVM execution
 	// This is the authoritative source for BuildUBTWitness
@@ -125,7 +145,7 @@ type StateDBStorage struct {
 	ubtReadLogEnabled bool       // Phase 1 support: when false, AppendUBTRead is a no-op
 
 	// Pinned state root for Phase 1 verification
-	// When set, reads use the tree at this root instead of CurrentUBT
+	// When set, reads use the tree at this root instead of canonical
 	pinnedStateRoot *common.Hash
 	pinnedTree      *UnifiedBinaryTree
 
@@ -154,34 +174,7 @@ type StateDBStorage struct {
 	// Mutex for service-scoped maps
 	serviceMutex sync.RWMutex
 
-	// Pending UBT writes: wpHash → contractWitnessBlob
-	// Stores contract writes that have been computed but not yet applied to CurrentUBT
-	// Writes are applied only when OnAccumulated fires, ensuring CurrentUBT
-	// only advances for bundles that actually accumulate on-chain
-	pendingWrites      map[common.Hash][]byte
-	pendingWritesMutex sync.RWMutex
-
-	// Multi-snapshot UBT system for parallel bundle building
-	// Each bundle gets its own UBT snapshot that chains from the previous bundle's post-state.
-	// Snapshots are committed in order on accumulation, invalidated on failure.
-	//
-	// Key: blockNumber → UBT snapshot for that block
-	// The snapshot represents the expected POST-state after that block's execution
-	pendingSnapshots      map[uint64]*UnifiedBinaryTree
-	pendingSnapshotsMutex sync.RWMutex
-
-	// Tracks which block numbers have active snapshots, ordered by block number
-	// Used for invalidating descendant snapshots on failure
-	snapshotOrder []uint64
-
-	// activeSnapshotBlock: The blockNumber whose snapshot is currently being used for reads
-	// Set to 0 when reading from canonicalUBT (CurrentUBT)
-	activeSnapshotBlock uint64
-
-	// lastCommittedSnapshotBlock: The highest block number whose snapshot has been committed to CurrentUBT
-	// Used to handle out-of-order accumulation: if a later block accumulates first,
-	// earlier blocks' snapshots are already superseded (included in the later snapshot)
-	lastCommittedSnapshotBlock uint64
+	// Pending writes and block-number snapshots are removed in root-first mode.
 }
 
 const (
@@ -218,6 +211,11 @@ func NewStateDBStorage(path string, jamda types.JAMDA, telemetryClient types.Tel
 	// Create empty trie database
 	trieDB := NewMerkleTree(nil)
 
+	// Create genesis tree for initial state
+	genesisTree := NewUnifiedBinaryTree(Config{Profile: defaultUBTProfile})
+	genesisRootBytes := genesisTree.RootHash()
+	genesisRoot := common.BytesToHash(genesisRootBytes[:])
+
 	s := &StateDBStorage{
 		db:                    db,
 		logChan:               make(chan LogMessage, 100),
@@ -228,18 +226,21 @@ func NewStateDBStorage(path string, jamda types.JAMDA, telemetryClient types.Tel
 		stagedInserts:         make(map[common.Hash][]byte),
 		stagedDeletes:         make(map[common.Hash]bool),
 		keys:                  make(map[common.Hash]bool),
+		// Root-first state model: unified tree store and canonical root
+		treeStore:             make(map[common.Hash]*UnifiedBinaryTree),
+		canonicalRoot:         genesisRoot,
+		activeRoot:            common.Hash{}, // No active root initially
+		// DEPRECATED: kept for interface compatibility, no longer used
 		ubtRoots:              make(map[common.Hash]*UnifiedBinaryTree),
-		CurrentUBT:            NewUnifiedBinaryTree(Config{Profile: defaultUBTProfile}),
 		ubtReadLogEnabled:     true, // Default: logging enabled (normal operation)
 		serviceUBTRoots:       make(map[string]common.Hash),
 		serviceJAMStateRoots:  make(map[string]*types.ServiceBlockIndex),
 		serviceBlockHashIndex: make(map[string]uint64),
 		latestRollupBlock:     make(map[uint32]uint64),
-		pendingWrites:         make(map[common.Hash][]byte),
-		pendingSnapshots:      make(map[uint64]*UnifiedBinaryTree),
-		snapshotOrder:         make([]uint64, 0),
-		activeSnapshotBlock:   0,
 	}
+
+	// Store genesis tree in treeStore
+	s.treeStore[genesisRoot] = genesisTree
 
 	// Initialize checkpoint manager (UBT checkpoint tree)
 	// maxCheckpoints: 100 (keeps ~100 fine checkpoints in LRU)
@@ -261,6 +262,219 @@ func NewStateDBStorage(path string, jamda types.JAMDA, telemetryClient types.Tel
 	s.Root = initialRoot
 
 	return s, nil
+}
+
+// ===== Root-First State Access Methods =====
+//
+// These methods provide root-based state access, replacing block-number-based
+// or implicit CurrentUBT access. All state should be accessed by root hash.
+
+// GetCanonicalRoot returns the state root of the canonical (committed) state.
+func (s *StateDBStorage) GetCanonicalRoot() common.Hash {
+	s.treeStoreMutex.RLock()
+	defer s.treeStoreMutex.RUnlock()
+	return s.canonicalRoot
+}
+
+// SetCanonicalRoot updates the canonical state root.
+// This should only be called by CommitAsCanonical after accumulation.
+func (s *StateDBStorage) SetCanonicalRoot(root common.Hash) error {
+	s.treeStoreMutex.Lock()
+	defer s.treeStoreMutex.Unlock()
+
+	if _, exists := s.treeStore[root]; !exists {
+		return fmt.Errorf("cannot set canonical root to %s: tree not found in treeStore", root.Hex())
+	}
+	s.canonicalRoot = root
+
+	return nil
+}
+
+// GetTreeByRoot returns the UBT tree with the given state root.
+// Returns (tree, true) if found, (nil, false) if not.
+func (s *StateDBStorage) GetTreeByRoot(root common.Hash) (interface{}, bool) {
+	s.treeStoreMutex.RLock()
+	defer s.treeStoreMutex.RUnlock()
+	tree, exists := s.treeStore[root]
+	if !exists {
+		return nil, false
+	}
+	return tree, true
+}
+
+// GetTreeByRootTyped returns the typed UBT tree (for internal use).
+func (s *StateDBStorage) GetTreeByRootTyped(root common.Hash) (*UnifiedBinaryTree, bool) {
+	s.treeStoreMutex.RLock()
+	defer s.treeStoreMutex.RUnlock()
+	tree, exists := s.treeStore[root]
+	return tree, exists
+}
+
+// GetCanonicalTree returns the UBT tree at the canonical root.
+// This is the replacement for accessing CurrentUBT directly.
+// GetCanonicalTree returns the UBT tree at the canonical root.
+// This is the replacement for accessing CurrentUBT directly.
+// Returns interface{} to satisfy EVMJAMStorage interface.
+func (s *StateDBStorage) GetCanonicalTree() interface{} {
+	return s.GetCanonicalTreeTyped()
+}
+
+// GetCanonicalTreeTyped returns the typed UBT tree at the canonical root (internal use).
+func (s *StateDBStorage) GetCanonicalTreeTyped() *UnifiedBinaryTree {
+	s.treeStoreMutex.RLock()
+	defer s.treeStoreMutex.RUnlock()
+	return s.treeStore[s.canonicalRoot]
+}
+
+// StoreTree adds a tree to the treeStore with its root hash.
+// If a tree with this root already exists, this is a no-op.
+// tree must be *UnifiedBinaryTree.
+func (s *StateDBStorage) StoreTree(tree interface{}) common.Hash {
+	ubt, ok := tree.(*UnifiedBinaryTree)
+	if !ok {
+		log.Error(log.EVM, "StoreTree: tree is not *UnifiedBinaryTree")
+		return common.Hash{}
+	}
+	rootBytes := ubt.RootHash()
+	root := common.BytesToHash(rootBytes[:])
+
+	s.treeStoreMutex.Lock()
+	defer s.treeStoreMutex.Unlock()
+
+	if _, exists := s.treeStore[root]; !exists {
+		s.treeStore[root] = ubt
+	}
+	return root
+}
+
+// StoreTreeTyped adds a typed tree (for internal use).
+func (s *StateDBStorage) StoreTreeTyped(tree *UnifiedBinaryTree) common.Hash {
+	rootBytes := tree.RootHash()
+	root := common.BytesToHash(rootBytes[:])
+
+	s.treeStoreMutex.Lock()
+	defer s.treeStoreMutex.Unlock()
+
+	if _, exists := s.treeStore[root]; !exists {
+		s.treeStore[root] = tree
+	}
+	return root
+}
+
+// StoreTreeWithRoot adds a tree to the treeStore with an explicit root.
+// Use this when you've already computed the root hash.
+func (s *StateDBStorage) StoreTreeWithRoot(root common.Hash, tree *UnifiedBinaryTree) {
+	s.treeStoreMutex.Lock()
+	defer s.treeStoreMutex.Unlock()
+	s.treeStore[root] = tree
+}
+
+// CloneTreeFromRoot creates a deep copy of the tree at the given root.
+// Returns error if no tree exists at that root.
+func (s *StateDBStorage) CloneTreeFromRoot(root common.Hash) (interface{}, error) {
+	s.treeStoreMutex.RLock()
+	tree, exists := s.treeStore[root]
+	s.treeStoreMutex.RUnlock()
+
+	if !exists {
+		return nil, fmt.Errorf("no tree found at root %s", root.Hex())
+	}
+
+	return tree.Copy(), nil
+}
+
+// CloneTreeFromRootTyped creates a typed deep copy (for internal use).
+func (s *StateDBStorage) CloneTreeFromRootTyped(root common.Hash) (*UnifiedBinaryTree, error) {
+	s.treeStoreMutex.RLock()
+	tree, exists := s.treeStore[root]
+	s.treeStoreMutex.RUnlock()
+
+	if !exists {
+		return nil, fmt.Errorf("no tree found at root %s", root.Hex())
+	}
+
+	return tree.Copy(), nil
+}
+
+// DiscardTree removes a tree from the treeStore.
+// Returns true if a tree was removed, false if no tree existed at that root.
+// WARNING: Do not discard the canonical root or any root that may be needed for rebuilds.
+func (s *StateDBStorage) DiscardTree(root common.Hash) bool {
+	s.treeStoreMutex.Lock()
+	defer s.treeStoreMutex.Unlock()
+
+	if root == s.canonicalRoot {
+		log.Warn(log.EVM, "DiscardTree: refusing to discard canonical root",
+			"root", root.Hex())
+		return false
+	}
+
+	if _, exists := s.treeStore[root]; exists {
+		delete(s.treeStore, root)
+		return true
+	}
+	return false
+}
+
+// GetActiveRoot returns the currently active state root for execution.
+// Returns the zero hash if no active root is set.
+func (s *StateDBStorage) GetActiveRoot() common.Hash {
+	s.treeStoreMutex.RLock()
+	defer s.treeStoreMutex.RUnlock()
+	return s.activeRoot
+}
+
+// SetActiveRoot sets the state root to use for the current execution context.
+// Returns error if no tree exists at that root.
+func (s *StateDBStorage) SetActiveRoot(root common.Hash) error {
+	s.treeStoreMutex.Lock()
+	defer s.treeStoreMutex.Unlock()
+
+	if root == (common.Hash{}) {
+		s.activeRoot = common.Hash{}
+		return nil
+	}
+
+	if _, exists := s.treeStore[root]; !exists {
+		return fmt.Errorf("cannot set active root to %s: tree not found", root.Hex())
+	}
+	s.activeRoot = root
+	return nil
+}
+
+// ClearActiveRoot resets the active root to zero (use canonical for reads).
+func (s *StateDBStorage) ClearActiveRoot() {
+	s.treeStoreMutex.Lock()
+	defer s.treeStoreMutex.Unlock()
+	s.activeRoot = common.Hash{}
+}
+
+// GetTreeStoreSize returns the number of trees in the store (for debugging/metrics).
+func (s *StateDBStorage) GetTreeStoreSize() int {
+	s.treeStoreMutex.RLock()
+	defer s.treeStoreMutex.RUnlock()
+	return len(s.treeStore)
+}
+
+// CommitAsCanonical sets the given root as the new canonical state.
+// The tree at this root becomes the canonical state that all queries read from.
+// Called when a bundle accumulates successfully.
+func (s *StateDBStorage) CommitAsCanonical(root common.Hash) error {
+	s.treeStoreMutex.Lock()
+	defer s.treeStoreMutex.Unlock()
+
+	_, exists := s.treeStore[root]
+	if !exists {
+		return fmt.Errorf("cannot commit root %s as canonical: tree not found", root.Hex())
+	}
+
+	s.canonicalRoot = root
+
+	log.Info(log.EVM, "CommitAsCanonical: updated canonical root",
+		"root", root.Hex(),
+		"treeStoreSize", len(s.treeStore))
+
+	return nil
 }
 
 // GetJAMDA returns the JAMDA interface instance
@@ -311,34 +525,30 @@ func (store *StateDBStorage) CloseDB() error {
 }
 
 // StoreUBTTransition stores a UBT tree state by its root hash.
+// This method now uses treeStore (root-first model).
 func (store *StateDBStorage) StoreUBTTransition(ubtRoot common.Hash, tree *UnifiedBinaryTree) error {
-	store.ubtRootsMutex.Lock()
-	defer store.ubtRootsMutex.Unlock()
-
 	if tree == nil {
 		return fmt.Errorf("cannot store nil UBT tree")
 	}
 
-	store.ubtRoots[ubtRoot] = tree
+	store.StoreTreeWithRoot(ubtRoot, tree)
 	return nil
 }
 
 // GetUBTTreeAtRoot retrieves a UBT tree state by its root hash.
+// This method now uses treeStore (root-first model).
 func (store *StateDBStorage) GetUBTTreeAtRoot(ubtRoot common.Hash) (interface{}, bool) {
-	store.ubtRootsMutex.RLock()
-	defer store.ubtRootsMutex.RUnlock()
-
-	tree, found := store.ubtRoots[ubtRoot]
-	return tree, found
+	return store.GetTreeByRoot(ubtRoot)
 }
 
 // GetUBTNodeForBlockNumber maps a block number string to the corresponding UBT tree.
+// Uses treeStore with canonicalRoot for "latest" (root-first model).
 func (store *StateDBStorage) GetUBTNodeForBlockNumber(blockNumber string) (interface{}, bool) {
-	// TODO: Implement actual blockNumber -> UBT root mapping
-	// For now, return the current UBT tree if blockNumber is "latest"
+	// For "latest" or empty, return the canonical tree
 	if blockNumber == "latest" || blockNumber == "" {
-		if store.CurrentUBT != nil {
-			return store.CurrentUBT, true
+		tree := store.GetCanonicalTree()
+		if tree != nil {
+			return tree, true
 		}
 		return nil, false
 	}
@@ -382,37 +592,6 @@ func (store *StateDBStorage) GetNonce(tree interface{}, address common.Address) 
 
 	basicData := DecodeBasicDataLeaf(value)
 	return basicData.Nonce, nil
-}
-
-// GetCurrentUBTTree returns the current active UBT tree.
-func (store *StateDBStorage) GetCurrentUBTTree() interface{} {
-	return store.CurrentUBT
-}
-
-// StoreUBTTree stores a UBT tree at a specific root hash.
-func (store *StateDBStorage) StoreUBTTree(root common.Hash, tree *UnifiedBinaryTree) {
-	store.ubtRootsMutex.Lock()
-	defer store.ubtRootsMutex.Unlock()
-	store.ubtRoots[root] = tree
-}
-
-// StoreCurrentUBTAtRoot stores a COPY of CurrentUBT at the given root hash.
-// Used by Phase 1 to preserve pre-state trees for Phase 2 pinning.
-func (store *StateDBStorage) StoreCurrentUBTAtRoot(root common.Hash) {
-	if store.CurrentUBT == nil {
-		log.Warn(log.EVM, "StoreCurrentUBTAtRoot: CurrentUBT is nil", "root", root.Hex())
-		return
-	}
-	store.ubtRootsMutex.Lock()
-	defer store.ubtRootsMutex.Unlock()
-	// Store a copy so mutations to CurrentUBT don't affect the stored tree
-	copiedTree := store.CurrentUBT.Copy()
-	store.ubtRoots[root] = copiedTree
-	copiedRoot := copiedTree.RootHash()
-	log.Info(log.EVM, "StoreCurrentUBTAtRoot: stored pre-state tree",
-		"requestedRoot", root.Hex(),
-		"copiedTreeRoot", common.BytesToHash(copiedRoot[:]).Hex(),
-		"totalStoredRoots", len(store.ubtRoots))
 }
 
 func (store *StateDBStorage) ReadRawKV(key []byte) ([]byte, bool, error) {
@@ -615,7 +794,7 @@ func (store *StateDBStorage) StoreWarpSyncFragment(setID uint32, fragment types.
 func (store *StateDBStorage) FetchBalance(address common.Address, txIndex uint32) ([32]byte, error) {
 	var balance [32]byte
 
-	tree := store.GetActiveTree()
+	tree := store.GetActiveTreeTyped()
 	if tree == nil {
 		return balance, nil // Return zero balance if no tree
 	}
@@ -646,7 +825,7 @@ func (store *StateDBStorage) FetchBalance(address common.Address, txIndex uint32
 func (store *StateDBStorage) FetchNonce(address common.Address, txIndex uint32) ([32]byte, error) {
 	var nonce [32]byte
 
-	tree := store.GetActiveTree()
+	tree := store.GetActiveTreeTyped()
 	if tree == nil {
 		return nonce, nil // Return zero nonce if no tree
 	}
@@ -675,7 +854,7 @@ func (store *StateDBStorage) FetchNonce(address common.Address, txIndex uint32) 
 // FetchCode fetches code from the UBT tree.
 // Uses GetActiveTree() to support multi-snapshot parallel bundle building.
 func (store *StateDBStorage) FetchCode(address common.Address, txIndex uint32) ([]byte, uint32, error) {
-	tree := store.GetActiveTree()
+	tree := store.GetActiveTreeTyped()
 	if tree == nil {
 		return nil, 0, nil
 	}
@@ -762,7 +941,7 @@ func (store *StateDBStorage) FetchCode(address common.Address, txIndex uint32) (
 func (store *StateDBStorage) FetchCodeHash(address common.Address, txIndex uint32) ([32]byte, error) {
 	var codeHash [32]byte
 
-	tree := store.GetActiveTree()
+	tree := store.GetActiveTreeTyped()
 	if tree == nil {
 		codeHash = emptyCodeHash()
 		return codeHash, nil
@@ -799,7 +978,7 @@ func (store *StateDBStorage) FetchStorage(address common.Address, storageKey [32
 	var value [32]byte
 	found := false
 
-	tree := store.GetActiveTree()
+	tree := store.GetActiveTreeTyped()
 	if tree == nil {
 		return value, found, nil
 	}
@@ -873,64 +1052,55 @@ func (store *StateDBStorage) IsUBTReadLogEnabled() bool {
 	return store.ubtReadLogEnabled
 }
 
-// GetCurrentUBTRoot returns the current UBT state root hash.
-// If a state is pinned, returns that root. Otherwise returns CurrentUBT root.
-func (store *StateDBStorage) GetCurrentUBTRoot() common.Hash {
-	store.mutex.RLock()
-	defer store.mutex.RUnlock()
-
-	if store.pinnedStateRoot != nil {
-		return *store.pinnedStateRoot
-	}
-
-	if store.CurrentUBT == nil {
+// GetActiveUBTRoot returns the root hash of the currently active tree.
+// Priority: pinnedTree (Phase 2) > activeRoot (root-first) > canonical.
+// This is used by ExecutePhase1/BuildBundle to get the post-state root.
+func (store *StateDBStorage) GetActiveUBTRoot() common.Hash {
+	tree := store.GetActiveTreeTyped()
+	if tree == nil {
 		return common.Hash{}
 	}
-	root := store.CurrentUBT.RootHash()
+	root := tree.RootHash()
 	return common.BytesToHash(root[:])
 }
 
 // PinToStateRoot pins execution to a specific historical state root.
 // Used for Phase 1 verification where we need to re-execute against the same pre-state.
-// Returns error if the state root is not available.
+// Returns error if the state root is not available in treeStore.
+//
+// ROOT-FIRST ONLY: This method now only checks treeStore.
+// All trees must be stored via StoreTreeWithRoot or ApplyWritesToTree.
 func (store *StateDBStorage) PinToStateRoot(root common.Hash) error {
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
 
-	// Check if we have this root in ubtRoots
-	store.ubtRootsMutex.RLock()
-	tree, found := store.ubtRoots[root]
-	storedRoots := make([]string, 0, len(store.ubtRoots))
-	for r := range store.ubtRoots {
-		storedRoots = append(storedRoots, r.Hex()[:10])
-	}
-	store.ubtRootsMutex.RUnlock()
-
-	log.Info(log.EVM, "PinToStateRoot: checking",
-		"requestedRoot", root.Hex(),
-		"foundInUbtRoots", found,
-		"storedRootsCount", len(storedRoots),
-		"storedRoots", storedRoots)
+	// Check treeStore (root-first state model - the only source)
+	store.treeStoreMutex.RLock()
+	tree, found := store.treeStore[root]
+	treeStoreCount := len(store.treeStore)
+	store.treeStoreMutex.RUnlock()
 
 	if !found {
-		// Check if current tree matches
-		if store.CurrentUBT != nil {
-			currentRoot := store.CurrentUBT.RootHash()
-			if common.BytesToHash(currentRoot[:]) == root {
-				tree = store.CurrentUBT
-				found = true
-				log.Info(log.EVM, "PinToStateRoot: found in CurrentUBT")
-			}
+		// Log available roots for debugging
+		store.treeStoreMutex.RLock()
+		treeStoreRoots := make([]string, 0, len(store.treeStore))
+		for r := range store.treeStore {
+			treeStoreRoots = append(treeStoreRoots, r.Hex()[:10])
 		}
-	}
+		store.treeStoreMutex.RUnlock()
 
-	if !found {
-		return fmt.Errorf("state root %s not available for pinning", root.Hex())
+		log.Warn(log.EVM, "PinToStateRoot: root not found in treeStore",
+			"requestedRoot", root.Hex(),
+			"treeStoreCount", treeStoreCount,
+			"availableRoots", treeStoreRoots)
+		return fmt.Errorf("state root %s not available for pinning (treeStore only)", root.Hex())
 	}
 
 	store.pinnedStateRoot = &root
 	store.pinnedTree = tree
-	log.Info(log.EVM, "PinToStateRoot", "root", root.Hex())
+	log.Info(log.EVM, "PinToStateRoot: pinned to state root",
+		"root", root.Hex(),
+		"treeStoreCount", treeStoreCount)
 	return nil
 }
 
@@ -947,21 +1117,35 @@ func (store *StateDBStorage) UnpinState() {
 }
 
 func (store *StateDBStorage) ResetTrie() {
-	store.CurrentUBT = NewUnifiedBinaryTree(Config{Profile: defaultUBTProfile})
+	// Create new genesis tree and set as canonical
+	genesisTree := NewUnifiedBinaryTree(Config{Profile: defaultUBTProfile})
+	genesisRootBytes := genesisTree.RootHash()
+	genesisRoot := common.BytesToHash(genesisRootBytes[:])
+
+	store.treeStoreMutex.Lock()
+	store.treeStore = make(map[common.Hash]*UnifiedBinaryTree)
+	store.treeStore[genesisRoot] = genesisTree
+	store.canonicalRoot = genesisRoot
+	store.activeRoot = common.Hash{}
+	store.treeStoreMutex.Unlock()
+
+	// Reset other state
 	store.trieDB = NewMerkleTree(nil)
 	store.stagedInserts = make(map[common.Hash][]byte)
 	store.stagedDeletes = make(map[common.Hash]bool)
 	store.keys = make(map[common.Hash]bool)
-	store.ubtRoots = make(map[common.Hash]*UnifiedBinaryTree)
 	store.Root = store.trieDB.GetRoot()
+
+	// DEPRECATED: kept for interface compatibility
+	store.ubtRoots = make(map[common.Hash]*UnifiedBinaryTree)
 }
 
 // BuildUBTWitness builds dual UBT witnesses and stores the post-state tree.
-// Uses GetActiveTree() to support multi-snapshot parallel bundle building.
+// Uses GetActiveTree() to support root-first parallel bundle building.
 func (store *StateDBStorage) BuildUBTWitness(contractWitnessBlob []byte) ([]byte, []byte, error) {
 	// Use GetActiveTree() to get the correct tree for parallel bundle building
-	// This returns the active snapshot if set, otherwise CurrentUBT
-	tree := store.GetActiveTree()
+	// This returns pinnedTree > activeRoot tree > canonical tree
+	tree := store.GetActiveTreeTyped()
 	if tree == nil {
 		return nil, nil, fmt.Errorf("no UBT tree available")
 	}
@@ -975,10 +1159,8 @@ func (store *StateDBStorage) BuildUBTWitness(contractWitnessBlob []byte) ([]byte
 		return nil, nil, fmt.Errorf("failed to build witness: %w", err)
 	}
 
-	// Store the post-state tree in ubtRoots map
-	store.ubtRootsMutex.Lock()
-	store.ubtRoots[postUBTRoot] = postTree
-	store.ubtRootsMutex.Unlock()
+	// Store the post-state tree in treeStore (root-first model)
+	store.StoreTreeWithRoot(postUBTRoot, postTree)
 
 	return preWitness, postWitness, nil
 }
@@ -1061,23 +1243,23 @@ func parseBlockNumber(blockNumber string, latestBlock uint64) (uint32, error) {
 // Multi-Rollup Support: Implementation Methods
 
 // GetUBTNodeForServiceBlock retrieves the UBT tree for a specific service's block
+// Uses treeStore for root-first state management.
 func (store *StateDBStorage) GetUBTNodeForServiceBlock(serviceID uint32, blockNumber string) (interface{}, bool) {
 	store.serviceMutex.RLock()
 	defer store.serviceMutex.RUnlock()
 
-	// For "latest"/"pending" queries, always use CurrentUBT if available
-	// This ensures we return the most up-to-date state from CommitSnapshot,
-	// which may be ahead of the indexed blocks (FinalizeEVMBlock may not have been called yet)
+	// For "latest"/"pending" queries, return canonical tree
 	if blockNumber == "latest" || blockNumber == "pending" {
-		if store.CurrentUBT != nil {
-			return store.CurrentUBT, true
+		tree := store.GetCanonicalTree()
+		if tree != nil {
+			return tree, true
 		}
 	}
 
 	// Get latest block for this service
 	latestBlock, exists := store.latestRollupBlock[serviceID]
 	if !exists {
-		log.Info(log.EVM, "GetUBTNodeForServiceBlock: no indexed blocks and no CurrentUBT",
+		log.Info(log.EVM, "GetUBTNodeForServiceBlock: no indexed blocks",
 			"serviceID", serviceID,
 			"blockNumber", blockNumber)
 		return nil, false
@@ -1093,25 +1275,24 @@ func (store *StateDBStorage) GetUBTNodeForServiceBlock(serviceID uint32, blockNu
 	key := ubtRootKey(serviceID, blockNum)
 	ubtRoot, ok := store.serviceUBTRoots[key]
 	if !ok {
-		// Block not indexed yet - fall back to CurrentUBT for latest block
+		// Block not indexed yet - fall back to canonical for latest block
 		if uint64(blockNum) == latestBlock || blockNumber == "latest" || blockNumber == "pending" {
-			if store.CurrentUBT != nil {
-				return store.CurrentUBT, true
+			tree := store.GetCanonicalTree()
+			if tree != nil {
+				return tree, true
 			}
 		}
 		return nil, false
 	}
 
-	// Retrieve UBT tree from root
-	store.ubtRootsMutex.RLock()
-	defer store.ubtRootsMutex.RUnlock()
-
-	tree, found := store.ubtRoots[ubtRoot]
+	// Retrieve UBT tree from treeStore (root-first model)
+	tree, found := store.GetTreeByRootTyped(ubtRoot)
 	if !found {
-		// Tree not found in index - fall back to CurrentUBT for latest
+		// Tree not found in treeStore - fall back to canonical for latest
 		if blockNumber == "latest" || blockNumber == "pending" {
-			if store.CurrentUBT != nil {
-				return store.CurrentUBT, true
+			canonicalTree := store.GetCanonicalTree()
+			if canonicalTree != nil {
+				return canonicalTree, true
 			}
 		}
 	}
@@ -1438,32 +1619,31 @@ func (store *StateDBStorage) FinalizeEVMBlock(
 		return fmt.Errorf("failed to store service block: %w", err)
 	}
 
-	// Store the UBT tree snapshot
-	store.ubtRootsMutex.Lock()
-	if store.CurrentUBT != nil {
-		// The CurrentUBT should already be the post-state tree
+	// Store the UBT tree snapshot in treeStore (root-first model)
+	canonicalTree := store.GetCanonicalTreeTyped()
+	if canonicalTree != nil {
+		// The canonical tree should already be the post-state tree
 		// Store it under the block's UBT root
-		store.ubtRoots[payload.UBTRoot] = store.CurrentUBT
+		store.StoreTreeWithRoot(payload.UBTRoot, canonicalTree)
 		log.Info(log.EVM, "Stored UBT tree snapshot",
 			"serviceID", serviceID,
 			"blockNumber", payload.Number,
 			"ubtRoot", payload.UBTRoot.String())
 	}
-	store.ubtRootsMutex.Unlock()
 
 	// Create checkpoint if needed (UBT checkpoint tree)
-	if store.CheckpointManager != nil && store.CurrentUBT != nil {
+	if store.CheckpointManager != nil && canonicalTree != nil {
 		blockHeight := uint64(payload.Number)
 
 		// Pin genesis checkpoint (never evicted)
 		if blockHeight == 0 {
-			store.CheckpointManager.PinCheckpoint(blockHeight, store.CurrentUBT)
+			store.CheckpointManager.PinCheckpoint(blockHeight, canonicalTree)
 			log.Info(log.EVM, "Pinned genesis checkpoint",
 				"height", blockHeight,
 				"ubtRoot", payload.UBTRoot.String())
 		} else if store.CheckpointManager.ShouldCreateCheckpoint(blockHeight) {
 			// Add to LRU cache for fine/coarse checkpoints
-			store.CheckpointManager.AddCheckpoint(blockHeight, store.CurrentUBT)
+			store.CheckpointManager.AddCheckpoint(blockHeight, canonicalTree)
 			log.Info(log.EVM, "Created checkpoint",
 				"height", blockHeight,
 				"ubtRoot", payload.UBTRoot.String())
@@ -1496,9 +1676,10 @@ func (store *StateDBStorage) InitializeEVMGenesis(
 	// Convert startBalance to Wei (18 decimals)
 	balanceWei := new(big.Int).Mul(big.NewInt(startBalance), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
 
-	// Get current UBT tree
-	if store.CurrentUBT == nil {
-		return common.Hash{}, fmt.Errorf("CurrentUBT is nil")
+	// Get canonical tree (root-first model)
+	canonicalTree := store.GetCanonicalTreeTyped()
+	if canonicalTree == nil {
+		return common.Hash{}, fmt.Errorf("canonical tree not available")
 	}
 
 	// Insert account BasicData (balance + nonce).
@@ -1511,14 +1692,17 @@ func (store *StateDBStorage) InitializeEVMGenesis(
 
 	basicData := NewBasicDataLeaf(1, balance, 0)
 	basicDataKey := GetBasicDataKey(defaultUBTProfile, issuerAddress)
-	store.CurrentUBT.Insert(basicDataKey, basicData.Encode())
+	canonicalTree.Insert(basicDataKey, basicData.Encode())
 
 	// Compute the updated UBT root
-	ubtRoot := store.CurrentUBT.RootHash()
+	ubtRoot := canonicalTree.RootHash()
 	ubtRootHash := common.BytesToHash(ubtRoot[:])
 
-	// Store the updated UBT tree
-	store.StoreUBTTree(ubtRootHash, store.CurrentUBT)
+	// Store the updated tree in treeStore and set as canonical (root-first model)
+	store.StoreTreeWithRoot(ubtRootHash, canonicalTree)
+	if err := store.SetCanonicalRoot(ubtRootHash); err != nil {
+		return common.Hash{}, fmt.Errorf("failed to set canonical root: %w", err)
+	}
 
 	// Create genesis block (block 0) for EVM service
 	genesisBlock := &evmtypes.EvmBlockPayload{

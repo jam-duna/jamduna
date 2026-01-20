@@ -4,6 +4,81 @@ For full throughput, JAM Rollups should NOT wait to submit one work package beca
 has not been guaranteed, accumulated, and finalized.  Instead, work package builders should put work packages
 in a queue and submit them as soon as they are ready.  Provided sufficient cores are available, this supports rollup high throughput (1 block per 6 seconds) to support finality in < 30s from JAM for all rollups.
 
+---
+
+## Contiguous Accumulation (2026-01-20)
+
+JAM accumulates work packages out of order across cores. For example, blocks may accumulate in sequence: 2,3,5,4,7,6,1,8,10,11,9. The canonical state must only advance when we have a contiguous chain of accumulated blocks.
+
+### Problem
+
+If `CommitAsCanonical` is called on every accumulation event, out-of-order accumulation causes incorrect canonical state:
+
+- Block 11 accumulates → canonical = block 11's postRoot
+- Block 9 accumulates LATER → canonical = block 9's postRoot (WRONG!)
+
+Result: `eth_getBalance("latest")` returns stale state.
+
+### Solution: Contiguous Tracking
+
+The queue runner tracks accumulated blocks and only commits canonical state for the highest contiguous block:
+
+```go
+// In Runner:
+accumulatedRoots  map[uint64]common.Hash // blockNumber -> postRoot
+highestContiguous uint64                 // highest N where blocks 1..N are all accumulated
+```
+
+**Algorithm on each accumulation:**
+
+1. Store `accumulatedRoots[blockNumber] = postRoot`
+2. Advance: `while accumulatedRoots[highestContiguous+1] exists { highestContiguous++ }`
+3. Commit only `accumulatedRoots[highestContiguous]` as canonical
+
+**Example with sequence 2,3,5,4,7,6,1,8,10,11,9:**
+
+| Accumulated | highestContiguous | Canonical Block |
+|-------------|-------------------|-----------------|
+| 2 | 0 (missing 1) | none |
+| 3 | 0 | none |
+| 1 | → 7 | 7 |
+| 8 | → 8 | 8 |
+| 10, 11 | 8 (missing 9) | 8 |
+| 9 | → 11 | **11** |
+
+Final canonical = block 11's postRoot (correct).
+
+### BlockCommitment as Authoritative Root Source
+
+When bundles are rebuilt (new RefineContext), the wpHash changes but the payload is immutable. `BlockCommitment` (148-byte header hash) remains stable across rebuilds:
+
+```go
+// In QueueItem:
+BlockCommitment common.Hash
+
+// In QueueState:
+BlockCommitmentData map[common.Hash]*BlockCommitmentInfo
+
+type BlockCommitmentInfo struct {
+    PreRoot     common.Hash
+    PostRoot    common.Hash
+    TxHashes    []common.Hash
+    BlockNumber uint64
+}
+```
+
+At Phase 1 completion, `StoreBlockCommitmentData(commitment, info)` saves the authoritative roots. On accumulation, the PostRoot is looked up via `BlockCommitmentData[item.BlockCommitment]`.
+
+### Block Tag Semantics
+
+| Tag | Meaning | Returns |
+|-----|---------|---------|
+| `pending` | Latest Phase 1 executed block | All txs (optimistic state) |
+| `latest` | Highest contiguous accumulated block | Canonical JAM state |
+| `finalized` | Not yet implemented | Panics |
+
+---
+
 Users can obtain proofs of finality through the combination of a JAM light client and a rollup light client
 as described below.
 

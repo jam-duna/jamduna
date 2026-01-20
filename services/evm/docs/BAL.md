@@ -979,7 +979,8 @@ Update Fetch* methods to accept and use txIndex:
 func (store *StateDBStorage) FetchBalance(address common.Address, txIndex uint32) ([32]byte, error) {
     var balance [32]byte
 
-    if store.CurrentUBT == nil {
+    tree := store.GetActiveTreeTyped()
+    if tree == nil {
         return balance, nil
     }
 

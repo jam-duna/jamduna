@@ -555,13 +555,9 @@ type EVMJAMStorage interface {
 	// IsUBTReadLogEnabled returns whether UBT read logging is currently enabled
 	IsUBTReadLogEnabled() bool
 
-	// GetCurrentUBTRoot returns the current UBT state root hash
-	// This is the EVMPreStateRoot before execution or EVMPostStateRoot after
-	GetCurrentUBTRoot() common.Hash
-
-	// StoreCurrentUBTAtRoot stores a copy of CurrentUBT at the given root hash
-	// Used by Phase 1 to preserve pre-state trees for Phase 2 pinning
-	StoreCurrentUBTAtRoot(root common.Hash)
+	// GetActiveUBTRoot returns the root hash of the currently active tree
+	// Priority: pinnedTree (Phase 2) > activeRoot (root-first) > canonical
+	GetActiveUBTRoot() common.Hash
 
 	// PinToStateRoot pins execution to a specific historical state root
 	// Used for Phase 1 verification (re-execute against same pre-state)
@@ -575,27 +571,6 @@ type EVMJAMStorage interface {
 	// BuildUBTWitness builds dual UBT witnesses and stores the post-state tree
 	// Returns: preWitness, postWitness, error
 	BuildUBTWitness(contractWitnessBlob []byte) (preWitness []byte, postWitness []byte, err error)
-
-	// Contract Write Application
-	// ApplyContractWrites applies contract writes (code, storage, balance, nonce) to the current UBT tree
-	// This is called after work items are processed to update the state
-	ApplyContractWrites(blob []byte) error
-
-	// Deferred Write Management (for parallel bundle building)
-	// StorePendingWrites stores contract writes keyed by wpHash for deferred application
-	// Writes are applied only when OnAccumulated fires, preventing speculative CurrentUBT advancement
-	StorePendingWrites(wpHash common.Hash, blob []byte)
-
-	// ApplyPendingWrites applies stored writes for a work package that has accumulated
-	// Returns: (applied, error) where applied=true if writes were found and applied
-	ApplyPendingWrites(wpHash common.Hash) (bool, error)
-
-	// DiscardPendingWrites removes pending writes without applying (for failed bundles)
-	// Returns true if writes were found and discarded
-	DiscardPendingWrites(wpHash common.Hash) bool
-
-	// GetPendingWritesCount returns the number of pending write blobs (for monitoring)
-	GetPendingWritesCount() int
 
 	// Block Access List (BAL) Computation
 	// ComputeBlockAccessListHash builds BAL from UBT witnesses and returns hash + statistics
@@ -619,10 +594,6 @@ type EVMJAMStorage interface {
 	// GetNonce reads nonce from UBT tree using BasicData
 	// Returns: nonce, error
 	GetNonce(tree interface{}, address common.Address) (uint64, error)
-
-	// GetCurrentUBTTree returns the current active UBT tree
-	// Returns: tree (nil if not available)
-	GetCurrentUBTTree() interface{}
 
 	// Multi-Rollup Support: Service-Scoped State Management
 	// Each node can run multiple rollups (one per service), each with isolated state
@@ -674,41 +645,66 @@ type EVMJAMStorage interface {
 	// Returns the UBT root hash and any error
 	InitializeEVMGenesis(serviceID uint32, issuerAddress common.Address, startBalance int64) (common.Hash, error)
 
-	// Multi-Snapshot UBT System for Parallel Bundle Building
-	// These methods support concurrent bundle building with proper state chaining.
-	// Each bundle gets its own UBT snapshot, preventing the "CurrentUBT drift" problem.
+	// ===== Root-First State Model =====
+	//
+	// These methods enable standalone pre/post per bundle by using state root hashes
+	// instead of block numbers. This allows safe resubmission without affecting other bundles.
+	//
+	// Key principle: All state access is by root hash, not block number.
 
-	// CreateSnapshotForBlock creates a new UBT snapshot for the given block number.
-	// The snapshot chains from: previous block's pending snapshot OR canonical CurrentUBT.
-	CreateSnapshotForBlock(blockNumber uint64) error
+	// GetCanonicalRoot returns the state root of the canonical (committed) state.
+	GetCanonicalRoot() common.Hash
 
-	// SetActiveSnapshot sets which snapshot to use for subsequent reads (0 = canonical).
-	SetActiveSnapshot(blockNumber uint64) error
+	// SetCanonicalRoot updates the canonical state root (internal use).
+	SetCanonicalRoot(root common.Hash) error
 
-	// ClearActiveSnapshot resets to reading from canonical CurrentUBT.
-	ClearActiveSnapshot()
+	// GetCanonicalTree returns the UBT tree at the canonical root.
+	// This is the replacement for accessing CurrentUBT directly.
+	GetCanonicalTree() interface{}
 
-	// ApplyWritesToActiveSnapshot applies contract writes to the currently active snapshot.
-	ApplyWritesToActiveSnapshot(blob []byte) error
+	// GetActiveTree returns the UBT tree that should be used for reads.
+	// Priority: pinnedTree (Phase 2) > activeRoot (root-first) > canonical.
+	GetActiveTree() interface{}
 
-	// CommitSnapshot commits the snapshot for blockNumber to canonical state (OnAccumulated).
-	CommitSnapshot(blockNumber uint64) error
+	// GetTreeByRoot returns the UBT tree with the given state root.
+	// Returns (tree, true) if found, (nil, false) if not.
+	GetTreeByRoot(root common.Hash) (interface{}, bool)
 
-	// InvalidateSnapshotsFrom discards snapshots for blocks >= blockNumber (OnFailed).
-	// Returns the number of snapshots invalidated.
-	InvalidateSnapshotsFrom(blockNumber uint64) int
+	// CloneTreeFromRoot creates a deep copy of the tree at the given root.
+	// Returns error if no tree exists at that root.
+	CloneTreeFromRoot(root common.Hash) (interface{}, error)
 
-	// InvalidateSnapshot discards only the snapshot for the specified block number.
-	// Unlike InvalidateSnapshotsFrom, this does NOT affect snapshots for other blocks.
-	// Used for rebuilding bundles: invalidate v1's polluted snapshot, recreate from parent.
-	// Returns true if a snapshot was deleted, false if no snapshot existed.
-	InvalidateSnapshot(blockNumber uint64) bool
+	// StoreTree stores a tree and returns its root hash.
+	StoreTree(tree interface{}) common.Hash
 
-	// GetSnapshotBlockNumbers returns sorted list of block numbers with pending snapshots.
-	GetSnapshotBlockNumbers() []uint64
+	// DiscardTree removes a tree from storage by root.
+	// Returns true if removed, false if not found.
+	// Does not discard canonical root.
+	DiscardTree(root common.Hash) bool
 
-	// GetPendingSnapshotCount returns the number of pending snapshots.
-	GetPendingSnapshotCount() int
+	// CreateSnapshotFromRoot creates a new UBT snapshot by cloning from the specified root.
+	// Returns the root hash of the newly created snapshot.
+	CreateSnapshotFromRoot(parentRoot common.Hash) (common.Hash, error)
+
+	// ApplyWritesToTree applies contract writes to the tree at the given root.
+	// Returns the new root hash after writes are applied.
+	ApplyWritesToTree(root common.Hash, blob []byte) (common.Hash, error)
+
+	// CommitAsCanonical sets the given root as the new canonical state.
+	// Called when a bundle accumulates successfully.
+	CommitAsCanonical(root common.Hash) error
+
+	// SetActiveRoot sets the state root to use for the current execution context.
+	SetActiveRoot(root common.Hash) error
+
+	// GetActiveRoot returns the currently active state root (zero hash if not set).
+	GetActiveRoot() common.Hash
+
+	// ClearActiveRoot resets the active root (use canonical for reads).
+	ClearActiveRoot()
+
+	// GetTreeStoreSize returns the number of trees in the store (for metrics).
+	GetTreeStoreSize() int
 }
 
 // OrchardJAMStorage extends JAMStorage with Orchard-specific operations

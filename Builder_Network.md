@@ -88,7 +88,8 @@ func ExecutePhase1Batch(
     evmStorage := getEVMStorage()
 
     // 1. Capture pre-state root
-    preRoot := evmStorage.GetCurrentUBTRoot()
+    preRoot := evmStorage.GetCanonicalRoot()
+    activeRoot := preRoot
 
     // 2. DISABLE witness tracking for fast execution
     evmStorage.DisableUBTReadLog()
@@ -97,17 +98,19 @@ func ExecutePhase1Batch(
     blocks := make([]BlockResult, len(txLists))
     for i, txs := range txLists {
         result := executeEVMBlock(txs, blockContexts[i])
+        postRoot, _ := evmStorage.ApplyWritesToTree(activeRoot, result.StateChanges)
+        activeRoot = postRoot
         blocks[i] = BlockResult{
             BlockNumber:  blockContexts[i].Number,
             BlockHash:    result.BlockHash,
-            StateRoot:    evmStorage.GetCurrentUBTRoot(),
+            StateRoot:    postRoot,
             ReceiptsRoot: result.ReceiptsRoot,
             GasUsed:      result.GasUsed,
         }
     }
 
     // 4. Capture post-state root
-    postRoot := evmStorage.GetCurrentUBTRoot()
+    postRoot := activeRoot
 
     // 5. Compute batch ID
     batchID := computeBatchID(preRoot, blocks, postRoot)
@@ -232,19 +235,21 @@ func ExecutePhase2(agreement *BuilderAgreement) (*types.WorkPackageBundle, error
 
     // 3. Re-execute the batch (populates read log)
     var allStateChanges []byte
+    activeRoot := phase1.EVMPreStateRoot
     for i, txs := range phase1.TxLists {
         result := executeEVMBlock(txs, phase1.BlockContexts[i])
         allStateChanges = append(allStateChanges, result.StateChanges...)
+        nextRoot, _ := evmStorage.ApplyWritesToTree(activeRoot, result.StateChanges)
+        activeRoot = nextRoot
 
         // Verify we match Phase 1 result
-        currentRoot := evmStorage.GetCurrentUBTRoot()
-        if currentRoot != phase1.Blocks[i].StateRoot {
+        if activeRoot != phase1.Blocks[i].StateRoot {
             return nil, ErrStateMismatch
         }
     }
 
     // 4. Verify final post-state matches
-    postRoot := evmStorage.GetCurrentUBTRoot()
+    postRoot := activeRoot
     if postRoot != phase1.EVMPostStateRoot {
         return nil, fmt.Errorf("post-state mismatch: expected %x, got %x",
             phase1.EVMPostStateRoot, postRoot)
@@ -299,14 +304,14 @@ If Phase 2 produces a different post-state root than Phase 1:
 
 ### Storage Layer Changes
 
-The existing `StateDBStorage` already supports most requirements:
+The root-first storage model provides explicit pre/post roots per bundle:
 
 | Requirement | Existing Support | Notes |
 |-------------|------------------|-------|
 | UBT read log | `ubtReadLog`, `EnableUBTReadLog()` | Need `DisableUBTReadLog()` |
-| State snapshots | `pendingSnapshots`, `CreateSnapshotForBlock()` | Works for batching |
-| Active tree selection | `GetActiveTree()`, `SetActiveSnapshot()` | Works |
-| Witness generation | `BuildUBTWitness()` | Works |
+| Root-based trees | `treeStore`, `GetTreeByRoot()` | Copy-on-write per root |
+| Active tree selection | `GetActiveTree()`, `SetActiveRoot()` | Explicit root pinning |
+| Witness generation | `BuildUBTWitness()` | Uses read log |
 
 ### New Methods Needed
 
@@ -317,8 +322,8 @@ func (s *StateDBStorage) DisableUBTReadLog()
 // Pin execution to a specific state root
 func (s *StateDBStorage) PinToStateRoot(root common.Hash) error
 
-// Get current UBT root without full tree access
-func (s *StateDBStorage) GetCurrentUBTRoot() common.Hash
+// Get canonical root without tree access
+func (s *StateDBStorage) GetCanonicalRoot() common.Hash
 ```
 
 ### Work Package Structure for Batched Blocks
@@ -546,47 +551,15 @@ This bypasses the DA overwrite issue entirely - builders serve receipts from loc
 
 ### 2. Intermediate State Correctness
 
-**Problem**: Multi-snapshot UBT must maintain correct state chaining:
-- Snapshot N must read from Snapshot N-1 (not canonical) if N-1 is pending
-- Writes must not leak between unrelated snapshots
+**Status**: Addressed by root-first execution.
 
-**Current Implementation**:
-```go
-// CreateSnapshotForBlock chains correctly:
-// 1. Look for parent snapshot (blockNumber - 1)
-// 2. If exists, clone from parent
-// 3. Otherwise, clone from canonical CurrentUBT
-```
+Each bundle is built against an explicit `PreRoot` and produces a `PostRoot` via copy-on-write. Parallel builds no longer share mutable state, so intermediate reads are isolated by root.
 
-**Verification Required**:
-- Balance queries during parallel bundle building
-- State reads for contract execution mid-batch
-- FetchBalance/FetchNonce routing to correct snapshot
+### 3. Invalidation and Resubmission
 
-### 3. InvalidateBlock and StateDB Access (UBT2)
+**Status**: Addressed by root-first execution.
 
-**Problem**: Current invalidation approach is too coarse:
-
-```go
-// Current: InvalidateSnapshotsFrom(blockNumber)
-// Deletes ALL snapshots >= blockNumber
-```
-
-This breaks parallel bundle building:
-- Bundle A (block 5) fails
-- Bundle B (block 6) is valid but depends on A
-- Bundle C (block 7) is independent of A (different tx set)
-- `InvalidateSnapshotsFrom(5)` deletes B and C unnecessarily
-
-**Better Approach**:
-1. Track snapshot dependencies explicitly
-2. Only invalidate snapshots that actually depend on failed state
-3. Or: Rebuild only the affected chain, not all pending
-
-**StateDB Access Issue**:
-- Invalidation must not corrupt in-progress reads
-- Need proper locking or copy-on-write semantics
-- Current mutex may cause deadlocks in concurrent build/invalidate
+Failed bundles discard only their `PostRoot`, leaving other in-flight bundles untouched. Resubmission rebuilds from the original `PreRoot` without requiring any snapshot invalidation.
 
 ---
 

@@ -202,6 +202,10 @@ func main() {
 			// Create queue runner for managed submission
 			queueState := queue.NewQueueState(sid)
 
+			// Wire up txPool for dynamic queue depth calculation
+			// Queue depth adjusts based on pending transactions: (pendingTxs / maxTxsPerBundle) + buffer
+			queueState.SetTxPoolProvider(txPool)
+
 			// Create submitter callback - submits bundle to guarantor via CE146
 			submitter := func(bundle *types.WorkPackageBundle, coreIndex uint16) (common.Hash, error) {
 				wpHash := bundle.WorkPackage.Hash()
@@ -270,53 +274,49 @@ func main() {
 					}
 				}
 
-				// === Multi-Snapshot UBT: Create and activate snapshot for rebuild ===
-				// CreateSnapshotForBlock is idempotent - if snapshot already exists, it reuses it.
-				// No need to delete snapshots before rebuild.
-				blockNumber := item.BlockNumber
+				// === ROOT-FIRST STATE MODEL: Use PreRoot for rebuild ===
+				// For rebuilds, we pin to the original PreRoot to re-execute against the same state.
+				// PreRoot was captured during initial build and stored in QueueItem.
+				preRoot := item.PreRoot
+				if preRoot == (common.Hash{}) {
+					// Fallback: use canonical root if PreRoot not set
+					preRoot = evmstorage.GetCanonicalRoot()
+				}
 
-				// Create snapshot for this block, chaining from previous block's snapshot or canonical
-				if err := evmstorage.CreateSnapshotForBlock(blockNumber); err != nil {
-					// If parent state was superseded (out-of-order commit), we cannot rebuild.
-					// The bundle's state is already committed via a later block - skip this rebuild.
-					log.Error(log.EVM, "Rebuild: Cannot create snapshot - aborting rebuild",
-						"blockNumber", blockNumber,
+				// Set active root for reads during BuildBundle
+				if err := evmstorage.SetActiveRoot(preRoot); err != nil {
+					log.Error(log.EVM, "Rebuild: Cannot set active root - aborting rebuild",
+						"blockNumber", item.BlockNumber,
+						"preRoot", preRoot.Hex(),
 						"error", err)
-					return nil, fmt.Errorf("cannot rebuild block %d: %w", blockNumber, err)
-				} else {
-					// Activate the snapshot for reads during BuildBundle
-					if err := evmstorage.SetActiveSnapshot(blockNumber); err != nil {
-						log.Warn(log.EVM, "Rebuild: Failed to activate snapshot",
-							"blockNumber", blockNumber,
-							"error", err)
-					}
+					return nil, fmt.Errorf("cannot rebuild block %d: %w", item.BlockNumber, err)
 				}
 
 				// Rebuild via StateDB.BuildBundle (skip writes - already applied)
 				bundle, _, err := n.BuildBundle(item.Bundle.WorkPackage, extrinsicsCopy, item.CoreIndex, nil, true)
 
-				// Always clear active snapshot after build
-				evmstorage.ClearActiveSnapshot()
+				// Always clear active root after build
+				evmstorage.ClearActiveRoot()
 
 				if err != nil {
-					// On rebuild failure, invalidate the snapshot we created
-					evmstorage.InvalidateSnapshotsFrom(blockNumber)
 					return nil, fmt.Errorf("failed to rebuild bundle: %w", err)
 				}
 
-				log.Info(log.EVM, "Rebuild: completed with snapshot",
-					"blockNumber", blockNumber,
-					"pendingSnapshots", evmstorage.GetPendingSnapshotCount())
+				log.Info(log.EVM, "Rebuild: completed with root-first state",
+					"blockNumber", item.BlockNumber,
+					"preRoot", preRoot.Hex(),
+					"treeStoreSize", evmstorage.GetTreeStoreSize())
 
 				return bundle, nil
 			}
 
-			queueRunner := queue.NewRunner(queueState, sid, submitter, bundleBuilder, evmstorage)
+			queueRunner := queue.NewRunner(queueState, sid, submitter, bundleBuilder)
 
-			// Set up snapshot-aware callbacks for multi-snapshot UBT parallel bundle building.
-			// These callbacks commit/invalidate UBT snapshots in addition to txpool cleanup.
-			queueRunner.SetOnAccumulatedWithSnapshots(evmstorage, func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash) {
-				// Called AFTER snapshot is committed to canonical state
+			// Set up root-based callbacks for multi-snapshot UBT parallel bundle building.
+			// These callbacks use PostRoot from QueueItem to commit canonical state,
+			// enabling standalone pre/post per bundle for safe resubmission.
+			queueRunner.SetOnAccumulatedWithRoots(evmstorage, func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash) {
+				// Called AFTER PostRoot is committed to canonical state (or fallback to legacy path)
 				log.Info(log.Node, "🗑️  Removing accumulated transactions from txpool",
 					"wpHash", wpHash.Hex(),
 					"blockNumber", blockNumber,
@@ -329,10 +329,10 @@ func main() {
 					"requested", len(txHashes))
 			})
 
-			// Set callback to invalidate snapshots and unlock transactions when bundles fail permanently
-			// This also invalidates descendant snapshots that depend on the failed bundle
-			queueRunner.SetOnFailedWithSnapshots(evmstorage, func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash) {
-				// Called AFTER snapshots are invalidated
+			// Set callback to discard trees and unlock transactions when bundles fail permanently
+			// Uses root-first model: discards PostRoot tree instead of invalidating snapshots
+			queueRunner.SetOnFailedWithRoots(evmstorage, func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash) {
+				// Called AFTER PostRoot tree is discarded (or fallback to snapshot invalidation)
 				log.Warn(log.Node, "🔓 Unlocking transactions from failed bundle",
 					"wpHash", wpHash.Hex(),
 					"blockNumber", blockNumber,
@@ -535,6 +535,7 @@ func handleBlockNotifications(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrp
 		txOffset := 0
 		blockIdx := 0
 		phase1Failed := false
+		currentRoot := evmStorage.GetCanonicalRoot()
 
 		for txOffset < len(allPendingTxs) {
 			// Calculate how many txns for this bundle
@@ -557,7 +558,7 @@ func handleBlockNotifications(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrp
 				anchorOffset = 1
 			}
 
-			blockData, err := executePhase1ForBatch(n, rollup, queueRunner, batchTxs, batchHashes, coreIdx, anchorOffset)
+			blockData, err := executePhase1ForBatch(n, rollup, queueRunner, evmStorage, batchTxs, batchHashes, coreIdx, anchorOffset, currentRoot)
 			if err != nil {
 				log.Warn(log.Node, "Phase 1 failed", "blockIdx", blockIdx, "core", coreIdx, "err", err)
 				phase1Failed = true
@@ -567,7 +568,17 @@ func handleBlockNotifications(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrp
 			// Assign real block number to this batch's transactions (updates from BlockNumber=0)
 			txPool.AssignBlockNumber(batchHashes, blockData.blockNumber)
 
+			// Store BlockCommitmentData at Phase 1 completion (survives rebuilds)
+			blockCommitment := blockData.evmBlock.BlockCommitment()
+			queueRunner.StoreBlockCommitmentData(blockCommitment, &queue.BlockCommitmentInfo{
+				PreRoot:     blockData.phase1Result.EVMPreStateRoot,
+				PostRoot:    blockData.phase1Result.EVMPostStateRoot,
+				TxHashes:    batchHashes,
+				BlockNumber: blockData.blockNumber,
+			})
+
 			phase1Blocks = append(phase1Blocks, *blockData)
+			currentRoot = blockData.phase1Result.EVMPostStateRoot
 			txOffset = endOffset
 			blockIdx++
 		}
@@ -620,7 +631,7 @@ func handleBlockNotifications(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrp
 // executePhase1ForBatch executes Phase 1 for a batch of transactions: build evmBlock without witnesses.
 // Takes pre-fetched and pre-locked transactions (already sorted by sender+nonce).
 // Returns phase1BlockData containing all info needed for Phase 2.
-func executePhase1ForBatch(n *node.Node, rollup *evmrpc.Rollup, queueRunner *queue.Runner, batchTxs []*evmtypes.EthereumTransaction, batchHashes []common.Hash, coreIdx uint16, anchorOffset int) (*phase1BlockData, error) {
+func executePhase1ForBatch(n *node.Node, rollup *evmrpc.Rollup, queueRunner *queue.Runner, evmStorage types.EVMJAMStorage, batchTxs []*evmtypes.EthereumTransaction, batchHashes []common.Hash, coreIdx uint16, anchorOffset int, preRoot common.Hash) (*phase1BlockData, error) {
 	if len(batchTxs) == 0 {
 		return nil, fmt.Errorf("no transactions in batch")
 	}
@@ -663,12 +674,37 @@ func executePhase1ForBatch(n *node.Node, rollup *evmrpc.Rollup, queueRunner *que
 		copy(originalWorkItemExtrinsics[i], wi.Extrinsics)
 	}
 
+	// === ROOT-FIRST STATE MODEL ===
+	// Use chained preRoot from the previous bundle's postRoot.
+	// This root will be stored in QueueItem for rebuild and commit operations.
+
+	// Validate parent root exists and set as active for reads during execution
+	if _, err := evmStorage.CreateSnapshotFromRoot(preRoot); err != nil {
+		return nil, fmt.Errorf("failed to validate parent root %s for block %d: %w", preRoot.Hex(), blockNumber, err)
+	}
+	if err := evmStorage.SetActiveRoot(preRoot); err != nil {
+		return nil, fmt.Errorf("failed to set active root for block %d: %w", blockNumber, err)
+	}
+
 	// Execute Phase 1: EVM without witnesses
-	// Note: No snapshot needed here - Phase 2 pins to pre-state root directly
+	// Writes are applied to the active tree via ApplyWritesToTree
 	phase1Result, err := rollup.ExecutePhase1(workPackage, originalExtrinsics)
+
+	// Always clear active root after Phase 1
+	evmStorage.ClearActiveRoot()
+
 	if err != nil {
 		return nil, fmt.Errorf("Phase 1 execution failed: %w", err)
 	}
+
+	// Capture postRoot - this should be set by ExecutePhase1 via ApplyWritesToTree
+	postRoot := phase1Result.EVMPostStateRoot
+
+	log.Info(log.Node, "🔷 Phase 1: Root-first state captured",
+		"blockNumber", blockNumber,
+		"preRoot", preRoot.Hex(),
+		"postRoot", postRoot.Hex(),
+		"treeStoreSize", evmStorage.GetTreeStoreSize())
 
 	// Build EvmBlockPayload
 	var receipts []evmtypes.TransactionReceipt
@@ -759,6 +795,9 @@ func executePhase2ForBlock(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrpc.T
 		blockData.coreIdx,
 		blockData.txHashes,
 		blockData.blockNumber,
+		blockData.phase1Result.EVMPreStateRoot,
+		blockData.phase1Result.EVMPostStateRoot,
+		blockCommitment,
 	)
 	if err != nil {
 		txPool.UnlockTransactionsFromBundle(blockData.txHashes)
@@ -862,4 +901,3 @@ func handleBlockEvents(n *node.Node, serviceID uint32, queueRunner *queue.Runner
 		}
 	}
 }
-

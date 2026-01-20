@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -37,6 +38,16 @@ type receiptPollerResult struct {
 	bundleHash   string
 	isNewBundle  bool
 	newBundleIdx int
+}
+
+func parseReceiptBlockNumber(blockNumber string) (uint64, error) {
+	if blockNumber == "" {
+		return 0, fmt.Errorf("empty block number")
+	}
+	if strings.HasPrefix(blockNumber, "0x") {
+		return strconv.ParseUint(strings.TrimPrefix(blockNumber, "0x"), 16, 64)
+	}
+	return strconv.ParseUint(blockNumber, 10, 64)
 }
 
 // pollReceiptSimple polls for a transaction receipt without work report lookup.
@@ -674,15 +685,29 @@ func TestEVMBlocksTransfersRPC(t *testing.T) {
 			t.Errorf("Only %d/%d transactions confirmed within timeout", confirmedCount, totalTxCount)
 		}
 
-		// Verify final balances
-		recipientBalanceAfter, err := evmClient.GetBalance(recipientAddr, "latest")
-		if err != nil {
-			t.Fatalf("GetBalance (recipient after) failed: %v", err)
-		}
-		recipientBalanceAfterInt := new(big.Int).SetBytes(recipientBalanceAfter.Bytes())
-
 		totalReceived := new(big.Int).Mul(amount, big.NewInt(int64(confirmedCount)))
 		expectedRecipientBalance := new(big.Int).Add(recipientBalanceBeforeInt, totalReceived)
+
+		// Wait for accumulation to update canonical state before checking "latest"
+		var recipientBalanceAfterInt *big.Int
+		balancePollInterval := 6 * time.Second
+		maxBalanceWaitRounds := 30
+		for round := 0; round < maxBalanceWaitRounds; round++ {
+			recipientBalanceAfter, err := evmClient.GetBalance(recipientAddr, "latest")
+			if err != nil {
+				t.Fatalf("GetBalance (recipient after) failed: %v", err)
+			}
+			recipientBalanceAfterInt = new(big.Int).SetBytes(recipientBalanceAfter.Bytes())
+			if recipientBalanceAfterInt.Cmp(expectedRecipientBalance) == 0 {
+				break
+			}
+			log.Info(log.Node, "⏳ Waiting for accumulation to update canonical balance",
+				"round", round+1,
+				"maxRounds", maxBalanceWaitRounds,
+				"recipientAfter", recipientBalanceAfterInt.String(),
+				"expected", expectedRecipientBalance.String())
+			time.Sleep(balancePollInterval)
+		}
 
 		log.Info(log.Node, "📊 Balance verification",
 			"recipientBefore", recipientBalanceBeforeInt.String(),
@@ -690,9 +715,9 @@ func TestEVMBlocksTransfersRPC(t *testing.T) {
 			"expected", expectedRecipientBalance.String(),
 			"confirmedCount", confirmedCount)
 
-		if recipientBalanceAfterInt.Cmp(expectedRecipientBalance) != 0 {
-			diff := new(big.Int).Sub(recipientBalanceAfterInt, expectedRecipientBalance)
-			t.Errorf("Recipient balance mismatch: expected %s, got %s (diff=%s)",
+		if recipientBalanceAfterInt == nil || recipientBalanceAfterInt.Cmp(expectedRecipientBalance) != 0 {
+			diff := new(big.Int).Sub(expectedRecipientBalance, recipientBalanceAfterInt)
+			t.Errorf("Recipient balance mismatch after accumulation wait: expected %s, got %s (diff=%s)",
 				expectedRecipientBalance.String(), recipientBalanceAfterInt.String(), diff.String())
 		} else {
 			log.Info(log.Node, "✅ Recipient balance verified")
@@ -961,15 +986,55 @@ func TestEVMMultiRoundTransfers(t *testing.T) {
 			t.Errorf("Detected %d unexpected transactions sent to recipient (non-test txs)", unexpectedRecipientTxs)
 		}
 
-		// Verify final balances
-		recipientBalanceAfter, err := evmClient.GetBalance(recipientAddr, "latest")
+		// Verify pending balance (all Phase 1 executed transactions)
+		// "pending" returns the latest Phase 1 block's state, which includes ALL executed txs
+		recipientBalancePending, err := evmClient.GetBalance(recipientAddr, "pending")
 		if err != nil {
-			t.Fatalf("GetBalance (recipient after) failed: %v", err)
+			t.Fatalf("GetBalance (recipient pending) failed: %v", err)
 		}
-		recipientBalanceAfterInt := new(big.Int).SetBytes(recipientBalanceAfter.Bytes())
+		recipientBalancePendingInt := new(big.Int).SetBytes(recipientBalancePending.Bytes())
+
+		// Expected pending = all confirmed transactions (pending tree has all Phase 1 state)
+		pendingReceived := new(big.Int).Mul(amount, big.NewInt(int64(confirmedCount)))
+		expectedPendingBalance := new(big.Int).Add(recipientBalanceBeforeInt, pendingReceived)
+
+		log.Info(log.Node, "📊 Pending balance verification",
+			"recipientBefore", recipientBalanceBeforeInt.String(),
+			"recipientPending", recipientBalancePendingInt.String(),
+			"expected", expectedPendingBalance.String(),
+			"confirmedCount", confirmedCount)
+
+		if recipientBalancePendingInt.Cmp(expectedPendingBalance) != 0 {
+			diff := new(big.Int).Sub(expectedPendingBalance, recipientBalancePendingInt)
+			t.Errorf("Recipient pending balance mismatch: expected %s, got %s (diff=%s)",
+				expectedPendingBalance.String(), recipientBalancePendingInt.String(), diff.String())
+		} else {
+			log.Info(log.Node, "✅ Recipient pending balance verified")
+		}
 
 		totalReceived := new(big.Int).Mul(amount, big.NewInt(int64(confirmedCount)))
 		expectedRecipientBalance := new(big.Int).Add(recipientBalanceBeforeInt, totalReceived)
+
+		// Wait for accumulation to update canonical state before checking "latest"
+		var recipientBalanceAfterInt *big.Int
+		balancePollInterval := 6 * time.Second
+		maxBalanceWaitRounds := 30
+		for round := 0; round < maxBalanceWaitRounds; round++ {
+			recipientBalanceAfter, err := evmClient.GetBalance(recipientAddr, "latest")
+			if err != nil {
+				t.Fatalf("GetBalance (recipient after) failed: %v", err)
+			}
+			recipientBalanceAfterInt = new(big.Int).SetBytes(recipientBalanceAfter.Bytes())
+			if recipientBalanceAfterInt.Cmp(expectedRecipientBalance) == 0 {
+				break
+			}
+			log.Info(log.Node, "⏳ Waiting for accumulation to update canonical balance",
+				"round", round+1,
+				"maxRounds", maxBalanceWaitRounds,
+				"recipientAfter", recipientBalanceAfterInt.String(),
+				"expected", expectedRecipientBalance.String())
+			time.Sleep(balancePollInterval)
+		}
 
 		log.Info(log.Node, "📊 Balance verification",
 			"recipientBefore", recipientBalanceBeforeInt.String(),
@@ -977,9 +1042,9 @@ func TestEVMMultiRoundTransfers(t *testing.T) {
 			"expected", expectedRecipientBalance.String(),
 			"confirmedCount", confirmedCount)
 
-		if recipientBalanceAfterInt.Cmp(expectedRecipientBalance) != 0 {
-			diff := new(big.Int).Sub(recipientBalanceAfterInt, expectedRecipientBalance)
-			t.Errorf("Recipient balance mismatch: expected %s, got %s (diff=%s)",
+		if recipientBalanceAfterInt == nil || recipientBalanceAfterInt.Cmp(expectedRecipientBalance) != 0 {
+			diff := new(big.Int).Sub(expectedRecipientBalance, recipientBalanceAfterInt)
+			t.Errorf("Recipient balance mismatch after accumulation wait: expected %s, got %s (diff=%s)",
 				expectedRecipientBalance.String(), recipientBalanceAfterInt.String(), diff.String())
 		} else {
 			log.Info(log.Node, "✅ Recipient balance verified")

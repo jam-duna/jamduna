@@ -46,144 +46,6 @@ type KeyMetadata struct {
 	TxIndex    uint32   // Transaction index within work package (0=pre-exec, 1..n=txs)
 }
 
-// ApplyContractWrites applies all contract writes to the current UBT tree.
-// This includes code deployments and storage updates.
-func (store *StateDBStorage) ApplyContractWrites(blob []byte) error {
-	if len(blob) == 0 {
-		return nil
-	}
-
-	if store.CurrentUBT == nil {
-		return fmt.Errorf("no current UBT tree available")
-	}
-
-	offset := 0
-
-	for offset < len(blob) {
-		// Parse header
-		if len(blob)-offset < 29 {
-			return fmt.Errorf("invalid contract witness blob: insufficient header bytes at offset %d", offset)
-		}
-
-		address := blob[offset : offset+20]
-		kind := blob[offset+20]
-		payloadLength := uint32(blob[offset+21]) | uint32(blob[offset+22])<<8 |
-			uint32(blob[offset+23])<<16 | uint32(blob[offset+24])<<24
-		_ = uint32(blob[offset+25]) | uint32(blob[offset+26])<<8 |
-			uint32(blob[offset+27])<<16 | uint32(blob[offset+28])<<24 // txIndex (unused here, but needed for blob parsing)
-		offset += 29
-
-		if len(blob)-offset < int(payloadLength) {
-			return fmt.Errorf("invalid contract witness blob: insufficient payload bytes at offset %d", offset)
-		}
-
-		payload := blob[offset : offset+int(payloadLength)]
-		offset += int(payloadLength)
-
-		// Apply writes based on kind
-		switch kind {
-		case 0x00: // Code
-			if err := applyCodeWrites(address, payload, store.CurrentUBT); err != nil {
-				return fmt.Errorf("failed to apply code writes: %v", err)
-			}
-
-		case 0x01: // Storage shard
-			if err := applyStorageWrites(address, payload, store.CurrentUBT); err != nil {
-				return fmt.Errorf("failed to apply storage writes: %v", err)
-			}
-
-		case 0x02: // Balance
-			if err := applyBalanceWrites(address, payload, store.CurrentUBT); err != nil {
-				return fmt.Errorf("failed to apply balance writes: %v", err)
-			}
-
-		case 0x06: // Nonce
-			if err := applyNonceWrites(address, payload, store.CurrentUBT); err != nil {
-				return fmt.Errorf("failed to apply nonce writes: %v", err)
-			}
-
-		default:
-			log.Warn(log.EVM, "ApplyContractWrites: unknown kind", "kind", kind)
-		}
-	}
-
-	return nil
-}
-
-// StorePendingWrites stores contract writes for deferred application.
-// Writes are keyed by work package hash and applied only when OnAccumulated fires.
-// This prevents CurrentUBT from advancing speculatively before bundle accumulation.
-func (store *StateDBStorage) StorePendingWrites(wpHash common.Hash, blob []byte) {
-	if len(blob) == 0 {
-		return
-	}
-
-	store.pendingWritesMutex.Lock()
-	defer store.pendingWritesMutex.Unlock()
-
-	// Make a copy of the blob to avoid aliasing issues
-	blobCopy := make([]byte, len(blob))
-	copy(blobCopy, blob)
-	store.pendingWrites[wpHash] = blobCopy
-
-	log.Info(log.EVM, "StorePendingWrites: stored deferred writes",
-		"wpHash", wpHash.Hex(),
-		"blobSize", len(blob),
-		"pendingCount", len(store.pendingWrites))
-}
-
-// ApplyPendingWrites applies stored contract writes for the given work package hash.
-// Called when OnAccumulated fires to commit the bundle's state changes to CurrentUBT.
-// Returns true if writes were found and applied, false if no pending writes existed.
-func (store *StateDBStorage) ApplyPendingWrites(wpHash common.Hash) (bool, error) {
-	store.pendingWritesMutex.Lock()
-	blob, exists := store.pendingWrites[wpHash]
-	if exists {
-		delete(store.pendingWrites, wpHash)
-	}
-	store.pendingWritesMutex.Unlock()
-
-	if !exists {
-		log.Debug(log.EVM, "ApplyPendingWrites: no pending writes found",
-			"wpHash", wpHash.Hex())
-		return false, nil
-	}
-
-	log.Info(log.EVM, "ApplyPendingWrites: applying deferred writes",
-		"wpHash", wpHash.Hex(),
-		"blobSize", len(blob))
-
-	if err := store.ApplyContractWrites(blob); err != nil {
-		return false, fmt.Errorf("failed to apply pending writes for %s: %w", wpHash.Hex(), err)
-	}
-
-	return true, nil
-}
-
-// DiscardPendingWrites removes pending writes without applying them.
-// Called when a bundle fails (OnFailed) to clean up without modifying CurrentUBT.
-func (store *StateDBStorage) DiscardPendingWrites(wpHash common.Hash) bool {
-	store.pendingWritesMutex.Lock()
-	defer store.pendingWritesMutex.Unlock()
-
-	_, exists := store.pendingWrites[wpHash]
-	if exists {
-		delete(store.pendingWrites, wpHash)
-		log.Info(log.EVM, "DiscardPendingWrites: discarded writes for failed bundle",
-			"wpHash", wpHash.Hex(),
-			"remainingPending", len(store.pendingWrites))
-	}
-	return exists
-}
-
-// GetPendingWritesCount returns the number of pending write blobs.
-// Useful for debugging and monitoring.
-func (store *StateDBStorage) GetPendingWritesCount() int {
-	store.pendingWritesMutex.RLock()
-	defer store.pendingWritesMutex.RUnlock()
-	return len(store.pendingWrites)
-}
-
 // applyContractWritesToTree applies all contract writes to the given UBT tree.
 func applyContractWritesToTree(blob []byte, tree *UnifiedBinaryTree) error {
 	if len(blob) == 0 {
@@ -345,105 +207,102 @@ func applyNonceWrites(address []byte, payload []byte, tree *UnifiedBinaryTree) e
 // where bundles built in parallel all read from the same canonical state S0, making
 // their state transitions incompatible when applied sequentially.
 //
-// Flow:
-//   1. CreateSnapshotForBlock(blockNumber) - Creates a snapshot chained from previous block
-//   2. SetActiveSnapshot(blockNumber) - Sets which snapshot to use for reads
-//   3. ApplyContractWritesToActiveSnapshot(blob) - Apply writes to the active snapshot
-//   4. CommitSnapshot(blockNumber) - On OnAccumulated: Commit snapshot to canonical
-//   5. InvalidateSnapshotsFrom(blockNumber) - On OnFailed: Discard snapshot and descendants
-
-// CreateSnapshotForBlock creates a new UBT snapshot for the given block number.
-// The snapshot is cloned from:
-//   - The previous block's pending snapshot if it exists (chaining)
-//   - Otherwise from CurrentUBT (canonical state)
+// ROOT-FIRST FLOW (preferred):
+//   1. CreateSnapshotFromRoot(parentRoot) - Creates snapshot cloned from specific root
+//   2. SetActiveRoot(snapshotRoot) - Sets which root to use for reads
+//   3. ApplyWritesToTree(root, blob) - Apply writes to tree, returns new root
+//   4. CommitAsCanonical(postRoot) - On accumulation: set as canonical
+//   5. DiscardTree(root) - On failure: remove tree from store
 //
-// If a snapshot for this block already exists, this is a no-op (idempotent).
-func (store *StateDBStorage) CreateSnapshotForBlock(blockNumber uint64) error {
-	store.pendingSnapshotsMutex.Lock()
-	defer store.pendingSnapshotsMutex.Unlock()
+// ===== Root-First Snapshot Methods =====
 
-	if _, exists := store.pendingSnapshots[blockNumber]; exists {
-		log.Info(log.EVM, "CreateSnapshotForBlock: snapshot already exists, reusing",
-			"blockNumber", blockNumber)
-		return nil
-	}
-
-	// Find parent snapshot: previous block's pending snapshot or CurrentUBT
-	var parentTree *UnifiedBinaryTree
-	if blockNumber > 0 {
-		if parentSnapshot, exists := store.pendingSnapshots[blockNumber-1]; exists {
-			parentTree = parentSnapshot
-			log.Info(log.EVM, "CreateSnapshotForBlock: chaining from previous pending snapshot",
-				"blockNumber", blockNumber,
-				"parentBlock", blockNumber-1)
-		}
-	}
-	if parentTree == nil {
-		// No pending parent snapshot - use CurrentUBT.
-		// This is safe because we never delete snapshots, so if the parent existed
-		// it would have been found above. If it doesn't exist, CurrentUBT is correct
-		// (either this is block 1 cloning from genesis, or the parent was never created).
-		parentTree = store.CurrentUBT
-		log.Info(log.EVM, "CreateSnapshotForBlock: cloning from canonical CurrentUBT",
-			"blockNumber", blockNumber)
-	}
-
-	if parentTree == nil {
-		return fmt.Errorf("no parent tree available for snapshot at block %d", blockNumber)
-	}
-
-	// Clone the parent tree
-	snapshot := parentTree.Copy()
-	store.pendingSnapshots[blockNumber] = snapshot
-
-	// Maintain ordered list of snapshot block numbers
-	store.snapshotOrder = insertSorted(store.snapshotOrder, blockNumber)
-
-	log.Info(log.EVM, "CreateSnapshotForBlock: created snapshot",
-		"blockNumber", blockNumber,
-		"pendingCount", len(store.pendingSnapshots))
-
-	return nil
-}
-
-// SetActiveSnapshot sets which snapshot to use for subsequent reads.
-// Pass blockNumber=0 to read from canonical CurrentUBT.
-func (store *StateDBStorage) SetActiveSnapshot(blockNumber uint64) error {
-	if blockNumber == 0 {
-		store.pendingSnapshotsMutex.Lock()
-		store.activeSnapshotBlock = 0
-		store.pendingSnapshotsMutex.Unlock()
-		log.Debug(log.EVM, "SetActiveSnapshot: using canonical CurrentUBT")
-		return nil
-	}
-
-	store.pendingSnapshotsMutex.RLock()
-	_, exists := store.pendingSnapshots[blockNumber]
-	store.pendingSnapshotsMutex.RUnlock()
-
+// CreateSnapshotFromRoot creates a new UBT snapshot by cloning from the specified parent root.
+// Returns the root hash of the parent (which equals the snapshot's root until writes are applied).
+//
+// IMPORTANT: The snapshot is NOT stored in treeStore yet because its root equals parentRoot
+// until writes are applied. Storing it would overwrite or conflict with the parent tree.
+// After applying writes via ApplyWritesToTree, the resulting tree is stored under the new root.
+//
+// This is the root-first replacement for CreateSnapshotForBlock.
+// Instead of relying on block number chaining, the caller explicitly specifies
+// which state to clone from, enabling standalone pre/post per bundle.
+//
+// Typical workflow:
+//   1. preRoot := GetCanonicalRoot() or parent bundle's postRoot
+//   2. snapshot, _ := CreateSnapshotFromRoot(preRoot) // Returns preRoot, creates internal clone
+//   3. SetActiveRoot(preRoot) // Use parent for reads during execution
+//   4. ... execute refine ...
+//   5. postRoot, _ := ApplyWritesToTree(preRoot, contractWrites) // Clone, apply, store under postRoot
+//   6. EnqueueWithRoots(bundle, preRoot, postRoot)
+func (store *StateDBStorage) CreateSnapshotFromRoot(parentRoot common.Hash) (common.Hash, error) {
+	// Verify parent root exists
+	_, exists := store.GetTreeByRootTyped(parentRoot)
 	if !exists {
-		return fmt.Errorf("no snapshot exists for block %d", blockNumber)
+		return common.Hash{}, fmt.Errorf("CreateSnapshotFromRoot: parent root not found %s", parentRoot.Hex())
 	}
 
-	store.pendingSnapshotsMutex.Lock()
-	store.activeSnapshotBlock = blockNumber
-	store.pendingSnapshotsMutex.Unlock()
+	// NOTE: We don't clone or store here - ApplyWritesToTree does the clone-on-write.
+	// The caller should use parentRoot as preRoot, and ApplyWritesToTree will produce postRoot.
 
-	log.Debug(log.EVM, "SetActiveSnapshot: using snapshot",
-		"blockNumber", blockNumber)
-	return nil
+	log.Info(log.EVM, "CreateSnapshotFromRoot: validated parent root",
+		"parentRoot", parentRoot.Hex())
+
+	return parentRoot, nil
 }
 
-// ClearActiveSnapshot resets to reading from canonical CurrentUBT.
-func (store *StateDBStorage) ClearActiveSnapshot() {
-	store.pendingSnapshotsMutex.Lock()
-	store.activeSnapshotBlock = 0
-	store.pendingSnapshotsMutex.Unlock()
+// ApplyWritesToTree applies contract writes to the tree at the given root.
+// Returns the new root hash after writes are applied.
+// The modified tree is stored in treeStore under the new root.
+//
+// This is the root-first replacement for ApplyWritesToActiveSnapshot.
+// The caller specifies exactly which tree to modify by its root.
+func (store *StateDBStorage) ApplyWritesToTree(root common.Hash, blob []byte) (common.Hash, error) {
+	if len(blob) == 0 {
+		return root, nil // No changes, return same root
+	}
+
+	// Get the original tree (use typed internal method)
+	origTree, exists := store.GetTreeByRootTyped(root)
+	if !exists {
+		return common.Hash{}, fmt.Errorf("ApplyWritesToTree: tree not found at root %s", root.Hex())
+	}
+
+	// CRITICAL: Clone before mutation to preserve root immutability.
+	// The original tree at `root` must remain unchanged so historical roots stay valid.
+	// This enables safe resubmission - the preRoot always points to the correct pre-state.
+	snapshot := origTree.Copy()
+
+	// Apply writes to the cloned snapshot
+	if err := applyContractWritesToTree(blob, snapshot); err != nil {
+		return common.Hash{}, fmt.Errorf("ApplyWritesToTree: failed to apply writes: %w", err)
+	}
+
+	// Compute new root and store the cloned snapshot under it
+	newRootBytes := snapshot.RootHash()
+	newRoot := common.BytesToHash(newRootBytes[:])
+
+	// Store cloned snapshot under new root (always store, even if root unchanged,
+	// since the snapshot is a distinct object from the original)
+	store.StoreTreeWithRoot(newRoot, snapshot)
+
+	log.Info(log.EVM, "ApplyWritesToTree: applied writes (copy-on-write)",
+		"oldRoot", root.Hex(),
+		"newRoot", newRoot.Hex(),
+		"blobSize", len(blob))
+
+	return newRoot, nil
 }
 
 // GetActiveTree returns the UBT tree that should be used for reads.
-// Priority: pinnedTree (Phase 2) > activeSnapshot > CurrentUBT.
-func (store *StateDBStorage) GetActiveTree() *UnifiedBinaryTree {
+// Priority: pinnedTree (Phase 2) > activeRoot (root-first) > canonical.
+// Returns interface{} to satisfy EVMJAMStorage interface.
+func (store *StateDBStorage) GetActiveTree() interface{} {
+	return store.GetActiveTreeTyped()
+}
+
+// GetActiveTreeTyped returns the typed UBT tree for reads (internal use).
+// Priority: pinnedTree (Phase 2) > activeRoot (root-first) > canonical.
+func (store *StateDBStorage) GetActiveTreeTyped() *UnifiedBinaryTree {
 	// Check pinnedTree first (set by PinToStateRoot for Phase 2 execution)
 	store.mutex.RLock()
 	if store.pinnedTree != nil {
@@ -453,212 +312,18 @@ func (store *StateDBStorage) GetActiveTree() *UnifiedBinaryTree {
 	}
 	store.mutex.RUnlock()
 
-	// Check active snapshot (for parallel bundle building)
-	store.pendingSnapshotsMutex.RLock()
-	activeBlock := store.activeSnapshotBlock
-	if activeBlock > 0 {
-		if snapshot, exists := store.pendingSnapshots[activeBlock]; exists {
-			store.pendingSnapshotsMutex.RUnlock()
-			return snapshot
-		}
-	}
-	store.pendingSnapshotsMutex.RUnlock()
-
-	// Fall back to CurrentUBT
-	return store.CurrentUBT
-}
-
-// ApplyWritesToActiveSnapshot applies contract writes to the currently active snapshot.
-// If no snapshot is active (activeSnapshotBlock=0), returns an error since writes
-// should only be applied to snapshots during parallel building, not to canonical state.
-func (store *StateDBStorage) ApplyWritesToActiveSnapshot(blob []byte) error {
-	if len(blob) == 0 {
-		return nil
-	}
-
-	store.pendingSnapshotsMutex.RLock()
-	activeBlock := store.activeSnapshotBlock
-	if activeBlock == 0 {
-		store.pendingSnapshotsMutex.RUnlock()
-		return fmt.Errorf("no active snapshot set, cannot apply writes")
-	}
-
-	snapshot, exists := store.pendingSnapshots[activeBlock]
-	store.pendingSnapshotsMutex.RUnlock()
-
-	if !exists {
-		return fmt.Errorf("active snapshot for block %d not found", activeBlock)
-	}
-
-	log.Info(log.EVM, "ApplyWritesToActiveSnapshot: applying writes to snapshot",
-		"blockNumber", activeBlock,
-		"blobSize", len(blob))
-
-	return applyContractWritesToTree(blob, snapshot)
-}
-
-// CommitSnapshot commits the snapshot for the given block number to canonical state.
-// Called when OnAccumulated fires. The snapshot's state becomes the new CurrentUBT.
-//
-// Handles out-of-order accumulation: since snapshots are chained (block N's snapshot
-// includes all state from blocks 1..N), if a later block accumulates first, earlier
-// blocks' snapshots are already superseded and don't need to be committed.
-func (store *StateDBStorage) CommitSnapshot(blockNumber uint64) error {
-	store.pendingSnapshotsMutex.Lock()
-	defer store.pendingSnapshotsMutex.Unlock()
-
-	// Check if this block is already superseded by a later committed block
-	// Since snapshots chain (block N includes all state from 1..N), if block N+k
-	// was already committed, block N's changes are already in CurrentUBT
-	if blockNumber <= store.lastCommittedSnapshotBlock {
-		log.Info(log.EVM, "CommitSnapshot: block already superseded by later commit",
-			"blockNumber", blockNumber,
-			"lastCommittedBlock", store.lastCommittedSnapshotBlock)
-		// Don't delete - keep snapshots for potential rebuilds
-		return nil
-	}
-
-	snapshot, exists := store.pendingSnapshots[blockNumber]
-	if !exists {
-		log.Warn(log.EVM, "CommitSnapshot: no snapshot found for block",
-			"blockNumber", blockNumber,
-			"lastCommittedBlock", store.lastCommittedSnapshotBlock)
-		return nil // Not an error - snapshot might have been committed via pending writes path
-	}
-
-	// Commit: Set canonical UBT to the snapshot
-	store.CurrentUBT = snapshot
-	store.lastCommittedSnapshotBlock = blockNumber
-
-	// NOTE: We intentionally do NOT delete snapshots here.
-	// Deleting snapshots causes issues when rebuilding bundles out-of-order:
-	// if block N+k commits first, deleting snapshots <= N+k makes it impossible
-	// to rebuild block N because its parent snapshot is gone.
-	// Snapshots are kept in memory for now. Future optimization: add cleanup
-	// when we're certain no in-flight bundles need them.
-
-	log.Info(log.EVM, "CommitSnapshot: committed snapshot to canonical",
-		"blockNumber", blockNumber,
-		"pendingSnapshots", len(store.pendingSnapshots))
-
-	return nil
-}
-
-// InvalidateSnapshotsFrom discards all snapshots for blocks >= blockNumber.
-// Called when OnFailed fires. Bundles at these block heights need to be rebuilt
-// with the correct pre-state.
-func (store *StateDBStorage) InvalidateSnapshotsFrom(blockNumber uint64) int {
-	store.pendingSnapshotsMutex.Lock()
-	defer store.pendingSnapshotsMutex.Unlock()
-
-	invalidated := 0
-	for bn := range store.pendingSnapshots {
-		if bn >= blockNumber {
-			delete(store.pendingSnapshots, bn)
-			invalidated++
+	// Check activeRoot (root-first state access)
+	store.treeStoreMutex.RLock()
+	if store.activeRoot != (common.Hash{}) {
+		if tree, exists := store.treeStore[store.activeRoot]; exists {
+			store.treeStoreMutex.RUnlock()
+			return tree
 		}
 	}
 
-	// Update snapshotOrder
-	store.snapshotOrder = filterLessThan(store.snapshotOrder, blockNumber)
+	// Fall back to canonical tree (this is the root-first default)
+	tree := store.treeStore[store.canonicalRoot]
+	store.treeStoreMutex.RUnlock()
 
-	if invalidated > 0 {
-		log.Info(log.EVM, "InvalidateSnapshotsFrom: invalidated snapshots",
-			"fromBlock", blockNumber,
-			"invalidatedCount", invalidated,
-			"remainingSnapshots", len(store.pendingSnapshots))
-	}
-
-	return invalidated
-}
-
-// InvalidateSnapshot deletes only the snapshot for the specified block number.
-// Unlike InvalidateSnapshotsFrom, this does NOT affect snapshots for other blocks.
-// Returns true if a snapshot was deleted, false if no snapshot existed for this block.
-func (store *StateDBStorage) InvalidateSnapshot(blockNumber uint64) bool {
-	store.pendingSnapshotsMutex.Lock()
-	defer store.pendingSnapshotsMutex.Unlock()
-
-	if _, exists := store.pendingSnapshots[blockNumber]; !exists {
-		return false
-	}
-
-	delete(store.pendingSnapshots, blockNumber)
-	store.snapshotOrder = removeFromSorted(store.snapshotOrder, blockNumber)
-
-	log.Info(log.EVM, "InvalidateSnapshot: deleted single snapshot",
-		"blockNumber", blockNumber,
-		"remainingSnapshots", len(store.pendingSnapshots))
-
-	return true
-}
-
-// GetSnapshotBlockNumbers returns a sorted list of block numbers with pending snapshots.
-// Useful for debugging and monitoring.
-func (store *StateDBStorage) GetSnapshotBlockNumbers() []uint64 {
-	store.pendingSnapshotsMutex.RLock()
-	defer store.pendingSnapshotsMutex.RUnlock()
-
-	result := make([]uint64, len(store.snapshotOrder))
-	copy(result, store.snapshotOrder)
-	return result
-}
-
-// GetPendingSnapshotCount returns the number of pending snapshots.
-func (store *StateDBStorage) GetPendingSnapshotCount() int {
-	store.pendingSnapshotsMutex.RLock()
-	defer store.pendingSnapshotsMutex.RUnlock()
-	return len(store.pendingSnapshots)
-}
-
-// Helper: Insert value into sorted slice maintaining order
-func insertSorted(slice []uint64, val uint64) []uint64 {
-	i := 0
-	for i < len(slice) && slice[i] < val {
-		i++
-	}
-	// Check if already exists
-	if i < len(slice) && slice[i] == val {
-		return slice
-	}
-	// Insert at position i
-	slice = append(slice, 0)
-	copy(slice[i+1:], slice[i:])
-	slice[i] = val
-	return slice
-}
-
-// Helper: Filter slice to keep only values > threshold
-func filterGreaterThan(slice []uint64, threshold uint64) []uint64 {
-	result := make([]uint64, 0, len(slice))
-	for _, v := range slice {
-		if v > threshold {
-			result = append(result, v)
-		}
-	}
-	return result
-}
-
-// Helper: Filter slice to keep only values < threshold
-func filterLessThan(slice []uint64, threshold uint64) []uint64 {
-	result := make([]uint64, 0, len(slice))
-	for _, v := range slice {
-		if v < threshold {
-			result = append(result, v)
-		}
-	}
-	return result
-}
-
-// Helper: Remove a single value from a sorted slice
-func removeFromSorted(slice []uint64, val uint64) []uint64 {
-	for i, v := range slice {
-		if v == val {
-			return append(slice[:i], slice[i+1:]...)
-		}
-		if v > val {
-			break // Not found, sorted slice so no need to continue
-		}
-	}
-	return slice
+	return tree
 }

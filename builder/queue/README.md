@@ -769,64 +769,49 @@ bundleBuilder := func(item *QueueItem, stats QueueStats) (*WorkPackageBundle, er
 }
 ```
 
-## UBT State and Parallel Bundles
+## Root-First State and Parallel Bundles
 
-The builder supports **multi-snapshot UBT** for parallel bundle building, allowing multiple bundles to be built concurrently with correct state chaining.
+The builder now uses a **root-first state model** so every bundle is built against an explicit pre-root and produces its own post-root. This removes shared mutable state and allows safe resubmission without cross-bundle pollution.
 
-### Multi-Snapshot Architecture
+### Root-First Architecture
 
 ```
-                     canonicalUBT (S0)
-                           │
-             ┌─────────────┴─────────────┐
-             │                           │
-         snapshot[1]                 snapshot[2]
-          (S0→S1)                     (S1→S2)
-         Bundle A                    Bundle B
-             │                           │
-             ▼                           ▼
-     OnAccumulated(1)            OnAccumulated(2)
-    canonicalUBT=S1              canonicalUBT=S2
+                 canonicalRoot (S0)
+                      │
+      ┌───────────────┴───────────────┐
+      │                               │
+  preRoot=A                       preRoot=B
+  (explicit)                      (explicit)
+      │                               │
+  ApplyWritesToTree               ApplyWritesToTree
+      │                               │
+  postRoot=A'                     postRoot=B'
+      │                               │
+CommitAsCanonical(A')          CommitAsCanonical(B')
 ```
 
-Each bundle gets its own **UBT snapshot** that chains from the previous bundle's post-state (or canonical state if no prior pending snapshot exists). This eliminates the "CurrentUBT drift" problem.
+Each bundle carries its own `PreRoot`/`PostRoot` in the queue item. Rebuilds and resubmissions simply rerun from the same `PreRoot`, producing a fresh `PostRoot` without mutating any other bundle.
 
-### Snapshot Lifecycle
+### Root-First Lifecycle
 
 | Phase | Method | Description |
 |-------|--------|-------------|
-| **Create** | `CreateSnapshotForBlock(bn)` | Clone from parent snapshot or canonical (idempotent) |
-| **Activate** | `SetActiveSnapshot(bn)` | Route reads to this snapshot |
-| **Write** | `ApplyWritesToActiveSnapshot(blob)` | Apply contract writes to snapshot |
-| **Commit** | `CommitSnapshot(bn)` | On accumulation: merge to canonical |
-| **Invalidate** | `InvalidateSnapshotsFrom(bn)` | On failure: discard snapshot + descendants |
-| **Invalidate Single** | `InvalidateSnapshot(bn)` | Discard only one snapshot (not descendants) |
-
-**Idempotent Snapshot Creation:** `CreateSnapshotForBlock` is idempotent - if a snapshot already exists for the given block number, it simply reuses the existing snapshot instead of erroring. This eliminates the need to delete snapshots before rebuilds, which was problematic because `InvalidateSnapshotsFrom` would delete ALL snapshots >= blockNumber, destroying valid snapshots for other in-flight bundles.
-
-### How Snapshots Chain
-
-When building Bundle B (block 2) while Bundle A (block 1) is still pending:
-
-1. `CreateSnapshotForBlock(2)` checks if `pendingSnapshots[1]` exists
-2. If yes: clone from `pendingSnapshots[1]` (Bundle A's post-state)
-3. If no: clone from `CurrentUBT` (canonical state)
-
-This ensures each bundle reads from its correct pre-state, even when built in parallel.
+| **Create** | `CreateSnapshotFromRoot(preRoot)` | Clone a tree from the explicit pre-root |
+| **Activate** | `SetActiveRoot(preRoot)` | Route reads to a specific root for refine |
+| **Write** | `ApplyWritesToTree(preRoot, blob)` | Copy-on-write into a new tree, returns `postRoot` |
+| **Commit** | `CommitAsCanonical(postRoot)` | On accumulation: make the post-root canonical |
+| **Discard** | `DiscardTree(postRoot)` | On failure: drop the failed bundle's tree |
 
 ### Callback Setup (Recommended)
 
 ```go
-// Use snapshot-aware callbacks for proper state management
-runner.SetOnAccumulatedWithSnapshots(storage, func(wpHash common.Hash, txHashes []common.Hash) {
-    // Called AFTER snapshot committed to canonical
+runner.SetOnAccumulatedWithRoots(storage, func(wpHash common.Hash, txHashes []common.Hash) {
     for _, txHash := range txHashes {
         txPool.RemoveTransaction(txHash)
     }
 })
 
-runner.SetOnFailedWithSnapshots(storage, func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash) {
-    // Called AFTER snapshot + descendants invalidated
+runner.SetOnFailedWithRoots(storage, func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash) {
     for _, txHash := range txHashes {
         txPool.UnlockTransaction(txHash)
     }
@@ -835,103 +820,11 @@ runner.SetOnFailedWithSnapshots(storage, func(wpHash common.Hash, blockNumber ui
 
 ### Failure Handling
 
-When a bundle fails, snapshots are invalidated based on the failure type:
+When a bundle fails, the queue discards the bundle's `PostRoot` only. Other in-flight bundles are unaffected because their roots are independent.
 
-**Build/Enqueue Failure (use `InvalidateSnapshotsFrom`):**
-When a bundle fails to build or enqueue, all pending snapshots from that block onwards are invalidated because later bundles may have been built on stale state:
+### Concurrency
 
-```
-Bundle A (blk#1): build fails
-Bundle B (blk#2): pending    ← invalidated (may depend on A)
-Bundle C (blk#3): pending    ← invalidated (may depend on B)
-```
-
-The `InvalidateSnapshotsFrom(1)` call removes snapshots for blocks 1, 2, and 3.
-
-**Rebuild (invalidate + recreate):**
-When a bundle needs to be rebuilt (e.g., stale anchor timeout), the existing snapshot must be invalidated and recreated from the parent state:
-
-1. `InvalidateSnapshot(blockNumber)` - Delete the polluted snapshot (contains v1's writes)
-2. `CreateSnapshotForBlock(blockNumber)` - Create fresh snapshot from parent (N-1 or CurrentUBT)
-3. Build bundle with clean state
-
-This prevents "snapshot pollution" where v2 would stack writes on top of v1's writes, causing balance double-counting.
-
-```go
-// In runner.go, before calling bundleBuilder:
-if needsRebuild && r.snapshotManager != nil {
-    r.snapshotManager.InvalidateSnapshot(item.BlockNumber)
-}
-```
-
-### Concurrency Limitation: Global Active Snapshot
-
-**Important**: The `activeSnapshotBlock` is a process-global variable. This means:
-
-1. **Serialized builds required**: Only one bundle can be built at a time. If two builds overlap, `SetActiveSnapshot` calls will interfere with each other.
-2. **Current design**: The EVM builder builds bundles sequentially in a single goroutine (`handleBlockNotifications` loop), so this is safe.
-3. **Future work**: For true concurrent builds, each build would need its own snapshot context (e.g., pass snapshot reference through BuildBundle, or use goroutine-local storage).
-
-```text
-Thread 1: SetActiveSnapshot(1) → BuildBundle → ClearActiveSnapshot
-Thread 2:          SetActiveSnapshot(2) → ...  ← RACE! Thread 1 now reads snapshot 2
-```
-
-The current implementation is correct for single-threaded sequential building, which is the expected use case for the EVM builder.
-
-### Snapshot Retention Policy
-
-**Current policy: Never delete snapshots.**
-
-Snapshots are kept in memory indefinitely. This is intentional:
-
-1. **Out-of-order accumulation**: Blocks can accumulate in any order (e.g., block 12 before block 9). If we delete snapshots on commit, rebuilding earlier blocks becomes impossible because the parent state is gone.
-
-2. **No persistence layer yet**: Without a way to persist and recover snapshots from disk/database, deletion is permanent data loss. Deleting "for optimization" before having persistence just causes bugs.
-
-3. **Memory vs correctness tradeoff**: Yes, this uses more memory. But incorrect balances are worse than high memory usage.
-
-**Future optimization**: Once snapshot persistence is implemented:
-
-- Snapshots can be written to disk after commit
-- In-memory copies can be evicted using LRU
-- Rebuilds can recover parent state from disk on demand
-
-```text
-Current:  snapshot created → kept forever (in memory)
-Future:   snapshot created → committed → persisted to disk → evicted from memory
-          rebuild needed → load from disk → use → evict again
-```
-
-### Legacy Mode (Deferred Writes Only)
-
-For backwards compatibility, the system can operate with deferred writes instead of snapshots:
-
-```go
-// Legacy deferred writes approach (not recommended for parallel building)
-runner.SetOnAccumulatedWithStorage(storage, userCallback)
-runner.SetOnFailedWithStorage(storage, userCallback)
-```
-
-This mode defers `ApplyContractWrites` until accumulation, but **does not support parallel bundle building** because all bundles would read from the same `CurrentUBT` state.
-
-### Balance Reads and "latest" Semantics
-
-When querying balances with `"latest"` or `"pending"`, the builder should read from `CurrentUBT`, which is updated by `CommitSnapshot` on accumulation. The indexed block trees (`serviceUBTRoots`, `latestRollupBlock`) are only updated by `FinalizeEVMBlock`/`StoreServiceBlock`, which are not part of the snapshot-based flow.
-
-**Implication:** For `"latest"`/`"pending"`, `GetUBTNodeForServiceBlock` must prefer `CurrentUBT` even if indexed blocks exist, otherwise balance lookups can return stale genesis state.
-
-### Why Multi-Snapshot is Needed (Historical Context)
-
-With a single `CurrentUBT`, parallel bundle building causes state drift:
-
-```text
-1. Build Bundle A: reads S0, produces (pre=S0, post=S1)
-2. Build Bundle B: reads S0 (same!), produces (pre=S0, post=S1')  ← WRONG
-   Should read S1 (A's post-state), not S0
-```
-
-If Bundle A accumulates first, Bundle B has incorrect pre-state. Multi-snapshot solves this by giving each bundle its own snapshot that chains from the previous bundle's post-state.
+There is no process-global snapshot pointer in root-first mode. Each build uses explicit roots, so parallel bundle building is safe as long as each worker uses its own `PreRoot`/`PostRoot`.
 
 ## Receipt Indexing and Meta-Shard Overwrites
 

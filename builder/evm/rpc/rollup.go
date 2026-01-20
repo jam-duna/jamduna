@@ -91,7 +91,34 @@ func (r *Rollup) GetServiceID() uint32 {
 	return r.serviceID
 }
 
+func (r *Rollup) getPendingTree() (interface{}, bool) {
+	if r.blockCache == nil {
+		return nil, false
+	}
+	block, ok := r.blockCache.GetLatest()
+	if !ok {
+		return nil, false
+	}
+	return r.storage.GetTreeByRoot(block.UBTRoot)
+}
+
 func (r *Rollup) GetBalance(address common.Address, blockNumber string) (common.Hash, error) {
+	if blockNumber == "finalized" {
+		// TODO: Implement finalized block tag for JAM
+		// In JAM, "finalized" could mean: accumulated + N confirmations
+		// For now, panic to catch unimplemented usage
+		panic("GetBalance: 'finalized' block tag not yet implemented")
+	}
+	if blockNumber == "pending" {
+		if tree, ok := r.getPendingTree(); ok {
+			balanceHash, err := r.storage.GetBalance(tree, address)
+			if err != nil {
+				return common.Hash{}, err
+			}
+			return balanceHash, nil
+		}
+	}
+
 	// Use service-scoped state tree lookup
 	tree, ok := r.storage.GetUBTNodeForServiceBlock(r.serviceID, blockNumber)
 	if !ok {
@@ -107,6 +134,20 @@ func (r *Rollup) GetBalance(address common.Address, blockNumber string) (common.
 }
 
 func (r *Rollup) GetTransactionCount(address common.Address, blockNumber string) (uint64, error) {
+	if blockNumber == "finalized" {
+		// TODO: Implement finalized block tag for JAM
+		panic("GetTransactionCount: 'finalized' block tag not yet implemented")
+	}
+	if blockNumber == "pending" {
+		if tree, ok := r.getPendingTree(); ok {
+			nonce, err := r.storage.GetNonce(tree, address)
+			if err != nil {
+				return 0, err
+			}
+			return nonce, nil
+		}
+	}
+
 	// Use service-scoped state tree lookup
 	tree, ok := r.storage.GetUBTNodeForServiceBlock(r.serviceID, blockNumber)
 	if !ok {
@@ -121,6 +162,24 @@ func (r *Rollup) GetTransactionCount(address common.Address, blockNumber string)
 }
 
 func (r *Rollup) GetCode(address common.Address, blockNumber string) ([]byte, error) {
+	if blockNumber == "finalized" {
+		// TODO: Implement finalized block tag for JAM
+		panic("GetCode: 'finalized' block tag not yet implemented")
+	}
+	if blockNumber == "pending" {
+		if tree, ok := r.getPendingTree(); ok {
+			ubtTree, ok := tree.(*storage.UnifiedBinaryTree)
+			if !ok {
+				return nil, fmt.Errorf("invalid tree type")
+			}
+			code, _, err := storage.ReadCodeFromTree(ubtTree, address)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read code from state tree: %w", err)
+			}
+			return code, nil
+		}
+	}
+
 	// Use service-scoped state tree lookup
 	tree, ok := r.storage.GetUBTNodeForServiceBlock(r.serviceID, blockNumber)
 	if !ok {
@@ -292,11 +351,15 @@ func (r *Rollup) ExecutePhase1(
 		return nil, fmt.Errorf("StateDB not available")
 	}
 
-	// Step 1: Capture EVMPreStateRoot BEFORE execution and store pre-state tree
-	// We must store the tree for PinToStateRoot to work in Phase 2
-	evmPreStateRoot := r.storage.GetCurrentUBTRoot()
-	r.storage.StoreCurrentUBTAtRoot(evmPreStateRoot)
-	log.Info(log.EVM, "ExecutePhase1: captured pre-state root", "root", evmPreStateRoot.Hex())
+	// Step 1: Capture EVMPreStateRoot BEFORE execution
+	// ROOT-FIRST ONLY: activeRoot must be set by caller for proper state isolation.
+	// The legacy CurrentUBT path is no longer supported.
+	activeRoot := r.storage.GetActiveRoot()
+	if activeRoot == (common.Hash{}) {
+		return nil, fmt.Errorf("ExecutePhase1: activeRoot not set - caller must call SetActiveRoot before ExecutePhase1 for root-first state isolation")
+	}
+	evmPreStateRoot := activeRoot
+	log.Info(log.EVM, "ExecutePhase1: captured pre-state root (root-first)", "root", evmPreStateRoot.Hex())
 
 	// Step 2: DISABLE UBT read logging for Phase 1 (faster execution)
 	r.storage.SetUBTReadLogEnabled(false)
@@ -374,16 +437,31 @@ func (r *Rollup) ExecutePhase1(
 			"resultLen", len(result.Ok))
 	}
 
-	// Step 5: Apply state changes to CurrentUBT to advance state for next block
-	if len(stateChanges) > 0 {
-		if err := r.storage.ApplyContractWrites(stateChanges); err != nil {
-			return nil, fmt.Errorf("ExecutePhase1: failed to apply state changes: %w", err)
-		}
-		log.Debug(log.EVM, "ExecutePhase1: applied state changes", "blobSize", len(stateChanges))
-	}
+	// Step 5: Apply state changes using ROOT-FIRST model.
+	// activeRoot was validated in Step 1.
 
-	// Step 6: Capture EVMPostStateRoot AFTER applying state changes
-	evmPostStateRoot := r.storage.GetCurrentUBTRoot()
+	evmPostStateRoot := evmPreStateRoot // Default: no changes = same root
+	if len(stateChanges) > 0 {
+		// ROOT-FIRST PATH: Apply writes via copy-on-write to the active root
+		newRoot, err := r.storage.ApplyWritesToTree(activeRoot, stateChanges)
+		if err != nil {
+			return nil, fmt.Errorf("ExecutePhase1: failed to apply state changes (root-first): %w", err)
+		}
+		evmPostStateRoot = newRoot
+		// Update activeRoot to point to the new tree so GetActiveUBTRoot() returns postRoot
+		if err := r.storage.SetActiveRoot(newRoot); err != nil {
+			log.Warn(log.EVM, "ExecutePhase1: failed to update active root to postRoot",
+				"newRoot", newRoot.Hex(),
+				"error", err)
+		}
+		log.Debug(log.EVM, "ExecutePhase1: applied state changes via root-first path",
+			"activeRoot", activeRoot.Hex(),
+			"postRoot", newRoot.Hex(),
+			"blobSize", len(stateChanges))
+	} else {
+		// No state changes - post root equals pre root
+		evmPostStateRoot = activeRoot
+	}
 	log.Info(log.EVM, "ExecutePhase1: captured post-state root",
 		"preRoot", evmPreStateRoot.Hex(),
 		"postRoot", evmPostStateRoot.Hex(),
@@ -407,7 +485,7 @@ func (r *Rollup) ExecutePhase1(
 }
 
 // BuildAndEnqueueWorkPackage builds a bundle from pending txs and enqueues it for submission.
-// Uses multi-snapshot UBT system for parallel bundle building with proper state chaining.
+// Uses ROOT-FIRST state model for proper state isolation per bundle.
 func (r *Rollup) BuildAndEnqueueWorkPackage(
 	refineCtx types.RefineContext,
 	txPool *TxPool,
@@ -450,47 +528,63 @@ func (r *Rollup) BuildAndEnqueueWorkPackage(
 		txHashes[i] = tx.Hash
 	}
 
-	// === Multi-Snapshot UBT: Create and activate per-bundle snapshot ===
-	// Get block number BEFORE building so we can create/activate snapshot
+	// Get block number BEFORE building
 	blockNumber := queueRunner.PeekNextBlockNumber()
 
-	// Get storage for snapshot management
+	// Get storage for state management
 	evmStorage := r.GetStateDB().GetStorage().(types.EVMJAMStorage)
 
-	// Create snapshot for this block, chaining from previous block's snapshot or canonical
-	if err := evmStorage.CreateSnapshotForBlock(blockNumber); err != nil {
-		// If parent state was superseded (out-of-order commit), we cannot build.
-		// This should not happen for initial builds, only for rebuilds.
-		log.Error(log.EVM, "Failed to create snapshot - cannot build bundle",
+	// === ROOT-FIRST STATE MODEL ===
+	// Capture preRoot from canonical state (or parent bundle's postRoot in the future)
+	preRoot := evmStorage.GetCanonicalRoot()
+
+	// Validate parent root exists in treeStore
+	if _, err := evmStorage.CreateSnapshotFromRoot(preRoot); err != nil {
+		log.Error(log.EVM, "Failed to validate parent root - cannot build bundle",
 			"blockNumber", blockNumber,
+			"preRoot", preRoot.Hex(),
 			"error", err)
-		return fmt.Errorf("cannot create snapshot for block %d: %w", blockNumber, err)
+		return fmt.Errorf("cannot validate parent root %s for block %d: %w", preRoot.Hex(), blockNumber, err)
 	}
 
-	// Activate the snapshot for reads during BuildBundle
-	if err := evmStorage.SetActiveSnapshot(blockNumber); err != nil {
-		log.Warn(log.EVM, "Failed to activate snapshot",
+	// Set active root for reads during BuildBundle
+	if err := evmStorage.SetActiveRoot(preRoot); err != nil {
+		log.Warn(log.EVM, "Failed to set active root",
 			"blockNumber", blockNumber,
+			"preRoot", preRoot.Hex(),
 			"error", err)
 	}
 
-	// Build bundle - reads will use active snapshot if set
+	// Build bundle - reads will use active root
 	bundle, workReport, err := r.GetStateDB().BuildBundle(workPackage, extrinsicsBlobs, 0, nil, r.pvmBackend, false)
 
-	// Always clear active snapshot after build, regardless of success/failure
-	evmStorage.ClearActiveSnapshot()
+	// Capture post-state root BEFORE clearing active root
+	postRoot := evmStorage.GetActiveUBTRoot()
+
+	// Always clear active root after build, regardless of success/failure
+	evmStorage.ClearActiveRoot()
 
 	if err != nil {
-		// On build failure, invalidate the snapshot we created
-		evmStorage.InvalidateSnapshotsFrom(blockNumber)
+		// On build failure, discard the post-state tree if it was created and differs from pre
+		if postRoot != preRoot && postRoot != (common.Hash{}) {
+			evmStorage.DiscardTree(postRoot)
+		}
 		return fmt.Errorf("failed to build bundle: %w", err)
 	}
 
-	// Enqueue the bundle - this increments nextBlockNumber
-	enqueuedBlockNumber, err := queueRunner.EnqueueBundleWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, 0, txHashes)
+	log.Info(log.EVM, "BuildAndEnqueueWorkPackage: captured state roots (root-first)",
+		"blockNumber", blockNumber,
+		"preRoot", preRoot.Hex(),
+		"postRoot", postRoot.Hex(),
+		"treeStoreSize", evmStorage.GetTreeStoreSize())
+
+	// Enqueue the bundle with roots - this increments nextBlockNumber
+	enqueuedBlockNumber, err := queueRunner.EnqueueBundleWithRoots(bundle, originalExtrinsics, originalWorkItemExtrinsics, 0, txHashes, preRoot, postRoot)
 	if err != nil {
-		// On enqueue failure, invalidate the snapshot
-		evmStorage.InvalidateSnapshotsFrom(blockNumber)
+		// On enqueue failure, discard the post-state tree if it differs from pre
+		if postRoot != preRoot && postRoot != (common.Hash{}) {
+			evmStorage.DiscardTree(postRoot)
+		}
 		return fmt.Errorf("failed to enqueue bundle: %w", err)
 	}
 
@@ -506,13 +600,13 @@ func (r *Rollup) BuildAndEnqueueWorkPackage(
 	// Or unlocked if the bundle fails/expires
 	txPool.LockTransactionsToBundle(txHashes, enqueuedBlockNumber)
 
-	log.Info(log.Node, "Work package enqueued",
+	log.Info(log.Node, "Work package enqueued (root-first)",
 		"wp_hash", bundle.WorkPackage.Hash().Hex(),
 		"work_report_hash", workReport.Hash().Hex(),
 		"block_number", enqueuedBlockNumber,
 		"service_id", r.serviceID,
 		"locked_txs", len(txHashes),
-		"pending_snapshots", evmStorage.GetPendingSnapshotCount())
+		"treeStoreSize", evmStorage.GetTreeStoreSize())
 
 	return nil
 }

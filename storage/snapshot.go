@@ -255,23 +255,32 @@ func (s *StateDBStorage) ColdStart(
 			return fmt.Errorf("replay to head failed: %w", err)
 		}
 
-		// 4. Set as current tree
-		s.mutex.Lock()
-		s.CurrentUBT = currentTree
-		s.mutex.Unlock()
+		// 4. Set as canonical tree (root-first model)
+		rootBytes := currentTree.RootHash()
+		currentRoot := common.BytesToHash(rootBytes[:])
+		s.StoreTreeWithRoot(currentRoot, currentTree)
+		if err := s.SetCanonicalRoot(currentRoot); err != nil {
+			return fmt.Errorf("failed to set canonical root: %w", err)
+		}
 
 		log.Info(log.SDB, "Cold start complete",
 			"snapshot_height", snapshotHeight,
 			"head_height", headHeight,
-			"blocks_replayed", headHeight-snapshotHeight)
+			"blocks_replayed", headHeight-snapshotHeight,
+			"canonicalRoot", currentRoot.Hex())
 	} else {
 		// No replay needed - snapshot is at head
-		s.mutex.Lock()
-		s.CurrentUBT = snapshotTree.Copy()
-		s.mutex.Unlock()
+		copiedTree := snapshotTree.Copy()
+		rootBytes := copiedTree.RootHash()
+		snapshotRoot := common.BytesToHash(rootBytes[:])
+		s.StoreTreeWithRoot(snapshotRoot, copiedTree)
+		if err := s.SetCanonicalRoot(snapshotRoot); err != nil {
+			return fmt.Errorf("failed to set canonical root: %w", err)
+		}
 
 		log.Info(log.SDB, "Cold start complete (no replay needed)",
-			"snapshot_height", snapshotHeight)
+			"snapshot_height", snapshotHeight,
+			"canonicalRoot", snapshotRoot.Hex())
 	}
 
 	return nil

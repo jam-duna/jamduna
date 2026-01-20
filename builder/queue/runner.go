@@ -30,9 +30,6 @@ type Runner struct {
 	submitter     Submitter
 	bundleBuilder BundleBuilder
 
-	// Snapshot management for rebuild invalidation
-	snapshotManager SnapshotManager
-
 	// Control
 	tickInterval time.Duration
 	stopCh       chan struct{}
@@ -41,6 +38,10 @@ type Runner struct {
 	// Submission window timing (seconds before next timeslot to start submission)
 	submissionWindowStart int // e.g., 3 seconds before timeslot
 	submissionWindowEnd   int // e.g., 1 second before timeslot
+
+	// Contiguous accumulation tracking for canonical commits
+	accumulatedRoots  map[uint64]common.Hash // blockNumber -> postRoot
+	highestContiguous uint64                 // highest block where 1..N are all accumulated
 }
 
 // RunnerConfig holds configuration for the runner
@@ -60,18 +61,18 @@ func DefaultRunnerConfig() RunnerConfig {
 }
 
 // NewRunner creates a new queue runner
-func NewRunner(queue *QueueState, serviceID uint32, submitter Submitter, bundleBuilder BundleBuilder, snapshotManager SnapshotManager) *Runner {
+func NewRunner(queue *QueueState, serviceID uint32, submitter Submitter, bundleBuilder BundleBuilder) *Runner {
 	config := DefaultRunnerConfig()
 	return &Runner{
 		queue:                 queue,
 		serviceID:             serviceID,
 		submitter:             submitter,
 		bundleBuilder:         bundleBuilder,
-		snapshotManager:       snapshotManager,
 		tickInterval:          config.TickInterval,
 		submissionWindowStart: config.SubmissionWindowStart,
 		submissionWindowEnd:   config.SubmissionWindowEnd,
 		stopCh:                make(chan struct{}),
+		accumulatedRoots:      make(map[uint64]common.Hash),
 	}
 }
 
@@ -115,124 +116,91 @@ func (r *Runner) SetOnAccumulated(callback func(wpHash common.Hash, blockNumber 
 	r.queue.SetOnAccumulated(callback)
 }
 
-// PendingWritesApplier is an interface for applying deferred UBT writes.
-// Implemented by EVMJAMStorage to apply pending contract writes when bundles accumulate.
-type PendingWritesApplier interface {
-	ApplyPendingWrites(wpHash common.Hash) (bool, error)
-	DiscardPendingWrites(wpHash common.Hash) bool
+// RootBasedStorage is the interface for root-first state management.
+// Used by SetOnAccumulatedWithRoots for standalone pre/post per bundle.
+type RootBasedStorage interface {
+	// CommitAsCanonical sets the given root as the new canonical state.
+	CommitAsCanonical(root common.Hash) error
+
+	// DiscardTree removes a tree from storage by root.
+	DiscardTree(root common.Hash) bool
 }
 
-// SnapshotManager is an interface for managing multi-snapshot UBT state.
-// Implemented by EVMJAMStorage to support parallel bundle building with proper state chaining.
-type SnapshotManager interface {
-	// Snapshot lifecycle
-	CreateSnapshotForBlock(blockNumber uint64) error
-	SetActiveSnapshot(blockNumber uint64) error
-	ClearActiveSnapshot()
-	ApplyWritesToActiveSnapshot(blob []byte) error
-
-	// Accumulation handling
-	CommitSnapshot(blockNumber uint64) error
-
-	// Fallback: Apply pending writes if snapshot path failed
-	// This handles the case where ApplyWritesToActiveSnapshot failed and
-	// writes were stored via StorePendingWrites instead
-	ApplyPendingWrites(wpHash common.Hash) (bool, error)
-
-	// Failure handling
-	InvalidateSnapshotsFrom(blockNumber uint64) int
-	InvalidateSnapshot(blockNumber uint64) bool // Single snapshot invalidation for rebuilds
-	DiscardPendingWrites(wpHash common.Hash) bool
-
-	// Monitoring
-	GetSnapshotBlockNumbers() []uint64
-	GetPendingSnapshotCount() int
-}
-
-// SetOnAccumulatedWithStorage sets up callbacks that apply pending UBT writes when bundles accumulate.
-// This ensures CurrentUBT only advances for bundles that actually accumulate on-chain.
-// The userCallback is invoked AFTER writes are applied (e.g., for txpool cleanup).
-func (r *Runner) SetOnAccumulatedWithStorage(storage PendingWritesApplier, userCallback func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash)) {
+// SetOnAccumulatedWithRoots sets up callbacks that commit state by root when bundles accumulate.
+// Uses BlockCommitmentData (Phase 1) as authoritative PostRoot, falls back to QueueItem.PostRoot.
+func (r *Runner) SetOnAccumulatedWithRoots(storage RootBasedStorage, userCallback func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash)) {
 	r.queue.SetOnAccumulated(func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash) {
-		// Apply pending writes to CurrentUBT now that bundle has accumulated
-		applied, err := storage.ApplyPendingWrites(wpHash)
-		if err != nil {
-			log.Error(log.Node, "Failed to apply pending writes on accumulation",
-				"wpHash", wpHash.Hex(),
-				"blockNumber", blockNumber,
-				"error", err)
-		} else if applied {
-			log.Info(log.Node, "Applied deferred UBT writes on accumulation",
-				"wpHash", wpHash.Hex(),
-				"blockNumber", blockNumber,
-				"txCount", len(txHashes))
-		}
+		item := r.queue.GetItemByBlockNumber(blockNumber)
 
-		// Invoke user callback (e.g., remove txs from txpool)
-		if userCallback != nil {
-			userCallback(wpHash, blockNumber, txHashes)
-		}
-	})
-}
+		var postRoot common.Hash
 
-// SetOnFailedWithStorage sets up callbacks that discard pending UBT writes when bundles fail.
-// This ensures CurrentUBT doesn't advance for failed bundles.
-// The userCallback is invoked AFTER writes are discarded (e.g., to unlock txs in txpool).
-func (r *Runner) SetOnFailedWithStorage(storage PendingWritesApplier, userCallback func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash)) {
-	r.queue.SetOnFailed(func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash) {
-		// Discard pending writes for this failed bundle
-		discarded := storage.DiscardPendingWrites(wpHash)
-		if discarded {
-			log.Info(log.Node, "Discarded pending UBT writes for failed bundle",
-				"wpHash", wpHash.Hex(),
-				"blockNumber", blockNumber,
-				"txCount", len(txHashes))
-		}
-
-		// Invoke user callback (e.g., unlock txs in txpool)
-		if userCallback != nil {
-			userCallback(wpHash, blockNumber, txHashes)
-		}
-	})
-}
-
-// SetOnAccumulatedWithSnapshots sets up callbacks that commit UBT snapshots when bundles accumulate.
-// This is the recommended approach for parallel bundle building with multi-snapshot UBT.
-// The userCallback is invoked AFTER snapshot is committed (e.g., for txpool cleanup).
-//
-// This callback handles both the snapshot path AND the legacy pending writes path:
-// - Snapshot path: ApplyWritesToActiveSnapshot succeeded, CommitSnapshot promotes snapshot to canonical
-// - Legacy fallback: ApplyWritesToActiveSnapshot failed, writes stored via StorePendingWrites,
-//   ApplyPendingWrites applies them to CurrentUBT
-func (r *Runner) SetOnAccumulatedWithSnapshots(storage SnapshotManager, userCallback func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash)) {
-	r.queue.SetOnAccumulated(func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash) {
-		// Commit the snapshot for this block to canonical state
-		if blockNumber > 0 {
-			if err := storage.CommitSnapshot(blockNumber); err != nil {
-				log.Error(log.Node, "Failed to commit snapshot on accumulation",
+		// Try BlockCommitmentData via item.BlockCommitment
+		if item != nil && item.BlockCommitment != (common.Hash{}) {
+			if commitmentData := r.queue.GetBlockCommitmentData(item.BlockCommitment); commitmentData != nil {
+				postRoot = commitmentData.PostRoot
+				log.Debug(log.Node, "SetOnAccumulatedWithRoots: using BlockCommitmentData",
 					"wpHash", wpHash.Hex(),
 					"blockNumber", blockNumber,
-					"error", err)
-			} else {
-				log.Info(log.Node, "Committed UBT snapshot on accumulation",
-					"wpHash", wpHash.Hex(),
-					"blockNumber", blockNumber,
-					"txCount", len(txHashes))
+					"commitment", item.BlockCommitment.Hex(),
+					"postRoot", postRoot.Hex())
 			}
 		}
 
-		// FALLBACK: Also try to apply any pending writes that were stored via legacy path
-		// This handles the case where ApplyWritesToActiveSnapshot failed (no active snapshot)
-		// and writes were stored via StorePendingWrites instead
-		if applied, err := storage.ApplyPendingWrites(wpHash); err != nil {
-			log.Error(log.Node, "Failed to apply pending writes on accumulation (fallback path)",
+		// Fallback: search BlockCommitmentData by blockNumber (handles pruned QueueItem)
+		if postRoot == (common.Hash{}) {
+			if commitmentData := r.queue.GetBlockCommitmentDataByBlockNumber(blockNumber); commitmentData != nil {
+				postRoot = commitmentData.PostRoot
+				log.Debug(log.Node, "SetOnAccumulatedWithRoots: found BlockCommitmentData by blockNumber",
+					"wpHash", wpHash.Hex(),
+					"blockNumber", blockNumber,
+					"postRoot", postRoot.Hex())
+			}
+		}
+
+		// Last resort: item.PostRoot
+		if postRoot == (common.Hash{}) && item != nil && item.PostRoot != (common.Hash{}) {
+			postRoot = item.PostRoot
+			log.Warn(log.Node, "SetOnAccumulatedWithRoots: using item.PostRoot fallback",
 				"wpHash", wpHash.Hex(),
 				"blockNumber", blockNumber,
-				"error", err)
-		} else if applied {
-			log.Info(log.Node, "Applied pending writes on accumulation (fallback path)",
+				"postRoot", postRoot.Hex())
+		}
+
+		if postRoot == (common.Hash{}) {
+			log.Error(log.Node, "SetOnAccumulatedWithRoots: no PostRoot found, cannot commit",
 				"wpHash", wpHash.Hex(),
-				"blockNumber", blockNumber)
+				"blockNumber", blockNumber,
+				"hasItem", item != nil)
+		} else {
+			// Store accumulated root and advance contiguous pointer
+			r.mu.Lock()
+			r.accumulatedRoots[blockNumber] = postRoot
+
+			// Advance highestContiguous while next block exists
+			for r.accumulatedRoots[r.highestContiguous+1] != (common.Hash{}) {
+				r.highestContiguous++
+			}
+			commitBlockNumber := r.highestContiguous
+			commitRoot := r.accumulatedRoots[commitBlockNumber]
+			r.mu.Unlock()
+
+			// Commit the highest contiguous block's root as canonical
+			if commitRoot != (common.Hash{}) {
+				if err := storage.CommitAsCanonical(commitRoot); err != nil {
+					log.Error(log.Node, "💧 ACCUMULATE_FAIL",
+						"accumulatedBlock", blockNumber,
+						"canonicalBlock", commitBlockNumber,
+						"postRoot", commitRoot.Hex(),
+						"error", err)
+				} else {
+					log.Info(log.Node, "💧 ACCUMULATE",
+						"accumulatedBlock", blockNumber,
+						"canonicalBlock", commitBlockNumber,
+						"highestContiguous", commitBlockNumber,
+						"postRoot", commitRoot.Hex(),
+						"txCount", len(txHashes))
+				}
+			}
 		}
 
 		// Invoke user callback (e.g., remove txs from txpool)
@@ -242,24 +210,26 @@ func (r *Runner) SetOnAccumulatedWithSnapshots(storage SnapshotManager, userCall
 	})
 }
 
-// SetOnFailedWithSnapshots sets up callbacks that invalidate UBT snapshots when bundles fail.
-// This ensures failed bundles and their descendants are discarded.
-// The userCallback is invoked AFTER snapshots are invalidated (e.g., to unlock txs in txpool).
-func (r *Runner) SetOnFailedWithSnapshots(storage SnapshotManager, userCallback func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash)) {
+// SetOnFailedWithRoots sets up callbacks that discard trees by root when bundles fail.
+// This is the root-first version for standalone pre/post per bundle.
+// Uses the PostRoot stored in QueueItem to discard the failed bundle's state.
+func (r *Runner) SetOnFailedWithRoots(storage RootBasedStorage, userCallback func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash)) {
 	r.queue.SetOnFailed(func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash) {
-		// Invalidate snapshots for this block and all descendants
-		invalidated := storage.InvalidateSnapshotsFrom(blockNumber)
-		if invalidated > 0 {
-			log.Info(log.Node, "Invalidated UBT snapshots for failed bundle",
-				"wpHash", wpHash.Hex(),
-				"blockNumber", blockNumber,
-				"invalidatedCount", invalidated,
-				"txCount", len(txHashes))
-		}
-
-		// Also discard any pending writes for this work package (fallback path cleanup)
-		if storage.DiscardPendingWrites(wpHash) {
-			log.Info(log.Node, "Discarded pending writes for failed bundle",
+		// Look up the QueueItem to get its PostRoot
+		item := r.queue.GetItemByWPHash(wpHash)
+		if item != nil && item.PostRoot != (common.Hash{}) && item.PostRoot != item.PreRoot {
+			// Root-first path: discard the PostRoot tree (failed bundle's state)
+			discarded := storage.DiscardTree(item.PostRoot)
+			if discarded {
+				log.Info(log.Node, "Discarded PostRoot tree for failed bundle",
+					"wpHash", wpHash.Hex(),
+					"blockNumber", blockNumber,
+					"preRoot", item.PreRoot.Hex(),
+					"postRoot", item.PostRoot.Hex(),
+					"txCount", len(txHashes))
+			}
+		} else {
+			log.Warn(log.Node, "SetOnFailedWithRoots: missing PostRoot, nothing to discard",
 				"wpHash", wpHash.Hex(),
 				"blockNumber", blockNumber)
 		}
@@ -380,20 +350,6 @@ func (r *Runner) tick() {
 		}
 
 		if needsRebuild && r.bundleBuilder != nil {
-			// Invalidate existing snapshot before rebuild to prevent pollution
-			// When v1 is built, it writes to snapshot N. If v1 times out and v2 is built,
-			// v2 would reuse snapshot N (with v1's writes) and add more writes on top.
-			// This causes balance double-counting. By invalidating, we force a fresh snapshot
-			// that clones from the parent (N-1 or CurrentUBT), not from v1's polluted state.
-			if r.snapshotManager != nil {
-				invalidated := r.snapshotManager.InvalidateSnapshot(item.BlockNumber)
-				log.Info(log.Node, "Queue Runner: Invalidated snapshot before rebuild",
-					"service", r.serviceID,
-					"blockNumber", item.BlockNumber,
-					"version", item.Version,
-					"invalidated", invalidated)
-			}
-
 			stats := r.queue.GetStats()
 			newBundle, err := r.bundleBuilder(item, stats)
 			if err != nil {
@@ -477,7 +433,7 @@ func (r *Runner) GetQueue() *QueueState {
 }
 
 // PeekNextBlockNumber returns what the next block number will be without incrementing.
-// Use this to set up per-bundle snapshots BEFORE calling BuildBundle.
+// Use this to set up per-bundle roots BEFORE calling BuildBundle.
 func (r *Runner) PeekNextBlockNumber() uint64 {
 	return r.queue.PeekNextBlockNumber()
 }
@@ -505,10 +461,22 @@ func (r *Runner) EnqueueBundleWithOriginalExtrinsics(bundle *types.WorkPackageBu
 	return r.queue.EnqueueWithOriginalExtrinsics(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIndex, txHashes)
 }
 
+// EnqueueBundleWithRoots enqueues a bundle with explicit pre/post state roots.
+// This is the root-first version for standalone pre/post per bundle.
+// preRoot: state root before bundle execution (canonical or parent's postRoot)
+// postRoot: state root after bundle execution (computed during BuildBundle)
+func (r *Runner) EnqueueBundleWithRoots(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic, coreIndex uint16, txHashes []common.Hash, preRoot, postRoot common.Hash) (uint64, error) {
+	return r.queue.EnqueueWithRoots(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIndex, txHashes, preRoot, postRoot)
+}
+
 // EnqueueBundleWithReservedBlockNumber enqueues a bundle using a pre-reserved block number.
-// Use this when block numbers were reserved during Phase 1 batch building.
-func (r *Runner) EnqueueBundleWithReservedBlockNumber(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic, coreIndex uint16, txHashes []common.Hash, blockNumber uint64) error {
-	return r.queue.EnqueueWithReservedBlockNumber(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIndex, txHashes, blockNumber)
+func (r *Runner) EnqueueBundleWithReservedBlockNumber(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic, coreIndex uint16, txHashes []common.Hash, blockNumber uint64, preRoot, postRoot, blockCommitment common.Hash) error {
+	return r.queue.EnqueueWithReservedBlockNumber(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIndex, txHashes, blockNumber, preRoot, postRoot, blockCommitment)
+}
+
+// StoreBlockCommitmentData stores the authoritative state roots for a block commitment.
+func (r *Runner) StoreBlockCommitmentData(commitment common.Hash, info *BlockCommitmentInfo) {
+	r.queue.StoreBlockCommitmentData(commitment, info)
 }
 
 // HandleGuaranteed processes a guarantee event

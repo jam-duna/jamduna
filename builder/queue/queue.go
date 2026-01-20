@@ -52,8 +52,10 @@ func (s WorkPackageBundleStatus) String() string {
 
 // Configuration parameters for the queue
 const (
-	DefaultMaxQueueDepth = 12  // Maximum items waiting to be submitted
-	DefaultMaxInflight   = 3   // Maximum items in Submitted state (cores blocked)
+	DefaultMaxQueueDepth    = 12 // Minimum queue depth (used when no txpool provider)
+	DefaultMaxInflight      = 3  // Maximum items in Submitted state (cores blocked)
+	DefaultMaxTxsPerBundle  = 5  // Default transactions per bundle for dynamic depth calculation
+	DefaultQueueDepthBuffer = 4  // Extra buffer slots beyond calculated need
 
 	// Fast retry configuration (same version, network failure recovery)
 	// Uses RecentHistorySize window (48s) for safe retries within anchor validity
@@ -94,9 +96,16 @@ const (
 	DefaultMaxAccumulateTimeouts = 3               // Max accumulate timeouts before marking guaranteed bundle as failed
 )
 
+// TxPoolProvider interface allows queue to query transaction counts
+// for dynamic queue depth calculation
+type TxPoolProvider interface {
+	GetPendingOnlyCount() int // Transactions not yet assigned to a bundle
+	GetInBundleCount() int    // Transactions locked to bundles (in-flight)
+}
+
 // QueueConfig holds configuration for the work package queue
 type QueueConfig struct {
-	MaxQueueDepth       int
+	MaxQueueDepth       int // Minimum queue depth (fallback when no txpool provider)
 	MaxInflight         int
 	SubmitRetryInterval time.Duration // Fast retry: resubmit same version every N seconds
 	MaxSubmitRetries    int           // Fast retry: max attempts before slow timeout
@@ -109,6 +118,10 @@ type QueueConfig struct {
 	// before being marked as failed. Prevents stuck bundles that are guaranteed
 	// but never accumulate (e.g., due to accumulate entry point failure).
 	MaxAccumulateTimeouts int
+
+	// Dynamic queue depth settings
+	MaxTxsPerBundle  int // Transactions per bundle for depth calculation
+	QueueDepthBuffer int // Extra buffer slots beyond calculated need
 }
 
 // DefaultConfig returns the default queue configuration
@@ -123,6 +136,8 @@ func DefaultConfig() QueueConfig {
 		RetentionWindow:       DefaultRetentionWindow,
 		MaxVersionRetries:     DefaultMaxVersionRetries,
 		MaxAccumulateTimeouts: DefaultMaxAccumulateTimeouts,
+		MaxTxsPerBundle:       DefaultMaxTxsPerBundle,
+		QueueDepthBuffer:      DefaultQueueDepthBuffer,
 	}
 }
 
@@ -153,6 +168,20 @@ type QueueItem struct {
 	// Used to remove transactions from txpool only after accumulation (not after enqueue)
 	TransactionHashes []common.Hash
 
+	// ===== Root-First State Tracking =====
+	//
+	// For standalone pre/post per bundle, each bundle tracks its own state roots.
+	// This enables safe resubmission: rebuild clones from PreRoot, produces new PostRoot.
+
+	// PreRoot is the state root BEFORE this bundle's execution.
+	// For new bundles: canonical root at build time, or parent bundle's PostRoot.
+	// For rebuilds: should be recalculated from the correct parent state.
+	PreRoot common.Hash
+
+	// PostRoot is the state root AFTER this bundle's execution (writes applied).
+	// Computed during BuildBundle, stored here for CommitAsCanonical on accumulation.
+	PostRoot common.Hash
+
 	// Fast retry tracking: resubmit same version on network failures
 	SubmitAttempts int       // Number of times this version was submitted
 	LastSubmitAt   time.Time // Last submission attempt timestamp
@@ -161,6 +190,20 @@ type QueueItem struct {
 	// while bundle remains in Guaranteed state without accumulating.
 	// Used to detect and fail bundles that are guaranteed but never accumulate.
 	AccumulateTimeoutCount int
+
+	// BlockCommitment is the stable content hash (148-byte header).
+	// Computed from deterministic fields (txs, receipts, UBTRoot, etc.)
+	// Does NOT change on rebuild since payload is immutable.
+	// Used to look up authoritative PreRoot/PostRoot from BlockCommitmentData.
+	BlockCommitment common.Hash
+}
+
+// BlockCommitmentInfo stores the authoritative state roots for a block.
+type BlockCommitmentInfo struct {
+	PreRoot     common.Hash
+	PostRoot    common.Hash
+	TxHashes    []common.Hash
+	BlockNumber uint64
 }
 
 // QueueState manages the work package submission pipeline
@@ -214,6 +257,13 @@ type QueueState struct {
 	onStatusChange   func(blockNumber uint64, oldStatus, newStatus WorkPackageBundleStatus)
 	onAccumulated    func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash)   // Called when bundle accumulates
 	onFailed         func(wpHash common.Hash, blockNumber uint64, txHashes []common.Hash) // Called when bundle fails permanently (max retries exceeded)
+
+	// BlockCommitmentData maps BlockCommitment -> authoritative state roots.
+	// Populated at Phase 1 completion, survives rebuilds.
+	BlockCommitmentData map[common.Hash]*BlockCommitmentInfo
+
+	// TxPool provider for dynamic queue depth calculation
+	txPoolProvider TxPoolProvider
 }
 
 // NewQueueState creates a new queue state with default configuration
@@ -224,19 +274,64 @@ func NewQueueState(serviceID uint32) *QueueState {
 // NewQueueStateWithConfig creates a new queue state with custom configuration
 func NewQueueStateWithConfig(serviceID uint32, config QueueConfig) *QueueState {
 	return &QueueState{
-		config:          config,
-		serviceID:       serviceID,
-		Queued:          make(map[uint64]*QueueItem),
-		Inflight:        make(map[uint64]*QueueItem),
-		Status:          make(map[uint64]WorkPackageBundleStatus),
-		CurrentVer:      make(map[uint64]int),
-		HashByVer:       make(map[uint64]map[int]common.Hash),
-		HashToBlock:     make(map[common.Hash]uint64),
-		WinningVer:      make(map[uint64]int),
-		Finalized:       make(map[uint64]*QueueItem),
-		nextBlockNumber: 1, // Start from block 1 (0 is genesis)
-		eventIDCounter:  0,
+		config:              config,
+		serviceID:           serviceID,
+		Queued:              make(map[uint64]*QueueItem),
+		Inflight:            make(map[uint64]*QueueItem),
+		Status:              make(map[uint64]WorkPackageBundleStatus),
+		CurrentVer:          make(map[uint64]int),
+		HashByVer:           make(map[uint64]map[int]common.Hash),
+		HashToBlock:         make(map[common.Hash]uint64),
+		WinningVer:          make(map[uint64]int),
+		Finalized:           make(map[uint64]*QueueItem),
+		BlockCommitmentData: make(map[common.Hash]*BlockCommitmentInfo),
+		nextBlockNumber:     1, // Start from block 1 (0 is genesis)
+		eventIDCounter:      0,
 	}
+}
+
+// SetTxPoolProvider sets the transaction pool provider for dynamic queue depth calculation.
+// When set, the queue depth adjusts based on pending transaction count.
+func (qs *QueueState) SetTxPoolProvider(provider TxPoolProvider) {
+	qs.mu.Lock()
+	defer qs.mu.Unlock()
+	qs.txPoolProvider = provider
+}
+
+// getMaxQueueDepth returns the effective maximum queue depth.
+// If a TxPoolProvider is set, calculates dynamically based on total in-flight txs:
+//
+//	depth = ceil((pending + inBundle) / maxTxsPerBundle) + buffer
+//
+// This handles continuous transaction flow by accounting for:
+// - Pending: new txs not yet in bundles
+// - InBundle: txs locked to bundles awaiting enqueue or accumulation
+//
+// Otherwise falls back to static config.MaxQueueDepth.
+// Must be called with lock held.
+func (qs *QueueState) getMaxQueueDepth() int {
+	if qs.txPoolProvider == nil {
+		return qs.config.MaxQueueDepth
+	}
+
+	pendingTxs := qs.txPoolProvider.GetPendingOnlyCount()
+	inBundleTxs := qs.txPoolProvider.GetInBundleCount()
+	totalInflightTxs := pendingTxs + inBundleTxs
+
+	maxTxsPerBundle := qs.config.MaxTxsPerBundle
+	if maxTxsPerBundle <= 0 {
+		maxTxsPerBundle = DefaultMaxTxsPerBundle
+	}
+
+	// Calculate: ceil(totalInflightTxs / maxTxsPerBundle) + buffer
+	bundlesNeeded := (totalInflightTxs + maxTxsPerBundle - 1) / maxTxsPerBundle
+	dynamicDepth := bundlesNeeded + qs.config.QueueDepthBuffer
+
+	// Use the larger of dynamic calculation or static minimum
+	if dynamicDepth < qs.config.MaxQueueDepth {
+		return qs.config.MaxQueueDepth
+	}
+	return dynamicDepth
 }
 
 // SetStatusChangeCallback sets a callback for status changes
@@ -261,6 +356,53 @@ func (qs *QueueState) SetOnFailed(cb func(wpHash common.Hash, blockNumber uint64
 	qs.mu.Lock()
 	defer qs.mu.Unlock()
 	qs.onFailed = cb
+}
+
+// StoreBlockCommitmentData stores the authoritative state roots for a block.
+func (qs *QueueState) StoreBlockCommitmentData(commitment common.Hash, info *BlockCommitmentInfo) {
+	if commitment == (common.Hash{}) || info == nil {
+		return
+	}
+	qs.mu.Lock()
+	defer qs.mu.Unlock()
+
+	txHashesCopy := make([]common.Hash, len(info.TxHashes))
+	copy(txHashesCopy, info.TxHashes)
+
+	qs.BlockCommitmentData[commitment] = &BlockCommitmentInfo{
+		PreRoot:     info.PreRoot,
+		PostRoot:    info.PostRoot,
+		TxHashes:    txHashesCopy,
+		BlockNumber: info.BlockNumber,
+	}
+
+	log.Debug(log.Node, "Queue: Stored BlockCommitmentData",
+		"service", qs.serviceID,
+		"commitment", commitment.Hex(),
+		"blockNumber", info.BlockNumber,
+		"preRoot", info.PreRoot.Hex(),
+		"postRoot", info.PostRoot.Hex(),
+		"txCount", len(info.TxHashes))
+}
+
+// GetBlockCommitmentData retrieves the authoritative state roots for a block commitment.
+func (qs *QueueState) GetBlockCommitmentData(commitment common.Hash) *BlockCommitmentInfo {
+	qs.mu.RLock()
+	defer qs.mu.RUnlock()
+	return qs.BlockCommitmentData[commitment]
+}
+
+// GetBlockCommitmentDataByBlockNumber finds BlockCommitmentInfo by block number.
+// Used as fallback when QueueItem is missing/pruned but BlockCommitmentData still exists.
+func (qs *QueueState) GetBlockCommitmentDataByBlockNumber(blockNumber uint64) *BlockCommitmentInfo {
+	qs.mu.RLock()
+	defer qs.mu.RUnlock()
+	for _, info := range qs.BlockCommitmentData {
+		if info.BlockNumber == blockNumber {
+			return info
+		}
+	}
+	return nil
 }
 
 // nextEventID generates a unique event ID
@@ -293,8 +435,9 @@ func (qs *QueueState) Enqueue(bundle *types.WorkPackageBundle, coreIndex uint16)
 	qs.mu.Lock()
 	defer qs.mu.Unlock()
 
-	if len(qs.Queued) >= qs.config.MaxQueueDepth {
-		return 0, fmt.Errorf("queue full: %d items queued (max %d)", len(qs.Queued), qs.config.MaxQueueDepth)
+	maxDepth := qs.getMaxQueueDepth()
+	if len(qs.Queued) >= maxDepth {
+		return 0, fmt.Errorf("queue full: %d items queued (max %d)", len(qs.Queued), maxDepth)
 	}
 
 	blockNumber := qs.nextBlockNumber
@@ -341,35 +484,54 @@ func (qs *QueueState) Enqueue(bundle *types.WorkPackageBundle, coreIndex uint16)
 // used for rebuilding bundles on resubmission without double-prepending the witness.
 // The originalWorkItemExtrinsics are the WorkItems[].Extrinsics metadata BEFORE UBT witness prepending.
 func (qs *QueueState) EnqueueWithOriginalExtrinsics(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic, coreIndex uint16, txHashes []common.Hash) (uint64, error) {
+	// Delegate to root-aware version with zero roots (legacy compatibility)
+	return qs.EnqueueWithRoots(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIndex, txHashes, common.Hash{}, common.Hash{})
+}
+
+// EnqueueWithRoots adds a bundle to the queue with explicit pre/post state roots.
+// This is the root-first version for standalone pre/post per bundle.
+// preRoot: state root before bundle execution (canonical or parent's postRoot)
+// postRoot: state root after bundle execution (computed during BuildBundle)
+func (qs *QueueState) EnqueueWithRoots(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic, coreIndex uint16, txHashes []common.Hash, preRoot, postRoot common.Hash) (uint64, error) {
 	qs.mu.Lock()
 	defer qs.mu.Unlock()
 
-	if len(qs.Queued) >= qs.config.MaxQueueDepth {
-		return 0, fmt.Errorf("queue full: %d items queued (max %d)", len(qs.Queued), qs.config.MaxQueueDepth)
+	maxDepth := qs.getMaxQueueDepth()
+	if len(qs.Queued) >= maxDepth {
+		return 0, fmt.Errorf("queue full: %d items queued (max %d)", len(qs.Queued), maxDepth)
 	}
 
 	blockNumber := qs.nextBlockNumber
 	qs.nextBlockNumber++
 
-	return qs.enqueueWithBlockNumber(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIndex, txHashes, blockNumber)
+	return qs.enqueueWithBlockNumberAndRoots(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIndex, txHashes, blockNumber, preRoot, postRoot, common.Hash{})
 }
 
 // EnqueueWithReservedBlockNumber adds a bundle using a pre-reserved block number.
 // Use this when block numbers were reserved during Phase 1 batch building.
-func (qs *QueueState) EnqueueWithReservedBlockNumber(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic, coreIndex uint16, txHashes []common.Hash, blockNumber uint64) error {
+// blockCommitment is the stable content hash for looking up authoritative roots.
+func (qs *QueueState) EnqueueWithReservedBlockNumber(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic, coreIndex uint16, txHashes []common.Hash, blockNumber uint64, preRoot, postRoot, blockCommitment common.Hash) error {
 	qs.mu.Lock()
 	defer qs.mu.Unlock()
 
-	if len(qs.Queued) >= qs.config.MaxQueueDepth {
-		return fmt.Errorf("queue full: %d items queued (max %d)", len(qs.Queued), qs.config.MaxQueueDepth)
+	maxDepth := qs.getMaxQueueDepth()
+	if len(qs.Queued) >= maxDepth {
+		return fmt.Errorf("queue full: %d items queued (max %d)", len(qs.Queued), maxDepth)
 	}
 
-	_, err := qs.enqueueWithBlockNumber(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIndex, txHashes, blockNumber)
+	_, err := qs.enqueueWithBlockNumberAndRoots(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIndex, txHashes, blockNumber, preRoot, postRoot, blockCommitment)
 	return err
 }
 
 // enqueueWithBlockNumber is the internal implementation for enqueueing with a specific block number.
+// DEPRECATED: Use enqueueWithBlockNumberAndRoots for root-first state management.
 func (qs *QueueState) enqueueWithBlockNumber(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic, coreIndex uint16, txHashes []common.Hash, blockNumber uint64) (uint64, error) {
+	return qs.enqueueWithBlockNumberAndRoots(bundle, originalExtrinsics, originalWorkItemExtrinsics, coreIndex, txHashes, blockNumber, common.Hash{}, common.Hash{}, common.Hash{})
+}
+
+// enqueueWithBlockNumberAndRoots is the internal implementation for enqueueing with roots.
+// blockCommitment is stored on QueueItem for looking up authoritative roots from BlockCommitmentData.
+func (qs *QueueState) enqueueWithBlockNumberAndRoots(bundle *types.WorkPackageBundle, originalExtrinsics []types.ExtrinsicsBlobs, originalWorkItemExtrinsics [][]types.WorkItemExtrinsic, coreIndex uint16, txHashes []common.Hash, blockNumber uint64, preRoot, postRoot, blockCommitment common.Hash) (uint64, error) {
 	bundleID := fmt.Sprintf("B-%d", blockNumber)
 	wpHash := bundle.WorkPackage.Hash()
 
@@ -386,6 +548,9 @@ func (qs *QueueState) enqueueWithBlockNumber(bundle *types.WorkPackageBundle, or
 		OriginalExtrinsics:         originalExtrinsics,
 		OriginalWorkItemExtrinsics: originalWorkItemExtrinsics,
 		TransactionHashes:          txHashes,
+		PreRoot:                    preRoot,
+		PostRoot:                   postRoot,
+		BlockCommitment:            blockCommitment,
 	}
 
 	qs.Queued[blockNumber] = item
@@ -936,6 +1101,33 @@ func (qs *QueueState) OnTimeoutOrFailure(failedBN uint64) {
 			callback(failed.wpHash, failed.blockNumber, failed.txHashes)
 		}
 	}
+}
+
+// GetItemByWPHash returns the QueueItem for a given work package hash.
+// Searches Inflight first (most common case for accumulation), then Queued, then Finalized.
+// Returns nil if not found.
+func (qs *QueueState) GetItemByWPHash(wpHash common.Hash) *QueueItem {
+	bn, _ := qs.lookupByHash(wpHash)
+	if bn == 0 {
+		return nil
+	}
+
+	// Check Inflight first (most common for accumulation)
+	if item, ok := qs.Inflight[bn]; ok && item.WPHash == wpHash {
+		return item
+	}
+
+	// Check Queued
+	if item, ok := qs.Queued[bn]; ok && item.WPHash == wpHash {
+		return item
+	}
+
+	// Check Finalized
+	if item, ok := qs.Finalized[bn]; ok && item.WPHash == wpHash {
+		return item
+	}
+
+	return nil
 }
 
 // lookupByHash finds block number and version for a given work package hash

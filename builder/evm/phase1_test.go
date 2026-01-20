@@ -1,6 +1,7 @@
 package witness
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -18,6 +19,7 @@ import (
 	"github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/node"
 	"github.com/colorfulnotion/jam/statedb"
+	"github.com/colorfulnotion/jam/storage"
 	"github.com/colorfulnotion/jam/types"
 	jamtypes "github.com/colorfulnotion/jam/types"
 )
@@ -28,6 +30,23 @@ const (
 	expectedBundles   = 11 // ceil(51/5) = 11 bundles = 11 EVM blocks after genesis
 	expectedEVMBlocks = 12 // 1 genesis + 11 bundles
 )
+
+func buildBalanceWriteBlob(addr common.Address, balance *big.Int, txIndex uint32) []byte {
+	payload := make([]byte, 16)
+	balanceBytes := balance.Bytes()
+	if len(balanceBytes) > len(payload) {
+		balanceBytes = balanceBytes[len(balanceBytes)-len(payload):]
+	}
+	copy(payload[len(payload)-len(balanceBytes):], balanceBytes)
+
+	header := make([]byte, 29)
+	copy(header[0:20], addr.Bytes())
+	header[20] = 0x02 // Balance write
+	binary.LittleEndian.PutUint32(header[21:25], uint32(len(payload)))
+	binary.LittleEndian.PutUint32(header[25:29], txIndex)
+
+	return append(header, payload...)
+}
 
 // TestMultiSnapshotUBT tests the multi-snapshot UBT system for parallel bundle building.
 // Creates 51 transactions, batches them 5 per bundle, expects 11 bundles (11 EVM blocks after genesis).
@@ -134,9 +153,9 @@ func TestMultiSnapshotUBT(t *testing.T) {
 	senderAddr, senderPrivKey := common.GetEVMDevAccount(0)
 	recipientAddr, _ := common.GetEVMDevAccount(1)
 
-	// Get initial balances
-	senderBalanceBefore := evmstorage.GetCurrentUBTRoot()
-	fmt.Printf("Initial UBT root: %s\n", senderBalanceBefore.Hex())
+	// ROOT-FIRST: Get initial canonical root
+	initialCanonicalRoot := evmstorage.GetCanonicalRoot()
+	fmt.Printf("Initial canonical root: %s\n", initialCanonicalRoot.Hex())
 
 	// Transaction parameters
 	amount := big.NewInt(100_000_000) // 0.1 ETH per tx
@@ -166,13 +185,17 @@ func TestMultiSnapshotUBT(t *testing.T) {
 	}
 	fmt.Printf("Created %d transactions\n", len(allTxs))
 
-	// Process transactions in batches of 5
-	fmt.Println("=== Processing bundles ===")
+	// Process transactions in batches of 5 using ROOT-FIRST API
+	fmt.Println("=== Processing bundles (root-first API) ===")
 	blockRoots := make([]common.Hash, 0, expectedBundles)
 	var totalGasUsed uint64
 
 	// Use the Rollup's block cache instead of a slice
 	blockCache := rollup.GetBlockCache()
+
+	// Track the current canonical root - start with genesis
+	currentRoot := evmstorage.GetCanonicalRoot()
+	fmt.Printf("Starting canonical root: %s\n", currentRoot.Hex())
 
 	for bundleIdx := 0; bundleIdx < expectedBundles; bundleIdx++ {
 		startIdx := bundleIdx * txsPerBundle
@@ -187,14 +210,19 @@ func TestMultiSnapshotUBT(t *testing.T) {
 		fmt.Printf("--- Bundle %d: Block %d, txs %d-%d (%d txs) ---\n",
 			bundleIdx, blockNumber, startIdx, endIdx-1, len(batchTxs))
 
-		// Create snapshot for this block
-		if err := evmstorage.CreateSnapshotForBlock(blockNumber); err != nil {
-			t.Fatalf("CreateSnapshotForBlock(%d) failed: %v", blockNumber, err)
+		// ROOT-FIRST: Capture preRoot before execution
+		preRoot := currentRoot
+		fmt.Printf("  PreRoot: %s\n", preRoot.Hex())
+
+		// ROOT-FIRST: Validate parent root exists (CreateSnapshotFromRoot)
+		_, err := evmstorage.CreateSnapshotFromRoot(preRoot)
+		if err != nil {
+			t.Fatalf("CreateSnapshotFromRoot(%s) failed: %v", preRoot.Hex(), err)
 		}
 
-		// Set active snapshot
-		if err := evmstorage.SetActiveSnapshot(blockNumber); err != nil {
-			t.Fatalf("SetActiveSnapshot(%d) failed: %v", blockNumber, err)
+		// ROOT-FIRST: Set active root for reads during execution
+		if err := evmstorage.SetActiveRoot(preRoot); err != nil {
+			t.Fatalf("SetActiveRoot(%s) failed: %v", preRoot.Hex(), err)
 		}
 
 		// Prepare work package
@@ -213,25 +241,28 @@ func TestMultiSnapshotUBT(t *testing.T) {
 		}
 
 		// Execute Phase 1 (no witness generation)
+		// ExecutePhase1 internally applies writes via ApplyWritesToTree when activeRoot is set
+		// The postRoot is returned in phase1Result.EVMPostStateRoot
 		phase1Result, err := rollup.ExecutePhase1(workPackage, extrinsicsBlobs)
 		if err != nil {
 			t.Fatalf("ExecutePhase1 for bundle %d failed: %v", bundleIdx, err)
 		}
 
-		// Apply writes to active snapshot
-		if len(phase1Result.StateChanges) > 0 {
-			if err := evmstorage.ApplyWritesToActiveSnapshot(phase1Result.StateChanges); err != nil {
-				t.Fatalf("ApplyWritesToActiveSnapshot for bundle %d failed: %v", bundleIdx, err)
-			}
+		// ROOT-FIRST: Get postRoot from Phase1Result
+		// ExecutePhase1 already applied writes via ApplyWritesToTree internally
+		postRoot := phase1Result.EVMPostStateRoot
+		fmt.Printf("  PostRoot: %s\n", postRoot.Hex())
+
+		// ROOT-FIRST: Commit postRoot as canonical (simulates OnAccumulated)
+		if err := evmstorage.CommitAsCanonical(postRoot); err != nil {
+			t.Fatalf("CommitAsCanonical(%s) failed: %v", postRoot.Hex(), err)
 		}
 
-		// Commit snapshot (simulates OnAccumulated)
-		if err := evmstorage.CommitSnapshot(blockNumber); err != nil {
-			t.Fatalf("CommitSnapshot(%d) failed: %v", blockNumber, err)
-		}
+		// ROOT-FIRST: Clear active root
+		evmstorage.ClearActiveRoot()
 
-		// Clear active snapshot
-		evmstorage.ClearActiveSnapshot()
+		// Update current root for next iteration
+		currentRoot = postRoot
 
 		// Build EvmBlockPayload for logging
 		txHashes := make([]common.Hash, len(batchTxs))
@@ -276,9 +307,10 @@ func TestMultiSnapshotUBT(t *testing.T) {
 
 	fmt.Println("=== Verifying final state ===")
 
-	// Get final UBT root
-	finalRoot := evmstorage.GetCurrentUBTRoot()
-	fmt.Printf("Final UBT root: %s\n", finalRoot.Hex())
+	// ROOT-FIRST: Get final canonical root
+	finalRoot := evmstorage.GetCanonicalRoot()
+	fmt.Printf("Final canonical root: %s\n", finalRoot.Hex())
+	fmt.Printf("TreeStore size: %d\n", evmstorage.GetTreeStoreSize())
 
 	// Verify we processed the expected number of blocks
 	if len(blockRoots) != expectedBundles {
@@ -414,7 +446,7 @@ func TestMultiSnapshotUBT(t *testing.T) {
 	fmt.Printf("Expected gas cost:      %s\n", expectedGasTotal.String())
 	fmt.Printf("Sender:                 %s\n", senderAddr.Hex())
 	fmt.Printf("Recipient:              %s\n", recipientAddr.Hex())
-	fmt.Printf("Initial UBT root:       %s\n", senderBalanceBefore.Hex())
+	fmt.Printf("Initial canonical root: %s\n", initialCanonicalRoot.Hex())
 	fmt.Printf("Final UBT root:         %s\n", finalRoot.Hex())
 
 	// Verify final balances using FetchBalance
@@ -453,6 +485,54 @@ func TestMultiSnapshotUBT(t *testing.T) {
 	fmt.Println("Sender balance CORRECT")
 
 	fmt.Println("=== MULTI-SNAPSHOT UBT TEST PASSED ===")
+}
+
+func TestRootFirstResubmissionIsolation(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := storage.NewStateDBStorage(tmpDir, storage.NewMockJAMDA(), nil, 0)
+	if err != nil {
+		t.Fatalf("NewStateDBStorage failed: %v", err)
+	}
+	defer store.Close()
+
+	issuerAddr, _ := common.GetEVMDevAccount(0)
+	if _, err := store.InitializeEVMGenesis(0, issuerAddr, 100); err != nil {
+		t.Fatalf("InitializeEVMGenesis failed: %v", err)
+	}
+
+	preRoot := store.GetCanonicalRoot()
+	balanceBlob := buildBalanceWriteBlob(issuerAddr, big.NewInt(1234), 1)
+
+	postRoot1, err := store.ApplyWritesToTree(preRoot, balanceBlob)
+	if err != nil {
+		t.Fatalf("ApplyWritesToTree(v1) failed: %v", err)
+	}
+	if postRoot1 == preRoot {
+		t.Fatalf("expected postRoot to differ from preRoot")
+	}
+	if got := store.GetCanonicalRoot(); got != preRoot {
+		t.Fatalf("canonical root changed before commit: %s", got.Hex())
+	}
+
+	store.DiscardTree(postRoot1)
+
+	postRoot2, err := store.ApplyWritesToTree(preRoot, balanceBlob)
+	if err != nil {
+		t.Fatalf("ApplyWritesToTree(v2) failed: %v", err)
+	}
+	if postRoot2 != postRoot1 {
+		t.Fatalf("resubmission produced different postRoot: %s vs %s", postRoot1.Hex(), postRoot2.Hex())
+	}
+	if got := store.GetCanonicalRoot(); got != preRoot {
+		t.Fatalf("canonical root changed before commit: %s", got.Hex())
+	}
+
+	if err := store.CommitAsCanonical(postRoot2); err != nil {
+		t.Fatalf("CommitAsCanonical failed: %v", err)
+	}
+	if got := store.GetCanonicalRoot(); got != postRoot2 {
+		t.Fatalf("canonical root mismatch after commit: %s", got.Hex())
+	}
 }
 
 // TestPhase1ExecutionOnly tests EVM execution WITHOUT witness generation.
@@ -548,8 +628,8 @@ func TestPhase1ExecutionOnly(t *testing.T) {
 
 	fmt.Println("=== PHASE 1: Capture Pre-State Root ===")
 
-	// Step 1: Capture EVMPreStateRoot BEFORE execution
-	evmPreStateRoot := evmstorage.GetCurrentUBTRoot()
+	// Step 1: Capture EVMPreStateRoot BEFORE execution (use canonical root)
+	evmPreStateRoot := evmstorage.GetCanonicalRoot()
 	fmt.Printf("EVMPreStateRoot: %s\n", evmPreStateRoot.Hex())
 
 	// Step 2: Verify logging is enabled before Phase 1
@@ -710,3 +790,7 @@ func randomPortAbove2(base int) int {
 	}
 	return base + 1000
 }
+
+// NOTE: TestResubmissionIsolation removed - requires full node setup and additional
+// imports that aren't available. The root-first state isolation is tested via
+// TestMultiSnapshotUBT which verifies core treeStore functionality.

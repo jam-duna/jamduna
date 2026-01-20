@@ -334,6 +334,20 @@ func (pool *TxPool) GetPendingOnlyCount() int {
 	return count
 }
 
+// GetInBundleCount returns count of transactions with TxStatusInBundle (locked to bundles, awaiting accumulation)
+func (pool *TxPool) GetInBundleCount() int {
+	pool.mutex.RLock()
+	defer pool.mutex.RUnlock()
+
+	count := 0
+	for _, entry := range pool.pending {
+		if entry.Status == TxStatusInBundle {
+			count++
+		}
+	}
+	return count
+}
+
 // GetStats returns current pool statistics
 func (pool *TxPool) GetStats() TxPoolStats {
 	pool.mutex.RLock()
