@@ -307,23 +307,50 @@ func (store *StateDBStorage) GetActiveTreeTyped() *UnifiedBinaryTree {
 	store.mutex.RLock()
 	if store.pinnedTree != nil {
 		tree := store.pinnedTree
+		pinnedRoot := ""
+		if store.pinnedStateRoot != nil {
+			pinnedRoot = store.pinnedStateRoot.Hex()[:16]
+		}
+		treeRootHash := tree.RootHash()
 		store.mutex.RUnlock()
+		log.Debug(log.EVM, "GetActiveTreeTyped: using pinnedTree",
+			"ptr", fmt.Sprintf("%p", store),
+			"pinnedRoot", pinnedRoot,
+			"treeRoot", fmt.Sprintf("%x", treeRootHash[:8]),
+			"isClone", store.isClone)
 		return tree
 	}
+	// Get per-instance activeRoot while still holding mutex
+	activeRoot := store.activeRoot
 	store.mutex.RUnlock()
 
-	// Check activeRoot (root-first state access)
-	store.treeStoreMutex.RLock()
-	if store.activeRoot != (common.Hash{}) {
-		if tree, exists := store.treeStore[store.activeRoot]; exists {
-			store.treeStoreMutex.RUnlock()
+	// Check per-instance activeRoot (root-first state access)
+	// activeRoot is PER-INSTANCE - must be set on THIS storage instance
+	if activeRoot != (common.Hash{}) {
+		store.ubtState.mutex.RLock()
+		if tree, exists := store.ubtState.treeStore[activeRoot]; exists {
+			store.ubtState.mutex.RUnlock()
+			log.Debug(log.EVM, "GetActiveTreeTyped: using activeRoot tree",
+				"ptr", fmt.Sprintf("%p", store),
+				"activeRoot", activeRoot.Hex()[:16],
+				"isClone", store.isClone)
 			return tree
 		}
+		store.ubtState.mutex.RUnlock()
 	}
 
 	// Fall back to canonical tree (this is the root-first default)
-	tree := store.treeStore[store.canonicalRoot]
-	store.treeStoreMutex.RUnlock()
+	store.ubtState.mutex.RLock()
+	tree := store.ubtState.treeStore[store.ubtState.canonicalRoot]
+	canonicalRoot := store.ubtState.canonicalRoot
+	store.ubtState.mutex.RUnlock()
+
+	log.Debug(log.EVM, "GetActiveTreeTyped: using canonical tree (no activeRoot or pinnedTree set)",
+		"ptr", fmt.Sprintf("%p", store),
+		"canonicalRoot", canonicalRoot.Hex()[:16],
+		"activeRoot", activeRoot.Hex()[:16],
+		"pinnedTree", store.pinnedTree != nil,
+		"isClone", store.isClone)
 
 	return tree
 }

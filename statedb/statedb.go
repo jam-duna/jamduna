@@ -481,11 +481,19 @@ func (s *StateDB) Flush() common.Hash {
 
 	s.sdb.SetStates(newStates)
 	//TODO: flush shoud be split into compute overlayRoot & flush to disk to decouple the dependancies
+	previousRoot := s.StateRoot
 	updated_root, err := s.sdb.Flush()
 	if err != nil {
 		log.Error(log.SDB, "Flush failed", "err", err)
 	}
 	s.StateRoot = updated_root
+
+	// DEBUG: Log state root transition
+	log.Info(log.SDB, "✅ StateDB.Flush: new state root committed",
+		"statedbID", s.Id,
+		"previousRoot", previousRoot.Hex()[:16],
+		"newRoot", updated_root.Hex()[:16],
+		"slot", sf.Timeslot)
 
 	return updated_root
 }
@@ -585,15 +593,31 @@ func NewStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *St
 }
 
 func NewStateDBFromStateRoot(stateRoot common.Hash, sdb types.JAMStorage) (recoveredStateDB *StateDB, err error) {
-	recoveredStateDB = newEmptyStateDB(sdb)
-	recoveredStateDB.Finalized = true // Historical state is always finalized
+	// CRITICAL FIX: Create an ISOLATED trie view for this StateDB.
+	// This prevents race conditions when multiple operations (auditor, authoring, importing)
+	// call NewStateDBFromStateRoot concurrently - each gets its own Root pointer.
+	isolatedSdb := sdb.CloneTrieView()
+
+	log.Debug(log.SDB, "🔎 NewStateDBFromStateRoot: attempting to recover state with isolated trie",
+		"stateRoot", stateRoot.Hex()[:16],
+		"originalSdbPtr", fmt.Sprintf("%p", sdb),
+		"isolatedSdbPtr", fmt.Sprintf("%p", isolatedSdb))
+
+	recoveredStateDB = newEmptyStateDB(isolatedSdb) // Use isolated view
+	recoveredStateDB.Finalized = true               // Historical state is always finalized
 	recoveredStateDB.JamState = NewJamState()
 
 	err = recoveredStateDB.InitTrieAndLoadJamState(stateRoot)
 	if err != nil {
+		log.Error(log.SDB, "❌ NewStateDBFromStateRoot: failed to recover state",
+			"stateRoot", stateRoot.Hex(),
+			"isolatedSdbPtr", fmt.Sprintf("%p", isolatedSdb),
+			"err", err)
 		return nil, fmt.Errorf("failed to recover state from root %s: %w", stateRoot.Hex(), err)
 	}
 
+	log.Debug(log.SDB, "✅ NewStateDBFromStateRoot: state recovered successfully",
+		"stateRoot", stateRoot.Hex()[:16])
 	return recoveredStateDB, nil
 }
 
@@ -632,7 +656,10 @@ func newStateDB(sdb types.JAMStorage, blockHash common.Hash) (statedb *StateDB, 
 	return statedb, nil
 }
 
-// Copy generates a copy of the StateDB
+// Copy generates a copy of the StateDB with an ISOLATED trie view.
+// Each copy has its own trie Root pointer, so SetRoot calls on one copy
+// won't affect other copies. This prevents race conditions when multiple
+// operations (auditor, authoring, importing) run concurrently.
 func (s *StateDB) Copy() (newStateDB *StateDB) {
 	// Create a new instance of StateDB
 	// T.P.G.A.
@@ -648,6 +675,11 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		}
 	}
 
+	// CRITICAL FIX: Create an ISOLATED trie view for this StateDB copy.
+	// Each copy now has its own Root pointer that won't be affected by
+	// SetRoot calls from other concurrent operations.
+	isolatedSdb := s.sdb.CloneTrieView()
+
 	newStateDB = &StateDB{
 		Id:               s.Id,
 		Block:            s.Block.Copy(), // You might need to deep copy the Block if it's mutable
@@ -655,7 +687,7 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		HeaderHash:       s.HeaderHash,
 		StateRoot:        s.StateRoot,
 		JamState:         s.JamState.Copy(), // DisputesState has a Copy method
-		sdb:              s.sdb,
+		sdb:              isolatedSdb,       // Use isolated trie view instead of shared sdb
 
 		logChan:             make(chan storage.LogMessage, 100),
 		metashardWitnesses:  make(map[common.Hash]*types.StateWitness),
@@ -672,15 +704,55 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 
 		*/
 	}
-	// Initialize trie state with the copied state root
+	// Initialize trie state with the copied state root.
+	// Now safe because isolatedSdb has its own Root pointer.
+	log.Debug(log.SDB, "Copy: initializing trie with ISOLATED sdb",
+		"sourceId", s.Id,
+		"sourceRoot", s.StateRoot.Hex(),
+		"targetRoot", newStateDB.StateRoot.Hex(),
+		"isolatedSdbPtr", fmt.Sprintf("%p", isolatedSdb))
 	err := newStateDB.InitTrieAndLoadJamState(newStateDB.StateRoot)
 	if err != nil {
-		log.Error(log.SDB, "Copy: failed to initialize trie state", "stateRoot", newStateDB.StateRoot, "err", err)
+		log.Error(log.SDB, "Copy: failed to initialize trie state",
+			"stateRoot", newStateDB.StateRoot.Hex(),
+			"sourceRoot", s.StateRoot.Hex(),
+			"err", err)
 		// Return the newStateDB anyway, but this indicates a serious issue
 	}
 	// copy instead of recalculate
 	newStateDB.RotateGuarantors()
 	return newStateDB
+}
+
+// CopyForPhase2 creates a lightweight StateDB copy for Phase 2 witness generation.
+// Unlike full Copy(), this only isolates the per-execution state needed for BuildBundle:
+// - ubtReadLog (via CloneTrieView) - each Phase 2 needs its own read log
+// - pinnedTree/activeRoot - per-execution pinning state
+// It shares the heavy state (JamState, treeStore) to minimize CPU/memory overhead.
+// This is safe because:
+// - JamState is read-only during BuildBundle
+// - treeStore trees are immutable (copy-on-write)
+// - Only ubtReadLog needs isolation for concurrent Phase 2 builds
+func (s *StateDB) CopyForPhase2() *StateDB {
+	// CloneTrieView creates isolated storage with its own ubtReadLog
+	isolatedSdb := s.sdb.CloneTrieView()
+
+	return &StateDB{
+		Id:               s.Id,
+		Block:            s.Block,            // Read-only during Phase 2
+		ParentHeaderHash: s.ParentHeaderHash, // Read-only
+		HeaderHash:       s.HeaderHash,       // Read-only
+		StateRoot:        s.StateRoot,        // Read-only
+		JamState:         s.JamState,         // SHARED - read-only during BuildBundle
+		sdb:              isolatedSdb,        // ISOLATED - has own ubtReadLog
+
+		logChan:             s.logChan,            // Can share
+		metashardWitnesses:  make(map[common.Hash]*types.StateWitness), // Per-execution
+		AvailableWorkReport: s.AvailableWorkReport, // Read-only during Phase 2
+		AncestorSet:         s.AncestorSet,         // Read-only during Phase 2
+		Authoring:           s.Authoring,           // Read-only
+	}
+	// No InitTrieAndLoadJamState needed - we share JamState and trie is accessed via isolatedSdb
 }
 
 func GenerateEpochPhaseTraceID(epoch uint32, phase uint32) string {

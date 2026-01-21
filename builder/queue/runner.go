@@ -42,6 +42,12 @@ type Runner struct {
 	// Contiguous accumulation tracking for canonical commits
 	accumulatedRoots  map[uint64]common.Hash // blockNumber -> postRoot
 	highestContiguous uint64                 // highest block where 1..N are all accumulated
+
+	// Pending head tracking: the postRoot of the most recent Phase 1 block
+	// This is used to chain Phase 1 blocks across multiple batches, even before
+	// bundles accumulate (which updates canonicalRoot). Without this, each new
+	// batch would start from canonicalRoot and re-execute the same transactions.
+	pendingHeadRoot common.Hash
 }
 
 // RunnerConfig holds configuration for the runner
@@ -492,4 +498,43 @@ func (r *Runner) HandleAccumulated(wpHash common.Hash) {
 // HandleFinalized processes a finalization event
 func (r *Runner) HandleFinalized(wpHash common.Hash) {
 	r.queue.OnFinalized(wpHash)
+}
+
+// GetPendingHeadRoot returns the current pending head root.
+// This is the postRoot of the most recent Phase 1 block, used to chain
+// Phase 1 blocks across multiple batches even before bundles accumulate.
+// Returns zero hash if no pending head is set.
+func (r *Runner) GetPendingHeadRoot() common.Hash {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.pendingHeadRoot
+}
+
+// SetPendingHeadRoot updates the pending head root to a new value.
+// Call this after each successful Phase 1 execution with the block's postRoot.
+func (r *Runner) SetPendingHeadRoot(root common.Hash) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pendingHeadRoot = root
+}
+
+// GetChainHeadRoot returns the best root to use for chaining Phase 1 blocks.
+// Returns pendingHeadRoot if set, otherwise returns the canonical root from storage.
+// This ensures Phase 1 blocks chain correctly even when bundles haven't accumulated yet.
+func (r *Runner) GetChainHeadRoot(canonicalRoot common.Hash) common.Hash {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if r.pendingHeadRoot != (common.Hash{}) {
+		return r.pendingHeadRoot
+	}
+	return canonicalRoot
+}
+
+// ResetPendingHeadToCanonical resets the pending head to match the canonical root.
+// Call this after accumulation catches up to ensure the chain doesn't diverge.
+func (r *Runner) ResetPendingHeadToCanonical(canonicalRoot common.Hash) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pendingHeadRoot = canonicalRoot
 }

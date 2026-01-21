@@ -67,7 +67,10 @@ type BlockCommitmentInfo struct {
 }
 ```
 
-At Phase 1 completion, `StoreBlockCommitmentData(commitment, info)` saves the authoritative roots. On accumulation, the PostRoot is looked up via `BlockCommitmentData[item.BlockCommitment]`.
+At Phase 1 completion, `StoreBlockCommitmentData(commitment, info)` saves the authoritative roots. On accumulation, the PostRoot lookup order is:
+1) `BlockCommitmentData[item.BlockCommitment]`
+2) `BlockCommitmentData` by blockNumber (fallback if item is pruned)
+3) `item.PostRoot` (last-resort legacy fallback with a warning)
 
 ### Block Tag Semantics
 
@@ -514,4 +517,298 @@ The queue implements a **two-tier timeout strategy** to recover quickly from net
 2. **RecentBlocks** (`checkRecentBlock`): 8 slots (48s)
 3. **LookupAnchor** (`checkTimeSlotHeader`): 24 slots (144s)
 
-The configuration uses constraint #1's minimum (24s) for maximum safety.
+The configuration uses constraint #1's maximum (42s) plus a 12s safety margin (total 54s).
+
+---
+
+## Phase 2 Concurrency and State Isolation (2026-01-21)
+
+### Problem: Concurrent Phase 2 Builds Share ubtReadLog
+
+The EVM builder executes Phase 2 (witness generation) for multiple blocks concurrently. Each `BuildBundle` call:
+
+1. Executes PVM/EVM which reads from UBT (balance, nonce, storage, code)
+2. Logs those reads to `ubtReadLog` on the storage instance
+3. Calls `BuildUBTWitness()` which uses `ubtReadLog` to generate proofs
+4. Calls `ClearUBTReadLog()` after witness generation
+
+**Bug**: When multiple Phase 2 builds run concurrently on the **same shared StateDB**, they share the same `ubtReadLog`:
+
+```
+Phase 2 (Block 37): ExecuteRefine starts, logs reads...
+Phase 2 (Block 38): ExecuteRefine starts, logs reads... (interleaved!)
+Phase 2 (Block 36): ClearUBTReadLog() → clears ALL reads!
+Phase 2 (Block 37): BuildUBTWitness() → empty read log → proofKeys=0 → FAIL
+```
+
+**Symptoms**:
+- `VerifyMultiProof failed: invalid proof` with `proofKeys=0, proofNodes=0, proofStems=0`
+- `expectedRoot` matches `witnessRoot` (roots are correct, proof is empty)
+- Random Phase 2 failures for blocks that should succeed
+
+### Solution: Isolated StateDB per Phase 2 Execution
+
+Each Phase 2 build uses `CopyForPhase2()` to create a lightweight isolated StateDB:
+
+```go
+// In executePhase2ForBlock:
+stateDB := n.GetStateDB().CopyForPhase2()  // Isolated copy
+actualStorage := stateDB.GetStorage().(types.EVMJAMStorage)
+actualStorage.PinToStateRoot(preStateRoot)
+bundle, workReport, err := stateDB.BuildBundle(...)  // Uses isolated ubtReadLog
+```
+
+### CopyForPhase2 vs Full Copy
+
+| Aspect | `Copy()` | `CopyForPhase2()` |
+|--------|----------|-------------------|
+| `ubtReadLog` | Isolated (new empty log) | Isolated (new empty log) |
+| `pinnedTree/activeRoot` | Isolated | Isolated |
+| `JamState` | Deep copied | **Shared** (read-only) |
+| `treeStore` | Shared | Shared |
+| `InitTrieAndLoadJamState` | Yes (expensive) | **No** |
+| Use case | Block import, forking | Phase 2 witness gen |
+
+**Why sharing JamState is safe**:
+
+Phase 2 `BuildBundle` only reads from JamState:
+- `JamState.SafroleState.Timeslot` - timestamp for VM
+- `JamState.RecentBlocks.B_H` - anchor lookup in `GetRefineContext`
+
+JamState is only mutated during block import/accumulation, never during `BuildBundle`. This assumes JamState is not mutated in-place while Phase 2 runs (the node swaps StateDB on import).
+
+### What Gets Isolated
+
+`CloneTrieView()` (called by `CopyForPhase2`) creates storage with:
+
+```go
+// ISOLATED per-execution:
+ubtReadLog:        make([]types.UBTRead, 0),  // Fresh empty log
+ubtReadLogEnabled: true,
+pinnedStateRoot:   clonedPinnedStateRoot,     // Own pinning state
+pinnedTree:        pinnedTree,
+activeRoot:        common.Hash{},             // Own active root
+
+// SHARED (thread-safe or immutable):
+ubtState:     t.ubtState,      // treeStore is copy-on-write, safe to share
+serviceState: t.serviceState,  // Synchronized via mutex
+db:           t.db,            // LevelDB is thread-safe
+```
+
+### Key Invariants
+
+1. **Each Phase 2 execution has its own `ubtReadLog`** - prevents cross-contamination
+2. **`treeStore` trees are immutable** - `ApplyWritesToTree` clones before mutation (copy-on-write)
+3. **Pin/unpin is per-instance** - each Phase 2 pins its own `pinnedTree`
+4. **JamState is read-only during BuildBundle** - safe to share
+
+### Pending Head Root for Cross-Batch Chaining
+
+**Problem**: Phase 1 blocks must chain state roots across batches, but `GetCanonicalRoot()` only advances after accumulation.
+
+**Solution**: `pendingHeadRoot` tracks the postRoot of the most recent Phase 1 block:
+
+```go
+// In queue/runner.go:
+type Runner struct {
+    pendingHeadRoot common.Hash  // Tracks Phase 1 chain head
+}
+
+// After each Phase 1 block:
+queueRunner.SetPendingHeadRoot(blockData.phase1Result.EVMPostStateRoot)
+
+// When starting next batch:
+currentRoot := queueRunner.GetChainHeadRoot(canonicalRoot)
+// Returns pendingHeadRoot if set, otherwise canonicalRoot
+```
+
+This ensures:
+- Block 6 chains from Block 5's postRoot (even before Block 5 accumulates)
+- Batches don't restart from genesis
+- State roots form a proper chain: genesis → B1 → B2 → ... → BN
+
+### Summary of State Isolation
+
+| Component | Isolation Level | Reason |
+|-----------|-----------------|--------|
+| `ubtReadLog` | Per-execution | Prevents cross-contamination of read tracking |
+| `pinnedTree` | Per-execution | Each Phase 2 pins to its own preRoot |
+| `activeRoot` | Per-execution | Execution context isolation |
+| `treeStore` | Shared | Copy-on-write makes trees immutable |
+| `JamState` | Shared | Read-only during BuildBundle |
+| `pendingHeadRoot` | Per-Runner | Cross-batch Phase 1 chaining |
+
+---
+
+## StateDB Isolation for Block Import/Authoring & Auditing
+
+### Problem: Concurrent Block Processing and Auditing
+
+JAM nodes run multiple concurrent operations that all access StateDB:
+
+1. **Block Import** (`ApplyBlock`): Imports blocks from the network, applies state transitions
+2. **Block Authoring** (`runAuthoring`): Creates new blocks when the node is a proposer
+3. **Auditing** (`runAudit`): Verifies work reports by re-executing refine operations
+
+These operations run in different goroutines and can overlap. Without isolation:
+- Auditing could read partial state during block import
+- Authoring could see inconsistent trie state during concurrent imports
+- `SetRoot` calls could affect concurrent operations
+
+### Solution: Full StateDB Copy for Auditing
+
+When a block is imported or authored, a **full copy** of the StateDB is sent to the auditing channel:
+
+```go
+// In ApplyBlock (block import):
+if n.AuditFlag {
+    if snap, ok := n.statedbMap[n.statedb.HeaderHash]; ok {
+        select {
+        case n.auditingCh <- snap.Copy():  // FULL COPY
+            log.Debug(log.Audit, "ApplyBlock: auditingCh", ...)
+        default:
+            log.Warn(log.Node, "auditingCh full, skipping audit")
+        }
+    }
+}
+
+// In runAuthoring (block production):
+if n.AuditFlag {
+    select {
+    case n.auditingCh <- newStateDB.Copy():  // FULL COPY
+    default:
+        log.Warn(log.Node, "auditingCh full, dropping state")
+    }
+}
+```
+
+### Why Full Copy() is Required for Auditing
+
+Auditing differs from Phase 2 witness generation:
+
+| Aspect | Phase 2 (`CopyForPhase2`) | Auditing (`Copy`) |
+|--------|---------------------------|-------------------|
+| JamState access | Read-only (Timeslot, RecentBlocks) | Read-only but needs full snapshot |
+| Block access | Read-only | May modify (e.g., disputes) |
+| AvailableWorkReport | Read-only | May need to verify/access |
+| AncestorSet | Read-only | Needs deep copy for isolation |
+| Trie state | Pinned to specific root | Needs isolated view |
+| Lifetime | Short (single BuildBundle) | Long (async audit process) |
+
+Auditing runs **asynchronously in a separate goroutine** and may take a long time (re-executing all work packages). During this time, the main node continues importing blocks and mutating state. A full copy ensures:
+
+1. **Consistent snapshot**: Auditing sees the exact state at the block being audited
+2. **No interference**: Block imports don't affect the auditing StateDB
+3. **Safe mutations**: `audit_statedb.Block.Copy()` allows auditing to mark blocks audited
+
+### StateDB.Copy() Deep Copy Details
+
+```go
+func (s *StateDB) Copy() (newStateDB *StateDB) {
+    // Deep copy mutable collections
+    tmpAvailableWorkReport := make([]types.WorkReport, len(s.AvailableWorkReport))
+    copy(tmpAvailableWorkReport, s.AvailableWorkReport)
+
+    tmpAncestorSet := make(map[common.Hash]uint32, len(s.AncestorSet))
+    for k, v := range s.AncestorSet {
+        tmpAncestorSet[k] = v
+    }
+
+    // Isolated trie view with own Root pointer
+    isolatedSdb := s.sdb.CloneTrieView()
+
+    return &StateDB{
+        Block:            s.Block.Copy(),     // Deep copy - auditing may mutate
+        JamState:         s.JamState.Copy(),  // Deep copy - full state snapshot
+        sdb:              isolatedSdb,        // Isolated trie view
+        AvailableWorkReport: tmpAvailableWorkReport,
+        AncestorSet:         tmpAncestorSet,
+        // ... other fields
+    }
+}
+```
+
+### CloneTrieView() Trie Isolation
+
+Both `Copy()` and `CopyForPhase2()` use `CloneTrieView()` for trie isolation:
+
+```go
+func (t *StateDBStorage) CloneTrieView() types.JAMStorage {
+    return &StateDBStorage{
+        trieDB:        t.trieDB.CloneView(),  // Isolated trie view
+        Root:          t.Root,                 // Own Root pointer
+        stagedInserts: make(map[common.Hash][]byte),  // Fresh staging
+        stagedDeletes: make(map[common.Hash]bool),
+
+        // SHARED (thread-safe):
+        db:           t.db,           // LevelDB - thread-safe
+        ubtState:     t.ubtState,     // Synchronized via mutex
+        serviceState: t.serviceState, // Synchronized via mutex
+
+        // Per-clone state:
+        activeRoot:        common.Hash{},
+        ubtReadLog:        make([]types.UBTRead, 0),
+        ubtReadLogEnabled: true,
+    }
+}
+```
+
+### Key Invariants for Block Import/Authoring/Auditing
+
+1. **Auditing always receives a full `Copy()`** - ensures complete isolation from ongoing imports
+2. **Block and JamState are deep copied** - auditing may run for seconds/minutes asynchronously
+3. **Trie views are isolated** - `SetRoot` on one doesn't affect others
+4. **treeStore is copy-on-write** - multiple readers (audit + import) are safe
+5. **statedbMap access is mutex-protected** - prevents data races on the map itself
+
+### Comparison: Copy() vs CopyForPhase2()
+
+| Operation | Use Case | JamState | Block | Trie | Overhead |
+|-----------|----------|----------|-------|------|----------|
+| `Copy()` | Auditing, Forking | Deep copy | Deep copy | Isolated | High |
+| `CopyForPhase2()` | Phase 2 witness gen | Shared | Shared | Isolated | Low |
+
+**When to use which:**
+- `Copy()`: Long-lived async operations that need a complete, immutable snapshot
+- `CopyForPhase2()`: Short-lived operations that only read from JamState/Block
+
+### panicIfClone: Safety Guard for Canonical State Mutations
+
+Cloned storage instances (`CloneTrieView`) are marked with `isClone = true`. A safety guard prevents clones from accidentally mutating shared canonical state:
+
+```go
+// In storage/storage.go:
+func (s *StateDBStorage) panicIfClone(operation string) {
+    if s.isClone {
+        panic(fmt.Sprintf("operation %q modifies canonical state - not allowed on CloneTrieView", operation))
+    }
+}
+```
+
+**Protected operations** (will panic if called on a clone):
+
+- `SetCanonicalRoot()` - would corrupt shared canonical root
+- `CommitAsCanonical()` - would commit clone's state as canonical
+- `DiscardTree()` - would remove trees needed by other operations
+- `ResetTrie()` - would reset the entire treeStore
+
+**Why this matters:**
+
+- Phase 2 clones (`CopyForPhase2`) share `ubtState` including `canonicalRoot`
+- If a clone accidentally called `SetCanonicalRoot()`, it would corrupt the canonical state for ALL operations
+- The panic is a **fail-fast** mechanism - better to crash immediately than silently corrupt state
+
+**What clones CAN do:**
+
+- Read from `treeStore` (thread-safe with mutex)
+- Pin to state roots (`PinToStateRoot`) - uses clone's own `pinnedTree`
+- Build witnesses (`BuildUBTWitness`) - uses clone's own `ubtReadLog`
+- Apply writes to trees (`ApplyWritesToTree`) - copy-on-write, creates new tree
+
+### Summary: Three Levels of StateDB Isolation
+
+| Scenario | Method | What's Isolated | What's Shared |
+|----------|--------|-----------------|---------------|
+| Auditing | `Copy()` | Everything (JamState, Block, AncestorSet, Trie) | treeStore (CoW), LevelDB |
+| Phase 2 witness | `CopyForPhase2()` | ubtReadLog, pinnedTree, activeRoot | JamState, Block, treeStore |
+| Block import | Fresh StateDB via STF | Everything | treeStore (CoW), LevelDB |

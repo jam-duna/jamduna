@@ -404,6 +404,11 @@ type JAMStorage interface {
 	SetRoot(root common.Hash) error
 	ClearStagedOps()
 
+	// CloneTrieView creates an isolated view of the storage with its own trie Root pointer.
+	// This enables concurrent operations (auditor, authoring, importing) to work on
+	// different state roots without race conditions on the shared MerkleTree.Root.
+	CloneTrieView() JAMStorage
+
 	// Service Operations - per-service account data management
 	DeleteService(s uint32) error
 	SetService(s uint32, v []byte) error

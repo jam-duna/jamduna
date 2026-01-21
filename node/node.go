@@ -831,6 +831,10 @@ func (n *Node) SetPVMBackend(pvm_mode string) {
 	log.Trace(log.Node, fmt.Sprintf("PVM Backend: [%s]", pvmBackend))
 }
 
+func (n *Node) GetPVMBackend() string {
+	return n.pvmBackend
+}
+
 // TODO: take in serviceIDs for multi-rollup support
 func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.ChainSpec, pvmBackend string, peers []string, startPeerList map[uint16]*Peer, dataDir string, port int, jceMode string, role string) (*Node, error) {
 	bindAddr := os.Getenv("JAM_BIND_ADDR")
@@ -2134,6 +2138,13 @@ func (n *NodeContent) addStateDB(_statedb *statedb.StateDB) error {
 	defer n.statedbMutex.Unlock()
 	defer n.statedbMapMutex.Unlock()
 
+	// DEBUG: Log when a new state is being added to the node
+	log.Info(log.B, "🔄 addStateDB: adding new state",
+		"nodeID", n.id,
+		"newStateRoot", _statedb.StateRoot.Hex()[:16],
+		"newSlot", _statedb.GetSafrole().Timeslot,
+		"headerHash", _statedb.GetHeaderHash().Hex()[:16])
+
 	if n.statedb == nil || n.statedb.GetBlock() == nil {
 		var headerHash common.Hash
 		if _statedb.GetBlock() != nil {
@@ -2145,7 +2156,10 @@ func (n *NodeContent) addStateDB(_statedb *statedb.StateDB) error {
 			telemetryClient.BestBlockChanged(_statedb.GetSafrole().Timeslot, _statedb.GetBlock().Header.HeaderHash())
 		}
 		n.statedbMap[headerHash] = _statedb
-		log.Debug(log.B, "addStateDB", "statedb", n.statedb.GetHeaderHash().Hex())
+		log.Info(log.B, "🔄 addStateDB: first state added",
+			"nodeID", n.id,
+			"stateRoot", _statedb.StateRoot.Hex()[:16],
+			"headerHash", n.statedb.GetHeaderHash().Hex()[:16])
 		return nil
 	}
 	if _statedb.GetBlock() == nil {

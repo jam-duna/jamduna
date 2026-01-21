@@ -143,9 +143,34 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, np_blockAnnouncemen
 
 	validatorIndex := np_blockAnnouncement.Header.AuthorIndex
 	newSlot := np_blockAnnouncement.Header.Slot
+	parentStateRoot := np_blockAnnouncement.Header.ParentStateRoot
+	parentHeaderHash := np_blockAnnouncement.Header.ParentHeaderHash
+
+	// DEBUG: Log the state root we're trying to recover
+	log.Info(log.Node, "📨 processBlockAnnouncement: attempting state recovery",
+		"nodeID", n.id,
+		"announcedSlot", newSlot,
+		"parentStateRoot", parentStateRoot.Hex()[:16],
+		"parentHeaderHash", parentHeaderHash.Hex()[:16],
+		"validatorIndex", validatorIndex)
+
+	// Check what state we currently have
+	if n.statedb != nil {
+		log.Info(log.Node, "📨 processBlockAnnouncement: current node state",
+			"nodeID", n.id,
+			"currentStateRoot", n.statedb.StateRoot.Hex()[:16],
+			"currentSlot", n.statedb.GetSafrole().Timeslot)
+	}
+
 	// check if epoch has changed
-	recoveredStateDB, err := statedb.NewStateDBFromStateRoot(np_blockAnnouncement.Header.ParentStateRoot, n.store)
+	recoveredStateDB, err := statedb.NewStateDBFromStateRoot(parentStateRoot, n.store)
 	if err != nil {
+		log.Error(log.Node, "❌ processBlockAnnouncement: failed to recover state from ParentStateRoot",
+			"nodeID", n.id,
+			"parentStateRoot", parentStateRoot.Hex(),
+			"parentHeaderHash", parentHeaderHash.Hex()[:16],
+			"announcedSlot", newSlot,
+			"err", err)
 		return nil, err
 	}
 	safrole := recoveredStateDB.GetSafrole()

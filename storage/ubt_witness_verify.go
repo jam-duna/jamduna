@@ -2,6 +2,9 @@ package storage
 
 import (
 	"encoding/binary"
+	"fmt"
+
+	log "github.com/colorfulnotion/jam/log"
 )
 
 // WitnessValueKind selects which value column is verified.
@@ -33,18 +36,34 @@ type witnessEntry struct {
 func VerifyUBTWitnessSection(data []byte, expectedRoot *[32]byte, valueKind WitnessValueKind, hasher Hasher) (*UBTWitnessStats, error) {
 	section, err := parseUBTWitnessSection(data)
 	if err != nil {
+		log.Warn(log.EVM, "VerifyUBTWitnessSection: parseUBTWitnessSection failed", "err", err)
 		return nil, err
 	}
 	if expectedRoot != nil && section.root != *expectedRoot {
+		log.Warn(log.EVM, "VerifyUBTWitnessSection: root mismatch",
+			"expected", fmt.Sprintf("%x", expectedRoot[:]),
+			"got", fmt.Sprintf("%x", section.root[:]))
 		return nil, ErrInvalidProof
 	}
 	if err := VerifyMultiProof(section.proof, hasher, section.root); err != nil {
+		log.Warn(log.EVM, "VerifyUBTWitnessSection: VerifyMultiProof failed",
+			"err", err,
+			"proofKeys", len(section.proof.Keys),
+			"proofNodes", len(section.proof.Nodes),
+			"proofStems", len(section.proof.Stems))
 		return nil, err
 	}
 	if err := verifyExtensionProofs(section.extensions, section.root, hasher); err != nil {
+		log.Warn(log.EVM, "VerifyUBTWitnessSection: verifyExtensionProofs failed",
+			"err", err,
+			"extensionCount", len(section.extensions))
 		return nil, err
 	}
 	if err := verifyEntriesAgainstProof(section, valueKind); err != nil {
+		log.Warn(log.EVM, "VerifyUBTWitnessSection: verifyEntriesAgainstProof failed",
+			"err", err,
+			"entryCount", len(section.entries),
+			"valueKind", valueKind)
 		return nil, err
 	}
 

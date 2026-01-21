@@ -1728,8 +1728,10 @@ func (n *StateDB) VerifyBundle(b *types.WorkPackageBundle, segmentRootLookup typ
 			segmentData := importedSegments[segmentIdx]
 			global_segmentsRoot := trie.VerifyCDTJustificationX(trie.ComputeLeaf(segmentData), int(i.Index), b.Justification[itemIndex][segmentIdx], 0)
 			if !common.CompareBytes(exportedSegmentRoot[:], global_segmentsRoot) {
-				log.Warn(log.Node, "trie.VerifyCDTJustificationX NOT VERIFIED", "index", i.Index)
-				return false, fmt.Errorf("justification failure computedRoot %s != exportedSegmentRoot %s", exportedSegmentRoot, exportedSegmentRoot)
+				log.Warn(log.Node, "trie.VerifyCDTJustificationX NOT VERIFIED", "index", i.Index,
+					"computedRoot", common.BytesToHash(global_segmentsRoot).Hex(),
+					"exportedSegmentRoot", exportedSegmentRoot.Hex())
+				return false, fmt.Errorf("justification failure computedRoot %s != exportedSegmentRoot %s", common.BytesToHash(global_segmentsRoot).Hex(), exportedSegmentRoot.Hex())
 			} else {
 				log.Trace(log.DA, "VerifyBundle: Justification Verified", "index", i.Index, "exportedSegmentRoot", exportedSegmentRoot)
 			}
@@ -1831,8 +1833,25 @@ func (s *StateDB) verifyUBTWitness(witness []byte, label string, kind storage.Wi
 			}
 		}
 	}
+	// DEBUG: Extract witness root for comparison logging
+	var witnessRoot [32]byte
+	if len(witness) >= 32 {
+		copy(witnessRoot[:], witness[:32])
+	}
+	if expectedRoot != nil {
+		log.Info(log.EVM, "verifyUBTWitness: comparing roots",
+			"label", label,
+			"expectedRoot", fmt.Sprintf("%x", expectedRoot[:]),
+			"witnessRoot", fmt.Sprintf("%x", witnessRoot[:]),
+			"match", *expectedRoot == witnessRoot)
+	}
 	stats, err := storage.VerifyUBTWitnessSection(witness, expectedRoot, kind, hasher)
 	if err != nil {
+		log.Warn(log.EVM, "verifyUBTWitness: verification failed",
+			"label", label,
+			"expectedRoot", fmt.Sprintf("%x", expectedRoot),
+			"witnessRoot", fmt.Sprintf("%x", witnessRoot[:]),
+			"err", err)
 		return nil, fmt.Errorf("%s witness verification failed: %w", label, err)
 	}
 	log.Trace(log.EVM, "UBT witness verified", "label", label, "root", fmt.Sprintf("%x", stats.Root[:8]), "entries", stats.EntryCount)

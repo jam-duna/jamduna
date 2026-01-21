@@ -191,6 +191,13 @@ func TestEVMBlocksTransfersLocal(t *testing.T) {
 		t.Fatalf("expected tx count %d in payload, got %d", transferCount, txCount)
 	}
 
+	// Set activeRoot for root-first state isolation (required for BuildBundle)
+	preRoot := evmstorage.GetCanonicalRoot()
+	if err := evmstorage.SetActiveRoot(preRoot); err != nil {
+		t.Fatalf("Failed to set active root: %v", err)
+	}
+	defer evmstorage.ClearActiveRoot()
+
 	// Now execute the bundle with StateDB.BuildBundle
 	bundle, workReport, err := n.GetStateDB().BuildBundle(workPackage, extrinsicsBlobs, 0, nil, statedb.BackendInterpreter, false)
 

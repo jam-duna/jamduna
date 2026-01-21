@@ -2,8 +2,10 @@ package storage
 
 import (
 	"fmt"
+	"runtime"
 
 	"github.com/colorfulnotion/jam/common"
+	log "github.com/colorfulnotion/jam/log"
 	"github.com/colorfulnotion/jam/types"
 )
 
@@ -22,6 +24,18 @@ func normalizeKey32(src []byte) common.Hash {
 
 func (t *StateDBStorage) SetRoot(root common.Hash) error {
 	currentRoot := t.GetRoot()
+
+	// Debug: trace SetRoot calls to detect race conditions on shared sdb
+	var caller string
+	if pc, _, line, ok := runtime.Caller(1); ok {
+		caller = fmt.Sprintf("%s:%d", runtime.FuncForPC(pc).Name(), line)
+	}
+	log.Debug(log.SDB, "SetRoot called",
+		"ptr", fmt.Sprintf("%p", t),
+		"from", currentRoot.Hex(),
+		"to", root.Hex(),
+		"caller", caller)
+
 	if currentRoot == root {
 		t.trieDB.ClearStagedOps()
 		return nil
@@ -29,6 +43,11 @@ func (t *StateDBStorage) SetRoot(root common.Hash) error {
 
 	// Use the MerkleTree's SetRoot to reconstruct the tree from the historical root
 	if err := t.trieDB.SetRoot(root); err != nil {
+		log.Error(log.SDB, "SetRoot failed",
+			"ptr", fmt.Sprintf("%p", t),
+			"from", currentRoot.Hex(),
+			"to", root.Hex(),
+			"err", err)
 		return fmt.Errorf("failed to set trie root to %s: %w", root.Hex(), err)
 	}
 
@@ -72,19 +91,21 @@ func (t *StateDBStorage) OverlayRoot() (common.Hash, error) {
 
 	// Create a temporary tree with current state
 	tempTree := &MerkleTree{
-		Root:          t.trieDB.Root, // Start with current tree state
-		writeBatch:    make(map[common.Hash][]byte),
+		Root: t.trieDB.Root, // Start with current tree state
+		backend: &sharedTrieBackend{
+			writeBatch: make(map[common.Hash][]byte),
+		},
 		stagedInserts: make(map[common.Hash][]byte),
 		stagedDeletes: make(map[common.Hash]bool),
 	}
 
 	// Copy any existing write batch
-	t.trieDB.batchMutex.Lock()
-	for k, v := range t.trieDB.writeBatch {
-		tempTree.writeBatch[k] = make([]byte, len(v))
-		copy(tempTree.writeBatch[k], v)
+	t.trieDB.backend.batchMutex.Lock()
+	for k, v := range t.trieDB.backend.writeBatch {
+		tempTree.backend.writeBatch[k] = make([]byte, len(v))
+		copy(tempTree.backend.writeBatch[k], v)
 	}
-	t.trieDB.batchMutex.Unlock()
+	t.trieDB.backend.batchMutex.Unlock()
 
 	// Apply staged operations to temp tree
 	tempTree.treeMutex.Lock()
@@ -152,6 +173,83 @@ func (t *StateDBStorage) Close() error {
 		return nil
 	}
 	return nil
+}
+
+// CloneTrieView creates an isolated view of the storage with its own trie Root pointer.
+// The new view shares the committed writeBatch (node data via backend pointer) but has its own:
+// - Root pointer (SetRoot won't affect other views)
+// - Staged operations (uncommitted changes are isolated)
+//
+// This enables concurrent operations (auditor, authoring, importing) to work on
+// different state roots without race conditions on the shared MerkleTree.Root.
+//
+// IMPORTANT: The clone shares the MerkleTree's backend (writeBatch + batchMutex) via pointer,
+// ensuring synchronized access to committed node data. The clone also shares the LevelDB
+// connection and read-only resources.
+//
+// UBT STATE SHARING: The clone shares the SAME sharedUBTState pointer as the original.
+// This includes treeStore, canonicalRoot, and the mutex protecting them.
+// This is safe because all access is synchronized via the shared mutex.
+//
+// PINNED STATE: The clone inherits the current pinnedStateRoot and pinnedTree from the parent.
+// This is critical for Phase 2 witness generation where the parent has pinned to a pre-state root
+// and the clone (created via NewStateDBFromStateRoot) needs to use that same pinned tree.
+//
+// The clone does NOT share activeRoot - each clone maintains its own execution context.
+//
+// Usage: Call this when creating a StateDB copy that needs to operate at a different root.
+func (t *StateDBStorage) CloneTrieView() types.JAMStorage {
+	// Copy pinnedStateRoot if set (make a copy of the pointer's value)
+	var clonedPinnedStateRoot *common.Hash
+	t.mutex.RLock()
+	if t.pinnedStateRoot != nil {
+		rootCopy := *t.pinnedStateRoot
+		clonedPinnedStateRoot = &rootCopy
+	}
+	pinnedTree := t.pinnedTree // Safe to share - tree is immutable once in treeStore
+	t.mutex.RUnlock()
+
+	return &StateDBStorage{
+		trieDB:        t.trieDB.CloneView(), // Isolated trie view (shares backend for writeBatch)
+		Root:          t.Root,
+		stagedInserts: make(map[common.Hash][]byte),
+		stagedDeletes: make(map[common.Hash]bool),
+		keys:          make(map[common.Hash]bool),
+
+		// Shared read-only resources
+		db:              t.db, // LevelDB connection - thread-safe
+		logChan:         t.logChan,
+		jamda:           t.jamda,
+		telemetryClient: t.telemetryClient,
+		nodeID:          t.nodeID,
+
+		// SHARED UBT state: Clone references the SAME sharedUBTState pointer.
+		// This includes treeStore, canonicalRoot, ubtRoots, and their mutex.
+		// All access is synchronized via ubtState.mutex.
+		ubtState: t.ubtState, // SHARED - same pointer, same mutex
+
+		// Per-clone state - not shared
+		activeRoot: common.Hash{}, // Each clone has its own active execution context
+
+		// INHERITED pinned state: Clone gets the parent's pinned tree at clone time.
+		// This is essential for Phase 2 witness verification where the parent has pinned
+		// to a pre-state root and the clone needs access to that same tree.
+		pinnedStateRoot: clonedPinnedStateRoot,
+		pinnedTree:      pinnedTree,
+
+		// SHARED service state: Clone references the SAME sharedServiceState pointer.
+		// All access is synchronized via serviceState.mutex.
+		serviceState: t.serviceState, // SHARED - same pointer, same mutex
+
+		// Mark as clone for debugging/tracking (not for restricting operations anymore)
+		isClone: true,
+
+		// UBT read log: Per-clone state for witness generation
+		// Clone gets its own empty read log but inherits the enabled flag
+		// so reads during Phase 2 are tracked for the pre-witness
+		ubtReadLog:        make([]types.UBTRead, 0),
+		ubtReadLogEnabled: true, // Enable by default so Phase 2 tracking works
+	}
 }
 
 // Insert applies the operation directly to trie

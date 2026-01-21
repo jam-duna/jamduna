@@ -101,20 +101,31 @@ type Page struct {
 	SubPages [126]*Page
 }
 
+// sharedTrieBackend holds the shared, mutex-protected resources for MerkleTree clones.
+// When cloning a trie view, we share this backend pointer so all clones use the same
+// mutexes for the shared writeBatch map.
+type sharedTrieBackend struct {
+	writeMutex sync.Mutex             // Protects concurrent writes to levelDB during Flush
+	writeBatch map[common.Hash][]byte // Batched writes (key -> value) - always batched
+	batchMutex sync.Mutex             // Protects the write batch
+}
+
 // MerkleTree represents the entire Merkle Tree
 type MerkleTree struct {
 	Root *Node
 
-	writeMutex sync.Mutex             // Protects concurrent writes to levelDB during Flush
-	writeBatch map[common.Hash][]byte // Batched writes (key -> value) - always batched
-	batchMutex sync.Mutex             // Protects the write batch
+	// Shared backend - contains writeBatch and its mutexes
+	// All clones share the same backend pointer for synchronized access
+	backend *sharedTrieBackend
 
 	// Staged operations - no hashing, no levelDB until Flush
+	// These are PER-INSTANCE (not shared between clones)
 	stagedInserts map[common.Hash][]byte // key -> value
 	stagedDeletes map[common.Hash]bool   // key -> true
 	stagedMutex   sync.Mutex             // Protects staged operations
 
-	// Tree structure protection
+	// Tree structure protection - PER-INSTANCE
+	// Each clone has its own treeMutex protecting its own Root pointer
 	treeMutex sync.RWMutex // Protects Root and all Node structures
 
 	// Page-based storage
@@ -132,8 +143,10 @@ func trieNormalizeKey32(src []byte) common.Hash {
 
 func NewMerkleTree(data [][2][]byte) *MerkleTree {
 	t := &MerkleTree{
-		Root:          nil,
-		writeBatch:    make(map[common.Hash][]byte),
+		Root: nil,
+		backend: &sharedTrieBackend{
+			writeBatch: make(map[common.Hash][]byte),
+		},
 		stagedInserts: make(map[common.Hash][]byte),
 		stagedDeletes: make(map[common.Hash]bool),
 	}
@@ -143,6 +156,54 @@ func NewMerkleTree(data [][2][]byte) *MerkleTree {
 	root := t.buildMerkleTree(data, 0)
 	t.Root = root
 	return t
+}
+
+// CloneView creates an isolated view of the MerkleTree with the same committed data (writeBatch)
+// but its own Root pointer and staged operations. This prevents race conditions when multiple
+// StateDB instances need to operate concurrently at different state roots.
+//
+// The clone SHARES the backend (writeBatch + its mutexes) but has:
+// - Its own Root pointer (can call SetRoot without affecting other views)
+// - Its own stagedInserts/stagedDeletes (uncommitted changes are isolated)
+// - Its own treeMutex (protects its own Root pointer)
+//
+// IMPORTANT: Writes to the shared backend's writeBatch are synchronized via backend.batchMutex.
+func (t *MerkleTree) CloneView() *MerkleTree {
+	t.treeMutex.RLock()
+	defer t.treeMutex.RUnlock()
+
+	// Clone the Root node tree structure (shallow copy of node pointers is sufficient
+	// since nodes are immutable once created - new nodes are created on modification)
+	var clonedRoot *Node
+	if t.Root != nil {
+		clonedRoot = t.cloneNode(t.Root)
+	}
+
+	clone := &MerkleTree{
+		Root:          clonedRoot,
+		backend:       t.backend, // SHARED - same backend pointer for synchronized access
+		stagedInserts: make(map[common.Hash][]byte),
+		stagedDeletes: make(map[common.Hash]bool),
+		usePages:      t.usePages,
+		rootPage:      t.rootPage, // Page-based storage shares pages (if used)
+	}
+
+	return clone
+}
+
+// cloneNode creates a shallow copy of the node tree structure.
+// Node data (Hash, Key) is copied, but child pointers reference the same nodes.
+// This is safe because nodes are immutable - modifications create new nodes.
+func (t *MerkleTree) cloneNode(n *Node) *Node {
+	if n == nil {
+		return nil
+	}
+	return &Node{
+		Hash:  n.Hash,
+		Key:   n.Key,
+		Left:  n.Left,  // Shared reference - nodes are immutable
+		Right: n.Right, // Shared reference - nodes are immutable
+	}
 }
 
 // buildMerkleTree constructs the Merkle tree from key-value pairs and stores them in levelDB
@@ -320,15 +381,33 @@ func (t *MerkleTree) SetRoot(root common.Hash) error {
 		return nil
 	}
 
+	// DEBUG: Log writeBatch size before attempting lookup
+	t.backend.batchMutex.Lock()
+	writeBatchSize := len(t.backend.writeBatch)
+	_, rootExistsInBatch := t.backend.writeBatch[root]
+	t.backend.batchMutex.Unlock()
+	log.Info(log.SDB, "🔍 MerkleTree.SetRoot: attempting to load root",
+		"root", root.Hex()[:16],
+		"writeBatchSize", writeBatchSize,
+		"rootExistsInBatch", rootExistsInBatch)
+
 	// Reconstruct tree from the stored nodes in writeBatch/levelDB
 	rootNode, err := t.levelDBGetNode(root)
 	if err != nil {
+		log.Error(log.SDB, "❌ MerkleTree.SetRoot: levelDBGetNode failed",
+			"root", root.Hex(),
+			"writeBatchSize", writeBatchSize,
+			"err", err)
 		return fmt.Errorf("failed to load root node for hash %s: %w", root.Hex(), err)
 	}
 
 	// Verify the loaded node actually matches the requested root (not a zero-hash fallback)
 	zeroHash := common.Hash{}
 	if bytes.Equal(rootNode.Hash, zeroHash[:]) && root != zeroHash {
+		log.Error(log.SDB, "❌ MerkleTree.SetRoot: root not found (zero-hash fallback)",
+			"requestedRoot", root.Hex(),
+			"writeBatchSize", writeBatchSize,
+			"rootExistsInBatch", rootExistsInBatch)
 		return fmt.Errorf("root %s not found in storage (returned zero-hash node)", root.Hex())
 	}
 
@@ -342,8 +421,9 @@ func InitMerkleTreeFromHash(root common.Hash, db types.JAMStorage) (*MerkleTree,
 	}
 	tree := &MerkleTree{
 		Root: nil,
-
-		writeBatch:    make(map[common.Hash][]byte),
+		backend: &sharedTrieBackend{
+			writeBatch: make(map[common.Hash][]byte),
+		},
 		stagedInserts: make(map[common.Hash][]byte),
 		stagedDeletes: make(map[common.Hash]bool),
 	}
@@ -365,7 +445,9 @@ func InitMerkleTreeFromHashPageBased(rootHash common.Hash, db types.JAMStorage) 
 	}
 
 	tree := &MerkleTree{
-		writeBatch:    make(map[common.Hash][]byte),
+		backend: &sharedTrieBackend{
+			writeBatch: make(map[common.Hash][]byte),
+		},
 		stagedInserts: make(map[common.Hash][]byte),
 		stagedDeletes: make(map[common.Hash]bool),
 		usePages:      true,
@@ -544,8 +626,8 @@ func (t *MerkleTree) levelDBSetLeaf(encodedLeaf, value []byte, key []byte) {
 // getDBLeafValue retrieves the value from a leaf node
 // Returns the actual value, not the key
 func (t *MerkleTree) getDBLeafValue(nodeHash []byte) ([]byte, bool, error) {
-	t.batchMutex.Lock()
-	defer t.batchMutex.Unlock()
+	t.backend.batchMutex.Lock()
+	defer t.backend.batchMutex.Unlock()
 
 	encodedLeaf, ok, err := t.levelDBGetLocked(nodeHash)
 	if err != nil {
@@ -574,21 +656,21 @@ func (t *MerkleTree) getDBLeafValue(nodeHash []byte) ([]byte, bool, error) {
 func (t *MerkleTree) levelDBSet(k, v []byte) error {
 
 	// Always add to batch
-	t.batchMutex.Lock()
+	t.backend.batchMutex.Lock()
 	var keyHash common.Hash
 	copy(keyHash[:], k)
-	t.writeBatch[keyHash] = v
-	t.batchMutex.Unlock()
+	t.backend.writeBatch[keyHash] = v
+	t.backend.batchMutex.Unlock()
 
 	return nil
 }
 
-// levelDBGetLocked is the internal version that assumes batchMutex is already held
+// levelDBGetLocked is the internal version that assumes backend.batchMutex is already held
 func (t *MerkleTree) levelDBGetLocked(k []byte) ([]byte, bool, error) {
 	// Check write batch first (for reads of recently written but not yet flushed data)
 	var keyHash common.Hash
 	copy(keyHash[:], k)
-	if value, exists := t.writeBatch[keyHash]; exists {
+	if value, exists := t.backend.writeBatch[keyHash]; exists {
 		return value, true, nil
 	}
 
@@ -597,8 +679,8 @@ func (t *MerkleTree) levelDBGetLocked(k []byte) ([]byte, bool, error) {
 
 // levelDBGet gets the value for the given key - checks write batch first, then levelDB
 func (t *MerkleTree) levelDBGet(k []byte) ([]byte, bool, error) {
-	t.batchMutex.Lock()
-	defer t.batchMutex.Unlock()
+	t.backend.batchMutex.Lock()
+	defer t.backend.batchMutex.Unlock()
 	return t.levelDBGetLocked(k)
 }
 
@@ -663,9 +745,9 @@ func (t *MerkleTree) levelDBGetNode(nodeHash common.Hash) (*Node, error) {
 
 // StateDB DEBUG: GetBatchSize returns the current number of batched writes
 func (t *MerkleTree) GetBatchSize() int {
-	t.batchMutex.Lock()
-	defer t.batchMutex.Unlock()
-	return len(t.writeBatch)
+	t.backend.batchMutex.Lock()
+	defer t.backend.batchMutex.Unlock()
+	return len(t.backend.writeBatch)
 }
 
 // StateDB DEBUG: GetStagedSize returns the current number of staged operations

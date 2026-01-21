@@ -41,7 +41,6 @@ const (
 	DefaultMaxTxsPerBundle = 5
 )
 
-
 // maxTxsPerBundleConfig holds the configured max transactions per bundle
 var maxTxsPerBundleConfig int
 
@@ -484,21 +483,22 @@ func waitForSync(n *node.Node, timeout time.Duration) error {
 
 // phase1BlockData holds all data needed to execute Phase 2 for a block
 type phase1BlockData struct {
-	blockNumber               uint64
-	coreIdx                   uint16
-	workPackage               types.WorkPackage
-	extrinsicsBlobs           []types.ExtrinsicsBlobs
-	originalExtrinsics        []types.ExtrinsicsBlobs
+	blockNumber                uint64
+	coreIdx                    uint16
+	workPackage                types.WorkPackage
+	extrinsicsBlobs            []types.ExtrinsicsBlobs
+	originalExtrinsics         []types.ExtrinsicsBlobs
 	originalWorkItemExtrinsics [][]types.WorkItemExtrinsic
-	txHashes                  []common.Hash
-	phase1Result              *evmtypes.Phase1Result
-	evmBlock                  *evmtypes.EvmBlockPayload
+	txHashes                   []common.Hash
+	phase1Result               *evmtypes.Phase1Result
+	evmBlock                   *evmtypes.EvmBlockPayload
 }
 
 // handleBlockNotifications monitors for pending transactions and builds parallel bundles
 // Two-Phase Pipeline:
-//   Phase 1: Pull ALL txns upfront, build ALL evmBlocks (no witnesses) - FAST
-//   Phase 2: Generate witnesses and submit bundles to JAM - with verification
+//
+//	Phase 1: Pull ALL txns upfront, build ALL evmBlocks (no witnesses) - FAST
+//	Phase 2: Generate witnesses and submit bundles to JAM - with verification
 func handleBlockNotifications(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrpc.TxPool, serviceID uint32, queueRunner *queue.Runner) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -535,7 +535,13 @@ func handleBlockNotifications(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrp
 		txOffset := 0
 		blockIdx := 0
 		phase1Failed := false
-		currentRoot := evmStorage.GetCanonicalRoot()
+
+		// Use pending head root for chaining across batches.
+		// This is critical: GetCanonicalRoot() only advances after bundles accumulate,
+		// but Phase 1 blocks need to chain immediately. Without this, the second batch
+		// would restart from genesis and re-execute the same transactions.
+		canonicalRoot := evmStorage.GetCanonicalRoot()
+		currentRoot := queueRunner.GetChainHeadRoot(canonicalRoot)
 
 		for txOffset < len(allPendingTxs) {
 			// Calculate how many txns for this bundle
@@ -579,6 +585,10 @@ func handleBlockNotifications(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrp
 
 			phase1Blocks = append(phase1Blocks, *blockData)
 			currentRoot = blockData.phase1Result.EVMPostStateRoot
+
+			// Update pending head so subsequent batches chain from this postRoot
+			queueRunner.SetPendingHeadRoot(currentRoot)
+
 			txOffset = endOffset
 			blockIdx++
 		}
@@ -756,17 +766,36 @@ func executePhase2ForBlock(n *node.Node, rollup *evmrpc.Rollup, txPool *evmrpc.T
 		"blockCommitment", blockCommitment.Hex(),
 		"preStateRoot", blockData.phase1Result.EVMPreStateRoot.Hex())
 
-	// Pin to pre-state root for witness generation
-	if err := evmStorage.PinToStateRoot(blockData.phase1Result.EVMPreStateRoot); err != nil {
+	// CRITICAL: Create a lightweight ISOLATED StateDB for this Phase 2 execution.
+	// Each Phase 2 build runs concurrently and needs its own ubtReadLog to track reads.
+	// Without isolation, concurrent BuildBundle calls share the same ubtReadLog, causing:
+	// - ClearUBTReadLog from one build to clear another's reads
+	// - Mixed reads across executions
+	// - Empty read logs -> proofKeys=0 -> invalid proof
+	// CopyForPhase2() creates a lightweight clone that isolates only what's needed:
+	// - ubtReadLog (per-execution read tracking)
+	// - pinnedTree/activeRoot (per-execution pinning)
+	// It shares JamState and treeStore (read-only during Phase 2) for efficiency.
+	stateDB := n.GetStateDB().CopyForPhase2()
+	//stateDB := n.GetStateDB().Copy() -- slow
+	stateDBStorage := stateDB.GetStorage()
+	actualStorage, ok := stateDBStorage.(types.EVMJAMStorage)
+	if !ok {
+		txPool.UnlockTransactionsFromBundle(blockData.txHashes)
+		return fmt.Errorf("CRITICAL: statedb storage is not EVMJAMStorage")
+	}
+
+	// Pin to pre-state root for witness generation on this isolated storage
+	if err := actualStorage.PinToStateRoot(blockData.phase1Result.EVMPreStateRoot); err != nil {
 		txPool.UnlockTransactionsFromBundle(blockData.txHashes)
 		return fmt.Errorf("CRITICAL: failed to pin to pre-state root: %w", err)
 	}
 
-	// Build bundle with witness generation (skip writes - Phase 1 already applied them)
-	bundle, workReport, err := n.BuildBundle(blockData.workPackage, blockData.extrinsicsBlobs, blockData.coreIdx, nil, true)
+	// Build bundle using the isolated stateDB (each has its own ubtReadLog)
+	bundle, workReport, err := stateDB.BuildBundle(blockData.workPackage, blockData.extrinsicsBlobs, blockData.coreIdx, nil, n.GetPVMBackend(), true)
 
 	// Unpin after build
-	evmStorage.UnpinState()
+	actualStorage.UnpinState()
 
 	if err != nil {
 		txPool.UnlockTransactionsFromBundle(blockData.txHashes)

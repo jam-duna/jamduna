@@ -632,6 +632,13 @@ func TestPhase1ExecutionOnly(t *testing.T) {
 	evmPreStateRoot := evmstorage.GetCanonicalRoot()
 	fmt.Printf("EVMPreStateRoot: %s\n", evmPreStateRoot.Hex())
 
+	// Step 1b: Set activeRoot for root-first state isolation
+	// This tells ExecutePhase1 which tree to read from during execution
+	if err := evmstorage.SetActiveRoot(evmPreStateRoot); err != nil {
+		t.Fatalf("Failed to set active root: %v", err)
+	}
+	defer evmstorage.ClearActiveRoot() // Clear after test
+
 	// Step 2: Verify logging is enabled before Phase 1
 	// ExecutePhase1 will internally disable/re-enable logging
 	if !evmstorage.IsUBTReadLogEnabled() {
@@ -713,6 +720,11 @@ func TestPhase1ExecutionOnly(t *testing.T) {
 		t.Fatalf("Failed to pin to pre-state root: %v", err)
 	}
 	defer evmstorage.UnpinState() // Release pinned state on test exit
+
+	// Set activeRoot for re-execution (root-first requirement)
+	if err := evmstorage.SetActiveRoot(evmPreStateRoot); err != nil {
+		t.Fatalf("Failed to set active root for re-execution: %v", err)
+	}
 
 	// Re-execute (still with logging disabled)
 	phase1Result2, err := rollup.ExecutePhase1(workPackage, extrinsicsBlobs)

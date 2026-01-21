@@ -351,22 +351,47 @@ func (r *Rollup) ExecutePhase1(
 		return nil, fmt.Errorf("StateDB not available")
 	}
 
+	// CRITICAL: Get the clone storage that the VM will use for state reads.
+	// activeRoot must be set on THIS storage instance, not r.storage (main storage).
+	// The VM is created with sdb (StateDB), which uses sdb.GetStorage() for reads.
+	sdbStorage, ok := sdb.GetStorage().(types.EVMJAMStorage)
+	if !ok {
+		return nil, fmt.Errorf("StateDB storage is not EVMJAMStorage")
+	}
+
+	// Debug log to confirm storage pointers (helps verify fix)
+	log.Debug(log.EVM, "ExecutePhase1: storage pointers",
+		"r.storage", fmt.Sprintf("%p", r.storage),
+		"sdbStorage", fmt.Sprintf("%p", sdbStorage),
+		"sdb", fmt.Sprintf("%p", sdb))
+
 	// Step 1: Capture EVMPreStateRoot BEFORE execution
-	// ROOT-FIRST ONLY: activeRoot must be set by caller for proper state isolation.
-	// The legacy CurrentUBT path is no longer supported.
+	// ROOT-FIRST ONLY: activeRoot must be set by caller on r.storage.
+	// We need to propagate it to sdbStorage (the clone the VM uses).
 	activeRoot := r.storage.GetActiveRoot()
 	if activeRoot == (common.Hash{}) {
 		return nil, fmt.Errorf("ExecutePhase1: activeRoot not set - caller must call SetActiveRoot before ExecutePhase1 for root-first state isolation")
 	}
+
+	// Set activeRoot on the CLONE storage that the VM will use
+	if err := sdbStorage.SetActiveRoot(activeRoot); err != nil {
+		return nil, fmt.Errorf("ExecutePhase1: failed to set activeRoot on clone storage: %w", err)
+	}
+	// CRITICAL: Always clear activeRoot on clone when exiting, regardless of success/failure
+	defer sdbStorage.ClearActiveRoot()
+
 	evmPreStateRoot := activeRoot
-	log.Info(log.EVM, "ExecutePhase1: captured pre-state root (root-first)", "root", evmPreStateRoot.Hex())
+	log.Info(log.EVM, "ExecutePhase1: captured pre-state root (root-first)",
+		"root", evmPreStateRoot.Hex(),
+		"setOnClone", true)
 
 	// Step 2: DISABLE UBT read logging for Phase 1 (faster execution)
-	r.storage.SetUBTReadLogEnabled(false)
-	defer r.storage.SetUBTReadLogEnabled(true) // Re-enable on exit
+	// Set on the CLONE storage that the VM uses
+	sdbStorage.SetUBTReadLogEnabled(false)
+	defer sdbStorage.SetUBTReadLogEnabled(true) // Re-enable on exit
 
-	// Step 3: Clear any stale read log entries
-	r.storage.ClearUBTReadLog()
+	// Step 3: Clear any stale read log entries on the CLONE
+	sdbStorage.ClearUBTReadLog()
 
 	// Step 4: Execute refine WITHOUT witness generation
 	// We use a modified BuildBundle that skips witness prepending
@@ -443,14 +468,22 @@ func (r *Rollup) ExecutePhase1(
 	evmPostStateRoot := evmPreStateRoot // Default: no changes = same root
 	if len(stateChanges) > 0 {
 		// ROOT-FIRST PATH: Apply writes via copy-on-write to the active root
+		// Use r.storage for ApplyWritesToTree since it modifies the shared treeStore
 		newRoot, err := r.storage.ApplyWritesToTree(activeRoot, stateChanges)
 		if err != nil {
 			return nil, fmt.Errorf("ExecutePhase1: failed to apply state changes (root-first): %w", err)
 		}
 		evmPostStateRoot = newRoot
-		// Update activeRoot to point to the new tree so GetActiveUBTRoot() returns postRoot
+		// Update activeRoot on BOTH storages:
+		// - sdbStorage (clone): so any subsequent reads in this execution use the new tree
+		// - r.storage (main): so the caller can retrieve postRoot via GetActiveRoot if needed
+		if err := sdbStorage.SetActiveRoot(newRoot); err != nil {
+			log.Warn(log.EVM, "ExecutePhase1: failed to update active root on clone",
+				"newRoot", newRoot.Hex(),
+				"error", err)
+		}
 		if err := r.storage.SetActiveRoot(newRoot); err != nil {
-			log.Warn(log.EVM, "ExecutePhase1: failed to update active root to postRoot",
+			log.Warn(log.EVM, "ExecutePhase1: failed to update active root on main storage",
 				"newRoot", newRoot.Hex(),
 				"error", err)
 		}
@@ -468,11 +501,13 @@ func (r *Rollup) ExecutePhase1(
 		"totalGasUsed", totalGasUsed,
 		"receiptsExtracted", len(allReceipts))
 
-	// Verify read log is empty (confirms Phase 1 mode worked)
-	readLog := r.storage.GetUBTReadLog()
+	// Verify read log is empty on the CLONE (confirms Phase 1 mode worked)
+	readLog := sdbStorage.GetUBTReadLog()
 	if len(readLog) != 0 {
 		log.Warn(log.EVM, "ExecutePhase1: unexpected non-empty read log", "entries", len(readLog))
 	}
+
+	// Note: ClearActiveRoot on clone is handled by defer above
 
 	return &evmtypes.Phase1Result{
 		EVMPreStateRoot:  evmPreStateRoot,
